@@ -16,6 +16,7 @@ import {
 import {
 	refused,
 	type ColorModel,
+	type Action,
 	type Deck,
 	type EffectList,
 	type FillProps,
@@ -43,14 +44,27 @@ import { bookmarkTriggers, mediaTimingLosses } from "../../anim/media"
 import { withoutShapes } from "../../anim/prune"
 import { OdpContext } from "../read/context"
 import { openOdp } from "../read/document"
-import { IDENTITY, OdpShapeWriter, canonicalBox, markupOf, compose, groupAffine, pictureMirror, placed, type Affine } from "./emit/shape"
+import { NEAR_NUMBERINGS, NUMBERING_ALIASES, ODF_NUMBERINGS } from "../read/text"
+import {
+	IDENTITY,
+	OdpShapeWriter,
+	canonicalBox,
+	markupOf,
+	compose,
+	groupAffine,
+	odpWritesAction,
+	pictureMirror,
+	placed,
+	type Affine
+} from "./emit/shape"
 import { odfWritesPreset } from "../../odf/presetShapes"
 import { pageNames } from "./integrity"
-import { OdpStyles, cm, fillChanges, isRefused, setProperty, styleChanges, type OdpWriteEnv, type StyleChanges } from "./styles"
+import { OdpStyles, cm, fillChanges, setProperty, styleChanges, type OdpWriteEnv, type StyleChanges } from "./styles"
 import { emitOdp, type OdpEmitContext } from "./emit"
 import { odpTransitionPar, odpTransitionStyle, timingRootWith, withTransitionPar } from "./emit/transition"
 import { DrawResources, resourceFillChanges } from "./resources"
 import { newSettingsAttributes, odfShow, settingsAttributes } from "./emit/presentation"
+import { isRefused } from "../../presentation/refusal"
 
 // The fresh writer (§1.5.7): a whole ODP package from the model, for conversions (a pptx deck to ODP), templates and
 // Save as. Everything a shape inherits is resolved and written on the shape (ODF's presentation styles are not the
@@ -114,6 +128,10 @@ export interface FreshOdpServices {
 	// A SmartArt frame's shapes as its source draws them (its drawing, in the frame's own space), when the frame holds
 	// none of its own; undefined when the source has none.
 	diagram?(frame: ShapeNode, node: SlideNode): readonly ShapeNode[] | undefined
+	// A slide's comments as the annotations of its page (markup declaring the namespaces it names beyond svg and text).
+	annotations?(slide: SlideNode): string
+	// The document's properties as meta.xml (ODF 1.3 Part 3 §4.3).
+	readonly meta?: string
 }
 
 export interface FreshReport {
@@ -144,6 +162,20 @@ function srgb(color: ColorModel, context: ColorContext): ColorModel | undefined 
 	return alpha >= 100_000
 		? { kind: "srgb", rgb: resolved.hex }
 		: { kind: "srgb", rgb: resolved.hex, mods: [{ name: "alpha", value: alpha }] }
+}
+
+// A table cell's fill as ODF holds it (fo:background-color, §20.175, has no alpha): a semi-transparent colour written
+// opaque, and counted.
+function opaqueCellFill(fill: FillProps | "none" | undefined, report: FreshReport): FillProps | "none" | undefined {
+	if (fill === undefined || fill === "none" || fill.kind !== "solid" || fill.color.mods?.some(mod => mod.name === "alpha") !== true)
+		return fill
+
+	count(report.approximated, "transparent cell fill")
+
+	const { mods: all, ...color } = fill.color
+	const mods = all?.filter(mod => mod.name !== "alpha") ?? []
+
+	return { kind: "solid", color: mods.length === 0 ? color : { ...color, mods } } as FillProps
 }
 
 class Flattener {
@@ -363,6 +395,13 @@ class Flattener {
 
 		if (resolved.xfrm === undefined && xfrm !== undefined) count(this.report.approximated, "shape without a box")
 
+		// A click action ODF has no listener for (a custom show, a medium of its own, one refused as unsafe: a macro, a
+		// program) and a hover action (ODF has none) are left off, each counted; the shape stays.
+		const click = shape.actions?.click
+
+		if (click !== undefined && !odpWritesAction(click)) count(this.report.omitted, `action ${click.kind}`)
+		if (shape.actions?.hover !== undefined) count(this.report.omitted, "action hover")
+
 		const out: ShapeNode = {
 			id: shape.id,
 			name: shape.name,
@@ -377,9 +416,7 @@ class Flattener {
 				bodyPr: { ...body, vertical }
 			},
 			...(text === undefined ? {} : { text }),
-			...(shape.actions?.click === undefined || shape.actions.click.kind === "refused"
-				? {}
-				: { actions: { click: shape.actions.click } })
+			...(click === undefined || !odpWritesAction(click) ? {} : { actions: { click } })
 		}
 
 		if (shape.kind === "pic") {
@@ -449,7 +486,7 @@ class Flattener {
 				}
 
 				const own = cell.props
-				const ownFill = own?.fill === undefined ? undefined : this.fill(own.fill, colors)
+				const ownFill = own?.fill === undefined ? undefined : opaqueCellFill(this.fill(own.fill, colors), this.report)
 				const borders: Record<string, LineProps | "none"> = { ...props.borders }
 
 				for (const [side, line] of Object.entries(own?.borders ?? {})) {
@@ -639,10 +676,24 @@ class Flattener {
 			return { ...bullet, char: first }
 		}
 
-		if (bullet.kind === "autoNum" && !NUMBERINGS.test(bullet.scheme)) {
-			count(this.report.approximated, `numbering ${bullet.scheme}`)
+		if (bullet.kind === "autoNum") {
+			const alias = NUMBERING_ALIASES.get(bullet.scheme)
+			const near = NEAR_NUMBERINGS.get(bullet.scheme)
 
-			return { ...bullet, scheme: "arabicPeriod" }
+			if (alias !== undefined) return { ...bullet, scheme: alias }
+
+			if (near !== undefined) {
+				count(this.report.approximated, `numbering ${bullet.scheme}`)
+
+				return { ...bullet, scheme: near }
+			}
+
+			// A numbering ODF has no format for (LibreOffice 7.5 reads none for it) is written as Arabic numbers.
+			if (!ODF_NUMBERINGS.has(bullet.scheme)) {
+				count(this.report.approximated, `numbering ${bullet.scheme}`)
+
+				return { ...bullet, scheme: "arabicPeriod" }
+			}
 		}
 
 		return bullet
@@ -683,10 +734,27 @@ class Flattener {
 			if (color !== undefined) out["highlight"] = color
 		}
 
-		if (rPr.hlinkClick !== undefined && rPr.hlinkClick.kind !== "refused") out["hlinkClick"] = rPr.hlinkClick
+		// A text link: kept as its link, a refused one as its raw link (inert, as the ODP writer keeps one); one ODF has no
+		// link for (the last slide viewed, the end of the show, a custom show, a medium) is left off and counted.
+		const link = rPr.hlinkClick
+
+		if (link !== undefined) {
+			if (odpTextLink(link)) out["hlinkClick"] = link
+			else count(this.report.omitted, `action ${link.kind}`)
+		}
 
 		return out as RunProps
 	}
+}
+
+// Whether ODF holds a text link (emit/text.ts hrefOf): a link, a page, a relative jump, a refused link's raw text.
+function odpTextLink(action: Action): boolean {
+	return (
+		action.kind === "url" ||
+		action.kind === "slide" ||
+		action.kind === "refused" ||
+		(action.kind === "internal" && action.jump !== "end" && action.jump !== "lastViewed")
+	)
 }
 
 // The accent slot of a table style of PowerPoint's built-in Medium Style 2 family (render/tableStyles.ts), from its
@@ -757,9 +825,6 @@ const DEFAULT_CLR_MAP: ColorContext["clrMap"] = {
 	hlink: "hlink",
 	folHlink: "folHlink"
 } as ColorContext["clrMap"]
-
-// Numberings ODF's formats read back as (emit/text.ts SCHEMES).
-const NUMBERINGS = /^(arabicPlain|(arabic|alphaLc|alphaUc|romanLc|romanUc)(Period|ParenR|ParenBoth))$/u
 
 const MEDIA_TYPES: Readonly<Record<string, string>> = {
 	png: "image/png",
@@ -1168,7 +1233,9 @@ export async function freshOdp(deck: Deck, services: FreshOdpServices): Promise<
 
 		const pageIds = transitionPar === undefined ? "" : ` xml:id="${pageId}" draw:id="${pageId}"`
 
-		pages += `<draw:page draw:name="${escapeAttribute(names.get(ref) ?? "")}"${style === undefined ? "" : ` draw:style-name="${style}"`} draw:master-page-name="${master}"${pageIds}>${shapes}${timing}${notes}</draw:page>`
+		const annotations = services.annotations?.(slide) ?? ""
+
+		pages += `<draw:page draw:name="${escapeAttribute(names.get(ref) ?? "")}"${style === undefined ? "" : ` draw:style-name="${style}"`} draw:master-page-name="${master}"${pageIds}>${shapes}${annotations}${timing}${notes}</draw:page>`
 	}
 
 	if (deck.slides.length === 0) {
@@ -1220,6 +1287,7 @@ export async function freshOdp(deck: Deck, services: FreshOdpServices): Promise<
 		{ fullPath: "content.xml", mediaType: "text/xml" },
 		{ fullPath: "styles.xml", mediaType: "text/xml" },
 		{ fullPath: "settings.xml", mediaType: "text/xml" },
+		...(services.meta === undefined ? [] : [{ fullPath: "meta.xml", mediaType: "text/xml" }]),
 		...objects.map(path => ({ fullPath: `${path}/`, mediaType: "application/vnd.oasis.opendocument.chart" })),
 		...extra.map(part => ({
 			fullPath: part.name,
@@ -1236,6 +1304,7 @@ export async function freshOdp(deck: Deck, services: FreshOdpServices): Promise<
 			{ name: "content.xml", bytes: encodeUtf8(content) },
 			{ name: "styles.xml", bytes: encodeUtf8(styles) },
 			{ name: "settings.xml", bytes: encodeUtf8(settingsPart) },
+			...(services.meta === undefined ? [] : [{ name: "meta.xml", bytes: encodeUtf8(services.meta) }]),
 			...extra,
 			{ name: "META-INF/manifest.xml", bytes: manifest }
 		]

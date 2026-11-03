@@ -17,9 +17,11 @@ import { decodeUtf8, escapeAttribute } from "../../../xml/index"
 import { pictureSize, type OdpPackageView } from "../../read/document"
 import type { Fragment } from "../../read/context"
 import type { OdpEmitContext, OdpEmitFamily, OdpStylesApi } from "../emit"
-import { OdpStyles, declared, hexColor, isRefused, percent, pt, setProperty, styleChanges, type StyleChanges } from "../styles"
+import { OdpStyles, declared, hexColor, percent, pt, setProperty, styleChanges, type StyleChanges } from "../styles"
 import { IDENTITY, OdpShapeWriter, canonicalBox, pictureMirror } from "./shape"
 import { altMarkup, frameBox } from "./table"
+import { isRefused } from "../../../presentation/refusal"
+import { sameBytes } from "../../../docx/write/bytes"
 
 // The picture family's ODF markup: a draw:frame holding draw:image (ODF 1.3 Part 3 §10.3.4). The frame's box, name,
 // title and click action are the shape family's (a source frame is patched there); the picture's fill is written
@@ -54,15 +56,6 @@ function crc32(bytes: Uint8Array): number {
 	}
 
 	return (crc ^ 0xffffffff) >>> 0
-}
-
-function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
-	if (a === b) return true
-	if (a.length !== b.length) return false
-
-	for (let k = 0; k < a.length; k++) if (a[k] !== b[k]) return false
-
-	return true
 }
 
 // The package path of an inserted image: named by its content and registry id, past every name the package has or a

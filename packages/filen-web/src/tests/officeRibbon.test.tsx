@@ -245,6 +245,32 @@ describe("OfficeRibbon", () => {
 		expect(onCommand).toHaveBeenCalledWith("Center")
 	})
 
+	it("closes the overflow and a collapsed group's dropdown with one Escape on a command in it, focus back on its trigger", async () => {
+		size.width = 600
+
+		renderRibbon()
+
+		const trigger = within(commands()).getByRole("button", { name: "Clipboard" })
+
+		fireEvent.click(trigger)
+
+		const cut = within(await screen.findByRole("toolbar", { name: "Clipboard" })).getByRole("button", { name: "Cut" })
+
+		cut.focus()
+		// The command's tooltip, shown on keyboard focus, takes an Escape where it is pressed (it goes no further); the
+		// dropdown closes ahead of it.
+		cut.addEventListener("keydown", event => {
+			if (event.key === "Escape") event.stopPropagation()
+		})
+		expect(fireEvent.keyDown(cut, { key: "Escape" })).toBe(false)
+		await waitFor(() => {
+			expect(screen.queryByRole("toolbar", { name: "Clipboard" })).toBeNull()
+		})
+		await waitFor(() => {
+			expect(document.activeElement).toBe(trigger)
+		})
+	})
+
 	it("shows tabs only with the chevron or Ctrl+F1, a tab showing its commands until one runs, and remembers it", async () => {
 		const { onCommand } = renderRibbon()
 

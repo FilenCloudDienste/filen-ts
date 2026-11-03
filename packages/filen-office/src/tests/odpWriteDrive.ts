@@ -7,7 +7,7 @@ import type { EmitFunction } from "../core/presentation/edit/proof"
 import { openOdpCapability } from "../dom/presentation/engine/open/odp"
 import { openPptxCapability } from "../dom/presentation/engine/open/pptx"
 import { SAVE_DEPENDENCIES } from "../dom/presentation/engine/save"
-import { commitSavedSession, rebasableSource, saveSession } from "../dom/presentation/save"
+import { commitSavedSession, rebasableSource, saveSession, type SaveDependencies } from "../dom/presentation/save"
 import { savePortAnnounced, savePortReader, type SavePortEnd } from "../dom/presentation/savePort"
 
 // An engine session over a file store with versioning off (an upload replaces the file and the old version is gone),
@@ -105,7 +105,8 @@ class Drive {
 
 // `stallMs`: the upload's stall (savePortReader's), for a test that waits it out; `commitWaitMs` and `inMemoryLimit`
 // the save's (SaveDependencies); `emit` the emitters proof gate 1 checks with; `sample` is called on every read of the
-// drive's files and every chunk it receives (a memory budget's sampler; drive.held() is what the drive holds).
+// drive's files and every chunk it receives (a memory budget's sampler; drive.held() is what the drive holds);
+// `dependencies` changes the save's (a writer that refuses, say).
 export async function driveSession(
 	bytes: Uint8Array,
 	format: "odp" | "pptx" = "odp",
@@ -116,6 +117,7 @@ export async function driveSession(
 		readonly inMemoryLimit?: number
 		readonly emit?: EmitFunction
 		readonly sample?: () => void
+		readonly dependencies?: (dependencies: SaveDependencies) => SaveDependencies
 	} = {}
 ) {
 	const drive = new Drive(bytes, tuning.sample)
@@ -147,11 +149,12 @@ export async function driveSession(
 	// A save up to its upload's answer; commit() then moves the session onto the file made (the page's two calls, which a
 	// test may interleave with another save).
 	const edit = tuning.emit === undefined ? editCapability : createEditCapability({ emit: tuning.emit })
-	const dependencies = {
+	const tuned: SaveDependencies = {
 		...SAVE_DEPENDENCIES,
 		...(tuning.commitWaitMs === undefined ? {} : { commitWaitMs: tuning.commitWaitMs }),
 		...(tuning.inMemoryLimit === undefined ? {} : { inMemoryLimit: tuning.inMemoryLimit })
 	}
+	const dependencies = tuning.dependencies === undefined ? tuned : tuning.dependencies(tuned)
 	const begin = async () => {
 		const { port1, port2 } = new MessageChannel()
 		// As the page does (presentationSaveEdits): the upload opens only once the session says it is going to write, and

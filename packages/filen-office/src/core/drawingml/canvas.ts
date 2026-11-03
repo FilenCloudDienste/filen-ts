@@ -39,6 +39,7 @@ import {
 	type TextParagraph,
 	type TextRun
 } from "./displayList"
+import { lumTransfer } from "./lum"
 import { averageShade, shadeRaster } from "./shade"
 import { layoutBlock } from "./textBlock"
 
@@ -528,7 +529,7 @@ export function patternMask(preset: string): Uint8Array | undefined {
 
 // --- Pictures recoloured (grayscale, brightness/contrast, bi-level, duotone, colour change) ---
 
-function recolors(image: DrawingImage): boolean {
+export function recolors(image: DrawingImage): boolean {
 	return (
 		image.grayscale === true ||
 		clamp(image.biLevel, -1, 1, -1) >= 0 ||
@@ -548,8 +549,7 @@ export function recolorPixels(pixels: Uint8ClampedArray, image: DrawingImage): v
 	const duotone = Array.isArray(image.duotone) && image.duotone.length === 2 ? image.duotone : undefined
 	const change = Array.isArray(image.colorChange) && image.colorChange.length === 2 ? image.colorChange : undefined
 	const gray = image.grayscale === true || biLevel >= 0 || duotone !== undefined
-	const slope = (1 + contrast) / (1 - contrast)
-	const intercept = 0.5 - 0.5 * slope + brightness
+	const [slope, intercept] = lumTransfer(brightness, contrast)
 	const linear = brightness !== 0 || contrast !== 0
 	const from = change === undefined ? 0 : rgbaOf(change[0]) >>> 8
 	const to = change === undefined ? 0 : rgbaOf(change[1])
@@ -1090,16 +1090,18 @@ class CanvasDrawingPainter<I extends CanvasSized> {
 
 		switch (paint.kind) {
 			case "path": {
-				const { cx, cy, radius, inner } = pathGradientCircle(paint)
+				const { cx, cy, rx, ry, inner } = pathGradientCircle(paint, width, height)
 
-				// The SVG painter's objectBoundingBox radial: a circle in the unit box, stretched with the box.
-				this.place(times(this.local, [width, 0, 0, height, x, y]))
+				// The unit circle placed as the gradient's ellipse; the fill covers the box (whose sides lie within 1 / rx and
+				// 1 / ry of the centre).
+				this.place(times(this.local, [rx * width, 0, 0, ry * height, x + cx * width, y + cy * height]))
 
-				const gradient = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius)
+				const gradient = ctx.createRadialGradient(0, 0, 0, 0, 0, 1)
+				const reach = Math.min(1e6, 2 / Math.min(rx, ry))
 
 				this.stops(gradient, paint.stops, inner, 1, 0)
 				ctx.fillStyle = gradient
-				ctx.fillRect(-16, -16, 33, 33)
+				ctx.fillRect(-reach, -reach, reach * 2, reach * 2)
 				break
 			}
 			case "gradient": {

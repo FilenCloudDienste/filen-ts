@@ -475,6 +475,53 @@ describe("keys typed while a body opens", () => {
 		})
 	})
 
+	it("a body opened from a field (find showing a match) leaves focus and keys in the field", async () => {
+		const host = frame()
+		const find = document.createElement("input")
+
+		document.body.append(find)
+
+		const editing = createTextEditing()
+		const { session, answer } = slowSession("Hi")
+		const root = createRoot(host)
+
+		find.focus()
+		await act(async () => {
+			root.render(
+				<PresentationTextEditor
+					session={session}
+					shape={SHAPE}
+					scale={1}
+					editing={editing}
+					labels={{ editor: "Slide text" }}
+					apple={false}
+					measurer={new FakeMeasurer()}
+					onExit={() => undefined}
+					onRefused={() => undefined}
+				/>
+			)
+		})
+
+		// Enter in the field while the body opens: the field's own (find next), never held for the body.
+		const enter = new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })
+
+		find.dispatchEvent(enter)
+		expect(enter.defaultPrevented).toBe(false)
+
+		await act(async () => {
+			answer()
+			await Promise.resolve()
+		})
+		await settle()
+
+		expect(document.activeElement).toBe(find)
+		expect(editing.active?.body.paragraphs).toHaveLength(1)
+
+		act(() => {
+			root.unmount()
+		})
+	})
+
 	it("a character typed with AltGr (Ctrl+Alt) is text, held like any other", () => {
 		const host = frame()
 		const editing = createTextEditing()

@@ -160,7 +160,7 @@ describe("path gradients", () => {
 	})
 
 	it("centres an inverted fillToRect between its edges (a theme background's l 10% t 110% r 10% b 100%)", () => {
-		const circle = pathGradientCircle(path(0.1, 1.1, 0.1, 1))
+		const circle = pathGradientCircle(path(0.1, 1.1, 0.1, 1), 1280, 960)
 
 		expect(circle.cx).toBeCloseTo(0.5, 6)
 		expect(circle.cy).toBeCloseTo(0.55, 6)
@@ -168,19 +168,29 @@ describe("path gradients", () => {
 		expect(circle.inner).toBe(0)
 	})
 
-	it("centres l 50% t 50% r 100% b 100% at a quarter of the box, reaching the far corner", () => {
-		const circle = pathGradientCircle(path(0.5, 0.5, 1, 1))
+	it("ends a circle path at the circle through the box's corners, a true circle wherever the focus sits", () => {
+		// QuizShow's background (l 50% t 50% r 100% b 100% on a 4:3 slide): LibreOffice 7.5 reaches the last stop 800 px
+		// from the focus at a quarter of the slide, in every direction: half the slide's diagonal.
+		const circle = pathGradientCircle(path(0.5, 0.5, 1, 1), 1280, 960)
 
 		expect(circle.cx).toBeCloseTo(0.25, 6)
 		expect(circle.cy).toBeCloseTo(0.25, 6)
-		expect(circle.radius).toBeCloseTo(Math.hypot(0.75, 0.75), 6)
+		expect(circle.rx * 1280).toBeCloseTo(800, 6)
+		expect(circle.ry * 960).toBeCloseTo(800, 6)
 	})
 
 	it("keeps an ordinary focus rectangle as before: its centre, solid inside it", () => {
-		const circle = pathGradientCircle(path(0.25, 0.25, 0.25, 0.25))
+		const circle = pathGradientCircle(path(0.25, 0.25, 0.25, 0.25), 1000, 1000)
 
 		expect([circle.cx, circle.cy]).toEqual([0.5, 0.5])
+		expect(circle.rx).toBeCloseTo(Math.hypot(0.5, 0.5), 6)
 		expect(circle.inner).toBeCloseTo(Math.hypot(0.25, 0.25) / Math.hypot(0.5, 0.5), 6)
+	})
+
+	it("stretches a rect path with its box to the farthest side", () => {
+		const circle = pathGradientCircle({ ...path(0.5, 0.5, 0.5, 0.5), shape: "rect" }, 400, 100)
+
+		expect([circle.rx, circle.ry]).toEqual([0.5, 0.5])
 	})
 })
 

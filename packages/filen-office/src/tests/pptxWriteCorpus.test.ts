@@ -12,7 +12,7 @@ import type { SlideNode, SlideRef, Xfrm } from "../core/presentation/model"
 import { pptxParts } from "../dom/presentation/engine/open/pptx"
 import {
 	Changes,
-	applyEs2,
+	applyShapeAndSlideEdits,
 	changedParts,
 	danglingReferences,
 	openDeck,
@@ -27,7 +27,7 @@ import {
 import { editHarness, type EditHarness } from "./presentationEditFixtures"
 
 // The splice writer over every unencrypted OOXML presentation of the frozen corpus: an untouched save is unchanged,
-// a forced rewrite with no ops is byte-identical, a one-shape edit changes only its slide part, and edit set ES2
+// a forced rewrite with no ops is byte-identical, a one-shape edit changes only its slide part, and the shape and slide edit set
 // passes gate 2 with its edits read back and a second save identical; through the edit session, a slide duplicated
 // and its original deleted leaves no dangling reference, and slides added and duplicated by a save are edited and
 // saved again after its rebase. With FILEN_OFFICE_PPTX_WRITE_OUT set, every output is written there for the Open XML
@@ -187,7 +187,7 @@ describe.skipIf(PRESENT.length === 0)("pptx splice writer over the corpus", () =
 	})
 
 	it(
-		"writes edit set ES2 on every deck: gate 2 passes, the edits read back, a second save is identical",
+		"writes the shape and slide edit set on every deck: gate 2 passes, the edits read back, a second save is identical",
 		{ timeout: budget(600_000) },
 		async ({ task }) => {
 			const failures: string[] = []
@@ -198,7 +198,7 @@ describe.skipIf(PRESENT.length === 0)("pptx splice writer over the corpus", () =
 			await each(async (path, opened) => {
 				if (opened.deck.gate.length > 0) return
 
-				const { changes, report } = applyEs2(opened)
+				const { changes, report } = applyShapeAndSlideEdits(opened)
 				const { outcome, bytes } = await save(opened, changes)
 
 				if (outcome.kind !== "written") {

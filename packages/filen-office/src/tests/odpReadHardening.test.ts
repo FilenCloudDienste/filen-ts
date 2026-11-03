@@ -179,24 +179,26 @@ describe("odp font-independent line spacing", () => {
 		).toEqual({ level: false, paragraph: undefined })
 	})
 
-	it("leaves the rule unwritten where it is on or absent", async () => {
-		expect(await lineRule({ text: "<text:p>x</text:p>" })).toEqual({ level: undefined, paragraph: undefined })
+	it("keeps the font-independent rule only where the shape's chain says so; absent, it is the face's", async () => {
+		expect(await lineRule({ text: "<text:p>x</text:p>" })).toEqual({ level: false, paragraph: undefined })
 		expect(
 			await lineRule({
-				automatic:
-					'<style:style style:name="P1" style:family="paragraph"><style:paragraph-properties style:font-independent-line-spacing="true"/></style:style>',
-				text: '<text:p text:style-name="P1">x</text:p>'
+				styles: '<style:default-style style:family="graphic"><style:paragraph-properties style:font-independent-line-spacing="true"/></style:default-style>',
+				text: "<text:p>x</text:p>"
 			})
 		).toEqual({ level: undefined, paragraph: undefined })
 	})
 
-	it("takes it from a paragraph style, and lets a paragraph style turn it back on over the shape's", async () => {
+	// LibreOffice 7.5 lays a shape's text out by its own style chain's rule alone (measured): a paragraph style's says
+	// nothing either way.
+	it("takes no rule from a paragraph style", async () => {
 		expect(
 			await lineRule({
 				automatic: `<style:style style:name="P1" style:family="paragraph">${OFF}</style:style>`,
+				styles: '<style:default-style style:family="graphic"><style:paragraph-properties style:font-independent-line-spacing="true"/></style:default-style>',
 				text: '<text:p text:style-name="P1">x</text:p>'
 			})
-		).toEqual({ level: undefined, paragraph: false })
+		).toEqual({ level: undefined, paragraph: undefined })
 		expect(
 			await lineRule({
 				styles: `<style:default-style style:family="graphic">${OFF}</style:default-style>`,
@@ -204,6 +206,6 @@ describe("odp font-independent line spacing", () => {
 					'<style:style style:name="P1" style:family="paragraph"><style:paragraph-properties style:font-independent-line-spacing="true"/></style:style>',
 				text: '<text:p text:style-name="P1">x</text:p>'
 			})
-		).toEqual({ level: false, paragraph: true })
+		).toEqual({ level: false, paragraph: undefined })
 	})
 })

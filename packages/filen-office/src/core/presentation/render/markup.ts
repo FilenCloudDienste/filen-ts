@@ -242,15 +242,18 @@ export function colorXml(color: ColorModel): string {
 		if (MOD_NAME.test(mod.name)) mods += `<a:${mod.name}${attribute("val", mod.value)}/>`
 	}
 
+	// Without modifiers an empty element, as PowerPoint writes it (a part written again reads byte for byte as it was).
+	const close = (name: string): string => (mods === "" ? "/>" : `>${mods}</a:${name}>`)
+
 	switch (color.kind) {
 		case "srgb":
-			return `<a:srgbClr${attribute("val", color.rgb)}>${mods}</a:srgbClr>`
+			return `<a:srgbClr${attribute("val", color.rgb)}${close("srgbClr")}`
 		case "scheme":
-			return `<a:schemeClr${attribute("val", color.slot)}>${mods}</a:schemeClr>`
+			return `<a:schemeClr${attribute("val", color.slot)}${close("schemeClr")}`
 		case "preset":
-			return `<a:prstClr${attribute("val", color.name)}>${mods}</a:prstClr>`
+			return `<a:prstClr${attribute("val", color.name)}${close("prstClr")}`
 		case "system":
-			return `<a:sysClr${attribute("val", color.name)}${attribute("lastClr", color.lastColor)}>${mods}</a:sysClr>`
+			return `<a:sysClr${attribute("val", color.name)}${attribute("lastClr", color.lastColor)}${close("sysClr")}`
 	}
 }
 

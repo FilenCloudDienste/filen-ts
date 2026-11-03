@@ -216,17 +216,29 @@ export function generateGallery(family: string, sources: readonly GallerySource[
 	const entries = (kind: Kind): string[] =>
 		of(kind).map(each => `{ uniqueId: ${JSON.stringify(each.uniqueId)}, nameKey: ${JSON.stringify(each.nameKey)} }`)
 	const definitions = (kind: Kind): string[] => of(kind).map(each => `[${JSON.stringify(each.uniqueId)}, ${JSON.stringify(each.text)}]`)
-	const names =
-		header +
-		'import type { SmartArtColorsEntry, SmartArtLayoutEntry, SmartArtStyleEntry } from "./index"\n\n' +
-		`export const ${name}_LAYOUTS: readonly SmartArtLayoutEntry[] = [${layouts.join(", ")}]\n\n` +
-		`export const ${name}_STYLES: readonly SmartArtStyleEntry[] = [${entries("style").join(", ")}]\n\n` +
-		`export const ${name}_COLORS: readonly SmartArtColorsEntry[] = [${entries("colors").join(", ")}]\n`
+	// Only the kinds the family has: a family is one kind of definition, and an empty list would be dead code.
+	const lists = (entries: readonly (readonly [string, string, readonly string[]])[]): string =>
+		entries
+			.filter(([, , items]) => items.length > 0)
+			.map(([constant, type, items]) => `export const ${constant}: ${type} = [${items.join(", ")}]\n`)
+			.join("\n")
+	const named: readonly (readonly [string, string, readonly string[]])[] = [
+		[`${name}_LAYOUTS`, "readonly SmartArtLayoutEntry[]", layouts],
+		[`${name}_STYLES`, "readonly SmartArtStyleEntry[]", entries("style")],
+		[`${name}_COLORS`, "readonly SmartArtColorsEntry[]", entries("colors")]
+	]
+	const types = named
+		.filter(([, , items]) => items.length > 0)
+		.map(([, type]) => type.slice("readonly ".length, -"[]".length))
+		.sort()
+	const names = header + `import type { ${types.join(", ")} } from "./index"\n\n` + lists(named)
 	const defs =
 		header +
-		`export const ${name}_LAYOUT_DEFS: readonly (readonly [string, string])[] = [${definitions("layout").join(", ")}]\n\n` +
-		`export const ${name}_STYLE_DEFS: readonly (readonly [string, string])[] = [${definitions("style").join(", ")}]\n\n` +
-		`export const ${name}_COLORS_DEFS: readonly (readonly [string, string])[] = [${definitions("colors").join(", ")}]\n`
+		lists([
+			[`${name}_LAYOUT_DEFS`, "readonly (readonly [string, string])[]", definitions("layout")],
+			[`${name}_STYLE_DEFS`, "readonly (readonly [string, string])[]", definitions("style")],
+			[`${name}_COLORS_DEFS`, "readonly (readonly [string, string])[]", definitions("colors")]
+		])
 
 	return { names, defs }
 }

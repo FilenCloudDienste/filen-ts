@@ -503,10 +503,10 @@ export function pristineOf(context: EmitContext, shape: ShapeNode): ShapeNode | 
 	return node < 0 ? undefined : context.pristine?.shapes.get(node)
 }
 
-// p:ph with what the source wrote (type obj and idx 0 are the defaults, §19.3.1.36).
+// p:ph with what the source wrote (type obj and idx 0 are the defaults, §19.3.1.36: written when the source wrote them).
 function placeholderXml(ph: Placeholder): string {
 	return (
-		`<p:ph${ph.type === "obj" ? "" : attr("type", ph.type)}${attr("orient", ph.orient)}${attr("sz", ph.sz)}` +
+		`<p:ph${ph.type === "obj" && ph.typeWritten !== true ? "" : attr("type", ph.type)}${attr("orient", ph.orient)}${attr("sz", ph.sz)}` +
 		`${ph.idx === 0 && ph.idxWritten !== true ? "" : attr("idx", ph.idx)}${attr("hasCustomPrompt", ph.hasCustomPrompt)}/>`
 	)
 }

@@ -20,6 +20,7 @@ import {
 	refused,
 	slideRef,
 	type CustomPath,
+	type FillProps,
 	type Geometry,
 	type GeometryGuide,
 	type Refused,
@@ -303,6 +304,31 @@ export class FinalPackage {
 	}
 }
 
+// A written picture's p:spPr fill (null: none), read aside from its picture fill.
+const behind = new WeakMap<ShapeNode, FillProps | "none" | null>()
+
+// A picture the model gives a fill other than a picture (set on it: the fill behind the picture, written into its
+// p:spPr) is compared with the fill behind it as written; `expected` are the model's normal shapes, `read` the written
+// ones in the same order.
+function fillsBehind(expected: unknown, read: readonly ShapeNode[]): void {
+	if (!Array.isArray(expected)) return
+
+	for (let at = 0; at < read.length; at++) {
+		const shape = read[at] as ShapeNode
+		const want = expected[at] as Record<string, unknown> | undefined
+		const fill = want?.["fill"] as { readonly kind?: unknown } | "none" | undefined
+		const written = behind.get(shape)
+
+		if (shape.kind === "pic" && written !== undefined && fill !== undefined && (fill === "none" || fill.kind !== "picture")) {
+			const { fill: _picture, ...rest } = shape.props ?? {}
+
+			shape.props = written === null ? rest : { ...rest, fill: written }
+		}
+
+		fillsBehind(want?.["children"], shape.children ?? [])
+	}
+}
+
 // What one written slide reads back as.
 async function readWritten(
 	final: FinalPackage,
@@ -392,8 +418,12 @@ async function readWritten(
 
 			if (spPr >= 0) {
 				const blipFill = shape.kind === "pic" ? r.child(shape.src.node, G.P, "blipFill") : -1
-				// A picture's own fill is its p:blipFill (the model's picture fill on a p:pic).
-				const fill = blipFill >= 0 ? readBlipFill(context, blipFill) : readFill(context, fillChild(r, spPr))
+				const spFill = readFill(context, fillChild(r, spPr))
+				// A picture's own fill is its p:blipFill (the model's picture fill on a p:pic); a fill behind it is its
+				// p:spPr's, where the writer puts one the model holds (compared there: fillsBehind).
+				const fill = blipFill >= 0 ? readBlipFill(context, blipFill) : spFill
+
+				if (blipFill >= 0) behind.set(shape, spFill ?? null)
 				const ln = r.child(spPr, G.A, "ln")
 				const effects = r.child(spPr, G.A, "effectLst")
 				const geometry = readGeometry(r, spPr)
@@ -513,6 +543,8 @@ export async function verifyFinal(final: FinalPackage, expectation: GateExpectat
 		const written = await readWritten(final, expected.part, parsed)
 
 		if ("kind" in written) return written
+
+		fillsBehind(expected.value["shapes"], written.node.shapes)
 
 		const actual = normalSlide(expected.part, written.node, written.layout, written.partOf)
 		const differs = difference(expected.value, actual.value, "")

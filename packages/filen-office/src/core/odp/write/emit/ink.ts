@@ -13,8 +13,9 @@ import {
 import { escapeAttribute, escapeText } from "../../../xml/index"
 import { odpTargetId, odpTargetIds } from "../../../anim/odf"
 import type { OdpEmitContext, OdpEmitFamily } from "../emit"
-import { attributeMarkup, cm, effectChanges, fillChanges, isRefused, lineChanges, styleChanges, type StyleChanges } from "../styles"
+import { attributeMarkup, cm, effectChanges, fillChanges, lineChanges, styleChanges, type StyleChanges } from "../styles"
 import { IDENTITY, compose, emitOdpShape, groupAffine, placed, type Affine } from "./shape"
+import { isRefused } from "../../../presentation/refusal"
 
 // The ink family's ODF markup (ODF 1.3 Part 3 §10.3.7 draw:path): a freeform a session made, kept ink's strokes
 // among them, written whole as a draw:path whose svg:d runs through the outline's points in a view box of the

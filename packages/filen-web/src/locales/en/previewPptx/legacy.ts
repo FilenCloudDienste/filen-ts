@@ -43,9 +43,9 @@ export const previewPptxLegacy = {
 	previewPptxLossComment_one: "Comments on {{count}} slide, left out",
 	/** Save as .pptx — as previewPptxLossComment_one, for several */
 	previewPptxLossComment_other: "Comments on {{count}} slides, left out",
-	/** Save as .pptx — kept differently: click or hover actions the copy cannot carry */
+	/** Save as .pptx, and a converted copy — a click or hover action the copy can't hold (the shape is kept) */
 	previewPptxLossAction_one: "{{count}} click or hover action, left out",
-	/** Save as .pptx — as previewPptxLossAction_one, for several */
+	/** Save as .pptx, and a converted copy — as previewPptxLossAction_one, for several */
 	previewPptxLossAction_other: "{{count}} click or hover actions, left out",
 	/** Save as .pptx — kept differently: WordArt (decorative text) kept as plain text in a box */
 	previewPptxLossWordArt_one: "{{count}} WordArt item, kept as plain text",
@@ -60,13 +60,13 @@ export const previewPptxLegacy = {
 	/** Save as .pptx — as previewPptxLossPicture_one, for several */
 	previewPptxLossPicture_other: "{{count}} pictures that could not be read",
 	/** Save as .pptx — kept differently: slides with a colour scheme of their own whose master shapes keep the master's colours */
-	previewPptxLossSlideColorScheme_one: "{{count}} slide's own colours, not used on its master's shapes",
+	previewPptxLossSlideColorScheme_one: "{{count}} slide's own colors, not used on its master's shapes",
 	/** Save as .pptx — as previewPptxLossSlideColorScheme_one, for several */
-	previewPptxLossSlideColorScheme_other: "{{count}} slides' own colours, not used on their master's shapes",
+	previewPptxLossSlideColorScheme_other: "{{count}} slides' own colors, not used on their master's shapes",
 	/** Save as .pptx — kept differently: pattern fills drawn as an even mix of their two colours */
-	previewPptxLossPatternFill_one: "{{count}} pattern fill, drawn as a pattern of its two colours",
+	previewPptxLossPatternFill_one: "{{count}} pattern fill, drawn as a pattern of its two colors",
 	/** Save as .pptx — as previewPptxLossPatternFill_one, for several */
-	previewPptxLossPatternFill_other: "{{count}} pattern fills, drawn as patterns of their two colours",
+	previewPptxLossPatternFill_other: "{{count}} pattern fills, drawn as patterns of their two colors",
 	/** Save as .pptx — kept differently: parts of a damaged file that could not be read */
 	previewPptxLossDamaged: "Some damaged content could not be read"
 } as const

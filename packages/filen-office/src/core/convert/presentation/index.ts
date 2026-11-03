@@ -6,10 +6,12 @@ import { writePptConversion } from "../../ppt/toPptx"
 import type { PptxParts } from "../../pptx/package"
 import { freshPptxWith } from "../../pptx/write/fresh"
 import type { PptxSource } from "../../pptx/write/types"
-import { refused, type Deck, type Format, type Refused } from "../../presentation/model"
+import { PresentationError, refused, type Deck, type Format, type Refused, type SlideNode } from "../../presentation/model"
 import type { Slicing } from "../../slicing"
+import { deckComments, legacyComments, odpAnnotations, type SlideCommentsOf } from "./comments"
 import { odpToPptxAdapter } from "./fromOdp"
 import { odpObjects } from "./odpElements"
+import { coreXml, customXml, metaXml, odfProperties, pptxProperties } from "./properties"
 import { pptxServices, type PptxServicesOptions } from "./pptxServices"
 import { ConversionReport, type ConversionLoss, type ConversionLossKind } from "./report"
 
@@ -74,7 +76,8 @@ const FRESH_KINDS: readonly (readonly [RegExp, ConversionLossKind])[] = [
 	[/^(dashed line|line end)$/u, "line"],
 	[/^outline level /u, "outlineLevel"],
 	[/^outline /u, "geometry"],
-	[/^(vertical |line-breaking|spacing|bullet size|numbering |run kept|picture bullet)/u, "text"],
+	[/^numbering /u, "numbering"],
+	[/^(vertical |line-breaking|spacing|bullet size|run kept|picture bullet)/u, "text"],
 	[/^table style/u, "tableStyle"],
 	[/^chart$/u, "chartDetail"],
 	[/^chart frame/u, "chart"],
@@ -85,6 +88,7 @@ const FRESH_KINDS: readonly (readonly [RegExp, ConversionLossKind])[] = [
 	[/^ole frame/u, "oleObject"],
 	[/^ink$/u, "ink"],
 	[/^background/u, "background"],
+	[/^action /u, "action"],
 	[/^animation/u, "animation"],
 	[/^transition/u, "transition"],
 	[/^picture$/u, "picture"],
@@ -155,6 +159,35 @@ function heldSink(): ByteSink & { bytes(): Uint8Array } {
 	}
 }
 
+// What an ODF source carries into the PresentationML copy beyond its slides: its annotations as legacy comments, its
+// meta.xml as the core and custom properties; and what it cannot (scripts, embedded fonts) counted.
+async function odpExtras(
+	deck: Deck,
+	parts: OdpParts,
+	report: ConversionReport,
+	slicing: Slicing | undefined
+): Promise<{
+	readonly comments?: (node: SlideNode) => string | undefined
+	readonly commentAuthors?: string
+	readonly coreProperties?: string
+	readonly customProperties?: string
+}> {
+	noteOpenDocument(report, parts)
+
+	const comments: SlideCommentsOf = await deckComments(deck, { format: "odp", parts }, slicing)
+	const legacy = legacyComments(deck, comments, report)
+	const properties = await odfProperties(parts.odf)
+	const custom = properties === undefined ? undefined : customXml(properties)
+
+	return {
+		...(legacy.authors === undefined
+			? {}
+			: { comments: (node: SlideNode) => legacy.slides.get(node.ref), commentAuthors: legacy.authors }),
+		...(properties === undefined ? {} : { coreProperties: coreXml(properties) }),
+		...(custom === undefined ? {} : { customProperties: custom })
+	}
+}
+
 const CHUNK = 1024 * 1024
 
 async function sealed(zip: Uint8Array, seal: (zip: Uint8Array) => Promise<Uint8Array>, sink: ByteSink): Promise<number> {
@@ -196,8 +229,44 @@ async function parseAll(input: ConversionSource, deck: Deck, slicing: Slicing | 
 	}
 }
 
-// `deck` written as `target` to `sink`.
+// What a PresentationML deck holds that OpenDocument has no form for: its sections, its embedded fonts, its macros (a
+// PowerPoint 97–2003 deck's own losses name its macros already).
+function notePresentationML(report: ConversionReport, deck: Deck, format: Format): void {
+	report.note("section", deck.sections.length)
+	report.note("embeddedFont", deck.embeddedFonts.length)
+
+	if (format === "pptx" && deck.opaque.some(ref => ref.kind === "vbaProject")) report.note("macros")
+}
+
+// What an OpenDocument package holds that PresentationML has no form for: its script libraries (Basic, other script
+// languages) and embedded fonts.
+function noteOpenDocument(report: ConversionReport, parts: OdpParts): void {
+	const names = parts.odf.archive.entries.map(entry => entry.name)
+
+	if (names.some(name => name.startsWith("Basic/") || name.startsWith("Scripts/"))) report.note("macros")
+
+	report.note("embeddedFont", names.filter(name => name.startsWith("Fonts/") && !name.endsWith("/")).length)
+}
+
+// `deck` written as `target` to `sink`. A refusal while it is read (comments past their bounds, a damaged part) refuses
+// the conversion: nothing is dropped.
 export async function convertPresentation(
+	deck: Deck,
+	input: ConversionSource,
+	target: PresentationTarget,
+	sink: ByteSink,
+	options: ConvertOptions = {}
+): Promise<Converted | Refused> {
+	try {
+		return await convert(deck, input, target, sink, options)
+	} catch (error) {
+		if (error instanceof PresentationError) return refused(error.reason, error.message)
+
+		throw error
+	}
+}
+
+async function convert(
 	deck: Deck,
 	input: ConversionSource,
 	target: PresentationTarget,
@@ -239,10 +308,19 @@ export async function convertPresentation(
 	if (target === "odp") {
 		if (input.format === "odp") return refused("unsupported", "odp to odp")
 
-		const services = pptxServices(deck, input.parts, options.relayout === undefined ? {} : { relayout: options.relayout })
+		const base = pptxServices(deck, input.parts, options.relayout === undefined ? {} : { relayout: options.relayout })
 
-		await services.preload()
+		await base.preload()
 
+		const comments = await deckComments(deck, { format: input.format, parts: input.parts }, options.slicing)
+		const properties = await pptxProperties(input.format === "ppt" ? input.pptx : input.parts.opc, report)
+
+		notePresentationML(report, deck, input.format)
+
+		const services = Object.assign(Object.create(base) as typeof base, {
+			annotations: (slide: SlideNode) => odpAnnotations(deck, slide, comments.get(slide.ref) ?? [], report),
+			...(properties === undefined ? {} : { meta: metaXml(properties) })
+		})
 		const out = counted(sink)
 		const written = await writeFreshOdp(deck, services, out)
 
@@ -255,6 +333,7 @@ export async function convertPresentation(
 
 	const source: PptxSource | undefined = input.format === "pptx" ? input.source : undefined
 	const objects = input.format === "odp" ? await odpObjects(deck, input.parts, report, options.svgPng) : undefined
+	const fromOdp = input.format === "odp" ? await odpExtras(deck, input.parts, report, options.slicing) : undefined
 	const size = slideSize(deck, report)
 	const extras = {
 		...(objects === undefined
@@ -265,7 +344,8 @@ export async function convertPresentation(
 					element: objects.element,
 					svgFallback: objects.svgFallback
 				}),
-		...(size === undefined ? {} : { size })
+		...(size === undefined ? {} : { size }),
+		...fromOdp
 	}
 	const held = options.seal === undefined ? undefined : heldSink()
 	const out = counted(held ?? sink)

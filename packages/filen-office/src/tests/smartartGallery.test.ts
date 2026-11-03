@@ -67,6 +67,17 @@ describe("SmartArt gallery generation", () => {
 		}
 	})
 
+	it("exports only the lists a family has, never an empty one", () => {
+		for (const [family, sources] of families()) {
+			const generated = generateGallery(family, sources)
+
+			for (const source of [generated.names, generated.defs]) {
+				expect(source, family).not.toMatch(/= \[\]/u)
+				expect(source, family).toMatch(/export const /u)
+			}
+		}
+	})
+
 	it("refuses a definition without the authorship header or with a uniqueId used twice", () => {
 		const layout =
 			'<dgm:layoutDef xmlns:dgm="http://schemas.openxmlformats.org/drawingml/2006/diagram" uniqueId="u"><dgm:catLst><dgm:cat type="list"/></dgm:catLst></dgm:layoutDef>'

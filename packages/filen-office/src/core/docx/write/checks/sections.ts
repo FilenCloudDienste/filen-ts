@@ -6,6 +6,7 @@ import { DocxVerifyError } from "../failure"
 import { ownedByCopy } from "../newStory"
 import { joinBytes, type Relationship } from "../../../opc/index"
 import type { CheckInput, CheckedPart, DocxCheck } from "./index"
+import { sameBytes } from "../bytes"
 
 // The section properties a save wrote (new or spliced w:sectPr; the source's, copied or written again as they
 // were, are not looked at again): each header and footer reference resolves to a part of its content type that the package has, a
@@ -133,14 +134,6 @@ async function checkSection(input: CheckInput, part: string, reader: PartReader,
 
 		for (const before of children(document, reader, change, "sectPr")) await checkSection(input, part, reader, before, true)
 	}
-}
-
-function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
-	if (a.length !== b.length) return false
-
-	for (let k = 0; k < a.length; k++) if (a[k] !== b[k]) return false
-
-	return true
 }
 
 // Whether part `copy` the save added is a copy of the original's part `source` (see above).

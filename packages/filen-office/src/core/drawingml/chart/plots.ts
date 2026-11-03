@@ -2,7 +2,7 @@ import { ItemFlag } from "../displayList"
 import { D } from "../reader"
 import { plainParagraph } from "../text"
 import { categoryBand, categoryPosition, crossingValue, valuePosition, axisPosition, type AxisState } from "./axes"
-import { estimateHeight, estimateWidth, labelBody, type ChartBuilder, type Rect } from "./builder"
+import { estimateHeight, estimateWidth, labelBody, PX_PER_PT, type ChartBuilder, type Rect } from "./builder"
 import { cacheLabels, type SeriesData } from "./data"
 import { formatNumber } from "./format"
 import { labelText, placeLabel, pointConfig, seriesLabels, type PendingLabel } from "./labels"
@@ -451,6 +451,249 @@ export function drawScatter(frame: PlotFrame): void {
 		drawMarkers(builder, style, xs, ys, inner, series.node)
 		pointLabels(frame, series, order, xs, ys, null, "r")
 	})
+}
+
+// Bubbles: the largest of the plot is a quarter of its shorter side across at c:bubbleScale 100, the others scaled
+// by area (or width); each a circle of its own, the larger drawn first so smaller ones stay visible.
+export function drawBubbles(frame: PlotFrame): void {
+	const { builder, plot, inner } = frame
+	const xAxis = frame.categoryAxis
+	const yAxis = frame.valueAxis
+
+	if (xAxis === undefined || yAxis === undefined) return
+
+	let largest = 0
+
+	for (const series of plot.series) {
+		const sizes = series.sizes?.numbers
+
+		if (sizes === null || sizes === undefined) continue
+
+		for (const size of sizes)
+			if (Number.isFinite(size) && (size > 0 || plot.negativeBubbles)) largest = Math.max(largest, Math.abs(size))
+	}
+
+	if (!(largest > 0)) return
+
+	const maxRadius = ((Math.min(inner.w, inner.h) / 4) * plot.bubbleScale) / 100 / 2
+
+	plot.series.forEach((series, order) => {
+		const style = frame.styles.get(series.node)
+		const sizes = series.sizes?.numbers
+
+		if (style === undefined || sizes === null || sizes === undefined) return
+
+		const count = Math.min(series.values.count, sizes.length)
+		const xs = new Float64Array(count)
+		const ys = new Float64Array(count)
+		const radii = new Float64Array(count)
+		const xNumbers = series.categories.numbers
+		const drawn: number[] = []
+
+		for (let k = 0; k < count; k++) {
+			const x = xNumbers === null ? k + 1 : (xNumbers[k] ?? Number.NaN)
+			const y = series.values.numbers?.[k] ?? Number.NaN
+			const size = sizes[k] ?? Number.NaN
+
+			xs[k] = Number.isFinite(x) ? axisPosition(xAxis, xAxis.scale === undefined ? x - 1 : x) : Number.NaN
+			ys[k] = Number.isFinite(y) ? valuePosition(yAxis, y) : Number.NaN
+
+			if (!Number.isFinite(xs[k] ?? Number.NaN) || !Number.isFinite(ys[k] ?? Number.NaN) || !Number.isFinite(size)) continue
+			if (size === 0 || (size < 0 && !plot.negativeBubbles)) continue
+
+			const share = Math.abs(size) / largest
+
+			radii[k] = maxRadius * (plot.sizeByWidth ? share : Math.sqrt(share))
+			drawn.push(k)
+		}
+
+		drawn.sort((a, b) => (radii[b] ?? 0) - (radii[a] ?? 0) || a - b)
+
+		for (const k of drawn) {
+			const x = xs[k] ?? 0
+			const y = ys[k] ?? 0
+			const r = radii[k] ?? 0
+			// A negative bubble is drawn hollow, as Office does.
+			const negative = (sizes[k] ?? 0) < 0
+
+			builder.begin()
+			builder.list.moveTo(x + r, y)
+			builder.arc(x, y, r, 0, Math.PI * 2)
+			builder.list.close()
+			const stroke = pointStroke(style, k)
+
+			builder.end(
+				negative ? -1 : pointFill(builder, style, k),
+				negative && stroke < 0 ? builder.plainStroke(style.color, 0.75 * PX_PER_PT, false) : stroke,
+				inner,
+				0,
+				series.node
+			)
+		}
+
+		pointLabels(frame, series, order, xs, ys, null, "r")
+	})
+}
+
+export interface SurfaceBand {
+	readonly low: number
+	readonly high: number
+	readonly label: string
+	readonly fill: number
+	readonly stroke: number
+}
+
+// Grid cells of a surface drawn at most; past it the rest of the grid is left out (and reported).
+export const MAX_SURFACE_CELLS = 1 << 16
+
+// Corners of a triangle clipped to the values in [low, high], interpolated linearly along its edges
+// (Sutherland-Hodgman against the two thresholds); fewer than 3 corners when it misses the band.
+function clipToBand(xs: number[], ys: number[], vs: number[], low: number, high: number): { xs: number[]; ys: number[] } {
+	let px = xs
+	let py = ys
+	let pv = vs
+
+	for (const [limit, above] of [
+		[low, true],
+		[high, false]
+	] as const) {
+		const nx: number[] = []
+		const ny: number[] = []
+		const nv: number[] = []
+
+		for (let k = 0; k < pv.length; k++) {
+			const j = (k + 1) % pv.length
+			const a = pv[k] ?? 0
+			const b = pv[j] ?? 0
+			const inA = above ? a >= limit : a <= limit
+			const inB = above ? b >= limit : b <= limit
+
+			if (inA) {
+				nx.push(px[k] ?? 0)
+				ny.push(py[k] ?? 0)
+				nv.push(a)
+			}
+
+			if (inA !== inB) {
+				const t = (limit - a) / (b - a)
+
+				nx.push((px[k] ?? 0) + t * ((px[j] ?? 0) - (px[k] ?? 0)))
+				ny.push((py[k] ?? 0) + t * ((py[j] ?? 0) - (py[k] ?? 0)))
+				nv.push(limit)
+			}
+		}
+
+		px = nx
+		py = ny
+		pv = nv
+
+		if (pv.length < 3) break
+	}
+
+	return { xs: px, ys: py }
+}
+
+// A contour: the series' values over the categories (across) and the series (up), each cell split into two
+// triangles whose parts in each value band fill with the band's paint; a wireframe draws the bands' lower edges.
+export function drawSurface(frame: PlotFrame, rows: AxisState | undefined, bands: readonly SurfaceBand[]): void {
+	const { builder, plot, inner } = frame
+	const columns = frame.categoryAxis
+
+	if (columns === undefined || bands.length === 0) return
+
+	const series = plot.series.length === 1 ? [plot.series[0], plot.series[0]] : plot.series
+	const rowCount = series.length
+	let columnCount = 0
+
+	for (const entry of series) columnCount = Math.max(columnCount, entry?.values.count ?? 0)
+
+	if (rowCount < 2 || columnCount === 0) return
+
+	const wide = columnCount === 1 ? 2 : columnCount
+	const columnAt = (i: number): number => (columnCount === 1 ? (i === 0 ? inner.x : inner.x + inner.w) : categoryPosition(columns, i))
+	const rowAt = (j: number): number =>
+		rows !== undefined && plot.series.length > 1 ? categoryPosition(rows, j) : inner.y + inner.h - (j * inner.h) / (rowCount - 1)
+	const valueAt = (i: number, j: number): number => series[j]?.values.numbers?.[columnCount === 1 ? 0 : i] ?? Number.NaN
+	const cells = Math.min(MAX_SURFACE_CELLS, (wide - 1) * (rowCount - 1))
+
+	for (let band = 0; band < bands.length; band++) {
+		const { low, high, fill, stroke } = bands[band] as SurfaceBand
+
+		builder.begin()
+
+		for (let cell = 0; cell < cells; cell++) {
+			const i = cell % (wide - 1)
+			const j = Math.floor(cell / (wide - 1))
+			const x0 = columnAt(i)
+			const x1 = columnAt(i + 1)
+			const y0 = rowAt(j)
+			const y1 = rowAt(j + 1)
+			const v00 = valueAt(i, j)
+			const v10 = valueAt(i + 1, j)
+			const v01 = valueAt(i, j + 1)
+			const v11 = valueAt(i + 1, j + 1)
+			const triangles = [
+				[x0, y0, v00, x1, y0, v10, x1, y1, v11],
+				[x0, y0, v00, x1, y1, v11, x0, y1, v01]
+			]
+
+			for (const t of triangles) {
+				const vs = [t[2] ?? 0, t[5] ?? 0, t[8] ?? 0]
+
+				// A cell with a missing point is left empty, as Office leaves it.
+				if (!vs.every(Number.isFinite)) continue
+
+				const min = Math.min(...vs)
+				const max = Math.max(...vs)
+
+				if (fill >= 0) {
+					// Values beyond the axis fall in the end bands.
+					const bottom = band === 0 ? -Infinity : low
+					const top = band === bands.length - 1 ? Infinity : high
+
+					if (max < bottom || min > top) continue
+
+					const part = clipToBand([t[0] ?? 0, t[3] ?? 0, t[6] ?? 0], [t[1] ?? 0, t[4] ?? 0, t[7] ?? 0], vs, bottom, top)
+
+					if (part.xs.length < 3) continue
+
+					builder.list.moveTo(part.xs[0] ?? 0, part.ys[0] ?? 0)
+
+					for (let k = 1; k < part.xs.length; k++) builder.list.lineTo(part.xs[k] ?? 0, part.ys[k] ?? 0)
+
+					builder.list.close()
+				} else if (band > 0 && min < low && max > low) {
+					// The band's lower edge through the triangle: where two of its edges cross the value.
+					const points: number[] = []
+
+					for (let k = 0; k < 3; k++) {
+						const a = vs[k] ?? 0
+						const b = vs[(k + 1) % 3] ?? 0
+
+						if (a < low === b < low) continue
+
+						const s = (low - a) / (b - a)
+
+						points.push((t[k * 3] ?? 0) + s * ((t[((k + 1) % 3) * 3] ?? 0) - (t[k * 3] ?? 0)))
+						points.push((t[k * 3 + 1] ?? 0) + s * ((t[((k + 1) % 3) * 3 + 1] ?? 0) - (t[k * 3 + 1] ?? 0)))
+					}
+
+					if (points.length >= 4) builder.segment(points[0] ?? 0, points[1] ?? 0, points[2] ?? 0, points[3] ?? 0)
+				}
+			}
+		}
+
+		builder.end(fill, fill >= 0 ? -1 : stroke, inner, 0, plot.node)
+	}
+}
+
+// Whether a surface plot has more grid cells than are drawn.
+export function surfaceTruncated(plot: Plot): boolean {
+	let columns = 0
+
+	for (const series of plot.series) columns = Math.max(columns, series.values.count)
+
+	return plot.kind === "surface" && (Math.max(2, columns) - 1) * (Math.max(2, plot.series.length) - 1) > MAX_SURFACE_CELLS
 }
 
 export function drawPie(frame: PlotFrame): void {

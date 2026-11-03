@@ -83,7 +83,8 @@ export function seriesStyles(builder: ChartBuilder, plot: Plot, total: number): 
 	const out = new Map<number, SeriesStyle>()
 	const reader = builder.reader
 	const single = plot.series.length === 1
-	const vary = plot.varyColors && (plot.kind === "pie" || plot.kind === "doughnut" || (single && plot.kind === "bar"))
+	const vary =
+		plot.varyColors && (plot.kind === "pie" || plot.kind === "doughnut" || (single && (plot.kind === "bar" || plot.kind === "bubble")))
 	const lines = lineKind(plot)
 	const background = backgroundColor(builder.theme)
 

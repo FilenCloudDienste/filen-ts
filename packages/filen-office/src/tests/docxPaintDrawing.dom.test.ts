@@ -313,7 +313,8 @@ describe("paintDrawing", () => {
 
 		const radialGradient = defs?.querySelector("radialGradient")
 
-		expect(radialGradient?.getAttribute("cx")).toBe("0.5")
+		// The unit circle placed at the centre, its radius half the diagonal of the item's 2:1 box in that box's fractions.
+		expect(radialGradient?.getAttribute("gradientTransform")).toBe("matrix(0.559 0 0 1.118 0.5 0.5)")
 		expect(paths[2]?.getAttribute("fill")).toBe(`url(#${radialGradient?.id})`)
 
 		const tile = defs?.querySelector("pattern")

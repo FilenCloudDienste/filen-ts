@@ -47,10 +47,6 @@ export interface Point {
 	readonly y: number
 }
 
-export function pointCount(path: EditablePath): number {
-	return path.xs.length
-}
-
 export function segmentCount(path: EditablePath): number {
 	const n = path.xs.length
 
@@ -411,15 +407,6 @@ export function polyline(path: EditablePath, steps: number = 16): Float64Array {
 	}
 
 	return out
-}
-
-// The segments the player flattens the path into, for the timing budget.
-export function flattenedSegments(path: EditablePath): number {
-	let count = 0
-
-	for (let s = 0; s < segmentCount(path); s++) count += path.curves[s] === 1 ? CURVE_CHORDS : 1
-
-	return count
 }
 
 // --- Auto points ---

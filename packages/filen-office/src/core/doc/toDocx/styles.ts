@@ -181,11 +181,6 @@ function styleIdOf(name: string): string {
 	return name.replace(/[^A-Za-z0-9]/gu, "")
 }
 
-// The default character properties docDefaults states (fonts from the STSHI, the rest Word's defaults).
-export function defaultsChar(model: DocModel): DocChar {
-	return model.defaultChar
-}
-
 // What WordprocessingML assumes with no rPrDefault: the base docDefaults are diffed against.
 function implicitChar(): DocChar {
 	const char = defaultChar()

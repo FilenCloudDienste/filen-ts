@@ -86,7 +86,7 @@ import { DocxCommentPopover } from "@/features/preview/components/docxCommentPop
 import { DocxContextCommands } from "@/features/preview/components/docxContextMenu"
 import { DocxEditToolbar, type DocxRibbonClipboard } from "@/features/preview/components/docxEditToolbar"
 import { DocxFileMenu } from "@/features/preview/components/docxFileMenu"
-import { ribbonLanding } from "@/features/office/components/ribbon/ribbonFocus"
+import { onRibbonEscape, ribbonLanding } from "@/features/office/components/ribbon/ribbonFocus"
 import { useDocxPdfExport } from "@/features/preview/hooks/useDocxPdfExport"
 import { editedFile } from "@/features/preview/lib/docxLiveFile"
 import type { LiveFile } from "@/features/drive/lib/downloadAs"
@@ -1250,8 +1250,11 @@ export function DocxEditView({
 			ref={rootRef}
 			className="flex size-full flex-col"
 			// F6 and Shift+F6 move between the ribbon and the document, as Word's panes.
+			onKeyDownCapture={event => {
+				onRibbonEscape(event, event.currentTarget, focusEditor, "capture")
+			}}
 			onKeyDown={event => {
-				onPaneKey(event.nativeEvent, event.currentTarget)
+				if (!onRibbonEscape(event, event.currentTarget, focusEditor, "bubble")) onPaneKey(event.nativeEvent, event.currentTarget)
 			}}
 		>
 			<DocxEditToolbar

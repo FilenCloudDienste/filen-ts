@@ -107,20 +107,6 @@ export function fromSelectionState(state: SheetSelectionState | undefined, merge
 	return { active, anchor, focus, ranges: state.ranges }
 }
 
-// The merge holding a cell, from merge quads (startRow, startCol, endRow, endCol), or null.
-export function mergeAtQuads(merges: Uint32Array, row: number, col: number): SheetRange | null {
-	for (let i = 0; i + 3 < merges.length; i += 4) {
-		const startRow = merges[i] ?? 0
-		const startCol = merges[i + 1] ?? 0
-		const endRow = merges[i + 2] ?? 0
-		const endCol = merges[i + 3] ?? 0
-
-		if (row >= startRow && row <= endRow && col >= startCol && col <= endCol) return { startRow, startCol, endRow, endCol }
-	}
-
-	return null
-}
-
 export function mergeRanges(merges: Uint32Array): SheetRange[] {
 	const ranges: SheetRange[] = []
 

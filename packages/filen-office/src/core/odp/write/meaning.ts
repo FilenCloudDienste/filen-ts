@@ -16,9 +16,9 @@ import type {
 	Xfrm
 } from "../../presentation/model"
 import { odfCustomCommands } from "../../odf/presetShapes"
-import { jumpIndex } from "./emit/text"
+import { bulletSize, jumpIndex } from "./emit/text"
 import { IDENTITY, canonicalBox, compose, groupAffine, lineEnds, placed, type Affine } from "./emit/shape"
-import { isRefused } from "./styles"
+import { isRefused } from "../../presentation/refusal"
 
 // What a written page means, compared with what the session holds (proof gate 2 for ODP: the touched pages of the
 // saved file read back by the reader, shape by shape in order). The model is compared as the reader produces it, with
@@ -167,6 +167,11 @@ function paragraphDiffers(expected: Paragraph, read: Paragraph): string | undefi
 	const want: Record<string, unknown> = { ...expected.pPr }
 	const got: Record<string, unknown> = { ...read.pPr }
 
+	want["buSz"] = bulletSize(want["buSz"] as ParaProps["buSz"])
+	got["buSz"] = bulletSize(got["buSz"] as ParaProps["buSz"])
+
+	if (want["buSz"] === undefined) delete want["buSz"]
+	if (got["buSz"] === undefined) delete got["buSz"]
 	if ((want["lvl"] ?? 0) === 0) delete want["lvl"]
 	if ((got["lvl"] ?? 0) === 0) delete got["lvl"]
 
@@ -199,7 +204,10 @@ function paragraphDiffers(expected: Paragraph, read: Paragraph): string | undefi
 
 	const end = (rPr: RunProps | undefined): RunProps => rPr ?? {}
 
-	if (!same(end(expected.endRPr), end(read.endRPr))) return "endRPr"
+	// ODF holds no paragraph mark properties of its own (LibreOffice drops an empty span; the reader reads the paragraph
+	// style's): a paragraph with text whose runs differ from its mark is written with its runs, only an empty
+	// paragraph's mark is compared.
+	if (expected.runs.length === 0 && !same(end(expected.endRPr), end(read.endRPr))) return "endRPr"
 
 	return undefined
 }

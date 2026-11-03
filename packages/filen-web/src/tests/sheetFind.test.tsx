@@ -161,6 +161,32 @@ async function goTo(reference: string): Promise<void> {
 }
 
 describe("the spreadsheet find bar", () => {
+	it("gives the cells focus with Escape on a ribbon control, keeping the key from closing the preview", async () => {
+		await openViewer()
+
+		const tab = screen.getAllByRole("tab")[0]
+
+		if (tab === undefined) throw new Error("no tab")
+
+		act(() => {
+			tab.focus()
+		})
+		expect(fireEvent.keyDown(tab, { key: "Escape" })).toBe(false)
+		expect(document.activeElement?.closest('[data-sheet-pane="grid"]')).not.toBeNull()
+	})
+
+	it("gives the cells focus with Escape on a sheet tab, keeping the key from closing the preview", async () => {
+		await openViewer()
+
+		const tab = screen.getByRole("tab", { name: /Fruit/u })
+
+		act(() => {
+			tab.focus()
+		})
+		expect(fireEvent.keyDown(tab, { key: "Escape" })).toBe(false)
+		expect(document.activeElement?.closest('[data-sheet-pane="grid"]')).not.toBeNull()
+	})
+
 	it("opens with Mod+F, selects the first match and steps with Enter", async () => {
 		const grid = await openViewer()
 

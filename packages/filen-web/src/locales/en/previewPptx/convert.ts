@@ -23,8 +23,8 @@ export const previewPptxConvert = {
 	previewPptxConvertNotPresentation: "This file is a text file, not a PowerPoint template",
 	/** Download as warning — heading before the list of what the converted copy holds differently */
 	previewPptxConvertDifferently: "Kept differently in the copy: {{list}}",
-	/** Converted copy — kept differently: the deck's macros (a VBA project), which the copy cannot hold */
-	previewPptxConvertLossMacros: "Its macros (a VBA project), which the copy can't hold",
+	/** Converted copy — kept differently: the deck's macros (a VBA project, or an OpenDocument Basic or script library), which the copy cannot hold */
+	previewPptxConvertLossMacros: "Its macros, which the copy can't hold",
 	/** Converted copy — kept differently: gradient, pattern or picture fills written in the nearest form the copy's format has */
 	previewPptxConvertLossFill_one: "{{count}} fill, drawn in the nearest form",
 	/** Converted copy — as previewPptxConvertLossFill_one, for several */
@@ -41,10 +41,14 @@ export const previewPptxConvert = {
 	previewPptxConvertLossOutlineLevel_one: "{{count}} paragraph outline level, written as its indent",
 	/** Converted copy — as previewPptxConvertLossOutlineLevel_one, for several */
 	previewPptxConvertLossOutlineLevel_other: "{{count}} paragraph outline levels, written as their indents",
-	/** Converted copy — kept differently: text settings (vertical text, line breaking, spacing, bullets, numbering) written in a nearer form */
+	/** Converted copy — kept differently: text settings (vertical text, line breaking, spacing, bullets) written in a nearer form */
 	previewPptxConvertLossText_one: "{{count}} text setting, written in the nearest form",
 	/** Converted copy — as previewPptxConvertLossText_one, for several */
 	previewPptxConvertLossText_other: "{{count}} text settings, written in the nearest form",
+	/** Converted copy — a list numbering style (such as Hindi letters) the copy has no form for, shown as the nearest it has */
+	previewPptxConvertLossNumbering_one: "{{count}} list numbering, shown in the nearest style",
+	/** Converted copy — as previewPptxConvertLossNumbering_one, for several */
+	previewPptxConvertLossNumbering_other: "{{count}} list numberings, shown in the nearest style",
 	/** Converted copy — kept differently: table styles written as the cells' own formatting */
 	previewPptxConvertLossTableStyle_one: "{{count}} table style, kept as the cells' own formatting",
 	/** Converted copy — as previewPptxConvertLossTableStyle_one, for several */
@@ -88,5 +92,25 @@ export const previewPptxConvert = {
 	/** Converted copy — kept differently: the file's digital signature, which a new file cannot keep */
 	previewPptxConvertLossSignature: "Its digital signature, which a new file can't keep",
 	/** Converted copy — kept differently: the password asked before changes, which the copy does not keep */
-	previewPptxConvertLossWriteReservation: "The password asked before changing it, which the copy doesn't keep"
+	previewPptxConvertLossWriteReservation: "The password asked before changing it, which the copy doesn't keep",
+	/** Converted copy — kept differently: replies to comments, each written as a comment of its own (OpenDocument comments have no threads) */
+	previewPptxConvertLossCommentReply_one: "{{count}} comment reply, written as a comment of its own",
+	/** Converted copy — as previewPptxConvertLossCommentReply_one, for several */
+	previewPptxConvertLossCommentReply_other: "{{count}} comment replies, each written as a comment of its own",
+	/** Converted copy — kept differently: whether a comment was resolved, which OpenDocument comments can't hold */
+	previewPptxConvertLossCommentState_one: "Whether {{count}} comment was resolved, left out",
+	/** Converted copy — as previewPptxConvertLossCommentState_one, for several */
+	previewPptxConvertLossCommentState_other: "Whether {{count}} comments were resolved, left out",
+	/** Converted copy — kept differently: the slides' sections, which OpenDocument has no form for */
+	previewPptxConvertLossSection_one: "{{count}} section, left out (the slides stay)",
+	/** Converted copy — as previewPptxConvertLossSection_one, for several */
+	previewPptxConvertLossSection_other: "{{count}} sections, left out (the slides stay)",
+	/** Converted copy — kept differently: fonts embedded in the file, which the copy doesn't embed */
+	previewPptxConvertLossEmbeddedFont_one: "{{count}} embedded font, left out",
+	/** Converted copy — as previewPptxConvertLossEmbeddedFont_one, for several */
+	previewPptxConvertLossEmbeddedFont_other: "{{count}} embedded fonts, left out",
+	/** Converted copy — kept differently: document properties the copy's format has no place for (a category, a property of a binary type) */
+	previewPptxConvertLossProperties_one: "{{count}} document property, left out",
+	/** Converted copy — as previewPptxConvertLossProperties_one, for several */
+	previewPptxConvertLossProperties_other: "{{count}} document properties, left out"
 } as const

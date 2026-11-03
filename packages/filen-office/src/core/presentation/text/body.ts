@@ -60,6 +60,9 @@ export interface LayoutOptions {
 	// "face": lines take the face's own hhea ascent and descent rather than the font-independent single line, as
 	// LibreOffice 7.5 lays out table cell text (measured; ECMA and MS-OI29500 are silent).
 	readonly lineMetrics?: "fontIndependent" | "face"
+	// An autofit "normal" body's scale is found as it is laid out: the largest its text fits the box at (ODF
+	// style:shrink-to-fit names none, LibreOffice finds it so), not the fontScale it carries.
+	readonly shrinkOnLayout?: boolean
 }
 
 // Text runs one body may hold (plan §1.12): larger bodies are refused before any layout.
@@ -74,6 +77,8 @@ export interface BodyLayout {
 	readonly height: number
 	// Whether the text runs past the box (it is drawn anyway).
 	readonly overflow: boolean
+	// The scale sizes and point spacing were laid out at (an autofit "normal" body's).
+	readonly scale: number
 	// How the page is turned onto the box (turnOf): 90 (vert, eaVert, mongolianVert), 270 (vert270) or 0. The page's
 	// width and height are the turned box's.
 	readonly turn: 0 | 90 | 270
@@ -231,15 +236,19 @@ class Session {
 	readonly env: TextEnvironment
 	readonly body: ResolvedBody
 	readonly scale: number
+	// The single line against the drawn size: 1, or (spacing scale / scale) where lines keep their pitch while the
+	// glyphs shrink.
+	readonly lineFactor: number
 	readonly options: LayoutOptions
 
 	// The paragraph being built lays its lines out at its faces' own ascent and descent (fontIndependentOff).
 	faceLines = false
 
-	constructor(env: TextEnvironment, body: ResolvedBody, scale: number, options: LayoutOptions) {
+	constructor(env: TextEnvironment, body: ResolvedBody, scale: number, options: LayoutOptions, lineFactor = 1) {
 		this.env = env
 		this.body = body
 		this.scale = scale
+		this.lineFactor = lineFactor
 		this.options = options
 		// Face metrics measure ascent plus descent without the line gap ("hhea"); the font-independent single line
 		// measures the same under either rule.
@@ -340,7 +349,7 @@ class Session {
 		const drawn = this.env.fonts.resolve(fontRequest(props, slot, fonts, fontOverride))
 		const font = withSingleLine(
 			drawn,
-			marker && sizeFactor > 0 ? 1 / sizeFactor : 1,
+			(marker && sizeFactor > 0 ? 1 / sizeFactor : 1) * this.lineFactor,
 			this.options.lineMetrics === "face" || this.faceLines
 		)
 		const sizePt = (props.sz ?? DEFAULT_SIZE) / 100
@@ -744,16 +753,75 @@ export function layoutBody(
 
 	const bodyPr = resolved.bodyPr
 	const normal = bodyPr.autofit === "normal"
+	const reduction = normal ? Math.max(0, bodyPr.lineSpacingReduction) : 0
+	const given = layoutAt(resolved, box, env, options, normal ? Math.max(0.01, bodyPr.fontScale) : 1, reduction)
 
-	return layoutAt(
-		resolved,
-		box,
-		env,
-		options,
-		normal ? Math.max(0.01, bodyPr.fontScale) : 1,
-		normal ? Math.max(0, bodyPr.lineSpacingReduction) : 0
-	)
+	if (!normal || options.shrinkOnLayout !== true || !given.overflow) return given
+
+	// What must fit: the body without its trailing empty paragraphs (LibreOffice 7.5 leaves them out of the fit).
+	const fitted = withoutTrailingEmpty(resolved)
+	const stacked = bodyPr.vertical === "wordArtVert" || bodyPr.vertical === "wordArtVertRtl"
+	const room = (stacked ? box.width : box.height) * FIT_ALLOWANCE
+	const fitsAt = (scale: number, spacing: number): boolean =>
+		layoutAt(fitted, box, env, options, scale, reduction, spacing).height <= room
+
+	if (fitsAt(given.scale, given.scale)) return given
+
+	// LibreOffice 7.5 shrinks the glyphs first, its lines keeping their pitch and the paragraphs their spacing (measured:
+	// tika__testODP_NPE slide 11, TextFitToSizeScale 92%, its line pitch the unscaled 1.2 times the size); a body its
+	// glyphs cannot fit shrinks whole (lo__trailing-paragraphs: one 40 pt line in a 1 cm box).
+	const glyphs = largestFit(scale => fitsAt(scale, given.scale), MIN_GLYPH_SCALE, given.scale)
+
+	if (glyphs !== undefined) return layoutAt(resolved, box, env, options, glyphs, reduction, given.scale)
+
+	const whole = largestFit(scale => fitsAt(scale, scale), MIN_SCALE, given.scale) ?? MIN_SCALE
+
+	return layoutAt(resolved, box, env, options, whole, reduction)
 }
+
+// The largest scale in [from, to] `fits` holds at, to within SHRINK_STEPS halvings; undefined when `from` does not fit.
+function largestFit(fits: (scale: number) => boolean, from: number, to: number): number | undefined {
+	if (!fits(from)) return undefined
+
+	let low = from
+	let high = to
+
+	for (let step = 0; step < SHRINK_STEPS; step++) {
+		const scale = (low + high) / 2
+
+		if (fits(scale)) low = scale
+		else high = scale
+	}
+
+	return low
+}
+
+// A body without the empty paragraphs it ends with (its first paragraph always kept); the body itself when it ends with
+// text.
+function withoutTrailingEmpty(resolved: ResolvedBody): ResolvedBody {
+	const paragraphs = resolved.paragraphs
+	let end = paragraphs.length
+
+	while (end > 1 && paragraphs[end - 1]?.runs.every(run => run.kind === "r" && run.text === "") === true) end--
+
+	return end === paragraphs.length ? resolved : { ...resolved, paragraphs: paragraphs.slice(0, end) }
+}
+
+// How far past its box (as we lay it out) a body may run and count as fitting, measured against LibreOffice 7.5's own
+// TextFitToSizeScale on tika__testODP_NPE: slide 11 at its 92%, wrapped into the same 14 lines LibreOffice draws with
+// the pitch kept, runs 4.4% past the box and fits; slide 20, 3.1% past at 100%, is left; slide 26, 6.2% past, is
+// shrunk. Our line pitch is LibreOffice's (1.2 times the size, a probe of five 28 pt lines: 5.926 cm in both), so the
+// remainder lies in what its fit measures, which LibreOffice exposes no further (7.5 has no font or spacing scale
+// properties beside TextFitToSizeScale).
+const FIT_ALLOWANCE = 1.045
+
+// The least the glyphs alone shrink to before the lines shrink too (LibreOffice's glyph shrinks on the corpus stay
+// above 90%; a body needing less than half shrinks whole).
+const MIN_GLYPH_SCALE = 0.5
+
+// The least scale a body shrinks to, and the halvings that find its scale (1/128 of the range).
+const MIN_SCALE = 0.01
+const SHRINK_STEPS = 7
 
 // One layout at `scale` (sizes and point spacing) with `reduction` off proportional line spacing.
 function layoutAt(
@@ -762,7 +830,9 @@ function layoutAt(
 	env: TextEnvironment,
 	options: LayoutOptions,
 	scale: number,
-	reduction: number
+	reduction: number,
+	// The scale lines and paragraph spacing are laid out at: `scale`, or another where the glyphs alone shrink.
+	spacingScale = scale
 ): BodyLayout {
 	const bodyPr = resolved.bodyPr
 	const vertical = bodyPr.vertical
@@ -772,7 +842,7 @@ function layoutAt(
 	// Stacked columns are laid out horizontally across the column's length (the box's height) first.
 	const frameWidth = Math.max(0, stacked ? box.height : box.width)
 	const frameHeight = Math.max(0, stacked ? box.width : box.height)
-	const session = new Session(env, resolved, scale, options)
+	const session = new Session(env, resolved, scale, options, spacingScale / scale)
 	const layouter = new ParagraphLayouter(session.styles)
 	const builder = new ParagraphBuilder()
 	const out = new TextLayout()
@@ -799,14 +869,14 @@ function layoutAt(
 		const fontPx = ((first.sz ?? DEFAULT_SIZE) / 100) * PT_PX * scale
 		const spcBef = index === 0 ? undefined : paragraph.pPr.spcBef
 		// The first run's size is the guess; a larger run on the first line lays the paragraph out again.
-		let before = paragraphSpace(spcBef, fontPx, scale)
+		let before = paragraphSpace(spcBef, fontPx * (spacingScale / scale), spacingScale)
 		// LibreOffice's EditEngine leaves proportional spacing (and the autofit reduction) off the very first line of
 		// the text when its paragraph is empty (ImpEditEngine::CreateAndInsertEmptyLine, measured; ECMA is silent).
 		const lnSpc = paragraph.pPr.lnSpc
 		const spacing =
 			index === 0 && !hasText(paragraph) && (lnSpc === undefined || "pct" in lnSpc)
-				? lineSpacing(undefined, 0, scale)
-				: lineSpacing(lnSpc, reduction, scale)
+				? lineSpacing(undefined, 0, spacingScale)
+				: lineSpacing(lnSpc, reduction, spacingScale)
 		session.faceLines = fontIndependentOff(paragraph.pPr)
 
 		const markStyle = session.look(paragraph.endRPr, "latin")
@@ -868,7 +938,11 @@ function layoutAt(
 			// Done (page and column breaks never occur in DrawingML text).
 			if (spcBef === undefined || !("pct" in spcBef) || out.lineCount === startLine) break
 
-			const exact = paragraphSpace(spcBef, largestSize(session, out, startLine, prefixes[index] ?? 0, fontPx), scale)
+			const exact = paragraphSpace(
+				spcBef,
+				largestSize(session, out, startLine, prefixes[index] ?? 0, fontPx) * (spacingScale / scale),
+				spacingScale
+			)
 
 			if (Math.abs(exact - before) < 0.001) break
 
@@ -882,8 +956,8 @@ function layoutAt(
 		const lastLine = out.lineCount - 1
 		const after = paragraphSpace(
 			paragraph.pPr.spcAft,
-			lastLine >= startLine ? largestSize(session, out, lastLine, prefixes[index] ?? 0, fontPx) : fontPx,
-			scale
+			(lastLine >= startLine ? largestSize(session, out, lastLine, prefixes[index] ?? 0, fontPx) : fontPx) * (spacingScale / scale),
+			spacingScale
 		)
 
 		previousAfter = after
@@ -907,7 +981,18 @@ function layoutAt(
 
 	runStarts[resolved.paragraphs.length] = runEnds.length
 
-	return { page, layout: laid, styles: session.styles, height, overflow, turn, prefixes, runStarts, runEnds: Int32Array.from(runEnds) }
+	return {
+		page,
+		layout: laid,
+		styles: session.styles,
+		height,
+		overflow,
+		scale,
+		turn,
+		prefixes,
+		runStarts,
+		runEnds: Int32Array.from(runEnds)
+	}
 }
 
 export type { Session as BodySession }

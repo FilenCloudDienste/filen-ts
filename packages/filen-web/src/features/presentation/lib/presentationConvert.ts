@@ -107,6 +107,7 @@ const LOSS_KEYS = {
 	geometry: "previewPptxConvertLossGeometry",
 	outlineLevel: "previewPptxConvertLossOutlineLevel",
 	text: "previewPptxConvertLossText",
+	numbering: "previewPptxConvertLossNumbering",
 	tableStyle: "previewPptxConvertLossTableStyle",
 	chart: "previewPptxConvertLossChart",
 	chartDetail: "previewPptxConvertLossChartDetail",
@@ -121,7 +122,12 @@ const LOSS_KEYS = {
 	signature: "previewPptxConvertLossSignature",
 	writeReservation: "previewPptxConvertLossWriteReservation",
 	mediaTiming: "previewPptxConvertLossMediaTiming",
-	bookmarkTrigger: "previewPptxConvertLossBookmarkTrigger"
+	bookmarkTrigger: "previewPptxConvertLossBookmarkTrigger",
+	commentReply: "previewPptxConvertLossCommentReply",
+	commentState: "previewPptxConvertLossCommentState",
+	section: "previewPptxConvertLossSection",
+	embeddedFont: "previewPptxConvertLossEmbeddedFont",
+	properties: "previewPptxConvertLossProperties"
 } as const satisfies Readonly<Record<ConversionLossKind, string>>
 
 export type ConversionLossKey = (typeof LOSS_KEYS)[ConversionLossKind]

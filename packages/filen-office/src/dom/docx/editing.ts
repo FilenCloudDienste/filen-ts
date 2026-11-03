@@ -26,14 +26,13 @@ import type { DocxHost } from "./host"
 import type { DocxPdfLive } from "./pdfSnapshot"
 import type { DocxOpenOptions } from "./protocol"
 import { isSealedOfficeFile } from "../../core/encryption/index"
-import { PackageSealError, packageSealer, type PackageSealer, type PackageSealFailure } from "../encryption/seal"
+import { PackageSealError, packageSealer, type PackageSealer } from "../encryption/seal"
 import { importOfficeKey, type AbortSignalLike, type OfficeKeyTransfer } from "../encryption/webCrypto"
 import { DocxClosedError, inThreadDocxZipper, type DocxSaveNotice, type DocxZipper, type DocxZipperFactory } from "./save"
 
 // A password-protected document's saves: sealed with the key the document's holder handed over
 // (DocxUnlockedDocument.take), on this thread, in the editor's own chain (a viewer never loads seal code).
 export type DocxSealer = PackageSealer
-export type DocxSealFailure = PackageSealFailure
 export { PackageSealError as DocxSealError, isSealedOfficeFile }
 
 // Where an editor's key comes from: a taken document's key() (protection.ts), asked at the first seal.

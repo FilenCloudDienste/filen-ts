@@ -23,6 +23,7 @@ import { NO_FEATURES, type SheetFeatures } from "./features"
 import type { ScopeNames } from "./names"
 import { nameKey } from "../features"
 import { ADDRESS_ATTRIBUTES, patchAttributes, type Shifter } from "../unheld"
+import { sameBytes } from "../../docx/write/bytes"
 
 // content.xml as a save writes it, streamed from the source's: everything an edit left alone passes through as its
 // bytes; the automatic styles new formats need go at the end of office:automatic-styles; each table:table goes
@@ -175,14 +176,6 @@ class LazyPieces {
 }
 
 type Piece = string | Uint8Array | DeferredRow | LazyPieces
-
-function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
-	if (a.length !== b.length) return false
-
-	for (let k = 0; k < a.length; k++) if (a[k] !== b[k]) return false
-
-	return true
-}
 
 export class ContentWriter implements StreamHandler {
 	private readonly plan: ContentPlan

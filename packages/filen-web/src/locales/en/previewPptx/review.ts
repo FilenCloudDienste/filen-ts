@@ -4,9 +4,9 @@ export const previewPptxReview = {
 	/** Presentation editor, Review tab — group of the comment commands */
 	previewPptxReviewComments: "Comments",
 	/** Presentation editor, Review tab — starts a comment on the slide in view */
-	previewPptxCommentNew: "New Comment",
+	previewPptxCommentNew: "New comment",
 	/** Presentation editor, Review tab — shows the Comments pane beside the slide */
-	previewPptxCommentsShow: "Show Comments",
+	previewPptxCommentsShow: "Show comments",
 	/** Comments pane — its heading */
 	previewPptxCommentsTitle: "Comments",
 	/** Comments pane — closes the pane */

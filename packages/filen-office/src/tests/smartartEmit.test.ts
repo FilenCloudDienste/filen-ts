@@ -219,6 +219,26 @@ describe("SmartArt drawing", () => {
 		expect(shapes[0]?.text?.paragraphs[0]?.runs[0]).toMatchObject({ kind: "r", text: "Alpha" })
 	})
 
+	it("keeps a turned shape's upright text in its geometry's text rectangle, turned into place with the shape", () => {
+		// An up-arrow callout turned half way round (Process 4's down arrows): its text box is the callout's box part,
+		// which the turn takes from the bottom to the top.
+		const xml =
+			layout(`<dgm:alg type="lin"/><dgm:constrLst><dgm:constr type="w" for="ch" forName="box" val="40"/><dgm:constr type="h" for="ch" forName="box" val="20"/></dgm:constrLst>
+			<dgm:forEach axis="ch" ptType="node"><dgm:layoutNode name="box" styleLbl="node1"><dgm:alg type="tx"/><dgm:shape type="upArrowCallout" rot="180"/><dgm:presOf axis="self"/></dgm:layoutNode></dgm:forEach>`)
+		const { document } = emitted(data([{ id: "a", text: "Alpha" }]), xml, 40 * MM, 20 * MM)
+		const reader = drawingReader(document)
+		const sp = reader.children(reader.child(document.documentElement(), D.Dsp, "spTree"), D.Dsp, "sp")[0] ?? -1
+		const txXfrm = reader.child(sp, D.Dsp, "txXfrm")
+		const top = Number(reader.attr(reader.child(txXfrm, D.A, "off"), "y"))
+		const height = Number(reader.attr(reader.child(txXfrm, D.A, "ext"), "cy"))
+
+		expect(reader.attr(txXfrm, "rot")).toBe("-10800000")
+		expect(top).toBe(0)
+		expect(height).toBeGreaterThan(5 * MM)
+		expect(height).toBeLessThan(20 * MM)
+		expect(reader.attr(reader.child(txXfrm, D.A, "ext"), "cx")).toBe(String(40 * MM))
+	})
+
 	it("writes a one-dimensional connector as its route, unfilled, with its arrowhead", () => {
 		const xml = layout(`<dgm:alg type="lin"/><dgm:constrLst>
 			<dgm:constr type="w" for="ch" forName="box" val="40"/><dgm:constr type="h" for="ch" forName="box" val="20"/><dgm:constr type="w" for="ch" forName="link" val="20"/></dgm:constrLst>

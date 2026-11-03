@@ -384,7 +384,8 @@ const ANCHORS: Readonly<Record<string, TextBodyProps["anchor"]>> = { top: "t", m
 // The text area of a shape (§20.130 draw:textarea-vertical-align, §20.129 horizontal, §20.218 fo:padding,
 // §20.119 draw:auto-grow-height, §20.143 draw:fit-to-size, §20.393 style:shrink-to-fit, §20.394 style:writing-mode)
 // as a:bodyPr; insets in px as the text reader keeps them.
-export function bodyPrOf(properties: OdfProperties, paragraph: OdfProperties | undefined): Partial<TextBodyProps> {
+// `wrap`: what the shape's kind makes of fo:wrap-option (shapes.ts wrapOf); absent: the option as the chain says.
+export function bodyPrOf(properties: OdfProperties, paragraph: OdfProperties | undefined, wrap?: boolean): Partial<TextBodyProps> {
 	const attributes = properties.attributes
 	const inset = (side: string): number => (parseLength(attributes.get(`fo:padding-${side}`)) ?? 0) * PX_PER_PT
 	const anchor = ANCHORS[attributes.get("draw:textarea-vertical-align") ?? "top"] ?? "t"
@@ -398,7 +399,7 @@ export function bodyPrOf(properties: OdfProperties, paragraph: OdfProperties | u
 		insets: { left: inset("left"), top: inset("top"), right: inset("right"), bottom: inset("bottom") },
 		anchor,
 		anchorCenter: attributes.get("draw:textarea-horizontal-align") === "center",
-		wrap: attributes.get("fo:wrap-option") !== "no-wrap",
+		wrap: wrap ?? attributes.get("fo:wrap-option") !== "no-wrap",
 		vertical: writing === "tb-rl" || writing === "tb" ? "vert" : writing === "tb-lr" ? "vert270" : "horz",
 		autofit: shrink ? "normal" : attributes.get("draw:auto-grow-height") === "true" ? "shape" : "none",
 		...(Number.isInteger(count) && count > 1

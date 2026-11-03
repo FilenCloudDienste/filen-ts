@@ -9,6 +9,7 @@ import { CORPUS_DIR as CORPUS } from "./corpusDir"
 import { openBytes } from "./docxEditFixtures"
 import { runEditScript } from "./docxWriteFixtures"
 import { scriptOps } from "./fuzz/ops/index"
+import { sameBytes } from "../core/docx/write/bytes"
 
 // The licensed real-world corpus is kept out of the repository (pnpm run corpus:fetch); this sweep runs only where it exists.
 const EXTENSIONS = ["docx", "docm", "dotx", "dotm"]
@@ -53,10 +54,6 @@ function newBlocks(before: Uint8Array, after: Uint8Array): number {
 	for (const [hash, times] of blockHashes(after)) count += Math.max(0, times - (source.get(hash) ?? 0))
 
 	return count
-}
-
-function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
-	return a.length === b.length && a.every((byte, index) => byte === b[index])
 }
 
 describe.skipIf(!existsSync(CORPUS))("docx writer over the real-world corpus", () => {

@@ -1,16 +1,17 @@
-import type { OpcPackage, Slicing } from "../../../core/opc/index"
+import type { Slicing } from "../../../core/opc/index"
 import { readAnnotations } from "../../../core/odp/read/annotations"
 import { countPageAnnotations } from "../../../core/odp/read/annotationCount"
 import { Fragment } from "../../../core/odp/read/context"
 import { pageFragment } from "../../../core/odp/read/scan"
 import { odpWriteSource } from "../../../core/odp/write/source"
 import {
-	MODERN_COMMENTS_RELATIONSHIP,
 	MODERN_COMMENTS_TYPE,
 	countLegacyComments,
 	countModernComments,
+	eachSlideCommentsPart,
 	readLegacyComments,
-	readModernComments
+	readModernComments,
+	slideCommentSource
 } from "../../../core/pptx/read/comments"
 import { G, partReader } from "../../../core/pptx/read/xml"
 import { Namespaces, XmlError, encodeUtf8, type XmlDocument } from "../../../core/xml/index"
@@ -41,6 +42,7 @@ import type { CallContext, EngineSession } from "../engine"
 import { dormantNotes } from "./dormantNotes"
 import { odpParts } from "./open/odp"
 import { pptxParts } from "./open/pptx"
+import type { PptxParts } from "../../../core/pptx/package"
 
 // The review capability: a slide's notes and comments for the page's panes (review()), and what a notes or comment op
 // needs read before it applies (prepareReview): the deck's comment facts (the form new comments take, legacy authors'
@@ -48,7 +50,6 @@ import { pptxParts } from "./open/pptx"
 // asked for (the Comments pane or a comment op; never for the notes pane alone); the session keeps them
 // (core/presentation/comments.ts) across saves.
 
-const LEGACY_COMMENTS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments"
 const LEGACY_AUTHORS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/commentAuthors"
 const LEGACY_TYPE = "application/vnd.openxmlformats-officedocument.presentationml.comments+xml"
 
@@ -127,68 +128,15 @@ function checkSize(budget: number, size: number, part: string): void {
 // A pptx slide's comments: its legacy and modern comment parts (a new slide's are its source slide's, which a save
 // copies with it).
 async function pptxSlideComments(session: EngineSession, node: SlideNode, slicing: Slicing | undefined): Promise<SlideComments> {
-	return pptxPartComments(session, node.ref, pptxSource(session, node.ref), slicing)
+	return pptxPartComments(session, node.ref, slideCommentSource(pptxPartsOf(session), session.deck, node.ref), slicing)
 }
 
-// A comments part parsed; markup that is no XML refuses as malformed (typed, as every other refusal of the review).
-async function commentsDocument(opc: OpcPackage, name: string, slicing: Slicing | undefined): Promise<XmlDocument> {
-	try {
-		return await opc.xml(name, slicing)
-	} catch (error) {
-		if (error instanceof XmlError) throw new PresentationError("malformed", `comments part ${name}: ${error.message}`)
-
-		throw error
-	}
-}
-
-// The part a pptx slide's comments are related from: its own when the package has it, else (a copy not written yet)
-// its source slide's; for a slide not parsed, its part.
-function pptxSource(session: EngineSession, ref: SlideRef): string | undefined {
+function pptxPartsOf(session: EngineSession): PptxParts {
 	const parts = pptxParts(session.deck)
 
 	if (parts === undefined) throw new PresentationError("notImplemented", "comments of this deck")
 
-	const node = session.deck.nodes.get(ref)
-
-	if (node === undefined) return parts.partOf(ref)?.replace(/^\//u, "")
-
-	const own = node.part.replace(/^\//u, "")
-
-	return parts.opc.has(own)
-		? own
-		: node.src?.format === "pptx" && node.src.epoch === parts.epoch
-			? node.src.part.replace(/^\//u, "")
-			: undefined
-}
-
-// Each comments part slide part `source` relates, read once however many times it is related (its entries would
-// repeat), in relationship order.
-async function eachCommentsPart(
-	session: EngineSession,
-	source: string | undefined,
-	slicing: Slicing | undefined,
-	visit: (document: XmlDocument, modern: boolean) => void
-): Promise<void> {
-	const parts = pptxParts(session.deck)
-
-	if (parts === undefined) throw new PresentationError("notImplemented", "comments of this deck")
-
-	const opc = parts.opc
-
-	if (source === undefined || !opc.has(source)) return
-
-	const read = new Set<string>()
-
-	for (const relationship of (await opc.relationships(source)).all) {
-		const modern = relationship.type === MODERN_COMMENTS_RELATIONSHIP
-		const name = relationship.partName
-
-		if ((!modern && relationship.type !== LEGACY_COMMENTS) || name === undefined || read.has(name) || !opc.has(name)) continue
-
-		read.add(name)
-		checkSize(parts.budgets.xmlPartBytes, opc.entry(name)?.uncompressedSize ?? 0, name)
-		visit(await commentsDocument(opc, name, slicing), modern)
-	}
+	return parts
 }
 
 // The comments of slide `ref` as its slide part `source` relates them (none without one); the slide's bounds span all
@@ -204,7 +152,7 @@ async function pptxPartComments(
 	const room = commentCharacterRoom(session.deck, ref)
 	let used = 0
 
-	await eachCommentsPart(session, source, slicing, (document, modern) => {
+	await eachSlideCommentsPart(pptxPartsOf(session), source, slicing, (document, modern) => {
 		const part = (modern ? readModernComments : readLegacyComments)(document, entries.length, room - used)
 
 		for (const entry of part.entries) {
@@ -229,7 +177,7 @@ async function pptxPartCharacters(
 	let comments = 0
 	let characters = 0
 
-	await eachCommentsPart(session, source, slicing, (document, modern) => {
+	await eachSlideCommentsPart(pptxPartsOf(session), source, slicing, (document, modern) => {
 		const part = (modern ? countModernComments : countLegacyComments)(document, comments, room - characters)
 
 		comments += part.comments
@@ -349,7 +297,10 @@ async function countDeckComments(session: EngineSession, source: SlideRef, slici
 
 		if (deck.format === "odp")
 			characters = node === undefined ? odpPageCharacters(session, ref) : commentCharacters(await odpSlideComments(session, node))
-		else characters = commented ? await pptxPartCharacters(session, ref, pptxSource(session, ref), slicing) : 0
+		else
+			characters = commented
+				? await pptxPartCharacters(session, ref, slideCommentSource(pptxPartsOf(session), session.deck, ref), slicing)
+				: 0
 
 		countUnheldComments(deck, ref, characters)
 	}

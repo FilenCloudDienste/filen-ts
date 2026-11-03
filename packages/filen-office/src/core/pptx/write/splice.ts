@@ -15,7 +15,7 @@ import {
 	type SlideRef,
 	type Xfrm
 } from "../../presentation/model"
-import { encodeUtf8, escapeAttribute, escapeText, parseXml, type XmlDocument, type XmlEditor } from "../../xml/index"
+import { decodeUtf8, encodeUtf8, escapeAttribute, escapeText, parseXml, type XmlDocument, type XmlEditor } from "../../xml/index"
 import { readSlidePart, SlidePartError } from "../read/slide"
 import { timingContainer } from "./emit/timing"
 import { G, P_MAIN, partReader, type PartReader } from "../read/xml"
@@ -47,6 +47,8 @@ import { copiedWithoutNotes } from "../../presentation/edit/apply/slide"
 import { diagramDrawingRelId, diagramRelationshipOwner, notePackageDrawingRel } from "../../presentation/edit/apply/smartart"
 import type { EmitPiece, EmitRequest, EmitResult, PptxPartIndex, PptxSaveInput, PptxSnapshot, PptxSource } from "./types"
 import { normalSlide, type GateExpectation, type NormalSlide } from "./verify"
+import { isRefused } from "../../presentation/refusal"
+import { rescaleMarkup, scaledValues, type ScaledValues } from "../../presentation/edit/apply/designScale"
 
 // The splice writer (same-format source): every touched part gets one XmlEditor and the smallest edit its dirt needs
 // (an xfrm's attributes; an element replaced by its family's markup, holes copying the source by span; the whole root
@@ -159,10 +161,6 @@ function markupOf(result: EmitResult): readonly EmitPiece[] | Refused {
 	if (result.kind === "unchanged") return []
 
 	return result.pieces
-}
-
-function isRefused(value: unknown): value is Refused {
-	return typeof value === "object" && value !== null && !Array.isArray(value) && (value as { kind?: unknown }).kind === "refused"
 }
 
 function walk(shapes: readonly ShapeNode[], visit: (shape: ShapeNode) => void): void {
@@ -1064,7 +1062,11 @@ class Splice {
 			}
 		}
 
-		for (const [at, markup] of this.alternateXfrms(context, r, node.shapes)) overlay.set(at, markup)
+		const alternates = this.alternateXfrms(context, r, node.shapes)
+
+		if (isRefused(alternates)) return alternates
+
+		for (const [at, markup] of alternates) overlay.set(at, markup)
 
 		const result = markupOf(slideRoot(context, node))
 
@@ -1179,6 +1181,7 @@ class Splice {
 			if (written === undefined || reused.has(key)) continue
 
 			writer.add(written, part.contentType, part.bytes)
+			if (partKey(written) === partKey(zipName(part.name))) writer.restored.add(partKey(written))
 
 			const edit = await writer.loadRelationships(written)
 			const relationships = relsOf(part).all
@@ -1293,28 +1296,57 @@ class Splice {
 		}
 	}
 
-	// xfrms of shapes kept inside mc:AlternateContent that moved: every branch's copy gets the new xfrm.
-	private alternateXfrms(context: EmitContext, r: PartReader, shapes: readonly ShapeNode[]): Overlay {
+	// Shapes kept inside mc:AlternateContent: every branch's copy gets the new xfrm of one that moved, and the scaled
+	// values of one a slide size change scaled (its text's stated sizes, spacing and indents, rewritten by attribute in
+	// each txBody); refused when a branch states a value the model does not say the scale of.
+	private alternateXfrms(context: EmitContext, r: PartReader, shapes: readonly ShapeNode[]): Overlay | Refused {
 		const out: Overlay = new Map()
 		const pristine = context.pristine
+		const document = r.document
+		let failure: Refused | undefined
 
 		walk(shapes, shape => {
-			if (shape.lock !== "alternateContent" || shape.src === undefined || pristine === undefined) return
+			if (shape.lock !== "alternateContent" || shape.src === undefined || pristine === undefined || failure !== undefined) return
 
 			const before = pristine.shapes.get(shape.src.node)
 
-			if (before === undefined || sameModel(shape.xfrm, before.xfrm) || shape.xfrm === undefined) return
+			if (before === undefined) return
+
+			const moved = shape.xfrm !== undefined && !sameModel(shape.xfrm, before.xfrm)
+			const values = keptScale(shape, before)
+
+			if (!moved && values === undefined) return
 
 			const unit = alternateUnit(context, shape.src.node)
 
 			for (const copy of branchCopies(r, unit, shape.src.node)) {
 				const node = xfrmNode(r, copy)
 
-				if (node >= 0) out.set(node, xfrmXml(xfrmTag(r, copy), shape.xfrm, shape.kind === "grpSp"))
+				if (moved && shape.xfrm !== undefined && node >= 0)
+					out.set(node, xfrmXml(xfrmTag(r, copy), shape.xfrm, shape.kind === "grpSp"))
+				if (values === undefined) continue
+
+				for (let at = copy + 1; at < document.count && document.start(at) < document.end(copy); at++) {
+					if (!r.is(at, G.P, "txBody")) continue
+
+					const markup = decodeUtf8(document.raw(at))
+					const scaled = rescaleMarkup(markup, values)
+
+					if (scaled === undefined) {
+						failure = refused(
+							"locked",
+							`Shape ${String(shape.id)} sits in mc:AlternateContent with text the scale cannot rewrite`
+						)
+
+						return
+					}
+
+					if (scaled !== markup) out.set(at, scaled)
+				}
 			}
 		})
 
-		return out
+		return failure ?? out
 	}
 
 	// A part that stays, edited in place: attribute edits for moves, an element replaced for anything else, the whole
@@ -1373,7 +1405,11 @@ class Splice {
 
 			if (isRefused(result)) return result
 
-			replaceChanged(editor, document, root, assemble(document, result, this.alternateXfrms(context, r, node.shapes)))
+			const alternates = this.alternateXfrms(context, r, node.shapes)
+
+			if (isRefused(alternates)) return alternates
+
+			replaceChanged(editor, document, root, assemble(document, result, alternates))
 			this.expect(name, node)
 
 			return undefined
@@ -1382,6 +1418,8 @@ class Splice {
 		if (slideDirt !== undefined) rootAttributes(editor, r, root, node, pristine.slide)
 
 		const overlay = this.alternateXfrms(context, r, node.shapes)
+
+		if (isRefused(overlay)) return overlay
 
 		for (const [at, markup] of overlay) editor.replace(at, markup)
 
@@ -1393,7 +1431,9 @@ class Splice {
 			const element = shape.src.node
 
 			if (shape.lock === "alternateContent") {
-				if (dirt.kind !== "xfrm" && !sameShapeExceptXfrm(shape, pristine.shapes.get(element)))
+				const before = pristine.shapes.get(element)
+
+				if (dirt.kind !== "xfrm" && !sameShapeExceptXfrm(shape, before) && !scaledOnly(shape, before))
 					return refused("locked", `Shape ${String(id)} sits in mc:AlternateContent`)
 
 				continue
@@ -1925,6 +1965,30 @@ function titleOf(node: SlideNode | undefined): string {
 		.map(paragraph => paragraph.runs.map(run => (run.kind === "br" ? " " : run.text)).join(""))
 		.join(" ")
 		.trim()
+}
+
+// What a slide size change did to a kept shape's text (and its members'): its stated values before → after; undefined
+// when they are as they were or the text changed otherwise.
+function keptScale(shape: ShapeNode, before: ShapeNode): ScaledValues | undefined {
+	const values = scaledValues(before, shape)
+
+	return values !== undefined && [...values.values()].some(pairs => [...pairs].some(([from, to]) => from !== to)) ? values : undefined
+}
+
+// A kept shape whose text (and members') a scale changed and nothing else but its box: the overlays write it.
+function scaledOnly(shape: ShapeNode, before: ShapeNode | undefined): boolean {
+	return (
+		before !== undefined &&
+		keptScale(shape, before) !== undefined &&
+		sameShapeExceptXfrm(
+			{
+				...shape,
+				...(before.text === undefined ? {} : { text: before.text }),
+				...(before.children === undefined ? {} : { children: before.children })
+			},
+			before
+		)
+	)
 }
 
 function sameShapeExceptXfrm(shape: ShapeNode, pristine: ShapeNode | undefined): boolean {

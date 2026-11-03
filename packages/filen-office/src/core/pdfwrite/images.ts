@@ -375,6 +375,32 @@ const MIME: Record<PdfImageFormat, string> = {
 	webp: "image/webp"
 }
 
+// WebCodecs' ImageDecoder, as the PNG decoders below use it.
+export interface PngFrameDecoder {
+	new (init: {
+		readonly type: string
+		readonly data: Uint8Array
+		readonly premultiplyAlpha?: "none"
+		readonly colorSpaceConversion?: "none"
+	}): {
+		decode(): Promise<{ readonly image: { readonly displayWidth?: number; readonly displayHeight?: number; close(): void } }>
+		close(): void
+	}
+}
+
+// Firefox decodes the Blob a worker's createImageBitmap is given on the page's main thread (hundreds of milliseconds
+// for a large PNG; its JPEGs and other engines' decodes stay off the page). There a PNG is decoded through
+// ImageDecoder instead, whose frame is drawn without decoding again; elsewhere undefined.
+export function geckoPngDecoder(scope: object): PngFrameDecoder | undefined {
+	const decoder: unknown = Reflect.get(scope, "ImageDecoder")
+	const navigator: unknown = Reflect.get(scope, "navigator")
+	const agent: unknown = typeof navigator === "object" && navigator !== null ? Reflect.get(navigator, "userAgent") : undefined
+
+	return typeof decoder === "function" && typeof agent === "string" && /\bFirefox\//u.test(agent)
+		? (decoder as PngFrameDecoder)
+		: undefined
+}
+
 // The platform decoder of browsers and workers: createImageBitmap without premultiplying or colour
 // conversion, read back through an OffscreenCanvas. Undefined where either is missing.
 export function platformImageDecoder(): PdfImageDecoder | undefined {
@@ -398,13 +424,16 @@ export function platformImageDecoder(): PdfImageDecoder | undefined {
 		createImageBitmap: (globals.createImageBitmap as DecoderGlobals["createImageBitmap"]).bind(globalThis)
 	}
 
+	const frames = geckoPngDecoder(globalThis)
+
 	return {
 		async decode(data, format, maxPixels) {
+			const frame = format === "png" && frames !== undefined ? await decodedFrame(frames, data) : undefined
 			const blob = data instanceof Uint8Array ? new platform.Blob([data], { type: MIME[format] }) : data
-			let bitmap: Awaited<ReturnType<DecoderGlobals["createImageBitmap"]>>
+			let bitmap: { readonly width: number; readonly height: number; close(): void }
 
 			try {
-				bitmap = await platform.createImageBitmap(blob, { premultiplyAlpha: "none", colorSpaceConversion: "none" })
+				bitmap = frame ?? (await platform.createImageBitmap(blob, { premultiplyAlpha: "none", colorSpaceConversion: "none" }))
 			} catch {
 				throw new PdfWriteError("imageUnsupported", `The platform cannot decode this ${format} image`)
 			}
@@ -431,6 +460,37 @@ export function platformImageDecoder(): PdfImageDecoder | undefined {
 				bitmap.close()
 			}
 		}
+	}
+}
+
+// A PNG's first frame through ImageDecoder, as a drawable of its size; undefined when it fails (the caller decodes
+// the Blob).
+async function decodedFrame(
+	Decoder: PngFrameDecoder,
+	data: PdfImageData
+): Promise<{ readonly width: number; readonly height: number; close(): void } | undefined> {
+	let decoder: InstanceType<PngFrameDecoder> | undefined
+
+	try {
+		const bytes = data instanceof Uint8Array ? data : new Uint8Array(await data.arrayBuffer())
+
+		decoder = new Decoder({ type: "image/png", data: bytes, premultiplyAlpha: "none", colorSpaceConversion: "none" })
+
+		const { image } = await decoder.decode()
+		const width = image.displayWidth ?? 0
+		const height = image.displayHeight ?? 0
+
+		if (!(width > 0 && height > 0)) {
+			image.close()
+
+			return undefined
+		}
+
+		return Object.assign(image, { width, height })
+	} catch {
+		return undefined
+	} finally {
+		decoder?.close()
 	}
 }
 

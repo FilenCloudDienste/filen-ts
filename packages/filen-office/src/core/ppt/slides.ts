@@ -3,7 +3,7 @@ import { readDrawing, type Drawing } from "./officeArt"
 import { tooLarge } from "../presentation/refusal"
 import { PresentationError } from "../presentation/model"
 import { malformed, RT, u16, u32, utf16Text, type PptRecord } from "./records"
-import { readMasterStyle, type MasterStyle } from "./text"
+import { pp9Records, readMasterStyle, readMasterStyle9, RT_TEXT_MASTER_STYLE9, type MasterStyle, type ParaProps } from "./text"
 
 // Slides, main masters, title masters and notes ([MS-PPT] §2.5): each persist object's atoms (SlideAtom §2.5.10,
 // NotesAtom §2.5.12), colour scheme (§2.5.14), text styles (a main master's TextMasterStyleAtoms), headers and
@@ -37,6 +37,8 @@ export interface PptSlide {
 	// SlideSchemeColorSchemeAtom: 8 RGB colours (background, text, shadow, title, fill, accent, hyperlink, followed).
 	readonly scheme: readonly number[] | undefined
 	readonly styles: ReadonlyMap<number, MasterStyle>
+	// A master's TextMasterStyle9Atoms (its "___PPT9" tag): per text type, each level's paragraph extension.
+	readonly styles9?: ReadonlyMap<number, readonly (ParaProps | undefined)[]>
 	readonly headersFooters: HeadersFooters | undefined
 	readonly show: SlideShowInfo | undefined
 	readonly name: string | undefined
@@ -123,6 +125,11 @@ export function readSlide(file: PptFile, persistId: number, kind: PptSlideKind):
 
 	const nameAtom = records.find(child => child.type === RT.cString && child.instance === 3)
 	const extension = pp10(file, records)
+	const styles9 = new Map<number, readonly (ParaProps | undefined)[]>()
+
+	if (actualKind === "mainMaster" || actualKind === "titleMaster")
+		for (const child of pp9Records(data, records, kid => kids(file, kid)))
+			if (child.type === RT_TEXT_MASTER_STYLE9) styles9.set(child.instance, readMasterStyle9(data, child))
 
 	return {
 		kind: actualKind,
@@ -138,6 +145,7 @@ export function readSlide(file: PptFile, persistId: number, kind: PptSlideKind):
 			records.find(child => child.type === RT.colorSchemeAtom && child.instance === 1)
 		),
 		styles,
+		...(styles9.size === 0 ? {} : { styles9 }),
 		headersFooters: readHeadersFootersOf(
 			file,
 			records.find(child => child.type === RT.headersFooters)

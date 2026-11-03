@@ -22,8 +22,8 @@ import {
 	declared,
 	cm,
 	effectChanges,
+	FILL_PROPERTIES,
 	fillChanges,
-	isRefused,
 	lineChanges,
 	setProperty,
 	styleChanges,
@@ -33,8 +33,10 @@ import { odfCustomAttributes, odfPresetAttributes, odfPresetGeometry, presetDepe
 import { parseLength } from "../../../odf/index"
 import { transformMatrix, xfrmOf } from "../../read/shapes"
 import { resourceFillChanges, resourceLineChanges } from "../resources"
-import { changedLengths } from "./box"
-import { odpScaledTextChanges } from "./design"
+import { LENGTHS, changedLengths, emuOf } from "./box"
+import { textScaleOf } from "../../../presentation/edit/apply/design"
+import { keptTextNames, odpKeptTextMarkup, odpScaledTextChanges, type KeptTextNames } from "./design"
+import { isRefused } from "../../../presentation/refusal"
 
 // A shape as ODF drawing markup (ODF 1.3 Part 3 §10.3 draw:frame, §10.6 draw:custom-shape, §10.4 shapes, §10.3.14
 // draw:g). A shape the source has is patched, never rewritten: its start tag keeps every attribute the edit did not
@@ -318,6 +320,12 @@ export interface AttributeChange {
 	readonly value: string | null
 }
 
+// The attributes a style's fill is written in, with the draw:transparency fillChanges takes out.
+const FILL_ATTRIBUTES: readonly string[] = [...FILL_PROPERTIES, "draw:transparency"]
+
+// A start tag: its name (group 1) and its attributes.
+const START_TAG = /^(<[^\s/>]+)(?:\s+[^\s=]+\s*=\s*(?:"[^"]*"|'[^']*'))*/u
+
 // Writes the shapes of one page (or of a notes page) as markup: patched source elements, copies by span, new ones.
 export class OdpShapeWriter {
 	readonly context: OdpEmitContext
@@ -331,6 +339,8 @@ export class OdpShapeWriter {
 	private readonly idPrefix: string
 	// The shapes the slide's timing animates (walked once a writer).
 	private targets: ReadonlySet<number> | undefined = undefined
+	// The scaled copies of kept shapes' text styles this writer made (odpKeptTextMarkup).
+	private readonly keptNames: KeptTextNames = keptTextNames()
 
 	constructor(
 		context: OdpEmitContext,
@@ -370,10 +380,46 @@ export class OdpShapeWriter {
 
 	// One shape's markup under the mapping `m` of its groups. `aspects` overrides what changed (a direct emit).
 	element(shape: ShapeNode, m: Affine, aspects?: Aspects, force = false): EmitPiece[] | Refused {
+		const pieces = this.shapeElement(shape, m, aspects, force)
+
+		if (
+			isRefused(pieces) ||
+			shape.lock === undefined ||
+			shape.synthetic === true ||
+			textScaleOf(this.context.deck) === 1 ||
+			!holdsText(shape)
+		)
+			return pieces
+
+		// A shape kept as written holds its text at the text scale the content took through scaled copies of its styles.
+		const fragment = this.fragment
+
+		return pieces.map(piece => {
+			const markup =
+				typeof piece === "string"
+					? piece
+					: piece instanceof Uint8Array
+						? decodeUtf8(piece)
+						: fragment === undefined
+							? undefined
+							: decodeUtf8(fragment.document.raw(piece.hole))
+
+			if (markup === undefined) return piece
+
+			const scaled = odpKeptTextMarkup(markup, this.context.deck, this.styles, this.keptNames)
+
+			return scaled === markup ? piece : scaled
+		})
+	}
+
+	private shapeElement(shape: ShapeNode, m: Affine, aspects?: Aspects, force = false): EmitPiece[] | Refused {
 		if (shape.synthetic === true) return []
 
 		const node = this.sourceNode(shape)
-		const own = aspects ?? this.aspectsOf(shape) ?? {}
+		const aspectsHeld = aspects ?? this.aspectsOf(shape) ?? {}
+		// A shape kept as written never has its text written from the model: a scaled change scales the model's copy
+		// and the kept markup follows through scaled copies of its styles (element).
+		const own = shape.lock !== undefined && shape.synthetic !== true ? { ...aspectsHeld, text: false } : aspectsHeld
 		const moved = !isIdentity(m)
 
 		if (node === undefined) {
@@ -419,7 +465,7 @@ export class OdpShapeWriter {
 
 				const markup = markupOf(this.styles.env.dispatch(family, request, this.context))
 
-				return isRefused(markup) ? markup : [markup]
+				return isRefused(markup) ? markup : [this.withTargetId(shape, markup)]
 			}
 		}
 
@@ -483,7 +529,7 @@ export class OdpShapeWriter {
 
 			if (isRefused(box)) return box
 
-			appendAll(changes, changedLengths(box, fragment.attributes(node)))
+			appendAll(changes, this.lengthSpellings(shape, changedLengths(box, fragment.attributes(node)), fragment.attributes(node)))
 		}
 
 		// The box the element holds: the shape's own placed by the groups it moved with (a mirrored group mirrors it).
@@ -495,7 +541,27 @@ export class OdpShapeWriter {
 			shape.kind === "pic" && aspects.xfrm === true && held !== undefined && held.flipH !== (before?.flipH ?? false)
 				? this.mirrorSpelling(shape, "style:mirror", this.ownMirror(node), pictureMirror(held), held.flipH)
 				: undefined
-		const style = this.styleChange(shape, node, aspects, mirror)
+		// A presentation object is a placeholder exactly while it is a prompt (LibreOffice writes the flag on one without
+		// text; read/shapes.ts draws none of its fill, line or shadow): text, or a drawing given to it, takes the flag off,
+		// and taking them back out puts it back.
+		let styleAspects = aspects
+
+		if (aspects.text === true || aspects.fill === true || aspects.ln === true || aspects.effects === true) {
+			const own = fragment.attributes(node)
+			const flagged = own.get("presentation:placeholder") === "true"
+			const prompt = isPrompt(shape)
+
+			if (flagged && !prompt) {
+				changes.push({ name: "presentation:placeholder", value: null })
+				// A drawing given to it: its style's others (none of which the prompt showed) written as the model has them.
+				// Text alone leaves its style's drawing to show, as LibreOffice draws a presentation object holding text.
+				if (aspects.fill === true || aspects.ln === true || aspects.effects === true)
+					styleAspects = { ...aspects, fill: true, ln: true, effects: true }
+			} else if (!flagged && own.has("presentation:class") && prompt)
+				changes.push({ name: "presentation:placeholder", value: "true" })
+		}
+
+		const style = this.styleChange(shape, node, styleAspects, mirror)
 
 		if (isRefused(style)) return style
 		if (style !== undefined) changes.push(style)
@@ -518,15 +584,6 @@ export class OdpShapeWriter {
 			if (isRefused(text)) return text
 
 			textMarkup = text
-
-			// A presentation object is a placeholder exactly while it holds no text (LibreOffice writes the flag on an empty
-			// one), so text taken back out of it makes it one again.
-			const own = fragment.attributes(node)
-			const flagged = own.get("presentation:placeholder") === "true"
-
-			if (flagged && hasText(shape)) changes.push({ name: "presentation:placeholder", value: null })
-			else if (!flagged && own.has("presentation:class") && !hasText(shape))
-				changes.push({ name: "presentation:placeholder", value: "true" })
 		}
 
 		if (aspects.alt === true) {
@@ -912,16 +969,17 @@ export class OdpShapeWriter {
 
 		if (mirror !== undefined) setProperty(changes, "graphic", "style:mirror", mirror)
 		const props = shape.props ?? {}
+		const frame = (this.fragment as Fragment).name(node) === "draw:frame"
 
 		for (const group of groups) {
 			const failed =
 				group === "fill"
-					? fillChanges(changes, props.fill)
+					? this.fillAgain(shape, node, aspects, changes)
 					: group === "ln"
 						? lineChanges(changes, props.ln, aspects.pristine?.props?.ln)
 						: group === "effects"
 							? effectChanges(changes, props.effects)
-							: bodyChanges(changes, props.bodyPr ?? {})
+							: bodyChanges(changes, props.bodyPr ?? {}, frame)
 
 			if (failed !== undefined) return failed
 		}
@@ -931,7 +989,7 @@ export class OdpShapeWriter {
 			const before = aspects.pristine?.text?.bodyPr
 
 			if (before === undefined || JSON.stringify(before) !== JSON.stringify(shape.text.bodyPr)) {
-				const failed = bodyChanges(changes, shape.text.bodyPr)
+				const failed = bodyChanges(changes, shape.text.bodyPr, frame)
 
 				if (failed !== undefined) return failed
 			}
@@ -960,6 +1018,61 @@ export class OdpShapeWriter {
 			return { name: "presentation:style-name", value: this.styles.derived("presentation", presentation, changes) }
 
 		return { name: "draw:style-name", value: this.styles.derived("graphic", graphic, changes) }
+	}
+
+	// A box's length changes, each written as the file first wrote it when it comes back to that length (its unit and
+	// spelling, "0in" or "-0in", kept for the session from the first save that changed it), so a box moved back is
+	// written as its source was.
+	private lengthSpellings(shape: ShapeNode, changes: AttributeChange[], attributes: ReadonlyMap<string, string>): AttributeChange[] {
+		const values = this.styles.env.mirrorValues
+
+		if (values === undefined) return changes
+
+		return changes.map(change => {
+			if (change.value === null || !LENGTHS.has(change.name)) return change
+
+			const key = `${String(this.slide.ref)}\u0000${String(shape.id)}\u0000${change.name}`
+
+			if (!values.has(key)) values.set(key, attributes.get(change.name))
+
+			const original = values.get(key)
+
+			return original !== undefined && emuOf(original) === emuOf(change.value) ? { name: change.name, value: original } : change
+		})
+	}
+
+	// A shape's fill. One back to the fill its source style held when a save first changed it (an undo across that save)
+	// is that style's own fill attributes again, kept for the session: the file's spelling, and a gradient, hatch or
+	// bitmap the style writer cannot make (each names a drawing resource) written at all. Any other fill is written new.
+	private fillAgain(shape: ShapeNode, node: number, aspects: Aspects, changes: StyleChanges): Refused | undefined {
+		const fill = shape.props?.fill
+		const values = this.styles.env.mirrorValues
+		const key = `${String(this.slide.ref)}\u0000${String(shape.id)}\u0000fill`
+
+		if (values !== undefined && !values.has(key) && aspects.pristine !== undefined) {
+			const attributes = (this.fragment as Fragment).attributes(node)
+			const presentation = attributes.get("presentation:style-name")
+			const name = presentation ?? attributes.get("draw:style-name")
+			const own = name === undefined ? undefined : this.styles.style(presentation === undefined ? "graphic" : "presentation", name)
+			const graphic = own?.properties.get("graphic")?.attributes
+
+			values.set(
+				key,
+				JSON.stringify({
+					fill: aspects.pristine.props?.fill ?? null,
+					attributes: FILL_ATTRIBUTES.map(each => [each, graphic?.get(each) ?? null])
+				})
+			)
+		}
+
+		const held = values?.get(key)
+		const kept = held === undefined ? undefined : (JSON.parse(held) as { fill: unknown; attributes: [string, string | null][] })
+
+		if (kept === undefined || JSON.stringify(kept.fill) !== JSON.stringify(fill ?? null)) return fillChanges(changes, fill)
+
+		for (const [name, value] of kept.attributes) setProperty(changes, "graphic", name, value)
+
+		return undefined
 	}
 
 	// The declarations in force where this writer's shapes land: its page's or notes element's (the notes of a page may
@@ -1152,7 +1265,7 @@ export class OdpShapeWriter {
 			)
 			const markup = markupOf(result)
 
-			return isRefused(markup) ? markup : [markup]
+			return isRefused(markup) ? markup : [this.withTargetId(shape, markup)]
 		}
 
 		const markup = this.newShape(shape, m)
@@ -1276,14 +1389,14 @@ export class OdpShapeWriter {
 		const isTextFrame = rectangle && (placeholder !== undefined || !fits)
 
 		if (isTextFrame && !box.flipH && !box.flipV) {
-			const style = placeholder === undefined ? this.newStyle(shape) : this.newPresentationStyle(shape, placeholder)
+			const style = placeholder === undefined ? this.newStyle(shape, true) : this.newPresentationStyle(shape, placeholder)
 
 			if (isRefused(style)) return style
 
 			const classes =
 				placeholder === undefined
 					? ""
-					: ` presentation:class="${placeholder}"${hasText(shape) ? "" : ' presentation:placeholder="true"'} presentation:user-transformed="true"`
+					: ` presentation:class="${placeholder}"${isPrompt(shape) ? ' presentation:placeholder="true"' : ""} presentation:user-transformed="true"`
 
 			return `<draw:frame${common}${style}${classes}${boxMarkup}><draw:text-box>${text}</draw:text-box>${listeners}${alt}</draw:frame>`
 		}
@@ -1335,27 +1448,45 @@ export class OdpShapeWriter {
 		return find(layout?.shapes) ?? find(master?.shapes)
 	}
 
+	// The id a new element the slide's timing animates is named by: the one the save gave it (OdpEmitContext.targetIds,
+	// unique in the document), else its target id (core/anim/odf.ts odpTargetId).
+	private targetIdOf(shape: ShapeNode): string | undefined {
+		this.targets ??= odpTargetIds(this.slide.timing)
+
+		if (!this.targets.has(shape.id)) return undefined
+
+		return this.context.targetIds?.get(shape.id) ?? odpTargetId(shape, this.fragment, this.idPrefix)
+	}
+
+	// A frame another family wrote whole (a picture, table, chart, medium): its start tag named by the id the slide's
+	// timing targets it by, unless the markup carries an id of its own.
+	private withTargetId(shape: ShapeNode, markup: string): string {
+		const target = this.targetIdOf(shape)
+		const tag = START_TAG.exec(markup)
+
+		if (target === undefined || tag === null || /\s(?:xml|draw):id\s*=/u.test(tag[0])) return markup
+
+		const at = (tag[1] ?? "").length
+
+		return `${markup.slice(0, at)} xml:id="${escapeAttribute(target)}" draw:id="${escapeAttribute(target)}"${markup.slice(at)}`
+	}
+
 	private commonAttributes(shape: ShapeNode): string | Refused {
 		let out = ""
 
 		if (shape.name !== "") out += ` draw:name="${escapeAttribute(shape.name)}"`
 
-		// A shape the slide's timing animates is named by its target id (core/anim/odf.ts odpTargetId).
-		this.targets ??= odpTargetIds(this.slide.timing)
+		const target = this.targetIdOf(shape)
 
-		if (this.targets.has(shape.id)) {
-			const id = escapeAttribute(odpTargetId(shape, undefined, this.idPrefix))
-
-			out += ` xml:id="${id}" draw:id="${id}"`
-		}
+		if (target !== undefined) out += ` xml:id="${escapeAttribute(target)}" draw:id="${escapeAttribute(target)}"`
 		if (shape.hidden) out += ' draw:display="none"'
 
 		return out
 	}
 
 	// A new shape's graphic style: its fill, line, shadow and text area.
-	private newStyle(shape: ShapeNode): string | Refused {
-		const changes = this.propsChanges(shape)
+	private newStyle(shape: ShapeNode, frame = false): string | Refused {
+		const changes = this.propsChanges(shape, frame)
 
 		if (isRefused(changes)) return changes
 		if (changes.attributes.size === 0 && changes.children.size === 0) return ""
@@ -1365,7 +1496,7 @@ export class OdpShapeWriter {
 
 	// A new placeholder's presentation style: its master's for its class, with what the shape says over it.
 	private newPresentationStyle(shape: ShapeNode, placeholder: string): string | Refused {
-		const changes = this.propsChanges(shape)
+		const changes = this.propsChanges(shape, true)
 
 		if (isRefused(changes)) return changes
 
@@ -1388,7 +1519,8 @@ export class OdpShapeWriter {
 		return master?.name
 	}
 
-	private propsChanges(shape: ShapeNode): StyleChanges | Refused {
+	// `frame`: the style is a text frame's (draw:frame), which writes its wrap as draw:auto-grow-width (bodyChanges).
+	private propsChanges(shape: ShapeNode, frame = false): StyleChanges | Refused {
 		const changes = styleChanges()
 		const props = shape.props
 
@@ -1426,7 +1558,7 @@ export class OdpShapeWriter {
 		const body = props?.bodyPr ?? shape.text?.bodyPr
 
 		if (body !== undefined) {
-			const failed = bodyChanges(changes, body)
+			const failed = bodyChanges(changes, body, frame)
 
 			if (failed !== undefined) return failed
 		}
@@ -1451,8 +1583,25 @@ export function isShapeElement(name: string): boolean {
 }
 
 // Whether a shape holds text (LibreOffice's presentation:placeholder="true" is a placeholder without any).
+function holdsText(shape: ShapeNode): boolean {
+	return shape.text !== undefined || (shape.children ?? []).some(holdsText)
+}
+
 function hasText(shape: ShapeNode): boolean {
 	return shape.text?.paragraphs.some(paragraph => paragraph.runs.some(run => run.kind !== "r" || run.text !== "")) ?? false
+}
+
+// Whether a presentation object is a prompt (presentation:placeholder="true"): no text, and no fill, line or shadow of
+// its own drawn (the reader reads a prompt's as none).
+function isPrompt(shape: ShapeNode): boolean {
+	const props = shape.props
+
+	return (
+		!hasText(shape) &&
+		(props?.fill === undefined || props.fill === "none") &&
+		(props?.ln === undefined || props.ln === "none") &&
+		(props?.effects === undefined || props.effects.effects.length === 0)
+	)
 }
 
 // Elements a mirrored box is written for by a mirroring draw:transform (§19.229 scale with a negative factor).
@@ -1565,7 +1714,14 @@ const JUMPS: Readonly<Record<string, string>> = {
 	previous: "previous-page",
 	first: "first-page",
 	last: "last-page",
-	end: "stop"
+	end: "stop",
+	lastViewed: "last-visited-page"
+}
+
+// Whether a click action has an ODF form (presentation:action, §19.442): a jump, a page, a link. A custom show and a
+// medium of the shape's own have none.
+export function odpWritesAction(action: Action): boolean {
+	return (action.kind === "internal" && JUMPS[action.jump] !== undefined) || action.kind === "slide" || action.kind === "url"
 }
 
 // A click action as presentation:event-listener (§10.4.3; the reader's mapping, inverted).

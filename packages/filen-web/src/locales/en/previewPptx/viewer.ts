@@ -37,6 +37,8 @@ export const previewPptxViewer = {
 	previewPptxRightsManaged: "This presentation is protected with rights management, so it can't be opened here.",
 	/** Presentation viewer — the deck is encrypted in a way the viewer can't read */
 	previewPptxUnsupportedEncryption: "This presentation is encrypted in a way that can't be opened here.",
+	/** Presentation viewer — the deck is a password-protected OpenDocument presentation, which the viewer can't open */
+	previewPptxEncrypted: "This presentation is password-protected. Password-protected OpenDocument presentations can't be opened here.",
 	/** Presentation viewer — the deck's encryption is damaged */
 	previewPptxDamagedEncryption: "This presentation's encryption is damaged, so it can't be opened.",
 	/** Presentation viewer — the deck uses a format or feature the viewer can't show yet */

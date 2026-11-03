@@ -4,7 +4,8 @@ import { refused, type Deck, type EdgeFractions, type FillProps, type Refused, t
 import type { ApplyContext, ApplyFamily, ApplyResult, Touch } from "../apply"
 import { cloneModel, findShape } from "../changes"
 import type { InsertedImage, OpOf, PictureAdjust, PictureOp } from "../ops"
-import { applyShape, isRefused } from "./shape"
+import { applyShape } from "./shape"
+import { isRefused } from "../../refusal"
 
 // The picture ops on the model, in place. A picture's image, crop and adjustments are its typed picture fill
 // (`props.fill`, model.ts): the fill is read from the source at the first edit (PictureReading) and written whole by

@@ -235,19 +235,6 @@ export function bookmarkXml(bookmark: MediaBookmark): string {
 	return `<p14:bmk name="${escapeAttribute(bookmark.name)}" time="${formatUniversalTime(bookmark.timeMs)}"/>`
 }
 
-// The children of p14:media in schema order (trim, fade, bmkLst; its extLst is the caller's).
-export function mediaTimingXml(timing: MediaTiming | undefined): string {
-	const normal = timing === undefined ? undefined : normalizedMediaTiming(timing)
-
-	if (normal === undefined) return ""
-
-	return (
-		(normal.trim === undefined ? "" : trimXml(normal.trim)) +
-		(normal.fade === undefined ? "" : fadeXml(normal.fade)) +
-		(normal.bookmarks === undefined ? "" : bookmarksXml(normal.bookmarks))
-	)
-}
-
 // A p:tgtEl's p14:bmkTgt (MS-PPTX §2.3.1.1): the medium's shape and the bookmark that starts the condition.
 export function readBookmarkTarget(r: PartReader, tgtEl: number): { readonly shape: number; readonly bookmark: string } | undefined {
 	if (tgtEl < 0) return undefined

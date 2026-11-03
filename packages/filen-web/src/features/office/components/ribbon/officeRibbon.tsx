@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react"
+import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { Popover as PopoverPrimitive } from "@base-ui/react/popover"
 import { Tabs } from "@base-ui/react/tabs"
@@ -95,6 +95,7 @@ function useRibbonPopup(): {
 	open: boolean
 	setOpen: (open: boolean) => void
 	onClick: (event: MouseEvent) => void
+	onKeyDownCapture: (event: ReactKeyboardEvent<HTMLElement>) => void
 	finalFocus: () => HTMLElement | boolean
 } {
 	const [open, setOpenState] = useState(false)
@@ -128,6 +129,28 @@ function useRibbonPopup(): {
 
 				setOpenState(false)
 			}
+		},
+		// One Escape on a command in the popup closes it (focus back on its trigger, finalFocus), ahead of the command's
+		// tooltip, which would take the key and keep the popup. A menu or list opened from a command (they render
+		// outside the popup) or an expanded control answers its own Escape.
+		onKeyDownCapture: event => {
+			const target = event.target
+
+			if (
+				event.key !== "Escape" ||
+				event.defaultPrevented ||
+				event.ctrlKey ||
+				event.metaKey ||
+				event.altKey ||
+				!(target instanceof Element) ||
+				!event.currentTarget.contains(target) ||
+				target.getAttribute("aria-expanded") === "true"
+			) {
+				return
+			}
+
+			event.preventDefault()
+			setOpenState(false)
 		},
 		finalFocus: () => {
 			if (!ranRef.current) {
@@ -188,6 +211,7 @@ function CollapsedGroup({ group }: { group: RibbonGroup }) {
 				className="w-auto max-w-[min(36rem,calc(100vw-2rem))] gap-1 rounded-2xl p-1.5"
 				finalFocus={popup.finalFocus}
 				onClick={popup.onClick}
+				onKeyDownCapture={popup.onKeyDownCapture}
 			>
 				<RibbonToolbar
 					label={group.label}
@@ -239,6 +263,7 @@ function Overflow({ groups }: { groups: readonly RibbonGroup[] }) {
 				className="max-h-[min(32rem,var(--available-height))] w-auto max-w-[min(36rem,calc(100vw-2rem))] gap-2 overflow-y-auto rounded-2xl p-2"
 				finalFocus={popup.finalFocus}
 				onClick={popup.onClick}
+				onKeyDownCapture={popup.onKeyDownCapture}
 			>
 				{groups.map(group => (
 					<section
@@ -292,7 +317,8 @@ export function CommandRow({
 	return (
 		<div
 			ref={setRow}
-			className={cn("flex h-10 min-w-0 items-center px-2", className)}
+			// A replacement (the find bar) may wrap on a phone: the row grows with it rather than clipping its second line.
+			className={cn("flex min-h-10 min-w-0 items-center px-2", replacement != null && "py-1", className)}
 		>
 			{replacement ?? (
 				<RibbonToolbar

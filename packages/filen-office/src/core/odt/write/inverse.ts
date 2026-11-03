@@ -5,8 +5,6 @@ import type { PropertyValue } from "./meaning"
 // ODF form returns undefined (the writer then refuses the block). `neutral` gives what turns a property off where a
 // style below would otherwise show through.
 
-export type OdfAttributes = Map<string, string>
-
 const UNDERLINES: Readonly<
 	Record<string, readonly [style: string, type?: string | undefined, width?: string | undefined, mode?: string | undefined]>
 > = {

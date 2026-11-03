@@ -26,6 +26,7 @@ import {
 	wholeAxis,
 	type SheetShortcut
 } from "@filen/office/react/sheet"
+import { onRibbonEscape } from "@/features/office/components/ribbon/ribbonFocus"
 import { paneAfter } from "@/features/spreadsheet/components/sheetPanes"
 import { useEditorLayerKeys } from "@/lib/keymap/editorLayerKeys"
 import "@filen/office/css/sheet.css"
@@ -550,6 +551,10 @@ export function SheetBody({
 		)
 	}
 
+	const focusCells = (): void => {
+		gridRef.current?.focus()
+	}
+
 	// The same keys pressed elsewhere in the view's layer (focus left on the preview overlay itself after a click, as
 	// Safari and macOS Firefox do): the workbook's shortcuts, and F6 into the panes. The cells' own stay theirs.
 	useEditorLayerKeys(containerRef, (event, root) => {
@@ -627,7 +632,14 @@ export function SheetBody({
 			data-preview-surface
 			className="flex size-full flex-col"
 			// F6 and Shift+F6 from anywhere in the view (the cells take theirs as shortcuts): the next or previous pane.
+			onKeyDownCapture={event => {
+				onRibbonEscape(event, event.currentTarget, focusCells, "capture")
+			}}
 			onKeyDown={event => {
+				if (onRibbonEscape(event, event.currentTarget, focusCells, "bubble")) {
+					return
+				}
+
 				if (event.key !== "F6" || event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey) {
 					return
 				}

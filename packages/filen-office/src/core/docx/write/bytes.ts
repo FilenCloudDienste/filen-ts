@@ -35,3 +35,8 @@ export function equalBytes(a: Uint8Array, aFrom: number, b: Uint8Array, bFrom: n
 
 	return true
 }
+
+// Whether two byte arrays hold the same bytes.
+export function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
+	return a === b || (a.length === b.length && equalBytes(a, 0, b, 0, a.length))
+}

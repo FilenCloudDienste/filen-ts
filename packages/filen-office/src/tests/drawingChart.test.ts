@@ -292,6 +292,115 @@ describe("line, area and scatter charts", () => {
 	})
 })
 
+describe("bubble charts", () => {
+	const bubble = (scale: string = "", sizes: readonly (number | null)[] = [10, 4, 8], extra: string = "") =>
+		`<c:bubbleChart><c:varyColors val="0"/><c:ser><c:idx val="0"/><c:order val="0"/><c:tx>${strings(["Y-Value 1"])}</c:tx><c:xVal>${numbers([0.7, 1.8, 2.6])}</c:xVal><c:yVal>${numbers([2.7, 3.2, 0.8])}</c:yVal><c:bubbleSize>${numbers(sizes)}</c:bubbleSize></c:ser>${scale}${extra}<c:axId val="5"/><c:axId val="6"/></c:bubbleChart><c:valAx><c:axId val="5"/><c:scaling/><c:axPos val="b"/><c:crossAx val="6"/></c:valAx><c:valAx><c:axId val="6"/><c:scaling/><c:axPos val="l"/><c:crossAx val="5"/></c:valAx>`
+	// The circles' diameters, px, largest first.
+	const diameters = (list: DrawingList): number[] => {
+		const out: number[] = []
+
+		for (const item of filledWith(list, rgba("4472C4"))) {
+			const first = list.itemInt(item, ItemInt.FIRST_COORD)
+			let end = list.coordCount
+			let min = Infinity
+			let max = -Infinity
+
+			// The item's coordinates run to the next item's first (a circle's control points stay within its box).
+			for (let other = 0; other < list.itemCount; other++) {
+				const start = list.itemInt(other, ItemInt.FIRST_COORD)
+
+				if (start > first && start < end) end = start
+			}
+
+			for (let k = first; k + 1 < end; k += 2) {
+				min = Math.min(min, list.coords[k] ?? Infinity)
+				max = Math.max(max, list.coords[k] ?? -Infinity)
+			}
+
+			out.push(max - min)
+		}
+
+		return out.sort((a, b) => b - a)
+	}
+
+	it("draws a circle per point, its area proportional to the bubble size, the largest a quarter of the plot's shorter side", () => {
+		const result = convert(bubble())
+
+		expect(result).toMatchObject({ supported: true, plots: ["bubbleChart"], unsupported: [] })
+
+		const [large = 0, middle = 0, small = 0] = diameters(result.list)
+
+		expect(diameters(result.list)).toHaveLength(3)
+		expect(middle / large).toBeCloseTo(Math.sqrt(8 / 10), 2)
+		expect(small / large).toBeCloseTo(Math.sqrt(4 / 10), 2)
+		expect(large).toBeGreaterThan(40)
+		expect(large).toBeLessThan(100)
+	})
+
+	it("scales bubbles by c:bubbleScale and by width when c:sizeRepresents says so", () => {
+		const [full = 0] = diameters(convert(bubble()).list)
+		const [scaled = 0] = diameters(convert(bubble('<c:bubbleScale val="50"/>')).list)
+		const widths = diameters(convert(bubble("", [10, 4, 8], '<c:sizeRepresents val="w"/>')).list)
+
+		expect(scaled / full).toBeCloseTo(0.5, 2)
+		expect((widths[2] ?? 0) / (widths[0] ?? 1)).toBeCloseTo(0.4, 2)
+	})
+
+	it("leaves out bubbles of no size or a negative one unless c:showNegBubbles", () => {
+		const hidden = convert(bubble("", [10, 0, -8])).list
+		const shown = convert(bubble("", [10, 0, -8], '<c:showNegBubbles val="1"/>')).list
+
+		expect(diameters(hidden)).toHaveLength(1)
+		// The negative bubble is drawn hollow.
+		expect(diameters(shown)).toHaveLength(1)
+		expect(items(shown, ItemKind.PATH).length).toBe(items(hidden, ItemKind.PATH).length + 1)
+	})
+})
+
+describe("surface charts", () => {
+	const SURFACE_AXES =
+		'<c:catAx><c:axId val="1"/><c:scaling/><c:delete val="0"/><c:axPos val="b"/><c:crossAx val="2"/></c:catAx><c:valAx><c:axId val="2"/><c:scaling><c:min val="0"/><c:max val="30"/></c:scaling><c:delete val="0"/><c:axPos val="l"/><c:majorUnit val="10"/><c:crossAx val="1"/></c:valAx><c:serAx><c:axId val="3"/><c:scaling/><c:delete val="0"/><c:axPos val="b"/><c:crossAx val="2"/></c:serAx>'
+	const surface = (element: string = "surfaceChart", extra: string = "") =>
+		`<c:${element}>${extra}${series(0, "Front", [0, 10, 20], CATS)}${series(1, "Back", [10, 20, 30], CATS)}<c:axId val="1"/><c:axId val="2"/><c:axId val="3"/></c:${element}>${SURFACE_AXES}`
+	const legend = '<c:legend><c:legendPos val="r"/></c:legend>'
+
+	it("fills each value band of the grid with its colour, names the bands in the legend and the series up the side", () => {
+		const result = convert(surface(), legend)
+		const list = result.list
+
+		expect(result).toMatchObject({ supported: true, plots: ["surfaceChart"], unsupported: [] })
+		// Three bands of 10 from the axis's ticks, each one path in the series colours.
+		expect(filledWith(list, rgba("4472C4"))).toHaveLength(2)
+		expect(filledWith(list, rgba("ED7D31"))).toHaveLength(2)
+		expect(filledWith(list, rgba("A5A5A5"))).toHaveLength(2)
+		expect(texts(list)).toEqual(expect.arrayContaining(["0-10", "10-20", "20-30", "Front", "Back", "A", "C"]))
+		// The value axis is the bands: its tick labels are not drawn.
+		expect(texts(list)).not.toContain("30")
+	})
+
+	it("draws a wireframe's band edges as lines instead", () => {
+		const list = convert(surface("surfaceChart", '<c:wireframe val="1"/>')).list
+
+		expect(filledWith(list, rgba("ED7D31"))).toHaveLength(0)
+
+		const stroked = items(list, ItemKind.PATH).filter(item => {
+			const stroke = list.strokes[list.itemInt(item, ItemInt.STROKE)]
+			const paint = stroke === undefined ? undefined : list.paints[stroke.paint]
+
+			return paint?.kind === "solid" && paint.color === rgba("ED7D31")
+		})
+
+		expect(stroked).toHaveLength(1)
+	})
+
+	it("draws a 3D surface from above and reports it as approximated", () => {
+		const result = convert(surface("surface3DChart"))
+
+		expect(result).toMatchObject({ supported: true, unsupported: ["surface3DChart"] })
+		expect(filledWith(result.list, rgba("ED7D31"))).toHaveLength(1)
+	})
+})
+
 describe("pie, doughnut and radar charts", () => {
 	it("draws one slice per point with varied colours and percent labels", () => {
 		const plotArea = `<c:pieChart><c:varyColors val="1"/>${series(0, "Share", [1, 1, 2], CATS)}<c:dLbls><c:showPercent val="1"/></c:dLbls><c:firstSliceAng val="0"/></c:pieChart>`
@@ -350,9 +459,9 @@ describe("unsupported and hostile charts", () => {
 	})
 
 	it("reports charts with nothing drawable", () => {
-		expect(convert(`<c:surfaceChart>${series(0, "s", [1], ["a"])}</c:surfaceChart>`)).toMatchObject({
+		expect(convert(`<c:unknownChart>${series(0, "s", [1], ["a"])}</c:unknownChart>`)).toMatchObject({
 			supported: false,
-			unsupported: ["surfaceChart"]
+			unsupported: ["empty"]
 		})
 
 		const missing = convertChart(
@@ -368,7 +477,7 @@ describe("unsupported and hostile charts", () => {
 	it("draws the supported plots of a combination chart", () => {
 		const plotArea = `<c:barChart><c:barDir val="col"/><c:grouping val="clustered"/>${series(0, "One", [1, 2, 3], CATS)}<c:axId val="1"/><c:axId val="2"/></c:barChart><c:surfaceChart>${series(1, "Two", [1, 2, 3], CATS)}<c:axId val="1"/><c:axId val="2"/></c:surfaceChart>${AXES}`
 
-		expect(convert(plotArea)).toMatchObject({ supported: true, plots: ["barChart", "surfaceChart"], unsupported: ["surfaceChart"] })
+		expect(convert(plotArea)).toMatchObject({ supported: true, plots: ["barChart", "surfaceChart"], unsupported: [] })
 	})
 
 	it("caps point counts and survives junk values", () => {

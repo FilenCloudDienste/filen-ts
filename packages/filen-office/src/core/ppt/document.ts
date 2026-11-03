@@ -1,10 +1,9 @@
 import { CfbError, CfbFile, isCompoundFile } from "../cfb/index"
 import type { DocBlockKey } from "../doc/decrypt"
-import { readProperties, records as artRecords, type ArtProperty } from "../doc/toDocx/officeArt"
+import { records as artRecords } from "../doc/toDocx/officeArt"
 import type { ByteSource } from "../opc/index"
 import { DEFAULT_PRESENTATION_BUDGETS, type PresentationBudgets } from "../presentation/budget"
 import { PresentationError } from "../presentation/model"
-import { tooLarge } from "../presentation/refusal"
 import { decryptPersistObjects, pptKey, type PptDecryption } from "./decrypt"
 import { ENCRYPTED_TOKEN, isEncryptedEdit, readCurrentUser, readPersistDirectory, type PersistDirectory } from "./persist"
 import {
@@ -21,7 +20,20 @@ import {
 	type PptBudgets,
 	type PptRecord
 } from "./records"
-import { readMasterStyle, readRuler, readTextBlocks, type MasterStyle, type Ruler, type TextBlock } from "./text"
+import {
+	pp9Records,
+	readMasterStyle,
+	readRuler,
+	readStyleTextProp9,
+	readTextBlocks,
+	RT_OUTLINE_TEXT_PROPS9,
+	RT_OUTLINE_TEXT_PROPS_HEADER,
+	RT_STYLE_TEXT_PROP9,
+	type MasterStyle,
+	type ParaProps,
+	type Ruler,
+	type TextBlock
+} from "./text"
 
 // A PowerPoint 97–2003 file (.ppt, .pps, .pot; [MS-PPT] §2.1): the compound file's streams, the persist object
 // directory, decryption with the open password, and the DocumentContainer (§2.4.1): slide size, fonts, the document's
@@ -72,6 +84,9 @@ function encryptedAtOpen(user: { readonly headerToken: number }, directory: Pers
 
 // Opens the compound file and its PowerPoint Document stream: needsPassword without a password for an encrypted
 // file, wrongPassword for a wrong one, unsupported for a compound file that is not a presentation.
+const DATA_SPACES = "\u0006DataSpaces"
+const DRM_CONTENT = "\u0009DRMContent"
+
 export async function openPptFile(source: ByteSource, options: PptOpenOptions = {}): Promise<PptFile> {
 	const budgets = options.budgets ?? DEFAULT_PPT_BUDGETS
 	const deckBudgets = options.deckBudgets ?? DEFAULT_PRESENTATION_BUDGETS
@@ -79,6 +94,12 @@ export async function openPptFile(source: ByteSource, options: PptOpenOptions = 
 	if (source.size < 8 || !isCompoundFile(await source.read(0, 8))) throw new PresentationError("malformed", "Not a compound file")
 
 	const cfb = await readCfb(() => CfbFile.open(source))
+
+	// Office 2003 IRM ([MS-OFFCRYPTO] §2.2.11): the presentation is \x09DRMContent behind the DRM transform the
+	// \x06DataSpaces storage maps it to; a "PowerPoint Document" beside it is the stub shown to readers without IRM.
+	if (cfb.entry([DATA_SPACES]) !== undefined || cfb.entry([DRM_CONTENT]) !== undefined)
+		throw new PresentationError("rightsManaged", "A rights-managed (IRM) presentation")
+
 	const documentEntry = cfb.entry(["PowerPoint Document"])
 	const userEntry = cfb.entry(["Current User"])
 
@@ -205,8 +226,6 @@ export interface PptDocument {
 	readonly slideHF: HeadersFooters | undefined
 	readonly notesHF: HeadersFooters | undefined
 	readonly blips: readonly BlipStoreEntry[]
-	// The drawing group's default shape properties (OfficeArtDggContainer drawingPrimaryOptions and the others).
-	readonly defaults: ReadonlyMap<number, ArtProperty>
 	readonly macros: boolean
 }
 
@@ -236,7 +255,7 @@ function readFonts(file: PptFile, collection: PptRecord | undefined): FontEntry[
 
 // §2.4.14.3: SlidePersistAtom (or MasterPersistAtom, NotesPersistAtom: the same first 20 bytes' layout for the ids
 // the reader uses) and the text bodies after it.
-function readList(file: PptFile, list: PptRecord | undefined): ListEntry[] {
+function readList(file: PptFile, list: PptRecord | undefined, outline9: Outline9): ListEntry[] {
 	if (list === undefined) return []
 
 	const out: { persistId: number; id: number; records: PptRecord[] }[] = []
@@ -251,11 +270,54 @@ function readList(file: PptFile, list: PptRecord | undefined): ListEntry[] {
 		}
 	}
 
-	return out.map(entry => ({
-		persistId: entry.persistId,
-		id: entry.id,
-		texts: readTextBlocks(file.stream, entry.records, file.budgets, record => kids(file, record), file.deckBudgets.runsPerBody)
-	}))
+	return out.map(entry => {
+		const texts = readTextBlocks(file.stream, entry.records, file.budgets, record => kids(file, record), file.deckBudgets.runsPerBody)
+		const ext9 = outline9.get(entry.id)
+
+		return {
+			persistId: entry.persistId,
+			id: entry.id,
+			texts:
+				ext9 === undefined
+					? texts
+					: texts.map((text, index): TextBlock => {
+							const own = ext9.get(index)
+
+							return own === undefined ? text : { ...text, ext9: own }
+						})
+		}
+	})
+}
+
+// Slide id → the index of a body in its slide list → that body's paragraph extensions.
+type Outline9 = ReadonlyMap<number, ReadonlyMap<number, readonly ParaProps[]>>
+
+// The OutlineTextProps9Container of the DocInfoList's "___PPT9" tag: each OutlineTextPropsHeaderExAtom (the slide id
+// and, as its recInstance, the body's index) followed by the body's StyleTextProp9Atom, as LibreOffice pairs them.
+function readOutline9(file: PptFile, docInfo: PptRecord | undefined): Outline9 {
+	const out = new Map<number, Map<number, readonly ParaProps[]>>()
+
+	if (docInfo === undefined) return out
+
+	for (const container of pp9Records(file.stream, kids(file, docInfo), record => kids(file, record))) {
+		if (container.type !== RT_OUTLINE_TEXT_PROPS9) continue
+
+		let header: { readonly slideId: number; readonly index: number } | undefined
+
+		for (const child of kids(file, container)) {
+			if (child.type === RT_OUTLINE_TEXT_PROPS_HEADER && child.end - child.start >= 4) {
+				header = { slideId: u32(file.stream, child.start), index: child.instance }
+			} else if (child.type === RT_STYLE_TEXT_PROP9 && header !== undefined) {
+				const bodies = out.get(header.slideId) ?? new Map<number, readonly ParaProps[]>()
+
+				bodies.set(header.index, readStyleTextProp9(file.stream, child))
+				out.set(header.slideId, bodies)
+				header = undefined
+			}
+		}
+	}
+
+	return out
 }
 
 function readHeadersFooters(file: PptFile, container: PptRecord | undefined): HeadersFooters | undefined {
@@ -365,29 +427,26 @@ function readExObjects(file: PptFile, list: PptRecord | undefined): Pick<PptDocu
 	return { hyperlinks, oleObjects, media }
 }
 
-// MS-ODRAW §2.2.12 OfficeArtDggContainer: the BLIP store and the default properties.
-function readDrawingGroup(file: PptFile, group: PptRecord | undefined): Pick<PptDocument, "blips" | "defaults"> {
+// MS-ODRAW §2.2.12 OfficeArtDggContainer: the BLIP store. Its default properties (drawingPrimaryOptions and the
+// others) are not read: taken as every shape's base they contradict the corpus's decks as their authors left them
+// (table cells' text unwrapped and cut off, boxes and placeholders filled in a scheme colour) and LibreOffice 7.5's
+// renders of them; PowerPoint applies them to a shape it inserts, which then writes what it needs.
+function readDrawingGroup(file: PptFile, group: PptRecord | undefined): Pick<PptDocument, "blips"> {
 	const blips: BlipStoreEntry[] = []
-	const defaults = new Map<number, ArtProperty>()
 	const data = file.stream
 
-	if (group === undefined) return { blips, defaults }
+	if (group === undefined) return { blips }
 
 	const dgg = artRecords(data, group.start, group.end).find(record => record.type === 0xf000)
 
-	if (dgg === undefined) return { blips, defaults }
+	if (dgg === undefined) return { blips }
 
 	const inner = artRecords(data, dgg.start, dgg.end)
 
 	file.counter.add(inner.length)
 
 	for (const record of inner) {
-		if (record.type === 0xf00b || record.type === 0xf121 || record.type === 0xf122) {
-			if (record.end - record.start > file.budgets.shapePropertyBytes)
-				tooLarge("OfficeArt property bytes", file.budgets.shapePropertyBytes)
-
-			readProperties(data, record, defaults)
-		} else if (record.type === 0xf001) {
+		if (record.type === 0xf001) {
 			const store = artRecords(data, record.start, record.end)
 
 			file.counter.add(store.length)
@@ -429,7 +488,7 @@ function readDrawingGroup(file: PptFile, group: PptRecord | undefined): Pick<Ppt
 		}
 	}
 
-	return { blips, defaults }
+	return { blips }
 }
 
 function readNamedShows(file: PptFile, container: PptRecord | undefined): PptDocument["namedShows"] {
@@ -489,6 +548,8 @@ export function readDocument(file: PptFile): PptDocument {
 			return atom !== undefined && atom.end - atom.start >= 8 && u32(data, atom.start) !== 0 && (u32(data, atom.start + 4) & 1) === 1
 		})
 
+	const outline9 = readOutline9(file, docInfo)
+
 	return {
 		file,
 		slideSize: { x: u32(data, atom.start), y: u32(data, atom.start + 4) },
@@ -504,9 +565,9 @@ export function readDocument(file: PptFile): PptDocument {
 		styles,
 		defaultRuler,
 		// §2.4.14: recInstance 0 the slides, 1 the masters, 2 the notes.
-		masters: readList(file, listOf(1)),
-		slides: readList(file, listOf(0)),
-		notes: readList(file, listOf(2)),
+		masters: readList(file, listOf(1), outline9),
+		slides: readList(file, listOf(0), outline9),
+		notes: readList(file, listOf(2), outline9),
 		...readExObjects(file, find(records, RT.externalObjectList)),
 		namedShows: readNamedShows(file, find(records, RT.namedShows)),
 		slideHF: readHeadersFooters(

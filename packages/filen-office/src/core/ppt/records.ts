@@ -94,9 +94,6 @@ export const DEFAULT_PPT_BUDGETS: PptBudgets = {
 	shapePropertyBytes: 16 * 1024 * 1024
 }
 
-// Container nesting the reader follows at most (OfficeArt groups have their own bound).
-export const MAX_RECORD_DEPTH = 64
-
 export interface PptRecord {
 	readonly type: number
 	readonly instance: number

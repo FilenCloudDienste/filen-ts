@@ -1,4 +1,5 @@
 import type { Canvas2DLike, CanvasSurface } from "../../core/drawingml/canvas"
+import { geckoPngDecoder, type PngFrameDecoder } from "../../core/pdfwrite/images"
 import { imageDimensions, imageWithinBudget, MEDIA_LIMITS } from "../../core/opc/mediaPolicy"
 import { offscreenMeasurer } from "../canvasMeasurer"
 import type { DocxEngineServices } from "../docx/engine"
@@ -73,6 +74,8 @@ interface OffscreenScope {
 	readonly createImageBitmap: (blob: unknown, options?: Record<string, unknown>) => Promise<RasterImage>
 	readonly Blob: new (parts: readonly Uint8Array[], options: { type: string }) => unknown
 	readonly fonts?: { check?(font: string): boolean; load?(font: string): Promise<unknown> }
+	// WebCodecs' ImageDecoder, where PNGs go through it (geckoPngDecoder).
+	readonly pngDecoder?: PngFrameDecoder
 }
 
 function offscreenScope(scope: unknown): OffscreenScope | undefined {
@@ -82,6 +85,7 @@ function offscreenScope(scope: unknown): OffscreenScope | undefined {
 	const create: unknown = Reflect.get(scope, "createImageBitmap")
 	const Blob: unknown = Reflect.get(scope, "Blob")
 	const fonts: unknown = Reflect.get(scope, "fonts")
+	const decoder = geckoPngDecoder(scope)
 
 	if (typeof OffscreenCanvas !== "function" || typeof create !== "function" || typeof Blob !== "function") return undefined
 
@@ -91,7 +95,34 @@ function offscreenScope(scope: unknown): OffscreenScope | undefined {
 		createImageBitmap: (blob, options) =>
 			Reflect.apply(create, scope, options === undefined ? [blob] : [blob, options]) as Promise<RasterImage>,
 		Blob: Blob as OffscreenScope["Blob"],
-		...(typeof fonts === "object" && fonts !== null ? { fonts: fonts as NonNullable<OffscreenScope["fonts"]> } : {})
+		...(typeof fonts === "object" && fonts !== null ? { fonts: fonts as NonNullable<OffscreenScope["fonts"]> } : {}),
+		...(decoder === undefined ? {} : { pngDecoder: decoder })
+	}
+}
+
+// A PNG through the platform's PNG decoder (Firefox), its frame closed once the bitmap is made; undefined without
+// one or when it fails (the caller decodes the Blob).
+async function decodedPng(platform: OffscreenScope, bytes: Uint8Array, options: Record<string, unknown>): Promise<RasterImage | undefined> {
+	const Decoder = platform.pngDecoder
+
+	if (Decoder === undefined) return undefined
+
+	let decoder: InstanceType<PngFrameDecoder> | undefined
+
+	try {
+		decoder = new Decoder({ type: "image/png", data: bytes })
+
+		const { image } = await decoder.decode()
+
+		try {
+			return await platform.createImageBitmap(image, options)
+		} finally {
+			image.close()
+		}
+	} catch {
+		return undefined
+	} finally {
+		decoder?.close()
 	}
 }
 
@@ -128,10 +159,10 @@ export function offscreenCanvas(scope: unknown): RealmCanvas | undefined {
 			// One side given: the other follows the picture's proportions, also when its orientation (EXIF) turns it.
 			const options: Record<string, unknown> =
 				size !== undefined && scale < 1 ? { resizeWidth: Math.max(1, Math.round(size.width * scale)), resizeQuality: "medium" } : {}
-			let bitmap: RasterImage
+			let bitmap: RasterImage | undefined = type === "image/png" ? await decodedPng(platform, bytes, options) : undefined
 
 			try {
-				bitmap = await platform.createImageBitmap(new platform.Blob([bytes], { type }), options)
+				bitmap ??= await platform.createImageBitmap(new platform.Blob([bytes], { type }), options)
 			} catch {
 				return undefined
 			}

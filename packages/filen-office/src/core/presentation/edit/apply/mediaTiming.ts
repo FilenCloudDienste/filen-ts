@@ -14,7 +14,8 @@ import { refused, type Deck, type MediaRef, type Refused, type ShapeNode, type S
 import type { ApplyContext, ApplyFamily, ApplyResult, Inverse, Touch } from "../apply"
 import { cloneModel, digestOf, findShape } from "../changes"
 import type { DeckOp, MediaTimingOp, OpOf } from "../ops"
-import { isRefused, type SourceReading } from "./shape"
+import { type SourceReading } from "./shape"
+import { isRefused } from "../../refusal"
 
 // The media timing ops on the model, in place: a medium's trim, fade and bookmarks (MS-PPTX p14:media, written by
 // core/pptx/write/emit/mediaTiming.ts). Each op replaces one group of the shape's MediaRef.timing. Its inverse is the

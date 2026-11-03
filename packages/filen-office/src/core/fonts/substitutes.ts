@@ -127,6 +127,42 @@ const PANOSE_MONOSPACED = 9
 const PANOSE_FIRST_SANS = 11
 const PANOSE_LAST_SANS = 15
 
+// Common sans families with no substitute of their own, by the start of their lower-cased name: without the font
+// table's hints (a DrawingML theme font often has none), these are drawn in the bundled sans, not the serif.
+const SANS_NAMES: readonly string[] = [
+	"arial",
+	"avenir",
+	"bahnschrift",
+	"berlin sans",
+	"calibri",
+	"candara",
+	"century gothic",
+	"corbel",
+	"dejavu sans",
+	"eras",
+	"franklin gothic",
+	"frutiger",
+	"futura",
+	"gill sans",
+	"helvetica",
+	"lato",
+	"lucida grande",
+	"lucida sans",
+	"montserrat",
+	"myriad",
+	"open sans",
+	"optima",
+	"roboto",
+	"segoe",
+	"source sans",
+	"tahoma",
+	"trebuchet",
+	"tw cen",
+	"ubuntu",
+	"univers",
+	"verdana"
+]
+
 // The bundled family to stand in for a font we have no substitute for, from the font table's hints. Text
 // in the East Asian or complex-script slots goes to the platform: the bundled families are Latin fonts.
 export function fallbackFor(name: string, hints: FontHints, latinSlot: boolean): Fallback {
@@ -149,7 +185,7 @@ export function fallbackFor(name: string, hints: FontHints, latinSlot: boolean):
 	else if (panose !== undefined && panose[0] === PANOSE_LATIN_TEXT && (panose[1] ?? 0) >= 2) {
 		serif = (panose[1] ?? 0) < PANOSE_FIRST_SANS || (panose[1] ?? 0) > PANOSE_LAST_SANS
 	} else {
-		serif = !lower.includes("sans")
+		serif = !lower.includes("sans") && !SANS_NAMES.some(prefix => lower.startsWith(prefix))
 	}
 
 	const generic: GenericFamily = serif ? "serif" : "sans-serif"

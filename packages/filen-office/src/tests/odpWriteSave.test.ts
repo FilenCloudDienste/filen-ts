@@ -11,10 +11,16 @@ describe("ODP save gate 2", () => {
 		const slide = touched(slideAt(opened, 0))
 		const box = shapeNamed(slide, "Box")
 
-		// End-of-paragraph properties no run carries: a paragraph style cannot give them without giving them to the run.
+		// A link on an empty paragraph's mark: ODF links text (text:a), never a paragraph's end.
 		box.text = {
 			bodyPr: box.text?.bodyPr ?? {},
-			paragraphs: [{ pPr: {}, runs: [{ kind: "r", text: "Plain", rPr: {} }], endRPr: { sz: 2000 } }]
+			paragraphs: [
+				{
+					pPr: {},
+					runs: [],
+					endRPr: { hlinkClick: { kind: "url", href: "https://example.org/" } }
+				}
+			]
 		}
 
 		let closed = false

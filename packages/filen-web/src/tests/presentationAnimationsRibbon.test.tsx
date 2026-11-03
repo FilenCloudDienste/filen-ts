@@ -16,6 +16,7 @@ import {
 	subtypeLabel
 } from "@/features/presentation/components/ribbon/animations"
 import type { PresentationRibbonContext, PresentationRibbonEditor } from "@/features/presentation/components/ribbon/tabs"
+import { transitionsGroups } from "@/features/presentation/components/ribbon/transitions"
 import "@/lib/i18n"
 
 // The Animations tab and the Animation Pane against a fake editor: a gallery pick is one timing op on the selected
@@ -341,6 +342,71 @@ describe("presentation Animations tab", () => {
 		fireEvent.change(delay, { target: { value: "1.5" } })
 		fireEvent.keyDown(delay, { key: "Enter" })
 		expect(ops).toEqual([{ family: "timing", kind: "setEffectTiming", slide: ref, node: 20, timing: { delayMs: 1500 } }])
+	})
+})
+
+describe("a ribbon seconds field's Escape", () => {
+	it("cancels what was typed without sending it (the effect's Delay), the key taken so focus stays", async () => {
+		mount(true, [])
+		act(() => {
+			animationPane.setOpen(true)
+		})
+		fireEvent.click(at(await screen.findAllByRole("option"), 1))
+
+		const delay = within(commands()).getByLabelText<HTMLInputElement>("Delay")
+		const shown = delay.value
+
+		fireEvent.change(delay, { target: { value: "9" } })
+		expect(fireEvent.keyDown(delay, { key: "Escape" })).toBe(false)
+		expect(delay.value).toBe(shown)
+		fireEvent.blur(delay)
+		expect(ops).toEqual([])
+		// Nothing typed: the Escape is not the field's.
+		expect(fireEvent.keyDown(delay, { key: "Escape" })).toBe(true)
+	})
+
+	it("cancels what was typed without sending it (the transition's Duration)", async () => {
+		const selection = createShapeSelection()
+
+		selection.show(ref)
+		ops = []
+
+		const editor: PresentationRibbonEditor = {
+			info: INFO,
+			render: renderOf(false),
+			selection,
+			session: {
+				timegraph: () => Promise.resolve({ source: { transition: { kind: "fade", durationMs: 700, advance: { onClick: true } } } })
+			} as unknown as PresentationSessionApi,
+			command: (op: DeckOp): Promise<CommandResult> => {
+				ops.push(op)
+
+				return Promise.resolve({ ok: true, revision: ops.length, dirty: true })
+			}
+		}
+
+		render(
+			<OfficeRibbon
+				label="Ribbon"
+				commandsLabel="Commands"
+				tabs={[{ id: "transitions", label: "Transitions" }]}
+				tab="transitions"
+				onTab={() => undefined}
+				file={null}
+				groups={transitionsGroups({ editable: true, phone: false, selection: new Set(), t: i18n.t.bind(i18n), editor })}
+			/>
+		)
+
+		const duration = within(commands()).getByLabelText<HTMLInputElement>("Duration (s)")
+
+		await waitFor(() => {
+			expect(duration.value).toBe("0.7")
+		})
+		fireEvent.change(duration, { target: { value: "9" } })
+		expect(fireEvent.keyDown(duration, { key: "Escape" })).toBe(false)
+		expect(duration.value).toBe("0.7")
+		fireEvent.blur(duration)
+		expect(ops).toEqual([])
 	})
 })
 

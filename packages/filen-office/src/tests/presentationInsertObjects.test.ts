@@ -70,7 +70,7 @@ describe("inserting objects", () => {
 		expect(xml).toContain('<p:cNvSpPr txBox="1"/>')
 		expect(xml).toContain("<a:spAutoFit/>")
 		expect(xml).toContain(`<a:tableStyleId>${DEFAULT_TABLE_STYLE}</a:tableStyleId>`)
-		expect(xml).toContain('<a:fillRef idx="1"><a:schemeClr val="accent1"></a:schemeClr></a:fillRef>')
+		expect(xml).toContain('<a:fillRef idx="1"><a:schemeClr val="accent1"/></a:fillRef>')
 
 		const reopened = await openDeck(saved)
 		const shapes = slideNode(reopened, 0).shapes

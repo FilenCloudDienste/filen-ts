@@ -31,6 +31,7 @@ import type { OdpEmitContext, OdpStylesApi } from "./emit"
 import type { DrawResourceSink } from "./resources"
 import type { DeckOpFamily } from "../../presentation/edit/ops"
 import type { EmitRequest, EmitResult } from "../../pptx/write/types"
+import { isRefused } from "../../presentation/refusal"
 
 // The automatic styles a save writes (ODF 1.3 Part 3 §16.2): a shape's, paragraph's or span's properties as
 // style:*-properties attributes, the inverse of the reader's mapping (read/fills.ts, read/text.ts), so what is written
@@ -75,10 +76,6 @@ export function hexColor(color: ColorModel): string | Refused {
 // The alpha of an sRGB colour as 1/100,000 (100,000 when opaque).
 export function alphaOf(color: ColorModel): number {
 	return color.mods?.find(mod => mod.name === "alpha")?.value ?? 100_000
-}
-
-export function isRefused(value: unknown): value is Refused {
-	return typeof value === "object" && value !== null && (value as { kind?: unknown }).kind === "refused"
 }
 
 // Attribute changes of one properties element: a value to write, or null to take the attribute out.
@@ -280,7 +277,9 @@ const ANCHORS: Readonly<Record<string, string>> = { t: "top", ctr: "middle", b: 
 const WRITING: Readonly<Record<string, string>> = { horz: "lr-tb", vert: "tb-rl", vert270: "tb-lr" }
 
 // A text area (§20.130, §20.218, §20.119, §20.393, §20.394; style:columns §17.12).
-export function bodyChanges(changes: StyleChanges, body: Partial<TextBodyProps>): Refused | undefined {
+// `frame`: the body is a text frame's (draw:frame), whose text LibreOffice wraps whatever fo:wrap-option says unless
+// the frame grows with it (read/shapes.ts wrapOf): its wrap is written as draw:auto-grow-width, the option left as it was.
+export function bodyChanges(changes: StyleChanges, body: Partial<TextBodyProps>, frame = false): Refused | undefined {
 	if (body.insets !== undefined) {
 		// A padding is a non-negative length (§20.218).
 		for (const [side, value] of Object.entries(body.insets))
@@ -299,7 +298,18 @@ export function bodyChanges(changes: StyleChanges, body: Partial<TextBodyProps>)
 
 	if (body.anchorCenter !== undefined)
 		setProperty(changes, "graphic", "draw:textarea-horizontal-align", body.anchorCenter ? "center" : "justify")
-	if (body.wrap !== undefined) setProperty(changes, "graphic", "fo:wrap-option", body.wrap ? "wrap" : "no-wrap")
+	if (body.wrap !== undefined)
+		setProperty(
+			changes,
+			"graphic",
+			frame ? "draw:auto-grow-width" : "fo:wrap-option",
+			frame ? String(!body.wrap) : body.wrap ? "wrap" : "no-wrap"
+		)
+	// A frame that grows with its text grows about its middle unless its text area is left-aligned (LibreOffice 7.5,
+	// measured: with "justify" a line runs out on both sides): left, so its line runs on to the right as a:bodyPr
+	// wrap="none" draws it.
+	if (frame && body.wrap === false && body.anchorCenter !== true)
+		setProperty(changes, "graphic", "draw:textarea-horizontal-align", "left")
 
 	if (body.vertical !== undefined) {
 		const mode = WRITING[body.vertical]
@@ -728,7 +738,9 @@ export const WRITTEN_NAMESPACES: Readonly<Record<string, string>> = {
 	script: OdfNs.script,
 	dom: "http://www.w3.org/2001/xml-events",
 	loext: OdfNs.loext,
-	table: OdfNs.table
+	table: OdfNs.table,
+	anim: OdfNs.anim,
+	smil: OdfNs.smil
 }
 
 // New markup with declarations on its first start tag for each prefix it writes that `scope` (prefix → URI, the
@@ -788,7 +800,7 @@ function unboundPrefixes(markup: string, scope: ReadonlyMap<string, string>): Se
 export function styleDeclarations(scope: ReadonlyMap<string, string>): string {
 	let out = ""
 
-	for (const prefix of ["style", "fo", "draw", "svg", "text", "presentation", "loext", "table", "xlink"]) {
+	for (const prefix of ["style", "fo", "draw", "svg", "text", "presentation", "loext", "table", "xlink", "smil"]) {
 		const uri = WRITTEN_NAMESPACES[prefix] as string
 
 		if (scope.get(prefix) !== uri) out += ` xmlns:${prefix}="${escapeAttribute(uri)}"`
@@ -838,14 +850,26 @@ export class OdpStyles implements OdpStylesApi {
 		const byFamily = new Map<string, Map<string, string>>()
 
 		for (const [name, markup] of retired) {
-			const match =
-				/^<style:style(?:\s+xmlns:[\w-]+="[^"]*")* style:name="([^"]*)" style:family="([\w-]+)"((?:\s+[\w:-]+="[^"]*")*)(?:\/>|>([\s\S]*)<\/style:style>)\s*$/u.exec(
-					markup
-				)
+			// Its name and family in either order (LibreOffice writes the name first, Google's export the family), the
+			// other attributes in theirs.
+			const match = /^<style:style((?:\s+[\w:-]+="[^"]*")*)(?:\/>|>([\s\S]*)<\/style:style>)\s*$/u.exec(markup)
 
-			if (match === null || match[1] !== escapeAttribute(name)) continue
+			if (match === null) continue
 
-			const family = match[2] as string
+			let own: string | undefined
+			let family: string | undefined
+			let rest = ""
+
+			for (const attribute of (match[1] ?? "").matchAll(/\s+([\w:-]+)="([^"]*)"/gu)) {
+				const [whole, key, value] = attribute
+
+				if (key === "style:name") own = value
+				else if (key === "style:family") family = value
+				else if (!key?.startsWith("xmlns:")) rest += whole
+			}
+
+			if (own !== escapeAttribute(name) || family === undefined) continue
+
 			let forms = byFamily.get(family)
 
 			if (forms === undefined) {
@@ -853,7 +877,7 @@ export class OdpStyles implements OdpStylesApi {
 				byFamily.set(family, forms)
 			}
 
-			const form = `${match[3] ?? ""}\u0000${match[4] ?? ""}`
+			const form = `${rest}\u0000${match[2] ?? ""}`
 
 			if (!forms.has(form)) forms.set(form, name)
 		}
@@ -906,8 +930,15 @@ export class OdpStyles implements OdpStylesApi {
 	}
 
 	// A new style of `family` whose own properties are `base`'s (an automatic style is copied whole with its parent; a
-	// common one becomes the parent) with `changes` applied; undefined `base`: a style of the changes alone.
-	derived(family: string, base: string | undefined, changes: StyleChanges, extra: string = ""): string {
+	// common one becomes the parent) with `changes` applied; undefined `base`: a style of the changes alone. `named`:
+	// style attributes set on the copy (a style:list-style-name renamed).
+	derived(
+		family: string,
+		base: string | undefined,
+		changes: StyleChanges,
+		extra: string = "",
+		named: ReadonlyMap<string, string> = new Map()
+	): string {
 		const style = base === undefined ? undefined : this.sheet.style(family, base, this.scope)
 		const automatic = style?.automatic === true
 		const own: ReadonlyMap<string, OdfProperties> = automatic ? style.properties : new Map()
@@ -919,6 +950,8 @@ export class OdpStyles implements OdpStylesApi {
 		attributes.delete("style:parent-style-name")
 
 		if (parent !== undefined) attributes.set("style:parent-style-name", parent)
+
+		for (const [name, value] of named) attributes.set(name, value)
 
 		const properties = kindsOf(own, changes)
 			.map(kind => propertiesMarkup(kind, own.get(kind) ?? { attributes: new Map(), children: [] }, changes))
@@ -949,12 +982,4 @@ export class OdpStyles implements OdpStylesApi {
 	get empty(): boolean {
 		return this.registry.markup.length === 0
 	}
-}
-
-// Attributes as a sorted map key (a property set compared by what it says).
-export function propertiesKey(attributes: ReadonlyMap<string, string>): string {
-	return [...attributes]
-		.sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-		.map(([name, value]) => `${name}=${value}`)
-		.join("\u0000")
 }

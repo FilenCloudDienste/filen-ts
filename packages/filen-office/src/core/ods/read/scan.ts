@@ -121,9 +121,6 @@ const ATTRIBUTE_NAMES = [
 
 type QualifiedName<T extends readonly (readonly [string, string])[]> = `${T[number][0]}:${T[number][1]}`
 
-export type OdsElement = QualifiedName<typeof ELEMENT_NAMES>
-export type OdsAttribute = QualifiedName<typeof ATTRIBUTE_NAMES>
-
 function ids<T extends readonly (readonly [string, string])[]>(names: T): Readonly<Record<QualifiedName<T>, number>> {
 	const out: Record<string, number> = {}
 

@@ -627,13 +627,6 @@ export function plainTextSlice(text: string, base: RunProps, endRPr: RunProps | 
 	return new Slice(Fragment.from(paragraphs), 1, 1)
 }
 
-// The caret placed at `pos` (clamped into the document).
-export function caretAt(state: EditorState, pos: number): Transaction {
-	const clamped = Math.max(0, Math.min(state.doc.content.size, pos))
-
-	return state.tr.setSelection(TextSelection.near(state.doc.resolve(clamped)))
-}
-
 const WORD_CHAR = /[\p{L}\p{N}_'’]/u
 
 function isLowSurrogate(code: number): boolean {

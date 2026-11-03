@@ -4,7 +4,7 @@ import { isCodeLanguageId, type CodeLanguageId } from "@filen/office/core/code"
 import { CodeMirrorSource } from "@/features/preview/components/codeMirrorSource"
 import { CodeCommandBar, type MarkdownBar } from "@/features/preview/components/codeCommandBar"
 import { RemoteCompare } from "@/features/preview/components/remoteCompare"
-import { onCommandBarF6 } from "@/features/office/components/ribbon/ribbonFocus"
+import { onCommandBarF6, onRibbonEscape } from "@/features/office/components/ribbon/ribbonFocus"
 import { CodeChrome, detectIndent, type CodeIndent } from "@/features/preview/lib/codeChrome"
 import { useCodeViewSettings } from "@/features/preview/lib/codeViewSettings"
 import { usePreviewDownload } from "@/features/preview/lib/accessMode"
@@ -121,8 +121,12 @@ export function CodeSurface({ file, tag, alt, editable, locked, onDirtyChange, c
 		<div
 			ref={rootRef}
 			className="flex size-full flex-col"
+			onKeyDownCapture={event => {
+				onRibbonEscape(event, event.currentTarget, focusEditor, "capture")
+			}}
 			onKeyDown={event => {
-				onCommandBarF6(event, event.currentTarget, focusEditor)
+				if (!onRibbonEscape(event, event.currentTarget, focusEditor, "bubble"))
+					onCommandBarF6(event, event.currentTarget, focusEditor)
 			}}
 		>
 			<CodeCommandBar

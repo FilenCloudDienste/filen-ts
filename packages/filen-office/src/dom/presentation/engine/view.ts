@@ -28,6 +28,7 @@ import type { DataPoint } from "../../../core/smartart/data"
 import { smartArtFontRequests, textAdapterMeasurer, type TextMeasurer } from "../../../core/smartart/measure"
 import { MeasureCache } from "../../../core/text/index"
 import type { XmlDocument } from "../../../core/xml/index"
+import { XmlError } from "../../../core/xml/errors"
 import type { DocxFontFace } from "../../docx/protocol"
 import type { ShadedPng } from "../protocol"
 import type { CallContext, EngineSession, ViewCapability } from "../engine"
@@ -244,8 +245,22 @@ function smartArtHost(session: EngineSession, text: ViewText | undefined): Param
 	}
 }
 
+// A part the renderer reads as XML: an XML content type, pictures aside (an SVG picture is drawn from its bytes, and
+// Illustrator's carry an internal DTD subset the XML reader refuses).
 function isXml(type: string | undefined): boolean {
-	return type !== undefined && (type.endsWith("+xml") || type.endsWith("/xml"))
+	return type !== undefined && !type.startsWith("image/") && (type.endsWith("+xml") || type.endsWith("/xml"))
+}
+
+// A related part read as XML, or null when it is not well-formed: the renderer then draws without it (a picture its
+// fallback, a table its own formatting), as for a part over the budget.
+async function readableXml(parts: ViewParts, key: string, slicing: Slicing): Promise<XmlDocument | null> {
+	try {
+		return await parts.opc.xml(key, slicing)
+	} catch (error) {
+		if (error instanceof XmlError) return null
+
+		throw error
+	}
 }
 
 async function relationshipsOf(state: ViewState, part: string): Promise<Relationships> {
@@ -286,7 +301,12 @@ async function locateTableStyles(context: CallContext, state: ViewState): Promis
 
 	if (entry === undefined || entry.uncompressedSize > state.parts.budgets.xmlPartBytes) return
 
-	state.documents.set(partKey(styles.partName), await state.parts.opc.xml(styles.partName, context.slicing))
+	const document = await readableXml(state.parts, styles.partName, context.slicing)
+
+	// A table style part that does not read is no table style part.
+	if (document === null) return
+
+	state.documents.set(partKey(styles.partName), document)
 	state.services = { ...state.services, tableStylesPart: `/${styles.partName}` }
 }
 
@@ -327,7 +347,7 @@ async function prepare(context: CallContext, state: ViewState, ref: SlideRef): P
 				const fits =
 					entry !== undefined && isXml(parts.contentTypes.typeOf(key)) && entry.uncompressedSize <= parts.budgets.xmlPartBytes
 
-				state.documents.set(key, fits ? await parts.opc.xml(key, context.slicing) : null)
+				state.documents.set(key, fits ? await readableXml(parts, key, context.slicing) : null)
 			}
 
 			for (const relationship of (await relationshipsOf(state, part)).all) {
@@ -457,6 +477,8 @@ function layoutRequest(parts: ViewParts, text: ViewText, request: TextLayoutRequ
 	const result = layoutBody(resolved, { width: request.width, height: request.height }, text.environment, {
 		fields: { slideNumber: request.deck.firstSlideNumber + Math.max(0, index), now: new Date() },
 		hyperlinks: true,
+		// ODF shrink-to-fit names no scale: LibreOffice finds it as it lays the text out.
+		...(request.deck.format === "odp" ? { shrinkOnLayout: true } : {}),
 		// Table cells keep the face's own line height (LibreOffice 7.5, measured).
 		...(request.cell === undefined ? {} : { lineMetrics: "face" as const })
 	})
@@ -720,6 +742,7 @@ export const presentationTextServices: TextServices = {
 					now: new Date()
 				},
 				hyperlinks: true,
+				...(session.deck.format === "odp" ? { shrinkOnLayout: true } : {}),
 				...(request.cell === undefined ? {} : { lineMetrics: "face" as const })
 			},
 			revision: held.revision

@@ -767,17 +767,10 @@ export const UPDATABLE_FIELDS: ReadonlySet<string> = new Set([
 // Fields numbering by a list of their own (§17.16.5.37, §17.16.5.4-6), which an update does not count.
 const LIST_NUMBERS: ReadonlySet<string> = new Set(["LISTNUM", "AUTONUM", "AUTONUMLGL", "AUTONUMOUT"])
 
-// Fields whose result depends on page numbers.
-const PAGE_FIELDS: ReadonlySet<string> = new Set(["PAGE", "NUMPAGES", "SECTIONPAGES", "SECTION", "PAGEREF"])
-
 // What Word writes for a page reference (PAGEREF, a table of contents' entry) to a bookmark the document lacks,
 // and for a REF to one (en-US).
 export const MISSING_BOOKMARK = "Error! Bookmark not defined."
 export const MISSING_REFERENCE = "Error! Reference source not found."
-
-export function needsPages(type: string): boolean {
-	return PAGE_FIELDS.has(type)
-}
 
 // The tracked update of a field atom (its result before an update made while tracking changes, who made it
 // and when: fields/result.ts), or null.

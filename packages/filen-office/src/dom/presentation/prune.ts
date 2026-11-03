@@ -10,7 +10,7 @@ import { insertedImageWritten, insertedImageWrittenFor } from "../../core/presen
 import type { InsertedImage, RawPart } from "../../core/presentation/edit/ops"
 import type { PartChange } from "../../core/opc/index"
 import type { Deck } from "../../core/presentation/model"
-import { decodeUtf8, transcodeUtf16 } from "../../core/xml/index"
+import { decodeUtf8, NodeKind, transcodeUtf16, type XmlDocument } from "../../core/xml/index"
 import type { EngineSession } from "./engine"
 import type { DeckHistory } from "../../core/presentation/edit/history"
 import { sessionEdits } from "./engine/edit"
@@ -440,6 +440,45 @@ async function drawingsOf(parts: NonNullable<ReturnType<typeof pptxParts>>, name
 	return out
 }
 
+// Whether an attribute of `document` names relationship `id` anywhere but in a shape of its tree whose id is not
+// `kept` (one the model dropped).
+function namedOutsideDropped(document: XmlDocument, id: string, kept: ReadonlySet<number>): boolean {
+	for (let node = 0; node < document.count; node++) {
+		if (document.kinds[node] !== NodeKind.Element) continue
+		// Attributes that cannot be read keep what they may name.
+		if (document.isMalformed(node)) return true
+		if (document.attributeSpans(node).length === 0) continue
+		if (!document.attributes(node).some(attribute => attribute.value === id && attribute.name.includes(":"))) continue
+
+		let shape = node
+
+		while (shape >= 0 && document.parent(shape) >= 0 && document.localName(document.parent(shape)) !== "spTree")
+			shape = document.parent(shape)
+
+		const tree = shape < 0 ? -1 : document.parent(shape)
+
+		if (tree < 0 || document.localName(tree) !== "spTree") return true
+		const shapeId = cNvPrId(document, shape)
+
+		// A shape the model cannot tell by its id (an mc:AlternateContent at the top) keeps what it names.
+		if (shapeId === undefined || kept.has(Number(shapeId))) return true
+	}
+
+	return false
+}
+
+// The id of a shape element's own non-visual properties (p:nvSpPr/p:cNvPr and its kin, the first one in it).
+function cNvPrId(document: XmlDocument, shape: number): string | undefined {
+	for (let child = document.firstChild(shape); child >= 0; child = document.nextSibling(child)) {
+		if (document.kinds[child] !== NodeKind.Element || !document.localName(child).startsWith("nv")) continue
+
+		for (let inner = document.firstChild(child); inner >= 0; inner = document.nextSibling(inner))
+			if (document.kinds[inner] === NodeKind.Element && document.localName(inner) === "cNvPr") return document.attribute(inner, "id")
+	}
+
+	return undefined
+}
+
 async function judgePptx(
 	session: EngineSession,
 	history: DeckHistory | undefined
@@ -468,19 +507,29 @@ async function judgePptx(
 		}
 
 	// A node's markup as the package has it names the part (a relationship id of its own): whatever the model reads
-	// of it (a picture the reader keeps unmodelled, a slide an undo restored), it is in use.
+	// of it (a picture the reader keeps unmodelled, a slide an undo restored), it is in use; unless only shapes of its
+	// tree the model no longer has name it (a picture inserted, saved and undone: the save writes the slide without it).
 	const markup = new Map<string, string>()
+	const nodesByPart = new Map([...session.deck.nodes.values()].map(node => [key(node.part), node]))
 	const namedByMarkup = async (source: string, target: string): Promise<boolean> => {
 		let text = markup.get(source)
+		const document = parts.document(`/${entries.get(source) ?? source}`)
 
 		if (text === undefined) {
-			const bytes = parts.document(`/${entries.get(source) ?? source}`)?.bytes ?? (await read(entries.get(source)))
+			const bytes = document?.bytes ?? (await read(entries.get(source)))
 
 			text = bytes === undefined ? "" : decodeUtf8(bytes, 0, bytes.length)
 			markup.set(source, text)
 		}
 
-		return (index.get(source) ?? []).some(related => related.target === target && text.includes(`"${related.id}"`))
+		const ids = (index.get(source) ?? []).filter(related => related.target === target && text.includes(`"${related.id}"`))
+		const node = nodesByPart.get(source)
+
+		if (ids.length === 0 || document === undefined || node === undefined) return ids.length > 0
+
+		const kept = new Set(node.shapes.map(shape => shape.sourceId ?? shape.id))
+
+		return ids.some(related => namedOutsideDropped(document, related.id, kept))
 	}
 	const read = async (name: string | undefined): Promise<Uint8Array | undefined> =>
 		name !== undefined && parts.opc.has(name) ? parts.opc.read(name) : undefined

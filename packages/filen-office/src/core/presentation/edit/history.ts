@@ -178,6 +178,12 @@ export class DeckHistory {
 		return this.entries[this.cursor - 1]?.id ?? 0
 	}
 
+	// Steps applied since the saved state, which this timeline still holds; undefined when it does not (its branch
+	// was discarded or trimmed away) or lies ahead (undone past it).
+	get sinceSaved(): number | undefined {
+		return this.savedReachable && this.saved.pos <= this.cursor ? this.cursor - this.saved.pos : undefined
+	}
+
 	get atSaved(): boolean {
 		return this.savedReachable && this.saved.pos === this.cursor && this.saved.baseline.size === 0
 	}

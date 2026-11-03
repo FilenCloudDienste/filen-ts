@@ -1,21 +1,14 @@
 import type { Deck, SlideNode } from "../../model"
 import type { ApplyContext } from "../apply"
-import { isRefused } from "./shape"
 import { overlayNode, type SlideSourceReading } from "./slide"
+import { isRefused } from "../../refusal"
+import { sameBytes } from "../../../docx/write/bytes"
 
 // An ODP page's source markup held by an inverse: an undo after a save puts the page back on that markup (as a
 // deleted page's restore does), so the next save writes the page as the file had it, edits since then aside.
 
 export function sourceReading(context: ApplyContext): SlideSourceReading | undefined {
 	return "readSlides" in context ? (context as SlideSourceReading) : undefined
-}
-
-export function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
-	if (a.length !== b.length) return false
-
-	for (let at = 0; at < a.length; at++) if (a[at] !== b[at]) return false
-
-	return true
 }
 
 // An ODP page's source markup as it is now (undefined: a page an op made, or no reading here).

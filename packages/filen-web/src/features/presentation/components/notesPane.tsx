@@ -367,6 +367,7 @@ export function PresentationNotesPane({
 	return (
 		<div
 			data-preview-surface
+			data-office-pane
 			className="shrink-0 border-t border-border"
 		>
 			<NotesPanel

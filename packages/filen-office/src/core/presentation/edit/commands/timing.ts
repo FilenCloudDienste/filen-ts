@@ -331,11 +331,6 @@ export function effectTimingOp(slide: SlideRef, ids: readonly number[], timing: 
 	return oneStep(ids.map(node => ({ family: "timing", kind: "setEffectTiming", slide, node, timing }) as const))[0]
 }
 
-// The begin of every effect of `rows` after `from` (inclusive), for "play from": the main-sequence click it is on.
-export function stepOf(rows: readonly EffectRow[], id: number): number {
-	return rows.find(row => row.id === id)?.step ?? 0
-}
-
 // Every effect par of a tree, in document order (for tests and the pane's lookups).
 export function effectNodes(timing: TimingTree | undefined): TimeNode[] {
 	const sequences = readSequences(timing)

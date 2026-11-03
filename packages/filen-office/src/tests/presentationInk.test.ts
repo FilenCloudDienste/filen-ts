@@ -302,9 +302,7 @@ describe("writing kept ink", () => {
 			'<a:custGeom><a:avLst/><a:gdLst></a:gdLst><a:rect l="l" t="t" r="r" b="b"/><a:pathLst><a:path w="800000" h="600000" fill="norm" stroke="1" extrusionOk="0">' +
 				'<a:moveTo><a:pt x="0" y="0"/></a:moveTo><a:lnTo><a:pt x="400000" y="60000"/></a:lnTo><a:lnTo><a:pt x="800000" y="600000"/></a:lnTo></a:path></a:pathLst></a:custGeom>'
 		)
-		expect(sp).toContain(
-			'<a:noFill/><a:ln w="28575" cap="rnd"><a:solidFill><a:srgbClr val="FF0000"></a:srgbClr></a:solidFill><a:round/></a:ln>'
-		)
+		expect(sp).toContain('<a:noFill/><a:ln w="28575" cap="rnd"><a:solidFill><a:srgbClr val="FF0000"/></a:solidFill><a:round/></a:ln>')
 		expect(markup).toContain(sp)
 		expect(markup).toContain('<a:srgbClr val="FF0000"><a:alpha val="50000"/></a:srgbClr>')
 		expect(markup.endsWith("</p:sp></p:grpSp>")).toBe(true)

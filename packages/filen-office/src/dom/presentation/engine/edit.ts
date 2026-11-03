@@ -1,5 +1,5 @@
 import { prepareOdpPictureOp } from "../../../core/odp/write/emit/picture"
-import { prepareChartOp } from "../../../core/presentation/edit/apply/chart"
+import { prepareChartOp, type ChartPartSource } from "../../../core/presentation/edit/apply/chart"
 import { clearDormantNotes, dormantNotesOfBody, dormantNotesOfOrigin, setDormantNotes } from "./dormantNotes"
 import { notesTarget } from "../../../core/presentation/notes"
 import { issuedPartNames } from "../../../core/pptx/write/parts"
@@ -11,12 +11,11 @@ import { encodeUtf8, escapeAttribute, parseXml, type XmlDocument } from "../../.
 import { crc32, parseRelationships, partKey, relationshipsPartName, Relationships } from "../../../core/opc/index"
 import type { PptxParts } from "../../../core/pptx/package"
 import { readSlidePart } from "../../../core/pptx/read/slide"
-import { P_MAIN } from "../../../core/pptx/read/xml"
+import { G, P_MAIN, partReader } from "../../../core/pptx/read/xml"
 import { sourcePictureFill } from "../../../core/pptx/write/emit/picture"
 import { DeckTally } from "../../../core/presentation/budget"
 import { applyAll, applyOp, opTouches, type DeckChanges, type Dirt, type Inverse, type Touch } from "../../../core/presentation/edit/apply"
 import type { PictureReading } from "../../../core/presentation/edit/apply/picture"
-import { isRefused } from "../../../core/presentation/edit/apply/shape"
 import {
 	deckDefinitionType,
 	diagramPartsOf,
@@ -64,10 +63,12 @@ import {
 import type { TextSeed } from "../../../core/presentation/output"
 import type { CallContext, EditCapability, EngineSession } from "../engine"
 import type { CommandResult } from "../protocol"
+import type { RefusedEdits } from "../refusedEdits"
 import { bindSaveHistory, deckTurn, saveHistoryOf, type SaveHistory } from "../save"
 import { odpParts } from "./open/odp"
 import { pptxParts } from "./open/pptx"
 import { textSeedOf } from "./text"
+import { isRefused } from "../../../core/presentation/refusal"
 
 // The edit capability: commands, undo and redo over the session's model, with the deck history (edit/history.ts).
 // Before an op applies, every node it touches is parsed and its slide proved once (proof gate 1); the history
@@ -211,7 +212,7 @@ function stateOf(session: EngineSession): EditState {
 		abandon: point => {
 			state.history.abandon(point)
 		},
-		revert: parts => revert(session, state, parts, {}),
+		revert: (parts, edits) => revert(session, state, parts, {}, edits),
 		settle,
 		steps: state.history
 	}
@@ -264,6 +265,28 @@ function withAncestorDeclarations(document: XmlDocument, node: number): Uint8Arr
 	out.set(raw.subarray(nameEnd), nameEnd + head.length)
 
 	return out
+}
+
+// Every branch of the outermost mc:AlternateContent holding a pptx source element, with the declarations its ancestors
+// make; undefined outside one (or when the source is not at hand).
+function alternateSource(session: EngineSession, raw: ReadonlyMap<string, RawDocument>, src: SourceRef): Uint8Array | undefined {
+	if (src.format !== "pptx") return undefined
+
+	const parts = pptxParts(session.deck)
+	const document =
+		raw.get(src.part)?.document ?? (parts !== undefined && src.epoch === parts.epoch ? parts.document(src.part) : undefined)
+
+	if (document === undefined || src.node <= 0 || src.node >= document.count) return undefined
+
+	const r = partReader(document)
+	let unit = -1
+
+	for (let up = document.parent(src.node); up > 0; up = document.parent(up)) {
+		if (r.is(up, G.P, "spTree") || r.is(up, G.P, "grpSp")) break
+		if (r.is(up, G.MC, "AlternateContent")) unit = up
+	}
+
+	return unit < 0 ? undefined : withAncestorDeclarations(document, unit)
 }
 
 function sourceBytes(session: EngineSession, raw: ReadonlyMap<string, RawDocument>, src: SourceRef): Uint8Array | Refused {
@@ -703,6 +726,7 @@ function contextFor(
 
 	const reading: SlideSourceReading & PictureReading & SmartArtSourceReading & DesignReading = {
 		sourceBytes: src => sourceBytes(session, state.raw, src),
+		keptSource: shape => (shape.src === undefined ? undefined : alternateSource(session, state.raw, shape.src)),
 		epoch: parts.epoch,
 		restoredLive: (ref, held) => {
 			state.restored.set(ref, { parts: held, epoch: parts.epoch })
@@ -1171,7 +1195,7 @@ async function prepare(
 	for (const part of diagramPicturePartsOf(deck, op)) await relationshipsOf(state, parts, part)
 
 	// A chart op's chart part, its embedded workbook, a new workbook's cells, an inserted chart's workbook.
-	await prepareChartOp(deck, op, { opc: parts.opc, document: part => parts.document(part) }, slicing)
+	await prepareChartOp(deck, op, chartPartSource(session, parts), slicing)
 
 	if (op.family !== "slide" || !(op.kind === "delete" || op.kind === "restore" || op.kind === "duplicate")) return
 
@@ -1826,12 +1850,53 @@ function stepParts(step: HistoryStep): Set<string> {
 	return out
 }
 
-// The steps whose net effect touches `parts` reverted (the writer refused them): steps are undone from the newest
-// until none of those parts differs from the saved state, then the undone steps that touched none of them are
-// applied again, oldest first (a new step each). The count of steps reverted. Runs inside the save's turn.
-async function revert(session: EngineSession, state: EditState, parts: ReadonlySet<string>, options: EditOptions): Promise<number> {
+// The steps that made what the writer refused reverted: undone from the newest, then the undone steps that did not
+// make it applied again, oldest first (a new step each). What was refused: with `edits`, the steps since the save that
+// change the shape's refused group (else those that made the shape whole: its insert, its slide copied); without, or
+// when no step names it, every step whose net effect touches `parts`, until none of them differs from the saved state.
+// The count of steps reverted. Runs inside the save's turn.
+async function revert(
+	session: EngineSession,
+	state: EditState,
+	parts: ReadonlySet<string>,
+	options: EditOptions,
+	edits?: RefusedEdits
+): Promise<number> {
 	const history = state.history
+	// The keys a step changed, a whole node's marked when the step made it (a shape it made is named by that key alone).
+	const keysOf = (entry: HistoryStep): readonly { readonly key: string; readonly made: boolean }[] => {
+		const out: { key: string; made: boolean }[] = []
+
+		for (const [key, before] of entry.before) {
+			const after = entry.after.get(key)
+
+			if (after !== undefined && after.digest === before.digest && after.exists === before.exists) continue
+
+			const made = !before.exists && after?.exists === true
+
+			if (made && key.startsWith("s:") && !key.endsWith(":n")) continue
+
+			out.push({ key, made })
+		}
+
+		return out
+	}
+	const since = history.sinceSaved
+	const window = since === undefined ? undefined : history.steps().slice(history.depth.undo - since, history.depth.undo)
+	const dirty = (): readonly { readonly key: string; readonly made: boolean }[] =>
+		[...history.dirtyTouchKeys()].map(key => ({ key, made: history.savedFingerprint(key)?.exists === false }))
+	const names = (test: (key: string, made: boolean) => boolean): boolean =>
+		window !== undefined
+			? window.some(entry => keysOf(entry).some(each => test(each.key, each.made)))
+			: dirty().some(each => test(each.key, each.made))
+	const named = edits === undefined ? undefined : [edits.changes, edits.alters, edits.makes].find(test => names(test))
+	const related = (entry: HistoryStep): boolean =>
+		named !== undefined ? keysOf(entry).some(each => named(each.key, each.made)) : [...stepParts(entry)].some(part => parts.has(part))
+	let left = named === undefined || window === undefined ? undefined : window.filter(related).length
 	const touched = (): boolean => {
+		if (left !== undefined) return left > 0
+		if (named !== undefined) return dirty().some(each => named(each.key, each.made))
+
 		for (const part of deckChanges(session.deck, history, state.fingerprint).parts.keys()) if (parts.has(part)) return true
 
 		return false
@@ -1857,10 +1922,11 @@ async function revert(session: EngineSession, state: EditState, parts: ReadonlyS
 		history.undone()
 		changed(session, state, entry.touches)
 
-		const changedParts = stepParts(entry)
+		if (related(entry)) {
+			count++
 
-		if ([...changedParts].some(part => parts.has(part))) count++
-		else unrelated.unshift(entry.op)
+			if (left !== undefined) left--
+		} else unrelated.unshift(entry.op)
 	}
 
 	for (const op of unrelated) {
@@ -1872,8 +1938,8 @@ async function revert(session: EngineSession, state: EditState, parts: ReadonlyS
 			continue
 		}
 
-		// A step that keeps a refused part changed after all goes again.
-		if (touched()) {
+		// A step that keeps a refused part changed after all goes again (a step named by `edits` never is one).
+		if (named === undefined && touched()) {
 			const entry = history.peekUndo()
 
 			const back = entry === undefined ? undefined : applyAll(session.deck, entry.inverse.ops, contextFor(session, state))
@@ -1901,6 +1967,50 @@ export function createEditCapability(options: EditOptions = {}): EditCapability 
 }
 
 export const editCapability: EditCapability = createEditCapability()
+
+// The pptx package's chart parts, and those of a slide an undo restored after a save left its parts out: the bytes
+// its delete held (a chart and its workbook read as they were).
+export function chartPartSource(session: EngineSession, parts: PptxParts): ChartPartSource {
+	const restored = (name: string): RawPart | undefined => {
+		const key = partKey(name)
+
+		for (const node of session.deck.nodes.values()) {
+			const src = node.src
+
+			if (src?.format !== "pptx" || !src.part.startsWith("raw:")) continue
+
+			const held = stateOf(session)
+				.raw.get(src.part)
+				?.parts?.find(each => partKey(each.name) === key)
+
+			if (held !== undefined) return held
+		}
+
+		return undefined
+	}
+	const opc = parts.opc
+
+	return {
+		opc: {
+			entry: name => opc.entry(name) ?? restoredEntry(restored(name)),
+			read: async (name, slicing) => (opc.has(name) ? opc.read(name, slicing) : (restored(name)?.bytes ?? opc.read(name, slicing))),
+			relationships: async name => {
+				const held = opc.has(name) ? undefined : restored(name)
+
+				if (held === undefined) return opc.relationships(name)
+
+				return held.rels === undefined
+					? new Relationships([])
+					: parseRelationships(held.rels, held.name.startsWith("/") ? held.name.slice(1) : held.name)
+			}
+		},
+		document: part => parts.document(part)
+	}
+}
+
+function restoredEntry(part: RawPart | undefined): { readonly uncompressedSize: number } | undefined {
+	return part === undefined ? undefined : { uncompressedSize: part.bytes.length }
+}
 
 // What the save capability needs of a session's edits.
 export interface SessionEdits {

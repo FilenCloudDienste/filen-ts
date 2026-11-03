@@ -158,7 +158,7 @@ export function odpApplier(opened: OpenedOdp): (op: DeckOp) => Refused | undefin
 	}
 }
 
-export interface OdpEs2Report {
+export interface OdpShapeAndSlideEditsReport {
 	readonly moved?: { readonly slide: SlideRef; readonly name: string }
 	readonly hidden?: SlideRef
 	readonly duplicated?: SlideRef
@@ -180,14 +180,14 @@ function firstEditable(shapes: readonly ShapeNode[]): ShapeNode | undefined {
 	)
 }
 
-// Edit set ES2 (no text edits) through the families: move, resize and turn a shape and fill it; hide a slide; put a
+// The shape and slide edit set (no text edits) through the families: move, resize and turn a shape and fill it; hide a slide; put a
 // slide on another layout of its master; duplicate a slide; add a slide on the first slide's layout; delete a slide
 // (a jump target when there is one); move the first slide last. Each op the families refuse is reported, not hidden.
-export function applyOdpEs2(opened: OpenedOdp): OdpEs2Report {
+export function applyOdpShapeAndSlideEdits(opened: OpenedOdp): OdpShapeAndSlideEditsReport {
 	const deck = opened.deck
 	const apply = odpApplier(opened)
 	const refusals: string[] = []
-	const report: { -readonly [K in keyof OdpEs2Report]: OdpEs2Report[K] } = { refusals }
+	const report: { -readonly [K in keyof OdpShapeAndSlideEditsReport]: OdpShapeAndSlideEditsReport[K] } = { refusals }
 	const run = (op: DeckOp): boolean => {
 		const refusal = apply(op)
 

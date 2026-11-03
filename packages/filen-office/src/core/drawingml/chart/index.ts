@@ -15,12 +15,26 @@ import {
 	tickLabels,
 	type AxisState
 } from "./axes"
+import { formatNumber } from "./format"
 import { ChartBuilder, PX_PER_PT, estimateHeight, estimateWidth, labelBody, type Rect } from "./builder"
 import { emitLabels, type PendingLabel } from "./labels"
 import { readPlotArea, type Plot } from "./model"
-import { backgroundColor, mutedText, textColor } from "./palette"
-import { drawBars, drawLinesOrAreas, drawPie, drawRadar, drawScatter, plotCategories, type Blanks, type PlotFrame } from "./plots"
-import { computeScale } from "./scale"
+import { backgroundColor, mutedText, seriesColor, textColor } from "./palette"
+import {
+	drawBars,
+	drawBubbles,
+	drawLinesOrAreas,
+	drawPie,
+	drawRadar,
+	drawScatter,
+	drawSurface,
+	plotCategories,
+	surfaceTruncated,
+	type Blanks,
+	type PlotFrame,
+	type SurfaceBand
+} from "./plots"
+import { computeScale, scaleTicks } from "./scale"
 import { appendMarker, pointFill, seriesName, seriesStyles, type MarkerStyle, type SeriesStyle } from "./series"
 
 // Legend entries of a per-point (varyColors) legend.
@@ -44,7 +58,17 @@ export interface ChartConversion {
 }
 
 // Draw order of plot kinds in a combination chart: areas at the back, then bars, then lines and points.
-const PLOT_RANK: Readonly<Record<string, number>> = { area: 0, bar: 1, pie: 1, doughnut: 1, radar: 2, line: 3, scatter: 4 }
+const PLOT_RANK: Readonly<Record<string, number>> = {
+	surface: 0,
+	area: 0,
+	bar: 1,
+	pie: 1,
+	doughnut: 1,
+	radar: 2,
+	bubble: 3,
+	line: 3,
+	scatter: 4
+}
 
 interface Manual {
 	readonly x: number | undefined
@@ -108,12 +132,25 @@ function legendEntries(
 	builder: ChartBuilder,
 	plots: readonly Plot[],
 	styles: ReadonlyMap<number, SeriesStyle>,
-	categories: ReadonlyMap<Plot, string[]>
+	categories: ReadonlyMap<Plot, string[]>,
+	bands: ReadonlyMap<Plot, readonly SurfaceBand[]>
 ): LegendEntry[] {
 	const out: LegendEntry[] = []
 	let position = 0
 
 	for (const plot of plots) {
+		const plotBands = bands.get(plot)
+
+		// A surface's legend names its value bands.
+		if (plotBands !== undefined) {
+			for (const band of plotBands)
+				out.push({ text: band.label, fill: band.fill, stroke: band.stroke, line: band.fill < 0, marker: undefined })
+
+			position += plot.series.length
+
+			continue
+		}
+
 		const lineKind = plot.kind === "line" || plot.kind === "scatter" || (plot.kind === "radar" && !plot.filled)
 		const first = plot.series[0]
 		const firstStyle = first === undefined ? undefined : styles.get(first.node)
@@ -311,6 +348,9 @@ export function convertChart(
 	const radial = new Set<number>()
 	const ranges = new Map<number, { min: number; max: number; percent: boolean }>()
 	const plotAxes = new Map<Plot, { category: AxisState | undefined; value: AxisState | undefined }>()
+	// Axes a plot uses but does not draw (a surface's value axis: its bands show the values), and surfaces' series axes.
+	const unplotted = new Set<number>()
+	const surfaceRows = new Map<Plot, AxisState | undefined>()
 	const state = (id: number | undefined): AxisState | undefined => {
 		if (id === undefined) return undefined
 
@@ -355,9 +395,52 @@ export function convertChart(
 			continue
 		}
 
+		if (plot.kind === "surface") {
+			const category = state(plot.axisIds[0])
+			const value = state(plot.axisIds[1])
+			const rows = state(plot.axisIds[2])
+
+			if (category === undefined || value === undefined) continue
+
+			const names = plotCategories(plot, date1904, category.axis.format)
+			let count = names.length
+
+			for (const series of plot.series) {
+				count = Math.max(count, series.values.count)
+
+				for (let k = 0; k < series.values.count; k++) widen(value.axis.id, series.values.numbers?.[k] ?? Number.NaN, false)
+			}
+
+			// Seen from above: categories across, series up the side, points on the grid lines.
+			category.used = true
+			category.horizontal = true
+			category.between = false
+			category.count = Math.max(category.count, count)
+			category.categories = names.length >= category.categories.length ? names : category.categories
+			value.used = true
+			value.horizontal = false
+			value.format = value.axis.format ?? plot.series[0]?.values.formatCode ?? "General"
+			unplotted.add(value.axis.id)
+
+			if (rows !== undefined) {
+				rows.used = true
+				rows.horizontal = false
+				rows.between = false
+				rows.count = plot.series.length
+				rows.categories = plot.series.map((series, order) => seriesName(series, order))
+			}
+
+			categories.set(plot, names)
+			plotAxes.set(plot, { category, value })
+			surfaceRows.set(plot, rows)
+
+			continue
+		}
+
 		const first = state(plot.axisIds[0])
 		const second = state(plot.axisIds[1])
-		const swap = plot.kind !== "scatter" && first?.axis.kind === "val" && second !== undefined && second.axis.kind !== "val"
+		const xy = plot.kind === "scatter" || plot.kind === "bubble"
+		const swap = !xy && first?.axis.kind === "val" && second !== undefined && second.axis.kind !== "val"
 		const category = swap ? second : first
 		const value = swap ? first : second
 
@@ -366,7 +449,7 @@ export function convertChart(
 		category.used = true
 		value.used = true
 
-		if (plot.kind === "scatter") {
+		if (xy) {
 			category.horizontal =
 				!(category.axis.side === "l" || category.axis.side === "r") || value.axis.side === "l" || value.axis.side === "r"
 			value.horizontal = !category.horizontal
@@ -392,7 +475,7 @@ export function convertChart(
 
 		for (const series of plot.series) count = Math.max(count, series.values.count)
 
-		if (plot.kind === "scatter") {
+		if (xy) {
 			for (const series of plot.series) {
 				const xs = series.categories.numbers
 
@@ -471,6 +554,38 @@ export function convertChart(
 		})
 	}
 
+	// Surface bands: one per interval of the value axis's ticks, coloured by c:bandFmt or the series colours.
+	const bands = new Map<Plot, SurfaceBand[]>()
+
+	for (const plot of drawable) {
+		const scale = plot.kind === "surface" ? plotAxes.get(plot)?.value?.scale : undefined
+
+		if (scale === undefined) continue
+
+		const value = plotAxes.get(plot)?.value
+		const ticks = scaleTicks(scale)
+		const list: SurfaceBand[] = []
+		const count = Math.max(0, ticks.length - 1)
+
+		for (let k = 0; k < count; k++) {
+			const low = ticks[k] ?? 0
+			const high = ticks[k + 1] ?? 0
+			const color = seriesColor(builder.theme, builder.style, k, count)
+			const spPr = plot.bandFormats.get(k) ?? -1
+			const format = value?.format ?? "General"
+
+			list.push({
+				low,
+				high,
+				label: `${formatNumber(low, format, date1904)}-${formatNumber(high, format, date1904)}`,
+				fill: plot.wireframe ? -1 : builder.fill(spPr, color),
+				stroke: plot.wireframe ? builder.line(spPr, { color, width: 1.5 * PX_PER_PT, round: true }) : builder.line(spPr, undefined)
+			})
+		}
+
+		bands.set(plot, list)
+	}
+
 	const pad = Math.max(4, Math.min(10, Math.min(W, H) * 0.03))
 	let content: Rect = { x: pad, y: pad, w: Math.max(1, W - pad * 2), h: Math.max(1, H - pad * 2) }
 
@@ -512,7 +627,7 @@ export function convertChart(
 				deleted.add(reader.number(reader.child(entry, D.C, "idx"), "val", -1))
 		}
 
-		const entries = legendEntries(builder, drawable, styles, categories).filter((_, index) => !deleted.has(index))
+		const entries = legendEntries(builder, drawable, styles, categories, bands).filter((_, index) => !deleted.has(index))
 		const text = builder.textProps(reader.child(legendNode, D.C, "txPr"))
 		const key = text.size * PX_PER_PT * 0.75
 		const row = Math.max(estimateHeight(text.size), key) + 2
@@ -622,7 +737,7 @@ export function convertChart(
 		const reserve = { t: 0, b: 0, l: 0, r: 0 }
 		// Vertical axes first: the room they leave is the length horizontal category labels are fitted to.
 		const cartesianStates = [...states.entries()]
-			.filter(([id]) => !radial.has(id))
+			.filter(([id]) => !radial.has(id) && !unplotted.has(id))
 			.sort(([, a], [, b]) => Number(a.horizontal) - Number(b.horizontal))
 
 		for (const [, axisStateValue] of cartesianStates) {
@@ -662,6 +777,14 @@ export function convertChart(
 			cross === undefined ? (axisStateValue.horizontal ? inner.y + inner.h : inner.x) : crossingPosition(cross, axisStateValue.axis)
 	}
 
+	// A surface's axes meet at its lower left corner (its value axis is not drawn to cross them).
+	for (const [plot, rows] of surfaceRows) {
+		const category = plotAxes.get(plot)?.category
+
+		if (category !== undefined) category.line = inner.y + inner.h
+		if (rows !== undefined) rows.line = inner.x
+	}
+
 	// Plot area fill.
 	const plotSpPr = reader.child(plotAreaNode, D.C, "spPr")
 
@@ -671,7 +794,7 @@ export function convertChart(
 		builder.end(builder.fill(plotSpPr, undefined), builder.line(plotSpPr, undefined), inner, 0, plotAreaNode)
 	}
 
-	const cartesian = [...states.entries()].filter(([id]) => !radial.has(id)).map(([, value]) => value)
+	const cartesian = [...states.entries()].filter(([id]) => !radial.has(id) && !unplotted.has(id)).map(([, value]) => value)
 
 	for (const axisStateValue of cartesian) if (axisStateValue.axis.kind === "val") drawGridlines(builder, axisStateValue, inner)
 	for (const axisStateValue of cartesian) if (axisStateValue.axis.kind !== "val") drawGridlines(builder, axisStateValue, inner)
@@ -707,6 +830,12 @@ export function convertChart(
 			case "scatter":
 				drawScatter(plotFrame)
 				break
+			case "bubble":
+				drawBubbles(plotFrame)
+				break
+			case "surface":
+				drawSurface(plotFrame, surfaceRows.get(plot), bands.get(plot) ?? [])
+				break
 			case "pie":
 			case "doughnut":
 				drawPie(plotFrame)
@@ -726,7 +855,9 @@ export function convertChart(
 	if (legend !== undefined) drawLegend(builder, legendNode, legend)
 	if (title !== undefined) builder.label(title.paragraphs, title.box, labelBody("t", title.rotation), titleNode)
 
-	return { list: target, supported: true, plots: area.found, unsupported: area.unsupported }
+	const truncated = drawable.some(surfaceTruncated) ? ["surfaceCells"] : []
+
+	return { list: target, supported: true, plots: area.found, unsupported: [...area.unsupported, ...truncated] }
 }
 
 function drawLegend(

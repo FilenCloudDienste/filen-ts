@@ -102,6 +102,9 @@ export interface PdfImageSource {
 	readonly key?: string
 	// Smooth when scaled up (§8.9.5.3).
 	readonly interpolate?: boolean
+	// Changes the decoded pixels in place before they are written (a picture's recolouring). The image is then always
+	// decoded and shared by `key` alone (none: written each time); with no decoder for it, it is written unchanged.
+	readonly transform?: (rgba: Uint8Array) => void
 }
 
 export type PdfDestinationTarget = { readonly page: number; readonly x?: number; readonly y?: number }
@@ -424,6 +427,7 @@ export class PdfWriter implements PdfObjectSink {
 		resources["XObject"] = table(page.xobjects) ?? null
 		resources["ExtGState"] = table(page.extGStates) ?? null
 		resources["Shading"] = table(page.shadings) ?? null
+		resources["Pattern"] = table(page.patterns) ?? null
 
 		for (const key of Object.keys(resources)) if (resources[key] === null) delete resources[key]
 
@@ -482,6 +486,38 @@ export class PdfWriter implements PdfObjectSink {
 		}
 
 		return entry
+	}
+
+	// A coloured tiling pattern (§8.7.3.3) whose cell `content` draws `image`; `matrix` places pattern space in the
+	// page's default space.
+	async tilingPattern(cell: {
+		readonly width: number
+		readonly height: number
+		readonly matrix: readonly number[]
+		readonly content: Uint8Array
+		readonly image: PdfImage
+	}): Promise<{ readonly name: string; readonly ref: PdfRef }> {
+		const pattern = { name: this.name("P"), ref: this.allocate() }
+		const fine = (value: number): number => Math.round(value * 1e6) / 1e6
+
+		await this.stream(
+			pattern.ref,
+			{
+				Type: pdfName("Pattern"),
+				PatternType: 1,
+				PaintType: 1,
+				TilingType: 1,
+				BBox: [0, 0, fine(cell.width), fine(cell.height)],
+				XStep: fine(cell.width),
+				YStep: fine(cell.height),
+				Matrix: cell.matrix.map(fine),
+				Resources: { XObject: { [cell.image.name]: cell.image.ref } }
+			},
+			cell.content,
+			{ compress: true }
+		)
+
+		return pattern
 	}
 
 	gradient(gradient: PdfGradient): Promise<GradientResources> {
@@ -581,6 +617,24 @@ export class PdfWriter implements PdfObjectSink {
 	// Embeds an image once; refusals throw PdfWriteError.
 	image(source: PdfImageSource): Promise<PdfImage> {
 		const key = source.key
+
+		if (source.transform !== undefined) {
+			const held = key === undefined ? undefined : this.imagesByKey.get(key)
+
+			if (held !== undefined) return held
+
+			// A realm that cannot decode the picture draws it unchanged rather than not at all.
+			const made = this.writeImage(source, new ByteSource(source.data)).catch((error: unknown) => {
+				if (!(error instanceof PdfWriteError) || error.reason !== "imageUnsupported") throw error
+
+				return this.image({ data: source.data, ...(source.format === undefined ? {} : { format: source.format }) })
+			})
+
+			if (key !== undefined) this.imagesByKey.set(key, made)
+
+			return made
+		}
+
 		let entry = key === undefined ? this.imagesByData.get(source.data) : this.imagesByKey.get(key)
 
 		if (entry === undefined) {
@@ -637,13 +691,14 @@ export class PdfWriter implements PdfObjectSink {
 			Interpolate: source.interpolate === true ? true : undefined
 		}
 		let orientation = 1
+		const transform = source.transform
 
 		if (format === "jpeg") {
 			const jpeg = await readJpeg(bytes)
 
 			if (jpeg !== undefined) orientation = jpeg.orientation
 
-			if (jpeg?.passthrough === true) {
+			if (jpeg?.passthrough === true && transform === undefined) {
 				const space = jpeg.components === 1 ? "DeviceGray" : jpeg.components === 3 ? "DeviceRGB" : "DeviceCMYK"
 
 				await this.stream(
@@ -665,7 +720,7 @@ export class PdfWriter implements PdfObjectSink {
 		} else if (format === "png") {
 			const png = await readPng(bytes)
 
-			if (png !== undefined && pngPassthrough(png)) {
+			if (png !== undefined && pngPassthrough(png) && transform === undefined) {
 				const colors = png.colorType === 2 ? 3 : 1
 				const palette = png.palette
 				const colorSpace: PdfValue =
@@ -700,6 +755,8 @@ export class PdfWriter implements PdfObjectSink {
 		if (this.decoder === undefined) throw new PdfWriteError("imageUnsupported", `No decoder for this ${format} image`)
 
 		const decoded = await this.decoder.decode(source.data, format, this.maxImagePixels)
+
+		transform?.(decoded.rgba)
 
 		return this.writeRgba(ref, name, common, decoded, orientation)
 	}

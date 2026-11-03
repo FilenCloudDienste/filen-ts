@@ -82,6 +82,13 @@ function nullCanvas(width: number, height: number): RasterCanvas {
 	} as unknown as RasterCanvas
 }
 
+// A full collection where the runtime exposes one (node --expose-gc), else nothing.
+function collect(): void {
+	const gc: unknown = Reflect.get(globalThis, "gc")
+
+	if (typeof gc === "function") Reflect.apply(gc, globalThis, [])
+}
+
 function percentile(values: readonly number[], q: number): number {
 	const sorted = [...values].sort((a, b) => a - b)
 
@@ -183,6 +190,10 @@ describe.skipIf(!SLIDES.every(([path]) => existsSync(join(CORPUS_DIR, path))))("
 				if (source === undefined) throw new Error("no source")
 
 				worstLayers = Math.max(worstLayers, best)
+
+				// The compile alone: a collection the layers above left due runs first (with --expose-gc, as the perf step
+				// runs), so a single cold compile does not carry another step's garbage.
+				collect()
 
 				const compileStart = cpuMs()
 				const compiled = compileSource(ref, source, DEFAULT_PRESENTATION_BUDGETS.timing)

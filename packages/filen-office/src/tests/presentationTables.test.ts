@@ -192,7 +192,7 @@ describe("table edits", () => {
 
 		expect(slide).toContain("New &amp; &lt;x&gt;")
 		expect(slide).toContain(
-			'<a:tcPr anchor="ctr"><a:lnB><a:noFill/></a:lnB><a:solidFill><a:srgbClr val="FF0000"></a:srgbClr></a:solidFill></a:tcPr>'
+			'<a:tcPr anchor="ctr"><a:lnB><a:noFill/></a:lnB><a:solidFill><a:srgbClr val="FF0000"/></a:solidFill></a:tcPr>'
 		)
 		expect(slide).toContain("{073A0DAA-6AF3-43AB-8588-CEC1D06C72B9}")
 		expect(slide).toContain('<a:tblPr firstRow="1">')

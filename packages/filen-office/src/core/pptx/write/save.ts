@@ -20,6 +20,7 @@ import { decodeUtf8 } from "../../xml/index"
 import { spliceSnapshot, type SpliceSnapshot } from "./splice"
 import type { PptxSaveInput, PptxSaveOptions, PptxSaveOutcome, PptxSnapshot, SavePptx, SpliceWriter } from "./types"
 import { FinalPackage, verifyFinal } from "./verify"
+import { isRefused } from "../../presentation/refusal"
 
 // Saving a pptx into its own format: the snapshot (every changed part serialized at revision R), proof gate 2 on the
 // package as it will be stored, then the zip. A package up to the in-memory limit is written to memory and read back
@@ -30,10 +31,6 @@ import { FinalPackage, verifyFinal } from "./verify"
 
 export const IN_MEMORY_LIMIT = 64 * 1024 * 1024
 const CHUNK = 1024 * 1024
-
-function isRefused(value: unknown): value is Refused {
-	return typeof value === "object" && value !== null && (value as { kind?: unknown }).kind === "refused"
-}
 
 // A source whose checked reads are checked again on arrival: what the far side checksummed must be what came.
 export function arrivalChecked(source: ByteSource): ByteSource {

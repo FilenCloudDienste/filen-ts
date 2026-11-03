@@ -325,9 +325,7 @@ describe("slide size and backgrounds on a pptx deck", () => {
 
 		await rebaseSession(h, bytes, saved)
 
-		expect(markup).toContain(
-			'<p:bg><p:bgPr><a:solidFill><a:srgbClr val="112233"></a:srgbClr></a:solidFill><a:effectLst/></p:bgPr></p:bg>'
-		)
+		expect(markup).toContain('<p:bg><p:bgPr><a:solidFill><a:srgbClr val="112233"/></a:solidFill><a:effectLst/></p:bgPr></p:bg>')
 		expect(markup).toContain('showMasterSp="0"')
 
 		const undone = await h.undo()

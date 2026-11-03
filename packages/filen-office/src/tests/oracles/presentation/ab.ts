@@ -18,7 +18,7 @@ import { pdfBytes } from "../../sheetPdfFixtures"
 // The A/B gate for the engines presentations share with the other editors: every docx, odt, rtf, doc, xlsx and ods
 // corpus file exported to PDF in deterministic mode, so a change to a shared engine shows as a PDF that is no longer
 // byte-identical to the baseline. Documents are laid out with the bundled fonts' real advance widths; workbooks print
-// every visible worksheet as "Entire workbook" does. Driven by /tmp/p5/tools/scripts/ab_shared.mjs:
+// every visible worksheet as "Entire workbook" does. A driver runs it once per batch:
 //   node --import tsx src/tests/oracles/presentation/ab.ts run --files <list> --corpus <dir> --out <dir>
 // prints one JSON line per file (a "start" line first, so a driver can stop a file that hangs).
 

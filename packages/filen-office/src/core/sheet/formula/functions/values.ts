@@ -157,8 +157,3 @@ export function wildcard(pattern: string): (text: string) => boolean {
 		return p === tokens.length
 	}
 }
-
-// Whether text holds a wildcard character (*, ? or ~).
-export function hasWildcard(text: string): boolean {
-	return /[*?~]/.test(text)
-}

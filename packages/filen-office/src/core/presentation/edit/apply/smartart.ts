@@ -24,6 +24,8 @@ import { imageWithinBudget } from "../../../opc/mediaPolicy"
 import { DEFAULT_PRESENTATION_BUDGETS } from "../../budget"
 import { registerInsertedImage } from "./picture"
 import { applyShape } from "./shape"
+import { isRefused } from "../../refusal"
+import { sameBytes } from "../../../docx/write/bytes"
 
 // Applies the smartart ops: each edit makes the diagram's data part anew (core/smartart/edit.ts), holds it beside the
 // package (a "raw:N" part the renderer, later ops and the writer resolve) and points the frame at it with no drawing
@@ -73,10 +75,6 @@ const DEFINITION_ROOTS = { layout: "layoutDef", style: "styleDef", colors: "colo
 const MAX_GROUP_DEPTH = 128
 const NO_INVERSE = { ops: [], bytes: 0 } as const
 const NONE: readonly string[] = []
-
-function isRefused(value: unknown): value is Refused {
-	return typeof value === "object" && value !== null && (value as { kind?: unknown }).kind === "refused"
-}
 
 function readingOf(context: ApplyContext): SmartArtSourceReading | undefined {
 	const candidate = context as ApplyContext & Partial<SmartArtSourceReading>
@@ -266,14 +264,6 @@ function holdData(reading: SmartArtSourceReading, bytes: Uint8Array): string | R
 	} catch {
 		return refused("malformed", "diagram data")
 	}
-}
-
-function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
-	if (a.length !== b.length) return false
-
-	for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false
-
-	return true
 }
 
 function isHeld(part: string): boolean {

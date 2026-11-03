@@ -12,7 +12,7 @@ export const previewPptxPresenter = {
 	/** Presentation slideshow — shown instead of the next slide when the next click plays an animation on this slide */
 	previewPptxPresenterNextStep: "Next animation on this slide",
 	/** Presentation slideshow — shown instead of the next slide after the last one */
-	previewPptxPresenterEndOfShow: "End of slideshow",
+	previewPptxPresenterEndOfShow: "End of slide show",
 	/** Presentation slideshow — heading of the speaker notes in the presenter view */
 	previewPptxPresenterNotes: "Notes",
 	/** Presenter view — accessible name of the speaker notes area (unique beside the editor's own notes pane) */
@@ -44,43 +44,43 @@ export const previewPptxPresenter = {
 	/** Presentation slideshow — button that whites out the audience's screen (again to return) */
 	previewPptxPresenterWhite: "White screen",
 	/** Presentation slideshow — button that ends the slideshow */
-	previewPptxPresenterEnd: "End slideshow",
+	previewPptxPresenterEnd: "End slide show",
 	/** Presentation slideshow — button in the slideshow window that shows it full screen, after the presenter view opened in its own window */
-	previewPptxPresenterStart: "Start slideshow",
+	previewPptxPresenterStart: "Start slide show",
 	/** Presentation slideshow — note in the presenter view when the browser would not show the slideshow full screen from there */
-	previewPptxPresenterStartHint: "Click Start slideshow in the slideshow window to show it full screen.",
+	previewPptxPresenterStartHint: "Click Start slide show in the slide show window to show it full screen.",
 	/** Presentation slideshow — note when the browser blocked the presenter view's own window, so it is shown in this one */
 	previewPptxPresenterBlocked: "Your browser blocked the presenter window, so the presenter view is shown here.",
 	/** Presentation slideshow — button in the presenter view (shown in the same window) that shows the slideshow instead */
-	previewPptxPresenterShowAudience: "Show slideshow",
+	previewPptxPresenterShowAudience: "Show slide show",
 	/** Presentation slideshow — button over the slideshow that brings the presenter view back */
 	previewPptxPresenterShowPresenter: "Show presenter view",
 	/** Presentation slideshow — button that starts the slideshow with the presenter view */
 	previewPptxPresenterOpen: "Presenter view",
 	/** Presentation shortcuts — next slide or animation in a slideshow */
-	previewPptxShortcutShowNext: "Slideshow: next slide or animation",
+	previewPptxShortcutShowNext: "Slide show: next slide or animation",
 	/** Presentation shortcuts — previous slide or animation in a slideshow */
-	previewPptxShortcutShowPrevious: "Slideshow: previous slide or animation",
+	previewPptxShortcutShowPrevious: "Slide show: previous slide or animation",
 	/** Presentation shortcuts — first slide of a slideshow */
-	previewPptxShortcutShowFirst: "Slideshow: first slide",
+	previewPptxShortcutShowFirst: "Slide show: first slide",
 	/** Presentation shortcuts — last slide of a slideshow */
-	previewPptxShortcutShowLast: "Slideshow: last slide",
+	previewPptxShortcutShowLast: "Slide show: last slide",
 	/** Presentation shortcuts — black screen in a slideshow */
-	previewPptxShortcutShowBlack: "Slideshow: black screen",
+	previewPptxShortcutShowBlack: "Slide show: black screen",
 	/** Presentation shortcuts — white screen in a slideshow */
-	previewPptxShortcutShowWhite: "Slideshow: white screen",
+	previewPptxShortcutShowWhite: "Slide show: white screen",
 	/** Presentation shortcuts — end a slideshow (or put down the pen first) */
-	previewPptxShortcutShowEnd: "Slideshow: end",
+	previewPptxShortcutShowEnd: "Slide show: end",
 	/** Presentation shortcuts — turn the laser pointer on or off in a slideshow */
-	previewPptxShortcutShowLaser: "Slideshow: laser pointer",
+	previewPptxShortcutShowLaser: "Slide show: laser pointer",
 	/** Presentation shortcuts — turn the pen on or off in a slideshow */
-	previewPptxShortcutShowPen: "Slideshow: pen",
+	previewPptxShortcutShowPen: "Slide show: pen",
 	/** Presentation shortcuts — back to the normal pointer (no pen) in a slideshow */
-	previewPptxShortcutShowArrow: "Slideshow: arrow pointer",
+	previewPptxShortcutShowArrow: "Slide show: arrow pointer",
 	/** Presentation shortcuts — erase all ink on the current slide in a slideshow */
-	previewPptxShortcutShowEraseAll: "Slideshow: erase all ink on the slide",
+	previewPptxShortcutShowEraseAll: "Slide show: erase all ink on the slide",
 	/** Presentation shortcuts — start the slideshow from the first slide */
-	previewPptxShortcutShowStart: "Start slideshow from the beginning",
+	previewPptxShortcutShowStart: "Start slide show from the beginning",
 	/** Presentation shortcuts — start the slideshow from the current slide */
-	previewPptxShortcutShowStartCurrent: "Start slideshow from the current slide"
+	previewPptxShortcutShowStartCurrent: "Start slide show from the current slide"
 }

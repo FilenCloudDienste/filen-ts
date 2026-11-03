@@ -211,6 +211,7 @@ function placeholderOf(r: PartReader, nvPr: number): Placeholder | undefined {
 		type: (PLACEHOLDER_TYPES.has(type) ? type : "obj") as PlaceholderType,
 		idx: Math.max(0, r.int(ph, "idx") ?? 0),
 		...(r.int(ph, "idx") === undefined ? {} : { idxWritten: true as const }),
+		...(r.attr(ph, "type") === "obj" ? { typeWritten: true as const } : {}),
 		...(orient === "horz" || orient === "vert" ? { orient } : {}),
 		...(sz === "full" || sz === "half" || sz === "quarter" ? { sz } : {}),
 		...(custom === undefined ? {} : { hasCustomPrompt: custom })

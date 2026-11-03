@@ -29,13 +29,6 @@ export function axisEntryAt(layout: SheetAxisLayout, index: number): number {
 	return k >= 0 && index < (layout.indices[k] ?? 0) + entryCount(layout, k) ? k : -1
 }
 
-// Whether entry k overlaps first..last.
-export function entryMeets(layout: SheetAxisLayout, k: number, first: number, last: number): boolean {
-	const start = layout.indices[k] ?? 0
-
-	return start <= last && start + entryCount(layout, k) - 1 >= first
-}
-
 export interface AxisRun {
 	readonly first: number
 	readonly count: number

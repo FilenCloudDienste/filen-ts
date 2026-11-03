@@ -74,8 +74,16 @@ async function openSource(request: OpenRequest, source: ByteSource, encrypted?: 
 			...(archive === undefined ? {} : { archive }),
 			opc: opened.parts.opc,
 			locks: 0,
-			// The session drops the key when it closes.
-			...(encrypted === undefined ? {} : { release: () => encrypted.release() })
+			// The session drops the key and the open password when it closes.
+			...(encrypted === undefined
+				? {}
+				: {
+						release: () => {
+							passwords.delete(deck)
+							decrypted.delete(deck)
+							encrypted.release()
+						}
+					})
 		}
 	}
 }

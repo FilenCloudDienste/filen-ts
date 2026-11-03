@@ -50,11 +50,12 @@ import {
 	STYLE_NAME_SUFFIX,
 	attributeValues,
 	declared,
-	isRefused,
 	styleDeclarations,
 	takenInStreams,
 	type OdpWriteEnv
 } from "./styles"
+import { isRefused } from "../../presentation/refusal"
+import { sameBytes } from "../../docx/write/bytes"
 
 // The splice of an ODP save (§1.5.4): content.xml is written as the pages of the deck in order, each untouched page
 // copied as its byte span of the source (no parse), each touched page parsed as its fragment and spliced element by
@@ -229,6 +230,48 @@ function familyContent(target: readonly ShapeNode[], pristine: readonly ShapeNod
 
 const TRAILING: ReadonlySet<string> = new Set(["presentation:animations", "presentation:notes"])
 
+// Whether two readings of a shape hold the same paragraphs, text for text, in order.
+function sameParagraphs(shape: ShapeNode, other: ShapeNode | undefined): boolean {
+	const a = shape.text?.paragraphs ?? []
+	const b = other?.text?.paragraphs
+
+	const plain = (paragraph: (typeof a)[number]) => paragraph.runs.map(run => (run.kind === "r" ? run.text : run.kind)).join("")
+
+	return b !== undefined && a.length === b.length && a.every((paragraph, at) => plain(paragraph) === plain(b[at] as (typeof a)[number]))
+}
+
+// The `index`-th paragraph element (text:p, text:h) of a shape whose element is on `fragment`, in document order; -1
+// when the shape is not there or has fewer.
+function paragraphElement(fragment: Fragment, shape: ShapeNode, index: number): number {
+	const src = shape.src
+
+	if (src?.format !== "odp" || src.fragment !== fragment.offset || src.epoch !== fragment.epoch) return -1
+
+	const document = fragment.document
+	const stack = [src.node]
+	let seen = 0
+
+	// Depth first in document order (children pushed last first).
+	while (stack.length > 0) {
+		const node = stack.pop() as number
+		const name = fragment.name(node)
+
+		if (node !== src.node && (name === "text:p" || name === "text:h")) {
+			if (seen === index) return node
+
+			seen++
+			continue
+		}
+
+		const children: number[] = []
+
+		for (let child = document.firstChildElement(node); child >= 0; child = document.nextSiblingElement(child)) children.push(child)
+		for (let k = children.length - 1; k >= 0; k--) stack.push(children[k] as number)
+	}
+
+	return -1
+}
+
 // The parts of content.xml around its pages: where office:automatic-styles takes new styles, and the settings.
 interface ContentLayout {
 	readonly stylesAt: number
@@ -340,14 +383,6 @@ function settingsRange(bytes: Uint8Array, from: number, prefix: string): { reado
 	return undefined
 }
 
-function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
-	if (a.length !== b.length) return false
-
-	for (let k = 0; k < a.length; k++) if (a[k] !== b[k]) return false
-
-	return true
-}
-
 function isWhitespace(bytes: Uint8Array): boolean {
 	for (const byte of bytes) if (byte !== 0x20 && byte !== 0x09 && byte !== 0x0a && byte !== 0x0d) return false
 
@@ -410,9 +445,10 @@ class Splicer {
 
 		this.scope = prologue.namespaces.inScope(prologue.root)
 		this.styles = new OdpStyles(env, "content", taken, styleDeclarations(this.scope))
-		// The stream's own automatic styles first, then those a save retired: a style written again in the form one of them
-		// has takes its name, so a state saved again (an undo back to it) writes the same bytes.
-		const own = new Map<string, string>()
+		// The styles a save retired first (what an undo returns to had them; a source may hold equal copies, as Google's
+		// export does), then the stream's own: a style written again in the form one of them has takes its name, so a state
+		// saved again (an undo back to it) writes the same bytes.
+		const own = new Map<string, string>(source.retired)
 
 		if (prologue.sliced) {
 			const document = prologue.document
@@ -424,12 +460,11 @@ class Splicer {
 					const name = document.attributes(style).find(attribute => attribute.name === "style:name")?.value
 					const raw = document.raw(style)
 
-					if (name !== undefined && document.localName(style) === "style") own.set(name, decodeUtf8(raw, 0, raw.length))
+					if (name !== undefined && document.localName(style) === "style" && !own.has(name))
+						own.set(name, decodeUtf8(raw, 0, raw.length))
 				}
 			}
 		}
-
-		for (const [name, markup] of source.retired) if (!own.has(name)) own.set(name, markup)
 
 		this.styles.reuseRetired(own)
 		this.context = { deck, document: undefined, editor: undefined, styles: this.styles }
@@ -487,7 +522,8 @@ class Splicer {
 		const name = this.names.get(node.ref) ?? node.name ?? ""
 		const targetIds = this.targetIds(fragment, node)
 		// Only a page whose timing is written names paragraphs anew.
-		const paragraphIds = pageAspects(node, pristine.slide, name).timing === true ? this.paragraphIds(fragment, node) : new Map()
+		const paragraphIds =
+			pageAspects(node, pristine.slide, name).timing === true ? this.paragraphIds(fragment, node, pristine.slide) : new Map()
 
 		if (isRefused(paragraphIds)) return paragraphIds
 
@@ -660,52 +696,101 @@ class Splicer {
 	// Every text:p the page's timing targets on its own that has no id gets one unique in the document: a source
 	// paragraph on its element (node), a paragraph the save writes new (of a shape inserted or a body edited since) by
 	// the text family as it writes it (node -1). A paragraph the shape does not have refuses.
-	private paragraphIds(fragment: Fragment, node: SlideNode): Map<string, { readonly node: number; readonly name: string }> | Refused {
+	private paragraphIds(
+		fragment: Fragment,
+		node: SlideNode,
+		pristine: SlideNode
+	): Map<string, { readonly node: number; readonly name: string }> | Refused {
 		const out = new Map<string, { readonly node: number; readonly name: string }>()
-
-		this.ids ??= contentIds(this.parts.content.bytes)
 
 		for (const { shape: id, paragraph } of odpParagraphTargets(node.timing)) {
 			const shape = findTarget(node.shapes, id)
 
-			// A shape written whole (put back by an undo from its held markup) carries its paragraphs' ids with it.
-			if (shape === undefined || (shape.src !== undefined && (shape.src.format !== "odp" || shape.src.fragment !== fragment.offset)))
-				continue
+			if (shape === undefined || (shape.src !== undefined && shape.src.format !== "odp")) continue
 
 			const own = shape.text?.paragraphs[paragraph]
 
 			if (own === undefined) return refused("malformed", `a paragraph target past the text of shape ${String(id)}`)
 
+			// A shape written from markup an undo held: a paragraph of that markup is named by its own id there, any other
+			// is given one (its body is written anew, with the ids given here).
+			if (shape.src?.format === "odp" && shape.src.fragment !== fragment.offset) {
+				const held = this.source.fragmentOf(shape.src)
+
+				if (held === undefined) continue
+
+				const from = odpOwnParagraphSource(shape, paragraph)
+				const inHeld =
+					from?.format === "odp" && from.part === held.part && from.fragment === held.offset && from.epoch === held.epoch
+				const a = inHeld ? held.attributes(from.node) : undefined
+
+				out.set(odpParagraphKey(id, paragraph), {
+					node: -1,
+					name: a?.get("xml:id") ?? a?.get("text:id") ?? this.paragraphName(fragment, id, paragraph)
+				})
+
+				continue
+			}
+
 			const src = odpOwnParagraphSource(shape, paragraph)
 			const sourced = src?.format === "odp" && src.fragment === fragment.offset && src.epoch === fragment.epoch
+			// The paragraph's element on this page: its source's, else (a paragraph an undo put back, its ref from an earlier
+			// file) the shape's paragraph element at its place, where the page holds the same paragraphs in order.
+			const element = sourced
+				? src.node
+				: sameParagraphs(shape, findTarget(pristine.shapes, id))
+					? paragraphElement(fragment, shape, paragraph)
+					: -1
 
-			if (sourced) {
-				const a = fragment.attributes(src.node)
+			if (element >= 0) {
+				const a = fragment.attributes(element)
+				const existing = a.get("xml:id") ?? a.get("text:id")
 
-				if (a.has("xml:id") || a.has("text:id")) continue
+				if (existing !== undefined) {
+					// Named already: the timing names it so (its ref cannot say which element it is).
+					if (!sourced) out.set(odpParagraphKey(id, paragraph), { node: -1, name: existing })
+
+					continue
+				}
 			}
 
-			const key = `${String(fragment.offset)}:${String(fragment.epoch)}:${String(id)}p${String(paragraph)}`
-			let name = this.givenIds.get(key)
-
-			if (name === undefined) {
-				name = `id${String(id)}p${String(paragraph)}`
-
-				for (let n = 2; this.ids.has(name); n++) name = `id${String(id)}p${String(paragraph)}_${String(n)}`
-
-				this.ids.add(name)
-				this.givenIds.set(key, name)
-			}
-
-			out.set(odpParagraphKey(id, paragraph), { node: sourced ? src.node : -1, name })
+			out.set(odpParagraphKey(id, paragraph), { node: element, name: this.paragraphName(fragment, id, paragraph) })
 		}
 
 		return out
 	}
 
-	// An id no element of the content holds.
-	newId(): string {
-		return this.freshId()
+	// The id a save gives paragraph `paragraph` of shape `id` on a page (the same for the page however often it asks),
+	// unique in the content.
+	private paragraphName(fragment: Fragment, id: number, paragraph: number): string {
+		const ids = (this.ids ??= contentIds(this.parts.content.bytes))
+		const key = `${String(fragment.offset)}:${String(fragment.epoch)}:${String(id)}p${String(paragraph)}`
+		let name = this.givenIds.get(key)
+
+		if (name === undefined) {
+			name = `id${String(id)}p${String(paragraph)}`
+
+			for (let n = 2; ids.has(name); n++) name = `id${String(id)}p${String(paragraph)}_${String(n)}`
+
+			ids.add(name)
+			this.givenIds.set(key, name)
+		}
+
+		return name
+	}
+
+	// An id no element of the content holds: `base` when it is free, else `base` with a number.
+	newId(base?: string): string {
+		if (base === undefined) return this.freshId()
+
+		const ids = (this.ids ??= contentIds(this.parts.content.bytes))
+		let name = base
+
+		for (let n = 2; ids.has(name); n++) name = `${base}_${String(n)}`
+
+		ids.add(name)
+
+		return name
 	}
 
 	private freshId(): string {
@@ -756,7 +841,8 @@ class Splicer {
 			kept < 0 ? withPar : ['<anim:par presentation:node-type="timing-root">', { hole: kept }, "</anim:par>"]
 
 		const document = fragment.document
-		const bytes = this.bytes(pieces, document)
+		// Sources that bind anim: only on each page's own timing root (Google's export) need it declared on the new one.
+		const bytes = this.shapeBytes(pieces, fragment, page)
 		const root = odpTimingRoot(fragment, page)
 
 		if (root >= 0) {
@@ -1153,7 +1239,7 @@ export async function odpSplice(input: OdpSaveInput): Promise<OdpSplice | Refuse
 
 			if (node.src === undefined) {
 				const name = names.get(ref) ?? ""
-				const page = newPage(deck, node, name, splicer.context, () => splicer.newId())
+				const page = newPage(deck, node, name, splicer.context, base => splicer.newId(base))
 
 				if (isRefused(page)) return page
 
@@ -1244,7 +1330,7 @@ export async function odpSplice(input: OdpSaveInput): Promise<OdpSplice | Refuse
 
 	if (isRefused(sized)) return sized
 
-	const stylesReplaced = sized === undefined ? [] : [{ name: "styles.xml", bytes: sized }]
+	const stylesReplaced = sized === undefined ? [] : [{ name: "styles.xml", bytes: utf8Declared(sized) }]
 
 	// Nothing of content.xml changed: unchanged, unless styles.xml did (written with content.xml as it is).
 	if (
@@ -1261,10 +1347,8 @@ export async function odpSplice(input: OdpSaveInput): Promise<OdpSplice | Refuse
 
 	if (isRefused(whole)) return whole
 
-	const assembled = withRetired(
-		withoutOrphans(parts.content.bytes, whole, source.retired, source.retiredAfter),
-		source.retired,
-		source.retiredAfter
+	const assembled = utf8Declared(
+		withRetired(withoutOrphans(parts.content.bytes, whole, source.retired, source.retiredAfter), source.retired, source.retiredAfter)
 	)
 
 	// Entries the written pages added (an inserted picture), each with its manifest entry.
@@ -1355,6 +1439,27 @@ function decodeAttribute(bytes: Uint8Array, start: number, end: number): string 
 	} catch {
 		return decodeUtf8(bytes, start, end)
 	}
+}
+
+// A part declared encoding="us-ascii" (XML 1.0 §4.3.3) that holds a byte past ASCII (text a save wrote, always UTF-8)
+// declared UTF-8: its ASCII bytes are UTF-8 as they are. Any other part is returned as it is.
+export function utf8Declared(bytes: Uint8Array): Uint8Array {
+	const head = decodeUtf8(bytes, 0, Math.min(bytes.length, 256))
+	const declaration = /^(\uFEFF?<\?xml\s[^>]*?\bencoding\s*=\s*)(["'])((?:us-)?ascii)\2/iu.exec(head)
+
+	if (declaration === null || !bytes.some(byte => byte >= 0x80)) return bytes
+
+	const start = encodeUtf8(declaration[1] ?? "").length + 1
+	const end = start + (declaration[3] ?? "").length
+
+	const name = encodeUtf8("UTF-8")
+	const out = new Uint8Array(bytes.length - (end - start) + name.length)
+
+	out.set(bytes.subarray(0, start))
+	out.set(name, start)
+	out.set(bytes.subarray(end), start + name.length)
+
+	return out
 }
 
 // The automatic styles of content.xml an edit left without a reference (a deleted page's, a style a patched copy

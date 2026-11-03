@@ -43,6 +43,7 @@ import { dateSerial } from "../../sheet/numfmt/date"
 import type { XlsxDocument } from "./document"
 import { MAX_HIDDEN_ROWS } from "./hide"
 import { CellLog, NO_ROW, cellKeyOf, rowState, type RowState } from "./history"
+import { sameBytes } from "../../docx/write/bytes"
 
 // Autofilters (ECMA-376 Part 1 §18.3.1.2 autoFilter, §18.3.2): the sheet's own and each table's (§18.5.1.2). A
 // column's criteria (criteria.ts) are set or cleared, and every data row of the range is hidden or shown again by
@@ -1107,14 +1108,6 @@ function filterEdit(
 			: { part, contentType: target.table.info.contentType, before: state.heldPart(part), after },
 		names: null
 	}
-}
-
-function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
-	if (a.length !== b.length) return false
-
-	for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false
-
-	return true
 }
 
 // Whether an edit changes nothing.

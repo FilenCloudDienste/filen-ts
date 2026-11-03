@@ -3,7 +3,7 @@ import { pointBudget, readSeries, type PointBudget, type SeriesData } from "./da
 
 // The plot area of a chart part (§21.2.2.145): its plots (c:barChart, c:lineChart...) and axes.
 
-export type PlotKind = "bar" | "line" | "area" | "pie" | "doughnut" | "scatter" | "radar"
+export type PlotKind = "bar" | "line" | "area" | "pie" | "doughnut" | "scatter" | "bubble" | "radar" | "surface"
 
 const PLOT_KINDS: Readonly<Record<string, PlotKind>> = {
 	barChart: "bar",
@@ -18,13 +18,16 @@ const PLOT_KINDS: Readonly<Record<string, PlotKind>> = {
 	ofPieChart: "pie",
 	doughnutChart: "doughnut",
 	scatterChart: "scatter",
+	// Drawn flat (c:bubble3D bubbles as plain circles).
+	bubbleChart: "bubble",
 	radarChart: "radar",
+	// A contour: the surface seen from above, its values in bands (surface3DChart drawn so too, as approximated).
+	surfaceChart: "surface",
+	surface3DChart: "surface",
 	// High-low-close (§21.2.2.198): its series as lines over the categories, drawn only as their own spPr and markers
 	// say (no default line or marker), with the high-low lines between them. Up-down bars are not drawn.
 	stockChart: "line"
 }
-
-export const UNSUPPORTED_PLOTS: ReadonlySet<string> = new Set(["surfaceChart", "surface3DChart", "bubbleChart"])
 
 export type Grouping = "standard" | "clustered" | "stacked" | "percentStacked"
 
@@ -52,6 +55,13 @@ export interface Plot {
 	readonly dataLabels: number
 	// c:hiLowLines (§21.2.2.80, line and stock charts): a line per category from its highest to its lowest value; -1.
 	readonly hiLowLines: number
+	// Bubble charts: c:bubbleScale (percent of the default size), c:sizeRepresents (area or width), c:showNegBubbles.
+	readonly bubbleScale: number
+	readonly sizeByWidth: boolean
+	readonly negativeBubbles: boolean
+	// Surface charts: c:wireframe (band edges drawn as lines, not filled) and the c:bandFmt shape properties by band.
+	readonly wireframe: boolean
+	readonly bandFormats: ReadonlyMap<number, number>
 }
 
 export type AxisKind = "cat" | "val" | "date" | "ser"
@@ -102,6 +112,21 @@ function numberValue(reader: DrawingReader, node: number, local: string): number
 	return Number.isNaN(result) ? undefined : result
 }
 
+const NO_BANDS: ReadonlyMap<number, number> = new Map()
+
+function bandFormats(reader: DrawingReader, node: number): ReadonlyMap<number, number> {
+	const out = new Map<number, number>()
+
+	for (const band of reader.children(reader.child(node, D.C, "bandFmts"), D.C, "bandFmt")) {
+		const index = numberValue(reader, band, "idx")
+		const spPr = reader.child(band, D.C, "spPr")
+
+		if (index !== undefined && index >= 0 && spPr >= 0) out.set(index, spPr)
+	}
+
+	return out
+}
+
 function readPlot(reader: DrawingReader, node: number, kind: PlotKind, budget: PointBudget, seriesCount: { count: number }): Plot {
 	const element = reader.local(node)
 	const groupingText = value(reader, node, "grouping")
@@ -138,7 +163,7 @@ function readPlot(reader: DrawingReader, node: number, kind: PlotKind, budget: P
 		kind,
 		element,
 		node,
-		series: readSeries(reader, node, kind === "scatter", budget, seriesCount),
+		series: readSeries(reader, node, kind === "scatter" || kind === "bubble", budget, seriesCount, kind === "bubble"),
 		axisIds,
 		grouping,
 		horizontal: value(reader, node, "barDir") === "bar",
@@ -152,7 +177,12 @@ function readPlot(reader: DrawingReader, node: number, kind: PlotKind, budget: P
 		filled,
 		smooth,
 		dataLabels: reader.child(node, D.C, "dLbls"),
-		hiLowLines: kind === "line" ? reader.child(node, D.C, "hiLowLines") : -1
+		hiLowLines: kind === "line" ? reader.child(node, D.C, "hiLowLines") : -1,
+		bubbleScale: Math.max(0, Math.min(300, numberValue(reader, node, "bubbleScale") ?? 100)),
+		sizeByWidth: value(reader, node, "sizeRepresents") === "w",
+		negativeBubbles: flag(reader, node, "showNegBubbles", false),
+		wireframe: kind === "surface" && flag(reader, node, "wireframe", false),
+		bandFormats: kind === "surface" ? bandFormats(reader, node) : NO_BANDS
 	}
 }
 
@@ -198,7 +228,7 @@ export interface PlotArea {
 	readonly node: number
 	readonly plots: Plot[]
 	readonly axes: Map<number, Axis>
-	// Plot kinds found (element names) and the ones not drawn.
+	// Plot kinds found (element names), and the ones or parts of them not drawn or drawn approximated.
 	readonly found: string[]
 	readonly unsupported: string[]
 	// Series in every plot, drawn or not (an automatic title shows only for a chart of one series).
@@ -213,7 +243,6 @@ export function readPlotArea(reader: DrawingReader, plotArea: number): PlotArea 
 	const document = reader.document
 	const budget = pointBudget()
 	const seriesCount = { count: 0 }
-	let undrawnSeries = 0
 
 	for (let child = plotArea < 0 ? -1 : document.firstChildElement(plotArea); child >= 0; child = document.nextSiblingElement(child)) {
 		if (reader.group(child) !== D.C) continue
@@ -227,14 +256,11 @@ export function readPlotArea(reader: DrawingReader, plotArea: number): PlotArea 
 			plots.push(readPlot(reader, child, kind, budget, seriesCount))
 
 			if (reader.child(child, D.C, "upDownBars") >= 0) unsupported.push("upDownBars")
+			if (local === "surface3DChart") unsupported.push(local)
 		} else if (axisKind !== undefined) {
 			const axis = readAxis(reader, child, axisKind)
 
 			if (!axes.has(axis.id)) axes.set(axis.id, axis)
-		} else if (UNSUPPORTED_PLOTS.has(local)) {
-			found.push(local)
-			unsupported.push(local)
-			undrawnSeries += reader.children(child, D.C, "ser").length
 		}
 	}
 
@@ -244,6 +270,6 @@ export function readPlotArea(reader: DrawingReader, plotArea: number): PlotArea 
 		axes,
 		found,
 		unsupported,
-		seriesTotal: plots.reduce((sum, plot) => sum + plot.series.length, undrawnSeries)
+		seriesTotal: plots.reduce((sum, plot) => sum + plot.series.length, 0)
 	}
 }

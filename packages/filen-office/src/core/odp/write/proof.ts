@@ -19,7 +19,8 @@ import { IDENTITY, OdpShapeWriter, type Aspects } from "./emit/shape"
 import { slideDiffers } from "./meaning"
 import { pageNames } from "./integrity"
 import type { OdpWriteSource } from "./source"
-import { OdpStyles, isRefused, takenInStreams } from "./styles"
+import { OdpStyles, takenInStreams } from "./styles"
+import { isRefused } from "../../presentation/refusal"
 
 // Proof gate 1 for ODP (§1.5.3): before the first edit on a slide, each source shape is written by the emitters as an
 // edit of what it already says (its box, its text, its name, title and visibility rewritten from the model) and read

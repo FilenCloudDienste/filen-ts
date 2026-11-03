@@ -5,6 +5,7 @@ import { bytesSource, ZipArchive } from "@filen/office/core/opc"
 import type { DeckOp, FileLike, InsertedMedia } from "../core/presentation/edit/ops"
 import type { ShapeNode, SlideNode, Xfrm } from "../core/presentation/model"
 import type { SmartArtInfo } from "../core/smartart/edit"
+import { insertTextBoxOp } from "../core/presentation/edit/commands/insert"
 import { mediaCapability } from "../dom/presentation/engine/media"
 import { pptxParts } from "../dom/presentation/engine/open/pptx"
 import { CORPUS_DIR } from "./corpusDir"
@@ -208,6 +209,34 @@ describe("a replaced picture, its image kept while the history can bring it back
 			}
 		)
 	}
+})
+
+describe("an inserted picture undone after its save", () => {
+	for (const format of ["pptx", "odp"] as const)
+		for (const newEdit of ["move", "text box"] as const)
+			for (const between of [false, true])
+				it(`${format}: leaves its image out of the save after a new edit (${newEdit}) clears the redo${between ? ", a save between" : ""}`, async () => {
+					const d = await driveSession(deckOf(format), format)
+					const slide = d.session.deck.slides[0] as SlideNode["ref"]
+					const shape = { id: 0, name: "Picture", hidden: false, kind: "pic", xfrm: BOX } as ShapeNode
+
+					expect((await d.command({ family: "picture", kind: "insert", slide, shape, image: image(64, 32) })).ok).toBe(true)
+
+					const box = (d.session.deck.nodes.get(slide) as SlideNode).shapes.find(each => each.kind !== "pic") as ShapeNode
+
+					expect(pictures(await saved(d, format))).toHaveLength(1)
+					expect((await d.undo()).ok).toBe(true)
+					// The redo still holds the insert.
+					if (between) expect(pictures(await saved(d, format))).toHaveLength(1)
+					expect(
+						(await d.command(newEdit === "move" ? move(slide, box.id, 9000) : insertTextBoxOp(d.session.deck, slide, 60))).ok
+					).toBe(true)
+
+					const file = await saved(d, format)
+
+					expect(pictures(file)).toEqual([])
+					if (format === "odp") expect(await text(file, "META-INF/manifest.xml")).not.toContain("Pictures/")
+				})
 })
 
 describe("a diagram written anew for its pictures, its earlier parts kept while the history can bring them back", () => {

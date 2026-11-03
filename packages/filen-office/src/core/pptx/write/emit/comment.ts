@@ -23,6 +23,7 @@ import { PART_CONTENT_TYPES, RELATIONSHIPS, type PackageWriter } from "../parts"
 import type { PptxEmitFamily } from "../types"
 import type { ReviewSpliceInput } from "./notes"
 import { URIS } from "./shape"
+import { sameBytes } from "../../../docx/write/bytes"
 
 // The comment parts of the slides whose comments changed, and the deck's author parts, written after the splice
 // writer's slides. A comment part is edited in place: elements whose bytes the session still holds stay where they
@@ -79,14 +80,6 @@ function inScope(raw: Uint8Array, from: Scope, target: Scope): Uint8Array {
 	out.set(raw.subarray(end), end + head.length)
 
 	return out
-}
-
-function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
-	if (a.length !== b.length) return false
-
-	for (let at = 0; at < a.length; at++) if (a[at] !== b[at]) return false
-
-	return true
 }
 
 function rootScope(document: XmlDocument): Scope {

@@ -531,36 +531,6 @@ export function dibImage(
 	return { format: "png", bytes: encodePng(rgba, dib.width, dib.height) }
 }
 
-// The mean colour of the bitmap, sampled on a grid of at most 64 x 64 pixels (a pattern brush drawn as a
-// solid fill).
-export function averageColor(dib: Dib, budget: PixelBudget, lookup?: PaletteLookup): Rgba {
-	const rgba = decodeDib(dib, false, budget, lookup)
-
-	if (rgba === undefined) return 0x808080ff
-
-	const stepX = Math.max(1, Math.floor(dib.width / 64))
-	const stepY = Math.max(1, Math.floor(dib.height / 64))
-	let r = 0
-	let g = 0
-	let b = 0
-	let count = 0
-
-	for (let y = 0; y < dib.height; y += stepY) {
-		for (let x = 0; x < dib.width; x += stepX) {
-			const p = (y * dib.width + x) * 4
-
-			r += rgba[p] ?? 0
-			g += rgba[p + 1] ?? 0
-			b += rgba[p + 2] ?? 0
-			count++
-		}
-	}
-
-	return count === 0
-		? 0x808080ff
-		: ((Math.round(r / count) << 24) | (Math.round(g / count) << 16) | (Math.round(b / count) << 8) | 255) >>> 0
-}
-
 // A packed DIB (BITMAPINFO followed by its bits) occupying [offset, offset + size).
 export function packedDib(bytes: Bytes, offset: number, size: number, usage: number): Dib | undefined {
 	const headerSize = bytes.u32(offset)

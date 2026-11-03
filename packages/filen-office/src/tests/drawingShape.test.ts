@@ -425,6 +425,31 @@ describe("SmartArt", () => {
 		expect(list.itemFloat(texts[0] ?? 0, ItemFloat.WIDTH)).toBeCloseTo(48, 3)
 	})
 
+	it("turns a text box by the shape's turn plus its own (txXfrm rot is relative)", () => {
+		// The Gear layout's cache: a shape turned 345 degrees whose text turns back by 345, so it reads upright.
+		const shape = (rot: string, textRot: string) =>
+			xml(
+				`<dsp:drawing ${NS}><dsp:spTree><dsp:nvGrpSpPr><dsp:cNvPr id="0" name=""/><dsp:cNvGrpSpPr/></dsp:nvGrpSpPr><dsp:grpSpPr/>
+				<dsp:sp modelId="{1}"><dsp:nvSpPr><dsp:cNvPr id="0" name=""/><dsp:cNvSpPr/></dsp:nvSpPr>
+					<dsp:spPr><a:xfrm${rot}><a:off x="95250" y="95250"/><a:ext cx="476250" cy="285750"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></dsp:spPr>
+					<dsp:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:rPr lang="en-US"/><a:t>Three</a:t></a:r></a:p></dsp:txBody>
+					<dsp:txXfrm${textRot}><a:off x="104775" y="104775"/><a:ext cx="457200" cy="266700"/></dsp:txXfrm></dsp:sp>
+			</dsp:spTree></dsp:drawing>`
+			)
+		const turn = (rot: string, textRot: string) => {
+			const list = convertSmartArt(context(), shape(rot, textRot), 100 * EMU, 50 * EMU)?.list ?? new DrawingList()
+			const text = items(list, ItemKind.TEXT)[0] ?? 0
+
+			return (Math.atan2(list.itemFloat(text, ItemFloat.B), list.itemFloat(text, ItemFloat.A)) * 180) / Math.PI
+		}
+
+		expect(turn(' rot="20700000"', ' rot="-20700000"')).toBeCloseTo(0, 3)
+		// Upright text on a shape turned half way round (an up-arrow callout pointing down).
+		expect(turn(' rot="10800000"', ' rot="-10800000"')).toBeCloseTo(0, 3)
+		// No txXfrm turn: the text turns with the shape.
+		expect(turn(' rot="5400000"', "")).toBeCloseTo(90, 3)
+	})
+
 	it("rejects parts that are not drawings", () => {
 		const document = xml(`<dsp:other ${NS}/>`)
 

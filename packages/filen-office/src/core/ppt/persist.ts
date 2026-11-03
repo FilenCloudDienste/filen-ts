@@ -135,11 +135,6 @@ export function readPersistDirectory(stream: Uint8Array, user: CurrentUser, budg
 	return { offsets, edits, current }
 }
 
-// The record header of a persist object, read from the (possibly still encrypted) stream: callers decrypt first.
-export function persistOffset(directory: PersistDirectory, id: number): number | undefined {
-	return directory.offsets.get(id)
-}
-
 // Whether the newest edit names an encryption session ([MS-PPT] §2.3.7: it MUST in an encrypted file).
 export function isEncryptedEdit(directory: PersistDirectory): boolean {
 	return directory.current.encryptSessionPersistIdRef !== 0 && directory.offsets.has(directory.current.encryptSessionPersistIdRef)

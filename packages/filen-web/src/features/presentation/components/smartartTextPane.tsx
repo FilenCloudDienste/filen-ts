@@ -309,6 +309,7 @@ export function SmartArtTextPane({
 	return (
 		<aside
 			data-preview-surface
+			data-office-pane
 			aria-labelledby={headingId}
 			className={cn(
 				"flex min-h-0 shrink-0 flex-col bg-background",

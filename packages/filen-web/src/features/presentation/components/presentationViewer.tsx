@@ -31,7 +31,7 @@ import { RibbonButton } from "@/features/office/components/ribbon/ribbonControls
 import { usePhoneWidth } from "@/features/office/components/ribbon/phoneMedia"
 import { BAR_BUTTON, pageControlsWidth, useLeaveViewerFullScreen } from "@/features/preview/components/commandBar.logic"
 import { CommandFileMenu, FullScreenButton, PageControls } from "@/features/preview/components/commandBarControls"
-import { onCommandBarF6 } from "@/features/office/components/ribbon/ribbonFocus"
+import { onCommandBarF6, onRibbonEscape } from "@/features/office/components/ribbon/ribbonFocus"
 import { useEditorLayerKeys } from "@/lib/keymap/editorLayerKeys"
 import { DocxPasswordGate, type PasswordVerdict } from "@/features/preview/components/docxPasswordPrompt"
 import { PreviewDownloadButton, PreviewErrorState, PreviewGate, PreviewLoading } from "@/features/preview/components/previewErrorState"
@@ -60,6 +60,7 @@ import { PresentationMediaFrames } from "@/features/presentation/components/medi
 import { fullscreenSupported } from "@/lib/media/fullscreen"
 import { log } from "@/lib/log"
 import type { PreviewKey } from "@/lib/i18n"
+import { openRefusalKey } from "@/features/presentation/lib/openRefusal"
 
 // A presentation in the preview: the slide in view (fit inside the canvas), the slide list beside it (a strip under
 // it at phone widths), the speaker notes under it and a read-only command bar (slides, Present, the list and notes
@@ -347,17 +348,6 @@ function PreparedDeck({
 	}
 }
 
-const REFUSAL_KEYS: Partial<Record<PresentationRefusal, PreviewKey>> = {
-	malformed: "previewPptxMalformed",
-	tooLarge: "previewPptxTooLarge",
-	tooDeep: "previewPptxTooLarge",
-	rightsManaged: "previewPptxRightsManaged",
-	unsupportedEncryption: "previewPptxUnsupportedEncryption",
-	damagedEncryption: "previewPptxDamagedEncryption",
-	unsupported: "previewPptxUnsupported",
-	notImplemented: "previewPptxUnsupported"
-}
-
 // Failures a second try can fix (the worker went away, the open was called off).
 const RETRYABLE: ReadonlySet<PresentationRefusal> = new Set(["failed", "aborted", "closed"])
 
@@ -402,7 +392,7 @@ function DeckSession({
 
 		return (
 			<PreviewErrorState
-				message={t(stopped ? "previewPptxStoppedWorking" : (REFUSAL_KEYS[reason] ?? "previewPptxLoadFailed"))}
+				message={t(stopped ? "previewPptxStoppedWorking" : openRefusalKey(reason))}
 				{...(RETRYABLE.has(reason) && onRetry !== undefined ? { onRetry } : {})}
 				action={<PreviewDownloadButton />}
 			/>
@@ -669,8 +659,13 @@ function DeckSurface({
 			role="region"
 			aria-label={alt}
 			className="flex size-full flex-col"
+			onKeyDownCapture={event => {
+				onRibbonEscape(event, event.currentTarget, focusSlide, "capture")
+			}}
 			onKeyDown={event => {
 				if (show.onKey(event)) return
+
+				if (onRibbonEscape(event, event.currentTarget, focusSlide, "bubble")) return
 
 				onCommandBarF6(event, event.currentTarget, focusSlide)
 				onPageKey(event, show.showing, step => {

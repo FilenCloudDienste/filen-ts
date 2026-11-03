@@ -42,10 +42,13 @@ const CLASS_PREFIX: Readonly<Record<string, string>> = {
 	entr: "ooo-entrance-",
 	exit: "ooo-exit-",
 	emph: "ooo-emphasis-",
-	path: "ooo-motionpath-"
+	path: "ooo-motionpath-",
+	mediacall: "ppt_"
 }
 
 const PRESET_NAMES: Readonly<Record<string, Readonly<Record<number, string>>>> = {
+	// PowerPoint's media Play, as LibreOffice 7.5 names it.
+	mediacall: { 1: "mediacall_1" },
 	entr: {
 		1: "appear",
 		2: "fly-in",

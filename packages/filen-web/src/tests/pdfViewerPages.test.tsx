@@ -306,6 +306,16 @@ describe("PdfViewer", () => {
 		expect(within(dialog).getByText("3")).toBeTruthy()
 	})
 
+	it("gives the pages focus with Escape on a command bar control, keeping the key from closing the preview", async () => {
+		await mount()
+
+		const file = screen.getByRole("button", { name: "File" })
+
+		file.focus()
+		expect(fireEvent.keyDown(file, { key: "Escape" })).toBe(false)
+		expect(document.activeElement).toBe(document.querySelector<HTMLElement>(".fo-pdf-page")?.closest("[tabindex]"))
+	})
+
 	it("moves between the command bar and the pages with F6", async () => {
 		await mount()
 

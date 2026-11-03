@@ -10,6 +10,7 @@ import {
 	type StyleScope
 } from "../../odf/index"
 import type { DeckTally, PresentationBudgets } from "../../presentation/budget"
+import { BUILTIN_SUFFIX, builtinPresentationStyle } from "./builtinStyles"
 import type { SlideRef, SourceRef } from "../../presentation/model"
 import { tooLarge } from "../../presentation/refusal"
 import type { Namespaces, XmlDocument } from "../../xml/index"
@@ -70,6 +71,10 @@ export class Fragment {
 }
 
 const FONT_INDEPENDENT = "style:font-independent-line-spacing"
+
+// The presentation styles a master page writes for its objects (LibreOffice's names, §16.4): none of them makes it a
+// master without styles.
+const MASTER_SUFFIXES = ["title", "subtitle", "notes", "outline1", "background", "backgroundobjects"]
 const RELATIVE_SIZE = new Set(["fo:font-size", "style:font-size-asian", "style:font-size-complex"])
 
 // Properties of `own` over `base`, a percent font size taken of the base's (§20.190).
@@ -133,6 +138,10 @@ export class OdpContext {
 	private readonly pages: ReadonlyMap<string, SlideRef>
 	private fields = 0
 	private readonly owned = new Map<string, OdfProperties>()
+	// Whether each master page writes no presentation styles of its own.
+	private readonly styleless = new Map<string, boolean>()
+	// builtin's answer per style name (null: none), asked on every presentation style lookup.
+	private readonly builtins = new Map<string, ReadonlyMap<string, OdfProperties> | null>()
 
 	private readonly facts: PackageFacts
 
@@ -222,6 +231,15 @@ export class OdpContext {
 		const key = `${scope}\u0000${family}\u0000${name}\u0000${kind}`
 		let held = this.owned.get(key)
 
+		if (held === undefined && family === "presentation") {
+			const builtin = this.builtin(name)
+
+			if (builtin !== undefined) {
+				held = builtin.get(kind) ?? NO_PROPERTIES
+				this.owned.set(key, held)
+			}
+		}
+
 		if (held === undefined) {
 			held = NO_PROPERTIES
 
@@ -253,7 +271,7 @@ export class OdpContext {
 	): OdfProperties {
 		let out = this.sheet.defaults.get("graphic")?.properties.get(kind) ?? NO_PROPERTIES
 
-		if (presentationClass !== undefined && base === undefined && kind === "graphic") {
+		if (presentationClass !== undefined && (base === undefined || this.builtin(base) !== undefined) && kind === "graphic") {
 			if (presentationClass === "notes") out = overlay(out, CLASS_NOTES_GRAPHIC)
 			else if (presentation !== undefined) out = overlay(out, CLASS_STYLE_GRAPHIC)
 		}
@@ -275,10 +293,44 @@ export class OdpContext {
 
 	// A presentation style's own properties of one kind, without its parents (an automatic style's hard attributes).
 	ownOnly(name: string, scope: StyleScope, kind: string): OdfProperties {
-		return this.sheet.style("presentation", name, scope)?.properties.get(kind) ?? NO_PROPERTIES
+		return this.sheet.style("presentation", name, scope)?.properties.get(kind) ?? this.builtin(name)?.get(kind) ?? NO_PROPERTIES
 	}
 
 	hasPresentationStyle(name: string): boolean {
-		return this.sheet.style("presentation", name, "styles") !== undefined
+		return this.sheet.style("presentation", name, "styles") !== undefined || this.builtin(name) !== undefined
+	}
+
+	// LibreOffice's built-in style a presentation style name stands for ("<master>-title"…): only for a master page that
+	// defines no presentation styles of its own (builtinStyles.ts), and only where the file writes none of that name.
+	private builtin(name: string): ReadonlyMap<string, OdfProperties> | undefined {
+		const held = this.builtins.get(name)
+
+		if (held !== undefined) return held ?? undefined
+
+		const found = this.builtinOf(name)
+
+		this.builtins.set(name, found ?? null)
+
+		return found
+	}
+
+	private builtinOf(name: string): ReadonlyMap<string, OdfProperties> | undefined {
+		const at = name.lastIndexOf("-")
+
+		if (at <= 0) return undefined
+
+		const master = name.slice(0, at)
+		const suffix = name.slice(at + 1)
+
+		if (!BUILTIN_SUFFIX.test(suffix) || !this.sheet.masterPages.has(master)) return undefined
+
+		let bare = this.styleless.get(master)
+
+		if (bare === undefined) {
+			bare = MASTER_SUFFIXES.every(each => this.sheet.style("presentation", `${master}-${each}`, "styles") === undefined)
+			this.styleless.set(master, bare)
+		}
+
+		return bare ? builtinPresentationStyle(suffix) : undefined
 	}
 }

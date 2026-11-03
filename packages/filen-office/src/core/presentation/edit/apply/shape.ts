@@ -21,6 +21,8 @@ import type { ApplyContext, ApplyFamily, ApplyResult, Inverse, Touch } from "../
 import { cloneModel, digestOf, findShape } from "../changes"
 import type { DeckOp, OpOf, ShapeOp } from "../ops"
 import { xmlSafeText } from "../xmlText"
+import { isRefused } from "../../refusal"
+import { sameBytes } from "../../../docx/write/bytes"
 
 // The shape ops on the model, in place. Inverses follow ops.ts: typed values where the prior state was an edit
 // (a local xfrm, `props`), bytes where it was source. A content op on a shape backed by source is undone by
@@ -40,10 +42,6 @@ export interface SourceReading extends ApplyContext {
 
 function reading(context: ApplyContext): SourceReading | undefined {
 	return "readShape" in context ? (context as SourceReading) : undefined
-}
-
-export function isRefused(value: unknown): value is Refused {
-	return typeof value === "object" && value !== null && (value as { kind?: unknown }).kind === "refused"
 }
 
 type At = { readonly shape: ShapeNode; readonly parent: number; readonly index: number }
@@ -83,7 +81,8 @@ function contentLock(shape: ShapeNode): Refused | undefined {
 }
 
 // A move rewrites only a:xfrm (in both branches of an mc:AlternateContent; p:xfrm of an unknown frame).
-function moveLock(shape: ShapeNode, context: ApplyContext): Refused | undefined {
+// Whether a locked shape (written as its source) can have its box rewritten: refused with the lock's reason if not.
+export function moveLock(shape: ShapeNode, context: ApplyContext): Refused | undefined {
 	switch (shape.lock) {
 		case undefined:
 		case "alternateContent":
@@ -198,14 +197,6 @@ function overlay(typed: ShapeNode, read: ShapeNode): ShapeNode {
 	}
 
 	return out
-}
-
-function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
-	if (a.length !== b.length) return false
-
-	for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false
-
-	return true
 }
 
 // The shape an insert puts in: a copy of the op's, its source backing checked against `raw`.
@@ -668,7 +659,12 @@ function zOrder(node: SlideNode, op: OpOf<"shape"> & { kind: "zOrder" }, context
 	return { kind: "applied", inverse: inverseOf(back), op }
 }
 
-function setProps(node: SlideNode, op: OpOf<"shape"> & { kind: "setProps" }, context: ApplyContext): ApplyResult<typeof op> {
+function setProps(
+	node: SlideNode,
+	op: OpOf<"shape"> & { kind: "setProps" },
+	context: ApplyContext,
+	format: Deck["format"]
+): ApplyResult<typeof op> {
 	const at = findShape(node.shapes, op.target.id)
 
 	if (at === undefined) return refused("notFound", `shape ${String(op.target.id)}`)
@@ -678,6 +674,13 @@ function setProps(node: SlideNode, op: OpOf<"shape"> & { kind: "setProps" }, con
 	if (locked !== undefined) return locked
 
 	const groups = Object.keys(op.props) as (keyof ShapePropsEdit)[]
+
+	// A graphic frame (a chart, table, diagram or object) has no shape properties to hold them (p:graphicFrame,
+	// §19.3.1.21; draw:frame of an object).
+	if (at.shape.kind === "frame" && groups.length > 0) return refused("unsupported", `a graphic frame cannot hold ${groups.join(", ")}`)
+	// An ODP page thumbnail (draw:page-thumbnail, §10.3.6) shows its page; its own graphic style is never read.
+	if (format === "odp" && at.shape.ph?.type === "sldImg" && groups.length > 0)
+		return refused("unsupported", `a page thumbnail cannot hold ${groups.join(", ")}`)
 	// Prior groups that were edits (or a shape with no source) are put back as values; a source group by bytes.
 	const typed = at.shape.src === undefined || groups.every(group => at.shape.props?.[group] !== undefined)
 	let back: Inverse | Refused
@@ -1162,7 +1165,7 @@ function applyOne(deck: Deck, op: ShapeOp, context: ApplyContext): ApplyResult<S
 		case "restore":
 			return restore(node, op, context)
 		case "setProps":
-			return setProps(node, op, context)
+			return setProps(node, op, context, deck.format)
 		case "setStyle":
 			return applied(
 				setField(

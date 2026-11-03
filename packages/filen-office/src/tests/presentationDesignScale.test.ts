@@ -40,10 +40,40 @@ const ALTERNATE =
 	'<p:sp><p:nvSpPr><p:cNvPr id="5" name="Alt"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x="11000000" y="6000000"/><a:ext cx="1000000" cy="500000"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr></p:sp>' +
 	"</mc:Choice></mc:AlternateContent>"
 
+// A shape in a branch the reader takes (p14, with its fallback copy): kept as written, its box rewritten in both
+// branches when it moves.
+const P14 = "http://schemas.microsoft.com/office/powerpoint/2010/main"
+const KNOWN_SHAPE = (body: string): string =>
+	'<p:sp><p:nvSpPr><p:cNvPr id="7" name="Kept"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x="11000000" y="6000000"/><a:ext cx="1000000" cy="500000"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr>' +
+	`${body}</p:sp>`
+const KNOWN = (body: string): string =>
+	`<mc:AlternateContent xmlns:mc="${MC}"><mc:Choice xmlns:p14="${P14}" Requires="p14">${KNOWN_SHAPE(body)}</mc:Choice><mc:Fallback>${KNOWN_SHAPE(body)}</mc:Fallback></mc:AlternateContent>`
+// The same with text that states no size of its own (it takes its master's, which the change scales).
+const KNOWN_INHERITED_TEXT = KNOWN('<p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:rPr lang="en-US"/><a:t>y</a:t></a:r></a:p></p:txBody>')
+// The same with text whose fallback states a size its Choice does not: no stated value of the read branch says how
+// the other's scales.
+const KNOWN_UNEVEN =
+	`<mc:AlternateContent xmlns:mc="${MC}"><mc:Choice xmlns:p14="${P14}" Requires="p14">` +
+	KNOWN_SHAPE('<p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:rPr lang="en-US"/><a:t>y</a:t></a:r></a:p></p:txBody>') +
+	"</mc:Choice><mc:Fallback>" +
+	KNOWN_SHAPE('<p:txBody><a:bodyPr/><a:lstStyle/><a:p><a:r><a:rPr lang="en-US" sz="2400"/><a:t>y</a:t></a:r></a:p></p:txBody>') +
+	"</mc:Fallback></mc:AlternateContent>"
+// The same with text stating sizes, spacing, a bullet size and indents of its own, which a scale rewrites.
+const KNOWN_TEXT = KNOWN(
+	'<p:txBody><a:bodyPr/><a:lstStyle><a:lvl1pPr marL="914400" indent="-457200"><a:spcBef><a:spcPts val="1200"/></a:spcBef><a:defRPr sz="2800"/></a:lvl1pPr></a:lstStyle>' +
+		'<a:p><a:pPr marL="685800" indent="-342900"><a:buSzPts val="2000"/></a:pPr><a:r><a:rPr lang="en-US" sz="2400"/><a:t>y</a:t></a:r><a:endParaRPr lang="en-US" sz="2400"/></a:p></p:txBody>'
+)
+
 const PLAIN =
 	'<p:sp><p:nvSpPr><p:cNvPr id="6" name="Plain"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x="11000000" y="6000000"/><a:ext cx="1000000" cy="500000"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr>' +
 	'<p:txBody><a:bodyPr/><a:lstStyle><a:lvl1pPr><a:spcBef><a:spcPts val="1200"/></a:spcBef><a:defRPr sz="2800"/></a:lvl1pPr></a:lstStyle>' +
 	'<a:p><a:pPr><a:buSzPts val="2000"/></a:pPr><a:r><a:rPr lang="en-US" sz="2400"/><a:t>x</a:t></a:r><a:endParaRPr lang="en-US" sz="2400"/></a:p></p:txBody></p:sp>'
+
+// Paragraph indents in a list level and in a paragraph's own properties.
+const INDENTED =
+	'<p:sp><p:nvSpPr><p:cNvPr id="7" name="Indented"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x="1000000" y="1000000"/><a:ext cx="6000000" cy="2000000"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></p:spPr>' +
+	'<p:txBody><a:bodyPr/><a:lstStyle><a:lvl1pPr marL="914400" indent="-457200"><a:defRPr sz="2800"/></a:lvl1pPr></a:lstStyle>' +
+	'<a:p><a:pPr marL="685800" indent="-342900"/><a:r><a:rPr lang="en-US" sz="2400"/><a:t>x</a:t></a:r></a:p></p:txBody></p:sp>'
 
 function slide(content: string): string {
 	return (
@@ -142,6 +172,33 @@ describe("a scaled slide size change", () => {
 		h.close()
 	})
 
+	it("scales paragraph and list level indents with the text, and undo puts them back exactly", async () => {
+		const bytes = await deck(INDENTED)
+		const h = await editHarness(bytes)
+		const saved = await saveEdits(h, revisionOf(await h.command(TO_4X3)))
+		const parts = await partsOf(saved)
+		const markup = text(parts.get("ppt/slides/slide2.xml"))
+
+		expect(markup).toMatch(/<a:lvl1pPr marL="685800" indent="-342900"/u)
+		expect(markup).toMatch(/<a:pPr marL="514350" indent="-257175"/u)
+
+		// The master's text styles' indents scale too.
+		const indents = (markup: string): number[] => numbers(markup, /\b(?:marL|indent)="(-?\d+)"/gu)
+		const source = await partsOf(bytes)
+		const master = indents(text(source.get("ppt/slideMasters/slideMaster1.xml")))
+
+		expect(master.some(value => value !== 0)).toBe(true)
+		expect(indents(text(parts.get("ppt/slideMasters/slideMaster1.xml")))).toEqual(master.map(value => Math.round(value * 0.75)))
+
+		await rebaseSession(h, bytes, saved)
+
+		const back = await partsOf(await saveEdits(h, revisionOf(await h.undo())))
+
+		expect(text(back.get("ppt/slides/slide2.xml"))).toBe(text(source.get("ppt/slides/slide2.xml")))
+		expect(indents(text(back.get("ppt/slideMasters/slideMaster1.xml")))).toEqual(master)
+		h.close()
+	})
+
 	it("leaves the text sizes alone when the content keeps its scale", async () => {
 		const bytes = await designDeck(["title", "obj"], {})
 		const h = await editHarness(bytes)
@@ -161,11 +218,94 @@ describe("a scaled slide size change", () => {
 		h.close()
 	})
 
-	it("refuses a change that would leave a locked shape where it was", async () => {
-		const h = await editHarness(await deck(ALTERNATE + PLAIN))
-		const result = await h.command(TO_4X3)
+	it("moves and scales a shape kept as written with the others when only its box changes", async () => {
+		const h = await editHarness(await deck(KNOWN("") + PLAIN))
+		const parts = await partsOf(await saveEdits(h, revisionOf(await h.command(TO_4X3))))
+		const markup = text(parts.get("ppt/slides/slide2.xml"))
+		// 16:9 to 4:3, Ensure fit: s = 0.75, the content centred vertically (dy = 857250); both branches' copies.
+		const boxes = [...markup.matchAll(/name="Kept".*?<a:off x="(\d+)" y="(\d+)"\/><a:ext cx="(\d+)" cy="(\d+)"\/>/gsu)].map(match =>
+			match.slice(1).map(Number)
+		)
 
-		expect(result).toMatchObject({ ok: false, refusal: "locked" })
+		expect(boxes).toEqual([
+			[8_250_000, 5_357_250, 750_000, 375_000],
+			[8_250_000, 5_357_250, 750_000, 375_000]
+		])
+		h.close()
+	})
+
+	it("scales a kept shape whose text states no size: its box in both branches, its text as written", async () => {
+		const bytes = await deck(KNOWN_INHERITED_TEXT + PLAIN)
+		const h = await editHarness(bytes)
+		const saved = await saveEdits(h, revisionOf(await h.command(TO_4X3)))
+		const markup = text((await partsOf(saved)).get("ppt/slides/slide2.xml"))
+		const boxes = [...markup.matchAll(/name="Kept".*?<a:off x="(\d+)" y="(\d+)"\/><a:ext cx="(\d+)" cy="(\d+)"\/>/gsu)].map(match =>
+			match.slice(1).map(Number)
+		)
+
+		expect(boxes).toEqual([
+			[8_250_000, 5_357_250, 750_000, 375_000],
+			[8_250_000, 5_357_250, 750_000, 375_000]
+		])
+		expect(markup.match(/<a:p><a:r><a:rPr lang="en-US"\/><a:t>y<\/a:t><\/a:r><\/a:p>/gu)).toHaveLength(2)
+		h.close()
+
+		// Reopened, the saved deck reads the kept shape at its new box.
+		const again = await editHarness(saved)
+		const kept = (await again.slide(1)).shapes.find(shape => shape.name === "Kept")
+
+		expect(kept?.xfrm).toMatchObject({ x: 8_250_000, y: 5_357_250, cx: 750_000, cy: 375_000 })
+		again.close()
+	})
+
+	it("scales a kept shape's stated text values in both branches, and undo after the save puts them back exactly", async () => {
+		const bytes = await deck(KNOWN_TEXT + PLAIN)
+		const h = await editHarness(bytes)
+		const saved = await saveEdits(h, revisionOf(await h.command(TO_4X3)))
+		const markup = text((await partsOf(saved)).get("ppt/slides/slide2.xml"))
+		const kept = [...markup.matchAll(/<p:sp><p:nvSpPr><p:cNvPr id="7" name="Kept"\/>.*?<\/p:sp>/gsu)].map(match => match[0])
+
+		expect(kept).toHaveLength(2)
+
+		for (const copy of kept) {
+			expect(copy).toContain('<a:off x="8250000" y="5357250"/><a:ext cx="750000" cy="375000"/>')
+			expect(copy).toContain(
+				'<a:lvl1pPr marL="685800" indent="-342900"><a:spcBef><a:spcPts val="900"/></a:spcBef><a:defRPr sz="2100"/>'
+			)
+			expect(copy).toContain('<a:pPr marL="514350" indent="-257175"><a:buSzPts val="1500"/></a:pPr>')
+			expect(copy).toContain('<a:rPr lang="en-US" sz="1800"/>')
+			expect(copy).toContain('<a:endParaRPr lang="en-US" sz="1800"/>')
+		}
+
+		// Reopened, the kept shape reads at its scaled sizes, and saves again unchanged.
+		const again = await editHarness(saved)
+		const shape = (await again.slide(1)).shapes.find(each => each.name === "Kept")
+
+		expect(shape?.text?.paragraphs[0]?.runs[0]).toMatchObject({ rPr: { sz: 1800 } })
+		again.close()
+
+		await rebaseSession(h, bytes, saved)
+
+		const back = await partsOf(await saveEdits(h, revisionOf(await h.undo())))
+
+		expect(text(back.get("ppt/slides/slide2.xml"))).toBe(text((await partsOf(bytes)).get("ppt/slides/slide2.xml")))
+		h.close()
+	})
+
+	it("refuses a change whose scale a kept shape's other branch could not follow", async () => {
+		const h = await editHarness(await deck(KNOWN_UNEVEN + PLAIN))
+
+		expect(await h.command(TO_4X3)).toMatchObject({ ok: false, refusal: "locked" })
+
+		// Without scaling the content, its text keeps its size and it only moves: the change applies.
+		expect((await h.command({ ...TO_4X3, scale: "none" })).ok).toBe(true)
+		h.close()
+	})
+
+	it("refuses a change that would leave a shape it cannot read where it was", async () => {
+		const h = await editHarness(await deck(ALTERNATE + PLAIN))
+
+		expect(await h.command(TO_4X3)).toMatchObject({ ok: false, refusal: "locked" })
 
 		// Without scaling the content, nothing moves: the change applies.
 		expect((await h.command({ ...TO_4X3, scale: "none" })).ok).toBe(true)

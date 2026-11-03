@@ -110,7 +110,7 @@ export const previewPptxObjects = {
 	/** Presentation editor — Picture tab button and dialog: change brightness, contrast, colour and transparency */
 	previewPptxPictureCorrections: "Corrections",
 	/** Presentation editor — picture corrections dialog description */
-	previewPptxPictureCorrectionsDescription: "Change the picture's brightness, contrast and colour.",
+	previewPptxPictureCorrectionsDescription: "Change the picture's brightness, contrast and color.",
 	/** Presentation editor — picture corrections field, a percentage from -100 to 100 */
 	previewPptxPictureBrightness: "Brightness (%)",
 	/** Presentation editor — picture corrections field, a percentage from -100 to 100 */

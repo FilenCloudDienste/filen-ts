@@ -513,7 +513,7 @@ describe("the PowerPoint 97–2003 bar's Save as .odp", () => {
 			within(list)
 				.getAllByRole("listitem")
 				.map(entry => entry.textContent)
-		).toEqual(["Its macros (a VBA project), which the copy can't hold", "2 SmartArt diagrams, kept as groups of shapes"])
+		).toEqual(["Its macros, which the copy can't hold", "2 SmartArt diagrams, kept as groups of shapes"])
 		expect(uploads).toEqual([{ bytes, extension: "odp" }])
 		expect(opened).toEqual([])
 	})

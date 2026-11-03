@@ -1,7 +1,10 @@
 import type { Matrix } from "../pdfwrite/content"
 import type { PdfFontFaceRequest, PdfFontSet, PdfShapedText } from "../pdfwrite/fonts/fontSet"
 import type { PdfGradient } from "../pdfwrite/shading"
+import type { PdfImageData } from "../pdfwrite/images"
 import type { PdfImage, PdfPage } from "../pdfwrite/page"
+import type { PdfImageSource } from "../pdfwrite/writer"
+import { recolorPixels, recolors } from "./canvas"
 import {
 	ITEM_FILL_MODIFIER_MASK,
 	ITEM_FLOATS,
@@ -16,6 +19,7 @@ import {
 	type DrawingList,
 	type DrawingText,
 	type GradientStops,
+	type ImageTile,
 	type Inset,
 	type Paint,
 	type Stroke,
@@ -28,8 +32,8 @@ import { layoutBlock } from "./textBlock"
 // A drawing's display list painted onto a PDF page as vectors: paths with their fills (solid, linear and path
 // gradients as shadings, patterns as the blend of their colours, pictures clipped by the path), strokes with
 // widths, caps, joins and dashes, clips (and their parents), pictures with their crop and opacity, and text shaped
-// by the export's fonts. What it draws matches the SVG painter (react/docx/paint/drawing.ts) item for item; shadows,
-// picture recolouring and a clip group's opacity as one group are not drawn (each item takes the group's opacity).
+// by the export's fonts. What it draws matches the SVG painter (react/docx/paint/drawing.ts) item for item; shadows
+// and a clip group's opacity as one group are not drawn (each item takes the group's opacity).
 //
 // Coordinates are the drawing's px; `placement` maps them onto the page's px (see core/pdfwrite/page.ts). The
 // caller opens the marked content (a Figure, or an artifact) around it.
@@ -54,12 +58,31 @@ export interface PdfDrawingData {
 export interface PdfDrawingContext {
 	readonly page: PdfPage
 	readonly fonts: PdfFontSet
-	// The picture of a drawing image, written once per export (undefined: it does not draw).
+	// The picture of a drawing image as drawn (recoloured: see pictureSource), written once per export (undefined:
+	// it does not draw).
 	image(image: DrawingImage): Promise<PdfImage | undefined>
 	// The family text without a typeface of its own is drawn in.
 	readonly defaultFamily: string
 	// Every colour drawn as its grey (a sheet printed in black and white).
 	readonly gray?: boolean
+}
+
+// A picture's dedupe key: its part (or other key) plus the recolouring it is drawn with.
+export function pictureKey(image: DrawingImage, key: string): string {
+	if (!recolors(image)) return key
+
+	return `${key}|${image.grayscale ? 1 : 0}|${String(image.biLevel)}|${String(image.brightness)}|${String(image.contrast)}|${String(image.duotone)}|${String(image.colorChange)}`
+}
+
+// The image source for a drawing image's bytes: recoloured as the screen draws it (decoded, then written as pixels).
+export function pictureSource(image: DrawingImage, data: PdfImageData, key: string | undefined): PdfImageSource {
+	if (!recolors(image)) return key === undefined ? { data } : { data, key }
+
+	return {
+		data,
+		...(key === undefined ? {} : { key: pictureKey(image, key) }),
+		transform: rgba => recolorPixels(new Uint8ClampedArray(rgba.buffer, rgba.byteOffset, rgba.length), image)
+	}
 }
 
 const MAX_ITEMS = 200_000
@@ -620,12 +643,22 @@ class DrawingPainter {
 				break
 			}
 			case "path": {
-				const { cx, cy, radius, inner } = pathGradientCircle(paint)
+				const { cx, cy, rx, ry, inner } = pathGradientCircle(paint, width, height)
 
-				// The SVG painter's objectBoundingBox radial: a circle in the unit box, stretched with the box.
+				// The unit circle placed as the gradient's ellipse, as the canvas painter draws it; bounds are the box there.
 				page.saveState()
-				page.concat([width, 0, 0, height, x, y])
-				await page.gradient(this.gradient("radial", [cx, cy, 0, cx, cy, radius], paint.stops, inner, "pad", [0, 0, 1, 1], opacity))
+				page.concat([rx * width, 0, 0, ry * height, x + cx * width, y + cy * height])
+				await page.gradient(
+					this.gradient(
+						"radial",
+						[0, 0, 0, 0, 0, 1],
+						paint.stops,
+						inner,
+						"pad",
+						[-cx / rx, -cy / ry, (1 - cx) / rx, (1 - cy) / ry],
+						opacity
+					)
+				)
 				page.restoreState()
 				break
 			}
@@ -666,7 +699,14 @@ class DrawingPainter {
 
 				if (image === undefined) break
 
-				// A tiled picture is drawn once over the box (its tiling is not repeated).
+				const tile = paint.tile ?? undefined
+
+				// An explicit tile repeats through a tiling pattern; an implicit one is stretched, as on screen.
+				if (tile !== undefined && tile.width !== undefined) {
+					await this.tile(image, tile, box, opacity)
+					break
+				}
+
 				const [left, top, right, bottom] = insetOf(paint.stretch, -10, 10)
 
 				await this.drawPicture(
@@ -740,6 +780,56 @@ class DrawingPainter {
 	}
 
 	// --- Pictures ---
+
+	private async tile(
+		image: DrawingImage,
+		tile: ImageTile,
+		box: readonly [number, number, number, number],
+		opacity: number
+	): Promise<void> {
+		const width = clamp(tile.width, 0, MAX_COORD, 0)
+		const height = clamp(tile.height, 0, MAX_COORD, 0)
+		const m = matrixOf(Array.isArray(tile.matrix) ? tile.matrix : [])
+		const page = this.page
+
+		if (!(width > 0 && height > 0)) return
+
+		if (tile.clamp === true) {
+			page.saveState()
+			page.concat(m)
+			await this.drawPicture(image, 0, 0, width, height, opacity)
+			page.restoreState()
+
+			return
+		}
+
+		const picture = await this.context.image(image)
+
+		if (picture === undefined) return
+
+		const alpha = clamp(image.alpha, 0, 1, 1) * opacity
+
+		page.saveState()
+
+		if (alpha < 1) page.graphicsState({ fillAlpha: alpha })
+
+		await page.tile(
+			picture,
+			{
+				width,
+				height,
+				matrix: m,
+				flipX: tile.flip === "x" || tile.flip === "xy",
+				flipY: tile.flip === "y" || tile.flip === "xy",
+				crop: insetOf(image.crop, -10, 1)
+			},
+			box[0],
+			box[1],
+			box[2],
+			box[3]
+		)
+		page.restoreState()
+	}
 
 	private async drawPicture(image: DrawingImage, x: number, y: number, width: number, height: number, opacity: number): Promise<void> {
 		if (!(width > 0 && height > 0)) return

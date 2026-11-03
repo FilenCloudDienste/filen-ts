@@ -1,5 +1,5 @@
 import { appendAll } from "../../arrays"
-import type { DocModel, DocBlock, DocParagraph, DocPlaceholder, DocRun, DocStory, DocStoryKind, DocTable, DocTextBox } from "../model"
+import type { DocModel, DocBlock, DocParagraph, DocPlaceholder, DocRun, DocStoryKind, DocTable, DocTextBox } from "../model"
 import type { DocChar, DocCell, DocRevision, DocRow, DocWidth } from "../props"
 import type { DocFile } from "../read"
 import { anchor, EMU_PER_TWIP, inline, pictureGraphic, shapeGraphic, type DrawingName, type ShapeLook, type Transform } from "./drawing"
@@ -1046,8 +1046,4 @@ function shapeLook(shape: ArtShape, preset: string, textBox: boolean): ShapeLook
 			props.get(PID.dyTextBottom)?.value ?? 45720
 		]
 	}
-}
-
-export function storyRange(model: DocModel, kind: DocStoryKind): DocStory | undefined {
-	return model.stories.find(story => story.kind === kind)
 }

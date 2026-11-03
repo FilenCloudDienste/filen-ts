@@ -12,6 +12,7 @@ import { decodeUtf8, encodeUtf8, escapeAttribute, escapeText, type XmlEditor } f
 import { ANNOTATION, isAnnotation } from "../../read/annotations"
 import type { Fragment } from "../../read/context"
 import type { OdpEmitFamily } from "../emit"
+import { sameBytes } from "../../../docx/write/bytes"
 
 // A page's comments as LibreOffice reads and writes them on draw pages: officeooo:annotation, last in the page, with
 // its place (svg:x, svg:y), author (dc:creator), date (dc:date) and one text:p per line. The page's annotations are
@@ -79,14 +80,6 @@ function annotationMarkup(entry: CommentEntry, held: SlideComments, scope: Reado
 		(created === "" ? "" : `<dc:date>${escapeText(created)}</dc:date>`) +
 		`${text}</${ANNOTATION}>`
 	)
-}
-
-function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
-	if (a.length !== b.length) return false
-
-	for (let at = 0; at < a.length; at++) if (a[at] !== b[at]) return false
-
-	return true
 }
 
 // The page's annotations made the session's, in its order.

@@ -225,9 +225,9 @@ describe("presenter view", () => {
 			emit({ type: "slide", index: 2, slide: slideRef(12), step: 0, steps: 0 })
 		})
 		expect(screen.getByText("Slide 3 of 3")).toBeTruthy()
-		expect(screen.getByText("End of slideshow")).toBeTruthy()
+		expect(screen.getByText("End of slide show")).toBeTruthy()
 
-		fireEvent.click(screen.getByRole("button", { name: "Show slideshow" }))
+		fireEvent.click(screen.getByRole("button", { name: "Show slide show" }))
 		expect(screen.queryByRole("region", { name: "Presenter view" })).toBeNull()
 	})
 
@@ -264,7 +264,7 @@ describe("presenter view", () => {
 		expect(popupDocument.title).toBe("Presenter view")
 		expect(popupDocument.body.textContent).toContain("Next animation on this slide")
 		// The audience window waits for its own click to go full screen.
-		expect(screen.getByRole("button", { name: "Start slideshow" })).toBeTruthy()
+		expect(screen.getByRole("button", { name: "Start slide show" })).toBeTruthy()
 		act(() => {
 			emit({ type: "ended" })
 		})
@@ -345,7 +345,7 @@ describe("presenter view", () => {
 
 			for (let k = 0; k < 5; k++) await Promise.resolve()
 		})
-		expect(error).toHaveBeenCalledWith("The ink on 1 slide could not be added. It stays for the next slideshow.")
+		expect(error).toHaveBeenCalledWith("The ink on 1 slide could not be added. It stays for the next slide show.")
 		// Both slides tried, in order; the refused one's ink stays for the next show.
 		expect(commands.map(op => (op.family === "ink" ? op.slide : undefined))).toEqual([slideRef(10), slideRef(12)])
 		expect(session?.ink.strokes(slideRef(10))).toHaveLength(1)

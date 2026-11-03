@@ -267,7 +267,7 @@ describe("focus after a show started from the Slide Show tab", () => {
 	it("goes to More commands when Set Up Slide Show, opened from the overflow, closes", async () => {
 		render(<Page />)
 
-		await fromOverflow("Set Up Slide Show")
+		await fromOverflow("Set up slide show")
 
 		const dialog = await screen.findByRole("dialog", { name: "Set up slide show" })
 

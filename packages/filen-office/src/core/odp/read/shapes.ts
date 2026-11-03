@@ -1,5 +1,5 @@
 import { groupBounds } from "../../presentation/groupBounds"
-import { NO_PROPERTIES, parseLength, type OdfListStyle, type OdfProperties } from "../../odf/index"
+import { NO_PROPERTIES, parseLength, type OdfListStyle, type OdfProperties, type StyleScope } from "../../odf/index"
 import { Evaluator, GeometryError, enhancedPath, pointsPath, svgPath, type SubPath } from "../../odt/geometry"
 import { classifyHref } from "../../presentation/actions"
 import type { PictureAdjust } from "../../presentation/edit/ops"
@@ -404,6 +404,32 @@ function styleOf(context: OdpContext, fragment: Fragment, attributes: ReadonlyMa
 	}
 }
 
+// Whether a shape's text wraps, as LibreOffice 7.5 lays it out (measured, each case as a page its PDF export counts
+// lines of): a text frame (draw:frame, a presentation object or not) wraps whatever fo:wrap-option (§20.395) says,
+// unless it grows with its text (draw:auto-grow-width, §20.118); a custom shape takes the option from its own styles,
+// never from the graphic default style (LibreOffice writes no-wrap there and wraps them); other drawing shapes take
+// the option as their whole chain says (undefined).
+function wrapOf(
+	context: OdpContext,
+	fragment: Fragment,
+	attributes: ReadonlyMap<string, string>,
+	name: string,
+	style: ShapeStyle,
+	base: string | undefined
+): boolean | undefined {
+	if (name === "draw:frame") return style.graphic.attributes.get("draw:auto-grow-width") !== "true"
+	if (name !== "draw:custom-shape") return undefined
+
+	const own = (family: string, styleName: string | undefined, scope: StyleScope): string | undefined =>
+		styleName === undefined ? undefined : context.ownProperties(family, styleName, scope, "graphic").attributes.get("fo:wrap-option")
+	const option =
+		own("presentation", attributes.get("presentation:style-name"), fragment.scope) ??
+		own("graphic", attributes.get("draw:style-name"), fragment.scope) ??
+		own("presentation", base, "styles")
+
+	return option !== "no-wrap"
+}
+
 // style:protect (ODF 1.3 §20.351, a space-separated list of content, position and size, or none) as the shape's locks:
 // a protected position also stops turning (LibreOffice offers no rotation for it), a protected size stops resizing.
 function protectionOf(value: string | undefined): ShapeLocks | undefined {
@@ -528,6 +554,8 @@ function eventAction(context: OdpContext, fragment: Fragment, node: number): Act
 					return { kind: "internal", jump: "last" }
 				case "stop":
 					return { kind: "internal", jump: "end" }
+				case "last-visited-page":
+					return { kind: "internal", jump: "lastViewed" }
 				case "execute":
 					return { kind: "refused", what: "execute", raw: href ?? "execute" }
 				case "verb":
@@ -920,7 +948,9 @@ function readShape(context: OdpContext, scope: ShapeScope, node: number, depth: 
 		presentationClass,
 		scope.masterName
 	)
-	const style = styleOf(context, fragment, attributes, masterStyleOf(context, objectMasterName, presentationClass))
+	const masterStyle = masterStyleOf(context, objectMasterName, presentationClass)
+	const style = styleOf(context, fragment, attributes, masterStyle)
+	const wrap = wrapOf(context, fragment, attributes, name, style, masterStyle)
 	const alt = altOf(fragment, node)
 	const action = eventAction(context, fragment, node) ?? link
 	const locks = protectionOf(style.graphic.attributes.get("style:protect"))
@@ -968,9 +998,9 @@ function readShape(context: OdpContext, scope: ShapeScope, node: number, depth: 
 		if (body === undefined)
 			return presentationClass === undefined
 				? undefined
-				: { bodyPr: bodyPrOf(style.graphic, style.paragraph), lstStyle: levels.lstStyle, paragraphs: [] }
+				: { bodyPr: bodyPrOf(style.graphic, style.paragraph, wrap), lstStyle: levels.lstStyle, paragraphs: [] }
 
-		return { ...body, bodyPr: bodyPrOf(style.graphic, style.paragraph) }
+		return { ...body, bodyPr: bodyPrOf(style.graphic, style.paragraph, wrap) }
 	}
 
 	switch (name) {
@@ -1056,7 +1086,7 @@ function readShape(context: OdpContext, scope: ShapeScope, node: number, depth: 
 					...base,
 					kind: "sp",
 					xfrm,
-					props: { ...props, bodyPr: bodyPrOf(style.graphic, style.paragraph) },
+					props: { ...props, bodyPr: bodyPrOf(style.graphic, style.paragraph, wrap) },
 					...(text === undefined ? {} : { text }),
 					...(presentationClass === undefined && attributes.get("draw:text-style-name") === undefined
 						? { txBox: true as const }
@@ -1301,7 +1331,7 @@ function readShape(context: OdpContext, scope: ShapeScope, node: number, depth: 
 		...base,
 		kind,
 		xfrm: phType === undefined ? xfrm : placed(),
-		props: { ...props, bodyPr: bodyPrOf(style.graphic, style.paragraph) },
+		props: { ...props, bodyPr: bodyPrOf(style.graphic, style.paragraph, wrap) },
 		...(text === undefined ? {} : { text })
 	}
 }
@@ -1415,25 +1445,4 @@ export function readShapeElements(context: OdpContext, scope: ShapeScope, nodes:
 	}
 
 	return out
-}
-
-// A master page's presentation shapes by class: where placeholders that do not place themselves go.
-export function masterBoxesOf(shapes: readonly ShapeNode[], classes: ReadonlyMap<ShapeNode, string>): Map<string, Xfrm> {
-	const out = new Map<string, Xfrm>()
-
-	for (const shape of shapes) {
-		const name = classes.get(shape)
-
-		if (name !== undefined && shape.xfrm !== undefined && !out.has(name)) out.set(name, shape.xfrm)
-	}
-
-	return out
-}
-
-export function presentationClassOf(fragment: Fragment, shape: ShapeNode): string | undefined {
-	const src = shape.src
-
-	if (src?.format !== "odp" || src.fragment !== fragment.offset) return undefined
-
-	return fragment.attributes(src.node).get("presentation:class")
 }

@@ -11,6 +11,7 @@ import {
 	type ShapeRef
 } from "../../core/presentation/model"
 import type { DocxFontFace } from "../docx/protocol"
+import { XmlError } from "../../core/xml/errors"
 import { macrotaskYield } from "../docx/host"
 import {
 	transferablesOf,
@@ -173,7 +174,6 @@ export type ShowCapability = Capability<"timegraph" | "layers">
 export type FindCapability = Capability<"find">
 export type JobsCapability = Capability<"jobsPort">
 export type ConvertCapability = Capability<"freshParts">
-export type ChartCapability = Capability<"chartData">
 export type ReviewCapability = Capability<"review">
 
 // The faces the deck's text is measured and drawn with (bundled substitutes and decoded embedded fonts).
@@ -515,7 +515,8 @@ export function servePresentation(endpoint: PresentationEndpoint, options: Serve
 		} catch (error) {
 			if (live.calls.get(id) !== state || state.aborted) return
 
-			const reason = error instanceof PresentationError ? error.reason : "failed"
+			// A part that is not well-formed is the file's fault, typed as such; anything else failed.
+			const reason = error instanceof PresentationError ? error.reason : error instanceof XmlError ? "malformed" : "failed"
 
 			post({ t: "refused", s, id, reason, message: error instanceof Error ? error.message : String(error) })
 		} finally {

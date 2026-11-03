@@ -696,6 +696,7 @@ export function PresentationCommentsPane({
 	return (
 		<section
 			data-preview-surface
+			data-office-pane
 			data-comments-pane=""
 			aria-labelledby={headingId}
 			className={cn(

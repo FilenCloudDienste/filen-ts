@@ -19,7 +19,7 @@ import { editHarness, type EditHarness } from "./presentationEditFixtures"
 import { budget } from "./timing"
 
 // Text edits through the pptx writer and back: every run and paragraph property the editor sets reads back as set;
-// the text edits of edit set ES3 (type mid-run in a title, bold a range, add a bullet paragraph, replace across
+// the text edit set (type mid-run in a title, bold a range, add a bullet paragraph, replace across
 // slides) over every unencrypted OOXML deck of the corpus change only the slides they touch, read back as made, leave
 // nothing to save after the save's rebase, and the saved file rewrites byte for byte. With FILEN_OFFICE_PPTX_WRITE_OUT
 // set, every output is written there for the Open XML SDK and LibreOffice runs.
@@ -265,7 +265,7 @@ function withRun(body: TextBody, paragraph: number, run: number, replace: (text:
 const MARK = "Qzv"
 const REPLACED = "Replaced"
 
-describe.skipIf(PRESENT.length === 0)("text edit set ES3 over the corpus", () => {
+describe.skipIf(PRESENT.length === 0)("the text edit set over the corpus", () => {
 	it(
 		"types, bolds, adds a bullet paragraph and replaces across slides: only touched slides change, all reads back",
 		{ timeout: budget(600_000) },

@@ -1,4 +1,5 @@
 import { MessageChannel } from "node:worker_threads"
+import { XmlError } from "../core/xml/errors"
 import { describe, expect, it } from "vitest"
 import { PresentationError, refused, slideRef, type ShapeRef } from "../core/presentation/model"
 import type { CompiledTimegraph } from "../core/anim/model"
@@ -525,11 +526,12 @@ describe("the presentation protocol", () => {
 		stop()
 	})
 
-	it("answers a thrown refusal with its reason and any other failure as failed", async () => {
+	it("answers a thrown refusal with its reason, a part that is not well-formed as malformed, and any other failure as failed", async () => {
 		const { channel, stop } = serve({
 			handlers: {
 				undo: () => Promise.reject(new PresentationError("locked", "the body is being edited")),
-				redo: () => Promise.reject(new Error("boom"))
+				redo: () => Promise.reject(new Error("boom")),
+				retract: () => Promise.reject(new XmlError("invalidReference", "Invalid character reference", 12))
 			}
 		})
 		const session = new LoopbackSession(channel.page, 1)
@@ -537,6 +539,7 @@ describe("the presentation protocol", () => {
 		await opened(session, channel)
 		await expect(session.call("undo").answer).rejects.toMatchObject({ reason: "locked", message: "the body is being edited" })
 		await expect(session.call("redo").answer).rejects.toMatchObject({ reason: "failed", message: "boom" })
+		await expect(session.call("retract", 1).answer).rejects.toMatchObject({ reason: "malformed" })
 		stop()
 	})
 

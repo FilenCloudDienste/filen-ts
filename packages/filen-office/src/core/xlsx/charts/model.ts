@@ -1,5 +1,5 @@
 import { D, drawingReader, type DrawingReader } from "../../drawingml/reader"
-import { parseXml, type XmlDocument } from "../../xml/index"
+import type { XmlDocument } from "../../xml/index"
 
 // A chart part as the chart editor shows it (ECMA-376 Part 1 §21.2.2): its plots with their series and the cells
 // those read, its axes, title, legend and data labels. Read from the markup, never from a model the writer
@@ -270,13 +270,5 @@ export function readChartInfo(document: XmlDocument): ChartInfo | null {
 			legendNode < 0 ? null : ((["r", "l", "t", "b", "tr"].includes(legendPosition) ? legendPosition : "r") as ChartLegendPosition),
 		plots,
 		axes
-	}
-}
-
-export function parseChart(bytes: Uint8Array): XmlDocument | null {
-	try {
-		return parseXml(bytes)
-	} catch {
-		return null
 	}
 }

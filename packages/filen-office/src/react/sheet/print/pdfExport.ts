@@ -1,4 +1,4 @@
-import { grayRgba, paintDrawingPdf, type PdfDrawingData } from "../../../core/drawingml/pdf"
+import { grayRgba, paintDrawingPdf, pictureKey, pictureSource, type PdfDrawingData } from "../../../core/drawingml/pdf"
 import type { DrawingImage } from "../../../core/drawingml/displayList"
 import type { Matrix } from "../../../core/pdfwrite/content"
 import type { PdfDeflate } from "../../../core/pdfwrite/deflate"
@@ -891,7 +891,7 @@ class SheetPdfExport {
 		const partName = image.partName
 
 		if (image.bytes !== undefined) {
-			return writer.image({ data: image.bytes }).catch(() => {
+			return writer.image(pictureSource(image, image.bytes, undefined)).catch(() => {
 				this.missingImages++
 
 				return undefined
@@ -900,21 +900,22 @@ class SheetPdfExport {
 
 		if (partName === undefined || image.format === "svg") return Promise.resolve(undefined)
 
-		let made = this.images.get(partName)
+		const key = pictureKey(image, partName)
+		let made = this.images.get(key)
 
 		if (made === undefined) {
 			made = (async () => {
 				try {
 					const media = await this.session.query("drawing.media", { partName })
 
-					return media === null ? undefined : await writer.image({ data: media.bytes, key: partName })
+					return media === null ? undefined : await writer.image(pictureSource(image, media.bytes, partName))
 				} catch {
 					this.missingImages++
 
 					return undefined
 				}
 			})()
-			this.images.set(partName, made)
+			this.images.set(key, made)
 		}
 
 		return made

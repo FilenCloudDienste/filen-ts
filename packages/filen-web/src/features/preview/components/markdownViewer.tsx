@@ -9,7 +9,7 @@ import { usePreviewUnsavedGuardStore } from "@/features/preview/store/usePreview
 import { usePreviewDownload } from "@/features/preview/lib/accessMode"
 import { readTextFile } from "@/features/preview/lib/textFile"
 import { useLeaveViewerFullScreen } from "@/features/preview/components/commandBar.logic"
-import { onCommandBarF6 } from "@/features/office/components/ribbon/ribbonFocus"
+import { onCommandBarF6, onRibbonEscape } from "@/features/office/components/ribbon/ribbonFocus"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { useEditorLayerKeys } from "@/lib/keymap/editorLayerKeys"
 import { IN_EDITORS, useAction } from "@/lib/keymap/useAction"
@@ -115,8 +115,12 @@ export function MarkdownViewer({ item, alt, editable, onDirtyChange, contentRef,
 			ref={containerRef}
 			className="flex size-full flex-col"
 			// The source's F6 is the editor surface's own (it takes the key first).
+			onKeyDownCapture={event => {
+				onRibbonEscape(event, event.currentTarget, focusDocument, "capture")
+			}}
 			onKeyDown={event => {
-				onCommandBarF6(event, event.currentTarget, focusDocument)
+				if (!onRibbonEscape(event, event.currentTarget, focusDocument, "bubble"))
+					onCommandBarF6(event, event.currentTarget, focusDocument)
 			}}
 		>
 			{mode === "source" ? (

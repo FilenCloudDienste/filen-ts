@@ -358,6 +358,27 @@ function shapeOf(effect: TimeNode): number | undefined {
 	return target === undefined || target.kind === "slide" || target.kind === "sound" ? undefined : target.shape
 }
 
+// The first shape an effect's behaviours target that `shapes` does not hold (its id as text), or undefined.
+function missingTarget(effect: TimeNode, shapes: readonly ShapeNode[]): string | undefined {
+	const stack = [effect]
+
+	for (let node = stack.pop(); node !== undefined; node = stack.pop()) {
+		if (node.kind === "behavior") {
+			const target = isMediaBehavior(node.behavior) ? node.behavior.target : node.behavior.common.target
+
+			if (target.kind !== "slide" && target.kind !== "sound") {
+				const id = target.shape
+
+				if (!Number.isSafeInteger(id) || findShape(shapes, id) === undefined) return `shape ${String(id)}`
+			}
+		}
+
+		for (const child of node.ctn.children) stack.push(child)
+	}
+
+	return undefined
+}
+
 function buildKey(shape: number, grpId: number): string {
 	return `${String(shape)}:${String(grpId)}`
 }
@@ -560,6 +581,12 @@ function addEffect(deck: Deck, op: OpOf<"timing"> & { kind: "addEffect" }, conte
 	const trigger = triggerOfOp(op.trigger, state)
 
 	if (trigger !== undefined && "reason" in trigger) return trigger
+
+	// Every shape the effect names is one of the slide's (an id nothing carries would be written as a target that names
+	// nothing).
+	const missing = missingTarget(op.effect, state.slide.shapes)
+
+	if (missing !== undefined) return refused("notFound", `the effect's target ${missing} is not on the slide`)
 
 	// A master's field the slide shows (ODP) is not the slide's to animate: the file could not name it.
 	const animated = shapeOf(op.effect)

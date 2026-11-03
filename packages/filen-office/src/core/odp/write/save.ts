@@ -20,7 +20,7 @@ import { packagePart } from "../read/fills"
 import { notesDiffer, slideDiffers } from "./meaning"
 import { withoutManifestEntries } from "./manifestPrune"
 import { odpSplice, type OdpSaveInput, type OdpSplice } from "./splice"
-import { isRefused } from "./styles"
+import { isRefused } from "../../presentation/refusal"
 
 // Saving an ODP deck into its own source (§1.5.4): the splice (splice.ts) at revision R, proof gate 2, then the zip.
 // Gate 2 reads the written pages back with the reader and compares them with the session's slides (meaning.ts):

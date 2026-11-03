@@ -140,9 +140,16 @@ function spTreeXml(context: EmitContext, node: SlideNode, source: number): reado
 
 	const first = children.findIndex(isShape)
 	const last = children.length - 1 - [...children].reverse().findIndex(isShape)
-	const before =
-		first < 0 ? children.filter(child => document.kinds[child] === NodeKind.Element && !isShape(child)) : children.slice(0, first)
-	const after = first < 0 ? [] : children.slice(last + 1)
+	// A tree with no shapes: shapes go after its own properties, before the whitespace and extension list that follow
+	// (so a tree emptied again reads as it was).
+	const properties =
+		children.length -
+		1 -
+		[...children]
+			.reverse()
+			.findIndex(child => document.kinds[child] === NodeKind.Element && r.group(child) === G.P && r.local(child) !== "extLst")
+	const before = first < 0 ? children.slice(0, properties + 1) : children.slice(0, first)
+	const after = first < 0 ? children.slice(properties + 1) : children.slice(last + 1)
 
 	for (const child of before) {
 		// The whitespace before the first shape goes with that shape.

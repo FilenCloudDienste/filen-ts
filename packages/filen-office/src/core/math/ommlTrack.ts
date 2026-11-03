@@ -249,14 +249,6 @@ function eachRevision(node: XElement, visit: (revision: OmmlRevision, mark: XEle
 	}
 }
 
-export function treeRevisions(root: XElement): OmmlRevision[] {
-	const out: OmmlRevision[] = []
-
-	eachRevision(root, revision => out.push(revision))
-
-	return out
-}
-
 function groupKey(revision: OmmlRevision): string {
 	return `${revision.kind}\u0000${revision.author}\u0000${revision.date}`
 }

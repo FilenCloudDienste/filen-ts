@@ -537,6 +537,32 @@ describe("DocxEditView", () => {
 		expect(screen.getByRole("textbox", { name: "report.docx" })).toBeTruthy()
 	})
 
+	it("gives the document focus with Escape on a ribbon control, keeping the key from closing the preview", async () => {
+		await openEditor()
+
+		const tab = screen.getByRole("tab", { name: "View" })
+
+		act(() => {
+			tab.focus()
+		})
+		// Taken (prevented): the preview overlay closes only on an Escape nothing took.
+		expect(fireEvent.keyDown(tab, { key: "Escape" })).toBe(false)
+		await waitFor(() => {
+			expect(screen.getByRole("textbox", { name: "report.docx" }).contains(document.activeElement)).toBe(true)
+		})
+
+		// A button (ahead of its tooltip, which would otherwise take the key) and a field (after it had the key).
+		for (const control of [screen.getByRole("button", { name: /^Bold/u }), screen.getByRole("combobox", { name: /^Font size/u })]) {
+			act(() => {
+				control.focus()
+			})
+			expect(fireEvent.keyDown(control, { key: "Escape" })).toBe(false)
+			await waitFor(() => {
+				expect(screen.getByRole("textbox", { name: "report.docx" }).contains(document.activeElement)).toBe(true)
+			})
+		}
+	})
+
 	it("moves between the document and the ribbon with F6 and Shift+F6, landing on the File menu", async () => {
 		await openEditor()
 

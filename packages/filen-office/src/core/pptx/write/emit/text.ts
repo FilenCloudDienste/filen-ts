@@ -41,6 +41,7 @@ import {
 	unmodeledAttributes,
 	type EmitContext
 } from "./shape"
+import { isRefused } from "../../../presentation/refusal"
 
 // The text family's PresentationML: p:txBody of a shape (ECMA-376 Part 1 §21.1.2: a:bodyPr, a:lstStyle, a:p with
 // a:r, a:br, a:fld and a:endParaRPr). Paragraphs, runs and their properties are written from the model; whatever the
@@ -154,9 +155,12 @@ export function runPropsXml(context: EmitContext, tag: string, props: RunProps, 
 		const r = readerOf(context)
 		const kept = r === undefined || source < 0 ? -1 : r.child(source, G.A, name)
 		const markup = actionPieces(context, `a:${name}`, action, kept)
+		// A refused action is written only as the source wrote it: a run made from one (part of it formatted
+		// otherwise) carries the element of a source run with that action, as PowerPoint copies it onto both.
+		const donor = markup !== undefined || kept >= 0 ? kept : actionDonor(context, name, action)
 
 		if (markup !== undefined) children.append(markup)
-		else if (kept >= 0) children.hole(kept)
+		else if (donor >= 0) children.hole(donor)
 		else return refused("unsupported", `A ${action.kind} text action cannot be written from the model`)
 	}
 
@@ -261,10 +265,6 @@ export function paraPropsXml(context: EmitContext, tag: string, props: ParaProps
 	if (children.out.length === 0) return out.text("/>").out
 
 	return out.text(">").append(children.out).text(`</${tag}>`).out
-}
-
-function isRefused(value: unknown): value is Refused {
-	return typeof value === "object" && value !== null && !Array.isArray(value) && (value as { kind?: unknown }).kind === "refused"
 }
 
 // a:lstStyle (CT_TextListStyle): a:defPPr, a:lvl1pPr…a:lvl9pPr, from the model; the source's extension list kept.
@@ -376,6 +376,31 @@ function sourceRuns(context: EmitContext, paragraph: number): number[] {
 	}
 
 	return out
+}
+
+// The a:hlinkClick or a:hlinkMouseOver (`name`) of a source run of the slide that reads as `action`; -1 when none.
+function actionDonor(context: EmitContext, name: "hlinkClick" | "hlinkMouseOver", action: Action): number {
+	const r = readerOf(context)
+
+	if (r === undefined) return -1
+
+	for (const [node, paragraph] of context.pristine?.paragraphs ?? []) {
+		const runs = sourceRuns(context, node)
+
+		for (let at = 0; at < paragraph.runs.length; at++) {
+			const run = paragraph.runs[at]
+			const source = runs[at] ?? -1
+
+			if (source < 0 || run === undefined || run.kind === "opaque" || !sameModel(run.rPr[name], action)) continue
+
+			const rPr = r.child(source, G.A, "rPr")
+			const element = rPr < 0 ? -1 : r.child(rPr, G.A, name)
+
+			if (element >= 0) return element
+		}
+	}
+
+	return -1
 }
 
 function runXml(context: EmitContext, run: Run, source: number): readonly EmitPiece[] | Refused {

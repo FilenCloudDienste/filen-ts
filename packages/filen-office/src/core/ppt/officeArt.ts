@@ -2,7 +2,16 @@ import { readProperties, records as artRecords, type ArtProperty, type ArtRecord
 import { tooDeep, tooLarge } from "../presentation/refusal"
 import type { PptFile } from "./document"
 import { i16, i32, RT, u16, u32, type PptRecord } from "./records"
-import { interactionOf, readTextBlocks, type Interaction, type TextBlock } from "./text"
+import {
+	interactionOf,
+	pp9Records,
+	readStyleTextProp9,
+	readTextBlocks,
+	RT_STYLE_TEXT_PROP9,
+	type Interaction,
+	type ParaProps,
+	type TextBlock
+} from "./text"
 
 // The OfficeArt drawing of a slide ([MS-PPT] §2.5.13 DrawingContainer → [MS-ODRAW] §2.2.13 OfficeArtDgContainer) as a
 // tree of shapes, read with the Word reader's OfficeArt record and property parsing (core/doc/toDocx/officeArt.ts):
@@ -59,6 +68,8 @@ export interface PptShape {
 	// Inline text (ClientTextbox), or the index of the slide list's text body (OutlineTextRefAtom).
 	readonly text?: TextBlock
 	readonly outlineRef?: number
+	// The paragraph extensions of its text (StyleTextProp9Atom in the ClientData's "___PPT9" tag).
+	readonly ext9?: readonly ParaProps[]
 }
 
 export interface Drawing {
@@ -138,9 +149,17 @@ class ShapeReader {
 			hover?: Interaction
 			exObjRef?: number
 			animation?: { start: number; end: number }
+			ext9?: readonly ParaProps[]
 		}
 	): void {
-		for (const child of this.records(record.start, record.end)) {
+		const children = this.records(record.start, record.end)
+		const ext9 = pp9Records(this.data, children, kid => this.records(kid.start, kid.end)).find(
+			child => child.type === RT_STYLE_TEXT_PROP9
+		)
+
+		if (ext9 !== undefined) into.ext9 = readStyleTextProp9(this.data, asPpt(ext9))
+
+		for (const child of children) {
 			if (child.type === RT.placeholderAtom && child.end - child.start >= 8) {
 				const position = i32(this.data, child.start)
 
@@ -179,6 +198,7 @@ class ShapeReader {
 			hover?: Interaction
 			exObjRef?: number
 			animation?: { start: number; end: number }
+			ext9?: readonly ParaProps[]
 		} = {}
 		let propertyBytes = 0
 
@@ -253,7 +273,8 @@ class ShapeReader {
 			...(client.exObjRef === undefined ? {} : { exObjRef: client.exObjRef }),
 			...(client.animation === undefined ? {} : { animation: client.animation }),
 			...(text === undefined ? {} : { text }),
-			...(outlineRef === undefined ? {} : { outlineRef })
+			...(outlineRef === undefined ? {} : { outlineRef }),
+			...(client.ext9 === undefined || client.ext9.length === 0 ? {} : { ext9: client.ext9 })
 		}
 	}
 

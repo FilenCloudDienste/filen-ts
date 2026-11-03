@@ -4,6 +4,7 @@ import {
 	refused,
 	type Action,
 	type Bullet,
+	type Deck,
 	type Paragraph,
 	type ParaProps,
 	type Refused,
@@ -12,23 +13,15 @@ import {
 	type SlideRef,
 	type TextBody
 } from "../../../presentation/model"
-import { Namespaces, encodeUtf8, escapeAttribute, escapeText, parseXml } from "../../../xml/index"
-import { embeddedListStyle, levelProps, paraPropsOf, runPropsOf } from "../../read/text"
+import { Namespaces, NodeKind, encodeUtf8, escapeAttribute, escapeText, parseXml } from "../../../xml/index"
+import { NEAR_NUMBERINGS, NUMBERING_ALIASES, ODF_NUMBERINGS, embeddedListStyle, levelProps, paraPropsOf, runPropsOf } from "../../read/text"
 import type { Fragment } from "../../read/context"
+import { packagePart } from "../../read/fills"
 import type { OdpEmitFamily } from "../emit"
 import { odpParagraphKey } from "../../../anim/odf"
-import {
-	OdpStyles,
-	cm,
-	hexColor,
-	isRefused,
-	paragraphAttributes,
-	percent,
-	runAttributes,
-	setChild,
-	setProperty,
-	styleChanges
-} from "../styles"
+import { OdpStyles, cm, hexColor, paragraphAttributes, percent, runAttributes, setChild, setProperty, styleChanges } from "../styles"
+import { isRefused } from "../../../presentation/refusal"
+import { odpScaledTextChanges } from "./design"
 
 // A shape's text as ODF paragraphs (ODF 1.3 Part 3 §5.1 text:p, §5.3 lists, §6 paragraph content), the inverse of the
 // reader's mapping (read/text.ts):
@@ -63,6 +56,7 @@ export const emitOdpText: OdpEmitFamily = {
 			})
 
 		const scope: TextWriteScope = {
+			deck,
 			styles: context.styles,
 			fragment: context.document === undefined ? undefined : context.styles.env.fragmentOf(context.document),
 			outline: request.shape?.ph?.type === "body" && slide.kind !== "notes",
@@ -81,6 +75,8 @@ export const emitOdpText: OdpEmitFamily = {
 }
 
 export interface TextWriteScope {
+	// The deck written (its text scale after a scaled slide size change).
+	readonly deck: Deck
 	readonly styles: OdpStyles
 	// The source fragment the shape's paragraphs came from, when the shape has a source.
 	readonly fragment: Fragment | undefined
@@ -308,7 +304,10 @@ function paragraphStyle(
 	pPr: ParaProps,
 	marL: number | undefined,
 	withIndent: boolean,
-	base: RunProps
+	base: RunProps,
+	// The source style's own margin and first-line indent kept as they are (a labelled list paragraph: its level
+	// places the line, and LibreOffice starts the label at the indents the paragraph had).
+	sourceIndents = false
 ): string | Refused | undefined {
 	const { indent: _indent, ...noIndent } = pPr
 	const own = paragraphAttributes(withIndent ? pPr : noIndent, marL)
@@ -321,7 +320,8 @@ function paragraphStyle(
 
 	if (source !== undefined) {
 		const style = scope.styles.env.context.ownStyle("paragraph", source, scope.styles.scope)
-		const read = paraPropsOf(style.paragraph)
+		const { marL: _marL, indent: _readIndent, ...unindented } = paraPropsOf(style.paragraph)
+		const read = sourceIndents ? unindented : paraPropsOf(style.paragraph)
 		const want = paraPropsOf({ attributes: own.attributes, children: [] })
 
 		if (
@@ -337,7 +337,8 @@ function paragraphStyle(
 
 	const changes = styleChanges()
 
-	for (const name of MODEL_PARAGRAPH_ATTRIBUTES) setProperty(changes, "paragraph", name, null)
+	for (const name of MODEL_PARAGRAPH_ATTRIBUTES)
+		if (!sourceIndents || (name !== "fo:margin-left" && name !== "fo:text-indent")) setProperty(changes, "paragraph", name, null)
 	for (const name of MODEL_TEXT_ATTRIBUTES) setProperty(changes, "text", name, null)
 	for (const [name, value] of own.attributes) setProperty(changes, "paragraph", name, value)
 	for (const [name, value] of text) setProperty(changes, "text", name, value)
@@ -490,22 +491,18 @@ function baseRunProps(paragraph: Paragraph): RunProps {
 
 // --- Lists. ---
 
-// ST_TextAutonumberScheme values ODF numbering reads back as (read/text.ts autonumberScheme): format, prefix, suffix.
-const SCHEMES = new Map<string, readonly [string, string, string]>([["arabicPlain", ["1", "", ""]]])
+// ST_TextAutonumberScheme values ODF numbering reads back as (read/text.ts ODF_NUMBERINGS): format, prefix, suffix.
+// A scheme held only as another is refused here (the conversion writes it as that one, emit through fresh.ts).
+const SCHEMES = new Map([...ODF_NUMBERINGS].filter(([scheme]) => !NEAR_NUMBERINGS.has(scheme) && !NUMBERING_ALIASES.has(scheme)))
 
-for (const [stem, format] of [
-	["arabic", "1"],
-	["alphaLc", "a"],
-	["alphaUc", "A"],
-	["romanLc", "i"],
-	["romanUc", "I"]
-] as const) {
-	SCHEMES.set(`${stem}Period`, [format, "", "."])
-	SCHEMES.set(`${stem}ParenR`, [format, "", ")"])
-	SCHEMES.set(`${stem}ParenBoth`, [format, "(", ")"])
+// A picture label's size (fo:width, fo:height): LibreOffice draws a picture level without one as nothing.
+interface PictureSize {
+	readonly width: string
+	readonly height: string
 }
 
 interface LevelBullet {
+	readonly image?: PictureSize
 	readonly bullet: Bullet
 	readonly buClr: ParaProps["buClr"]
 	readonly buSz: ParaProps["buSz"]
@@ -514,8 +511,9 @@ interface LevelBullet {
 	readonly indent: number
 }
 
-function levelOf(pPr: ParaProps): LevelBullet {
+function levelOf(pPr: ParaProps, image?: PictureSize): LevelBullet {
 	return {
+		...(image === undefined ? {} : { image }),
 		bullet: pPr.bullet ?? { kind: "none" },
 		buClr: pPr.buClr,
 		buSz: pPr.buSz,
@@ -525,7 +523,7 @@ function levelOf(pPr: ParaProps): LevelBullet {
 	}
 }
 
-// One list level element (§16.31–§16.33) giving `level`'s bullet and indents (label alignment, §19.840).
+// One list level element (§16.31–§16.33) giving `level`'s bullet and indents.
 function levelMarkup(depth: number, level: LevelBullet): string | Refused {
 	const text: string[] = []
 
@@ -540,20 +538,29 @@ function levelMarkup(depth: number, level: LevelBullet): string | Refused {
 	if (level.bullet.kind === "char" && level.buFont !== undefined && level.buFont !== "text")
 		text.push(`fo:font-family="${escapeAttribute(level.buFont.typeface)}"`)
 
-	let size = ""
-
+	// The label's size as its text properties' fo:font-size (§20.183), a percentage of the text's: LibreOffice Impress
+	// reads a label's size there only (it ignores text:bullet-relative-size, and draws a bullet or number without one
+	// tiny), so a label the size of its text is written 100%.
 	if (level.bullet.kind !== "none" && level.buSz !== undefined && level.buSz !== "text") {
 		if (!("pct" in level.buSz)) return refused("unsupported", "a bullet size in points")
 
-		// A bullet character's size is text:bullet-relative-size; a number's or picture's its text properties' (§20.183).
-		if (level.bullet.kind === "char") size = ` text:bullet-relative-size="${percent(level.buSz.pct / 1000)}"`
-		else text.push(`fo:font-size="${percent(level.buSz.pct / 1000)}"`)
-	}
+		text.push(`fo:font-size="${percent(level.buSz.pct / 1000)}"`)
+	} else if (level.bullet.kind === "char" || level.bullet.kind === "autoNum") text.push('fo:font-size="100%"')
 
+	// A hanging or flush first line is placed by text:space-before and text:min-label-width (§19.880
+	// label-width-and-position, the mode LibreOffice Impress lays lists out in): the label starts at marL + indent and
+	// the text at marL. A first line indented past the text has no such form: label alignment (§19.840) holds it.
+	// A picture centred on its line (as LibreOffice writes one) at its size.
+	const picture =
+		level.bullet.kind === "blip" && level.image !== undefined
+			? ` style:vertical-pos="middle" style:vertical-rel="line" fo:width="${escapeAttribute(level.image.width)}" fo:height="${escapeAttribute(level.image.height)}"`
+			: ""
 	const properties =
-		'<style:list-level-properties text:list-level-position-and-space-mode="label-alignment">' +
-		`<style:list-level-label-alignment text:label-followed-by="listtab" fo:margin-left="${cm(level.marL)}" fo:text-indent="${cm(level.indent)}"/>` +
-		"</style:list-level-properties>"
+		level.indent <= 0
+			? `<style:list-level-properties text:space-before="${cm(level.marL + level.indent)}" text:min-label-width="${cm(0 - level.indent)}"${picture}/>`
+			: `<style:list-level-properties text:list-level-position-and-space-mode="label-alignment"${picture}>` +
+				`<style:list-level-label-alignment text:label-followed-by="listtab" fo:margin-left="${cm(level.marL)}" fo:text-indent="${cm(level.indent)}"/>` +
+				"</style:list-level-properties>"
 	const textProperties = text.length === 0 ? "" : `<style:text-properties ${text.join(" ")}/>`
 	const at = ` text:level="${String(depth)}"`
 
@@ -563,7 +570,7 @@ function levelMarkup(depth: number, level: LevelBullet): string | Refused {
 			return `<text:list-level-style-number${at} style:num-format="">${properties}</text:list-level-style-number>`
 		case "char":
 			// One character (§19.778): the reader takes the first.
-			return `<text:list-level-style-bullet${at} text:bullet-char="${escapeAttribute([...level.bullet.char][0] ?? "")}"${size}>${properties}${textProperties}</text:list-level-style-bullet>`
+			return `<text:list-level-style-bullet${at} text:bullet-char="${escapeAttribute([...level.bullet.char][0] ?? "")}">${properties}${textProperties}</text:list-level-style-bullet>`
 		case "autoNum": {
 			const scheme = SCHEMES.get(level.bullet.scheme)
 
@@ -592,13 +599,13 @@ function readsAs(scope: TextWriteScope, markup: string, depth: number, start: nu
 	return parsed === undefined ? undefined : levelProps(scope.styles.env.context, parsed.levels.get(depth), start)
 }
 
-// A list paragraph's level fields compared with what its level gives (`ownMarL`: its own margin, added by the reader).
-function matches(pPr: ParaProps, read: Partial<ParaProps>, bulleted: boolean, ownMarL: number): boolean {
-	if (read.marL !== undefined) {
-		if (pPr.marL !== undefined && pPr.marL !== read.marL + ownMarL) return false
-		if (pPr.indent !== undefined && pPr.indent !== (bulleted ? (read.indent ?? 0) : 0)) return false
-	}
+// A bullet the size of its text: 100% of it is the text's own size (read/text.ts reads 100% as "text").
+export function bulletSize(size: ParaProps["buSz"]): ParaProps["buSz"] {
+	return size !== undefined && size !== "text" && "pct" in size && size.pct === 100_000 ? "text" : size
+}
 
+// A list paragraph's label fields compared with what its level gives (its indents are its own, written with it).
+function matches(pPr: ParaProps, read: Partial<ParaProps>, bulleted: boolean): boolean {
 	if (!bulleted) return pPr.bullet === undefined || pPr.bullet.kind === "none"
 
 	// A number's font is the text's (ODF reads a font for bullet characters only).
@@ -607,7 +614,7 @@ function matches(pPr: ParaProps, read: Partial<ParaProps>, bulleted: boolean, ow
 	for (const key of keys) {
 		const value = pPr[key]
 
-		if (value !== undefined && !same(value, read[key])) return false
+		if (value !== undefined && !same(key === "buSz" ? bulletSize(value as ParaProps["buSz"]) : value, read[key])) return false
 	}
 
 	return true
@@ -730,11 +737,10 @@ function headerMarkup(
 		if (entry.depth !== 0 || sourceHeader(scope, entry.paragraph)?.header !== header.header) break
 
 		const pPr = entry.paragraph.pPr
-		const ownMarL = read.marL === undefined ? pPr.marL : (pPr.marL ?? read.marL) - read.marL
 
-		if (!matches(pPr, read, false, ownMarL ?? 0)) break
+		if (!matches(pPr, read, false)) break
 
-		const markup = paragraphMarkup(scope, entry.paragraph, ownMarL, read.marL === undefined)
+		const markup = paragraphMarkup(scope, entry.paragraph, pPr.marL, true)
 
 		if (isRefused(markup)) return markup
 
@@ -784,30 +790,68 @@ function sourceIds(scope: TextWriteScope, paragraph: Paragraph): string {
 	return out
 }
 
-function paragraphMarkup(scope: TextWriteScope, paragraph: Paragraph, marL: number | undefined, withIndent: boolean): string | Refused {
+function paragraphMarkup(
+	scope: TextWriteScope,
+	paragraph: Paragraph,
+	marL: number | undefined,
+	withIndent: boolean,
+	sourceIndents = false
+): string | Refused {
 	const base = baseRunProps(paragraph)
-	const style = paragraphStyle(scope, sourceStyleOf(scope, paragraph), paragraph.pPr, marL, withIndent, base)
+	const style = paragraphStyle(scope, sourceStyleOf(scope, paragraph), paragraph.pPr, marL, withIndent, base, sourceIndents)
 
 	if (isRefused(style)) return style
 
-	const runs = writeRuns(scope, paragraph, base)
+	const written = writeRuns(scope, paragraph, base)
 
-	if (isRefused(runs)) return runs
+	if (isRefused(written)) return written
 
+	const end = sourceEndSpan(scope, paragraph)
+	const runs = end === undefined ? written : `${written}<text:span text:style-name="${escapeAttribute(end)}"/>`
 	const head = `<text:p${style === undefined ? "" : ` text:style-name="${escapeAttribute(style)}"`}${idsOf(scope, paragraph)}`
 
 	return runs === "" ? `${head}/>` : `${head}>${runs}</text:p>`
 }
 
+// The style of the empty text:span its source paragraph ends with (Microsoft's export writes one per paragraph):
+// written again (its sizes scaled with the text), as LibreOffice sizes an empty paragraph's line by it; the reader
+// takes no properties from it.
+function sourceEndSpan(scope: TextWriteScope, paragraph: Paragraph): string | undefined {
+	const node = sourceNode(scope, paragraph)
+	const fragment = scope.fragment
+
+	if (node < 0 || fragment === undefined) return undefined
+
+	const document = fragment.document
+	let last = -1
+
+	for (let child = document.firstChild(node); child >= 0; child = document.nextSibling(child)) last = child
+
+	if (last < 0 || document.kind(last) !== NodeKind.Element || fragment.name(last) !== "text:span" || document.firstChild(last) >= 0)
+		return undefined
+
+	const name = fragment.attributes(last).get("text:style-name")
+
+	if (name === undefined) return undefined
+
+	// Its sizes at the content's text scale (a scaled slide size change), as the paragraph's own runs are.
+	const changes = styleChanges()
+
+	odpScaledTextChanges(changes, scope.deck, scope.styles.style("text", name))
+
+	return changes.attributes.size === 0 ? name : scope.styles.derived("text", name, changes)
+}
+
 // The level each depth of a run of list paragraphs gets: the first item's bullet and indents at that depth (a depth
 // only list headers use: their margin, no bullet).
-function runLevels(entries: readonly Entry[], from: number, end: number): Map<number, LevelBullet> {
+function runLevels(scope: TextWriteScope, entries: readonly Entry[], from: number, end: number): Map<number, LevelBullet> {
 	const levels = new Map<number, LevelBullet>()
 
 	for (let index = from; index < end; index++) {
 		const entry = entries[index] as Entry
 
-		if (entry.item && !levels.has(entry.depth)) levels.set(entry.depth, levelOf(entry.paragraph.pPr))
+		if (entry.item && !levels.has(entry.depth))
+			levels.set(entry.depth, levelOf(entry.paragraph.pPr, pictureSize(scope, entry.paragraph, entry.depth)))
 	}
 
 	for (let index = from; index < end; index++) {
@@ -817,6 +861,44 @@ function runLevels(entries: readonly Entry[], from: number, end: number): Map<nu
 	}
 
 	return levels
+}
+
+// A picture label's size: its source level's (the same picture at the same depth of the list the paragraph was read
+// from), else its text's size (a picture the size of its text, as the model draws one).
+function pictureSize(scope: TextWriteScope, paragraph: Paragraph, depth: number): PictureSize | undefined {
+	const bullet = paragraph.pPr.bullet
+
+	if (bullet?.kind !== "blip") return undefined
+
+	const node = sourceNode(scope, paragraph)
+	const fragment = scope.fragment
+
+	if (node >= 0 && fragment !== undefined) {
+		let list = -1
+
+		for (let at = fragment.document.parent(node); at > 0; at = fragment.document.parent(at))
+			if (fragment.name(at) === "text:list" && fragment.attributes(at).has("text:style-name")) list = at
+
+		const name = list < 0 ? undefined : fragment.attributes(list).get("text:style-name")
+		const level = name === undefined ? undefined : scope.styles.env.context.sheet.listStyle(name, fragment.scope)?.levels.get(depth)
+		const attributes = level?.properties.attributes
+		const width = attributes?.get("fo:width")
+		const height = attributes?.get("fo:height")
+
+		if (
+			level?.kind === "image" &&
+			packagePart(level.attributes.get("xlink:href")) === bullet.part &&
+			width !== undefined &&
+			height !== undefined
+		)
+			return { width, height }
+	}
+
+	const first = paragraph.runs.find(run => run.kind !== "opaque")
+	const points = ((first !== undefined && "rPr" in first ? first.rPr.sz : undefined) ?? paragraph.endRPr?.sz ?? 1800) / 100
+	const size = `${String(Number(points.toFixed(2)))}pt`
+
+	return { width: size, height: size }
 }
 
 // The end of a run of list paragraphs one list style can give: consecutive list entries with their bullets either
@@ -849,7 +931,7 @@ function listMarkup(
 ): { readonly markup: string; readonly next: number } | Refused {
 	const inherited = entries[from]?.paragraph.pPr.bullet === undefined
 	const end = runEnd(entries, from, inherited)
-	const levels = inherited ? new Map<number, LevelBullet>() : runLevels(entries, from, end)
+	const levels = inherited ? new Map<number, LevelBullet>() : runLevels(scope, entries, from, end)
 	const elements = new Map<number, string>()
 	let style: string | undefined
 
@@ -917,20 +999,20 @@ function listMarkup(
 		}
 
 		const startAt = pPr.bullet?.kind === "autoNum" ? pPr.bullet.startAt : undefined
-		let marL = pPr.marL
-
+		// A labelled paragraph's level places its line (read/text.ts): the paragraph keeps the margin and first-line indent
+		// its source style had and writes none of its own, so LibreOffice places its label as the source did (it starts
+		// the label at the paragraph's margin and indent plus the level's space-before). A list header has no label, and a label-aligned level gives way to the paragraph's own
+		// margins in LibreOffice: their own margins place them.
 		if (!inherited) {
-			const level = levels.get(entry.depth) as LevelBullet
-			const ownMarL = pPr.marL === undefined ? 0 : pPr.marL - level.marL
 			const read = readsAs(scope, elements.get(entry.depth) ?? "", entry.depth, startAt)
 
-			if (read === undefined || !matches(pPr, read, entry.item, ownMarL))
-				return refused("unsupported", "a bullet its list level cannot give")
-
-			marL = ownMarL
+			if (read === undefined || !matches(pPr, read, entry.item)) return refused("unsupported", "a bullet its list level cannot give")
 		}
 
-		const paragraph = paragraphMarkup(scope, entry.paragraph, marL, inherited)
+		const paragraph =
+			inherited || !entry.item || (levels.get(entry.depth)?.indent ?? 0) > 0
+				? paragraphMarkup(scope, entry.paragraph, pPr.marL, true)
+				: paragraphMarkup(scope, entry.paragraph, undefined, false, true)
 
 		if (isRefused(paragraph)) return paragraph
 

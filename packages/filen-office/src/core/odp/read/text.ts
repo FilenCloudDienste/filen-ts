@@ -16,8 +16,6 @@ import type { Fragment, OdpContext } from "./context"
 // carries (style:graphic-properties/text:list-style). A paragraph outside a list, or after the first in a list
 // item, has no bullet. Whitespace collapses as §6.1.2 says.
 
-const PX_PER_PT = 96 / 72
-
 const ALIGNS: Readonly<Record<string, TextAlign>> = {
 	start: "l",
 	left: "l",
@@ -254,23 +252,98 @@ export function embeddedListStyle(element: OdfElement | undefined): OdfListStyle
 	}
 }
 
-const NUMBER_STEMS: Readonly<Record<string, string>> = { "1": "arabic", a: "alphaLc", A: "alphaUc", i: "romanLc", I: "romanUc" }
+// ST_TextAutonumberScheme (ECMA-376 §20.1.10.61) as ODF numbering: style:num-format, num-prefix, num-suffix, as
+// LibreOffice 7.5 writes each (measured: its conversion of a deck of every scheme) or reads it (its own format names,
+// rendered). The first scheme of a format is the one a format with another prefix or suffix reads as.
+export const ODF_NUMBERINGS: ReadonlyMap<string, readonly [string, string, string]> = (() => {
+	const out = new Map<string, readonly [string, string, string]>()
+	const affixes = (stem: string, format: string, kinds: readonly string[]): void => {
+		for (const kind of kinds)
+			out.set(
+				`${stem}${kind}`,
+				kind === "Period"
+					? [format, "", "."]
+					: kind === "ParenR"
+						? [format, "", ")"]
+						: kind === "ParenBoth"
+							? [format, "(", ")"]
+							: kind === "Minus"
+								? [format, "", "-"]
+								: [format, "", ""]
+			)
+	}
 
-// style:num-format with its prefix and suffix as ST_TextAutonumberScheme; undefined for none ("") or a format
-// DrawingML has no scheme for (shown as Arabic numbers).
+	out.set("arabicPlain", ["1", "", ""])
+
+	for (const [stem, format] of [
+		["arabic", "1"],
+		["alphaLc", "a"],
+		["alphaUc", "A"],
+		["romanLc", "i"],
+		["romanUc", "I"],
+		["thaiAlpha", "ก, ข, ค, ..."],
+		// Thai numerals: LibreOffice writes Thai letters for them (counted as approximated where it is written).
+		["thaiNum", "ก, ข, ค, ..."]
+	] as const)
+		affixes(stem, format, ["Period", "ParenR", "ParenBoth"])
+
+	affixes("circleNum", "①, ②, ③, ...", ["DbPlain", "WdWhitePlain", "WdBlackPlain"])
+	affixes("ea1Chs", "壹, 贰, 叁, ...", ["Period", "Plain"])
+	affixes("ea1Cht", "壹, 貳, 參, ...", ["Period", "Plain"])
+	affixes("ea1JpnKor", "一, 二, 三, ...", ["Period", "Plain"])
+	affixes("hebrew2", "א, ב, ג, ...", ["Minus"])
+	affixes("arabic1", "أ, ب, ت, ...", ["Minus"])
+	affixes("hindiNum", "१, २, ३, ...", ["Period", "ParenR"])
+	affixes("hindiAlpha1", "क, ख, ग, ...", ["Period"])
+
+	return out
+})()
+
+// Schemes ODF holds only as another (the one it reads back as): the same white circled numbers, and as a near form
+// (LibreOffice's) black circled numbers as white ones and Thai numerals as letters.
+export const NUMBERING_ALIASES: ReadonlyMap<string, string> = new Map([["circleNumWdWhitePlain", "circleNumDbPlain"]])
+export const NEAR_NUMBERINGS: ReadonlyMap<string, string> = new Map([
+	["circleNumWdBlackPlain", "circleNumDbPlain"],
+	["thaiNumPeriod", "thaiAlphaPeriod"],
+	["thaiNumParenR", "thaiAlphaParenR"],
+	["thaiNumParenBoth", "thaiAlphaParenBoth"]
+])
+
+// Formats LibreOffice also reads a scheme from: Hebrew numerals (its .ppt import's hebrew2Minus).
+const FORMAT_ALIASES: Readonly<Record<string, string>> = { "א, י, ק, ...": "א, ב, ג, ..." }
+
+const BY_FORM = new Map<string, string>()
+const BY_FORMAT = new Map<string, string>()
+
+for (const [scheme, [format, prefix, suffix]] of ODF_NUMBERINGS) {
+	if (NEAR_NUMBERINGS.has(scheme) || NUMBERING_ALIASES.has(scheme)) continue
+
+	const form = `${format}\u0000${prefix}\u0000${suffix}`
+
+	if (!BY_FORM.has(form)) BY_FORM.set(form, scheme)
+	if (!BY_FORMAT.has(format)) BY_FORMAT.set(format, scheme)
+}
+
+// style:num-format with its prefix and suffix as ST_TextAutonumberScheme; undefined for none (""). A format DrawingML
+// has no scheme for is shown as Arabic numbers; a known format with other affixes as its first scheme.
 function autonumberScheme(attributes: ReadonlyMap<string, string>): string | undefined {
-	const format = attributes.get("style:num-format") ?? ""
+	const given = attributes.get("style:num-format") ?? ""
 
-	if (format === "") return undefined
+	if (given === "") return undefined
 
-	const stem = NUMBER_STEMS[format] ?? "arabic"
+	const format = FORMAT_ALIASES[given] ?? given
 	const prefix = attributes.get("style:num-prefix") ?? ""
 	const suffix = attributes.get("style:num-suffix") ?? ""
+	const exact = BY_FORM.get(`${format}\u0000${prefix}\u0000${suffix}`)
 
-	if (suffix.startsWith(")")) return `${stem}${prefix.startsWith("(") ? "ParenBoth" : "ParenR"}`
-	if (suffix.startsWith(".")) return `${stem}Period`
+	if (exact !== undefined) return exact
 
-	return stem === "arabic" ? "arabicPlain" : `${stem}Period`
+	const latin = { "1": "arabic", a: "alphaLc", A: "alphaUc", i: "romanLc", I: "romanUc" }[format]
+
+	if (latin === undefined) return BY_FORMAT.get(format) ?? "arabicPlain"
+	if (suffix.startsWith(")")) return `${latin}${prefix.startsWith("(") ? "ParenBoth" : "ParenR"}`
+
+	return latin === "arabic" && !suffix.startsWith(".") ? "arabicPlain" : `${latin}Period`
 }
 
 // The bullet, its colour, size and font, and the indents a list level gives a paragraph (§16.32–§16.34, §17.19).
@@ -323,16 +396,29 @@ export function levelProps(context: OdpContext, level: OdfListLevel | undefined,
 	const color = text?.get("style:use-window-font-color") === "true" ? undefined : srgb(text?.get("fo:color"))
 	const typeface = font(context, text ?? new Map<string, string>(), "")
 
-	out.buSz = relative === undefined ? "text" : { pct: Math.round(relative * 1000) }
+	// 100% is the text's own size (the form a bullet of its text's size is written in).
+	out.buSz = relative === undefined || relative === 100 ? "text" : { pct: Math.round(relative * 1000) }
 	out.buClr = color ?? "text"
 	if (bullet.kind === "char") out.buFont = typeface ?? "text"
 
 	return out
 }
 
+// A shape's line-spacing rule (style:font-independent-line-spacing, ODF 1.3 Part 3, a paragraph property) from its
+// style chain: font-independent (the model's default, undefined) only where the chain says true, else the face's
+// ascent and descent, as LibreOffice 7.5 lays the text out (measured: five 24 pt Times lines in a growing frame take
+// 0.936 cm each when the shape's chain says nothing, whatever a paragraph style says; 1.2 times the size when it says
+// true).
+function shapeLineRule(paragraph: OdfProperties | undefined): false | undefined {
+	return paragraph?.attributes.get("style:font-independent-line-spacing") === "true" ? undefined : false
+}
+
 // Each of the nine levels as a:lstStyle sees it: a paragraph and its default run properties.
 export function levelStyle(paragraph: OdfProperties | undefined, text: OdfProperties | undefined, context: OdpContext): ParaProps {
 	const own = paraPropsOf(paragraph)
+
+	if (shapeLineRule(paragraph) === false) own.fontIndependentLineSpacing = false
+	else delete own.fontIndependentLineSpacing
 	const rPr = runPropsOf(context, text)
 
 	return Object.keys(rPr).length === 0 ? own : { ...own, defRPr: rPr }
@@ -599,6 +685,53 @@ interface ListFrame {
 	readonly style: OdfListStyle | undefined
 }
 
+// A list naming a list style the document doesn't define: LibreOffice draws it as one that names no level (measured).
+const MISSING_LIST_STYLE: OdfListStyle = Object.freeze({
+	name: "",
+	displayName: undefined,
+	automatic: true,
+	origin: "content",
+	outline: false,
+	consecutiveNumbering: false,
+	levels: new Map<number, OdfListLevel>()
+})
+
+// LibreOffice 7.5's level of a list style that names none (measured: saved again, it writes each level as a "●" in
+// OpenSymbol at 45% of the text, 0.6 cm in per level, with a 0.6 cm label).
+const DEFAULT_LEVELS = new Map<number, OdfListLevel>()
+
+function defaultLevel(level: number): OdfListLevel {
+	let out = DEFAULT_LEVELS.get(level)
+
+	if (out === undefined) {
+		const properties = new Map([["text:min-label-width", "0.6cm"]])
+
+		if (level > 1) properties.set("text:space-before", `${String(Number((0.6 * (level - 1)).toFixed(1)))}cm`)
+
+		out = {
+			level,
+			kind: "bullet",
+			attributes: new Map([
+				["text:level", String(level)],
+				["text:bullet-char", "●"]
+			]),
+			properties: { attributes: properties, children: [] },
+			labelAlignment: undefined,
+			textProperties: {
+				attributes: new Map([
+					["fo:font-family", "OpenSymbol"],
+					["style:use-window-font-color", "true"],
+					["fo:font-size", "45%"]
+				]),
+				children: []
+			}
+		}
+		DEFAULT_LEVELS.set(level, out)
+	}
+
+	return out
+}
+
 // One text body from a shape element (its text:p, text:h and text:list children); undefined when it has none.
 export function readTextBody(
 	context: OdpContext,
@@ -621,18 +754,37 @@ export function readTextBody(
 
 		if (list !== undefined) {
 			const level = Math.min(9, list.level)
-			const listLevel = list.style?.levels.get(list.level)
+			const listLevel =
+				list.style?.levels.get(list.level) ??
+				(list.style !== undefined && list.style.levels.size === 0 ? defaultLevel(list.level) : undefined)
 			const fromLevel = levelProps(context, listLevel, start)
 			// The list level's indents add to the paragraph's own left margin (LibreOffice 7.5, measured: a paragraph
 			// whose style writes margin-left 0 and a level of min-label-width 0.952 cm starts its text 0.952 cm in,
 			// its bullet at the margin); a paragraph without a margin takes its level's from the body's list style.
-			const margin = pPr.marL ?? lstStyle?.levels[level - 1]?.marL ?? 0
+			// A level placed by space-before and min-label-width places the line itself: LibreOffice 7.5 lays the
+			// paragraph out at the level's margin (S + L) and first-line offset (-L) whatever margins the paragraph or
+			// its outline style give (measured, its resolved numbering per paragraph: tdf153161 1.2/-0.9 cm over no
+			// margins, tdf169524 level 2 1.6/-1 cm under an outline margin of 1.6/-1 cm, Microsoft's export
+			// 0.87/-0.87 cm under its own margin of 0.87/-0.87 cm). A label-alignment level gives way to the
+			// paragraph's own margins (measured: margin-left 0 puts the text at 0).
+			const outline = lstStyle?.levels[level - 1]
+			const margin = pPr.marL ?? outline?.marL
+			const first = pPr.indent ?? outline?.indent
 
 			pPr.lvl = level - 1
 
 			if (fromLevel.marL !== undefined) {
-				pPr.marL = margin + fromLevel.marL
-				pPr.indent = bulleted ? (fromLevel.indent ?? 0) : 0
+				if (listLevel?.labelAlignment !== undefined && (margin !== undefined || first !== undefined)) {
+					pPr.marL = margin ?? 0
+					pPr.indent = bulleted ? (first ?? 0) : 0
+				} else if (bulleted) {
+					pPr.marL = fromLevel.marL
+					pPr.indent = fromLevel.indent ?? 0
+				} else {
+					// A list header (no label) at its own margin, else the level's.
+					pPr.marL = pPr.marL ?? fromLevel.marL
+					pPr.indent = 0
+				}
 			}
 
 			if (bulleted) {
@@ -645,13 +797,9 @@ export function readTextBody(
 			pPr.bullet = { kind: "none" }
 		}
 
-		// A paragraph style that turns the rule back on over a shape whose text has it off says so (true is written
-		// only here, where the level below would otherwise give false).
-		if (
-			style?.paragraph.attributes.get("style:font-independent-line-spacing") === "true" &&
-			lstStyle?.levels[pPr.lvl ?? 0]?.fontIndependentLineSpacing === false
-		)
-			pPr.fontIndependentLineSpacing = true
+		// The line-spacing rule is the shape's (shapeLineRule), never a paragraph style's: ODF allows it on any
+		// paragraph style, but LibreOffice 7.5 lays a shape's text out by its own style chain's alone (measured).
+		delete pPr.fontIndependentLineSpacing
 
 		const cursor: Cursor = {
 			runs: [],
@@ -679,10 +827,12 @@ export function readTextBody(
 
 		if (cursor.runs.length > context.budgets.runsPerBody) tooLarge("runs in a text body", context.budgets.runsPerBody)
 
+		const end = rPr
+
 		paragraphs.push({
 			pPr,
 			runs: cursor.runs,
-			...(Object.keys(rPr).length === 0 ? {} : { endRPr: rPr }),
+			...(Object.keys(end).length === 0 ? {} : { endRPr: end }),
 			src: fragment.src(node)
 		})
 		found = true
@@ -695,7 +845,7 @@ export function readTextBody(
 		const style =
 			named === undefined
 				? (parent?.style ?? scope.listStyle)
-				: (context.sheet.listStyle(named, fragment.scope) ?? parent?.style ?? scope.listStyle)
+				: (context.sheet.listStyle(named, fragment.scope) ?? MISSING_LIST_STYLE)
 		const frame: ListFrame = { level: (parent?.level ?? 0) + 1, style }
 
 		for (let item = document.firstChildElement(node); item >= 0; item = document.nextSiblingElement(item)) {
@@ -730,8 +880,4 @@ export function readTextBody(
 	if (!found) return undefined
 
 	return { bodyPr: {}, ...(lstStyle === undefined ? {} : { lstStyle }), paragraphs }
-}
-
-export function insetsPx(points: number): number {
-	return points * PX_PER_PT
 }

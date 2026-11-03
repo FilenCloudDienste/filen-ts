@@ -4,7 +4,6 @@ import { le16 } from "./bytes"
 
 export const SGC_PARAGRAPH = 1
 export const SGC_CHARACTER = 2
-export const SGC_PICTURE = 3
 export const SGC_SECTION = 4
 export const SGC_TABLE = 5
 

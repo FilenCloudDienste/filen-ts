@@ -2,6 +2,8 @@ import { chartDataOf, type ChartData } from "../../../core/presentation/edit/app
 import { findShape } from "../../../core/presentation/edit/changes"
 import { PresentationError, type ShapeRef } from "../../../core/presentation/model"
 import type { CallContext } from "../engine"
+import { chartPartSource } from "./edit"
+import { pptxParts } from "./open/pptx"
 import { viewParts } from "./view"
 
 // The chart capability: what a chart frame holds for the Chart tab, and its data as a workbook for Edit Data
@@ -15,13 +17,14 @@ export async function chartData(context: CallContext, target: ShapeRef, options?
 
 	const node = await parts.slide(target.slide, context.slicing)
 	const shape = findShape(node.shapes, target.id)?.shape
+	const pptx = pptxParts(session.deck)
 
 	if (shape?.frame?.kind !== "chart") throw new PresentationError("notFound", `shape ${String(target.id)} is not a chart`)
 
 	const data = await chartDataOf(
 		session.deck,
 		shape.frame,
-		{ opc: parts.opc, document: part => parts.document(part) },
+		pptx === undefined ? { opc: parts.opc, document: part => parts.document(part) } : chartPartSource(session, pptx),
 		options ?? {},
 		context.slicing
 	)

@@ -1,4 +1,5 @@
 import { PresentationError } from "../presentation/model"
+import type { AutonumberScheme } from "../presentation/text/autonum"
 import { tooLarge } from "../presentation/refusal"
 import { i16, i32, malformed, RT, u16, u32, utf16Text, type PptBudgets, type PptRecord } from "./records"
 
@@ -24,6 +25,8 @@ export interface CharProps {
 	size?: number
 	color?: PptColor
 	position?: number
+	// CFStyle pp9rt (§2.9.16): the run's paragraph's entry in its body's StyleTextProp9Atom.
+	pp9?: number
 }
 
 export interface TabStop {
@@ -53,6 +56,10 @@ export interface ParaProps {
 	charWrap?: boolean
 	overflow?: boolean
 	direction?: number
+	// TextPFException9 (the "___PPT9" extension): fBulletHasAutoNumber and bulletAutoNumberScheme.
+	autoNumber?: boolean
+	autoNumberScheme?: number
+	autoNumberStart?: number
 }
 
 export interface StyleLevel {
@@ -127,6 +134,8 @@ export interface TextBlock {
 	readonly links: readonly TextLink[]
 	// Part of its formatting could not be read (the text itself is whole).
 	readonly damaged?: boolean
+	// StyleTextProp9Atom: the PowerPoint 2000 paragraph extensions its runs' pp9rt index.
+	readonly ext9?: readonly ParaProps[]
 }
 
 function color(data: Uint8Array, at: number): PptColor | undefined {
@@ -248,6 +257,7 @@ export function readCF(data: Uint8Array, start: number, end: number): { readonly
 		if ((masks & 0x4) !== 0) cf.underline = (style & 0x4) !== 0
 		if ((masks & 0x10) !== 0) cf.shadow = (style & 0x10) !== 0
 		if ((masks & 0x200) !== 0) cf.emboss = (style & 0x200) !== 0
+		if ((masks & 0x3c00) !== 0) cf.pp9 = (style >> 10) & 0xf
 	}
 
 	if ((masks & 0x10000) !== 0) cf.font = u16(data, field(2))
@@ -463,6 +473,211 @@ function readRuns(
 
 // The bodies of text in `records` (a SlideListWithText slice, or a shape's OfficeArtClientTextbox): each starts at a
 // TextHeaderAtom.
+// [MS-PPT] TextAutoNumberSchemeEnum, in order, as ECMA-376 names each (ST_TextAutonumberScheme).
+export const PPT_AUTONUMBER_SCHEMES: readonly AutonumberScheme[] = [
+	"alphaLcPeriod",
+	"alphaUcPeriod",
+	"arabicParenR",
+	"arabicPeriod",
+	"romanLcParenBoth",
+	"romanLcParenR",
+	"romanLcPeriod",
+	"romanUcPeriod",
+	"alphaLcParenBoth",
+	"alphaLcParenR",
+	"alphaUcParenBoth",
+	"alphaUcParenR",
+	"arabicParenBoth",
+	"arabicPlain",
+	"romanUcParenBoth",
+	"romanUcParenR",
+	"ea1ChsPlain",
+	"ea1ChsPeriod",
+	"circleNumDbPlain",
+	"circleNumWdWhitePlain",
+	"circleNumWdBlackPlain",
+	"ea1ChtPlain",
+	"ea1ChtPeriod",
+	"arabic1Minus",
+	"arabic2Minus",
+	"hebrew2Minus",
+	"ea1JpnKorPlain",
+	"ea1JpnKorPeriod",
+	"arabicDbPlain",
+	"arabicDbPeriod",
+	"thaiAlphaPeriod",
+	"thaiAlphaParenR",
+	"thaiAlphaParenBoth",
+	"thaiNumPeriod",
+	"thaiNumParenR",
+	"thaiNumParenBoth",
+	"hindiAlphaPeriod",
+	"hindiNumPeriod",
+	"ea1JpnChsDbPeriod",
+	"hindiNumParenR",
+	"hindiAlpha1Period"
+]
+
+// TextPFException9; the paragraph mask bit 0x4000000 carries a PowerPoint 2002 extension (4 bytes), as
+// LibreOffice reads it.
+function readPF9(data: Uint8Array, start: number, end: number): { readonly pf: ParaProps; readonly next: number } {
+	need(start, 4, end)
+
+	const masks = u32(data, start)
+	const pf: ParaProps = {}
+	let at = start + 4
+	const field = (size: number): number => {
+		need(at, size, end)
+
+		const here = at
+
+		at += size
+
+		return here
+	}
+
+	if ((masks & 0x800000) !== 0) field(2)
+	if ((masks & 0x2000000) !== 0) pf.autoNumber = u16(data, field(2)) !== 0
+	if ((masks & 0x1000000) !== 0) {
+		const here = field(4)
+
+		pf.autoNumberScheme = u16(data, here)
+		pf.autoNumberStart = i16(data, here + 2)
+	}
+
+	if ((masks & 0x4000000) !== 0) field(4)
+
+	return { pf, next: at }
+}
+
+// TextCFException9: only its length matters here.
+function skipCF9(data: Uint8Array, start: number, end: number): number {
+	need(start, 4, end)
+
+	const masks = u32(data, start)
+	const next = start + 4 + ((masks & 0x100000) !== 0 ? 4 : 0)
+
+	need(start + 4, next - start - 4, end)
+
+	return next
+}
+
+// TextSIException: only its length matters here.
+function skipSI(data: Uint8Array, start: number, end: number): number {
+	need(start, 4, end)
+
+	const masks = u32(data, start)
+	let at = start + 4
+	const skip = (size: number): void => {
+		need(at, size, end)
+		at += size
+	}
+
+	if ((masks & 0x1) !== 0) skip(2)
+	if ((masks & 0x2) !== 0) skip(2)
+	if ((masks & 0x4) !== 0) skip(2)
+	if ((masks & 0x40) !== 0) skip(2)
+	if ((masks & 0x20) !== 0) skip(4)
+	if ((masks & 0x200) !== 0) {
+		need(at, 4, end)
+
+		const count = u32(data, at)
+
+		skip(4)
+		skip(count * 4)
+	}
+
+	return at
+}
+
+// StyleTextProp9Atom: one extension per entry; a damaged tail keeps the entries read before it.
+export function readStyleTextProp9(data: Uint8Array, record: PptRecord): ParaProps[] {
+	const out: ParaProps[] = []
+	let at = record.start
+
+	try {
+		while (at < record.end) {
+			const pf = readPF9(data, at, record.end)
+
+			at = skipSI(data, skipCF9(data, pf.next, record.end), record.end)
+			out.push(pf.pf)
+		}
+	} catch (error) {
+		if (!(error instanceof PresentationError) || error.reason !== "malformed") throw error
+	}
+
+	return out
+}
+
+// TextMasterStyle9Atom: per level the paragraph extension (and a character one), a level number first for
+// recInstance 5 and up as in TextMasterStyleAtom; a record that does not read whole that way is read without it.
+export function readMasterStyle9(data: Uint8Array, record: PptRecord): (ParaProps | undefined)[] {
+	const read = (numbered: boolean): (ParaProps | undefined)[] | undefined => {
+		const levels: (ParaProps | undefined)[] = []
+
+		try {
+			need(record.start, 2, record.end)
+
+			const count = Math.min(5, u16(data, record.start))
+			let at = record.start + 2
+
+			for (let k = 0; k < count; k++) {
+				let level = k
+
+				if (numbered) {
+					need(at, 2, record.end)
+					level = u16(data, at)
+					at += 2
+				}
+
+				const pf = readPF9(data, at, record.end)
+
+				at = skipCF9(data, pf.next, record.end)
+
+				if (level < 5) levels[level] = pf.pf
+			}
+
+			return at === record.end ? levels : undefined
+		} catch (error) {
+			if (!(error instanceof PresentationError) || error.reason !== "malformed") throw error
+
+			return undefined
+		}
+	}
+
+	return (record.instance >= 5 ? read(true) : undefined) ?? read(false) ?? []
+}
+
+const PP9_NAME = "___PPT9"
+const RT_PROG_BINARY_TAG = 0x138a
+const RT_BINARY_TAG_DATA_BLOB = 0x138b
+export const RT_STYLE_TEXT_PROP9 = 0x0fac
+export const RT_TEXT_MASTER_STYLE9 = 0x0fad
+export const RT_OUTLINE_TEXT_PROPS9 = 0x0fae
+export const RT_OUTLINE_TEXT_PROPS_HEADER = 0x0faf
+
+// A ProgTags container (DocProgTagsContainer, SlideProgTagsContainer, ShapeProgTagsContainer): the records of its "___PPT9" binary tag's data blob.
+export function pp9Records<R extends PptRecord>(data: Uint8Array, records: readonly R[], children: (record: R) => readonly R[]): R[] {
+	const out: R[] = []
+
+	for (const tags of records) {
+		if (tags.type !== RT.progTags) continue
+
+		for (const tag of children(tags)) {
+			if (tag.type !== RT_PROG_BINARY_TAG) continue
+
+			const parts = children(tag)
+			const name = parts.find(part => part.type === RT.cString)
+
+			if (name === undefined || utf16Text(data, name.start, name.end) !== PP9_NAME) continue
+
+			for (const blob of parts) if (blob.type === RT_BINARY_TAG_DATA_BLOB) out.push(...children(blob))
+		}
+	}
+
+	return out
+}
+
 export function readTextBlocks(
 	data: Uint8Array,
 	records: readonly PptRecord[],
@@ -787,7 +1002,11 @@ export function paragraphsOf(block: TextBlock): TextParagraph[] {
 
 		flush(stop)
 
-		out.push({ level: Math.min(level, 4), pf: pfRun?.pf ?? {}, runs, end: cfRuns.at(stop)?.cf ?? {} })
+		// The extension of the paragraph's first run's pp9rt (entry 0 when the run names none), as LibreOffice reads it.
+		const ext9 = block.ext9?.[cfRuns.at(start)?.cf.pp9 ?? 0]
+		const pf = ext9 === undefined ? (pfRun?.pf ?? {}) : { ...pfRun?.pf, ...ext9 }
+
+		out.push({ level: Math.min(level, 4), pf, runs, end: cfRuns.at(stop)?.cf ?? {} })
 
 		if (stop >= text.length) break
 
@@ -812,6 +1031,9 @@ export interface TextEmitContext {
 	readonly footer: string | undefined
 	readonly header: string | undefined
 	readonly date: string | undefined
+	// The date is the fixed text `date` (HeadersFootersAtom fHasUserDate without fHasTodayDate, [MS-PPT] §2.4.15.2), not
+	// today's date.
+	readonly fixedDate?: boolean
 	// The a:hlinkClick of an interaction, or "" when it has none this deck can carry.
 	link(interaction: Interaction): string
 }
@@ -953,6 +1175,7 @@ export function paraPropsXml(
 	if (pf.fontAlign !== undefined && FONT_ALIGN[pf.fontAlign] !== undefined)
 		attributes += ` fontAlgn="${FONT_ALIGN[pf.fontAlign] ?? "auto"}"`
 	if (pf.direction === 1) attributes += ' rtl="1"'
+	else if (pf.direction === 0 && element === "pPr") attributes += ' rtl="0"'
 	if (pf.charWrap !== undefined) attributes += ` eaLnBrk="${pf.charWrap ? "1" : "0"}"`
 	if (pf.wordWrap !== undefined) attributes += ` latinLnBrk="${pf.wordWrap ? "0" : "1"}"`
 	if (pf.overflow !== undefined) attributes += ` hangingPunct="${pf.overflow ? "1" : "0"}"`
@@ -986,11 +1209,19 @@ export function paraPropsXml(
 			children += `<a:buFont typeface="${escapeXml(bulletFont)}"/>`
 
 		const char = effective.bulletChar
+		const numbering = effective.autoNumber === true ? PPT_AUTONUMBER_SCHEMES[effective.autoNumberScheme ?? 3] : undefined
+		const start = effective.autoNumberStart ?? 1
 
-		// A bullet turned on here, or a character set here, writes the character (its presence is what turns it on).
-		if ((pf.bullet === true || pf.bulletChar !== undefined) && char !== undefined && char !== 0) {
+		// A bullet or numbering turned on here, or a character or scheme set here, writes it (its presence is what turns
+		// it on).
+		if (
+			numbering !== undefined &&
+			(pf.bullet === true || pf.bulletChar !== undefined || pf.autoNumber !== undefined || pf.autoNumberScheme !== undefined)
+		) {
+			children += `<a:buAutoNum type="${numbering}"${start > 1 && start <= 32767 ? ` startAt="${String(start)}"` : ""}/>`
+		} else if ((pf.bullet === true || pf.bulletChar !== undefined || pf.autoNumber === false) && char !== undefined && char !== 0) {
 			children += `<a:buChar char="${escapeXml(String.fromCharCode(char)) || "•"}"/>`
-		} else if (pf.bullet === true) {
+		} else if (pf.bullet === true || pf.autoNumber === false) {
 			children += '<a:buChar char="•"/>'
 		}
 	}
@@ -1048,6 +1279,8 @@ function runXml(run: TextRun, block: TextBlock, level: number, context: TextEmit
 			case "datetime":
 			case "genericDate":
 			case "rtfDate":
+				if (context.fixedDate === true) return `<a:r>${props}<a:t>${escapeXml((context.date ?? "") + rest)}</a:t></a:r>`
+
 				return `<a:fld id="${FIELD_GUIDS["datetime"] ?? ""}" type="${dateType(field.format)}">${props}<a:t>${escapeXml(context.date ?? "")}</a:t></a:fld>${after}`
 			case "footer":
 				return `<a:r>${props}<a:t>${escapeXml((context.footer ?? "") + rest)}</a:t></a:r>`
@@ -1085,7 +1318,11 @@ export function paragraphsXml(block: TextBlock, context: TextEmitContext, fallba
 				? { ...paragraph.pf, defaultTab: block.ruler.defaultTab }
 				: paragraph.pf
 		const tabs = pf.tabs ?? block.ruler?.tabs
-		const own = tabs === undefined || tabs === pf.tabs ? pf : { ...pf, tabs }
+		const tabbed = tabs === undefined || tabs === pf.tabs ? pf : { ...pf, tabs }
+		// A left-to-right paragraph under a right-to-left master level is written rtl="0"; under any other level its
+		// direction is the default and is left out.
+		const { direction: _direction, ...undirected } = tabbed
+		const own = tabbed.direction === 0 && style.pf.direction !== 1 ? undirected : tabbed
 		const effective = mergePara(style.pf, own)
 		const pPr = paraPropsXml("pPr", own, level, context, effective, marginsOf(own, level, block.ruler, style.pf, fallbackRuler))
 		const runs = paragraph.runs.map(run => runXml(run, block, level, context)).join("")

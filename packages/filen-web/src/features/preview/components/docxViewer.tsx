@@ -57,7 +57,7 @@ import { DocxPasswordGate, type PasswordVerdict } from "@/features/preview/compo
 import { DocxEditView, DocxProtectedEditView, type DocxSaveSource } from "@/features/preview/components/docxEditor"
 import { DocxFileMenu } from "@/features/preview/components/docxFileMenu"
 import { useLeaveViewerFullScreen } from "@/features/preview/components/commandBar.logic"
-import { onCommandBarF6 } from "@/features/office/components/ribbon/ribbonFocus"
+import { onCommandBarF6, onRibbonEscape } from "@/features/office/components/ribbon/ribbonFocus"
 import { useDocxPdfExport, type DocxPdfExportTarget } from "@/features/preview/hooks/useDocxPdfExport"
 import { DownloadAsItemProvider } from "@/features/drive/components/editorDownloadAs"
 import { DocxToolbar, type DocxLegacyInfo, type PasswordIntegrity } from "@/features/preview/components/docxToolbar"
@@ -1034,8 +1034,12 @@ function DocxPageList({
 		<div
 			ref={rootRef}
 			className="flex size-full flex-col"
+			onKeyDownCapture={event => {
+				onRibbonEscape(event, event.currentTarget, focusPages, "capture")
+			}}
 			onKeyDown={event => {
-				onCommandBarF6(event, event.currentTarget, focusPages)
+				if (!onRibbonEscape(event, event.currentTarget, focusPages, "bubble"))
+					onCommandBarF6(event, event.currentTarget, focusPages)
 			}}
 		>
 			<DocxToolbar

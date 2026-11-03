@@ -18,7 +18,8 @@ import { cloneModel, digestOf, findShape } from "../changes"
 import { holdDiagramCopies } from "./smartart"
 import { planDelete, sectionsAfterInsert, sectionsAfterMove, type JumpRewrite, type PartOf, type ReferenceFacts } from "../integrity"
 import type { DeckOp, OpOf, RawPart, SlideOp } from "../ops"
-import { isRefused, type SourceReading } from "./shape"
+import { type SourceReading } from "./shape"
+import { isRefused } from "../../refusal"
 
 // The slide ops on the model, in place, with the integrity graph's model half (edit/integrity.ts): a delete takes
 // the slides out of their sections and custom shows and turns jumps to them into "next slide"; an add or a

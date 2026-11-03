@@ -14,7 +14,7 @@ import { type DriveItem } from "@/features/drive/lib/item"
 import { usePreviewBytes } from "@/features/preview/hooks/usePreviewBytes"
 import { PdfCommandBar, PdfPropertiesDialog } from "@/features/preview/components/pdfCommandBar"
 import { useLeaveViewerFullScreen } from "@/features/preview/components/commandBar.logic"
-import { onCommandBarF6 } from "@/features/office/components/ribbon/ribbonFocus"
+import { onCommandBarF6, onRibbonEscape } from "@/features/office/components/ribbon/ribbonFocus"
 import { usePreviewDownload } from "@/features/preview/lib/accessMode"
 import { useTrustedLinkGate } from "@/lib/trustedLinks/useTrustedLinkGate"
 import { isSafeAbsoluteHref } from "@/lib/safeUrl"
@@ -154,8 +154,12 @@ function PdfReader({ document, alt, size }: { document: PdfDomDocument; alt: str
 		<div
 			ref={rootRef}
 			className="flex size-full flex-col"
+			onKeyDownCapture={event => {
+				onRibbonEscape(event, event.currentTarget, focusPages, "capture")
+			}}
 			onKeyDown={event => {
-				onCommandBarF6(event, event.currentTarget, focusPages)
+				if (!onRibbonEscape(event, event.currentTarget, focusPages, "bubble"))
+					onCommandBarF6(event, event.currentTarget, focusPages)
 			}}
 		>
 			<PdfCommandBar

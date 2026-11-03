@@ -72,12 +72,3 @@ export function encodeText(text: string, codepage: number): EncodedText {
 
 	return { rtf: out, unicode }
 }
-
-// A string of ASCII characters as bytes.
-export function asciiBytes(text: string): Uint8Array {
-	const out = new Uint8Array(text.length)
-
-	for (let k = 0; k < text.length; k++) out[k] = text.charCodeAt(k) & 0x7f
-
-	return out
-}

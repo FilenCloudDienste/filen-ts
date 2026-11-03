@@ -1126,11 +1126,6 @@ export function dataHasRelationships(document: XmlDocument): boolean {
 	return new DataPart(document).hasRelationships()
 }
 
-// The modelId of the doc point, the node new top-level nodes go under.
-export function diagramRootId(document: XmlDocument): string | undefined {
-	return new DataPart(document).pts.find(pt => pt.type === "doc")?.id
-}
-
 // --- New diagrams ---
 
 export interface DiagramDefinitionIds {

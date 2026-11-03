@@ -92,6 +92,8 @@ interface GraphicsState {
 	strokeAlpha: number
 	fill: number
 	stroke: number
+	// User space to the page's default space (tiling patterns are placed in the latter).
+	ctm: Matrix
 }
 
 function codeByte(out: ByteWriter, byte: number): void {
@@ -104,13 +106,37 @@ function codeByte(out: ByteWriter, byte: number): void {
 // The smallest pen move written into a TJ array, 1/1000 em (smaller ones are carried on).
 const MIN_MOVE = 1.5
 
-const DEFAULT_STATE: GraphicsState = { fillAlpha: 1, strokeAlpha: 1, fill: 0, stroke: 0 }
+const DEFAULT_STATE: GraphicsState = { fillAlpha: 1, strokeAlpha: 1, fill: 0, stroke: 0, ctm: [1, 0, 0, 1, 0, 0] }
+
+// `first` then `second` (row vectors, as cm composes).
+function multiply(first: Matrix, second: Matrix): Matrix {
+	return [
+		first[0] * second[0] + first[1] * second[2],
+		first[0] * second[1] + first[1] * second[3],
+		first[2] * second[0] + first[3] * second[2],
+		first[2] * second[1] + first[3] * second[3],
+		first[4] * second[0] + first[5] * second[2] + second[4],
+		first[4] * second[1] + first[5] * second[3] + second[5]
+	]
+}
+
+// A picture repeated over an area: `width` x `height` units of tile space, placed by `matrix` (tile space to user
+// space), mirrored across the next cell per flip, cropped by `crop` (fractions of each side).
+export interface PdfTile {
+	readonly width: number
+	readonly height: number
+	readonly matrix: Matrix
+	readonly flipX: boolean
+	readonly flipY: boolean
+	readonly crop: readonly [number, number, number, number]
+}
 
 export class PdfPage extends ContentBuilder {
 	readonly fonts = new Map<string, PdfRef>()
 	readonly xobjects = new Map<string, PdfRef>()
 	readonly extGStates = new Map<string, PdfRef>()
 	readonly shadings = new Map<string, PdfRef>()
+	readonly patterns = new Map<string, PdfRef>()
 	readonly annotations: PdfRef[] = []
 	private states: GraphicsState[] = [{ ...DEFAULT_STATE }]
 	// Open marked content: "c" structure content (with MCID), "a" artifact, "s" span.
@@ -159,6 +185,12 @@ export class PdfPage extends ContentBuilder {
 		this.states.pop()
 
 		return super.restoreState()
+	}
+
+	override concat(m: Matrix): this {
+		this.state.ctm = multiply(m, this.state.ctm)
+
+		return super.concat(m)
 	}
 
 	get depth(): number {
@@ -276,6 +308,58 @@ export class PdfPage extends ContentBuilder {
 		this.named(image.name, "Do")
 
 		return this.restoreState()
+	}
+
+	// Paints the rectangle (inside the current clip) with a picture tiled through a tiling pattern (§8.7.3): the
+	// picture is embedded once and the cell drawn by the viewer as often as the area needs.
+	async tile(image: PdfImage, tile: PdfTile, x: number, y: number, width: number, height: number): Promise<void> {
+		this.live()
+
+		const flips: readonly (readonly [number, number])[] = [
+			[1, 1],
+			...(tile.flipX ? ([[-1, 1]] as const) : []),
+			...(tile.flipY ? ([[1, -1]] as const) : []),
+			...(tile.flipX && tile.flipY ? ([[-1, -1]] as const) : [])
+		]
+		const cell = new ContentBuilder(new ByteWriter(256))
+		const [left, top, right, bottom] = tile.crop
+		const cropped = left !== 0 || top !== 0 || right !== 0 || bottom !== 0
+		const fullWidth = tile.width / Math.max(0.0001, 1 - left - right)
+		const fullHeight = tile.height / Math.max(0.0001, 1 - top - bottom)
+		const ix = -left * fullWidth
+		const iy = -top * fullHeight
+		const [a, b, c, d, e, f] = orientationMatrix(image.orientation)
+
+		for (const [fx, fy] of flips) {
+			cell.saveState().concat([fx, 0, 0, fy, fx < 0 ? tile.width * 2 : 0, fy < 0 ? tile.height * 2 : 0])
+
+			if (cropped) cell.rect(0, 0, tile.width, tile.height).clip()
+
+			cell.concat([
+				fullWidth * a,
+				fullHeight * b,
+				-fullWidth * c,
+				-fullHeight * d,
+				ix + fullWidth * (c + e),
+				iy + fullHeight * (d + f)
+			])
+			cell.named(image.name, "Do").restoreState()
+		}
+
+		const pattern = await this.writer.tilingPattern({
+			width: tile.width * (tile.flipX ? 2 : 1),
+			height: tile.height * (tile.flipY ? 2 : 1),
+			matrix: multiply(tile.matrix, this.state.ctm),
+			content: cell.out.take(),
+			image
+		})
+
+		this.patterns.set(pattern.name, pattern.ref)
+		this.saveState()
+		this.op("/Pattern cs")
+		this.named(pattern.name, "scn")
+		this.rect(x, y, width, height).fill()
+		this.restoreState()
 	}
 
 	// Draws an image through an arbitrary matrix from its unit square (PDF image space, y up).

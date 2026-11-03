@@ -28,7 +28,7 @@ import type { DriveItem } from "@/features/drive/lib/item"
 import type { DriveVariant } from "@/features/drive/lib/preferences"
 import { OfficeRibbon, type RibbonGroup, type RibbonTab } from "@/features/office/components/ribbon/officeRibbon"
 import { usePhoneWidth } from "@/features/office/components/ribbon/phoneMedia"
-import { ribbonLanding } from "@/features/office/components/ribbon/ribbonFocus"
+import { onRibbonEscape, ribbonLanding } from "@/features/office/components/ribbon/ribbonFocus"
 import { keepFocus } from "@/features/office/lib/officeControls"
 import { usePreviewDownloadable } from "@/features/preview/lib/accessMode"
 import { SlideListContextMenu } from "@/features/presentation/components/contextMenu"
@@ -532,6 +532,17 @@ export function PresentationEditor({ store, document: deck, alt, item, variant, 
 		canvasRef.current?.focus()
 	}
 
+	// The document's focus (Find closing, Escape on the ribbon): the body being edited (the notes or a slide's text), as
+	// PowerPoint does; else the slide.
+	const focusDocument = (): void => {
+		const body =
+			text.active === undefined
+				? null
+				: (rootRef.current?.querySelector<HTMLElement>("[data-fo-text-editor] [contenteditable]") ?? null)
+
+		;(body ?? canvasRef.current)?.focus({ preventScroll: true })
+	}
+
 	// The same keys pressed elsewhere in the editor's layer (focus left on the preview overlay itself after a click, as
 	// Safari and macOS Firefox do): the show's, the panes' and the editor's shortcuts. Paging stays the slide's own.
 	useEditorLayerKeys(rootRef, (event, root) => {
@@ -611,14 +622,7 @@ export function PresentationEditor({ store, document: deck, alt, item, variant, 
 				focus={find.focus}
 				onClosed={() => {
 					setFind({ open: false, replace: false, focus: 0 })
-
-					// Editing a body (the notes or a slide's text): back into it, as PowerPoint does; else the slide.
-					const body =
-						text.active === undefined
-							? null
-							: (rootRef.current?.querySelector<HTMLElement>("[data-fo-text-editor] [contenteditable]") ?? null)
-
-					;(body ?? canvasRef.current)?.focus({ preventScroll: true })
+					focusDocument()
 				}}
 				replaceOpen={find.replace}
 			/>
@@ -637,11 +641,18 @@ export function PresentationEditor({ store, document: deck, alt, item, variant, 
 				role="region"
 				aria-label={alt}
 				className="flex size-full flex-col"
+				onKeyDownCapture={event => {
+					onRibbonEscape(event, event.currentTarget, focusDocument, "capture")
+				}}
 				onKeyDown={event => {
 					// The show's keys first: while it runs the editor takes none (no edit reaches the deck under it).
 					if (show.onKey(event)) return
 
-					if (onPaneKey(event, event.currentTarget, focusCanvas)) return
+					if (
+						onRibbonEscape(event, event.currentTarget, focusDocument, "bubble") ||
+						onPaneKey(event, event.currentTarget, focusCanvas)
+					)
+						return
 
 					onEditorKey(event, editor, overrides)
 					onPageKey(event, show.showing, step => {

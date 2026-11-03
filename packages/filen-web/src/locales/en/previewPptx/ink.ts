@@ -16,7 +16,7 @@ export const previewPptxInk = {
 	/** Presentation slideshow — remove every ink stroke on the current slide */
 	previewPptxInkEraseAll: "Erase all ink on slide",
 	/** Presentation slideshow — accessible name of the ink colour choices */
-	previewPptxInkColor: "Ink colour",
+	previewPptxInkColor: "Ink color",
 	/** Presentation slideshow — ink colour */
 	previewPptxInkColorRed: "Red",
 	/** Presentation slideshow — ink colour */
@@ -36,7 +36,7 @@ export const previewPptxInk = {
 	/** Presentation slideshow — question after a slideshow in which the presenter drew on slides */
 	previewPptxInkKeepTitle: "Keep ink annotations?",
 	/** Presentation slideshow — explains the question after a slideshow with ink */
-	previewPptxInkKeepDescription: "The ink you drew during the slideshow can be added to the slides as shapes.",
+	previewPptxInkKeepDescription: "The ink you drew during the slide show can be added to the slides as shapes.",
 	/** Presentation slideshow — button: add the ink to the slides */
 	previewPptxInkKeep: "Keep",
 	/** Presentation slideshow — button: throw the ink away */
@@ -44,7 +44,7 @@ export const previewPptxInk = {
 	/** Presentation slideshow — error when the ink could not be added to the slides */
 	previewPptxInkKeepFailed: "The ink could not be added to the slides.",
 	/** Presentation slideshow — error when the ink of some slides could not be added; that ink stays for the next slideshow */
-	previewPptxInkKeepPartial_one: "The ink on {{count}} slide could not be added. It stays for the next slideshow.",
+	previewPptxInkKeepPartial_one: "The ink on {{count}} slide could not be added. It stays for the next slide show.",
 	/** Presentation slideshow — error when the ink of some slides could not be added; that ink stays for the next slideshow */
-	previewPptxInkKeepPartial_other: "The ink on {{count}} slides could not be added. It stays for the next slideshow."
+	previewPptxInkKeepPartial_other: "The ink on {{count}} slides could not be added. It stays for the next slide show."
 }

@@ -133,6 +133,8 @@ export interface SeriesData {
 	// Categories, or the x values (c:xVal) of a scatter series.
 	readonly categories: CachedValues
 	readonly values: CachedValues
+	// c:bubbleSize of a bubble series.
+	readonly sizes?: CachedValues
 	readonly spPr: number
 }
 
@@ -142,7 +144,8 @@ export function readSeries(
 	plot: number,
 	scatter: boolean,
 	budget: PointBudget,
-	series: { count: number }
+	series: { count: number },
+	bubble: boolean = false
 ): SeriesData[] {
 	const out: SeriesData[] = []
 
@@ -162,6 +165,7 @@ export function readSeries(
 			name: name.strings?.[0] ?? (name.numbers === null ? "" : formatNumber(name.numbers[0] ?? Number.NaN, name.formatCode)),
 			categories: readCache(reader, reader.child(ser, D.C, scatter ? "xVal" : "cat"), budget),
 			values: readCache(reader, reader.child(ser, D.C, scatter ? "yVal" : "val"), budget),
+			...(bubble ? { sizes: readCache(reader, reader.child(ser, D.C, "bubbleSize"), budget) } : {}),
 			spPr: reader.child(ser, D.C, "spPr")
 		})
 	})

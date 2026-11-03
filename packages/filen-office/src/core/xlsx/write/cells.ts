@@ -503,11 +503,6 @@ export function decodeRowElement(document: XmlDocument, root: number, start: num
 
 // --- Comparison with the store ---
 
-export interface StoreView {
-	readonly strings: XlsxSheetStrings
-	formula(id: number): XlsxFormula
-}
-
 function sameRange(a: SheetRange | null, b: SheetRange | null): boolean {
 	if (a === null || b === null) return a === b
 

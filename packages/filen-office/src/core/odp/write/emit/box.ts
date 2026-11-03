@@ -2,9 +2,9 @@ import { parseLength } from "../../../odf/units"
 import type { AttributeChange } from "./shape"
 
 const EMU_PER_PT = 12_700
-const LENGTHS: ReadonlySet<string> = new Set(["svg:x", "svg:y", "svg:width", "svg:height", "svg:x1", "svg:y1", "svg:x2", "svg:y2"])
+export const LENGTHS: ReadonlySet<string> = new Set(["svg:x", "svg:y", "svg:width", "svg:height", "svg:x1", "svg:y1", "svg:x2", "svg:y2"])
 
-function emuOf(value: string | undefined): number | undefined {
+export function emuOf(value: string | undefined): number | undefined {
 	const points = parseLength(value)
 
 	return points === undefined ? undefined : Math.round(points * EMU_PER_PT)

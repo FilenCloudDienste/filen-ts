@@ -159,38 +159,6 @@ export function docxConvertServer(slicing?: Slicing): DocxConvertServer {
 	}
 }
 
-// Read through a call: a check before an await would narrow the flag for the rest of the function.
-function isAborted(signal: DocxAbortSignal | undefined): boolean {
-	return signal?.aborted === true
-}
-
-// The same on the calling thread (tests, a host without workers).
-export function inThreadDocxConverter(slicing?: Slicing): DocxConverter {
-	let next = 0
-
-	return {
-		async convert(bytes, from, to, options = {}) {
-			if (options.signal?.aborted === true) return { kind: "aborted" }
-
-			const server = docxConvertServer(slicing)
-			const id = ++next
-			const abort = (): void => {
-				server.close(id)
-			}
-
-			options.signal?.addEventListener?.("abort", abort)
-
-			try {
-				const result = await server.convert(id, options.owned === true ? bytes : bytes.slice(), from, to, options.password)
-
-				return isAborted(options.signal) ? { kind: "aborted" } : answerOf(result)
-			} finally {
-				options.signal?.removeEventListener?.("abort", abort)
-			}
-		}
-	}
-}
-
 export function answerOf(result: TextConversion): DocxConversion {
 	if (result.ok) return { kind: "converted", bytes: result.bytes, lossy: result.lossy.features }
 

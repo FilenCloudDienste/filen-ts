@@ -1116,11 +1116,6 @@ interface ContainerState {
 	ops: Op[]
 }
 
-export interface RtfWriteOptions {
-	// Gate 1: write every paragraph from its WordprocessingML (none kept), report each that does not read back.
-	readonly prove?: boolean
-}
-
 // The proof's verdict per container: the blocks (indices into the container's blocks) that did not read back.
 export interface RtfProofResult {
 	readonly locked: readonly { readonly part: string; readonly offset: number; readonly reason: string }[]

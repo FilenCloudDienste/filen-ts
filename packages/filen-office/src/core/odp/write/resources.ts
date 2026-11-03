@@ -2,7 +2,8 @@ import { patternMask } from "../../drawingml/canvas"
 import { encodePng } from "../../metafile/dib"
 import type { ColorModel, FillProps, LineEnd, LineProps } from "../../presentation/model"
 import { escapeAttribute } from "../../xml/index"
-import { alphaOf, cm, hexColor, isRefused, percent, setProperty, type StyleChanges } from "./styles"
+import { alphaOf, cm, hexColor, percent, setProperty, type StyleChanges } from "./styles"
+import { isRefused } from "../../presentation/refusal"
 
 // The drawing resources a new package's office:styles holds (ODF 1.3 Part 3 §16.40 draw:gradient, §16.42
 // draw:fill-image, §16.43 draw:stroke-dash, §16.44 draw:opacity, §16.45 draw:marker), written from DrawingML fills

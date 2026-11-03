@@ -91,12 +91,6 @@ export function intArg(value: object, key: string, min: number, max: number): nu
 	return typeof out === "number" && Number.isInteger(out) && out >= min && out <= max ? out : undefined
 }
 
-export function numberArg(value: object, key: string, min: number, max: number): number | undefined {
-	const out = field(value, key)
-
-	return typeof out === "number" && Number.isFinite(out) && out >= min && out <= max ? out : undefined
-}
-
 export function boolArg(value: object, key: string): boolean | undefined {
 	const out = field(value, key)
 

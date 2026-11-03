@@ -1,5 +1,5 @@
-import { presetProgram } from "../drawingml/geometry/evaluate"
-import { D, type DrawingReader } from "../drawingml/reader"
+import { evaluateGuides, presetProgram, textRect } from "../drawingml/geometry/evaluate"
+import { D, EMU_PER_PX, type DrawingReader } from "../drawingml/reader"
 import { Relationships } from "../opc/index"
 import { fillOf, readLine, readTextBody, readXfrm, type ReadContext } from "../pptx/read/drawing"
 import { styleOf } from "../pptx/read/slide"
@@ -458,12 +458,47 @@ function ownProps(pres: DataPoint, options: EmitOptions): { fill: string | undef
 	return fill === undefined && line === undefined ? undefined : { fill, line }
 }
 
+// The text box of a turned shape's own text: its geometry's text rectangle turned with the shape about the shape's
+// centre, then seen from the text's own turn (`relative` to the shape's), so its sides swap for a quarter turn.
+function turnedTextBox(shape: LaidShape, geometry: Geometry, turn: number, relative: number): Box {
+	const box = shape.box
+	const program = geometry.kind === "preset" ? presetProgram(geometry.preset) : undefined
+
+	if (program === undefined) return box
+
+	const values = new Map<string, number>()
+
+	for (const guide of geometry.guides) {
+		const value = Number(guide.formula.replace(/^val /u, ""))
+
+		if (Number.isFinite(value)) values.set(guide.name, value)
+	}
+
+	const slots = evaluateGuides(program, box.w, box.h, name => values.get(name))
+	const [left, top, right, bottom] = textRect(program, slots, box.w, box.h).map(value => value * EMU_PER_PX) as [
+		number,
+		number,
+		number,
+		number
+	]
+	const radians = (turn * Math.PI) / 180
+	const dx = (left + right) / 2 - box.w / 2
+	const dy = (top + bottom) / 2 - box.h / 2
+	const cx = box.x + box.w / 2 + dx * Math.cos(radians) - dy * Math.sin(radians)
+	const cy = box.y + box.h / 2 + dx * Math.sin(radians) + dy * Math.cos(radians)
+	const quarter = Math.round(Math.abs(relative) / 90) % 2 === 1
+	const w = quarter ? bottom - top : right - left
+	const h = quarter ? right - left : bottom - top
+
+	return { x: cx - w / 2, y: cy - h / 2, w, h }
+}
+
 function shapeMarkup(item: Drawn, index: number, style: ShapeStyle, options: EmitOptions): string {
 	const { shape, text } = item
 	const route = connectorRoute(shape.node)
 	const line1D = route !== undefined && route.dim === "1D"
 	const box = shape.box
-	const { markup } = geometryMarkup(shape, route, box)
+	const { markup, geometry } = geometryMarkup(shape, route, box)
 	const own = shape.node.pres === undefined ? undefined : ownProps(shape.node.pres, options)
 	const fill = line1D ? "<a:noFill/>" : shape.hideGeom ? "<a:noFill/>" : (own?.fill ?? style.fill ?? "")
 	const ends = line1D ? `${route.begArrow ? '<a:headEnd type="arrow"/>' : ""}${route.endArrow ? '<a:tailEnd type="arrow"/>' : ""}` : ""
@@ -487,7 +522,9 @@ function shapeMarkup(item: Drawn, index: number, style: ShapeStyle, options: Emi
 			const angle = Math.round(relative * 60000)
 			const rotation = angle === 0 ? "" : ` rot="${String(angle)}"`
 
-			body += `<dsp:txXfrm${rotation}>${xfrmMarkup(text.box, 0).replace("<a:xfrm>", "").replace("</a:xfrm>", "")}</dsp:txXfrm>`
+			const textBox = text === shape ? turnedTextBox(shape, geometry, turn, relative) : text.box
+
+			body += `<dsp:txXfrm${rotation}>${xfrmMarkup(textBox, 0).replace("<a:xfrm>", "").replace("</a:xfrm>", "")}</dsp:txXfrm>`
 		}
 	}
 

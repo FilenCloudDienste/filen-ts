@@ -119,11 +119,11 @@ describe("presentation Slide Show tab", () => {
 			within(commands())
 				.getAllByRole("group")
 				.map(group => group.getAttribute("aria-label"))
-		).toEqual(["Start Slide Show", "Set Up"])
+		).toEqual(["Start slide show", "Set Up"])
 
 		fireEvent.click(within(commands()).getByRole("button", { name: "From Beginning" }))
 		fireEvent.click(within(commands()).getByRole("button", { name: "From Current Slide" }))
-		fireEvent.click(within(commands()).getByRole("button", { name: "Custom Slide Show" }))
+		fireEvent.click(within(commands()).getByRole("button", { name: "Custom slide show" }))
 		fireEvent.click(await screen.findByRole("menuitem", { name: "Short version" }))
 		fireEvent.click(within(commands()).getByRole("button", { name: "Presenter View" }))
 
@@ -135,7 +135,7 @@ describe("presentation Slide Show tab", () => {
 	it("says when the deck has no custom shows, and offers no presenter view without one", async () => {
 		mount([], false)
 
-		fireEvent.click(within(commands()).getByRole("button", { name: "Custom Slide Show" }))
+		fireEvent.click(within(commands()).getByRole("button", { name: "Custom slide show" }))
 		expect(await screen.findByText("This presentation has no custom shows.")).toBeTruthy()
 		expect(within(commands()).queryByRole("button", { name: "Presenter View" })).toBeNull()
 	})
@@ -143,7 +143,7 @@ describe("presentation Slide Show tab", () => {
 	it("sets up a kiosk show for the shows that follow", async () => {
 		const show = mount([])
 
-		fireEvent.click(within(commands()).getByRole("button", { name: "Set Up Slide Show" }))
+		fireEvent.click(within(commands()).getByRole("button", { name: "Set up slide show" }))
 
 		const dialog = await screen.findByRole("dialog", { name: "Set up slide show" })
 
@@ -175,7 +175,7 @@ describe("Set Up Slide Show saved in the presentation", () => {
 			}
 		})
 
-		fireEvent.click(within(commands()).getByRole("button", { name: "Set Up Slide Show" }))
+		fireEvent.click(within(commands()).getByRole("button", { name: "Set up slide show" }))
 
 		const dialog = await screen.findByRole("dialog", { name: "Set up slide show" })
 
@@ -219,7 +219,7 @@ describe("Set Up Slide Show saved in the presentation", () => {
 			},
 			format: "odp"
 		})
-		fireEvent.click(within(commands()).getByRole("button", { name: "Set Up Slide Show" }))
+		fireEvent.click(within(commands()).getByRole("button", { name: "Set up slide show" }))
 
 		const dialog = await screen.findByRole("dialog", { name: "Set up slide show" })
 
@@ -244,7 +244,7 @@ describe("Set Up Slide Show saved in the presentation", () => {
 	it("keeps a refused change for this session's shows", async () => {
 		const show = mount([], true, { command: () => Promise.resolve({ ok: false, refusal: "locked" }) })
 
-		fireEvent.click(within(commands()).getByRole("button", { name: "Set Up Slide Show" }))
+		fireEvent.click(within(commands()).getByRole("button", { name: "Set up slide show" }))
 
 		const dialog = await screen.findByRole("dialog", { name: "Set up slide show" })
 

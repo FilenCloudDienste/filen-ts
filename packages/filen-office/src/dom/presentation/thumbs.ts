@@ -39,9 +39,6 @@ function color(rgba: number): string {
 // Effects of a layer the canvas does not draw exactly (counted per kind for the effects report).
 export type UndrawnEffect = "innerShadow" | "softEdge"
 
-// What the slide painter needs per slide: the pictures, decoded.
-export type SlideImages = CanvasPaintContext<RasterImage>["image"]
-
 // Draws what a layer's outer effects add under it: a shadow or glow as the canvas shadow of a copy drawn far off the
 // canvas (so only the shadow lands; the layer itself is drawn once, after), the reflection as a mirrored copy below at
 // the mean of its opacities. Inner shadows and soft edges are not drawn (counted for the effects report).

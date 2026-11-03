@@ -540,6 +540,18 @@ describe("SmartArt Format tab", () => {
 		expect([3_600_000, 9_144_000]).toContain(cx)
 	})
 
+	it("cancels a typed width with Escape without sending it, the key taken so focus stays", () => {
+		const { ops } = mount(smartartFormatGroups)
+		const width = within(commands()).getByRole<HTMLInputElement>("textbox", { name: /^Width/ })
+		const shown = width.value
+
+		fireEvent.change(width, { target: { value: "10" } })
+		expect(fireEvent.keyDown(width, { key: "Escape" })).toBe(false)
+		expect(width.value).toBe(shown)
+		fireEvent.blur(width)
+		expect(ops).toEqual([])
+	})
+
 	it("keeps the aspect a file locks, and refuses lengths out of range", () => {
 		expect(resizedXfrm(FRAME, "cx", "", "cm", false)).toBeUndefined()
 		expect(resizedXfrm(FRAME, "cx", "0", "cm", false)).toBeUndefined()

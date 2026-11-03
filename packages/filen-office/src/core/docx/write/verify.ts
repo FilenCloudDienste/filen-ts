@@ -39,7 +39,7 @@ import { parseNumbering, type Numbering } from "../numbering/index"
 import { openDocxPackage, type DocxPackage } from "../package"
 import { PropsStore } from "../props/index"
 import { parseStyles, type DocxStyles } from "../styles/index"
-import { equalBytes } from "./bytes"
+import { equalBytes, sameBytes } from "./bytes"
 import { canonicalElement, canonicalFragment } from "./canonical"
 import { DOCX_CHECKS, checkDone, checkPart, type CheckInput, type DocxCheck, type DocxFact } from "./checks/index"
 import { DocxVerifyError, type VerifyFailure } from "./failure"
@@ -1524,14 +1524,6 @@ function hashBytes(bytes: Uint8Array): number {
 	for (let i = 0; i < bytes.length; i++) hash = Math.imul(hash ^ (bytes[i] ?? 0), 0x01000193)
 
 	return hash >>> 0
-}
-
-function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
-	if (a.length !== b.length) return false
-
-	for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false
-
-	return true
 }
 
 function cached(

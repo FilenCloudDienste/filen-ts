@@ -90,7 +90,10 @@ function SizeField({
 					if (event.key === "Enter") {
 						event.preventDefault()
 						commit()
-					} else if (event.key === "Escape") {
+					} else if (event.key === "Escape" && text !== value) {
+						// The field's own Escape: what was typed is cancelled, and focus stays (the ribbon's Escape, which
+						// moves focus and so commits on blur, comes with the next press).
+						event.preventDefault()
 						setText(value)
 					}
 				}}

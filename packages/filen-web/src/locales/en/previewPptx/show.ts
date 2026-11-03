@@ -2,13 +2,13 @@
 // (animation triggers, links, notices). Spread into preview.ts; same catalog rules.
 export const previewPptxShow = {
 	/** Presentation editor, Slide Show tab — group of the commands that start the slide show */
-	previewPptxShowStartGroup: "Start Slide Show",
+	previewPptxShowStartGroup: "Start slide show",
 	/** Presentation editor, Slide Show tab — starts the slide show from the first slide */
 	previewPptxShowFromBeginning: "From Beginning",
 	/** Presentation editor, Slide Show tab — starts the slide show from the slide in view */
 	previewPptxShowFromCurrent: "From Current Slide",
 	/** Presentation editor, Slide Show tab — menu of the presentation's custom shows (named subsets of its slides) */
-	previewPptxShowCustom: "Custom Slide Show",
+	previewPptxShowCustom: "Custom slide show",
 	/** Presentation editor, Slide Show tab — the custom show menu when the presentation has none */
 	previewPptxShowCustomNone: "This presentation has no custom shows.",
 	/** Presentation editor, Slide Show tab — starts the slide show with the speaker's own view (notes, next slide, timer) */
@@ -16,7 +16,7 @@ export const previewPptxShow = {
 	/** Presentation editor, Slide Show tab — group of the slide show settings */
 	previewPptxShowSetUpGroup: "Set Up",
 	/** Presentation editor, Slide Show tab — opens the slide show settings */
-	previewPptxShowSetUp: "Set Up Slide Show",
+	previewPptxShowSetUp: "Set up slide show",
 
 	/** Set Up Slide Show dialog — title */
 	previewPptxShowSetUpTitle: "Set up slide show",

@@ -23,6 +23,7 @@ import {
 	type TextRun
 } from "../../../core/drawingml/index"
 import { pathGradientCircle } from "../../../core/drawingml/displayList"
+import { lumTransfer } from "../../../core/drawingml/lum"
 import { layoutBlock } from "../../../core/drawingml/textBlock"
 import type { DrawingData } from "../../../dom/docx/protocol"
 
@@ -1022,7 +1023,7 @@ class Painter {
 			case "path":
 				if (flat || stopCount(paint.stops) === 0) return this.color(averageColor(paint.stops))
 
-				return this.radial(paintIndex, paint)
+				return this.radial(paintIndex, paint, width, height)
 			case "pattern":
 				if (flat) return this.color(mix(rgbaOf(paint.foreground), rgbaOf(paint.background), 0.5))
 
@@ -1216,20 +1217,22 @@ class Painter {
 	}
 
 	// a:path gradients as a radial gradient centred on the focus rectangle, which the first stop fills.
-	private radial(paintIndex: number, paint: Extract<Paint, { kind: "path" }>): string {
-		const key = `p${paintIndex}`
+	private radial(paintIndex: number, paint: Extract<Paint, { kind: "path" }>, width: number, height: number): string {
+		const { cx, cy, rx, ry, inner } = pathGradientCircle(paint, width, height)
+		// A circle's ellipse in the box's fractions depends on the box's proportions.
+		const key = `p${paintIndex}|${fmt(rx)}|${fmt(ry)}`
 		const cached = this.paintIds.get(key)
 
 		if (cached !== undefined) return `url(#${cached})`
 
-		const { cx, cy, radius, inner } = pathGradientCircle(paint)
 		const id = this.id("r")
 		const gradient = this.el("radialGradient")
 
 		gradient.setAttribute("id", id)
-		gradient.setAttribute("cx", fmt(cx))
-		gradient.setAttribute("cy", fmt(cy))
-		gradient.setAttribute("r", fmt(radius))
+		gradient.setAttribute("cx", "0")
+		gradient.setAttribute("cy", "0")
+		gradient.setAttribute("r", "1")
+		gradient.setAttribute("gradientTransform", `matrix(${fmt(rx)} 0 0 ${fmt(ry)} ${fmt(cx)} ${fmt(cy)})`)
 		this.stops(gradient, paint.stops, inner)
 		this.defs().appendChild(gradient)
 		this.paintIds.set(key, id)
@@ -1396,9 +1399,7 @@ class Painter {
 		}
 
 		if (brightness !== 0 || contrast !== 0) {
-			const slope = (1 + contrast) / (1 - contrast)
-
-			this.transfer(filter, "linear", [slope, 0.5 - 0.5 * slope + brightness], undefined)
+			this.transfer(filter, "linear", lumTransfer(brightness, contrast), undefined)
 		}
 
 		if (biLevel >= 0) {

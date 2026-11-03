@@ -7,8 +7,9 @@ import {
 	type CommentEntry,
 	type SlideComments
 } from "../../presentation/comments"
-import { PresentationError } from "../../presentation/model"
-import type { XmlDocument } from "../../xml/index"
+import { PresentationError, type Deck, type SlideRef } from "../../presentation/model"
+import type { OpcPackage, Slicing } from "../../opc/index"
+import { XmlError, type XmlDocument } from "../../xml/index"
 import { G, partReader, type PartReader } from "./xml"
 
 // A slide's comment parts read into the session's entries (core/presentation/comments.ts): legacy p:cmLst (ECMA-376
@@ -301,4 +302,70 @@ function hasFormatting(r: PartReader, rPr: number): boolean {
 	for (const attribute of r.document.attributes(rPr)) if (attribute.name !== "lang" && attribute.name !== "dirty") return true
 
 	return false
+}
+
+export const LEGACY_COMMENTS_RELATIONSHIP = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments"
+
+// What reading a slide's comment parts needs of a PresentationML package (the deck's parts).
+export interface CommentSourceParts {
+	readonly opc: OpcPackage
+	readonly epoch: number
+	readonly budgets: { readonly xmlPartBytes: number }
+	partOf(ref: SlideRef): string | undefined
+}
+
+// The part a slide's comments are related from (zip name): its own when the package has it, else (a copy not written
+// yet) its source slide's; for a slide not parsed, its part.
+export function slideCommentSource(parts: CommentSourceParts, deck: Deck, ref: SlideRef): string | undefined {
+	const node = deck.nodes.get(ref)
+
+	if (node === undefined) return parts.partOf(ref)?.replace(/^\//u, "")
+
+	const own = node.part.replace(/^\//u, "")
+
+	return parts.opc.has(own)
+		? own
+		: node.src?.format === "pptx" && node.src.epoch === parts.epoch
+			? node.src.part.replace(/^\//u, "")
+			: undefined
+}
+
+// Each comments part slide part `source` relates, read once however many times it is related (its entries would
+// repeat), in relationship order; a part over the XML budget refuses as too large, markup that is no XML as malformed.
+export async function eachSlideCommentsPart(
+	parts: CommentSourceParts,
+	source: string | undefined,
+	slicing: Slicing | undefined,
+	visit: (document: XmlDocument, modern: boolean) => void
+): Promise<void> {
+	const opc = parts.opc
+
+	if (source === undefined || !opc.has(source)) return
+
+	const read = new Set<string>()
+
+	for (const relationship of (await opc.relationships(source)).all) {
+		const modern = relationship.type === MODERN_COMMENTS_RELATIONSHIP
+		const name = relationship.partName
+
+		if ((!modern && relationship.type !== LEGACY_COMMENTS_RELATIONSHIP) || name === undefined || read.has(name) || !opc.has(name))
+			continue
+
+		read.add(name)
+
+		if ((opc.entry(name)?.uncompressedSize ?? 0) > parts.budgets.xmlPartBytes)
+			throw new PresentationError("tooLarge", `XML part ${name}`)
+
+		let document: XmlDocument
+
+		try {
+			document = await opc.xml(name, slicing)
+		} catch (error) {
+			if (error instanceof XmlError) throw new PresentationError("malformed", `comments part ${name}: ${error.message}`)
+
+			throw error
+		}
+
+		visit(document, modern)
+	}
 }

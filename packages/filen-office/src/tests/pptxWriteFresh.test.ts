@@ -73,7 +73,7 @@ describe("pptx fresh writer", () => {
 		expect(summary(slideNode(back, 0).shapes)).toEqual(summary(slideNode(opened, 0).shapes))
 		expect(back.deck.layouts.map(ref => back.deck.nodes.get(ref)?.name)).toEqual(["Title and Content", "Blank"])
 		expect(text(parts.get("ppt/slides/slide1.xml"))).toContain(
-			'<a:prstGeom prst="ellipse"><a:avLst/></a:prstGeom><a:solidFill><a:schemeClr val="accent1"></a:schemeClr></a:solidFill>'
+			'<a:prstGeom prst="ellipse"><a:avLst/></a:prstGeom><a:solidFill><a:schemeClr val="accent1"/></a:solidFill>'
 		)
 		expect(text(parts.get("ppt/notesSlides/notesSlide1.xml"))).toContain("Speaker notes")
 		expect(text(parts.get("ppt/notesSlides/_rels/notesSlide1.xml.rels"))).toContain("../slides/slide1.xml")

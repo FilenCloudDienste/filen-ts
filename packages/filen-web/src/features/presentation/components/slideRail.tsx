@@ -44,6 +44,7 @@ export function PresentationSlideRail({
 
 	return (
 		<div
+			data-office-pane
 			ref={node => {
 				const rail = node?.firstElementChild
 

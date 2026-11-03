@@ -346,6 +346,7 @@ export function AnimationPane({
 	return (
 		<section
 			data-preview-surface
+			data-office-pane
 			data-animation-pane=""
 			aria-labelledby={headingId}
 			className={cn(

@@ -105,10 +105,6 @@ export function reaches(end: number, shift: AxisShift): boolean {
 	return shift.at <= end
 }
 
-export function sameRange(a: SheetRange, b: SheetRange): boolean {
-	return a.startRow === b.startRow && a.startCol === b.startCol && a.endRow === b.endRow && a.endCol === b.endCol
-}
-
 // Whether an index of the other axis is in the edit's band (always, for whole rows or columns).
 export function crossInBand(index: number, shift: AxisShift): boolean {
 	return shift.band === undefined || (index >= shift.band.start && index <= shift.band.end)

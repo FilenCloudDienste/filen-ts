@@ -108,7 +108,7 @@ describe("blank odp", () => {
 })
 
 describe("the Filen themes", () => {
-	it("are eight themes of four variants in the ORCH-8 font names, each dark variant mapping its background to dk1", async () => {
+	it("are eight themes of four variants in the allowed font names, each dark variant mapping its background to dk1", async () => {
 		expect(FILEN_THEMES.map(theme => theme.id)).toEqual([
 			"filen",
 			"slate",

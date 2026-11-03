@@ -60,6 +60,11 @@ export interface FixtureOptions {
 	readonly objects?: ReadonlyMap<number, Uint8Array>
 	// The main master's shapes (spids from 0x401), in place of its title and body placeholders.
 	readonly masterShapes?: readonly FixtureShape[]
+	// The main master's background shape properties (pid → value), in place of a fill of scheme colour 0.
+	readonly masterBackground?: readonly (readonly [number, number])[]
+	// The drawing group's default properties (OfficeArtDggContainer drawingPrimaryOptions), in place of fill colour
+	// scheme 4 and line colour scheme 1.
+	readonly drawingDefaults?: readonly (readonly [number, number])[]
 }
 
 function u16(value: number): Uint8Array {
@@ -152,15 +157,12 @@ function shapeContainer(shape: FixtureShape, spid: number): Uint8Array {
 	return container(0xf004, children)
 }
 
-function drawing(shapes: readonly FixtureShape[], firstSpid: number, background: number): Uint8Array {
+function drawing(shapes: readonly FixtureShape[], firstSpid: number, background: readonly (readonly [number, number])[]): Uint8Array {
 	const patriarch = container(0xf004, [record(0xf009, new Uint8Array(16), 0, 1), record(0xf00a, concat(u32(firstSpid), u32(0x5)), 0, 2)])
 	const members = shapes.map((shape, index) => shapeContainer(shape, firstSpid + 1 + index))
 	const backgroundShape = container(0xf004, [
 		record(0xf00a, concat(u32(firstSpid + shapes.length + 1), u32(0xc00)), 1, 2),
-		properties([
-			[0x0181, background],
-			[0x01bf, 0x100010]
-		])
+		properties(background)
 	])
 
 	return container(0x040c, [
@@ -198,7 +200,10 @@ function slideRecord(slide: FixtureSlide, spidBase: number): Uint8Array {
 	return container(0x03ee, [
 		slideAtom(1, 0x80000000, 0x7),
 		...show,
-		drawing(slide.shapes, spidBase, 0x08000000),
+		drawing(slide.shapes, spidBase, [
+			[0x0181, 0x08000000],
+			[0x01bf, 0x100010]
+		]),
 		scheme(),
 		...(slide.records ?? [])
 	])
@@ -291,10 +296,12 @@ export async function buildPpt(options: FixtureOptions): Promise<BuiltPpt> {
 					: picture === undefined
 						? []
 						: [container(0xf001, [picture.fbse(0)], 1)]),
-				properties([
-					[0x0181, 0x08000004],
-					[0x01c0, 0x08000001]
-				])
+				properties(
+					options.drawingDefaults ?? [
+						[0x0181, 0x08000004],
+						[0x01c0, 0x08000001]
+					]
+				)
 			])
 		]),
 		container(0x0ff0, [record(0x03f3, concat(u32(2), u32(0), u32(0), u32(0x80000000), u32(0)))], 1),
@@ -312,7 +319,10 @@ export async function buildPpt(options: FixtureOptions): Promise<BuiltPpt> {
 				{ text: "Master body", textType: 1, placeholder: { type: 2, position: 1 }, anchor: [900, 300, 5400, 4000] }
 			],
 			0x400,
-			0x08000000
+			options.masterBackground ?? [
+				[0x0181, 0x08000000],
+				[0x01bf, 0x100010]
+			]
 		),
 		scheme()
 	])

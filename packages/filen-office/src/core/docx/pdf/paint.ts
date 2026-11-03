@@ -26,7 +26,7 @@ import {
 import { symbolTable, symbolToUnicode } from "../../fonts/index"
 import { GRAPHIC_FLOATS, GRAPHIC_INTS, Layer, OBJECT_FLOATS, OBJECT_INTS, PageGraphic } from "../layout/output"
 import type { DecorationValue } from "../layout/styles"
-import { paintDrawingPdf } from "../../drawingml/pdf"
+import { paintDrawingPdf, pictureSource } from "../../drawingml/pdf"
 import type { DrawingImage, Paint } from "../../drawingml/index"
 import {
 	PdfWriteError,
@@ -1431,7 +1431,7 @@ export class DocxPagePainter {
 		}
 
 		try {
-			return await this.context.writer.image({ data: bytes, key: part })
+			return await this.context.writer.image(pictureSource(image, bytes, part))
 		} catch (error) {
 			if (!(error instanceof PdfWriteError)) throw error
 

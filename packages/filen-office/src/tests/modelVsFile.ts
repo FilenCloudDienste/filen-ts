@@ -101,8 +101,8 @@ export async function deckSummary(d: Drive, format: Format): Promise<string[]> {
 }
 
 // A session over saved bytes, as the page opens them (diagrams laid out like the session's).
-export async function reopened(bytes: Uint8Array, format: Format): Promise<Drive> {
-	const d = await driveSession(bytes, format)
+export async function reopened(bytes: Uint8Array, format: Format, tuning: Parameters<typeof driveSession>[3] = {}): Promise<Drive> {
+	const d = await driveSession(bytes, format, [], tuning)
 
 	if (format === "pptx")
 		smartArtRenderer(d.session, {

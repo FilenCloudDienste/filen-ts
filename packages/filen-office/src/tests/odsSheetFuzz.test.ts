@@ -12,6 +12,7 @@ import { CORPUS_DIR } from "./corpusDir"
 import { rng } from "./fuzz/config"
 import { KNOWN_REFUSALS, OpPicker, type Outcome } from "./fuzz/sheet/ops"
 import { odsBytes, table } from "./odsFixtures"
+import { sameBytes } from "../core/docx/write/bytes"
 
 // Random command sequences through ODS sessions, awaited one by one ("sync") and sent in bursts that interleave with
 // tile requests and saves ("race"). At every checkpoint the save passes its proof (the file read back equals the
@@ -132,10 +133,6 @@ async function reopenProblems(live: SheetSession<XlsxDocument>, bytes: Uint8Arra
 	return problems
 }
 
-function equal(a: Uint8Array, b: Uint8Array): boolean {
-	return a.length === b.length && a.every((byte, index) => byte === b[index])
-}
-
 async function sequence(bytes: Uint8Array, seed: number, mode: Mode): Promise<Result> {
 	const rand = rng(seed)
 	const picker = new OpPicker()
@@ -228,7 +225,7 @@ async function sequence(bytes: Uint8Array, seed: number, mode: Mode): Promise<Re
 		const saved = await within(session.save(), "save")
 
 		if (!saved.ok) result.findings.push(`undone save: ${saved.message.slice(0, 400)}`)
-		else if (!equal(saved.bytes, bytes)) result.findings.push(`undone save is not the source after ${result.ops.join(" ")}`)
+		else if (!sameBytes(saved.bytes, bytes)) result.findings.push(`undone save is not the source after ${result.ops.join(" ")}`)
 	} catch (error) {
 		result.findings.push(
 			`${error instanceof Hang ? "hang" : "crash"}: ${error instanceof Error ? (error.stack ?? error.message).slice(0, 1200) : String(error)} after ${result.ops.join(" ")}`

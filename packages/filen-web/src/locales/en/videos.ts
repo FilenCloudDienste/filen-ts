@@ -536,7 +536,7 @@ export const videos = {
 	/** Subtitle style panel rows */
 	subtitleSize: "Size",
 	subtitleFont: "Font",
-	subtitleColor: "Colour",
+	subtitleColor: "Color",
 	subtitleBackground: "Background",
 	subtitleEdge: "Edge",
 	subtitlePosition: "Position",

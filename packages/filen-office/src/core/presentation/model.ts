@@ -196,6 +196,8 @@ export interface Placeholder {
 	// The source wrote idx (§19.3.1.36 defaults it to 0). A written idx matches the layout placeholder by idx alone
 	// (MS-OI29500 §2.1.1127(b)); an implied one falls back by type.
 	idxWritten?: true
+	// The source wrote type="obj" (§19.3.1.36's default): written back as it was.
+	typeWritten?: true
 	orient?: "horz" | "vert"
 	sz?: "full" | "half" | "quarter"
 	hasCustomPrompt?: boolean

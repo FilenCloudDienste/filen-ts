@@ -91,6 +91,16 @@ const NS_A = "http://schemas.openxmlformats.org/drawingml/2006/main"
 const NS_R = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 const REL = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 const DECLARATION = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\r\n'
+// MSOSPT msosptTextBox (MS-ODRAW §2.4.24).
+const TEXT_BOX = 202
+
+// A shape's text (inline, or its slide list's body) with the paragraph extensions its ClientData carries, which take
+// the place of any the body has.
+function shapeText(shape: PptShape, outline: readonly TextBlock[]): TextBlock | undefined {
+	const block = shape.outlineRef !== undefined ? outline[shape.outlineRef] : shape.text
+
+	return block === undefined || shape.ext9 === undefined ? block : { ...block, ext9: shape.ext9 }
+}
 const ROOT_NS = `xmlns:a="${NS_A}" xmlns:r="${NS_R}" xmlns:p="${NS_P}"`
 const CT = {
 	presentation: "application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml",
@@ -769,10 +779,7 @@ class Converter {
 	shapeXml(shape: PptShape, context: PartContext, child: boolean, scale = EMU_PER_MASTER): string {
 		const master = shape.properties.get(P.hspMaster)?.value
 		const masterShape = master === undefined ? undefined : context.masterShapes.get(master)
-		const chain: PropertyChain =
-			masterShape === undefined
-				? [shape.properties, this.document.defaults]
-				: [shape.properties, masterShape.properties, this.document.defaults]
+		const chain: PropertyChain = masterShape === undefined ? [shape.properties] : [shape.properties, masterShape.properties]
 		const rotation = rotationOf(chain)
 		// A group written without an anchor places its members in its own coordinate space as they are (PowerPoint draws
 		// them there; LibreOffice 7.5 leaves the group out).
@@ -869,10 +876,27 @@ class Converter {
 		if (media) this.report.note("media", context.slideNumber)
 		else if (ole) this.report.note("oleObject", context.slideNumber)
 
-		const block = shape.outlineRef !== undefined ? context.outline[shape.outlineRef] : shape.text
+		const block = shapeText(shape, context.outline)
 		const wordArt = isWordArt(shape.shapeType) ? textProperty(lookup(chain, P.gtextUNICODE)) : undefined
 		const connector = isConnector(shape.shapeType)
-		const spPr = `<p:spPr>${xfrm}${this.geometry(shape, chain, context)}${wordArt === undefined ? this.fill(chain, context.scheme, context) : "<a:noFill/>"}${wordArt === undefined ? this.line(chain, context.scheme) : "<a:ln><a:noFill/></a:ln>"}${this.effects(chain, context.scheme)}</p:spPr>`
+		// A placeholder that sets no fill or line of its own (nor its master shape) takes its master placeholder's.
+		const inherits = (pid: number, bit: number): boolean => placeholder !== undefined && flag(chain, pid, bit) === undefined
+		// A text box that neither sets fFilled (fUsefFilled clear) nor names a fill colour is drawn unfilled, as LibreOffice
+		// 7.5 draws the corpus's (MS-ODRAW's fFilled default would fill it white over what lies behind it).
+		const unfilledBox =
+			shape.shapeType === TEXT_BOX &&
+			placeholder === undefined &&
+			flag(chain, P.fillStyleBooleans, 4) === undefined &&
+			lookup(chain, P.fillColor) === undefined
+		const fill =
+			wordArt !== undefined || unfilledBox
+				? "<a:noFill/>"
+				: inherits(P.fillStyleBooleans, 4)
+					? ""
+					: this.fill(chain, context.scheme, context)
+		const line =
+			wordArt !== undefined ? "<a:ln><a:noFill/></a:ln>" : inherits(P.lineStyleBooleans, 3) ? "" : this.line(chain, context.scheme)
+		const spPr = `<p:spPr>${xfrm}${this.geometry(shape, chain, context)}${fill}${line}${this.effects(chain, context.scheme)}</p:spPr>`
 
 		if (connector && block === undefined) {
 			return `<p:cxnSp><p:nvCxnSpPr>${cNvPr}<p:cNvCxnSpPr/><p:nvPr/></p:nvCxnSpPr>${spPr}</p:cxnSp>`
@@ -887,7 +911,7 @@ class Converter {
 			txBody = this.textBody(chain, context, block, placeholder?.[0])
 		}
 
-		const textBox = shape.shapeType === 202 && placeholder === undefined ? ' txBox="1"' : ""
+		const textBox = shape.shapeType === TEXT_BOX && placeholder === undefined ? ' txBox="1"' : ""
 
 		return `<p:sp><p:nvSpPr>${cNvPr}<p:cNvSpPr${textBox}/><p:nvPr>${ph}</p:nvPr></p:nvSpPr>${spPr}${txBody}</p:sp>`
 	}
@@ -982,7 +1006,7 @@ class Converter {
 							Math.abs(a.left - (side === "lnL" ? anchor.left : anchor.right)) <= tolerance &&
 							covers(a.top, a.bottom, anchor.top, anchor.bottom)
 
-				if (hit) return this.line([line.properties, this.document.defaults], context.scheme, side)
+				if (hit) return this.line([line.properties], context.scheme, side)
 			}
 
 			return `<a:${side}><a:noFill/></a:${side}>`
@@ -1010,8 +1034,8 @@ class Converter {
 					continue
 				}
 
-				const chain: PropertyChain = [cell.properties, this.document.defaults]
-				const block = cell.outlineRef !== undefined ? context.outline[cell.outlineRef] : cell.text
+				const chain: PropertyChain = [cell.properties]
+				const block = shapeText(cell, context.outline)
 				const body = this.textBody(chain, context, block, undefined)
 					.replace(/^<p:txBody>/u, "<a:txBody>")
 					.replace(/<\/p:txBody>$/u, "</a:txBody>")
@@ -1077,7 +1101,7 @@ class Converter {
 	background(shape: PptShape | undefined, scheme: readonly number[], context: PartContext): string {
 		if (shape === undefined) return ""
 
-		const chain: PropertyChain = [shape.properties, this.document.defaults]
+		const chain: PropertyChain = [shape.properties]
 
 		return `<p:bg><p:bgPr>${this.fill(chain, scheme, context)}<a:effectLst/></p:bgPr></p:bg>`
 	}
@@ -1123,6 +1147,10 @@ function familyOf(placeholderType: string | undefined, kind: PartContext["kind"]
 
 	return TEXT_TYPE.body
 }
+
+// HeadersFootersAtom flags ([MS-PPT] §2.4.15.2): fHasTodayDate, fHasUserDate.
+const HF_TODAY_DATE = 0x2
+const HF_USER_DATE = 0x4
 
 export async function pptToPptx(source: ByteSource, options: PptOpenOptions = {}): Promise<PptConversion | Refused> {
 	try {
@@ -1172,6 +1200,9 @@ async function converted(file: PptFile): Promise<PptConversion> {
 	converter.finishMedia()
 
 	if (document.macros) converter.report.note("macros")
+	// A signed file (a _signatures or _xmlsignatures storage): the copy cannot keep the signature.
+	if (file.cfb.entry(["_signatures"]) !== undefined || file.cfb.entry(["_xmlsignatures"]) !== undefined)
+		converter.report.note("signature")
 
 	const pptx = OpcPackage.fromParts(written)
 
@@ -1316,8 +1347,13 @@ class PackageWriter {
 				? []
 				: [levelOf(this.document.styles, type), levelOf(firstMaster?.styles, type), levelOf(master?.styles, type)])
 		]
+		// The masters' paragraph extensions (automatic numbering) over their styles, as LibreOffice merges them.
+		const ext9 = [firstMaster, master].flatMap(each => [
+			each?.styles9?.get(base)?.[level],
+			...(base === type ? [] : [each?.styles9?.get(type)?.[level]])
+		])
 
-		return { pf: mergePara(...chain.map(entry => entry?.pf)), cf: mergeChar(...chain.map(entry => entry?.cf)) }
+		return { pf: mergePara(...chain.map(entry => entry?.pf), ...ext9), cf: mergeChar(...chain.map(entry => entry?.cf)) }
 	}
 
 	private textContext(
@@ -1339,6 +1375,7 @@ class PackageWriter {
 			footer: hf?.footer,
 			header: hf?.header,
 			date: hf?.userDate,
+			fixedDate: hf !== undefined && (hf.flags & HF_USER_DATE) !== 0 && (hf.flags & HF_TODAY_DATE) === 0,
 			link: interaction => converter.link(interaction, rels, slideNumber)
 		}
 	}
@@ -1842,7 +1879,7 @@ class PackageWriter {
 
 		const visit = (list: readonly PptShape[], top: boolean): void => {
 			for (const shape of list) {
-				const block = shape.outlineRef !== undefined ? outline[shape.outlineRef] : shape.text
+				const block = shapeText(shape, outline)
 
 				if (!shapes.has(shape.spid)) shapes.set(shape.spid, { paragraphs: paragraphSpans(block) })
 

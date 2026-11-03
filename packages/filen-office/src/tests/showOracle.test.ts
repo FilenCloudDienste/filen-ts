@@ -41,7 +41,10 @@ function effectKey(presetClass: string, id: string | undefined, subtype: string 
 }
 
 // Ours: the main sequence's children; a child a "next" begins opens a step.
-function ourSteps(tree: TimingTree | undefined): Steps {
+// LibreOffice 7.5 names a media-call effect only from a .ppt (sd's import writes "ppt_mediacall_1", which our
+// conversion writes for every source); its pptx import has no media-call preset names (oox's preset_mapping), so it
+// reports none for a pptx deck.
+function ourSteps(tree: TimingTree | undefined, pptx: boolean): Steps {
 	const steps: Steps = []
 	const find = (node: TimeNode): TimeNode | undefined =>
 		node.ctn.nodeType === "mainSeq" ? node : node.ctn.children.map(find).find(found => found !== undefined)
@@ -59,7 +62,7 @@ function ourSteps(tree: TimingTree | undefined): Steps {
 				effects.push(
 					effectKey(
 						ctn.presetClass === undefined ? "0" : (CLASSES[ctn.presetClass] ?? "0"),
-						preset.id ?? ctn.presetName,
+						pptx && ctn.presetClass === "mediacall" ? undefined : (preset.id ?? ctn.presetName),
 						preset.subtype ?? ctn.presetSubtypeName
 					)
 				)
@@ -170,7 +173,7 @@ describe("show steps against LibreOffice's animation trees", () => {
 
 					if (expected.length === 0 || node === undefined) return
 
-					const actual = ourSteps(node.timing)
+					const actual = ourSteps(node.timing, !odp)
 					// The steps the player gives "next" (an auto step 0 is not one).
 					const graph = compile(node, showLayerIndex(node.timing), BUDGETS)
 					const clicks = actual.length - (waitsFirst(node.timing) ? 0 : 1)

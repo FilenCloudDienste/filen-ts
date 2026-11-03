@@ -17,11 +17,13 @@ import type { ApplyContext, ApplyFamily, ApplyResult, Inverse, Touch } from "../
 import { cloneModel, digestOf, findShape } from "../changes"
 import { matcherOf, replaceInBody } from "../find"
 import type { DeckOp, OpOf, TextOp } from "../ops"
-import { isRefused, type SourceReading } from "./shape"
+import { type SourceReading } from "./shape"
 import { applyTable, replaceInFrame } from "./table"
 import { remapParagraphs } from "./timing"
 import { odpParagraphTargets } from "../../../anim/odf"
 import { parseXml, type XmlDocument } from "../../../xml/index"
+import { isRefused } from "../../refusal"
+import { sameBytes } from "../../../docx/write/bytes"
 
 // The text ops on the model, in place. setText puts a whole new body on one shape; its inverse is a setText of the
 // body it had, with the shape's source markup as bytes when that body came from the source (`raw`), so an undo after
@@ -384,14 +386,6 @@ function keptInPlace(body: TextBody, shape: ShapeNode, context: ApplyContext): T
 	}
 
 	return { ...body, paragraphs }
-}
-
-function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
-	if (a.length !== b.length) return false
-
-	for (let index = 0; index < a.length; index++) if (a[index] !== b[index]) return false
-
-	return true
 }
 
 function inverseOf(ops: readonly DeckOp[]): Inverse {

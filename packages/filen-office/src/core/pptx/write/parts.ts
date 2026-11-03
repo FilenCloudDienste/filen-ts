@@ -349,6 +349,9 @@ export class PackageWriter {
 	readonly notices: SaveNotice[] = []
 	// Targets of copied relationships that the base package already lacked.
 	readonly inheritedMissing = new Set<string>()
+	// Held parts an undone slide brought back, added under their own names: a chart version whose home this is may
+	// replace it (its bytes are only the held state).
+	readonly restored = new Set<string>()
 	private readonly documents = new Map<string, XmlDocument>()
 	private readonly editors = new Map<string, XmlEditor>()
 	private readonly replaced = new Map<string, PartBytes>()
@@ -817,7 +820,7 @@ export class PackageWriter {
 			replacePart: (part, content) => {
 				const name = part.startsWith("/") ? part.slice(1) : part
 
-				if (!this.exists(name) || this.isAdded(name)) return false
+				if (!this.exists(name) || (this.isAdded(name) && !this.restored.has(partKey(name)))) return false
 
 				this.replace(name, content)
 

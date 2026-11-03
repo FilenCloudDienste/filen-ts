@@ -152,7 +152,7 @@ describe("canvas painter: paths", () => {
 		])
 	})
 
-	it("stretches a path gradient's circle with the box, solid inside its focus", () => {
+	it("draws a circle path gradient as a true circle through the box's corners, centred on its focus", () => {
 		const ctx = new RecordingCanvas()
 		const stops = { offsets: new Float32Array([0, 1]), colors: new Uint32Array([rgba("FFFFFF"), rgba("000000")]) }
 
@@ -167,9 +167,12 @@ describe("canvas painter: paths", () => {
 
 		const area = ctx.ops("fillRect")[0]
 
-		expect(area?.transform).toEqual([100, 0, 0, 50, 0, 0])
+		const radius = Math.hypot(100, 50) / 2
+
+		// A 100 x 50 box: the unit circle scaled to half the diagonal on both axes, at the box's centre.
+		expect(area?.transform).toEqual([radius, 0, 0, radius, 50, 25])
 		expect((area?.fill as RecordedGradient).kind).toBe("radial")
-		expect((area?.fill as RecordedGradient).args.slice(0, 3)).toEqual([0.5, 0.5, 0])
+		expect((area?.fill as RecordedGradient).args).toEqual([0, 0, 0, 0, 0, 1])
 	})
 
 	it("repeats a metafile gradient's stops over every period it covers", () => {

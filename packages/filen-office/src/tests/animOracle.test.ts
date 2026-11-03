@@ -55,7 +55,10 @@ function seconds(ms: number): string {
 	return (Math.round(ms) / 1000).toFixed(3)
 }
 
-function ours(tree: TimingTree | undefined): Effect[] {
+// LibreOffice 7.5 names a media-call effect only from a .ppt (sd's import writes "ppt_mediacall_1", which our
+// conversion writes for every source); its pptx import has no media-call preset names (oox's preset_mapping), so it
+// reports none for a pptx deck.
+function ours(tree: TimingTree | undefined, pptx: boolean): Effect[] {
 	const out: Effect[] = []
 	const visit = (node: TimeNode): void => {
 		const ctn = node.ctn
@@ -72,7 +75,7 @@ function ours(tree: TimingTree | undefined): Effect[] {
 
 			out.push({
 				nodeType: type,
-				presetId: preset.id ?? ctn.presetName,
+				presetId: pptx && ctn.presetClass === "mediacall" ? undefined : (preset.id ?? ctn.presetName),
 				presetClass: ctn.presetClass === undefined ? "0" : (CLASSES[ctn.presetClass] ?? "0"),
 				subtype: preset.subtype ?? ctn.presetSubtypeName,
 				// LibreOffice holds a begin that waits (indefinite, an event) as an event trigger.
@@ -230,7 +233,7 @@ describe("timing against LibreOffice's animation trees", () => {
 
 				decks++
 				loEffects.forEach((expected, slide) => {
-					const actual = ours(timings[slide])
+					const actual = ours(timings[slide], !entry.path.endsWith(".odp"))
 					const loNodes = loCount(lo.deck.slides?.[slide]?.animation)
 
 					if (loNodes > 0) {

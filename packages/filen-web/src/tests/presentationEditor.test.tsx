@@ -490,6 +490,39 @@ describe("presentation editor slide list", () => {
 	})
 })
 
+describe("presentation editor ribbon Escape", () => {
+	it("gives the slide focus with Escape on a ribbon control, keeping the key from closing the preview", async () => {
+		await openEditor({}, editing(), "deck.pptx", true)
+
+		const tab = screen.getAllByRole("tab")[0]
+
+		if (tab === undefined) throw new Error("no tab")
+
+		act(() => {
+			tab.focus()
+		})
+		expect(fireEvent.keyDown(tab, { key: "Escape" })).toBe(false)
+		expect(document.activeElement?.hasAttribute("data-preview-surface")).toBe(true)
+		expect(screen.getByRole("region", { name: "deck.pptx" }).contains(document.activeElement)).toBe(true)
+	})
+})
+
+describe("presentation editor pane Escape", () => {
+	it("gives the slide focus with Escape in the slide rail, keeping the key from closing the preview", async () => {
+		await openEditor({}, editing(), "deck.pptx", true)
+
+		const option = within(screen.getByRole("listbox", { name: "Slides" })).getAllByRole("option")[0]
+
+		if (option === undefined) throw new Error("no slide")
+
+		act(() => {
+			option.focus()
+		})
+		expect(fireEvent.keyDown(option, { key: "Escape" })).toBe(false)
+		expect(document.activeElement?.hasAttribute("data-preview-surface")).toBe(true)
+	})
+})
+
 describe("presentation editor find", () => {
 	it("opens find and replace with their keys and from the ribbon inside the preview overlay", async () => {
 		await openEditor({}, editing(), "deck.pptx", true)

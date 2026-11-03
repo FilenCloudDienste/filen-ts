@@ -1,4 +1,5 @@
 import { partsNamed } from "./detailParts"
+import { deckOutline, refusedEdits, type DeckOutline, type RefusedEdits } from "./refusedEdits"
 import {
 	chunksSource,
 	crc32,
@@ -70,8 +71,9 @@ export interface SaveHistory {
 	commit(point: { readonly revision: number }): void
 	abandon(point: { readonly revision: number }): void
 	// Reverts the ops whose net effect touches these parts (the writer's own check refused them), answering how many
-	// steps were reverted. Absent: nothing is reverted and the save is only refused.
-	revert?(parts: ReadonlySet<string>): Promise<number>
+	// steps were reverted; with `edits`, only the steps that change what the check named (one shape's fill, its text…).
+	// Absent: nothing is reverted and the save is only refused.
+	revert?(parts: ReadonlySet<string>, edits?: RefusedEdits): Promise<number>
 	// Takes back, before the snapshot, what the deck holds that the user has not made yet (notes started, nothing
 	// typed): the file never holds it.
 	settle?(): void
@@ -670,6 +672,9 @@ export async function saveSession(
 	// The parts the snapshot was taken for: a writer that then finds nothing to write in them is wrong, never "saved".
 	let changedParts = 0
 
+	// The changed slides as the snapshot saw them: what a refusal of the writer's check names is resolved on it.
+	let outline: DeckOutline | undefined
+
 	try {
 		const taken = await deckTurn(deck, async () => {
 			history.settle?.()
@@ -679,6 +684,7 @@ export async function saveSession(
 			const changes = history.changes()
 
 			changedParts = changes.parts.size + changes.presentation.size
+			outline = deckOutline(deck, changes.parts.keys())
 
 			// Dirty keys with nothing net to write (no part names them, an order no shape moved in): the file holds
 			// this state, so it is the saved one from now and the page reads clean, not dirty with nothing to save.
@@ -789,11 +795,12 @@ export async function saveSession(
 		if (point !== undefined) history?.abandon(point)
 
 		const parts = detail === undefined ? undefined : partsNamed(detail)
+		const edits = detail === undefined || outline === undefined ? undefined : refusedEdits(outline, detail)
 		const revert = history?.revert
 		// In the deck's turn, as any change of the model.
 		const reverted =
 			reason === "proofFailed" && parts !== undefined && revert !== undefined
-				? await deckTurn(deck, () => revert.call(history, parts))
+				? await deckTurn(deck, () => revert.call(history, parts, edits))
 				: undefined
 
 		if (reverted !== undefined && reverted > 0) session.emit({ type: "notice", notice: { kind: "saveReverted", ops: reverted } })

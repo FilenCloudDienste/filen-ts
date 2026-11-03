@@ -5,13 +5,15 @@ import { decodeUtf8, escapeAttribute } from "../../../xml/index"
 import { canonicalName } from "../../../odf/index"
 import type { Fragment } from "../../read/context"
 import type { OdpEmitContext, OdpEmitFamily } from "../emit"
-import { OdpStyles, isRefused, setProperty, styleChanges } from "../styles"
+import { OdpStyles, setProperty, styleChanges } from "../styles"
 import { odpGalleryMasterName } from "../../../presentation/edit/apply/design"
 import { odpBackgroundStyle } from "./design"
 import { IDENTITY, OdpShapeWriter, markupOf } from "./shape"
 import { odpNotesMarkup } from "./notes"
 import { odpNewPageAnnotations } from "./comment"
+import { odpTargetIds } from "../../../anim/odf"
 import { odpTransitionPar, odpTransitionSound, odpTransitionStyle, timingRootWith, withTransitionPar } from "./transition"
+import { isRefused } from "../../../presentation/refusal"
 
 // A slide as a draw:page (ODF 1.3 Part 3 §10.2.4): its name (§19.162 draw:name), master page and layout
 // (§19.185 draw:master-page-name, §19.414 presentation:presentation-page-layout-name), and its drawing-page style's
@@ -72,6 +74,27 @@ function layoutName(deck: Deck, node: SlideNode): string | undefined {
 	return layout?.kind === "layout" ? layout.layoutType : undefined
 }
 
+// A page's presentation:visibility (§19.410, visible by default): as the file first wrote it when the page is back to
+// what the file had (kept for the session from the first save that changed it), else "hidden", or none for a page
+// shown again unless the style it inherits from hides.
+function visibility(styles: OdpStyles, base: string | undefined, node: SlideNode): string | null {
+	const own = base === undefined ? undefined : styles.style("drawing-page", base)
+	const values = styles.env.mirrorValues
+	const key = `${String(node.ref)}\u0000presentation:visibility`
+	const current = own?.properties.get("drawing-page")?.attributes.get("presentation:visibility")
+
+	if (values !== undefined && !values.has(key)) values.set(key, current)
+
+	const original = values === undefined ? current : values.get(key)
+
+	if (node.hidden === (original === "hidden")) return original ?? null
+	if (node.hidden) return "hidden"
+
+	const parent = own?.automatic === true && own.parent !== undefined ? styles.style("drawing-page", own.parent) : undefined
+
+	return parent?.properties.get("drawing-page")?.attributes.get("presentation:visibility") === "hidden" ? "visible" : null
+}
+
 // The page's drawing-page style with its visibility and master-shape display as the slide has them.
 function pageStyle(
 	context: OdpEmitContext,
@@ -83,7 +106,7 @@ function pageStyle(
 	const styles = context.styles as OdpStyles
 	const changes = styleChanges()
 
-	if (aspects.hidden !== undefined) setProperty(changes, "drawing-page", "presentation:visibility", node.hidden ? "hidden" : "visible")
+	if (aspects.hidden !== undefined) setProperty(changes, "drawing-page", "presentation:visibility", visibility(styles, base, node))
 	if (aspects.showMasterShapes !== undefined)
 		setProperty(changes, "drawing-page", "presentation:background-objects-visible", node.showMasterShapes ? "true" : "false")
 	if (aspects.transition === true) odpTransitionStyle(changes, node.transition, sound)
@@ -140,7 +163,21 @@ export function pageChanges(
 
 // A page an op made, written whole: its start tag and its shapes. `newId`: an id no element of the content holds
 // (the page's, when its transition par begins by it).
-export function newPage(deck: Deck, node: SlideNode, name: string, context: OdpEmitContext, newId?: () => string): string | Refused {
+// `newId(base)`: an id no element of the document holds, `base` itself when it is free.
+export function newPage(
+	deck: Deck,
+	node: SlideNode,
+	name: string,
+	given: OdpEmitContext,
+	newId?: (base?: string) => string
+): string | Refused {
+	// The shapes the page's timing targets are named by ids unique in the document (ODF 1.3 Part 1 §19.914 xml:id), as
+	// the shapes and the timing are written.
+	const targetIds = new Map<number, string>()
+
+	if (newId !== undefined) for (const id of odpTargetIds(node.timing)) targetIds.set(id, newId(`id${String(id)}`))
+
+	const context: OdpEmitContext = targetIds.size === 0 ? given : { ...given, targetIds }
 	const styles = context.styles as OdpStyles
 	// A page names a master page (§19.185 draw:master-page-name is required): its layout's, else the deck's first.
 	const master = masterPageName(deck, node, styles) ?? styles.sheet.masterOrder[0]
@@ -190,13 +227,13 @@ export function newPage(deck: Deck, node: SlideNode, name: string, context: OdpE
 	const notesNode = node.notes === undefined ? undefined : deck.nodes.get(node.notes)
 
 	if (notesNode !== undefined && notesNode.src === undefined) {
-		const made = odpNotesMarkup(node, notesNode, deck.slides.indexOf(node.ref) + 1, context)
+		const made = odpNotesMarkup(node, notesNode, deck.slides.indexOf(node.ref) + 1, given)
 
 		if (isRefused(made)) return made
 
 		notes = made
 	} else if (notesNode !== undefined && notesNode.shapes.length > 0) {
-		const notesWriter = new OdpShapeWriter(context, undefined, notesNode, () => undefined)
+		const notesWriter = new OdpShapeWriter(given, undefined, notesNode, () => undefined)
 
 		for (const shape of notesNode.shapes) {
 			const pieces = notesWriter.element(shape, IDENTITY)

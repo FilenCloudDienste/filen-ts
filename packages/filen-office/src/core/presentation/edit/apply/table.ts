@@ -18,7 +18,8 @@ import { cloneModel, digestOf, findShape } from "../changes"
 import { replaceInBody, type Matcher } from "../find"
 import type { CellRange, DeckOp, OpOf, TableOp } from "../ops"
 import { xmlSafeText } from "../xmlText"
-import { isRefused, type SourceReading } from "./shape"
+import { type SourceReading } from "./shape"
+import { isRefused } from "../../refusal"
 
 // The table ops on the model (a:tbl, ECMA-376 Part 1 §21.1.3; ODF table:table in a draw:frame), in place. A table is
 // read as its merged areas (an origin cell with gridSpan/rowSpan, the cells it covers flagged hMerge/vMerge, as

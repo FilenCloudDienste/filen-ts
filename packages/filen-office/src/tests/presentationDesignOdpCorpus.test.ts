@@ -48,12 +48,11 @@ const MODES = ["none", "ensureFit", "maximize"] as const
 // The changes refused when sent, by deck and mode:
 //   - lo__tdf163343 has no styles.xml, where ODF keeps the page size (ODF 1.3 Part 2 §3.1): every mode is refused.
 //   - The others hold shapes the open-time proof locked (each would read back differently when written), which a change
-//     that moves the content cannot move: routed connectors (lo__tdf151492, lo__tdf66228, odftk__Presentation2__2),
-//     grouped pictures whose fill does not read back (govuk__Shaping_the_Qualifications_Landscape) and turned, mirrored
-//     shapes (lo__rotate_flip). Don't scale moves nothing and saves.
+//     that moves the content cannot move: routed connectors (lo__tdf151492, lo__tdf66228, odftk__Presentation2__2) and
+//     turned, mirrored shapes (lo__rotate_flip). Don't scale moves nothing and saves.
+// govuk__Shaping_the_Qualifications_Landscape's locked groups of pictures follow: their boxes are written by attributes,
+// their text by scaled copies of its automatic styles.
 const REFUSED: Readonly<Record<string, string>> = {
-	"govuk__Shaping_the_Qualifications_Landscape.odp ensureFit": "locked",
-	"govuk__Shaping_the_Qualifications_Landscape.odp maximize": "locked",
 	"lo__rotate_flip.odp ensureFit": "locked",
 	"lo__rotate_flip.odp maximize": "locked",
 	"lo__tdf151492.odp ensureFit": "locked",

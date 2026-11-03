@@ -1,6 +1,6 @@
 import { DEFAULT_PRESENTATION_BUDGETS } from "../../budget"
 import { reviewFacts } from "../../comments"
-import { refused, type Deck, type Refused, type SlideNode, type SlideRef, type TextBody } from "../../model"
+import { refused, type Deck, type Refused, type ShapeNode, type SlideNode, type SlideRef, type TextBody } from "../../model"
 import { defaultNotesMaster, markMadeNotesPart, newNotesSlide, notesBody, notesBoxes } from "../../notes"
 import type { ApplyContext, ApplyFamily, ApplyResult, Touch } from "../apply"
 import type { NotesOp } from "../ops"
@@ -20,6 +20,10 @@ const MADE = new WeakMap<
 	{ readonly notes: SlideRef; readonly part: string; readonly master?: { readonly ref: SlideRef; readonly part: string } }
 >()
 const REMOVES = new WeakSet<NotesOp>()
+// The body placeholder a setNotes added to a notes page that had none (its shape id, given again on a redo), and the
+// inverses that take such a body out again.
+const ADDED_BODY = new WeakMap<NotesOp, { readonly notes: SlideRef; readonly id: number }>()
+const DROPS_BODY = new WeakMap<NotesOp, { readonly notes: SlideRef; readonly id: number }>()
 
 const BUDGETS = DEFAULT_PRESENTATION_BUDGETS
 
@@ -153,6 +157,56 @@ function create(deck: Deck, op: NotesOp, slide: SlideNode, context: ApplyContext
 	return { kind: "applied", inverse: { ops: [inverse], bytes: 128 }, op }
 }
 
+// A notes page with no body placeholder (only the slide image): the body the notes master places (pptx: inherited from
+// the master's body placeholder; ODF: the master's box or the default placement), as PowerPoint adds it.
+function addBody(deck: Deck, op: NotesOp, notes: SlideNode, context: ApplyContext): ApplyResult<NotesOp> {
+	const checked = checkBody(op.body)
+
+	if (checked !== undefined) return checked
+
+	const made = ADDED_BODY.get(op)
+	const used = new Set(notes.shapes.map(shape => shape.id))
+	const id = made !== undefined && made.notes === notes.ref && !used.has(made.id) ? made.id : context.newShapeId(notes.ref)
+	const master = notes.parent === undefined ? undefined : deck.nodes.get(notes.parent)
+	const masterBody = notesBody(master)
+	const taken = new Set(notes.shapes.flatMap(shape => (shape.ph?.idx === undefined ? [] : [shape.ph.idx])))
+	let idx = masterBody?.ph?.idx ?? 1
+
+	while (taken.has(idx)) idx++
+
+	const shape: ShapeNode = {
+		id,
+		name: `Notes Placeholder ${String(id - 1)}`,
+		hidden: false,
+		kind: "sp",
+		ph: { type: "body", idx, idxWritten: true },
+		...(deck.format === "odp" ? { xfrm: notesBoxes(deck, master).body } : {}),
+		text: cloneModel(op.body)
+	}
+
+	notes.shapes = [...notes.shapes, shape]
+	notes.revision++
+	ADDED_BODY.set(op, { notes: notes.ref, id })
+
+	const inverse: NotesOp = { family: "notes", kind: "setNotes", slide: op.slide, body: EMPTY }
+
+	DROPS_BODY.set(inverse, { notes: notes.ref, id })
+
+	return { kind: "applied", inverse: { ops: [inverse], bytes: 128 }, op }
+}
+
+function dropBody(deck: Deck, op: NotesOp, added: { readonly notes: SlideRef; readonly id: number }): ApplyResult<NotesOp> {
+	const notes = deck.nodes.get(added.notes)
+
+	if (notes === undefined || !notes.shapes.some(shape => shape.id === added.id))
+		return refused("notFound", `the notes body of slide ${String(op.slide)}`)
+
+	notes.shapes = notes.shapes.filter(shape => shape.id !== added.id)
+	notes.revision++
+
+	return { kind: "applied", inverse: { ops: [{ family: "notes", kind: "setNotes", slide: op.slide, body: EMPTY }], bytes: 128 }, op }
+}
+
 export const applyNotes: ApplyFamily<NotesOp> = {
 	apply(deck, op, context) {
 		const slide = deck.nodes.get(op.slide)
@@ -160,6 +214,10 @@ export const applyNotes: ApplyFamily<NotesOp> = {
 		if (slide === undefined) return refused("notFound", `slide ${String(op.slide)} is not parsed`)
 		if (slide.kind !== "slide") return refused("unsupported", "notes of a node that is not a slide")
 		if (REMOVES.has(op)) return remove(deck, op, slide)
+
+		const drops = DROPS_BODY.get(op)
+
+		if (drops !== undefined) return dropBody(deck, op, drops)
 
 		const notes = slide.notes === undefined ? undefined : deck.nodes.get(slide.notes)
 
@@ -169,7 +227,7 @@ export const applyNotes: ApplyFamily<NotesOp> = {
 
 		const body = notesBody(notes)
 
-		if (body === undefined) return refused("unsupported", "a notes slide without a notes placeholder")
+		if (body === undefined) return addBody(deck, op, notes, context)
 
 		const result = applyText.apply(
 			deck,
@@ -191,6 +249,10 @@ export const applyNotes: ApplyFamily<NotesOp> = {
 		const made = MADE.get(op)
 
 		if (made !== undefined) touches.push({ kind: "slide", slide: made.notes, dirt: { kind: "node" } })
+
+		const body = ADDED_BODY.get(op) ?? DROPS_BODY.get(op)
+
+		if (body !== undefined) touches.push({ kind: "shape", slide: body.notes, shape: body.id, dirt: { kind: "node" } })
 
 		return touches
 	}

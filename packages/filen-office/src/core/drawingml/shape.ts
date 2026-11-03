@@ -596,6 +596,9 @@ class ShapeWalker {
 		let textMatrix: readonly number[]
 		let rect: [number, number, number, number]
 		const textXfrm = readXfrm(reader, txXfrm)
+		// Text does not mirror with the shape, but turns with it.
+		const xfrm = readXfrm(reader, reader.child(propertiesOf(reader, node, "spPr"), D.A, "xfrm"))
+		const turn = xfrm?.rotation ?? 0
 
 		if (textXfrm !== undefined) {
 			const textBox = this.box(textXfrm, frame)
@@ -607,19 +610,17 @@ class ShapeWalker {
 					textBox.y / EMU_PER_PX,
 					textBox.w / EMU_PER_PX,
 					textBox.h / EMU_PER_PX,
-					textXfrm.rotation,
+					// dsp:txXfrm turns relative to the shape (upright text on a turned shape turns back by its turn).
+					turn + textXfrm.rotation,
 					false,
 					false
 				)
 			)
 			rect = [0, 0, textBox.w / EMU_PER_PX, textBox.h / EMU_PER_PX]
 		} else {
-			// Text does not mirror with the shape.
-			const xfrm = readXfrm(reader, reader.child(propertiesOf(reader, node, "spPr"), D.A, "xfrm"))
-
 			textMatrix = multiply(
 				frame.matrix,
-				boxMatrix(box.x / EMU_PER_PX, box.y / EMU_PER_PX, box.w / EMU_PER_PX, box.h / EMU_PER_PX, xfrm?.rotation ?? 0, false, false)
+				boxMatrix(box.x / EMU_PER_PX, box.y / EMU_PER_PX, box.w / EMU_PER_PX, box.h / EMU_PER_PX, turn, false, false)
 			)
 			rect = textRect(program, evaluateGuides(program, box.w, box.h, adjust), box.w, box.h)
 		}

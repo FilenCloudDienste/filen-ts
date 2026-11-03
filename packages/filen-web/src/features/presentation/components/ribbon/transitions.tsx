@@ -478,7 +478,12 @@ function SecondsField({
 					if (event.key === "Enter") {
 						event.preventDefault()
 						commit()
-					} else if (event.key === "Escape") setText(shown)
+					} else if (event.key === "Escape" && text !== shown) {
+						// The field's own Escape: what was typed is cancelled, and focus stays (the ribbon's Escape, which
+						// moves focus and so commits on blur, comes with the next press).
+						event.preventDefault()
+						setText(shown)
+					}
 				}}
 			/>
 		</label>

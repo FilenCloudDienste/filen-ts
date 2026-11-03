@@ -1,4 +1,4 @@
-import { canonicalName, type OdfStyle } from "../../../odf/index"
+import { canonicalName, type OdfListStyle, type OdfStyle } from "../../../odf/index"
 import { parseLength } from "../../../odf/units"
 import {
 	boxesMovedSinceBase,
@@ -29,11 +29,12 @@ import { resourceFillChanges, type DrawResourceSink } from "../resources"
 import {
 	FILL_PROPERTIES,
 	OdpStyles,
+	attributeMarkup,
+	elementMarkup,
 	WRITTEN_NAMESPACES,
 	cm,
 	declared,
 	hexColor,
-	isRefused,
 	pt,
 	setProperty,
 	styleChanges,
@@ -41,6 +42,7 @@ import {
 } from "../styles"
 import { pictureFillEntry } from "./picture"
 import { IDENTITY, compose, groupAffine, lineEnds, placed, type Affine } from "./shape"
+import { isRefused } from "../../../presentation/refusal"
 
 // The design family's ODF: a page's background as its drawing-page style's fill (ODF 1.3 Part 3 §20.137 draw:fill,
 // §20.146 draw:fill-color on style:drawing-page-properties §17.25), joined to the page style the slide family derives.
@@ -218,17 +220,6 @@ export const emitOdpDesign: OdpEmitFamily = {
 
 const EMU_PER_PT = 12_700
 
-// styles.xml after a slide size change (§20.215 fo:page-width/height on the master pages' page layouts, §16.5), with
-// each master page shape the change moved written at its new box (moveShapes); undefined when nothing differs.
-export function odpSizedStyles(deck: Deck, fragment: Fragment): Uint8Array | Refused | undefined {
-	const editor = new XmlEditor(fragment.document)
-	const refusal = sizeEdits(deck, fragment, editor)
-
-	if (refusal !== undefined) return refusal
-
-	return editor.changed ? editor.serialize() : undefined
-}
-
 function sizeEdits(deck: Deck, fragment: Fragment, editor: XmlEditor): Refused | undefined {
 	const document = fragment.document
 	const layouts = new Set<string>()
@@ -283,7 +274,9 @@ const FONT_SIZES = ["fo:font-size", "style:font-size-asian", "style:font-size-co
 // The text sizes a scaled change scales with the content, as the model's ContentScaler does: font sizes (§20.190
 // fo:font-size and its Asian and complex twins) and point paragraph spacing (§20.209 fo:margin-top, §20.206
 // fo:margin-bottom, §20.204 fo:line-height, §20.317 style:line-height-at-least), each by properties kind with the
-// model's range (hundredths of a point). A percentage scales with what it is relative to.
+// model's range (hundredths of a point). A percentage scales with what it is relative to. A frame's fo:padding-* keeps
+// its size, as LibreOffice 7.5 keeps it when it scales a presentation to a new page size (measured over UNO,
+// .uno:PageSize with ScaleObjects), and as the model's ContentScaler keeps a text body's insets.
 const SCALED_SIZES = [
 	{ kind: "text", element: "style:text-properties", names: FONT_SIZES, range: [100, 400_000] },
 	{
@@ -293,6 +286,33 @@ const SCALED_SIZES = [
 		range: [0, 158_400]
 	}
 ] as const
+
+// Indents a scaled change scales with the text, as the model's ContentScaler scales a level's marL and indent: §20.199
+// fo:margin-left, §20.200 fo:margin-right and §20.215 fo:text-indent, in EMU (ST_TextIndent's range).
+const SCALED_INDENTS = {
+	kind: "paragraph",
+	element: "style:paragraph-properties",
+	names: ["fo:margin-left", "fo:margin-right", "fo:text-indent"],
+	range: [-51_206_400, 51_206_400]
+} as const
+
+const EMU_PER_UNIT: Readonly<Record<string, number>> = { cm: 360_000, mm: 36_000, in: 914_400, pt: 12_700, pc: 152_400 }
+
+// An indent at `scale`, rounded to the EMU as the reader reads it and written in the unit it was written in (points for
+// one LibreOffice reads in another unit); undefined for what is not an absolute length.
+function scaledIndent(value: string | undefined, scale: number, [min, max]: readonly [number, number]): string | undefined {
+	const points = parseLength(value)
+
+	if (points === undefined || value === undefined) return undefined
+
+	const emu = Math.min(max, Math.max(min, Math.round(Math.round(points * EMU_PER_PT) * scale)))
+	const unit = /[a-z]+$/u.exec(value.trim())?.[0] ?? "pt"
+	const per = EMU_PER_UNIT[unit] ?? EMU_PER_PT
+	const fixed = (emu / (unit in EMU_PER_UNIT ? per : EMU_PER_PT)).toFixed(6)
+	const trimmed = fixed.includes(".") ? fixed.replace(/0+$/u, "").replace(/\.$/u, "") : fixed
+
+	return `${trimmed === "-0" ? "0" : trimmed}${unit in EMU_PER_UNIT ? unit : "pt"}`
+}
 
 // A length at `scale`, rounded as the reader and the model round it (hundredths of a point), so that what is written
 // reads back as the model holds it; undefined for what is not an absolute length.
@@ -377,7 +397,205 @@ function scaleFontSizes(deck: Deck, fragment: Fragment, set: (node: number, cano
 
 			if (value !== undefined) set(node, each, value)
 		}
+
+		if (sizes.element !== SCALED_INDENTS.element) continue
+
+		for (const each of SCALED_INDENTS.names) {
+			const value = scaledIndent(attributes.get(each), scale, SCALED_INDENTS.range)
+
+			if (value !== undefined) set(node, each, value)
+		}
 	}
+}
+
+// --- Text kept as written (a locked frame or group) at a text scale ---
+
+// The style family an element's text style reference names: a paragraph's (and a drawing object's text style, §19.226
+// draw:text-style-name), or a span's or link's text style.
+const KEPT_REFERENCES = /<(text:p|text:h|text:span|text:a|text:list|text:list-item|draw:[\w-]+)\b[^>]*>/gu
+const KEPT_NAMES = /(\s)(text:style-name|text:cond-style-name|text:style-override|draw:text-style-name)="([^"]*)"/gu
+
+type KeptFamily = "paragraph" | "text" | "list"
+
+function keptFamily(element: string, attribute: string): KeptFamily | undefined {
+	if (element.startsWith("draw:")) return attribute === "draw:text-style-name" ? "paragraph" : undefined
+	if (element === "text:list") return attribute === "text:style-name" ? "list" : undefined
+	if (element === "text:list-item") return attribute === "text:style-override" ? "list" : undefined
+	if (element === "text:p" || element === "text:h") return attribute === "draw:text-style-name" ? undefined : "paragraph"
+
+	return attribute === "text:style-name" ? "text" : undefined
+}
+
+// What a kept shape's names map to at the current text scale: family and source name → the scaled copy's name (the
+// source name when the style states nothing the scale changes); the copies' own names, which are never renamed again.
+export interface KeptTextNames {
+	readonly renamed: Map<string, string>
+	readonly copies: Set<string>
+}
+
+export function keptTextNames(): KeptTextNames {
+	return { renamed: new Map(), copies: new Set() }
+}
+
+// A list level's lengths a scaled change scales (§19.856 text:space-before, §19.835 text:min-label-width, §19.834
+// text:min-label-distance, an image bullet's fo:width and fo:height; in label alignment fo:margin-left, fo:text-indent
+// and text:list-tab-stop-position), and its absolute bullet size.
+const LIST_LENGTHS = ["text:space-before", "text:min-label-width", "text:min-label-distance", "fo:width", "fo:height"] as const
+const LABEL_LENGTHS = ["fo:margin-left", "fo:text-indent", "text:list-tab-stop-position"] as const
+const LEVEL_ELEMENTS: Readonly<Record<string, string>> = {
+	bullet: "text:list-level-style-bullet",
+	number: "text:list-level-style-number",
+	image: "text:list-level-style-image"
+}
+
+function scaledAttributes(
+	attributes: ReadonlyMap<string, string>,
+	names: readonly string[],
+	scaled: (value: string | undefined) => string | undefined
+): { readonly attributes: Map<string, string>; readonly changed: boolean } {
+	const out = new Map(attributes)
+	let changed = false
+
+	for (const name of names) {
+		const value = scaled(attributes.get(name))
+
+		if (value !== undefined && value !== attributes.get(name)) {
+			out.set(name, value)
+			changed = true
+		}
+	}
+
+	return { attributes: out, changed }
+}
+
+// An automatic list style's levels at `scale`, as level markup for a new list style; undefined when no level states a
+// length or bullet size the scale changes.
+function scaledListLevels(list: OdfListStyle, scale: number): string | undefined {
+	const indent = (value: string | undefined): string | undefined => scaledIndent(value, scale, SCALED_INDENTS.range)
+	const size = (value: string | undefined): string | undefined => scaledLength(value, scale, [100, 400_000])
+	let changed = false
+	let out = ""
+
+	for (const level of [...list.levels.values()].sort((a, b) => a.level - b.level)) {
+		const element = LEVEL_ELEMENTS[level.kind] ?? "text:list-level-style-bullet"
+		const properties = scaledAttributes(level.properties.attributes, LIST_LENGTHS, indent)
+		const children = level.properties.children.map(child => {
+			if (child.name !== "style:list-level-label-alignment") return elementMarkup(child)
+
+			const label = scaledAttributes(child.attributes, LABEL_LENGTHS, indent)
+
+			changed ||= label.changed
+
+			return elementMarkup({ ...child, attributes: label.attributes })
+		})
+		const text = level.textProperties === undefined ? undefined : scaledAttributes(level.textProperties.attributes, FONT_SIZES, size)
+
+		changed ||= properties.changed || text?.changed === true
+
+		const levelProperties =
+			properties.attributes.size === 0 && children.length === 0
+				? ""
+				: children.length === 0
+					? `<style:list-level-properties${attributeMarkup(properties.attributes)}/>`
+					: `<style:list-level-properties${attributeMarkup(properties.attributes)}>${children.join("")}</style:list-level-properties>`
+		const textProperties =
+			text === undefined || level.textProperties === undefined
+				? ""
+				: elementMarkup({
+						name: "style:text-properties",
+						attributes: text.attributes,
+						children: level.textProperties.children,
+						text: ""
+					})
+		const inner = levelProperties + textProperties
+
+		out +=
+			inner === ""
+				? `<${element}${attributeMarkup(level.attributes)}/>`
+				: `<${element}${attributeMarkup(level.attributes)}>${inner}</${element}>`
+	}
+
+	return changed ? out : undefined
+}
+
+// The markup of a shape kept as written (its text is never written from the model) at the text scale the content took
+// since the base file was read: each automatic paragraph or text style its text names that states a font size,
+// spacing or indent is written again scaled under a new name, and the reference renamed; the rest is the markup as it
+// was. At scale 1 (no change, or an undo back to the base) the markup is returned unchanged.
+export function odpKeptTextMarkup(
+	markup: string,
+	deck: Deck,
+	styles: Pick<OdpStyles, "style" | "derived" | "list" | "sheet" | "scope">,
+	names: KeptTextNames
+): string {
+	const scale = textScaleOf(deck)
+
+	if (scale === 1) return markup
+
+	const rename = (family: KeptFamily, name: string): string => {
+		if (names.copies.has(name)) return name
+
+		const key = `${family}\u0000${name}`
+		const known = names.renamed.get(key)
+
+		if (known !== undefined) return known
+
+		if (family === "list") {
+			const list = styles.sheet.listStyle(name, styles.scope)
+			const levels = list?.automatic === true ? scaledListLevels(list, scale) : undefined
+			const copy = levels === undefined ? name : styles.list(levels)
+
+			names.renamed.set(key, copy)
+			names.copies.add(copy)
+
+			return copy
+		}
+
+		const style = styles.style(family, name)
+		const changes = styleChanges()
+		const named = new Map<string, string>()
+
+		if (style?.automatic === true) {
+			// A paragraph style naming a list style (§19.509 style:list-style-name): its copy names the list's copy.
+			const list = style.attributes.get("style:list-style-name")
+
+			if (family === "paragraph" && list !== undefined && list !== "") {
+				const copy = rename("list", list)
+
+				if (copy !== list) named.set("style:list-style-name", copy)
+			}
+
+			for (const sizes of [...SCALED_SIZES, SCALED_INDENTS]) {
+				const attributes = style.properties.get(sizes.kind)?.attributes
+
+				if (attributes === undefined) continue
+
+				for (const each of sizes.names) {
+					const value =
+						sizes === SCALED_INDENTS
+							? scaledIndent(attributes.get(each), scale, sizes.range)
+							: scaledLength(attributes.get(each), scale, sizes.range)
+
+					if (value !== undefined) setProperty(changes, sizes.kind, each, value)
+				}
+			}
+		}
+
+		const next = changes.attributes.size === 0 && named.size === 0 ? name : styles.derived(family, name, changes, "", named)
+
+		names.renamed.set(key, next)
+		names.copies.add(next)
+
+		return next
+	}
+
+	return markup.replace(KEPT_REFERENCES, (tag: string, element: string) =>
+		tag.replace(KEPT_NAMES, (whole: string, space: string, attribute: string, value: string) => {
+			const family = keptFamily(element, attribute)
+
+			return family === undefined ? whole : `${space}${attribute}="${rename(family, value)}"`
+		})
+	)
 }
 
 // A source shape's own style as a written shape takes it while the content is at a text scale since the base file was

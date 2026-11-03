@@ -40,11 +40,6 @@ export function strongerLine(first: SheetBorderLine | undefined, second: SheetBo
 	return LINES[first.style].weight > LINES[second.style].weight ? first : second
 }
 
-// How far a line reaches past its centre on each side (for clipping and the selection's inset).
-export function lineReach(line: SheetBorderLine): number {
-	return LINES[line.style].double === true ? 1.5 : LINES[line.style].width / 2
-}
-
 export class BorderPainter {
 	private style = ""
 	private width = -1

@@ -13,7 +13,8 @@ import {
 import type { ApplyContext, ApplyFamily, ApplyResult, Touch } from "../apply"
 import type { InkOp, ShapeOp } from "../ops"
 import { xmlSafeText } from "../xmlText"
-import { applyShape, isRefused } from "./shape"
+import { applyShape } from "./shape"
+import { isRefused } from "../../refusal"
 
 // Ink kept after a slideshow: one group named by the page (from the locale) holding one freeform per stroke, each a
 // custom outline through the stroke's points with no fill and a round-capped, round-joined line (a highlighter's

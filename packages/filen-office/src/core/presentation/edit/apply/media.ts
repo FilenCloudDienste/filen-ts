@@ -5,8 +5,9 @@ import type { ApplyContext, ApplyFamily, ApplyResult, Touch } from "../apply"
 import { cloneModel, findShape } from "../changes"
 import type { InsertedImage, MediaOp, MediaPlayback, OpOf } from "../ops"
 import { insertedImage, pictureFillOf, registerInsertedImage } from "./picture"
-import { applyShape, isRefused } from "./shape"
+import { applyShape } from "./shape"
 import { applyTiming } from "./timing"
+import { isRefused } from "../../refusal"
 
 // The media ops on the model, in place. An inserted medium is a p:pic (ECMA-376 §19.3.1.37) holding the medium
 // (`media`, part "inserted:<id>" until a save gives it one) and its poster as an inserted picture fill: the poster

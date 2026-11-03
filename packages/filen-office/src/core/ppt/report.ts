@@ -15,6 +15,8 @@ export type PptLossKind =
 	| "comment"
 	// A VBA project, which a .pptx cannot hold.
 	| "macros"
+	// A digital signature (the _signatures or _xmlsignatures storage), which a new file cannot keep.
+	| "signature"
 	// A click or hover action the deck cannot carry (media, an unknown action); macros, programs and OLE verbs are
 	// carried, refused by the reader.
 	| "action"

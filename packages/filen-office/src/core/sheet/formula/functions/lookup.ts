@@ -1,7 +1,7 @@
-import { CellError, EmptyValue, FunctionArgumentType, SimpleRangeValue, type ImplementedFunctions } from "hyperformula"
+import { EmptyValue, FunctionArgumentType, SimpleRangeValue, type ImplementedFunctions } from "hyperformula"
 import { lastLineValue, uniformTail, type Plugin } from "./blankTails"
 import { naError, SheetFunctionPlugin, unmodeledError, valueError, type PluginCall, type PluginScalar, type PluginState } from "./plugin"
-import { binarySearch, compareLookup, flatten, lookupValue, rowsOf, sameClass, vectorOf, wildcard, type Lookup } from "./values"
+import { binarySearch, compareLookup, lookupValue, rowsOf, sameClass, vectorOf, wildcard, type Lookup } from "./values"
 
 // LOOKUP and XMATCH as support.microsoft.com defines them. Their arrays are evaluated as arrays
 // (LOOKUP(2,1/(A1:A9="x"),B1:B9) in an ordinary formula), as Excel does.
@@ -212,12 +212,4 @@ export class LookupFunctions extends SheetFunctionPlugin {
 
 		return -1
 	}
-}
-
-// Every value of a range or array (for functions that take numbers from either).
-export function arrayValues(value: unknown): PluginScalar[] {
-	if (value instanceof SimpleRangeValue) return flatten(value.data)
-	if (value instanceof CellError) return [value]
-
-	return [value as PluginScalar]
 }

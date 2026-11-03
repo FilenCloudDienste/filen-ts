@@ -15,9 +15,6 @@ export const CHART_COLORS_TYPE = "application/vnd.ms-office.chartcolorstyle+xml"
 export const CHART_SHAPES_TYPE = "application/vnd.openxmlformats-officedocument.drawingml.chartshapes+xml"
 export const CHART_NAMESPACE = "http://schemas.openxmlformats.org/drawingml/2006/chart"
 export const CHART_STRICT_NAMESPACE = "http://purl.oclc.org/ooxml/drawingml/chart"
-export const CHART_STYLE_RELATIONSHIP = "http://schemas.microsoft.com/office/2011/relationships/chartStyle"
-export const CHART_COLORS_RELATIONSHIP = "http://schemas.microsoft.com/office/2011/relationships/chartColorStyle"
-
 // The chart's relationship from a drawing (Transitional or Strict, by its last segment).
 export function chartRelationship(workbook: XlsxWorkbookModel): string {
 	return `${workbook.strict ? "http://purl.oclc.org/ooxml/officeDocument/relationships" : "http://schemas.openxmlformats.org/officeDocument/2006/relationships"}/chart`

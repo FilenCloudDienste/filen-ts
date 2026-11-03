@@ -1,4 +1,4 @@
-import { paintDrawingPdf, type PdfDrawingData } from "../../core/drawingml/pdf"
+import { paintDrawingPdf, pictureKey, pictureSource, type PdfDrawingData } from "../../core/drawingml/pdf"
 import {
 	ITEM_FLOATS,
 	ITEM_INTS,
@@ -722,11 +722,12 @@ export class PresentationPdf {
 		if (image.partName === undefined) {
 			if (inline === undefined) return Promise.resolve(undefined)
 
-			return this.write(inline, image.bytesKey)
+			return this.write(image, inline, image.bytesKey)
 		}
 
 		const part = image.partName
-		const held = this.images.get(part)
+		const key = pictureKey(image, part)
+		const held = this.images.get(key)
 
 		if (held !== undefined) return held
 
@@ -737,10 +738,10 @@ export class PresentationPdf {
 				return undefined
 			}
 
-			return this.write(found.bytes, part)
+			return this.write(image, found.bytes, part)
 		})
 
-		this.images.set(part, made)
+		this.images.set(key, made)
 
 		return made
 	}
@@ -779,9 +780,9 @@ export class PresentationPdf {
 		return image
 	}
 
-	private async write(bytes: Uint8Array, key: string | undefined): Promise<PdfImage | undefined> {
+	private async write(image: DrawingImage, bytes: Uint8Array, key: string | undefined): Promise<PdfImage | undefined> {
 		try {
-			return await this.writer.image({ data: bytes, ...(key === undefined ? {} : { key }) })
+			return await this.writer.image(pictureSource(image, bytes, key))
 		} catch (error) {
 			if (!(error instanceof PdfWriteError)) throw error
 

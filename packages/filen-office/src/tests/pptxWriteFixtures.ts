@@ -164,8 +164,8 @@ function walkShapes(shapes: readonly ShapeNode[], visit: (shape: ShapeNode) => v
 	}
 }
 
-// What the ES2 edit set did, for the checks after a reopen.
-export interface Es2Report {
+// What the shape and slide edit set did, for the checks after a reopen.
+export interface ShapeAndSlideEditsReport {
 	readonly moved?: {
 		readonly slide: number
 		readonly id: number
@@ -189,13 +189,13 @@ export interface Es2Report {
 	readonly slides: number
 }
 
-// Edit set ES2 (no text edits) on a parsed deck, as the slide and shape families apply it: move, resize and rotate
+// The shape and slide edit set (no text edits) on a parsed deck, as the slide and shape families apply it: move, resize and rotate
 // a shape and set its fill; hide a slide; change a slide's layout; duplicate a slide; add a Title and Content
 // slide; delete a slide (a slide-jump target and section member where the deck has one); move the first slide last.
-export function applyEs2(opened: OpenedDeck): { readonly changes: DeckChanges; readonly report: Es2Report } {
+export function applyShapeAndSlideEdits(opened: OpenedDeck): { readonly changes: DeckChanges; readonly report: ShapeAndSlideEditsReport } {
 	const deck = opened.deck
 	const changes = new Changes()
-	const report: { -readonly [K in keyof Es2Report]: Es2Report[K] } = { added: false, slides: 0 }
+	const report: { -readonly [K in keyof ShapeAndSlideEditsReport]: ShapeAndSlideEditsReport[K] } = { added: false, slides: 0 }
 	let nextRef = 100_000
 	let movedRef: SlideRef | undefined
 	let copyOf: SlideRef | undefined

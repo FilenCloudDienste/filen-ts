@@ -8,9 +8,12 @@ import { refused, type Background, type Deck, type Refused, type ShapeNode, type
 import type { ApplyContext, ApplyFamily, ApplyResult, Touch } from "../apply"
 import type { DesignThemeInfo, PresentationDesignInfo } from "../commands/design"
 import type { DeckOp, DesignOp, InsertedImage } from "../ops"
-import { ContentScaler, holdsLock } from "./designScale"
+import { ContentScaler, holdsLock, statedValues, statesWithin } from "./designScale"
 import { onHeldPage, pageMarkup, sourceReading } from "./heldPage"
 import { registerInsertedImage } from "./picture"
+import { moveLock } from "./shape"
+import { isRefused } from "../../refusal"
+import { decodeUtf8 } from "../../../xml/utf8"
 
 // The design family: the deck's theme (a Filen gallery theme, or a master the file has), its colour variant, the
 // slide size, and slide backgrounds.
@@ -49,6 +52,8 @@ export interface DesignReading {
 	stylesBytes?(): Uint8Array | undefined
 	// ODP: why a size change that moves the content could not write a master page shape of styles.xml moved.
 	masterMoveRefusal?(deck: Deck): Refused | undefined
+	// Pptx: every branch of the mc:AlternateContent a kept shape sits in, as the source has it (undefined: none).
+	keptSource?(shape: ShapeNode): Uint8Array | undefined
 }
 
 // ODP: a design op that puts something in styles.xml (a gallery master page, the page layouts' size, a drawing
@@ -184,10 +189,6 @@ export function targetLayoutType(layout: SlideNode | undefined): FilenLayoutType
 	if (title) return "titleOnly"
 
 	return "blank"
-}
-
-function isRefused(value: unknown): value is Refused {
-	return typeof value === "object" && value !== null && (value as { kind?: unknown }).kind === "refused"
 }
 
 function slidesOf(deck: Deck, refs: readonly SlideRef[]): SlideNode[] | Refused {
@@ -825,10 +826,18 @@ function scaleContent(
 	boxes: ReadonlyMap<ShapeNode, { readonly before: Xfrm; readonly after: Xfrm }>,
 	touches: Touch[]
 ): void {
-	const shape = (node: SlideNode, each: ShapeNode, top: boolean): void => {
-		// A master's field a slide shows (locked "master") follows its master like the master's own shapes.
-		if (each.lock !== undefined && each.synthetic !== true) return
+	// `kept`: the shape in mc:AlternateContent `each` is (or sits in), whose save rewrites the stated values of its text
+	// in every branch: a change to its members' text is a change to it.
+	const shape = (node: SlideNode, each: ShapeNode, top: boolean, kept?: ShapeNode, silent?: boolean): void => {
+		const alternate = deck.format === "pptx" && each.lock === "alternateContent" && each.synthetic !== true
+		// An ODP shape kept as written: its text follows through the save's scaled copies of its styles (nothing for the
+		// shape writer to write from the model, so no touch), the model scaled with it.
+		const keptOdp = deck.format === "odp" && each.lock !== undefined && each.lock !== "master" && each.synthetic !== true
 
+		// A master's field a slide shows (locked "master") follows its master like the master's own shapes.
+		if (each.lock !== undefined && each.synthetic !== true && !alternate && !keptOdp) return
+
+		const owner = alternate ? each : kept
 		let touched = false
 
 		if (each.text !== undefined) {
@@ -841,7 +850,12 @@ function scaleContent(
 			touched = true
 		}
 
-		if (touched)
+		if (keptOdp || silent === true) {
+			// No touch: the kept markup is written as its source.
+		} else if (touched && owner !== undefined) {
+			if (!touches.some(touch => touch.kind === "shape" && touch.slide === node.ref && touch.shape === owner.id))
+				touches.push({ kind: "shape", slide: node.ref, shape: owner.id, dirt: { kind: "text" } })
+		} else if (touched)
 			touches.push({
 				kind: "shape",
 				slide: node.ref,
@@ -849,7 +863,7 @@ function scaleContent(
 				dirt: each.frame === undefined ? { kind: "text" } : { kind: "node" }
 			})
 
-		for (const child of each.children ?? []) shape(node, child, false)
+		for (const child of each.children ?? []) shape(node, child, false, owner, silent === true || keptOdp)
 	}
 
 	for (const node of nodes) {
@@ -903,6 +917,67 @@ export function predictedSizeTouches(deck: Deck, op: DeckOp): Touch[] {
 	return out
 }
 
+function holdsText(shape: ShapeNode): boolean {
+	return shape.text !== undefined || (shape.children ?? []).some(holdsText)
+}
+
+// Whether a kept shape's text (or its members') could not follow a scale. An ODP's text takes its sizes from named
+// automatic styles, which the save writes again scaled under new names for a kept shape (odpKeptTextMarkup): it can.
+// Pptx text that states no value a scale
+// rewrites follows through the styles it inherits; a shape in mc:AlternateContent has its stated values rewritten in
+// every branch by the save, which can when each branch states only values the branch the reader took does (the model
+// says what each becomes); any other kept shape keeps its markup and cannot.
+function textCannotFollow(shape: ShapeNode, format: Deck["format"], context: ApplyContext): boolean {
+	if (!holdsText(shape) || format === "odp") return false
+	if (shape.src === undefined) return true
+
+	const own = context.sourceBytes(shape.src)
+
+	if (isRefused(own)) return true
+
+	const markup = decodeUtf8(own)
+
+	if (shape.lock !== "alternateContent") return statedValues(markup).size > 0
+
+	const branches = designReadingOf(context)?.keptSource?.(shape)
+
+	return branches === undefined ? statedValues(markup).size > 0 : !statesWithin(decodeUtf8(branches), markup)
+}
+
+// Why a locked shape (or a locked member of a group) would not follow a slide size change: its box cannot be rewritten
+// (`moves`), or a scale would have to resize content written as its source (its text, a table's cells). A pptx group's
+// members follow its transform; an ODP group has none, so each member's own box is rewritten (`membersMove`).
+function keptRefusal(
+	shape: ShapeNode,
+	format: Deck["format"],
+	moves: boolean,
+	scales: boolean,
+	membersMove: boolean,
+	context: ApplyContext
+): Refused | undefined {
+	const name = shape.name || "a shape"
+
+	if (shape.lock !== undefined && shape.synthetic !== true) {
+		// Content the reader keeps whole without reading it (an AlternateContent branch it does not know): its box is
+		// not known, so it cannot follow.
+		if (moves && shape.kind === "opaque") return refused("locked", `${name} is kept as written and cannot move with the slide size`)
+		if (moves && moveLock(shape, context) !== undefined)
+			return refused("locked", `${name} is kept as written and cannot move with the slide size`)
+		if (scales && (shape.frame?.kind === "table" || textCannotFollow(shape, format, context)))
+			return refused("locked", `${name} is kept as written and its text would not scale with the slide size`)
+	}
+
+	if (!(scales || (moves && membersMove)) || !holdsLock(shape)) return undefined
+
+	for (const child of shape.children ?? []) {
+		const inner = keptRefusal(child, format, membersMove, scales, membersMove, context)
+
+		if (inner !== undefined) return inner
+	}
+
+	return undefined
+}
+
 function setSize(deck: Deck, op: SetSize, context: ApplyContext): ApplyResult<SetSize> {
 	const { cx, cy } = op
 
@@ -940,17 +1015,21 @@ function setSize(deck: Deck, op: SetSize, context: ApplyContext): ApplyResult<Se
 
 		if (isRefused(nodes)) return nodes
 
-		// A locked shape is written as its source: one the change would move or scale is refused, never left behind.
+		// A locked shape is written as its source: it follows the change when only its box moves and scales (its box
+		// rewritten, as a move of it is), else the change is refused naming it, never leaving it behind.
 		const moves = s !== 1 || Math.round(dx) !== 0 || Math.round(dy) !== 0
 
-		for (const node of nodes)
-			for (const shape of node.shapes)
-				if (
-					shape.synthetic !== true &&
-					((moves && shape.lock !== undefined && shape.xfrm !== undefined && node.synthetic !== true) ||
-						(s !== 1 && holdsLock(shape)))
-				)
-					return refused("locked", `${shape.name || "a shape"} is locked and would not follow the slide size`)
+		for (const node of nodes) {
+			if (node.synthetic === true) continue
+
+			for (const shape of node.shapes) {
+				if (shape.synthetic === true) continue
+
+				const kept = keptRefusal(shape, deck.format, moves, s !== 1, moves && deck.format === "odp", context)
+
+				if (kept !== undefined) return kept
+			}
+		}
 
 		const unmovable = moves ? reading?.masterMoveRefusal?.(deck) : undefined
 

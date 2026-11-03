@@ -14,8 +14,10 @@ export type ConversionLossKind =
 	| "geometry"
 	// A paragraph's outline level the target holds only on a bulleted paragraph, written without it.
 	| "outlineLevel"
-	// Text written in a nearer form: vertical text, line-breaking rules, spacing, bullet size or numbering.
+	// Text written in a nearer form: vertical text, line-breaking rules, spacing or bullet size.
 	| "text"
+	// A list numbering the target has no form for (Hindi vowels, Arabic abjad…), written as its nearest.
+	| "numbering"
 	// A table style written as the cells' own properties.
 	| "tableStyle"
 	// A chart not carried.
@@ -46,6 +48,17 @@ export type ConversionLossKind =
 	| "mediaTiming"
 	// An animation a medium's bookmark starts, started on a click of the medium instead (OpenDocument has no bookmarks).
 	| "bookmarkTrigger"
+	// A reply to a comment, written as a comment of its own at its thread's place (OpenDocument annotations have no
+	// threads).
+	| "commentReply"
+	// A comment's resolved or closed state, left out (OpenDocument annotations have none).
+	| "commentState"
+	// The slides' sections, left out (OpenDocument has no sections).
+	| "section"
+	// A font embedded in the deck, left out of the copy.
+	| "embeddedFont"
+	// A document property the target has no place for (a category, a content status, a property of a binary type).
+	| "properties"
 
 export interface ConversionLoss {
 	readonly kind: ConversionLossKind

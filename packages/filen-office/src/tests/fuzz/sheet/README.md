@@ -29,7 +29,7 @@ within 60 s is a finding.
 | `FILEN_OFFICE_SHEET_RECALC=1`                | Our full recalculation against Excel's cached results over the Excel-calculated corpus (`excelCached.ts` selects 98 workbooks, 1.26M formula cells). `_MIN` (0.985) is the rate it must reach; `_OUT=<file.json>` keeps mismatches by function and kind, root causes, examples and the formulas the engine fell back on.                                                                             |
 | `FILEN_OFFICE_SOFFICE=<soffice>[,<soffice>]` | LibreOffice on edited saves: every install opens and converts them to ods, csv and pdf; the UNO runner's hard recalculation equals ours for the functions we calculate. `FILEN_OFFICE_SHEET_LO_CORPUS=<count>` adds corpus workbooks, `_LO_SCRATCH=<dir>` holds profiles and copies, `_LO_MIN` (0.99).                                                                                               |
 
-The 20,000-sequence gate: `FILEN_OFFICE_SHEET_FUZZ=20000 FILEN_OFFICE_SHEET_FUZZ_OUT=/tmp/sheet-fuzz.jsonl pnpm vitest run src/tests/sheetFuzz.test.ts -t "long run"`
+The 20,000-sequence gate: `FILEN_OFFICE_SHEET_FUZZ=20000 FILEN_OFFICE_SHEET_FUZZ_OUT=sheet-fuzz.jsonl pnpm vitest run src/tests/sheetFuzz.test.ts -t "long run"`
 (about 1,000 sequences an hour on 4 processes over corpus workbooks up to 5 MB, so most of a day; `_FILTER` and
 `_MAX_BYTES` narrow it).
 

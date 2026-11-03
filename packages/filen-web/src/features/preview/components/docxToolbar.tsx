@@ -68,7 +68,7 @@ import { isImeKeydown } from "@/lib/ime"
 const FIND_DEBOUNCE_MS = 150
 const FITS: readonly ZoomFit[] = ["fitWidth"]
 const FIELD_CLASS =
-	"h-7 w-40 min-w-0 rounded-xl bg-muted/60 pr-2 pl-7 text-xs leading-5 outline-none placeholder:text-muted-foreground focus-visible:ring-[3px] focus-visible:ring-ring/30 disabled:opacity-50 max-sm:w-28 [&::-webkit-search-cancel-button]:appearance-none"
+	"h-7 w-40 min-w-0 rounded-xl bg-muted/60 pr-2 pl-7 text-xs leading-5 outline-none placeholder:text-muted-foreground focus-visible:ring-[3px] focus-visible:ring-ring/30 disabled:opacity-50 max-sm:w-full [&::-webkit-search-cancel-button]:appearance-none"
 
 export interface DocxToolbarProps {
 	state: DocxViewerState
@@ -372,9 +372,11 @@ export function DocxFindField({
 		}
 	}
 
+	// One row, in reading order; on a phone the replace field and its buttons wrap onto a second row, with Close last
+	// after them, so neither field is squeezed and the order seen is the order tabbed.
 	return (
-		<div className="flex min-w-0 items-center gap-1">
-			<div className="relative min-w-0">
+		<div className="flex min-w-0 flex-wrap items-center gap-1">
+			<div className="relative min-w-0 max-sm:flex-1">
 				<SearchIcon
 					aria-hidden="true"
 					className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted-foreground"
@@ -459,63 +461,61 @@ export function DocxFindField({
 				<CaseSensitiveIcon />
 			</TooltipIconButton>
 			{replace === undefined ? null : (
-				<>
+				<TooltipIconButton
+					label={t("previewDocxShowReplace")}
+					pressed={replaceOpen}
+					className={replaceOpen ? "bg-accent text-foreground" : undefined}
+					onClick={() => {
+						setReplaceOpen(open => !open)
+					}}
+				>
+					<ReplaceIcon />
+				</TooltipIconButton>
+			)}
+			{replace === undefined || !replaceOpen ? null : (
+				<div className="flex min-w-0 items-center gap-1 max-sm:flex-1 max-sm:basis-[calc(100%-2rem)]">
+					<input
+						type="text"
+						aria-label={t("previewDocxReplacePlaceholder")}
+						placeholder={t("previewDocxReplacePlaceholder")}
+						value={replacement}
+						disabled={replace.disabled}
+						className={cn(FIELD_CLASS, "pl-2 max-sm:flex-1")}
+						onChange={event => {
+							setReplacement(event.target.value)
+						}}
+						onKeyDown={event => {
+							onFieldKeyDown(event, () => {
+								if (find.count > 0 && searched) {
+									replace.one(replacement)
+								}
+							})
+						}}
+					/>
 					<TooltipIconButton
-						label={t("previewDocxShowReplace")}
-						pressed={replaceOpen}
-						className={replaceOpen ? "bg-accent text-foreground" : undefined}
+						label={t("previewDocxReplace")}
+						disabled={replace.disabled || find.count === 0 || !searched}
 						onClick={() => {
-							setReplaceOpen(open => !open)
+							// The last match replaced disables this button: focus goes to the find field, not the overlay.
+							if (find.count === 1) inputRef.current?.focus()
+
+							replace.one(replacement)
 						}}
 					>
 						<ReplaceIcon />
 					</TooltipIconButton>
-					{replaceOpen ? (
-						<>
-							<input
-								type="text"
-								aria-label={t("previewDocxReplacePlaceholder")}
-								placeholder={t("previewDocxReplacePlaceholder")}
-								value={replacement}
-								disabled={replace.disabled}
-								className={cn(FIELD_CLASS, "pl-2")}
-								onChange={event => {
-									setReplacement(event.target.value)
-								}}
-								onKeyDown={event => {
-									onFieldKeyDown(event, () => {
-										if (find.count > 0 && searched) {
-											replace.one(replacement)
-										}
-									})
-								}}
-							/>
-							<TooltipIconButton
-								label={t("previewDocxReplace")}
-								disabled={replace.disabled || find.count === 0 || !searched}
-								onClick={() => {
-									// The last match replaced disables this button: focus goes to the find field, not the overlay.
-									if (find.count === 1) inputRef.current?.focus()
-
-									replace.one(replacement)
-								}}
-							>
-								<ReplaceIcon />
-							</TooltipIconButton>
-							<TooltipIconButton
-								label={t("previewDocxReplaceAll")}
-								disabled={replace.disabled || find.count === 0 || !searched}
-								onClick={() => {
-									// No match is left, and this button disables itself: focus goes to the find field.
-									inputRef.current?.focus()
-									replace.all(replacement)
-								}}
-							>
-								<ReplaceAllIcon />
-							</TooltipIconButton>
-						</>
-					) : null}
-				</>
+					<TooltipIconButton
+						label={t("previewDocxReplaceAll")}
+						disabled={replace.disabled || find.count === 0 || !searched}
+						onClick={() => {
+							// No match is left, and this button disables itself: focus goes to the find field.
+							inputRef.current?.focus()
+							replace.all(replacement)
+						}}
+					>
+						<ReplaceAllIcon />
+					</TooltipIconButton>
+				</div>
 			)}
 			<TooltipIconButton
 				label={t("previewDocxFindClose")}

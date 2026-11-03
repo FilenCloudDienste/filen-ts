@@ -46,7 +46,8 @@ import {
 import type { ApplyContext, ApplyFamily, ApplyResult, Touch } from "../apply"
 import { findShape } from "../changes"
 import type { ChartOp, DeckOp } from "../ops"
-import { applyShape, isRefused } from "./shape"
+import { applyShape } from "./shape"
+import { isRefused } from "../../refusal"
 
 // The chart ops on the model, in place. A chart frame names its chart (`frame.part`); every edit makes a new version
 // of it that the session holds under a "chart:N" name (the renderer reads it through chartDocument, the emitters write

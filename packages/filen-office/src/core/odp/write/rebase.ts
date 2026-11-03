@@ -247,6 +247,18 @@ export async function rebaseOdpDeck(
 			// A file's chart the save gave an object of its own (a duplicated page's copy): the frame names it from now on.
 			if (shape.frame?.kind === "chart" && other.frame?.kind === "chart" && !isHeldChart(shape.frame.part)) shape.frame = other.frame
 
+			// Each paragraph names the element it is in the saved file by its place (gate 2 read the shape back paragraph for
+			// paragraph): an old path would lead to another paragraph once the save wrote the body without one.
+			const mine = shape.text?.paragraphs
+			const read = other.text?.paragraphs
+
+			if (mine !== undefined && read !== undefined && mine.length === read.length)
+				mine.forEach((paragraph, at) => {
+					const written = read[at]?.src
+
+					if (written !== undefined) (paragraph as { src?: SourceRef }).src = written
+				})
+
 			moveShape(shape, held, src.node, page, other.src.node)
 			members(shape, other)
 		})
@@ -258,7 +270,8 @@ export async function rebaseOdpDeck(
 		const base = structuralPath(held.document, element)?.length ?? 0
 
 		visitSources(shape, src => {
-			if (src.format !== "odp" || src.part !== held.part) return src
+			// A ref already in the saved page (a paragraph of a body the save wrote anew) stays.
+			if (src.format !== "odp" || src.part !== held.part || src.fragment !== held.offset || src.epoch !== held.epoch) return src
 			if (src.node === element) return { format: "odp", part: page.part, fragment: page.offset, node: onto, epoch: page.epoch }
 
 			const path = structuralPath(held.document, src.node)

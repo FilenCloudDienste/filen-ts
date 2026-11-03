@@ -213,9 +213,23 @@ export function createTextEditing(): TextEditing {
 				keys = { bindings: options.keys.bindings ?? DEFAULT_TEXT_BINDINGS, apple: options.keys.apple ?? applePlatform() }
 			if (held !== undefined) return
 
-			held = []
 			const focused = doc()?.activeElement ?? null
 			const anchor = options?.anchor ?? null
+
+			// Asked while a field of its own has focus (the find field showing a match): the keys are the field's (Enter
+			// is its find next), nothing is held, and the editor leaves focus there.
+			if (
+				focused !== null &&
+				inField(focused) &&
+				focused.closest("[data-fo-text-editor]") === null &&
+				anchor?.contains(focused) !== true
+			) {
+				focusMoved = true
+
+				return
+			}
+
+			held = []
 
 			// Focus on the page around the anchor (or nowhere): the anchor is where keys are held for.
 			if (anchor !== null && (focused === null || focused === anchor || focused.contains(anchor))) {

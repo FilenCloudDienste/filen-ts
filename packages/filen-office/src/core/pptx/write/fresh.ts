@@ -1,4 +1,5 @@
 import { relationshipKind } from "../../docx/index"
+import { XmlError } from "../../xml/errors"
 import {
 	BytePieces,
 	OpcPackage,
@@ -398,6 +399,13 @@ export interface FreshExtras {
 	// The PNG an SVG picture among the foreign parts is shown by where SVG is not drawn: PowerPoint writes an SVG
 	// picture as a:blip of a PNG with the SVG in its asvg:svgBlip extension (MS-ODRAWXML §2.3.1.30).
 	readonly svgFallback?: (name: string) => Promise<Uint8Array>
+	// For a source that is no PresentationML package: a slide's comments as a legacy comments part (p:cmLst, ECMA-376
+	// Part 1 §19.4) and the deck's comment authors (p:cmAuthorLst), its core properties (docProps/core.xml, Part 2
+	// §11) and custom properties (docProps/custom.xml, Part 1 §22.3).
+	readonly comments?: (node: SlideNode) => string | undefined
+	readonly commentAuthors?: string
+	readonly coreProperties?: string
+	readonly customProperties?: string
 }
 
 // Media whose content is compressed already: stored, not deflated again.
@@ -405,6 +413,7 @@ const STORED_MEDIA = /^(?:image\/(?:png|jpeg|gif|webp)|video\/|audio\/)/u
 // A copied part larger than this is stored as it streams: deflating it would hold its whole deflated content.
 const DEFLATE_HELD = 16 * 1024 * 1024
 const XML_TYPE = /xml$/iu
+const CUSTOM_PROPERTIES_TYPE = "application/vnd.openxmlformats-officedocument.custom-properties+xml"
 const SVG_TYPE = "image/svg+xml"
 const SVG_BLIP_EXT = "{96DAC541-7B7A-43D3-8B79-37D633B846F1}"
 const ASVG = "http://schemas.microsoft.com/office/drawing/2016/SVG/main"
@@ -934,6 +943,15 @@ class Fresh {
 			const own = notes.find(entry => entry.slide === slide.name)
 
 			if (own !== undefined) rels.add(`${RELATIONSHIPS}notesSlide`, own.name, false)
+
+			const comments = this.extras.comments?.(slide.node)
+
+			if (comments !== undefined) {
+				const name = writer.allocate("comments", PART_CONTENT_TYPES.comments)
+
+				writer.add(name, PART_CONTENT_TYPES.comments, encodeUtf8(comments))
+				rels.add(`${RELATIONSHIPS}comments`, name, false)
+			}
 			slideIds.push(
 				`<p:sldId id="${String(MIN_SLIDE_ID + index)}" r:id="${presentationRels.add(`${RELATIONSHIPS}slide`, slide.name, false)}"/>`
 			)
@@ -1006,6 +1024,16 @@ class Fresh {
 
 			if (failed !== undefined) throw new PresentationError(failed.reason, failed.detail)
 		})
+
+		if (this.extras.commentAuthors !== undefined) {
+			writer.add("ppt/commentAuthors.xml", PART_CONTENT_TYPES.commentAuthors, encodeUtf8(this.extras.commentAuthors))
+			presentationRels.add(`${RELATIONSHIPS}commentAuthors`, "ppt/commentAuthors.xml", false)
+		}
+
+		if (this.extras.customProperties !== undefined) {
+			writer.add("docProps/custom.xml", CUSTOM_PROPERTIES_TYPE, encodeUtf8(this.extras.customProperties))
+			packageRels.add(`${TRANSITIONAL_RELATIONSHIPS}custom-properties`, "docProps/custom.xml", false)
+		}
 
 		writer.add("ppt/viewProps.xml", PART_CONTENT_TYPES.viewProps, encodeUtf8(`${XML_DECLARATION}<p:viewPr${ROOT_NAMESPACES}/>`))
 		presentationRels.add(`${RELATIONSHIPS}viewProps`, "ppt/viewProps.xml", false)
@@ -1192,7 +1220,10 @@ class Fresh {
 			}
 		}
 
-		return `${XML_DECLARATION}<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/"/>`
+		return (
+			this.extras.coreProperties ??
+			`${XML_DECLARATION}<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/"/>`
+		)
 	}
 }
 
@@ -1219,6 +1250,9 @@ export async function freshPptxWith(
 		return { kind: "written", report: { size, entries: 0, crcs: new Map(), copies: new Map() }, revision: deck.revision }
 	} catch (error) {
 		if (error instanceof PresentationError) return refused(error.reason, error.message)
+		// Markup copied from the source that does not decode (an attribute's invalid character reference): no
+		// well-formed part can carry it, so the package is refused rather than written without it.
+		if (error instanceof XmlError) return refused("malformed", error.message)
 
 		throw error
 	}

@@ -2,12 +2,12 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
 import { CORPUS_DIR } from "./corpusDir"
-import { applyOdpEs2, applyOdpTextEdits, changes, openOdpDeck, saveDeck } from "./odpWriteFixtures"
+import { applyOdpShapeAndSlideEdits, applyOdpTextEdits, changes, openOdpDeck, saveDeck } from "./odpWriteFixtures"
 import { budget } from "./timing"
 
 // The ODP writer over every ODP deck of the corpus:
 //   - untouched identity: a deck opened and saved, or with slides touched and nothing changed, is unchanged;
-//   - edit set ES2 (move, resize, turn and fill a shape; hide, re-lay, duplicate, add, delete and move slides) and the
+//   - the shape and slide edit set (move, resize, turn and fill a shape; hide, re-lay, duplicate, add, delete and move slides) and the
 //     text edits (type, bold a range, centre, add a paragraph) save, pass gate 2, read back with the deck's slide
 //     count, and the saved file saves again as unchanged; the same edits write the same bytes twice.
 // FILEN_OFFICE_ODP_WRITE_OUT: a directory the edited decks are written to, for jing (ODF 1.3 RELAX NG), the ODF
@@ -45,7 +45,7 @@ describe.skipIf(FILES.length === 0)("ODP writer corpus", () => {
 
 				applyOdpTextEdits(opened)
 
-				const report = applyOdpEs2(opened)
+				const report = applyOdpShapeAndSlideEdits(opened)
 
 				expect(report.refusals, name).toEqual([])
 

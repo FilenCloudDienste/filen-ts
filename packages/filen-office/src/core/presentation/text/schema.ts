@@ -196,18 +196,3 @@ export function docToBody(doc: Node, seed: TextBody, origins: readonly Node[]): 
 
 	return body
 }
-
-// The plain text of a body (paragraphs joined by "\n", a:br as "\n", fields as shown last, kept content as its text):
-// what find, copy as text and the outline read.
-export function paragraphText(paragraph: Paragraph): string {
-	let text = ""
-
-	for (const run of paragraph.runs) text += run.kind === "br" ? "\n" : run.text
-
-	return text
-}
-
-// A run's length in editing positions: text by its UTF-16 units; a break, a field and kept content are one position.
-export function runLength(run: Run): number {
-	return run.kind === "r" ? run.text.length : 1
-}

@@ -14,9 +14,10 @@ import type { OdpParts } from "../../read/document"
 import { refused, type FrameRef, type Refused, type ShapeNode } from "../../../presentation/model"
 import { decodeUtf8, escapeAttribute } from "../../../xml/index"
 import type { OdpEmitContext, OdpEmitFamily, OdpStylesApi } from "../emit"
-import { OdpStyles, declared, isRefused } from "../styles"
+import { OdpStyles, declared } from "../styles"
 import { IDENTITY, OdpShapeWriter, emitOdpShape } from "./shape"
 import { altMarkup, frameBox } from "./table"
+import { isRefused } from "../../../presentation/refusal"
 
 // A chart's draw:frame holding draw:object (ODF 1.3 Part 3 §10.4.6), the object a chart document of its own
 // (Part 3 §11; its manifest entry "Object N/" of type application/vnd.oasis.opendocument.chart, Part 2 §4.3). A frame

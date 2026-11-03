@@ -341,7 +341,10 @@ export function SheetTabs({ grid, canEdit, run }: { grid: SheetGridState; canEdi
 	const deletingName = sheets.find(sheet => sheet.id === deleting)?.name ?? ""
 
 	return (
-		<div className="flex h-9 shrink-0 items-center gap-1 border-t border-border bg-muted/40 px-2">
+		<div
+			data-office-pane
+			className="flex h-9 shrink-0 items-center gap-1 border-t border-border bg-muted/40 px-2"
+		>
 			{canEdit ? (
 				<TooltipIconButton
 					label={t("previewSpreadsheetAddSheet")}

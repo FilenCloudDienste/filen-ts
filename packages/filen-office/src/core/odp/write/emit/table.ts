@@ -12,9 +12,10 @@ import {
 } from "../../../presentation/model"
 import { decodeUtf8, escapeAttribute, escapeText } from "../../../xml/index"
 import type { OdpEmitContext, OdpEmitFamily } from "../emit"
-import { OdpStyles, alphaOf, cm, declared, hexColor, isRefused, setProperty, styleChanges, type StyleChanges } from "../styles"
+import { OdpStyles, alphaOf, cm, declared, hexColor, setProperty, styleChanges, type StyleChanges } from "../styles"
 import { IDENTITY, OdpShapeWriter, markupOf } from "./shape"
 import { emitOdpText } from "./text"
+import { isRefused } from "../../../presentation/refusal"
 
 // The table family's ODF markup: a draw:frame holding table:table (ODF 1.3 Part 3 §10.3.6, Part 1 §9.1). The frame's
 // box, name and title are the shape family's (a source frame is patched there); the table is written from the model:

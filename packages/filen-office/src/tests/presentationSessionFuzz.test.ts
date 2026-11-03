@@ -4,10 +4,11 @@ import { describe, expect, it } from "vitest"
 import { bytesSource, ZipArchive } from "@filen/office/core/opc"
 import { chartEditOp, insertChartOp, sampleChartCells } from "../core/presentation/edit/commands/chart"
 import type { DeckOp } from "../core/presentation/edit/ops"
-import type { ShapeNode, SlideNode, SlideRef, TextBody } from "../core/presentation/model"
+import { refused, type ShapeNode, type SlideNode, type SlideRef, type TextBody } from "../core/presentation/model"
 import type { SmartArtInfo } from "../core/smartart/edit"
 import { review } from "../dom/presentation/engine/review"
 import { smartartCapability } from "../dom/presentation/engine/smartart"
+import { saveHistoryOf, type DeckSaver, type SaveDependencies } from "../dom/presentation/save"
 import { CORPUS_DIR } from "./corpusDir"
 import { modelVsFile, reopened } from "./modelVsFile"
 import { odpBytes } from "./odpFixtures"
@@ -215,8 +216,9 @@ async function checked(d: Drive, format: Format, when: string): Promise<string[]
 
 const DECKS = ["synthetic.pptx", "lo__tdf149551_SmartArt_Pie.pptx", "lo__smartart-picture-strip.pptx", "synthetic.odp"]
 // Seeds that found a fault once, run every time (synthetic.pptx 5066: a diagram restyled on a saved copy, then undone
-// to the start and redone, lost its drawing relationship).
-const REGRESSIONS: Readonly<Record<string, readonly number[]>> = { "synthetic.pptx": [5066] }
+// to the start and redone, lost its drawing relationship; 10298: a chart inserted and saved, its slide deleted and
+// saved, the delete undone and the chart edited, could not be written again).
+const REGRESSIONS: Readonly<Record<string, readonly number[]>> = { "synthetic.pptx": [5066, 10298] }
 
 function seedsOf(name: string): number[] {
 	const seeds = Array.from({ length: SEEDS }, (_, at) => FROM + at)
@@ -261,6 +263,165 @@ describe("random sessions of edits, undo, redo and saves", () => {
 						await d.command({ family: "slide", kind: "hide", slides: [first], hidden: at % 2 === 0 })
 
 					problems.push(...(await checked(d, format, "redone, the history let go")))
+					expect(problems).toEqual([])
+				}
+			)
+})
+
+// A save the writer's check refuses for one edited shape (a writer that refuses, naming it as each format's check
+// does): the session takes back only what changed that shape's refused group; every other shape, on every slide, is
+// as before the save, and the next save writes it.
+
+interface Refusal {
+	detail: string | undefined
+	shape: number | undefined
+	slide?: SlideRef
+}
+
+function refusing(format: Format, refusal: Refusal): (dependencies: SaveDependencies) => SaveDependencies {
+	return dependencies => {
+		const saver = dependencies.savers[format] as DeckSaver<unknown>
+		const writer: DeckSaver<unknown>["writer"] = {
+			write: saver.writer.write.bind(saver.writer),
+			snapshot: async input => {
+				const snapshot = await saver.writer.snapshot(input)
+				const detail = refusal.detail
+
+				if (detail === undefined || ("kind" in snapshot && snapshot.kind === "refused")) return snapshot
+
+				refusal.detail = undefined
+
+				return refused("proofFailed", detail)
+			}
+		}
+
+		return { ...dependencies, savers: { ...dependencies.savers, [format]: { ...saver, writer } } }
+	}
+}
+
+// What each format's check says of a top-level shape whose `dirt` group reads back otherwise (pptx verify.ts, ODP
+// meaning.ts); undefined when the changed shape is not on a slide's top level.
+function refusalOf(d: Drive, format: Format, next: () => number): Refusal | undefined {
+	const changed = [...(saveHistoryOf(d.session.deck)?.changes().parts ?? new Map()).entries()].filter(([, part]) => part.shapes.size > 0)
+	const [part, changes] = changed[Math.floor(next() * changed.length)] ?? []
+
+	if (part === undefined || changes === undefined) return undefined
+
+	const [id, dirt] = [...changes.shapes.entries()][Math.floor(next() * changes.shapes.size)] ?? []
+	const deck = d.session.deck
+	const at = deck.slides.findIndex(ref => deck.nodes.get(ref)?.part === part)
+	const node = deck.slides.map(ref => deck.nodes.get(ref)).find(each => each?.part === part)
+	const shapes = format === "odp" ? (node?.shapes ?? []).filter(shape => shape.synthetic !== true) : (node?.shapes ?? [])
+	const index = shapes.findIndex(shape => shape.id === id)
+	const shape = shapes[index]
+
+	if (node === undefined || shape === undefined || dirt === undefined) return undefined
+
+	const group = dirt.kind === "props" ? dirt.group : undefined
+	const key = dirt.kind === "xfrm" ? "xfrm" : dirt.kind === "text" ? "text" : (group ?? "kind")
+
+	if (format === "pptx")
+		return { detail: `${part} reads back differently at .shapes[${String(index)}].${key}`, shape: shape.id, slide: node.ref }
+
+	const word = dirt.kind === "xfrm" ? "box" : dirt.kind === "text" ? "paragraph 0 text" : (group ?? "kind")
+
+	return {
+		detail: `page ${String(at + 1)} (${part}) reads back differently: shape ${String(index)} (${String(shape.name)}) ${word}`,
+		shape: shape.id,
+		slide: node.ref
+	}
+}
+
+// Every shape of every slide but `except` (and its members), by slide and id.
+function shapesExcept(d: Drive, except: number | undefined): Map<string, string> {
+	const out = new Map<string, string>()
+	const visit = (slide: SlideRef, shapes: readonly ShapeNode[]): void => {
+		for (const shape of shapes) {
+			if (shape.id === except) continue
+
+			// A step applied again holds its parts under names of its own: what it holds is the same.
+			out.set(
+				`${String(slide)}:${String(shape.id)}`,
+				JSON.stringify({ ...shape, src: undefined, children: undefined }).replace(/"(raw|held|inserted)(:[^"]*)?":?\d*/gu, "$1")
+			)
+			visit(slide, shape.children ?? [])
+		}
+	}
+
+	for (const ref of d.session.deck.slides) visit(ref, d.session.deck.nodes.get(ref)?.shapes ?? [])
+
+	return out
+}
+
+describe("random sessions whose saves are refused for one edit", () => {
+	for (const name of DECKS)
+		for (const seed of seedsOf(name))
+			it.skipIf(deckOf(name) === undefined)(
+				`${name} seed ${String(seed)}: every other edit stays`,
+				{ timeout: 120_000 },
+				async () => {
+					const { bytes, format } = deckOf(name) as { readonly bytes: Uint8Array; readonly format: Format }
+					const refusal: Refusal = { detail: undefined, shape: undefined }
+					const d = await reopened(bytes, format, { dependencies: refusing(format, refusal) })
+					const next = random(seed * 104_729 + name.length)
+					const problems: string[] = []
+					// The slides of the last save written.
+					let savedSlides = new Set(d.session.deck.slides)
+
+					for (let n = 0; n < STEPS; n++) {
+						const action = await step(d, next, format, n)
+
+						if (action === "undo") await d.undo()
+						else if (action === "redo") await d.redo()
+						else if (action !== "save" && action !== undefined) await d.command(action)
+						else if (action === "save") {
+							const chosen = refusalOf(d, format, next)
+
+							if (chosen === undefined) {
+								problems.push(...(await checked(d, format, `save at step ${String(n)}`)))
+								savedSlides = new Set(d.session.deck.slides)
+								continue
+							}
+
+							Object.assign(refusal, chosen)
+
+							const before = shapesExcept(d, chosen.shape)
+							const slides = [...d.session.deck.slides]
+							const result = (await d.save()).result
+
+							if (result.kind !== "refused") problems.push(`refused save at step ${String(n)}: ${JSON.stringify(result)}`)
+
+							const after = shapesExcept(d, chosen.shape)
+							const now = [...d.session.deck.slides]
+							// Taken back with what made it (its insert, its slide copied): what was made since the save from that may go
+							// with it (a copy of its slide, a delete that would leave no slide), never a slide the save had.
+							const made =
+								!now.includes(chosen.slide as SlideRef) ||
+								!shapesOf(d.session.deck.nodes.get(chosen.slide as SlideRef)?.shapes ?? []).some(
+									shape => shape.id === chosen.shape
+								)
+							const kept = new Set((made ? slides.filter(ref => savedSlides.has(ref)) : slides).map(String))
+
+							if (
+								made
+									? [...kept].some(ref => !now.map(String).includes(ref))
+									: JSON.stringify(now) !== JSON.stringify(slides)
+							)
+								problems.push(
+									`step ${String(n)} (${String(chosen.detail)}): the slide list ${JSON.stringify(slides)} changed to ${JSON.stringify(now)}`
+								)
+
+							for (const [key, value] of before)
+								if (after.get(key) !== value && kept.has(key.split(":")[0] ?? ""))
+									problems.push(
+										`step ${String(n)} (${String(chosen.detail)}, shape ${String(chosen.shape)}): shape ${key} ${value} changed to ${String(after.get(key))}`
+									)
+
+							problems.push(...(await checked(d, format, `save after the refusal at step ${String(n)}`)))
+							savedSlides = new Set(d.session.deck.slides)
+						}
+					}
+
 					expect(problems).toEqual([])
 				}
 			)

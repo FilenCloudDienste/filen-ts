@@ -130,6 +130,62 @@ describe("show media", () => {
 		pause.mockRestore()
 	})
 
+	it("asks nothing of a medium no browser can decode (Windows Media), going to the remux and else saying so", async () => {
+		const asf = {
+			shape: { slide: 1, id: 4 },
+			media: { kind: "video", part: "/ppt/media/media1.asf", contentType: "video/x-ms-asf" }
+		} as unknown as SlideLayer
+		const released: string[] = []
+		const remuxed: HTMLMediaElement[] = []
+		const streams: ShowMediaStreams = {
+			url: () => Promise.resolve({ kind: "url", url: "blob:media", release: () => released.push("blob:media") }),
+			remux: (_session, _media, element) => {
+				remuxed.push(element)
+
+				return Promise.resolve(undefined)
+			}
+		}
+		const canPlay = vi.spyOn(HTMLMediaElement.prototype, "canPlayType").mockReturnValue("")
+		const box = document.createElement("div")
+		const handle = showMediaMount(streams, { labels: LABELS }).mount(box, asf, SESSION, EVENTS)
+
+		handle.command({ command: "play" })
+		await flush()
+		await flush()
+
+		const video = box.querySelector("video") as HTMLVideoElement
+
+		// No request the element would abandon (Firefox logs one under the service worker as a failed load of '').
+		expect(video.hasAttribute("src")).toBe(false)
+		expect(released).toEqual(["blob:media"])
+		expect(remuxed).toEqual([video])
+		expect(box.textContent).toBe("Unplayable")
+
+		handle.release()
+		canPlay.mockRestore()
+	})
+
+	it("still asks for a medium of a sniffed container the element doubts (QuickTime in Chromium)", async () => {
+		const mov = {
+			shape: { slide: 1, id: 4 },
+			media: { kind: "video", part: "/ppt/media/media4.mov", contentType: "video/quicktime" }
+		} as unknown as SlideLayer
+		const streams: ShowMediaStreams = { url: () => Promise.resolve({ kind: "url", url: "blob:media", release: () => undefined }) }
+		const canPlay = vi.spyOn(HTMLMediaElement.prototype, "canPlayType").mockReturnValue("")
+		const play = vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined)
+		const box = document.createElement("div")
+		const handle = showMediaMount(streams, { labels: LABELS }).mount(box, mov, SESSION, EVENTS)
+
+		handle.command({ command: "play" })
+		await flush()
+
+		expect(box.querySelector("video")?.getAttribute("src")).toBe("blob:media")
+
+		handle.release()
+		canPlay.mockRestore()
+		play.mockRestore()
+	})
+
 	it("lets go of a played medium without loading an empty source", async () => {
 		const streams: ShowMediaStreams = { url: () => Promise.resolve({ kind: "url", url: "blob:media", release: () => undefined }) }
 		const play = vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined)

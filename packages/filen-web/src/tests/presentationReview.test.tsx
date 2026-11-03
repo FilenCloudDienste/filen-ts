@@ -209,10 +209,10 @@ describe("presentation review", () => {
 			</>
 		)
 
-		fireEvent.click(screen.getByRole("button", { name: "Show Comments" }))
+		fireEvent.click(screen.getByRole("button", { name: "Show comments" }))
 		expect(await screen.findByText("This slide has no comments.")).toBeTruthy()
 
-		fireEvent.click(first(screen.getAllByRole("button", { name: "New Comment" })))
+		fireEvent.click(first(screen.getAllByRole("button", { name: "New comment" })))
 		fireEvent.change(screen.getByRole("textbox", { name: "Add a comment" }), { target: { value: "Needs a source" } })
 		fireEvent.click(screen.getByRole("button", { name: "Post" }))
 

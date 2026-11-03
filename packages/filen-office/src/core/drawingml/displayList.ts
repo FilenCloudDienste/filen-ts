@@ -193,14 +193,21 @@ export type Paint =
 			readonly focus?: readonly [number, number]
 	  }
 
-// An a:path gradient as the circle the painters draw in the unit box (stretched with the item's box). It is centred
-// on the fillToRect's centre clamped into the box, so an inverted rectangle (l + r > 1, as theme backgrounds write)
-// centres between its edges. Its first stop fills the focus rectangle (`inner`, a fraction of `radius`); its last
-// reaches the corners ("circle", "shape") or the farthest side ("rect").
-export function pathGradientCircle(paint: Extract<Paint, { kind: "path" }>): {
+// An a:path gradient as the ellipse the painters draw, in fractions of the item's box (`width` x `height` px): centred on
+// the fillToRect's centre clamped into the box, so an inverted rectangle (l + r > 1, as theme backgrounds write) centres
+// between its edges; `rx`, `ry` its radii. Its first stop fills the focus rectangle (`inner`, a fraction of the radius).
+// "circle" ends on a true circle of half the box's diagonal wherever the focus sits (ECMA-376 §20.1.8.46; LibreOffice
+// draws QuizShow's corner-focused background so); "shape" reaches the corners and "rect" the farthest side, stretched
+// with the box.
+export function pathGradientCircle(
+	paint: Extract<Paint, { kind: "path" }>,
+	width: number,
+	height: number
+): {
 	readonly cx: number
 	readonly cy: number
-	readonly radius: number
+	readonly rx: number
+	readonly ry: number
 	readonly inner: number
 } {
 	const finite = (value: number | undefined): number => (value !== undefined && Number.isFinite(value) ? value : 0)
@@ -213,15 +220,23 @@ export function pathGradientCircle(paint: Extract<Paint, { kind: "path" }>): {
 	const halfHeight = Math.max(0, 1 - unit(top) - unit(bottom)) / 2
 	const cx = unit((1 + left - right) / 2)
 	const cy = unit((1 + top - bottom) / 2)
+	// A rectangle with no area (inverted on one axis) has no solid focus.
+	const solid = halfWidth > 0 && halfHeight > 0
+
+	if (paint.shape === "circle" && width > 0 && height > 0) {
+		const radius = Math.max(Math.hypot(width, height) / 2, 0.001)
+		const focus = solid ? Math.hypot(halfWidth * width, halfHeight * height) : 0
+
+		return { cx, cy, rx: radius / width, ry: radius / height, inner: Math.min(0.99, focus / radius) }
+	}
+
 	const reachX = Math.max(cx, 1 - cx)
 	const reachY = Math.max(cy, 1 - cy)
 	const rect = paint.shape === "rect"
 	const radius = Math.max(rect ? Math.max(reachX, reachY) : Math.hypot(reachX, reachY), 0.001)
-	// A rectangle with no area (inverted on one axis) has no solid focus.
-	const focusSize = rect ? Math.max(halfWidth, halfHeight) : halfWidth > 0 && halfHeight > 0 ? Math.hypot(halfWidth, halfHeight) : 0
-	const inner = Math.min(0.99, Math.max(0, focusSize / radius))
+	const focusSize = rect ? Math.max(halfWidth, halfHeight) : solid ? Math.hypot(halfWidth, halfHeight) : 0
 
-	return { cx, cy, radius, inner }
+	return { cx, cy, rx: radius, ry: radius, inner: Math.min(0.99, Math.max(0, focusSize / radius)) }
 }
 
 // How a shaded triangle's colour runs from its edge (position 0) to its centre vertex (1): preset colours

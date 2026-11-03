@@ -64,6 +64,17 @@ const BOX_STYLE = "position:absolute;inset:0;width:100%;height:100%"
 const CHIP_STYLE =
 	"position:absolute;left:8px;bottom:8px;max-width:calc(100% - 16px);padding:4px 8px;border:0;border-radius:6px;background:rgba(0,0,0,0.72);color:#fff;font:500 12px/16px system-ui,sans-serif"
 
+// Containers no browser's media sniffing recognises (it matches MP4, WebM, Ogg, MP3, WAV and the like: WHATWG MIME
+// Sniffing, "rules for sniffing audio and video"): Windows Media (ASF, WMV, WMA) and AVI.
+const UNSNIFFED = /^(?:video|audio)\/(?:x-ms-(?:asf|wmv|wma|wm|wmx|wvx)|x-msvideo|avi|msvideo)$/iu
+
+// Whether the element may play the medium itself: false only when it says it cannot play the declared type and no
+// sniffing of the bytes could change that. A request for such a medium is certain to fail, and Firefox abandons it
+// under the service worker that answers it, which it logs as a failed load of ''.
+function playsDirectly(element: HTMLMediaElement, contentType: string): boolean {
+	return !UNSNIFFED.test(contentType.split(";")[0]?.trim() ?? "") || element.canPlayType(contentType) !== ""
+}
+
 function noteElement(document: Document, text: string): HTMLElement {
 	const note = document.createElement("div")
 
@@ -347,9 +358,43 @@ class MountedMedia implements ShowMediaHandle {
 		element.addEventListener("error", () => {
 			void this.failed(element)
 		})
-		element.src = stream.url
 		this.box.append(element)
 		this.element = element
+
+		// A medium it cannot decode is not asked for at all: the page's remux, else the notice.
+		if (!playsDirectly(element, this.media.contentType)) {
+			this.stream?.release()
+			this.stream = undefined
+
+			return this.remuxed(element)
+		}
+
+		element.src = stream.url
+
+		return true
+	}
+
+	// The page's remux plays the medium through `element`; false (with the notice) when there is none or it cannot.
+	private async remuxed(element: HTMLMediaElement): Promise<boolean> {
+		const remux =
+			this.streams.remux === undefined || this.session === undefined
+				? undefined
+				: await this.streams.remux(this.session, this.media, element).catch(() => undefined)
+
+		if (this.released) {
+			remux?.dispose()
+
+			return false
+		}
+
+		if (remux === undefined) {
+			this.say(this.options.labels.unplayable)
+			this.status("unplayable")
+
+			return false
+		}
+
+		this.remux = remux
 
 		return true
 	}
@@ -424,23 +469,7 @@ class MountedMedia implements ShowMediaHandle {
 		this.stream?.release()
 		this.stream = undefined
 
-		const remux = await this.streams.remux(this.session, this.media, element).catch(() => undefined)
-
-		if (this.released) {
-			remux?.dispose()
-
-			return
-		}
-
-		if (remux === undefined) {
-			this.say(this.options.labels.unplayable)
-			this.status("unplayable")
-
-			return
-		}
-
-		this.remux = remux
-		void this.apply()
+		if (await this.remuxed(element)) void this.apply()
 	}
 
 	private async apply(): Promise<void> {

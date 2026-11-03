@@ -29,6 +29,7 @@ const KINDS: Readonly<Record<ConversionLossKind, true>> = {
 	geometry: true,
 	outlineLevel: true,
 	text: true,
+	numbering: true,
 	tableStyle: true,
 	chart: true,
 	chartDetail: true,
@@ -43,7 +44,12 @@ const KINDS: Readonly<Record<ConversionLossKind, true>> = {
 	signature: true,
 	writeReservation: true,
 	mediaTiming: true,
-	bookmarkTrigger: true
+	bookmarkTrigger: true,
+	commentReply: true,
+	commentState: true,
+	section: true,
+	embeddedFont: true,
+	properties: true
 }
 
 function report(losses: ConversionReport["losses"]): ConversionReport {

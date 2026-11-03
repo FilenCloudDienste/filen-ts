@@ -174,11 +174,3 @@ export function placementMarkup(p: string, anchor: DrawingAnchor): string {
 export function anchorElement(anchor: DrawingAnchor): string {
 	return anchor.mode === "twoCell" ? "twoCellAnchor" : anchor.mode === "oneCell" ? "oneCellAnchor" : "absoluteAnchor"
 }
-
-// The bounds of the cells an anchor reaches (for the sheet's used area), null for an absolute one.
-export function anchorCells(anchor: DrawingAnchor): { row: number; col: number } | null {
-	if (anchor.mode === "absolute") return null
-	if (anchor.mode === "twoCell") return { row: anchor.to.row, col: anchor.to.col }
-
-	return { row: anchor.from.row, col: anchor.from.col }
-}
