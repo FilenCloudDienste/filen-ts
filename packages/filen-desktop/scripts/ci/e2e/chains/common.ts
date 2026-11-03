@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto"
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync } from "node:fs"
 import { homedir } from "node:os"
 import path from "node:path"
 import { setTimeout as sleep } from "node:timers/promises"
@@ -338,8 +338,15 @@ export async function openChain(name: string, options: Omit<UpdateOptions, "hook
 					fail(`the launch exited before its debugging port answered, handed to an instance still running: ${json(exit)}`)
 				}
 
-				// The single-instance lock hands the second launch to the first, which shows its window.
-				target.launch({ ...process.env })
+				// The single-instance lock hands the second launch to the first, which shows its window. An AppImage's second
+				// runtime would extract to the running one's $TMPDIR/appimage_extracted_<digest> (same file, same digest) and
+				// delete it once its app hands over and exits, taking the running app's files (rclone among them) with it: it
+				// gets a TMPDIR of its own. The lock is found through userData, never TMPDIR.
+				target.launch(
+					target.format === "AppImage"
+						? { ...process.env, TMPDIR: mkdtempSync(path.join(work, "second-instance-")) }
+						: { ...process.env }
+				)
 			}
 
 			chain.renderer = await connectRenderer(launched.debugPort, APP_ORIGIN, START_TIMEOUT_MS)
