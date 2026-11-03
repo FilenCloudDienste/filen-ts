@@ -710,6 +710,36 @@ describe("createMigration", () => {
 		expect(stored()).toMatchObject({ stage: "imported" })
 	})
 
+	it("after a deferral, a session it stored stays decided when the rest fails, so the next launch imports the PIN", async () => {
+		const deferred = marker({ stage: "started", failedStarts: 0, deferred: true, prefsImported: true, userId: null, importedAt: null })
+		const first = setup({ marker: deferred })
+
+		first.deps.writeStash.mockRejectedValueOnce(Object.assign(new Error("full"), { code: "ENOSPC" }))
+		await expect(first.migration.start()).resolves.toEqual({ pinImported: false })
+		expect(first.deps.vault.set).toHaveBeenCalledTimes(1)
+		expect(first.stored()).toMatchObject({ stage: "started", failedStarts: 1, deferred: false, stashOnly: false })
+
+		const second = setup({ marker: first.stored() ?? undefined, vault: first.state.vault })
+
+		await expect(second.migration.start()).resolves.toEqual({ pinImported: true })
+		expect(second.deps.vault.set).not.toHaveBeenCalled()
+		expect(second.stored()).toMatchObject({ stage: "imported", stashOnly: false, userId: 123456 })
+	})
+
+	it("a deferral over an attempt that may have stored the session leaves it decided", async () => {
+		const crashed = marker({ stage: "started", failedStarts: 1, userId: null, importedAt: null })
+		const first = setup({ marker: crashed, vault: { status: "unreadable" } })
+
+		await first.migration.start()
+		expect(first.stored()).toMatchObject({ stage: "started", failedStarts: 1, deferred: false, prefsImported: true })
+
+		const second = setup({ marker: first.stored() ?? undefined, vault: { status: "present", blob: SESSION_OF("123456") } })
+
+		await expect(second.migration.start()).resolves.toEqual({ pinImported: true })
+		expect(second.deps.vault.set).not.toHaveBeenCalled()
+		expect(second.stored()).toMatchObject({ stage: "imported", stashOnly: false })
+	})
+
 	it("counts a session that cannot be written to disk, and keeps the prefs it imported before", async () => {
 		const first = setup()
 
@@ -966,9 +996,7 @@ describe("failure logging", () => {
 		["legacy read", (deps: Deps) => deps.readLegacy.mockRejectedValueOnce(new Error("page said user@example.com")), "Error"],
 		["legacy parse", (deps: Deps) => deps.readLegacy.mockResolvedValueOnce("not a read result"), "unexpected read result"],
 		["session import", (deps: Deps) => deps.vault.set.mockRejectedValueOnce(fsError("ENOSPC")), "ENOSPC"],
-		["stash", (deps: Deps) => deps.writeStash.mockRejectedValueOnce(fsError("EROFS")), "EROFS"],
-		["prefs import", (deps: Deps) => deps.readOptions.mockRejectedValueOnce(fsError("EISDIR")), "EISDIR"],
-		["prefs import", (deps: Deps) => deps.prefs.set.mockRejectedValueOnce(new RangeError("value")), "RangeError"]
+		["stash", (deps: Deps) => deps.writeStash.mockRejectedValueOnce(fsError("EROFS")), "EROFS"]
 	] as const)("names the failed step: %s (%s)", async (step, fail, cause) => {
 		const { deps, migration } = setup()
 
@@ -984,7 +1012,9 @@ describe("failure logging", () => {
 		["stash", (deps: Deps) => deps.writeStash.mockRejectedValueOnce(safeStorageError()), false],
 		["pin import", (deps: Deps) => deps.lock.set.mockRejectedValueOnce(safeStorageError()), false]
 	] as const)("defers a safeStorage failure uncounted and names its step: %s", async (step, fail, undecided) => {
-		const { deps, migration, stored } = setup({ marker: marker({ stage: "started", failedStarts: 2, userId: null, importedAt: null }) })
+		const { deps, migration, stored } = setup({
+			marker: marker({ stage: "started", failedStarts: 2, deferred: true, userId: null, importedAt: null })
+		})
 
 		fail(deps)
 		await expect(migration.start()).resolves.toEqual({ pinImported: false })
@@ -996,14 +1026,46 @@ describe("failure logging", () => {
 		expect(stored()).toMatchObject({ stage: "started", failedStarts: 2, deferred: undecided, prefsImported: true })
 	})
 
-	it("defers when the vault turns unreadable before the import", async () => {
-		const { deps, migration, stored } = setup({ marker: marker({ stage: "started", stashOnly: false, failedStarts: 1 }) })
+	// An earlier attempt that was not deferred may have stored the session: it is never decided afresh.
+	it.each([true, false])("defers when the vault turns unreadable before the import (deferred before: %s)", async deferred => {
+		const { deps, migration, stored } = setup({ marker: marker({ stage: "started", stashOnly: false, failedStarts: 1, deferred }) })
 
 		deps.vault.get.mockResolvedValueOnce({ status: "absent" }).mockResolvedValueOnce({ status: "unreadable" })
 		await migration.start()
 
 		expect(deps.warn).toHaveBeenCalledWith("migration: deferred, tried again next launch: vault status: unreadable")
-		expect(stored()).toMatchObject({ stage: "started", failedStarts: 1, deferred: true })
+		expect(stored()).toMatchObject({ stage: "started", failedStarts: 1, deferred })
+	})
+
+	it.each([
+		["EISDIR", (deps: Deps) => deps.readOptions.mockRejectedValueOnce(fsError("EISDIR"))],
+		["RangeError", (deps: Deps) => deps.prefs.set.mockRejectedValueOnce(new RangeError("value"))]
+	] as const)("logs a failed prefs import and goes on with the rest, retrying the prefs later: %s", async (cause, fail) => {
+		const { deps, migration, stored } = setup()
+
+		fail(deps)
+		await expect(migration.start()).resolves.toEqual({ pinImported: true })
+
+		expect(deps.warn).toHaveBeenCalledWith(
+			`migration: preferences not imported, tried again by a later attempt: prefs import: ${cause}`
+		)
+		expect(deps.vault.set).toHaveBeenCalledTimes(1)
+		expect(deps.writeStash).toHaveBeenCalledTimes(1)
+		expect(stored()).toMatchObject({ stage: "imported", prefsImported: false, userId: 123456 })
+	})
+
+	it("never counts a failed prefs import while the vault cannot be read", async () => {
+		const first = setup({ vault: { status: "unreadable" } })
+
+		first.deps.readOptions.mockRejectedValueOnce(fsError("EACCES"))
+		await first.migration.start()
+		expect(first.stored()).toMatchObject({ stage: "started", failedStarts: 0, deferred: true, prefsImported: false })
+
+		const second = setup({ marker: first.stored() ?? undefined, vault: { status: "unreadable" } })
+
+		await second.migration.start()
+		expect(second.deps.prefs.set).toHaveBeenCalledTimes(1)
+		expect(second.stored()).toMatchObject({ stage: "started", failedStarts: 0, deferred: true, prefsImported: true })
 	})
 
 	it.each([

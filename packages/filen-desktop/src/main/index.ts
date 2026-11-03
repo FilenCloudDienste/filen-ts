@@ -415,7 +415,7 @@ async function vaultDependents(): Promise<VaultDependent[]> {
 			.filter(entry => entry.isDirectory())
 			.map(entry => ({
 				label: "mount credentials",
-				discard: (cipher: VaultCipher) =>
+				discard: (cipher: VaultCipher | null) =>
 					removeIfUndecryptable(atomicFile(path.join(mountsRoot, entry.name, "credentials.bin")), cipher)
 			}))
 	]

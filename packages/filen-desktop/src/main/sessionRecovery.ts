@@ -7,8 +7,8 @@ import type { SessionVault, VaultCipher } from "./sessionVault.ts"
 // A file encrypted with the session vault's cipher besides the session itself.
 export interface VaultDependent {
 	label: string
-	// true when it could not be decrypted and was removed.
-	discard(cipher: VaultCipher): Promise<boolean>
+	// true when it could not be decrypted and was removed; `cipher` is null in a run without secure storage.
+	discard(cipher: VaultCipher | null): Promise<boolean>
 }
 
 export interface SessionRecoveryDeps {
@@ -21,8 +21,10 @@ export interface SessionRecoveryDeps {
 }
 
 // Gives up on a session the vault cannot decrypt. A session that decrypts now is kept and answered. Once no session
-// is stored, each dependent goes only when it cannot be decrypted either; a dependent that fails is logged and left,
-// so the user can still sign in, and a retry finds it again. Never touches the keychain or the server.
+// is stored, each dependent goes only when it cannot be decrypted either: in a run without secure storage every
+// encrypted one, which guarded the session just removed and would apply to the next one once the keyring is back. A
+// dependent that fails is logged and left, so the user can still sign in, and a retry finds it again. Never touches
+// the keychain or the server.
 export function sessionDiscarder(deps: SessionRecoveryDeps): () => Promise<SessionRead> {
 	return async () => {
 		const read = await deps.vault.discardUnreadable()
@@ -34,10 +36,6 @@ export function sessionDiscarder(deps: SessionRecoveryDeps): () => Promise<Sessi
 		}
 
 		const active = await deps.cipher()
-
-		if (active === null) {
-			return read
-		}
 
 		for (const dependent of await deps.dependents()) {
 			try {

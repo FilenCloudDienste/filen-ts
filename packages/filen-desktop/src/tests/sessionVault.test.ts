@@ -263,6 +263,17 @@ describe("createSessionVault", () => {
 			await expect(removeIfUndecryptable(broken, cipher)).resolves.toBe(true)
 			expect(broken.data).toBeNull()
 		})
+
+		it("without a cipher, removes every existing file that is not plain", async () => {
+			const encrypted = memoryFile(Buffer.from("enc:x"))
+			const plain = memoryFile(Buffer.from("{}"))
+
+			await expect(removeIfUndecryptable(memoryFile(), null)).resolves.toBe(false)
+			await expect(removeIfUndecryptable(plain, null, data => data.toString() === "{}")).resolves.toBe(false)
+			expect(plain.data).not.toBeNull()
+			await expect(removeIfUndecryptable(encrypted, null)).resolves.toBe(true)
+			expect(encrypted.data).toBeNull()
+		})
 	})
 
 	describe("memory only", () => {

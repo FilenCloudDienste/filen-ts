@@ -55,11 +55,11 @@ export function lazyCipher(probe: () => Promise<VaultCipher | null>): () => Prom
 	}
 }
 
-// Removes `file` only when it exists, is not `plain` (data that needs no key) and `cipher` cannot decrypt it; a failed
-// read or removal rejects.
+// Removes `file` only when it exists, is not `plain` (data that needs no key) and `cipher` cannot decrypt it (null: a
+// run without secure storage, which decrypts nothing); a failed read or removal rejects.
 export async function removeIfUndecryptable(
 	file: AtomicFile,
-	cipher: VaultCipher,
+	cipher: VaultCipher | null,
 	plain: (data: Buffer) => boolean = () => false
 ): Promise<boolean> {
 	const data = await file.read()
@@ -68,10 +68,12 @@ export async function removeIfUndecryptable(
 		return false
 	}
 
-	const undecryptable = await cipher.decrypt(data).then(
-		() => false,
-		() => true
-	)
+	const undecryptable =
+		cipher === null ||
+		(await cipher.decrypt(data).then(
+			() => false,
+			() => true
+		))
 
 	if (undecryptable) {
 		await file.remove()

@@ -169,8 +169,8 @@ export interface AppLock {
 	// Forgets the PIN and its backoff; the caller has already removed the session it guarded.
 	reset(): Promise<void>
 	// Removes the PIN file only when it is encrypted and `cipher` cannot decrypt it (its key is gone with the
-	// session's), like reset.
-	discardUndecryptable(cipher: VaultCipher): Promise<boolean>
+	// session's; null: no secure storage this run), like reset.
+	discardUndecryptable(cipher: VaultCipher | null): Promise<boolean>
 }
 
 // The record is encrypted with the session vault's cipher (safeStorage). Where the vault keeps the session in memory

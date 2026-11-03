@@ -403,6 +403,8 @@ export function createMigration(deps: MigrationDeps): Migration {
 	// Errors are logged by their step and code only: none of this may ever log a value.
 	async function attempt(previous: MigrationMarker | null, mode: AttemptMode): Promise<MigrationResult> {
 		const stashOnly = mode === "stash"
+		// No earlier attempt can have stored the session: only then may a deferral leave it to be decided afresh.
+		const undecided = previous === null || previous.deferred
 
 		await save({
 			...(previous ?? fresh("started")),
@@ -410,7 +412,7 @@ export function createMigration(deps: MigrationDeps): Migration {
 			failedStarts: (previous?.failedStarts ?? 0) + 1,
 			startedAt: previous?.startedAt ?? deps.now(),
 			stashOnly,
-			deferred: mode === "prefs" || previous?.deferred === true
+			deferred: mode === "prefs" ? undecided : previous?.deferred === true
 		})
 
 		const read = parseReadResult(await step("legacy read", () => deps.readLegacy()))
@@ -436,9 +438,8 @@ export function createMigration(deps: MigrationDeps): Migration {
 		let pinImported = false
 
 		try {
-			// Before the session, which may wait for the keychain; they need none.
-			if (!stashOnly && marker?.prefsImported !== true) {
-				await importPrefs(snapshot)
+			// Before the session, which may wait for the keychain; they need none. A failure never holds up the rest.
+			if (!stashOnly && marker?.prefsImported !== true && (await importPrefs(snapshot))) {
 				await save({ ...(marker ?? fresh("started")), prefsImported: true })
 			}
 
@@ -450,6 +451,11 @@ export function createMigration(deps: MigrationDeps): Migration {
 				deps.info("migration: signed in here already; importing the stash only")
 			} else {
 				await importSession(session)
+
+				// Decided now: a later failure or a crash must not decide it again as a first attempt would.
+				if (marker?.deferred === true) {
+					await save({ ...marker, deferred: false })
+				}
 			}
 
 			sessionDecided = true
@@ -480,7 +486,11 @@ export function createMigration(deps: MigrationDeps): Migration {
 				throw error
 			}
 
-			await save({ ...(marker ?? fresh("started")), failedStarts: previous?.failedStarts ?? 0, deferred: !sessionDecided })
+			await save({
+				...(marker ?? fresh("started")),
+				failedStarts: previous?.failedStarts ?? 0,
+				deferred: undecided && !sessionDecided
+			})
 			deps.warn(`migration: deferred, tried again next launch: ${error.code}`)
 
 			return { pinImported: false }
@@ -536,18 +546,27 @@ export function createMigration(deps: MigrationDeps): Migration {
 		return imported
 	}
 
-	async function importPrefs(snapshot: LegacySnapshot): Promise<void> {
-		const launchAtLogin = await step("prefs import", async () => {
-			const prefs = legacyPrefs(snapshot, await deps.readOptions())
-			const launches = deps.launchesAtLogin()
+	// Whether they were imported; a failure is logged and tried again by a later attempt.
+	async function importPrefs(snapshot: LegacySnapshot): Promise<boolean> {
+		let launchAtLogin: boolean
 
-			if (Object.keys(prefs).length > 0 || launches) {
-				await deps.prefs.set(launches ? { ...prefs, launchAtLogin: launches } : prefs)
-				deps.info("migration: preferences imported")
-			}
+		try {
+			launchAtLogin = await step("prefs import", async () => {
+				const prefs = legacyPrefs(snapshot, await deps.readOptions())
+				const launches = deps.launchesAtLogin()
 
-			return launches
-		})
+				if (Object.keys(prefs).length > 0 || launches) {
+					await deps.prefs.set(launches ? { ...prefs, launchAtLogin: launches } : prefs)
+					deps.info("migration: preferences imported")
+				}
+
+				return launches
+			})
+		} catch (error) {
+			deps.warn(`migration: preferences not imported, tried again by a later attempt: ${errorCode(error)}`)
+
+			return false
+		}
 
 		// Registered again in this app's form; the setting is kept even if that fails.
 		if (launchAtLogin) {
@@ -555,6 +574,8 @@ export function createMigration(deps: MigrationDeps): Migration {
 				deps.warn(`migration: launch at login not re-registered: ${errorCode(error)}`)
 			})
 		}
+
+		return true
 	}
 
 	// Records what purgeBeforeReady did; `purged` is set only once the stores are gone.

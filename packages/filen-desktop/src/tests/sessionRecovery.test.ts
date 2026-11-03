@@ -120,18 +120,63 @@ describe("sessionDiscarder", () => {
 		expect(context.stash.data).not.toBeNull()
 	})
 
-	it("checks nothing without a cipher", async () => {
-		const dependents = vi.fn(() => Promise.resolve([]))
+	it("without secure storage, removes every encrypted dependent with the session, so none guards the next one", async () => {
+		const cipher = fakeCipher()
+		const sessionFile = memoryFile(await cipher.encrypt(BLOB))
+		const lockFile = memoryFile()
+
+		await (await loadAppLock(lockFile, () => Promise.resolve(cipher), vi.fn())).set("1234", null)
+
+		const stash = memoryFile(await cipher.encrypt("stash"))
+		const credentials = memoryFile(await cipher.encrypt("first"))
+		const none = () => Promise.resolve(null)
+		const lock = await loadAppLock(lockFile, none, vi.fn())
+		const vault = createSessionVault(none, sessionFile, vi.fn())
+		const info = vi.fn<(message: string) => void>()
 		const discard = sessionDiscarder({
-			vault: createSessionVault(() => Promise.resolve(null), memoryFile(Buffer.from("old-key")), vi.fn()),
-			cipher: () => Promise.resolve(null),
-			dependents,
+			vault,
+			cipher: none,
+			dependents: () =>
+				Promise.resolve([
+					{ label: "app lock", discard: active => lock.discardUndecryptable(active) },
+					{ label: "migration stash", discard: active => removeIfUndecryptable(stash, active) },
+					{ label: "mount credentials", discard: active => removeIfUndecryptable(credentials, active) }
+				] satisfies VaultDependent[]),
+			info,
+			warn: vi.fn()
+		})
+
+		await expect(vault.get()).resolves.toEqual({ status: "unreadable" })
+		await expect(discard()).resolves.toEqual({ status: "absent" })
+		expect([sessionFile.data, lockFile.data, stash.data, credentials.data]).toEqual([null, null, null, null])
+		expect(info).toHaveBeenCalledWith("session recovery: removed the undecryptable app lock")
+
+		// A sign-in in this run, then the keyring is back: no PIN of the discarded account locks it.
+		await vault.set(BLOB)
+
+		const back = await loadAppLock(lockFile, () => Promise.resolve(cipher), vi.fn())
+
+		expect(back.status()).toEqual({ enabled: false, locked: false, unreadable: false, retryAt: null })
+	})
+
+	it("without secure storage, keeps a PIN stored without it", async () => {
+		const lockFile = memoryFile()
+		const none = () => Promise.resolve(null)
+
+		await (await loadAppLock(lockFile, none, vi.fn())).set("1234", null)
+
+		const lock = await loadAppLock(lockFile, none, vi.fn())
+		const discard = sessionDiscarder({
+			vault: createSessionVault(none, memoryFile(), vi.fn()),
+			cipher: none,
+			dependents: () => Promise.resolve([{ label: "app lock", discard: active => lock.discardUndecryptable(active) }]),
 			info: vi.fn(),
 			warn: vi.fn()
 		})
 
 		await expect(discard()).resolves.toEqual({ status: "absent" })
-		expect(dependents).not.toHaveBeenCalled()
+		expect(lockFile.data).not.toBeNull()
+		expect(lock.status()).toMatchObject({ enabled: true, locked: true })
 	})
 })
 
