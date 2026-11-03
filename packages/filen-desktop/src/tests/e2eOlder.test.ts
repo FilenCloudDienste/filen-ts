@@ -13,6 +13,7 @@ import {
 	bareImported,
 	fallbackImported,
 	findingsFor,
+	legacyNetworkDriveGone,
 	leftoversBeside,
 	OLDER_SDK_CONFIG_SHAPE,
 	OLDER_SKIPPED,
@@ -540,17 +541,19 @@ describe("chain L from 3.0.47", () => {
 		inner.finish()
 	})
 
-	it("allows nothing beside userData after the uninstall but the old release's network-drive leftovers", () => {
+	it("allows nothing beside userData after the uninstall, the old release's network drive included", () => {
 		const appData = tempDir()
 		const userData = path.join(appData, "desktop")
 
 		mkdirSync(userData)
-		expect(leftoversBeside(userData, LEGACY_PIN)).toBe("nothing beside desktop")
+		expect(leftoversBeside(userData)).toBe("nothing beside desktop")
+		expect(legacyNetworkDriveGone(userData)).toBe(`${path.join(appData, "network-drive")} gone`)
 		mkdirSync(path.join(appData, "network-drive"))
-		expect(() => leftoversBeside(userData, LEGACY_PIN)).toThrow(/network-drive/)
-		expect(leftoversBeside(userData, OLDER_PIN)).toBe("only the allowlisted network-drive")
+		expect(() => leftoversBeside(userData)).toThrow(/network-drive/)
+		expect(() => legacyNetworkDriveGone(userData)).toThrow(/network-drive is still there/)
+		rmSync(path.join(appData, "network-drive"), { recursive: true })
 		mkdirSync(path.join(appData, "logs"))
-		expect(() => leftoversBeside(userData, OLDER_PIN)).toThrow(/logs/)
-		expect(leftoversBeside(path.join(tempDir(), "missing", "desktop"), OLDER_PIN)).toBe("nothing beside desktop")
+		expect(() => leftoversBeside(userData)).toThrow(/logs/)
+		expect(leftoversBeside(path.join(tempDir(), "missing", "desktop"))).toBe("nothing beside desktop")
 	})
 })

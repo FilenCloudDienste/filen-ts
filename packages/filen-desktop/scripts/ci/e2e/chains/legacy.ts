@@ -75,6 +75,7 @@ import {
 	driveImportedOff,
 	fallbackImported,
 	findingsFor,
+	legacyNetworkDriveGone,
 	leftoversBeside,
 	olderDrive,
 	plantedHeld,
@@ -101,7 +102,8 @@ import {
 //   L5   mounts migrated          the drive at the 3.x mount point, running, a fixture read through it; WebDAV on the same
 //                                 port with the 3.x credentials, answering them
 //   L6   3.x secrets wiped        marker verified and wiped; rclone.conf gone; the old logs (<appData>/@filen/logs)
-//                                 deleted (logsDeleted); then purged: Local Storage and the old IndexedDB gone, and no
+//                                 deleted (logsDeleted), and 3.0.47's network drive (<appData>/@filen/network-drive,
+//                                 networkDriveDeleted) with them; then purged: Local Storage and the old IndexedDB gone, and no
 //                                 file under userData (or the logs, should they come back) holds a secret the harness knows
 //   L7   userData/sync kept       renamed to sync.migrated-<date>, its content unchanged
 //   L8   every pair, same mode    five pairs by name: the mapped mode, the same local root and remote directory, running
@@ -154,6 +156,7 @@ interface MigrationMarker {
 	volatileStash?: boolean
 	wiped?: boolean
 	logsDeleted?: boolean
+	networkDriveDeleted?: boolean
 	purged?: boolean
 }
 
@@ -855,31 +858,51 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 				return "the shell, no sign-in form"
 			})
 
-			await findings.check("L6 the migration verified the account, wiped the 3.x secrets and deleted its logs", async () => {
-				const read = await waitFor("the migration to verify, wipe and delete the old logs", SETUP_TIMEOUT_MS, () => {
-					const current = marker()
+			await findings.check(
+				"L6 the migration verified the account, wiped the 3.x secrets and deleted its logs and network drive",
+				async () => {
+					const read = await waitFor(
+						"the migration to verify, wipe and delete the old logs and network drive",
+						SETUP_TIMEOUT_MS,
+						() => {
+							const current = marker()
 
-					return current?.stage === "verified" && current.wiped === true && current.logsDeleted === true ? current : null
-				})
+							return current?.stage === "verified" &&
+								current.wiped === true &&
+								current.logsDeleted === true &&
+								current.networkDriveDeleted === true
+								? current
+								: null
+						}
+					)
 
-				if (existsSync(userData("rclone", "rclone.conf"))) {
-					fail("userData/rclone/rclone.conf is still there")
+					if (existsSync(userData("rclone", "rclone.conf"))) {
+						fail("userData/rclone/rclone.conf is still there")
+					}
+
+					if (existsSync(legacyLogs)) {
+						fail(`${legacyLogs} is still there`)
+					}
+
+					const mainLog = tail(userData("logs", "main.log"), 4000)
+
+					if (!mainLog.includes("migration: the old client's logs were deleted")) {
+						fail("main.log does not log the old logs' deletion")
+					}
+
+					if (!mainLog.includes("migration: the old network drive's directory was deleted")) {
+						fail("main.log does not log the old network drive's deletion")
+					}
+
+					const networkDrive = legacyNetworkDriveGone(target.userData)
+
+					if (!readdirSync(target.userData).some(name => name.startsWith("sync.migrated-"))) {
+						fail("no sync.migrated-* in userData")
+					}
+
+					return `stage ${String(read.stage)}, wiped, logsDeleted, networkDriveDeleted; rclone.conf, @filen/logs and ${networkDrive}; sync.migrated-* kept`
 				}
-
-				if (existsSync(legacyLogs)) {
-					fail(`${legacyLogs} is still there`)
-				}
-
-				if (!tail(userData("logs", "main.log"), 4000).includes("migration: the old client's logs were deleted")) {
-					fail("main.log does not log the old logs' deletion")
-				}
-
-				if (!readdirSync(target.userData).some(name => name.startsWith("sync.migrated-"))) {
-					fail("no sync.migrated-* in userData")
-				}
-
-				return `stage ${String(read.stage)}, wiped, logsDeleted; rclone.conf and @filen/logs gone; sync.migrated-* kept`
-			})
+			)
 
 			await findings.check("L4 prefs migrated", async () => {
 				const prefs = await desktop<DesktopPrefs>(page(), "window.desktop.prefs.get()")
@@ -1316,9 +1339,7 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 			return `${removed}; every pair directory intact`
 		})
 		findings.attach("legacy-userdata-after-uninstall.txt", inventory(path.dirname(target.userData)))
-		await findings.check(`L15 after the uninstall nothing of Filen's beside userData but ${LEGACY_VERSION}'s allowlist`, () =>
-			leftoversBeside(target.userData, release)
-		)
+		await findings.check("L15 after the uninstall nothing of Filen's beside userData", () => leftoversBeside(target.userData))
 	}
 
 	// The old app's page and inspector, if a setup step failed while it ran (the harness never leaves it running).

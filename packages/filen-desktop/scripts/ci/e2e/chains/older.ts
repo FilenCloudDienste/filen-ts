@@ -47,14 +47,6 @@ export const OLDER_SKIPPED: readonly string[] = [
 	"L15 old profile entries"
 ]
 
-// What may stay beside userData (<appData>/@filen/<entry>) once the user signed out and uninstalled, per old release
-// (owner-reviewed, D8). 3.0.47's network drive kept its own rclone, its config and its local WebDAV bridge's
-// credentials in @filen/network-drive, which 4.x never knew of.
-export const LEFTOVERS_ALLOWED: Readonly<Record<string, readonly string[]>> = {
-	[LEGACY_PIN.version]: [],
-	[OLDER_PIN.version]: ["network-drive"]
-}
-
 // The chain's findings for a pin: from 3.0.53 as they are; from an older release the skipped checks recorded as
 // information, and the attachments chain L names "legacy-..." under the chain's own name (both chains can share a job's
 // artifacts).
@@ -259,16 +251,27 @@ export async function driveImportedOff(overview: () => Promise<DesktopMountsOver
 	return `off, as ${OLDER_PIN.version} left it; nothing mounted at ${root}`
 }
 
-// L15: what is left of Filen beside its userData after the sign-out and the uninstall, against the pin's allowlist.
-export function leftoversBeside(userData: string, pin: LegacyPin): string {
+// L15: nothing of Filen beside its userData after the sign-out and the uninstall (<appData>/@filen/<entry>): neither the
+// old logs nor 3.0.47's network-drive directory (its rclone, rclone.conf with its local WebDAV bridge's credentials and
+// monitor scripts), which N deletes once the migration verified.
+export function leftoversBeside(userData: string): string {
 	const dir = path.dirname(userData)
-	const allowed = LEFTOVERS_ALLOWED[pin.version] ?? []
 	const left = existsSync(dir) ? readdirSync(dir).filter(entry => entry !== path.basename(userData)) : []
-	const extra = left.filter(entry => !allowed.includes(entry))
 
-	if (extra.length > 0) {
-		fail(`${dir} also holds ${extra.join(", ")}`)
+	if (left.length > 0) {
+		fail(`${dir} also holds ${left.join(", ")}`)
 	}
 
-	return left.length === 0 ? `nothing beside ${path.basename(userData)}` : `only the allowlisted ${left.join(", ")}`
+	return `nothing beside ${path.basename(userData)}`
+}
+
+// L6: 3.0.47's network-drive directory (@filen/network-drive 0.9.x's platformConfigPath(), beside userData) is gone.
+export function legacyNetworkDriveGone(userData: string): string {
+	const dir = path.join(path.dirname(userData), "network-drive")
+
+	if (existsSync(dir)) {
+		fail(`${dir} is still there`)
+	}
+
+	return `${dir} gone`
 }
