@@ -446,7 +446,8 @@ const fuseContext: FuseContext = {
 }
 const { fuseInstaller } = fuseContext
 
-// Resolved once the app is ready; the rclone the host starts inherits its environment.
+// Resolved once the app is ready; the host's first start waits for it, and the rclone it starts inherits its
+// environment.
 let hostProxy: HostProxy | null = null
 
 const nativeSupervisor = createNativeSupervisor({
@@ -456,6 +457,7 @@ const nativeSupervisor = createNativeSupervisor({
 			stdio: "pipe",
 			env: hostProxy?.env() ?? process.env
 		}),
+	forkReady: () => hostProxy?.ready ?? Promise.resolve(),
 	vault: sessionVault,
 	addonPath: () =>
 		addonPath({
@@ -1764,8 +1766,6 @@ if (!app.requestSingleInstanceLock()) {
 				lockNow()
 			}
 
-			// Resolved alongside the migration, so this rarely waits.
-			await hostProxy.ready
 			started = true
 			nativeSupervisor.ensure("launch")
 			void fileProvider.launch()

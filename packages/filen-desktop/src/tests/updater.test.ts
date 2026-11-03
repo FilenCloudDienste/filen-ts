@@ -4,6 +4,7 @@ import type { Logger, UpdateCheckResult } from "electron-updater"
 import {
 	type NativeUpdaterEvents,
 	shouldCheckForUpdate,
+	SQUIRREL_WAIT_MS,
 	stallWatch,
 	startUpdater,
 	TEST_UPDATE_CHECK_INTERVAL_MS,
@@ -320,20 +321,39 @@ describe("startUpdater", () => {
 		})
 
 		it("holds later checks until Squirrel answers", async () => {
-			const h = harness({ mac: true })
+			const h = harness({ mac: true, testFeed: "http://127.0.0.1:43210/" })
 
 			const download = downloadingCheck(h.engine, "4.0.1")
 
 			startUpdater(h.deps)
 			await vi.advanceTimersByTimeAsync(UPDATE_FIRST_CHECK_DELAY_MS)
 			download.finish()
-			await vi.advanceTimersByTimeAsync(UPDATE_CHECK_INTERVAL_MS)
+			await vi.advanceTimersByTimeAsync(SQUIRREL_WAIT_MS - TEST_UPDATE_CHECK_INTERVAL_MS)
 			expect(h.engine.checks).toBe(1)
 
 			h.native?.error(new Error("code signature invalid"))
 			h.engine.nextCheck = () => Promise.resolve(null)
-			await vi.advanceTimersByTimeAsync(UPDATE_CHECK_INTERVAL_MS)
+			await vi.advanceTimersByTimeAsync(TEST_UPDATE_CHECK_INTERVAL_MS)
 			expect(h.engine.checks).toBe(2)
+		})
+
+		it("a Squirrel that never answers releases the check, and a late answer still counts", async () => {
+			const h = harness({ mac: true })
+			const updater = startUpdater(h.deps)
+			const download = downloadingCheck(h.engine, "4.0.1")
+
+			await vi.advanceTimersByTimeAsync(UPDATE_FIRST_CHECK_DELAY_MS)
+			download.finish()
+			await vi.advanceTimersByTimeAsync(SQUIRREL_WAIT_MS)
+			expect(h.warnings.some(line => line.includes("Squirrel did not answer"))).toBe(true)
+
+			h.engine.nextCheck = () => Promise.resolve(null)
+			await vi.advanceTimersByTimeAsync(UPDATE_CHECK_INTERVAL_MS - SQUIRREL_WAIT_MS)
+			expect(h.engine.checks).toBe(2)
+
+			h.native?.downloaded()
+			expect(updater.ready()).toBe("4.0.1")
+			expect(h.onReady).toHaveBeenCalledWith("4.0.1")
 		})
 
 		it("a Squirrel error during the install clears ready and reports the failure", async () => {
@@ -423,6 +443,22 @@ describe("startUpdater", () => {
 			expect(updater.install()).toBe(true)
 			expect(h.onInstallFailed).toHaveBeenCalledOnce()
 			expect(h.warnings.some(line => line.includes("install failed: spawn ENOENT"))).toBe(true)
+		})
+
+		it("an error of a check during an install is not an install failure", async () => {
+			const h = harness()
+			const updater = startUpdater(h.deps)
+			const download = downloadingCheck(h.engine, "4.0.1")
+
+			await vi.advanceTimersByTimeAsync(UPDATE_FIRST_CHECK_DELAY_MS)
+			// Ready while the check that downloaded it still runs.
+			h.engine.downloaded("4.0.1")
+			expect(updater.install()).toBe(true)
+			h.engine.emit("error", new Error("net::ERR_INTERNET_DISCONNECTED"))
+			expect(h.onInstallFailed).not.toHaveBeenCalled()
+			download.finish()
+			await vi.advanceTimersByTimeAsync(0)
+			expect(h.engine.installs).toBe(1)
 		})
 
 		it("an error outside an install is not an install failure", async () => {

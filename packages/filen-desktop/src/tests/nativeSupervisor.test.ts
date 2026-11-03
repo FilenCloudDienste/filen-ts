@@ -88,6 +88,7 @@ function harness(read: SessionRead = { status: "present", blob: SESSION_OF("1") 
 
 			return native
 		},
+		forkReady: vi.fn<NativeSupervisorDeps["forkReady"]>(() => Promise.resolve()),
 		vault,
 		addonPath: () => "/app/native/sdk-rs.node",
 		dirFor: (userId: string) => Promise.resolve(`/data/sync-engine/${userId}`),
@@ -170,6 +171,21 @@ describe("createNativeSupervisor", () => {
 		ready(last())
 		expect(states.at(-1)).toEqual({ state: "running" })
 		expect(deps.onMessage).toHaveBeenCalledWith({ t: "ready", pairs: [], reset: false }, "1")
+	})
+
+	it("a start forks only once its environment is ready", async () => {
+		const { supervisor, forks, deps } = harness()
+		const env = Promise.withResolvers<void>()
+
+		deps.forkReady.mockReturnValue(env.promise)
+		supervisor.ensure("test")
+		await settle()
+		expect(forks).toHaveLength(0)
+		expect(supervisor.state()).toEqual({ state: "off" })
+
+		env.resolve()
+		await settle()
+		expect(forks).toHaveLength(1)
 	})
 
 	it("unreadable vault never starts or clears", async () => {

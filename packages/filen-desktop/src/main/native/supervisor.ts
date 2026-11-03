@@ -50,6 +50,8 @@ export type NativeTopic = "overview" | "mounts"
 
 export interface NativeSupervisorDeps {
 	fork(): UtilityProcessLike
+	// Settles once what `fork` passes on is complete; a start waits for it.
+	forkReady(): Promise<void>
 	vault: { get(): Promise<SessionRead>; clear(): Promise<void> }
 	// null: no addon for this build.
 	addonPath(): string | null
@@ -315,6 +317,7 @@ export function createNativeSupervisor(deps: NativeSupervisorDeps): NativeSuperv
 		try {
 			dir = await deps.dirFor(user.userId)
 			holdRemotes = await deps.holdRemotes(user.userId)
+			await deps.forkReady()
 		} catch (error) {
 			deps.log.warn(`native: engine directory or pair store unavailable: ${errorCode(error)}`)
 			crashed(null)

@@ -8,6 +8,8 @@ export const TEST_UPDATE_CHECK_INTERVAL_MS = 30 * 1000
 // A check or download that moved no data for this long is cut off. electron-updater's own request timeout never fires
 // on Electron's net module, so a stalled connection would otherwise hold every later check back.
 export const UPDATE_STALL_MS = 2 * 60 * 1000
+// macOS: how long a check waits for Squirrel to take or refuse a download. An answer after that still counts.
+export const SQUIRREL_WAIT_MS = 10 * 60 * 1000
 
 export function updateCheckInterval(testFeed: string | null): number {
 	return testFeed === null ? UPDATE_CHECK_INTERVAL_MS : TEST_UPDATE_CHECK_INTERVAL_MS
@@ -150,7 +152,8 @@ export function startUpdater(deps: UpdaterDeps): Updater {
 	let loaded: UpdaterEngine | null = null
 	// macOS: the version electron-updater downloaded and handed to Squirrel, not ready yet.
 	let staged: string | null = null
-	// macOS: settles once Squirrel took or refused the staged download; the check holds until then.
+	// macOS: settles once Squirrel took or refused the staged download; the check holds until then, at most
+	// SQUIRREL_WAIT_MS.
 	let squirrel: PromiseWithResolvers<void> | null = null
 	// An install was started and has not failed.
 	let installing = false
@@ -218,9 +221,11 @@ export function startUpdater(deps: UpdaterDeps): Updater {
 				squirrel ??= Promise.withResolvers()
 			}
 		})
-		// Squirrel's errors arrive here too: electron-updater passes them on.
+		// Squirrel's errors arrive here too: electron-updater passes them on. One during a check is the check's.
 		engine.on("error", error => {
-			installFailed(error.message)
+			if (!state.checking) {
+				installFailed(error.message)
+			}
 		})
 
 		deps.native?.({
@@ -248,6 +253,36 @@ export function startUpdater(deps: UpdaterDeps): Updater {
 	// Reported by the check that awaits it.
 	loading.catch(() => undefined)
 
+	async function squirrelAnswer(): Promise<void> {
+		const pending = squirrel
+
+		if (pending === null) {
+			return
+		}
+
+		let timer: ReturnType<typeof setTimeout> | undefined
+		const answered = await Promise.race([
+			pending.promise.then(() => true),
+			new Promise<boolean>(resolve => {
+				timer = setTimeout(() => {
+					resolve(false)
+				}, SQUIRREL_WAIT_MS)
+			})
+		])
+
+		clearTimeout(timer)
+
+		if (!answered) {
+			log.warn(`updater: Squirrel did not answer within ${String(SQUIRREL_WAIT_MS / 1000)} s`)
+			// The staged version stays, so a late answer still makes it ready; the next check hands it over again.
+			pending.resolve()
+
+			if (squirrel === pending) {
+				squirrel = null
+			}
+		}
+	}
+
 	async function check(): Promise<void> {
 		if (!shouldCheckForUpdate(state)) {
 			return
@@ -262,7 +297,7 @@ export function startUpdater(deps: UpdaterDeps): Updater {
 
 			// Held until the download settles, so the next interval never starts a second one.
 			await result?.downloadPromise
-			await squirrel?.promise
+			await squirrelAnswer()
 		} catch (error) {
 			// Squirrel was never handed a complete download.
 			settleSquirrel()
