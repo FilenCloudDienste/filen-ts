@@ -4,7 +4,9 @@ import os from "node:os"
 import path from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
 import { faultPlan, faultSteps, logMark, logSince, pendingProblems, stepLogProblems } from "../../scripts/ci/e2e/updateFaults.ts"
+import { describeProcesses, INSTALL_SIGNS, installSigns, type InstallProbe, processesAt, textFrom } from "../../scripts/ci/e2e/update.ts"
 import { serveFeed, type FeedFaultPlan, type FeedServer } from "../../scripts/ci/support.ts"
+import type { Target } from "../../scripts/ci/targets.ts"
 import { TEST_UPDATE_CHECK_INTERVAL_MS, UPDATE_STALL_MS } from "../../src/main/updater.ts"
 
 const dirs: string[] = []
@@ -266,5 +268,102 @@ describe("e2e update fault evidence", () => {
 			"pending/Filen_win.exe is a full-size download (100 bytes)",
 			"pending/update-info.json exists"
 		])
+	})
+})
+
+describe("e2e update install start", () => {
+	// The old app as the long wait would find it: nothing logged, no installer, the old version installed.
+	function probe(overrides: Partial<InstallProbe> = {}): InstallProbe {
+		return {
+			log: () => "",
+			needles: INSTALL_SIGNS.legacy,
+			installers: () => Promise.resolve([]),
+			installedVersion: () => "3.0.53",
+			startedVersions: () => [],
+			...overrides
+		}
+	}
+
+	it("finds no sign in a fetched download alone, the case where 3.x died during its update", async () => {
+		await expect(
+			installSigns(probe({ log: () => "[info] Checking for update\n[info] Update available\n" }), "3.0.53", "4.0.1")
+		).resolves.toEqual([])
+	})
+
+	it("takes 3.x's own log lines, an installer from the updater cache, a changed install or N started", async () => {
+		await expect(installSigns(probe({ log: () => "[info] Update downloaded: {}\n" }), "3.0.53", "4.0.1")).resolves.toEqual([
+			'logged "Update downloaded"'
+		])
+		await expect(installSigns(probe({ log: () => "[info] Installing update\n" }), "3.0.53", "4.0.1")).resolves.toEqual([
+			'logged "Installing update"'
+		])
+		await expect(
+			installSigns(probe({ installers: () => Promise.resolve(["412 C:\\Users\\e2e\\Filen_win.exe --updated"]) }), "3.0.53", "4.0.1")
+		).resolves.toEqual(["an installer runs: 412 C:\\Users\\e2e\\Filen_win.exe --updated"])
+		await expect(installSigns(probe({ installedVersion: () => "4.0.1" }), "3.0.53", "4.0.1")).resolves.toEqual([
+			"the installed app is 4.0.1"
+		])
+		await expect(installSigns(probe({ startedVersions: () => ["4.0.1"] }), "3.0.53", "4.0.1")).resolves.toEqual(["4.0.1 started"])
+	})
+
+	it("reads electron-updater's lines for N-1 -> N, and nothing from 3.x's", async () => {
+		const current = probe({ needles: INSTALL_SIGNS.current, installedVersion: () => "4.0.0" })
+
+		await expect(installSigns({ ...current, log: () => "INFO updater: Update downloaded\n" }, "4.0.0", "4.0.1")).resolves.toEqual([])
+		await expect(
+			installSigns(
+				{ ...current, log: () => "INFO updater: New version 4.0.1 has been downloaded to C:\\cache\\Filen_win.exe\n" },
+				"4.0.0",
+				"4.0.1"
+			)
+		).resolves.toEqual(['logged "has been downloaded to"'])
+	})
+
+	it("counts a failed look as no sign, never as a failure", async () => {
+		await expect(
+			installSigns(
+				probe({
+					installers: () => Promise.reject(new Error("listing processes failed: timed out")),
+					installedVersion: () => {
+						throw new Error("app.asar is missing")
+					}
+				}),
+				"3.0.53",
+				"4.0.1"
+			)
+		).resolves.toEqual([])
+		await expect(installSigns(probe({ installedVersion: null }), "3.0.53", "4.0.1")).resolves.toEqual([])
+	})
+
+	it("lists every main process, those without a readable path too, and counts only those at the executable", () => {
+		const entries = [
+			{ pid: 1, path: "C:\\Program Files\\Filen\\Filen.exe" },
+			{ pid: 2, path: "" }
+		]
+
+		expect(describeProcesses(entries)).toBe("1 C:\\Program Files\\Filen\\Filen.exe, 2 (no path)")
+		expect(describeProcesses([])).toBe("no main process")
+
+		const target = {
+			platform: "win",
+			executable: "c:\\program files\\filen\\filen.exe",
+			mainProcesses: () => entries
+		} as unknown as Target
+
+		expect(processesAt(target)).toEqual([entries[0]])
+	})
+
+	it("reads a log past an offset, all of it once it shrank", () => {
+		const file = path.join(tempDir(), "desktop.log")
+
+		expect(textFrom(file, 0)).toBe("")
+		writeFileSync(file, "before\n")
+
+		const offset = "before\n".length
+
+		writeFileSync(file, "before\nInstalling update\n")
+		expect(textFrom(file, offset)).toBe("Installing update\n")
+		writeFileSync(file, "new\n")
+		expect(textFrom(file, offset)).toBe("new\n")
 	})
 })

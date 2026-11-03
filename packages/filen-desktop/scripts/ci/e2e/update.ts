@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto"
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs"
+import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { hashFile, parseFeed } from "../../feed.ts"
@@ -22,7 +22,7 @@ import { linuxProcessReport, type AppProcess, type Arch, type Format, type Platf
 import type { Findings } from "./findings.ts"
 import { legacyUpdateHook } from "./legacyHook.ts"
 import { installedBy, updateEnvFor, verifyLegacyLink } from "./olderUpdate.ts"
-import { logMark, logSince, runFaultLaunch } from "./updateFaults.ts"
+import { installerProcesses, logMark, logSince, runFaultLaunch } from "./updateFaults.ts"
 
 // The update scenarios: an app is installed the way a user installs it, launched, and updated by its own updater from a
 // feed on the loopback interface that serves the candidate build N; the test then holds the relaunched app to N's
@@ -49,6 +49,9 @@ export const MARKER = "e2e.marker"
 export const START_TIMEOUT_MS = 3 * 60 * 1000
 // Download, Squirrel staging or the installer, the swap and the relaunch; the 3.x NSIS update also runs WinFSP's MSI.
 const UPDATE_TIMEOUT_MS = 25 * 60 * 1000
+// From the old app's update launch settling to a sign that its install started (INSTALL_SIGNS): the download from the
+// loopback feed and its verification, or Squirrel.Mac's staging.
+const INSTALL_START_TIMEOUT_MS = 5 * 60 * 1000
 const EXIT_TIMEOUT_MS = 2 * 60 * 1000
 const ALIVE_MS = 20 * 1000
 
@@ -106,6 +109,70 @@ export function startedVersions(target: Target): string[] {
 
 function logHas(file: string, needle: string): boolean {
 	return existsSync(file) && readFileSync(file, "utf8").includes(needle)
+}
+
+// What the old app logs once its update is downloaded or being installed: 3.x's own lines in desktop.log, and
+// electron-updater's in 4.x's main.log (through its "updater: " logger).
+export const INSTALL_SIGNS = {
+	legacy: ["Update downloaded", "Installing update"],
+	current: ["has been downloaded to", "Install: isSilent", "Install on explicit quitAndInstall", "Auto install update on quit"]
+} as const
+
+export interface InstallProbe {
+	// The old app's log since its update launch, and what in it shows the install started.
+	log(): string
+	needles: readonly string[]
+	// Processes installing an update (updateFaults.ts installerProcesses), as "pid command line".
+	installers(): Promise<string[]>
+	// Null where reading it is no cheap look (an AppImage's is extracted by running the file the update replaces).
+	installedVersion: (() => string) | null
+	startedVersions(): string[]
+}
+
+// Every sign that the old app started installing the update; none yet: empty. Downloading the file alone is none: the
+// app can die after it, as 3.0.53 did on Windows arm64.
+export async function installSigns(probe: InstallProbe, fromVersion: string, nextVersion: string): Promise<string[]> {
+	const log = probe.log()
+	const signs = probe.needles.filter(needle => log.includes(needle)).map(needle => `logged "${needle}"`)
+
+	try {
+		signs.push(...(await probe.installers()).map(line => `an installer runs: ${line}`))
+	} catch (error) {
+		console.log(`listing installer processes: ${errorMessage(error)}`)
+	}
+
+	try {
+		const installed = probe.installedVersion?.() ?? fromVersion
+
+		if (!sameVersion(installed, fromVersion)) {
+			signs.push(`the installed app is ${installed}`)
+		}
+	} catch (error) {
+		// Mid-install, the files can be gone for a moment.
+		console.log(`reading the installed version: ${errorMessage(error)}`)
+	}
+
+	if (probe.startedVersions().some(version => sameVersion(version, nextVersion))) {
+		signs.push(`${nextVersion} started`)
+	}
+
+	return signs
+}
+
+// A main-process listing, entries without a readable executable path included.
+export function describeProcesses(list: readonly AppProcess[]): string {
+	return list.map(entry => `${String(entry.pid)} ${entry.path === "" ? "(no path)" : entry.path}`).join(", ") || "no main process"
+}
+
+// `file` past its first `offset` bytes (all of it once it shrank).
+export function textFrom(file: string, offset: number): string {
+	if (!existsSync(file)) {
+		return ""
+	}
+
+	const content = readFileSync(file)
+
+	return (content.length < offset ? content : content.subarray(offset)).toString("utf8")
 }
 
 export function tail(file: string, lines = 60): string {
@@ -206,7 +273,14 @@ export function writeMarker(target: Target): string {
 export function processesAt(target: Target): AppProcess[] {
 	const samePath = (a: string, b: string) => (target.platform === "win" ? a.toLowerCase() === b.toLowerCase() : a === b)
 
-	return target.mainProcesses().filter(entry => samePath(entry.path, target.executable))
+	const all = target.mainProcesses()
+	const unnamed = all.filter(entry => entry.path === "")
+
+	if (unnamed.length > 0) {
+		console.log(`main processes without a readable path (not counted): ${describeProcesses(unnamed)}`)
+	}
+
+	return all.filter(entry => samePath(entry.path, target.executable))
 }
 
 export function installFrom(target: Target, artifact: string, version: string, payloadSigned: boolean): void {
@@ -298,6 +372,8 @@ export async function runUpdate({
 	const installer =
 		pin !== null ? await legacyInstaller(target, work, pin) : path.join(prevDir ?? fail("--prev is required"), target.installer)
 	const xvfb = platform === "linux" ? await startXvfb() : null
+	// The update launch's stdout and stderr, kept as evidence.
+	const output = path.join(work, `${scenario}-update-launch-output.log`)
 	let feed: FeedServer | null = null
 
 	try {
@@ -345,7 +421,20 @@ export async function runUpdate({
 			(await hooks?.updateLaunch?.(feed.url)) ??
 			(pin !== null && !pin.hasE2eHook ? await hookedUpdateLaunch(feed.url, fromVersion) : undefined)
 
-		from.launch(env, updateLaunch?.args ?? [])
+		const legacyLog = legacyLogOf(target)
+		const legacyMark = legacy && existsSync(legacyLog) ? statSync(legacyLog).size : 0
+
+		mkdirSync(work, { recursive: true })
+
+		const fd = openSync(output, "a", 0o600)
+
+		try {
+			from.launch({ ...env, ELECTRON_ENABLE_LOGGING: "1" }, updateLaunch?.args ?? [], fd)
+		} finally {
+			// The child holds its own copy.
+			closeSync(fd)
+		}
+
 		await updateLaunch?.started()
 
 		// The override must be provably in effect early; otherwise the app polls the real feed for the whole timeout.
@@ -354,8 +443,6 @@ export async function runUpdate({
 				served.server.requests.some(request => request.path === target.manifest) ? true : null
 			)
 		} else if (legacy) {
-			const legacyLog = legacyLogOf(target)
-
 			await waitFor(`${fromVersion} to log its E2E updater banner`, START_TIMEOUT_MS, () =>
 				logHas(legacyLog, LEGACY_E2E_BANNER) ? true : null
 			)
@@ -376,11 +463,16 @@ export async function runUpdate({
 				request => request.path === target.updateFile && request.status === 200 && request.bytes === served.size
 			)
 		let seen = "nothing looked at yet"
-		const before = await waitFor(`${fromVersion}'s main process`, START_TIMEOUT_MS, () => {
-			const all = from.mainProcesses()
-			const found = processesAt(from)
+		const look = (): string => {
+			seen = describeProcesses([...from.mainProcesses(), ...(from === target ? [] : target.mainProcesses())])
+			console.log(`main processes: ${seen}`)
 
-			seen = all.map(entry => `${String(entry.pid)} ${entry.path}`).join(", ") || "no main process"
+			return seen
+		}
+		const before = await waitFor(`${fromVersion}'s main process`, START_TIMEOUT_MS, () => {
+			look()
+
+			const found = processesAt(from)
 
 			return found.length > 0 ? found : fetched() ? [] : null
 		}).catch((error: unknown) => fail(`${errorMessage(error)}; last seen: ${seen}`))
@@ -389,14 +481,48 @@ export async function runUpdate({
 		console.log(
 			before.length > 0
 				? `running ${fromVersion}: pid ${before.map(entry => String(entry.pid)).join(", ")} at ${from.executable}`
-				: `${fromVersion} already quit to install the update it fetched`
+				: `${fromVersion} is gone after fetching the update`
 		)
 
 		section(`update ${fromVersion} -> ${nextVersion}`)
+
+		// A fetched file is no proof the app quit to install it: before the long wait, the install must show it started.
+		const oldLog = () => (legacy ? textFrom(legacyLog, legacyMark) : logSince(target, mark))
+		const probe: InstallProbe = {
+			log: oldLog,
+			needles: legacy ? INSTALL_SIGNS.legacy : INSTALL_SIGNS.current,
+			installers: () => installerProcesses(from),
+			installedVersion: format === "AppImage" ? null : () => from.installedVersion(),
+			startedVersions: () => startedVersions(target)
+		}
+		const signs = await waitFor(
+			`a sign that ${fromVersion} started installing the update`,
+			INSTALL_START_TIMEOUT_MS,
+			async () => {
+				const found = await installSigns(probe, fromVersion, nextVersion)
+
+				console.log(`install signs: ${found.join("; ") || "none"}; main processes: ${look()}`)
+
+				return found.length > 0 ? found : null
+			},
+			5000
+		).catch((error: unknown) =>
+			fail(
+				`${errorMessage(error)}: none of ${probe.needles.map(needle => `"${needle}"`).join(", ")} logged, no installer ran, ` +
+					`the installed version unchanged; main processes: ${seen}; the update download ${fetched() ? "completed" : "did not complete"}; ` +
+					`output in ${path.basename(output)}; ${legacy ? "3.x's log" : "main.log"} ends:\n${oldLog().split("\n").slice(-20).join("\n")}`
+			)
+		)
+
+		console.log(`install started: ${signs.join("; ")}`)
 		await waitFor(
 			`the relaunched app to log "Filen ${nextVersion} starting"`,
 			UPDATE_TIMEOUT_MS,
-			() => (startedVersions(target).some(version => sameVersion(version, nextVersion)) ? true : null),
+			() => {
+				look()
+
+				return startedVersions(target).some(version => sameVersion(version, nextVersion)) ? true : null
+			},
 			5000
 		)
 
@@ -407,10 +533,9 @@ export async function runUpdate({
 		)
 
 		const after = await waitFor(`${nextVersion}'s main process at ${target.executable}`, EXIT_TIMEOUT_MS, () => {
-			const all = target.mainProcesses()
-			const found = processesAt(target).filter(entry => !oldPids.has(entry.pid))
+			look()
 
-			seen = all.map(entry => `${String(entry.pid)} ${entry.path}`).join(", ") || "no main process"
+			const found = processesAt(target).filter(entry => !oldPids.has(entry.pid))
 
 			return found.length > 0 ? found : null
 		}).catch((error: unknown) => fail(`${errorMessage(error)}; last seen: ${seen}`))
@@ -506,6 +631,9 @@ export async function runUpdate({
 			console.log(tail(legacyLog))
 		}
 
+		console.log(`--- ${output}`)
+		console.log(tail(output, 200))
+
 		console.log("--- feed requests")
 		console.log(
 			feed?.requests.map(request => `${String(request.status)} ${request.path} ${String(request.bytes)}`).join("\n") ?? "(no feed)"
@@ -513,11 +641,7 @@ export async function runUpdate({
 		console.log("--- main processes")
 
 		try {
-			console.log(
-				[...from.mainProcesses(), ...(from === target ? [] : target.mainProcesses())]
-					.map(entry => `${String(entry.pid)} ${entry.path}`)
-					.join("\n") || "(none)"
-			)
+			console.log(describeProcesses([...from.mainProcesses(), ...(from === target ? [] : target.mainProcesses())]))
 		} catch (listing) {
 			console.log(errorMessage(listing))
 		}
@@ -530,6 +654,10 @@ export async function runUpdate({
 		throw error
 	} finally {
 		await hooks?.beforeReset().catch((error: unknown) => console.log(`before reset: ${errorMessage(error)}`))
+
+		if (existsSync(output)) {
+			hooks?.findings?.attach(path.basename(output), tail(output, 3000))
+		}
 
 		try {
 			target.reset()
