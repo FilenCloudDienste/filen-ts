@@ -3,7 +3,7 @@ import path from "node:path"
 import { setTimeout as sleep } from "node:timers/promises"
 import type { DesktopLockStatus, DesktopSyncPair } from "@filen/shared/desktop"
 import { fail, powershellBounded, psQuote, runBounded, type BoundedResult } from "../support.ts"
-import type { Target } from "../targets.ts"
+import type { Platform, Target } from "../targets.ts"
 import { desktop, unlockThroughScreen } from "./app.ts"
 import type { Chain } from "./chains/common.ts"
 import { START_TIMEOUT_MS } from "./update.ts"
@@ -157,8 +157,8 @@ const macBlock: OfflineBlock = {
 		// The app's open connections already have states that pass them; killed so their next packet meets the rule.
 		const remotes = await macRemotes(pids)
 
-		for (const remote of remotes) {
-			await tool("sudo", ["pfctl", "-q", "-k", "0.0.0.0/0", "-k", remote])
+		for (const kill of pfStateKills(remotes)) {
+			await tool("sudo", ["pfctl", "-q", ...kill])
 		}
 
 		return `pf ${pfToken === null ? "enabled (no token)" : `enabled (token ${pfToken})`}; ${PF_ANCHOR} blocks group ${GROUP} off lo0; states to ${String(remotes.length)} remote addresses killed`
@@ -174,6 +174,23 @@ const macBlock: OfflineBlock = {
 	async connections(pids) {
 		return perRemote(await macRemotes(pids, false))
 	}
+}
+
+// pfctl -k arguments killing every state from any local address to each remote, in the remote's own address family
+// (pfctl skips a source and destination of different families: an IPv4 source kills no state to an IPv6 remote).
+export function pfStateKills(remotes: readonly string[]): string[][] {
+	return remotes.map(remote => ["-k", remote.includes(":") ? "::/0" : "0.0.0.0/0", "-k", remote])
+}
+
+// How long the block may take to take a running N's pairs offline. On Linux, Windows and macOS on arm64 a blocked
+// connection fails at once (a reset). On the macOS Intel image pf's `block return out` resets nothing for the app's
+// sockets, killed states or not: a new connect times out and a request in flight hangs until the SDK finds the peer
+// dead (its TCP keepalive, tens of seconds), so mac x64 allows for that detection on top.
+export const LIVE_OFFLINE_MS = 30_000
+export const MAC_X64_DEAD_PEER_MS = 60_000
+
+export function liveOfflineMs(platform: Platform, arch: string): number {
+	return platform === "mac" && arch === "x64" ? LIVE_OFFLINE_MS + MAC_X64_DEAD_PEER_MS : LIVE_OFFLINE_MS
 }
 
 // The remote ends of N's established TCP connections off the loopback interface: addresses only (distinct), or

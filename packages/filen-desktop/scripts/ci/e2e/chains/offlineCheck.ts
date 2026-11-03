@@ -1,24 +1,38 @@
 import { randomBytes } from "node:crypto"
 import { writeFileSync } from "node:fs"
 import path from "node:path"
-import { errorMessage, fail, waitFor } from "../../support.ts"
-import { appPids, createSampler, describeSample, offlineBlockFor, relaunchThrough, type Sampler, startThrough } from "../offlineBlock.ts"
+import { setTimeout as sleep } from "node:timers/promises"
+import { errorMessage, fail } from "../../support.ts"
+import {
+	appPids,
+	createSampler,
+	describeSample,
+	liveOfflineMs,
+	offlineBlockFor,
+	POLL_MS,
+	relaunchThrough,
+	type Sampler,
+	seconds,
+	startThrough
+} from "../offlineBlock.ts"
 import type { Chain } from "./common.ts"
-import { runListingDrop } from "./offlineListing.ts"
+import { backOnline, CONVERGE_MS, converged, RECOVER_MS, runListingDrop } from "./offlineListing.ts"
 
 // P11: N offline and back, with its own processes cut off (offlineBlock.ts) and everything else on the runner online.
-//   live drop      with N running: an edit takes its pair offline within 30 s, stays out of the cloud, the sync status
-//                  never asks for attention; once the block is lifted the edit uploads and every lastError clears
-//                  within 60 s
+//   live drop      with N running: an edit takes its pair offline within 30 s (90 s on mac x64, liveOfflineMs), stays
+//                  out of the cloud, the sync status never asks for attention; once the block is lifted every pair is
+//                  back online (none offline or in error) within 60 s, and the edit uploads and every pair converges
+//                  (none waiting, no lastError) within 120 s
 //   offline start  N launched under the block: every pair offline (none in error), no attention; once lifted, every
-//                  pair recovers within 60 s (the engine wakes on reconnect instead of its next periodic pass)
+//                  pair is back online within 60 s (the engine wakes on reconnect instead of its next periodic pass)
+//                  and converged within 120 s
 //   listing drop   N launched to a relist while the harness holds drive-write: every pair waits for the cloud; the
 //                  block takes every pair offline (none in error, none still waiting) within 30 s; the lock released,
 //                  then the block lifted, every pair online within 60 s and converged within 120 s (offlineListing.ts)
-// N runs through the block's wrapper (Linux, macOS) for this check only and is started plainly again after it.
+// N runs through the block's wrapper (Linux, macOS) for this check only and is started plainly again after it. The
+// convergence windows tolerate one foreign drive-write hold (offlineListing.ts, CONVERGE_MS); the time each sub-step
+// took to converge is reported (info).
 
-const LIVE_OFFLINE_MS = 30_000
-const RECOVER_MS = 60_000
 // A launch's own start and first passes before every pair can have tried the network.
 const START_OFFLINE_MS = 90_000
 
@@ -28,6 +42,36 @@ export interface OfflineCheckOptions {
 	editPair: string
 	editCloudDir: string
 	pin: string
+}
+
+// Back online within RECOVER_MS of `lifted`, then converged with `done` true (`what`, when named, says what it waits
+// for) within CONVERGE_MS of it; returns the time from the lift to converged.
+async function recover(sampler: Sampler, lifted: number, what: string, done: () => Promise<boolean>): Promise<string> {
+	const online = await sampler.watch(Math.max(0, lifted + RECOVER_MS - Date.now()), backOnline)
+
+	if (online.hit === null) {
+		fail(`not back online within ${seconds(0, RECOVER_MS)} of the lift: ${describeSample(online.last)}`)
+	}
+
+	let last = online.hit
+	let finished = false
+
+	for (;;) {
+		finished ||= await done()
+
+		if (finished && converged(last)) {
+			return seconds(lifted, last.at)
+		}
+
+		if (Date.now() >= lifted + CONVERGE_MS) {
+			const state = what === "" ? "" : ` (${finished ? what : `not ${what}`})`
+
+			fail(`not converged within ${seconds(0, CONVERGE_MS)} of the lift${state}: ${describeSample(last)}`)
+		}
+
+		await sleep(POLL_MS)
+		last = await sampler.sample()
+	}
 }
 
 // Fails when the sync status asked for attention since the sampler's reset; mounts asking is information.
@@ -47,6 +91,9 @@ export async function runOfflineCheck(chain: Chain, options: OfflineCheckOptions
 	const sampler = createSampler(chain, new Set(options.pairs.map(pair => pair.id)))
 	const pair = options.pairs.find(candidate => candidate.name === options.editPair) ?? fail(`no pair ${options.editPair}`)
 	const inCloud = async (name: string) => (await chain.cloud.list(options.editCloudDir, false))?.some(item => item.path === name) === true
+	const offlineWindow = liveOfflineMs(target.platform, process.arch)
+	// Each sub-step's time from the lift to converged, reported whatever its outcome.
+	const toConverged: { live: string | null; start: string | null } = { live: null, start: null }
 
 	await findings.must("P11 the offline block prepared", () => block.prepare())
 
@@ -64,10 +111,10 @@ export async function runOfflineCheck(chain: Chain, options: OfflineCheckOptions
 				await block.block(target, await appPids(chain))
 				writeFileSync(path.join(pair.localRoot, name), `${name}\n`)
 
-				const offline = await sampler.watch(LIVE_OFFLINE_MS, current => current.phases.includes(`${pair.name}:offline`))
+				const offline = await sampler.watch(offlineWindow, current => current.phases.includes(`${pair.name}:offline`))
 
 				if (offline.hit === null) {
-					fail(`${pair.name} not offline within 30 s of the edit: ${describeSample(offline.last)}`)
+					fail(`${pair.name} not offline within ${seconds(0, offlineWindow)} of the edit: ${describeSample(offline.last)}`)
 				}
 
 				if (await inCloud(name)) {
@@ -78,23 +125,15 @@ export async function runOfflineCheck(chain: Chain, options: OfflineCheckOptions
 			}
 
 			const lifted = Date.now()
-			const recovered = await sampler.watch(RECOVER_MS, current => current.offline === 0 && current.lastErrors === 0)
-			// Recovery clears the offline halt before the pass that uploads the edit has finished.
-			const uploaded = await waitFor(`${name} in the cloud`, Math.max(0, lifted + RECOVER_MS - Date.now()), async () =>
-				(await inCloud(name)) ? true : null
-			).catch(() => false)
 
-			if (recovered.hit === null || !uploaded) {
-				fail(
-					`not recovered within 60 s of the lift (${name} ${uploaded ? "uploaded" : "not uploaded"}): ${describeSample(recovered.last)}`
-				)
-			}
+			// Back online clears the offline halt before the pass that uploads the edit has finished.
+			toConverged.live = await recover(sampler, lifted, `${name} uploaded`, () => inCloud(name).catch(() => false))
 
-			return `offline, ${name} queued; uploaded and every lastError cleared after the lift; ${noSyncAttention(sampler)}`
+			return `offline, ${name} queued; back online, uploaded and converged after the lift; ${noSyncAttention(sampler)}`
 		})
 
 		await findings.check(
-			"P11 a launch while offline: every pair offline, none in error; recovered within 60 s of the lift",
+			"P11 a launch while offline: every pair offline, none in error; online within 60 s of the lift, converged within 120 s",
 			async () => {
 				sampler.reset()
 				await chain.quit("N-before-offline-start")
@@ -115,21 +154,16 @@ export async function runOfflineCheck(chain: Chain, options: OfflineCheckOptions
 					await block.lift()
 				}
 
-				const recovered = await sampler.watch(
-					RECOVER_MS,
-					current => current.offline === 0 && current.errors === 0 && current.lastErrors === 0
-				)
+				toConverged.start = await recover(sampler, Date.now(), "", () => Promise.resolve(true))
 
-				if (recovered.hit === null) {
-					fail(`not recovered within 60 s of the lift: ${describeSample(recovered.last)}`)
-				}
-
-				return `every pair offline, none in error; recovered after the lift; ${noSyncAttention(sampler)}`
+				return `every pair offline, none in error; back online and converged after the lift; ${noSyncAttention(sampler)}`
 			}
 		)
 
 		await runListingDrop(chain, block, sampler, options.pin)
 	} finally {
+		findings.info("P11 live drop: time from the lift to converged", toConverged.live ?? "never")
+		findings.info("P11 launch while offline: time from the lift to converged", toConverged.start ?? "never")
 		findings.info("P11 the block lifted in the end", await block.lift().catch(errorMessage))
 		findings.info("P11 halts and lastError texts", sampler.errorsSeen().join(" | ") || "none")
 

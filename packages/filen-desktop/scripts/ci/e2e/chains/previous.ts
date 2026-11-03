@@ -77,11 +77,12 @@ import {
 //   P10 Filen in Finder (macOS)      on N-1 before the PIN: supported, the domain registered (userEnabled reported:
 //                                    a person switches it on), an off/on round trip; left off
 //   P11 offline and back         N cut off alone (offlineBlock.ts): a live drop queues an edit and uploads it after the
-//                                lift; a launch under the block shows every pair offline, none in error, and recovers
-//                                within 60 s of the lift; a drop while the first cloud listing waits (the harness
-//                                holding drive-write) takes every pair offline within 30 s and converges after the
-//                                lift; sync never asks for attention (chains/offlineCheck.ts); one entry's P11 at a
-//                                time on the account (chains/offlineListing.ts)
+//                                lift; a launch under the block shows every pair offline, none in error; a drop while
+//                                the first cloud listing waits (the harness holding drive-write) takes every pair
+//                                offline within 30 s (90 s on mac x64); after each lift every pair is back online
+//                                within 60 s and converged within 120 s (one foreign drive-write hold); sync never
+//                                asks for attention (chains/offlineCheck.ts); one entry's P11 at a time on the
+//                                account (chains/offlineListing.ts)
 //   P12 conflicts and held       in the two-way pair: a held batch approved while paused (applies on resume), conflicts
 //                                resolved one by one and in bulk through the Issues tab; disk, cloud and bin byte for
 //                                byte (chains/conflictsCheck.ts)

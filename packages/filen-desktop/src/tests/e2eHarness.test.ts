@@ -20,7 +20,15 @@ import {
 import { parseAbout } from "../../scripts/ci/e2e/cloud.ts"
 import { createFindings } from "../../scripts/ci/e2e/findings.ts"
 import { appImagePrefixes, appImageTree, type ProcessEntry, xwdToPng } from "../../scripts/ci/e2e/linux.ts"
-import { describeSample, sampleOf, windowsFirewallRules } from "../../scripts/ci/e2e/offlineBlock.ts"
+import {
+	describeSample,
+	LIVE_OFFLINE_MS,
+	liveOfflineMs,
+	MAC_X64_DEAD_PEER_MS,
+	pfStateKills,
+	sampleOf,
+	windowsFirewallRules
+} from "../../scripts/ci/e2e/offlineBlock.ts"
 import { describeStored, LEGACY_SDK_CONFIG_SHAPE, legacySeed, SESSION_SHAPE, sessionEnvelope } from "../../scripts/ci/e2e/seed.ts"
 import {
 	cacheKey,
@@ -400,6 +408,21 @@ describe("e2e offline block", () => {
 			{ name: "filen-e2e-offline", program: "C:\\Program Files\\Filen\\Filen.exe" },
 			{ name: "filen-e2e-offline-rclone", program: "C:\\Program Files\\Filen\\resources\\rclone\\rclone.exe" }
 		])
+	})
+
+	it("kills pf states to each remote in its own address family", () => {
+		expect(pfStateKills(["104.18.2.3", "2606:4700::6812:203"])).toEqual([
+			["-k", "0.0.0.0/0", "-k", "104.18.2.3"],
+			["-k", "::/0", "-k", "2606:4700::6812:203"]
+		])
+		expect(pfStateKills([])).toEqual([])
+	})
+
+	it("gives a live drop on mac x64 the time to find a dead peer", () => {
+		expect(liveOfflineMs("mac", "x64")).toBe(LIVE_OFFLINE_MS + MAC_X64_DEAD_PEER_MS)
+		expect(liveOfflineMs("mac", "arm64")).toBe(LIVE_OFFLINE_MS)
+		expect(liveOfflineMs("linux", "x64")).toBe(LIVE_OFFLINE_MS)
+		expect(liveOfflineMs("win", "x64")).toBe(LIVE_OFFLINE_MS)
 	})
 
 	it("counts pairs waiting for the cloud apart from offline and error ones", () => {

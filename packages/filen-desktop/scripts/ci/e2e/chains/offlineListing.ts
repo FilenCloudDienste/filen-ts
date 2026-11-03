@@ -2,12 +2,23 @@ import { randomBytes } from "node:crypto"
 import { setTimeout as sleep } from "node:timers/promises"
 import { errorMessage, fail } from "../../support.ts"
 import { acquireDriveLock, type DriveLock, type DriveLockTiming, lockPost } from "../driveLock.ts"
-import { appPids, describeSample, type OfflineBlock, POLL_MS, type Sample, type Sampler, seconds, startThrough } from "../offlineBlock.ts"
+import {
+	appPids,
+	describeSample,
+	liveOfflineMs,
+	type OfflineBlock,
+	POLL_MS,
+	type Sample,
+	type Sampler,
+	seconds,
+	startThrough
+} from "../offlineBlock.ts"
 import type { Chain } from "./common.ts"
 
 // P11's third sub-step: the network lost while a launch's first cloud listing waits. The harness holds the account's
 // drive-write lock (driveLock.ts) and has written outside the pairs while N was quit, so N's launch must relist and
-// every pair waits for the cloud; the block then must take every pair offline (none in error) within 30 s, not leave
+// every pair waits for the cloud; the block then must take every pair offline (none in error) within 30 s (mac x64:
+// liveOfflineMs), not leave
 // it waiting for a listing that cannot come. The lock is released before the lift; every pair is back online (none
 // offline or in error) within 60 s of it, and converged (none waiting, no lastError) within 120 s. Holding the lock
 // costs no sign-in: it is the harness session's API key.
@@ -20,12 +31,13 @@ import type { Chain } from "./common.ts"
 // to 60 s a batch (PASS_LOCK_MAX_HOLD), and the hold's wall-clock window is reported (info) so a timed failure in
 // another entry can be matched against it.
 
-const LIVE_OFFLINE_MS = 30_000
-// Back online after the lift: the engine wakes on reconnect (as in the other two sub-steps).
-const RECOVER_MS = 60_000
-// Converged after the lift: N's relist must take drive-write again, and the lock has no queue. Another entry's N can
-// win it first and hold it for a batch of up to 60 s (sdk-rs PASS_LOCK_MAX_HOLD) before N's cache retries (every 5 s).
-const CONVERGE_MS = RECOVER_MS + 60_000
+// Back online after the lift (none offline, none in error; a pair waiting for the cloud is online): the engine wakes
+// on reconnect. The same for P11's other two sub-steps.
+export const RECOVER_MS = 60_000
+// Converged after the lift: N's next pass must take drive-write again, and the lock has no queue. Another entry's N (or
+// its 3.x and rclone writers) can win it first and hold it for a batch of up to 60 s (sdk-rs PASS_LOCK_MAX_HOLD) before
+// N retries (every 5 s), so convergence tolerates one foreign hold. The same for P11's other two sub-steps.
+export const CONVERGE_MS = RECOVER_MS + 60_000
 // A launch's start and its first pass's wait for the cloud.
 const WAITING_MS = 60_000
 // Consecutive samples (POLL_MS apart) every pair stays waiting for the cloud before the block.
@@ -105,7 +117,7 @@ export async function runListingDrop(chain: Chain, block: OfflineBlock, sampler:
 	}
 
 	await findings.check(
-		"P11 a drop while the first cloud listing waits: every pair offline within 30 s, none in error; online within 60 s of the lift, converged within 120 s",
+		"P11 a drop while the first cloud listing waits: every pair offline within 30 s (90 s on mac x64), none in error; online within 60 s of the lift, converged within 120 s",
 		async () => {
 			sampler.reset()
 			await chain.quit("N-before-listing-drop")
@@ -141,11 +153,12 @@ export async function runListingDrop(chain: Chain, block: OfflineBlock, sampler:
 
 				await block.block(chain.target, await appPids(chain))
 
-				const offline = await sampler.watch(LIVE_OFFLINE_MS, current => current.offline === current.pairs || current.errors > 0)
+				const window = liveOfflineMs(chain.target.platform, process.arch)
+				const offline = await sampler.watch(window, current => current.offline === current.pairs || current.errors > 0)
 
 				if (offline.hit === null || offline.hit.errors > 0) {
 					fail(
-						`not every pair offline within 30 s of the block: ${offlineFailure(offline.last)}; ${describeSample(offline.last)}`
+						`not every pair offline within ${seconds(0, window)} of the block: ${offlineFailure(offline.last)}; ${describeSample(offline.last)}`
 					)
 				}
 
