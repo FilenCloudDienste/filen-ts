@@ -117,7 +117,7 @@ export async function runListingDrop(chain: Chain, block: OfflineBlock, sampler:
 	}
 
 	await findings.check(
-		"P11 a drop while the first cloud listing waits: every pair offline within 30 s (90 s on mac x64), none in error; online within 60 s of the lift, converged within 120 s",
+		"P11 a drop while the first cloud listing waits: every pair offline within 30 s (150 s on mac x64), none in error; online within 60 s of the lift, converged within 120 s",
 		async () => {
 			sampler.reset()
 			await chain.quit("N-before-listing-drop")

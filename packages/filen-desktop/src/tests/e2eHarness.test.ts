@@ -422,6 +422,8 @@ describe("e2e offline block", () => {
 
 	it("gives a live drop on mac x64 the time to find a dead peer", () => {
 		expect(liveOfflineMs("mac", "x64")).toBe(LIVE_OFFLINE_MS + MAC_X64_DEAD_PEER_MS)
+		// Past the 92 s a request in flight was seen to hang on mac x64.
+		expect(liveOfflineMs("mac", "x64")).toBe(150_000)
 		expect(liveOfflineMs("mac", "arm64")).toBe(LIVE_OFFLINE_MS)
 		expect(liveOfflineMs("linux", "x64")).toBe(LIVE_OFFLINE_MS)
 		expect(liveOfflineMs("win", "x64")).toBe(LIVE_OFFLINE_MS)

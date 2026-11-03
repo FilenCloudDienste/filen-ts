@@ -19,10 +19,10 @@ import type { Chain } from "./common.ts"
 import { backOnline, CONVERGE_MS, converged, RECOVER_MS, runListingDrop } from "./offlineListing.ts"
 
 // P11: N offline and back, with its own processes cut off (offlineBlock.ts) and everything else on the runner online.
-//   live drop      with N running: an edit takes its pair offline within 30 s (90 s on mac x64, liveOfflineMs), stays
-//                  out of the cloud, the sync status never asks for attention; once the block is lifted every pair is
-//                  back online (none offline or in error) within 60 s, and the edit uploads and every pair converges
-//                  (none waiting, no lastError) within 120 s
+//   live drop      with N running and every pair converged: an edit takes its pair offline within 30 s (150 s on mac
+//                  x64, liveOfflineMs), stays out of the cloud, the sync status never asks for attention; once the
+//                  block is lifted every pair is back online (none offline or in error) within 60 s, and the edit
+//                  uploads and every pair converges (none waiting, no lastError) within 120 s
 //   offline start  N launched under the block: every pair offline (none in error), no attention; once lifted, every
 //                  pair is back online within 60 s (the engine wakes on reconnect instead of its next periodic pass)
 //                  and converged within 120 s
@@ -106,6 +106,14 @@ export async function runOfflineCheck(chain: Chain, options: OfflineCheckOptions
 			const name = `offline-${randomBytes(4).toString("hex")}.txt`
 
 			sampler.reset()
+
+			// From settled pairs: a drop inside a launch's first cloud listing leaves its request in flight, which on mac
+			// x64 hangs on dropped packets past the window with no pass failing, so nothing goes offline.
+			const settled = await sampler.watch(CONVERGE_MS, converged)
+
+			if (settled.hit === null) {
+				fail(`not converged before the drop: ${describeSample(settled.last)}`)
+			}
 
 			try {
 				await block.block(target, await appPids(chain))

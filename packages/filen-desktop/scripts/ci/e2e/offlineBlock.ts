@@ -184,10 +184,10 @@ export function pfStateKills(remotes: readonly string[]): string[][] {
 
 // How long the block may take to take a running N's pairs offline. On Linux, Windows and macOS on arm64 a blocked
 // connection fails at once (a reset). On the macOS Intel image pf's `block return out` resets nothing for the app's
-// sockets, killed states or not: a new connect times out and a request in flight hangs until the SDK finds the peer
-// dead (its TCP keepalive, tens of seconds), so mac x64 allows for that detection on top.
+// sockets, killed states or not: a new connect times out and a request in flight hangs until the OS gives up
+// retransmitting its unacknowledged data (79 s seen, over 92 s once), so mac x64 allows for that detection on top.
 export const LIVE_OFFLINE_MS = 30_000
-export const MAC_X64_DEAD_PEER_MS = 60_000
+export const MAC_X64_DEAD_PEER_MS = 120_000
 
 export function liveOfflineMs(platform: Platform, arch: string): number {
 	return platform === "mac" && arch === "x64" ? LIVE_OFFLINE_MS + MAC_X64_DEAD_PEER_MS : LIVE_OFFLINE_MS
