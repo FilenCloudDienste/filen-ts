@@ -63,6 +63,10 @@ const BACKOFF_CAP_MS = 60_000
 // reply the SDK gets from the gateway (lock, messageIds, `v3/dir`, user and keys), so only that listing is reset.
 const F3_FILES = 128
 const F3_REPLY_BYTES = 16 * KIB
+// How soon after F3's reset the SDK's retry must reach the gateway again.
+const F3_RETRY_MS = 10_000
+// How often upload() lists the cloud while it waits for N's drive-write.
+const UPLOAD_CLOUD_POLL_MS = 5000
 
 // The released SDK's two bugs behind a cloud edit not found under the proxy.
 const SOCKET_ISSUE =
@@ -111,7 +115,9 @@ export async function runProxyChecks(chain: Chain, options: ProxyCheckOptions): 
 		(await cloud.list(options.editCloudDir, false))?.some(item => item.path === name && !item.isDir) === true
 
 	// A local file of `bytes` uploads byte for byte: N gets drive-write within the lock's cap of the edit, and the file
-	// is in the cloud within `timeoutMs` of that grant. Its name, the lock wait and the time from grant to upload.
+	// is in the cloud within `timeoutMs` of that grant. A file already in the cloud before a grant is seen (uploaded under
+	// a hold N took before the edit, or a grant line the log does not show) counts from when it was found. Its name, the
+	// lock wait and the time from grant to upload.
 	const upload = async (label: string, bytes: number, timeoutMs: number): Promise<string> => {
 		const name = `${label}-${randomBytes(4).toString("hex")}.bin`
 		const content = seededBytes(name, bytes)
@@ -120,15 +126,41 @@ export async function runProxyChecks(chain: Chain, options: ProxyCheckOptions): 
 
 		writeFileSync(path.join(pair.localRoot, name), content)
 
-		const granted = await waitFor(
+		// The cloud is listed every UPLOAD_CLOUD_POLL_MS, the log on every probe.
+		let listedAt = 0
+		const started = await waitFor(
 			`N's drive-write after ${name}`,
 			DRIVE_LOCK_TIMING.capMs,
-			() => driveWriteGrants(outputSince(chain.appOutput, mark)).find(at => at >= written),
+			async () => {
+				const grant = driveWriteGrants(outputSince(chain.appOutput, mark)).find(at => at >= written)
+
+				if (grant !== undefined) {
+					return { at: grant, grant: true }
+				}
+
+				if (Date.now() - listedAt < UPLOAD_CLOUD_POLL_MS) {
+					return null
+				}
+
+				listedAt = Date.now()
+
+				return (await inCloud(name)) ? { at: listedAt, grant: false } : null
+			},
 			500
 		).catch(onTimeout(null))
 
-		if (granted === null) {
-			fail(`N never got drive-write within ${seconds(0, DRIVE_LOCK_TIMING.capMs)} of the edit (${name})`)
+		if (started === null) {
+			fail(`N never got drive-write within ${seconds(0, DRIVE_LOCK_TIMING.capMs)} of the edit, nor was ${name} in the cloud`)
+		}
+
+		const granted = started.at
+
+		if (!started.grant) {
+			if ((await cloud.sha256Of(`${options.editCloudDir}/${name}`)) !== sha256(content)) {
+				fail(`${name} in the cloud differs from the local file`)
+			}
+
+			return `${name} in the cloud ${seconds(written, granted)} after the edit, before any drive-write grant was seen`
 		}
 
 		await waitFor(`${name} in the cloud`, Math.max(0, granted + timeoutMs - Date.now()), async () =>
@@ -367,8 +399,6 @@ export async function runProxyChecks(chain: Chain, options: ProxyCheckOptions): 
 
 				await cloud.upload(staged, `${options.editCloudDir}/${dir}`)
 
-				const mark = logMark(target)
-
 				await startWith(chain, block.via, options.pin, proxyLaunch(proxy))
 
 				const verified = new Set<string>()
@@ -397,9 +427,11 @@ export async function runProxyChecks(chain: Chain, options: ProxyCheckOptions): 
 						? "no tunnel reset"
 						: `tunnel ${String(reset.id)} (${reset.userAgent ?? "no User-Agent"}): ${reset.end ?? ""}`
 
-				// The reset must have hit the listing, not another request of the launch.
-				if (reset !== undefined && !listingRetried(logSince(target, mark))) {
-					fail(`main.log shows no failed or retried ${LISTING} since the relaunch: the reset hit another request (${tunnel})`)
+				// The reset hit the listing (an SDK tunnel, a reply of F3_REPLY_BYTES, which only `dir/download` reaches) and the
+				// SDK retried it on another of its tunnels. main.log cannot tell: a body read cut by a reset is retried
+				// without a log line.
+				if (reset !== undefined && !listingRetried(reset, proxy.tunnels(), GATEWAY, F3_RETRY_MS)) {
+					fail(`no SDK tunnel to ${GATEWAY} carried a retry within ${seconds(0, F3_RETRY_MS)} of the reset (${tunnel})`)
 				}
 
 				return `${String(seeded.length)} seeded files on disk byte for byte; ${tunnel}`
@@ -578,14 +610,29 @@ export function nextTry(
 	return Number.isFinite(first) ? first : null
 }
 
-// The resync's listing, as sdk-rs's request span names it.
-const LISTING = "endpoint=v3/dir/download"
+// Whether `reset`, an SDK tunnel (no User-Agent) reset in a reply, was followed within `withinMs` by the SDK's retry:
+// another SDK tunnel to `host` that opened after the reset, or one already open that received bytes after it (a pooled
+// connection).
+export function listingRetried(
+	reset: Pick<Tunnel, "id" | "userAgent" | "closedAt">,
+	tunnels: readonly Pick<Tunnel, "id" | "host" | "userAgent" | "openedAt" | "lastDownAt" | "closedAt">[],
+	host: string,
+	withinMs: number
+): boolean {
+	if (reset.userAgent !== null || reset.closedAt === null) {
+		return false
+	}
 
-// Whether `log` (main.log since a launch) shows the resync's listing failing or retried: a WARN inside its request span
-// (a connection that died mid-request, which the request's retry absorbs, or the request failing), or a resync that
-// did not converge and retries.
-export function listingRetried(log: string): boolean {
-	return log.split("\n").some(line => (line.includes(LISTING) && / WARN /.test(line)) || line.includes("resync: not converged"))
+	const at = reset.closedAt
+
+	return tunnels.some(
+		tunnel =>
+			tunnel.id !== reset.id &&
+			tunnel.host === host &&
+			tunnel.userAgent === null &&
+			((tunnel.openedAt >= at && tunnel.openedAt <= at + withinMs) ||
+				(tunnel.openedAt < at && tunnel.lastDownAt !== null && tunnel.lastDownAt > at && tunnel.lastDownAt <= at + withinMs))
+	)
 }
 
 // When the first tunnel to `host` opened after `since`; null before one did.

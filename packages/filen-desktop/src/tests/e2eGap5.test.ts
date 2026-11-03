@@ -257,6 +257,7 @@ describe("e2e CONNECT proxy", () => {
 		expect(await exchange(sdk, 40_000)).toBe("reset")
 		expect(fault.fired).toBe(1)
 		expect(via.tunnels()[1]?.end).toMatch(/^reset in a reply at \d+ bytes down \(resetInReply\)$/)
+		expect(via.tunnels()[1]?.lastDownAt).toBeTypeOf("number")
 
 		// Only `tunnels` of them.
 		const next = await tunnel(via, port)
@@ -398,22 +399,34 @@ describe("e2e CONNECT proxy", () => {
 		expect(nextTry([800], [{ host: "ingest.filen.io", openedAt: 900 }], "ingest.filen.io", 1000)).toBeNull()
 	})
 
-	it("finds F3's reset in the resync listing's request span, not in another request's", () => {
-		const died =
-			"native: 2026-11-03T12:55:00.100000Z  WARN list_dir_recursive{[redacted]}:http_request{endpoint=v3/dir/download request_id=13}: filen_sdk_rs::auth::http: connection died during the request kind=ConnectionReset os_error=Some(104)"
-		const failed =
-			"[2026-11-03T12:55:00.200Z] INFO native: 2026-11-03T12:55:00.200000Z  WARN list_dir_recursive{[redacted]}:http_request{endpoint=v3/dir/download request_id=14}: filen_sdk_rs::auth::http::logging: request failed elapsed_ms=120 error=Error of kind Reqwest"
-		const fine =
-			"native: 2026-11-03T12:55:00.300000Z  INFO list_dir_recursive{[redacted]}:http_request{endpoint=v3/dir/download request_id=15}: filen_sdk_rs::auth::http::logging: close time.busy=153µs time.idle=99.5ms"
-		const otherRequest =
-			"native: 2026-11-03T12:55:00.400000Z  WARN http_request{endpoint=v3/user/lock request_id=12}: filen_sdk_rs::auth::http: connection died during the request kind=ConnectionReset os_error=Some(104)"
+	it("finds the SDK's retry of F3's reset on another of its gateway tunnels", () => {
+		const gateway = "gateway.filen.io"
+		const reset = { id: 5, userAgent: null, closedAt: 10_000 }
+		const tunnel = (
+			id: number,
+			openedAt: number,
+			extra: { userAgent?: string | null; host?: string; lastDownAt?: number | null } = {}
+		) => ({
+			id,
+			host: extra.host ?? gateway,
+			userAgent: extra.userAgent ?? null,
+			openedAt,
+			lastDownAt: extra.lastDownAt ?? null,
+			closedAt: null
+		})
+		const resetTunnel = { ...tunnel(5, 1000, { lastDownAt: 9_999 }), closedAt: 10_000 }
 
-		expect(listingRetried([fine, died].join("\n"))).toBe(true)
-		expect(listingRetried(failed)).toBe(true)
-		expect(listingRetried("native: 2026-11-03T12:55:00Z DEBUG filen_sdk_rs::cache::state: resync: not converged; retrying in 5s")).toBe(
-			true
-		)
-		expect(listingRetried([fine, otherRequest].join("\n"))).toBe(false)
+		// A new SDK tunnel, or a pooled one that received bytes after the reset.
+		expect(listingRetried(reset, [resetTunnel, tunnel(6, 11_000)], gateway, 10_000)).toBe(true)
+		expect(listingRetried(reset, [resetTunnel, tunnel(4, 500, { lastDownAt: 12_000 })], gateway, 10_000)).toBe(true)
+		// Only the reset tunnel itself, too late, another client's, another host's, or a pooled one idle since.
+		expect(listingRetried(reset, [resetTunnel], gateway, 10_000)).toBe(false)
+		expect(listingRetried(reset, [resetTunnel, tunnel(6, 25_000)], gateway, 10_000)).toBe(false)
+		expect(listingRetried(reset, [resetTunnel, tunnel(6, 11_000, { userAgent: "Mozilla/5.0" })], gateway, 10_000)).toBe(false)
+		expect(listingRetried(reset, [resetTunnel, tunnel(6, 11_000, { host: "ingest.filen.io" })], gateway, 10_000)).toBe(false)
+		expect(listingRetried(reset, [resetTunnel, tunnel(4, 500, { lastDownAt: 9_000 })], gateway, 10_000)).toBe(false)
+		// A reset of a tunnel with a User-Agent is not the SDK's.
+		expect(listingRetried({ ...reset, userAgent: "Mozilla/5.0" }, [tunnel(6, 11_000)], gateway, 10_000)).toBe(false)
 	})
 })
 

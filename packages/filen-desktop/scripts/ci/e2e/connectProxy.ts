@@ -21,6 +21,8 @@ export interface Tunnel {
 	// Bytes relayed client -> server and server -> client.
 	up: number
 	down: number
+	// When the last bytes came down; null before any.
+	lastDownAt: number | null
 	closedAt: number | null
 	// Why it closed: "closed", "error: ...", or the fault that reset it.
 	end: string | null
@@ -126,6 +128,10 @@ export async function startConnectProxy(log: (line: string) => void = line => co
 		const destination = direction === "up" ? entry.server : entry.client
 
 		entry.tunnel[direction] += chunk.length
+
+		if (direction === "down") {
+			entry.tunnel.lastDownAt = Date.now()
+		}
 
 		if (!destination.write(chunk)) {
 			pause(entry, direction, "drain")
@@ -255,6 +261,7 @@ export async function startConnectProxy(log: (line: string) => void = line => co
 			openedAt: Date.now(),
 			up: 0,
 			down: 0,
+			lastDownAt: null,
 			closedAt: null,
 			end: null
 		}
