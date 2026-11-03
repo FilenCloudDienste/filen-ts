@@ -829,6 +829,8 @@ export function createStashStore(file: AtomicFile, cipher: () => Promise<VaultCi
 		if (stash === null) {
 			await file.remove()
 		} else if (active === null) {
+			// A fallback-key file stays though a feature was consumed: removing it would lose the features not consumed
+			// yet, and one offered again only consumes (both importers keep `legacyApplied`). It goes once all are.
 			warn("migration: no secure storage; the stash is kept for this run only")
 			persisted = false
 		} else {

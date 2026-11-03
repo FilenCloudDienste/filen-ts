@@ -63,6 +63,21 @@ export function readingCipher(cipher: VaultCipher | null, data: Buffer): VaultCi
 	return cipher?.readOnly === true && !fallbackKeyEncrypted(data) ? null : cipher
 }
 
+// Memory mode: removes a file encrypted with the fallback key whose content this run replaced, which a later run would
+// otherwise read back. A file the keyring encrypted stays for when the keyring is back; a failed removal rejects.
+export async function removeReplacedFallbackFile(file: AtomicFile, cipher: VaultCipher | null): Promise<void> {
+	// Only the fallback key's read-only cipher reads such a file.
+	if (cipher?.readOnly !== true) {
+		return
+	}
+
+	const data = await file.read().catch(() => null)
+
+	if (data !== null && readingCipher(cipher, data) !== null) {
+		await file.remove()
+	}
+}
+
 // Resolves the cipher once and shares it; a failed probe is retried by the next call instead of being replayed for the
 // rest of the run.
 export function lazyCipher(probe: () => Promise<VaultCipher | null>): () => Promise<VaultCipher | null> {
@@ -238,15 +253,9 @@ export function createSessionVault(
 				const cipher = await currentCipher()
 				const active = storingCipher(cipher)
 
-				// A file an encrypted run left stays for when its keyring is back; one encrypted with the fallback key
-				// holds a session this one replaces.
+				// One encrypted with the fallback key holds a session this one replaces.
 				if (active === null) {
-					const data = await file.read().catch(() => null)
-
-					if (data !== null && readingCipher(cipher, data) !== null) {
-						await file.remove()
-					}
-
+					await removeReplacedFallbackFile(file, cipher)
 					cached = blob
 
 					return

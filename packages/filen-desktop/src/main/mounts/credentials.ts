@@ -4,7 +4,7 @@ import type { DesktopServeProtocol } from "@filen/shared/desktop"
 import { authKindOf, basicAuthSchema, type NativeServeAuth, s3AuthSchema, SERVE_PROTOCOLS } from "../../shared/nativeProtocol.ts"
 import { type AtomicFile, codedError, errorCode } from "../atomicFile.ts"
 import { serialQueue } from "../../shared/serial.ts"
-import { readingCipher, storingCipher, type VaultCipher } from "../sessionVault.ts"
+import { readingCipher, removeReplacedFallbackFile, storingCipher, type VaultCipher } from "../sessionVault.ts"
 
 // The servers' credentials, encrypted with the session vault's cipher. They reach rclone only in the body of an
 // authenticated loopback rc call; nothing here ever logs one.
@@ -126,7 +126,7 @@ export interface CredentialStore {
 // `<userData>/mounts/<userId>/credentials.bin`, decrypted once and served from memory. A file that cannot be decrypted
 // now (a locked keychain) is read again on the next call and never overwritten, so the credentials in it are not
 // lost; until then every call rejects. Without a cipher (memory mode) nothing is written, and only a file encrypted with
-// Linux's fallback key is read.
+// Linux's fallback key is read; a change removes that file, so the credentials last for this run like any in memory mode.
 export function createCredentialStore(
 	file: AtomicFile,
 	cipher: () => Promise<VaultCipher | null>,
@@ -184,10 +184,14 @@ export function createCredentialStore(
 	}
 
 	async function store(next: Stored): Promise<void> {
-		const active = storingCipher(await cipher())
+		const current = await cipher()
+		const active = storingCipher(current)
 
 		if (active !== null) {
 			await file.write(await active.encrypt(JSON.stringify({ version: 1, serves: next })))
+		} else {
+			// What a fallback-key run stored would come back next run: a regenerated password among it.
+			await removeReplacedFallbackFile(file, current)
 		}
 
 		cached = next
