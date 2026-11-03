@@ -118,7 +118,7 @@ describe("e2e feed faults", () => {
 		expect(server.requests[0]?.bytes).toBe(Math.floor(data.length * 0.4))
 	})
 
-	it("stalls at stallAt on a live socket until release(), then sends the rest", async () => {
+	it("stalls at stallAt on a live socket until release(), then destroys it, never sending the rest", async () => {
 		const { server, data } = await feed(() => ({ stallAt: 0.3 }))
 		const stallBytes = Math.floor(data.length * 0.3)
 		let reachedStall: () => void = () => undefined
@@ -136,10 +136,11 @@ describe("e2e feed faults", () => {
 		expect(server.requests[0]?.bytes).toBe(stallBytes)
 		server.release()
 
-		const whole = await pending
+		const cut = await pending
 
-		expect(whole.broken).toBe(false)
-		expect(whole.body.equals(data)).toBe(true)
+		expect(cut.broken).toBe(true)
+		expect(cut.body.length).toBe(stallBytes)
+		expect(server.requests[0]?.bytes).toBe(stallBytes)
 	})
 
 	it("holds a stallAt 0 response before its first byte (the step gate)", async () => {

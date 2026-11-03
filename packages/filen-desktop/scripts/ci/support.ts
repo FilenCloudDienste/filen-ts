@@ -211,7 +211,9 @@ export interface FeedServer {
  *   status   that status and no body
  *   body     these bytes instead of the file's (a manifest made up for the request, a truncated file)
  *   cutAt    the socket destroyed once this much is sent
- *   stallAt  nothing more sent once this much is, on a live socket, until release() (stallAt 0: headers only)
+ *   stallAt  nothing more sent once this much is, on a live socket, until release() or the client goes; then the
+ *            socket is destroyed, so a stalled download never completes. Only stallAt 0 (headers only: the step gate)
+ *            sends the whole body on release()
  *   flipAt   the byte there sent inverted
  */
 export interface FeedFault {
@@ -344,6 +346,13 @@ export async function serveFeed(dir: string, names: readonly string[], plan?: Fe
 				stalled.add(go)
 				response.once("close", go)
 			})
+
+			// The rest of a half-sent file would let the client finish a valid download long after its fault.
+			if (fault.stallAt > 0) {
+				response.destroy()
+
+				return
+			}
 		}
 
 		if (await sendPart(response, record, source, first, size, flip)) {

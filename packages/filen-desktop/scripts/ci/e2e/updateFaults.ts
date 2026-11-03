@@ -1,4 +1,4 @@
-import { closeSync, existsSync, openSync, readdirSync, readFileSync, readSync, statSync } from "node:fs"
+import { closeSync, existsSync, openSync, readdirSync, readFileSync, readSync, rmSync, statSync } from "node:fs"
 import path from "node:path"
 import { Readable } from "node:stream"
 import { TEST_UPDATE_CHECK_INTERVAL_MS, UPDATE_FIRST_CHECK_DELAY_MS, UPDATE_STALL_MS } from "../../../src/main/updater.ts"
@@ -28,13 +28,14 @@ import { feedFor, processesAt, START_TIMEOUT_MS, TEST_FEED_ENV, TEST_FEED_LOG } 
 //   4  one byte of the update file flipped
 //   5  macOS: a truncated zip with its own sha512 in latest-mac.yml: electron-updater accepts it and Squirrel refuses it,
 //      which must clear the ready state (F2) so that another check follows
-//   6  the update file stalled at 30% on a live socket: the no-progress watchdog must close it (F1), and another check
-//      must follow
+//   6  the update file stalled at 30% on a live socket: the no-progress watchdog must cancel it (F1), and another check
+//      must follow; the server destroys a stalled file's socket once released, never sending the rest
 //   7  stalled at 30% again, and N-1 ended meanwhile: a hard kill at install depth, a graceful quit in a deep chain
 //
 // After each step: the same N-1 process runs, exactly one "updater: check failed" line was logged, nothing was
 // reported ready to install (step 5 aside), no installer (or ShipIt) runs, and pending/ holds no update-info.json and
-// no full-size download. Every check after the first is held at the server (its manifest stalls before the first byte)
+// no full-size download; neither does pending/ once the launch ended, after which it is emptied, so the real update
+// downloads afresh. Every check after the first is held at the server (its manifest stalls before the first byte)
 // until the step before it is asserted, so each step's lines are its own.
 
 const CHECK_FAILED_LOG = "updater: check failed"
@@ -456,6 +457,19 @@ export async function runFaultLaunch(options: FaultLaunchOptions): Promise<() =>
 
 		await server.close()
 	}
+
+	await findings.check("the update fault launch left no update in pending/ for the real one", () => {
+		const problems = pendingProblems(target, entry.size)
+
+		// Whatever is there, the real update must not reuse it.
+		rmSync(path.join(target.updaterCache, "pending"), { recursive: true, force: true })
+
+		if (problems.length > 0) {
+			fail(problems.join("; "))
+		}
+
+		return "no update-info.json and no full-size download; pending/ emptied"
+	})
 
 	return own ? () => findings.finish() : () => undefined
 }
