@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next"
-import { cn, deriveStorageBreakdown, formatBytes, storageUsageLevel } from "@filen/shared"
+import { cn, deriveStorageBreakdown, formatBytes, isProAccount, storageUsageLevel } from "@filen/shared"
 import { tierLabelKey } from "@/features/settings/lib/billing"
 import { storagePercent, STORAGE_LEVEL_FILL_CLASS } from "@/features/settings/lib/storageBreakdown"
 import type { AccountQuerySuccess } from "@/queries/account"
@@ -12,11 +12,12 @@ interface ProfileHeaderProps {
 }
 
 // Who you are at a glance, all from the account read the page already gates on. The tier follows the
-// Billing page's rule (tierLabelKey: isPremium only, never a plan name) and the usage the Storage
+// Billing page's rule (tierLabelKey from isProAccount(subs), never a plan name) and the usage the Storage
 // row's derivation, so the three surfaces cannot disagree.
 function ProfileHeader({ accountQuery }: ProfileHeaderProps) {
 	const { t } = useTranslation(["settings", "common"])
-	const { nickName, email, isPremium, storageUsed, maxStorage, versionedStorage } = accountQuery.data
+	const { nickName, email, subs, storageUsed, maxStorage, versionedStorage } = accountQuery.data
+	const isPro = isProAccount(subs)
 	const hasNickname = nickName !== undefined && nickName.length > 0
 	const breakdown = deriveStorageBreakdown(storageUsed, maxStorage, versionedStorage)
 	const usedPercent = storagePercent(breakdown.usedBytes, breakdown.maxBytes)
@@ -30,7 +31,7 @@ function ProfileHeader({ accountQuery }: ProfileHeaderProps) {
 			</div>
 			<div className="flex w-full flex-col gap-2 sm:w-56">
 				<div className="flex items-center justify-between gap-2">
-					<Badge variant={isPremium ? "default" : "secondary"}>{t(tierLabelKey(isPremium))}</Badge>
+					<Badge variant={isPro ? "default" : "secondary"}>{t(tierLabelKey(isPro))}</Badge>
 					<span className="truncate text-xs text-muted-foreground tabular-nums">
 						{t("common:storageUsage", {
 							used: formatBytes(Number(breakdown.usedBytes)),

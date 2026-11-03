@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { ArrowUpIcon, PlusIcon, UploadIcon, HardDriveIcon } from "lucide-react"
 import type { Chat, ChatMessage, ChatParticipant } from "@filen/sdk-rs"
-import { cn } from "@filen/shared"
+import { cn, isProAccount } from "@filen/shared"
 import { noop } from "@/lib/utils"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { enqueueChatMessage } from "@/features/chats/lib/sync"
@@ -79,7 +79,9 @@ export function Composer({
 	// already ran into the server's own createFileLink/createDirectoryLink rejection (attachments.ts's
 	// own header comment). Undefined (still loading) treats as non-Pro — the safe default while the
 	// account query is in flight, same posture as gating on `isOnline` before its first paint.
-	const isPremium = sender?.isPremium === true
+	// Pro as the backend decides it when it accepts or refuses the attachment's link (isUserPro: any activated
+	// subscription), not the account's premium flag (one-off purchases only, never reset).
+	const isPro = sender !== undefined && isProAccount(sender.subs)
 	const chatUuid = chat.uuid
 	const entry = useChatComposerEntry(chatUuid)
 	const draft = entry.draft
@@ -130,7 +132,7 @@ export function Composer({
 	const overLimit = isOverLimit(draft)
 	// Why attaching is refused (trigger tooltip, drop toast). Offline wins when both apply: going online fixes
 	// that one, while reconnecting alone can't fix a non-Pro rejection.
-	const attachGateReason = !isOnline ? t("common:offlineActionDisabled") : !isPremium ? t("chatComposerAttachPremiumRequired") : undefined
+	const attachGateReason = !isOnline ? t("common:offlineActionDisabled") : !isPro ? t("chatComposerAttachPremiumRequired") : undefined
 
 	// Hydrate the draft from disk once per chat, but never clobber a live draft already in the store (the
 	// user may have typed during the async read, or a menu may have loaded an edit body).
@@ -333,7 +335,7 @@ export function Composer({
 		event.preventDefault()
 
 		// Same gate as the attach menu trigger: a drop is the one path to an upload that bypasses it.
-		if (isAttachDisabled(uploadingCount, isOnline, isPremium)) {
+		if (isAttachDisabled(uploadingCount, isOnline, isPro)) {
 			toast.error(attachGateReason ?? t("chatComposerAttachInProgress"))
 
 			return
@@ -518,7 +520,7 @@ export function Composer({
 								// drive-attach start, not a durably-queued send), unlike the send button below,
 								// which stays enabled offline by design (its outbox queues and flushes later).
 								// Also pre-gated on Pro status.
-								disabled={isAttachDisabled(uploadingCount, isOnline, isPremium)}
+								disabled={isAttachDisabled(uploadingCount, isOnline, isPro)}
 								aria-label={t("chatComposerAttach")}
 								title={attachGateReason}
 							>

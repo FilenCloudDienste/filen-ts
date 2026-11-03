@@ -12,7 +12,9 @@ import type { Chat, ChatMessage } from "@filen/sdk-rs"
 // edit mode's emptied-input behaviour, the reply banner, and the suggestion listbox's keyboard/ARIA wiring.
 
 const { state, preflightAttachments, uploadAttachment, toastError } = vi.hoisted(() => ({
-	state: { isOnline: true, isPremium: true },
+	// Pro follows the subscriptions (isProAccount, the backend's isUserPro), never the account's isPremium flag:
+	// the default here is a subscriber whose isPremium is false, as it is for every subscription-only account.
+	state: { isOnline: true, subs: [{ activated: true }] as { activated: boolean }[], isPremium: false },
 	preflightAttachments: vi.fn<(files: File[]) => Promise<boolean>>(() => Promise.resolve(true)),
 	uploadAttachment: vi.fn<(file: File) => Promise<{ status: "success"; url: string }>>(),
 	toastError: vi.fn()
@@ -20,7 +22,7 @@ const { state, preflightAttachments, uploadAttachment, toastError } = vi.hoisted
 
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 vi.mock("@/lib/useIsOnline", () => ({ useIsOnline: () => state.isOnline }))
-vi.mock("@/queries/account", () => ({ useAccountQuery: () => ({ data: { isPremium: state.isPremium } }) }))
+vi.mock("@/queries/account", () => ({ useAccountQuery: () => ({ data: { isPremium: state.isPremium, subs: state.subs } }) }))
 vi.mock("@/features/chats/lib/attachments", () => ({ preflightAttachments, uploadAttachment }))
 vi.mock("@/features/chats/lib/sync", () => ({ enqueueChatMessage: vi.fn() }))
 vi.mock("@/features/chats/lib/typing", () => ({ signalTyping: vi.fn(), signalStopped: vi.fn() }))
@@ -69,7 +71,8 @@ async function dropFile(target: HTMLElement): Promise<boolean> {
 
 beforeEach(() => {
 	state.isOnline = true
-	state.isPremium = true
+	state.subs = [{ activated: true }]
+	state.isPremium = false
 })
 
 describe("Composer — dropping files", () => {
@@ -85,7 +88,17 @@ describe("Composer — dropping files", () => {
 	})
 
 	it("refuses the drop on a free account, without uploading", async () => {
-		state.isPremium = false
+		state.subs = []
+
+		await dropFile(renderComposer())
+
+		expect(uploadAttachment).not.toHaveBeenCalled()
+		expect(toastError).toHaveBeenCalledWith("Attachments require a Pro subscription")
+	})
+
+	it("refuses the drop when only the one-off isPremium flag is set and no subscription is active", async () => {
+		state.subs = [{ activated: false }]
+		state.isPremium = true
 
 		await dropFile(renderComposer())
 

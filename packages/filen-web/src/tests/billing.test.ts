@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { tierLabelKey, referralLink, referralEarnedStorage, formatBillingCost, subscriptionStatus } from "@/features/settings/lib/billing"
 
-describe("tierLabelKey (account-plans-stack rule: derived from isPremium only)", () => {
+describe("tierLabelKey (account-plans-stack rule: derived from isProAccount(subs) only)", () => {
 	it("Free for a non-premium account", () => {
 		expect(tierLabelKey(false)).toBe("settingsBillingTierFree")
 	})

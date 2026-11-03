@@ -345,7 +345,7 @@ describe("buildPublicLinkUrl", () => {
 })
 
 describe("resolvePremiumGateState", () => {
-	it("is 'loading' when isPremium is undefined (the account query hasn't resolved yet)", () => {
+	it("is 'loading' when isPro is undefined (the account query hasn't resolved yet)", () => {
 		expect(resolvePremiumGateState(undefined, "pending")).toBe("loading")
 	})
 

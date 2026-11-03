@@ -56,7 +56,7 @@ const FILE = narrowItem({
 } satisfies File)
 
 beforeEach(() => {
-	accountState.current = { status: "success", data: { isPremium: true }, error: null, refetch: refetchAccount }
+	accountState.current = { status: "success", data: { subs: [{ activated: true }] }, error: null, refetch: refetchAccount }
 })
 
 afterEach(() => {

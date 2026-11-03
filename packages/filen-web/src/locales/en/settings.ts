@@ -183,7 +183,7 @@ export const settings = {
 	settingsDeleteAllItemsSuccess: "Everything has been deleted.",
 
 	// ── Billing (read-only) ───────────────────────────────────────────────
-	/** Tier label rule (account-plans-stack): derived from isPremium only, never a raw plan name */
+	/** Tier label rule (account-plans-stack): derived from isProAccount(subs) only, never a raw plan name or isPremium */
 	settingsBillingTierFree: "Free",
 	settingsBillingTierPro: "Pro",
 	settingsBillingCurrentPlanTitle: "Current plan",

@@ -7,6 +7,7 @@ import type { PublicLinkExpiration } from "@filen/sdk-rs"
 import type { DriveItem } from "@/features/drive/lib/item"
 import { createLink, disableLink, updateLink } from "@/features/drive/lib/actions"
 import { useDriveItemLinkStatusQuery, type DriveItemLinkStatus } from "@/features/drive/queries/drive"
+import { isProAccount } from "@filen/shared"
 import { useAccountQuery } from "@/queries/account"
 import {
 	buildLinkUpdate,
@@ -91,7 +92,7 @@ export function LinkDialog({ item, onClose }: LinkDialogProps) {
 	const { t } = useTranslation(["drive", "common"])
 	const linkStatusQuery = useDriveItemLinkStatusQuery(item)
 	const accountQuery = useAccountQuery()
-	const premiumGate = resolvePremiumGateState(accountQuery.data?.isPremium, accountQuery.status)
+	const premiumGate = resolvePremiumGateState(accountQuery.data ? isProAccount(accountQuery.data.subs) : undefined, accountQuery.status)
 	const isOnline = useIsOnline()
 	const [pending, setPending] = useState(false)
 	const [createProgress, setCreateProgress] = useState<{ downloaded: number; total: number | undefined } | null>(null)

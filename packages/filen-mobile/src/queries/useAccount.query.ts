@@ -1,7 +1,7 @@
 import { useQuery, type UseQueryOptions, type UseQueryResult } from "@tanstack/react-query"
 import { queryClient, queryUpdater, getCachedQuery } from "@/queries/client"
 import auth from "@/lib/auth"
-import type { QuotaCheckDeps } from "@filen/shared"
+import { isProAccount, type QuotaCheckDeps } from "@filen/shared"
 import { toSignalOpts } from "@/lib/signals"
 
 export const BASE_QUERY_KEY = "useAccountQuery"
@@ -178,9 +178,10 @@ export function useAccountQuery(options?: Omit<UseQueryOptions, "queryKey" | "qu
 	return query as UseQueryResult<Account, Error>
 }
 
-// The feature gate (public links, chat attachments): any activated subscription, deliberately not isPremium.
+// The feature gate (public links, chat attachments): any activated subscription, deliberately not isPremium. The
+// rule itself is shared with the web app (isProAccount, the backend's isUserPro).
 export function isAccountSubscribed(accountQuery: UseQueryResult<Account, Error>): boolean {
-	return accountQuery.status === "success" && accountQuery.data.subs.some(sub => sub.activated)
+	return accountQuery.status === "success" && isProAccount(accountQuery.data.subs)
 }
 
 export default useAccountQuery

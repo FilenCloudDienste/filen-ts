@@ -138,18 +138,19 @@ export function buildPublicLinkUrl(item: DriveItem, status: DriveItemLinkStatus)
 // own `userIsSubbed` gate) — a state rather than a plain boolean so "the account query hasn't
 // resolved yet" is a distinct, explicit state from "resolved and not premium": the two render
 // completely differently (a loading spinner vs. the subscription empty-state), and collapsing them
-// would flash the gate at every account-query cold start. `isPremium` is `undefined` for BOTH the
+// would flash the gate at every account-query cold start. `isPro` (isProAccount of the account's subs, the
+// backend's own isUserPro rule that also refuses the link server-side) is `undefined` for BOTH the
 // pending and the error case (an error never overwrites previously-cached data, and there is none on a
 // cold start), so the query's status tells the two apart: a failed read with nothing cached is "error"
 // (the dialog offers a retry) rather than a spinner that never settles.
 export type PremiumGateState = "loading" | "error" | "gated" | "allowed"
 
-export function resolvePremiumGateState(isPremium: boolean | undefined, accountStatus: "pending" | "error" | "success"): PremiumGateState {
-	if (isPremium === undefined) {
+export function resolvePremiumGateState(isPro: boolean | undefined, accountStatus: "pending" | "error" | "success"): PremiumGateState {
+	if (isPro === undefined) {
 		return accountStatus === "error" ? "error" : "loading"
 	}
 
-	return isPremium ? "allowed" : "gated"
+	return isPro ? "allowed" : "gated"
 }
 
 // The dialog's item-hero header — name, type label, and (files only) a size line. A directory's true

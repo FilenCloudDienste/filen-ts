@@ -3,11 +3,12 @@ import type { SettingsKey } from "@/lib/i18n"
 
 // The account-plans-stack rule (project memory: Filen accounts can stack multiple, even different,
 // plans to combine their total storage — a single plan/sub name is never a tier label): derive Free
-// vs. Pro from `isPremium` ONLY, never from `plans`/`subs[].planName`. Table rows below still show a
-// subscription's own real `planName` — that rule is about a SINGLE headline tier label, not about
-// hiding what a stacked subscription actually is in its own row.
-export function tierLabelKey(isPremium: boolean): SettingsKey {
-	return isPremium ? "settingsBillingTierPro" : "settingsBillingTierFree"
+// vs. Pro from `isProAccount(subs)` (@filen/shared, the backend's own isUserPro rule) ONLY, never from
+// `plans`/`subs[].planName` and never from the account's `isPremium` (set only by one-off purchases,
+// never reset). Table rows below still show a subscription's own real `planName` — that rule is about a
+// SINGLE headline tier label, not about hiding what a stacked subscription actually is in its own row.
+export function tierLabelKey(isPro: boolean): SettingsKey {
+	return isPro ? "settingsBillingTierPro" : "settingsBillingTierFree"
 }
 
 // `https://filen.io/r/<refId>` — verified against old-web's invite card, the one other surface that
