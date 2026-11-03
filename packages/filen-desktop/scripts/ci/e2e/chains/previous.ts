@@ -32,6 +32,10 @@ import { runOfflineProbe } from "../spikes/offline.ts"
 import { runOfflineCheck } from "./offlineCheck.ts"
 import { inP11Turn } from "./offlineListing.ts"
 import { runConflictsCheck, seedConflictsCheck } from "./conflictsCheck.ts"
+import { runCloudFullCheck, takeQuotaCredentials } from "./cloudFullCheck.ts"
+import { runDiskFullCheck } from "./diskFullCheck.ts"
+import { runFileLockCheck } from "./fileLockCheck.ts"
+import { runProxyChecks } from "./proxyCheck.ts"
 import { fixtureTree, PREVIOUS_DELTAS, PREVIOUS_PAIRS, treeSnapshot, writeTree } from "../fixtures.ts"
 import { CHOOSER_BUDGET_MS } from "../os.ts"
 import { cloudSnapshot, diffSnapshots, snapshotText, type Snapshot } from "../snapshot.ts"
@@ -80,6 +84,12 @@ import {
 //   P12 conflicts and held       in the two-way pair: a held batch approved while paused (applies on resume), conflicts
 //                                resolved one by one and in bulk through the Issues tab; disk, cloud and bin byte for
 //                                byte (chains/conflictsCheck.ts)
+//   P13 local disk full          a pair on a small volume halts localStorageFull and recovers (chains/diskFullCheck.ts)
+//   P14 proxy only               N blocked but for a loopback CONNECT proxy syncs and reads the drive through it
+//   P15 connection faults        resets, a throttle and a slow first byte through that proxy (chains/proxyCheck.ts)
+//   P16 file locks (Windows)     files held open without sharing (chains/fileLockCheck.ts)
+//   P17 cloud storage full       Linux x64 deb, after P8: the quota account halts remoteStorageFull and recovers
+//                                (chains/cloudFullCheck.ts; one sign-in on that account)
 //
 // Linux deb and AppImage, Windows NSIS and macOS dmg; what differs per OS (the native folder chooser, the drive as the
 // OS sees it, quitting, uninstalling) is behind scripts/ci/e2e/os.ts.
@@ -98,6 +108,8 @@ interface PairState {
 }
 
 export async function runPreviousDeep(options: Omit<UpdateOptions, "hooks">, artifacts: string): Promise<void> {
+	// Before anything starts: nothing launched from here may inherit the quota account's secrets.
+	const quota = takeQuotaCredentials()
 	const chain = await openChain("previous", options, artifacts)
 	const { findings, cloud, cloudDir, localDir, credentials, work, target, page, userData, rootOf, snapshotOf, connect, quit } = chain
 	const { syncOverview, mountsOverview, signedOutOnFailure } = chain
@@ -659,6 +671,27 @@ export async function runPreviousDeep(options: Omit<UpdateOptions, "hooks">, art
 				})
 			}
 
+			// Gap 5 (plan D3): the local disk full, Windows file locks, then N through a proxy only and its faults.
+			await runDiskFullCheck(chain)
+
+			if (target.platform === "win") {
+				await runFileLockCheck(chain, {
+					pair: pairs.find(pair => pair.name === "e2e-twoway") ?? fail("no pair e2e-twoway"),
+					cloudDir: `${cloudDir}/e2e-twoway`
+				})
+			}
+
+			await runProxyChecks(chain, {
+				pairs,
+				editPair: "e2e-twoway",
+				editCloudDir: `${cloudDir}/e2e-twoway`,
+				pin,
+				driveFile: {
+					path: `${cloudDir}/e2e-r2l/media/blob.bin`,
+					sha256: treeSnapshot(trees.get("e2e-r2l") ?? fail("no tree")).get("media/blob.bin")?.sha256 ?? fail("no blob.bin")
+				}
+			})
+
 			witness = await chain.beforeSignOut()
 
 			await findings.must("P8 sign out through the account menu", async () => {
@@ -706,6 +739,7 @@ export async function runPreviousDeep(options: Omit<UpdateOptions, "hooks">, art
 		await findings.check("P8 old profile entries are gone and none holds a value from before the sign-out", () =>
 			chain.profileHoldsNoOldValue(signedOutWith())
 		)
+		await runCloudFullCheck(chain, quota)
 
 		await findings.check("P9 the app uninstalled as a user does, the user's directories left", async () => {
 			const removed = await chain.os.uninstall(target)

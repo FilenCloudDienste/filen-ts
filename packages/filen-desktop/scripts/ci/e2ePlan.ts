@@ -30,8 +30,9 @@ import { OLDER_SCENARIO, olderFor, runsOlder } from "./olderPlan.ts"
 // for real, on different entries where the OS has more than one: rotated by the day at night, so every entry's form
 // is exercised within days, and fixed in release and custom runs. Entries whose chains sign in for real get a
 // `stagger` (seconds) that spaces those sign-ins between parallel jobs. `logins` is the run's worst case (every slot
-// minted), which may not pass MAX_LOGINS_PER_RUN. `pins` names the old clients the run signs in or seeds, whose SDK
-// must take the account's auth version (checked by job `session`).
+// minted), which may not pass MAX_LOGINS_PER_RUN. Chain P on QUOTA_ENTRY also signs in once on the quota account
+// (`quota`, the cloud-storage-full check) when that still fits. `pins` names the old clients the run signs in or seeds,
+// whose SDK must take the account's auth version (checked by job `session`).
 //
 //   node scripts/ci/e2ePlan.ts
 
@@ -71,6 +72,8 @@ export interface TestEntry extends Entry {
 	spike: Spike | ""
 	// Scenario update-kill (scripts/ci/e2e/updateKill.ts).
 	updateKill: boolean
+	// Chain P also runs the cloud-storage-full check, which signs in once through the form on the quota account.
+	quota: boolean
 }
 
 export interface BuildEntry {
@@ -207,6 +210,9 @@ const STAGGER_SECONDS = 20
 // The session job's slots, each minted at most once a run (scripts/ci/e2e/session.ts SLOTS; this planner runs with no
 // dependencies installed, so it cannot import them).
 export const SESSION_SLOTS = 2
+// The entry whose chain P checks the cloud storage full (the quota account), when the run's logins leave room for its
+// sign-in.
+export const QUOTA_ENTRY = "linux-x64-deb"
 // A run's worst case, whatever is asked: with MAX_OTHER_RUNS others (desktop-e2e.yml) the account stays well inside
 // its 90 logins an hour even if every runner shared one IP.
 export const MAX_LOGINS_PER_RUN = 10
@@ -431,7 +437,8 @@ export function plan(input: PlanInput, readiness: DeepReadiness = { ready: DEEP_
 			// Only the form sign-ins are spaced; a seeded chain makes no login.
 			stagger: signInPrevious === "real" || signInLegacy === "real" || signInOlder === "real" ? STAGGER_SECONDS * realCount++ : 0,
 			spike,
-			updateKill: killed(entry)
+			updateKill: killed(entry),
+			quota: false
 		}
 	})
 	const builds = (Object.keys(builders) as Os[])
@@ -441,7 +448,7 @@ export function plan(input: PlanInput, readiness: DeepReadiness = { ready: DEEP_
 	// Chain K signs nothing in and reaches no cloud.
 	const session = tests.some(entry => entry.deepPrevious || entry.deepLegacy || entry.deepOlder)
 	// Spike s7 signs in through the 4.x form on its own.
-	const logins =
+	let logins =
 		(session ? SESSION_SLOTS : 0) +
 		tests.reduce(
 			(sum, entry) =>
@@ -452,6 +459,17 @@ export function plan(input: PlanInput, readiness: DeepReadiness = { ready: DEEP_
 				Number(entry.spike === "s7"),
 			0
 		)
+	// The cloud-full check's one sign-in on the quota account, where the run has room for it.
+	const quota = tests.find(entry => spike === "" && entry.deepPrevious && idOf(entry) === QUOTA_ENTRY)
+
+	if (quota !== undefined && logins < MAX_LOGINS_PER_RUN) {
+		quota.quota = true
+		logins++
+	} else if (quota !== undefined) {
+		notices.push(
+			`The cloud-storage-full check is skipped: the run's sign-ins are at MAX_LOGINS_PER_RUN (${String(MAX_LOGINS_PER_RUN)}).`
+		)
+	}
 
 	if (logins > MAX_LOGINS_PER_RUN) {
 		invalid(

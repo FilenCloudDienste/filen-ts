@@ -31,7 +31,9 @@
 # with nothing transferred or rewritten. 3.0.53 -> N (scripts/ci/e2e/chains/legacy.ts): 3.0.53 signed in through its
 # own page, given prefs, a PIN, the drive, WebDAV and five pairs (one per mode), settled, edited once on disk and once
 # in the cloud while closed, then updated by its own updater; N must migrate it all with the two edits as the only
-# changes. Both end with sign-out and uninstall. Deep is ready (scripts/ci/e2ePlan.ts DEEP_READY) per entry and
+# changes. Chain P also fills a small local volume, syncs through a loopback CONNECT proxy only (direct egress blocked)
+# with resets, a throttle and a slow first byte, holds Windows files locked, and on Linux x64 deb fills the quota
+# account's storage (one more form sign-in, on that account). Both end with sign-out and uninstall. Deep is ready (scripts/ci/e2ePlan.ts DEEP_READY) per entry and
 # chain; an entry being brought up (scripts/ci/e2ePlan.ts DEEP_TRIAL) runs deep only when a custom deep dispatch
 # names it in `formats`; the rest run at install depth with a notice. Logins are rate-limited (90 an hour per IP) and
 # an account's API key outlives every sign-out, so job `session` keeps one session per account slot in the Actions
@@ -707,16 +709,21 @@ jobs:
       - name: N-1 -> N, signed in
         if: matrix.deepPrevious
         shell: bash
-        timeout-minutes: 100
+        timeout-minutes: 150
         env:
           FILEN_DESKTOP_E2E_TEST_EMAIL: ${{ secrets.FILEN_DESKTOP_E2E_TEST_EMAIL }}
           FILEN_DESKTOP_E2E_TEST_PASSWORD: ${{ secrets.FILEN_DESKTOP_E2E_TEST_PASSWORD }}
           FILEN_DESKTOP_E2E_SESSION_KEY: ${{ secrets.FILEN_DESKTOP_E2E_SESSION_KEY }}
           FILEN_DESKTOP_E2E_SESSION_DIR: ${{ runner.temp }}/e2e-session
+          # The cloud-storage-full check (matrix.quota, one entry): its one form sign-in on the quota account. The
+          # harness takes both out of its environment before anything starts, and skips the check without them.
+          FILEN_DESKTOP_E2E_QUOTA_EMAIL: ${{ secrets.FILEN_DESKTOP_E2E_QUOTA_EMAIL }}
+          FILEN_DESKTOP_E2E_QUOTA_PASSWORD: ${{ secrets.FILEN_DESKTOP_E2E_QUOTA_PASSWORD }}
+          E2E_QUOTA: ${{ matrix.quota && '1' || '' }}
           E2E_SIGN_IN: ${{ matrix.signInPrevious }}
           E2E_STAGGER_SECONDS: ${{ matrix.stagger }}
           # Below the step's timeout: a chain that overruns writes its evidence and fails by name.
-          E2E_CHAIN_BUDGET_MINUTES: 85
+          E2E_CHAIN_BUDGET_MINUTES: 135
           E2E_OFFLINE_SPIKE: ${{ matrix.spike == 'offline' && '1' || '' }}
         run: bash scripts/ci/deepSession.sh --scenario previous --depth deep ${{ env.TEST_ARGS }} --artifacts e2e-artifacts
       - name: N-1 -> N (Fedora container)

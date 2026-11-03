@@ -513,11 +513,11 @@ export function encodePowerShell(script: string): string {
 	).toString("base64")
 }
 
-function powershellArgs(script: string): string[] {
+export function powershellArgs(script: string): string[] {
 	return ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encodePowerShell(script)]
 }
 
-function powershellEnv(): NodeJS.ProcessEnv {
+export function powershellEnv(): NodeJS.ProcessEnv {
 	return Object.fromEntries(Object.entries(process.env).filter(([name]) => name.toLowerCase() !== "psmodulepath"))
 }
 

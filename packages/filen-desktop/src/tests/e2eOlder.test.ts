@@ -95,8 +95,8 @@ describe("3.0.47 in the plan", () => {
 		expect(older.every(entry => entry.deepOlder && entry.deep)).toBe(true)
 		expect(older.map(entry => entry.signInOlder)).toEqual(["real", "seeded", "seeded"])
 		expect(result.tests.filter(entry => !entry.older).every(entry => !entry.deepOlder && entry.signInOlder === "")).toBe(true)
-		// Two session slots, one 4.x and one 3.0.53 form per OS, one 3.0.47 form.
-		expect(result.logins).toBe(9)
+		// Two session slots, one 4.x and one 3.0.53 form per OS, one 3.0.47 form, the quota account's form.
+		expect(result.logins).toBe(10)
 		expect(result.logins).toBeLessThanOrEqual(MAX_LOGINS_PER_RUN)
 		expect(result.pins).toBe("3.0.53,3.0.47")
 		// The real 3.0.47 sign-in is spaced like the others.

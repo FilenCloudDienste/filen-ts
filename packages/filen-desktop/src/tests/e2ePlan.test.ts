@@ -145,8 +145,12 @@ describe("e2ePlan depth", () => {
 		expect(nightly.tests.filter(entry => entry.format === "rpm").some(entry => entry.deep)).toBe(false)
 		// No rotation: every deep format every night, all of them deep.
 		expect(nightly.notices.some(notice => notice.startsWith("Deep depth is not built yet"))).toBe(false)
-		// Both slots at worst, then one 4.x and one 3.0.53 form sign-in per OS; the other chains are seeded.
-		expect(nightly.logins).toBe(SESSION_SLOTS + 6)
+		// Both slots at worst, then one 4.x and one 3.0.53 form sign-in per OS (the other chains are seeded), and the
+		// cloud-full check's one on the quota account.
+		expect(nightly.logins).toBe(SESSION_SLOTS + 6 + 1)
+		expect(nightly.tests.filter(entry => entry.quota).map(entry => `${entry.platform}-${entry.arch}-${entry.format}`)).toEqual([
+			"linux-x64-deb"
+		])
 		// Once every trial is promoted: both chains on eight entries, still one form sign-in per OS and chain.
 		expect(
 			plan(
@@ -161,7 +165,7 @@ describe("e2ePlan depth", () => {
 					trial: {}
 				}
 			).logins
-		).toBe(SESSION_SLOTS + 6)
+		).toBe(SESSION_SLOTS + 6 + 1)
 		// The nightly macOS builds are Developer-ID signed (Squirrel.Mac needs it), Windows and Linux are not.
 		expect(Object.fromEntries(nightly.builds.map(build => [build.os, build.sign]))).toEqual({ windows: false, mac: true, linux: false })
 		expect(mac?.signed).toBe(true)
@@ -176,7 +180,7 @@ describe("e2ePlan depth", () => {
 			"linux-arm64-AppImage@0"
 		])
 		// A custom deep run without FORMATS takes the release's deep entries, with the same form sign-ins.
-		expect(plan({ ...dispatch, signed: true, depth: "deep" }).logins).toBe(SESSION_SLOTS + 6)
+		expect(plan({ ...dispatch, signed: true, depth: "deep" }).logins).toBe(SESSION_SLOTS + 6 + 1)
 	})
 
 	it("runs a trial entry deep only when a custom deep run names it", () => {
@@ -335,8 +339,8 @@ describe("e2ePlan sign-ins", () => {
 					expect(ofOs.filter(entry => entry.signInLegacy === "seeded")).toHaveLength(ofOs.length - 1)
 				}
 
-				// A release also signs 3.0.47 in once (scripts/ci/olderPlan.ts).
-				expect(result.logins).toBe(SESSION_SLOTS + 6 + (input === release ? 1 : 0))
+				// A release also signs 3.0.47 in once (scripts/ci/olderPlan.ts); the quota account's sign-in on linux-x64-deb on top.
+				expect(result.logins).toBe(SESSION_SLOTS + 6 + (input === release ? 1 : 0) + 1)
 				expect(result.logins).toBeLessThanOrEqual(MAX_LOGINS_PER_RUN)
 
 				if (input === nightly) {
@@ -391,7 +395,7 @@ describe("e2ePlan sign-ins", () => {
 		// Linux's four deep entries alone sign in eight times through forms, at the cap; every OS is above it.
 		expect(plan({ ...custom, platforms: "linux" }).logins).toBe(MAX_LOGINS_PER_RUN)
 		expect(() => plan({ ...custom, platforms: "" })).toThrow(/MAX_LOGINS_PER_RUN/)
-		expect(plan({ ...custom, platforms: "", signin: "auto" }).logins).toBe(SESSION_SLOTS + 6)
+		expect(plan({ ...custom, platforms: "", signin: "auto" }).logins).toBe(SESSION_SLOTS + 6 + 1)
 		expect(() => plan({ ...nightly, signin: "real" })).toThrow(/custom profile only/)
 		expect(() => plan({ ...dispatch, signin: "seeded" })).toThrow(/SIGNIN/)
 		expect(plan({ ...dispatch, profile: "nightly", spike: "s7" }).logins).toBe(1)
