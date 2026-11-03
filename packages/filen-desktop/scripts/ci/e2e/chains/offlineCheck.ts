@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto"
 import { writeFileSync } from "node:fs"
 import path from "node:path"
-import { errorMessage, fail } from "../../support.ts"
+import { errorMessage, fail, waitFor } from "../../support.ts"
 import { appPids, createSampler, describeSample, offlineBlockFor, relaunchThrough, type Sampler, startThrough } from "../offlineBlock.ts"
 import type { Chain } from "./common.ts"
 
@@ -73,11 +73,16 @@ export async function runOfflineCheck(chain: Chain, options: OfflineCheckOptions
 				await block.lift()
 			}
 
+			const lifted = Date.now()
 			const recovered = await sampler.watch(RECOVER_MS, current => current.offline === 0 && current.lastErrors === 0)
+			// Recovery clears the offline halt before the pass that uploads the edit has finished.
+			const uploaded = await waitFor(`${name} in the cloud`, Math.max(0, lifted + RECOVER_MS - Date.now()), async () =>
+				(await inCloud(name)) ? true : null
+			).catch(() => false)
 
-			if (recovered.hit === null || !(await inCloud(name))) {
+			if (recovered.hit === null || !uploaded) {
 				fail(
-					`not recovered within 60 s of the lift (${name} ${(await inCloud(name)) ? "uploaded" : "not uploaded"}): ${describeSample(recovered.last)}`
+					`not recovered within 60 s of the lift (${name} ${uploaded ? "uploaded" : "not uploaded"}): ${describeSample(recovered.last)}`
 				)
 			}
 
