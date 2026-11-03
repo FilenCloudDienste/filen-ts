@@ -25,11 +25,13 @@ import { sessionUserId, type VaultCipher } from "./sessionVault.ts"
 //   started   a read began; `failedStarts` counts the attempts that never reached `imported`. Without secure storage
 //             (`volatileStash`) a read that worked stays here: its stash lives in memory only, so every launch reads
 //             the stash again, until the wait for the wipe ran out. An attempt the keychain stopped (`deferred` while
-//             the session is not decided yet) stays here too, uncounted, and is tried again next launch; the prefs go
-//             first, once (`prefsImported`), so they never wait for the keychain
+//             the session is not decided yet) stays here too, uncounted, and is tried again next launch, until the
+//             wait ran out since the first attempt (then abandoned); the prefs go first, once (`prefsImported`), so
+//             they never wait for the keychain
 //   imported  session, PIN, prefs and the stash are stored (only the stash when `stashOnly`); the old origin still
 //             holds its plaintext secrets
-//   abandoned the read failed too often; nothing is imported, the old secrets are still wiped once the wait ran out
+//   abandoned the read failed too often, or the keychain still stopped it once the wait ran out; nothing more is
+//             imported, the old secrets are still wiped once the wait ran out
 //   verified  the migrated account proved itself (an authed request, a sign-in as the same user) or the wait ran out;
 //             the old secrets are wiped, `wiped` says whether that finished; LevelDB keeps deleted values on disk
 //             until a compaction that may never come, so a later launch deletes the old origin's stores before
@@ -65,7 +67,8 @@ export interface MigrationMarker {
 export const MAX_FAILED_STARTS = 3
 
 // The old origin's secrets are wiped at the latest this long after the import, verified or not (offline, an account
-// whose session the server no longer takes), or after the first attempt of an import that was given up.
+// whose session the server no longer takes), or after the first attempt of an import that was given up; an import the
+// keychain still stops this long after its first attempt is given up.
 export const WIPE_AFTER_MS = 7 * 24 * 60 * 60 * 1000
 
 const markerSchema = type({
@@ -150,7 +153,7 @@ export type StartupDecision =
 	// Imports the stash only: the user is signed in to this app already.
 	| "stash"
 	// The vault cannot be read right now (a keychain locked at login or denied): only the prefs are imported, once,
-	// and the rest is asked again next launch, uncounted.
+	// and the rest is asked again next launch, uncounted, until deferralExpired.
 	| "defer"
 	| "skip-fresh"
 	// Too many failed attempts: no more reads, the old secrets are wiped once the wait ran out.
@@ -198,6 +201,12 @@ export function waitExpired(marker: MigrationMarker, now: number): boolean {
 	}
 
 	return marker.stage === "imported" && (marker.userId === null || now - (marker.importedAt ?? now) >= WIPE_AFTER_MS)
+}
+
+// Whether a keychain that still stops the import gives it up: the wait ran out since the first attempt. A clock set
+// back waits again.
+export function deferralExpired(marker: MigrationMarker, now: number): boolean {
+	return marker.startedAt !== null && now - marker.startedAt >= WIPE_AFTER_MS
 }
 
 // Whether a session proves the import: it belongs to the migrated account, the resumed one or a new sign-in as it.
@@ -400,6 +409,13 @@ export function createMigration(deps: MigrationDeps): Migration {
 		})
 	}
 
+	// The keychain still stops the import once the wait ran out: given up, so the wipe can run (the prefs were imported).
+	async function abandonDeferred(current: MigrationMarker, cause: string): Promise<void> {
+		await save({ ...current, stage: "abandoned" })
+		deps.warn(`migration: given up, the keychain stopped it past the wait: ${cause}`)
+		await removeRcloneConfig()
+	}
+
 	// Errors are logged by their step and code only: none of this may ever log a value.
 	async function attempt(previous: MigrationMarker | null, mode: AttemptMode): Promise<MigrationResult> {
 		const stashOnly = mode === "stash"
@@ -486,8 +502,16 @@ export function createMigration(deps: MigrationDeps): Migration {
 				throw error
 			}
 
+			const current = marker ?? fresh("started")
+
+			if (deferralExpired(current, deps.now())) {
+				await abandonDeferred({ ...current, failedStarts: previous?.failedStarts ?? 0 }, error.code)
+
+				return { pinImported: false }
+			}
+
 			await save({
-				...(marker ?? fresh("started")),
+				...current,
 				failedStarts: previous?.failedStarts ?? 0,
 				deferred: undecided && !sessionDecided
 			})
@@ -678,13 +702,23 @@ export function createMigration(deps: MigrationDeps): Migration {
 					const decision = startupDecision(marker, legacyProfile, vault)
 
 					if (decision === "defer") {
-						if (marker?.prefsImported === true) {
-							deps.info("migration: deferred (the session vault cannot be read)")
-						} else {
+						if (marker?.prefsImported !== true) {
 							await attempt(marker, "prefs")
+						} else if (deferralExpired(marker, deps.now())) {
+							await abandonDeferred(marker, "vault status: unreadable")
+						} else {
+							// A marker older than the field starts the clock now.
+							if (marker.startedAt === null) {
+								await save({ ...marker, startedAt: deps.now() })
+							}
+
+							deps.info("migration: deferred (the session vault cannot be read)")
 						}
 
-						return result
+						// Given up: the wipe is due.
+						if (marker?.stage !== "abandoned") {
+							return result
+						}
 					}
 
 					if (decision === "skip-fresh") {

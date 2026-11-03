@@ -9,6 +9,7 @@ import { deleteLegacyStores, LEGACY_INDEXEDDB_PREFIX, legacyProfileExists } from
 import {
 	createMigration,
 	createStashStore,
+	deferralExpired,
 	legacyLogsDir,
 	legacyOwner,
 	MAX_FAILED_STARTS,
@@ -654,6 +655,82 @@ describe("createMigration", () => {
 		await second.migration.start()
 		expect(second.deps.readLegacy).not.toHaveBeenCalled()
 		expect(second.markerFile.text()).toBe(first.markerFile.text())
+	})
+
+	it("gives up a deferral once the wait ran out since the first attempt, and wipes the old secrets", async () => {
+		const deferred = marker({
+			stage: "started",
+			failedStarts: 0,
+			deferred: true,
+			prefsImported: true,
+			startedAt: 1000,
+			userId: null,
+			importedAt: null
+		})
+		const early = setup({ marker: deferred, vault: { status: "unreadable" }, now: 1000 + WIPE_AFTER_MS - 1 })
+
+		await early.migration.start()
+		await settle()
+		expect(early.stored()).toEqual(deferred)
+		expect(early.deps.wipeLegacy).not.toHaveBeenCalled()
+
+		const due = setup({ marker: deferred, vault: { status: "unreadable" }, now: 1000 + WIPE_AFTER_MS })
+
+		await expect(due.migration.start()).resolves.toEqual({ pinImported: false })
+		await settle()
+		expect(due.deps.readLegacy).not.toHaveBeenCalled()
+		expect(due.deps.prefs.set).not.toHaveBeenCalled()
+		expect(due.deps.removeRcloneConfig).toHaveBeenCalled()
+		expect(due.deps.wipeLegacy).toHaveBeenCalledOnce()
+		expect(due.stored()).toMatchObject({ stage: "verified", wiped: true, startedAt: 1000 })
+		expect(due.deps.warn).toHaveBeenCalledWith("migration: given up, the keychain stopped it past the wait: vault status: unreadable")
+	})
+
+	it("gives up an attempt the keychain stopped once the wait ran out, keeping the count", async () => {
+		const deferred = marker({
+			stage: "started",
+			failedStarts: 0,
+			deferred: true,
+			prefsImported: true,
+			startedAt: 1000,
+			userId: null,
+			importedAt: null
+		})
+		const due = setup({ marker: deferred, now: 1000 + WIPE_AFTER_MS })
+
+		due.deps.vault.set.mockRejectedValue(new Error("Error while encrypting the text provided to safeStorage.encryptStringAsync."))
+		await due.migration.start()
+		await settle()
+		expect(due.deps.wipeLegacy).toHaveBeenCalledOnce()
+		expect(due.stored()).toMatchObject({ stage: "verified", wiped: true, failedStarts: 0 })
+		expect(due.deps.warn).toHaveBeenCalledWith(
+			"migration: given up, the keychain stopped it past the wait: session import: safeStorage"
+		)
+	})
+
+	it("starts the clock on a deferral whose marker has no startedAt, and a clock set back waits again", async () => {
+		const older = marker({
+			stage: "started",
+			failedStarts: 0,
+			deferred: true,
+			prefsImported: true,
+			startedAt: null,
+			userId: null,
+			importedAt: null
+		})
+		const first = setup({ marker: older, vault: { status: "unreadable" }, now: 5000 })
+
+		await first.migration.start()
+		expect(first.stored()).toEqual({ ...older, startedAt: 5000 })
+
+		const back = setup({ marker: first.stored() ?? undefined, vault: { status: "unreadable" }, now: 1000 })
+
+		await back.migration.start()
+		await settle()
+		expect(back.stored()).toMatchObject({ stage: "started", startedAt: 5000 })
+		expect(back.deps.wipeLegacy).not.toHaveBeenCalled()
+		expect(deferralExpired({ ...older, startedAt: 5000 }, 5000 + WIPE_AFTER_MS)).toBe(true)
+		expect(deferralExpired(older, Number.MAX_SAFE_INTEGER)).toBe(false)
 	})
 
 	it("after a deferral, decides the session like a first launch: a session stored since limits it to the stash", async () => {
