@@ -5,6 +5,7 @@ import type {
 	DesktopSyncPair,
 	DesktopSyncPlan,
 	DesktopSyncPlanSummary,
+	DesktopSyncResolvedConflicts,
 	DesktopSyncResult
 } from "@filen/shared/desktop"
 import { errorMessage, fail, waitFor } from "../../support.ts"
@@ -396,27 +397,78 @@ export async function runConflictsCheck(chain: Chain, options: ConflictsCheckOpt
 			"P12 the master-key reminder over the Issues tab",
 			putOff.some(count => count > 0) ? `put off ${String(putOff.reduce((sum, count) => sum + count, 0))} time(s)` : "not shown"
 		)
-		// What a failed step left is undone through the contract, so P11 meets a running pair without conflicts.
-		findings.info("P12 left the pair running with no conflict", await settle(chain, pair.id).catch(errorMessage))
+		// What a failed step left is undone through the contract, so P11 meets a running pair with no conflict or hold.
+		findings.info("P12 left the pair running with no conflict or held deletion", await settle(chain, pair.id).catch(errorMessage))
 	}
 }
 
+// Resumes the pair, lets one pass run (a paused pair has not looked since the edits, so its counts are stale), then
+// approves what it holds and resolves what conflicts (keeping this device's), and waits for both counts at 0: what P11
+// reads as needs attention.
 async function settle(chain: Chain, pairId: string): Promise<string> {
-	const current = (await chain.syncOverview()).pairs.find(candidate => candidate.id === pairId) ?? fail("the pair is gone")
+	const page = chain.page()
+	const read = async (): Promise<DesktopSyncPair> =>
+		(await chain.syncOverview()).pairs.find(candidate => candidate.id === pairId) ?? fail("the pair is gone")
 	const done: string[] = []
+	const resumedAt = Date.now()
 
-	if (current.paused) {
-		ok("resumePair", await desktop<DesktopSyncResult<null>>(chain.page(), `window.desktop.sync.resumePair(${json(pairId)})`))
+	if ((await read()).paused) {
+		ok("resumePair", await desktop<DesktopSyncResult<null>>(page, `window.desktop.sync.resumePair(${json(pairId)})`))
 		done.push("resumed")
 	}
 
-	if (current.issues.conflicts > 0) {
-		await desktop(
-			chain.page(),
-			`window.desktop.sync.resolveConflicts(${json(pairId)}, "keepLocal", ${String(current.issues.conflicts)})`
+	const passed = await waitFor(
+		"a pass to finish",
+		SETUP_TIMEOUT_MS,
+		async () => {
+			const current = await read()
+
+			return !current.paused &&
+				current.phase === "idle" &&
+				(done.length === 0 || (current.lastSyncedAt !== null && current.lastSyncedAt >= resumedAt))
+				? current
+				: null
+		},
+		5000
+	)
+
+	if (passed.issues.heldDeletions > 0) {
+		const list = ok(
+			"heldDeletions",
+			await desktop<DesktopSyncResult<DesktopSyncHeldDeletions>>(page, `window.desktop.sync.heldDeletions(${json(pairId)})`)
 		)
-		done.push(`${String(current.issues.conflicts)} conflict(s) resolved keeping this device's`)
+
+		ok(
+			"approveDeletions",
+			await desktop<DesktopSyncResult<null>>(
+				page,
+				`window.desktop.sync.approveDeletions(${json(pairId)}, ${json(list.passToken ?? fail("no pass token"))})`
+			)
+		)
+		done.push(`${String(list.total)} held deletion(s) approved`)
 	}
 
-	return done.join("; ") || "nothing to undo"
+	if (passed.issues.conflicts > 0) {
+		ok(
+			"resolveConflicts",
+			await desktop<DesktopSyncResult<DesktopSyncResolvedConflicts>>(
+				page,
+				`window.desktop.sync.resolveConflicts(${json(pairId)}, "keepLocal", ${String(passed.issues.conflicts)})`
+			)
+		)
+		done.push(`${String(passed.issues.conflicts)} conflict(s) resolved keeping this device's`)
+	}
+
+	const settled = await waitFor(
+		"no conflict and no held deletion",
+		SETUP_TIMEOUT_MS,
+		async () => {
+			const current = await read()
+
+			return current.phase === "idle" && current.issues.conflicts === 0 && current.issues.heldDeletions === 0 ? current : null
+		},
+		5000
+	).catch(async (error: unknown) => fail(`${[...done, errorMessage(error)].join("; ")}: ${json((await read()).issues)}`))
+
+	return `${done.join("; ") || "nothing to undo"}; issues ${json(settled.issues)}`
 }

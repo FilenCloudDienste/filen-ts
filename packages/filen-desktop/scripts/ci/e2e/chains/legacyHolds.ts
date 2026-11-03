@@ -12,7 +12,7 @@ import type {
 import type { Page } from "playwright-core"
 import { errorMessage, fail, waitFor } from "../../support.ts"
 import { desktop, desktopCall, underReminder } from "../app.ts"
-import type { CloudEntry } from "../cloud.ts"
+import { type CloudEntry, runDir } from "../cloud.ts"
 import { LEGACY_PAIRS, seededBytes } from "../fixtures.ts"
 import { addLegacyPair } from "../legacyApp.ts"
 import { diffSnapshots, localSnapshot, type Snapshot } from "../snapshot.ts"
@@ -37,7 +37,13 @@ export const CLOSED_UPLOAD = {
 	path: "from-cloud-while-closed.txt",
 	bytes: seededBytes("legacy/from-cloud-while-closed", 1500)
 } as const
-export const ROOT_PAIR = { name: "e2e-root", file: "root-local.txt", bytes: seededBytes("legacy/e2e-root", 900) } as const
+export const ROOT_PAIR = { name: "e2e-root", bytes: seededBytes("legacy/e2e-root", 900) } as const
+
+// The whole-drive pair's one local file, named per run, job and chain (from the chain's cloud directory): an upload one
+// run's pair left at the drive root never reads as another run's.
+export function rootPairFile(cloudDir: string): string {
+	return `root-local-${cloudDir.replace(/[^\w-]+/g, "-")}.txt`
+}
 
 // How N's first run leaves a migrated pair it does not start.
 export interface FirstRunHold {
@@ -117,8 +123,8 @@ export function firstRunProblems(
 	]
 }
 
-// The drive root against its listing before N: every entry still there as it was, none named like a file of the
-// whole-drive pair's local directory (`forbidden`). Entries added since are other jobs' (information).
+// The drive root against its listing before N: every entry still there as it was, none added since named like a file
+// of the whole-drive pair's local directory (`forbidden`). Other entries added since are other jobs' (information).
 export function driveRootChanges(
 	before: readonly CloudEntry[],
 	after: readonly CloudEntry[],
@@ -138,7 +144,9 @@ export function driveRootChanges(
 						? [`${entry.path} replaced`]
 						: []
 			}),
-			...after.filter(entry => forbidden.includes(entry.path)).map(entry => `${entry.path} uploaded to the drive root`)
+			...after
+				.filter(entry => !then.has(entry.path) && forbidden.includes(entry.path))
+				.map(entry => `${entry.path} uploaded to the drive root`)
 		],
 		added: after.filter(entry => !then.has(entry.path) && !forbidden.includes(entry.path)).map(entry => entry.path)
 	}
@@ -146,7 +154,13 @@ export function driveRootChanges(
 
 export function legacyHolds(chain: Chain) {
 	const { findings, cloud, cloudDir, work, rootOf, page } = chain
-	const state: { uploaded: boolean; l2cLocal?: Snapshot; root?: { driveRoot: CloudEntry[]; local: Snapshot } } = { uploaded: false }
+	const state: {
+		uploaded: boolean
+		l2cLocal?: Snapshot
+		root?: { driveRoot: CloudEntry[]; local: Snapshot }
+		// Set before 3.x is given the pair, so whatever it uploads is cleaned up even when the setup step fails after.
+		rootFile?: string
+	} = { uploaded: false }
 	const hold = (name: string): FirstRunHold | null => (state.uploaded ? (LEGACY_FIRST_RUN[name] ?? null) : null)
 	const refused = (): ReadonlySet<string> => new Set(state.root === undefined ? [] : [ROOT_PAIR.name])
 	const overviewPair = async (name: string): Promise<DesktopSyncPair | undefined> =>
@@ -156,11 +170,14 @@ export function legacyHolds(chain: Chain) {
 		// With 3.x running, before it quits: the whole-drive pair, paused (it never syncs there), beside the others.
 		async addRootPair(legacyPage: Page): Promise<string> {
 			const dir = rootOf(ROOT_PAIR.name)
+			const file = rootPairFile(cloudDir)
 
 			mkdirSync(dir, { recursive: true })
-			writeFileSync(path.join(dir, ROOT_PAIR.file), ROOT_PAIR.bytes)
+			writeFileSync(path.join(dir, file), ROOT_PAIR.bytes)
 
 			const driveRoot = (await cloud.list("", false)) ?? fail("the drive root does not list")
+
+			state.rootFile = file
 			const count = await addLegacyPair(legacyPage, {
 				uuid: randomUUID(),
 				name: ROOT_PAIR.name,
@@ -314,8 +331,9 @@ export function legacyHolds(chain: Chain) {
 			}
 
 			const root = state.root
+			const rootFile = state.rootFile
 
-			if (root !== undefined) {
+			if (root !== undefined && rootFile !== undefined) {
 				await findings.check(
 					`L17 the whole-drive pair is refused honestly: ${syncText("noticeRemove")}, never ${syncText("holdStartAnyway")} (C2); removed, no hold left, the drive root and its directory unchanged`,
 					async () => {
@@ -334,7 +352,7 @@ export function legacyHolds(chain: Chain) {
 							return current.pairs.some(pair => pair.name === ROOT_PAIR.name) ? null : current
 						})
 						const held = overview.pairs.filter(pair => pair.holds.length > 0).map(pair => `${pair.name} ${json(pair.holds)}`)
-						const { problems, added } = driveRootChanges(root.driveRoot, (await cloud.list("", false)) ?? [], [ROOT_PAIR.file])
+						const { problems, added } = driveRootChanges(root.driveRoot, (await cloud.list("", false)) ?? [], [rootFile])
 						const local = diffSnapshots(root.local, await localSnapshot(rootOf(ROOT_PAIR.name)), { identity: true })
 
 						if (held.length > 0 || problems.length > 0 || local.length > 0) {
@@ -344,6 +362,31 @@ export function legacyHolds(chain: Chain) {
 						return `${value}; no hold left; every drive-root entry as before${added.length > 0 ? ` (added meanwhile, not by this pair: ${added.join(", ")})` : ""}; ${ROOT_PAIR.name}'s directory unchanged`
 					}
 				)
+			}
+
+			// Whatever uploaded the pair's file to the drive root (outside the swept directory), it is moved into this run's
+			// directory, which the sweep removes. The check above already fails on it when it ran; this one when it did not.
+			if (rootFile !== undefined) {
+				const what = `L17 nothing of ${ROOT_PAIR.name} left at the drive root`
+				const clear = async (): Promise<string> => {
+					if ((await cloud.list("", false))?.some(entry => entry.path === rootFile) !== true) {
+						return "nothing to clear"
+					}
+
+					await cloud.moveto(rootFile, `${runDir()}/drive-root-leftovers/${rootFile}`)
+
+					return `${rootFile} was at the drive root; moved into ${runDir()}`
+				}
+
+				if (root === undefined) {
+					await findings.check(what, async () => {
+						const cleared = await clear()
+
+						return cleared === "nothing to clear" ? cleared : fail(cleared)
+					})
+				} else {
+					findings.info(what, await clear().catch(errorMessage))
+				}
 			}
 		}
 	}

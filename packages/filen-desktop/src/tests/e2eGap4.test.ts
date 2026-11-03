@@ -26,6 +26,7 @@ import {
 	firstRunSettled,
 	LEGACY_FIRST_RUN,
 	ROOT_PAIR,
+	rootPairFile,
 	type ShellPairState
 } from "../../scripts/ci/e2e/chains/legacyHolds.ts"
 import type { CloudEntry } from "../../scripts/ci/e2e/cloud.ts"
@@ -174,6 +175,12 @@ function shell(overrides: Record<string, Partial<ShellPairState>> = {}, extra: S
 }
 
 describe("L16 and L17 first-run table", () => {
+	it("names the whole-drive pair's file per run, job and chain", () => {
+		expect(rootPairFile("filen-desktop-e2e/123-1/deep-mac/L")).toBe("root-local-filen-desktop-e2e-123-1-deep-mac-L.txt")
+		expect(rootPairFile("filen-desktop-e2e/123-2/deep-mac/L")).not.toBe(rootPairFile("filen-desktop-e2e/123-1/deep-mac/L"))
+		expect(rootPairFile("filen-desktop-e2e/123-1/deep-win/L")).not.toBe(rootPairFile("filen-desktop-e2e/123-1/deep-mac/L"))
+	})
+
 	const held = new Set([CLOSED_UPLOAD.pair])
 	const refused = new Set([ROOT_PAIR.name])
 	const root: ShellPairState = { name: ROOT_PAIR.name, pairId: null, state: "unsupported", review: null, notices: ["refusedWholeDrive"] }
@@ -232,12 +239,17 @@ describe("L16 and L17 first-run table", () => {
 	it("keeps the drive root's entries, refuses the pair's file there and tells other jobs' additions apart", () => {
 		const entry = (name: string, id: string, isDir = true): CloudEntry => ({ path: name, isDir, size: 0, modTime: "", id })
 		const before = [entry("filen-desktop-e2e", "a"), entry("Documents", "b")]
+		const file = rootPairFile("filen-desktop-e2e/123-1/deep-mac/L")
 
-		expect(driveRootChanges(before, [...before, entry("x", "c")], [ROOT_PAIR.file])).toEqual({ problems: [], added: ["x"] })
-		expect(driveRootChanges(before, [before[0] ?? entry("", ""), entry(ROOT_PAIR.file, "d", false)], [ROOT_PAIR.file])).toEqual({
-			problems: ["Documents gone", `${ROOT_PAIR.file} uploaded to the drive root`],
+		expect(driveRootChanges(before, [...before, entry("x", "c")], [file])).toEqual({ problems: [], added: ["x"] })
+		expect(driveRootChanges(before, [before[0] ?? entry("", ""), entry(file, "d", false)], [file])).toEqual({
+			problems: ["Documents gone", `${file} uploaded to the drive root`],
 			added: []
 		})
+		// Only an upload since the listing before N counts: one already there is another run's leftover.
+		const leftover = [...before, entry(file, "e", false)]
+
+		expect(driveRootChanges(leftover, leftover, [file])).toEqual({ problems: [], added: [] })
 		expect(driveRootChanges(before, [entry("filen-desktop-e2e", "z"), entry("Documents", "b")], []).problems).toEqual([
 			"filen-desktop-e2e replaced"
 		])
