@@ -20,7 +20,7 @@ import { LEGACY_SDK_CONFIG_SHAPE } from "../seed.ts"
 // back to desktopConfig then; 4.x's effectiveConfig and the stash's fallback). Another account's pair in that map
 // must not come along (the fallback belongs to the account that was signed in).
 //
-// From 3.0.47 (scripts/ci/legacy.ts OLDER_PIN): L1-L10, L13 and L15 with its inventory; L11, L12, L14 and the
+// From 3.0.47 (scripts/ci/legacy.ts OLDER_PIN): L1-L10, L13 and L15-L17 with its inventory; L11, L12, L14 and the
 // profile wipe test N alone, which chain L does from 3.0.53, and are recorded as not run. 3.0.47's web (0.1.87) turns
 // the network drive off when it fails to start, so where it cannot mount (macOS, no FUSE-T) N must import it off.
 

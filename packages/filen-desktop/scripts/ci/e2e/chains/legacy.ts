@@ -170,7 +170,7 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 	const { cloud, cloudDir, localDir, credentials, work, target, page, userData, rootOf, snapshotOf } = chain
 	const findings = findingsFor(chain.findings, release, chain.name)
 	const installed = installedBy(target, release)
-	const holds = legacyHolds(chain)
+	const holds = legacyHolds(chain, findings)
 	const pin = String(randomInt(100_000, 1_000_000))
 	const webdav = { username: `e2e-${randomBytes(4).toString("hex")}`, password: randomBytes(18).toString("hex"), port: await freePort() }
 	// What 3.x's drive is set to (a mount point, or a letter on Windows) and where 4.x must then reach it.

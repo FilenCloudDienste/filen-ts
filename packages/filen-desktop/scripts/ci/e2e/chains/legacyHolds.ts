@@ -15,6 +15,7 @@ import { desktop, desktopCall, underReminder } from "../app.ts"
 import { type CloudEntry, runDir } from "../cloud.ts"
 import { LEGACY_PAIRS, seededBytes } from "../fixtures.ts"
 import { addLegacyPair } from "../legacyApp.ts"
+import type { Findings } from "../findings.ts"
 import { diffSnapshots, localSnapshot, type Snapshot } from "../snapshot.ts"
 import { approveHeldThroughIssues, findingText, removeThroughNotice, startReviewThroughCard, syncText } from "../syncUi.ts"
 import { json, LIVE_TIMEOUT_MS, ok, SETUP_TIMEOUT_MS, type Chain } from "./common.ts"
@@ -152,8 +153,9 @@ export function driveRootChanges(
 	}
 }
 
-export function legacyHolds(chain: Chain) {
-	const { findings, cloud, cloudDir, work, rootOf, page } = chain
+// `findings` is the chain's, as chain L records them (scripts/ci/e2e/chains/older.ts findingsFor).
+export function legacyHolds(chain: Chain, findings: Findings = chain.findings) {
+	const { cloud, cloudDir, work, rootOf, page } = chain
 	const state: {
 		uploaded: boolean
 		l2cLocal?: Snapshot

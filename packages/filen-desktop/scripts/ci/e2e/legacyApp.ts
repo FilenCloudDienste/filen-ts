@@ -214,8 +214,9 @@ export async function legacySyncHold(feed: string | null = null): Promise<SyncHo
 	return { args: hook.args, started: async () => (await hook.started()).dropped }
 }
 
-// One more pair, as the old sync settings add one: appended to the account's sync config (desktopConfig and its
-// per-user map), with the storage events its hooks re-read. Returns how many pairs the config holds now.
+// One more pair, as the old sync settings add one: appended to the account's sync config (desktopConfig, and its
+// per-user map entry where the account has one: a config planted in desktopConfig only stays so), with the storage
+// events its hooks re-read. Returns how many pairs the config holds now.
 export async function addLegacyPair(page: Page, pair: LegacySyncPair): Promise<number> {
 	const count = await page.evaluate(
 		`((keys, pair) => {
@@ -227,10 +228,9 @@ export async function addLegacyPair(page: Page, pair: LegacySyncPair): Promise<n
 			if (config === null || !(userId > 1)) throw new Error("the old app holds no desktopConfig or account")
 			const syncConfig = { ...config.syncConfig, syncPairs: [...(config.syncConfig?.syncPairs ?? []), pair] }
 			const users = parse(keys.sync, {})
-			const writes = {
-				[keys.desktopConfig]: { ...config, syncConfig },
-				[keys.sync]: { ...(users !== null && typeof users === "object" && !Array.isArray(users) ? users : {}), [userId]: syncConfig }
-			}
+			const map = users !== null && typeof users === "object" && !Array.isArray(users) ? users : {}
+			const writes = { [keys.desktopConfig]: { ...config, syncConfig } }
+			if (Object.prototype.hasOwnProperty.call(map, String(userId))) writes[keys.sync] = { ...map, [userId]: syncConfig }
 			for (const [key, value] of Object.entries(writes)) {
 				const raw = JSON.stringify(value)
 				localStorage.setItem(key, raw)

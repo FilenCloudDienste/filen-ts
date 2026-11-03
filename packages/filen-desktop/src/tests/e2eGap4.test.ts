@@ -308,8 +308,21 @@ describe("L16 and L17 first-run table", () => {
 		const users = JSON.parse(store.get(LEGACY_KEYS.sync) ?? "null") as Record<string, unknown>
 
 		expect(config.webdavConfig).toEqual({ enabled: false })
-		expect(users["42"]).toEqual(config.syncConfig)
-		expect(users["7"]).toEqual({ enabled: false, syncPairs: [] })
+		// The account has no entry in the per-user map (chain L's planted desktopConfig-only shape): it gets none.
+		expect(users).toEqual({ 7: { enabled: false, syncPairs: [] } })
+		expect(events).toEqual([LEGACY_KEYS.desktopConfig])
+
+		// Where it has one, that entry follows desktopConfig.
+		store.set(LEGACY_KEYS.sync, JSON.stringify({ 7: { enabled: false, syncPairs: [] }, 42: config.syncConfig }))
+		events.length = 0
+
+		expect(await addLegacyPair(page, { ...pair, uuid: randomUUID(), name: "e2e-another" })).toBe(3)
+
+		const updated = JSON.parse(store.get(LEGACY_KEYS.desktopConfig) ?? "null") as { syncConfig: unknown }
+		const updatedUsers = JSON.parse(store.get(LEGACY_KEYS.sync) ?? "null") as Record<string, unknown>
+
+		expect(updatedUsers["42"]).toEqual(updated.syncConfig)
+		expect(updatedUsers["7"]).toEqual({ enabled: false, syncPairs: [] })
 		expect(events.sort()).toEqual([LEGACY_KEYS.desktopConfig, LEGACY_KEYS.sync].sort())
 
 		const imported = legacySyncImport(config.syncConfig)
