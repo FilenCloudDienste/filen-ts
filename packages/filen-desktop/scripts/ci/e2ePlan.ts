@@ -1,4 +1,6 @@
 import { appendFileSync, readFileSync } from "node:fs"
+import { LEGACY_PIN, OLDER_PIN } from "./legacy.ts"
+import { OLDER_SCENARIO, olderFor, runsOlder } from "./olderPlan.ts"
 
 // Plans .github/workflows/desktop-e2e.yml: the candidate version N (package.json), the lower version N-1 is built as,
 // and the build and test matrices. Written to $GITHUB_OUTPUT when set. Every input arrives through the environment
@@ -7,9 +9,10 @@ import { appendFileSync, readFileSync } from "node:fs"
 //   PLATFORMS   comma-separated subset of windows,mac,linux (default all)
 //   PROFILE     release | nightly | custom; empty means nightly for a scheduled run, custom otherwise
 //   SIGNED      true | false: sign every build (release and custom); nightly signs macOS only, never notarized
-//   SCENARIOS   comma-separated subset of previous,legacy,update-kill (default the first two); LEGACY=false drops
-//               legacy too. update-kill (N-1's installer killed mid-install, install depth) runs in every release run
-//               and when named; never at night, and not for rpm
+//   SCENARIOS   comma-separated subset of previous,legacy,older,update-kill (default previous,legacy); LEGACY=false
+//               drops legacy and older. older (3.0.47 -> N, scripts/ci/olderPlan.ts) runs at release and one night a
+//               week with legacy, by hand only when named. update-kill (N-1's installer killed mid-install, install
+//               depth) runs in every release run and when named; never at night, and not for rpm
 //   FORMATS     custom only: entries such as win-x64-nsis,linux-x64-deb (default all)
 //   DEPTH       auto | install | deep: auto takes the profile's deep entries, deep those of a release (and any
 //               DEEP_TRIAL entry FORMATS names)
@@ -24,7 +27,8 @@ import { appendFileSync, readFileSync } from "node:fs"
 // for real, on different entries where the OS has more than one: rotated by the day at night, so every entry's form
 // is exercised within days, and fixed in release and custom runs. Entries whose chains sign in for real get a
 // `stagger` (seconds) that spaces those sign-ins between parallel jobs. `logins` is the run's worst case (every slot
-// minted), which may not pass MAX_LOGINS_PER_RUN.
+// minted), which may not pass MAX_LOGINS_PER_RUN. `pins` names the old clients the run signs in or seeds, whose SDK
+// must take the account's auth version (checked by job `session`).
 //
 //   node scripts/ci/e2ePlan.ts
 
@@ -54,6 +58,10 @@ export interface TestEntry extends Entry {
 	// "" where that chain is not deep.
 	signInPrevious: SignIn | ""
 	signInLegacy: SignIn | ""
+	// 3.0.47 -> N (scripts/ci/olderPlan.ts): at all, deep, and how its deep chain signs in ("" where it is not deep).
+	older: boolean
+	deepOlder: boolean
+	signInOlder: SignIn | ""
 	stagger: number
 	spike: Spike | ""
 	// Scenario update-kill (scripts/ci/e2e/updateKill.ts).
@@ -88,6 +96,8 @@ export interface Plan {
 	session: boolean
 	// The most logins the run can make: every session slot minted, every real UI sign-in.
 	logins: number
+	// The old clients' versions the run signs in or seeds, comma-separated ("" for none).
+	pins: string
 	builds: BuildEntry[]
 	tests: TestEntry[]
 	notices: string[]
@@ -249,13 +259,16 @@ export function plan(input: PlanInput, readiness: DeepReadiness = { ready: DEEP_
 	}
 
 	if (spike === "cloud") {
-		return { profile, spike, session: true, logins: SESSION_SLOTS, builds: [], tests: [], notices: [] }
+		return { profile, spike, session: true, logins: SESSION_SLOTS, pins: "", builds: [], tests: [], notices: [] }
 	}
 
 	const scenarios = input.scenarios.trim() === "" ? ["previous", "legacy"] : list(input.scenarios)
 
-	if (scenarios.length === 0 || scenarios.some(item => item !== "previous" && item !== "legacy" && item !== "update-kill")) {
-		invalid(`SCENARIOS must list some of previous, legacy, update-kill (got "${input.scenarios}")`)
+	if (
+		scenarios.length === 0 ||
+		scenarios.some(item => item !== "previous" && item !== "legacy" && item !== OLDER_SCENARIO && item !== "update-kill")
+	) {
+		invalid(`SCENARIOS must list some of previous, legacy, older, update-kill (got "${input.scenarios}")`)
 	}
 
 	const formats = list(input.formats)
@@ -306,8 +319,9 @@ export function plan(input: PlanInput, readiness: DeepReadiness = { ready: DEEP_
 	const legacy = spike === "" && scenarios.includes("legacy") && input.legacy
 	const updateKill = spike === "" && (profile === "release" || scenarios.includes("update-kill"))
 	const killed = (entry: Entry) => updateKill && entry.format !== "rpm"
+	const older = runsOlder({ profile, scenarios, legacy: input.legacy, spike, day: input.day })
 
-	if (chosen.length === 0 || (spike === "" && !previous && !legacy && !chosen.some(killed))) {
+	if (chosen.length === 0 || (spike === "" && !previous && !legacy && !older && !chosen.some(killed))) {
 		invalid("nothing to test")
 	}
 
@@ -320,7 +334,7 @@ export function plan(input: PlanInput, readiness: DeepReadiness = { ready: DEEP_
 	// A trial entry is wanted wherever it is named: it may be a format no profile runs deep yet.
 	const wantsDeep = (id: string) =>
 		spike === "" &&
-		(previous || legacy) &&
+		(previous || legacy || older) &&
 		depth !== "install" &&
 		((depth === "deep" ? DEEP_FORMATS : deepEntries[profile]).includes(id) ||
 			(trial && formats.includes(id) && Object.hasOwn(readiness.trial, id)))
@@ -349,16 +363,19 @@ export function plan(input: PlanInput, readiness: DeepReadiness = { ready: DEEP_
 		return {
 			entry,
 			deepPrevious: spike === "offline" || (previous && wantsDeep(id) && ready(id, "previous")),
-			deepLegacy: legacy && wantsDeep(id) && ready(id, "legacy")
+			deepLegacy: legacy && wantsDeep(id) && ready(id, "legacy"),
+			...olderFor(id, older, wantsDeep(id), profile)
 		}
 	})
+	// An entry with nothing to run (3.0.47 alone asked for, elsewhere) gets no job.
+	const running = deepChains.filter(item => spike !== "" || previous || legacy || item.older)
 	// Per OS, the entries whose chain signs in for real: one 4.x and one 3.0.53, the next entry along for 3.0.53, so the
 	// two land on different entries where there are two. At night the turn is the day's; otherwise the first.
 	const turn = profile === "nightly" ? input.day : 0
 	const real = (chain: "deepPrevious" | "deepLegacy", offset: number): Set<Entry> =>
 		new Set(
 			oses.flatMap(os => {
-				const candidates = deepChains.filter(item => item.entry.os === os && item[chain]).map(item => item.entry)
+				const candidates = running.filter(item => item.entry.os === os && item[chain]).map(item => item.entry)
 				const pick = candidates[(turn + offset) % Math.max(candidates.length, 1)]
 
 				return signin === "real" ? candidates : pick === undefined ? [] : [pick]
@@ -366,25 +383,32 @@ export function plan(input: PlanInput, readiness: DeepReadiness = { ready: DEEP_
 		)
 	const realPrevious = real("deepPrevious", 0)
 	const realLegacy = real("deepLegacy", 1)
+	// 3.0.47: one real sign-in a run over every OS (the first deep entry), the others seeded.
+	const olderCandidates = running.filter(item => item.deepOlder).map(item => item.entry)
+	const realOlder = new Set(signin === "real" ? olderCandidates : olderCandidates.slice(0, 1))
 	const signInOf = (deep: boolean, isReal: boolean): SignIn | "" => (!deep ? "" : isReal ? "real" : "seeded")
 
 	let realCount = 0
-	const tests = deepChains.map(({ entry, deepPrevious, deepLegacy }): TestEntry => {
+	const tests = running.map(({ entry, deepPrevious, deepLegacy, older: olderEntry, deepOlder }): TestEntry => {
 		const signInPrevious = signInOf(deepPrevious, realPrevious.has(entry))
 		const signInLegacy = signInOf(deepLegacy, realLegacy.has(entry))
+		const signInOlder = signInOf(deepOlder, realOlder.has(entry))
 
 		return {
 			...entry,
 			signed: sign[entry.os],
 			previous,
 			legacy,
-			deep: deepPrevious || deepLegacy,
+			deep: deepPrevious || deepLegacy || deepOlder,
 			deepPrevious,
 			deepLegacy,
 			signInPrevious,
 			signInLegacy,
+			older: olderEntry,
+			deepOlder,
+			signInOlder,
 			// Only the form sign-ins are spaced; a seeded chain makes no login.
-			stagger: signInPrevious === "real" || signInLegacy === "real" ? STAGGER_SECONDS * realCount++ : 0,
+			stagger: signInPrevious === "real" || signInLegacy === "real" || signInOlder === "real" ? STAGGER_SECONDS * realCount++ : 0,
 			spike,
 			updateKill: killed(entry)
 		}
@@ -399,7 +423,11 @@ export function plan(input: PlanInput, readiness: DeepReadiness = { ready: DEEP_
 		(session ? SESSION_SLOTS : 0) +
 		tests.reduce(
 			(sum, entry) =>
-				sum + Number(entry.signInPrevious === "real") + Number(entry.signInLegacy === "real") + Number(entry.spike === "s7"),
+				sum +
+				Number(entry.signInPrevious === "real") +
+				Number(entry.signInLegacy === "real") +
+				Number(entry.signInOlder === "real") +
+				Number(entry.spike === "s7"),
 			0
 		)
 
@@ -409,7 +437,12 @@ export function plan(input: PlanInput, readiness: DeepReadiness = { ready: DEEP_
 		)
 	}
 
-	return { profile, spike, session, logins, builds, tests, notices }
+	const pins = [
+		...(tests.some(entry => entry.deepLegacy) ? [LEGACY_PIN.version] : []),
+		...(tests.some(entry => entry.deepOlder) ? [OLDER_PIN.version] : [])
+	].join(",")
+
+	return { profile, spike, session, logins, pins, builds, tests, notices }
 }
 
 if (import.meta.main) {
@@ -440,6 +473,7 @@ if (import.meta.main) {
 			spike: result.spike,
 			session: String(result.session),
 			logins: String(result.logins),
+			pins: result.pins,
 			"next-version": version,
 			"prev-version": previousVersion(version),
 			"build-matrix": JSON.stringify({ include: result.builds }),

@@ -28,6 +28,7 @@ import {
 	writeHandOff
 } from "./e2e/session.ts"
 import { cloudSnapshot, diffSnapshots } from "./e2e/snapshot.ts"
+import { authVersionProblem } from "./legacy.ts"
 import { errorMessage, fail, section } from "./support.ts"
 
 // The desktop e2e's cloud side (see .github/workflows/desktop-e2e.yml), on any runner:
@@ -38,8 +39,10 @@ import { errorMessage, fail, section } from "./support.ts"
 //   selftest   with the handed session: create, list, upload a new version, diff, read back, move and delete a run
 //              directory, and read the account's storage
 //   sweep      with the handed session: delete this run's directories and any older than a day, then empty the trash
+//   pins       with the handed session: the test account's auth version is one every old client the run signs in or
+//              seeds (E2E_SIGN_IN_PINS, the plan's `pins`) can sign in to; no login, no request
 //
-//   node scripts/ci/e2eCloud.ts <session --slot <test|quota>|selftest|sweep> [--artifacts <dir>]
+//   node scripts/ci/e2eCloud.ts <session --slot <test|quota>|selftest|sweep|pins> [--artifacts <dir>]
 //
 // Credentials come from the slot's secrets (FILEN_DESKTOP_E2E_TEST_EMAIL / _PASSWORD for test), the sealing secret
 // from FILEN_DESKTOP_E2E_SESSION_KEY, the cached copy from FILEN_DESKTOP_E2E_CACHE_DIR and the handed session from
@@ -248,7 +251,7 @@ const option = (name: string): string | undefined => {
 	return at === -1 ? undefined : process.argv[at + 1]
 }
 const artifacts = path.resolve(option("--artifacts") ?? "e2e-artifacts")
-const usage = "usage: node scripts/ci/e2eCloud.ts <session --slot <test|quota>|selftest|sweep> [--artifacts <dir>]"
+const usage = "usage: node scripts/ci/e2eCloud.ts <session --slot <test|quota>|selftest|sweep|pins> [--artifacts <dir>]"
 
 if (import.meta.main) {
 	const work = mkdtempSync(path.join(os.tmpdir(), "filen-e2e-cloud-"))
@@ -269,6 +272,16 @@ if (import.meta.main) {
 			if (process.env["GITHUB_OUTPUT"]) {
 				appendFileSync(process.env["GITHUB_OUTPUT"], `minted=${String(minted)}\n`)
 			}
+		} else if (command === "pins") {
+			const pins = process.env["E2E_SIGN_IN_PINS"] ?? ""
+			const { authVersion } = harnessSession().client
+			const problem = authVersionProblem(authVersion, pins)
+
+			if (problem !== null) {
+				fail(problem)
+			}
+
+			console.log(`the test account uses auth v${String(authVersion)}, which ${pins} can all sign in to`)
 		} else if (command === "selftest" || command === "sweep") {
 			const credentials = takeCredentials()
 			const { remote } = harnessSession()

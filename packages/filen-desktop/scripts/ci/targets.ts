@@ -109,7 +109,7 @@ export function isChromiumChild(cmdline: string): boolean {
 
 // Linux: every process that is not a Chromium child and that `identify` attributes to the install, with the path
 // `identify` reports for it.
-function linuxProcesses(identify: (pid: number, exe: string) => string | null): AppProcess[] {
+export function linuxProcesses(identify: (pid: number, exe: string) => string | null): AppProcess[] {
 	const found: AppProcess[] = []
 
 	for (const pid of linuxPids()) {

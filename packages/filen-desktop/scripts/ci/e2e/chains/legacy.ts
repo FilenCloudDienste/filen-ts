@@ -11,7 +11,7 @@ import type {
 	DesktopSyncPair,
 	DesktopSyncResult
 } from "@filen/shared/desktop"
-import { LEGACY_VERSION } from "../../legacy.ts"
+import { LEGACY_PIN, pinFor } from "../../legacy.ts"
 import { errorMessage, fail, freePort, waitFor } from "../../support.ts"
 import {
 	desktop,
@@ -48,8 +48,10 @@ import {
 	quitLegacy,
 	watchLegacySync
 } from "../legacyApp.ts"
-import { crossCheck, describeLegacy, LEGACY_SDK_CONFIG_SHAPE, seedLegacy } from "../seed.ts"
+import { crossCheck, describeLegacy, seedLegacy } from "../seed.ts"
 import { cloudSnapshot, diffSnapshots, filesHolding, localSnapshot, snapshotText, type Snapshot, type SnapshotNode } from "../snapshot.ts"
+import { quietUpdater } from "../legacyHook.ts"
+import { installedBy } from "../olderUpdate.ts"
 import { legacyLogOf, START_TIMEOUT_MS, tail, type UpdateOptions } from "../update.ts"
 import {
 	BIN_DIR,
@@ -65,6 +67,17 @@ import {
 	type SignOutWitness
 } from "./common.ts"
 import { firstRunProblems, legacyHolds } from "./legacyHolds.ts"
+import {
+	BARE_PAIR,
+	bareImported,
+	driveImportedOff,
+	fallbackImported,
+	findingsFor,
+	leftoversBeside,
+	olderDrive,
+	plantedShape,
+	sdkConfigShapeOf
+} from "./older.ts"
 
 // Chain L at deep depth: the real 3.0.53 is signed in through its own page (or seeded with the run's session where the
 // plan says so: what its login stores, scripts/ci/e2e/seed.ts) and given what a user sets up (prefs, a PIN with a lock
@@ -111,6 +124,9 @@ import { firstRunProblems, legacyHolds } from "./legacyHolds.ts"
 //
 // The old app's tray and notifications are not observed. Linux deb and AppImage, Windows NSIS and macOS dmg so far; what
 // differs per OS is behind scripts/ci/e2e/os.ts.
+//
+// Gap 1 (scripts/ci/e2e/chains/older.ts): from 3.0.53 the pairs also carry two shapes older clients stored (L8, L9);
+// the same chain runs from 3.0.47 (scenario `older`), without L11, L12 and L14 and with its drive as 3.0.47 leaves it.
 
 const CONVERGE_TIMEOUT_MS = 6 * 60 * 1000
 const MIGRATE_TIMEOUT_MS = 8 * 60 * 1000
@@ -145,8 +161,13 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 		fail("the deep 3.0.53 -> N chain runs on Linux deb and AppImage, Windows NSIS and macOS dmg only so far")
 	}
 
-	const chain = await openChain("legacy", options, artifacts)
-	const { findings, cloud, cloudDir, localDir, credentials, work, target, page, userData, rootOf, snapshotOf } = chain
+	// The old release the chain starts from (3.0.53, or 3.0.47 for scenario `older`), and its install as it left it.
+	const release = pinFor(options.scenario) ?? fail(`chain L starts from an old release, not from ${options.scenario}`)
+	const LEGACY_VERSION = release.version
+	const chain = await openChain(release === LEGACY_PIN ? "legacy" : options.scenario, options, artifacts)
+	const { cloud, cloudDir, localDir, credentials, work, target, page, userData, rootOf, snapshotOf } = chain
+	const findings = findingsFor(chain.findings, release, chain.name)
+	const installed = installedBy(target, release)
 	const holds = legacyHolds(chain)
 	const pin = String(randomInt(100_000, 1_000_000))
 	const webdav = { username: `e2e-${randomBytes(4).toString("hex")}`, password: randomBytes(18).toString("hex"), port: await freePort() }
@@ -173,6 +194,8 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 		afterCloud?: Snapshot
 		// Windows: the tray preference was switched off to quit and is to be put back.
 		trayOff?: boolean
+		// 3.0.47 turned its network drive off (its start failed).
+		driveOff?: boolean
 	} = {}
 
 	chain.secret(pin)
@@ -189,9 +212,25 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 	const legacyPage = () => state.legacy?.renderer.page ?? fail("the old app's page is not connected")
 
 	const setUp = async (): Promise<void> => {
-		const launched = await launchDebuggable(target, true, chain.appOutput)
+		const launched = await launchDebuggable(installed, true, chain.appOutput)
+
+		if (!release.hasE2eHook) {
+			await findings.must(`${LEGACY_VERSION}'s updater kept off the production feed while it is set up`, async () =>
+				quietUpdater(launched.inspectPort ?? fail("the old app runs without its inspector"))
+			)
+		}
 
 		state.legacy = { launched, renderer: await connectRenderer(launched.debugPort, LEGACY_ORIGIN, START_TIMEOUT_MS) }
+
+		await findings.must(`${LEGACY_VERSION} can sign in to the account`, () => {
+			if (!release.authVersions.includes(chain.client.authVersion)) {
+				fail(
+					`the account uses auth v${String(chain.client.authVersion)}; ${LEGACY_VERSION} takes v${release.authVersions.join(", v")} only`
+				)
+			}
+
+			return `auth v${String(chain.client.authVersion)}`
+		})
 
 		if (chain.signIn === "real") {
 			await chain.stagger()
@@ -206,7 +245,7 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 			await findings.check(
 				`${LEGACY_VERSION}'s stored account is what the seed stores, with the handed session's API key`,
 				async () =>
-					crossCheck(await describeLegacy(legacyPage(), chain.client.apiKey), LEGACY_SDK_CONFIG_SHAPE, text =>
+					crossCheck(await describeLegacy(legacyPage(), chain.client.apiKey), sdkConfigShapeOf(release), text =>
 						findings.attach("legacy-sdk-config-shape.json", text)
 					)
 			)
@@ -265,7 +304,8 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 				drive: { mountPoint: drive.setting },
 				webdav,
 				pin,
-				lockTimeout: LOCK_TIMEOUT_S
+				lockTimeout: LOCK_TIMEOUT_S,
+				...(release === LEGACY_PIN ? { oldShape: plantedShape(state.pairs ?? [], chain.client.userId, localDir, cloudDir) } : {})
 			})
 
 			return `wrote ${keys.join(", ")}`
@@ -340,10 +380,18 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 
 		await findings.must(`${LEGACY_VERSION}: the network drive is mounted and WebDAV answers`, async () => {
 			// Where 3.0.53 cannot mount (FUSE-T on macOS needs an administrator's install), its drive stays configured and
-			// enabled, which is what migrates; 4.x then mounts it its own way (L5).
-			const type = chain.os.legacyDriveLive
-				? await waitFor("the old network drive to mount", SETUP_TIMEOUT_MS, async () => chain.os.driveMounted(drive.root))
-				: `configured only (3.0.53 cannot mount on this runner; ${(await chain.os.driveMounted(drive.root)) ?? "nothing"} mounted)`
+			// enabled, which is what migrates; 4.x then mounts it its own way (L5). 3.0.47 turns it off instead where its
+			// start fails (scripts/ci/e2e/chains/older.ts), which migrates too.
+			const older = release === LEGACY_PIN ? null : await olderDrive(legacyPage(), chain.os, drive.root, findings, SETUP_TIMEOUT_MS)
+
+			state.driveOff = older?.off === true
+
+			const type =
+				older !== null
+					? older.detail
+					: chain.os.legacyDriveLive
+						? await waitFor("the old network drive to mount", SETUP_TIMEOUT_MS, async () => chain.os.driveMounted(drive.root))
+						: `configured only (3.0.53 cannot mount on this runner; ${(await chain.os.driveMounted(drive.root)) ?? "nothing"} mounted)`
 			const response = await fetch(`http://127.0.0.1:${String(webdav.port)}/`, {
 				method: "PROPFIND",
 				headers: { Depth: "1", Authorization: `Basic ${Buffer.from(`${webdav.username}:${webdav.password}`).toString("base64")}` },
@@ -449,8 +497,9 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 		})
 	}
 
-	const updateLaunch = async () => {
-		const hold = await legacySyncHold()
+	const updateLaunch = async (feed: string) => {
+		// A release without an E2E hook gets the feed and the install from the same hook.
+		const hold = await legacySyncHold(release.hasE2eHook ? null : feed)
 
 		return {
 			args: hold.args,
@@ -809,6 +858,10 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 			})
 
 			await findings.check("L5 the network drive runs at the 3.x mount point and reads the cloud edit", async () => {
+				if (state.driveOff === true) {
+					return driveImportedOff(() => chain.mountsOverview(), chain.os, drive.root)
+				}
+
 				const current = await waitFor("the drive to run", SETUP_TIMEOUT_MS, async () => {
 					const read = (await chain.mountsOverview()).drive
 
@@ -908,6 +961,13 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 				return `${String(LEGACY_PAIRS.length)} pairs, modes mapped, roots kept`
 			})
 
+			if (release === LEGACY_PIN) {
+				await findings.check(
+					"L8 pairs stored in desktopConfig only (before 3.0.39) import for the signed-in account, another account's do not",
+					() => fallbackImported(overview, localDir)
+				)
+			}
+
 			await findings.check("L9 invisible: no review, hold, notice, issue, import note or dialog", async () => {
 				const expectedInfo = (pair: LegacyPairFixture) => (pair.localTrashDisabled ? ["localTrashNowOn"] : [])
 				const problems = findPairs(overview).flatMap(({ fixture, found }) =>
@@ -962,6 +1022,12 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 
 				return `nothing over the page${reminder.length > 0 ? " but the master-key reminder (put off)" : ""}; localTrashNowOn only where local trash was off; conflicts only as expected`
 			})
+
+			if (release === LEGACY_PIN) {
+				await findings.check("L9 the pair stored without excludeDotFiles and localTrashDisabled imports both as off", () =>
+					bareImported(overview, rootOf(BARE_PAIR))
+				)
+			}
 
 			const pairIds = findPairs(overview).flatMap(({ fixture, found }) =>
 				found === undefined ? [] : [{ name: fixture.name, id: found.id }]
@@ -1148,7 +1214,7 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 			stageAtSignOut = marker()?.stage
 
 			await findings.must("L15 sign out through the account menu", async () => {
-				const result = await signOut(page(), findings, credentials.email, artifacts, "legacy")
+				const result = await signOut(page(), findings, credentials.email, artifacts, chain.name)
 
 				chain.signedIn = false
 
@@ -1219,6 +1285,9 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 			return `${removed}; every pair directory intact`
 		})
 		findings.attach("legacy-userdata-after-uninstall.txt", inventory(path.dirname(target.userData)))
+		await findings.check(`L15 after the uninstall nothing of Filen's beside userData but ${LEGACY_VERSION}'s allowlist`, () =>
+			leftoversBeside(target.userData, release)
+		)
 	}
 
 	// The old app's page and inspector, if a setup step failed while it ran (the harness never leaves it running).

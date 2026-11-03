@@ -257,6 +257,7 @@ describe("e2ePlan depth", () => {
 			spike: "cloud",
 			session: true,
 			logins: SESSION_SLOTS,
+			pins: "",
 			builds: [],
 			tests: [],
 			notices: []
@@ -334,7 +335,8 @@ describe("e2ePlan sign-ins", () => {
 					expect(ofOs.filter(entry => entry.signInLegacy === "seeded")).toHaveLength(ofOs.length - 1)
 				}
 
-				expect(result.logins).toBe(SESSION_SLOTS + 6)
+				// A release also signs 3.0.47 in once (scripts/ci/olderPlan.ts).
+				expect(result.logins).toBe(SESSION_SLOTS + 6 + (input === release ? 1 : 0))
 				expect(result.logins).toBeLessThanOrEqual(MAX_LOGINS_PER_RUN)
 
 				if (input === nightly) {

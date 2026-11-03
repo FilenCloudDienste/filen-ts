@@ -13,6 +13,10 @@
 #   3.0.53 -> N   the real last 3.x release, downloaded from the old repository's GitHub release and checked against
 #                 pinned hashes: the path the whole installed fleet takes to 4.x. It is its old updater and its old
 #                 NSIS uninstaller (run with --updated, which is what keeps %APPDATA%\@filen\desktop) that do the work.
+#   3.0.47 -> N   an older 3.x (scenario `older`, scripts/ci/olderPlan.ts), which has no E2E hook: its update launch is
+#                 hooked through its inspector to the same feed. Windows NSIS and Linux deb at install depth (the deb
+#                 relaunches as /opt/Filen/@filendesktop, so N must come back through 4.x's link), at release and on
+#                 Wednesday nights; at release deep (chain L from 3.0.47) on Windows NSIS, macOS dmg and Linux deb.
 #
 # Called by release-desktop.yml before anything is published, on the signed artifacts it built (candidate-from-run).
 # Nightly (schedule) and by hand it builds N itself. Squirrel.Mac installs an update only if it satisfies the running
@@ -34,9 +38,10 @@
 # cache and logs in (@filen/sdk-rs) only when there is none usable, then hands the session, sealed, to every job that
 # reaches the cloud or signs an app in. Per OS one 4.x chain (N-1 -> N) and one 3.0.53 chain (3.0.53 -> N) sign in
 # through their real forms (rotated by the day at night, fixed otherwise; input `signin` real signs in every one),
-# spaced by the plan's stagger; every other deep chain is seeded with the handed session as a sign-in stores it
-# (scripts/ci/e2e/seed.ts). Each chain signs out at the end. A run logs in at most MAX_LOGINS_PER_RUN times
-# (scripts/ci/e2ePlan.ts). Each run attempt and entry owns a cloud directory; `sweep` removes the run's and any older
+# spaced by the plan's stagger, and one 3.0.47 chain a run; every other deep chain is seeded with the handed session as
+# a sign-in stores it (scripts/ci/e2e/seed.ts). Job `session` first checks that the account's auth version is one every
+# old client the run signs in or seeds can take. Each chain signs out at the end. A run logs in at most
+# MAX_LOGINS_PER_RUN times (scripts/ci/e2ePlan.ts). Each run attempt and entry owns a cloud directory; `sweep` removes the run's and any older
 # than a day, even after a failure.
 #
 # Spikes (by hand only, input `spike`) answer one question each, on one entry per OS, instead of the update scenarios;
@@ -76,7 +81,7 @@ on:
         type: string
         default: windows,mac,linux
       legacy:
-        description: Also test the update from 3.0.53
+        description: Also test the updates from 3.0.53 (and 3.0.47, scripts/ci/olderPlan.ts)
         type: boolean
         default: true
       profile:
@@ -106,7 +111,7 @@ on:
         type: string
         default: windows,mac,linux
       legacy:
-        description: Also test the update from 3.0.53
+        description: Also test the updates from 3.0.53 (and 3.0.47, scripts/ci/olderPlan.ts)
         type: boolean
         default: true
       profile:
@@ -118,7 +123,7 @@ on:
           - release
         default: custom
       scenarios:
-        description: Comma-separated subset of previous,legacy,update-kill (a release runs update-kill always)
+        description: Comma-separated subset of previous,legacy,older,update-kill (older is 3.0.47 -> N, by hand only when named; a release runs update-kill always)
         type: string
         default: previous,legacy
       formats:
@@ -181,6 +186,7 @@ jobs:
       spike: ${{ steps.plan.outputs.spike }}
       session: ${{ steps.plan.outputs.session }}
       logins: ${{ steps.plan.outputs.logins }}
+      pins: ${{ steps.plan.outputs.pins }}
       next-version: ${{ steps.plan.outputs.next-version }}
       prev-version: ${{ steps.plan.outputs.prev-version }}
       build-matrix: ${{ steps.plan.outputs.build-matrix }}
@@ -279,6 +285,16 @@ jobs:
         with:
           path: ${{ runner.temp }}/e2e-cache/test.sealed
           key: desktop-e2e-session-v1-test-${{ github.run_id }}-${{ github.run_attempt }}
+      # Before any old client is signed in or seeded: the account's auth version is one each of them can sign in to
+      # (3.0.47's SDK takes v1 and v2 only). Reads the hand-off just written; no login, no request.
+      - name: Check the test account against the old clients
+        if: needs.plan.outputs.pins != ''
+        timeout-minutes: 2
+        env:
+          FILEN_DESKTOP_E2E_SESSION_KEY: ${{ secrets.FILEN_DESKTOP_E2E_SESSION_KEY }}
+          FILEN_DESKTOP_E2E_SESSION_DIR: ${{ runner.temp }}/e2e-session
+          E2E_SIGN_IN_PINS: ${{ needs.plan.outputs.pins }}
+        run: node scripts/ci/e2eCloud.ts pins
       - name: Restore the cached quota session
         uses: actions/cache/restore@v4
         with:
@@ -591,7 +607,8 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJSON(needs.plan.outputs.test-matrix) }}
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: ${{ matrix.deep && 240 || 90 }}
+    # A third deep chain (3.0.47) gets its step budget on top.
+    timeout-minutes: ${{ matrix.deepOlder && 360 || matrix.deep && 240 || 90 }}
     defaults:
       run:
         working-directory: packages/filen-desktop
@@ -723,6 +740,24 @@ jobs:
           -w /work/packages/filen-desktop "${FEDORA_IMAGE}"
           bash -ec 'dnf install --assumeyes --quiet xorg-x11-server-Xvfb && /opt/host-node/node scripts/ci/e2e.ts "$@"'
           e2e --scenario legacy ${{ env.TEST_ARGS }}
+      # 3.0.47 (scripts/ci/olderPlan.ts): its update launch is hooked through its inspector; on Linux its updater gets a
+      # pkexec of its own (scripts/ci/e2e/olderUpdate.ts), the real prompts staying hidden.
+      - name: 3.0.47 -> N
+        if: ${{ !cancelled() && matrix.older && !matrix.deepOlder }}
+        run: node scripts/ci/e2e.ts --scenario older ${{ env.TEST_ARGS }}
+      - name: 3.0.47 -> N, signed in
+        if: ${{ !cancelled() && matrix.deepOlder }}
+        shell: bash
+        timeout-minutes: 120
+        env:
+          FILEN_DESKTOP_E2E_TEST_EMAIL: ${{ secrets.FILEN_DESKTOP_E2E_TEST_EMAIL }}
+          FILEN_DESKTOP_E2E_TEST_PASSWORD: ${{ secrets.FILEN_DESKTOP_E2E_TEST_PASSWORD }}
+          FILEN_DESKTOP_E2E_SESSION_KEY: ${{ secrets.FILEN_DESKTOP_E2E_SESSION_KEY }}
+          FILEN_DESKTOP_E2E_SESSION_DIR: ${{ runner.temp }}/e2e-session
+          E2E_SIGN_IN: ${{ matrix.signInOlder }}
+          E2E_STAGGER_SECONDS: ${{ matrix.stagger }}
+          E2E_CHAIN_BUDGET_MINUTES: 105
+        run: bash scripts/ci/deepSession.sh --scenario older --depth deep ${{ env.TEST_ARGS }} --artifacts e2e-artifacts
       # Every release run, and by hand when `scenarios` names update-kill: N-1's update installer killed mid-install
       # (Windows installer, ShipIt, dpkg; on the AppImage a failing mv), then what a user is left with must work
       # (scripts/ci/e2e/updateKill.ts). Install depth, nothing signed in, not for rpm.

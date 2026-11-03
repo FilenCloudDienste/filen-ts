@@ -4,7 +4,7 @@ import path from "node:path"
 import { fileURLToPath } from "node:url"
 import { hashFile, parseFeed } from "../../feed.ts"
 import { nativeArchOf } from "../../nativeArch.ts"
-import { LEGACY_E2E_BANNER, LEGACY_RELEASE_URL, LEGACY_SHA512, LEGACY_VERSION } from "../legacy.ts"
+import { LEGACY_E2E_BANNER, LEGACY_PIN, pinFor, type LegacyPin } from "../legacy.ts"
 import {
 	downloadPinned,
 	errorMessage,
@@ -20,6 +20,8 @@ import {
 } from "../support.ts"
 import { linuxProcessReport, type AppProcess, type Arch, type Format, type Platform, type Target } from "../targets.ts"
 import type { Findings } from "./findings.ts"
+import { legacyUpdateHook } from "./legacyHook.ts"
+import { installedBy, updateEnvFor, verifyLegacyLink } from "./olderUpdate.ts"
 import { logMark, logSince, runFaultLaunch } from "./updateFaults.ts"
 
 // The update scenarios: an app is installed the way a user installs it, launched, and updated by its own updater from a
@@ -28,6 +30,9 @@ import { logMark, logSince, runFaultLaunch } from "./updateFaults.ts"
 //
 //   previous   the installed app is N-1, a build of the same commit with a lower version
 //   legacy     the installed app is the real 3.0.53 release, the version the whole fleet updates from
+//   older      the installed app is the real 3.0.47 release (scripts/ci/legacy.ts OLDER_PIN): no E2E hook, so its
+//              update launch is hooked through its inspector (scripts/ci/e2e/legacyHook.ts); on Linux it runs as
+//              /opt/Filen/@filendesktop, which its updater relaunches, so N must come back through 4.x's link there
 //
 // The new app's side of the contract (src/main): FILEN_DESKTOP_TEST_UPDATE_FEED, honoured only as plain http on
 // 127.0.0.1, replaces the feed and installs a downloaded update at once, through the same path as the page's restart
@@ -48,7 +53,7 @@ const EXIT_TIMEOUT_MS = 2 * 60 * 1000
 const ALIVE_MS = 20 * 1000
 
 export interface UpdateOptions {
-	scenario: "previous" | "legacy"
+	scenario: "previous" | "legacy" | "older"
 	target: Target
 	platform: Platform
 	arch: Arch
@@ -72,7 +77,8 @@ export interface UpdateHooks {
 	// Whatever happened, before the machine is reset (evidence that lives in userData).
 	beforeReset(): Promise<void>
 	// Extra arguments for the update launch, and what to do once it is started (before the update is waited for).
-	updateLaunch?(): Promise<{ args: string[]; started(): Promise<void> }>
+	// `feed` is the loopback feed, which a release without an E2E hook must be pointed at by the hook itself.
+	updateLaunch?(feed: string): Promise<{ args: string[]; started(): Promise<void> }>
 	// The fault launch (e2e/updateFaults.ts): where its checks go (a deep chain's findings; else its own, settled after
 	// the update), and how N-1 is ended during its stalled download (a graceful quit; else a hard kill).
 	findings?: Findings
@@ -109,6 +115,20 @@ export function tail(file: string, lines = 60): string {
 // 3.x logs to <appData>/@filen/logs, next to its userData.
 export function legacyLogOf(target: Target): string {
 	return path.join(path.dirname(target.userData), "logs", "desktop.log")
+}
+
+// The update launch of a release without an E2E hook: its updater pointed at `feed`, and what it downloads installed.
+async function hookedUpdateLaunch(feed: string, version: string): Promise<{ args: string[]; started(): Promise<void> }> {
+	const hook = await legacyUpdateHook({ holdSync: false, feed })
+
+	return {
+		args: hook.args,
+		started: async () => {
+			const state = await hook.started()
+
+			console.log(`${version}'s updater hooked: feed ${String(state.feed)}, install on download ${String(state.updater)}`)
+		}
+	}
 }
 
 export async function feedFor(
@@ -208,17 +228,18 @@ export function installFrom(target: Target, artifact: string, version: string, p
 	}
 }
 
-// The pinned 3.0.53 installer for this target, downloaded into `work` and checked against its release hash.
-export async function legacyInstaller(target: Target, work: string): Promise<string> {
-	const pinned = LEGACY_SHA512[target.installer]
+// The pinned old installer for this target (3.0.53 unless `pin` says otherwise), downloaded into `work` and checked
+// against its release hash.
+export async function legacyInstaller(target: Target, work: string, pin: LegacyPin = LEGACY_PIN): Promise<string> {
+	const pinned = pin.sha512[target.installer]
 
 	if (pinned === undefined) {
-		fail(`no pinned 3.0.53 hash for ${target.installer}`)
+		fail(`no pinned ${pin.version} hash for ${target.installer}`)
 	}
 
-	const installer = path.join(work, "legacy", target.installer)
+	const installer = path.join(work, "legacy", pin.version, target.installer)
 
-	await downloadPinned(`${LEGACY_RELEASE_URL}${target.installer}`, installer, pinned)
+	await downloadPinned(`${pin.releaseUrl}${target.installer}`, installer, pinned)
 
 	return installer
 }
@@ -237,14 +258,17 @@ export async function runUpdate({
 	work,
 	hooks
 }: UpdateOptions): Promise<void> {
-	const legacy = scenario === "legacy"
-	const fromVersion = legacy ? LEGACY_VERSION : (prevVersion ?? fail("--prev-version is required"))
+	// The old release this update starts from (null: N-1), and the install as it left it (its own Linux executable).
+	const pin = pinFor(scenario)
+	const legacy = pin !== null
+	const fromVersion = pin?.version ?? prevVersion ?? fail("--prev-version is required")
+	const from = pin === null ? target : installedBy(target, pin)
 
 	if (legacy && platform === "mac" && !signed) {
-		// Squirrel.Mac installs an update only if it satisfies the running app's designated requirement, which 3.0.53
+		// Squirrel.Mac installs an update only if it satisfies the running app's designated requirement, which 3.x
 		// pins to Developer ID Team 7YTW5D2K7P. An unsigned candidate is (correctly) refused, so there is nothing to test.
 		console.log(
-			"::notice::3.0.53 -> candidate skipped on macOS: unsigned builds cannot satisfy the installed app's designated requirement (run with signed builds)"
+			`::notice::${fromVersion} -> candidate skipped on macOS: unsigned builds cannot satisfy the installed app's designated requirement (run with signed builds)`
 		)
 
 		return
@@ -271,13 +295,14 @@ export async function runUpdate({
 		}
 	}
 
-	const installer = legacy ? await legacyInstaller(target, work) : path.join(prevDir ?? fail("--prev is required"), target.installer)
+	const installer =
+		pin !== null ? await legacyInstaller(target, work, pin) : path.join(prevDir ?? fail("--prev is required"), target.installer)
 	const xvfb = platform === "linux" ? await startXvfb() : null
 	let feed: FeedServer | null = null
 
 	try {
-		// 3.0.53 is a signed release on Windows and macOS.
-		installFrom(target, installer, fromVersion, legacy ? platform !== "linux" : signed)
+		// 3.x is a signed release on Windows and macOS.
+		installFrom(from, installer, fromVersion, legacy ? platform !== "linux" : signed)
 
 		const token = writeMarker(target)
 
@@ -302,27 +327,36 @@ export async function runUpdate({
 
 		section(`launch ${fromVersion} against the local feed`)
 
-		const env: NodeJS.ProcessEnv = { ...process.env, [TEST_FEED_ENV]: feed.url }
+		let env: NodeJS.ProcessEnv = { ...process.env, [TEST_FEED_ENV]: feed.url }
 
-		if (legacy) {
+		if (pin?.hasE2eHook === true) {
 			mkdirSync(work, { recursive: true })
 			Object.assign(env, {
 				FILEN_E2E_UPDATER: "1",
 				FILEN_E2E_UPDATE_FEED: feed.url,
 				FILEN_E2E_ONCE_FILE: path.join(work, `once-${randomUUID()}`)
 			})
+		} else if (pin !== null) {
+			env = updateEnvFor(target, pin, env, work)
 		}
 
-		const updateLaunch = await hooks?.updateLaunch?.()
+		// A release without an E2E hook gets one from outside when no chain hooks its launch (the chain does it itself).
+		const updateLaunch =
+			(await hooks?.updateLaunch?.(feed.url)) ??
+			(pin !== null && !pin.hasE2eHook ? await hookedUpdateLaunch(feed.url, fromVersion) : undefined)
 
-		target.launch(env, updateLaunch?.args ?? [])
+		from.launch(env, updateLaunch?.args ?? [])
 		await updateLaunch?.started()
 
 		// The override must be provably in effect early; otherwise the app polls the real feed for the whole timeout.
-		if (legacy) {
+		if (pin !== null && !pin.hasE2eHook) {
+			await waitFor(`${fromVersion}'s updater to ask the local feed`, START_TIMEOUT_MS, () =>
+				served.server.requests.some(request => request.path === target.manifest) ? true : null
+			)
+		} else if (legacy) {
 			const legacyLog = legacyLogOf(target)
 
-			await waitFor("3.0.53 to log its E2E updater banner", START_TIMEOUT_MS, () =>
+			await waitFor(`${fromVersion} to log its E2E updater banner`, START_TIMEOUT_MS, () =>
 				logHas(legacyLog, LEGACY_E2E_BANNER) ? true : null
 			)
 		} else {
@@ -343,8 +377,8 @@ export async function runUpdate({
 			)
 		let seen = "nothing looked at yet"
 		const before = await waitFor(`${fromVersion}'s main process`, START_TIMEOUT_MS, () => {
-			const all = target.mainProcesses()
-			const found = processesAt(target)
+			const all = from.mainProcesses()
+			const found = processesAt(from)
 
 			seen = all.map(entry => `${String(entry.pid)} ${entry.path}`).join(", ") || "no main process"
 
@@ -354,7 +388,7 @@ export async function runUpdate({
 
 		console.log(
 			before.length > 0
-				? `running ${fromVersion}: pid ${before.map(entry => String(entry.pid)).join(", ")} at ${target.executable}`
+				? `running ${fromVersion}: pid ${before.map(entry => String(entry.pid)).join(", ")} at ${from.executable}`
 				: `${fromVersion} already quit to install the update it fetched`
 		)
 
@@ -369,7 +403,7 @@ export async function runUpdate({
 		const oldPids = new Set(before.map(entry => entry.pid))
 
 		await waitFor(`${fromVersion}'s process to exit`, EXIT_TIMEOUT_MS, () =>
-			target.mainProcesses().some(entry => oldPids.has(entry.pid)) ? null : true
+			from.mainProcesses().some(entry => oldPids.has(entry.pid)) ? null : true
 		)
 
 		const after = await waitFor(`${nextVersion}'s main process at ${target.executable}`, EXIT_TIMEOUT_MS, () => {
@@ -441,13 +475,18 @@ export async function runUpdate({
 			fail(`${target.executable} is not the AppImage the feed served`)
 		}
 
+		// B4: a release whose Linux executable had another name relaunched N through it.
+		if (pin !== null && from !== target) {
+			console.log(`legacy executable: ${await verifyLegacyLink(target, pin, [...pids])}`)
+		}
+
 		if (legacy) {
 			const userDataAfter = new Set(readdirSync(target.userData))
 			const gone = userDataBefore.filter(entry => !userDataAfter.has(entry))
 			const migration = path.join(target.userData, "migration.json")
 
 			// Informational: the 4.x migration removes some of 3.x's stores by design (PLAN §6).
-			console.log(`userData entries 3.0.53 had that are gone now: ${gone.length > 0 ? gone.join(", ") : "none"}`)
+			console.log(`userData entries ${fromVersion} had that are gone now: ${gone.length > 0 ? gone.join(", ") : "none"}`)
 			console.log(`migration marker: ${existsSync(migration) ? readFileSync(migration, "utf8") : "absent"}`)
 		}
 
@@ -475,8 +514,7 @@ export async function runUpdate({
 
 		try {
 			console.log(
-				target
-					.mainProcesses()
+				[...from.mainProcesses(), ...(from === target ? [] : target.mainProcesses())]
 					.map(entry => `${String(entry.pid)} ${entry.path}`)
 					.join("\n") || "(none)"
 			)

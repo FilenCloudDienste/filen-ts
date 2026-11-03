@@ -64,6 +64,21 @@ describe("desktop e2e workflow secrets", () => {
 		expect(text).toContain("per IP")
 	})
 
+	it("runs 3.0.47 -> N at install depth and deep, and checks the account's auth version for the old clients first", () => {
+		expect(text).toContain("pins: ${{ steps.plan.outputs.pins }}")
+		expect(text).toMatch(
+			/Check the test account against the old clients\n\s+if: needs\.plan\.outputs\.pins != ''[\s\S]{0,400}E2E_SIGN_IN_PINS: \$\{\{ needs\.plan\.outputs\.pins \}\}\n\s+run: node scripts\/ci\/e2eCloud\.ts pins\n/
+		)
+		// Before the quota slot and the hand-off's upload, after the test session is written.
+		expect(text.indexOf("Check the test account against the old clients")).toBeGreaterThan(text.indexOf("Cache the new test session"))
+		expect(text.indexOf("Check the test account against the old clients")).toBeLessThan(text.indexOf("Hand the sealed sessions on"))
+		expect(text).toContain(
+			"if: ${{ !cancelled() && matrix.older && !matrix.deepOlder }}\n        run: node scripts/ci/e2e.ts --scenario older ${{ env.TEST_ARGS }}"
+		)
+		expect(text).toContain("E2E_SIGN_IN: ${{ matrix.signInOlder }}")
+		expect(text).toContain("bash scripts/ci/deepSession.sh --scenario older --depth deep")
+	})
+
 	it("deletes the sealed session's artifact when the run is swept", () => {
 		expect(text).toContain("name: desktop-e2e-session")
 		expect(text).toMatch(/Delete the sealed session[\s\S]*select\(\.name == "desktop-e2e-session"\)/)

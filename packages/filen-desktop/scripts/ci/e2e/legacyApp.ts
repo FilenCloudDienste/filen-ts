@@ -1,9 +1,9 @@
 import type { Page } from "playwright-core"
 import { LEGACY_KEYS } from "../../../src/main/legacyData.ts"
-import { fail, freePort, waitFor } from "../support.ts"
-import { connectCdp, listTargets, type Cdp } from "./cdp/inspector.ts"
+import { fail, waitFor } from "../support.ts"
 import type { LegacyMode } from "./fixtures.ts"
 import { exitWithin, type Launched } from "./launch.ts"
+import { inspector, legacyUpdateHook } from "./legacyHook.ts"
 
 // The old client (3.0.53), driven from outside: its page over --remote-debugging-port, its main process over its Node
 // inspector (it has no fuses). Its page keeps everything in localStorage under the keys 4.x imports (LEGACY_KEYS); the
@@ -12,8 +12,6 @@ import { exitWithin, type Launched } from "./launch.ts"
 // settings change does.
 
 export const LEGACY_ORIGIN = "filendesktop://bundle"
-
-const INSPECTOR_TIMEOUT_MS = 60_000
 
 // The old SyncPair (filen-sync types.ts); `remoteParentUUID` is the pair's remote directory itself.
 export interface LegacySyncPair {
@@ -35,6 +33,19 @@ export interface LegacySettings {
 	pin: string
 	// Seconds of inactivity before the old app locks; 4.x imports a PIN only with one.
 	lockTimeout: number
+	// Shapes older clients left (scripts/ci/e2e/chains/older.ts), planted among the rest.
+	oldShape?: LegacyOldShape
+}
+
+// What clients before 3.0.39 stored: pairs without `excludeDotFiles` and `localTrashDisabled` (the old engine read
+// both by truthiness), and a feature's config in desktopConfig only, with no entry for the account in its per-user map
+// (which the old web then fell back to). `others` are other accounts' entries in those maps (userId digits -> config).
+export interface LegacyOldShape {
+	// Pair uuids stored without the two switches.
+	bare: string[]
+	// desktopConfig sections (syncConfig, ...) left out of the account's per-user maps.
+	fallbackOnly: string[]
+	others: Record<string, Record<string, unknown>>
 }
 
 // The real sign-in form (filen-web 0.2.3 login.tsx), one attempt. Done when the page stored the account; returns its
@@ -102,7 +113,7 @@ export async function legacySyncCounts(page: Page): Promise<LegacySyncCounts> {
 }
 
 // What the old settings dialogs write: prefs (tray, start minimized), the PIN and its lock timeout, the network drive,
-// WebDAV and the sync pairs, for the signed-in account.
+// WebDAV and the sync pairs, for the signed-in account (with `oldShape`, partly as an older client left them).
 export async function configureLegacy(page: Page, settings: LegacySettings): Promise<string[]> {
 	const keys = await page.evaluate(
 		`((keys, input) => {
@@ -112,9 +123,15 @@ export async function configureLegacy(page: Page, settings: LegacySettings): Pro
 			const config = parse(keys.desktopConfig, null)
 			const userId = parse(keys.sdkConfig, {}).userId
 			if (config === null || !(userId > 1)) throw new Error("the old app holds no desktopConfig or account")
+			const shape = input.oldShape ?? { bare: [], fallbackOnly: [], others: {} }
+			const pairs = input.pairs.map(pair => {
+				if (!shape.bare.includes(pair.uuid)) return pair
+				const { excludeDotFiles, localTrashDisabled, ...rest } = pair
+				return rest
+			})
 			const next = {
 				...config,
-				syncConfig: { ...config.syncConfig, enabled: true, syncPairs: input.pairs },
+				syncConfig: { ...config.syncConfig, enabled: true, syncPairs: pairs },
 				networkDriveConfig: { ...config.networkDriveConfig, enabled: true, readOnly: false, mountPoint: input.drive.mountPoint },
 				webdavConfig: {
 					...config.webdavConfig,
@@ -137,7 +154,9 @@ export async function configureLegacy(page: Page, settings: LegacySettings): Pro
 			}
 			for (const [key, section] of [[keys.sync, "syncConfig"], [keys.networkDrive, "networkDriveConfig"], [keys.webdav, "webdavConfig"], [keys.s3, "s3Config"]]) {
 				const users = parse(key, {})
-				writes[key] = { ...(users !== null && typeof users === "object" && !Array.isArray(users) ? users : {}), [userId]: next[section] }
+				const kept = { ...(users !== null && typeof users === "object" && !Array.isArray(users) ? users : {}), ...(shape.others[section] ?? {}) }
+				if (shape.fallbackOnly.includes(section)) delete kept[userId]
+				writes[key] = shape.fallbackOnly.includes(section) ? kept : { ...kept, [userId]: next[section] }
 			}
 			for (const [key, value] of Object.entries(writes)) {
 				const raw = JSON.stringify(value)
@@ -156,16 +175,6 @@ export async function legacyPrefs(page: Page): Promise<{ minimizeToTray: boolean
 	return (await page.evaluate(
 		`({ minimizeToTray: localStorage.getItem(${JSON.stringify(LEGACY_KEYS.minimizeToTray)}) === "true", startMinimized: localStorage.getItem(${JSON.stringify(LEGACY_KEYS.startMinimized)}) === "true" })`
 	)) as { minimizeToTray: boolean; startMinimized: boolean }
-}
-
-async function inspector(port: number): Promise<Cdp> {
-	const targets = await waitFor(`the old main process's inspector on port ${String(port)}`, INSPECTOR_TIMEOUT_MS, async () => {
-		const list = await listTargets(port)
-
-		return list?.some(entry => entry.webSocketDebuggerUrl !== undefined) === true ? list : null
-	})
-
-	return connectCdp(targets.find(entry => entry.webSocketDebuggerUrl !== undefined)?.webSocketDebuggerUrl ?? fail("no inspector target"))
 }
 
 // The old app's own graceful quit (tray Quit, Cmd+Q): app.quit() runs before-quit and will-quit, which flushes and
@@ -188,96 +197,21 @@ export async function quitLegacy(launched: Launched, timeoutMs: number): Promise
 	return `exited with code ${String(exit.code)}, signal ${String(exit.signal)}`
 }
 
-// Holds the old app's sync during its update launch. Its updater starts before its sync worker, but the download and
-// the install race the first sync cycle, which would carry the closed-app edits before 4.x sees them. Before any of
-// its code runs (--inspect-brk), a module-load hook wraps its worker's invoke so that sync starts and sync updates are
-// dropped; the updater itself is untouched. The hold reports itself in globalThis.__e2eSyncHold.
-const HOLD_SYNC = `(() => {
-	const Module = process.getBuiltinModule("module")
-	const state = (globalThis.__e2eSyncHold = { patched: false, dropped: [] })
-	const load = Module._load
-	Module._load = function (...args) {
-		const exported = load.apply(this, args)
-		const Worker = exported && exported.Worker
-		if (!state.patched && typeof Worker === "function" && Worker.prototype && typeof Worker.prototype.invoke === "function") {
-			const invoke = Worker.prototype.invoke
-			Worker.prototype.invoke = function (channel, data) {
-				if (channel === "restartSync" || channel === "startSync" || String(channel).startsWith("sync")) {
-					state.dropped.push(String(channel))
-					return Promise.resolve(undefined)
-				}
-				return invoke.call(this, channel, data)
-			}
-			state.patched = true
-		}
-		return exported
-	}
-	return "hooked"
-})()`
-
+// Holds the old app's sync during its update launch (scripts/ci/e2e/legacyHook.ts): its updater starts before its sync
+// worker, but the download and the install race the first sync cycle, which would carry the closed-app edits before
+// 4.x sees them. Before any of its code runs (--inspect-brk), a module-load hook wraps its worker's invoke so that sync
+// starts and sync updates are dropped; the updater itself is untouched. With `feed` (a client without an E2E hook), the
+// same hook points its updater at that loopback feed and installs what it downloads.
 export interface SyncHold {
 	args: string[]
 	// Installs the hold, lets the app run and waits until its worker is wrapped; the dropped calls so far.
 	started(): Promise<string[]>
 }
 
-export async function legacySyncHold(): Promise<SyncHold> {
-	const port = await freePort()
+export async function legacySyncHold(feed: string | null = null): Promise<SyncHold> {
+	const hook = await legacyUpdateHook({ holdSync: true, feed })
 
-	return {
-		args: [`--inspect-brk=127.0.0.1:${String(port)}`],
-		async started() {
-			const cdp = await inspector(port)
-
-			try {
-				// Under --inspect-brk the process runs nothing until it is let go, then breaks before its first statement
-				// (before any app module loads). At that break the main thread serves the debugger only: the hook runs on the
-				// paused frame (Debugger.evaluateOnCallFrame); a plain Runtime.evaluate is never answered there.
-				const paused = cdp.nextEvent("Debugger.paused", INSPECTOR_TIMEOUT_MS)
-
-				// Awaited below; this only keeps a rejection before then from going unhandled.
-				paused.catch(() => undefined)
-				await cdp.send("Debugger.enable")
-				await cdp.send("Runtime.runIfWaitingForDebugger")
-
-				const frame = ((await paused) as { callFrames?: { callFrameId?: string; url?: string }[] }).callFrames?.[0]
-				const hooked = (await cdp.send("Debugger.evaluateOnCallFrame", {
-					callFrameId: frame?.callFrameId ?? fail("the first break has no call frame"),
-					expression: HOLD_SYNC,
-					returnByValue: true
-				})) as { result?: { value?: unknown }; exceptionDetails?: { exception?: { description?: string } } }
-
-				if (hooked.result?.value !== "hooked") {
-					fail(
-						`the sync hold did not install at ${frame?.url ?? "an unknown frame"}: ${hooked.exceptionDetails?.exception?.description ?? JSON.stringify(hooked.result)}`
-					)
-				}
-
-				// No later break (an entry-script one, say) may hold the app once it is let go.
-				await cdp.send("Debugger.setSkipAllPauses", { skip: true })
-				await cdp.send("Debugger.resume")
-
-				// A synchronous read of the hold's flag, polled; a read that meets the app mid-start is asked again.
-				return await waitFor(
-					"the old sync worker to be held",
-					INSPECTOR_TIMEOUT_MS,
-					async () => {
-						const read = await cdp
-							.evaluate("JSON.stringify(globalThis.__e2eSyncHold ?? null)", { awaitPromise: false })
-							.catch(() => null)
-						const state =
-							typeof read === "string" ? (JSON.parse(read) as { patched?: boolean; dropped?: string[] } | null) : null
-
-						return state?.patched === true ? (state.dropped ?? []) : null
-					},
-					250
-				)
-			} finally {
-				// Detached, so nothing holds the process at its exit for the update.
-				cdp.close()
-			}
-		}
-	}
+	return { args: hook.args, started: async () => (await hook.started()).dropped }
 }
 
 // One more pair, as the old sync settings add one: appended to the account's sync config (desktopConfig and its

@@ -21,3 +21,81 @@ export const LEGACY_SHA512: Readonly<Record<string, string>> = {
 	"Filen_linux_x86_64.rpm": "6/8jHYz1rhbhU+6npysJVIlda4Szuu3Yr3hJT8hlX9r4vrOTZ1wSTb239vLduIhST9nIFfNrXUuhcabKyT2/qg==",
 	"Filen_linux_aarch64.rpm": "R9LhkuWZnEuvJOTgIODyKVbM9+awkVBokTrfgMkMIN92vhNDZUSqLqCwUhs8Jd1Rn8xbbryGh0xvmc8eh2c2Cw=="
 }
+
+// Every old release the e2e tests install, by scenario: chain L's 3.0.53, and 3.0.47 (gap 1), an older 3.x that still
+// updates straight to 4.x (the feed has no channel). Each is pinned the same way: its old repository's release, the
+// installers' sha512 from that release's latest*.yml. What differs between them is what the harness has to make up
+// for: 3.0.47 has no E2E hook (its update launch gets one through its Node inspector, scripts/ci/e2e/legacyHook.ts),
+// installs its Linux executable as @filendesktop (4.x's deb and rpm ship that name as a link, scripts/legacyExecutable.ts),
+// asks for root on Linux through pkexec and nothing else (electron-updater 6.5.0 has no sudo fallback), and its JS SDK
+// (@filen/sdk 0.1.193) signs in to auth v1 and v2 accounts only.
+export interface LegacyPin {
+	version: string
+	// The release's date (UTC).
+	released: string
+	releaseUrl: string
+	// Installer name (Target.installer) -> sha512 from the release's latest*.yml.
+	sha512: Readonly<Record<string, string>>
+	// FILEN_E2E_UPDATER and its banner (LEGACY_E2E_BANNER); without it the update launch is hooked from outside.
+	hasE2eHook: boolean
+	// The deb's and rpm's executable, which its updater relaunches after installing 4.x.
+	linuxExecutable: string
+	// The auth versions its SDK can sign in to.
+	authVersions: readonly number[]
+	// Its Linux updater finds root through gksudo, kdesudo, pkexec or beesu only (no sudo fallback).
+	linuxNeedsPrompt: boolean
+}
+
+export const LEGACY_PIN: LegacyPin = {
+	version: LEGACY_VERSION,
+	released: "2026-07-21",
+	releaseUrl: LEGACY_RELEASE_URL,
+	sha512: LEGACY_SHA512,
+	hasE2eHook: true,
+	linuxExecutable: "/opt/Filen/Filen",
+	authVersions: [1, 2, 3],
+	linuxNeedsPrompt: false
+}
+
+export const OLDER_PIN: LegacyPin = {
+	version: "3.0.47",
+	released: "2025-02-09",
+	releaseUrl: "https://github.com/FilenCloudDienste/filen-desktop/releases/download/v3.0.47/",
+	sha512: {
+		"Filen_win.exe": "m9E/LxzyXIypnyvRPLxFOt45BJLNWY6CZTIc2ycNqR/ZaSPR3Y7lZ9PRzNrPlgUTlA8ySqKZbyCgkypsRdoqUg==",
+		"Filen_mac_x64.dmg": "yNODSCALCvYK3uXevvatfpQzxHtkBRuD5Dc5hQZsS+d8HsK+rT8CjUV9Dv+BHh/MzDFH3ar0ZMXJvza0nyjdIw==",
+		"Filen_mac_arm64.dmg": "0uu2Wa5ofRXLMByUCGnZGnZlYDM2jw21eloDRZXXkdMN/hLhLV+75LIjGdzN+p7iAbXS9fc6gcGDPz5D7s8F8Q==",
+		"Filen_linux_x86_64.AppImage": "tvZ9mZ8KEaiFv1peIAgyElP1IAk+zQO3VHLavD3C/QKpSkHcAPhLV7Lmnjcal9uq8bEuyOis6eEMVpWvkMy6Ug==",
+		"Filen_linux_arm64.AppImage": "xaUt4TSlD5ykyrRHCsvhY7a9YqD2XkLEnqsEYtXdC1iKQAST9Da+z0rQ+cqL6yTTwUVoZcwjuW3uKdYSL6v+gw==",
+		"Filen_linux_amd64.deb": "ZC4K8CrAQDn/DgWwhBf+lVRKO+pTZILX9rigZDTc6mPDNHMa/meuaeEABS33jOW5V3vCJM0C7e835HewzySPYw==",
+		"Filen_linux_arm64.deb": "EFPiCX2EW8/n8bKqvsMAdKDNDGDMkN+TASll3o3l47piLLMDBRK9F9/T+FqHSCimZ1tcGJ7LJtGs+Bob8ZOpIg==",
+		"Filen_linux_x86_64.rpm": "mIVP4BYgbWe7z35MLCGqZtgLPDiRlbStLJajjKffa3APXFXv1HDnOsSRZOXhB2KhjAs109+oAVGw2fDAEubVJg==",
+		"Filen_linux_aarch64.rpm": "LA+HcabSaHoyfmqCozD3KarX1T8buptiEWs7WLN9YJe34PczmJm3PCCg4rxc5QKCxId+uhKAOa1taGOGsWedtg=="
+	},
+	hasE2eHook: false,
+	linuxExecutable: "/opt/Filen/@filendesktop",
+	authVersions: [1, 2],
+	linuxNeedsPrompt: true
+}
+
+// The update scenarios that start from an old release, by name (scripts/ci/e2e.ts --scenario).
+export const PINS = { legacy: LEGACY_PIN, older: OLDER_PIN } as const
+
+export type PinnedScenario = keyof typeof PINS
+
+export function pinFor(scenario: string): LegacyPin | null {
+	return Object.hasOwn(PINS, scenario) ? PINS[scenario as PinnedScenario] : null
+}
+
+// Why the account cannot serve the old clients a run signs in or seeds (`pins`: their versions, comma-separated), or
+// null. Checked on the run's session before any of them is launched: a login one of them cannot make proves nothing
+// and costs the budget.
+export function authVersionProblem(authVersion: number, pins: string): string | null {
+	const refusing = Object.values(PINS).filter(
+		pin => pins.split(",").some(item => item.trim() === pin.version) && !pin.authVersions.includes(authVersion)
+	)
+
+	return refusing.length === 0
+		? null
+		: `the test account uses auth v${String(authVersion)}, which ${refusing.map(pin => `${pin.version} (v${pin.authVersions.join(", v")} only)`).join(" and ")} cannot sign in to: drop that scenario or use an account it can`
+}
