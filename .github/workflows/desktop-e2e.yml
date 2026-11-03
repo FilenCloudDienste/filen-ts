@@ -648,7 +648,7 @@ jobs:
           compression-level: 0
 
   test:
-    name: ${{ matrix.spike && format('{0} ', matrix.spike) || '' }}${{ matrix.platform }} ${{ matrix.arch }} ${{ matrix.format }}${{ matrix.deep && ' deep' || '' }}
+    name: ${{ matrix.spike && format('{0} ', matrix.spike) || '' }}${{ matrix.platform }} ${{ matrix.arch }} ${{ matrix.format }}${{ matrix.deep && ' deep' || '' }}${{ matrix.lane && format(' {0}', matrix.lane) || '' }}
     needs: [plan, build, session]
     if: ${{ !cancelled() && needs.build.result == 'success' && (needs.session.result == 'success' || needs.session.result == 'skipped') }}
     # Deep entries share the e2e account. P11's listing drop holds its drive-write lock (every client of the account
@@ -658,9 +658,10 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJSON(needs.plan.outputs.test-matrix) }}
     runs-on: ${{ matrix.runner }}
-    # A third deep chain (3.0.47) gets its step budget on top; 3.0.47 at install depth on a deep entry (Wednesday nights)
-    # its step's; chain K's 45 minutes on top on the deep linux-x64-deb entry.
-    timeout-minutes: ${{ matrix.deepOlder && 360 || (matrix.deep && matrix.older) && 270 || matrix.deep && (matrix.keyring && 285 || 240) || 90 }}
+    # Setup and every step the job can run at its timeout (scripts/ci/e2ePlan.ts jobMinutes, STEP_MINUTES). Where an
+    # entry's chains overrun the six hours a hosted runner allows, its 3.0.47 chain and chain K run in a second job
+    # (matrix.lane).
+    timeout-minutes: ${{ matrix.timeout }}
     defaults:
       run:
         working-directory: packages/filen-desktop
@@ -748,7 +749,7 @@ jobs:
       - name: N-1 -> N, signed in
         if: matrix.deepPrevious
         shell: bash
-        timeout-minutes: 150
+        timeout-minutes: 165
         env:
           FILEN_DESKTOP_E2E_TEST_EMAIL: ${{ secrets.FILEN_DESKTOP_E2E_TEST_EMAIL }}
           FILEN_DESKTOP_E2E_TEST_PASSWORD: ${{ secrets.FILEN_DESKTOP_E2E_TEST_PASSWORD }}
@@ -762,7 +763,7 @@ jobs:
           E2E_SIGN_IN: ${{ matrix.signInPrevious }}
           E2E_STAGGER_SECONDS: ${{ matrix.stagger }}
           # Below the step's timeout: a chain that overruns writes its evidence and fails by name.
-          E2E_CHAIN_BUDGET_MINUTES: 135
+          E2E_CHAIN_BUDGET_MINUTES: 150
           E2E_OFFLINE_SPIKE: ${{ matrix.spike == 'offline' && '1' || '' }}
           E2E_NAMES_CHECK: ${{ inputs.names_check && '1' || '' }}
         run: bash scripts/ci/deepSession.sh --scenario previous --depth deep ${{ env.TEST_ARGS }} --artifacts e2e-artifacts
@@ -825,7 +826,7 @@ jobs:
         timeout-minutes: 45
         run: node scripts/ci/e2e.ts --scenario update-kill ${{ env.TEST_ARGS }}
       # Chain K starts its own D-Bus sessions and talks to them with dbus-send. After chain L, whose 3.0.53 download it
-      # reuses; it signs nothing in, so it gets no secret.
+      # reuses where the two share a job (matrix.lane); it signs nothing in, so it gets no secret.
       - name: Prepare the keyring chain
         if: ${{ !cancelled() && matrix.keyring }}
         run: sudo apt-get install --yes --no-install-recommends dbus-bin dbus-daemon gnome-keyring libsecret-tools
@@ -849,7 +850,7 @@ jobs:
         if: ${{ always() && (matrix.spike || matrix.deep) }}
         uses: actions/upload-artifact@v6
         with:
-          name: desktop-e2e-${{ matrix.spike && format('spike-{0}', matrix.spike) || 'deep' }}-${{ matrix.platform }}-${{ matrix.arch }}-${{ matrix.format }}-${{ github.run_attempt }}
+          name: desktop-e2e-${{ matrix.spike && format('spike-{0}', matrix.spike) || 'deep' }}-${{ matrix.platform }}-${{ matrix.arch }}-${{ matrix.format }}${{ matrix.lane && format('-{0}', matrix.lane) || '' }}-${{ github.run_attempt }}
           path: packages/filen-desktop/e2e-artifacts
           if-no-files-found: warn
           retention-days: 14

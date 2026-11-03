@@ -17,7 +17,7 @@ import {
 	freeDriveLetter
 } from "../../scripts/ci/e2e/smallVolume.ts"
 import { allIdle, proxyLaunch, tunnelsPerHost } from "../../scripts/ci/e2e/chains/proxyCheck.ts"
-import { MAX_LOGINS_PER_RUN, plan, type PlanInput, QUOTA_ENTRY, SESSION_SLOTS } from "../../scripts/ci/e2ePlan.ts"
+import { MAX_LOGINS_PER_RUN, plan, type PlanInput, QUOTA_ENTRY, SESSION_SLOTS, STEP_MINUTES } from "../../scripts/ci/e2ePlan.ts"
 import { LEASE_MS, leaseName, leaseStart, leaseState } from "../../scripts/ci/e2e/quotaLease.ts"
 
 // The pure parts of the gap-5 checks (plan D3): the CONNECT proxy and its faults against a local echo server, the
@@ -395,9 +395,10 @@ describe("e2e workflow: the gap-5 checks", () => {
 		const timeout = Number(/timeout-minutes: (\d+)/.exec(step)?.[1])
 		const legacy = text.slice(text.indexOf("- name: 3.0.53 -> N, signed in"))
 		const legacyTimeout = Number(/timeout-minutes: (\d+)/.exec(legacy)?.[1])
-		const job = Number(/timeout-minutes: \$\{\{ matrix\.deep && (\d+) \|\| 90 \}\}/.exec(text)?.[1])
 
 		expect(budget).toBeLessThan(timeout)
-		expect(timeout + legacyTimeout).toBeLessThan(job)
+		expect(timeout).toBe(STEP_MINUTES.previousDeep)
+		expect(legacyTimeout).toBe(STEP_MINUTES.legacyDeep)
+		expect(text).toContain("timeout-minutes: ${{ matrix.timeout }}")
 	})
 })

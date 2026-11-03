@@ -34,6 +34,10 @@ import { OLDER_SCENARIO, olderFor, runsOlder } from "./olderPlan.ts"
 // (`quota`, the cloud-storage-full check) when that still fits. `pins` names the old clients the run signs in or seeds,
 // whose SDK must take the account's auth version (checked by job `session`).
 //
+// Each entry gets one test job, whose `timeout` is its setup plus every step it can run at that step's timeout
+// (jobMinutes). Where that overruns the six hours a hosted runner allows (JOB_MAX_MINUTES), the entry's 3.0.47 chain and
+// chain K run in a second job (`lane`), listed after every entry's first.
+//
 //   node scripts/ci/e2ePlan.ts
 
 export type Os = "windows" | "mac" | "linux"
@@ -74,6 +78,11 @@ export interface TestEntry extends Entry {
 	updateKill: boolean
 	// Chain P also runs the cloud-storage-full check, which signs in once through the form on the quota account.
 	quota: boolean
+	// "" for the entry's job; else the second job of an entry whose chains do not fit one (jobMinutes), named by what
+	// it runs ("older", "keyring" or "older-keyring").
+	lane: string
+	// The job's timeout-minutes (jobMinutes).
+	timeout: number
 }
 
 export interface BuildEntry {
@@ -216,6 +225,67 @@ export const QUOTA_ENTRY = "linux-x64-deb"
 // A run's worst case, whatever is asked: with MAX_OTHER_RUNS others (desktop-e2e.yml) the account stays well inside
 // its 90 logins an hour even if every runner shared one IP.
 export const MAX_LOGINS_PER_RUN = 10
+
+// The test job's step timeouts (desktop-e2e.yml; the tests hold the two to each other) and the minutes around them
+// (checkout, installs, downloads). The install-depth N-1 and 3.0.53 steps have no timeout of their own: `install`.
+export const STEP_MINUTES = {
+	previousDeep: 165,
+	legacyDeep: 120,
+	olderDeep: 120,
+	olderInstall: 30,
+	updateKill: 45,
+	keyring: 45,
+	spike: 20,
+	install: 35
+} as const
+export const SETUP_MINUTES = 20
+// GitHub-hosted runners end a job after six hours whatever its timeout-minutes says.
+export const JOB_MAX_MINUTES = 360
+// What a job gets at the least (an install-depth entry's).
+const JOB_MIN_MINUTES = 90
+
+export type JobParts = Pick<
+	TestEntry,
+	"previous" | "legacy" | "deepPrevious" | "deepLegacy" | "older" | "deepOlder" | "keyring" | "updateKill" | "spike"
+>
+
+// A job's timeout: its setup and every step it can run, each at its timeout.
+export function jobMinutes(parts: JobParts): number {
+	const steps = [
+		parts.deepPrevious ? STEP_MINUTES.previousDeep : parts.previous ? STEP_MINUTES.install : 0,
+		parts.deepLegacy ? STEP_MINUTES.legacyDeep : parts.legacy ? STEP_MINUTES.install : 0,
+		parts.deepOlder ? STEP_MINUTES.olderDeep : parts.older ? STEP_MINUTES.olderInstall : 0,
+		parts.keyring ? STEP_MINUTES.keyring : 0,
+		parts.updateKill ? STEP_MINUTES.updateKill : 0,
+		parts.spike !== "" && !parts.deepPrevious ? STEP_MINUTES.spike : 0
+	]
+
+	return Math.max(JOB_MIN_MINUTES, SETUP_MINUTES + steps.reduce((sum, minutes) => sum + minutes, 0))
+}
+
+// An entry's jobs: one, or where its chains overrun JOB_MAX_MINUTES, the 3.0.47 chain and chain K in a second job on a
+// runner of their own (they share nothing with chains P and L but the build).
+export function splitJob(parts: JobParts): JobParts[] {
+	if (jobMinutes(parts) <= JOB_MAX_MINUTES || !(parts.older || parts.keyring)) {
+		return [parts]
+	}
+
+	return [
+		{ ...parts, older: false, deepOlder: false, keyring: false },
+		{
+			...parts,
+			previous: false,
+			legacy: false,
+			deepPrevious: false,
+			deepLegacy: false,
+			updateKill: false
+		}
+	]
+}
+
+function laneOf(parts: JobParts): string {
+	return [parts.older ? "older" : "", parts.keyring ? "keyring" : ""].filter(part => part !== "").join("-")
+}
 
 const builders: Record<Os, string> = { windows: "windows-latest", mac: "macos-26", linux: "ubuntu-latest" }
 
@@ -413,32 +483,47 @@ export function plan(input: PlanInput, readiness: DeepReadiness = { ready: DEEP_
 	const realOlder = new Set(signin === "real" ? olderCandidates : olderCandidates.slice(0, 1))
 	const signInOf = (deep: boolean, isReal: boolean): SignIn | "" => (!deep ? "" : isReal ? "real" : "seeded")
 
+	const perEntry = running.map(({ entry, deepPrevious, deepLegacy, older: olderEntry, deepOlder }) => {
+		const parts: JobParts = {
+			previous,
+			legacy,
+			deepPrevious,
+			deepLegacy,
+			older: olderEntry,
+			deepOlder,
+			keyring: keyringOn(entry),
+			updateKill: killed(entry),
+			spike
+		}
+		return splitJob(parts).map((job, index) => ({ entry, job, lane: index === 0 ? "" : laneOf(job) }))
+	})
+	// Every entry's job, then the second jobs, so the first ones' sign-ins keep their spacing.
+	const jobs = [...perEntry.map(([first]) => first), ...perEntry.flatMap(([, ...rest]) => rest)].filter(job => job !== undefined)
+
 	let realCount = 0
-	const tests = running.map(({ entry, deepPrevious, deepLegacy, older: olderEntry, deepOlder }): TestEntry => {
-		const signInPrevious = signInOf(deepPrevious, realPrevious.has(entry))
-		const signInLegacy = signInOf(deepLegacy, realLegacy.has(entry))
-		const signInOlder = signInOf(deepOlder, realOlder.has(entry))
-		const keyringHere = keyringOn(entry)
+	const tests = jobs.map(({ entry, job, lane }): TestEntry => {
+		const signInPrevious = signInOf(job.deepPrevious, realPrevious.has(entry))
+		const signInLegacy = signInOf(job.deepLegacy, realLegacy.has(entry))
+		const signInOlder = signInOf(job.deepOlder, realOlder.has(entry))
+		const timeout = jobMinutes(job)
+
+		if (timeout > JOB_MAX_MINUTES) {
+			invalid(`${idOf(entry)}'s job needs ${String(timeout)} minutes, more than JOB_MAX_MINUTES (${String(JOB_MAX_MINUTES)})`)
+		}
 
 		return {
 			...entry,
 			signed: sign[entry.os],
-			previous,
-			legacy,
-			deep: deepPrevious || deepLegacy || deepOlder || keyringHere,
-			deepPrevious,
-			deepLegacy,
+			...job,
+			deep: job.deepPrevious || job.deepLegacy || job.deepOlder || job.keyring,
 			signInPrevious,
 			signInLegacy,
-			older: olderEntry,
-			deepOlder,
 			signInOlder,
-			keyring: keyringHere,
-			// Only the form sign-ins are spaced; a seeded chain makes no login.
+			// Only the form sign-ins are spaced, per job; a seeded chain makes no login.
 			stagger: signInPrevious === "real" || signInLegacy === "real" || signInOlder === "real" ? STAGGER_SECONDS * realCount++ : 0,
-			spike,
-			updateKill: killed(entry),
-			quota: false
+			quota: false,
+			lane,
+			timeout
 		}
 	})
 	const builds = (Object.keys(builders) as Os[])

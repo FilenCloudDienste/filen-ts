@@ -75,10 +75,6 @@ describe("desktop e2e workflow secrets", () => {
 		expect(text).toContain(
 			"if: ${{ !cancelled() && matrix.older && !matrix.deepOlder }}\n        timeout-minutes: 30\n        run: node scripts/ci/e2e.ts --scenario older ${{ env.TEST_ARGS }}"
 		)
-		// On a deep nightly entry the install-depth step comes on top of two deep chains.
-		expect(text).toContain(
-			"timeout-minutes: ${{ matrix.deepOlder && 360 || (matrix.deep && matrix.older) && 270 || matrix.deep && 240 || 90 }}"
-		)
 		expect(text).toContain("E2E_SIGN_IN: ${{ matrix.signInOlder }}")
 		expect(text).toContain("bash scripts/ci/deepSession.sh --scenario older --depth deep")
 	})
@@ -111,10 +107,9 @@ describe("desktop e2e workflow chain K", () => {
 		expect(chain).toContain("if: ${{ !cancelled() && matrix.keyring }}")
 		expect(chain).toContain("run: node scripts/ci/e2e.ts --scenario keyring ${{ env.TEST_ARGS }} --artifacts e2e-artifacts")
 		expect(chain).not.toMatch(/secrets\.|E2E_SIGN_IN|SESSION/)
-		// A budget below the step's timeout, so an overrun keeps its evidence; the job's timeout leaves room after P and L.
+		// A budget below the step's timeout, so an overrun keeps its evidence; the job's timeout (the plan's) counts it.
 		expect(chain).toContain("timeout-minutes: 45")
 		expect(chain).toContain("E2E_CHAIN_BUDGET_MINUTES: 40")
-		expect(text).toContain("timeout-minutes: ${{ matrix.deep && (matrix.keyring && 285 || 240) || 90 }}")
 		expect(text.indexOf("- name: Keyring chain K, no sign-in")).toBeGreaterThan(text.indexOf("- name: 3.0.53 -> N, signed in"))
 		expect(step("Prepare the keyring chain")).toContain("dbus-bin")
 		// A keyring-only entry is deep (the harness) without a session to download.

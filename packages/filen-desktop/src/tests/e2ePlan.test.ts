@@ -1,14 +1,20 @@
+import { readFileSync } from "node:fs"
+import { fileURLToPath } from "node:url"
 import { describe, expect, it } from "vitest"
 import { refusal } from "../../scripts/ci/e2e/context.ts"
 import { SLOTS } from "../../scripts/ci/e2e/session.ts"
 import {
 	DEEP_READY,
 	DEEP_TRIAL,
+	JOB_MAX_MINUTES,
+	jobMinutes,
 	MAX_LOGINS_PER_RUN,
 	plan,
 	type PlanInput,
 	previousVersion,
-	SESSION_SLOTS
+	SESSION_SLOTS,
+	SETUP_MINUTES,
+	STEP_MINUTES
 } from "../../scripts/ci/e2ePlan.ts"
 
 const dispatch: PlanInput = {
@@ -49,7 +55,9 @@ describe("e2ePlan", () => {
 	it("tests every entry signed at release", () => {
 		const result = plan({ ...dispatch, profile: "release", eventName: "push", signed: true })
 
-		expect(result.tests).toHaveLength(10)
+		// Each entry's job, and the second jobs of the entries whose chains overrun one (jobMinutes).
+		expect(result.tests.filter(entry => entry.lane === "")).toHaveLength(10)
+		expect(result.tests.filter(entry => entry.lane !== "")).toHaveLength(3)
 		expect(result.builds.every(entry => entry.sign)).toBe(true)
 	})
 
@@ -169,6 +177,7 @@ describe("e2ePlan depth", () => {
 		// The nightly macOS builds are Developer-ID signed (Squirrel.Mac needs it), Windows and Linux are not.
 		expect(Object.fromEntries(nightly.builds.map(build => [build.os, build.sign]))).toEqual({ windows: false, mac: true, linux: false })
 		expect(mac?.signed).toBe(true)
+		// Then the second jobs (3.0.47 and chain K): the real 3.0.47 sign-in spaced after the others.
 		expect(deep({ ...dispatch, profile: "release", signed: true })).toEqual([
 			"win-x64-nsis@0",
 			"win-arm64-nsis@20",
@@ -177,7 +186,10 @@ describe("e2ePlan depth", () => {
 			"linux-x64-deb@80",
 			"linux-x64-AppImage@100",
 			"linux-arm64-deb@0",
-			"linux-arm64-AppImage@0"
+			"linux-arm64-AppImage@0",
+			"win-x64-nsis@120",
+			"mac-arm64-dmg@0",
+			"linux-x64-deb@0"
 		])
 		// A custom deep run without FORMATS takes the release's deep entries, with the same form sign-ins.
 		expect(plan({ ...dispatch, signed: true, depth: "deep" }).logins).toBe(SESSION_SLOTS + 6 + 1)
@@ -274,7 +286,7 @@ describe("e2ePlan sign-ins", () => {
 	const release = { ...dispatch, profile: "release", eventName: "workflow_call", signed: true }
 	const signIns = (input: PlanInput) =>
 		plan(input)
-			.tests.filter(entry => entry.deep)
+			.tests.filter(entry => entry.deep && entry.lane === "")
 			.map(
 				entry =>
 					`${entry.platform}-${entry.arch}-${entry.format} ${entry.signInPrevious}/${entry.signInLegacy}@${String(entry.stagger)}`
@@ -317,7 +329,8 @@ describe("e2ePlan sign-ins", () => {
 		] as const) {
 			for (const day of days) {
 				const result = plan({ ...input, day })
-				const deep = result.tests.filter(entry => entry.deep)
+				// Each entry's own job (a second job runs 3.0.47 and chain K only).
+				const deep = result.tests.filter(entry => entry.deep && entry.lane === "")
 
 				expect(deep.length).toBe(input === nightly || input === release || input.depth === "deep" ? 8 : 3)
 				expect(deep.every(entry => entry.deepPrevious && entry.deepLegacy)).toBe(true)
@@ -446,6 +459,94 @@ describe("e2ePlan sign-ins", () => {
 
 	it("counts the session job's slots", () => {
 		expect(SESSION_SLOTS).toBe(Object.keys(SLOTS).length)
+	})
+})
+
+describe("e2ePlan job timeouts", () => {
+	const nightly = { ...dispatch, platforms: "", profile: "", eventName: "schedule", scenarios: "", spike: "" }
+	const release = { ...dispatch, profile: "release", eventName: "workflow_call", signed: true }
+	const text = readFileSync(fileURLToPath(new URL("../../../../.github/workflows/desktop-e2e.yml", import.meta.url)), "utf8")
+	const stepTimeout = (name: string) => {
+		const start = text.indexOf(`- name: ${name}\n`)
+
+		expect(start).toBeGreaterThan(-1)
+
+		return Number(/timeout-minutes: (\d+)/.exec(text.slice(start, text.indexOf("\n      - name:", start + 1)))?.[1])
+	}
+	const idOf = (entry: { platform: string; arch: string; format: string }) => `${entry.platform}-${entry.arch}-${entry.format}`
+	// Every Wednesday-or-not night, a release, and dispatches asking for everything.
+	const runs: PlanInput[] = [
+		...[0, 1, 2, 3, 4, 5, 6].map(day => ({ ...nightly, day })),
+		release,
+		{ ...release, depth: "install" },
+		dispatch,
+		{ ...dispatch, signed: true, scenarios: "previous,legacy,older,update-kill,keyring", depth: "deep" },
+		{ ...dispatch, signed: true, scenarios: "older,update-kill,keyring" }
+	]
+
+	it("counts each step at the workflow's timeout for it", () => {
+		expect(stepTimeout("N-1 -> N, signed in")).toBe(STEP_MINUTES.previousDeep)
+		expect(stepTimeout("3.0.53 -> N, signed in")).toBe(STEP_MINUTES.legacyDeep)
+		expect(stepTimeout("3.0.47 -> N, signed in")).toBe(STEP_MINUTES.olderDeep)
+		expect(stepTimeout("3.0.47 -> N")).toBe(STEP_MINUTES.olderInstall)
+		expect(stepTimeout("N-1 -> N, installer killed")).toBe(STEP_MINUTES.updateKill)
+		expect(stepTimeout("Keyring chain K, no sign-in")).toBe(STEP_MINUTES.keyring)
+		expect(stepTimeout("Spike ${{ matrix.spike }}")).toBe(STEP_MINUTES.spike)
+		expect(text).toContain("timeout-minutes: ${{ matrix.timeout }}")
+		expect(text).toContain("${{ matrix.lane && format(' {0}', matrix.lane) || '' }}")
+		expect(text).toContain("${{ matrix.format }}${{ matrix.lane && format('-{0}', matrix.lane) || '' }}-${{ github.run_attempt }}")
+	})
+
+	it("gives every job its setup and steps, within a hosted runner's six hours, running each chain once", () => {
+		for (const input of runs) {
+			const result = plan(input)
+
+			for (const entry of result.tests) {
+				expect(entry.timeout).toBe(jobMinutes(entry))
+				expect(entry.timeout).toBeLessThanOrEqual(JOB_MAX_MINUTES)
+				expect(entry.timeout).toBeGreaterThanOrEqual(
+					SETUP_MINUTES +
+						(entry.deepPrevious ? STEP_MINUTES.previousDeep : 0) +
+						(entry.deepLegacy ? STEP_MINUTES.legacyDeep : 0) +
+						(entry.deepOlder ? STEP_MINUTES.olderDeep : entry.older ? STEP_MINUTES.olderInstall : 0) +
+						(entry.keyring ? STEP_MINUTES.keyring : 0) +
+						(entry.updateKill ? STEP_MINUTES.updateKill : 0)
+				)
+			}
+
+			for (const chain of ["deepPrevious", "deepLegacy", "older", "keyring", "updateKill", "quota"] as const) {
+				const holders = result.tests.filter(entry => entry[chain]).map(idOf)
+
+				expect(new Set(holders).size).toBe(holders.length)
+			}
+		}
+	})
+
+	it("runs 3.0.47 and chain K in a second job where an entry's chains overrun six hours", () => {
+		const lanes = (input: PlanInput) =>
+			plan(input)
+				.tests.filter(entry => entry.lane !== "")
+				.map(entry => `${idOf(entry)} ${entry.lane}`)
+
+		expect(lanes(release)).toEqual(["win-x64-nsis older", "mac-arm64-dmg older", "linux-x64-deb older-keyring"])
+		// A Wednesday night: chain K and the install-depth 3.0.47 update beside P and L on the deb.
+		expect(lanes({ ...nightly, day: 6 })).toEqual(["linux-x64-deb older-keyring"])
+		expect(lanes({ ...nightly, day: 0 })).toEqual([])
+
+		const second = plan(release).tests.find(entry => entry.lane === "older-keyring")
+
+		expect(second).toMatchObject({
+			previous: false,
+			legacy: false,
+			deepPrevious: false,
+			deepLegacy: false,
+			updateKill: false,
+			quota: false,
+			deep: true,
+			older: true,
+			deepOlder: true,
+			keyring: true
+		})
 	})
 })
 
