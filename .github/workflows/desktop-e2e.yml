@@ -652,7 +652,7 @@ jobs:
           ELECTRON_SKIP_BINARY_DOWNLOAD: 1
         run: pnpm install --frozen-lockfile --filter "@filen/desktop..." --ignore-scripts
       - name: Download the sealed session
-        if: matrix.deepPrevious || matrix.deepLegacy
+        if: matrix.deepPrevious || matrix.deepLegacy || matrix.deepOlder
         uses: actions/download-artifact@v7
         with:
           name: desktop-e2e-session
