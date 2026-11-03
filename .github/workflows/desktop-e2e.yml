@@ -7,7 +7,9 @@
 # installs so that each installer has to bring it.
 #
 #   N-1 -> N      N-1 is the same commit built with a lower version, so the new updater, installer and uninstaller
-#                 run against each other.
+#                 run against each other. Before its update, N-1 runs once against its own feed, which fails each
+#                 check in another way (500, 404, a cut, a flipped byte, a truncated zip on macOS, a stall, an end
+#                 mid-download; scripts/ci/e2e/updateFaults.ts).
 #   3.0.53 -> N   the real last 3.x release, downloaded from the old repository's GitHub release and checked against
 #                 pinned hashes: the path the whole installed fleet takes to 4.x. It is its old updater and its old
 #                 NSIS uninstaller (run with --updated, which is what keeps %APPDATA%\@filen\desktop) that do the work.
@@ -82,7 +84,7 @@ on:
         type: string
         default: release
       scenarios:
-        description: Comma-separated subset of previous,legacy
+        description: Comma-separated subset of previous,legacy,update-kill (a release runs update-kill always)
         type: string
         default: previous,legacy
       formats:
@@ -116,7 +118,7 @@ on:
           - release
         default: custom
       scenarios:
-        description: Comma-separated subset of previous,legacy
+        description: Comma-separated subset of previous,legacy,update-kill (a release runs update-kill always)
         type: string
         default: previous,legacy
       formats:
@@ -721,6 +723,13 @@ jobs:
           -w /work/packages/filen-desktop "${FEDORA_IMAGE}"
           bash -ec 'dnf install --assumeyes --quiet xorg-x11-server-Xvfb && /opt/host-node/node scripts/ci/e2e.ts "$@"'
           e2e --scenario legacy ${{ env.TEST_ARGS }}
+      # Every release run, and by hand when `scenarios` names update-kill: N-1's update installer killed mid-install
+      # (Windows installer, ShipIt, dpkg; on the AppImage a failing mv), then what a user is left with must work
+      # (scripts/ci/e2e/updateKill.ts). Install depth, nothing signed in, not for rpm.
+      - name: N-1 -> N, installer killed
+        if: ${{ !cancelled() && matrix.updateKill }}
+        timeout-minutes: 45
+        run: node scripts/ci/e2e.ts --scenario update-kill ${{ env.TEST_ARGS }}
       # The account's credentials reach spike s7 only, and only this step (deep entries: the step above).
       # Bounded so a hang never holds a runner for the job's whole budget.
       - name: Spike ${{ matrix.spike }}

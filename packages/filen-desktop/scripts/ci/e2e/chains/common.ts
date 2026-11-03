@@ -624,6 +624,9 @@ export async function openChain(name: string, options: Omit<UpdateOptions, "hook
 					hooks: {
 						...hooks,
 						beforeReset,
+						// The update fault launch's checks and its graceful quit (e2e/updateFaults.ts).
+						findings,
+						stopFaultLaunch: pids => os.requestQuit(pids),
 						beforeUpdate: async () => {
 							await unquarantined("installed, before its first launch")
 							await hooks.beforeUpdate()

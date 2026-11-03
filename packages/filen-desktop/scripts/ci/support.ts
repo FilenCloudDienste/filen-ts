@@ -1,7 +1,7 @@
 import { spawn, spawnSync, type ChildProcess } from "node:child_process"
 import { closeSync, createReadStream, createWriteStream, existsSync, openSync, readSync, statSync } from "node:fs"
 import { mkdir } from "node:fs/promises"
-import { createServer } from "node:http"
+import { createServer, type IncomingMessage, type ServerResponse } from "node:http"
 import type { AddressInfo } from "node:net"
 import path from "node:path"
 import { Readable } from "node:stream"
@@ -199,16 +199,158 @@ export interface FeedRequest {
 export interface FeedServer {
 	url: string
 	requests: FeedRequest[]
+	// Lets every stalled response go on from where it stopped (one whose client went away stays ended).
+	release(): void
 	close(): Promise<void>
 }
 
 /**
- * The update feed on the loopback interface: only the named files in `dir`, whole files only (no Range, so the
- * updater takes its full-download path and every request is one complete transfer that can be asserted on).
+ * What one request gets instead of the file (the update fault launch, scripts/ci/e2e/updateFaults.ts). Fractions are of
+ * the body; the full Content-Length is always announced.
+ *
+ *   status   that status and no body
+ *   body     these bytes instead of the file's (a manifest made up for the request, a truncated file)
+ *   cutAt    the socket destroyed once this much is sent
+ *   stallAt  nothing more sent once this much is, on a live socket, until release() (stallAt 0: headers only)
+ *   flipAt   the byte there sent inverted
  */
-export async function serveFeed(dir: string, names: readonly string[]): Promise<FeedServer> {
+export interface FeedFault {
+	status?: number
+	body?: Buffer
+	cutAt?: number
+	stallAt?: number
+	flipAt?: number
+}
+
+// The fault for a request, by name and that name's request ordinal (1 for its first); null serves the file as it is.
+// `range`: the request asks for a byte range (which the feed never serves).
+export type FeedFaultPlan = (request: { name: string; ordinal: number; range: boolean }) => FeedFault | null
+
+// Writes bytes [start, end) of the file or buffer to the response with backpressure, inverting the byte at `flip`.
+// False once the client is gone.
+async function sendPart(
+	response: ServerResponse,
+	record: FeedRequest,
+	source: string | Buffer,
+	start: number,
+	end: number,
+	flip: number | null
+): Promise<boolean> {
+	if (start >= end) {
+		return !response.destroyed
+	}
+
+	const chunks: AsyncIterable<Buffer> | Buffer[] =
+		typeof source === "string" ? createReadStream(source, { start, end: end - 1 }) : [source.subarray(start, end)]
+	let position = start
+
+	for await (const raw of chunks) {
+		if (response.destroyed) {
+			return false
+		}
+
+		let chunk = raw
+
+		if (flip !== null && flip >= position && flip < position + chunk.length) {
+			chunk = Buffer.from(chunk)
+			chunk[flip - position] = (chunk[flip - position] ?? 0) ^ 0xff
+		}
+
+		position += chunk.length
+		record.bytes += chunk.length
+
+		if (!response.write(chunk)) {
+			await new Promise<void>(resolve => {
+				const done = () => {
+					response.off("drain", done)
+					response.off("close", done)
+					resolve()
+				}
+
+				response.once("drain", done)
+				response.once("close", done)
+			})
+		}
+	}
+
+	return !response.destroyed
+}
+
+/**
+ * The update feed on the loopback interface: only the named files in `dir`, whole files only (no Range, so the
+ * updater takes its full-download path and every request is one complete transfer that can be asserted on). With
+ * `plan`, a request may get a fault instead (FeedFault).
+ */
+export async function serveFeed(dir: string, names: readonly string[], plan?: FeedFaultPlan): Promise<FeedServer> {
 	const allowed = new Set(names)
 	const requests: FeedRequest[] = []
+	const ordinals = new Map<string, number>()
+	const stalled = new Set<() => void>()
+
+	const faulted = async (
+		request: IncomingMessage,
+		response: ServerResponse,
+		record: FeedRequest,
+		file: string,
+		fault: FeedFault
+	): Promise<void> => {
+		if (fault.status !== undefined) {
+			record.status = fault.status
+			response.writeHead(fault.status).end()
+
+			return
+		}
+
+		const source = fault.body ?? file
+		const size = fault.body?.length ?? statSync(file).size
+		const at = (fraction: number) => Math.min(size, Math.max(0, Math.floor(size * fraction)))
+		const stop = fault.cutAt ?? fault.stallAt
+		const first = stop === undefined ? size : at(stop)
+		const flip = fault.flipAt === undefined ? null : Math.min(at(fault.flipAt), size - 1)
+
+		record.status = 200
+		response.writeHead(200, {
+			"Content-Length": size,
+			"Content-Type": record.path.endsWith(".yml") ? "text/yaml" : "application/octet-stream",
+			"Accept-Ranges": "none",
+			"Cache-Control": "no-store"
+		})
+		response.flushHeaders()
+
+		if (request.method === "HEAD") {
+			response.end()
+
+			return
+		}
+
+		if (!(await sendPart(response, record, source, 0, first, flip))) {
+			return
+		}
+
+		if (fault.cutAt !== undefined) {
+			response.socket?.destroy()
+
+			return
+		}
+
+		if (fault.stallAt !== undefined) {
+			await new Promise<void>(resolve => {
+				const go = () => {
+					stalled.delete(go)
+					response.off("close", go)
+					resolve()
+				}
+
+				stalled.add(go)
+				response.once("close", go)
+			})
+		}
+
+		if (await sendPart(response, record, source, first, size, flip)) {
+			response.end()
+		}
+	}
+
 	const server = createServer((request, response) => {
 		const name = decodeURIComponent(new URL(request.url ?? "/", "http://127.0.0.1").pathname.replace(/^\/+/, ""))
 		const file = path.join(dir, name)
@@ -225,6 +367,20 @@ export async function serveFeed(dir: string, names: readonly string[]): Promise<
 
 		if (!allowed.has(name) || !existsSync(file)) {
 			response.writeHead(404).end()
+
+			return
+		}
+
+		const ordinal = (ordinals.get(name) ?? 0) + 1
+
+		ordinals.set(name, ordinal)
+
+		const fault = plan?.({ name, ordinal, range: request.headers.range !== undefined }) ?? null
+
+		if (fault !== null) {
+			faulted(request, response, record, file, fault).catch(() => {
+				response.destroy()
+			})
 
 			return
 		}
@@ -263,6 +419,11 @@ export async function serveFeed(dir: string, names: readonly string[]): Promise<
 	return {
 		url: `http://127.0.0.1:${String(port)}/`,
 		requests,
+		release: () => {
+			for (const go of [...stalled]) {
+				go()
+			}
+		},
 		close: () =>
 			new Promise<void>(resolve => {
 				server.closeAllConnections()

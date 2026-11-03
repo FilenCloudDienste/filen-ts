@@ -7,7 +7,9 @@ import { appendFileSync, readFileSync } from "node:fs"
 //   PLATFORMS   comma-separated subset of windows,mac,linux (default all)
 //   PROFILE     release | nightly | custom; empty means nightly for a scheduled run, custom otherwise
 //   SIGNED      true | false: sign every build (release and custom); nightly signs macOS only, never notarized
-//   SCENARIOS   comma-separated subset of previous,legacy (default both); LEGACY=false drops legacy too
+//   SCENARIOS   comma-separated subset of previous,legacy,update-kill (default the first two); LEGACY=false drops
+//               legacy too. update-kill (N-1's installer killed mid-install, install depth) runs in every release run
+//               and when named; never at night, and not for rpm
 //   FORMATS     custom only: entries such as win-x64-nsis,linux-x64-deb (default all)
 //   DEPTH       auto | install | deep: auto takes the profile's deep entries, deep those of a release (and any
 //               DEEP_TRIAL entry FORMATS names)
@@ -54,6 +56,8 @@ export interface TestEntry extends Entry {
 	signInLegacy: SignIn | ""
 	stagger: number
 	spike: Spike | ""
+	// Scenario update-kill (scripts/ci/e2e/updateKill.ts).
+	updateKill: boolean
 }
 
 export interface BuildEntry {
@@ -250,8 +254,8 @@ export function plan(input: PlanInput, readiness: DeepReadiness = { ready: DEEP_
 
 	const scenarios = input.scenarios.trim() === "" ? ["previous", "legacy"] : list(input.scenarios)
 
-	if (scenarios.length === 0 || scenarios.some(item => item !== "previous" && item !== "legacy")) {
-		invalid(`SCENARIOS must list some of previous, legacy (got "${input.scenarios}")`)
+	if (scenarios.length === 0 || scenarios.some(item => item !== "previous" && item !== "legacy" && item !== "update-kill")) {
+		invalid(`SCENARIOS must list some of previous, legacy, update-kill (got "${input.scenarios}")`)
 	}
 
 	const formats = list(input.formats)
@@ -300,9 +304,16 @@ export function plan(input: PlanInput, readiness: DeepReadiness = { ready: DEEP_
 
 	const previous = spike === "" && scenarios.includes("previous")
 	const legacy = spike === "" && scenarios.includes("legacy") && input.legacy
+	const updateKill = spike === "" && (profile === "release" || scenarios.includes("update-kill"))
+	const killed = (entry: Entry) => updateKill && entry.format !== "rpm"
 
-	if (chosen.length === 0 || (spike === "" && !previous && !legacy)) {
+	if (chosen.length === 0 || (spike === "" && !previous && !legacy && !chosen.some(killed))) {
 		invalid("nothing to test")
+	}
+
+	// update-kill alone: only the entries it runs on (not rpm).
+	if (spike === "" && !previous && !legacy) {
+		chosen.splice(0, chosen.length, ...chosen.filter(killed))
 	}
 
 	const trial = profile === "custom" && depth === "deep"
@@ -374,7 +385,8 @@ export function plan(input: PlanInput, readiness: DeepReadiness = { ready: DEEP_
 			signInLegacy,
 			// Only the form sign-ins are spaced; a seeded chain makes no login.
 			stagger: signInPrevious === "real" || signInLegacy === "real" ? STAGGER_SECONDS * realCount++ : 0,
-			spike
+			spike,
+			updateKill: killed(entry)
 		}
 	})
 	const builds = (Object.keys(builders) as Os[])

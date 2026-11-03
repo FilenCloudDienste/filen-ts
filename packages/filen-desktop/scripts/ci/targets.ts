@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from "node:child_process"
+import { spawn, spawnSync, type ChildProcess } from "node:child_process"
 import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, rmSync } from "node:fs"
 import os from "node:os"
 import path from "node:path"
@@ -29,6 +29,8 @@ export interface Target {
 	// What a user's launch runs; the relaunched app must run from the same place.
 	readonly executable: string
 	readonly userData: string
+	// electron-updater's cache for this install (its downloads land in pending/).
+	readonly updaterCache: string
 	install(artifact: string): void
 	// The machine without the app, its data or its updater caches; safe when nothing is installed.
 	reset(): void
@@ -40,6 +42,8 @@ export interface Target {
 	launchEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv
 	// Main (browser) processes of the installed app; helpers and renderers are not listed.
 	mainProcesses(): AppProcess[]
+	// Ends processes at once, with their children on Windows; root's (an updater's package manager) through sudo.
+	kill(pids: readonly number[]): void
 	// The version packed into the installed app.
 	installedVersion(): string
 	// The version the OS's package database or uninstall entry records, null where there is none.
@@ -52,6 +56,8 @@ export interface Target {
 }
 
 const home = os.homedir()
+// electron-updater's cache directory: electron-builder's sanitized package name ("@filen/desktop") plus "-updater".
+const UPDATER_CACHE = "@filendesktop-updater"
 
 function remove(...paths: string[]): void {
 	for (const target of paths) {
@@ -176,6 +182,24 @@ function killAll(processes: AppProcess[]): void {
 	}
 }
 
+function killPids(pids: readonly number[]): void {
+	for (const pid of pids) {
+		if (process.platform === "win32") {
+			spawnSync("taskkill.exe", ["/F", "/T", "/PID", String(pid)], { encoding: "utf8", timeout: 30_000 })
+
+			continue
+		}
+
+		try {
+			process.kill(pid, "SIGKILL")
+		} catch (error) {
+			if (error instanceof Error && "code" in error && error.code === "EPERM") {
+				spawnSync("sudo", ["--non-interactive", "kill", "-9", String(pid)], { encoding: "utf8", timeout: 30_000 })
+			}
+		}
+	}
+}
+
 export function detached(executable: string, args: readonly string[], env: NodeJS.ProcessEnv, output?: number): ChildProcess {
 	const child = spawn(executable, args, {
 		detached: true,
@@ -237,6 +261,7 @@ function windows(): Target {
 		updateFile: "Filen_win.exe",
 		executable,
 		userData: path.join(appData, "@filen", "desktop"),
+		updaterCache: path.join(localAppData, UPDATER_CACHE),
 		install(artifact) {
 			// Silent, from the already elevated runner shell: the per-machine install a user confirms through UAC.
 			run(artifact, ["/S"])
@@ -275,6 +300,7 @@ function windows(): Target {
 		},
 		launchEnv: env => env,
 		mainProcesses,
+		kill: killPids,
 		installedVersion: () => asarVersion(path.join(installDir, "resources", "app.asar")),
 		registeredVersion() {
 			const entry = uninstallEntry("HKLM")
@@ -332,6 +358,7 @@ function mac(arch: Arch): Target {
 		updateFile: `Filen_mac_${arch}.zip`,
 		executable,
 		userData: path.join(support, "@filen", "desktop"),
+		updaterCache: path.join(caches, UPDATER_CACHE),
 		install(artifact) {
 			// Mount, drag to Applications, eject: what a user does with the website's disk image.
 			const mountpoint = mkdtempSync(path.join(os.tmpdir(), "filen-dmg-"))
@@ -369,6 +396,7 @@ function mac(arch: Arch): Target {
 				.map(line => /^\s*(\d+)\s+(.+?)\s*$/.exec(line))
 				.filter(match => match !== null && match[2] === executable)
 				.map(match => ({ pid: Number(match?.[1]), path: match?.[2] ?? "" })),
+		kill: killPids,
 		installedVersion: () => asarVersion(path.join(app, "Contents", "Resources", "app.asar")),
 		registeredVersion: () =>
 			run("/usr/libexec/PlistBuddy", [
@@ -442,6 +470,7 @@ function linux(arch: Arch, format: "deb" | "rpm" | "AppImage"): Target {
 			updateFile: file,
 			executable,
 			userData,
+			updaterCache: path.join(cache, UPDATER_CACHE),
 			install(artifact) {
 				mkdirSync(path.dirname(executable), { recursive: true })
 				copyFileSync(artifact, executable)
@@ -458,6 +487,7 @@ function linux(arch: Arch, format: "deb" | "rpm" | "AppImage"): Target {
 			},
 			launchEnv,
 			mainProcesses,
+			kill: killPids,
 			installedVersion() {
 				const work = mkdtempSync(path.join(os.tmpdir(), "filen-appimage-"))
 
@@ -514,6 +544,7 @@ function linux(arch: Arch, format: "deb" | "rpm" | "AppImage"): Target {
 		updateFile: file,
 		executable,
 		userData,
+		updaterCache: path.join(cache, UPDATER_CACHE),
 		install(artifact) {
 			if (deb) {
 				sudo("env", ["DEBIAN_FRONTEND=noninteractive", "apt-get", "install", "--yes", path.resolve(artifact)])
@@ -540,6 +571,7 @@ function linux(arch: Arch, format: "deb" | "rpm" | "AppImage"): Target {
 		},
 		launchEnv: env => env,
 		mainProcesses,
+		kill: killPids,
 		installedVersion: () => asarVersion("/opt/Filen/resources/app.asar"),
 		registeredVersion: packageVersion,
 		verifyInstall() {

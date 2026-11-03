@@ -5,8 +5,22 @@ import { fileURLToPath } from "node:url"
 import { hashFile, parseFeed } from "../../feed.ts"
 import { nativeArchOf } from "../../nativeArch.ts"
 import { LEGACY_E2E_BANNER, LEGACY_RELEASE_URL, LEGACY_SHA512, LEGACY_VERSION } from "../legacy.ts"
-import { downloadPinned, errorMessage, fail, holds, run, section, serveFeed, startXvfb, waitFor, type FeedServer } from "../support.ts"
+import {
+	downloadPinned,
+	errorMessage,
+	fail,
+	holds,
+	run,
+	section,
+	serveFeed,
+	startXvfb,
+	waitFor,
+	type FeedFaultPlan,
+	type FeedServer
+} from "../support.ts"
 import { linuxProcessReport, type AppProcess, type Arch, type Format, type Platform, type Target } from "../targets.ts"
+import type { Findings } from "./findings.ts"
+import { logMark, logSince, runFaultLaunch } from "./updateFaults.ts"
 
 // The update scenarios: an app is installed the way a user installs it, launched, and updated by its own updater from a
 // feed on the loopback interface that serves the candidate build N; the test then holds the relaunched app to N's
@@ -23,9 +37,9 @@ import { linuxProcessReport, type AppProcess, type Arch, type Format, type Platf
 // The updated app must also ship the pinned rclone (build/rclone/versions.json) for its CPU, runnable from the install,
 // and on Windows have WinFsp installed (Target.verifyInstall).
 
-const TEST_FEED_ENV = "FILEN_DESKTOP_TEST_UPDATE_FEED"
-const TEST_FEED_LOG = "updater: test feed"
-const MARKER = "e2e.marker"
+export const TEST_FEED_ENV = "FILEN_DESKTOP_TEST_UPDATE_FEED"
+export const TEST_FEED_LOG = "updater: test feed"
+export const MARKER = "e2e.marker"
 
 export const START_TIMEOUT_MS = 3 * 60 * 1000
 // Download, Squirrel staging or the installer, the swap and the relaunch; the 3.x NSIS update also runs WinFSP's MSI.
@@ -59,6 +73,10 @@ export interface UpdateHooks {
 	beforeReset(): Promise<void>
 	// Extra arguments for the update launch, and what to do once it is started (before the update is waited for).
 	updateLaunch?(): Promise<{ args: string[]; started(): Promise<void> }>
+	// The fault launch (e2e/updateFaults.ts): where its checks go (a deep chain's findings; else its own, settled after
+	// the update), and how N-1 is ended during its stalled download (a graceful quit; else a hard kill).
+	findings?: Findings
+	stopFaultLaunch?(pids: readonly number[]): Promise<void>
 }
 
 // rpm/deb/AppImage versions turn a prerelease's "-" into "~" or "_"; the comparison is over the same characters.
@@ -93,10 +111,11 @@ export function legacyLogOf(target: Target): string {
 	return path.join(path.dirname(target.userData), "logs", "desktop.log")
 }
 
-async function feedFor(
+export async function feedFor(
 	target: Target,
 	nextDir: string,
-	nextVersion: string
+	nextVersion: string,
+	plan?: FeedFaultPlan
 ): Promise<{ server: FeedServer; size: number; sha512: string }> {
 	const manifestPath = path.join(nextDir, target.manifest)
 
@@ -118,7 +137,7 @@ async function feedFor(
 
 	// Every listed file that exists, so the updater's own selection runs against the real manifest.
 	const names = [target.manifest, ...feed.files.map(file => file.url).filter(url => existsSync(path.join(nextDir, url)))]
-	const server = await serveFeed(nextDir, names)
+	const server = await serveFeed(nextDir, names, plan)
 
 	console.log(`feed ${server.url} serving ${names.join(", ")}`)
 
@@ -155,7 +174,7 @@ function verifyRclone(target: Target, arch: Arch): void {
 	})
 }
 
-function writeMarker(target: Target): string {
+export function writeMarker(target: Target): string {
 	const token = randomUUID()
 
 	mkdirSync(target.userData, { recursive: true })
@@ -164,7 +183,7 @@ function writeMarker(target: Target): string {
 	return token
 }
 
-function processesAt(target: Target): AppProcess[] {
+export function processesAt(target: Target): AppProcess[] {
 	const samePath = (a: string, b: string) => (target.platform === "win" ? a.toLowerCase() === b.toLowerCase() : a === b)
 
 	return target.mainProcesses().filter(entry => samePath(entry.path, target.executable))
@@ -264,6 +283,19 @@ export async function runUpdate({
 
 		await hooks?.beforeUpdate()
 
+		// N-1 against a feed that fails in every way first (plan D5); what follows reads main.log only past it.
+		const settleFaults = legacy
+			? () => undefined
+			: await runFaultLaunch({
+					target,
+					nextDir,
+					nextVersion,
+					fromVersion,
+					work,
+					findings: hooks?.findings,
+					stop: hooks?.stopFaultLaunch
+				})
+		const mark = logMark(target)
 		const served = await feedFor(target, nextDir, nextVersion)
 
 		feed = served.server
@@ -294,10 +326,12 @@ export async function runUpdate({
 				logHas(legacyLog, LEGACY_E2E_BANNER) ? true : null
 			)
 		} else {
-			const mainLog = path.join(target.userData, "logs", "main.log")
-
-			await waitFor(`${fromVersion} to start`, START_TIMEOUT_MS, () => (startedVersions(target).includes(fromVersion) ? true : null))
-			await waitFor(`${fromVersion} to take the test feed`, START_TIMEOUT_MS, () => (logHas(mainLog, TEST_FEED_LOG) ? true : null))
+			await waitFor(`${fromVersion} to start`, START_TIMEOUT_MS, () =>
+				logSince(target, mark).includes(` INFO Filen ${fromVersion} starting (`) ? true : null
+			)
+			await waitFor(`${fromVersion} to take the test feed`, START_TIMEOUT_MS, () =>
+				logSince(target, mark).includes(TEST_FEED_LOG) ? true : null
+			)
 		}
 
 		// The old app running, or already gone because its updater fetched the whole update and quit to install it (a
@@ -418,6 +452,7 @@ export async function runUpdate({
 		}
 
 		await hooks?.afterUpdate()
+		settleFaults()
 
 		console.log(`\n${scenario}: ${fromVersion} -> ${nextVersion} on ${platform} ${arch} ${format} PASSED`)
 	} catch (error) {

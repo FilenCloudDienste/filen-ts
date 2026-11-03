@@ -10,13 +10,14 @@ import { targetFor, type Arch, type Format, type Platform } from "./targets.ts"
 //
 //   previous   N-1 -> N through the app's own updater (scripts/ci/e2e/update.ts)
 //   legacy     3.0.53 -> N through 3.0.53's own updater (scripts/ci/e2e/update.ts)
+//   update-kill  N-1 -> N with the installer killed mid-install, install depth (scripts/ci/e2e/updateKill.ts)
 //   spike-s1   can the packaged 3.0.53 and N be driven over their debugging ports (scripts/ci/e2e/spikes/s1.ts)
 //   spike-s7   can Filen in Finder be switched on with nobody at the Mac (scripts/ci/e2e/spikes/s7.ts)
 //
 // At --depth deep, both also sign in and drive the apps around the update (scripts/ci/e2e/chains/previous.ts and
 // legacy.ts).
 //
-//   node scripts/ci/e2e.ts --scenario <previous|legacy|spike-s1|spike-s7> --platform <win|mac|linux> --arch <x64|arm64>
+//   node scripts/ci/e2e.ts --scenario <previous|legacy|update-kill|spike-s1|spike-s7> --platform <win|mac|linux> --arch <x64|arm64>
 //       --format <nsis|dmg|deb|rpm|AppImage> --next <dir> --next-version <v> [--prev <dir> --prev-version <v>] [--signed]
 //       [--depth <install|deep>] [--artifacts <dir>]
 //
@@ -60,7 +61,7 @@ function required(name: string, value: string | undefined): string {
 	return value
 }
 
-const scenario = oneOf("scenario", values.scenario, ["previous", "legacy", "spike-s1", "spike-s7"] as const)
+const scenario = oneOf("scenario", values.scenario, ["previous", "legacy", "update-kill", "spike-s1", "spike-s7"] as const)
 const platform = oneOf<Platform>("platform", values.platform, ["win", "mac", "linux"])
 const arch = oneOf<Arch>("arch", values.arch, ["x64", "arm64"])
 const format = oneOf<Format>("format", values.format, ["nsis", "dmg", "deb", "rpm", "AppImage"])
@@ -106,6 +107,26 @@ async function main(): Promise<void> {
 
 				await runLegacyDeep(options, path.resolve(values.artifacts))
 			}
+
+			return
+		}
+
+		case "update-kill": {
+			const { runUpdateKill } = await import("./e2e/updateKill.ts")
+
+			await runUpdateKill({
+				target,
+				platform,
+				arch,
+				format,
+				nextDir,
+				nextVersion,
+				prevDir: path.resolve(required("prev", values.prev)),
+				prevVersion: required("prev-version", values["prev-version"]),
+				signed,
+				work,
+				artifacts: path.resolve(values.artifacts)
+			})
 
 			return
 		}
