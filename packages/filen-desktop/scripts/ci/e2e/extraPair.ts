@@ -11,7 +11,7 @@ import type {
 } from "@filen/shared/desktop"
 import type { Page } from "playwright-core"
 import { errorMessage, fail, waitFor } from "../support.ts"
-import { desktop, desktopCall, MASTER_KEYS_REMINDER } from "./app.ts"
+import { desktop, desktopCall, MASTER_KEYS_REMINDER, putOffKeysReminder } from "./app.ts"
 import { json, ok, type Chain } from "./chains/common.ts"
 import { POLL_MS, type Sampler } from "./offlineBlock.ts"
 import { CHOOSER_BUDGET_MS } from "./os.ts"
@@ -37,6 +37,10 @@ export async function addPairThroughChooser(
 	record?: (added: ExtraPair) => void
 ): Promise<ExtraPair> {
 	const evidence = path.join(chain.artifacts, `${chain.name}-chooser-${pair.name}`)
+
+	// The master-key reminder a relaunch brings back is modal over the window the panel opens on: put off when it shows.
+	await putOffKeysReminder(chain.page(), 1000).catch((error: unknown) => console.log(`the master-key reminder: ${errorMessage(error)}`))
+
 	const choice = desktop<DesktopSyncLocalRootChoice>(chain.page(), "window.desktop.sync.chooseLocalDirectory()", CHOOSER_BUDGET_MS)
 
 	void choice.catch(() => undefined)

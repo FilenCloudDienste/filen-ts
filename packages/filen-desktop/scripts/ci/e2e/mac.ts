@@ -67,10 +67,12 @@ on run argv
 end run
 `
 
-// Whether the chooser waits once more: on its first attempt, when no panel came up at all. The panel lists mounted
-// volumes, and it can take that long while a drive mount just made settles; the app's call is still waiting.
+// Whether the chooser waits once more, on its first attempt only: when no panel came up at all (the panel lists
+// mounted volumes, and it can take that long while a drive mount just made settles), or when the script itself hung
+// in a System Events call and was killed. The app's call is still waiting either way, so nothing is cancelled first:
+// Escape would answer that call, and the second attempt would wait for a panel nothing opens.
 export function chooserRetries(attempt: number, timedOut: boolean, why: string): boolean {
-	return attempt === 1 && !timedOut && why.includes(NO_PANEL)
+	return attempt === 1 && (timedOut || why.includes(NO_PANEL))
 }
 
 // An error that means the runner gave this process no Accessibility (or AppleEvents to System Events).

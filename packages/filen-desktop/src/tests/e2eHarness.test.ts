@@ -578,10 +578,11 @@ describe("chain L fixtures", () => {
 describe("the macOS folder chooser", () => {
 	const noPanel = "787:833: execution error: no open panel on Filen's windows within 30 s (-2700)"
 
-	it("waits once more for a panel that never came up, and for nothing else", () => {
+	it("waits once more for a panel that never came up or a script that hung, and for nothing else", () => {
 		expect(chooserRetries(1, false, noPanel)).toBe(true)
 		expect(chooserRetries(2, false, noPanel)).toBe(false)
-		expect(chooserRetries(1, true, "timed out")).toBe(false)
+		expect(chooserRetries(1, true, "timed out")).toBe(true)
+		expect(chooserRetries(2, true, "timed out")).toBe(false)
 		expect(chooserRetries(1, false, "execution error: the panel stayed open after the path and Open; cancelled")).toBe(false)
 		expect(chooserRetries(1, false, "execution error: Not authorized to send Apple events to System Events. (-1743)")).toBe(false)
 	})
