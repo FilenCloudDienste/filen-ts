@@ -73,7 +73,11 @@ describe("desktop e2e workflow secrets", () => {
 		expect(text.indexOf("Check the test account against the old clients")).toBeGreaterThan(text.indexOf("Cache the new test session"))
 		expect(text.indexOf("Check the test account against the old clients")).toBeLessThan(text.indexOf("Hand the sealed sessions on"))
 		expect(text).toContain(
-			"if: ${{ !cancelled() && matrix.older && !matrix.deepOlder }}\n        run: node scripts/ci/e2e.ts --scenario older ${{ env.TEST_ARGS }}"
+			"if: ${{ !cancelled() && matrix.older && !matrix.deepOlder }}\n        timeout-minutes: 30\n        run: node scripts/ci/e2e.ts --scenario older ${{ env.TEST_ARGS }}"
+		)
+		// On a deep nightly entry the install-depth step comes on top of two deep chains.
+		expect(text).toContain(
+			"timeout-minutes: ${{ matrix.deepOlder && 360 || (matrix.deep && matrix.older) && 270 || matrix.deep && 240 || 90 }}"
 		)
 		expect(text).toContain("E2E_SIGN_IN: ${{ matrix.signInOlder }}")
 		expect(text).toContain("bash scripts/ci/deepSession.sh --scenario older --depth deep")

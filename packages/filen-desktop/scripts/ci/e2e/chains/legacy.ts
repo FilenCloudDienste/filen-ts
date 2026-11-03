@@ -75,7 +75,9 @@ import {
 	findingsFor,
 	leftoversBeside,
 	olderDrive,
+	plantedHeld,
 	plantedShape,
+	readPlanted,
 	sdkConfigShapeOf
 } from "./older.ts"
 
@@ -427,6 +429,20 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 		)
 
 		await findings.check(`L17 setup: a paused whole-drive pair added to ${LEGACY_VERSION}`, () => holds.addRootPair(legacyPage()))
+
+		if (release === LEGACY_PIN) {
+			await findings.must(`${LEGACY_VERSION} still holds the planted shapes as it quits (L8, L9)`, async () => {
+				const read = await readPlanted(legacyPage())
+
+				findings.attach("legacy-planted-before-quit.json", json(read))
+
+				return plantedHeld(
+					read,
+					chain.client.userId,
+					state.pairs?.find(pair => pair.name === BARE_PAIR)?.uuid ?? fail(`no pair ${BARE_PAIR}`)
+				)
+			})
+		}
 
 		await findings.must(`${LEGACY_VERSION} quits through app.quit(), rclone with it`, async () => {
 			await state.legacy?.renderer.browser.close().catch(() => undefined)

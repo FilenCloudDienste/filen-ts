@@ -106,6 +106,54 @@ export function plantedShape(pairs: readonly LegacySyncPair[], userId: bigint, l
 	}
 }
 
+// The old page's sync settings as it holds them now: the per-user map and desktopConfig's syncConfig (no other section,
+// so no WebDAV password), parsed; null where absent or unreadable.
+export async function readPlanted(page: Page): Promise<{ sync: unknown; syncConfig: unknown }> {
+	return (await page.evaluate(
+		([desktopKey, syncKey]) => {
+			const parse = (key: string): unknown => {
+				try {
+					return JSON.parse(localStorage.getItem(key) ?? "null")
+				} catch {
+					return null
+				}
+			}
+
+			return { sync: parse(syncKey), syncConfig: (parse(desktopKey) as { syncConfig?: unknown } | null)?.syncConfig ?? null }
+		},
+		[LEGACY_KEYS.desktopConfig, LEGACY_KEYS.sync] as const
+	)) as { sync: unknown; syncConfig: unknown }
+}
+
+// The planted shapes still there as the old app quits (its web may have written the account's entry back into the map
+// or the switches into the pairs while it ran; its update launch after that is brief, its sync held): without this, L8's and L9's planted checks could pass on the plain
+// shape. The account has no entry in the map, the other account's pair does; desktopConfig holds every fixture pair,
+// the bare one without both switches.
+export function plantedHeld(read: { sync: unknown; syncConfig: unknown }, userId: bigint, bareUuid: string): string {
+	const map = read.sync !== null && typeof read.sync === "object" ? (read.sync as Record<string, { syncPairs?: unknown }>) : {}
+	const other = map[String(userId + 1n)]?.syncPairs
+	const pairs = (read.syncConfig as { syncPairs?: unknown } | null)?.syncPairs
+	const stored = Array.isArray(pairs) ? (pairs as Record<string, unknown>[]) : []
+	const bare = stored.find(pair => pair["uuid"] === bareUuid)
+	const names = stored.map(pair => pair["name"])
+	const problems = [
+		...(String(userId) in map ? ["the account has an entry in the sync map"] : []),
+		...(Array.isArray(other) && other.some(pair => (pair as { name?: unknown } | null)?.name === OTHER_ACCOUNT_PAIR)
+			? []
+			: [`the other account's pair is gone from the map (keys ${JSON.stringify(Object.keys(map))})`]),
+		...LEGACY_PAIRS.filter(pair => !names.includes(pair.name)).map(pair => `${pair.name} is not in desktopConfig`),
+		...(bare === undefined
+			? []
+			: ["excludeDotFiles", "localTrashDisabled"].filter(key => key in bare).map(key => `${BARE_PAIR} has ${key}`))
+	]
+
+	if (problems.length > 0) {
+		fail(problems.join("; "))
+	}
+
+	return `the sync map without the account (keys ${Object.keys(map).join(", ")}), ${String(stored.length)} pairs in desktopConfig, ${BARE_PAIR} without both switches`
+}
+
 // L8, planted: every fixture pair came from desktopConfig alone, and the other account's did not (no pair, no root).
 export function fallbackImported(overview: DesktopSyncOverview, localDir: string): string {
 	const names = overview.pairs.map(pair => pair.name)

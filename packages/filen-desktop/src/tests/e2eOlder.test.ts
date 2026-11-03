@@ -17,6 +17,7 @@ import {
 	OLDER_SDK_CONFIG_SHAPE,
 	OLDER_SKIPPED,
 	OTHER_ACCOUNT_PAIR,
+	plantedHeld,
 	plantedShape,
 	sdkConfigShapeOf
 } from "../../scripts/ci/e2e/chains/older.ts"
@@ -451,6 +452,39 @@ describe("older shapes planted in chain L", () => {
 
 		expect(Object.keys(plain.read(LEGACY_KEYS.sync)).sort()).toEqual(["123", "77"])
 		expect(plain.read(LEGACY_KEYS.desktopConfig)["syncConfig"]?.syncPairs?.every(pair => "excludeDotFiles" in pair)).toBe(true)
+	})
+
+	it("holds the old app to the planted shapes until it quits", async () => {
+		const shape = plantedShape(pairs, 123n, "/home/e2e", "e2e/run")
+		const { read } = await configured(shape)
+		const bareUuid = `uuid-${BARE_PAIR}`
+		const planted = { sync: read(LEGACY_KEYS.sync), syncConfig: read(LEGACY_KEYS.desktopConfig)["syncConfig"] ?? null }
+
+		expect(plantedHeld(planted, 123n, bareUuid)).toMatch(/without both switches/)
+
+		// The web wrote the account's entry back: N would read the normal per-user shape.
+		expect(() => plantedHeld({ ...planted, sync: { ...planted.sync, 123: { syncPairs: [] } } }, 123n, bareUuid)).toThrow(/has an entry/)
+		// Or dropped the other account's entry.
+		expect(() => plantedHeld({ ...planted, sync: { 77: {} } }, 123n, bareUuid)).toThrow(/other account/)
+
+		// Or wrote the switches back into the bare pair.
+		const filled = {
+			syncPairs: pairs.map(pair => (pair.uuid === bareUuid ? { ...pair, excludeDotFiles: false } : pair))
+		}
+
+		expect(() => plantedHeld({ ...planted, syncConfig: filled }, 123n, bareUuid)).toThrow(/has excludeDotFiles/)
+		expect(() => plantedHeld({ sync: null, syncConfig: null }, 123n, bareUuid)).toThrow()
+
+		// Without the planted shape there is nothing to hold.
+		const plain = await configured(undefined)
+
+		expect(() =>
+			plantedHeld(
+				{ sync: plain.read(LEGACY_KEYS.sync), syncConfig: plain.read(LEGACY_KEYS.desktopConfig)["syncConfig"] ?? null },
+				123n,
+				bareUuid
+			)
+		).toThrow()
 	})
 
 	it("holds N to the fallback's pairs only and the bare pair to both switches off", () => {

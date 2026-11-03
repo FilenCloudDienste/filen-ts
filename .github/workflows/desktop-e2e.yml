@@ -607,8 +607,9 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJSON(needs.plan.outputs.test-matrix) }}
     runs-on: ${{ matrix.runner }}
-    # A third deep chain (3.0.47) gets its step budget on top.
-    timeout-minutes: ${{ matrix.deepOlder && 360 || matrix.deep && 240 || 90 }}
+    # A third deep chain (3.0.47) gets its step budget on top; 3.0.47 at install depth on a deep entry (Wednesday nights)
+    # its step's.
+    timeout-minutes: ${{ matrix.deepOlder && 360 || (matrix.deep && matrix.older) && 270 || matrix.deep && 240 || 90 }}
     defaults:
       run:
         working-directory: packages/filen-desktop
@@ -744,6 +745,7 @@ jobs:
       # pkexec of its own (scripts/ci/e2e/olderUpdate.ts), the real prompts staying hidden.
       - name: 3.0.47 -> N
         if: ${{ !cancelled() && matrix.older && !matrix.deepOlder }}
+        timeout-minutes: 30
         run: node scripts/ci/e2e.ts --scenario older ${{ env.TEST_ARGS }}
       - name: 3.0.47 -> N, signed in
         if: ${{ !cancelled() && matrix.deepOlder }}
