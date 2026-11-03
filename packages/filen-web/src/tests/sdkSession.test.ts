@@ -211,6 +211,7 @@ const unusedSync: DesktopSync = {
 	resolveConflicts: unused,
 	heldDeletions: unused,
 	approveDeletions: unused,
+	restoreDeletions: unused,
 	retryPath: unused,
 	retryAll: unused,
 	unsyncablePaths: unused,

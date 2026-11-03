@@ -14,6 +14,7 @@ import { ROOT_PROBLEM_KEY, ROOT_WARNING_KEY, SYNC_ERROR_KEY, UNSYNCABLE_REASON_K
 import {
 	ACTION_KIND_KEY,
 	aggregateSyncState,
+	canRestoreHeld,
 	conflictDetailKey,
 	conflictResolvedToast,
 	CONFLICTS_BULK,
@@ -184,7 +185,8 @@ describe("sync copy", () => {
 			"firstSyncWithDeletions",
 			"remoteUnconverged",
 			"remoteEmptied",
-			"exceededThreshold"
+			"exceededThreshold",
+			"restoreUnfinished"
 		])
 		expectAllKeysExist(REFUSAL_KEY, ["remoteCollision", "localCollision"])
 		expectAllKeysExist(PLAN_LIST_KEY, ["actions", "held", "conflicts", "unsyncable", "ignored"])
@@ -204,6 +206,7 @@ describe("sync copy", () => {
 			"repeatedFailure",
 			"remoteUndecodable",
 			"remoteInvalidName",
+			"remoteNameNotStorable",
 			"remoteBrokenParent",
 			"localAlias",
 			"localNameCollision",
@@ -216,6 +219,7 @@ describe("sync copy", () => {
 			"detailIssues",
 			"issuesFailed",
 			"heldApproveBody",
+			"heldRestoreBody",
 			"reviewActions",
 			"reviewHeld",
 			"reviewConflicts",
@@ -332,15 +336,38 @@ describe("sync status helpers", () => {
 		expect(conflictDetailKey({ relPath: "a", local: "file", remote: "file" })).toBe("conflictBoth")
 	})
 
-	it("confirms each conflict resolution, naming the bin path only when the cloud's version replaced this device's", () => {
+	it("confirms each conflict resolution, naming the bin path or the name the kept copy took", () => {
 		const bin = "/Users/a/Sync/.filen-sync-trash/2026-11-02/notes.txt"
+		const none = { quarantined: null, keptAs: null }
 
-		expect(conflictResolvedToast("keepLocal", null)).toEqual({ key: "conflictKeptLocal", path: null })
-		expect(conflictResolvedToast("keepRemote", bin)).toEqual({ key: "conflictKeptRemoteBinned", path: bin })
-		expect(conflictResolvedToast("keepRemote", null)).toEqual({ key: "conflictKeptRemote", path: null })
-		expect(conflictResolvedToast("keepBoth", null)).toEqual({ key: "conflictKeptBoth", path: null })
+		expect(conflictResolvedToast("keepLocal", none)).toEqual({ key: "conflictKeptLocal", path: null })
+		expect(conflictResolvedToast("keepRemote", { quarantined: bin, keptAs: null })).toEqual({
+			key: "conflictKeptRemoteBinned",
+			path: bin
+		})
+		expect(conflictResolvedToast("keepRemote", none)).toEqual({ key: "conflictKeptRemote", path: null })
+		expect(conflictResolvedToast("keepBoth", { quarantined: null, keptAs: "docs/report.old.docx" })).toEqual({
+			key: "conflictKeptBothAs",
+			path: "report.old.docx"
+		})
+		expect(conflictResolvedToast("keepBoth", { quarantined: null, keptAs: "report.old.docx" })).toEqual({
+			key: "conflictKeptBothAs",
+			path: "report.old.docx"
+		})
+		expect(conflictResolvedToast("keepBoth", none)).toEqual({ key: "conflictKeptBoth", path: null })
 		expect(sync.conflictKeptRemoteBinned).toContain("{{path}}")
+		expect(sync.conflictKeptBothAs).toContain("{{path}}")
 		expect(sync.conflictKeptBoth).not.toContain("{{path}}")
+	})
+
+	it("offers Keep them only for holds whose deletions are real", () => {
+		expect(canRestoreHeld("exceededThreshold")).toBe(true)
+		expect(canRestoreHeld("firstSyncWithDeletions")).toBe(true)
+		expect(canRestoreHeld("restoreUnfinished")).toBe(true)
+		expect(canRestoreHeld("scanIncomplete")).toBe(false)
+		expect(canRestoreHeld("remoteUnconverged")).toBe(false)
+		expect(canRestoreHeld("remoteEmptied")).toBe(false)
+		expect(canRestoreHeld(null)).toBe(false)
 	})
 
 	it("labels, confirms and reports every bulk resolution, warning when some paths stayed conflicts", () => {

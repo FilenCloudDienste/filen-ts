@@ -52,6 +52,7 @@ export const UNSYNCABLE_REASON_KEY: Record<DesktopSyncUnsyncableReason, SyncKey>
 	repeatedFailure: "unsyncableRepeatedFailure",
 	remoteUndecodable: "unsyncableRemoteUndecodable",
 	remoteInvalidName: "unsyncableRemoteInvalidName",
+	remoteNameNotStorable: "unsyncableRemoteNameNotStorable",
 	remoteBrokenParent: "unsyncableRemoteBrokenParent",
 	localAlias: "unsyncableLocalAlias",
 	localNameCollision: "unsyncableLocalNameCollision",

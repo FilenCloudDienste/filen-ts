@@ -22,6 +22,7 @@ import { useSyncRead } from "@/features/sync/hooks/useSyncRead"
 import { syncApi, useSyncStore } from "@/features/sync/lib/syncStore"
 import { runSyncAction, syncErrorLabel } from "@/features/sync/lib/syncActions"
 import {
+	canRestoreHeld,
 	CONFLICTS_BULK,
 	conflictDetailKey,
 	conflictResolvedToast,
@@ -288,29 +289,56 @@ function HeldList({ held }: { held: DesktopSyncHeldDeletions }) {
 	)
 }
 
-// The deletions the last pass held back, and the approval of exactly those (the shell's pass token). A paused pair
-// runs no pass, so the approval waits for the resume and the same list stays.
+// What the held deletions can be told to do, each with its button, confirmation and the notes it ends with.
+const HELD_DECISIONS = {
+	approve: {
+		label: "heldApprove",
+		title: "heldApproveTitle",
+		body: "heldApproveBody",
+		done: null,
+		paused: "heldApprovedPaused",
+		destructive: true
+	},
+	restore: {
+		label: "heldRestore",
+		title: "heldRestoreTitle",
+		body: "heldRestoreBody",
+		done: "heldRestored",
+		paused: "heldRestoredPaused",
+		destructive: false
+	}
+} as const
+
+type HeldDecision = keyof typeof HELD_DECISIONS
+
+// The deletions the last pass held back, and the approval or restoration of exactly those (the shell's pass token).
+// A paused pair runs no pass, so the decision waits for the resume and the same list stays.
 function HeldSection({ pairId, count, paused }: { pairId: string; count: number; paused: boolean }) {
 	const { t } = useTranslation(["sync", "common"])
 	const read = useSyncRead(`${pairId}:${String(count)}`, () => syncApi().heldDeletions(pairId))
 	const [confirming, setConfirming] = useState(false)
-	const [approving, setApproving] = useState(false)
-	// The token approved while paused.
-	const [approved, setApproved] = useState<string | null>(null)
+	// Kept while the dialog closes, so its text stays.
+	const [choice, setChoice] = useState<HeldDecision>("approve")
+	const [deciding, setDeciding] = useState(false)
+	// The decision taken while paused, and the token it covers.
+	const [decided, setDecided] = useState<{ token: string; decision: HeldDecision } | null>(null)
 	const held = read.data
 	const token = held?.passToken ?? null
-	const waiting = token !== null && approved === token
+	const waiting = token !== null && decided?.token === token ? decided.decision : null
+	const empty = token === null || held === undefined || held.total === 0 || waiting !== null
 
-	async function approve(): Promise<void> {
+	async function decide(decision: HeldDecision): Promise<void> {
 		if (token === null) {
 			return
 		}
 
-		setApproving(true)
+		setDeciding(true)
 
-		const done = await runSyncAction(() => syncApi().approveDeletions(pairId, token))
+		const done = await runSyncAction(() =>
+			decision === "approve" ? syncApi().approveDeletions(pairId, token) : syncApi().restoreDeletions(pairId, token)
+		)
 
-		setApproving(false)
+		setDeciding(false)
 
 		if (done === null) {
 			return
@@ -318,11 +346,17 @@ function HeldSection({ pairId, count, paused }: { pairId: string; count: number;
 
 		setConfirming(false)
 
+		const notes = HELD_DECISIONS[decision]
+
 		if (paused) {
-			setApproved(token)
-			toast.info(t("heldApprovedPaused"))
+			setDecided({ token, decision })
+			toast.info(t(notes.paused))
 
 			return
+		}
+
+		if (notes.done !== null) {
+			toast.success(t(notes.done))
 		}
 
 		read.reload()
@@ -347,12 +381,23 @@ function HeldSection({ pairId, count, paused }: { pairId: string; count: number;
 				) : (
 					<HeldList held={held} />
 				)}
-				<SettingsBlock className="flex items-center justify-end gap-3">
-					{waiting ? <span className="text-sm text-muted-foreground">{t("heldApprovedPaused")}</span> : null}
+				<SettingsBlock className="flex flex-wrap items-center justify-end gap-3">
+					{waiting === null ? null : <span className="text-sm text-muted-foreground">{t(HELD_DECISIONS[waiting].paused)}</span>}
+					<Button
+						variant="outline"
+						disabled={empty || !canRestoreHeld(held.reason)}
+						onClick={() => {
+							setChoice("restore")
+							setConfirming(true)
+						}}
+					>
+						{t("heldRestore")}
+					</Button>
 					<Button
 						variant="destructive"
-						disabled={token === null || held === undefined || held.total === 0 || waiting}
+						disabled={empty}
 						onClick={() => {
+							setChoice("approve")
 							setConfirming(true)
 						}}
 					>
@@ -362,15 +407,15 @@ function HeldSection({ pairId, count, paused }: { pairId: string; count: number;
 			</SettingsGroup>
 			<ConfirmDialog
 				open={confirming}
-				pending={approving}
-				title={t("heldApproveTitle")}
-				body={t("heldApproveBody", { count: held?.total ?? 0 })}
-				confirmLabel={t("heldApprove")}
+				pending={deciding}
+				title={t(HELD_DECISIONS[choice].title)}
+				body={t(HELD_DECISIONS[choice].body, { count: held?.total ?? 0 })}
+				confirmLabel={t(HELD_DECISIONS[choice].label)}
 				cancelLabel={t("common:cancel")}
-				destructive
+				destructive={HELD_DECISIONS[choice].destructive}
 				onOpenChange={setConfirming}
 				onConfirm={() => {
-					void approve()
+					void decide(choice)
 				}}
 			/>
 		</>

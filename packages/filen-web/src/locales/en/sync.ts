@@ -275,6 +275,8 @@ export const sync = {
 	conflictKeptRemoteBinned: "Kept the cloud's version. This device's version is in the pair's bin: {{path}}",
 	/** Toast — the conflict resolved keeping both versions */
 	conflictKeptBoth: "Kept both versions.",
+	/** Toast — the conflict resolved keeping both versions; path is the name this device's copy was kept under */
+	conflictKeptBothAs: "Kept both; this device's version is {{path}}",
 	/** Conflicts — resolve every conflict with the local version */
 	conflictsKeepAllLocal: "Keep all this device's",
 	/** Conflicts — resolve every conflict with the cloud version */
@@ -334,6 +336,20 @@ export const sync = {
 		"{{count}} items are deleted on the other side. This device's deletions go to the pair's bin, the cloud's to the cloud trash.",
 	/** Held deletions — approved while the pair is paused */
 	heldApprovedPaused: "Approved. Applies when you resume.",
+	/** Issues — keep the held items instead of deleting them */
+	heldRestore: "Keep them",
+	/** Held deletions — keep confirm title */
+	heldRestoreTitle: "Keep these items?",
+	/** Held deletions — keep confirm body */
+	heldRestoreBody_one:
+		"{{count}} item deleted on one side is put back from the other side's copy, so it stays on both. Nothing is deleted.",
+	/** Held deletions — keep confirm body */
+	heldRestoreBody_other:
+		"{{count}} items deleted on one side are put back from the other side's copy, so they stay on both. Nothing is deleted.",
+	/** Toast — the held items are being put back */
+	heldRestored: "Keeping them. Filen puts them back on the side they were deleted from.",
+	/** Held deletions — kept while the pair is paused */
+	heldRestoredPaused: "Kept. Applies when you resume.",
 	/** Held deletions — how many more are not listed */
 	heldMore: "and {{count}} more",
 	/** Held reason — a scan did not finish */
@@ -346,6 +362,9 @@ export const sync = {
 	heldRemoteEmptied: "Filen held these deletions because the cloud directory was emptied.",
 	/** Held reason — too many at once */
 	heldExceededThreshold: "Filen held these deletions because there are unusually many at once.",
+	/** Held reason — items the user chose to keep are not all back yet */
+	heldRestoreUnfinished:
+		"Filen held these deletions because putting back the items you kept hasn't finished. Keep them to try again, or approve the deletions.",
 	/** Held deletions — the paths the scan couldn't read, which held the deletions */
 	scanGapsTitle: "Not read in the last scan",
 	/** Held deletions — paths past the listed ones */
@@ -374,6 +393,8 @@ export const sync = {
 	unsyncableRemoteUndecodable: "The cloud item can't be decrypted.",
 	/** Unsyncable — invalid cloud name */
 	unsyncableRemoteInvalidName: "Its cloud name isn't allowed on this device.",
+	/** Unsyncable — the cloud name can't be stored on this device's file system; the system's reason follows */
+	unsyncableRemoteNameNotStorable: "Its cloud name can't be stored on this device.",
 	/** Unsyncable — its cloud parent is broken */
 	unsyncableRemoteBrokenParent: "The cloud directory it's in can't be read.",
 	/** Unsyncable — two local names refer to the same file */
@@ -381,9 +402,9 @@ export const sync = {
 	/** Unsyncable — another local item in its directory has the same name ignoring case or Unicode form */
 	unsyncableLocalNameCollision:
 		"Another item in its directory on this device has the same name when case is ignored. Rename one of them; until then neither syncs or moves.",
-	/** Unsyncable — another cloud item in its directory has the same name ignoring case */
+	/** Unsyncable — another cloud item in its directory has the same name ignoring case or Unicode form */
 	unsyncableRemoteNameCollision:
-		"Another item in its cloud directory has the same name when case is ignored. Rename one of them; until then neither syncs or moves.",
+		"Another item in its cloud directory has the same name when case and Unicode form are ignored. Rename one of them; until then neither syncs or moves.",
 	/** Paged lists — load the next page */
 	listLoadMore: "Load more",
 	/** Paged lists — load failure */

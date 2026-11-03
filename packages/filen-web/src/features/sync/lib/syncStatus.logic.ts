@@ -1,5 +1,6 @@
 import {
 	type DesktopSyncConflict,
+	type DesktopSyncConflictResolved,
 	type DesktopSyncHalt,
 	type DesktopSyncHold,
 	type DesktopSyncHeldReason,
@@ -155,7 +156,16 @@ export const HELD_REASON_KEY: Record<DesktopSyncHeldReason, SyncKey> = {
 	firstSyncWithDeletions: "heldFirstSyncWithDeletions",
 	remoteUnconverged: "heldRemoteUnconverged",
 	remoteEmptied: "heldRemoteEmptied",
-	exceededThreshold: "heldExceededThreshold"
+	exceededThreshold: "heldExceededThreshold",
+	restoreUnfinished: "heldRestoreUnfinished"
+}
+
+// The holds whose deletions are real, so Keep them can put the items back. The others may be deletions that never
+// happened (an unread volume, a cloud view not trusted), which the engine refuses to restore.
+const RESTORABLE_HOLDS: ReadonlySet<DesktopSyncHeldReason> = new Set(["firstSyncWithDeletions", "exceededThreshold", "restoreUnfinished"])
+
+export function canRestoreHeld(reason: DesktopSyncHeldReason | null): boolean {
+	return reason !== null && RESTORABLE_HOLDS.has(reason)
 }
 
 export const REFUSAL_KEY: Record<DesktopSyncRefusal, SyncKey> = {
@@ -248,10 +258,11 @@ export function conflictDetailKey(conflict: DesktopSyncConflict): SyncKey {
 	return conflict.remote === null ? "conflictRemoteDeleted" : "conflictBoth"
 }
 
-// The toast a resolved conflict reports. Only keepRemote names a path: where this device's differing copy went in the
-// pair's bin. keepBoth sets the local copy aside under a name the result does not carry.
+// The toast a resolved conflict reports. keepRemote names where this device's differing copy went in the pair's bin,
+// keepBoth the name this device's copy was kept under, next to the cloud's.
 export type ConflictResolvedToast =
-	{ key: "conflictKeptLocal" | "conflictKeptRemote" | "conflictKeptBoth"; path: null } | { key: "conflictKeptRemoteBinned"; path: string }
+	| { key: "conflictKeptLocal" | "conflictKeptRemote" | "conflictKeptBoth"; path: null }
+	| { key: "conflictKeptRemoteBinned" | "conflictKeptBothAs"; path: string }
 
 // Per bulk resolution: its button, its confirmation and the toast it ends with.
 export const CONFLICTS_BULK: Record<
@@ -278,18 +289,22 @@ export function conflictsResolvedTone(result: DesktopSyncResolvedConflicts): "su
 	return result.resolved === 0 ? "error" : "warning"
 }
 
-export function conflictResolvedToast(resolution: DesktopSyncResolution, binPath: string | null): ConflictResolvedToast {
+export function conflictResolvedToast(resolution: DesktopSyncResolution, resolved: DesktopSyncConflictResolved): ConflictResolvedToast {
 	switch (resolution) {
 		case "keepLocal": {
 			return { key: "conflictKeptLocal", path: null }
 		}
 
 		case "keepRemote": {
-			return binPath === null ? { key: "conflictKeptRemote", path: null } : { key: "conflictKeptRemoteBinned", path: binPath }
+			return resolved.quarantined === null
+				? { key: "conflictKeptRemote", path: null }
+				: { key: "conflictKeptRemoteBinned", path: resolved.quarantined }
 		}
 
 		case "keepBoth": {
-			return { key: "conflictKeptBoth", path: null }
+			return resolved.keptAs === null
+				? { key: "conflictKeptBoth", path: null }
+				: { key: "conflictKeptBothAs", path: resolved.keptAs.slice(resolved.keptAs.lastIndexOf("/") + 1) }
 		}
 	}
 }
