@@ -209,7 +209,16 @@ describe("ElectronHttpExecutor", () => {
 					return request
 				}
 			},
-			session: { fromPartition: () => ({}) }
+			session: { fromPartition: () => ({}) },
+			// What ElectronAppAdapter reads of a packaged app.
+			app: {
+				getVersion: () => "4.0.0",
+				getName: () => "Filen",
+				isPackaged: true,
+				whenReady: () => Promise.resolve(),
+				getPath: () => dir,
+				once: () => undefined
+			}
 		}
 		fake.loaded = true
 		cached = cache[electronPath]
@@ -226,23 +235,74 @@ describe("ElectronHttpExecutor", () => {
 		}
 	})
 
-	it("aborts a download's request when its token is cancelled, so nothing writes on into its file", async () => {
-		const token = new CancellationToken()
-		const download = new ElectronHttpExecutor().download(new URL("https://cdn.filen.io/Filen-4.0.1.zip"), path.join(dir, "temp.zip"), {
-			cancellationToken: token
+	it("fails a manifest request that never answers, so the next check starts afresh instead of joining it", async () => {
+		const updater = new NsisUpdater({ provider: "generic", url: "https://cdn.filen.io/desktop/" })
+
+		updater.logger = null
+
+		const first = updater.checkForUpdates()
+
+		first.catch(() => undefined)
+		await vi.waitFor(() => {
+			expect(requests).toHaveLength(1)
+		})
+		// AppUpdater hands a later check the pending one ("Checking for update (already in progress)").
+		expect(updater.checkForUpdates()).toBe(first)
+		updater.abortRequests()
+		await expect(first).rejects.toThrow("cancelled")
+		expect(requests[0]?.abort).toHaveBeenCalledOnce()
+
+		const second = updater.checkForUpdates()
+
+		second.catch(() => undefined)
+		expect(second).not.toBe(first)
+		await vi.waitFor(() => {
+			expect(requests).toHaveLength(2)
+		})
+		updater.abortRequests()
+		await expect(second).rejects.toThrow("cancelled")
+	})
+
+	it("fails a download's request, so nothing writes on into its file", async () => {
+		const executor = new ElectronHttpExecutor()
+		const download = executor.download(new URL("https://cdn.filen.io/Filen-4.0.1.zip"), path.join(dir, "temp.zip"), {
+			cancellationToken: new CancellationToken()
 		})
 
 		await vi.waitFor(() => {
 			expect(requests).toHaveLength(1)
 		})
-
-		const [request] = requests
-
-		expect(Object.getOwnPropertySymbols(request?.options)).toEqual([])
-		expect(request?.abort).not.toHaveBeenCalled()
-		token.cancel()
+		expect(requests[0]?.abort).not.toHaveBeenCalled()
+		executor.abortRequests()
 		await expect(download).rejects.toThrow("cancelled")
-		expect(request?.abort).toHaveBeenCalledOnce()
+		expect(requests[0]?.abort).toHaveBeenCalledOnce()
 		expect(existsSync(path.join(dir, "temp.zip"))).toBe(false)
+	})
+
+	it("fails a differential range request, which no token reaches", async () => {
+		const executor = new ElectronHttpExecutor()
+		// As DifferentialDownloader makes its range requests.
+		const range = new Promise((_resolve, reject) => {
+			const request = executor.createRequest({ headers: { range: "bytes=0-99" } }, () => undefined)
+
+			executor.addErrorAndTimeoutHandlers(request, reject)
+			request.end()
+		})
+
+		executor.abortRequests()
+		await expect(range).rejects.toThrow("cancelled")
+		expect(requests[0]?.abort).toHaveBeenCalledOnce()
+	})
+
+	it("leaves a request alone once it closed", () => {
+		const executor = new ElectronHttpExecutor()
+		const reject = vi.fn<(error: Error) => void>()
+		const request = executor.createRequest({}, () => undefined)
+
+		executor.addErrorAndTimeoutHandlers(request, reject)
+		request.emit("close")
+		executor.abortRequests()
+		expect(reject).not.toHaveBeenCalled()
+		expect(requests[0]?.abort).not.toHaveBeenCalled()
 	})
 })

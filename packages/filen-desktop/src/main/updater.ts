@@ -51,6 +51,8 @@ export interface UpdaterEngine {
 	on(event: "checking-for-update" | "update-available" | "download-progress", listener: () => void): unknown
 	on(event: "update-downloaded", listener: (event: UpdateDownloadedEvent) => void): unknown
 	checkForUpdates(): Promise<Pick<UpdateCheckResult, "downloadPromise" | "cancellationToken"> | null>
+	// Fails and aborts every request in flight (patches/electron-updater@6.8.11.patch).
+	abortRequests(): void
 	quitAndInstall(isSilent: boolean, isForceRunAfter: boolean): void
 }
 
@@ -297,33 +299,28 @@ export function startUpdater(deps: UpdaterDeps): Updater {
 
 		state.checking = true
 
-		// The watchdog ends the check at once, and cancels its download through electron-updater's own token: the
-		// download's promise rejects and its partial file is removed (the request is aborted too:
-		// patches/electron-updater@6.8.11.patch). No token reaches the manifest request: one that answers after all is
-		// cancelled as its download starts.
+		// The watchdog ends the check at once, cancels its download through electron-updater's own token (the download's
+		// promise rejects and its partial file is removed), and fails every request the engine has in flight
+		// (patches/electron-updater@6.8.11.patch): the manifest's, which no token reaches, and a differential download's
+		// ranges. electron-updater hands a later check the pending check or download it still holds, so only a request
+		// that ends lets the next check start afresh.
 		const stalled = Promise.withResolvers<never>()
-		let checking: ReturnType<UpdaterEngine["checkForUpdates"]> | null = null
+		let engine: UpdaterEngine | null = null
+		let result: Awaited<ReturnType<UpdaterEngine["checkForUpdates"]>> = null
 
 		// A stall may come once nothing awaits it any more.
 		stalled.promise.catch(() => undefined)
 		cancelCheck = () => {
 			stalled.reject(new Error("stalled"))
-			void checking?.then(
-				result => {
-					result?.downloadPromise?.catch(() => undefined)
-					result?.cancellationToken?.cancel()
-				},
-				() => undefined
-			)
+			// First, so the download fails as cancelled rather than as an error.
+			result?.cancellationToken?.cancel()
+			engine?.abortRequests()
 		}
 		stall.arm()
 
 		try {
-			const updater = await loading
-
-			checking = updater.checkForUpdates()
-
-			const result = await Promise.race([checking, stalled.promise])
+			engine = await loading
+			result = await Promise.race([engine.checkForUpdates(), stalled.promise])
 
 			// Held until the download settles, so the next interval never starts a second one.
 			await Promise.race([result?.downloadPromise, stalled.promise])

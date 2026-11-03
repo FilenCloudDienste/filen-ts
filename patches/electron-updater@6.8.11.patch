@@ -42,6 +42,41 @@ index 452e93f819eaeb5e6532a831255adc70d854df4b..2c737fc550f76dcf3d73e87168193626
              this.emit("appimage-filename-updated", destination);
          }
          const env = {
+diff --git a/out/AppUpdater.d.ts b/out/AppUpdater.d.ts
+index f453c1bb456a01522fabc07516e16477a276da64..16d5f02088fb52cddb2691156970bab9dbe26e91 100644
+--- a/out/AppUpdater.d.ts
++++ b/out/AppUpdater.d.ts
+@@ -167,6 +167,11 @@ export declare abstract class AppUpdater extends AppUpdater_base {
+      * @returns null if the updater is disabled, otherwise info about the latest version
+      */
+     checkForUpdates(): Promise<UpdateCheckResult | null>;
++    /**
++     * Fails and aborts every request the updater has in flight: the check's manifest, a download, its differential
++     * ranges. A check or download waiting on one rejects, so the next check starts afresh.
++     */
++    abortRequests(): void;
+     isUpdaterActive(): boolean;
+     checkForUpdatesAndNotify(downloadNotification?: DownloadNotification): Promise<UpdateCheckResult | null>;
+     private static formatDownloadNotification;
+diff --git a/out/AppUpdater.js b/out/AppUpdater.js
+index 9c9a71674b19da4c3bb775712a969b35e548f62a..35f6a2a24aeb97de80436e92c400fa87b0236999 100644
+--- a/out/AppUpdater.js
++++ b/out/AppUpdater.js
+@@ -473,6 +473,14 @@ class AppUpdater extends events_1.EventEmitter {
+         });
+         return this.downloadPromise.then(toDownloadedFilesArray);
+     }
++    /**
++     * Fails and aborts every request the updater has in flight: the check's manifest, a download, its differential
++     * ranges. A check or download waiting on one rejects, so the next check starts afresh.
++     */
++    abortRequests() {
++        var _a;
++        (_a = this.httpExecutor) === null || _a === void 0 ? void 0 : _a.abortRequests();
++    }
+     dispatchError(e) {
+         this.emit("error", e, (e.stack || e).toString());
+     }
 diff --git a/out/BaseUpdater.js b/out/BaseUpdater.js
 index f7c2965929a773ff54ac3124eec7a023e13ef1c9..a1252c5a96f579cd754cc62fdbaea6fb4691de41 100644
 --- a/out/BaseUpdater.js
@@ -184,47 +219,58 @@ index 6fb70b4275a59741d28aecc389c2736909130a3e..87dda653d0e912d92342d01db8463531
              }
          });
          return true;
+diff --git a/out/electronHttpExecutor.d.ts b/out/electronHttpExecutor.d.ts
+index 97981c5c68ad136f49c6b0076d6b0f8d9412b2e3..98f5f9110f3fb21a701a5ffd6e0226f190de818d 100644
+--- a/out/electronHttpExecutor.d.ts
++++ b/out/electronHttpExecutor.d.ts
+@@ -12,5 +12,8 @@ export declare class ElectronHttpExecutor extends HttpExecutor<Electron.ClientRe
+     constructor(proxyLoginCallback?: ((authInfo: AuthInfo, callback: LoginCallback) => void) | undefined);
+     download(url: URL, destination: string, options: DownloadOptions): Promise<string>;
+     createRequest(options: any, callback: (response: any) => void): Electron.ClientRequest;
++    private readonly inFlight;
++    addErrorAndTimeoutHandlers(request: any, reject: (error: Error) => void, timeout?: number): void;
++    abortRequests(): void;
+     protected addRedirectHandlers(request: ClientRequest, options: RequestOptions, reject: (error: Error) => void, redirectCount: number, handler: (options: RequestOptions) => void): void;
+ }
 diff --git a/out/electronHttpExecutor.js b/out/electronHttpExecutor.js
-index 0ae9e1126e1dc136977914ef1bfd46709fc9db1b..ef56a0d90030c3654c9230e9941f60b2d15b2ee1 100644
+index 0ae9e1126e1dc136977914ef1bfd46709fc9db1b..717db0a5105bc3db0a2979e42c39a657e3a16ba8 100644
 --- a/out/electronHttpExecutor.js
 +++ b/out/electronHttpExecutor.js
-@@ -4,6 +4,9 @@ exports.ElectronHttpExecutor = exports.NET_SESSION_NAME = void 0;
- exports.getNetSession = getNetSession;
- const builder_util_runtime_1 = require("builder-util-runtime");
- exports.NET_SESSION_NAME = "electron-updater";
-+// builder-util-runtime's doDownload is handed onCancel but never registers it, so a cancelled download kept its request
-+// open, writing on into its file. Each request it makes carries the hook under this key and is aborted on cancel.
-+const ABORT_ON_CANCEL = Symbol("abortOnCancel");
- function getNetSession() {
-     return require("electron").session.fromPartition(exports.NET_SESSION_NAME, {
-         cache: false,
-@@ -39,6 +42,9 @@ class ElectronHttpExecutor extends builder_util_runtime_1.HttpExecutor {
+@@ -14,6 +14,10 @@ class ElectronHttpExecutor extends builder_util_runtime_1.HttpExecutor {
+         super();
+         this.proxyLoginCallback = proxyLoginCallback;
+         this.cachedSession = null;
++        // Fails each request in flight, until it closes. A stalled request never ends otherwise: the socket timeout never
++        // fires on Electron's net, and a CancellationToken reaches neither the manifest's request (its token is private
++        // to the provider) nor a differential download's range requests.
++        this.inFlight = new Set();
+     }
+     async download(url, destination, options) {
+         return await options.cancellationToken.createPromise((resolve, reject, onCancel) => {
+@@ -39,6 +43,26 @@ class ElectronHttpExecutor extends builder_util_runtime_1.HttpExecutor {
              }, 0);
          });
      }
-+    doDownload(requestOptions, options, redirectCount) {
-+        super.doDownload({ ...requestOptions, [ABORT_ON_CANCEL]: options.onCancel }, options, redirectCount);
++    // Every request electron-updater makes (manifest, download, block maps, differential ranges) is handed its reject
++    // here.
++    addErrorAndTimeoutHandlers(request, reject, timeout) {
++        super.addErrorAndTimeoutHandlers(request, reject, timeout);
++        const fail = () => {
++            // Rejected first: an aborted response may still end its pipes, which must not count as a finished download.
++            reject(new builder_util_runtime_1.CancellationError());
++            request.abort();
++        };
++        this.inFlight.add(fail);
++        request.once("close", () => this.inFlight.delete(fail));
++    }
++    // Fails and aborts every request in flight.
++    abortRequests() {
++        const requests = [...this.inFlight];
++        this.inFlight.clear();
++        for (const fail of requests) {
++            fail();
++        }
 +    }
      createRequest(options, callback) {
          // fix (node 7+) for making electron updater work when using AWS private buckets, check if headers contain Host property
          if (options.headers && options.headers.Host) {
-@@ -51,14 +57,18 @@ class ElectronHttpExecutor extends builder_util_runtime_1.HttpExecutor {
-         if (this.cachedSession == null) {
-             this.cachedSession = getNetSession();
-         }
-+        const { [ABORT_ON_CANCEL]: abortOnCancel, ...requestOptions } = options;
-         const request = require("electron").net.request({
--            ...options,
-+            ...requestOptions,
-             session: this.cachedSession,
-         });
-         request.on("response", callback);
-         if (this.proxyLoginCallback != null) {
-             request.on("login", this.proxyLoginCallback);
-         }
-+        if (abortOnCancel != null) {
-+            abortOnCancel(() => request.abort());
-+        }
-         return request;
-     }
-     addRedirectHandlers(request, options, reject, redirectCount, handler) {

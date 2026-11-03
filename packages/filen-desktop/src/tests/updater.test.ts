@@ -115,30 +115,83 @@ describe("stallWatch", () => {
 
 type CheckResult = Pick<UpdateCheckResult, "downloadPromise" | "cancellationToken"> | null
 
+// Holds what AppUpdater holds: while a check is pending, checkForUpdates hands back that same promise ("Checking for
+// update (already in progress)"), and while a download is pending, a later check's result carries that same download
+// ("Downloading update (already in progress)"). Only a request that ends lets a later check start afresh.
 class FakeEngine extends EventEmitter implements UpdaterEngine {
 	logger: Logger | null = null
 	autoDownload = false
 	autoInstallOnAppQuit = false
 	feed: string | null = null
+	// Checks started afresh, not the calls that joined a pending one.
 	checks = 0
 	installs = 0
-	// What the next check resolves with; a check without one never settles (a stalled request).
+	// What the next check resolves with; a check without one waits on a request that never answers.
 	nextCheck: (() => Promise<CheckResult>) | null = null
 	// What quitAndInstall does besides counting: throw, or emit an error as electron-updater does.
 	onInstall: (() => void) | null = null
+	private pending: Promise<CheckResult> | null = null
+	private downloading: Promise<string[]> | null = null
+	private readonly inFlight = new Set<(error: Error) => void>()
 
 	setFeedURL(options: { provider: "generic"; url: string }): void {
 		this.feed = options.url
 	}
 
+	// A request that never answers (a stalled connection): only abortRequests ends it.
+	request<T>(): Promise<T> {
+		return new Promise<T>((_resolve, reject) => {
+			this.inFlight.add(reject)
+		})
+	}
+
+	abortRequests(): void {
+		for (const reject of this.inFlight) {
+			reject(new Error("cancelled"))
+		}
+
+		this.inFlight.clear()
+	}
+
 	checkForUpdates(): Promise<CheckResult> {
+		if (this.pending !== null) {
+			return this.pending
+		}
+
 		this.checks += 1
 
 		const next = this.nextCheck
 
 		this.nextCheck = null
 
-		return next === null ? new Promise<CheckResult>(() => undefined) : next()
+		const check = (next === null ? this.request<CheckResult>() : next()).then(result => {
+			const download = result?.downloadPromise
+
+			if (download === undefined || download === null) {
+				return result
+			}
+
+			if (this.downloading !== null) {
+				return { ...result, downloadPromise: this.downloading }
+			}
+
+			const tracked = download.finally(() => {
+				this.downloading = null
+			})
+
+			tracked.catch(() => undefined)
+			this.downloading = tracked
+
+			return { ...result, downloadPromise: tracked }
+		})
+
+		const pending = check.finally(() => {
+			this.pending = null
+		})
+
+		this.pending = pending
+
+		return pending
 	}
 
 	quitAndInstall(): void {
@@ -257,7 +310,7 @@ describe("startUpdater", () => {
 
 		const stalls = (h: Harness) => h.warnings.filter(line => line.includes("no progress for")).length
 
-		it("ends a check whose manifest moves nothing, and the next check runs", async () => {
+		it("ends a check whose manifest moves nothing, and the next check runs afresh", async () => {
 			const h = harness()
 
 			startUpdater(h.deps)
@@ -270,7 +323,9 @@ describe("startUpdater", () => {
 
 			h.engine.nextCheck = () => Promise.resolve(null)
 			await vi.advanceTimersByTimeAsync(UPDATE_CHECK_INTERVAL_MS - UPDATE_STALL_MS)
+			// A fresh check, not one that joined the stalled manifest.
 			expect(h.engine.checks).toBe(2)
+			expect(stalls(h)).toBe(1)
 		})
 
 		it("cancels a download that moves nothing through its token, and the next check runs", async () => {
@@ -287,25 +342,35 @@ describe("startUpdater", () => {
 			await expect(download.result?.downloadPromise).rejects.toThrow("cancelled")
 			expect(h.warnings.filter(line => line.includes("check failed:"))).toHaveLength(1)
 
-			h.engine.nextCheck = () => Promise.resolve(null)
+			const next = downloadingCheck(h.engine, "4.0.2")
+
 			await vi.advanceTimersByTimeAsync(UPDATE_CHECK_INTERVAL_MS - UPDATE_STALL_MS)
 			expect(h.engine.checks).toBe(2)
+			next.finish()
+			await vi.advanceTimersByTimeAsync(0)
+			expect(h.onReady).toHaveBeenCalledWith("4.0.2")
 		})
 
-		it("cancels the download of a manifest that answers only after the stall", async () => {
+		it("fails a stalled differential download, which no token reaches, and the next check downloads afresh", async () => {
 			const h = harness()
-			const manifest = Promise.withResolvers<CheckResult>()
-			const download = stalledDownload()
+			const token = new CancellationToken()
+			// The range requests ignore the token: only failing the requests ends it.
+			const differential = h.engine.request<string[]>()
 
 			startUpdater(h.deps)
-			h.engine.nextCheck = () => manifest.promise
+			h.engine.nextCheck = () => Promise.resolve({ cancellationToken: token, downloadPromise: differential })
 			await vi.advanceTimersByTimeAsync(UPDATE_FIRST_CHECK_DELAY_MS + UPDATE_STALL_MS)
-			expect(h.warnings.some(line => line.includes("check failed: stalled"))).toBe(true)
+			expect(token.cancelled).toBe(true)
+			await expect(differential).rejects.toThrow("cancelled")
 
-			manifest.resolve(download.result)
+			const next = downloadingCheck(h.engine, "4.0.2")
+
+			await vi.advanceTimersByTimeAsync(UPDATE_CHECK_INTERVAL_MS - UPDATE_STALL_MS)
+			expect(h.engine.checks).toBe(2)
+			next.finish()
 			await vi.advanceTimersByTimeAsync(0)
-			expect(download.token.cancelled).toBe(true)
-			await expect(download.result?.downloadPromise).rejects.toThrow("cancelled")
+			expect(h.onReady).toHaveBeenCalledWith("4.0.2")
+			expect(stalls(h)).toBe(1)
 		})
 
 		it("lets a download run as long as it reports progress", async () => {
