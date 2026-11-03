@@ -26,7 +26,7 @@ import {
 } from "../../scripts/ci/e2e/chains/older.ts"
 import { createFindings } from "../../scripts/ci/e2e/findings.ts"
 import { LEGACY_PAIRS } from "../../scripts/ci/e2e/fixtures.ts"
-import { configureLegacy, type LegacySyncPair } from "../../scripts/ci/e2e/legacyApp.ts"
+import { configureLegacy, type LegacySyncPair, requireLegacyPrefs } from "../../scripts/ci/e2e/legacyApp.ts"
 import { hookReady, hookScript, type HookState } from "../../scripts/ci/e2e/legacyHook.ts"
 import { installedBy, legacyLinkProblems, promptShim, updateEnvFor } from "../../scripts/ci/e2e/olderUpdate.ts"
 import { describeStored, LEGACY_SDK_CONFIG_SHAPE, legacySeed } from "../../scripts/ci/e2e/seed.ts"
@@ -602,5 +602,85 @@ describe("chain L from 3.0.47", () => {
 		mkdirSync(path.join(appData, "logs"))
 		expect(() => leftoversBeside(userData)).toThrow(/logs/)
 		expect(leftoversBeside(path.join(tempDir(), "missing", "desktop"))).toBe("nothing beside desktop")
+	})
+})
+
+describe("chain L prefs precondition", () => {
+	// 3.x's page (localStorage, its preload's desktopAPI) over an options.v1.json held in memory; setStartMinimized
+	// merges into the file as 3.x's Options.update does.
+	function legacy(stored: Record<string, string>, file: Record<string, unknown> | null) {
+		const options = { file }
+		const calls: string[] = []
+		const page = {
+			evaluate: (script: string) =>
+				Promise.resolve(
+					runInNewContext(script, {
+						localStorage: { getItem: (key: string) => stored[key] ?? null },
+						window: {
+							desktopAPI: {
+								setStartMinimized: (value: boolean) => {
+									calls.push(`setStartMinimized(${String(value)})`)
+									options.file = { ...options.file, startMinimized: value }
+
+									return Promise.resolve()
+								}
+							}
+						}
+					}) as unknown
+				)
+		} as unknown as Page
+
+		return { page, calls, read: () => options.file }
+	}
+	const bothOn = { [LEGACY_KEYS.minimizeToTray]: "true", [LEGACY_KEYS.startMinimized]: "true" }
+
+	it("passes a file with startMinimized on, recording a stale minimizeToTray without touching it", async () => {
+		const { page, calls, read } = legacy(bothOn, { minimizeToTray: false, startMinimized: true })
+
+		await expect(requireLegacyPrefs(page, read)).resolves.toBe("startMinimized:true, minimizeToTray:false (stale; localStorage wins)")
+		expect(calls).toEqual([])
+		expect(read()).toEqual({ minimizeToTray: false, startMinimized: true })
+	})
+
+	it("records both mirrored on as such", async () => {
+		const { page, read } = legacy(bothOn, { minimizeToTray: true, startMinimized: true })
+
+		await expect(requireLegacyPrefs(page, read)).resolves.toBe("startMinimized:true, minimizeToTray:true")
+	})
+
+	it("sets a stale or missing startMinimized once through 3.x's own setter and leaves minimizeToTray alone", async () => {
+		const stale = legacy(bothOn, { minimizeToTray: true, startMinimized: false })
+
+		await expect(requireLegacyPrefs(stale.page, stale.read)).resolves.toBe(
+			"startMinimized:true (was false; set once more through setStartMinimized), minimizeToTray:true"
+		)
+		expect(stale.calls).toEqual(["setStartMinimized(true)"])
+		expect(stale.read()).toEqual({ minimizeToTray: true, startMinimized: true })
+
+		const missing = legacy(bothOn, null)
+
+		await expect(requireLegacyPrefs(missing.page, missing.read)).resolves.toBe(
+			"startMinimized:true (was absent; set once more through setStartMinimized), minimizeToTray:absent (localStorage wins)"
+		)
+		expect(missing.calls).toEqual(["setStartMinimized(true)"])
+	})
+
+	it("fails where the file still lacks startMinimized after the one call", async () => {
+		const { page, calls } = legacy(bothOn, { minimizeToTray: true })
+
+		await expect(requireLegacyPrefs(page, () => ({ minimizeToTray: true }))).rejects.toThrow(
+			/after setStartMinimized\(true\); it held startMinimized:absent/
+		)
+		expect(calls).toEqual(["setStartMinimized(true)"])
+	})
+
+	it("requires both prefs on in localStorage, whatever the file holds", async () => {
+		const { page, calls, read } = legacy(
+			{ [LEGACY_KEYS.minimizeToTray]: "false", [LEGACY_KEYS.startMinimized]: "true" },
+			{ minimizeToTray: true, startMinimized: true }
+		)
+
+		await expect(requireLegacyPrefs(page, read)).rejects.toThrow(/localStorage \{"minimizeToTray":false,"startMinimized":true\}/)
+		expect(calls).toEqual([])
 	})
 })

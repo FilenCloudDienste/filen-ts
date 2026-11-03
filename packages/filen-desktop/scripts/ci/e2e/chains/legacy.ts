@@ -41,12 +41,12 @@ import { launchDebuggable, type Launched } from "../launch.ts"
 import {
 	configureLegacy,
 	LEGACY_ORIGIN,
-	legacyPrefs,
 	legacySignIn,
 	legacySyncCounts,
 	legacySyncHold,
 	type LegacySyncPair,
 	quitLegacy,
+	requireLegacyPrefs,
 	watchLegacySync
 } from "../legacyApp.ts"
 import { crossCheck, describeLegacy, seedLegacy } from "../seed.ts"
@@ -197,8 +197,8 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 		cloud?: Snapshot
 		// What each pair's old local trash directory held as 3.x left it (null where it had none).
 		trash?: Map<string, Snapshot | null>
-		// The prefs 3.x's options.v1.json held (the rest are in its localStorage only).
-		mirrored?: string[]
+		// What 3.x's options.v1.json held of the prefs (requireLegacyPrefs).
+		optionsFile?: string
 		afterCloud?: Snapshot
 		// Windows: the tray preference was switched off to quit and is to be put back.
 		trayOff?: boolean
@@ -413,24 +413,17 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 			return `${type} at ${drive.root}; PROPFIND 207`
 		})
 
-		// The prefs live in the page's localStorage; options.v1.json is main's mirror, which 3.0.53 writes from two
-		// concurrent read-merge-write calls (setMinimizeToTray, setStartMinimized), so it may keep only one key. 4.x takes
-		// minimizeToTray from localStorage first and startMinimized from the file first, each filled in from the other
-		// (legacyPrefs); L4 checks the outcome.
+		// The prefs live in the page's localStorage; options.v1.json is main's mirror, which 3.x writes from two concurrent
+		// read-merge-write calls (setMinimizeToTray, setStartMinimized), so one key can keep a stale value. 3.x reads only
+		// startMinimized from the file, so that one must be true there (set once more through 3.x's own setter, alone, where
+		// the race lost it); 4.x takes minimizeToTray from localStorage first, so the file's is recorded only, and L4's
+		// evidence shows whether the stale path ran.
 		await findings.must(
-			`${LEGACY_VERSION} keeps the prefs on (localStorage; its options.v1.json mirror never says otherwise)`,
+			`${LEGACY_VERSION} keeps the prefs on (localStorage; startMinimized in its options.v1.json mirror)`,
 			async () => {
-				const stored = await legacyPrefs(legacyPage())
-				const options = readJson(userData("options.v1.json")) as Record<string, unknown> | null
-				const mirrored = (["minimizeToTray", "startMinimized"] as const).filter(key => options?.[key] !== undefined)
+				state.optionsFile = await requireLegacyPrefs(legacyPage(), () => readJson(userData("options.v1.json")))
 
-				if (!stored.minimizeToTray || !stored.startMinimized || mirrored.some(key => options?.[key] !== true)) {
-					fail(`localStorage ${json(stored)}; options.v1.json ${json(options)}`)
-				}
-
-				state.mirrored = mirrored
-
-				return `localStorage both on; options.v1.json mirrors ${mirrored.join(", ") || "neither"}`
+				return `localStorage both on; options.v1.json ${state.optionsFile}`
 			}
 		)
 
@@ -911,7 +904,7 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 					fail(json(prefs))
 				}
 
-				return `${json(prefs)}; 3.x's options.v1.json held ${(state.mirrored ?? []).join(", ") || "neither"}`
+				return `${json(prefs)}; 3.x's options.v1.json held ${state.optionsFile ?? "nothing read"}`
 			})
 
 			await findings.check("L5 the network drive runs at the 3.x mount point and reads the cloud edit", async () => {

@@ -177,6 +177,49 @@ export async function legacyPrefs(page: Page): Promise<{ minimizeToTray: boolean
 	)) as { minimizeToTray: boolean; startMinimized: boolean }
 }
 
+// A pref as options.v1.json holds it (undefined: absent, or no file).
+function optionOf(options: unknown, key: "minimizeToTray" | "startMinimized"): unknown {
+	return typeof options === "object" && options !== null ? Object.entries(options).find(([name]) => name === key)?.[1] : undefined
+}
+
+function shownOption(value: unknown): string {
+	return value === undefined ? "absent" : JSON.stringify(value)
+}
+
+// The prefs chain L requires of the old client before its update: both on in its page's localStorage, and
+// startMinimized: true in options.v1.json, main's mirror. Its web writes the mirror from two concurrent calls
+// (setMinimizeToTray, setStartMinimized), each a read-merge-write over one cached base, so either key can keep a stale
+// value. 3.x reads only startMinimized from the file; 4.x takes minimizeToTray from localStorage first, so the file's
+// minimizeToTray is recorded, never required. Where the file's startMinimized is not true, 3.x's own setter runs once
+// more, alone (nothing races it), and the file is read again. Returns what the file holds.
+export async function requireLegacyPrefs(page: Page, readOptions: () => unknown): Promise<string> {
+	const stored = await legacyPrefs(page)
+
+	if (!stored.minimizeToTray || !stored.startMinimized) {
+		fail(`localStorage ${JSON.stringify(stored)}; options.v1.json ${JSON.stringify(readOptions())}`)
+	}
+
+	const first = optionOf(readOptions(), "startMinimized")
+	let startMinimized = "startMinimized:true"
+
+	if (first !== true) {
+		await page.evaluate("window.desktopAPI.setStartMinimized(true)")
+
+		const again = readOptions()
+
+		if (optionOf(again, "startMinimized") !== true) {
+			fail(`options.v1.json ${JSON.stringify(again)} after setStartMinimized(true); it held startMinimized:${shownOption(first)}`)
+		}
+
+		startMinimized = `startMinimized:true (was ${shownOption(first)}; set once more through setStartMinimized)`
+	}
+
+	const minimizeToTray = optionOf(readOptions(), "minimizeToTray")
+	const why = minimizeToTray === true ? "" : minimizeToTray === undefined ? " (localStorage wins)" : " (stale; localStorage wins)"
+
+	return `${startMinimized}, minimizeToTray:${shownOption(minimizeToTray)}${why}`
+}
+
 // The old app's own graceful quit (tray Quit, Cmd+Q): app.quit() runs before-quit and will-quit, which flushes and
 // unmounts rclone. Scheduled, and the session closed first: Node holds a process at exit while a debugger is attached.
 export async function quitLegacy(launched: Launched, timeoutMs: number): Promise<string> {
