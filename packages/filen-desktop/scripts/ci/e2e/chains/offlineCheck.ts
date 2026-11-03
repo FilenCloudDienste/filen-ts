@@ -4,6 +4,7 @@ import path from "node:path"
 import { errorMessage, fail, waitFor } from "../../support.ts"
 import { appPids, createSampler, describeSample, offlineBlockFor, relaunchThrough, type Sampler, startThrough } from "../offlineBlock.ts"
 import type { Chain } from "./common.ts"
+import { runListingDrop } from "./offlineListing.ts"
 
 // P11: N offline and back, with its own processes cut off (offlineBlock.ts) and everything else on the runner online.
 //   live drop      with N running: an edit takes its pair offline within 30 s, stays out of the cloud, the sync status
@@ -11,6 +12,9 @@ import type { Chain } from "./common.ts"
 //                  within 60 s
 //   offline start  N launched under the block: every pair offline (none in error), no attention; once lifted, every
 //                  pair recovers within 60 s (the engine wakes on reconnect instead of its next periodic pass)
+//   listing drop   N launched to a relist while the harness holds drive-write: every pair waits for the cloud; the
+//                  block takes every pair offline (none in error, none still waiting) within 30 s; the lock released,
+//                  then the block lifted, every pair converges within 60 s (offlineListing.ts)
 // N runs through the block's wrapper (Linux, macOS) for this check only and is started plainly again after it.
 
 const LIVE_OFFLINE_MS = 30_000
@@ -123,6 +127,8 @@ export async function runOfflineCheck(chain: Chain, options: OfflineCheckOptions
 				return `every pair offline, none in error; recovered after the lift; ${noSyncAttention(sampler)}`
 			}
 		)
+
+		await runListingDrop(chain, block, sampler, options.pin)
 	} finally {
 		findings.info("P11 the block lifted in the end", await block.lift().catch(errorMessage))
 		findings.info("P11 halts and lastError texts", sampler.errorsSeen().join(" | ") || "none")
