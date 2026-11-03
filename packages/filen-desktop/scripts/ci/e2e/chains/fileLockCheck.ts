@@ -260,8 +260,8 @@ export async function runFileLockCheck(chain: Chain, options: FileLockOptions): 
 
 			ok("retryAll", await desktop<DesktopSyncResult<null>>(chain.page(), `window.desktop.sync.retryAll(${json(pair.id)})`))
 
-			for (const name of leftInCloud) {
-				await cloud.moveto(`${cloudDir}/${name}`, `${chain.cloudDir}/moved-out/${name}`)
+			if (leftInCloud.length > 0) {
+				await cloud.purgeFiles(cloudDir, LOCKED_PREFIX)
 			}
 
 			for (const name of left) {

@@ -62,6 +62,8 @@ export interface Cloud {
 	download(dir: string, localDir: string, exclude?: readonly string[]): Promise<void>
 	// Moves `dir` and everything below it to the trash; a missing `dir` is not an error.
 	purge(dir: string): Promise<void>
+	// Deletes the files directly in `dir` whose names start with `prefix`, in one call (rclone delete).
+	purgeFiles(dir: string, prefix: string): Promise<void>
 	emptyTrash(): Promise<void>
 	about(): Promise<CloudUsage>
 	// A file's content as the cloud serves it (decrypted), whole in memory: for small files.
@@ -86,6 +88,12 @@ export function excludeArgs(prefixes: readonly string[]): string[] {
 
 		return ["--exclude", rule, "--exclude", `${rule}/**`]
 	})
+}
+
+// rclone filter rules keeping only the files directly in the source whose names start with `prefix`; glob characters
+// in it are escaped.
+export function prefixFilterArgs(prefix: string): string[] {
+	return ["--max-depth", "1", "--include", `/${prefix.replace(/[\\*?[\]{}]/g, "\\$&")}*`]
 }
 
 function remotePath(relative: string): string {
@@ -209,6 +217,9 @@ export async function openCloud(remote: HarnessRemote, work: string): Promise<Cl
 			if (result.status !== 0 && result.status !== NOT_FOUND) {
 				fail(`rclone purge ${dir}: ${describe(result)}`)
 			}
+		},
+		purgeFiles: async (dir, prefix) => {
+			await must(`delete ${prefix}* in ${dir}`, ["delete", ...prefixFilterArgs(prefix), remotePath(dir)])
 		},
 		emptyTrash: async () => {
 			await must("cleanup", ["cleanup", remotePath("")])

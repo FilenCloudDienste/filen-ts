@@ -4,7 +4,7 @@ import path from "node:path"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import type { Chain } from "../../scripts/ci/e2e/chains/common.ts"
 import { realWorldFor, renameProblems } from "../../scripts/ci/e2e/chains/realWorld.ts"
-import { type Cloud, type CloudEntry, excludeArgs } from "../../scripts/ci/e2e/cloud.ts"
+import { type Cloud, type CloudEntry, excludeArgs, prefixFilterArgs } from "../../scripts/ci/e2e/cloud.ts"
 import { expectedUnsyncable, NAME_FIXTURES, namesFor, NAMES_PAIR, NAMES_RENAMES } from "../../scripts/ci/e2e/fixtures.ts"
 import { createFindings, type Finding } from "../../scripts/ci/e2e/findings.ts"
 import {
@@ -59,6 +59,7 @@ function listingCloud(entries: CloudEntry[]): { cloud: Cloud; downloads: (readon
 			return Promise.resolve()
 		},
 		purge: unused,
+		purgeFiles: unused,
 		emptyTrash: unused,
 		about: unused,
 		cat: unused,
@@ -164,6 +165,11 @@ describe("e2e cloud snapshot options", () => {
 			"--exclude",
 			"/a\\[1\\]\\*/**"
 		])
+	})
+
+	it("purges by a name prefix in the directory itself only, glob characters escaped", () => {
+		expect(prefixFilterArgs("locked-")).toEqual(["--max-depth", "1", "--include", "/locked-*"])
+		expect(prefixFilterArgs("a[1]*")).toEqual(["--max-depth", "1", "--include", "/a\\[1\\]\\**"])
 	})
 
 	it("keeps an NFD name as spelled in a raw local snapshot only", async () => {
