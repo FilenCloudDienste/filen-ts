@@ -239,7 +239,11 @@ export async function startReviewThroughCard(page: Page, pairName: string, want:
 
 	// The held list, whichever list the switch opened on.
 	await lists.getByRole("button", { name: new RegExp(`^${syncText("planListHeld")}`) }).click({ timeout: timeoutMs })
-	await card.locator(`[title="${want.heldPath}"]`).waitFor({ state: "visible", timeout: timeoutMs })
+	// The row holding the path: both its label (EntryRow) and the middle-ellipsis text in it carry the path as title.
+	await card
+		.locator('[data-slot="settings-row"]')
+		.filter({ has: page.locator(`[title="${want.heldPath}"]`) })
+		.waitFor({ state: "visible", timeout: timeoutMs })
 	await card.getByRole("button", { name: syncText("reviewStart"), exact: true }).click({ timeout: timeoutMs })
 	await card.waitFor({ state: "detached", timeout: timeoutMs })
 
