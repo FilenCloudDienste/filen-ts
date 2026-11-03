@@ -197,9 +197,17 @@ export async function runFileLockCheck(chain: Chain, options: FileLockOptions): 
 				}
 
 				await held.release()
-				// What a user does from the Issues tab once the other program let go: Retry, which asks for a pass.
+
+				// What a user does from the Issues tab once the other program let go: Retry, which asks for a pass itself
+				// (no syncNow here, so a Retry that runs none fails: the safety net's pass comes later than SYNC_MS).
+				const retried = Date.now()
+
 				await retryPath(name)
-				await passed()
+				await waitFor("a completed pass after Retry", SYNC_MS, async () => {
+					const read = await pairOf(chain, pair.id)
+
+					return read.phase !== "syncing" && (read.lastSyncedAt ?? 0) >= retried ? true : null
+				})
 				await waitFor(`${name} replaced by the cloud's`, SYNC_MS, () => (sha256File(local(name)) === sha256(newer) ? true : null))
 
 				const after = await pairOf(chain, pair.id)
