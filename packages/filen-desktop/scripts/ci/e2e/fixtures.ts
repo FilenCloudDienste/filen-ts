@@ -195,3 +195,148 @@ export const LEGACY_DELTAS: readonly LegacyDelta[] = [
 export const LEGACY_CONFLICTS: Readonly<Record<string, readonly string[]>> = {
 	[LEGACY_EDITS.local.pair]: [LEGACY_EDITS.local.path]
 }
+
+// Chain P's names pair (chains/realWorld.ts): names a real drive holds, seeded on both sides of one two-way pair, and
+// what each OS's engine must make of them. The outcomes are the engine's once its names fix is in (sdk-rs: one
+// device-legality check for cloud names, an NFD local name kept as spelled and uploaded, NFC name hashing, a trailing dot
+// never renamed in the cloud); until that release the check is off (E2E_NAMES_CHECK).
+//   synced      on both sides with the same bytes; a cloud-seeded item keeps its uuid and exact name
+//   unsyncable  reported by the pair (at `reportedAs`, else its own path) and left on its side alone
+//   ignored     a built-in ignore rule: left on its side, not reported as unsyncable
+export const NAMES_PAIR = "e2e-names"
+
+export type NameOs = "linux" | "win" | "mac"
+export type NameOutcome = "synced" | "unsyncable" | "ignored"
+
+export interface NameFixture {
+	// As seeded: the exact spelling ("/"-separated, NFD where it says so).
+	path: string
+	side: "local" | "cloud"
+	// Seeded on that OS only.
+	only?: NameOs
+	outcome: NameOutcome | Readonly<Record<NameOs, NameOutcome>>
+	// The path the pair reports or ignores instead of `path` (a directory above it).
+	reportedAs?: string
+	// The bytes: `size` seeded bytes of the path, or a link's target's (`link`).
+	size?: number
+	// A symlink (a junction for a directory on Windows) to `target`: in the root (relative to it) or outside it ("@out/").
+	link?: { target: string; dir: boolean }
+	// macOS has no attribute: Windows only.
+	hidden?: boolean
+}
+
+// What Windows cannot hold (a device name, a forbidden character, a trailing dot) is pulled everywhere else.
+const WINDOWS_ONLY_REFUSES: Readonly<Record<NameOs, NameOutcome>> = { linux: "synced", win: "unsyncable", mac: "synced" }
+const LONG_CLOUD_DIRS = Array.from({ length: 6 }, (_, index) => `long-dir-${String(index)}-`.padEnd(45, "x"))
+const LONG_LOCAL_DIRS = Array.from({ length: 4 }, (_, index) => `deep-${String(index)}-`.padEnd(59, "y"))
+// The built-in ignore rules (sdk-rs DEFAULT_IGNORE_PATTERNS), one entry each; a directory rule by a file inside it.
+const DEFAULT_IGNORED = [
+	".DS_Store",
+	"._resource",
+	".Spotlight-V100/x",
+	".fseventsd/x",
+	".TemporaryItems/x",
+	".DocumentRevisions-V100/x",
+	".Trashes/x",
+	"Thumbs.db",
+	"ehthumbs.db",
+	"ehthumbs_vista.db",
+	"desktop.ini",
+	"$RECYCLE.BIN/x",
+	"System Volume Information/x",
+	"~$budget.xlsx",
+	".~lock.doc.odt#",
+	"a.swp",
+	"a.swo",
+	"a.swn",
+	".#notes.org",
+	"x.crdownload"
+]
+
+export const NAME_FIXTURES: readonly NameFixture[] = [
+	// Cloud: written by rclone, whose filen backend checks no name.
+	{ path: "aux.c", side: "cloud", outcome: WINDOWS_ONLY_REFUSES },
+	{ path: "CON", side: "cloud", outcome: WINDOWS_ONLY_REFUSES },
+	{ path: "Q&A: what?.txt", side: "cloud", outcome: WINDOWS_ONLY_REFUSES },
+	{ path: "trailing dot.", side: "cloud", outcome: WINDOWS_ONLY_REFUSES },
+	{ path: "bad:dir/child.txt", side: "cloud", outcome: WINDOWS_ONLY_REFUSES, reportedAs: "bad:dir" },
+	{ path: "bad:dir/sub/grand.txt", side: "cloud", outcome: WINDOWS_ONLY_REFUSES, reportedAs: "bad:dir" },
+	{ path: "naïve.txt", side: "cloud", outcome: "synced" },
+	{ path: [...LONG_CLOUD_DIRS, `${"long-file-".padEnd(196, "z")}.txt`].join("/"), side: "cloud", outcome: "synced" },
+	{ path: "Notes.md", side: "cloud", outcome: "synced" },
+	// Local.
+	{ path: "Report.txt", side: "local", outcome: "synced" },
+	{ path: "café.txt", side: "local", outcome: "synced" },
+	{ path: "Résumé/cv.txt", side: "local", outcome: "synced" },
+	{ path: "🎉 party 👩‍💻.txt", side: "local", outcome: "synced" },
+	{ path: "rtl ‏mark.txt", side: "local", outcome: "synced" },
+	{ path: "invoice ‮txt.exe", side: "local", outcome: "synced" },
+	{ path: `${"n".repeat(251)}.txt`, side: "local", outcome: "synced" },
+	{ path: [...LONG_LOCAL_DIRS, `${"file-".padEnd(56, "w")}.txt`].join("/"), side: "local", outcome: "synced" },
+	...DEFAULT_IGNORED.map((path): NameFixture => {
+		const dir = path.endsWith("/x") ? path.slice(0, -2) : undefined
+
+		return { path, side: "local", outcome: "ignored", ...(dir === undefined ? {} : { reportedAs: dir }) }
+	}),
+	{ path: ".env", side: "local", outcome: "synced" },
+	{ path: ".config/x", side: "local", outcome: "synced" },
+	// Links: followed and synced as what they lead to, but a directory link inside the root is an alias of its target.
+	{ path: "real-dir/inside.txt", side: "local", outcome: "synced" },
+	{ path: "alias-dir", side: "local", outcome: "unsyncable", link: { target: "real-dir", dir: true } },
+	{ path: "linked-out", side: "local", outcome: "synced", link: { target: "@out/outside", dir: true } },
+	{ path: "file-link.txt", side: "local", outcome: "synced", link: { target: "real-dir/inside.txt", dir: false } },
+	// Windows: a name NTFS holds but longer than the 255 bytes a cloud name may take, and a hidden file.
+	{ path: `${"文件名".repeat(32)}.txt`, side: "local", only: "win", outcome: "unsyncable" },
+	{ path: "hidden.txt", side: "local", only: "win", outcome: "synced", hidden: true },
+	// macOS: a colon (a slash in Finder) and a directory with a trailing space, both refused as cloud names.
+	{ path: "Invoice 1:2.pdf", side: "local", only: "mac", outcome: "unsyncable" },
+	{ path: "Folder /x.txt", side: "local", only: "mac", outcome: "unsyncable", reportedAs: "Folder " },
+	// Linux: two names the cloud folds into one, and a character the cloud refuses.
+	{ path: "Data.txt", side: "local", only: "linux", outcome: "unsyncable" },
+	{ path: "data.txt", side: "local", only: "linux", outcome: "unsyncable" },
+	{ path: "What?.txt", side: "local", only: "linux", outcome: "unsyncable" },
+	{ path: "big.bin", side: "local", outcome: "synced", size: 48 * MIB }
+]
+
+// The file a link leads outside the root to, under "@out/" (the chain's work directory).
+export const NAMES_OUTSIDE_FILE = "outside.txt"
+
+// The fixtures seeded on `os`, with that OS's outcome.
+export function namesFor(os: NameOs): (NameFixture & { expect: NameOutcome })[] {
+	return NAME_FIXTURES.filter(fixture => fixture.only === undefined || fixture.only === os).map(fixture => ({
+		...fixture,
+		expect: typeof fixture.outcome === "string" ? fixture.outcome : fixture.outcome[os]
+	}))
+}
+
+// A fixture's bytes: its own, or for a link to a file, its target's.
+export function nameBytes(fixture: NameFixture): Buffer {
+	if (fixture.link !== undefined && !fixture.link.dir) {
+		return nameBytes({ path: fixture.link.target, side: fixture.side, outcome: "synced" })
+	}
+
+	return seededBytes(`names/${fixture.path}`, fixture.size ?? 64)
+}
+
+// The bytes of the file a directory link outside the root leads to.
+export function outsideBytes(): Buffer {
+	return seededBytes(`names/@out/${NAMES_OUTSIDE_FILE}`, 64)
+}
+
+// The unsyncable paths `os` must report (NFC, as the engine keys them).
+export function expectedUnsyncable(os: NameOs): string[] {
+	return [
+		...new Set(
+			namesFor(os)
+				.filter(fixture => fixture.expect === "unsyncable")
+				.map(fixture => (fixture.reportedAs ?? fixture.path).normalize("NFC"))
+		)
+	].sort()
+}
+
+// The phase on N: a case rename on each side and an edit of the cloud's NFD file, each leaving exactly one cloud item.
+export const NAMES_RENAMES = {
+	local: { from: "Report.txt", to: "report.txt" },
+	cloud: { from: "Notes.md", to: "notes.md" },
+	edit: { path: "naïve.txt", bytes: seededBytes("names/edit-nfd", 3000) }
+} as const

@@ -36,6 +36,7 @@ import { runCloudFullCheck, takeQuotaCredentials } from "./cloudFullCheck.ts"
 import { runDiskFullCheck } from "./diskFullCheck.ts"
 import { runFileLockCheck } from "./fileLockCheck.ts"
 import { runProxyChecks } from "./proxyCheck.ts"
+import { realWorldFor } from "./realWorld.ts"
 import { fixtureTree, PREVIOUS_DELTAS, PREVIOUS_PAIRS, treeSnapshot, writeTree } from "../fixtures.ts"
 import { CHOOSER_BUDGET_MS } from "../os.ts"
 import { cloudSnapshot, diffSnapshots, snapshotText, type Snapshot } from "../snapshot.ts"
@@ -128,6 +129,9 @@ export async function runPreviousDeep(options: Omit<UpdateOptions, "hooks">, art
 	} = {}
 
 	chain.secret(pin)
+
+	// Gap 6: the names and scale pairs (chains/realWorld.ts), on three entries.
+	const realWorld = realWorldFor(chain, options.arch)
 
 	const setUp = async (): Promise<void> => {
 		await connect()
@@ -365,6 +369,8 @@ export async function runPreviousDeep(options: Omit<UpdateOptions, "hooks">, art
 				return "converged"
 			})
 
+			await realWorld.setUp()
+
 			// Off again before the PIN, which keeps it off; it replicates nothing the baseline holds.
 			if (target.platform === "mac") {
 				await findings.check("P10 Filen in Finder registers its domain and survives an off/on round trip", async () => {
@@ -401,7 +407,7 @@ export async function runPreviousDeep(options: Omit<UpdateOptions, "hooks">, art
 				state.local.set(pair.name, await snapshotOf(pair.name))
 			}
 
-			state.cloud = (await cloudSnapshot(cloud, cloudDir, work)) ?? fail(`${cloudDir} is gone`)
+			state.cloud = (await cloudSnapshot(cloud, cloudDir, work, { exclude: realWorld.cloudExclude })) ?? fail(`${cloudDir} is gone`)
 			state.vaultSize = statSync(userData("session.vault")).size
 			findings.attach("previous-baseline-cloud.jsonl", snapshotText(state.cloud))
 
@@ -452,7 +458,7 @@ export async function runPreviousDeep(options: Omit<UpdateOptions, "hooks">, art
 				)
 			}
 
-			const after = await cloudSnapshot(cloud, cloudDir, work)
+			const after = await cloudSnapshot(cloud, cloudDir, work, { exclude: realWorld.cloudExclude })
 
 			differences.push(
 				...diffSnapshots(state.cloud ?? fail("no cloud baseline"), after ?? new Map(), { identity: true }).map(
@@ -466,6 +472,8 @@ export async function runPreviousDeep(options: Omit<UpdateOptions, "hooks">, art
 
 			return "every file's bytes and identity unchanged on both sides"
 		})
+
+		await realWorld.afterUpdate()
 
 		await findings.check("P2 session vault kept, in secure storage", () => {
 			const vault = userData("session.vault")
@@ -655,6 +663,8 @@ export async function runPreviousDeep(options: Omit<UpdateOptions, "hooks">, art
 
 				return json(prefs)
 			})
+
+			await realWorld.onN()
 
 			await runConflictsCheck(chain, { pairs, pair: "e2e-twoway", cloudDir: `${cloudDir}/e2e-twoway` })
 

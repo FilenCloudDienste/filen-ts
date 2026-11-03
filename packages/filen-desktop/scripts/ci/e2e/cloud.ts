@@ -49,15 +49,17 @@ export function parseAbout(stdout: string): CloudUsage {
 
 export interface Cloud {
 	mkdir(dir: string): Promise<void>
-	// Copies a local tree into `dir` (created when missing), empty directories included.
-	upload(localDir: string, dir: string): Promise<void>
+	// Copies a local tree into `dir` (created when missing), empty directories included. `big` raises the time bound and
+	// the parallel transfers for a tree of thousands of files.
+	upload(localDir: string, dir: string, big?: BigCopy): Promise<void>
 	uploadFile(localFile: string, file: string): Promise<void>
 	// Every entry below `dir` (only its children without `recursive`), paths relative to it; null when `dir` does not
 	// exist.
 	list(dir: string, recursive?: boolean): Promise<CloudEntry[] | null>
 	// The uuid of directory `dir`.
 	dirId(dir: string): Promise<string>
-	download(dir: string, localDir: string): Promise<void>
+	// `exclude`: paths relative to `dir` left out, with everything below them.
+	download(dir: string, localDir: string, exclude?: readonly string[]): Promise<void>
 	// Moves `dir` and everything below it to the trash; a missing `dir` is not an error.
 	purge(dir: string): Promise<void>
 	emptyTrash(): Promise<void>
@@ -68,6 +70,22 @@ export interface Cloud {
 	sha256Of(file: string): Promise<string>
 	// Moves or renames one file or directory; the destination's parent is created when missing.
 	moveto(from: string, to: string): Promise<void>
+}
+
+// A copy of many small files: its own time bound and rclone's --transfers (and --checkers).
+export interface BigCopy {
+	timeoutMs: number
+	transfers: number
+}
+
+// rclone filter rules leaving out `prefixes` (relative to the copy's source) and everything below them; glob
+// characters in a name are escaped.
+export function excludeArgs(prefixes: readonly string[]): string[] {
+	return prefixes.flatMap(prefix => {
+		const rule = `/${prefix.replace(/[\\*?[\]{}]/g, "\\$&")}`
+
+		return ["--exclude", rule, "--exclude", `${rule}/**`]
+	})
 }
 
 function remotePath(relative: string): string {
@@ -123,8 +141,8 @@ export async function openCloud(remote: HarnessRemote, work: string): Promise<Cl
 	}
 	const rclone = (args: string[], timeoutMs = CALL_TIMEOUT_MS, onStdout?: (chunk: Buffer) => void) =>
 		runBounded(binary, ["--config", "", ...args], timeoutMs, onStdout === undefined ? { env } : { env, onStdout })
-	const must = async (what: string, args: string[]): Promise<void> => {
-		const result = await rclone(args)
+	const must = async (what: string, args: string[], timeoutMs = CALL_TIMEOUT_MS): Promise<void> => {
+		const result = await rclone(args, timeoutMs)
 
 		if (result.status !== 0) {
 			fail(`rclone ${what}: ${describe(result)}`)
@@ -166,8 +184,10 @@ export async function openCloud(remote: HarnessRemote, work: string): Promise<Cl
 		mkdir: async dir => {
 			await must(`mkdir ${dir}`, ["mkdir", remotePath(dir)])
 		},
-		upload: async (localDir, dir) => {
-			await must(`copy to ${dir}`, ["copy", "--create-empty-src-dirs", localDir, remotePath(dir)])
+		upload: async (localDir, dir, big) => {
+			const parallel = big === undefined ? [] : ["--transfers", String(big.transfers), "--checkers", String(big.transfers)]
+
+			await must(`copy to ${dir}`, ["copy", "--create-empty-src-dirs", ...parallel, localDir, remotePath(dir)], big?.timeoutMs)
 		},
 		uploadFile: async (localFile, file) => {
 			await must(`copyto ${file}`, ["copyto", localFile, remotePath(file)])
@@ -180,8 +200,8 @@ export async function openCloud(remote: HarnessRemote, work: string): Promise<Cl
 
 			return found?.id ?? fail(`no directory ${dir} in the cloud`)
 		},
-		download: async (dir, localDir) => {
-			await must(`copy from ${dir}`, ["copy", "--create-empty-src-dirs", remotePath(dir), localDir])
+		download: async (dir, localDir, exclude = []) => {
+			await must(`copy from ${dir}`, ["copy", "--create-empty-src-dirs", ...excludeArgs(exclude), remotePath(dir), localDir])
 		},
 		purge: async dir => {
 			const result = await rclone(["purge", remotePath(dir)])

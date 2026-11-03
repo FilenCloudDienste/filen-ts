@@ -28,13 +28,16 @@ async function sha256Of(file: string): Promise<string> {
 export interface LocalSnapshotOptions {
 	// Entries left out, with everything below them (the sync engine's own bin, say).
 	skip?: (relPath: string) => boolean
+	// Paths as the file system spells them, not NFC: to tell an NFD name from its NFC sibling.
+	raw?: boolean
 }
 
 export async function localSnapshot(root: string, options: LocalSnapshotOptions = {}): Promise<Snapshot> {
 	const snapshot: Snapshot = new Map()
 	const walk = async (dir: string, prefix: string): Promise<void> => {
 		for (const entry of readdirSync(dir, { withFileTypes: true })) {
-			const relPath = (prefix === "" ? entry.name : `${prefix}/${entry.name}`).normalize("NFC")
+			const spelled = prefix === "" ? entry.name : `${prefix}/${entry.name}`
+			const relPath = options.raw === true ? spelled : spelled.normalize("NFC")
 
 			if (options.skip?.(relPath) === true) {
 				continue
@@ -58,19 +61,42 @@ export async function localSnapshot(root: string, options: LocalSnapshotOptions 
 	return snapshot
 }
 
+export interface CloudSnapshotOptions {
+	// Paths relative to `dir` left out, with everything below them: neither listed nor downloaded.
+	exclude?: readonly string[]
+	// The listing alone, nothing downloaded: no hashes, and the uuid as every entry's identity (directories included),
+	// for a tree too big to download or one whose names no local file system holds.
+	listOnly?: boolean
+}
+
+// Whether `relPath` is one of `prefixes` or lies below one.
+export function underAny(relPath: string, prefixes: readonly string[]): boolean {
+	return prefixes.some(prefix => relPath === prefix || relPath.startsWith(`${prefix}/`))
+}
+
 // The cloud tree below `dir`: the listing gives kinds, sizes and identities, a download the hashes. null when `dir`
 // does not exist.
-export async function cloudSnapshot(cloud: Cloud, dir: string, work: string): Promise<Snapshot | null> {
-	const entries = await cloud.list(dir)
+export async function cloudSnapshot(cloud: Cloud, dir: string, work: string, options: CloudSnapshotOptions = {}): Promise<Snapshot | null> {
+	const exclude = options.exclude ?? []
+	const entries = (await cloud.list(dir))?.filter(entry => !underAny(entry.path, exclude))
 
-	if (entries === null) {
+	if (entries === undefined) {
 		return null
+	}
+
+	if (options.listOnly === true) {
+		return new Map(
+			entries.map((entry): [string, SnapshotNode] => [
+				entry.path.normalize("NFC"),
+				{ kind: entry.isDir ? "dir" : "file", size: entry.size, sha256: null, identity: entry.id }
+			])
+		)
 	}
 
 	const copy = mkdtempSync(path.join(work, "cloud-"))
 
 	try {
-		await cloud.download(dir, copy)
+		await cloud.download(dir, copy, exclude)
 
 		const local = await localSnapshot(copy)
 		const snapshot: Snapshot = new Map()

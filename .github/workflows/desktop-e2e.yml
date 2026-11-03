@@ -52,6 +52,11 @@
 # 7-day wait for the wipe. No sign-in and no cloud: every launch of N runs behind the offline block, on a D-Bus session
 # and Secret Service of its own.
 #
+# Gap 6 (scripts/ci/e2e/chains/realWorld.ts), chain P on linux-x64-deb, win-x64-nsis and mac-arm64-dmg: a remoteToLocal
+# pair pulls the permanent scale tree (filen-desktop-e2e-fixtures/scale-v1, about 8,500 entries, outside the swept
+# root), which job `session` and the sweep check against its manifest once a run and input `scale_reseed` writes anew;
+# and, with input `names_check` (off: it expects an sdk-rs release not out yet), a two-way pair of hostile names.
+#
 # Spikes (by hand only, input `spike`) answer one question each, on one entry per OS, instead of the update scenarios;
 # their findings go to the job summary and an artifact:
 #   s1   are the packaged 3.0.53 and N drivable over --remote-debugging-port (3.0.53 also over --inspect), and does
@@ -167,6 +172,14 @@ on:
           - auto
           - real
         default: auto
+      scale_reseed:
+        description: Write the permanent scale tree and its manifest anew before the tests (session job), then check it
+        type: boolean
+        default: false
+      names_check:
+        description: Chain P's names pair (needs the sdk-rs release with the names fixes)
+        type: boolean
+        default: false
   # Every night on main: every entry the release tests, on builds made here.
   schedule:
     - cron: '23 1 * * *'
@@ -257,7 +270,8 @@ jobs:
     needs: plan
     if: needs.plan.outputs.session == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # A reseed uploads about 8,500 entries.
+    timeout-minutes: ${{ inputs.scale_reseed && 60 || 25 }}
     defaults:
       run:
         working-directory: packages/filen-desktop
@@ -330,6 +344,17 @@ jobs:
         with:
           path: ${{ runner.temp }}/e2e-cache/quota.sealed
           key: desktop-e2e-session-v1-quota-${{ github.run_id }}-${{ github.run_attempt }}
+      # Once a run, before the tests: the scale tree against its manifest (written anew with scale_reseed). A broken tree
+      # fails chain P's scale checks by name, never the other deep jobs, so this step does not fail the job.
+      - name: The scale fixture tree
+        continue-on-error: true
+        timeout-minutes: ${{ inputs.scale_reseed && 45 || 8 }}
+        env:
+          FILEN_DESKTOP_E2E_TEST_EMAIL: ${{ secrets.FILEN_DESKTOP_E2E_TEST_EMAIL }}
+          FILEN_DESKTOP_E2E_TEST_PASSWORD: ${{ secrets.FILEN_DESKTOP_E2E_TEST_PASSWORD }}
+          FILEN_DESKTOP_E2E_SESSION_KEY: ${{ secrets.FILEN_DESKTOP_E2E_SESSION_KEY }}
+          FILEN_DESKTOP_E2E_SESSION_DIR: ${{ runner.temp }}/e2e-session
+        run: node scripts/ci/e2eCloud.ts fixtures ${{ inputs.scale_reseed && '--reseed' || '' }}
       - name: Hand the sealed sessions on
         uses: actions/upload-artifact@v6
         with:
@@ -725,6 +750,7 @@ jobs:
           # Below the step's timeout: a chain that overruns writes its evidence and fails by name.
           E2E_CHAIN_BUDGET_MINUTES: 135
           E2E_OFFLINE_SPIKE: ${{ matrix.spike == 'offline' && '1' || '' }}
+          E2E_NAMES_CHECK: ${{ inputs.names_check && '1' || '' }}
         run: bash scripts/ci/deepSession.sh --scenario previous --depth deep ${{ env.TEST_ARGS }} --artifacts e2e-artifacts
       - name: N-1 -> N (Fedora container)
         if: matrix.previous && matrix.format == 'rpm'
@@ -824,7 +850,7 @@ jobs:
     permissions:
       contents: read
       actions: write
-    timeout-minutes: 15
+    timeout-minutes: 25
     defaults:
       run:
         working-directory: packages/filen-desktop
@@ -855,6 +881,15 @@ jobs:
           FILEN_DESKTOP_E2E_SESSION_KEY: ${{ secrets.FILEN_DESKTOP_E2E_SESSION_KEY }}
           FILEN_DESKTOP_E2E_SESSION_DIR: ${{ runner.temp }}/e2e-session
         run: node scripts/ci/e2eCloud.ts sweep
+      # The second of the run's two checks of the scale tree: nothing in the run changed it.
+      - name: Check the scale fixture tree
+        timeout-minutes: 8
+        env:
+          FILEN_DESKTOP_E2E_TEST_EMAIL: ${{ secrets.FILEN_DESKTOP_E2E_TEST_EMAIL }}
+          FILEN_DESKTOP_E2E_TEST_PASSWORD: ${{ secrets.FILEN_DESKTOP_E2E_TEST_PASSWORD }}
+          FILEN_DESKTOP_E2E_SESSION_KEY: ${{ secrets.FILEN_DESKTOP_E2E_SESSION_KEY }}
+          FILEN_DESKTOP_E2E_SESSION_DIR: ${{ runner.temp }}/e2e-session
+        run: node scripts/ci/e2eCloud.ts fixtures
       # The sealed session is not kept past the run.
       - name: Delete the sealed session
         if: always()

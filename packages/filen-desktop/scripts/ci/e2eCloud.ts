@@ -27,6 +27,7 @@ import {
 	writeCached,
 	writeHandOff
 } from "./e2e/session.ts"
+import { reseedScale, SCALE_DIR, verifyScale } from "./e2e/scaleTree.ts"
 import { cloudSnapshot, diffSnapshots } from "./e2e/snapshot.ts"
 import { authVersionProblem } from "./legacy.ts"
 import { errorMessage, fail, section } from "./support.ts"
@@ -41,8 +42,10 @@ import { errorMessage, fail, section } from "./support.ts"
 //   sweep      with the handed session: delete this run's directories and any older than a day, then empty the trash
 //   pins       with the handed session: the test account's auth version is one every old client the run signs in or
 //              seeds (E2E_SIGN_IN_PINS, the plan's `pins`) can sign in to; no login, no request
+//   fixtures   with the handed session: check the permanent scale tree against its manifest (scripts/ci/e2e/scaleTree.ts);
+//              --reseed writes it anew first (dispatch input scale_reseed)
 //
-//   node scripts/ci/e2eCloud.ts <session --slot <test|quota>|selftest|sweep|pins> [--artifacts <dir>]
+//   node scripts/ci/e2eCloud.ts <session --slot <test|quota>|selftest|sweep|pins|fixtures [--reseed]> [--artifacts <dir>]
 //
 // Credentials come from the slot's secrets (FILEN_DESKTOP_E2E_TEST_EMAIL / _PASSWORD for test), the sealing secret
 // from FILEN_DESKTOP_E2E_SESSION_KEY, the cached copy from FILEN_DESKTOP_E2E_CACHE_DIR and the handed session from
@@ -244,6 +247,19 @@ async function sweep(cloud: Cloud): Promise<void> {
 	await cloud.emptyTrash()
 }
 
+// The scale tree checked once a run (the session job before the tests, the sweep after them), written anew only when
+// asked.
+async function fixtures(cloud: Cloud, work: string, artifacts: string, redact: (text: string) => string, reseed: boolean): Promise<void> {
+	const findings = createFindings("scale-fixture", artifacts, redact)
+
+	if (reseed) {
+		await findings.must(`${SCALE_DIR} written anew from the generator, with its manifest`, () => reseedScale(cloud, work))
+	}
+
+	await findings.check(`${SCALE_DIR} matches its manifest and the generated tree (listing only)`, () => verifyScale(cloud, work))
+	findings.finish()
+}
+
 const command = process.argv[2]
 const option = (name: string): string | undefined => {
 	const at = process.argv.indexOf(name)
@@ -251,7 +267,7 @@ const option = (name: string): string | undefined => {
 	return at === -1 ? undefined : process.argv[at + 1]
 }
 const artifacts = path.resolve(option("--artifacts") ?? "e2e-artifacts")
-const usage = "usage: node scripts/ci/e2eCloud.ts <session --slot <test|quota>|selftest|sweep|pins> [--artifacts <dir>]"
+const usage = "usage: node scripts/ci/e2eCloud.ts <session --slot <test|quota>|selftest|sweep|pins|fixtures [--reseed]> [--artifacts <dir>]"
 
 if (import.meta.main) {
 	const work = mkdtempSync(path.join(os.tmpdir(), "filen-e2e-cloud-"))
@@ -282,7 +298,7 @@ if (import.meta.main) {
 			}
 
 			console.log(`the test account uses auth v${String(authVersion)}, which ${pins} can all sign in to`)
-		} else if (command === "selftest" || command === "sweep") {
+		} else if (command === "selftest" || command === "sweep" || command === "fixtures") {
 			const credentials = takeCredentials()
 			const { remote } = harnessSession()
 			const cloud = await openCloud(remote, work)
@@ -291,6 +307,10 @@ if (import.meta.main) {
 
 			if (command === "selftest") {
 				await selftest(cloud, work, artifacts, redactor([credentials.email, credentials.password, ...secretsOf(remote)]))
+			} else if (command === "fixtures") {
+				const redact = redactor([credentials.email, credentials.password, ...secretsOf(remote)])
+
+				await fixtures(cloud, work, artifacts, redact, process.argv.includes("--reseed"))
 			} else {
 				await sweep(cloud)
 			}
