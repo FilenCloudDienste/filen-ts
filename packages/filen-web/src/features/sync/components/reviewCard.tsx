@@ -187,11 +187,13 @@ export interface ReviewSummaryProps {
 	findings: readonly DesktopSyncReviewFinding[]
 	// The dry run to page; null when there is none to page (unconverged, expired, or not read yet).
 	planId: string | null
+	// Lists shown as soon as there is a plan to page: the caller read it on request, so no second click.
+	listsOpen?: boolean
 }
 
 // What a pair's first run would do: why it was held (findings), the dry run's totals and its lists. Used by the
 // review card and by the add-pair dialog's last step.
-export function ReviewSummary({ summary, findings, planId }: ReviewSummaryProps) {
+export function ReviewSummary({ summary, findings, planId, listsOpen = false }: ReviewSummaryProps) {
 	const { t, i18n } = useTranslation("sync")
 	const [showLists, setShowLists] = useState(false)
 
@@ -219,7 +221,7 @@ export function ReviewSummary({ summary, findings, planId }: ReviewSummaryProps)
 						</DesktopCallout>
 					) : null}
 					{planId !== null && planListsWithEntries(summary).length > 0 ? (
-						showLists ? (
+						listsOpen || showLists ? (
 							<PlanLists
 								planId={planId}
 								summary={summary}

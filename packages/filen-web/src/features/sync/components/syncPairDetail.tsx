@@ -98,6 +98,7 @@ function ReviewPanel({ pair, review }: { pair: Pick<DesktopSyncPair, "id" | "nam
 				summary={plan?.summary ?? review.summary}
 				findings={review.findings}
 				planId={plan?.planId ?? null}
+				listsOpen
 				actions={
 					<>
 						{plan === null && review.summary !== null ? (
