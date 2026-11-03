@@ -1,4 +1,5 @@
-import type { DeleteGuardState, SyncPairInfo, SyncPassReport } from "@filen/sdk-rs"
+import type { ConflictResolution, DeleteGuardState, SyncPairInfo, SyncPassReport } from "@filen/sdk-rs"
+import type { DesktopSyncResolution } from "@filen/shared/desktop"
 import type { NativeOpArgs, NativeOpResult, NativePair, SyncOp } from "../shared/nativeProtocol.ts"
 import { modeName, type NativeSdk, type SyncEngine, syncMode } from "./addon.ts"
 import type { Convergence } from "./convergence.ts"
@@ -68,6 +69,14 @@ export function toNativePair(sdk: NativeSdk, info: SyncPairInfo): NativePair {
 		paused: info.paused,
 		firstPassCompleted: info.firstPassCompleted
 	}
+}
+
+function conflictResolution(sdk: NativeSdk, resolution: DesktopSyncResolution): ConflictResolution {
+	return resolution === "keepLocal"
+		? sdk.ConflictResolution.KeepLocal
+		: resolution === "keepRemote"
+			? sdk.ConflictResolution.KeepRemote
+			: sdk.ConflictResolution.KeepBoth
 }
 
 const NO_HELD = { passToken: null, reason: null, total: 0, entries: [], gaps: [], gapsTotal: 0 }
@@ -285,20 +294,47 @@ export function createHostEngine(ctx: OpsContext): HostEngine {
 		},
 		resolveConflict: async ({ pairId, relPath, resolution }) => {
 			const { id } = held(pairId)
-			const kept = await engine.resolveConflict(
-				id,
-				relPath,
-				resolution === "keepLocal"
-					? sdk.ConflictResolution.KeepLocal
-					: resolution === "keepRemote"
-						? sdk.ConflictResolution.KeepRemote
-						: sdk.ConflictResolution.KeepBoth
-			)
+			const kept = await engine.resolveConflict(id, relPath, conflictResolution(sdk, resolution))
 
 			// The resolution re-anchors the row at once, so the count drops now, not at the next pass.
 			await countConflicts(id)
 
 			return kept === undefined ? null : clip(kept)
+		},
+		// One at a time: the engine resolves a path at a time, each waiting for a scan in progress. The paths are the
+		// engine's own, never a clipped copy; the count is read once for the batch.
+		resolveConflicts: async ({ pairId, resolution, offset, limit }) => {
+			const { id } = held(pairId)
+			const { conflicts } = await engine.listConflicts(id, BigInt(offset), BigInt(limit))
+			const chosen = conflictResolution(sdk, resolution)
+			let resolved = 0
+			let failed = 0
+
+			try {
+				for (const conflict of conflicts) {
+					if (ctx.signal.aborted) {
+						break
+					}
+
+					try {
+						await engine.resolveConflict(id, conflict.relPath, chosen)
+						resolved++
+					} catch (error) {
+						const failure = classify(sdk, error)
+
+						if (failure === "unauthenticated") {
+							throw error
+						}
+
+						failed++
+						ctx.log.warn(`sync: conflict not resolved: ${failure.code}`)
+					}
+				}
+			} finally {
+				await countConflicts(id)
+			}
+
+			return { resolved, failed }
 		},
 		// What the last pass this process saw held back; nothing before one ran.
 		heldDeletions: async ({ pairId }) => {
@@ -317,15 +353,9 @@ export function createHostEngine(ctx: OpsContext): HostEngine {
 		},
 		// The approval only covers the next pass, so one runs now.
 		approveDeletions: async ({ pairId, passToken }) => {
-			const { id, info } = held(pairId)
+			await engine.approveDeletions(held(pairId).id, passToken)
 
-			await engine.approveDeletions(id, passToken)
-
-			if (watched.has(pairId) && !info.paused) {
-				await engine.requestPass(id)
-			}
-
-			return null
+			return ops.requestPass({ pairId })
 		},
 		retryPath: async ({ pairId, relPath }) => {
 			await engine.retryPath(held(pairId).id, relPath)

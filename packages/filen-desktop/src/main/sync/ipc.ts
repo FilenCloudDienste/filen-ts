@@ -7,6 +7,7 @@ import {
 	planIdSchema,
 	planListSchema,
 	relPathArgSchema,
+	resolutionSchema,
 	syncModeSchema
 } from "../../shared/nativeProtocol.ts"
 import { type CheckedCall, checkedCalls, type IpcMain, pageOf, registerCalls } from "../pages.ts"
@@ -50,8 +51,11 @@ const CALLS: Record<SyncCall, CheckedCall<SyncService>> = {
 	planPage: call(type([planIdSchema, planListSchema, countSchema, limitSchema]), (service, _page, args) => service.planPage(...args)),
 	releasePlan: call(type([planIdSchema]), (service, _page, [planId]) => service.releasePlan(planId)),
 	conflicts: call(type([pairIdSchema, countSchema, limitSchema]), (service, _page, args) => service.conflicts(...args)),
-	resolveConflict: call(type([pairIdSchema, relPathArgSchema, type("'keepLocal' | 'keepRemote' | 'keepBoth'")]), (service, _page, args) =>
+	resolveConflict: call(type([pairIdSchema, relPathArgSchema, resolutionSchema]), (service, _page, args) =>
 		service.resolveConflict(...args)
+	),
+	resolveConflicts: call(type([pairIdSchema, resolutionSchema, countSchema]), (service, _page, args) =>
+		service.resolveConflicts(...args)
 	),
 	heldDeletions: call(one, (service, _page, [pairId]) => service.heldDeletions(pairId)),
 	approveDeletions: call(type([pairIdSchema, passTokenSchema]), (service, _page, args) => service.approveDeletions(...args)),

@@ -558,6 +558,29 @@ describe("registerSyncIpc", () => {
 		expect(argsOf("unsyncablePaths")).toEqual([{ pairId: "7", offset: 0, limit: 50 }])
 	})
 
+	it("resolves conflicts in batches past the failed ones, stopping where the list ends or at the count", async () => {
+		const batches = [
+			{ resolved: 24, failed: 1 },
+			{ resolved: 3, failed: 0 }
+		]
+		const { invoke, argsOf } = setup({
+			pairs: [shellPair()],
+			answers: { resolveConflicts: () => batches.shift() ?? { resolved: 0, failed: 0 } }
+		})
+
+		expect(await invoke("resolveConflicts", "7", "keepBoth", 30)).toEqual({ ok: true, value: { resolved: 27, failed: 1 } })
+		expect(argsOf("resolveConflicts")).toEqual([
+			{ pairId: "7", resolution: "keepBoth", offset: 0, limit: 25 },
+			{ pairId: "7", resolution: "keepBoth", offset: 1, limit: 5 },
+			{ pairId: "7", resolution: "keepBoth", offset: 1, limit: 2 }
+		])
+
+		batches.push({ resolved: 3, failed: 0 })
+		expect(await invoke("resolveConflicts", "7", "keepLocal", 3)).toEqual({ ok: true, value: { resolved: 3, failed: 0 } })
+		expect(argsOf("resolveConflicts")).toHaveLength(4)
+		await expect(invoke("resolveConflicts", "7", "keepEither", 3)).rejects.toThrow("invalid sync payload")
+	})
+
 	it("keeps waiting for a slow cloud listing, at most five minutes apart, never giving up", async () => {
 		vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
 

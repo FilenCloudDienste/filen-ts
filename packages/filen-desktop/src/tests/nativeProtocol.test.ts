@@ -105,6 +105,7 @@ const ARGS: { [K in NativeOp]: unknown } = {
 	releasePlan: { planId: "p1" },
 	conflicts: { pairId: "1", offset: 0, limit: 200 },
 	resolveConflict: { pairId: "1", relPath: "d/a.txt", resolution: "keepBoth" },
+	resolveConflicts: { pairId: "1", resolution: "keepLocal", offset: 0, limit: 25 },
 	heldDeletions: { pairId: "1" },
 	approveDeletions: { pairId: "1", passToken: "token" },
 	retryPath: { pairId: "1", relPath: "d/a.txt" },

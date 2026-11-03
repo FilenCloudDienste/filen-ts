@@ -314,6 +314,7 @@ const bridge: DesktopBridge = {
 		releasePlan: planId => syncInvoke("releasePlan", planId),
 		conflicts: (pairId, offset, limit) => syncInvoke("conflicts", pairId, offset, limit),
 		resolveConflict: (pairId, relPath, resolution) => syncInvoke("resolveConflict", pairId, relPath, resolution),
+		resolveConflicts: (pairId, resolution, count) => syncInvoke("resolveConflicts", pairId, resolution, count),
 		heldDeletions: pairId => syncInvoke("heldDeletions", pairId),
 		approveDeletions: (pairId, passToken) => syncInvoke("approveDeletions", pairId, passToken),
 		retryPath: (pairId, relPath) => syncInvoke("retryPath", pairId, relPath),

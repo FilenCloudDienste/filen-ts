@@ -6,6 +6,7 @@ import type {
 	RcloneExit,
 	RcloneRefusal,
 	RcloneStats,
+	SyncConflictPage,
 	SyncPairInfo,
 	SyncPassEvent,
 	SyncPassReport,
@@ -281,7 +282,9 @@ export function fakeEngine(pairs: SyncPairInfo[] = [pairInfo()]) {
 		requestPass: vi.fn(() => Promise.resolve()),
 		reconfigurePair: vi.fn(() => Promise.resolve()),
 		planPair: vi.fn(() => Promise.resolve(fakePlan([]).handle)),
-		listConflicts: vi.fn(() => Promise.resolve({ conflicts: [], total: 0n })),
+		listConflicts: vi.fn((_pairId: bigint, _offset: bigint, _limit: bigint): Promise<SyncConflictPage> =>
+			Promise.resolve({ conflicts: [], total: 0n })
+		),
 		resolveConflict: vi.fn(() => Promise.resolve(undefined)),
 		lastReport: vi.fn((_pairId: bigint): Promise<SyncPassReport | undefined> => Promise.resolve(undefined)),
 		approveDeletions: vi.fn(() => Promise.resolve()),

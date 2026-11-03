@@ -20,6 +20,7 @@ import type {
 	DesktopSyncPlanList,
 	DesktopSyncPlanPage,
 	DesktopSyncPlanSummary,
+	DesktopSyncResolution,
 	DesktopSyncScanGap,
 	DesktopSyncStage,
 	DesktopSyncTransfer,
@@ -285,6 +286,8 @@ const pageLimitSchema = type("1 <= number.integer <= 1000")
 // An ignore text: the engine allows 1 MiB per rule file.
 export const ignoreTextSchema = type("string <= 1048576")
 
+export const resolutionSchema = pinned<DesktopSyncResolution>()(type("'keepLocal' | 'keepRemote' | 'keepBoth'"))
+
 const noArgs = type({ "+": "reject" })
 const pairArgs = type({ pairId: pairIdSchema, "+": "reject" })
 const pageArgs = type({ pairId: pairIdSchema, offset: countSchema, limit: pageLimitSchema, "+": "reject" })
@@ -339,10 +342,15 @@ export const SYNC_OPS = {
 		args: type({
 			pairId: pairIdSchema,
 			relPath: relPathArgSchema,
-			resolution: "'keepLocal' | 'keepRemote' | 'keepBoth'",
+			resolution: resolutionSchema,
 			"+": "reject"
 		}),
 		result: relPathSchema.or("null")
+	},
+	// Resolves the conflicts listed at offset..offset+limit one after another, a path that fails left in place.
+	resolveConflicts: {
+		args: type({ pairId: pairIdSchema, resolution: resolutionSchema, offset: countSchema, limit: pageLimitSchema, "+": "reject" }),
+		result: type({ resolved: countSchema, failed: countSchema, "+": "reject" })
 	},
 	heldDeletions: { args: pairArgs, result: heldDeletionsSchema },
 	approveDeletions: { args: type({ pairId: pairIdSchema, passToken: passTokenSchema, "+": "reject" }), result: done },

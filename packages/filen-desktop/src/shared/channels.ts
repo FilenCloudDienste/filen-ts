@@ -56,6 +56,7 @@ export const SYNC_CALLS = [
 	"releasePlan",
 	"conflicts",
 	"resolveConflict",
+	"resolveConflicts",
 	"heldDeletions",
 	"approveDeletions",
 	"retryPath",

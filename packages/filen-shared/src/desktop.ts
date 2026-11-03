@@ -463,6 +463,12 @@ export type DesktopSyncBacklog = "propagate" | "adoptDestination"
 
 export type DesktopSyncResolution = "keepLocal" | "keepRemote" | "keepBoth"
 
+// A bulk resolution: `failed` paths are still conflicts.
+export interface DesktopSyncResolvedConflicts {
+	resolved: number
+	failed: number
+}
+
 // `localRootId` is the id chooseLocalDirectory issued.
 export interface DesktopSyncNewPair {
 	localRootId: string
@@ -510,6 +516,13 @@ export interface DesktopSync {
 	conflicts(pairId: string, offset: number, limit: number): Promise<DesktopSyncResult<DesktopSyncEntries<DesktopSyncConflict>>>
 	// Resolves with where keepRemote moved this device's differing copy in the pair's bin; null otherwise.
 	resolveConflict(pairId: string, relPath: string, resolution: DesktopSyncResolution): Promise<DesktopSyncResult<string | null>>
+	// Resolves at most `count` of the pair's conflicts the same way, one after another; the overview's count drops as
+	// they go.
+	resolveConflicts(
+		pairId: string,
+		resolution: DesktopSyncResolution,
+		count: number
+	): Promise<DesktopSyncResult<DesktopSyncResolvedConflicts>>
 	heldDeletions(pairId: string): Promise<DesktopSyncResult<DesktopSyncHeldDeletions>>
 	approveDeletions(pairId: string, passToken: string): Promise<DesktopSyncResult<null>>
 	retryPath(pairId: string, relPath: string): Promise<DesktopSyncResult<null>>

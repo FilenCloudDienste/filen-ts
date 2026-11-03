@@ -205,6 +205,60 @@ describe("native ops", () => {
 		expect(engine.requestPass.mock.calls).toEqual([[1n]])
 	})
 
+	it("asks for a pass after an approval of a running pair only, starting its watch when it has none", async () => {
+		const { engine, host } = setup([pairInfo({ id: 1n }), pairInfo({ id: 2n, localRoot: "/b", paused: true })])
+
+		await host.refreshPairs()
+		await expect(host.ops.approveDeletions({ pairId: "2", passToken: "t2" })).resolves.toBeNull()
+		await expect(host.ops.approveDeletions({ pairId: "1", passToken: "t1" })).resolves.toBeNull()
+		expect(engine.approveDeletions.mock.calls).toEqual([
+			[2n, "t2"],
+			[1n, "t1"]
+		])
+		expect(engine.watchPair).toHaveBeenCalledExactlyOnceWith(1n, undefined)
+
+		await host.ops.approveDeletions({ pairId: "1", passToken: "t3" })
+		expect(engine.requestPass.mock.calls).toEqual([[1n]])
+	})
+
+	it("resolves a batch of conflicts one after another with the engine's paths, counting them once", async () => {
+		const { engine, host } = setup()
+		const conflicts = ["a.txt", "b.txt", "c.txt"].map(relPath => ({ relPath, local: undefined, remote: undefined }))
+
+		await host.refreshPairs()
+		engine.listConflicts.mockClear()
+		engine.listConflicts.mockResolvedValueOnce({ conflicts, total: 3n }).mockResolvedValueOnce({ conflicts: [], total: 1n })
+		engine.resolveConflict.mockResolvedValueOnce(undefined).mockRejectedValueOnce(sdkError(fakeSdk.ErrorKind.Io, "busy"))
+
+		await expect(host.ops.resolveConflicts({ pairId: "1", resolution: "keepRemote", offset: 2, limit: 3 })).resolves.toEqual({
+			resolved: 2,
+			failed: 1
+		})
+		expect(engine.listConflicts.mock.calls).toEqual([
+			[1n, 2n, 3n],
+			[1n, 0n, 0n]
+		])
+		expect(engine.resolveConflict.mock.calls).toEqual([
+			[1n, "a.txt", fakeSdk.ConflictResolution.KeepRemote],
+			[1n, "b.txt", fakeSdk.ConflictResolution.KeepRemote],
+			[1n, "c.txt", fakeSdk.ConflictResolution.KeepRemote]
+		])
+	})
+
+	it("stops a batch of conflicts at a lost session, still counting what it resolved", async () => {
+		const { engine, host } = setup()
+		const conflicts = ["a.txt", "b.txt"].map(relPath => ({ relPath, local: undefined, remote: undefined }))
+
+		await host.refreshPairs()
+		engine.listConflicts.mockClear()
+		engine.listConflicts.mockResolvedValueOnce({ conflicts, total: 2n })
+		engine.resolveConflict.mockRejectedValueOnce(sdkError(fakeSdk.ErrorKind.Unauthenticated))
+
+		await expect(host.ops.resolveConflicts({ pairId: "1", resolution: "keepLocal", offset: 0, limit: 2 })).rejects.toThrow()
+		expect(engine.resolveConflict).toHaveBeenCalledOnce()
+		expect(engine.listConflicts).toHaveBeenCalledTimes(2)
+	})
+
 	it("lists unsyncable paths and scan gaps from the last report", async () => {
 		const { engine, host } = setup()
 

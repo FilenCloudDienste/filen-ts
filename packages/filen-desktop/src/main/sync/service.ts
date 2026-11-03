@@ -20,6 +20,7 @@ import {
 	type DesktopSyncPlanList,
 	type DesktopSyncPlanPage,
 	type DesktopSyncResolution,
+	type DesktopSyncResolvedConflicts,
 	type DesktopSyncResult,
 	type DesktopSyncUnsyncable,
 	type DesktopSyncUserIgnore,
@@ -59,6 +60,9 @@ import type { ShellPair, SyncStore } from "./store.ts"
 
 // Overview pushes to a page at most this often.
 export const OVERVIEW_PUSH_INTERVAL_MS = 250
+
+// Conflicts resolved per host call: each resolution may wait for a scan, and every call has to beat its timeout.
+export const RESOLVE_BATCH = 25
 
 export interface SyncServiceDeps {
 	supervisor: Pick<NativeSupervisor, "call" | "subscribe" | "ensure" | "retry" | "user" | "state">
@@ -114,6 +118,7 @@ export interface SyncService {
 	releasePlan(planId: string): Promise<void>
 	conflicts(pairId: string, offset: number, limit: number): Promise<Result<DesktopSyncEntries<DesktopSyncConflict>>>
 	resolveConflict(pairId: string, relPath: string, resolution: DesktopSyncResolution): Promise<Result<string | null>>
+	resolveConflicts(pairId: string, resolution: DesktopSyncResolution, count: number): Promise<Result<DesktopSyncResolvedConflicts>>
 	heldDeletions(pairId: string): Promise<Result<DesktopSyncHeldDeletions>>
 	approveDeletions(pairId: string, passToken: string): Promise<Result<null>>
 	retryPath(pairId: string, relPath: string): Promise<Result<null>>
@@ -777,6 +782,40 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
 		conflicts: (pairId, offset, limit) => engineCall(pairId, "conflicts", id => ({ pairId: id, offset, limit })),
 		resolveConflict: (pairId, relPath, resolution) =>
 			engineCall(pairId, "resolveConflict", id => ({ pairId: id, relPath, resolution })),
+		// In batches, each well inside the host's call timeout. A path that failed stays at the head of the list, so the
+		// next batch starts past the failures; stopping at `count` leaves conflicts recorded since alone.
+		resolveConflicts: async (pairId, resolution, count) => {
+			const found = await findHeld(pairId)
+
+			if (found === null) {
+				return fail("pairNotFound")
+			}
+
+			const done = { resolved: 0, failed: 0 }
+
+			while (done.resolved + done.failed < count) {
+				const batch = await supervisor.call("resolveConflicts", {
+					pairId: found.engineId,
+					resolution,
+					offset: done.failed,
+					limit: Math.min(RESOLVE_BATCH, count - done.resolved - done.failed)
+				})
+
+				if (!batch.ok) {
+					return batch
+				}
+
+				// The list ran out before `count`.
+				if (batch.value.resolved + batch.value.failed === 0) {
+					break
+				}
+
+				done.resolved += batch.value.resolved
+				done.failed += batch.value.failed
+			}
+
+			return { ok: true, value: done }
+		},
 		heldDeletions: pairId => engineCall(pairId, "heldDeletions", id => ({ pairId: id })),
 		approveDeletions: (pairId, passToken) => engineCall(pairId, "approveDeletions", id => ({ pairId: id, passToken })),
 		retryPath: (pairId, relPath) => engineCall(pairId, "retryPath", id => ({ pairId: id, relPath })),
