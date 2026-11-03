@@ -479,14 +479,16 @@ export async function runKeyring({ target, nextDir, nextVersion, work, artifacts
 	mkdirSync(work, { recursive: true })
 
 	const xvfb = await startXvfb()
+	let wrapped = false
 
-	try {
-		await setUp()
-		await branchA()
-		await branchB()
-	} catch (error) {
-		await findings.check("the chain ran to the end", () => fail(errorMessage(error)))
-	} finally {
+	// Evidence and cleanup, run once: at the end, or by the budget's watchdog (which then exits) before the step's own
+	// timeout kills node and skips them (the offline rule, the detached D-Bus and keyring groups, the reset).
+	const wrapUp = async (): Promise<void> => {
+		if (wrapped) {
+			return
+		}
+
+		wrapped = true
 		findings.attach("keyring-main.log", tail(mainLog, 1500))
 		findings.attach("keyring-output.log", tail(appOutput, 3000))
 		findings.attach("keyring-secret-service.log", tail(serviceLog, 400))
@@ -508,6 +510,38 @@ export async function runKeyring({ target, nextDir, nextVersion, work, artifacts
 		}
 
 		xvfb?.kill()
+	}
+
+	// The chain's whole budget (E2E_CHAIN_BUDGET_MINUTES, below the workflow step's timeout), as in chains P and L.
+	const budgetMinutes = Number(process.env["E2E_CHAIN_BUDGET_MINUTES"] ?? "") || 0
+	const watchdog =
+		budgetMinutes > 0
+			? setTimeout(() => {
+					void (async () => {
+						console.error(`::error::keyring: the chain's ${String(budgetMinutes)}-minute budget ran out`)
+						await findings.check(`the chain finished within its ${String(budgetMinutes)}-minute budget`, () =>
+							fail("it did not")
+						)
+						await wrapUp().catch((error: unknown) => console.log(`cleanup: ${errorMessage(error)}`))
+
+						try {
+							findings.finish()
+						} finally {
+							process.exit(1)
+						}
+					})()
+				}, budgetMinutes * 60_000)
+			: undefined
+
+	try {
+		await setUp()
+		await branchA()
+		await branchB()
+	} catch (error) {
+		await findings.check("the chain ran to the end", () => fail(errorMessage(error)))
+	} finally {
+		clearTimeout(watchdog)
+		await wrapUp()
 	}
 
 	findings.finish()

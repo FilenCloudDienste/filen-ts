@@ -103,7 +103,11 @@ describe("desktop e2e workflow chain K", () => {
 
 		expect(chain).toContain("if: ${{ !cancelled() && matrix.keyring }}")
 		expect(chain).toContain("run: node scripts/ci/e2e.ts --scenario keyring ${{ env.TEST_ARGS }} --artifacts e2e-artifacts")
-		expect(chain).not.toMatch(/secrets\.|env:/)
+		expect(chain).not.toMatch(/secrets\.|E2E_SIGN_IN|SESSION/)
+		// A budget below the step's timeout, so an overrun keeps its evidence; the job's timeout leaves room after P and L.
+		expect(chain).toContain("timeout-minutes: 45")
+		expect(chain).toContain("E2E_CHAIN_BUDGET_MINUTES: 40")
+		expect(text).toContain("timeout-minutes: ${{ matrix.deep && (matrix.keyring && 285 || 240) || 90 }}")
 		expect(text.indexOf("- name: Keyring chain K, no sign-in")).toBeGreaterThan(text.indexOf("- name: 3.0.53 -> N, signed in"))
 		expect(step("Prepare the keyring chain")).toContain("dbus-bin")
 		// A keyring-only entry is deep (the harness) without a session to download.

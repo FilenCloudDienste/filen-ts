@@ -618,8 +618,8 @@ jobs:
       matrix: ${{ fromJSON(needs.plan.outputs.test-matrix) }}
     runs-on: ${{ matrix.runner }}
     # A third deep chain (3.0.47) gets its step budget on top; 3.0.47 at install depth on a deep entry (Wednesday nights)
-    # its step's.
-    timeout-minutes: ${{ matrix.deepOlder && 360 || (matrix.deep && matrix.older) && 270 || matrix.deep && 240 || 90 }}
+    # its step's; chain K's 45 minutes on top on the deep linux-x64-deb entry.
+    timeout-minutes: ${{ matrix.deepOlder && 360 || (matrix.deep && matrix.older) && 270 || matrix.deep && (matrix.keyring && 285 || 240) || 90 }}
     defaults:
       run:
         working-directory: packages/filen-desktop
@@ -785,6 +785,8 @@ jobs:
       - name: Keyring chain K, no sign-in
         if: ${{ !cancelled() && matrix.keyring }}
         timeout-minutes: 45
+        env:
+          E2E_CHAIN_BUDGET_MINUTES: 40
         run: node scripts/ci/e2e.ts --scenario keyring ${{ env.TEST_ARGS }} --artifacts e2e-artifacts
       # The account's credentials reach spike s7 only, and only this step (deep entries: the step above).
       # Bounded so a hang never holds a runner for the job's whole budget.
