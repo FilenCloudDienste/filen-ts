@@ -25,6 +25,7 @@ import {
 	unlockThroughScreen
 } from "../app.ts"
 import { runDir } from "../cloud.ts"
+import type { Platform } from "../../targets.ts"
 import { crossCheck, describeVault, seedSession, SESSION_SHAPE } from "../seed.ts"
 import { offlineBlockFor } from "../offlineBlock.ts"
 import { runOfflineProbe } from "../spikes/offline.ts"
@@ -90,11 +91,21 @@ import {
 //   P14 proxy only               N blocked but for a loopback CONNECT proxy syncs and reads the drive through it
 //   P15 connection faults        resets, a throttle and a slow first byte through that proxy (chains/proxyCheck.ts)
 //   P16 file locks (Windows)     files held open without sharing (chains/fileLockCheck.ts)
+//                                P13-P16 never run inside the offline spike (spikes/offline.ts, gap5Checks)
 //   P17 cloud storage full       Linux x64 deb, after P8: the quota account halts remoteStorageFull and recovers
 //                                (chains/cloudFullCheck.ts; one sign-in on that account)
 //
 // Linux deb and AppImage, Windows NSIS and macOS dmg; what differs per OS (the native folder chooser, the drive as the
 // OS sees it, quitting, uninstalling) is behind scripts/ci/e2e/os.ts.
+
+// Gap 5's checks (plan D3) as chain P runs them on `platform`: the local disk full (P13), Windows file locks (P16), then N
+// through a proxy only and its faults (P14, P15). None inside the offline spike (E2E_OFFLINE_SPIKE), which measures N
+// offline and nothing else.
+export type Gap5Check = "diskFull" | "fileLock" | "proxy"
+
+export function gap5Checks(platform: Platform, offlineSpike: boolean): Gap5Check[] {
+	return offlineSpike ? [] : ["diskFull", ...(platform === "win" ? (["fileLock"] as const) : []), "proxy"]
+}
 
 // How long the drive's mount may take to answer a directory read before the first chooser.
 const DRIVE_SETTLE_MS = 30_000
@@ -671,26 +682,37 @@ export async function runPreviousDeep(options: Omit<UpdateOptions, "hooks">, art
 				})
 			}
 
-			// Gap 5 (plan D3): the local disk full, Windows file locks, then N through a proxy only and its faults.
-			await runDiskFullCheck(chain)
-
-			if (target.platform === "win") {
-				await runFileLockCheck(chain, {
-					pair: pairs.find(pair => pair.name === "e2e-twoway") ?? fail("no pair e2e-twoway"),
-					cloudDir: `${cloudDir}/e2e-twoway`
-				})
+			if (offline !== null) {
+				findings.info("P13-P16 (disk full, proxy, faults, locks)", "not run inside the offline spike")
 			}
 
-			await runProxyChecks(chain, {
-				pairs,
-				editPair: "e2e-twoway",
-				editCloudDir: `${cloudDir}/e2e-twoway`,
-				pin,
-				driveFile: {
-					path: `${cloudDir}/e2e-r2l/media/blob.bin`,
-					sha256: treeSnapshot(trees.get("e2e-r2l") ?? fail("no tree")).get("media/blob.bin")?.sha256 ?? fail("no blob.bin")
+			for (const check of gap5Checks(target.platform, offline !== null)) {
+				switch (check) {
+					case "diskFull":
+						await runDiskFullCheck(chain)
+						break
+					case "fileLock":
+						await runFileLockCheck(chain, {
+							pair: pairs.find(pair => pair.name === "e2e-twoway") ?? fail("no pair e2e-twoway"),
+							cloudDir: `${cloudDir}/e2e-twoway`
+						})
+						break
+					case "proxy":
+						await runProxyChecks(chain, {
+							pairs,
+							editPair: "e2e-twoway",
+							editCloudDir: `${cloudDir}/e2e-twoway`,
+							pin,
+							driveFile: {
+								path: `${cloudDir}/e2e-r2l/media/blob.bin`,
+								sha256:
+									treeSnapshot(trees.get("e2e-r2l") ?? fail("no tree")).get("media/blob.bin")?.sha256 ??
+									fail("no blob.bin")
+							}
+						})
+						break
 				}
-			})
+			}
 
 			witness = await chain.beforeSignOut()
 

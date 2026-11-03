@@ -27,6 +27,7 @@ import {
 	tunnelsPerHost
 } from "../../scripts/ci/e2e/chains/proxyCheck.ts"
 import { tempFiles } from "../../scripts/ci/e2e/chains/diskFullCheck.ts"
+import { gap5Checks } from "../../scripts/ci/e2e/chains/previous.ts"
 import { MAX_LOGINS_PER_RUN, plan, type PlanInput, QUOTA_ENTRY, SESSION_SLOTS, STEP_MINUTES } from "../../scripts/ci/e2ePlan.ts"
 import { LEASE_MS, leaseName, leaseStart, leaseState } from "../../scripts/ci/e2e/quotaLease.ts"
 
@@ -604,5 +605,17 @@ describe("e2e workflow: the gap-5 checks", () => {
 		expect(timeout).toBe(STEP_MINUTES.previousDeep)
 		expect(legacyTimeout).toBe(STEP_MINUTES.legacyDeep)
 		expect(text).toContain("timeout-minutes: ${{ matrix.timeout }}")
+	})
+})
+
+describe("gap 5 in chain P", () => {
+	it("runs the disk full, then Windows' file locks, then the proxy and its faults, and none inside the offline spike", () => {
+		expect(gap5Checks("win", false)).toEqual(["diskFull", "fileLock", "proxy"])
+		expect(gap5Checks("mac", false)).toEqual(["diskFull", "proxy"])
+		expect(gap5Checks("linux", false)).toEqual(["diskFull", "proxy"])
+
+		for (const platform of ["win", "mac", "linux"] as const) {
+			expect(gap5Checks(platform, true)).toEqual([])
+		}
 	})
 })
