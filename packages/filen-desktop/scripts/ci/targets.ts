@@ -35,6 +35,9 @@ export interface Target {
 	// `args` reach the app after any the format itself needs; the child is the started process (the app's main process,
 	// or the AppImage runtime that starts it). `output`: a file descriptor for its stdout and stderr (else discarded).
 	launch(env: NodeJS.ProcessEnv, args?: readonly string[], output?: number): ChildProcess
+	// The environment launch() gives the app: `env` with what the format itself needs. For a launch through another
+	// command (sudo -g, which keeps the environment with -E) that starts the executable itself.
+	launchEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv
 	// Main (browser) processes of the installed app; helpers and renderers are not listed.
 	mainProcesses(): AppProcess[]
 	// The version packed into the installed app.
@@ -84,7 +87,7 @@ export function linuxExe(pid: number): string | null {
 	}
 }
 
-function linuxParent(pid: number): number {
+export function linuxParent(pid: number): number {
 	try {
 		return Number(/^PPid:\s*(\d+)/m.exec(readFileSync(`/proc/${String(pid)}/status`, "utf8"))?.[1] ?? 0)
 	} catch {
@@ -270,6 +273,7 @@ function windows(): Target {
 		launch(env, args = [], output) {
 			return detached(executable, args, env, output)
 		},
+		launchEnv: env => env,
 		mainProcesses,
 		installedVersion: () => asarVersion(path.join(installDir, "resources", "app.asar")),
 		registeredVersion() {
@@ -358,6 +362,7 @@ function mac(arch: Arch): Target {
 		launch(env, args = [], output) {
 			return detached(executable, args, env, output)
 		},
+		launchEnv: env => env,
 		mainProcesses: () =>
 			run("ps", ["-axo", "pid=,comm="])
 				.stdout.split("\n")
@@ -410,6 +415,8 @@ function linux(arch: Arch, format: "deb" | "rpm" | "AppImage"): Target {
 		// AppImage file itself running (its exe reads "<file> (deleted)" once an update replaced the file) and starts the
 		// app (extracted, or from its FUSE mount) as its child. Its APPIMAGE export cannot be read back from the app:
 		// Chromium reuses the main process's environ area for its process title. Reported at the AppImage's path.
+		// No FUSE on the runners: the runtime extracts itself instead, and still sets APPIMAGE for the updater.
+		const launchEnv = (env: NodeJS.ProcessEnv): NodeJS.ProcessEnv => ({ ...env, APPIMAGE_EXTRACT_AND_RUN: "1" })
 		const mainProcesses = () =>
 			linuxProcesses((pid, exe) => {
 				if (path.basename(exe) !== "Filen" || exe === "/opt/Filen/Filen") {
@@ -447,9 +454,9 @@ function linux(arch: Arch, format: "deb" | "rpm" | "AppImage"): Target {
 				clean()
 			},
 			launch(env, args = [], output) {
-				// No FUSE on the runners: the runtime extracts itself instead, and still sets APPIMAGE for the updater.
-				return detached(executable, args, { ...env, APPIMAGE_EXTRACT_AND_RUN: "1" }, output)
+				return detached(executable, args, launchEnv(env), output)
 			},
+			launchEnv,
 			mainProcesses,
 			installedVersion() {
 				const work = mkdtempSync(path.join(os.tmpdir(), "filen-appimage-"))
@@ -531,6 +538,7 @@ function linux(arch: Arch, format: "deb" | "rpm" | "AppImage"): Target {
 			// Chromium refuses to run as root with its sandbox; only the rpm container runs as root.
 			return detached(executable, root ? ["--no-sandbox", ...args] : args, env, output)
 		},
+		launchEnv: env => env,
 		mainProcesses,
 		installedVersion: () => asarVersion("/opt/Filen/resources/app.asar"),
 		registeredVersion: packageVersion,

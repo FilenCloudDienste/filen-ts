@@ -20,7 +20,7 @@ import { listTargets } from "../cdp/inspector.ts"
 import { connectRenderer, type Renderer } from "../cdp/renderer.ts"
 import { openCloud, runDir, type Cloud } from "../cloud.ts"
 import { createFindings, type Findings } from "../findings.ts"
-import { exitWithin, launchDebuggable, type Launched } from "../launch.ts"
+import { exitWithin, launchDebuggable, type LaunchExtra, type Launched } from "../launch.ts"
 import { type DesktopOs, osFor } from "../os.ts"
 import { redactor } from "../redact.ts"
 import { type Credentials, harnessRemote, type HarnessRemote, mask, secretsOf, takeCredentials } from "../session.ts"
@@ -234,8 +234,8 @@ export interface Chain {
 	syncOverview(): Promise<DesktopSyncOverview>
 	mountsOverview(): Promise<DesktopMountsOverview>
 	// Launches 4.x with its debugging port and connects to its page; a launch that shows no page (startMinimized) gets a
-	// second instance, which shows the window. Returns whether it started hidden.
-	connect(): Promise<boolean>
+	// second instance, which shows the window. Returns whether it started hidden. `extra` reaches this launch only.
+	connect(extra?: LaunchExtra): Promise<boolean>
 	// Asks 4.x's main processes to quit gracefully (DesktopOs.requestQuit), failing on an unclean exit or a crash report.
 	quit(what: string): Promise<void>
 	// A step that leaves a session behind on failure signs out through the page first.
@@ -317,10 +317,10 @@ export async function openChain(name: string, options: Omit<UpdateOptions, "hook
 		rootOf: pair => path.join(localDir, pair),
 		snapshotOf: pair => localSnapshot(path.join(localDir, pair), { skip: relPath => relPath === BIN_DIR }),
 
-		async connect() {
+		async connect(extra) {
 			mkdirSync(work, { recursive: true })
 
-			const launched = await launchDebuggable(target, false, appOutput, chain.launchVia ?? undefined)
+			const launched = await launchDebuggable(target, false, appOutput, chain.launchVia ?? undefined, extra)
 
 			chain.launched = launched
 

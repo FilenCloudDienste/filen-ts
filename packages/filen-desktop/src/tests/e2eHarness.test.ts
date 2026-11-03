@@ -1,9 +1,10 @@
 import { generateKeyPairSync } from "node:crypto"
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import os from "node:os"
 import { inflateSync } from "node:zlib"
 import path from "node:path"
-import { afterEach, describe, expect, it } from "vitest"
+import type { DesktopSyncPair, DesktopSyncPhase } from "@filen/shared/desktop"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import {
 	fixtureTree,
 	LEGACY_CONFLICTS,
@@ -16,7 +17,10 @@ import {
 	treeSnapshot,
 	writeTree
 } from "../../scripts/ci/e2e/fixtures.ts"
-import { xwdToPng } from "../../scripts/ci/e2e/linux.ts"
+import { parseAbout } from "../../scripts/ci/e2e/cloud.ts"
+import { createFindings } from "../../scripts/ci/e2e/findings.ts"
+import { appImagePrefixes, appImageTree, type ProcessEntry, xwdToPng } from "../../scripts/ci/e2e/linux.ts"
+import { describeSample, sampleOf, windowsFirewallRules } from "../../scripts/ci/e2e/offlineBlock.ts"
 import { openRemote, readSealed, remoteOf, sealRemote, secretsOf, SESSION_FILE_ENV, writeSealed } from "../../scripts/ci/e2e/session.ts"
 import { diffSnapshots, localSnapshot } from "../../scripts/ci/e2e/snapshot.ts"
 import { isChromiumChild } from "../../scripts/ci/targets.ts"
@@ -184,6 +188,175 @@ describe("e2e main process detection", () => {
 		// A child after setproctitle: one space-joined title, padded with NULs.
 		expect(isChromiumChild("/opt/Filen/Filen --type=gpu-process --enable-crash-reporter\0\0\0")).toBe(true)
 		expect(isChromiumChild("/opt/Filen/Filen --type=utility --utility-sub-type=node.mojom.NodeService\0")).toBe(true)
+	})
+})
+
+describe("e2e AppImage processes", () => {
+	const executable = "/home/runner/Applications/Filen_linux_x86_64.AppImage"
+	const prefixes = appImagePrefixes("/tmp")
+
+	it("looks for the extracted and the mounted app under $TMPDIR and /tmp", () => {
+		expect(appImagePrefixes("/tmp")).toEqual(["/tmp/appimage_extracted_", "/tmp/.mount_"])
+		expect(appImagePrefixes("/run/user/1001")).toEqual([
+			"/run/user/1001/appimage_extracted_",
+			"/run/user/1001/.mount_",
+			"/tmp/appimage_extracted_",
+			"/tmp/.mount_"
+		])
+	})
+
+	it("takes the runtime, everything below it and whatever runs from its extracted copy", () => {
+		const extracted = "/tmp/appimage_extracted_0f3a/Filen"
+		const entries: ProcessEntry[] = [
+			{ pid: 10, ppid: 1, exe: "/usr/bin/bash", argv0: "/usr/bin/bash" },
+			// sudo -g starts the runtime; its exe is unreadable then.
+			{ pid: 20, ppid: 10, exe: "/usr/bin/sudo", argv0: "/usr/bin/sudo" },
+			{ pid: 21, ppid: 20, exe: null, argv0: executable },
+			{ pid: 22, ppid: 21, exe: null, argv0: extracted },
+			{ pid: 23, ppid: 22, exe: null, argv0: extracted },
+			{ pid: 24, ppid: 22, exe: null, argv0: "/tmp/appimage_extracted_0f3a/resources/rclone/rclone" },
+			// Reparented to init once its parent died: found by its prefix.
+			{ pid: 30, ppid: 1, exe: "/tmp/appimage_extracted_0f3a/resources/rclone/rclone", argv0: "rclone" },
+			// The deb's app and another AppImage are not this one.
+			{ pid: 40, ppid: 1, exe: "/opt/Filen/Filen", argv0: "/opt/Filen/Filen" },
+			{ pid: 41, ppid: 1, exe: "/home/runner/Other.AppImage", argv0: "/home/runner/Other.AppImage" }
+		]
+
+		expect(appImageTree(entries, executable, prefixes)).toEqual([
+			`21 ${executable}`,
+			`22 ${extracted}`,
+			`23 ${extracted}`,
+			"24 /tmp/appimage_extracted_0f3a/resources/rclone/rclone",
+			"30 /tmp/appimage_extracted_0f3a/resources/rclone/rclone"
+		])
+	})
+
+	it("knows the runtime after an update replaced its file, and the app exec'd from a FUSE mount", () => {
+		const entries: ProcessEntry[] = [
+			{ pid: 5, ppid: 1, exe: `${executable} (deleted)`, argv0: executable },
+			{ pid: 6, ppid: 5, exe: "/usr/bin/fusermount3", argv0: "fusermount3" },
+			{ pid: 7, ppid: 1, exe: "/tmp/.mount_FilenAb12/Filen", argv0: "/tmp/.mount_FilenAb12/Filen" },
+			// Readable exe elsewhere with the AppImage as argv0: not the runtime.
+			{ pid: 8, ppid: 1, exe: "/usr/bin/sleep", argv0: executable }
+		]
+
+		expect(appImageTree(entries, executable, prefixes)).toEqual([
+			`5 ${executable} (deleted)`,
+			"6 /usr/bin/fusermount3",
+			"7 /tmp/.mount_FilenAb12/Filen"
+		])
+		expect(appImageTree([], executable, prefixes)).toEqual([])
+	})
+})
+
+describe("e2e offline block", () => {
+	it("blocks Filen.exe and the bundled rclone.exe on Windows", () => {
+		expect(windowsFirewallRules("C:\\Program Files\\Filen\\Filen.exe")).toEqual([
+			{ name: "filen-e2e-offline", program: "C:\\Program Files\\Filen\\Filen.exe" },
+			{ name: "filen-e2e-offline-rclone", program: "C:\\Program Files\\Filen\\resources\\rclone\\rclone.exe" }
+		])
+	})
+
+	it("counts pairs waiting for the cloud apart from offline and error ones", () => {
+		const pair = (id: string, phase: DesktopSyncPhase, lastError: string | null = null): DesktopSyncPair => ({
+			id,
+			name: `pair-${id}`,
+			localRoot: `/local/${id}`,
+			remoteRoot: id,
+			mode: "twoWay",
+			paused: false,
+			phase,
+			progress: null,
+			transfers: [],
+			lastSyncedAt: null,
+			lastError,
+			issues: { conflicts: 0, heldDeletions: 0, unsyncable: 0, failed: 0 },
+			degraded: { local: false, remote: false },
+			stage: phase === "waitingForCloud" ? { kind: "waitingForCloud" } : null,
+			halted: phase === "offline" ? "offline" : null,
+			refused: null,
+			review: null,
+			notices: [],
+			rootProblem: null,
+			holds: [],
+			info: []
+		})
+		const sample = sampleOf(
+			[pair("a", "waitingForCloud"), pair("b", "waitingForCloud"), pair("c", "offline"), pair("d", "error", "boom")],
+			"Computer, Sync, needs attention",
+			1000
+		)
+
+		expect(sample).toEqual({
+			at: 1000,
+			phases: "pair-a:waitingForCloud, pair-b:waitingForCloud, pair-c:offline, pair-d:error(lastError)",
+			offline: 1,
+			waiting: 2,
+			errors: 1,
+			pairs: 4,
+			lastErrors: 1,
+			rail: "Computer, Sync, needs attention",
+			syncAttention: true
+		})
+		expect(describeSample(sample)).toBe(
+			'pair-a:waitingForCloud, pair-b:waitingForCloud, pair-c:offline, pair-d:error(lastError); 2 of 4 waiting for the cloud; rail "Computer, Sync, needs attention"'
+		)
+		expect(sampleOf([pair("a", "idle")], "Computer", 0)).toMatchObject({ waiting: 0, offline: 0, syncAttention: false })
+	})
+})
+
+describe("e2e findings", () => {
+	afterEach(() => {
+		vi.unstubAllEnvs()
+	})
+
+	it("records a known bug that still reproduces without failing the run", async () => {
+		vi.stubEnv("GITHUB_STEP_SUMMARY", "")
+
+		const artifacts = tempDir()
+		const findings = createFindings("known", artifacts)
+
+		expect(
+			await findings.known("a pair survives a rename", "filen-rs#1", () => {
+				throw new Error("the pair is gone")
+			})
+		).toBe(true)
+		expect(() => findings.finish()).not.toThrow()
+		expect(JSON.parse(readFileSync(path.join(artifacts, "known-findings.json"), "utf8"))).toEqual([
+			{ check: "a pair survives a rename", ok: true, info: false, known: true, detail: "filen-rs#1: the pair is gone" }
+		])
+	})
+
+	it("fails the run once a known bug no longer reproduces, the detail redacted", async () => {
+		vi.stubEnv("GITHUB_STEP_SUMMARY", "")
+
+		const artifacts = tempDir()
+		const findings = createFindings("fixed", artifacts, text => text.replace("secret", "***"))
+
+		expect(await findings.known("a pair survives a rename", "filen-rs#1", async () => "kept the secret pair")).toBe(false)
+		expect(() => findings.finish()).toThrow(/1 check\(s\) failed: a pair survives a rename/)
+		expect(JSON.parse(readFileSync(path.join(artifacts, "fixed-findings.json"), "utf8"))).toEqual([
+			{
+				check: "a pair survives a rename",
+				ok: false,
+				info: false,
+				known: false,
+				detail: "known bug no longer reproduces, drop the entry (filen-rs#1): kept the *** pair"
+			}
+		])
+	})
+})
+
+describe("e2e cloud usage", () => {
+	it("reads rclone about's figures and leaves out what the backend does not give", () => {
+		expect(parseAbout('{"total":21495808,"used":1048576,"free":20447232}')).toEqual({
+			total: 21495808,
+			used: 1048576,
+			free: 20447232,
+			trashed: null
+		})
+		expect(parseAbout('{"used":5,"trashed":2,"other":"x"}')).toEqual({ total: null, used: 5, free: null, trashed: 2 })
+		expect(() => parseAbout("not json")).toThrow()
 	})
 })
 

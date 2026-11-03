@@ -1,6 +1,7 @@
 import { userInfo } from "node:os"
+import path from "node:path"
 import { setTimeout as sleep } from "node:timers/promises"
-import type { DesktopLockStatus } from "@filen/shared/desktop"
+import type { DesktopLockStatus, DesktopSyncPair } from "@filen/shared/desktop"
 import { fail, powershellBounded, psQuote, runBounded, type BoundedResult } from "../support.ts"
 import type { Target } from "../targets.ts"
 import { desktop, unlockThroughScreen } from "./app.ts"
@@ -9,9 +10,9 @@ import { START_TIMEOUT_MS } from "./update.ts"
 
 // Taking N offline on a hosted runner without touching anyone else's network: N's own processes lose it (Linux: N runs
 // with the group filen-e2e and an iptables owner rule rejects that group's packets off the loopback interface; macOS:
-// the same group and a pf anchor matching it, the app's pf states killed; Windows: a firewall rule on Filen.exe). The
-// loopback interface stays open (its debugging port, WebDAV, the drive). Used by chain P's P11 and the offline spike.
-// Every tool runs bounded.
+// the same group and a pf anchor matching it, the app's pf states killed; Windows: firewall rules on Filen.exe and the
+// bundled rclone.exe). The loopback interface stays open (its debugging port, WebDAV, the drive). Used by chain P's P11
+// and the offline spike. Every tool runs bounded.
 
 const GROUP = "filen-e2e"
 const RULE = "filen-e2e-offline"
@@ -210,27 +211,42 @@ function perRemote(peers: readonly string[]): string {
 // The firewall profiles as the runner had them, put back on lift.
 let profilesBefore: string | null = null
 
+// One outbound rule per program N runs: Filen.exe (main, helpers, the native host) and the drive's rclone.exe, which
+// the group and owner rules elsewhere catch as N's child but a Windows rule matches by program only.
+const WINDOWS_RULES = [RULE, `${RULE}-rclone`] as const
+
+export function windowsFirewallRules(executable: string): { name: string; program: string }[] {
+	return [
+		{ name: WINDOWS_RULES[0], program: executable },
+		{ name: WINDOWS_RULES[1], program: path.win32.join(path.win32.dirname(executable), "resources", "rclone", "rclone.exe") }
+	]
+}
+
 const windowsBlock: OfflineBlock = {
 	via: null,
-	prepare: async () => "nothing to prepare: the rule matches Filen.exe",
+	prepare: async () => "nothing to prepare: the rules match Filen.exe and rclone.exe",
 	async block(target) {
 		const profiles = await powershellBounded('Get-NetFirewallProfile | ForEach-Object { "$($_.Name)=$($_.Enabled)" }', TOOL_TIMEOUT_MS)
 
 		profilesBefore = profiles.stdout.trim().split(/\r?\n/).join(",")
 
+		const rules = windowsFirewallRules(target.executable)
 		const script = [
 			"$ErrorActionPreference = 'Stop'",
 			// A rule only applies where its profile's firewall is on.
 			"Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled True",
-			`New-NetFirewallRule -Name ${psQuote(RULE)} -DisplayName ${psQuote(RULE)} -Direction Outbound -Program ${psQuote(target.executable)} -Action Block -Profile Any | Out-Null`
+			...rules.map(
+				rule =>
+					`New-NetFirewallRule -Name ${psQuote(rule.name)} -DisplayName ${psQuote(rule.name)} -Direction Outbound -Program ${psQuote(rule.program)} -Action Block -Profile Any | Out-Null`
+			)
 		].join("; ")
 		const result = await powershellBounded(script, TOOL_TIMEOUT_MS)
 
 		if (result.status !== 0) {
-			fail(`firewall rule: ${output(result)}`)
+			fail(`firewall rules: ${output(result)}`)
 		}
 
-		return `profiles before: ${profilesBefore}; outbound block on ${target.executable}, every profile on`
+		return `profiles before: ${profilesBefore}; outbound block on ${rules.map(rule => rule.program).join(" and ")}, every profile on`
 	},
 	async lift() {
 		const restore =
@@ -246,13 +262,15 @@ const windowsBlock: OfflineBlock = {
 						)
 						.join("; ")
 		const result = await powershellBounded(
-			[`Remove-NetFirewallRule -Name ${psQuote(RULE)} -ErrorAction SilentlyContinue`, restore].filter(part => part !== "").join("; "),
+			[...WINDOWS_RULES.map(name => `Remove-NetFirewallRule -Name ${psQuote(name)} -ErrorAction SilentlyContinue`), restore]
+				.filter(part => part !== "")
+				.join("; "),
 			TOOL_TIMEOUT_MS
 		)
 
 		profilesBefore = null
 
-		return `rule removed, profiles restored (${output(result)})`
+		return `rules removed, profiles restored (${output(result)})`
 	},
 	async connections(pids) {
 		if (pids.length === 0) {
@@ -283,6 +301,8 @@ export interface Sample {
 	at: number
 	phases: string
 	offline: number
+	// Pairs whose pass waits for the cloud directory's listing (phase "waitingForCloud").
+	waiting: number
 	// Pairs in phase "error".
 	errors: number
 	pairs: number
@@ -301,6 +321,21 @@ export interface Sampler {
 	errorsSeen(): readonly string[]
 	// Starts both lists over.
 	reset(): void
+}
+
+// A sample of `pairs` (this check's, in the overview's order) with the rail label read at `at`.
+export function sampleOf(pairs: readonly DesktopSyncPair[], rail: string, at: number): Sample {
+	return {
+		at,
+		phases: pairs.map(pair => `${pair.name}:${pair.phase}${pair.lastError === null ? "" : "(lastError)"}`).join(", "),
+		offline: pairs.filter(pair => pair.phase === "offline").length,
+		waiting: pairs.filter(pair => pair.phase === "waitingForCloud").length,
+		errors: pairs.filter(pair => pair.phase === "error").length,
+		pairs: pairs.length,
+		lastErrors: pairs.filter(pair => pair.lastError !== null).length,
+		rail,
+		syncAttention: rail.includes("Sync, needs attention")
+	}
 }
 
 export function createSampler(chain: Chain, pairIds: ReadonlySet<string>): Sampler {
@@ -330,16 +365,7 @@ export function createSampler(chain: Chain, pairIds: ReadonlySet<string>): Sampl
 			}
 		}
 
-		return {
-			at: Date.now(),
-			phases: mine.map(pair => `${pair.name}:${pair.phase}${pair.lastError === null ? "" : "(lastError)"}`).join(", "),
-			offline: mine.filter(pair => pair.phase === "offline").length,
-			errors: mine.filter(pair => pair.phase === "error").length,
-			pairs: mine.length,
-			lastErrors: mine.filter(pair => pair.lastError !== null).length,
-			rail,
-			syncAttention: rail.includes("Sync, needs attention")
-		}
+		return sampleOf(mine, rail, Date.now())
 	}
 
 	return {
@@ -365,7 +391,7 @@ export function createSampler(chain: Chain, pairIds: ReadonlySet<string>): Sampl
 }
 
 export function describeSample(sample: Sample): string {
-	return `${sample.phases}; rail "${sample.rail}"`
+	return `${sample.phases}; ${String(sample.waiting)} of ${String(sample.pairs)} waiting for the cloud; rail "${sample.rail}"`
 }
 
 export function seconds(from: number, to: number): string {

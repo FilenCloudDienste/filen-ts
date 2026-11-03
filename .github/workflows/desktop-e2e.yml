@@ -40,11 +40,12 @@
 #   s7   Filen in Finder on signed macOS: sign-in, enable, off/on round trip, domain registration (userEnabled stays
 #        false without a person; reported as information). Signs in once with the e2e account and signs out after
 #   cloud  the harness's cloud side alone (no app, no build): the session hand-off, then a run directory created,
-#        listed, given a new file version, diffed and deleted (scripts/ci/e2eCloud.ts)
+#        listed, given a new file version, diffed, read back, moved within and deleted, and the account's storage read
+#        (scripts/ci/e2eCloud.ts)
 #   offline  N-1 -> N signed in (deep), then N's network blocked for its own processes only (Linux: a group and an
-#        iptables owner rule; macOS: a group and a pf anchor; Windows: a firewall rule on Filen.exe): how long until
-#        its pairs are offline, an edit made meanwhile, how long until it uploads once the block is lifted. Reported as
-#        information (scripts/ci/e2e/spikes/offline.ts); one 4.x sign-in per entry
+#        iptables owner rule; macOS: a group and a pf anchor; Windows: firewall rules on Filen.exe and rclone.exe): how
+#        long until its pairs are offline, an edit made meanwhile, how long until it uploads once the block is lifted.
+#        Reported as information (scripts/ci/e2e/spikes/offline.ts); one 4.x sign-in per entry
 #
 # Secrets: CSC_LINK, CSC_KEY_PASSWORD (Developer ID); AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET (Windows
 # signing); FILEN_DESKTOP_E2E_TEST_EMAIL, FILEN_DESKTOP_E2E_TEST_PASSWORD (a dedicated account without 2FA; deep

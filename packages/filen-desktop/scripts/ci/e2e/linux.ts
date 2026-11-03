@@ -1,9 +1,10 @@
-import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { existsSync, readdirSync, readFileSync, readlinkSync, rmSync, writeFileSync } from "node:fs"
+import os from "node:os"
 import { crc32, deflateSync } from "node:zlib"
 import path from "node:path"
 import { setTimeout as sleep } from "node:timers/promises"
 import { errorMessage, fail, run, runBounded, waitFor } from "../support.ts"
-import { linuxExe } from "../targets.ts"
+import { linuxExe, linuxParent } from "../targets.ts"
 
 // Linux desktop session pieces of the deep chains: the GTK folder chooser driven with xdotool under Xvfb (no window
 // manager, so focus is set on the window itself), mounts, the keyring and the package manager. Every tool runs
@@ -256,4 +257,77 @@ export function processesUnder(prefix: string): string[] {
 	}
 
 	return found
+}
+
+export interface ProcessEntry {
+	pid: number
+	ppid: number
+	// /proc/<pid>/exe, null where it cannot be read (another group, see linuxExe).
+	exe: string | null
+	// The first argument of its command line, cut where a retitled Chromium child joined its arguments.
+	argv0: string | null
+}
+
+// Where an AppImage runtime puts the app it starts: the directory it extracts to (APPIMAGE_EXTRACT_AND_RUN) or its FUSE
+// mount, under $TMPDIR or /tmp.
+export function appImagePrefixes(tmp: string): string[] {
+	return [...new Set([tmp, "/tmp"])].flatMap(dir => [path.join(dir, "appimage_extracted_"), path.join(dir, ".mount_")])
+}
+
+// The processes of AppImage `executable`, as "pid path": its runtime (the file itself running, "(deleted)" once an
+// update replaced it) and everything below it, and any process whose exe or argv0 lies under `prefixes`. The runtime
+// execs the app from its mount, so the app is not always the runtime's child; a helper exec'd from there keeps the
+// prefix. argv0 stands in where exe is unreadable (N started with sudo -g).
+export function appImageTree(entries: readonly ProcessEntry[], executable: string, prefixes: readonly string[]): string[] {
+	const isRuntime = (entry: ProcessEntry) =>
+		entry.exe === executable || entry.exe === `${executable} (deleted)` || (entry.exe === null && entry.argv0 === executable)
+	const under = (file: string | null) => file !== null && prefixes.some(prefix => file.startsWith(prefix))
+	const children = new Map<number, ProcessEntry[]>()
+
+	for (const entry of entries) {
+		children.set(entry.ppid, [...(children.get(entry.ppid) ?? []), entry])
+	}
+
+	const found = new Map<number, ProcessEntry>()
+	const queue = entries.filter(entry => isRuntime(entry) || under(entry.exe) || under(entry.argv0))
+
+	for (let entry = queue.shift(); entry !== undefined; entry = queue.shift()) {
+		if (!found.has(entry.pid)) {
+			found.set(entry.pid, entry)
+			queue.push(...(children.get(entry.pid) ?? []))
+		}
+	}
+
+	return [...found.values()].sort((a, b) => a.pid - b.pid).map(entry => `${String(entry.pid)} ${entry.exe ?? entry.argv0 ?? "?"}`)
+}
+
+function processEntry(pid: number): ProcessEntry | null {
+	try {
+		const argv0 =
+			readFileSync(`/proc/${String(pid)}/cmdline`, "utf8")
+				.split("\0")[0]
+				?.split(" --")[0] ?? ""
+		let exe: string | null
+
+		try {
+			exe = readlinkSync(`/proc/${String(pid)}/exe`)
+		} catch {
+			exe = null
+		}
+
+		return { pid, ppid: linuxParent(pid), exe, argv0: argv0.startsWith("/") ? argv0 : null }
+	} catch {
+		// Gone.
+		return null
+	}
+}
+
+// The running processes of AppImage `executable` (appImageTree), read from /proc.
+export function appImageProcesses(executable: string): string[] {
+	const entries = readdirSync("/proc")
+		.filter(entry => /^\d+$/.test(entry))
+		.map(entry => processEntry(Number(entry)))
+		.filter(entry => entry !== null)
+
+	return appImageTree(entries, executable, appImagePrefixes(os.tmpdir()))
 }

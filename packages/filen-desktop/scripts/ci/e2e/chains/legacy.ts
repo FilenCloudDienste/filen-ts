@@ -101,8 +101,8 @@ import {
 //                                 and the logs gone, an unfinished import ended; the next launch deletes the browser
 //                                 profile before ready; the user's directories intact
 //
-// The old app's tray and notifications are not observed. Linux deb and Windows NSIS so far; what differs per OS is behind
-// scripts/ci/e2e/os.ts.
+// The old app's tray and notifications are not observed. Linux deb and AppImage, Windows NSIS and macOS dmg so far; what
+// differs per OS is behind scripts/ci/e2e/os.ts.
 
 const CONVERGE_TIMEOUT_MS = 6 * 60 * 1000
 const MIGRATE_TIMEOUT_MS = 8 * 60 * 1000
@@ -133,8 +133,8 @@ interface ShellState {
 }
 
 export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artifacts: string): Promise<void> {
-	if (!["linux deb", "win nsis", "mac dmg"].includes(`${options.target.platform} ${options.target.format}`)) {
-		fail("the deep 3.0.53 -> N chain runs on Linux deb, Windows NSIS and macOS dmg only so far")
+	if (!["linux deb", "linux AppImage", "win nsis", "mac dmg"].includes(`${options.target.platform} ${options.target.format}`)) {
+		fail("the deep 3.0.53 -> N chain runs on Linux deb and AppImage, Windows NSIS and macOS dmg only so far")
 	}
 
 	const chain = await openChain("legacy", options, artifacts)

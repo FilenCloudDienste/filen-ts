@@ -14,19 +14,25 @@ export interface SpikeOptions {
 
 // A run's evidence (a spike's, or a chain's assertion table): every check runs (one failing does not hide the next),
 // each is logged as it ends, and the whole list goes to <artifacts>/<name>-findings.json and the job summary. finish()
-// fails the run if any check failed. must() is a check the rest of the run depends on: it throws when it fails.
+// fails the run if any check failed. must() is a check the rest of the run depends on: it throws when it fails. known()
+// is a check of a bug already filed: its failure is the expected result (recorded, never a failure), and a pass fails
+// the run so that the entry is dropped once the fix lands.
 
 export interface Finding {
 	check: string
 	ok: boolean
 	// Information only: recorded, never a failure.
 	info: boolean
+	// A known bug that still reproduces (known()): recorded, never a failure.
+	known: boolean
 	detail: string
 }
 
 export interface Findings {
 	check(name: string, probe: () => string | Promise<string>): Promise<boolean>
 	must(name: string, probe: () => string | Promise<string>): Promise<void>
+	// `issue` names the filed bug (a tracker reference). Returns whether the bug still reproduces.
+	known(name: string, issue: string, probe: () => string | Promise<string>): Promise<boolean>
 	info(name: string, detail: string): void
 	attach(name: string, text: string): void
 	finish(): void
@@ -41,16 +47,16 @@ export function createFindings(title: string, artifacts: string, redact: (text: 
 		const entry = { ...finding, detail: redact(finding.detail) }
 
 		list.push(entry)
-		console.log(`${entry.info ? "INFO" : entry.ok ? "PASS" : "FAIL"}  ${entry.check}: ${entry.detail}`)
+		console.log(`${entry.info ? "INFO" : entry.known ? "KNOWN" : entry.ok ? "PASS" : "FAIL"}  ${entry.check}: ${entry.detail}`)
 	}
 
 	const check = async (name: string, probe: () => string | Promise<string>): Promise<boolean> => {
 		try {
-			record({ check: name, ok: true, info: false, detail: await probe() })
+			record({ check: name, ok: true, info: false, known: false, detail: await probe() })
 
 			return true
 		} catch (error) {
-			record({ check: name, ok: false, info: false, detail: errorMessage(error) })
+			record({ check: name, ok: false, info: false, known: false, detail: errorMessage(error) })
 
 			return false
 		}
@@ -63,8 +69,29 @@ export function createFindings(title: string, artifacts: string, redact: (text: 
 				fail(`${name} failed; the run cannot go on`)
 			}
 		},
+		async known(name, issue, probe) {
+			let passed: string
+
+			try {
+				passed = await probe()
+			} catch (error) {
+				record({ check: name, ok: true, info: false, known: true, detail: `${issue}: ${errorMessage(error)}` })
+
+				return true
+			}
+
+			record({
+				check: name,
+				ok: false,
+				info: false,
+				known: false,
+				detail: `known bug no longer reproduces, drop the entry (${issue}): ${passed}`
+			})
+
+			return false
+		},
 		info(name, detail) {
-			record({ check: name, ok: true, info: true, detail })
+			record({ check: name, ok: true, info: true, known: false, detail })
 		},
 		attach(name, text) {
 			writeFileSync(path.join(artifacts, name), redact(text))
@@ -86,7 +113,7 @@ export function createFindings(title: string, artifacts: string, redact: (text: 
 						"|---|---|---|",
 						...list.map(
 							entry =>
-								`| ${entry.info ? "info" : entry.ok ? "pass" : "**fail**"} | ${cell(entry.check)} | ${cell(entry.detail)} |`
+								`| ${entry.info ? "info" : entry.known ? "known" : entry.ok ? "pass" : "**fail**"} | ${cell(entry.check)} | ${cell(entry.detail)} |`
 						),
 						"",
 						""

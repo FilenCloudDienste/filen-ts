@@ -94,13 +94,14 @@ export interface BoundedResult extends RunResult {
 
 /**
  * A command that must never hold up the harness (system tools that can block on a daemon or a prompt): after
- * `timeoutMs` its whole process group is killed, and the result says it timed out instead of the run hanging.
+ * `timeoutMs` its whole process group is killed, and the result says it timed out instead of the run hanging. With
+ * `onStdout`, stdout goes to it as raw bytes (a file's content) and the result's stdout stays empty.
  */
 export async function runBounded(
 	command: string,
 	args: readonly string[],
 	timeoutMs: number,
-	options: { env?: NodeJS.ProcessEnv; input?: string; cwd?: string; display?: string } = {}
+	options: { env?: NodeJS.ProcessEnv; input?: string; cwd?: string; display?: string; onStdout?: (chunk: Buffer) => void } = {}
 ): Promise<BoundedResult> {
 	console.log(`$ ${options.display ?? `${command} ${args.join(" ")}`}`)
 
@@ -119,9 +120,15 @@ export async function runBounded(
 	let stderr = ""
 	let timedOut = false
 
-	child.stdout.setEncoding("utf8").on("data", (chunk: string) => {
-		stdout += chunk
-	})
+	const { onStdout } = options
+
+	if (onStdout === undefined) {
+		child.stdout.setEncoding("utf8").on("data", (chunk: string) => {
+			stdout += chunk
+		})
+	} else {
+		child.stdout.on("data", onStdout)
+	}
 	child.stderr.setEncoding("utf8").on("data", (chunk: string) => {
 		stderr += chunk
 	})

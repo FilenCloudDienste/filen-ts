@@ -71,8 +71,8 @@ import {
 //                                lift; a launch under the block shows every pair offline, none in error, and recovers
 //                                within 60 s of the lift; sync never asks for attention (chains/offlineCheck.ts)
 //
-// Linux deb, Windows NSIS and macOS dmg; what differs per OS (the native folder chooser, the drive as the OS sees it,
-// quitting, uninstalling) is behind scripts/ci/e2e/os.ts.
+// Linux deb and AppImage, Windows NSIS and macOS dmg; what differs per OS (the native folder chooser, the drive as the
+// OS sees it, quitting, uninstalling) is behind scripts/ci/e2e/os.ts.
 
 const CHOOSER_TITLE = "Choose a directory to sync"
 const CONVERGE_TIMEOUT_MS = 8 * 60 * 1000

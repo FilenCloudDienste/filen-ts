@@ -1,8 +1,9 @@
-import { existsSync, mkdirSync, realpathSync } from "node:fs"
+import { existsSync, mkdirSync, realpathSync, rmSync } from "node:fs"
 import path from "node:path"
 import { fail } from "../support.ts"
 import type { Target } from "../targets.ts"
 import {
+	appImageProcesses,
 	chooseDirectory,
 	coreReport,
 	keyringItems,
@@ -85,6 +86,17 @@ const linuxOs: DesktopOs = {
 		}
 	},
 	async uninstall(target) {
+		// An AppImage is one file, which a user deletes.
+		if (target.format === "AppImage") {
+			rmSync(target.executable, { force: true })
+
+			if (existsSync(target.executable)) {
+				fail(`${target.executable} is still there`)
+			}
+
+			return `${target.executable} deleted`
+		}
+
 		if (target.format !== "deb") {
 			fail(`no uninstall for a Linux ${target.format}`)
 		}
@@ -97,7 +109,9 @@ const linuxOs: DesktopOs = {
 
 		return "apt-get remove and purge: /opt/Filen and its AppArmor profile gone"
 	},
-	appProcesses: async target => processesUnder(`${path.dirname(target.executable)}/`),
+	// An AppImage runs from where its runtime extracted or mounted it, not from the file's directory.
+	appProcesses: async target =>
+		target.format === "AppImage" ? appImageProcesses(target.executable) : processesUnder(`${path.dirname(target.executable)}/`),
 	async forceKill(pids) {
 		for (const pid of pids) {
 			try {

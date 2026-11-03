@@ -18,9 +18,9 @@ import {
 // Spike `offline`: can N be taken offline on a hosted runner without touching anyone else's network, and what does it
 // do then? Inside chain P, after the update and before the sign-out: N's own processes lose the network (Linux: N runs
 // with the group filen-e2e and an iptables owner rule rejects that group's packets; macOS: the same group and a pf
-// anchor matching it, the app's pf states killed; Windows: a firewall rule on Filen.exe), and the spike measures how
-// long until its pairs are offline, whether attention stays off, whether open connections break, an edit made
-// meanwhile, then how long until the pairs recover and the edit uploads once the block is lifted. Everything is
+// anchor matching it, the app's pf states killed; Windows: firewall rules on Filen.exe and rclone.exe), and the spike
+// measures how long until its pairs are offline, whether attention stays off, whether open connections break, an edit
+// made meanwhile, then how long until the pairs recover and the edit uploads once the block is lifted. Everything is
 // information; only a harness error fails. The block is lifted whatever happens. Every tool runs bounded.
 
 const CAP_MS = 5 * 60 * 1000

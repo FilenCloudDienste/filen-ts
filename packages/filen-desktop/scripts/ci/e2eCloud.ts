@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto"
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import os from "node:os"
 import path from "node:path"
@@ -12,7 +13,8 @@ import { errorMessage, fail, section } from "./support.ts"
 // The desktop e2e's cloud side (see .github/workflows/desktop-e2e.yml), on any runner:
 //
 //   session    the run's one harness sign-in (sdk-rs), written sealed to the file FILEN_DESKTOP_E2E_SESSION_FILE names
-//   selftest   with the handed session: create, list, upload a new version, diff and delete a run directory
+//   selftest   with the handed session: create, list, upload a new version, diff, read back, move and delete a run
+//              directory, and read the account's storage
 //   sweep      with the handed session: delete this run's directories and any older than a day, then empty the trash
 //
 //   node scripts/ci/e2eCloud.ts <session|selftest|sweep> [--artifacts <dir>]
@@ -77,6 +79,49 @@ async function selftest(cloud: Cloud, work: string, artifacts: string, redact: (
 			}
 
 			return differences[0]
+		})
+		await findings.check("cat and sha256Of read the new version back", async () => {
+			const expected = seededBytes("selftest-edit", 4096)
+			const read = await cloud.cat(`${dir}/docs/notes.txt`)
+			const digest = await cloud.sha256Of(`${dir}/docs/notes.txt`)
+
+			if (!read.equals(expected)) {
+				fail(`cat returned ${String(read.length)} bytes that differ from the ${String(expected.length)} uploaded`)
+			}
+
+			if (digest !== createHash("sha256").update(expected).digest("hex")) {
+				fail(`sha256Of gave ${digest}`)
+			}
+
+			return `${String(read.length)} bytes, sha256 matches`
+		})
+		await findings.check("moveto renames a file into a new directory, its uuid kept", async () => {
+			const before = (await cloud.list(dir))?.find(entry => entry.path === "docs/notes.txt") ?? fail("docs/notes.txt is not listed")
+
+			await cloud.moveto(`${dir}/docs/notes.txt`, `${dir}/moved/renamed.txt`)
+
+			const after = await cloud.list(dir)
+
+			if (after?.some(entry => entry.path === "docs/notes.txt") !== false) {
+				fail("docs/notes.txt is still listed")
+			}
+
+			const moved = after.find(entry => entry.path === "moved/renamed.txt") ?? fail("moved/renamed.txt is not listed")
+
+			if (moved.id !== before.id) {
+				fail("the moved file has another uuid")
+			}
+
+			return "moved/renamed.txt, same uuid"
+		})
+		await findings.check("about reports the account's storage", async () => {
+			const usage = await cloud.about()
+
+			if (usage.used === null) {
+				fail(`no used figure: ${JSON.stringify(usage)}`)
+			}
+
+			return `used ${String(usage.used)}, total ${String(usage.total)}, free ${String(usage.free)}, trashed ${String(usage.trashed)}`
 		})
 		await findings.check("purge removes the directory", async () => {
 			await cloud.purge(dir)

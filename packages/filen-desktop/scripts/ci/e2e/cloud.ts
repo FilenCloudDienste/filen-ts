@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto"
 import { chmodSync, mkdirSync, writeFileSync } from "node:fs"
 import path from "node:path"
 import { pinnedRclone } from "../../stageRclone.ts"
@@ -31,6 +32,21 @@ export interface CloudEntry {
 	id: string
 }
 
+// The account's storage as `rclone about` reports it, in bytes; null for a figure the backend does not give.
+export interface CloudUsage {
+	total: number | null
+	used: number | null
+	free: number | null
+	trashed: number | null
+}
+
+export function parseAbout(stdout: string): CloudUsage {
+	const about = JSON.parse(stdout) as Partial<Record<keyof CloudUsage, unknown>>
+	const figure = (value: unknown) => (typeof value === "number" && Number.isFinite(value) ? value : null)
+
+	return { total: figure(about.total), used: figure(about.used), free: figure(about.free), trashed: figure(about.trashed) }
+}
+
 export interface Cloud {
 	mkdir(dir: string): Promise<void>
 	// Copies a local tree into `dir` (created when missing), empty directories included.
@@ -45,6 +61,13 @@ export interface Cloud {
 	// Moves `dir` and everything below it to the trash; a missing `dir` is not an error.
 	purge(dir: string): Promise<void>
 	emptyTrash(): Promise<void>
+	about(): Promise<CloudUsage>
+	// A file's content as the cloud serves it (decrypted), whole in memory: for small files.
+	cat(file: string): Promise<Buffer>
+	// sha256 (hex) of a file's content, hashed as it streams.
+	sha256Of(file: string): Promise<string>
+	// Moves or renames one file or directory; the destination's parent is created when missing.
+	moveto(from: string, to: string): Promise<void>
 }
 
 function remotePath(relative: string): string {
@@ -98,12 +121,22 @@ export async function openCloud(remote: HarnessRemote, work: string): Promise<Cl
 		...process.env,
 		...Object.fromEntries(Object.entries(options).map(([key, value]) => [`RCLONE_CONFIG_${REMOTE}_${key}`, value]))
 	}
-	const rclone = (args: string[], timeoutMs = CALL_TIMEOUT_MS) => runBounded(binary, ["--config", "", ...args], timeoutMs, { env })
+	const rclone = (args: string[], timeoutMs = CALL_TIMEOUT_MS, onStdout?: (chunk: Buffer) => void) =>
+		runBounded(binary, ["--config", "", ...args], timeoutMs, onStdout === undefined ? { env } : { env, onStdout })
 	const must = async (what: string, args: string[]): Promise<void> => {
 		const result = await rclone(args)
 
 		if (result.status !== 0) {
 			fail(`rclone ${what}: ${describe(result)}`)
+		}
+	}
+
+	// The file's bytes to `onChunk`; a failure fails by name.
+	const stream = async (file: string, onChunk: (chunk: Buffer) => void): Promise<void> => {
+		const result = await rclone(["cat", remotePath(file)], CALL_TIMEOUT_MS, onChunk)
+
+		if (result.status !== 0) {
+			fail(`rclone cat ${file}: ${describe(result)}`)
 		}
 	}
 
@@ -159,6 +192,32 @@ export async function openCloud(remote: HarnessRemote, work: string): Promise<Cl
 		},
 		emptyTrash: async () => {
 			await must("cleanup", ["cleanup", remotePath("")])
+		},
+		about: async () => {
+			const result = await rclone(["about", "--json", remotePath("")], QUICK_TIMEOUT_MS)
+
+			if (result.status !== 0) {
+				fail(`rclone about: ${describe(result)}`)
+			}
+
+			return parseAbout(result.stdout)
+		},
+		cat: async file => {
+			const chunks: Buffer[] = []
+
+			await stream(file, chunk => chunks.push(chunk))
+
+			return Buffer.concat(chunks)
+		},
+		sha256Of: async file => {
+			const hash = createHash("sha256")
+
+			await stream(file, chunk => hash.update(chunk))
+
+			return hash.digest("hex")
+		},
+		moveto: async (from, to) => {
+			await must(`moveto ${from} ${to}`, ["moveto", remotePath(from), remotePath(to)])
 		}
 	}
 }
