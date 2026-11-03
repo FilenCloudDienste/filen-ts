@@ -26,7 +26,7 @@ import {
 	startedClean,
 	tunnelsPerHost
 } from "../../scripts/ci/e2e/chains/proxyCheck.ts"
-import { tempFiles } from "../../scripts/ci/e2e/chains/diskFullCheck.ts"
+import { noTempBetweenPasses, type QuietProbe, tempFiles } from "../../scripts/ci/e2e/chains/diskFullCheck.ts"
 import { gap5Checks } from "../../scripts/ci/e2e/chains/previous.ts"
 import { MAX_LOGINS_PER_RUN, plan, type PlanInput, QUOTA_ENTRY, SESSION_SLOTS, STEP_MINUTES } from "../../scripts/ci/e2ePlan.ts"
 import { LEASE_MS, leaseName, leaseStart, leaseState } from "../../scripts/ci/e2e/quotaLease.ts"
@@ -500,6 +500,82 @@ describe("e2e disk full: download temps", () => {
 
 		expect(tempFiles(dir)).toEqual([path.join("pair", "sub", "a.filendl")])
 		expect(tempFiles(path.join(dir, "gone"))).toEqual([])
+	})
+})
+
+// A halted pair's retries on a fake clock: pass ends at `ends` (ms), retry passes starting at `starts` and running for
+// 300 ms with their temp on disk and a transfer listed, each read of the app taking 20 ms.
+function retries(ends: number[], starts: number[], extra: { tempAt?: (now: number) => boolean } = {}) {
+	let now = 0
+	const running = (at: number) => starts.some(start => at >= start && at < start + 300)
+	const probe: QuietProbe = {
+		activity: () => {
+			now += 20
+
+			const seen = ends.map((at, seq) => ({ seq, pairId: "p", at, kind: "passCompleted" as const })).filter(item => item.at <= now)
+
+			return Promise.resolve(seen.reverse())
+		},
+		pair: () => {
+			now += 20
+
+			return Promise.resolve({ transfers: running(now) ? [{ name: "big.bin" } as never] : [] })
+		},
+		temps: () => (running(now) || extra.tempAt?.(now) === true ? ["e2e-diskfull/big.bin.filendl"] : []),
+		now: () => now,
+		sleep: ms => {
+			now += ms
+
+			return Promise.resolve()
+		}
+	}
+
+	return { probe, setNow: (at: number) => (now = at) }
+}
+
+describe("e2e disk-full temp window", () => {
+	it("passes a reading between two passes with no temp", async () => {
+		const { probe } = retries([0], [2000])
+
+		await expect(noTempBetweenPasses(probe, 0, 10_000)).resolves.toEqual({ afterMs: 60, missed: 0 })
+	})
+
+	it("fails a counted reading with a leftover temp, naming it", async () => {
+		const { probe } = retries([0], [2000], { tempAt: () => true })
+
+		await expect(noTempBetweenPasses(probe, 0, 10_000)).rejects.toThrow(
+			"download temps left between passes (read 60 ms after a pass end): e2e-diskfull/big.bin.filendl"
+		)
+	})
+
+	it("discards a reading a new pass cuts into and counts the next window", async () => {
+		// The retry starts 30 ms after the end, while the first scan runs (its temp already there): that scan is dropped.
+		const { probe } = retries([0, 4000], [30, 6000], { tempAt: now => now < 30 })
+
+		await expect(noTempBetweenPasses(probe, 0, 10_000)).resolves.toEqual({ afterMs: 60, missed: 1 })
+	})
+
+	it("discards a reading when a newer pass end lands during it", async () => {
+		// A pass ran and ended (at 30) between the scan at 20 and the re-read at 60: the scan is dropped, the next counts.
+		const { probe } = retries([0, 30], [2000], { tempAt: now => now < 30 })
+
+		await expect(noTempBetweenPasses(probe, 0, 10_000)).resolves.toEqual({ afterMs: 190, missed: 1 })
+	})
+
+	it("waits for the next pass end when the window was missed", async () => {
+		const { probe, setNow } = retries([0, 4000], [2000, 8000])
+
+		setNow(1600)
+
+		await expect(noTempBetweenPasses(probe, 0, 10_000)).resolves.toEqual({ afterMs: 60, missed: 1 })
+	})
+
+	it("ignores pass ends before the upload and gives up after the timeout", async () => {
+		const { probe } = retries([0], [2000])
+
+		await expect(noTempBetweenPasses(probe, 1, 5000)).rejects.toThrow(
+			"no temp scan between two passes within 5 s (0 windows missed; last pass end none)"
+		)
 	})
 })
 

@@ -1,7 +1,10 @@
 import { closeSync, type Dirent, existsSync, mkdirSync, openSync, readdirSync, rmSync, writeFileSync, writeSync } from "node:fs"
 import path from "node:path"
+import { setTimeout as sleep } from "node:timers/promises"
+import type { DesktopSyncActivity, DesktopSyncPair } from "@filen/shared/desktop"
 import { errorCode } from "../../../../src/main/atomicFile.ts"
 import { errorMessage, fail, onTimeout, waitFor } from "../../support.ts"
+import { desktop } from "../app.ts"
 import { addPairThroughChooser, describePair, pairOf, removePair, sha256, sha256File, type ExtraPair, waitPair } from "../extraPair.ts"
 import { fixtureTree, seededBytes, treeSnapshot, writeTree } from "../fixtures.ts"
 import { createSampler } from "../offlineBlock.ts"
@@ -12,7 +15,8 @@ import type { Chain } from "./common.ts"
 // P13: the local disk full. A remoteToLocal pair in a directory of a small volume of its own (smallVolume.ts), a filler
 // beside the pair that leaves less room than a new cloud file needs, then that file in the cloud:
 //   halted      the pair halts with localStorageFull, in error, and the sync status asks for attention
-//   no damage   no partial file and no download temp (*.filendl) anywhere on the volume, the pair's files unchanged
+//   no damage   no download temp (*.filendl) anywhere on the volume between two retries, no partial file, the pair's
+//               files unchanged
 //   recovery    with the filler deleted (and no syncNow), the file lands byte for byte within 3 minutes
 //   cleanup     the pair removed and the volume gone
 // N runs as the chain started it; nothing here signs in.
@@ -27,6 +31,13 @@ const CONVERGE_MS = 3 * 60 * 1000
 const HALT_MS = 3 * 60 * 1000
 const RECOVER_MS = 3 * 60 * 1000
 const TMP_SUFFIX = ".filendl"
+// The halted pair retries after a backoff of 2 s and more (the engine's BASE_BACKOFF), and each retry writes its temp
+// again until ENOSPC and removes it. The temp scan counts only between a pass end and the next pass start: it starts
+// within QUIET_START_MS of the end and counts if, read again after it, the end is still the newest, no transfer runs
+// and no more than QUIET_END_MS have passed.
+const QUIET_START_MS = 1500
+const QUIET_END_MS = 2000
+const QUIET_POLL_MS = 100
 
 // The download temps under `root`, relative to it. A directory nobody may read is skipped: a macOS volume's root holds
 // root-only ones (.Spotlight-V100, .fseventsd), and the engine, which writes its temps beside the files it downloads,
@@ -55,6 +66,70 @@ export function tempFiles(root: string, relative = ""): string[] {
 
 		return entry.name.endsWith(TMP_SUFFIX) ? [name] : []
 	})
+}
+
+export interface QuietProbe {
+	activity(): Promise<DesktopSyncActivity[]>
+	pair(): Promise<Pick<DesktopSyncPair, "transfers">>
+	temps(): string[]
+	now(): number
+	sleep(ms: number): Promise<void>
+}
+
+export interface QuietReading {
+	// How long after the pass end the reading was confirmed.
+	afterMs: number
+	// Pass ends whose window the reading missed or a new pass cut short.
+	missed: number
+}
+
+// The newest pass end at or after `since` in an activity list, newest first.
+export function newestPassEnd(activity: readonly DesktopSyncActivity[], since: number): DesktopSyncActivity | null {
+	return activity.find(item => (item.kind === "passCompleted" || item.kind === "passFailed") && item.at >= since) ?? null
+}
+
+// No download temp between two passes (see QUIET_START_MS); a missed window waits for the next pass end, a temp in a
+// counted reading fails with its names.
+export async function noTempBetweenPasses(probe: QuietProbe, since: number, timeoutMs: number): Promise<QuietReading> {
+	const deadline = probe.now() + timeoutMs
+	// The newest pass end already tried or missed; only a newer one opens a window.
+	let spent: number | null = null
+	let missed = 0
+	let last: DesktopSyncActivity | null = null
+
+	for (;;) {
+		const end = newestPassEnd(await probe.activity(), since)
+
+		if (end !== null && end.seq !== spent) {
+			last = end
+
+			if (probe.now() - end.at < QUIET_START_MS) {
+				const temps = probe.temps()
+				const pair = await probe.pair()
+				const after = newestPassEnd(await probe.activity(), since)
+				const afterMs = probe.now() - end.at
+
+				if (afterMs < QUIET_END_MS && after?.seq === end.seq && pair.transfers.length === 0) {
+					if (temps.length > 0) {
+						fail(`download temps left between passes (read ${String(afterMs)} ms after a pass end): ${temps.join(", ")}`)
+					}
+
+					return { afterMs, missed }
+				}
+			}
+
+			spent = end.seq
+			missed++
+		}
+
+		if (probe.now() >= deadline) {
+			fail(
+				`no temp scan between two passes within ${String(Math.round(timeoutMs / 1000))} s (${String(missed)} windows missed; last pass end ${last === null ? "none" : `${last.kind} at ${new Date(last.at).toISOString()}`})`
+			)
+		}
+
+		await probe.sleep(QUIET_POLL_MS)
+	}
 }
 
 // `bytes` of zeros in 1 MiB writes (no buffer of the whole size).
@@ -145,6 +220,9 @@ export async function runDiskFullCheck(chain: Chain): Promise<void> {
 			const local = path.join(chain.work, BIG)
 
 			writeFileSync(local, big)
+
+			const uploaded = Date.now()
+
 			await cloud.uploadFile(local, `${cloudDir}/${BIG}`)
 			sampler.reset()
 
@@ -155,6 +233,19 @@ export async function runDiskFullCheck(chain: Chain): Promise<void> {
 				HALT_MS,
 				found => found.halted === "localStorageFull" && found.phase === "error"
 			)
+			const quiet = await noTempBetweenPasses(
+				{
+					activity: () =>
+						desktop<DesktopSyncActivity[]>(chain.page(), `window.desktop.sync.activity(${JSON.stringify(extra.id)}, 50)`),
+					pair: () => pairOf(chain, extra.id),
+					temps: () => tempFiles(small.root),
+					now: () => Date.now(),
+					sleep: ms => sleep(ms)
+				},
+				uploaded,
+				HALT_MS
+			)
+
 			const attention = await sampler.watch(30_000, sample => sample.syncAttention)
 
 			if (attention.hit === null) {
@@ -163,7 +254,6 @@ export async function runDiskFullCheck(chain: Chain): Promise<void> {
 
 			const problems = [
 				...(existsSync(path.join(root, BIG)) ? [`${BIG} is on disk`] : []),
-				...tempFiles(small.root).map(file => `download temp ${file} left`),
 				...diffSnapshots(before, await localSnapshot(root), { identity: true }).map(line => `pair ${line}`)
 			]
 
@@ -171,7 +261,7 @@ export async function runDiskFullCheck(chain: Chain): Promise<void> {
 				fail(problems.join("; "))
 			}
 
-			return `${String(Math.round(free / MIB))} MiB free for a ${String(BIG_BYTES / MIB)} MiB file: ${describePair(halted)}; rail "${attention.hit.rail}"; nothing partial, the pair's files unchanged`
+			return `${String(Math.round(free / MIB))} MiB free for a ${String(BIG_BYTES / MIB)} MiB file: ${describePair(halted)}; rail "${attention.hit.rail}"; no temp ${String(quiet.afterMs)} ms after a pass end (${String(quiet.missed)} windows missed); nothing partial, the pair's files unchanged`
 		})
 
 		await findings.check("P13 the filler deleted: the file lands byte for byte within 3 min, no syncNow", async () => {
