@@ -1,4 +1,10 @@
-import type { DesktopSyncNotice, DesktopSyncResolution, DesktopSyncReviewFinding } from "@filen/shared/desktop"
+import {
+	type DesktopSyncNotice,
+	type DesktopSyncResolution,
+	type DesktopSyncReviewFinding,
+	SYNC_FINDING_KEY,
+	SYNC_NOTICE_KEY
+} from "@filen/shared/desktop"
 import type { Locator, Page } from "playwright-core"
 import { sync as SYNC_TEXT } from "../../../../filen-web/src/locales/en/sync.ts"
 import { fail, waitFor } from "../support.ts"
@@ -250,28 +256,9 @@ export async function startReviewThroughCard(page: Page, pairName: string, want:
 	return `"${want.title}" with ${want.findings.map(finding => `"${finding}"`).join(", ")}; one ${syncText("reviewShowDetails")} click opened the lists (${want.heldPath} held); started`
 }
 
-const FINDING_KEY: Record<DesktopSyncReviewFinding, SyncKey> = {
-	uploads: "findingUploads",
-	downloads: "findingDownloads",
-	conflicts: "findingConflicts",
-	heldDeletions: "findingHeldDeletions",
-	refused: "findingRefused",
-	unconverged: "findingUnconverged",
-	overwrites: "findingOverwrites"
-}
-
 // A review finding as the card lists it.
 export function findingText(finding: DesktopSyncReviewFinding): string {
-	return syncText(FINDING_KEY[finding])
-}
-
-const NOTICE_KEY: Record<DesktopSyncNotice, SyncKey> = {
-	refusedLocalRoot: "noticeRefusedLocalRoot",
-	refusedRemoteMissing: "noticeRefusedRemoteMissing",
-	refusedLocalOverlap: "noticeRefusedLocalOverlap",
-	refusedRemoteOverlap: "noticeRefusedRemoteOverlap",
-	refusedWholeDrive: "noticeRefusedWholeDrive",
-	refusedModeConflict: "noticeRefusedModeConflict"
+	return syncText(SYNC_FINDING_KEY[finding])
 }
 
 // A refused pair's notice (noticeBanner.tsx): its text with Remove pair as the one way out (no hold, no Start anyway on
@@ -279,7 +266,7 @@ const NOTICE_KEY: Record<DesktopSyncNotice, SyncKey> = {
 export async function removeThroughNotice(page: Page, pairName: string, notice: DesktopSyncNotice, timeoutMs: number): Promise<string> {
 	await openSyncPair(page, pairName, timeoutMs)
 
-	const text = syncText(NOTICE_KEY[notice])
+	const text = syncText(SYNC_NOTICE_KEY[notice])
 	const remove = page.getByRole("button", { name: syncText("noticeRemove"), exact: true })
 	const callout = page.locator("div.rounded-2xl").filter({ hasText: text }).filter({ has: remove })
 

@@ -1,16 +1,17 @@
 import { useState, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import type { TFunction } from "i18next"
-import type {
-	DesktopSyncEntries,
-	DesktopSyncPlanAction,
-	DesktopSyncConflict,
-	DesktopSyncIgnored,
-	DesktopSyncPlanList,
-	DesktopSyncPlanSummary,
-	DesktopSyncResult,
-	DesktopSyncReviewFinding,
-	DesktopSyncUnsyncable
+import {
+	type DesktopSyncEntries,
+	type DesktopSyncPlanAction,
+	type DesktopSyncConflict,
+	type DesktopSyncIgnored,
+	type DesktopSyncPlanList,
+	type DesktopSyncPlanSummary,
+	type DesktopSyncResult,
+	type DesktopSyncReviewFinding,
+	type DesktopSyncUnsyncable,
+	SYNC_FINDING_KEY
 } from "@filen/shared/desktop"
 import { ListChecksIcon } from "lucide-react"
 import { cn, formatBytes } from "@filen/shared"
@@ -20,7 +21,6 @@ import { usePagedEntries } from "@/features/sync/hooks/usePagedEntries"
 import { syncApi } from "@/features/sync/lib/syncStore"
 import {
 	conflictDetailKey,
-	FINDING_KEY,
 	HELD_REASON_KEY,
 	isLargePlan,
 	PLAN_LIST_KEY,
@@ -202,7 +202,7 @@ export function ReviewSummary({ summary, findings, planId, listsOpen = false }: 
 			{findings.length > 0 ? (
 				<ul className="flex list-disc flex-col gap-1 pl-5 text-sm">
 					{findings.map(finding => (
-						<li key={finding}>{t(FINDING_KEY[finding])}</li>
+						<li key={finding}>{t(SYNC_FINDING_KEY[finding])}</li>
 					))}
 				</ul>
 			) : null}

@@ -8,14 +8,12 @@ import {
 	SYNC_ATTENTION_HOLDS,
 	type DesktopSyncIssueCounts,
 	type DesktopSyncMode,
-	type DesktopSyncNotice,
 	type DesktopSyncOverview,
 	type DesktopSyncPair,
 	type DesktopSyncPhase,
 	type DesktopSyncPlanList,
 	type DesktopSyncPlanSummary,
 	type DesktopSyncRefusal,
-	type DesktopSyncReviewFinding,
 	type DesktopSyncResolution,
 	type DesktopSyncResolvedConflicts,
 	type DesktopSyncActionKind
@@ -129,15 +127,6 @@ export function modeChangeNeedsBacklog(from: DesktopSyncMode, to: DesktopSyncMod
 	return from !== to && isBackupMode(from)
 }
 
-export const NOTICE_KEY: Record<DesktopSyncNotice, SyncKey> = {
-	refusedLocalRoot: "noticeRefusedLocalRoot",
-	refusedRemoteMissing: "noticeRefusedRemoteMissing",
-	refusedLocalOverlap: "noticeRefusedLocalOverlap",
-	refusedRemoteOverlap: "noticeRefusedRemoteOverlap",
-	refusedWholeDrive: "noticeRefusedWholeDrive",
-	refusedModeConflict: "noticeRefusedModeConflict"
-}
-
 export const HOLD_KEY: Record<DesktopSyncHold, SyncKey> = {
 	ruleFileUnwritable: "holdRuleFileUnwritable",
 	ruleFileUndecodable: "holdRuleFileUndecodable",
@@ -159,16 +148,6 @@ export const SCAN_GAP_KEY: Record<DesktopSyncScanGap["cause"], SyncKey> = {
 	unreadable: "scanGapUnreadable",
 	changedDuringScan: "scanGapChangedDuringScan",
 	nonUtf8Name: "scanGapNonUtf8Name"
-}
-
-export const FINDING_KEY: Record<DesktopSyncReviewFinding, SyncKey> = {
-	uploads: "findingUploads",
-	downloads: "findingDownloads",
-	conflicts: "findingConflicts",
-	heldDeletions: "findingHeldDeletions",
-	refused: "findingRefused",
-	unconverged: "findingUnconverged",
-	overwrites: "findingOverwrites"
 }
 
 export const HELD_REASON_KEY: Record<DesktopSyncHeldReason, SyncKey> = {

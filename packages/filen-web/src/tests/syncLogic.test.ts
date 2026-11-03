@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest"
-import type { DesktopSyncActivity, DesktopSyncOverview, DesktopSyncPair, DesktopSyncPlanSummary } from "@filen/shared/desktop"
+import {
+	type DesktopSyncActivity,
+	type DesktopSyncOverview,
+	type DesktopSyncPair,
+	type DesktopSyncPlanSummary,
+	SYNC_FINDING_KEY,
+	SYNC_NOTICE_KEY
+} from "@filen/shared/desktop"
 import { sync } from "@/locales/en/sync"
 import { hostBanner } from "@/features/desktop/lib/hostBanner.logic"
 import { ACTIVITY_KIND_KEY, ACTIVITY_KIND_TONE, ACTIVITY_LIMIT, mergeActivity } from "@/features/sync/lib/activity.logic"
@@ -11,7 +18,6 @@ import {
 	conflictResolvedToast,
 	CONFLICTS_BULK,
 	conflictsResolvedTone,
-	FINDING_KEY,
 	HALT_KEY,
 	HELD_REASON_KEY,
 	HOLD_KEY,
@@ -24,7 +30,6 @@ import {
 	MODE_SHORT_KEY,
 	modeChangeNeedsBacklog,
 	MODES,
-	NOTICE_KEY,
 	pathBasename,
 	pathParent,
 	PHASE_KEY,
@@ -161,7 +166,7 @@ describe("sync copy", () => {
 		expectAllKeysExist(MODE_KEY, [...MODES])
 		expectAllKeysExist(MODE_DESCRIPTION_KEY, [...MODES])
 		expectAllKeysExist(MODE_SHORT_KEY, [...MODES])
-		expectAllKeysExist(NOTICE_KEY, [
+		expectAllKeysExist(SYNC_NOTICE_KEY, [
 			"refusedLocalRoot",
 			"refusedRemoteMissing",
 			"refusedLocalOverlap",
@@ -173,7 +178,7 @@ describe("sync copy", () => {
 		expectAllKeysExist(INFO_NOTICE_KEY, ["localTrashNowOn"])
 		expectAllKeysExist(HALT_KEY, ["localStorageFull", "remoteStorageFull", "offline"])
 		expectAllKeysExist(SCAN_GAP_KEY, ["unreadable", "changedDuringScan", "nonUtf8Name"])
-		expectAllKeysExist(FINDING_KEY, ["uploads", "downloads", "conflicts", "heldDeletions", "refused", "unconverged", "overwrites"])
+		expectAllKeysExist(SYNC_FINDING_KEY, ["uploads", "downloads", "conflicts", "heldDeletions", "refused", "unconverged", "overwrites"])
 		expectAllKeysExist(HELD_REASON_KEY, [
 			"scanIncomplete",
 			"firstSyncWithDeletions",

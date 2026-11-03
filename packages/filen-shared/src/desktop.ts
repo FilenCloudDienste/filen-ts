@@ -185,6 +185,16 @@ export type DesktopSyncNotice =
 	| "refusedWholeDrive"
 	| "refusedModeConflict"
 
+// The sync locale's key for each notice: filen-web shows it, the desktop e2e harness finds it by that text.
+export const SYNC_NOTICE_KEY = {
+	refusedLocalRoot: "noticeRefusedLocalRoot",
+	refusedRemoteMissing: "noticeRefusedRemoteMissing",
+	refusedLocalOverlap: "noticeRefusedLocalOverlap",
+	refusedRemoteOverlap: "noticeRefusedRemoteOverlap",
+	refusedWholeDrive: "noticeRefusedWholeDrive",
+	refusedModeConflict: "noticeRefusedModeConflict"
+} as const satisfies Record<DesktopSyncNotice, string>
+
 // Why a pair moved from the previous app waits (preparing) for the user: its root .filenignore cannot be written or
 // read as text, it syncs the whole drive (started only on request), or the cloud directory's listing is slow.
 export type DesktopSyncHold = "ruleFileUnwritable" | "ruleFileUndecodable" | "driveRoot" | "cloudListingSlow"
@@ -236,6 +246,17 @@ export interface DesktopSyncPlanSummary {
 
 // `overwrites`: a migrated one-way pair would replace a lot on its destination.
 export type DesktopSyncReviewFinding = "uploads" | "downloads" | "conflicts" | "heldDeletions" | "refused" | "unconverged" | "overwrites"
+
+// The sync locale's key for each review finding, as SYNC_NOTICE_KEY.
+export const SYNC_FINDING_KEY = {
+	uploads: "findingUploads",
+	downloads: "findingDownloads",
+	conflicts: "findingConflicts",
+	heldDeletions: "findingHeldDeletions",
+	refused: "findingRefused",
+	unconverged: "findingUnconverged",
+	overwrites: "findingOverwrites"
+} as const satisfies Record<DesktopSyncReviewFinding, string>
 
 // A pair kept paused until the user looked at what its first run would do. `summary` is null when the remote side
 // never converged.

@@ -1,13 +1,19 @@
 import { useState } from "react"
 import { useTranslation } from "react-i18next"
-import type { DesktopSyncHold, DesktopSyncInfoNotice, DesktopSyncNotice, DesktopSyncRootProblem } from "@filen/shared/desktop"
+import {
+	type DesktopSyncHold,
+	type DesktopSyncInfoNotice,
+	type DesktopSyncNotice,
+	type DesktopSyncRootProblem,
+	SYNC_NOTICE_KEY
+} from "@filen/shared/desktop"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { log } from "@/lib/log"
 import { syncApi } from "@/features/sync/lib/syncStore"
 import { runSyncAction } from "@/features/sync/lib/syncActions"
 import { ROOT_PROBLEM_KEY } from "@/features/sync/lib/syncErrors.logic"
-import { HOLD_KEY, INFO_NOTICE_KEY, NOTICE_KEY } from "@/features/sync/lib/syncStatus.logic"
+import { HOLD_KEY, INFO_NOTICE_KEY } from "@/features/sync/lib/syncStatus.logic"
 import { DesktopCallout } from "@/features/desktop/components/desktopCallout"
 
 function DismissButton({ label, onDismiss }: { label: string; onDismiss: () => Promise<void> }) {
@@ -55,7 +61,7 @@ export function NoticeBanner({
 						/>
 					}
 				>
-					{t(NOTICE_KEY[notice])}
+					{t(SYNC_NOTICE_KEY[notice])}
 					{notice === "refusedLocalRoot" && rootProblem !== null ? ` ${t(ROOT_PROBLEM_KEY[rootProblem])}` : null}
 				</DesktopCallout>
 			))}
