@@ -27,13 +27,13 @@ import { feedFor, processesAt, START_TIMEOUT_MS, TEST_FEED_ENV, TEST_FEED_LOG } 
 //   3  the update file's socket cut at 40% (the full Content-Length announced)
 //   4  one byte of the update file flipped
 //   5  macOS: a truncated zip with its own sha512 in latest-mac.yml: electron-updater accepts it and Squirrel refuses it,
-//      which must clear the ready state (F2) so that another check follows
+//      so it is never reported ready to install (F2: ready only once Squirrel took it) and another check follows
 //   6  the update file stalled at 30% on a live socket: the no-progress watchdog must cancel it (F1), and another check
 //      must follow; the server destroys a stalled file's socket once released, never sending the rest
 //   7  stalled at 30% again, and N-1 ended meanwhile: a hard kill at install depth, a graceful quit in a deep chain
 //
 // After each step: the same N-1 process runs, exactly one "updater: check failed" line was logged, nothing was
-// reported ready to install (step 5 aside), no installer (or ShipIt) runs, and pending/ holds no update-info.json and
+// reported ready to install, no installer (or ShipIt) runs, and pending/ holds no update-info.json and
 // no full-size download; neither does pending/ once the launch ended, after which it is emptied, so the real update
 // downloads afresh. Every check after the first is held at the server (its manifest stalls before the first byte)
 // until the step before it is asserted, so each step's lines are its own.
@@ -99,7 +99,7 @@ export function faultSteps(platform: Platform, truncated: { manifest: Buffer; zi
 			? [
 					step({
 						name: "truncated zip",
-						proves: "Squirrel's refusal clears the ready state and another check follows within 3 intervals (F2)",
+						proves: "Squirrel's refusal leaves nothing ready to install and another check follows within 3 intervals (F2)",
 						manifest: { body: truncated.manifest },
 						file: { body: truncated.zip },
 						squirrel: true
@@ -288,6 +288,28 @@ export interface FaultLaunchOptions {
 	stop?: ((pids: readonly number[]) => Promise<void>) | undefined
 }
 
+// What a step's main.log lines (`segment`) show wrong, for every step but the last: exactly one failed check (a
+// Squirrel step: its refusal or one failed check, never more), nothing ready to install (F2: not even once Squirrel
+// refused the download), and a stall step's watchdog line.
+export function stepLogProblems(step: FaultStep, segment: string): string[] {
+	const failures = count(segment, CHECK_FAILED_LOG)
+
+	return [
+		...(step.squirrel
+			? [
+					...(segment.includes(SQUIRREL_LOG) || failures === 1
+						? []
+						: ["neither Squirrel's refusal nor a failed check was logged"]),
+					...(failures > 1 ? [`${String(failures)} "check failed" lines`] : [])
+				]
+			: failures === 1
+				? []
+				: [`${String(failures)} "check failed" lines, expected exactly one`]),
+		...(segment.includes(READY_LOG) ? ["an update was reported ready to install"] : []),
+		...(step.watchdog && !segment.includes(STALL_LOG) ? ["the no-progress watchdog logged nothing"] : [])
+	]
+}
+
 // Runs the fault launch with the installed N-1 (not running); returns once N-1 is gone. The returned function fails
 // the run if any of the launch's own checks failed (a no-op with a chain's findings): called after the real update, so
 // that a fault never hides the update's own result.
@@ -398,18 +420,7 @@ export async function runFaultLaunch(options: FaultLaunchOptions): Promise<() =>
 
 				const problems = [
 					...(goOn ? [] : [`${fromVersion}'s process ${pids.join(", ")} is gone`]),
-					...(step.squirrel
-						? [
-								...(segment.includes(SQUIRREL_LOG) || failures === 1
-									? []
-									: ["neither Squirrel's refusal nor a failed check was logged"]),
-								...(failures > 1 ? [`${String(failures)} "check failed" lines`] : [])
-							]
-						: failures === 1
-							? []
-							: [`${String(failures)} "check failed" lines, expected exactly one`]),
-					...(!step.squirrel && segment.includes(READY_LOG) ? ["an update was reported ready to install"] : []),
-					...(step.watchdog && !segment.includes(STALL_LOG) ? ["the no-progress watchdog logged nothing"] : []),
+					...stepLogProblems(step, segment),
 					...(await installerProcesses(target)).map(line => `an installer runs: ${line}`),
 					...(step.squirrel ? [] : pendingProblems(target, entry.size))
 				]
@@ -418,7 +429,7 @@ export async function runFaultLaunch(options: FaultLaunchOptions): Promise<() =>
 					fail(problems.join("; "))
 				}
 
-				return `${String(failures)} failed check(s)${step.squirrel ? `, Squirrel ${segment.includes(SQUIRREL_LOG) ? "refused" : "said nothing"}, ready ${segment.includes(READY_LOG) ? "logged" : "not logged"}` : ""}; check ${String(ordinal + 1)} came; ${fromVersion} still running`
+				return `${String(failures)} failed check(s)${step.squirrel ? `, Squirrel ${segment.includes(SQUIRREL_LOG) ? "refused" : "said nothing"}, nothing ready to install` : ""}; check ${String(ordinal + 1)} came; ${fromVersion} still running`
 			})
 			mark = logMark(target)
 

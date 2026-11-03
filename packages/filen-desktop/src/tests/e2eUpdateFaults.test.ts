@@ -3,7 +3,7 @@ import { get } from "node:http"
 import os from "node:os"
 import path from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
-import { faultPlan, faultSteps, logMark, logSince, pendingProblems } from "../../scripts/ci/e2e/updateFaults.ts"
+import { faultPlan, faultSteps, logMark, logSince, pendingProblems, stepLogProblems } from "../../scripts/ci/e2e/updateFaults.ts"
 import { serveFeed, type FeedFaultPlan, type FeedServer } from "../../scripts/ci/support.ts"
 import { TEST_UPDATE_CHECK_INTERVAL_MS, UPDATE_STALL_MS } from "../../src/main/updater.ts"
 
@@ -178,6 +178,28 @@ describe("e2e update fault steps", () => {
 		expect(mac.filter(step => step.watchdog).map(step => step.nextWithinMs)).toEqual([
 			UPDATE_STALL_MS + 3 * TEST_UPDATE_CHECK_INTERVAL_MS
 		])
+	})
+
+	it("fails the truncated zip's step on any ready to install once Squirrel refused it (F2)", () => {
+		const squirrel = faultSteps("mac", truncated).find(step => step.squirrel) ?? expect.fail("no Squirrel step")
+		const refused = "WARN updater: Squirrel: Cannot open the update archive\n"
+		const ready = "INFO updater: 4.0.1 is ready to install\n"
+
+		expect(stepLogProblems(squirrel, refused)).toEqual([])
+		expect(stepLogProblems(squirrel, "ERROR updater: check failed: archive\n")).toEqual([])
+		expect(stepLogProblems(squirrel, refused + ready)).toEqual(["an update was reported ready to install"])
+		expect(stepLogProblems(squirrel, "")).toEqual(["neither Squirrel's refusal nor a failed check was logged"])
+	})
+
+	it("wants exactly one failed check of the other steps, nothing ready, and the stall's watchdog line", () => {
+		const [manifest500, , , , stall] = faultSteps("win", null)
+		const failed = "ERROR updater: check failed: 500\n"
+
+		expect(stepLogProblems(manifest500 ?? expect.fail("no step"), failed)).toEqual([])
+		expect(stepLogProblems(manifest500 ?? expect.fail("no step"), failed + failed)).toEqual([
+			'2 "check failed" lines, expected exactly one'
+		])
+		expect(stepLogProblems(stall ?? expect.fail("no step"), failed)).toEqual(["the no-progress watchdog logged nothing"])
 	})
 
 	it("keys the update file's fault on the manifest that came last and gates every later manifest", () => {
