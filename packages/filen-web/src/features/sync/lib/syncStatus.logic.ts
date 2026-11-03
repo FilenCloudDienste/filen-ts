@@ -17,6 +17,7 @@ import {
 	type DesktopSyncRefusal,
 	type DesktopSyncReviewFinding,
 	type DesktopSyncResolution,
+	type DesktopSyncResolvedConflicts,
 	type DesktopSyncActionKind
 } from "@filen/shared/desktop"
 import type { SyncKey } from "@/lib/i18n"
@@ -272,6 +273,31 @@ export function conflictDetailKey(conflict: DesktopSyncConflict): SyncKey {
 // pair's bin. keepBoth sets the local copy aside under a name the result does not carry.
 export type ConflictResolvedToast =
 	{ key: "conflictKeptLocal" | "conflictKeptRemote" | "conflictKeptBoth"; path: null } | { key: "conflictKeptRemoteBinned"; path: string }
+
+// Per bulk resolution: its button, its confirmation and the toast it ends with.
+export const CONFLICTS_BULK: Record<
+	DesktopSyncResolution,
+	{
+		label: "conflictsKeepAllLocal" | "conflictsKeepAllRemote" | "conflictsKeepAllBoth"
+		body: "conflictsKeepAllLocalBody" | "conflictsKeepAllRemoteBody" | "conflictsKeepAllBothBody"
+		kept: "conflictsKeptAllLocal" | "conflictsKeptAllRemote" | "conflictsKeptAllBoth"
+		destructive: boolean
+	}
+> = {
+	keepLocal: { label: "conflictsKeepAllLocal", body: "conflictsKeepAllLocalBody", kept: "conflictsKeptAllLocal", destructive: true },
+	keepRemote: { label: "conflictsKeepAllRemote", body: "conflictsKeepAllRemoteBody", kept: "conflictsKeptAllRemote", destructive: true },
+	keepBoth: { label: "conflictsKeepAllBoth", body: "conflictsKeepAllBothBody", kept: "conflictsKeptAllBoth", destructive: false }
+}
+
+// How a bulk resolution's toast ends: success when every path resolved, a warning naming the failures when some did,
+// an error when none did.
+export function conflictsResolvedTone(result: DesktopSyncResolvedConflicts): "success" | "warning" | "error" {
+	if (result.failed === 0) {
+		return "success"
+	}
+
+	return result.resolved === 0 ? "error" : "warning"
+}
 
 export function conflictResolvedToast(resolution: DesktopSyncResolution, binPath: string | null): ConflictResolvedToast {
 	switch (resolution) {

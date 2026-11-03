@@ -275,6 +275,48 @@ export const sync = {
 	conflictKeptRemoteBinned: "Kept the cloud's version. This device's version is in the pair's bin: {{path}}",
 	/** Toast — the conflict resolved keeping both versions */
 	conflictKeptBoth: "Kept both versions.",
+	/** Conflicts — resolve every conflict with the local version */
+	conflictsKeepAllLocal: "Keep all this device's",
+	/** Conflicts — resolve every conflict with the cloud version */
+	conflictsKeepAllRemote: "Keep all the cloud's",
+	/** Conflicts — resolve every conflict keeping both versions */
+	conflictsKeepAllBoth: "Keep both for all",
+	/** Conflicts — confirm title for resolving every conflict */
+	conflictsResolveAllTitle: "Resolve every conflict?",
+	/** Conflicts — confirm body, keeping the local versions */
+	conflictsKeepAllLocalBody_one: "This device's version replaces the cloud's for {{count}} item.",
+	/** Conflicts — confirm body, keeping the local versions */
+	conflictsKeepAllLocalBody_other: "This device's version replaces the cloud's for {{count}} items.",
+	/** Conflicts — confirm body, keeping the cloud versions */
+	conflictsKeepAllRemoteBody_one:
+		"The cloud's version replaces this device's for {{count}} item. This device's version goes to the pair's bin.",
+	/** Conflicts — confirm body, keeping the cloud versions */
+	conflictsKeepAllRemoteBody_other:
+		"The cloud's version replaces this device's for {{count}} items. This device's versions go to the pair's bin.",
+	/** Conflicts — confirm body, keeping both versions */
+	conflictsKeepAllBothBody_one: "Both versions of {{count}} item are kept, this device's under a new name.",
+	/** Conflicts — confirm body, keeping both versions */
+	conflictsKeepAllBothBody_other: "Both versions of {{count}} items are kept, this device's under a new name.",
+	/** Toast — resolving every conflict; count is how many are left */
+	conflictsResolvingAll_one: "Resolving {{count}} conflict…",
+	/** Toast — resolving every conflict; count is how many are left */
+	conflictsResolvingAll_other: "Resolving {{count}} conflicts…",
+	/** Toast — every conflict resolved to the local version */
+	conflictsKeptAllLocal_one: "Kept this device's version of {{count}} item.",
+	/** Toast — every conflict resolved to the local version */
+	conflictsKeptAllLocal_other: "Kept this device's version of {{count}} items.",
+	/** Toast — every conflict resolved to the cloud version */
+	conflictsKeptAllRemote_one: "Kept the cloud's version of {{count}} item. This device's version is in the pair's bin.",
+	/** Toast — every conflict resolved to the cloud version */
+	conflictsKeptAllRemote_other: "Kept the cloud's version of {{count}} items. This device's versions are in the pair's bin.",
+	/** Toast — every conflict resolved keeping both versions */
+	conflictsKeptAllBoth_one: "Kept both versions of {{count}} item.",
+	/** Toast — every conflict resolved keeping both versions */
+	conflictsKeptAllBoth_other: "Kept both versions of {{count}} items.",
+	/** Toast — conflicts a bulk resolution could not resolve; they stay listed */
+	conflictsResolveAllFailed_one: "{{count}} conflict couldn't be resolved.",
+	/** Toast — conflicts a bulk resolution could not resolve; they stay listed */
+	conflictsResolveAllFailed_other: "{{count}} conflicts couldn't be resolved.",
 	/** Conflict — the pair's own .filenignore, after it stopped only downloading */
 	conflictRuleFileHint:
 		"This is the pair's .filenignore. Its copy on this device was never uploaded while the pair only downloaded; keep both to merge the rules by hand.",
@@ -290,6 +332,8 @@ export const sync = {
 	/** Held deletions — confirm body */
 	heldApproveBody_other:
 		"{{count}} items are deleted on the other side. This device's deletions go to the pair's bin, the cloud's to the cloud trash.",
+	/** Held deletions — approved while the pair is paused */
+	heldApprovedPaused: "Approved. Applies when you resume.",
 	/** Held deletions — how many more are not listed */
 	heldMore: "and {{count}} more",
 	/** Held reason — a scan did not finish */

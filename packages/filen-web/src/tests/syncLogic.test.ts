@@ -9,6 +9,8 @@ import {
 	aggregateSyncState,
 	conflictDetailKey,
 	conflictResolvedToast,
+	CONFLICTS_BULK,
+	conflictsResolvedTone,
 	FINDING_KEY,
 	HALT_KEY,
 	HELD_REASON_KEY,
@@ -334,6 +336,24 @@ describe("sync status helpers", () => {
 		expect(conflictResolvedToast("keepBoth", null)).toEqual({ key: "conflictKeptBoth", path: null })
 		expect(sync.conflictKeptRemoteBinned).toContain("{{path}}")
 		expect(sync.conflictKeptBoth).not.toContain("{{path}}")
+	})
+
+	it("labels, confirms and reports every bulk resolution, warning when some paths stayed conflicts", () => {
+		for (const resolution of ["keepLocal", "keepRemote", "keepBoth"] as const) {
+			const bulk = CONFLICTS_BULK[resolution]
+
+			expect(CATALOG[bulk.label]).toBeTypeOf("string")
+
+			for (const plural of [`${bulk.body}_one`, `${bulk.body}_other`, `${bulk.kept}_one`, `${bulk.kept}_other`]) {
+				expect(CATALOG[plural], plural).toContain("{{count}}")
+			}
+		}
+
+		expect(CONFLICTS_BULK.keepBoth.destructive).toBe(false)
+		expect(conflictsResolvedTone({ resolved: 3, failed: 0 })).toBe("success")
+		expect(conflictsResolvedTone({ resolved: 0, failed: 0 })).toBe("success")
+		expect(conflictsResolvedTone({ resolved: 2, failed: 1 })).toBe("warning")
+		expect(conflictsResolvedTone({ resolved: 0, failed: 2 })).toBe("error")
 	})
 })
 

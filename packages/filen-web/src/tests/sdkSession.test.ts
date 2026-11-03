@@ -208,6 +208,7 @@ const unusedSync: DesktopSync = {
 	releasePlan: unused,
 	conflicts: unused,
 	resolveConflict: unused,
+	resolveConflicts: unused,
 	heldDeletions: unused,
 	approveDeletions: unused,
 	retryPath: unused,

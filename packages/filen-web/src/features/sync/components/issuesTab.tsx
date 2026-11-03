@@ -22,8 +22,10 @@ import { useSyncRead } from "@/features/sync/hooks/useSyncRead"
 import { syncApi, useSyncStore } from "@/features/sync/lib/syncStore"
 import { runSyncAction, syncErrorLabel } from "@/features/sync/lib/syncActions"
 import {
+	CONFLICTS_BULK,
 	conflictDetailKey,
 	conflictResolvedToast,
+	conflictsResolvedTone,
 	HALT_KEY,
 	HELD_REASON_KEY,
 	isRootRuleFile,
@@ -39,17 +41,136 @@ const RESOLUTIONS: readonly { value: DesktopSyncResolution; key: "conflictKeepLo
 	{ value: "keepBoth", key: "conflictKeepBoth" }
 ]
 
-// Conflicts a page at a time, each with its three resolutions. The list reads again when the count changes; a
-// resolved row hides at once, before the overview catches up.
+const NONE: ReadonlySet<string> = new Set()
+
+// Paths acted on since the list named `key` was read. A new read lists what the shell still holds, so a path that
+// comes back shows again.
+interface Hidden {
+	key: string
+	paths: ReadonlySet<string>
+}
+
+function useHidden(key: string): { hidden: ReadonlySet<string>; hide: (readKey: string, relPath: string) => void } {
+	const [state, setState] = useState<Hidden>(() => ({ key, paths: NONE }))
+
+	return {
+		hidden: state.key === key ? state.paths : NONE,
+		hide: (readKey, relPath) => {
+			setState(previous =>
+				previous.key === readKey
+					? { key: readKey, paths: new Set(previous.paths).add(relPath) }
+					: { key: readKey, paths: new Set([relPath]) }
+			)
+		}
+	}
+}
+
+// Every conflict resolved the same way, after a confirmation, in one shell call. The toast counts down from the
+// overview's count, which drops as the batches go.
+function ResolveAll({ pairId, count, onRunning }: { pairId: string; count: number; onRunning: (running: boolean) => void }) {
+	const { t } = useTranslation(["sync", "common"])
+	const [confirming, setConfirming] = useState(false)
+	// Kept while the dialog closes, so its text stays.
+	const [choice, setChoice] = useState<DesktopSyncResolution>("keepLocal")
+	const [toastId, setToastId] = useState<string | number | null>(null)
+
+	useEffect(() => {
+		if (toastId !== null) {
+			toast.loading(t("conflictsResolvingAll", { count }), { id: toastId })
+		}
+	}, [toastId, count, t])
+
+	async function resolveAll(resolution: DesktopSyncResolution): Promise<void> {
+		const id = toast.loading(t("conflictsResolvingAll", { count }))
+
+		setConfirming(false)
+		setToastId(id)
+		onRunning(true)
+
+		const done = await runSyncAction(() => syncApi().resolveConflicts(pairId, resolution, count))
+
+		setToastId(null)
+		onRunning(false)
+
+		if (done === null) {
+			toast.dismiss(id)
+
+			return
+		}
+
+		const kept = t(CONFLICTS_BULK[resolution].kept, { count: done.value.resolved })
+		const failed = t("conflictsResolveAllFailed", { count: done.value.failed })
+
+		switch (conflictsResolvedTone(done.value)) {
+			case "success": {
+				toast.success(kept, { id })
+
+				break
+			}
+
+			case "warning": {
+				toast.warning(kept, { id, description: failed })
+
+				break
+			}
+
+			case "error": {
+				toast.error(failed, { id })
+
+				break
+			}
+		}
+	}
+
+	return (
+		<>
+			<SettingsBlock className="flex flex-wrap justify-end gap-2">
+				{RESOLUTIONS.map(resolution => (
+					<Button
+						key={resolution.value}
+						variant="outline"
+						size="sm"
+						disabled={toastId !== null}
+						onClick={() => {
+							setChoice(resolution.value)
+							setConfirming(true)
+						}}
+					>
+						{toastId === null ? null : <Spinner data-icon="inline-start" />}
+						{t(CONFLICTS_BULK[resolution.value].label)}
+					</Button>
+				))}
+			</SettingsBlock>
+			<ConfirmDialog
+				open={confirming}
+				pending={false}
+				title={t("conflictsResolveAllTitle")}
+				body={t(CONFLICTS_BULK[choice].body, { count })}
+				confirmLabel={t(CONFLICTS_BULK[choice].label)}
+				cancelLabel={t("common:cancel")}
+				destructive={CONFLICTS_BULK[choice].destructive}
+				onOpenChange={setConfirming}
+				onConfirm={() => {
+					void resolveAll(choice)
+				}}
+			/>
+		</>
+	)
+}
+
+// Conflicts a page at a time, each with its three resolutions, and all of them at once. The list reads again when
+// the count changes; a resolved row hides at once, before the overview catches up.
 function ConflictsSection({ pairId, count }: { pairId: string; count: number }) {
 	const { t } = useTranslation("sync")
-	const paged = usePagedEntries<DesktopSyncConflict>(`${pairId}:${String(count)}`, (offset, limit) =>
-		syncApi().conflicts(pairId, offset, limit)
-	)
-	const [resolved, setResolved] = useState<ReadonlySet<string>>(() => new Set())
+	const key = `${pairId}:${String(count)}`
+	const paged = usePagedEntries<DesktopSyncConflict>(key, (offset, limit) => syncApi().conflicts(pairId, offset, limit))
+	const resolved = useHidden(key)
 	const [resolving, setResolving] = useState<string | null>(null)
+	const [resolvingAll, setResolvingAll] = useState(false)
 
 	async function resolve(relPath: string, resolution: DesktopSyncResolution): Promise<void> {
+		const readKey = key
+
 		setResolving(relPath)
 
 		const done = await runSyncAction(() => syncApi().resolveConflict(pairId, relPath, resolution))
@@ -57,7 +178,7 @@ function ConflictsSection({ pairId, count }: { pairId: string; count: number }) 
 		setResolving(null)
 
 		if (done !== null) {
-			setResolved(previous => new Set(previous).add(relPath))
+			resolved.hide(readKey, relPath)
 
 			const message = conflictResolvedToast(resolution, done.value)
 
@@ -71,7 +192,7 @@ function ConflictsSection({ pairId, count }: { pairId: string; count: number }) 
 			description={t("issuesConflictsDescription")}
 		>
 			{paged.entries
-				.filter(conflict => !resolved.has(conflict.relPath))
+				.filter(conflict => !resolved.hidden.has(conflict.relPath))
 				.map(conflict => (
 					<EntryRow
 						key={conflict.relPath}
@@ -87,7 +208,7 @@ function ConflictsSection({ pairId, count }: { pairId: string; count: number }) 
 								key={resolution.value}
 								variant="outline"
 								size="sm"
-								disabled={resolving !== null}
+								disabled={resolving !== null || resolvingAll}
 								onClick={() => {
 									void resolve(conflict.relPath, resolution.value)
 								}}
@@ -98,6 +219,13 @@ function ConflictsSection({ pairId, count }: { pairId: string; count: number }) 
 					</EntryRow>
 				))}
 			<PagedFooter paged={paged} />
+			{count > 1 || resolvingAll ? (
+				<ResolveAll
+					pairId={pairId}
+					count={count}
+					onRunning={setResolvingAll}
+				/>
+			) : null}
 		</SettingsGroup>
 	)
 }
@@ -149,14 +277,18 @@ function HeldList({ held }: { held: DesktopSyncHeldDeletions }) {
 	)
 }
 
-// The deletions the last pass held back, and the approval of exactly those (the shell's pass token).
-function HeldSection({ pairId, count }: { pairId: string; count: number }) {
+// The deletions the last pass held back, and the approval of exactly those (the shell's pass token). A paused pair
+// runs no pass, so the approval waits for the resume and the same list stays.
+function HeldSection({ pairId, count, paused }: { pairId: string; count: number; paused: boolean }) {
 	const { t } = useTranslation(["sync", "common"])
 	const read = useSyncRead(`${pairId}:${String(count)}`, () => syncApi().heldDeletions(pairId))
 	const [confirming, setConfirming] = useState(false)
 	const [approving, setApproving] = useState(false)
+	// The token approved while paused.
+	const [approved, setApproved] = useState<string | null>(null)
 	const held = read.data
 	const token = held?.passToken ?? null
+	const waiting = token !== null && approved === token
 
 	async function approve(): Promise<void> {
 		if (token === null) {
@@ -169,10 +301,20 @@ function HeldSection({ pairId, count }: { pairId: string; count: number }) {
 
 		setApproving(false)
 
-		if (done !== null) {
-			setConfirming(false)
-			read.reload()
+		if (done === null) {
+			return
 		}
+
+		setConfirming(false)
+
+		if (paused) {
+			setApproved(token)
+			toast.info(t("heldApprovedPaused"))
+
+			return
+		}
+
+		read.reload()
 	}
 
 	return (
@@ -194,10 +336,11 @@ function HeldSection({ pairId, count }: { pairId: string; count: number }) {
 				) : (
 					<HeldList held={held} />
 				)}
-				<SettingsBlock className="flex justify-end">
+				<SettingsBlock className="flex items-center justify-end gap-3">
+					{waiting ? <span className="text-sm text-muted-foreground">{t("heldApprovedPaused")}</span> : null}
 					<Button
 						variant="destructive"
-						disabled={token === null || held === undefined || held.total === 0}
+						disabled={token === null || held === undefined || held.total === 0 || waiting}
 						onClick={() => {
 							setConfirming(true)
 						}}
@@ -247,20 +390,23 @@ function RetryAllButton({ pairId }: { pairId: string }) {
 }
 
 // One page after another of unsyncable items; Retry clears an item's failure record so the next pass tries it again.
-function UnsyncableRows({ pairId, paged }: { pairId: string; paged: PagedEntries<DesktopSyncUnsyncable> }) {
+// `readKey` names the list read; a retried item hides until the next one.
+function UnsyncableRows({ pairId, readKey, paged }: { pairId: string; readKey: string; paged: PagedEntries<DesktopSyncUnsyncable> }) {
 	const { t } = useTranslation("sync")
-	const [retried, setRetried] = useState<ReadonlySet<string>>(() => new Set())
+	const retried = useHidden(readKey)
 
 	async function retry(relPath: string): Promise<void> {
+		const key = readKey
+
 		if ((await runSyncAction(() => syncApi().retryPath(pairId, relPath))) !== null) {
-			setRetried(previous => new Set(previous).add(relPath))
+			retried.hide(key, relPath)
 		}
 	}
 
 	return (
 		<>
 			{paged.entries
-				.filter(entry => !retried.has(entry.relPath))
+				.filter(entry => !retried.hidden.has(entry.relPath))
 				.map(entry => (
 					<UnsyncableEntry
 						key={entry.relPath}
@@ -344,15 +490,17 @@ function PlannedUnsyncable({ pairId, readKey }: { pairId: string; readKey: strin
 	return (
 		<UnsyncableRows
 			pairId={pairId}
+			readKey={planRead.data.planId}
 			paged={paged}
 		/>
 	)
 }
 
-// Unsyncable items as the last pass this run saw reported them; without one, from a dry run.
-function UnsyncableSection({ pairId, count }: { pairId: string; count: number }) {
+// Unsyncable items as the last pass this run saw reported them; without one, from a dry run. Read again after each
+// pass, whose report replaces the last.
+function UnsyncableSection({ pairId, count, lastSyncedAt }: { pairId: string; count: number; lastSyncedAt: number | null }) {
 	const { t } = useTranslation("sync")
-	const key = `${pairId}:${String(count)}`
+	const key = `${pairId}:${String(count)}:${String(lastSyncedAt)}`
 	// The key a report was missing for.
 	const [unreported, setUnreported] = useState<string | null>(null)
 	const paged = usePagedEntries<DesktopSyncUnsyncable>(unreported === key ? null : key, async (offset, limit) => {
@@ -381,6 +529,7 @@ function UnsyncableSection({ pairId, count }: { pairId: string; count: number })
 			) : (
 				<UnsyncableRows
 					pairId={pairId}
+					readKey={key}
 					paged={paged}
 				/>
 			)}
@@ -440,7 +589,9 @@ export function IssuesTab({ pairId }: { pairId: string }) {
 				failed: pair?.issues.failed ?? 0,
 				lastError: pair?.lastError ?? null,
 				halted: pair?.halted ?? null,
-				refused: pair?.refused ?? null
+				refused: pair?.refused ?? null,
+				paused: pair?.paused ?? false,
+				lastSyncedAt: pair?.lastSyncedAt ?? null
 			}
 		})
 	)
@@ -481,12 +632,14 @@ export function IssuesTab({ pairId }: { pairId: string }) {
 				<HeldSection
 					pairId={pairId}
 					count={issues.heldDeletions}
+					paused={issues.paused}
 				/>
 			) : null}
 			{issues.unsyncable > 0 ? (
 				<UnsyncableSection
 					pairId={pairId}
 					count={issues.unsyncable}
+					lastSyncedAt={issues.lastSyncedAt}
 				/>
 			) : null}
 		</div>
