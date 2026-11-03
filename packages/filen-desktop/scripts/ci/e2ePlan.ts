@@ -326,7 +326,7 @@ export function plan(input: PlanInput, readiness: DeepReadiness = { ready: DEEP_
 	}
 
 	// update-kill alone: only the entries it runs on (not rpm).
-	if (spike === "" && !previous && !legacy) {
+	if (spike === "" && !previous && !legacy && !older) {
 		chosen.splice(0, chosen.length, ...chosen.filter(killed))
 	}
 
@@ -367,8 +367,8 @@ export function plan(input: PlanInput, readiness: DeepReadiness = { ready: DEEP_
 			...olderFor(id, older, wantsDeep(id), profile)
 		}
 	})
-	// An entry with nothing to run (3.0.47 alone asked for, elsewhere) gets no job.
-	const running = deepChains.filter(item => spike !== "" || previous || legacy || item.older)
+	// An entry with nothing to run (3.0.47 or update-kill without the update scenarios, elsewhere) gets no job.
+	const running = deepChains.filter(item => spike !== "" || previous || legacy || item.older || killed(item.entry))
 	// Per OS, the entries whose chain signs in for real: one 4.x and one 3.0.53, the next entry along for 3.0.53, so the
 	// two land on different entries where there are two. At night the turn is the day's; otherwise the first.
 	const turn = profile === "nightly" ? input.day : 0

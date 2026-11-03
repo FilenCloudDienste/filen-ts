@@ -53,6 +53,16 @@ describe("e2ePlan update-kill", () => {
 		expect(() => plan({ ...dispatch, scenarios: "update-kill,kill" })).toThrow()
 	})
 
+	it("with 3.0.47 and no update scenario, plans the entries either runs on", () => {
+		const result = plan({ ...dispatch, scenarios: "older,update-kill", formats: "win-x64-nsis,linux-x64-rpm,linux-x64-AppImage" })
+		const ids = (pick: (entry: (typeof result.tests)[number]) => boolean) =>
+			result.tests.filter(pick).map(entry => `${entry.platform}-${entry.arch}-${entry.format}`)
+
+		expect(ids(() => true)).toEqual(["win-x64-nsis", "linux-x64-AppImage"])
+		expect(ids(entry => entry.older)).toEqual(["win-x64-nsis"])
+		expect(ids(entry => entry.updateKill)).toEqual(["win-x64-nsis", "linux-x64-AppImage"])
+	})
+
 	it("is a workflow step of its own, install depth, with no account secrets", () => {
 		const text = readFileSync(fileURLToPath(new URL("../../../../.github/workflows/desktop-e2e.yml", import.meta.url)), "utf8")
 		const step = /- name: N-1 -> N, installer killed\n([\s\S]*?)\n\s+- name:/.exec(text)?.[1] ?? ""
