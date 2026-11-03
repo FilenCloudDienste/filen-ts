@@ -94,6 +94,9 @@ export interface DesktopLockStatus {
 	unreadable: boolean
 	// While wrong attempts are being backed off: when the next attempt is accepted (epoch ms).
 	retryAt: number | null
+	// No PIN is in effect, but one stored with secure storage waits for a run that has it again (this one has none): no
+	// new PIN can be set over it until then, `set` is refused.
+	waitingForSecureStorage: boolean
 }
 
 // A PIN check. A rejected one carries the backoff in effect; an attempt during it is rejected without being checked.

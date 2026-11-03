@@ -87,10 +87,13 @@ export function PinDialog({ mode, onClose }: PinDialogProps) {
 			}
 
 			setCurrent("")
+			// A first PIN checks no current one: main refused it over a PIN that waits for secure storage.
 			setError(
-				result.retryAt === null
-					? t("pinWrong")
-					: t("lockRetryIn", { time: formatSecondsToMediaClock(Math.ceil((result.retryAt - Date.now()) / 1000)) })
+				mode === "set"
+					? t("pinWaitingForSecureStorage")
+					: result.retryAt === null
+						? t("pinWrong")
+						: t("lockRetryIn", { time: formatSecondsToMediaClock(Math.ceil((result.retryAt - Date.now()) / 1000)) })
 			)
 		} catch (failure) {
 			log.error("desktop", "PIN change failed", failure)

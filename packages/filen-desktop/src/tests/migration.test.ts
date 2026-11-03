@@ -939,7 +939,13 @@ describe("a first launch with a keychain problem", () => {
 		const cipher = vaultCipher()
 		const next = await launch(files, () => Promise.resolve(cipher), memory.stored())
 
-		expect(next.lock.status()).toEqual({ enabled: true, locked: true, unreadable: false, retryAt: null })
+		expect(next.lock.status()).toEqual({
+			enabled: true,
+			locked: true,
+			unreadable: false,
+			retryAt: null,
+			waitingForSecureStorage: false
+		})
 		expect(files.lock.data?.toString().startsWith("enc:")).toBe(true)
 		expect(next.deps.prefs.set).not.toHaveBeenCalled()
 		expect(next.stored()).toMatchObject({ stage: "imported", stashOnly: true })
@@ -959,7 +965,13 @@ describe("a first launch with a keychain problem", () => {
 		const next = await launch(files, () => Promise.resolve(linuxCipher("keyring")), fallback.stored())
 
 		await expect(next.vault.get()).resolves.toMatchObject({ status: "present" })
-		expect(next.lock.status()).toEqual({ enabled: true, locked: true, unreadable: false, retryAt: null })
+		expect(next.lock.status()).toEqual({
+			enabled: true,
+			locked: true,
+			unreadable: false,
+			retryAt: null,
+			waitingForSecureStorage: false
+		})
 		expect(files.session.data?.subarray(0, 3).toString()).toBe("v11")
 		expect(files.lock.data?.subarray(0, 3).toString()).toBe("v11")
 	})
@@ -976,7 +988,13 @@ describe("a first launch with a keychain problem", () => {
 		const memory = await launch(files, () => Promise.resolve(null), null)
 
 		await expect(memory.vault.get()).resolves.toEqual({ status: "unreadable" })
-		expect(memory.lock.status()).toEqual({ enabled: false, locked: false, unreadable: false, retryAt: null })
+		expect(memory.lock.status()).toEqual({
+			enabled: false,
+			locked: false,
+			unreadable: false,
+			retryAt: null,
+			waitingForSecureStorage: true
+		})
 		expect(memory.deps.prefs.set).toHaveBeenCalledTimes(1)
 		expect([files.session.data, files.lock.data]).toEqual([session, pin])
 		expect(memory.stored()).toMatchObject({ stage: "started", deferred: true, prefsImported: true })

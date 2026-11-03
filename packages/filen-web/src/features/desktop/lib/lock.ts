@@ -19,7 +19,7 @@ export const useDesktopLock = create<DesktopLockState>(() => ({ status: null, re
 
 // The page cannot tell why main did not answer, so it treats the PIN as unreadable: locked, with a retry and a
 // sign-out, never open.
-const UNANSWERED: DesktopLockStatus = { enabled: true, locked: true, unreadable: true, retryAt: null }
+const UNANSWERED: DesktopLockStatus = { enabled: true, locked: true, unreadable: true, retryAt: null, waitingForSecureStorage: false }
 
 function apply(status: DesktopLockStatus): void {
 	useDesktopLock.setState(state => ({ status, revealed: state.revealed || (!status.locked && !state.signingOut) }))

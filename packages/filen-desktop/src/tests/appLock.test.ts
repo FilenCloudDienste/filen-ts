@@ -144,7 +144,7 @@ describe("loadAppLock", () => {
 	it("starts unlocked without a PIN and refuses to lock", async () => {
 		const lock = await loadAppLock(memoryFile(), () => Promise.resolve(fakeCipher()), warn)
 
-		expect(lock.status()).toEqual({ enabled: false, locked: false, unreadable: false, retryAt: null })
+		expect(lock.status()).toEqual({ enabled: false, locked: false, unreadable: false, retryAt: null, waitingForSecureStorage: false })
 		expect(lock.lock()).toBe(false)
 	})
 
@@ -245,7 +245,7 @@ describe("loadAppLock", () => {
 
 		await expect(lock.clear("5678")).resolves.toEqual({ ok: true })
 		expect(file.data).toBeNull()
-		expect(lock.status()).toEqual({ enabled: false, locked: false, unreadable: false, retryAt: null })
+		expect(lock.status()).toEqual({ enabled: false, locked: false, unreadable: false, retryAt: null, waitingForSecureStorage: false })
 	})
 
 	it("fails closed on a record it cannot decrypt, and reads it again on reload", async () => {
@@ -256,7 +256,7 @@ describe("loadAppLock", () => {
 
 		const lock = await loadAppLock(file, () => Promise.resolve(cipher), warn)
 
-		expect(lock.status()).toEqual({ enabled: true, locked: true, unreadable: true, retryAt: null })
+		expect(lock.status()).toEqual({ enabled: true, locked: true, unreadable: true, retryAt: null, waitingForSecureStorage: false })
 		await expect(lock.unlock("1234")).resolves.toEqual({ ok: false, retryAt: null })
 
 		cipher.failDecrypt = false
@@ -269,7 +269,7 @@ describe("loadAppLock", () => {
 		const { file } = await lockWithPin("1234", memoryFile(), null)
 		const lock = await loadAppLock(file, () => Promise.resolve(fakeCipher()), warn)
 
-		expect(lock.status()).toEqual({ enabled: true, locked: true, unreadable: false, retryAt: null })
+		expect(lock.status()).toEqual({ enabled: true, locked: true, unreadable: false, retryAt: null, waitingForSecureStorage: false })
 		expect(file.data?.toString("utf8").startsWith("enc:")).toBe(true)
 		await expect(lock.unlock("1234")).resolves.toEqual({ ok: true })
 	})
@@ -279,7 +279,7 @@ describe("loadAppLock", () => {
 		const stored = file.data
 		const lock = await loadAppLock(file, () => Promise.reject(new Error("probe")), warn)
 
-		expect(lock.status()).toEqual({ enabled: true, locked: true, unreadable: false, retryAt: null })
+		expect(lock.status()).toEqual({ enabled: true, locked: true, unreadable: false, retryAt: null, waitingForSecureStorage: false })
 		expect(file.data).toBe(stored)
 	})
 
@@ -289,13 +289,42 @@ describe("loadAppLock", () => {
 		const stored = file.data
 		const memory = await loadAppLock(file, () => Promise.resolve(null), warn)
 
-		expect(memory.status()).toEqual({ enabled: false, locked: false, unreadable: false, retryAt: null })
+		expect(memory.status()).toEqual({ enabled: false, locked: false, unreadable: false, retryAt: null, waitingForSecureStorage: true })
 		expect(file.data).toBe(stored)
 
 		const back = await loadAppLock(file, () => Promise.resolve(cipher), warn)
 
 		expect(back.status()).toMatchObject({ enabled: true, locked: true, unreadable: false })
 		await expect(back.unlock("1234")).resolves.toEqual({ ok: true })
+	})
+
+	it("refuses a new PIN over an encrypted one that waits for secure storage, until a reset or a run that has it", async () => {
+		const cipher = fakeCipher()
+		const { file } = await lockWithPin("1234", memoryFile(), cipher)
+		const stored = file.data
+		const memory = await loadAppLock(file, () => Promise.resolve(null), warn)
+
+		await expect(memory.set("5678", null)).resolves.toEqual({ ok: false, retryAt: null })
+		expect(file.data).toBe(stored)
+		expect(memory.status()).toMatchObject({ enabled: false, waitingForSecureStorage: true })
+		expect(warn).toHaveBeenCalledWith("app lock: a new PIN is refused while the stored one waits for secure storage")
+
+		const back = await loadAppLock(file, () => Promise.resolve(cipher), warn)
+
+		expect(back.status()).toMatchObject({ enabled: true, waitingForSecureStorage: false })
+		await expect(back.unlock("1234")).resolves.toEqual({ ok: true })
+
+		await memory.reset()
+		expect(memory.status()).toMatchObject({ waitingForSecureStorage: false })
+		await expect(memory.set("5678", null)).resolves.toEqual({ ok: true })
+		expect(file.data?.toString().startsWith("{")).toBe(true)
+	})
+
+	it("refuses no PIN over a plain record or none while there is no secure storage", async () => {
+		const lock = await loadAppLock(memoryFile(), () => Promise.resolve(null), warn)
+
+		expect(lock.status()).toMatchObject({ waitingForSecureStorage: false })
+		await expect(lock.set("1234", null)).resolves.toEqual({ ok: true })
 	})
 
 	it("fails closed on an invalid record, until a reset", async () => {
@@ -307,7 +336,13 @@ describe("loadAppLock", () => {
 
 		expect(invalid.status()).toMatchObject({ enabled: true, locked: true, unreadable: true })
 		await invalid.reset()
-		expect(invalid.status()).toEqual({ enabled: false, locked: false, unreadable: false, retryAt: null })
+		expect(invalid.status()).toEqual({
+			enabled: false,
+			locked: false,
+			unreadable: false,
+			retryAt: null,
+			waitingForSecureStorage: false
+		})
 	})
 
 	it("discards the record only when its key is gone", async () => {
@@ -322,7 +357,7 @@ describe("loadAppLock", () => {
 		cipher.failDecrypt = true
 		await expect(lock.discardUndecryptable(cipher)).resolves.toBe(true)
 		expect(file.data).toBeNull()
-		expect(lock.status()).toEqual({ enabled: false, locked: false, unreadable: false, retryAt: null })
+		expect(lock.status()).toEqual({ enabled: false, locked: false, unreadable: false, retryAt: null, waitingForSecureStorage: false })
 	})
 
 	it("never discards a plain record, which needs no key", async () => {

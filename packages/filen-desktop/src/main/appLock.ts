@@ -178,7 +178,7 @@ export interface AppLock {
 // and losing the lock on every launch would be worse. A keyring that comes or goes between runs keeps the file: a
 // plain record is read with a cipher too (and encrypted then), and an encrypted one read without a cipher is left
 // unused for a run that has it: like the session vault's file, which then reads as unreadable, it guards nothing this
-// run can read.
+// run can read, and no new PIN is set over it (status `waitingForSecureStorage`), which would replace it.
 //
 // Read once and kept in memory; every change is written before it takes effect. A file that exists but cannot be read
 // or used fails closed: the app stays locked, and only a reset (signing out) opens it; an unreadable one is read again
@@ -192,10 +192,14 @@ export async function loadAppLock(
 	let record: LockRecord | null = null
 	// "unreadable" may clear up on a later read; "invalid" never does.
 	let fault: "unreadable" | "invalid" | null = null
+	// An encrypted PIN file kept for a run with secure storage.
+	let waiting = false
 	const serial = serialQueue()
 
 	async function read(): Promise<void> {
 		let data: Buffer | null
+
+		waiting = false
 
 		try {
 			data = await file.read()
@@ -228,6 +232,7 @@ export async function loadAppLock(
 					warn("app lock: the PIN file was stored with secure storage; it is kept until that is available again")
 					record = null
 					fault = null
+					waiting = true
 
 					return
 				}
@@ -308,7 +313,8 @@ export async function loadAppLock(
 			enabled: record !== null || fault !== null,
 			locked,
 			unreadable: fault !== null,
-			retryAt: record === null ? null : retryAtOf(normalizeAttempts(record, now()), now())
+			retryAt: record === null ? null : retryAtOf(normalizeAttempts(record, now()), now()),
+			waitingForSecureStorage: waiting
 		}),
 		reload: () =>
 			serial(async () => {
@@ -335,6 +341,13 @@ export async function loadAppLock(
 		set: (pin, currentPin) =>
 			serial(async () => {
 				refuseWhileLocked()
+
+				// It would replace the PIN that waits for secure storage.
+				if (waiting) {
+					warn("app lock: a new PIN is refused while the stored one waits for secure storage")
+
+					return { ok: false, retryAt: null }
+				}
 
 				if (record !== null) {
 					const result = await attempt(currentPin ?? "")
@@ -375,6 +388,7 @@ export async function loadAppLock(
 				await file.remove()
 				record = null
 				fault = null
+				waiting = false
 				locked = false
 			}),
 		discardUndecryptable: active =>
@@ -385,6 +399,7 @@ export async function loadAppLock(
 
 				record = null
 				fault = null
+				waiting = false
 				locked = false
 
 				return true

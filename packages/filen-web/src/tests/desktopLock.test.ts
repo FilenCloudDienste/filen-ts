@@ -33,7 +33,7 @@ vi.mock("@/features/shell/lib/performLogout", () => logout)
 
 const { isDesktopLocked, refreshDesktopLock, signOutFromLock, useDesktopLock } = await import("@/features/desktop/lib/lock")
 
-const LOCKED: DesktopLockStatus = { enabled: true, locked: true, unreadable: false, retryAt: null }
+const LOCKED: DesktopLockStatus = { enabled: true, locked: true, unreadable: false, retryAt: null, waitingForSecureStorage: false }
 const UNLOCKED: DesktopLockStatus = { ...LOCKED, locked: false }
 
 beforeEach(() => {
@@ -61,14 +61,20 @@ describe("desktop app lock mirror", () => {
 		desktop.bridge.lock.status.mockRejectedValueOnce(new Error("ipc"))
 		await refreshDesktopLock()
 
-		expect(useDesktopLock.getState().status).toEqual({ enabled: true, locked: true, unreadable: true, retryAt: null })
+		expect(useDesktopLock.getState().status).toEqual({
+			enabled: true,
+			locked: true,
+			unreadable: true,
+			retryAt: null,
+			waitingForSecureStorage: false
+		})
 	})
 
 	it("signs out after main dropped the PIN, without revealing the content in between", async () => {
 		desktop.bridge.lock.reset.mockImplementationOnce(() => {
 			desktop.state.calls.push("reset")
 			// Main reports the PIN gone before the reset resolves.
-			desktop.state.listener?.({ enabled: false, locked: false, unreadable: false, retryAt: null })
+			desktop.state.listener?.({ enabled: false, locked: false, unreadable: false, retryAt: null, waitingForSecureStorage: false })
 
 			return Promise.resolve()
 		})

@@ -7,8 +7,7 @@ import type { DesktopPrefs } from "@filen/shared/desktop"
 import { PreferenceToggleRow } from "@/features/settings/components/settingRows"
 import { SettingsGroup, SettingsPage, SettingsRow } from "@/features/settings/components/settingsLayout"
 import { loadDesktopPrefs, setDesktopPref, useDesktopPrefs } from "@/features/desktop/lib/prefs"
-import { useDesktopLock } from "@/features/desktop/lib/lock"
-import { PinDialog, type PinDialogMode } from "@/features/desktop/components/pinDialog"
+import { AppLockSettings } from "@/features/desktop/components/appLockSettings"
 import { formatLogEntries } from "@/features/settings/lib/logs"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
@@ -33,9 +32,7 @@ type PrefKey = keyof DesktopPrefs
 function DesktopPage() {
 	const { t } = useTranslation(["settings", "desktop"])
 	const prefs = useDesktopPrefs(state => state.prefs)
-	const lockEnabled = useDesktopLock(state => state.status?.enabled === true)
 	const [pending, setPending] = useState<PrefKey | null>(null)
-	const [pinMode, setPinMode] = useState<PinDialogMode | null>(null)
 	const [exporting, setExporting] = useState(false)
 	const bridge = desktopBridge()
 
@@ -106,64 +103,7 @@ function DesktopPage() {
 			<SettingsGroup title={t("settingsDesktopNotificationsTitle")}>
 				{toggleRow("notifications", t("settingsDesktopNotifications"), t("settingsDesktopNotificationsDescription"))}
 			</SettingsGroup>
-			<SettingsGroup title={t("desktop:settingsLockTitle")}>
-				<SettingsRow
-					label={t("desktop:settingsLockPin")}
-					description={t("desktop:settingsLockPinDescription")}
-				>
-					{lockEnabled ? (
-						<>
-							<Button
-								type="button"
-								variant="outline"
-								aria-label={t("desktop:pinChangeTitle")}
-								onClick={() => {
-									setPinMode("change")
-								}}
-							>
-								{t("desktop:settingsLockChange")}
-							</Button>
-							<Button
-								type="button"
-								variant="outline"
-								aria-label={t("desktop:pinRemoveTitle")}
-								onClick={() => {
-									setPinMode("remove")
-								}}
-							>
-								{t("desktop:settingsLockRemove")}
-							</Button>
-						</>
-					) : (
-						<Button
-							type="button"
-							variant="outline"
-							onClick={() => {
-								setPinMode("set")
-							}}
-						>
-							{t("desktop:settingsLockSet")}
-						</Button>
-					)}
-				</SettingsRow>
-				{lockEnabled ? (
-					<SettingsRow
-						label={t("desktop:settingsLockNow")}
-						description={t("desktop:settingsLockNowDescription")}
-					>
-						<Button
-							type="button"
-							variant="outline"
-							aria-label={t("desktop:settingsLockNow")}
-							onClick={() => {
-								bridge?.lock.lock()
-							}}
-						>
-							{t("desktop:settingsLockNowAction")}
-						</Button>
-					</SettingsRow>
-				) : null}
-			</SettingsGroup>
+			<AppLockSettings />
 			<SettingsGroup title={t("desktop:settingsLogsTitle")}>
 				<SettingsRow
 					label={t("desktop:settingsLogsExport")}
@@ -186,12 +126,6 @@ function DesktopPage() {
 					<span className="text-sm text-muted-foreground tabular-nums">{bridge?.app.version}</span>
 				</SettingsRow>
 			</SettingsGroup>
-			<PinDialog
-				mode={pinMode}
-				onClose={() => {
-					setPinMode(null)
-				}}
-			/>
 		</SettingsPage>
 	)
 }

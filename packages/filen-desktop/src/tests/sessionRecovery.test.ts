@@ -80,7 +80,13 @@ describe("sessionDiscarder", () => {
 
 		expect(context.sessionFile.data).toBeNull()
 		expect(context.lockFile.data).toBeNull()
-		expect(context.lock.status()).toEqual({ enabled: false, locked: false, unreadable: false, retryAt: null })
+		expect(context.lock.status()).toEqual({
+			enabled: false,
+			locked: false,
+			unreadable: false,
+			retryAt: null,
+			waitingForSecureStorage: false
+		})
 		expect(context.stash.data).not.toBeNull()
 		expect(context.credentials.first.data).toBeNull()
 		expect(context.credentials.second.data).not.toBeNull()
@@ -156,7 +162,7 @@ describe("sessionDiscarder", () => {
 
 		const back = await loadAppLock(lockFile, () => Promise.resolve(cipher), vi.fn())
 
-		expect(back.status()).toEqual({ enabled: false, locked: false, unreadable: false, retryAt: null })
+		expect(back.status()).toEqual({ enabled: false, locked: false, unreadable: false, retryAt: null, waitingForSecureStorage: false })
 	})
 
 	it("without secure storage, keeps a PIN stored without it", async () => {
