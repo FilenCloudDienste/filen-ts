@@ -26,6 +26,7 @@ import {
 	unlockThroughScreen
 } from "../app.ts"
 import { runDir } from "../cloud.ts"
+import { crossCheck, describeVault, seedSession, SESSION_SHAPE } from "../seed.ts"
 import { offlineBlockFor } from "../offlineBlock.ts"
 import { runOfflineProbe } from "../spikes/offline.ts"
 import { runOfflineCheck } from "./offlineCheck.ts"
@@ -47,10 +48,11 @@ import {
 	type SignOutWitness
 } from "./common.ts"
 
-// Chain P at deep depth: N-1 on a clean machine is set up through its own page (the real sign-in form, the native
-// folder chooser), syncs three pairs, and is updated to N by its own updater. N must then hold everything: no
-// transfer or rewrite on either side, the session and PIN, the pairs, the drive and WebDAV, the preferences. Then the
-// user signs out through the account menu and uninstalls; what remains is inventoried.
+// Chain P at deep depth: N-1 on a clean machine is set up through its own page (the real sign-in form, or the run's
+// session seeded where the plan says so, scripts/ci/e2e/seed.ts; the native folder chooser), syncs three pairs, and
+// is updated to N by its own updater. N must then hold everything: no transfer or rewrite on either side, the session
+// and PIN, the pairs, the drive and WebDAV, the preferences. Then the user signs out through the account menu and
+// uninstalls; what remains is inventoried.
 //
 // The assertion table (each one a finding):
 //   P1  update path                  the update scenario's own checks (scripts/ci/e2e/update.ts)
@@ -123,19 +125,37 @@ export async function runPreviousDeep(options: Omit<UpdateOptions, "hooks">, art
 			return `session ${status}, migration ${stage}`
 		})
 
-		await chain.stagger()
+		if (chain.signIn === "real") {
+			await chain.stagger()
+			await findings.must("sign in through the 4.x form (one attempt)", async () => {
+				try {
+					chain.signedIn = true
 
-		await findings.must("sign in through the 4.x form (one attempt)", async () => {
-			try {
-				chain.signedIn = true
+					return await signIn(page(), credentials.email, credentials.password, START_TIMEOUT_MS)
+				} catch (error) {
+					findings.attach("previous-sign-in-page.txt", await pageText(page(), 4000))
 
-				return await signIn(page(), credentials.email, credentials.password, START_TIMEOUT_MS)
-			} catch (error) {
-				findings.attach("previous-sign-in-page.txt", await pageText(page(), 4000))
+					throw error
+				}
+			})
+			await findings.check("the stored session is what the seed stores, with the handed session's API key", async () =>
+				crossCheck(await describeVault(page(), chain.client.apiKey), SESSION_SHAPE, text =>
+					findings.attach("previous-session-shape.json", text)
+				)
+			)
+		} else {
+			await findings.must("signed in with the handed session (seeded, no login)", async () => {
+				try {
+					chain.signedIn = true
 
-				throw error
-			}
-		})
+					return await seedSession(page(), chain.client, START_TIMEOUT_MS)
+				} catch (error) {
+					findings.attach("previous-sign-in-page.txt", await pageText(page(), 4000))
+
+					throw error
+				}
+			})
+		}
 
 		// The startup reminder is modal over the shell; put off before anything else, so it covers nothing that follows.
 		findings.info(

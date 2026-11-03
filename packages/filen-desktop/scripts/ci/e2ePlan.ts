@@ -13,9 +13,16 @@ import { appendFileSync, readFileSync } from "node:fs"
 //               DEEP_TRIAL entry FORMATS names)
 //   SPIKE       none | s1 | s7 | cloud | offline: a dispatch-only spike instead of the update scenarios (cloud: the
 //               harness's cloud self-test, no app; offline: deep N-1 -> N with an offline/reconnect probe, signed in)
+//   SIGNIN      custom only: auto | real. auto signs in through a form once per OS and chain (the rest seeded), real
+//               signs every deep chain in through its form
 //
-// Deep entries sign in: `session` tells the workflow to make the run's one harness sign-in, and each deep entry gets a
-// `stagger` (seconds) that spaces the UI sign-ins of parallel jobs.
+// Deep entries are signed in: `session` tells the workflow to provide the run's sessions (job `session`: cached, or one
+// harness login per slot), and each deep chain signs in through its app's real form or is seeded with that session
+// (scripts/ci/e2e/seed.ts). Logins are rate-limited (90 an hour per IP), so per OS one 4.x and one 3.0.53 chain sign in
+// for real, on different entries where the OS has more than one: rotated by the day at night, so every entry's form
+// is exercised within days, and fixed in release and custom runs. Entries whose chains sign in for real get a
+// `stagger` (seconds) that spaces those sign-ins between parallel jobs. `logins` is the run's worst case (every slot
+// minted), which may not pass MAX_LOGINS_PER_RUN.
 //
 //   node scripts/ci/e2ePlan.ts
 
@@ -23,6 +30,8 @@ export type Os = "windows" | "mac" | "linux"
 export type Profile = "release" | "nightly" | "custom"
 export type Spike = "s1" | "s7" | "cloud" | "offline"
 export type Depth = "auto" | "install" | "deep"
+// How a deep chain signs in: through its app's real form, or seeded with the run's session (scripts/ci/e2e/seed.ts).
+export type SignIn = "real" | "seeded"
 
 interface Entry {
 	os: Os
@@ -40,6 +49,9 @@ export interface TestEntry extends Entry {
 	deep: boolean
 	deepPrevious: boolean
 	deepLegacy: boolean
+	// "" where that chain is not deep.
+	signInPrevious: SignIn | ""
+	signInLegacy: SignIn | ""
 	stagger: number
 	spike: Spike | ""
 }
@@ -60,13 +72,18 @@ export interface PlanInput {
 	formats: string
 	depth: string
 	spike: string
+	signin: string
+	// Days since the Unix epoch (UTC): the nightly's rotation of real sign-ins.
+	day: number
 }
 
 export interface Plan {
 	profile: Profile
 	spike: Spike | ""
-	// The run's one harness sign-in is needed.
+	// The run's sessions are needed (job `session`).
 	session: boolean
+	// The most logins the run can make: every session slot minted, every real UI sign-in.
+	logins: number
 	builds: BuildEntry[]
 	tests: TestEntry[]
 	notices: string[]
@@ -165,6 +182,12 @@ export const DEEP_READY: DeepScenarios = {
 export const DEEP_TRIAL: DeepScenarios = {}
 // Seconds between the UI sign-ins of parallel deep jobs.
 const STAGGER_SECONDS = 20
+// The session job's slots, each minted at most once a run (scripts/ci/e2e/session.ts SLOTS; this planner runs with no
+// dependencies installed, so it cannot import them).
+export const SESSION_SLOTS = 2
+// A run's worst case, whatever is asked: with MAX_OTHER_RUNS others (desktop-e2e.yml) the account stays well inside
+// its 90 logins an hour even if every runner shared one IP.
+export const MAX_LOGINS_PER_RUN = 10
 
 const builders: Record<Os, string> = { windows: "windows-latest", mac: "macos-26", linux: "ubuntu-latest" }
 
@@ -211,8 +234,18 @@ export function plan(input: PlanInput, readiness: DeepReadiness = { ready: DEEP_
 		invalid(`DEPTH must be auto, install or deep (got "${input.depth}")`)
 	}
 
+	const signin = (["auto", "real"] as const).find(candidate => candidate === (input.signin === "" ? "auto" : input.signin))
+
+	if (signin === undefined) {
+		invalid(`SIGNIN must be auto or real (got "${input.signin}")`)
+	}
+
+	if (signin === "real" && profile !== "custom") {
+		invalid("SIGNIN real applies to the custom profile only")
+	}
+
 	if (spike === "cloud") {
-		return { profile, spike, session: true, builds: [], tests: [], notices: [] }
+		return { profile, spike, session: true, logins: SESSION_SLOTS, builds: [], tests: [], notices: [] }
 	}
 
 	const scenarios = input.scenarios.trim() === "" ? ["previous", "legacy"] : list(input.scenarios)
@@ -298,23 +331,49 @@ export function plan(input: PlanInput, readiness: DeepReadiness = { ready: DEEP_
 		notices.push(`Deep depth is not built yet for ${notReady.join(", ")}; they run at install depth.`)
 	}
 
-	let deepCount = 0
-	const tests = chosen.map((entry): TestEntry => {
+	const deepChains = chosen.map(entry => {
 		const id = idOf(entry)
-		// The offline spike is chain P at deep depth with its probe (one 4.x sign-in per entry).
-		const deepPrevious = spike === "offline" || (previous && wantsDeep(id) && ready(id, "previous"))
-		const deepLegacy = legacy && wantsDeep(id) && ready(id, "legacy")
-		const deep = deepPrevious || deepLegacy
+
+		// The offline spike is chain P at deep depth with its probe.
+		return {
+			entry,
+			deepPrevious: spike === "offline" || (previous && wantsDeep(id) && ready(id, "previous")),
+			deepLegacy: legacy && wantsDeep(id) && ready(id, "legacy")
+		}
+	})
+	// Per OS, the entries whose chain signs in for real: one 4.x and one 3.0.53, the next entry along for 3.0.53, so the
+	// two land on different entries where there are two. At night the turn is the day's; otherwise the first.
+	const turn = profile === "nightly" ? input.day : 0
+	const real = (chain: "deepPrevious" | "deepLegacy", offset: number): Set<Entry> =>
+		new Set(
+			oses.flatMap(os => {
+				const candidates = deepChains.filter(item => item.entry.os === os && item[chain]).map(item => item.entry)
+				const pick = candidates[(turn + offset) % Math.max(candidates.length, 1)]
+
+				return signin === "real" ? candidates : pick === undefined ? [] : [pick]
+			})
+		)
+	const realPrevious = real("deepPrevious", 0)
+	const realLegacy = real("deepLegacy", 1)
+	const signInOf = (deep: boolean, isReal: boolean): SignIn | "" => (!deep ? "" : isReal ? "real" : "seeded")
+
+	let realCount = 0
+	const tests = deepChains.map(({ entry, deepPrevious, deepLegacy }): TestEntry => {
+		const signInPrevious = signInOf(deepPrevious, realPrevious.has(entry))
+		const signInLegacy = signInOf(deepLegacy, realLegacy.has(entry))
 
 		return {
 			...entry,
 			signed: sign[entry.os],
 			previous,
 			legacy,
-			deep,
+			deep: deepPrevious || deepLegacy,
 			deepPrevious,
 			deepLegacy,
-			stagger: deep ? STAGGER_SECONDS * deepCount++ : 0,
+			signInPrevious,
+			signInLegacy,
+			// Only the form sign-ins are spaced; a seeded chain makes no login.
+			stagger: signInPrevious === "real" || signInLegacy === "real" ? STAGGER_SECONDS * realCount++ : 0,
 			spike
 		}
 	})
@@ -322,7 +381,23 @@ export function plan(input: PlanInput, readiness: DeepReadiness = { ready: DEEP_
 		.filter(os => tests.some(entry => entry.os === os))
 		.map((os): BuildEntry => ({ os, runner: builders[os], sign: sign[os] }))
 
-	return { profile, spike, session: deepCount > 0, builds, tests, notices }
+	const session = tests.some(entry => entry.deep)
+	// Spike s7 signs in through the 4.x form on its own.
+	const logins =
+		(session ? SESSION_SLOTS : 0) +
+		tests.reduce(
+			(sum, entry) =>
+				sum + Number(entry.signInPrevious === "real") + Number(entry.signInLegacy === "real") + Number(entry.spike === "s7"),
+			0
+		)
+
+	if (logins > MAX_LOGINS_PER_RUN) {
+		invalid(
+			`the run could log in ${String(logins)} times, more than MAX_LOGINS_PER_RUN (${String(MAX_LOGINS_PER_RUN)}): name fewer formats or sign in with auto`
+		)
+	}
+
+	return { profile, spike, session, logins, builds, tests, notices }
 }
 
 if (import.meta.main) {
@@ -339,7 +414,9 @@ if (import.meta.main) {
 			legacy: env("LEGACY") !== "false",
 			formats: env("FORMATS"),
 			depth: env("DEPTH"),
-			spike: env("SPIKE")
+			spike: env("SPIKE"),
+			signin: env("SIGNIN"),
+			day: Math.floor(Date.now() / 86_400_000)
 		})
 
 		for (const notice of result.notices) {
@@ -350,6 +427,7 @@ if (import.meta.main) {
 			profile: result.profile,
 			spike: result.spike,
 			session: String(result.session),
+			logins: String(result.logins),
 			"next-version": version,
 			"prev-version": previousVersion(version),
 			"build-matrix": JSON.stringify({ include: result.builds }),

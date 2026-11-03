@@ -1,6 +1,15 @@
 import { describe, expect, it } from "vitest"
 import { refusal } from "../../scripts/ci/e2e/context.ts"
-import { DEEP_READY, DEEP_TRIAL, plan, type Plan, type PlanInput, previousVersion } from "../../scripts/ci/e2ePlan.ts"
+import { SLOTS } from "../../scripts/ci/e2e/session.ts"
+import {
+	DEEP_READY,
+	DEEP_TRIAL,
+	MAX_LOGINS_PER_RUN,
+	plan,
+	type PlanInput,
+	previousVersion,
+	SESSION_SLOTS
+} from "../../scripts/ci/e2ePlan.ts"
 
 const dispatch: PlanInput = {
 	platforms: "windows,mac,linux",
@@ -11,7 +20,9 @@ const dispatch: PlanInput = {
 	legacy: true,
 	formats: "",
 	depth: "",
-	spike: "none"
+	spike: "none",
+	signin: "",
+	day: 0
 }
 
 const ids = (input: PlanInput) => plan(input).tests.map(entry => `${entry.platform}-${entry.arch}-${entry.format}`)
@@ -87,9 +98,10 @@ describe("e2ePlan", () => {
 		])
 		expect(offline.tests.every(entry => entry.spike === "offline" && entry.deep && entry.deepPrevious && !entry.deepLegacy)).toBe(true)
 		expect(offline.tests.every(entry => !entry.previous && !entry.legacy)).toBe(true)
-		// The harness sign-in, then 4.x on each OS.
+		// Both slots at worst, then 4.x on each OS through its form (the only deep entry of its OS).
 		expect(offline.session).toBe(true)
-		expect(1 + offline.tests.length).toBe(4)
+		expect(offline.tests.every(entry => entry.signInPrevious === "real" && entry.signInLegacy === "")).toBe(true)
+		expect(offline.logins).toBe(SESSION_SLOTS + 3)
 	})
 })
 
@@ -98,10 +110,6 @@ describe("e2ePlan depth", () => {
 		plan(input)
 			.tests.filter(entry => entry.deep)
 			.map(entry => `${entry.platform}-${entry.arch}-${entry.format}@${String(entry.stagger)}`)
-
-	// The run's logins: the harness sign-in, then one UI sign-in per deep chain.
-	const logins = (result: Plan) =>
-		(result.session ? 1 : 0) + result.tests.reduce((sum, entry) => sum + Number(entry.deepPrevious) + Number(entry.deepLegacy), 0)
 
 	it("makes the built deep entries deep, staggers them and asks for the harness sign-in", () => {
 		const nightly = plan({ ...dispatch, platforms: "", profile: "", eventName: "schedule", spike: "" })
@@ -116,8 +124,8 @@ describe("e2ePlan depth", () => {
 			"mac-x64-dmg@60",
 			"linux-x64-deb@80",
 			"linux-x64-AppImage@100",
-			"linux-arm64-deb@120",
-			"linux-arm64-AppImage@140"
+			"linux-arm64-deb@0",
+			"linux-arm64-AppImage@0"
 		])
 		expect(nightly.session).toBe(true)
 		expect([windows?.deepPrevious, windows?.deepLegacy]).toEqual([true, true])
@@ -137,26 +145,23 @@ describe("e2ePlan depth", () => {
 		expect(nightly.tests.filter(entry => entry.format === "rpm").some(entry => entry.deep)).toBe(false)
 		// No rotation: every deep format every night, all of them deep.
 		expect(nightly.notices.some(notice => notice.startsWith("Deep depth is not built yet"))).toBe(false)
-		// The session, then 4.x and 3.0.53 on Windows x64 and arm64, macOS arm64 and x64, and Linux deb and AppImage on
-		// x64 and arm64.
-		expect(logins(nightly)).toBe(17)
-		// Once every trial is promoted: both chains on eight entries.
+		// Both slots at worst, then one 4.x and one 3.0.53 form sign-in per OS; the other chains are seeded.
+		expect(nightly.logins).toBe(SESSION_SLOTS + 6)
+		// Once every trial is promoted: both chains on eight entries, still one form sign-in per OS and chain.
 		expect(
-			logins(
-				plan(
-					{ ...dispatch, platforms: "", profile: "", eventName: "schedule", spike: "" },
-					{
-						ready: Object.fromEntries(
-							[...new Set([...Object.keys(DEEP_READY), ...Object.keys(DEEP_TRIAL)])].map(id => [
-								id,
-								[...(DEEP_READY[id] ?? []), ...(DEEP_TRIAL[id] ?? [])]
-							])
-						),
-						trial: {}
-					}
-				)
-			)
-		).toBe(17)
+			plan(
+				{ ...dispatch, platforms: "", profile: "", eventName: "schedule", spike: "" },
+				{
+					ready: Object.fromEntries(
+						[...new Set([...Object.keys(DEEP_READY), ...Object.keys(DEEP_TRIAL)])].map(id => [
+							id,
+							[...(DEEP_READY[id] ?? []), ...(DEEP_TRIAL[id] ?? [])]
+						])
+					),
+					trial: {}
+				}
+			).logins
+		).toBe(SESSION_SLOTS + 6)
 		// The nightly macOS builds are Developer-ID signed (Squirrel.Mac needs it), Windows and Linux are not.
 		expect(Object.fromEntries(nightly.builds.map(build => [build.os, build.sign]))).toEqual({ windows: false, mac: true, linux: false })
 		expect(mac?.signed).toBe(true)
@@ -167,11 +172,11 @@ describe("e2ePlan depth", () => {
 			"mac-x64-dmg@60",
 			"linux-x64-deb@80",
 			"linux-x64-AppImage@100",
-			"linux-arm64-deb@120",
-			"linux-arm64-AppImage@140"
+			"linux-arm64-deb@0",
+			"linux-arm64-AppImage@0"
 		])
-		// A custom deep run without FORMATS takes the release's deep entries.
-		expect(logins(plan({ ...dispatch, signed: true, depth: "deep" }))).toBe(17)
+		// A custom deep run without FORMATS takes the release's deep entries, with the same form sign-ins.
+		expect(plan({ ...dispatch, signed: true, depth: "deep" }).logins).toBe(SESSION_SLOTS + 6)
 	})
 
 	it("runs a trial entry deep only when a custom deep run names it", () => {
@@ -197,13 +202,13 @@ describe("e2ePlan depth", () => {
 		const arm = plan({ ...dispatch, platforms: "windows", depth: "deep", formats: "win-arm64-nsis" })
 
 		expect(arm.tests.map(entry => [entry.runner, entry.deepPrevious, entry.deepLegacy])).toEqual([["windows-11-arm", true, true]])
-		expect(logins(arm)).toBe(3)
+		expect(arm.logins).toBe(SESSION_SLOTS + 2)
 
-		// macOS chain P alone, named: 2 logins.
+		// macOS chain P alone, named: one form sign-in.
 		const mac = plan({ ...dispatch, platforms: "mac", signed: true, scenarios: "previous", depth: "deep", formats: "mac-arm64-dmg" })
 
 		expect(mac.tests.map(entry => [entry.format, entry.deepPrevious, entry.deepLegacy])).toEqual([["dmg", true, false]])
-		expect(logins(mac)).toBe(2)
+		expect(mac.logins).toBe(SESSION_SLOTS + 1)
 
 		// An AppImage named in a custom deep run: both chains.
 		const appImage = plan({ ...dispatch, platforms: "linux", depth: "deep", formats: "linux-arm64-AppImage" })
@@ -240,7 +245,7 @@ describe("e2ePlan depth", () => {
 		expect(deep({ ...dispatch, scenarios: "legacy" })).toEqual(["win-x64-nsis@0", "linux-x64-deb@20"])
 		expect(deep({ ...dispatch, scenarios: "previous" })).toEqual(["win-x64-nsis@0", "linux-x64-deb@20"])
 		expect(plan({ ...dispatch, scenarios: "legacy" }).tests.find(entry => entry.deep)?.previous).toBe(false)
-		expect(logins(plan({ ...dispatch, scenarios: "legacy" }))).toBe(3)
+		expect(plan({ ...dispatch, scenarios: "legacy" }).logins).toBe(SESSION_SLOTS + 2)
 		expect(deep({ ...dispatch, spike: "s1" })).toEqual([])
 		expect(deep({ ...dispatch, depth: "deep", formats: "linux-arm64-deb,linux-x64-rpm" })).toEqual(["linux-arm64-deb@0"])
 		expect(() => plan({ ...dispatch, depth: "deepest" })).toThrow()
@@ -251,10 +256,92 @@ describe("e2ePlan depth", () => {
 			profile: "custom",
 			spike: "cloud",
 			session: true,
+			logins: SESSION_SLOTS,
 			builds: [],
 			tests: [],
 			notices: []
 		})
+	})
+})
+
+describe("e2ePlan sign-ins", () => {
+	const nightly = { ...dispatch, platforms: "", profile: "", eventName: "schedule", spike: "" }
+	const release = { ...dispatch, profile: "release", eventName: "workflow_call", signed: true }
+	const signIns = (input: PlanInput) =>
+		plan(input)
+			.tests.filter(entry => entry.deep)
+			.map(
+				entry =>
+					`${entry.platform}-${entry.arch}-${entry.format} ${entry.signInPrevious}/${entry.signInLegacy}@${String(entry.stagger)}`
+			)
+
+	it("signs in through a form once per OS and chain, on different entries, rotated by the day at night", () => {
+		expect(signIns({ ...nightly, day: 0 })).toEqual([
+			"win-x64-nsis real/seeded@0",
+			"win-arm64-nsis seeded/real@20",
+			"mac-arm64-dmg real/seeded@40",
+			"mac-x64-dmg seeded/real@60",
+			"linux-x64-deb real/seeded@80",
+			"linux-x64-AppImage seeded/real@100",
+			"linux-arm64-deb seeded/seeded@0",
+			"linux-arm64-AppImage seeded/seeded@0"
+		])
+		expect(signIns({ ...nightly, day: 1 })).toEqual([
+			"win-x64-nsis seeded/real@0",
+			"win-arm64-nsis real/seeded@20",
+			"mac-arm64-dmg seeded/real@40",
+			"mac-x64-dmg real/seeded@60",
+			"linux-x64-deb seeded/seeded@0",
+			"linux-x64-AppImage real/seeded@80",
+			"linux-arm64-deb seeded/real@100",
+			"linux-arm64-AppImage seeded/seeded@0"
+		])
+		// Linux's four entries take four nights to come round, Windows' and macOS's two.
+		expect(signIns({ ...nightly, day: 4 })).toEqual(signIns({ ...nightly, day: 0 }))
+		expect(signIns({ ...nightly, day: 2 })).not.toEqual(signIns({ ...nightly, day: 0 }))
+	})
+
+	it("keeps release and custom runs on one choice whatever the day", () => {
+		expect(signIns({ ...release, day: 1 })).toEqual(signIns({ ...release, day: 0 }))
+		expect(signIns({ ...nightly, day: 0 })).toEqual(signIns({ ...release, day: 7 }))
+		expect(signIns({ ...dispatch, day: 3 })).toEqual(["win-x64-nsis real/real@0", "linux-x64-deb real/real@20"])
+	})
+
+	it("spaces only the entries that sign in through a form", () => {
+		expect(signIns({ ...nightly, scenarios: "previous" })).toEqual([
+			"win-x64-nsis real/@0",
+			"win-arm64-nsis seeded/@0",
+			"mac-arm64-dmg real/@20",
+			"mac-x64-dmg seeded/@0",
+			"linux-x64-deb real/@40",
+			"linux-x64-AppImage seeded/@0",
+			"linux-arm64-deb seeded/@0",
+			"linux-arm64-AppImage seeded/@0"
+		])
+	})
+
+	it("signs every deep chain in through its form only when a custom run asks, within the run's login cap", () => {
+		const custom = { ...dispatch, platforms: "windows,mac", signed: true, depth: "deep", signin: "real" }
+
+		expect(signIns(custom)).toEqual([
+			"win-x64-nsis real/real@0",
+			"win-arm64-nsis real/real@20",
+			"mac-arm64-dmg real/real@40",
+			"mac-x64-dmg real/real@60"
+		])
+		expect(plan(custom).logins).toBe(MAX_LOGINS_PER_RUN)
+		// Linux's four deep entries alone sign in eight times through forms, at the cap; every OS is above it.
+		expect(plan({ ...custom, platforms: "linux" }).logins).toBe(MAX_LOGINS_PER_RUN)
+		expect(() => plan({ ...custom, platforms: "" })).toThrow(/MAX_LOGINS_PER_RUN/)
+		expect(plan({ ...custom, platforms: "", signin: "auto" }).logins).toBe(SESSION_SLOTS + 6)
+		expect(() => plan({ ...nightly, signin: "real" })).toThrow(/custom profile only/)
+		expect(() => plan({ ...dispatch, signin: "seeded" })).toThrow(/SIGNIN/)
+		expect(plan({ ...dispatch, profile: "nightly", spike: "s7" }).logins).toBe(1)
+		expect(plan({ ...dispatch, depth: "install" }).logins).toBe(0)
+	})
+
+	it("counts the session job's slots", () => {
+		expect(SESSION_SLOTS).toBe(Object.keys(SLOTS).length)
 	})
 })
 

@@ -48,6 +48,7 @@ import {
 	quitLegacy,
 	watchLegacySync
 } from "../legacyApp.ts"
+import { crossCheck, describeLegacy, LEGACY_SDK_CONFIG_SHAPE, seedLegacy } from "../seed.ts"
 import { cloudSnapshot, diffSnapshots, filesHolding, localSnapshot, snapshotText, type Snapshot, type SnapshotNode } from "../snapshot.ts"
 import { legacyLogOf, START_TIMEOUT_MS, tail, type UpdateOptions } from "../update.ts"
 import {
@@ -64,10 +65,11 @@ import {
 	type SignOutWitness
 } from "./common.ts"
 
-// Chain L at deep depth: the real 3.0.53 is signed in through its own page and given what a user sets up (prefs, a PIN
-// with a lock timeout, the network drive, WebDAV and five sync pairs, one per mode, the dot-file and local-trash switches
-// mixed), syncs until it settles, and quits. One file changes on disk and one in the cloud while it is closed. Its own
-// updater then installs N from the loopback feed (its sync held for that launch, so the edits wait for N), and N must
+// Chain L at deep depth: the real 3.0.53 is signed in through its own page (or seeded with the run's session where the
+// plan says so: what its login stores, scripts/ci/e2e/seed.ts) and given what a user sets up (prefs, a PIN with a lock
+// timeout, the network drive, WebDAV and five sync pairs, one per mode, the dot-file and local-trash switches mixed),
+// syncs until it settles, and quits. One file changes on disk and one in the cloud while it is closed. Its own updater
+// then installs N from the loopback feed (its sync held for that launch, so the edits wait for N), and N must
 // migrate everything invisibly: the account without a sign-in, the PIN, prefs and mounts, every pair with its mode,
 // downloading the cloud edit and holding the disk edit as a conflict (N imports none of the old sync history, so a
 // two-way path changed on one side is a conflict), moving nothing else. Then the user signs out and uninstalls.
@@ -184,15 +186,32 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 
 		state.legacy = { launched, renderer: await connectRenderer(launched.debugPort, LEGACY_ORIGIN, START_TIMEOUT_MS) }
 
-		await chain.stagger()
-		await findings.must(`sign in through the ${LEGACY_VERSION} form (one attempt)`, async () => {
-			const account = await legacySignIn(legacyPage(), credentials.email, credentials.password, START_TIMEOUT_MS)
+		if (chain.signIn === "real") {
+			await chain.stagger()
+			await findings.must(`sign in through the ${LEGACY_VERSION} form (one attempt)`, async () => {
+				const account = await legacySignIn(legacyPage(), credentials.email, credentials.password, START_TIMEOUT_MS)
 
-			state.apiKey = account.apiKey
-			chain.secret(account.apiKey)
+				state.apiKey = account.apiKey
+				chain.secret(account.apiKey)
 
-			return `signed in (userId ${String(account.userId)})`
-		})
+				return `signed in (userId ${String(account.userId)})`
+			})
+			await findings.check(
+				`${LEGACY_VERSION}'s stored account is what the seed stores, with the handed session's API key`,
+				async () =>
+					crossCheck(await describeLegacy(legacyPage(), chain.client.apiKey), LEGACY_SDK_CONFIG_SHAPE, text =>
+						findings.attach("legacy-sdk-config-shape.json", text)
+					)
+			)
+		} else {
+			await findings.must(`${LEGACY_VERSION} signed in with the handed session (seeded, no login)`, async () => {
+				const userId = await seedLegacy(legacyPage(), chain.client, START_TIMEOUT_MS)
+
+				state.apiKey = chain.client.apiKey
+
+				return `seeded its sdkConfig, desktopConfig and authed; the reloaded page took the account (userId ${String(userId)})`
+			})
+		}
 
 		await findings.must("fixtures: five pair trees, each seeded on one side", async () => {
 			await cloud.mkdir(cloudDir)

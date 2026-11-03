@@ -11,6 +11,7 @@ import type {
 	DesktopSyncPlan,
 	DesktopSyncResult
 } from "@filen/shared/desktop"
+import type { StringifiedClient } from "@filen/sdk-rs"
 import type { Page } from "playwright-core"
 import { errorMessage, fail, waitFor } from "../../support.ts"
 import { PROFILE_ENTRIES } from "../../../../src/main/signOut.ts"
@@ -23,7 +24,8 @@ import { createFindings, type Findings } from "../findings.ts"
 import { exitWithin, launchDebuggable, type LaunchExtra, type Launched } from "../launch.ts"
 import { type DesktopOs, osFor } from "../os.ts"
 import { redactor } from "../redact.ts"
-import { type Credentials, harnessRemote, type HarnessRemote, mask, secretsOf, takeCredentials } from "../session.ts"
+import { type SignIn, signInMode } from "../seed.ts"
+import { type Credentials, harnessSession, type HarnessRemote, mask, secretsOf, takeCredentials } from "../session.ts"
 import { filesHolding, localSnapshot, type Snapshot } from "../snapshot.ts"
 import { runUpdate, START_TIMEOUT_MS, tail, type UpdateHooks, type UpdateOptions } from "../update.ts"
 
@@ -214,6 +216,10 @@ export interface Chain {
 	readonly artifacts: string
 	readonly credentials: Credentials
 	readonly remote: HarnessRemote
+	// The run's handed session, which seeds the app when this chain does not sign in through its form.
+	readonly client: StringifiedClient
+	// Through the form, or seeded (the plan's choice for this entry and chain).
+	readonly signIn: SignIn
 	readonly findings: Findings
 	readonly cloud: Cloud
 	readonly os: DesktopOs
@@ -252,7 +258,8 @@ export interface Chain {
 	// Once that launch quit: none of the profile's entries is the one from before it, and no profile file holds the
 	// witness's value or `oldValues`.
 	profileHoldsNoOldValue(witness: SignOutWitness, oldValues?: readonly string[]): string
-	// Deep jobs sign in some seconds apart (the plan's per-entry offset); logins are rate-limited per account.
+	// Deep jobs that sign in through a form do so some seconds apart (the plan's per-entry offset); logins are
+	// rate-limited.
 	stagger(): Promise<void>
 	// The local snapshot of a pair root, the engine's bin left out.
 	snapshotOf(name: string): Promise<Snapshot>
@@ -274,7 +281,7 @@ export async function openChain(name: string, options: Omit<UpdateOptions, "hook
 	const os = osFor(target)
 
 	const credentials = takeCredentials()
-	const remote = harnessRemote(credentials)
+	const { client, remote } = harnessSession()
 	const secrets = [credentials.email, credentials.password, ...secretsOf(remote)]
 	const findings = createFindings(name, artifacts, text => redactor(secrets)(text))
 	const cloud = await openCloud(remote, work)
@@ -296,6 +303,8 @@ export async function openChain(name: string, options: Omit<UpdateOptions, "hook
 		artifacts,
 		credentials,
 		remote,
+		client,
+		signIn: signInMode(),
 		findings,
 		cloud,
 		os,

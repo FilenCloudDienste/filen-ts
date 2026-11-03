@@ -21,7 +21,25 @@ import { parseAbout } from "../../scripts/ci/e2e/cloud.ts"
 import { createFindings } from "../../scripts/ci/e2e/findings.ts"
 import { appImagePrefixes, appImageTree, type ProcessEntry, xwdToPng } from "../../scripts/ci/e2e/linux.ts"
 import { describeSample, sampleOf, windowsFirewallRules } from "../../scripts/ci/e2e/offlineBlock.ts"
-import { openRemote, readSealed, remoteOf, sealRemote, secretsOf, SESSION_FILE_ENV, writeSealed } from "../../scripts/ci/e2e/session.ts"
+import { describeStored, LEGACY_SDK_CONFIG_SHAPE, legacySeed, SESSION_SHAPE, sessionEnvelope } from "../../scripts/ci/e2e/seed.ts"
+import {
+	cacheKey,
+	CACHE_DIR_ENV,
+	canonicalClient,
+	harnessSession,
+	openRecord,
+	readCached,
+	readHandOff,
+	remoteOf,
+	runKey,
+	sealRecord,
+	secretsOf,
+	SESSION_DIR_ENV,
+	SESSION_KEY_ENV,
+	writeCached,
+	writeHandOff
+} from "../../scripts/ci/e2e/session.ts"
+import { LEGACY_KEYS, legacySession } from "../../src/main/legacyData.ts"
 import { diffSnapshots, localSnapshot } from "../../scripts/ci/e2e/snapshot.ts"
 import { isChromiumChild } from "../../scripts/ci/targets.ts"
 
@@ -125,37 +143,164 @@ describe("e2e harness session", () => {
 		expect(secretsOf(remote)).toEqual(["api-key", "key-one", "key-two", remote.privateKey, remote.publicKey])
 	})
 
-	it("hands the sealed session over as a file, never through the environment", () => {
-		const file = path.join(tempDir(), "session", "session.sealed")
-		const before = process.env[SESSION_FILE_ENV]
+	const secret = "an organization secret of at least 32 characters"
+	const record = { client, mintedAt: 1_700_000_000_000 }
 
-		process.env[SESSION_FILE_ENV] = file
+	// Runs `body` with the given environment, restoring every variable it names afterwards.
+	const withEnv = (env: Record<string, string>, body: () => void): void => {
+		const before = Object.fromEntries(Object.keys(env).map(name => [name, process.env[name]]))
+
+		Object.assign(process.env, env)
 
 		try {
-			const sealed = sealRemote(remoteOf(client), "password", "123")
-
-			expect(writeSealed(sealed)).toBe(file)
-			expect(readSealed()).toBe(sealed)
-			expect(Object.values(process.env)).not.toContain(sealed)
-			process.env[SESSION_FILE_ENV] = path.join(tempDir(), "missing")
-			expect(() => readSealed()).toThrow(/names no sealed session/)
+			body()
 		} finally {
-			if (before === undefined) {
-				delete process.env[SESSION_FILE_ENV]
-			} else {
-				process.env[SESSION_FILE_ENV] = before
+			for (const [name, value] of Object.entries(before)) {
+				if (value === undefined) {
+					delete process.env[name]
+				} else {
+					process.env[name] = value
+				}
 			}
 		}
-	})
+	}
 
-	it("seals the session for one run and password only", () => {
-		const remote = remoteOf(client)
-		const sealed = sealRemote(remote, "password", "123")
+	it("seals a record for its slot under a key from the secret, and for the run's hand-off under the run as salt", () => {
+		const sealed = sealRecord(record, cacheKey(secret), "test")
 
 		expect(sealed).not.toContain("api-key")
-		expect(openRemote(sealed, "password", "123")).toEqual(remote)
-		expect(() => openRemote(sealed, "password", "124")).toThrow()
-		expect(() => openRemote(sealed, "wrong", "123")).toThrow()
+		expect(openRecord(sealed, cacheKey(secret), "test")).toEqual(record)
+		expect(() => openRecord(sealed, cacheKey(secret), "quota")).toThrow()
+		expect(() => openRecord(sealed, cacheKey(`${secret}!`), "test")).toThrow()
+		expect(() => openRecord(sealed, runKey(secret, "123"), "test")).toThrow()
+		expect(openRecord(sealRecord(record, runKey(secret, "123"), "test"), runKey(secret, "123"), "test")).toEqual(record)
+		expect(() => openRecord(sealRecord(record, runKey(secret, "123"), "test"), runKey(secret, "124"), "test")).toThrow()
+		expect(() => openRecord(`${sealed}.x`, cacheKey(secret), "test")).toThrow(/malformed/)
+	})
+
+	it("hands the sealed session over as a file, never through the environment", () => {
+		const dir = path.join(tempDir(), "session")
+
+		withEnv({ [SESSION_DIR_ENV]: dir, [SESSION_KEY_ENV]: secret, GITHUB_RUN_ID: "123" }, () => {
+			expect(writeHandOff("test", record, secret)).toBe(path.join(dir, "test.sealed"))
+			expect(Object.values(process.env).some(value => value?.includes(readHandOff("test")))).toBe(false)
+			expect(harnessSession("test")).toEqual({ client, remote: remoteOf(client) })
+			expect(process.env[SESSION_KEY_ENV]).toBeUndefined()
+			expect(() => readHandOff("quota")).toThrow(/holds no sealed quota session/)
+		})
+	})
+
+	it("takes a cached copy that does not open as a miss", () => {
+		const dir = path.join(tempDir(), "cache")
+
+		withEnv({ [CACHE_DIR_ENV]: dir }, () => {
+			expect(readCached("test", secret)).toBeNull()
+			writeCached("test", record, secret)
+			expect(readCached("test", secret)).toEqual(record)
+			expect(readCached("test", `${secret}!`)).toBeNull()
+			writeFileSync(path.join(dir, "quota.sealed"), "not.sealed.text")
+			expect(readCached("quota", secret)).toBeNull()
+		})
+	})
+
+	it("keeps the stringified client's fields in sdk-rs's order and drops unset limits", () => {
+		const { authVersion, apiKey, ...rest } = client
+		const shuffled = { authVersion, apiKey, maxIoMemoryUsage: null, ...rest } as unknown as typeof client
+
+		expect(Object.keys(canonicalClient(shuffled))).toEqual(Object.keys(client))
+		expect(canonicalClient({ ...client, maxParallelRequests: 4 }).maxParallelRequests).toBe(4)
+	})
+})
+
+describe("e2e sign-in seeds", () => {
+	const { privateKey, publicKey } = generateKeyPairSync("rsa", { modulusLength: 2048 })
+	const client = {
+		email: "e2e@example.invalid",
+		userId: 123n,
+		rootUuid: "00000000-0000-0000-0000-000000000001",
+		authInfo: "key-one|key-two",
+		privateKey: privateKey.export({ type: "pkcs8", format: "der" }).toString("base64"),
+		apiKey: "a".repeat(64),
+		authVersion: 2
+	}
+	// What 3.0.53's signed-out start stores (filen-web 0.2.3 setup() for a fresh install): @filen/sdk 0.4.2's
+	// ANONYMOUS_SDK_CONFIG with connectToSocket and metadataCache on, and DEFAULT_DESKTOP_CONFIG around a copy.
+	const anonymousSdk = {
+		email: "anonymous@filen.io",
+		password: "anonymous",
+		masterKeys: ["anonymous"],
+		connectToSocket: true,
+		metadataCache: true,
+		twoFactorCode: "XXXXXX",
+		publicKey: "anonymous",
+		privateKey: "anonymous",
+		apiKey: "anonymous",
+		authVersion: 3,
+		baseFolderUUID: "anonymous",
+		userId: 1,
+		tmpPath: "/tmp"
+	}
+	const anonymous = {
+		sdkConfig: anonymousSdk,
+		desktopConfig: {
+			sdkConfig: anonymousSdk,
+			webdavConfig: { enabled: false, username: "admin", password: "admin", hostname: "127.0.0.1", port: 1900 },
+			s3Config: { enabled: false },
+			networkDriveConfig: { enabled: false, mountPoint: "/tmp/filen" },
+			syncConfig: { enabled: true, syncPairs: [], dbPath: "" }
+		}
+	}
+
+	it("seeds 4.x with the envelope persistSession stores, in a real sign-in's shape", () => {
+		const envelope = sessionEnvelope({ ...client, maxParallelRequests: undefined } as typeof client)
+
+		expect(envelope).toBe(
+			`{"email":"e2e@example.invalid","userId":"$bigint:123n","rootUuid":"${client.rootUuid}","authInfo":"key-one|key-two","privateKey":"${client.privateKey}","apiKey":"${client.apiKey}","authVersion":2}`
+		)
+		expect(describeStored(envelope, client.apiKey)).toEqual({ shape: [...SESSION_SHAPE], sameKey: true })
+		expect(describeStored(envelope, "b".repeat(64)).sameKey).toBe(false)
+	})
+
+	it("seeds 3.0.53 with what its login stores, in a real sign-in's shape, which 4.x then migrates", () => {
+		const seed = legacySeed(client, anonymous)
+		const sdkConfig = JSON.parse(seed.sdkConfig) as Record<string, unknown>
+		const desktopConfig = JSON.parse(seed.desktopConfig) as Record<string, unknown>
+
+		expect(describeStored(seed.sdkConfig, client.apiKey)).toEqual({ shape: [...LEGACY_SDK_CONFIG_SHAPE], sameKey: true })
+		expect(sdkConfig).toEqual({
+			email: client.email,
+			password: "redacted",
+			masterKeys: ["key-one", "key-two"],
+			connectToSocket: true,
+			metadataCache: true,
+			twoFactorCode: "redacted",
+			publicKey: publicKey.export({ type: "spki", format: "der" }).toString("base64"),
+			privateKey: client.privateKey,
+			apiKey: client.apiKey,
+			authVersion: 2,
+			baseFolderUUID: client.rootUuid,
+			userId: 123,
+			tmpPath: "/tmp"
+		})
+		// desktopConfig: the defaults as stored, the account in place of the anonymous config.
+		expect(Object.keys(desktopConfig)).toEqual(Object.keys(anonymous.desktopConfig))
+		expect(desktopConfig).toEqual({ ...anonymous.desktopConfig, sdkConfig })
+
+		// 4.x imports it as the session a 4.x sign-in stores (its own key order).
+		const migrated = legacySession({
+			[LEGACY_KEYS.authed]: "true",
+			[LEGACY_KEYS.sdkConfig]: seed.sdkConfig,
+			[LEGACY_KEYS.desktopConfig]: seed.desktopConfig
+		})
+
+		expect(migrated.ok && JSON.parse(migrated.blob)).toEqual(JSON.parse(sessionEnvelope(client)))
+	})
+
+	it("describes a stored value by keys and types only", () => {
+		const described = describeStored(JSON.stringify({ apiKey: "x", list: ["a", 1], none: null, nested: { a: 1 } }), "x")
+
+		expect(described).toEqual({ shape: ["apiKey: string", "list: string|number[]", "none: null", "nested: object"], sameKey: true })
+		expect(describeStored("[1]", "x")).toEqual({ shape: [], sameKey: false })
 	})
 })
 

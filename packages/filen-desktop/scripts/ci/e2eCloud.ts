@@ -1,38 +1,106 @@
 import { createHash } from "node:crypto"
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { CLOUD_ROOT, openCloud, runDir, type Cloud } from "./e2e/cloud.ts"
 import { createFindings } from "./e2e/findings.ts"
 import { fixtureTree, seededBytes, treeSnapshot, writeTree } from "./e2e/fixtures.ts"
 import { redactor } from "./e2e/redact.ts"
-import { harnessRemote, mask, runId, sealRemote, secretsOf, signInHarness, takeCredentials, writeSealed } from "./e2e/session.ts"
+import {
+	type Credentials,
+	harnessSession,
+	isSlot,
+	mask,
+	readCached,
+	remoteOf,
+	runId,
+	secretsOf,
+	type SessionRecord,
+	signInHarness,
+	type Slot,
+	slotCredentials,
+	SLOTS,
+	STALE_AFTER_MS,
+	takeCredentials,
+	takeSessionKey,
+	validateSession,
+	writeCached,
+	writeHandOff
+} from "./e2e/session.ts"
 import { cloudSnapshot, diffSnapshots } from "./e2e/snapshot.ts"
 import { errorMessage, fail, section } from "./support.ts"
 
 // The desktop e2e's cloud side (see .github/workflows/desktop-e2e.yml), on any runner:
 //
-//   session    the run's one harness sign-in (sdk-rs), written sealed to the file FILEN_DESKTOP_E2E_SESSION_FILE names
+//   session    one slot's session for the run (scripts/ci/e2e/session.ts): the cached one if the API still knows it
+//              and it is under a week old, else one login (sdk-rs); written sealed to the cache directory when minted
+//              and to the run's hand-off directory. Writes minted=true|false to $GITHUB_OUTPUT and nothing else.
 //   selftest   with the handed session: create, list, upload a new version, diff, read back, move and delete a run
 //              directory, and read the account's storage
 //   sweep      with the handed session: delete this run's directories and any older than a day, then empty the trash
 //
-//   node scripts/ci/e2eCloud.ts <session|selftest|sweep> [--artifacts <dir>]
+//   node scripts/ci/e2eCloud.ts <session --slot <test|quota>|selftest|sweep> [--artifacts <dir>]
 //
-// Credentials come from FILEN_DESKTOP_E2E_TEST_EMAIL / _PASSWORD, the handed session from the file
-// FILEN_DESKTOP_E2E_SESSION_FILE names.
+// Credentials come from the slot's secrets (FILEN_DESKTOP_E2E_TEST_EMAIL / _PASSWORD for test), the sealing secret
+// from FILEN_DESKTOP_E2E_SESSION_KEY, the cached copy from FILEN_DESKTOP_E2E_CACHE_DIR and the handed session from
+// FILEN_DESKTOP_E2E_SESSION_DIR.
 
 const SWEEP_AGE_MS = 24 * 60 * 60 * 1000
 const SWEEP_BUDGET_MS = 3 * 60 * 1000
 
-async function session(): Promise<void> {
-	const credentials = takeCredentials()
-	const remote = await signInHarness(credentials)
-	const sealed = sealRemote(remote, credentials.password, runId())
+// Why a cached session cannot serve the run (null: it can). An infrastructure failure while asking the API throws.
+async function unusable(cached: SessionRecord | null, credentials: Credentials): Promise<string | null> {
+	if (cached === null) {
+		return "nothing cached"
+	}
 
-	mask([sealed])
-	writeSealed(sealed)
-	console.log("signed in once; the sealed session is in its file, for the artifact")
+	if (cached.client.email.toLowerCase() !== credentials.email.toLowerCase()) {
+		return "cached for another account"
+	}
+
+	if (Date.now() - cached.mintedAt > STALE_AFTER_MS) {
+		return "minted a week ago or more"
+	}
+
+	const verdict = await validateSession(cached.client)
+
+	return verdict === "valid" ? null : verdict === "unknown-key" ? "the API does not know its key" : "its key is another account's"
+}
+
+// Exactly one login when the cache holds no usable session, none otherwise; whether it logged in. A slot without its
+// secrets is skipped, except `test`, which every deep entry needs.
+async function session(slot: Slot): Promise<boolean> {
+	const credentials = slotCredentials(slot)
+
+	if (credentials === null) {
+		if (slot === "test") {
+			fail(`${SLOTS.test.email} and ${SLOTS.test.password} must be set`)
+		}
+
+		console.log(`no secrets for the ${slot} slot; skipped`)
+
+		return false
+	}
+
+	const secret = takeSessionKey()
+	const cached = readCached(slot, secret)
+	const reason = await unusable(cached, credentials)
+	let record: SessionRecord
+
+	if (cached !== null && reason === null) {
+		record = cached
+		mask(secretsOf(remoteOf(record.client)))
+		console.log(`the cached ${slot} session is valid (minted ${new Date(record.mintedAt).toISOString()}); no login`)
+	} else {
+		console.log(`minting the ${slot} session (one login): ${reason ?? "nothing cached"}`)
+		record = { client: await signInHarness(credentials), mintedAt: Date.now() }
+		writeCached(slot, record, secret)
+	}
+
+	writeHandOff(slot, record, secret)
+	console.log(`the sealed ${slot} session is in the hand-off directory, for the artifact`)
+
+	return record !== cached
 }
 
 async function selftest(cloud: Cloud, work: string, artifacts: string, redact: (text: string) => string): Promise<void> {
@@ -174,19 +242,36 @@ async function sweep(cloud: Cloud): Promise<void> {
 }
 
 const command = process.argv[2]
-const artifactsAt = process.argv.indexOf("--artifacts")
-const artifacts = path.resolve(artifactsAt === -1 ? "e2e-artifacts" : (process.argv[artifactsAt + 1] ?? "e2e-artifacts"))
+const option = (name: string): string | undefined => {
+	const at = process.argv.indexOf(name)
+
+	return at === -1 ? undefined : process.argv[at + 1]
+}
+const artifacts = path.resolve(option("--artifacts") ?? "e2e-artifacts")
+const usage = "usage: node scripts/ci/e2eCloud.ts <session --slot <test|quota>|selftest|sweep> [--artifacts <dir>]"
 
 if (import.meta.main) {
 	const work = mkdtempSync(path.join(os.tmpdir(), "filen-e2e-cloud-"))
 
 	try {
 		if (command === "session") {
-			section("harness sign-in")
-			await session()
+			const slot = option("--slot") ?? ""
+
+			if (!isSlot(slot)) {
+				console.error(usage)
+				process.exit(2)
+			}
+
+			section(`${slot} session`)
+
+			const minted = await session(slot)
+
+			if (process.env["GITHUB_OUTPUT"]) {
+				appendFileSync(process.env["GITHUB_OUTPUT"], `minted=${String(minted)}\n`)
+			}
 		} else if (command === "selftest" || command === "sweep") {
 			const credentials = takeCredentials()
-			const remote = harnessRemote(credentials)
+			const { remote } = harnessSession()
 			const cloud = await openCloud(remote, work)
 
 			section(command)
@@ -197,7 +282,7 @@ if (import.meta.main) {
 				await sweep(cloud)
 			}
 		} else {
-			console.error("usage: node scripts/ci/e2eCloud.ts <session|selftest|sweep> [--artifacts <dir>]")
+			console.error(usage)
 			process.exit(2)
 		}
 	} catch (error) {
