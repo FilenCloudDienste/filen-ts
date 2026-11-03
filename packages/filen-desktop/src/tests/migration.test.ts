@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs"
-import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import path from "node:path"
 import { describe, expect, it, vi } from "vitest"
@@ -11,6 +11,7 @@ import {
 	createStashStore,
 	deferralExpired,
 	legacyLogsDir,
+	legacyNetworkDriveDir,
 	legacyOwner,
 	MAX_FAILED_STARTS,
 	type MigrationDeps,
@@ -50,6 +51,7 @@ function marker(overrides: Partial<MigrationMarker> = {}): MigrationMarker {
 		wiped: false,
 		purged: false,
 		logsDeleted: false,
+		networkDriveDeleted: false,
 		...overrides
 	}
 }
@@ -261,6 +263,7 @@ function setup(
 		wipeLegacy: vi.fn(() => Promise.resolve()),
 		removeRcloneConfig: vi.fn(() => Promise.resolve()),
 		removeLegacyLogs: vi.fn(() => Promise.resolve()),
+		removeLegacyNetworkDrive: vi.fn(() => Promise.resolve()),
 		earlyPurge: vi.fn((): PurgeOutcome => ({ result: "not-due" })),
 		vault: {
 			get: vi.fn(() => Promise.resolve(state.vault)),
@@ -356,7 +359,8 @@ describe("createMigration", () => {
 			importedAt: 1000,
 			wiped: false,
 			purged: false,
-			logsDeleted: false
+			logsDeleted: false,
+			networkDriveDeleted: false
 		})
 	})
 
@@ -480,6 +484,68 @@ describe("createMigration", () => {
 		expect(second.deps.wipeLegacy).not.toHaveBeenCalled()
 		expect(second.deps.removeLegacyLogs).toHaveBeenCalledTimes(1)
 		expect(second.stored()).toMatchObject({ wiped: true, logsDeleted: true })
+	})
+
+	it("deletes the old network drive's directory after the wipe, records it and never again", async () => {
+		const { deps, migration, stored } = setup()
+
+		await migration.start()
+		await settle()
+		expect(deps.removeLegacyNetworkDrive).not.toHaveBeenCalled()
+
+		await migration.sessionConfirmed(SESSION_OF("123456"))
+		await settle()
+		expect(deps.removeLegacyNetworkDrive).toHaveBeenCalledTimes(1)
+		expect(deps.wipeLegacy.mock.invocationCallOrder[0]).toBeLessThan(deps.removeLegacyNetworkDrive.mock.invocationCallOrder[0] ?? 0)
+		expect(stored()).toMatchObject({ wiped: true, logsDeleted: true, networkDriveDeleted: true })
+		expect(deps.info).toHaveBeenCalledWith("migration: the old network drive's directory was deleted")
+
+		const next = setup({ marker: stored() ?? undefined })
+
+		await next.migration.start()
+		await settle()
+		expect(next.deps.removeLegacyNetworkDrive).not.toHaveBeenCalled()
+	})
+
+	it("never deletes the old network drive's directory when the wipe failed", async () => {
+		const { deps, migration, stored } = setup({ marker: marker({ stage: "verified" }) })
+
+		deps.wipeLegacy.mockRejectedValueOnce(new Error("timeout"))
+		await migration.start()
+		await settle()
+		expect(deps.removeLegacyNetworkDrive).not.toHaveBeenCalled()
+		expect(stored()).toMatchObject({ wiped: false, networkDriveDeleted: false })
+	})
+
+	it("retries the old network drive's directory on the next launch alone when deleting it failed", async () => {
+		const first = setup({ marker: marker({ stage: "verified" }) })
+
+		first.deps.removeLegacyNetworkDrive.mockRejectedValueOnce(Object.assign(new Error("resource busy or locked"), { code: "EBUSY" }))
+		await first.migration.start()
+		await settle()
+		expect(first.stored()).toMatchObject({ wiped: true, logsDeleted: true, networkDriveDeleted: false })
+		expect(first.deps.warn).toHaveBeenCalledWith("migration: deleting the old network drive failed, tried again next launch: EBUSY")
+
+		const second = setup({ marker: first.stored() ?? undefined })
+
+		await second.migration.start()
+		await settle()
+		expect(second.deps.wipeLegacy).not.toHaveBeenCalled()
+		expect(second.deps.removeLegacyLogs).not.toHaveBeenCalled()
+		expect(second.deps.removeLegacyNetworkDrive).toHaveBeenCalledTimes(1)
+		expect(second.stored()).toMatchObject({ networkDriveDeleted: true })
+	})
+
+	it("deletes the old network drive's directory of a migration wiped before that step existed", async () => {
+		const { networkDriveDeleted: _deleted, ...older } = marker({ stage: "verified", wiped: true, purged: true, logsDeleted: true })
+		const run = setup()
+
+		await run.markerFile.write(Buffer.from(JSON.stringify({ version: 1, ...older })))
+		await run.migration.start()
+		await settle()
+		expect(run.deps.removeLegacyLogs).not.toHaveBeenCalled()
+		expect(run.deps.removeLegacyNetworkDrive).toHaveBeenCalledTimes(1)
+		expect(run.stored()).toMatchObject({ networkDriveDeleted: true })
 	})
 
 	it("deletes the old logs of a migration wiped before that step existed", async () => {
@@ -1643,6 +1709,73 @@ describe("the old client's logs directory", () => {
 			expect(existsSync(path.join(retired, "state.json"))).toBe(true)
 		} finally {
 			await rm(appData, { recursive: true, force: true })
+		}
+	})
+})
+
+describe("the old network drive's directory", () => {
+	it("is @filen/network-drive 0.9.x's platformConfigPath()", () => {
+		expect(legacyNetworkDriveDir("win32", { APPDATA: "/roaming" }, "/home/user")).toBe(
+			path.resolve("/roaming", "@filen", "network-drive")
+		)
+		expect(legacyNetworkDriveDir("win32", {}, "/home/user")).toBeNull()
+		expect(legacyNetworkDriveDir("darwin", { XDG_CONFIG_HOME: "/xdg" }, "/Users/user")).toBe(
+			path.resolve("/Users/user/Library/Application Support/@filen/network-drive")
+		)
+		expect(legacyNetworkDriveDir("linux", { XDG_CONFIG_HOME: "/xdg" }, "/home/user")).toBe(path.resolve("/xdg/@filen/network-drive"))
+		expect(legacyNetworkDriveDir("linux", { XDG_CONFIG_HOME: "" }, "/home/user")).toBe(
+			path.resolve("/home/user/.config/@filen/network-drive")
+		)
+		expect(legacyNetworkDriveDir("linux", {}, "/home/user")).toBe(path.resolve("/home/user/.config/@filen/network-drive"))
+	})
+
+	it("goes with everything in it, never what a symlink in it points to, and keeps userData", async () => {
+		const home = await realpath(await mkdtemp(path.join(tmpdir(), "filen-legacy-drive-")))
+
+		try {
+			const dir = legacyNetworkDriveDir("linux", {}, home) ?? ""
+			const userData = path.join(home, ".config", "@filen", "desktop")
+			const outside = path.join(home, "outside")
+
+			await mkdir(path.join(dir, "cache"), { recursive: true })
+			await mkdir(userData, { recursive: true })
+			await mkdir(outside)
+			await writeFile(path.join(outside, "keep.txt"), "kept")
+			await writeFile(path.join(userData, "migration.json"), "{}")
+
+			for (const name of ["rclone", "rclone.conf", "monitor.v1.sh", path.join("cache", "chunk")]) {
+				await writeFile(path.join(dir, name), "x")
+			}
+
+			await symlink(outside, path.join(dir, "linked"), process.platform === "win32" ? "junction" : "dir")
+			await removeTree(dir)
+			await removeTree(dir)
+
+			expect(existsSync(dir)).toBe(false)
+			expect(existsSync(path.join(outside, "keep.txt"))).toBe(true)
+			expect(existsSync(path.join(userData, "migration.json"))).toBe(true)
+		} finally {
+			await rm(home, { recursive: true, force: true })
+		}
+	})
+
+	it("is only a link when the directory itself is a symlink: its target stays", async () => {
+		const home = await realpath(await mkdtemp(path.join(tmpdir(), "filen-legacy-drive-")))
+
+		try {
+			const dir = legacyNetworkDriveDir("linux", {}, home) ?? ""
+			const outside = path.join(home, "outside")
+
+			await mkdir(outside)
+			await writeFile(path.join(outside, "keep.txt"), "kept")
+			await mkdir(path.dirname(dir), { recursive: true })
+			await symlink(outside, dir, process.platform === "win32" ? "junction" : "dir")
+			await removeTree(dir)
+
+			expect(existsSync(dir)).toBe(false)
+			expect(existsSync(path.join(outside, "keep.txt"))).toBe(true)
+		} finally {
+			await rm(home, { recursive: true, force: true })
 		}
 	})
 })
