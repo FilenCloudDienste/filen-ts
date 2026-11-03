@@ -541,8 +541,24 @@ const nativeSupervisor = createNativeSupervisor({
 	}
 })
 
-function showOpenDialog(options: OpenDialogOptions): Promise<OpenDialogReturnValue> {
-	return mainWindow === null ? dialog.showOpenDialog(options) : dialog.showOpenDialog(mainWindow, options)
+// The directory chooser of a sync pair and of the drive's mount point; logged without the path, so main.log shows
+// whether a page's call reached the dialog and how long it took to answer (the OS opening it included).
+async function showOpenDialog(options: OpenDialogOptions): Promise<OpenDialogReturnValue> {
+	const started = Date.now()
+
+	info(`directory chooser opening (${options.title ?? "untitled"})`)
+
+	try {
+		const result = await (mainWindow === null ? dialog.showOpenDialog(options) : dialog.showOpenDialog(mainWindow, options))
+
+		info(`directory chooser answered (${result.canceled ? "canceled" : "chosen"}) in ${String(Date.now() - started)} ms`)
+
+		return result
+	} catch (error) {
+		warn(`directory chooser failed after ${String(Date.now() - started)} ms: ${errorCode(error)}`)
+
+		throw error
+	}
 }
 
 // Where neither a sync pair nor the network drive may be.
