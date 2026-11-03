@@ -294,12 +294,12 @@ export function createHostEngine(ctx: OpsContext): HostEngine {
 		},
 		resolveConflict: async ({ pairId, relPath, resolution }) => {
 			const { id } = held(pairId)
-			const kept = await engine.resolveConflict(id, relPath, conflictResolution(sdk, resolution))
+			const { quarantined, keptAs } = await engine.resolveConflict(id, relPath, conflictResolution(sdk, resolution))
 
 			// The resolution re-anchors the row at once, so the count drops now, not at the next pass.
 			await countConflicts(id)
 
-			return kept === undefined ? null : clip(kept)
+			return { quarantined: quarantined === undefined ? null : clip(quarantined), keptAs: keptAs === undefined ? null : clip(keptAs) }
 		},
 		// One at a time: the engine resolves a path at a time, each waiting for a scan in progress. The count is read
 		// once for the batch.
@@ -350,9 +350,15 @@ export function createHostEngine(ctx: OpsContext): HostEngine {
 						gapsTotal: Number(report.scanGapsTotal)
 					}
 		},
-		// The approval only covers the next pass, so one runs now.
+		// The approval only covers the next pass, so one runs now; a paused pair's waits for the resume.
 		approveDeletions: async ({ pairId, passToken }) => {
 			await engine.approveDeletions(held(pairId).id, passToken)
+
+			return ops.requestPass({ pairId })
+		},
+		// Like an approval: the restore is the next pass's, which runs now unless the pair is paused.
+		restoreDeletions: async ({ pairId, passToken }) => {
+			await engine.restoreDeletions(held(pairId).id, passToken)
 
 			return ops.requestPass({ pairId })
 		},

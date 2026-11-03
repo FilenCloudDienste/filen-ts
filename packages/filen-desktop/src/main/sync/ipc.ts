@@ -59,6 +59,7 @@ const CALLS: Record<SyncCall, CheckedCall<SyncService>> = {
 	),
 	heldDeletions: call(one, (service, _page, [pairId]) => service.heldDeletions(pairId)),
 	approveDeletions: call(type([pairIdSchema, passTokenSchema]), (service, _page, args) => service.approveDeletions(...args)),
+	restoreDeletions: call(type([pairIdSchema, passTokenSchema]), (service, _page, args) => service.restoreDeletions(...args)),
 	retryPath: call(type([pairIdSchema, relPathArgSchema]), (service, _page, args) => service.retryPath(...args)),
 	retryAll: call(one, (service, _page, [pairId]) => service.retryAll(pairId)),
 	unsyncablePaths: call(type([pairIdSchema, countSchema, limitSchema]), (service, _page, args) => service.unsyncablePaths(...args)),

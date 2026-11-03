@@ -111,7 +111,8 @@ const HELD_REASONS: Record<SyncGuardReason["tag"], DesktopSyncHeldReason> = {
 	FirstSyncWithDeletions: "firstSyncWithDeletions",
 	RemoteUnconverged: "remoteUnconverged",
 	RemoteEmptied: "remoteEmptied",
-	ExceededThreshold: "exceededThreshold"
+	ExceededThreshold: "exceededThreshold",
+	RestoreUnfinished: "restoreUnfinished"
 }
 
 const UNSYNCABLE_REASONS: Record<UnsyncablePath["reason"]["tag"], DesktopSyncUnsyncableReason> = {
@@ -119,6 +120,7 @@ const UNSYNCABLE_REASONS: Record<UnsyncablePath["reason"]["tag"], DesktopSyncUns
 	RepeatedFailure: "repeatedFailure",
 	RemoteUndecodable: "remoteUndecodable",
 	RemoteInvalidName: "remoteInvalidName",
+	RemoteNameNotStorable: "remoteNameNotStorable",
 	RemoteBrokenParent: "remoteBrokenParent",
 	LocalAlias: "localAlias",
 	LocalNameCollision: "localNameCollision",
@@ -157,6 +159,8 @@ function unsyncableDetail(reason: UnsyncablePath["reason"]): string | null {
 			return reason.inner.lastError
 		case "RemoteInvalidName":
 			return reason.inner.name
+		case "RemoteNameNotStorable":
+			return reason.inner.detail
 		case "LocalAlias":
 			return reason.inner.target
 		default:

@@ -4,6 +4,7 @@ import {
 	type DesktopSyncActivity,
 	type DesktopSyncBacklog,
 	type DesktopSyncConflict,
+	type DesktopSyncConflictResolved,
 	type DesktopSyncEntries,
 	type DesktopSyncErrorCode,
 	type DesktopSyncHeldDeletions,
@@ -120,10 +121,11 @@ export interface SyncService {
 	planPage(planId: string, list: DesktopSyncPlanList, offset: number, limit: number): Promise<Result<DesktopSyncPlanPage>>
 	releasePlan(planId: string): Promise<void>
 	conflicts(pairId: string, offset: number, limit: number): Promise<Result<DesktopSyncEntries<DesktopSyncConflict>>>
-	resolveConflict(pairId: string, relPath: string, resolution: DesktopSyncResolution): Promise<Result<string | null>>
+	resolveConflict(pairId: string, relPath: string, resolution: DesktopSyncResolution): Promise<Result<DesktopSyncConflictResolved>>
 	resolveConflicts(pairId: string, resolution: DesktopSyncResolution, count: number): Promise<Result<DesktopSyncResolvedConflicts>>
 	heldDeletions(pairId: string): Promise<Result<DesktopSyncHeldDeletions>>
 	approveDeletions(pairId: string, passToken: string): Promise<Result<null>>
+	restoreDeletions(pairId: string, passToken: string): Promise<Result<null>>
 	retryPath(pairId: string, relPath: string): Promise<Result<null>>
 	retryAll(pairId: string): Promise<Result<null>>
 	unsyncablePaths(pairId: string, offset: number, limit: number): Promise<Result<DesktopSyncEntries<DesktopSyncUnsyncable> | null>>
@@ -841,6 +843,7 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
 		},
 		heldDeletions: pairId => engineCall(pairId, "heldDeletions", id => ({ pairId: id })),
 		approveDeletions: (pairId, passToken) => engineCall(pairId, "approveDeletions", id => ({ pairId: id, passToken })),
+		restoreDeletions: (pairId, passToken) => engineCall(pairId, "restoreDeletions", id => ({ pairId: id, passToken })),
 		retryPath: (pairId, relPath) => engineCall(pairId, "retryPath", id => ({ pairId: id, relPath })),
 		retryAll: pairId => engineCall(pairId, "retryAll", id => ({ pairId: id })),
 		unsyncablePaths: async (pairId, offset, limit) => {

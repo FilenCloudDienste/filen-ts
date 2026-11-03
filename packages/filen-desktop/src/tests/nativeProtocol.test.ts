@@ -108,6 +108,7 @@ const ARGS: { [K in NativeOp]: unknown } = {
 	resolveConflicts: { pairId: "1", resolution: "keepLocal", relPaths: ["a.txt"] },
 	heldDeletions: { pairId: "1" },
 	approveDeletions: { pairId: "1", passToken: "token" },
+	restoreDeletions: { pairId: "1", passToken: "token" },
 	retryPath: { pairId: "1", relPath: "d/a.txt" },
 	retryAll: { pairId: "1" },
 	unsyncablePaths: { pairId: "1", offset: 0, limit: 1000 },

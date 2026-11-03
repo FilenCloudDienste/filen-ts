@@ -9,6 +9,7 @@ import type {
 	DesktopSyncActivity,
 	DesktopSyncActivityKind,
 	DesktopSyncConflict,
+	DesktopSyncConflictResolved,
 	DesktopSyncError,
 	DesktopSyncErrorCode,
 	DesktopSyncHeldDeletions,
@@ -63,7 +64,7 @@ export const syncModeSchema = pinned<DesktopSyncMode>()(
 )
 
 const heldReasonSchema = pinned<DesktopSyncHeldReason>()(
-	type("'scanIncomplete' | 'firstSyncWithDeletions' | 'remoteUnconverged' | 'remoteEmptied' | 'exceededThreshold'")
+	type("'scanIncomplete' | 'firstSyncWithDeletions' | 'remoteUnconverged' | 'remoteEmptied' | 'exceededThreshold' | 'restoreUnfinished'")
 )
 
 export const planListSchema = pinned<DesktopSyncPlanList>()(type("'actions' | 'held' | 'conflicts' | 'unsyncable' | 'ignored'"))
@@ -230,10 +231,14 @@ const conflictSchema = pinned<DesktopSyncConflict>()(
 	type({ relPath: relPathSchema, local: nodeKindSchema.or("null"), remote: nodeKindSchema.or("null"), "+": "reject" })
 )
 
+const conflictResolvedSchema = pinned<DesktopSyncConflictResolved>()(
+	type({ quarantined: relPathSchema.or("null"), keptAs: relPathSchema.or("null"), "+": "reject" })
+)
+
 const unsyncableSchema = pinned<DesktopSyncUnsyncable>()(
 	type({
 		relPath: relPathSchema,
-		reason: "'invalidName' | 'repeatedFailure' | 'remoteUndecodable' | 'remoteInvalidName' | 'remoteBrokenParent' | 'localAlias' | 'localNameCollision' | 'remoteNameCollision'",
+		reason: "'invalidName' | 'repeatedFailure' | 'remoteUndecodable' | 'remoteInvalidName' | 'remoteNameNotStorable' | 'remoteBrokenParent' | 'localAlias' | 'localNameCollision' | 'remoteNameCollision'",
 		detail: textSchema.or("null"),
 		"+": "reject"
 	})
@@ -337,7 +342,7 @@ export const SYNC_OPS = {
 	},
 	releasePlan: { args: type({ planId: planIdSchema, "+": "reject" }), result: done },
 	conflicts: { args: pageArgs, result: type({ total: countSchema, entries: conflictSchema.array(), "+": "reject" }) },
-	// The result is where keepRemote moved the differing local copy in the pair's bin; null otherwise.
+	// The result is where the copy that lost went: keepRemote's bin path, or the path keepBoth kept it at.
 	resolveConflict: {
 		args: type({
 			pairId: pairIdSchema,
@@ -345,7 +350,7 @@ export const SYNC_OPS = {
 			resolution: resolutionSchema,
 			"+": "reject"
 		}),
-		result: relPathSchema.or("null")
+		result: conflictResolvedSchema
 	},
 	// Resolves the given conflicts one after another, a path that fails left in place.
 	resolveConflicts: {
@@ -359,6 +364,7 @@ export const SYNC_OPS = {
 	},
 	heldDeletions: { args: pairArgs, result: heldDeletionsSchema },
 	approveDeletions: { args: type({ pairId: pairIdSchema, passToken: passTokenSchema, "+": "reject" }), result: done },
+	restoreDeletions: { args: type({ pairId: pairIdSchema, passToken: passTokenSchema, "+": "reject" }), result: done },
 	retryPath: { args: type({ pairId: pairIdSchema, relPath: relPathArgSchema, "+": "reject" }), result: done },
 	// Clears every failure streak, then asks for a pass.
 	retryAll: { args: pairArgs, result: done },

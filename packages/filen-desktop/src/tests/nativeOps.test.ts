@@ -234,13 +234,53 @@ describe("native ops", () => {
 		expect(engine.requestPass.mock.calls).toEqual([[1n]])
 	})
 
+	it("asks for a pass after a restore of a running pair only, starting its watch when it has none", async () => {
+		const { engine, host } = setup([pairInfo({ id: 1n }), pairInfo({ id: 2n, localRoot: "/b", paused: true })])
+
+		await host.refreshPairs()
+		await expect(host.ops.restoreDeletions({ pairId: "2", passToken: "t2" })).resolves.toBeNull()
+		await expect(host.ops.restoreDeletions({ pairId: "1", passToken: "t1" })).resolves.toBeNull()
+		expect(engine.restoreDeletions.mock.calls).toEqual([
+			[2n, "t2"],
+			[1n, "t1"]
+		])
+		expect(engine.approveDeletions).not.toHaveBeenCalled()
+		expect(engine.watchPair).toHaveBeenCalledExactlyOnceWith(1n, undefined)
+
+		await host.ops.restoreDeletions({ pairId: "1", passToken: "t3" })
+		expect(engine.requestPass.mock.calls).toEqual([[1n]])
+	})
+
+	it("returns where a resolution put the copy that lost", async () => {
+		const { engine, host } = setup()
+
+		await host.refreshPairs()
+		engine.resolveConflict
+			.mockResolvedValueOnce({ keptAs: "docs/report.old.docx" })
+			.mockResolvedValueOnce({ quarantined: ".filen/bin/2026-11-03/report.docx" })
+			.mockResolvedValueOnce({})
+
+		await expect(host.ops.resolveConflict({ pairId: "1", relPath: "docs/report.docx", resolution: "keepBoth" })).resolves.toEqual({
+			quarantined: null,
+			keptAs: "docs/report.old.docx"
+		})
+		await expect(host.ops.resolveConflict({ pairId: "1", relPath: "docs/report.docx", resolution: "keepRemote" })).resolves.toEqual({
+			quarantined: ".filen/bin/2026-11-03/report.docx",
+			keptAs: null
+		})
+		await expect(host.ops.resolveConflict({ pairId: "1", relPath: "docs/report.docx", resolution: "keepLocal" })).resolves.toEqual({
+			quarantined: null,
+			keptAs: null
+		})
+	})
+
 	it("resolves a batch of conflicts one after another, counting them once", async () => {
 		const { engine, host } = setup()
 
 		await host.refreshPairs()
 		engine.listConflicts.mockClear()
 		engine.listConflicts.mockResolvedValueOnce({ conflicts: [], total: 1n })
-		engine.resolveConflict.mockResolvedValueOnce(undefined).mockRejectedValueOnce(sdkError(fakeSdk.ErrorKind.Io, "busy"))
+		engine.resolveConflict.mockResolvedValueOnce({}).mockRejectedValueOnce(sdkError(fakeSdk.ErrorKind.Io, "busy"))
 
 		await expect(
 			host.ops.resolveConflicts({ pairId: "1", resolution: "keepRemote", relPaths: ["a.txt", "b.txt", "c.txt"] })
@@ -276,9 +316,14 @@ describe("native ops", () => {
 			report({
 				unsyncable: [
 					{ relPath: "a", reason: { tag: "LocalNameCollision" } },
-					{ relPath: "b", reason: { tag: "RemoteNameCollision" } }
+					{ relPath: "b", reason: { tag: "RemoteNameCollision" } },
+					{
+						relPath: "CON.txt",
+						reason: { tag: "RemoteNameNotStorable", inner: { name: "CON.txt", detail: "a reserved device name" } }
+					}
 				],
-				unsyncableTotal: 2n,
+				unsyncableTotal: 3n,
+				guard: { tag: "RestoreUnfinished", inner: { deletions: 2n } },
 				scanGaps: [
 					{ relPath: "locked", cause: { tag: "Unreadable", inner: { kind: "PermissionDenied" } } },
 					{ relPath: "busy", cause: { tag: "ChangedDuringScan" } }
@@ -288,10 +333,14 @@ describe("native ops", () => {
 		)
 
 		await expect(host.ops.unsyncablePaths({ pairId: "1", offset: 1, limit: 10 })).resolves.toEqual({
-			total: 2,
-			entries: [{ relPath: "b", reason: "remoteNameCollision", detail: null }]
+			total: 3,
+			entries: [
+				{ relPath: "b", reason: "remoteNameCollision", detail: null },
+				{ relPath: "CON.txt", reason: "remoteNameNotStorable", detail: "a reserved device name" }
+			]
 		})
 		await expect(host.ops.heldDeletions({ pairId: "1" })).resolves.toMatchObject({
+			reason: "restoreUnfinished",
 			gaps: [
 				{ relPath: "locked", cause: "unreadable", kind: "PermissionDenied" },
 				{ relPath: "busy", cause: "changedDuringScan", kind: null }

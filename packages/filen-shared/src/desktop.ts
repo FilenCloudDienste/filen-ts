@@ -224,8 +224,14 @@ export interface DesktopSyncImportNote {
 }
 
 // Why deletions were held back for approval.
+// restoreUnfinished: a restore of held deletions has not landed yet, so what it would put back stays held.
 export type DesktopSyncHeldReason =
-	"scanIncomplete" | "firstSyncWithDeletions" | "remoteUnconverged" | "remoteEmptied" | "exceededThreshold"
+	| "scanIncomplete"
+	| "firstSyncWithDeletions"
+	| "remoteUnconverged"
+	| "remoteEmptied"
+	| "exceededThreshold"
+	| "restoreUnfinished"
 
 // Why a pass applies nothing: two items on one side resolve to the same path (only a mode switch adopting the
 // destination across such a pair refuses).
@@ -365,6 +371,13 @@ export interface DesktopSyncPlanAction {
 	size: number | null
 }
 
+// Where a resolution put the copy that lost, at most one set: `quarantined` is the bin path keepRemote moved this
+// device's differing copy to, `keptAs` the relative path keepBoth kept this device's copy at.
+export interface DesktopSyncConflictResolved {
+	quarantined: string | null
+	keptAs: string | null
+}
+
 // A side is null where that side deleted the path.
 export interface DesktopSyncConflict {
 	relPath: string
@@ -377,6 +390,7 @@ export type DesktopSyncUnsyncableReason =
 	| "repeatedFailure"
 	| "remoteUndecodable"
 	| "remoteInvalidName"
+	| "remoteNameNotStorable"
 	| "remoteBrokenParent"
 	| "localAlias"
 	| "localNameCollision"
@@ -538,8 +552,11 @@ export interface DesktopSync {
 	planPage(planId: string, list: DesktopSyncPlanList, offset: number, limit: number): Promise<DesktopSyncResult<DesktopSyncPlanPage>>
 	releasePlan(planId: string): Promise<void>
 	conflicts(pairId: string, offset: number, limit: number): Promise<DesktopSyncResult<DesktopSyncEntries<DesktopSyncConflict>>>
-	// Resolves with where keepRemote moved this device's differing copy in the pair's bin; null otherwise.
-	resolveConflict(pairId: string, relPath: string, resolution: DesktopSyncResolution): Promise<DesktopSyncResult<string | null>>
+	resolveConflict(
+		pairId: string,
+		relPath: string,
+		resolution: DesktopSyncResolution
+	): Promise<DesktopSyncResult<DesktopSyncConflictResolved>>
 	// Resolves at most `count` of the pair's conflicts, as listed when called, the same way one after another; the
 	// overview's count drops as they go.
 	resolveConflicts(
@@ -549,6 +566,8 @@ export interface DesktopSync {
 	): Promise<DesktopSyncResult<DesktopSyncResolvedConflicts>>
 	heldDeletions(pairId: string): Promise<DesktopSyncResult<DesktopSyncHeldDeletions>>
 	approveDeletions(pairId: string, passToken: string): Promise<DesktopSyncResult<null>>
+	// The held deletions come undone instead: what they deleted is put back from the other side (or the pair's bin).
+	restoreDeletions(pairId: string, passToken: string): Promise<DesktopSyncResult<null>>
 	retryPath(pairId: string, relPath: string): Promise<DesktopSyncResult<null>>
 	// Every path that kept failing is tried again on a pass that starts now.
 	retryAll(pairId: string): Promise<DesktopSyncResult<null>>
