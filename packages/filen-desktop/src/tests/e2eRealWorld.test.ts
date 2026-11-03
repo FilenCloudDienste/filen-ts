@@ -240,7 +240,7 @@ describe("e2e names pair", () => {
 
 describe("e2e scale pair", () => {
 	// Chain P on linux-x64-deb with a page that answers the sync contract: the pair added, then idle at once, its
-	// root left empty (so PS2 fails). Records the contract calls.
+	// root left empty (so PS2 fails), gone from the overview once removed. Records the contract calls.
 	const scaleChain = (cloud: Cloud) => {
 		const work = tempDir()
 		const artifacts = path.join(work, "artifacts")
@@ -256,7 +256,11 @@ describe("e2e scale pair", () => {
 			}
 
 			if (expression.includes("overview")) {
-				return { pairs: [{ id: "scale-id", phase: "idle", lastSyncedAt: 1, lastError: null, issues: 0, review: null }] }
+				return {
+					pairs: calls.some(call => call.includes("removePair"))
+						? []
+						: [{ id: "scale-id", phase: "idle", lastSyncedAt: 1, lastError: null, issues: 0, review: null }]
+				}
 			}
 
 			return { ok: true, value: null }
@@ -269,6 +273,7 @@ describe("e2e scale pair", () => {
 			}
 		}
 		const partial = {
+			name: "previous",
 			findings,
 			cloud,
 			target: { platform: "linux", format: "deb" },

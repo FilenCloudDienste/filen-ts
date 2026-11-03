@@ -1,17 +1,8 @@
-import { createHash } from "node:crypto"
 import { mkdirSync, renameSync, symlinkSync, writeFileSync } from "node:fs"
 import path from "node:path"
-import type {
-	DesktopSyncEntries,
-	DesktopSyncLocalRootChoice,
-	DesktopSyncMode,
-	DesktopSyncPair,
-	DesktopSyncPlan,
-	DesktopSyncResult,
-	DesktopSyncUnsyncable
-} from "@filen/shared/desktop"
+import type { DesktopSyncEntries, DesktopSyncMode, DesktopSyncPair, DesktopSyncResult, DesktopSyncUnsyncable } from "@filen/shared/desktop"
 import { errorMessage, fail, runBounded } from "../../support.ts"
-import { desktop, desktopCall } from "../app.ts"
+import { desktop } from "../app.ts"
 import type { CloudEntry } from "../cloud.ts"
 import {
 	expectedUnsyncable,
@@ -25,7 +16,7 @@ import {
 	outsideBytes,
 	treeSnapshot
 } from "../fixtures.ts"
-import { CHOOSER_BUDGET_MS } from "../os.ts"
+import { addPairThroughChooser, pairOf, removePair as removeExtraPair, sha256, syncNow } from "../extraPair.ts"
 import { currentScale, scaleLayout, scaleTree, SCALE_UNSEEDED } from "../scaleTree.ts"
 import { diffSnapshots, localSnapshot, type Snapshot, underAny } from "../snapshot.ts"
 import { BIN_DIR, json, LIVE_TIMEOUT_MS, ok, quiet, type Chain } from "./common.ts"
@@ -57,7 +48,6 @@ import { BIN_DIR, json, LIVE_TIMEOUT_MS, ok, quiet, type Chain } from "./common.
 
 const ENTRIES = new Set(["linux-x64-deb", "win-x64-nsis", "mac-arm64-dmg"])
 const SCALE_PAIR = "e2e-scale"
-const CHOOSER_TITLE = "Choose a directory to sync"
 const SCALE_IDLE_MS = 8 * 60 * 1000
 const NAMES_FIRST_PASS_MS = 8 * 60 * 1000
 const EDIT_BOUND_MS = 2 * 60 * 1000
@@ -80,10 +70,6 @@ interface Added {
 	name: string
 	id: string
 	localRoot: string
-}
-
-function sha256(bytes: Buffer): string {
-	return createHash("sha256").update(bytes).digest("hex")
 }
 
 function seconds(ms: number): string {
@@ -110,8 +96,7 @@ export function realWorldFor(chain: Chain, arch: string): RealWorld {
 		unseeded?: Set<string>
 	} = {}
 
-	const overviewOf = async (pair: Added): Promise<DesktopSyncPair> =>
-		(await chain.syncOverview()).pairs.find(candidate => candidate.id === pair.id) ?? fail(`${pair.name} is gone`)
+	const overviewOf = async (pair: Added): Promise<DesktopSyncPair> => pairOf(chain, pair.id)
 
 	// Until the pair is idle after a pass completed later than `after`, at most `timeoutMs`; null when it was not.
 	const settled = async (pair: Added, after: number, timeoutMs: number): Promise<DesktopSyncPair | null> => {
@@ -141,52 +126,16 @@ export function realWorldFor(chain: Chain, arch: string): RealWorld {
 			review: found.review
 		})
 
-	// The pair added through the native folder chooser, as a user adds one, and started after its dry run. `record`
+	// The pair added through the native folder chooser, as a user adds one, and started after its dry run; `record`
 	// learns of it as soon as it exists, so that a failed start still leaves it for removal.
 	const addPair = async (name: string, mode: DesktopSyncMode, remoteRoot: string, record: (pair: Added) => void): Promise<Added> => {
-		const page = chain.page()
-		const evidence = path.join(chain.artifacts, `previous-chooser-${name}`)
-
 		mkdirSync(chain.rootOf(name), { recursive: true })
 
-		const choice = desktop<DesktopSyncLocalRootChoice>(page, "window.desktop.sync.chooseLocalDirectory()", CHOOSER_BUDGET_MS)
-
-		void choice.catch(() => undefined)
-		await chain.os.chooseDirectory(CHOOSER_TITLE, chain.rootOf(name), evidence)
-
-		const chosen = await choice.catch(async (error: unknown) => {
-			await chain.os.screenDump(`${evidence}-no-answer.png`)
-
-			throw error
-		})
-
-		if (chosen.status !== "ok") {
-			fail(`chooseLocalDirectory: ${json(chosen)} (the chooser's steps: previous-chooser-${name}-*.png)`)
-		}
-
-		const added = ok(
-			"addPair",
-			await desktop<DesktopSyncResult<{ pairId: string; plan: DesktopSyncPlan | null }>>(
-				page,
-				`window.desktop.sync.addPair(${json({ localRootId: chosen.id, remoteRoot, mode, name })})`
-			)
-		)
-
-		const pair = { name, id: added.pairId, localRoot: chosen.path }
-
-		record(pair)
-
-		if (added.plan !== null) {
-			await desktopCall(page, `window.desktop.sync.releasePlan(${json(added.plan.planId)})`)
-		}
-
-		ok("startPair", await desktop<DesktopSyncResult<null>>(page, `window.desktop.sync.startPair(${json(added.pairId)})`))
-
-		return pair
+		return addPairThroughChooser(chain, { name, mode, localRoot: chain.rootOf(name), remoteRoot }, record)
 	}
 
 	const removePair = async (pair: Added): Promise<void> => {
-		ok("removePair", await desktop<DesktopSyncResult<null>>(chain.page(), `window.desktop.sync.removePair(${json(pair.id)})`))
+		await removeExtraPair(chain, pair.id)
 	}
 
 	const scaleSetUp = async (): Promise<void> => {
@@ -374,7 +323,7 @@ export function realWorldFor(chain: Chain, arch: string): RealWorld {
 			for (const round of [1, 2]) {
 				const before = last.lastSyncedAt ?? 0
 
-				ok("syncNow", await desktop<DesktopSyncResult<null>>(chain.page(), `window.desktop.sync.syncNow(${json(pair.id)})`))
+				await syncNow(chain, pair.id)
 
 				last =
 					(await settled(pair, before, LIVE_TIMEOUT_MS)) ??
@@ -573,7 +522,7 @@ export function realWorldFor(chain: Chain, arch: string): RealWorld {
 				}
 
 				writeFileSync(path.join(root, ...editedOnDisk.split("/")), edit.bytes)
-				ok("syncNow", await desktop<DesktopSyncResult<null>>(chain.page(), `window.desktop.sync.syncNow(${json(pair.id)})`))
+				await syncNow(chain, pair.id)
 
 				const started = Date.now()
 				let pending = await renamesPending(root)

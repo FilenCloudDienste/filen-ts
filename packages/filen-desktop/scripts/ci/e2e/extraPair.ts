@@ -29,10 +29,12 @@ export interface ExtraPair {
 	remoteRoot: string
 }
 
-// `remoteRoot` is the cloud directory's uuid.
+// `remoteRoot` is the cloud directory's uuid. `record` learns of the pair as soon as it exists, so that a failed start
+// still leaves it for removal.
 export async function addPairThroughChooser(
 	chain: Chain,
-	pair: { name: string; mode: DesktopSyncMode; localRoot: string; remoteRoot: string }
+	pair: { name: string; mode: DesktopSyncMode; localRoot: string; remoteRoot: string },
+	record?: (added: ExtraPair) => void
 ): Promise<ExtraPair> {
 	const evidence = path.join(chain.artifacts, `${chain.name}-chooser-${pair.name}`)
 	const choice = desktop<DesktopSyncLocalRootChoice>(chain.page(), "window.desktop.sync.chooseLocalDirectory()", CHOOSER_BUDGET_MS)
@@ -40,7 +42,11 @@ export async function addPairThroughChooser(
 	void choice.catch(() => undefined)
 	await chain.os.chooseDirectory(CHOOSER_TITLE, pair.localRoot, evidence)
 
-	const chosen = await choice
+	const chosen = await choice.catch(async (error: unknown) => {
+		await chain.os.screenDump(`${evidence}-no-answer.png`)
+
+		throw error
+	})
 
 	if (chosen.status !== "ok") {
 		fail(`chooseLocalDirectory: ${json(chosen)} (the chooser's steps: ${path.basename(evidence)}-*.png)`)
@@ -54,13 +60,17 @@ export async function addPairThroughChooser(
 		)
 	)
 
+	const result = { name: pair.name, id: added.pairId, localRoot: chosen.path, remoteRoot: pair.remoteRoot }
+
+	record?.(result)
+
 	if (added.plan !== null) {
 		await desktopCall(chain.page(), `window.desktop.sync.releasePlan(${json(added.plan.planId)})`)
 	}
 
 	ok("startPair", await desktop<DesktopSyncResult<null>>(chain.page(), `window.desktop.sync.startPair(${json(added.pairId)})`))
 
-	return { name: pair.name, id: added.pairId, localRoot: chosen.path, remoteRoot: pair.remoteRoot }
+	return result
 }
 
 export async function pairOf(chain: Chain, id: string): Promise<DesktopSyncPair> {
