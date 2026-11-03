@@ -5,6 +5,7 @@ import { stringifyEnvelope } from "@filen/shared/session"
 import type { Page } from "playwright-core"
 import { LEGACY_KEYS } from "../../../src/main/legacyData.ts"
 import { fail, waitFor } from "../support.ts"
+import { MASTER_KEYS_REMINDER } from "./app.ts"
 import { canonicalClient } from "./session.ts"
 
 // Signing an app in without its form. Logins are rate-limited (90 an hour per IP), so each OS signs in through a real
@@ -176,12 +177,17 @@ export function describeLegacy(page: Page, expected: string): Promise<StoredDesc
 }
 
 // The 4.x seed, on the sign-in screen: the envelope through the vault, then a reload, which resumes it. Done when the
-// shell shows (its account button).
+// shell shows: its account button, or the master-key reminder, which opens as soon as the account resolves and, modal,
+// aria-hides the rail (a role locator then never matches the button). Either shows only once the session resumed.
 export async function seedSession(page: Page, client: Sdk.StringifiedClient, timeoutMs: number): Promise<string> {
 	await page.getByText("Sign in to Filen").waitFor({ state: "visible", timeout: timeoutMs })
 	await page.evaluate(blob => (globalThis as unknown as { desktop: DesktopBridge }).desktop.session.set(blob), sessionEnvelope(client))
 	await page.reload()
-	await page.getByRole("button", { name: "Account", exact: true }).waitFor({ state: "visible", timeout: timeoutMs })
+	await page
+		.getByRole("button", { name: "Account", exact: true })
+		.or(page.locator('[role="dialog"], [role="alertdialog"]').filter({ hasText: MASTER_KEYS_REMINDER }))
+		.first()
+		.waitFor({ state: "visible", timeout: timeoutMs })
 
 	return "seeded through session.set; the reloaded page resumed it"
 }
