@@ -22,8 +22,8 @@ import { windowsOs } from "./windows.ts"
 // and uninstalling the way a user does. Every call is bounded.
 
 // How long the app's directory call may wait for its dialog: what any driver below takes at most (finding the dialog,
-// answering it, seeing it close or cancelling it), plus a margin.
-export const CHOOSER_BUDGET_MS = 3 * 60 * 1000
+// answering it, seeing it close or cancelling it; macOS waits twice for a panel that never came up), plus a margin.
+export const CHOOSER_BUDGET_MS = 4 * 60 * 1000
 
 export interface DriveLocation {
 	mountPoint: string | null

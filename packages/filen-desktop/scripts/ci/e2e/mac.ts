@@ -14,6 +14,8 @@ import type { DesktopOs } from "./os.ts"
 
 const TOOL_TIMEOUT_MS = 30_000
 const CHOOSER_TIMEOUT_MS = 90_000
+// The chooser's error when no panel came up on the app's windows.
+const NO_PANEL = "no open panel on Filen's windows within 30 s"
 const REPORTS = path.join(os.homedir(), "Library", "Logs", "DiagnosticReports")
 
 // Answers the open panel of process "Filen" (a sheet on its window, or a window of its own): Go to Folder
@@ -46,7 +48,7 @@ on run argv
 				if thePanel is not missing value then exit repeat
 				delay 0.5
 			end repeat
-			if thePanel is missing value then error "no open panel on Filen's windows within 30 s"
+			if thePanel is missing value then error "${NO_PANEL}"
 			keystroke "g" using {command down, shift down}
 			delay 1
 			keystroke thePath
@@ -64,6 +66,12 @@ on run argv
 	end timeout
 end run
 `
+
+// Whether the chooser waits once more: on its first attempt, when no panel came up at all. The panel lists mounted
+// volumes, and it can take that long while a drive mount just made settles; the app's call is still waiting.
+export function chooserRetries(attempt: number, timedOut: boolean, why: string): boolean {
+	return attempt === 1 && !timedOut && why.includes(NO_PANEL)
+}
 
 // An error that means the runner gave this process no Accessibility (or AppleEvents to System Events).
 function deniedAccess(text: string): boolean {
@@ -102,19 +110,31 @@ export const macOs: DesktopOs = {
 	},
 
 	async chooseDirectory(_title, dir, evidence) {
-		const result = await runBounded("osascript", ["-", dir], CHOOSER_TIMEOUT_MS, { input: CHOOSER })
+		for (let attempt = 1; ; attempt++) {
+			const result = await runBounded("osascript", ["-", dir], CHOOSER_TIMEOUT_MS, { input: CHOOSER })
 
-		console.log(result.stdout.trim())
+			console.log(result.stdout.trim())
 
-		if (result.status !== 0) {
-			await macOs.screenDump(`${evidence}-failed.png`)
+			if (result.status === 0) {
+				return
+			}
+
+			const shot = `${evidence}-failed${attempt === 1 ? "" : `-${String(attempt)}`}.png`
+
+			await macOs.screenDump(shot)
 
 			const why = result.timedOut ? "timed out" : result.stderr.trim()
+
+			if (chooserRetries(attempt, result.timedOut, why)) {
+				console.log(`the open panel: ${why}; waiting for it once more (see ${path.basename(shot)})`)
+
+				continue
+			}
 
 			fail(
 				deniedAccess(why)
 					? `osascript has no Accessibility for System Events on this runner: ${why}`
-					: `the open panel: ${why} (see ${path.basename(evidence)}-failed.png)`
+					: `the open panel: ${why} (see ${path.basename(shot)})`
 			)
 		}
 	},

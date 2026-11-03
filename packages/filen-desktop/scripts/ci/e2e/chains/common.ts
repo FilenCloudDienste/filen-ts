@@ -418,6 +418,8 @@ export async function openChain(name: string, options: Omit<UpdateOptions, "hook
 				await step()
 			} catch (error) {
 				if (chain.signedIn && chain.renderer !== null) {
+					// The sign-out deletes the logs: the app's side of the failure is kept first.
+					findings.attach(`${name}-main-before-failure-sign-out.log`, tail(userData("logs", "main.log"), 100_000))
 					await findings.check("sign out after the failure", () =>
 						signOut(chain.page(), findings, credentials.email, artifacts, name)
 					)

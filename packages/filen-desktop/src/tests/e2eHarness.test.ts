@@ -50,6 +50,8 @@ import {
 import { LEGACY_KEYS, legacySession } from "../../src/main/legacyData.ts"
 import { diffSnapshots, localSnapshot } from "../../scripts/ci/e2e/snapshot.ts"
 import { isChromiumChild } from "../../scripts/ci/targets.ts"
+import { chooserRetries } from "../../scripts/ci/e2e/mac.ts"
+import { CHOOSER_BUDGET_MS } from "../../scripts/ci/e2e/os.ts"
 
 const dirs: string[] = []
 
@@ -568,5 +570,21 @@ describe("chain L fixtures", () => {
 			"local e2e-twoway/.filenignore rules"
 		])
 		expect(LEGACY_CONFLICTS).toEqual({ "e2e-twoway": ["docs/notes.txt"] })
+	})
+})
+
+describe("the macOS folder chooser", () => {
+	const noPanel = "787:833: execution error: no open panel on Filen's windows within 30 s (-2700)"
+
+	it("waits once more for a panel that never came up, and for nothing else", () => {
+		expect(chooserRetries(1, false, noPanel)).toBe(true)
+		expect(chooserRetries(2, false, noPanel)).toBe(false)
+		expect(chooserRetries(1, true, "timed out")).toBe(false)
+		expect(chooserRetries(1, false, "execution error: the panel stayed open after the path and Open; cancelled")).toBe(false)
+		expect(chooserRetries(1, false, "execution error: Not authorized to send Apple events to System Events. (-1743)")).toBe(false)
+	})
+
+	it("gives the app's call the time of both waits", () => {
+		expect(CHOOSER_BUDGET_MS).toBeGreaterThan(2 * 90_000)
 	})
 })
