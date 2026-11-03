@@ -8,23 +8,21 @@ import {
 	appPids,
 	createSampler,
 	describeSample,
+	LIVE_OFFLINE_MS,
 	offlineBlockFor,
 	POLL_MS,
 	relaunchThrough,
 	type Sampler,
 	seconds,
-	silentBlock,
-	startThrough,
-	watchOffline
+	startThrough
 } from "../offlineBlock.ts"
 import type { Chain } from "./common.ts"
 import { backOnline, CONVERGE_MS, converged, RECOVER_MS, releaseSentAgain, runListingDrop } from "./offlineListing.ts"
 
 // P11: N offline and back, with its own processes cut off (offlineBlock.ts) and everything else on the runner online.
-//   live drop      with N running and every pair converged: an edit takes its pair offline within 30 s (on mac x64
-//                  later, up to the SDK's read timeout, is a known bug: watchOffline), stays out of the cloud, the sync status never asks for attention; once the
-//                  block is lifted every pair is back online (none offline or in error) within 60 s, and the edit
-//                  uploads and every pair converges (none waiting, no lastError) within 120 s
+//   live drop      with N running and every pair converged: an edit takes its pair offline within 30 s, stays out of
+//                  the cloud, the sync status never asks for attention; once the block is lifted every pair is back
+//                  online (none offline or in error) within 60 s, and the edit uploads and every pair converges (none waiting, no lastError) within 120 s
 //   offline start  N launched under the block: every pair offline (none in error), no attention; once lifted, every
 //                  pair is back online within 60 s (the engine wakes on reconnect instead of its next periodic pass)
 //                  and converged within 120 s
@@ -110,8 +108,7 @@ export async function runOfflineCheck(chain: Chain, options: OfflineCheckOptions
 
 			sampler.reset()
 
-			// From settled pairs: a drop inside a launch's first cloud listing leaves its request in flight, which on mac
-			// x64 hangs on dropped packets past the window with no pass failing, so nothing goes offline.
+			// From settled pairs, so the drop meets no launch's first cloud listing (the listing drop's own sub-step).
 			const settled = await sampler.watch(CONVERGE_MS, converged)
 
 			if (settled.hit === null) {
@@ -126,16 +123,10 @@ export async function runOfflineCheck(chain: Chain, options: OfflineCheckOptions
 				blockedAt = Date.now()
 				writeFileSync(path.join(pair.localRoot, name), `${name}\n`)
 
-				const offline = await watchOffline(
-					findings,
-					"P11 a live drop: offline",
-					sampler,
-					silentBlock(target.platform, process.arch),
-					current => current.phases.includes(`${pair.name}:offline`)
-				)
+				const offline = await sampler.watch(LIVE_OFFLINE_MS, current => current.phases.includes(`${pair.name}:offline`))
 
 				if (offline.hit === null) {
-					fail(`${pair.name} not offline within ${seconds(0, offline.capMs)} of the edit: ${describeSample(offline.last)}`)
+					fail(`${pair.name} not offline within ${seconds(0, LIVE_OFFLINE_MS)} of the edit: ${describeSample(offline.last)}`)
 				}
 
 				if (await inCloud(name)) {

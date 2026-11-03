@@ -3,10 +3,9 @@ import path from "node:path"
 import { setTimeout as sleep } from "node:timers/promises"
 import type { DesktopLockStatus, DesktopSyncPair } from "@filen/shared/desktop"
 import { fail, powershellBounded, psQuote, runBounded, type BoundedResult } from "../support.ts"
-import type { Platform, Target } from "../targets.ts"
+import type { Target } from "../targets.ts"
 import { desktop, unlockThroughScreen } from "./app.ts"
 import type { Chain } from "./chains/common.ts"
-import type { Findings } from "./findings.ts"
 import { START_TIMEOUT_MS } from "./update.ts"
 
 // Taking N offline on a hosted runner without touching anyone else's network: N's own processes lose it (Linux: N runs
@@ -184,50 +183,8 @@ export function pfStateKills(remotes: readonly string[]): string[][] {
 }
 
 // How long the block may take to take a running N's pairs offline: a blocked connection fails at once (a reset) on
-// Linux, Windows and macOS on arm64. On the macOS Intel image pf's `block return out` resets nothing for the app's
-// sockets, killed states or not, so a request in flight hangs on dropped packets, and sdk-rs 0.5.18 bounds that on
-// macOS only by the OS giving up retransmitting (79 s seen, over 92 s once) or by its read timeout (DEAD_PEER_ISSUE).
-// There, offline after the window but within that bound is the known bug; never offline within it still fails.
+// Linux, Windows and macOS on arm64.
 export const LIVE_OFFLINE_MS = 30_000
-// sdk-rs DEFAULT_READ_TIMEOUT: the longest a request in flight waits on a peer that never answers.
-export const SDK_READ_TIMEOUT_MS = 300_000
-export const DEAD_PEER_ISSUE =
-	"sdk-rs 0.5.18 sets no dead-peer bound on macOS for a request whose sent data goes unacknowledged (a firewall dropping its packets): it waits for the OS to give up retransmitting or for the 300 s read timeout; the SDK fix: TCP_RXT_CONNDROPTIME on macOS, as TCP_USER_TIMEOUT on Linux and Android"
-
-// Where pf's block resets nothing, so a request in flight meets DEAD_PEER_ISSUE.
-export function silentBlock(platform: Platform, arch: string): boolean {
-	return platform === "mac" && arch === "x64"
-}
-
-// The first sample satisfying `done` within LIVE_OFFLINE_MS of now. Where the block is silent, a later one within the
-// SDK's read timeout (plus the same window for the failure to reach the pairs) is recorded as DEAD_PEER_ISSUE and
-// returned as a hit; `capMs` is what was waited for at most.
-export async function watchOffline(
-	findings: Pick<Findings, "known">,
-	check: string,
-	sampler: Pick<Sampler, "watch">,
-	silent: boolean,
-	done: (sample: Sample) => boolean
-): Promise<{ hit: Sample | null; last: Sample; capMs: number }> {
-	const start = Date.now()
-	const prompt = await sampler.watch(LIVE_OFFLINE_MS, done)
-
-	if (prompt.hit !== null || !silent) {
-		return { ...prompt, capMs: LIVE_OFFLINE_MS }
-	}
-
-	const capMs = SDK_READ_TIMEOUT_MS + LIVE_OFFLINE_MS
-	const late = await sampler.watch(Math.max(0, start + capMs - Date.now()), done)
-	const { hit } = late
-
-	if (hit !== null) {
-		await findings.known(`${check} within ${seconds(0, LIVE_OFFLINE_MS)} on mac x64`, DEAD_PEER_ISSUE, () =>
-			fail(`reached after ${seconds(start, hit.at)}: ${describeSample(hit)}`)
-		)
-	}
-
-	return { ...late, capMs }
-}
 
 // The remote ends of N's established TCP connections off the loopback interface: addresses only (distinct), or
 // address:port per connection.

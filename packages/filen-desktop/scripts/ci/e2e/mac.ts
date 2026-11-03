@@ -14,14 +14,8 @@ import type { DesktopOs } from "./os.ts"
 
 const TOOL_TIMEOUT_MS = 30_000
 
-// How long the chooser waits for the open panel to come up, by wall clock (System Events calls take about 1.5 s each
-// on Intel runners, so a count of polls is no measure). The first panel of a launch on an Intel runner has taken over
-// 30 s (and in one run over 140 s), every later one about 6 s; arm64 runners show each within 6 s.
-export function panelWaitS(arch: string): number {
-	return arch === "x64" ? 150 : 30
-}
-
-const PANEL_WAIT_S = panelWaitS(process.arch)
+// How long the chooser waits for the open panel to come up, by wall clock; arm64 runners show each within 6 s.
+export const PANEL_WAIT_S = 30
 // The script's own bound: the panel's wait plus a minute for Go to Folder, the path, Open and the panel closing.
 export const MAC_CHOOSER_TIMEOUT_MS = (PANEL_WAIT_S + 60) * 1000
 // The chooser's error when no panel came up on the app's windows (the script names the wait after it).
