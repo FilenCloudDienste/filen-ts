@@ -339,6 +339,55 @@ describe("attachUnheld", () => {
 		expect(ops()).toEqual(["addPair", "pause"])
 	})
 
+	it("tells a pair of the whole drive that other pairs overlap it instead of holding it for a start", async () => {
+		const other = "0a1b2c3d-4e5f-4a6b-8c7d-8e9f0a1b2c3d"
+		const store = memoryStore([
+			shellPair({ legacyUuid: LEGACY, state: "waitingForRoot" }),
+			shellPair({ pairId: "2", localRoot: path.join(tmpdir(), "elsewhere"), remoteRoot: other })
+		])
+		const { deps, ops } = fakeNative(store)
+
+		deps.driveRoot = REMOTE
+		await attachUnheld(deps)
+		await attachUnheld(deps)
+
+		expect(ops()).toEqual([])
+		expect(store.get().pairs[0]).toMatchObject({
+			pairId: null,
+			state: "unsupported",
+			holds: [],
+			notices: ["refusedWholeDrive"],
+			wholeDriveConfirmed: false
+		})
+	})
+
+	it("refuses a held pair of the whole drive once another pair overlaps it, never for a refused one", async () => {
+		const other = "0a1b2c3d-4e5f-4a6b-8c7d-8e9f0a1b2c3d"
+		const held = shellPair({ legacyUuid: LEGACY, state: "preparing", holds: ["driveRoot"] })
+		const refused = shellPair({
+			legacyUuid: "6f7a8b9c-0d1e-4f2a-8b3c-4d5e6f7a8b9c",
+			localRoot: path.join(tmpdir(), "elsewhere"),
+			remoteRoot: other,
+			state: "unsupported",
+			notices: ["refusedRemoteMissing"]
+		})
+		const store = memoryStore([held, refused])
+		const { deps, ops } = fakeNative(store)
+
+		deps.driveRoot = REMOTE
+		await attachUnheld(deps)
+		expect(store.get().pairs[0]).toEqual(held)
+
+		await store.update(state => ({
+			...state,
+			pairs: [...state.pairs, shellPair({ pairId: "2", localRoot: path.join(tmpdir(), "another"), remoteRoot: other })]
+		}))
+		await attachUnheld(deps)
+
+		expect(ops()).toEqual([])
+		expect(store.get().pairs[0]).toMatchObject({ state: "unsupported", holds: [], notices: ["refusedWholeDrive"] })
+	})
+
 	it("keeps a pair the engine refuses for good, unsynced with the reason, and one a passing failure hit for later", async () => {
 		const store = memoryStore([shellPair()])
 		const refused = fakeNative(store, { addPair: () => new Refusal("remoteRootNested") })

@@ -10,6 +10,7 @@ import {
 	localChoiceOutcome,
 	nextStep,
 	previousStep,
+	isWholeDrivePick,
 	remotePick,
 	withLocalChoice,
 	type AddPairForm,
@@ -101,10 +102,18 @@ describe("add pair dialog", () => {
 	})
 
 	it("the top level picks the account root", () => {
-		expect(remotePick(null, "root-uuid")).toBe("root-uuid")
-		expect(remotePick("", "root-uuid")).toBe("root-uuid")
-		expect(remotePick(null, undefined)).toBeNull()
-		expect(remotePick("child-uuid", "root-uuid")).toBe("child-uuid")
+		// No default: the top level picks nothing until the whole drive is chosen.
+		expect(remotePick(null, "root-uuid", false)).toBeNull()
+		expect(remotePick("", "root-uuid", false)).toBeNull()
+		expect(remotePick(null, "root-uuid", true)).toBe("root-uuid")
+		expect(remotePick("", "root-uuid", true)).toBe("root-uuid")
+		expect(remotePick(null, undefined, true)).toBeNull()
+		expect(remotePick("child-uuid", "root-uuid", false)).toBe("child-uuid")
+		expect(remotePick("child-uuid", "root-uuid", true)).toBe("child-uuid")
+		expect(isWholeDrivePick("root-uuid", "root-uuid")).toBe(true)
+		expect(isWholeDrivePick("child-uuid", "root-uuid")).toBe(false)
+		expect(isWholeDrivePick(null, undefined)).toBe(false)
+		expect(canAdvance("remote", { ...FILLED, remote: remotePick(null, "root-uuid", false) })).toBe(false)
 		expect(isHiddenRemoteRow(".filen", true)).toBe(true)
 		expect(isHiddenRemoteRow(".filen", false)).toBe(false)
 	})

@@ -164,6 +164,7 @@ describe("sync copy", () => {
 			"refusedRemoteMissing",
 			"refusedLocalOverlap",
 			"refusedRemoteOverlap",
+			"refusedWholeDrive",
 			"refusedModeConflict"
 		])
 		expectAllKeysExist(HOLD_KEY, ["ruleFileUnwritable", "ruleFileUndecodable", "driveRoot", "cloudListingSlow"])

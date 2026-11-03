@@ -158,6 +158,9 @@ export const sync = {
 		"Filen can't sync this pair: its directory on this device is, contains or is inside another pair's directory.",
 	/** Notice — the cloud directory overlaps another pair's */
 	noticeRefusedRemoteOverlap: "Filen can't sync this pair: its cloud directory is, contains or is inside another pair's cloud directory.",
+	/** Notice — a pair of the previous app syncs the whole drive, which overlaps every other pair */
+	noticeRefusedWholeDrive:
+		"Filen can't sync this pair from the previous app: it syncs your whole drive, which overlaps your other pairs. Remove it, or remove the other pairs and add it again.",
 	/** Notice — the previous app had two pairs of the same directories in different modes */
 	noticeRefusedModeConflict: "Filen can't sync this pair: another pair syncs the same directories in another mode.",
 	/** Notice — remove the pair a refusal notice is about */
@@ -622,11 +625,18 @@ export const sync = {
 	/** Add — remote step title */
 	addRemoteTitle: "Directory in the cloud",
 	/** Add — remote step description */
-	addRemoteDescription: "Open the directory in your Cloud Drive to sync with. Double-click a directory to open it.",
+	addRemoteDescription:
+		"Open the directory in your Cloud Drive to sync with, or choose your whole drive. Double-click a directory to open it.",
 	/** Add — remote filter placeholder */
 	addRemoteFilter: "Filter directories",
 	/** Add — the remote pick */
 	addRemotePick: "Syncs with {{name}}",
+	/** Add — no remote picked yet */
+	addRemotePickNone: "Open a directory to sync with, or choose your whole drive.",
+	/** Add — pick the whole drive as the remote */
+	addRemoteWholeDrive: "Sync my whole drive",
+	/** Add — the whole drive is picked as the remote */
+	addRemoteWholeDriveWarning: "The first sync lists your entire drive, which can take a long time and a lot of memory.",
 	/** Add — mode step title */
 	addModeTitle: "Sync mode",
 	/** Add — mode step description */

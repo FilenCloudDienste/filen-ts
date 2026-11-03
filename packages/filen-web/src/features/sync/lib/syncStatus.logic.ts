@@ -133,6 +133,7 @@ export const NOTICE_KEY: Record<DesktopSyncNotice, SyncKey> = {
 	refusedRemoteMissing: "noticeRefusedRemoteMissing",
 	refusedLocalOverlap: "noticeRefusedLocalOverlap",
 	refusedRemoteOverlap: "noticeRefusedRemoteOverlap",
+	refusedWholeDrive: "noticeRefusedWholeDrive",
 	refusedModeConflict: "noticeRefusedModeConflict"
 }
 

@@ -482,6 +482,30 @@ describe("registerSyncIpc", () => {
 		expect(onHeld).toHaveBeenLastCalledWith(false)
 	})
 
+	it("does not start a pair of the whole drive another pair now overlaps, telling why instead", async () => {
+		const legacy = "11111111-2222-4333-8444-555555555555"
+		const { service, store, invoke, ops } = setup({
+			pairs: [shellPair({ pairId: null, legacyUuid: legacy, localRoot: directory, state: "preparing", holds: ["driveRoot"] })],
+			driveRoot: REMOTE
+		})
+
+		await service.nativeEvent({ t: "ready", pairs: [], reset: false }, "1")
+		// Added after the hold was shown, before the user answers it.
+		await store.update(state => ({
+			...state,
+			pairs: [...state.pairs, shellPair({ pairId: "8", remoteRoot: ACCOUNT_ROOT, paused: true })]
+		}))
+
+		expect(await invoke("holdAction", `legacy:${legacy}`, "startAnyway")).toEqual({ ok: true, value: null })
+		expect(store.get().pairs[0]).toMatchObject({
+			state: "unsupported",
+			holds: [],
+			notices: ["refusedWholeDrive"],
+			wholeDriveConfirmed: false
+		})
+		expect(ops()).not.toContain("addPair")
+	})
+
 	it("starts a migrated pair from its review on the guard it would have started on", async () => {
 		const { invoke, ops, store } = setup({
 			pairs: [

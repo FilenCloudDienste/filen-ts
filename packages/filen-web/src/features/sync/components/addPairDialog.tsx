@@ -13,6 +13,8 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Field, FieldLabel } from "@/components/ui/field"
+import { Switch } from "@/components/ui/switch"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Spinner } from "@/components/ui/spinner"
 import { SURFACE_RING } from "@/components/ui/surface"
@@ -25,6 +27,7 @@ import {
 	addPairRequest,
 	canAdvance,
 	INITIAL_ADD_PAIR_FORM,
+	isWholeDrivePick,
 	localChoiceOutcome,
 	nextStep,
 	previousStep,
@@ -100,9 +103,10 @@ export function AddPairDialog({ onClose }: { onClose: () => void }) {
 	const [addError, setAddError] = useState<string | null>(null)
 	const [busy, setBusy] = useState<Busy>(null)
 	const [added, setAdded] = useState<AddedPair | null>(null)
+	const [wholeDrive, setWholeDrive] = useState(false)
 	// The unstarted pair, for the unmount cleanup: leaving the Sync section must not leave it behind, paused.
 	const unstartedRef = useRef<AddedPair | null>(null)
-	const remote = remotePick(picker.targetUuid, accountRoot)
+	const remote = remotePick(picker.targetUuid, accountRoot, wholeDrive)
 	const form: AddPairForm = { ...fields, remote }
 	const remoteName =
 		remote === null ? null : remote === accountRoot ? t("drive:driveMyDrive") : (picker.namesQuery.data?.[remote] ?? null)
@@ -276,7 +280,23 @@ export function AddPairDialog({ onClose }: { onClose: () => void }) {
 							picker={picker}
 							disabled={busy !== null}
 						/>
-						<p className="text-xs text-muted-foreground">{t("addRemotePick", { name: remoteName ?? "…" })}</p>
+						{picker.pathStack.length === 0 ? (
+							<Field orientation="horizontal">
+								<Switch
+									id={`${id}-whole-drive`}
+									checked={wholeDrive}
+									disabled={busy !== null || accountRoot === undefined}
+									onCheckedChange={setWholeDrive}
+								/>
+								<FieldLabel htmlFor={`${id}-whole-drive`}>{t("addRemoteWholeDrive")}</FieldLabel>
+							</Field>
+						) : null}
+						{isWholeDrivePick(remote, accountRoot) ? (
+							<DesktopCallout tone="warning">{t("addRemoteWholeDriveWarning")}</DesktopCallout>
+						) : null}
+						<p className="text-xs text-muted-foreground">
+							{remote === null ? t("addRemotePickNone") : t("addRemotePick", { name: remoteName ?? "…" })}
+						</p>
 					</>
 				)
 			case "mode":

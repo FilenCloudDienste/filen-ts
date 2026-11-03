@@ -507,7 +507,11 @@ async function attach(deps: FirstRunDeps, pair: ShellPair): Promise<void> {
 		}
 
 		if (!pair.wholeDriveConfirmed && deps.driveRoot !== null && pair.remoteRoot.toLowerCase() === deps.driveRoot.toLowerCase()) {
-			await patch({ state: "preparing", review: null, holds: withHold(pair.holds, "driveRoot", new Set()) })
+			await patch(
+				wholeDriveOverlaps(deps.store.get().pairs, id)
+					? wholeDriveRefusal(pair)
+					: { state: "preparing", review: null, holds: withHold(pair.holds, "driveRoot", new Set()) }
+			)
 
 			return
 		}
@@ -563,6 +567,22 @@ async function attach(deps: FirstRunDeps, pair: ShellPair): Promise<void> {
 	}
 }
 
+// Whether another pair stands in the way of one of the whole drive (id): the engine refuses a pair whose cloud directory
+// contains another's, so a start would never come. A refused pair is not synced and does not count.
+export function wholeDriveOverlaps(pairs: readonly ShellPair[], id: string): boolean {
+	return pairs.some(other => shellPairId(other) !== id && other.notices.length === 0)
+}
+
+// A whole-drive pair that overlaps the others: told so, with removing it as the way out, instead of held for a start.
+export function wholeDriveRefusal(pair: ShellPair): Partial<ShellPair> {
+	return {
+		state: "unsupported",
+		review: null,
+		holds: pair.holds.filter(hold => hold !== "driveRoot"),
+		notices: [...pair.notices, "refusedWholeDrive"]
+	}
+}
+
 // Whether attachUnheld has work for the pair: the engine does not hold it, it was not refused, and it is not waiting for
 // the user to start a whole-drive pair.
 export function attachable(pair: ShellPair): boolean {
@@ -570,11 +590,17 @@ export function attachable(pair: ShellPair): boolean {
 }
 
 // Every pair the engine does not hold, one at a time: migrated ones, ones waiting for their directory and ones a
-// baseline reset lost.
+// baseline reset lost. A whole-drive pair held for the user is refused once another pair overlaps it.
 export async function attachUnheld(deps: FirstRunDeps): Promise<void> {
 	for (const pair of deps.store.get().pairs) {
 		if (attachable(pair)) {
 			await attach(deps, pair)
+		} else if (pair.notices.length === 0 && pair.holds.includes("driveRoot")) {
+			const id = shellPairId(pair)
+
+			if (wholeDriveOverlaps(deps.store.get().pairs, id)) {
+				await patchPair(deps.store, entry => shellPairId(entry) === id, wholeDriveRefusal(pair))
+			}
 		}
 	}
 }

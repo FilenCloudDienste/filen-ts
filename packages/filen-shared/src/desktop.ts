@@ -171,13 +171,15 @@ export type DesktopSyncPhase =
 
 // Why the engine refused for good a pair it had to add (a migrated one, or one a baseline reset lost): the local
 // directory cannot be a root, the cloud directory is gone, or the pair overlaps another one on this device or in the
-// cloud, or another pair has the same directories. The pair is kept (not synced) until the notice is dismissed, which
-// removes it. With `refusedLocalRoot`, the pair's `rootProblem` says why.
+// cloud, or another pair has the same directories. `refusedWholeDrive`: a migrated pair of the whole drive overlaps the
+// other pairs, so it is never started. The pair is kept (not synced) until the notice is dismissed, which removes it.
+// With `refusedLocalRoot`, the pair's `rootProblem` says why.
 export type DesktopSyncNotice =
 	| "refusedLocalRoot"
 	| "refusedRemoteMissing"
 	| "refusedLocalOverlap"
 	| "refusedRemoteOverlap"
+	| "refusedWholeDrive"
 	| "refusedModeConflict"
 
 // Why a pair moved from the previous app waits (preparing) for the user: its root .filenignore cannot be written or

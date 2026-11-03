@@ -34,7 +34,16 @@ import { errorCode } from "../atomicFile.ts"
 import { type Page, pushThrottle } from "../pages.ts"
 import { serialQueue } from "../../shared/serial.ts"
 import { createActivityLog } from "./activity.ts"
-import { attachable, attachUnheld, BIN_DIR, type FirstRunDeps, holdReviewed, startPreparing } from "./firstRun.ts"
+import {
+	attachable,
+	attachUnheld,
+	BIN_DIR,
+	type FirstRunDeps,
+	holdReviewed,
+	startPreparing,
+	wholeDriveOverlaps,
+	wholeDriveRefusal
+} from "./firstRun.ts"
 import { applyLegacySync } from "./legacyPairs.ts"
 import {
 	chooseLocalDirectory,
@@ -829,10 +838,14 @@ export function createSyncService(deps: SyncServiceDeps): SyncService {
 					return fail("pairNotFound")
 				}
 
-				await patchPair(found.store, pairId, {
-					holds: found.pair.holds.filter(hold => hold !== "driveRoot"),
-					wholeDriveConfirmed: true
-				})
+				// Another pair added since the hold was shown would make the engine refuse the start.
+				await patchPair(
+					found.store,
+					pairId,
+					wholeDriveOverlaps(found.store.get().pairs, pairId)
+						? wholeDriveRefusal(found.pair)
+						: { holds: found.pair.holds.filter(hold => hold !== "driveRoot"), wholeDriveConfirmed: true }
+				)
 			}
 
 			if (user.userId === hostUser && host.state === "running") {

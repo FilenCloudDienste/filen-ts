@@ -63,7 +63,14 @@ const findingSchema = pinned<DesktopSyncReviewFinding>()(
 
 // Each one stands for an engine refusal: such a pair is never added, and dismissing the notice removes it.
 export const noticeSchema = pinned<DesktopSyncNotice>()(
-	type.enumerated("refusedLocalRoot", "refusedRemoteMissing", "refusedLocalOverlap", "refusedRemoteOverlap", "refusedModeConflict")
+	type.enumerated(
+		"refusedLocalRoot",
+		"refusedRemoteMissing",
+		"refusedLocalOverlap",
+		"refusedRemoteOverlap",
+		"refusedWholeDrive",
+		"refusedModeConflict"
+	)
 )
 
 export const holdSchema = pinned<DesktopSyncHold>()(

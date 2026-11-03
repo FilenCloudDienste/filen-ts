@@ -35,9 +35,19 @@ export function localChoiceOutcome(choice: DesktopSyncLocalRootChoice): LocalCho
 	}
 }
 
-// The remote pick: the directory open in the chooser, at the top level the account's root (null until it is known).
-export function remotePick(openUuid: string | null, accountRootUuid: string | undefined): string | null {
-	return openUuid === null || openUuid.length === 0 ? (accountRootUuid ?? null) : openUuid
+// The remote pick: the directory open in the chooser. At the top level there is none until the user chooses the whole
+// drive, the account's root (null until it is known).
+export function remotePick(openUuid: string | null, accountRootUuid: string | undefined, wholeDrive: boolean): string | null {
+	if (openUuid !== null && openUuid.length > 0) {
+		return openUuid
+	}
+
+	return wholeDrive ? (accountRootUuid ?? null) : null
+}
+
+// Whether the pick is the whole drive, whose first sync lists all of it.
+export function isWholeDrivePick(remote: string | null, accountRootUuid: string | undefined): boolean {
+	return remote !== null && remote === accountRootUuid
 }
 
 export function defaultPairName(choice: LocalChoice): string {
