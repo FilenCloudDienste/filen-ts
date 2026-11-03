@@ -18,7 +18,7 @@ import {
 	parseStash
 } from "./legacyData.ts"
 import { serialQueue } from "../shared/serial.ts"
-import { readingCipher, sessionUserId, storingCipher, type VaultCipher } from "./sessionVault.ts"
+import { sessionUserId, type VaultCipher } from "./sessionVault.ts"
 
 // The one-time import from the old client (3.0.53), PLAN §6 steps 1-5 and 8. A marker file in userData records where
 // it got to:
@@ -782,8 +782,8 @@ export interface StashStore {
 }
 
 // The encrypted stash, decrypted once and served from memory. A stash that cannot be decrypted now (a locked keychain)
-// is read again next time and never removed. In memory mode only one encrypted with Linux's fallback key is read, and
-// a run with secure storage re-encrypts that.
+// is read again next time and never removed. One encrypted with an older key (Linux's fallback key, "v10") is
+// re-encrypted once read.
 export function createStashStore(file: AtomicFile, cipher: () => Promise<VaultCipher | null>, warn: (message: string) => void): StashStore {
 	// undefined: not read yet.
 	let cached: LegacyStash | null | undefined
@@ -795,7 +795,7 @@ export function createStashStore(file: AtomicFile, cipher: () => Promise<VaultCi
 		}
 
 		const data = await file.read()
-		const active = data === null ? null : readingCipher(await cipher(), data)
+		const active = data === null ? null : await cipher()
 
 		if (data === null || active === null) {
 			cached = null
@@ -812,7 +812,7 @@ export function createStashStore(file: AtomicFile, cipher: () => Promise<VaultCi
 
 		cached = stash
 
-		if (stash !== null && decrypted.shouldReEncrypt && storingCipher(active) !== null) {
+		if (stash !== null && decrypted.shouldReEncrypt) {
 			await store(stash).catch((error: unknown) => {
 				warn(`migration: stash re-encryption failed: ${errorCode(error)}`)
 			})
@@ -823,14 +823,12 @@ export function createStashStore(file: AtomicFile, cipher: () => Promise<VaultCi
 
 	// False when the stash is kept for this run only.
 	async function store(stash: LegacyStash | null): Promise<boolean> {
-		const active = storingCipher(await cipher())
+		const active = await cipher()
 		let persisted = true
 
 		if (stash === null) {
 			await file.remove()
 		} else if (active === null) {
-			// A fallback-key file stays though a feature was consumed: removing it would lose the features not consumed
-			// yet, and one offered again only consumes (both importers keep `legacyApplied`). It goes once all are.
 			warn("migration: no secure storage; the stash is kept for this run only")
 			persisted = false
 		} else {

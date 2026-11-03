@@ -868,21 +868,23 @@ describe("a first launch with a keychain problem", () => {
 		expect(next.stored()).toMatchObject({ stage: "imported", stashOnly: true })
 	})
 
-	it("a launch on Linux's fallback key imports into memory like one without secure storage, and the keyring's run encrypts", async () => {
+	it("a launch on Linux's fallback key stores the import with that key, and the keyring's run re-encrypts it", async () => {
 		const files = disk()
-		const memory = await launch(files, () => Promise.resolve(linuxCipher("fallback")), null)
+		const fallback = await launch(files, () => Promise.resolve(linuxCipher("fallback")), null)
 
-		expect(memory.result).toEqual({ pinImported: true })
-		await expect(memory.vault.get()).resolves.toMatchObject({ status: "present" })
-		expect([files.session.data, files.stash.data]).toEqual([null, null])
-		expect(parseLockRecord(files.lock.data?.toString() ?? "")).not.toBeNull()
-		expect(memory.stored()).toMatchObject({ stage: "started", failedStarts: 0, stashOnly: true, volatileStash: true, deferred: false })
+		expect(fallback.result).toEqual({ pinImported: true })
+		expect(fallback.stored()).toMatchObject({ stage: "imported", deferred: false, volatileStash: false })
 
-		const next = await launch(files, () => Promise.resolve(linuxCipher("keyring")), memory.stored())
+		for (const file of [files.session, files.lock, files.stash]) {
+			expect(file.data?.subarray(0, 3).toString()).toBe("v10")
+		}
 
+		const next = await launch(files, () => Promise.resolve(linuxCipher("keyring")), fallback.stored())
+
+		await expect(next.vault.get()).resolves.toMatchObject({ status: "present" })
 		expect(next.lock.status()).toEqual({ enabled: true, locked: true, unreadable: false, retryAt: null })
+		expect(files.session.data?.subarray(0, 3).toString()).toBe("v11")
 		expect(files.lock.data?.subarray(0, 3).toString()).toBe("v11")
-		expect(next.stored()).toMatchObject({ stage: "imported", stashOnly: true })
 	})
 
 	it("a run without a keyring keeps an encrypted 4.x session and its PIN, and imports only the prefs", async () => {
@@ -1476,39 +1478,15 @@ describe("stash store", () => {
 		expect(await volatile.pending("1001", "sync")).toBeUndefined()
 	})
 
-	it("reads a stash a run on the fallback key stored, and re-encrypts it once a run has the keyring's key", async () => {
+	it("re-encrypts a stash the fallback key stored once a run has the keyring's key", async () => {
 		const file = memoryFile(null)
 
-		await createStashStore(file, () => Promise.resolve(linuxCipher("unprobed")), vi.fn()).write(JSON.stringify(STASH))
+		await createStashStore(file, () => Promise.resolve(linuxCipher("fallback")), vi.fn()).write(JSON.stringify(STASH))
 		expect(file.text()?.startsWith("v10")).toBe(true)
-
-		const stored = file.text()
-		const fallback = createStashStore(file, () => Promise.resolve(linuxCipher("fallback")), vi.fn())
-
-		await expect(fallback.write(JSON.stringify(STASH))).resolves.toBe(false)
-		expect(await fallback.pending("1001", "sync")).toEqual(OLD_SYNC)
-		expect(file.text()).toBe(stored)
-		expect(await createStashStore(file, () => Promise.resolve(linuxCipher("fallback")), vi.fn()).pending("1001", "sync")).toEqual(
+		expect(await createStashStore(file, () => Promise.resolve(linuxCipher("keyring")), vi.fn()).pending("1001", "sync")).toEqual(
 			OLD_SYNC
 		)
-
-		const keyring = createStashStore(file, () => Promise.resolve(linuxCipher("keyring")), vi.fn())
-
-		expect(await keyring.pending("1001", "sync")).toEqual(OLD_SYNC)
 		expect(file.text()?.startsWith("v11")).toBe(true)
-	})
-
-	it("keeps a stash the keyring encrypted, unread and unchanged, on the fallback key", async () => {
-		const file = memoryFile(null)
-
-		await createStashStore(file, () => Promise.resolve(linuxCipher("keyring")), vi.fn()).write(JSON.stringify(STASH))
-
-		const stored = file.text()
-
-		expect(
-			await createStashStore(file, () => Promise.resolve(linuxCipher("fallback")), vi.fn()).pending("1001", "sync")
-		).toBeUndefined()
-		expect(file.text()).toBe(stored)
 	})
 
 	it("withoutFeature keeps other users' and other features' parts", () => {

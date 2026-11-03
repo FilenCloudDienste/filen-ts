@@ -3,7 +3,7 @@ import { type } from "arktype"
 import type { DesktopLockAttempt, DesktopLockStatus } from "@filen/shared/desktop"
 import { type AtomicFile, errorCode } from "./atomicFile.ts"
 import { serialQueue } from "../shared/serial.ts"
-import { readingCipher, removeIfUndecryptable, storingCipher, type VaultCipher } from "./sessionVault.ts"
+import { removeIfUndecryptable, type VaultCipher } from "./sessionVault.ts"
 
 // scrypt cost for new PINs: 32 MiB and roughly 50-100 ms per check on current hardware, off the main thread (libuv's
 // pool). Stored with each hash, so raising them later only affects PINs set afterwards.
@@ -174,11 +174,11 @@ export interface AppLock {
 }
 
 // The record is encrypted with the session vault's cipher (safeStorage). Where the vault keeps the session in memory
-// only (no OS encryption, Linux basic_text or its fallback key), the record is stored as plain JSON: it holds only a
-// salted scrypt hash, and losing the lock on every launch would be worse. A keyring that comes or goes between runs
-// keeps the file: a plain record is read with a cipher too (and encrypted then), and an encrypted one read without a
-// cipher is left unused for a run that has it: like the session vault's file, which then reads as unreadable, it
-// guards nothing this run can read. One encrypted with the fallback key is still read then.
+// only (no OS encryption, Linux basic_text), the record is stored as plain JSON: it holds only a salted scrypt hash,
+// and losing the lock on every launch would be worse. A keyring that comes or goes between runs keeps the file: a
+// plain record is read with a cipher too (and encrypted then), and an encrypted one read without a cipher is left
+// unused for a run that has it: like the session vault's file, which then reads as unreadable, it guards nothing this
+// run can read.
 //
 // Read once and kept in memory; every change is written before it takes effect. A file that exists but cannot be read
 // or used fails closed: the app stays locked, and only a reset (signing out) opens it; an unreadable one is read again
@@ -219,10 +219,10 @@ export async function loadAppLock(
 		if (isPlainRecord(data)) {
 			text = data.toString("utf8")
 			// Stored by a run without secure storage: encrypted once this one has it.
-			reEncrypt = storingCipher(await cipher().catch(() => null)) !== null
+			reEncrypt = (await cipher().catch(() => null)) !== null
 		} else {
 			try {
-				const active = readingCipher(await cipher(), data)
+				const active = await cipher()
 
 				if (active === null) {
 					warn("app lock: the PIN file was stored with secure storage; it is kept until that is available again")
@@ -235,7 +235,7 @@ export async function loadAppLock(
 				const decrypted = await active.decrypt(data)
 
 				text = decrypted.result
-				reEncrypt = decrypted.shouldReEncrypt && storingCipher(active) !== null
+				reEncrypt = decrypted.shouldReEncrypt
 			} catch (error) {
 				warn(`app lock: the PIN file could not be decrypted: ${errorCode(error)}`)
 				fault = "unreadable"
@@ -257,7 +257,7 @@ export async function loadAppLock(
 	}
 
 	async function store(next: LockRecord): Promise<void> {
-		const active = storingCipher(await cipher())
+		const active = await cipher()
 		const json = serializeLockRecord(next)
 
 		await file.write(active === null ? Buffer.from(json) : await active.encrypt(json))

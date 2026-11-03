@@ -4,7 +4,6 @@ import path from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import {
 	createSessionVault,
-	fallbackKeyEncrypted,
 	isSessionBlob,
 	removeIfUndecryptable,
 	sessionUserId,
@@ -92,81 +91,24 @@ describe("sessionUserId", () => {
 
 describe("vaultMode", () => {
 	it("keeps the session in memory on Linux basic_text or without encryption", () => {
-		expect(vaultMode("linux", "basic_text", true, false)).toBe("memory")
-		expect(vaultMode("linux", "gnome_libsecret", true, false)).toBe("encrypted")
-		expect(vaultMode("darwin", "", true, false)).toBe("encrypted")
-		expect(vaultMode("win32", "", false, false)).toBe("memory")
-	})
-
-	it("keeps it in memory on Linux's fallback key, whatever backend is reported", () => {
-		expect(vaultMode("linux", "gnome_libsecret", true, true)).toBe("memory")
-		expect(vaultMode("linux", "kwallet6", true, true)).toBe("memory")
-	})
-})
-
-describe("fallbackKeyEncrypted", () => {
-	it("tells Chromium's fallback-key ciphertext by its prefix", () => {
-		expect(fallbackKeyEncrypted(Buffer.from("v10abc"))).toBe(true)
-		expect(fallbackKeyEncrypted(Buffer.from("v11abc"))).toBe(false)
-		expect(fallbackKeyEncrypted(Buffer.from("v1"))).toBe(false)
-		expect(fallbackKeyEncrypted(Buffer.alloc(0))).toBe(false)
+		expect(vaultMode("linux", "basic_text", true)).toBe("memory")
+		expect(vaultMode("linux", "gnome_libsecret", true)).toBe("encrypted")
+		expect(vaultMode("darwin", "", true)).toBe("encrypted")
+		expect(vaultMode("win32", "", false)).toBe("memory")
 	})
 })
 
 describe("the session vault on Linux's fallback key", () => {
-	const warn = vi.fn()
-	const vaultOn = (key: "keyring" | "fallback", file: AtomicFile) =>
-		createSessionVault(() => Promise.resolve(linuxCipher(key)), file, warn)
+	it("stores with that key, and re-encrypts with the keyring's key once a run has it", async () => {
+		const file = memoryFile()
 
-	it("reads a session the fallback key encrypted, and stores nothing with that key", async () => {
-		const file = memoryFile(await linuxCipher("fallback").encrypt(BLOB))
-		const vault = vaultOn("fallback", file)
+		await createSessionVault(() => Promise.resolve(linuxCipher("fallback")), file, vi.fn()).set(BLOB)
+		expect(file.data?.subarray(0, 3).toString()).toBe("v10")
+
+		const vault = createSessionVault(() => Promise.resolve(linuxCipher("keyring")), file, vi.fn())
 
 		await expect(vault.get()).resolves.toEqual({ status: "present", blob: BLOB })
-		expect(file.writes).toBe(0)
-	})
-
-	it("keeps a session the keyring encrypted, unreadable and unchanged", async () => {
-		const stored = await linuxCipher("keyring").encrypt(BLOB)
-		const file = memoryFile(stored)
-
-		await expect(vaultOn("fallback", file).get()).resolves.toEqual({ status: "unreadable" })
-		expect(file.data).toBe(stored)
-	})
-
-	it("re-encrypts a fallback-key session with the keyring's key once a run has it", async () => {
-		const file = memoryFile(await linuxCipher("fallback").encrypt(BLOB))
-
-		await expect(vaultOn("keyring", file).get()).resolves.toEqual({ status: "present", blob: BLOB })
 		expect(file.data?.subarray(0, 3).toString()).toBe("v11")
-		await expect(vaultOn("keyring", file).get()).resolves.toEqual({ status: "present", blob: BLOB })
-	})
-
-	it("keeps a new session in memory, removing a fallback-key file it replaces and keeping a keyring one", async () => {
-		const fallback = memoryFile(await linuxCipher("fallback").encrypt(BLOB))
-		const vault = vaultOn("fallback", fallback)
-
-		await vault.set(BLOB)
-		expect(fallback.data).toBeNull()
-		await expect(vault.get()).resolves.toEqual({ status: "present", blob: BLOB })
-
-		const stored = await linuxCipher("keyring").encrypt(BLOB)
-		const keyring = memoryFile(stored)
-
-		await vaultOn("fallback", keyring).set(BLOB)
-		expect(keyring.data).toBe(stored)
-		expect(keyring.writes).toBe(0)
-	})
-
-	it("discards only what the fallback key cannot read", async () => {
-		const cipher = linuxCipher("fallback")
-		const fallback = memoryFile(await cipher.encrypt(BLOB))
-		const keyring = memoryFile(await linuxCipher("keyring").encrypt(BLOB))
-
-		await expect(removeIfUndecryptable(fallback, cipher)).resolves.toBe(false)
-		expect(fallback.data).not.toBeNull()
-		await expect(removeIfUndecryptable(keyring, cipher)).resolves.toBe(true)
-		expect(keyring.data).toBeNull()
 	})
 })
 

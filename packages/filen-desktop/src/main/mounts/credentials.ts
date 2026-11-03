@@ -4,7 +4,7 @@ import type { DesktopServeProtocol } from "@filen/shared/desktop"
 import { authKindOf, basicAuthSchema, type NativeServeAuth, s3AuthSchema, SERVE_PROTOCOLS } from "../../shared/nativeProtocol.ts"
 import { type AtomicFile, codedError, errorCode } from "../atomicFile.ts"
 import { serialQueue } from "../../shared/serial.ts"
-import { readingCipher, removeReplacedFallbackFile, storingCipher, type VaultCipher } from "../sessionVault.ts"
+import type { VaultCipher } from "../sessionVault.ts"
 
 // The servers' credentials, encrypted with the session vault's cipher. They reach rclone only in the body of an
 // authenticated loopback rc call; nothing here ever logs one.
@@ -118,15 +118,13 @@ export interface CredentialStore {
 	regenerate(protocol: CredentialProtocol): Promise<ServeCredentials>
 	// Credentials the user chose or the migration kept; the caller checked them with credentialsProblem.
 	set(protocol: CredentialProtocol, credentials: ServeCredentials): Promise<void>
-	// false: there is no secure storage (Linux basic_text or its fallback key, no OS encryption), so they last for this
-	// run only.
+	// false: there is no secure storage (Linux basic_text, no OS encryption), so they last for this run only.
 	persistent(): Promise<boolean>
 }
 
 // `<userData>/mounts/<userId>/credentials.bin`, decrypted once and served from memory. A file that cannot be decrypted
 // now (a locked keychain) is read again on the next call and never overwritten, so the credentials in it are not
-// lost; until then every call rejects. Without a cipher (memory mode) nothing is written, and only a file encrypted with
-// Linux's fallback key is read; a change removes that file, so the credentials last for this run like any in memory mode.
+// lost; until then every call rejects. Without a cipher nothing is written.
 export function createCredentialStore(
 	file: AtomicFile,
 	cipher: () => Promise<VaultCipher | null>,
@@ -149,10 +147,8 @@ export function createCredentialStore(
 		}
 
 		const data = await file.read()
-		const reader = data === null ? null : readingCipher(active, data)
 
-		// None, or kept for a run with secure storage.
-		if (data === null || reader === null) {
+		if (data === null) {
 			cached = {}
 
 			return cached
@@ -162,7 +158,7 @@ export function createCredentialStore(
 		let reEncrypt: boolean
 
 		try {
-			const decrypted = await reader.decrypt(data)
+			const decrypted = await active.decrypt(data)
 
 			text = decrypted.result
 			reEncrypt = decrypted.shouldReEncrypt
@@ -184,14 +180,10 @@ export function createCredentialStore(
 	}
 
 	async function store(next: Stored): Promise<void> {
-		const current = await cipher()
-		const active = storingCipher(current)
+		const active = await cipher()
 
 		if (active !== null) {
 			await file.write(await active.encrypt(JSON.stringify({ version: 1, serves: next })))
-		} else {
-			// What a fallback-key run stored would come back next run: a regenerated password among it.
-			await removeReplacedFallbackFile(file, current)
 		}
 
 		cached = next
@@ -215,6 +207,6 @@ export function createCredentialStore(
 			serial(async () => {
 				await put(protocol, credentials)
 			}),
-		persistent: async () => storingCipher(await cipher()) !== null
+		persistent: async () => (await cipher()) !== null
 	}
 }

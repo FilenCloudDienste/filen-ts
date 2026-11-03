@@ -1,10 +1,7 @@
 import { createPrivateKey, createPublicKey, generateKeyPairSync, randomBytes, randomInt, randomUUID } from "node:crypto"
-import { existsSync, readdirSync, readFileSync } from "node:fs"
-import path from "node:path"
 import type * as Sdk from "@filen/sdk-rs"
 import type { Page } from "playwright-core"
 import { LEGACY_KEYS } from "../../../src/main/legacyData.ts"
-import { fallbackKeyEncrypted } from "../../../src/main/sessionVault.ts"
 import { fail, waitFor } from "../support.ts"
 import { type LegacyAnonymous, legacySeed } from "./seed.ts"
 
@@ -209,10 +206,10 @@ export async function readLegacyOrigin(page: Page, secrets: readonly string[]): 
 }
 
 // What N's safeStorage did in a launch, from what main logged (src/main/index.ts sessionCipher, sessionVault.ts,
-// migration.ts): no secure storage (isAsyncEncryptionAvailable false, Linux's basic_text, or a probe encrypted with
-// Chromium's fallback key, as without a Secret Service or with a locked keyring), the probe rejecting, an encryption
-// the keychain refused (a deferral from a step that encrypts), or none of these (it encrypted).
-export type CipherSeen = "memory" | "probe-rejected" | "encrypt-rejected" | "encrypted"
+// migration.ts): no secure storage (isAsyncEncryptionAvailable false, or Linux's basic_text), the probe rejecting, an
+// encryption the keychain refused (a deferral from a step that encrypts), Chromium's hardcoded fallback key ("v10", as
+// without a working Secret Service, which N stores with all the same), or none of these (the keyring's key).
+export type CipherSeen = "memory" | "probe-rejected" | "encrypt-rejected" | "fallback-key" | "encrypted"
 
 export function cipherSeen(log: string): CipherSeen {
 	if (log.includes("keeping the session in memory only")) {
@@ -225,6 +222,10 @@ export function cipherSeen(log: string): CipherSeen {
 
 	if (/migration: deferred, tried again next launch: [\w ]+: safeStorage/.test(log)) {
 		return "encrypt-rejected"
+	}
+
+	if (/secure storage: available, .*probe v10\b/.test(log)) {
+		return "fallback-key"
 	}
 
 	return "encrypted"
@@ -251,11 +252,11 @@ export interface MarkerRead {
 	logsDeleted?: unknown
 }
 
-// What B1 (src/main/migration.ts) leaves after a launch whose keychain could not store anything: the attempt waits,
-// uncounted, with the prefs imported and nothing wiped. Without secure storage (`memory`, Linux's fallback key
-// included) the read worked and its stash lives in memory only (volatileStash, read again next launch); otherwise the
-// keychain refused and the session is left undecided (deferred). Either way never abandoned. The problems, empty when
-// it is so.
+// What B1 (src/main/migration.ts) leaves after a launch without a working keyring: the attempt waits, uncounted, with
+// the prefs imported and nothing wiped. Without secure storage at all (`memory`) the read worked and its stash lives in
+// memory only (volatileStash, read again next launch); on the fallback key (`fallback-key`) N stores with it, so the
+// import proceeds as with the keyring (imported, nothing deferred or in memory); otherwise the keychain refused and the
+// session is left undecided (deferred). Never abandoned. The problems, empty when it is so.
 export function heldProblems(marker: MarkerRead | null, seen: CipherSeen): string[] {
 	if (marker === null) {
 		return ["no migration.json"]
@@ -263,11 +264,12 @@ export function heldProblems(marker: MarkerRead | null, seen: CipherSeen): strin
 
 	const problems: string[] = []
 
-	if (marker.stage !== "started") {
+	if (marker.stage !== (seen === "fallback-key" ? "imported" : "started")) {
 		problems.push(`stage ${String(marker.stage)}`)
 	}
 
-	if (marker.failedStarts !== 0) {
+	// An attempt that reached imported keeps the count it started with.
+	if (seen !== "fallback-key" && marker.failedStarts !== 0) {
 		problems.push(`failedStarts ${String(marker.failedStarts)} (counted as a failure)`)
 	}
 
@@ -284,6 +286,10 @@ export function heldProblems(marker: MarkerRead | null, seen: CipherSeen): strin
 			problems.push(
 				`in memory: volatileStash ${String(marker.volatileStash)}, stashOnly ${String(marker.stashOnly)}, deferred ${String(marker.deferred)}`
 			)
+		}
+	} else if (seen === "fallback-key") {
+		if (marker.volatileStash === true || marker.deferred === true) {
+			problems.push(`on the fallback key: volatileStash ${String(marker.volatileStash)}, deferred ${String(marker.deferred)}`)
 		}
 	} else if (seen === "encrypted") {
 		problems.push("safeStorage encrypted: nothing held the import")
@@ -305,29 +311,12 @@ export function backdateImport(text: string, ms: number): string {
 	return JSON.stringify({ ...marker, importedAt: marker["importedAt"] - ms })
 }
 
-// Chromium's Linux encryption with the key it keeps in the Secret Service ("v11"; "v10" is the hardcoded basic_text key).
+// Chromium's Linux encryption with the key it keeps in the Secret Service ("v11"; "v10" is the hardcoded fallback key).
 export function keyringEncrypted(data: Buffer | null): boolean {
 	return data !== null && data.subarray(0, 3).toString("latin1") === "v11"
 }
 
-// The files N encrypts with safeStorage that hold Chromium's fallback-key ciphertext ("v10"), which protects nothing: a
-// launch without a working keyring keeps their contents in memory instead (src/main/sessionVault.ts vaultMode).
-export function fallbackKeyFiles(userData: string): string[] {
-	const mounts = path.join(userData, "mounts")
-	const files = [
-		"session.vault",
-		"lock.vault",
-		"migration.stash",
-		...(existsSync(mounts)
-			? readdirSync(mounts, { withFileTypes: true })
-					.filter(entry => entry.isDirectory())
-					.map(entry => path.join("mounts", entry.name, "credentials.bin"))
-			: [])
-	]
-
-	return files.filter(file => {
-		const full = path.join(userData, file)
-
-		return existsSync(full) && fallbackKeyEncrypted(readFileSync(full))
-	})
+// Chromium's Linux encryption with its hardcoded fallback key ("v10").
+export function fallbackKeyEncrypted(data: Buffer | null): boolean {
+	return data !== null && data.subarray(0, 3).toString("latin1") === "v10"
 }
