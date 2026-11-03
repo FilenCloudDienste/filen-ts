@@ -57,6 +57,7 @@ import { RibbonButton, RibbonMenuTrigger } from "@/features/office/components/ri
 import { keepFocus } from "@/features/office/lib/officeControls"
 import { useCommandMenuFocus } from "@/features/preview/components/docxInsert.logic"
 import type { PresentationGroups, PresentationRibbonEditor } from "@/features/presentation/components/ribbon/tabs"
+import { BookmarkTriggerItems, bookmarkTriggerOf, bookmarkTriggerValue } from "@/features/presentation/components/ribbon/mediaTiming"
 import type { PreviewKey } from "@/lib/i18n"
 
 // The Animations tab: Preview (the slide's animations played in the canvas), the effect gallery (entrance, emphasis,
@@ -385,6 +386,30 @@ export function shapeName(t: TFunction<"preview">, editor: PresentationRibbonEdi
 	const alt = shape?.alt?.title ?? shape?.alt?.descr
 
 	return alt !== undefined && alt.trim() !== "" ? alt.trim().slice(0, 60) : t("previewPptxAnimShape", { id })
+}
+
+// The slide's shapes by a name each, in slide order: shapes sharing a name (two clips of one file name) are numbered
+// in that order, so no two items of a list read the same.
+export function distinctShapeNames(
+	t: TFunction<"preview">,
+	editor: PresentationRibbonEditor | undefined,
+	ids: readonly number[]
+): ReadonlyMap<number, string> {
+	const names = ids.map(id => [id, shapeName(t, editor, id)] as const)
+	const totals = new Map<string, number>()
+	const seen = new Map<string, number>()
+	const out = new Map<number, string>()
+
+	for (const [, name] of names) totals.set(name, (totals.get(name) ?? 0) + 1)
+
+	for (const [id, name] of names) {
+		const index = (seen.get(name) ?? 0) + 1
+
+		seen.set(name, index)
+		out.set(id, (totals.get(name) ?? 0) > 1 ? t("previewPptxAnimShapeNumbered", { name, index }) : name)
+	}
+
+	return out
 }
 
 // ---- commands ----------------------------------------------------------------------------------------------------
@@ -755,6 +780,11 @@ function TriggerMenu({ editor, state }: { editor: PresentationRibbonEditor; stat
 	const focus = useCommandMenuFocus()
 	const row = state.active[0]
 	const shapes = editor.render === undefined ? [] : slideShapes(editor.render)
+	const names = distinctShapeNames(
+		t,
+		editor,
+		shapes.map(shape => shape.id)
+	)
 
 	return (
 		<DropdownMenu onOpenChange={focus.opened}>
@@ -770,11 +800,23 @@ function TriggerMenu({ editor, state }: { editor: PresentationRibbonEditor; stat
 				className="max-h-80 min-w-56"
 			>
 				<DropdownMenuRadioGroup
-					value={row?.trigger === undefined ? "sequence" : String(row.trigger)}
+					value={
+						row?.trigger === undefined
+							? "sequence"
+							: row.bookmark === undefined
+								? String(row.trigger)
+								: bookmarkTriggerValue(row.trigger, row.bookmark)
+					}
 					onValueChange={value => {
 						focus.ran()
 						timeEffects(editor, state, {
-							trigger: value === "sequence" ? { kind: "none" } : { kind: "shapeClick", shape: Number(value) }
+							trigger:
+								value === "sequence"
+									? { kind: "none" }
+									: ((typeof value === "string" ? bookmarkTriggerOf(value) : undefined) ?? {
+											kind: "shapeClick",
+											shape: Number(value)
+										})
 						})
 					}}
 				>
@@ -784,9 +826,13 @@ function TriggerMenu({ editor, state }: { editor: PresentationRibbonEditor; stat
 							key={shape.id}
 							value={String(shape.id)}
 						>
-							{t("previewPptxAnimTriggerShape", { name: shapeName(t, editor, shape.id) })}
+							{t("previewPptxAnimTriggerShape", { name: names.get(shape.id) ?? shapeName(t, editor, shape.id) })}
 						</DropdownMenuRadioItem>
 					))}
+					<BookmarkTriggerItems
+						render={editor.render}
+						name={id => names.get(id) ?? shapeName(t, editor, id)}
+					/>
 				</DropdownMenuRadioGroup>
 			</DropdownMenuContent>
 		</DropdownMenu>

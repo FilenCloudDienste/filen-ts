@@ -1,4 +1,3 @@
-import { maxOf, minOf } from "../arrays"
 import type { Rgba, ShadeRamp } from "./displayList"
 
 // Rasterises a "shaded" paint (triangles with a colour per vertex: GDI gradient triangles, GDI+ path
@@ -100,44 +99,161 @@ export function averageShade(colors: Uint32Array): Rgba {
 	return ((Math.round(r / n) << 24) | (Math.round(g / n) << 16) | (Math.round(b / n) << 8) | Math.round(a / n)) >>> 0
 }
 
-// The triangles (x, y of three vertices each, local units) with their colours interpolated (Gouraud
-// shading, or through `ramp` from each first vertex) over their bounds at `scale` pixels per local unit,
-// shrunk to at most `maxPixels` and so the triangles' bounding boxes together visit at most `maxWork` pixels.
-// Pixels just outside an edge take the nearest triangle's colour, so the clipping outline never shows a gap.
-export function shadeRaster(
-	points: Float32Array,
-	colors: Uint32Array,
-	ramp: ShadeRamp | null,
-	scale: number,
-	maxPixels: number,
-	maxWork: number = maxPixels * 4
-): ShadedRaster | undefined {
-	const extent = shadeBounds(points)
+// One shaded paint's triangles (x, y of three vertices each, local units), a colour per vertex, and its ramp.
+export interface ShadedMesh {
+	readonly points: Float32Array
+	readonly colors: Uint32Array
+	readonly ramp: ShadeRamp | null
+}
 
-	if (extent === undefined || !(scale > 0) || !(maxPixels >= 1)) return undefined
+// How close (in pixels) a pixel centre must be to count as inside, filling the edges' anti-aliasing.
+const SLACK = 1.5
+// The pixels a triangle's box gains on each axis from the slack band and rounding: what a sliver with no area costs.
+const BAND = 2 * SLACK + 1
+// Triangle visits per step between two looks at the clock.
+const STEP_TRIANGLES = 64
 
-	const [minX, minY, spanX, spanY] = extent
-	const triangles = Math.min(Math.floor(points.length / 6), Math.floor(colors.length / 3))
-	let area = 0
+function triangleCount(mesh: ShadedMesh): number {
+	return Math.min(Math.floor(mesh.points.length / 6), Math.floor(mesh.colors.length / 3))
+}
 
-	for (let t = 0; t < triangles; t++) {
-		const p = t * 6
-		const xs = [points[p] ?? 0, points[p + 2] ?? 0, points[p + 4] ?? 0]
-		const ys = [points[p + 1] ?? 0, points[p + 3] ?? 0, points[p + 5] ?? 0]
+// The meshes' triangles (Gouraud shading, or through a mesh's ramp from each first vertex) over their joint bounds at
+// `scale` pixels per local unit, shrunk to at most `maxPixels` and so the pixels the triangles visit (each its box
+// plus the slack band) total at most `maxWork`; later triangles over earlier ones, as they are drawn. Pixels just
+// outside an edge take the nearest triangle's colour, so the clipping outline never shows a gap. Built by steps, so
+// a thread that must stay responsive can run it in slices (step()); undefined when even the least scale (one pixel on
+// the longer side) would pass `maxWork`.
+export class ShadeJob {
+	readonly width: number
+	readonly height: number
+	// The raster's extent in the paint's local units (x, y, width, height).
+	readonly bounds: readonly [number, number, number, number]
+	// Allocated by the first step: a plan alone (a page sizing what a worker draws) holds no pixels.
+	private pixels: Uint8Array | undefined
+	private readonly meshes: readonly ShadedMesh[]
+	private readonly sx: number
+	private readonly sy: number
+	private mesh = 0
+	private triangle = 0
 
-		area += (maxOf(xs) - minOf(xs)) * (maxOf(ys) - minOf(ys))
+	private constructor(meshes: readonly ShadedMesh[], extent: readonly [number, number, number, number], width: number, height: number) {
+		this.meshes = meshes
+		this.bounds = extent
+		this.width = width
+		this.height = height
+		this.sx = width / extent[2]
+		this.sy = height / extent[3]
 	}
 
-	const fit = Math.min(scale, Math.sqrt(maxPixels / (spanX * spanY)), area > 0 ? Math.sqrt(maxWork / area) : scale)
-	const width = Math.max(1, Math.min(16_384, Math.ceil(spanX * fit)))
-	const height = Math.max(1, Math.min(16_384, Math.ceil(spanY * fit)))
-	const sx = width / spanX
-	const sy = height / spanY
-	const rgba = new Uint8Array(width * height * 4)
-	// How close (in pixels) a pixel centre must be to count as inside, filling the edges' anti-aliasing.
-	const slack = 1.5
+	static plan(meshes: readonly ShadedMesh[], scale: number, maxPixels: number, maxWork: number = maxPixels * 4): ShadeJob | undefined {
+		if (!(scale > 0) || !(maxPixels >= 1) || meshes.length === 0) return undefined
 
-	for (let t = 0; t < triangles; t++) {
+		let minX = Infinity
+		let minY = Infinity
+		let maxX = -Infinity
+		let maxY = -Infinity
+		// Per triangle its box is (w·f + BAND) × (h·f + BAND) pixels at scale f: the work is area·f² + edges·f + count,
+		// summed over the triangles.
+		let area = 0
+		let edges = 0
+		let count = 0
+
+		for (const mesh of meshes) {
+			const extent = shadeBounds(mesh.points)
+
+			if (extent === undefined) continue
+
+			minX = Math.min(minX, extent[0])
+			minY = Math.min(minY, extent[1])
+			maxX = Math.max(maxX, extent[0] + extent[2])
+			maxY = Math.max(maxY, extent[1] + extent[3])
+
+			const points = mesh.points
+			const triangles = triangleCount(mesh)
+
+			for (let t = 0; t < triangles; t++) {
+				const p = t * 6
+				const ax = points[p] ?? 0
+				const ay = points[p + 1] ?? 0
+				const bx = points[p + 2] ?? 0
+				const by = points[p + 3] ?? 0
+				const cx = points[p + 4] ?? 0
+				const cy = points[p + 5] ?? 0
+				const w = Math.max(ax, bx, cx) - Math.min(ax, bx, cx)
+				const h = Math.max(ay, by, cy) - Math.min(ay, by, cy)
+
+				area += w * h
+				edges += (w + h) * BAND
+				count++
+			}
+		}
+
+		const spanX = maxX - minX
+		const spanY = maxY - minY
+
+		if (!(spanX > 0 && spanY > 0 && Number.isFinite(spanX + spanY))) return undefined
+
+		const constant = count * BAND * BAND
+
+		if (constant >= maxWork) return undefined
+
+		// The largest f with area·f² + edges·f + constant ≤ maxWork.
+		const budget = maxWork - constant
+		const byWork = area > 0 ? (-edges + Math.sqrt(edges * edges + 4 * area * budget)) / (2 * area) : edges > 0 ? budget / edges : scale
+		const fit = Math.min(scale, Math.sqrt(maxPixels / (spanX * spanY)), byWork)
+
+		// Below one pixel on the longer side the raster would show nothing of the shading.
+		if (!(fit * Math.max(spanX, spanY) >= 1)) return undefined
+
+		const width = Math.max(1, Math.min(16_384, Math.ceil(spanX * fit)))
+		const height = Math.max(1, Math.min(16_384, Math.ceil(spanY * fit)))
+
+		return new ShadeJob(meshes, [minX, minY, spanX, spanY], width, height)
+	}
+
+	get done(): boolean {
+		return this.mesh >= this.meshes.length
+	}
+
+	// Rasterises triangles until done or `stop()` says to (checked every few triangles); whether it is done.
+	step(stop: () => boolean = () => false): boolean {
+		while (this.mesh < this.meshes.length) {
+			const mesh = this.meshes[this.mesh] as ShadedMesh
+			const triangles = triangleCount(mesh)
+
+			while (this.triangle < triangles) {
+				const end = Math.min(triangles, this.triangle + STEP_TRIANGLES)
+
+				for (; this.triangle < end; this.triangle++) this.draw(mesh, this.triangle)
+
+				if (this.triangle < triangles && stop()) return false
+			}
+
+			this.mesh++
+			this.triangle = 0
+
+			if (this.mesh < this.meshes.length && stop()) return false
+		}
+
+		return true
+	}
+
+	result(): ShadedRaster {
+		return { rgba: this.rgba, width: this.width, height: this.height, bounds: this.bounds }
+	}
+
+	private get rgba(): Uint8Array {
+		this.pixels ??= new Uint8Array(this.width * this.height * 4)
+
+		return this.pixels
+	}
+
+	private draw(mesh: ShadedMesh, t: number): void {
+		const { rgba, width, height, sx, sy } = this
+		const [minX, minY] = this.bounds
+		const points = mesh.points
+		const colors = mesh.colors
+		const ramp = mesh.ramp
 		const p = t * 6
 		const ax = ((points[p] ?? 0) - minX) * sx
 		const ay = ((points[p + 1] ?? 0) - minY) * sy
@@ -150,13 +266,16 @@ export function shadeRaster(
 		const cc = colors[t * 3 + 2] ?? 0
 		const area = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax)
 
-		if (Math.abs(area) < 1e-12) continue
+		if (Math.abs(area) < 1e-12) return
 
-		const x0 = Math.max(0, Math.floor(Math.min(ax, bx, cx) - slack))
-		const x1 = Math.min(width - 1, Math.ceil(Math.max(ax, bx, cx) + slack))
-		const y0 = Math.max(0, Math.floor(Math.min(ay, by, cy) - slack))
-		const y1 = Math.min(height - 1, Math.ceil(Math.max(ay, by, cy) + slack))
-		const edges = [Math.hypot(cx - bx, cy - by), Math.hypot(ax - cx, ay - cy), Math.hypot(bx - ax, by - ay)]
+		const x0 = Math.max(0, Math.floor(Math.min(ax, bx, cx) - SLACK))
+		const x1 = Math.min(width - 1, Math.ceil(Math.max(ax, bx, cx) + SLACK))
+		const y0 = Math.max(0, Math.floor(Math.min(ay, by, cy) - SLACK))
+		const y1 = Math.min(height - 1, Math.ceil(Math.max(ay, by, cy) + SLACK))
+		const magnitude = Math.abs(area)
+		const ea = magnitude / (Math.hypot(cx - bx, cy - by) || 1)
+		const eb = magnitude / (Math.hypot(ax - cx, ay - cy) || 1)
+		const ec = magnitude / (Math.hypot(bx - ax, by - ay) || 1)
 
 		for (let y = y0; y <= y1; y++) {
 			for (let x = x0; x <= x1; x++) {
@@ -166,13 +285,9 @@ export function shadeRaster(
 				let wb = ((cx - px) * (ay - py) - (cy - py) * (ax - px)) / area
 				let wc = 1 - wa - wb
 				// Distance outside each edge, in pixels.
-				const outside = Math.max(
-					(-wa * Math.abs(area)) / (edges[0] || 1),
-					(-wb * Math.abs(area)) / (edges[1] || 1),
-					(-wc * Math.abs(area)) / (edges[2] || 1)
-				)
+				const outside = Math.max(-wa * ea, -wb * eb, -wc * ec)
 
-				if (outside > slack) continue
+				if (outside > SLACK) continue
 
 				const at = (y * width + x) * 4
 
@@ -202,6 +317,22 @@ export function shadeRaster(
 			}
 		}
 	}
+}
 
-	return { rgba, width, height, bounds: extent }
+// One mesh's raster at once (ShadeJob run to its end), for renderers that draw in a worker or a single pass.
+export function shadeRaster(
+	points: Float32Array,
+	colors: Uint32Array,
+	ramp: ShadeRamp | null,
+	scale: number,
+	maxPixels: number,
+	maxWork: number = maxPixels * 4
+): ShadedRaster | undefined {
+	const job = ShadeJob.plan([{ points, colors, ramp }], scale, maxPixels, maxWork)
+
+	if (job === undefined) return undefined
+
+	job.step()
+
+	return job.result()
 }

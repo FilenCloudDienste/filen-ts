@@ -103,6 +103,8 @@ interface PendingPortPreview {
 	lost: boolean
 	streams: number
 	dropped: boolean
+	// The open responses' quiet endings, run when the page releases the registration.
+	ends: Set<() => void>
 }
 type PendingDownload = PendingFileDownload | PendingZipDownload | PendingPreviewDownload | PendingStreamDownload | PendingPortPreview
 
@@ -554,14 +556,17 @@ interface PortSpares {
 // leave after one chunk and a slow link shows progress chunk by chunk. Pull n keeps up to min(n - 1,
 // `readAhead`) further windows of the served range in flight, so at most that many chunks wait in memory;
 // nothing is read past `end`. A cancel aborts every read in flight and leaves the windows that had arrived to
-// `spares`, which also serves any window an earlier response left.
+// `spares`, which also serves any window an earlier response left. `ends` holds the body's quiet ending while it is
+// open: run (the page released the registration), it aborts the reads and closes the body where it stands, so the
+// consumer sees a finished body rather than an error.
 function portBody(
 	reader: RangePortReader,
 	start: number,
 	end: number,
 	readAhead: number,
 	finish: () => void,
-	spares?: PortSpares
+	spares?: PortSpares,
+	ends?: Set<() => void>
 ): ReadableStream<Uint8Array> {
 	const reads = new AbortController()
 	// Windows read or being read, in order; the first starts at `position`. `arrived` once its bytes have.
@@ -571,10 +576,17 @@ function portBody(
 	let next = start
 	let pulls = 0
 	let finished = false
+	let ended = false
+	let quietEnd: (() => void) | undefined
 	const settle = () => {
 		if (!finished) {
 			finished = true
 			reads.abort()
+
+			if (quietEnd !== undefined) {
+				ends?.delete(quietEnd)
+			}
+
 			finish()
 		}
 	}
@@ -611,7 +623,20 @@ function portBody(
 				if (position > end) {
 					controller.close()
 					settle()
+
+					return
 				}
+
+				quietEnd = () => {
+					if (finished) {
+						return
+					}
+
+					ended = true
+					controller.close()
+					settle()
+				}
+				ends?.add(quietEnd)
 			},
 			async pull(controller) {
 				pulls++
@@ -631,6 +656,10 @@ function portBody(
 
 					const bytes = await window.bytes
 
+					if (ended) {
+						return
+					}
+
 					// The windows after it start where it was meant to end.
 					if (bytes.length !== window.end - position) {
 						throw new Error("range port read came back short")
@@ -644,6 +673,11 @@ function portBody(
 						settle()
 					}
 				} catch (e) {
+					// Ended quietly while this read waited: its abort is not the body's failure.
+					if (ended) {
+						return
+					}
+
 					controller.error(e)
 					settle()
 				}
@@ -699,7 +733,8 @@ function handlePortPreview(event: FetchEvent, id: string, pending: PendingPortPr
 			keep: windows => {
 				keepSpare(pending, windows)
 			}
-		}
+		},
+		pending.ends
 	)
 	// Built BEFORE the stream is counted (see pumpToResponse).
 	const response = rangeResponse(
@@ -1064,7 +1099,8 @@ self.addEventListener("message", (event: ExtendableMessageEvent) => {
 			contentType: msg.contentType,
 			lost: false,
 			streams: 0,
-			dropped: false
+			dropped: false,
+			ends: new Set()
 		}
 
 		entry.reader.onLost(() => {
@@ -1097,6 +1133,14 @@ self.addEventListener("message", (event: ExtendableMessageEvent) => {
 			(entry?.kind === "portPreview" && (released === null || entry.generation === null || entry.generation <= released))
 		) {
 			downloads.delete(id)
+
+			// Its page has let go: a response still open ends where it stands, as a finished body (an errored one is
+			// reported as a failed load by Firefox), and the port closes once the last has.
+			if (entry.kind === "portPreview") {
+				for (const quiet of [...entry.ends]) {
+					quiet()
+				}
+			}
 		}
 		return
 	}

@@ -1624,6 +1624,12 @@ class OdfTimingWriter {
 				)
 			} else if (c.evt === "onNext") {
 				out.push("next")
+			} else if (c.evt === "onMediaBookmark") {
+				// ODF has no media bookmarks: started on a click of the clip instead, as PowerPoint's Fallback for readers
+				// without p14 starts it (a conversion reports it); a clip not written waits.
+				const name = c.tgtEl === undefined ? undefined : this.targetName(c.tgtEl)
+
+				out.push(name === undefined ? "indefinite" : `${name}.click${offset}`)
 			} else if (c.evt !== undefined && c.tgtEl !== undefined && this.targetName(c.tgtEl) !== undefined) {
 				const event =
 					c.evt === "onClick"

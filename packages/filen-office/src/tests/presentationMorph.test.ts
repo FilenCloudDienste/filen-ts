@@ -25,7 +25,7 @@ import { DrawingList, ItemKind } from "../core/drawingml/displayList"
 import { drawingData } from "../core/presentation/render/slide"
 import type { SlideLayer, SlideRender } from "../core/presentation/output"
 import { slideRef, type ShapeNode } from "../core/presentation/model"
-import { cpuMs } from "./timing"
+import { budget, cpuMs } from "./timing"
 
 // Morph (MS-PPTX §2.6.1.1, option §2.6.4.1): which objects, words and characters of two slides match, and where a
 // matched object is at a point of the transition.
@@ -633,6 +633,27 @@ describe("the WebGL transitions a deck uses", () => {
 		}
 
 		expect(best).toBeLessThan(120)
+	})
+
+	it("scans 20 MB of shape properties and runs in under 70 ms of CPU, every element name compared in place", () => {
+		const shape =
+			'<p:sp><p:spPr><a:xfrm><a:off x="1" y="2"/><a:ext cx="3" cy="4"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom>' +
+			'<a:solidFill><a:srgbClr val="FF0000"/></a:solidFill></p:spPr><p:txBody><a:bodyPr/><a:p><a:r><a:rPr lang="en-GB"/>' +
+			"<a:t>Some words</a:t></a:r></a:p></p:txBody></p:sp>"
+		const chunk = encode(shape.repeat(Math.ceil(1_000_000 / shape.length)))
+		let best = Number.POSITIVE_INFINITY
+
+		for (let run = 0; run < 3; run++) {
+			const scanner = new TransitionKindScanner()
+			const start = cpuMs()
+
+			for (let bytes = 0; bytes < 20_000_000; bytes += chunk.length) scanner.push(chunk)
+
+			best = Math.min(best, cpuMs() - start)
+			expect(scanner.found.size).toBe(0)
+		}
+
+		expect(best).toBeLessThan(budget(70))
 	})
 })
 

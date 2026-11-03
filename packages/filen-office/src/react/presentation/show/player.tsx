@@ -192,7 +192,6 @@ export function SlideShow(props: SlideShowProps) {
 			className="fo-show-stage"
 			role="region"
 			aria-label={label}
-			aria-roledescription="slideshow"
 			data-fo-show-stage=""
 			data-fo-screen={screen}
 			tabIndex={-1}

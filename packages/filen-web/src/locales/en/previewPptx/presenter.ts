@@ -8,7 +8,7 @@ export const previewPptxPresenter = {
 	/** Presentation slideshow — accessible name of the current slide in the presenter view */
 	previewPptxPresenterCurrent: "Current slide",
 	/** Presentation slideshow — heading over the preview of the slide that comes next */
-	previewPptxPresenterNext: "Next",
+	previewPptxPresenterNext: "Next slide",
 	/** Presentation slideshow — shown instead of the next slide when the next click plays an animation on this slide */
 	previewPptxPresenterNextStep: "Next animation on this slide",
 	/** Presentation slideshow — shown instead of the next slide after the last one */

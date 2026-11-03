@@ -1,4 +1,8 @@
-import { IDENTITY, multiply, type DrawingData, type DrawingImage, type Rgba } from "../../../core/drawingml/index"
+import { IDENTITY, multiply, type DrawingData, type DrawingImage, type Paint, type Rgba } from "../../../core/drawingml/index"
+import { ShadeJob, type ShadedMesh } from "../../../core/drawingml/shade"
+import { encodePng } from "../../../core/metafile/dib"
+import { PngSteps } from "../../../core/drawingml/shadePng"
+import { mergeShadedRuns } from "./shadeRuns"
 import type { RenderEffects, SlideLayer, TextPage } from "../../../core/presentation/output"
 import { PICTURE_BULLET_OBJECT } from "../../../core/presentation/text/page"
 import type { PresentationSessionApi } from "../../../dom/presentation/protocol"
@@ -19,6 +23,16 @@ import type { SlidePainter } from "../SlideView"
 // Types the page shows natively (an SVG in <image> runs no script).
 const SHOWN_TYPES: ReadonlySet<string> = new Set(["image/png", "image/jpeg", "image/gif", "image/bmp", "image/webp", "image/svg+xml"])
 const MAX_PX = 1e6
+// Shaded meshes (3D scenes) are rasterised at this many device pixels per drawing px, rounded up to a power of two. One raster's pixels, and all of one paint's, are bounded.
+const SHADE_OVERSAMPLE = 1
+const MAX_SHADE_PIXELS = 2048 * 1024
+const MAX_SHADE_TOTAL = 16 * 1024 * 1024
+// Rasters one paint makes at most (each a PNG and a URL); past them a mesh shows its mean colour.
+const MAX_SHADE_RASTERS = 256
+// The page rasterises and encodes meshes in slices of at most this long, a macrotask apart.
+const SHADE_SLICE_MS = 8
+// Rasters asked of the worker at once.
+const SHADE_IN_FLIGHT = 2
 
 let painted = 0
 
@@ -257,6 +271,119 @@ function positioned(document: Document, className: string, matrix: readonly numb
 	return element
 }
 
+type ShadedPaint = Extract<Paint, { kind: "shaded" }>
+
+interface ShadeRequest {
+	readonly image: SVGImageElement
+	readonly paint: ShadedPaint
+	// Drawing units per local unit where it is drawn.
+	readonly scale: number
+	bucket: number
+}
+
+interface QueuedShade {
+	// The plan: its size and extent (the worker plans the same meshes, scale and pixels alike).
+	readonly job: ShadeJob
+	readonly entry: ShadeEntry
+	readonly meshes: readonly ShadedMesh[]
+	readonly scale: number
+	readonly maxPixels: number
+	png?: PngSteps
+}
+
+// The pixels a raster planned at `full` keeps when a paint's budget is shared out at `factor` (linear).
+function scaledPixels(full: ShadeJob, factor: number, left: number): number {
+	return Math.min(Math.floor(full.width * full.height * factor * factor), left)
+}
+
+interface ShadeEntry {
+	url: string | undefined
+	readonly waiting: SVGImageElement[]
+	// The joint raster's extent in the meshes' local units, once planned; undefined for a mean colour.
+	bounds: readonly [number, number, number, number] | undefined
+	// The images showing it, placed over the extent once it is planned.
+	readonly images: SVGImageElement[]
+}
+
+// A number per shaded paint, for the keys of the rasters that hold it.
+const shadeIds = new WeakMap<ShadedPaint, number>()
+let shadeCount = 0
+
+function shadeId(paint: ShadedPaint): number {
+	let id = shadeIds.get(paint)
+
+	if (id === undefined) {
+		id = ++shadeCount
+		shadeIds.set(paint, id)
+	}
+
+	return id
+}
+
+// The transforms from `element` up to the drawing's SVG: the local space it is drawn in.
+function spaceOf(element: Element, svg: Element): string {
+	let space = ""
+
+	for (let at = element.parentElement; at !== null && at !== svg; at = at.parentElement) space += `${at.getAttribute("transform") ?? ""};`
+
+	return space
+}
+
+// 1 x 1 PNGs of mean colours, as data URLs (no blob URL to revoke).
+const meanColors = new Map<number, string>()
+const MAX_MEAN_COLORS = 1024
+
+function meanColorUrl(meshes: readonly ShadedMesh[], window: PageWindow): string {
+	let r = 0
+	let g = 0
+	let b = 0
+	let a = 0
+	let n = 0
+
+	for (const mesh of meshes) {
+		for (const color of mesh.colors) {
+			r += color >>> 24
+			g += (color >>> 16) & 255
+			b += (color >>> 8) & 255
+			a += color & 255
+			n++
+		}
+	}
+
+	const mean = n === 0 ? 0 : ((Math.round(r / n) << 24) | (Math.round(g / n) << 16) | (Math.round(b / n) << 8) | Math.round(a / n)) >>> 0
+	const known = meanColors.get(mean)
+
+	if (known !== undefined) return known
+	if (meanColors.size >= MAX_MEAN_COLORS) meanColors.clear()
+
+	const png = encodePng(Uint8Array.of(mean >>> 24, (mean >>> 16) & 255, (mean >>> 8) & 255, mean & 255), 1, 1)
+	const url = `data:image/png;base64,${window.btoa(String.fromCharCode(...png))}`
+
+	meanColors.set(mean, url)
+
+	return url
+}
+
+// The image at `url` decoded (an engine without decode() decodes it when it is shown).
+async function decoded(window: PageWindow, url: string): Promise<void> {
+	const Image = (window as unknown as { Image?: typeof HTMLImageElement }).Image
+
+	if (typeof Image !== "function") return
+
+	const image = new Image()
+
+	if (typeof image.decode !== "function") return
+
+	image.src = url
+	await image.decode().catch(() => undefined)
+}
+
+// A timer turn of the page: other tasks and the page's own timers run between slices (a chain of MessageChannel
+// turns runs back to back in Chromium and starves its timers for the whole raster).
+function pageTurn(window: PageWindow): () => Promise<void> {
+	return () => new Promise(resolve => window.setTimeout(resolve, 0))
+}
+
 export const paintSlide: SlidePainter = (render, context) => paint(render, context, false)
 
 // The editor's compositor: paintSlide plus the empty placeholders' prompts (SlideLayer.prompt, in a .fo-slide-prompt
@@ -286,6 +413,210 @@ function paint(render: Parameters<SlidePainter>[0], context: Parameters<SlidePai
 	// session, one URL each for this paint, revoked on release. A cache key that starts with a space is no part name.
 	const inline = new Map<DrawingImage, string>()
 	const ownInline: string[] = []
+	// Shaded meshes (3D scenes, metafile gradient triangles): a drawing's meshes drawn in one local space at one
+	// resolution share one raster (each image shows it clipped to its own outline, so later triangles over earlier
+	// ones as drawn), rasterised in slices off the paint's own task; by the meshes it holds, the URL once made and the
+	// images waiting for it.
+	const shades = new Map<string, ShadeEntry>()
+	const queue: QueuedShade[] = []
+	// Rasters asked for and not planned yet: planned together at the start of the next slice, so the paint's pixel
+	// budget is shared by all of them (each scaled alike), not spent by the first ones painted.
+	const unplanned: { readonly entry: ShadeEntry; readonly meshes: readonly ShadedMesh[]; readonly bucket: number }[] = []
+	let running = false
+	let shadePixels = MAX_SHADE_TOTAL
+	let shadeRasters = MAX_SHADE_RASTERS
+	const settle = (entry: ShadeEntry, url: string): void => {
+		entry.url = url
+
+		for (const waiting of entry.waiting) waiting.setAttribute("href", url)
+
+		entry.waiting.length = 0
+	}
+	const place = (entry: ShadeEntry, image: SVGImageElement): void => {
+		const bounds = entry.bounds
+
+		if (bounds !== undefined) {
+			image.setAttribute("x", String(bounds[0]))
+			image.setAttribute("y", String(bounds[1]))
+			image.setAttribute("width", String(bounds[2]))
+			image.setAttribute("height", String(bounds[3]))
+		}
+	}
+	const plan = (): void => {
+		if (window === null || unplanned.length === 0) return
+
+		const batch = unplanned.splice(0)
+		const wanted = batch.map((asked, k) =>
+			k < shadeRasters && shadePixels > 0 ? ShadeJob.plan(asked.meshes, asked.bucket, MAX_SHADE_PIXELS) : undefined
+		)
+		const total = wanted.reduce((sum, job) => sum + (job === undefined ? 0 : job.width * job.height), 0)
+		const factor = total > shadePixels ? Math.sqrt(shadePixels / total) : 1
+
+		batch.forEach((asked, k) => {
+			const full = wanted[k]
+			const job =
+				full === undefined || shadePixels <= 0
+					? undefined
+					: factor < 1
+						? ShadeJob.plan(asked.meshes, asked.bucket, scaledPixels(full, factor, shadePixels))
+						: full
+
+			if (job === undefined) {
+				asked.entry.images.length = 0
+				settle(asked.entry, meanColorUrl(asked.meshes, window))
+
+				return
+			}
+
+			asked.entry.bounds = job.bounds
+
+			for (const image of asked.entry.images) place(asked.entry, image)
+
+			asked.entry.images.length = 0
+
+			shadePixels -= job.width * job.height
+			shadeRasters--
+			queue.push({
+				job,
+				entry: asked.entry,
+				meshes: asked.meshes,
+				scale: asked.bucket,
+				maxPixels:
+					full !== undefined && factor < 1 ? scaledPixels(full, factor, shadePixels + job.width * job.height) : MAX_SHADE_PIXELS
+			})
+		})
+	}
+	const remote = async (next: QueuedShade): Promise<void> => {
+		if (session === undefined || window === null) return
+
+		const answer = await session.shade(next.meshes, next.scale, next.maxPixels).catch(() => null)
+
+		if (released) return
+		if (answer === null) {
+			settle(next.entry, meanColorUrl(next.meshes, window))
+
+			return
+		}
+
+		const url = window.URL.createObjectURL(answer.png as unknown as Blob)
+
+		ownInline.push(url)
+		await decoded(window, url)
+
+		if (!released) settle(next.entry, url)
+	}
+	// The queued rasters: asked of the session's worker, or (without a session) made here in slices of at most
+	// SHADE_SLICE_MS, a timer turn apart.
+	const run = async (): Promise<void> => {
+		if (running || window === null) return
+
+		running = true
+
+		const now = (): number => window.performance.now()
+		const turn = pageTurn(window)
+
+		try {
+			// Never in the paint's own task.
+			await turn()
+
+			// The session's worker rasterises and encodes (a few at a time); the page only makes the URL and decodes the
+			// image before it shows it.
+			if (session !== undefined) {
+				for (plan(); queue.length > 0 && !released && !signal.aborted; plan()) {
+					await Promise.all(queue.splice(0, SHADE_IN_FLIGHT).map(next => remote(next)))
+				}
+
+				return
+			}
+
+			for (plan(); queue.length > 0 && !released && !signal.aborted; plan()) {
+				const deadline = now() + SHADE_SLICE_MS
+				const stop = (): boolean => now() >= deadline
+
+				while (queue.length > 0 && !stop()) {
+					const next = queue[0] as (typeof queue)[number]
+
+					if (!next.job.step(stop)) break
+
+					const raster = next.job.result()
+
+					next.png ??= new PngSteps(raster.rgba, raster.width, raster.height)
+
+					if (!next.png.step(stop)) break
+
+					queue.shift()
+
+					const url = window.URL.createObjectURL(new window.Blob([...next.png.result()], { type: "image/png" }))
+
+					ownInline.push(url)
+					// Decoded off the thread before it is shown, one raster at a time: a large one decoded at paint blocks the frame.
+					await decoded(window, url)
+
+					if (released) return
+
+					settle(next.entry, url)
+				}
+
+				if (queue.length > 0) await turn()
+			}
+		} finally {
+			running = false
+			queue.length = 0
+		}
+	}
+	// The images paintDrawing made for a drawing's shaded paints, once its SVG is built (their local space is the
+	// transforms around them).
+	const shadeAll = (requests: readonly ShadeRequest[], svg: Element): void => {
+		if (window === null || requests.length === 0) return
+
+		const ratio = window.devicePixelRatio > 0 ? window.devicePixelRatio : 1
+		const groups = new Map<string, ShadeRequest[]>()
+
+		for (const request of requests) {
+			const wanted = request.scale * ratio * SHADE_OVERSAMPLE
+			const bucket = 2 ** Math.ceil(Math.log2(Number.isFinite(wanted) && wanted > 0 ? Math.min(Math.max(wanted, 1 / 64), 64) : 1))
+			// A ramp is a paint's own: its mesh is rasterised alone.
+			const key = `${String(bucket)}|${spaceOf(request.image, svg)}${request.paint.ramp === null ? "" : `|${String(shadeId(request.paint))}`}`
+			const group = groups.get(key)
+
+			request.bucket = bucket
+
+			if (group === undefined) groups.set(key, [request])
+			else group.push(request)
+		}
+
+		for (const [key, group] of groups) {
+			const meshes: ShadedMesh[] = []
+			let signature = key
+
+			for (const request of group) {
+				if (meshes.at(-1) !== request.paint) {
+					meshes.push(request.paint)
+					signature += `,${String(shadeId(request.paint))}`
+				}
+			}
+
+			let entry = shades.get(signature)
+
+			if (entry === undefined) {
+				entry = { url: undefined, waiting: [], bounds: undefined, images: [] }
+				shades.set(signature, entry)
+				unplanned.push({ entry, meshes, bucket: group[0]?.bucket ?? 1 })
+			}
+
+			for (const request of group) {
+				// Placed now when planned, else once it is.
+				if (entry.bounds === undefined && entry.url === undefined) entry.images.push(request.image)
+				else place(entry, request.image)
+
+				if (entry.url === undefined) entry.waiting.push(request.image)
+				else request.image.setAttribute("href", entry.url)
+			}
+		}
+
+		void run()
+	}
+
 	const imageUrl = (image: DrawingImage): string | undefined => {
 		const key = imageKey(image)
 
@@ -323,7 +654,13 @@ function paint(render: Parameters<SlidePainter>[0], context: Parameters<SlidePai
 		const frameWidth = Math.max(1, finite(data.width))
 		const frameHeight = Math.max(1, finite(data.height))
 		const paint = (): void => {
-			const svg = paintDrawing(data, { document, idPrefix: prefix, imageUrl })
+			const requests: ShadeRequest[] = []
+			const shade = (image: SVGImageElement, paint: ShadedPaint, scale: number): void => {
+				requests.push({ image, paint, scale, bucket: 1 })
+			}
+			const svg = paintDrawing(mergeShadedRuns(data), { document, idPrefix: prefix, imageUrl, shade })
+
+			shadeAll(requests, svg)
 
 			svg.setAttribute("width", String(frameWidth))
 			svg.setAttribute("height", String(frameHeight))
@@ -539,6 +876,8 @@ function paint(render: Parameters<SlidePainter>[0], context: Parameters<SlidePai
 
 			ownInline.length = 0
 			inline.clear()
+			shades.clear()
+			queue.length = 0
 
 			const cache = session === undefined ? undefined : pictureCaches.get(session)
 

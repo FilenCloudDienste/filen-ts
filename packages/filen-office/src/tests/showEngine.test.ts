@@ -8,6 +8,7 @@ import type { SlideLayer, SlideRender } from "../core/presentation/output"
 import { drawingData } from "../core/presentation/render/slide"
 import { encodeUtf8, parseXml } from "../core/xml/index"
 import { SERVICES, type CallContext, type EngineSession } from "../dom/presentation/engine"
+import { openOdpCapability } from "../dom/presentation/engine/open/odp"
 import { openPptxCapability } from "../dom/presentation/engine/open/pptx"
 import {
 	drawingExtent,
@@ -26,6 +27,7 @@ import { installPresentationRealm, MAX_CANVAS_SIDE, type RasterCanvas, type Rast
 import { TIMING_XML, TimingBuilder } from "./animFixtures"
 import { fixtureTextPage } from "./fixtures/presentation/textPage"
 import { HmtxMeasurer, nodeFontAssets, nodeFontHost } from "./layoutFixtures"
+import { odpBytes, page } from "./odpFixtures"
 import { body, buildPptx, NS, para, sp, xfrm } from "./pptxFixtures"
 import { RecordingCanvas } from "./presentationCanvasRecorder"
 
@@ -395,9 +397,11 @@ function deck(): Uint8Array {
 	})
 }
 
-async function harness(): Promise<{ readonly context: CallContext; readonly ref: ReturnType<typeof slideRef>; close(): void }> {
+async function harness(
+	bytes: Uint8Array = deck()
+): Promise<{ readonly context: CallContext; readonly ref: ReturnType<typeof slideRef>; close(): void }> {
 	const outcome = await openPptxCapability.open({
-		source: bytesSource(deck()),
+		source: bytesSource(bytes),
 		sourceKind: "bytes",
 		options: { format: "pptx", fileName: "show.pptx" }
 	})
@@ -614,6 +618,63 @@ describe("showCapability", () => {
 		} finally {
 			close()
 		}
+	})
+
+	it("describes the slide's objects for morph only in a deck one of whose slides morphs", async () => {
+		const box = `${xfrm(914400, 914400, 1828800, 914400)}<a:prstGeom prst="rect"><a:avLst/></a:prstGeom>`
+		const morph =
+			'<mc:AlternateContent xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006">' +
+			'<mc:Choice xmlns:p159="http://schemas.microsoft.com/office/powerpoint/2015/09/main" Requires="p159">' +
+			'<p:transition spd="slow"><p159:morph option="byObject"/></p:transition></mc:Choice>' +
+			'<mc:Fallback><p:transition spd="slow"><p:fade/></p:transition></mc:Fallback></mc:AlternateContent>'
+		const morphing = await harness(
+			buildPptx({ slides: [{ shapes: sp(2, "Box", undefined, box) }, { shapes: sp(2, "Box", undefined, box), after: morph }] })
+		)
+		const still = await harness()
+
+		try {
+			// The first slide's objects are what the second one's morph starts from.
+			expect((await showCapability.timegraph(morphing.context, morphing.ref)).source?.morph).toHaveLength(1)
+			expect((await showCapability.timegraph(still.context, still.ref)).source?.morph).toBeUndefined()
+
+			// A morph given in this session counts.
+			const node = still.context.session.deck.nodes.get(still.ref)
+
+			if (node === undefined) throw new Error("no slide")
+
+			still.context.session.deck.nodes.set(still.ref, {
+				...node,
+				transition: { kind: "morph", namespace: "morph", options: {}, advance: { onClick: true } }
+			})
+			expect((await showCapability.timegraph(still.context, still.ref)).source?.morph).toHaveLength(4)
+		} finally {
+			morphing.close()
+			still.close()
+		}
+
+		// An ODP deck (not scanned: ODF has no morph) morphs only by an edit.
+		const odp = await openOdpCapability.open({
+			source: bytesSource(odpBytes({ body: page('<draw:rect svg:x="1cm" svg:y="1cm" svg:width="4cm" svg:height="2cm"/>') })),
+			sourceKind: "bytes",
+			options: { format: "odp", fileName: "show.odp" }
+		})
+
+		if (odp.kind !== "opened") throw new Error(odp.kind)
+
+		const ref = odp.deck.slides[0]
+
+		if (ref === undefined) throw new Error("no slide")
+
+		const context = { ...still.context, session: { ...still.context.session, deck: odp.deck, package: odp.package } }
+
+		expect((await showCapability.timegraph(context, ref)).source?.morph).toBeUndefined()
+
+		const node = odp.deck.nodes.get(ref)
+
+		if (node === undefined) throw new Error("no slide")
+
+		odp.deck.nodes.set(ref, { ...node, transition: { kind: "morph", namespace: "morph", options: {}, advance: { onClick: true } } })
+		expect((await showCapability.timegraph(context, ref)).source?.morph).toHaveLength(1)
 	})
 
 	it("refuses a stage width outside what it draws", async () => {

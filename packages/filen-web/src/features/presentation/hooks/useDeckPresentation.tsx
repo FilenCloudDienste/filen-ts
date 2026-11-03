@@ -45,6 +45,36 @@ function endFocus(origin: RefObject<RibbonOrigin | undefined>, slide: RefObject<
 	return (origin.current === undefined ? null : ribbonFocusTarget(origin.current)) ?? slide.current
 }
 
+// The full-page show covers the deck and the preview around it: while it runs, all of that leaves the tab order and
+// the accessibility tree. That is what comes before the show in the deck's root, and the siblings of every ancestor up
+// to the dialog it opened in (a page without one keeps the rest of its body). What follows the show in the root (the
+// presenter's same-window view) stays live. Elements already inert are left as they are.
+function coverUnderShow(layer: HTMLElement | null): (() => void) | undefined {
+	if (layer === null) return undefined
+
+	const marked: Element[] = []
+	const mark = (element: Element): void => {
+		if (element.hasAttribute("inert")) return
+
+		element.setAttribute("inert", "")
+		marked.push(element)
+	}
+
+	for (let sibling = layer.previousElementSibling; sibling !== null; sibling = sibling.previousElementSibling) mark(sibling)
+
+	for (
+		let node = layer.parentElement;
+		node?.parentElement != null && node.parentElement !== document.body && node.getAttribute("role") !== "dialog";
+		node = node.parentElement
+	) {
+		for (const sibling of node.parentElement.children) if (sibling !== node) mark(sibling)
+	}
+
+	return () => {
+		for (const element of marked) element.removeAttribute("inert")
+	}
+}
+
 // A key the deck takes: React's from the deck's root, or the page's for one pressed elsewhere in the editor's layer.
 export interface DeckKeyEvent {
 	readonly key: string
@@ -357,6 +387,7 @@ export function useDeckPresentation({
 			<>
 				{showing === undefined ? null : (
 					<div
+						ref={coverUnderShow}
 						data-preview-surface
 						className="fixed inset-0 z-50 bg-black"
 						onClickCapture={presenter.stageProps.onClickCapture}

@@ -16,7 +16,7 @@ import { layoutSlide, openDeck, type LaidBody } from "./presentationTextHarness"
 
 const CACHE = loCacheDir()
 const CORPUS = resolve(process.env["FILEN_OFFICE_CORPUS"] ?? join(import.meta.dirname, "../../.corpus"))
-const LIST = process.env["FILEN_OFFICE_CORPUS_LIST"] ?? "/tmp/p5/corpus-frozen.json"
+const LIST = process.env["FILEN_OFFICE_CORPUS_LIST"] ?? join(import.meta.dirname, "../../corpus/manifest.json")
 const REPORT = process.env["FILEN_OFFICE_TEXT_REPORT"]
 const ONLY = process.env["FILEN_OFFICE_TEXT_ONLY"]
 const READY = CACHE !== undefined && existsSync(CORPUS) && existsSync(LIST)

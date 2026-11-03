@@ -1,3 +1,4 @@
+import { readMediaTiming, type MediaTiming } from "../../anim/media"
 import type { MediaRef } from "../../presentation/model"
 import { relPart, type ReadContext } from "./drawing"
 import { G } from "./xml"
@@ -50,11 +51,16 @@ export function readMedia(context: ReadContext, nvPr: number, facts: MediaFacts,
 
 	if (kind === undefined) return undefined
 
-	// p14:media: the embedded copy PowerPoint 2010+ plays (r:embed) and its link (r:link).
+	let timing: MediaTiming | undefined
+
+	// p14:media: the embedded copy PowerPoint 2010+ plays (r:embed) and its link (r:link), with its trim, fade and
+	// bookmarks.
 	for (const ext of r.children(r.child(nvPr, G.P, "extLst"), G.P, "ext")) {
 		if (r.attr(ext, "uri") !== P14_MEDIA_EXT) continue
 
 		const media = r.child(ext, G.P14, "media")
+
+		timing = readMediaTiming(r, media)
 		const embedded = target(context, r.rel(media, "embed"))
 		const linked = target(context, r.rel(media, "link"))
 
@@ -71,6 +77,7 @@ export function readMedia(context: ReadContext, nvPr: number, facts: MediaFacts,
 		...place,
 		contentType,
 		...(size === undefined ? {} : { size }),
-		...(poster === undefined ? {} : { poster })
+		...(poster === undefined ? {} : { poster }),
+		...(timing === undefined ? {} : { timing })
 	}
 }

@@ -208,6 +208,9 @@ describe("presenter view", () => {
 
 		// Its notes are a landmark of their own, apart from the editor's notes under it.
 		expect(screen.getByRole("region", { name: "Speaker notes" })).toBeTruthy()
+		// The preview of what comes next is named apart from the Next button.
+		expect(screen.getByRole("region", { name: "Next slide" })).toBeTruthy()
+		expect(screen.getByRole("button", { name: "Next" })).toBeTruthy()
 		expect(screen.getByText("Slide 1 of 3")).toBeTruthy()
 		expect(screen.getByText(/blocked the presenter window/u)).toBeTruthy()
 		fireEvent.keyDown(view, { key: "ArrowRight", code: "ArrowRight" })

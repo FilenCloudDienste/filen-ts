@@ -7,6 +7,17 @@ export {
 	type EmbeddedFontRef,
 	type EmbeddedStyle
 } from "./docx"
+export {
+	DEFAULT_EOT_LIMITS,
+	decodeEot,
+	decodeMtx,
+	embeddedFontData,
+	isEot,
+	isSfnt,
+	readEotHeader,
+	type EotHeader,
+	type EotLimits
+} from "./eot"
 export { FontError, type FontErrorCode } from "./errors"
 export type { FontAssets, FontFaceDescriptor, FontHost } from "./host"
 export {

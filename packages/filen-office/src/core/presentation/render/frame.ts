@@ -13,6 +13,7 @@ import type { RenderServices } from "./services"
 import type { SmartArtTexts } from "./smartartText"
 import { INSERTED_IMAGE_ID, PART_IMAGE_ID } from "../../smartart/emit"
 import { drawingMarkup } from "../../smartart/style"
+import { drawScene } from "../../metafile/dr3d"
 
 // Graphic frames other than tables: charts (the shared chart converter), SmartArt (the drawing PowerPoint caches
 // beside the diagram, else the SmartArt engine), OLE objects and media (their preview picture). Each draws into a
@@ -265,8 +266,13 @@ export async function drawFrame(
 			report.refuse("mediaPosterMissing")
 
 			return false
-		case "table":
 		case "unknown":
+			// An ODF 3D scene: its mesh projected into the frame.
+			if (frame.scene !== undefined && drawScene(list, frame.scene, matrix ?? IDENTITY, w, h)) return true
+			if (frame.scene !== undefined) report.refuse("dr3dScene")
+
+			return false
+		case "table":
 			return false
 	}
 }

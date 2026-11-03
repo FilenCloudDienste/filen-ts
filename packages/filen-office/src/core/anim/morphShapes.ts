@@ -315,16 +315,41 @@ export function pptxGeometry(document: XmlDocument, epoch: number): (shape: Shap
 
 const LT = 0x3c
 const COLON = 0x3a
+// XML name bytes the scanner walks over (ASCII letters, digits, "_", "-", ".").
+const NAME_BYTE = new Uint8Array(256)
 
-function nameByte(byte: number): boolean {
-	return (
+for (let byte = 0; byte < 256; byte++)
+	NAME_BYTE[byte] =
 		(byte >= 0x61 && byte <= 0x7a) ||
 		(byte >= 0x41 && byte <= 0x5a) ||
 		(byte >= 0x30 && byte <= 0x39) ||
 		byte === 0x5f ||
 		byte === 0x2d ||
 		byte === 0x2e
-	)
+			? 1
+			: 0
+
+// The kinds as bytes, compared in place: no string is made for the other elements' names.
+const KIND_BYTES: readonly (readonly [string, Uint8Array])[] = [...WEBGL_TRANSITION_KINDS].map(kind => [
+	kind,
+	Uint8Array.from(kind, c => c.charCodeAt(0))
+])
+const LONGEST_KIND = Math.max(...KIND_BYTES.map(([kind]) => kind.length))
+
+function kindAt(data: Uint8Array, start: number, end: number): string | undefined {
+	const length = end - start
+
+	for (const [kind, bytes] of KIND_BYTES) {
+		if (bytes.length !== length) continue
+
+		let k = 0
+
+		while (k < length && bytes[k] === data[start + k]) k++
+
+		if (k === length) return kind
+	}
+
+	return undefined
 }
 
 // Finds the prefixed elements named in WEBGL_TRANSITION_KINDS in a part's bytes (MS-PPTX §2.2.1 writes them as
@@ -336,14 +361,15 @@ export class TransitionKindScanner {
 
 	push(chunk: Uint8Array): void {
 		const data = this.carry.length === 0 ? chunk : concat(this.carry, chunk)
-		let keep = data.length
+		const size = data.length
+		let keep = size
 
-		for (let at = data.indexOf(LT); at >= 0 && at < data.length; at = data.indexOf(LT, at + 1)) {
+		for (let at = data.indexOf(LT); at >= 0; at = data.indexOf(LT, at + 1)) {
 			let k = at + 1
 
-			while (k < data.length && nameByte(data[k] ?? 0)) k++
+			while (k < size && NAME_BYTE[data[k] as number] === 1) k++
 
-			if (k >= data.length) {
+			if (k >= size) {
 				keep = at
 
 				break
@@ -354,25 +380,22 @@ export class TransitionKindScanner {
 			const start = k + 1
 			let end = start
 
-			while (end < data.length && nameByte(data[end] ?? 0)) end++
+			while (end < size && NAME_BYTE[data[end] as number] === 1) end++
 
-			if (end >= data.length) {
+			if (end >= size) {
 				keep = at
 
 				break
 			}
 
-			// The longest kind is ten letters.
-			if (end - start > 10) continue
+			if (end - start > LONGEST_KIND) continue
 
-			let name = ""
+			const kind = kindAt(data, start, end)
 
-			for (let n = start; n < end; n++) name += String.fromCharCode(data[n] ?? 0)
-
-			if (WEBGL_TRANSITION_KINDS.has(name)) this.found.add(name)
+			if (kind !== undefined) this.found.add(kind)
 		}
 
-		this.carry = keep >= data.length ? new Uint8Array(0) : data.slice(keep)
+		this.carry = keep >= size ? new Uint8Array(0) : data.slice(keep)
 	}
 
 	// The part is over.

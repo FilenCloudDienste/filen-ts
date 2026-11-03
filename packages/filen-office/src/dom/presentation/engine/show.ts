@@ -772,6 +772,17 @@ function transitionKinds(context: CallContext): Promise<readonly string[]> | und
 	return deckWebglTransitions(pptx, deck.slides, context.slicing, deck.nodes, scanned).catch(() => [])
 }
 
+// Whether a slide of the deck is entered with morph: the scanned kinds where the deck has them (parsed slides'
+// transitions included), else a parsed slide's transition (a deck the worker does not scan morphs only by an edit,
+// which parses the slide).
+function deckMorphs(nodes: ReadonlyMap<SlideRef, SlideNode>, kinds: readonly string[] | undefined): boolean {
+	if (kinds !== undefined) return kinds.includes("morph")
+
+	for (const node of nodes.values()) if (node.transition?.kind === "morph") return true
+
+	return false
+}
+
 async function slideRender(context: CallContext, ref: SlideRef): Promise<{ readonly node: SlideNode; readonly render: SlideRender }> {
 	const session = context.session
 	const parts = viewParts(session.deck)
@@ -833,12 +844,12 @@ async function timegraph(context: CallContext, ref: SlideRef): Promise<CompiledT
 	const fallback =
 		authored === undefined || document === undefined || pptx === undefined ? undefined : fileFallback(authored, document, pptx.epoch)
 	const transition = authored === undefined ? undefined : playableTransition(authored, stageDraws, fallback)
-	const morph = morphShapes(
-		node.shapes,
-		render,
-		document === undefined || pptx === undefined ? undefined : pptxGeometry(document, pptx.epoch)
-	)
 	const kinds = await transitionKinds(context)
+	// Any slide's morph may start from this one (a show can go to any slide), so the objects are described whenever
+	// the deck morphs anywhere, and never otherwise.
+	const morph = deckMorphs(session.deck.nodes, kinds)
+		? morphShapes(node.shapes, render, document === undefined || pptx === undefined ? undefined : pptxGeometry(document, pptx.epoch))
+		: undefined
 	const source: TimegraphSource = {
 		timing,
 		layers,

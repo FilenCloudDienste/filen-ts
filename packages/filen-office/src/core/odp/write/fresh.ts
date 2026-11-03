@@ -39,6 +39,7 @@ import { D } from "../../drawingml/reader"
 import { resolveColor, themeTypeface, type ColorContext, type PresentationTheme } from "../../presentation/theme"
 import { decodeUtf8, encodeUtf8, escapeAttribute, escapeText } from "../../xml/index"
 import { odpParagraphId, odpParagraphKey, odpParagraphTargets, odpTargetId, odpTargetIds, odpTimingMarkup } from "../../anim/odf"
+import { bookmarkTriggers, mediaTimingLosses } from "../../anim/media"
 import { withoutShapes } from "../../anim/prune"
 import { OdpContext } from "../read/context"
 import { openOdp } from "../read/document"
@@ -383,7 +384,12 @@ class Flattener {
 
 		if (shape.kind === "pic") {
 			// A medium is shown as its poster (the picture PowerPoint shows before it plays).
-			if (shape.media !== undefined) count(this.report.approximated, "media frame")
+			if (shape.media !== undefined) {
+				count(this.report.approximated, "media frame")
+
+				// ODF has no trim, fade or bookmarks of a medium.
+				for (const what of mediaTimingLosses(shape.media.timing)) count(this.report.omitted, what)
+			}
 
 			const picture =
 				shape.props?.fill ??
@@ -1145,6 +1151,10 @@ export async function freshOdp(deck: Deck, services: FreshOdpServices): Promise<
 			const kept = withoutShapes(slide.timing, gone)
 
 			if (kept !== slide.timing) count(report.omitted, "animation of a shape not written")
+
+			// ODF has no media bookmarks: each such effect starts on a click of its clip instead (anim/odf.ts).
+			for (let k = bookmarkTriggers(kept).length; k > 0; k--)
+				count(report.approximated, "animation triggered by a bookmark, started on click instead")
 			if (kept !== undefined)
 				timing = odpTimingMarkup({ fragment: undefined, shapes: slide.shapes, idPrefix: idPrefix(slide) }, kept, undefined)
 					.map(piece => (typeof piece === "string" ? piece : piece instanceof Uint8Array ? decodeUtf8(piece) : ""))

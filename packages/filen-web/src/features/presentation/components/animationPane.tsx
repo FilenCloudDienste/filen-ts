@@ -433,13 +433,14 @@ export function AnimationPane({
 			) : rows.length === 0 ? (
 				<p className="p-3 text-sm text-muted-foreground">{t("previewPptxAnimPaneEmpty")}</p>
 			) : (
-				// The rows' pointer, keys and drops are handled here, once for the list.
+				// The rows' pointer, keys and drops are handled here, once for the list. Layout and paint contained, not
+				// size: in the phone pane (a maximum height only) the list takes its rows' height up to the pane's.
 				<div
 					ref={element => {
 						listRef.current = element
 						setList(element)
 					}}
-					className="min-h-0 flex-1 overflow-y-auto px-1 [contain:strict]"
+					className="min-h-0 flex-1 overflow-y-auto px-1 [contain:content]"
 					onScroll={event => {
 						const top = event.currentTarget.scrollTop
 
@@ -497,7 +498,15 @@ export function AnimationPane({
 							const heading =
 								trigger === undefined
 									? t("previewPptxAnimTriggerSequence")
-									: t("previewPptxAnimTriggerHeading", { name: nameOf(trigger) })
+									: t("previewPptxAnimTriggerHeading", {
+											name:
+												members[0]?.bookmark === undefined
+													? nameOf(trigger)
+													: t("previewPptxAnimTriggerBookmark", {
+															bookmark: members[0].bookmark,
+															name: nameOf(trigger)
+														})
+										})
 							const from = Math.max(0, Math.floor((scroll - OVERSCAN_PX - top) / ROW_PX))
 							const to = Math.min(
 								members.length,

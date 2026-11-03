@@ -118,6 +118,8 @@ interface EmbeddedFace {
 	readonly metrics: VerticalMetrics
 	// OS/2 fsType: restricted fonts may be drawn but never embedded again.
 	readonly fsType: number
+	// The font data the platform holds, for the realms that draw the same face (counted in the embedded budget).
+	readonly data: Uint8Array
 }
 
 interface EmbeddedSource {
@@ -415,6 +417,19 @@ export class FontManager {
 		return { kind: "bundled", family: substitute, weight, italic: font.italic }
 	}
 
+	// The font data of an embedded face this manager registered (the bytes the platform loaded), for another realm to
+	// register the same face; undefined for any other registration.
+	embeddedData(registration: FaceRegistration): Uint8Array | undefined {
+		if (registration.source !== "embedded") return undefined
+
+		const entry = this.embedded.get(registration.declaredFamily.toLowerCase())
+		const weight = typeof registration.weight === "number" ? registration.weight : registration.weight[0]
+
+		return entry?.alias === registration.family
+			? entry.faces.find(face => face.weight === weight && face.italic === registration.italic)?.data
+			: undefined
+	}
+
 	// Whether an embedded font may be embedded again on save (OS/2 fsType: not restricted-license).
 	reembeddable(family: string): boolean {
 		const entry = this.embedded.get(family.toLowerCase())
@@ -533,13 +548,14 @@ export class FontManager {
 
 			// Counted once the platform holds the face; the queue keeps the next read waiting until then.
 			this.embeddedBytes += data.length
-			entry.faces.push({ weight: bold ? 700 : 400, italic, metrics: font.metrics, fsType: font.fsType })
+			entry.faces.push({ weight: bold ? 700 : 400, italic, metrics: font.metrics, fsType: font.fsType, data })
 			this.registered.push({ ...descriptor, source: "embedded", declaredFamily: entry.name })
 			this.resolved.clear()
 			source.state = "loaded"
 		} catch (error) {
 			source.state = "failed"
-			source.error = error
+			// A copy: the thrown error's captured stack can keep the refused bytes alive.
+			source.error = error instanceof FontError ? new FontError(error.code, error.message) : new Error(reasonOf(error))
 
 			if (!this.disposed) this.failed.push({ family: entry.name, bold, italic, reason: reasonOf(error) })
 		}

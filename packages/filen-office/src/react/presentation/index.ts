@@ -71,5 +71,6 @@ export {
 	type ShowMediaStatus,
 	type ShowMediaStreams
 } from "./show/media"
+export { knownMediaDuration, noteMediaDuration } from "./show/mediaTiming"
 export * from "./presenter/index"
 export * from "./ink/index"

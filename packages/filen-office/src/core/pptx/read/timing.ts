@@ -1,3 +1,4 @@
+import { readBookmarkTarget } from "../../anim/media"
 import { eventOf, nodeTypeOf, oneOf, parsePercent, parseTime, presetClassOf } from "../../anim/pptx"
 import type {
 	AnimTarget,
@@ -75,10 +76,15 @@ export function readTiming(input: TimingReadInput, root: number): TimingTree | u
 
 	if (tree === undefined && builds.length === 0) return undefined
 
+	const branch = r.document.parent(timing)
+	const container = branch < 0 ? -1 : r.document.parent(branch)
+	const alternate = container >= 0 && container !== root && r.is(container, G.MC, "AlternateContent") ? container : -1
+
 	return {
 		root: tree ?? { kind: "par", ctn: { id: 1, nodeType: "tmRoot", stCondLst: [], endCondLst: [], children: [] } },
 		builds,
-		src: reader.src(timing)
+		src: reader.src(timing),
+		...(alternate < 0 ? {} : { alternate: reader.src(alternate) })
 	}
 }
 
@@ -188,6 +194,8 @@ class TimingReader {
 		set("syncBehavior", oneOf(r.attr(node, "syncBehavior"), ["canSlip", "locked"] as const))
 		set("masterRel", oneOf(r.attr(node, "masterRel"), ["sameClick", "lastClick", "nextClick"] as const))
 
+		for (const key of ["evtFilter", "tmFilter", "display", "nodePh", "afterEffect", "bldLvl"] as const) set(key, r.attr(node, key))
+
 		const endSync = r.child(node, G.P, "endSync")
 
 		if (endSync >= 0) set("endSync", this.condition(endSync))
@@ -237,6 +245,16 @@ class TimingReader {
 		const tgtEl = r.child(node, G.P, "tgtEl")
 		const tn = r.int(r.child(node, G.P, "tn"), "val")
 		const rtn = oneOf(r.attr(r.child(node, G.P, "rtn"), "val"), ["first", "last", "all"] as const)
+		// A media bookmark (MS-PPTX p14:bmkTgt): the medium's shape and the bookmark's name.
+		const bookmark = readBookmarkTarget(r, tgtEl)
+
+		if (bookmark !== undefined)
+			return {
+				...(evt === undefined ? {} : { evt }),
+				delay: parseTime(r.attr(node, "delay")) ?? 0,
+				tgtEl: { kind: "shape", shape: bookmark.shape },
+				bookmark: bookmark.bookmark
+			}
 
 		return {
 			...(evt === undefined ? {} : { evt }),

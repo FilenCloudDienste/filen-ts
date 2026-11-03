@@ -168,7 +168,7 @@ function timing(): unknown {
 	}
 }
 
-function mount(animated: boolean, selected: readonly number[]): PresentationRibbonEditor {
+function mount(animated: boolean, selected: readonly number[], phone = false): PresentationRibbonEditor {
 	const selection = createShapeSelection()
 
 	selection.show(ref)
@@ -202,7 +202,7 @@ function mount(animated: boolean, selected: readonly number[]): PresentationRibb
 			<AnimationPane
 				editor={editor}
 				editable
-				phone={false}
+				phone={phone}
 			/>
 		</>
 	)
@@ -277,6 +277,20 @@ describe("presentation Animations tab", () => {
 		await waitFor(() => {
 			expect(ops).toEqual([{ family: "timing", kind: "moveEffect", slide: ref, node: 10, to: 1 }])
 		})
+	})
+
+	it("lets the phone pane's list take its rows' height: layout and paint contained, never size", async () => {
+		mount(true, [], true)
+		act(() => {
+			animationPane.setOpen(true)
+		})
+
+		const rows = await screen.findAllByRole("option")
+		const list = at(rows, 0).closest<HTMLElement>(".overflow-y-auto")
+
+		// The phone pane has only a maximum height, so size containment would make the list 0 px tall.
+		expect(list?.className).toContain("[contain:content]")
+		expect(list?.className).not.toMatch(/contain:(strict|size)/u)
 	})
 
 	it("tells an entrance and an exit of one name apart by their names", async () => {

@@ -17,7 +17,7 @@ import {
 } from "../../presentation/model"
 import { encodeUtf8, escapeAttribute, escapeText, parseXml, type XmlDocument, type XmlEditor } from "../../xml/index"
 import { readSlidePart, SlidePartError } from "../read/slide"
-import { timingElement } from "../read/timing"
+import { timingContainer } from "./emit/timing"
 import { G, P_MAIN, partReader, type PartReader } from "../read/xml"
 import { emitFamilyOf, emitPptx } from "./emit"
 import { notePackageDiagramData, noteSharedDiagramParts, type PackageDiagramData } from "./emit/smartart"
@@ -1879,9 +1879,11 @@ function rootAttributes(editor: XmlEditor, r: PartReader, root: number, node: Sl
 }
 
 // The slide's p:timing (ECMA-376 Part 1 §19.3.1.38: after p:transition, before p:extLst) replaced, removed or added.
+// The timing family's markup (a bare p:timing, or the mc:AlternateContent holding it) in place of the slide's timing
+// container, or after the root's last child before its extLst.
 function placeTiming(editor: XmlEditor, document: XmlDocument, r: PartReader, root: number, pieces: readonly EmitPiece[]): void {
 	const bytes = assemble(document, pieces)
-	const current = timingElement(r, root)
+	const current = timingContainer(r, root)
 
 	if (current >= 0) {
 		if (bytes.length === 0) editor.remove(current)

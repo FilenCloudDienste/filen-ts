@@ -280,3 +280,57 @@ describe("focus after a show started from the Slide Show tab", () => {
 		expect(document.activeElement).toBe(screen.getByRole("button", { name: "More commands" }))
 	})
 })
+
+describe("what the running show covers", () => {
+	function InPreview({ onShow }: { onShow: (start: () => void) => void }) {
+		return (
+			<div
+				role="dialog"
+				aria-label="Preview"
+			>
+				<button
+					type="button"
+					aria-label="Close preview"
+				/>
+				<div
+					inert
+					data-testid="already-inert"
+				/>
+				<div>
+					<Page onShow={onShow} />
+				</div>
+			</div>
+		)
+	}
+
+	it("is out of reach while the show runs, up to the preview's dialog, and comes back as it ends", async () => {
+		let start: () => void = () => undefined
+
+		render(
+			<InPreview
+				onShow={value => {
+					start = value
+				}}
+			/>
+		)
+		act(() => {
+			start()
+		})
+
+		const stage = await screen.findByTestId("stage")
+		const close = screen.getByRole("button", { name: "Close preview", hidden: true })
+
+		expect(close.closest("[inert]")).not.toBeNull()
+		expect(screen.getByRole("toolbar", { name: "Commands", hidden: true }).closest("[inert]")).not.toBeNull()
+		expect(screen.getByLabelText("Slide").closest("[inert]")).not.toBeNull()
+		expect(stage.closest("[inert]")).toBeNull()
+		expect(screen.getByRole("dialog", { name: "Preview" }).hasAttribute("inert")).toBe(false)
+
+		await endShow()
+
+		expect(close.closest("[inert]")).toBeNull()
+		expect(screen.getByRole("toolbar", { name: "Commands" }).closest("[inert]")).toBeNull()
+		expect(screen.getByTestId("already-inert").hasAttribute("inert")).toBe(true)
+		expect(document.activeElement?.getAttribute("aria-label")).toBe("Slide")
+	})
+})

@@ -15,6 +15,7 @@ import { DocxPagePainter, type DocxPdfRefusal, type PagePaintContext } from "../
 import type { DocxPdfDocument, DocxPdfLinkTarget, DocxPdfRole, DocxPdfStyle } from "../../core/docx/pdf/types"
 import type { DocxLinkTarget, DocxTextStyle } from "../../core/docx/layout/index"
 import { NO_HINTS, SUBSTITUTIONS, fallbackFor, type BundledFamily } from "../../core/fonts/substitutes"
+import { readSfnt } from "../../core/fonts/sfnt"
 import type { PdfFaceSource } from "../../core/fonts/manager"
 import type { PdfSecurityKey } from "../../core/pdfwrite/crypto"
 import { PdfFontSet, type PdfFontAssets, type PdfFontFaceRequest } from "../../core/pdfwrite/fonts/index"
@@ -98,6 +99,8 @@ export interface PresentationPdfResult extends PdfOutput {
 
 // Requests for the text's faces name them by index under this prefix (no document family starts with it).
 const FACE_PREFIX = "\u0001face:"
+// OS/2 fsType's restricted-license bit: what an unreadable face is taken to have.
+const RESTRICTED_LICENSE = 0x0002
 const DRAWING_FAMILY = "Calibri"
 const BLACK = 0x000000ff
 const FRAME = 0x808080ff
@@ -829,6 +832,34 @@ export class PresentationPdf {
 			return { source: { kind: "bundled", family: substituteOf(face.name, generic), weight, italic }, fitted: true }
 
 		const family = alias === undefined ? undefined : bundledFamily(alias)
+
+		// A face of the deck's own (an embedded font, decoded): embedded in its own right, unless its licence forbids it
+		// (then its bundled stand-in for the generic family draws).
+		if (face?.kind === "bytes" && family === undefined) {
+			const bytes = face.bytes
+			let fsType: number
+
+			try {
+				fsType = readSfnt(bytes).fsType
+			} catch {
+				fsType = RESTRICTED_LICENSE
+			}
+
+			const faceWeight = typeof face.face.weight === "number" ? face.face.weight : face.face.weight[0]
+
+			return {
+				source: {
+					kind: "embedded",
+					key: `${alias ?? ""}:${String(faceWeight)}:${face.face.italic ? 1 : 0}`,
+					read: () => Promise.resolve(bytes),
+					fsType,
+					weight: faceWeight,
+					italic: face.face.italic,
+					substitute: genericFamily(generic)
+				},
+				fitted: false
+			}
+		}
 
 		if (family !== undefined) return { source: { kind: "bundled", family, weight, italic }, fitted: false }
 

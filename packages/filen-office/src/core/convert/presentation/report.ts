@@ -42,6 +42,10 @@ export type ConversionLossKind =
 	| "signature"
 	// A write-reservation password, which a new file does not keep.
 	| "writeReservation"
+	// A medium's trim, fade or bookmarks: OpenDocument has no form for them.
+	| "mediaTiming"
+	// An animation a medium's bookmark starts, started on a click of the medium instead (OpenDocument has no bookmarks).
+	| "bookmarkTrigger"
 
 export interface ConversionLoss {
 	readonly kind: ConversionLossKind

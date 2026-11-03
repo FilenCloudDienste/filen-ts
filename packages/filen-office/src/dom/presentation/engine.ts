@@ -89,6 +89,7 @@ export const PRESENTATION_LANES: { readonly [M in PresentationMethod]: Lane } = 
 	media: "background",
 	registerMedia: "background",
 	image: "background",
+	shade: "background",
 	smartArtPreview: "background",
 	smartArtInfo: "priority",
 	chartData: "priority",
@@ -162,7 +163,7 @@ export type MethodHandler<M extends PresentationMethod> = (
 
 export type Capability<M extends PresentationMethod> = { readonly [K in M]: MethodHandler<K> }
 
-export type ViewCapability = Capability<"render" | "image">
+export type ViewCapability = Capability<"render" | "image" | "shade">
 export type ThumbsCapability = Capability<"thumbnails">
 export type TextCapability = Capability<"textSeed" | "layoutText">
 export type EditCapability = Capability<"command" | "undo" | "redo" | "retract">

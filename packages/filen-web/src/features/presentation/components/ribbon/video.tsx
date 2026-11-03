@@ -21,6 +21,7 @@ import type {
 	PresentationRibbonContext,
 	PresentationRibbonEditor
 } from "@/features/presentation/components/ribbon/tabs"
+import { mediaTimingGroups } from "@/features/presentation/components/ribbon/mediaTiming"
 import type { PreviewKey } from "@/lib/i18n"
 
 // The Video tab (and, through mediaPlaybackGroups, the Audio tab): how the selected medium plays in the show —
@@ -256,4 +257,4 @@ export function mediaPlaybackGroups(kind: MediaKind, context: PresentationRibbon
 	]
 }
 
-export const videoGroups: PresentationGroups = context => mediaPlaybackGroups("video", context)
+export const videoGroups: PresentationGroups = context => [...mediaPlaybackGroups("video", context), ...mediaTimingGroups("video", context)]

@@ -244,5 +244,10 @@ export function bindWrittenTiming(mine: TimingTree, theirs: TimingTree): boolean
 	if (theirs.src === undefined) delete mine.src
 	else mine.src = theirs.src
 
+	if (theirs.alternate === undefined) delete mine.alternate
+	else mine.alternate = theirs.alternate
+
+	delete mine.alternateRaw
+
 	return true
 }

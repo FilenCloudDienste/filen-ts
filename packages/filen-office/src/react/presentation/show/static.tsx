@@ -299,7 +299,6 @@ export function StaticShow({
 			className="fo-show-stage"
 			role="region"
 			aria-label={label}
-			aria-roledescription="slideshow"
 			data-fo-screen={screen}
 			tabIndex={-1}
 			onKeyDown={onKeyDown}

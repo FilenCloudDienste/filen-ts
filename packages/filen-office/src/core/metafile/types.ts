@@ -1,6 +1,6 @@
 import type { DrawingList } from "../drawingml/displayList"
 
-export type MetafileFormat = "emf" | "emf+" | "wmf"
+export type MetafileFormat = "emf" | "emf+" | "wmf" | "svm" | "pict"
 
 export type MetafileFailure =
 	// Not a metafile, or its header is unreadable.

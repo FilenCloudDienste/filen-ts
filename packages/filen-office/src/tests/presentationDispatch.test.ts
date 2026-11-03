@@ -76,7 +76,8 @@ const BUILT_APPLY: ReadonlySet<DeckOpFamily> = new Set([
 	"timing",
 	"motionPath",
 	"notes",
-	"comment"
+	"comment",
+	"mediaTiming"
 ])
 const BUILT_PPTX_EMIT: ReadonlySet<DeckOpFamily> = new Set([
 	"design",
@@ -93,7 +94,8 @@ const BUILT_PPTX_EMIT: ReadonlySet<DeckOpFamily> = new Set([
 	"chart",
 	"motionPath",
 	"notes",
-	"comment"
+	"comment",
+	"mediaTiming"
 ])
 const BUILT_ODP_EMIT: ReadonlySet<DeckOpFamily> = new Set([
 	"design",
@@ -110,7 +112,8 @@ const BUILT_ODP_EMIT: ReadonlySet<DeckOpFamily> = new Set([
 	"chart",
 	"motionPath",
 	"notes",
-	"comment"
+	"comment",
+	"mediaTiming"
 ])
 const BUILT_METHODS: ReadonlySet<PresentationMethod> = new Set([
 	"jobsPort",
@@ -126,7 +129,8 @@ const BUILT_METHODS: ReadonlySet<PresentationMethod> = new Set([
 	"freshParts",
 	"jobsPort",
 	"review",
-	"retract"
+	"retract",
+	"shade"
 ])
 
 const context: ApplyContext = {
@@ -226,7 +230,8 @@ describe("presentation dispatch seams", () => {
 			"picture",
 			"ink"
 		])
-		expect(on("pic", { media: { kind: "video", contentType: "video/mp4" } })).toBe("media")
+		// A medium goes to the media timing family, which writes its p14:media timing into the media family's markup.
+		expect(on("pic", { media: { kind: "video", contentType: "video/mp4" } })).toBe("mediaTiming")
 		// A stroke of kept ink goes to the ink family while it has no source; any other new freeform stays a shape.
 		const custom = { props: { geometry: { kind: "custom" as const, guides: [], paths: [] } } }
 
@@ -280,10 +285,10 @@ describe("presentation dispatch seams", () => {
 		}
 	})
 
-	it("refuses the fonts service as notImplemented, SmartArt before any render as notFound, and empty bytes in every reader typed", async () => {
+	it("serves no embedded faces before a deck declared any, refuses SmartArt before any render as notFound, and empty bytes in every reader typed", async () => {
 		const session = { s: 1 } as unknown as EngineSession
 
-		await expect(SERVICES.fonts.faces(session)).rejects.toMatchObject({ reason: "notImplemented" })
+		await expect(SERVICES.fonts.faces(session)).resolves.toEqual([])
 		const slicing = { pause: () => Promise.resolve(), sliceMs: 8, now: () => 0 }
 
 		await expect(SERVICES.smartart.relayout(session, target, slicing)).rejects.toMatchObject({ reason: "notFound" })

@@ -525,7 +525,14 @@ class DrawingPainter {
 		if (paint !== undefined) {
 			const solid = this.solidOf(paint, box, flags & ITEM_FILL_MODIFIER_MASK)
 
-			if (solid !== undefined) {
+			if (solid === undefined && paint.kind === "shaded") {
+				// A plain mesh's outline is its triangles (a 3D scene's, a gradient triangle's), which the shading paints
+				// exactly: no clip path is written. One the writer refuses fills the outline in its mean colour.
+				const colors = opacity >= 1 ? paint.colors : paint.colors.map(color => this.alpha(color >>> 0, opacity))
+
+				if (!(await page.mesh({ points: paint.points, colors })) && this.path(i))
+					page.fillColor(this.alpha(this.color(averageShade(paint.colors)), opacity)).fill(evenOdd)
+			} else if (solid !== undefined) {
 				if ((solid & 255) > 0 && this.path(i)) page.fillColor(this.alpha(this.color(solid), opacity)).fill(evenOdd)
 			} else if (this.path(i)) {
 				page.saveState()
@@ -556,7 +563,15 @@ class DrawingPainter {
 			case "pattern":
 				return mixRgba(paint.background >>> 0, paint.foreground >>> 0, patternCoverage(paint.pattern))
 			case "shaded":
-				return paint.colors instanceof Uint32Array ? averageShade(paint.colors) : 0
+				// A plain Gouraud mesh paints its area (a type 4 shading); one with a centre ramp, its mean colour.
+				return paint.ramp === null &&
+					paint.points instanceof Float32Array &&
+					paint.colors instanceof Uint32Array &&
+					paint.colors.length >= 3
+					? undefined
+					: paint.colors instanceof Uint32Array
+						? averageShade(paint.colors)
+						: 0
 			case "image":
 				return flat ? 0 : undefined
 		}
@@ -633,6 +648,17 @@ class DrawingPainter {
 					)
 				)
 				page.restoreState()
+				break
+			}
+			case "shaded": {
+				const colors = opacity >= 1 ? paint.colors : paint.colors.map(color => this.alpha(color >>> 0, opacity))
+
+				// A mesh the writer refuses (bounds that are no page geometry) shows its mean colour.
+				if (!(await page.mesh({ points: paint.points, colors })))
+					page.fillColor(this.alpha(this.color(averageShade(paint.colors)), opacity))
+						.rect(x, y, width, height)
+						.fill()
+
 				break
 			}
 			case "image": {

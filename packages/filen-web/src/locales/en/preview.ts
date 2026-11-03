@@ -30,6 +30,7 @@ import { previewPptxText } from "@/locales/en/previewPptx/text"
 import { previewPptxFind } from "@/locales/en/previewPptx/find"
 import { previewPptxObjects } from "@/locales/en/previewPptx/objects"
 import { previewPptxMedia } from "@/locales/en/previewPptx/media"
+import { previewPptxMediaTiming } from "@/locales/en/previewPptx/mediaTiming"
 import { previewPptxShow } from "@/locales/en/previewPptx/show"
 import { previewPptxExport } from "@/locales/en/previewPptx/export"
 import { previewPptxPresenter } from "@/locales/en/previewPptx/presenter"
@@ -761,6 +762,7 @@ export const preview = {
 	...previewPptxFind,
 	...previewPptxObjects,
 	...previewPptxMedia,
+	...previewPptxMediaTiming,
 	...previewPptxShow,
 	...previewPptxExport,
 	...previewPptxPresenter,

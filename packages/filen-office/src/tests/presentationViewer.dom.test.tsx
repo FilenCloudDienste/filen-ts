@@ -717,6 +717,39 @@ describe("presentation viewer components", () => {
 		document.body.removeEventListener("keydown", outer)
 	})
 
+	it("names a static show's stage only by the page's label and announces each slide politely", () => {
+		const slides = slideList(2)
+		const renders = new Map(slides.map(slide => [slide.ref, plainRender(slide.ref)]))
+
+		act(() =>
+			root.render(
+				<StaticShow
+					slides={slides}
+					customShows={[]}
+					renders={renders}
+					size={SIZE}
+					painter={painter}
+					onEnd={() => undefined}
+					label="Slide show"
+					slideLabel={(index, count) => `Slide ${String(index + 1)} of ${String(count)}`}
+				/>
+			)
+		)
+
+		const stage = host.querySelector<HTMLElement>(".fo-show-stage")
+		const live = stage?.querySelector<HTMLElement>("[aria-live]")
+
+		expect(stage?.getAttribute("role")).toBe("region")
+		expect(stage?.getAttribute("aria-label")).toBe("Slide show")
+		expect(stage?.hasAttribute("aria-roledescription")).toBe(false)
+		expect(live?.getAttribute("aria-live")).toBe("polite")
+		expect(live?.textContent).toBe("Slide 1 of 2")
+		act(() => {
+			stage?.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }))
+		})
+		expect(live?.textContent).toBe("Slide 2 of 2")
+	})
+
 	it("runs a custom show and returns after it when asked", () => {
 		const slides = slideList(5)
 		const renders = new Map<SlideRef, SlideRender>()

@@ -1,6 +1,7 @@
 import type { LayerState } from "../../../core/anim/model"
 import type { SlideLayer, SlideMediaInfo } from "../../../core/presentation/output"
 import type { MediaRefusal, PresentationSessionApi } from "../../../dom/presentation/protocol"
+import { MediaTimingDriver, noteMediaDuration } from "./mediaTiming"
 import type { ShowMediaEvents, ShowMediaHandle, ShowMediaMount, ShowSoundHandle } from "./stage"
 
 // A medium on a slide as a native <video>/<audio> over its layer, for the show and the editor's canvas alike. The
@@ -86,6 +87,8 @@ class MountedMedia implements ShowMediaHandle {
 	private element: HTMLMediaElement | undefined
 	private stream: { release(): void } | undefined
 	private remux: MediaRemux | undefined
+	// The medium's trim, fade and bookmarks while its element lives (react/presentation/show/mediaTiming.ts).
+	private timing: MediaTimingDriver | undefined
 	private loading: Promise<boolean> | undefined
 	private note: HTMLElement | undefined
 	private released = false
@@ -169,6 +172,8 @@ class MountedMedia implements ShowMediaHandle {
 		if (this.released) return
 
 		this.released = true
+		this.timing?.dispose()
+		this.timing = undefined
 		this.remux?.dispose()
 		this.remux = undefined
 
@@ -272,15 +277,40 @@ class MountedMedia implements ShowMediaHandle {
 				? `${BOX_STYLE};object-fit:contain;background:transparent`
 				: "position:absolute;left:0;right:0;bottom:0;width:100%"
 		element.preload = "metadata"
+		// Its length, for the Trim dialog (no second load of the medium to learn it).
+		element.addEventListener("loadedmetadata", () => {
+			if (this.media.part !== undefined) noteMediaDuration(session, this.media.part, element.duration)
+		})
 		element.controls = this.options.hoverControls === false
 
 		// The file's playback options (p:cMediaNode vol and mute, the media node's repeat).
 		const playback = this.media.playback
 
-		element.volume = Math.max(0, Math.min(1, (playback?.volume ?? 100_000) / 100_000))
+		const volume = Math.max(0, Math.min(1, (playback?.volume ?? 100_000) / 100_000))
+
+		element.volume = volume
 		element.muted = playback?.mute === true
-		element.loop = playback?.loop === true
 		element.setAttribute("playsinline", "")
+
+		// A trim, fade or bookmarks: the driver loops within the trimmed part itself.
+		if (this.media.timing !== undefined)
+			this.timing = new MediaTimingDriver(
+				element,
+				this.media.timing,
+				{
+					bookmark: name => {
+						this.events.bookmark(name)
+					},
+					ended: () => {
+						this.wanted = { playing: false }
+						this.status("ended")
+						this.events.ended()
+					}
+				},
+				{ loop: playback?.loop === true, volume }
+			)
+
+		element.loop = playback?.loop === true && this.timing === undefined
 
 		if (this.options.hoverControls !== false) {
 			this.box.addEventListener("pointerenter", () => {
@@ -424,7 +454,8 @@ class MountedMedia implements ShowMediaHandle {
 		if (element === undefined || wanted !== this.wanted) return
 
 		if (wanted.atMs !== undefined) {
-			const seconds = wanted.atMs / 1000
+			// From the trimmed start: playFrom(t) and a stop's 0 are positions in the part that plays.
+			const seconds = this.timing?.seekSeconds(wanted.atMs) ?? wanted.atMs / 1000
 
 			if (this.remux !== undefined) this.remux.seek(seconds)
 			else element.currentTime = seconds

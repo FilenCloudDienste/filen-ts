@@ -31,7 +31,10 @@ const FORMAT_BY_TYPE: Readonly<Record<string, ImageFormat>> = {
 	"application/x-emf": "emf",
 	"image/x-wmf": "wmf",
 	"image/wmf": "wmf",
-	"application/x-msmetafile": "wmf"
+	"application/x-msmetafile": "wmf",
+	"image/x-svm": "svm",
+	"image/pict": "pict",
+	"image/x-pict": "pict"
 }
 
 const FORMAT_BY_EXTENSION: Readonly<Record<string, ImageFormat>> = {
@@ -50,7 +53,10 @@ const FORMAT_BY_EXTENSION: Readonly<Record<string, ImageFormat>> = {
 	emf: "emf",
 	emz: "emf",
 	wmf: "wmf",
-	wmz: "wmf"
+	wmz: "wmf",
+	svm: "svm",
+	pct: "pict",
+	pict: "pict"
 }
 
 export function imageFormat(partName: string, contentType: string | undefined): ImageFormat {
@@ -77,6 +83,8 @@ export function imageHandling(format: ImageFormat): ImageHandling {
 			return "convert"
 		case "emf":
 		case "wmf":
+		case "svm":
+		case "pict":
 			return "metafile"
 		default:
 			return "placeholder"

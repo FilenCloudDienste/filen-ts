@@ -150,6 +150,12 @@ function echoHandlers(): { readonly [M in PresentationMethod]: MethodHandler<M> 
 		registerMedia: () => Promise.resolve({ kind: "refused", reason: "notImplemented" }),
 		image: (_context, part) =>
 			Promise.resolve(part === "/ppt/media/image1.png" ? { bytes: new Uint8Array([0x89, 0x50]), type: "image/png" } : null),
+		shade: (_context, meshes, scale, maxPixels) =>
+			Promise.resolve(
+				meshes.length === 0
+					? null
+					: { png: new Blob([Uint8Array.of(scale, maxPixels & 255)], { type: "image/png" }), bounds: [0, 0, 1, 1] as const }
+			),
 		smartArtPreview: (_context, _layout, options) => Promise.resolve(bitmap(options.widthPx, options.widthPx)),
 		smartArtInfo: (_context, target) =>
 			Promise.resolve({
@@ -281,6 +287,13 @@ describe("the presentation protocol", () => {
 			type: "image/png"
 		})
 		expect(await session.call("image", "/ppt/media/missing.png").answer).toBeNull()
+
+		const mesh = { points: Float32Array.of(0, 0, 1, 0, 0, 1), colors: Uint32Array.of(1, 2, 3), ramp: null }
+		const shaded = await session.call("shade", [mesh], 2, 1024).answer
+
+		expect(shaded?.bounds).toEqual([0, 0, 1, 1])
+		expect(Array.from(new Uint8Array((await shaded?.png.arrayBuffer()) ?? new ArrayBuffer(0)))).toEqual([2, 0])
+		expect(await session.call("shade", [], 2, 1024).answer).toBeNull()
 		expect(await session.call("smartArtPreview", { uniqueId: "urn:x", source: "gallery" }, { widthPx: 96 }).answer).toEqual({
 			width: 96,
 			height: 96
@@ -432,6 +445,9 @@ describe("the presentation protocol", () => {
 			save: () => session.call("save", { reason: "auto", port: ports() }).answer,
 			commitSaved: () => session.call("commitSaved", { file: { uuid: "u", name: "n" }, port: ports(), size: 1, revision: 1 }).answer,
 			image: () => session.call("image", "/ppt/media/image1.png").answer,
+			shade: () =>
+				session.call("shade", [{ points: Float32Array.of(0, 0, 1, 0, 0, 1), colors: Uint32Array.of(1, 2, 3), ramp: null }], 1, 1024)
+					.answer,
 			smartArtPreview: () => session.call("smartArtPreview", { uniqueId: "urn:x", source: "gallery" }, { widthPx: 96 }).answer,
 			smartArtInfo: () => session.call("smartArtInfo", shape).answer,
 			chartData: () => session.call("chartData", shape).answer,
@@ -441,7 +457,7 @@ describe("the presentation protocol", () => {
 		}
 
 		// Built by their slices: edits (command, undo, redo), saving (save, commitSaved), find, the SmartArt text pane's
-		// info, the jobs port, and registerMedia (it answers a typed MediaRefusal value: this host serves no range sources).
+		// info, shaded rasters, the jobs port, and registerMedia (it answers a typed MediaRefusal value: this host serves no range sources).
 		const built: ReadonlySet<PresentationMethod> = new Set([
 			"command",
 			"undo",
@@ -451,6 +467,7 @@ describe("the presentation protocol", () => {
 			"commitSaved",
 			"find",
 			"smartArtInfo",
+			"shade",
 			"registerMedia",
 			"chartData",
 			"jobsPort",

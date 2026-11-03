@@ -39,6 +39,8 @@ export interface EffectRow {
 	// 0: the main sequence; n: the nth trigger's interactive sequence.
 	readonly sequence: number
 	readonly trigger?: number
+	// The medium bookmark that starts its sequence (`trigger` is the medium's shape).
+	readonly bookmark?: string
 	// Within its sequence.
 	readonly index: number
 	readonly start: EffectStart
@@ -126,6 +128,7 @@ export function slideEffects(timing: TimingTree | undefined): SlideEffects {
 						id: ctn.id,
 						sequence: s,
 						...(sequence.trigger === undefined ? {} : { trigger: sequence.trigger.shape }),
+						...(sequence.trigger?.kind === "bookmark" ? { bookmark: sequence.trigger.bookmark } : {}),
 						index,
 						start: entry?.start ?? "click",
 						step,
@@ -293,7 +296,12 @@ export function replaceEffectOp(
 		{ first: first.start, rest: members[1]?.start ?? first.start },
 		timing
 	)
-	const trigger = first.trigger === undefined ? undefined : ({ kind: "shapeClick", shape: first.trigger } as const)
+	const trigger =
+		first.trigger === undefined
+			? undefined
+			: first.bookmark === undefined
+				? ({ kind: "shapeClick", shape: first.trigger } as const)
+				: ({ kind: "bookmark", shape: first.trigger, bookmark: first.bookmark } as const)
 	const ops: DeckOp[] = members.map(member => ({ family: "timing", kind: "removeEffect", slide, node: member.id }))
 
 	for (const [e, effect] of effects.entries()) {

@@ -4,7 +4,7 @@ import { ContentBuilder, type Matrix } from "./content"
 import { PdfWriteError } from "./errors"
 import { orientationMatrix } from "./images"
 import { pdfName, textStringBytes, writeName, type PdfDict, type PdfRef, type PdfValue } from "./objects"
-import type { PdfGradient } from "./shading"
+import type { PdfGradient, PdfMesh } from "./shading"
 import type { PdfStructOptions } from "./tagged"
 import type { PdfObjectSink, PdfWriter } from "./writer"
 
@@ -240,6 +240,28 @@ export class PdfPage extends ContentBuilder {
 
 		this.named(resources.shading.name, "sh")
 		this.restoreState()
+	}
+
+	// Paints a Gouraud mesh over the current clip, inside q/Q; false (nothing painted) for a mesh the writer refuses.
+	async mesh(mesh: PdfMesh): Promise<boolean> {
+		this.live()
+
+		const resources = await this.writer.mesh(mesh)
+
+		if (resources === undefined) return false
+
+		this.saveState()
+		this.shadings.set(resources.shading.name, resources.shading.ref)
+
+		if (resources.state !== undefined) {
+			this.extGStates.set(resources.state.name, resources.state.ref)
+			this.named(resources.state.name, "gs")
+		}
+
+		this.named(resources.shading.name, "sh")
+		this.restoreState()
+
+		return true
 	}
 
 	// Draws an image into the box (px), upright for its EXIF orientation unless `asStored`.

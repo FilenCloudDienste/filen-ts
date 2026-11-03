@@ -29,7 +29,7 @@ import {
 } from "./shape"
 import { backgroundMarkup } from "./design"
 import { listStyleXml } from "./text"
-import { timingPieces } from "./timing"
+import { isTimingContainer, timingSlotPieces } from "./timing"
 import { isTransitionElement, pptxTransitionPieces, sameTransition } from "./transition"
 
 // The slide family's PresentationML: the root of a slide, layout, master, notes slide, notes master or handout master
@@ -296,11 +296,16 @@ export function slideRoot(context: EmitContext, node: SlideNode, options: SlideR
 					? "keep"
 					: take(pptxTransitionPieces(node.transition, context))
 		},
-		own("timing", child =>
-			child >= 0 && (pristine === undefined || sameModel(node.timing, pristine.timing))
-				? "keep"
-				: take(timingPieces(context, node.timing, node.shapes))
-		)
+		// A bare p:timing, or the mc:AlternateContent that holds it (a timing that uses p14, MS-PPTX §2.2.2): one slot,
+		// so the timing is never written a second time beside its AlternateContent.
+		{
+			match: () => false,
+			takes: child => context.document !== undefined && isTimingContainer(context.document, child),
+			write: child =>
+				child >= 0 && (pristine === undefined || sameModel(node.timing, pristine.timing))
+					? "keep"
+					: take(timingSlotPieces(context, node.timing, node.shapes, child))
+		}
 	)
 
 	if (node.kind !== "slide" && node.kind !== "notes") {

@@ -13,6 +13,10 @@ export interface TimingTree {
 	// p:bldLst.
 	builds: Build[]
 	src?: SourceRef
+	// The mc:AlternateContent the source holds the timing in (MS-PPTX §2.2.2), when it does.
+	alternate?: SourceRef
+	// That AlternateContent's bytes, held by an inverse: written back as they are while the tree is what they read as.
+	alternateRaw?: Uint8Array
 }
 
 export type TimeNodeKind = "par" | "seq" | "excl"
@@ -45,6 +49,14 @@ export interface CommonTimeNode {
 	autoRev?: boolean
 	syncBehavior?: "canSlip" | "locked"
 	masterRel?: "sameClick" | "lastClick" | "nextClick"
+	// The rest of CT_TLCommonTimeNodeData (ECMA-376 §19.5.33) as written: none plays here, all are written back (a
+	// regenerated mc:Fallback, a node written from the model keep them).
+	evtFilter?: string
+	tmFilter?: string
+	display?: string
+	nodePh?: string
+	afterEffect?: string
+	bldLvl?: string
 	stCondLst: TimeCondition[]
 	endCondLst: TimeCondition[]
 	endSync?: TimeCondition

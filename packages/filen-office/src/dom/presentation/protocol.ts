@@ -20,6 +20,7 @@ import type { PlaceholderPrompts } from "../../core/presentation/render/prompts"
 import type { DocxFontFace } from "../docx/protocol"
 import type { TextMailboxTicket } from "./textMailbox"
 import type { ChartData } from "../../core/presentation/edit/apply/chart"
+import type { ShadedMesh } from "../../core/drawingml/shade"
 
 export type { ChartData } from "../../core/presentation/edit/apply/chart"
 
@@ -55,6 +56,13 @@ export interface BitmapLike {
 	readonly width: number
 	readonly height: number
 	close(): void
+}
+
+// A shaded raster the worker made: a PNG Blob (the office lib has no DOM types: a Blob's shape) and its extent in the
+// meshes' local units.
+export interface ShadedPng {
+	readonly png: { readonly size: number; readonly type: string; arrayBuffer(): Promise<ArrayBuffer> }
+	readonly bounds: readonly [number, number, number, number]
 }
 
 // The deck's bytes: in memory (archive entries, encrypted packages, ≤ 256 MiB), or a range port to the SDK worker
@@ -278,6 +286,10 @@ export interface PresentationSessionApi {
 	// A picture's bytes for the SVG painter (a part name, or "inserted:<id>" for an image an op inserted); null when
 	// the package has none.
 	image(part: string): Promise<{ readonly bytes: Uint8Array; readonly type: string } | null>
+	// Shaded meshes (a render's, sent back) rasterised together at `scale` px per local unit within `maxPixels`, and
+	// encoded: a PNG as a Blob with its extent in the meshes' local units. null when the raster is refused (the page
+	// shows the meshes' mean colour).
+	shade(meshes: readonly ShadedMesh[], scale: number, maxPixels: number): Promise<ShadedPng | null>
 	// A SmartArt layout (with a style and colours) laid out over sample text, for the gallery and the switch-layout
 	// previews.
 	smartArtPreview(
@@ -331,6 +343,7 @@ export const PRESENTATION_METHODS: readonly PresentationMethod[] = [
 	"media",
 	"registerMedia",
 	"image",
+	"shade",
 	"smartArtPreview",
 	"smartArtInfo",
 	"chartData",

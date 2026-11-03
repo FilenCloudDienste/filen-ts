@@ -13,7 +13,6 @@ export const previewPptxDesign = {
 	previewPptxDesignThisPresentation: "In this presentation",
 	/** Presentation editor — theme gallery section: Filen's own themes */
 	previewPptxDesignFilenThemes: "Filen themes",
-	/** Presentation editor — Design tab: why Filen themes are off in an OpenDocument presentation */
 	/** Presentation editor — theme gallery: a theme of the presentation without a name; {{n}} counts from 1 */
 	previewPptxDesignThemeUntitled: "Theme {{n}}",
 	/** Presentation editor — theme gallery: a Filen theme in one of its color variants; {{name}} is the theme, {{n}} 1 to 4 */

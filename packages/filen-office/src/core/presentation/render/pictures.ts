@@ -1,12 +1,13 @@
 import { ITEM_FLOATS, ITEM_INTS, ItemFloat, ItemInt, type DrawingList, type ImageTile } from "../../drawingml/displayList"
 import { MAX_IMAGE_BYTES, sniffImage } from "../../docx/objects/images"
 import { MetafileCache } from "../../metafile/cache"
-import { MAX_METAFILE_BYTES, convertMetafile, expandMetafiles, hasMetafileImages } from "../../metafile/index"
+import { MAX_METAFILE_BYTES, expandMetafiles, hasMetafileImages } from "../../metafile/index"
+import { convertPresentationMetafile } from "../../metafile/legacy"
 import type { RenderReport } from "./effects"
 import type { RenderServices } from "./services"
 
 // What a layer's pictures need from their bytes, once the drawing is converted:
-// - EMF/WMF pictures (pictures, OLE previews, media posters) drawn as what they hold: each metafile image item is
+// - EMF, WMF, SVM and PICT pictures (pictures, OLE previews, media posters) drawn as what they hold: each metafile image item is
 //   replaced by its conversion (core/metafile, as the docx and xlsx drawings do). Conversions are kept per host (logos
 //   repeat on every slide), bounded by core/metafile's cache.
 // - Tiled picture fills (a:tile, ECMA-376 §20.1.8.58) placed at the picture's own size: its pixels at its resolution
@@ -35,7 +36,7 @@ function cacheOf(services: RenderServices, read: NonNullable<RenderServices["byt
 				return undefined
 			}
 
-			return bytes === undefined || bytes.length > MAX_METAFILE_BYTES ? undefined : convertMetafile(bytes)
+			return bytes === undefined || bytes.length > MAX_METAFILE_BYTES ? undefined : convertPresentationMetafile(bytes)
 		})
 		caches.set(services, cache)
 	}

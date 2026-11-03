@@ -223,3 +223,113 @@ export function gradientKey(gradient: PdfGradient): string {
 		gradient.bounds
 	])
 }
+
+// A Gouraud mesh as a free-form triangle shading (ISO 32000-1 §8.7.4.5.5, type 4): per corner an 8-bit flag (0: each
+// triangle stands alone), its coordinates as fractions of the mesh's bounds, its red, green and blue. `points` holds
+// x, y of three corners per triangle, `colors` a 0xRRGGBBAA per corner.
+export interface PdfMesh {
+	readonly points: Float32Array
+	readonly colors: Uint32Array
+}
+
+export interface PdfMeshStream {
+	readonly data: Uint8Array
+	readonly decode: number[]
+	readonly bitsPerCoordinate: 12 | 16 | 24 | 32
+}
+
+// Bounds beyond this are no page geometry (the content writer's own limit); such a mesh is refused.
+const MAX_MESH_MAGNITUDE = 1e9
+// A coordinate step is at most this fraction of the mesh's extent, and of its smallest triangle's.
+const EXTENT_STEPS = 4095
+const TRIANGLE_STEPS = 16
+const COORDINATE_BITS = [12, 16, 24, 32] as const
+
+// The fewest bits per coordinate (of those that keep a corner a whole number of bytes: an 8-bit flag and three 8-bit
+// components with two 12, 16, 24 or 32-bit coordinates) whose step resolves both the mesh and its smallest triangle.
+function coordinateBits(points: Float32Array, corners: number, span: number): (typeof COORDINATE_BITS)[number] {
+	let smallest = span
+
+	for (let k = 0; k + 2 < corners; k += 3) {
+		const at = k * 2
+		const xs = [points[at] ?? 0, points[at + 2] ?? 0, points[at + 4] ?? 0]
+		const ys = [points[at + 1] ?? 0, points[at + 3] ?? 0, points[at + 5] ?? 0]
+		const size = Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys))
+
+		if (size > 0 && size < smallest) smallest = size
+	}
+
+	const step = Math.min(span / EXTENT_STEPS, smallest / TRIANGLE_STEPS)
+
+	return COORDINATE_BITS.find(bits => span / (2 ** bits - 1) <= step) ?? 32
+}
+
+// The mesh's stream at the fewest coordinate bits it needs; undefined for one whose bounds are not page geometry.
+export function meshStream(points: Float32Array, colors: Uint32Array): PdfMeshStream | undefined {
+	const corners = Math.min(Math.floor(points.length / 6) * 3, colors.length - (colors.length % 3))
+	let minX = Number.POSITIVE_INFINITY
+	let minY = Number.POSITIVE_INFINITY
+	let maxX = Number.NEGATIVE_INFINITY
+	let maxY = Number.NEGATIVE_INFINITY
+
+	for (let k = 0; k < corners; k++) {
+		const x = points[k * 2] ?? 0
+		const y = points[k * 2 + 1] ?? 0
+
+		if (x < minX) minX = x
+		if (x > maxX) maxX = x
+		if (y < minY) minY = y
+		if (y > maxY) maxY = y
+	}
+
+	if (corners === 0 || ![minX, minY, maxX, maxY].every(value => Math.abs(value) <= MAX_MESH_MAGNITUDE)) return undefined
+	if (!(maxX > minX)) maxX = minX + 1
+	if (!(maxY > minY)) maxY = minY + 1
+
+	const bits = coordinateBits(points, corners, Math.max(maxX - minX, maxY - minY))
+	const steps = 2 ** bits - 1
+	const stride = 1 + (bits * 2) / 8 + 3
+	const data = new Uint8Array(corners * stride)
+	const sx = steps / (maxX - minX)
+	const sy = steps / (maxY - minY)
+	const put = (at: number, value: number, bytes: number): void => {
+		for (let k = bytes - 1; k >= 0; k--) {
+			data[at + k] = value % 256
+			value = Math.floor(value / 256)
+		}
+	}
+
+	for (let k = 0; k < corners; k++) {
+		const at = k * stride
+		const color = colors[k] ?? 0
+		const x = Math.min(steps, Math.max(0, Math.round(((points[k * 2] ?? 0) - minX) * sx)))
+		const y = Math.min(steps, Math.max(0, Math.round(((points[k * 2 + 1] ?? 0) - minY) * sy)))
+
+		if (bits === 12) {
+			// Two 12-bit coordinates in three bytes.
+			data[at + 1] = x >>> 4
+			data[at + 2] = ((x & 15) << 4) | (y >>> 8)
+			data[at + 3] = y & 255
+		} else {
+			put(at + 1, x, bits / 8)
+			put(at + 1 + bits / 8, y, bits / 8)
+		}
+
+		data[at + stride - 3] = color >>> 24
+		data[at + stride - 2] = (color >>> 16) & 255
+		data[at + stride - 1] = (color >>> 8) & 255
+	}
+
+	return { data, decode: [minX, maxX, minY, maxY, 0, 1, 0, 1, 0, 1], bitsPerCoordinate: bits }
+}
+
+// The mean alpha (0..1) of a mesh's corners: a mesh is drawn at one opacity.
+export function meshAlpha(colors: Uint32Array): number {
+	if (colors.length === 0) return 1
+
+	let sum = 0
+
+	for (const color of colors) sum += color & 255
+
+	return sum / colors.length / 255
+}

@@ -1,4 +1,5 @@
 import { appendAll } from "../../../arrays"
+import { bookmarkCondition, isBookmarkCondition } from "../../media"
 import type { CommonTimeNode, TimeCondition, TimeNode, TimeNodeType, TimingTree } from "../../model"
 
 // A slide's effects as authoring sees them: the main sequence and each trigger's interactive sequence as flat lists of
@@ -9,7 +10,16 @@ import type { CommonTimeNode, TimeCondition, TimeNode, TimeNodeType, TimingTree 
 
 export type EffectStart = "click" | "with" | "after"
 
-export type EffectTrigger = { readonly kind: "shapeClick"; readonly shape: number }
+// A click on a shape, or a bookmark of a medium (MS-PPTX p14:bmkTgt) reached as it plays.
+export type EffectTrigger =
+	| { readonly kind: "shapeClick"; readonly shape: number }
+	| { readonly kind: "bookmark"; readonly shape: number; readonly bookmark: string }
+
+export function sameTrigger(a: EffectTrigger | undefined, b: EffectTrigger | undefined): boolean {
+	if (a === undefined || b === undefined) return a === b
+
+	return a.kind === b.kind && a.shape === b.shape && (a.kind !== "bookmark" || (b.kind === "bookmark" && a.bookmark === b.bookmark))
+}
 
 export interface SequenceEffect {
 	readonly node: TimeNode
@@ -33,6 +43,7 @@ export interface SlideSequences {
 	readonly interactive: EffectSequence[]
 	readonly builds: TimingTree["builds"]
 	readonly src?: TimingTree["src"]
+	readonly alternate?: TimingTree["alternate"]
 }
 
 // Why a tree cannot be authored: a sequence whose children are not click pars of group pars of effects.
@@ -91,6 +102,11 @@ function readSequence(seq: TimeNode | undefined, trigger: EffectTrigger | undefi
 }
 
 function triggerOf(seq: TimeNode): EffectTrigger | undefined {
+	const bookmark = seq.ctn.stCondLst.find(isBookmarkCondition)
+
+	if (bookmark?.tgtEl?.kind === "shape" && bookmark.bookmark !== undefined)
+		return { kind: "bookmark", shape: bookmark.tgtEl.shape, bookmark: bookmark.bookmark }
+
 	const condition = seq.ctn.stCondLst.find(c => c.evt === "onClick" && c.tgtEl !== undefined)
 	const target = condition?.tgtEl
 
@@ -132,7 +148,8 @@ export function readSequences(tree: TimingTree | undefined): SlideSequences | Se
 		main: main ?? { effects: [], clicks: [] },
 		interactive,
 		builds: tree?.builds ?? [],
-		...(tree?.src === undefined ? {} : { src: tree.src })
+		...(tree?.src === undefined ? {} : { src: tree.src }),
+		...(tree?.alternate === undefined ? {} : { alternate: tree.alternate })
 	}
 }
 
@@ -332,7 +349,10 @@ function mainSeqNode(old: TimeNode | undefined, ids: IdAllocator): TimeNode {
 function interactiveNode(old: TimeNode | undefined, trigger: EffectTrigger, ids: IdAllocator): TimeNode {
 	if (old !== undefined) return old
 
-	const click: TimeCondition = { evt: "onClick", delay: 0, tgtEl: { kind: "shape", shape: trigger.shape } }
+	const click: TimeCondition =
+		trigger.kind === "bookmark"
+			? bookmarkCondition(trigger.shape, trigger.bookmark)
+			: { evt: "onClick", delay: 0, tgtEl: { kind: "shape", shape: trigger.shape } }
 
 	return {
 		kind: "seq",
@@ -340,6 +360,8 @@ function interactiveNode(old: TimeNode | undefined, trigger: EffectTrigger, ids:
 			id: ids.take(),
 			restart: "whenNotActive",
 			fill: "hold",
+			// As PowerPoint writes a trigger's sequence: the trigger's click is not the slide's too.
+			evtFilter: "cancelBubble",
 			nodeType: "interactiveSeq",
 			concurrent: true,
 			nextAc: "seek",
@@ -412,5 +434,10 @@ export function writeSequences(sequences: SlideSequences, ids: IdAllocator, auto
 				}
 			: withChildren(old, children)
 
-	return { root, builds: [...sequences.builds], ...(sequences.src === undefined ? {} : { src: sequences.src }) }
+	return {
+		root,
+		builds: [...sequences.builds],
+		...(sequences.src === undefined ? {} : { src: sequences.src }),
+		...(sequences.alternate === undefined ? {} : { alternate: sequences.alternate })
+	}
 }

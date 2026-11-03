@@ -41,7 +41,9 @@ const KINDS: Readonly<Record<ConversionLossKind, true>> = {
 	slideSize: true,
 	showSettings: true,
 	signature: true,
-	writeReservation: true
+	writeReservation: true,
+	mediaTiming: true,
+	bookmarkTrigger: true
 }
 
 function report(losses: ConversionReport["losses"]): ConversionReport {

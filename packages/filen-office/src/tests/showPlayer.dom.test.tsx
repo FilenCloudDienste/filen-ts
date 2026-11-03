@@ -342,6 +342,22 @@ describe("SlideShow", () => {
 		expect(show.events.at(-1)).toEqual({ type: "ended" })
 	})
 
+	it("speaks only the page's words: the stage is a region named by its label, announcing each slide politely", async () => {
+		const show = await mount(new Map())
+		const stage = host.querySelector<HTMLElement>(".fo-show-stage")
+		const live = stage?.querySelector<HTMLElement>("[aria-live]")
+
+		expect(stage?.getAttribute("role")).toBe("region")
+		expect(stage?.getAttribute("aria-label")).toBe("Slide show")
+		expect(stage?.hasAttribute("aria-roledescription")).toBe(false)
+		expect(live?.getAttribute("aria-live")).toBe("polite")
+		expect(live?.textContent).toBe(`Slide 1 of ${String(slides.length)}`)
+
+		show.key("ArrowRight")
+		await settle(100)
+		expect(live?.textContent).toBe(`Slide 2 of ${String(slides.length)}`)
+	})
+
 	it("plays a slide's transition sound as it enters, looping until the next sound or a stop, and stops it at the end", async () => {
 		const chime: Transition = {
 			kind: "fade",

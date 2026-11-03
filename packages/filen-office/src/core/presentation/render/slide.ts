@@ -17,6 +17,7 @@ import { convertShapeTree, type ShapeContext } from "../../drawingml/shape"
 import { NodeKind, parseXml, sliceClock, type SliceClock, type XmlDocument } from "../../xml/index"
 import { runSliced, type Slicing } from "../../slicing"
 import { DEFAULT_PRESENTATION_BUDGETS, type PresentationBudgets } from "../budget"
+import { bookmarkTriggers } from "../../anim/media"
 import { mediaPlayback } from "../edit/apply/media"
 import { notesText } from "../notes"
 import {
@@ -785,6 +786,7 @@ function heldRoles(shape: ShapeNode): LayerRole[] {
 // What a medium's layer plays, with its playback options from the slide's timing.
 function mediaInfo(media: MediaRef, owner: SlideNode, id: number): SlideMediaInfo {
 	const playback = mediaPlayback(owner.timing, id)
+	const triggered = [...new Set(bookmarkTriggers(owner.timing).flatMap(trigger => (trigger.shape === id ? [trigger.bookmark] : [])))]
 
 	return {
 		kind: media.kind,
@@ -792,7 +794,9 @@ function mediaInfo(media: MediaRef, owner: SlideNode, id: number): SlideMediaInf
 		...(media.external === undefined ? {} : { external: media.external }),
 		contentType: media.contentType,
 		...(media.size === undefined ? {} : { size: media.size }),
-		...(Object.keys(playback).length === 0 ? {} : { playback })
+		...(Object.keys(playback).length === 0 ? {} : { playback }),
+		...(media.timing === undefined ? {} : { timing: media.timing }),
+		...(triggered.length === 0 ? {} : { triggered })
 	}
 }
 

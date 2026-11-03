@@ -268,7 +268,7 @@ export interface Stroke {
 	readonly inset: boolean
 }
 
-export type ImageFormat = "png" | "jpeg" | "gif" | "bmp" | "webp" | "svg" | "tiff" | "emf" | "wmf" | "unknown"
+export type ImageFormat = "png" | "jpeg" | "gif" | "bmp" | "webp" | "svg" | "tiff" | "emf" | "wmf" | "svm" | "pict" | "unknown"
 
 // How a renderer may show an image: as is, after sanitising (SVG), after converting (TIFF), through the
 // metafile converter (EMF/WMF), or not at all (external, missing, unknown).

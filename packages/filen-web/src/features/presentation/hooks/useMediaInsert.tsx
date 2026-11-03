@@ -4,10 +4,12 @@ import type { TFunction } from "i18next"
 import * as Comlink from "comlink"
 import { toast } from "sonner"
 import { driveItemName } from "@filen/shared"
-import type { InsertedImage, InsertedMedia, ShapeNode, SlideLayer, Xfrm } from "@filen/office/core/presentation"
+import type { InsertedImage, InsertedMedia, ShapeNode, SlideLayer, SlideRef, Xfrm } from "@filen/office/core/presentation"
 import type { MediaInsertSource, MediaRefusal, PresentationNotice } from "@filen/office/dom/presentation"
 import {
+	noteMediaDuration,
 	showMediaMount,
+	slideShapes,
 	type PresentationActionActivator,
 	type PresentationStore,
 	type ShowMediaLabels,
@@ -169,7 +171,47 @@ function waitFor(element: HTMLMediaElement, event: "loadedmetadata" | "seeked", 
 
 // Size, duration and a poster frame of the medium at `url` (a tenth of the way in, at most 1 s); a video the browser
 // cannot decode gets a neutral poster at 16:9.
-async function probe(url: string, kind: MediaKind, signal: AbortSignal): Promise<Probe> {
+// How long a dropped element is given to say it has let go of its source (`emptied`) before its URL goes anyway.
+const LET_GO_MS = 2000
+// How long a reset player is given after `emptied` to finish its last reads (100 times the tail measured in WebKit).
+const SETTLE_MS = 1000
+// Drops a media element's source: paused, told to load nothing more, unlinked and reset (load() with none). Resolves
+// once the element has emptied and its player has settled: WebKit's player still issues a last read or two of the old
+// source after `emptied` (measured: up to 10 ms after it), and a blob URL revoked under such a read fails it
+// ("WebKitBlobResource error 1"). `waitMs` bounds the wait for `emptied`.
+export function letGo(
+	element: Pick<HTMLMediaElement, "removeAttribute" | "load" | "addEventListener" | "pause" | "preload">,
+	waitMs = LET_GO_MS,
+	settleMs = SETTLE_MS
+): Promise<void> {
+	const emptied = new Promise<void>(resolve => {
+		const timer = setTimeout(resolve, waitMs)
+
+		element.addEventListener(
+			"emptied",
+			() => {
+				clearTimeout(timer)
+				resolve()
+			},
+			{ once: true }
+		)
+	})
+
+	element.pause()
+	element.preload = "none"
+	element.removeAttribute("src")
+	element.load()
+
+	return emptied.then(() => new Promise<void>(resolve => setTimeout(resolve, settleMs)))
+}
+
+// Runs `release` (an object URL revoked, a stream let go) once every one of `holds` has settled, whichever way: no
+// sooner, so nothing still reading the URL loses it, and no later.
+export function releaseAfter(holds: readonly Promise<unknown>[], release: () => void): void {
+	void Promise.allSettled(holds).then(release)
+}
+
+async function probe(url: string, kind: MediaKind, signal: AbortSignal, hold: (released: Promise<void>) => void): Promise<Probe> {
 	const element = document.createElement(kind)
 	const deadline = AbortSignal.any([signal, AbortSignal.timeout(PROBE_TIMEOUT_MS)])
 
@@ -213,8 +255,7 @@ async function probe(url: string, kind: MediaKind, signal: AbortSignal): Promise
 
 		return { width: 1280, height: 720, poster: await placeholderPoster(1280, 720) }
 	} finally {
-		element.removeAttribute("src")
-		element.load()
+		hold(letGo(element))
 	}
 }
 
@@ -242,6 +283,26 @@ export function isMediaFile(kind: MediaKind): (item: DriveItem) => boolean {
 
 type Picked = { readonly kind: "file"; readonly file: File } | { readonly kind: "drive"; readonly item: DriveItem }
 
+// Inserts `media` as `shape` on `slide` and selects it once the slide shows it, as every other insert does; the length
+// the probe read is kept for the Trim dialog.
+export async function insertMediaShape(
+	editor: PresentationRibbonEditor,
+	slide: SlideRef,
+	shape: ShapeNode,
+	media: InsertedMedia
+): Promise<void> {
+	const render = editor.render?.ref === slide ? editor.render : (await editor.session.render([slide]))[0]
+
+	if (media.durationMs !== undefined) noteMediaDuration(editor.session, `inserted:${String(media.id)}`, media.durationMs / 1000)
+	if (render !== undefined)
+		editor.selection.selectNew(
+			slide,
+			slideShapes(render).map(entry => entry.id)
+		)
+
+	await editor.command({ family: "media", kind: "insert", slide, shape, media })
+}
+
 // Inserts one medium into the slide in view; resolves once it is in (or refused, with a toast).
 async function insertMedia(
 	editor: PresentationRibbonEditor,
@@ -258,6 +319,11 @@ async function insertMedia(
 	const name = picked.kind === "file" ? picked.file.name : driveItemName(picked.item)
 	const reading = toast.loading(t("previewPptxMediaReading", { name }))
 	let url: string | undefined
+	// What still reads `url` after the insert: the probe's element until it has let go.
+	const holds: Promise<void>[] = []
+	const hold = (released: Promise<void>): void => {
+		holds.push(released)
+	}
 
 	try {
 		let source: MediaInsertSource
@@ -275,7 +341,7 @@ async function insertMedia(
 			source = { kind: "range", port: port2, size: Number(file.size), checked: true, name, type }
 		}
 
-		const [probed, registered] = await Promise.all([probe(url, kind, signal), editor.session.registerMedia(source)])
+		const [probed, registered] = await Promise.all([probe(url, kind, signal, hold), editor.session.registerMedia(source)])
 
 		if (signal.aborted) return
 		if ("reason" in registered) {
@@ -298,7 +364,7 @@ async function insertMedia(
 			alt: { descr: name }
 		}
 
-		await editor.command({ family: "media", kind: "insert", slide, shape, media })
+		await insertMediaShape(editor, slide, shape, media)
 	} catch (error) {
 		if (!signal.aborted) {
 			log.warn("presentation", "media not inserted", { error })
@@ -308,8 +374,13 @@ async function insertMedia(
 		toast.dismiss(reading)
 
 		if (url !== undefined) {
-			if (picked.kind === "file") URL.revokeObjectURL(url)
-			else releasePreviewStream(previewStreamIdOf(url))
+			const done = url
+
+			// The insert is over (made, refused or cancelled): the URL goes once the probe's element has let go of it too.
+			releaseAfter(holds, () => {
+				if (picked.kind === "file") URL.revokeObjectURL(done)
+				else releasePreviewStream(previewStreamIdOf(done))
+			})
 		}
 	}
 }

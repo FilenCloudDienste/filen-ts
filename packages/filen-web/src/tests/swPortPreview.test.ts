@@ -498,6 +498,33 @@ describe("sw.ts port-backed preview", () => {
 		])
 	})
 
+	// The page let go of the stream (a media element dropped while its request was still open): the response ends as
+	// a complete body, not an error (Firefox logs an errored intercepted media load); the port closes once it has.
+	it("ends a response quietly when its registration is released mid-stream, then closes the port", async () => {
+		const { lifetime } = await registerPort("p1", 3 * BLOCK_BYTES, "video/mp4", true)
+		const { response, settled } = get("p1", "bytes=0-")
+		const body = response.arrayBuffer()
+
+		await tick()
+		listeners.get("message")?.({ data: { type: SW_MSG_RELEASE_PREVIEW, id: "p1" }, ports: [] })
+
+		expect((await body).byteLength).toBe(0)
+		await settled
+		await tick()
+		expect(lifetime.signal.aborted).toBe(true)
+		expect(get("p1", "bytes=0-9").response.status).toBe(404)
+	})
+
+	it("keeps serving a stream of a newer registration a release does not cover", async () => {
+		await registerPort("p1", 100, "video/mp4", false, 4)
+
+		const { response } = get("p1", "bytes=0-9")
+
+		listeners.get("message")?.({ data: { type: SW_MSG_RELEASE_PREVIEW, id: "p1", generation: 3 }, ports: [] })
+
+		expect(await bodyOf(response)).toEqual(expected(0, 9))
+	})
+
 	it("errors a response whose port's serving side dies mid-stream", async () => {
 		const { lifetime } = await registerPort("p1", 100, "video/mp4", true)
 		const { response, settled } = get("p1", "bytes=0-9")

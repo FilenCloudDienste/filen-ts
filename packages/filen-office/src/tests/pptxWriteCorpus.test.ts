@@ -36,7 +36,7 @@ import { editHarness, type EditHarness } from "./presentationEditFixtures"
 const manifest = JSON.parse(readFileSync(join(import.meta.dirname, "..", "..", "corpus", "manifest.json"), "utf8")) as CorpusManifest
 const FILES = manifest.files.filter(file => /^(pptx|pptm|potx|potm|ppsx|ppsm)\//u.test(file.path) && file.password === undefined)
 const PRESENT = FILES.filter(file => existsSync(join(CORPUS_DIR, file.path)))
-const OUT = process.env["FILEN_OFFICE_PPTX_WRITE_OUT"]
+const OUT = process.env["FILEN_OFFICE_PPTX_WRITE_OUT"] || undefined
 
 const EDIT = { emit: emitPptx } as never
 

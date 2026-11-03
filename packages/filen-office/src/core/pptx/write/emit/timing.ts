@@ -1,5 +1,8 @@
 import { isMediaBehavior, type MediaBehavior } from "../../../anim/attributes"
+import { bookmarkTargetXml, bookmarkTriggersAsClicks, hasBookmarkTriggers } from "../../../anim/media"
 import { heldMarkup, inScope, rootScope } from "../../../anim/prune"
+import { DEFAULT_PRESENTATION_BUDGETS } from "../../../presentation/budget"
+import { readTiming } from "../../read/timing"
 import { CTN_MODELED, ctnAttributes, formatInteger, formatTime } from "../../../anim/pptx"
 import type {
 	AnimTarget,
@@ -13,18 +16,21 @@ import type {
 	TimingTree
 } from "../../../anim/model"
 import { colorXml } from "../../../presentation/render/markup"
-import type { ColorModel, ShapeNode } from "../../../presentation/model"
-import { encodeUtf8, escapeText } from "../../../xml/index"
-import { G } from "../../read/xml"
+import { refused, type ColorModel, type Refused, type ShapeNode } from "../../../presentation/model"
+import { encodeUtf8, escapeAttribute, escapeText, parseXml, type XmlDocument } from "../../../xml/index"
+import { G, partReader, type PartReader } from "../../read/xml"
 import type { EmitPiece, EmitResult, PptxEmitFamily } from "../types"
 import {
 	Pieces,
+	URIS,
 	attr,
+	endTag,
 	mergeChildren,
 	readerOf,
 	sameModel,
 	sourceNode,
 	splicing,
+	startTag,
 	unmodeledAttributes,
 	type EmitContext,
 	type Slot
@@ -578,13 +584,15 @@ function spacedEmptyElements(context: EmitContext, node: number): boolean | unde
 
 function conditionXml(local: string, condition: TimeCondition): string {
 	const inner =
-		condition.tgtEl !== undefined
-			? targetXml(condition.tgtEl)
-			: condition.tn !== undefined
-				? `<p:tn${attr("val", condition.tn)}/>`
-				: condition.rtn !== undefined
-					? `<p:rtn${attr("val", condition.rtn)}/>`
-					: ""
+		condition.bookmark !== undefined && condition.tgtEl?.kind === "shape"
+			? bookmarkTargetXml(condition.tgtEl.shape, condition.bookmark)
+			: condition.tgtEl !== undefined
+				? targetXml(condition.tgtEl)
+				: condition.tn !== undefined
+					? `<p:tn${attr("val", condition.tn)}/>`
+					: condition.rtn !== undefined
+						? `<p:rtn${attr("val", condition.rtn)}/>`
+						: ""
 
 	return `<p:${local}${attr("evt", condition.evt)}${attr("delay", formatTime(condition.delay))}${inner === "" ? "/>" : `>${inner}</p:${local}>`}`
 }
@@ -692,6 +700,153 @@ export function timingPieces(context: EmitContext, tree: TimingTree | undefined,
 	return new TimingWriter(context, pristine, shapes).timing(tree, pristine)
 }
 
+// The element a slide root holds its timing in: a bare p:timing, or an mc:AlternateContent one of whose branches holds
+// one (MS-PPTX §2.2.2); -1 when it has none.
+export function timingContainer(r: PartReader, root: number): number {
+	for (let child = r.first(root); child >= 0; child = r.next(child)) if (isTimingIn(r, child)) return child
+
+	return -1
+}
+
+export function isTimingContainer(document: XmlDocument, node: number): boolean {
+	return isTimingIn(partReader(document), node)
+}
+
+function isTimingIn(r: PartReader, node: number): boolean {
+	if (r.is(node, G.P, "timing")) return true
+	if (!r.is(node, G.MC, "AlternateContent")) return false
+
+	for (let branch = r.first(node); branch >= 0; branch = r.next(branch)) if (r.child(branch, G.P, "timing") >= 0) return true
+
+	return false
+}
+
+const MC_URI = URIS["mc"] ?? ""
+const P14_URI = URIS["p14"] ?? ""
+
+// What the model of a timing holds, without where it was read from (source refs, held bytes).
+function content(tree: TimingTree): unknown {
+	const strip = (value: unknown): unknown => {
+		if (Array.isArray(value)) return value.map(strip)
+		if (value === null || typeof value !== "object" || value instanceof Uint8Array) return value
+
+		const out: Record<string, unknown> = {}
+
+		for (const [key, entry] of Object.entries(value)) {
+			if (key === "src" || key === "raw" || key === "alternate" || key === "alternateRaw") continue
+
+			out[key] = strip(entry)
+		}
+
+		return out
+	}
+
+	return strip({ root: tree.root, builds: tree.builds })
+}
+
+// Whether `raw` (an mc:AlternateContent an inverse held) reads as `tree`: read again in the scope of the part's root.
+function readsAs(context: EmitContext, raw: Uint8Array, tree: TimingTree): boolean {
+	const scope = context.document === undefined ? new Map<string, string>() : rootScope(context.document)
+
+	for (const prefix of ["p", "a", "r", "mc"]) if (!scope.has(prefix)) scope.set(prefix, URIS[prefix] ?? "")
+
+	let declarations = ""
+
+	for (const [prefix, uri] of scope) declarations += ` ${prefix === "" ? "xmlns" : `xmlns:${prefix}`}="${escapeAttribute(uri)}"`
+
+	try {
+		const head = encodeUtf8(`<p:sld${declarations}>`)
+		const tail = encodeUtf8("</p:sld>")
+		const bytes = new Uint8Array(head.length + raw.length + tail.length)
+
+		bytes.set(head, 0)
+		bytes.set(raw, head.length)
+		bytes.set(tail, head.length + raw.length)
+
+		const document = parseXml(bytes)
+		const reader = partReader(document)
+		const read = readTiming(
+			{ reader, part: "held", epoch: -1, budgets: DEFAULT_PRESENTATION_BUDGETS.timing },
+			document.documentElement()
+		)
+
+		return read !== undefined && sameModel(content(read), content(tree))
+	} catch {
+		return false
+	}
+}
+
+// A slide's timing in its place (`container`, the source's timingContainer, or -1). A timing that names a media
+// bookmark (p14), or one the source held in mc:AlternateContent, is written as one: the timing in its p14 Choice (the
+// source's Choice start tag kept), and a Fallback written again from the model with each bookmark condition a click on
+// its clip, as PowerPoint writes it for readers without p14. Anything else is the bare p:timing. No timing: nothing.
+export function timingSlotPieces(
+	context: EmitContext,
+	tree: TimingTree | undefined,
+	shapes: readonly ShapeNode[],
+	container: number
+): readonly EmitPiece[] | Refused {
+	if (tree === undefined) return []
+
+	// An undo back to a timing the source held in mc:AlternateContent: those bytes, its Fallback included.
+	if (tree.alternateRaw !== undefined && readsAs(context, tree.alternateRaw, tree)) return [tree.alternateRaw]
+
+	const r = readerOf(context)
+	const document = context.document
+	const bookmarks = hasBookmarkTriggers(tree)
+	// The source's AlternateContent is rewritten for a timing read from one or one that needs p14; a timing from a bare
+	// p:timing without p14 (an undo back past the edit that made the AlternateContent) is the bare p:timing again.
+	const ac =
+		r !== undefined && container >= 0 && r.is(container, G.MC, "AlternateContent") && (bookmarks || tree.alternate !== undefined)
+			? container
+			: -1
+
+	if (ac < 0 && !bookmarks) return timingPieces(context, tree, shapes)
+
+	const fallback = timingPieces({ ...context, document: undefined, mode: "model" }, bookmarkTriggersAsClicks(tree), shapes)
+
+	if (ac < 0 || r === undefined || document === undefined) {
+		return new Pieces()
+			.text(`<mc:AlternateContent xmlns:mc="${MC_URI}"><mc:Choice xmlns:p14="${P14_URI}" Requires="p14">`)
+			.append(timingPieces(context, tree, shapes))
+			.text("</mc:Choice><mc:Fallback>")
+			.append(fallback)
+			.text("</mc:Fallback></mc:AlternateContent>").out
+	}
+
+	const read = r.alternate(ac)
+
+	// The model is the branch the reader took; when that is the Fallback (a Choice it does not understand), the Choice
+	// would go stale.
+	if (!r.is(read, G.MC, "Choice")) return refused("unsupported", "a timing whose mc:AlternateContent Choice is not read")
+
+	const prefix = context.copier !== undefined ? "mc" : document.prefix(ac)
+	const fallbackTag = prefix === "" ? "Fallback" : `${prefix}:Fallback`
+	const out = new Pieces().append([startTag(context, ac)])
+
+	for (let child = document.firstChild(ac); child >= 0; child = document.nextSibling(child)) {
+		if (child === read) {
+			out.append([startTag(context, read)])
+				.append(timingPieces(context, tree, shapes))
+				.text(endTag(context, read))
+		} else if (r.is(child, G.MC, "Fallback")) {
+			out.text(`<${fallbackTag}>`).append(fallback).text(`</${fallbackTag}>`)
+		} else {
+			out.hole(child)
+		}
+	}
+
+	if (r.child(ac, G.MC, "Fallback") < 0) out.text(`<${fallbackTag}>`).append(fallback).text(`</${fallbackTag}>`)
+
+	return out.text(endTag(context, ac)).out
+}
+
 export const emitPptxTiming: PptxEmitFamily = {
-	emit: (request, context): EmitResult => ({ kind: "markup", pieces: timingPieces(context, request.slide.timing, request.slide.shapes) })
+	emit: (request, context): EmitResult => {
+		const r = readerOf(context)
+		const container = r === undefined ? -1 : timingContainer(r, r.document.documentElement())
+		const pieces = timingSlotPieces(context, request.slide.timing, request.slide.shapes, container)
+
+		return Array.isArray(pieces) ? { kind: "markup", pieces: pieces as readonly EmitPiece[] } : (pieces as Refused)
+	}
 }

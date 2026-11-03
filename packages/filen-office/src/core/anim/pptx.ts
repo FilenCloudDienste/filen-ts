@@ -102,7 +102,13 @@ export const CTN_MODELED: ReadonlySet<string> = new Set([
 	"decel",
 	"autoRev",
 	"syncBehavior",
-	"masterRel"
+	"masterRel",
+	"evtFilter",
+	"tmFilter",
+	"display",
+	"nodePh",
+	"afterEffect",
+	"bldLvl"
 ])
 
 // The cTn attribute values of `ctn` in schema order (CT_TLCommonTimeNodeData).
@@ -124,10 +130,15 @@ export function ctnAttributes(ctn: CommonTimeNode): readonly (readonly [string, 
 	push("autoRev", ctn.autoRev === undefined ? undefined : ctn.autoRev ? "1" : "0")
 	push("restart", ctn.restart)
 	push("fill", ctn.fill)
-	push("syncBehavior", ctn.syncBehavior)
+	push("tmFilter", ctn.tmFilter)
+	push("evtFilter", ctn.evtFilter)
+	push("display", ctn.display)
 	push("masterRel", ctn.masterRel)
+	push("bldLvl", ctn.bldLvl)
 	push("grpId", ctn.grpId === undefined ? undefined : formatInteger(ctn.grpId))
+	push("afterEffect", ctn.afterEffect)
 	push("nodeType", ctn.nodeType)
+	push("nodePh", ctn.nodePh)
 
 	return out
 }

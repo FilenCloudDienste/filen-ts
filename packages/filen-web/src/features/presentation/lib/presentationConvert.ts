@@ -119,7 +119,9 @@ const LOSS_KEYS = {
 	slideSize: "previewPptxConvertLossSlideSize",
 	showSettings: "previewPptxConvertLossShowSettings",
 	signature: "previewPptxConvertLossSignature",
-	writeReservation: "previewPptxConvertLossWriteReservation"
+	writeReservation: "previewPptxConvertLossWriteReservation",
+	mediaTiming: "previewPptxConvertLossMediaTiming",
+	bookmarkTrigger: "previewPptxConvertLossBookmarkTrigger"
 } as const satisfies Readonly<Record<ConversionLossKind, string>>
 
 export type ConversionLossKey = (typeof LOSS_KEYS)[ConversionLossKind]

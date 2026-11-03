@@ -5,10 +5,11 @@ import { MAX_METAFILE_BYTES, MAX_NESTING } from "./limits"
 import type { MetafileConversion } from "./types"
 import { convertWmf, isWmf } from "./wmf"
 
-// EMF, EMF+ and WMF pictures as drawing lists. Pure data in, numbers, enums and run text out: no network,
+// EMF, EMF+ and WMF pictures as drawing lists (SVM and PICT, which only presentations hold, convert through legacy.ts). Pure data in, numbers, enums and run text out: no network,
 // no evaluation, every count bounded (limits.ts). Embedded bitmaps become image entries that carry their
 // encoded bytes for the renderer to show as object URLs.
 
+export { DR3D_LIMITS, drawScene, readScene, transform3d, type Dr3dScene, type SceneSource } from "./dr3d"
 export { expandMetafiles, hasMetafileImages } from "./embed"
 export { MAX_METAFILE_BYTES } from "./limits"
 export type { MetafileConversion, MetafileFailure, MetafileFormat } from "./types"

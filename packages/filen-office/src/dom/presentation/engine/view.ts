@@ -29,12 +29,17 @@ import { smartArtFontRequests, textAdapterMeasurer, type TextMeasurer } from "..
 import { MeasureCache } from "../../../core/text/index"
 import type { XmlDocument } from "../../../core/xml/index"
 import type { DocxFontFace } from "../../docx/protocol"
+import type { ShadedPng } from "../protocol"
 import type { CallContext, EngineSession, ViewCapability } from "../engine"
-import { presentationRealm, type PresentationRealm } from "../services"
+import { presentationRealm, type PresentationRealm, type RasterCanvas } from "../services"
+import { ShadeJob, type ShadedMesh, type ShadedRaster } from "../../../core/drawingml/shade"
+import { sliceClock } from "../../../core/slicing"
+import { PngSteps } from "../../../core/drawingml/shadePng"
 import type { ShapeTextContext, TextServices } from "./text"
 import { odpParts } from "./open/odp"
 import { pptxParts } from "./open/pptx"
 import { smartArtRenderer } from "./smartart"
+import { declareEmbeddedFonts, embeddedFaceBytes, loadEmbeddedFaces } from "./fonts"
 
 // Slide renders for the page's SVG canvas, the raster path and the jobs worker: each slide parsed with its layout,
 // master and notes (parse before touch), the XML parts its frames draw from (charts, diagrams) read ahead, then
@@ -102,36 +107,64 @@ interface ViewState {
 	located: boolean
 }
 
-const states = new WeakMap<EngineSession, ViewState>()
+// Per session, the state of each reading of its deck (an ODP rebase reads the saved file anew): a reading the deck no
+// longer holds is let go with its state, never kept until the next render.
+const states = new WeakMap<EngineSession, WeakMap<ViewParts, ViewState>>()
+// The session's measuring, carried from one reading to the next: faces come from the realm, not the file, so a save
+// neither prepares them again nor sends them to the page again.
+const texts = new WeakMap<EngineSession, ViewText>()
 
 function stateOf(session: EngineSession): ViewState {
-	const held = states.get(session)
 	const parts = viewParts(session.deck)
 
-	if (held !== undefined && held.parts === parts) return held
 	if (parts === undefined) throw new PresentationError("notImplemented", "render")
+
+	let readings = states.get(session)
+	const held = readings?.get(parts)
+
+	if (held !== undefined) return held
 
 	const documents = new Map<string, XmlDocument | null>()
 	const relationships = new Map<string, Relationships>()
 	const realm = presentationRealm()
-	const text: ViewText | undefined =
-		realm === undefined
-			? undefined
-			: (() => {
-					const fonts = new FontManager(realm.text.fontHost, realm.text.fontAssets)
+	const kept = texts.get(session)
 
-					return {
-						realm,
-						fonts,
-						environment: { fonts, cache: new MeasureCache(realm.text.measurer) },
-						prepared: new Set<string>(),
-						missing: new Map<string, FontRequest>(),
-						pending: undefined,
-						replayed: 0,
-						capture: undefined,
-						shapes: new Map()
-					}
-				})()
+	if (kept !== undefined) {
+		// Its answers were read from the previous reading.
+		kept.shapes.clear()
+		kept.capture = undefined
+
+		if (kept.realm !== realm) kept.fonts.dispose()
+	}
+
+	const text: ViewText | undefined =
+		kept !== undefined && kept.realm === realm
+			? kept
+			: realm === undefined
+				? undefined
+				: (() => {
+						const fonts = new FontManager(realm.text.fontHost, realm.text.fontAssets)
+
+						// The deck's embedded fonts, each decoded when text first needs it.
+						declareEmbeddedFonts(session, fonts, async (part, limit) => {
+							const key = partKey(part)
+							const entry = parts.opc.entry(key)
+
+							return entry === undefined || entry.uncompressedSize > limit ? undefined : await parts.opc.read(key)
+						})
+
+						return {
+							realm,
+							fonts,
+							environment: { fonts, cache: new MeasureCache(realm.text.measurer) },
+							prepared: new Set<string>(),
+							missing: new Map<string, FontRequest>(),
+							pending: undefined,
+							replayed: 0,
+							capture: undefined,
+							shapes: new Map()
+						}
+					})()
 	const services: RenderServices = {
 		xml: part => chartDocument(session.deck, part) ?? parts.document(part) ?? documents.get(partKey(part)) ?? undefined,
 		relationship(part, id) {
@@ -158,35 +191,57 @@ function stateOf(session: EngineSession): ViewState {
 	}
 	const state: ViewState = { parts, text, documents, relationships, services, located: false }
 
-	// Diagrams without a drawing cache are laid out by the SmartArt engine over these parts and this text adapter.
+	// Diagrams without a drawing cache are laid out by the SmartArt engine over the session's current reading and this
+	// text adapter (the host the engine keeps for the session reaches no reading a rebase replaced).
 	state.services = {
 		...services,
-		smartart: smartArtRenderer(session, {
-			get services() {
-				return state.services
-			},
-			...(text === undefined
-				? {}
-				: {
-						measurer: (slide: SlideNode, texts: readonly (string | DataPoint)[]) =>
-							smartArtMeasurer(parts, text, session, slide, texts),
-						fontGeneration: () => text.prepared.size
-					})
-		})
+		smartart: smartArtRenderer(session, smartArtHost(session, text))
 	}
 
-	session.onClose(() => {
-		documents.clear()
-		relationships.clear()
-		text?.shapes.clear()
-		// A worker's faces only served measuring: the page has its own copies.
-		text?.fonts.dispose()
-		states.delete(session)
-	})
+	if (readings === undefined) {
+		readings = new WeakMap()
+		states.set(session, readings)
+		releaseOnClose(session)
+	}
 
-	states.set(session, state)
+	readings.set(parts, state)
+
+	if (text === undefined) texts.delete(session)
+	else texts.set(session, text)
 
 	return state
+}
+
+// Once per session, apart from stateOf (whose closures hold a reading): whatever the session holds when it closes.
+function releaseOnClose(session: EngineSession): void {
+	session.onClose(() => {
+		const current = viewParts(session.deck)
+		const last = current === undefined ? undefined : states.get(session)?.get(current)
+
+		last?.documents.clear()
+		last?.relationships.clear()
+		texts.get(session)?.shapes.clear()
+		// A worker's faces only served measuring: the page has its own copies.
+		texts.get(session)?.fonts.dispose()
+		texts.delete(session)
+		states.delete(session)
+	})
+}
+
+// Built apart from stateOf so that its closures hold the session and its measuring only, never a reading.
+function smartArtHost(session: EngineSession, text: ViewText | undefined): Parameters<typeof smartArtRenderer>[1] {
+	return {
+		get services() {
+			return stateOf(session).services
+		},
+		...(text === undefined
+			? {}
+			: {
+					measurer: (slide: SlideNode, texts: readonly (string | DataPoint)[]) =>
+						smartArtMeasurer(stateOf(session).parts, text, session, slide, texts),
+					fontGeneration: () => text.prepared.size
+				})
+	}
 }
 
 function isXml(type: string | undefined): boolean {
@@ -504,8 +559,16 @@ async function prepareFaces(session: EngineSession, text: ViewText, requests: It
 	const registrations = text.fonts.registrations()
 	const faces: DocxFontFace[] = []
 
-	for (; text.replayed < registrations.length; text.replayed++) {
-		const registration = registrations[text.replayed]
+	// The registrations not yet sent are claimed before anything is awaited: concurrent preparations (a render, the
+	// thumbnails, the editor's text) share the counter, and an await inside the loop would let each advance it past
+	// faces another one registered meanwhile, which then never reach the page.
+	const from = text.replayed
+	const to = registrations.length
+
+	text.replayed = to
+
+	for (let index = from; index < to; index++) {
+		const registration = registrations[index]
 
 		if (registration === undefined) continue
 
@@ -514,6 +577,12 @@ async function prepareFaces(session: EngineSession, text: ViewText, requests: It
 		if (registration.source === "asset")
 			faces.push({ kind: "bytes", face, bytes: await text.realm.text.fontAssets.read(registration.file) })
 		else if (registration.source === "local") faces.push({ kind: "local", face, name: registration.name })
+		else {
+			// Sent as a copy: the session keeps the decoded font for later sends.
+			const bytes = embeddedFaceBytes(session, registration)
+
+			if (bytes !== undefined) faces.push({ kind: "bytes", face, bytes: bytes.slice() })
+		}
 	}
 
 	if (faces.length > 0) session.emit({ type: "fonts", faces })
@@ -542,6 +611,9 @@ export async function sessionFaces(session: EngineSession): Promise<DocxFontFace
 
 	if (text === undefined) return []
 
+	// An export takes the font list before it lays out its pages: the deck's embedded faces are loaded first.
+	await loadEmbeddedFaces(session)
+
 	const faces: DocxFontFace[] = []
 
 	for (const registration of text.fonts.registrations()) {
@@ -550,6 +622,11 @@ export async function sessionFaces(session: EngineSession): Promise<DocxFontFace
 		if (registration.source === "asset")
 			faces.push({ kind: "bytes", face, bytes: await text.realm.text.fontAssets.read(registration.file) })
 		else if (registration.source === "local") faces.push({ kind: "local", face, name: registration.name })
+		else {
+			const bytes = embeddedFaceBytes(session, registration)
+
+			if (bytes !== undefined) faces.push({ kind: "bytes", face, bytes })
+		}
 	}
 
 	return faces
@@ -703,6 +780,9 @@ export async function readPart(session: EngineSession, part: string): Promise<Ui
 	return (await readImage(session, part))?.bytes ?? null
 }
 
+// A worker raster's pixels at most (the page asks within its own, smaller, budget).
+const MAX_SHADE_RASTER_PIXELS = 4 * 1024 * 1024
+
 export const viewCapability: ViewCapability = {
 	async render(context, refs, options) {
 		// A deck no reader of this capability opened is refused before its arguments are looked at.
@@ -724,5 +804,102 @@ export const viewCapability: ViewCapability = {
 
 		return out
 	},
-	image: (context, part) => readImage(context.session, part)
+	image: (context, part) => readImage(context.session, part),
+	shade: (context, meshes, scale, maxPixels) => shadeRasterFor(context, meshes, scale, maxPixels)
+}
+
+// A render's shaded meshes rasterised and encoded here, off the page's thread, in the call's slices: the raster the
+// page planned (ShadeJob.plan of the same meshes, scale and pixels is deterministic, so its size and extent are the
+// page's), as a PNG Blob through the realm's canvas encoder where it has one (OffscreenCanvas.convertToBlob), else
+// through the sliced encoder.
+async function shadeRasterFor(
+	context: CallContext,
+	meshes: readonly ShadedMesh[],
+	scale: number,
+	maxPixels: number
+): Promise<ShadedPng | null> {
+	const job = ShadeJob.plan(meshes, scale, Math.min(maxPixels, MAX_SHADE_RASTER_PIXELS))
+
+	if (job === undefined) return null
+
+	const clock = sliceClock(context.slicing)
+	const check = (): void => {
+		if (context.signal.aborted) throw new PresentationError("aborted", "shade")
+	}
+
+	check()
+
+	while (!job.step(() => clock.due)) {
+		await clock.pause()
+		check()
+	}
+
+	const raster = job.result()
+	const encoded = await canvasPng(raster)
+
+	if (encoded !== undefined) return { png: encoded, bounds: raster.bounds }
+
+	const Blob: unknown = Reflect.get(globalThis, "Blob")
+
+	if (typeof Blob !== "function") throw new PresentationError("notImplemented", "shade: no Blob")
+
+	const png = new PngSteps(raster.rgba, raster.width, raster.height)
+
+	while (!png.step(() => clock.due)) {
+		await clock.pause()
+		check()
+	}
+
+	return {
+		png: new (Blob as new (parts: readonly Uint8Array[], options: { readonly type: string }) => ShadedPng["png"])(png.result(), {
+			type: "image/png"
+		}),
+		bounds: raster.bounds
+	}
+}
+
+interface EncodingCanvas extends RasterCanvas {
+	convertToBlob(options: { readonly type: string }): Promise<ShadedPng["png"]>
+}
+
+// The raster through the realm's canvas encoder (a worker's OffscreenCanvas encodes off its thread's slices);
+// undefined where the realm has none.
+async function canvasPng(raster: ShadedRaster): Promise<ShadedPng["png"] | undefined> {
+	const ImageData: unknown = Reflect.get(globalThis, "ImageData")
+	const canvas = presentationRealm()?.canvas.canvas(raster.width, raster.height)
+	const ctx = canvas?.getContext("2d") ?? null
+	const put: unknown = ctx === null ? undefined : Reflect.get(ctx, "putImageData")
+
+	if (
+		canvas === undefined ||
+		ctx === null ||
+		typeof ImageData !== "function" ||
+		typeof put !== "function" ||
+		typeof Reflect.get(canvas, "convertToBlob") !== "function"
+	) {
+		if (canvas !== undefined) release(canvas)
+
+		return undefined
+	}
+
+	try {
+		const pixels = new (ImageData as new (data: Uint8ClampedArray, width: number, height: number) => unknown)(
+			new Uint8ClampedArray(raster.rgba.buffer as ArrayBuffer, raster.rgba.byteOffset, raster.rgba.length),
+			raster.width,
+			raster.height
+		)
+
+		Reflect.apply(put, ctx, [pixels, 0, 0])
+
+		return await (canvas as EncodingCanvas).convertToBlob({ type: "image/png" })
+	} finally {
+		release(canvas)
+	}
+}
+
+// An OffscreenCanvas has no close(): only a bitmap-like canvas of a test realm does.
+function release(canvas: RasterCanvas): void {
+	const close: unknown = Reflect.get(canvas, "close")
+
+	if (typeof close === "function") Reflect.apply(close, canvas, [])
 }

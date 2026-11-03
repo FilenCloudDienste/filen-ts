@@ -24,7 +24,16 @@ import {
 import { xmpMetadata } from "./metadata"
 import { mapStrings, pdfName, PdfRef, PdfString, utf8, writeValue, type PdfDict, type PdfValue } from "./objects"
 import { PdfPage, type PdfImage, type PdfTextFont } from "./page"
-import { gradientAlpha, gradientKey, shadingDict, type PdfGradient } from "./shading"
+import {
+	gradientAlpha,
+	gradientKey,
+	meshAlpha,
+	meshStream,
+	shadingDict,
+	type PdfGradient,
+	type PdfMesh,
+	type PdfMeshStream
+} from "./shading"
 import { StructTree, type PdfStructOptions } from "./tagged"
 
 // The document writer: PDF 1.7 (ISO 32000-1) with a cross-reference stream and object streams (§7.5.7-8),
@@ -112,6 +121,38 @@ interface OutlineItem {
 	readonly target: PdfDestinationTarget | string
 }
 
+// Mesh streams the writer holds to share them (a document's distinct scenes; more are written again each time).
+const MESH_SHARE_BYTES = 16 * 1024 * 1024
+
+// FNV-1a over a mesh stream's bytes, its bounds and its opacity.
+function meshHash(stream: PdfMeshStream, alpha: number): number {
+	let hash = 0x811c9dc5
+
+	const mixByte = (byte: number): void => {
+		hash = Math.imul(hash ^ byte, 0x01000193)
+	}
+
+	for (const byte of stream.data) mixByte(byte)
+
+	const numbers = new Float64Array([...stream.decode, alpha, stream.bitsPerCoordinate])
+
+	for (const byte of new Uint8Array(numbers.buffer)) mixByte(byte)
+
+	return hash >>> 0
+}
+
+function equalBytes(a: Uint8Array, b: Uint8Array): boolean {
+	if (a.length !== b.length) return false
+
+	for (let k = 0; k < a.length; k++) if (a[k] !== b[k]) return false
+
+	return true
+}
+
+function sameNumbers(a: readonly number[], b: readonly number[]): boolean {
+	return a.length === b.length && a.every((value, k) => value === b[k])
+}
+
 export class PdfWriter implements PdfObjectSink {
 	readonly deterministic: boolean
 	readonly tagged: boolean
@@ -150,6 +191,18 @@ export class PdfWriter implements PdfObjectSink {
 	>()
 	private readonly states = new Map<string, { readonly name: string; readonly ref: PdfRef }>()
 	private readonly gradients = new Map<string, Promise<GradientResources>>()
+	// Meshes written so far, by hash of their stream and opacity.
+	private readonly meshes = new Map<
+		number,
+		{
+			readonly data: Uint8Array
+			readonly decode: readonly number[]
+			readonly alpha: number
+			readonly bits: number
+			readonly resources: Promise<GradientResources>
+		}[]
+	>()
+	private meshBytes = 0
 	private readonly destinations = new Map<string, PdfDestinationTarget>()
 	// Link annotations to named destinations, written at the end once every name is known.
 	private readonly namedLinks: { readonly ref: PdfRef; readonly annotation: PdfDict; readonly name: string }[] = []
@@ -474,6 +527,55 @@ export class PdfWriter implements PdfObjectSink {
 		)
 
 		return { shading, state: this.extGState({ softMask: form }) }
+	}
+
+	// A Gouraud mesh as a shading, written once per document however often it is painted (a scene on a master, a
+	// deck's repeated picture): the same stream and opacity share one shading. Undefined for a mesh the stream
+	// refuses (bounds that are no page geometry); the caller paints its mean colour.
+	async mesh(mesh: PdfMesh): Promise<GradientResources | undefined> {
+		const stream = meshStream(mesh.points, mesh.colors)
+
+		if (stream === undefined) return undefined
+
+		const alpha = meshAlpha(mesh.colors)
+		const hash = meshHash(stream, alpha)
+		const known = this.meshes
+			.get(hash)
+			?.find(
+				entry =>
+					entry.alpha === alpha &&
+					entry.bits === stream.bitsPerCoordinate &&
+					equalBytes(entry.data, stream.data) &&
+					sameNumbers(entry.decode, stream.decode)
+			)
+
+		if (known !== undefined) return await known.resources
+
+		const shading = { name: this.name("Sh"), ref: this.allocate() }
+		const resources = this.stream(
+			shading.ref,
+			{
+				ShadingType: 4,
+				ColorSpace: pdfName("DeviceRGB"),
+				BitsPerCoordinate: stream.bitsPerCoordinate,
+				BitsPerComponent: 8,
+				BitsPerFlag: 8,
+				Decode: stream.decode.map(value => Math.round(value * 1000) / 1000)
+			},
+			stream.data,
+			{ compress: true }
+		).then(() => ({ shading, state: alpha < 1 ? this.extGState({ fillAlpha: alpha }) : undefined }))
+
+		// Kept for sharing within a byte budget (past it a mesh is written again rather than held).
+		if (this.meshBytes + stream.data.length <= MESH_SHARE_BYTES) {
+			const entries = this.meshes.get(hash) ?? []
+
+			entries.push({ data: stream.data, decode: stream.decode, alpha, bits: stream.bitsPerCoordinate, resources })
+			this.meshes.set(hash, entries)
+			this.meshBytes += stream.data.length
+		}
+
+		return await resources
 	}
 
 	// Embeds an image once; refusals throw PdfWriteError.

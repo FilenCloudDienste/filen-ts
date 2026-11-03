@@ -48,7 +48,8 @@ export function emitPptx(family: DeckOpFamily, request: EmitRequest, context: Pp
 	return PPTX_EMIT_FAMILIES[family].emit(request, context)
 }
 
-// The family whose emit writes `request`'s element: by shape kind and frame for a shape, by slide part for a slide.
+// The family whose emit writes `request`'s element: by shape kind and frame for a shape, by slide part for a slide. A
+// medium goes to the media timing family, which writes its trim, fade and bookmarks into the media family's markup.
 export function emitFamilyOf(request: EmitRequest): DeckOpFamily {
 	const { shape, touch } = request
 
@@ -69,7 +70,7 @@ export function emitFamilyOf(request: EmitRequest): DeckOpFamily {
 
 	switch (shape.kind) {
 		case "pic":
-			return shape.media === undefined ? "picture" : "media"
+			return shape.media === undefined ? "picture" : "mediaTiming"
 		case "ink":
 			return "ink"
 		// A stroke of kept ink the session made: written whole by the ink family (ODF: draw:path).
@@ -84,7 +85,7 @@ export function emitFamilyOf(request: EmitRequest): DeckOpFamily {
 				case "smartart":
 					return "smartart"
 				case "media":
-					return "media"
+					return "mediaTiming"
 				default:
 					return "shape"
 			}

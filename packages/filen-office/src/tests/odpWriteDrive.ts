@@ -16,10 +16,23 @@ import { savePortAnnounced, savePortReader, type SavePortEnd } from "../dom/pres
 class Drive {
 	readonly files = new Map<string, Uint8Array>()
 	current = "v1"
+	// Bytes of the upload under way that the drive holds (the server's, not the session's).
+	received = 0
 	private next = 1
+	private readonly sample: (() => void) | undefined
 
-	constructor(bytes: Uint8Array) {
+	constructor(bytes: Uint8Array, sample?: () => void) {
 		this.files.set("v1", bytes)
+		this.sample = sample
+	}
+
+	// Bytes the drive holds: its files and the upload under way.
+	held(): number {
+		let bytes = this.received
+
+		for (const file of this.files.values()) bytes += file.length
+
+		return bytes
 	}
 
 	source(uuid: string): ByteSource {
@@ -34,7 +47,12 @@ class Drive {
 		// A file the drive deleted reads as gone (its size as nothing): the port a late commit closes is never read.
 		return {
 			size: this.files.get(uuid)?.length ?? 0,
-			read: (offset, length) => Promise.resolve().then(() => of().slice(offset, offset + length))
+			read: (offset, length) =>
+				Promise.resolve().then(() => {
+					this.sample?.()
+
+					return of().slice(offset, offset + length)
+				})
 		}
 	}
 
@@ -57,7 +75,11 @@ class Drive {
 		const reader = savePortReader(port as unknown as SavePortEnd, stallMs === undefined ? {} : { stallMs })
 		const chunks: Uint8Array[] = []
 
-		for (let chunk = await reader.read(); chunk !== undefined; chunk = await reader.read()) chunks.push(chunk)
+		for (let chunk = await reader.read(); chunk !== undefined; chunk = await reader.read()) {
+			chunks.push(chunk)
+			this.received += chunk.length
+			this.sample?.()
+		}
 
 		const out = new Uint8Array(chunks.reduce((sum, chunk) => sum + chunk.length, 0))
 		let at = 0
@@ -72,6 +94,7 @@ class Drive {
 		const uuid = `v${String(++this.next)}`
 
 		this.files.set(uuid, out)
+		this.received = 0
 		this.files.delete(this.current)
 		this.current = uuid
 		reader.settled(true)
@@ -81,7 +104,8 @@ class Drive {
 }
 
 // `stallMs`: the upload's stall (savePortReader's), for a test that waits it out; `commitWaitMs` and `inMemoryLimit`
-// the save's (SaveDependencies); `emit` the emitters proof gate 1 checks with.
+// the save's (SaveDependencies); `emit` the emitters proof gate 1 checks with; `sample` is called on every read of the
+// drive's files and every chunk it receives (a memory budget's sampler; drive.held() is what the drive holds).
 export async function driveSession(
 	bytes: Uint8Array,
 	format: "odp" | "pptx" = "odp",
@@ -91,9 +115,10 @@ export async function driveSession(
 		readonly commitWaitMs?: number
 		readonly inMemoryLimit?: number
 		readonly emit?: EmitFunction
+		readonly sample?: () => void
 	} = {}
 ) {
-	const drive = new Drive(bytes)
+	const drive = new Drive(bytes, tuning.sample)
 	const options = { format, fileName: `deck.${format}` } as const
 	const capability = format === "odp" ? openOdpCapability : openPptxCapability
 	const outcome = await capability.open({ source: rebasableSource(drive.source("v1")), sourceKind: "range", options } as never)

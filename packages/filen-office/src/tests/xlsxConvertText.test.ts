@@ -293,7 +293,7 @@ describe("a text file saved as .xlsx", () => {
 
 				writeFileSync(path, await convert(rows))
 
-				const [shown] = await exportShown(office, sheetProfile("/tmp/p3", "D-save-1"), [path], join(scratch, "out"), 60_000, false)
+				const [shown] = await exportShown(office, sheetProfile(tmpdir(), "D-save-1"), [path], join(scratch, "out"), 60_000, false)
 
 				expect(shown?.ok, shown?.error).toBe(true)
 

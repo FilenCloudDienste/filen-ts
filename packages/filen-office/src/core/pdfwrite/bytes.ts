@@ -76,8 +76,11 @@ export class ByteWriter {
 		let rest = Math.trunc(value)
 
 		if (rest === 0) return this.byte(0x30)
+		// Past the safe integers digits would be lost (and past 2^31 no PDF integer is portable): bounded as a real.
+		if (!Number.isSafeInteger(rest)) return this.num(value)
 
-		this.ensure(12)
+		// A sign and up to 16 digits.
+		this.ensure(17)
 
 		if (rest < 0) {
 			this.buffer[this.length++] = 0x2d

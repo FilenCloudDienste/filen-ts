@@ -79,6 +79,8 @@ const FRESH_KINDS: readonly (readonly [RegExp, ConversionLossKind])[] = [
 	[/^chart$/u, "chartDetail"],
 	[/^chart frame/u, "chart"],
 	[/^smartart frame/u, "smartArt"],
+	[/^animation triggered by a bookmark/u, "bookmarkTrigger"],
+	[/^media (trim|fade|bookmark)/u, "mediaTiming"],
 	[/^(media frame|audio|video)/u, "media"],
 	[/^ole frame/u, "oleObject"],
 	[/^ink$/u, "ink"],

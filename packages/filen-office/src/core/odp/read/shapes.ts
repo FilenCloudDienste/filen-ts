@@ -29,6 +29,7 @@ import {
 } from "../../presentation/model"
 import { NodeKind } from "../../xml/index"
 import { presetOfOdfType } from "../../odf/presetShapes"
+import { readScene } from "../../metafile/dr3d"
 import { overlay, type Fragment, type OdpContext } from "./context"
 import { EMU_PER_PT, bodyPrOf, effectsOf, fillOf, lineOf, packagePart, srgb } from "./fills"
 import { asianSizeOf, embeddedListStyle, levelStyle, listStyleOf, readTextBody, type TextScope } from "./text"
@@ -1083,7 +1084,31 @@ function readShape(context: OdpContext, scope: ShapeScope, node: number, depth: 
 		case "dr3d:scene": {
 			scope.unread++
 
-			return { ...base, kind: "frame", xfrm: xfrmOf(box, matrix), frame: { kind: "unknown", src: fragment.src(node) } }
+			// Members take the scene's graphic properties unless their own style element sets them (dr3d.ts).
+			const scene = readScene(
+				{
+					name: member => fragment.name(member),
+					attributes: member => fragment.attributes(member),
+					firstChild: member => document.firstChildElement(member),
+					nextSibling: member => document.nextSiblingElement(member),
+					style: styleName => ({
+						resolved: context.shapeProperties(styleName, undefined, fragment.scope, "graphic").attributes,
+						own:
+							(styleName === undefined
+								? undefined
+								: context.sheet.style("graphic", styleName, fragment.scope)
+							)?.properties.get("graphic")?.attributes ?? NO_PROPERTIES.attributes
+					})
+				},
+				node
+			)
+
+			return {
+				...base,
+				kind: "frame",
+				xfrm: xfrmOf(box, matrix),
+				frame: { kind: "unknown", src: fragment.src(node), ...(scene === undefined ? {} : { scene }) }
+			}
 		}
 		case "draw:page-thumbnail":
 			return {

@@ -619,6 +619,8 @@ export type InkOp = {
 	readonly id?: number
 }
 
+// `restore`: an inverse putting back a value the file held, held only to what can be written (each time within a day,
+// a writable name), never to the editor's own rules (cuts adding up past a day, a name or time another bookmark has).
 export type MediaTimingOp =
 	| {
 			readonly family: "mediaTiming"
@@ -626,14 +628,23 @@ export type MediaTimingOp =
 			readonly target: ShapeRef
 			readonly startMs: number
 			readonly endMs: number
+			readonly restore?: boolean
 	  }
-	| { readonly family: "mediaTiming"; readonly kind: "setFade"; readonly target: ShapeRef; readonly inMs: number; readonly outMs: number }
+	| {
+			readonly family: "mediaTiming"
+			readonly kind: "setFade"
+			readonly target: ShapeRef
+			readonly inMs: number
+			readonly outMs: number
+			readonly restore?: boolean
+	  }
 	| {
 			readonly family: "mediaTiming"
 			readonly kind: "addBookmark"
 			readonly target: ShapeRef
 			readonly name: string
 			readonly timeMs: number
+			readonly restore?: boolean
 	  }
 	| { readonly family: "mediaTiming"; readonly kind: "removeBookmark"; readonly target: ShapeRef; readonly name: string }
 

@@ -1,5 +1,7 @@
 import type { TextAlign, TextBodyProps, TextUnderline } from "../drawingml/index"
+import type { MediaTiming } from "../anim/media"
 import type { TimingTree, Transition } from "../anim/model"
+import type { Dr3dScene } from "../metafile/dr3d"
 
 // The presentation model shared by the pptx, ODP and ppt readers, the renderer, the editor and the writers. Each
 // level (slide, layout, master, notes) stores only what its source wrote; inheritance is resolved elsewhere, never
@@ -552,7 +554,8 @@ export type FrameRef =
 	  }
 	| { readonly kind: "ole"; readonly progId: string; readonly part?: string; readonly preview?: string }
 	| { readonly kind: "media"; readonly media: MediaRef }
-	| { readonly kind: "unknown"; readonly src: SourceRef }
+	// A frame kept by its source: an ODF 3D scene carries what drawing it needs (core/metafile/dr3d.ts).
+	| { readonly kind: "unknown"; readonly src: SourceRef; readonly scene?: Dr3dScene }
 
 export interface TableModel {
 	// Column widths, EMU.
@@ -600,6 +603,8 @@ export interface MediaRef {
 	contentType: string
 	size?: number
 	poster?: string
+	// Its trim, fade and bookmarks (p14:media's; none in ODF).
+	timing?: MediaTiming
 }
 
 export type Action =

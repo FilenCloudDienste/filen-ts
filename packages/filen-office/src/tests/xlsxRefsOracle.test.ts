@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { unzipSync } from "fflate"
@@ -21,7 +22,7 @@ import { buildFixture, type Fixture } from "./xlsxWriteFixtures"
 // with its reason (Excel's documented behaviour breaks a tie). Opt-in: FILEN_OFFICE_SOFFICE=<soffice>[,<soffice>].
 
 const UNO = unoOffice(sheetOffices())
-const SCRATCH = "/tmp/p3/lo-C6-1"
+const SCRATCH = join(tmpdir(), "filen-office-xlsx-refs-oracle")
 
 interface Constructs {
 	readonly [key: string]: string

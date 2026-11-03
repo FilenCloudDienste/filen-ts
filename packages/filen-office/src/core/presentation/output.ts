@@ -1,5 +1,6 @@
 import type { DrawingData, Paint, Rgba, Stroke } from "../drawingml/index"
 import type { DecorationValue, DocxLinkTarget, DocxPageData, DocxTextStyle } from "../docx/layout/index"
+import type { MediaTiming } from "../anim/media"
 import type { MediaPlayback } from "./edit/ops"
 import type {
 	Action,
@@ -115,6 +116,10 @@ export interface SlideMediaInfo {
 	// Its playback options from the slide's timing (core/presentation/edit/apply/media.ts mediaPlayback): what the
 	// Video/Audio tabs show checked and what the player applies (volume, mute, loop).
 	readonly playback?: MediaPlayback
+	// Its trim, fade and bookmarks (p14:media): what the player cuts, fades and fires bookmark triggers by.
+	readonly timing?: MediaTiming
+	// Its bookmarks an animation's trigger names on the slide (they cannot be removed while it does).
+	readonly triggered?: readonly string[]
 }
 
 // A shape's actions as the page may show and activate them (judged again on click, never on paint).

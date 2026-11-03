@@ -15,6 +15,7 @@ import {
 	type EffectTrigger,
 	type SlideSequences
 } from "../../../anim/presets/effects/index"
+import { sameTrigger } from "../../../anim/presets/effects/sequence"
 import {
 	refused,
 	type Deck,
@@ -162,7 +163,13 @@ function putWhole(held: TimingTree, context: ApplyContext): TimingTree {
 		return (raw !== undefined && raw.length > 0 ? { ...rest, raw } : rest) as Build
 	})
 
-	return { root: copy.root, builds, ...(reads(copy.src) ? { src: copy.src } : {}) }
+	return {
+		root: copy.root,
+		builds,
+		...(reads(copy.src) ? { src: copy.src } : {}),
+		...(reads(copy.alternate) ? { alternate: copy.alternate } : {}),
+		...(copy.alternateRaw === undefined ? {} : { alternateRaw: copy.alternateRaw })
+	}
 }
 
 function restored(held: TimingTree, live: TimingTree | undefined, context: ApplyContext): TimingTree | Refused {
@@ -280,7 +287,17 @@ function heldWhole(
 		return { ...build, raw: source }
 	})
 
-	return { timing: { ...prior, root: copy(prior.root, "root"), builds }, bytes }
+	// The mc:AlternateContent the prior timing sat in (MS-PPTX §2.2.2), as its bytes: an undo writes it back whole while
+	// the tree is what it reads as (its Fallback, which the model does not hold, included).
+	const alternate = prior.alternate === undefined ? undefined : context.sourceBytes(prior.alternate)
+	const alternateRaw = alternate instanceof Uint8Array ? alternate : prior.alternateRaw
+
+	if (alternateRaw !== undefined) bytes += alternateRaw.length
+
+	return {
+		timing: { ...prior, root: copy(prior.root, "root"), builds, ...(alternateRaw === undefined ? {} : { alternateRaw }) },
+		bytes
+	}
 }
 
 function wholeInverse(slide: SlideNode, prior: TimingTree | undefined, context: ApplyContext): Inverse {
@@ -308,7 +325,7 @@ function find(sequences: SlideSequences, id: number): Placed | undefined {
 function sequenceFor(sequences: SlideSequences, trigger: EffectTrigger | undefined): EffectSequence {
 	if (trigger === undefined) return sequences.main
 
-	const found = sequences.interactive.find(sequence => sequence.trigger?.shape === trigger.shape)
+	const found = sequences.interactive.find(sequence => sameTrigger(sequence.trigger, trigger))
 
 	if (found !== undefined) return found
 
@@ -515,11 +532,20 @@ function placed(effect: TimeNode, state: Authoring, context: ApplyContext): Time
 	return copy
 }
 
-function triggerOfOp(trigger: EffectTiming["trigger"]): EffectTrigger | undefined | Refused {
+// A bookmark trigger names a bookmark its medium on this slide has (MS-PPTX §2.3.3.13: the name MUST exist in the
+// medium's list); ODF has no bookmarks.
+function triggerOfOp(trigger: EffectTiming["trigger"], state: Authoring): EffectTrigger | undefined | Refused {
 	if (trigger === undefined || trigger.kind === "none") return undefined
-	if (trigger.kind === "bookmark") return refused("unsupported", "media bookmark triggers")
+	if (trigger.kind === "shapeClick") return { kind: "shapeClick", shape: trigger.shape }
+	if (state.format === "odp") return refused("unsupported", "an OpenDocument presentation has no media bookmarks")
 
-	return { kind: "shapeClick", shape: trigger.shape }
+	const shape = findShape(state.slide.shapes, trigger.shape)
+	const media = shape?.media ?? (shape?.frame?.kind === "media" ? shape.frame.media : undefined)
+
+	if (media?.timing?.bookmarks?.some(bookmark => bookmark.name === trigger.bookmark) !== true)
+		return refused("notFound", `bookmark ${trigger.bookmark} of shape ${String(trigger.shape)}`)
+
+	return { kind: "bookmark", shape: trigger.shape, bookmark: trigger.bookmark }
 }
 
 function clamp(at: number | undefined, length: number): number {
@@ -531,7 +557,7 @@ function addEffect(deck: Deck, op: OpOf<"timing"> & { kind: "addEffect" }, conte
 
 	if ("reason" in state) return state
 
-	const trigger = triggerOfOp(op.trigger)
+	const trigger = triggerOfOp(op.trigger, state)
 
 	if (trigger !== undefined && "reason" in trigger) return trigger
 
@@ -601,14 +627,14 @@ function setEffectTiming(deck: Deck, op: OpOf<"timing"> & { kind: "setEffectTimi
 
 	if (where === undefined || current === undefined) return refused("notFound", `effect ${String(op.node)}`)
 
-	const trigger = triggerOfOp(op.timing.trigger)
+	const trigger = triggerOfOp(op.timing.trigger, state)
 
 	if (trigger !== undefined && "reason" in trigger) return trigger
 
 	const prior = state.slide.timing
 	const effect = timedEffect(current.node, op.timing)
 	const entry = { node: effect, start: op.timing.start ?? current.start }
-	const moves = op.timing.trigger !== undefined && (trigger?.shape ?? -1) !== (where.sequence.trigger?.shape ?? -1)
+	const moves = op.timing.trigger !== undefined && !sameTrigger(trigger, where.sequence.trigger)
 
 	if (moves) {
 		where.sequence.effects.splice(where.index, 1)

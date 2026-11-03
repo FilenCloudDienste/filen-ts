@@ -66,3 +66,17 @@ export {
 	type TransitionOptionSpec,
 	type TransitionPreset
 } from "./presets/transitions/catalog"
+export {
+	BookmarkCursor,
+	bookmarkProblem,
+	fadeGain,
+	formatUniversalTime,
+	MEDIA_BOOKMARKS_MAX,
+	MEDIA_BOOKMARK_NAME_MAX,
+	MEDIA_TIME_MAX_MS,
+	parseUniversalTime,
+	playWindow,
+	type MediaBookmark,
+	type MediaTiming,
+	type PlayWindow
+} from "./media"
