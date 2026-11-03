@@ -301,6 +301,62 @@ describe("e2ePlan sign-ins", () => {
 		expect(signIns({ ...nightly, day: 2 })).not.toEqual(signIns({ ...nightly, day: 0 }))
 	})
 
+	it("gives every OS exactly one real chain of each kind on different entries, every chain of every entry within days", () => {
+		const formed = new Set<string>()
+
+		for (const [input, days] of [
+			[nightly, [0, 1, 2, 3, 4, 5, 6, 7, 20_000, 20_001]],
+			[release, [0, 3]],
+			[{ ...dispatch, signed: true }, [0, 5]],
+			[{ ...dispatch, signed: true, depth: "deep" }, [0, 5]]
+		] as const) {
+			for (const day of days) {
+				const result = plan({ ...input, day })
+				const deep = result.tests.filter(entry => entry.deep)
+
+				expect(deep.length).toBe(input === nightly || input === release || input.depth === "deep" ? 8 : 3)
+				expect(deep.every(entry => entry.deepPrevious && entry.deepLegacy)).toBe(true)
+
+				for (const os of ["windows", "mac", "linux"] as const) {
+					const ofOs = deep.filter(entry => entry.os === os)
+					const realPrevious = ofOs.filter(entry => entry.signInPrevious === "real")
+					const realLegacy = ofOs.filter(entry => entry.signInLegacy === "real")
+
+					expect(realPrevious).toHaveLength(1)
+					expect(realLegacy).toHaveLength(1)
+
+					if (ofOs.length > 1) {
+						expect(realPrevious[0]).not.toBe(realLegacy[0])
+					}
+
+					// Every other chain is seeded.
+					expect(ofOs.filter(entry => entry.signInPrevious === "seeded")).toHaveLength(ofOs.length - 1)
+					expect(ofOs.filter(entry => entry.signInLegacy === "seeded")).toHaveLength(ofOs.length - 1)
+				}
+
+				expect(result.logins).toBe(SESSION_SLOTS + 6)
+				expect(result.logins).toBeLessThanOrEqual(MAX_LOGINS_PER_RUN)
+
+				if (input === nightly) {
+					for (const entry of deep) {
+						const id = `${entry.platform}-${entry.arch}-${entry.format}`
+
+						if (entry.signInPrevious === "real") {
+							formed.add(`${id} previous`)
+						}
+
+						if (entry.signInLegacy === "real") {
+							formed.add(`${id} legacy`)
+						}
+					}
+				}
+			}
+		}
+
+		// Within the first four nights every deep entry's both forms have signed in.
+		expect(formed.size).toBe(16)
+	})
+
 	it("keeps release and custom runs on one choice whatever the day", () => {
 		expect(signIns({ ...release, day: 1 })).toEqual(signIns({ ...release, day: 0 }))
 		expect(signIns({ ...nightly, day: 0 })).toEqual(signIns({ ...release, day: 7 }))

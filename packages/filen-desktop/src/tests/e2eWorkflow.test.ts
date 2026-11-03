@@ -60,7 +60,8 @@ describe("desktop e2e workflow secrets", () => {
 		expect(text).toContain("E2E_SIGN_IN: ${{ matrix.signInLegacy }}")
 		expect(text).toContain("SIGNIN: ${{ inputs.signin }}")
 		expect(text).toContain("MAX_OTHER_RUNS: 5")
-		expect(text).not.toContain("at most 11")
+		expect(text).not.toMatch(/at most 1[17]\b/)
+		expect(text).toContain("per IP")
 	})
 
 	it("deletes the sealed session's artifact when the run is swept", () => {
