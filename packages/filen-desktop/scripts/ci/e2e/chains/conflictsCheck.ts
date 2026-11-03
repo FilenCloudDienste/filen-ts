@@ -17,6 +17,7 @@ import {
 	binPathFromToast,
 	resolveAllThroughIssues,
 	resolveThroughIssues,
+	restoreHeldThroughIssues,
 	syncCount,
 	syncText
 } from "../syncUi.ts"
@@ -35,9 +36,11 @@ import { BIN_DIR, json, LIVE_TIMEOUT_MS, ok, SETUP_TIMEOUT_MS, type Chain } from
 //               conflicts
 //   resolve     keep-local with Keep this device's, keep-cloud with Keep the cloud's (the toast names the bin path), the
 //               three bulk files with Keep both for all (C3)
+//   restore     a second batch (gap4/restore, thirty files written on this device while the pair runs) uploads; its
+//               cloud copy purged, the pass holds it over the guard (exceededThreshold); Keep them through the Issues
+//               tab puts it back in the cloud from this device's copy and the hold clears (C1)
 //   end state   disk, cloud and bin byte for byte (the bin's day bucket within a day of now), every issue count 0, and
 //               the pair's activity since P12 began holding only what these steps make
-// Restore (Keep them, plan A6/C1) is not built yet; its step goes where the TODO below says.
 
 export const GAP4_DIR = "gap4"
 const KEEP_LOCAL = `${GAP4_DIR}/keep-local.txt`
@@ -46,6 +49,9 @@ const BULK = [1, 2, 3].map(index => `${GAP4_DIR}/bulk-${String(index)}.txt`)
 const HELD_DIR = `${GAP4_DIR}/held`
 export const HELD = Array.from({ length: 30 }, (_, index) => `${HELD_DIR}/h${String(index + 1).padStart(2, "0")}.txt`)
 const CONFLICTS = [KEEP_LOCAL, KEEP_CLOUD, ...BULK]
+const RESTORE_DIR = `${GAP4_DIR}/restore`
+// Written on N after the first batch went, so they never count toward the first hold's guard.
+export const RESTORE = Array.from({ length: 30 }, (_, index) => `${RESTORE_DIR}/r${String(index + 1).padStart(2, "0")}.txt`)
 
 const HOLD_TIMEOUT_MS = 3 * 60 * 1000
 const BARRIER_TIMEOUT_MS = 3 * 60 * 1000
@@ -54,6 +60,10 @@ const DAY_MS = 24 * 60 * 60 * 1000
 
 function seedBytes(relPath: string): Buffer {
 	return seededBytes(`gap4/seed/${relPath}`, 700)
+}
+
+export function restoreBytes(relPath: string): Buffer {
+	return seededBytes(`gap4/restore/${relPath}`, 900)
 }
 
 // The edits while paused: each side's bytes differ from the seed and from each other (different sizes too).
@@ -80,9 +90,10 @@ export function keptAside(relPath: string): string {
 }
 
 // What both sides hold under gap4/ at the end: keep-local this device's edit, keep-cloud the cloud's, each bulk file the
-// cloud's beside this device's as its copy; gap4/held gone.
+// cloud's beside this device's as its copy, the restored batch; gap4/held gone.
 export function expectedSides(): Snapshot {
 	const files = new Map<string, Buffer>([
+		...RESTORE.map((relPath): [string, Buffer] => [relPath, restoreBytes(relPath)]),
 		[KEEP_LOCAL, localEdit(KEEP_LOCAL)],
 		[KEEP_CLOUD, cloudEdit(KEEP_CLOUD)],
 		...BULK.flatMap((relPath): [string, Buffer][] => [
@@ -131,9 +142,9 @@ export function under(snapshot: Snapshot, prefix: string, day = false): Snapshot
 	return new Map([...snapshot].filter(([relPath]) => pattern.test(relPath)))
 }
 
-// What P12 lets the pair's activity hold (TRANSFER_KINDS only): the five conflicts, the hold, the held files binned
+// What P12 lets the pair's activity hold (TRANSFER_KINDS only): the five conflicts, the holds, the held files binned
 // (a directory or file at a time), each resolution's transfers (keep-local up, keep-cloud down, each bulk file down
-// with its copy up).
+// with its copy up), and the restored batch up (once written, again restored).
 export function conflictsAllowed(pair: string): Set<string> {
 	return new Set([
 		`${pair}:deletionsHeld:`,
@@ -142,7 +153,9 @@ export function conflictsAllowed(pair: string): Set<string> {
 		`${pair}:uploaded:${KEEP_LOCAL}`,
 		`${pair}:downloaded:${KEEP_CLOUD}`,
 		`${pair}:binned:${KEEP_CLOUD}`,
-		...BULK.flatMap(relPath => [`${pair}:downloaded:${relPath}`, `${pair}:uploaded:${keptAside(relPath)}`])
+		...BULK.flatMap(relPath => [`${pair}:downloaded:${relPath}`, `${pair}:uploaded:${keptAside(relPath)}`]),
+		`${pair}:createdRemoteDirectory:${RESTORE_DIR}`,
+		...RESTORE.map(relPath => `${pair}:uploaded:${relPath}`)
 	])
 }
 
@@ -342,8 +355,104 @@ export async function runConflictsCheck(chain: Chain, options: ConflictsCheckOpt
 			return `toast "${toast}"`
 		})
 
-		// TODO(restore, plan A6 + C1): once sdk-rs restore_deletions and the Issues tab's "Keep them" button land, hold a
-		// second batch here (purge again, over the guard), restore it through the page and assert both sides hold it again.
+		const cloudRestored = async (): Promise<number> =>
+			((await cloud.list(`${options.cloudDir}/${RESTORE_DIR}`)) ?? []).filter(entry => !entry.isDir).length
+
+		const restoreHeld = await findings.check(
+			`P12 a second batch (${RESTORE_DIR}, written on this device) uploads; its cloud purge is held over the guard`,
+			async () => {
+				mkdirSync(local(RESTORE_DIR), { recursive: true })
+
+				for (const relPath of RESTORE) {
+					writeFileSync(local(relPath), restoreBytes(relPath))
+				}
+
+				await waitFor(
+					`${RESTORE_DIR} uploaded`,
+					RESUME_TIMEOUT_MS,
+					async () => ((await read()).phase === "idle" && (await cloudRestored()) === RESTORE.length ? true : null),
+					5000
+				).catch(async (error: unknown) => fail(`${errorMessage(error)}: ${String(await cloudRestored())} in the cloud`))
+				await cloud.purge(`${options.cloudDir}/${RESTORE_DIR}`)
+
+				const holding = await waitFor(
+					"the pass to hold the second batch",
+					HOLD_TIMEOUT_MS,
+					async () => {
+						const current = await read()
+
+						return current.phase === "idle" && current.issues.heldDeletions >= RESTORE.length ? current : null
+					},
+					5000
+				).catch(async (error: unknown) => fail(`${errorMessage(error)}: ${json((await read()).issues)}`))
+				const list = ok(
+					"heldDeletions",
+					await desktop<DesktopSyncResult<DesktopSyncHeldDeletions>>(
+						page(),
+						`window.desktop.sync.heldDeletions(${json(pair.id)})`
+					)
+				)
+
+				if (list.reason !== "exceededThreshold" || list.passToken === null) {
+					fail(`held ${String(list.total)} for ${String(list.reason)}, token ${list.passToken === null ? "none" : "set"}`)
+				}
+
+				return `${String(holding.issues.heldDeletions)} held (${list.reason})`
+			}
+		)
+
+		if (restoreHeld) {
+			const restored = await findings.check(`P12 ${syncText("heldRestore")} through the Issues tab (C1)`, async () => {
+				const toast = await ui(() => restoreHeldThroughIssues(page(), pair.name, SETUP_TIMEOUT_MS))
+
+				return `toast "${toast}"`
+			})
+
+			await findings.check(`P12 the restoring pass puts ${RESTORE_DIR} back in the cloud and the hold clears`, async () => {
+				// Without the page's restoration, the contract's, so the end state still holds; this check then fails.
+				if (!restored) {
+					const list = ok(
+						"heldDeletions",
+						await desktop<DesktopSyncResult<DesktopSyncHeldDeletions>>(
+							page(),
+							`window.desktop.sync.heldDeletions(${json(pair.id)})`
+						)
+					)
+
+					ok(
+						"restoreDeletions",
+						await desktop<DesktopSyncResult<null>>(
+							page(),
+							`window.desktop.sync.restoreDeletions(${json(pair.id)}, ${json(list.passToken ?? fail("no pass token"))})`
+						)
+					)
+				}
+
+				const back = await waitFor(
+					`${RESTORE_DIR} back in the cloud, nothing held`,
+					RESUME_TIMEOUT_MS,
+					async () => {
+						const current = await read()
+
+						return current.phase === "idle" &&
+							current.issues.heldDeletions === 0 &&
+							(await cloudRestored()) === RESTORE.length &&
+							RESTORE.every(relPath => existsSync(local(relPath)))
+							? current
+							: null
+					},
+					5000
+				).catch(async (error: unknown) =>
+					fail(`${errorMessage(error)}: ${String(await cloudRestored())} in the cloud; ${json((await read()).issues)}`)
+				)
+
+				if (!restored) {
+					fail(`restored, but with the contract's restoration (the page's failed); issues ${json(back.issues)}`)
+				}
+
+				return `${String(RESTORE.length)} files back in the cloud, still on the disk; issues ${json(back.issues)}`
+			})
+		}
 
 		await findings.check("P12 disk, cloud and bin byte for byte; no issue left; only these steps in the activity", async () => {
 			const want = expectedSides()

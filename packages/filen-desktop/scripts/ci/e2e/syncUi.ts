@@ -46,19 +46,37 @@ const BULK: Record<DesktopSyncResolution, { label: SyncKey; body: string; kept: 
 	keepRemote: { label: "conflictsKeepAllRemote", body: "conflictsKeepAllRemoteBody", kept: "conflictsKeptAllRemote" },
 	keepBoth: { label: "conflictsKeepAllBoth", body: "conflictsKeepAllBothBody", kept: "conflictsKeptAllBoth" }
 }
-const KEPT: Record<DesktopSyncResolution, SyncKey> = {
-	keepLocal: "conflictKeptLocal",
-	keepRemote: "conflictKeptRemote",
-	keepBoth: "conflictKeptBoth"
+// The text before a toast's {{path}}.
+function beforePath(key: SyncKey): string {
+	return SYNC_TEXT[key].split("{{path}}")[0] ?? ""
+}
+
+// How each resolution's success toast starts: Keep the cloud's may name the bin path after the same words, Keep both
+// names this device's copy.
+const KEPT: Record<DesktopSyncResolution, readonly string[]> = {
+	keepLocal: [SYNC_TEXT.conflictKeptLocal],
+	keepRemote: [SYNC_TEXT.conflictKeptRemote],
+	keepBoth: [SYNC_TEXT.conflictKeptBoth, beforePath("conflictKeptBothAs")]
 }
 // The text before the bin path in a Keep the cloud's toast that moved this device's copy aside.
-const BINNED_PREFIX = SYNC_TEXT.conflictKeptRemoteBinned.split("{{path}}")[0] ?? ""
+const BINNED_PREFIX = beforePath("conflictKeptRemoteBinned")
+// The text before the copy's name in a Keep both toast.
+const KEPT_AS_PREFIX = beforePath("conflictKeptBothAs")
+
+function afterPrefix(text: string, prefix: string): string | null {
+	const trimmed = text.trim()
+
+	return prefix !== "" && trimmed.startsWith(prefix) ? trimmed.slice(prefix.length).trim() || null : null
+}
 
 // Where a Keep the cloud's toast says this device's copy went; null for a toast that names no bin path.
 export function binPathFromToast(text: string): string | null {
-	const trimmed = text.trim()
+	return afterPrefix(text, BINNED_PREFIX)
+}
 
-	return BINNED_PREFIX !== "" && trimmed.startsWith(BINNED_PREFIX) ? trimmed.slice(BINNED_PREFIX.length).trim() || null : null
+// The name a Keep both toast says this device's copy was kept under; null for a toast that names none.
+export function keptAsFromToast(text: string): string | null {
+	return afterPrefix(text, KEPT_AS_PREFIX)
 }
 
 // A settings group of the Issues tab by its title.
@@ -132,10 +150,9 @@ export async function resolveThroughIssues(
 	await button.click({ timeout: timeoutMs })
 	await row.waitFor({ state: "detached", timeout: timeoutMs })
 
-	const kept = syncText(KEPT[resolution])
+	const kept = KEPT[resolution]
 
-	// Keep the cloud's may name the bin path after the same words.
-	return toastText(page, `the toast "${kept}"`, title => title.startsWith(kept), timeoutMs)
+	return toastText(page, `the toast "${kept.join('" or "')}"`, title => kept.some(prefix => title.startsWith(prefix)), timeoutMs)
 }
 
 // Every conflict of the pair resolved one way with the bulk buttons under the list (shown from two conflicts on), after
@@ -204,6 +221,26 @@ export async function approveHeldThroughIssues(page: Page, pairName: string, pau
 	}
 
 	return `"${syncText("heldApprovedPaused")}" beside a disabled ${syncText("heldApprove")}`
+}
+
+// The held deletions undone from the Issues tab (Keep them), after the confirmation, on a running pair: resolves with the
+// toast that says the items are being put back.
+export async function restoreHeldThroughIssues(page: Page, pairName: string, timeoutMs: number): Promise<string> {
+	await openIssues(page, pairName, timeoutMs)
+
+	// Enabled once the held list and its pass token are read, for a hold whose deletions are real.
+	await group(page, "heldTitle")
+		.getByRole("button", { name: syncText("heldRestore"), exact: true })
+		.click({ timeout: timeoutMs })
+
+	const dialog = page.getByRole("alertdialog").filter({ hasText: syncText("heldRestoreTitle") })
+
+	await dialog.getByRole("button", { name: syncText("heldRestore"), exact: true }).click({ timeout: timeoutMs })
+	await dialog.waitFor({ state: "hidden", timeout: timeoutMs })
+
+	const restored = syncText("heldRestored")
+
+	return toastText(page, `the toast "${restored}"`, title => title === restored, timeoutMs)
 }
 
 export interface ReviewExpectation {

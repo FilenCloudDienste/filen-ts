@@ -5,6 +5,7 @@ import { errorMessage, fail, runBounded } from "../../support.ts"
 import { desktop } from "../app.ts"
 import type { CloudEntry } from "../cloud.ts"
 import {
+	expectedCloudReasons,
 	expectedUnsyncable,
 	type NameFixture,
 	type NameOs,
@@ -40,7 +41,7 @@ import { BIN_DIR, json, LIVE_TIMEOUT_MS, ok, quiet, type Chain } from "./common.
 //   PS4 how long one local edit takes to advance the pair's lastSyncedAt (information, 2 min bound)
 //   PN0 both sides seeded; rclone kept every cloud name exactly (else an infra failure)
 //   PN1 the first pass and two more on request (syncNow) complete
-//   PN2 the pair reports exactly this OS's unsyncable set
+//   PN2 the pair reports exactly this OS's unsyncable set, the cloud-seeded names as ones this device can't store
 //   PN3 every cloud-seeded item keeps its uuid and exact name; the ones this OS can hold are on disk with their bytes
 //   PN4 every device-seeded item that syncs is in the cloud once, with its bytes (sha256Of); the rest are not; NFD names
 //       keep their spelling on disk with no NFC sibling
@@ -387,12 +388,20 @@ export function realWorldFor(chain: Chain, arch: string): RealWorld {
 			const listed = entries.map(item => nfc(item.relPath))
 			const missing = expected.filter(relPath => !listed.includes(relPath))
 			const extra = entries.filter(item => !underAny(nfc(item.relPath), expected))
+			const reasons = expectedCloudReasons(os)
+			const misreported = entries.filter(item => {
+				const want = reasons.get(nfc(item.relPath))
+
+				return want !== undefined && item.reason !== want
+			})
 			const described = entries.map(item => `${item.relPath} (${item.reason}${item.detail === null ? "" : `: ${item.detail}`})`)
 
 			findings.attach("previous-names-unsyncable.json", json(entries))
 
-			if (missing.length > 0 || extra.length > 0) {
-				fail(`missing ${json(missing)}; not expected ${json(extra.map(item => item.relPath))}; reported: ${described.join(" | ")}`)
+			if (missing.length > 0 || extra.length > 0 || misreported.length > 0) {
+				fail(
+					`missing ${json(missing)}; not expected ${json(extra.map(item => item.relPath))}; not reported as a name this device can't store ${json(misreported.map(item => item.relPath))}; reported: ${described.join(" | ")}`
+				)
 			}
 
 			return described.join(" | ") || "none"

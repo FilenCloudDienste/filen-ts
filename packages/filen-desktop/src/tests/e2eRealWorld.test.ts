@@ -5,7 +5,14 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import type { Chain } from "../../scripts/ci/e2e/chains/common.ts"
 import { realWorldFor, renameProblems } from "../../scripts/ci/e2e/chains/realWorld.ts"
 import { type Cloud, type CloudEntry, excludeArgs, prefixFilterArgs } from "../../scripts/ci/e2e/cloud.ts"
-import { expectedUnsyncable, NAME_FIXTURES, namesFor, NAMES_PAIR, NAMES_RENAMES } from "../../scripts/ci/e2e/fixtures.ts"
+import {
+	expectedCloudReasons,
+	expectedUnsyncable,
+	NAME_FIXTURES,
+	namesFor,
+	NAMES_PAIR,
+	NAMES_RENAMES
+} from "../../scripts/ci/e2e/fixtures.ts"
 import { createFindings, type Finding } from "../../scripts/ci/e2e/findings.ts"
 import {
 	currentScale,
@@ -189,6 +196,11 @@ describe("e2e names pair", () => {
 		)
 		expect(expectedUnsyncable("mac")).toEqual(["Folder ", "Invoice 1:2.pdf", "alias-dir"].sort())
 		expect(expectedUnsyncable("linux")).toEqual(["Data.txt", "What?.txt", "alias-dir", "data.txt"].sort())
+		expect(expectedCloudReasons("win")).toEqual(
+			new Map(["aux.c", "CON", "Q&A: what?.txt", "trailing dot.", "bad:dir"].map(relPath => [relPath, "remoteNameNotStorable"]))
+		)
+		expect(expectedCloudReasons("mac").size).toBe(0)
+		expect(expectedCloudReasons("linux").size).toBe(0)
 		// Every OS syncs the NFD names both ways and ignores the built-in set.
 		for (const os of ["linux", "win", "mac"] as const) {
 			const fixtures = namesFor(os)

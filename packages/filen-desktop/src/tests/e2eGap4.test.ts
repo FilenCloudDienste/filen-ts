@@ -16,6 +16,8 @@ import {
 	HELD,
 	keptAside,
 	localEdit,
+	RESTORE,
+	restoreBytes,
 	seedConflictsCheck,
 	under
 } from "../../scripts/ci/e2e/chains/conflictsCheck.ts"
@@ -34,7 +36,7 @@ import type { CloudEntry } from "../../scripts/ci/e2e/cloud.ts"
 import { fixtureTree, LEGACY_PAIRS, treeSnapshot, writeTree } from "../../scripts/ci/e2e/fixtures.ts"
 import { addLegacyPair, type LegacySyncPair } from "../../scripts/ci/e2e/legacyApp.ts"
 import { diffSnapshots, localSnapshot } from "../../scripts/ci/e2e/snapshot.ts"
-import { binPathFromToast, findingText, syncCount, syncText } from "../../scripts/ci/e2e/syncUi.ts"
+import { binPathFromToast, findingText, keptAsFromToast, syncCount, syncText } from "../../scripts/ci/e2e/syncUi.ts"
 import { LEGACY_KEYS } from "../../src/main/legacyData.ts"
 import { legacySyncImport } from "../../src/main/sync/legacyPairs.ts"
 
@@ -79,6 +81,13 @@ describe("e2e sync page labels", () => {
 		expect(binPathParts("/root/.filen-sync-trash/2026-11-03")).toBeNull()
 	})
 
+	it("reads the copy's name out of a Keep both toast, and nothing out of one without it", () => {
+		expect(keptAsFromToast(syncText("conflictKeptBothAs", { path: "report.old.docx" }))).toBe("report.old.docx")
+		expect(keptAsFromToast(syncText("conflictKeptBoth"))).toBeNull()
+		expect(keptAsFromToast(syncText("conflictKeptRemoteBinned", { path: "/a/b.txt" }))).toBeNull()
+		expect(binPathFromToast(syncText("conflictKeptBothAs", { path: "report.old.docx" }))).toBeNull()
+	})
+
 	it("takes the UTC day buckets within a day of now, across midnight and a month's end", () => {
 		expect(binDays(Date.parse("2026-11-30T23:59:30Z"))).toEqual(["2026-11-29", "2026-11-30", "2026-12-01"])
 		expect(binDays(Date.parse("2026-11-03T00:00:10Z"))).toEqual(["2026-11-02", "2026-11-03", "2026-11-04"])
@@ -103,6 +112,22 @@ describe("P12 conflicts and held deletions", () => {
 		expect(HELD.length).toBeGreaterThan(limit(files + 1))
 	})
 
+	it("writes a second batch on N that the guard holds once the first batch went", () => {
+		const tree = fixtureTree("previous/e2e-twoway", false)
+		const first = treeSnapshot(tree)
+		// What the pair tracks once the first batch went and the conflicts resolved, before the second batch.
+		const left = new Map([...first, ...expectedSides()].filter(([relPath]) => !/^gap4\/(held|restore)(\/|$)/.test(relPath)))
+		const tracked = left.size + RESTORE.length + 1
+		const files = [...left.values()].filter(node => node.kind === "file").length + RESTORE.length
+		const limit = (count: number) => Math.max(10, 0.5 * count)
+
+		expect(RESTORE).toHaveLength(30)
+		expect(RESTORE.every(relPath => relPath.startsWith("gap4/restore/"))).toBe(true)
+		expect(RESTORE.length).toBeGreaterThan(limit(tracked + 1))
+		expect(RESTORE.length).toBeGreaterThan(limit(files + 1))
+		expect(restoreBytes(RESTORE[0] ?? "").equals(restoreBytes(RESTORE[1] ?? ""))).toBe(false)
+	})
+
 	it("expects each side's edit where it was kept and Keep both's copy beside the cloud's", () => {
 		const sides = expectedSides()
 		const sha = (relPath: string) => sides.get(relPath)?.sha256
@@ -119,7 +144,9 @@ describe("P12 conflicts and held deletions", () => {
 				"gap4/bulk-2.txt",
 				"gap4/bulk-2.old.txt",
 				"gap4/bulk-3.txt",
-				"gap4/bulk-3.old.txt"
+				"gap4/bulk-3.old.txt",
+				"gap4/restore",
+				...RESTORE
 			].sort()
 		)
 		expect(sha("gap4/keep-local.txt")).toBe(of(localEdit("gap4/keep-local.txt")))
@@ -162,6 +189,9 @@ describe("P12 conflicts and held deletions", () => {
 		expect(allowed.has("e2e-twoway:binned:gap4/held/h30.txt")).toBe(true)
 		expect(allowed.has("e2e-twoway:uploaded:gap4/keep-local.txt")).toBe(true)
 		expect(allowed.has("e2e-twoway:uploaded:gap4/bulk-1.old.txt")).toBe(true)
+		expect(allowed.has("e2e-twoway:uploaded:gap4/restore/r30.txt")).toBe(true)
+		expect(allowed.has("e2e-twoway:createdRemoteDirectory:gap4/restore")).toBe(true)
+		expect(allowed.has("e2e-twoway:downloaded:gap4/restore/r01.txt")).toBe(false)
 		expect(allowed.has("e2e-twoway:uploaded:gap4/keep-cloud.txt")).toBe(false)
 		expect(allowed.has("e2e-twoway:downloaded:gap4/keep-local.txt")).toBe(false)
 		expect(allowed.has("e2e-twoway:uploaded:docs/notes.txt")).toBe(false)

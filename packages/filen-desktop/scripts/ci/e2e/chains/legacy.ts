@@ -51,6 +51,7 @@ import {
 } from "../legacyApp.ts"
 import { crossCheck, describeLegacy, seedLegacy } from "../seed.ts"
 import { cloudSnapshot, diffSnapshots, filesHolding, localSnapshot, snapshotText, type Snapshot, type SnapshotNode } from "../snapshot.ts"
+import { keptAsFromToast } from "../syncUi.ts"
 import { quietUpdater } from "../legacyHook.ts"
 import { installedBy } from "../olderUpdate.ts"
 import { legacyLogOf, START_TIMEOUT_MS, tail, type UpdateOptions } from "../update.ts"
@@ -112,8 +113,8 @@ import {
 //                                 dialog over the page but the master-key reminder (put off)
 //   L10  only the edits           disk and cloud over N's first passes: identities unchanged except the expected deltas
 //                                 (LEGACY_DELTAS); exactly LEGACY_CONFLICTS held; N's activity and plans carry nothing else
-//   L11  a conflict resolved      the held conflict resolved through the Issues tab with Keep both: the overview counts
-//                                 none, the disk and the cloud hold the cloud's bytes at the path and the edit as the
+//   L11  a conflict resolved      the held conflict resolved through the Issues tab with Keep both, its toast naming
+//                                 the copy: the overview counts none, the disk and the cloud hold the cloud's bytes at the path and the edit as the
 //                                 engine's copy (<stem>.old.<ext>), byte for byte; then nothing else transfers, plans empty
 //   L12  the bins                 each pair's bin holds exactly 3.x's local trash (moved there, content intact) and what
 //                                 the cloud edit replaced, under the day's bucket; neither ever in the cloud
@@ -1184,7 +1185,7 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 				const cloudBytes =
 					state.cloud?.get(`${conflict.pair}/${conflict.path}`)?.sha256 ?? fail("no cloud baseline for the conflict")
 
-				const putOff = await keepBothThroughIssues(page(), conflict.pair, conflict.path, SETUP_TIMEOUT_MS).catch(
+				const { putOff, toast } = await keepBothThroughIssues(page(), conflict.pair, conflict.path, SETUP_TIMEOUT_MS).catch(
 					async (error: unknown) => {
 						findings.attach("legacy-issues-page.txt", await pageText(page(), 4000))
 						await chain.os.screenDump(path.join(chain.artifacts, "legacy-issues-page.png"))
@@ -1213,6 +1214,11 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 
 				keptCopy = dir === "." ? copy : `${dir}/${copy}`
 
+				// The toast names the copy (plan C6).
+				if (keptAsFromToast(toast) !== copy) {
+					fail(`the toast "${toast}" does not name this device's copy ${copy}`)
+				}
+
 				const kept = keptCopy
 				const sides = async (): Promise<string[]> => {
 					const local = await snapshotOf(conflict.pair)
@@ -1235,7 +1241,7 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 					15_000
 				).catch(async (error: unknown) => fail(`${errorMessage(error)}; not as expected: ${(await sides()).join(", ")}`))
 
-				return `no conflict counted; ${conflict.path} holds the cloud's bytes and ${kept} the edit, on disk and in the cloud`
+				return `toast "${toast}"; no conflict counted; ${conflict.path} holds the cloud's bytes and ${kept} the edit, on disk and in the cloud`
 			})
 
 			// The resolution's own transfers are the only new ones.

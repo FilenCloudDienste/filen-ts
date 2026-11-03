@@ -207,11 +207,16 @@ export async function underReminder<T>(page: Page, run: () => Promise<T>): Promi
 }
 
 // A held sync conflict resolved with Keep both as a user does (syncUi.ts resolveThroughIssues), the reminder put off
-// whenever it covers a step. Resolves with how often it was.
-export async function keepBothThroughIssues(page: Page, pairName: string, relPath: string, timeoutMs: number): Promise<number> {
-	const { putOff } = await underReminder(page, () => resolveThroughIssues(page, pairName, relPath, "keepBoth", timeoutMs))
+// whenever it covers a step. Resolves with how often it was and the success toast's text.
+export async function keepBothThroughIssues(
+	page: Page,
+	pairName: string,
+	relPath: string,
+	timeoutMs: number
+): Promise<{ putOff: number; toast: string }> {
+	const { putOff, value } = await underReminder(page, () => resolveThroughIssues(page, pairName, relPath, "keepBoth", timeoutMs))
 
-	return putOff
+	return { putOff, toast: value }
 }
 
 // The lock screen's PIN field (filen-web desktopLock.tsx), then its Unlock button.

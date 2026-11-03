@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto"
 import { mkdirSync, writeFileSync } from "node:fs"
 import path from "node:path"
-import type { DesktopSyncMode } from "@filen/shared/desktop"
+import type { DesktopSyncMode, DesktopSyncUnsyncableReason } from "@filen/shared/desktop"
 import type { Snapshot } from "./snapshot.ts"
 
 // The trees the chains sync and the changes they expect. Bytes are deterministic per seed, so an expected tree is known
@@ -332,6 +332,19 @@ export function expectedUnsyncable(os: NameOs): string[] {
 				.map(fixture => (fixture.reportedAs ?? fixture.path).normalize("NFC"))
 		)
 	].sort()
+}
+
+// Why `os` must report its unsyncable cloud-seeded paths: a cloud name this device can't store (sdk-rs
+// RemoteNameNotStorable). The device-seeded ones are left to the engine's own reasons.
+export function expectedCloudReasons(os: NameOs): Map<string, DesktopSyncUnsyncableReason> {
+	return new Map(
+		namesFor(os)
+			.filter(fixture => fixture.side === "cloud" && fixture.expect === "unsyncable")
+			.map((fixture): [string, DesktopSyncUnsyncableReason] => [
+				(fixture.reportedAs ?? fixture.path).normalize("NFC"),
+				"remoteNameNotStorable"
+			])
+	)
 }
 
 // The phase on N: a case rename on each side and an edit of the cloud's NFD file, each leaving exactly one cloud item.
