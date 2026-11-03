@@ -66,8 +66,18 @@ function useHidden(key: string): { hidden: ReadonlySet<string>; hide: (readKey: 
 }
 
 // Every conflict resolved the same way, after a confirmation, in one shell call. The toast counts down from the
-// overview's count, which drops as the batches go.
-function ResolveAll({ pairId, count, onRunning }: { pairId: string; count: number; onRunning: (running: boolean) => void }) {
+// overview's count, which drops as the batches go. `busy` while a single row resolves, which the run would list too.
+function ResolveAll({
+	pairId,
+	count,
+	busy,
+	onRunning
+}: {
+	pairId: string
+	count: number
+	busy: boolean
+	onRunning: (running: boolean) => void
+}) {
 	const { t } = useTranslation(["sync", "common"])
 	const [confirming, setConfirming] = useState(false)
 	// Kept while the dialog closes, so its text stays.
@@ -130,7 +140,7 @@ function ResolveAll({ pairId, count, onRunning }: { pairId: string; count: numbe
 						key={resolution.value}
 						variant="outline"
 						size="sm"
-						disabled={toastId !== null}
+						disabled={toastId !== null || busy}
 						onClick={() => {
 							setChoice(resolution.value)
 							setConfirming(true)
@@ -223,6 +233,7 @@ function ConflictsSection({ pairId, count }: { pairId: string; count: number }) 
 				<ResolveAll
 					pairId={pairId}
 					count={count}
+					busy={resolving !== null}
 					onRunning={setResolvingAll}
 				/>
 			) : null}
@@ -496,32 +507,38 @@ function PlannedUnsyncable({ pairId, readKey }: { pairId: string; readKey: strin
 	)
 }
 
-// Unsyncable items as the last pass this run saw reported them; without one, from a dry run. Read again after each
-// pass, whose report replaces the last.
+// Unsyncable items as the last pass this run saw reported them; without one, from a dry run. Read again in place
+// after each pass, whose report replaces the last.
 function UnsyncableSection({ pairId, count, lastSyncedAt }: { pairId: string; count: number; lastSyncedAt: number | null }) {
 	const { t } = useTranslation("sync")
-	const key = `${pairId}:${String(count)}:${String(lastSyncedAt)}`
-	// The key a report was missing for.
+	const key = `${pairId}:${String(count)}`
+	const pass = String(lastSyncedAt)
+	// The pass a report was missing for.
 	const [unreported, setUnreported] = useState<string | null>(null)
-	const paged = usePagedEntries<DesktopSyncUnsyncable>(unreported === key ? null : key, async (offset, limit) => {
-		const result = await syncApi().unsyncablePaths(pairId, offset, limit)
+	const missing = unreported === `${key}:${pass}`
+	const paged = usePagedEntries<DesktopSyncUnsyncable>(
+		missing ? null : key,
+		async (offset, limit) => {
+			const result = await syncApi().unsyncablePaths(pairId, offset, limit)
 
-		if (!result.ok) {
-			return result
-		}
+			if (!result.ok) {
+				return result
+			}
 
-		if (result.value === null) {
-			setUnreported(key)
+			if (result.value === null) {
+				setUnreported(`${key}:${pass}`)
 
-			return { ok: true, value: { total: 0, entries: [] } }
-		}
+				return { ok: true, value: { total: 0, entries: [] } }
+			}
 
-		return { ok: true, value: result.value }
-	})
+			return { ok: true, value: result.value }
+		},
+		pass
+	)
 
 	return (
 		<SettingsGroup title={t("unsyncableTitle")}>
-			{unreported === key ? (
+			{missing ? (
 				<PlannedUnsyncable
 					pairId={pairId}
 					readKey={key}
@@ -529,7 +546,7 @@ function UnsyncableSection({ pairId, count, lastSyncedAt }: { pairId: string; co
 			) : (
 				<UnsyncableRows
 					pairId={pairId}
-					readKey={key}
+					readKey={`${key}:${paged.version}`}
 					paged={paged}
 				/>
 			)}
