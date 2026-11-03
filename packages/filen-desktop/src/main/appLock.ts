@@ -132,6 +132,18 @@ export function parseLockRecord(data: string): LockRecord | null {
 	return { salt, hash, N: record.N, r: record.r, p: record.p, failures: record.failures, retryAt: record.retryAt }
 }
 
+// Whether `data` is a record stored without encryption (by a run without secure storage); safeStorage's output is never
+// JSON.
+export function isPlainRecord(data: Buffer): boolean {
+	try {
+		JSON.parse(data.toString("utf8"))
+
+		return true
+	} catch {
+		return false
+	}
+}
+
 export function serializeLockRecord(record: LockRecord): string {
 	return JSON.stringify({
 		version: 1,
@@ -156,14 +168,17 @@ export interface AppLock {
 	lock(): boolean
 	// Forgets the PIN and its backoff; the caller has already removed the session it guarded.
 	reset(): Promise<void>
-	// Removes the PIN file only when `cipher` cannot decrypt it (its key is gone with the session's), like reset.
+	// Removes the PIN file only when it is encrypted and `cipher` cannot decrypt it (its key is gone with the
+	// session's), like reset.
 	discardUndecryptable(cipher: VaultCipher): Promise<boolean>
 }
 
 // The record is encrypted with the session vault's cipher (safeStorage). Where the vault keeps the session in memory
 // only (no OS encryption, Linux basic_text), the record is stored as plain JSON: it holds only a salted scrypt hash,
-// and losing the lock on every launch would be worse. A cipher that comes or goes between runs makes the file
-// unreadable, never silently ignored.
+// and losing the lock on every launch would be worse. A keyring that comes or goes between runs keeps the file: a
+// plain record is read with a cipher too (and encrypted then), and an encrypted one read without a cipher is left
+// unused for a run that has it: like the session vault's file, which then reads as unreadable, it guards nothing this
+// run can read.
 //
 // Read once and kept in memory; every change is written before it takes effect. A file that exists but cannot be read
 // or used fails closed: the app stays locked, and only a reset (signing out) opens it; an unreadable one is read again
@@ -199,24 +214,34 @@ export async function loadAppLock(
 		}
 
 		let text: string
-		let reEncrypt = false
+		let reEncrypt: boolean
 
-		try {
-			const active = await cipher()
+		if (isPlainRecord(data)) {
+			text = data.toString("utf8")
+			// Stored by a run without secure storage: encrypted once this one has it.
+			reEncrypt = (await cipher().catch(() => null)) !== null
+		} else {
+			try {
+				const active = await cipher()
 
-			if (active === null) {
-				text = data.toString("utf8")
-			} else {
+				if (active === null) {
+					warn("app lock: the PIN file was stored with secure storage; it is kept until that is available again")
+					record = null
+					fault = null
+
+					return
+				}
+
 				const decrypted = await active.decrypt(data)
 
 				text = decrypted.result
 				reEncrypt = decrypted.shouldReEncrypt
-			}
-		} catch (error) {
-			warn(`app lock: the PIN file could not be decrypted: ${errorCode(error)}`)
-			fault = "unreadable"
+			} catch (error) {
+				warn(`app lock: the PIN file could not be decrypted: ${errorCode(error)}`)
+				fault = "unreadable"
 
-			return
+				return
+			}
 		}
 
 		record = parseLockRecord(text)
@@ -354,7 +379,7 @@ export async function loadAppLock(
 			}),
 		discardUndecryptable: active =>
 			serial(async () => {
-				if (!(await removeIfUndecryptable(file, active))) {
+				if (!(await removeIfUndecryptable(file, active, isPlainRecord))) {
 					return false
 				}
 

@@ -1331,6 +1331,9 @@ if (!app.requestSingleInstanceLock()) {
 		sessionStored: () => existsSync(sessionVaultPath),
 		deleteStores: () => {
 			deleteLegacyStores(userDataPath)
+		},
+		deleteProfile: () => {
+			deleteProfileStorage(userDataPath)
 		}
 	})
 	void signOutFlow.resume().then(signOutResumed.resolve)

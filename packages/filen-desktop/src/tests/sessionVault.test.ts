@@ -266,19 +266,46 @@ describe("createSessionVault", () => {
 	})
 
 	describe("memory only", () => {
-		it("keeps the session in memory, never writes, and leaves an older file unread until replaced", async () => {
-			const file = memoryFile(Buffer.from(`enc:${BLOB}`))
+		it("keeps the session in memory and never writes", async () => {
+			const file = memoryFile()
 			const vault = createSessionVault(() => Promise.resolve(null), file, warn)
 
 			await expect(vault.get()).resolves.toEqual({ status: "absent" })
-			expect(file.data).not.toBeNull()
-
 			await vault.set(BLOB)
 			expect(file.writes).toBe(0)
 			expect(file.data).toBeNull()
 			await expect(vault.get()).resolves.toEqual({ status: "present", blob: BLOB })
 
 			await vault.clear()
+			await expect(vault.get()).resolves.toEqual({ status: "absent" })
+		})
+
+		it("keeps a session an encrypted run stored, unreadable, for when the keyring is back", async () => {
+			const cipher = fakeCipher()
+			const file = memoryFile()
+
+			await createSessionVault(() => Promise.resolve(cipher), file, warn).set(BLOB)
+
+			const stored = file.data
+			const memory = createSessionVault(() => Promise.resolve(null), file, warn)
+
+			await expect(memory.get()).resolves.toEqual({ status: "unreadable" })
+			await expect(memory.get()).resolves.toEqual({ status: "unreadable" })
+			await memory.set(BLOB.replace("api-key", "new-key"))
+			expect(file.data).toBe(stored)
+
+			await expect(createSessionVault(() => Promise.resolve(cipher), file, warn).get()).resolves.toEqual({
+				status: "present",
+				blob: BLOB
+			})
+		})
+
+		it("removes it only when asked to discard it", async () => {
+			const file = memoryFile(Buffer.from(`enc:${BLOB}`))
+			const vault = createSessionVault(() => Promise.resolve(null), file, warn)
+
+			await expect(vault.discardUnreadable()).resolves.toEqual({ status: "absent" })
+			expect(file.data).toBeNull()
 			await expect(vault.get()).resolves.toEqual({ status: "absent" })
 		})
 	})

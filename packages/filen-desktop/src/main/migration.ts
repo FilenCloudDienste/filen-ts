@@ -24,7 +24,9 @@ import { sessionUserId, type VaultCipher } from "./sessionVault.ts"
 // it got to:
 //   started   a read began; `failedStarts` counts the attempts that never reached `imported`. Without secure storage
 //             (`volatileStash`) a read that worked stays here: its stash lives in memory only, so every launch reads
-//             the stash again, until the wait for the wipe ran out
+//             the stash again, until the wait for the wipe ran out. An attempt the keychain stopped (`deferred` while
+//             the session is not decided yet) stays here too, uncounted, and is tried again next launch; the prefs go
+//             first, once (`prefsImported`), so they never wait for the keychain
 //   imported  session, PIN, prefs and the stash are stored (only the stash when `stashOnly`); the old origin still
 //             holds its plaintext secrets
 //   abandoned the read failed too often; nothing is imported, the old secrets are still wiped once the wait ran out
@@ -42,11 +44,15 @@ export interface MigrationMarker {
 	failedStarts: number
 	// When the first attempt began (null: before it, or a marker older than the field).
 	startedAt: number | null
-	// The vault held a session before the first attempt (signed in to this app already), or an earlier attempt imported
+	// The vault held a session before an attempt decided it (signed in to this app already), or an earlier attempt imported
 	// them already: the session, PIN and prefs the user has here are left alone and only the stash is imported.
 	stashOnly: boolean
 	// The stash could not be stored (no secure storage): it is read again on every launch.
 	volatileStash: boolean
+	// The keychain stopped an attempt before the session was decided: the next launch decides it like a first one.
+	deferred: boolean
+	// The prefs (and launch at login) were imported: never again, so a later attempt keeps what the user set since.
+	prefsImported: boolean
 	// The old signed-in account, once imported (null: it had none).
 	userId: number | null
 	importedAt: number | null
@@ -69,6 +75,8 @@ const markerSchema = type({
 	"startedAt?": type("number.integer >= 0").or("null"),
 	"stashOnly?": "boolean",
 	"volatileStash?": "boolean",
+	"deferred?": "boolean",
+	"prefsImported?": "boolean",
 	userId: type("1 < number.integer <= 9007199254740991").or("null"),
 	importedAt: type("number.integer >= 0").or("null"),
 	wiped: "boolean",
@@ -102,6 +110,8 @@ export function parseMarker(data: string | null): MigrationMarker | null {
 		startedAt: marker.startedAt ?? null,
 		stashOnly: marker.stashOnly ?? false,
 		volatileStash: marker.volatileStash ?? false,
+		deferred: marker.deferred ?? false,
+		prefsImported: marker.prefsImported ?? false,
 		userId: marker.userId,
 		importedAt: marker.importedAt,
 		wiped: marker.wiped,
@@ -139,7 +149,8 @@ export type StartupDecision =
 	| "run"
 	// Imports the stash only: the user is signed in to this app already.
 	| "stash"
-	// Nothing written: the vault cannot be read right now (a keychain locked at login), so ask again next launch.
+	// The vault cannot be read right now (a keychain locked at login or denied): only the prefs are imported, once,
+	// and the rest is asked again next launch, uncounted.
 	| "defer"
 	| "skip-fresh"
 	// Too many failed attempts: no more reads, the old secrets are wiped once the wait ran out.
@@ -147,10 +158,10 @@ export type StartupDecision =
 	| "none"
 
 // Whether this launch imports. Without the old profile there is nothing to import, also for an attempt an earlier
-// build started on a fresh install (its read found no keys). Only a launch with no marker can see a session the user
-// stored in 4.x itself, so that is where a stored session limits it to the stash (a newer sign-in, its PIN and prefs
-// are never overwritten); the marker keeps that for reruns. A rerun after a crash imports again but leaves a session
-// the earlier attempt already stored alone.
+// build started on a fresh install (its read found no keys). Only a launch before any attempt decided the session (no
+// marker, or one the keychain deferred) can see a session the user stored in 4.x itself, so that is where a stored
+// session limits it to the stash (a newer sign-in, its PIN and prefs are never overwritten); the marker keeps that for
+// reruns. A rerun after a crash imports again but leaves a session the earlier attempt already stored alone.
 export function startupDecision(marker: MigrationMarker | null, legacyProfile: boolean, vault: SessionRead["status"]): StartupDecision {
 	if (marker !== null && marker.stage !== "started") {
 		return "none"
@@ -160,24 +171,22 @@ export function startupDecision(marker: MigrationMarker | null, legacyProfile: b
 		return "skip-fresh"
 	}
 
-	if (marker === null) {
-		if (vault === "present") {
-			return "stash"
+	if (marker !== null) {
+		// A read that worked resets the count, so only failed reads in a row give up.
+		if (marker.failedStarts >= MAX_FAILED_STARTS) {
+			return "abandon"
 		}
 
-		return vault === "unreadable" ? "defer" : "run"
+		if (marker.stashOnly) {
+			return "stash"
+		}
 	}
 
-	// A read that worked resets the count, so only failed reads in a row give up.
-	if (marker.failedStarts >= MAX_FAILED_STARTS) {
-		return "abandon"
+	if (vault === "unreadable") {
+		return "defer"
 	}
 
-	if (marker.stashOnly) {
-		return "stash"
-	}
-
-	return vault === "unreadable" ? "defer" : "run"
+	return vault === "present" && (marker === null || marker.deferred) ? "stash" : "run"
 }
 
 // Whether the wipe stops waiting for verification: at once after an import without an account (nothing to verify),
@@ -216,6 +225,8 @@ export interface PurgeDeps {
 	sessionStored(): boolean
 	// Deletes the old origin's IndexedDB and the Local Storage store; throws when an entry stays.
 	deleteStores(): void
+	// Deletes the browser profile's storage (signOut.ts deleteProfileStorage), the old origin's stores among it.
+	deleteProfile(): void
 }
 
 // LevelDB keeps deleted values until a compaction, so the old origin's stores are deleted from disk once its secrets
@@ -226,7 +237,8 @@ export interface PurgeDeps {
 // signOutPending.ts), whose loss would leave the signed-out account's local data behind. That flag can outlive the
 // session only: sign-out clears the vault first among its wipes, removing its file (in memory-only mode too), and an
 // existing file means a stored session (or a sign-out that stopped before clearing anything, which the page then shows
-// as still signed in). So the purge waits for a launch with the vault file present.
+// as still signed in). Without the vault file (signed out, or no secure storage to store a session in) the flag may be
+// set, so the whole profile goes, as after a sign-out: everything the flag would finish goes with it.
 export function purgeBeforeReady(deps: PurgeDeps): PurgeOutcome {
 	let current: MigrationMarker | null
 
@@ -237,12 +249,16 @@ export function purgeBeforeReady(deps: PurgeDeps): PurgeOutcome {
 		return { result: "not-due" }
 	}
 
-	if (current?.wiped !== true || current.purged || !deps.sessionStored()) {
+	if (current?.wiped !== true || current.purged) {
 		return { result: "not-due" }
 	}
 
 	try {
-		deps.deleteStores()
+		if (deps.sessionStored()) {
+			deps.deleteStores()
+		} else {
+			deps.deleteProfile()
+		}
 	} catch (error) {
 		return { result: "failed", code: errorCode(error) }
 	}
@@ -314,20 +330,38 @@ function stepError(step: MigrationStep, cause: string): Error {
 	return codedError(`${step}: ${cause}`)
 }
 
+// What an attempt imports: everything, the stash only (signed in here already), or the prefs only (the vault cannot be
+// read now).
+type AttemptMode = "full" | "stash" | "prefs"
+
+// The keychain stopped the attempt (safeStorage denied, locked or gone, or the vault unreadable): it is tried again
+// next launch and never counts toward giving up.
+class Deferral extends Error {
+	readonly code: string
+
+	constructor(step: MigrationStep, cause: string) {
+		super(`${step}: ${cause}`)
+		this.name = "Deferral"
+		this.code = this.message
+	}
+}
+
 // Runs one step; a failure is rethrown as the step and the original's code or name, never its message (which may
-// carry data). safeStorage rejects with a plain Error whose message is the reason: those log as `uncoded` instead.
-async function step<T>(name: MigrationStep, run: () => T | Promise<T>, uncoded?: string): Promise<T> {
+// carry data). safeStorage rejects with a plain Error whose message is the reason: in a step that encrypts with it
+// (`keychain`) that is a Deferral.
+async function step<T>(name: MigrationStep, run: () => T | Promise<T>, keychain = false): Promise<T> {
 	try {
 		return await run()
 	} catch (error) {
 		const code = errorCode(error)
 
-		throw stepError(name, code === "Error" && uncoded !== undefined ? uncoded : code)
+		if (keychain && code === "Error") {
+			throw new Deferral(name, "safeStorage")
+		}
+
+		throw stepError(name, code)
 	}
 }
-
-// The cause of a step that encrypts with safeStorage and fails without a code.
-const SAFE_STORAGE = "safeStorage"
 
 export function createMigration(deps: MigrationDeps): Migration {
 	let marker: MigrationMarker | null = null
@@ -349,6 +383,8 @@ export function createMigration(deps: MigrationDeps): Migration {
 			startedAt: null,
 			stashOnly: false,
 			volatileStash: false,
+			deferred: false,
+			prefsImported: false,
 			userId: null,
 			importedAt: null,
 			wiped: false,
@@ -365,13 +401,16 @@ export function createMigration(deps: MigrationDeps): Migration {
 	}
 
 	// Errors are logged by their step and code only: none of this may ever log a value.
-	async function attempt(previous: MigrationMarker | null, stashOnly: boolean): Promise<MigrationResult> {
+	async function attempt(previous: MigrationMarker | null, mode: AttemptMode): Promise<MigrationResult> {
+		const stashOnly = mode === "stash"
+
 		await save({
 			...(previous ?? fresh("started")),
 			stage: "started",
 			failedStarts: (previous?.failedStarts ?? 0) + 1,
 			startedAt: previous?.startedAt ?? deps.now(),
-			stashOnly
+			stashOnly,
+			deferred: mode === "prefs" || previous?.deferred === true
 		})
 
 		const read = parseReadResult(await step("legacy read", () => deps.readLegacy()))
@@ -391,33 +430,61 @@ export function createMigration(deps: MigrationDeps): Migration {
 
 		const { snapshot } = read
 		const session = await step("legacy parse", () => legacySession(snapshot))
-
-		if (stashOnly) {
-			deps.info("migration: signed in here already; importing the stash only")
-		} else {
-			await importSession(session)
-		}
-
 		const userId = session.ok ? session.userId : null
-		const persisted = await step(
-			"stash",
-			async () => {
-				const stash = legacyStash(snapshot, userId)
+		let sessionDecided = stashOnly
+		let persisted: boolean
+		let pinImported = false
 
-				if (stash === null) {
-					return true
-				}
+		try {
+			// Before the session, which may wait for the keychain; they need none.
+			if (!stashOnly && marker?.prefsImported !== true) {
+				await importPrefs(snapshot)
+				await save({ ...(marker ?? fresh("started")), prefsImported: true })
+			}
 
-				const stored = await deps.writeStash(JSON.stringify(stash))
+			if (mode === "prefs") {
+				throw new Deferral("vault status", "unreadable")
+			}
 
-				deps.info("migration: sync and mount settings stashed")
+			if (stashOnly) {
+				deps.info("migration: signed in here already; importing the stash only")
+			} else {
+				await importSession(session)
+			}
 
-				return stored
-			},
-			SAFE_STORAGE
-		)
+			sessionDecided = true
+			persisted = await step(
+				"stash",
+				async () => {
+					const stash = legacyStash(snapshot, userId)
 
-		const pinImported = stashOnly ? false : await importSettings(snapshot, session.ok)
+					if (stash === null) {
+						return true
+					}
+
+					const stored = await deps.writeStash(JSON.stringify(stash))
+
+					deps.info("migration: sync and mount settings stashed")
+
+					return stored
+				},
+				true
+			)
+
+			// Only with the imported account, which it guarded.
+			if (!stashOnly && session.ok) {
+				pinImported = await importPin(snapshot)
+			}
+		} catch (error) {
+			if (!(error instanceof Deferral)) {
+				throw error
+			}
+
+			await save({ ...(marker ?? fresh("started")), failedStarts: previous?.failedStarts ?? 0, deferred: !sessionDecided })
+			deps.warn(`migration: deferred, tried again next launch: ${error.code}`)
+
+			return { pinImported: false }
+		}
 
 		await removeRcloneConfig()
 
@@ -426,13 +493,13 @@ export function createMigration(deps: MigrationDeps): Migration {
 
 		// The stash lives in this run only: read again next launch (the rest is imported), until the wait ran out.
 		if (!persisted && deps.now() - startedAt < WIPE_AFTER_MS) {
-			await save({ ...current, failedStarts: 0, stashOnly: true, volatileStash: true, userId })
+			await save({ ...current, failedStarts: 0, stashOnly: true, volatileStash: true, deferred: false, userId })
 			deps.info("migration: no secure storage; the stash is read again next launch")
 
 			return { pinImported }
 		}
 
-		await save({ ...current, stage: "imported", volatileStash: false, userId, importedAt: deps.now() })
+		await save({ ...current, stage: "imported", volatileStash: false, deferred: false, userId, importedAt: deps.now() })
 
 		return { pinImported }
 	}
@@ -441,7 +508,7 @@ export function createMigration(deps: MigrationDeps): Migration {
 		const stored = await vaultStatus()
 
 		if (stored === "unreadable") {
-			throw stepError("vault status", "unreadable")
+			throw new Deferral("vault status", "unreadable")
 		}
 
 		if (!session.ok) {
@@ -449,21 +516,27 @@ export function createMigration(deps: MigrationDeps): Migration {
 		} else if (stored === "present") {
 			deps.info("migration: a session is stored already; keeping it")
 		} else {
-			await step("session import", () => deps.vault.set(session.blob), SAFE_STORAGE)
+			await step("session import", () => deps.vault.set(session.blob), true)
 			deps.info("migration: session imported")
 		}
 	}
 
-	// The PIN (only with the imported account) and the prefs; whether a PIN was imported.
-	async function importSettings(snapshot: LegacySnapshot, signedIn: boolean): Promise<boolean> {
-		let pinImported = false
-		const pin = signedIn ? legacyPin(snapshot) : null
+	// Whether the PIN was imported; a PIN set in this app stays.
+	async function importPin(snapshot: LegacySnapshot): Promise<boolean> {
+		const pin = legacyPin(snapshot)
 
-		if (pin !== null && !deps.lock.enabled()) {
-			pinImported = await step("pin import", () => deps.lock.set(pin), SAFE_STORAGE)
-			deps.info(pinImported ? "migration: app lock PIN imported" : "migration: app lock PIN not imported")
+		if (pin === null || deps.lock.enabled()) {
+			return false
 		}
 
+		const imported = await step("pin import", () => deps.lock.set(pin), true)
+
+		deps.info(imported ? "migration: app lock PIN imported" : "migration: app lock PIN not imported")
+
+		return imported
+	}
+
+	async function importPrefs(snapshot: LegacySnapshot): Promise<void> {
 		const launchAtLogin = await step("prefs import", async () => {
 			const prefs = legacyPrefs(snapshot, await deps.readOptions())
 			const launches = deps.launchesAtLogin()
@@ -482,8 +555,6 @@ export function createMigration(deps: MigrationDeps): Migration {
 				deps.warn(`migration: launch at login not re-registered: ${errorCode(error)}`)
 			})
 		}
-
-		return pinImported
 	}
 
 	// Records what purgeBeforeReady did; `purged` is set only once the stores are gone.
@@ -497,8 +568,9 @@ export function createMigration(deps: MigrationDeps): Migration {
 			return
 		}
 
+		// The marker could not be read before ready.
 		if (outcome.result === "not-due") {
-			deps.info("migration: deleting the old stores waits for a launch with a stored session")
+			deps.info("migration: deleting the old stores waits for the next launch")
 
 			return
 		}
@@ -585,7 +657,11 @@ export function createMigration(deps: MigrationDeps): Migration {
 					const decision = startupDecision(marker, legacyProfile, vault)
 
 					if (decision === "defer") {
-						deps.info("migration: deferred (the session vault cannot be read)")
+						if (marker?.prefsImported === true) {
+							deps.info("migration: deferred (the session vault cannot be read)")
+						} else {
+							await attempt(marker, "prefs")
+						}
 
 						return result
 					}
@@ -602,7 +678,7 @@ export function createMigration(deps: MigrationDeps): Migration {
 						await save({ ...(marker ?? fresh("abandoned")), stage: "abandoned", startedAt: marker?.startedAt ?? deps.now() })
 						await removeRcloneConfig()
 					} else if (decision === "run" || decision === "stash") {
-						result = await attempt(marker, decision === "stash")
+						result = await attempt(marker, decision === "stash" ? "stash" : "full")
 					}
 				}
 			} catch (error) {
@@ -620,7 +696,7 @@ export function createMigration(deps: MigrationDeps): Migration {
 				const current = marker ?? parseMarker((await step("marker read", () => deps.marker.read()))?.toString("utf8") ?? null)
 
 				if (current === null) {
-					// A launch that deferred (a locked keychain) left no marker; with nothing to import there is nothing to end.
+					// No attempt saved a marker yet; with nothing to import there is nothing to end.
 					if (!(await step("profile probe", () => deps.legacyProfile()))) {
 						return
 					}

@@ -265,12 +265,43 @@ describe("loadAppLock", () => {
 		await expect(lock.unlock("1234")).resolves.toEqual({ ok: true })
 	})
 
-	it("fails closed on an invalid record or a cipher that changed, until a reset", async () => {
-		const plain = await lockWithPin("1234", memoryFile(), null)
-		// Written without a cipher, read with one: not silently accepted.
-		const lock = await loadAppLock(plain.file, () => Promise.resolve(fakeCipher()), warn)
+	it("reads a plain record once a keyring appeared, and encrypts it", async () => {
+		const { file } = await lockWithPin("1234", memoryFile(), null)
+		const lock = await loadAppLock(file, () => Promise.resolve(fakeCipher()), warn)
 
-		expect(lock.status()).toMatchObject({ enabled: true, locked: true, unreadable: true })
+		expect(lock.status()).toEqual({ enabled: true, locked: true, unreadable: false, retryAt: null })
+		expect(file.data?.toString("utf8").startsWith("enc:")).toBe(true)
+		await expect(lock.unlock("1234")).resolves.toEqual({ ok: true })
+	})
+
+	it("reads a plain record while the probe fails, leaving it plain", async () => {
+		const { file } = await lockWithPin("1234", memoryFile(), null)
+		const stored = file.data
+		const lock = await loadAppLock(file, () => Promise.reject(new Error("probe")), warn)
+
+		expect(lock.status()).toEqual({ enabled: true, locked: true, unreadable: false, retryAt: null })
+		expect(file.data).toBe(stored)
+	})
+
+	it("keeps an encrypted record unused and unchanged while the keyring is gone, and reads it once it is back", async () => {
+		const cipher = fakeCipher()
+		const { file } = await lockWithPin("1234", memoryFile(), cipher)
+		const stored = file.data
+		const memory = await loadAppLock(file, () => Promise.resolve(null), warn)
+
+		expect(memory.status()).toEqual({ enabled: false, locked: false, unreadable: false, retryAt: null })
+		expect(file.data).toBe(stored)
+
+		const back = await loadAppLock(file, () => Promise.resolve(cipher), warn)
+
+		expect(back.status()).toMatchObject({ enabled: true, locked: true, unreadable: false })
+		await expect(back.unlock("1234")).resolves.toEqual({ ok: true })
+	})
+
+	it("fails closed on an invalid record, until a reset", async () => {
+		const plainInvalid = await loadAppLock(memoryFile(Buffer.from("{}")), () => Promise.resolve(null), warn)
+
+		expect(plainInvalid.status()).toMatchObject({ enabled: true, locked: true, unreadable: true })
 
 		const invalid = await loadAppLock(memoryFile(Buffer.from("enc:{}")), () => Promise.resolve(fakeCipher()), warn)
 
@@ -292,5 +323,16 @@ describe("loadAppLock", () => {
 		await expect(lock.discardUndecryptable(cipher)).resolves.toBe(true)
 		expect(file.data).toBeNull()
 		expect(lock.status()).toEqual({ enabled: false, locked: false, unreadable: false, retryAt: null })
+	})
+
+	it("never discards a plain record, which needs no key", async () => {
+		const { file } = await lockWithPin("1234", memoryFile(), null)
+		const lock = await loadAppLock(file, () => Promise.reject(new Error("probe")), warn)
+		const cipher = fakeCipher()
+
+		cipher.failDecrypt = true
+		await expect(lock.discardUndecryptable(cipher)).resolves.toBe(false)
+		expect(file.data).not.toBeNull()
+		expect(lock.status()).toMatchObject({ enabled: true, locked: true })
 	})
 })

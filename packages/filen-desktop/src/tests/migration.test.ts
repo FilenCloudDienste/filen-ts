@@ -25,11 +25,13 @@ import {
 	WIPE_AFTER_MS,
 	withoutFeature
 } from "../main/migration.ts"
-import type { VaultCipher } from "../main/sessionVault.ts"
+import { loadAppLock, parseLockRecord } from "../main/appLock.ts"
+import { createSessionVault, lazyCipher, type VaultCipher } from "../main/sessionVault.ts"
 import { removeTree } from "../main/signOut.ts"
 import { applyLegacySync, LEGACY_BUILTIN_RULES, type LegacySyncDeps } from "../main/sync/legacyPairs.ts"
 import type { SessionRead } from "../shared/channels.ts"
 import { fakeNative, memoryStore, Refusal } from "./syncFakes.ts"
+import { fakeCipher as vaultCipher, memoryFile as vaultFile } from "./fileFakes.ts"
 
 const DAY = 24 * 60 * 60 * 1000
 
@@ -40,6 +42,8 @@ function marker(overrides: Partial<MigrationMarker> = {}): MigrationMarker {
 		startedAt: 0,
 		stashOnly: false,
 		volatileStash: false,
+		deferred: false,
+		prefsImported: false,
 		userId: 123456,
 		importedAt: 0,
 		wiped: false,
@@ -92,6 +96,12 @@ describe("parseMarker", () => {
 
 		expect(parseMarker(JSON.stringify({ version: 1, ...older }))).toMatchObject({ startedAt: null, stashOnly: false })
 	})
+
+	it("reads a marker written before deferrals were recorded as neither deferred nor with its prefs imported", () => {
+		const { deferred: _deferred, prefsImported: _prefsImported, ...older } = marker({ stage: "started" })
+
+		expect(parseMarker(JSON.stringify({ version: 1, ...older }))).toMatchObject({ deferred: false, prefsImported: false })
+	})
 })
 
 describe("legacyOwner", () => {
@@ -121,6 +131,15 @@ describe("startupDecision", () => {
 		expect(startupDecision(started, true, "absent")).toBe("run")
 		expect(startupDecision(started, true, "unreadable")).toBe("defer")
 		expect(startupDecision({ ...started, failedStarts: MAX_FAILED_STARTS }, true, "absent")).toBe("abandon")
+	})
+
+	it("decides a deferred attempt's session like a first launch, until it failed too often", () => {
+		const deferred = marker({ stage: "started", failedStarts: 0, deferred: true, prefsImported: true })
+
+		expect(startupDecision(deferred, true, "present")).toBe("stash")
+		expect(startupDecision(deferred, true, "unreadable")).toBe("defer")
+		expect(startupDecision(deferred, true, "absent")).toBe("run")
+		expect(startupDecision({ ...deferred, failedStarts: MAX_FAILED_STARTS }, true, "unreadable")).toBe("abandon")
 	})
 
 	it("skips a started attempt without the old profile, however often it failed", () => {
@@ -221,7 +240,15 @@ function memoryFile(initial: string | null = null): AtomicFile & { text: () => s
 }
 
 function setup(
-	options: { marker?: MigrationMarker | undefined; read?: unknown; vault?: SessionRead; legacyProfile?: boolean; now?: number } = {}
+	options: {
+		marker?: MigrationMarker | undefined
+		read?: unknown
+		vault?: SessionRead
+		legacyProfile?: boolean
+		now?: number
+		// The real stores in place of the mocks.
+		real?: Pick<MigrationDeps, "vault" | "lock" | "writeStash">
+	} = {}
 ) {
 	const markerFile = memoryFile(options.marker === undefined ? null : serializeMarker(options.marker))
 	const state = { vault: options.vault ?? ({ status: "absent" } as SessionRead), lockEnabled: false, now: options.now ?? 1000 }
@@ -259,7 +286,13 @@ function setup(
 		warn: vi.fn()
 	} satisfies MigrationDeps
 
-	return { deps, state, markerFile, migration: createMigration(deps), stored: () => parseMarker(markerFile.text()) }
+	return {
+		deps,
+		state,
+		markerFile,
+		migration: createMigration({ ...deps, ...options.real }),
+		stored: () => parseMarker(markerFile.text())
+	}
 }
 
 type Deps = ReturnType<typeof setup>["deps"]
@@ -316,6 +349,8 @@ describe("createMigration", () => {
 			startedAt: 1000,
 			stashOnly: false,
 			volatileStash: false,
+			deferred: false,
+			prefsImported: true,
 			userId: 123456,
 			importedAt: 1000,
 			wiped: false,
@@ -603,13 +638,41 @@ describe("createMigration", () => {
 		expect(stored()).toMatchObject({ stage: "started", failedStarts: 2 })
 	})
 
-	it("defers without writing anything while the vault cannot be read", async () => {
-		const { deps, migration, markerFile } = setup({ vault: { status: "unreadable" } })
+	it("imports only the prefs while the vault cannot be read, then defers without reading again", async () => {
+		const first = setup({ vault: { status: "unreadable" } })
 
-		await migration.start()
+		await expect(first.migration.start()).resolves.toEqual({ pinImported: false })
+		expect(first.deps.prefs.set).toHaveBeenCalledWith({ minimizeToTray: true, startMinimized: true })
+		expect(first.deps.vault.set).not.toHaveBeenCalled()
+		expect(first.deps.writeStash).not.toHaveBeenCalled()
+		expect(first.deps.lock.set).not.toHaveBeenCalled()
+		expect(first.deps.removeRcloneConfig).not.toHaveBeenCalled()
+		expect(first.stored()).toMatchObject({ stage: "started", failedStarts: 0, deferred: true, prefsImported: true, startedAt: 1000 })
 
-		expect(deps.readLegacy).not.toHaveBeenCalled()
-		expect(markerFile.text()).toBeNull()
+		const second = setup({ marker: first.stored() ?? undefined, vault: { status: "unreadable" } })
+
+		await second.migration.start()
+		expect(second.deps.readLegacy).not.toHaveBeenCalled()
+		expect(second.markerFile.text()).toBe(first.markerFile.text())
+	})
+
+	it("after a deferral, decides the session like a first launch: a session stored since limits it to the stash", async () => {
+		const deferred = marker({ stage: "started", failedStarts: 0, deferred: true, prefsImported: true, userId: null, importedAt: null })
+		const signedIn = setup({ marker: deferred, vault: { status: "present", blob: SESSION_OF("777") } })
+
+		await signedIn.migration.start()
+		expect(signedIn.deps.vault.set).not.toHaveBeenCalled()
+		expect(signedIn.deps.lock.set).not.toHaveBeenCalled()
+		expect(signedIn.deps.prefs.set).not.toHaveBeenCalled()
+		expect(signedIn.stored()).toMatchObject({ stage: "imported", stashOnly: true, deferred: false })
+
+		const empty = setup({ marker: deferred })
+
+		await expect(empty.migration.start()).resolves.toEqual({ pinImported: true })
+		expect(empty.deps.vault.set).toHaveBeenCalledTimes(1)
+		// Imported the first time; what the user set since stays.
+		expect(empty.deps.prefs.set).not.toHaveBeenCalled()
+		expect(empty.stored()).toMatchObject({ stage: "imported", deferred: false, userId: 123456 })
 	})
 
 	it("reruns after a crash without replacing the session the earlier attempt stored", async () => {
@@ -647,14 +710,157 @@ describe("createMigration", () => {
 		expect(stored()).toMatchObject({ stage: "imported" })
 	})
 
-	it("stays retryable when storing the session fails", async () => {
-		const { deps, migration, stored } = setup()
+	it("counts a session that cannot be written to disk, and keeps the prefs it imported before", async () => {
+		const first = setup()
 
-		deps.vault.set.mockRejectedValueOnce(new Error("keychain"))
+		first.deps.vault.set.mockRejectedValueOnce(Object.assign(new Error("full"), { code: "ENOSPC" }))
 
-		await expect(migration.start()).resolves.toEqual({ pinImported: false })
-		expect(deps.writeStash).not.toHaveBeenCalled()
-		expect(stored()).toMatchObject({ stage: "started", failedStarts: 1 })
+		await expect(first.migration.start()).resolves.toEqual({ pinImported: false })
+		expect(first.deps.prefs.set).toHaveBeenCalledTimes(1)
+		expect(first.deps.writeStash).not.toHaveBeenCalled()
+		expect(first.stored()).toMatchObject({ stage: "started", failedStarts: 1, deferred: false, prefsImported: true })
+
+		const second = setup({ marker: first.stored() ?? undefined })
+
+		await second.migration.start()
+		expect(second.deps.prefs.set).not.toHaveBeenCalled()
+		expect(second.stored()).toMatchObject({ stage: "imported", failedStarts: 2 })
+	})
+})
+
+// Main's own vault, PIN record and stash on files that outlive a launch, behind one lazily probed safeStorage, as on a
+// first launch: no session.vault yet.
+describe("a first launch with a keychain problem", () => {
+	// safeStorage's rejection: a plain Error.
+	const keychainError = () => new Error("Error while encrypting the text provided to safeStorage.encryptStringAsync.")
+
+	function disk() {
+		return { session: vaultFile(), lock: vaultFile(), stash: vaultFile() }
+	}
+
+	async function launch(files: ReturnType<typeof disk>, probe: () => Promise<VaultCipher | null>, stored: MigrationMarker | null) {
+		const cipher = lazyCipher(probe)
+		const vault = createSessionVault(cipher, files.session, vi.fn())
+		const lock = await loadAppLock(files.lock, cipher, vi.fn())
+		const stash = createStashStore(files.stash, cipher, vi.fn())
+		const run = setup({
+			marker: stored ?? undefined,
+			real: {
+				vault,
+				lock: { enabled: () => lock.status().enabled, set: async pin => (await lock.set(pin, null)).ok },
+				writeStash: text => stash.write(text)
+			}
+		})
+		const result = await run.migration.start()
+
+		await settle()
+
+		return { ...run, result, vault, lock }
+	}
+
+	// The keyring works again: everything else is imported, encrypted, once.
+	async function keyringBack(files: ReturnType<typeof disk>, stored: MigrationMarker | null) {
+		const cipher = vaultCipher()
+		const run = await launch(files, () => Promise.resolve(cipher), stored)
+
+		expect(run.result).toEqual({ pinImported: true })
+		expect(run.deps.prefs.set).not.toHaveBeenCalled()
+		expect(run.stored()).toMatchObject({ stage: "imported", failedStarts: 1, deferred: false, userId: 123456 })
+		await expect(run.vault.get()).resolves.toMatchObject({ status: "present" })
+
+		for (const file of [files.session, files.lock, files.stash]) {
+			expect(file.data?.toString().startsWith("enc:")).toBe(true)
+		}
+	}
+
+	it("a probe that rejects imports the prefs once and defers, uncounted, until the keyring works", async () => {
+		const files = disk()
+		let stored: MigrationMarker | null = null
+
+		for (let launchNo = 0; launchNo < MAX_FAILED_STARTS + 2; launchNo++) {
+			const run = await launch(files, () => Promise.reject(keychainError()), stored)
+
+			expect(run.result).toEqual({ pinImported: false })
+			expect(run.deps.readLegacy).toHaveBeenCalledTimes(launchNo === 0 ? 1 : 0)
+			expect(run.deps.prefs.set).toHaveBeenCalledTimes(launchNo === 0 ? 1 : 0)
+			expect(run.deps.removeRcloneConfig).not.toHaveBeenCalled()
+			stored = run.stored()
+			expect(stored).toMatchObject({ stage: "started", failedStarts: 0, deferred: true, prefsImported: true })
+		}
+
+		expect(files.session.data).toBeNull()
+		await keyringBack(files, stored)
+	})
+
+	it("an encrypt that rejects imports the prefs once and defers, uncounted, until the keyring works", async () => {
+		const files = disk()
+		const denied: VaultCipher = { ...vaultCipher(), encrypt: () => Promise.reject(keychainError()) }
+		let stored: MigrationMarker | null = null
+
+		for (let launchNo = 0; launchNo < MAX_FAILED_STARTS + 2; launchNo++) {
+			const run = await launch(files, () => Promise.resolve(denied), stored)
+
+			expect(run.result).toEqual({ pinImported: false })
+			expect(run.deps.prefs.set).toHaveBeenCalledTimes(launchNo === 0 ? 1 : 0)
+			expect(run.deps.removeRcloneConfig).not.toHaveBeenCalled()
+			expect(run.deps.warn).toHaveBeenCalledWith("migration: deferred, tried again next launch: session import: safeStorage")
+			stored = run.stored()
+			expect(stored).toMatchObject({ stage: "started", failedStarts: 0, deferred: true, prefsImported: true })
+		}
+
+		expect([files.session.data, files.lock.data, files.stash.data]).toEqual([null, null, null])
+		await keyringBack(files, stored)
+	})
+
+	it("a probe that resolves false imports into memory, never counted, and the plain PIN survives the keyring appearing", async () => {
+		const files = disk()
+		const memory = await launch(files, () => Promise.resolve(null), null)
+
+		expect(memory.result).toEqual({ pinImported: true })
+		expect(memory.deps.prefs.set).toHaveBeenCalledTimes(1)
+		await expect(memory.vault.get()).resolves.toMatchObject({ status: "present" })
+		expect([files.session.data, files.stash.data]).toEqual([null, null])
+		expect(parseLockRecord(files.lock.data?.toString() ?? "")).not.toBeNull()
+		expect(memory.stored()).toMatchObject({
+			stage: "started",
+			failedStarts: 0,
+			stashOnly: true,
+			volatileStash: true,
+			prefsImported: true
+		})
+
+		const cipher = vaultCipher()
+		const next = await launch(files, () => Promise.resolve(cipher), memory.stored())
+
+		expect(next.lock.status()).toEqual({ enabled: true, locked: true, unreadable: false, retryAt: null })
+		expect(files.lock.data?.toString().startsWith("enc:")).toBe(true)
+		expect(next.deps.prefs.set).not.toHaveBeenCalled()
+		expect(next.stored()).toMatchObject({ stage: "imported", stashOnly: true })
+	})
+
+	it("a run without a keyring keeps an encrypted 4.x session and its PIN, and imports only the prefs", async () => {
+		const files = disk()
+		const cipher = vaultCipher()
+		const earlier = await loadAppLock(files.lock, () => Promise.resolve(cipher), vi.fn())
+
+		await createSessionVault(() => Promise.resolve(cipher), files.session, vi.fn()).set(SESSION_OF("777"))
+		await earlier.set("2468", null)
+
+		const [session, pin] = [files.session.data, files.lock.data]
+		const memory = await launch(files, () => Promise.resolve(null), null)
+
+		await expect(memory.vault.get()).resolves.toEqual({ status: "unreadable" })
+		expect(memory.lock.status()).toEqual({ enabled: false, locked: false, unreadable: false, retryAt: null })
+		expect(memory.deps.prefs.set).toHaveBeenCalledTimes(1)
+		expect([files.session.data, files.lock.data]).toEqual([session, pin])
+		expect(memory.stored()).toMatchObject({ stage: "started", deferred: true, prefsImported: true })
+
+		const back = await launch(files, () => Promise.resolve(cipher), memory.stored())
+
+		await expect(back.vault.get()).resolves.toEqual({ status: "present", blob: SESSION_OF("777") })
+		expect(back.lock.status()).toMatchObject({ enabled: true, locked: true })
+		expect(back.result).toEqual({ pinImported: false })
+		expect(back.stored()).toMatchObject({ stage: "imported", stashOnly: true })
 	})
 })
 
@@ -759,10 +965,8 @@ describe("failure logging", () => {
 		["vault status", (deps: Deps) => deps.vault.get.mockRejectedValueOnce(new TypeError("value")), "TypeError"],
 		["legacy read", (deps: Deps) => deps.readLegacy.mockRejectedValueOnce(new Error("page said user@example.com")), "Error"],
 		["legacy parse", (deps: Deps) => deps.readLegacy.mockResolvedValueOnce("not a read result"), "unexpected read result"],
-		["session import", (deps: Deps) => deps.vault.set.mockRejectedValueOnce(safeStorageError()), "safeStorage"],
 		["session import", (deps: Deps) => deps.vault.set.mockRejectedValueOnce(fsError("ENOSPC")), "ENOSPC"],
-		["stash", (deps: Deps) => deps.writeStash.mockRejectedValueOnce(safeStorageError()), "safeStorage"],
-		["pin import", (deps: Deps) => deps.lock.set.mockRejectedValueOnce(safeStorageError()), "safeStorage"],
+		["stash", (deps: Deps) => deps.writeStash.mockRejectedValueOnce(fsError("EROFS")), "EROFS"],
 		["prefs import", (deps: Deps) => deps.readOptions.mockRejectedValueOnce(fsError("EISDIR")), "EISDIR"],
 		["prefs import", (deps: Deps) => deps.prefs.set.mockRejectedValueOnce(new RangeError("value")), "RangeError"]
 	] as const)("names the failed step: %s (%s)", async (step, fail, cause) => {
@@ -775,13 +979,31 @@ describe("failure logging", () => {
 		expect(deps.warn).toHaveBeenCalledWith(`migration: failed: ${step}: ${cause}`)
 	})
 
-	it("names the vault status step when the vault turns unreadable before the import", async () => {
-		const { deps, migration } = setup({ marker: marker({ stage: "started", stashOnly: false }) })
+	it.each([
+		["session import", (deps: Deps) => deps.vault.set.mockRejectedValueOnce(safeStorageError()), true],
+		["stash", (deps: Deps) => deps.writeStash.mockRejectedValueOnce(safeStorageError()), false],
+		["pin import", (deps: Deps) => deps.lock.set.mockRejectedValueOnce(safeStorageError()), false]
+	] as const)("defers a safeStorage failure uncounted and names its step: %s", async (step, fail, undecided) => {
+		const { deps, migration, stored } = setup({ marker: marker({ stage: "started", failedStarts: 2, userId: null, importedAt: null }) })
+
+		fail(deps)
+		await expect(migration.start()).resolves.toEqual({ pinImported: false })
+
+		expect(deps.warn).toHaveBeenCalledTimes(1)
+		expect(deps.warn).toHaveBeenCalledWith(`migration: deferred, tried again next launch: ${step}: safeStorage`)
+		expect(deps.warn.mock.calls.flat().join("\n")).not.toContain("encryptStringAsync")
+		expect(deps.removeRcloneConfig).not.toHaveBeenCalled()
+		expect(stored()).toMatchObject({ stage: "started", failedStarts: 2, deferred: undecided, prefsImported: true })
+	})
+
+	it("defers when the vault turns unreadable before the import", async () => {
+		const { deps, migration, stored } = setup({ marker: marker({ stage: "started", stashOnly: false, failedStarts: 1 }) })
 
 		deps.vault.get.mockResolvedValueOnce({ status: "absent" }).mockResolvedValueOnce({ status: "unreadable" })
 		await migration.start()
 
-		expect(deps.warn).toHaveBeenCalledWith("migration: failed: vault status: unreadable")
+		expect(deps.warn).toHaveBeenCalledWith("migration: deferred, tried again next launch: vault status: unreadable")
+		expect(stored()).toMatchObject({ stage: "started", failedStarts: 1, deferred: true })
 	})
 
 	it.each([
@@ -827,6 +1049,7 @@ describe("purging the old stores", () => {
 			readMarker: vi.fn(() => text),
 			sessionStored: vi.fn(() => true),
 			deleteStores: vi.fn(() => undefined),
+			deleteProfile: vi.fn(() => undefined),
 			...overrides
 		} satisfies PurgeDeps
 	}
@@ -876,13 +1099,29 @@ describe("purging the old stores", () => {
 		expect(unreadable.deleteStores).not.toHaveBeenCalled()
 	})
 
-	it("waits for a launch with the vault file present, so a sign-out cut short keeps the page's flag", async () => {
-		const run = await launch(WIPED, { sessionStored: () => false })
+	it("without a stored session, deletes the whole profile, so nothing a sign-out cut short left outlives its flag", async () => {
+		const deleteProfile = vi.fn(() => undefined)
+		const run = await launch(WIPED, { sessionStored: () => false, deleteProfile })
 
-		expect(run.outcome).toEqual({ result: "not-due" })
+		expect(run.outcome).toEqual({ result: "deleted" })
 		expect(run.deleteStores).not.toHaveBeenCalled()
+		expect(deleteProfile).toHaveBeenCalledTimes(1)
+		expect(run.stored()).toMatchObject({ purged: true })
+
+		const next = await launch(run.stored(), { sessionStored: () => false, deleteProfile })
+
+		expect(next.outcome).toEqual({ result: "not-due" })
+		expect(deleteProfile).toHaveBeenCalledTimes(1)
+	})
+
+	it("waits for the next launch when the marker could not be read before ready", async () => {
+		const run = setup({ marker: WIPED })
+
+		run.deps.earlyPurge.mockReturnValue({ result: "not-due" })
+		await run.migration.start()
+
 		expect(run.stored()).toMatchObject({ purged: false })
-		expect(run.deps.info).toHaveBeenCalledWith("migration: deleting the old stores waits for a launch with a stored session")
+		expect(run.deps.info).toHaveBeenCalledWith("migration: deleting the old stores waits for the next launch")
 	})
 
 	it("leaves the marker unpurged on a Windows-like EBUSY, logs the code once and deletes them on the next launch", async () => {

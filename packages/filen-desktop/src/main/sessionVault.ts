@@ -55,11 +55,16 @@ export function lazyCipher(probe: () => Promise<VaultCipher | null>): () => Prom
 	}
 }
 
-// Removes `file` only when it exists and `cipher` cannot decrypt it; a failed read or removal rejects.
-export async function removeIfUndecryptable(file: AtomicFile, cipher: VaultCipher): Promise<boolean> {
+// Removes `file` only when it exists, is not `plain` (data that needs no key) and `cipher` cannot decrypt it; a failed
+// read or removal rejects.
+export async function removeIfUndecryptable(
+	file: AtomicFile,
+	cipher: VaultCipher,
+	plain: (data: Buffer) => boolean = () => false
+): Promise<boolean> {
 	const data = await file.read()
 
-	if (data === null) {
+	if (data === null || plain(data)) {
 		return false
 	}
 
@@ -83,8 +88,9 @@ export interface SessionVault {
 	discardUnreadable(): Promise<SessionRead>
 }
 
-// `cipher` resolves once, lazily (safeStorage only works after app ready); null keeps the session in memory only.
-// Operations run one at a time so a clear can never land between a set's write and rename. The decrypted session is
+// `cipher` resolves once, lazily (safeStorage only works after app ready); null keeps the session in memory only, and
+// a file an encrypted run left is never read or replaced then: it reads as unreadable (its keyring may come back) and
+// goes only by a clear or a discard. Operations run one at a time so a clear can never land between a set's write and rename. The decrypted session is
 // cached: it is read once per launch and changes only through this vault. Errors never carry the session.
 export function createSessionVault(
 	cipher: () => Promise<VaultCipher | null>,
@@ -96,7 +102,7 @@ export function createSessionVault(
 	let cached: string | null | undefined
 	const serial = serialQueue()
 
-	async function load(active: VaultCipher, discard: boolean): Promise<SessionRead> {
+	async function load(active: VaultCipher | null, discard: boolean): Promise<SessionRead> {
 		let data: Buffer | null
 
 		try {
@@ -109,6 +115,20 @@ export function createSessionVault(
 
 		if (data === null) {
 			cached = null
+
+			return { status: "absent" }
+		}
+
+		if (active === null) {
+			if (!discard) {
+				warn("session vault: a session stored with secure storage is kept until it is available again")
+
+				return { status: "unreadable" }
+			}
+
+			await file.remove()
+			cached = null
+			warn("session vault: removed the session stored with secure storage")
 
 			return { status: "absent" }
 		}
@@ -169,12 +189,6 @@ export function createSessionVault(
 				return { status: "unreadable" }
 			}
 
-			if (active === null) {
-				cached = null
-
-				return { status: "absent" }
-			}
-
 			return load(active, discard)
 		})
 	}
@@ -186,13 +200,9 @@ export function createSessionVault(
 			serial(async () => {
 				const active = await currentCipher()
 
+				// A file an encrypted run left stays for when its keyring is back.
 				if (active === null) {
 					cached = blob
-
-					// A vault file left from an encrypted run holds an older session this one supersedes.
-					await file.remove().catch((error: unknown) => {
-						warn(`stale session vault removal failed: ${errorCode(error)}`)
-					})
 
 					return
 				}
