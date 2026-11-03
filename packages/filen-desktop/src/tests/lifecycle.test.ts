@@ -8,6 +8,7 @@ import {
 	RELAUNCH_LOCK_WAIT_MS,
 	startsHidden
 } from "../main/lifecycle.ts"
+import { SHUTDOWN_TIMEOUT_MS } from "../main/native/supervisor.ts"
 
 describe("closeAction", () => {
 	it.each([
@@ -99,6 +100,11 @@ describe("acquireInstanceLock", () => {
 
 		expect(acquireInstanceLock(quitting)).toEqual({ held: true, attempts: 7, waitedMs: 1500 })
 		expect(sleeps.every(ms => ms === RELAUNCH_LOCK_RETRY_MS)).toBe(true)
+	})
+
+	it("outwaits the quitting instance's native-host stops", () => {
+		// A queued stop, then quit's own, each up to the shutdown timeout, then the teardown and the exit.
+		expect(RELAUNCH_LOCK_WAIT_MS).toBeGreaterThan(2 * SHUTDOWN_TIMEOUT_MS)
 	})
 
 	it("gives up once the wait is over", () => {

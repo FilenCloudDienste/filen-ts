@@ -1,4 +1,5 @@
 import type { DesktopPlatform } from "@filen/shared/desktop"
+import { SHUTDOWN_TIMEOUT_MS } from "./native/supervisor.ts"
 
 // How long a hidden window keeps its page before main destroys it to free the renderer's memory. Reopening reboots
 // the web app (bundle, wasm compile, cache restore, socket reconnect), so a window hidden for a moment keeps it.
@@ -45,8 +46,10 @@ export function appIdentity(packaged: boolean): { name: string; userData: string
 // electron-updater's AppImage install starts the new AppImage with this set to "true" before the old instance quits,
 // and the old one holds the single-instance lock while its native host stops.
 export const UPDATER_RELAUNCH_ENV = "APPIMAGE_SILENT_INSTALL"
-// How long that relaunch waits for the lock, and how often it asks again.
-export const RELAUNCH_LOCK_WAIT_MS = 30_000
+// How long that relaunch waits for the lock, and how often it asks again. The quitting instance's will-quit stops the
+// native host behind whatever the supervisor's queue holds: a stop already under way (a session change), then its own,
+// each up to SHUTDOWN_TIMEOUT_MS, then the windows' teardown and the exit.
+export const RELAUNCH_LOCK_WAIT_MS = 2 * SHUTDOWN_TIMEOUT_MS + 10_000
 export const RELAUNCH_LOCK_RETRY_MS = 250
 
 export interface InstanceLockContext {
