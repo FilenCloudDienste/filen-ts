@@ -30,6 +30,7 @@ import { crossCheck, describeVault, seedSession, SESSION_SHAPE } from "../seed.t
 import { offlineBlockFor } from "../offlineBlock.ts"
 import { runOfflineProbe } from "../spikes/offline.ts"
 import { runOfflineCheck } from "./offlineCheck.ts"
+import { inP11Turn } from "./offlineListing.ts"
 import { fixtureTree, PREVIOUS_DELTAS, PREVIOUS_PAIRS, treeSnapshot, writeTree } from "../fixtures.ts"
 import { CHOOSER_BUDGET_MS } from "../os.ts"
 import { cloudSnapshot, diffSnapshots, snapshotText, type Snapshot } from "../snapshot.ts"
@@ -73,7 +74,8 @@ import {
 //                                lift; a launch under the block shows every pair offline, none in error, and recovers
 //                                within 60 s of the lift; a drop while the first cloud listing waits (the harness
 //                                holding drive-write) takes every pair offline within 30 s and converges after the
-//                                lift; sync never asks for attention (chains/offlineCheck.ts)
+//                                lift; sync never asks for attention (chains/offlineCheck.ts); one entry's P11 at a
+//                                time on the account (chains/offlineListing.ts)
 //
 // Linux deb and AppImage, Windows NSIS and macOS dmg; what differs per OS (the native folder chooser, the drive as the
 // OS sees it, quitting, uninstalling) is behind scripts/ci/e2e/os.ts.
@@ -635,7 +637,9 @@ export async function runPreviousDeep(options: Omit<UpdateOptions, "hooks">, art
 				return json(prefs)
 			})
 
-			await runOfflineCheck(chain, { pairs, editPair: "e2e-twoway", editCloudDir: `${cloudDir}/e2e-twoway`, pin })
+			await inP11Turn(chain, () =>
+				runOfflineCheck(chain, { pairs, editPair: "e2e-twoway", editCloudDir: `${cloudDir}/e2e-twoway`, pin })
+			)
 
 			if (offline !== null) {
 				await runOfflineProbe(chain, offline, {

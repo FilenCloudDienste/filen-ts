@@ -14,7 +14,7 @@ import { runListingDrop } from "./offlineListing.ts"
 //                  pair recovers within 60 s (the engine wakes on reconnect instead of its next periodic pass)
 //   listing drop   N launched to a relist while the harness holds drive-write: every pair waits for the cloud; the
 //                  block takes every pair offline (none in error, none still waiting) within 30 s; the lock released,
-//                  then the block lifted, every pair converges within 60 s (offlineListing.ts)
+//                  then the block lifted, every pair online within 60 s and converged within 120 s (offlineListing.ts)
 // N runs through the block's wrapper (Linux, macOS) for this check only and is started plainly again after it.
 
 const LIVE_OFFLINE_MS = 30_000

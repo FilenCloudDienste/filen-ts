@@ -7,7 +7,7 @@ import {
 	type LockPost,
 	type LockType
 } from "../../scripts/ci/e2e/driveLock.ts"
-import { allWaiting, offlineFailure } from "../../scripts/ci/e2e/chains/offlineListing.ts"
+import { allWaiting, backOnline, converged, offlineFailure, P11_TURN, P11_TURN_TIMING } from "../../scripts/ci/e2e/chains/offlineListing.ts"
 import type { Sample } from "../../scripts/ci/e2e/offlineBlock.ts"
 
 const FAST = { pollMs: 1, acquireMs: 200, refreshMs: 5, capMs: 10_000 }
@@ -94,6 +94,27 @@ describe("e2e drive-write lock", () => {
 		expect(await lock.release()).toMatch(/^released after/)
 	})
 
+	it("takes any resource, naming it", async () => {
+		const { post, sent } = server()
+		const lock = await acquireDriveLock(post, FAST, P11_TURN)
+
+		await lock.release()
+		expect(new Set(sent.map(body => body.resource))).toEqual(new Set([P11_TURN]))
+		await expect(acquireDriveLock(server(Number.POSITIVE_INFINITY).post, { ...FAST, acquireMs: 20 }, P11_TURN)).rejects.toThrow(
+			`${P11_TURN} not acquired within 0.02 s (last: held by another client)`
+		)
+	})
+
+	it("keeps the P11 turn past P11's longest path and within the server's limits", () => {
+		expect(P11_TURN).not.toBe(DRIVE_WRITE)
+		// filen-backend userLock.ts: resource 1-128 characters; a lease lapses 60 s after its last refresh.
+		expect(P11_TURN.length).toBeLessThanOrEqual(128)
+		expect(P11_TURN_TIMING.refreshMs).toBeLessThan(60_000)
+		// P11's three sub-steps with their relaunches, and the drive-write cap, fit in the turn's cap.
+		expect(P11_TURN_TIMING.capMs).toBeGreaterThan(10 * 60 * 1000)
+		expect(P11_TURN_TIMING.acquireMs).toBeGreaterThan(P11_TURN_TIMING.capMs)
+	})
+
 	it("releases at the cap and records refused refreshes", async () => {
 		const sent: LockType[] = []
 		const post: LockPost = body => {
@@ -131,6 +152,15 @@ describe("P11 listing drop", () => {
 		expect(allWaiting(sample(2, 1, 0))).toBe(false)
 		expect(allWaiting(sample(3, 0, 1))).toBe(false)
 		expect(allWaiting(sample(0, 0, 0, 0))).toBe(false)
+	})
+
+	it("is back online before converged: a pair still waiting for the cloud is online", () => {
+		expect(backOnline(sample(2, 0, 0))).toBe(true)
+		expect(converged(sample(2, 0, 0))).toBe(false)
+		expect(backOnline(sample(0, 1, 0))).toBe(false)
+		expect(backOnline(sample(0, 0, 1))).toBe(false)
+		expect(converged(sample(0, 0, 0))).toBe(true)
+		expect(converged({ ...sample(0, 0, 0), lastErrors: 1 })).toBe(false)
 	})
 
 	it("names a pair still waiting for the cloud as the regression", () => {

@@ -582,6 +582,9 @@ jobs:
     name: ${{ matrix.spike && format('{0} ', matrix.spike) || '' }}${{ matrix.platform }} ${{ matrix.arch }} ${{ matrix.format }}${{ matrix.deep && ' deep' || '' }}
     needs: [plan, build, session]
     if: ${{ !cancelled() && needs.build.result == 'success' && (needs.session.result == 'success' || needs.session.result == 'skipped') }}
+    # Deep entries share the e2e account. P11's listing drop holds its drive-write lock (every client of the account
+    # waits to write meanwhile, up to 150 s), so P11 runs in turn across entries and overlapping runs (an entry may
+    # wait up to 40 min for it); checks outside P11 can meet that hold (scripts/ci/e2e/chains/offlineListing.ts).
     strategy:
       fail-fast: false
       matrix: ${{ fromJSON(needs.plan.outputs.test-matrix) }}

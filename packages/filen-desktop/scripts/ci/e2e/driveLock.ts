@@ -11,6 +11,8 @@ import { errorMessage, fail } from "../support.ts"
 // behind by a quit app is gone by then); a refresh every 15 s keeps it (sdk-rs's own interval); a hard cap releases
 // it 150 s after the acquire whatever the caller does, so a check that stalls never holds the account's drive for long.
 // Every request is bounded; the key is never logged (the chain masks it).
+// The same API takes any resource name (filen-backend userLock.ts: one key per user and resource), so the harness also
+// keeps a lock of its own on the account (P11_TURN, chains/offlineListing.ts) that no client of the product knows.
 
 export const LOCK_URL = "https://gateway.filen.io/v3/user/lock"
 export const DRIVE_WRITE = "drive-write"
@@ -90,9 +92,13 @@ export interface DriveLock {
 	release(): Promise<string>
 }
 
-export async function acquireDriveLock(post: LockPost, timing: DriveLockTiming = DRIVE_LOCK_TIMING): Promise<DriveLock> {
+export async function acquireDriveLock(
+	post: LockPost,
+	timing: DriveLockTiming = DRIVE_LOCK_TIMING,
+	resource: string = DRIVE_WRITE
+): Promise<DriveLock> {
 	const uuid = randomUUID()
-	const body = (lockType: LockType) => ({ uuid, type: lockType, resource: DRIVE_WRITE })
+	const body = (lockType: LockType) => ({ uuid, type: lockType, resource })
 	const deadline = Date.now() + timing.acquireMs
 	let lastRefusal = "refused"
 
@@ -112,7 +118,7 @@ export async function acquireDriveLock(post: LockPost, timing: DriveLockTiming =
 		}
 
 		if (Date.now() + timing.pollMs > deadline) {
-			fail(`${DRIVE_WRITE} not acquired within ${String(timing.acquireMs / 1000)} s (last: ${lastRefusal})`)
+			fail(`${resource} not acquired within ${String(timing.acquireMs / 1000)} s (last: ${lastRefusal})`)
 		}
 
 		await sleep(timing.pollMs)
