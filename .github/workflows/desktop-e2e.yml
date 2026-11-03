@@ -254,7 +254,7 @@ jobs:
       - name: Install the harness dependencies
         env:
           ELECTRON_SKIP_BINARY_DOWNLOAD: 1
-        run: pnpm install --frozen-lockfile --filter @filen/desktop --ignore-scripts
+        run: pnpm install --frozen-lockfile --filter "@filen/desktop..." --ignore-scripts
       - name: Restore the cached test session
         uses: actions/cache/restore@v4
         with:
@@ -332,7 +332,7 @@ jobs:
       - name: Install the harness dependencies
         env:
           ELECTRON_SKIP_BINARY_DOWNLOAD: 1
-        run: pnpm install --frozen-lockfile --filter @filen/desktop --ignore-scripts
+        run: pnpm install --frozen-lockfile --filter "@filen/desktop..." --ignore-scripts
       # The sealed sessions as files (never an environment variable or a job output, which are printed with a step's
       # settings); the harness masks them on reading.
       - name: Download the sealed session
@@ -764,7 +764,7 @@ jobs:
       - name: Install the harness dependencies
         env:
           ELECTRON_SKIP_BINARY_DOWNLOAD: 1
-        run: pnpm install --frozen-lockfile --filter @filen/desktop --ignore-scripts
+        run: pnpm install --frozen-lockfile --filter "@filen/desktop..." --ignore-scripts
       - name: Download the sealed session
         uses: actions/download-artifact@v7
         with:
