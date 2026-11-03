@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -6,14 +6,20 @@ import type { Chain } from "../../scripts/ci/e2e/chains/common.ts"
 import { realWorldFor } from "../../scripts/ci/e2e/chains/realWorld.ts"
 import { type Cloud, type CloudEntry, excludeArgs } from "../../scripts/ci/e2e/cloud.ts"
 import { expectedUnsyncable, NAME_FIXTURES, namesFor, NAMES_PAIR, NAMES_RENAMES } from "../../scripts/ci/e2e/fixtures.ts"
+import { createFindings, type Finding } from "../../scripts/ci/e2e/findings.ts"
 import {
+	currentScale,
+	FIXTURES_ROOT,
 	layoutSnapshot,
 	manifestOf,
-	manifestSnapshot,
+	readManifest,
 	SCALE_DIRS,
 	SCALE_FILES,
+	SCALE_MANIFEST_NAME,
+	scaleGeneration,
 	scaleLayout,
-	scaleTree
+	scaleTree,
+	staleGenerations
 } from "../../scripts/ci/e2e/scaleTree.ts"
 import { cloudSnapshot, diffSnapshots, localSnapshot } from "../../scripts/ci/e2e/snapshot.ts"
 
@@ -83,22 +89,49 @@ describe("e2e scale tree", () => {
 		expect([...tree.files.values()].reduce((sum, bytes) => sum + bytes.length, 0)).toBeLessThan(20 * 1024 * 1024)
 	})
 
-	it("reads its manifest back as the list-only snapshot it was written from, and refuses a malformed one", () => {
+	it("reads its manifest back as the generation and list-only snapshot it was written from, and refuses a malformed one", () => {
 		const entries = [entry("a0", true, 0, "dir-uuid"), entry("a0/f0001.txt", false, 12, "file-uuid")]
-		const snapshot = manifestSnapshot(JSON.stringify(manifestOf(entries)))
+		const generation = scaleGeneration(new Date("2026-11-03T01:23:45.678Z"))
+		const current = readManifest(JSON.stringify(manifestOf(generation, entries)))
 
-		expect(manifestOf(entries).entries).toEqual(["a0/:0:dir-uuid", "a0/f0001.txt:12:file-uuid"])
-		expect([...snapshot]).toEqual([
+		expect(generation).toBe("scale-v1.2026-11-03T01-23-45-678Z")
+		expect(manifestOf(generation, entries).entries).toEqual(["a0/:0:dir-uuid", "a0/f0001.txt:12:file-uuid"])
+		expect(current.dir).toBe(`${FIXTURES_ROOT}/${generation}`)
+		expect([...current.snapshot]).toEqual([
 			["a0", { kind: "dir", size: 0, sha256: null, identity: "dir-uuid" }],
 			["a0/f0001.txt", { kind: "file", size: 12, sha256: null, identity: "file-uuid" }]
 		])
-		expect(() => manifestSnapshot(JSON.stringify({ version: 1, entries: ["no-size"] }))).toThrow(/path:size:uuid/)
-		expect(() => manifestSnapshot(JSON.stringify({ version: 2, entries: [] }))).toThrow(/version 1/)
+		expect(() => readManifest(JSON.stringify({ version: 2, dir: generation, entries: ["no-size"] }))).toThrow(/path:size:uuid/)
+		expect(() => readManifest(JSON.stringify({ version: 1, entries: [] }))).toThrow(/version 2/)
+
+		for (const dir of ["scale-v1", "other", "scale-v1.x/../y", SCALE_MANIFEST_NAME]) {
+			expect(() => readManifest(JSON.stringify({ version: 2, dir, entries: [] }))).toThrow(/generation/)
+		}
+	})
+
+	it("is unseeded without a manifest, which is not an error", async () => {
+		const { cloud } = listingCloud([entry("scale-v1.2026-11-03T00-00-00-000Z", true, 0, "g")])
+
+		await expect(currentScale(cloud)).resolves.toBeNull()
+		await expect(currentScale({ ...cloud, list: () => Promise.resolve(null) })).resolves.toBeNull()
+	})
+
+	it("removes on a reseed every generation but its own and the one runs may still be pulling", () => {
+		const siblings = [
+			entry("scale-v1.a", true, 0, "1"),
+			entry("scale-v1.b", true, 0, "2"),
+			entry("scale-v1.c", true, 0, "3"),
+			entry(SCALE_MANIFEST_NAME, false, 10, "m"),
+			entry("other", true, 0, "o")
+		]
+
+		expect(staleGenerations(siblings, ["scale-v1.c", "scale-v1.b"])).toEqual(["scale-v1.a"])
+		expect(staleGenerations(siblings, ["scale-v1.c"])).toEqual(["scale-v1.a", "scale-v1.b"])
 	})
 
 	it("tells a rewritten or resized entry from the manifest by its listing alone", async () => {
 		const entries = [entry("a0", true, 0, "d"), entry("a0/f.txt", false, 12, "u1")]
-		const manifest = manifestSnapshot(JSON.stringify(manifestOf(entries)))
+		const manifest = readManifest(JSON.stringify(manifestOf(scaleGeneration(new Date(0)), entries))).snapshot
 		const { cloud, downloads } = listingCloud([entry("a0", true, 0, "d"), entry("a0/f.txt", false, 12, "u2")])
 		const listed = await cloudSnapshot(cloud, "x", tempDir(), { listOnly: true })
 
@@ -202,5 +235,110 @@ describe("e2e names pair", () => {
 		expect(realWorldFor(chainOn("mac", "dmg"), "arm64").cloudExclude).toEqual([NAMES_PAIR])
 		expect(realWorldFor(chainOn("linux", "deb"), "arm64").cloudExclude).toEqual([])
 		expect(realWorldFor(chainOn("linux", "AppImage"), "x64").cloudExclude).toEqual([])
+	})
+})
+
+describe("e2e scale pair", () => {
+	// Chain P on linux-x64-deb with a page that answers the sync contract: the pair added, then idle at once, its
+	// root left empty (so PS2 fails). Records the contract calls.
+	const scaleChain = (cloud: Cloud) => {
+		const work = tempDir()
+		const artifacts = path.join(work, "artifacts")
+		const findings = createFindings("test", artifacts)
+		const calls: string[] = []
+		const answer = (expression: string): unknown => {
+			if (expression.includes("chooseLocalDirectory")) {
+				return { status: "ok", id: "root", path: path.join(work, "e2e-scale") }
+			}
+
+			if (expression.includes("addPair")) {
+				return { ok: true, value: { pairId: "scale-id", plan: null } }
+			}
+
+			if (expression.includes("overview")) {
+				return { pairs: [{ id: "scale-id", phase: "idle", lastSyncedAt: 1, lastError: null, issues: 0, review: null }] }
+			}
+
+			return { ok: true, value: null }
+		}
+		const page = {
+			evaluate: (code: string) => {
+				calls.push(code)
+
+				return Promise.resolve(JSON.stringify({ value: answer(code) }))
+			}
+		}
+		const partial = {
+			findings,
+			cloud,
+			target: { platform: "linux", format: "deb" },
+			cloudDir: "run/entry/previous",
+			work,
+			artifacts,
+			page: () => page,
+			os: { chooseDirectory: () => Promise.resolve(), screenDump: () => Promise.resolve() },
+			rootOf: (name: string) => path.join(work, name),
+			syncOverview: () => Promise.resolve(answer("overview")),
+			snapshotOf: (name: string) => localSnapshot(path.join(work, name))
+		}
+
+		return { chain: partial as unknown as Chain, artifacts, findings, calls }
+	}
+	const recorded = (artifacts: string): Finding[] =>
+		JSON.parse(readFileSync(path.join(artifacts, "test-findings.json"), "utf8")) as Finding[]
+
+	it("stays off with a note while the tree is unseeded", async () => {
+		vi.stubEnv("E2E_NAMES_CHECK", "")
+
+		const { cloud } = listingCloud([])
+		const { chain, artifacts, findings, calls } = scaleChain(cloud)
+
+		await realWorldFor(chain, "x64").setUp()
+		findings.finish()
+
+		expect(calls).toEqual([])
+		expect(recorded(artifacts).map(finding => [finding.check, finding.ok, finding.info])).toEqual([
+			["PS0 the scale tree's manifest names its current generation", true, false],
+			["PS scale pair", true, true],
+			["PN names pair", true, true]
+		])
+	})
+
+	it("removes the pair at once when the pulled tree is wrong, so the update and N run without it", async () => {
+		vi.stubEnv("E2E_NAMES_CHECK", "")
+
+		const generation = scaleGeneration(new Date(0))
+		const manifest = Buffer.from(JSON.stringify(manifestOf(generation, [])))
+		const { cloud } = listingCloud([entry(SCALE_MANIFEST_NAME, false, manifest.length, "m")])
+		const { chain, artifacts, findings, calls } = scaleChain({
+			...cloud,
+			cat: () => Promise.resolve(manifest),
+			dirId: dir => Promise.resolve(dir === `${FIXTURES_ROOT}/${generation}` ? "generation-uuid" : "wrong")
+		})
+		const realWorld = realWorldFor(chain, "x64")
+
+		await realWorld.setUp()
+
+		const removals = () => calls.filter(call => call.includes("removePair"))
+
+		expect(removals()).toHaveLength(1)
+		expect(calls.some(call => call.includes('"remoteRoot":"generation-uuid"'))).toBe(true)
+
+		await realWorld.afterUpdate()
+		await realWorld.onN()
+
+		expect(() => {
+			findings.finish()
+		}).toThrow(/1 check\(s\) failed: PS2/)
+
+		expect(removals()).toHaveLength(1)
+		expect(recorded(artifacts).map(finding => [finding.check.split(" (")[0], finding.ok])).toEqual([
+			["PS0 the scale tree's manifest names its current generation", true],
+			["PS1 the scale pull's time to idle on N-1", true],
+			["PS1 e2e-scale", true],
+			["PS2 the pulled tree is the generated tree byte for byte", false],
+			["the scale pair removed at once after PS1 or PS2 failed", true],
+			["PN names pair", true]
+		])
 	})
 })

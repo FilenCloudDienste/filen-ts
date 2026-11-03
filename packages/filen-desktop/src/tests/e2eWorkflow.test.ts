@@ -83,6 +83,13 @@ describe("desktop e2e workflow secrets", () => {
 		expect(text).toContain("bash scripts/ci/deepSession.sh --scenario older --depth deep")
 	})
 
+	it("runs a scale reseed alone, and never fails the session job on the scale tree", () => {
+		expect(text).toMatch(
+			/name: Run a scale reseed alone\n\s+if: inputs\.scale_reseed && github\.workflow == 'Desktop E2E'\n[\s\S]{0,400}if \[ "\$\{active\}" -gt 0 \]; then[\s\S]{0,160}exit 1/
+		)
+		expect(text).toMatch(/name: The scale fixture tree\n\s+continue-on-error: true\n/)
+	})
+
 	it("deletes the sealed session's artifact when the run is swept", () => {
 		expect(text).toContain("name: desktop-e2e-session")
 		expect(text).toMatch(/Delete the sealed session[\s\S]*select\(\.name == "desktop-e2e-session"\)/)
@@ -111,7 +118,9 @@ describe("desktop e2e workflow chain K", () => {
 		expect(text.indexOf("- name: Keyring chain K, no sign-in")).toBeGreaterThan(text.indexOf("- name: 3.0.53 -> N, signed in"))
 		expect(step("Prepare the keyring chain")).toContain("dbus-bin")
 		// A keyring-only entry is deep (the harness) without a session to download.
-		expect(text).toContain("- name: Download the sealed session\n        if: matrix.deepPrevious || matrix.deepLegacy || matrix.deepOlder\n")
+		expect(text).toContain(
+			"- name: Download the sealed session\n        if: matrix.deepPrevious || matrix.deepLegacy || matrix.deepOlder\n"
+		)
 		expect(text).not.toContain("if: matrix.deep\n")
 	})
 

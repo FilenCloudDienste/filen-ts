@@ -26,7 +26,7 @@ import {
 	treeSnapshot
 } from "../fixtures.ts"
 import { CHOOSER_BUDGET_MS } from "../os.ts"
-import { SCALE_DIR, scaleLayout, scaleTree } from "../scaleTree.ts"
+import { currentScale, scaleLayout, scaleTree, SCALE_UNSEEDED } from "../scaleTree.ts"
 import { diffSnapshots, localSnapshot, type Snapshot, underAny } from "../snapshot.ts"
 import { BIN_DIR, json, LIVE_TIMEOUT_MS, ok, quiet, type Chain } from "./common.ts"
 
@@ -34,12 +34,15 @@ import { BIN_DIR, json, LIVE_TIMEOUT_MS, ok, quiet, type Chain } from "./common.
 // chain's own three pairs converged and removed on N before P11, so the chain's other checks see its three pairs alone.
 //
 //   PS  the permanent scale tree (scaleTree.ts, about 8,500 entries) pulled by a remoteToLocal pair, e2e-scale; on by
-//       default. Its integrity against the manifest is checked once a run by the session job and the sweep.
+//       default; off with a warning until the tree is first seeded. Its integrity against the manifest is checked once
+//       a run by the session job and the sweep. A pull that fails PS1 or PS2 has its pair removed at once, so the update
+//       and P4 run with the chain's own pairs and a scale problem fails by its own name only.
 //   PN  the names pair, e2e-names (twoWay): hostile and unusual names on both sides (fixtures.ts NAME_FIXTURES) with
 //       per-OS outcomes, then renames and an edit on N. The outcomes are those of sdk-rs's names fix, not yet released:
 //       off unless E2E_NAMES_CHECK=1 (dispatch input names_check).
 //
 // The assertion table (each one a finding):
+//   PS0 the manifest names the tree's current generation (none: the pair is off, with a note)
 //   PS1 the pull goes idle within 8 min (the time is information)
 //   PS2 the local tree is the generated tree byte for byte
 //   PS3 (P4) N's first launch rewrites nothing of it (identities unchanged across the update)
@@ -138,8 +141,9 @@ export function realWorldFor(chain: Chain, arch: string): RealWorld {
 			review: found.review
 		})
 
-	// The pair added through the native folder chooser, as a user adds one, and started after its dry run.
-	const addPair = async (name: string, mode: DesktopSyncMode, remoteRoot: string): Promise<Added> => {
+	// The pair added through the native folder chooser, as a user adds one, and started after its dry run. `record`
+	// learns of it as soon as it exists, so that a failed start still leaves it for removal.
+	const addPair = async (name: string, mode: DesktopSyncMode, remoteRoot: string, record: (pair: Added) => void): Promise<Added> => {
 		const page = chain.page()
 		const evidence = path.join(chain.artifacts, `previous-chooser-${name}`)
 
@@ -168,53 +172,90 @@ export function realWorldFor(chain: Chain, arch: string): RealWorld {
 			)
 		)
 
+		const pair = { name, id: added.pairId, localRoot: chosen.path }
+
+		record(pair)
+
 		if (added.plan !== null) {
 			await desktopCall(page, `window.desktop.sync.releasePlan(${json(added.plan.planId)})`)
 		}
 
 		ok("startPair", await desktop<DesktopSyncResult<null>>(page, `window.desktop.sync.startPair(${json(added.pairId)})`))
 
-		return { name, id: added.pairId, localRoot: chosen.path }
+		return pair
+	}
+
+	const removePair = async (pair: Added): Promise<void> => {
+		ok("removePair", await desktop<DesktopSyncResult<null>>(chain.page(), `window.desktop.sync.removePair(${json(pair.id)})`))
 	}
 
 	const scaleSetUp = async (): Promise<void> => {
-		await findings.check(`PS1 ${SCALE_PAIR} (remoteToLocal) pulls the permanent tree and goes idle within 8 min`, async () => {
-			const remoteRoot = await cloud
-				.dirId(SCALE_DIR)
-				.catch((error: unknown) => fail(`${errorMessage(error)}: seed it with a dispatch with scale_reseed`))
-			const pair = await addPair(SCALE_PAIR, "remoteToLocal", remoteRoot)
-			const started = Date.now()
+		// The generation the manifest names now: a reseed in another run writes a new one and keeps this one.
+		const read: { dir?: string | null } = {}
 
-			state.scale = pair
+		await findings.check("PS0 the scale tree's manifest names its current generation", async () => {
+			read.dir = (await currentScale(cloud))?.dir ?? null
 
-			const idle = await settled(pair, 0, SCALE_IDLE_MS)
-
-			if (idle === null) {
-				fail(`not idle within 8 min: ${describePair(await overviewOf(pair))}`)
-			}
-
-			findings.info("PS1 the scale pull's time to idle on N-1", seconds(Date.now() - started))
-
-			return `idle after ${seconds(Date.now() - started)}`
+			return read.dir ?? "none yet"
 		})
 
-		const pair = state.scale
+		const dir = read.dir
 
-		if (pair === undefined) {
+		if (dir === null) {
+			findings.info("PS scale pair", `off: ${SCALE_UNSEEDED}`)
+
 			return
 		}
 
-		await findings.check("PS2 the pulled tree is the generated tree byte for byte", async () => {
-			const local = await chain.snapshotOf(SCALE_PAIR)
-			const differences = diffSnapshots(treeSnapshot(scaleTree()), local, { identity: false })
+		if (dir === undefined) {
+			return
+		}
 
-			if (differences.length > 0) {
-				fail(`${String(differences.length)} differences: ${differences.slice(0, 10).join("; ")}`)
+		const pulled = await findings.check(
+			`PS1 ${SCALE_PAIR} (remoteToLocal) pulls the permanent tree and goes idle within 8 min`,
+			async () => {
+				const pair = await addPair(SCALE_PAIR, "remoteToLocal", await cloud.dirId(dir), added => {
+					state.scale = added
+				})
+				const started = Date.now()
+				const idle = await settled(pair, 0, SCALE_IDLE_MS)
+
+				if (idle === null) {
+					fail(`not idle within 8 min: ${describePair(await overviewOf(pair))}`)
+				}
+
+				findings.info("PS1 the scale pull's time to idle on N-1", seconds(Date.now() - started))
+
+				return `idle after ${seconds(Date.now() - started)}`
 			}
+		)
 
-			state.scaleBaseline = local
+		if (pulled) {
+			await findings.check("PS2 the pulled tree is the generated tree byte for byte", async () => {
+				const local = await chain.snapshotOf(SCALE_PAIR)
+				const differences = diffSnapshots(treeSnapshot(scaleTree()), local, { identity: false })
 
-			return `${String(local.size)} entries`
+				if (differences.length > 0) {
+					fail(`${String(differences.length)} differences: ${differences.slice(0, 10).join("; ")}`)
+				}
+
+				state.scaleBaseline = local
+
+				return `${String(local.size)} entries`
+			})
+		}
+
+		const failed = state.scale
+
+		if (state.scaleBaseline !== undefined || failed === undefined) {
+			return
+		}
+
+		delete state.scale
+		await findings.check("the scale pair removed at once after PS1 or PS2 failed (the update runs without it)", async () => {
+			await removePair(failed)
+
+			return failed.name
 		})
 	}
 
@@ -318,9 +359,9 @@ export function realWorldFor(chain: Chain, arch: string): RealWorld {
 		}
 
 		await findings.check(`PN1 ${NAMES_PAIR} (twoWay): the first pass, then two more on request (syncNow)`, async () => {
-			const pair = await addPair(NAMES_PAIR, "twoWay", await cloud.dirId(cloudNames))
-
-			state.names = pair
+			const pair = await addPair(NAMES_PAIR, "twoWay", await cloud.dirId(cloudNames), added => {
+				state.names = added
+			})
 
 			const first = await settled(pair, 0, NAMES_FIRST_PASS_MS)
 
@@ -578,7 +619,7 @@ export function realWorldFor(chain: Chain, arch: string): RealWorld {
 
 		await findings.check("the real-world pairs removed before P11 (their files stay)", async () => {
 			for (const pair of pairs) {
-				ok("removePair", await desktop<DesktopSyncResult<null>>(chain.page(), `window.desktop.sync.removePair(${json(pair.id)})`))
+				await removePair(pair)
 			}
 
 			return pairs.map(pair => pair.name).join(", ")

@@ -53,8 +53,9 @@
 # and Secret Service of its own.
 #
 # Gap 6 (scripts/ci/e2e/chains/realWorld.ts), chain P on linux-x64-deb, win-x64-nsis and mac-arm64-dmg: a remoteToLocal
-# pair pulls the permanent scale tree (filen-desktop-e2e-fixtures/scale-v1, about 8,500 entries, outside the swept
-# root), which job `session` and the sweep check against its manifest once a run and input `scale_reseed` writes anew;
+# pair pulls the permanent scale tree (filen-desktop-e2e-fixtures/scale-v1.<time>, the generation its manifest names,
+# about 8,500 entries, outside the swept root), which job `session` and the sweep check against its manifest once a
+# run (unseeded: a warning) and input `scale_reseed` writes anew as a new generation, run alone;
 # and, with input `names_check` (off: it expects an sdk-rs release not out yet), a two-way pair of hostile names.
 #
 # Spikes (by hand only, input `spike`) answer one question each, on one entry per OS, instead of the update scenarios;
@@ -173,7 +174,7 @@ on:
           - real
         default: auto
       scale_reseed:
-        description: Write the permanent scale tree and its manifest anew before the tests (session job), then check it
+        description: Write a new generation of the permanent scale tree and its manifest before the tests (session job), then check it; refused while another run is active
         type: boolean
         default: false
       names_check:
@@ -256,6 +257,19 @@ jobs:
           echo "other active Desktop E2E runs: ${active}; this run logs in at most ${LOGINS} times"
           if [ "${active}" -ge "${MAX_OTHER_RUNS}" ]; then
             echo "::error::${active} other Desktop E2E runs are active; dispatch again once one finishes (the account allows 90 logins an hour)"
+            exit 1
+          fi
+      # A reseed removes the scale tree's generations older than the one it replaces (scripts/ci/e2e/scaleTree.ts), so
+      # it runs alone: no other run may be reading one of them, nor reseeding at the same time.
+      - name: Run a scale reseed alone
+        if: inputs.scale_reseed && github.workflow == 'Desktop E2E'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          active="$(gh run list --repo "${GITHUB_REPOSITORY}" --workflow desktop-e2e.yml --limit 50 --json databaseId,status \
+            --jq "[.[] | select(.status != \"completed\" and .databaseId != ${GITHUB_RUN_ID})] | length")"
+          if [ "${active}" -gt 0 ]; then
+            echo "::error::${active} other Desktop E2E runs are active; dispatch scale_reseed again once none is"
             exit 1
           fi
 
@@ -344,7 +358,7 @@ jobs:
         with:
           path: ${{ runner.temp }}/e2e-cache/quota.sealed
           key: desktop-e2e-session-v1-quota-${{ github.run_id }}-${{ github.run_attempt }}
-      # Once a run, before the tests: the scale tree against its manifest (written anew with scale_reseed). A broken tree
+      # Once a run, before the tests: the scale tree against its manifest (a new generation with scale_reseed). A broken tree
       # fails chain P's scale checks by name, never the other deep jobs, so this step does not fail the job.
       - name: The scale fixture tree
         continue-on-error: true
@@ -881,7 +895,7 @@ jobs:
           FILEN_DESKTOP_E2E_SESSION_KEY: ${{ secrets.FILEN_DESKTOP_E2E_SESSION_KEY }}
           FILEN_DESKTOP_E2E_SESSION_DIR: ${{ runner.temp }}/e2e-session
         run: node scripts/ci/e2eCloud.ts sweep
-      # The second of the run's two checks of the scale tree: nothing in the run changed it.
+      # The second of the run's two checks of the scale tree: nothing in the run changed it. Unseeded is a warning.
       - name: Check the scale fixture tree
         timeout-minutes: 8
         env:

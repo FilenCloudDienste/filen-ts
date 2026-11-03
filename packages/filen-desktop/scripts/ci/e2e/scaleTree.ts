@@ -6,17 +6,19 @@ import { seededBytes, type Tree, writeTree } from "./fixtures.ts"
 import { cloudSnapshot, diffSnapshots, type Snapshot, type SnapshotNode } from "./snapshot.ts"
 
 // The permanent scale tree: 8,200 small files (0 to 4 KiB, one in twenty empty) in 300 directories three levels deep,
-// about 8,500 entries, the same bytes whenever it is generated. It lives in the cloud outside the swept root, seeded
-// once (e2eCloud.ts fixtures --reseed, dispatch input scale_reseed) and only ever read: chain P pulls it into a
-// remoteToLocal pair (chains/realWorld.ts). Its manifest, next to it, records every entry as it was seeded
-// ("path:size:uuid", a directory's path ending in "/"), so a run can tell a damaged or reseeded tree from the one it
-// knows without downloading it.
+// about 8,500 entries, the same bytes whenever it is generated. It lives in the cloud outside the swept root, written
+// by a reseed (e2eCloud.ts fixtures --reseed, dispatch input scale_reseed) and otherwise only ever read: chain P pulls
+// it into a remoteToLocal pair (chains/realWorld.ts). Runs overlap, so a reseed never touches a tree one may be
+// reading: it writes a new generation (scale-v1.<time>) and then the manifest, which names the current generation and
+// records every entry of it as it was seeded ("path:size:uuid", a directory's path ending in "/"), so a run can tell a
+// damaged tree from the one it knows without downloading it. Until the first reseed there is no manifest: the tree is
+// unseeded, which is a warning, not a failure.
 
 export const FIXTURES_ROOT = "filen-desktop-e2e-fixtures"
 export const SCALE_NAME = "scale-v1"
-export const SCALE_DIR = `${FIXTURES_ROOT}/${SCALE_NAME}`
 export const SCALE_MANIFEST_NAME = `${SCALE_NAME}.manifest.json`
 export const SCALE_MANIFEST = `${FIXTURES_ROOT}/${SCALE_MANIFEST_NAME}`
+export const SCALE_UNSEEDED = `${FIXTURES_ROOT} has no ${SCALE_MANIFEST_NAME}: seed the scale tree with a dispatch with scale_reseed`
 export const SCALE_FILES = 8200
 // 6 at the top, 7 in each, 6 in each of those: 6 + 42 + 252.
 const FANOUT = [6, 7, 6] as const
@@ -80,25 +82,41 @@ export function layoutSnapshot(layout: ScaleLayout = scaleLayout()): Snapshot {
 }
 
 export interface ScaleManifest {
-	version: 1
+	version: 2
+	// The current generation's directory below FIXTURES_ROOT.
+	dir: string
 	entries: string[]
 }
 
-export function manifestOf(entries: readonly CloudEntry[]): ScaleManifest {
+// A generation's directory below FIXTURES_ROOT: the name and the time it was written.
+export function scaleGeneration(at: Date): string {
+	return `${SCALE_NAME}.${at.toISOString().replace(/[:.]/g, "-")}`
+}
+
+const isGeneration = (name: string) => name.startsWith(`${SCALE_NAME}.`) && name !== SCALE_MANIFEST_NAME && !name.includes("/")
+
+export function manifestOf(dir: string, entries: readonly CloudEntry[]): ScaleManifest {
 	return {
-		version: 1,
+		version: 2,
+		dir,
 		entries: entries
 			.map(entry => `${entry.path}${entry.isDir ? "/" : ""}:${String(entry.size)}:${entry.id}`)
 			.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
 	}
 }
 
-// A manifest as a list-only snapshot (cloudSnapshot listOnly: the uuid is the identity).
-export function manifestSnapshot(text: string): Snapshot {
+export interface ScaleCurrent {
+	// The generation's path in the cloud.
+	dir: string
+	// Its entries as a list-only snapshot (cloudSnapshot listOnly: the uuid is the identity).
+	snapshot: Snapshot
+}
+
+export function readManifest(text: string): ScaleCurrent {
 	const parsed = JSON.parse(text) as Partial<ScaleManifest>
 
-	if (parsed.version !== 1 || !Array.isArray(parsed.entries)) {
-		fail(`${SCALE_MANIFEST_NAME} is not a version 1 manifest`)
+	if (parsed.version !== 2 || typeof parsed.dir !== "string" || !isGeneration(parsed.dir) || !Array.isArray(parsed.entries)) {
+		fail(`${SCALE_MANIFEST_NAME} is not a version 2 manifest naming a ${SCALE_NAME}.<time> generation`)
 	}
 
 	const snapshot: Snapshot = new Map()
@@ -119,62 +137,73 @@ export function manifestSnapshot(text: string): Snapshot {
 		snapshot.set(isDir ? name.slice(0, -1) : name, { kind: isDir ? "dir" : "file", size, sha256: null, identity: id })
 	}
 
-	return snapshot
+	return { dir: `${FIXTURES_ROOT}/${parsed.dir}`, snapshot }
 }
 
-// The tree in the cloud against its manifest (uuids included: a reseed or a rewrite shows) and against the layout
-// (kinds and sizes); fails naming the first differences.
-export async function verifyScale(cloud: Cloud, work: string): Promise<string> {
+// The current generation as the manifest names it; null while none was ever seeded.
+export async function currentScale(cloud: Cloud): Promise<ScaleCurrent | null> {
 	const siblings = (await cloud.list(FIXTURES_ROOT, false)) ?? []
-	const missing = [SCALE_NAME, SCALE_MANIFEST_NAME].filter(name => !siblings.some(entry => entry.path === name))
 
-	if (missing.length > 0) {
-		fail(`${FIXTURES_ROOT} has no ${missing.join(" or ")}: seed it with a dispatch with scale_reseed`)
+	if (!siblings.some(entry => !entry.isDir && entry.path === SCALE_MANIFEST_NAME)) {
+		return null
 	}
 
-	const manifest = manifestSnapshot((await cloud.cat(SCALE_MANIFEST)).toString("utf8"))
-	const listed = (await cloudSnapshot(cloud, SCALE_DIR, work, { listOnly: true })) ?? fail(`${SCALE_DIR} is gone`)
+	return readManifest((await cloud.cat(SCALE_MANIFEST)).toString("utf8"))
+}
+
+// The current generation in the cloud against its manifest (uuids included: a rewrite shows) and against the layout
+// (kinds and sizes); fails naming the first differences.
+export async function verifyScale(cloud: Cloud, work: string, current: ScaleCurrent): Promise<string> {
+	const listed = (await cloudSnapshot(cloud, current.dir, work, { listOnly: true })) ?? fail(`${current.dir} is gone`)
 	const name = (differences: string[]) =>
 		`${differences.slice(0, 10).join("; ")}${differences.length > 10 ? ` and ${String(differences.length - 10)} more` : ""}`
-	const againstManifest = diffSnapshots(manifest, listed, { identity: true })
+	const againstManifest = diffSnapshots(current.snapshot, listed, { identity: true })
 
 	if (againstManifest.length > 0) {
-		fail(`${SCALE_DIR} differs from its manifest (${String(againstManifest.length)}): ${name(againstManifest)}`)
+		fail(`${current.dir} differs from its manifest (${String(againstManifest.length)}): ${name(againstManifest)}`)
 	}
 
 	const againstLayout = diffSnapshots(layoutSnapshot(), listed, { identity: false })
 
 	if (againstLayout.length > 0) {
-		fail(`${SCALE_DIR} is not the generated tree (${String(againstLayout.length)}): ${name(againstLayout)}`)
+		fail(`${current.dir} is not the generated tree (${String(againstLayout.length)}): ${name(againstLayout)}`)
 	}
 
-	return `${String(listed.size)} entries match the manifest (uuids included) and the generated tree`
+	return `${current.dir}: ${String(listed.size)} entries match the manifest (uuids included) and the generated tree`
 }
 
-// The tree written anew: the old one to the trash, the generated tree uploaded, listed and checked
-// against the layout, the manifest written from that listing.
+// The generations a reseed removes once its own is current: every other one but the generation the manifest named
+// before it, which a run that started earlier may still be pulling. The plan job runs a reseed only while no other
+// run is active, so no run can still read an older one.
+export function staleGenerations(siblings: readonly CloudEntry[], keep: readonly string[]): string[] {
+	return siblings.filter(entry => entry.isDir && isGeneration(entry.path) && !keep.includes(entry.path)).map(entry => entry.path)
+}
+
+// A new generation: the generated tree uploaded, listed and checked against the layout, the manifest pointed at it
+// from that listing, then the stale generations to the trash. Nothing a run may read is changed before the manifest
+// is: a reseed cut short leaves the current generation as it was (its partial upload goes with the next reseed).
 export async function reseedScale(cloud: Cloud, work: string): Promise<string> {
 	const local = mkdtempSync(path.join(work, "scale-"))
 
 	try {
 		const layout = scaleLayout()
+		// A manifest that does not read is replaced like a missing one.
+		const previous = await currentScale(cloud).catch(() => null)
+		const generation = scaleGeneration(new Date())
+		const dir = `${FIXTURES_ROOT}/${generation}`
 
 		writeTree(local, scaleTree(layout))
-		// The manifest is replaced below (a new version); until then it no longer matches, so a reseed cut short fails
-		// every verification instead of passing on half a tree.
-		await cloud.purge(SCALE_DIR)
 
 		const started = Date.now()
 
-		await cloud.upload(local, SCALE_DIR, RESEED)
+		await cloud.upload(local, dir, RESEED)
 
-		const entries = (await cloud.list(SCALE_DIR)) ?? fail(`${SCALE_DIR} is not there after the upload`)
-		const listed = new Map(entries.map(entry => [entry.path, entry]))
+		const entries = (await cloud.list(dir)) ?? fail(`${dir} is not there after the upload`)
 		const differences = diffSnapshots(
 			layoutSnapshot(layout),
 			new Map(
-				[...listed].map(([relPath, entry]): [string, SnapshotNode] => [
-					relPath,
+				entries.map((entry): [string, SnapshotNode] => [
+					entry.path,
 					{ kind: entry.isDir ? "dir" : "file", size: entry.size, sha256: null, identity: null }
 				])
 			),
@@ -187,10 +216,17 @@ export async function reseedScale(cloud: Cloud, work: string): Promise<string> {
 
 		const file = path.join(work, SCALE_MANIFEST_NAME)
 
-		writeFileSync(file, `${JSON.stringify(manifestOf(entries), null, "\t")}\n`)
+		writeFileSync(file, `${JSON.stringify(manifestOf(generation, entries), null, "\t")}\n`)
 		await cloud.uploadFile(file, SCALE_MANIFEST)
 
-		return `${String(entries.length)} entries uploaded in ${String(Math.round((Date.now() - started) / 1000))} s; manifest written`
+		const keep = [generation, ...(previous === null ? [] : [previous.dir.slice(FIXTURES_ROOT.length + 1)])]
+		const stale = staleGenerations((await cloud.list(FIXTURES_ROOT, false)) ?? [], keep)
+
+		for (const old of stale) {
+			await cloud.purge(`${FIXTURES_ROOT}/${old}`)
+		}
+
+		return `${generation}: ${String(entries.length)} entries uploaded in ${String(Math.round((Date.now() - started) / 1000))} s; manifest written; ${stale.length === 0 ? "nothing" : stale.join(", ")} to the trash`
 	} finally {
 		rmSync(local, { recursive: true, force: true })
 	}

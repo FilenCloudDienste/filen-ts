@@ -27,7 +27,7 @@ import {
 	writeCached,
 	writeHandOff
 } from "./e2e/session.ts"
-import { reseedScale, SCALE_DIR, verifyScale } from "./e2e/scaleTree.ts"
+import { currentScale, reseedScale, type ScaleCurrent, SCALE_NAME, SCALE_UNSEEDED, verifyScale } from "./e2e/scaleTree.ts"
 import { cloudSnapshot, diffSnapshots } from "./e2e/snapshot.ts"
 import { authVersionProblem } from "./legacy.ts"
 import { errorMessage, fail, section } from "./support.ts"
@@ -42,8 +42,9 @@ import { errorMessage, fail, section } from "./support.ts"
 //   sweep      with the handed session: delete this run's directories and any older than a day, then empty the trash
 //   pins       with the handed session: the test account's auth version is one every old client the run signs in or
 //              seeds (E2E_SIGN_IN_PINS, the plan's `pins`) can sign in to; no login, no request
-//   fixtures   with the handed session: check the permanent scale tree against its manifest (scripts/ci/e2e/scaleTree.ts);
-//              --reseed writes it anew first (dispatch input scale_reseed)
+//   fixtures   with the handed session: check the permanent scale tree's current generation against its manifest
+//              (scripts/ci/e2e/scaleTree.ts; unseeded is a warning); --reseed writes a new generation first (dispatch
+//              input scale_reseed)
 //
 //   node scripts/ci/e2eCloud.ts <session --slot <test|quota>|selftest|sweep|pins|fixtures [--reseed]> [--artifacts <dir>]
 //
@@ -248,15 +249,33 @@ async function sweep(cloud: Cloud): Promise<void> {
 }
 
 // The scale tree checked once a run (the session job before the tests, the sweep after them), written anew only when
-// asked.
+// asked. Unseeded is a warning: only a tree that exists and does not match its manifest fails.
 async function fixtures(cloud: Cloud, work: string, artifacts: string, redact: (text: string) => string, reseed: boolean): Promise<void> {
 	const findings = createFindings("scale-fixture", artifacts, redact)
 
 	if (reseed) {
-		await findings.must(`${SCALE_DIR} written anew from the generator, with its manifest`, () => reseedScale(cloud, work))
+		await findings.must(`${SCALE_NAME}: a new generation written from the generator, with its manifest`, () => reseedScale(cloud, work))
 	}
 
-	await findings.check(`${SCALE_DIR} matches its manifest and the generated tree (listing only)`, () => verifyScale(cloud, work))
+	const read: { current?: ScaleCurrent | null } = {}
+
+	await findings.check(`${SCALE_NAME}: the manifest reads`, async () => {
+		read.current = await currentScale(cloud)
+
+		return read.current?.dir ?? "none yet"
+	})
+
+	const current = read.current
+
+	if (current === null) {
+		findings.info(`${SCALE_NAME} unseeded`, SCALE_UNSEEDED)
+		console.log(`::warning::${SCALE_UNSEEDED}`)
+	} else if (current !== undefined) {
+		await findings.check(`${SCALE_NAME} matches its manifest and the generated tree (listing only)`, () =>
+			verifyScale(cloud, work, current)
+		)
+	}
+
 	findings.finish()
 }
 
