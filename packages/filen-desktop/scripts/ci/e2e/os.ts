@@ -14,7 +14,7 @@ import {
 	sha256Through,
 	uninstallDeb
 } from "./linux.ts"
-import { macOs } from "./mac.ts"
+import { MAC_CHOOSER_TIMEOUT_MS, macOs } from "./mac.ts"
 import { windowsOs } from "./windows.ts"
 
 // What the deep chains need from the desktop they run on, behind one interface per OS (linux.ts, windows.ts): the
@@ -23,7 +23,7 @@ import { windowsOs } from "./windows.ts"
 
 // How long the app's directory call may wait for its dialog: what any driver below takes at most (finding the dialog,
 // answering it, seeing it close or cancelling it; macOS waits twice for a panel that never came up), plus a margin.
-export const CHOOSER_BUDGET_MS = 4 * 60 * 1000
+export const CHOOSER_BUDGET_MS = Math.max(4 * 60 * 1000, process.platform === "darwin" ? 2 * MAC_CHOOSER_TIMEOUT_MS + 60_000 : 0)
 
 export interface DriveLocation {
 	mountPoint: string | null

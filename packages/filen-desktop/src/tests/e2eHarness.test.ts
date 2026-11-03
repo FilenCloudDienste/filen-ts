@@ -4,6 +4,7 @@ import os from "node:os"
 import { inflateSync } from "node:zlib"
 import path from "node:path"
 import type { DesktopSyncPair, DesktopSyncPhase } from "@filen/shared/desktop"
+import type { Page } from "playwright-core"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import {
 	fixtureTree,
@@ -53,8 +54,9 @@ import {
 import { LEGACY_KEYS, legacySession } from "../../src/main/legacyData.ts"
 import { diffSnapshots, localSnapshot } from "../../scripts/ci/e2e/snapshot.ts"
 import { isChromiumChild } from "../../scripts/ci/targets.ts"
-import { chooserRetries } from "../../scripts/ci/e2e/mac.ts"
-import { CHOOSER_BUDGET_MS } from "../../scripts/ci/e2e/os.ts"
+import { chooserRetries, MAC_CHOOSER_TIMEOUT_MS, panelWaitS } from "../../scripts/ci/e2e/mac.ts"
+import { CHOOSER_BUDGET_MS, type DesktopOs } from "../../scripts/ci/e2e/os.ts"
+import { chooseThrough } from "../../scripts/ci/e2e/extraPair.ts"
 
 const dirs: string[] = []
 
@@ -656,7 +658,91 @@ describe("the macOS folder chooser", () => {
 		expect(chooserRetries(1, false, "execution error: Not authorized to send Apple events to System Events. (-1743)")).toBe(false)
 	})
 
+	it("names the panel's real wait, and retries on it whatever its length", () => {
+		expect(chooserRetries(1, false, "execution error: no open panel on Filen's windows within 150 s (-2700)")).toBe(true)
+	})
+
+	it("waits for the panel by wall clock, longest on Intel, where the first panel of a launch is slow", () => {
+		expect(panelWaitS("x64")).toBe(150)
+		expect(panelWaitS("arm64")).toBe(30)
+		expect(MAC_CHOOSER_TIMEOUT_MS).toBe((panelWaitS(process.arch) + 60) * 1000)
+	})
+
 	it("gives the app's call the time of both waits", () => {
-		expect(CHOOSER_BUDGET_MS).toBeGreaterThan(2 * 90_000)
+		expect(CHOOSER_BUDGET_MS).toBeGreaterThanOrEqual(4 * 60 * 1000)
+
+		if (process.platform === "darwin") {
+			expect(CHOOSER_BUDGET_MS).toBeGreaterThan(2 * MAC_CHOOSER_TIMEOUT_MS)
+		}
+	})
+})
+
+describe("the folder chooser raced against the app's call", () => {
+	const ok = { status: "ok", id: "root-1", path: "/tmp/pair", name: "pair", warnings: [] }
+
+	// A page whose chooseLocalDirectory answers with `answer` after `answerMs`, and an OS whose driver finishes after
+	// `driverMs` (or fails with `driverError`); screen dumps recorded.
+	function harness(answer: unknown, answerMs: number, driverMs: number, driverError?: string) {
+		const dumps: string[] = []
+		const page = {
+			evaluate: () =>
+				new Promise(resolve =>
+					setTimeout(() => {
+						resolve(JSON.stringify({ value: answer }))
+					}, answerMs)
+				)
+		}
+		const desktopOs = {
+			chooseDirectory: () =>
+				new Promise<void>((resolve, reject) =>
+					setTimeout(() => {
+						if (driverError === undefined) {
+							resolve()
+						} else {
+							reject(new Error(driverError))
+						}
+					}, driverMs)
+				),
+			screenDump: (file: string) => {
+				dumps.push(path.basename(file))
+
+				return Promise.resolve()
+			}
+		}
+
+		return {
+			dumps,
+			chain: { page: () => page as unknown as Page, os: desktopOs as unknown as DesktopOs }
+		}
+	}
+
+	it("returns the chosen directory once the driver is done, even when the app answered first", async () => {
+		const { chain } = harness(ok, 1, 20)
+
+		await expect(chooseThrough(chain, "/tmp/pair", "/tmp/evidence")).resolves.toEqual(ok)
+	})
+
+	it("fails at once when the call answers without a directory while the driver still waits for its dialog", async () => {
+		const { chain, dumps } = harness({ status: "canceled" }, 1, 2000)
+		const started = Date.now()
+
+		await expect(chooseThrough(chain, "/tmp/pair", "/tmp/evidence")).rejects.toThrow(
+			'chooseLocalDirectory answered while the chooser still waited for its dialog: {"status":"canceled"}'
+		)
+		expect(Date.now() - started).toBeLessThan(1000)
+		expect(dumps).toEqual(["evidence-answered-early.png"])
+	})
+
+	it("fails with the driver's error when the driver fails first", async () => {
+		const { chain } = harness(ok, 1000, 1, "the open panel: no open panel on Filen's windows within 30 s")
+
+		await expect(chooseThrough(chain, "/tmp/pair", "/tmp/evidence")).rejects.toThrow("no open panel")
+	})
+
+	it("fails on an answer other than ok that came after the driver", async () => {
+		const refused = { status: "refused", path: "/tmp/pair", problem: "notADirectory" }
+		const { chain } = harness(refused, 20, 1)
+
+		await expect(chooseThrough(chain, "/tmp/pair", "/tmp/evidence")).rejects.toThrow(`chooseLocalDirectory: ${JSON.stringify(refused)}`)
 	})
 })

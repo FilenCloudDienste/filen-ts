@@ -29,6 +29,51 @@ export interface ExtraPair {
 	remoteRoot: string
 }
 
+// The app's chooseLocalDirectory answered with `dir` through the OS's folder chooser; evidence files start with
+// `evidence`. The app's call is raced against the driver: a call that answers without a directory (canceled, refused or
+// failed) while the driver still waits for a dialog fails at once, since no dialog is coming. An ok answer can come
+// before the driver saw its dialog close; the driver's own outcome then decides.
+export async function chooseThrough(
+	chain: Pick<Chain, "page" | "os">,
+	dir: string,
+	evidence: string
+): Promise<Extract<DesktopSyncLocalRootChoice, { status: "ok" }>> {
+	const choice = desktop<DesktopSyncLocalRootChoice>(chain.page(), "window.desktop.sync.chooseLocalDirectory()", CHOOSER_BUDGET_MS)
+	const answered = choice.then(
+		chosen => ({ chosen }),
+		(error: unknown) => ({ error })
+	)
+	const driven = chain.os.chooseDirectory(CHOOSER_TITLE, dir, evidence).then(() => null)
+
+	void driven.catch(() => undefined)
+
+	const early = await Promise.race([
+		driven,
+		answered.then(answer => ("chosen" in answer && answer.chosen.status === "ok" ? driven : answer))
+	])
+
+	if (early !== null) {
+		await chain.os.screenDump(`${evidence}-answered-early.png`)
+		fail(
+			`chooseLocalDirectory answered while the chooser still waited for its dialog: ${"chosen" in early ? json(early.chosen) : errorMessage(early.error)}`
+		)
+	}
+
+	const answer = await answered
+
+	if ("error" in answer) {
+		await chain.os.screenDump(`${evidence}-no-answer.png`)
+
+		throw answer.error
+	}
+
+	if (answer.chosen.status !== "ok") {
+		fail(`chooseLocalDirectory: ${json(answer.chosen)} (the chooser's steps: ${path.basename(evidence)}-*.png)`)
+	}
+
+	return answer.chosen
+}
+
 // `remoteRoot` is the cloud directory's uuid. `record` learns of the pair as soon as it exists, so that a failed start
 // still leaves it for removal.
 export async function addPairThroughChooser(
@@ -41,20 +86,7 @@ export async function addPairThroughChooser(
 	// The master-key reminder a relaunch brings back is modal over the window the panel opens on: put off when it shows.
 	await putOffKeysReminder(chain.page(), 1000).catch((error: unknown) => console.log(`the master-key reminder: ${errorMessage(error)}`))
 
-	const choice = desktop<DesktopSyncLocalRootChoice>(chain.page(), "window.desktop.sync.chooseLocalDirectory()", CHOOSER_BUDGET_MS)
-
-	void choice.catch(() => undefined)
-	await chain.os.chooseDirectory(CHOOSER_TITLE, pair.localRoot, evidence)
-
-	const chosen = await choice.catch(async (error: unknown) => {
-		await chain.os.screenDump(`${evidence}-no-answer.png`)
-
-		throw error
-	})
-
-	if (chosen.status !== "ok") {
-		fail(`chooseLocalDirectory: ${json(chosen)} (the chooser's steps: ${path.basename(evidence)}-*.png)`)
-	}
+	const chosen = await chooseThrough(chain, pair.localRoot, evidence)
 
 	const added = ok(
 		"addPair",

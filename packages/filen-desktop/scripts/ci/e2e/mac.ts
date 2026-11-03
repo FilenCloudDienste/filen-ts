@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync } from "node:fs"
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { fail, runBounded } from "../support.ts"
@@ -13,9 +13,19 @@ import type { DesktopOs } from "./os.ts"
 // uninstall a user does (the app moved out of /Applications).
 
 const TOOL_TIMEOUT_MS = 30_000
-const CHOOSER_TIMEOUT_MS = 90_000
-// The chooser's error when no panel came up on the app's windows.
-const NO_PANEL = "no open panel on Filen's windows within 30 s"
+
+// How long the chooser waits for the open panel to come up, by wall clock (System Events calls take about 1.5 s each
+// on Intel runners, so a count of polls is no measure). The first panel of a launch on an Intel runner has taken over
+// 30 s (and in one run over 140 s), every later one about 6 s; arm64 runners show each within 6 s.
+export function panelWaitS(arch: string): number {
+	return arch === "x64" ? 150 : 30
+}
+
+const PANEL_WAIT_S = panelWaitS(process.arch)
+// The script's own bound: the panel's wait plus a minute for Go to Folder, the path, Open and the panel closing.
+export const MAC_CHOOSER_TIMEOUT_MS = (PANEL_WAIT_S + 60) * 1000
+// The chooser's error when no panel came up on the app's windows (the script names the wait after it).
+const NO_PANEL = "no open panel on Filen's windows within"
 const REPORTS = path.join(os.homedir(), "Library", "Logs", "DiagnosticReports")
 
 // Answers the open panel of process "Filen" (a sheet on its window, or a window of its own): Go to Folder
@@ -30,25 +40,37 @@ on panelOf(theProcess)
 			end repeat
 			repeat with theWindow in windows
 				if exists (button "Open" of theWindow) then return theWindow
+				try
+					if subrole of theWindow is in {"AXDialog", "AXSystemDialog"} then return theWindow
+				end try
 			end repeat
 		end tell
 	end tell
 	return missing value
 end panelOf
 
+on clockNow()
+	return current date
+end clockNow
+
 on run argv
 	set thePath to item 1 of argv
+	set panelWait to (item 2 of argv) as integer
 	with timeout of 60 seconds
 		tell application "System Events"
 			set theProcess to first process whose name is "Filen"
 			set frontmost of theProcess to true
+			try
+				perform action "AXRaise" of window 1 of theProcess
+			end try
 			set thePanel to missing value
-			repeat 60 times
+			set deadline to (my clockNow()) + panelWait
+			repeat while (my clockNow()) < deadline
 				set thePanel to my panelOf(theProcess)
 				if thePanel is not missing value then exit repeat
 				delay 0.5
 			end repeat
-			if thePanel is missing value then error "${NO_PANEL}"
+			if thePanel is missing value then error "${NO_PANEL} " & panelWait & " s"
 			keystroke "g" using {command down, shift down}
 			delay 1
 			keystroke thePath
@@ -73,6 +95,43 @@ end run
 // Escape would answer that call, and the second attempt would wait for a panel nothing opens.
 export function chooserRetries(attempt: number, timedOut: boolean, why: string): boolean {
 	return attempt === 1 && (timedOut || why.includes(NO_PANEL))
+}
+
+// What process "Filen" shows System Events when no panel came up: its main process's pid, then each window's name,
+// role, subrole and sheet count.
+const WINDOWS_DUMP = `
+tell application "System Events"
+	set theProcess to first process whose name is "Filen"
+	set theLines to {"pid " & (unix id of theProcess)}
+	repeat with theWindow in windows of theProcess
+		try
+			set end of theLines to "window " & quoted form of ((name of theWindow) as text) & ", role " & ((role of theWindow) as text) & ", subrole " & ((subrole of theWindow) as text) & ", sheets " & ((count of sheets of theWindow) as text)
+		on error theError
+			set end of theLines to "window (unreadable: " & theError & ")"
+		end try
+	end repeat
+end tell
+set AppleScript's text item delimiters to linefeed
+return theLines as text
+`
+
+// Evidence for a panel that never came up, beside `evidence`: the app's windows as System Events sees them, and a
+// 3 s sample of its main process, which shows whether main is inside the panel's setup or idle (never asked).
+async function noPanelEvidence(evidence: string): Promise<string> {
+	const windows = await runBounded("osascript", ["-"], TOOL_TIMEOUT_MS, { input: WINDOWS_DUMP })
+	const dump = windows.status === 0 ? windows.stdout.trim() : `osascript: ${windows.timedOut ? "timed out" : windows.stderr.trim()}`
+
+	writeFileSync(`${evidence}-windows.txt`, `${dump}\n`)
+
+	const pid = /^pid (\d+)$/m.exec(dump)?.[1]
+
+	if (pid === undefined) {
+		return `windows: ${dump}; no pid to sample`
+	}
+
+	const sampled = await runBounded("sample", [pid, "3", "-file", `${evidence}-sample.txt`], TOOL_TIMEOUT_MS)
+
+	return `windows: ${dump.split("\n").slice(1).join(" | ") || "none"}; sample of ${pid}: ${sampled.status === 0 ? path.basename(`${evidence}-sample.txt`) : sampled.timedOut ? "timed out" : sampled.stderr.trim()}`
 }
 
 // An error that means the runner gave this process no Accessibility (or AppleEvents to System Events).
@@ -113,7 +172,7 @@ export const macOs: DesktopOs = {
 
 	async chooseDirectory(_title, dir, evidence) {
 		for (let attempt = 1; ; attempt++) {
-			const result = await runBounded("osascript", ["-", dir], CHOOSER_TIMEOUT_MS, { input: CHOOSER })
+			const result = await runBounded("osascript", ["-", dir, String(PANEL_WAIT_S)], MAC_CHOOSER_TIMEOUT_MS, { input: CHOOSER })
 
 			console.log(result.stdout.trim())
 
@@ -126,6 +185,12 @@ export const macOs: DesktopOs = {
 			await macOs.screenDump(shot)
 
 			const why = result.timedOut ? "timed out" : result.stderr.trim()
+
+			if (why.includes(NO_PANEL)) {
+				const suffix = attempt === 1 ? "" : `-${String(attempt)}`
+
+				console.log(`no open panel: ${await noPanelEvidence(`${evidence}-no-panel${suffix}`)}`)
+			}
 
 			if (chooserRetries(attempt, result.timedOut, why)) {
 				console.log(`the open panel: ${why}; waiting for it once more (see ${path.basename(shot)})`)

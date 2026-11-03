@@ -7,11 +7,10 @@ import type {
 	DesktopMountsResult,
 	DesktopPrefs,
 	DesktopServeCredentials,
-	DesktopSyncLocalRootChoice,
 	DesktopSyncPlan,
 	DesktopSyncResult
 } from "@filen/shared/desktop"
-import { errorMessage, fail, freePort, waitFor } from "../../support.ts"
+import { errorMessage, fail, freePort, runBounded, waitFor } from "../../support.ts"
 import {
 	desktop,
 	desktopCall,
@@ -38,7 +37,7 @@ import { runFileLockCheck } from "./fileLockCheck.ts"
 import { runProxyChecks } from "./proxyCheck.ts"
 import { realWorldFor } from "./realWorld.ts"
 import { fixtureTree, PREVIOUS_DELTAS, PREVIOUS_PAIRS, treeSnapshot, writeTree } from "../fixtures.ts"
-import { CHOOSER_BUDGET_MS } from "../os.ts"
+import { chooseThrough } from "../extraPair.ts"
 import { cloudSnapshot, diffSnapshots, snapshotText, type Snapshot } from "../snapshot.ts"
 import { START_TIMEOUT_MS, tail, type UpdateOptions } from "../update.ts"
 import {
@@ -96,7 +95,8 @@ import {
 // Linux deb and AppImage, Windows NSIS and macOS dmg; what differs per OS (the native folder chooser, the drive as the
 // OS sees it, quitting, uninstalling) is behind scripts/ci/e2e/os.ts.
 
-const CHOOSER_TITLE = "Choose a directory to sync"
+// How long the drive's mount may take to answer a directory read before the first chooser.
+const DRIVE_SETTLE_MS = 30_000
 const CONVERGE_TIMEOUT_MS = 8 * 60 * 1000
 const DOMAIN_TIMEOUT_MS = 60_000
 const PREFS: DesktopPrefs = { minimizeToTray: false, startMinimized: false, launchAtLogin: false, notifications: false }
@@ -284,30 +284,21 @@ export async function runPreviousDeep(options: Omit<UpdateOptions, "hooks">, art
 				return `running at ${serve.url ?? ""}`
 			})
 
+			// The first open panel lists the mounted volumes: on macOS the drive's NFS mount, made seconds ago, answers a
+			// directory read first, so the panel does not wait on a volume still settling.
+			if (target.platform === "mac" && state.drive !== undefined) {
+				const listed = await runBounded("ls", ["-a", state.drive], DRIVE_SETTLE_MS)
+
+				console.log(
+					`the drive at ${state.drive} before the first chooser: ${listed.status === 0 ? "answered" : listed.timedOut ? `no answer within ${String(DRIVE_SETTLE_MS / 1000)} s` : listed.stderr.trim()}`
+				)
+			}
+
 			const pairs: PairState[] = []
 
 			for (const pair of PREVIOUS_PAIRS) {
 				await findings.must(`add pair ${pair.name} (${pair.mode}) through the native folder chooser`, async () => {
-					const evidence = path.join(artifacts, `previous-chooser-${pair.name}`)
-					// The app's call returns once the dialog is answered or cancelled; the driver's own bound plus a margin.
-					const choice = desktop<DesktopSyncLocalRootChoice>(
-						page(),
-						"window.desktop.sync.chooseLocalDirectory()",
-						CHOOSER_BUDGET_MS
-					)
-
-					void choice.catch(() => undefined)
-					await chain.os.chooseDirectory(CHOOSER_TITLE, rootOf(pair.name), evidence)
-
-					const chosen = await choice.catch(async (error: unknown) => {
-						await chain.os.screenDump(`${evidence}-no-answer.png`)
-
-						throw error
-					})
-
-					if (chosen.status !== "ok") {
-						fail(`chooseLocalDirectory: ${json(chosen)} (the chooser's steps: previous-chooser-${pair.name}-*.png)`)
-					}
+					const chosen = await chooseThrough(chain, rootOf(pair.name), path.join(artifacts, `previous-chooser-${pair.name}`))
 
 					const remoteRoot = remoteRoots.get(pair.name) ?? fail(`no remote root for ${pair.name}`)
 					const added = ok(
