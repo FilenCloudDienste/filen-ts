@@ -9,21 +9,24 @@ import useIsOnline from "@/hooks/useIsOnline"
 import useIsAppActive from "@/hooks/useIsAppActive"
 import useAppStore from "@/stores/useApp.store"
 import { useIsAuthed } from "@/lib/auth"
-import { nextOfflineStatus, type OfflineStatus } from "@/components/floatingBar/offlineSlotStatus"
+import useIsConnectionUnverified from "@/hooks/useIsConnectionUnverified"
+import { nextOfflineStatus, resolveConnectionSlotStatus, type OfflineStatus } from "@/components/floatingBar/offlineSlotStatus"
 
 const BACK_ONLINE_DURATION_MS = 2000
 
-export type OfflineSlotStatus = "hidden" | "offline" | "back-online"
+export type OfflineSlotStatus = "hidden" | "offline" | "back-online" | "unverified"
 
 /**
  * Owns the offline state machine for both surfaces (this slot authed, <OfflineBanner /> unauthed):
- * the during-render connectivity transition + the 2s "back-online" decay, plus the root-overlay gates.
+ * the during-render connectivity transition + the 2s "back-online" decay, the certificate-failure state
+ * ("unverified": online, but the connection to Filen couldn't be verified), plus the root-overlay gates.
  * Returns "hidden" when there is nothing to show — online, app backgrounded, or (authed and) the
  * biometric lock hasn't been cleared (so the chip never paints behind the lock overlay). The
  * FloatingBar uses the result both to decide whether to render at all and what the slot shows.
  */
 export function useOfflineSlotStatus(): OfflineSlotStatus {
 	const isOnline = useIsOnline()
+	const connectionUnverified = useIsConnectionUnverified()
 	const isActive = useIsAppActive()
 	const isAuthed = useIsAuthed()
 	const biometricUnlocked = useAppStore(state => state.biometricUnlocked)
@@ -53,7 +56,9 @@ export function useOfflineSlotStatus(): OfflineSlotStatus {
 		}
 	}, [status])
 
-	if (status === "online") {
+	const shown = resolveConnectionSlotStatus(status, connectionUnverified)
+
+	if (shown === "online") {
 		return "hidden"
 	}
 
@@ -67,34 +72,40 @@ export function useOfflineSlotStatus(): OfflineSlotStatus {
 		return "hidden"
 	}
 
-	return status
+	return shown
 }
+
+const SLOT_ICONS = {
+	offline: "cloud-offline-outline",
+	"back-online": "cloud-done-outline",
+	unverified: "warning-outline"
+} as const satisfies Record<Exclude<OfflineSlotStatus, "hidden">, keyof typeof Ionicons.glyphMap>
 
 /**
  * The offline chip for the floating bar — same visual language as the audio/transfers slots
- * (compact row, text-xs, no progress bar). Calm foreground color while offline; a brief green
- * "Back online" confirmation on reconnect. Non-interactive: there is nowhere to navigate.
+ * (compact row, text-xs, no progress bar). Calm foreground color while offline or unverified; a brief
+ * green "Back online" confirmation on reconnect. Non-interactive: there is nowhere to navigate.
  */
 const OfflineSlot = ({ status }: { status: Exclude<OfflineSlotStatus, "hidden"> }) => {
 	const { t } = useTranslation()
 	const textForeground = useResolveClassNames("text-foreground")
 	const textSuccess = useResolveClassNames("text-success")
-	const isOffline = status === "offline"
+	const isBackOnline = status === "back-online"
 
 	return (
 		<View className="flex-1 flex-row items-center min-h-11 px-3 py-2 gap-2 bg-transparent">
 			<Ionicons
-				name={isOffline ? "cloud-offline-outline" : "cloud-done-outline"}
+				name={SLOT_ICONS[status]}
 				size={18}
-				color={isOffline ? textForeground.color : textSuccess.color}
+				color={isBackOnline ? textSuccess.color : textForeground.color}
 				style={{ flexShrink: 0 }}
 			/>
 			<Text
-				className={cn("text-xs shrink", isOffline ? "" : "text-success")}
+				className={cn("text-xs shrink", isBackOnline ? "text-success" : "")}
 				numberOfLines={1}
 				ellipsizeMode="tail"
 			>
-				{isOffline ? t("offline") : t("back_online")}
+				{status === "offline" ? t("offline") : status === "unverified" ? t("connection_unverified") : t("back_online")}
 			</Text>
 		</View>
 	)

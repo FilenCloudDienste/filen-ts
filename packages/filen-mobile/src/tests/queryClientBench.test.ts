@@ -117,7 +117,8 @@ vi.mock("@/lib/serializer", async importOriginal => {
 
 vi.mock("@/lib/sdkErrors", () => ({
 	unwrapSdkError: () => null,
-	isNetworkClassError: () => false
+	isNetworkClassError: () => false,
+	isTlsVerificationError: () => false
 }))
 
 vi.mock("@filen/sdk-rs", () => ({

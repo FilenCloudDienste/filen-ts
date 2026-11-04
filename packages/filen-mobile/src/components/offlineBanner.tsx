@@ -10,22 +10,24 @@ import { useOfflineSlotStatus, type OfflineSlotStatus } from "@/components/float
 const Banner = ({ status }: { status: Exclude<OfflineSlotStatus, "hidden"> }) => {
 	const { t } = useTranslation()
 	const insets = useSafeAreaInsets()
-	const isOffline = status === "offline"
+	const isBackOnline = status === "back-online"
 
 	return (
 		<Animated.View
 			entering={FadeInDown.duration(200)}
 			exiting={FadeOutUp.duration(200)}
 			style={{ paddingTop: insets.top + 8, paddingBottom: 8 }}
-			className={isOffline ? "bg-warning" : "bg-success"}
+			className={isBackOnline ? "bg-success" : "bg-warning"}
 		>
-			<View className="flex-row items-center justify-center bg-transparent">
+			<View className="flex-row items-center justify-center bg-transparent px-4">
 				<Ionicons
-					name={isOffline ? "cloud-offline-outline" : "cloud-done-outline"}
+					name={status === "offline" ? "cloud-offline-outline" : status === "unverified" ? "warning-outline" : "cloud-done-outline"}
 					size={16}
 					color="white"
 				/>
-				<Text className="ml-2 text-sm leading-5 text-white">{isOffline ? t("youre_offline") : t("back_online")}</Text>
+				<Text className="ml-2 shrink text-sm leading-5 text-white">
+					{status === "offline" ? t("youre_offline") : status === "unverified" ? t("secure_connection_unverified") : t("back_online")}
+				</Text>
 			</View>
 		</Animated.View>
 	)

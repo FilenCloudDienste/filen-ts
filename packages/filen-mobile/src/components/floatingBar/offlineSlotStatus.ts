@@ -14,3 +14,18 @@ export function nextOfflineStatus(prev: OfflineStatus, isOnline: boolean): Offli
 
 	return prev === "offline" ? "back-online" : prev
 }
+
+export type ConnectionSlotStatus = OfflineStatus | "unverified"
+
+/**
+ * What the connection indicator shows for a connectivity status and the certificate-failure state.
+ * Offline wins (no request leaves the device); otherwise a rejected certificate replaces both the
+ * steady state and the "back-online" confirmation, since the connection is up but not trusted.
+ */
+export function resolveConnectionSlotStatus(status: OfflineStatus, connectionUnverified: boolean): ConnectionSlotStatus {
+	if (status === "offline" || !connectionUnverified) {
+		return status
+	}
+
+	return "unverified"
+}

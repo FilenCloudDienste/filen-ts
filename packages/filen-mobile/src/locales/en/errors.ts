@@ -45,6 +45,8 @@ export const errors = {
 	metadata_was_not_decrypted: "Some data could not be decrypted.",
 	/** SDK error: a network request failed (covers both Reqwest and Response SDK kinds) */
 	network_error: "Network error. Please check your connection and try again.",
+	/** SDK error and sign-in banner: the server's security certificate failed verification, so the app refused the connection (e.g. a network intercepting traffic, a captive portal) */
+	secure_connection_unverified: "A secure connection to Filen couldn't be verified.",
 	/** SDK error: a network request kept failing after the SDK exhausted its retries */
 	network_retry_failed: "The request failed repeatedly. Please check your connection and try again.",
 	/** SDK error: the server returned an error response */

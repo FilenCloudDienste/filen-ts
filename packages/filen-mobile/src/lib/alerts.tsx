@@ -2,7 +2,8 @@ import * as Burnt from "burnt"
 import { Notifier, NotifierComponents } from "react-native-notifier"
 import View from "@/components/ui/view"
 import { useSafeAreaInsets } from "react-native-safe-area-context"
-import { errorToMessage } from "@/lib/sdkErrors"
+import { errorToMessage, isTlsVerificationError } from "@/lib/sdkErrors"
+import connectionTrust from "@/lib/connectionTrust"
 import i18n from "@/lib/i18n"
 
 const NotifierErrorContainer = ({ children }: { children: React.ReactNode }) => {
@@ -31,6 +32,12 @@ const NotifierErrorContainer = ({ children }: { children: React.ReactNode }) => 
 // stay unchanged; the former `class Alerts` added no value (zero fields, zero `this`).
 export const alerts = {
 	error(message: unknown): void {
+		// An SDK error shown to the user is also how the connection state learns of a certificate failure
+		// outside the query cache (sign-in, transfers, mutations).
+		if (isTlsVerificationError(message)) {
+			connectionTrust.markUnverified()
+		}
+
 		Notifier.showNotification({
 			title: i18n.t("error"),
 			description: errorToMessage(message),

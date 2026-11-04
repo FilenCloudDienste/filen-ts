@@ -37,6 +37,7 @@ vi.mock("@/lib/sqlite", () => ({
 
 vi.mock("@/lib/sdkErrors", () => ({
 	isNetworkClassError: () => false,
+	isTlsVerificationError: () => false,
 	unwrapSdkError: () => null
 }))
 

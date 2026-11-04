@@ -26,7 +26,8 @@ vi.mock("@/lib/paths", () => ({
 
 vi.mock("@/lib/sdkErrors", () => ({
 	unwrapSdkError: () => null,
-	isNetworkClassError: () => false
+	isNetworkClassError: () => false,
+	isTlsVerificationError: () => false
 }))
 
 vi.mock("@/constants", async () => await import("@/tests/mocks/constants"))

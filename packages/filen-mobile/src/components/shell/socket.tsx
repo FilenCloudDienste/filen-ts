@@ -22,6 +22,7 @@ import { handleContactEvent } from "@/features/contacts/socketHandlers"
 import logger from "@/lib/logger"
 import { noteSocketDataEvent } from "@/queries/socketSession"
 import events from "@/lib/events"
+import connectionTrust from "@/lib/connectionTrust"
 
 type ConnectionTag =
 	| SocketEvent_Tags.Reconnecting
@@ -84,6 +85,9 @@ async function onEvent(event: SocketEvent) {
 				logger.info("socket", "connection state changed", { tag: event.tag })
 
 				if (event.tag === SocketEvent_Tags.AuthSuccess) {
+					// An authenticated socket is a verified TLS round trip to Filen.
+					connectionTrust.clear()
+
 					// Refetch chats and messages to ensure we have the latest data after reconnect + to update unread counts
 					chats.refetchChatsAndMessages().catch(e => logger.error("socket", "chats refetch after reconnect failed", { error: e }))
 				}

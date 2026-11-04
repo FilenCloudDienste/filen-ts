@@ -46,6 +46,8 @@ export const misc = {
 	youre_offline: "You're offline",
 	/** Global banner text shown briefly after the connection is restored */
 	back_online: "Back online",
+	/** Short floating-bar status: the device is online, but the server's security certificate failed verification (e.g. a network intercepting traffic) */
+	connection_unverified: "Connection not verified",
 
 	// ── Cannot-decrypt screen (cannotDecryptScreen.tsx) ───────────────────────
 	/** Explanatory body shown under a "could not decrypt" placeholder, telling the user the item couldn't be decrypted on this device */

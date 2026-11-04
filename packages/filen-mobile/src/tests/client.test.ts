@@ -4,6 +4,7 @@ import { vi, describe, it, expect, beforeEach } from "vitest"
 
 const {
 	mockIsNetworkClassError,
+	mockIsTlsVerificationError,
 	mockUnwrapSdkError,
 	mockLogout,
 	mockAlertsError,
@@ -14,6 +15,7 @@ const {
 	mockQueryCacheGet
 } = vi.hoisted(() => ({
 	mockIsNetworkClassError: vi.fn().mockReturnValue(false),
+	mockIsTlsVerificationError: vi.fn().mockReturnValue(false),
 	mockUnwrapSdkError: vi.fn().mockReturnValue(null),
 	mockLogout: vi.fn().mockResolvedValue(undefined),
 	mockAlertsError: vi.fn(),
@@ -47,7 +49,8 @@ vi.mock("@/lib/utils", () => ({}))
 
 vi.mock("@/lib/sdkErrors", () => ({
 	unwrapSdkError: mockUnwrapSdkError,
-	isNetworkClassError: mockIsNetworkClassError
+	isNetworkClassError: mockIsNetworkClassError,
+	isTlsVerificationError: mockIsTlsVerificationError
 }))
 
 vi.mock("@/lib/auth", () => ({
@@ -287,14 +290,24 @@ describe("queryClient default query options", () => {
 describe("decideQueryErrorAction", () => {
 	const baseDeps = {
 		isNetworkClassError: mockIsNetworkClassError,
+		isTlsVerificationError: mockIsTlsVerificationError,
 		unwrapSdkError: mockUnwrapSdkError,
 		isOnline: mockIsOnline
 	}
 
 	beforeEach(() => {
 		mockIsNetworkClassError.mockReset().mockReturnValue(false)
+		mockIsTlsVerificationError.mockReset().mockReturnValue(false)
 		mockUnwrapSdkError.mockReset().mockReturnValue(null)
 		mockIsOnline.mockReset().mockReturnValue(true)
+	})
+
+	it("maps a TLS verification failure to its own connection state, not an alert or offline", () => {
+		mockIsTlsVerificationError.mockReturnValue(true)
+		// The SDK also counts it network-class; the certificate verdict must win.
+		mockIsNetworkClassError.mockReturnValue(true)
+
+		expect(decideQueryErrorAction(new Error("tls"), baseDeps)).toBe("unverified")
 	})
 
 	it("suppresses network-class errors while offline", () => {
@@ -394,10 +407,27 @@ describe("QueryCache onError sink", () => {
 
 	beforeEach(() => {
 		mockIsNetworkClassError.mockReset().mockReturnValue(false)
+		mockIsTlsVerificationError.mockReset().mockReturnValue(false)
 		mockUnwrapSdkError.mockReset().mockReturnValue(null)
 		mockIsOnline.mockReset().mockReturnValue(true)
 		mockLogout.mockReset().mockResolvedValue(undefined)
 		mockAlertsError.mockReset()
+	})
+
+	it("records a TLS verification failure in connectionTrust instead of alerting", async () => {
+		const { default: connectionTrust } = await import("@/lib/connectionTrust")
+
+		connectionTrust.clear()
+		mockIsTlsVerificationError.mockReturnValue(true)
+
+		const onError = await getOnError()
+		onError(new Error("tls"), { queryKey: ["k"] })
+
+		expect(connectionTrust.isUnverified()).toBe(true)
+		expect(mockAlertsError).not.toHaveBeenCalled()
+		expect(mockLogout).not.toHaveBeenCalled()
+
+		connectionTrust.clear()
 	})
 
 	it("suppresses (no logout, no alert) for an offline network error", async () => {

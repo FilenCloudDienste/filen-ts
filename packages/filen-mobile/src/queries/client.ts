@@ -4,7 +4,8 @@ import sqlite from "@/lib/sqlite"
 import { forEachKvRowByPrefix, prefixUpperBound } from "@/lib/kvScan"
 import alerts from "@/lib/alerts"
 import { serialize, deserialize } from "@/lib/serializer"
-import { unwrapSdkError, isNetworkClassError } from "@/lib/sdkErrors"
+import { unwrapSdkError, isNetworkClassError, isTlsVerificationError } from "@/lib/sdkErrors"
+import connectionTrust from "@/lib/connectionTrust"
 import { ErrorKind } from "@filen/sdk-rs"
 import { errorMessage } from "@filen/shared"
 import { AppState } from "react-native"
@@ -784,12 +785,13 @@ export async function restoreQueries(): Promise<void> {
 
 // Discriminated decision derived purely from the error + connectivity. No side effects, no I/O,
 // no global reads — fully unit-testable. The QueryCache `onError` sink interprets the result.
-export type QueryErrorAction = "suppress" | "logout" | "alert"
+export type QueryErrorAction = "suppress" | "logout" | "alert" | "unverified"
 
 export function decideQueryErrorAction(
 	err: unknown,
 	deps: {
 		isNetworkClassError: (error: unknown) => boolean
+		isTlsVerificationError: (error: unknown) => boolean
 		unwrapSdkError: (error: unknown) => { kind: () => ErrorKind } | null
 		isOnline: () => boolean
 	}
@@ -799,6 +801,12 @@ export function decideQueryErrorAction(
 	// A banner adds only noise, and the per-uuid messages defeat the dedupe window.
 	if (err instanceof Error && (err.name === "DriveDirectoryNotFoundError" || err.name === "DirectorySizeUnresolvedError")) {
 		return "suppress"
+	}
+
+	// A certificate the platform verifier rejected is a state of the connection, shown by the offline
+	// indicator's own "couldn't be verified" status; a banner per failed query would storm.
+	if (deps.isTlsVerificationError(err)) {
+		return "unverified"
 	}
 
 	// When offline, suppress network-class errors so the user doesn't see banner storms.
@@ -843,6 +851,7 @@ const queryCache = new QueryCache({
 	onError(err, query) {
 		const action = decideQueryErrorAction(err, {
 			isNetworkClassError,
+			isTlsVerificationError,
 			unwrapSdkError,
 			isOnline: () => onlineManager.isOnline()
 		})
@@ -850,6 +859,13 @@ const queryCache = new QueryCache({
 		// Suppressed = expected, query-local UX (session-cache warm-up misses, offline network
 		// errors) — info keeps them in the breadcrumb ring as context for real errors without
 		// red-flagging dev LogBox or inflating the persisted error log.
+		if (action === "unverified") {
+			connectionTrust.markUnverified()
+			logger.warn("queries", "QueryCache error", { queryHash: query.queryHash, error: err, action })
+
+			return
+		}
+
 		if (action === "suppress") {
 			logger.info("queries", "QueryCache error", { queryHash: query.queryHash, error: err, action })
 

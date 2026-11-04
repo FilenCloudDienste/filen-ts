@@ -1,8 +1,9 @@
 import { vi, describe, it, expect, beforeEach } from "vitest"
 
-const { mockShowNotification, mockErrorToMessage } = vi.hoisted(() => ({
+const { mockShowNotification, mockErrorToMessage, mockIsTlsVerificationError } = vi.hoisted(() => ({
 	mockShowNotification: vi.fn(),
-	mockErrorToMessage: vi.fn()
+	mockErrorToMessage: vi.fn(),
+	mockIsTlsVerificationError: vi.fn()
 }))
 
 // ---------- boundary mocks ----------
@@ -42,15 +43,19 @@ vi.mock("@/lib/i18n", async () => await import("@/tests/mocks/i18n"))
 
 // The message precedence itself is covered in sdkErrorHumanReadable.test.ts.
 vi.mock("@/lib/sdkErrors", () => ({
-	errorToMessage: mockErrorToMessage
+	errorToMessage: mockErrorToMessage,
+	isTlsVerificationError: mockIsTlsVerificationError
 }))
 
 import { alerts } from "@/lib/alerts"
+import connectionTrust from "@/lib/connectionTrust"
 
 beforeEach(() => {
 	mockShowNotification.mockClear()
 	mockErrorToMessage.mockReset()
 	mockErrorToMessage.mockImplementation((message: unknown) => String(message))
+	mockIsTlsVerificationError.mockReset().mockReturnValue(false)
+	connectionTrust.clear()
 })
 
 // ---------------------------------------------------------------------------
@@ -68,6 +73,18 @@ describe("Alerts.error", () => {
 		expect(mockShowNotification).toHaveBeenCalledTimes(1)
 		const callArgs = mockShowNotification.mock.calls[0]?.[0] as { description: string }
 		expect(callArgs.description).toBe("human readable message")
+	})
+
+	it("marks the connection unverified for a TLS verification error, and only for one", () => {
+		alerts.error(new Error("plain"))
+
+		expect(connectionTrust.isUnverified()).toBe(false)
+
+		mockIsTlsVerificationError.mockReturnValue(true)
+		alerts.error(new Error("tls"))
+
+		expect(connectionTrust.isUnverified()).toBe(true)
+		expect(mockShowNotification).toHaveBeenCalledTimes(2)
 	})
 
 	it("calls Notifier.showNotification exactly once per error() call", () => {

@@ -109,6 +109,8 @@ export const {
 	newestMessage,
 	mergeInflightQueuesByUnion,
 	isPermanentRejection,
+	isTlsVerificationErrorKind,
+	TLS_VERIFICATION_ERROR_KIND,
 	MAX_NON_RETRYABLE_REJECTIONS,
 	createTypingSender,
 	DOT_FILEN_DIR_NAME,
