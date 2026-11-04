@@ -173,6 +173,40 @@ export async function quiet(dirs: readonly string[]): Promise<void> {
 	}
 }
 
+// The pids of process lines ("pid path", DesktopOs.appProcesses).
+export function pidsOf(lines: readonly string[]): number[] {
+	return lines.map(line => Number.parseInt(line, 10)).filter(pid => Number.isSafeInteger(pid))
+}
+
+// D13 after an app's main process ended: whatever of it still runs `timeoutMs` later (a helper, crash handler or
+// watchdog it left) is hard-killed once `settle` resolves (what it may still write gone quiet), then must be gone within
+// `timeoutMs`. Returns what lingered ("pid path"), empty when nothing did.
+export async function endLeftovers(
+	os: Pick<DesktopOs, "appProcesses" | "forceKill">,
+	target: Target,
+	settle: () => Promise<void>,
+	timeoutMs: number,
+	pollMs = 2000
+): Promise<string[]> {
+	const gone = async () => ((await os.appProcesses(target)).length === 0 ? true : null)
+	const lingering = await waitFor("the old app's processes to end", timeoutMs, gone, pollMs).then(
+		() => [],
+		async () => os.appProcesses(target)
+	)
+
+	if (lingering.length === 0) {
+		return []
+	}
+
+	await settle()
+	await os.forceKill(pidsOf(lingering))
+	await waitFor("the old app's processes to end after the hard kill", timeoutMs, gone, pollMs).catch(async (error: unknown) =>
+		fail(`${errorMessage(error)}: ${(await os.appProcesses(target)).join("; ")}`)
+	)
+
+	return lingering
+}
+
 // A contract result's value; anything but { ok: true, value } fails, named, with what came back.
 export function ok<T>(what: string, result: DesktopSyncResult<T> | DesktopMountsResult<T>): T {
 	const shaped: unknown = result

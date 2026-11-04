@@ -14,11 +14,13 @@ import {
 	seedRedacted,
 	seedSecrets
 } from "../../scripts/ci/e2e/keyringData.ts"
+import { endLeftovers } from "../../scripts/ci/e2e/chains/common.ts"
 import { dbusSessionConfig, keyringDaemonArgs } from "../../scripts/ci/e2e/linux.ts"
 import { loadAppLock } from "../main/appLock.ts"
 import { LEGACY_KEYS, legacyPin, legacyPrefs, legacySession, legacyStash, WIPE_SCRIPT } from "../main/legacyData.ts"
 import { createMigration, createStashStore, MAX_FAILED_STARTS, parseMarker, waitExpired, WIPE_AFTER_MS } from "../main/migration.ts"
 import { createSessionVault, isSessionBlob, lazyCipher, type VaultCipher } from "../main/sessionVault.ts"
+import type { Target } from "../../scripts/ci/targets.ts"
 import { linuxCipher, memoryFile } from "./fileFakes.ts"
 
 // Chain K's synthetic profile and the expectations it checks (scripts/ci/e2e/chains/keyring.ts), against the real
@@ -372,5 +374,51 @@ describe("chain K's Secret Service and files", () => {
 		expect(fallbackKeyEncrypted(Buffer.from("v10abc"))).toBe(true)
 		expect(fallbackKeyEncrypted(Buffer.from("v11abc"))).toBe(false)
 		expect(fallbackKeyEncrypted(null)).toBe(false)
+	})
+})
+
+describe("chain K's quit of 3.0.53", () => {
+	const target = { platform: "linux" } as unknown as Target
+
+	it("waits for nothing when the old app ended whole", async () => {
+		const settle = vi.fn(() => Promise.resolve())
+		const forceKill = vi.fn(() => Promise.resolve())
+
+		await expect(endLeftovers({ appProcesses: () => Promise.resolve([]), forceKill }, target, settle, 50, 1)).resolves.toEqual([])
+		expect(settle).not.toHaveBeenCalled()
+		expect(forceKill).not.toHaveBeenCalled()
+	})
+
+	it("hard-kills what lingers past the main process once its storage settled, and names it", async () => {
+		const order: string[] = []
+		let left = ["4242 /opt/Filen/chrome_crashpad_handler", "4250 /opt/Filen/Filen"]
+		const os = {
+			appProcesses: () => Promise.resolve(left),
+			forceKill: (pids: readonly number[]) => {
+				order.push(`kill ${pids.join(",")}`)
+				left = []
+
+				return Promise.resolve()
+			}
+		}
+		const settle = () => {
+			order.push("settled")
+
+			return Promise.resolve()
+		}
+
+		await expect(endLeftovers(os, target, settle, 20, 1)).resolves.toEqual([
+			"4242 /opt/Filen/chrome_crashpad_handler",
+			"4250 /opt/Filen/Filen"
+		])
+		expect(order).toEqual(["settled", "kill 4242,4250"])
+	})
+
+	it("fails, naming them, when the hard kill leaves processes behind", async () => {
+		const os = { appProcesses: () => Promise.resolve(["4242 /opt/Filen/Filen"]), forceKill: () => Promise.resolve() }
+
+		await expect(endLeftovers(os, target, () => Promise.resolve(), 10, 1)).rejects.toThrow(
+			/the old app's processes to end after the hard kill: 4242 \/opt\/Filen\/Filen/
+		)
 	})
 })

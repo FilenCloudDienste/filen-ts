@@ -34,7 +34,7 @@ import { redactor } from "../redact.ts"
 import { mask } from "../session.ts"
 import { filesHolding } from "../snapshot.ts"
 import { installFrom, legacyInstaller, sameVersion, START_TIMEOUT_MS, tail } from "../update.ts"
-import { EXIT_TIMEOUT_MS, inventory, json, readJson, SETUP_TIMEOUT_MS } from "./common.ts"
+import { endLeftovers, EXIT_TIMEOUT_MS, inventory, json, pidsOf, quiet, readJson, SETUP_TIMEOUT_MS } from "./common.ts"
 
 // Chain K (gap 2, proving fix B1 in src/main/migration.ts, sessionVault.ts and appLock.ts): the 3.x import when the
 // keyring is missing, locked or comes back, on Linux deb with no sign-in at all. 3.0.53 is installed and given a
@@ -126,7 +126,6 @@ export async function runKeyring({ target, nextDir, nextVersion, work, artifacts
 		current: null,
 		legacyLogs: false
 	}
-	const pidsOf = (lines: readonly string[]) => lines.map(line => Number.parseInt(line, 10)).filter(pid => Number.isSafeInteger(pid))
 
 	redacted.push(keyringA.password, keyringB.password)
 	mask(redacted)
@@ -322,8 +321,13 @@ export async function runKeyring({ target, nextDir, nextVersion, work, artifacts
 				})
 			}
 
-			await waitFor("the old app's processes to end", EXIT_TIMEOUT_MS, async () =>
-				(await os.appProcesses(target)).length === 0 ? true : null
+			// What 3.0.53 leaves running past its main process (a helper or crash handler) is hard-killed once its storage
+			// has gone quiet, as chain L does (D13).
+			const lingering = await endLeftovers(
+				os,
+				target,
+				() => quiet([userData("Local Storage"), userData("IndexedDB")]),
+				EXIT_TIMEOUT_MS
 			)
 
 			if (!existsSync(userData("IndexedDB", "filendesktop_bundle_0.indexeddb.leveldb")) || !existsSync(userData("Local Storage"))) {
@@ -332,7 +336,7 @@ export async function runKeyring({ target, nextDir, nextVersion, work, artifacts
 
 			state.legacyLogs = existsSync(legacyLogs)
 
-			return `wrote ${written.join(", ")} (the other user's settings beside the account's); @filen/logs ${state.legacyLogs ? "written" : "not written"}`
+			return `wrote ${written.join(", ")} (the other user's settings beside the account's); @filen/logs ${state.legacyLogs ? "written" : "not written"}${lingering.length === 0 ? "" : `; left after app.quit(), hard-killed (D13): ${lingering.join("; ")}`}`
 		})
 
 		await findings.must("N installed over it as a package upgrade (no updater), the profile kept aside", () => {

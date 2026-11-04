@@ -57,12 +57,14 @@ import { installedBy } from "../olderUpdate.ts"
 import { legacyLogOf, START_TIMEOUT_MS, tail, type UpdateOptions } from "../update.ts"
 import {
 	BIN_DIR,
+	endLeftovers,
 	EXIT_TIMEOUT_MS,
 	inventory,
 	json,
 	LIVE_TIMEOUT_MS,
 	ok,
 	openChain,
+	pidsOf,
 	quiet,
 	readJson,
 	SETUP_TIMEOUT_MS,
@@ -452,7 +454,7 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 			const settled = [...LEGACY_PAIRS.map(pair => rootOf(pair.name)), userData("sync")]
 			const hardKill = async (left: readonly string[], why: string): Promise<void> => {
 				await quiet(settled)
-				await chain.os.forceKill(left.map(line => Number.parseInt(line, 10)).filter(pid => Number.isSafeInteger(pid)))
+				await chain.os.forceKill(pidsOf(left))
 				findings.info(
 					`${LEGACY_VERSION}'s processes left after app.quit()`,
 					`${left.join("; ")}: hard-killed after 30 s without writes (D13); ${why}`
@@ -463,16 +465,12 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 
 				return "hard-killed (D13)"
 			})
-			const gone = async () => ((await chain.os.appProcesses(target)).length === 0 ? true : null)
-			const lingering = await waitFor("the old app's processes to end", EXIT_TIMEOUT_MS, gone, 2000).then(
-				() => [],
-				async () => chain.os.appProcesses(target)
-			)
+			const lingering = await endLeftovers(chain.os, target, () => quiet(settled), EXIT_TIMEOUT_MS)
 
 			if (lingering.length > 0) {
-				await hardKill(lingering, "still running a minute after the main process ended")
-				await waitFor("the old app's processes to end after the hard kill", EXIT_TIMEOUT_MS, gone, 2000).catch(
-					async (error: unknown) => fail(`${errorMessage(error)}: ${(await chain.os.appProcesses(target)).join("; ")}`)
+				findings.info(
+					`${LEGACY_VERSION}'s processes left after app.quit()`,
+					`${lingering.join("; ")}: hard-killed after 30 s without writes (D13); still running a minute after the main process ended`
 				)
 			}
 
