@@ -40,6 +40,8 @@ export interface PairRuntime {
 	stage: DesktopSyncStage | null
 	halted: DesktopSyncHalt | null
 	refused: DesktopSyncRefusal | null
+	// A pass ended since the host started: until then a watch's clean status is its start's, not a pass's.
+	passEnded: boolean
 }
 
 export function createPairRuntime(info?: SyncPairInfo, sdk?: NativeSdk): PairRuntime {
@@ -62,7 +64,8 @@ export function createPairRuntime(info?: SyncPairInfo, sdk?: NativeSdk): PairRun
 		pending: null,
 		stage: null,
 		halted: sdk !== undefined && info?.lastPassErrorKind === sdk.ErrorKind.Reqwest ? "offline" : null,
-		refused: null
+		refused: null,
+		passEnded: false
 	}
 }
 
@@ -296,6 +299,7 @@ export function reduceEvents(sdk: NativeSdk, state: Map<string, PairRuntime>, ev
 
 				finishPending(runtime, activity)
 				endPass(runtime)
+				runtime.passEnded = true
 				runtime.lastSyncedAt = at
 				runtime.lastError = report.passError === undefined ? null : clip(report.passError)
 				runtime.halted = halt(sdk, report.halted) ?? offlineKind(sdk, report.passErrorKind)
@@ -320,6 +324,7 @@ export function reduceEvents(sdk: NativeSdk, state: Map<string, PairRuntime>, ev
 			}
 			case "PassFailed":
 				endPass(runtime)
+				runtime.passEnded = true
 				ended.push({ pairId: id, report: null })
 
 				// The cloud listing did not finish in time: not ready yet. The engine tries again on its own, and the pair
@@ -351,6 +356,10 @@ export function reduceWatchStatus(sdk: NativeSdk, runtime: PairRuntime, status: 
 		if (status.lastErrorKind === sdk.ErrorKind.Reqwest) {
 			runtime.halted = "offline"
 		}
+	} else if (status.consecutiveFailures === 0 && status.lastError === undefined && runtime.passEnded && runtime.halted === "offline") {
+		// The engine can publish a status still carrying the previous failure just before the clean one: the outage is over.
+		runtime.halted = null
+		runtime.lastError = null
 	}
 
 	if (status.state === sdk.WatchState.Stopped || status.state === sdk.WatchState.PairRemoved) {

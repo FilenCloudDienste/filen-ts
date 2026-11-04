@@ -454,6 +454,37 @@ describe("reduceEvents", () => {
 		).toBeNull()
 	})
 
+	it("a clean status after a stale one that still carries the outage is no longer offline", () => {
+		const state = new Map([
+			["1", createPairRuntime(pairInfo({ lastPassError: "connect", lastPassErrorKind: fakeSdk.ErrorKind.Reqwest }), fakeSdk)]
+		])
+		const runtime = state.get("1") ?? createPairRuntime()
+
+		reduceEvents(fakeSdk, state, [
+			passEvent({ tag: "AwaitingRemote" }),
+			passEvent({ tag: "PassStarted", inner: { mode: fakeSdk.SyncMode.TwoWay } }),
+			passEvent({ tag: "PassCompleted", inner: { report: report() } })
+		])
+		// The engine publishes the subscription grant before the pass's health, so one status still carries the outage.
+		reduceWatchStatus(fakeSdk, runtime, {
+			consecutiveFailures: 4,
+			lastError: "connect",
+			lastErrorKind: fakeSdk.ErrorKind.Reqwest,
+			state: fakeSdk.WatchState.Running
+		})
+		reduceWatchStatus(fakeSdk, runtime, { consecutiveFailures: 0, state: fakeSdk.WatchState.Running })
+
+		expect(runtime).toMatchObject({ halted: null, lastError: null })
+	})
+
+	it("a watch's clean status at its start keeps the error carried from before", () => {
+		const runtime = createPairRuntime(pairInfo({ lastPassError: "connect", lastPassErrorKind: fakeSdk.ErrorKind.Reqwest }), fakeSdk)
+
+		reduceWatchStatus(fakeSdk, runtime, { consecutiveFailures: 0, state: fakeSdk.WatchState.Running })
+
+		expect(runtime).toMatchObject({ halted: "offline", lastError: "connect" })
+	})
+
 	it("a pass halted by an expired session shows no halt, and signs out", () => {
 		const state = new Map([["1", createPairRuntime()]])
 		const reduced = reduceEvents(fakeSdk, state, [
