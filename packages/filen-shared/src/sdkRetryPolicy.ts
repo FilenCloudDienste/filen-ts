@@ -33,15 +33,31 @@ export function isRetryableLockErrorKind(kind: string | undefined): boolean {
 	return kind === "LockLost"
 }
 
+// The server's certificate failed the platform verifier (an intercepting proxy, a captive portal, a
+// revoked or expired chain). A state of the network path, not of the item: keep-for-retry, never counts
+// toward the drop. Named here, not as an enum member, so callers compile against an SDK that predates
+// the kind; such an SDK never reports it. Uniffi and wasm spell an acronym-free name identically.
+export const TLS_VERIFICATION_ERROR_KIND = "TlsVerification"
+
+export function isTlsVerificationErrorKind(kind: string | undefined): boolean {
+	return kind === TLS_VERIFICATION_ERROR_KIND
+}
+
 // A genuine read-only/permission rejection must eventually DROP so the wedged consumer (a note's
 // content query, a chat's send queue) un-wedges — but a TRANSIENT non-network error (e.g. a one-off
 // `Server`, the catch-all for non-`Internal` API failures) must NOT lose the first edit/message. We
-// bound the drop: only after this many CONSECUTIVE non-network, non-auth, non-lock SDK rejections for the same
+// bound the drop: only after this many CONSECUTIVE non-network, non-auth, non-lock, non-TLS SDK rejections for the same
 // item do we discard it.
 export const MAX_NON_RETRYABLE_REJECTIONS = 3
 
 // `hasSdkError` is false for a non-SDK throw (e.g. abort, a plain worker Error) — always keep-for-retry,
 // never counted toward the drop bound.
 export function isPermanentRejection({ hasSdkError, kind }: { hasSdkError: boolean; kind: string | undefined }): boolean {
-	return hasSdkError && !isNetworkClassErrorKind(kind) && !isRetryableAuthErrorKind(kind) && !isRetryableLockErrorKind(kind)
+	return (
+		hasSdkError &&
+		!isNetworkClassErrorKind(kind) &&
+		!isRetryableAuthErrorKind(kind) &&
+		!isRetryableLockErrorKind(kind) &&
+		!isTlsVerificationErrorKind(kind)
+	)
 }

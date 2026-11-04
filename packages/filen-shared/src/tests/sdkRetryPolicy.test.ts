@@ -1,5 +1,12 @@
 import { describe, it, expect } from "vitest"
-import { isNetworkClassErrorKind, isRetryableAuthErrorKind, isRetryableLockErrorKind, isPermanentRejection } from "@filen/shared"
+import {
+	isNetworkClassErrorKind,
+	isRetryableAuthErrorKind,
+	isRetryableLockErrorKind,
+	isTlsVerificationErrorKind,
+	isPermanentRejection,
+	TLS_VERIFICATION_ERROR_KIND
+} from "@filen/shared"
 
 describe("isNetworkClassErrorKind", () => {
 	it("matches the three network-class kinds", () => {
@@ -31,6 +38,14 @@ describe("isRetryableLockErrorKind", () => {
 	})
 })
 
+describe("isTlsVerificationErrorKind", () => {
+	it("matches only the TLS verification kind", () => {
+		expect(isTlsVerificationErrorKind(TLS_VERIFICATION_ERROR_KIND)).toBe(true)
+		expect(isTlsVerificationErrorKind("Reqwest")).toBe(false)
+		expect(isTlsVerificationErrorKind(undefined)).toBe(false)
+	})
+})
+
 describe("isPermanentRejection", () => {
 	it("short-circuits false when there is no SDK error at all", () => {
 		expect(isPermanentRejection({ hasSdkError: false, kind: "Server" })).toBe(false)
@@ -49,6 +64,10 @@ describe("isPermanentRejection", () => {
 
 	it("keeps a lost-lock SDK error for retry", () => {
 		expect(isPermanentRejection({ hasSdkError: true, kind: "LockLost" })).toBe(false)
+	})
+
+	it("keeps a TLS verification failure for retry", () => {
+		expect(isPermanentRejection({ hasSdkError: true, kind: TLS_VERIFICATION_ERROR_KIND })).toBe(false)
 	})
 
 	it("is permanent for any other SDK error kind", () => {
