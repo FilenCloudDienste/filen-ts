@@ -8,8 +8,8 @@ import { log } from "@/lib/log"
 import { userDictionary } from "@/features/spellcheck/lib/userDictionary"
 
 // The page's spellchecker: verdicts cached here, checks in one worker, suggestions in another (each ends
-// after a quiet spell, which is when a dictionary's memory goes). Nothing starts until a document is
-// checked.
+// after a quiet spell or once no document is open, which is when a dictionary's memory goes). Nothing starts
+// until a document is checked.
 export const spellcheck = new SpellcheckHost({
 	assets: SPELLCHECK_ASSETS,
 	createWorker: () => {
@@ -70,7 +70,9 @@ export const documentSpellingChecker: SpellingChecker = {
 
 		return Promise.resolve()
 	},
-	subscribe: listener => spellcheck.subscribe(listener)
+	subscribe: listener => spellcheck.subscribe(listener),
+	// The workers and verdicts go once no document is open.
+	open: () => spellcheck.open()
 }
 
 // The language for text that names none: the browser's (the user's locale, with its region).

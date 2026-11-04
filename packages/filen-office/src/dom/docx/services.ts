@@ -12,9 +12,9 @@ type Fetch = (url: string) => Promise<{ readonly ok: boolean; readonly status: n
 // names). Same origin either way: the apps' font-src is 'self'.
 export type FontLocation = string | Readonly<Record<string, string>>
 
-// Fetched files by URL, shared by every document in this realm (a worker that outlives one document keeps
-// them); a failed fetch is forgotten.
-const fetched = new Map<string, Promise<Uint8Array>>()
+// Fetched files by URL, shared by every later document in a worker that outlives one document; a failed fetch
+// is forgotten.
+const shared = new Map<string, Promise<Uint8Array>>()
 
 function fontUrl(location: FontLocation, file: string): string | undefined {
 	if (typeof location !== "string") return Object.hasOwn(location, file) ? location[file] : undefined
@@ -24,8 +24,12 @@ function fontUrl(location: FontLocation, file: string): string | undefined {
 	return base + file.split("/").map(encodeURIComponent).join("/")
 }
 
-// The bundled fonts, fetched on demand. Files are the manifest's paths under assets/fonts.
-export function fetchFontAssets(location: FontLocation): FontAssets {
+// The bundled fonts, fetched on demand. Files are the manifest's paths under assets/fonts. `shared` keeps them
+// for every later document in this realm (a worker); otherwise only as long as these assets are held (a page,
+// which outlives every document).
+export function fetchFontAssets(location: FontLocation, options: { readonly shared?: boolean } = {}): FontAssets {
+	const fetched = options.shared === true ? shared : new Map<string, Promise<Uint8Array>>()
+
 	return {
 		async read(file) {
 			const url = fontUrl(location, file)
@@ -76,7 +80,7 @@ export function workerServices(scope: unknown, fonts: FontLocation): DocxEngineS
 	return {
 		fontHost: fontFaceHost(scope),
 		replayFonts: true,
-		fontAssets: fetchFontAssets(fonts),
+		fontAssets: fetchFontAssets(fonts, { shared: true }),
 		measurer: offscreenMeasurer(scope),
 		yield: macrotaskYield(),
 		sliceMs: 12,

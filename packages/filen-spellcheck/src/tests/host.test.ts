@@ -192,4 +192,30 @@ describe("SpellcheckHost", () => {
 		expect(workers).toHaveLength(2)
 		host.dispose()
 	})
+
+	it("ends its workers and drops its caches once the last open document closes", async () => {
+		const { host, workers } = setup()
+		const first = host.open()
+		const second = host.open()
+
+		await host.check("en_US", ["hello", "helo"])
+		await host.suggest("en_US", "helo")
+		first()
+		first()
+		expect(workers.map(worker => worker.terminated)).toEqual([false, false])
+		expect(host.known("en_US", "helo")).toBe(false)
+
+		second()
+		expect(workers.map(worker => worker.terminated)).toEqual([true, true])
+		expect(host.known("en_US", "helo")).toBeUndefined()
+
+		// The next document starts afresh.
+		const third = host.open()
+
+		await host.check("en_US", ["helo"])
+		expect(host.known("en_US", "helo")).toBe(false)
+		expect(workers).toHaveLength(3)
+		third()
+		host.dispose()
+	})
 })

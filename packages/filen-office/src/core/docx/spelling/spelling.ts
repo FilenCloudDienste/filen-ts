@@ -223,6 +223,11 @@ export class DocxSpelling {
 			session.onApplied((transactions, state) => this.onApplied(transactions, state)),
 			checker.subscribe(() => this.invalidate())
 		)
+
+		const close = checker.open?.()
+
+		if (close !== undefined) this.unsubscribe.push(close)
+
 		this.dirty = [0, session.state.doc.content.size]
 		this.schedule(0)
 	}

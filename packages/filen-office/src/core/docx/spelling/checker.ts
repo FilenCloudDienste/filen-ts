@@ -19,6 +19,9 @@ export interface SpellingChecker {
 	addToDictionary(word: string): Promise<void>
 	// Hears when verdicts may have changed (the user's dictionary changed): text is checked again.
 	subscribe(listener: () => void): () => void
+	// A document starts being checked; the returned call ends that (its spelling is disposed). A checker may
+	// let go of its engine and caches once no document is open.
+	open?(): () => void
 }
 
 export type SpellingKind = "spelling" | "repeated"

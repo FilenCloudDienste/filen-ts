@@ -23,7 +23,17 @@ class FakeChecker implements SpellingChecker {
 	readonly cache = new Map<string, boolean>()
 	readonly checked: string[] = []
 	readonly added: string[] = []
+	// Documents open on this checker.
+	documents = 0
 	private readonly listeners = new Set<() => void>()
+
+	open(): () => void {
+		this.documents++
+
+		return () => {
+			this.documents--
+		}
+	}
 
 	dictionaryFor(language: string): string | undefined {
 		return language.startsWith("en") ? "en" : language.startsWith("de") ? "de" : undefined
@@ -304,6 +314,8 @@ describe("DocxSpelling", () => {
 	it("honours w:hideSpellingErrors", async () => {
 		const { spelling, checker } = await open({ body: para(run("wrold")), settings: "<w:hideSpellingErrors/>" })
 
+		// Nothing is checked, so the checker is not held open.
+		expect(checker.documents).toBe(0)
 		expect(spelling.hidden).toBe(true)
 		expect(spelling.marks()).toEqual([])
 		expect(checker.checked).toEqual([])
@@ -467,7 +479,10 @@ describe("DocxSpelling", () => {
 		expect(marked(session, spelling.marks())).toEqual(["spelling:wrold"])
 		expect(spelling.replaceWord(find(session, "wrold"), "world")).toBe(false)
 
+		expect(checker.documents).toBe(1)
 		spelling.dispose()
+		spelling.dispose()
+		expect(checker.documents).toBe(0)
 		checker.checked.length = 0
 		await checker.addToDictionary("x")
 		await clock.advance(1000)

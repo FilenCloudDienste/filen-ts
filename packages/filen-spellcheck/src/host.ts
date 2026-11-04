@@ -4,7 +4,8 @@ import { WORD_SEPARATOR, type SpellcheckAssets, type SpellcheckPort, type Spellc
 // The page's side of spellchecking: verdicts cached per dictionary (a document repeats its words: about
 // 12k unique among 84k), checks batched to a worker that keeps the dictionaries loaded, and suggestions
 // from a second worker that is terminated when a slow request is superseded or overruns. Workers end
-// after a quiet spell; wasm memory never shrinks, so ending the worker is how a dictionary's memory goes.
+// after a quiet spell or once no document is open; wasm memory never shrinks, so ending the worker is how a
+// dictionary's memory goes.
 
 export interface SpellcheckHostOptions {
 	readonly assets: SpellcheckAssets
@@ -190,6 +191,8 @@ export class SpellcheckHost {
 	// The suggestion request running in the suggest worker, so a newer one can abandon it.
 	private running: { readonly slow: boolean; readonly abort: () => void } | undefined = undefined
 	private disposed = false
+	// Documents being checked (open()); once none is, nothing is kept.
+	private documents = 0
 	private readonly loadFailures = new Map<string, { readonly until: number; readonly delay: number; readonly error: unknown }>()
 
 	constructor(options: SpellcheckHostOptions) {
@@ -413,6 +416,33 @@ export class SpellcheckHost {
 		for (const listener of [...this.listeners]) listener()
 	}
 
+	// A document starts being checked; the returned call ends that. When the last one ends, the workers end
+	// and the cached verdicts and suggestions go: a closed editor holds no dictionary.
+	open(): () => void {
+		this.documents++
+
+		let open = true
+
+		return () => {
+			if (!open) return
+
+			open = false
+			this.documents--
+
+			if (this.documents === 0) this.release()
+		}
+	}
+
+	private release(): void {
+		// Answers still on their way are not cached.
+		this.generation++
+		this.checker.terminate(new SpellcheckAbortError())
+		this.suggester.terminate(new SpellcheckAbortError())
+		this.verdicts.clear()
+		this.inflight.clear()
+		this.suggestions.clear()
+	}
+
 	// Hears when cached verdicts were dropped (the user's words changed): text should be checked again.
 	subscribe(listener: () => void): () => void {
 		this.listeners.add(listener)
@@ -424,11 +454,7 @@ export class SpellcheckHost {
 
 	dispose(): void {
 		this.disposed = true
-		this.checker.terminate(new SpellcheckAbortError())
-		this.suggester.terminate(new SpellcheckAbortError())
-		this.verdicts.clear()
-		this.inflight.clear()
-		this.suggestions.clear()
+		this.release()
 		this.listeners.clear()
 	}
 }

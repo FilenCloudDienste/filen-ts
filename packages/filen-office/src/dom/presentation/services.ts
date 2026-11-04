@@ -226,7 +226,7 @@ export function workerRealm(scope: unknown, fonts: FontLocation): PresentationRe
 		text: {
 			fontHost: fontFaceHost(scope),
 			replayFonts: true,
-			fontAssets: fetchFontAssets(fonts),
+			fontAssets: fetchFontAssets(fonts, { shared: true }),
 			measurer: offscreenMeasurer(scope),
 			yield: macrotaskYield(),
 			sliceMs: 8
