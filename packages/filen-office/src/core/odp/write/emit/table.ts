@@ -13,7 +13,7 @@ import {
 import { decodeUtf8, escapeAttribute, escapeText } from "../../../xml/index"
 import type { OdpEmitContext, OdpEmitFamily } from "../emit"
 import { OdpStyles, alphaOf, cm, declared, hexColor, setProperty, styleChanges, type StyleChanges } from "../styles"
-import { IDENTITY, OdpShapeWriter, markupOf } from "./shape"
+import { IDENTITY, OdpShapeWriter, familyFragment, markupOf } from "./shape"
 import { emitOdpText } from "./text"
 import { isRefused } from "../../../presentation/refusal"
 
@@ -263,7 +263,7 @@ export const emitOdpTable: OdpEmitFamily = {
 		if (!(context.styles instanceof OdpStyles)) return refused("failed", "the save's styles")
 
 		const styles = context.styles
-		const fragment = context.document === undefined ? undefined : styles.env.fragmentOf(context.document)
+		const fragment = familyFragment(styles, context, shape)
 		const writer = new OdpShapeWriter(context, fragment, request.slide, () => undefined)
 		const node = writer.sourceNode(shape)
 		const table = shape.frame.table

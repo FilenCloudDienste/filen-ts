@@ -15,7 +15,7 @@ import { refused, type FrameRef, type Refused, type ShapeNode } from "../../../p
 import { decodeUtf8, escapeAttribute } from "../../../xml/index"
 import type { OdpEmitContext, OdpEmitFamily, OdpStylesApi } from "../emit"
 import { OdpStyles, declared } from "../styles"
-import { IDENTITY, OdpShapeWriter, emitOdpShape } from "./shape"
+import { IDENTITY, OdpShapeWriter, emitOdpShape, familyFragment } from "./shape"
 import { altMarkup, frameBox } from "./table"
 import { isRefused } from "../../../presentation/refusal"
 
@@ -171,7 +171,7 @@ function emitFrame(context: OdpEmitContext, shape: ShapeNode, request: Parameter
 	if (typeof path !== "string") return path
 
 	const styles = context.styles
-	const fragment = context.document === undefined ? undefined : styles.env.fragmentOf(context.document)
+	const fragment = familyFragment(styles, context, shape)
 	const writer = new OdpShapeWriter(context, fragment, request.slide, () => undefined)
 	const node = writer.sourceNode(shape)
 

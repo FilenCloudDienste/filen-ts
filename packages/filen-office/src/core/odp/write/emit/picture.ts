@@ -18,7 +18,7 @@ import { pictureSize, type OdpPackageView } from "../../read/document"
 import type { Fragment } from "../../read/context"
 import type { OdpEmitContext, OdpEmitFamily, OdpStylesApi } from "../emit"
 import { OdpStyles, declared, hexColor, percent, pt, setProperty, styleChanges, type StyleChanges } from "../styles"
-import { IDENTITY, OdpShapeWriter, canonicalBox, pictureMirror } from "./shape"
+import { IDENTITY, OdpShapeWriter, canonicalBox, familyFragment, pictureMirror } from "./shape"
 import { altMarkup, frameBox } from "./table"
 import { isRefused } from "../../../presentation/refusal"
 import { sameBytes } from "../../../docx/write/bytes"
@@ -270,7 +270,7 @@ export const emitOdpPicture: OdpEmitFamily = {
 
 		const styles = context.styles
 		const fill = pictureFillOf(shape)
-		const fragment = context.document === undefined ? undefined : styles.env.fragmentOf(context.document)
+		const fragment = familyFragment(styles, context, shape)
 		const writer = new OdpShapeWriter(context, fragment, request.slide, () => undefined)
 		const node = writer.sourceNode(shape)
 

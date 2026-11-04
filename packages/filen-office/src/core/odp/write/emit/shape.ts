@@ -326,6 +326,18 @@ const FILL_ATTRIBUTES: readonly string[] = [...FILL_PROPERTIES, "draw:transparen
 // A start tag: its name (group 1) and its attributes.
 const START_TAG = /^(<[^\s/>]+)(?:\s+[^\s=]+\s*=\s*(?:"[^"]*"|'[^']*'))*/u
 
+// The markup a family (picture, table, chart) writes a shape from: the page's, else the fragment the shape's source is in
+// (markup an undo held, another page), which the writer of that markup hands the family the page's context for.
+export function familyFragment(styles: OdpStyles, context: OdpEmitContext, shape: ShapeNode): Fragment | undefined {
+	const page = context.document === undefined ? undefined : styles.env.fragmentOf(context.document)
+	const src = shape.src
+
+	if (src?.format !== "odp" || (page !== undefined && src.part === page.part && src.fragment === page.offset && src.epoch === page.epoch))
+		return page
+
+	return styles.env.sourceFragment(src) ?? page
+}
+
 // Writes the shapes of one page (or of a notes page) as markup: patched source elements, copies by span, new ones.
 export class OdpShapeWriter {
 	readonly context: OdpEmitContext
