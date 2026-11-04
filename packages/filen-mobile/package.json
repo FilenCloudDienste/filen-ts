@@ -26,6 +26,7 @@
 		"test": "vitest run",
 		"translate-i18n": "tsx scripts/translate-i18n.ts",
 		"notices": "tsx scripts/generateThirdPartyNotices.ts",
+		"check:crl-hosts": "tsx scripts/checkCrlHosts.ts",
 		"verify": "pnpm run lint && pnpm run typecheck && pnpm run test"
 	},
 	"expo": {

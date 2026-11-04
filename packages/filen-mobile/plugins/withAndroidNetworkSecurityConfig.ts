@@ -1,6 +1,7 @@
 import { withAndroidManifest, withDangerousMod, AndroidConfig, type ConfigPlugin } from "expo/config-plugins"
 import fs from "node:fs"
 import path from "node:path"
+import { buildNetworkSecurityConfig, extractAarNetworkSecurityConfig, loadRustlsPlatformVerifierAar } from "./rustlsPlatformVerifier"
 
 const isDevelopment = process.env["APP_ENV"] === "development" || process.env["NODE_ENV"] === "development"
 
@@ -21,14 +22,18 @@ const DEV_HOSTS = [
 	"192.168.0.152"
 ]
 
-const CLEARTEXT_HOSTS = ["127.0.0.1", ...(isDevelopment ? DEV_HOSTS : [])]
+export const CLEARTEXT_HOSTS = ["127.0.0.1", ...(isDevelopment ? DEV_HOSTS : [])]
 
-const networkSecurityConfigContent = `<?xml version="1.0" encoding="utf-8"?>
-<network-security-config>
-	<domain-config cleartextTrafficPermitted="true">
-${CLEARTEXT_HOSTS.map(host => `		<domain includeSubdomains="true">${host}</domain>`).join("\n")}
-	</domain-config>
-</network-security-config>`
+// Generated from the pinned rustls-platform-verifier AAR on every prebuild, never hand-copied. The
+// network check for Filen's live CRL hosts is scripts/checkCrlHosts.ts (pnpm run check:crl-hosts).
+export async function generateNetworkSecurityConfig(projectRoot: string): Promise<string> {
+	const aar = await loadRustlsPlatformVerifierAar(projectRoot)
+
+	return buildNetworkSecurityConfig({
+		appCleartextHosts: CLEARTEXT_HOSTS,
+		aarNetworkSecurityConfig: await extractAarNetworkSecurityConfig(aar)
+	})
+}
 
 function setNetworkSecurityConfig(
 	androidManifest: AndroidConfig.Manifest.AndroidManifest
@@ -59,7 +64,7 @@ const withAndroidNetworkSecurityConfig: ConfigPlugin = config => {
 				recursive: true
 			})
 
-			fs.writeFileSync(networkSecurityConfigPath, networkSecurityConfigContent)
+			fs.writeFileSync(networkSecurityConfigPath, await generateNetworkSecurityConfig(config.modRequest.projectRoot))
 
 			return config
 		}
