@@ -231,7 +231,9 @@ async function hookedUpdateLaunch(feed: string, version: string): Promise<{ args
 		started: async () => {
 			const state = await hook.started()
 
-			console.log(`${version}'s updater hooked: feed ${String(state.feed)}, install on download ${String(state.updater)}`)
+			console.log(
+				`${version}'s updater hooked: feed ${String(state.feed)}, install on download ${String(state.updater)}, worker threads without the inspector ${String(state.threads)}`
+			)
 		}
 	}
 }

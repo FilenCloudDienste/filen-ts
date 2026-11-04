@@ -2,7 +2,13 @@ import { fail, freePort, waitFor } from "../support.ts"
 import { connectCdp, listTargets, type Cdp } from "./cdp/inspector.ts"
 
 // An old client's update launch, hooked before any of its code runs. It starts with --inspect-brk; at the first break a
-// module-load hook goes in, then the app runs. The hook can:
+// module-load hook goes in, then the app runs. The hook always:
+//
+//   frees its    start its worker threads without the inspector flags: a worker inherits --inspect-brk and waits for a
+//   workers      debugger forever, so the old main process never sees its worker start (3.0.47 starts its updater only
+//                after that)
+//
+// and can:
 //
 //   hold sync    wrap its worker's invoke so that sync starts and sync updates are dropped (chain L: its updater starts
 //                before its sync worker, but the download and the install race the first sync cycle, which would carry
@@ -23,6 +29,8 @@ export interface HookOptions {
 }
 
 export interface HookState {
+	// worker_threads' Worker drops the inspector flags.
+	threads: boolean
 	// The worker's invoke is wrapped, and the calls it dropped.
 	held: boolean
 	dropped: string[]
@@ -38,13 +46,23 @@ export interface HookState {
 export function hookScript({ holdSync, feed }: HookOptions): string {
 	return `(() => {
 	const Module = process.getBuiltinModule("module")
-	const state = (globalThis.__e2eHook = { held: false, dropped: [], feed: false, updater: false, installs: 0, error: null })
+	const state = (globalThis.__e2eHook = { threads: false, held: false, dropped: [], feed: false, updater: false, installs: 0, error: null })
 	const holdSync = ${JSON.stringify(holdSync)}
 	const feed = ${JSON.stringify(feed)}
 	let autoUpdater = null
 	const load = Module._load
 	Module._load = function (...args) {
 		const exported = load.apply(this, args)
+		if (!state.threads && args[0] === "worker_threads" && exported && typeof exported.Worker === "function") {
+			const Thread = exported.Worker
+			const execArgv = (process.execArgv || []).filter(arg => !arg.startsWith("--inspect"))
+			exported.Worker = class extends Thread {
+				constructor(file, options) {
+					super(file, options && options.execArgv !== undefined ? options : { ...options, execArgv })
+				}
+			}
+			state.threads = true
+		}
 		const Worker = exported && exported.Worker
 		if (holdSync && !state.held && typeof Worker === "function" && Worker.prototype && typeof Worker.prototype.invoke === "function") {
 			const invoke = Worker.prototype.invoke

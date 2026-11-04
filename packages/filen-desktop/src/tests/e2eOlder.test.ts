@@ -188,7 +188,15 @@ describe("3.0.47 update launch hook", () => {
 				return Promise.resolve(`ran ${channel}`)
 			}
 		}
+		class Thread {
+			options: { execArgv?: string[]; workerData?: unknown } | undefined
+
+			constructor(_file: string, options?: { execArgv?: string[]; workerData?: unknown }) {
+				this.options = options
+			}
+		}
 		const modules: Record<string, unknown> = {
+			worker_threads: { Worker: Thread },
 			"electron-updater": { autoUpdater },
 			"./lib/updater": { Updater, default: Updater },
 			"./worker": { Worker }
@@ -196,7 +204,7 @@ describe("3.0.47 update launch hook", () => {
 		const Module = { _load: (request: string) => modules[request] }
 		const timers: (() => void)[] = []
 		const context = {
-			process: { getBuiltinModule: () => Module },
+			process: { getBuiltinModule: () => Module, execArgv: ["--inspect-brk=127.0.0.1:9229", "--max-old-space-size=4096"] },
 			setTimeout: (run: () => void) => timers.push(run),
 			Promise
 		} as { process: unknown; setTimeout: unknown; Promise: unknown; __e2eHook?: HookState }
@@ -227,6 +235,24 @@ describe("3.0.47 update launch hook", () => {
 		// The app's own listener first, then exactly one install.
 		expect(installs).toEqual(["app listener", "app listener", "installUpdate"])
 		expect(context.__e2eHook?.installs).toBe(1)
+	})
+
+	it("starts worker threads without the inherited --inspect-brk, keeping an execArgv the app passes", () => {
+		const { Module, context } = loaded(false, null)
+		const { Worker } = Module._load("worker_threads") as {
+			Worker: new (
+				file: string,
+				options?: { execArgv?: string[]; workerData?: unknown }
+			) => {
+				options?: { execArgv?: string[]; workerData?: unknown }
+			}
+		}
+
+		expect(new Worker("worker.js").options).toEqual({ execArgv: ["--max-old-space-size=4096"] })
+		expect(new Worker("worker.js", { workerData: 1 }).options).toEqual({ workerData: 1, execArgv: ["--max-old-space-size=4096"] })
+		expect(new Worker("worker.js", { execArgv: [] }).options).toEqual({ execArgv: [] })
+		expect(Module._load("worker_threads")).toMatchObject({ Worker })
+		expect(context.__e2eHook?.threads).toBe(true)
 	})
 
 	it("holds sync without touching the updater when the client has its own E2E hook", async () => {
