@@ -48,8 +48,10 @@ export function booleanAttribute(document: XmlDocument, node: number, name: stri
 
 // A finite number, or undefined.
 export function numberAttribute(document: XmlDocument, node: number, name: string): number | undefined {
-	const value = document.attribute(node, name)
+	return numberValue(document.attribute(node, name))
+}
 
+function numberValue(value: string | undefined): number | undefined {
 	if (value === undefined || value.trim() === "") return undefined
 
 	const number = Number(value)
@@ -58,9 +60,13 @@ export function numberAttribute(document: XmlDocument, node: number, name: strin
 }
 
 export function intAttribute(document: XmlDocument, node: number, name: string, fallback: number): number {
-	const value = numberAttribute(document, node, name)
+	return intValue(document.attribute(node, name), fallback)
+}
 
-	return value === undefined || !Number.isInteger(value) ? fallback : value
+export function intValue(value: string | undefined, fallback: number): number {
+	const number = numberValue(value)
+
+	return number === undefined || !Number.isInteger(number) ? fallback : number
 }
 
 // A CT_BooleanProperty element (<b/>, <i val="0"/>): val defaults to true.
@@ -68,9 +74,11 @@ function booleanProperty(document: XmlDocument, node: number): boolean {
 	return parseBoolean(document.attribute(node, "val")) ?? true
 }
 
+const COLOR_ATTRIBUTES = ["rgb", "theme", "tint", "indexed", "auto"]
+
 export function readColor(document: XmlDocument, node: number): XlsxColor {
 	const color: Mutable<XlsxColor> = {}
-	const rgb = document.attribute(node, "rgb")
+	const [rgb, themeValue, tintValue, indexedValue, autoValue] = document.attributeValues(node, COLOR_ATTRIBUTES)
 
 	if (rgb !== undefined && /^[0-9A-Fa-f]{6}([0-9A-Fa-f]{2})?$/.test(rgb.trim())) {
 		const hex = rgb.trim()
@@ -78,10 +86,10 @@ export function readColor(document: XmlDocument, node: number): XlsxColor {
 		color.argb = (hex.length === 6 ? Number.parseInt(`FF${hex}`, 16) : Number.parseInt(hex, 16)) >>> 0
 	}
 
-	const theme = numberAttribute(document, node, "theme")
-	const tint = numberAttribute(document, node, "tint")
-	const indexed = numberAttribute(document, node, "indexed")
-	const auto = parseBoolean(document.attribute(node, "auto"))
+	const theme = numberValue(themeValue)
+	const tint = numberValue(tintValue)
+	const indexed = numberValue(indexedValue)
+	const auto = parseBoolean(autoValue)
 
 	if (theme !== undefined) color.theme = theme
 	if (tint !== undefined) color.tint = tint
@@ -107,7 +115,7 @@ export function readFont(document: XmlDocument, node: number): XlsxFont {
 
 				break
 			case "sz": {
-				const size = numberAttribute(document, child, "val")
+				const size = numberValue(val)
 
 				if (size !== undefined) font.size = size
 
@@ -149,14 +157,14 @@ export function readFont(document: XmlDocument, node: number): XlsxFont {
 				font.color = readColor(document, child)
 				break
 			case "family": {
-				const family = numberAttribute(document, child, "val")
+				const family = numberValue(val)
 
 				if (family !== undefined) font.family = family
 
 				break
 			}
 			case "charset": {
-				const charset = numberAttribute(document, child, "val")
+				const charset = numberValue(val)
 
 				if (charset !== undefined) font.charset = charset
 
@@ -265,6 +273,8 @@ function readEdge(document: XmlDocument, node: number): XlsxBorderEdge {
 	return edge
 }
 
+const BORDER_ATTRIBUTES = ["diagonalUp", "diagonalDown", "outline"]
+
 export function readBorder(document: XmlDocument, node: number): XlsxBorder {
 	const border: Mutable<XlsxBorder> = {}
 
@@ -297,9 +307,10 @@ export function readBorder(document: XmlDocument, node: number): XlsxBorder {
 		}
 	}
 
-	const up = parseBoolean(document.attribute(node, "diagonalUp"))
-	const down = parseBoolean(document.attribute(node, "diagonalDown"))
-	const outline = parseBoolean(document.attribute(node, "outline"))
+	const [upValue, downValue, outlineValue] = document.attributeValues(node, BORDER_ATTRIBUTES)
+	const up = parseBoolean(upValue)
+	const down = parseBoolean(downValue)
+	const outline = parseBoolean(outlineValue)
 
 	if (up !== undefined) border.diagonalUp = up
 	if (down !== undefined) border.diagonalDown = down
@@ -320,21 +331,33 @@ const HORIZONTAL: ReadonlySet<string> = new Set([
 ])
 const VERTICAL: ReadonlySet<string> = new Set(["top", "center", "bottom", "justify", "distributed"])
 
+const ALIGNMENT_ATTRIBUTES = [
+	"horizontal",
+	"vertical",
+	"wrapText",
+	"shrinkToFit",
+	"justifyLastLine",
+	"indent",
+	"relativeIndent",
+	"textRotation",
+	"readingOrder"
+]
+
 export function readAlignment(document: XmlDocument, node: number): XlsxAlignment {
 	const alignment: Mutable<XlsxAlignment> = {}
-	const horizontal = document.attribute(node, "horizontal")
-	const vertical = document.attribute(node, "vertical")
+	const [horizontal, vertical, wrapValue, shrinkValue, justifyValue, indentValue, relativeValue, rotationValue, orderValue] =
+		document.attributeValues(node, ALIGNMENT_ATTRIBUTES)
 
 	if (horizontal !== undefined && HORIZONTAL.has(horizontal)) alignment.horizontal = horizontal as SheetHorizontalAlign | "general"
 	if (vertical !== undefined && VERTICAL.has(vertical)) alignment.vertical = vertical as SheetVerticalAlign
 
-	const wrap = parseBoolean(document.attribute(node, "wrapText"))
-	const shrink = parseBoolean(document.attribute(node, "shrinkToFit"))
-	const justify = parseBoolean(document.attribute(node, "justifyLastLine"))
-	const indent = numberAttribute(document, node, "indent")
-	const relativeIndent = numberAttribute(document, node, "relativeIndent")
-	const rotation = numberAttribute(document, node, "textRotation")
-	const readingOrder = numberAttribute(document, node, "readingOrder")
+	const wrap = parseBoolean(wrapValue)
+	const shrink = parseBoolean(shrinkValue)
+	const justify = parseBoolean(justifyValue)
+	const indent = numberValue(indentValue)
+	const relativeIndent = numberValue(relativeValue)
+	const rotation = numberValue(rotationValue)
+	const readingOrder = numberValue(orderValue)
 
 	if (wrap !== undefined) alignment.wrapText = wrap
 	if (shrink !== undefined) alignment.shrinkToFit = shrink
@@ -347,10 +370,13 @@ export function readAlignment(document: XmlDocument, node: number): XlsxAlignmen
 	return alignment
 }
 
+const PROTECTION_ATTRIBUTES = ["locked", "hidden"]
+
 export function readProtection(document: XmlDocument, node: number): XlsxCellProtection {
 	const protection: Mutable<XlsxCellProtection> = {}
-	const locked = parseBoolean(document.attribute(node, "locked"))
-	const hidden = parseBoolean(document.attribute(node, "hidden"))
+	const [lockedValue, hiddenValue] = document.attributeValues(node, PROTECTION_ATTRIBUTES)
+	const locked = parseBoolean(lockedValue)
+	const hidden = parseBoolean(hiddenValue)
 
 	if (locked !== undefined) protection.locked = locked
 	if (hidden !== undefined) protection.hidden = hidden
@@ -369,18 +395,25 @@ const APPLY: readonly (readonly [string, number])[] = [
 	["pivotButton", XfApply.PIVOT_BUTTON]
 ]
 
+// The attributes a cellStyleXfs record is read for (APPLY's, then the ids from XF_IDS on), and a cellXfs one.
+const APPLY_BITS = APPLY.map(([, bit]) => bit)
+const XF_ATTRIBUTES = [...APPLY.map(([name]) => name), "numFmtId", "fontId", "fillId", "borderId"]
+const CELL_XF_ATTRIBUTES = [...XF_ATTRIBUTES, "xfId"]
+const XF_IDS = APPLY.length
+
 // A cellXfs or cellStyleXfs record (`styleRecord`: xfId is -1).
 export function readXf(document: XmlDocument, node: number, styleRecord: boolean): XlsxXf {
+	const values = document.attributeValues(node, styleRecord ? XF_ATTRIBUTES : CELL_XF_ATTRIBUTES)
 	let flags = 0
 
-	for (const [name, bit] of APPLY) if (parseBoolean(document.attribute(node, name)) === true) flags |= bit
+	for (let k = 0; k < APPLY_BITS.length; k++) if (parseBoolean(values[k]) === true) flags |= APPLY_BITS[k] as number
 
 	const xf: Mutable<XlsxXf> = {
-		numFmtId: Math.max(0, intAttribute(document, node, "numFmtId", 0)),
-		fontId: Math.max(0, intAttribute(document, node, "fontId", 0)),
-		fillId: Math.max(0, intAttribute(document, node, "fillId", 0)),
-		borderId: Math.max(0, intAttribute(document, node, "borderId", 0)),
-		xfId: styleRecord ? -1 : Math.max(0, intAttribute(document, node, "xfId", 0)),
+		numFmtId: Math.max(0, intValue(values[XF_IDS], 0)),
+		fontId: Math.max(0, intValue(values[XF_IDS + 1], 0)),
+		fillId: Math.max(0, intValue(values[XF_IDS + 2], 0)),
+		borderId: Math.max(0, intValue(values[XF_IDS + 3], 0)),
+		xfId: styleRecord ? -1 : Math.max(0, intValue(values[XF_IDS + 4], 0)),
 		flags
 	}
 	const alignment = childByLocal(document, node, "alignment")

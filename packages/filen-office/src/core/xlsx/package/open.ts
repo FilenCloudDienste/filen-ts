@@ -4,7 +4,7 @@ import { parseTheme, SCHEME_SLOTS } from "../../docx/theme/theme"
 import { isEncryptedContainer } from "../../encryption/index"
 import { OpcError, OpcPackage, ZipError, partKey, type ByteSource, type Relationships, type ZipOpenOptions } from "../../opc/index"
 import { coreTitle } from "../../opc/coreTitle"
-import type { SheetId, SheetKind, SheetOpenFailure } from "../../sheet/protocol"
+import type { SheetKind, SheetOpenFailure } from "../../sheet/protocol"
 import { sliceClock, type SliceClock, type Slicing } from "../../slicing"
 import { parseXml, parseXmlSliced, XmlError, type XmlDocument } from "../../xml/index"
 import { ChangeLog } from "../model/changes"
@@ -16,7 +16,7 @@ import { DEFAULT_XLSX_LIMITS, type XlsxLimits } from "../read/limits"
 import { countElements } from "../read/scan"
 import { readSharedStrings } from "../read/sharedStrings"
 import { readStyles } from "../read/styles"
-import { readWorkbook } from "../read/workbook"
+import { readWorkbook, sourcedName } from "../read/workbook"
 import { SHEET_CONTENT_TYPES } from "../write/namespaces"
 import { XlsxParts } from "./parts"
 
@@ -258,16 +258,12 @@ async function open(source: ByteSource, options: XlsxOpenOptions): Promise<XlsxO
 			model: null
 		}
 	})
-	const definedNames: XlsxDefinedName[] = facts.names.map(record => ({
-		name: record.name,
-		sheet:
-			record.localSheetId >= 0 && record.localSheetId < sheets.length
-				? (sheets[record.localSheetId]?.id ?? null)
-				: (null as SheetId | null),
-		formula: record.formula,
-		hidden: record.hidden,
-		source: record.source
-	}))
+	const definedNames: XlsxDefinedName[] = facts.names.map(record =>
+		sourcedName(
+			record,
+			record.localSheetId >= 0 && record.localSheetId < sheets.length ? (sheets[record.localSheetId]?.id ?? null) : null
+		)
+	)
 	const strict =
 		facts.strict ||
 		main.type.startsWith("http://purl.oclc.org/ooxml/") ||

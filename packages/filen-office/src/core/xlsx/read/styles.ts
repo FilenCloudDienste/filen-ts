@@ -3,7 +3,7 @@ import { StyleTable, type StyleSource } from "../model/styles"
 import type { XlsxCellStyle } from "../model/types"
 import { XlsxReadError } from "./errors"
 import type { XlsxLimits } from "./limits"
-import { childElements, intAttribute, parseBoolean, readBorder, readDxf, readFill, readFont, readXf } from "./styleRecords"
+import { childElements, intAttribute, intValue, parseBoolean, readBorder, readDxf, readFill, readFont, readXf } from "./styleRecords"
 
 // styles.xml (ECMA-376 Part 1 §18.8.39 styleSheet), every record kind in file order; extLst is left to the
 // part's bytes, which the writer keeps.
@@ -107,15 +107,18 @@ function alternateRecord(document: XmlDocument, namespaces: Namespaces, node: nu
 	return -1
 }
 
+const CELL_STYLE_ATTRIBUTES = ["name", "xfId", "builtinId", "iLevel", "hidden", "customBuiltin"]
+
 function readCellStyle(document: XmlDocument, node: number): XlsxCellStyle {
+	const [name, xfId, builtinValue, levelValue, hiddenValue, customValue] = document.attributeValues(node, CELL_STYLE_ATTRIBUTES)
 	const style: { -readonly [K in keyof XlsxCellStyle]: XlsxCellStyle[K] } = {
-		name: document.attribute(node, "name") ?? "",
-		xfId: intAttribute(document, node, "xfId", 0)
+		name: name ?? "",
+		xfId: intValue(xfId, 0)
 	}
-	const builtinId = intAttribute(document, node, "builtinId", -1)
-	const outlineLevel = intAttribute(document, node, "iLevel", -1)
-	const hidden = parseBoolean(document.attribute(node, "hidden"))
-	const customBuiltin = parseBoolean(document.attribute(node, "customBuiltin"))
+	const builtinId = intValue(builtinValue, -1)
+	const outlineLevel = intValue(levelValue, -1)
+	const hidden = parseBoolean(hiddenValue)
+	const customBuiltin = parseBoolean(customValue)
 
 	if (builtinId >= 0) style.builtinId = builtinId
 	if (outlineLevel >= 0) style.outlineLevel = outlineLevel

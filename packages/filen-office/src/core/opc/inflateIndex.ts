@@ -208,7 +208,7 @@ function buildTable(lengths: Uint8Array, from: number, count: number, table: Uin
 }
 
 // One decoding run: input buffered from the compressed stream, output in a buffer whose first WINDOW bytes (once
-// that much was produced) are the history back-references reach.
+// that much was produced) are the history back-references reach, or straight into the whole output (`into`).
 class Inflater {
 	readonly input: InflateInput
 	// Input: buf[0, valid) holds compressed bytes from `base`, then PAD zero bytes.
@@ -218,7 +218,9 @@ class Inflater {
 	// Bit position in buf.
 	private pos = 0
 	// Output.
-	readonly out = new Uint8Array(WINDOW + CHUNK)
+	readonly out: Uint8Array
+	// `out` is the whole output: never slid, and Full means the stream holds more than it.
+	private readonly direct: boolean
 	// Write index in `out`, and where the bytes not yet handed over start.
 	o = 0
 	pending = 0
@@ -235,8 +237,10 @@ class Inflater {
 	// The tables hold the fixed code (built once per decoder however many fixed blocks follow).
 	private fixedTables = false
 
-	constructor(input: InflateInput, from?: InflateCheckpoint) {
+	constructor(input: InflateInput, from?: InflateCheckpoint, into?: Uint8Array) {
 		this.input = input
+		this.out = into ?? new Uint8Array(WINDOW + CHUNK)
+		this.direct = into !== undefined
 
 		if (from === undefined) return
 
@@ -403,13 +407,14 @@ class Inflater {
 	// an input bit at which it stops (Target) before the next block header.
 	decode(target: number, inputTarget = Infinity): Stop {
 		const out = this.out
-		const full = out.length - MAX_MATCH
+		// Output past which no symbol starts (a direct one checks each symbol's room instead).
+		const full = this.direct ? out.length : out.length - MAX_MATCH
 		let headers = 0
 
 		for (;;) {
 			if (this.mode === Mode.Done) return Stop.End
 			if (this.produced >= target) return Stop.Target
-			if (this.o >= full) return Stop.Full
+			if (this.o >= full && !this.direct) return Stop.Full
 
 			const available = this.valid - (this.pos >>> 3)
 			const end = this.inputEnd
@@ -460,7 +465,11 @@ class Inflater {
 				}
 
 				const at = this.pos >>> 3
-				const count = Math.min(this.stored, available, full + MAX_MATCH - this.o, target - this.produced)
+				const room = out.length - this.o
+
+				if (room === 0) return Stop.Full
+
+				const count = Math.min(this.stored, available, room, target - this.produced)
 
 				if (count <= 0) {
 					if (end) throw corrupt("the stream ends early")
@@ -492,8 +501,11 @@ class Inflater {
 			let o = this.o
 			const stopAt = Math.min(full, o + (target - this.produced))
 			let blockEnd = false
+			// A symbol was read with no room for it: the input stays before it.
+			let stopped = false
 
-			while (o < stopAt && pos < limit) {
+			while (pos < limit) {
+				const symbolStart = pos
 				let at = pos >>> 3
 				let word = ((buf[at] as number) | ((buf[at + 1] as number) << 8) | ((buf[at + 2] as number) << 16)) >>> (pos & 7)
 				const entry = literalTable[word & literalMask] as number
@@ -506,12 +518,27 @@ class Inflater {
 				const symbol = entry >>> 4
 
 				if (symbol < 256) {
+					if (o >= stopAt) {
+						pos = symbolStart
+						stopped = true
+
+						break
+					}
+
 					out[o++] = symbol
 
 					continue
 				}
 
 				if (symbol === 256) {
+					// A window run stops before it once full, as before any symbol; a direct one reads it at its end.
+					if (o >= stopAt && !this.direct) {
+						pos = symbolStart
+						stopped = true
+
+						break
+					}
+
 					blockEnd = true
 
 					break
@@ -557,9 +584,16 @@ class Inflater {
 
 				if (distance > o) throw corrupt("a distance before the stream's start")
 
+				if (o >= stopAt || o + copy > out.length) {
+					pos = symbolStart
+					stopped = true
+
+					break
+				}
+
 				let from = o - distance
 
-				if (distance >= copy) {
+				if (copy > 32 && distance >= copy) {
 					out.copyWithin(o, from, from + copy)
 					o += copy
 				} else {
@@ -575,8 +609,10 @@ class Inflater {
 			this.o = o
 			this.pos = pos
 
+			if (stopped) return this.produced >= target ? Stop.Target : Stop.Full
+
 			if (blockEnd) this.mode = this.final ? Mode.Done : Mode.Header
-			else if (pos >= limit && o < stopAt) {
+			else if (pos >= limit && (o < stopAt || this.direct)) {
 				if (end) throw corrupt("the stream ends early")
 
 				return Stop.Input
@@ -640,6 +676,31 @@ async function run(
 			hand()
 			await options.clock.pause()
 		}
+	}
+}
+
+// Output a direct inflate produces between two calls of its `step`.
+const DIRECT_STEP = 64 * 1024
+
+// Inflates a whole raw DEFLATE stream straight into `out`, sized to the output it must have: nothing is copied out of
+// a window, and decoding stops at the first symbol `out` has no room for. `step` sees each run of new output
+// [from, to) (at most about DIRECT_STEP bytes, or none after a run of block headers or an input read) and may give
+// the host a turn. Returns the bytes produced, or -1 when the stream holds more than `out`.
+export async function inflateInto(
+	input: InflateInput,
+	out: Uint8Array,
+	step: (from: number, to: number) => void | Promise<void>
+): Promise<number> {
+	const inflater = new Inflater(input, undefined, out)
+
+	for (;;) {
+		const from = inflater.o
+		const stop = inflater.decode(from + DIRECT_STEP)
+
+		await step(from, inflater.o)
+		if (stop === Stop.End) return inflater.o
+		if (stop === Stop.Full) return -1
+		if (stop === Stop.Input) await inflater.fill()
 	}
 }
 

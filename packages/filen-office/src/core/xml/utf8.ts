@@ -1,18 +1,37 @@
-// Names, attribute values and text runs are short, so a loop beats a TextDecoder call here, and Hermes has
-// no TextDecoder. Invalid sequences decode to U+FFFD, one per offending byte.
+// Names, attribute values and text runs are short, so a loop beats a TextDecoder call on them; longer ASCII takes the
+// platform's TextDecoder where there is one (Hermes has none). Other text keeps the loop: it builds one-byte strings
+// wherever the text fits them, where a native decode of a whole text holds two bytes a character for one wider
+// character. Invalid sequences decode to U+FFFD, one per offending byte.
 
 const CHUNK = 8192
 // Up to this many bytes, ASCII is copied into a reused array for String.fromCharCode: no view is made per decode, and
-// Function.apply over a typed array takes SpiderMonkey's slow path (twice V8's time for short slices).
-const SHORT = 64
-const shortUnits: number[] = []
+// Function.apply over a typed array takes SpiderMonkey's slow path (twice V8's time for short slices). Past it, a
+// native decode call costs less.
+const SHORT = 40
+// One array per length: setting an array's length on every decode costs more than the copy.
+const shortUnits: number[][] = Array.from({ length: SHORT + 1 }, (_, length) => new Array<number>(length).fill(0))
+
+interface NativeDecoder {
+	decode(input: Uint8Array): string
+}
+
+// For ASCII, which it decodes as the loop does.
+const native = ((): NativeDecoder | undefined => {
+	const constructor = (globalThis as { TextDecoder?: new (label: string, options: object) => NativeDecoder }).TextDecoder
+
+	if (typeof constructor !== "function") return undefined
+
+	try {
+		return new constructor("utf-8", { ignoreBOM: true })
+	} catch {
+		return undefined
+	}
+})()
 
 export function decodeUtf8(bytes: Uint8Array, start: number = 0, end: number = bytes.length): string {
 	if (end - start <= SHORT && start >= 0) {
-		const units = shortUnits
 		const last = Math.min(end, bytes.length)
-
-		units.length = Math.max(0, last - start)
+		const units = shortUnits[Math.max(0, last - start)] ?? []
 
 		for (let i = start; i < last; i++) {
 			const b = bytes[i] ?? 0
@@ -36,6 +55,7 @@ export function decodeUtf8(bytes: Uint8Array, start: number = 0, end: number = b
 	}
 
 	if (ascii) {
+		if (native !== undefined && start >= 0 && end <= bytes.length) return native.decode(bytes.subarray(start, end))
 		if (end - start <= CHUNK) {
 			return String.fromCharCode.apply(null, bytes.subarray(start, end) as unknown as number[])
 		}

@@ -3,6 +3,7 @@ import { sliceClock, type SliceClock, type Slicing } from "../slicing"
 import { decodeUtf8 } from "../xml/utf8"
 import { crc32 } from "./crc32"
 import { ZipError } from "./errors"
+import { inflateInto, type InflateInput } from "./inflateIndex"
 import type { ByteSource } from "./io"
 
 export const EOCD_SIGNATURE = 0x06054b50
@@ -39,10 +40,8 @@ const END_SEARCH_WINDOW = 256 * 1024
 // 22 bytes.
 const MAX_END_CANDIDATES = 256
 const READ_STEP = 1024 * 1024
-// Compressed bytes per inflate step: one step expands at most ~1032-fold before the output is checked, so
-// steps shrink as the declared size runs out. fflate holds a step's whole output twice (its buffer and the
-// chunk it hands over), so its steps stay smaller than a native inflate's, which streams its output.
-const MAX_FFLATE_STEP = 8 * 1024
+// Compressed bytes per inflate step of a hook or of stream(): one step expands at most ~1032-fold before the
+// output is checked, so steps shrink as the declared size runs out.
 const MAX_HOOK_STEP = 64 * 1024
 const MIN_INFLATE_STEP = 1024
 // Stored bytes CRC-checked between two looks at the clock.
@@ -787,39 +786,31 @@ export class ZipArchive {
 
 	// No compression-ratio limit: deflate legitimately reaches ~1030:1 on uniform data, and nothing needs
 	// one. Memory is bounded by the declared-size limits (the output buffer is the declared size, and its
-	// untouched pages stay unbacked) and by the overflow cut-off below; CPU by both plus one step. The CRC
-	// is taken as the output arrives.
+	// untouched pages stay unbacked) and by the overflow cut-off; CPU by both plus one step. The CRC is taken
+	// as the output arrives.
 	private async inflate(entry: ZipEntry, dataOffset: number, clock: SliceClock | undefined): Promise<Uint8Array> {
 		const out = new Uint8Array(entry.uncompressedSize)
 		let written = 0
 		let crc = 0
 		let overflow = false
-		const accept = (chunk: Uint8Array): void => {
-			if (overflow) return
-
-			if (written + chunk.length > out.length) {
-				overflow = true
-
-				return
-			}
-
-			out.set(chunk, written)
-			crc = crc32(chunk, crc)
-			written += chunk.length
-		}
-		// Small enough that one step cannot expand far past what the entry may still produce.
-		const maxStep = this.inflateHook === undefined ? MAX_FFLATE_STEP : MAX_HOOK_STEP
-		const stepSize = (): number => Math.min(maxStep, Math.max(MIN_INFLATE_STEP, Math.ceil((out.length - written) / 1024)))
-		const input = steps(this.compressed(entry, dataOffset), stepSize)
 		// Set while the host has its turn: what that throws (a cancelled open) is not damage.
 		let pausing = false
 
 		try {
 			if (this.inflateHook !== undefined) {
-				for await (const chunk of this.inflateHook(input)) {
-					accept(chunk)
+				// Small enough that one step cannot expand far past what the entry may still produce.
+				const stepSize = (): number => Math.min(MAX_HOOK_STEP, Math.max(MIN_INFLATE_STEP, Math.ceil((out.length - written) / 1024)))
 
-					if (overflow) break
+				for await (const chunk of this.inflateHook(steps(this.compressed(entry, dataOffset), stepSize))) {
+					if (written + chunk.length > out.length) {
+						overflow = true
+
+						break
+					}
+
+					out.set(chunk, written)
+					crc = crc32(chunk, crc)
+					written += chunk.length
 
 					if (clock?.due === true) {
 						pausing = true
@@ -827,27 +818,35 @@ export class ZipArchive {
 						pausing = false
 					}
 				}
-			} else {
-				const inflater = new Inflate(accept)
-				let consumed = 0
-
-				for await (const step of input) {
-					consumed += step.length
-					inflater.push(step, consumed === entry.compressedSize)
-
-					if (overflow) break
+			} else if (entry.compressedSize > 0) {
+				// Straight into `out`: the decoder stops at the first byte past it.
+				const source = this.source
+				const input: InflateInput = {
+					size: entry.compressedSize,
+					read: async (offset, length) => {
+						try {
+							return await source.read(dataOffset + offset, length)
+						} catch (error) {
+							throw sourceFailure(error)
+						}
+					}
+				}
+				const produced = await inflateInto(input, out, async (from, to) => {
+					crc = crc32(out.subarray(from, to), crc)
 
 					if (clock?.due === true) {
 						pausing = true
 						await clock.pause()
 						pausing = false
 					}
-				}
+				})
 
-				if (entry.compressedSize === 0) inflater.push(new Uint8Array(0), true)
+				if (produced < 0) overflow = true
+				else written = produced
 			}
 		} catch (error) {
-			if (error instanceof ZipError || pausing || (error instanceof Error && sourceFailures.has(error))) throw error
+			if (pausing || (error instanceof Error && sourceFailures.has(error))) throw error
+			if (error instanceof ZipError && this.inflateHook !== undefined) throw error
 
 			throw new ZipError("corrupt", `Damaged deflate data in ${entry.name}`)
 		}

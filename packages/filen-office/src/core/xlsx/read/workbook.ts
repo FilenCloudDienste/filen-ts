@@ -1,9 +1,9 @@
-import type { SheetState } from "../../sheet/protocol"
+import type { SheetId, SheetState } from "../../sheet/protocol"
 import { Namespaces, type XmlDocument } from "../../xml/index"
-import type { XlsxCalcProperties, XlsxFileSharing, XlsxSection, XlsxWorkbookProtection } from "../model/types"
+import type { XlsxCalcProperties, XlsxDefinedName, XlsxFileSharing, XlsxSection, XlsxWorkbookProtection } from "../model/types"
 import { XlsxReadError } from "./errors"
 import type { XlsxLimits } from "./limits"
-import { booleanAttribute, childByLocal, childElements, intAttribute, numberAttribute } from "./styleRecords"
+import { booleanAttribute, childByLocal, childElements, intAttribute, intValue, numberAttribute, parseBoolean } from "./styleRecords"
 import { readProtectionHash } from "./worksheet"
 
 // workbook.xml (ECMA-376 Part 1 §18.2.27 CT_Workbook): its children as sections, the sheet list, the defined
@@ -29,7 +29,10 @@ export interface WorkbookNameRecord {
 	readonly localSheetId: number
 	readonly formula: string
 	readonly hidden: boolean
-	readonly source: Uint8Array
+	// The element's bytes: [start, end) of its section's copy, which every name of the section shares.
+	readonly section: Uint8Array
+	readonly start: number
+	readonly end: number
 }
 
 export interface WorkbookFacts {
@@ -45,6 +48,40 @@ export interface WorkbookFacts {
 }
 
 const CALC_MODES: ReadonlySet<string> = new Set(["auto", "manual", "autoNoTable"])
+const DEFINED_NAME_ATTRIBUTES = ["name", "localSheetId", "hidden"]
+
+const SECTION = Symbol("section")
+const START = Symbol("start")
+const END = Symbol("end")
+
+interface SourcedName {
+	readonly [SECTION]: Uint8Array
+	readonly [START]: number
+	readonly [END]: number
+}
+
+function sourceOf(this: SourcedName): Uint8Array {
+	return this[SECTION].subarray(this[START], this[END])
+}
+
+// An enumerable own accessor, so a spread or a copy still gets the bytes; one getter for every name.
+const SOURCE: PropertyDescriptor = { get: sourceOf, enumerable: true, configurable: true }
+
+// A defined name read from the workbook part: its source element is made on access from the section's one copy,
+// where a view held per name would cost about as much as the name's decoded text.
+export function sourcedName(record: WorkbookNameRecord, sheet: SheetId | null): XlsxDefinedName {
+	const name = { name: record.name, sheet, formula: record.formula, hidden: record.hidden }
+
+	Object.defineProperty(name, "source", SOURCE)
+
+	const sourced = name as unknown as { -readonly [K in keyof SourcedName]: SourcedName[K] }
+
+	sourced[SECTION] = record.section
+	sourced[START] = record.start
+	sourced[END] = record.end
+
+	return name as unknown as XlsxDefinedName
+}
 
 export function readWorkbook(document: XmlDocument, part: string, limits: XlsxLimits): WorkbookFacts {
 	const namespaces = new Namespaces(document, { lenient: true })
@@ -90,17 +127,23 @@ export function readWorkbook(document: XmlDocument, part: string, limits: XlsxLi
 
 	const names: WorkbookNameRecord[] = []
 	const namesNode = childByLocal(document, root, "definedNames")
+	const namesStart = namesNode < 0 ? -1 : document.start(namesNode)
+	const namesBytes = sections.find(section => section.start === namesStart)?.bytes ?? new Uint8Array(0)
 
 	for (const node of namesNode < 0 ? [] : childElements(document, namesNode)) {
 		if (document.localName(node) !== "definedName") continue
 		if (names.length >= limits.maxDefinedNames) throw new XlsxReadError("tooLarge", "Too many defined names", part)
 
+		const [name, localSheetId, hidden] = document.attributeValues(node, DEFINED_NAME_ATTRIBUTES)
+
 		names.push({
-			name: document.attribute(node, "name") ?? "",
-			localSheetId: intAttribute(document, node, "localSheetId", -1),
+			name: name ?? "",
+			localSheetId: intValue(localSheetId, -1),
 			formula: document.textContent(node),
-			hidden: booleanAttribute(document, node, "hidden", false),
-			source: document.raw(node).slice()
+			hidden: parseBoolean(hidden) ?? false,
+			section: namesBytes,
+			start: document.start(node) - namesStart,
+			end: document.end(node) - namesStart
 		})
 	}
 

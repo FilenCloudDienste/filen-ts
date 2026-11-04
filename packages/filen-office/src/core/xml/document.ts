@@ -417,6 +417,60 @@ export class XmlDocument {
 		}
 	}
 
+	// The decoded values of the attributes named in `names` (undefined for absent ones), as attribute() gives each, in
+	// one scan of the start tag.
+	attributeValues(node: number, names: readonly string[]): (string | undefined)[] {
+		const values: (string | undefined)[] = new Array<string | undefined>(names.length).fill(undefined)
+
+		if (this.kinds[node] !== NodeKind.Element) return values
+
+		const bytes = this.bytes
+		const tagEnd = this.openEnd(node) - 1
+		let i = this.start(node) + 1 + this.nameLength(this.nameId(node))
+		let missing = names.length
+
+		while (missing > 0) {
+			while (i < tagEnd && isSpace(bytes[i])) i++
+
+			if (i >= tagEnd || bytes[i] === 47) break
+
+			const nameStart = i
+
+			while (i < tagEnd && !isSpace(bytes[i]) && bytes[i] !== 61) i++
+
+			const nameEnd = i
+
+			while (i < tagEnd && bytes[i] !== 34 && bytes[i] !== 39) i++
+
+			const quote = bytes[i]
+			const valueStart = i + 1
+
+			i = valueStart
+
+			while (i < tagEnd && bytes[i] !== quote) i++
+
+			if (i >= tagEnd) {
+				// Malformed: let the validating parser name the problem, as findAttribute does for a name not found.
+				this.attributeSpans(node)
+
+				break
+			}
+
+			for (let k = 0; k < names.length; k++) {
+				if (values[k] === undefined && this.bytesEqualString(nameStart, nameEnd, names[k] as string)) {
+					values[k] = decodeCharacterData(bytes, valueStart, i, true)
+					missing--
+
+					break
+				}
+			}
+
+			i++
+		}
+
+		return values
+	}
+
 	// First child element, optionally restricted to one interned name id.
 	firstChildElement(node: number, nameId: number = -1): number {
 		return this.elementFrom(this.firstChild(node), nameId)
@@ -477,7 +531,12 @@ export class XmlDocument {
 	private bytesEqualString(start: number, end: number, text: string): boolean {
 		// Qualified names are almost always ASCII; anything else takes the decoding path.
 		if (end - start !== text.length) {
-			return end - start > text.length && decodeUtf8(this.bytes, start, end) === text
+			if (end - start < text.length) return false
+
+			// ASCII decodes to a unit a byte: only a name with other bytes can still match.
+			for (let k = start; k < end; k++) if ((this.bytes[k] as number) >= 0x80) return decodeUtf8(this.bytes, start, end) === text
+
+			return false
 		}
 
 		for (let k = 0; k < text.length; k++) {

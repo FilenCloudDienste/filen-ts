@@ -401,13 +401,15 @@ export function parseUint(bytes: Uint8Array, start: number, end: number): number
 	return value
 }
 
+// 2^53: every integer below it, and so each partial sum of one, is exact.
+const EXACT = 9_007_199_254_740_992
 const POWERS = [
 	1, 1e1, 1e2, 1e3, 1e4, 1e5, 1e6, 1e7, 1e8, 1e9, 1e10, 1e11, 1e12, 1e13, 1e14, 1e15, 1e16, 1e17, 1e18, 1e19, 1e20, 1e21, 1e22
 ]
 
-// A number as Number() reads the text [start, end), the same double: plain decimals of at most 15 digits are
-// exact as integer / 10^k (both exact, one correctly rounded division); anything else goes through Number().
-// NaN for text that is not a number, as Number() gives it, and for empty text.
+// A number as Number() reads the text [start, end), the same double: a plain decimal whose digits form an integer
+// below 2^53 is exact as integer / 10^k (both exact, one correctly rounded division, as Number() rounds); anything
+// else goes through Number(). NaN for text that is not a number, as Number() gives it, and for empty text.
 export function parseNumber(bytes: Uint8Array, start: number, end: number): number {
 	while (start < end && isSpace(bytes[start])) start++
 	while (end > start && isSpace(bytes[end - 1])) end--
@@ -419,39 +421,60 @@ export function parseNumber(bytes: Uint8Array, start: number, end: number): numb
 
 	if (negative || bytes[i] === 43) i++
 
+	const integerStart = i
 	let mantissa = 0
-	let digits = 0
-	let fraction = -1
 
 	for (; i < end; i++) {
-		const b = bytes[i] ?? 0
+		const digit = (bytes[i] as number) - 48
 
-		if (b >= 48 && b <= 57) {
-			if (digits > 0 || b !== 48) digits++
+		if (digit < 0 || digit > 9) break
 
-			mantissa = mantissa * 10 + (b - 48)
+		mantissa = mantissa * 10 + digit
+	}
 
-			if (fraction >= 0) fraction++
-		} else if (b === 46 && fraction < 0) {
-			fraction = 0
-		} else {
-			break
+	if (i > integerStart) {
+		if (i === end) {
+			if (mantissa < EXACT) return negative ? -mantissa : mantissa
+		} else if (bytes[i] === 46) {
+			const fractionStart = ++i
+
+			for (; i < end; i++) {
+				const digit = (bytes[i] as number) - 48
+
+				if (digit < 0 || digit > 9) break
+
+				mantissa = mantissa * 10 + digit
+			}
+
+			const fraction = i - fractionStart
+
+			if (i === end && fraction > 0 && fraction < POWERS.length && mantissa < EXACT) {
+				const value = mantissa / (POWERS[fraction] as number)
+
+				return negative ? -value : value
+			}
 		}
 	}
 
-	const integerDigits = i - start - (negative || bytes[start] === 43 ? 1 : 0) - (fraction >= 0 ? 1 : 0)
+	const units = numberUnits[end - start]
 
-	if (i === end && digits <= 15 && integerDigits > 0 && fraction !== 0) {
-		const value = fraction > 0 ? mantissa / (POWERS[fraction] ?? 1) : mantissa
+	if (units === undefined) return Number(decodeLatin1(bytes, start, end))
 
-		if (fraction <= 22) return negative ? -value : value
-	}
+	// Copied into a reused array for one String.fromCharCode, as decodeUtf8 does short text.
+	for (let k = start; k < end; k++) units[k - start] = bytes[k] ?? 0
 
+	return Number(String.fromCharCode.apply(null, units))
+}
+
+// Reused arrays, one per length, for number text up to 32 bytes.
+const numberUnits: number[][] = Array.from({ length: 33 }, (_, length) => new Array<number>(length).fill(0))
+
+function decodeLatin1(bytes: Uint8Array, start: number, end: number): string {
 	let text = ""
 
 	for (let k = start; k < end; k++) text += String.fromCharCode(bytes[k] ?? 0)
 
-	return Number(text)
+	return text
 }
 
 // The elements of a document, counted with no node per element and in slices of `clock`; refuses once past

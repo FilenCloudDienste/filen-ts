@@ -232,62 +232,89 @@ export class SheetDataReader {
 	private row(start: number, name: number): void {
 		const bytes = this.bytes
 		const scanner = this.scanner
-		const tagEnd = scanner.tagEnd(start)
-		const empty = scanner.selfClosing
+		let tagEnd = -1
+		let empty = false
 		let row = -1
 		let flags = 0
 		let height = Number.NaN
 		let style = -1
 
-		scanner.attributes(start, tagEnd, (nameStart, nameStop, valueStart, valueEnd) => {
-			switch (nameStop - nameStart) {
-				case 1:
-					if (bytes[nameStart] === 114) {
-						const value = parseUint(bytes, valueStart, valueEnd)
+		// <row r="N">, the usual spelling, without the general path (r read as parseUint reads it).
+		if (bytes[name] === 32 && bytes[name + 1] === 114 && bytes[name + 2] === 61 && bytes[name + 3] === 34) {
+			const digits = name + 4
+			let k = digits
+			let value = 0
 
-						if (value >= 1) row = value - 1
-					} else if (bytes[nameStart] === 115) {
-						style = parseUint(bytes, valueStart, valueEnd)
-					}
+			for (; k - digits < 15; k++) {
+				const digit = (bytes[k] as number) - 48
 
-					break
-				case 2:
-					if (bytesAre(bytes, nameStart, nameStop, "ht")) {
-						const value = parseNumber(bytes, valueStart, valueEnd)
+				if (digit < 0 || digit > 9) break
 
-						if (Number.isFinite(value)) height = value
-					}
-
-					break
-				case 6:
-					if (bytesAre(bytes, nameStart, nameStop, "hidden") && isTrue(bytes, valueStart, valueEnd)) flags |= RowFlag.HIDDEN
-
-					break
-				case 8:
-					if (bytesAre(bytes, nameStart, nameStop, "thickBot") && isTrue(bytes, valueStart, valueEnd))
-						flags |= RowFlag.THICK_BOTTOM
-					else if (bytesAre(bytes, nameStart, nameStop, "thickTop") && isTrue(bytes, valueStart, valueEnd))
-						flags |= RowFlag.THICK_TOP
-
-					break
-				case 9:
-					if (bytesAre(bytes, nameStart, nameStop, "collapsed") && isTrue(bytes, valueStart, valueEnd)) flags |= RowFlag.COLLAPSED
-
-					break
-				case 12:
-					if (bytesAre(bytes, nameStart, nameStop, "customFormat") && isTrue(bytes, valueStart, valueEnd)) {
-						flags |= RowFlag.CUSTOM_FORMAT
-					} else if (bytesAre(bytes, nameStart, nameStop, "customHeight") && isTrue(bytes, valueStart, valueEnd)) {
-						flags |= RowFlag.CUSTOM_HEIGHT
-					} else if (bytesAre(bytes, nameStart, nameStop, "outlineLevel")) {
-						const level = parseUint(bytes, valueStart, valueEnd)
-
-						if (level > 0) flags |= Math.min(7, level) << RowFlag.OUTLINE_SHIFT
-					}
-
-					break
+				value = value * 10 + digit
 			}
-		})
+
+			if (k > digits && bytes[k] === 34 && bytes[k + 1] === GT) {
+				tagEnd = k + 2
+
+				if (value >= 1) row = value - 1
+			}
+		}
+
+		if (tagEnd < 0) {
+			tagEnd = scanner.tagEnd(start)
+			empty = scanner.selfClosing
+
+			scanner.attributes(start, tagEnd, (nameStart, nameStop, valueStart, valueEnd) => {
+				switch (nameStop - nameStart) {
+					case 1:
+						if (bytes[nameStart] === 114) {
+							const value = parseUint(bytes, valueStart, valueEnd)
+
+							if (value >= 1) row = value - 1
+						} else if (bytes[nameStart] === 115) {
+							style = parseUint(bytes, valueStart, valueEnd)
+						}
+
+						break
+					case 2:
+						if (bytesAre(bytes, nameStart, nameStop, "ht")) {
+							const value = parseNumber(bytes, valueStart, valueEnd)
+
+							if (Number.isFinite(value)) height = value
+						}
+
+						break
+					case 6:
+						if (bytesAre(bytes, nameStart, nameStop, "hidden") && isTrue(bytes, valueStart, valueEnd)) flags |= RowFlag.HIDDEN
+
+						break
+					case 8:
+						if (bytesAre(bytes, nameStart, nameStop, "thickBot") && isTrue(bytes, valueStart, valueEnd))
+							flags |= RowFlag.THICK_BOTTOM
+						else if (bytesAre(bytes, nameStart, nameStop, "thickTop") && isTrue(bytes, valueStart, valueEnd))
+							flags |= RowFlag.THICK_TOP
+
+						break
+					case 9:
+						if (bytesAre(bytes, nameStart, nameStop, "collapsed") && isTrue(bytes, valueStart, valueEnd))
+							flags |= RowFlag.COLLAPSED
+
+						break
+					case 12:
+						if (bytesAre(bytes, nameStart, nameStop, "customFormat") && isTrue(bytes, valueStart, valueEnd)) {
+							flags |= RowFlag.CUSTOM_FORMAT
+						} else if (bytesAre(bytes, nameStart, nameStop, "customHeight") && isTrue(bytes, valueStart, valueEnd)) {
+							flags |= RowFlag.CUSTOM_HEIGHT
+						} else if (bytesAre(bytes, nameStart, nameStop, "outlineLevel")) {
+							const level = parseUint(bytes, valueStart, valueEnd)
+
+							if (level > 0) flags |= Math.min(7, level) << RowFlag.OUTLINE_SHIFT
+						}
+
+						break
+				}
+			})
+		}
 
 		if (row >= SHEET_MAX_ROWS) scanner.fail("A row lies outside the grid", start)
 
@@ -352,10 +379,13 @@ export class SheetDataReader {
 		if (row >= SHEET_MAX_ROWS) scanner.fail("A row lies outside the grid", start)
 
 		// The row's shared masters placed, now its index is known: a child moves from its master's own cell.
-		for (let i = 0; i + 1 < this.masterCols.length; i += 2)
-			this.formulas.placeMaster(this.masterCols[i] ?? -1, row, this.masterCols[i + 1] ?? 0)
+		if (this.masterCols.length > 0) {
+			for (let i = 0; i + 1 < this.masterCols.length; i += 2)
+				this.formulas.placeMaster(this.masterCols[i] ?? -1, row, this.masterCols[i + 1] ?? 0)
 
-		this.masterCols.length = 0
+			this.masterCols.length = 0
+		}
+
 		builder.endRow(row, start, at, flags, height, style)
 		this.previousRow = row
 		this.at = at
@@ -414,14 +444,19 @@ export class SheetDataReader {
 			if (j >= length || b === LT) scanner.fail("A tag is not closed", start)
 
 			const attributeStart = j
+			let attributeEnd: number
 
-			j = nameEnd(bytes, j)
+			if (b !== 61 && bytes[j + 1] === 61) {
+				// A one-letter name and "=", the usual spelling (r, s, t).
+				attributeEnd = ++j
+			} else {
+				j = nameEnd(bytes, j)
+				attributeEnd = j
 
-			const attributeEnd = j
+				while (isSpace(bytes[j])) j++
 
-			while (isSpace(bytes[j])) j++
-
-			if (bytes[j] !== 61) scanner.fail("An attribute has no value", attributeStart)
+				if (bytes[j] !== 61) scanner.fail("An attribute has no value", attributeStart)
+			}
 
 			j++
 
@@ -432,6 +467,42 @@ export class SheetDataReader {
 			if (quote !== 34 && quote !== 39) return scanner.fail("An attribute value is not quoted", j)
 
 			const valueStart = j + 1
+			const nameLength = attributeEnd - attributeStart
+			const first = bytes[attributeStart]
+
+			if (nameLength === 1 && first === 114) {
+				// r: a plain reference (as readReference reads it) read as it is scanned.
+				let k = valueStart
+				let letters = 0
+
+				for (; k - valueStart < 3; k++) {
+					const upper = (bytes[k] ?? 0) & 0xdf
+
+					if (upper < 65 || upper > 90) break
+
+					letters = letters * 26 + upper - 64
+				}
+
+				const digits = k
+				let number = 0
+
+				for (; k - digits < 8; k++) {
+					const digit = (bytes[k] ?? 0) - 48
+
+					if (digit < 0 || digit > 9) break
+
+					number = number * 10 + digit
+				}
+
+				if (bytes[k] === quote && k > digits && digits > valueStart && number > 0) {
+					col = letters - 1
+					this.cellRow = number - 1
+					j = k + 1
+
+					continue
+				}
+			}
+
 			let valueEnd = valueStart
 
 			while (valueEnd < length && bytes[valueEnd] !== quote) {
@@ -443,9 +514,6 @@ export class SheetDataReader {
 			if (valueEnd >= length) scanner.fail("An attribute value is not closed", j)
 
 			j = valueEnd + 1
-
-			const nameLength = attributeEnd - attributeStart
-			const first = bytes[attributeStart]
 
 			if (nameLength === 1) {
 				if (first === 114) {
@@ -512,6 +580,18 @@ export class SheetDataReader {
 				break
 			}
 			case T_BOOLEAN: {
+				// "0" and "1", the usual spellings, without a string.
+				if (hasValue && valueText === null && this.valueEnd - this.valueStart === 1) {
+					const digit = bytes[this.valueStart]
+
+					if (digit === 48 || digit === 49) {
+						kind = CellKind.BOOLEAN
+						value = digit - 48
+
+						break
+					}
+				}
+
 				const text = hasValue ? this.value() : ""
 
 				if (text !== "") {
@@ -719,23 +799,29 @@ export class SheetDataReader {
 		let r1: string | undefined
 		let r2: string | undefined
 
-		scanner.attributes(start, tagEnd, (nameStart, nameStop, valueStart, valueEnd) => {
-			const length = nameStop - nameStart
+		// <f>, the usual spelling, has none to visit.
+		if (bytes[start + 2] !== GT)
+			scanner.attributes(start, tagEnd, (nameStart, nameStop, valueStart, valueEnd) => {
+				const length = nameStop - nameStart
 
-			if (length === 1 && bytes[nameStart] === 116) type = scanner.attributeValue(valueStart, valueEnd)
-			else if (bytesAre(bytes, nameStart, nameStop, "ref")) ref = scanner.attributeValue(valueStart, valueEnd)
-			else if (bytesAre(bytes, nameStart, nameStop, "si")) shared = parseUint(bytes, valueStart, valueEnd)
-			else if (bytesAre(bytes, nameStart, nameStop, "ca")) flags |= isTrue(bytes, valueStart, valueEnd) ? FormulaFlag.ALWAYS : 0
-			else if (bytesAre(bytes, nameStart, nameStop, "aca"))
-				flags |= isTrue(bytes, valueStart, valueEnd) ? FormulaFlag.ALWAYS_ARRAY : 0
-			else if (bytesAre(bytes, nameStart, nameStop, "bx")) flags |= isTrue(bytes, valueStart, valueEnd) ? FormulaFlag.ASSIGNS_NAME : 0
-			else if (bytesAre(bytes, nameStart, nameStop, "dt2D")) flags |= isTrue(bytes, valueStart, valueEnd) ? FormulaFlag.TWO_D : 0
-			else if (bytesAre(bytes, nameStart, nameStop, "dtr")) flags |= isTrue(bytes, valueStart, valueEnd) ? FormulaFlag.ROW_INPUT : 0
-			else if (bytesAre(bytes, nameStart, nameStop, "del1")) flags |= isTrue(bytes, valueStart, valueEnd) ? FormulaFlag.DELETED_1 : 0
-			else if (bytesAre(bytes, nameStart, nameStop, "del2")) flags |= isTrue(bytes, valueStart, valueEnd) ? FormulaFlag.DELETED_2 : 0
-			else if (bytesAre(bytes, nameStart, nameStop, "r1")) r1 = scanner.attributeValue(valueStart, valueEnd)
-			else if (bytesAre(bytes, nameStart, nameStop, "r2")) r2 = scanner.attributeValue(valueStart, valueEnd)
-		})
+				if (length === 1 && bytes[nameStart] === 116) type = scanner.attributeValue(valueStart, valueEnd)
+				else if (bytesAre(bytes, nameStart, nameStop, "ref")) ref = scanner.attributeValue(valueStart, valueEnd)
+				else if (bytesAre(bytes, nameStart, nameStop, "si")) shared = parseUint(bytes, valueStart, valueEnd)
+				else if (bytesAre(bytes, nameStart, nameStop, "ca")) flags |= isTrue(bytes, valueStart, valueEnd) ? FormulaFlag.ALWAYS : 0
+				else if (bytesAre(bytes, nameStart, nameStop, "aca"))
+					flags |= isTrue(bytes, valueStart, valueEnd) ? FormulaFlag.ALWAYS_ARRAY : 0
+				else if (bytesAre(bytes, nameStart, nameStop, "bx"))
+					flags |= isTrue(bytes, valueStart, valueEnd) ? FormulaFlag.ASSIGNS_NAME : 0
+				else if (bytesAre(bytes, nameStart, nameStop, "dt2D")) flags |= isTrue(bytes, valueStart, valueEnd) ? FormulaFlag.TWO_D : 0
+				else if (bytesAre(bytes, nameStart, nameStop, "dtr"))
+					flags |= isTrue(bytes, valueStart, valueEnd) ? FormulaFlag.ROW_INPUT : 0
+				else if (bytesAre(bytes, nameStart, nameStop, "del1"))
+					flags |= isTrue(bytes, valueStart, valueEnd) ? FormulaFlag.DELETED_1 : 0
+				else if (bytesAre(bytes, nameStart, nameStop, "del2"))
+					flags |= isTrue(bytes, valueStart, valueEnd) ? FormulaFlag.DELETED_2 : 0
+				else if (bytesAre(bytes, nameStart, nameStop, "r1")) r1 = scanner.attributeValue(valueStart, valueEnd)
+				else if (bytesAre(bytes, nameStart, nameStop, "r2")) r2 = scanner.attributeValue(valueStart, valueEnd)
+			})
 
 		let text = ""
 		let at = tagEnd
