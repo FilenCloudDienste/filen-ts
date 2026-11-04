@@ -3,7 +3,7 @@ import { writeFileSync } from "node:fs"
 import path from "node:path"
 import { setTimeout as sleep } from "node:timers/promises"
 import { errorMessage, fail } from "../../support.ts"
-import { outputMark } from "../driveLock.ts"
+import { outputMark, outputSince } from "../driveLock.ts"
 import {
 	appPids,
 	createSampler,
@@ -12,6 +12,7 @@ import {
 	offlineBlockFor,
 	POLL_MS,
 	relaunchThrough,
+	type Sample,
 	type Sampler,
 	seconds,
 	startThrough
@@ -45,9 +46,49 @@ export interface OfflineCheckOptions {
 	pin: string
 }
 
+// What N's engine last said about each pair that is not idle in `sample` (`output`: the chain's app output since the
+// block went in): its last line naming the pair, and how long before `at` it came. Tells a pair that never tried
+// again (its last line the pre-lift backoff) from one still waiting on another client's drive-write (lock polls) or
+// one whose pass keeps failing.
+export function stallNote(sample: Pick<Sample, "phases" | "at">, pairs: readonly { name: string; id: string }[], output: string): string {
+	const lines = output.split("\n")
+
+	return sample.phases
+		.split(", ")
+		.filter(phase => !/:idle$/.test(phase))
+		.map(phase => {
+			const name = phase.slice(0, phase.indexOf(":"))
+			const pair = pairs.find(candidate => candidate.name === name)
+
+			if (pair === undefined) {
+				return `${name}: not one of this check's pairs`
+			}
+
+			const naming = new RegExp(String.raw`native: (\S+Z)\s.*\bsync pair ${pair.id}\b`)
+			const last = lines
+				.flatMap(line => {
+					const match = naming.exec(line)
+
+					return match === null ? [] : [{ at: Date.parse(match[1] ?? ""), line: line.trim() }]
+				})
+				.at(-1)
+
+			return last === undefined
+				? `${name} (pair ${pair.id}): no engine line names it since the block`
+				: `${name} (pair ${pair.id}): last engine line ${seconds(last.at, sample.at)} before: ${last.line}`
+		})
+		.join(" | ")
+}
+
 // Back online within RECOVER_MS of `lifted`, then converged with `done` true (`what`, when named, says what it waits
-// for) within CONVERGE_MS of it; returns the time from the lift to converged.
-async function recover(sampler: Sampler, lifted: number, what: string, done: () => Promise<boolean>): Promise<string> {
+// for) within CONVERGE_MS of it; returns the time from the lift to converged. `stalled` explains a pair not converged.
+async function recover(
+	sampler: Sampler,
+	lifted: number,
+	what: string,
+	done: () => Promise<boolean>,
+	stalled: (sample: Sample) => string
+): Promise<string> {
 	const online = await sampler.watch(Math.max(0, lifted + RECOVER_MS - Date.now()), backOnline)
 
 	if (online.hit === null) {
@@ -67,7 +108,7 @@ async function recover(sampler: Sampler, lifted: number, what: string, done: () 
 		if (Date.now() >= lifted + CONVERGE_MS) {
 			const state = what === "" ? "" : ` (${finished ? what : `not ${what}`})`
 
-			fail(`not converged within ${seconds(0, CONVERGE_MS)} of the lift${state}: ${describeSample(last)}`)
+			fail(`not converged within ${seconds(0, CONVERGE_MS)} of the lift${state}: ${describeSample(last)}; ${stalled(last)}`)
 		}
 
 		await sleep(POLL_MS)
@@ -92,6 +133,8 @@ export async function runOfflineCheck(chain: Chain, options: OfflineCheckOptions
 	const sampler = createSampler(chain, new Set(options.pairs.map(pair => pair.id)))
 	const pair = options.pairs.find(candidate => candidate.name === options.editPair) ?? fail(`no pair ${options.editPair}`)
 	const inCloud = async (name: string) => (await chain.cloud.list(options.editCloudDir, false))?.some(item => item.path === name) === true
+	// What the engine last said about each pair not converged, from the chain's app output since `mark`.
+	const stalledSince = (mark: number) => (sample: Sample) => stallNote(sample, options.pairs, outputSince(chain.appOutput, mark))
 	// Each sub-step's time from the lift to converged, reported whatever its outcome.
 	const toConverged: { live: string | null; start: string | null } = { live: null, start: null }
 
@@ -138,7 +181,13 @@ export async function runOfflineCheck(chain: Chain, options: OfflineCheckOptions
 			const lifted = Date.now()
 
 			// Back online clears the offline halt before the pass that uploads the edit has finished.
-			toConverged.live = await recover(sampler, lifted, `${name} uploaded`, () => inCloud(name).catch(() => false))
+			toConverged.live = await recover(
+				sampler,
+				lifted,
+				`${name} uploaded`,
+				() => inCloud(name).catch(() => false),
+				stalledSince(mark)
+			)
 			await releaseSentAgain(chain, "P11 a live drop", mark, blockedAt, lifted)
 
 			return `offline, ${name} queued; back online, uploaded and converged after the lift; ${noSyncAttention(sampler)}`
@@ -149,6 +198,8 @@ export async function runOfflineCheck(chain: Chain, options: OfflineCheckOptions
 			async () => {
 				sampler.reset()
 				await chain.quit("N-before-offline-start")
+
+				const mark = outputMark(chain.appOutput)
 
 				try {
 					await block.block(target, [])
@@ -166,7 +217,7 @@ export async function runOfflineCheck(chain: Chain, options: OfflineCheckOptions
 					await block.lift()
 				}
 
-				toConverged.start = await recover(sampler, Date.now(), "", () => Promise.resolve(true))
+				toConverged.start = await recover(sampler, Date.now(), "", () => Promise.resolve(true), stalledSince(mark))
 
 				return `every pair offline, none in error; back online and converged after the lift; ${noSyncAttention(sampler)}`
 			}

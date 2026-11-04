@@ -22,6 +22,7 @@ import {
 } from "../../scripts/ci/e2e/driveLock.ts"
 import { LIVE_TIMEOUT_MS, LIVE_UPLOAD_MS } from "../../scripts/ci/e2e/chains/common.ts"
 import { allWaiting, backOnline, converged, offlineFailure, P11_TURN, P11_TURN_TIMING } from "../../scripts/ci/e2e/chains/offlineListing.ts"
+import { stallNote } from "../../scripts/ci/e2e/chains/offlineCheck.ts"
 import type { Sample } from "../../scripts/ci/e2e/offlineBlock.ts"
 
 const FAST = { pollMs: 1, acquireMs: 200, refreshMs: 5, capMs: 10_000 }
@@ -260,6 +261,31 @@ describe("e2e drive-write in N's log", () => {
 		expect(orphanedLease(output.split("\n").slice(0, 4).join("\n"), blocked, lifted, 10_000)).toBeNull()
 		// No lock request answered before it: no confirmation to date the lease from.
 		expect(orphanedLease(output.split("\n").slice(2).join("\n"), blocked, lifted, 10_000)).toBeNull()
+	})
+
+	it("names what the engine last said about each pair a lift left unconverged", () => {
+		const pairs = [
+			{ name: "e2e-twoway", id: "1" },
+			{ name: "e2e-l2r", id: "2" },
+			{ name: "e2e-r2l", id: "3" },
+			{ name: "e2e-extra", id: "12" }
+		]
+		const backoff =
+			"native: 2026-11-04T19:42:15.717698Z  WARN filen_sdk_rs::sync_engine::watch: sync pair 2: 4 consecutive failure(s); waiting 16s before the next pass"
+		const output = [
+			"native: 2026-11-04T19:42:05.533800Z  WARN filen_sdk_rs::sync_engine::watch: sync pair 2: 3 consecutive failure(s); waiting 8s before the next pass",
+			backoff,
+			"native: 2026-11-04T19:42:18.584798Z  WARN filen_sdk_rs::sync_engine::watch: sync pair 1: 4 consecutive failure(s); waiting 16s before the next pass",
+			"native: 2026-11-04T19:42:26.548544Z  INFO http_request{endpoint=v3/dir request_id=18}: filen_sdk_rs::auth::http::logging: close"
+		].join("\n")
+		const sample = {
+			at: Date.parse("2026-11-04T19:44:26.000Z"),
+			phases: "e2e-twoway:idle, e2e-l2r:offline(lastError), e2e-r2l:idle(lastError), e2e-extra:offline"
+		}
+
+		expect(stallNote(sample, pairs, output)).toBe(
+			`e2e-l2r (pair 2): last engine line 130.3 s before: ${backoff} | e2e-r2l (pair 3): no engine line names it since the block | e2e-extra (pair 12): no engine line names it since the block`
+		)
 	})
 
 	it("tells a release sent again until answered from one whose retries stopped", () => {
