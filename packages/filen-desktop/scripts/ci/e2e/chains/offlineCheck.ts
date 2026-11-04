@@ -32,8 +32,7 @@ import { backOnline, CONVERGE_MS, converged, RECOVER_MS, releaseSentAgain, runLi
 // N runs through the block's wrapper (Linux, macOS) for this check only and is started plainly again after it. The
 // convergence windows tolerate one foreign drive-write hold (offlineListing.ts, CONVERGE_MS); the time each sub-step
 // took to converge is reported (info). When the live drop cut N off while it held drive-write and its release failed,
-// N's next drive-write before the server could let that lease lapse proves the release was sent again; until sdk-rs
-// does, that is a known bug (offlineListing.ts RELEASE_ISSUE).
+// the release must be sent again once back online (offlineListing.ts releaseSentAgain).
 
 // A launch's own start and first passes before every pair can have tried the network.
 const START_OFFLINE_MS = 90_000

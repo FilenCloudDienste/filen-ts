@@ -9,11 +9,13 @@ import {
 	type DriveLock,
 	type DriveLockTiming,
 	driveWriteGrants,
+	LEASE_MARGIN_MS,
 	lockPost,
 	lockWaitNote,
 	orphanedLease,
 	outputMark,
-	outputSince
+	outputSince,
+	releaseStopped
 } from "../driveLock.ts"
 import {
 	appPids,
@@ -129,17 +131,17 @@ export interface LiveEdit {
 	findings?: Findings
 }
 
-// sdk-rs sends a drive-write release once: one that fails while N is cut off leaves the lease on the server until its
-// TTL, which keeps every client of the account, N included, from the lock for up to a minute after the network is back.
-export const RELEASE_ISSUE =
-	"gap/sdk: a drive-write release that fails in transport is never sent again, so the server keeps the lease for its 60 s TTL (sdk-rs sync/lock release(), from spawn_release: on ErrorKind::Reqwest send it again every LOCK_RETRY_INTERVAL until it succeeds or LOCK_SERVER_TTL has passed since the lease's last confirmation)"
+// A drive-write release that fails while N is cut off must be sent again once the network is back (sdk-rs sync/lock
+// release_loop, 0.5.19): a lease left on the server for its TTL keeps every client of the account, N included, from
+// the lock for up to a minute.
 // The least time a lease left by a failed release must still have at the lift for N's next acquire to tell a release
 // sent again from the server's TTL.
 const ORPHAN_ROOM_MS = 10_000
 
 // After a lift: when N's release of drive-write failed while it was cut off (from `blockedAt`) and the server still
-// keeps the lease, whether N got drive-write again before the lease could lapse, which only a release sent again
-// allows. `mark` is where the chain's app output stood before the block.
+// keeps the lease, that the release was sent again: N got drive-write again before the lease could lapse, which only a
+// release sent again allows, or, when another client took the lock first, the release's retries ended answered
+// (releaseStopped) by the time the lease could lapse. `mark` is where the chain's app output stood before the block.
 export async function releaseSentAgain(chain: Chain, step: string, mark: number, blockedAt: number, lifted: number): Promise<void> {
 	const lease = orphanedLease(outputSince(chain.appOutput, mark), blockedAt, lifted, ORPHAN_ROOM_MS)
 
@@ -147,25 +149,32 @@ export async function releaseSentAgain(chain: Chain, step: string, mark: number,
 		return
 	}
 
-	await chain.findings.known(
-		`${step}: a drive-write release that failed offline is sent again once back online`,
-		RELEASE_ISSUE,
-		async () => {
-			const grant = await waitFor(
-				"N's drive-write before the lease could lapse",
-				Math.max(0, lease.lapsesAt - Date.now()),
-				() => driveWriteGrants(outputSince(chain.appOutput, mark)).find(at => at >= lifted && at < lease.lapsesAt),
-				500
-			).catch(onTimeout(null))
-			const times = `the release failed ${seconds(lease.failedAt, lifted)} before the lift; the lease, last confirmed ${seconds(lease.confirmedAt, lifted)} before it, could lapse ${seconds(lifted, lease.lapsesAt)} after it`
+	await chain.findings.check(`${step}: a drive-write release that failed offline is sent again once back online`, async () => {
+		const grant = await waitFor(
+			"N's drive-write before the lease could lapse",
+			Math.max(0, lease.lapsesAt - Date.now()),
+			() => driveWriteGrants(outputSince(chain.appOutput, mark)).find(at => at >= lifted && at < lease.lapsesAt),
+			500
+		).catch(onTimeout(null))
+		const times = `the release failed ${seconds(lease.failedAt, lifted)} before the lift; the lease, last confirmed ${seconds(lease.confirmedAt, lifted)} before it, could lapse ${seconds(lifted, lease.lapsesAt)} after it`
 
-			if (grant === null) {
-				fail(`N got drive-write again only once the lease could lapse (${times})`)
-			}
-
+		if (grant !== null) {
 			return `N got drive-write ${seconds(lifted, grant)} after the lift (${times})`
 		}
-	)
+
+		// Another client can take the lock the release freed before N asks again: the release's own lines tell, once
+		// sdk-rs would have stopped retrying it (the lease's TTL on its clock, the margin past it).
+		await sleep(Math.max(0, lease.lapsesAt + 2 * LEASE_MARGIN_MS - Date.now()))
+
+		const output = outputSince(chain.appOutput, mark)
+		const stopped = releaseStopped(output, lease.failedAt)
+
+		if (stopped !== null) {
+			fail(`the release was not sent again until answered (${times}): ${stopped}`)
+		}
+
+		return `the release sent again was answered (${times}); N's drive-write came later: ${lockWaitNote(output)}`
+	})
 }
 
 // Every pair waiting for the cloud's listing, none offline or in error.

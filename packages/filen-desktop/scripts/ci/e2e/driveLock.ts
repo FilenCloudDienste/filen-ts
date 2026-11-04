@@ -200,6 +200,12 @@ const LOCK_REQUEST = new RegExp(
 )
 const ACQUIRE_RUNNING = new RegExp(String.raw`${NATIVE_TIME}WARN \S+: operation still running .*op_name="acquire_lock" .*elapsed_ms=(\d+)`)
 const RELEASE_FAILED = new RegExp(String.raw`${NATIVE_TIME}WARN \S+: Failed to release lock drive-write`)
+// A release attempt that failed in transport and is sent again (sdk-rs sync/lock release_loop); every other release
+// line after a failed attempt ends the loop without an answer: given up for the lease's TTL, or failed otherwise.
+const RELEASE_RETRYING = "Failed to release lock drive-write, retrying in "
+const RELEASE_STOPPED = new RegExp(
+	String.raw`${NATIVE_TIME}WARN \S+: (?:Failed to release lock drive-write(?!, retrying in )|Release of lock drive-write unanswered)`
+)
 const PASS_BACKOFF = new RegExp(
 	String.raw`${NATIVE_TIME}WARN \S+: sync pair \S+: \d+ consecutive failure\(s\); waiting (\d+)s before the next pass`
 )
@@ -276,8 +282,9 @@ export interface OrphanedLease {
 	lapsesAt: number
 }
 
-// A drive-write lease N's release could not free because N was cut off at `blockedAt` (sdk-rs sends a release once and
-// never again), still alive at `lifted` with `minRoomMs` left for N's next acquire before it lapses; null otherwise.
+// A drive-write lease N's release could not free because N was cut off at `blockedAt` (sdk-rs sends it again until
+// the server answers, but no answer can come while N is cut off), still alive at `lifted` with `minRoomMs` left for N's
+// next acquire before it lapses; null otherwise.
 // Only a release whose request was sent after the block counts: one sent before it may have reached the server, whose
 // answer alone was lost.
 export function orphanedLease(output: string, blockedAt: number, lifted: number, minRoomMs: number): OrphanedLease | null {
@@ -296,6 +303,32 @@ export function orphanedLease(output: string, blockedAt: number, lifted: number,
 	const lapsesAt = confirmedAt + LOCK_SERVER_TTL_MS - LEASE_MARGIN_MS
 
 	return failedAt === 0 || confirmedAt === 0 || lapsesAt - lifted < minRoomMs ? null : { failedAt, confirmedAt, lapsesAt }
+}
+
+// Why N's drive-write release that failed at `failedAt` was never answered, or null: the attempt that failed then is not
+// one sdk-rs sends again, or a later one stopped the retries (the lease's TTL reached, an attempt unanswered within it,
+// a failure other than transport). A retry that was answered logs nothing at INFO, so null is the release sent again.
+export function releaseStopped(output: string, failedAt: number): string | null {
+	const lines = output.split("\n")
+	const failed = lines.find(line => {
+		const match = RELEASE_FAILED.exec(line)
+
+		return match !== null && Date.parse(match[1] ?? "") === failedAt
+	})
+
+	if (failed !== undefined && !failed.includes(RELEASE_RETRYING)) {
+		return failed.trim()
+	}
+
+	return (
+		lines
+			.filter(line => {
+				const match = RELEASE_STOPPED.exec(line)
+
+				return match !== null && Date.parse(match[1] ?? "") >= failedAt
+			})[0]
+			?.trim() ?? null
+	)
 }
 
 // The chain's app output file is appended by every launch: where it ends now, and what was appended since.

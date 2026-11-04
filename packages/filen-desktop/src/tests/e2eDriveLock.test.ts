@@ -17,6 +17,7 @@ import {
 	orphanedLease,
 	outputMark,
 	outputSince,
+	releaseStopped,
 	residualBackoff
 } from "../../scripts/ci/e2e/driveLock.ts"
 import { LIVE_TIMEOUT_MS, LIVE_UPLOAD_MS } from "../../scripts/ci/e2e/chains/common.ts"
@@ -259,6 +260,40 @@ describe("e2e drive-write in N's log", () => {
 		expect(orphanedLease(output.split("\n").slice(0, 4).join("\n"), blocked, lifted, 10_000)).toBeNull()
 		// No lock request answered before it: no confirmation to date the lease from.
 		expect(orphanedLease(output.split("\n").slice(2).join("\n"), blocked, lifted, 10_000)).toBeNull()
+	})
+
+	it("tells a release sent again until answered from one whose retries stopped", () => {
+		const release = (at: string, text: string) => `native: ${at}  WARN filen_sdk_rs::sync::lock: ${text}`
+		const transport = "Error of kind Reqwest: context: v3/user/lock, error: error sending request"
+		const retrying = (at: string, pause: string) =>
+			release(at, `Failed to release lock drive-write, retrying in ${pause}: ${transport}`)
+		const failedAt = Date.parse("2026-11-04T19:09:25.390Z")
+		const retried = [
+			retrying("2026-11-04T19:09:21.790862Z", "250ms"),
+			retrying("2026-11-04T19:09:23.471387Z", "500ms"),
+			retrying("2026-11-04T19:09:25.390035Z", "1s")
+		]
+
+		// Answered after the lift: nothing more is logged at INFO.
+		expect(releaseStopped(retried.join("\n"), failedAt)).toBeNull()
+		// Given up once the lease could stand no longer, or unanswered within it.
+		const expired = release(
+			"2026-11-04T19:10:15.000000Z",
+			`Failed to release lock drive-write, the server expires its lease on its own: ${transport}`
+		)
+		const unanswered = release(
+			"2026-11-04T19:10:15.000000Z",
+			"Release of lock drive-write unanswered within its lease, the server expires it on its own"
+		)
+
+		expect(releaseStopped([...retried, expired].join("\n"), failedAt)).toBe(expired)
+		expect(releaseStopped([...retried, unanswered].join("\n"), failedAt)).toBe(unanswered)
+		// A release never sent again: its one failure is the last word.
+		const once = release("2026-11-04T19:09:25.390035Z", `Failed to release lock drive-write: ${transport}`)
+
+		expect(releaseStopped(once, failedAt)).toBe(once)
+		// A stop before the failure that counts is an earlier release's.
+		expect(releaseStopped([unanswered.replace("19:10:15", "19:09:20"), ...retried].join("\n"), failedAt)).toBeNull()
 	})
 
 	it("matches a failed lock request to its close by id and time, ids restarting with each launch", () => {

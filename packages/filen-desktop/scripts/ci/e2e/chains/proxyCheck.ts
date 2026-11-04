@@ -7,7 +7,7 @@ import { errorMessage, fail, onTimeout, runBounded, waitFor } from "../../suppor
 import { desktop, unlockThroughScreen } from "../app.ts"
 import { type ConnectProxy, type Fault, startConnectProxy, type Tunnel } from "../connectProxy.ts"
 import { DRIVE_LOCK_TIMING, driveWriteGrants, lockWaitNote, outputMark, outputSince, residualBackoff } from "../driveLock.ts"
-import { nothingSeen, pairOf, sha256, sha256File, syncNow, watchPairs, type PairWatch } from "../extraPair.ts"
+import { nothingSeen, pairOf, sha256, sha256File, syncNow, waitPair, watchPairs, type PairWatch } from "../extraPair.ts"
 import { seededBytes } from "../fixtures.ts"
 import type { LaunchExtra } from "../launch.ts"
 import { createSampler, describeSample, offlineBlockFor, relaunchThrough, type Sample, type Sampler, seconds } from "../offlineBlock.ts"
@@ -20,18 +20,16 @@ import type { Chain } from "./common.ts"
 // and Chromium's --proxy-server, all pointing at a CONNECT proxy on 127.0.0.1 (connectProxy.ts), which only relays.
 //   P14 proxy only     N starts with every pair idle and no attention (none inherited from an earlier check); the proxy
 //                      carried gateway, ingest and egest; a local edit uploads within 60 s of N's drive-write and a
-//                      cloud edit downloads within 60 s;
-//                      the drive reads a file; never offline, no attention. The SDK's websocket ignores proxies until
-//                      its proxy-aware connector lands (plan A5), a known bug read from main.log (the renderer's own
-//                      socket, which honours --proxy-server, makes a tunnel to the socket's host either way). While the
-//                      socket is down a pass enumerates the cloud from the SDK's cache, which nothing refreshes, and the
-//                      engine does not report remote events degraded (the subscription validates the root over HTTP,
-//                      through the proxy), so syncNow does not find a cloud edit either: a second known bug. Until both
-//                      are fixed the cloud edit is found by a relaunch under the proxy, whose first listing is over HTTP
+//                      cloud edit downloads within 60 s, heard through the SDK's websocket, which connects through
+//                      the proxy (read from main.log: the renderer's own socket, which honours --proxy-server, makes a
+//                      tunnel to the socket's host either way); with every tunnel to the socket's host reset, the pair
+//                      reports remote events degraded, a cloud edit downloads within 60 s of a syncNow (the cache
+//                      catches up over HTTP), and once tunnels go through again the socket is back within its proxy
+//                      backoff (60 s at most) and the report clears; the drive reads a file; never offline, no attention
 //   P15 faults         through the same proxy, one at a time, each must fire:
 //                      F1 the first 2 ingest tunnels reset after 512 KiB up; F2 the same on egest, down (sdk-rs speaks
 //                      HTTP/1.1 and moves 1 MiB chunks concurrently, one per tunnel, so the reset lands mid-chunk; the
-//                      cloud file found as P14's was);
+//                      cloud file found on syncNow);
 //                      F3 a gateway tunnel reset inside the launch's resync listing (`dir/download`, inflated by 128
 //                      seeded files): retried, every seeded file on disk, no attention; F4 everything throttled to
 //                      256 KiB/s with an 8 MiB upload; F5 the gateway's first reply bytes held 20 s; F6 every ingest
@@ -50,6 +48,7 @@ const KIB = 1024
 const GATEWAY = "gateway.filen.io"
 const INGEST = "ingest.filen.io"
 const EGEST = "egest.filen.io"
+const SOCKET = "socket.filen.io"
 // Below one 1 MiB chunk: a tunnel often carries a single chunk.
 const RESET_BYTES = 512 * KIB
 const START_MS = 3 * 60 * 1000
@@ -68,11 +67,11 @@ const F3_RETRY_MS = 10_000
 // How often upload() lists the cloud while it waits for N's drive-write.
 const UPLOAD_CLOUD_POLL_MS = 5000
 
-// The released SDK's two bugs behind a cloud edit not found under the proxy.
-const SOCKET_ISSUE =
-	"plan A5: the SDK's websocket connects directly and ignores proxies (sdk-rs socket/native.rs connect: CONNECT through HTTPS_PROXY/ALL_PROXY, honouring NO_PROXY)"
-const STALE_CACHE_ISSUE =
-	"plan A5: with the websocket down the SDK does not report remote events degraded, so a whole pass enumerates the cloud from a cache nothing refreshes (sdk-rs: degraded.remote while the socket is not authed, a whole pass relisting over HTTP)"
+// How soon the pair reports remote events degraded once the socket's tunnels are reset: the reset closes its connection.
+const DEGRADED_MS = 30_000
+// How soon the socket is back once its tunnels go through again: sdk-rs waits up to 60 s between attempts through a
+// proxy that failed it, plus the handshake.
+const SOCKET_BACK_MS = 90_000
 const SOCKET_REFUSED = "Error initializing WebSocket connection"
 const SOCKET_DIAL_FAILED = "failed to connect to websocket"
 // The SDK's handshake span: it starts on a connected socket only, which under the block is the proxy's.
@@ -196,11 +195,6 @@ export async function runProxyChecks(chain: Chain, options: ProxyCheckOptions): 
 			existsSync(local) && sha256File(local) === sha256(edit.content) ? true : null
 		)
 	}
-	// N started again under the proxy: a launch lists each pair's cloud over HTTP, so it finds what the cache missed.
-	const relaunchUnderProxy = async (label: string): Promise<void> => {
-		await chain.quit(label)
-		await startWith(chain, block.via, options.pin, proxyLaunch(proxy))
-	}
 	// Where main.log stood at N's launch under the proxy.
 	let launched: LogMark | null = null
 
@@ -270,44 +264,49 @@ export async function runProxyChecks(chain: Chain, options: ProxyCheckOptions): 
 		const degraded = (await pairOf(chain, pair.id)).degraded.remote
 		const detail = `the cloud edit ${heard === null ? "heard" : "not heard"}; remote events ${degraded ? "degraded" : "not degraded"}`
 
-		await findings.known("P14 remote change notifications through the proxy (the SDK's websocket)", SOCKET_ISSUE, () => {
-			if (socket !== "proxied") {
+		await findings.check("P14 remote change notifications through the proxy (the SDK's websocket)", () => {
+			if (socket !== "proxied" || degraded) {
 				fail(`${SOCKET_STATES[socket]}; ${detail}`)
 			}
 
 			return `${SOCKET_STATES[socket]}; ${detail}`
 		})
 
-		// Whether a pass reads a stale cache while the socket is down: a syncNow for the edit not heard.
-		const staleCache =
-			heard !== null &&
-			socket !== "proxied" &&
-			(await findings.known("P14 a cloud edit found by syncNow while the SDK's websocket is down", STALE_CACHE_ISSUE, async () => {
-				await syncNow(chain, pair.id)
-				await onDisk(edit, EDIT_MS)
-
-				return `${edit.name} downloaded on syncNow; remote events ${degraded ? "degraded" : "not degraded"}`
-			}))
-
-		await findings.check("P14 a cloud edit downloads within 60 s", async () => {
-			if (heard === null) {
-				return `${edit.name} downloaded`
+		await findings.check("P14 a cloud edit downloads within 60 s", () => {
+			if (heard !== null) {
+				fail(`${heard}; ${SOCKET_STATES[socket]}`)
 			}
 
-			// With the socket through the proxy, the edit must have been heard.
-			if (socket === "proxied") {
-				fail(heard)
-			}
-
-			if (!staleCache) {
-				return `not heard (the known A5); ${edit.name} downloaded on syncNow`
-			}
-
-			await relaunchUnderProxy("N-proxy-relist")
-			await onDisk(edit, EDIT_MS)
-
-			return `not heard and not found by syncNow (the known A5); ${edit.name} downloaded by a relaunch's first listing`
+			return `${edit.name} downloaded, heard through the SDK's websocket`
 		})
+
+		await findings.check(
+			"P14 the SDK's websocket cut off: remote events degraded, a cloud edit found by syncNow within 60 s, the socket back once let through",
+			async () => {
+				const armed = proxy.arm({ kind: "resetAll", host: SOCKET })
+				let found: string
+
+				try {
+					await waitPair(chain, pair.id, "remote events reported degraded", DEGRADED_MS, candidate => candidate.degraded.remote)
+
+					// Not heard while the socket is down: the requested pass catches the cache up over HTTP.
+					const unheard = await inCloudOnly("proxy-nosocket", 64 * KIB)
+					const asked = Date.now()
+
+					await syncNow(chain, pair.id)
+					await onDisk(unheard, EDIT_MS)
+					found = `${unheard.name} downloaded ${seconds(asked, Date.now())} after syncNow`
+				} finally {
+					armed.disarm()
+				}
+
+				const letThrough = Date.now()
+
+				await waitPair(chain, pair.id, "remote events live again", SOCKET_BACK_MS, candidate => !candidate.degraded.remote)
+
+				return `${found}; ${String(armed.fired)} socket tunnel(s) reset; live again ${seconds(letThrough, Date.now())} after the reset ended`
+			}
+		)
 
 		await findings.check("P14 the proxy carried gateway, ingest and egest", () => {
 			const hosts = proxy.hosts()
@@ -364,15 +363,10 @@ export async function runProxyChecks(chain: Chain, options: ProxyCheckOptions): 
 			async () => {
 				const file = await inCloudOnly("f2", 6 * MIB)
 
-				if (staleCache) {
-					await relaunchUnderProxy("N-proxy-f2")
-				} else {
-					await syncNow(chain, pair.id)
-				}
-
+				await syncNow(chain, pair.id)
 				await onDisk(file, FAULT_MS)
 
-				return `${file.name} downloaded${staleCache ? " by a relaunch's first listing (the known A5)" : " on syncNow"}`
+				return `${file.name} downloaded on syncNow`
 			}
 		)
 		await fault(
