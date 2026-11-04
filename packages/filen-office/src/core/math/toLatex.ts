@@ -103,21 +103,25 @@ function endsInName(latex: string): boolean {
 // `parts` concatenated, a space where a command name would run into letters.
 function join(parts: readonly string[]): string {
 	let out = ""
-	// Whether `out` ends in a command name, kept as parts are added (reading it again each time is quadratic).
+	// Whether `out` ends in a command name, and its last two characters, kept as parts are added (reading `out`
+	// again each time is quadratic: slicing a concatenated string flattens it).
 	let name = false
+	let tail = ""
 
 	for (const part of parts) {
 		if (part === "") continue
 		const first = part.charCodeAt(0)
 
 		// After a command name, and (for reading's sake) after a one-character script: x_i y, not x_iy.
-		if ((name && isLetter(first)) || (/[_^][A-Za-z0-9]$/.test(out.slice(-2)) && /[A-Za-z0-9]/.test(part.charAt(0)))) {
+		if ((name && isLetter(first)) || (/^[_^][A-Za-z0-9]$/.test(tail) && /[A-Za-z0-9]/.test(part.charAt(0)))) {
 			out += " "
+			tail = `${tail.slice(-1)} `
 			name = false
 		}
 
 		name = endsInName(part) || (name && /^[A-Za-z]+$/.test(part))
 		out += part
+		tail = part.length >= 2 ? part.slice(-2) : `${tail}${part}`.slice(-2)
 	}
 
 	return out
