@@ -30,8 +30,8 @@ import { BIN_DIR, json, LIVE_TIMEOUT_MS, ok, quiet, type Chain } from "./common.
 //       a run by the session job and the sweep. A pull that fails PS1 or PS2 has its pair removed at once, so the update
 //       and P4 run with the chain's own pairs and a scale problem fails by its own name only.
 //   PN  the names pair, e2e-names (twoWay): hostile and unusual names on both sides (fixtures.ts NAME_FIXTURES) with
-//       per-OS outcomes, then renames and an edit on N. The outcomes are those of sdk-rs's names fix, not yet released:
-//       off unless E2E_NAMES_CHECK=1 (dispatch input names_check).
+//       per-OS outcomes, then renames and an edit on N. The outcomes are those of sdk-rs's names fix (0.5.19): on
+//       unless E2E_NAMES_CHECK=0 (dispatch input names_check).
 //
 // The assertion table (each one a finding):
 //   PS0 the manifest names the tree's current generation (none: the pair is off, with a note)
@@ -116,7 +116,7 @@ export function realWorldFor(chain: Chain, arch: string): RealWorld {
 	const { findings, cloud, target } = chain
 	const entry = `${target.platform}-${arch}-${target.format}`
 	const scaleOn = ENTRIES.has(entry)
-	const namesOn = ENTRIES.has(entry) && process.env["E2E_NAMES_CHECK"] === "1"
+	const namesOn = ENTRIES.has(entry) && process.env["E2E_NAMES_CHECK"] !== "0"
 	const os: NameOs = target.platform
 	const cloudNames = `${chain.cloudDir}/${NAMES_PAIR}`
 	const state: {
@@ -620,7 +620,7 @@ export function realWorldFor(chain: Chain, arch: string): RealWorld {
 			if (namesOn) {
 				await namesSetUp()
 			} else if (scaleOn) {
-				findings.info("PN names pair", "off (E2E_NAMES_CHECK): its outcomes are those of an sdk-rs release not out yet")
+				findings.info("PN names pair", "off (E2E_NAMES_CHECK=0)")
 			}
 		},
 

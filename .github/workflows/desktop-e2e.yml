@@ -57,7 +57,7 @@
 # pair pulls the permanent scale tree (filen-desktop-e2e-fixtures/scale-v1.<time>, the generation its manifest names,
 # about 8,500 entries, outside the swept root), which job `session` and the sweep check against its manifest once a
 # run (unseeded: a warning) and input `scale_reseed` writes anew as a new generation, run alone;
-# and, with input `names_check` (off: it expects an sdk-rs release not out yet), a two-way pair of hostile names.
+# and a two-way pair of hostile names, on unless input `names_check` is turned off.
 #
 # Spikes (by hand only, input `spike`) answer one question each, on one entry per OS, instead of the update scenarios;
 # their findings go to the job summary and an artifact:
@@ -180,9 +180,9 @@ on:
         type: boolean
         default: false
       names_check:
-        description: Chain P's names pair (needs the sdk-rs release with the names fixes)
+        description: Chain P's names pair
         type: boolean
-        default: false
+        default: true
   # Every night on main: every entry the release tests, on builds made here.
   schedule:
     - cron: '23 1 * * *'
@@ -774,7 +774,8 @@ jobs:
           # Below the step's timeout: a chain that overruns writes its evidence and fails by name.
           E2E_CHAIN_BUDGET_MINUTES: 150
           E2E_OFFLINE_SPIKE: ${{ matrix.spike == 'offline' && '1' || '' }}
-          E2E_NAMES_CHECK: ${{ inputs.names_check && '1' || '' }}
+          # On unless a dispatch turns it off: a scheduled or release run has no such input.
+          E2E_NAMES_CHECK: ${{ format('{0}', inputs.names_check) == 'false' && '0' || '1' }}
         run: bash scripts/ci/deepSession.sh --scenario previous --depth deep ${{ env.TEST_ARGS }} --artifacts e2e-artifacts
       - name: N-1 -> N (Fedora container)
         if: matrix.previous && matrix.format == 'rpm'

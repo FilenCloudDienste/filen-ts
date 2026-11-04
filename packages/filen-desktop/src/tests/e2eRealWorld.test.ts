@@ -259,16 +259,18 @@ describe("e2e names pair", () => {
 		expect(NAME_FIXTURES.filter(fixture => fixture.path === NAMES_RENAMES.local.from)[0]?.side).toBe("local")
 	})
 
-	it("runs on three entries only, the names pair only when asked", () => {
+	it("runs on three entries only, the names pair unless turned off", () => {
 		const chainOn = (platform: string, format: string) => {
 			const partial = { findings: {}, cloud: {}, target: { platform, format }, cloudDir: "run/entry/previous" }
 
 			return partial as unknown as Chain
 		}
 
-		vi.stubEnv("E2E_NAMES_CHECK", "")
+		vi.stubEnv("E2E_NAMES_CHECK", "0")
 		expect(realWorldFor(chainOn("linux", "deb"), "x64").cloudExclude).toEqual([])
 
+		vi.stubEnv("E2E_NAMES_CHECK", "")
+		expect(realWorldFor(chainOn("linux", "deb"), "x64").cloudExclude).toEqual([NAMES_PAIR])
 		vi.stubEnv("E2E_NAMES_CHECK", "1")
 		expect(realWorldFor(chainOn("linux", "deb"), "x64").cloudExclude).toEqual([NAMES_PAIR])
 		expect(realWorldFor(chainOn("win", "nsis"), "x64").cloudExclude).toEqual([NAMES_PAIR])
@@ -333,7 +335,7 @@ describe("e2e scale pair", () => {
 		JSON.parse(readFileSync(path.join(artifacts, "test-findings.json"), "utf8")) as Finding[]
 
 	it("stays off with a note while the tree is unseeded", async () => {
-		vi.stubEnv("E2E_NAMES_CHECK", "")
+		vi.stubEnv("E2E_NAMES_CHECK", "0")
 
 		const { cloud } = listingCloud([])
 		const { chain, artifacts, findings, calls } = scaleChain(cloud)
@@ -350,7 +352,7 @@ describe("e2e scale pair", () => {
 	})
 
 	it("removes the pair at once when the pulled tree is wrong, so the update and N run without it", async () => {
-		vi.stubEnv("E2E_NAMES_CHECK", "")
+		vi.stubEnv("E2E_NAMES_CHECK", "0")
 
 		const generation = scaleGeneration(new Date(0))
 		const manifest = Buffer.from(JSON.stringify(manifestOf(generation, [])))

@@ -197,9 +197,9 @@ export const LEGACY_CONFLICTS: Readonly<Record<string, readonly string[]>> = {
 }
 
 // Chain P's names pair (chains/realWorld.ts): names a real drive holds, seeded on both sides of one two-way pair, and
-// what each OS's engine must make of them. The outcomes are the engine's once its names fix is in (sdk-rs: one
+// what each OS's engine must make of them. The outcomes are those of the engine's names fix (sdk-rs 0.5.19: one
 // device-legality check for cloud names, an NFD local name kept as spelled and uploaded, NFC name hashing, a trailing dot
-// never renamed in the cloud); until that release the check is off (E2E_NAMES_CHECK).
+// never renamed in the cloud); E2E_NAMES_CHECK=0 turns the check off.
 //   synced      on both sides with the same bytes; a cloud-seeded item keeps its uuid and exact name
 //   unsyncable  reported by the pair (at `reportedAs`, else its own path) and left on its side alone
 //   ignored     a built-in ignore rule: left on its side, not reported as unsyncable
