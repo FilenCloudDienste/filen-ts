@@ -192,15 +192,18 @@ describe("entries in the browser's locale", () => {
 		const input = await typeInBar("=ROUND(A2*1,25;1)")
 
 		fireEvent.keyDown(input, { key: "Enter" })
-		await goTo("C2")
-		await goTo("B2")
+		// Enter moves down once the session has kept the entry; going back before that move lands would be undone by it.
 		await waitFor(
 			() => {
-				expect(bar().value).toBe("=ROUND(A2*1,25;1)")
+				expect(screen.getByRole<HTMLInputElement>("textbox", { name: preview.previewSheetNameBox }).value).toBe("B3")
 			},
 			{ timeout: 5000 }
 		)
-		// Opening the viewer and the three moves wait up to a second each, the entry's round trip up to five.
+		await goTo("B2")
+		await waitFor(() => {
+			expect(bar().value).toBe("=ROUND(A2*1,25;1)")
+		})
+		// Opening the viewer and the moves wait up to a second each, the entry's round trip up to five.
 	}, 15_000)
 })
 
