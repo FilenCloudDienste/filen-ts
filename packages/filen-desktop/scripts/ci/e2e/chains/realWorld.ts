@@ -79,6 +79,8 @@ function seconds(ms: number): string {
 }
 
 const nfc = (relPath: string) => relPath.normalize("NFC")
+// Which Unicode form a path is spelled in, for a report.
+const spelling = (relPath: string) => (relPath === nfc(relPath) ? "NFC" : relPath === relPath.normalize("NFD") ? "NFD" : "mixed")
 const folded = (relPath: string) => nfc(relPath).toLowerCase()
 
 // PN5's case renames as they stand (`listed`: the cloud's files, `local`: the paths on disk, `ids`: each renamed file's
@@ -110,6 +112,34 @@ export function renameProblems(
 	}
 
 	return problems
+}
+
+// PN5's edit as it stands (`listed`: the cloud's files; `sha256Of` reads one by its listed path): what does not hold yet,
+// and the Unicode form of its one cloud item. The edit's upload moves the file under the listing: sdk-rs renames an NFD
+// cloud name to NFC before it versions the file, so the spelling just listed can be gone by the read, which is then
+// one more look's business, not a failure.
+export async function editOutcome(
+	listed: readonly CloudEntry[],
+	sha256Of: (relPath: string) => Promise<string>
+): Promise<{ problem: string | null; spelling: string | null }> {
+	const { edit } = NAMES_RENAMES
+	const edited = listed.filter(item => nfc(item.path) === nfc(edit.path))
+	const [item] = edited
+
+	if (edited.length !== 1 || item === undefined) {
+		return { problem: `cloud ${json(edited.map(entry => entry.path))} for ${json(nfc(edit.path))}, expected one`, spelling: null }
+	}
+
+	const spelled = spelling(item.path)
+	const digest = await sha256Of(item.path).catch((error: unknown) => `unreadable as listed: ${errorMessage(error)}`)
+
+	return {
+		problem:
+			digest === sha256(edit.bytes)
+				? null
+				: `${json(item.path)} (${spelled}) does not hold the edit yet${digest.length === 64 ? "" : `: ${digest}`}`,
+		spelling: spelled
+	}
 }
 
 export function realWorldFor(chain: Chain, arch: string): RealWorld {
@@ -515,18 +545,19 @@ export function realWorldFor(chain: Chain, arch: string): RealWorld {
 		)
 	}
 
+	// The Unicode form of the edited file's one cloud item, as the last look found it.
+	let editedSpelling = "unknown"
 	// PN5's three outcomes as they stand: null when every one holds, else what does not.
 	const renamesPending = async (root: string, ids: Readonly<Record<"local" | "cloud", string>>): Promise<string | null> => {
 		const listed = ((await cloud.list(cloudNames)) ?? []).filter(item => !item.isDir)
 		const local = await localSnapshot(root, { raw: true, skip: relPath => relPath === BIN_DIR })
 		const problems = renameProblems(listed, local.keys(), ids)
-		const { edit } = NAMES_RENAMES
-		const edited: CloudEntry[] = listed.filter(item => nfc(item.path) === nfc(edit.path))
+		const edited = await editOutcome(listed, relPath => cloud.sha256Of(`${cloudNames}/${relPath}`))
 
-		if (edited.length !== 1 || edited[0] === undefined) {
-			problems.push(`cloud ${json(edited.map(item => item.path))} for ${json(nfc(edit.path))}, expected one`)
-		} else if ((await cloud.sha256Of(`${cloudNames}/${edited[0].path}`)) !== sha256(edit.bytes)) {
-			problems.push(`${json(edited[0].path)} does not hold the edit yet`)
+		editedSpelling = edited.spelling ?? editedSpelling
+
+		if (edited.problem !== null) {
+			problems.push(edited.problem)
 		}
 
 		return problems.length === 0 ? null : problems.join("; ")
@@ -570,7 +601,7 @@ export function realWorldFor(chain: Chain, arch: string): RealWorld {
 					fail(`after 3 min: ${pending}; the pair: ${describePair(await overviewOf(pair))}`)
 				}
 
-				return `report.txt and notes.md once each, as renamed, with their uuids; the NFD file's edit in its one cloud item (${seconds(Date.now() - started)})`
+				return `report.txt and notes.md once each, as renamed, with their uuids; the NFD file's edit in its one cloud item, spelled ${editedSpelling} (${seconds(Date.now() - started)})`
 			}
 		)
 	}

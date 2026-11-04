@@ -1,9 +1,10 @@
+import { createHash } from "node:crypto"
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import os from "node:os"
 import path from "node:path"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import type { Chain } from "../../scripts/ci/e2e/chains/common.ts"
-import { realWorldFor, renameProblems } from "../../scripts/ci/e2e/chains/realWorld.ts"
+import { editOutcome, realWorldFor, renameProblems } from "../../scripts/ci/e2e/chains/realWorld.ts"
 import { type Cloud, type CloudEntry, excludeArgs, prefixFilterArgs } from "../../scripts/ci/e2e/cloud.ts"
 import {
 	expectedCloudReasons,
@@ -234,6 +235,33 @@ describe("e2e names pair", () => {
 			'cloud ["Notes.md"], expected ["notes.md"]',
 			'on disk ["Notes.md"], expected ["notes.md"]'
 		])
+	})
+
+	it("reads PN5's edit again when the listed spelling is gone by the read, and names the spelling it found", async () => {
+		const file = (relPath: string): CloudEntry => ({ path: relPath, isDir: false, size: 1, modTime: "", id: "uuid-edited" })
+		const nfdName = NAMES_RENAMES.edit.path
+		const nfcName = nfdName.normalize("NFC")
+		const edited = createHash("sha256").update(NAMES_RENAMES.edit.bytes).digest("hex")
+		const old = createHash("sha256").update("seeded").digest("hex")
+
+		expect(nfdName).not.toBe(nfcName)
+		// Listed in NFD, renamed to NFC before the read (rclone cat: directory not found): pending, not thrown.
+		await expect(
+			editOutcome([file(nfdName)], () => Promise.reject(new Error("rclone cat: exit 3: Failed to cat: directory not found")))
+		).resolves.toEqual({
+			problem: `${JSON.stringify(nfdName)} (NFD) does not hold the edit yet: unreadable as listed: rclone cat: exit 3: Failed to cat: directory not found`,
+			spelling: "NFD"
+		})
+		await expect(editOutcome([file(nfdName)], () => Promise.resolve(old))).resolves.toEqual({
+			problem: `${JSON.stringify(nfdName)} (NFD) does not hold the edit yet`,
+			spelling: "NFD"
+		})
+		await expect(editOutcome([file(nfcName)], () => Promise.resolve(edited))).resolves.toEqual({ problem: null, spelling: "NFC" })
+		// Both spellings at once are two cloud items: the server's name hash did not match them.
+		await expect(editOutcome([file(nfdName), file(nfcName)], () => Promise.resolve(edited))).resolves.toEqual({
+			problem: `cloud ${JSON.stringify([nfdName, nfcName])} for ${JSON.stringify(nfcName)}, expected one`,
+			spelling: null
+		})
 	})
 
 	it("holds names at the limits it is meant to", () => {
