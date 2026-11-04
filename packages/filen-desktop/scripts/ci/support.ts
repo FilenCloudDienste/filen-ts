@@ -22,6 +22,11 @@ export function fail(message: string): never {
 // A waitFor that reached its deadline; what its probe throws stays that error.
 export class WaitTimeout extends TestFailure {}
 
+// The time from `from` to `to` (ms since the epoch, or any two marks on one clock), for a report.
+export function seconds(from: number, to: number): string {
+	return `${((to - from) / 1000).toFixed(1)} s`
+}
+
 // For a .catch after waitFor: a timeout stands for `value`, and anything else (the probe's own error) goes on.
 export function onTimeout<T>(value: T): (error: unknown) => T {
 	return error => {

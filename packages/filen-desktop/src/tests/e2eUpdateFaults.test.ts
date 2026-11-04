@@ -4,7 +4,18 @@ import os from "node:os"
 import path from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
 import { faultPlan, faultSteps, logMark, logSince, pendingProblems, stepLogProblems } from "../../scripts/ci/e2e/updateFaults.ts"
-import { describeProcesses, INSTALL_SIGNS, installSigns, type InstallProbe, processesAt, textFrom } from "../../scripts/ci/e2e/update.ts"
+import {
+	describeExit,
+	describeProcesses,
+	GONE_GRACE_MS,
+	INSTALL_SIGNS,
+	INSTALL_START_TIMEOUT_MS,
+	installSigns,
+	installStartEnd,
+	type InstallProbe,
+	processesAt,
+	textFrom
+} from "../../scripts/ci/e2e/update.ts"
 import { serveFeed, type FeedFaultPlan, type FeedServer } from "../../scripts/ci/support.ts"
 import type { Target } from "../../scripts/ci/targets.ts"
 import { TEST_UPDATE_CHECK_INTERVAL_MS, UPDATE_STALL_MS } from "../../src/main/updater.ts"
@@ -283,6 +294,36 @@ describe("e2e update install start", () => {
 			...overrides
 		}
 	}
+
+	it("waits for an install while the download advances, and ends early once the old app is gone with no sign", () => {
+		const started = 1_000_000
+
+		expect(installStartEnd(started + INSTALL_START_TIMEOUT_MS - 1, started, null, null)).toBeNull()
+		expect(installStartEnd(started + INSTALL_START_TIMEOUT_MS, started, null, null)).toEqual({
+			kind: "stalled",
+			sinceMs: INSTALL_START_TIMEOUT_MS
+		})
+		// A slow download that still moves: the window runs from its last progress.
+		const progress = started + 4 * 60 * 1000
+
+		expect(installStartEnd(started + INSTALL_START_TIMEOUT_MS + 1000, started, progress, null)).toBeNull()
+		expect(installStartEnd(progress + INSTALL_START_TIMEOUT_MS, started, progress, null)).toEqual({
+			kind: "stalled",
+			sinceMs: INSTALL_START_TIMEOUT_MS
+		})
+		// 3.0.53 dead 2 s into its update launch on Windows: a minute later, not five.
+		const gone = started + 2000
+
+		expect(installStartEnd(gone + GONE_GRACE_MS - 1, started, null, gone)).toBeNull()
+		expect(installStartEnd(gone + GONE_GRACE_MS, started, progress, gone)).toEqual({ kind: "gone", sinceMs: GONE_GRACE_MS })
+	})
+
+	it("names how the launched old app ended, a Windows NTSTATUS in hex", () => {
+		expect(describeExit(null)).toBe("its launched process still running or its end not seen")
+		expect(describeExit({ code: 0, signal: null })).toBe("exit code 0")
+		expect(describeExit({ code: 3221225477, signal: null })).toBe("exit code 3221225477 (0xC0000005)")
+		expect(describeExit({ code: null, signal: "SIGSEGV" })).toBe("ended by SIGSEGV")
+	})
 
 	it("finds no sign in a fetched download alone, the case where 3.x died during its update", async () => {
 		await expect(

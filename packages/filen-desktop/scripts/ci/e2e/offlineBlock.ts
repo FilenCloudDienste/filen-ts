@@ -404,9 +404,7 @@ export function describeSample(sample: Sample): string {
 	return `${sample.phases}; ${String(sample.waiting)} of ${String(sample.pairs)} waiting for the cloud; rail "${sample.rail}"`
 }
 
-export function seconds(from: number, to: number): string {
-	return `${((to - from) / 1000).toFixed(1)} s`
-}
+export { seconds } from "../support.ts"
 
 // N's processes (helpers and rclone included).
 export async function appPids(chain: Chain): Promise<number[]> {

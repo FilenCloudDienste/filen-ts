@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto"
 import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs"
 import path from "node:path"
+import { setTimeout as sleep } from "node:timers/promises"
 import { fileURLToPath } from "node:url"
 import { hashFile, parseFeed } from "../../feed.ts"
 import { nativeArchOf } from "../../nativeArch.ts"
@@ -11,6 +12,7 @@ import {
 	fail,
 	holds,
 	run,
+	seconds,
 	section,
 	serveFeed,
 	startXvfb,
@@ -49,9 +51,12 @@ export const MARKER = "e2e.marker"
 export const START_TIMEOUT_MS = 3 * 60 * 1000
 // Download, Squirrel staging or the installer, the swap and the relaunch; the 3.x NSIS update also runs WinFSP's MSI.
 const UPDATE_TIMEOUT_MS = 25 * 60 * 1000
-// From the old app's update launch settling to a sign that its install started (INSTALL_SIGNS): the download from the
-// loopback feed and its verification, or Squirrel.Mac's staging.
-const INSTALL_START_TIMEOUT_MS = 5 * 60 * 1000
+// From the old app's update launch settling, or from the download's last progress, to a sign that its install started
+// (INSTALL_SIGNS): the download from the loopback feed and its verification, or Squirrel.Mac's staging.
+export const INSTALL_START_TIMEOUT_MS = 5 * 60 * 1000
+// How long the old app may be gone with no sign of an install before the wait ends: an app that quits to install hands
+// over to its installer within seconds, and logs that the update was downloaded before it quits.
+export const GONE_GRACE_MS = 60 * 1000
 const EXIT_TIMEOUT_MS = 2 * 60 * 1000
 const ALIVE_MS = 20 * 1000
 
@@ -157,6 +162,39 @@ export async function installSigns(probe: InstallProbe, fromVersion: string, nex
 	}
 
 	return signs
+}
+
+// The install-start wait at `now` (installSigns found none yet): null while it goes on; else why it ends. The window runs
+// from the launch settling (`startedAt`) or the download's last progress, whichever is later, so a download still
+// advancing is waited for; an old app gone (`goneAt`, its main process no longer seen) ends it once GONE_GRACE_MS passed.
+export function installStartEnd(
+	now: number,
+	startedAt: number,
+	progressAt: number | null,
+	goneAt: number | null
+): { kind: "gone"; sinceMs: number } | { kind: "stalled"; sinceMs: number } | null {
+	if (goneAt !== null && now - goneAt >= GONE_GRACE_MS) {
+		return { kind: "gone", sinceMs: now - goneAt }
+	}
+
+	const from = Math.max(startedAt, progressAt ?? startedAt)
+
+	return now - from >= INSTALL_START_TIMEOUT_MS ? { kind: "stalled", sinceMs: now - from } : null
+}
+
+// How a launched process ended: Windows' exit codes are NTSTATUS values (0xC0000005 an access violation), shown in hex.
+export function describeExit(exit: { code: number | null; signal: string | null } | null): string {
+	if (exit === null) {
+		return "its launched process still running or its end not seen"
+	}
+
+	if (exit.code === null) {
+		return `ended by ${exit.signal ?? "an unknown signal"}`
+	}
+
+	return exit.code > 0xffff
+		? `exit code ${String(exit.code)} (0x${exit.code.toString(16).toUpperCase()})`
+		: `exit code ${String(exit.code)}`
 }
 
 // A main-process listing, entries without a readable executable path included.
@@ -427,9 +465,17 @@ export async function runUpdate({
 		mkdirSync(work, { recursive: true })
 
 		const fd = openSync(output, "a", 0o600)
+		const launchedAt = Date.now()
+		// How the launched process (the old app's main process, or the runtime that starts it) ended, and when.
+		const launchEnd: { exit: { code: number | null; signal: string | null; at: number } | null } = { exit: null }
 
 		try {
-			from.launch({ ...env, ELECTRON_ENABLE_LOGGING: "1" }, updateLaunch?.args ?? [], fd)
+			from.launch({ ...env, ELECTRON_ENABLE_LOGGING: "1" }, updateLaunch?.args ?? [], fd).once("exit", (code, signal) => {
+				const exit = { code, signal, at: Date.now() }
+
+				launchEnd.exit = exit
+				console.log(`${fromVersion}'s update launch ended ${seconds(launchedAt, exit.at)} after it started: ${describeExit(exit)}`)
+			})
 		} finally {
 			// The child holds its own copy.
 			closeSync(fd)
@@ -462,6 +508,9 @@ export async function runUpdate({
 			served.server.requests.some(
 				request => request.path === target.updateFile && request.status === 200 && request.bytes === served.size
 			)
+		// Every byte of the update file the feed has sent so far, over all requests.
+		const sentBytes = () =>
+			served.server.requests.filter(request => request.path === target.updateFile).reduce((sum, request) => sum + request.bytes, 0)
 		let seen = "nothing looked at yet"
 		const look = (): string => {
 			seen = describeProcesses([...from.mainProcesses(), ...(from === target ? [] : target.mainProcesses())])
@@ -495,24 +544,52 @@ export async function runUpdate({
 			installedVersion: format === "AppImage" ? null : () => from.installedVersion(),
 			startedVersions: () => startedVersions(target)
 		}
-		const signs = await waitFor(
-			`a sign that ${fromVersion} started installing the update`,
-			INSTALL_START_TIMEOUT_MS,
-			async () => {
-				const found = await installSigns(probe, fromVersion, nextVersion)
+		// Until a sign: the window runs from the download's last progress, and an old app gone with no sign ends it early.
+		const waitStarted = Date.now()
+		let sent = sentBytes()
+		let progressAt: number | null = null
+		let goneAt: number | null = null
+		let signs: string[] = []
 
-				console.log(`install signs: ${found.join("; ") || "none"}; main processes: ${look()}`)
+		for (;;) {
+			signs = await installSigns(probe, fromVersion, nextVersion)
 
-				return found.length > 0 ? found : null
-			},
-			5000
-		).catch((error: unknown) =>
-			fail(
-				`${errorMessage(error)}: none of ${probe.needles.map(needle => `"${needle}"`).join(", ")} logged, no installer ran, ` +
-					`the installed version unchanged; main processes: ${seen}; the update download ${fetched() ? "completed" : "did not complete"}; ` +
-					`output in ${path.basename(output)}; ${legacy ? "3.x's log" : "main.log"} ends:\n${oldLog().split("\n").slice(-20).join("\n")}`
+			const now = Date.now()
+			const running = processesAt(from).length > 0
+
+			console.log(
+				`install signs: ${signs.join("; ") || "none"}; main processes: ${look()}; update bytes sent ${String(sentBytes())} of ${String(served.size)}`
 			)
-		)
+
+			if (signs.length > 0) {
+				break
+			}
+
+			if (sentBytes() > sent) {
+				sent = sentBytes()
+				progressAt = now
+			}
+
+			goneAt = running ? null : (goneAt ?? now)
+
+			const end = installStartEnd(now, waitStarted, progressAt, goneAt)
+
+			if (end !== null) {
+				const exit = launchEnd.exit
+				const why =
+					end.kind === "gone"
+						? `${fromVersion} is gone (${describeExit(exit)}${exit === null ? "" : `, ${seconds(launchedAt, exit.at)} after its update launch`}) and nothing started installing within ${seconds(0, end.sinceMs)}`
+						: `no sign that ${fromVersion} started installing the update within ${seconds(0, end.sinceMs)} of ${progressAt === null ? "its launch settling" : "the download's last progress"}`
+
+				fail(
+					`${why}: none of ${probe.needles.map(needle => `"${needle}"`).join(", ")} logged, no installer ran, ` +
+						`the installed version unchanged; main processes: ${seen}; the update download ${fetched() ? "completed" : `did not complete (${String(sentBytes())} of ${String(served.size)} bytes sent)`}; ` +
+						`output in ${path.basename(output)}; ${legacy ? "3.x's log" : "main.log"} ends:\n${oldLog().split("\n").slice(-20).join("\n")}`
+				)
+			}
+
+			await sleep(5000)
+		}
 
 		console.log(`install started: ${signs.join("; ")}`)
 		await waitFor(
