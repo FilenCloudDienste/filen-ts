@@ -248,6 +248,13 @@ export class OdpParts {
 	// Refs a reading must never hand out: those of the deck it took over (adopt).
 	private taken: ReadonlySet<SlideRef> | undefined
 
+	// Entries a save let go of that the session still holds (an undo put their shape back): read as the package's.
+	private held: ((part: string) => { readonly bytes: Uint8Array; readonly mediaType: string } | undefined) | undefined
+
+	holdMedia(lookup: (part: string) => { readonly bytes: Uint8Array; readonly mediaType: string } | undefined): void {
+		this.held = lookup
+	}
+
 	constructor(
 		odf: OdfPackage,
 		content: ContentPages,
@@ -270,16 +277,18 @@ export class OdpParts {
 		const manifest = new Map((odf.manifest?.entries ?? []).map(entry => [partKey(entry.fullPath.replace(/\/$/u, "")), entry.mediaType]))
 
 		this.context = new OdpContext(sheet, budgets, this.tally, pages, {
-			mediaType: part => manifest.get(partKey(part)),
-			has: part => this.entries.has(partKey(part)),
+			mediaType: part => manifest.get(partKey(part)) ?? this.held?.(part)?.mediaType,
+			has: part => this.entries.has(partKey(part)) || this.held?.(part) !== undefined,
 			templates
 		})
 		this.opc = {
 			entry: name => this.entries.get(partKey(name)),
-			has: name => this.entries.has(partKey(name)),
+			has: name => this.entries.has(partKey(name)) || this.held?.(name) !== undefined,
 			read: async (name, slicing) => {
 				const entry = this.entries.get(partKey(name))
+				const held = entry === undefined ? this.held?.(name) : undefined
 
+				if (held !== undefined) return held.bytes
 				if (entry === undefined) throw new PresentationError("notFound", `No stream ${name}`)
 
 				return slicing === undefined ? odf.archive.read(entry) : odf.archive.readSliced(entry, slicing)

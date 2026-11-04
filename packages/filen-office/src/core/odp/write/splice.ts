@@ -76,6 +76,10 @@ export interface OdpSaveInput {
 	readonly revision: number
 	// Entries this session's saves added that nothing reaches any more: left out, with their manifest entries.
 	readonly prune?: readonly string[]
+	// Entries a step the history holds names (a deleted picture an undo puts back): one a save leaves out is held for it.
+	readonly keep?: readonly string[]
+	// The entries this session's saves wrote (judged by the prune, not as the source's media).
+	readonly own?: readonly string[]
 }
 
 // One page of the written content.xml: copied from the source (its span), or written (and read back by gate 2).
@@ -1394,7 +1398,7 @@ export async function odpSplice(input: OdpSaveInput): Promise<OdpSplice | Refuse
 
 // META-INF/manifest.xml with `entries` added as manifest:file-entry elements (Part 2 §4.3) before the root's end tag,
 // in the prefix the root uses; undefined when the root's end cannot be found.
-function withManifestEntries(
+export function withManifestEntries(
 	bytes: Uint8Array,
 	entries: readonly { readonly path: string; readonly mediaType: string }[]
 ): Uint8Array | undefined {

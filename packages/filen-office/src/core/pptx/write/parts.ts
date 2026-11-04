@@ -15,6 +15,7 @@ import {
 } from "../../opc/index"
 import { formerName, issuedNames, noteFormerName, noteIssuedNames } from "../../presentation/issuedNames"
 import { PresentationError } from "../../presentation/model"
+import { noteRestoredMedia } from "../../presentation/restoredMedia"
 import { XmlEditor, decodeUtf8, encodeUtf8, escapeAttribute, parseXml, type XmlDocument } from "../../xml/index"
 import type { PartsApi, PptxPartKind } from "./types"
 
@@ -168,11 +169,12 @@ class RelationshipsEdit {
 	private highest = 0
 	private readonly taken = new Set<string>()
 
-	constructor(source: string, base: readonly Relationship[]) {
+	constructor(source: string, base: readonly Relationship[], retired: Iterable<string> = []) {
 		this.source = source
 		this.base = base
 
 		for (const relationship of base) this.claim(relationship.id)
+		for (const id of retired) this.claim(id)
 	}
 
 	private claim(id: string): void {
@@ -221,6 +223,12 @@ class RelationshipsEdit {
 		this.added.push({ id: next, type, target, external })
 
 		return next
+	}
+
+	// A relationship under an id of its own that no live relationship has (a retired one an undo's markup names).
+	restore(type: string, target: string, id: string): void {
+		this.claim(id)
+		this.added.push({ id, type, target, external: false })
 	}
 
 	remove(id: string): void {
@@ -334,6 +342,68 @@ function zipNameOf(part: string): string {
 // save adds never takes one, so nothing a step the history holds still names (a slide an undo restores relates the
 // parts it had) is handed to another part.
 export { issuedNames as issuedPartNames } from "../../presentation/issuedNames"
+
+// Media a save let go of (a picture, a medium or an embedded object of the source deleted): what each owner related,
+// by its relationship id, with the part's bytes when the part left the package, while a step the history holds names
+// the part (an undo puts the shape back: the save writing it relates them again, the part re-added). By deck, then
+// owner part key.
+interface ReleasedMedia {
+	readonly type: string
+	readonly name: string
+	readonly contentType: string | undefined
+	readonly bytes: Uint8Array | undefined
+}
+
+const releasedMedia = new WeakMap<object, Map<string, Map<string, ReleasedMedia>>>()
+// Relationship ids released media had, by deck and owner part key: never given to another relationship (an undo's
+// markup names them).
+const retiredIds = new WeakMap<object, Map<string, Set<string>>>()
+
+// The relationship kinds of media a slide's markup names (pictures, video, audio, embedded objects).
+const MEDIA_KINDS: ReadonlySet<string> = new Set(["image", "video", "audio", "media", "oleObject", "package", "hdphoto"])
+
+export function hasReleasedMedia(deck: object): boolean {
+	return (releasedMedia.get(deck)?.size ?? 0) > 0
+}
+
+// What `owner` (a part name) related by relationship `id` before a save let it go, while an undo may name it again.
+export function releasedMediaRelationship(
+	deck: object,
+	owner: string,
+	id: string
+): { readonly type: string; readonly name: string } | undefined {
+	const media = releasedMedia.get(deck)?.get(partKey(owner))?.get(id)
+
+	return media === undefined ? undefined : { type: media.type, name: media.name }
+}
+
+// The bytes of a part a save let go of, held for an undo (by part name).
+export function releasedMediaBytes(deck: object, part: string): { readonly bytes: Uint8Array; readonly contentType: string } | undefined {
+	const key = partKey(part)
+
+	for (const byId of releasedMedia.get(deck)?.values() ?? [])
+		for (const media of byId.values())
+			if (partKey(media.name) === key && media.bytes !== undefined && media.contentType !== undefined)
+				return { bytes: media.bytes, contentType: media.contentType }
+
+	return undefined
+}
+
+// Lets go of released media no step the history holds names: `named` (owner part key → relationship ids the held
+// markup of its shapes names).
+export function keepReleasedMedia(deck: object, named: ReadonlyMap<string, ReadonlySet<string>>): void {
+	const owners = releasedMedia.get(deck)
+
+	if (owners === undefined) return
+
+	for (const [owner, byId] of owners) {
+		const ids = named.get(owner)
+
+		for (const id of byId.keys()) if (ids?.has(id) !== true) byId.delete(id)
+
+		if (byId.size === 0) owners.delete(owner)
+	}
+}
 
 export function noteDeckReleased(deck: object, parts: readonly string[]): void {
 	deckReleased.set(deck, parts)
@@ -680,7 +750,11 @@ export class PackageWriter {
 		if (edit === undefined) {
 			const base = this.added.has(key) || !this.opc.has(source) ? [] : (await this.opc.relationships(source)).all
 
-			edit = new RelationshipsEdit(this.opc.entry(source)?.name ?? source, base)
+			edit = new RelationshipsEdit(
+				this.opc.entry(source)?.name ?? source,
+				base,
+				this.deck === undefined ? [] : (retiredIds.get(this.deck)?.get(key) ?? [])
+			)
 			this.relationshipEdits.set(key, edit)
 		}
 
@@ -987,6 +1061,8 @@ export class PackageWriter {
 	private holdAll = false
 	// Parts emits stopped naming (letGo), by zip name.
 	private readonly released: string[] = []
+	// Media relationships written slides stopped naming (releaseMedia), by owner part key.
+	private readonly releasing: { owner: string; id: string; type: string; target: string }[] = []
 
 	// undefined: what the history names is not known, so no part an emit lets go of goes with this save.
 	holdParts(parts: readonly string[] | undefined): void {
@@ -1094,6 +1170,73 @@ export class PackageWriter {
 		return gone
 	}
 
+	// A part's markup as this save writes it.
+	async writtenText(name: string): Promise<string> {
+		const key = partKey(name)
+		const editor = this.editors.get(key)
+		const entry = this.opc.entry(key)
+		const bytes =
+			editor?.changed === true ? editor.serialize() : entry === undefined ? new Uint8Array(0) : await this.opc.read(entry.name)
+
+		return decodeUtf8(bytes)
+	}
+
+	// Whether media `owner` once related were released while a step the history holds names them.
+	hasReleasedMedia(owner: string): boolean {
+		return this.deck !== undefined && (releasedMedia.get(this.deck)?.get(partKey(owner))?.size ?? 0) > 0
+	}
+
+	// The media relationships of `owner` its source markup named and its written markup (`text`) names by no id (a
+	// picture, medium or object deleted, an image replaced): dropped, their parts left to removeUnrelated (gone when
+	// nothing relates them). A relationship the source already named by no id stays as it was.
+	async releaseMedia(owner: string, text: string): Promise<void> {
+		const edit = await this.loadRelationships(owner)
+		const entry = this.opc.entry(partKey(owner))
+		const source = entry === undefined ? "" : decodeUtf8(await this.opc.read(entry.name))
+
+		for (const relationship of edit.all()) {
+			const quoted = `"${relationship.id}"`
+
+			if (
+				relationship.external ||
+				!MEDIA_KINDS.has(relationshipKind(relationship.type) ?? "") ||
+				text.includes(quoted) ||
+				!source.includes(quoted)
+			)
+				continue
+
+			edit.remove(relationship.id)
+			this.unrelated.push(relationship.target)
+			this.releasing.push({ owner: partKey(owner), id: relationship.id, type: relationship.type, target: relationship.target })
+		}
+	}
+
+	// Released media `owner`'s written markup (`text`) names again (an undo put the shape back): related under their
+	// ids, a part that left the package added again from its held bytes, under its own name where it is free.
+	restoreMedia(owner: string, text: string): void {
+		const byId = this.deck === undefined ? undefined : releasedMedia.get(this.deck)?.get(partKey(owner))
+
+		if (byId === undefined) return
+
+		const edit = this.relationshipsOf(owner)
+
+		for (const [id, media] of byId) {
+			if (!text.includes(`"${id}"`) || edit.byId(id) !== undefined) continue
+
+			let name = media.name
+
+			if (!this.exists(name)) {
+				if (media.bytes === undefined || media.contentType === undefined) continue
+
+				name = this.claim(name) ? name : this.allocate(undefined, media.contentType, name)
+				this.add(name, media.contentType, media.bytes)
+				noteRestoredMedia(this.deck as object, name)
+			}
+
+			edit.restore(media.type, name, id)
+		}
+	}
+
 	// The base parts emits unrelated (PartsApi.unrelate) that nothing relates now, removed with what only they kept.
 	async removeUnrelated(dangling: (source: string, relationship: PendingRelationship) => Promise<void>): Promise<void> {
 		if (this.unrelated.length === 0) return
@@ -1105,12 +1248,13 @@ export class PackageWriter {
 			for (const relationship of all) if (!relationship.external) related.add(partKey(relationship.target))
 
 		const keys = [...new Set(this.unrelated.map(partKey))]
+		// Media a written slide no longer names go whatever the history names: an undo adds them again (restoreMedia).
+		const media = new Set(this.releasing.map(each => partKey(each.target)))
 		const loose = keys.filter(
 			key =>
 				!related.has(key) &&
 				!this.kept.has(key) &&
-				!this.held.has(key) &&
-				!(this.holdAll && this.released.some(name => partKey(name) === key)) &&
+				(media.has(key) || (!this.held.has(key) && !(this.holdAll && this.released.some(name => partKey(name) === key)))) &&
 				this.opc.entry(key) !== undefined
 		)
 
@@ -1142,7 +1286,44 @@ export class PackageWriter {
 			added = next
 		}
 
-		if (loose.length > 0) await this.removeWithOrphans(loose, dangling)
+		const gone = loose.length > 0 ? await this.removeWithOrphans(loose, dangling) : new Set<string>()
+
+		await this.holdReleased(gone)
+	}
+
+	// What the save released that a step the history holds names: kept for an undo (restoreMedia), with the part's
+	// bytes when it left the package; its relationship id never given out again.
+	private async holdReleased(gone: ReadonlySet<string>): Promise<void> {
+		const deck = this.deck
+
+		if (deck === undefined || this.releasing.length === 0) return
+
+		for (const { owner, id, type, target } of this.releasing.splice(0)) {
+			const key = partKey(target)
+
+			if (!this.holdAll && !this.held.has(key)) continue
+
+			const entry = this.opc.entry(key)
+			const bytes = gone.has(key) && entry !== undefined ? await this.opc.read(entry.name) : undefined
+			let owners = releasedMedia.get(deck)
+
+			if (owners === undefined) {
+				owners = new Map()
+				releasedMedia.set(deck, owners)
+			}
+
+			const byId = owners.get(owner) ?? new Map<string, ReleasedMedia>()
+			let retired = retiredIds.get(deck)
+
+			if (retired === undefined) {
+				retired = new Map()
+				retiredIds.set(deck, retired)
+			}
+
+			owners.set(owner, byId)
+			byId.set(id, { type, name: entry?.name ?? target, contentType: this.typeOf(entry?.name ?? target), bytes })
+			retired.set(owner, (retired.get(owner) ?? new Set()).add(id))
+		}
 	}
 
 	patchAfter(name: string, patch: (document: XmlDocument, editor: XmlEditor) => void): void {

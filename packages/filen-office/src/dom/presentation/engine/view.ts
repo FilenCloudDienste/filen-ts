@@ -1,3 +1,5 @@
+import { heldOdpMedia } from "../../../core/odp/write/save"
+import { releasedMediaBytes, releasedMediaRelationship } from "../../../core/pptx/write/parts"
 import { scriptForLanguage } from "../../../core/docx/theme/index"
 import { FontManager, type FontRequest } from "../../../core/fonts/index"
 import { partKey, type Relationships, type Slicing, type ZipEntry } from "../../../core/opc/index"
@@ -173,7 +175,12 @@ function stateOf(session: EngineSession): ViewState {
 			const owner = diagramRelationshipOwner(session.deck, part) ?? chartRelationshipOwner(session.deck, part) ?? part
 			const relationship = relationships.get(partKey(owner))?.byId(id)
 
-			if (relationship === undefined) return undefined
+			if (relationship === undefined) {
+				// Media a save let go of that an undo put back: related as before until the next save writes them again.
+				const released = releasedMediaRelationship(session.deck, owner, id)
+
+				return released === undefined ? undefined : { target: `/${released.name}`, external: false, type: released.type }
+			}
 
 			return relationship.external || relationship.partName === undefined
 				? { target: relationship.target, external: true, type: relationship.type }
@@ -791,6 +798,15 @@ export async function readImage(
 	const type = parts.contentTypes.typeOf(key)?.toLowerCase()
 	const entry = parts.opc.entry(key)
 
+	// An image a save let go of that an undo put back: the bytes the session holds for it.
+	if (entry === undefined) {
+		const held = heldImage(session.deck, part)
+
+		return held === undefined || !IMAGE_TYPES.test(held.type.toLowerCase()) || !imageWithinBudget(held.bytes, parts.budgets)
+			? null
+			: { bytes: held.bytes.slice(), type: held.type }
+	}
+
 	if (type === undefined || !IMAGE_TYPES.test(type) || entry === undefined || entry.uncompressedSize > MAX_IMAGE_BYTES) return null
 
 	const bytes = await parts.opc.read(key)
@@ -925,4 +941,16 @@ function release(canvas: RasterCanvas): void {
 	const close: unknown = Reflect.get(canvas, "close")
 
 	if (typeof close === "function") Reflect.apply(close, canvas, [])
+}
+
+function heldImage(deck: EngineSession["deck"], part: string): { readonly bytes: Uint8Array; readonly type: string } | undefined {
+	if (deck.format !== "odp") {
+		const released = releasedMediaBytes(deck, part)
+
+		return released === undefined ? undefined : { bytes: released.bytes, type: released.contentType }
+	}
+
+	const held = heldOdpMedia(deck, part)
+
+	return held === undefined ? undefined : { bytes: held.bytes, type: held.mediaType }
 }

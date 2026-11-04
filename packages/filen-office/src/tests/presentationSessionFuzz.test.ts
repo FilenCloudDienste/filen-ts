@@ -342,7 +342,10 @@ function shapesExcept(d: Drive, except: number | undefined): Map<string, string>
 			// A step applied again holds its parts under names of its own: what it holds is the same.
 			out.set(
 				`${String(slide)}:${String(shape.id)}`,
-				JSON.stringify({ ...shape, src: undefined, children: undefined }).replace(/"(raw|held|inserted)(:[^"]*)?":?\d*/gu, "$1")
+				JSON.stringify({ ...shape, src: undefined, children: undefined })
+					.replace(/"(raw|held|inserted)(:[^"]*)?":?\d*/gu, "$1")
+					// A chart's workbook named by its version or by the part an earlier save wrote it to: the same workbook.
+					.replace(/"workbook":\{"part":"[^"]*"/gu, '"workbook":{"part":""')
 			)
 			visit(slide, shape.children ?? [])
 		}

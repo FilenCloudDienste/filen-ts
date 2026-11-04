@@ -1412,7 +1412,7 @@ class Splice {
 			replaceChanged(editor, document, root, assemble(document, result, alternates))
 			this.expect(name, node)
 
-			return undefined
+			return this.media(name, node, change)
 		}
 
 		if (slideDirt !== undefined) rootAttributes(editor, r, root, node, pristine.slide)
@@ -1465,6 +1465,30 @@ class Splice {
 		}
 
 		this.expect(name, node)
+
+		return this.media(name, node, change)
+	}
+
+	// The media a written part's markup stopped naming (a picture, medium or object deleted, a picture's image or the
+	// background replaced) let go of; those it names again (an undo after the save that let them go) related again.
+	// Read only where a change can have done either.
+	private async media(name: string, node: SlideNode, change: PartChanges): Promise<undefined> {
+		const writer = this.writer
+		const slide = change.slide
+		// A shape deleted, an image or the background replaced (restoredMedia.ts mediaDropped, for this part).
+		const dropped =
+			(slide?.kind === "slidePart" && slide.part === "background") ||
+			[...change.shapes].some(
+				([id, dirt]) => (dirt.kind === "props" && dirt.group === "fill") || findShape(node.shapes, id) === undefined
+			)
+		const restoring = writer.hasReleasedMedia(name)
+
+		if (!dropped && !restoring) return undefined
+
+		const text = await writer.writtenText(name)
+
+		if (dropped) await writer.releaseMedia(name, text)
+		if (restoring) writer.restoreMedia(name, text)
 
 		return undefined
 	}

@@ -9,6 +9,9 @@ import {
 import { insertedImageWritten, insertedImageWrittenFor } from "../../core/presentation/edit/apply/picture"
 import type { InsertedImage, RawPart } from "../../core/presentation/edit/ops"
 import type { PartChange } from "../../core/opc/index"
+import { hasHeldOdpMedia, keepHeldOdpMedia } from "../../core/odp/write/save"
+import { isRestoredMedia } from "../../core/presentation/restoredMedia"
+import { hasReleasedMedia, keepReleasedMedia } from "../../core/pptx/write/parts"
 import type { Deck } from "../../core/presentation/model"
 import { decodeUtf8, NodeKind, transcodeUtf16, type XmlDocument } from "../../core/xml/index"
 import type { EngineSession } from "./engine"
@@ -77,7 +80,7 @@ function key(name: string): string {
 export function authoredEntries(deck: Deck, added: readonly PartChange[] | undefined): string[] {
 	const pattern = deck.format === "odp" ? AUTHORED_ODP : AUTHORED_PPTX
 
-	return (added ?? []).map(change => change.name).filter(name => pattern.test(name))
+	return (added ?? []).map(change => change.name).filter(name => pattern.test(name) && !isRestoredMedia(deck, name))
 }
 
 // A committed save: the entries it added are the session's, those it left out are gone.
@@ -332,23 +335,101 @@ export async function prunableEntries(session: EngineSession): Promise<string[]>
 // What the next save of `session` does with the parts its saves authored: those it leaves out, and those a step the
 // history holds names by name (pptx; not a held part's own, whose bytes an undo writes back), which it keeps even where
 // a removed slide was their only referrer (a later save leaves them out once nothing can).
+// `dropped`: the save's changes can have let media go (restoredMedia.ts mediaDropped); only then, or while media are
+// held for an undo, is the history's markup searched for what it names.
 export async function prunePlan(
 	session: EngineSession,
-	saving?: DeckHistory
-): Promise<{ readonly prune: string[]; readonly keep: string[]; readonly hold: string[] | undefined }> {
+	saving?: DeckHistory,
+	dropped = false
+): Promise<{ readonly prune: string[]; readonly keep: string[]; readonly hold: string[] | undefined; readonly own?: string[] }> {
 	const deck = session.deck
 	const made = (authored.get(deck)?.size ?? 0) > 0
 	// The edit engine's history, when it is the one the save keeps (never made here: making it would take the deck as
 	// it is now as saved).
 	const history = saving ?? (made ? sessionEdits(session).history : undefined)
 
-	if (deck.format === "odp") return { prune: made ? prunableOdp(session, history) : [], keep: [], hold: [] }
+	if (deck.format === "odp") {
+		// The entries the markup a step holds names (a deleted picture an undo puts back): kept for it when a save lets
+		// them go (core/odp/write/save.ts).
+		const named = history === undefined || (!dropped && !hasHeldOdpMedia(deck)) ? undefined : heldMarkupNames(history)
+
+		if (named !== undefined) keepHeldOdpMedia(deck, named)
+
+		return {
+			prune: made ? prunableOdp(session, history) : [],
+			keep: named === undefined ? [] : [...named],
+			hold: [],
+			own: [...(authored.get(deck) ?? [])]
+		}
+	}
 	// The history unknown (no edit session the save keeps): nothing to leave out, and what the session holds unknown.
 	if (history === undefined) return { prune: [], keep: [], hold: undefined }
 	// Nothing authored and no step held: nothing to leave out, keep or hold.
-	if (!made && history.steps().length === 0) return { prune: [], keep: [], hold: [] }
+	if (!made && history.steps().length === 0) {
+		keepReleasedMedia(deck, new Map())
 
-	return judgePptx(session, history)
+		return { prune: [], keep: [], hold: [] }
+	}
+
+	return judgePptx(session, history, dropped || hasReleasedMedia(deck))
+}
+
+const HREF = /\sxlink:href="([^"]+)"/gu
+// What held markup names, read once per held bytes (a step keeps its bytes for its life).
+const namedByHeld = new WeakMap<Uint8Array, readonly string[]>()
+
+function namedIn(bytes: Uint8Array, pattern: RegExp, normal: (name: string) => string): readonly string[] {
+	let names = namedByHeld.get(bytes)
+
+	if (names === undefined) {
+		names = [...decodeUtf8(bytes, 0, bytes.length).matchAll(pattern)].map(match => normal(match[1] ?? ""))
+		namedByHeld.set(bytes, names)
+	}
+
+	return names
+}
+
+// The entries the markup the history holds names by href (ODP: a deleted shape's, a deleted page's).
+function heldMarkupNames(history: DeckHistory): Set<string> {
+	const out = new Set<string>()
+	const add = (bytes: Uint8Array | undefined): void => {
+		if (bytes !== undefined) for (const name of namedIn(bytes, HREF, name => name.replace(/^\.\//u, ""))) out.add(name)
+	}
+
+	for (const step of history.steps())
+		for (const op of [step.op, ...step.inverse.ops]) {
+			if (op.family === "shape" && (op.kind === "insert" || op.kind === "restore")) add(op.raw)
+			else if (op.family === "slide" && op.kind === "restore")
+				for (const slide of op.slides) for (const part of slide.parts) add(part.bytes)
+		}
+
+	return out
+}
+
+const RELATIONSHIP_ID = /\s[\w.-]+:(?:id|embed|link|pict)="([^"]+)"/gu
+
+// The relationship ids the shapes the history holds as markup (a deleted shape an undo puts back) name, by the part
+// key of the slide they go back into.
+function heldShapeIds(deck: Deck, history: DeckHistory): Map<string, Set<string>> {
+	const out = new Map<string, Set<string>>()
+
+	for (const step of history.steps())
+		for (const op of [step.op, ...step.inverse.ops]) {
+			if (op.family !== "shape" || (op.kind !== "insert" && op.kind !== "restore") || op.raw === undefined) continue
+
+			const slide = op.kind === "insert" ? op.slide : op.target.slide
+			const part = deck.nodes.get(slide)?.part
+
+			if (part === undefined) continue
+
+			const ids = out.get(key(part)) ?? new Set<string>()
+
+			for (const id of namedIn(op.raw, RELATIONSHIP_ID, id => id)) ids.add(id)
+
+			out.set(key(part), ids)
+		}
+
+	return out
 }
 
 function prunableOdp(session: EngineSession, history: DeckHistory | undefined): string[] {
@@ -481,7 +562,9 @@ function cNvPrId(document: XmlDocument, shape: number): string | undefined {
 
 async function judgePptx(
 	session: EngineSession,
-	history: DeckHistory | undefined
+	history: DeckHistory | undefined,
+	// Media may go with this save or are held for an undo (prunePlan).
+	media = false
 ): Promise<{ prune: string[]; keep: string[]; hold: string[] }> {
 	const parts = pptxParts(session.deck)
 
@@ -492,6 +575,13 @@ async function judgePptx(
 
 	const index = await relationshipIndex(session)
 	const reach = reachOf(session, name => parts.document(`/${name}`)?.bytes ?? parts.document(name)?.bytes, history)
+	const heldIds = history === undefined || !media ? new Map<string, Set<string>>() : heldShapeIds(session.deck, history)
+
+	// What a deleted shape the history holds relates: a save that lets it go keeps its bytes for the undo.
+	if (media) keepReleasedMedia(session.deck, heldIds)
+
+	for (const [owner, ids] of heldIds)
+		for (const related of index.get(owner) ?? []) if (ids.has(related.id)) reach.history.add(related.target)
 	// What the parts reached relate in turn: a node's own relationships may be dead (a replaced picture's), so only
 	// parts reached by name lead on, never the nodes that relate them.
 	const nodeParts = new Set([...session.deck.nodes.values()].map(node => key(node.part)))

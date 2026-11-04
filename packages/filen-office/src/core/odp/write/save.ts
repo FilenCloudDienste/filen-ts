@@ -13,13 +13,14 @@ import {
 import { arrivalChecked, checkedItems, IN_MEMORY_LIMIT } from "../../pptx/write/save"
 import type { PptxSaveOptions, PptxSaveOutcome, PptxSnapshot } from "../../pptx/write/types"
 import { noteIssuedNames } from "../../presentation/issuedNames"
+import { mediaDropped, noteRestoredMedia } from "../../presentation/restoredMedia"
 import { PresentationError, refused, type Deck, type Refused, type SlideNode, type SlideRef } from "../../presentation/model"
 import { Namespaces, NodeKind, XmlError, decodeUtf8, parseXml } from "../../xml/index"
 import { openOdp, type OdpOpen, type OdpParts } from "../read/document"
 import { packagePart } from "../read/fills"
 import { notesDiffer, slideDiffers } from "./meaning"
 import { withoutManifestEntries } from "./manifestPrune"
-import { odpSplice, type OdpSaveInput, type OdpSplice } from "./splice"
+import { odpSplice, withManifestEntries, type OdpSaveInput, type OdpSplice } from "./splice"
 import { isRefused } from "../../presentation/refusal"
 
 // Saving an ODP deck into its own source (§1.5.4): the splice (splice.ts) at revision R, proof gate 2, then the zip.
@@ -77,6 +78,9 @@ export async function odpSnapshot(input: OdpSaveInput): Promise<OdpSnapshot | Re
 		archive.entries.map(entry => entry.name)
 	)
 
+	// What a save let go of reads as the package's while the session holds it (a picture an undo put back).
+	parts.holdMedia(name => heldOdpMedia(input.deck, name))
+
 	const splice = await odpSplice(input)
 
 	if (isRefused(splice)) return splice
@@ -85,22 +89,43 @@ export async function odpSnapshot(input: OdpSaveInput): Promise<OdpSnapshot | Re
 	// Entries this session wrote that nothing reaches any more (dom/presentation/prune.ts), and their manifest entries,
 	// but those the content.xml and styles.xml this save writes name (a page copied as the package has it).
 	const proposed = (input.prune ?? []).filter(name => !replacedNames.has(name) && archive.entries.some(entry => entry.name === name))
-	const prune = proposed.length === 0 ? proposed : unnamed(proposed, splice, parts)
+	const media = await releasedMedia(
+		input,
+		splice,
+		parts,
+		new Set([...replacedNames, ...proposed, ...(input.own ?? [])].map(name => name.toLowerCase()))
+	)
+	const pruned = proposed.length === 0 ? proposed : unnamed(proposed, splice, parts)
+	const prune = [...pruned, ...media.released]
+	const unlisted = [...pruned, ...media.manifest]
 	let replace = splice.replace
 
-	if (prune.length > 0) {
+	if (unlisted.length > 0 || media.restored.length > 0) {
 		const written = replace.find(change => change.name === MANIFEST)
 		const entry = archive.entries.find(candidate => candidate.name === MANIFEST)
 		const source = written?.bytes instanceof Uint8Array ? written.bytes : entry === undefined ? undefined : await archive.read(entry)
+		const without = source === undefined ? undefined : withoutManifestEntries(source, unlisted)
+		const bytes =
+			without === undefined || media.restored.length === 0
+				? without
+				: withManifestEntries(
+						without,
+						media.restored.flatMap(unit => unit.manifest)
+					)
 
-		if (source !== undefined) {
-			const manifest = { name: MANIFEST, bytes: withoutManifestEntries(source, prune) }
+		if (bytes === undefined) return refused("malformed", "The manifest has no end to add the entries an undo brings back")
 
-			replace = written === undefined ? [...replace, manifest] : replace.map(change => (change.name === MANIFEST ? manifest : change))
-		}
+		const manifest = { name: MANIFEST, bytes }
+
+		replace = written === undefined ? [...replace, manifest] : replace.map(change => (change.name === MANIFEST ? manifest : change))
 	}
 
-	const changes: ZipChanges = { replace, add: splice.add, ...(prune.length === 0 ? {} : { remove: prune }) }
+	const back = media.restored.flatMap(unit => unit.entries)
+
+	for (const entry of back) noteRestoredMedia(input.deck, entry.name)
+
+	const add = [...splice.add, ...back.map(entry => ({ name: entry.name, bytes: entry.bytes }))]
+	const changes: ZipChanges = { replace, add, ...(prune.length === 0 ? {} : { remove: prune }) }
 	const copies = archive.entries.length - replace.length - prune.length
 
 	const expected = new Map<SlideRef, { readonly node: SlideNode; readonly notes: SlideNode | undefined }>()
@@ -164,6 +189,172 @@ export function releaseSnapshotOrders(deck: Deck, revision: number): void {
 	if (orders === undefined) return
 
 	for (const saved of [...orders.keys()]) if (saved <= revision) orders.delete(saved)
+}
+
+// Pictures, media and embedded objects of the source a save lets go of (a picture, medium or object deleted, an image
+// replaced): those the source content.xml names that neither the written content.xml nor styles.xml does. An object
+// goes whole: its Object N/ folder, its ObjectReplacements image and their manifest entries. Held by deck while a step
+// the history holds names them (OdpSaveInput.keep), so the save writing them again (an undo) adds every entry back as
+// it was, with its manifest entries.
+interface HeldMedia {
+	readonly bytes: Uint8Array
+	readonly mediaType: string
+}
+
+// One thing the markup names: a picture or medium (its entry), or an object (its folder, by name without the slash).
+interface HeldUnit {
+	readonly entries: readonly { readonly name: string; readonly bytes: Uint8Array; readonly mediaType: string }[]
+	readonly manifest: readonly { readonly path: string; readonly mediaType: string }[]
+	// The object's own media type (its folder's manifest entry); undefined for a picture or medium.
+	readonly folder?: string
+}
+
+const heldMedia = new WeakMap<Deck, Map<string, HeldUnit>>()
+const SOURCE_MEDIA = /^(?:Pictures|Media)\/[^/]+$/u
+const EMBEDDED = "application/vnd.oasis.opendocument."
+const NO_BYTES = new Uint8Array(0)
+
+function bare(name: string): string {
+	return name.replace(/^\.?\//u, "")
+}
+
+// An entry a save let go of that the session holds for an undo: its bytes and media type (an object's folder: none and
+// its type).
+export function heldOdpMedia(deck: Deck, name: string): HeldMedia | undefined {
+	const wanted = bare(name).replace(/\/$/u, "")
+
+	for (const [key, unit] of heldMedia.get(deck) ?? []) {
+		if (key === wanted && unit.folder !== undefined) return { bytes: NO_BYTES, mediaType: unit.folder }
+
+		const entry = unit.entries.find(each => each.name === wanted)
+
+		if (entry !== undefined) return { bytes: entry.bytes, mediaType: entry.mediaType }
+	}
+
+	return undefined
+}
+
+export function hasHeldOdpMedia(deck: Deck): boolean {
+	return (heldMedia.get(deck)?.size ?? 0) > 0
+}
+
+// Lets go of held media no step the history names any more.
+export function keepHeldOdpMedia(deck: Deck, named: ReadonlySet<string>): void {
+	const held = heldMedia.get(deck)
+
+	if (held === undefined) return
+
+	for (const key of held.keys()) if (!named.has(key)) held.delete(key)
+}
+
+// The manifest's media type of each path (full-path → media-type).
+function manifestTypes(manifest: string): Map<string, string> {
+	const out = new Map<string, string>()
+
+	for (const [entry] of manifest.matchAll(/<[\w.-]*:?file-entry\b[^>]*>/gu)) {
+		const path = /full-path="([^"]*)"/u.exec(entry)?.[1]
+
+		if (path !== undefined) out.set(path, /media-type="([^"]*)"/u.exec(entry)?.[1] ?? "")
+	}
+
+	return out
+}
+
+// Whether `text` names `key` as an href does: "Pictures/1.png", "./Object 1", "./Object 1/…" (never "Object 10").
+function names(text: string, key: string): boolean {
+	return [`"${key}"`, `"./${key}"`, `"${key}/`, `"./${key}/`].some(form => text.includes(form))
+}
+
+async function releasedMedia(
+	input: OdpSaveInput,
+	splice: OdpSplice,
+	parts: OdpParts,
+	settled: ReadonlySet<string>
+): Promise<{ readonly released: string[]; readonly manifest: readonly string[]; readonly restored: HeldUnit[] }> {
+	const archive = parts.odf.archive
+	const content = splice.content
+	const held = heldMedia.get(input.deck)
+	const none = { released: [], manifest: [], restored: [] }
+
+	if (content === undefined) return none
+
+	const has = new Set(archive.entries.map(entry => entry.name))
+	const text = held === undefined || held.size === 0 ? undefined : decodeUtf8(content)
+	const restored = [...(held ?? [])]
+		.filter(([key, unit]) => unit.entries.every(entry => !has.has(entry.name)) && text !== undefined && names(text, key))
+		.map(([, unit]) => unit)
+	const dropped = mediaDropped(input.deck, input.changes)
+
+	if (!dropped) return { ...none, restored }
+
+	const styles = splice.replace.find(change => change.name === "styles.xml")?.bytes ?? parts.sheet.stylesDocument?.bytes
+
+	// Styles written as chunks are not searched: nothing goes.
+	if (styles !== undefined && !(styles instanceof Uint8Array)) return { ...none, restored }
+
+	const source = decodeUtf8(parts.content.bytes)
+	const written = [decodeUtf8(content), styles === undefined ? "" : decodeUtf8(styles)]
+	const manifestEntry = archive.entries.find(entry => entry.name === MANIFEST)
+	const types = manifestTypes(manifestEntry === undefined ? "" : decodeUtf8(await archive.read(manifestEntry)))
+	// What the markup names, with the entries and manifest paths that go with it.
+	const units = new Map<string, { readonly entries: string[]; readonly manifest: string[]; readonly folder?: string }>()
+
+	for (const entry of archive.entries)
+		if (SOURCE_MEDIA.test(entry.name)) units.set(entry.name, { entries: [entry.name], manifest: [entry.name] })
+
+	for (const [path, type] of types) {
+		if (!path.endsWith("/") || path === "/" || !type.startsWith(EMBEDDED)) continue
+
+		const folder = path.slice(0, -1)
+		const replacement = `ObjectReplacements/${folder}`
+		const inside = archive.entries.map(entry => entry.name).filter(name => name.startsWith(path))
+		const all = has.has(replacement) ? [...inside, replacement] : inside
+
+		const listed = [...types.keys()].filter(name => name.startsWith(path) || name === replacement)
+
+		units.set(folder, { entries: all, manifest: listed, folder: type })
+	}
+
+	const keep = new Set(input.keep ?? [])
+	const released: string[] = []
+	const manifest: string[] = []
+	let map = held
+
+	for (const [key, unit] of units) {
+		if (
+			unit.entries.length === 0 ||
+			unit.entries.some(name => settled.has(name.toLowerCase())) ||
+			!names(source, key) ||
+			written.some(each => names(each, key))
+		)
+			continue
+
+		released.push(...unit.entries)
+		manifest.push(...unit.manifest)
+
+		if (!keep.has(key)) continue
+
+		if (map === undefined) {
+			map = new Map()
+			heldMedia.set(input.deck, map)
+		}
+
+		const entries: { name: string; bytes: Uint8Array; mediaType: string }[] = []
+
+		for (const name of unit.entries) {
+			const entry = archive.entries.find(candidate => candidate.name === name)
+
+			if (entry !== undefined) entries.push({ name, bytes: await archive.read(entry), mediaType: types.get(name) ?? "" })
+		}
+
+		map.set(key, {
+			entries,
+			manifest: unit.manifest.map(path => ({ path, mediaType: types.get(path) ?? "" })),
+			...(unit.folder === undefined ? {} : { folder: unit.folder })
+		})
+	}
+
+	return { released, manifest, restored }
 }
 
 // The entries of `names` neither the written content.xml nor styles.xml names (by its full name, as hrefs give it).

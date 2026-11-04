@@ -1,4 +1,5 @@
 import { partsNamed } from "./detailParts"
+import { mediaDropped } from "../../core/presentation/restoredMedia"
 import { deckOutline, refusedEdits, type DeckOutline, type RefusedEdits } from "./refusedEdits"
 import {
 	chunksSource,
@@ -369,6 +370,8 @@ export interface DeckSaver<S = PptxSource> {
 			readonly revision: number
 			readonly prune?: readonly string[]
 			readonly keep?: readonly string[]
+			// The entries this session's saves wrote (prune.ts): an ODP save judges the source's apart from them.
+			readonly own?: readonly string[]
 		}): Promise<PptxSnapshot | Refused>
 		write: SpliceWriter["write"]
 	}
@@ -715,11 +718,11 @@ export async function saveSession(
 			}
 			noteSnapshotFrames(deck)
 
-			const plan = await prunePlan(session, history.steps)
+			const plan = await prunePlan(session, history.steps, mediaDropped(deck, changes))
 
 			holdDeckParts(deck, plan.hold)
 
-			const snapshot = await active.writer.snapshot({ ...input, prune: plan.prune, keep: plan.keep })
+			const snapshot = await active.writer.snapshot({ ...input, prune: plan.prune, keep: plan.keep, own: plan.own ?? [] })
 			const proof = active.proof
 
 			if (proof === undefined || isRefused(snapshot)) return { revision: point.revision, snapshot }
@@ -740,7 +743,7 @@ export async function saveSession(
 			if (failed?.reason !== "proofFailed") return { revision: point.revision, snapshot: failed ?? snapshot }
 			if (plan.prune.length === 0) return { revision: point.revision, snapshot: failed }
 
-			const kept = await active.writer.snapshot({ ...input, keep: plan.keep })
+			const kept = await active.writer.snapshot({ ...input, keep: plan.keep, own: plan.own ?? [] })
 			const still = isRefused(kept) ? undefined : await proof.every(kept, known)
 
 			return { revision: point.revision, snapshot: still ?? kept }

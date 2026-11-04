@@ -8,7 +8,7 @@ import {
 	noteDiagramWritten,
 	notePackageDrawingRel
 } from "../../../core/presentation/edit/apply/smartart"
-import { odpSpliceWriter } from "../../../core/odp/write/save"
+import { heldOdpMedia, odpSpliceWriter } from "../../../core/odp/write/save"
 import type { OdpSaveSource } from "../../../core/odp/write/splice"
 import { checkDiagramDrawings, gateSnapshot, pptxSpliceWriter, sourceDiagramDamage } from "../../../core/pptx/write/save"
 import type { PptxSpliceSource } from "../../../core/pptx/write/splice"
@@ -378,6 +378,8 @@ export async function rebaseOdp(session: EngineSession, source: ByteSource, save
 
 	if ("kind" in rebased) throw new PresentationError(rebased.reason, rebased.detail ?? "rebase")
 
+	// Pictures and media the save let go of that a step the history holds names read as the package's (an undo).
+	rebased.holdMedia(name => heldOdpMedia(session.deck, name))
 	bindOdpParts(session.deck, rebased)
 
 	return { ...session.package, bytes: source.size, source, archive: rebased.odf.archive }
