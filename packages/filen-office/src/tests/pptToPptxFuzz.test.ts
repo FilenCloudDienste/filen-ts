@@ -6,7 +6,7 @@ import { openPptxPackage } from "../core/pptx/package"
 import { PresentationError } from "../core/presentation/model"
 import { pptAsPptx } from "./pptConvertFixtures"
 import { RICH_BUILD, RICH_TAG, RICH_TRANSITION, richDeck } from "./pptFixtures"
-import { cpuMs } from "./timing"
+import { budget, cpuMs } from "./timing"
 
 // Damaged decks holding every reader past the slides (time tree, comment, transition sound, Office 97 build, linked
 // movie, embedded object storage, sound collection), through conversion, the pptx reader and Download as .pptx (convertPresentation): each answers with
@@ -125,6 +125,6 @@ describe("ppt Download as .pptx fuzz", () => {
 
 		expect([...seen.keys()].every(key => key === "saved" || !key.includes(" "))).toBe(true)
 		expect(seen.get("saved") ?? 0).toBeGreaterThan(600)
-		expect(worst).toBeLessThan(250)
+		expect(worst).toBeLessThan(budget(250))
 	})
 })

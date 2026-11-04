@@ -108,7 +108,7 @@ describe.skipIf(!existsSync(DECK))("odpOpenPerf", () => {
 					odpOpenHeapMB: { value: held, budget: 13 }
 				}
 			})
-			expect(best).toBeLessThanOrEqual(1500)
+			expect(best).toBeLessThanOrEqual(budget(1500))
 			expect(held).toBeLessThanOrEqual(13)
 		}
 	)

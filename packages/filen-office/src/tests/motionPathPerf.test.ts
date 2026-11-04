@@ -60,8 +60,8 @@ describe("motionPathPerf", () => {
 		}
 
 		Object.assign(task.meta, { perf: { dragFrameCpuMs: { value: frame, budget: 4 }, dropCpuMs: { value: drop, budget: 8 } } })
-		expect(frame).toBeLessThanOrEqual(4)
-		expect(drop).toBeLessThanOrEqual(8)
+		expect(frame).toBeLessThanOrEqual(budget(4))
+		expect(drop).toBeLessThanOrEqual(budget(8))
 	})
 
 	it("simplifies a 20,000-sample scribble stroke in at most 10 ms of CPU", { timeout: budget(60_000) }, ({ task }) => {
@@ -84,6 +84,6 @@ describe("motionPathPerf", () => {
 		}
 
 		Object.assign(task.meta, { perf: { simplifyCpuMs: { value: best, budget: 10 } } })
-		expect(best).toBeLessThanOrEqual(10)
+		expect(best).toBeLessThanOrEqual(budget(10))
 	})
 })

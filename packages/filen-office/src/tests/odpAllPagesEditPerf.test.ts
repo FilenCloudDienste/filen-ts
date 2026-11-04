@@ -36,7 +36,7 @@ describe.skipIf(!existsSync(DECK))("odpAllPagesEditPerf", () => {
 
 			expect(result).toMatchObject({ ok: true })
 			Object.assign(task.meta, { perf: { odpAllPagesEditCpuMs: { value: spent, budget: 1000 } } })
-			expect(spent).toBeLessThan(1000)
+			expect(spent).toBeLessThan(budget(1000))
 		}
 	)
 })

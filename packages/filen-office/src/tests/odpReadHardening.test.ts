@@ -5,7 +5,7 @@ import { pageFragment, scanPages } from "../core/odp/read/scan"
 import { PresentationError } from "../core/presentation/model"
 import { encodeUtf8 } from "../core/xml/index"
 import { ODP_NS, odpBytes, openOdpFixture, page, plainText, slideOf } from "./odpFixtures"
-import { cpuMs } from "./timing"
+import { budget, cpuMs } from "./timing"
 
 const DRAWING = "urn:oasis:names:tc:opendocument:xmlns:drawing:1.0"
 const OFFICE = "urn:oasis:names:tc:opendocument:xmlns:office:1.0"
@@ -31,7 +31,7 @@ describe("odp page scan", () => {
 		const start = cpuMs()
 		const scanned = scanPages(bytes, 100, refuseLimit)
 
-		expect(cpuMs() - start).toBeLessThan(100)
+		expect(cpuMs() - start).toBeLessThan(budget(100))
 		expect(scanned.pages.length).toBe(2)
 		expect(scanned.pages[0]?.end).toBe(scanned.pages[1]?.start)
 	}, 30_000)
@@ -41,7 +41,7 @@ describe("odp page scan", () => {
 		const start = cpuMs()
 		const opened = await openOdp(bytesSource(bytes))
 
-		expect(cpuMs() - start).toBeLessThan(500)
+		expect(cpuMs() - start).toBeLessThan(budget(500))
 		expect(opened.kind === "refused" && opened.reason).toBe("malformed")
 	}, 30_000)
 

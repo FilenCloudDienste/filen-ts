@@ -43,6 +43,6 @@ describe.skipIf(!existsSync(SHAPING))("pptxOpenPerf", () => {
 		Object.assign(task.meta, {
 			perf: { pptxOpenCpuMs: { value: best, budget: 250 }, pptxFirstSlideCpuMs: { value: firstSlide } }
 		})
-		expect(best).toBeLessThanOrEqual(250)
+		expect(best).toBeLessThanOrEqual(budget(250))
 	})
 })

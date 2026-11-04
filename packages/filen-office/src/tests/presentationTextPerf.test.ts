@@ -54,7 +54,7 @@ describe("presentationTextPerf", () => {
 				perf: { presentationTextDeckCpuMs: { value: best, budget: 300 }, presentationTextBodies: { value: bodies } }
 			})
 			expect(bodies).toBeGreaterThan(100)
-			expect(best).toBeLessThanOrEqual(300)
+			expect(best).toBeLessThanOrEqual(budget(300))
 		}
 	)
 
@@ -94,6 +94,6 @@ describe("presentationTextPerf", () => {
 		}
 
 		Object.assign(task.meta, { perf: { presentationTextKeystrokeCpuMs: { value: best, budget: 4 } } })
-		expect(best).toBeLessThanOrEqual(4)
+		expect(best).toBeLessThanOrEqual(budget(4))
 	})
 })

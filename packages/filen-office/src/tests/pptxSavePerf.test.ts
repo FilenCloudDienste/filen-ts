@@ -91,7 +91,7 @@ describe.skipIf(!existsSync(SHAPING))("pptxSavePerf", () => {
 					pptxSavePeakAboveModelBytes: { value: peak, budget: 32 * 1024 * 1024 }
 				}
 			})
-			expect(best).toBeLessThanOrEqual(600)
+			expect(best).toBeLessThanOrEqual(budget(600))
 			expect(peak).toBeGreaterThan(0)
 			expect(peak).toBeLessThanOrEqual(32 * 1024 * 1024)
 		}

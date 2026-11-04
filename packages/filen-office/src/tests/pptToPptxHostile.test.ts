@@ -8,7 +8,7 @@ import { DEFAULT_PRESENTATION_BUDGETS } from "../core/presentation/budget"
 import { liveHeap, liveHeapNow } from "./liveHeap"
 import { pptAsPptx } from "./pptConvertFixtures"
 import { buildPpt, concat, container, FIXTURE_PNG, record, type FixtureOptions } from "./pptFixtures"
-import { cpuMs } from "./timing"
+import { budget, cpuMs } from "./timing"
 
 // Hostile PowerPoint 97–2003 input the converter must survive with its deck: damaged time trees and comments, unpaired
 // surrogates, numbers no attribute can hold, impossible dates, storage bombs and quadratic targets.
@@ -277,7 +277,7 @@ describe("ppt time tree targets", () => {
 		const spent = cpuMs() - start
 
 		expect(timing.xml).toContain('<p:pRg st="7" end="8"/>')
-		expect(spent).toBeLessThan(400)
+		expect(spent).toBeLessThan(budget(400))
 	})
 })
 
@@ -470,7 +470,7 @@ describe("ppt embedded object storage bombs", () => {
 
 		if (converted.kind !== "converted") throw new Error(converted.reason)
 
-		expect(openCpu).toBeLessThan(250)
+		expect(openCpu).toBeLessThan(budget(250))
 		expect(converted.pptx.entry("ppt/embeddings/oleObject1.bin")?.uncompressedSize).toBe(SIZE)
 
 		const before = await liveHeap()

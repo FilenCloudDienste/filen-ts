@@ -55,7 +55,7 @@ describe("inflateIndexPerf", () => {
 
 				if (index === undefined) throw new Error("no index")
 
-				expect(best).toBeLessThanOrEqual(2500)
+				expect(best).toBeLessThanOrEqual(budget(2500))
 				// About 32 KiB per 2 MiB of output.
 				expect(index.windowBytes).toBeLessThanOrEqual(
 					Math.ceil(entry.uncompressedSize / INFLATE_CHECKPOINT_BYTES + 1) * (32 * 1024 + 320)

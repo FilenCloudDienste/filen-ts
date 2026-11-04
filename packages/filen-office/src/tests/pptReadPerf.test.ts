@@ -46,6 +46,6 @@ describe.skipIf(!existsSync(DECK))("pptReadPerf", () => {
 		}
 
 		Object.assign(task.meta, { perf: { pptReadCpuMs: { value: best, budget: 1200 }, pptOpenConvertedCpuMs: { value: open } } })
-		expect(best).toBeLessThanOrEqual(1200)
+		expect(best).toBeLessThanOrEqual(budget(1200))
 	})
 })

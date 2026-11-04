@@ -352,7 +352,7 @@ describe("morph descriptors", () => {
 		const start = cpuMs()
 		const match = matchMorph(from, to)
 
-		expect(cpuMs() - start).toBeLessThan(50)
+		expect(cpuMs() - start).toBeLessThan(budget(50))
 		expect(match.pairs).toEqual(to.map((_, k) => [k, k]))
 	})
 
@@ -414,7 +414,7 @@ describe("morph descriptors", () => {
 					best = Math.min(best, cpuMs() - start)
 				}
 
-				expect(best).toBeLessThan(10)
+				expect(best).toBeLessThan(budget(10))
 
 				const finite = (shape: MorphCandidate | undefined): boolean =>
 					shape !== undefined && [shape.x, shape.y, shape.w, shape.h].every(Number.isFinite)
@@ -446,7 +446,7 @@ describe("morph descriptors", () => {
 			best = Math.min(best, cpuMs() - start)
 		}
 
-		expect(best).toBeLessThan(20)
+		expect(best).toBeLessThan(budget(20))
 	})
 })
 
@@ -632,7 +632,7 @@ describe("the WebGL transitions a deck uses", () => {
 			best = Math.min(best, cpuMs() - start)
 		}
 
-		expect(best).toBeLessThan(120)
+		expect(best).toBeLessThan(budget(120))
 	})
 
 	it("scans 20 MB of shape properties and runs in under 70 ms of CPU, every element name compared in place", () => {

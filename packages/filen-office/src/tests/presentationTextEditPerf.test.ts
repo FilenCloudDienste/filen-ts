@@ -96,7 +96,7 @@ describe("presentationTextEditPerf", () => {
 			}
 		})
 		expect(map.paragraphCount).toBe(30)
-		expect(p95).toBeLessThanOrEqual(8)
-		expect(worker).toBeLessThanOrEqual(4)
+		expect(p95).toBeLessThanOrEqual(budget(8))
+		expect(worker).toBeLessThanOrEqual(budget(4))
 	})
 })

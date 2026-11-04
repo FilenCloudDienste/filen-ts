@@ -10,7 +10,7 @@ import type { TableModel } from "../core/presentation/model"
 import { renderSlide } from "../core/presentation/render/slide"
 import { renderTable, renderTableSteps } from "../core/presentation/render/table"
 import { NS, SLIDE, THEME, THEME_PART, body, deckOf, renderServices, xfrm } from "./fixtures/presentation/renderDeck"
-import { cpuMs } from "./timing"
+import { budget, cpuMs } from "./timing"
 
 const EMU = 9525
 
@@ -67,7 +67,7 @@ describe("hostile tables", () => {
 			best = Math.min(best, cpuMs() - started)
 		}
 
-		expect(best).toBeLessThan(60)
+		expect(best).toBeLessThan(budget(60))
 	})
 
 	it("cuts overlapping spans to the positions no earlier cell holds", () => {

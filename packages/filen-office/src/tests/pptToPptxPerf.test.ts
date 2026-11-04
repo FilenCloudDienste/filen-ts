@@ -50,6 +50,6 @@ describe.skipIf(!existsSync(DECK))("pptToPptxPerf", () => {
 
 		Object.assign(task.meta, { perf: { pptToPptxCpuMs: { value: best, budget: 2000 } } })
 		expect(size).toBeGreaterThan(1_000_000)
-		expect(best).toBeLessThanOrEqual(2000)
+		expect(best).toBeLessThanOrEqual(budget(2000))
 	})
 })

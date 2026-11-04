@@ -3,7 +3,7 @@ import type { Touch } from "../core/presentation/edit/apply"
 import { DeckHistory, opBytesOf, touchKey, type Fingerprint } from "../core/presentation/edit/history"
 import type { DeckOp } from "../core/presentation/edit/ops"
 import { slideRef } from "../core/presentation/model"
-import { cpuMs } from "./timing"
+import { budget, cpuMs } from "./timing"
 import { editDeck, editHarness } from "./presentationEditFixtures"
 
 // The history's estimate of the bytes dirty against the saved state (the autosave tiers' 1 KiB rule): the ops and
@@ -129,7 +129,7 @@ describe("deck history dirty bytes", () => {
 		for (let read = 0; read < 20_000; read++) total += toy.history.dirtyBytes
 
 		// A walk of the 500 steps per read takes hundreds of ms here.
-		expect(cpuMs() - start).toBeLessThan(20)
+		expect(cpuMs() - start).toBeLessThan(budget(20))
 		expect(total).toBe(20_000 * toy.history.dirtyBytes)
 	})
 

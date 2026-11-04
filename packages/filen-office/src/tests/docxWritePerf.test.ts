@@ -7,7 +7,6 @@ import { CORPUS_DIR } from "./corpusDir"
 import { openBytes } from "./docxEditFixtures"
 import { runEditScript } from "./docxWriteFixtures"
 import { buildDocx } from "./docxSynthetic"
-import { budget, cpuMs } from "./timing"
 
 const FIXTURE = join(import.meta.dirname, "fixtures", "08-large-300p.docx")
 const TARIFF = join(CORPUS_DIR, "docx", "govuk__Tariff_of_the_United_Kingdom_v1.34.docx")
@@ -159,31 +158,48 @@ describe("docx writer performance: people", () => {
 		'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w15:people xmlns:w15="http://schemas.microsoft.com/office/word/2012/wordml">' +
 		`<w15:person w15:author="${author}"/></w15:people>`
 
-	// The least CPU time of a few saves after an edit (other processes' scheduling is not the writer's cost), the person named first thing in the body or by nothing.
-	async function fastest(people: string): Promise<number> {
-		const opened = await openBytes(buildDocx({ body: REVISION + PARAGRAPH.repeat(100_000), people }))
+	// How many times each save reads a source part's bytes for authors: the author scan is the only reader of the
+	// bytes that looks for an "a" (author=). Counted, not timed: a scan of the whole file is the cost in question,
+	// and a count is the same on any machine.
+	async function authorScans(people: string): Promise<number[]> {
+		const opened = await openBytes(buildDocx({ body: REVISION + PARAGRAPH.repeat(2_000), people }))
 		const session = new DocxEditorSession(opened.context)
-		let best = Infinity
+		const sources = new Set<Uint8Array>(opened.context.model.parts.map(part => part.document.bytes))
+		const indexOf = Uint8Array.prototype.indexOf
+		const scans: number[] = []
+		let reads = 0
 
-		for (let k = 0; k < 4; k++) {
-			session.dispatch(session.state.tr.insertText("x", 1))
+		Object.defineProperty(Uint8Array.prototype, "indexOf", {
+			configurable: true,
+			writable: true,
+			value: function (this: Uint8Array, value: number, from?: number): number {
+				if (value === 0x61 && sources.has(this)) reads++
 
-			const started = cpuMs()
+				return indexOf.call(this, value, from)
+			}
+		})
 
-			await saveDocx({ pkg: opened.pkg, context: opened.context, sessions: [session] })
-			best = Math.min(best, cpuMs() - started)
+		try {
+			for (let k = 0; k < 4; k++) {
+				session.dispatch(session.state.tr.insertText("x", 1))
+				reads = 0
+				await saveDocx({ pkg: opened.pkg, context: opened.context, sessions: [session] })
+				scans.push(reads)
+			}
+		} finally {
+			Reflect.deleteProperty(Uint8Array.prototype, "indexOf")
 		}
 
-		return best
+		return scans
 	}
 
 	// The source's authors are read once per document: a person no revision names costs a later save no scan
 	// of the whole file.
-	it("costs a save no scan of the source for a person nothing names", { timeout: 600_000 }, async () => {
-		const named = await fastest(people("Bo"))
-		const orphan = await fastest(people("Zed"))
+	it("costs a save no scan of the source for a person nothing names", async () => {
+		const [first = 0, ...later] = await authorScans(people("Zed"))
 
-		console.log(`people census: named ${named.toFixed(0)} ms, orphan ${orphan.toFixed(0)} ms`)
-		expect(orphan - named).toBeLessThan(budget(25))
+		// The first save reads the source's authors (what the probe sees), the later ones reuse them.
+		expect(first).toBeGreaterThan(1000)
+		expect(later).toEqual([0, 0, 0])
 	})
 })

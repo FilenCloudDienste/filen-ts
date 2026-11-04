@@ -6,7 +6,7 @@ import type { DrawingData } from "../dom/docx/protocol"
 import { fixtureDeck, FIXTURE_LAYOUT, FIXTURE_MASTER } from "./fixtures/presentation/deck"
 import { fixtureSlideRender } from "./fixtures/presentation/slideRender"
 import { fixtureTextLayout, fixtureTextPage } from "./fixtures/presentation/textPage"
-import { cpuMs } from "./timing"
+import { budget, cpuMs } from "./timing"
 
 // The presentation fixtures later slices build on before the engine exists: a deck, its slide renders and text
 // pages, each consistent with itself (every index points into its table), so a painter fed them draws what a real
@@ -134,6 +134,6 @@ describe("presentation fixtures", () => {
 			best = Math.min(best, cpuMs() - start)
 		}
 
-		expect(best).toBeLessThan(250)
+		expect(best).toBeLessThan(budget(250))
 	})
 })

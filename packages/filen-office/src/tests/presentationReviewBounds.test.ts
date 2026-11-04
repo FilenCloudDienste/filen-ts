@@ -8,7 +8,7 @@ import { odpBytes, page } from "./odpFixtures"
 import { driveSession } from "./odpWriteDrive"
 import { buildPptx } from "./pptxFixtures"
 import { editDeckOptions } from "./presentationEditFixtures"
-import { cpuMs } from "./timing"
+import { budget, cpuMs } from "./timing"
 
 // The review reader under hostile comments: amplified and over-long text, deep nesting, a comment part related many
 // times from one slide, many authors; and the notes pane's review, which reads no comments.
@@ -327,7 +327,7 @@ describe("the review reader under hostile comments", () => {
 		const reviewed = await review(s.context, s.session.deck.slides[0] as SlideRef)
 
 		expect(reviewed.comments).toHaveLength(1000)
-		expect(cpuMs() - start).toBeLessThan(500)
+		expect(cpuMs() - start).toBeLessThan(budget(500))
 	})
 
 	it("bounds a slide's comments across its parts, refusing before the next part's entries are kept", () => {
@@ -356,7 +356,7 @@ describe("the review reader under hostile comments", () => {
 		const start = cpuMs()
 		const reviewed = await review(s.context, slide)
 
-		expect(cpuMs() - start).toBeLessThan(500)
+		expect(cpuMs() - start).toBeLessThan(budget(500))
 		expect(reviewed.comments[n - 1]?.author).toBe(`A${String(n - 1)}`)
 	})
 })

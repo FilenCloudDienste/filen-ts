@@ -27,7 +27,7 @@ import {
 } from "../core/anim/motionEdit"
 import type { Refused } from "../core/presentation/model"
 import { DEFAULT_PRESENTATION_BUDGETS } from "../core/presentation/budget"
-import { cpuMs } from "./timing"
+import { budget, cpuMs } from "./timing"
 
 // The editable motion path (ECMA-376 §19.5.4): reading and writing the path attribute and ptsTypes, the drawing
 // tools' paths, and Edit Points (move, handles, add, delete, segment and point types, open/close, reverse).
@@ -88,7 +88,7 @@ describe("motion path attribute", () => {
 		const start = cpuMs()
 		const read = readEditablePath(huge)
 
-		expect(cpuMs() - start).toBeLessThan(20)
+		expect(cpuMs() - start).toBeLessThan(budget(20))
 		expect(read).toMatchObject({ kind: "refused", reason: "tooLarge" })
 		// The bound is the one the motionPath op checks: what reads also applies, and the next segment refuses.
 		expect("reason" in readEditablePath(lines(cap))).toBe(false)

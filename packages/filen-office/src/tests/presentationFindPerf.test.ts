@@ -36,6 +36,6 @@ describe.skipIf(!existsSync(SHAPING))("presentationFindPerf", () => {
 		})
 		expect(first.length).toBeGreaterThan(0)
 		expect(count).toBeGreaterThan(0)
-		expect(best).toBeLessThanOrEqual(80)
+		expect(best).toBeLessThanOrEqual(budget(80))
 	})
 })

@@ -5,7 +5,7 @@ import { renderSlide } from "../core/presentation/render/slide"
 import type { Slicing } from "../core/slicing"
 import { CORPUS_DIR } from "./corpusDir"
 import { openRenderDeck } from "./fixtures/presentation/renderDeck"
-import { cpuMs } from "./timing"
+import { budget, cpuMs } from "./timing"
 
 // A slide model to its SlideRender (drawings, no text layout), cold: every run builds the slide's resolved elements
 // and theme anew. Per slide the least CPU of three runs; the budget is on the median and p99 over the deck.
@@ -53,7 +53,7 @@ describe.skipIf(!existsSync(SHAPING))("renderSlidePerf", () => {
 		})
 
 		expect(times).toHaveLength(81)
-		expect(median).toBeLessThanOrEqual(15)
-		expect(p99).toBeLessThanOrEqual(60)
+		expect(median).toBeLessThanOrEqual(budget(15))
+		expect(p99).toBeLessThanOrEqual(budget(60))
 	}, 120_000)
 })

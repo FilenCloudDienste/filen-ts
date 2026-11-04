@@ -72,7 +72,8 @@ describe("ODP page fields", () => {
 			}
 		}
 
-		expect(pages).toBeGreaterThan(3)
+		// The synthetic deck's three pages, and the corpus decks' where the corpus is present (CI has none).
+		expect(pages).toBeGreaterThanOrEqual(3)
 	})
 })
 

@@ -7,7 +7,7 @@ import { installPresentationRealm } from "../dom/presentation/services"
 import { HmtxMeasurer, nodeFontAssets, nodeFontHost } from "./layoutFixtures"
 import { driveSession } from "./odpWriteDrive"
 import { body, buildPptx, para, sp, xfrm } from "./pptxFixtures"
-import { cpuMs } from "./timing"
+import { budget, cpuMs } from "./timing"
 
 // presentationChartPerf: an Edit Data commit on a chart over a 10,000-cell workbook (2,000 categories, four series)
 // reads the workbook, refreshes the chart's caches from its cells and re-renders the slide within 150 ms of worker
@@ -80,6 +80,6 @@ describe("presentation chart performance", () => {
 		}
 
 		Object.assign(task.meta, { perf: { presentationChartEditDataCpuMs: { value: best, budget: 150 } } })
-		expect(best).toBeLessThanOrEqual(150)
+		expect(best).toBeLessThanOrEqual(budget(150))
 	})
 })

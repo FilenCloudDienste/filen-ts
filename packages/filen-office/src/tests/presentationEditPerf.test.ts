@@ -7,7 +7,7 @@ import { refused, slideRef, type Deck } from "../core/presentation/model"
 import { pptxParts } from "../dom/presentation/engine/open/pptx"
 import { sessionEdits } from "../dom/presentation/engine/edit"
 import { editDeck, editHarness } from "./presentationEditFixtures"
-import { cpuMs } from "./timing"
+import { budget, cpuMs } from "./timing"
 
 // Applying 10,000 shape ops and their inverses on the model takes at most 200 ms of CPU; the history holds at most
 // 64 MiB and 500 steps however many ops went through it.
@@ -84,7 +84,7 @@ describe("presentation edit performance", () => {
 		}
 
 		Object.assign(task.meta, { perf: { presentationEditApplyCpuMs: { value: best, budget: 200 } } })
-		expect(best).toBeLessThanOrEqual(200)
+		expect(best).toBeLessThanOrEqual(budget(200))
 		harness.close()
 	}, 60_000)
 

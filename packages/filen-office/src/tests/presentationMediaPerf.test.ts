@@ -138,7 +138,7 @@ describe("presentationMediaPerf", () => {
 					event.type === "notice" && event.notice.kind === "media" ? [event.notice.progress ?? 0] : []
 				)
 
-				expect(build).toBeLessThanOrEqual(2500)
+				expect(build).toBeLessThanOrEqual(budget(2500))
 				expect(progress.length).toBeGreaterThan(2)
 				expect(progress.at(-1)).toBe(1)
 
@@ -155,7 +155,7 @@ describe("presentationMediaPerf", () => {
 				}
 
 				// Far from the 60 s a range read may go without progress before the port gives up on it.
-				expect(slowest).toBeLessThan(5000)
+				expect(slowest).toBeLessThan(budget(5000))
 				process.stdout.write(
 					`presentationMediaPerf: index of 200 MB deflated built in ${build.toFixed(0)} ms CPU, slowest seek ${slowest.toFixed(0)} ms (checkpoints every ${String(INFLATE_CHECKPOINT_BYTES / MiB)} MiB)\n`
 				)
@@ -236,7 +236,7 @@ describe("presentationMediaPerf", () => {
 			const from = performance.now()
 
 			expect((await read(size - 4096, size, SIGNAL)).length).toBe(4096)
-			expect(performance.now() - from).toBeLessThan(5000)
+			expect(performance.now() - from).toBeLessThan(budget(5000))
 		} finally {
 			await opened.close()
 		}

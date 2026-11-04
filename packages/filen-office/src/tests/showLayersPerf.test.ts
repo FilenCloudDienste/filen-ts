@@ -13,7 +13,7 @@ import { installPresentationRealm, type RasterCanvas, type RasterImage } from ".
 import { layerPlanOf } from "../react/presentation/show/layers"
 import { CORPUS_DIR } from "./corpusDir"
 import { HmtxMeasurer, nodeFontAssets, nodeFontHost } from "./layoutFixtures"
-import { cpuMs } from "./timing"
+import { budget, cpuMs } from "./timing"
 
 // The show's preparation and frames on the corpus's 20 most animated slides (H0's mostAnimated: govuk Shaping, the
 // SmartArt org chart fly-in, York, bbfa, customGeo, CompanyBackground, typical): the worker's timegraph() and layers()
@@ -232,9 +232,9 @@ describe.skipIf(!SLIDES.every(([path]) => existsSync(join(CORPUS_DIR, path))))("
 			})
 
 			expect(layersDrawn).toBeGreaterThan(1)
-			expect(worstLayers).toBeLessThanOrEqual(250)
-			expect(worstCompile).toBeLessThanOrEqual(5)
-			expect(p99).toBeLessThanOrEqual(2)
+			expect(worstLayers).toBeLessThanOrEqual(budget(250))
+			expect(worstCompile).toBeLessThanOrEqual(budget(5))
+			expect(p99).toBeLessThanOrEqual(budget(2))
 		}
 	)
 })

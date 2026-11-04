@@ -66,7 +66,7 @@ describe("presentation objects performance", () => {
 		}
 
 		Object.assign(task.meta, { perf: { presentationObjectsPicturePerf: { value: best, budget: 400 } } })
-		expect(best).toBeLessThanOrEqual(400)
+		expect(best).toBeLessThanOrEqual(budget(400))
 	})
 
 	it(
@@ -137,14 +137,17 @@ describe("presentation objects performance", () => {
 
 			const sorted = [...runs].sort((a, b) => a - b)
 			const worst = sorted[sorted.length - 1] ?? Infinity
+			const median = sorted[Math.floor(sorted.length / 2)] ?? Infinity
 
 			Object.assign(task.meta, {
 				perf: {
 					presentationObjectsCellEditPerf: { value: worst, budget: 15 },
-					presentationObjectsCellEditMedian: { value: sorted[Math.floor(sorted.length / 2)] ?? Infinity, budget: 15 }
+					presentationObjectsCellEditMedian: { value: median, budget: 15 }
 				}
 			})
-			expect(worst).toBeLessThanOrEqual(budget(15))
+			// The median of nine: a cost most edits pay still exceeds it; a collection, the runner's other work or Linux's
+			// tick-grained thread CPU landing in one edit (which decides the worst) does not.
+			expect(median).toBeLessThanOrEqual(budget(15))
 		}
 	)
 })

@@ -11,7 +11,7 @@ import type { PresentationEvent } from "../dom/presentation/protocol"
 import { installPresentationRealm, type RasterCanvas, type RasterImage } from "../dom/presentation/services"
 import { CORPUS_DIR } from "./corpusDir"
 import { HmtxMeasurer, nodeFontAssets, nodeFontHost } from "./layoutFixtures"
-import { cpuMs } from "./timing"
+import { budget, cpuMs } from "./timing"
 
 // Thumbnails of the 81-slide govuk Shaping deck at 192 px: each slide parsed, rendered, its text laid out and painted
 // through the canvas painters, as the worker does, minus the browser's rasterisation (a canvas that draws nothing; the
@@ -182,8 +182,8 @@ describe.skipIf(!existsSync(DECK))("presentationThumbsPerf", () => {
 			perf: { thumbnailMedianCpuMs: { value: medians, budget: 25 }, thumbnails81CpuMs: { value: best, budget: 2500 } }
 		})
 
-		expect(medians).toBeLessThanOrEqual(25)
-		expect(best).toBeLessThanOrEqual(2500)
+		expect(medians).toBeLessThanOrEqual(budget(25))
+		expect(best).toBeLessThanOrEqual(budget(2500))
 		expect(slices).toBeGreaterThan(0)
 	})
 })

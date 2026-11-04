@@ -90,7 +90,7 @@ describe.skipIf(!existsSync(DECK))("odpSavePerf", () => {
 					odpSavePeakMiB: { value: peakMiB, budget: 64 }
 				}
 			})
-			expect(best).toBeLessThanOrEqual(2000)
+			expect(best).toBeLessThanOrEqual(budget(2000))
 			expect(peakMiB).toBeLessThanOrEqual(64)
 		}
 	)

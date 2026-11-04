@@ -109,7 +109,7 @@ describe.skipIf(!existsSync(SHAPING))("pptxSealPerf", () => {
 			Object.assign(task.meta, {
 				perf: { pptxSealCpuMs: { value: best, budget: 1500 }, pptxSealPeakRatio: { value: ratio, budget: 2.1 } }
 			})
-			expect(best).toBeLessThanOrEqual(1500)
+			expect(best).toBeLessThanOrEqual(budget(1500))
 			expect(ratio).toBeLessThanOrEqual(2.1)
 		}
 	)

@@ -19,7 +19,7 @@ import {
 	VECTOR_FRAME_SHAPES,
 	type MorphData
 } from "../react/presentation/show/webgl/morph"
-import { cpuMs } from "./timing"
+import { budget, cpuMs } from "./timing"
 import { particleScale, particleShape, PARTICLE_KINDS } from "../react/presentation/show/webgl/particles"
 
 // The show's WebGL2 transitions on the page: when they decline (so the player plays the file's mc:Fallback), what
@@ -367,8 +367,8 @@ describe("starting morph on a slide of many like objects", () => {
 				click = Math.min(click, cpuMs() - start)
 			}
 
-			expect(prepare).toBeLessThan(50)
-			expect(click).toBeLessThan(50)
+			expect(prepare).toBeLessThan(budget(50))
+			expect(click).toBeLessThan(budget(50))
 			// Every shown incoming object takes its nearest outgoing one, 3 px to its left.
 			const pairs = elements.filter(element => element.a.length > 0 && element.b.length > 0)
 
@@ -438,7 +438,7 @@ describe("starting morph on a slide of many like objects", () => {
 				frame = Math.min(frame, cpuMs() - start)
 			}
 
-			expect(frame).toBeLessThan(20)
+			expect(frame).toBeLessThan(budget(20))
 			// One upload of the instances and one of the outline canvas a frame; a call per run of instances sampling
 			// the same pages (each redrawn outline, from the outline texture, breaks a run).
 			expect(outlines.slots.size).toBe(VECTOR_FRAME_SHAPES)

@@ -245,24 +245,32 @@ describe("OMML to the LaTeX subset", () => {
 	})
 
 	it("takes time linear in the equation's length: a long run, many primes", () => {
-		// The least CPU time of six runs (the first warms up), at a quarter of the length and at the whole: linear grows about 4 times.
-		const growth = (work: (n: number) => void): number => {
-			const least = (n: number): number => {
+		// The least CPU time of six runs (the first warms up), at a quarter of the length and at the whole: linear grows
+		// about 4 times. Each run repeats the work until a quarter-length run costs 10 ms, well above what a thread's CPU
+		// time resolves on any runner (Linux counts it at scheduler ticks), so the ratio is the work's, not the clock's.
+		const growth = (work: (n: number) => void, length: number): number => {
+			const least = (n: number, repeats: number): number => {
 				let best = Infinity
 
 				for (let k = 0; k < 6; k++) {
 					const started = cpuMs()
 
-					work(n)
+					for (let r = 0; r < repeats; r++) work(n)
 					best = Math.min(best, cpuMs() - started)
 				}
 
 				return best
 			}
 
-			const quarter = least(2_400)
+			let repeats = 1
+			let quarter = least(length / 4, repeats)
 
-			return least(9_600) / Math.max(quarter, 0.5)
+			while (quarter < 10 && repeats < 1024) {
+				repeats *= 2
+				quarter = least(length / 4, repeats)
+			}
+
+			return least(length, repeats) / quarter
 		}
 		const letters = (n: number): void => {
 			const { document, node } = parsed(`<m:oMath>${R("x".repeat(n))}</m:oMath>`)
@@ -270,8 +278,9 @@ describe("OMML to the LaTeX subset", () => {
 			ommlToLatex(document, node)
 		}
 
-		expect(growth(letters)).toBeLessThan(9)
-		expect(growth(n => omml(`x${"'".repeat(n)}`))).toBeLessThan(9)
+		// A run's text has no bound on its length (a quadratic join shows past 10,000 characters); LaTeX is read up to 10,000.
+		expect(growth(letters, 38_400)).toBeLessThan(9)
+		expect(growth(n => omml(`x${"'".repeat(n)}`), 9_600)).toBeLessThan(9)
 	})
 
 	it("diffs an edit of a long equation in bounded time and memory, as the least it can record", () => {

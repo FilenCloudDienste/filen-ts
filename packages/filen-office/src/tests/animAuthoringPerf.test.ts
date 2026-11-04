@@ -114,9 +114,9 @@ describe("animAuthoringPerf", () => {
 				retimeCpuMs: { value: retime, budget: 15 }
 			}
 		})
-		expect(add).toBeLessThanOrEqual(15)
-		expect(move).toBeLessThanOrEqual(15)
-		expect(retime).toBeLessThanOrEqual(15)
+		expect(add).toBeLessThanOrEqual(budget(15))
+		expect(move).toBeLessThanOrEqual(budget(15))
+		expect(retime).toBeLessThanOrEqual(budget(15))
 		h.close()
 	})
 
@@ -163,9 +163,9 @@ describe("animAuthoringPerf", () => {
 				sampleCpuMs: { value: sampled, budget: 1 }
 			}
 		})
-		expect(list).toBeLessThanOrEqual(5)
-		expect(compiled).toBeLessThanOrEqual(10)
-		expect(sampled).toBeLessThanOrEqual(1)
+		expect(list).toBeLessThanOrEqual(budget(5))
+		expect(compiled).toBeLessThanOrEqual(budget(10))
+		expect(sampled).toBeLessThanOrEqual(budget(1))
 		h.close()
 	})
 })

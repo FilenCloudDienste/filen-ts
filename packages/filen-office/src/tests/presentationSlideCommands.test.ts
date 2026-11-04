@@ -20,7 +20,7 @@ import { sessionEdits } from "../dom/presentation/engine/edit"
 import { emitPptx } from "../core/pptx/write/emit"
 import { editDeck, editHarness, shapeById } from "./presentationEditFixtures"
 import { saveEdits } from "./pptxWriteFixtures"
-import { cpuMs } from "./timing"
+import { budget, cpuMs } from "./timing"
 
 const refs = (...values: number[]): SlideRef[] => values.map(value => slideRef(value))
 const order = refs(1, 2, 3, 4, 5)
@@ -198,7 +198,7 @@ describe("slide commands", () => {
 		}
 
 		// A quadratic walk takes seconds here.
-		expect(least).toBeLessThan(30)
+		expect(least).toBeLessThan(budget(30))
 	})
 })
 
