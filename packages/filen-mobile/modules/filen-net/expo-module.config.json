@@ -1,0 +1,6 @@
+{
+	"platforms": ["android"],
+	"android": {
+		"modules": ["io.filen.net.FilenNetModule"]
+	}
+}

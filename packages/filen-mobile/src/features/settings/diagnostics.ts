@@ -6,6 +6,7 @@ import logger from "@/lib/logger"
 import { writeTmpFile } from "@/lib/tmp"
 import i18n from "@/lib/i18n"
 import backgroundRunLog from "@/features/cameraUpload/backgroundRunLog"
+import { tlsDiagnostics } from "@/lib/sdkTls"
 
 export type PreparedLogsExport =
 	| {
@@ -26,7 +27,8 @@ function buildDeviceInfo(): Record<string, unknown> {
 		osVersion: String(Platform.Version),
 		locale: i18n.language,
 		availableDiskSpaceBytes: FileSystem.Paths.availableDiskSpace,
-		totalDiskSpaceBytes: FileSystem.Paths.totalDiskSpace
+		totalDiskSpaceBytes: FileSystem.Paths.totalDiskSpace,
+		tls: tlsDiagnostics()
 	}
 }
 

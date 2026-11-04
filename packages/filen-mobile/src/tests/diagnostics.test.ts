@@ -34,6 +34,9 @@ vi.mock("@/lib/tmp", () => tmpMock)
 vi.mock("@/lib/i18n", () => ({ default: { language: "en" } }))
 // Stubbed rather than pulled in: the real module reaches op-sqlite, which has no node build here.
 vi.mock("@/features/cameraUpload/backgroundRunLog", () => ({ default: backgroundRunLogMock }))
+vi.mock("@/lib/sdkTls", () => ({
+	tlsDiagnostics: () => ({ nativeInit: true, sdk: { ready: true, backend: "platform", lastError: undefined } })
+}))
 vi.mock("expo-constants", () => ({ default: { expoConfig: { version: "9.9.9" }, nativeBuildVersion: "42" } }))
 vi.mock("expo-file-system", () => ({ Paths: { availableDiskSpace: 100, totalDiskSpace: 200 } }))
 
@@ -99,6 +102,7 @@ describe("diagnostics.prepareLogsExport", () => {
 
 		expect(info["appVersion"]).toBe("9.9.9")
 		expect(info["platform"]).toBeDefined()
+		expect(info["tls"]).toEqual({ nativeInit: true, sdk: { ready: true, backend: "platform" } })
 	})
 
 	it("bundles the background run log, the only record a headless run leaves", async () => {

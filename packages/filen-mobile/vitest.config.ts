@@ -38,6 +38,8 @@ export default defineConfig({
 			// The native filen-exif module calls requireNativeModule() at import — unloadable in
 			// Node — so alias it to a mock globally (must precede the "@/modules" alias below).
 			"@/modules/filen-exif": path.resolve(__dirname, "./src/tests/mocks/filenExif.ts"),
+			// Same for filen-net (expo-modules-core at import); auth.ts reaches it from most tests.
+			"@/modules/filen-net": path.resolve(__dirname, "./src/tests/mocks/filenNet.ts"),
 			// Local Expo modules live under ./modules (not ./src). Must precede the "@" alias so
 			// "@/modules/*" resolves there rather than "./src/modules/*". Mirrors the app's babel/metro
 			// "@/modules/" → "modules/" alias.

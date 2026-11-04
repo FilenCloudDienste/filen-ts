@@ -41,6 +41,7 @@ import socketCreateBatcher from "@/features/drive/socketCreateBatcher"
 import events from "@/lib/events"
 import { reloadAppAsync } from "expo"
 import { isEqual } from "es-toolkit"
+import { initTls } from "@/modules/filen-net"
 
 const RELOAD_RETRY_DELAY = 1000
 const RELOAD_MAX_ATTEMPTS = 5
@@ -66,6 +67,21 @@ class Auth {
 	public maxIoMemoryUsage: number = DEFAULT_RESOLVED_TRANSFER_CONFIG.maxIoMemoryUsage
 	public maxParallelRequests: number = DEFAULT_RESOLVED_TRANSFER_CONFIG.maxParallelRequests
 	public jsClientBaseConfig: JsClientConfig = buildJsClientConfig(DEFAULT_RESOLVED_TRANSFER_CONFIG)
+
+	// Every SDK client is built here, so the platform TLS verifier is initialized before the first
+	// connection on every path (launch, sign-in, register, password reset). A no-op after the first
+	// success; a failure is logged once and left to the SDK, which then fails its connections closed.
+	private tlsInitFailureLogged = false
+
+	private createUnauthedClient(): UnauthJsClientInterface {
+		if (!initTls() && !this.tlsInitFailureLogged) {
+			this.tlsInitFailureLogged = true
+
+			logger.error("auth", "platform TLS verifier init failed")
+		}
+
+		return UnauthJsClient.fromConfig(this.jsClientBaseConfig)
+	}
 
 	public async isAuthed(): Promise<
 		| {
@@ -193,7 +209,7 @@ class Auth {
 		this.destroyClient(this.authedClient)
 		this.destroyClient(this.unauthedClient)
 
-		this.unauthedClient = UnauthJsClient.fromConfig(this.jsClientBaseConfig)
+		this.unauthedClient = this.createUnauthedClient()
 		this.authedClient = this.unauthedClient.fromStringified({
 			...stringifiedClient,
 			maxIoMemoryUsage: this.maxIoMemoryUsage,
@@ -328,7 +344,7 @@ class Auth {
 		this.authedClient = null
 		this.lastStringifiedClient = null
 
-		const unauthedClient = UnauthJsClient.fromConfig(this.jsClientBaseConfig)
+		const unauthedClient = this.createUnauthedClient()
 
 		this.unauthedClient = unauthedClient
 
@@ -363,7 +379,7 @@ class Auth {
 
 	public async register(params: Parameters<UnauthJsClientInterface["register"]>[0]): Promise<void> {
 		if (!this.unauthedClient) {
-			this.unauthedClient = UnauthJsClient.fromConfig(this.jsClientBaseConfig)
+			this.unauthedClient = this.createUnauthedClient()
 		}
 
 		await this.unauthedClient.register(params)
@@ -371,7 +387,7 @@ class Auth {
 
 	public async startPasswordReset(email: string): Promise<void> {
 		if (!this.unauthedClient) {
-			this.unauthedClient = UnauthJsClient.fromConfig(this.jsClientBaseConfig)
+			this.unauthedClient = this.createUnauthedClient()
 		}
 
 		await this.unauthedClient.startPasswordReset(email)
@@ -379,7 +395,7 @@ class Auth {
 
 	public async resendConfirmationEmail(email: string): Promise<void> {
 		if (!this.unauthedClient) {
-			this.unauthedClient = UnauthJsClient.fromConfig(this.jsClientBaseConfig)
+			this.unauthedClient = this.createUnauthedClient()
 		}
 
 		await this.unauthedClient.resendRegistrationConfirmation(email)
