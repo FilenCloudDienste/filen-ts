@@ -30,7 +30,7 @@
 	"devDependencies": {
 		"@electron/osx-sign": "1.3.3",
 		"@eslint/js": "^10.0.1",
-		"@filen/sdk-rs": "0.5.19",
+		"@filen/sdk-rs": "0.5.20",
 		"@filen/shared": "workspace:*",
 		"@peculiar/x509": "^2.2.0",
 		"@types/node": "^24.19.2",

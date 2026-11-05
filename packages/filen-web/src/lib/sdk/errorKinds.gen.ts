@@ -37,6 +37,7 @@ export const ERROR_KINDS = [
 	"ArchivePasswordRequired",
 	"ArchiveWrongPassword",
 	"ArchiveSolidSkipExceeded",
-	"LockLost"
+	"LockLost",
+	"TlsVerification"
 ] as const
 export type SdkErrorKind = (typeof ERROR_KINDS)[number]
