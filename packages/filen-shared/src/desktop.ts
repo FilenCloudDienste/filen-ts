@@ -208,8 +208,9 @@ export type DesktopSyncHoldAction = "retry" | "startAnyway"
 // Told once, dismissed for good: the pair now keeps replaced and deleted local files in its bin.
 export type DesktopSyncInfoNotice = "localTrashNowOn"
 
-// Why a pass held back part of its work: a side out of room, or the server out of reach.
-export type DesktopSyncHalt = "localStorageFull" | "remoteStorageFull" | "offline"
+// Why a pass held back part of its work: a side out of room, the server out of reach, or its certificate not
+// verified (`certificateUnverified`: an intercepting proxy, or a CA the system does not trust).
+export type DesktopSyncHalt = "localStorageFull" | "remoteStorageFull" | "offline" | "certificateUnverified"
 
 // What a pass does before it starts: waits for the cloud listing, or reads the local directory. The "to hash" figures
 // grow as the read goes.

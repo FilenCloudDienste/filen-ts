@@ -177,7 +177,7 @@ describe("sync copy", () => {
 		])
 		expectAllKeysExist(HOLD_KEY, ["ruleFileUnwritable", "ruleFileUndecodable", "driveRoot", "cloudListingSlow"])
 		expectAllKeysExist(INFO_NOTICE_KEY, ["localTrashNowOn"])
-		expectAllKeysExist(HALT_KEY, ["localStorageFull", "remoteStorageFull", "offline"])
+		expectAllKeysExist(HALT_KEY, ["localStorageFull", "remoteStorageFull", "offline", "certificateUnverified"])
 		expectAllKeysExist(SCAN_GAP_KEY, ["unreadable", "changedDuringScan", "nonUtf8Name"])
 		expectAllKeysExist(SYNC_FINDING_KEY, ["uploads", "downloads", "conflicts", "heldDeletions", "refused", "unconverged", "overwrites"])
 		expectAllKeysExist(HELD_REASON_KEY, [

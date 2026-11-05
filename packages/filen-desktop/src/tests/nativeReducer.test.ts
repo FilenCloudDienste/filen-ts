@@ -391,6 +391,37 @@ describe("reduceEvents", () => {
 		}
 	})
 
+	it("an unverified certificate is its own halt, not offline, and asks for attention", async () => {
+		const { runtime, of } = feed()
+		const tls = fakeSdk.ErrorKind.TlsVerification
+
+		runtime.setPairs([pairInfo()])
+		runtime.subscribe(true)
+		// The engine halts it as unreachable; the kind says why.
+		runtime.events([
+			passEvent({
+				tag: "PassCompleted",
+				inner: { report: report({ halted: fakeSdk.HaltReason.RemoteUnavailable, passError: "certificate", passErrorKind: tls }) }
+			})
+		])
+		await vi.advanceTimersByTimeAsync(FEED_INTERVAL_MS)
+		expect(of("overview").at(-1)).toMatchObject({ pairs: [{ halted: "certificateUnverified", lastError: "certificate" }] })
+		expect(of("aggregate")).toEqual([{ t: "aggregate", state: "attention" }])
+
+		const state = new Map([["1", createPairRuntime()]])
+
+		reduceEvents(fakeSdk, state, [passEvent({ tag: "PassFailed", inner: { error: "certificate", kind: tls } })])
+		expect(state.get("1")).toMatchObject({ halted: "certificateUnverified", lastError: "certificate" })
+
+		const watched = createPairRuntime()
+
+		reduceWatchStatus(fakeSdk, watched, { consecutiveFailures: 1, lastError: "certificate", lastErrorKind: tls, state: 0 })
+		expect(watched).toMatchObject({ halted: "certificateUnverified", lastError: "certificate" })
+		expect(createPairRuntime(pairInfo({ lastPassError: "certificate", lastPassErrorKind: tls }), fakeSdk).halted).toBe(
+			"certificateUnverified"
+		)
+	})
+
 	it("the pass that tries the server again is no longer offline", () => {
 		const state = new Map([["1", createPairRuntime()]])
 

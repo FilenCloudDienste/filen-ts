@@ -169,7 +169,7 @@ const nativePairRuntimeSchema = type({
 	issues: issueCountsSchema,
 	degraded: type({ local: "boolean", remote: "boolean", "+": "reject" }),
 	stage: stageSchema.or("null"),
-	halted: type("'localStorageFull' | 'remoteStorageFull' | 'offline' | null"),
+	halted: type("'localStorageFull' | 'remoteStorageFull' | 'offline' | 'certificateUnverified' | null"),
 	refused: refusalSchema.or("null"),
 	"+": "reject"
 })

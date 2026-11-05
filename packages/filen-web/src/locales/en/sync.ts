@@ -381,6 +381,9 @@ export const sync = {
 	haltRemoteStorageFull: "Your Filen storage is full, so Filen held back what it would upload.",
 	/** Halt — the server couldn't be reached */
 	haltOffline: "Filen can't reach the server right now. It syncs again once it can.",
+	/** Halt — the server's certificate failed the system's verification (an intercepting proxy or security software, or a certificate authority this device does not trust); worded like the errors catalog's TlsVerification */
+	haltCertificateUnverified:
+		"A secure connection to Filen couldn't be verified. A proxy or security software may be intercepting it, or this device is missing a certificate it needs. It syncs again once the connection can be verified.",
 	/** Issues — unsyncable section */
 	unsyncableTitle: "Can't be synced",
 	/** Unsyncable — retry one item */

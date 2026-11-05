@@ -142,7 +142,8 @@ export const INFO_NOTICE_KEY: Record<DesktopSyncInfoNotice, SyncKey> = {
 export const HALT_KEY: Record<DesktopSyncHalt, SyncKey> = {
 	localStorageFull: "haltLocalStorageFull",
 	remoteStorageFull: "haltRemoteStorageFull",
-	offline: "haltOffline"
+	offline: "haltOffline",
+	certificateUnverified: "haltCertificateUnverified"
 }
 
 export const SCAN_GAP_KEY: Record<DesktopSyncScanGap["cause"], SyncKey> = {

@@ -61,7 +61,16 @@ class FakeThrown extends Error {
 }
 
 export const fakeSdk = {
-	ErrorKind: { Server: 0, Unauthenticated: 1, Reqwest: 2, Io: 6, InvalidState: 8, FolderNotFound: 20, StaleState: 28 },
+	ErrorKind: {
+		Server: 0,
+		Unauthenticated: 1,
+		Reqwest: 2,
+		Io: 6,
+		InvalidState: 8,
+		FolderNotFound: 20,
+		StaleState: 28,
+		TlsVerification: 38
+	},
 	SyncMode: { LocalToRemote: 0, RemoteToLocal: 1, TwoWay: 2, LocalBackup: 3, RemoteBackup: 4 },
 	Backlog: { Propagate: 0, AdoptDestination: 1 },
 	ConflictResolution: { KeepLocal: 0, KeepRemote: 1, KeepBoth: 2 },

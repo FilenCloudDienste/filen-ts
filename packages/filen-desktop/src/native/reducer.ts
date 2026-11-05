@@ -63,7 +63,7 @@ export function createPairRuntime(info?: SyncPairInfo, sdk?: NativeSdk): PairRun
 		degraded: { local: status?.localEventsDegraded !== undefined, remote: status?.remoteEventsDegraded !== undefined },
 		pending: null,
 		stage: null,
-		halted: sdk !== undefined && info?.lastPassErrorKind === sdk.ErrorKind.Reqwest ? "offline" : null,
+		halted: sdk === undefined ? null : connectionHalt(sdk, info?.lastPassErrorKind),
 		refused: null,
 		passEnded: false
 	}
@@ -98,9 +98,21 @@ function halt(sdk: NativeSdk, reason: HaltReason | undefined): DesktopSyncHalt |
 	}
 }
 
-// A pass that failed because the server could not be reached (a lock request among them) is offline, whatever halted.
-function offlineKind(sdk: NativeSdk, kind: ErrorKind | undefined): DesktopSyncHalt | null {
-	return kind === sdk.ErrorKind.Reqwest ? "offline" : null
+// A pass that failed because the server could not be reached (a lock request among them) is offline; one whose
+// certificate the system did not verify says so, though the engine halts it as unreachable.
+function connectionHalt(sdk: NativeSdk, kind: ErrorKind | undefined): DesktopSyncHalt | null {
+	if (kind === sdk.ErrorKind.Reqwest) {
+		return "offline"
+	}
+
+	return kind === sdk.ErrorKind.TlsVerification ? "certificateUnverified" : null
+}
+
+// A pass's halt: an unverified certificate first, then the engine's reason, then an unreachable server whatever halted.
+function passHalt(sdk: NativeSdk, report: SyncPassReport): DesktopSyncHalt | null {
+	const connection = connectionHalt(sdk, report.passErrorKind)
+
+	return connection === "certificateUnverified" ? connection : (halt(sdk, report.halted) ?? connection)
 }
 
 const BEGIN_KINDS = {
@@ -302,7 +314,7 @@ export function reduceEvents(sdk: NativeSdk, state: Map<string, PairRuntime>, ev
 				runtime.passEnded = true
 				runtime.lastSyncedAt = at
 				runtime.lastError = report.passError === undefined ? null : clip(report.passError)
-				runtime.halted = halt(sdk, report.halted) ?? offlineKind(sdk, report.passErrorKind)
+				runtime.halted = passHalt(sdk, report)
 				runtime.refused = refusal(sdk, report.refused)
 				// A report's conflicts are the ones its pass planned: none for a pass that read nothing (paused, a
 				// wake with nothing announced), so not the count held. The host reads that one after it.
@@ -335,7 +347,7 @@ export function reduceEvents(sdk: NativeSdk, state: Map<string, PairRuntime>, ev
 				}
 
 				runtime.lastError = clip(event.inner.error)
-				runtime.halted = offlineKind(sdk, event.inner.kind)
+				runtime.halted = connectionHalt(sdk, event.inner.kind)
 				authFailed ||= event.inner.kind === sdk.ErrorKind.Unauthenticated
 				activity.push({ pairId, at, kind: "passFailed", detail: runtime.lastError })
 				break
@@ -352,11 +364,13 @@ export function reduceWatchStatus(sdk: NativeSdk, runtime: PairRuntime, status: 
 	// A cloud listing that did not finish in time is not ready yet, no error.
 	if (status.lastError !== undefined && status.lastErrorKind !== sdk.ErrorKind.StaleState) {
 		runtime.lastError = clip(status.lastError)
-
-		if (status.lastErrorKind === sdk.ErrorKind.Reqwest) {
-			runtime.halted = "offline"
-		}
-	} else if (status.consecutiveFailures === 0 && status.lastError === undefined && runtime.passEnded && runtime.halted === "offline") {
+		runtime.halted = connectionHalt(sdk, status.lastErrorKind) ?? runtime.halted
+	} else if (
+		status.consecutiveFailures === 0 &&
+		status.lastError === undefined &&
+		runtime.passEnded &&
+		(runtime.halted === "offline" || runtime.halted === "certificateUnverified")
+	) {
 		// The engine can publish a status still carrying the previous failure just before the clean one: the outage is over.
 		runtime.halted = null
 		runtime.lastError = null
