@@ -89,7 +89,8 @@ export enum ErrorKind {
 	ArchivePasswordRequired,
 	ArchiveWrongPassword,
 	ArchiveSolidSkipExceeded,
-	LockLost
+	LockLost,
+	TlsVerification
 }
 
 export enum NonRootNormalItem_Tags {

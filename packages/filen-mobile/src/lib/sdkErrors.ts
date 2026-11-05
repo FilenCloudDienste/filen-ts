@@ -1,5 +1,5 @@
 import { FilenSdkError, ErrorKind } from "@filen/sdk-rs"
-import { isNetworkClassErrorKind, isPermanentRejection, TLS_VERIFICATION_ERROR_KIND } from "@filen/shared"
+import { isNetworkClassErrorKind, isPermanentRejection } from "@filen/shared"
 import i18n from "@/lib/i18n"
 import { type en } from "@/locales/en"
 
@@ -31,11 +31,8 @@ export function isPermanentSdkRejection(error: unknown): boolean {
 	})
 }
 
-// Resolved by name at call time: an SDK that predates the kind has no such member and never reports it.
 export function isTlsVerificationErrorKind(kind: ErrorKind): boolean {
-	const tlsKind = (ErrorKind as unknown as Record<string, ErrorKind | undefined>)[TLS_VERIFICATION_ERROR_KIND]
-
-	return tlsKind !== undefined && kind === tlsKind
+	return kind === ErrorKind.TlsVerification
 }
 
 // A server certificate the platform verifier rejected. Shown as its own connection state, not as offline.
@@ -74,7 +71,8 @@ const ERROR_KEY_BY_KIND: Partial<Record<ErrorKind, keyof typeof en>> = {
 	[ErrorKind.StaleState]: "stale_state",
 	[ErrorKind.MissingStableUuid]: "item_not_modifiable",
 	// Its inner text names the Rust resource lock, which says nothing to a user.
-	[ErrorKind.LockLost]: "lock_lost"
+	[ErrorKind.LockLost]: "lock_lost",
+	[ErrorKind.TlsVerification]: "secure_connection_unverified"
 }
 
 // Produces the user-facing string for an SDK error. Priority: (1) SERVER/API errors show the
@@ -86,9 +84,7 @@ const ERROR_KEY_BY_KIND: Partial<Record<ErrorKind, keyof typeof en>> = {
 // message (`innerMessage()`), then the generic label. Module level (not a hook) → uses `i18n`.
 // The same priority for an SDK error already read into its parts (a copy job keeps its errors that way).
 export function sdkErrorPartsToHumanReadable(parts: { kind: ErrorKind; serverMessage: string | undefined; innerMessage: string | undefined }): string {
-	const errorKey = isTlsVerificationErrorKind(parts.kind)
-		? "secure_connection_unverified"
-		: (ERROR_KEY_BY_KIND[parts.kind] ?? "error_generic")
+	const errorKey = ERROR_KEY_BY_KIND[parts.kind] ?? "error_generic"
 
 	// Server/API errors → the server's own human-readable message (the most specific text we have).
 	const serverMessage = parts.serverMessage

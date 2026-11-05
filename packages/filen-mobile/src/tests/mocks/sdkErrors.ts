@@ -17,7 +17,8 @@ export const ErrorKind = {
 	Unauthenticated: "Unauthenticated",
 	Reqwest: "Reqwest",
 	RetryFailed: "RetryFailed",
-	Response: "Response"
+	Response: "Response",
+	TlsVerification: "TlsVerification"
 } as const
 
 export const sdkErrorState = {

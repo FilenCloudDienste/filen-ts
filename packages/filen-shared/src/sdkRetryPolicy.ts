@@ -35,8 +35,7 @@ export function isRetryableLockErrorKind(kind: string | undefined): boolean {
 
 // The server's certificate failed the platform verifier (an intercepting proxy, a captive portal, a
 // revoked or expired chain). A state of the network path, not of the item: keep-for-retry, never counts
-// toward the drop. Named here, not as an enum member, so callers compile against an SDK that predates
-// the kind; such an SDK never reports it. Uniffi and wasm spell an acronym-free name identically.
+// toward the drop. Matched by name like the other kinds here: uniffi and wasm spell it identically.
 export const TLS_VERIFICATION_ERROR_KIND = "TlsVerification"
 
 export function isTlsVerificationErrorKind(kind: string | undefined): boolean {
