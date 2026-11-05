@@ -270,10 +270,9 @@ export async function driveImportedOff(overview: () => Promise<DesktopMountsOver
 	return `off, as ${OLDER_PIN.version} left it; nothing mounted at ${root}`
 }
 
-// L15: nothing of Filen beside its userData after the sign-out and the uninstall (<appData>/@filen/<entry>): neither the
-// old logs nor 3.0.47's network-drive directory (its rclone, rclone.conf with its local WebDAV bridge's credentials and
-// monitor scripts), which N deletes once the migration verified.
-// `expected`: what the old release leaves there that N does not delete (LegacyPin.besideUserData), named when found.
+// L15: nothing of Filen beside its userData after the sign-out and the uninstall (<appData>/@filen/<entry>), not the old
+// logs among it. `expected`: what the old release leaves there that N does not delete (LegacyPin.besideUserData), named
+// when found.
 export function leftoversBeside(userData: string, expected: readonly string[] = []): string {
 	const dir = path.dirname(userData)
 	const entries = existsSync(dir) ? readdirSync(dir).filter(entry => entry !== path.basename(userData)) : []
@@ -315,13 +314,28 @@ export async function endOrphanedRclone(
 	return `${left.join("; ")}: still running, ended as the old app's next start ends it`
 }
 
-// L6: 3.0.47's network-drive directory (@filen/network-drive 0.9.x's platformConfigPath(), beside userData) is gone.
-export function legacyNetworkDriveGone(userData: string): string {
+// What 3.0.47's network-drive directory (@filen/network-drive 0.9.x's platformConfigPath(), beside userData: its rclone,
+// rclone.conf and monitor scripts) holds, by name; null when there is none. @filen/cli's `mount` uses it too.
+export function legacyNetworkDriveEntries(userData: string): string[] | null {
 	const dir = path.join(path.dirname(userData), "network-drive")
 
-	if (existsSync(dir)) {
-		fail(`${dir} is still there`)
+	return existsSync(dir) ? readdirSync(dir).sort() : null
+}
+
+// L6: N leaves that directory alone: everything it held once the old release quit (`before`) is still there.
+export function legacyNetworkDriveLeft(userData: string, before: readonly string[] | null): string {
+	const dir = path.join(path.dirname(userData), "network-drive")
+
+	if (before === null) {
+		return `no ${dir}`
 	}
 
-	return `${dir} gone`
+	const now = legacyNetworkDriveEntries(userData) ?? []
+	const gone = before.filter(entry => !now.includes(entry))
+
+	if (gone.length > 0) {
+		fail(`${dir} lost ${gone.join(", ")}`)
+	}
+
+	return `${dir} left in place (${before.join(", ") || "empty"})`
 }

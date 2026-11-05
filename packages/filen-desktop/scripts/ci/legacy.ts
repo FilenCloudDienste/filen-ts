@@ -58,9 +58,9 @@ export interface LegacyPin {
 	// PowerShell wait, the grandchildren, break away silently, and the monitor's taskkill never runs. The app's next start
 	// with the drive on (its network drive's start ends every rclone by name) or a sign-out of Windows ends it.
 	winRcloneOutlivesExit: boolean
-	// What it leaves beside userData that N does not delete, by name. 3.0.47's @filen/s3 and @filen/webdav create their
-	// platformConfigPath() as their modules load (`<appData>/@filen/s3`, `webdav`: certificates once HTTPS ran,
-	// tempDiskFiles), directories @filen/cli shares.
+	// What it leaves beside userData that N does not delete, by name. 3.0.47's @filen/network-drive downloads its rclone
+	// into its platformConfigPath() (`<appData>/@filen/network-drive`), and its @filen/s3 and @filen/webdav create theirs
+	// as their modules load (`s3`, `webdav`: certificates once HTTPS ran, tempDiskFiles), directories @filen/cli shares.
 	besideUserData: readonly string[]
 }
 
@@ -103,7 +103,7 @@ export const OLDER_PIN: LegacyPin = {
 	syncsEmptyFiles: false,
 	quit: "app.exit(0)",
 	winRcloneOutlivesExit: true,
-	besideUserData: ["s3", "webdav"]
+	besideUserData: ["network-drive", "s3", "webdav"]
 }
 
 // The update scenarios that start from an old release, by name (scripts/ci/e2e.ts --scenario).

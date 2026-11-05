@@ -268,6 +268,8 @@ function windows(): Target {
 		},
 		reset() {
 			run("taskkill.exe", ["/F", "/T", "/IM", "Filen.exe"], { allowFailure: true })
+			// The rclone 3.0.47's network drive leaves running from <appData>/@filen/network-drive, which N keeps.
+			run("taskkill.exe", ["/F", "/T", "/IM", "filen_rclone_win32_*"], { allowFailure: true })
 
 			const uninstaller = path.join(installDir, "Uninstall Filen.exe")
 
@@ -287,10 +289,10 @@ function windows(): Target {
 				run("msiexec.exe", ["/x", product, "/qn", "/norestart"], { allowFailure: true })
 			}
 
+			// All of <appData>/@filen, as on macOS and Linux: N leaves 3.0.47's network-drive, s3 and webdav directories.
 			remove(
 				installDir,
-				path.join(appData, "@filen", "desktop"),
-				path.join(appData, "@filen", "logs"),
+				path.join(appData, "@filen"),
 				path.join(localAppData, "@filendesktop-updater"),
 				path.join(localAppData, "@filen", "desktop-updater")
 			)

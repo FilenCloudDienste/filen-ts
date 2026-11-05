@@ -15,7 +15,8 @@ import {
 	fallbackImported,
 	findingsFor,
 	FUSE_T_PROMPT_ISSUE,
-	legacyNetworkDriveGone,
+	legacyNetworkDriveEntries,
+	legacyNetworkDriveLeft,
 	leftoversBeside,
 	OLDER_SDK_CONFIG_SHAPE,
 	olderDrive,
@@ -705,28 +706,49 @@ describe("chain L from 3.0.47", () => {
 		inner.finish()
 	})
 
-	it("allows nothing beside userData after the uninstall, the old release's network drive included", () => {
+	it("allows nothing beside userData after the uninstall but what the release leaves", () => {
 		const appData = tempDir()
 		const userData = path.join(appData, "desktop")
 
 		mkdirSync(userData)
 		expect(leftoversBeside(userData)).toBe("nothing beside desktop")
-		expect(legacyNetworkDriveGone(userData)).toBe(`${path.join(appData, "network-drive")} gone`)
 		mkdirSync(path.join(appData, "network-drive"))
 		expect(() => leftoversBeside(userData)).toThrow(/network-drive/)
-		expect(() => legacyNetworkDriveGone(userData)).toThrow(/network-drive is still there/)
 		rmSync(path.join(appData, "network-drive"), { recursive: true })
 		mkdirSync(path.join(appData, "logs"))
 		expect(() => leftoversBeside(userData)).toThrow(/logs/)
 		expect(leftoversBeside(path.join(tempDir(), "missing", "desktop"))).toBe("nothing beside desktop")
 	})
 
-	it("allows only what the old release leaves beside userData and N keeps: 3.0.47's s3 and webdav", () => {
+	it("requires N to leave 3.0.47's network-drive directory as the old app left it (@filen/cli uses it too)", () => {
+		const appData = tempDir()
+		const userData = path.join(appData, "desktop")
+		const dir = path.join(appData, "network-drive")
+
+		mkdirSync(userData)
+		expect(legacyNetworkDriveEntries(userData)).toBeNull()
+		expect(legacyNetworkDriveLeft(userData, null)).toBe(`no ${dir}`)
+		mkdirSync(dir)
+		writeFileSync(path.join(dir, "rclone.conf"), "")
+		writeFileSync(path.join(dir, "filen_rclone_win32_x64_1680.exe"), "")
+
+		const before = legacyNetworkDriveEntries(userData)
+
+		expect(before).toEqual(["filen_rclone_win32_x64_1680.exe", "rclone.conf"])
+		writeFileSync(path.join(dir, "monitor.v3.bat"), "")
+		expect(legacyNetworkDriveLeft(userData, before)).toBe(`${dir} left in place (filen_rclone_win32_x64_1680.exe, rclone.conf)`)
+		rmSync(path.join(dir, "rclone.conf"))
+		expect(() => legacyNetworkDriveLeft(userData, before)).toThrow(/lost rclone\.conf$/)
+		rmSync(dir, { recursive: true })
+		expect(() => legacyNetworkDriveLeft(userData, before)).toThrow(/lost filen_rclone_win32_x64_1680\.exe, rclone\.conf$/)
+	})
+
+	it("allows only what the old release leaves beside userData and N keeps: 3.0.47's network-drive, s3 and webdav", () => {
 		const appData = tempDir()
 		const userData = path.join(appData, "desktop")
 
 		mkdirSync(userData)
-		expect(OLDER_PIN.besideUserData).toEqual(["s3", "webdav"])
+		expect(OLDER_PIN.besideUserData).toEqual(["network-drive", "s3", "webdav"])
 		expect(LEGACY_PIN.besideUserData).toEqual([])
 		expect(leftoversBeside(userData, OLDER_PIN.besideUserData)).toBe("nothing beside desktop")
 		mkdirSync(path.join(appData, "s3"))
@@ -736,7 +758,11 @@ describe("chain L from 3.0.47", () => {
 			"nothing beside desktop but what the old release leaves and N keeps: s3, webdav"
 		)
 		mkdirSync(path.join(appData, "network-drive"))
-		expect(() => leftoversBeside(userData, OLDER_PIN.besideUserData)).toThrow(/also holds network-drive$/)
+		expect(leftoversBeside(userData, OLDER_PIN.besideUserData)).toBe(
+			"nothing beside desktop but what the old release leaves and N keeps: network-drive, s3, webdav"
+		)
+		mkdirSync(path.join(appData, "logs"))
+		expect(() => leftoversBeside(userData, OLDER_PIN.besideUserData)).toThrow(/also holds logs$/)
 	})
 
 	it("ends the rclone 3.0.47's drive leaves running on Windows, only there and only for it", async () => {

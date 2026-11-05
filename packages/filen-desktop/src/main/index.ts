@@ -67,7 +67,6 @@ import {
 	createMigration,
 	createStashStore,
 	legacyLogsDir,
-	legacyNetworkDriveDir,
 	legacyOwner,
 	parseMarker,
 	type PurgeOutcome,
@@ -305,13 +304,6 @@ const migration = createMigration({
 	removeRcloneConfig: () => rm(path.join(userDataPath, "rclone", "rclone.conf"), { force: true }),
 	// Development has its own userData beside a real installation's, so only a packaged app deletes the old logs.
 	removeLegacyLogs: () => (app.isPackaged ? removeTree(legacyLogsDir(userDataPath)) : Promise.resolve()),
-	removeLegacyNetworkDrive: async () => {
-		const dir = legacyNetworkDriveDir(PLATFORM, process.env, os.homedir())
-
-		if (app.isPackaged && dir !== null) {
-			await removeTree(dir)
-		}
-	},
 	earlyPurge: () => earlyPurge,
 	vault: sessionVault,
 	lock: {

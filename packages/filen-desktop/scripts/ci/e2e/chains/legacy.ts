@@ -83,7 +83,8 @@ import {
 	endOrphanedRclone,
 	fallbackImported,
 	findingsFor,
-	legacyNetworkDriveGone,
+	legacyNetworkDriveEntries,
+	legacyNetworkDriveLeft,
 	leftoversBeside,
 	olderDrive,
 	plantedHeld,
@@ -110,9 +111,10 @@ import {
 //   L5   mounts migrated          the drive at the 3.x mount point, running, a fixture read through it; WebDAV on the same
 //                                 port with the 3.x credentials, answering them
 //   L6   3.x secrets wiped        marker verified and wiped; rclone.conf gone; the old logs (<appData>/@filen/logs)
-//                                 deleted (logsDeleted), and 3.0.47's network drive (<appData>/@filen/network-drive,
-//                                 networkDriveDeleted) with them; then purged: Local Storage and the old IndexedDB gone, and no
-//                                 file under userData (or the logs, should they come back) holds a secret the harness knows
+//                                 deleted (logsDeleted); 3.0.47's network drive (<appData>/@filen/network-drive, which
+//                                 @filen/cli shares) left in place; then purged: Local Storage and the old IndexedDB gone,
+//                                 and no file under userData (or the logs, should they come back) holds a secret the
+//                                 harness knows
 //   L7   userData/sync kept       renamed to sync.migrated-<date>, its content unchanged
 //   L8   every pair, same mode    five pairs by name: the mapped mode, the same local root and remote directory, running
 //   L9   invisible                no review, hold, notice, root problem or issue; info only localTrashNowOn where local
@@ -164,7 +166,6 @@ interface MigrationMarker {
 	volatileStash?: boolean
 	wiped?: boolean
 	logsDeleted?: boolean
-	networkDriveDeleted?: boolean
 	purged?: boolean
 }
 
@@ -215,6 +216,8 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 		trayOff?: boolean
 		// 3.0.47 turned its network drive off (its start failed).
 		driveOff?: boolean
+		// What <appData>/@filen/network-drive held once the old app quit (null: none); N leaves it (L6).
+		networkDrive?: string[] | null
 	} = {}
 
 	chain.secret(pin)
@@ -509,6 +512,8 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 			if (orphaned !== null) {
 				findings.info(`${LEGACY_VERSION}'s rclone after ${release.quit} on Windows (LegacyPin.winRcloneOutlivesExit)`, orphaned)
 			}
+
+			state.networkDrive = legacyNetworkDriveEntries(target.userData)
 
 			await waitFor("the old drive to unmount", EXIT_TIMEOUT_MS, async () =>
 				(await chain.os.driveMounted(drive.root)) === null ? true : null
@@ -904,22 +909,13 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 			})
 
 			await findings.check(
-				"L6 the migration verified the account, wiped the 3.x secrets and deleted its logs and network drive",
+				"L6 the migration verified the account, wiped the 3.x secrets and deleted its logs, its network drive left in place",
 				async () => {
-					const read = await waitFor(
-						"the migration to verify, wipe and delete the old logs and network drive",
-						SETUP_TIMEOUT_MS,
-						() => {
-							const current = marker()
+					const read = await waitFor("the migration to verify, wipe and delete the old logs", SETUP_TIMEOUT_MS, () => {
+						const current = marker()
 
-							return current?.stage === "verified" &&
-								current.wiped === true &&
-								current.logsDeleted === true &&
-								current.networkDriveDeleted === true
-								? current
-								: null
-						}
-					)
+						return current?.stage === "verified" && current.wiped === true && current.logsDeleted === true ? current : null
+					})
 
 					if (existsSync(userData("rclone", "rclone.conf"))) {
 						fail("userData/rclone/rclone.conf is still there")
@@ -935,17 +931,13 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 						fail("main.log does not log the old logs' deletion")
 					}
 
-					if (!mainLog.includes("migration: the old network drive's directory was deleted")) {
-						fail("main.log does not log the old network drive's deletion")
-					}
-
-					const networkDrive = legacyNetworkDriveGone(target.userData)
+					const networkDrive = legacyNetworkDriveLeft(target.userData, state.networkDrive ?? null)
 
 					if (!readdirSync(target.userData).some(name => name.startsWith("sync.migrated-"))) {
 						fail("no sync.migrated-* in userData")
 					}
 
-					return `stage ${String(read.stage)}, wiped, logsDeleted, networkDriveDeleted; rclone.conf, @filen/logs and ${networkDrive}; sync.migrated-* kept`
+					return `stage ${String(read.stage)}, wiped, logsDeleted; rclone.conf and @filen/logs gone; ${networkDrive}; sync.migrated-* kept`
 				}
 			)
 

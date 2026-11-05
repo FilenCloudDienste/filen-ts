@@ -104,7 +104,6 @@ async function launch(files: ReturnType<typeof disk>, keychain: Keychain, now = 
 		wipeLegacy,
 		removeRcloneConfig: () => Promise.resolve(),
 		removeLegacyLogs: () => Promise.resolve(),
-		removeLegacyNetworkDrive: () => Promise.resolve(),
 		earlyPurge: () => ({ result: "not-due" }),
 		vault,
 		lock: { enabled: () => lock.status().enabled, set: async pin => (await lock.set(pin, null)).ok },

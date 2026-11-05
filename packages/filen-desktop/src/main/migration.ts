@@ -36,7 +36,7 @@ import { sessionUserId, type VaultCipher } from "./sessionVault.ts"
 //             the old secrets are wiped, `wiped` says whether that finished; LevelDB keeps deleted values on disk
 //             until a compaction that may never come, so a later launch deletes the old origin's stores before
 //             anything opens them, and `purged` records that; the old client's logs directory goes after the wipe,
-//             and `logsDeleted` records that, then 3.0.47's network-drive directory (`networkDriveDeleted`)
+//             and `logsDeleted` records that. 3.0.47's network-drive directory stays: @filen/cli uses it too
 //   skipped   nothing to import: the old client's web app never ran here (a fresh install)
 // The old client's rclone config (the account's keys, merely obscured) is deleted once the import is done or given up.
 export type MigrationStage = "started" | "imported" | "abandoned" | "verified" | "skipped"
@@ -61,7 +61,6 @@ export interface MigrationMarker {
 	wiped: boolean
 	purged: boolean
 	logsDeleted: boolean
-	networkDriveDeleted: boolean
 }
 
 // A read that crashed or came back empty this many times is not tried again.
@@ -85,8 +84,7 @@ const markerSchema = type({
 	importedAt: type("number.integer >= 0").or("null"),
 	wiped: "boolean",
 	"purged?": "boolean",
-	"logsDeleted?": "boolean",
-	"networkDriveDeleted?": "boolean"
+	"logsDeleted?": "boolean"
 })
 
 // null: no marker, or one that cannot be used (it is then decided afresh, which never overwrites a stored session).
@@ -121,8 +119,7 @@ export function parseMarker(data: string | null): MigrationMarker | null {
 		importedAt: marker.importedAt,
 		wiped: marker.wiped,
 		purged: marker.purged ?? false,
-		logsDeleted: marker.logsDeleted ?? false,
-		networkDriveDeleted: marker.networkDriveDeleted ?? false
+		logsDeleted: marker.logsDeleted ?? false
 	}
 }
 
@@ -302,9 +299,6 @@ export interface MigrationDeps {
 	removeRcloneConfig(): Promise<void>
 	// Deletes the old client's logs directory (`<appData>/@filen/logs`, beside userData); nothing when it is gone.
 	removeLegacyLogs(): Promise<void>
-	// Deletes 3.0.47's network-drive directory (legacyNetworkDriveDir), never following a symlink out of it; nothing when
-	// it is gone.
-	removeLegacyNetworkDrive(): Promise<void>
 	// What purgeBeforeReady did in this launch.
 	earlyPurge(): PurgeOutcome
 	vault: { get(): Promise<SessionRead>; set(blob: string): Promise<void> }
@@ -414,8 +408,7 @@ export function createMigration(deps: MigrationDeps): Migration {
 			importedAt: null,
 			wiped: false,
 			purged: false,
-			logsDeleted: false,
-			networkDriveDeleted: false
+			logsDeleted: false
 		}
 	}
 
@@ -641,28 +634,23 @@ export function createMigration(deps: MigrationDeps): Migration {
 		deps.info("migration: the old client's stores were deleted from disk")
 	}
 
-	// After the wipe, each until it worked once; a failure retries on the next launch. The logs name the old client's
-	// files, paths and account; the network-drive directory holds a local WebDAV bridge's credentials.
+	// After the wipe, until it worked once; a failure retries on the next launch. The logs name the old client's files,
+	// paths and account.
 	async function removeAfterWipe(): Promise<void> {
-		for (const [field, remove, what, done] of [
-			["logsDeleted", deps.removeLegacyLogs, "logs", "the old client's logs were deleted"],
-			["networkDriveDeleted", deps.removeLegacyNetworkDrive, "network drive", "the old network drive's directory was deleted"]
-		] as const) {
-			if (marker === null || !marker.wiped || marker[field]) {
-				continue
-			}
-
-			try {
-				await remove()
-			} catch (error) {
-				deps.warn(`migration: deleting the old ${what} failed, tried again next launch: ${errorCode(error)}`)
-
-				continue
-			}
-
-			await save({ ...marker, [field]: true })
-			deps.info(`migration: ${done}`)
+		if (marker === null || !marker.wiped || marker.logsDeleted) {
+			return
 		}
+
+		try {
+			await deps.removeLegacyLogs()
+		} catch (error) {
+			deps.warn(`migration: deleting the old logs failed, tried again next launch: ${errorCode(error)}`)
+
+			return
+		}
+
+		await save({ ...marker, logsDeleted: true })
+		deps.info("migration: the old client's logs were deleted")
 	}
 
 	// From `verified` until the wipe worked once; a failure retries on the next confirmation or launch.
@@ -704,7 +692,7 @@ export function createMigration(deps: MigrationDeps): Migration {
 						await recordPurge(marker)
 					}
 
-					if (!marker.logsDeleted || !marker.networkDriveDeleted) {
+					if (!marker.logsDeleted) {
 						void serial(removeAfterWipe).catch((error: unknown) => {
 							deps.warn(`migration: deleting the old files failed: ${errorCode(error)}`)
 						})
