@@ -83,15 +83,14 @@ describe("classifyReachabilityProbeError", () => {
 		expect(classifyReachabilityProbeError(asSdkError(new Error("tls"), "TlsVerification"))).toBe("unverified")
 	})
 
-	it("reads a transport failure the SDK already retried as unreachable", () => {
+	it("reads a transport failure or an answer other than the gateway's OK as unreachable", () => {
 		for (const kind of ["Reqwest", "RetryFailed", "Response"]) {
 			expect(classifyReachabilityProbeError(asSdkError(new Error(kind), kind))).toBe("unreachable")
 		}
 	})
 
 	it("reads any other SDK error as an answer from Filen, so reachable", () => {
-		// The probe's nil public link is answered with an API error; a session the server refuses is
-		// still the server answering.
+		// A session the server refuses is still the server answering.
 		for (const kind of ["Server", "FolderNotFound", "Unauthenticated"]) {
 			expect(classifyReachabilityProbeError(asSdkError(new Error(kind), kind))).toBe("reachable")
 		}

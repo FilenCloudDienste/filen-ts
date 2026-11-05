@@ -46,7 +46,6 @@ import reachability, { type ProbeOutcome } from "@/lib/reachability"
 import { classifyReachabilityProbeError } from "@/lib/sdkErrors"
 
 const RELOAD_RETRY_DELAY = 1000
-const NIL_UUID = "00000000-0000-0000-0000-000000000000"
 const RELOAD_MAX_ATTEMPTS = 5
 // How long sign-out waits for running copies to hand back their reports.
 const COPY_SETTLE_WAIT_MS = 6000
@@ -405,10 +404,10 @@ class Auth {
 	}
 
 	/**
-	 * The reachability probe (src/lib/reachability.ts): one unauthenticated SDK request, so Filen's
-	 * certificate is checked by the same verifier as all real traffic. It looks up the nil public link,
-	 * which the gateway answers with a small "not found" error and no other work; any answer is
-	 * reachable. Sent through the session's unauthed client, whose connections real traffic reuses.
+	 * The reachability probe (src/lib/reachability.ts): the SDK's health check, one unauthenticated
+	 * request without retries, so Filen's certificate is checked by the same verifier as all real
+	 * traffic and the answer is the network's state now. Sent through the session's unauthed client,
+	 * whose connections real traffic reuses.
 	 * Signed in but not set up yet (launch), it sends nothing rather than build a client setup would
 	 * replace at once; signed out, it builds the unauthed client sign-in would build anyway.
 	 */
@@ -430,7 +429,7 @@ class Auth {
 		}
 
 		try {
-			await client.getDirPublicLinkInfo(NIL_UUID, "", { signal })
+			await client.health({ signal })
 
 			return "reachable"
 		} catch (e) {

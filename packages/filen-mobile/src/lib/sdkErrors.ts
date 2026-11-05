@@ -44,10 +44,11 @@ export function isTlsVerificationError(error: unknown): boolean {
 }
 
 /**
- * What a failed reachability probe (src/lib/reachability.ts) says about the network. A rejected
- * certificate is "unverified", never offline. A transport failure the SDK already retried (the
- * shared network-class kinds) is "unreachable". Any other SDK error is an answer from Filen, so
- * "reachable". A cancelled call or a non-SDK throw says nothing about the network.
+ * What a failed reachability probe (src/lib/reachability.ts, the SDK's health check) says about the
+ * network. A rejected certificate is "unverified", never offline. A transport failure or an answer
+ * that is not the gateway's "OK" (a captive portal, a gateway outage), the shared network-class
+ * kinds, is "unreachable". Any other SDK error is an answer from Filen, so "reachable". A cancelled
+ * call or a non-SDK throw says nothing about the network.
  */
 export function classifyReachabilityProbeError(error: unknown): ProbeOutcome {
 	const unwrapped = unwrapSdkError(error)

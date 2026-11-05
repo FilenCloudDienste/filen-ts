@@ -8,7 +8,7 @@ const {
 	mockStartPasswordReset,
 	mockResendRegistrationConfirmation,
 	mockFromConfig,
-	mockGetDirPublicLinkInfo,
+	mockHealth,
 	mockSetProbe,
 	mockClassifyProbeError
 } = vi.hoisted(() => {
@@ -19,7 +19,7 @@ const {
 	const mockRegister = vi.fn()
 	const mockStartPasswordReset = vi.fn()
 	const mockResendRegistrationConfirmation = vi.fn()
-	const mockGetDirPublicLinkInfo = vi.fn()
+	const mockHealth = vi.fn()
 	const mockSetProbe = vi.fn()
 	const mockClassifyProbeError = vi.fn()
 	const mockFromConfig = vi.fn(() => ({
@@ -28,7 +28,7 @@ const {
 		register: mockRegister,
 		startPasswordReset: mockStartPasswordReset,
 		resendRegistrationConfirmation: mockResendRegistrationConfirmation,
-		getDirPublicLinkInfo: mockGetDirPublicLinkInfo
+		health: mockHealth
 	}))
 
 	return {
@@ -39,7 +39,7 @@ const {
 		mockStartPasswordReset,
 		mockResendRegistrationConfirmation,
 		mockFromConfig,
-		mockGetDirPublicLinkInfo,
+		mockHealth,
 		mockSetProbe,
 		mockClassifyProbeError
 	}
@@ -1356,20 +1356,20 @@ describe("auth.probeReachability", () => {
 		expect(registeredProbe).toBeTypeOf("function")
 	})
 
-	it("looks up the nil public link through the unauthed client, signal passed through", async () => {
-		const client = { getDirPublicLinkInfo: vi.fn(async () => ({})) }
+	it("sends the SDK's health check through the unauthed client, signal passed through", async () => {
+		const client = { health: vi.fn(async () => {}) }
 		const signal = new AbortController().signal
 
 		authInternals().unauthedClient = client
 
 		await expect(auth.probeReachability(signal)).resolves.toBe("reachable")
-		expect(client.getDirPublicLinkInfo).toHaveBeenCalledWith("00000000-0000-0000-0000-000000000000", "", { signal })
+		expect(client.health).toHaveBeenCalledWith({ signal })
 		expect(mockFromConfig).not.toHaveBeenCalled()
 	})
 
-	it("classifies a failed lookup with the SDK error classifier", async () => {
-		const error = new Error("public_link_not_found")
-		const client = { getDirPublicLinkInfo: vi.fn(async () => Promise.reject(error)) }
+	it("classifies a failed health check with the SDK error classifier", async () => {
+		const error = new Error("health_failed")
+		const client = { health: vi.fn(async () => Promise.reject(error)) }
 
 		authInternals().unauthedClient = client
 		mockClassifyProbeError.mockReturnValueOnce("unverified")
@@ -1379,7 +1379,7 @@ describe("auth.probeReachability", () => {
 	})
 
 	it("signed out with no client, builds the unauthed client sign-in would build and keeps it", async () => {
-		mockGetDirPublicLinkInfo.mockResolvedValueOnce({})
+		mockHealth.mockResolvedValueOnce(undefined)
 
 		await expect(auth.probeReachability(new AbortController().signal)).resolves.toBe("reachable")
 		expect(mockFromConfig).toHaveBeenCalledTimes(1)
@@ -1391,16 +1391,16 @@ describe("auth.probeReachability", () => {
 
 		await expect(auth.probeReachability(new AbortController().signal)).resolves.toBe("inconclusive")
 		expect(mockFromConfig).not.toHaveBeenCalled()
-		expect(mockGetDirPublicLinkInfo).not.toHaveBeenCalled()
+		expect(mockHealth).not.toHaveBeenCalled()
 	})
 
 	it("sends nothing while signing out", async () => {
-		const client = { getDirPublicLinkInfo: vi.fn() }
+		const client = { health: vi.fn() }
 
 		authInternals().unauthedClient = client
 		authInternals().logoutPromise = new Promise<void>(() => {})
 
 		await expect(auth.probeReachability(new AbortController().signal)).resolves.toBe("inconclusive")
-		expect(client.getDirPublicLinkInfo).not.toHaveBeenCalled()
+		expect(client.health).not.toHaveBeenCalled()
 	})
 })
