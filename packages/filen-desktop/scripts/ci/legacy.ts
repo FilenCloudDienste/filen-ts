@@ -50,8 +50,18 @@ export interface LegacyPin {
 	// How a user quits it. 3.0.53's tray Exit runs app.quit(), whose before-quit lets the window close and will-quit
 	// stops the sync worker and rclone. 3.0.47 cancels app.quit() while minimize to tray is on (its window's close
 	// handler minimizes instead and nothing marks the quit), and every quit it offers (the tray's Exit, the last window
-	// closing) is app.exit(0), which ends the worker with the process; rclone's monitor follows the process out.
+	// closing) is app.exit(0), which ends the worker with the process; rclone's monitor follows the process out (not on
+	// Windows: winRcloneOutlivesExit).
 	quit: LegacyQuit
+	// On Windows its rclone outlives app.exit(0), the drive mounted: @filen/network-drive 0.9.x starts rclone and its
+	// monitor script through cmd.exe, which libuv puts in the job object that dies with the app; rclone and the monitor's
+	// PowerShell wait, the grandchildren, break away silently, and the monitor's taskkill never runs. The app's next start
+	// with the drive on (its network drive's start ends every rclone by name) or a sign-out of Windows ends it.
+	winRcloneOutlivesExit: boolean
+	// What it leaves beside userData that N does not delete, by name. 3.0.47's @filen/s3 and @filen/webdav create their
+	// platformConfigPath() as their modules load (`<appData>/@filen/s3`, `webdav`: certificates once HTTPS ran,
+	// tempDiskFiles), directories @filen/cli shares.
+	besideUserData: readonly string[]
 }
 
 export type LegacyQuit = "app.quit()" | "app.exit(0)"
@@ -66,7 +76,9 @@ export const LEGACY_PIN: LegacyPin = {
 	authVersions: [1, 2, 3],
 	linuxNeedsPrompt: false,
 	syncsEmptyFiles: true,
-	quit: "app.quit()"
+	quit: "app.quit()",
+	winRcloneOutlivesExit: false,
+	besideUserData: []
 }
 
 export const OLDER_PIN: LegacyPin = {
@@ -89,7 +101,9 @@ export const OLDER_PIN: LegacyPin = {
 	authVersions: [1, 2],
 	linuxNeedsPrompt: true,
 	syncsEmptyFiles: false,
-	quit: "app.exit(0)"
+	quit: "app.exit(0)",
+	winRcloneOutlivesExit: true,
+	besideUserData: ["s3", "webdav"]
 }
 
 // The update scenarios that start from an old release, by name (scripts/ci/e2e.ts --scenario).

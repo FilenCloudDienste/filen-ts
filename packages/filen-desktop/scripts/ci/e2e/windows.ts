@@ -155,6 +155,16 @@ throw 'the dialog was not answered; cancelled'
 `
 }
 
+// Every process running from an executable below `dir`, as "pid path".
+export async function windowsProcessesUnder(dir: string): Promise<string[]> {
+	const found = await ps(
+		`list the processes under ${dir}`,
+		`Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith(${psQuote(path.join(dir, path.sep))}, [System.StringComparison]::OrdinalIgnoreCase) } | ForEach-Object { "$($_.ProcessId) $($_.ExecutablePath)" }`
+	)
+
+	return found.split(/\r?\n/).filter(line => line.trim() !== "")
+}
+
 export const windowsOs: DesktopOs = {
 	legacyDriveLive: true,
 	async prepare() {
@@ -278,15 +288,7 @@ $bitmap.Save(${psQuote(file)}, [System.Drawing.Imaging.ImageFormat]::Png)
 		return "the NSIS uninstaller removed the app, its uninstall entry and its app data"
 	},
 
-	async appProcesses(target) {
-		const installDir = path.dirname(target.executable)
-		const found = await ps(
-			"list the install's processes",
-			`Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith(${psQuote(path.join(installDir, path.sep))}, [System.StringComparison]::OrdinalIgnoreCase) } | ForEach-Object { "$($_.ProcessId) $($_.ExecutablePath)" }`
-		)
-
-		return found.split(/\r?\n/).filter(line => line.trim() !== "")
-	},
+	appProcesses: async target => windowsProcessesUnder(path.dirname(target.executable)),
 
 	async forceKill(pids) {
 		for (const pid of pids) {

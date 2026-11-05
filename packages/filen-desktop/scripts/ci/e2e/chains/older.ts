@@ -6,11 +6,13 @@ import type { Page } from "playwright-core"
 import { LEGACY_KEYS } from "../../../../src/main/legacyData.ts"
 import { LEGACY_PIN, OLDER_PIN, type LegacyPin } from "../../legacy.ts"
 import { fail, waitFor } from "../../support.ts"
+import type { Platform } from "../../targets.ts"
 import type { Findings } from "../findings.ts"
 import { LEGACY_PAIRS } from "../fixtures.ts"
 import type { LegacyOldShape, LegacySyncPair } from "../legacyApp.ts"
 import type { DesktopOs } from "../os.ts"
 import { LEGACY_SDK_CONFIG_SHAPE } from "../seed.ts"
+import { pidsOf } from "./common.ts"
 
 // Gap 1 in chain L (scripts/ci/e2e/chains/legacy.ts): what older 3.x clients left behind, and chain L run from one.
 //
@@ -271,15 +273,46 @@ export async function driveImportedOff(overview: () => Promise<DesktopMountsOver
 // L15: nothing of Filen beside its userData after the sign-out and the uninstall (<appData>/@filen/<entry>): neither the
 // old logs nor 3.0.47's network-drive directory (its rclone, rclone.conf with its local WebDAV bridge's credentials and
 // monitor scripts), which N deletes once the migration verified.
-export function leftoversBeside(userData: string): string {
+// `expected`: what the old release leaves there that N does not delete (LegacyPin.besideUserData), named when found.
+export function leftoversBeside(userData: string, expected: readonly string[] = []): string {
 	const dir = path.dirname(userData)
-	const left = existsSync(dir) ? readdirSync(dir).filter(entry => entry !== path.basename(userData)) : []
+	const entries = existsSync(dir) ? readdirSync(dir).filter(entry => entry !== path.basename(userData)) : []
+	const left = entries.filter(entry => !expected.includes(entry))
+	const known = entries.filter(entry => expected.includes(entry))
 
 	if (left.length > 0) {
 		fail(`${dir} also holds ${left.join(", ")}`)
 	}
 
-	return `nothing beside ${path.basename(userData)}`
+	return known.length > 0
+		? `nothing beside ${path.basename(userData)} but what the old release leaves and N keeps: ${known.join(", ")}`
+		: `nothing beside ${path.basename(userData)}`
+}
+
+// After the old release quit on Windows: the rclone its network drive left running from its directory (3.0.47,
+// LegacyPin.winRcloneOutlivesExit) is ended as the old app's next start ends it (by name, at once), so the drive
+// unmounts. Null where the release leaves none; else what was found and ended.
+export async function endOrphanedRclone(
+	pin: LegacyPin,
+	platform: Platform,
+	userData: string,
+	processesUnder: (dir: string) => Promise<string[]>,
+	forceKill: (pids: readonly number[]) => Promise<void>
+): Promise<string | null> {
+	if (platform !== "win" || !pin.winRcloneOutlivesExit) {
+		return null
+	}
+
+	const dir = path.join(path.dirname(userData), "network-drive")
+	const left = await processesUnder(dir)
+
+	if (left.length === 0) {
+		return `nothing of ${dir} ran on`
+	}
+
+	await forceKill(pidsOf(left))
+
+	return `${left.join("; ")}: still running, ended as the old app's next start ends it`
 }
 
 // L6: 3.0.47's network-drive directory (@filen/network-drive 0.9.x's platformConfigPath(), beside userData) is gone.

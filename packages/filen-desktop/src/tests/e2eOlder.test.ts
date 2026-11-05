@@ -11,6 +11,7 @@ import { afterEach, describe, expect, it } from "vitest"
 import {
 	BARE_PAIR,
 	bareImported,
+	endOrphanedRclone,
 	fallbackImported,
 	findingsFor,
 	FUSE_T_PROMPT_ISSUE,
@@ -718,6 +719,54 @@ describe("chain L from 3.0.47", () => {
 		mkdirSync(path.join(appData, "logs"))
 		expect(() => leftoversBeside(userData)).toThrow(/logs/)
 		expect(leftoversBeside(path.join(tempDir(), "missing", "desktop"))).toBe("nothing beside desktop")
+	})
+
+	it("allows only what the old release leaves beside userData and N keeps: 3.0.47's s3 and webdav", () => {
+		const appData = tempDir()
+		const userData = path.join(appData, "desktop")
+
+		mkdirSync(userData)
+		expect(OLDER_PIN.besideUserData).toEqual(["s3", "webdav"])
+		expect(LEGACY_PIN.besideUserData).toEqual([])
+		expect(leftoversBeside(userData, OLDER_PIN.besideUserData)).toBe("nothing beside desktop")
+		mkdirSync(path.join(appData, "s3"))
+		mkdirSync(path.join(appData, "webdav", "tempDiskFiles"), { recursive: true })
+		expect(() => leftoversBeside(userData, LEGACY_PIN.besideUserData)).toThrow(/also holds s3, webdav/)
+		expect(leftoversBeside(userData, OLDER_PIN.besideUserData)).toBe(
+			"nothing beside desktop but what the old release leaves and N keeps: s3, webdav"
+		)
+		mkdirSync(path.join(appData, "network-drive"))
+		expect(() => leftoversBeside(userData, OLDER_PIN.besideUserData)).toThrow(/also holds network-drive$/)
+	})
+
+	it("ends the rclone 3.0.47's drive leaves running on Windows, only there and only for it", async () => {
+		const userData = path.join("C:", "appdata", "@filen", "desktop")
+		const listed: string[] = []
+		const killed: number[][] = []
+		const processesUnder = (running: string[]) => async (dir: string) => {
+			listed.push(dir)
+
+			return running
+		}
+		const forceKill = async (pids: readonly number[]) => {
+			killed.push([...pids])
+		}
+
+		expect(OLDER_PIN.winRcloneOutlivesExit).toBe(true)
+		expect(LEGACY_PIN.winRcloneOutlivesExit).toBe(false)
+		expect(await endOrphanedRclone(OLDER_PIN, "linux", userData, processesUnder(["1 x"]), forceKill)).toBeNull()
+		expect(await endOrphanedRclone(LEGACY_PIN, "win", userData, processesUnder(["1 x"]), forceKill)).toBeNull()
+		expect(listed).toEqual([])
+
+		const rclone = String.raw`4242 C:\appdata\@filen\network-drive\filen_rclone_win32_x64_1.68.2.exe`
+
+		expect(await endOrphanedRclone(OLDER_PIN, "win", userData, processesUnder([rclone]), forceKill)).toBe(
+			`${rclone}: still running, ended as the old app's next start ends it`
+		)
+		expect(listed).toEqual([path.join(path.dirname(userData), "network-drive")])
+		expect(killed).toEqual([[4242]])
+		expect(await endOrphanedRclone(OLDER_PIN, "win", userData, processesUnder([]), forceKill)).toMatch(/ran on$/)
+		expect(killed).toHaveLength(1)
 	})
 })
 

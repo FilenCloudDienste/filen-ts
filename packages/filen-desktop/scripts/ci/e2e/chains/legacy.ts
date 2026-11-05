@@ -58,6 +58,7 @@ import { keptAsFromToast } from "../syncUi.ts"
 import { quietUpdater } from "../legacyHook.ts"
 import { installedBy } from "../olderUpdate.ts"
 import { legacyLogOf, START_TIMEOUT_MS, tail, type UpdateOptions } from "../update.ts"
+import { windowsProcessesUnder } from "../windows.ts"
 import {
 	BIN_DIR,
 	endLeftovers,
@@ -79,6 +80,7 @@ import {
 	BARE_PAIR,
 	bareImported,
 	driveImportedOff,
+	endOrphanedRclone,
 	fallbackImported,
 	findingsFor,
 	legacyNetworkDriveGone,
@@ -498,6 +500,14 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 					`${LEGACY_VERSION}'s processes left after ${release.quit}`,
 					`${lingering.join("; ")}: hard-killed after 30 s without writes (D13); still running a minute after the main process ended`
 				)
+			}
+
+			const orphaned = await endOrphanedRclone(release, target.platform, target.userData, windowsProcessesUnder, pids =>
+				chain.os.forceKill(pids)
+			)
+
+			if (orphaned !== null) {
+				findings.info(`${LEGACY_VERSION}'s rclone after ${release.quit} on Windows (LegacyPin.winRcloneOutlivesExit)`, orphaned)
 			}
 
 			await waitFor("the old drive to unmount", EXIT_TIMEOUT_MS, async () =>
@@ -1416,7 +1426,9 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 			return `${removed}; every pair directory intact`
 		})
 		findings.attach("legacy-userdata-after-uninstall.txt", inventory(path.dirname(target.userData)))
-		await findings.check("L15 after the uninstall nothing of Filen's beside userData", () => leftoversBeside(target.userData))
+		await findings.check("L15 after the uninstall nothing of Filen's beside userData", () =>
+			leftoversBeside(target.userData, release.besideUserData)
+		)
 	}
 
 	// The old app's page and inspector, if a setup step failed while it ran (the harness never leaves it running).
