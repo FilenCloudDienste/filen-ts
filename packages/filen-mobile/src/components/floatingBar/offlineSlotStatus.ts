@@ -19,13 +19,11 @@ export type ConnectionSlotStatus = OfflineStatus | "unverified"
 
 /**
  * What the connection indicator shows for a connectivity status and the certificate-failure state.
- * Offline wins (no request leaves the device); otherwise a rejected certificate replaces both the
- * steady state and the "back-online" confirmation, since the connection is up but not trusted.
+ * A rejected certificate wins over every connectivity status, offline included: the reachability
+ * probe reports offline while Filen's certificate fails (nothing can be sent), but the network works
+ * and "offline" would send the user looking for the wrong fault. The state is cleared whenever the
+ * probe learns the network is really gone.
  */
 export function resolveConnectionSlotStatus(status: OfflineStatus, connectionUnverified: boolean): ConnectionSlotStatus {
-	if (status === "offline" || !connectionUnverified) {
-		return status
-	}
-
-	return "unverified"
+	return connectionUnverified ? "unverified" : status
 }

@@ -21,8 +21,8 @@ describe("offlineSlotStatus — nextOfflineStatus", () => {
 })
 
 describe("offlineSlotStatus — resolveConnectionSlotStatus", () => {
-	it("shows offline over a certificate failure (no request leaves the device)", () => {
-		expect(resolveConnectionSlotStatus("offline", true)).toBe("offline")
+	it("shows a certificate failure over offline (the probe reports offline while the certificate fails)", () => {
+		expect(resolveConnectionSlotStatus("offline", true)).toBe("unverified")
 	})
 
 	it("shows unverified while online with a certificate failure, replacing the back-online confirmation", () => {
