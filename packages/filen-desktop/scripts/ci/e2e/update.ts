@@ -223,8 +223,12 @@ export function legacyLogOf(target: Target): string {
 }
 
 // The update launch of a release without an E2E hook: its updater pointed at `feed`, and what it downloads installed.
-async function hookedUpdateLaunch(feed: string, version: string): Promise<{ args: string[]; started(): Promise<void> }> {
-	const hook = await legacyUpdateHook({ holdSync: false, feed })
+async function hookedUpdateLaunch(
+	feed: string,
+	version: string,
+	relaunchAs: string
+): Promise<{ args: string[]; started(): Promise<void> }> {
+	const hook = await legacyUpdateHook({ holdSync: false, feed, relaunchAs })
 
 	return {
 		args: hook.args,
@@ -232,7 +236,7 @@ async function hookedUpdateLaunch(feed: string, version: string): Promise<{ args
 			const state = await hook.started()
 
 			console.log(
-				`${version}'s updater hooked: feed ${String(state.feed)}, install on download ${String(state.updater)}, worker threads without the inspector ${String(state.threads)}`
+				`${version}'s updater hooked: feed ${String(state.feed)}, install on download ${String(state.updater)}, worker threads without the inspector ${String(state.threads)}, relaunch without it ${String(state.relaunch)}`
 			)
 		}
 	}
@@ -459,7 +463,7 @@ export async function runUpdate({
 		// A release without an E2E hook gets one from outside when no chain hooks its launch (the chain does it itself).
 		const updateLaunch =
 			(await hooks?.updateLaunch?.(feed.url)) ??
-			(pin !== null && !pin.hasE2eHook ? await hookedUpdateLaunch(feed.url, fromVersion) : undefined)
+			(pin !== null && !pin.hasE2eHook ? await hookedUpdateLaunch(feed.url, fromVersion, from.executable) : undefined)
 
 		const legacyLog = legacyLogOf(target)
 		const legacyMark = legacy && existsSync(legacyLog) ? statSync(legacyLog).size : 0

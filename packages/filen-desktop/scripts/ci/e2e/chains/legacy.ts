@@ -539,7 +539,7 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 
 	const updateLaunch = async (feed: string) => {
 		// A release without an E2E hook gets the feed and the install from the same hook.
-		const hold = await legacySyncHold(release.hasE2eHook ? null : feed)
+		const hold = await legacySyncHold(installed.executable, release.hasE2eHook ? null : feed)
 
 		return {
 			args: hold.args,

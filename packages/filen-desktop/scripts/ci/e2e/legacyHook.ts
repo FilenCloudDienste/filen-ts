@@ -7,6 +7,10 @@ import { connectCdp, listTargets, type Cdp } from "./cdp/inspector.ts"
 //   frees its    start its worker threads without the inspector flags: a worker inherits --inspect-brk and waits for a
 //   workers      debugger forever, so the old main process never sees its worker start (3.0.47 starts its updater only
 //                after that)
+//   relaunches   app.relaunch() without options (electron-updater's deb and rpm install relaunches that way) relaunches
+//   as started   the command line the app was started with, which holds --inspect-brk; the hook relaunches the
+//                executable the harness started (`relaunchAs`) with the app's own arguments less the inspector flags,
+//                as a user's app would be relaunched
 //
 // and can:
 //
@@ -26,11 +30,16 @@ export interface HookOptions {
 	holdSync: boolean
 	// The loopback feed the updater is pointed at; null leaves it alone (the client's own E2E hook does that).
 	feed: string | null
+	// The executable the app was started as (Linux deb and rpm: the old release's own name), which a relaunch runs.
+	relaunchAs: string
 }
 
 export interface HookState {
 	// worker_threads' Worker drops the inspector flags.
 	threads: boolean
+	// electron's app.relaunch is wrapped, and the command line a relaunch ran (null before one).
+	relaunch: boolean
+	relaunched: string[] | null
 	// The worker's invoke is wrapped, and the calls it dropped.
 	held: boolean
 	dropped: string[]
@@ -43,12 +52,13 @@ export interface HookState {
 }
 
 // The hook as one expression, evaluated on the first paused frame. Self-contained: the feed crosses as a JSON literal.
-export function hookScript({ holdSync, feed }: HookOptions): string {
+export function hookScript({ holdSync, feed, relaunchAs }: HookOptions): string {
 	return `(() => {
 	const Module = process.getBuiltinModule("module")
-	const state = (globalThis.__e2eHook = { threads: false, held: false, dropped: [], feed: false, updater: false, installs: 0, error: null })
+	const state = (globalThis.__e2eHook = { threads: false, relaunch: false, relaunched: null, held: false, dropped: [], feed: false, updater: false, installs: 0, error: null })
 	const holdSync = ${JSON.stringify(holdSync)}
 	const feed = ${JSON.stringify(feed)}
+	const relaunchAs = ${JSON.stringify(relaunchAs)}
 	let autoUpdater = null
 	const load = Module._load
 	Module._load = function (...args) {
@@ -62,6 +72,20 @@ export function hookScript({ holdSync, feed }: HookOptions): string {
 				}
 			}
 			state.threads = true
+		}
+		const app = !state.relaunch && args[0] === "electron" && exported ? exported.app : undefined
+		if (app && typeof app.relaunch === "function") {
+			const relaunch = app.relaunch
+			app.relaunch = function (options) {
+				if (options !== undefined) {
+					return relaunch.call(this, options)
+				}
+				const rest = (process.argv || []).slice(1).filter(arg => !arg.startsWith("--inspect"))
+				state.relaunched = [relaunchAs, ...rest]
+				console.log("e2e hook: app.relaunch() as " + JSON.stringify(state.relaunched))
+				return relaunch.call(this, { execPath: relaunchAs, args: rest })
+			}
+			state.relaunch = true
 		}
 		const Worker = exported && exported.Worker
 		if (holdSync && !state.held && typeof Worker === "function" && Worker.prototype && typeof Worker.prototype.invoke === "function") {
@@ -107,8 +131,8 @@ export function hookScript({ holdSync, feed }: HookOptions): string {
 }
 
 // Whether the hook did what it was asked to, by the time the app's modules are loaded.
-export function hookReady(state: HookState | null, options: HookOptions): boolean {
-	return state !== null && (!options.holdSync || state.held) && (options.feed === null || (state.feed && state.updater))
+export function hookReady(state: HookState | null, options: Pick<HookOptions, "holdSync" | "feed">): boolean {
+	return state !== null && state.relaunch && (!options.holdSync || state.held) && (options.feed === null || (state.feed && state.updater))
 }
 
 // The old main process's inspector on `port`, once it answers.

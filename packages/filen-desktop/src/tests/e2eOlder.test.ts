@@ -28,7 +28,7 @@ import { createFindings } from "../../scripts/ci/e2e/findings.ts"
 import { LEGACY_PAIRS } from "../../scripts/ci/e2e/fixtures.ts"
 import { configureLegacy, type LegacySyncPair, quitExpression, requireLegacyPrefs } from "../../scripts/ci/e2e/legacyApp.ts"
 import { hookReady, hookScript, type HookState } from "../../scripts/ci/e2e/legacyHook.ts"
-import { installedBy, legacyLinkProblems, promptShim, updateEnvFor } from "../../scripts/ci/e2e/olderUpdate.ts"
+import { execFnAddress, installedBy, legacyLinkProblems, promptShim, updateEnvFor } from "../../scripts/ci/e2e/olderUpdate.ts"
 import { describeStored, LEGACY_SDK_CONFIG_SHAPE, legacySeed } from "../../scripts/ci/e2e/seed.ts"
 import { authVersionCheck, LEGACY_PIN, LEGACY_SHA512, OLDER_PIN, pinFor } from "../../scripts/ci/legacy.ts"
 import { MAX_LOGINS_PER_RUN, plan, type PlanInput } from "../../scripts/ci/e2ePlan.ts"
@@ -202,7 +202,14 @@ describe("3.0.47 update launch hook", () => {
 				this.options = options
 			}
 		}
+		const relaunches: unknown[] = []
+		const app = {
+			relaunch(options?: unknown) {
+				relaunches.push(options)
+			}
+		}
 		const modules: Record<string, unknown> = {
+			electron: { app },
 			worker_threads: { Worker: Thread },
 			"electron-updater": { autoUpdater },
 			"./lib/updater": { Updater, default: Updater },
@@ -211,14 +218,21 @@ describe("3.0.47 update launch hook", () => {
 		const Module = { _load: (request: string) => modules[request] }
 		const timers: (() => void)[] = []
 		const context = {
-			process: { getBuiltinModule: () => Module, execArgv: ["--inspect-brk=127.0.0.1:9229", "--max-old-space-size=4096"] },
+			process: {
+				getBuiltinModule: () => Module,
+				argv: ["/opt/Filen/Filen", "--inspect-brk=127.0.0.1:9229", "--hidden"],
+				execArgv: ["--inspect-brk=127.0.0.1:9229", "--max-old-space-size=4096"]
+			},
+			console: { log: () => undefined },
 			setTimeout: (run: () => void) => timers.push(run),
 			Promise
-		} as { process: unknown; setTimeout: unknown; Promise: unknown; __e2eHook?: HookState }
+		} as { process: unknown; console: unknown; setTimeout: unknown; Promise: unknown; __e2eHook?: HookState }
 
-		expect(runInNewContext(hookScript({ holdSync, feed }), context)).toBe("hooked")
+		expect(runInNewContext(hookScript({ holdSync, feed, relaunchAs: "/opt/Filen/@filendesktop" }), context)).toBe("hooked")
+		// The app requires electron before anything else.
+		Module._load("electron")
 
-		return { Module, autoUpdater, installs, timers, context }
+		return { Module, app, relaunches, autoUpdater, installs, timers, context }
 	}
 
 	it("points electron-updater at the feed when it loads and installs what it downloads through the app's own installUpdate, once", async () => {
@@ -260,6 +274,34 @@ describe("3.0.47 update launch hook", () => {
 		expect(new Worker("worker.js", { execArgv: [] }).options).toEqual({ execArgv: [] })
 		expect(Module._load("worker_threads")).toMatchObject({ Worker })
 		expect(context.__e2eHook?.threads).toBe(true)
+	})
+
+	it("relaunches the executable it was started as, with its own arguments less the inspector flags", () => {
+		const { Module, app, relaunches, context } = loaded(false, null)
+
+		expect(hookReady(context.__e2eHook ?? null, { holdSync: false, feed: null })).toBe(true)
+		Module._load("electron")
+		app.relaunch()
+		app.relaunch({ args: ["--other"] })
+		expect(relaunches).toEqual([{ execPath: "/opt/Filen/@filendesktop", args: ["--hidden"] }, { args: ["--other"] }])
+		expect(context.__e2eHook?.relaunched).toEqual(["/opt/Filen/@filendesktop", "--hidden"])
+	})
+
+	it("is not ready before electron's app.relaunch is wrapped", () => {
+		const state = {
+			threads: false,
+			relaunch: false,
+			relaunched: null,
+			held: true,
+			dropped: [],
+			feed: true,
+			updater: true,
+			installs: 0,
+			error: null
+		}
+
+		expect(hookReady(state, { holdSync: true, feed: "x" })).toBe(false)
+		expect(hookReady({ ...state, relaunch: true }, { holdSync: true, feed: "x" })).toBe(true)
 	})
 
 	it("holds sync without touching the updater when the client has its own E2E hook", async () => {
@@ -360,6 +402,22 @@ describe("3.0.47 on Linux", () => {
 			])
 		}
 	)
+	it("finds AT_EXECFN in an auxiliary vector, null without one or past AT_NULL", () => {
+		const auxv = (...pairs: [bigint, bigint][]) => {
+			const buffer = Buffer.alloc(pairs.length * 16)
+
+			pairs.forEach(([type, value], index) => {
+				buffer.writeBigUInt64LE(type, index * 16)
+				buffer.writeBigUInt64LE(value, index * 16 + 8)
+			})
+
+			return buffer
+		}
+
+		expect(execFnAddress(auxv([33n, 0x7ffd1000n], [6n, 4096n], [31n, 0x7ffdeff0n], [0n, 0n]))).toBe(0x7ffdeff0n)
+		expect(execFnAddress(auxv([6n, 4096n], [0n, 0n], [31n, 1n]))).toBeNull()
+		expect(execFnAddress(Buffer.alloc(0))).toBeNull()
+	})
 })
 
 describe("3.x quit", () => {

@@ -253,15 +253,16 @@ export async function quitLegacy(launched: Launched, timeoutMs: number, how: Leg
 // worker, but the download and the install race the first sync cycle, which would carry the closed-app edits before
 // 4.x sees them. Before any of its code runs (--inspect-brk), a module-load hook wraps its worker's invoke so that sync
 // starts and sync updates are dropped; the updater itself is untouched. With `feed` (a client without an E2E hook), the
-// same hook points its updater at that loopback feed and installs what it downloads.
+// same hook points its updater at that loopback feed and installs what it downloads. `relaunchAs`: the executable the
+// harness starts it as (legacyHook.ts).
 export interface SyncHold {
 	args: string[]
 	// Installs the hold, lets the app run and waits until its worker is wrapped; the dropped calls so far.
 	started(): Promise<string[]>
 }
 
-export async function legacySyncHold(feed: string | null = null): Promise<SyncHold> {
-	const hook = await legacyUpdateHook({ holdSync: true, feed })
+export async function legacySyncHold(relaunchAs: string, feed: string | null = null): Promise<SyncHold> {
+	const hook = await legacyUpdateHook({ holdSync: true, feed, relaunchAs })
 
 	return { args: hook.args, started: async () => (await hook.started()).dropped }
 }

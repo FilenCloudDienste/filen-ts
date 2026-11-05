@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs"
+import { chmodSync, existsSync, lstatSync, mkdirSync, realpathSync, writeFileSync } from "node:fs"
 import path from "node:path"
 import type { LegacyPin } from "../legacy.ts"
 import { fail, runBounded } from "../support.ts"
@@ -84,13 +84,55 @@ export function updateEnvFor(target: Target, pin: LegacyPin, env: NodeJS.Process
 	return { ...env, PATH: [shim, env["PATH"] ?? ""].filter(item => item !== "").join(path.delimiter) }
 }
 
-// The first argument of a process's command line (what it was started as), null when unreadable.
-export function argv0(pid: number): string | null {
-	try {
-		return readFileSync(`/proc/${String(pid)}/cmdline`, "utf8").split("\0")[0] ?? null
-	} catch {
+// AT_EXECFN in an auxiliary vector (/proc/<pid>/auxv, 64-bit little-endian pairs): the address of the path the process
+// was exec'd through, null without one.
+export function execFnAddress(auxv: Buffer): bigint | null {
+	for (let at = 0; at + 16 <= auxv.length; at += 16) {
+		const type = auxv.readBigUInt64LE(at)
+
+		if (type === 0n) {
+			return null
+		}
+
+		if (type === AT_EXECFN) {
+			return auxv.readBigUInt64LE(at + 8)
+		}
+	}
+
+	return null
+}
+
+const AT_EXECFN = 31n
+
+// Bytes a root read of `file` returned (from `offset`, at most `count`), whatever its exit: a read of the process's
+// memory ends with an error where its stack does.
+async function rootRead(file: string, offset?: bigint, count?: number): Promise<Buffer> {
+	const command =
+		offset === undefined
+			? ["cat", file]
+			: ["dd", `if=${file}`, "bs=1", `skip=${String(offset)}`, `count=${String(count)}`, "status=none"]
+	const chunks: Buffer[] = []
+	const [tool, args] = process.getuid?.() === 0 ? [command[0] ?? "", command.slice(1)] : ["sudo", ["--non-interactive", ...command]]
+
+	await runBounded(tool, args, TOOL_TIMEOUT_MS, { onStdout: chunk => chunks.push(chunk) })
+
+	return Buffer.concat(chunks)
+}
+
+// The path a process was exec'd through (its AT_EXECFN string), null when unreadable. Its command line cannot say:
+// Chromium retitles every process as its resolved executable plus its arguments, so a process started through a link
+// reads as the link's target there. Read as root: the relaunched app is no descendant of the harness (Yama).
+export async function execFn(pid: number): Promise<string | null> {
+	const address = execFnAddress(await rootRead(`/proc/${String(pid)}/auxv`))
+
+	if (address === null) {
 		return null
 	}
+
+	const read = (await rootRead(`/proc/${String(pid)}/mem`, address, 4096)).toString("utf8")
+	const end = read.indexOf("\0")
+
+	return end > 0 ? read.slice(0, end) : null
 }
 
 // What the links that may name the old executable resolve to: the old path itself, and the update-alternatives entry
@@ -132,18 +174,21 @@ export function legacyLinkProblems(oldExecutable: string, executable: string, ro
 	return { problems, seen }
 }
 
-// B4 after the update from a release whose Linux executable had another name: N came back through the old path (its
-// updater relaunches the argv it was started with), that path is 4.x's link to its executable, and no alternative the
-// old package registered dangles.
+// B4 after the update from a release whose Linux executable had another name: N came back through the old path, as its
+// AT_EXECFN shows (its updater relaunches the argv it was started with; a hooked launch the same less the inspector
+// flag, legacyHook.ts), that path is 4.x's link to its executable, and no alternative the old package registered
+// dangles.
 export async function verifyLegacyLink(target: Target, pin: LegacyPin, relaunched: readonly number[]): Promise<string> {
 	if (!linuxPackaged(target) || pin.linuxExecutable === target.executable) {
 		return "nothing to check: the old release's executable has N's name here"
 	}
 
-	const started = relaunched.map(pid => argv0(pid))
+	const started = await Promise.all(relaunched.map(pid => execFn(pid)))
 
 	if (!started.includes(pin.linuxExecutable)) {
-		fail(`N's main process was started as ${started.join(", ") || "nothing readable"}, not through ${pin.linuxExecutable}`)
+		fail(
+			`N's main process was exec'd through ${started.map(file => file ?? "(unreadable)").join(", ") || "nothing"}, not through ${pin.linuxExecutable}`
+		)
 	}
 
 	const { problems, seen } = legacyLinkProblems(pin.linuxExecutable, target.executable)
