@@ -25,13 +25,16 @@ import {
 } from "../app.ts"
 import { connectRenderer, type Renderer } from "../cdp/renderer.ts"
 import {
+	emptyFillActivity,
 	LEGACY_CONFLICTS,
 	LEGACY_DELTAS,
 	LEGACY_EDITS,
 	LEGACY_LOCAL_TRASH,
+	legacyEmptyFills,
 	legacyLocalTree,
 	LEGACY_PAIRS,
 	legacySideTree,
+	type LegacyDelta,
 	type LegacyPairFixture,
 	treeSnapshot,
 	writeTree
@@ -188,6 +191,9 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 		local: { ...LEGACY_EDITS.local, sha256: sha256(LEGACY_EDITS.local.bytes) },
 		cloud: { ...LEGACY_EDITS.cloud, sha256: sha256(LEGACY_EDITS.cloud.bytes) }
 	}
+	// The empty files the old client leaves out (none from 3.0.53), which N fills in, and every change N may make.
+	const fills = legacyEmptyFills(release.syncsEmptyFiles)
+	const deltas = [...LEGACY_DELTAS, ...fills]
 	const marker = () => readJson(userData("migration.json")) as MigrationMarker | null
 	// The old client's logs, beside userData.
 	const legacyLogs = path.dirname(legacyLogOf(target))
@@ -322,6 +328,13 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 			return `wrote ${keys.join(", ")}`
 		})
 
+		if (fills.length > 0) {
+			findings.info(
+				`${LEGACY_VERSION} leaves 0-byte files out`,
+				`its @filen/sync skips them in both trees (reason "empty"), so it converges without ${fills.map(fill => `${fill.pair} ${fill.side} ${fill.path}`).join(", ")}; N must carry each (L10)`
+			)
+		}
+
 		await findings.must(`${LEGACY_VERSION} converged: every pair quiet twice, both sides as expected`, async () => {
 			const pairs = state.pairs ?? fail("no pairs")
 
@@ -339,9 +352,13 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 
 						for (const pair of LEGACY_PAIRS) {
 							differences.push(
-								...diffSnapshots(treeSnapshot(legacyLocalTree(pair)), await snapshotOf(pair.name), {
-									identity: false
-								}).map(line => `${pair.name} local: ${line}`)
+								...diffSnapshots(
+									treeSnapshot(legacyLocalTree(pair, release.syncsEmptyFiles)),
+									await snapshotOf(pair.name),
+									{
+										identity: false
+									}
+								).map(line => `${pair.name} local: ${line}`)
 							)
 
 							const remoteSide = await cloudSnapshot(cloud, `${cloudDir}/${pair.name}`, work)
@@ -349,9 +366,9 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 							differences.push(
 								...(remoteSide === null
 									? [`${pair.name} cloud: no directory`]
-									: diffSnapshots(treeSnapshot(legacySideTree(pair, "cloud")), remoteSide, { identity: false }).map(
-											line => `${pair.name} cloud: ${line}`
-										))
+									: diffSnapshots(treeSnapshot(legacySideTree(pair, "cloud", release.syncsEmptyFiles)), remoteSide, {
+											identity: false
+										}).map(line => `${pair.name} cloud: ${line}`))
 							)
 						}
 
@@ -527,17 +544,36 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 		}
 	}
 
+	// A left-out empty file N filled in: there, 0 bytes. `relPath` is its path in `now`.
+	const fillProblem = (fill: LegacyDelta, now: Snapshot, relPath: string): string | null => {
+		const node = now.get(relPath)
+
+		return node?.kind === "file" && node.size === 0
+			? null
+			: `${fill.side} ${fill.pair}/${fill.path}: ${node === undefined ? "missing" : `a ${node.kind} of ${String(node.size)} bytes`}`
+	}
+
 	// The expected-delta table checked against what is there now: a rule file holds the dot-file rules (and in the cloud,
 	// the bytes of its local copy), an edit the edit's bytes. `now` is one pair's tree (`pair`), or with `pair` null the
 	// chain's whole cloud directory.
 	const checkDeltas = (side: "local" | "cloud", now: Snapshot, pair: string | null): string[] => {
 		const problems: string[] = []
 
-		for (const delta of LEGACY_DELTAS.filter(item => item.side === side && (pair === null || item.pair === pair))) {
+		for (const delta of deltas.filter(item => item.side === side && (pair === null || item.pair === pair))) {
 			const node = now.get(pair === null ? `${delta.pair}/${delta.path}` : delta.path)
 			const edit = edits.local.pair === delta.pair && edits.local.path === delta.path ? edits.local : edits.cloud
 
-			if (delta.change === "binned") {
+			if (delta.change === "filled") {
+				// A pair held in review has not run on N yet; its fill is checked once it started (L16).
+				const problem =
+					holds.hold(delta.pair) === null
+						? fillProblem(delta, now, pair === null ? `${delta.pair}/${delta.path}` : delta.path)
+						: null
+
+				if (problem !== null) {
+					problems.push(problem)
+				}
+			} else if (delta.change === "binned") {
 				if (node !== undefined) {
 					problems.push(`${side} ${delta.pair}/${delta.path}: still in the root`)
 				}
@@ -689,9 +725,7 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 				const problems: string[] = []
 
 				for (const pair of LEGACY_PAIRS) {
-					const allowed = LEGACY_DELTAS.filter(delta => delta.pair === pair.name && delta.side === "local").map(
-						delta => delta.path
-					)
+					const allowed = deltas.filter(delta => delta.pair === pair.name && delta.side === "local").map(delta => delta.path)
 					const now = await snapshotOf(pair.name)
 
 					problems.push(
@@ -706,7 +740,7 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 
 				state.afterCloud = now
 
-				const allowed = LEGACY_DELTAS.filter(delta => delta.side === "cloud").map(delta => `${delta.pair}/${delta.path}`)
+				const allowed = deltas.filter(delta => delta.side === "cloud").map(delta => `${delta.pair}/${delta.path}`)
 
 				problems.push(
 					...diffSnapshots(state.cloud ?? new Map(), now, { identity: true, allowed }).map(line => `cloud ${line}`),
@@ -1092,7 +1126,8 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 				...LEGACY_DELTAS.filter(delta => delta.change === "binned").map(delta => `${delta.pair}:binned:${delta.path}`),
 				...LEGACY_DELTAS.filter(delta => delta.side === "cloud" && delta.change === "rules").map(
 					delta => `${delta.pair}:uploaded:.filenignore`
-				)
+				),
+				...fills.map(emptyFillActivity)
 			])
 
 			await findings.check("L10 N's activity and plans carry nothing but the edits and the expected conflicts", () =>
@@ -1102,7 +1137,7 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 					conflictCounts
 				)
 			)
-			await findings.check("L10 a pair held in review plans exactly its held deletions", () => holds.heldPlans(pairIds))
+			await findings.check("L10 a pair held in review plans exactly its held deletions", () => holds.heldPlans(pairIds, fills))
 
 			await findings.check("L10 exactly the expected conflicts are held, both sides kept", async () => {
 				const problems: string[] = []
@@ -1131,6 +1166,37 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 			})
 
 			await holds.run(pairIds)
+
+			// Where a pair waited in review (L16), N's first pass on it ran only now.
+			if (fills.length > 0) {
+				await findings.check(`L10 N carries the 0-byte files ${LEGACY_VERSION} left out, every pair`, async () => {
+					let problems: string[] = []
+
+					return waitFor(
+						"every left-out empty file on its other side",
+						SETUP_TIMEOUT_MS,
+						async () => {
+							const remote = (await cloudSnapshot(cloud, cloudDir, work)) ?? new Map()
+
+							problems = []
+
+							for (const fill of fills) {
+								const problem =
+									fill.side === "cloud"
+										? fillProblem(fill, remote, `${fill.pair}/${fill.path}`)
+										: fillProblem(fill, await snapshotOf(fill.pair), fill.path)
+
+								if (problem !== null) {
+									problems.push(problem)
+								}
+							}
+
+							return problems.length === 0 ? fills.map(fill => `${fill.pair} ${fill.side} ${fill.path}`).join(", ") : null
+						},
+						15_000
+					).catch((error: unknown) => fail(`${errorMessage(error)}; ${problems.join("; ")}`))
+				})
+			}
 
 			await findings.must("N quits on SIGTERM and starts a third time", async () => {
 				await quitN("N")
@@ -1250,7 +1316,12 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 				keptCopy === null
 					? "steady state: the third launch transfers nothing; the conflicts still held"
 					: "steady state: after the resolution nothing else transfers and no conflict is held",
-				() => chain.quietActivity(pairIds, new Set([...conflictActivity, ...resolution]), keptCopy === null ? conflictCounts : {})
+				() =>
+					chain.quietActivity(
+						pairIds,
+						new Set([...conflictActivity, ...resolution, ...fills.map(emptyFillActivity)]),
+						keptCopy === null ? conflictCounts : {}
+					)
 			)
 
 			await liveEditUploads(chain, {

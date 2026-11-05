@@ -268,6 +268,31 @@ describe("L16 and L17 first-run table", () => {
 		expect(heldPlanProblem({ ...summary, refused: "remoteCollision" as const }, actions, want)).not.toBeNull()
 	})
 
+	it("L10 takes a held pair's 0-byte transfer of an empty file the old client left out, and nothing else besides", () => {
+		const want = { heldDeletions: 1, heldReason: "firstSyncWithDeletions" as const }
+		const summary = {
+			actions: 2,
+			uploadBytes: 0,
+			downloadBytes: 0,
+			heldDeletions: 1,
+			heldReason: "firstSyncWithDeletions" as const,
+			conflicts: 0,
+			unsyncable: 0,
+			ignored: 0,
+			refused: null
+		}
+		const adopt = { relPath: "a.txt", kind: "adoptBaseline" as const, to: null, node: "file" as const, size: 3 }
+		const upload = { relPath: "docs/empty.txt", kind: "upload" as const, to: null, node: "file" as const, size: 0 }
+		const fills = ["docs/empty.txt"]
+
+		expect(heldPlanProblem(summary, [adopt, upload], want, fills)).toBeNull()
+		expect(heldPlanProblem(summary, [adopt, { ...upload, kind: "download" as const }], want, fills)).toBeNull()
+		expect(heldPlanProblem(summary, [adopt, upload], want)).toContain("upload docs/empty.txt")
+		expect(heldPlanProblem(summary, [adopt, { ...upload, size: 1 }], want, fills)).not.toBeNull()
+		expect(heldPlanProblem(summary, [adopt, { ...upload, relPath: "docs/notes.txt" }], want, fills)).not.toBeNull()
+		expect(heldPlanProblem(summary, [adopt, { ...upload, kind: "trashRemote" as const }], want, fills)).not.toBeNull()
+	})
+
 	it("compares a pair's review, phase and pause with the table", () => {
 		const want = LEGACY_FIRST_RUN[CLOSED_UPLOAD.pair] ?? null
 		const summary = {

@@ -7,10 +7,13 @@ import type { DesktopSyncPair, DesktopSyncPhase } from "@filen/shared/desktop"
 import type { Page } from "playwright-core"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import {
+	EMPTY_FILE,
+	emptyFillActivity,
 	fixtureTree,
 	LEGACY_CONFLICTS,
 	LEGACY_DELTAS,
 	LEGACY_LOCAL_TRASH,
+	legacyEmptyFills,
 	legacyLocalTree,
 	LEGACY_PAIRS,
 	legacySideTree,
@@ -537,6 +540,40 @@ describe("chain L fixtures", () => {
 		expect(twoWay && legacySideTree(twoWay, "local").files.has(".hidden.txt")).toBe(true)
 		expect(twoWay && legacySideTree(twoWay, "cloud").files.has(".hidden.txt")).toBe(false)
 		expect(l2c && legacySideTree(l2c, "cloud").files.has(".hidden.txt")).toBe(true)
+	})
+
+	it("expects the empty file missing on the unseeded side only from a client that leaves 0-byte files out", () => {
+		for (const pair of LEGACY_PAIRS) {
+			const other = pair.seed === "local" ? "cloud" : "local"
+
+			expect(fixtureTree("x", false).files.get(EMPTY_FILE)?.length).toBe(0)
+			expect(legacySideTree(pair, pair.seed, false).files.has(EMPTY_FILE)).toBe(true)
+			expect(legacySideTree(pair, other, false).files.has(EMPTY_FILE)).toBe(false)
+			expect(legacySideTree(pair, other).files.has(EMPTY_FILE)).toBe(true)
+			expect(legacyLocalTree(pair, false).files.has(EMPTY_FILE)).toBe(pair.seed === "local")
+			// Nothing else differs.
+			expect([...legacySideTree(pair, other, false).files.keys(), EMPTY_FILE].sort()).toEqual(
+				[...legacySideTree(pair, other).files.keys()].sort()
+			)
+		}
+	})
+
+	it("has N fill in each pair's empty file on its unseeded side, by an upload or a download, only where the client left it out", () => {
+		expect(legacyEmptyFills(true)).toEqual([])
+		expect(legacyEmptyFills(false).map(fill => `${fill.side} ${fill.pair}/${fill.path} ${fill.change}`)).toEqual([
+			"cloud e2e-twoway/docs/empty.txt filled",
+			"cloud e2e-l2c/docs/empty.txt filled",
+			"local e2e-c2l/docs/empty.txt filled",
+			"cloud e2e-lbak/docs/empty.txt filled",
+			"local e2e-cbak/docs/empty.txt filled"
+		])
+		expect(legacyEmptyFills(false).map(emptyFillActivity)).toEqual([
+			"e2e-twoway:uploaded:docs/empty.txt",
+			"e2e-l2c:uploaded:docs/empty.txt",
+			"e2e-c2l:downloaded:docs/empty.txt",
+			"e2e-lbak:uploaded:docs/empty.txt",
+			"e2e-cbak:downloaded:docs/empty.txt"
+		])
 	})
 
 	it("expects 3.x's local trash directory, empty, in the pairs it filled by downloads, whatever their trash switch", () => {

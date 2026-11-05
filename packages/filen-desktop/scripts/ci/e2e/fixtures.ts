@@ -31,13 +31,16 @@ export function seededBytes(seed: string, size: number): Buffer {
 	return Buffer.concat(blocks).subarray(0, size)
 }
 
+// The fixture's 0-byte file.
+export const EMPTY_FILE = "docs/empty.txt"
+
 // The shape every pair syncs: a nested file, an empty file, one of more than one chunk, unicode and space names and an
 // empty directory. `dotEntries` adds a hidden file and directory, which an excludeDotFiles pair keeps on its seeded side.
 export function fixtureTree(seed: string, dotEntries: boolean): Tree {
 	const text = (name: string) => Buffer.from(`${seed} ${name}\n${seededBytes(`${seed}/${name}`, 96).toString("hex")}\n`)
 	const files = new Map<string, Buffer>([
 		["docs/notes.txt", text("notes")],
-		["docs/empty.txt", Buffer.alloc(0)],
+		[EMPTY_FILE, Buffer.alloc(0)],
 		["media/blob.bin", seededBytes(`${seed}/blob`, 1.5 * MIB)],
 		["nested/a/b/c.txt", text("c")],
 		["Ünïcødé ✓ name.txt".normalize("NFC"), text("unicode")],
@@ -133,9 +136,16 @@ export const LEGACY_PAIRS: readonly LegacyPairFixture[] = [
 ]
 
 // What each side of a pair holds once the old client converged: the seeded side the whole tree, the other side the
-// tree without dot entries when they are excluded.
-export function legacySideTree(pair: LegacyPairFixture, side: "local" | "cloud"): Tree {
-	return fixtureTree(`legacy/${pair.name}`, pair.seed === side || !pair.excludeDotFiles)
+// tree without dot entries when they are excluded, and without the empty file where the old client leaves 0-byte files
+// out (LegacyPin.syncsEmptyFiles).
+export function legacySideTree(pair: LegacyPairFixture, side: "local" | "cloud", syncsEmptyFiles = true): Tree {
+	const tree = fixtureTree(`legacy/${pair.name}`, pair.seed === side || !pair.excludeDotFiles)
+
+	if (!syncsEmptyFiles && pair.seed !== side) {
+		tree.files.delete(EMPTY_FILE)
+	}
+
+	return tree
 }
 
 // The old client's local trash directory in a pair root.
@@ -145,8 +155,8 @@ export const LEGACY_LOCAL_TRASH = ".filen.trash.local"
 // by downloads its local trash directory, empty. filen-sync 0.3.7 writes every download to
 // <root>/.filen.trash.local/<uuid> and moves it into place, whatever localTrashDisabled says; deletions would add to it
 // with local trash on, and the fixtures make none.
-export function legacyLocalTree(pair: LegacyPairFixture): Tree {
-	const tree = legacySideTree(pair, "local")
+export function legacyLocalTree(pair: LegacyPairFixture, syncsEmptyFiles = true): Tree {
+	const tree = legacySideTree(pair, "local", syncsEmptyFiles)
 
 	return pair.seed === "cloud" ? { files: tree.files, emptyDirs: [...tree.emptyDirs, LEGACY_LOCAL_TRASH] } : tree
 }
@@ -164,7 +174,8 @@ export interface LegacyDelta {
 	// `rules`: the root .filenignore the migration writes for an excludeDotFiles pair (holding the dot-file rules), and
 	// for a pair that pushes, its upload. `edit`: a closed-app edit arriving on the other side. `binned`: the old local
 	// trash, which the engine's first pass moves into the pair's bin (gone from the root, with everything in it).
-	change: "rules" | "edit" | "binned"
+	// `filled`: the empty file an old client that leaves 0-byte files out never brought over, which N carries.
+	change: "rules" | "edit" | "binned" | "filled"
 }
 
 // Everything N may change against the old client's converged state plus the two edits; anything else differing fails.
@@ -188,6 +199,24 @@ export const LEGACY_DELTAS: readonly LegacyDelta[] = [
 		change: "binned"
 	}))
 ]
+
+// The empty file per pair on the side an old client that leaves 0-byte files out (LegacyPin.syncsEmptyFiles) never
+// filled: N's first passes put it there (a held pair's once it starts), every mode carrying it to its other side.
+export function legacyEmptyFills(syncsEmptyFiles: boolean): LegacyDelta[] {
+	return syncsEmptyFiles
+		? []
+		: LEGACY_PAIRS.map(pair => ({
+				pair: pair.name,
+				side: pair.seed === "local" ? "cloud" : "local",
+				path: EMPTY_FILE,
+				change: "filled"
+			}))
+}
+
+// How N's activity names the transfer that fills it in.
+export function emptyFillActivity(fill: LegacyDelta): string {
+	return `${fill.pair}:${fill.side === "cloud" ? "uploaded" : "downloaded"}:${fill.path}`
+}
 
 // The closed-app edit in the two-way pair is a conflict for N, which imports none of the old client's sync history:
 // both sides hold the path and they differ. The engine holds it for the user (no copy is made until it is resolved),

@@ -24,6 +24,8 @@ import { LEGACY_SDK_CONFIG_SHAPE } from "../seed.ts"
 // profile wipe test N alone, which chain L does from 3.0.53, and are recorded as not run. 3.0.47's web (0.1.87) turns
 // the network drive off when it fails to start, so where it cannot mount N must import it off. On macOS its start waits
 // on FUSE-T's administrator prompt instead, a known 3.0.47 limitation (FUSE_T_PROMPT_ISSUE): the drive stays on.
+// Its @filen/sync (0.1.101) leaves 0-byte files out (LegacyPin.syncsEmptyFiles): it converges without each pair's empty
+// file on the unseeded side, and N must carry it there (L10, a held pair's once L16 starts it).
 
 // The fixture pair stored without its two switches: both are off in its fixture, so every other expectation holds.
 export const BARE_PAIR = "e2e-lbak"

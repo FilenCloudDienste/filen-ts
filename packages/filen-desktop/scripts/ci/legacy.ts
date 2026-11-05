@@ -44,6 +44,9 @@ export interface LegacyPin {
 	authVersions: readonly number[]
 	// Its Linux updater finds root through gksudo, kdesudo, pkexec or beesu only (no sudo fallback).
 	linuxNeedsPrompt: boolean
+	// Its sync carries 0-byte files. @filen/sync before 0.3.1 (3.0.47 ships 0.1.101) leaves them out of both trees
+	// (ignored, reason "empty"), so they stay on the side they were made on.
+	syncsEmptyFiles: boolean
 }
 
 export const LEGACY_PIN: LegacyPin = {
@@ -54,7 +57,8 @@ export const LEGACY_PIN: LegacyPin = {
 	hasE2eHook: true,
 	linuxExecutable: "/opt/Filen/Filen",
 	authVersions: [1, 2, 3],
-	linuxNeedsPrompt: false
+	linuxNeedsPrompt: false,
+	syncsEmptyFiles: true
 }
 
 export const OLDER_PIN: LegacyPin = {
@@ -75,7 +79,8 @@ export const OLDER_PIN: LegacyPin = {
 	hasE2eHook: false,
 	linuxExecutable: "/opt/Filen/@filendesktop",
 	authVersions: [1, 2],
-	linuxNeedsPrompt: true
+	linuxNeedsPrompt: true,
+	syncsEmptyFiles: false
 }
 
 // The update scenarios that start from an old release, by name (scripts/ci/e2e.ts --scenario).

@@ -16,7 +16,7 @@ import type { Page } from "playwright-core"
 import { errorMessage, fail, waitFor } from "../../support.ts"
 import { desktop, desktopCall, underReminder } from "../app.ts"
 import { type CloudEntry, runDir } from "../cloud.ts"
-import { LEGACY_PAIRS, seededBytes } from "../fixtures.ts"
+import { LEGACY_PAIRS, type LegacyDelta, seededBytes } from "../fixtures.ts"
 import { addLegacyPair } from "../legacyApp.ts"
 import type { Findings } from "../findings.ts"
 import { diffSnapshots, localSnapshot, type Snapshot } from "../snapshot.ts"
@@ -53,15 +53,19 @@ export function rootPairFile(cloudDir: string): string {
 }
 
 // What is wrong with the dry run of a pair N's first run holds (L10), or null: its held deletions are the table's, with
-// no conflict and no refusal, and every action (all of them listed) only adopts the baseline, moving no bytes.
+// no conflict and no refusal, and every action (all of them listed) only adopts the baseline, moving no bytes, but for
+// the transfer of a 0-byte file the old client left out (`fills`, relative paths: legacyEmptyFills).
 export function heldPlanProblem(
 	summary: DesktopSyncPlanSummary,
 	actions: readonly DesktopSyncPlanAction[],
-	want: Pick<FirstRunHold, "heldDeletions" | "heldReason">
+	want: Pick<FirstRunHold, "heldDeletions" | "heldReason">,
+	fills: readonly string[] = []
 ): string | null {
+	const fill = (action: DesktopSyncPlanAction) =>
+		(action.kind === "upload" || action.kind === "download") && action.size === 0 && fills.includes(action.relPath)
 	const ok =
 		actions.length === summary.actions &&
-		actions.every(action => action.kind === "adoptBaseline") &&
+		actions.every(action => action.kind === "adoptBaseline" || fill(action)) &&
 		summary.uploadBytes === 0 &&
 		summary.downloadBytes === 0 &&
 		summary.heldDeletions === want.heldDeletions &&
@@ -249,7 +253,7 @@ export function legacyHolds(chain: Chain, findings: Findings = chain.findings) {
 
 		// L10 for the held pairs: their dry run holds exactly the table's deletions and nothing else. A migrated pair held
 		// in review never ran a pass on N, so its plan adopts the baseline (adoptBaseline rows) and moves no bytes.
-		async heldPlans(pairIds: readonly { name: string; id: string }[]): Promise<string> {
+		async heldPlans(pairIds: readonly { name: string; id: string }[], fills: readonly LegacyDelta[] = []): Promise<string> {
 			const problems: string[] = []
 			const seen: string[] = []
 
@@ -293,7 +297,12 @@ export function legacyHolds(chain: Chain, findings: Findings = chain.findings) {
 					await desktopCall(page(), `window.desktop.sync.releasePlan(${json(plan.planId)})`)
 				}
 
-				const problem = heldPlanProblem(plan.summary, actions, want)
+				const problem = heldPlanProblem(
+					plan.summary,
+					actions,
+					want,
+					fills.filter(item => item.pair === name).map(item => item.path)
+				)
 
 				if (problem !== null) {
 					problems.push(`${name}: ${problem}`)
