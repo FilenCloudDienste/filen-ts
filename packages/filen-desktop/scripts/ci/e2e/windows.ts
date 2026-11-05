@@ -25,7 +25,8 @@ async function ps(what: string, script: string, timeoutMs = TOOL_TIMEOUT_MS): Pr
 }
 
 // The dialog, driven through Win32 messages, which need neither focus nor the foreground (UI Automation's view of this
-// dialog proved incomplete, then unfocusable): it is the visible top-level #32770 window with the title. Its "Folder:"
+// dialog proved incomplete, then unfocusable): it is the visible top-level #32770 window with the title, trimmed (NSIS
+// appends the page's caption, " " on every Modern UI page, to its window's). Its "Folder:"
 // box is the edit with control id 1152 among its descendants, else the Edit inside its ComboBoxEx32 (id 1148). The
 // path is typed in (WM_CHAR, so the dialog's model of the name follows; WM_SETTEXT alone left it empty) and read back;
 // then Select Folder (BM_CLICK on control 1), else Enter in the box, else WM_COMMAND IDOK, each given 5 s to close the
@@ -57,9 +58,7 @@ public static class FilenE2eDialog {
 		IntPtr found = IntPtr.Zero;
 		EnumWindows((hwnd, param) => {
 			if (Class(hwnd) != "#32770" || !IsWindowVisible(hwnd)) return true;
-			var text = new StringBuilder(512);
-			GetWindowText(hwnd, text, 512);
-			if (text.ToString() != title) return true;
+			if (Text(hwnd).Trim() != title) return true;
 			found = hwnd;
 			return false;
 		}, IntPtr.Zero);
@@ -96,6 +95,23 @@ public static class FilenE2eDialog {
 	public static bool Command(IntPtr dialog, int id) { return PostMessage(dialog, WM_COMMAND, (IntPtr)id, IntPtr.Zero); }
 	public static string Describe(IntPtr hwnd) { return Class(hwnd) + " id " + GetDlgCtrlID(hwnd); }
 	public static string Text(IntPtr hwnd) { var text = new StringBuilder(512); GetWindowText(hwnd, text, 512); return text.ToString(); }
+	[DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
+	// Every visible top-level window with a title, and every #32770 one, as class, owning process and quoted title.
+	public static string[] Windows() {
+		var found = new System.Collections.Generic.List<string>();
+		EnumWindows((hwnd, param) => {
+			if (!IsWindowVisible(hwnd)) return true;
+			string cls = Class(hwnd), title = Text(hwnd);
+			if (title == "" && cls != "#32770") return true;
+			uint pid;
+			GetWindowThreadProcessId(hwnd, out pid);
+			string name;
+			try { name = System.Diagnostics.Process.GetProcessById((int)pid).ProcessName; } catch (Exception) { name = "?"; }
+			found.Add(cls + " " + name + " " + pid + " '" + title + "'");
+			return true;
+		}, IntPtr.Zero);
+		return found.ToArray();
+	}
 	const uint BM_GETCHECK = 0x00F0;
 	// The check state (0 off, 1 on) of the first Button among the dialog's descendants whose text, without its &
 	// accelerator, starts with the prefix; -1 when there is none.
@@ -169,11 +185,12 @@ throw 'the dialog was not answered; cancelled'
 }
 
 // The NSIS wizard an old release's update leaves open (LegacyPin.winUpdateWizard): its outer #32770 window, titled
-// "<product> Setup", whose button 1 reads Finish on its last page. One look, no waiting for the window to appear.
+// "<product> Setup" (the window's text is "<product> Setup " on Modern UI pages), whose button 1 reads Finish on its
+// last page. One look, no waiting for the window to appear; when none is there, it lists the windows it saw.
 export const UPDATE_WIZARD_TITLE = "Filen Setup"
 
 export type WizardStep =
-	| { kind: "none" }
+	| { kind: "none"; detail: string }
 	| { kind: "page"; button: string }
 	| { kind: "finished"; run: "checked" | "unchecked" | "absent"; detail: string }
 	| { kind: "stuck"; detail: string }
@@ -198,7 +215,7 @@ export function wizardStep(stdout: string): WizardStep {
 		return last === "closed" ? { kind: "finished", run: state, detail } : { kind: "stuck", detail }
 	}
 
-	return { kind: "none" }
+	return { kind: "none", detail: lines.filter(line => line !== "none").join("; ") }
 }
 
 // Finish clicked as a user clicks it (BM_CLICK), else WM_COMMAND IDOK, each given 5 s to close the window.
@@ -208,7 +225,13 @@ Add-Type -TypeDefinition @'
 ${WIN32}
 '@
 $dialog = [FilenE2eDialog]::Dialog(${psQuote(title)})
-if ($dialog -eq [IntPtr]::Zero) { 'none'; exit 0 }
+if ($dialog -eq [IntPtr]::Zero) {
+	$elevated = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+	"harness elevated: $elevated"
+	[FilenE2eDialog]::Windows() | ForEach-Object { "window $_" }
+	'none'
+	exit 0
+}
 $button = [FilenE2eDialog]::Button($dialog, 1)
 $label = if ($button -eq [IntPtr]::Zero) { '' } else { [FilenE2eDialog]::Text($button) }
 if ($label.Replace('&', '') -ne 'Finish') { "page $label"; exit 0 }

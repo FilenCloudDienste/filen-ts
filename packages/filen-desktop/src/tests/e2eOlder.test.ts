@@ -73,8 +73,16 @@ const idOf = (entry: { platform: string; arch: string; format: string }) => `${e
 
 describe("3.0.47's update wizard on Windows", () => {
 	it("reads what one look at the installer's window found", () => {
-		expect(wizardStep("none\r\n")).toEqual({ kind: "none" })
-		expect(wizardStep("")).toEqual({ kind: "none" })
+		expect(wizardStep("none\r\n")).toEqual({ kind: "none", detail: "" })
+		expect(wizardStep("")).toEqual({ kind: "none", detail: "" })
+		expect(
+			wizardStep(
+				"harness elevated: True\r\nwindow #32770 Filen_win 3756 'Filen Setup '\r\nwindow CASCADIA_HOSTING_WINDOW_CLASS WindowsTerminal 5120 'Terminal'\r\nnone\r\n"
+			)
+		).toEqual({
+			kind: "none",
+			detail: "harness elevated: True; window #32770 Filen_win 3756 'Filen Setup '; window CASCADIA_HOSTING_WINDOW_CLASS WindowsTerminal 5120 'Terminal'"
+		})
 		expect(wizardStep("page &Install\r\n")).toEqual({ kind: "page", button: "&Install" })
 		expect(wizardStep("run 1\r\nFinish clicked: True\r\nclosed\r\n")).toEqual({
 			kind: "finished",

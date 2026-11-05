@@ -606,7 +606,12 @@ export async function runUpdate({
 		const finishWizard = async (): Promise<void> => {
 			const step = await finishUpdateWizard()
 
-			if (step.kind === "page") {
+			if (step.kind === "none") {
+				// What was on screen instead, while it has not been seen.
+				if (wizard?.startsWith("not seen") === true) {
+					wizard = `not seen (${step.detail})`
+				}
+			} else if (step.kind === "page") {
 				wizard = `on the page whose button reads "${step.button}"`
 				console.log(`${fromVersion}'s update wizard: ${wizard}`)
 			} else if (step.kind === "stuck") {
@@ -641,7 +646,7 @@ export async function runUpdate({
 			5000
 		).catch((error: unknown) => fail(`${errorMessage(error)}${wizard === null ? "" : `; ${fromVersion}'s update wizard: ${wizard}`}`))
 
-		if (wizard === "not seen") {
+		if (wizard?.startsWith("not seen") === true) {
 			console.log(`${fromVersion}'s update wizard: not seen; ${nextVersion} started without it`)
 		}
 
