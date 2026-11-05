@@ -50,7 +50,7 @@ export interface LegacyMountsImport {
 }
 
 // "X", "X:" or "X:\" as the old client took a Windows mount point.
-function driveLetterOf(mountPoint: string): string | null {
+export function driveLetterOf(mountPoint: string): string | null {
 	const letter = /^([A-Za-z]):?\\?$/.exec(mountPoint)?.[1]?.toUpperCase()
 
 	return letter !== undefined && letter >= "D" && letter <= "Z" ? letter : null
@@ -99,6 +99,13 @@ export function legacyDriveMountPoint(raw: unknown): string | null {
 	}
 
 	return localPathSchema(old.mountPoint) instanceof type.errors ? null : old.mountPoint
+}
+
+// The Windows drive letter the old client's drive ran on; null when the drive was off or had none.
+export function legacyDriveLetter(raw: unknown): string | null {
+	const old = driveSchema(raw)
+
+	return old instanceof type.errors || old.enabled !== true ? null : driveLetterOf(old.mountPoint ?? "")
 }
 
 interface OldServe {

@@ -89,6 +89,7 @@ function setup(
 		return Promise.resolve()
 	})
 	const warn = vi.fn()
+	const endLegacyDriveRclone = vi.fn((_networkDrive: unknown) => Promise.resolve())
 	const storeFor = (userId: string) => {
 		let store = state.stores.get(userId)
 
@@ -114,12 +115,14 @@ function setup(
 		mountPointContext: () =>
 			Promise.resolve({ platform: "linux", home: path.join(directory, "home"), appData: [], temporary: [], pairRoots: [] }),
 		resolveHost: () => Promise.resolve(null),
+		endLegacyDriveRclone,
 		log: { info: vi.fn(), warn }
 	}
 
 	return {
 		legacy: createLegacyMounts(deps),
 		call,
+		endLegacyDriveRclone,
 		consume,
 		credentials,
 		warn,
@@ -157,6 +160,8 @@ describe("createLegacyMounts", () => {
 		expect(run.argsOf("quiesceLegacy")).toEqual([
 			{ binDir: path.join(directory, "rclone", "bin"), mountPoints: [path.join(directory, "home", "Filen")] }
 		])
+		expect(run.endLegacyDriveRclone.mock.calls).toEqual([[oldDrive()]])
+		expect(run.endLegacyDriveRclone.mock.invocationCallOrder[0]).toBeLessThan(run.call.mock.invocationCallOrder[0] ?? 0)
 		expect(await exists("mounts/1/cache/vfs/Filen/a.txt")).toBe(true)
 		expect(await exists("networkDrive/cache")).toBe(false)
 		expect(await exists("rclone")).toBe(false)

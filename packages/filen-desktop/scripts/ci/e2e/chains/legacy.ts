@@ -109,7 +109,8 @@ import {
 //   L3   PIN migrated             N starts locked; the 3.x PIN unlocks through the lock screen
 //   L4   prefs migrated           N starts hidden; prefs.get() minimizeToTray and startMinimized on
 //   L5   mounts migrated          the drive at the 3.x mount point, running, a fixture read through it; WebDAV on the same
-//                                 port with the 3.x credentials, answering them
+//                                 port with the 3.x credentials, answering them; on Windows from 3.0.47 no rclone of its
+//                                 network drive runs on (N ends the one an app.exit(0) left, main.log names it)
 //   L6   3.x secrets wiped        marker verified and wiped; rclone.conf gone; the old logs (<appData>/@filen/logs)
 //                                 deleted (logsDeleted); 3.0.47's network drive (<appData>/@filen/network-drive, which
 //                                 @filen/cli shares) left in place; then purged: Local Storage and the old IndexedDB gone,
@@ -982,6 +983,22 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 
 				return `${type} at ${root}; the cloud edit reads back byte for byte`
 			})
+
+			if (target.platform === "win" && release.winRcloneOutlivesExit) {
+				await findings.check(`L5 no rclone of ${LEGACY_VERSION}'s network drive runs on beside N's drive`, async () => {
+					const dir = path.join(path.dirname(target.userData), "network-drive")
+					const left = await windowsProcessesUnder(dir)
+					const logged = tail(userData("logs", "main.log"), 4000)
+						.split(/\r?\n/)
+						.filter(line => line.includes("rclone 3.0.47") || line.includes("other filen rclone"))
+
+					if (left.length > 0) {
+						fail(`${left.join("; ")} still running; main.log: ${logged.join("; ") || "nothing"}`)
+					}
+
+					return `none; main.log: ${logged.join("; ") || "nothing ended (none ran on when N started)"}`
+				})
+			}
 
 			await findings.check("L5 WebDAV on the 3.x port with the 3.x credentials", async () => {
 				const serve = await waitFor("WebDAV to run", SETUP_TIMEOUT_MS, async () => {

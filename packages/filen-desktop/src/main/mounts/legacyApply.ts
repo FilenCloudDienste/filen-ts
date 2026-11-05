@@ -15,8 +15,9 @@ import { anyEnabled, type MountsConfig, type MountsStore } from "./store.ts"
 
 // PLAN §6.7: the old client's (3.x) rclone, its caches and the user's drive/WebDAV/S3 settings. The old rclone may
 // outlive the old app by ~10 s (its watchdog reaps it), and its caches may hold writes not uploaded yet, so:
-//   1. quiesce   the old rclone is stopped and a stale old mount unmounted, then the old binaries, TLS files and
-//                watchdog scripts are deleted. Before any role of this app starts.
+//   1. quiesce   the old rclone is stopped (on Windows also the one 3.0.47's tray Exit leaves running, legacyRclone.ts)
+//                and a stale old mount unmounted, then the old binaries, TLS files and watchdog scripts are deleted.
+//                Before any role of this app starts.
 //   2. import    the user's old settings go into their store (credentials first), then the stash is consumed.
 //   3. adopt     the old drive cache becomes the user's drive cache when a role will run on it (rclone resumes its
 //                uploads); otherwise it stays where it is for step 4. Only for the old client's account: its pending
@@ -66,6 +67,8 @@ export interface LegacyMountsDeps {
 	mountPointContext(userId: string): Promise<MountPointContext>
 	// For an old server address that is a host name; bounded, never rejects.
 	resolveHost: HostResolver
+	// Ends the rclone 3.0.47's drive (the stashed settings) left running, where there is one; never rejects.
+	endLegacyDriveRclone(networkDrive: unknown): Promise<void>
 	log: { info(message: string): void; warn(message: string): void }
 }
 
@@ -177,6 +180,11 @@ export function createLegacyMounts(deps: LegacyMountsDeps): LegacyMounts {
 
 	async function quiesce(userId: string, input: LegacyMountsInput | null): Promise<boolean> {
 		const mountPoint = input === null ? null : legacyDriveMountPoint(input.networkDrive)
+
+		if (input !== null) {
+			await deps.endLegacyDriveRclone(input.networkDrive)
+		}
+
 		const quiesced = await deps.call(
 			"quiesceLegacy",
 			{ binDir: path.join(rcloneDir, "bin"), mountPoints: mountPoint === null ? [] : [mountPoint] },

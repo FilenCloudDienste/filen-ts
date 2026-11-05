@@ -78,6 +78,7 @@ import { type FuseContext, fuseStatus, installWinFsp, linuxFuseGap, runProgram }
 import { registerMountsIpc } from "./mounts/ipc.ts"
 import { createHostResolver } from "./mounts/addresses.ts"
 import { createLegacyMounts } from "./mounts/legacyApply.ts"
+import { endLegacyDriveRclone } from "./mounts/legacyRclone.ts"
 import { configuredMountPoints } from "./mounts/mountPoint.ts"
 import { bakedRcloneSha256, rclonePaths } from "./mounts/rclonePath.ts"
 import { createMountsService } from "./mounts/service.ts"
@@ -648,6 +649,18 @@ const legacyMounts = createLegacyMounts({
 	credentialsFor: credentialStoreFor,
 	mountPointContext,
 	resolveHost: createHostResolver({ lookup, interfaces: () => os.networkInterfaces(), timeoutMs: LEGACY_HOST_LOOKUP_TIMEOUT_MS }),
+	endLegacyDriveRclone: networkDrive =>
+		endLegacyDriveRclone(
+			{
+				platform: PLATFORM,
+				userData: userDataPath,
+				env: process.env,
+				run: runProgram,
+				kill: (pid, signal) => process.kill(pid, signal),
+				log: { info, warn }
+			},
+			networkDrive
+		),
 	log: { info, warn }
 })
 

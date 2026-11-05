@@ -59,7 +59,7 @@ export function winFspInstallDir(regQuery: string): string | null {
 	return /^\s*InstallDir\s+REG_SZ\s+(.+?)\s*$/m.exec(regQuery)?.[1] ?? null
 }
 
-function system32(ctx: Pick<FuseContext, "env">, ...file: string[]): string {
+export function system32(ctx: Pick<FuseContext, "env">, ...file: string[]): string {
 	return path.win32.join(ctx.env["SystemRoot"] ?? "C:\\Windows", "System32", ...file)
 }
 
