@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomInt, randomUUID } from "node:crypto"
-import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs"
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs"
 import path from "node:path"
 import type {
 	DesktopLockStatus,
@@ -25,8 +25,9 @@ import {
 } from "../app.ts"
 import { connectRenderer, type Renderer } from "../cdp/renderer.ts"
 import {
-	emptyFillActivity,
+	arrivalActivity,
 	LEGACY_CONFLICTS,
+	LEGACY_DELETIONS,
 	LEGACY_DELTAS,
 	LEGACY_EDITS,
 	LEGACY_LOCAL_TRASH,
@@ -36,6 +37,7 @@ import {
 	legacySideTree,
 	type LegacyDelta,
 	type LegacyPairFixture,
+	restoredProblems,
 	treeSnapshot,
 	writeTree
 } from "../fixtures.ts"
@@ -96,11 +98,13 @@ import {
 // Chain L at deep depth: the real 3.0.53 is signed in through its own page (or seeded with the run's session where the
 // plan says so: what its login stores, scripts/ci/e2e/seed.ts) and given what a user sets up (prefs, a PIN with a lock
 // timeout, the network drive, WebDAV and five sync pairs, one per mode, the dot-file and local-trash switches mixed),
-// syncs until it settles, and quits. One file changes on disk and one in the cloud while it is closed. Its own updater
+// syncs until it settles, and quits. While it is closed one file changes on disk and one in the cloud, and in the two-way
+// pair one file is deleted on disk and another in the cloud. Its own updater
 // then installs N from the loopback feed (its sync held for that launch, so the edits wait for N), and N must
 // migrate everything invisibly: the account without a sign-in, the PIN, prefs and mounts, every pair with its mode,
 // downloading the cloud edit and holding the disk edit as a conflict (N imports none of the old sync history, so a
-// two-way path changed on one side is a conflict), moving nothing else. Then the user signs out and uninstalls.
+// two-way path changed on one side is a conflict), copying both deleted files back (accepted: a deletion made while 3.x
+// was closed is not carried over), moving nothing else. Then the user signs out and uninstalls.
 //
 // The assertion table (each one a finding):
 //   L1   update path              the update scenario's own checks (scripts/ci/e2e/update.ts)
@@ -122,7 +126,8 @@ import {
 //                                 trash was off; conflicts only as LEGACY_CONFLICTS; no import note, no mount notice, no
 //                                 dialog over the page but the master-key reminder (put off)
 //   L10  only the edits           disk and cloud over N's first passes: identities unchanged except the expected deltas
-//                                 (LEGACY_DELTAS); exactly LEGACY_CONFLICTS held; N's activity and plans carry nothing else
+//                                 (LEGACY_DELTAS); exactly LEGACY_CONFLICTS held; N's activity and plans carry nothing else;
+//                                 the closed-app deletions (LEGACY_DELETIONS) back on both sides, byte for byte
 //   L11  a conflict resolved      the held conflict resolved through the Issues tab with Keep both, its toast naming
 //                                 the copy: the overview counts none, the disk and the cloud hold the cloud's bytes at the path and the edit as the
 //                                 engine's copy (<stem>.old.<ext>), byte for byte; then nothing else transfers, plans empty
@@ -528,13 +533,21 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 
 		await findings.check("L16 setup: a file added to e2e-l2c's cloud directory while 3.x is closed", () => holds.uploadWhileClosed())
 
-		await findings.must("the closed-app edits: one file on disk, one in the cloud", async () => {
+		await findings.must("the closed-app edits: one file on disk, one in the cloud; one deleted on disk, one in the cloud", async () => {
 			const localFile = path.join(rootOf(edits.local.pair), ...edits.local.path.split("/"))
 			const cloudFile = path.join(work, "edit-cloud.bin")
+			const deleted = LEGACY_DELETIONS
 
 			writeFileSync(localFile, edits.local.bytes)
 			writeFileSync(cloudFile, edits.cloud.bytes)
-			await cloud.uploadFile(cloudFile, `${cloudDir}/${edits.cloud.pair}/${edits.cloud.path}`)
+			rmSync(path.join(rootOf(deleted.local.pair), ...deleted.local.path.split("/")))
+			await Promise.all([
+				cloud.uploadFile(cloudFile, `${cloudDir}/${edits.cloud.pair}/${edits.cloud.path}`),
+				cloud.purgeFiles(
+					path.posix.join(cloudDir, deleted.cloud.pair, path.posix.dirname(deleted.cloud.path)),
+					path.posix.basename(deleted.cloud.path)
+				)
+			])
 
 			// Baseline B: what N starts from.
 			state.local = new Map()
@@ -549,7 +562,15 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 			state.cloud = (await cloudSnapshot(cloud, cloudDir, work)) ?? fail(`${cloudDir} is gone`)
 			findings.attach("legacy-baseline-cloud.jsonl", snapshotText(state.cloud))
 
-			return `${edits.local.pair}/${edits.local.path} on disk, ${edits.cloud.pair}/${edits.cloud.path} in the cloud`
+			if (state.local.get(deleted.local.pair)?.has(deleted.local.path) !== false) {
+				fail(`${deleted.local.pair}/${deleted.local.path} still on disk`)
+			}
+
+			if (state.cloud.has(`${deleted.cloud.pair}/${deleted.cloud.path}`)) {
+				fail(`${deleted.cloud.pair}/${deleted.cloud.path} still in the cloud`)
+			}
+
+			return `edited ${edits.local.pair}/${edits.local.path} on disk, ${edits.cloud.pair}/${edits.cloud.path} in the cloud; deleted ${deleted.local.pair}/${deleted.local.path} on disk, ${deleted.cloud.pair}/${deleted.cloud.path} in the cloud`
 		})
 	}
 
@@ -777,9 +798,35 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 					fail(problems.join("; "))
 				}
 
-				return `${String(shell.pairs?.length)} pairs active; only the two edits and the rule files moved`
+				return `${String(shell.pairs?.length)} pairs active; only the two edits, the two deletions and the rule files moved`
 			}
 		)
+
+		// Accepted behaviour: N imports none of 3.x's sync state, so a file deleted on one side while 3.x was closed is
+		// on the other side only, and N copies it back. A change here (the deletion carried over) is to be noticed.
+		await findings.check("L10 the files deleted while 3.x was closed are back on both sides, byte for byte", async () => {
+			const pairs = new Set(Object.values(LEGACY_DELETIONS).map(item => item.pair))
+			const local = new Map<string, Snapshot>()
+
+			for (const pair of pairs) {
+				local.set(pair, await snapshotOf(pair))
+			}
+
+			const problems = restoredProblems(local, state.afterCloud ?? (await cloudSnapshot(cloud, cloudDir, work)) ?? new Map())
+
+			if (problems.length > 0) {
+				fail(problems.join("; "))
+			}
+
+			const deleted = LEGACY_DELETIONS
+
+			findings.info(
+				"L10 deletions made while 3.x was closed are not carried over (accepted)",
+				`4.x imports no 3.x sync state: ${deleted.local.pair}/${deleted.local.path} (deleted on disk) was downloaded again and ${deleted.cloud.pair}/${deleted.cloud.path} (deleted in the cloud) uploaded again`
+			)
+
+			return `${deleted.local.pair}/${deleted.local.path} and ${deleted.cloud.pair}/${deleted.cloud.path} on disk and in the cloud with their original bytes`
+		})
 
 		// Each pair's bin (<root>/.filen-sync-trash, filed by UTC day, its `.filed-by-day` marker beside the buckets) holds
 		// exactly what the engine moved there: the old local trash with its content, and the local bytes the cloud edit's
@@ -1147,6 +1194,7 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 				paths.map(relPath => `${pair}:conflict:${relPath}`)
 			)
 			const conflictCounts = Object.fromEntries(LEGACY_PAIRS.map(pair => [pair.name, expectedConflicts(pair.name)]))
+			const restored = LEGACY_DELTAS.filter(delta => delta.change === "restored").map(arrivalActivity)
 			const allowed = new Set([
 				`${edits.cloud.pair}:downloaded:${edits.cloud.path}`,
 				`${edits.cloud.pair}:binned:${edits.cloud.path}`,
@@ -1155,7 +1203,8 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 				...LEGACY_DELTAS.filter(delta => delta.side === "cloud" && delta.change === "rules").map(
 					delta => `${delta.pair}:uploaded:.filenignore`
 				),
-				...fills.map(emptyFillActivity)
+				...restored,
+				...fills.map(arrivalActivity)
 			])
 
 			await findings.check("L10 N's activity and plans carry nothing but the edits and the expected conflicts", () =>
@@ -1347,7 +1396,7 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 				() =>
 					chain.quietActivity(
 						pairIds,
-						new Set([...conflictActivity, ...resolution, ...fills.map(emptyFillActivity)]),
+						new Set([...conflictActivity, ...resolution, ...restored, ...fills.map(arrivalActivity)]),
 						keptCopy === null ? conflictCounts : {}
 					)
 			)

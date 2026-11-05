@@ -167,6 +167,14 @@ export const LEGACY_EDITS = {
 	cloud: { pair: "e2e-c2l", path: "media/blob.bin", bytes: seededBytes("legacy/edit-cloud", 1.25 * MIB) }
 } as const
 
+// The deletions made while the old client is closed, in the two-way pair: one file deleted on disk, another in the
+// cloud. N imports none of the old client's sync state, so it finds each on one side only and copies it back (accepted:
+// such a deletion is not carried over). Neither is the 0-byte file nor an edited path.
+export const LEGACY_DELETIONS = {
+	local: { pair: "e2e-twoway", path: "nested/a/b/c.txt" },
+	cloud: { pair: "e2e-twoway", path: "space name.txt" }
+} as const
+
 export interface LegacyDelta {
 	pair: string
 	side: "local" | "cloud"
@@ -175,10 +183,12 @@ export interface LegacyDelta {
 	// for a pair that pushes, its upload. `edit`: a closed-app edit arriving on the other side. `binned`: the old local
 	// trash, which the engine's first pass moves into the pair's bin (gone from the root, with everything in it).
 	// `filled`: the empty file an old client that leaves 0-byte files out never brought over, which N carries.
-	change: "rules" | "edit" | "binned" | "filled"
+	// `restored`: a closed-app deletion undone, the file back on the side it was deleted from (LEGACY_DELETIONS).
+	change: "rules" | "edit" | "binned" | "filled" | "restored"
 }
 
-// Everything N may change against the old client's converged state plus the two edits; anything else differing fails.
+// Everything N may change against the old client's converged state plus the closed-app edits and deletions; anything
+// else differing fails.
 // The rule file is one of the two differences a migration may make visible (the other is the localTrashNowOn notice of
 // pairs that had local trash off, which the overview carries).
 export const LEGACY_DELTAS: readonly LegacyDelta[] = [
@@ -197,8 +207,32 @@ export const LEGACY_DELTAS: readonly LegacyDelta[] = [
 		side: "local",
 		path: LEGACY_LOCAL_TRASH,
 		change: "binned"
-	}))
+	})),
+	{ pair: LEGACY_DELETIONS.local.pair, side: "local", path: LEGACY_DELETIONS.local.path, change: "restored" },
+	{ pair: LEGACY_DELETIONS.cloud.pair, side: "cloud", path: LEGACY_DELETIONS.cloud.path, change: "restored" }
 ]
+
+// What is wrong with the closed-app deletions after N's first passes: each file must be back on both sides with its
+// original bytes. `local` holds each pair's tree on disk, `cloud` the chain's cloud directory (paths under the pair).
+export function restoredProblems(local: ReadonlyMap<string, Snapshot>, cloud: Snapshot): string[] {
+	return Object.values(LEGACY_DELETIONS).flatMap(({ pair, path: relPath }) => {
+		const fixture = LEGACY_PAIRS.find(item => item.name === pair)
+		const bytes = fixture === undefined ? undefined : legacySideTree(fixture, "local").files.get(relPath)
+		const want = bytes === undefined ? null : createHash("sha256").update(bytes).digest("hex")
+		const sides: [string, Snapshot | undefined, string][] = [
+			["disk", local.get(pair), relPath],
+			["cloud", cloud, `${pair}/${relPath}`]
+		]
+
+		return sides.flatMap(([side, tree, key]) => {
+			const node = tree?.get(key)
+
+			return node?.kind === "file" && want !== null && node.sha256 === want
+				? []
+				: [`${side} ${pair}/${relPath}: ${node === undefined ? "missing" : "not its original bytes"}`]
+		})
+	})
+}
 
 // The empty file per pair on the side an old client that leaves 0-byte files out (LegacyPin.syncsEmptyFiles) never
 // filled: N's first passes put it there (a held pair's once it starts), every mode carrying it to its other side.
@@ -213,9 +247,9 @@ export function legacyEmptyFills(syncsEmptyFiles: boolean): LegacyDelta[] {
 			}))
 }
 
-// How N's activity names the transfer that fills it in.
-export function emptyFillActivity(fill: LegacyDelta): string {
-	return `${fill.pair}:${fill.side === "cloud" ? "uploaded" : "downloaded"}:${fill.path}`
+// How N's activity names the transfer that brings a delta to its side (a fill, a restored deletion).
+export function arrivalActivity(delta: LegacyDelta): string {
+	return `${delta.pair}:${delta.side === "cloud" ? "uploaded" : "downloaded"}:${delta.path}`
 }
 
 // The closed-app edit in the two-way pair is a conflict for N, which imports none of the old client's sync history:

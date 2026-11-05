@@ -7,16 +7,19 @@ import type { DesktopSyncPair, DesktopSyncPhase } from "@filen/shared/desktop"
 import type { Page } from "playwright-core"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import {
+	arrivalActivity,
 	EMPTY_FILE,
-	emptyFillActivity,
 	fixtureTree,
 	LEGACY_CONFLICTS,
+	LEGACY_DELETIONS,
 	LEGACY_DELTAS,
+	LEGACY_EDITS,
 	LEGACY_LOCAL_TRASH,
 	legacyEmptyFills,
 	legacyLocalTree,
 	LEGACY_PAIRS,
 	legacySideTree,
+	restoredProblems,
 	seededBytes,
 	treeSnapshot,
 	writeTree
@@ -567,7 +570,7 @@ describe("chain L fixtures", () => {
 			"cloud e2e-lbak/docs/empty.txt filled",
 			"local e2e-cbak/docs/empty.txt filled"
 		])
-		expect(legacyEmptyFills(false).map(emptyFillActivity)).toEqual([
+		expect(legacyEmptyFills(false).map(arrivalActivity)).toEqual([
 			"e2e-twoway:uploaded:docs/empty.txt",
 			"e2e-l2c:uploaded:docs/empty.txt",
 			"e2e-c2l:downloaded:docs/empty.txt",
@@ -583,17 +586,70 @@ describe("chain L fixtures", () => {
 		expect(LEGACY_PAIRS.filter(pair => withTrash.includes(pair.name)).map(pair => pair.localTrashDisabled)).toEqual([true, false])
 	})
 
-	it("allows a rule file where dot files were excluded (uploaded only by a pair that pushes), the cloud edit, the old trash moved to the bin, and one held conflict", () => {
+	it("allows a rule file where dot files were excluded (uploaded only by a pair that pushes), the cloud edit, the old trash moved to the bin, the two deletions undone, and one held conflict", () => {
 		expect(LEGACY_DELTAS.map(delta => `${delta.side} ${delta.pair}/${delta.path} ${delta.change}`).sort()).toEqual([
 			"cloud e2e-twoway/.filenignore rules",
+			"cloud e2e-twoway/space name.txt restored",
 			"local e2e-c2l/.filen.trash.local binned",
 			"local e2e-c2l/.filenignore rules",
 			"local e2e-c2l/media/blob.bin edit",
 			"local e2e-cbak/.filen.trash.local binned",
 			"local e2e-cbak/.filenignore rules",
-			"local e2e-twoway/.filenignore rules"
+			"local e2e-twoway/.filenignore rules",
+			"local e2e-twoway/nested/a/b/c.txt restored"
 		])
 		expect(LEGACY_CONFLICTS).toEqual({ "e2e-twoway": ["docs/notes.txt"] })
+		expect(LEGACY_DELTAS.filter(delta => delta.change === "restored").map(arrivalActivity)).toEqual([
+			"e2e-twoway:downloaded:nested/a/b/c.txt",
+			"e2e-twoway:uploaded:space name.txt"
+		])
+	})
+
+	it("deletes two distinct, non-empty files on both sides of the two-way pair, apart from the edits and every 0-byte special case", () => {
+		const twoWay = LEGACY_PAIRS.find(pair => pair.name === "e2e-twoway")
+		const paths = Object.values(LEGACY_DELETIONS).map(item => item.path)
+
+		expect(twoWay?.mode).toBe("twoWay")
+		expect(new Set(paths).size).toBe(2)
+
+		for (const item of Object.values(LEGACY_DELETIONS)) {
+			expect(item.pair).toBe("e2e-twoway")
+			expect(item.path).not.toBe(EMPTY_FILE)
+			expect(Object.values(LEGACY_EDITS).map(edit => `${edit.pair}/${edit.path}`)).not.toContain(`${item.pair}/${item.path}`)
+
+			for (const syncsEmptyFiles of [true, false]) {
+				for (const side of ["local", "cloud"] as const) {
+					expect(twoWay && legacySideTree(twoWay, side, syncsEmptyFiles).files.get(item.path)?.length).toBeGreaterThan(0)
+				}
+			}
+		}
+	})
+
+	it("finds the deleted files back on both sides only with their original bytes", () => {
+		const twoWay = LEGACY_PAIRS.find(pair => pair.name === "e2e-twoway")
+		const tree = twoWay === undefined ? new Map() : treeSnapshot(legacySideTree(twoWay, "local"))
+		const cloud = new Map([...tree].map(([relPath, node]) => [`e2e-twoway/${relPath}`, node]))
+		const local = new Map([["e2e-twoway", tree]])
+
+		expect(restoredProblems(local, cloud)).toEqual([])
+
+		const missing = new Map(tree)
+		const changed = new Map(cloud)
+		const spaced = "e2e-twoway/space name.txt"
+
+		missing.delete("nested/a/b/c.txt")
+		changed.set(spaced, { kind: "file", size: 1, sha256: "0".repeat(64), identity: null })
+
+		expect(restoredProblems(new Map([["e2e-twoway", missing]]), changed)).toEqual([
+			"disk e2e-twoway/nested/a/b/c.txt: missing",
+			"cloud e2e-twoway/space name.txt: not its original bytes"
+		])
+		expect(restoredProblems(new Map(), new Map())).toEqual([
+			"disk e2e-twoway/nested/a/b/c.txt: missing",
+			"cloud e2e-twoway/nested/a/b/c.txt: missing",
+			"disk e2e-twoway/space name.txt: missing",
+			"cloud e2e-twoway/space name.txt: missing"
+		])
 	})
 })
 
