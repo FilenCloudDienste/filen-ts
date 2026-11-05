@@ -1,5 +1,6 @@
 import type { Page } from "playwright-core"
 import { LEGACY_KEYS } from "../../../src/main/legacyData.ts"
+import type { LegacyQuit } from "../legacy.ts"
 import { fail, waitFor } from "../support.ts"
 import type { LegacyMode } from "./fixtures.ts"
 import { exitWithin, type Launched } from "./launch.ts"
@@ -220,13 +221,21 @@ export async function requireLegacyPrefs(page: Page, readOptions: () => unknown)
 	return `${startMinimized}, minimizeToTray:${shownOption(minimizeToTray)}${why}`
 }
 
-// The old app's own graceful quit (tray Quit, Cmd+Q): app.quit() runs before-quit and will-quit, which flushes and
-// unmounts rclone. Scheduled, and the session closed first: Node holds a process at exit while a debugger is attached.
-export async function quitLegacy(launched: Launched, timeoutMs: number): Promise<string> {
+// The old app's own quit (LegacyPin.quit): app.quit() runs before-quit and will-quit, which flushes and unmounts
+// rclone; app.exit(0) ends the process as it stands, so the page's storage is flushed first (what a user's app did in
+// the time since its last setting changed). Scheduled, and the session closed first: Node holds a process at exit while
+// a debugger is attached.
+export function quitExpression(how: LegacyQuit): string {
+	return how === "app.quit()"
+		? 'setTimeout(() => process.mainModule.require("electron").app.quit(), 500), "scheduled"'
+		: '(() => { const { app, session } = process.mainModule.require("electron"); session.defaultSession.flushStorageData(); setTimeout(() => app.exit(0), 1000); return "scheduled" })()'
+}
+
+export async function quitLegacy(launched: Launched, timeoutMs: number, how: LegacyQuit = "app.quit()"): Promise<string> {
 	const cdp = await inspector(launched.inspectPort ?? fail("the old app runs without its inspector"))
 
 	try {
-		await cdp.evaluate('setTimeout(() => process.mainModule.require("electron").app.quit(), 500), "scheduled"')
+		await cdp.evaluate(quitExpression(how))
 	} finally {
 		cdp.close()
 	}
@@ -234,7 +243,7 @@ export async function quitLegacy(launched: Launched, timeoutMs: number): Promise
 	const exit = await exitWithin(launched, timeoutMs)
 
 	if (exit === null) {
-		fail(`the old app still runs ${String(timeoutMs / 1000)} s after app.quit()`)
+		fail(`the old app still runs ${String(timeoutMs / 1000)} s after ${how}`)
 	}
 
 	return `exited with code ${String(exit.code)}, signal ${String(exit.signal)}`

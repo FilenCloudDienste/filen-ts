@@ -463,30 +463,39 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 			})
 		}
 
-		await findings.must(`${LEGACY_VERSION} quits through app.quit(), rclone with it`, async () => {
+		if (release.quit !== "app.quit()") {
+			findings.info(
+				`${LEGACY_VERSION}'s quit`,
+				`it cancels app.quit() while minimize to tray is on (its window's close handler minimizes, nothing marks the quit); its tray's Exit is ${release.quit}, which ends its sync worker with the process (LegacyPin.quit)`
+			)
+		}
+
+		await findings.must(`${LEGACY_VERSION} quits through ${release.quit}, rclone with it`, async () => {
 			await state.legacy?.renderer.browser.close().catch(() => undefined)
 
-			// D13 as the fallback, on every OS: whatever of the old app still runs a minute after app.quit() (its main
+			// D13 as the fallback, on every OS: whatever of the old app still runs a minute after its quit (its main
 			// process, or a helper or watchdog it left) is hard-killed once nothing has been written for 30 s, and named.
 			const settled = [...LEGACY_PAIRS.map(pair => rootOf(pair.name)), userData("sync")]
 			const hardKill = async (left: readonly string[], why: string): Promise<void> => {
 				await quiet(settled)
 				await chain.os.forceKill(pidsOf(left))
 				findings.info(
-					`${LEGACY_VERSION}'s processes left after app.quit()`,
+					`${LEGACY_VERSION}'s processes left after ${release.quit}`,
 					`${left.join("; ")}: hard-killed after 30 s without writes (D13); ${why}`
 				)
 			}
-			const exit = await quitLegacy(state.legacy?.launched ?? fail("not launched"), EXIT_TIMEOUT_MS).catch(async (error: unknown) => {
-				await hardKill(await chain.os.appProcesses(target), errorMessage(error))
+			const exit = await quitLegacy(state.legacy?.launched ?? fail("not launched"), EXIT_TIMEOUT_MS, release.quit).catch(
+				async (error: unknown) => {
+					await hardKill(await chain.os.appProcesses(target), errorMessage(error))
 
-				return "hard-killed (D13)"
-			})
+					return "hard-killed (D13)"
+				}
+			)
 			const lingering = await endLeftovers(chain.os, target, () => quiet(settled), EXIT_TIMEOUT_MS)
 
 			if (lingering.length > 0) {
 				findings.info(
-					`${LEGACY_VERSION}'s processes left after app.quit()`,
+					`${LEGACY_VERSION}'s processes left after ${release.quit}`,
 					`${lingering.join("; ")}: hard-killed after 30 s without writes (D13); still running a minute after the main process ended`
 				)
 			}
@@ -1422,7 +1431,7 @@ export async function runLegacyDeep(options: Omit<UpdateOptions, "hooks">, artif
 
 			if (state.legacy !== undefined) {
 				await state.legacy.renderer.browser.close().catch(() => undefined)
-				await quitLegacy(state.legacy.launched, EXIT_TIMEOUT_MS).catch(() => undefined)
+				await quitLegacy(state.legacy.launched, EXIT_TIMEOUT_MS, release.quit).catch(() => undefined)
 			}
 		}
 	}

@@ -26,7 +26,7 @@ import {
 } from "../../scripts/ci/e2e/chains/older.ts"
 import { createFindings } from "../../scripts/ci/e2e/findings.ts"
 import { LEGACY_PAIRS } from "../../scripts/ci/e2e/fixtures.ts"
-import { configureLegacy, type LegacySyncPair, requireLegacyPrefs } from "../../scripts/ci/e2e/legacyApp.ts"
+import { configureLegacy, type LegacySyncPair, quitExpression, requireLegacyPrefs } from "../../scripts/ci/e2e/legacyApp.ts"
 import { hookReady, hookScript, type HookState } from "../../scripts/ci/e2e/legacyHook.ts"
 import { installedBy, legacyLinkProblems, promptShim, updateEnvFor } from "../../scripts/ci/e2e/olderUpdate.ts"
 import { describeStored, LEGACY_SDK_CONFIG_SHAPE, legacySeed } from "../../scripts/ci/e2e/seed.ts"
@@ -73,8 +73,14 @@ describe("3.0.47 pin", () => {
 		expect(Object.keys(OLDER_PIN.sha512).sort()).toEqual(Object.keys(LEGACY_SHA512).sort())
 		expect(OLDER_PIN.releaseUrl).toBe("https://github.com/FilenCloudDienste/filen-desktop/releases/download/v3.0.47/")
 		expect(Object.values(OLDER_PIN.sha512).every(hash => /^[A-Za-z0-9+/]{86}==$/.test(hash))).toBe(true)
-		expect(OLDER_PIN).toMatchObject({ version: "3.0.47", released: "2025-02-09", hasE2eHook: false, syncsEmptyFiles: false })
-		expect(LEGACY_PIN.syncsEmptyFiles).toBe(true)
+		expect(OLDER_PIN).toMatchObject({
+			version: "3.0.47",
+			released: "2025-02-09",
+			hasE2eHook: false,
+			syncsEmptyFiles: false,
+			quit: "app.exit(0)"
+		})
+		expect(LEGACY_PIN).toMatchObject({ syncsEmptyFiles: true, quit: "app.quit()" })
 		expect(OLDER_PIN.linuxExecutable).toBe("/opt/Filen/@filendesktop")
 		expect(pinFor("older")).toBe(OLDER_PIN)
 		expect(pinFor("legacy")).toBe(LEGACY_PIN)
@@ -354,6 +360,31 @@ describe("3.0.47 on Linux", () => {
 			])
 		}
 	)
+})
+
+describe("3.x quit", () => {
+	it("quits 3.0.53 through app.quit() and 3.0.47 through app.exit(0), its page storage flushed first", () => {
+		const calls: string[] = []
+		const timers: (() => void)[] = []
+		const electron = {
+			app: { quit: () => calls.push("quit"), exit: (code: number) => calls.push(`exit ${String(code)}`) },
+			session: { defaultSession: { flushStorageData: () => calls.push("flush") } }
+		}
+		const context = {
+			process: { mainModule: { require: (name: string) => (name === "electron" ? electron : undefined) } },
+			setTimeout: (run: () => void) => timers.push(run)
+		}
+
+		for (const pin of [LEGACY_PIN, OLDER_PIN]) {
+			expect(runInNewContext(quitExpression(pin.quit), context)).toBe("scheduled")
+
+			for (const run of timers.splice(0)) {
+				run()
+			}
+		}
+
+		expect(calls).toEqual(["quit", "flush", "exit 0"])
+	})
 })
 
 describe("3.0.47 sign-in seed", () => {

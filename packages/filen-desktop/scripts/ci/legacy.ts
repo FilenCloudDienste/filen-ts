@@ -47,7 +47,14 @@ export interface LegacyPin {
 	// Its sync carries 0-byte files. @filen/sync before 0.3.1 (3.0.47 ships 0.1.101) leaves them out of both trees
 	// (ignored, reason "empty"), so they stay on the side they were made on.
 	syncsEmptyFiles: boolean
+	// How a user quits it. 3.0.53's tray Exit runs app.quit(), whose before-quit lets the window close and will-quit
+	// stops the sync worker and rclone. 3.0.47 cancels app.quit() while minimize to tray is on (its window's close
+	// handler minimizes instead and nothing marks the quit), and every quit it offers (the tray's Exit, the last window
+	// closing) is app.exit(0), which ends the worker with the process; rclone's monitor follows the process out.
+	quit: LegacyQuit
 }
+
+export type LegacyQuit = "app.quit()" | "app.exit(0)"
 
 export const LEGACY_PIN: LegacyPin = {
 	version: LEGACY_VERSION,
@@ -58,7 +65,8 @@ export const LEGACY_PIN: LegacyPin = {
 	linuxExecutable: "/opt/Filen/Filen",
 	authVersions: [1, 2, 3],
 	linuxNeedsPrompt: false,
-	syncsEmptyFiles: true
+	syncsEmptyFiles: true,
+	quit: "app.quit()"
 }
 
 export const OLDER_PIN: LegacyPin = {
@@ -80,7 +88,8 @@ export const OLDER_PIN: LegacyPin = {
 	linuxExecutable: "/opt/Filen/@filendesktop",
 	authVersions: [1, 2],
 	linuxNeedsPrompt: true,
-	syncsEmptyFiles: false
+	syncsEmptyFiles: false,
+	quit: "app.exit(0)"
 }
 
 // The update scenarios that start from an old release, by name (scripts/ci/e2e.ts --scenario).
