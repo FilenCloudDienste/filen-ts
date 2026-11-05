@@ -58,6 +58,11 @@ export interface LegacyPin {
 	// PowerShell wait, the grandchildren, break away silently, and the monitor's taskkill never runs. The app's next start
 	// with the drive on (its network drive's start ends every rclone by name) or a sign-out of Windows ends it.
 	winRcloneOutlivesExit: boolean
+	// On Windows its update ends on the installer's Finish page until the user clicks Finish. Before 3.0.52 it installs
+	// through quitAndInstall(false, true): not silent, and the assisted (oneClick: false) installer honours --force-run
+	// only when silent, so after installing N it shows "Completing Filen Setup" with "Run Filen" checked; Finish starts N
+	// (with --updated). 3.0.52 and later install silently and the installer starts N itself.
+	winUpdateWizard: boolean
 	// What it leaves beside userData that N does not delete, by name. 3.0.47's @filen/network-drive downloads its rclone
 	// into its platformConfigPath() (`<appData>/@filen/network-drive`), and its @filen/s3 and @filen/webdav create theirs
 	// as their modules load (`s3`, `webdav`: certificates once HTTPS ran, tempDiskFiles), directories @filen/cli shares.
@@ -78,6 +83,7 @@ export const LEGACY_PIN: LegacyPin = {
 	syncsEmptyFiles: true,
 	quit: "app.quit()",
 	winRcloneOutlivesExit: false,
+	winUpdateWizard: false,
 	besideUserData: []
 }
 
@@ -103,6 +109,7 @@ export const OLDER_PIN: LegacyPin = {
 	syncsEmptyFiles: false,
 	quit: "app.exit(0)",
 	winRcloneOutlivesExit: true,
+	winUpdateWizard: true,
 	besideUserData: ["network-drive", "s3", "webdav"]
 }
 

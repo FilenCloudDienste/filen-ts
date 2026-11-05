@@ -95,6 +95,19 @@ public static class FilenE2eDialog {
 	public static IntPtr Button(IntPtr dialog, int id) { return GetDlgItem(dialog, id); }
 	public static bool Command(IntPtr dialog, int id) { return PostMessage(dialog, WM_COMMAND, (IntPtr)id, IntPtr.Zero); }
 	public static string Describe(IntPtr hwnd) { return Class(hwnd) + " id " + GetDlgCtrlID(hwnd); }
+	public static string Text(IntPtr hwnd) { var text = new StringBuilder(512); GetWindowText(hwnd, text, 512); return text.ToString(); }
+	const uint BM_GETCHECK = 0x00F0;
+	// The check state (0 off, 1 on) of the first Button among the dialog's descendants whose text, without its &
+	// accelerator, starts with the prefix; -1 when there is none.
+	public static int CheckState(IntPtr dialog, string prefix) {
+		int state = -1;
+		EnumChildWindows(dialog, (hwnd, param) => {
+			if (Class(hwnd) != "Button" || !Text(hwnd).Replace("&", "").StartsWith(prefix)) return true;
+			state = (int)SendMessage(hwnd, BM_GETCHECK, IntPtr.Zero, IntPtr.Zero);
+			return false;
+		}, IntPtr.Zero);
+		return state;
+	}
 }
 `
 
@@ -153,6 +166,73 @@ if ($closed) { "the dialog closed"; exit 0 }
 [void][FilenE2eDialog]::Command($dialog, 2)
 throw 'the dialog was not answered; cancelled'
 `
+}
+
+// The NSIS wizard an old release's update leaves open (LegacyPin.winUpdateWizard): its outer #32770 window, titled
+// "<product> Setup", whose button 1 reads Finish on its last page. One look, no waiting for the window to appear.
+export const UPDATE_WIZARD_TITLE = "Filen Setup"
+
+export type WizardStep =
+	| { kind: "none" }
+	| { kind: "page"; button: string }
+	| { kind: "finished"; run: "checked" | "unchecked" | "absent"; detail: string }
+	| { kind: "stuck"; detail: string }
+
+// What finishWizardScript printed: its last line says what it found.
+export function wizardStep(stdout: string): WizardStep {
+	const lines = stdout
+		.split(/\r?\n/)
+		.map(line => line.trim())
+		.filter(line => line !== "")
+	const last = lines.at(-1) ?? ""
+	const detail = lines.join("; ")
+
+	if (last.startsWith("page ")) {
+		return { kind: "page", button: last.slice("page ".length) }
+	}
+
+	if (last === "closed" || last === "open") {
+		const run = lines.map(line => /^run (-?\d+)$/.exec(line)?.[1]).find(value => value !== undefined)
+		const state = run === "1" ? "checked" : run === "0" ? "unchecked" : "absent"
+
+		return last === "closed" ? { kind: "finished", run: state, detail } : { kind: "stuck", detail }
+	}
+
+	return { kind: "none" }
+}
+
+// Finish clicked as a user clicks it (BM_CLICK), else WM_COMMAND IDOK, each given 5 s to close the window.
+function finishWizardScript(title: string): string {
+	return `
+Add-Type -TypeDefinition @'
+${WIN32}
+'@
+$dialog = [FilenE2eDialog]::Dialog(${psQuote(title)})
+if ($dialog -eq [IntPtr]::Zero) { 'none'; exit 0 }
+$button = [FilenE2eDialog]::Button($dialog, 1)
+$label = if ($button -eq [IntPtr]::Zero) { '' } else { [FilenE2eDialog]::Text($button) }
+if ($label.Replace('&', '') -ne 'Finish') { "page $label"; exit 0 }
+"run $([FilenE2eDialog]::CheckState($dialog, 'Run '))"
+function Gone($seconds) {
+	$until = (Get-Date).AddSeconds($seconds)
+	while ((Get-Date) -lt $until) {
+		if (-not [FilenE2eDialog]::IsWindow($dialog)) { return $true }
+		Start-Sleep -Milliseconds 250
+	}
+	return $false
+}
+"Finish clicked: $([FilenE2eDialog]::Click($button))"
+$closed = Gone 5
+if (-not $closed) {
+	"WM_COMMAND IDOK posted: $([FilenE2eDialog]::Command($dialog, 1))"
+	$closed = Gone 5
+}
+if ($closed) { 'closed' } else { 'open' }
+`
+}
+
+export async function finishUpdateWizard(title = UPDATE_WIZARD_TITLE): Promise<WizardStep> {
+	return wizardStep(await ps(`finish the "${title}" wizard`, finishWizardScript(title)))
 }
 
 // Every process running from an executable below `dir`, as "pid path".

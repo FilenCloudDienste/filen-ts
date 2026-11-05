@@ -33,6 +33,7 @@ import { hookReady, hookScript, type HookState } from "../../scripts/ci/e2e/lega
 import { execFnAddress, installedBy, legacyLinkProblems, promptShim, updateEnvFor } from "../../scripts/ci/e2e/olderUpdate.ts"
 import { describeStored, LEGACY_SDK_CONFIG_SHAPE, legacySeed } from "../../scripts/ci/e2e/seed.ts"
 import { authVersionCheck, LEGACY_PIN, LEGACY_SHA512, OLDER_PIN, pinFor } from "../../scripts/ci/legacy.ts"
+import { wizardStep } from "../../scripts/ci/e2e/windows.ts"
 import { MAX_LOGINS_PER_RUN, plan, type PlanInput } from "../../scripts/ci/e2ePlan.ts"
 import { OLDER_DEEP_ENTRIES, OLDER_INSTALL_ENTRIES, weekday } from "../../scripts/ci/olderPlan.ts"
 import type { Target } from "../../scripts/ci/targets.ts"
@@ -70,6 +71,28 @@ const release: PlanInput = {
 
 const idOf = (entry: { platform: string; arch: string; format: string }) => `${entry.platform}-${entry.arch}-${entry.format}`
 
+describe("3.0.47's update wizard on Windows", () => {
+	it("reads what one look at the installer's window found", () => {
+		expect(wizardStep("none\r\n")).toEqual({ kind: "none" })
+		expect(wizardStep("")).toEqual({ kind: "none" })
+		expect(wizardStep("page &Install\r\n")).toEqual({ kind: "page", button: "&Install" })
+		expect(wizardStep("run 1\r\nFinish clicked: True\r\nclosed\r\n")).toEqual({
+			kind: "finished",
+			run: "checked",
+			detail: "run 1; Finish clicked: True; closed"
+		})
+		expect(wizardStep("run 0\nFinish clicked: True\nclosed")).toMatchObject({ kind: "finished", run: "unchecked" })
+		expect(wizardStep("run -1\nFinish clicked: True\nWM_COMMAND IDOK posted: True\nclosed")).toMatchObject({
+			kind: "finished",
+			run: "absent"
+		})
+		expect(wizardStep("run 1\nFinish clicked: False\nWM_COMMAND IDOK posted: True\nopen")).toEqual({
+			kind: "stuck",
+			detail: "run 1; Finish clicked: False; WM_COMMAND IDOK posted: True; open"
+		})
+	})
+})
+
 describe("3.0.47 pin", () => {
 	it("pins every installer 3.0.53's table has, by the same names, from the 3.0.47 release", () => {
 		expect(Object.keys(OLDER_PIN.sha512).sort()).toEqual(Object.keys(LEGACY_SHA512).sort())
@@ -82,7 +105,8 @@ describe("3.0.47 pin", () => {
 			syncsEmptyFiles: false,
 			quit: "app.exit(0)"
 		})
-		expect(LEGACY_PIN).toMatchObject({ syncsEmptyFiles: true, quit: "app.quit()" })
+		expect(LEGACY_PIN).toMatchObject({ syncsEmptyFiles: true, quit: "app.quit()", winUpdateWizard: false })
+		expect(OLDER_PIN.winUpdateWizard).toBe(true)
 		expect(OLDER_PIN.linuxExecutable).toBe("/opt/Filen/@filendesktop")
 		expect(pinFor("older")).toBe(OLDER_PIN)
 		expect(pinFor("legacy")).toBe(LEGACY_PIN)

@@ -24,6 +24,7 @@ import { linuxProcessReport, type AppProcess, type Arch, type Format, type Platf
 import type { Findings } from "./findings.ts"
 import { legacyUpdateHook } from "./legacyHook.ts"
 import { installedBy, updateEnvFor, verifyLegacyLink } from "./olderUpdate.ts"
+import { finishUpdateWizard } from "./windows.ts"
 import { installerProcesses, logMark, logSince, runFaultLaunch } from "./updateFaults.ts"
 
 // The update scenarios: an app is installed the way a user installs it, launched, and updated by its own updater from a
@@ -598,16 +599,51 @@ export async function runUpdate({
 		}
 
 		console.log(`install started: ${signs.join("; ")}`)
+
+		// An old release whose update ends on the installer's Finish page (LegacyPin.winUpdateWizard): Finish is clicked
+		// as its user clicks it, with "Run Filen" as the installer left it; N starts only then.
+		let wizard: string | null = platform === "win" && pin?.winUpdateWizard === true ? "not seen" : null
+		const finishWizard = async (): Promise<void> => {
+			const step = await finishUpdateWizard()
+
+			if (step.kind === "page") {
+				wizard = `on the page whose button reads "${step.button}"`
+				console.log(`${fromVersion}'s update wizard: ${wizard}`)
+			} else if (step.kind === "stuck") {
+				wizard = `Finish did not close it: ${step.detail}`
+				console.log(`${fromVersion}'s update wizard: ${wizard}`)
+			} else if (step.kind === "finished") {
+				wizard = `Finish clicked, "Run Filen" ${step.run}`
+				console.log(`${fromVersion}'s update wizard: ${wizard} (${step.detail})`)
+				hooks?.findings?.info(
+					`${fromVersion}'s update waits on the installer's Finish page on Windows (LegacyPin.winUpdateWizard)`,
+					`${wizard}; its quitAndInstall(false, true) runs the assisted installer not silent, which ignores --force-run`
+				)
+			}
+		}
+
 		await waitFor(
 			`the relaunched app to log "Filen ${nextVersion} starting"`,
 			UPDATE_TIMEOUT_MS,
-			() => {
+			async () => {
 				look()
 
-				return startedVersions(target).some(version => sameVersion(version, nextVersion)) ? true : null
+				if (startedVersions(target).some(version => sameVersion(version, nextVersion))) {
+					return true
+				}
+
+				if (wizard !== null && !wizard.startsWith("Finish clicked")) {
+					await finishWizard()
+				}
+
+				return null
 			},
 			5000
-		)
+		).catch((error: unknown) => fail(`${errorMessage(error)}${wizard === null ? "" : `; ${fromVersion}'s update wizard: ${wizard}`}`))
+
+		if (wizard === "not seen") {
+			console.log(`${fromVersion}'s update wizard: not seen; ${nextVersion} started without it`)
+		}
 
 		const oldPids = new Set(before.map(entry => entry.pid))
 
