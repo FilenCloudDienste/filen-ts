@@ -4,8 +4,9 @@ import android.content.Context
 import android.util.Log
 
 /**
- * Hands the JVM and an application Context to the platform TLS verifier compiled into the sdk-rs
- * library (rustls-platform-verifier). Until it runs, every SDK connection fails closed.
+ * Hands the JVM to the certificate verifier compiled into the sdk-rs library, which asks the
+ * platform's X509TrustManager through JNI (no online revocation check). Until it runs, every SDK
+ * connection fails closed. The entry point still takes a Context; the SDK no longer reads it.
  *
  * The JNI symbol is Java_io_filen_net_FilenTls_nativeInit, exported by libfilen_sdk_rs.so: the Rust
  * cdylib that @filen/sdk-rs ships in its jniLibs and its TurboModule (libfilen-sdk-rs.so) links

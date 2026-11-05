@@ -354,9 +354,6 @@ export default ({ config }: ConfigContext): ExpoConfig => ({
 				targets: ANDROID_ABIS
 			}
 		],
-		// The Kotlin half of the Rust platform TLS verifier (both Rust libraries above use it). Its CRL
-		// hosts are merged into the app's network security config by withAndroidNetworkSecurityConfig.
-		"./plugins/withAndroidRustlsPlatformVerifier",
 		"./plugins/withAndroidSigning",
 		[
 			"react-native-document-scanner-plugin",
