@@ -1,11 +1,13 @@
 /**
  * Whether the last word on the connection to Filen is a certificate the platform verifier rejected
- * (an intercepting proxy, a captive portal, a revoked chain). The device is online, so this is its
- * own state in the offline indicator, never "offline". Marked when an SDK error of the TLS
- * verification kind (sdkErrors.isTlsVerificationError) reaches the query cache or an error alert.
- * Cleared when the socket authenticates (a verified round trip) and on going offline, after which
- * the next network is unproven. Query successes do not clear it: many queryFns are local and prove
- * nothing about the connection. Dependency-free, so infra that only clears it does not pull in the SDK.
+ * (an intercepting proxy, a captive portal, a revoked chain). The network works, so this is its own
+ * state in the offline indicator and wins over "offline". Marked when an SDK error of the TLS
+ * verification kind (sdkErrors.isTlsVerificationError) reaches the query cache or an error alert, or
+ * the reachability probe fails on it. Cleared when the socket authenticates or the probe gets an answer
+ * (verified round trips), when the probe gets none, and when the network interface goes down, after
+ * which the next network is unproven (lib/reachability.ts). Query successes do not clear it: many
+ * queryFns are local and prove nothing about the connection. Dependency-free, so infra that only
+ * clears it does not pull in the SDK.
  */
 export class ConnectionTrust {
 	private unverified = false

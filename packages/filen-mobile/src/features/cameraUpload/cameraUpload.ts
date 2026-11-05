@@ -23,6 +23,7 @@ import * as ImageManipulator from "expo-image-manipulator"
 import { renderAndSave } from "@/lib/imageManipulator"
 import NetInfo from "@react-native-community/netinfo"
 import { computeOnline } from "@/lib/connectivity"
+import reachability from "@/lib/reachability"
 import * as Battery from "expo-battery"
 import { hasAllNeededMediaPermissions } from "@/hooks/useMediaPermissions"
 import cache from "@/lib/cache"
@@ -1291,12 +1292,12 @@ class CameraUpload {
 				return
 			}
 
-			// Listing and uploading need the server, or every call fails into the error store. fetch()
-			// returns the cached state without awaiting NetInfo's reachability probe, so on iOS a cold
-			// headless run often sees a null `isInternetReachable`; counting that as offline forfeited the
-			// whole OS window. The accepted trade: a connected-but-unreachable device (captive portal) whose
-			// probe has not settled proceeds and fails into the error store, bounded by the run budget.
-			if (!computeOnline(netState)) {
+			// Listing and uploading need the server, or every call fails into the error store. The interface
+			// comes from the awaited fetch(); reachability is the SDK probe's last answer, null on a cold
+			// headless run whose probe has not settled. Counting null as offline forfeited the whole OS
+			// window, so the accepted trade: a connected-but-unreachable device (captive portal) whose probe
+			// has not settled proceeds and fails into the error store, bounded by the run budget.
+			if (!computeOnline(netState.isConnected, reachability.getReachable())) {
 				skipped = "offline"
 
 				return

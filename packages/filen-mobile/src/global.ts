@@ -3,7 +3,7 @@ import "@/lib/polyfills/buffer"
 import "@/lib/polyfills/crypto"
 import "@/lib/polyfills/console"
 
-// Bind TanStack onlineManager → NetInfo here (BG-04), the single universal entry that runs on EVERY
+// Bind TanStack onlineManager → reachability (NetInfo's interface + the SDK probe) here (BG-04), the single universal entry that runs on EVERY
 // launch — foreground render AND a headless OS background wake (entry.ts → "@/global"). Doing it only
 // in _layout.tsx left onlineManager at its default `online:true` during headless runs (the nav tree
 // never renders), so the offline background pass bypassed its own connectivity gate and the reconnect

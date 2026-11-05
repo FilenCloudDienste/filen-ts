@@ -103,17 +103,17 @@ describe("startReconnectListener", () => {
 		expect(mockChatsSyncNow).not.toHaveBeenCalled()
 	})
 
-	it("clears a certificate failure when the device goes offline, and keeps it on reconnect", async () => {
+	it("leaves a certificate failure alone across offline and online flips (the probe owns it)", async () => {
 		const { startReconnectListener } = await import("@/lib/reconnect")
-		// After resetModules: the same instance reconnect.ts imports.
+		// After resetModules: the same instance reconnect.ts would import.
 		const { default: connectionTrust } = await import("@/lib/connectionTrust")
 
 		startReconnectListener()
 		connectionTrust.markUnverified()
+		fireOnlineEvent(false)
+		expect(connectionTrust.isUnverified()).toBe(true)
 		fireOnlineEvent(true)
 		expect(connectionTrust.isUnverified()).toBe(true)
-		fireOnlineEvent(false)
-		expect(connectionTrust.isUnverified()).toBe(false)
 	})
 
 	it("is idempotent — calling startReconnectListener twice registers only one subscriber", async () => {

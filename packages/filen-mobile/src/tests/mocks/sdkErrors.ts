@@ -18,7 +18,9 @@ export const ErrorKind = {
 	Reqwest: "Reqwest",
 	RetryFailed: "RetryFailed",
 	Response: "Response",
-	TlsVerification: "TlsVerification"
+	TlsVerification: "TlsVerification",
+	Cancelled: "Cancelled",
+	FolderNotFound: "FolderNotFound"
 } as const
 
 export const sdkErrorState = {

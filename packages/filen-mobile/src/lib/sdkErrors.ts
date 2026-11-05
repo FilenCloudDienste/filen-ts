@@ -2,6 +2,7 @@ import { FilenSdkError, ErrorKind } from "@filen/sdk-rs"
 import { isNetworkClassErrorKind, isPermanentRejection } from "@filen/shared"
 import i18n from "@/lib/i18n"
 import { type en } from "@/locales/en"
+import type { ProbeOutcome } from "@/lib/reachability"
 
 export function unwrapSdkError(error: unknown): FilenSdkError | null {
 	if (FilenSdkError.hasInner(error)) {
@@ -40,6 +41,32 @@ export function isTlsVerificationError(error: unknown): boolean {
 	const unwrapped = unwrapSdkError(error)
 
 	return unwrapped !== null && isTlsVerificationErrorKind(unwrapped.kind())
+}
+
+/**
+ * What a failed reachability probe (src/lib/reachability.ts) says about the network. A rejected
+ * certificate is "unverified", never offline. A transport failure the SDK already retried (the
+ * shared network-class kinds) is "unreachable". Any other SDK error is an answer from Filen, so
+ * "reachable". A cancelled call or a non-SDK throw says nothing about the network.
+ */
+export function classifyReachabilityProbeError(error: unknown): ProbeOutcome {
+	const unwrapped = unwrapSdkError(error)
+
+	if (unwrapped === null) {
+		return "inconclusive"
+	}
+
+	const kind = unwrapped.kind()
+
+	if (isTlsVerificationErrorKind(kind)) {
+		return "unverified"
+	}
+
+	if (kind === ErrorKind.Cancelled) {
+		return "inconclusive"
+	}
+
+	return isNetworkClassErrorKind(ErrorKind[kind]) ? "unreachable" : "reachable"
 }
 
 const ERROR_KEY_BY_KIND: Partial<Record<ErrorKind, keyof typeof en>> = {

@@ -7,7 +7,10 @@ const {
 	mockRegister,
 	mockStartPasswordReset,
 	mockResendRegistrationConfirmation,
-	mockFromConfig
+	mockFromConfig,
+	mockGetDirPublicLinkInfo,
+	mockSetProbe,
+	mockClassifyProbeError
 } = vi.hoisted(() => {
 	process.env["EXPO_PUBLIC_SECURE_STORE_UNSECURE_FALLBACK_ENCRYPTION_KEY"] = "test-fallback-key-1234567890abcdef"
 
@@ -16,12 +19,16 @@ const {
 	const mockRegister = vi.fn()
 	const mockStartPasswordReset = vi.fn()
 	const mockResendRegistrationConfirmation = vi.fn()
+	const mockGetDirPublicLinkInfo = vi.fn()
+	const mockSetProbe = vi.fn()
+	const mockClassifyProbeError = vi.fn()
 	const mockFromConfig = vi.fn(() => ({
 		fromStringified: mockFromStringified,
 		login: mockLogin,
 		register: mockRegister,
 		startPasswordReset: mockStartPasswordReset,
-		resendRegistrationConfirmation: mockResendRegistrationConfirmation
+		resendRegistrationConfirmation: mockResendRegistrationConfirmation,
+		getDirPublicLinkInfo: mockGetDirPublicLinkInfo
 	}))
 
 	return {
@@ -31,7 +38,10 @@ const {
 		mockRegister,
 		mockStartPasswordReset,
 		mockResendRegistrationConfirmation,
-		mockFromConfig
+		mockFromConfig,
+		mockGetDirPublicLinkInfo,
+		mockSetProbe,
+		mockClassifyProbeError
 	}
 })
 
@@ -41,6 +51,16 @@ vi.mock("@filen/sdk-rs", () => ({
 	},
 	FilenSdkError: class FilenSdkError extends Error {},
 	LogLevel: { Info: "Info", Debug: "Debug", Warn: "Warn", Error: "Error", Trace: "Trace" }
+}))
+
+vi.mock("@/lib/reachability", () => ({
+	default: {
+		setProbe: mockSetProbe
+	}
+}))
+
+vi.mock("@/lib/sdkErrors", () => ({
+	classifyReachabilityProbeError: mockClassifyProbeError
 }))
 
 vi.mock("@/lib/secureStore", () => ({
@@ -283,6 +303,7 @@ vi.mock("expo", () => ({
 }))
 
 import auth from "@/lib/auth"
+import secureStore from "@/lib/secureStore"
 import useDriveClipboardStore from "@/features/drive/store/useDriveClipboard.store"
 
 type AuthInternals = {
@@ -293,6 +314,9 @@ type AuthInternals = {
 	clientsReadyResolve: (() => void) | null
 	lastStringifiedClient: unknown
 }
+
+// auth registers its probe at module init; vi.clearAllMocks in beforeEach would erase the call.
+const registeredProbe = mockSetProbe.mock.calls[0]?.[0] as ((signal: AbortSignal) => Promise<string>) | undefined
 
 function authInternals(): AuthInternals {
 	return auth as unknown as AuthInternals
@@ -1318,5 +1342,65 @@ describe("auth.resendConfirmationEmail", () => {
 
 		expect(mockFromConfig).not.toHaveBeenCalled()
 		expect(fakeExisting.resendRegistrationConfirmation).toHaveBeenCalledWith("unconfirmed@me.com")
+	})
+})
+
+describe("auth.probeReachability", () => {
+	beforeEach(() => {
+		resetAuthClients()
+		// Earlier suites leave queued secureStore reads behind; start signed out.
+		vi.mocked(secureStore.get).mockReset().mockResolvedValue(null)
+	})
+
+	it("registers itself as the reachability probe at module init", () => {
+		expect(registeredProbe).toBeTypeOf("function")
+	})
+
+	it("looks up the nil public link through the unauthed client, signal passed through", async () => {
+		const client = { getDirPublicLinkInfo: vi.fn(async () => ({})) }
+		const signal = new AbortController().signal
+
+		authInternals().unauthedClient = client
+
+		await expect(auth.probeReachability(signal)).resolves.toBe("reachable")
+		expect(client.getDirPublicLinkInfo).toHaveBeenCalledWith("00000000-0000-0000-0000-000000000000", "", { signal })
+		expect(mockFromConfig).not.toHaveBeenCalled()
+	})
+
+	it("classifies a failed lookup with the SDK error classifier", async () => {
+		const error = new Error("public_link_not_found")
+		const client = { getDirPublicLinkInfo: vi.fn(async () => Promise.reject(error)) }
+
+		authInternals().unauthedClient = client
+		mockClassifyProbeError.mockReturnValueOnce("unverified")
+
+		await expect(auth.probeReachability(new AbortController().signal)).resolves.toBe("unverified")
+		expect(mockClassifyProbeError).toHaveBeenCalledWith(error)
+	})
+
+	it("signed out with no client, builds the unauthed client sign-in would build and keeps it", async () => {
+		mockGetDirPublicLinkInfo.mockResolvedValueOnce({})
+
+		await expect(auth.probeReachability(new AbortController().signal)).resolves.toBe("reachable")
+		expect(mockFromConfig).toHaveBeenCalledTimes(1)
+		expect(authInternals().unauthedClient).not.toBeNull()
+	})
+
+	it("signed in but not set up yet, sends nothing rather than build a client setup would replace", async () => {
+		vi.mocked(secureStore.get).mockResolvedValueOnce({ email: "a@b.c" })
+
+		await expect(auth.probeReachability(new AbortController().signal)).resolves.toBe("inconclusive")
+		expect(mockFromConfig).not.toHaveBeenCalled()
+		expect(mockGetDirPublicLinkInfo).not.toHaveBeenCalled()
+	})
+
+	it("sends nothing while signing out", async () => {
+		const client = { getDirPublicLinkInfo: vi.fn() }
+
+		authInternals().unauthedClient = client
+		authInternals().logoutPromise = new Promise<void>(() => {})
+
+		await expect(auth.probeReachability(new AbortController().signal)).resolves.toBe("inconclusive")
+		expect(client.getDirPublicLinkInfo).not.toHaveBeenCalled()
 	})
 })

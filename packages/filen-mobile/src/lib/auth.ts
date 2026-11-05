@@ -42,8 +42,11 @@ import events from "@/lib/events"
 import { reloadAppAsync } from "expo"
 import { isEqual } from "es-toolkit"
 import { initTls } from "@/modules/filen-net"
+import reachability, { type ProbeOutcome } from "@/lib/reachability"
+import { classifyReachabilityProbeError } from "@/lib/sdkErrors"
 
 const RELOAD_RETRY_DELAY = 1000
+const NIL_UUID = "00000000-0000-0000-0000-000000000000"
 const RELOAD_MAX_ATTEMPTS = 5
 // How long sign-out waits for running copies to hand back their reports.
 const COPY_SETTLE_WAIT_MS = 6000
@@ -401,6 +404,40 @@ class Auth {
 		await this.unauthedClient.resendRegistrationConfirmation(email)
 	}
 
+	/**
+	 * The reachability probe (src/lib/reachability.ts): one unauthenticated SDK request, so Filen's
+	 * certificate is checked by the same verifier as all real traffic. It looks up the nil public link,
+	 * which the gateway answers with a small "not found" error and no other work; any answer is
+	 * reachable. Sent through the session's unauthed client, whose connections real traffic reuses.
+	 * Signed in but not set up yet (launch), it sends nothing rather than build a client setup would
+	 * replace at once; signed out, it builds the unauthed client sign-in would build anyway.
+	 */
+	public async probeReachability(signal: AbortSignal): Promise<ProbeOutcome> {
+		// Signing out: the clients are being destroyed and the process reloads next.
+		if (this.logoutPromise) {
+			return "inconclusive"
+		}
+
+		let client = this.unauthedClient
+
+		if (!client) {
+			if ((await this.isAuthed()).isAuthed) {
+				return "inconclusive"
+			}
+
+			// Re-read after the await: setup or sign-in may have built one meanwhile.
+			client = this.unauthedClient ?? (this.unauthedClient = this.createUnauthedClient())
+		}
+
+		try {
+			await client.getDirPublicLinkInfo(NIL_UUID, "", { signal })
+
+			return "reachable"
+		} catch (e) {
+			return classifyReachabilityProbeError(e)
+		}
+	}
+
 	public async logout(): Promise<void> {
 		if (this.logoutPromise) {
 			await this.logoutPromise
@@ -595,6 +632,8 @@ class Auth {
 }
 
 const auth = new Auth()
+
+reachability.setProbe(signal => auth.probeReachability(signal))
 
 export function useIsAuthed(): boolean {
 	const [stringifiedClient] = useSecureStore<StringifiedClient | null>(auth.stringifiedClientStorageKey, null)

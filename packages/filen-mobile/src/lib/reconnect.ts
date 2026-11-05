@@ -5,7 +5,6 @@ import notesOffline from "@/features/notes/notesOffline"
 import { sync as chatsSync } from "@/features/chats/components/sync"
 import cameraUpload from "@/features/cameraUpload/cameraUpload"
 import logger from "@/lib/logger"
-import connectionTrust from "@/lib/connectionTrust"
 
 let started = false
 
@@ -18,8 +17,6 @@ let started = false
  * - Refetch TanStack queries — the QueryClient default refetchOnReconnect:
  *   "always" handles that automatically. TanStack also serializes refetches
  *   per query key so there's no thunder-herd risk.
- *
- * On every true → false transition it clears connectionTrust's certificate-failure state.
  *
  * What it DOES do on every false → true transition:
  * - offlineSync.sync(): reconciles the offline-files store against current
@@ -46,9 +43,6 @@ export function startReconnectListener(): void {
 	// onlineManager only notifies on a value change, so every true here is a false -> true transition.
 	onlineManager.subscribe(isOnline => {
 		if (!isOnline) {
-			// A certificate failure was seen on the network the device just left; the next one is unproven.
-			connectionTrust.clear()
-
 			return
 		}
 

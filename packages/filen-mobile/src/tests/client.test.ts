@@ -12,7 +12,8 @@ const {
 	mockSetQueryData,
 	mockGetQueryData,
 	mockPersistQueryByKey,
-	mockQueryCacheGet
+	mockQueryCacheGet,
+	mockRequestProbe
 } = vi.hoisted(() => ({
 	mockIsNetworkClassError: vi.fn().mockReturnValue(false),
 	mockIsTlsVerificationError: vi.fn().mockReturnValue(false),
@@ -23,7 +24,8 @@ const {
 	mockSetQueryData: vi.fn(),
 	mockGetQueryData: vi.fn().mockReturnValue(undefined),
 	mockPersistQueryByKey: vi.fn().mockResolvedValue(undefined),
-	mockQueryCacheGet: vi.fn().mockReturnValue(undefined)
+	mockQueryCacheGet: vi.fn().mockReturnValue(undefined),
+	mockRequestProbe: vi.fn()
 }))
 
 // ─── vi.mock declarations (must appear before any imports of the mocked modules) ─
@@ -51,6 +53,12 @@ vi.mock("@/lib/sdkErrors", () => ({
 	unwrapSdkError: mockUnwrapSdkError,
 	isNetworkClassError: mockIsNetworkClassError,
 	isTlsVerificationError: mockIsTlsVerificationError
+}))
+
+vi.mock("@/lib/reachability", () => ({
+	default: {
+		requestProbe: mockRequestProbe
+	}
 }))
 
 vi.mock("@/lib/auth", () => ({
@@ -412,6 +420,30 @@ describe("QueryCache onError sink", () => {
 		mockIsOnline.mockReset().mockReturnValue(true)
 		mockLogout.mockReset().mockResolvedValue(undefined)
 		mockAlertsError.mockReset()
+		mockRequestProbe.mockReset()
+	})
+
+	it("asks the reachability probe to confirm a network failure seen while online", async () => {
+		mockIsNetworkClassError.mockReturnValue(true)
+
+		const onError = await getOnError()
+		onError(new Error("net online"), { queryKey: ["k"] })
+
+		expect(mockRequestProbe).toHaveBeenCalledTimes(1)
+	})
+
+	it("asks for no probe for a network failure while offline, nor for a non-network error", async () => {
+		const onError = await getOnError()
+
+		mockIsNetworkClassError.mockReturnValue(true)
+		mockIsOnline.mockReturnValue(false)
+		onError(new Error("net offline"), { queryKey: ["k"] })
+
+		mockIsNetworkClassError.mockReturnValue(false)
+		mockIsOnline.mockReturnValue(true)
+		onError(new Error("boom-unique-probe"), { queryKey: ["k"] })
+
+		expect(mockRequestProbe).not.toHaveBeenCalled()
 	})
 
 	it("records a TLS verification failure in connectionTrust instead of alerting", async () => {

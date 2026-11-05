@@ -11,7 +11,13 @@ vi.mock("@filen/sdk-rs", async () => {
 
 import { asSdkError, sdkErrorState } from "@/tests/mocks/sdkErrors"
 import { ErrorKind } from "@filen/sdk-rs"
-import { isTlsVerificationError, isTlsVerificationErrorKind, isPermanentSdkRejection, sdkErrorPartsToHumanReadable } from "@/lib/sdkErrors"
+import {
+	isTlsVerificationError,
+	isTlsVerificationErrorKind,
+	isPermanentSdkRejection,
+	sdkErrorPartsToHumanReadable,
+	classifyReachabilityProbeError
+} from "@/lib/sdkErrors"
 import { ConnectionTrust } from "@/lib/connectionTrust"
 import { errors } from "@/locales/en/errors"
 
@@ -69,5 +75,31 @@ describe("ConnectionTrust", () => {
 		trust.markUnverified()
 
 		expect(listener).not.toHaveBeenCalled()
+	})
+})
+
+describe("classifyReachabilityProbeError", () => {
+	it("reads a rejected certificate as unverified, never as offline", () => {
+		expect(classifyReachabilityProbeError(asSdkError(new Error("tls"), "TlsVerification"))).toBe("unverified")
+	})
+
+	it("reads a transport failure the SDK already retried as unreachable", () => {
+		for (const kind of ["Reqwest", "RetryFailed", "Response"]) {
+			expect(classifyReachabilityProbeError(asSdkError(new Error(kind), kind))).toBe("unreachable")
+		}
+	})
+
+	it("reads any other SDK error as an answer from Filen, so reachable", () => {
+		// The probe's nil public link is answered with an API error; a session the server refuses is
+		// still the server answering.
+		for (const kind of ["Server", "FolderNotFound", "Unauthenticated"]) {
+			expect(classifyReachabilityProbeError(asSdkError(new Error(kind), kind))).toBe("reachable")
+		}
+	})
+
+	it("learns nothing from a cancelled call or a non-SDK throw", () => {
+		expect(classifyReachabilityProbeError(asSdkError(new Error("cancelled"), "Cancelled"))).toBe("inconclusive")
+		expect(classifyReachabilityProbeError(new Error("AbortError"))).toBe("inconclusive")
+		expect(classifyReachabilityProbeError("aborted")).toBe("inconclusive")
 	})
 })

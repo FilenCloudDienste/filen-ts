@@ -115,6 +115,7 @@ import { CAMERA_UPLOAD_REUPLOAD_DELETED_SECURE_STORE_KEY } from "@/features/came
 import secureStore from "@/lib/secureStore"
 import { CONVERT_HEIC_TO_JPG_ENABLED_SECURE_STORE_KEY } from "@/lib/imageConversion"
 import NetInfo from "@react-native-community/netinfo"
+import reachability from "@/lib/reachability"
 import * as Battery from "expo-battery"
 import { hasAllNeededMediaPermissions } from "@/hooks/useMediaPermissions"
 import { getPermissionsAsync } from "expo-media-library/legacy"
@@ -336,22 +337,23 @@ describe("sync pre-flight checks", () => {
 		expect(mockSetSyncing).not.toHaveBeenCalled()
 	})
 
-	it("skips when internet is unreachable (captive portal / DNS dead)", async () => {
+	it("skips when the reachability probe found Filen unreachable (captive portal / DNS dead)", async () => {
 		vi.mocked(secureStore.get).mockResolvedValueOnce({ ...ENABLED_CONFIG, cellular: true })
 		vi.mocked(NetInfo.fetch).mockResolvedValueOnce({ type: "wifi", isConnected: true, isInternetReachable: false } as any)
+		vi.spyOn(reachability, "getReachable").mockReturnValueOnce(false)
 
 		await cameraUpload.sync()
 
 		expect(mockSetSyncing).not.toHaveBeenCalled()
 	})
 
-	it("proceeds when isInternetReachable is null (reachability not determined yet)", async () => {
-		// iOS reports null for a window at the start of every process: its native module supplies no
-		// isInternetReachable, so NetInfo falls back to a probe and serves null from cache until that
-		// probe first settles. Treating null as offline skipped whole headless runs. isConnected is
-		// still authoritative, so a genuinely offline device (below) is unaffected.
+	it("proceeds while reachability is not determined yet (no probe settled this process)", async () => {
+		// A cold headless run reads before its first probe settles. Treating that as offline skipped
+		// whole headless runs. isConnected is still authoritative, so a genuinely offline device
+		// (below) is unaffected. NetInfo's own isInternetReachable is ignored (its probe is off).
 		vi.mocked(secureStore.get).mockResolvedValueOnce({ ...ENABLED_CONFIG, cellular: true })
-		vi.mocked(NetInfo.fetch).mockResolvedValueOnce({ type: "wifi", isConnected: true, isInternetReachable: null } as any)
+		vi.mocked(NetInfo.fetch).mockResolvedValueOnce({ type: "wifi", isConnected: true, isInternetReachable: false } as any)
+		vi.spyOn(reachability, "getReachable").mockReturnValueOnce(null)
 
 		await cameraUpload.sync()
 

@@ -6,6 +6,7 @@ import alerts from "@/lib/alerts"
 import { serialize, deserialize } from "@/lib/serializer"
 import { unwrapSdkError, isNetworkClassError, isTlsVerificationError } from "@/lib/sdkErrors"
 import connectionTrust from "@/lib/connectionTrust"
+import reachability from "@/lib/reachability"
 import { ErrorKind } from "@filen/sdk-rs"
 import { errorMessage } from "@filen/shared"
 import { AppState } from "react-native"
@@ -855,6 +856,13 @@ const queryCache = new QueryCache({
 			unwrapSdkError,
 			isOnline: () => onlineManager.isOnline()
 		})
+
+		// A request failing on the network while believed online is evidence the reachability probe
+		// confirms (it decides offline; one failed query does not). A certificate failure asks for it
+		// through connectionTrust.
+		if (action !== "unverified" && onlineManager.isOnline() && isNetworkClassError(err)) {
+			reachability.requestProbe()
+		}
 
 		// Suppressed = expected, query-local UX (session-cache warm-up misses, offline network
 		// errors) — info keeps them in the breadcrumb ring as context for real errors without
