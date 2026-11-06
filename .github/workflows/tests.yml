@@ -536,10 +536,12 @@ jobs:
             [[ "$spec" =~ ^[A-Za-z0-9_./-]+$ ]] || { echo "invalid spec: $spec"; exit 1; }
             args+=("$spec")
           done
-          if [ -n "$E2E_SPEC" ]; then
-            [[ "$E2E_SPEC" =~ ^[A-Za-z0-9_./:-]+$ ]] || { echo "invalid spec: $E2E_SPEC"; exit 1; }
-            args+=("$E2E_SPEC")
-          fi
+          # The dispatch's specs, space-separated; read -a splits without globbing.
+          read -ra specs <<< "$E2E_SPEC"
+          for spec in "${specs[@]}"; do
+            [[ "$spec" =~ ^[A-Za-z0-9_./:-]+$ ]] || { echo "invalid spec: $spec"; exit 1; }
+            args+=("$spec")
+          done
           if [ -n "$E2E_PROJECT" ]; then
             [[ "$E2E_PROJECT" =~ ^[a-z0-9-]+$ ]] || { echo "invalid project: $E2E_PROJECT"; exit 1; }
             args+=("--project=$E2E_PROJECT")
