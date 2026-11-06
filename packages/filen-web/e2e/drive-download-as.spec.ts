@@ -11,6 +11,7 @@ import { DOCX_FIXTURE_TEXT, DOCX_MIME, docxFixtureBytes } from "./helpers/docxFi
 import { ENCRYPTED_DOCX_PASSWORD, ENCRYPTED_DOCX_TEXT, encryptedDocxBytes } from "./helpers/docxEncryptedFixtures"
 import { holdChunks } from "./helpers/jobs"
 import { MOD_KEY } from "./helpers/modkey"
+import { closeOfficeDocument } from "./helpers/ribbon"
 import { trackCspViolations } from "./helpers/csp"
 import { storedPassword, trackPasswordCanary } from "./helpers/passwordCanary"
 import { drive } from "@/locales/en/drive"
@@ -130,8 +131,7 @@ async function fileMenuPdf(page: Page, listbox: Locator, name: string): Promise<
 
 	const path = await (await downloading).path()
 
-	await page.keyboard.press("Escape")
-	await expect(page.getByRole("dialog")).toHaveCount(0)
+	await closeOfficeDocument(page, page.getByRole("dialog"))
 
 	return path
 }

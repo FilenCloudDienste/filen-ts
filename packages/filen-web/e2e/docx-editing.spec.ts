@@ -3,7 +3,7 @@ import { test, expect } from "./fixtures"
 import { LAZY_VIEWER_TIMEOUT_MS, LIVE_WRITE_TIMEOUT_MS, uploadFiles, withScratchDirectory } from "./helpers/listing"
 import { DOCX_FIXTURE_TEXT, DOCX_MIME, docxFixtureBytes, svgPictureBytes, type DocxFixtureName } from "./helpers/docxFixtures"
 import { trackCspViolations } from "./helpers/csp"
-import { ribbonButton, ribbonCommands, ribbonTab } from "./helpers/ribbon"
+import { closeOfficeDocument, ribbonButton, ribbonCommands, ribbonTab } from "./helpers/ribbon"
 import { preview } from "@/locales/en/preview"
 
 // The DOCX editor's editing UI in a real browser: the Table group and a column border dragged on the page, a
@@ -77,8 +77,7 @@ async function closeMenu(page: Page): Promise<void> {
 }
 
 async function closeDocument(page: Page): Promise<void> {
-	await page.keyboard.press("Escape")
-	await expect(page.getByRole("toolbar", { name: preview.previewOfficeRibbonCommands })).toHaveCount(0)
+	await closeOfficeDocument(page, ribbonCommands(page))
 }
 
 async function upload(page: Page, listbox: Locator, runId: string, fixtures: readonly DocxFixtureName[]): Promise<Record<string, string>> {

@@ -19,6 +19,7 @@ import {
 	LIVE_WRITE_TIMEOUT_MS
 } from "./helpers/listing"
 import { setAppOffline } from "./helpers/offline"
+import { photos } from "@/locales/en/photos"
 
 // Compress from Photos: the tile menu, the selection bar, the options dialog with a mixed selection and
 // with Afterwards, and the gates (no Extract anywhere in Photos, Compress off while offline). Photos only
@@ -26,6 +27,22 @@ import { setAppOffline } from "./helpers/offline"
 // says, so every submit here goes to the scratch directory and none to the drive root.
 
 const OFFLINE_TITLE = "Unavailable while offline"
+
+// Removes `name` from the photos directories through the Directories dialog, leaving the screen at its unset hero.
+async function removePhotosDirectory(page: Page, name: string): Promise<void> {
+	await page.getByRole("button", { name: photos.photosDirectoriesButton, exact: true }).click()
+
+	const dialog = page.getByRole("dialog", { name: photos.photosDirectoriesTitle, exact: true })
+
+	await dialog.getByRole("button", { name: photos.photosRemoveDirectory.replace("{{name}}", name), exact: true }).click()
+	await page
+		.getByRole("alertdialog", { name: photos.photosRemoveConfirmTitle.replace("{{name}}", name), exact: true })
+		.getByRole("button", { name: photos.photosRemoveConfirmAction, exact: true })
+		.click()
+	await expect(dialog.getByText(photos.photosDirectoriesNone, { exact: true })).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
+	await dialog.getByRole("button", { name: photos.photosDirectoriesDone, exact: true }).click()
+	await expect(page.getByText(photos.photosUnsetTitle, { exact: true })).toBeVisible()
+}
 
 // Picks the photos root down `path` from the drive root in the chooser ("Choose directory" on a fresh
 // context, which has no root yet), and returns the grid once it shows `expectTiles` tiles.
@@ -190,8 +207,10 @@ test.describe("photos compress", () => {
 		}
 	})
 
-	// Over the shared read-only fixture tree's two PNGs: picking a photos root is a local preference, and
-	// nothing below ever runs a compress (the entries are only looked at), so this test writes nothing.
+	// Over the shared read-only fixture tree's two PNGs: nothing below ever runs a compress (the entries are only looked
+	// at), so the tree is never written. The photos directory picked over it is synced to the account's .filen, so it is
+	// removed again at the end: a later spec starts at the unset hero. A failed run leaves it to the fixture teardown, whose
+	// trash makes the next visit drop it as gone.
 	test("offers Compress but never Extract in the viewer's menu, and switches Compress off while offline", async ({ page }) => {
 		const cspViolations = trackCspViolations(page)
 		const [imageA, imageB] = FIXTURE_FILES["preview-image"]
@@ -240,6 +259,8 @@ test.describe("photos compress", () => {
 			await expect(tileCompress).toHaveAttribute("title", OFFLINE_TITLE)
 			await expect(tileMenu.getByRole("menuitem", { name: "Extract", exact: true })).toHaveCount(0)
 			await dismissOverlays(page)
+			await setAppOffline(page, false)
+			await removePhotosDirectory(page, "preview-image")
 		} finally {
 			await setAppOffline(page, false)
 		}

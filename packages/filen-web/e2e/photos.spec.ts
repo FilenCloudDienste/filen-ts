@@ -11,12 +11,13 @@ import {
 } from "./helpers/listing"
 import { PNG_BYTES } from "./helpers/fixtureBytes"
 import { resolveModKey } from "./helpers/modkey"
+import { photos } from "@/locales/en/photos"
 
 // The one live proof of the whole photos arc: root selection, the media-only grid over a mixed
 // upload, the viewer wired to the shared preview overlay, a favorite toggled FROM INSIDE that overlay
 // reflecting back into the grid without a reload (trash/rename already converge for free via the
 // drive socket echo's photos-invalidation set — favorite needs its own patch since it has no such
-// echo), the change-directory affordance, and the root-gone reset once the chosen directory is
+// echo), the Directories dialog, and the root-gone reset once the chosen directory is
 // trashed. Net-zero via the same scratch-directory convention as every other upload spec.
 
 // A real, tiny synthetic H.264/mp4 clip (64x64, 2s @ 5fps) — generated once via
@@ -30,7 +31,7 @@ const MP4_BYTES = Buffer.from(
 	"base64"
 )
 
-test("photos: root pick over a mixed upload, media-only grid, viewer pager + in-overlay favorite reflecting back without a reload, change-directory, and root-gone reset", async ({
+test("photos: root pick over a mixed upload, media-only grid, viewer pager + in-overlay favorite reflecting back without a reload, Directories dialog, and root-gone reset", async ({
 	page
 }) => {
 	const runId = crypto.randomUUID()
@@ -244,17 +245,20 @@ test("photos: root pick over a mixed upload, media-only grid, viewer pager + in-
 		await expect(copyDialog).toHaveCount(0)
 		await expect(grid.locator('[role="option"][aria-selected="true"]')).toHaveCount(2)
 
-		// Clear the selection so the change-directory block and the teardown below run against exactly the
+		// Clear the selection so the Directories block and the teardown below run against exactly the
 		// state they run against without this leg.
 		await tiles.first().focus()
 		await page.keyboard.press("Escape")
 		await expect(grid.locator('[role="option"][aria-selected="true"]')).toHaveCount(0)
 
-		// ---- change-directory affordance re-opens the chooser ----
-		await page.getByRole("button", { name: "Change directory", exact: true }).click()
-		await expect(chooser).toBeVisible()
-		await page.keyboard.press("Escape")
-		await expect(chooser).toHaveCount(0)
+		// ---- the Directories dialog lists the picked directory, removable; Done leaves it in place ----
+		await page.getByRole("button", { name: photos.photosDirectoriesButton, exact: true }).click()
+		const directories = page.getByRole("dialog", { name: photos.photosDirectoriesTitle, exact: true })
+		await expect(
+			directories.getByRole("button", { name: photos.photosRemoveDirectory.replace("{{name}}", scratchName), exact: true })
+		).toBeVisible()
+		await directories.getByRole("button", { name: photos.photosDirectoriesDone, exact: true }).click()
+		await expect(directories).toHaveCount(0)
 
 		// ---- trash the scratch directory itself (root-gone), then revisit /photos ----
 		await trashScratchDirectory(page, scratchName)
@@ -264,8 +268,8 @@ test("photos: root pick over a mixed upload, media-only grid, viewer pager + in-
 
 		// Raised once the photos listing's read of the trashed root fails — a network read, so the boot
 		// budget rather than a UI one.
-		await expect(page.getByText("Your photos directory is no longer available.")).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
-		await expect(page.getByText("Choose your photos directory")).toBeVisible()
+		await expect(page.getByText(photos.photosRootGoneToast)).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
+		await expect(page.getByText(photos.photosUnsetTitle)).toBeVisible()
 	} finally {
 		// The net-zero safety net for every path that threw before the in-body trash above — but ONLY
 		// those. Calling it a second time after that one ran is not a cheap no-op: it burns its full row

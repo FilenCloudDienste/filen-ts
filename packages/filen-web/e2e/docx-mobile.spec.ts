@@ -4,7 +4,7 @@ import { LAZY_VIEWER_TIMEOUT_MS, LIVE_WRITE_TIMEOUT_MS, toasts, uploadFiles, wit
 import { DOCX_FIXTURE_TEXT, DOCX_MIME, docxFixtureBytes, type DocxFixtureName } from "./helpers/docxFixtures"
 import { trackCspViolations } from "./helpers/csp"
 import { common } from "@/locales/en/common"
-import { ribbonButton, ribbonTab } from "./helpers/ribbon"
+import { closeOfficeDocument, ribbonButton, ribbonCommands, ribbonTab } from "./helpers/ribbon"
 import { preview } from "@/locales/en/preview"
 
 // The DOCX editor's Mobile view in a real browser at a phone's width: it shows by itself, the text is edited
@@ -73,8 +73,7 @@ async function openDocument(page: Page, listbox: Locator, name: string, marker: 
 }
 
 async function closeDocument(page: Page): Promise<void> {
-	await page.keyboard.press("Escape")
-	await expect(page.getByRole("toolbar", { name: preview.previewOfficeRibbonCommands })).toHaveCount(0)
+	await closeOfficeDocument(page, ribbonCommands(page))
 }
 
 test("Mobile view: shown by itself on a phone, typing, IME and spelling in place, kept by a save", async ({ page, browserName }) => {

@@ -120,6 +120,8 @@ export function RailGroup({
 				render={
 					<Link
 						to={RAIL_CHILD_ROUTE[target]}
+						// A click navigates, so this stays a link: a non-native trigger otherwise gets Base UI's role="button".
+						role="link"
 						aria-current={activeChild === null ? undefined : "page"}
 						aria-label={status === undefined ? label : t("railGroupWithStatus", { group: label, status })}
 						className={cn(railItemClass(activeChild !== null), "relative")}
