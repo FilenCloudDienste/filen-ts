@@ -34,6 +34,22 @@ export function seededBytes(seed: string, size: number): Buffer {
 // The fixture's 0-byte file.
 export const EMPTY_FILE = "docs/empty.txt"
 
+const BLOB_BYTES = 1.5 * MIB
+// A tree's multi-chunk file per seed. Every side and client rule of a pair asks for a new tree of the same seed, and
+// hashing 1.5 MiB again each time is most of what building one costs. Shared by every tree of its seed, never written.
+const blobs = new Map<string, Buffer>()
+
+function blobOf(seed: string): Buffer {
+	let blob = blobs.get(seed)
+
+	if (blob === undefined) {
+		blob = seededBytes(`${seed}/blob`, BLOB_BYTES)
+		blobs.set(seed, blob)
+	}
+
+	return blob
+}
+
 // The shape every pair syncs: a nested file, an empty file, one of more than one chunk, unicode and space names and an
 // empty directory. `dotEntries` adds a hidden file and directory, which an excludeDotFiles pair keeps on its seeded side.
 export function fixtureTree(seed: string, dotEntries: boolean): Tree {
@@ -41,7 +57,7 @@ export function fixtureTree(seed: string, dotEntries: boolean): Tree {
 	const files = new Map<string, Buffer>([
 		["docs/notes.txt", text("notes")],
 		[EMPTY_FILE, Buffer.alloc(0)],
-		["media/blob.bin", seededBytes(`${seed}/blob`, 1.5 * MIB)],
+		["media/blob.bin", blobOf(seed)],
 		["nested/a/b/c.txt", text("c")],
 		["Ünïcødé ✓ name.txt".normalize("NFC"), text("unicode")],
 		["space name.txt", text("space")]
