@@ -429,3 +429,81 @@ describe("reachability: evidence from real traffic", () => {
 		expect(connectionTrust.isUnverified()).toBe(false)
 	})
 })
+
+describe("reachability: socket reconnect", () => {
+	it("asks for a reconnect when an interface comes up or changes, never when it goes down", async () => {
+		const { reachability, probe } = await setup()
+		const reconnect = vi.fn()
+
+		reachability.setProbe(probe)
+		reachability.setSocketReconnect(reconnect)
+
+		reachability.setInterface(true, "wifi")
+		reachability.setInterface(true, "wifi")
+		expect(reconnect).toHaveBeenCalledTimes(1)
+
+		reachability.setInterface(false, "none")
+		expect(reconnect).toHaveBeenCalledTimes(1)
+
+		reachability.setInterface(true, "cellular")
+		expect(reconnect).toHaveBeenCalledTimes(2)
+	})
+
+	it("asks on every return to the foreground", async () => {
+		const { reachability, probe } = await setup()
+		const reconnect = vi.fn()
+
+		reachability.setProbe(probe)
+		reachability.setSocketReconnect(reconnect)
+		reachability.start()
+		await settle()
+		reconnect.mockClear()
+
+		appState.emit("background")
+		expect(reconnect).not.toHaveBeenCalled()
+
+		appState.emit("active")
+		appState.emit("background")
+		appState.emit("active")
+		expect(reconnect).toHaveBeenCalledTimes(2)
+	})
+
+	it("asks when Filen answers again after the probe found it unreachable", async () => {
+		const { reachability, probe, outcomes } = await setup()
+		const reconnect = vi.fn()
+
+		outcomes.push("unreachable", "reachable")
+		reachability.setProbe(probe)
+		reachability.setSocketReconnect(reconnect)
+		reachability.start()
+		await settle()
+		expect(reconnect).not.toHaveBeenCalled()
+
+		await vi.advanceTimersByTimeAsync(REACHABILITY_PROBE.unreachableIntervalMs)
+		expect(reachability.getReachable()).toBe(true)
+		expect(reconnect).toHaveBeenCalledTimes(1)
+	})
+
+	it("asks nothing while the socket is connected", async () => {
+		const { reachability, probe, useSocketStore } = await setup()
+		const reconnect = vi.fn()
+
+		reachability.setProbe(probe)
+		reachability.setSocketReconnect(reconnect)
+		reachability.start()
+		await settle()
+		useSocketStore.getState().setState("connected")
+		reconnect.mockClear()
+
+		reachability.setInterface(true, "wifi")
+		appState.emit("background")
+		appState.emit("active")
+		expect(reconnect).not.toHaveBeenCalled()
+	})
+
+	it("asks nothing before a reconnect is registered (auth not loaded)", async () => {
+		const { reachability } = await setup()
+
+		expect(() => reachability.setInterface(true, "wifi")).not.toThrow()
+	})
+})

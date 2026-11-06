@@ -10,6 +10,7 @@ const {
 	mockFromConfig,
 	mockHealth,
 	mockSetProbe,
+	mockSetSocketReconnect,
 	mockClassifyProbeError
 } = vi.hoisted(() => {
 	process.env["EXPO_PUBLIC_SECURE_STORE_UNSECURE_FALLBACK_ENCRYPTION_KEY"] = "test-fallback-key-1234567890abcdef"
@@ -21,6 +22,7 @@ const {
 	const mockResendRegistrationConfirmation = vi.fn()
 	const mockHealth = vi.fn()
 	const mockSetProbe = vi.fn()
+	const mockSetSocketReconnect = vi.fn()
 	const mockClassifyProbeError = vi.fn()
 	const mockFromConfig = vi.fn(() => ({
 		fromStringified: mockFromStringified,
@@ -41,6 +43,7 @@ const {
 		mockFromConfig,
 		mockHealth,
 		mockSetProbe,
+		mockSetSocketReconnect,
 		mockClassifyProbeError
 	}
 })
@@ -55,7 +58,8 @@ vi.mock("@filen/sdk-rs", () => ({
 
 vi.mock("@/lib/reachability", () => ({
 	default: {
-		setProbe: mockSetProbe
+		setProbe: mockSetProbe,
+		setSocketReconnect: mockSetSocketReconnect
 	}
 }))
 
@@ -317,6 +321,7 @@ type AuthInternals = {
 
 // auth registers its probe at module init; vi.clearAllMocks in beforeEach would erase the call.
 const registeredProbe = mockSetProbe.mock.calls[0]?.[0] as ((signal: AbortSignal) => Promise<string>) | undefined
+const registeredSocketReconnect = mockSetSocketReconnect.mock.calls[0]?.[0] as (() => void) | undefined
 
 function authInternals(): AuthInternals {
 	return auth as unknown as AuthInternals
@@ -1402,5 +1407,46 @@ describe("auth.probeReachability", () => {
 
 		await expect(auth.probeReachability(new AbortController().signal)).resolves.toBe("inconclusive")
 		expect(client.health).not.toHaveBeenCalled()
+	})
+})
+
+describe("auth.reconnectSocket", () => {
+	beforeEach(() => {
+		resetAuthClients()
+	})
+
+	it("registers itself as the reachability socket reconnect at module init", () => {
+		expect(registeredSocketReconnect).toBeTypeOf("function")
+	})
+
+	it("asks the signed-in client's socket to reconnect, once per call", () => {
+		const client = { reconnectSocket: vi.fn(async () => {}) }
+
+		authInternals().authedClient = client
+
+		registeredSocketReconnect?.()
+		registeredSocketReconnect?.()
+
+		expect(client.reconnectSocket).toHaveBeenCalledTimes(2)
+	})
+
+	it("does nothing signed out (no authed client)", () => {
+		const unauthed = { reconnectSocket: vi.fn(async () => {}) }
+
+		authInternals().unauthedClient = unauthed
+
+		expect(() => auth.reconnectSocket()).not.toThrow()
+		expect(unauthed.reconnectSocket).not.toHaveBeenCalled()
+	})
+
+	it("does nothing while signing out", () => {
+		const client = { reconnectSocket: vi.fn(async () => {}) }
+
+		authInternals().authedClient = client
+		authInternals().logoutPromise = new Promise<void>(() => {})
+
+		auth.reconnectSocket()
+
+		expect(client.reconnectSocket).not.toHaveBeenCalled()
 	})
 })

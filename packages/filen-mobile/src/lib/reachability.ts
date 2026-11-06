@@ -31,6 +31,10 @@ export type ReachabilityProbe = (signal: AbortSignal) => Promise<ProbeOutcome>
  * "reachable" (a verified round trip), on "unreachable" and when the interface goes down (the next
  * network is unproven). The probe itself is registered by the SDK client owner (auth), so this module
  * does not pull the SDK into the boot path.
+ *
+ * The same evidence that the network may be back (a network interface coming up or changing, the app
+ * coming to the foreground, Filen answering again) asks the SDK to cut its socket's reconnect backoff
+ * short, through the hook auth registers, while no authenticated socket is up.
  */
 export class Reachability {
 	private interfaceConnected: boolean | null = null
@@ -40,6 +44,7 @@ export class Reachability {
 	private active = true
 	private started = false
 	private probe: ReachabilityProbe | null = null
+	private reconnectSocket: (() => void) | null = null
 	private probePending = false
 	private inFlight = false
 	private lastProbeAt: number | null = null
@@ -74,6 +79,10 @@ export class Reachability {
 		}
 	}
 
+	public setSocketReconnect(reconnect: () => void): void {
+		this.reconnectSocket = reconnect
+	}
+
 	/** Subscribes to the app state, the socket and the certificate state. Idempotent. */
 	public start(): void {
 		if (this.started) {
@@ -93,6 +102,7 @@ export class Reachability {
 			this.active = active
 
 			if (active) {
+				this.networkMayBeBack()
 				this.requestProbe()
 
 				return
@@ -154,6 +164,11 @@ export class Reachability {
 		}
 
 		this.emit()
+
+		if (isConnected === true) {
+			this.networkMayBeBack()
+		}
+
 		this.requestProbe()
 	}
 
@@ -231,9 +246,22 @@ export class Reachability {
 
 		if (this.reachable !== prevReachable) {
 			logger.info("reachability", "changed", { outcome })
+
+			// Back from unreachable or unverified; the first answer after launch is no return.
+			if (this.reachable && prevReachable === false) {
+				this.networkMayBeBack()
+			}
 		}
 
 		this.emit()
+	}
+
+	// A connected socket has nothing to cut short; otherwise the SDK ignores the call while it has no socket
+	// (signed out, or in the background, which closes it) and coalesces a burst into one attempt.
+	private networkMayBeBack(): void {
+		if (this.reconnectSocket && useSocketStore.getState().state !== "connected") {
+			this.reconnectSocket()
+		}
 	}
 
 	// The periodic re-check, only while the answer can change unseen.

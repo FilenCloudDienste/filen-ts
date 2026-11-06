@@ -404,6 +404,21 @@ class Auth {
 	}
 
 	/**
+	 * Asks the signed-in client's socket to reconnect now instead of waiting out its backoff
+	 * (src/lib/reachability.ts calls it when the network may be back). Signed out, signing out or not set
+	 * up yet, there is no socket to wake. The SDK call never rejects.
+	 */
+	public reconnectSocket(): void {
+		if (this.logoutPromise || !this.authedClient) {
+			return
+		}
+
+		this.authedClient.reconnectSocket().catch((e: unknown) => {
+			logger.warn("auth", "reconnectSocket failed", { error: e })
+		})
+	}
+
+	/**
 	 * The reachability probe (src/lib/reachability.ts): the SDK's health check, one unauthenticated
 	 * request without retries, so Filen's certificate is checked by the same verifier as all real
 	 * traffic and the answer is the network's state now. Sent through the session's unauthed client,
@@ -633,6 +648,7 @@ class Auth {
 const auth = new Auth()
 
 reachability.setProbe(signal => auth.probeReachability(signal))
+reachability.setSocketReconnect(() => auth.reconnectSocket())
 
 export function useIsAuthed(): boolean {
 	const [stringifiedClient] = useSecureStore<StringifiedClient | null>(auth.stringifiedClientStorageKey, null)
