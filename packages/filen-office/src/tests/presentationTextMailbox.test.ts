@@ -170,13 +170,17 @@ describe("presentation text mailbox", () => {
 		controller.dispatch(controller.state.tr.insertText("A", 1), true)
 
 		const start = cpuMs()
+		const wallStart = performance.now()
 
 		frames.shift()?.()
 
+		const waited = performance.now() - wallStart
 		const spent = cpuMs() - start
 
-		// The worker never writes: the first frame gives up after the spin, and the next frame reads again.
-		expect(spent).toBeGreaterThanOrEqual(MAILBOX_SPIN_MS * 0.5)
+		// The worker never writes: the first frame gives up after the spin, and the next frame reads again. The spin
+		// is timed on the wall clock, which a descheduled process still advances, so that is what bounds it from
+		// below; only CPU time is free of a busy runner's stalls, so that is what bounds it from above.
+		expect(waited).toBeGreaterThanOrEqual(MAILBOX_SPIN_MS * 0.5)
 		expect(spent).toBeLessThan(MAILBOX_SPIN_MS + 4)
 		expect(frames).toHaveLength(1)
 	})
