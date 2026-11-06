@@ -82,6 +82,9 @@ export interface NativeSupervisor {
 	callMounts<K extends MountsOp>(op: K, args: NativeOpArgs<K>, userId?: string, timeoutMs?: number): Promise<NativeMountsResult<K>>
 	// A page shows the overview (or the mounts stats): the host streams it and stays up.
 	subscribe(on: boolean, topic?: NativeTopic): void
+	// The network may be back (a wake from sleep, the page going online): a running host's socket cuts a reconnect
+	// backoff short. Never starts a host.
+	reconnectSocket(): void
 	// After a failure: start again from a clean slate.
 	retry(): void
 	// The signed-in user, from the vault; null when signed out or unreadable.
@@ -606,6 +609,11 @@ export function createNativeSupervisor(deps: NativeSupervisorDeps): NativeSuperv
 			}
 
 			ensure(on ? `subscribed (${topic})` : `unsubscribed (${topic})`)
+		},
+		reconnectSocket: () => {
+			if (current?.ready === true && !current.revoked) {
+				send(current, { t: "reconnectSocket" })
+			}
 		},
 		retry: () => {
 			stuck = false

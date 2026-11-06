@@ -602,8 +602,10 @@ export interface NativeInit {
 
 export type NativeCall = { [K in NativeOp]: { t: "call"; id: number; op: K; args: NativeOpArgs<K> } }[NativeOp]
 
-// `overview`: the sync runtime; `mounts`: mounts stats at 1 Hz.
-export type ToNative = NativeInit | NativeCall | { t: "subscribe"; overview: boolean; mounts: boolean } | { t: "shutdown" }
+// `overview`: the sync runtime; `mounts`: mounts stats at 1 Hz. `reconnectSocket`: the network may be back, so the
+// client's socket cuts a reconnect backoff short; no reply.
+export type ToNative =
+	NativeInit | NativeCall | { t: "subscribe"; overview: boolean; mounts: boolean } | { t: "reconnectSocket" } | { t: "shutdown" }
 
 const initSchema = pinned<NativeInit>()(
 	type({
@@ -626,6 +628,7 @@ const callSchema = type({ t: "'call'", id: callIdSchema, op: opSchema, args: "un
 export const toNativeSchema = initSchema
 	.or(callSchema)
 	.or({ t: "'subscribe'", overview: "boolean", mounts: "boolean", "+": "reject" })
+	.or({ t: "'reconnectSocket'", "+": "reject" })
 	.or({ t: "'shutdown'", "+": "reject" })
 	.as<ToNative>()
 

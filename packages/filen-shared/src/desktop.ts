@@ -141,6 +141,9 @@ export interface DesktopBridge {
 	onWindowState(callback: (state: WindowState) => void): () => void
 	// Shows and focuses the window (a clicked notification).
 	showWindow(): void
+	// The page saw the network come back (`online`): the sync engine's socket reconnects now instead of waiting out
+	// its backoff.
+	networkOnline(): void
 }
 
 // Directory sync. Pair ids are the engine's ids as decimal strings; a pair the engine does not hold yet (its local

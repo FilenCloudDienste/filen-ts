@@ -13,6 +13,7 @@ import {
 	type ToNative,
 	toNativeSchema
 } from "../shared/nativeProtocol.ts"
+import type { JsClient } from "@filen/sdk-rs"
 import { loadAddon, type NativeSdk, type SyncEngine } from "./addon.ts"
 import { clientFromSession } from "./client.ts"
 import { createConvergence } from "./convergence.ts"
@@ -61,6 +62,7 @@ export function startHost(port: HostPort, exit: (code: number) => void): void {
 	let feed: RuntimeFeed | null = null
 	let engine: SyncEngine | null = null
 	let host: HostEngine | null = null
+	let client: JsClient | null = null
 	// The engine open in flight, to the engine it opens: a shutdown waits for it, so an engine that opens late is closed.
 	let opening: Promise<SyncEngine | null> | null = null
 	let mounts: MountsHost | null = null
@@ -124,17 +126,19 @@ export function startHost(port: HostPort, exit: (code: number) => void): void {
 
 		sdk = addon
 
-		const client = clientFromSession(addon, message.session, message.logLevel)
+		const sessionClient = clientFromSession(addon, message.session, message.logLevel)
 
-		if (client === null) {
+		if (sessionClient === null) {
 			fatal("session")
 
 			return
 		}
 
+		client = sessionClient
+
 		mounts = createMountsHost({
 			sdk: addon,
-			client,
+			client: sessionClient,
 			platform: process.platform,
 			userAgent: USER_AGENT,
 			verifyBinary: createBinaryCheck({
@@ -167,7 +171,7 @@ export function startHost(port: HostPort, exit: (code: number) => void): void {
 		runtime.subscribe(subscribed)
 
 		try {
-			const pending = openEngine(addon, client, message.dir, {
+			const pending = openEngine(addon, sessionClient, message.dir, {
 				cache: convergence,
 				sync: {
 					onEvents: events => {
@@ -346,6 +350,16 @@ export function startHost(port: HostPort, exit: (code: number) => void): void {
 				mountsSubscribed = message.mounts
 				feed?.subscribe(message.overview)
 				mounts?.subscribe(message.mounts)
+
+				return
+			case "reconnectSocket":
+				// The SDK ignores it while the socket is connected or connecting and before the cache opened one, and
+				// never rejects.
+				if (phase === "ready" && !revoked) {
+					client?.reconnectSocket().catch((error: unknown) => {
+						log.warn(`reconnectSocket failed: ${error instanceof Error ? error.message : String(error)}`)
+					})
+				}
 
 				return
 			case "shutdown":

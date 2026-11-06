@@ -417,6 +417,9 @@ const bridge: DesktopBridge = {
 	},
 	showWindow: () => {
 		ipcRenderer.send(CHANNELS.showWindow)
+	},
+	networkOnline: () => {
+		ipcRenderer.send(CHANNELS.networkOnline)
 	}
 }
 

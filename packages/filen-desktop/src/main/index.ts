@@ -1582,6 +1582,12 @@ if (!instanceLock.held) {
 		}
 	})
 
+	ipcMain.on(CHANNELS.networkOnline, event => {
+		if (isTrusted(event.senderFrame)) {
+			nativeSupervisor.reconnectSocket()
+		}
+	})
+
 	ipcMain.on(CHANNELS.setBadge, (event, payload: unknown) => {
 		const count = countSchema(payload)
 
@@ -1803,6 +1809,11 @@ if (!instanceLock.held) {
 
 			// A sleep stops the hidden-window timer; the screen lock is a moment to lock too.
 			powerMonitor.on("resume", lockIfHiddenTooLong)
+			// The network comes back after a sleep: the sync engine's socket reconnects now instead of waiting out its
+			// backoff. The page's `online` events reach it through CHANNELS.networkOnline.
+			powerMonitor.on("resume", () => {
+				nativeSupervisor.reconnectSocket()
+			})
 			powerMonitor.on("unlock-screen", lockIfHiddenTooLong)
 			powerMonitor.on("lock-screen", lockNow)
 

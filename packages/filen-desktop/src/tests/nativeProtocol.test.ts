@@ -136,6 +136,8 @@ describe("toNativeSchema", () => {
 		).toBe(true)
 		expect(accepts(toNativeSchema, { t: "subscribe", overview: true, mounts: false })).toBe(true)
 		expect(accepts(toNativeSchema, { t: "shutdown" })).toBe(true)
+		expect(accepts(toNativeSchema, { t: "reconnectSocket" })).toBe(true)
+		expect(accepts(toNativeSchema, { t: "reconnectSocket", force: true })).toBe(false)
 
 		for (const op of Object.keys(NATIVE_OPS) as NativeOp[]) {
 			expect(accepts(toNativeSchema, call(op, ARGS[op])), op).toBe(true)

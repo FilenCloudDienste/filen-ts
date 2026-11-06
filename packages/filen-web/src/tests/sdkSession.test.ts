@@ -313,7 +313,8 @@ describe("desktop vault", () => {
 			fileProvider: { supported: false, state: unused, enable: unused, disable: unused, reveal: unused, openSettings: unused },
 			setTitleBarColors: () => undefined,
 			onWindowState: () => () => undefined,
-			showWindow: () => undefined
+			showWindow: () => undefined,
+			networkOnline: () => undefined
 		}
 
 		return vault

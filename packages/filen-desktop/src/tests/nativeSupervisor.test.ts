@@ -418,6 +418,32 @@ describe("createNativeSupervisor", () => {
 		expect(last().sent.at(-1)).toEqual({ t: "subscribe", overview: false, mounts: false })
 	})
 
+	it("passes a socket reconnect to a ready host only, and never starts one for it", async () => {
+		const { supervisor, forks, deps, last } = harness()
+		const reconnects = () => last().sent.filter(message => message.t === "reconnectSocket")
+
+		deps.demand.mockResolvedValue(false)
+		supervisor.reconnectSocket()
+		await settle()
+		expect(forks).toHaveLength(0)
+
+		deps.demand.mockResolvedValue(true)
+		supervisor.ensure("launch")
+		await settle()
+		supervisor.reconnectSocket()
+		expect(reconnects()).toHaveLength(0)
+
+		ready(last())
+		supervisor.reconnectSocket()
+		supervisor.reconnectSocket()
+		expect(reconnects()).toHaveLength(2)
+
+		last().reply({ t: "authRevoked" })
+		await settle()
+		supervisor.reconnectSocket()
+		expect(reconnects()).toHaveLength(2)
+	})
+
 	it("mounts stats are a topic of their own", async () => {
 		const { supervisor, last } = harness()
 

@@ -5,6 +5,7 @@ export const CHANNELS = {
 	setTitleBarColors: "window:set-title-bar-colors",
 	windowState: "window:state",
 	showWindow: "window:show",
+	networkOnline: "app:network-online",
 	sessionGet: "session:get",
 	sessionSet: "session:set",
 	sessionClear: "session:clear",
