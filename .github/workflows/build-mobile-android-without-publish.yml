@@ -16,7 +16,7 @@ on:
       - '.github/workflows/build-mobile-android-without-publish.yml'
 
 concurrency:
-  group: build-mobile-android-without-publish
+  group: build-mobile-android-without-publish-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:

@@ -12,6 +12,7 @@ on:
     paths:
       - 'packages/filen-desktop/**'
       - 'packages/filen-web/**'
+      - 'packages/filen-office/**'
       - 'packages/filen-shared/**'
       - 'packages/filen-spellcheck/**'
       - 'pnpm-lock.yaml'
@@ -24,6 +25,7 @@ on:
     paths:
       - 'packages/filen-desktop/**'
       - 'packages/filen-web/**'
+      - 'packages/filen-office/**'
       - 'packages/filen-shared/**'
       - 'packages/filen-spellcheck/**'
       - 'pnpm-lock.yaml'

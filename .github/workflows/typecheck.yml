@@ -15,6 +15,7 @@ on:
       - 'pnpm-workspace.yaml'
       - 'patches/**'
       - 'package.json'
+      - '.github/workflows/typecheck.yml'
 
   pull_request:
     paths:
@@ -28,9 +29,10 @@ on:
       - 'pnpm-workspace.yaml'
       - 'patches/**'
       - 'package.json'
+      - '.github/workflows/typecheck.yml'
 
 concurrency:
-  group: 'typecheck'
+  group: typecheck-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -50,7 +52,9 @@ jobs:
         with:
           filters: |
             filen-web:
+              - '.github/workflows/typecheck.yml'
               - 'packages/filen-web/**'
+              - 'packages/filen-office/**'
               - 'packages/filen-shared/**'
               - 'packages/filen-spellcheck/**'
               - 'pnpm-lock.yaml'
@@ -58,6 +62,7 @@ jobs:
               - 'patches/**'
               - 'package.json'
             filen-mobile:
+              - '.github/workflows/typecheck.yml'
               - 'packages/filen-mobile/**'
               - 'packages/filen-shared/**'
               - 'pnpm-lock.yaml'
@@ -65,12 +70,14 @@ jobs:
               - 'patches/**'
               - 'package.json'
             filen-shared:
+              - '.github/workflows/typecheck.yml'
               - 'packages/filen-shared/**'
               - 'pnpm-lock.yaml'
               - 'pnpm-workspace.yaml'
               - 'patches/**'
               - 'package.json'
             filen-desktop:
+              - '.github/workflows/typecheck.yml'
               - 'packages/filen-desktop/**'
               - 'packages/filen-shared/**'
               - 'pnpm-lock.yaml'
@@ -78,12 +85,15 @@ jobs:
               - 'patches/**'
               - 'package.json'
             filen-office:
+              - '.github/workflows/typecheck.yml'
               - 'packages/filen-office/**'
+              - 'packages/filen-shared/**'
               - 'pnpm-lock.yaml'
               - 'pnpm-workspace.yaml'
               - 'patches/**'
               - 'package.json'
             filen-spellcheck:
+              - '.github/workflows/typecheck.yml'
               - 'packages/filen-spellcheck/**'
               - 'pnpm-lock.yaml'
               - 'pnpm-workspace.yaml'

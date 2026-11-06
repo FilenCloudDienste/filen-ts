@@ -19,6 +19,7 @@ on:
   push:
     paths:
       - 'packages/filen-office/**'
+      - 'packages/filen-shared/**'
       - 'pnpm-lock.yaml'
       - 'pnpm-workspace.yaml'
       - 'patches/**'
@@ -28,6 +29,7 @@ on:
   pull_request:
     paths:
       - 'packages/filen-office/**'
+      - 'packages/filen-shared/**'
       - 'pnpm-lock.yaml'
       - 'pnpm-workspace.yaml'
       - 'patches/**'

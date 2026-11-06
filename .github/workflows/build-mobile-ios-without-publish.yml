@@ -16,7 +16,7 @@ on:
       - '.github/workflows/build-mobile-ios-without-publish.yml'
 
 concurrency:
-  group: build-mobile-ios-without-publish
+  group: build-mobile-ios-without-publish-${{ github.ref }}
   cancel-in-progress: true
 
 env:

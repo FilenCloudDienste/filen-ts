@@ -15,6 +15,7 @@ on:
       - 'pnpm-workspace.yaml'
       - 'patches/**'
       - 'package.json'
+      - '.github/workflows/lint.yml'
 
   pull_request:
     paths:
@@ -28,9 +29,10 @@ on:
       - 'pnpm-workspace.yaml'
       - 'patches/**'
       - 'package.json'
+      - '.github/workflows/lint.yml'
 
 concurrency:
-  group: 'lint'
+  group: lint-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -50,7 +52,9 @@ jobs:
         with:
           filters: |
             filen-web:
+              - '.github/workflows/lint.yml'
               - 'packages/filen-web/**'
+              - 'packages/filen-office/**'
               - 'packages/filen-shared/**'
               - 'packages/filen-spellcheck/**'
               - 'pnpm-lock.yaml'
@@ -58,6 +62,7 @@ jobs:
               - 'patches/**'
               - 'package.json'
             filen-mobile:
+              - '.github/workflows/lint.yml'
               - 'packages/filen-mobile/**'
               - 'packages/filen-shared/**'
               - 'pnpm-lock.yaml'
@@ -65,12 +70,14 @@ jobs:
               - 'patches/**'
               - 'package.json'
             filen-shared:
+              - '.github/workflows/lint.yml'
               - 'packages/filen-shared/**'
               - 'pnpm-lock.yaml'
               - 'pnpm-workspace.yaml'
               - 'patches/**'
               - 'package.json'
             filen-desktop:
+              - '.github/workflows/lint.yml'
               - 'packages/filen-desktop/**'
               - 'packages/filen-shared/**'
               - 'pnpm-lock.yaml'
@@ -78,12 +85,15 @@ jobs:
               - 'patches/**'
               - 'package.json'
             filen-office:
+              - '.github/workflows/lint.yml'
               - 'packages/filen-office/**'
+              - 'packages/filen-shared/**'
               - 'pnpm-lock.yaml'
               - 'pnpm-workspace.yaml'
               - 'patches/**'
               - 'package.json'
             filen-spellcheck:
+              - '.github/workflows/lint.yml'
               - 'packages/filen-spellcheck/**'
               - 'pnpm-lock.yaml'
               - 'pnpm-workspace.yaml'
