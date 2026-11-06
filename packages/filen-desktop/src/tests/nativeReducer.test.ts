@@ -22,13 +22,15 @@ function feed() {
 	const posted: FromNative[] = []
 	const onAuthFailed = vi.fn()
 	const onPassEnded = vi.fn()
-	const runtime = createRuntimeFeed(fakeSdk, { post: message => posted.push(message), onAuthFailed, onPassEnded })
+	const onReachable = vi.fn()
+	const runtime = createRuntimeFeed(fakeSdk, { post: message => posted.push(message), onAuthFailed, onPassEnded, onReachable })
 
 	return {
 		runtime,
 		posted,
 		onAuthFailed,
 		onPassEnded,
+		onReachable,
 		of: <T extends FromNative["t"]>(t: T) => posted.filter(message => message.t === t)
 	}
 }
@@ -259,7 +261,7 @@ describe("reduceEvents", () => {
 		])
 
 		expect(reduced.activity).toEqual([])
-		expect(reduced.ended).toEqual([{ pairId: 1n, report: null }])
+		expect(reduced.ended).toEqual([{ pairId: 1n, report: null, reached: null }])
 		expect(state.get("1")).toMatchObject({ lastError: null, syncing: false, stage: { kind: "waitingForCloud" } })
 
 		// The watch's status after it, and the engine's next tries, keep it waiting.
@@ -530,5 +532,77 @@ describe("reduceEvents", () => {
 		expect(createPairRuntime(pairInfo({ lastPassError: "x", lastPassErrorKind: fakeSdk.ErrorKind.Reqwest }), fakeSdk).halted).toBe(
 			"offline"
 		)
+	})
+})
+
+describe("reaching the server again", () => {
+	const offline = (pairId = 1n) => passEvent({ tag: "PassFailed", inner: { error: "connect", kind: fakeSdk.ErrorKind.Reqwest } }, pairId)
+	const online = (pairId = 1n) => passEvent({ tag: "PassCompleted", inner: { report: report() } }, pairId)
+
+	it("reports an offline pair reaching the server once", () => {
+		const { runtime, onReachable } = feed()
+
+		runtime.setPairs([pairInfo()])
+		runtime.events([online()])
+		expect(onReachable).not.toHaveBeenCalled()
+
+		runtime.events([offline(), offline()])
+		runtime.watchStatus(1n, { consecutiveFailures: 2, lastError: "connect", lastErrorKind: fakeSdk.ErrorKind.Reqwest, state: 0 })
+		expect(onReachable).not.toHaveBeenCalled()
+
+		runtime.events([online()])
+		runtime.watchStatus(1n, { consecutiveFailures: 0, state: 0 })
+		runtime.events([online()])
+		expect(onReachable).toHaveBeenCalledOnce()
+
+		// A retry is no verdict; a pass that cannot tell (the cloud listing not ready) is none either.
+		runtime.events([offline(), passEvent({ tag: "AwaitingRemote" })])
+		runtime.events([passEvent({ tag: "PassFailed", inner: { error: "stale", kind: fakeSdk.ErrorKind.StaleState } })])
+		expect(onReachable).toHaveBeenCalledOnce()
+
+		runtime.events([online()])
+		expect(onReachable).toHaveBeenCalledTimes(2)
+	})
+
+	it("reports one outage across pairs once", () => {
+		const { runtime, onReachable } = feed()
+
+		runtime.setPairs([pairInfo(), pairInfo({ id: 2n }), pairInfo({ id: 3n })])
+		runtime.events([offline(1n), offline(2n), offline(3n)])
+		runtime.events([online(2n), online(1n)])
+		runtime.events([online(3n)])
+		expect(onReachable).toHaveBeenCalledOnce()
+
+		// Another outage while one pair still had not reached the server again.
+		runtime.events([offline(1n), offline(2n)])
+		runtime.events([online(1n), online(2n)])
+		expect(onReachable).toHaveBeenCalledTimes(2)
+	})
+
+	it("counts a pair stored offline, and not a pair removed while offline", () => {
+		const { runtime, onReachable } = feed()
+
+		runtime.setPairs([pairInfo({ lastPassError: "connect", lastPassErrorKind: fakeSdk.ErrorKind.Reqwest })])
+		runtime.setPairs([pairInfo()])
+		runtime.events([online()])
+		expect(onReachable).toHaveBeenCalledOnce()
+
+		runtime.events([offline()])
+		runtime.setPairs([])
+		runtime.setPairs([pairInfo()])
+		runtime.events([online()])
+		expect(onReachable).toHaveBeenCalledOnce()
+	})
+
+	it("an unverified certificate is no way back", () => {
+		const { runtime, onReachable } = feed()
+		const tls = passEvent({ tag: "PassFailed", inner: { error: "certificate", kind: fakeSdk.ErrorKind.TlsVerification } })
+
+		runtime.setPairs([pairInfo()])
+		runtime.events([offline(), tls])
+		expect(onReachable).not.toHaveBeenCalled()
+
+		runtime.events([online()])
+		expect(onReachable).toHaveBeenCalledOnce()
 	})
 })

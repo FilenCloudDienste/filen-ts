@@ -109,6 +109,17 @@ export function startHost(port: HostPort, exit: (code: number) => void): void {
 		}
 	}
 
+	// The network may be back: main says so (a resume, the page's online event), and so does a sync pair reaching the
+	// server after an outage, the only sign there is while no window is open. The SDK ignores it while the socket is
+	// connected or connecting and before the cache opened one, and never rejects.
+	function reconnectSocket(): void {
+		if (phase === "ready" && !revoked) {
+			client?.reconnectSocket().catch((error: unknown) => {
+				log.warn(`reconnectSocket failed: ${error instanceof Error ? error.message : String(error)}`)
+			})
+		}
+	}
+
 	async function init(message: NativeInit): Promise<void> {
 		phase = "starting"
 
@@ -163,7 +174,8 @@ export function startHost(port: HostPort, exit: (code: number) => void): void {
 				host?.passEnded(pairId, report).catch((error: unknown) => {
 					console.error(`the delete guard was not restored: ${describe(classify(addon, error))}`)
 				})
-			}
+			},
+			onReachable: reconnectSocket
 		})
 		const convergence = createConvergence()
 
@@ -353,13 +365,7 @@ export function startHost(port: HostPort, exit: (code: number) => void): void {
 
 				return
 			case "reconnectSocket":
-				// The SDK ignores it while the socket is connected or connecting and before the cache opened one, and
-				// never rejects.
-				if (phase === "ready" && !revoked) {
-					client?.reconnectSocket().catch((error: unknown) => {
-						log.warn(`reconnectSocket failed: ${error instanceof Error ? error.message : String(error)}`)
-					})
-				}
+				reconnectSocket()
 
 				return
 			case "shutdown":

@@ -27,7 +27,8 @@ function setup(pairs = [pairInfo()]) {
 			posted.push(message)
 		},
 		onAuthFailed: () => undefined,
-		onPassEnded: () => undefined
+		onPassEnded: () => undefined,
+		onReachable: () => undefined
 	})
 	const host = createHostEngine({
 		sdk: fakeSdk,

@@ -74,8 +74,14 @@ export interface Reduced {
 	activity: NativeActivity[]
 	// A pass failed because the server no longer takes the session.
 	authFailed: boolean
-	// The passes that ended, with the report of each that completed.
-	ended: { pairId: bigint; report: SyncPassReport | null }[]
+	// The passes that ended, with the report of each that completed and whether it reached the server (null when its
+	// end does not say).
+	ended: { pairId: bigint; report: SyncPassReport | null; reached: boolean | null }[]
+}
+
+// The server could not be reached, or not trusted, at the pair's last word on it.
+function unreachable(halted: DesktopSyncHalt | null): boolean {
+	return halted === "offline" || halted === "certificateUnverified"
 }
 
 // Unauthenticated is the sign-out flow's, not a state the pair shows.
@@ -325,7 +331,7 @@ export function reduceEvents(sdk: NativeSdk, state: Map<string, PairRuntime>, ev
 					failed: Number(report.errorsTotal)
 				}
 				authFailed ||= report.passErrorKind === sdk.ErrorKind.Unauthenticated || report.halted === sdk.HaltReason.Unauthenticated
-				ended.push({ pairId: id, report })
+				ended.push({ pairId: id, report, reached: !unreachable(runtime.halted) })
 
 				// A safety-net pass that found nothing to do is no news.
 				if (applied(report) || report.passError !== undefined) {
@@ -337,17 +343,18 @@ export function reduceEvents(sdk: NativeSdk, state: Map<string, PairRuntime>, ev
 			case "PassFailed":
 				endPass(runtime)
 				runtime.passEnded = true
-				ended.push({ pairId: id, report: null })
 
 				// The cloud listing did not finish in time: not ready yet. The engine tries again on its own, and the pair
 				// keeps waiting for the cloud until a pass starts.
 				if (event.inner.kind === sdk.ErrorKind.StaleState) {
 					runtime.stage = { kind: "waitingForCloud" }
+					ended.push({ pairId: id, report: null, reached: null })
 					break
 				}
 
 				runtime.lastError = clip(event.inner.error)
 				runtime.halted = connectionHalt(sdk, event.inner.kind)
+				ended.push({ pairId: id, report: null, reached: !unreachable(runtime.halted) })
 				authFailed ||= event.inner.kind === sdk.ErrorKind.Unauthenticated
 				activity.push({ pairId, at, kind: "passFailed", detail: runtime.lastError })
 				break
@@ -357,14 +364,22 @@ export function reduceEvents(sdk: NativeSdk, state: Map<string, PairRuntime>, ev
 	return { changed: events.length > 0, activity, authFailed, ended }
 }
 
-// A watch's status, published after every pass and when it starts or ends.
-export function reduceWatchStatus(sdk: NativeSdk, runtime: PairRuntime, status: WatchStatus): { authFailed: boolean } {
+// A watch's status, published after every pass and when it starts or ends. `reached`: whether the server was reached,
+// null when the status does not say.
+export function reduceWatchStatus(
+	sdk: NativeSdk,
+	runtime: PairRuntime,
+	status: WatchStatus
+): { authFailed: boolean; reached: boolean | null } {
 	runtime.degraded = { local: status.localEventsDegraded !== undefined, remote: status.remoteEventsDegraded !== undefined }
 
 	// A cloud listing that did not finish in time is not ready yet, no error.
+	let reached: boolean | null = null
+
 	if (status.lastError !== undefined && status.lastErrorKind !== sdk.ErrorKind.StaleState) {
 		runtime.lastError = clip(status.lastError)
 		runtime.halted = connectionHalt(sdk, status.lastErrorKind) ?? runtime.halted
+		reached = !unreachable(runtime.halted)
 	} else if (
 		status.consecutiveFailures === 0 &&
 		status.lastError === undefined &&
@@ -374,13 +389,14 @@ export function reduceWatchStatus(sdk: NativeSdk, runtime: PairRuntime, status: 
 		// The engine can publish a status still carrying the previous failure just before the clean one: the outage is over.
 		runtime.halted = null
 		runtime.lastError = null
+		reached = true
 	}
 
 	if (status.state === sdk.WatchState.Stopped || status.state === sdk.WatchState.PairRemoved) {
 		endPass(runtime)
 	}
 
-	return { authFailed: status.lastErrorKind === sdk.ErrorKind.Unauthenticated }
+	return { authFailed: status.lastErrorKind === sdk.ErrorKind.Unauthenticated, reached }
 }
 
 export function runtimeOf(sdk: NativeSdk, info: SyncPairInfo, runtime: PairRuntime): NativePairRuntime {
@@ -437,6 +453,8 @@ export function createRuntimeFeed(
 		post(message: FromNative): void
 		onAuthFailed(): void
 		onPassEnded(pairId: bigint, report: SyncPassReport | null): void
+		// The server is reachable again after an outage: once per outage, however many pairs recover.
+		onReachable(): void
 	},
 	intervalMs = FEED_INTERVAL_MS
 ): RuntimeFeed {
@@ -448,6 +466,21 @@ export function createRuntimeFeed(
 	let dirty = false
 	let stopped = false
 	let timer: NodeJS.Timeout | undefined
+	// The pairs whose last word was that the server could not be reached; `outage` until the first of them reaches it.
+	const unreached = new Set<string>()
+	let outage = false
+
+	function reachedServer(pairId: string, reached: boolean | null): void {
+		if (reached === false) {
+			if (!unreached.has(pairId)) {
+				unreached.add(pairId)
+				outage = true
+			}
+		} else if (reached === true && unreached.delete(pairId) && outage) {
+			outage = false
+			deps.onReachable()
+		}
+	}
 
 	function schedule(): void {
 		if (!stopped) {
@@ -507,15 +540,26 @@ export function createRuntimeFeed(
 			infos.clear()
 
 			for (const info of list) {
-				infos.set(info.id.toString(), info)
-				runtimeFor(info.id.toString())
+				const pairId = info.id.toString()
+				const known = state.has(pairId)
+
+				infos.set(pairId, info)
+
+				// A pair's stored last pass is its word until a pass of its own speaks.
+				if (!known && unreachable(runtimeFor(pairId).halted)) {
+					reachedServer(pairId, false)
+				}
 			}
 
 			for (const pairId of state.keys()) {
 				if (!infos.has(pairId)) {
 					state.delete(pairId)
+					unreached.delete(pairId)
 				}
 			}
+
+			// A removed pair's outage is no one's.
+			outage &&= unreached.size > 0
 
 			dirty = true
 			schedule()
@@ -545,9 +589,10 @@ export function createRuntimeFeed(
 				deps.onAuthFailed()
 			}
 
-			for (const { pairId, report } of reduced.ended) {
+			for (const { pairId, report, reached } of reduced.ended) {
 				deps.post({ t: "passEnded", pairId: pairId.toString() })
 				deps.onPassEnded(pairId, report)
+				reachedServer(pairId.toString(), reached)
 			}
 
 			if (reduced.changed) {
@@ -556,9 +601,13 @@ export function createRuntimeFeed(
 			}
 		},
 		watchStatus: (pairId, status) => {
-			if (reduceWatchStatus(sdk, runtimeFor(pairId.toString()), status).authFailed) {
+			const { authFailed, reached } = reduceWatchStatus(sdk, runtimeFor(pairId.toString()), status)
+
+			if (authFailed) {
 				deps.onAuthFailed()
 			}
+
+			reachedServer(pairId.toString(), reached)
 
 			dirty = true
 			schedule()
