@@ -48,7 +48,7 @@ describe("3D transition frames", () => {
 			for (const { geometry, frame } of geometries) for (let k = 0; k <= FRAMES; k++) geometry.frame(k / FRAMES, frame)
 		})
 
-		expect(spent).toBeLessThan(GEOMETRY_LIMIT_MS)
+		expect(spent).toBeLessThan(budget(GEOMETRY_LIMIT_MS))
 	})
 
 	it(`writes a second of a fracture's frames in ≤ ${String(CSS_LIMIT_MS)} ms CPU`, { timeout: budget(60_000) }, () => {
@@ -101,7 +101,7 @@ describe("3D transition frames", () => {
 				run.finish()
 			})
 
-			expect(spent).toBeLessThan(CSS_LIMIT_MS)
+			expect(spent).toBeLessThan(budget(CSS_LIMIT_MS))
 		} finally {
 			Reflect.deleteProperty(globalThis, "CSS")
 			vi.restoreAllMocks()

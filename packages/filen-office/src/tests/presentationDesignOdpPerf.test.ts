@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import { encodePng } from "../core/metafile/dib"
 import { designOdp } from "./presentationDesignFixtures"
 import { driveSession } from "./odpWriteDrive"
-import { cpuMs } from "./timing"
+import { budget, cpuMs } from "./timing"
 
 // An ODP deck of 100 pages: a picture background applied to every page (the command and the save, which stores the
 // picture once and every page names one page style naming one draw:fill-image), and a gallery theme applied to every page
@@ -24,41 +24,45 @@ function picture(): Uint8Array {
 }
 
 describe("presentationDesignOdpPerf", () => {
-	it(`applies a picture background to ${String(PAGES)} ODP pages and saves within budget`, { timeout: 120_000 }, async ({ task }) => {
-		const bytes = await designOdp(PAGES)
-		const image = picture()
-		let command = Number.POSITIVE_INFINITY
-		let save = Number.POSITIVE_INFINITY
+	it(
+		`applies a picture background to ${String(PAGES)} ODP pages and saves within budget`,
+		{ timeout: budget(120_000) },
+		async ({ task }) => {
+			const bytes = await designOdp(PAGES)
+			const image = picture()
+			let command = Number.POSITIVE_INFINITY
+			let save = Number.POSITIVE_INFINITY
 
-		for (let run = 0; run < 3; run++) {
-			const d = await driveSession(bytes)
-			const start = cpuMs()
-			const result = await d.command({
-				family: "design",
-				kind: "setBackground",
-				slides: "all",
-				background: { kind: "fill", fill: { kind: "picture", stretch: { l: 0, t: 0, r: 0, b: 0 } } },
-				image: { bytes: image, contentType: "image/png", width: 256, height: 256 }
+			for (let run = 0; run < 3; run++) {
+				const d = await driveSession(bytes)
+				const start = cpuMs()
+				const result = await d.command({
+					family: "design",
+					kind: "setBackground",
+					slides: "all",
+					background: { kind: "fill", fill: { kind: "picture", stretch: { l: 0, t: 0, r: 0, b: 0 } } },
+					image: { bytes: image, contentType: "image/png", width: 256, height: 256 }
+				})
+
+				command = Math.min(command, cpuMs() - start)
+				expect(result.ok).toBe(true)
+
+				const saving = cpuMs()
+				const saved = await d.save()
+
+				save = Math.min(save, cpuMs() - saving)
+				expect(saved.result.kind).toBe("written")
+			}
+
+			Object.assign(task.meta, {
+				perf: { commandCpuMs: { value: command, budget: COMMAND_BUDGET_MS }, saveCpuMs: { value: save, budget: SAVE_BUDGET_MS } }
 			})
-
-			command = Math.min(command, cpuMs() - start)
-			expect(result.ok).toBe(true)
-
-			const saving = cpuMs()
-			const saved = await d.save()
-
-			save = Math.min(save, cpuMs() - saving)
-			expect(saved.result.kind).toBe("written")
+			expect(command).toBeLessThanOrEqual(budget(COMMAND_BUDGET_MS))
+			expect(save).toBeLessThanOrEqual(budget(SAVE_BUDGET_MS))
 		}
+	)
 
-		Object.assign(task.meta, {
-			perf: { commandCpuMs: { value: command, budget: COMMAND_BUDGET_MS }, saveCpuMs: { value: save, budget: SAVE_BUDGET_MS } }
-		})
-		expect(command).toBeLessThanOrEqual(COMMAND_BUDGET_MS)
-		expect(save).toBeLessThanOrEqual(SAVE_BUDGET_MS)
-	})
-
-	it(`applies a gallery theme to ${String(PAGES)} ODP pages and saves within budget`, { timeout: 120_000 }, async ({ task }) => {
+	it(`applies a gallery theme to ${String(PAGES)} ODP pages and saves within budget`, { timeout: budget(120_000) }, async ({ task }) => {
 		const bytes = await designOdp(PAGES)
 		let command = Number.POSITIVE_INFINITY
 		let save = Number.POSITIVE_INFINITY
@@ -86,7 +90,7 @@ describe("presentationDesignOdpPerf", () => {
 		Object.assign(task.meta, {
 			perf: { commandCpuMs: { value: command, budget: COMMAND_BUDGET_MS }, saveCpuMs: { value: save, budget: SAVE_BUDGET_MS } }
 		})
-		expect(command).toBeLessThanOrEqual(COMMAND_BUDGET_MS)
-		expect(save).toBeLessThanOrEqual(SAVE_BUDGET_MS)
+		expect(command).toBeLessThanOrEqual(budget(COMMAND_BUDGET_MS))
+		expect(save).toBeLessThanOrEqual(budget(SAVE_BUDGET_MS))
 	})
 })

@@ -82,11 +82,12 @@ function sameFingerprint(a: Fingerprint, b: Fingerprint): boolean {
 
 let nextId = 1
 
-// An anchor as it was before the last push changed it.
+// An anchor as it was before the last push changed it: its scalars, and the keys the push added to its baseline and
+// lost keys (a push only adds to them), so taking the push back costs what it changed, not the baseline's size.
 interface AnchorCopy {
 	readonly pos: number
-	readonly baseline: ReadonlyMap<TouchKey, Fingerprint>
-	readonly lost: { readonly bytes: number; readonly keys: readonly TouchKey[]; readonly dirty: number }
+	readonly baselineAdded: TouchKey[]
+	readonly lost: { readonly bytes: number; readonly keysAdded: TouchKey[]; readonly dirty: number }
 }
 
 // What a push did besides adding its step (the redo branch it discarded, the oldest steps it trimmed, the anchors it
@@ -325,7 +326,7 @@ export class DeckHistory {
 		const later = [this.saved, ...this.pending.values()].filter(anchor => !record.anchors.has(anchor) && anchor.pos > from)
 
 		for (const anchor of later) {
-			for (const [key, value] of step.after) if (!anchor.baseline.has(key)) anchor.baseline.set(key, value)
+			for (const [key, value] of step.after) this.keepSaved(anchor, key, value)
 
 			this.lose(anchor, step)
 			anchor.pos = from
@@ -352,15 +353,12 @@ export class DeckHistory {
 
 		for (const [anchor, copy] of record.anchors) {
 			anchor.pos = copy.pos
-			anchor.baseline.clear()
 
-			for (const [key, value] of copy.baseline) anchor.baseline.set(key, value)
+			for (const key of copy.baselineAdded) anchor.baseline.delete(key)
 
 			const keys = anchor.lost.keys as Set<TouchKey>
 
-			keys.clear()
-
-			for (const key of copy.lost.keys) keys.add(key)
+			for (const key of copy.lost.keysAdded) keys.delete(key)
 
 			anchor.lost.bytes = copy.lost.bytes
 			anchor.lost.dirty = copy.lost.dirty
@@ -475,9 +473,17 @@ export class DeckHistory {
 
 		record.anchors.set(anchor, {
 			pos: anchor.pos,
-			baseline: new Map(anchor.baseline),
-			lost: { bytes: anchor.lost.bytes, keys: [...anchor.lost.keys.keys()], dirty: anchor.lost.dirty }
+			baselineAdded: [],
+			lost: { bytes: anchor.lost.bytes, keysAdded: [], dirty: anchor.lost.dirty }
 		})
+	}
+
+	// A key's saved fingerprint kept in an anchor's baseline (the first one kept stays), noted for the push in progress.
+	private keepSaved(anchor: Anchor, key: TouchKey, value: Fingerprint): void {
+		if (anchor.baseline.has(key)) return
+
+		anchor.baseline.set(key, value)
+		this.recording?.anchors.get(anchor)?.baselineAdded.push(key)
 	}
 
 	private pendingAt(pos: number): boolean {
@@ -550,7 +556,7 @@ export class DeckHistory {
 			for (let index = anchor.pos - 1; index >= from; index--) {
 				const entry = this.entries[index] as HistoryStep
 
-				for (const [key, value] of entry.after) if (!anchor.baseline.has(key)) anchor.baseline.set(key, value)
+				for (const [key, value] of entry.after) this.keepSaved(anchor, key, value)
 
 				this.lose(anchor, entry)
 			}
@@ -596,7 +602,7 @@ export class DeckHistory {
 				}
 
 				// The anchor is at the bottom: the step leaves its range, its before-state is what the anchor held.
-				for (const [key, value] of oldest.before) if (!anchor.baseline.has(key)) anchor.baseline.set(key, value)
+				for (const [key, value] of oldest.before) this.keepSaved(anchor, key, value)
 
 				this.lose(anchor, oldest)
 
@@ -742,10 +748,13 @@ export class DeckHistory {
 
 		lost.bytes += bytes
 
+		const added = this.recording?.anchors.get(anchor)?.lost.keysAdded
+
 		for (const key of entry.before.keys()) {
 			if (keys.has(key)) continue
 
 			keys.add(key)
+			added?.push(key)
 
 			if (!counted) continue
 

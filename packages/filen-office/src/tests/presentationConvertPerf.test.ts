@@ -93,7 +93,7 @@ describe.skipIf(!existsSync(PPTX) || !existsSync(ODP))("presentationConvertPerf"
 			perf: { pptxToOdpCpuMs: { value: cpu, budget: CPU_BUDGET_MS }, pptxToOdpHeapBytes: { value: heap, budget: HEAP_BUDGET } }
 		})
 		expect(size).toBeGreaterThan(100_000)
-		expect(cpu).toBeLessThanOrEqual(CPU_BUDGET_MS)
+		expect(cpu).toBeLessThanOrEqual(budget(CPU_BUDGET_MS))
 		expect(heap).toBeLessThanOrEqual(HEAP_BUDGET)
 	})
 
@@ -104,7 +104,7 @@ describe.skipIf(!existsSync(PPTX) || !existsSync(ODP))("presentationConvertPerf"
 			perf: { odpToPptxCpuMs: { value: cpu, budget: CPU_BUDGET_MS }, odpToPptxHeapBytes: { value: heap, budget: HEAP_BUDGET } }
 		})
 		expect(size).toBeGreaterThan(100_000)
-		expect(cpu).toBeLessThanOrEqual(CPU_BUDGET_MS)
+		expect(cpu).toBeLessThanOrEqual(budget(CPU_BUDGET_MS))
 		expect(heap).toBeLessThanOrEqual(HEAP_BUDGET)
 	})
 })

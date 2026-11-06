@@ -55,7 +55,7 @@ describe.skipIf(!existsSync(DECK))("presentationPdfPerf", () => {
 		Object.assign(task.meta, {
 			perf: { pdfCpuMs: { value: best, budget: CPU_BUDGET_MS }, peakMb: { value: peakMb, budget: PEAK_BUDGET_MB } }
 		})
-		expect(best).toBeLessThanOrEqual(CPU_BUDGET_MS)
+		expect(best).toBeLessThanOrEqual(budget(CPU_BUDGET_MS))
 		expect(peakMb).toBeLessThanOrEqual(PEAK_BUDGET_MB)
 	})
 })

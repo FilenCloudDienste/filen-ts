@@ -1,4 +1,4 @@
-import { digestOf } from "../../presentation/edit/changes"
+import { digestOf, sameDigest } from "../../presentation/edit/changes"
 import type {
 	Action,
 	FrameRef,
@@ -39,7 +39,7 @@ import { isRefused } from "../../presentation/refusal"
 const TOLERANCE = 2
 
 function same(a: unknown, b: unknown): boolean {
-	return digestOf(a) === digestOf(b)
+	return sameDigest(a, b)
 }
 
 function near(a: number, b: number, tolerance = TOLERANCE): boolean {

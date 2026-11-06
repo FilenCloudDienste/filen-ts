@@ -14,7 +14,7 @@ import {
 	type TextBody
 } from "../../model"
 import type { ApplyContext, ApplyFamily, ApplyResult, Inverse, Touch } from "../apply"
-import { cloneModel, digestOf, findShape } from "../changes"
+import { cloneModel, findShape, sameDigest } from "../changes"
 import { replaceInBody, type Matcher } from "../find"
 import type { CellRange, DeckOp, OpOf, TableOp } from "../ops"
 import { xmlSafeText } from "../xmlText"
@@ -724,7 +724,7 @@ function asSource(at: Found, raw: Uint8Array, context: ApplyContext): boolean {
 
 	if (read === undefined || isRefused(read)) return false
 
-	return digestOf({ ...read, id: at.shape.id, sourceId: undefined }) === digestOf({ ...at.shape, sourceId: undefined })
+	return sameDigest({ ...read, id: at.shape.id, sourceId: undefined }, { ...at.shape, sourceId: undefined })
 }
 
 // The ops that put the frame back as it is now.

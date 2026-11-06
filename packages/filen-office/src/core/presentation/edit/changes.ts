@@ -131,6 +131,68 @@ export function digestOf(value: unknown): string {
 	return text.length <= INLINE_DIGEST ? text : digestString(text)
 }
 
+function listLike(value: object): value is Iterable<unknown> {
+	return Array.isArray(value) || value instanceof Map || value instanceof Set
+}
+
+function definedKeys(value: Record<string, unknown>): number {
+	let count = 0
+
+	for (const key in value) if (Object.hasOwn(value, key) && value[key] !== undefined && !LEFT_OUT.has(key)) count++
+
+	return count
+}
+
+// Whether two model values have the same digest (digestOf(a) === digestOf(b), short of a collision), compared in
+// place: no digest is built, and the first difference ends the walk.
+export function sameDigest(a: unknown, b: unknown): boolean {
+	if (a === b) return true
+	if (a === undefined || b === undefined) return false
+
+	const objectA = a !== null && typeof a === "object"
+	const objectB = b !== null && typeof b === "object"
+
+	if (!objectA || !objectB) return !objectA && !objectB && JSON.stringify(a) === JSON.stringify(b)
+
+	if (ArrayBuffer.isView(a) || ArrayBuffer.isView(b)) {
+		if (!ArrayBuffer.isView(a) || !ArrayBuffer.isView(b) || a.byteLength !== b.byteLength) return false
+
+		const left = new Uint8Array(a.buffer, a.byteOffset, a.byteLength)
+		const right = new Uint8Array(b.buffer, b.byteOffset, b.byteLength)
+
+		for (let k = 0; k < left.length; k++) if (left[k] !== right[k]) return false
+
+		return true
+	}
+
+	if (listLike(a) || listLike(b)) {
+		if (!listLike(a) || !listLike(b)) return false
+
+		const right = b[Symbol.iterator]()
+
+		for (const item of a) {
+			const other = right.next()
+
+			if (other.done === true || !sameDigest(item, other.value)) return false
+		}
+
+		return right.next().done === true
+	}
+
+	const left = a as Record<string, unknown>
+	const right = b as Record<string, unknown>
+	let count = 0
+
+	for (const key in left) {
+		if (!Object.hasOwn(left, key) || left[key] === undefined || LEFT_OUT.has(key)) continue
+		if (!sameDigest(left[key], right[key])) return false
+
+		count++
+	}
+
+	return count === definedKeys(right)
+}
+
 export interface ShapeAt {
 	readonly shape: ShapeNode
 	// The group's id, or 0 at the top of the tree; the index among its siblings.
@@ -395,7 +457,7 @@ function dirtOf(code: string): Dirt {
 }
 
 function sameDirt(a: Dirt, b: Dirt): boolean {
-	return digestOf(a) === digestOf(b)
+	return sameDigest(a, b)
 }
 
 // Two different dirts on one element: the whole element is rewritten (one dirt never covers another kind's markup).

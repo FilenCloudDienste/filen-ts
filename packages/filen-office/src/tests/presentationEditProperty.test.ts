@@ -4,6 +4,7 @@ import type { ShapeNode, SlideRef, Xfrm } from "../core/presentation/model"
 import { sessionEdits } from "../dom/presentation/engine/edit"
 import { editDeckOptions, editHarness, type EditHarness } from "./presentationEditFixtures"
 import { body, buildPptx, DEFAULT_LAYOUTS, para, sp, xfrm } from "./pptxFixtures"
+import { budget } from "./timing"
 
 // Any sequence of ops followed by the ops of their inverses (applied as new commands, newest first) leaves the deck
 // as it was: the recomputed changes against the saved state are empty, however the history trimmed and coalesced.
@@ -228,7 +229,7 @@ function randomOp(harness: EditHarness, next: () => number): DeckOp | undefined 
 }
 
 describe("presentation edit property", () => {
-	it("10,000 random op sequences followed by their inverses recompute an empty set of changes", async () => {
+	it("10,000 random op sequences followed by their inverses recompute an empty set of changes", { timeout: budget(60_000) }, async () => {
 		const harness = await editHarness(propertyDeck())
 
 		for (const ref of [...harness.session.deck.slides]) await harness.slide(harness.session.deck.slides.indexOf(ref))
@@ -279,5 +280,5 @@ describe("presentation edit property", () => {
 		expect(applied).toBeGreaterThan(10_000)
 		expect(edits.history.size.steps).toBeLessThanOrEqual(500)
 		harness.close()
-	}, 600_000)
+	})
 })

@@ -146,8 +146,8 @@ describe.skipIf(!existsSync(DECK))("presentationRasterPerf", () => {
 			})
 			// Every slide's PNG went in (a 1920 x 1080 PNG is more than its 33-byte header and IEND).
 			expect(written).toBeGreaterThan(81 * 1024)
-			expect(best).toBeLessThanOrEqual(CPU_BUDGET_MS)
-			expect(encode).toBeLessThanOrEqual(ENCODE_BUDGET_MS)
+			expect(best).toBeLessThanOrEqual(budget(CPU_BUDGET_MS))
+			expect(encode).toBeLessThanOrEqual(budget(ENCODE_BUDGET_MS))
 			expect(peakMb).toBeLessThanOrEqual(PEAK_BUDGET_MB)
 		}
 	)

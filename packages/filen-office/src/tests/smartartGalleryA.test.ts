@@ -10,7 +10,7 @@ import { layoutDiagram } from "../core/smartart/interp"
 import { parseLayoutDef, type Atom, type LayoutDefinition } from "../core/smartart/layoutDef"
 import { encodeUtf8, parseXml, type XmlDocument } from "../core/xml/index"
 import { measurer } from "./smartartFixtures"
-import { cpuMs } from "./timing"
+import { budget, cpuMs } from "./timing"
 
 // Our gallery's lists, processes, cycles and pyramids with their style and colour definitions: the generated
 // modules match the definition files, every file says it is ours, every layout lays out any number of items with
@@ -160,7 +160,7 @@ describe("SmartArt gallery: lists, processes, cycles and pyramids", () => {
 		}
 	})
 
-	it("lays every layout out with 1, 3, 8 and 30 items within the relayout budget, every text drawn", { timeout: 60_000 }, () => {
+	it("lays every layout out with 1, 3, 8 and 30 items within the relayout budget, every text drawn", { timeout: budget(60_000) }, () => {
 		const style = doc(STYLES[0]?.xml ?? "")
 		const colors = doc(COLORS[0]?.xml ?? "")
 
@@ -172,7 +172,7 @@ describe("SmartArt gallery: lists, processes, cycles and pyramids", () => {
 				const drawing = emitDiagram(layoutDiagram(parseDataModel(data), layout.def, style, colors, BOX, measurer)).drawingXml
 				const ms = cpuMs() - start
 
-				expect(ms, `${layout.file} ${String(count)}`).toBeLessThan(RELAYOUT_BUDGET_MS)
+				expect(ms, `${layout.file} ${String(count)}`).toBeLessThan(budget(RELAYOUT_BUDGET_MS))
 
 				for (const text of texts) expect(drawing, `${layout.file} ${String(count)}`).toContain(text.trim())
 			}

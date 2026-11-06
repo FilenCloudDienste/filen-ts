@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import { LAYOUT_TYPES } from "../core/templates/themes/pptx"
 import { editHarness } from "./presentationEditFixtures"
 import { designDeck } from "./presentationDesignFixtures"
-import { cpuMs } from "./timing"
+import { budget, cpuMs } from "./timing"
 
 // Ensure fit on 81 slides: ≤ 60 ms worker CPU for the command (every slide parsed, every box, text and table
 // scaled, the undo recorded), the least of three runs.
@@ -13,7 +13,7 @@ const BUDGET_MS = 60
 describe("presentationDesignScalePerf", () => {
 	it(
 		`scales the content of ${String(SLIDES)} slides to a new size within ${String(BUDGET_MS)} ms of CPU`,
-		{ timeout: 60_000 },
+		{ timeout: budget(60_000) },
 		async () => {
 			const bytes = await designDeck(Array.from({ length: SLIDES }, (_, index) => LAYOUT_TYPES[index % LAYOUT_TYPES.length] ?? "obj"))
 			let best = Number.POSITIVE_INFINITY
@@ -36,7 +36,7 @@ describe("presentationDesignScalePerf", () => {
 			}
 
 			console.log(`ensure fit on ${String(SLIDES)} slides: ${best.toFixed(1)} ms CPU`)
-			expect(best).toBeLessThanOrEqual(BUDGET_MS)
+			expect(best).toBeLessThanOrEqual(budget(BUDGET_MS))
 		}
 	)
 })

@@ -13,7 +13,7 @@ import { layoutDiagram } from "../core/smartart/interp"
 import { parseLayoutDef } from "../core/smartart/layoutDef"
 import { encodeUtf8, parseXml } from "../core/xml/index"
 import { measurer } from "./smartartFixtures"
-import { cpuMs } from "./timing"
+import { budget, cpuMs } from "./timing"
 
 // Our SmartArt gallery: the generated modules match the definition files they come from (and are written from them
 // with FILEN_SMARTART_GALLERY_WRITE=1), every file carries its authorship header, and every layout of the registry
@@ -133,25 +133,36 @@ describe("SmartArt gallery generation", () => {
 		for (const entry of SMARTART_COLORS) expect(root(smartArtColorsDef(entry.uniqueId)), entry.uniqueId).toBe("colorsDef")
 	})
 
-	it("lays every registry layout out with 1, 3, 8 and 30 nodes within the relayout budget, every text drawn", { timeout: 60_000 }, () => {
-		const style = parseXml(encodeUtf8(smartArtStyleDef(SMARTART_STYLES[0]?.uniqueId ?? "") ?? ""))
-		const colors = parseXml(encodeUtf8(smartArtColorsDef(SMARTART_COLORS[0]?.uniqueId ?? "") ?? ""))
+	it(
+		"lays every registry layout out with 1, 3, 8 and 30 nodes within the relayout budget, every text drawn",
+		{ timeout: budget(60_000) },
+		() => {
+			const style = parseXml(encodeUtf8(smartArtStyleDef(SMARTART_STYLES[0]?.uniqueId ?? "") ?? ""))
+			const colors = parseXml(encodeUtf8(smartArtColorsDef(SMARTART_COLORS[0]?.uniqueId ?? "") ?? ""))
 
-		for (const entry of SMARTART_LAYOUTS) {
-			const def = parseLayoutDef(parseXml(encodeUtf8(smartArtLayoutDef(entry.uniqueId) ?? "")))
+			for (const entry of SMARTART_LAYOUTS) {
+				const def = parseLayoutDef(parseXml(encodeUtf8(smartArtLayoutDef(entry.uniqueId) ?? "")))
 
-			for (const count of [1, 3, 8, 30]) {
-				const texts = Array.from({ length: count }, (_, i) => (i % 3 === 2 ? `\tSub ${String(i)}` : `Item ${String(i)}`))
-				const data = parseXml(encodeUtf8(newDiagramData(texts, { layout: { uniqueId: entry.uniqueId } })))
-				const start = cpuMs()
-				const layout = layoutDiagram(parseDataModel(data), def, style, colors, { x: 0, y: 0, w: 8_000_000, h: 4_500_000 }, measurer)
-				const drawing = emitDiagram(layout).drawingXml
-				const ms = cpuMs() - start
+				for (const count of [1, 3, 8, 30]) {
+					const texts = Array.from({ length: count }, (_, i) => (i % 3 === 2 ? `\tSub ${String(i)}` : `Item ${String(i)}`))
+					const data = parseXml(encodeUtf8(newDiagramData(texts, { layout: { uniqueId: entry.uniqueId } })))
+					const start = cpuMs()
+					const layout = layoutDiagram(
+						parseDataModel(data),
+						def,
+						style,
+						colors,
+						{ x: 0, y: 0, w: 8_000_000, h: 4_500_000 },
+						measurer
+					)
+					const drawing = emitDiagram(layout).drawingXml
+					const ms = cpuMs() - start
 
-				expect(ms, `${entry.uniqueId} ${String(count)}`).toBeLessThan(RELAYOUT_BUDGET_MS)
+					expect(ms, `${entry.uniqueId} ${String(count)}`).toBeLessThan(budget(RELAYOUT_BUDGET_MS))
 
-				for (const text of texts) expect(drawing, `${entry.uniqueId} ${String(count)}`).toContain(text.trim())
+					for (const text of texts) expect(drawing, `${entry.uniqueId} ${String(count)}`).toContain(text.trim())
+				}
 			}
 		}
-	})
+	)
 })

@@ -1,5 +1,5 @@
 import type { EmitPiece, EmitRequest } from "../../../pptx/write/types"
-import { digestOf } from "../../../presentation/edit/changes"
+import { sameDigest } from "../../../presentation/edit/changes"
 import { refused, type Deck, type Refused, type SlideNode } from "../../../presentation/model"
 import { decodeUtf8, escapeAttribute } from "../../../xml/index"
 import { canonicalName } from "../../../odf/index"
@@ -33,16 +33,15 @@ export interface PageAspects {
 }
 
 export function pageAspects(node: SlideNode, pristine: SlideNode | undefined, name: string): PageAspects {
-	const same = (a: unknown, b: unknown): boolean => digestOf(a) === digestOf(b)
 	const out: { -readonly [K in keyof PageAspects]: PageAspects[K] } = {}
 
 	if (pristine === undefined || name !== pristine.name) out.name = name
 	if (pristine === undefined || node.hidden !== pristine.hidden) out.hidden = node.hidden
 	if (pristine === undefined || node.showMasterShapes !== pristine.showMasterShapes) out.showMasterShapes = node.showMasterShapes
 	if (pristine !== undefined && node.parent !== pristine.parent) out.layout = true
-	if (pristine !== undefined && !same(node.background, pristine.background)) out.background = true
-	if (pristine !== undefined && !same(node.transition, pristine.transition)) out.transition = true
-	if (pristine !== undefined && !same(node.timing, pristine.timing)) out.timing = true
+	if (pristine !== undefined && !sameDigest(node.background, pristine.background)) out.background = true
+	if (pristine !== undefined && !sameDigest(node.transition, pristine.transition)) out.transition = true
+	if (pristine !== undefined && !sameDigest(node.timing, pristine.timing)) out.timing = true
 
 	return out
 }

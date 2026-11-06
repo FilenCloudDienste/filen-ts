@@ -14,7 +14,7 @@ import {
 	type SlideRef
 } from "../../model"
 import type { ApplyContext, ApplyFamily, ApplyResult, Dirt, Touch } from "../apply"
-import { cloneModel, digestOf, findShape } from "../changes"
+import { cloneModel, findShape, sameDigest } from "../changes"
 import { holdDiagramCopies } from "./smartart"
 import { planDelete, sectionsAfterInsert, sectionsAfterMove, type JumpRewrite, type PartOf, type ReferenceFacts } from "../integrity"
 import type { DeckOp, OpOf, RawPart, SlideOp } from "../ops"
@@ -405,8 +405,7 @@ export function overlayNode(typed: SlideNode, read: SlideNode | undefined): Slid
 			if (match?.src === undefined) delete shape.src
 			else shape.src = match.src
 
-			if (match?.text !== undefined && shape.text !== undefined && digestOf(shape.text) === digestOf(match.text))
-				shape.text = match.text
+			if (match?.text !== undefined && shape.text !== undefined && sameDigest(shape.text, match.text)) shape.text = match.text
 			if (shape.children !== undefined) rebind(shape.children, match?.children ?? [])
 		})
 	}

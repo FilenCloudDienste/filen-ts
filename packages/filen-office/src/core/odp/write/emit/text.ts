@@ -1,5 +1,5 @@
 import { OdfNs, readElement } from "../../../odf/index"
-import { digestOf } from "../../../presentation/edit/changes"
+import { digestOf, sameDigest } from "../../../presentation/edit/changes"
 import {
 	refused,
 	type Action,
@@ -218,7 +218,7 @@ function hrefOf(action: Action, scope: TextWriteScope): string | Refused {
 }
 
 function same(a: unknown, b: unknown): boolean {
-	return digestOf(a) === digestOf(b)
+	return sameDigest(a, b)
 }
 
 // What a span adds over the paragraph's run properties (the reader merges a span's own properties over them).

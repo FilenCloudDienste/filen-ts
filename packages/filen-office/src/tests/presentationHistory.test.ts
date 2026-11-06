@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest"
 import type { Touch } from "../core/presentation/edit/apply"
+import { digestOf, sameDigest } from "../core/presentation/edit/changes"
 import { DeckHistory, touchKey, type Fingerprint, type HistoryLimits } from "../core/presentation/edit/history"
 import type { DeckOp } from "../core/presentation/edit/ops"
 import { slideRef } from "../core/presentation/model"
+import { budget, cpuMs } from "./timing"
 
 // The deck history over a toy model (a map of key → value): each step sets keys, its inverse sets them back.
 
@@ -188,5 +190,60 @@ describe("deck history", () => {
 		for (let index = 0; index < 50; index++) big.set(index, "x", { bytes: 30 })
 
 		expect(big.history.size.bytes).toBeLessThanOrEqual(100)
+	})
+
+	it("trims a step at the limit in time independent of what the saved state's baseline already holds", () => {
+		const toy = new Toy({ maxSteps: 50, maxBytes: 64 * 1024 * 1024 })
+
+		// Each trimmed step puts a new key in the saved state's baseline: 20,000 of them.
+		for (let id = 0; id < 20_050; id++) toy.set(id, "v")
+
+		const start = cpuMs()
+
+		for (let id = 20_050; id < 21_050; id++) toy.set(id, "v")
+
+		// A copy of the baseline per push (to take that push back) costs seconds here.
+		expect(cpuMs() - start).toBeLessThan(budget(50))
+		expect(toy.history.size.steps).toBe(50)
+		expect(toy.history.dirty).toBe(true)
+	})
+})
+
+describe("sameDigest", () => {
+	it("answers as digestOf(a) === digestOf(b) over model-like values", () => {
+		const values: unknown[] = [
+			undefined,
+			null,
+			0,
+			Number.NaN,
+			1,
+			"",
+			"1",
+			true,
+			[],
+			[undefined],
+			[1, 2],
+			[2, 1],
+			{},
+			{ a: undefined },
+			{ src: { part: "x" } },
+			{ revision: 3, lock: "gate" },
+			{ a: 1 },
+			{ a: 1, b: undefined },
+			{ b: 2, a: 1 },
+			{ a: 1, b: 2 },
+			{ a: [1, { c: "x" }] },
+			{ a: [1, { c: "y" }] },
+			new Map([[1, "x"]]),
+			[[1, "x"]],
+			new Set([1, 2]),
+			new Uint8Array([1, 2, 3]),
+			new Uint8Array([1, 2, 4]),
+			new Int8Array([1, 2, 3]),
+			{ bytes: new Uint8Array([1, 2]), src: 1 },
+			{ bytes: new Uint8Array([1, 2]) }
+		]
+
+		for (const a of values) for (const b of values) expect([a, b, sameDigest(a, b)]).toEqual([a, b, digestOf(a) === digestOf(b)])
 	})
 })

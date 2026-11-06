@@ -18,7 +18,7 @@ import {
 	type Xfrm
 } from "../../model"
 import type { ApplyContext, ApplyFamily, ApplyResult, Inverse, Touch } from "../apply"
-import { cloneModel, digestOf, findShape } from "../changes"
+import { cloneModel, findShape, sameDigest } from "../changes"
 import type { DeckOp, OpOf, ShapeOp } from "../ops"
 import { xmlSafeText } from "../xmlText"
 import { isRefused } from "../../refusal"
@@ -183,8 +183,8 @@ function overlay(typed: ShapeNode, read: ShapeNode): ShapeNode {
 	if (read.src === undefined) delete out.src
 	else out.src = read.src
 
-	if (typed.text !== undefined && read.text !== undefined && digestOf(typed.text) === digestOf(read.text)) out.text = read.text
-	if (typed.frame !== undefined && read.frame !== undefined && digestOf(typed.frame) === digestOf(read.frame)) out.frame = read.frame
+	if (typed.text !== undefined && read.text !== undefined && sameDigest(typed.text, read.text)) out.text = read.text
+	if (typed.frame !== undefined && read.frame !== undefined && sameDigest(typed.frame, read.frame)) out.frame = read.frame
 
 	if (typed.children !== undefined) {
 		const matches = matchShapes(typed.children, read.children ?? [])

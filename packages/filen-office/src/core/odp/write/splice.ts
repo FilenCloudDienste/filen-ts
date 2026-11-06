@@ -3,7 +3,7 @@ import { canonicalName, readContentPrologue } from "../../odf/index"
 import { emitFamilyOf } from "../../pptx/write/emit"
 import type { PartChange } from "../../opc/index"
 import type { DeckChanges } from "../../presentation/edit/apply"
-import { digestOf } from "../../presentation/edit/changes"
+import { sameDigest } from "../../presentation/edit/changes"
 import { markupBytes } from "../../presentation/edit/proof"
 import { parseInScope } from "../../presentation/edit/canonical"
 import {
@@ -153,7 +153,6 @@ function sourceKey(shape: ShapeNode): string | undefined {
 export function shapeAspects(target: readonly ShapeNode[], pristine: readonly ShapeNode[]): Map<ShapeNode, Aspects> {
 	const before = new Map<string, ShapeNode>()
 	const out = new Map<ShapeNode, Aspects>()
-	const same = (a: unknown, b: unknown): boolean => digestOf(a) === digestOf(b)
 
 	walk(pristine, shape => {
 		const key = sourceKey(shape)
@@ -169,18 +168,20 @@ export function shapeAspects(target: readonly ShapeNode[], pristine: readonly Sh
 
 		const aspects: Aspects = {
 			pristine: was,
-			...(same(shape.xfrm, was.xfrm) ? {} : { xfrm: true }),
-			...(same(shape.props?.fill, was.props?.fill) ? {} : { fill: true }),
-			...(same(shape.props?.ln, was.props?.ln) ? {} : { ln: true }),
-			...(same(shape.props?.effects, was.props?.effects) ? {} : { effects: true }),
-			...(same(shape.props?.bodyPr, was.props?.bodyPr) ? {} : { bodyPr: true }),
-			...(same(outline(shape), outline(was)) ? {} : { geometry: true }),
-			...(same(fieldless(shape.text), fieldless(was.text)) ? {} : { text: true }),
-			...(same(shape.alt, was.alt) ? {} : { alt: true }),
+			...(sameDigest(shape.xfrm, was.xfrm) ? {} : { xfrm: true }),
+			...(sameDigest(shape.props?.fill, was.props?.fill) ? {} : { fill: true }),
+			...(sameDigest(shape.props?.ln, was.props?.ln) ? {} : { ln: true }),
+			...(sameDigest(shape.props?.effects, was.props?.effects) ? {} : { effects: true }),
+			...(sameDigest(shape.props?.bodyPr, was.props?.bodyPr) ? {} : { bodyPr: true }),
+			...(sameDigest(outline(shape), outline(was)) ? {} : { geometry: true }),
+			...(sameDigest(fieldless(shape.text), fieldless(was.text)) ? {} : { text: true }),
+			...(sameDigest(shape.alt, was.alt) ? {} : { alt: true }),
 			...(shape.name === was.name ? {} : { name: true }),
 			...(shape.hidden === was.hidden ? {} : { hidden: true }),
-			...(same(shape.actions, was.actions) ? {} : { actions: true }),
-			...((shape.frame?.kind === "table" || shape.frame?.kind === "chart") && !same(shape.frame, was.frame) ? { frame: true } : {})
+			...(sameDigest(shape.actions, was.actions) ? {} : { actions: true }),
+			...((shape.frame?.kind === "table" || shape.frame?.kind === "chart") && !sameDigest(shape.frame, was.frame)
+				? { frame: true }
+				: {})
 		}
 
 		out.set(shape, aspects)
@@ -220,12 +221,12 @@ function familyContent(target: readonly ShapeNode[], pristine: readonly ShapeNod
 		if (was === undefined) return
 		if (shape.kind !== was.kind) found = refused("unsupported", "a shape of another kind")
 		else if (
-			(shape.frame?.kind !== "table" && shape.frame?.kind !== "chart" && digestOf(shape.frame) !== digestOf(was.frame)) ||
-			digestOf(shape.media) !== digestOf(was.media)
+			(shape.frame?.kind !== "table" && shape.frame?.kind !== "chart" && !sameDigest(shape.frame, was.frame)) ||
+			!sameDigest(shape.media, was.media)
 		)
 			found = refused("notImplemented", `odp emit ${shape.frame?.kind ?? "media"}`)
 		// What a placeholder is (ODF holds its kind; idxWritten is how a pptx writes its idx).
-		else if (digestOf(placeholderKind(shape.ph)) !== digestOf(placeholderKind(was.ph)))
+		else if (!sameDigest(placeholderKind(shape.ph), placeholderKind(was.ph)))
 			found = refused("unsupported", "a placeholder of another kind")
 	})
 

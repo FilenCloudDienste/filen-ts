@@ -6,7 +6,7 @@ import type { DeckOp } from "../core/presentation/edit/ops"
 import type { Xfrm } from "../core/presentation/model"
 import { editHarness, type EditHarness } from "./presentationEditFixtures"
 import { buildPptx, sp, xfrm } from "./pptxFixtures"
-import { cpuMs } from "./timing"
+import { budget, cpuMs } from "./timing"
 
 // Arranging a busy slide in the worker: aligning, distributing or dragging 500 shapes is one command of at most
 // 30 ms CPU (the least of 3 runs), proof gate 1 of the slide already paid by an earlier edit.
@@ -52,7 +52,7 @@ async function measure(h: EditHarness, op: () => DeckOp | undefined): Promise<nu
 describe("presentation arrange performance", () => {
 	it(
 		`align, distribute and a drag of ${String(SHAPES)} shapes each take at most ${String(BUDGET_MS)} ms CPU in the worker`,
-		{ timeout: 60_000 },
+		{ timeout: budget(60_000) },
 		async () => {
 			const h = await editHarness(busyDeck(), { emit: emitPptx } as never)
 			const slide = await h.slide(0)
@@ -70,9 +70,9 @@ describe("presentation arrange performance", () => {
 
 			h.close()
 
-			expect(align).toBeLessThanOrEqual(BUDGET_MS)
-			expect(distribute).toBeLessThanOrEqual(BUDGET_MS)
-			expect(drag).toBeLessThanOrEqual(BUDGET_MS)
+			expect(align).toBeLessThanOrEqual(budget(BUDGET_MS))
+			expect(distribute).toBeLessThanOrEqual(budget(BUDGET_MS))
+			expect(drag).toBeLessThanOrEqual(budget(BUDGET_MS))
 		}
 	)
 })

@@ -14,7 +14,7 @@ import {
 	type TextBody
 } from "../../model"
 import type { ApplyContext, ApplyFamily, ApplyResult, Inverse, Touch } from "../apply"
-import { cloneModel, digestOf, findShape } from "../changes"
+import { cloneModel, digestOf, findShape, sameDigest } from "../changes"
 import { matcherOf, replaceInBody } from "../find"
 import type { DeckOp, OpOf, TextOp } from "../ops"
 import { type SourceReading } from "./shape"
@@ -260,7 +260,7 @@ function bodyToPut(node: SlideNode, shape: ShapeNode, op: SetText, context: Appl
 
 	if (isRefused(read)) return read
 
-	const from = read.text !== undefined && digestOf(read.text) === digestOf(body) ? read.text : rebind(body, read.text, context)
+	const from = read.text !== undefined && sameDigest(read.text, body) ? read.text : rebind(body, read.text, context)
 
 	return isRefused(from) ? from : keptInPlace(from, shape, context)
 }
@@ -337,7 +337,7 @@ function heldBody(node: SlideNode, shape: ShapeNode, op: SetText, body: TextBody
 	if (shape.src.format === "odp" && !heldIdsCover(op.raw, read.text.paragraphs.length, odpParagraphTargets(node.timing), shape.id))
 		return undefined
 
-	return digestOf(read.text) === digestOf(body) ? { body: read.text, src: read.src } : undefined
+	return sameDigest(read.text, body) ? { body: read.text, src: read.src } : undefined
 }
 
 // Content kept as source that was read back from held markup, bound to the same content in the shape's live source
