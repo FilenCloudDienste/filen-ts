@@ -152,6 +152,21 @@ async function pruneVideoRoots(page: Page): Promise<void> {
 	}
 }
 
+// Photos' counterpart: photos-archive.spec.ts picks a root inside the fixture tree, which the fixture teardown trashes,
+// and photos.spec.ts a scratch directory; a run killed before either removes its own leaves the next one off the unset
+// screen both start from.
+async function pruneLeftoverPhotosRoots(page: Page): Promise<void> {
+	try {
+		const removed = await page.evaluate(minAgeMs => window.__filenE2E.pruneLeftoverPhotosRoots(minAgeMs), MIN_DRIVE_DEBRIS_AGE_MS)
+
+		if (removed > 0) {
+			console.log(`cleanup-setup: removed ${String(removed)} leftover Photos root(s)`)
+		}
+	} catch (error) {
+		console.log(`cleanup-setup: Photos root sweep failed — left for the next run (${String(error)})`)
+	}
+}
+
 setup("sweep drive, trash and playlist debris matching a retired scratch-name prefix", async ({ page }) => {
 	try {
 		await page.goto("/drive")
@@ -173,6 +188,7 @@ setup("sweep drive, trash and playlist debris matching a retired scratch-name pr
 
 		await sweepPlaylistDebris(page)
 		await pruneVideoRoots(page)
+		await pruneLeftoverPhotosRoots(page)
 	} catch (error) {
 		console.log(`cleanup-setup: drive-side sweep stopped early — ${String(error)}`)
 	}

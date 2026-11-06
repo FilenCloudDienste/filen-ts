@@ -35,11 +35,13 @@ async function removePhotosDirectory(page: Page, name: string): Promise<void> {
 	const dialog = page.getByRole("dialog", { name: photos.photosDirectoriesTitle, exact: true })
 
 	await dialog.getByRole("button", { name: photos.photosRemoveDirectory.replace("{{name}}", name), exact: true }).click()
-	await page
-		.getByRole("alertdialog", { name: photos.photosRemoveConfirmTitle.replace("{{name}}", name), exact: true })
-		.getByRole("button", { name: photos.photosRemoveConfirmAction, exact: true })
-		.click()
-	await expect(dialog.getByText(photos.photosDirectoriesNone, { exact: true })).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
+	const confirm = page.getByRole("alertdialog", { name: photos.photosRemoveConfirmTitle.replace("{{name}}", name), exact: true })
+
+	await confirm.getByRole("button", { name: photos.photosRemoveConfirmAction, exact: true }).click()
+	// The list empties at once; the confirmation closes only once the removal is uploaded, which a context closed
+	// earlier would cut off, leaving the root on the account for the next spec.
+	await expect(confirm).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
+	await expect(dialog.getByText(photos.photosDirectoriesNone, { exact: true })).toBeVisible()
 	await dialog.getByRole("button", { name: photos.photosDirectoriesDone, exact: true }).click()
 	await expect(page.getByText(photos.photosUnsetTitle, { exact: true })).toBeVisible()
 }

@@ -17,6 +17,7 @@ import { CATALOGUE } from "@/features/drive/components/compressDialog.logic"
 import { archiveFormatInfos } from "@/features/drive/lib/archiveHelpers"
 import { withLevel } from "@/features/drive/lib/archiveFormats"
 import { pendingSdkCalls } from "@/e2e-hooks/sdkCalls"
+import { pruneLeftoverPhotosRoots } from "@/e2e-hooks/photosLibrary"
 import {
 	pruneDeadVideoRoots,
 	videosSyncFileText,
@@ -204,6 +205,9 @@ interface E2eHooks {
 	// cleanup.setup.ts: removes library roots a killed Videos run left (directory gone or trashed, or scratch-named
 	// and older than `minAgeMs`) through the app's own configuration edit. Returns the count.
 	pruneDeadVideoRoots: (minAgeMs: number) => Promise<number>
+	// cleanup.setup.ts: removes photos roots a killed Photos run left (it or its parent gone or trashed, or
+	// scratch-named and older than `minAgeMs`) through the app's own edit. Returns the count.
+	pruneLeftoverPhotosRoots: (minAgeMs: number) => Promise<number>
 }
 
 interface ArchiveCatalogueRow {
@@ -523,6 +527,7 @@ export function installE2eHooks(): void {
 		videosSyncSnapshot: ready(videosSyncSnapshot),
 		videosSyncRestore: ready(videosSyncRestore),
 		videosSyncFileText: ready(videosSyncFileText),
-		pruneDeadVideoRoots: ready(pruneDeadVideoRoots)
+		pruneDeadVideoRoots: ready(pruneDeadVideoRoots),
+		pruneLeftoverPhotosRoots: ready(pruneLeftoverPhotosRoots)
 	}
 }
