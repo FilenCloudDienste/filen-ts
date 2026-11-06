@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import type { Dir, SocketEvent, UuidStr } from "@filen/sdk-rs"
 import { testUuid } from "@/tests/support/uuid"
+import { stubBrowserEvents } from "@/tests/support/browserEvents"
 import { driveFile } from "@/tests/support/videoDrive"
 
 const DOT_FILEN = testUuid("dotfilen")
@@ -248,6 +249,7 @@ describe(".filen subdirectories", () => {
 			library.registerLibraryConfigSocketHandlers()
 		]
 
+		stubBrowserEvents()
 		await socket.socketBridge.start()
 		await playlists.getPlaylistsDirectoryUuid()
 		await dotFilen.getDotFilenSubdir("videos")
@@ -273,6 +275,7 @@ describe(".filen subdirectories", () => {
 		}
 
 		await socket.socketBridge.stop().catch(() => undefined)
+		vi.unstubAllGlobals()
 	})
 
 	it("forgetting one subdirectory keeps `.filen` while a sibling is resolved under it", async () => {

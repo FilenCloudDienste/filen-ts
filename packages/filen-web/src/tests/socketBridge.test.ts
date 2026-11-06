@@ -1,14 +1,19 @@
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { SocketEvent } from "@filen/sdk-rs"
 
 // The real sdk client imports a Vite `?worker` (unresolvable under node vitest) — mock it to the two
 // socket ops the bridge calls.
-const { subscribeToSocket, unsubscribeFromSocket } = vi.hoisted(() => ({
+const { subscribeToSocket, unsubscribeFromSocket, reconnectSocket } = vi.hoisted(() => ({
 	subscribeToSocket: vi.fn<(cb: (event: SocketEvent) => void) => Promise<void>>(() => Promise.resolve()),
-	unsubscribeFromSocket: vi.fn<() => void>()
+	unsubscribeFromSocket: vi.fn<() => void>(),
+	reconnectSocket: vi.fn<() => Promise<void>>(() => Promise.resolve())
 }))
 
-vi.mock("@/lib/sdk/client", () => ({ sdkApi: { subscribeToSocket, unsubscribeFromSocket } }))
+vi.mock("@/lib/sdk/client", () => ({ sdkApi: { subscribeToSocket, unsubscribeFromSocket, reconnectSocket } }))
+
+const { desktop } = vi.hoisted(() => ({ desktop: { bridge: undefined as { networkOnline: () => void } | undefined } }))
+
+vi.mock("@/lib/desktop", () => ({ desktopBridge: () => desktop.bridge }))
 
 const { logError, logWarn } = vi.hoisted(() => ({ logError: vi.fn(), logWarn: vi.fn() }))
 
@@ -16,6 +21,7 @@ vi.mock("@/lib/log", () => ({ log: { error: logError, warn: logWarn, info: vi.fn
 
 import { registerSocketHandler, decryptedOrSkip, socketBridge } from "@/lib/sdk/socket"
 import { currentSocketEpoch, socketLiveSince } from "@/lib/sdk/socketSession"
+import { stubBrowserEvents } from "@/tests/support/browserEvents"
 
 // Grab the plain dispatch fn the bridge handed to subscribeToSocket (Comlink.proxy is a no-op marker in
 // node, so the value passed IS the dispatch closure — invoking it drives the fan-out).
@@ -37,9 +43,16 @@ function noteEvent(uuid: string): SocketEvent {
 	}
 }
 
+let page: ReturnType<typeof stubBrowserEvents>
+
+beforeEach(() => {
+	page = stubBrowserEvents()
+})
+
 afterEach(async () => {
 	await socketBridge.stop()
 	vi.clearAllMocks()
+	vi.unstubAllGlobals()
 })
 
 describe("socket bridge — registry dispatch", () => {
@@ -174,5 +187,80 @@ describe("socket bridge — socket session", () => {
 		expect(currentSocketEpoch()).toBeNull()
 
 		unregister()
+	})
+})
+
+describe("socket bridge — reconnect when the network returns", () => {
+	function setVisibility(state: DocumentVisibilityState): void {
+		page.document.visibilityState = state
+		page.document.dispatchEvent(new Event("visibilitychange"))
+	}
+
+	it("asks the worker to reconnect on every online event and every return to visible", async () => {
+		await socketBridge.start()
+
+		page.window.dispatchEvent(new Event("online"))
+		page.window.dispatchEvent(new Event("online"))
+		setVisibility("hidden")
+		expect(reconnectSocket).toHaveBeenCalledTimes(2)
+
+		setVisibility("visible")
+		expect(reconnectSocket).toHaveBeenCalledTimes(3)
+	})
+
+	it("asks nothing while the socket is authenticated, and again once it drops", async () => {
+		await socketBridge.start()
+		dispatchFn()({ type: "authSuccess" })
+
+		page.window.dispatchEvent(new Event("online"))
+		setVisibility("visible")
+		expect(reconnectSocket).not.toHaveBeenCalled()
+
+		dispatchFn()({ type: "reconnecting" })
+		page.window.dispatchEvent(new Event("online"))
+		expect(reconnectSocket).toHaveBeenCalledTimes(1)
+	})
+
+	it("asks nothing before start() (signed out) or after stop() (logout)", async () => {
+		page.window.dispatchEvent(new Event("online"))
+		setVisibility("visible")
+
+		await socketBridge.start()
+		await socketBridge.stop()
+
+		page.window.dispatchEvent(new Event("online"))
+		setVisibility("visible")
+		expect(reconnectSocket).not.toHaveBeenCalled()
+	})
+
+	it("in the desktop app, tells the native host on every online event, the page's socket up or not", async () => {
+		const networkOnline = vi.fn()
+
+		desktop.bridge = { networkOnline }
+
+		try {
+			await socketBridge.start()
+			dispatchFn()({ type: "authSuccess" })
+
+			page.window.dispatchEvent(new Event("online"))
+			setVisibility("visible")
+			expect(networkOnline).toHaveBeenCalledTimes(1)
+			expect(reconnectSocket).not.toHaveBeenCalled()
+
+			dispatchFn()({ type: "reconnecting" })
+			page.window.dispatchEvent(new Event("online"))
+			expect(networkOnline).toHaveBeenCalledTimes(2)
+			expect(reconnectSocket).toHaveBeenCalledTimes(1)
+		} finally {
+			desktop.bridge = undefined
+		}
+	})
+
+	it("drops the listeners when the subscription fails", async () => {
+		subscribeToSocket.mockRejectedValueOnce(new Error("no client"))
+
+		await socketBridge.start()
+		page.window.dispatchEvent(new Event("online"))
+		expect(reconnectSocket).not.toHaveBeenCalled()
 	})
 })

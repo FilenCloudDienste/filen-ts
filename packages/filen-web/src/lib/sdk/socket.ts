@@ -2,7 +2,8 @@ import * as Comlink from "comlink"
 import type { SocketEvent, MaybeEncrypted } from "@filen/sdk-rs"
 import { sdkApi } from "@/lib/sdk/client"
 import { log } from "@/lib/log"
-import { socketAuthenticated, socketDropped } from "@/lib/sdk/socketSession"
+import { desktopBridge } from "@/lib/desktop"
+import { currentSocketEpoch, socketAuthenticated, socketDropped } from "@/lib/sdk/socketSession"
 
 // The main-thread half of the realtime socket bridge — the FIRST socket wiring in filen-web, kept
 // generic so drive/chats reuse it later; the note handlers live in features/notes, never here. One
@@ -90,8 +91,34 @@ export function decryptedOrSkip<T>(value: MaybeEncrypted<T>, context: string): T
 	return undefined
 }
 
+// The network may be back: a socket waiting out its reconnect backoff tries now instead (the SDK backs
+// failed connects off up to a minute). Nothing to cut short while the socket is authenticated.
+function wakeSocket(): void {
+	if (currentSocketEpoch() !== null) {
+		return
+	}
+
+	sdkApi.reconnectSocket().catch((e: unknown) => {
+		log.warn("socket", "reconnectSocket failed", e)
+	})
+}
+
+// In the desktop app the sync engine's socket, in the native host, is told too (whether or not this page's is up).
+function onOnline(): void {
+	desktopBridge()?.networkOnline()
+	wakeSocket()
+}
+
+function wakeSocketIfVisible(): void {
+	if (document.visibilityState === "visible") {
+		wakeSocket()
+	}
+}
+
 class SocketBridge {
 	private started = false
+	// Removes the network and visibility listeners, which live exactly as long as the subscription.
+	private wakeListeners: AbortController | null = null
 	// The Comlink.proxy handed to the worker. Held so it is not GC'd while the worker's ListenerHandle
 	// still references it; a plain wrapping fn, same idiom as the upload/download onProgress proxies.
 	private proxied: StoredHandler | null = null
@@ -106,6 +133,10 @@ class SocketBridge {
 
 		this.started = true
 		this.proxied = Comlink.proxy(dispatch)
+		this.wakeListeners = new AbortController()
+
+		window.addEventListener("online", onOnline, { signal: this.wakeListeners.signal })
+		document.addEventListener("visibilitychange", wakeSocketIfVisible, { signal: this.wakeListeners.signal })
 
 		try {
 			await sdkApi.subscribeToSocket(this.proxied)
@@ -114,6 +145,7 @@ class SocketBridge {
 			// subscribe/logout.
 			this.started = false
 			this.proxied = null
+			this.stopWakeListeners()
 
 			log.error("socket", "subscribeToSocket failed", e)
 		}
@@ -129,6 +161,7 @@ class SocketBridge {
 
 		this.started = false
 		this.proxied = null
+		this.stopWakeListeners()
 		socketDropped()
 
 		try {
@@ -136,6 +169,11 @@ class SocketBridge {
 		} catch (e) {
 			log.error("socket", "unsubscribeFromSocket failed", e)
 		}
+	}
+
+	private stopWakeListeners(): void {
+		this.wakeListeners?.abort()
+		this.wakeListeners = null
 	}
 }
 

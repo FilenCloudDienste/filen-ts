@@ -2883,6 +2883,11 @@ const api = {
 	unsubscribeFromSocket(): void {
 		freeSocketListener()
 	},
+	// Cuts a reconnect backoff pause short. The SDK ignores it while the socket is connected or connecting
+	// and with no socket (signed out, unsubscribed), coalesces a burst, and never rejects.
+	async reconnectSocket(): Promise<void> {
+		await client?.reconnectSocket()
+	},
 	searchSetName(name: string): Promise<boolean> {
 		return searchEngine.setName(name)
 	},
