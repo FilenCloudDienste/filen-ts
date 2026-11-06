@@ -408,7 +408,7 @@ jobs:
             include='[{"name":"all","browser":"all","account":"","group":"filen-web-e2e","specs":""}]'
           else
             case "$E2E_PROJECT" in
-              '') include="[$(entry chromium CHROMIUM),$(entry firefox FIREFOX),$(entry webkit WEBKIT)$([ -z "$E2E_SPEC" ] && printf ',%s' "$free")]" ;;
+              '') include="[$(entry chromium CHROMIUM),$(entry firefox FIREFOX),$(entry webkit WEBKIT)$([ -n "$E2E_SPEC" ] || printf ',%s' "$free")]" ;;
               firefox-*) include="[$(entry firefox FIREFOX)]" ;;
               webkit-*) include="[$(entry webkit WEBKIT)]" ;;
               *) include="[$(entry chromium CHROMIUM)]" ;;
