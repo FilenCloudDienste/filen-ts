@@ -28,12 +28,15 @@ export function jobCard(page: Page, title: string | RegExp): Locator {
 		.filter({ hasText: title })
 }
 
-// Waits for the card, then hovers it so its auto-close stands still while the caller reads it.
+// Waits for the card and hovers it, one retried step, so its auto-close stands still while the caller reads
+// it: a settled card is issued again with its timed duration (jobToast.tsx), which replaces its element, and a
+// separate visibility wait left that countdown running until the hover landed.
 export async function expectJobCard(page: Page, title: string | RegExp, timeout: number = ARCHIVE_JOB_TIMEOUT_MS): Promise<Locator> {
 	const card = jobCard(page, title)
 
-	await expect(card).toBeVisible({ timeout })
-	await card.hover()
+	await expect(async () => {
+		await card.hover({ timeout: 2_000 })
+	}).toPass({ timeout })
 
 	return card
 }
@@ -68,6 +71,7 @@ export async function settledExtractCard(page: Page, archive: string, timeout: n
 	const settled = new RegExp(`Extracted ${name} → |Extract ${name} → [\\s\\S]*Done, with issues\\. See the details\\.`)
 	const cards = jobCard(page, new RegExp(`Extract(ed|ing)? ${name} → `))
 	const seen = new Set<string>()
+	let hovered = false
 
 	try {
 		await expect
@@ -77,6 +81,16 @@ export async function settledExtractCard(page: Page, archive: string, timeout: n
 
 					if (text.length > 0) {
 						seen.add(text)
+					}
+
+					// The pointer rests on the card while the job runs, so the settled card's countdown never
+					// starts before the caller reads it.
+					if (!hovered && text.length > 0) {
+						hovered = await cards
+							.first()
+							.hover({ timeout: 2_000 })
+							.then(() => true)
+							.catch(() => false)
 					}
 
 					return text
