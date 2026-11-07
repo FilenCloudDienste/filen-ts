@@ -60,7 +60,7 @@ interface E2eHooks {
 	videosSyncRestore: (snapshot: VideosSyncSnapshot) => Promise<void>
 	videosSyncFileText: (name: string) => Promise<string | null>
 	pruneDeadVideoRoots: (minAgeMs: number) => Promise<number>
-	pruneLeftoverPhotosRoots: (minAgeMs: number) => Promise<number>
+	clearPhotosRoots: () => Promise<number>
 }
 
 // `.filen/videos` as a Videos spec found it (src/e2e-hooks/videosSync.ts): plain strings, so it crosses the

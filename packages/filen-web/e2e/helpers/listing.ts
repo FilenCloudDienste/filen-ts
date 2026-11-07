@@ -295,6 +295,13 @@ export async function openPhotos(page: Page): Promise<void> {
 	await openRailGroupChild(page, "Media", "Photos", /\/photos$/)
 }
 
+// The photos screen with no root, as the photos specs start: whatever roots the account still holds (a run cut
+// short leaves its own) are removed first, each once uploaded.
+export async function openPhotosUnset(page: Page): Promise<void> {
+	await page.evaluate(() => window.__filenE2E.clearPhotosRoots())
+	await openPhotos(page)
+}
+
 // The rail shows its transfers ring only while there are transfers, so this goes through the account
 // menu's Transfers entry, which is always there.
 export async function openTransfers(page: Page): Promise<void> {

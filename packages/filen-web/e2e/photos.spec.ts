@@ -3,6 +3,7 @@ import { boxOf } from "./helpers/geometry"
 import {
 	bootTo,
 	openPhotos,
+	openPhotosUnset,
 	enterScratchDirectory,
 	trashScratchDirectory,
 	uploadFiles,
@@ -59,7 +60,7 @@ test("photos: root pick over a mixed upload, media-only grid, viewer pager + in-
 		)
 
 		// ---- navigate to /photos: unset hero (no root picked yet) ----
-		await openPhotos(page)
+		await openPhotosUnset(page)
 		await expect(page.getByText("Choose your photos directory")).toBeVisible()
 
 		// ---- choose the scratch directory as the photos root ----

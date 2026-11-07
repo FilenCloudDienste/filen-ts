@@ -12,7 +12,7 @@ import {
 	descendInto,
 	dismissOverlays,
 	enterScratchDirectory,
-	openPhotos,
+	openPhotosUnset,
 	trashScratchDirectory,
 	uploadFiles,
 	waitForListingSettled,
@@ -49,7 +49,7 @@ async function removePhotosDirectory(page: Page, name: string): Promise<void> {
 // Picks the photos root down `path` from the drive root in the chooser ("Choose directory" on a fresh
 // context, which has no root yet), and returns the grid once it shows `expectTiles` tiles.
 async function choosePhotosRoot(page: Page, path: readonly string[], expectTiles: number): Promise<Locator> {
-	await openPhotos(page)
+	await openPhotosUnset(page)
 	await page.getByRole("button", { name: "Choose directory", exact: true }).click()
 
 	// Scoped by its title: the preview overlay is a dialog too.
