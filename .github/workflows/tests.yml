@@ -594,10 +594,9 @@ jobs:
           path: ~/.cache/ms-playwright
           key: ${{ steps.playwright-cache.outputs.cache-primary-key }}
       # Firefox on Linux advances a playing media element's clock only against a live audio sink, and the
-      # runner has no sound server: playback reports playing with its position stuck at 0. WebKit's GStreamer
-      # playback, with no sink either, left its audio playhead at 0 in some runs (preview-media's audio leg).
+      # runner has no sound server: playback reports playing with its position stuck at 0.
       - name: Start a null audio sink
-        if: matrix.browser == 'all' || matrix.browser == 'firefox' || matrix.browser == 'webkit'
+        if: matrix.browser == 'all' || matrix.browser == 'firefox'
         run: |
           sudo apt-get install -y --no-install-recommends pulseaudio
           pulseaudio --start --exit-idle-time=-1
