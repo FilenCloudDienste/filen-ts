@@ -558,6 +558,11 @@ export class AudioEngine {
 		const sample = this.element.sample()
 
 		useAudioStore.getState().setPosition(Math.max(0, sample.currentTimeMs))
+		// WebKit's GStreamer backend can announce a duration of 0 and then learn the real one without a
+		// second `durationchange` (a header-less MP3 whose length it estimates), which would leave the
+		// scrubber dead for the whole track. The sample read here already carries it, so it is picked up
+		// on the next position write.
+		this.applyDuration(sample.durationMs)
 		this.deps.mediaSession?.setPositionState(sample)
 	}
 
@@ -566,10 +571,19 @@ export class AudioEngine {
 			return
 		}
 
-		const durationMs = this.element.sample().durationMs
-		const known = Number.isFinite(durationMs) && durationMs > 0
+		this.applyDuration(this.element.sample().durationMs)
+	}
 
-		useAudioStore.getState().setDuration(known ? durationMs : 0)
+	// Writes the element's duration (0 while unknown) to the store when it differs from what is there.
+	private applyDuration(sampledMs: number): void {
+		const known = Number.isFinite(sampledMs) && sampledMs > 0
+		const durationMs = known ? sampledMs : 0
+
+		if (durationMs === useAudioStore.getState().durationMs) {
+			return
+		}
+
+		useAudioStore.getState().setDuration(durationMs)
 
 		if (known && this.loadedTrackUuid !== null) {
 			backfillTrackDuration(this.loadedTrackUuid, durationMs / 1000)

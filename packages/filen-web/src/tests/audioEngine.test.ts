@@ -812,6 +812,40 @@ describe("position throttle", () => {
 	})
 })
 
+describe("duration", () => {
+	// WebKit's GStreamer backend announces 0 for a header-less MP3 and learns the real length without a
+	// second durationchange: the scrubber must not stay dead for the track.
+	it("picks up a duration the element learned without announcing it", async () => {
+		const h = makeHarness()
+
+		await h.engine.enqueueAndPlay([track("a")], 0)
+		await flush()
+
+		h.fake.setSample({ currentTimeMs: 0, durationMs: 0, paused: false, ended: false })
+		h.events().onDurationChange()
+		expect(useAudioStore.getState().durationMs).toBe(0)
+
+		h.setNow(2_000)
+		h.fake.setSample({ currentTimeMs: 500, durationMs: 30_024, paused: false, ended: false })
+		h.events().onTimeUpdate()
+
+		expect(useAudioStore.getState().durationMs).toBe(30_024)
+	})
+
+	it("leaves an unknown duration at 0", async () => {
+		const h = makeHarness()
+
+		await h.engine.enqueueAndPlay([track("a")], 0)
+		await flush()
+
+		h.setNow(2_000)
+		h.fake.setSample({ currentTimeMs: 500, durationMs: Number.POSITIVE_INFINITY, paused: false, ended: false })
+		h.events().onTimeUpdate()
+
+		expect(useAudioStore.getState().durationMs).toBe(0)
+	})
+})
+
 describe("shared media volume", () => {
 	it("gives a new element the shared level", async () => {
 		setMediaVolume(0.4)
