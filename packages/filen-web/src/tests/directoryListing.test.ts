@@ -14,7 +14,7 @@ import {
 } from "@/features/drive/components/directoryListing.logic"
 import { DRIVE_SORT_BY, DRIVE_SORT_PARTS, type DriveSortBy } from "@/features/drive/lib/sort"
 import { testUuid } from "@/tests/support/uuid"
-import { dotFilenFilterAppliesTo } from "@/features/drive/lib/hiddenItems"
+import { dotFilenFilterAppliesTo, rootUuidOfRootListing } from "@/features/drive/lib/hiddenItems"
 import { sharerRole, receiverRole } from "@/tests/fixtures/sdk"
 
 function mockDir(overrides: Partial<Dir> = {}): Dir {
@@ -267,6 +267,29 @@ describe("resolveListingDisplayItems", () => {
 			expect(result.items).toEqual([docs])
 			expect(result.hiddenCount).toBe(1)
 			expect(result.hiddenUuids.sort()).toEqual([dotFilen.data.uuid, env.data.uuid].sort())
+		})
+
+		it("is removed at the drive root before the account loads, the root read off the root's own listing", () => {
+			const report = narrowItem(mockFile({ uuid: testUuid("report"), parent: ROOT }))
+			const items = [report, dotFilen, docs]
+			const result = resolveListingDisplayItems({
+				items,
+				sortBy: "nameAsc",
+				directorySizes: NO_SIZES,
+				hide: false,
+				dotFilenRoot: rootUuidOfRootListing(items),
+				atDriveRoot: true
+			})
+
+			expect(result.items).toEqual([docs, report])
+			expect(result.hiddenCount).toBe(0)
+		})
+
+		it("reads no root off a listing without a directory", () => {
+			expect(rootUuidOfRootListing(undefined)).toBeNull()
+			expect(rootUuidOfRootListing([])).toBeNull()
+			expect(rootUuidOfRootListing([narrowItem(mockFile())])).toBeNull()
+			expect(rootUuidOfRootListing([narrowItem(mockFile()), docs])).toBe(ROOT)
 		})
 
 		it("stays while shown, and the dot-prefix toggle alone never removes it", () => {

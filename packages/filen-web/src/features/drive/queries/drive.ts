@@ -41,6 +41,7 @@ import {
 	type DriveViewMode
 } from "@/features/drive/lib/preferences"
 import { type DriveSortBy } from "@/features/drive/lib/sort"
+import { rootUuidOfRootListing } from "@/features/drive/lib/hiddenItems"
 import { getHeicUploadConvertPreference } from "@/features/drive/lib/heicUpload"
 import { useAccountQuery } from "@/queries/account"
 
@@ -1488,12 +1489,13 @@ export function useShowDotFilenPreferenceQuery(): UseQueryResult<boolean> {
 }
 
 // The drive root uuid while the root `.filen` is hidden, for lib/hiddenItems.ts's rootDotFilenFilter; null while it
-// is shown (or before the account is known, when nothing can be matched yet).
-export function useHiddenDotFilenRoot(): string | null {
+// is shown, or while neither the account nor `rootListing` (the drive root's own listing, for a surface showing it)
+// names the root yet.
+export function useHiddenDotFilenRoot(rootListing?: readonly DriveItem[]): string | null {
 	const show = useShowDotFilenPreferenceQuery().data ?? DEFAULT_SHOW_DOT_FILEN
 	const rootUuid = useAccountQuery().data?.rootDirUuid ?? null
 
-	return show ? null : rootUuid
+	return show ? null : (rootUuid ?? rootUuidOfRootListing(rootListing))
 }
 
 // Public-link panel primitive: tags the worker's per-type status read with which type it is —
