@@ -37,12 +37,20 @@ on:
       - '.github/workflows/office-corpus.yml'
 
 jobs:
+  # Vitest's --shard splits the test files by a hash of their path, so the shards together run every file once.
+  # Each runner keeps Vitest's default pool (CPUs - 1 workers), so a timing test shares its machine as it did
+  # unsharded. One concurrency group per shard: shards sharing a group would cancel each other.
   test-office-corpus:
     concurrency:
-      group: filen-office-corpus-${{ github.ref }}
+      group: filen-office-corpus-${{ github.ref }}-${{ matrix.shard }}
       cancel-in-progress: true
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    name: test-office-corpus (${{ matrix.shard }}/4)
     env:
       # The tests' time bounds are set on developer machines; these runners' CPUs are slower. A complexity
       # regression still exceeds the scaled bounds.
@@ -114,7 +122,7 @@ jobs:
         env:
           FILEN_OFFICE_CORPUS: ${{ github.workspace }}/packages/filen-office/.corpus
           FILEN_OFFICE_UNICODE_FULL: '1'
-        run: pnpm test
+        run: pnpm test --shard=${{ matrix.shard }}/4
 
   # Nightly and on demand: the paged-editing fuzz (edited layout = fresh layout of the saved file) and the writer
   # damage fuzz (Gate 2 against an independent reader) over the cached corpus, one new seed per run. Findings

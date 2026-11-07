@@ -45,7 +45,7 @@ describe.skipIf(!existsSync(PPTX) || !existsSync(ODP))("transition apply to all"
 
 			// The first command reads each slide's relationships once; the ones after it apply only.
 			expect(first).toBeLessThanOrEqual(budget(LIMIT_MS))
-			expect(best).toBeLessThanOrEqual(LIMIT_MS / 10)
+			expect(best).toBeLessThanOrEqual(budget(LIMIT_MS / 10))
 		} finally {
 			h.close()
 		}

@@ -155,11 +155,20 @@ jobs:
     if: needs.changes.outputs.filen-office == 'true' || github.event_name == 'workflow_dispatch'
     # A superseded push to the same ref cancels its own in-flight run: this is a cheap unit job
     # that touches nothing shared, so only the newest commit's result is worth paying for. The web
-    # job deliberately does NOT cancel — see its own concurrency block for why.
+    # job deliberately does NOT cancel — see its own concurrency block for why. One group per shard:
+    # shards sharing a group would cancel each other.
     concurrency:
-      group: filen-office-tests-${{ github.ref }}
+      group: filen-office-tests-${{ github.ref }}-${{ matrix.shard }}
       cancel-in-progress: true
     runs-on: ubuntu-latest
+    # Vitest's --shard splits the test files by a hash of their path, so the shards together run every file
+    # once. Each runner keeps Vitest's default pool (CPUs - 1 workers), so a timing test shares its machine
+    # as it did unsharded.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    name: test-office (${{ matrix.shard }}/4)
     env:
       # The tests' time bounds are set on developer machines; these runners' CPUs are slower. A complexity
       # regression still exceeds the scaled bounds.
@@ -179,7 +188,7 @@ jobs:
         run: pnpm install --frozen-lockfile --filter @filen/office...
       - name: Test
         working-directory: packages/filen-office
-        run: pnpm test
+        run: pnpm test --shard=${{ matrix.shard }}/4
   # Rust (format, clippy, unit tests on the host) and the TypeScript side, whose tests run the built wasm.
   test-spellcheck:
     needs: changes
@@ -322,7 +331,7 @@ jobs:
   # `filen-web-e2e` concurrency group below: these used to sit in that group, so a six-second unit
   # suite queued behind whatever ~35-minute e2e run happened to hold the account — turning the fastest
   # signal in the repo into the slowest. Runs in parallel with test-web, not before it, so neither
-  # waits on the other.
+  # waits on the other. The unit suite runs in web-unit beside it.
   web-checks:
     needs: changes
     if: needs.changes.outputs.filen-web == 'true' || github.event_name == 'workflow_dispatch'
@@ -366,9 +375,6 @@ jobs:
       - name: Check generated error kinds are up to date
         working-directory: packages/filen-web
         run: pnpm run gen:error-kinds && git diff --exit-code
-      - name: Unit tests
-        working-directory: packages/filen-web
-        run: pnpm run test
       - name: Assert e2e hooks are absent from a production build
         # A property of the BUILD, so it belongs with the other account-free checks rather than behind
         # the e2e queue — and an e2e flake can no longer decide whether it runs at all.
@@ -379,6 +385,35 @@ jobs:
             echo 'E2E hooks leaked into the production build'
             exit 1
           fi
+  # filen-web's unit suite, outside the e2e group like web-checks. Vitest's --shard splits the test files by a
+  # hash of their path, so the shards together run every file once. The tests read only the spellchecker's
+  # committed manifest, so no shard builds the wasm engine or the dictionaries.
+  web-unit:
+    needs: changes
+    if: needs.changes.outputs.filen-web == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    name: web-unit (${{ matrix.shard }}/4)
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install dependencies
+        working-directory: packages/filen-web
+        run: pnpm install --frozen-lockfile --filter @filen/web...
+      - name: Unit tests
+        working-directory: packages/filen-web
+        run: pnpm run test --shard=${{ matrix.shard }}/4
 
   # The e2e matrix. With the repository variable E2E_ACCOUNT_PER_BROWSER = 'true', one job per browser,
   # each on its own runner, account (secrets FILEN_WEB_E2E_TEST_{EMAIL,PASSWORD}_<BROWSER>) and
@@ -388,6 +423,16 @@ jobs:
   # job; one outside a browser (a setup project) on chromium's. Beside the per-browser (premium) accounts, an
   # undispatched run checks the free tier's upgrade prompts on the shared account: only the specs that branch on
   # E2E_PREMIUM, on chromium.
+  #
+  # WebKit runs as two jobs on its one account. Its tests run one at a time per machine (its storage lock,
+  # e2e/fixtures.ts), so on one runner the read, notes and chats lanes (~30 min) queued behind the write lane
+  # (~110 min) instead of running beside it as on the other browsers' runners. webkit-write takes the
+  # drive-write lane, webkit-rest the other three, so every resource's writes stay on ONE machine under its
+  # cross-process account lock, and each job keeps its own group (a shared one would serialise the two) for
+  # every run, narrowed or not: a dispatched webkit project goes to the job that owns its lane. What the second
+  # runner adds on the account is its own setup chain: the debris sweep (age-windowed, so it never reaches a
+  # live run's rows), a fixture tree under its own run id, and that tree's teardown, written beside the other
+  # job the way the read lanes already read beside the write lane.
   e2e-matrix:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
@@ -400,18 +445,24 @@ jobs:
           E2E_PROJECT: ${{ inputs.project }}
           E2E_SPEC: ${{ inputs.spec }}
         run: |
+          # name, browser, account, group suffix, projects (space-separated; empty runs every lane).
           entry() {
-            printf '{"name":"%s","browser":"%s","account":"%s","group":"filen-web-e2e-%s","specs":""}' "$1" "$1" "$2" "$1"
+            printf '{"name":"%s","browser":"%s","account":"%s","group":"filen-web-e2e-%s","specs":"","projects":"%s"}' "$1" "$2" "$3" "$4" "$5"
           }
-          free='{"name":"free-tier","browser":"chromium","account":"","group":"filen-web-e2e","specs":"e2e/menus.spec.ts e2e/settings.spec.ts e2e/public-links.spec.ts"}'
+          chromium=$(entry chromium chromium CHROMIUM chromium '')
+          firefox=$(entry firefox firefox FIREFOX firefox '')
+          webkit_write=$(entry webkit-write webkit WEBKIT webkit webkit-write)
+          webkit_rest=$(entry webkit-rest webkit WEBKIT webkit-rest 'webkit-read webkit-notes webkit-chats')
+          free='{"name":"free-tier","browser":"chromium","account":"","group":"filen-web-e2e","specs":"e2e/menus.spec.ts e2e/settings.spec.ts e2e/public-links.spec.ts","projects":""}'
           if [ "$PER_BROWSER" != "true" ]; then
-            include='[{"name":"all","browser":"all","account":"","group":"filen-web-e2e","specs":""}]'
+            include='[{"name":"all","browser":"all","account":"","group":"filen-web-e2e","specs":"","projects":""}]'
           else
             case "$E2E_PROJECT" in
-              '') include="[$(entry chromium CHROMIUM),$(entry firefox FIREFOX),$(entry webkit WEBKIT)$([ -n "$E2E_SPEC" ] || printf ',%s' "$free")]" ;;
-              firefox-*) include="[$(entry firefox FIREFOX)]" ;;
-              webkit-*) include="[$(entry webkit WEBKIT)]" ;;
-              *) include="[$(entry chromium CHROMIUM)]" ;;
+              '') include="[$chromium,$firefox,$webkit_write,$webkit_rest$([ -n "$E2E_SPEC" ] || printf ',%s' "$free")]" ;;
+              firefox-*) include="[$firefox]" ;;
+              webkit-write) include="[$webkit_write]" ;;
+              webkit-*) include="[$webkit_rest]" ;;
+              *) include="[$chromium]" ;;
             esac
           fi
           echo "include=$include" >> "$GITHUB_OUTPUT"
@@ -429,11 +480,11 @@ jobs:
     # and the browser install are unbounded, and a hang in any of them would hold the non-cancelling
     # group below for GitHub's 6h job default.
     timeout-minutes: 340
-    # ONE group per ACCOUNT (e2e-matrix above), and scoped to this job because it is the only one that
-    # touches a live Filen test account — and setup/cleanup.setup.ts trashes then PERMANENTLY DELETES every
-    # row matching the e2e debris prefixes, which includes a concurrently running suite's live fixture
-    # root on the same account. A per-ref group does not serialise that at all: `push` and `pull_request`
-    # both fire for a same-repo branch, under two different refs and so in two different groups.
+    # ONE group per ACCOUNT (per WebKit shard, see e2e-matrix above), and scoped to this job because it is
+    # the only one that touches a live Filen test account — and two runs of one lane on one account would
+    # write the same resource from two machines, which no cross-process lock orders. A per-ref group does
+    # not serialise that at all: `push` and `pull_request` both fire for a same-repo branch, under two
+    # different refs and so in two different groups.
     # cancel-in-progress stays false because cancelling is the other way to corrupt a run: a context
     # killed mid-write keeps the account-wide `drive-write` lease it was refreshing until the TTL
     # expires, blocking every later run. A superseded run therefore queues instead — GitHub only drops
@@ -488,8 +539,19 @@ jobs:
       # into GITHUB_ENV here is what makes it referable.
       - name: Identify the runner image
         run: echo "IMAGE_OS=$ImageOS" >> "$GITHUB_ENV"
-      - name: Cache Playwright browsers
-        uses: actions/cache@v4
+      # A Playwright release pins the browser builds it downloads, and the system packages they need, so its
+      # version keys both caches below exactly. The lockfile changed with every unrelated dependency bump, and
+      # each change missed.
+      - name: Identify the Playwright release
+        working-directory: packages/filen-web
+        run: |
+          version=$(pnpm exec playwright --version | awk '{print $2}')
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]] || { echo "unexpected Playwright version: $version"; exit 1; }
+          echo "PLAYWRIGHT_VERSION=$version" >> "$GITHUB_ENV"
+      # Restored and saved as two steps rather than one actions/cache, whose save runs only when the whole job
+      # succeeds: an e2e job seldom does, so the browsers were downloaded again on most runs.
+      - name: Restore Playwright browsers
+        uses: actions/cache/restore@v4
         id: playwright-cache
         with:
           path: ~/.cache/ms-playwright
@@ -498,28 +560,63 @@ jobs:
           # neither. Without them a `ubuntu-latest` rollover still HITS this key, restores binaries
           # built for the previous distro, and takes the install step's cache-hit branch below — which
           # only installs system libs and never re-downloads — so every browser launch fails with a
-          # loader error until someone touches the lockfile. Deliberately NO restore-keys: a prefix
+          # loader error until Playwright is bumped. Deliberately NO restore-keys: a prefix
           # restore is that same stale hit, reintroduced on purpose. The matrix entry is in it for the
           # same reason: each job installs a different set of browsers into that one path.
-          key: ms-playwright-${{ runner.os }}-${{ runner.arch }}-${{ env.IMAGE_OS }}-${{ matrix.browser }}-${{ hashFiles('pnpm-lock.yaml') }}
+          key: ms-playwright-${{ runner.os }}-${{ runner.arch }}-${{ env.IMAGE_OS }}-${{ matrix.browser }}-${{ env.PLAYWRIGHT_VERSION }}
+      # The system packages the browsers need. apt-get finds a package in /var/cache/apt/archives before it
+      # downloads one, and the runner's mirror has served them at ~45 kB/s on some nights (firefox's 49 MB took
+      # 18 minutes). A prefix restore is safe here, unlike the browsers': apt checks each deb against its index
+      # and downloads whatever does not match.
+      - name: Restore system packages
+        uses: actions/cache/restore@v4
+        id: apt-cache
+        with:
+          path: ~/apt-archives
+          key: apt-${{ runner.os }}-${{ runner.arch }}-${{ env.IMAGE_OS }}-${{ matrix.browser }}-${{ env.PLAYWRIGHT_VERSION }}
+          restore-keys: apt-${{ runner.os }}-${{ runner.arch }}-${{ env.IMAGE_OS }}-${{ matrix.browser }}-
       - name: Install Playwright browsers
         working-directory: packages/filen-web
         # On a cache hit the binaries are already there and only the system libs are missing.
         run: |
+          if [ -d ~/apt-archives ]; then
+            sudo find ~/apt-archives -maxdepth 1 -name '*.deb' -exec cp -t /var/cache/apt/archives {} +
+          fi
           if [ "${{ steps.playwright-cache.outputs.cache-hit }}" = "true" ]; then
             pnpm exec playwright install-deps $E2E_INSTALL
           else
             pnpm exec playwright install --with-deps $E2E_INSTALL
           fi
+      - name: Save Playwright browsers
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ steps.playwright-cache.outputs.cache-primary-key }}
       # Firefox on Linux advances a playing media element's clock only against a live audio sink, and the
-      # runner has no sound server: playback reports playing with its position stuck at 0.
+      # runner has no sound server: playback reports playing with its position stuck at 0. WebKit's GStreamer
+      # playback, with no sink either, left its audio playhead at 0 in some runs (preview-media's audio leg).
       - name: Start a null audio sink
-        if: matrix.browser == 'all' || matrix.browser == 'firefox'
+        if: matrix.browser == 'all' || matrix.browser == 'firefox' || matrix.browser == 'webkit'
         run: |
           sudo apt-get install -y --no-install-recommends pulseaudio
           pulseaudio --start --exit-idle-time=-1
           pactl load-module module-null-sink sink_name=e2e
           pactl set-default-sink e2e
+      # After the audio sink, so its packages are among them. Nothing to save when apt kept no debs.
+      - name: Collect system packages
+        id: apt-collect
+        if: steps.apt-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/apt-archives
+          find /var/cache/apt/archives -maxdepth 1 -name '*.deb' -exec cp -t ~/apt-archives {} +
+          echo "debs=$(find ~/apt-archives -maxdepth 1 -name '*.deb' | wc -l)" >> "$GITHUB_OUTPUT"
+      - name: Save system packages
+        if: steps.apt-cache.outputs.cache-hit != 'true' && steps.apt-collect.outputs.debs != '0'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/apt-archives
+          key: ${{ steps.apt-cache.outputs.cache-primary-key }}
       - name: E2E tests
         working-directory: packages/filen-web
         # A dispatch can narrow the run to a spec and a project; both arrive through env, never inlined into
@@ -546,6 +643,18 @@ jobs:
             [[ "$E2E_PROJECT" =~ ^[a-z0-9-]+$ ]] || { echo "invalid project: $E2E_PROJECT"; exit 1; }
             args+=("--project=$E2E_PROJECT")
           fi
+          # A split browser's share of its lanes (e2e-matrix), plain names; the setup projects come with them. A
+          # dispatched project already picked the job that owns it. Narrowed by spec, one share can match nothing,
+          # which is not a failure; the other browsers' jobs still fail a spec that matches nowhere.
+          if [ -z "$E2E_PROJECT" ] && [ -n "$MATRIX_PROJECTS" ]; then
+            for project in $MATRIX_PROJECTS; do
+              [[ "$project" =~ ^[a-z0-9-]+$ ]] || { echo "invalid project: $project"; exit 1; }
+              args+=("--project=$project")
+            done
+            if [ -n "$E2E_SPEC" ]; then
+              args+=("--pass-with-no-tests")
+            fi
+          fi
           if [ "$MATRIX_BROWSER" != "all" ]; then
             export E2E_BROWSER="$MATRIX_BROWSER"
           fi
@@ -555,6 +664,7 @@ jobs:
           E2E_PROJECT: ${{ inputs.project }}
           MATRIX_BROWSER: ${{ matrix.browser }}
           MATRIX_SPECS: ${{ matrix.specs }}
+          MATRIX_PROJECTS: ${{ matrix.projects }}
           E2E_ACCOUNT: ${{ matrix.account }}
           FILEN_WEB_E2E_TEST_EMAIL: ${{ matrix.account == '' && secrets.FILEN_WEB_E2E_TEST_EMAIL || secrets[format('FILEN_WEB_E2E_TEST_EMAIL_{0}', matrix.account)] }}
           FILEN_WEB_E2E_TEST_PASSWORD: ${{ matrix.account == '' && secrets.FILEN_WEB_E2E_TEST_PASSWORD || secrets[format('FILEN_WEB_E2E_TEST_PASSWORD_{0}', matrix.account)] }}

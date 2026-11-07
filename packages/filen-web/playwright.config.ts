@@ -63,7 +63,8 @@ const ALL_BROWSERS = ["chromium", "firefox", "webkit"] as const
 type Browser = (typeof ALL_BROWSERS)[number]
 
 // E2E_BROWSER narrows the run to one browser's lanes (CI runs one job per browser, each on its own runner
-// and account); the setup and teardown projects stay, they are browser-agnostic. Unset runs all three.
+// and account, and splits WebKit's lanes over two, see tests.yml); the setup and teardown projects stay, they
+// are browser-agnostic. Unset runs all three.
 function selectedBrowsers(): readonly Browser[] {
 	const selected = process.env["E2E_BROWSER"]
 
