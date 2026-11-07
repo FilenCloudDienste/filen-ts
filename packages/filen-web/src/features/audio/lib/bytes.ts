@@ -9,6 +9,7 @@ import { ErrorWithDTO, type ErrorDTO } from "@/lib/sdk/errors"
 import { classifyMediaError, mediaFailureDTO, type MediaFailureKind } from "@/lib/media/mediaFailure"
 import { BlockSource } from "@filen/shared/videos"
 import { urlReadRange } from "@/lib/media/urlReadRange"
+import { cancelHeldPause, pauseMedia } from "@/lib/media/heldPause"
 import { audioDemotions, audioRoute } from "@/lib/media/audioRoute.logic"
 import { audioMediaSource, openDecodedAudioStream } from "@/lib/media/playback/audioStream"
 import { isAudioUnsupported } from "@/lib/media/remuxTypes"
@@ -194,17 +195,21 @@ function createDomAudioAdapterWithPreload(initialEvents: AudioElementEvents, pre
 		play: async () => {
 			await attaching
 
+			// Playing is asked for after a pause still held for a seek (heldPause.ts): the pause is dropped.
+			cancelHeldPause(element)
+
 			await element.play().catch(async () => {
 				throw new ErrorWithDTO((await classifyFailure()) ?? mediaFailureDTO("other"))
 			})
 		},
 		pause: () => {
-			element.pause()
+			pauseMedia(element)
 		},
 		seek: seconds => {
 			element.currentTime = seconds
 		},
 		clear: () => {
+			cancelHeldPause(element)
 			element.removeAttribute("src")
 			element.load()
 		},
@@ -219,6 +224,7 @@ function createDomAudioAdapterWithPreload(initialEvents: AudioElementEvents, pre
 			events = nextEvents
 		},
 		dispose: () => {
+			cancelHeldPause(element)
 			element.pause()
 			element.removeAttribute("src")
 		}

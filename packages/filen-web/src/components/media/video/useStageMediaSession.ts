@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react"
 import { mediaSessionOwners, type MediaSessionOwner } from "@/lib/media/mediaSessionOwner"
-import { seekMedia } from "@/lib/media/useMediaState"
+import { pauseMedia } from "@/lib/media/heldPause"
+import { playMedia, seekMedia } from "@/lib/media/useMediaState"
 
 // The video stage's share of the Media Session: taken from the audio engine (which pauses) for as long as the
 // stage is open, given back on close. Position state is published on discrete events only (play, pause,
@@ -93,11 +94,11 @@ export function useStageMediaSession(params: {
 
 		owner.setActionHandler("play", () => {
 			touched()
-			void element.play().catch(() => undefined)
+			playMedia(element)
 		})
 		owner.setActionHandler("pause", () => {
 			touched()
-			element.pause()
+			pauseMedia(element)
 		})
 		owner.setActionHandler("seekto", details => {
 			touched()

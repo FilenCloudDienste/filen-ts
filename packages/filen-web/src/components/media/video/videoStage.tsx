@@ -24,6 +24,7 @@ import { isVideoNativeFullscreen, toggleVideoFullscreen, useIsFullscreen, videoF
 import { stepMediaVolume, toggleMediaMuted, warmMediaVolume } from "@/lib/media/mediaVolume"
 import { playerKeyTarget } from "@/lib/media/playerKeys.logic"
 import { SeekCoalescer } from "@/lib/media/seekCoalescer.logic"
+import { cancelHeldPause, pauseMedia } from "@/lib/media/heldPause"
 import { chapterTarget, frameDuration, stepPlaybackRate, videoKeyAction, type VideoKeyAction } from "@/lib/media/videoKeys.logic"
 import { useHoldReadsWhilePlaying } from "@/lib/media/useHoldReadsWhilePlaying"
 import { seekMedia, setPlaybackRate, toggleMediaPlayback, useMediaPictureInPicture, useSyncedMediaVolume } from "@/lib/media/useMediaState"
@@ -275,6 +276,8 @@ export function VideoStage(props: VideoStageProps) {
 			video.removeEventListener("emptied", cancel)
 			video.removeEventListener("loadstart", cancel)
 			cancel()
+			// A pause still held for a seek goes with the stage: the element is not ours to stop any more.
+			cancelHeldPause(video)
 		}
 	}, [video])
 
@@ -424,7 +427,7 @@ export function VideoStage(props: VideoStageProps) {
 				return true
 			case "frameStep":
 				if (!video.paused) {
-					video.pause()
+					pauseMedia(video)
 				}
 
 				seekTo(video.currentTime + action.direction * frameDuration(props.frameRate ?? null))

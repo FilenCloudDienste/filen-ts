@@ -150,3 +150,35 @@ describe("DOM audio adapter — MediaSource sources", () => {
 		expect((await failures[0]?.())?.kind).toBe(MEDIA_FORMAT_UNSUPPORTED)
 	})
 })
+
+describe("DOM audio adapter — a pause while a seek is in flight", () => {
+	function seeking(element: HTMLAudioElement, value: boolean): void {
+		Object.defineProperty(element, "seeking", { configurable: true, get: () => value })
+	}
+
+	it("holds the pause until the seek lands", () => {
+		const { element, adapter } = makeAdapter()
+		const pause = vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => undefined)
+
+		seeking(element, true)
+		adapter.pause()
+		expect(pause).not.toHaveBeenCalled()
+
+		seeking(element, false)
+		element.dispatchEvent(new Event("seeked"))
+		expect(pause).toHaveBeenCalledOnce()
+	})
+
+	it("drops the held pause when it is asked to play", async () => {
+		const { element, adapter } = makeAdapter()
+		const pause = vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => undefined)
+
+		vi.spyOn(HTMLMediaElement.prototype, "play").mockImplementation(() => Promise.resolve())
+		seeking(element, true)
+		adapter.pause()
+		await adapter.play()
+		element.dispatchEvent(new Event("seeked"))
+
+		expect(pause).not.toHaveBeenCalled()
+	})
+})

@@ -1,4 +1,5 @@
 import { useEffect, useSyncExternalStore } from "react"
+import { cancelHeldPause, pauseMedia, type PausableMedia } from "@/lib/media/heldPause"
 import { adoptMediaVolume, useMediaVolumeStore, warmMediaVolume, type MediaVolume } from "@/lib/media/mediaVolume"
 
 // Reads of a media element's state, re-rendering only the component that asks and only when the value it
@@ -175,16 +176,30 @@ export function useMediaPictureInPicture(media: HTMLMediaElement | null): boolea
 	return useMediaValue(media, PICTURE_IN_PICTURE, false)
 }
 
-// Starts playback, leaving the element paused where the browser refuses (an autoplay policy).
-export function playMedia(media: HTMLMediaElement): void {
+// The parts of a media element starting and stopping it uses.
+export interface PlayableMedia extends PausableMedia {
+	readonly paused: boolean
+	readonly ended: boolean
+	play(): Promise<void>
+}
+
+// Starts playback, leaving the element paused where the browser refuses (an autoplay policy). A pause still
+// held for a seek (heldPause.ts) is dropped: playing was asked for after it.
+export function playMedia(media: PlayableMedia): void {
+	cancelHeldPause(media)
 	void media.play().catch(() => undefined)
 }
 
-export function toggleMediaPlayback(media: HTMLMediaElement): void {
+// A press while a pause is held undoes that pause: the element never stopped, so it just goes on playing.
+export function toggleMediaPlayback(media: PlayableMedia): void {
+	if (cancelHeldPause(media)) {
+		return
+	}
+
 	if (media.paused || media.ended) {
 		playMedia(media)
 	} else {
-		media.pause()
+		pauseMedia(media)
 	}
 }
 
