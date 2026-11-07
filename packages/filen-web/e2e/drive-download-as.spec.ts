@@ -4,7 +4,14 @@ import { writeXlsx } from "hucre/xlsx"
 import JSZip from "jszip"
 import * as pdfjs from "pdfjs-dist/legacy/build/pdf.mjs"
 import { test, expect } from "./fixtures"
-import { LAZY_VIEWER_TIMEOUT_MS, LIVE_WRITE_TIMEOUT_MS, toasts, uploadFiles, withScratchDirectory } from "./helpers/listing"
+import {
+	LAZY_VIEWER_TIMEOUT_MS,
+	LIVE_WRITE_TIMEOUT_MS,
+	selectAndTrashRow,
+	toasts,
+	uploadFiles,
+	withScratchDirectory
+} from "./helpers/listing"
 import { openRowMenu, openTrash, revealRow } from "./helpers/archive"
 import { buildZip } from "./helpers/archiveFixtures"
 import { DOCX_FIXTURE_TEXT, DOCX_MIME, docxFixtureBytes } from "./helpers/docxFixtures"
@@ -337,10 +344,10 @@ test("Download as is never offered in the trash, and is disabled offline", async
 		await page.keyboard.press("Escape")
 		await page.context().setOffline(false)
 
-		await listbox.getByRole("option", { name: trashed }).click()
-		await page.getByRole("button", { name: "Trash", exact: true }).click()
-		await page.getByRole("alertdialog", { name: "Move to trash?" }).getByRole("button", { name: "Trash", exact: true }).click()
-		await expect(listbox.getByRole("option", { name: trashed })).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
+		// Through to the committed trash: a one-item confirm stays open and pending for the whole write, and
+		// while it does the page behind it is outside the accessibility tree, so the row reads as gone at once
+		// and the trash link as missing. selectAndTrashRow waits the confirm out before checking the row.
+		await selectAndTrashRow(page, listbox, trashed)
 
 		const trash = await openTrash(page)
 		const row = trash.getByRole("option", { name: trashed })

@@ -273,12 +273,21 @@ function stallProbe(updateToastText: string): void {
 	}
 
 	let last = performance.now()
+	let ticks = 0
 
 	setInterval(() => {
 		const now = performance.now()
 		const late = now - last - 1000
 
 		last = now
+		ticks += 1
+
+		// Proof of life for the frozen-page watchdog (collectDiagnostics), which only a running main thread can
+		// send. From the first tick, then every 5s: the watchdog's threshold is minutes. A literal, as this function
+		// runs in the page.
+		if (ticks % 5 === 1) {
+			void (window as unknown as { __e2eHeartbeat?: () => Promise<void> }).__e2eHeartbeat?.()
+		}
 
 		if (late >= 1000) {
 			report(`timers stalled ${String(Math.round(late))}ms`)
@@ -365,7 +374,16 @@ async function attachTopScreenshots(context: BrowserContext, testInfo: TestInfo)
 interface Diagnostics {
 	report: () => string
 	updateToastSeen: () => boolean
+	stop: () => void
 }
+
+// A page whose main thread has sent no heartbeat (stallProbe) for this long is frozen, not slow: every action and
+// assertion budget here is far shorter, a stall the probe reports runs to seconds, and a hidden page's throttled
+// timers still fire once a minute. Calls with no timeout of their own (locator.count, evaluate) never return on such
+// a page, so without this a WebKit content process that hung once held its test for the whole 45-minute test.slow
+// budget. Closing the page fails the test now, with the reason on every call it interrupts.
+const FROZEN_PAGE_MS = 120_000
+const FROZEN_PAGE_CHECK_MS = 10_000
 
 async function collectDiagnostics(context: BrowserContext): Promise<Diagnostics> {
 	const startedAt = Date.now()
@@ -381,6 +399,9 @@ async function collectDiagnostics(context: BrowserContext): Promise<Diagnostics>
 		}
 	}
 	const inFlight = new Map<Request, { tab: string; startedAt: number }>()
+	// Last heartbeat per page (stallProbe). A page is only watched once it has sent one: the first page of a
+	// persistent context (WebKit's start page) predates the init script and never will.
+	const heartbeats = new Map<Page, number>()
 	const watch = (page: Page) => {
 		const tab = `tab${String(context.pages().indexOf(page))}`
 
@@ -412,12 +433,17 @@ async function collectDiagnostics(context: BrowserContext): Promise<Diagnostics>
 			}
 		})
 		page.on("close", () => {
+			heartbeats.delete(page)
 			log(`${tab} closed`)
 		})
 		// A navigation nobody asked for (a drop the page did not cancel, a reload) restarts the app.
 		page.on("framenavigated", frame => {
 			if (frame === page.mainFrame()) {
 				log(`${tab} navigated ${path(frame.url())}`)
+
+				// Unwatched until the new document beats: one without the init script (a PDF the browser renders
+				// itself) never will.
+				heartbeats.delete(page)
 			}
 		})
 		// Requests still unanswered when the test ends: a listing or a stream that never arrives shows up
@@ -439,10 +465,33 @@ async function collectDiagnostics(context: BrowserContext): Promise<Diagnostics>
 
 	context.on("page", watch)
 
+	const watchdog = setInterval(() => {
+		const now = Date.now()
+
+		for (const [page, at] of heartbeats) {
+			if (now - at < FROZEN_PAGE_MS) {
+				continue
+			}
+
+			heartbeats.delete(page)
+
+			const reason = `the page's main thread last answered at +${String(at - startedAt)}ms (no heartbeat for ${String(now - at)}ms): closed by the frozen-page watchdog (e2e/fixtures.ts)`
+
+			log(`tab${String(context.pages().indexOf(page))} ${reason}`)
+			void page.close({ reason }).catch(() => undefined)
+		}
+	}, FROZEN_PAGE_CHECK_MS)
+
 	let updateToastSeen = false
 
 	await context.exposeBinding("__e2eStall", ({ page }, line: string) => {
 		log(`tab${String(context.pages().indexOf(page))} ${line}`)
+	})
+	await context.exposeBinding("__e2eHeartbeat", ({ page }) => {
+		// A debugger paused on a breakpoint is not a frozen page.
+		if (process.env["PWDEBUG"] === undefined && !page.isClosed()) {
+			heartbeats.set(page, Date.now())
+		}
 	})
 	await context.exposeBinding("__e2eUpdateToast", ({ page }) => {
 		updateToastSeen = true
@@ -468,7 +517,10 @@ async function collectDiagnostics(context: BrowserContext): Promise<Diagnostics>
 
 			return [...lines, ...(pending.length === 0 ? [] : ["-- in flight at the end --", ...pending])].join("\n")
 		},
-		updateToastSeen: () => updateToastSeen
+		updateToastSeen: () => updateToastSeen,
+		stop: () => {
+			clearInterval(watchdog)
+		}
 	}
 }
 
@@ -787,6 +839,8 @@ export const test = base.extend<{
 			const diagnostics = await collectDiagnostics(context)
 
 			await use(undefined)
+
+			diagnostics.stop()
 
 			const failed = testInfo.status !== testInfo.expectedStatus
 

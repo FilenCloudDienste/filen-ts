@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs"
 import type { Locator, Page } from "@playwright/test"
 import * as pdfjs from "pdfjs-dist/legacy/build/pdf.mjs"
 import { test, expect } from "./fixtures"
-import { LAZY_VIEWER_TIMEOUT_MS, LIVE_WRITE_TIMEOUT_MS, uploadFiles, withScratchDirectory } from "./helpers/listing"
+import { LAZY_VIEWER_TIMEOUT_MS, LIVE_WRITE_TIMEOUT_MS, selectAndTrashRow, uploadFiles, withScratchDirectory } from "./helpers/listing"
 import { DOCX_FIXTURE_TEXT, DOCX_MIME, docxFixtureBytes, docxViewerBytes, DOCX_VIEWER_TEXT } from "./helpers/docxFixtures"
 import { openTrash, revealRow } from "./helpers/archive"
 import { ENCRYPTED_DOCX_PASSWORD, ENCRYPTED_DOCX_TEXT, encryptedDocxBytes } from "./helpers/docxEncryptedFixtures"
@@ -166,13 +166,9 @@ test("Download as PDF is not offered in the trash", async ({ page }) => {
 		const name = `e2e-${runId}-trashed.docx`
 
 		await uploadFiles(page, [{ name, mimeType: DOCX_MIME, buffer: docxFixtureBytes("notes.docx") }], listbox)
-		await listbox.getByRole("option", { name }).click()
-		await page.getByRole("button", { name: "Trash", exact: true }).click()
-
-		const confirm = page.getByRole("alertdialog", { name: "Move to trash?" })
-
-		await confirm.getByRole("button", { name: "Trash", exact: true }).click()
-		await expect(listbox.getByRole("option", { name })).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
+		// Through to the committed trash: while the one-item confirm is pending, the page behind it is outside the
+		// accessibility tree and the row would read as gone at once (selectAndTrashRow waits the confirm out).
+		await selectAndTrashRow(page, listbox, name)
 
 		const trash = await openTrash(page)
 		const trashed = trash.getByRole("option", { name })
