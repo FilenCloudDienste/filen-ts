@@ -32,6 +32,7 @@ import {
 	type DocxSource,
 	type DocxTables
 } from "@filen/office/react/docx"
+import { classicScrollbars } from "./scrollbars.dom"
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true)
 
@@ -384,6 +385,39 @@ describe("useDocxDocument and DocxPages", () => {
 		expect(container.querySelector<HTMLElement>(".fo-docx-pages-content")?.style.width).toBe(`${816 + 2 * 16 + 300}px`)
 		expect(last?.[0]?.left).toBe(16)
 		expect(container.querySelector(".fo-docx-pages-content .probe-overlay")).not.toBeNull()
+	})
+
+	it("centres the pages in the width a scrollbar the arriving pages bring leaves, in the commit that brings it", async () => {
+		const manual = manualHost()
+		const source: DocxSource = { host: manual.host, bytes: bytesSource(new Uint8Array(1)) }
+		const size = { width: 1600, height: 900, scrollbar: 10 }
+		const restore = classicScrollbars(size)
+
+		function View() {
+			const document = useDocxDocument(source)
+
+			return (
+				<DocxPages
+					document={document}
+					zoom={1}
+					pageLabel={index => `Page ${index + 1}`}
+				/>
+			)
+		}
+
+		try {
+			act(() => root.render(<View />))
+			manual.emit({
+				type: "opened",
+				info: { variant: "docx", gate: [], estimatedPages: 1, pageWidth: 816, pageHeight: 1056, mainPartBytes: 1000 }
+			})
+			manual.emit(pagesEvent([page(0, ["Text"], [0, 0, 4, 0])], true, false))
+			await flush()
+
+			expect(container.querySelector<HTMLElement>(".fo-docx-page")?.style.left).toBe(`${((1600 - 10 - 816) / 2) | 0}px`)
+		} finally {
+			restore()
+		}
 	})
 
 	it("opens external links through the policy and scrolls to internal ones", async () => {

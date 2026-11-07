@@ -16,6 +16,7 @@ import type { DocxMediaCache } from "./media"
 import { paintObjects } from "./paint/objects"
 import { paintPage, type PaintedPage } from "./paint/page"
 import type { DocxDocument, DocxTables } from "./store"
+import { readViewport, type PagesViewport } from "./viewport"
 
 // The page list: scroll height from the page sizes, only the pages in view (plus `overscan` on each side)
 // mounted, each painted once from its display list and scaled by CSS for zoom. Structure and data-*
@@ -206,7 +207,7 @@ export function DocxPages({
 	const overscan = overscanProp ?? 2
 	const aside = Math.max(0, asideWidth ?? 0)
 	const containerRef = useRef<HTMLDivElement | null>(null)
-	const [viewport, setViewport] = useState({ top: 0, height: 0, width: 0 })
+	const [viewport, setViewport] = useState<PagesViewport>({ top: 0, height: 0, width: 0 })
 	// Page positions change with the pages, not with scrolling: computed once per document, zoom and gap.
 	const layout = useMemo(() => pageLayout(document, zoom, gap, aside), [document, zoom, gap, aside])
 	const count = layout.tops.length
@@ -228,6 +229,14 @@ export function DocxPages({
 				}
 
 	const cache = document.media
+	// The view's size and scroll position: read in the commit that sizes the content (a scrollbar it brings or
+	// takes away moves the pages in the same paint), then once per frame on scrolling and resizing.
+	useLayoutEffect(() => {
+		const container = containerRef.current
+
+		if (container !== null) setViewport(readViewport(container))
+	}, [layout.total, layout.contentWidth])
+
 	useEffect(() => {
 		const container = containerRef.current
 
@@ -240,20 +249,13 @@ export function DocxPages({
 		}
 		const read = (): void => {
 			frame = 0
-			setViewport(previous =>
-				previous.top === container.scrollTop &&
-				previous.height === container.clientHeight &&
-				previous.width === container.clientWidth
-					? previous
-					: { top: container.scrollTop, height: container.clientHeight, width: container.clientWidth }
-			)
+			setViewport(readViewport(container))
 		}
 		const schedule = (): void => {
 			if (frame === 0) frame = requestAnimationFrame(read)
 		}
 		const observer = typeof ResizeObserver === "function" ? new ResizeObserver(schedule) : undefined
 
-		read()
 		scrollTopRef.current = container.scrollTop
 		container.addEventListener("scroll", onScroll, { passive: true })
 		observer?.observe(container)

@@ -1,7 +1,7 @@
 {
 	"extends": "./tsconfig.json",
 	"include": ["src/tests", "src/bench", "src/scripts", "src/globals.d.ts"],
-	"exclude": ["src/tests/**/*.dom.test.ts", "src/tests/**/*.dom.test.tsx"],
+	"exclude": ["src/tests/**/*.dom.ts", "src/tests/**/*.dom.test.ts", "src/tests/**/*.dom.test.tsx"],
 	"compilerOptions": {
 		"types": ["node"]
 	}

@@ -12,6 +12,7 @@ import { DocxEditor, EditSink, type DocxEditorHandle, type DocxEditorMark } from
 import { plainSlice, plainText } from "../react/docx/edit/sink"
 import { buildDocx } from "./docxSynthetic"
 import { pagedEditor, settle } from "./pagedDomFixtures"
+import { classicScrollbars } from "./scrollbars.dom"
 
 Reflect.set(globalThis, "IS_REACT_ACT_ENVIRONMENT", true)
 
@@ -450,6 +451,41 @@ describe("DocxEditor input", () => {
 		})
 		expect(places()).toEqual(first)
 		expect(content.style.height).toBe(height)
+	})
+
+	it("centres the pages in the width a scrollbar the content brings leaves, in the commit that brings it", async () => {
+		const { editor } = await pagedEditor(LONG)
+		const size = { width: 1600, height: Number.POSITIVE_INFINITY, scrollbar: 10 }
+		const restore = classicScrollbars(size)
+
+		try {
+			const { content } = await mount(editor, { zoom: 0.25 })
+
+			// Shorter than the view at a quarter, taller at full size: the scrollbar comes with the zoom.
+			size.height = Number.parseFloat(content.style.height) + 1
+			act(() =>
+				root.render(
+					<DocxEditor
+						editor={editor}
+						document={documentOf(editor)}
+						zoom={1}
+						gap={GAP}
+						label="Document"
+					/>
+				)
+			)
+
+			const page = container.querySelector<HTMLElement>("[data-fo-page]")
+
+			if (page === null) throw new Error("no page")
+
+			const width = Number.parseFloat(page.style.width)
+
+			expect(Number.parseFloat(content.style.height)).toBeGreaterThan(size.height)
+			expect(page.style.left).toBe(`${((size.width - size.scrollbar - width) / 2) | 0}px`)
+		} finally {
+			restore()
+		}
 	})
 
 	it("counts clicks itself: a double click selects the word, a triple click the paragraph", async () => {

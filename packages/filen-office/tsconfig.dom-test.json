@@ -1,6 +1,6 @@
 {
 	"extends": "./tsconfig.json",
-	"include": ["src/tests/**/*.dom.test.ts", "src/tests/**/*.dom.test.tsx", "src/react", "src/globals.d.ts"],
+	"include": ["src/tests/**/*.dom.ts", "src/tests/**/*.dom.test.ts", "src/tests/**/*.dom.test.tsx", "src/react", "src/globals.d.ts"],
 	"exclude": [],
 	"compilerOptions": {
 		"types": [],

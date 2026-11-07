@@ -14,6 +14,7 @@ import type { HitResult, ObjectHit, ObjectHitKind, PagedEditor } from "../../cor
 import { EditSink } from "./edit/sink"
 import { EditSurface, type DocxEditorMark } from "./edit/surface"
 import type { DocxDocument } from "./store"
+import { readViewport, type PagesViewport } from "./viewport"
 
 // Paged editing on the rendered pages, unstyled: the pages (only those in view mounted, patched line by line
 // as edits lay them out again), the caret, selection and composition drawn over them, pointer and touch
@@ -253,7 +254,7 @@ export function DocxEditor(props: DocxEditorProps) {
 	const revealRef = useRef(true)
 	const [surface] = useState(() => new EditSurface(editor))
 	const [layouts] = useState(() => new PageLayouts())
-	const [viewport, setViewport] = useState({ top: 0, height: 0, width: 0 })
+	const [viewport, setViewport] = useState<PagesViewport>({ top: 0, height: 0, width: 0 })
 	const [count, setCount] = useState(() => Math.max(editor.pageCount, document.pages.length))
 	const [focused, setFocused] = useState(false)
 	const [composing, setComposing] = useState(false)
@@ -448,7 +449,14 @@ export function DocxEditor(props: DocxEditorProps) {
 	const onFindRef = useRef(props.onFind)
 	const scrollToCaretRef = useRef(scrollToCaret)
 
-	// The view's size and scroll position, read once per frame.
+	// The view's size and scroll position: read in the commit that sizes the content (a scrollbar it brings or
+	// takes away moves the pages in the same paint), then once per frame on scrolling and resizing.
+	useLayoutEffect(() => {
+		const container = containerRef.current
+
+		if (container !== null) setViewport(readViewport(container))
+	}, [layout.total, layout.contentWidth])
+
 	useEffect(() => {
 		const container = containerRef.current
 
@@ -457,13 +465,7 @@ export function DocxEditor(props: DocxEditorProps) {
 		let frame = 0
 		const read = (): void => {
 			frame = 0
-			setViewport(previous =>
-				previous.top === container.scrollTop &&
-				previous.height === container.clientHeight &&
-				previous.width === container.clientWidth
-					? previous
-					: { top: container.scrollTop, height: container.clientHeight, width: container.clientWidth }
-			)
+			setViewport(readViewport(container))
 		}
 		const schedule = (): void => {
 			if (frame === 0) frame = requestAnimationFrame(read)
@@ -475,7 +477,6 @@ export function DocxEditor(props: DocxEditorProps) {
 			revealRef.current = false
 		}
 
-		read()
 		container.addEventListener("scroll", schedule, { passive: true })
 		container.addEventListener("wheel", scrolled, { passive: true })
 		container.addEventListener("touchstart", scrolled, { passive: true })
