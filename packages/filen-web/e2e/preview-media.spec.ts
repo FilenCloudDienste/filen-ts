@@ -139,7 +139,12 @@ test("image/video/audio previews stream over the SW's inline route: range-seekab
 	await video.evaluate(el => {
 		void (el as HTMLVideoElement).play().catch(() => undefined)
 	})
-	await expect.poll(() => video.evaluate(el => !(el as HTMLVideoElement).paused), { timeout: 15_000 }).toBe(true)
+	// Playing with the mid-file seek landed. Linux WebKit's GStreamer backend loses a pause that arrives while
+	// a seek is still in flight: the playhead then snaps to 0 on the next seek and playback resumes on its own,
+	// so the pause below must not race this seek.
+	await expect
+		.poll(() => video.evaluate(el => !(el as HTMLVideoElement).paused && !(el as HTMLVideoElement).seeking), { timeout: 15_000 })
+		.toBe(true)
 
 	// ---- inside the focused player ArrowRight is a seek — the overlay's pager must not steal
 	// it. nameAsc sort (mp3 < mp4 < png) puts the video at the MIDDLE pager index, so Next is enabled
@@ -160,7 +165,9 @@ test("image/video/audio previews stream over the SW's inline route: range-seekab
 		videoEl.pause()
 		videoEl.focus()
 	})
-	await expect.poll(() => video.evaluate(el => (el as HTMLVideoElement).paused), { timeout: 15_000 }).toBe(true)
+	await expect
+		.poll(() => video.evaluate(el => (el as HTMLVideoElement).paused && !(el as HTMLVideoElement).seeking), { timeout: 15_000 })
+		.toBe(true)
 
 	const timeBeforeSeek = await video.evaluate(el => (el as HTMLVideoElement).currentTime)
 
