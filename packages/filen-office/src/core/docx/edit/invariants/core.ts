@@ -1,5 +1,5 @@
 import { appendAll } from "../../../arrays"
-import { Fragment, Slice, type Mark, type MarkType, type Node, type NodeType, type ResolvedPos } from "prosemirror-model"
+import { Fragment, Slice, type Attrs, type Mark, type MarkType, type Node, type NodeType, type ResolvedPos } from "prosemirror-model"
 import { Plugin, PluginKey, type EditorState, type Transaction } from "prosemirror-state"
 import {
 	AddNodeMarkStep,
@@ -2287,6 +2287,9 @@ export function repairTransaction(
 	// the break (a paste of paragraphs into the paragraph ending a section): where that mark ended up, in
 	// `state.doc`. The break goes with the paragraph mark, as in Word.
 	const breakOwners = new Map<number, { readonly pos: number; readonly change: Mark | undefined }>()
+	// Paragraphs an edit rebuilt from another's attributes, which hold its paragraph mark now: a position inside
+	// each in `state.doc` and the node marks it had (see rebuiltParagraphs).
+	const rebuilt: { readonly pos: number; readonly marks: readonly Mark[] }[] = []
 	// Content pasted from elsewhere holding source identities: where built content came from is asked for now.
 	const part = options.part
 
@@ -2318,7 +2321,10 @@ export function repairTransaction(
 		const users = command ? (userSteps.get(tr) ?? 0) : tr.steps.length
 		const copies = typed ? [] : users === tr.steps.length ? insertions : insertedRanges(tr, users)
 
-		if (!command) breakMoves(tr, (key, pos, change) => breakOwners.set(key, { pos: toState(index, pos, 1), change }))
+		if (!command) {
+			breakMoves(tr, (key, pos, change) => breakOwners.set(key, { pos: toState(index, pos, 1), change }))
+			rebuiltParagraphs(tr, (pos, marks) => rebuilt.push({ pos: toState(index, pos, 1), marks }))
+		}
 
 		for (let k = 0; k < insertions.length; k += 2) {
 			const from = toState(index, insertions[k] ?? 0, 1)
@@ -2680,19 +2686,6 @@ export function repairTransaction(
 
 		breakHolders.set(key, holder)
 
-		// A paragraph the edit rebuilt from the attributes of the one ending the section (ProseMirror fits an
-		// open end with its type and attributes, not its node marks) lost the break's section change: back to it.
-		const change = breakOwners.get(key)?.change
-
-		if (
-			change !== undefined &&
-			sectionChange.isInSet(state.doc.nodeAt(holder)?.marks ?? []) === undefined &&
-			!sectioned.some(
-				({ node }) => (sectionChange.isInSet(node.marks)?.attrs["value"] as { section?: unknown } | null)?.section === key
-			)
-		)
-			repair.addNodeMark(holder, change)
-
 		for (const pos of positions) {
 			if (pos === holder) continue
 
@@ -2717,6 +2710,17 @@ export function repairTransaction(
 		breakHolders.set(key, at)
 
 		if (change !== undefined && sectionChange.isInSet($owner.parent.marks) === undefined) repair.addNodeMark(at, change)
+	}
+
+	// A rebuilt paragraph keeps the node marks of the paragraph whose mark it holds (its paragraph id, tracked
+	// property change and section change), as the paragraph a join keeps its own.
+	for (const { pos, marks } of rebuilt) {
+		const $pos = state.doc.resolve(Math.max(0, Math.min(size, pos)))
+		const node = $pos.parent
+
+		if ($pos.depth === 0 || !node.isTextblock) continue
+
+		for (const mark of marks) if (!mark.type.isInSet(node.marks)) repair.addNodeMark($pos.before(), mark)
 	}
 
 	// A section change goes with its break (the writer has nothing to write it on elsewhere).
@@ -2857,6 +2861,62 @@ function breakMoves(tr: Transaction, f: (key: number, pos: number, change: Mark 
 			f(key, pos, sectionChange.isInSet($to.parent.marks))
 		}
 	})
+}
+
+// Paragraphs whose start a replace deleted while their end stays, where ProseMirror fits that end into a node it
+// builds from the paragraph's type and attributes alone (no node marks): a deletion from between blocks into a
+// paragraph. That node holds the paragraph's mark; `f` gets the end of its content (in `tr.doc`) and the node
+// marks of blocks the paragraph had.
+function rebuiltParagraphs(tr: Transaction, f: (pos: number, marks: readonly Mark[]) => void): void {
+	tr.steps.forEach((step, index) => {
+		const doc = tr.docs[index]
+
+		if (doc === undefined || !(step instanceof ReplaceStep)) return
+
+		const walk = ordered(doc)
+
+		for (const replace of replacesOf(step)) {
+			const to = walk.resolve(replace.to)
+			const $to = to.$pos
+			const paragraph = $to.parent
+
+			if (!paragraph.isTextblock || $to.parentOffset === 0 || paragraph.marks.length === 0) continue
+
+			const marks = paragraph.marks.filter(mark => blockMarkTypes.includes(mark.type))
+			const end = openEnd(replace.slice)
+
+			if (marks.length === 0 || end === undefined || end.marks.length > 0 || !sameAttrs(end.attrs, paragraph.attrs)) continue
+
+			const at = to.start + $to.end()
+			let pos = step instanceof RebuildStep ? rebuiltPos(step, at) : (tr.mapping.maps[index]?.map(at, 1) ?? at)
+
+			for (let later = index + 1; later < tr.steps.length; later++) pos = tr.mapping.maps[later]?.map(pos, 1) ?? pos
+
+			f(pos, marks)
+		}
+	})
+}
+
+// The textblock a slice ends open in, if any.
+function openEnd(slice: Slice): Node | undefined {
+	let node: Node | null = null
+	let content = slice.content
+
+	for (let depth = 0; depth < slice.openEnd; depth++) {
+		node = content.lastChild
+
+		if (node === null) return undefined
+
+		content = node.content
+	}
+
+	return node?.isTextblock === true ? node : undefined
+}
+
+function sameAttrs(a: Attrs, b: Attrs): boolean {
+	for (const key in b) if (a[key] !== b[key]) return false
+
+	return true
 }
 
 // The block of `doc` holding section break `key` (a section change moving away from where the edit left it,

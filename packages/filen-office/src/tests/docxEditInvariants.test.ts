@@ -5,7 +5,8 @@ import { NodeSelection, TextSelection, type EditorState, type Transaction } from
 import { canJoin, canSplit } from "prosemirror-transform"
 import { describe, expect, it } from "vitest"
 import { DocxEditorSession, NO_SOURCE, docxSchema, freshSlice, normalizeListAttrs } from "@filen/office/core/docx/edit"
-import { freshSliceKeeping } from "../core/docx/edit/invariants/index"
+import { freshSliceKeeping, markInternal } from "../core/docx/edit/invariants/index"
+import { joinBackward, joinForward } from "../core/docx/paged/keys"
 import { originOf } from "../core/docx/edit/origin"
 import { sourceCopies } from "../core/docx/edit/session"
 import { unzipSync, zipSync } from "fflate"
@@ -1093,3 +1094,81 @@ describe("docx editing invariants", () => {
 		}
 	})
 })
+
+// The node marks a paragraph carries (docx schema BLOCK_MARKS; section_change is covered with its break in
+// docxSections.test.ts), each on the first or the second of "Alpha" / "Bravo charlie", through each way of
+// joining them.
+describe("docx editing invariants: a joined paragraph's node marks", () => {
+	const marks = docxSchema.marks
+	const NODE_MARKS = {
+		para_id: marks.para_id.create({ id: "1A2B3C4D" }),
+		paragraph_change: marks.paragraph_change.create({ value: { author: "A", date: "2020-01-01T00:00:00Z", before: { align: null } } })
+	}
+	// Positions in "Alpha" (1..6) and "Bravo charlie" (8..21).
+	const JOINS: Record<string, { readonly survivor: 0 | 1; readonly join: (session: DocxEditorSession) => void }> = {
+		// ProseMirror rebuilds the end of "Bravo charlie" from its attributes alone: the paragraph mark is its.
+		"a deletion from the start of the first into the second": {
+			survivor: 1,
+			join: session =>
+				session.dispatch(session.state.tr.setSelection(TextSelection.create(session.state.doc, 1, 9)).deleteSelection())
+		},
+		"a deletion from inside the first into the second": {
+			survivor: 0,
+			join: session =>
+				session.dispatch(session.state.tr.setSelection(TextSelection.create(session.state.doc, 3, 9)).deleteSelection())
+		},
+		"Backspace at the start of the second": {
+			survivor: 0,
+			join: session => expect(joinAt(session, 8, joinBackward)).toBe(true)
+		},
+		"Delete at the end of the first": { survivor: 0, join: session => expect(joinAt(session, 6, joinForward)).toBe(true) }
+	}
+
+	for (const [name, mark] of Object.entries(NODE_MARKS)) {
+		for (const on of [0, 1] as const) {
+			for (const [label, { survivor, join }] of Object.entries(JOINS)) {
+				it(`keeps ${name} on the ${on === 0 ? "first" : "second"} paragraph through ${label} where its attributes stay`, async () => {
+					const opened = await openBytes(buildDocx({ body: p("Alpha") + p("Bravo charlie") + p("End") }))
+					const session = new DocxEditorSession(opened.context)
+					const doc = session.state.doc
+					session.dispatch(markInternal(session.state.tr.addNodeMark(on === 0 ? 0 : doc.child(0).nodeSize, mark)))
+					join(session)
+
+					const joined = session.state.doc.child(0)
+
+					expect(session.state.doc.childCount).toBe(2)
+					// The joined paragraph is the one whose attributes it has, with its node marks: its own, or none.
+					expect(joined.attrs["src"]).toBe(doc.child(survivor).attrs["src"])
+					expect(joined.marks.map(kept => kept.type.name)).toEqual(survivor === on ? [name] : [])
+				})
+			}
+		}
+	}
+
+	it("saves the tracked property change of a paragraph a deletion from the paragraph before rebuilt", async () => {
+		const opened = await openBytes(buildDocx({ body: p("Alpha") + p("Bravo charlie") + p("End") }))
+		const session = new DocxEditorSession(opened.context)
+
+		opened.context.identity.author = "Tester"
+		opened.context.review.tracking = true
+		session.dispatch(session.state.tr.setSelection(TextSelection.create(session.state.doc, 10)))
+		expect(session.execute({ type: "align.center" })).toBe(true)
+		opened.context.review.tracking = false
+		session.dispatch(session.state.tr.setSelection(TextSelection.create(session.state.doc, 1, 9)).deleteSelection())
+
+		const result = await saveDocx({ pkg: opened.pkg, context: opened.context, sessions: [session] })
+		const xml = new TextDecoder().decode(unzipSync(result.bytes as Uint8Array)["word/document.xml"])
+
+		expect(xml).toMatch(
+			/<w:p><w:pPr><w:jc w:val="center"\/><w:pPrChange w:id="\d+" w:author="Tester" w:date="[^"]+"><w:pPr\/><\/w:pPrChange><\/w:pPr><w:r><w:t>ravo charlie<\/w:t><\/w:r><\/w:p>/
+		)
+	})
+})
+
+function joinAt(session: DocxEditorSession, pos: number, command: (state: EditorState) => Transaction | null | false): boolean {
+	session.dispatch(session.state.tr.setSelection(TextSelection.create(session.state.doc, pos)))
+
+	const tr = command(session.state)
+
+	return tr !== null && tr !== false && session.dispatch(tr)
+}
