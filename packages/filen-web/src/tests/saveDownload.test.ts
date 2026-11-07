@@ -5,6 +5,7 @@ import { type SwSaveTarget } from "@/features/drive/lib/saveDownload"
 import {
 	SW_DOWNLOAD_PREFIX,
 	SW_ERROR_NO_CLIENT,
+	SW_INIT_CLIENT_TIMEOUT_MS,
 	SW_MSG_INIT_CLIENT,
 	SW_MSG_LOGOUT,
 	SW_MSG_REGISTER_DOWNLOAD,
@@ -16,6 +17,7 @@ import {
 	SW_DOWNLOAD_STALL_MS,
 	SW_KEEPALIVE_MS,
 	SW_MSG_KEEPALIVE,
+	SW_REQUEST_TIMEOUT_MS,
 	type SwDownloadStatus
 } from "@/lib/sw/protocol"
 import { asErrorDTO, plainErrorDTO } from "@/lib/sdk/errors"
@@ -723,10 +725,65 @@ describe("sendToSw", () => {
 			const { saveDownload } = await freshModule()
 			const pending = expect(saveDownload("a.txt")).rejects.toThrow("service worker did not respond")
 
-			await vi.advanceTimersByTimeAsync(20_000)
+			await vi.advanceTimersByTimeAsync(SW_INIT_CLIENT_TIMEOUT_MS + 1)
 			await pending
 
 			expect(openChannels.every(channel => channel.port1.closed)).toBe(true)
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	// A cold worker compiles the SDK wasm before it can answer the session handover, which outlasts the
+	// ordinary bound on a slow CPU: the page keeps waiting for it rather than falling back.
+	it("waits past the ordinary bound for a cold worker's session handover", async () => {
+		vi.useFakeTimers()
+
+		try {
+			stubWindow()
+			stubServiceWorkerReady(fakeServiceWorker(type => (type === SW_MSG_INIT_CLIENT ? null : { ok: true })))
+
+			const { saveDownload } = await freshModule()
+			let settled: "resolved" | "rejected" | null = null
+			const pending = saveDownload("a.txt").then(
+				target => {
+					settled = "resolved"
+
+					return target
+				},
+				(e: unknown) => {
+					settled = "rejected"
+
+					throw e
+				}
+			)
+
+			await vi.advanceTimersByTimeAsync(SW_REQUEST_TIMEOUT_MS + 5_000)
+			expect(settled).toBeNull()
+
+			openChannels[0]?.port2.postMessage({ ok: true })
+
+			await expect(pending).resolves.toMatchObject({ kind: "sw" })
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	it("keeps the ordinary bound for every other message", async () => {
+		vi.useFakeTimers()
+
+		try {
+			stubWindow()
+			stubServiceWorkerReady(fakeServiceWorker(type => (type === SW_MSG_INIT_CLIENT ? { ok: true } : null)))
+
+			const { triggerSwDownload } = await freshModule()
+			const save: SwSaveTarget = { kind: "sw", id: "abc-123", url: `${SW_DOWNLOAD_PREFIX}abc-123`, name: "report.pdf" }
+			const pending = expect(triggerSwDownload(testFile(), save, "transfer-1", () => undefined)).rejects.toThrow(
+				"service worker did not respond"
+			)
+
+			await vi.advanceTimersByTimeAsync(SW_REQUEST_TIMEOUT_MS + 1)
+			await pending
 		} finally {
 			vi.useRealTimers()
 		}

@@ -124,9 +124,14 @@ export const SW_DOWNLOAD_STALL_MS = 30_000
 export const SW_MSG_KEEPALIVE = "FILEN_SW_KEEPALIVE"
 export const SW_KEEPALIVE_MS = 10_000
 
-// How long the page waits for a message's ack before rejecting. Generous enough for the one slow
-// message: INIT_CLIENT compiles the 2 MB wasm on a cold worker before it can reply.
+// How long the page waits for a message's ack before rejecting, so a wedged worker cannot hold a caller
+// forever.
 export const SW_REQUEST_TIMEOUT_MS = 15_000
+
+// INIT_CLIENT's own bound: a cold worker compiles and instantiates the SDK wasm before it can reply, which
+// takes 15-20 s on a slow CPU. Giving up sooner abandons a worker that is about to answer, and the preview
+// that asked falls back to downloading the whole file into memory.
+export const SW_INIT_CLIENT_TIMEOUT_MS = 60_000
 
 // ── Inline-preview Content-Type allowlist ───────────────────────────────────────────────────────
 // The SW's inline route (SW_MSG_REGISTER_PREVIEW) only ever serves a Content-Type on this list —

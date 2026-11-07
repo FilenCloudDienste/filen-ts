@@ -19,6 +19,7 @@ import {
 	SW_MSG_REGISTER_ZIP_DOWNLOAD,
 	SW_MSG_WATCH_DOWNLOAD,
 	SW_REQUEST_TIMEOUT_MS,
+	SW_INIT_CLIENT_TIMEOUT_MS,
 	SW_READING_PROTOCOL,
 	type SwDownloadStatus
 } from "@/lib/sw/protocol"
@@ -124,14 +125,15 @@ export function sendToSw(
 	target: ServiceWorker,
 	type: string,
 	payload: Record<string, unknown>,
-	transfer: readonly Transferable[] = []
+	transfer: readonly Transferable[] = [],
+	timeoutMs: number = SW_REQUEST_TIMEOUT_MS
 ): Promise<void> {
 	return new Promise((resolve, reject) => {
 		const channel = new MessageChannel()
 		const timeout = setTimeout(() => {
 			close()
 			reject(new Error("service worker did not respond"))
-		}, SW_REQUEST_TIMEOUT_MS)
+		}, timeoutMs)
 
 		function close(): void {
 			clearTimeout(timeout)
@@ -174,7 +176,7 @@ async function initSwClient(): Promise<void> {
 	const target = await activeServiceWorker()
 
 	// The SW's client runs every download FSA cannot, so it gets the transfer preset this page applied.
-	await sendToSw(target, SW_MSG_INIT_CLIENT, { blob, config: getAppliedTransferConfig() })
+	await sendToSw(target, SW_MSG_INIT_CLIENT, { blob, config: getAppliedTransferConfig() }, [], SW_INIT_CLIENT_TIMEOUT_MS)
 }
 
 export function ensureSwClientReady(): Promise<void> {
