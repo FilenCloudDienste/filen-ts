@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest"
+import { cancelHeldPause, hasHeldPause } from "@filen/shared/heldPause"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { MediaTiming } from "../core/anim/media"
 import {
 	knownMediaDuration,
@@ -19,6 +20,7 @@ class FakeMedia implements TimedMedia {
 	currentTime = 0
 	volume = 1
 	paused = true
+	seeking = false
 	readonly duration: number
 	readonly seeks: number[] = []
 	private readonly listeners = new Map<string, Set<() => void>>()
@@ -266,5 +268,73 @@ describe("the lengths the player learnt", () => {
 		expect(knownMediaDuration(session, "/ppt/media/media2.mp4")).toBeUndefined()
 		expect(knownMediaDuration(session, "/ppt/media/media3.mp4")).toBeUndefined()
 		expect(knownMediaDuration({}, "/ppt/media/media1.mp4")).toBeUndefined()
+	})
+})
+
+// Linux WebKit loses a pause made while a seek is in flight (@filen/shared/heldPause): the trimmed end reached by a seek
+// on the native bar pauses once that seek lands.
+describe("media timing in the show: the trimmed end reached mid-seek", () => {
+	beforeEach(() => {
+		vi.useFakeTimers()
+	})
+
+	afterEach(() => {
+		vi.useRealTimers()
+	})
+
+	async function pastTheEndMidSeek() {
+		const h = harness({ trim: { startMs: 0, endMs: 5000 } })
+
+		await h.media.play()
+		h.media.currentTime = 8
+		h.media.seeking = true
+		h.frames.step(h.media)
+
+		return h
+	}
+
+	it("holds the pause until the seek lands", async () => {
+		const h = await pastTheEndMidSeek()
+
+		expect(h.media.paused).toBe(false)
+		expect(hasHeldPause(h.media)).toBe(true)
+		expect(h.ended()).toBe(1)
+		expect(h.frames.waiting).toBe(0)
+
+		h.media.seeking = false
+		h.media.emit("seeked")
+
+		expect(h.media.paused).toBe(true)
+		expect(hasHeldPause(h.media)).toBe(false)
+		expect(h.ended()).toBe(1)
+	})
+
+	it("pauses at once when no seek is in flight, holding nothing", async () => {
+		const h = harness({ trim: { startMs: 0, endMs: 5000 } })
+
+		await h.media.play()
+		h.media.currentTime = 8
+		h.frames.step(h.media)
+
+		expect(h.media.paused).toBe(true)
+		expect(hasHeldPause(h.media)).toBe(false)
+	})
+
+	it("plays on from the trimmed start when the held pause is dropped for a play", async () => {
+		const h = await pastTheEndMidSeek()
+
+		expect(cancelHeldPause(h.media)).toBe(true)
+
+		h.driver.resumed()
+		h.media.seeking = false
+		h.media.emit("seeked")
+
+		expect(h.media.currentTime).toBe(0)
+		expect(h.frames.waiting).toBe(1)
+
+		h.frames.step(h.media)
+
+		expect(h.media.paused).toBe(false)
+		expect(h.ended()).toBe(1)
 	})
 })

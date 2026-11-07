@@ -25,6 +25,7 @@ describe("mediaTimingPerf", () => {
 				volume: 1,
 				duration: 70,
 				paused: false,
+				seeking: false,
 				pause: () => undefined,
 				play: () => Promise.resolve(),
 				addEventListener: () => undefined,

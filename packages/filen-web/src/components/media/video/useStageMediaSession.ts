@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react"
 import { mediaSessionOwners, type MediaSessionOwner } from "@/lib/media/mediaSessionOwner"
-import { pauseMedia } from "@/lib/media/heldPause"
+import { pauseMedia } from "@filen/shared/heldPause"
 import { playMedia, seekMedia } from "@/lib/media/useMediaState"
 
 // The video stage's share of the Media Session: taken from the audio engine (which pauses) for as long as the

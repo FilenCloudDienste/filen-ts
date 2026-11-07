@@ -1,5 +1,5 @@
 import { useEffect, useSyncExternalStore } from "react"
-import { cancelHeldPause, pauseMedia, type PausableMedia } from "@/lib/media/heldPause"
+import { cancelHeldPause, pauseMedia, type PausableMedia } from "@filen/shared/heldPause"
 import { adoptMediaVolume, useMediaVolumeStore, warmMediaVolume, type MediaVolume } from "@/lib/media/mediaVolume"
 
 // Reads of a media element's state, re-rendering only the component that asks and only when the value it
@@ -184,7 +184,7 @@ export interface PlayableMedia extends PausableMedia {
 }
 
 // Starts playback, leaving the element paused where the browser refuses (an autoplay policy). A pause still
-// held for a seek (heldPause.ts) is dropped: playing was asked for after it.
+// held for a seek (@filen/shared/heldPause) is dropped: playing was asked for after it.
 export function playMedia(media: PlayableMedia): void {
 	cancelHeldPause(media)
 	void media.play().catch(() => undefined)

@@ -24,7 +24,7 @@ import { isVideoNativeFullscreen, toggleVideoFullscreen, useIsFullscreen, videoF
 import { stepMediaVolume, toggleMediaMuted, warmMediaVolume } from "@/lib/media/mediaVolume"
 import { playerKeyTarget } from "@/lib/media/playerKeys.logic"
 import { SeekCoalescer } from "@/lib/media/seekCoalescer.logic"
-import { cancelHeldPause, pauseMedia } from "@/lib/media/heldPause"
+import { cancelHeldPause, pauseMedia } from "@filen/shared/heldPause"
 import { chapterTarget, frameDuration, stepPlaybackRate, videoKeyAction, type VideoKeyAction } from "@/lib/media/videoKeys.logic"
 import { useHoldReadsWhilePlaying } from "@/lib/media/useHoldReadsWhilePlaying"
 import { seekMedia, setPlaybackRate, toggleMediaPlayback, useMediaPictureInPicture, useSyncedMediaVolume } from "@/lib/media/useMediaState"

@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
-import { describe, expect, it, vi } from "vitest"
+import { hasHeldPause } from "@filen/shared/heldPause"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { SlideLayer, SlideMediaInfo } from "../core/presentation/output"
 import type { PresentationSessionApi } from "../dom/presentation/protocol"
 import { showMediaMount, type ShowMediaStreams } from "../react/presentation/show/media"
@@ -268,5 +269,214 @@ describe("show media", () => {
 
 		play.mockRestore()
 		pause.mockRestore()
+	})
+})
+
+// Linux WebKit loses a pause made while a seek is in flight (@filen/shared/heldPause): the medium pauses once the seek
+// lands, a play or toggle in the meantime drops that pause, and a new stream is not paused for the old one's seek.
+describe("show media: a pause while a seek is in flight", () => {
+	const streams: ShowMediaStreams = { url: () => Promise.resolve({ kind: "url", url: "blob:media", release: () => undefined }) }
+	let paused = true
+	let seeking = false
+
+	beforeEach(() => {
+		vi.useFakeTimers()
+		paused = true
+		seeking = false
+		vi.spyOn(HTMLMediaElement.prototype, "play").mockImplementation(() => {
+			paused = false
+
+			return Promise.resolve()
+		})
+		vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {
+			paused = true
+		})
+	})
+
+	afterEach(() => {
+		vi.useRealTimers()
+	})
+
+	async function playing() {
+		const box = document.createElement("div")
+		const handle = showMediaMount(streams, { labels: LABELS }).mount(box, LAYER, SESSION, EVENTS)
+
+		handle.command({ command: "play" })
+		await vi.advanceTimersByTimeAsync(0)
+
+		const video = box.querySelector("video") as HTMLVideoElement
+
+		Object.defineProperty(video, "paused", { configurable: true, get: () => paused })
+		Object.defineProperty(video, "seeking", { configurable: true, get: () => seeking })
+
+		return { box, handle, video }
+	}
+
+	function landSeek(video: HTMLMediaElement): void {
+		seeking = false
+		video.dispatchEvent(new Event("seeked"))
+	}
+
+	it("pauses at once when no seek is in flight", async () => {
+		const { handle, video } = await playing()
+
+		handle.command({ command: "pause" })
+		await vi.advanceTimersByTimeAsync(0)
+
+		expect(HTMLMediaElement.prototype.pause).toHaveBeenCalledOnce()
+		expect(hasHeldPause(video)).toBe(false)
+
+		handle.release()
+	})
+
+	it("holds a pause until the seek lands", async () => {
+		const { handle, video } = await playing()
+
+		seeking = true
+		handle.command({ command: "pause" })
+		await vi.advanceTimersByTimeAsync(0)
+
+		expect(HTMLMediaElement.prototype.pause).not.toHaveBeenCalled()
+
+		landSeek(video)
+
+		expect(HTMLMediaElement.prototype.pause).toHaveBeenCalledOnce()
+		expect(hasHeldPause(video)).toBe(false)
+
+		handle.release()
+	})
+
+	it("holds a stop's pause for its own seek to the start", async () => {
+		const { handle, video } = await playing()
+
+		video.currentTime = 4
+		seeking = true
+		handle.command({ command: "stop" })
+		await vi.advanceTimersByTimeAsync(0)
+
+		expect(video.currentTime).toBe(0)
+		expect(HTMLMediaElement.prototype.pause).not.toHaveBeenCalled()
+
+		landSeek(video)
+
+		expect(HTMLMediaElement.prototype.pause).toHaveBeenCalledOnce()
+
+		handle.release()
+	})
+
+	it("takes a toggle during the hold as play: the pause is dropped and the medium plays on", async () => {
+		const { handle, video } = await playing()
+
+		seeking = true
+		handle.command({ command: "toggle" })
+		await vi.advanceTimersByTimeAsync(0)
+
+		expect(hasHeldPause(video)).toBe(true)
+
+		handle.command({ command: "toggle" })
+		await vi.advanceTimersByTimeAsync(0)
+		landSeek(video)
+		await vi.advanceTimersByTimeAsync(5000)
+
+		expect(HTMLMediaElement.prototype.pause).not.toHaveBeenCalled()
+		expect(HTMLMediaElement.prototype.play).toHaveBeenCalledTimes(2)
+		expect(paused).toBe(false)
+
+		handle.release()
+	})
+
+	it("drops a held pause when a press on the picture asks to play", async () => {
+		const { handle, video } = await playing()
+
+		seeking = true
+		handle.command({ command: "pause" })
+		await vi.advanceTimersByTimeAsync(0)
+		handle.click()
+		await vi.advanceTimersByTimeAsync(0)
+		landSeek(video)
+
+		expect(HTMLMediaElement.prototype.pause).not.toHaveBeenCalled()
+		expect(paused).toBe(false)
+
+		handle.release()
+	})
+
+	it("keeps the pause of a medium let go mid-seek, made once the seek lands or the hold's bound passes", async () => {
+		const first = await playing()
+
+		seeking = true
+		first.handle.release()
+
+		expect(HTMLMediaElement.prototype.pause).not.toHaveBeenCalled()
+
+		landSeek(first.video)
+
+		expect(HTMLMediaElement.prototype.pause).toHaveBeenCalledOnce()
+
+		paused = true
+		vi.mocked(HTMLMediaElement.prototype.pause).mockClear()
+
+		const second = await playing()
+
+		seeking = true
+		second.handle.release()
+		await vi.advanceTimersByTimeAsync(3000)
+
+		expect(HTMLMediaElement.prototype.pause).toHaveBeenCalledOnce()
+		expect(hasHeldPause(second.video)).toBe(false)
+	})
+
+	it("drops a held pause when the stream is asked for again after a network error", async () => {
+		const urls = ["blob:first", "blob:second"]
+		const reopening: ShowMediaStreams = {
+			url: () => Promise.resolve({ kind: "url", url: urls.shift() ?? "blob:none", release: () => undefined })
+		}
+		const box = document.createElement("div")
+		const handle = showMediaMount(reopening, { labels: LABELS }).mount(box, LAYER, SESSION, EVENTS)
+
+		handle.command({ command: "play" })
+		await vi.advanceTimersByTimeAsync(0)
+
+		const video = box.querySelector("video") as HTMLVideoElement
+
+		Object.defineProperty(video, "paused", { configurable: true, get: () => paused })
+		Object.defineProperty(video, "seeking", { configurable: true, get: () => seeking })
+		seeking = true
+		handle.command({ command: "pause" })
+		await vi.advanceTimersByTimeAsync(0)
+
+		expect(hasHeldPause(video)).toBe(true)
+
+		Object.defineProperty(video, "error", { configurable: true, value: { code: 2 } })
+		video.dispatchEvent(new Event("error"))
+		await vi.advanceTimersByTimeAsync(0)
+
+		expect(video.getAttribute("src")).toBe("blob:second")
+		expect(hasHeldPause(video)).toBe(false)
+
+		landSeek(video)
+
+		expect(HTMLMediaElement.prototype.pause).not.toHaveBeenCalled()
+
+		handle.release()
+	})
+
+	it("holds a transition sound's stop until a loop's seek lands", async () => {
+		const sound = showMediaMount(streams, { labels: LABELS }).sound?.(SESSION, { part: "/ppt/media/audio1.wav", loop: true })
+
+		await vi.advanceTimersByTimeAsync(0)
+
+		const element = vi.mocked(HTMLMediaElement.prototype.play).mock.contexts[0] as HTMLAudioElement
+
+		Object.defineProperty(element, "seeking", { configurable: true, get: () => seeking })
+		seeking = true
+		sound?.stop()
+
+		expect(HTMLMediaElement.prototype.pause).not.toHaveBeenCalled()
+		expect(element.hasAttribute("src")).toBe(false)
+
+		landSeek(element)
+
+		expect(HTMLMediaElement.prototype.pause).toHaveBeenCalledOnce()
 	})
 })

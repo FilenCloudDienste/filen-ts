@@ -20,6 +20,7 @@
 		"./assistant": "./src/assistant/index.ts",
 		"./videos": "./src/videos/index.ts",
 		"./videos/transportStreamHead": "./src/videos/transportStreamHead.ts",
+		"./heldPause": "./src/heldPause.ts",
 		"./svgProlog": "./src/svgProlog.ts",
 		"./svgThumb": "./src/svgThumb.ts",
 		"./linkPolicy": "./src/linkPolicy.ts",

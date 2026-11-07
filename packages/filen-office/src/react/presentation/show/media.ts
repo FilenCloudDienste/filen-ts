@@ -1,3 +1,4 @@
+import { cancelHeldPause, hasHeldPause, pauseMedia } from "@filen/shared/heldPause"
 import type { LayerState } from "../../../core/anim/model"
 import type { SlideLayer, SlideMediaInfo } from "../../../core/presentation/output"
 import type { MediaRefusal, PresentationSessionApi } from "../../../dom/presentation/protocol"
@@ -73,6 +74,12 @@ const UNSNIFFED = /^(?:video|audio)\/(?:x-ms-(?:asf|wmv|wma|wm|wmx|wvx)|x-msvide
 // under the service worker that answers it, which it logs as a failed load of ''.
 function playsDirectly(element: HTMLMediaElement, contentType: string): boolean {
 	return !UNSNIFFED.test(contentType.split(";")[0]?.trim() ?? "") || element.canPlayType(contentType) !== ""
+}
+
+// Whether the element plays on its own: not one asked to pause while a seek is in flight (@filen/shared/heldPause), which
+// still plays until the seek lands, so a toggle then plays on rather than asking for the same pause again.
+function playsOn(element: HTMLMediaElement): boolean {
+	return !element.paused && !element.ended && !hasHeldPause(element)
 }
 
 function noteElement(document: Document, text: string): HTMLElement {
@@ -159,7 +166,7 @@ class MountedMedia implements ShowMediaHandle {
 	private isPlaying(): boolean {
 		const element = this.element
 
-		return element === undefined ? this.wanted.playing && this.loading !== undefined : !element.paused && !element.ended
+		return element === undefined ? this.wanted.playing && this.loading !== undefined : playsOn(element)
 	}
 
 	click(): void {
@@ -174,7 +181,7 @@ class MountedMedia implements ShowMediaHandle {
 		}
 
 		const element = this.element
-		const playing = element !== undefined && !element.paused && !element.ended
+		const playing = element !== undefined && playsOn(element)
 
 		this.command({ command: playing ? "pause" : "play" })
 	}
@@ -191,9 +198,10 @@ class MountedMedia implements ShowMediaHandle {
 		const element = this.element
 
 		// Paused, unlinked and dropped: its stream is released below, so no range request follows. No load() over the
-		// emptied source (Firefox logs it as a failed load of '').
+		// emptied source (Firefox logs it as a failed load of ''). A pause asked for mid-seek is held, not dropped: the
+		// element keeps its loaded resource, and a lost pause would let it play on detached.
 		if (element !== undefined) {
-			element.pause()
+			pauseMedia(element)
 			element.removeAttribute("src")
 			element.remove()
 		}
@@ -443,6 +451,8 @@ class MountedMedia implements ShowMediaHandle {
 		}
 
 		this.stream = stream
+		// A new source: a pause held for the old one's seek is not this one's (the load leaves it paused).
+		cancelHeldPause(element)
 		element.src = stream.url
 		element.currentTime = at
 
@@ -465,6 +475,7 @@ class MountedMedia implements ShowMediaHandle {
 			return
 		}
 
+		cancelHeldPause(element)
 		element.removeAttribute("src")
 		this.stream?.release()
 		this.stream = undefined
@@ -492,11 +503,16 @@ class MountedMedia implements ShowMediaHandle {
 			this.wanted = { playing: wanted.playing }
 		}
 
+		// A seek just made (a stop's 0, playFrom) is in flight: the pause waits for it to land (@filen/shared/heldPause).
 		if (!wanted.playing) {
-			element.pause()
+			pauseMedia(element)
 
 			return
 		}
+
+		// Playing asked for after a pause still held: the pause is dropped and the element, which never stopped, plays on
+		// with no play event, so the trim driver is told.
+		if (cancelHeldPause(element)) this.timing?.resumed()
 
 		try {
 			await (this.remux?.play() ?? element.play())
@@ -539,8 +555,9 @@ function transitionSound(
 	const stop = (): void => {
 		stopped = true
 
+		// Off the page nothing else pauses it: a pause lost while a loop seeks back to 0 would leave it playing.
 		if (element !== undefined) {
-			element.pause()
+			pauseMedia(element)
 			element.removeAttribute("src")
 		}
 

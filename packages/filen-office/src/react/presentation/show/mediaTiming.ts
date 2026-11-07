@@ -1,3 +1,4 @@
+import { pauseMedia, type PausableMedia } from "@filen/shared/heldPause"
 import { BookmarkCursor, fadeGain, playWindow, type MediaTiming, type PlayWindow } from "../../../core/anim/media"
 
 // A medium's trim, fade and bookmarks applied to its <video>/<audio> while it plays (core/anim/media.ts holds the
@@ -51,12 +52,11 @@ const PAGE_FRAMES: FrameSource = {
 }
 
 // What the driver reads and sets of the element (an HTMLMediaElement has all of it).
-export interface TimedMedia {
+export interface TimedMedia extends PausableMedia {
 	currentTime: number
 	volume: number
 	readonly duration: number
 	readonly paused: boolean
-	pause(): void
 	play(): Promise<void>
 	addEventListener(type: string, listener: () => void): void
 	removeEventListener(type: string, listener: () => void): void
@@ -103,8 +103,7 @@ export class MediaTimingDriver {
 			this.window = playWindow(this.timing, this.element.duration * 1000)
 		})
 		this.listen("play", () => {
-			this.enter()
-			this.schedule()
+			this.resumed()
 		})
 		this.listen("seeked", () => {
 			this.lastMs = this.element.currentTime * 1000
@@ -127,6 +126,14 @@ export class MediaTimingDriver {
 	// The trimmed part to play.
 	get playWindow(): PlayWindow {
 		return this.window
+	}
+
+	// Playing starts, or goes on after a pause held for a seek was dropped (no play event: it never stopped).
+	resumed(): void {
+		if (this.disposed) return
+
+		this.enter()
+		this.schedule()
 	}
 
 	dispose(): void {
@@ -173,7 +180,8 @@ export class MediaTimingDriver {
 				return true
 			}
 
-			element.pause()
+			// A seek on the native bar past the end may still be in flight: the pause waits for it to land.
+			pauseMedia(element)
 			this.hooks.ended()
 
 			return false
