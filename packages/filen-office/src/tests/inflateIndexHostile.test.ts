@@ -107,17 +107,19 @@ describe("hostile deflate streams", () => {
 
 		expect(compressed.length).toBeLessThanOrEqual(deflateBound(SIZE))
 
+		// The longest slice in this thread's CPU time: what a slice computed between two yields, not the wall time a
+		// busy machine adds while the thread waits.
 		let longest = 0
-		let last = performance.now()
+		let last = cpuMs()
 		const slicing = {
 			sliceMs: 8,
 			now: () => performance.now(),
 			pause: () => {
-				longest = Math.max(longest, performance.now() - last)
+				longest = Math.max(longest, cpuMs() - last)
 
 				return new Promise<void>(resolve => {
 					setImmediate(() => {
-						last = performance.now()
+						last = cpuMs()
 						resolve()
 					})
 				})
