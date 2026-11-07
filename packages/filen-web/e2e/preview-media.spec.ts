@@ -4,6 +4,7 @@ import { bootTo } from "./helpers/listing"
 import { FIXTURE_FILES, openFixtureRows } from "./helpers/fixtures"
 import { waitForSwReady } from "./helpers/sw"
 import { trackCspViolations } from "./helpers/csp"
+import { explainMediaFailure, recordPlayedMediaElements } from "./helpers/mediaProbe"
 
 // The one live proof the streamed-preview architecture actually works: a service worker is PROD-only
 // (never registered under `vite dev`), so this only ever runs against
@@ -20,6 +21,9 @@ import { trackCspViolations } from "./helpers/csp"
 // fixtures-setup project builds (helpers/fixtures.ts), so this spec performs no drive writes at all.
 
 interface SwResponseLog {
+	// The registration id and the Range the element asked for: which stream a response belongs to.
+	id: string
+	range: string | null
 	status: number
 	contentType: string | null
 	contentRange: string | null
@@ -28,7 +32,7 @@ interface SwResponseLog {
 
 test("image/video/audio previews stream over the SW's inline route: range-seekable, inline, allowlisted Content-Type, zero CSP violations", async ({
 	page
-}) => {
+}, testInfo) => {
 	// Destructured in the scenario's own nameAsc order (mp3 < mp4 < png) — that order is the reason the
 	// video sits at the MIDDLE pager index, which the ArrowRight leg below depends on.
 	const [nameAudio, nameVideo, nameImage] = FIXTURE_FILES["preview-media"]
@@ -40,6 +44,8 @@ test("image/video/audio previews stream over the SW's inline route: range-seekab
 			const headers = res.headers()
 
 			swResponses.push({
+				id: res.url().slice(res.url().indexOf(SW_DOWNLOAD_PREFIX) + SW_DOWNLOAD_PREFIX.length),
+				range: res.request().headers()["range"] ?? null,
 				status: res.status(),
 				contentType: headers["content-type"] ?? null,
 				contentRange: headers["content-range"] ?? null,
@@ -48,7 +54,9 @@ test("image/video/audio previews stream over the SW's inline route: range-seekab
 		}
 	})
 	const cspViolations = trackCspViolations(page)
+	const swLines = () => ["-- service worker responses --", ...swResponses.map(r => JSON.stringify(r))]
 
+	await page.addInitScript(recordPlayedMediaElements)
 	await bootTo(page)
 
 	const {
@@ -175,7 +183,11 @@ test("image/video/audio previews stream over the SW's inline route: range-seekab
 		})
 	).toEqual({ key: "ArrowRight", defaultPrevented: true })
 
-	await expect.poll(() => video.evaluate(el => (el as HTMLVideoElement).currentTime), { timeout: 15_000 }).toBeGreaterThan(timeBeforeSeek)
+	await explainMediaFailure(page, testInfo, swLines, async () => {
+		await expect
+			.poll(() => video.evaluate(el => (el as HTMLVideoElement).currentTime), { timeout: 15_000 })
+			.toBeGreaterThan(timeBeforeSeek)
+	})
 
 	await expect(heading).toBeVisible()
 
@@ -245,7 +257,9 @@ test("image/video/audio previews stream over the SW's inline route: range-seekab
 	await expect(bar.getByRole("button", { name: "Pause" })).toBeVisible({ timeout: 30_000 })
 	const audioSeek = bar.getByRole("slider", { name: "Seek" })
 	const audioStart = Number(await audioSeek.inputValue())
-	await expect.poll(async () => Number(await audioSeek.inputValue()), { timeout: 30_000 }).toBeGreaterThan(audioStart)
+	await explainMediaFailure(page, testInfo, swLines, async () => {
+		await expect.poll(async () => Number(await audioSeek.inputValue()), { timeout: 30_000 }).toBeGreaterThan(audioStart)
+	})
 
 	// Polled for the same reason the image leg's own find is — the response handler is async, and the
 	// playhead advancing above does not prove its frame has been logged yet.
