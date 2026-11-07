@@ -670,6 +670,30 @@ describe("docx sections: page setup Word's way", () => {
 		empty.editor.dispose()
 	})
 
+	it("keeps a new break's section change on the paragraph a deletion from the paragraph before joins to it", async () => {
+		const opened = await pagedEditor(
+			buildDocx({ body: p("Alpha") + p("I want more charts") + `<w:sectPr><w:pgSz w:w="12240" w:h="15840"/>${MARGINS}</w:sectPr>` })
+		)
+		const { editor } = opened
+		const session = editor.session
+
+		// "I want more c|harts": the first half ends the new section.
+		caret(editor, 8 + "I want more c".length)
+		expect(await run(editor, { type: "insert.sectionBreak", kind: "continuous" })).toBe(true)
+		// From the start of "Alpha" to before the "c" of the paragraph ending the new section.
+		session.dispatch(
+			session.state.tr.setSelection(TextSelection.create(session.state.doc, 1, 8 + "I want more ".length)).deleteSelection()
+		)
+
+		const first = session.state.doc.child(0)
+
+		expect(first.textContent).toBe("c")
+		expect(first.attrs["sectPr"]).toBeLessThan(-1)
+		expect(marks.section_change.isInSet(first.marks)?.attrs["value"]).toMatchObject({ section: first.attrs["sectPr"] })
+		expect(await sections(await saved(opened))).toHaveLength(2)
+		editor.dispose()
+	})
+
 	it("rejecting a section change the file recorded brings back what it recorded, whatever came after", async () => {
 		const bytes = buildDocx({
 			body:

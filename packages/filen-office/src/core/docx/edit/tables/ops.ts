@@ -9,9 +9,9 @@ import { minuteDate, paragraphChange, type ParagraphChange } from "../../review/
 import type { DocxThemeColor } from "../commands/formatting"
 import { MAX_TABLE_COLUMNS, MAX_TABLE_ROWS, type DocxCellVAlign, type DocxTableAlign } from "../commands/tables"
 import type { DocxEditContext } from "../context"
-import { markCommand } from "../invariants/core"
+import { markCommand, markerNode } from "../invariants/core"
 import { minColumn, tableCellMargins } from "./margins"
-import { NO_MARKERS, NO_SOURCE, docxSchema, tableEdge, type MarkerList } from "../schema"
+import { NO_MARKERS, NO_SOURCE, docxSchema, tableEdge, type MarkerAttrs, type MarkerList } from "../schema"
 import {
 	RECORD_KEYS,
 	cellOverrides,
@@ -1074,7 +1074,28 @@ export function mergeCells(state: EditorState, at: TableAt): Transaction | null 
 	const width = widthOf(paddedGrid(map, rect.right), rect.left, span)
 	const tall = rect.bottom - rect.top > 1
 	const moved: Node[] = []
-	const markers: MarkerList[] = []
+	// The markers between the cells that go and after their blocks, in their order: each run of them goes
+	// into the `before` of the next block moved, the last into the merged cell's last paragraph.
+	const pending: MarkerAttrs[] = []
+	const markers = (list: MarkerList): void => {
+		appendAll(pending, list)
+	}
+	const move = (block: Node): void => {
+		if (pending.length === 0) {
+			moved.push(block)
+
+			return
+		}
+
+		moved.push(
+			block.type.create(
+				{ ...block.attrs, before: [...pending, ...(block.attrs["before"] as MarkerList)] },
+				block.content,
+				block.marks
+			)
+		)
+		pending.length = 0
+	}
 	const groups: { row: number; first: number; last: number }[] = []
 
 	for (let r = rect.top; r < rect.bottom; r++) {
@@ -1096,11 +1117,19 @@ export function mergeCells(state: EditorState, at: TableAt): Transaction | null 
 		for (let index = first; index <= last; index++) {
 			const cell = map.cell(r, index)
 
-			if (r === rect.top && index === first) continue
+			if (r === rect.top && index === first) {
+				// The kept cell's own end markers come after its blocks, before those moved in.
+				markers(cell.attrs["end"] as MarkerList)
 
-			// Markers between the cells that go stay with the merged cell.
-			if (r === rect.top || index > first) markers.push(cell.attrs["before"] as MarkerList, cell.attrs["end"] as MarkerList)
-			if (!emptyCell(cell)) cell.forEach(block => moved.push(block))
+				continue
+			}
+
+			// The first cell of a lower row stays (continuing the merge) with its markers.
+			const own = r === rect.top || index > first
+
+			if (own) markers(cell.attrs["before"] as MarkerList)
+			if (!emptyCell(cell)) cell.forEach(move)
+			if (own) markers(cell.attrs["end"] as MarkerList)
 		}
 	}
 
@@ -1119,9 +1148,15 @@ export function mergeCells(state: EditorState, at: TableAt): Transaction | null 
 
 			if (content.at(-1)?.type === nodes.table) content.push(nodes.paragraph.create())
 
-			const kept = markers.flat()
+			// Word wants a cell to end with a paragraph: the markers after the last block go into it.
+			const last = content.at(-1)
 
-			if (kept.length > 0) end = [...end, ...kept]
+			if (pending.length > 0 && last?.type === nodes.paragraph) {
+				content[content.length - 1] = last.copy(last.content.append(Fragment.from(pending.map(markerNode))))
+				end = []
+			} else {
+				end = [...pending]
+			}
 		} else {
 			content = [emptyParagraph(keep.firstChild)]
 		}

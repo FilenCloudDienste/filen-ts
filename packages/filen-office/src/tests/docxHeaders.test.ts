@@ -557,6 +557,60 @@ describe("docx headers and footers", () => {
 		editor.dispose()
 	})
 
+	it("lays out the empty paragraph of a header without blocks once a table goes before it, and not once it goes again", async () => {
+		// The first-page header's part has no block: its editor holds an empty paragraph standing for none.
+		const opened = await pagedEditor(
+			buildDocx({
+				body: p("Body") + SECTION(HEADER("default", "rIdD") + HEADER("first", "rIdF") + "<w:titlePg/>"),
+				headers: { rIdD: p("Default header"), rIdF: "" }
+			})
+		)
+		const { editor } = opened
+
+		caret(editor, 1)
+		expect(await run(editor, { type: "header.edit" })).toBe(true)
+		expect(editor.snapshot().context.story.header).toMatchObject({ type: "first" })
+		expect(await run(editor, { type: "table.insert", rows: 1, cols: 1 })).toBe(true)
+		// The table's paragraph and the one after it, as the save writes them.
+		expect(await headerTexts(editor)).toEqual(["|"])
+		expect(await read(await saved(opened), "word/header2.xml")).toMatch(/<\/w:tbl><w:p><\/w:p><\/w:hdr>$/)
+
+		expect(await run(editor, { type: "history.undo" })).toBe(true)
+		expect(await headerTexts(editor)).toEqual([""])
+		await saved(opened)
+		editor.dispose()
+	})
+
+	it("saves a header whose relationships the edit rewrites while one already pointed at a part the package lacks", async () => {
+		const opened = await pagedEditor(
+			buildDocx({
+				body: p("Body") + SECTION(HEADER("default", "rIdH")),
+				headers: { rIdH: `${p("Header")}<w:p><w:hyperlink r:id="rIdLink"><w:r><w:t>link</w:t></w:r></w:hyperlink></w:p>` },
+				parts: [
+					{
+						name: "word/_rels/header1.xml.rels",
+						data: RELATIONSHIPS(
+							RELATIONSHIP("rIdGone", "image", "media/gone.png") +
+								'<Relationship Id="rIdLink" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="https://example.com" TargetMode="External"/>'
+						)
+					}
+				]
+			})
+		)
+		const { editor } = opened
+
+		caret(editor, 1)
+		expect(await run(editor, { type: "header.edit" })).toBe(true)
+		editor.session.dispatch(editor.session.state.tr.delete(0, editor.session.state.doc.content.size))
+
+		// The link's relationship goes with it; the one to the missing picture stays as the source had it.
+		const rels = await read(await saved(opened), "word/_rels/header1.xml.rels")
+
+		expect(rels).not.toContain("rIdLink")
+		expect(rels).toContain('Id="rIdGone"')
+		editor.dispose()
+	})
+
 	it("shows a different first page and different even pages", async () => {
 		const opened = await pagedEditor(TWO_SECTIONS)
 		const { editor } = opened

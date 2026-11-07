@@ -1319,7 +1319,7 @@ function markersOf(node: Node, names: readonly string[], out: Map<string, Marker
 	}
 }
 
-function markerNode(marker: MarkerAttrs): Node {
+export function markerNode(marker: MarkerAttrs): Node {
 	return marker.kind === "commentReference"
 		? nodes.comment_ref.create({ src: marker.src, id: marker.id })
 		: nodes.marker.create({
@@ -2679,6 +2679,19 @@ export function repairTransaction(
 		}
 
 		breakHolders.set(key, holder)
+
+		// A paragraph the edit rebuilt from the attributes of the one ending the section (ProseMirror fits an
+		// open end with its type and attributes, not its node marks) lost the break's section change: back to it.
+		const change = breakOwners.get(key)?.change
+
+		if (
+			change !== undefined &&
+			sectionChange.isInSet(state.doc.nodeAt(holder)?.marks ?? []) === undefined &&
+			!sectioned.some(
+				({ node }) => (sectionChange.isInSet(node.marks)?.attrs["value"] as { section?: unknown } | null)?.section === key
+			)
+		)
+			repair.addNodeMark(holder, change)
 
 		for (const pos of positions) {
 			if (pos === holder) continue

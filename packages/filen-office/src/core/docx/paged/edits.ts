@@ -31,7 +31,7 @@ import {
 import { StringTable } from "../model/columns"
 import { Ns, STRICT_WORDPROCESSINGML } from "../model/namespaces"
 import { DocxWriteError, StoryWriter, planNumbering, stylesWithDefinitions, type WriteEnvironment } from "../write/index"
-import { inCell, sectionWritten } from "../write/story"
+import { inCell, sectionWritten, untouchedEmpty } from "../write/story"
 import type { StoryTemplate } from "../stories/clone"
 import { EditedSections, finalSectionEnd, inheritedSections, sameSection, sectionEndOf, type SectionEnd } from "../stories/sections"
 import { sniffImage } from "../objects/images"
@@ -1361,7 +1361,13 @@ export class StoryEdits {
 
 		if (span === undefined) return undefined
 
-		if (span.whole || before.attrs["sectPr"] !== after.attrs["sectPr"]) {
+		// A story without blocks gaining its first or losing its last edit: whether its paragraph is laid out
+		// changes (blockRefs), however far from it the edit is.
+		if (
+			span.whole ||
+			before.attrs["sectPr"] !== after.attrs["sectPr"] ||
+			untouchedEmpty(this.story, before) !== untouchedEmpty(this.story, after)
+		) {
 			const replaced = this.entries.slice()
 
 			this.rebuildAll(after)
@@ -1872,8 +1878,8 @@ export class StoryEdits {
 		switch (node.type) {
 			case nodes.paragraph:
 			case nodes.table: {
-				// The empty paragraph of a story without blocks, untouched: no block, as the save writes it.
-				if (src < 0 && this.story.pristine.has(node)) return
+				// The empty paragraph of a story without blocks, untouched and alone: no block, as the save writes it.
+				if (src < 0 && this.doc.firstChild === node && untouchedEmpty(this.story, this.doc)) return
 
 				// A copy of a block from inside a table cell stays a copy: the table lays its source out.
 				const own = src >= 0 && !inCell(part, src) ? src : -1

@@ -5,6 +5,7 @@ import type { DocxEditContext } from "../edit/context"
 import type { StoryDoc } from "../edit/build"
 import { NO_SOURCE, docxSchema, type MarkerList } from "../edit/schema"
 import type { StoryPart } from "../model/index"
+import { finalSectionEdit } from "../stories/sections"
 import { closeTag, copyNode, Names, openTag, Out, spliceChildren } from "./markup"
 import { MARKER_ITEMS, writeListMarker } from "./markers"
 import { copySource, type NestedStories } from "./nested"
@@ -473,7 +474,7 @@ export class StoryWriting {
 		const final = finalSectionMarkup(this, doc)
 
 		// A story without blocks, its empty paragraph untouched: as its source.
-		if (final === undefined && untouchedEmpty(this.story, doc)) {
+		if (untouchedEmpty(this.story, doc)) {
 			this.copyWhole(out, container)
 
 			return { out, paragraphs: [], containers: [] }
@@ -1019,7 +1020,7 @@ function copyOwner(): Node {
 }
 
 // Whether `doc` is a story the source has no block in, holding only the builder's empty paragraph untouched (see
-// StoryDoc.pristine) and nothing an edit added around it.
+// StoryDoc.pristine) and nothing an edit added around it: the save copies its source, and layout lays out no block.
 export function untouchedEmpty(story: StoryDoc, doc: Node): boolean {
 	const only = doc.childCount === 1 ? doc.firstChild : null
 
@@ -1027,6 +1028,7 @@ export function untouchedEmpty(story: StoryDoc, doc: Node): boolean {
 		only !== null &&
 		src(only) === NO_SOURCE &&
 		story.pristine.has(only) &&
-		((doc.attrs["end"] as MarkerList | undefined)?.length ?? 0) === 0
+		((doc.attrs["end"] as MarkerList | undefined)?.length ?? 0) === 0 &&
+		finalSectionEdit(doc) === undefined
 	)
 }

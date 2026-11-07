@@ -841,7 +841,7 @@ export async function verifyDocxParts(input: VerifyPartsInput, slicing?: Slicing
 			if (removedParts.has(partKey(source))) fail("relationship", `${entry.name}: its part is removed`)
 
 			for (const relationship of (await original.relationships(source)).all) {
-				if (!relationship.external && relationship.partName !== undefined && !exists(relationship.partName))
+				if (!relationship.external && relationship.partName !== undefined && removedParts.has(partKey(relationship.partName)))
 					fail("relationship", `${entry.name}: ${relationship.id} points at a removed part`)
 			}
 		}
@@ -934,11 +934,22 @@ export async function verifyDocxParts(input: VerifyPartsInput, slicing?: Slicing
 
 			const source = name.replace(/_rels\/([^/]+)\.rels$/, "$1")
 			const relationships = parseRelationships(relsBytes, source)
+			// Read only when a target is missing: the source's own relationships of the part.
+			let sourceRelationships: Promise<Relationships> | undefined
 
 			for (const relationship of relationships.all) {
-				if (!relationship.external && relationship.partName !== undefined && !exists(relationship.partName)) {
-					fail("relationship", `${name}: ${relationship.id} points at a missing part`)
+				const target = relationship.partName
+
+				if (relationship.external || target === undefined || exists(target)) continue
+
+				// One the source already had, to a part the package never held, is kept as it was.
+				if (original.has(name) && !original.has(target)) {
+					sourceRelationships ??= original.relationships(source)
+
+					if ((await sourceRelationships).byId(relationship.id)?.partName === target) continue
 				}
+
+				fail("relationship", `${name}: ${relationship.id} points at a missing part`)
 			}
 
 			continue

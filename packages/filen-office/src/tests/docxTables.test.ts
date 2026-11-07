@@ -254,6 +254,28 @@ describe("table commands", () => {
 		expect(shape((await reopen(split.bytes)).table)).toEqual(["a1b1a2b2:1 :1 c1:1", ":1 :1 c2:1", "a3:1 b3:1 c3:1"])
 	})
 
+	it("keeps the markers between and after merged cells in their order, the merged cell ending in a paragraph", async () => {
+		// A bookmark starting between a1 and b1 and ending in b1, another after the last paragraph of b1 (Word
+		// writes both).
+		const source = tbl(
+			[2000, 2000],
+			[
+				`<w:tr>${tc("a1", W(2000))}<w:bookmarkStart w:id="1" w:name="Between"/><w:tc><w:tcPr>${W(2000)}</w:tcPr><w:p><w:r><w:t>b1</w:t></w:r><w:bookmarkEnd w:id="1"/></w:p><w:p><w:r><w:t>b1 more</w:t></w:r></w:p><w:bookmarkStart w:id="2" w:name="After"/><w:bookmarkEnd w:id="2"/></w:tc></w:tr>`,
+				tr([tc("a2", W(2000)), tc("b2", W(2000))])
+			]
+		)
+		const { bytes } = await edited(docx(source), session => select(session, "a1", "b1"), [{ type: "table.cells.merge" }])
+		const xml = await partXml(bytes)
+		const cell = xml.slice(xml.indexOf("<w:tc>"), xml.indexOf("</w:tc>") + 7)
+		const order = [...cell.matchAll(/<w:bookmark(Start|End) w:id="(\d)"|<w:t[^>]*>(\w[^<]*)<\/w:t>/g)].map(
+			match => match[3] ?? `${match[1]}${match[2]}`
+		)
+
+		expect(order).toEqual(["a1", "Start1", "b1", "End1", "b1 more", "Start2", "End2"])
+		expect(cell.endsWith("</w:p></w:tc>")).toBe(true)
+		expect(violations(parseIndependent(new TextEncoder().encode(xml)), {}).counts.get("tc-notEndingInP")).toBeUndefined()
+	})
+
 	it("splits a cell of one row into new rows, the other cells merged down", async () => {
 		const { bytes } = await edited(docx(GRID3), session => select(session, "b2"), [{ type: "table.cell.split", rows: 2, cols: 1 }])
 
