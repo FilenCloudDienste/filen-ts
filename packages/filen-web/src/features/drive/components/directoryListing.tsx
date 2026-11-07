@@ -232,8 +232,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 	const hiddenPref = hiddenPrefQuery.data ?? DEFAULT_HIDE_HIDDEN_ITEMS
 	const hiddenFilterApplies = hiddenFilterAppliesTo(variant)
 	const hideHidden = hiddenPref && hiddenFilterApplies
-	// At the drive root its own listing names the root, so the root `.filen` never shows while the account loads.
-	const hiddenDotFilenRoot = useHiddenDotFilenRoot(variant === "drive" && uuid === null ? listingQuery.data : undefined)
+	const hiddenDotFilenRoot = useHiddenDotFilenRoot()
 	const dotFilenRoot = dotFilenFilterAppliesTo(variant, uuid) ? hiddenDotFilenRoot : null
 
 	// sharedIn ONLY: hide items shared by a blocked user (fail-open — see directoryListing.logic.ts).
@@ -302,8 +301,8 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 				atDriveRoot: variant === "drive" && uuid === null,
 				variant,
 				isDotFilenSystemDir,
-				// At the drive root `dotFilenRoot` is null only while the setting shows `.filen` (or no directory is
-				// listed, when there is none to lead).
+				// At the drive root `dotFilenRoot` is null only while the setting shows `.filen` (or, for the one
+				// worker round trip before the session's root is read, on a page that was never booted authed).
 				leadsDirectories: variant === "drive" && uuid === null && dotFilenRoot === null ? isRootDotFilenItem : undefined,
 				...(search.active ? { search: { total: search.total, parentPaths: search.parentPaths } } : {})
 			}),

@@ -2,7 +2,7 @@ import type { Dir, DirMeta, SocketEvent } from "@filen/sdk-rs"
 import { type } from "arktype"
 import { dotFilenSubdirLookupNames, dotFilenSubdirRename, isDotFilenSubdirName, nameCollisionKey } from "@filen/shared"
 import { sdkApi } from "@/lib/sdk/client"
-import { accountQueryGet } from "@/queries/account"
+import { driveRootUuidGet } from "@/queries/driveRoot"
 import { runOp } from "@/lib/actions/outcome"
 import { registerSocketHandler } from "@/lib/sdk/socket"
 import { narrowItem } from "@/features/drive/lib/item"
@@ -434,7 +434,7 @@ function isDotFilenAtRoot(dir: Dir): boolean {
 		return false
 	}
 
-	const root = accountQueryGet()?.rootDirUuid
+	const root = driveRootUuidGet()
 
 	return root === undefined || dir.parent === root
 }
@@ -443,7 +443,7 @@ function isDotFilenAtRoot(dir: Dir): boolean {
 // up, under any parent but the drive root (only those lookups are concerned).
 function subdirNamesFor(dir: Dir): { name: string; memo: Memo }[] {
 	const underDotFilen = dotFilen.uuid !== null && dir.parent === dotFilen.uuid
-	const mayBeUnderDotFilen = dotFilen.uuid === null && dotFilen.pending > 0 && dir.parent !== accountQueryGet()?.rootDirUuid
+	const mayBeUnderDotFilen = dotFilen.uuid === null && dotFilen.pending > 0 && dir.parent !== driveRootUuidGet()
 
 	if (!underDotFilen && !mayBeUnderDotFilen) {
 		return []

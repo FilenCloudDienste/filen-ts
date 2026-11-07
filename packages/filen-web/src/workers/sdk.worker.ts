@@ -2915,6 +2915,10 @@ const api = {
 	hasClient(): boolean {
 		return client !== null
 	},
+	// The drive root's uuid as the live client holds it from its session (no request); null without a client.
+	driveRootUuid(): string | null {
+		return client?.root().uuid ?? null
+	},
 	// Whether a public link's file or directory belongs to the signed-in account: only the owner can look
 	// it up by uuid. False without a session, and on any failure (the caller only hides a button on it).
 	async ownsItem(kind: "file" | "directory", uuid: string): Promise<boolean> {

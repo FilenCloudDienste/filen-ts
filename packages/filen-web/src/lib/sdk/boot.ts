@@ -14,6 +14,7 @@ import { isOpfsUnavailableError } from "@/lib/storage/errors"
 import { useBootStore } from "@/stores/boot"
 import { queryClient } from "@/queries/client"
 import { restorePersistedQueries, purgePersistedQueries } from "@/queries/persist"
+import { warmDriveRootUuid } from "@/queries/driveRoot"
 import { log } from "@/lib/log"
 import { advanceBootSplash } from "@/lib/bootSplash"
 import {
@@ -99,6 +100,8 @@ async function resumeAndOpen(): Promise<boolean> {
 		// Warm the query cache from disk once per boot, before the first render that reads it
 		// (best-effort — never rejects; a failed restore just means an empty cache).
 		await restorePersistedQueries(queryClient)
+		// The drive root from the client just injected, so no listing renders before it (the root `.filen` filter).
+		await warmDriveRootUuid()
 	} else {
 		// An unauthed boot must not resurrect a leftover `<PERSIST_PREFIX>-*` row (e.g. a cross-tab
 		// logout/persister-write race) into the cache, where it would flash under whatever

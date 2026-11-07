@@ -50,15 +50,6 @@ function directoryParentOf(item: DriveItem): string | null {
 	return item.type === "directory" ? item.data.parent : null
 }
 
-// The drive root uuid as the root's own listing holds it: every directory there is a direct child of the root. Lets the
-// root `.filen` hide from the listing's first paint, before the account (and with it rootDirUuid) has loaded, as the
-// sidebar tree already does by name; otherwise it shows, takes a click or a selection, and vanishes under it.
-export function rootUuidOfRootListing(items: readonly DriveItem[] | undefined): string | null {
-	const directory = items?.find(item => item.type === "directory")
-
-	return directory?.type === "directory" ? directory.data.parent : null
-}
-
 // The shared filter's root `.filen` rule against the drive root `rootUuid`; undefined (nothing hidden) when the root
 // `.filen` is shown here or the root isn't known yet. `searchAtDriveRoot`: search results come from a search rooted
 // there. `isSystemDir` (lib/dotFilen.ts's isDotFilenSystemDir) names `.filen` and the subdirectories resolved so far,

@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from "react"
 import { driveItemName, isDotFilenName, isRootDotFilen, type SourceDisposalKind } from "@filen/shared"
 import type { DriveItem } from "@/features/drive/lib/item"
-import { accountQueryGet } from "@/queries/account"
+import { driveRootUuidGet } from "@/queries/driveRoot"
 import { knownDotFilenUuid } from "@/lib/dotFilen"
 
 // Trashing, deleting, moving or renaming the root `.filen` (Filen's own synced settings) is never blocked, only
@@ -25,7 +25,7 @@ export function isRootDotFilenItem(item: DriveItem): boolean {
 
 	return item.data.parent === "trash"
 		? isDotFilenName(name)
-		: isRootDotFilen({ name, parentUuid: item.data.parent, rootUuid: accountQueryGet()?.rootDirUuid ?? null })
+		: isRootDotFilen({ name, parentUuid: item.data.parent, rootUuid: driveRootUuidGet() ?? null })
 }
 
 export function includesRootDotFilen(items: readonly DriveItem[]): boolean {

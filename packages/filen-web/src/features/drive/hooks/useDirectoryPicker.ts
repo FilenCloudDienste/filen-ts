@@ -15,7 +15,7 @@ export function useDirectoryPicker(initialPath?: readonly string[]) {
 	const targetUuid = pathStack.at(-1) ?? null
 	const listingQuery = useDirectoryListingQuery("drive", targetUuid)
 	const namesQuery = useDirectoryNamesQuery(pathStack)
-	const dotFilenRoot = useHiddenDotFilenRoot(targetUuid === null ? listingQuery.data : undefined)
+	const dotFilenRoot = useHiddenDotFilenRoot()
 	// Only the root level can hold it.
 	const items = filterHiddenItems({
 		// The root `.filen`, where shown, leads the directories as in the listing.

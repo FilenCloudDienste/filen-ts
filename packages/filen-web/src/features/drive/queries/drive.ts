@@ -41,9 +41,8 @@ import {
 	type DriveViewMode
 } from "@/features/drive/lib/preferences"
 import { type DriveSortBy } from "@/features/drive/lib/sort"
-import { rootUuidOfRootListing } from "@/features/drive/lib/hiddenItems"
 import { getHeicUploadConvertPreference } from "@/features/drive/lib/heicUpload"
-import { useAccountQuery } from "@/queries/account"
+import { useDriveRootUuidQuery } from "@/queries/driveRoot"
 
 // Query key taxonomy per client.ts ([domain, entity, params?]): `uuid` is null for every flat
 // listing (recents/favorites/trash) and for My Drive's own root, so a fast nav between two
@@ -1489,13 +1488,13 @@ export function useShowDotFilenPreferenceQuery(): UseQueryResult<boolean> {
 }
 
 // The drive root uuid while the root `.filen` is hidden, for lib/hiddenItems.ts's rootDotFilenFilter; null while it
-// is shown, or while neither the account nor `rootListing` (the drive root's own listing, for a surface showing it)
-// names the root yet.
-export function useHiddenDotFilenRoot(rootListing?: readonly DriveItem[]): string | null {
+// is shown. Read from the session (queries/driveRoot.ts), never the account, so every view that can list it hides it
+// from its first paint rather than once getUserInfo has answered.
+export function useHiddenDotFilenRoot(): string | null {
 	const show = useShowDotFilenPreferenceQuery().data ?? DEFAULT_SHOW_DOT_FILEN
-	const rootUuid = useAccountQuery().data?.rootDirUuid ?? null
+	const rootUuid = useDriveRootUuidQuery().data ?? null
 
-	return show ? null : (rootUuid ?? rootUuidOfRootListing(rootListing))
+	return show ? null : rootUuid
 }
 
 // Public-link panel primitive: tags the worker's per-type status read with which type it is —
