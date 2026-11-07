@@ -1145,6 +1145,39 @@ describe("docx editing invariants: a joined paragraph's node marks", () => {
 		}
 	}
 
+	// The same deletion where the paragraphs are a table cell's or a block content control's.
+	const CONTAINERS = {
+		"a table cell": (inner: string) =>
+			`<w:tbl><w:tblPr><w:tblW w:w="0" w:type="auto"/></w:tblPr><w:tblGrid><w:gridCol w:w="4000"/></w:tblGrid><w:tr><w:tc><w:tcPr><w:tcW w:w="4000" w:type="dxa"/></w:tcPr>${inner}</w:tc></w:tr></w:tbl>`,
+		"a block content control": (inner: string) =>
+			`<w:sdt><w:sdtPr><w:id w:val="7"/></w:sdtPr><w:sdtContent>${inner}</w:sdtContent></w:sdt>`
+	}
+
+	for (const [container, wrap] of Object.entries(CONTAINERS)) {
+		for (const [name, mark] of Object.entries(NODE_MARKS)) {
+			it(`keeps ${name} of the second paragraph in ${container} through a deletion from the start of the first into it`, async () => {
+				const opened = await openBytes(buildDocx({ body: p("Before") + wrap(p("Alpha") + p("Bravo charlie")) + p("After") }))
+				const session = new DocxEditorSession(opened.context)
+				const doc = session.state.doc
+				const second = find(doc, "Bravo") - 1
+				const src = doc.nodeAt(second)?.attrs["src"]
+
+				session.dispatch(markInternal(session.state.tr.addNodeMark(second, mark)))
+				session.dispatch(
+					session.state.tr
+						.setSelection(TextSelection.create(session.state.doc, find(doc, "Alpha"), find(doc, "Bravo", 1)))
+						.deleteSelection()
+				)
+
+				const joined = session.state.doc.nodeAt(find(session.state.doc, "ravo charlie") - 1)
+
+				expect(session.state.doc.textContent).toBe("Beforeravo charlieAfter")
+				expect(joined?.attrs["src"]).toBe(src)
+				expect(joined?.marks.map(kept => kept.type.name)).toEqual([name])
+			})
+		}
+	}
+
 	it("saves the tracked property change of a paragraph a deletion from the paragraph before rebuilt", async () => {
 		const opened = await openBytes(buildDocx({ body: p("Alpha") + p("Bravo charlie") + p("End") }))
 		const session = new DocxEditorSession(opened.context)
