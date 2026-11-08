@@ -130,8 +130,8 @@ export interface CompressReportInput<TArchive, TError extends JobErrorLike> {
 	// Set only when a storage limit refused the archive up front.
 	neededBytes: bigint | undefined
 	dispositions: readonly DispositionInput<TError>[]
-	hashMismatches: readonly CompressHashMismatch[]
-	omittedHashMismatches: bigint
+	// The source whose data did not match its hash, which failed the job: it ends on the first.
+	hashMismatch: CompressHashMismatch | undefined
 	// Why the job ended early; undefined when it ran to the end.
 	error: TError | undefined
 }
@@ -420,7 +420,7 @@ export function settleCompressJob<TArchive, TError extends JobErrorLike, TJob ex
 		paused: false,
 		skipped: mapCapped(report.skipped, 0, toSkipped),
 		renamed: cappedList(report.renamed, 0),
-		hashMismatches: cappedList(report.hashMismatches, jobNumber(report.omittedHashMismatches)),
+		hashMismatches: cappedList(report.hashMismatch === undefined ? [] : [report.hashMismatch], 0),
 		dispositions: report.dispositions.map(toDisposition),
 		neededBytes: jobNumberOrNull(report.neededBytes),
 		archive

@@ -133,8 +133,7 @@ function compressReport(overrides: Partial<CompressReportDTO> = {}): CompressRep
 		counts: compressCounts({ filesDone: 2n, bytesRead: 200n, bytesWritten: 150n, archiveBytes: 150n }),
 		neededBytes: undefined,
 		dispositions: [],
-		hashMismatches: [],
-		omittedHashMismatches: 0n,
+		hashMismatch: undefined,
 		error: undefined,
 		...overrides
 	}

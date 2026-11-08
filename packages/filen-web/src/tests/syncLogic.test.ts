@@ -210,7 +210,8 @@ describe("sync copy", () => {
 			"remoteBrokenParent",
 			"localAlias",
 			"localNameCollision",
-			"remoteNameCollision"
+			"remoteNameCollision",
+			"remoteContentHashMismatch"
 		])
 	})
 

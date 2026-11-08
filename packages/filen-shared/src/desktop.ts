@@ -399,6 +399,7 @@ export type DesktopSyncUnsyncableReason =
 	| "localAlias"
 	| "localNameCollision"
 	| "remoteNameCollision"
+	| "remoteContentHashMismatch"
 
 export interface DesktopSyncUnsyncable {
 	relPath: string

@@ -222,8 +222,7 @@ describe("update and report inputs", () => {
 			},
 			neededBytes: undefined,
 			dispositions: [],
-			hashMismatches: [],
-			omittedHashMismatches: 0n,
+			hashMismatch: undefined,
 			error: undefined
 		})
 

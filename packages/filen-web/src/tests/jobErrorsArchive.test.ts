@@ -53,8 +53,7 @@ function compressReport(overrides: Partial<CompressReport> = {}): CompressReport
 		counts: compressCounts(),
 		neededBytes: undefined,
 		dispositions: [],
-		hashMismatches: [],
-		omittedHashMismatches: 0n,
+		hashMismatch: undefined,
 		error: undefined,
 		...overrides
 	}

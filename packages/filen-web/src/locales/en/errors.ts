@@ -38,6 +38,8 @@ export const errors = {
 	Server: "The server returned an error. Please try again later.",
 	/** Fires when a file's stored data is missing on the server, e.g. the file was deleted after the listing was loaded; worded without claiming the file is gone */
 	FileChunkNotFound: "This file's data could not be found on the server. It may have been deleted.",
+	/** Fires when a file's downloaded content does not match the checksum stored with it, which fails its download, copy, compress or extract; retrying does not help */
+	ContentHashMismatch: "This file's content doesn't match its stored checksum. It may be damaged.",
 	/** Fires when reading or writing local data failed (e.g. browser storage) */
 	IO: "Could not read or write a file on this device.",
 	/** Fires on an unexpected failure inside the app's file engine */

@@ -408,6 +408,8 @@ export const sync = {
 	/** Unsyncable — another cloud item in its directory has the same name ignoring case or Unicode form */
 	unsyncableRemoteNameCollision:
 		"Another item in its cloud directory has the same name when case and Unicode form are ignored. Rename one of them; until then neither syncs or moves.",
+	/** Unsyncable — the cloud file's content does not match its stored checksum, so it is not downloaded until it changes; the download's error follows */
+	unsyncableRemoteContentHashMismatch: "Its cloud content doesn't match its stored checksum, so it isn't downloaded until it changes.",
 	/** Paged lists — load the next page */
 	listLoadMore: "Load more",
 	/** Paged lists — load failure */

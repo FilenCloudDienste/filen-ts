@@ -41,6 +41,7 @@ export const errors = {
 	max_remote_storage_reached: "You've reached your storage limit. Free up space or upgrade your plan.",
 	/** SDK error: a file's stored data is missing on the server, e.g. the file was deleted after the list was loaded */
 	file_data_not_found: "This file's data could not be found on the server. It may have been deleted.",
+	content_hash_mismatch: "This file's content doesn't match its stored checksum. It may be damaged.",
 	/** SDK error: an item's encrypted metadata could not be decrypted */
 	metadata_was_not_decrypted: "Some data could not be decrypted.",
 	/** SDK error: a network request failed (covers both Reqwest and Response SDK kinds) */

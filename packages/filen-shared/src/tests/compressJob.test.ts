@@ -80,8 +80,7 @@ function report(overrides: Partial<Report> = {}): Report {
 		counts: counts({ filesDone: 4n, bytesRead: 400n, bytesWritten: 300n, archiveBytes: 300n }),
 		neededBytes: undefined,
 		dispositions: [],
-		hashMismatches: [],
-		omittedHashMismatches: 0n,
+		hashMismatch: undefined,
 		error: undefined,
 		...overrides
 	}
@@ -284,12 +283,12 @@ describe("settleCompressJob", () => {
 
 	it("is done with issues when the report lists some", () => {
 		const settled = settleCompressJob(job(), {
-			report: report({ hashMismatches: [{ sourceUuid: "h", path: "a/h" }], omittedHashMismatches: 4n }),
+			report: report({ hashMismatch: { sourceUuid: "h", path: "a/h" } }),
 			maxBytes: undefined
 		})
 
 		expect(settled.outcome).toEqual({ status: "doneWithIssues" })
-		expect(settled.hashMismatches.omitted).toBe(4)
+		expect(settled.hashMismatches).toEqual({ items: [{ sourceUuid: "h", path: "a/h" }], omitted: 0 })
 	})
 
 	it("keeps the archive and the originals when cancelled after the archive was registered", () => {

@@ -168,8 +168,7 @@ const COMPRESS_REPORT: CompressReport = {
 	counts: { filesDone: 1n, entriesSkipped: 0n, bytesSkipped: 0n, bytesRead: 1n, bytesWritten: 1n, archiveBytes: 1n, bytesVerified: 0n },
 	neededBytes: undefined,
 	dispositions: [],
-	hashMismatches: [],
-	omittedHashMismatches: 0n,
+	hashMismatch: undefined,
 	error: undefined
 }
 

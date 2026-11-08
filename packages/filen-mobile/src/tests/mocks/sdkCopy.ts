@@ -90,7 +90,8 @@ export enum ErrorKind {
 	ArchiveWrongPassword,
 	ArchiveSolidSkipExceeded,
 	LockLost,
-	TlsVerification
+	TlsVerification,
+	ContentHashMismatch
 }
 
 export enum NonRootNormalItem_Tags {

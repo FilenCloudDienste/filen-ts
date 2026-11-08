@@ -124,7 +124,8 @@ const UNSYNCABLE_REASONS: Record<UnsyncablePath["reason"]["tag"], DesktopSyncUns
 	RemoteBrokenParent: "remoteBrokenParent",
 	LocalAlias: "localAlias",
 	LocalNameCollision: "localNameCollision",
-	RemoteNameCollision: "remoteNameCollision"
+	RemoteNameCollision: "remoteNameCollision",
+	RemoteContentHashMismatch: "remoteContentHashMismatch"
 }
 
 function nodeKind(sdk: NativeSdk, node: PlannedNodeKind): DesktopSyncNodeKind {
@@ -163,6 +164,8 @@ function unsyncableDetail(reason: UnsyncablePath["reason"]): string | null {
 			return reason.inner.detail
 		case "LocalAlias":
 			return reason.inner.target
+		case "RemoteContentHashMismatch":
+			return reason.inner.lastError
 		default:
 			return null
 	}

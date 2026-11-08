@@ -89,6 +89,8 @@ const ERROR_KEY_BY_KIND: Partial<Record<ErrorKind, keyof typeof en>> = {
 	[ErrorKind.MaxStorageReached]: "max_remote_storage_reached",
 	// A 404 on a stored chunk: carries no server message, and its inner text is a raw request URL.
 	[ErrorKind.FileChunkNotFound]: "file_data_not_found",
+	// A download, copy or archive of a file whose content does not match its stored hash.
+	[ErrorKind.ContentHashMismatch]: "content_hash_mismatch",
 	[ErrorKind.MetadataWasNotDecrypted]: "metadata_was_not_decrypted",
 	[ErrorKind.Reqwest]: "network_error",
 	[ErrorKind.Response]: "network_error",

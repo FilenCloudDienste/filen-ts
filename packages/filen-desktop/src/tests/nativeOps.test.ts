@@ -321,9 +321,10 @@ describe("native ops", () => {
 					{
 						relPath: "CON.txt",
 						reason: { tag: "RemoteNameNotStorable", inner: { name: "CON.txt", detail: "a reserved device name" } }
-					}
+					},
+					{ relPath: "damaged.bin", reason: { tag: "RemoteContentHashMismatch", inner: { lastError: "hash mismatch" } } }
 				],
-				unsyncableTotal: 3n,
+				unsyncableTotal: 4n,
 				guard: { tag: "RestoreUnfinished", inner: { deletions: 2n } },
 				scanGaps: [
 					{ relPath: "locked", cause: { tag: "Unreadable", inner: { kind: "PermissionDenied" } } },
@@ -334,10 +335,11 @@ describe("native ops", () => {
 		)
 
 		await expect(host.ops.unsyncablePaths({ pairId: "1", offset: 1, limit: 10 })).resolves.toEqual({
-			total: 3,
+			total: 4,
 			entries: [
 				{ relPath: "b", reason: "remoteNameCollision", detail: null },
-				{ relPath: "CON.txt", reason: "remoteNameNotStorable", detail: "a reserved device name" }
+				{ relPath: "CON.txt", reason: "remoteNameNotStorable", detail: "a reserved device name" },
+				{ relPath: "damaged.bin", reason: "remoteContentHashMismatch", detail: "hash mismatch" }
 			]
 		})
 		await expect(host.ops.heldDeletions({ pairId: "1" })).resolves.toMatchObject({
