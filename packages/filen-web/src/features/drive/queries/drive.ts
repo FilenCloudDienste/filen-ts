@@ -784,6 +784,21 @@ const LISTING_PERSIST_IDLE_MS = 2_000
 const unpersistedListings = new Map<Query, unknown>()
 let listingPersistTimer: ReturnType<typeof setTimeout> | undefined
 let listingPersistFlushBound = false
+// Patched-listing writes issued and not yet answered by the kv store (its setItem never rejects).
+let listingWritesInFlight = 0
+
+function writeListing(query: Query): void {
+	listingWritesInFlight++
+	void persister.persistQuery(query).finally(() => {
+		listingWritesInFlight--
+	})
+}
+
+// Whether every patched listing is on disk: none waiting for its pause, none being written. A page left
+// before that comes back from disk as it was last read (pagehide's write can die with the page).
+export function patchedListingsWritten(): boolean {
+	return unpersistedListings.size === 0 && listingWritesInFlight === 0
+}
 
 function persistLater(query: Query): void {
 	unpersistedListings.set(query, query.state.data)
@@ -824,7 +839,7 @@ function persistIdleListings(): void {
 			unpersistedListings.delete(query)
 		} else if (query.state.fetchStatus !== "fetching") {
 			unpersistedListings.delete(query)
-			void persister.persistQuery(query)
+			writeListing(query)
 
 			wrote = true
 
@@ -857,7 +872,7 @@ function persistAllListings(): void {
 	for (const [query, rows] of pending) {
 		// A read under way too: the page may not live to see it land.
 		if (stillUnpersisted(query, rows)) {
-			void persister.persistQuery(query)
+			writeListing(query)
 		}
 	}
 }

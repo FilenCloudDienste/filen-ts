@@ -314,20 +314,47 @@ function stallProbe(updateToastText: string): void {
 	}, 1000)
 }
 
-// What each open page still had in flight inside the SDK worker. Bounded, because a wedged main thread
-// never answers an evaluate.
-async function pendingSdkCallLines(context: BrowserContext): Promise<string[]> {
-	const lines = await Promise.all(
+// What each open page still had in flight inside the SDK worker, and the state of every dialog it still holds:
+// whether one asked to close is still mounted, and which animation it waits on (the failure screenshot shows only
+// the top of an 8000px viewport, where no dialog is). Bounded, because a wedged main thread never answers an
+// evaluate.
+async function pageStateLines(context: BrowserContext): Promise<{ sdkCalls: string[]; overlays: string[] }> {
+	const pages = await Promise.all(
 		context.pages().map(async (page, index) => {
-			const calls = await Promise.race([
+			const tab = `tab${String(index)}`
+			const state = await Promise.race([
 				page
 					.evaluate(() => {
 						const hooks = (window as unknown as { __filenE2E?: Partial<Window["__filenE2E"]> }).__filenE2E
+						const overlays = [...document.querySelectorAll<HTMLElement>('[role="dialog"], [role="alertdialog"]')].map(
+							element => {
+								const labelledBy = element.getAttribute("aria-labelledby")
+								const name =
+									(labelledBy === null ? null : document.getElementById(labelledBy)?.textContent) ??
+									element.getAttribute("aria-label") ??
+									""
+								const flags = ["data-open", "data-closed", "data-starting-style", "data-ending-style"].filter(flag =>
+									element.hasAttribute(flag)
+								)
+								const animations = element.getAnimations().map(animation => {
+									const label =
+										animation instanceof CSSAnimation
+											? animation.animationName
+											: animation instanceof CSSTransition
+												? `transition ${animation.transitionProperty}`
+												: "animation"
 
-						// A page without the app (a blank start page) has none to report.
-						return hooks?.pendingSdkCalls?.() ?? []
+									return `${label} ${animation.playState}${animation.pending ? " pending" : ""} at ${String(Math.round(Number(animation.currentTime ?? 0)))}ms`
+								})
+
+								return `${String(element.getAttribute("role"))} "${name.slice(0, 60)}" ${flags.join(" ") || "(no state)"}${element.closest("[inert]") === null ? "" : " inert"}${element.checkVisibility() ? "" : " invisible"}; animations: ${animations.join(", ") || "none"}`
+							}
+						)
+
+						// A page without the app (a blank start page) has no sdk calls to report.
+						return { calls: hooks?.pendingSdkCalls?.() ?? [], overlays }
 					})
-					.catch(() => []),
+					.catch(() => ({ calls: [], overlays: [] })),
 				new Promise<null>(resolve => {
 					setTimeout(() => {
 						resolve(null)
@@ -335,15 +362,18 @@ async function pendingSdkCallLines(context: BrowserContext): Promise<string[]> {
 				})
 			])
 
-			if (calls === null) {
-				return [`tab${String(index)} sdk calls: (the page did not answer)`]
+			if (state === null) {
+				return { sdkCalls: [`${tab} sdk calls: (the page did not answer)`], overlays: [] }
 			}
 
-			return calls.map(({ method, ageMs }) => `tab${String(index)} sdk call ${method} pending ${String(ageMs)}ms`)
+			return {
+				sdkCalls: state.calls.map(({ method, ageMs }) => `${tab} sdk call ${method} pending ${String(ageMs)}ms`),
+				overlays: state.overlays.map(line => `${tab} ${line}`)
+			}
 		})
 	)
 
-	return lines.flat()
+	return { sdkCalls: pages.flatMap(page => page.sdkCalls), overlays: pages.flatMap(page => page.overlays) }
 }
 
 // Only the top of the page: the helpers stretch the viewport to 8000px for virtualization, and the full
@@ -384,6 +414,33 @@ interface Diagnostics {
 // budget. Closing the page fails the test now, with the reason on every call it interrupts.
 const FROZEN_PAGE_MS = 120_000
 const FROZEN_PAGE_CHECK_MS = 10_000
+// Before closing, the page must also leave an evaluate unanswered this long: a document without the init script
+// (a PDF the browser renders itself) never beats, yet answers.
+const FROZEN_PAGE_PROBE_MS = 10_000
+
+// Whether the page's main thread runs a trivial evaluate within `ms`. A rejection (a navigation tearing the
+// context down, a closing page) is an answer too: only silence means frozen.
+async function answersWithin(page: Page, ms: number): Promise<boolean> {
+	let timer: ReturnType<typeof setTimeout> | undefined
+
+	try {
+		return await Promise.race([
+			page
+				.evaluate(() => true)
+				.then(
+					() => true,
+					() => true
+				),
+			new Promise<boolean>(resolve => {
+				timer = setTimeout(() => {
+					resolve(false)
+				}, ms)
+			})
+		])
+	} finally {
+		clearTimeout(timer)
+	}
+}
 
 async function collectDiagnostics(context: BrowserContext): Promise<Diagnostics> {
 	const startedAt = Date.now()
@@ -402,6 +459,8 @@ async function collectDiagnostics(context: BrowserContext): Promise<Diagnostics>
 	// Last heartbeat per page (stallProbe). A page is only watched once it has sent one: the first page of a
 	// persistent context (WebKit's start page) predates the init script and never will.
 	const heartbeats = new Map<Page, number>()
+	// Pages the watchdog is probing (answersWithin), so a slow probe is not started twice.
+	const probing = new Set<Page>()
 	const watch = (page: Page) => {
 		const tab = `tab${String(context.pages().indexOf(page))}`
 
@@ -436,14 +495,13 @@ async function collectDiagnostics(context: BrowserContext): Promise<Diagnostics>
 			heartbeats.delete(page)
 			log(`${tab} closed`)
 		})
-		// A navigation nobody asked for (a drop the page did not cancel, a reload) restarts the app.
+		// A navigation nobody asked for (a drop the page did not cancel, a reload) restarts the app. The page stays
+		// watched: this also fires for the app's own history navigations, and a page dropped from the watch here
+		// and frozen before its next beat (a WebKit page that hung on reaching /trash) held its test for the whole
+		// test.slow budget. A new document that never beats is told apart by the probe instead.
 		page.on("framenavigated", frame => {
 			if (frame === page.mainFrame()) {
 				log(`${tab} navigated ${path(frame.url())}`)
-
-				// Unwatched until the new document beats: one without the init script (a PDF the browser renders
-				// itself) never will.
-				heartbeats.delete(page)
 			}
 		})
 		// Requests still unanswered when the test ends: a listing or a stream that never arrives shows up
@@ -469,16 +527,37 @@ async function collectDiagnostics(context: BrowserContext): Promise<Diagnostics>
 		const now = Date.now()
 
 		for (const [page, at] of heartbeats) {
-			if (now - at < FROZEN_PAGE_MS) {
+			if (now - at < FROZEN_PAGE_MS || probing.has(page)) {
 				continue
 			}
 
-			heartbeats.delete(page)
+			probing.add(page)
 
-			const reason = `the page's main thread last answered at +${String(at - startedAt)}ms (no heartbeat for ${String(now - at)}ms): closed by the frozen-page watchdog (e2e/fixtures.ts)`
+			void answersWithin(page, FROZEN_PAGE_PROBE_MS).then(answered => {
+				probing.delete(page)
 
-			log(`tab${String(context.pages().indexOf(page))} ${reason}`)
-			void page.close({ reason }).catch(() => undefined)
+				const tab = `tab${String(context.pages().indexOf(page))}`
+				const last = heartbeats.get(page)
+
+				// Closed meanwhile, or beating again.
+				if (last === undefined || Date.now() - last < FROZEN_PAGE_MS) {
+					return
+				}
+
+				if (answered) {
+					log(`${tab} sent no heartbeat for ${String(Date.now() - last)}ms but answered a probe: not frozen`)
+					heartbeats.set(page, Date.now())
+
+					return
+				}
+
+				heartbeats.delete(page)
+
+				const reason = `the page's main thread last answered at +${String(last - startedAt)}ms (no heartbeat for ${String(Date.now() - last)}ms, and no answer to a probe for ${String(FROZEN_PAGE_PROBE_MS)}ms): closed by the frozen-page watchdog (e2e/fixtures.ts)`
+
+				log(`${tab} ${reason}`)
+				void page.close({ reason }).catch(() => undefined)
+			})
 		}
 	}, FROZEN_PAGE_CHECK_MS)
 
@@ -515,7 +594,16 @@ async function collectDiagnostics(context: BrowserContext): Promise<Diagnostics>
 					`+${String(now - startedAt).padStart(6)}ms ago ${tab} still in flight ${request.method()} ${path(request.url())}`
 			)
 
-			return [...lines, ...(pending.length === 0 ? [] : ["-- in flight at the end --", ...pending])].join("\n")
+			// The watchdog's view at the end: a page silent for less than its threshold was not closed.
+			const beats = [...heartbeats].map(
+				([page, at]) => `tab${String(context.pages().indexOf(page))} last heartbeat ${String(now - at)}ms ago`
+			)
+
+			return [
+				...lines,
+				...(pending.length === 0 ? [] : ["-- in flight at the end --", ...pending]),
+				...(beats.length === 0 ? [] : ["-- heartbeats at the end --", ...beats])
+			].join("\n")
 		},
 		updateToastSeen: () => updateToastSeen,
 		stop: () => {
@@ -845,8 +933,12 @@ export const test = base.extend<{
 			const failed = testInfo.status !== testInfo.expectedStatus
 
 			if (failed || diagnostics.updateToastSeen()) {
-				const sdkCalls = await pendingSdkCallLines(context)
-				const body = [diagnostics.report(), ...(sdkCalls.length === 0 ? [] : ["-- sdk calls pending at the end --", ...sdkCalls])]
+				const { sdkCalls, overlays } = await pageStateLines(context)
+				const body = [
+					diagnostics.report(),
+					...(sdkCalls.length === 0 ? [] : ["-- sdk calls pending at the end --", ...sdkCalls]),
+					...(overlays.length === 0 ? [] : ["-- dialogs at the end --", ...overlays])
+				]
 					.join("\n")
 					.trim()
 

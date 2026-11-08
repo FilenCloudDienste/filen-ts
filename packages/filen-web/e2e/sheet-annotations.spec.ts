@@ -1,7 +1,7 @@
 import type { Locator, Page } from "@playwright/test"
 import { writeXlsx } from "hucre/xlsx"
 import { test, expect } from "./fixtures"
-import { withScratchDirectory, LAZY_VIEWER_TIMEOUT_MS, LIVE_WRITE_TIMEOUT_MS, uploadFiles } from "./helpers/listing"
+import { withScratchDirectory, LAZY_VIEWER_TIMEOUT_MS, LIVE_WRITE_TIMEOUT_MS, uploadFiles, reloadAfterWrite } from "./helpers/listing"
 import { resolveModKey } from "./helpers/modkey"
 import { preview } from "@/locales/en/preview"
 
@@ -209,7 +209,7 @@ test("a note, a comment thread and links: added, shown, followed, saved and read
 		await saveAndClose(page, dialog, mod)
 
 		// What the drive now holds, read fresh.
-		await page.reload()
+		await reloadAfterWrite(page)
 		await open(dialog, row)
 
 		// The note shows on hover.

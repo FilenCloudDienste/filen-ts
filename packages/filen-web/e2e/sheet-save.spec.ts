@@ -9,7 +9,8 @@ import {
 	withScratchDirectory,
 	LAZY_VIEWER_TIMEOUT_MS,
 	LIVE_WRITE_TIMEOUT_MS,
-	uploadFiles
+	uploadFiles,
+	reloadAfterWrite
 } from "./helpers/listing"
 import { resolveModKey } from "./helpers/modkey"
 import { trackCspViolations } from "./helpers/csp"
@@ -135,7 +136,7 @@ test("a workbook saves itself after an idle pause, and on Cmd/Ctrl+S from the gr
 		await goTo(dialog, "A1")
 		await close(page)
 
-		await page.reload()
+		await reloadAfterWrite(page)
 		dialog = await open(page, listbox, name)
 		await expectCell(dialog, "B2", "1250", LAZY_VIEWER_TIMEOUT_MS)
 		await expectCell(dialog, "B3", "333")
@@ -355,7 +356,7 @@ test("each save is what the file opens on after a reload, never announced as mad
 			await page.keyboard.press(`${mod}+S`)
 			await expect(saveButton).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
 			await close(page)
-			await page.reload()
+			await reloadAfterWrite(page)
 			previous = value
 		}
 

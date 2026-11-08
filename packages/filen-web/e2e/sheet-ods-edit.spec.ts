@@ -8,7 +8,8 @@ import {
 	withScratchDirectory,
 	LAZY_VIEWER_TIMEOUT_MS,
 	LIVE_WRITE_TIMEOUT_MS,
-	uploadFiles
+	uploadFiles,
+	reloadAfterWrite
 } from "./helpers/listing"
 import { resolveModKey } from "./helpers/modkey"
 import { trackCspViolations } from "./helpers/csp"
@@ -134,7 +135,7 @@ test("an .ods saves itself after an idle pause and on Cmd/Ctrl+S, staying an Ope
 		await goTo(dialog, "A1")
 		await close(page)
 
-		await page.reload()
+		await reloadAfterWrite(page)
 		dialog = await open(page, listbox, name)
 		await expectCell(dialog, "A2", "Inserted")
 		await expectCell(dialog, "B3", "1250")

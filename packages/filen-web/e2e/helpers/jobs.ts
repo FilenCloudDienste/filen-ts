@@ -44,6 +44,13 @@ export async function expectJobCard(page: Page, title: string | RegExp, timeout:
 // The card whose title is exactly `title`: titles of different jobs can be prefixes of one another
 // (".tar" and ".tar.gz"). Hovered unless the preview overlay is up (its markOthers leaves the card
 // reachable by text only).
+//
+// A settled title (`Compressed …`) shows only once the job is done, when its countdown starts at once. So
+// while it is not up yet, the pointer rests on the job's running card, and the settled card replacing it
+// stays put until read: a hover started only after it settled lost the card on a starved runner, where the
+// hover's own stability wait outlasted the 4 s countdown and its exit animation moved it from under the
+// pointer ("<html> intercepts pointer events", then detached). The specs clear the cards between jobs, so the
+// running card is the only one up.
 export async function expectExactJobCard(
 	page: Page,
 	title: string,
@@ -53,10 +60,19 @@ export async function expectExactJobCard(
 		has: page.getByText(title, { exact: true })
 	})
 
-	await expect(card).toBeVisible({ timeout })
-
 	if (hover) {
-		await card.hover()
+		const running = jobCard(page, /\S/).first()
+
+		// One retried step, as in expectJobCard: a settled card's element is replaced as its countdown starts.
+		await expect(async () => {
+			if (!(await card.isVisible())) {
+				await running.hover({ timeout: 2_000 }).catch(() => undefined)
+			}
+
+			await card.hover({ timeout: 2_000 })
+		}).toPass({ timeout })
+	} else {
+		await expect(card).toBeVisible({ timeout })
 	}
 
 	return card

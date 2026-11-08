@@ -4,7 +4,7 @@ import type { Locator, Page } from "@playwright/test"
 import { writeXlsx } from "hucre/xlsx"
 import { test, expect } from "./fixtures"
 import { boxOf } from "./helpers/geometry"
-import { withScratchDirectory, LAZY_VIEWER_TIMEOUT_MS, LIVE_WRITE_TIMEOUT_MS, uploadFiles } from "./helpers/listing"
+import { withScratchDirectory, LAZY_VIEWER_TIMEOUT_MS, LIVE_WRITE_TIMEOUT_MS, uploadFiles, reloadAfterWrite } from "./helpers/listing"
 import { resolveModKey } from "./helpers/modkey"
 import { trackCspViolations } from "./helpers/csp"
 import { storedPassword, trackPasswordCanary } from "./helpers/passwordCanary"
@@ -218,7 +218,7 @@ test("csv and xlsx open on the office engine, edit, format, insert a row, add an
 		await expect(dialog).toHaveCount(0)
 
 		// What the drive now holds, read fresh.
-		await page.reload()
+		await reloadAfterWrite(page)
 		await expect(xlsxRow).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
 		await xlsxRow.dblclick()
 		await expectCell(dialog, "B5", "1700", LAZY_VIEWER_TIMEOUT_MS)
@@ -278,7 +278,7 @@ test("a dragged column width: an xlsx keeps it in the file once saved, a csv bes
 		await page.keyboard.press("Escape")
 		await expect(dialog).toHaveCount(0)
 
-		await page.reload()
+		await reloadAfterWrite(page)
 		await expect(xlsxRow).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
 		await xlsxRow.dblclick()
 		await expectCell(dialog, "A1", "Item", LAZY_VIEWER_TIMEOUT_MS)
@@ -392,7 +392,7 @@ test("a password-protected xlsx is asked its password on the office engine, save
 		await expect(dialog).toHaveCount(0)
 
 		// What the drive now holds is still protected: asked again, it holds the edit.
-		await page.reload()
+		await reloadAfterWrite(page)
 		await expect(listbox.getByRole("option", { name: encrypted })).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
 		await listbox.getByRole("option", { name: encrypted }).dblclick()
 		await expect(prompt).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })

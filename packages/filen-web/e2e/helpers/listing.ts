@@ -1,5 +1,5 @@
 import type { Locator, Page } from "@playwright/test"
-import { expect } from "../fixtures"
+import { expect, settleLeases } from "../fixtures"
 import { waitForE2eHooks } from "./e2eHooks"
 import { OPEN_OVERLAY_SELECTOR } from "@/lib/keymap/dialogGuard"
 
@@ -211,6 +211,24 @@ export async function reloadToShell(page: Page): Promise<void> {
 	await page.reload()
 	await awaitShell(page)
 	await waitForE2eHooks(page)
+}
+
+// A listing patched by a write is written to disk once its patches pause (features/drive/queries/drive.ts): two
+// seconds, then one kv round trip.
+const LISTING_WRITE_TIMEOUT_MS = 15_000
+
+// A reload right after a write, once the write has let go of the page: the SDK releases its lease
+// fire-and-forget, and the listing the write patched reaches disk on the app's own schedule. Left before
+// either, the page orphans the lease (the next write anywhere waits ~70s for it to age out), or restores the
+// listing as last read, naming the version the write replaced, which the first read after the boot then
+// swaps out from under a click (a double click split across the two rows opens nothing; one landing on the
+// old row opens the replaced version and loses it again).
+export async function reloadAfterWrite(page: Page): Promise<void> {
+	await settleLeases(page)
+	await expect
+		.poll(() => page.evaluate(() => window.__filenE2E.patchedListingsWritten()), { timeout: LISTING_WRITE_TIMEOUT_MS })
+		.toBe(true)
+	await page.reload()
 }
 
 // The unauthenticated shell's heading, and the boot that lands on it.

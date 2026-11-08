@@ -1,7 +1,7 @@
 import type { Locator, Page } from "@playwright/test"
 import { writeXlsx } from "hucre/xlsx"
 import { test, expect } from "./fixtures"
-import { withScratchDirectory, LAZY_VIEWER_TIMEOUT_MS, LIVE_WRITE_TIMEOUT_MS, uploadFiles } from "./helpers/listing"
+import { withScratchDirectory, LAZY_VIEWER_TIMEOUT_MS, LIVE_WRITE_TIMEOUT_MS, uploadFiles, reloadAfterWrite } from "./helpers/listing"
 import { resolveModKey } from "./helpers/modkey"
 import { ribbonButton, ribbonTab } from "./helpers/ribbon"
 import { preview } from "@/locales/en/preview"
@@ -157,7 +157,7 @@ test("data sorted from the toolbar and the sort dialog, filtered from a header's
 		await expectCell(dialog, "B2", "3")
 		await saveAndClose(page, dialog, mod)
 
-		await page.reload()
+		await reloadAfterWrite(page)
 
 		// The filtered rows stay hidden: the menu shows "pear" unchecked; Ctrl+Shift+L then turns the filter off.
 		await open(dialog, rows.filter)

@@ -11,7 +11,7 @@ import { testUuid } from "@/tests/support/uuid"
 // its patches pause, one listing per task, at once when the page is hidden or left, and never once a sign-out
 // started.
 
-const hooks = vi.hoisted(() => ({ persisted: [] as Query[], signOut: false }))
+const hooks = vi.hoisted(() => ({ persisted: [] as Query[], signOut: false, write: Promise.resolve() }))
 
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: {} }))
 vi.mock("@/queries/client", async () => ({ queryClient: (await import("@/tests/testQueryClient")).createTestQueryClient() }))
@@ -20,14 +20,14 @@ vi.mock("@/queries/persist", () => ({
 		persistQuery: (query: Query) => {
 			hooks.persisted.push(query)
 
-			return Promise.resolve()
+			return hooks.write
 		}
 	}
 }))
 vi.mock("@/lib/signOutPending", () => ({ readSignOutPending: () => hooks.signOut }))
 
 const { queryClient } = await import("@/queries/client")
-const { driveListingQueryKey, driveListingQueryUpdate } = await import("@/features/drive/queries/drive")
+const { driveListingQueryKey, driveListingQueryUpdate, patchedListingsWritten } = await import("@/features/drive/queries/drive")
 const { runPreviewSave } = await import("@/features/drive/lib/previewSave.logic")
 const { narrowItem } = await import("@/features/drive/lib/item")
 
@@ -78,6 +78,7 @@ beforeEach(() => {
 	vi.useFakeTimers()
 	hooks.persisted = []
 	hooks.signOut = false
+	hooks.write = Promise.resolve()
 	queryClient.clear()
 	queryClient.setQueryData(KEY, [file("v0"), file("other", "notes.txt")])
 })
@@ -193,5 +194,36 @@ describe("a drive listing patched after a save", () => {
 		setVisibility("hidden")
 		expect(hooks.persisted).toEqual([])
 		setVisibility("visible")
+	})
+
+	it("is reported written only once its write is answered, so a reload restores it", async () => {
+		const write = Promise.withResolvers<undefined>()
+
+		hooks.write = write.promise
+		expect(patchedListingsWritten()).toBe(true)
+
+		await save(file("v0"), file("v1"))
+		expect(patchedListingsWritten()).toBe(false)
+
+		await vi.advanceTimersByTimeAsync(3_000)
+		expect(hooks.persisted).toHaveLength(1)
+		expect(patchedListingsWritten()).toBe(false)
+
+		write.resolve(undefined)
+		await vi.advanceTimersByTimeAsync(0)
+		expect(patchedListingsWritten()).toBe(true)
+
+		// The page left before the pause: the write it starts counts too.
+		const left = Promise.withResolvers<undefined>()
+
+		hooks.write = left.promise
+		await save(file("v1"), file("v2"))
+		window.dispatchEvent(new Event("pagehide"))
+		expect(hooks.persisted).toHaveLength(2)
+		expect(patchedListingsWritten()).toBe(false)
+
+		left.resolve(undefined)
+		await vi.advanceTimersByTimeAsync(0)
+		expect(patchedListingsWritten()).toBe(true)
 	})
 })

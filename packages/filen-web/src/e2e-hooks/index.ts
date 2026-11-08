@@ -17,6 +17,7 @@ import { CATALOGUE } from "@/features/drive/components/compressDialog.logic"
 import { archiveFormatInfos } from "@/features/drive/lib/archiveHelpers"
 import { withLevel } from "@/features/drive/lib/archiveFormats"
 import { pendingSdkCalls } from "@/e2e-hooks/sdkCalls"
+import { patchedListingsWritten } from "@/features/drive/queries/drive"
 import { clearPhotosRoots } from "@/e2e-hooks/photosLibrary"
 import {
 	pruneDeadVideoRoots,
@@ -195,6 +196,9 @@ interface E2eHooks {
 	// The SDK worker calls in flight, oldest first, for a failed test's diagnostics. Synchronous and
 	// main-thread only, so it answers even while the worker is stuck.
 	pendingSdkCalls: () => { method: string; ageMs: number }[]
+	// Whether every drive listing a write patched is on disk, so a reload restores it as the write left it
+	// rather than as last read (features/drive/queries/drive.ts).
+	patchedListingsWritten: () => boolean
 	// `.filen/videos` as found (each file's text and version uuids), and putting it back that way afterwards — the
 	// Videos specs change the account's synced library and watch state. Restore from a freshly loaded page that has
 	// not opened Videos, or the app saves its own copy back over it.
@@ -523,6 +527,7 @@ export function installE2eHooks(): void {
 			)
 		}),
 		pendingSdkCalls,
+		patchedListingsWritten,
 		videosSyncSnapshot: ready(videosSyncSnapshot),
 		videosSyncRestore: ready(videosSyncRestore),
 		videosSyncFileText: ready(videosSyncFileText),

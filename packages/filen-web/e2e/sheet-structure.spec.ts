@@ -1,7 +1,7 @@
 import type { Locator, Page } from "@playwright/test"
 import { writeXlsx } from "hucre/xlsx"
 import { test, expect } from "./fixtures"
-import { withScratchDirectory, LAZY_VIEWER_TIMEOUT_MS, LIVE_WRITE_TIMEOUT_MS, uploadFiles } from "./helpers/listing"
+import { withScratchDirectory, LAZY_VIEWER_TIMEOUT_MS, LIVE_WRITE_TIMEOUT_MS, uploadFiles, reloadAfterWrite } from "./helpers/listing"
 import { resolveModKey } from "./helpers/modkey"
 import { ribbonButton, ribbonTab } from "./helpers/ribbon"
 import { preview } from "@/locales/en/preview"
@@ -201,7 +201,7 @@ test("rows and columns inserted, deleted, hidden and shown, the top row frozen, 
 		await saveAndClose(page, dialog, mod)
 
 		// What the drive now holds, read fresh.
-		await page.reload()
+		await reloadAfterWrite(page)
 
 		await open(dialog, rows.insert)
 		await expectCell(dialog, "B3", "Rent")
@@ -311,7 +311,7 @@ test("sheets added, renamed, duplicated, moved and deleted from the tabs, and a 
 		await saveAndClose(page, dialog, mod)
 
 		// What the drive now holds, read fresh.
-		await page.reload()
+		await reloadAfterWrite(page)
 
 		await open(dialog, rows.tabs)
 		await expect(tabNames(dialog)).toHaveText(["Budget", "Summary (2)", "Summary"])
