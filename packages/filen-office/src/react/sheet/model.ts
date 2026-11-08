@@ -233,6 +233,9 @@ export class SheetGridModel {
 	private readonly layouts = new Map<SheetId, SheetLayout>()
 	private readonly layoutRequests = new Set<SheetId>()
 	private readonly selections = new Map<SheetId, GridSelection>()
+	// Counts the user's selection moves (select, setSheet): a command's answer takes the selection it carries only
+	// when no move came after the command was sent, so a paste landing late never undoes where the user went.
+	private moves = 0
 	private readonly reach = new Map<SheetId, GridPoint>()
 	private readonly pending = new Map<string, string>()
 	// The commit each pending text is from: a later commit of the same cell owns it, and an earlier one's answer
@@ -670,6 +673,7 @@ export class SheetGridModel {
 	setSheet(sheet: SheetId): void {
 		if (sheet === this.snapshot.sheet || !this.snapshot.sheets.some(entry => entry.id === sheet)) return
 
+		this.moves++
 		this.commitOrDrop()
 
 		const layout = this.layouts.get(sheet) ?? null
@@ -750,6 +754,7 @@ export class SheetGridModel {
 	select(selection: GridSelection): void {
 		const sheet = this.snapshot.sheet
 
+		this.moves++
 		this.selections.set(sheet, selection)
 
 		const reach = this.reach.get(sheet)
@@ -1033,11 +1038,12 @@ export class SheetGridModel {
 
 	// Runs a command and applies its change. `report`: a refusal goes to onRefusal.
 	async command(command: SheetCommand, report = true): Promise<SheetCommandResult> {
+		const moves = this.moves
 		const result = await this.session.command(command)
 		// Changes before this answer arrived before it: a newer version is this command's step.
 		const before = this.snapshot.state.version
 
-		this.settle(result, report ? command : null)
+		this.settle(result, report ? command : null, moves)
 
 		// A step the session can undo: the size layer's shift is kept beside it.
 		if (result.ok && result.change.state.version > before) {
@@ -1083,9 +1089,10 @@ export class SheetGridModel {
 	}
 
 	async undo(): Promise<SheetCommandResult> {
+		const moves = this.moves
 		const result = await this.session.undo()
 
-		this.settle(result, "undo")
+		this.settle(result, "undo", moves)
 
 		if (result.ok) {
 			const step = this.shifts.undo.pop() ?? null
@@ -1098,9 +1105,10 @@ export class SheetGridModel {
 	}
 
 	async redo(): Promise<SheetCommandResult> {
+		const moves = this.moves
 		const result = await this.session.redo()
 
-		this.settle(result, "redo")
+		this.settle(result, "redo", moves)
 
 		if (result.ok) {
 			const step = this.shifts.redo.pop() ?? null
@@ -1118,9 +1126,10 @@ export class SheetGridModel {
 		if (step !== null && layer !== null && this.keepsSizes()) layer.follow(step.sheet, { ...step.shift, revert })
 	}
 
-	private settle(result: SheetCommandResult, reported: SheetCommand | "undo" | "redo" | null): void {
+	// `moves`: the selection moves counted when the command was sent.
+	private settle(result: SheetCommandResult, reported: SheetCommand | "undo" | "redo" | null, moves: number): void {
 		if (result.ok) {
-			this.apply(result.change)
+			this.apply(result.change, moves)
 
 			return
 		}
@@ -1157,8 +1166,9 @@ export class SheetGridModel {
 	}
 
 	// A change, as a command answer or an event carries it: patches folded into held tiles (or kept for tiles still
-	// on their way), invalidated tiles dropped, layouts, the sheet list, styles and the selection taken.
-	apply(change: SheetChange): void {
+	// on their way), invalidated tiles dropped, layouts, the sheet list, styles and the selection taken. `moves`: for
+	// a command's answer, the selection moves counted when it was sent; its selection is dropped once the user moved.
+	apply(change: SheetChange, moves = this.moves): void {
 		if (this.disposed) return
 
 		this.fitter.changed(change)
@@ -1236,7 +1246,7 @@ export class SheetGridModel {
 
 		if (change.state.version >= this.snapshot.state.version) update.state = change.state
 
-		const selection = change.selection
+		const selection = moves === this.moves ? change.selection : undefined
 
 		if (selection !== undefined) {
 			const layout = this.layouts.get(selection.sheet)

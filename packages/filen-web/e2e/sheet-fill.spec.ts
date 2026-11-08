@@ -165,7 +165,7 @@ test("the fill handle by mouse and touch, the Series dialog, and HTML pasted fro
 			Object.defineProperty(event, "clipboardData", { value: { getData: (type: string) => data[type] ?? "" } })
 			grid.dispatchEvent(event)
 		}, PASTED_HTML)
-		// The engine's answer selects the pasted range; a name box move before it lands is overwritten by it.
+		// The engine's answer selects the pasted range; waited for, as a name box move before it lands keeps the move.
 		await expect(nameBox(dialog)).toHaveValue("F2:H2")
 		await expectCell(dialog, "F2", "007")
 		await expectCell(dialog, "G2", "12.5%")
