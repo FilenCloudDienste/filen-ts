@@ -173,3 +173,7 @@ patchedDependencies:
   # Android: a <marker orient> other than "auto" (auto-start-reverse, 45deg) threw in onDraw and crashed
   # the app; parsed per the SVG grammar. Drop once upstream fixes it.
   react-native-svg@15.16.0: patches/react-native-svg@15.16.0.patch
+  # The Toaster put focus back on the element focused before a toast was clicked even after focus had moved
+  # on, when its list unmounted or lost focus to another element: it closed a menu opening at that moment.
+  # Restores only when focus is lost. Drop once upstream does the same.
+  sonner@2.0.8: patches/sonner@2.0.8.patch

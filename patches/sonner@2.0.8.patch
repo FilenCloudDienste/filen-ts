@@ -1,0 +1,78 @@
+diff --git a/dist/index.js b/dist/index.js
+index 394dbc2272f43b84642b0f9d5cc7eb1eacb0ffb3..f20f01f40b47ee9c69545e1b236d28cebfa39c56 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -1132,13 +1132,15 @@ const Toaster = /*#__PURE__*/ React__default.default.forwardRef(function Toaster
+     React__default.default.useEffect(()=>{
+         if (listRef.current) {
+             return ()=>{
+-                if (lastFocusedElementRef.current) {
++                // Only when focus went down with the list: focus that already moved on stays put.
++                const active = document.activeElement;
++                if (lastFocusedElementRef.current && (active === null || active === document.body)) {
+                     lastFocusedElementRef.current.focus({
+                         preventScroll: true
+                     });
+-                    lastFocusedElementRef.current = null;
+-                    isFocusWithinRef.current = false;
+                 }
++                lastFocusedElementRef.current = null;
++                isFocusWithinRef.current = false;
+             };
+         }
+     }, [
+@@ -1178,12 +1180,13 @@ const Toaster = /*#__PURE__*/ React__default.default.forwardRef(function Toaster
+             onBlur: (event)=>{
+                 if (isFocusWithinRef.current && !event.currentTarget.contains(event.relatedTarget)) {
+                     isFocusWithinRef.current = false;
+-                    if (lastFocusedElementRef.current) {
++                    // Only when focus is going nowhere: focus moved to another element stays there.
++                    if (lastFocusedElementRef.current && event.relatedTarget == null) {
+                         lastFocusedElementRef.current.focus({
+                             preventScroll: true
+                         });
+-                        lastFocusedElementRef.current = null;
+                     }
++                    lastFocusedElementRef.current = null;
+                 }
+             },
+             onFocus: (event)=>{
+diff --git a/dist/index.mjs b/dist/index.mjs
+index c124f821a68f7070647a5a04441d0caa53689662..285916fddb0942d4fffc539b99b41366507e2c37 100644
+--- a/dist/index.mjs
++++ b/dist/index.mjs
+@@ -1125,13 +1125,15 @@ const Toaster = /*#__PURE__*/ React.forwardRef(function Toaster(props, ref) {
+     React.useEffect(()=>{
+         if (listRef.current) {
+             return ()=>{
+-                if (lastFocusedElementRef.current) {
++                // Only when focus went down with the list: focus that already moved on stays put.
++                const active = document.activeElement;
++                if (lastFocusedElementRef.current && (active === null || active === document.body)) {
+                     lastFocusedElementRef.current.focus({
+                         preventScroll: true
+                     });
+-                    lastFocusedElementRef.current = null;
+-                    isFocusWithinRef.current = false;
+                 }
++                lastFocusedElementRef.current = null;
++                isFocusWithinRef.current = false;
+             };
+         }
+     }, [
+@@ -1171,12 +1173,13 @@ const Toaster = /*#__PURE__*/ React.forwardRef(function Toaster(props, ref) {
+             onBlur: (event)=>{
+                 if (isFocusWithinRef.current && !event.currentTarget.contains(event.relatedTarget)) {
+                     isFocusWithinRef.current = false;
+-                    if (lastFocusedElementRef.current) {
++                    // Only when focus is going nowhere: focus moved to another element stays there.
++                    if (lastFocusedElementRef.current && event.relatedTarget == null) {
+                         lastFocusedElementRef.current.focus({
+                             preventScroll: true
+                         });
+-                        lastFocusedElementRef.current = null;
+                     }
++                    lastFocusedElementRef.current = null;
+                 }
+             },
+             onFocus: (event)=>{
