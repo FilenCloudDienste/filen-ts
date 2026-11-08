@@ -8,6 +8,7 @@ import { Field, FieldError, FieldLabel } from "@/components/ui/field"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { log } from "@/lib/log"
+import { usePasswordDraft, type PasswordDraft } from "@/features/preview/lib/passwordDraft"
 
 // What a password check found: the caller closes the prompt on "accepted"; "aborted" is the user's cancel.
 export type PasswordVerdict = "accepted" | "wrong" | "aborted"
@@ -27,12 +28,15 @@ export interface DocxPasswordPromptProps {
 	onOpenChange: (open: boolean) => void
 	// Where focus goes when the prompt closes (default: where it was before it opened).
 	finalFocus?: RefObject<HTMLElement | null>
+	// What was typed, kept beyond this prompt: it starts from it and keeps it up to date.
+	draft?: PasswordDraft | undefined
 }
 
 // A document's password, asked in the preview (nested in the overlay's dialog, as the archive and PDF prompts
 // are): masked with a show/hide toggle, never offered to or saved by a password manager. While the check runs
 // the field is locked and Cancel (or Escape) stops it; a wrong password clears the field for another try. The
-// typed password lives only in this component's state and is dropped after each check.
+// typed password lives only in this component's state (and the `draft` given, see PasswordDraft) and is
+// dropped after each check.
 export function DocxPasswordPrompt({
 	open,
 	title,
@@ -43,14 +47,15 @@ export function DocxPasswordPrompt({
 	progressLabel,
 	verify,
 	onOpenChange,
-	finalFocus
+	finalFocus,
+	draft
 }: DocxPasswordPromptProps) {
 	const { t } = useTranslation("common")
 	const id = useId()
 	const fieldId = `${id}-password`
 	const errorId = `${id}-error`
-	const [password, setPassword] = useState("")
-	const [revealed, setRevealed] = useState(false)
+	const [password, setPassword] = useState(() => draft?.password ?? "")
+	const [revealed, setRevealed] = useState(() => draft?.revealed ?? false)
 	const [wrong, setWrong] = useState(false)
 	const [verifying, setVerifying] = useState<AbortController | null>(null)
 	const [wasOpen, setWasOpen] = useState(open)
@@ -120,6 +125,7 @@ export function DocxPasswordPrompt({
 			setPassword("")
 			setWrong(false)
 		})
+		draft?.keep("", revealed)
 		cancelRef.current?.focus()
 
 		verify(typed, controller.signal).then(
@@ -172,9 +178,13 @@ export function DocxPasswordPrompt({
 							revealed={revealed}
 							aria-invalid={wrong ? true : undefined}
 							aria-describedby={wrong ? errorId : undefined}
-							onRevealedChange={setRevealed}
+							onRevealedChange={next => {
+								setRevealed(next)
+								draft?.keep(password, next)
+							}}
 							onChange={event => {
 								setPassword(event.target.value)
+								draft?.keep(event.target.value, revealed)
 							}}
 						/>
 						{wrong ? <FieldError id={errorId}>{wrongMessage}</FieldError> : null}
@@ -228,9 +238,11 @@ export interface DocxPasswordGateProps extends Omit<DocxPasswordPromptProps, "op
 }
 
 // Nothing can be shown without the password: a lock in the document's place, the prompt over it. Dismissing the
-// prompt leaves its button to bring it back, which takes focus.
+// prompt leaves its button to bring it back, which takes focus. In a preview overlay, a newer version of the file
+// shown meanwhile asks again as this one was left: dismissed, or with what was typed (PasswordDraft).
 export function DocxPasswordGate({ message, enterLabel, ...prompt }: DocxPasswordGateProps) {
-	const [dismissed, setDismissed] = useState(false)
+	const draft = usePasswordDraft()
+	const [dismissed, setDismissed] = useState(() => draft?.dismissed ?? false)
 	const enterRef = useRef<HTMLButtonElement | null>(null)
 
 	return (
@@ -245,6 +257,7 @@ export function DocxPasswordGate({ message, enterLabel, ...prompt }: DocxPasswor
 				variant="outline"
 				onClick={() => {
 					setDismissed(false)
+					draft?.dismiss(false)
 				}}
 			>
 				{enterLabel}
@@ -253,8 +266,10 @@ export function DocxPasswordGate({ message, enterLabel, ...prompt }: DocxPasswor
 				{...prompt}
 				open={!dismissed}
 				finalFocus={enterRef}
+				draft={draft}
 				onOpenChange={open => {
 					setDismissed(!open)
+					draft?.dismiss(!open)
 				}}
 			/>
 		</div>

@@ -72,6 +72,8 @@ import { ArchiveBrowser } from "@/features/archive/components/archiveBrowser"
 import { ArchiveListingScope } from "@/features/archive/components/archiveListingScope"
 import { PreviewDownloadableProvider } from "@/features/preview/lib/accessMode"
 import { PreviewReplaceContext, type PreviewReplaceMake } from "@/features/preview/lib/previewReplace"
+import { PasswordDraft, PasswordDraftContext } from "@/features/preview/lib/passwordDraft"
+import { stableUuidOf } from "@/features/drive/store/useDriveClipboardStore"
 import { PreviewLoading } from "@/features/preview/components/previewErrorState"
 import { useSettledSlot } from "@/features/preview/hooks/useSettledSlot"
 import {
@@ -302,6 +304,16 @@ export function PreviewOverlay({
 	// an out-of-range index.
 	const driveItem = rawDriveItem !== undefined ? (saved.get(rawDriveItem.data.uuid) ?? rawDriveItem) : undefined
 	const currentDocumentKey = rawDriveItem === undefined ? "" : (documentKeys.get(rawDriveItem.data.uuid) ?? rawDriveItem.data.uuid)
+	// The password being typed into the file's prompt, for the slot on screen and the file it shows (its stable
+	// uuid, which its versions share): a newer version shown meanwhile remounts the viewer, whose prompt takes it
+	// up. Stepping to another slot or file starts a new one.
+	const draftKey =
+		rawDriveItem === undefined || driveItem === undefined ? "" : `${rawDriveItem.data.uuid}/${stableUuidOf(driveItem) ?? ""}`
+	const [passwordDraft, setPasswordDraft] = useState(() => ({ key: draftKey, draft: new PasswordDraft() }))
+
+	if (passwordDraft.key !== draftKey) {
+		setPasswordDraft({ key: draftKey, draft: new PasswordDraft() })
+	}
 	// The drive slot's renderer and save format, as it mounted: a rename never swaps the viewer (and with it
 	// the unsaved edits) out from under the user. Taken again whenever the slot mounts anew, which is only
 	// ever clean (stepping to it, or a new document, see documentKeys): its name as it stands then decides.
@@ -1352,30 +1364,32 @@ export function PreviewOverlay({
 											item={driveItem}
 											render={() => (
 												<PreviewReplaceContext value={replaceInSlot}>
-													<PreviewBody
-														item={driveItem}
-														variant={variant}
-														category={pin?.category}
-														documentKey={currentDocumentKey}
-														editable={editable}
-														renamedReadOnly={renamedReadOnly}
-														neverEditable={variant !== "drive"}
-														asText={asText}
-														locked={saving}
-														onDirtyChange={setPreviewDirty}
-														contentRef={contentRef}
-														spreadsheetRef={spreadsheetRef}
-														docxRef={docxRef}
-														presentationRef={presentationRef}
-														onSave={() => performSaveRef.current()}
-														onAutosave={() => performSaveRef.current(true)}
-														canSaveCopy={canSaveCopyBeside(driveItem, variant)}
-														onOpenFile={opened => {
-															if (rawDriveItem !== undefined) {
-																commitSaved(rawDriveItem.data.uuid, opened)
-															}
-														}}
-													/>
+													<PasswordDraftContext value={passwordDraft.draft}>
+														<PreviewBody
+															item={driveItem}
+															variant={variant}
+															category={pin?.category}
+															documentKey={currentDocumentKey}
+															editable={editable}
+															renamedReadOnly={renamedReadOnly}
+															neverEditable={variant !== "drive"}
+															asText={asText}
+															locked={saving}
+															onDirtyChange={setPreviewDirty}
+															contentRef={contentRef}
+															spreadsheetRef={spreadsheetRef}
+															docxRef={docxRef}
+															presentationRef={presentationRef}
+															onSave={() => performSaveRef.current()}
+															onAutosave={() => performSaveRef.current(true)}
+															canSaveCopy={canSaveCopyBeside(driveItem, variant)}
+															onOpenFile={opened => {
+																if (rawDriveItem !== undefined) {
+																	commitSaved(rawDriveItem.data.uuid, opened)
+																}
+															}}
+														/>
+													</PasswordDraftContext>
 												</PreviewReplaceContext>
 											)}
 										/>

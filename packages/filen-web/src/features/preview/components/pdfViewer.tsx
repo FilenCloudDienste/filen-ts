@@ -28,6 +28,7 @@ import { PreviewErrorState, PreviewGate, PreviewLoading } from "@/features/previ
 import "@filen/office/css/pdf.css"
 import "@/features/preview/components/pdfTheme.css"
 import { recoverIfNewerBuild } from "@/lib/appUpdate"
+import { usePasswordDraft } from "@/features/preview/lib/passwordDraft"
 
 export interface PdfViewerProps {
 	item: DriveItem
@@ -53,10 +54,15 @@ const CLASS_NAMES = {
 type PasswordAttempt = "initial" | "retry"
 
 // The password prompt: the shared single-field dialog, nested in the preview overlay's own. Dismissing it leaves
-// pdf.js waiting (it does not fail the task), so a button stands in to open it again.
-function PdfPasswordPrompt({ attempt, onSubmit }: { attempt: PasswordAttempt; onSubmit: (password: string) => void }) {
+// pdf.js waiting (it does not fail the task), so a button stands in to open it again. In a preview overlay, a
+// newer version of the file shown meanwhile asks again as this one was left: dismissed, or with what was typed
+// (PasswordDraft).
+export function PdfPasswordPrompt({ attempt, onSubmit }: { attempt: PasswordAttempt; onSubmit: (password: string) => void }) {
 	const { t } = useTranslation("preview")
-	const [dismissed, setDismissed] = useState(false)
+	const draft = usePasswordDraft()
+	const [dismissed, setDismissed] = useState(() => draft?.dismissed ?? false)
+	// What the field starts from when it opens: the carried draft at first, blank once dismissed.
+	const [seed, setSeed] = useState(() => draft?.password ?? "")
 
 	return (
 		<div className="flex size-full items-center justify-center px-6">
@@ -65,6 +71,7 @@ function PdfPasswordPrompt({ attempt, onSubmit }: { attempt: PasswordAttempt; on
 					variant="outline"
 					onClick={() => {
 						setDismissed(false)
+						draft?.dismiss(false)
 					}}
 				>
 					{t("previewPdfPasswordReopen")}
@@ -78,11 +85,23 @@ function PdfPasswordPrompt({ attempt, onSubmit }: { attempt: PasswordAttempt; on
 				label={t("previewPdfPasswordLabel")}
 				secret
 				submitLabel={t("previewPdfPasswordSubmit")}
+				initialValue={seed}
 				validate={value => value.length > 0}
 				onOpenChange={open => {
 					setDismissed(!open)
+					draft?.dismiss(!open)
+
+					if (!open) {
+						setSeed("")
+					}
 				}}
-				onSubmit={onSubmit}
+				onValueChange={value => {
+					draft?.keep(value, false)
+				}}
+				onSubmit={value => {
+					draft?.keep("", false)
+					onSubmit(value)
+				}}
 			/>
 		</div>
 	)

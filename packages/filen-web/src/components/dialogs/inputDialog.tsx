@@ -23,7 +23,8 @@ interface InputDialogProps {
 	// document.docx"), so typing renames the file and keeps its type. Omitted selects the whole value.
 	selectBaseName?: boolean | undefined
 	// A secret that is not the user's Filen login (a PDF's password): masked, and never offered to or
-	// saved by a password manager (SecretInput). type/autoComplete do not apply to it.
+	// saved by a password manager (SecretInput). type/autoComplete do not apply to it. A secret pre-filled
+	// is one being typed (carried over a remount), so focus leaves it to be typed on, not selected.
 	secret?: boolean
 	// Optional input-attribute passthroughs (e.g. type="password" + autoComplete="current-password",
 	// or inputMode="numeric" + maxLength for a one-time code). The DOM attribute types already carry
@@ -43,6 +44,8 @@ interface InputDialogProps {
 	errorFor?: ((value: string) => string | null) | undefined
 	onOpenChange: (open: boolean) => void
 	onSubmit: (value: string) => void
+	// Every edit of the value, for a caller that keeps what was typed.
+	onValueChange?: ((value: string) => void) | undefined
 }
 
 // Generic single-field prompt built on the dialog primitive — the shared base for "type a value and
@@ -72,7 +75,8 @@ function InputDialog({
 	validate,
 	errorFor,
 	onOpenChange,
-	onSubmit
+	onSubmit,
+	onValueChange
 }: InputDialogProps) {
 	const [value, setValue] = useSeededOnOpen(open, initialValue ?? "")
 	const valid = validate(value)
@@ -100,8 +104,13 @@ function InputDialog({
 		"aria-describedby": error !== null ? "input-dialog-error" : undefined,
 		onChange: e => {
 			setValue(e.target.value)
+			onValueChange?.(e.target.value)
 		},
 		onFocus: e => {
+			if (secret === true) {
+				return
+			}
+
 			// Base UI's Dialog re-focuses the popup's initial-focus target (this input, via
 			// FloatingFocusManager) on every open, not just first mount — so this reliably
 			// selects the pre-filled value each time, not only once.
