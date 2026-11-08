@@ -47,105 +47,117 @@ async function fileSource(path: string): Promise<{ readonly source: ByteSource; 
 
 const SHAPING = join(CORPUS_DIR, "pptx", "govuk__Shaping_the_Qualifications_Landscape.pptx")
 
+// One move on slide 4 of the deck saved in memory from a range-backed session, the upload reading the port: the peak
+// live heap above the opened model while the save runs, sampled at reads and at chunks the upload takes.
+async function inMemorySave(bytes: Uint8Array): Promise<{ readonly result: unknown; readonly uploaded: number; readonly peak: number }> {
+	let peak = 0
+	let base = 0
+	let sampling = false
+	const sample = (): void => {
+		if (sampling) peak = Math.max(peak, liveHeapNow() - base)
+	}
+	// Every read a fresh buffer, as a range port's are; the bytes checksummed where they live.
+	let reads = 0
+	// Every 16th read samples (each sample is two full collections).
+	const read = (offset: number, length: number): Uint8Array => {
+		if (reads++ % 16 === 0) sample()
+
+		return bytes.slice(offset, offset + length)
+	}
+	const remote: ByteSource = {
+		size: bytes.length,
+		read: (offset, length) => Promise.resolve(read(offset, length)),
+		readChecked: (offset, length, crc) => {
+			const chunk = read(offset, length)
+
+			return Promise.resolve({ bytes: chunk, crc: crc32(chunk, crc) })
+		}
+	}
+	const outcome = await openPptxCapability.open({
+		source: rebasableSource(remote),
+		sourceKind: "range",
+		options: { format: "pptx", fileName: "deck.pptx" }
+	})
+
+	if (outcome.kind !== "opened") throw new Error(outcome.kind)
+
+	const node = await pptxParts(outcome.deck)!.slide(outcome.deck.slides[3]!)
+	const shape = node.shapes.find(candidate => candidate.kind === "sp" && candidate.xfrm !== undefined && candidate.lock === undefined)!
+
+	shape.xfrm = { ...shape.xfrm!, x: shape.xfrm!.x + 12700 }
+	bindSaveHistory(outcome.deck, {
+		revision: 1,
+		dirty: true,
+		changes: () => ({
+			empty: false,
+			parts: new Map([[node.part, { change: "changed", shapes: new Map([[shape.id, { kind: "xfrm" }]]) }]]),
+			presentation: new Set()
+		}),
+		savePoint: () => ({ revision: 1 }),
+		commit: () => undefined,
+		abandon: () => undefined
+	})
+
+	const session: EngineSession = {
+		s: 1,
+		deck: outcome.deck,
+		package: outcome.package,
+		options: { format: "pptx", fileName: "deck.pptx" },
+		services: SERVICES,
+		rangeSource: undefined,
+		schedule: () => undefined,
+		emit: () => undefined,
+		onClose: () => undefined
+	}
+	const context: CallContext = {
+		session,
+		signal: { aborted: false, onAbort: () => undefined },
+		lane: "background",
+		slicing: { pause: () => Promise.resolve(), sliceMs: 8, now: () => Date.now() }
+	}
+	const { port1, port2 } = new MessageChannel()
+	const uploading = (async () => {
+		const reader = savePortReader(port2 as unknown as SavePortEnd)
+		let total = 0
+
+		for (let chunk = await reader.read(); chunk !== undefined; chunk = await reader.read()) {
+			sample()
+			total += chunk.length
+		}
+
+		reader.settled(true)
+
+		return total
+	})()
+
+	base = await liveHeap()
+	sampling = true
+
+	const result = await saveSession(
+		context,
+		{ reason: "user", port: port1 as unknown as SavePortEnd },
+		{ savers: { pptx: { writer: pptxSpliceWriter, source: pptxSaveSource } }, rebasers: {} }
+	)
+	const uploaded = await uploading
+
+	sample()
+	sampling = false
+
+	return { result, uploaded, peak }
+}
+
 describe("presentation save memory", () => {
 	it.skipIf(!existsSync(SHAPING))(
 		"holds one copy of the zip and the port's window while a range-backed deck saves in memory",
 		async () => {
 			const bytes = new Uint8Array(readFileSync(SHAPING))
-			let peak = 0
-			let base = 0
-			let sampling = false
-			const sample = (): void => {
-				if (sampling) peak = Math.max(peak, liveHeapNow() - base)
-			}
-			// Every read a fresh buffer, as a range port's are; the bytes checksummed where they live.
-			let reads = 0
-			// Every 16th read samples (each sample is two full collections).
-			const read = (offset: number, length: number): Uint8Array => {
-				if (reads++ % 16 === 0) sample()
 
-				return bytes.slice(offset, offset + length)
-			}
-			const remote: ByteSource = {
-				size: bytes.length,
-				read: (offset, length) => Promise.resolve(read(offset, length)),
-				readChecked: (offset, length, crc) => {
-					const chunk = read(offset, length)
+			// A save first, outside the measurement: the first run of the save path compiles it (its bytecode, feedback
+			// and code, ~2 MiB of heap the measured save would otherwise count), which the save does not hold.
+			expect((await inMemorySave(bytes)).result).toMatchObject({ kind: "written" })
 
-					return Promise.resolve({ bytes: chunk, crc: crc32(chunk, crc) })
-				}
-			}
-			const outcome = await openPptxCapability.open({
-				source: rebasableSource(remote),
-				sourceKind: "range",
-				options: { format: "pptx", fileName: "deck.pptx" }
-			})
+			const { result, uploaded, peak } = await inMemorySave(bytes)
 
-			if (outcome.kind !== "opened") throw new Error(outcome.kind)
-
-			const node = await pptxParts(outcome.deck)!.slide(outcome.deck.slides[3]!)
-			const shape = node.shapes.find(
-				candidate => candidate.kind === "sp" && candidate.xfrm !== undefined && candidate.lock === undefined
-			)!
-
-			shape.xfrm = { ...shape.xfrm!, x: shape.xfrm!.x + 12700 }
-			bindSaveHistory(outcome.deck, {
-				revision: 1,
-				dirty: true,
-				changes: () => ({
-					empty: false,
-					parts: new Map([[node.part, { change: "changed", shapes: new Map([[shape.id, { kind: "xfrm" }]]) }]]),
-					presentation: new Set()
-				}),
-				savePoint: () => ({ revision: 1 }),
-				commit: () => undefined,
-				abandon: () => undefined
-			})
-
-			const session: EngineSession = {
-				s: 1,
-				deck: outcome.deck,
-				package: outcome.package,
-				options: { format: "pptx", fileName: "deck.pptx" },
-				services: SERVICES,
-				rangeSource: undefined,
-				schedule: () => undefined,
-				emit: () => undefined,
-				onClose: () => undefined
-			}
-			const context: CallContext = {
-				session,
-				signal: { aborted: false, onAbort: () => undefined },
-				lane: "background",
-				slicing: { pause: () => Promise.resolve(), sliceMs: 8, now: () => Date.now() }
-			}
-			const { port1, port2 } = new MessageChannel()
-			const uploading = (async () => {
-				const reader = savePortReader(port2 as unknown as SavePortEnd)
-				let total = 0
-
-				for (let chunk = await reader.read(); chunk !== undefined; chunk = await reader.read()) {
-					sample()
-					total += chunk.length
-				}
-
-				reader.settled(true)
-
-				return total
-			})()
-
-			base = await liveHeap()
-			sampling = true
-
-			const result = await saveSession(
-				context,
-				{ reason: "user", port: port1 as unknown as SavePortEnd },
-				{ savers: { pptx: { writer: pptxSpliceWriter, source: pptxSaveSource } }, rebasers: {} }
-			)
-			const uploaded = await uploading
-
-			sample()
-			sampling = false
 			expect(result).toMatchObject({ kind: "written" })
 			console.info(
 				`in-memory save of ${String(Math.round(uploaded / MiB))} MiB: peak ${(peak / MiB).toFixed(2)} MiB above the open model`
