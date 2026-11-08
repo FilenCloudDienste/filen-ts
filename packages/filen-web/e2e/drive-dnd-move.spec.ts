@@ -23,7 +23,7 @@ test.describe("drive drag-to-move", () => {
 			await createDirectoryViaDialog(page, targetDirName)
 
 			// A file to drag.
-			await uploadFiles(page, [{ name: fileName, mimeType: "text/plain", buffer: Buffer.from("drag-to-move probe") }])
+			await uploadFiles(page, [{ name: fileName, mimeType: "text/plain", buffer: Buffer.from("drag-to-move probe") }], listbox)
 
 			const options = listbox.getByRole("option")
 			await expect(options).toHaveCount(2, { timeout: LIVE_WRITE_TIMEOUT_MS }) // target directory + uploaded file

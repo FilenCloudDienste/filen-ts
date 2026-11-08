@@ -4,6 +4,7 @@ import {
 	clickSidebarLink,
 	LAZY_VIEWER_TIMEOUT_MS,
 	LIVE_WRITE_TIMEOUT_MS,
+	pendingUploadsList,
 	reloadToShell,
 	setTallListingViewport,
 	uploadFiles,
@@ -487,6 +488,10 @@ export async function uploadArchives(page: Page, listbox: Locator, files: readon
 	for (const { name } of files) {
 		await expect(itemRow(listbox, name)).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
 	}
+
+	// A row lands while the finished uploads' block still stands above it; the block then unmounts and
+	// every row moves up under a menu already opened from it.
+	await expect(pendingUploadsList(page)).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
 }
 
 // Opens a text file's preview, checks its text and closes it again.

@@ -1,4 +1,4 @@
-import type { Page } from "@playwright/test"
+import type { Locator, Page } from "@playwright/test"
 import { test, expect } from "./fixtures"
 import { compressPreset, escapeRegExp, extractQuick, namePattern, openRowMenu, pickTreeTarget } from "./helpers/archive"
 import { trackCspViolations } from "./helpers/csp"
@@ -37,8 +37,8 @@ import { resolveModKey } from "./helpers/modkey"
 // card reaching its end state rather than on the listing alone. Shared-in copies can't be exercised
 // here: the e2e account has no contacts, so nothing is ever shared into it (unit-tested instead).
 
-async function uploadTextFile(page: Page, name: string): Promise<void> {
-	await uploadFiles(page, [{ name, mimeType: "text/plain", buffer: Buffer.from(`copy probe ${name}`) }])
+async function uploadTextFile(page: Page, listbox: Locator, name: string): Promise<void> {
+	await uploadFiles(page, [{ name, mimeType: "text/plain", buffer: Buffer.from(`copy probe ${name}`) }], listbox)
 }
 
 test.describe.configure({ mode: "serial" })
@@ -56,7 +56,7 @@ test.describe("drive copy", () => {
 			const { listbox } = await enterScratchDirectory(page, scratchName)
 
 			await createDirectoryViaDialog(page, targetDirName)
-			await uploadTextFile(page, fileName)
+			await uploadTextFile(page, listbox, fileName)
 			await expect(listbox.getByRole("option")).toHaveCount(2, { timeout: LIVE_WRITE_TIMEOUT_MS })
 
 			await openRowMenu(page, listbox, fileName)
@@ -98,8 +98,8 @@ test.describe("drive copy", () => {
 		try {
 			const { listbox } = await enterScratchDirectory(page, scratchName)
 
-			await uploadTextFile(page, firstName)
-			await uploadTextFile(page, secondName)
+			await uploadTextFile(page, listbox, firstName)
+			await uploadTextFile(page, listbox, secondName)
 			await expect(listbox.getByRole("option")).toHaveCount(2, { timeout: LIVE_WRITE_TIMEOUT_MS })
 
 			// Both rows selected: the bulk bar's Copy opens the picker on the whole selection.
@@ -150,8 +150,8 @@ test.describe("drive copy", () => {
 			}
 
 			await createDirectoryViaDialog(page, subName)
-			await uploadTextFile(page, keptName)
-			await uploadTextFile(page, movedName)
+			await uploadTextFile(page, listbox, keptName)
+			await uploadTextFile(page, listbox, movedName)
 			await expect(listbox.getByRole("option")).toHaveCount(3, { timeout: LIVE_WRITE_TIMEOUT_MS })
 
 			// mod+c in a text field stays the browser's text copy; over the listing it takes the selection.
@@ -224,7 +224,7 @@ test.describe("drive copy", () => {
 			const { listbox } = await enterScratchDirectory(page, scratchName)
 
 			await createDirectoryViaDialog(page, subName)
-			await uploadTextFile(page, fileName)
+			await uploadTextFile(page, listbox, fileName)
 			await expect(listbox.getByRole("option")).toHaveCount(2, { timeout: LIVE_WRITE_TIMEOUT_MS })
 
 			// Onto a directory row: a copy lands there and the source stays.
@@ -403,7 +403,7 @@ test.describe("drive copy", () => {
 			const { listbox } = await enterScratchDirectory(page, scratchName)
 
 			await createDirectoryViaDialog(page, destName, listbox)
-			await uploadTextFile(page, fileName)
+			await uploadTextFile(page, listbox, fileName)
 			await expect(listbox.getByRole("option")).toHaveCount(2, { timeout: LIVE_WRITE_TIMEOUT_MS })
 
 			await openRowMenu(page, listbox, fileName)

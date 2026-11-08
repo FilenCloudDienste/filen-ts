@@ -289,8 +289,7 @@ test("an .xls opens view-only on the office engine and saves as an editable .xls
 		const nameXlsx = `e2e-sheet-viewer-${runId}.xlsx`
 		const xlsRowName = new RegExp(`${runId}\\.xls(?!x)`)
 
-		await uploadFiles(page, [{ name: nameXls, mimeType: "application/vnd.ms-excel", buffer: readFileSync(XLS_FIXTURE) }])
-		await expect(listbox.getByRole("option", { name: xlsRowName })).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
+		await uploadFiles(page, [{ name: nameXls, mimeType: "application/vnd.ms-excel", buffer: readFileSync(XLS_FIXTURE) }], listbox)
 
 		await listbox.getByRole("option", { name: xlsRowName }).dblclick()
 		await expectCell(dialog, "A2", "Rent", LAZY_VIEWER_TIMEOUT_MS)
