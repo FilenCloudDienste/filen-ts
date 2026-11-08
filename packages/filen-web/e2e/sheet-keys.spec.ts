@@ -3,6 +3,7 @@ import { writeXlsx } from "hucre/xlsx"
 import { test, expect } from "./fixtures"
 import { withScratchDirectory, LAZY_VIEWER_TIMEOUT_MS, LIVE_WRITE_TIMEOUT_MS, uploadFiles } from "./helpers/listing"
 import { resolveModKey } from "./helpers/modkey"
+import { activeCell, expectCell, goTo, nameBox, XLSX_MIME } from "./helpers/sheet"
 import { preview } from "@/locales/en/preview"
 
 // The office engine's grid keyboard end to end: Excel's shortcuts (Ctrl+arrow to
@@ -10,8 +11,6 @@ import { preview } from "@/locales/en/preview"
 // find bar (Mod+F, Mod+H), against a real session in the sheet worker. Mod is Command where the page says it runs on
 // a Mac, as the app's keymap reads it.
 test.describe.configure({ mode: "default" })
-
-const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 async function xlsxBytes(): Promise<Buffer> {
 	return Buffer.from(
@@ -27,24 +26,6 @@ async function xlsxBytes(): Promise<Buffer> {
 	)
 }
 
-function nameBox(dialog: Locator): Locator {
-	return dialog.getByRole("textbox", { name: preview.previewSheetNameBox })
-}
-
-async function goTo(dialog: Locator, ref: string): Promise<void> {
-	const box = nameBox(dialog)
-
-	await box.click()
-	await box.fill(ref)
-	await box.press("Enter")
-	await expect(box).toHaveValue(ref)
-	await expect(dialog.getByRole("grid")).toBeFocused()
-}
-
-function activeCell(dialog: Locator): Locator {
-	return dialog.getByRole("grid").getByRole("gridcell")
-}
-
 test("the grid's Excel shortcuts and the find bar", async ({ page }) => {
 	test.slow()
 
@@ -56,9 +37,7 @@ test("the grid's Excel shortcuts and the find bar", async ({ page }) => {
 
 		await uploadFiles(page, [{ name, mimeType: XLSX_MIME, buffer: await xlsxBytes() }], listbox)
 		await listbox.getByRole("option", { name }).dblclick()
-		await expect(nameBox(dialog)).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
-		await goTo(dialog, "A1")
-		await expect(activeCell(dialog)).toHaveText("Item", { timeout: LAZY_VIEWER_TIMEOUT_MS })
+		await expectCell(dialog, "A1", "Item", LAZY_VIEWER_TIMEOUT_MS)
 
 		// Ctrl+Down: the end of the run of filled cells, then the next filled cell past the blank row.
 		await page.keyboard.press(`${mod}+ArrowDown`)
@@ -180,9 +159,7 @@ test("the active cell reads what the grid shows after rows and columns move, and
 
 		await uploadFiles(page, [{ name, mimeType: XLSX_MIME, buffer: await xlsxBytes() }], listbox)
 		await listbox.getByRole("option", { name }).dblclick()
-		await expect(nameBox(dialog)).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
-		await goTo(dialog, "A2")
-		await expect(activeCell(dialog)).toHaveText("apple", { timeout: LAZY_VIEWER_TIMEOUT_MS })
+		await expectCell(dialog, "A2", "apple", LAZY_VIEWER_TIMEOUT_MS)
 
 		// Escape with the menu open and the grid still focused closes the menu, never the viewer.
 		await gridMenu(dialog, 2)
@@ -221,9 +198,7 @@ test("the active cell reads what the grid shows after rows and columns move, and
 		await page.keyboard.press("Escape")
 		await expect(dialog).toHaveCount(0)
 		await listbox.getByRole("option", { name }).dblclick()
-		await expect(nameBox(dialog)).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
-		await goTo(dialog, "A2")
-		await expect(activeCell(dialog)).toHaveText("apple", { timeout: LAZY_VIEWER_TIMEOUT_MS })
+		await expectCell(dialog, "A2", "apple", LAZY_VIEWER_TIMEOUT_MS)
 		await expect(contents).toHaveValue("apple")
 		await goTo(dialog, "B2")
 		await expect(activeCell(dialog)).toHaveText("3")

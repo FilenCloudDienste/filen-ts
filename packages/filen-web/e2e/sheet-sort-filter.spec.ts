@@ -1,9 +1,10 @@
 import type { Locator, Page } from "@playwright/test"
 import { writeXlsx } from "hucre/xlsx"
 import { test, expect } from "./fixtures"
-import { withScratchDirectory, LAZY_VIEWER_TIMEOUT_MS, LIVE_WRITE_TIMEOUT_MS, uploadFiles, reloadAfterWrite } from "./helpers/listing"
+import { withScratchDirectory, uploadFiles, reloadAfterWrite } from "./helpers/listing"
 import { resolveModKey } from "./helpers/modkey"
 import { ribbonButton, ribbonTab } from "./helpers/ribbon"
+import { closeDialog, expectCell, goTo, openRow, saveAndClose, XLSX_MIME } from "./helpers/sheet"
 import { preview } from "@/locales/en/preview"
 
 // Sorting and autofilters on the office engine end to end: the toolbar's sort and
@@ -12,14 +13,14 @@ import { preview } from "@/locales/en/preview"
 // (Cmd+Shift+F) turns the filter off. Each leg saves and reopens, so what it checks is the file the drive now holds.
 test.describe.configure({ mode: "default" })
 
-const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+const SHEET = "Fruit"
 
 async function xlsxBytes(): Promise<Buffer> {
 	return Buffer.from(
 		await writeXlsx({
 			sheets: [
 				{
-					name: "Fruit",
+					name: SHEET,
 					rows: [
 						["Fruit", "Count"],
 						["pear", 7],
@@ -31,25 +32,6 @@ async function xlsxBytes(): Promise<Buffer> {
 			]
 		})
 	)
-}
-
-function nameBox(dialog: Locator): Locator {
-	return dialog.getByRole("textbox", { name: preview.previewSheetNameBox })
-}
-
-async function goTo(dialog: Locator, ref: string): Promise<void> {
-	const box = nameBox(dialog)
-
-	await box.click()
-	await box.fill(ref)
-	await box.press("Enter")
-	await expect(box).toHaveValue(ref)
-	await expect(dialog.getByRole("grid")).toBeFocused()
-}
-
-async function expectCell(dialog: Locator, ref: string, text: string): Promise<void> {
-	await goTo(dialog, ref)
-	await expect(dialog.getByRole("grid").getByRole("gridcell")).toHaveText(text)
 }
 
 function menuItem(page: Page, name: string): Locator {
@@ -66,30 +48,6 @@ async function sortFilterMenu(dialog: Locator): Promise<void> {
 // 64 px columns at 100 %): column `col` (0-based) of row 1.
 async function filterButton(dialog: Locator, col: number): Promise<void> {
 	await dialog.getByRole("grid").click({ position: { x: 32 + (col + 1) * 64 - 8, y: 20 + 12 } })
-}
-
-async function open(dialog: Locator, row: Locator): Promise<void> {
-	await expect(row).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
-	await row.dblclick()
-	await expect(nameBox(dialog)).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
-	await expect(dialog.getByRole("tab", { name: "Fruit" })).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
-}
-
-async function close(page: Page, dialog: Locator): Promise<void> {
-	await expect(async () => {
-		await page.keyboard.press("Escape")
-		await expect(dialog).toHaveCount(0, { timeout: 2_000 })
-	}).toPass({ timeout: 15_000 })
-}
-
-async function saveAndClose(page: Page, dialog: Locator, mod: string): Promise<void> {
-	const save = dialog.getByRole("button", { name: "Save", exact: true })
-
-	await expect(save).toBeVisible()
-	await goTo(dialog, "D10")
-	await page.keyboard.press(`${mod}+S`)
-	await expect(save).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
-	await close(page, dialog)
 }
 
 const LEGS = ["filter", "sort"] as const
@@ -116,7 +74,7 @@ test("data sorted from the toolbar and the sort dialog, filtered from a header's
 		>
 
 		// The filter on from the toolbar, then "pear" unchecked in the Fruit column's menu.
-		await open(dialog, rows.filter)
+		await openRow(dialog, rows.filter, SHEET)
 		await goTo(dialog, "A2")
 		await sortFilterMenu(dialog)
 		await page.getByRole("menuitemcheckbox", { name: new RegExp(preview.previewSheetFilter) }).click()
@@ -136,7 +94,7 @@ test("data sorted from the toolbar and the sort dialog, filtered from a header's
 		await saveAndClose(page, dialog, mod)
 
 		// Sorted by Count, smallest first, from the toolbar; then by Fruit, then Count descending, in the dialog.
-		await open(dialog, rows.sort)
+		await openRow(dialog, rows.sort, SHEET)
 		await goTo(dialog, "B3")
 		await sortFilterMenu(dialog)
 		await menuItem(page, preview.previewSheetSortAscending).click()
@@ -160,7 +118,7 @@ test("data sorted from the toolbar and the sort dialog, filtered from a header's
 		await reloadAfterWrite(page)
 
 		// The filtered rows stay hidden: the menu shows "pear" unchecked; Ctrl+Shift+L then turns the filter off.
-		await open(dialog, rows.filter)
+		await openRow(dialog, rows.filter, SHEET)
 		await filterButton(dialog, 0)
 		const filterMenu = page.locator("[data-sheet-filter-menu]")
 
@@ -176,12 +134,12 @@ test("data sorted from the toolbar and the sort dialog, filtered from a header's
 		// The filter's change is a change of the file: saved, as any edit, before the viewer closes.
 		await saveAndClose(page, dialog, mod)
 
-		await open(dialog, rows.sort)
+		await openRow(dialog, rows.sort, SHEET)
 		await expectCell(dialog, "A2", "apple")
 		await expectCell(dialog, "B2", "3")
 		await expectCell(dialog, "A3", "apple")
 		await expectCell(dialog, "B3", "1")
 		await expectCell(dialog, "A4", "fig")
-		await close(page, dialog)
+		await closeDialog(page, dialog)
 	})
 })

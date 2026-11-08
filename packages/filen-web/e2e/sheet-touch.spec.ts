@@ -5,6 +5,7 @@ import { withScratchDirectory, LAZY_VIEWER_TIMEOUT_MS, uploadFiles } from "./hel
 import { common } from "@/locales/en/common"
 import { ribbonControl } from "./helpers/ribbon"
 import { framedCenterOf } from "./helpers/geometry"
+import { activeCell, nameBox, selectByNameBox, XLSX_MIME } from "./helpers/sheet"
 import { preview } from "@/locales/en/preview"
 
 // The office engine's grid under a finger, on a sheet's whole range and for a screen reader. A tap selects and a pan
@@ -20,7 +21,7 @@ import { preview } from "@/locales/en/preview"
 // are.
 test.describe.configure({ mode: "default" })
 
-const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+// Cells are reached with selectByNameBox, not goTo: this spec has never asserted where focus goes after the name box.
 // touch/gestures.ts's LONG_PRESS_MS and DOUBLE_TAP_MS, and some.
 const LONG_PRESS_HOLD_MS = 800
 const DOUBLE_TAP_WAIT_MS = 450
@@ -38,25 +39,8 @@ async function xlsxBytes(): Promise<Buffer> {
 	return Buffer.from(await writeXlsx({ sheets: [{ name: "Touch", rows }] }))
 }
 
-function nameBox(dialog: Locator): Locator {
-	return dialog.getByRole("textbox", { name: preview.previewSheetNameBox })
-}
-
-function activeCell(dialog: Locator): Locator {
-	return dialog.getByRole("grid").getByRole("gridcell")
-}
-
-async function goTo(dialog: Locator, ref: string): Promise<void> {
-	const box = nameBox(dialog)
-
-	await box.click()
-	await box.fill(ref)
-	await box.press("Enter")
-	await expect(box).toHaveValue(ref)
-}
-
 async function cellCentre(dialog: Locator, ref: string): Promise<Point> {
-	await goTo(dialog, ref)
+	await selectByNameBox(dialog, ref)
 
 	return framedCenterOf(dialog.locator(".fo-sheet-a11y"))
 }
@@ -168,8 +152,7 @@ async function openWorkbook(page: Page, listbox: Locator, runId: string, dialog:
 
 	await uploadFiles(page, [{ name, mimeType: XLSX_MIME, buffer: await xlsxBytes() }], listbox)
 	await listbox.getByRole("option", { name }).dblclick()
-	await expect(nameBox(dialog)).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
-	await goTo(dialog, "A2")
+	await selectByNameBox(dialog, "A2", LAZY_VIEWER_TIMEOUT_MS)
 	await expect(activeCell(dialog)).toHaveText("1", { timeout: LAZY_VIEWER_TIMEOUT_MS })
 }
 
@@ -190,7 +173,7 @@ test.describe("touch", () => {
 			// A tap selects, with the start handle.
 			const b3 = await cellCentre(dialog, "B3")
 
-			await goTo(dialog, "A1")
+			await selectByNameBox(dialog, "A1")
 			await touch(page, browserName, [b3])
 			await expect(nameBox(dialog)).toHaveValue("B3")
 			await expect(handle).toBeVisible()
@@ -199,7 +182,7 @@ test.describe("touch", () => {
 			// A pan selects nothing.
 			const a10 = await cellCentre(dialog, "A10")
 
-			await goTo(dialog, "A1")
+			await selectByNameBox(dialog, "A1")
 			await touch(page, browserName, [a10, { x: a10.x, y: a10.y - 60 }, { x: a10.x, y: a10.y - 140 }])
 			await page.waitForTimeout(DOUBLE_TAP_WAIT_MS)
 			await expect(nameBox(dialog)).toHaveValue("A1")
@@ -214,11 +197,11 @@ test.describe("touch", () => {
 
 			// A long press shows the menu above the cell, 44 px targets, the grid's own context menu shut. Measured from
 			// the top: the pan above scrolled the sheet, and going to A1 for the press scrolls it back.
-			await goTo(dialog, "A1")
+			await selectByNameBox(dialog, "A1")
 
 			const c6 = await cellCentre(dialog, "C6")
 
-			await goTo(dialog, "A1")
+			await selectByNameBox(dialog, "A1")
 			await touch(page, browserName, [c6], LONG_PRESS_HOLD_MS)
 			await expect(nameBox(dialog)).toHaveValue("C6")
 			await expect(menu).toBeVisible()
@@ -287,7 +270,7 @@ test("the whole sheet: the name box, Ctrl+arrows, the wheel and the scrollbar re
 			return Number((await nameBox(dialog).inputValue()).replace(/^[A-Z]+/, ""))
 		}
 
-		await goTo(dialog, "A1048576")
+		await selectByNameBox(dialog, "A1048576")
 		await expect(grid.locator("[role=row]")).toHaveAttribute("aria-rowindex", "1048576")
 
 		const dom = await scroller.evaluate(element => ({ height: element.scrollHeight, top: element.scrollTop }))
@@ -304,7 +287,7 @@ test("the whole sheet: the name box, Ctrl+arrows, the wheel and the scrollbar re
 		const before = await row(30)
 		const box = await scroller.boundingBox()
 
-		await goTo(dialog, "A1048576")
+		await selectByNameBox(dialog, "A1048576")
 		await page.mouse.move((box?.x ?? 0) + 300, (box?.y ?? 0) + 300)
 
 		for (let step = 0; step < 10; step++) await page.mouse.wheel(0, -100)
@@ -318,9 +301,9 @@ test("the whole sheet: the name box, Ctrl+arrows, the wheel and the scrollbar re
 		})
 		await expect.poll(async () => Math.abs((await row((box?.height ?? 0) / 2)) - 524_288)).toBeLessThan(50)
 
-		await goTo(dialog, "XFD1")
+		await selectByNameBox(dialog, "XFD1")
 		await expect(grid.getByRole("gridcell")).toHaveAttribute("aria-colindex", "16384")
-		await goTo(dialog, "A60")
+		await selectByNameBox(dialog, "A60")
 		await grid.press("Control+ArrowRight")
 		await expect(nameBox(dialog)).toHaveValue("XFD60")
 	})
@@ -341,13 +324,13 @@ test("a screen reader's grid: named, its active cell a gridcell in a row, the li
 		await expect(grid).toHaveAttribute("aria-colcount", "16384")
 		await expect(grid).toHaveAttribute("aria-multiselectable", "true")
 
-		await goTo(dialog, "B3")
+		await selectByNameBox(dialog, "B3")
 		await expect(grid.getByRole("row")).toHaveAttribute("aria-rowindex", "3")
 		await expect(grid.getByRole("gridcell")).toHaveAttribute("aria-colindex", "2")
 		await expect(grid.getByRole("gridcell")).toHaveText("item 2")
 		await expect(dialog.locator(".fo-sheet-live")).toHaveText("B3, item 2")
 
-		await goTo(dialog, "B3:C4")
+		await selectByNameBox(dialog, "B3:C4")
 		await expect(dialog.locator(".fo-sheet-live")).toHaveText(/B3:C4 selected$/)
 
 		// The menus a pointer opens are named.

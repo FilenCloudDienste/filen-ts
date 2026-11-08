@@ -9,6 +9,7 @@ import { resolveModKey } from "./helpers/modkey"
 import { trackCspViolations } from "./helpers/csp"
 import { storedPassword, trackPasswordCanary } from "./helpers/passwordCanary"
 import { WORKBOOK_PASSWORD, encryptedWorkbook } from "@/tests/encryptedWorkbookFixtures"
+import { activeCell, expectCell, goTo, typeInto, XLSX_MIME } from "./helpers/sheet"
 import { preview } from "@/locales/en/preview"
 
 // The spreadsheet viewer end to end: a real open in the
@@ -19,7 +20,6 @@ import { preview } from "@/locales/en/preview"
 test.describe.configure({ mode: "default" })
 
 const XLS_FIXTURE = fileURLToPath(new URL("../src/tests/fixtures/spreadsheet/budget.xls", import.meta.url))
-const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 const CSV_BYTES = Buffer.from("Name;Qty\r\nApples;3\r\nPears;5\r\n", "utf8")
 
 async function xlsxBytes(): Promise<Buffer> {
@@ -40,33 +40,6 @@ async function xlsxBytes(): Promise<Buffer> {
 			]
 		})
 	)
-}
-
-// Makes `ref` ("B4") the active cell through the name box; the grid has focus after.
-async function goTo(dialog: Locator, ref: string): Promise<void> {
-	const box = dialog.getByRole("textbox", { name: preview.previewSheetNameBox })
-
-	await box.click()
-	await box.fill(ref)
-	await box.press("Enter")
-	await expect(box).toHaveValue(ref)
-	await expect(dialog.getByRole("grid")).toBeFocused()
-}
-
-// The active cell's shown text.
-function activeCell(dialog: Locator): Locator {
-	return dialog.getByRole("grid").getByRole("gridcell")
-}
-
-async function expectCell(dialog: Locator, ref: string, text: string, timeout?: number): Promise<void> {
-	await goTo(dialog, ref)
-	await expect(activeCell(dialog)).toHaveText(text, timeout === undefined ? {} : { timeout })
-}
-
-async function typeInto(page: Page, dialog: Locator, ref: string, text: string): Promise<void> {
-	await goTo(dialog, ref)
-	await page.keyboard.type(text)
-	await page.keyboard.press("Enter")
 }
 
 // Opens the grid's menu on the active cell's row header (row `row`, 1-based), the way a right-click there does.

@@ -14,6 +14,7 @@ import {
 import { resolveModKey } from "./helpers/modkey"
 import { trackCspViolations } from "./helpers/csp"
 import { ODS_MIME, ODS_UNTOUCHED_ROW, OTS_MIME, odsFixture, zipEntry } from "./helpers/odsFixtures"
+import { closeDialog, dialogOf, expectCell, goTo, openFromListing, typeInto } from "./helpers/sheet"
 import { preview } from "@/locales/en/preview"
 
 // OpenDocument spreadsheets edited in the spreadsheet viewer against the backend: saved by the idle autosave and by
@@ -26,51 +27,13 @@ test.describe.configure({ mode: "default" })
 const AUTOSAVE_TIMEOUT_MS = 30_000 + LIVE_WRITE_TIMEOUT_MS
 const REMOTE_EVENT_TIMEOUT_MS = 30_000
 
-function dialogOf(page: Page): Locator {
-	return page.getByRole("dialog").first()
-}
-
-async function goTo(dialog: Locator, ref: string): Promise<void> {
-	const box = dialog.getByRole("textbox", { name: preview.previewSheetNameBox })
-
-	await box.click()
-	await box.fill(ref)
-	await box.press("Enter")
-	await expect(box).toHaveValue(ref)
-	await expect(dialog.getByRole("grid")).toBeFocused()
-}
-
-async function expectCell(dialog: Locator, ref: string, text: string, timeout?: number): Promise<void> {
-	await goTo(dialog, ref)
-	await expect(dialog.getByRole("grid").getByRole("gridcell")).toHaveText(text, timeout === undefined ? {} : { timeout })
-}
-
-async function typeInto(page: Page, dialog: Locator, ref: string, text: string): Promise<void> {
-	await goTo(dialog, ref)
-	await page.keyboard.type(text)
-	await page.keyboard.press("Enter")
-}
-
+// The shared open, and also waits for A1 to read the fixture's "Item": every ODS leg starts from a loaded workbook.
 async function open(page: Page, listbox: Locator, name: string | RegExp): Promise<Locator> {
-	const row = listbox.getByRole("option", { name })
+	const dialog = await openFromListing(page, listbox, name)
 
-	await expect(row).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
-	await row.dblclick()
-
-	const dialog = dialogOf(page)
-
-	await expect(dialog.getByRole("grid")).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
 	await expectCell(dialog, "A1", "Item", LAZY_VIEWER_TIMEOUT_MS)
 
 	return dialog
-}
-
-// Escape until the preview is gone: a tooltip the pointer left open takes the first one (Chromium).
-async function close(page: Page): Promise<void> {
-	await expect(async () => {
-		await page.keyboard.press("Escape")
-		await expect(page.getByRole("dialog")).toHaveCount(0, { timeout: 2_000 })
-	}).toPass({ timeout: 15_000 })
 }
 
 // The file as stored, downloaded from its row's menu.
@@ -116,7 +79,7 @@ test("an .ods saves itself after an idle pause and on Cmd/Ctrl+S, staying an Ope
 		await expect(saveButton).toBeVisible()
 		await expect(saveButton).toHaveCount(0, { timeout: AUTOSAVE_TIMEOUT_MS })
 		await goTo(dialog, "A1")
-		await close(page)
+		await closeDialog(page, dialogOf(page))
 
 		const content = expectOpenDocument(await storedBytes(page, listbox, name), ODS_MIME)
 
@@ -133,7 +96,7 @@ test("an .ods saves itself after an idle pause and on Cmd/Ctrl+S, staying an Ope
 		await page.keyboard.press(`${mod}+S`)
 		await expect(saveButton).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
 		await goTo(dialog, "A1")
-		await close(page)
+		await closeDialog(page, dialogOf(page))
 
 		await reloadAfterWrite(page)
 		dialog = await open(page, listbox, name)
@@ -141,7 +104,7 @@ test("an .ods saves itself after an idle pause and on Cmd/Ctrl+S, staying an Ope
 		await expectCell(dialog, "B3", "1250")
 		// The total's formula reads the rows it read before, with the edit.
 		await expectCell(dialog, "B5", "1550")
-		await close(page)
+		await closeDialog(page, dialogOf(page))
 
 		expectOpenDocument(await storedBytes(page, listbox, name), ODS_MIME)
 	})
@@ -169,7 +132,7 @@ test("an .ots template saves as a template", async ({ page }) => {
 		await page.keyboard.press(`${mod}+S`)
 		await expect(saveButton).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
 		await goTo(dialog, "A1")
-		await close(page)
+		await closeDialog(page, dialogOf(page))
 
 		expect(expectOpenDocument(await storedBytes(page, listbox, name), OTS_MIME)).toContain("Template edit")
 	})
@@ -210,14 +173,14 @@ test("a save made elsewhere is asked about over unsaved edits to an .ods, which 
 
 			await expectCell(mine, "B2", "2000", LAZY_VIEWER_TIMEOUT_MS)
 			await expectCell(mine, "A6", "")
-			await close(page)
+			await closeDialog(page, dialogOf(page))
 
 			// The copy beside it is an .ods too, with this tab's edit.
 			const copy = await open(page, listbox, /\(conflicted copy .*\)\.ods/)
 
 			await expectCell(copy, "A6", "Mine only", LAZY_VIEWER_TIMEOUT_MS)
 			await expectCell(copy, "B2", "1200")
-			await close(page)
+			await closeDialog(page, dialogOf(page))
 		})
 	} finally {
 		for (const tab of tabs) await tab.close()
@@ -231,7 +194,7 @@ test("an .ods opened and closed without an edit is stored as it was", async ({ p
 
 		await uploadFiles(page, [{ name, mimeType: ODS_MIME, buffer: fixture }], listbox)
 		await open(page, listbox, name)
-		await close(page)
+		await closeDialog(page, dialogOf(page))
 
 		expect((await storedBytes(page, listbox, name)).equals(fixture)).toBe(true)
 	})

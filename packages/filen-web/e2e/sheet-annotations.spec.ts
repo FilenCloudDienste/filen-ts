@@ -1,8 +1,9 @@
 import type { Locator, Page } from "@playwright/test"
 import { writeXlsx } from "hucre/xlsx"
 import { test, expect } from "./fixtures"
-import { withScratchDirectory, LAZY_VIEWER_TIMEOUT_MS, LIVE_WRITE_TIMEOUT_MS, uploadFiles, reloadAfterWrite } from "./helpers/listing"
+import { withScratchDirectory, uploadFiles, reloadAfterWrite } from "./helpers/listing"
 import { resolveModKey } from "./helpers/modkey"
+import { closeDialog, goTo, nameBox, openRow, saveAndClose, XLSX_MIME } from "./helpers/sheet"
 import { preview } from "@/locales/en/preview"
 
 // Notes, threaded comments and hyperlinks on the office engine end to end: a note
@@ -11,7 +12,7 @@ import { preview } from "@/locales/en/preview"
 // reopened, so what it checks is the file the drive now holds.
 test.describe.configure({ mode: "default" })
 
-const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+const SHEET = "Budget"
 const AUTHOR = "E2E Sheet Author"
 // Where a cell's middle is at 100 %: a 32 px row header, 64 px columns, a 20 px column header and 20 px rows.
 const ROW_HEADER = 32
@@ -24,7 +25,7 @@ async function xlsxBytes(): Promise<Buffer> {
 		await writeXlsx({
 			sheets: [
 				{
-					name: "Budget",
+					name: SHEET,
 					rows: [
 						["Item", "Cost"],
 						["Rent", 1200],
@@ -37,20 +38,6 @@ async function xlsxBytes(): Promise<Buffer> {
 			]
 		})
 	)
-}
-
-function nameBox(dialog: Locator): Locator {
-	return dialog.getByRole("textbox", { name: preview.previewSheetNameBox })
-}
-
-async function goTo(dialog: Locator, ref: string): Promise<void> {
-	const box = nameBox(dialog)
-
-	await box.click()
-	await box.fill(ref)
-	await box.press("Enter")
-	await expect(box).toHaveValue(ref)
-	await expect(dialog.getByRole("grid")).toBeFocused()
 }
 
 // A cell's middle in the grid, 0-based.
@@ -103,30 +90,6 @@ async function closeStrayMenu(page: Page): Promise<void> {
 	}
 }
 
-async function open(dialog: Locator, row: Locator): Promise<void> {
-	await expect(row).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
-	await row.dblclick()
-	await expect(nameBox(dialog)).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
-	await expect(dialog.getByRole("tab", { name: "Budget" })).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
-}
-
-async function close(page: Page, dialog: Locator): Promise<void> {
-	await expect(async () => {
-		await page.keyboard.press("Escape")
-		await expect(dialog).toHaveCount(0, { timeout: 2_000 })
-	}).toPass({ timeout: 15_000 })
-}
-
-async function saveAndClose(page: Page, dialog: Locator, mod: string): Promise<void> {
-	const save = dialog.getByRole("button", { name: "Save", exact: true })
-
-	await expect(save).toBeVisible()
-	await goTo(dialog, "D10")
-	await page.keyboard.press(`${mod}+S`)
-	await expect(save).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
-	await close(page, dialog)
-}
-
 test("a note, a comment thread and links: added, shown, followed, saved and read back", async ({ page }) => {
 	test.slow()
 
@@ -140,7 +103,7 @@ test("a note, a comment thread and links: added, shown, followed, saved and read
 
 		const row = listbox.getByRole("option", { name })
 
-		await open(dialog, row)
+		await openRow(dialog, row, SHEET)
 
 		// A note on B2 from the grid's menu: its text starts with the author's line.
 		await goTo(dialog, "B2")
@@ -210,7 +173,7 @@ test("a note, a comment thread and links: added, shown, followed, saved and read
 
 		// What the drive now holds, read fresh.
 		await reloadAfterWrite(page)
-		await open(dialog, row)
+		await openRow(dialog, row, SHEET)
 
 		// The note shows on hover.
 		await hover(page, dialog, 1, 1)
@@ -244,6 +207,6 @@ test("a note, a comment thread and links: added, shown, followed, saved and read
 		await expect(dialog.getByRole("tab", { name: "Notes" })).toHaveAttribute("aria-selected", "true")
 		await expect(nameBox(dialog)).toHaveValue("A1")
 
-		await close(page, dialog)
+		await closeDialog(page, dialog)
 	})
 })

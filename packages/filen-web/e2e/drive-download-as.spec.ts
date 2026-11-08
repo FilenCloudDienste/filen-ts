@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs"
+import { XLSX_MIME } from "./helpers/sheet"
 import type { Download, Locator, Page } from "@playwright/test"
 import { writeXlsx } from "hucre/xlsx"
 import JSZip from "jszip"
@@ -33,7 +34,6 @@ import { transfers } from "@/locales/en/transfers"
 
 test.describe.configure({ mode: "default" })
 
-const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 // features/office/lib/pdfTestMode.ts's key: an E2E build makes every PDF deterministic once it is set.
 const PDF_DETERMINISTIC_KEY = "filen-e2e-pdf-deterministic"
 // features/office/lib/officeAutosave.ts's key: the editors this spec opens never save.

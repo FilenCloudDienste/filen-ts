@@ -2,10 +2,11 @@ import { readFileSync } from "node:fs"
 import type { Locator, Page } from "@playwright/test"
 import { writeXlsx } from "hucre/xlsx"
 import { test, expect } from "./fixtures"
-import { LAZY_VIEWER_TIMEOUT_MS, LIVE_WRITE_TIMEOUT_MS, uploadFiles, withScratchDirectory } from "./helpers/listing"
+import { LAZY_VIEWER_TIMEOUT_MS, uploadFiles, withScratchDirectory } from "./helpers/listing"
 import { trackCspViolations } from "./helpers/csp"
 import { pdfSyntax } from "./helpers/pdfBytes"
 import { WORKBOOK_PASSWORD, encryptedWorkbook } from "@/tests/encryptedWorkbookFixtures"
+import { dialogOf, openFromListing, XLSX_MIME } from "./helpers/sheet"
 import { preview } from "@/locales/en/preview"
 
 // Download as ▸ PDF on the spreadsheet viewer end to end: made in the sheet worker beside the session (its fonts
@@ -14,7 +15,6 @@ import { preview } from "@/locales/en/preview"
 // password. The PDF's pages are counted from its page tree (/Count), its encryption from its trailer.
 test.describe.configure({ mode: "default" })
 
-const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 // A PDF of a few pages, fonts fetched on first use.
 const PDF_TIMEOUT_MS = 60_000
 
@@ -30,23 +30,6 @@ async function xlsxBytes(rows: number): Promise<Buffer> {
 			]
 		})
 	)
-}
-
-function dialogOf(page: Page): Locator {
-	return page.getByRole("dialog").first()
-}
-
-async function open(page: Page, listbox: Locator, name: string): Promise<Locator> {
-	const row = listbox.getByRole("option", { name })
-
-	await expect(row).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
-	await row.dblclick()
-
-	const dialog = dialogOf(page)
-
-	await expect(dialog.getByRole("grid")).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
-
-	return dialog
 }
 
 // A protected workbook's PDF takes its password, asked for before the export.
@@ -81,7 +64,7 @@ test("a workbook's sheet downloads as a tagged PDF, from the File menu and from 
 		// 120 rows: three Letter pages at 100 %.
 		await uploadFiles(page, [{ name, mimeType: XLSX_MIME, buffer: await xlsxBytes(120) }], listbox)
 
-		const dialog = await open(page, listbox, name)
+		const dialog = await openFromListing(page, listbox, name)
 		const pdf = await downloadPdf(page, dialog)
 
 		expect(pdf.name).toBe(name.replace(/\.xlsx$/, ".pdf"))

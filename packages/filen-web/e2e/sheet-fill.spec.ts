@@ -3,6 +3,7 @@ import { writeXlsx } from "hucre/xlsx"
 import { test, expect } from "./fixtures"
 import { withScratchDirectory, LAZY_VIEWER_TIMEOUT_MS, uploadFiles } from "./helpers/listing"
 import { framedCenterOf } from "./helpers/geometry"
+import { expectCell, goTo, nameBox, XLSX_MIME } from "./helpers/sheet"
 import { preview } from "@/locales/en/preview"
 
 // The office engine's fill and clipboard end to end: the fill handle dragged with
@@ -10,8 +11,6 @@ import { preview } from "@/locales/en/preview"
 // handle, which never pans the grid), the Series dialog from the grid's menu, and clipboard HTML pasted from another
 // spreadsheet (LibreOffice's, with Google Sheets' attributes): values, an R1C1 formula and number formats.
 test.describe.configure({ mode: "default" })
-
-const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 async function xlsxBytes(): Promise<Buffer> {
 	return Buffer.from(
@@ -36,24 +35,6 @@ const PASTED_HTML =
 	'<td align="right" sdval="0.125" sdnum="1033;0;0.0%">12.5%</td>' +
 	'<td align="right" sdval="0.25" sdnum="1033;" data-sheets-formula="=RC[-1]*2">0.25</td>' +
 	"</tr></table>"
-
-function nameBox(dialog: Locator): Locator {
-	return dialog.getByRole("textbox", { name: preview.previewSheetNameBox })
-}
-
-function activeCell(dialog: Locator): Locator {
-	return dialog.getByRole("grid").getByRole("gridcell")
-}
-
-async function goTo(dialog: Locator, ref: string): Promise<void> {
-	const box = nameBox(dialog)
-
-	await box.click()
-	await box.fill(ref)
-	await box.press("Enter")
-	await expect(box).toHaveValue(ref)
-	await expect(dialog.getByRole("grid")).toBeFocused()
-}
 
 // The centre of a cell on screen: the accessible active cell sits over the cell the grid draws.
 async function cellCentre(dialog: Locator, ref: string): Promise<{ x: number; y: number }> {
@@ -85,11 +66,6 @@ async function dragHandle(page: Page, dialog: Locator, to: { x: number; y: numbe
 	if (ctrl) await page.keyboard.up("Control")
 }
 
-async function expectCell(dialog: Locator, ref: string, text: string): Promise<void> {
-	await goTo(dialog, ref)
-	await expect(activeCell(dialog)).toHaveText(text)
-}
-
 test("the fill handle by mouse and touch, the Series dialog, and HTML pasted from another spreadsheet", async ({ page, browserName }) => {
 	test.slow()
 
@@ -100,9 +76,7 @@ test("the fill handle by mouse and touch, the Series dialog, and HTML pasted fro
 
 		await uploadFiles(page, [{ name, mimeType: XLSX_MIME, buffer: await xlsxBytes() }], listbox)
 		await listbox.getByRole("option", { name }).dblclick()
-		await expect(nameBox(dialog)).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
-		await goTo(dialog, "A1")
-		await expect(activeCell(dialog)).toHaveText("1", { timeout: LAZY_VIEWER_TIMEOUT_MS })
+		await expectCell(dialog, "A1", "1", LAZY_VIEWER_TIMEOUT_MS)
 
 		// Mouse: 1, 2 dragged down to row 5 is a linear series.
 		const a5 = await cellCentre(dialog, "A5")

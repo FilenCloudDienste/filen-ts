@@ -16,6 +16,7 @@ import { resolveModKey } from "./helpers/modkey"
 import { trackCspViolations } from "./helpers/csp"
 import { storedPassword, trackPasswordCanary } from "./helpers/passwordCanary"
 import { WORKBOOK_PASSWORD, encryptedWorkbook } from "@/tests/encryptedWorkbookFixtures"
+import { closeDialog, dialogOf, expectCell, goTo, openFromListing, typeInto, XLSX_MIME } from "./helpers/sheet"
 import { preview } from "@/locales/en/preview"
 import { settings } from "@/locales/en/settings"
 
@@ -26,7 +27,6 @@ import { settings } from "@/locales/en/settings"
 // the cells nor the password, as UTF-8 or UTF-16). Each leg reads back what the drive now holds.
 test.describe.configure({ mode: "default" })
 
-const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 // The idle autosave waits 30 s after the last edit (features/office/lib/officeAutosave.ts AUTOSAVE_IDLE_MS).
 const AUTOSAVE_TIMEOUT_MS = 30_000 + LIVE_WRITE_TIMEOUT_MS
 const REMOTE_EVENT_TIMEOUT_MS = 30_000
@@ -50,58 +50,12 @@ async function xlsxBytes(): Promise<Buffer> {
 	)
 }
 
-function dialogOf(page: Page): Locator {
-	return page.getByRole("dialog").first()
-}
-
-async function goTo(dialog: Locator, ref: string): Promise<void> {
-	const box = dialog.getByRole("textbox", { name: preview.previewSheetNameBox })
-
-	await box.click()
-	await box.fill(ref)
-	await box.press("Enter")
-	await expect(box).toHaveValue(ref)
-	await expect(dialog.getByRole("grid")).toBeFocused()
-}
-
-async function expectCell(dialog: Locator, ref: string, text: string, timeout?: number): Promise<void> {
-	await goTo(dialog, ref)
-	await expect(dialog.getByRole("grid").getByRole("gridcell")).toHaveText(text, timeout === undefined ? {} : { timeout })
-}
-
-async function typeInto(page: Page, dialog: Locator, ref: string, text: string): Promise<void> {
-	await goTo(dialog, ref)
-	await page.keyboard.type(text)
-	await page.keyboard.press("Enter")
-}
-
 async function fileMenu(page: Page, dialog: Locator, item: string, submenu?: string): Promise<void> {
 	await dialog.getByRole("button", { name: preview.previewSheetFileMenu, exact: true }).click()
 
 	if (submenu !== undefined) await page.getByRole("menuitem", { name: submenu, exact: true }).click()
 
 	await page.getByRole("menuitem", { name: item, exact: true }).click()
-}
-
-async function open(page: Page, listbox: Locator, name: string | RegExp): Promise<Locator> {
-	const row = listbox.getByRole("option", { name })
-
-	await expect(row).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
-	await row.dblclick()
-
-	const dialog = dialogOf(page)
-
-	await expect(dialog.getByRole("grid")).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
-
-	return dialog
-}
-
-// Escape until the preview is gone: a tooltip the pointer left open takes the first one (Chromium).
-async function close(page: Page): Promise<void> {
-	await expect(async () => {
-		await page.keyboard.press("Escape")
-		await expect(page.getByRole("dialog")).toHaveCount(0, { timeout: 2_000 })
-	}).toPass({ timeout: 15_000 })
 }
 
 test("a workbook saves itself after an idle pause, and on Cmd/Ctrl+S from the grid", async ({ page }) => {
@@ -115,7 +69,7 @@ test("a workbook saves itself after an idle pause, and on Cmd/Ctrl+S from the gr
 
 		await uploadFiles(page, [{ name, mimeType: XLSX_MIME, buffer: await xlsxBytes() }], listbox)
 
-		let dialog = await open(page, listbox, name)
+		let dialog = await openFromListing(page, listbox, name)
 		const saveButton = dialog.getByRole("button", { name: "Save", exact: true })
 
 		await expectCell(dialog, "B2", "1200", LAZY_VIEWER_TIMEOUT_MS)
@@ -134,13 +88,13 @@ test("a workbook saves itself after an idle pause, and on Cmd/Ctrl+S from the gr
 		await expect(saveButton).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
 		// Back on the grid: an Escape there closes the preview (in the cell editor it would only end the entry).
 		await goTo(dialog, "A1")
-		await close(page)
+		await closeDialog(page, dialogOf(page))
 
 		await reloadAfterWrite(page)
-		dialog = await open(page, listbox, name)
+		dialog = await openFromListing(page, listbox, name)
 		await expectCell(dialog, "B2", "1250", LAZY_VIEWER_TIMEOUT_MS)
 		await expectCell(dialog, "B3", "333")
-		await close(page)
+		await closeDialog(page, dialogOf(page))
 	})
 
 	expect(cspViolations).toEqual([])
@@ -158,7 +112,7 @@ test("a save made elsewhere is asked about over unsaved edits, which can go into
 
 			await uploadFiles(page, [{ name, mimeType: XLSX_MIME, buffer: await xlsxBytes() }], listbox)
 
-			const mine = await open(page, listbox, name)
+			const mine = await openFromListing(page, listbox, name)
 
 			await expectCell(mine, "B2", "1200", LAZY_VIEWER_TIMEOUT_MS)
 
@@ -168,7 +122,7 @@ test("a save made elsewhere is asked about over unsaved edits, which can go into
 			await bootTo(other)
 			await descendInto(other, (await waitForListingSettled(other)).listbox, scratchName)
 
-			const theirs = await open(other, (await waitForListingSettled(other)).listbox, name)
+			const theirs = await openFromListing(other, (await waitForListingSettled(other)).listbox, name)
 
 			await expectCell(theirs, "B2", "1200", LAZY_VIEWER_TIMEOUT_MS)
 			await typeInto(other, theirs, "B2", "2000")
@@ -185,13 +139,13 @@ test("a save made elsewhere is asked about over unsaved edits, which can go into
 			// This tab now shows the newer version; its edits went into a conflicted copy beside it.
 			await expectCell(mine, "B2", "2000", LAZY_VIEWER_TIMEOUT_MS)
 			await expectCell(mine, "A4", "")
-			await close(page)
+			await closeDialog(page, dialogOf(page))
 
-			const copy = await open(page, listbox, /\(conflicted copy .*\)\.xlsx/)
+			const copy = await openFromListing(page, listbox, /\(conflicted copy .*\)\.xlsx/)
 
 			await expectCell(copy, "A4", "Mine only", LAZY_VIEWER_TIMEOUT_MS)
 			await expectCell(copy, "B2", "1200")
-			await close(page)
+			await closeDialog(page, dialogOf(page))
 		})
 	} finally {
 		for (const tab of tabs) await tab.close()
@@ -211,7 +165,7 @@ test("a CSV saves as an .xlsx copy holding its unsaved edits, and a sheet downlo
 			listbox
 		)
 
-		let dialog = await open(page, listbox, nameCsv)
+		let dialog = await openFromListing(page, listbox, nameCsv)
 
 		await expectCell(dialog, "A2", "Apples", LAZY_VIEWER_TIMEOUT_MS)
 		await typeInto(page, dialog, "A4", "Pears")
@@ -245,13 +199,13 @@ test("a CSV saves as an .xlsx copy holding its unsaved edits, and a sheet downlo
 		expect([...bytes.subarray(0, 3)]).toEqual([0xef, 0xbb, 0xbf])
 		// Every row ends with a line end, the last too, as Excel and LibreOffice write CSV.
 		expect(bytes.subarray(3).toString("utf8")).toBe("Name,Qty\r\nApples,3\r\n007,=1+2\r\nPears,5\r\n")
-		await close(page)
+		await closeDialog(page, dialogOf(page))
 
 		// The CSV stays as it was last saved.
-		dialog = await open(page, listbox, nameCsv)
+		dialog = await openFromListing(page, listbox, nameCsv)
 		await expectCell(dialog, "A2", "Apples", LAZY_VIEWER_TIMEOUT_MS)
 		await expectCell(dialog, "A4", "")
-		await close(page)
+		await closeDialog(page, dialogOf(page))
 	})
 })
 
@@ -310,7 +264,7 @@ test("a password-protected workbook's saves store only its sealed package, and i
 			expect(stored.includes(Buffer.from(needle, "utf16le")), needle).toBe(false)
 		}
 
-		await close(page)
+		await closeDialog(page, dialogOf(page))
 		expect(await storedPassword(page, WORKBOOK_PASSWORD)).toEqual([])
 	})
 
@@ -342,7 +296,7 @@ test("each save is what the file opens on after a reload, never announced as mad
 		let previous = "Item"
 
 		for (const value of ["one", "two", "three"]) {
-			const dialog = await open(page, listbox, name)
+			const dialog = await openFromListing(page, listbox, name)
 
 			// Opened at once from the listing restored from disk: the version saved last, no notice of it.
 			await expectCell(dialog, "A1", previous, LIVE_WRITE_TIMEOUT_MS)
@@ -355,14 +309,14 @@ test("each save is what the file opens on after a reload, never announced as mad
 			await expect(saveButton).toBeVisible()
 			await page.keyboard.press(`${mod}+S`)
 			await expect(saveButton).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
-			await close(page)
+			await closeDialog(page, dialogOf(page))
 			await reloadAfterWrite(page)
 			previous = value
 		}
 
-		const dialog = await open(page, listbox, name)
+		const dialog = await openFromListing(page, listbox, name)
 
 		await expectCell(dialog, "A1", "three", LIVE_WRITE_TIMEOUT_MS)
-		await close(page)
+		await closeDialog(page, dialogOf(page))
 	})
 })
