@@ -10,6 +10,7 @@ import {
 } from "@filen/office/core/docx/edit"
 import { DocxEditToolbar, type DocxEditToolbarProps } from "@/features/preview/components/docxEditToolbar"
 import { themeSwatches } from "@/features/preview/components/docxEditor.logic"
+import { createDocxPageStore } from "@/features/preview/components/docxGoTo.logic"
 import "@/lib/i18n"
 
 // The Word editor's ribbon on its own, as its tests render it: a snapshot with every command enabled, the
@@ -114,6 +115,8 @@ export function renderRibbon(props: Partial<DocxEditToolbarProps> = {}) {
 	const onFindOpen = vi.fn()
 	const onZoom = vi.fn()
 	const onReflowChange = vi.fn()
+	const onGoTo = vi.fn()
+	const pages = createDocxPageStore()
 	const clipboard = { cut: vi.fn(), copy: vi.fn(), paste: vi.fn() }
 
 	const result = render(
@@ -145,7 +148,11 @@ export function renderRibbon(props: Partial<DocxEditToolbarProps> = {}) {
 			markup={null}
 			onMarkupChange={vi.fn()}
 			zoom={1}
+			zoomFit={false}
 			onZoom={onZoom}
+			pages={pages}
+			onGoTo={onGoTo}
+			onGoToClosed={vi.fn()}
 			reflow={false}
 			onReflowChange={onReflowChange}
 			surface="pages"
@@ -162,5 +169,5 @@ export function renderRibbon(props: Partial<DocxEditToolbarProps> = {}) {
 		/>
 	)
 
-	return { ...result, execute, onPainterCancel, requestInput, onFindOpen, onZoom, onReflowChange, clipboard }
+	return { ...result, execute, onPainterCancel, requestInput, onFindOpen, onZoom, onReflowChange, onGoTo, pages, clipboard }
 }

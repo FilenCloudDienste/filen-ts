@@ -188,7 +188,6 @@ export function ZoomControls({
 	onFit: (fit: ZoomFit) => void
 }) {
 	const { t } = useTranslation("preview")
-	const value = mode === "custom" ? String(percent) : mode
 
 	return (
 		<>
@@ -204,42 +203,14 @@ export function ZoomControls({
 					icon={null}
 					text={t("previewPdfZoomIndicator", { percent })}
 				/>
-				<DropdownMenuContent
-					align="center"
-					data-preview-surface
-					className="min-w-36"
-				>
-					<DropdownMenuRadioGroup
-						value={value}
-						onValueChange={(next: string) => {
-							if (next === "fitWidth" || next === "fitPage") {
-								onFit(next)
-							} else {
-								onPercent(Number(next))
-							}
-						}}
-					>
-						{presets.map(preset => (
-							<DropdownMenuRadioItem
-								key={preset}
-								value={String(preset)}
-								closeOnClick
-							>
-								{t("previewPdfZoomIndicator", { percent: preset })}
-							</DropdownMenuRadioItem>
-						))}
-						{fits.length > 0 ? <DropdownMenuSeparator /> : null}
-						{fits.map(fit => (
-							<DropdownMenuRadioItem
-								key={fit}
-								value={fit}
-								closeOnClick
-							>
-								{t(fit === "fitWidth" ? "previewDocxFitWidth" : "previewCommandBarFitPage")}
-							</DropdownMenuRadioItem>
-						))}
-					</DropdownMenuRadioGroup>
-				</DropdownMenuContent>
+				<ZoomMenuContent
+					percent={percent}
+					presets={presets}
+					fits={fits}
+					mode={mode}
+					onPercent={onPercent}
+					onFit={onFit}
+				/>
 			</DropdownMenu>
 			<RibbonButton
 				label={t("previewPdfZoomInAction")}
@@ -248,6 +219,69 @@ export function ZoomControls({
 				onClick={onIn}
 			/>
 		</>
+	)
+}
+
+// The zoom menu's popup (inside a DropdownMenu, after its trigger): the steps, then the fits a viewer offers, the
+// one in effect checked. `finalFocus`: where focus goes as it closes (the trigger's default otherwise).
+export function ZoomMenuContent({
+	percent,
+	presets,
+	fits,
+	mode,
+	onPercent,
+	onFit,
+	finalFocus
+}: {
+	percent: number
+	presets: readonly number[]
+	fits: readonly ZoomFit[]
+	mode: ZoomFit | "custom"
+	onPercent: (percent: number) => void
+	onFit: (fit: ZoomFit) => void
+	finalFocus?: () => HTMLElement | boolean
+}) {
+	const { t } = useTranslation("preview")
+	const value = mode === "custom" ? String(percent) : mode
+
+	return (
+		<DropdownMenuContent
+			align="center"
+			data-preview-surface
+			className="min-w-36"
+			{...(finalFocus === undefined ? {} : { finalFocus })}
+		>
+			<DropdownMenuRadioGroup
+				value={value}
+				onValueChange={(next: string) => {
+					if (next === "fitWidth" || next === "fitPage") {
+						onFit(next)
+					} else {
+						onPercent(Number(next))
+					}
+				}}
+			>
+				{presets.map(preset => (
+					<DropdownMenuRadioItem
+						key={preset}
+						value={String(preset)}
+						closeOnClick
+					>
+						{t("previewPdfZoomIndicator", { percent: preset })}
+					</DropdownMenuRadioItem>
+				))}
+				{fits.length > 0 ? <DropdownMenuSeparator /> : null}
+				{fits.map(fit => (
+					<DropdownMenuRadioItem
+						key={fit}
+						value={fit}
+						closeOnClick
+					>
+						{t(fit === "fitWidth" ? "previewDocxFitWidth" : "previewCommandBarFitPage")}
+					</DropdownMenuRadioItem>
+				))}
+			</DropdownMenuRadioGroup>
+		</DropdownMenuContent>
 	)
 }
 

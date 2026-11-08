@@ -45,6 +45,7 @@ import {
 	editorMarks,
 	editorViewOnlyReasons,
 	firstMatchFrom,
+	hostKeyAction,
 	replaceAllToast,
 	lockReasonKey,
 	featureLanded,
@@ -57,6 +58,8 @@ import {
 	styleLabel
 } from "@/features/preview/components/docxEditor.logic"
 import { viewOnlyReasonKey, viewOnlyReasons } from "@/features/preview/components/docxViewer.logic"
+import { commandNeedsAuthor } from "@/features/preview/components/docxAuthorGate.logic"
+import { hostCommandForKey, type KeyLike } from "@filen/office/core/docx/paged"
 import { preview as en } from "@/locales/en/preview"
 
 const VALUES = NO_VALUES
@@ -155,6 +158,11 @@ describe("docx editor toolbar logic", () => {
 		expect(shortcutKeys("mod+shift+z", true)).toEqual(["⌘", "⇧", "Z"])
 		expect(shortcutKeys("mod+alt+1", false)).toEqual(["Ctrl", "Alt", "1"])
 		expect(shortcutKeys("mod+space", false)).toEqual(["Ctrl", "Space"])
+		expect(shortcutKeys("mod+enter", false)).toEqual(["Ctrl", "Enter"])
+		expect(shortcutKeys("mod+enter", true)).toEqual(["⌘", "↩"])
+		// Control itself, whatever the platform's mod key.
+		expect(shortcutKeys("ctrl+space", true)).toEqual(["⌃", "Space"])
+		expect(shortcutKeys("ctrl+shift+m", false)).toEqual(["Ctrl", "Shift", "M"])
 	})
 
 	it("explains read-only editing with keys that exist", () => {
@@ -657,7 +665,14 @@ describe("context menu and row room for pictures and links", () => {
 
 		expect(actions["link.set"]).toBe("input")
 		expect(actions["link.remove"]).toBe("run")
-		expect(contextCommands(snapshot(), false).some(command => command.info.type.startsWith("link."))).toBe(false)
+		// Outside a link, Link inserts one (as Word's text menu does); there is nothing to remove.
+		const outside = Object.fromEntries(contextCommands(snapshot(), false).map(command => [command.info.type, command.action]))
+
+		expect(outside["link.set"]).toBe("input")
+		expect(outside["link.remove"]).toBeUndefined()
+		// Paragraph… opens the paragraph dialog anywhere in text.
+		expect(outside["paragraph.indent"]).toBe("input")
+		expect(contextCommands(snapshot(), true).some(command => command.info.type === "paragraph.indent")).toBe(false)
 		// A new comment asks for its text, a change at the caret is accepted as it is.
 		const review = { ...REVIEW, current: "7", revisionCount: 1 }
 		const atChange = Object.fromEntries(
@@ -708,5 +723,58 @@ describe("replaceAllToast", () => {
 		expect(replaceAllToast({ refused: "tooLarge" }, false)).toEqual({ key: "previewDocxReplaceAllTooLarge" })
 		expect(replaceAllToast({ refused: "unreplaceable" }, false)).toEqual({ key: "previewDocxReplaceAllUnreplaceable" })
 		expect(replaceAllToast(null, false)).toBeUndefined()
+	})
+})
+
+describe("docx editor Word review keys", () => {
+	const press = (key: string, code: string, mods: Partial<KeyLike>): KeyLike => ({
+		key,
+		code,
+		ctrlKey: false,
+		metaKey: false,
+		shiftKey: false,
+		altKey: false,
+		...mods
+	})
+
+	it("toggles Track Changes with Mod+Shift+E: on asks for the author, off never does", () => {
+		for (const apple of [false, true]) {
+			const type = hostCommandForKey(press("E", "KeyE", { [apple ? "metaKey" : "ctrlKey"]: true, shiftKey: true }), apple)
+
+			expect(type).toBe("review.track")
+
+			if (type === undefined) {
+				continue
+			}
+
+			const on = hostKeyAction(type, snapshot(), false)
+
+			expect(on).toEqual({ kind: "execute", command: { type: "review.track", on: true } })
+			expect(on?.kind === "execute" && commandNeedsAuthor(on.command, REVIEW)).toBe(true)
+
+			const tracking = { ...REVIEW, tracking: true, authorNeeded: true }
+			const off = hostKeyAction(type, snapshot({ review: tracking }), false)
+
+			expect(off).toEqual({ kind: "execute", command: { type: "review.track", on: false } })
+			expect(off?.kind === "execute" && commandNeedsAuthor(off.command, tracking)).toBe(false)
+			expect(hostKeyAction(type, snapshot(), true)).toBeNull()
+		}
+	})
+
+	it("opens a new comment with Ctrl+Alt+M, Cmd+Option+A on Apple platforms", () => {
+		const windows = hostCommandForKey(press("m", "KeyM", { ctrlKey: true, altKey: true }), false)
+		const apple = hostCommandForKey(press("å", "KeyA", { metaKey: true, altKey: true }), true)
+
+		expect(windows).toBe("comment.add")
+		expect(apple).toBe("comment.add")
+
+		if (windows === undefined) {
+			return
+		}
+
+		expect(hostKeyAction(windows, snapshot(), false)).toEqual({ kind: "input", type: "comment.add" })
+		expect(hostKeyAction(windows, snapshot(), true)).toBeNull()
+		expect(hostKeyAction(windows, snapshot({ enabled: { ...snapshot().enabled, "comment.add": false } }), false)).toBeNull()
+		expect(hostKeyAction(windows, undefined, false)).toBeNull()
 	})
 })

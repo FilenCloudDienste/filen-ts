@@ -246,14 +246,14 @@ describe("DocxEditView routing", () => {
 		await openEditor("04-comments-tracked.docx")
 		// 900 px less the 280 px column, less the gutters, over the A4 page's 794 px.
 		await waitFor(() => {
-			expect(screen.getByRole("button", { name: /^Zoom 74%/ })).toBeTruthy()
+			expect(screen.getByRole("button", { name: /^Zoom level, 74%/ })).toBeTruthy()
 		})
 		cleanup()
 
 		// Without comments the pages take the width.
 		await openEditor("01-plain.docx")
 		await waitFor(() => {
-			expect(screen.getByRole("button", { name: /^Zoom 100%/ })).toBeTruthy()
+			expect(screen.getByRole("button", { name: /^Zoom level, 100%/ })).toBeTruthy()
 		})
 	})
 

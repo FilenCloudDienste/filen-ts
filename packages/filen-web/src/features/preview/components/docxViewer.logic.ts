@@ -19,6 +19,7 @@ import type { DriveItem } from "@/features/drive/lib/item"
 import type { DriveVariant } from "@/features/drive/lib/preferences"
 import { extensionOf, itemFileKind } from "@/features/drive/lib/preview.logic"
 import type { PreviewKey } from "@/lib/i18n"
+import type { ZoomFit } from "@/features/preview/components/commandBar.logic"
 
 // A `.dot` is a Word 97–2003 template or a text file (Graphviz) under the same extension: bytes that are neither a
 // compound file nor a zip package are text.
@@ -39,6 +40,10 @@ const FALLBACK_REASONS: ReadonlySet<DocxErrorReason> = new Set<DocxErrorReason>(
 // The main part's uncompressed size when the engine read the zip directory, else the file's own size.
 export const FALLBACK_MAX_MAIN_PART_BYTES = 24 * 1024 * 1024
 export const FALLBACK_MAX_FILE_BYTES = 8 * 1024 * 1024
+
+// The zoom menu's steps (percent) and fits, in the viewer and the editor alike.
+export const DOCX_ZOOM_PRESETS: readonly number[] = [50, 75, 100, 125, 150, 200, 300, 400]
+export const DOCX_ZOOM_FITS: readonly ZoomFit[] = ["fitWidth"]
 
 export type DocxFailure = { readonly fallback: boolean; readonly detail: string } | null
 

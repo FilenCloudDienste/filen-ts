@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react"
+import { useState, useSyncExternalStore, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import type { TFunction } from "i18next"
 import {
@@ -30,11 +30,11 @@ import {
 	UnderlineIcon,
 	Undo2Icon,
 	ZoomInIcon,
-	ZoomOutIcon,
 	type LucideIcon
 } from "lucide-react"
 import {
 	parseDocxEditorCommand,
+	shortcutHint,
 	type DocxEditorCommand,
 	type DocxEditorCommandInfo,
 	type DocxEditorSnapshot,
@@ -42,7 +42,7 @@ import {
 	type DocxParagraphStyle,
 	type LockReason
 } from "@filen/office/core/docx/edit"
-import type { DocxMarkupMode } from "@filen/office/dom/docx"
+import { canZoomIn, canZoomOut, type DocxMarkupMode } from "@filen/office/dom/docx"
 import { cn } from "@filen/shared"
 import {
 	COMMAND_LABELS,
@@ -70,8 +70,16 @@ import { useCommandMenuFocus } from "@/features/preview/components/docxInsert.lo
 import { DocxBreaksMenu } from "@/features/preview/components/docxInsertMenu"
 import { docxInsertGroups, docxReferencesGroups, docxReviewGroups, docxTableGroups } from "@/features/preview/components/docxRibbonGroups"
 import { reflowCommands } from "@/features/preview/components/docxReflow.logic"
-import type { DocxFindControls, DocxViewOnlyReason } from "@/features/preview/components/docxViewer.logic"
+import {
+	DOCX_ZOOM_FITS,
+	DOCX_ZOOM_PRESETS,
+	type DocxFindControls,
+	type DocxViewOnlyReason
+} from "@/features/preview/components/docxViewer.logic"
 import { DocxFindField, PasswordBadge, ViewOnlyBadge, type PasswordIntegrity } from "@/features/preview/components/docxToolbar"
+import { ZoomControls, ZoomMenuContent } from "@/features/preview/components/commandBarControls"
+import { ZOOM_CONTROLS_WIDTH } from "@/features/preview/components/commandBar.logic"
+import { goToPageIndex, type DocxPageStore } from "@/features/preview/components/docxGoTo.logic"
 import { OfficeRibbon, type RibbonGroup, type RibbonTab } from "@/features/office/components/ribbon/officeRibbon"
 import { RibbonButton, RibbonMenuTrigger } from "@/features/office/components/ribbon/ribbonControls"
 import { Badge } from "@/components/ui/badge"
@@ -81,13 +89,15 @@ import {
 	DropdownMenuContent,
 	DropdownMenuItem,
 	DropdownMenuRadioGroup,
-	DropdownMenuRadioItem
+	DropdownMenuRadioItem,
+	DropdownMenuTrigger
 } from "@/components/ui/dropdown-menu"
+import { Input } from "@/components/ui/input"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
 import { Kbd, KbdKeys } from "@/lib/keymap/kbd"
+import { desktopBridge } from "@/lib/desktop"
 
 // The Word document editor's ribbon (officeRibbon.tsx), as Word for the web's simplified ribbon: File, Home
 // (undo, clipboard, font, paragraph, styles, editing), Insert, Layout, References, Review, View, and the contextual
@@ -113,6 +123,8 @@ const ICONS: Readonly<Record<string, LucideIcon>> = {
 	redo: Redo2Icon
 }
 
+// In a browser, keys the browser keeps for itself are not advertised (the desktop app delivers them).
+const BROWSER = desktopBridge() === undefined
 const HISTORY = rowCommands("history")
 const FORMAT = rowCommands("format")
 const ALIGN = rowCommands("align")
@@ -134,6 +146,8 @@ const PAGE_SETUP = COMMAND_LABELS["page.setup"] !== undefined
 // A button's width with its gap, a dropdown trigger's, as the browsers lay them out (ribbonFit's estimates).
 const BUTTON = 30
 const MENU = 44
+// View ▸ Zoom's 100% button.
+const ZOOM_100 = 52
 
 // The editor's own clipboard commands (the context menu's), for the Clipboard group.
 export interface DocxRibbonClipboard {
@@ -161,7 +175,16 @@ export interface DocxEditToolbarProps {
 	markup: DocxMarkupMode | null
 	onMarkupChange: (mode: DocxMarkupMode) => void
 	zoom: number
-	onZoom: (change: "in" | "out" | "fit") => void
+	// Zoom follows the width of the view.
+	zoomFit: boolean
+	// A step in or out, fit to width, or a zoom (1 = 100 %).
+	onZoom: (change: "in" | "out" | "fit" | number) => void
+	// The page in view and the page count (the status bar's Page X of Y), and whether Go To is open.
+	pages: DocxPageStore
+	// Go To: the caret to the page (index) and the page into view.
+	onGoTo: (page: number) => void
+	// Go To closed: focus back to the document.
+	onGoToClosed: () => void
 	// The reflowed (mobile) view instead of pages.
 	reflow: boolean
 	onReflowChange: (reflow: boolean) => void
@@ -214,6 +237,7 @@ function CommandButton({
 	const { info, label } = command
 	const Icon = ICONS[info.icon ?? ""] ?? BoldIcon
 	const toggle = info.group === "format" && info.type !== "format.clear"
+	const shortcut = shortcutHint(info, apple, BROWSER)
 
 	return (
 		<TooltipIconButton
@@ -221,7 +245,7 @@ function CommandButton({
 			disabled={disabled}
 			pressed={toggle || info.group === "align" || info.type === "list.bullet" || info.type === "list.numbered" ? active : undefined}
 			className={cn(active && "bg-accent text-foreground")}
-			shortcut={info.shortcut === undefined ? undefined : <KbdKeys keys={shortcutKeys(info.shortcut, apple)} />}
+			shortcut={shortcut === undefined ? undefined : <KbdKeys keys={shortcutKeys(shortcut, apple)} />}
 			onMouseDown={keepFocus}
 			onClick={() => {
 				run(info, execute)
@@ -448,8 +472,10 @@ function LineSpacingMenu({
 }
 
 // Find ▾: find, or find and replace.
-function FindMenu({ onFindOpen }: { onFindOpen: (replace: boolean) => void }) {
+// Word's Find and Replace is Ctrl+H, Control+H on a Mac (findForKey); shown as a hint, kept out of the item's name.
+function FindMenu({ onFindOpen, apple }: { onFindOpen: (replace: boolean) => void; apple: boolean }) {
 	const { t } = useTranslation("preview")
+	const replaceCombo = apple ? "ctrl+h" : "mod+h"
 
 	return (
 		<DropdownMenu>
@@ -467,14 +493,136 @@ function FindMenu({ onFindOpen }: { onFindOpen: (replace: boolean) => void }) {
 					{t("previewDocxFindAction")}
 				</DropdownMenuItem>
 				<DropdownMenuItem
+					aria-keyshortcuts="Control+H"
 					onClick={() => {
 						onFindOpen(true)
 					}}
 				>
 					{t("previewDocxFindReplaceAction")}
+					<span
+						className="ml-auto pl-4"
+						aria-hidden
+					>
+						<KbdKeys keys={shortcutKeys(replaceCombo, apple)} />
+					</span>
 				</DropdownMenuItem>
 			</DropdownMenuContent>
 		</DropdownMenu>
+	)
+}
+
+// The status bar's zoom percentage: the zoom menu (steps, fit to width), as Word's opens its Zoom dialog.
+function StatusZoomMenu({ percent, fit, onZoom }: { percent: number; fit: boolean; onZoom: (change: "fit" | number) => void }) {
+	const { t } = useTranslation("preview")
+	const focus = useCommandMenuFocus()
+
+	return (
+		<DropdownMenu onOpenChange={focus.opened}>
+			<DropdownMenuTrigger
+				render={
+					<Button
+						variant="ghost"
+						size="xs"
+						aria-label={t("previewCommandBarZoomLevel", { percent })}
+						className="w-12 shrink-0 px-0 text-muted-foreground tabular-nums max-sm:hidden"
+						onMouseDown={keepFocus}
+					>
+						{t("previewDocxZoomIndicator", { percent })}
+					</Button>
+				}
+			/>
+			<ZoomMenuContent
+				percent={percent}
+				presets={DOCX_ZOOM_PRESETS}
+				fits={DOCX_ZOOM_FITS}
+				mode={fit ? "fitWidth" : "custom"}
+				finalFocus={focus.finalFocus}
+				onPercent={next => {
+					focus.kept()
+					onZoom(next / 100)
+				}}
+				onFit={() => {
+					focus.kept()
+					onZoom("fit")
+				}}
+			/>
+		</DropdownMenu>
+	)
+}
+
+// The status bar's Page X of Y (the page in view), opening Go To as Word's does, as Ctrl+G does: a page number
+// typed and Enter puts the caret at that page's start.
+function PageIndicator({ pages, onGoTo, onClosed }: { pages: DocxPageStore; onGoTo: (page: number) => void; onClosed: () => void }) {
+	const { t } = useTranslation("preview")
+	const { page, count, goTo } = useSyncExternalStore(pages.subscribe, pages.get)
+	const [draft, setDraft] = useState("")
+	const target = goToPageIndex(draft, count)
+
+	if (count === 0) {
+		return null
+	}
+
+	return (
+		<Popover
+			open={goTo}
+			onOpenChange={pages.setGoTo}
+			onOpenChangeComplete={open => {
+				if (!open) {
+					setDraft("")
+					onClosed()
+				}
+			}}
+		>
+			<PopoverTrigger
+				render={
+					<Button
+						variant="ghost"
+						size="xs"
+						aria-label={t("previewDocxPageIndicatorAction", { current: page + 1, total: count })}
+						className="shrink-0 px-1.5 text-muted-foreground tabular-nums"
+						onMouseDown={keepFocus}
+					>
+						{t("previewDocxPageIndicator", { current: page + 1, total: count })}
+					</Button>
+				}
+			/>
+			<PopoverContent
+				align="end"
+				className="w-64 gap-2"
+				finalFocus={false}
+				data-preview-surface
+			>
+				<form
+					className="flex items-center gap-2"
+					onSubmit={event => {
+						event.preventDefault()
+
+						if (target !== null) {
+							onGoTo(target)
+							pages.setGoTo(false)
+						}
+					}}
+				>
+					<Input
+						inputMode="numeric"
+						aria-label={t("previewDocxGoToPage")}
+						placeholder={t("previewDocxGoToPage")}
+						value={draft}
+						className="leading-5"
+						onChange={event => {
+							setDraft(event.target.value.replace(/\D/g, ""))
+						}}
+					/>
+					<Button
+						type="submit"
+						size="sm"
+						disabled={target === null}
+					>
+						{t("previewDocxGoToAction")}
+					</Button>
+				</form>
+			</PopoverContent>
+		</Popover>
 	)
 }
 
@@ -660,7 +808,12 @@ export function DocxEditToolbar(props: DocxEditToolbarProps) {
 					width: MENU,
 					priority: 2,
 					single: true,
-					content: <FindMenu onFindOpen={props.onFindOpen} />
+					content: (
+						<FindMenu
+							onFindOpen={props.onFindOpen}
+							apple={apple}
+						/>
+					)
 				}
 			)
 			break
@@ -729,22 +882,36 @@ export function DocxEditToolbar(props: DocxEditToolbarProps) {
 				id: "zoom",
 				label: t("previewOfficeRibbonZoom"),
 				icon: ZoomInIcon,
-				width: 3 * BUTTON,
+				width: ZOOM_CONTROLS_WIDTH + ZOOM_100 + BUTTON,
 				priority: 3,
 				content: (
 					<>
-						<RibbonButton
-							label={t("previewDocxZoomOutAction")}
-							icon={<ZoomOutIcon />}
-							onClick={() => {
+						<ZoomControls
+							percent={percent}
+							presets={DOCX_ZOOM_PRESETS}
+							fits={DOCX_ZOOM_FITS}
+							mode={props.zoomFit ? "fitWidth" : "custom"}
+							canIn={canZoomIn(props.zoom)}
+							canOut={canZoomOut(props.zoom)}
+							onIn={() => {
+								props.onZoom("in")
+							}}
+							onOut={() => {
 								props.onZoom("out")
+							}}
+							onPercent={next => {
+								props.onZoom(next / 100)
+							}}
+							onFit={() => {
+								props.onZoom("fit")
 							}}
 						/>
 						<RibbonButton
-							label={t("previewDocxZoomInAction")}
-							icon={<ZoomInIcon />}
+							label={t("previewDocxZoom100Action")}
+							icon={null}
+							text={t("previewDocxZoomIndicator", { percent: 100 })}
 							onClick={() => {
-								props.onZoom("in")
+								props.onZoom(1)
 							}}
 						/>
 						<RibbonButton
@@ -844,25 +1011,18 @@ export function DocxEditToolbar(props: DocxEditToolbarProps) {
 							/>
 						)}
 						{locked === null ? null : <LockedBadge reason={locked} />}
-						<Tooltip>
-							<TooltipTrigger
-								render={
-									<Button
-										variant="ghost"
-										size="xs"
-										aria-label={t("previewDocxFitWidthAction", { percent })}
-										className="w-12 shrink-0 px-0 text-muted-foreground tabular-nums max-sm:hidden"
-										onMouseDown={keepFocus}
-										onClick={() => {
-											props.onZoom("fit")
-										}}
-									>
-										{t("previewDocxZoomIndicator", { percent })}
-									</Button>
-								}
+						{props.surface === "reflow" ? null : (
+							<PageIndicator
+								pages={props.pages}
+								onGoTo={props.onGoTo}
+								onClosed={props.onGoToClosed}
 							/>
-							<TooltipContent>{t("previewDocxFitWidth")}</TooltipContent>
-						</Tooltip>
+						)}
+						<StatusZoomMenu
+							percent={percent}
+							fit={props.zoomFit}
+							onZoom={props.onZoom}
+						/>
 					</>
 				}
 				groups={groups}

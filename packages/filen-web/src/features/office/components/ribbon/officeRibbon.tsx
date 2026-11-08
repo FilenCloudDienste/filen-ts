@@ -1,4 +1,13 @@
-import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent, type ReactNode } from "react"
+import {
+	useEffect,
+	useEffectEvent,
+	useRef,
+	useState,
+	type KeyboardEvent as ReactKeyboardEvent,
+	type MouseEvent,
+	type ReactNode
+} from "react"
+import { createPortal } from "react-dom"
 import { useTranslation } from "react-i18next"
 import { Popover as PopoverPrimitive } from "@base-ui/react/popover"
 import { Tabs } from "@base-ui/react/tabs"
@@ -13,6 +22,15 @@ import { setRibbonCollapsed, useRibbonCollapsed } from "@/features/office/lib/ri
 import { ribbonFit, type RibbonGroupState } from "@/features/office/components/ribbon/ribbonFit"
 import { RibbonToolbar } from "@/features/office/components/ribbon/ribbonToolbar"
 import { usePhoneWidth } from "@/features/office/components/ribbon/phoneMedia"
+import {
+	FILE_KEYTIP,
+	controlKeyTips,
+	createKeyTipTrigger,
+	keyTipCharacters,
+	matchKeyTip,
+	tabKeyTips
+} from "@/features/office/components/ribbon/ribbonKeyTips"
+import { desktopPlatform } from "@/lib/desktop"
 import { KbdKeys } from "@/lib/keymap/kbd"
 import { useElementSize } from "@/lib/useElementSize"
 
@@ -20,7 +38,7 @@ import { useElementSize } from "@/lib/useElementSize"
 // first, contextual tabs after the rest while their object is selected, status badges and the collapse switch at the
 // end) over one row of the selected tab's command groups. Groups the row has no room for collapse into a dropdown
 // each, then move into its overflow menu (ribbonFit). "Show tabs only" (the chevron, Ctrl+F1) hides the command row
-// until a tab is clicked. Only the selected tab's groups are rendered.
+// until a tab is clicked. Only the selected tab's groups are rendered. KeyTips (RibbonKeyTips) drive it from the keyboard.
 //
 // The document viewers' command bar (OfficeCommandBar) is that command row on its own, with no tab row: the File menu
 // first, then the groups, then the status.
@@ -357,11 +375,309 @@ export function CommandRow({
 	)
 }
 
+interface KeyTipBadge {
+	readonly tip: string
+	readonly element: HTMLElement
+	readonly x: number
+	readonly y: number
+}
+
+interface KeyTipLayer {
+	readonly level: "tabs" | "commands"
+	readonly typed: string
+	// Measured once the level's targets are on screen.
+	readonly badges: readonly KeyTipBadge[] | null
+}
+
+// A command's target in the row: a group's controls, a collapsed group's button and the overflow's.
+const KEYTIP_CONTROL =
+	'button, input, select, textarea, [role="button"], [role="combobox"], [role="checkbox"], [role="switch"], [role="radio"]'
+const KEYTIP_FIELD = 'input, select, textarea, [role="combobox"]'
+
+function keyTipTargetShown(element: HTMLElement): DOMRect | null {
+	if (element.matches(":disabled") || element.getAttribute("aria-disabled") === "true") return null
+
+	const rect = element.getBoundingClientRect()
+
+	return rect.width > 0 && rect.height > 0 ? rect : null
+}
+
+function tabBadges(root: HTMLElement, tabs: readonly RibbonTab[]): KeyTipBadge[] {
+	const tips = tabKeyTips(tabs)
+	const badges: KeyTipBadge[] = []
+	const add = (element: HTMLElement | null, tip: string): void => {
+		const rect = element === null ? null : keyTipTargetShown(element)
+
+		if (element !== null && rect !== null) badges.push({ tip, element, x: rect.left + rect.width / 2, y: rect.bottom })
+	}
+
+	add(root.querySelector<HTMLElement>("[data-ribbon-file]"), FILE_KEYTIP)
+
+	for (const element of root.querySelectorAll<HTMLElement>("[data-ribbon-tab]")) {
+		const index = tabs.findIndex(tab => tab.id === element.dataset["ribbonTab"])
+		const tip = tips[index]
+
+		if (tip !== undefined) add(element, tip)
+	}
+
+	return badges
+}
+
+function commandBadges(panel: HTMLElement): KeyTipBadge[] {
+	const targets: HTMLElement[] = []
+	const rects: DOMRect[] = []
+	const seen = new Set<Element>()
+
+	for (const element of panel.querySelectorAll<HTMLElement>(
+		`[data-ribbon-popup-trigger], [role="group"][data-ribbon-group] :is(${KEYTIP_CONTROL})`
+	)) {
+		seen.add(element)
+
+		// A control inside another (a combobox's button) is the outer one's.
+		let parent = element.parentElement
+		let nested = false
+
+		while (parent !== null && parent !== panel && !nested) {
+			nested = seen.has(parent)
+			parent = parent.parentElement
+		}
+
+		const rect = nested ? null : keyTipTargetShown(element)
+
+		if (rect !== null) {
+			targets.push(element)
+			rects.push(rect)
+		}
+	}
+
+	const tips = controlKeyTips(targets.map(element => element.getAttribute("aria-label") ?? element.textContent))
+	const badges: KeyTipBadge[] = []
+
+	targets.forEach((element, index) => {
+		const rect = rects[index]
+		const tip = tips[index]
+
+		if (rect !== undefined && tip !== undefined) badges.push({ tip, element, x: rect.left + rect.width / 2, y: rect.bottom })
+	})
+
+	return badges
+}
+
+// KeyTips (Alt+Windows / Alt+Command, and on the Windows and Linux desktop shell a bare Alt or F10, as in Office): badges
+// on the File menu and the tabs, then, once a tab is picked, on its commands; typing a tip picks its target. Escape goes
+// back a level; a click, another key or the trigger again hides them. Idle, it is two key listeners and renders nothing.
+function RibbonKeyTips({
+	root,
+	panel,
+	tabs,
+	onTab,
+	onBack
+}: {
+	root: HTMLElement | null
+	panel: HTMLElement | null
+	tabs: readonly RibbonTab[]
+	onTab: (tab: string) => void
+	onBack: () => void
+}) {
+	const [layer, setLayer] = useState<KeyTipLayer | null>(null)
+	const [trigger] = useState(() => {
+		const platform = desktopPlatform()
+
+		return createKeyTipTrigger(platform !== undefined && platform !== "darwin" ? "alt" : "chord")
+	})
+	const active = layer !== null
+
+	const pick = (badge: KeyTipBadge, level: KeyTipLayer["level"]): void => {
+		if (level === "tabs" && badge.element.dataset["ribbonTab"] !== undefined) {
+			onTab(badge.element.dataset["ribbonTab"])
+			setLayer({ level: "commands", typed: "", badges: null })
+
+			return
+		}
+
+		setLayer(null)
+
+		if (badge.element.matches(KEYTIP_FIELD) && badge.element.tagName !== "BUTTON") {
+			badge.element.focus()
+		} else {
+			badge.element.click()
+		}
+	}
+
+	const onKeyDown = useEffectEvent((event: KeyboardEvent): void => {
+		const fired = trigger.keydown(event)
+
+		if (fired) {
+			if (layer !== null || keyTipsAllowed(root, event.target)) {
+				event.preventDefault()
+				setLayer(layer === null ? { level: "tabs", typed: "", badges: null } : null)
+			}
+
+			return
+		}
+
+		if (layer === null || event.isComposing || MODIFIERS.has(event.key)) return
+
+		if (event.key === "Escape" && !event.ctrlKey && !event.metaKey && !event.altKey) {
+			event.preventDefault()
+			event.stopImmediatePropagation()
+
+			if (layer.typed !== "") {
+				setLayer({ ...layer, typed: "" })
+			} else if (layer.level === "commands") {
+				onBack()
+				setLayer({ level: "tabs", typed: "", badges: null })
+			} else {
+				setLayer(null)
+			}
+
+			return
+		}
+
+		const characters = event.ctrlKey || event.metaKey || event.altKey ? [] : keyTipCharacters(event)
+
+		if (characters.length === 0) {
+			// Any other key (an arrow, Tab, a shortcut) hides them and does what it does.
+			setLayer(null)
+
+			return
+		}
+
+		event.preventDefault()
+		event.stopImmediatePropagation()
+
+		if (layer.badges === null) return
+
+		const tips = layer.badges.map(badge => badge.tip)
+
+		for (const character of characters) {
+			const match = matchKeyTip(tips, layer.typed + character)
+
+			if (match === "prefix") {
+				setLayer({ ...layer, typed: layer.typed + character })
+
+				return
+			}
+
+			const badge = match === null ? undefined : layer.badges[match]
+
+			if (badge !== undefined) {
+				pick(badge, layer.level)
+
+				return
+			}
+		}
+	})
+
+	const onKeyUp = useEffectEvent((event: KeyboardEvent): void => {
+		if (!trigger.keyup(event) || (layer === null && !keyTipsAllowed(root, event.target))) return
+
+		event.preventDefault()
+		setLayer(layer === null ? { level: "tabs", typed: "", badges: null } : null)
+	})
+
+	useEffect(() => {
+		const down = (event: KeyboardEvent): void => {
+			onKeyDown(event)
+		}
+		const up = (event: KeyboardEvent): void => {
+			onKeyUp(event)
+		}
+		const reset = (): void => {
+			trigger.reset()
+		}
+
+		window.addEventListener("keydown", down, true)
+		window.addEventListener("keyup", up, true)
+		window.addEventListener("pointerdown", reset, true)
+
+		return () => {
+			window.removeEventListener("keydown", down, true)
+			window.removeEventListener("keyup", up, true)
+			window.removeEventListener("pointerdown", reset, true)
+		}
+	}, [trigger])
+
+	// A click anywhere, the window losing focus or resizing hides them.
+	useEffect(() => {
+		if (!active) return undefined
+
+		const dismiss = (): void => {
+			setLayer(null)
+		}
+
+		window.addEventListener("pointerdown", dismiss, true)
+		window.addEventListener("blur", dismiss)
+		window.addEventListener("resize", dismiss)
+
+		return () => {
+			window.removeEventListener("pointerdown", dismiss, true)
+			window.removeEventListener("blur", dismiss)
+			window.removeEventListener("resize", dismiss)
+		}
+	}, [active])
+
+	// The level's targets are measured once they are laid out (the picked tab's row rendered, a collapsed ribbon's shown).
+	const level = layer?.level
+	const measured = layer?.badges != null
+
+	useEffect(() => {
+		if (level === undefined || measured || root === null || (level === "commands" && panel === null)) return undefined
+
+		const frame = requestAnimationFrame(() => {
+			const badges = level === "tabs" || panel === null ? tabBadges(root, tabs) : commandBadges(panel)
+
+			setLayer(previous => (previous?.level === level && previous.badges === null ? { ...previous, badges } : previous))
+		})
+
+		return () => {
+			cancelAnimationFrame(frame)
+		}
+	}, [level, measured, root, panel, tabs])
+
+	if (layer?.badges == null) return null
+
+	return createPortal(
+		<div
+			aria-hidden="true"
+			data-ribbon-keytips={layer.level}
+			className="pointer-events-none fixed inset-0 z-50"
+		>
+			{layer.badges
+				.filter(badge => badge.tip.startsWith(layer.typed))
+				.map(badge => (
+					<span
+						key={badge.tip}
+						data-ribbon-keytip={badge.tip}
+						className="absolute -translate-x-1/2 -translate-y-1/2 rounded-sm border border-border bg-popover px-1 text-[11px] leading-4 font-medium text-popover-foreground shadow-sm"
+						style={{ left: badge.x, top: badge.y }}
+					>
+						{badge.tip}
+					</span>
+				))}
+		</div>,
+		document.body
+	)
+}
+
+const MODIFIERS = new Set(["Alt", "AltGraph", "Control", "Meta", "Shift", "OS", "CapsLock"])
+
+// The layer opens over the ribbon's own layer only: not from a dialog over it, nor while the ribbon is hidden or inert.
+function keyTipsAllowed(root: HTMLElement | null, target: EventTarget | null): boolean {
+	if (root === null || !root.isConnected || root.closest("[inert]") !== null) return false
+
+	const dialog = target instanceof Element ? target.closest('[role="dialog"], [role="alertdialog"]') : null
+
+	return dialog === null || dialog.contains(root)
+}
+
 export function OfficeRibbon(props: OfficeRibbonProps) {
 	const { t } = useTranslation("preview")
 	const collapsed = useRibbonCollapsed()
 	const phone = usePhoneWidth()
 	const [tabRow, setTabRow] = useState<HTMLDivElement | null>(null)
+	const [root, setRoot] = useState<HTMLDivElement | null>(null)
+	const [panel, setPanel] = useState<HTMLDivElement | null>(null)
 	// Show tabs only: the command row a clicked tab shows over the content until a command runs or focus leaves.
 	const peek = useRibbonPopup()
 	const peeking = collapsed && peek.open
@@ -416,6 +732,7 @@ export function OfficeRibbon(props: OfficeRibbonProps) {
 
 	const row = (
 		<Tabs.Panel
+			ref={setPanel}
 			value={props.tab}
 			tabIndex={-1}
 		>
@@ -434,9 +751,27 @@ export function OfficeRibbon(props: OfficeRibbonProps) {
 			onValueChange={(value: string) => {
 				props.onTab(value)
 			}}
+			ref={setRoot}
 			data-office-ribbon
 			className="shrink-0 border-b border-border"
 		>
+			<RibbonKeyTips
+				root={root}
+				panel={panel}
+				tabs={props.tabs}
+				onTab={tab => {
+					if (tab !== props.tab) props.onTab(tab)
+
+					// Show tabs only: the picked tab's row shows, focus staying in the document until a command runs.
+					if (collapsed) {
+						setPeekFocus(false)
+						setPeek(true)
+					}
+				}}
+				onBack={() => {
+					setPeek(false)
+				}}
+			/>
 			<div
 				ref={setTabRow}
 				className={cn("flex h-9 items-center gap-1 px-2", !collapsed && "border-b border-border/60")}
@@ -465,6 +800,7 @@ export function OfficeRibbon(props: OfficeRibbonProps) {
 						<Tabs.Tab
 							key={tab.id}
 							value={tab.id}
+							data-ribbon-tab={tab.id}
 							className={cn(
 								"shrink-0 border-b-2 border-transparent px-2.5 text-sm whitespace-nowrap text-muted-foreground outline-none hover:text-foreground focus-visible:rounded-md focus-visible:ring-3 focus-visible:ring-ring/30 aria-selected:border-primary aria-selected:font-medium aria-selected:text-foreground",
 								tab.contextual === true && "text-primary aria-selected:text-primary"

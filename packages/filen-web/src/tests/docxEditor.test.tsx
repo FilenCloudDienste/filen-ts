@@ -3,15 +3,17 @@
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, cleanup, createEvent, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { bytesSource } from "@filen/office/core/opc"
 import { buildDocxModel, openDocxPackage } from "@filen/office/core/docx"
-import { DocxEditorSession, openDocxEditContext } from "@filen/office/core/docx/edit"
-import type { PagedEditor } from "@filen/office/core/docx/paged"
+import { DocxEditorSession, findInStory, openDocxEditContext, selectMatch } from "@filen/office/core/docx/edit"
+import { TextSelection } from "prosemirror-state"
+import { docxBookmarkStart, type PagedEditor } from "@filen/office/core/docx/paged"
 import type { FontExtents, TextMeasurer } from "@filen/office/core/text"
 import type { DocxEditingHost } from "@filen/office/dom/docx/editing"
 import { i18n } from "@/lib/i18n"
 import { registerAllActions } from "@/lib/keymap/actions"
+import { isMacPlatform } from "@/lib/keymap/kbd.logic"
 
 // The DOCX editor's web side on a real document: the in-thread editing host with the writer's proof, the
 // toolbar's commands, dirty reporting, find, the overlay's save source and idle autosave. Text is measured by
@@ -22,6 +24,8 @@ const hooks = vi.hoisted(() => ({
 	settings: { authorName: null as string | null, autosave: true, loaded: true },
 	// What the context menu's Paste reads.
 	clipboard: null as { html?: string; text?: string } | null,
+	// The one word spelling flags (none when unset).
+	misspelled: undefined as string | undefined,
 	// Replaces the writer when set.
 	write: undefined as
 		| ((
@@ -76,12 +80,12 @@ vi.mock("@/features/preview/lib/docxEditing", async () => {
 		}
 	}
 })
-// Spelling checks nothing here (no dictionary for any language).
+// Spelling checks nothing here (no dictionary for any language), unless a test names a misspelled word.
 vi.mock("@/features/spellcheck/lib/spellcheck", () => ({
 	defaultSpellingLanguage: () => "en-US",
 	documentSpellingChecker: {
-		dictionaryFor: () => undefined,
-		known: () => undefined,
+		dictionaryFor: () => (hooks.misspelled === undefined ? undefined : "en-US"),
+		known: (_dictionary: string, word: string) => word !== hooks.misspelled,
 		check: () => Promise.resolve(),
 		suggest: () => Promise.resolve([]),
 		addToDictionary: () => Promise.resolve(),
@@ -101,6 +105,8 @@ vi.mock("@/features/preview/components/docxEditor.logic", async () => ({
 	AUTOSAVE_IDLE_MS: 200
 }))
 vi.mock("@/lib/useIsOnline", () => ({ useIsOnline: () => true }))
+// Followed links' domains are trusted here (no confirmation).
+vi.mock("@/lib/trustedLinks/trustedDomainsQuery", () => ({ useTrustedDomainsQuery: () => ({ data: new Set(["example.com"]) }) }))
 vi.mock("@/features/preview/lib/docxClipboard", async () => ({
 	...(await vi.importActual<typeof import("@/features/preview/lib/docxClipboard")>("@/features/preview/lib/docxClipboard")),
 	readEditorClipboard: () => Promise.resolve(hooks.clipboard)
@@ -165,6 +171,25 @@ function typeAtStart(editor: PagedEditor, text: string): void {
 	})
 }
 
+// Selects the first occurrence of `word` in the story being edited.
+function selectWord(editor: PagedEditor, word: string): void {
+	act(() => {
+		const match = findInStory(editor.state.doc, word)[0]
+		const tr = match === undefined ? null : selectMatch(editor.state, match)
+
+		if (tr === null) {
+			throw new Error(`no "${word}" to select`)
+		}
+
+		editor.dispatch(tr)
+	})
+}
+
+async function openFindField(): Promise<void> {
+	fireEvent.click(screen.getByRole("button", { name: "Find in document" }))
+	fireEvent.click(await screen.findByRole("menuitem", { name: "Find in document" }))
+}
+
 async function readBack(bytes: Uint8Array): Promise<string> {
 	const opened = await openDocxPackage(bytesSource(bytes))
 
@@ -183,6 +208,7 @@ afterEach(() => {
 	hooks.settings = { authorName: null, autosave: true, loaded: true }
 	hooks.write = undefined
 	hooks.clipboard = null
+	hooks.misspelled = undefined
 	vi.clearAllMocks()
 })
 
@@ -528,10 +554,14 @@ describe("DocxEditView", () => {
 
 		fireEvent.click(screen.getByRole("button", { name: "Find in document" }))
 
-		const items = (await screen.findAllByRole("menuitem")).map(item => item.textContent)
+		await screen.findAllByRole("menuitem")
 
-		expect(items).toEqual(["Find in document", "Find and replace"])
-		fireEvent.keyDown(screen.getByRole("menuitem", { name: "Find and replace" }), { key: "Escape" })
+		expect(screen.getAllByRole("menuitem").map(item => item.getAttribute("aria-keyshortcuts"))).toEqual([null, "Control+H"])
+		expect(screen.getByRole("menuitem", { name: "Find in document" })).toBeTruthy()
+
+		const replace = screen.getByRole("menuitem", { name: "Find and replace" })
+
+		fireEvent.keyDown(replace, { key: "Escape" })
 		fireEvent.click(screen.getByRole("tab", { name: "View" }))
 		expect((await screen.findByRole("button", { name: "Mobile view" })).getAttribute("aria-pressed")).toBe("false")
 		expect(screen.getByRole("textbox", { name: "report.docx" })).toBeTruthy()
@@ -764,6 +794,163 @@ describe("DocxEditView", () => {
 		fireEvent.click(await screen.findByRole("button", { name: "Split" }))
 		expect((await screen.findByRole("alert")).textContent).toBe("This cell can't be split into that many rows and columns.")
 		expect(screen.getByRole("dialog", { name: "Split cells" })).toBeTruthy()
+	})
+
+	it("adds up Ctrl+wheel zoom steps that arrive before the next render", async () => {
+		await openEditor()
+
+		const zoomOf = (): number =>
+			Number(/(\d+)%/.exec(screen.getByRole("button", { name: /^Zoom level, \d+%$/ }).getAttribute("aria-label") ?? "")?.[1])
+		const start = zoomOf()
+		const surface = screen.getByRole("textbox", { name: "report.docx" }).closest("[data-preview-surface]")
+
+		if (surface === null) {
+			throw new Error("no surface")
+		}
+
+		act(() => {
+			for (let k = 0; k < 2; k++) {
+				const wheel = createEvent.wheel(surface, { deltaY: -100 })
+
+				// happy-dom's WheelEvent leaves modifier keys out of its init.
+				Object.defineProperty(wheel, "ctrlKey", { value: true })
+				surface.dispatchEvent(wheel)
+			}
+		})
+		// 0.15 per step.
+		expect(Math.abs(zoomOf() - (start + 30))).toBeLessThanOrEqual(1)
+	})
+
+	it("seeds Find with a short selection and keeps the last search once closed", async () => {
+		const { editor } = await openEditor()
+
+		typeAtStart(editor, "zebra zebra ")
+		selectWord(editor, "zebra")
+		await openFindField()
+		expect((await screen.findByRole<HTMLInputElement>("searchbox", { name: "Find" })).value).toBe("zebra")
+		await waitFor(() => {
+			expect(screen.getByRole("status").textContent).toContain("of 2")
+		})
+		fireEvent.keyDown(screen.getByRole("searchbox", { name: "Find" }), { key: "Escape" })
+		await waitFor(() => {
+			expect(screen.queryByRole("searchbox", { name: "Find" })).toBeNull()
+		})
+		act(() => {
+			const head = editor.state.selection.head
+
+			editor.dispatch(editor.state.tr.setSelection(TextSelection.create(editor.state.doc, head)))
+		})
+		await openFindField()
+		expect((await screen.findByRole<HTMLInputElement>("searchbox", { name: "Find" })).value).toBe("zebra")
+	})
+
+	it("finds and replaces in the body while the caret is in a header, going back to the body to show a match", async () => {
+		const { editor } = await openEditor()
+
+		typeAtStart(editor, "zebra zebra ")
+		act(() => {
+			void editor.execute({ type: "header.edit" })
+		})
+		await screen.findByRole("group", { name: "Header" })
+		await openFindField()
+
+		const field = await screen.findByRole("searchbox", { name: "Find" })
+
+		fireEvent.change(field, { target: { value: "zebra" } })
+		fireEvent.keyDown(field, { key: "Enter" })
+		await waitFor(() => {
+			expect(screen.getByRole("status").textContent).toContain("of 2")
+		})
+		await waitFor(() => {
+			expect(editor.snapshot().context.story.kind).toBe("body")
+		})
+		expect(editor.state.doc.textBetween(editor.state.selection.from, editor.state.selection.to)).toBe("zebra")
+
+		act(() => {
+			void editor.execute({ type: "header.edit" })
+		})
+		expect(editor.snapshot().context.story.kind).toBe("header")
+		fireEvent.click(screen.getByRole("button", { name: "Toggle replace" }))
+		fireEvent.change(screen.getByRole("textbox", { name: "Replace with" }), { target: { value: "okapi" } })
+		fireEvent.click(screen.getByRole("button", { name: "Replace all" }))
+		await waitFor(() => {
+			expect(editor.body.session.state.doc.textContent).toContain("okapi okapi")
+		})
+	})
+
+	it("checks spelling in a header and suggests from its context menu, as in the body", async () => {
+		hooks.misspelled = "qzxv"
+
+		const { editor } = await openEditor()
+
+		act(() => {
+			void editor.execute({ type: "header.edit" })
+		})
+		await screen.findByRole("group", { name: "Header" })
+		act(() => {
+			editor.dispatch(editor.state.tr.insertText("qzxv ", 1))
+		})
+		selectWord(editor, "qzxv")
+		// Spelling checks once typing pauses (300 ms).
+		await act(() => new Promise(resolve => setTimeout(resolve, 600)))
+		fireEvent.contextMenu(screen.getByRole("textbox", { name: "report.docx" }))
+		expect(await screen.findByRole("menuitem", { name: "Ignore all" })).toBeTruthy()
+		expect(editor.snapshot().context.story.kind).toBe("header")
+	})
+
+	it("opens a hyperlink from the context menu: a web link in a new tab, a bookmark's at its place", async () => {
+		const open = vi.spyOn(window, "open").mockReturnValue(null)
+		const { editor } = await openEditor()
+
+		act(() => {
+			editor.dispatch(editor.state.tr.setSelection(TextSelection.create(editor.state.doc, 1)))
+			void editor.execute({ type: "bookmark.add", name: "Results" })
+		})
+		act(() => {
+			const end = editor.state.doc.content.size - 1
+
+			editor.dispatch(editor.state.tr.setSelection(TextSelection.near(editor.state.doc.resolve(end), -1)))
+			void editor.execute({ type: "link.set", target: "https://example.com/", text: "site" })
+			void editor.execute({ type: "link.set", anchor: "Results", text: "jump" })
+		})
+		// The menu opens where the caret is (nothing is laid out on screen here).
+		vi.spyOn(editor, "hitTest").mockReturnValue(undefined)
+
+		const followAt = async (word: string): Promise<void> => {
+			selectWord(editor, word)
+			act(() => {
+				const from = editor.state.selection.from + 1
+
+				editor.dispatch(editor.state.tr.setSelection(TextSelection.create(editor.state.doc, from)))
+			})
+			fireEvent.contextMenu(screen.getByRole("textbox", { name: "report.docx", hidden: true }))
+			fireEvent.click(await screen.findByRole("menuitem", { name: /^Open link/ }))
+		}
+
+		await followAt("site")
+		expect(open).toHaveBeenCalledWith("https://example.com/", "_blank", "noopener,noreferrer")
+
+		const target = docxBookmarkStart(editor, "Results")
+
+		expect(target).toBeDefined()
+		await followAt("jump")
+		expect(editor.state.selection.from).toBe(target)
+		expect(editor.state.selection.empty).toBe(true)
+
+		// Ctrl+Click on a link follows it and places no caret; a plain click does not follow it.
+		const site = findInStory(editor.state.doc, "site")[0]?.from ?? -1
+
+		vi.spyOn(editor, "hitTest").mockReturnValue({ pos: site + 1, affinity: 1, page: 0, line: 0, atom: false })
+		open.mockClear()
+
+		const pages = screen.getByRole("textbox", { name: "report.docx" })
+
+		fireEvent.pointerDown(pages, { button: 0, ctrlKey: false, metaKey: false })
+		expect(open).not.toHaveBeenCalled()
+		fireEvent.pointerDown(pages, { button: 0, ctrlKey: !isMacPlatform(), metaKey: isMacPlatform() })
+		expect(open).toHaveBeenCalledWith("https://example.com/", "_blank", "noopener,noreferrer")
+		expect(editor.state.selection.from).toBe(target)
+		open.mockRestore()
 	})
 
 	it("counts matches in the locale's numbers, past the most a find shows", () => {

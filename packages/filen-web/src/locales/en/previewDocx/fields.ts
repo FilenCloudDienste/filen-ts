@@ -5,6 +5,8 @@ export const previewDocxFields = {
 	previewDocxUpdateField: "Update field",
 	/** Docx editor — command and Insert menu item recomputing every field in the document */
 	previewDocxUpdateAllFields: "Update all fields",
+	/** Docx editor — command turning the fields at the cursor or in the selection into their results as plain text (Ctrl+Shift+F9) */
+	previewDocxUnlinkFields: "Unlink fields",
 	/** Docx editor — command and Insert menu item: a table of contents built from the headings (opens a dialog) */
 	previewDocxInsertToc: "Table of contents…",
 	/** Docx editor — command and chip button rebuilding the table of contents at the cursor */

@@ -27,6 +27,8 @@ import {
 } from "@filen/office/dom/docx"
 import { cn } from "@filen/shared"
 import {
+	DOCX_ZOOM_FITS,
+	DOCX_ZOOM_PRESETS,
 	MARKUP_LABELS,
 	notConvertedKey,
 	viewOnlyReasonKey,
@@ -54,7 +56,7 @@ import { OfficeCommandBar, type RibbonGroup } from "@/features/office/components
 import { RibbonButton } from "@/features/office/components/ribbon/ribbonControls"
 import { usePhoneWidth } from "@/features/office/components/ribbon/phoneMedia"
 import { FullScreenButton, PageControls, ZoomControls } from "@/features/preview/components/commandBarControls"
-import { BAR_BUTTON, pageControlsWidth, ZOOM_CONTROLS_WIDTH, type ZoomFit } from "@/features/preview/components/commandBar.logic"
+import { BAR_BUTTON, pageControlsWidth, ZOOM_CONTROLS_WIDTH } from "@/features/preview/components/commandBar.logic"
 import { useAction } from "@/lib/keymap/useAction"
 import { isImeKeydown } from "@/lib/ime"
 
@@ -66,7 +68,6 @@ import { isImeKeydown } from "@/lib/ime"
 
 // Typing waits this long before the document is searched (each search runs over every page).
 const FIND_DEBOUNCE_MS = 150
-const FITS: readonly ZoomFit[] = ["fitWidth"]
 const FIELD_CLASS =
 	"h-7 w-40 min-w-0 rounded-xl bg-muted/60 pr-2 pl-7 text-xs leading-5 outline-none placeholder:text-muted-foreground focus-visible:ring-[3px] focus-visible:ring-ring/30 disabled:opacity-50 max-sm:w-full [&::-webkit-search-cancel-button]:appearance-none"
 
@@ -310,6 +311,14 @@ export function DocxFindField({
 }) {
 	const { t } = useTranslation("preview")
 	const [text, setText] = useState(find.query)
+	// A query set from outside the field (Find seeded from the selection while open) replaces what it holds.
+	const [givenQuery, setGivenQuery] = useState(find.query)
+
+	if (givenQuery !== find.query) {
+		setGivenQuery(find.query)
+		setText(find.query)
+	}
+
 	const [replacement, setReplacement] = useState("")
 	const [replaceOpen, setReplaceOpen] = useState(replaceOpenProp === true)
 	const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -527,8 +536,6 @@ export function DocxFindField({
 	)
 }
 
-// The zoom menu's steps, in percent.
-const ZOOM_PRESETS: readonly number[] = [50, 75, 100, 125, 150, 200, 300, 400]
 // The markup menu's button with its mode's name.
 const MARKUP_WIDTH = 120
 
@@ -589,8 +596,8 @@ export function DocxToolbar({
 			content: (
 				<ZoomControls
 					percent={percent}
-					presets={ZOOM_PRESETS}
-					fits={FITS}
+					presets={DOCX_ZOOM_PRESETS}
+					fits={DOCX_ZOOM_FITS}
 					mode={state.zoomMode === "fitWidth" ? "fitWidth" : "custom"}
 					canIn={isDocxCommandEnabled(state, "zoom.in")}
 					canOut={isDocxCommandEnabled(state, "zoom.out")}

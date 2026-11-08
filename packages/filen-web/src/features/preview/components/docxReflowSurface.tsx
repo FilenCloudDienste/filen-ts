@@ -15,8 +15,9 @@ export interface DocxReflowSurfaceProps {
 	describedBy?: string
 	readOnly: boolean
 	apple: boolean
+	desktop: boolean
 	marks: readonly DocxEditorMark[]
-	onFind: () => void
+	onFind: (replace: boolean) => void
 	// Presses on objects in the text (comment highlights, controls), as on the pages.
 	interactions?: DocxEditorInteractions
 }
@@ -44,6 +45,7 @@ export function DocxReflowSurface({ handleRef, interactions, ...props }: DocxRef
 			{...(props.describedBy === undefined ? {} : { describedBy: props.describedBy })}
 			readOnly={props.readOnly}
 			apple={props.apple}
+			desktop={props.desktop}
 			marks={props.marks}
 			onFind={props.onFind}
 			storyLabel={(kind, mark) => (kind === "textbox" || mark === "" ? t(STORY_LABELS[kind]) : t(NUMBERED_LABELS[kind], { mark }))}

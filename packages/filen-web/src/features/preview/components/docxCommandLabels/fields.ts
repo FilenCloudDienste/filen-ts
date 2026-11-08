@@ -5,6 +5,7 @@ import type { DocxCommandLabels } from "@/features/preview/components/docxEditor
 export const FIELDS_LABELS: Required<DocxCommandLabels<"fields">> = {
 	"field.update": "previewDocxUpdateField",
 	"field.updateAll": "previewDocxUpdateAllFields",
+	"field.unlink": "previewDocxUnlinkFields",
 	"toc.insert": "previewDocxInsertToc",
 	"toc.update": "previewDocxUpdateToc",
 	"insert.pageNumber": "previewDocxInsertPageNumber",

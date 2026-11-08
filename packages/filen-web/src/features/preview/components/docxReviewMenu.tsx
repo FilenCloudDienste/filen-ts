@@ -87,7 +87,7 @@ export function MarkupMenu({ markup, onMarkupChange }: { markup: DocxMarkupMode;
 	)
 }
 
-// Accept ▾ or Reject ▾: the change at the caret, or every change.
+// Accept ▾ or Reject ▾: the change at the caret (then moving to the next, or staying), or every change.
 export function DecideMenu({ accept, ...props }: DocxToolbarSlotProps & { accept: boolean }) {
 	const { t } = useTranslation("preview")
 	const one = accept ? ("review.accept" as const) : ("review.reject" as const)
@@ -97,12 +97,17 @@ export function DecideMenu({ accept, ...props }: DocxToolbarSlotProps & { accept
 	const allLabel = labelOf(props, all)
 
 	if (oneLabel !== undefined) {
-		entries.push({
-			label: t(oneLabel),
-			// Needs a change at the caret.
-			disabled: reviewOff(props, one) || props.snapshot?.review.current == null,
-			command: { type: one }
-		})
+		// Both need a change at the caret; Word's default first.
+		const disabled = reviewOff(props, one) || props.snapshot?.review.current == null
+
+		entries.push(
+			{
+				label: t(accept ? "previewDocxAcceptAndNext" : "previewDocxRejectAndNext"),
+				disabled,
+				command: { type: one, next: true }
+			},
+			{ label: t(oneLabel), disabled, command: { type: one } }
+		)
 	}
 
 	if (allLabel !== undefined) {

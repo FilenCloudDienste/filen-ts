@@ -79,11 +79,15 @@ export const DOCX_COMMAND_CATALOGUE = {
 		"format.doubleStrike",
 		"format.smallCaps",
 		"format.allCaps",
+		"format.doubleUnderline",
+		"format.changeCase",
 		"format.clearAll",
 		"font.family",
 		"font.size",
 		"font.grow",
 		"font.shrink",
+		"font.growPoint",
+		"font.shrinkPoint",
 		"font.spacing",
 		"color.text",
 		"color.highlight",
@@ -149,6 +153,7 @@ export const DOCX_COMMAND_CATALOGUE = {
 	fields: [
 		"field.update",
 		"field.updateAll",
+		"field.unlink",
 		"toc.insert",
 		"toc.update",
 		"insert.pageNumber",
@@ -253,6 +258,8 @@ const COMMAND_SLOTS: Readonly<Partial<Record<DocxEditorCommandType, DocxToolbarS
 	"toc.insert": "references",
 	"toc.update": "references",
 	"field.updateAll": "references",
+	// Word offers Unlink Fields by its key alone (Ctrl+Shift+F9).
+	"field.unlink": null,
 	"header.differentFirst": null,
 	"header.differentOddEven": null,
 	"header.linkToPrevious": null,
@@ -335,12 +342,16 @@ export function contextPresent(snapshot: DocxEditorSnapshot, context: DocxComman
 	}
 }
 
-// What a context menu offers, in its order, and where: a tracked change's accept and reject, a new comment, the
-// table's rows, columns and cells, the control's content, the link, the field and the note at the selection,
-// the picture's items. Each only once labelled and while it can run.
+// What a context menu offers, in its order, and where: a tracked change's accept and reject, the paragraph's
+// dialog, a link (new, or the one at the selection) and its removal, a new comment, the table's rows, columns and
+// cells, the control's content, the field and the note at the selection, the picture's items. Each only once
+// labelled and while it can run.
 const CONTEXT_MENU: readonly (readonly [DocxEditorCommandType, DocxCommandContext | "field" | "link" | "always"])[] = [
 	["review.accept", "revision"],
 	["review.reject", "revision"],
+	["paragraph.indent", "always"],
+	["link.set", "always"],
+	["link.remove", "link"],
 	["comment.add", "always"],
 	["table.row.insertAbove", "table"],
 	["table.row.insertBelow", "table"],
@@ -355,8 +366,6 @@ const CONTEXT_MENU: readonly (readonly [DocxEditorCommandType, DocxCommandContex
 	["control.clear", "control"],
 	["control.item.add", "control"],
 	["control.item.remove", "control"],
-	["link.set", "link"],
-	["link.remove", "link"],
 	["field.update", "field"],
 	["view.fieldCode", "field"],
 	["note.goto", "note"],
@@ -373,6 +382,7 @@ const CONTEXT_MENU: readonly (readonly [DocxEditorCommandType, DocxCommandContex
 const CONTEXT_INPUTS: ReadonlySet<DocxEditorCommandType> = new Set([
 	"table.cell.split",
 	"comment.add",
+	"paragraph.indent",
 	"link.set",
 	"drawing.crop",
 	"drawing.altText"
@@ -572,12 +582,16 @@ export function shortcutKeys(combo: string, apple: boolean): string[] {
 		switch (key) {
 			case "mod":
 				return apple ? "⌘" : "Ctrl"
+			case "ctrl":
+				return apple ? "⌃" : "Ctrl"
 			case "shift":
 				return apple ? "⇧" : "Shift"
 			case "alt":
 				return apple ? "⌥" : "Alt"
 			case "space":
 				return "Space"
+			case "enter":
+				return apple ? "↩" : "Enter"
 			default:
 				return key.length === 1 ? key.toUpperCase() : key
 		}
@@ -1348,5 +1362,27 @@ export function controlLockedKey(locked: NonNullable<DocxControlContext["locked"
 			return "previewDocxControlLockedBound"
 		default:
 			return "previewDocxControlLockedDisabled"
+	}
+}
+
+// What a key the host runs (hostCommandForKey) does where it can: Track Changes toggles from the review state (the
+// author gate asks for a name to turn it on, never to turn it off); New Comment opens the new comment's input.
+export type DocxHostKeyAction =
+	{ readonly kind: "execute"; readonly command: DocxEditorCommand } | { readonly kind: "input"; readonly type: DocxEditorCommandType }
+
+export function hostKeyAction(
+	type: DocxEditorCommandType,
+	snapshot: DocxEditorSnapshot | undefined,
+	readOnly: boolean
+): DocxHostKeyAction | null {
+	if (snapshot === undefined || readOnly || !snapshot.enabled[type]) return null
+
+	switch (type) {
+		case "review.track":
+			return { kind: "execute", command: { type, on: !snapshot.review.tracking } }
+		case "comment.add":
+			return { kind: "input", type }
+		default:
+			return null
 	}
 }

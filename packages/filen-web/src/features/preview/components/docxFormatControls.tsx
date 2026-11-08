@@ -1,10 +1,13 @@
-import { useState, type ReactNode, type SubmitEvent } from "react"
+import { useRef, useState, type ReactNode, type SubmitEvent } from "react"
 import { useTranslation } from "react-i18next"
 import type { TFunction } from "i18next"
+import { Combobox } from "@base-ui/react/combobox"
 import {
 	AArrowDownIcon,
 	AArrowUpIcon,
 	BaselineIcon,
+	CheckIcon,
+	ChevronDownIcon,
 	HighlighterIcon,
 	PaintbrushVerticalIcon,
 	SubscriptIcon,
@@ -40,6 +43,13 @@ import {
 	type DocxToolbarSlotProps
 } from "@/features/preview/components/docxEditor.logic"
 import { DocxChoiceField } from "@/features/preview/components/docxFields"
+import {
+	fontMatches,
+	listedFont,
+	parseFontSize,
+	typedFont,
+	type DocxFontItem
+} from "@/features/preview/components/docxFormatControls.logic"
 import { useCommandMenuFocus } from "@/features/preview/components/docxInsert.logic"
 import { DocxColorGrid, SwatchButton } from "@/features/office/components/officeColorGrid"
 import { FormDialog } from "@/components/dialogs/formDialog"
@@ -60,10 +70,12 @@ import {
 import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { MENU_POPUP_CLASS } from "@/components/ui/menuStyles"
+import { FIELD_CONTROL_CLASS } from "@/components/ui/surface"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
 import { i18n } from "@/lib/i18n"
+import { isImeKeydown } from "@/lib/ime"
 
 // The ribbon's Font group (font and size pickers, growing and shrinking the size, highlight and text colours, a
 // formatting menu: double strikethrough, caps, character spacing, clear all) and its Formatting group (the base toggles
@@ -85,8 +97,6 @@ export interface DocxFormatControlsProps extends DocxToolbarSlotProps {
 
 // The colour picker lives in a leaf the spreadsheet toolbar shares without reaching the editor.
 export { DocxColorGrid } from "@/features/office/components/officeColorGrid"
-
-const MIXED = "\u0000mixed"
 
 // The highlighter's colours and No color.
 function HighlightGrid({ chosen, onPick }: { chosen: string | undefined; onPick: (name: string) => void }) {
@@ -185,17 +195,17 @@ export function DocxColorButton({
 	)
 }
 
-interface FontItem {
+interface ComboGroup {
 	value: string
-	label: string
+	items: readonly string[]
 }
 
-// The font picker's items by group, the selection's font marked: a font in the lists is chosen by name (the
-// theme's under their role), one outside them is added.
+// The font box's items by group (values: what font.family takes), with their labels, and the selection's font: a font
+// in the lists by name (the theme's under their role), one outside them as itself, none for several.
 function fontItems(fonts: readonly DocxFontChoice[], current: DocxValuesSnapshot["font"], t: TFunction<"preview">) {
-	const groups: { label: string; items: FontItem[] }[] = []
-	const all: FontItem[] = []
-	let value: string = current === null || current === "mixed" ? MIXED : current
+	const groups: ComboGroup[] = []
+	const all: DocxFontItem[] = []
+	let value: string | null = current === null || current === "mixed" ? null : current
 
 	for (const [kind, label] of [
 		["theme", "previewDocxFontsTheme"],
@@ -213,32 +223,226 @@ function fontItems(fonts: readonly DocxFontChoice[], current: DocxValuesSnapshot
 			}))
 
 		if (items.length > 0) {
-			groups.push({ label: t(label), items })
+			groups.push({ value: t(label), items: items.map(item => item.value) })
 			all.push(...items)
 		}
 	}
 
-	const known = fonts.some(font => font.kind !== "theme" && font.name === current)
-
-	if (!known && current !== null && current !== "mixed") {
-		const theme = fonts.find(font => font.kind === "theme" && font.name === current)
-
-		if (theme !== undefined) {
-			value = theme.family
-		} else {
-			all.push({ value: current, label: current })
-		}
+	if (value !== null && !fonts.some(font => font.kind !== "theme" && font.name === current)) {
+		value = fonts.find(font => font.kind === "theme" && font.name === current)?.family ?? value
 	}
 
-	if (value === MIXED) {
-		all.push({ value: MIXED, label: t("previewDocxValueMixed") })
-	}
-
-	return { groups, all, value, extra: all.filter(item => !groups.some(group => group.items.includes(item))) }
+	return { groups, all, value, labels: new Map(all.map(item => [item.value, item.label])) }
 }
 
 // Where a picker gives focus back once closed (see useCommandMenuFocus).
 type MenuFocus = ReturnType<typeof useCommandMenuFocus>
+
+// Whether the list's highlight is the user's (arrow keys, pointer) or one following what is typed.
+type Highlight = "user" | "auto" | null
+
+// Word's editable Font and Font Size boxes: a list to pick from and a field to type into. What is typed applies on
+// Enter or on leaving the field (`onCommit`, false when refused: the field shows the value in effect again); Escape
+// drops it and gives the document the focus (the ribbon's rule). Enter takes a highlighted item instead when the user
+// moved to it, or when it follows what is typed and `exact` does not take the text as it is.
+function DocxComboBox({
+	label,
+	items,
+	value,
+	labelOf,
+	placeholder,
+	filter,
+	exact,
+	disabled,
+	className,
+	focus,
+	onPick,
+	onCommit
+}: {
+	label: string
+	items: readonly string[] | readonly ComboGroup[]
+	value: string | null
+	labelOf: (value: string) => string
+	placeholder?: string | undefined
+	// Null: the list is not narrowed by what is typed.
+	filter: ((value: string, query: string) => boolean) | null
+	exact: (text: string) => boolean
+	disabled: boolean
+	className: string
+	focus: MenuFocus
+	onPick: (value: string) => void
+	onCommit: (text: string) => boolean
+}) {
+	const [draft, setDraft] = useState<string | null>(null)
+	const [anchor, setAnchor] = useState<HTMLDivElement | null>(null)
+	// Read by the key and blur handlers, which can run before the draft's render.
+	const draftRef = useRef<string | null>(null)
+	const openRef = useRef(false)
+	const highlightRef = useRef<Highlight>(null)
+	const actionsRef = useRef<Combobox.Root.Actions | null>(null)
+	const shown = value === null ? "" : labelOf(value)
+	const edit = (next: string | null): void => {
+		draftRef.current = next
+		setDraft(next)
+	}
+	// Applies what is typed; false when it was refused.
+	const commit = (): boolean => {
+		const text = draftRef.current
+
+		edit(null)
+
+		return text === null || text === shown || onCommit(text)
+	}
+
+	return (
+		<Combobox.Root
+			items={items}
+			value={value}
+			inputValue={draft ?? shown}
+			itemToStringLabel={labelOf}
+			filter={filter}
+			autoHighlight={filter !== null}
+			disabled={disabled}
+			actionsRef={actionsRef}
+			onValueChange={next => {
+				if (typeof next === "string") {
+					edit(null)
+					onPick(next)
+				}
+			}}
+			onInputValueChange={(next, details) => {
+				edit(details.reason === "input-change" ? next : null)
+			}}
+			onItemHighlighted={(item, details) => {
+				highlightRef.current = item === undefined ? null : details.reason === "none" ? "auto" : "user"
+			}}
+			onOpenChange={open => {
+				openRef.current = open
+
+				if (!open) {
+					highlightRef.current = null
+				}
+
+				focus.opened(open)
+			}}
+			onOpenChangeComplete={focus.settled}
+		>
+			{/* Not Combobox.InputGroup, a role="group" the ribbon would take for one of its groups. */}
+			<div
+				ref={setAnchor}
+				className={cn(
+					"flex h-7 shrink-0 items-center focus-within:border-ring",
+					FIELD_CONTROL_CLASS,
+					disabled && "cursor-not-allowed opacity-50",
+					className
+				)}
+			>
+				<Combobox.Input
+					aria-label={label}
+					placeholder={placeholder}
+					className="h-full w-full min-w-0 bg-transparent pl-2.5 text-sm outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed"
+					onKeyDown={event => {
+						if (isImeKeydown(event.nativeEvent)) {
+							return
+						}
+
+						if (event.key === "Escape" && !openRef.current) {
+							// Not the field's own clearing: the ribbon gives the document the focus.
+							event.preventBaseUIHandler()
+							edit(null)
+						} else if (event.key === "Enter") {
+							const highlight = highlightRef.current
+							const text = draftRef.current
+
+							if (openRef.current && (highlight === "user" || (highlight === "auto" && (text === null || !exact(text))))) {
+								return
+							}
+
+							event.preventBaseUIHandler()
+							event.preventDefault()
+							actionsRef.current?.close()
+
+							if (!commit()) {
+								event.currentTarget.select()
+							}
+						}
+					}}
+					onBlur={() => {
+						commit()
+					}}
+				/>
+				<Combobox.Trigger
+					aria-label={label}
+					className="flex h-full shrink-0 items-center pr-1.5 pl-0.5 text-muted-foreground outline-none"
+				>
+					<ChevronDownIcon className="pointer-events-none size-4" />
+				</Combobox.Trigger>
+			</div>
+			<Combobox.Portal>
+				<Combobox.Positioner
+					anchor={anchor}
+					side="bottom"
+					align="start"
+					sideOffset={4}
+					className="isolate z-50"
+				>
+					<Combobox.Popup
+						data-preview-surface
+						className={cn(MENU_POPUP_CLASS, "max-h-80 min-w-(--anchor-width) data-empty:hidden")}
+					>
+						<Combobox.List className="p-1">
+							{(entry: string | ComboGroup) =>
+								typeof entry === "string" ? (
+									<ComboItem
+										key={entry}
+										value={entry}
+										label={labelOf(entry)}
+									/>
+								) : (
+									<Combobox.Group
+										key={entry.value}
+										items={entry.items}
+										className="scroll-my-1.5"
+									>
+										<Combobox.GroupLabel className="px-2 py-1 text-xs text-muted-foreground">
+											{entry.value}
+										</Combobox.GroupLabel>
+										<Combobox.Collection>
+											{(item: string) => (
+												<ComboItem
+													key={item}
+													value={item}
+													label={labelOf(item)}
+												/>
+											)}
+										</Combobox.Collection>
+									</Combobox.Group>
+								)
+							}
+						</Combobox.List>
+					</Combobox.Popup>
+				</Combobox.Positioner>
+			</Combobox.Portal>
+		</Combobox.Root>
+	)
+}
+
+function ComboItem({ value, label }: { value: string; label: string }) {
+	return (
+		<Combobox.Item
+			value={value}
+			data-slot="combobox-item"
+			className="relative flex min-h-7 w-full items-center gap-2 rounded-xl py-1.5 pr-8 pl-2 text-sm whitespace-nowrap outline-hidden select-none data-disabled:pointer-events-none data-disabled:opacity-50"
+		>
+			{label}
+			<Combobox.ItemIndicator
+				render={<span className="pointer-events-none absolute right-2 flex size-4 items-center justify-center" />}
+			>
+				<CheckIcon className="pointer-events-none size-4" />
+			</Combobox.ItemIndicator>
+		</Combobox.Item>
+	)
+}
 
 function FontPicker({
 	fonts,
@@ -254,65 +458,48 @@ function FontPicker({
 	focus: MenuFocus
 }) {
 	const { t } = useTranslation("preview")
-	const { groups, all, value, extra } = fontItems(fonts, font, t)
+	const { groups, all, value, labels } = fontItems(fonts, font, t)
+	const labelOf = (family: string): string => labels.get(family) ?? family
 
 	return (
-		<Select
-			items={all}
+		<DocxComboBox
+			label={t("previewDocxFont")}
+			items={groups}
 			value={value}
+			labelOf={labelOf}
+			placeholder={font === "mixed" ? t("previewDocxValueMixed") : undefined}
+			filter={(family, query) => fontMatches(labelOf(family), query)}
+			exact={text => listedFont(text, all) !== undefined}
 			disabled={disabled}
-			onOpenChange={focus.opened}
-			onOpenChangeComplete={focus.settled}
-			onValueChange={next => {
-				if (typeof next === "string" && next !== MIXED) {
-					execute({ type: "font.family", family: next })
-				}
+			className="w-32"
+			focus={focus}
+			onPick={family => {
+				execute({ type: "font.family", family })
 			}}
-		>
-			<SelectTrigger
-				size="sm"
-				aria-label={t("previewDocxFont")}
-				className="w-32 shrink-0"
-			>
-				<SelectValue />
-			</SelectTrigger>
-			<SelectContent
-				data-preview-surface
-				className="max-h-80 min-w-48"
-			>
-				{groups.map(group => (
-					<SelectGroup key={group.label}>
-						<SelectLabel>{group.label}</SelectLabel>
-						{group.items.map(item => (
-							<SelectItem
-								key={item.value}
-								value={item.value}
-							>
-								{item.label}
-							</SelectItem>
-						))}
-					</SelectGroup>
-				))}
-				{extra.length > 0 ? (
-					<SelectGroup>
-						{extra.map(item => (
-							<SelectItem
-								key={item.value}
-								value={item.value}
-							>
-								{item.label}
-							</SelectItem>
-						))}
-					</SelectGroup>
-				) : null}
-			</SelectContent>
-		</Select>
+			onCommit={text => {
+				const family = typedFont(text, all)
+
+				if (family === null) {
+					return false
+				}
+
+				execute({ type: "font.family", family })
+
+				return true
+			}}
+		/>
 	)
 }
 
 // A size in points as the pickers show it (half-points).
 function points(halfPoints: number): string {
 	return i18n.format(halfPoints / 2, "number")
+}
+
+const SIZE_ITEMS: readonly string[] = DOCX_FONT_SIZES.map(String)
+
+function sizeLabel(halfPoints: string): string {
+	return points(Number(halfPoints))
 }
 
 function SizePicker({
@@ -327,52 +514,34 @@ function SizePicker({
 	focus: MenuFocus
 }) {
 	const { t } = useTranslation("preview")
-	const value = size === null || size === "mixed" ? MIXED : String(size)
-	const sizes =
-		size === null || size === "mixed" || DOCX_FONT_SIZES.includes(size)
-			? DOCX_FONT_SIZES
-			: [...DOCX_FONT_SIZES, size].sort((a, b) => a - b)
-	const items = [
-		...sizes.map(half => ({ value: String(half), label: points(half) })),
-		...(value === MIXED ? [{ value: MIXED, label: "" }] : [])
-	]
 
+	// Several sizes leave the box empty; a size outside the list is shown, not added to it.
 	return (
-		<Select
-			items={items}
-			value={value}
+		<DocxComboBox
+			label={t("previewDocxFontSize")}
+			items={SIZE_ITEMS}
+			value={size === null || size === "mixed" ? null : String(size)}
+			labelOf={sizeLabel}
+			filter={null}
+			exact={() => true}
 			disabled={disabled}
-			onOpenChange={focus.opened}
-			onOpenChangeComplete={focus.settled}
-			onValueChange={next => {
-				if (typeof next === "string" && next !== MIXED) {
-					execute({ type: "font.size", halfPoints: Number(next) })
-				}
+			className="w-18"
+			focus={focus}
+			onPick={half => {
+				execute({ type: "font.size", halfPoints: Number(half) })
 			}}
-		>
-			<SelectTrigger
-				size="sm"
-				aria-label={t("previewDocxFontSize")}
-				className="w-16 shrink-0"
-			>
-				<SelectValue />
-			</SelectTrigger>
-			<SelectContent
-				data-preview-surface
-				className="max-h-80"
-			>
-				<SelectGroup>
-					{sizes.map(half => (
-						<SelectItem
-							key={half}
-							value={String(half)}
-						>
-							{points(half)}
-						</SelectItem>
-					))}
-				</SelectGroup>
-			</SelectContent>
-		</Select>
+			onCommit={text => {
+				const halfPoints = parseFontSize(text)
+
+				if (halfPoints === null) {
+					return false
+				}
+
+				execute({ type: "font.size", halfPoints })
+
+				return true
+			}}
+		/>
 	)
 }
 

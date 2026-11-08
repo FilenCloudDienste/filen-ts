@@ -1,9 +1,10 @@
 // @vitest-environment happy-dom
 
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react"
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react"
 import { NO_VALUES } from "@filen/office/core/docx/edit"
 import { themeSwatches } from "@/features/preview/components/docxEditor.logic"
+import { createDocxPageStore, goToPageIndex } from "@/features/preview/components/docxGoTo.logic"
 import { registerAllActions } from "@/lib/keymap/actions"
 import { PICTURE, TABLE, renderRibbon, ribbonSnapshot, ribbonSnapshotIn } from "@/tests/docxRibbonHarness"
 
@@ -79,18 +80,30 @@ describe("DocxEditToolbar", () => {
 	})
 
 	it("shows the selection's font and size, and nothing for several", () => {
+		// Editable boxes, as Word's: the value is the field's; several fonts leave it empty with a hint.
+		const field = (name: string): HTMLInputElement => {
+			const element = screen.getByRole("combobox", { name })
+
+			if (!(element instanceof HTMLInputElement)) {
+				throw new Error(`${name} is no field`)
+			}
+
+			return element
+		}
+
 		renderRibbon()
 
-		expect(screen.getByRole("combobox", { name: "Font" }).textContent).toContain("Georgia")
-		expect(screen.getByRole("combobox", { name: "Font size" }).textContent).toContain("11")
+		expect(field("Font").value).toBe("Georgia")
+		expect(field("Font size").value).toBe("11")
 		cleanup()
 		renderRibbon({ snapshot: ribbonSnapshot({ values: { ...NO_VALUES, font: "mixed", size: "mixed" } }) })
-		expect(screen.getByRole("combobox", { name: "Font" }).textContent).toContain("Several")
-		expect(screen.getByRole("combobox", { name: "Font size" }).textContent).not.toMatch(/\d/)
+		expect(field("Font").value).toBe("")
+		expect(field("Font").placeholder).toContain("Several")
+		expect(field("Font size").value).toBe("")
 		cleanup()
 		renderRibbon({ snapshot: ribbonSnapshot({ values: { ...NO_VALUES, font: "Calibri", size: 21 } }) })
-		expect(screen.getByRole("combobox", { name: "Font" }).textContent).toContain("Calibri (Body)")
-		expect(screen.getByRole("combobox", { name: "Font size" }).textContent).toMatch(/10[.,]5/)
+		expect(field("Font").value).toBe("Calibri (Body)")
+		expect(field("Font size").value).toMatch(/^10[.,]5$/)
 	})
 
 	it("turns each control off with its command (direct formatting under formatting restrictions), and when read-only", () => {
@@ -312,6 +325,108 @@ describe("DocxEditToolbar", () => {
 		expect(onReflowChange).toHaveBeenLastCalledWith(true)
 		fireEvent.click(screen.getByRole("button", { name: "Show field codes" }))
 		expect(execute).toHaveBeenLastCalledWith({ type: "view.fieldCodes" })
+	})
+
+	it("zooms to 100% and to a step from View ▸ Zoom, with zoom in and out off at the limits", async () => {
+		const { onZoom } = renderRibbon({ zoom: 0.5 })
+
+		tab("View")
+		fireEvent.click(screen.getByRole("button", { name: "Zoom to 100%" }))
+		expect(onZoom).toHaveBeenLastCalledWith(1)
+		fireEvent.click(within(screen.getByRole("group", { name: "Zoom" })).getByRole("button", { name: "Zoom level, 50%" }))
+		fireEvent.click(await screen.findByRole("menuitemradio", { name: "200%" }))
+		expect(onZoom).toHaveBeenLastCalledWith(2)
+		expect(screen.getByRole("button", { name: "Zoom in" }).hasAttribute("disabled")).toBe(false)
+		expect(screen.getByRole("button", { name: "Zoom out" }).hasAttribute("disabled")).toBe(false)
+		cleanup()
+
+		renderRibbon({ zoom: 4 })
+		tab("View")
+		expect(screen.getByRole("button", { name: "Zoom in" }).hasAttribute("disabled")).toBe(true)
+		expect(screen.getByRole("button", { name: "Zoom out" }).hasAttribute("disabled")).toBe(false)
+		cleanup()
+
+		renderRibbon({ zoom: 0.25 })
+		tab("View")
+		expect(screen.getByRole("button", { name: "Zoom out" }).hasAttribute("disabled")).toBe(true)
+	})
+
+	it("opens the zoom menu from the status bar's percentage, its steps and fit to width", async () => {
+		const { onZoom } = renderRibbon({ zoom: 1.25 })
+		const status = screen
+			.getAllByRole("button", { name: "Zoom level, 125%" })
+			.find(button => button.closest("[data-ribbon-group]") === null)
+
+		if (status === undefined) throw new Error("no status zoom")
+
+		fireEvent.click(status)
+		expect((await screen.findByRole("menuitemradio", { name: "125%" })).getAttribute("aria-checked")).toBe("true")
+		fireEvent.click(screen.getByRole("menuitemradio", { name: "100%" }))
+		expect(onZoom).toHaveBeenLastCalledWith(1)
+		cleanup()
+
+		const fitted = renderRibbon({ zoom: 1.25, zoomFit: true })
+
+		fireEvent.click(screen.getByRole("button", { name: "Zoom level, 125%" }))
+		expect((await screen.findByRole("menuitemradio", { name: "Fit to width" })).getAttribute("aria-checked")).toBe("true")
+		fireEvent.click(screen.getByRole("menuitemradio", { name: "Fit to width" }))
+		expect(fitted.onZoom).toHaveBeenLastCalledWith("fit")
+	})
+
+	it("shows Page X of Y in the status bar and goes to a typed page from Go To (Ctrl+G opens it)", async () => {
+		const { pages, onGoTo } = renderRibbon()
+
+		// Nothing laid out yet: no indicator.
+		expect(screen.queryByRole("button", { name: /^Page / })).toBeNull()
+		act(() => {
+			pages.setPage(1, 5)
+		})
+		expect(screen.getByRole("button", { name: "Page 2 of 5, go to a page" }).textContent).toBe("Page 2 of 5")
+
+		fireEvent.click(screen.getByRole("button", { name: "Page 2 of 5, go to a page" }))
+
+		const field = await screen.findByRole("textbox", { name: "Enter page number" })
+
+		expect(screen.getByRole("button", { name: "Go to" }).hasAttribute("disabled")).toBe(true)
+		fireEvent.change(field, { target: { value: "9" } })
+		// Past the end: the last page, as Word goes.
+		fireEvent.submit(field)
+		expect(onGoTo).toHaveBeenLastCalledWith(4)
+		expect(pages.get().goTo).toBe(false)
+
+		// Ctrl+G (the editor's onGoTo) opens it without a click.
+		act(() => {
+			pages.setGoTo(true)
+		})
+		fireEvent.change(await screen.findByRole("textbox", { name: "Enter page number" }), { target: { value: "3" } })
+		fireEvent.click(screen.getByRole("button", { name: "Go to" }))
+		expect(onGoTo).toHaveBeenLastCalledWith(2)
+		cleanup()
+
+		// Mobile view has no pages.
+		const reflowed = renderRibbon({ surface: "reflow" })
+
+		act(() => {
+			reflowed.pages.setPage(0, 5)
+		})
+		expect(screen.queryByRole("button", { name: /^Page / })).toBeNull()
+	})
+
+	it("tells the page indicator only of a change (scrolling within a page notifies nothing)", () => {
+		const pages = createDocxPageStore()
+		const listener = vi.fn()
+
+		pages.subscribe(listener)
+		pages.setPage(0, 3)
+		pages.setPage(0, 3)
+		pages.setGoTo(false)
+		expect(listener).toHaveBeenCalledTimes(1)
+		pages.setPage(2, 3)
+		pages.setGoTo(true)
+		expect(listener).toHaveBeenCalledTimes(3)
+		expect(pages.get()).toEqual({ page: 2, count: 3, goTo: true })
+		expect(goToPageIndex("", 3)).toBeNull()
+		expect(goToPageIndex("0", 3)).toBe(0)
 	})
 
 	it("runs the table's commands on the Table tab, asks for the split's size, and shows the table's state", async () => {

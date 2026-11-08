@@ -20,7 +20,7 @@ import {
 	type StoryMatch,
 	writeProtectionOf
 } from "@filen/office/core/docx/edit"
-import type { PagedEditor } from "@filen/office/core/docx/paged"
+import { docxLinkAt, hostCommandForKey, type DocxLinkAt, type PagedEditor } from "@filen/office/core/docx/paged"
 import type { SpellingIssue, SpellingMark } from "@filen/office/core/docx/spelling"
 import { DocxSpelling } from "@filen/office/core/docx/spelling"
 import { DocxSaveError } from "@filen/office/core/docx/write"
@@ -68,6 +68,7 @@ import {
 	featureLanded,
 	editorViewOnlyReasons,
 	firstMatchFrom,
+	hostKeyAction,
 	markupRelayout,
 	objectInteractions,
 	replaceAllToast,
@@ -80,7 +81,17 @@ import {
 	type DocxSurface,
 	type DocxSwatch
 } from "@/features/preview/components/docxEditor.logic"
+import {
+	FIND_CLOSED,
+	closedFind,
+	findSeed,
+	openedFind,
+	wheelZoom,
+	type FindState
+} from "@/features/preview/components/docxEditorFind.logic"
+import { useDocxLinkFollow } from "@/features/preview/components/docxEditorLinks"
 import { commandNeedsAuthor } from "@/features/preview/components/docxAuthorGate.logic"
+import { createDocxPageStore } from "@/features/preview/components/docxGoTo.logic"
 import { useDocxAuthorGate } from "@/features/preview/components/docxAuthorGate"
 import { DocxCommentPopover } from "@/features/preview/components/docxCommentPopover"
 import { DocxContextCommands } from "@/features/preview/components/docxContextMenu"
@@ -114,6 +125,7 @@ import { loadOfficeSettings, saveOfficeAutosave, useOfficeSettings } from "@/fea
 import { E2E_AUTOSAVE_OFF } from "@/features/office/lib/officeAutosave"
 import { LoadingState } from "@/components/loadingState"
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from "@/components/ui/context-menu"
+import { desktopBridge } from "@/lib/desktop"
 import { keyForEditor } from "@/lib/keymap/dialogGuard"
 import { useEditorLayerKeys } from "@/lib/keymap/editorLayerKeys"
 import { isMacPlatform } from "@/lib/keymap/kbd.logic"
@@ -135,8 +147,9 @@ import { useLatestRef } from "@/lib/useLatestRef"
 export type DocxSaveSource = (options?: { auto?: boolean }) => Promise<DocxSaveSnapshot>
 
 const PAGE_GAP = 16
-const WHEEL_SENSITIVITY = 0.0015
 const APPLE = isMacPlatform()
+// The desktop app owns the keys a browser keeps for itself (Ctrl/Cmd+digit): the editor takes Word's there.
+const DESKTOP = desktopBridge() !== undefined
 const NO_MATCHES: readonly StoryMatch[] = []
 const NO_SPELLING: readonly SpellingMark[] = []
 // The toast shown while a save looks for the blocks the writer refuses.
@@ -180,25 +193,13 @@ interface Ready {
 	writeProtection: DocxWriteProtection | undefined
 }
 
-interface FindState {
-	open: boolean
-	// Opened as "Find and replace".
-	replace: boolean
-	// Bumped to focus the field again.
-	focus: number
-	query: string
-	caseSensitive: boolean
-	// The current match; -1 until a search picks one (the first after the caret).
-	active: number
-}
-
-const FIND_CLOSED: FindState = { open: false, replace: false, focus: 0, query: "", caseSensitive: false, active: -1 }
-
 // What a context menu was opened on: a position, and the spelling issue there with its suggestions.
 interface MenuTarget {
 	pos: number
 	issue: SpellingIssue | undefined
 	suggestions: readonly string[] | undefined
+	// The hyperlink there (Open link).
+	link: DocxLinkAt | undefined
 }
 
 // What features draw over each page once offered.
@@ -459,7 +460,6 @@ export function DocxEditView({
 	const current = ready?.opened === opened ? ready : null
 	const openedRef = useLatestRef(onEditorOpened)
 	const editor = current?.editor
-	const spelling = current?.spelling
 	// The font picker's fonts, read once the editor is open.
 	const [fonts, setFonts] = useState<{ editor: PagedEditor; fonts: readonly DocxFontChoice[] } | null>(null)
 	const controls = useDocxEditor(editor)
@@ -499,6 +499,11 @@ export function DocxEditView({
 		setInputRequest(previous => (previous?.nonce === nonce ? null : previous))
 	})
 	const inputChannel = { inputRequest, requestInput, onInputDone }
+	// The page in view for the status bar's Page X of Y, and Go To (Ctrl+G): read by the indicator alone.
+	const [pages] = useState(createDocxPageStore)
+	const openGoTo = (): void => {
+		pages.setGoTo(true)
+	}
 	// One function for the editor's lifetime: the toolbar's buttons take no new props on a keystroke. It runs
 	// the latest executeCommand (set after commit, below), which the author gate it is given to precedes.
 	const executeRef = useRef<(command: DocxEditorCommand) => void>(executeNothing)
@@ -545,7 +550,53 @@ export function DocxEditView({
 	// one converts from its saved file, which the conversion refuses with why (an OpenDocument copy is never protected).
 	const liveFile: LiveFile | undefined =
 		encryptedFile === undefined ? (target, signal) => editedFile(opened.editing, target, signal, backend?.convertEdited) : undefined
-	const bodyActive = editor !== undefined && editor.activeStory === editor.body.session.story.story.index
+	const activeStory = editor?.activeStory
+	const bodyActive = editor !== undefined && activeStory === editor.body.session.story.story.index
+	// The spelling of the story being edited: the body's, or a header's, footer's or note's once made for it.
+	const [storySpelling, setStorySpelling] = useState<{ editor: PagedEditor; story: number; spelling: DocxSpelling } | null>(null)
+	const spelling = bodyActive
+		? current?.spelling
+		: storySpelling !== null && storySpelling.editor === editor && storySpelling.story === activeStory
+			? storySpelling.spelling
+			: undefined
+
+	// Each story's spelling made as it is first entered, kept (proofed once) until the editor closes.
+	useEffect(() => {
+		if (editor === undefined) {
+			return
+		}
+
+		const made = new Map<number, DocxSpelling>()
+		const unsubscribe = editor.subscribe(event => {
+			if (event.type !== "story" || event.story === editor.body.session.story.story.index) {
+				return
+			}
+
+			let story = made.get(event.story)
+
+			if (story === undefined) {
+				const session = editor.storySession(event.story)
+
+				if (session === undefined) {
+					return
+				}
+
+				story = new DocxSpelling(session, documentSpellingChecker, { defaultLanguage: defaultSpellingLanguage() })
+				made.set(event.story, story)
+			}
+
+			setStorySpelling({ editor, story: event.story, spelling: story })
+		})
+
+		return () => {
+			unsubscribe()
+
+			for (const story of made.values()) {
+				story.dispose()
+			}
+		}
+	}, [editor])
+
 	const spellingMarks = useSyncExternalStore(
 		spelling === undefined ? subscribeNothing : listener => spelling.subscribe(listener),
 		spelling === undefined ? noSpelling : () => spelling.marks(),
@@ -553,7 +604,9 @@ export function DocxEditView({
 	)
 	// Find runs on the document as it stands once typing pauses, never inside a keystroke (and nothing is
 	// deferred while it is closed: a keystroke renders once). One match past the limit tells that there are more.
-	const searchedDoc = useDeferredValue(find.open && find.query.length > 0 ? doc : undefined)
+	// The main text (the body), whichever story the caret is in.
+	const bodyState = editor?.body.session.state
+	const searchedDoc = useDeferredValue(find.open && find.query.length > 0 ? bodyState?.doc : undefined)
 	const found =
 		find.open && find.query.length > 0 && searchedDoc !== undefined
 			? findInStory(searchedDoc, find.query, { caseSensitive: find.caseSensitive }, STORY_FIND_LIMIT + 1)
@@ -565,8 +618,9 @@ export function DocxEditView({
 			? -1
 			: find.active >= 0
 				? Math.min(find.active, matches.length - 1)
-				: firstMatchFrom(matches, editor?.selection().from ?? 0)
-	const marks = editorMarks(bodyActive ? spellingMarks : NO_SPELLING, matches, active)
+				: firstMatchFrom(matches, bodyState?.selection.from ?? 0)
+	// Marks are drawn in the story being edited: find's only while that is the body.
+	const marks = editorMarks(spellingMarks, bodyActive ? matches : NO_MATCHES, active)
 	const selection = controls.state?.selection
 	const viewOnly = editorViewOnlyReasons(toolbarSnapshot?.readOnlyReasons ?? [], writable, renamed)
 	// Comments and tracked changes in the document: the markup menu is offered.
@@ -581,8 +635,10 @@ export function DocxEditView({
 		(markupInfo(shownMode).comments || markupInfo(shownMode).formatting) &&
 		(annotated > 0 || (review?.commentCount ?? 0) > 0)
 	const aside = balloonsWanted && balloonsFit(width) ? BALLOON_COLUMN_WIDTH : 0
-	const zoom = zoomMode === "fit" ? fitWidthZoom(width - aside, pageWidth, PAGE_GAP) : zoomMode
-	const zoomRef = useLatestRef(zoom)
+	const fitZoom = fitWidthZoom(width - aside, pageWidth, PAGE_GAP)
+	const zoom = zoomMode === "fit" ? fitZoom : zoomMode
+	// Read by the first wheel step from "fit" only: later steps build on the previous step's zoom.
+	const fitZoomRef = useLatestRef(fitZoom)
 
 	// The editor and its spelling once the document is open for editing (proved block by block meanwhile).
 	useEffect(() => {
@@ -761,7 +817,10 @@ export function DocxEditView({
 			}
 
 			event.preventDefault()
-			setZoomMode(clampZoom(zoomRef.current - event.deltaY * WHEEL_SENSITIVITY))
+
+			const { deltaY } = event
+
+			setZoomMode(previous => wheelZoom(previous, fitZoomRef.current, deltaY))
 		}
 
 		wrapper.addEventListener("wheel", onWheel, { passive: false })
@@ -769,59 +828,106 @@ export function DocxEditView({
 		return () => {
 			wrapper.removeEventListener("wheel", onWheel)
 		}
-	}, [wrapper, zoomRef])
+	}, [wrapper, fitZoomRef])
 
 	// Shows the match `index` of `list`: selected, scrolled to.
-	const reveal = (list: readonly StoryMatch[], index: number): void => {
-		const match = list[index]
-
+	// Matches are in the body: one shown from a header, footer or note goes back to the body first.
+	const showMatch = (match: StoryMatch | undefined): void => {
 		if (editor === undefined || match === undefined) {
 			return
 		}
 
-		const tr = selectMatch(editor.state, match)
+		const body = editor.body.session
+		const tr = selectMatch(body.state, match)
 
-		if (tr !== null) {
-			editor.dispatch(tr)
-			handleRef.current?.scrollToCaret()
+		if (tr === null) {
+			return
 		}
+
+		if (editor.activeStory !== body.story.story.index) {
+			editor.exitStory()
+		}
+
+		body.dispatch(tr)
+		handleRef.current?.scrollToCaret()
+	}
+
+	const reveal = (list: readonly StoryMatch[], index: number): void => {
+		showMatch(list[index])
 	}
 
 	// A new search shows its first match from the caret once the results are in.
 	const revealedRef = useRef<string | null>(null)
 
 	useEffect(() => {
-		const key = `${find.query}\u0000${String(find.caseSensitive)}`
-
-		if (!find.open || active < 0 || revealedRef.current === key || editor === undefined) {
+		if (!find.open || active < 0 || editor === undefined) {
 			return
 		}
 
-		revealedRef.current = key
+		const key = `${find.query}\u0000${String(find.caseSensitive)}`
 
-		const match = matches[active]
-		const tr = match === undefined ? null : selectMatch(editor.state, match)
-
-		if (tr !== null) {
-			editor.dispatch(tr)
-			handleRef.current?.scrollToCaret()
+		if (revealedRef.current !== key) {
+			revealedRef.current = key
+			showMatch(matches[active])
 		}
-	}, [find.open, find.query, find.caseSensitive, active, matches, editor])
+	})
 
+	// Opens with the selection's text when it is short and in one paragraph, else with the last search (Word's).
 	const openFind = (replace: boolean): void => {
-		setFind(previous =>
-			previous.open
-				? { ...previous, replace: previous.replace || replace, focus: previous.focus + 1 }
-				: { ...FIND_CLOSED, open: true, replace }
-		)
+		const seed = editor === undefined ? undefined : findSeed(editor)
+
+		if (seed !== undefined) {
+			revealedRef.current = null
+		}
+
+		setFind(previous => openedFind(previous, replace, seed))
 	}
 
 	const focusEditor = (): void => {
 		handleRef.current?.focus()
 	}
 
-	// F6 and Shift+F6 move between the ribbon and the document, as Word's panes.
+	const links = useDocxLinkFollow(editor, handleRef, focusEditor)
+
+	// Word's keys the host runs (Track Changes, New Comment), never pressed in a field (the find box, a comment's)
+	// nor in a dialog over the editor (portalled: its keys bubble here through React).
+	const onHostKey = (event: KeyboardEvent, root: Element): boolean => {
+		const target = event.target
+
+		if (
+			event.defaultPrevented ||
+			!keyForEditor(root, target) ||
+			inReview(target) ||
+			(target instanceof Element && target.matches("input, textarea, select"))
+		) {
+			return false
+		}
+
+		const type = hostCommandForKey(event, APPLE)
+
+		if (type === undefined) {
+			return false
+		}
+
+		event.preventDefault()
+
+		const action = hostKeyAction(type, editor?.snapshot(), readOnly)
+
+		if (action?.kind === "execute") {
+			execute(action.command)
+		} else if (action?.kind === "input") {
+			requestInput(action.type)
+		}
+
+		return true
+	}
+
+	// F6 and Shift+F6 move between the ribbon and the document, as Word's panes; and the host's own Word keys.
 	const onPaneKey = (event: KeyboardEvent, root: Element): void => {
+		if (onHostKey(event, root)) {
+			return
+		}
+
 		if (event.key !== "F6" || event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey) {
 			return
 		}
@@ -938,7 +1044,7 @@ export function DocxEditView({
 		},
 		close: () => {
 			revealedRef.current = null
-			setFind(FIND_CLOSED)
+			setFind(closedFind)
 		},
 		replace: {
 			disabled: !canReplace,
@@ -949,14 +1055,15 @@ export function DocxEditView({
 					return
 				}
 
-				const tr = replaceMatches(editor.state, [match], find.query, replacement, { caseSensitive: find.caseSensitive })
+				const body = editor.body.session
+				const tr = replaceMatches(body.state, [match], find.query, replacement, { caseSensitive: find.caseSensitive })
 
-				if (tr === null || !editor.dispatch(tr)) {
+				if (tr === null || !body.dispatch(tr)) {
 					return
 				}
 
 				// The next match takes the replaced one's place.
-				const after = findInStory(editor.state.doc, find.query, { caseSensitive: find.caseSensitive })
+				const after = findInStory(body.state.doc, find.query, { caseSensitive: find.caseSensitive })
 				const next = after.length === 0 ? -1 : firstMatchFrom(after, match.from + replacement.length)
 
 				setFind(previous => ({ ...previous, active: next }))
@@ -968,14 +1075,15 @@ export function DocxEditView({
 					return
 				}
 
-				const result = replaceAll(editor.state, find.query, replacement, { caseSensitive: find.caseSensitive })
-				const before = editor.state.doc
+				const body = editor.body.session
+				const result = replaceAll(body.state, find.query, replacement, { caseSensitive: find.caseSensitive })
+				const before = body.state.doc
 
-				if (result !== null && "tr" in result && !editor.dispatch(result.tr)) {
+				if (result !== null && "tr" in result && !body.dispatch(result.tr)) {
 					return
 				}
 
-				const notice = replaceAllToast(result, editor.state.doc !== before)
+				const notice = replaceAllToast(result, body.state.doc !== before)
 
 				if (notice?.key === "previewDocxReplacedCount") {
 					toast.success(t(notice.key, { count: notice.count }))
@@ -987,18 +1095,30 @@ export function DocxEditView({
 	}
 
 	// Find opens for keys pressed in the layer the document is shown in, never for one over it; the editor's
-	// own input takes Mod+F itself (onFind below).
+	// own input takes Mod+F and Ctrl+H itself (onFind below).
+	const onFindKey = (keyboardEvent: KeyboardEvent, replace: boolean): void => {
+		const root = rootRef.current
+
+		if (root === null || keyboardEvent.defaultPrevented || !keyForEditor(root, keyboardEvent.target)) {
+			return
+		}
+
+		keyboardEvent.preventDefault()
+		openFind(replace)
+	}
+
 	useAction(
 		"editor.find",
 		keyboardEvent => {
-			const root = rootRef.current
-
-			if (root === null || keyboardEvent.defaultPrevented || !keyForEditor(root, keyboardEvent.target)) {
-				return
-			}
-
-			keyboardEvent.preventDefault()
-			openFind(false)
+			onFindKey(keyboardEvent, false)
+		},
+		IN_EDITORS,
+		[]
+	)
+	useAction(
+		"editor.replace",
+		keyboardEvent => {
+			onFindKey(keyboardEvent, true)
 		},
 		IN_EDITORS,
 		[]
@@ -1293,9 +1413,17 @@ export function DocxEditView({
 				markup={reviewing ? shownMode : null}
 				onMarkupChange={changeMarkup}
 				zoom={zoom}
+				zoomFit={zoomMode === "fit"}
 				onZoom={change => {
-					setZoomMode(change === "fit" ? "fit" : stepZoom(zoom, change === "in" ? 1 : -1))
+					setZoomMode(
+						change === "fit" ? "fit" : typeof change === "number" ? clampZoom(change) : stepZoom(zoom, change === "in" ? 1 : -1)
+					)
 				}}
+				pages={pages}
+				onGoTo={page => {
+					handleRef.current?.goToPage(page)
+				}}
+				onGoToClosed={focusEditor}
 				reflow={reflow}
 				onReflowChange={setReflow}
 				surface={surface}
@@ -1349,6 +1477,25 @@ export function DocxEditView({
 					}}
 					onPointerDownCapture={event => {
 						setTouch(event.pointerType === "touch" || event.pointerType === "pen")
+
+						// Ctrl+Click (Cmd+Click on a Mac) follows a link, placing no caret; a plain click edits it (Word's).
+						if (
+							event.button !== 0 ||
+							!(APPLE ? event.metaKey : event.ctrlKey) ||
+							editor === undefined ||
+							inReview(event.target)
+						) {
+							return
+						}
+
+						const hit = handleRef.current?.hitTest(event.clientX, event.clientY)
+						const link = hit === undefined ? undefined : docxLinkAt(editor, hit.pos)
+
+						if (link !== undefined) {
+							event.preventDefault()
+							event.stopPropagation()
+							links.follow(link)
+						}
 					}}
 					// The format painter paints the selection a press in the document made (Word's).
 					onPointerUp={event => {
@@ -1395,9 +1542,9 @@ export function DocxEditView({
 						}
 
 						const pos = hit?.pos ?? current.head
-						const issue = bodyActive && spelling !== undefined ? spelling.spellingAt(pos) : undefined
+						const issue = spelling?.spellingAt(pos)
 
-						setMenu({ pos, issue, suggestions: issue?.kind === "spelling" ? undefined : [] })
+						setMenu({ pos, issue, suggestions: issue?.kind === "spelling" ? undefined : [], link: docxLinkAt(editor, pos) })
 
 						if (issue?.kind === "spelling" && spelling !== undefined) {
 							spelling
@@ -1430,10 +1577,9 @@ export function DocxEditView({
 							{...(describedBy === undefined ? {} : { describedBy })}
 							readOnly={readOnly}
 							apple={APPLE}
+							desktop={DESKTOP}
 							marks={marks}
-							onFind={() => {
-								openFind(false)
-							}}
+							onFind={openFind}
 							{...(interactions === undefined ? {} : { interactions })}
 						/>
 					) : (
@@ -1449,9 +1595,10 @@ export function DocxEditView({
 								{...(describedBy === undefined ? {} : { describedBy })}
 								readOnly={readOnly}
 								apple={APPLE}
-								onFind={() => {
-									openFind(false)
-								}}
+								desktop={DESKTOP}
+								onFind={openFind}
+								onGoTo={openGoTo}
+								onPage={pages.setPage}
 								marks={marks}
 								aside={aside}
 								{...(interactions === undefined ? {} : { interactions })}
@@ -1599,6 +1746,23 @@ export function DocxEditView({
 							<ContextMenuSeparator />
 						</>
 					) : null}
+					{menu?.link === undefined ? null : (
+						<>
+							<ContextMenuItem
+								onClick={() => {
+									if (menu.link !== undefined) {
+										links.follow(menu.link)
+									}
+								}}
+							>
+								{t("previewDocxOpenLink")}
+								<span className="ml-auto pl-4 text-xs text-muted-foreground">
+									{t("previewDocxOpenLinkClick", { modifier: APPLE ? "⌘" : "Ctrl" })}
+								</span>
+							</ContextMenuItem>
+							<ContextMenuSeparator />
+						</>
+					)}
 					<ContextMenuItem
 						disabled={!hasSelection || !editable}
 						onClick={() => {
@@ -1635,6 +1799,7 @@ export function DocxEditView({
 				</ContextMenuContent>
 			</ContextMenu>
 			{authorDialog}
+			{links.gate}
 			{pdf.prompt}
 			{image.dialogs}
 			{editor === undefined ? null : (

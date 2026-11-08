@@ -65,6 +65,10 @@ export const previewDocxEditor = {
 	previewDocxPaste: "Paste",
 	/** Docx editor — context and touch menu: select the whole document */
 	previewDocxSelectAll: "Select all",
+	/** Docx editor — context menu on a hyperlink: open its web page, or go to the place in the document it points to */
+	previewDocxOpenLink: "Open link",
+	/** Docx editor — context menu, beside Open link: the click that follows a link; {{modifier}} is Ctrl, or ⌘ on a Mac */
+	previewDocxOpenLinkClick: "{{modifier}}+Click",
 	/** Docx editor — toast when the browser refuses access to the clipboard; names the keyboard shortcut that still works */
 	previewDocxClipboardBlocked: "Access to the clipboard was blocked. Use {{shortcut}} instead.",
 	/** Docx editor — context menu while spelling suggestions load */
@@ -158,5 +162,13 @@ export const previewDocxEditor = {
 	/** Docx editor — label of the prompt's password field */
 	previewDocxWritePasswordLabel: "Password",
 	/** Docx editor — submit button of that prompt */
-	previewDocxWritePasswordSubmit: "Edit"
+	previewDocxWritePasswordSubmit: "Edit",
+	/** Docx editor — View tab button: zoom to 100 % */
+	previewDocxZoom100Action: "Zoom to 100%",
+	/** Docx editor — accessible name of the status bar's page indicator, which opens Go To */
+	previewDocxPageIndicatorAction: "Page {{current}} of {{total}}, go to a page",
+	/** Docx editor — Go To popover: label of the page number field */
+	previewDocxGoToPage: "Enter page number",
+	/** Docx editor — Go To popover: button that goes to the page typed */
+	previewDocxGoToAction: "Go to"
 } as const

@@ -10,6 +10,10 @@ export const previewDocxFormat = {
 	previewDocxSmallCaps: "Small caps",
 	/** Docx editor — formatting menu item: all capitals */
 	previewDocxAllCaps: "All caps",
+	/** Docx editor — formatting command: double underline */
+	previewDocxDoubleUnderline: "Double underline",
+	/** Docx editor — formatting command: cycles the selected text through lower case, title case and upper case */
+	previewDocxChangeCase: "Change case",
 	/** Docx editor — formatting menu item: removes all formatting and resets the paragraphs to the Normal style */
 	previewDocxClearAllFormatting: "Clear all formatting",
 	/** Docx editor — font picker label */
@@ -20,6 +24,10 @@ export const previewDocxFormat = {
 	previewDocxFontGrow: "Increase font size",
 	/** Docx editor — toolbar button: one font size smaller */
 	previewDocxFontShrink: "Decrease font size",
+	/** Docx editor — formatting command: font size one point larger */
+	previewDocxFontGrowPoint: "Increase font size by 1 point",
+	/** Docx editor — formatting command: font size one point smaller */
+	previewDocxFontShrinkPoint: "Decrease font size by 1 point",
 	/** Docx editor — formatting submenu: spacing between characters */
 	previewDocxCharacterSpacing: "Character spacing",
 	/** Docx editor — character spacing step: condensed by 3 points */

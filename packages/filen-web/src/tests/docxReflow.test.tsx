@@ -114,6 +114,7 @@ describe("Mobile view surface", () => {
 				describedBy="keys"
 				readOnly
 				apple
+				desktop
 				marks={marks}
 				onFind={onFind}
 				interactions={{ commentMarker }}
@@ -131,6 +132,7 @@ describe("Mobile view surface", () => {
 			describedBy: "keys",
 			readOnly: true,
 			apple: true,
+			desktop: true,
 			marks,
 			onFind
 		})

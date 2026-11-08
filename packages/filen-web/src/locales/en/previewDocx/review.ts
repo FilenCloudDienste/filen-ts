@@ -2,6 +2,10 @@
 export const previewDocxReview = {
 	/** Docx editor — Review menu switch recording every edit as a tracked change with the author's name (Word's "Track Changes") */
 	previewDocxTrackChanges: "Track changes",
+	/** Docx editor — Review menu item accepting the tracked change at the cursor, then selecting the next one (Word's "Accept and Move to Next") */
+	previewDocxAcceptAndNext: "Accept and move to next",
+	/** Docx editor — Review menu item rejecting the tracked change at the cursor, then selecting the next one (Word's "Reject and Move to Next") */
+	previewDocxRejectAndNext: "Reject and move to next",
 	/** Docx editor — Review menu item accepting the tracked change at the cursor */
 	previewDocxAcceptChange: "Accept change",
 	/** Docx editor — Review menu item rejecting the tracked change at the cursor */
