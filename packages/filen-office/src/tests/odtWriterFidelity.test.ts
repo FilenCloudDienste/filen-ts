@@ -183,7 +183,7 @@ describe("ODT writer fidelity", () => {
 			e => {
 				select(e, nth(e, 1).pos + 4)
 
-				const split = splitParagraph(e.session.state)
+				const split = splitParagraph(e.session.state, e.session.formats)
 
 				if (split !== null) e.session.dispatch(split)
 			}
@@ -262,7 +262,7 @@ describe("ODT writer fidelity", () => {
 			e => {
 				select(e, nth(e, 0).pos + 1 + 15)
 
-				const split = splitParagraph(e.session.state)
+				const split = splitParagraph(e.session.state, e.session.formats)
 
 				if (split !== null) e.session.dispatch(split)
 			}
@@ -335,7 +335,7 @@ describe("ODT writer fidelity", () => {
 		const bytes = await save({ body: '<text:p xml:id="para7">First half second half</text:p>' }, e => {
 			select(e, nth(e, 0).pos + 1 + 10)
 
-			const split = splitParagraph(e.session.state)
+			const split = splitParagraph(e.session.state, e.session.formats)
 
 			if (split !== null) e.session.dispatch(split)
 		})

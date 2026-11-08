@@ -1,3 +1,4 @@
+import { findPattern } from "../../core/docx/findPattern"
 import { nfcWithMap } from "../../core/text/nfc"
 import { DOCX_FIND_LIMIT, FIND_INTS, type DocxFindOptions } from "./protocol"
 
@@ -14,7 +15,6 @@ export interface FindablePage {
 }
 
 const LINE_INTS = 7
-const SPECIAL = /[.*+?^${}()|[\]\\]/g
 
 // The page's line that holds offset `at` of `source`, or -1.
 export function lineOf(page: FindablePage, source: number, at: number): number {
@@ -29,12 +29,12 @@ export function lineOf(page: FindablePage, source: number, at: number): number {
 
 export function findMatches(pages: Iterable<FindablePage | undefined>, query: string, options: DocxFindOptions = {}): Int32Array {
 	const out: number[] = []
+	const pattern = findPattern(query, options)
 
-	if (query.length === 0) return new Int32Array(0)
+	if (pattern === null) return new Int32Array(0)
 
 	// One past the limit: whoever shows the matches can tell there are more.
 	const limit = (options.limit ?? DOCX_FIND_LIMIT) + 1
-	const pattern = new RegExp(query.normalize("NFC").replace(SPECIAL, "\\$&"), options.caseSensitive === true ? "gu" : "giu")
 
 	for (const page of pages) {
 		if (page === undefined) continue

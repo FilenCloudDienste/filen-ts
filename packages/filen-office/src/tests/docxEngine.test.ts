@@ -405,6 +405,13 @@ describe("findMatches", () => {
 		expect(Array.from(findMatches([page("e\u0301x")], "é"))).toEqual([0, 0, 0, 2])
 	})
 
+	it("finds whole words only when asked, as the editing find does", () => {
+		const text = "the other them, The. théâtre the_x"
+
+		expect(findMatches([page(text)], "the").length / FIND_INTS).toBe(5)
+		expect(Array.from(findMatches([page(text)], "the", { wholeWord: true }))).toEqual([0, 0, 0, 3, 0, 0, 16, 19])
+	})
+
 	it("stops one match past the limit, which tells that there are more", () => {
 		expect(findMatches([page("a a a a a")], "a", { limit: 3 }).length / FIND_INTS).toBe(4)
 		expect(findMatches([page("a a a")], "a", { limit: 3 }).length / FIND_INTS).toBe(3)

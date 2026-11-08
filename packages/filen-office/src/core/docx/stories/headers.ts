@@ -9,6 +9,7 @@ import type { HeaderFooterSet, Section } from "../model/index"
 import type { PagedEditor } from "../paged/editor"
 import { cloneStory, copySessions, type StoryTemplate } from "./clone"
 import { hasStyleDefinition } from "../write/styles"
+import { resolveSection } from "../styles/index"
 import {
 	bodySectionsOf,
 	docSectionChanges,
@@ -18,6 +19,7 @@ import {
 	registerSectionStory,
 	sectionDocument,
 	sectionNode,
+	sectionProps,
 	setEvenAndOddHeaders,
 	setTitlePage,
 	type DocxHeaderKind,
@@ -146,8 +148,9 @@ type AddStory = (kind: DocxHeaderKind, id?: string, template?: StoryTemplate) =>
 
 // A new header or footer story, outside the undo history (the section edit referring to it is what undoes):
 // a copy of story `copy` (the one an unlinked section showed, stories/clone.ts), else one empty paragraph of
-// the Header or Footer style.
-function newStory(editor: PagedEditor, kind: DocxHeaderKind, copy?: number): number | undefined {
+// the Header or Footer style (added for section `section` when the document lacks it: its tabs are that
+// section's).
+function newStory(editor: PagedEditor, kind: DocxHeaderKind, section: number, copy?: number): number | undefined {
 	const template = copy === undefined ? undefined : copyOf(editor, copy)
 	const add: AddStory = editor.addStory.bind(editor)
 	const session = add(kind, undefined, template)
@@ -159,6 +162,14 @@ function newStory(editor: PagedEditor, kind: DocxHeaderKind, copy?: number): num
 	// Made from the template, the story holds the copy; else its content is set here.
 	if (session.story.story.item < 0) {
 		const style = context.styles.byName(kind, "paragraph")?.id ?? (hasStyleDefinition(kind) ? builtInStyleId(context, kind) : null)
+
+		// The first section to add the style sets its tabs, as in Word.
+		if (style !== null && context.newStyles.has(style) && !context.newStyleWidths.has(style)) {
+			const width = textWidth(editor, section)
+
+			if (width !== undefined) context.newStyleWidths.set(style, width)
+		}
+
 		const blocks =
 			(copy === undefined ? undefined : pastedContent(editor, copy, session.story.part.index)) ??
 			Fragment.from(nodes.paragraph.create({ styleId: style }))
@@ -170,6 +181,20 @@ function newStory(editor: PagedEditor, kind: DocxHeaderKind, copy?: number): num
 	registerSectionStory(context, session.story.story)
 
 	return session.story.story.index
+}
+
+// The twips of text body section `index` holds across: its page less the side margins and a gutter at a side.
+function textWidth(editor: PagedEditor, index: number): number | undefined {
+	const state = bodySectionsOf(editor).states[index]
+
+	if (state === undefined) return undefined
+
+	const session = editor.body.session
+	const { pageWidth, margins } = resolveSection(sectionProps(session.context, session.story.part, state))
+	const gutter = session.context.model.settings.gutterAtTop ? 0 : Math.max(0, margins.gutter)
+	const width = Math.round(pageWidth - margins.left - margins.right - gutter)
+
+	return width > 0 ? width : undefined
 }
 
 // The part a copy of story `story` makes, as it is now (its session's document, when it has one, with the
@@ -246,7 +271,7 @@ export function editHeader(editor: PagedEditor, kind: DocxHeaderKind, page: numb
 
 	while (first > 0 && setOf(states[first - 1] as SectionState, kind, false)[shown.type] < 0) first--
 
-	const story = newStory(editor, kind)
+	const story = newStory(editor, kind, first)
 
 	if (story === undefined) return false
 
@@ -309,7 +334,7 @@ export function toggleLink(editor: PagedEditor): boolean {
 	}
 
 	const previous = setOf(state, kind, true)[shown.type]
-	const story = newStory(editor, kind, previous >= 0 ? previous : undefined)
+	const story = newStory(editor, kind, shown.section, previous >= 0 ? previous : undefined)
 
 	if (story === undefined) return false
 
@@ -365,7 +390,7 @@ export function removeHeader(editor: PagedEditor, kind: DocxHeaderKind): boolean
 		}
 	}
 
-	const empty = covered.size === 0 ? undefined : newStory(editor, kind)
+	const empty = covered.size === 0 ? undefined : newStory(editor, kind, Math.min(...covered))
 
 	if (covered.size > 0 && empty === undefined) return false
 

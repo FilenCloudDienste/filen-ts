@@ -149,6 +149,23 @@ describe("ODT writer", () => {
 		expect(content).toMatch(/<text:list-style style:name="L1"><text:list-level-style-bullet text:level="1" text:bullet-char="[^"]+">/u)
 	})
 
+	it("adds no Hyperlink style for a new link", async () => {
+		const bytes = odtBytes({ body: "<text:p>One</text:p>" })
+		const editing = await editOdt(bytes)
+		const first = paragraphs(editing.session.state.doc)[0]
+
+		if (first === undefined) throw new Error("no paragraph")
+
+		select(editing, first.pos + 1, first.pos + 4)
+		expect(await editing.editor.execute({ type: "link.set", target: "https://filen.io/" })).toBe(true)
+		expect([...editing.opened.context.newStyles.values()]).toEqual([])
+
+		const written = await saveOdt(editing)
+
+		expect(await entry(written.bytes, "styles.xml")).not.toContain('style:name="Hyperlink"')
+		expect(await entry(written.bytes, "content.xml")).toContain('xlink:href="https://filen.io/"')
+	})
+
 	it("applies a heading style the document already has", async () => {
 		const bytes = document("<text:p>One</text:p><text:p>Two</text:p>")
 		const editing = await editOdt(bytes)

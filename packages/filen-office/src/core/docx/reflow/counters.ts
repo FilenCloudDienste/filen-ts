@@ -235,7 +235,20 @@ export class StoryCounters {
 
 				news.set(key, value)
 
-				if (shown && list !== undefined) marker(pos + 1, list.kind === "bullet" ? "•" : `${String(value)}.`, paragraph, "tab")
+				// The first level of one AutoFormat started counts from its typed number in its format.
+				const first = typeof ilvl === "number" && ilvl > 0 ? undefined : list?.first
+
+				if (shown && list !== undefined)
+					marker(
+						pos + 1,
+						list.kind === "bullet"
+							? "•"
+							: first === undefined
+								? `${String(value)}.`
+								: `${numberText(first.start + value - 1, first.format)}${first.suffix}`,
+						paragraph,
+						"tab"
+					)
 			} else if (!joined) {
 				const numbering = format.props.numbering
 

@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest"
 import { NumberingCounters, englishCardinal, englishOrdinal, formatNumber, parseNumbering } from "../core/docx/numbering/index"
 import { PropsStore } from "../core/docx/props/index"
 import { parseStyles } from "../core/docx/styles/index"
+import { abstractNumbering } from "../core/docx/write/numbering"
+import { Names } from "../core/docx/write/markup"
 import { stylesXml, wordPart } from "./docxFixtures"
 
 function level(ilvl: number, format: string, text: string, extra: string = ""): string {
@@ -114,6 +116,22 @@ describe("numbering part", () => {
 		)
 
 		expect(numbering.level(1, 0)).toBeUndefined()
+	})
+})
+
+describe("new list definitions", () => {
+	const indents = (xml: string): string[] => [...xml.matchAll(/<w:lvl w:ilvl="\d">.*?<w:ind ([^/]*)\/>/g)].map(match => match[1] ?? "")
+
+	it("hangs right-aligned roman levels 180 twips like Word's 1. a. i. list", () => {
+		const numbered = indents(abstractNumbering(new Names("w", ""), 1, "numbered"))
+
+		expect(numbered).toHaveLength(9)
+		expect(numbered[0]).toBe('w:left="720" w:hanging="360"')
+		expect(numbered[1]).toBe('w:left="1440" w:hanging="360"')
+		expect(numbered[2]).toBe('w:left="2160" w:hanging="180"')
+		expect(numbered[5]).toBe('w:left="4320" w:hanging="180"')
+		expect(numbered[8]).toBe('w:left="6480" w:hanging="180"')
+		expect(indents(abstractNumbering(new Names("w", ""), 1, "bullet")).every(ind => ind.endsWith('w:hanging="360"'))).toBe(true)
 	})
 })
 

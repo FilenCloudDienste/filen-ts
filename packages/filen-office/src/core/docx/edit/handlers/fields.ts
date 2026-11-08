@@ -17,6 +17,7 @@ import {
 	tocRegions,
 	type TocRegion
 } from "../../fields/toc"
+import { shownFieldText } from "../../layout/fields"
 import type { PagedEditor } from "../../paged/editor"
 import { isDeleted, revisionStamp, type RevisionStamp } from "../../review/track"
 import { AttrChanges } from "../attrs"
@@ -199,7 +200,10 @@ function fieldChanges(host: FieldHost, session: DocxEditorSession, from: number,
 
 		const result = evaluation.result(node, pos)
 
-		if (result !== undefined && result !== node.attrs["result"]) changes.set(node, pos, updated(session, node, result, stamp))
+		if (result !== undefined && result !== node.attrs["result"]) {
+			evaluation.results.set(pos, result)
+			changes.set(node, pos, updated(session, node, result, stamp))
+		}
 
 		return false
 	})
@@ -471,6 +475,73 @@ function insertDateText(editor: PagedEditor, format: string): boolean {
 	return text !== undefined && text !== "" && session.dispatch(session.state.tr.insertText(text).scrollIntoView())
 }
 
+// Whether Unlink Fields turns `node` into text: not a field deleted while tracking, nor a legacy check box or
+// drop-down (what they show is their form data, not a result).
+function unlinkable(node: Node): boolean {
+	const type = node.attrs["type"] as string
+
+	return node.type === nodes.field && !isDeleted(node) && type !== "FORMCHECKBOX" && type !== "FORMDROPDOWN"
+}
+
+// The fields Unlink Fields takes: those of the selection, else the one at the caret.
+function fieldsToUnlink(state: EditorState): { node: Node; pos: number }[] {
+	const out: { node: Node; pos: number }[] = []
+
+	if (state.selection.empty || state.selection instanceof NodeSelection) {
+		const caret = fieldAtCaret(state)
+
+		if (caret !== undefined && unlinkable(caret.node)) out.push(caret)
+
+		return out
+	}
+
+	state.doc.nodesBetween(state.selection.from, state.selection.to, (node, pos) => {
+		if (unlinkable(node)) out.push({ node, pos })
+
+		return !node.isLeaf
+	})
+
+	return out
+}
+
+// A field's shown result as inline content with the field's marks: tabs and line breaks as their nodes.
+function resultContent(node: Node): Node[] {
+	const text = shownFieldText(node.attrs["result"] as string, node.attrs["instruction"] as string)
+	const out: Node[] = []
+	let start = 0
+
+	for (let k = 0; k <= text.length; k++) {
+		const code = k < text.length ? text.charCodeAt(k) : -1
+
+		if (code !== -1 && code !== 0x09 && code !== 0x0a) continue
+		if (k > start) out.push(docxSchema.text(text.slice(start, k), node.marks))
+		if (code === 0x09) out.push(nodes.tab.create(null, null, node.marks))
+		else if (code === 0x0a) out.push(nodes.break.create({ type: "textWrapping" }, null, node.marks))
+
+		start = k + 1
+	}
+
+	return out
+}
+
+// Unlink Fields (Ctrl+Shift+F9): each field replaced by its result as text with the field's formatting, as the
+// user's edit (while tracking, the field deleted and its result inserted).
+function unlinkFields(session: DocxEditorSession): boolean {
+	const targets = fieldsToUnlink(session.state)
+
+	if (targets.length === 0) return false
+
+	const tr = session.state.tr
+
+	for (let k = targets.length - 1; k >= 0; k--) {
+		const { node, pos } = targets[k] as { node: Node; pos: number }
+
+		tr.replaceWith(pos, pos + node.nodeSize, resultContent(node))
+	}
+
+	return session.dispatch(tr.scrollIntoView())
+}
+
 const insertable = (context: DocumentCommandContext): boolean => writable(context) && inParagraph(context.session.state)
 // Updates read the laid-out pages and wait for layout to catch up: none while paged layout is suspended (another
 // surface shows the document), where they would wait until it resumes.
@@ -504,6 +575,21 @@ const document: DocumentHandlers = {
 	"field.updateAll": {
 		enabled: updatable,
 		run: context => update(context.editor, true)
+	},
+	"field.unlink": {
+		// As Update Field's: any selection (not walked for each snapshot), or a field at the caret.
+		enabled: context => {
+			const state = context.session.state
+			const selection = state.selection
+
+			if (!writable(context)) return false
+			if (!selection.empty && !(selection instanceof NodeSelection)) return true
+
+			const caret = fieldAtCaret(state)
+
+			return caret !== undefined && unlinkable(caret.node)
+		},
+		run: context => unlinkFields(context.session)
 	},
 	"toc.insert": {
 		enabled: context => insertable(context) && !context.editor.suspended && context.session === context.editor.body.session,

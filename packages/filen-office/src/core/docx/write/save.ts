@@ -48,7 +48,7 @@ import {
 	type NewStoryContainer
 } from "./newStory"
 import { NUMBERING_CONTENT_TYPE, planNumbering } from "./numbering"
-import { orphanedHyperlinks } from "./orphans"
+import { orphanedRelationships } from "./orphans"
 import { noteCopySource, noteCopyTarget, orphanedNotes, readNoteReferences, relationshipIdsOf, relationshipUses } from "./parts/notes"
 import { Out } from "./markup"
 import { PART_CONTRIBUTORS, type PartContributor, type RootDeclarations, type SaveParts } from "./parts/index"
@@ -243,9 +243,18 @@ function writtenPart(part: StoryPart): StoryPart {
 
 // Package parts left with no relationship pointing at them once `dropped` (part keys, targets of relationships
 // the save removes) lose theirs: each with its relationships part, and what only those pointed at. Word drops
-// such parts on save; a part the save writes stays.
-async function unreferencedParts(pkg: DocxPackage, dropped: ReadonlySet<string>, changes: readonly PartChange[]): Promise<string[]> {
-	if (dropped.size === 0) return []
+// such parts on save. A part the save writes stays, unless it is one of `discardable` (story parts and parts the
+// save adds: a header edited and then removed, a picture added to it): then its writes go too (`discarded`,
+// part keys).
+async function unreferencedParts(
+	pkg: DocxPackage,
+	dropped: ReadonlySet<string>,
+	changes: readonly PartChange[],
+	discardable: ReadonlySet<string>
+): Promise<{ remove: string[]; discarded: Set<string> }> {
+	const discarded = new Set<string>()
+
+	if (dropped.size === 0) return { remove: [], discarded }
 
 	const changed = new Map(changes.map(change => [partKey(change.name), change]))
 	// Part key -> keys of the parts relating to it (the package: "").
@@ -287,16 +296,25 @@ async function unreferencedParts(pkg: DocxPackage, dropped: ReadonlySet<string>,
 
 		for (const key of queue) {
 			const entry = pkg.opc.entry(key)
+			const change = changed.get(key)
+			const keep = !discardable.has(key)
 
-			if (entry === undefined || removed.has(key) || changed.has(key) || key === partKey(CONTENT_TYPES_PART)) continue
+			if (removed.has(key) || key === partKey(CONTENT_TYPES_PART) || (change !== undefined && keep)) continue
+
+			const name = entry?.name ?? change?.name
+
+			if (name === undefined) continue
 			if ([...(sources.get(key) ?? [])].some(source => !removed.has(source))) continue
 
-			const rels = partKey(relationshipsPartName(entry.name))
+			const rels = partKey(relationshipsPartName(name))
 
-			if (changed.has(rels)) continue
+			if (changed.has(rels) && keep) continue
 
 			removed.add(key)
-			out.push(entry.name)
+
+			if (entry !== undefined) out.push(entry.name)
+			if (change !== undefined) discarded.add(key)
+			if (changed.has(rels)) discarded.add(rels)
 
 			const relsEntry = pkg.opc.entry(rels)
 
@@ -309,7 +327,7 @@ async function unreferencedParts(pkg: DocxPackage, dropped: ReadonlySet<string>,
 		queue = next
 	}
 
-	return out
+	return { remove: out, discarded }
 }
 
 // Pieces gathered between looks at the clock.
@@ -677,7 +695,7 @@ export async function serializeDocx(input: DocxSaveInput, options: DocxPrepareOp
 	}
 	// Relationships of notes part `part` its source used and its writing (`written`, the part as assembled) no
 	// longer does: a note that went, its picture or object moved with a note converted (hyperlinks apart:
-	// orphanedHyperlinks).
+	// orphanedRelationships).
 	const unusedNoteRelationships = async (part: StoryPart, written: BytePieces): Promise<string[]> => {
 		const local = part.document.localName(part.document.documentElement())
 
@@ -809,6 +827,7 @@ export async function serializeDocx(input: DocxSaveInput, options: DocxPrepareOp
 			return relationship
 		},
 		freeName: name => freeName(pkg, taken, name),
+		changed: () => written.size > 0,
 		xml: name => optionalXml(pkg, name, clock),
 		replace(name, bytes) {
 			if (own(name)) throw new DocxWriteError("unsupported", `${name} is the save's own to write`)
@@ -1059,7 +1078,7 @@ export async function serializeDocx(input: DocxSaveInput, options: DocxPrepareOp
 
 			const plan = await relationshipsOf(part.name)
 
-			for (const id of await orphanedHyperlinks(pkg, part, result.bytes, clock)) plan.removals.add(id)
+			for (const id of await orphanedRelationships(pkg, part, result.bytes, clock)) plan.removals.add(id)
 			for (const id of await unusedNoteRelationships(part, result.bytes)) plan.removals.add(id)
 		} else {
 			put(add, { name: part.name, bytes: result.bytes })
@@ -1098,7 +1117,12 @@ export async function serializeDocx(input: DocxSaveInput, options: DocxPrepareOp
 	for (const session of kept) for (const [id, name] of session.missingStyles) missingStyles.set(id, name)
 
 	const stylesPart = pkg.part("styles")
-	const stylesBytes = stylesWithDefinitions(await optionalXml(pkg, stylesPart, clock), context.styles, missingStyles)
+	const stylesBytes = stylesWithDefinitions(
+		await optionalXml(pkg, stylesPart, clock),
+		context.styles,
+		missingStyles,
+		context.newStyleWidths
+	)
 
 	if (stylesBytes !== null) {
 		if (stylesPart !== undefined) {
@@ -1189,17 +1213,30 @@ export async function serializeDocx(input: DocxSaveInput, options: DocxPrepareOp
 	}
 
 	// What only those relationships pointed at goes with them, as Word saves it.
-	const remove = await unreferencedParts(pkg, dropped, [...replace, ...add])
+	const discardable = new Set([...storyParts, ...add.map(change => partKey(change.name))])
+	const { remove, discarded } = await unreferencedParts(pkg, dropped, [...replace, ...add], discardable)
 	const removeOverrides = remove.filter(name => types.overrides.has(partKey(name)))
+	const stays = (name: string): boolean => !discarded.has(partKey(name))
+	const keptOverrides = discarded.size === 0 ? overrides : overrides.filter(override => stays(override.partName))
+	const keptReplace = discarded.size === 0 ? replace : replace.filter(change => stays(change.name))
+	const keptAdd = discarded.size === 0 ? add : add.filter(change => stays(change.name))
 
-	if (overrides.length > 0 || defaults.length > 0 || removeOverrides.length > 0) {
-		put(replace, {
+	if (keptOverrides.length > 0 || defaults.length > 0 || removeOverrides.length > 0) {
+		keptReplace.push({
 			name: CONTENT_TYPES_PART,
-			bytes: editContentTypes(await pkg.opc.read(CONTENT_TYPES_PART), { overrides, defaults, removeOverrides })
+			bytes: editContentTypes(await pkg.opc.read(CONTENT_TYPES_PART), { overrides: keptOverrides, defaults, removeOverrides })
 		})
 	}
 
-	return { replace, add, remove, numIds: numbering.numIds, stories, removed, roots }
+	return {
+		replace: keptReplace,
+		add: keptAdd,
+		remove,
+		numIds: numbering.numIds,
+		stories: discarded.size === 0 ? stories : stories.filter(story => stays(story.part.name)),
+		removed: discarded.size === 0 ? removed : removed.filter(cut => stays(cut.part.name)),
+		roots: discarded.size === 0 ? roots : new Map([...roots].filter(([part]) => stays(part.name)))
+	}
 }
 
 // The parts a save writes, checked by the part-level half of gate 2, with the time each step took (ms, slices

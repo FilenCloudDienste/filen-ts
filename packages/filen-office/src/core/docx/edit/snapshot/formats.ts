@@ -2,7 +2,7 @@ import type { Mark, Node } from "prosemirror-model"
 import type { EditorState } from "prosemirror-state"
 import type { ParagraphFormat } from "../../styles/index"
 import type { DocxHighlightColor, DocxLineSpacingRule } from "../commands/formatting"
-import { type FormatResolver, type RunValues } from "../formats"
+import { caretMarks, type FormatResolver, type RunValues } from "../formats"
 import { docxSchema, inlineLevel } from "../schema"
 import type { SnapshotInput } from "./index"
 
@@ -358,7 +358,7 @@ function caretValues(state: ProviderState, editor: EditorState): { run: RunValue
 
 	if ($from.parent.type !== nodes.paragraph) return undefined
 
-	const marksOf: readonly Mark[] = editor.storedMarks ?? $from.marks()
+	const marksOf: readonly Mark[] = caretMarks(editor, state.formats)
 
 	return {
 		run: state.formats.values(state.formats.paragraph($from.parent), marksOf),

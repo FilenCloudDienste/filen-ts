@@ -4,7 +4,9 @@ import { docxSchema, type DocxEditorCommand } from "@filen/office/core/docx/edit
 import {
 	currentNoteOptions,
 	currentPageSetup,
+	docxBookmarkStart,
 	docxBookmarks,
+	docxLinkAt,
 	formatDatePicture,
 	tableBorderOf,
 	type DocxCurrentPageSetup,
@@ -254,6 +256,32 @@ describe("bookmarks a link offers", () => {
 		caret(editor, at(editor, "One") + 2)
 		expect(await run(editor, { type: "bookmark.add", name: "Middle" })).toBe(true)
 		expect(docxBookmarks(editor).map(bookmark => bookmark.name)).toEqual(["Results", "Middle", "Appendix"])
+		editor.dispose()
+	})
+
+	it("reads the link a press follows: an external target or a bookmark it goes to", async () => {
+		const { editor } = await pagedEditor(
+			buildDocx({
+				body:
+					'<w:p><w:r><w:t xml:space="preserve">See </w:t></w:r><w:hyperlink r:id="rIdL"><w:r><w:t>site</w:t></w:r></w:hyperlink></w:p>' +
+					'<w:p><w:hyperlink w:anchor="results"><w:r><w:t>Jump</w:t></w:r></w:hyperlink></w:p>' +
+					'<w:p><w:bookmarkStart w:id="1" w:name="Results"/><w:r><w:t>Target</w:t></w:r><w:bookmarkEnd w:id="1"/></w:p>',
+				relationships: [{ id: "rIdL", type: "hyperlink", target: "https://example.com/", external: true }]
+			})
+		)
+		const site = at(editor, "See") + 4
+
+		expect(docxLinkAt(editor, site)).toEqual({ target: "https://example.com/", anchor: null })
+		// At the link's end, and not before it.
+		expect(docxLinkAt(editor, site + 4)).toEqual({ target: "https://example.com/", anchor: null })
+		expect(docxLinkAt(editor, site - 1)).toBeUndefined()
+
+		const jump = docxLinkAt(editor, at(editor, "Jump") + 1)
+
+		expect(jump).toEqual({ target: null, anchor: "results" })
+		// Just after its start marker.
+		expect(docxBookmarkStart(editor, jump?.anchor ?? "")).toBe(at(editor, "Target") + 1)
+		expect(docxBookmarkStart(editor, "missing")).toBeUndefined()
 		editor.dispose()
 	})
 

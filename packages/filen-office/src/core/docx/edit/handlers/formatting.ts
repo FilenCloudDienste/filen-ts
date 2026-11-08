@@ -12,14 +12,17 @@ import {
 	type FormattingCommand
 } from "../commands/formatting"
 import { AttrChanges } from "../attrs"
+import { changeCase } from "../changeCase"
 import type { DocxEditContext } from "../context"
 import { baseFits } from "../formatting"
 import {
+	caretMarks,
 	changeMarkSets,
 	changeMarks,
 	runPieces,
 	selectedParagraphs,
 	withMark,
+	wordAround,
 	type FormatResolver,
 	type ParagraphAt,
 	type RunValues
@@ -113,18 +116,19 @@ function atOf(formats: FormatResolver, paragraph: Node, marksOf: readonly Mark[]
 	}
 }
 
-// Applies the changes `plan` makes from the content's current formatting: to every piece of a selection, or
-// to the caret's stored marks (what is typed next).
+// Applies the changes `plan` makes from the content's current formatting: to every piece of a selection, to
+// the word a caret is inside of (as Word does), or to the caret's stored marks (what is typed next).
 function runCommand(context: StoryCommandContext, plan: (ats: readonly RunAt[]) => readonly MarkChange[]): Transaction | null {
 	const state = context.state
 	const formats = context.session.formats
+	const word = wordAround(state)
 
-	if (state.selection.empty) {
+	if (state.selection.empty && word === undefined) {
 		const $from = state.selection.$from
 
 		if ($from.parent.type !== nodes.paragraph) return null
 
-		const current = state.storedMarks ?? $from.marks()
+		const current = caretMarks(state, formats)
 		const at = atOf(formats, $from.parent, current, inCell(state))
 		let next = current
 
@@ -133,7 +137,7 @@ function runCommand(context: StoryCommandContext, plan: (ats: readonly RunAt[]) 
 		return state.tr.setStoredMarks(next)
 	}
 
-	const pieces = runPieces(state)
+	const pieces = runPieces(state, word === undefined ? undefined : [word])
 
 	if (pieces.length === 0) return null
 
@@ -178,6 +182,42 @@ function vertAlign(target: "superscript" | "subscript"): (ats: readonly RunAt[])
 
 		return [{ type: marks.vert_align, next: at => (at.style.vertAlign === value ? undefined : mark) }]
 	}
+}
+
+// The w:u value content shows: its own, else what the styles give.
+function underlineOf(at: RunAt): string {
+	const own = marks.underline.isInSet(at.marks)
+
+	return own === undefined ? (at.styleRun.underline?.style ?? "none") : (own.attrs["style"] as string)
+}
+
+// Double underline on, or underline off when all of the content has it; an underline colour stays.
+function doubleUnderline(ats: readonly RunAt[]): readonly MarkChange[] {
+	const value = ats.every(at => underlineOf(at) === "double") ? "none" : "double"
+	// One mark for each distinct own underline (a few in any selection).
+	const made = new Map<Mark | undefined, Mark>()
+
+	return [
+		{
+			type: marks.underline,
+			next: at => {
+				const own = marks.underline.isInSet(at.marks)
+
+				const colored = own !== undefined && (own.attrs["value"] !== null || own.attrs["themeColor"] !== null)
+
+				if ((at.styleRun.underline?.style ?? "none") === value && !colored) return undefined
+
+				let mark = made.get(own)
+
+				if (mark === undefined) {
+					mark = marks.underline.create({ ...own?.attrs, style: value })
+					made.set(own, mark)
+				}
+
+				return mark
+			}
+		}
+	]
 }
 
 // The w:rFonts slots a font choice sets (Word sets the Latin and complex script fonts; the East Asian one
@@ -651,7 +691,7 @@ function clearAll(context: StoryCommandContext): Transaction | null {
 
 		if ($from.parent.type !== nodes.paragraph) return null
 
-		const current = state.storedMarks ?? $from.marks()
+		const current = caretMarks(state, context.session.formats)
 		const tr = state.tr.setStoredMarks(PLAIN.addToSet(current.filter(mark => !CLEARED_TYPES.includes(mark.type))))
 
 		paragraphReset(context.context, tr, [{ node: $from.parent, pos: $from.before(), cell: false }])
@@ -681,7 +721,7 @@ function copyFormat(context: DocumentCommandContext, sticky: boolean): boolean {
 	const state = context.session.state
 	const { $from, $to, empty } = state.selection
 	const first = empty ? undefined : runPieces(state)[0]
-	const source = first?.node.marks ?? state.storedMarks ?? $from.marks()
+	const source = first?.node.marks ?? caretMarks(state, context.session.formats)
 	const paragraph = first?.paragraph ?? ($from.parent.type === nodes.paragraph ? $from.parent : undefined)
 
 	if (paragraph === undefined) return false
@@ -698,26 +738,6 @@ function copyFormat(context: DocumentCommandContext, sticky: boolean): boolean {
 	})
 
 	return true
-}
-
-const WORD_CHARACTER = /[\p{L}\p{N}\p{M}'\u2019_-]|\u200c|\u200d/u
-
-// The word an empty selection is inside of (not at either end of), as Word's painter takes it.
-function wordAround(state: EditorState): { from: number; to: number } | undefined {
-	const $from = state.selection.$from
-	const parent = $from.parent
-
-	if (parent.type !== nodes.paragraph) return undefined
-
-	const text = parent.textBetween(0, parent.content.size, undefined, "\ufffc")
-	const at = $from.parentOffset
-	let start = at
-	let end = at
-
-	while (start > 0 && WORD_CHARACTER.test(text.charAt(start - 1))) start--
-	while (end < text.length && WORD_CHARACTER.test(text.charAt(end))) end++
-
-	return start === at || end === at ? undefined : { from: $from.start() + start, to: $from.start() + end }
 }
 
 // format.paste: the painted content becomes formatted exactly as the painter's: written from the painter's
@@ -748,7 +768,7 @@ function pasteFormat(context: DocumentCommandContext): boolean {
 	if (state.selection.empty && word === undefined) {
 		if (state.selection.$from.parent.type !== nodes.paragraph) return false
 
-		const current = state.storedMarks ?? state.selection.$from.marks()
+		const current = caretMarks(state, context.session.formats)
 		// What is typed next is new text: no part of another formatting revision.
 		let next: readonly Mark[] = current.filter(mark => !PAINTED_TYPES.includes(mark.type) && mark.type !== marks.format_change)
 
@@ -819,6 +839,11 @@ function storyHandler<T extends FormattingCommand["type"]>(
 }
 
 const step = (up: boolean): MarkChange => ({ type: marks.size, next: at => sizeMark(at, steppedSize(at.values.size, up)) })
+// font.growPoint and font.shrinkPoint: one point, within the sizes Word accepts.
+const pointStep = (up: boolean): MarkChange => ({
+	type: marks.size,
+	next: at => sizeMark(at, Math.min(MAX_HALF_POINTS, Math.max(SMALL_STEP, at.values.size + (up ? SMALL_STEP : -SMALL_STEP))))
+})
 
 export const FORMATTING_HANDLERS: FeatureHandlers = {
 	story: {
@@ -827,11 +852,15 @@ export const FORMATTING_HANDLERS: FeatureHandlers = {
 		"format.doubleStrike": runHandler(() => toggleValue("doubleStrike", "strike")),
 		"format.smallCaps": runHandler(() => toggleValue("smallCaps", "caps")),
 		"format.allCaps": runHandler(() => toggleValue("caps", "smallCaps")),
+		"format.doubleUnderline": runHandler(() => doubleUnderline),
+		"format.changeCase": storyHandler(changeCase),
 		"format.clearAll": storyHandler(clearAll),
 		"font.family": runHandler<"font.family">((context, command) => [fontChange(context.context, command.family)]),
 		"font.size": runHandler<"font.size">((_context, command) => [{ type: marks.size, next: at => sizeMark(at, command.halfPoints) }]),
 		"font.grow": runHandler(() => [step(true)]),
 		"font.shrink": runHandler(() => [step(false)]),
+		"font.growPoint": runHandler(() => [pointStep(true)]),
+		"font.shrinkPoint": runHandler(() => [pointStep(false)]),
 		"font.spacing": runHandler<"font.spacing">((_context, command) => [spacingChange(command.twips)]),
 		"color.text": runHandler<"color.text">((context, command) => [colorChange(context.context, command.color)]),
 		"color.highlight": runHandler<"color.highlight">((_context, command) => [highlightChange(command.name)]),

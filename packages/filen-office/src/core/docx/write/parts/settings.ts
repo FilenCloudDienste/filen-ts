@@ -13,7 +13,7 @@ import type { PartContributor, SaveParts, WrittenStories } from "./index"
 
 // settings.xml: the track switch (w:trackRevisions) where the editor turned it from what the file has, the
 // even/odd headers switch (w:evenAndOddHeaders), mirror margins (w:mirrorMargins) and where notes go (w:pos of w:footnotePr / w:endnotePr) as the
-// body's section edits set them; nothing else of the part changes. A package without settings gets a part holding only those. A notes part the save makes gets no
+// body's section edits set them, and w:documentProtection switched off once the user stopped it; nothing else of the part changes. A package without settings gets a part holding only those. A notes part the save makes gets no
 // separator list here: its separator notes carry w:type, and layout reads the list as the source has it. The
 // contributor also claims the body's section edits (written with the stories, see write/sections.ts) and the
 // header and footer stories sections refer to.
@@ -232,6 +232,19 @@ export const settingsParts: PartContributor = {
 				return decodeUtf8(out.finish())
 			})
 		}
+
+		// Stop Protection: the element stays with its restriction choices, enforcement off and the hash dropped
+		// (the password went with the protection).
+		if (context.protectionUnlocked === true && model.settings.documentProtection?.enforced === true)
+			changes.set("documentProtection", (names, existing) => {
+				const attr = (local: string): string | undefined => existing?.reader.attr(existing.node, Ns.W, local)
+
+				return names.empty("documentProtection", [
+					["edit", attr("edit")],
+					["formatting", attr("formatting")],
+					["enforcement", "0"]
+				])
+			})
 
 		if (changes.size === 0) return
 

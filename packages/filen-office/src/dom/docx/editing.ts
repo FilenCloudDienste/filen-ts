@@ -173,6 +173,9 @@ export interface DocxEditingOptions {
 	// The document's password to modify was given (edit/protection.ts gateLifted): its write protection does
 	// not make it view-only for this session.
 	readonly writeUnlocked?: boolean
+	// The user stopped the document's protection (edit/protection.ts documentProtectionOf): none applies for
+	// this session, and saves write it switched off.
+	readonly protectionUnlocked?: boolean
 	// The document was opened from a password-protected file (docxSealer): every save is sealed with its key
 	// after the zip and its Gate 2, and checked, before the bytes are handed out.
 	readonly encryption?: DocxSealer
@@ -551,7 +554,8 @@ export function inThreadEditingHost(
 				...(open.numbering === undefined ? {} : { numbering: open.numbering }),
 				resolver: open.resolver,
 				...(editing.clock === undefined ? {} : { clock: editing.clock }),
-				...(editing.writeUnlocked === true ? { writeUnlocked: true } : {})
+				...(editing.writeUnlocked === true ? { writeUnlocked: true } : {}),
+				...(editing.protectionUnlocked === true ? { protectionUnlocked: true } : {})
 			})
 
 			// The name as it is now (setAuthor may have changed it since the host was made).

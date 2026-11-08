@@ -2,7 +2,7 @@ import type { Mark, Node } from "prosemirror-model"
 import { EditorState, Plugin, TextSelection, type Selection as EditorSelection, type Transaction } from "prosemirror-state"
 import { Mapping, StepMap } from "prosemirror-transform"
 import { DecorationSet, EditorView } from "prosemirror-view"
-import { DocxDocBuilder, FormatResolver, type DocxEditorSession } from "../../../core/docx/edit/index"
+import { DocxDocBuilder, FormatResolver, isWriteCommand, type DocxEditorSession } from "../../../core/docx/edit/index"
 import type { Story } from "../../../core/docx/model/story"
 import { inlineControlAround, legacyFieldOf, type ControlInfo } from "../../../core/docx/forms/controls"
 import { RevisionView } from "../../../core/docx/model/kinds"
@@ -11,6 +11,8 @@ import { modelAuthors } from "../../../core/docx/layout/styles"
 import type { OmmlRevisionView } from "../../../core/math/index"
 import {
 	commandForKey,
+	findForKey,
+	isRepeatKey,
 	joinBackward,
 	joinForward,
 	lineBreak,
@@ -35,7 +37,16 @@ import {
 	shownSlice,
 	writeClipboardEvent
 } from "../edit/clipboard"
-import { composedFormatting, deleteBeforeComposition, deleteSelectionKey, inputTransaction, selectionFormatting } from "../edit/input"
+import {
+	autoLinked,
+	composedFormatting,
+	deleteBeforeComposition,
+	deleteSelectionKey,
+	inputTransaction,
+	selectionFormatting,
+	spaceEndsAddress,
+	spaceTransaction
+} from "../edit/input"
 import type { DocxEditorMark } from "../edit/surface"
 import {
 	blockIndex,
@@ -80,7 +91,9 @@ export interface ReflowViewOptions {
 	readonly describedBy?: string | undefined
 	readonly readOnly: boolean
 	readonly apple: boolean
-	readonly onFind: (() => void) | undefined
+	// In the desktop app: the shortcuts the browser owns are the editor's (DocxKeyBinding).
+	readonly desktop?: boolean
+	readonly onFind: ((replace: boolean) => void) | undefined
 	// Sorted by `from`, in the body.
 	readonly marks: readonly DocxEditorMark[]
 	readonly interactions: DocxEditorInteractions | undefined
@@ -239,8 +252,17 @@ class StoryView {
 			handleScrollToSelection: () => true,
 			handleKeyDown: (_view, event) => this.keyDown(event),
 			handleDOMEvents: {
-				// An Escape the editor does not take, in the body's view, is the host's (see escapesToHost).
-				keydown: (_view, event) => windowed && escapesToHost(editor, event),
+				keydown: (view, event) => {
+					// An Escape the editor does not take, in the body's view, is the host's (see escapesToHost).
+					if (windowed && escapesToHost(editor, event)) return true
+					// Read-only, the view is not editable and ProseMirror's own key handling is off: the app's find and
+					// the shortcuts that change nothing.
+					if (view.editable || view.composing || event.isComposing || !this.shortcutKey(event, true)) return false
+
+					event.preventDefault()
+
+					return true
+				},
 				focus: () => {
 					host.focused(this)
 
@@ -257,7 +279,7 @@ class StoryView {
 					// Composed over a selection: the selection goes first, as a transaction.
 					if (!this.readOnly) {
 						this.readSelection()
-						this.composeFormatting = selectionFormatting(this.session.state)
+						this.composeFormatting = selectionFormatting(this.session.state) ?? this.session.typingMarks(this.session.state)
 						this.run(deleteBeforeComposition(this.session.state))
 					}
 
@@ -611,12 +633,22 @@ class StoryView {
 
 		this.readSelection()
 
-		const tr = inputTransaction(view, this.session.state, event)
+		const session = this.session
+		const tr = inputTransaction(view, session.state, event, state => session.typingMarks(state))
+		const linking = spaceEndsAddress(view, session, event)
+		const typed = tr ?? (linking ? spaceTransaction(session) : undefined)
 
-		if (tr === undefined) return false
+		if (typed === undefined) return false
 
 		event.preventDefault()
-		this.run(tr)
+
+		if (!linking) this.run(typed)
+		else
+			autoLinked(
+				session,
+				() => this.run(typed),
+				link => this.run(link)
+			)
 
 		// Typed text leaves the caret right after a character on its line (see lineEnd).
 		if (this.typing) {
@@ -751,18 +783,31 @@ class StoryView {
 				return true
 			}
 			case "Enter":
-				if (mod || event.altKey || readOnly) return false
+				if (event.altKey || readOnly) return false
+				// Mod+Enter: the page break's shortcut.
+				if (mod) break
 
-				return this.run(extend ? lineBreak(state) : splitParagraph(state))
+				return autoLinked(
+					this.session,
+					() => this.run(extend ? lineBreak(state) : splitParagraph(state, this.session.formats)),
+					tr => this.run(tr)
+				)
 			case "Tab":
-				return !readOnly && tabKey(editor, this.session, event, apple, tr => this.run(tr))
+				return (
+					!readOnly &&
+					autoLinked(
+						this.session,
+						() => tabKey(editor, this.session, event, apple, tr => this.run(tr)),
+						tr => this.run(tr)
+					)
+				)
 			case "Backspace":
 				if (readOnly) return false
 				if (this.windowed && deletesBreakBefore(editor)) return true
 
 				this.readSelection()
 
-				return this.run(deleteSelectionKey(this.session.state) ?? joinBackward(this.session.state))
+				return this.run(deleteSelectionKey(this.session.state) ?? joinBackward(this.session.state, this.session.formats))
 			case "Delete":
 				if (readOnly || extend) return false
 
@@ -794,23 +839,35 @@ class StoryView {
 			const key = event.key.toLowerCase()
 
 			if (key === "a") return this.selectAll()
-
-			if (key === "f" || key === "g" || key === "h") {
-				host.find()
-
-				return host.canFind
-			}
 		}
 
-		const command = readOnly ? undefined : commandForKey(event, apple)
+		return this.shortcutKey(event, readOnly)
+	}
 
-		if (command !== undefined) {
-			void editor.execute(command)
+	// The app's find, Repeat and the editor commands' shortcuts; read-only only what changes nothing (the view:
+	// Alt+F9), as the host runs it.
+	private shortcutKey(event: KeyboardEvent, readOnly: boolean): boolean {
+		const host = this.host
+		const editor = host.editor
+		const apple = host.apple
+		const find = findForKey(event, apple)
 
-			return true
+		if (find !== undefined) {
+			host.find(find === "replace")
+
+			return host.canFind
 		}
 
-		return false
+		if (!readOnly && isRepeatKey(event, apple)) return editor.repeat()
+
+		const command = commandForKey(event, apple, host.desktop)
+
+		if (command === undefined || (readOnly && isWriteCommand(command.type))) return false
+
+		host.enter(this)
+		void editor.execute(command)
+
+		return true
 	}
 
 	// The position under a point on screen in this story.
@@ -1066,6 +1123,10 @@ export class ReflowView implements ReflowNodeHost {
 		return this.options.apple
 	}
 
+	get desktop(): boolean {
+		return this.options.desktop === true
+	}
+
 	get readOnlyOption(): boolean {
 		return this.options.readOnly
 	}
@@ -1084,8 +1145,8 @@ export class ReflowView implements ReflowNodeHost {
 		return this.options.onFind !== undefined
 	}
 
-	find(): void {
-		this.options.onFind?.()
+	find(replace: boolean): void {
+		this.options.onFind?.(replace)
 	}
 
 	unregister(story: StoryView | ShownStory): void {

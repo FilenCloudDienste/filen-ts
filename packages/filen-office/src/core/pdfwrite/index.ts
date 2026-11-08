@@ -28,6 +28,7 @@ export {
 	type GradientResources,
 	type PdfAbortSignal,
 	type PdfDestinationTarget,
+	type PdfDocumentProperties,
 	type PdfImageSource,
 	type PdfObjectSink,
 	type PdfOutput,

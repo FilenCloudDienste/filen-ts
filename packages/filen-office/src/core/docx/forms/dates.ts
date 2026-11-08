@@ -214,30 +214,33 @@ function partsIn(date: Date, locale: string, calendar: string, korea: boolean): 
 	return { year: number("year"), month: calendar === "hebrew" ? hebrewMonth(date) : number("month"), day: number("day") }
 }
 
-// The month of `date` in the Hebrew year, from 1 (Tishri): counted back to the year's first day.
+// The month of `date` in the Hebrew year, from 1 (Tishri): counted back a month at a time (stepping back by the
+// day of the month lands on the previous month's last day) until the year changes. At most 14 Intl calls.
 function hebrewMonth(date: Date): number {
-	const months = format(tagOf("en", "hebrew"), { year: "numeric", month: "long" })
-	const at = (time: number): { year: string; month: string } => {
-		const parts = months.formatToParts(new Date(time))
+	const days = format(tagOf("en", "hebrew"), { year: "numeric", month: "numeric", day: "numeric" })
+	const at = (time: number): { year: string; day: number } => {
+		const parts = days.formatToParts(new Date(time))
 
 		return {
 			year: parts.find(part => part.type === "year")?.value ?? "",
-			month: parts.find(part => part.type === "month")?.value ?? ""
+			day: Number.parseInt(parts.find(part => part.type === "day")?.value ?? "", 10)
 		}
 	}
 	const start = at(date.getTime())
-	let month = start.month
+	let time = date.getTime()
+	let day = start.day
 	let index = 1
 
-	// A Hebrew year has at most 385 days.
-	for (let back = 1; back <= 385; back++) {
-		const day = at(date.getTime() - back * 86_400_000)
+	// A Hebrew year has at most 13 months; a day of month that does not parse ends the walk.
+	while (index < 13 && day >= 1 && day <= 30) {
+		time -= day * 86_400_000
 
-		if (day.year !== start.year) break
-		if (day.month !== month) {
-			month = day.month
-			index++
-		}
+		const previous = at(time)
+
+		if (previous.year !== start.year) break
+
+		day = previous.day
+		index++
 	}
 
 	return index

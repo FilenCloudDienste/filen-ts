@@ -23,11 +23,12 @@ import type {
 	DocxPdfRole,
 	DocxPdfStyle
 } from "../../core/docx/pdf/types"
+import { Emphasis, RunEffect } from "../../core/docx/layout/effects"
 import { symbolTable, type FontManager, type FontRequest, type FontSlot } from "../../core/fonts/index"
 import { FRAGMENT_FLOATS, FRAGMENT_INTS, FRAGMENT_KIND_MASK, FragmentKind, LINE_FLOATS, LINE_INTS, LineInt } from "../../core/text/index"
 import { sliceClock, type Slicing } from "../../core/slicing"
 import { languageTag } from "../../core/docx/forms/dates"
-import { coreTitle } from "../../core/opc/coreTitle"
+import { coreProperties } from "../../core/opc/coreTitle"
 import { bookmarkIndex, paragraphLinks, paragraphOf } from "./links"
 import type { DocxMedia, DocxObjectData } from "./protocol"
 
@@ -174,6 +175,8 @@ async function stylesOf(
 		}
 
 		const color = info?.color
+		const effect = info?.effect
+		const emphasis = info?.emphasis
 		const symbolFont =
 			request !== undefined && faces[face]?.kind === "bundled" && symbolTable(request.family) !== undefined
 				? request.family
@@ -192,7 +195,18 @@ async function stylesOf(
 			scaleX: table.scaleX[id] ?? 1,
 			shift: table.shift[id] ?? 0,
 			fit: font.source === "local" ? "scale" : "spread",
-			...(symbolFont === undefined ? {} : { symbolFont })
+			...(symbolFont === undefined ? {} : { symbolFont }),
+			...(effect === undefined || effect === RunEffect.NONE ? {} : { effect }),
+			...(emphasis === undefined || emphasis === Emphasis.NONE
+				? {}
+				: {
+						emphasis,
+						// The middle of the room the line keeps for the marks, over the ascent or under the descent.
+						markY:
+							emphasis === Emphasis.UNDER_DOT
+								? (table.descent[id] ?? 0) + (table.markBelow[id] ?? 0) / 2
+								: -((table.ascent[id] ?? 0) + (table.markAbove[id] ?? 0) / 2)
+					})
 		})
 	}
 
@@ -659,6 +673,7 @@ export async function docxPdfSnapshot(live: DocxPdfLive, options: DocxPdfSnapsho
 	const lang = [defaults.latin, defaults.eastAsia, defaults.bidi, theme?.latin, theme?.eastAsia, theme?.bidi]
 		.map(pdfLanguage)
 		.find(value => value !== undefined)
+	const core = await coreProperties(model.package.opc)
 
 	return {
 		pages,
@@ -671,7 +686,8 @@ export async function docxPdfSnapshot(live: DocxPdfLive, options: DocxPdfSnapsho
 		destinations,
 		outline,
 		lang,
-		title: (await coreTitle(model.package.opc)) ?? options.title
+		title: core.title ?? options.title,
+		properties: { author: core.author, subject: core.subject, keywords: core.keywords }
 	}
 }
 

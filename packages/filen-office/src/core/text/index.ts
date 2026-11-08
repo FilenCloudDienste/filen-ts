@@ -77,6 +77,8 @@ export { nfcWithMap, type NfcText } from "./nfc"
 export { paragraphGap, type ParagraphSpacing } from "./spacing"
 export {
 	Caps,
+	MARK_ROOM,
+	MarkRoom,
 	SMALL_CAPS_SCALE,
 	SUBSCRIPT_DROP,
 	SUBSCRIPT_SIZE,

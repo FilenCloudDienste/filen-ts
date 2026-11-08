@@ -35,6 +35,7 @@ export class Geometry implements ParagraphGeometry {
 	decimalSeparator = 0x2e
 	markSizesObjectLines = true
 	libreOfficeSpacing = false
+	gridPitch = 0
 }
 
 export interface LayoutCompat {
@@ -52,6 +53,8 @@ export interface LayoutCompat {
 	readonly mirrorMargins: boolean
 	readonly gutterAtTop: boolean
 	readonly evenAndOddHeaders: boolean
+	// w:noColumnBalance: a continuous section break leaves the columns above it unbalanced.
+	readonly noColumnBalance: boolean
 	// Floats stay on the page their anchor is on (ODF 1.3 Part 3 §20.267 style:flow-with-text false), asked for by
 	// a document translated from OpenDocument: WordprocessingML lets them run off it.
 	readonly floatsOnAnchorPage: boolean
@@ -83,6 +86,12 @@ export function lineSpacingRule(settings: DocxSettings): LineSpacingRule {
 	return gap === "below" ? "hheaGapBelow" : gap === "none" ? "hhea" : "gdi"
 }
 
+// Whether the document is a translation from OpenDocument, which always says how its lines are measured
+// (ODF_LINE_GAP): laid out, and edited, as LibreOffice does.
+export function openDocumentTranslation(settings: DocxSettings): boolean {
+	return lineSpacingRule(settings) !== "gdi"
+}
+
 export function layoutCompat(settings: DocxSettings): LayoutCompat {
 	const legacy = new Set(settings.legacyCompat)
 
@@ -98,6 +107,7 @@ export function layoutCompat(settings: DocxSettings): LayoutCompat {
 		mirrorMargins: settings.mirrorMargins,
 		gutterAtTop: settings.gutterAtTop,
 		evenAndOddHeaders: settings.evenAndOddHeaders,
+		noColumnBalance: legacy.has("noColumnBalance"),
 		floatsOnAnchorPage: settings.compatSettings.some(
 			setting => setting.name === "flow-with-text" && setting.uri === ODF_STYLE_NS && setting.value === "false"
 		),
@@ -105,7 +115,7 @@ export function layoutCompat(settings: DocxSettings): LayoutCompat {
 			setting => setting.name === ODF_OBJECT_LINES && setting.uri === ODF_STYLE_NS && setting.value === "objects"
 		),
 		joinsBoxes: odfPadding(settings),
-		libreOfficeSpacing: lineSpacingRule(settings) !== "gdi"
+		libreOfficeSpacing: openDocumentTranslation(settings)
 	}
 }
 
@@ -190,8 +200,8 @@ function alignmentOf(props: ResolvedParagraphProps): Alignment {
 	}
 }
 
-// Fills `g` for a paragraph in a column [left, left + width). `gridPitch` > 0 snaps lines to the
-// document grid (approximated as a minimum height).
+// Fills `g` for a paragraph in a column [left, left + width). `gridPitch` > 0 snaps auto-spaced lines to
+// the document grid: whole rows, at least the spacing multiple of one.
 export function paragraphGeometry(
 	g: Geometry,
 	props: ResolvedParagraphProps,
@@ -218,6 +228,7 @@ export function paragraphGeometry(
 	g.markSizesObjectLines = compat.markSizesObjectLines
 	g.libreOfficeSpacing = compat.libreOfficeSpacing
 	g.exclusions = null
+	g.gridPitch = gridPitch
 
 	if (spacing.lineRule === "exact") {
 		g.lineRule = LineRule.EXACT
@@ -229,7 +240,7 @@ export function paragraphGeometry(
 		const multiple = spacing.line > 0 ? spacing.line / 240 : 1
 
 		if (gridPitch > 0 && props.snapToGrid) {
-			g.lineRule = LineRule.AT_LEAST
+			g.lineRule = LineRule.GRID
 			g.lineSpacing = gridPitch * multiple
 		} else {
 			g.lineRule = LineRule.AUTO

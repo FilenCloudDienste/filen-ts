@@ -464,6 +464,31 @@ describe("what a PDF job tells the page", () => {
 
 		expect((metadata.info as { Title?: string }).Title).toBe("Alizarin crimson")
 	})
+
+	it("carries a deck's core properties into its PDF as PowerPoint's Save as PDF does", { timeout: 60_000 }, async () => {
+		const core =
+			'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" ' +
+			'xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>Deck</dc:title><dc:creator>Cora</dc:creator><dc:subject>Rivers</dc:subject>' +
+			"<cp:keywords>delta, flow</cp:keywords></cp:coreProperties>"
+		const context = await openDeck(
+			buildPptx({
+				slides: [{ shapes: sp(2, "Title 1", 'type="title"', xfrm(100 * EMU, 40 * EMU, 760 * EMU, 80 * EMU), body(para("Hi"))) }],
+				parts: { "docProps/core.xml": { data: core, type: "application/vnd.openxmlformats-package.core-properties+xml" } },
+				packageRels: [
+					[
+						"rIdCore",
+						"http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties",
+						"docProps/core.xml"
+					]
+				]
+			})
+		)
+		const { bytes } = await job(context, "pdf", { layout: "slides", includeHidden: true, protect: false })
+		const metadata = await (await openPdf(bytes)).getMetadata()
+
+		expect(metadata.info).toMatchObject({ Title: "Deck", Author: "Cora", Subject: "Rivers", Keywords: "delta, flow" })
+		expect(metadata.metadata?.get("pdf:keywords")).toBe("delta, flow")
+	})
 })
 
 describe("SVG pictures in a jobs worker", () => {

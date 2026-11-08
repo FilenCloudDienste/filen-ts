@@ -1,7 +1,7 @@
 import type { Mark, Node } from "prosemirror-model"
 import type { Transaction } from "prosemirror-state"
 import type { DocxEditContext } from "../edit/context"
-import { NO_MARKERS, NO_SOURCE, docxSchema, survivorsOf, type MarkerList, type MarkerNodeAttrs, type SpacingAttrs } from "../edit/schema"
+import { NO_MARKERS, NO_SOURCE, docxSchema, markerNodeAttrs, survivorsOf, type MarkerList, type SpacingAttrs } from "../edit/schema"
 import type { DocxEditorSession } from "../edit/session"
 import { FieldCharType, Item, type StoryPart } from "../model/index"
 import { Ns } from "../model/namespaces"
@@ -856,12 +856,7 @@ export function buildToc(input: TocBuildInput): TocBuild {
 		...input.markers.map(marker =>
 			marker.kind === "commentReference"
 				? nodes.comment_ref.create({ src: marker.src, id: marker.id })
-				: nodes.marker.create({
-						src: marker.src,
-						kind: marker.kind,
-						id: marker.id,
-						name: (marker as Partial<MarkerNodeAttrs>).name ?? null
-					})
+				: nodes.marker.create(markerNodeAttrs(marker))
 		),
 		...code
 	)

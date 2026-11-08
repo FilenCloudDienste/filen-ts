@@ -1,5 +1,5 @@
 import { XmlEditor, encodeUtf8, type XmlDocument } from "../../xml/index"
-import type { NewList } from "../edit/formats"
+import type { ListStart, NewList } from "../edit/formats"
 import type { Numbering } from "../numbering/index"
 import { partReader } from "../model/reader"
 import { Ns } from "../model/namespaces"
@@ -14,32 +14,40 @@ const BULLETS: readonly (readonly [string, string])[] = [
 ]
 const NUMBER_FORMATS = ["decimal", "lowerLetter", "lowerRoman"] as const
 
-export function abstractNumbering(names: Names, id: number, kind: NewList["kind"]): string {
+// `first`: the first level's number format, text and start a list AutoFormat started takes.
+export function abstractNumbering(names: Names, id: number, kind: NewList["kind"], first?: ListStart): string {
 	let levels = ""
 
 	for (let level = 0; level < 9; level++) {
-		const indent = names.empty("ind", [
-			["left", String(720 * (level + 1))],
-			["hanging", "360"]
-		])
+		const left = String(720 * (level + 1))
 
 		if (kind === "bullet") {
 			const [text, font] = BULLETS[level % 3] as readonly [string, string]
 
 			levels +=
 				`<${names.el("lvl")} ${names.attr("ilvl")}="${level}">${names.val("start", "1")}${names.val("numFmt", "bullet")}${names.val("lvlText", text)}` +
-				`${names.val("lvlJc", "left")}<${names.el("pPr")}>${indent}</${names.el("pPr")}><${names.el("rPr")}>` +
+				`${names.val("lvlJc", "left")}<${names.el("pPr")}>${names.empty("ind", [
+					["left", left],
+					["hanging", "360"]
+				])}</${names.el("pPr")}><${names.el("rPr")}>` +
 				`${names.empty("rFonts", [
 					["ascii", font],
 					["hAnsi", font],
 					["hint", "default"]
 				])}</${names.el("rPr")}></${names.el("lvl")}>`
 		} else {
-			const format = NUMBER_FORMATS[level % 3] ?? "decimal"
+			const own = level === 0 ? first : undefined
+			const format = own?.format ?? NUMBER_FORMATS[level % 3] ?? "decimal"
+			const roman = format === "lowerRoman" || format === "upperRoman"
+			// Word hangs its right-aligned roman levels 180, so the numeral ends 180 before the text.
+			const indent = names.empty("ind", [
+				["left", left],
+				["hanging", roman ? "180" : "360"]
+			])
 
 			levels +=
-				`<${names.el("lvl")} ${names.attr("ilvl")}="${level}">${names.val("start", "1")}${names.val("numFmt", format)}` +
-				`${names.val("lvlText", `%${level + 1}.`)}${names.val("lvlJc", format === "lowerRoman" ? "right" : "left")}` +
+				`<${names.el("lvl")} ${names.attr("ilvl")}="${level}">${names.val("start", String(own?.start ?? 1))}${names.val("numFmt", format)}` +
+				`${names.val("lvlText", `%${level + 1}${own?.suffix ?? "."}`)}${names.val("lvlJc", roman ? "right" : "left")}` +
 				`<${names.el("pPr")}>${indent}</${names.el("pPr")}></${names.el("lvl")}>`
 		}
 	}
@@ -111,7 +119,7 @@ export function planNumbering(
 		} else {
 			const abstractId = ++maxAbstract
 
-			abstracts += abstractNumbering(names, abstractId, list.kind)
+			abstracts += abstractNumbering(names, abstractId, list.kind, list.first)
 			instances += numberingInstance(names, numId, abstractId, false)
 		}
 	}

@@ -55,9 +55,16 @@ export interface DocxCommandInfo<T extends string = string> {
 	readonly labelKey: string
 	// A neutral icon id an app maps to its own icon set; absent for commands without one.
 	readonly icon?: string
-	// Platform-neutral shortcut ("mod" = Cmd on Apple platforms, Ctrl elsewhere); only on commands without
-	// arguments.
+	// Platform-neutral shortcut ("mod" = Cmd on Apple platforms, Ctrl elsewhere; "ctrl" = Control on every
+	// platform); only on commands without arguments unless `hostShortcut`. Read through shortcutFor.
 	readonly shortcut?: string
+	// The shortcut on Apple platforms where Word for Mac's differs from `shortcut`.
+	readonly appleShortcut?: string
+	// The host runs the shortcut (it gives the arguments, asks for the author or the input first):
+	// commandForKey leaves it to hostCommandForKey.
+	readonly hostShortcut?: true
+	// Further keys that run the command on every platform; never shown.
+	readonly alsoShortcuts?: readonly string[]
 	readonly group: DocxEditorCommandGroup
 	// Changes the document (refused in read-only mode).
 	readonly write: boolean
@@ -189,6 +196,36 @@ export function writesUnholdableText(command: { readonly type: string }): boolea
 // Twips, as far as Word's own limits go (22 inches).
 export const MAX_TWIPS = 31680
 
+// ---- shortcuts --------------------------------------------------------------------------------------------
+
+export interface DocxShortcutEntry {
+	readonly shortcut?: string
+	readonly appleShortcut?: string
+}
+
+// The shortcut an entry runs with (and shows) on the platform.
+export function shortcutFor(entry: DocxShortcutEntry, apple: boolean): string | undefined {
+	return apple ? (entry.appleShortcut ?? entry.shortcut) : entry.shortcut
+}
+
+// Keys a browser keeps for itself (Chromium never delivers them to a page; on macOS the app menu takes the
+// rest): bound all the same (a desktop shell delivers them), never advertised on a browser host.
+const BROWSER_RESERVED: ReadonlySet<string> = new Set(["mod+n", "mod+shift+n", "mod+t", "mod+shift+t", "mod+w", "mod+shift+w"])
+const APPLE_BROWSER_RESERVED: ReadonlySet<string> = new Set(["mod+q", "mod+h", "mod+m"])
+
+export function browserReservedShortcut(shortcut: string, apple: boolean): boolean {
+	const combo = shortcut.toLowerCase()
+
+	return BROWSER_RESERVED.has(combo) || (apple && APPLE_BROWSER_RESERVED.has(combo))
+}
+
+// The shortcut to show for an entry: none for a key the browser takes when `browser` (not a desktop shell).
+export function shortcutHint(entry: DocxShortcutEntry, apple: boolean, browser: boolean): string | undefined {
+	const shortcut = shortcutFor(entry, apple)
+
+	return shortcut === undefined || (browser && browserReservedShortcut(shortcut, apple)) ? undefined : shortcut
+}
+
 // ---- base commands ---------------------------------------------------------------------------------------
 
 export const DOCX_PARAGRAPH_STYLES = [
@@ -253,16 +290,36 @@ export const BASE_COMMANDS: readonly DocxCommandInfo<BaseCommand["type"]>[] = [
 	{ type: "format.italic", labelKey: "docx.format.italic", icon: "italic", shortcut: "mod+i", group: "format", ...story },
 	{ type: "format.underline", labelKey: "docx.format.underline", icon: "underline", shortcut: "mod+u", group: "format", ...story },
 	{ type: "format.strike", labelKey: "docx.format.strike", icon: "strikethrough", group: "format", ...story },
-	{ type: "format.clear", labelKey: "docx.format.clear", icon: "clear-formatting", shortcut: "mod+space", group: "format", ...story },
+	// Ctrl+Space; Control+Space on a Mac (Cmd+Space is Spotlight's).
+	{
+		type: "format.clear",
+		labelKey: "docx.format.clear",
+		icon: "clear-formatting",
+		shortcut: "mod+space",
+		appleShortcut: "ctrl+space",
+		group: "format",
+		...story
+	},
 	{ type: "style.set", labelKey: "docx.style.set", icon: "paragraph-style", group: "style", ...story },
 	{ type: "align.start", labelKey: "docx.align.start", icon: "align-start", shortcut: "mod+l", group: "align", ...story },
 	{ type: "align.center", labelKey: "docx.align.center", icon: "align-center", shortcut: "mod+e", group: "align", ...story },
 	{ type: "align.end", labelKey: "docx.align.end", icon: "align-end", shortcut: "mod+r", group: "align", ...story },
 	{ type: "align.justify", labelKey: "docx.align.justify", icon: "align-justify", shortcut: "mod+j", group: "align", ...story },
-	{ type: "list.bullet", labelKey: "docx.list.bullet", icon: "list-bullet", shortcut: "mod+shift+8", group: "list", ...story },
+	// Word's List Bullet key (Mod+Shift+8 is its Show/Hide ¶).
+	{ type: "list.bullet", labelKey: "docx.list.bullet", icon: "list-bullet", shortcut: "mod+shift+l", group: "list", ...story },
+	// Not Word's (it has no numbered-list key): a free key kept for a numbered list.
 	{ type: "list.numbered", labelKey: "docx.list.numbered", icon: "list-numbered", shortcut: "mod+shift+7", group: "list", ...story },
-	{ type: "list.indent", labelKey: "docx.list.indent", icon: "indent", group: "list", ...story },
-	{ type: "list.outdent", labelKey: "docx.list.outdent", icon: "outdent", group: "list", ...story },
+	// Word's indent keys; on a Mac Control+Shift+M indents (Cmd+M minimises the window).
+	{
+		type: "list.indent",
+		labelKey: "docx.list.indent",
+		icon: "indent",
+		shortcut: "mod+m",
+		appleShortcut: "ctrl+shift+m",
+		group: "list",
+		...story
+	},
+	{ type: "list.outdent", labelKey: "docx.list.outdent", icon: "outdent", shortcut: "mod+shift+m", group: "list", ...story },
 	// One undo order across every story the editor edits (a session alone undoes its own edits).
 	{
 		type: "history.undo",
@@ -277,7 +334,9 @@ export const BASE_COMMANDS: readonly DocxCommandInfo<BaseCommand["type"]>[] = [
 		type: "history.redo",
 		labelKey: "docx.history.redo",
 		icon: "redo",
-		shortcut: "mod+shift+z",
+		// Word's Mod+Y; Mod+Shift+Z, the platform's redo, too.
+		shortcut: "mod+y",
+		alsoShortcuts: ["mod+shift+z"],
 		group: "history",
 		write: true,
 		scope: "document"

@@ -101,7 +101,7 @@ const SCENARIOS: readonly Scenario[] = [
 		edit: async e => {
 			caret(e, 1, 3)
 
-			const split = splitParagraph(e.session.state)
+			const split = splitParagraph(e.session.state, e.session.formats)
 
 			if (split === null) throw new Error("no split")
 

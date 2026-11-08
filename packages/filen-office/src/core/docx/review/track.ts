@@ -16,7 +16,7 @@ import {
 	markRemarking,
 	markTyping
 } from "../edit/invariants/core"
-import { FORMATTING_MARKS, NO_SOURCE, docxSchema, inlineLevel, type IndentAttrs, type SpacingAttrs } from "../edit/schema"
+import { FORMATTING_MARKS, NO_SOURCE, docxSchema, inlineLevel, type IndentAttrs, type MarkerKind, type SpacingAttrs } from "../edit/schema"
 import { SetAttrsStep } from "../edit/attrs"
 import { MarkChanges, SetMarkSetsStep, SetMarksStep, markStepsOf, type MarkStep } from "../edit/marks"
 import { rowOverrides, type RowOverrides, type TrackStamp } from "../edit/tables/map"
@@ -229,6 +229,9 @@ export interface TrackPlan {
 	readonly propsSeen: Set<string>
 	// Typed during an IME composition: marked when it ends.
 	readonly composing: boolean
+	// What may be recorded as a move (see recordedMove), and whether the transaction is a cut a paste may move.
+	readonly move?: MoveSource
+	readonly cut?: boolean
 }
 
 const plans = new WeakMap<Transaction, TrackPlan>()
@@ -400,6 +403,172 @@ function compositionMarking(session: DocxEditorSession): Transaction | undefined
 	applyMarking(tr, marking)
 
 	return markInternal(tr.setMeta("addToHistory", false))
+}
+
+// ---- moves ------------------------------------------------------------------------------------------------
+
+// As Word's Track moves (on unless the document's w:doNotTrackMoves): text dragged elsewhere, or cut and then
+// pasted as the next edit, is recorded as a move (w:moveFrom / w:moveTo inside move ranges of one name)
+// instead of a deletion and an insertion. Only text within a paragraph, with no change recorded on it yet,
+// moves; anything else stays a deletion and an insertion, as before.
+
+// A drop, or a paste after a tracked cut: the cut's range (in the transaction's first document) and its mark.
+type MoveSource = "drop" | { readonly from: number; readonly to: number; readonly mark: Mark }
+
+// The last tracked cut, kept while nothing else changes the document: its range in `doc` (undefined until the
+// transaction marking it applied, `tr`).
+interface Cut {
+	from: number
+	to: number
+	doc: Node | undefined
+	readonly mark: Mark
+	readonly tr: Transaction
+}
+
+const cuts = new WeakMap<DocxEditorSession, Cut>()
+const watchingCuts = new WeakSet<DocxEditorSession>()
+
+function watchCuts(session: DocxEditorSession): void {
+	if (watchingCuts.has(session)) return
+
+	watchingCuts.add(session)
+	session.onApplied((transactions, state) => {
+		const cut = cuts.get(session)
+
+		if (cut === undefined) return
+
+		if (cut.doc !== undefined) {
+			// Any other change of the document (an undo included) ends it.
+			if (cut.doc !== state.doc) cuts.delete(session)
+
+			return
+		}
+
+		const index = transactions.indexOf(cut.tr)
+
+		if (index < 0) {
+			cuts.delete(session)
+
+			return
+		}
+
+		for (const later of transactions.slice(index + 1)) {
+			cut.from = later.mapping.map(cut.from, 1)
+			cut.to = later.mapping.map(cut.to, -1)
+		}
+
+		cut.doc = state.doc
+	})
+}
+
+// What `plan` may record as a move: the cut a paste takes, or the drop.
+function moveSource(tr: Transaction, session: DocxEditorSession): { move?: MoveSource; cut?: boolean } {
+	if (session.context.model.settings.doNotTrackMoves) return {}
+
+	const event: unknown = tr.getMeta("uiEvent")
+
+	if (event === "drop") return { move: "drop" }
+
+	if (event === "cut") {
+		watchCuts(session)
+
+		return { cut: true }
+	}
+
+	const cut = cuts.get(session)
+
+	return event === "paste" && cut?.doc !== undefined && cut.doc === tr.before
+		? { move: { from: cut.from, to: cut.to, mark: cut.mark } }
+		: {}
+}
+
+// [from, to) is inline content of one paragraph whose run content has no recorded change but `allowed`'s (all
+// of it when given) and no move range markers.
+function movable(doc: Node, from: number, to: number, allowed: Mark | undefined): boolean {
+	const $from = doc.resolve(from)
+
+	if (!$from.sameParent(doc.resolve(to)) || $from.parent.type !== nodes.paragraph) return false
+
+	let ok = true
+
+	doc.nodesBetween(from, to, node => {
+		if (!ok || !node.isInline) return ok
+
+		if (node.type === nodes.marker && (node.attrs["kind"] as string).startsWith("move")) ok = false
+
+		for (const mark of node.marks) if (REVISION_TYPES.includes(mark.type) && (allowed === undefined || !mark.eq(allowed))) ok = false
+
+		if (allowed !== undefined && markable(node) && !allowed.isInSet(node.marks)) ok = false
+
+		return false
+	})
+
+	return ok
+}
+
+interface RecordedMove {
+	readonly source: readonly [number, number]
+	readonly target: readonly [number, number]
+	// The cut's deletion the source had.
+	readonly cut: Mark | undefined
+}
+
+// The move `plan` records in `doc` (ranges mapped there): its one insertion of what it took from the source,
+// a drop's one deletion or the cut's range. Undefined when it is no move Word would record.
+function recordedMove(
+	plan: TrackPlan,
+	doc: Node,
+	inserted: readonly number[],
+	mapped: (range: Range) => [number, number] | undefined
+): RecordedMove | undefined {
+	const move = plan.move
+
+	if (move === undefined || plan.composing || inserted.length !== 2) return undefined
+	if (plan.marks.length + plan.equations.length + plan.rows.length + plan.formats.length + plan.props.length > 0) return undefined
+
+	const drop = move === "drop"
+	const deleted = plan.deleted[0]
+
+	if (drop && (plan.deleted.length !== 1 || deleted === undefined)) return undefined
+
+	const source = drop ? mapped(deleted as Range) : mapped({ from: move.from, to: move.to, at: 0 })
+	const target: [number, number] = [inserted[0] ?? 0, inserted[1] ?? 0]
+
+	if (source === undefined || (source[0] < target[1] && target[0] < source[1])) return undefined
+
+	const cut = drop ? undefined : move.mark
+
+	if (!movable(doc, source[0], source[1], cut) || !movable(doc, target[0], target[1], undefined)) return undefined
+
+	const text = doc.textBetween(source[0], source[1], "\n", "￼")
+
+	return text !== "" && text === doc.textBetween(target[0], target[1], "\n", "￼") ? { source, target, cut } : undefined
+}
+
+// The move's range markers, in document order: each range's start and end share a w:id, its two starts a name.
+function moveMarkers(move: RecordedMove, stamp: RevisionStamp, context: DocxEditContext): { pos: number; node: Node }[] {
+	const fromId = String(newChange(context))
+	const toId = String(newChange(context))
+	const name = `move${fromId}`
+	const marker = (kind: MarkerKind, id: string, start: boolean): Node =>
+		nodes.marker.create({
+			src: NO_SOURCE,
+			kind,
+			id,
+			name: start ? name : null,
+			author: start ? stamp.author : null,
+			date: start ? stamp.date : null
+		})
+	const from = [
+		{ pos: move.source[0], node: marker("moveFromRangeStart", fromId, true) },
+		{ pos: move.source[1], node: marker("moveFromRangeEnd", fromId, false) }
+	]
+	const to = [
+		{ pos: move.target[0], node: marker("moveToRangeStart", toId, true) },
+		{ pos: move.target[1], node: marker("moveToRangeEnd", toId, false) }
+	]
+
+	return move.source[0] < move.target[0] ? [...from, ...to] : [...to, ...from]
 }
 
 // ---- rewriting --------------------------------------------------------------------------------------------
@@ -936,7 +1105,8 @@ export function trackTransaction(tr: Transaction, session: DocxEditorSession): T
 		settle: [],
 		props: [],
 		propsSeen: new Set(),
-		composing
+		composing,
+		...moveSource(tr, session)
 	}
 	const inverted: StepMap[] = []
 	let mapping = new Mapping()
@@ -1029,7 +1199,9 @@ export function trackTransaction(tr: Transaction, session: DocxEditorSession): T
 // typing (a transaction of several steps, a composition, content outside a paragraph or not all marked as runs,
 // text typed in a composition waiting to be marked with it).
 function typedInsertion(step: ReplaceStep, doc: Node, plan: TrackPlan, alone: EditorState | undefined): Mark | undefined {
-	if (alone === undefined || plan.composing || plan.inserted.length > 0 || step.from !== step.to) return undefined
+	// A paste that may move a cut is marked by the stage (as a move or an insertion).
+	if (alone === undefined || plan.composing || plan.move !== undefined || plan.inserted.length > 0 || step.from !== step.to)
+		return undefined
 
 	const slice = step.slice
 
@@ -2072,7 +2244,19 @@ function applyPlan(
 		if (at !== undefined) inserted.push(at[0], at[1])
 	}
 
-	if (plan.composing) {
+	const move = recordedMove(plan, doc, inserted, mapped)
+
+	if (move !== undefined) {
+		// The move's two sides, each a change of its own; the source's cut deletion (if any) becomes the move.
+		const own = { src: NO_SOURCE, author: stamp.author, date: stamp.date }
+
+		if (move.cut !== undefined) tr.removeMark(move.source[0], move.source[1], move.cut)
+
+		marking.marks.push(
+			{ from: move.target[0], to: move.target[1], kind: "insert", mark: marks.move_to.create({ ...own, id: newChange(context) }) },
+			{ from: move.source[0], to: move.source[1], kind: "delete", mark: marks.move_from.create({ ...own, id: newChange(context) }) }
+		)
+	} else if (plan.composing) {
 		if (inserted.length > 0) addPending(plan.session, stamp, inserted, doc, batch)
 	} else if (inserted.length > 0) {
 		// One change for all of it, the one the first range continues (or a new one); the ranges marked in
@@ -2092,7 +2276,8 @@ function applyPlan(
 	// author's deletion it touches.
 	let deletion: Mark | undefined
 
-	for (const range of plan.deleted) {
+	// A drop's one deletion is the move's source.
+	for (const range of move !== undefined && move.cut === undefined ? [] : plan.deleted) {
 		const at = mapped(range)
 
 		if (at === undefined) continue
@@ -2196,7 +2381,20 @@ function applyPlan(
 	// Attributes move nothing: before the marking rebuilds what it marks.
 	for (const { pos, omml } of equations) tr.setNodeAttribute(pos, "omml", omml)
 
-	return applyMarking(tr, marking)
+	const bulk = applyMarking(tr, marking)
+
+	// Marking moves nothing either: the range markers go in after it, the last first.
+	if (move !== undefined) for (const { pos, node } of moveMarkers(move, stamp, context).reverse()) tr.insert(pos, node)
+
+	// A cut that only marked text deleted: a paste right after it moves that text.
+	const cutRange = plan.cut === true && plan.deleted.length === 1 && plan.inserted.length === 0 ? plan.deleted[0] : undefined
+	const cutAt = cutRange === undefined || deletion === undefined ? undefined : mapped(cutRange)
+
+	if (cutAt !== undefined && deletion !== undefined)
+		cuts.set(plan.session, { from: cutAt[0], to: cutAt[1], doc: undefined, mark: deletion, tr })
+	else if (plan.cut === true) cuts.delete(plan.session)
+
+	return bulk
 }
 
 // The nodes starting at `positions` of `doc` (any order; positions where none starts are left out), in one walk.

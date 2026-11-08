@@ -594,6 +594,8 @@ export class DocxEngine implements DocxSessionApi {
 			const font = cssFont(style.font, style.size)
 			const extents = measurer.fontExtents(font)
 			const color = info[id]?.color
+			const effect = info[id]?.effect
+			const emphasis = info[id]?.emphasis
 
 			out.push({
 				font,
@@ -606,7 +608,9 @@ export class DocxEngine implements DocxSessionApi {
 				ascent: extents.ascent,
 				descent: extents.descent,
 				revision: info[id]?.revision ?? 0,
-				author: info[id]?.author ?? 0
+				author: info[id]?.author ?? 0,
+				...(effect === undefined || effect === 0 ? {} : { effect }),
+				...(emphasis === undefined || emphasis === 0 ? {} : { emphasis })
 			})
 		}
 

@@ -1,4 +1,5 @@
 import { EMU_PER_PX } from "../drawingml/index"
+import type { PdfDocumentProperties } from "../pdfwrite/index"
 import type { SlideRef } from "./model"
 import type { SlideRender } from "./output"
 
@@ -88,6 +89,8 @@ export interface JobDeckInfo {
 	// The deck's title (its core properties', else its file name's), and its language when it names one.
 	readonly title?: string
 	readonly lang?: string
+	// Its core properties' author, subject and keywords, when it names any.
+	readonly properties?: PdfDocumentProperties
 }
 
 export function emuToPx(emu: number): number {

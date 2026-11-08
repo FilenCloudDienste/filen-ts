@@ -132,10 +132,14 @@ const resolveOne = <T extends "review.accept" | "review.reject">(accept: boolean
 	enabled: context => revisionCount(context.session) > 0,
 	run(context, command) {
 		const selection = context.session.state.selection
-		const id = (command as { readonly id?: string }).id
+		const { id, next } = command as { readonly id?: string; readonly next?: boolean }
 		const scope: ReviewScope = id !== undefined ? { id } : { from: selection.from, to: selection.to }
 
-		return resolve([context.session], scope, accept)
+		if (!resolve([context.session], scope, accept)) return false
+		// The resolved change is gone: the next one after where it was (none left: done all the same).
+		if (next === true) step(context, true)
+
+		return true
 	}
 })
 
@@ -144,78 +148,139 @@ const resolveAll = <T extends "review.acceptAll" | "review.rejectAll">(accept: b
 	run: context => resolve(sessionsWithChanges(context.editor), { all: true }, accept)
 })
 
-// Selects the next (previous) change of the story being edited, whole (from its first piece to its last).
-// Changes go in the order of their first pieces (one inside another's span, as a paragraph's property change
-// inside a deletion across paragraphs, after it); past the last (first) one, the first (last) again. The
-// change at the selection (the one a move selected, or the narrowest the caret is inside) is skipped.
-const move = <T extends "review.next" | "review.prev">(forward: boolean): DocumentCommandHandler<T> => ({
-	enabled: context => revisionCount(context.session) > 0,
-	run(context: DocumentCommandContext) {
-		const session = context.session
-		const state = session.state
-		const index = storyReviewIndex(session)
-		const spans = new Map<string, { from: number; to: number }>()
+interface Change {
+	readonly session: DocxEditorSession
+	// The story's place in the order (the body first, then by story index), as comment navigation ranks.
+	readonly rank: number
+	readonly id: string
+	readonly from: number
+	readonly to: number
+}
 
-		for (const entry of index.entries()) {
-			if (entry.kind <= ReviewKind.COMMENT_REFERENCE) continue
+function rankOf(editor: PagedEditor, session: DocxEditorSession): number {
+	return session === editor.body.session ? -1 : session.story.story.index
+}
 
-			const span = spans.get(entry.id)
+// The sessions a move can enter (the body and stories on the pages), with those of stories whose source has
+// changes made: in the order of their ranks.
+function navigableSessions(editor: PagedEditor): DocxEditorSession[] {
+	const body = editor.body.session
+	const sessions = editor.sessions
+	const out = sessions.filter(session => session === body || editor.storyOnPages(session.story.story.index) !== undefined)
+	const opened = new Set(sessions.map(session => session.story.story.index))
 
-			if (span === undefined) spans.set(entry.id, { from: entry.from, to: entry.to })
-			else {
-				span.from = Math.min(span.from, entry.from)
-				span.to = Math.max(span.to, entry.to)
-			}
-		}
+	for (const index of changedStories(editor)) {
+		if (opened.has(index)) continue
 
-		const changes = [...spans].sort((a, b) => a[1].from - b[1].from || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
+		const story = editor.storyOnPages(index)
 
-		if (changes.length === 0) return false
-
-		const { from, to } = state.selection
-		const last = movedChange(session)
-		let current: string | undefined
-
-		if (last !== undefined && spans.has(last)) current = last
-		else {
-			const here = index.changeAt(from)
-
-			if (here !== undefined && (from < to || (here.from < from && Math.max(here.to, here.from + 1) > from))) current = here.id
-		}
-
-		const at = changes.findIndex(([id]) => id === current)
-		let next: number
-
-		if (at >= 0) next = (at + (forward ? 1 : -1) + changes.length) % changes.length
-		else {
-			next = forward ? changes.findIndex(([, span]) => span.from >= to) : changes.findLastIndex(([, span]) => span.from < from)
-
-			if (next < 0) next = forward ? 0 : changes.length - 1
-		}
-
-		const target = changes[next]
-
-		if (target === undefined) return false
-
-		const [id, span] = target
-		const doc = state.doc
-		const size = doc.content.size
-		const start = Math.min(size, span.from)
-		const end = Math.min(size, span.to)
-		const $from = doc.resolve(start)
-		// A paragraph mark's entry ends past its paragraph.
-		const stop = doc.resolve(end).parent.inlineContent || end === start ? end : end - 1
-		const selection =
-			$from.parent.inlineContent && doc.resolve(stop).parent.inlineContent
-				? TextSelection.create(doc, start, stop)
-				: Selection.near($from)
-
-		const tr = state.tr.setSelection(selection).scrollIntoView()
-
-		rememberMovedChange(session, tr.doc, tr.selection, id)
-
-		return session.dispatch(tr)
+		if (story !== undefined) out.push(story.session)
 	}
+
+	return out.sort((a, b) => rankOf(editor, a) - rankOf(editor, b))
+}
+
+// Session `session`'s changes, whole (from the first piece to the last), in the order of their first pieces
+// (one inside another's span, as a paragraph's property change inside a deletion across paragraphs, after it).
+function storyChanges(editor: PagedEditor, session: DocxEditorSession, out: Change[]): void {
+	const spans = new Map<string, { from: number; to: number }>()
+
+	for (const entry of storyReviewIndex(session).entries()) {
+		if (entry.kind <= ReviewKind.COMMENT_REFERENCE) continue
+
+		const span = spans.get(entry.id)
+
+		if (span === undefined) spans.set(entry.id, { from: entry.from, to: entry.to })
+		else {
+			span.from = Math.min(span.from, entry.from)
+			span.to = Math.max(span.to, entry.to)
+		}
+	}
+
+	const rank = rankOf(editor, session)
+	const sorted = [...spans].sort((a, b) => a[1].from - b[1].from || (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))
+
+	for (const [id, span] of sorted) out.push({ session, rank, id, from: span.from, to: span.to })
+}
+
+// The change at session `session`'s selection: the one a move selected, or the narrowest the caret is inside.
+function currentChange(session: DocxEditorSession, changes: readonly Change[]): string | undefined {
+	const last = movedChange(session)
+
+	if (last !== undefined && changes.some(change => change.session === session && change.id === last)) return last
+
+	const { from, to } = session.state.selection
+	const here = storyReviewIndex(session).changeAt(from)
+
+	return here !== undefined && (from < to || (here.from < from && Math.max(here.to, here.from + 1) > from)) ? here.id : undefined
+}
+
+// Selects change `change` whole, in its story (entered first).
+function selectChange(editor: PagedEditor, change: Change): boolean {
+	const session = change.session
+
+	if (session !== editor.session && !editor.enterStory(session.story.story.index, -1)) return false
+
+	const state = session.state
+	const doc = state.doc
+	const size = doc.content.size
+	const start = Math.min(size, change.from)
+	const end = Math.min(size, change.to)
+	const $from = doc.resolve(start)
+	// A paragraph mark's entry ends past its paragraph.
+	const stop = doc.resolve(end).parent.inlineContent || end === start ? end : end - 1
+	const selection =
+		$from.parent.inlineContent && doc.resolve(stop).parent.inlineContent
+			? TextSelection.create(doc, start, stop)
+			: Selection.near($from)
+	const tr = state.tr.setSelection(selection).scrollIntoView()
+
+	rememberMovedChange(session, tr.doc, tr.selection, change.id)
+
+	return session.dispatch(tr)
+}
+
+// Selects the next (previous) change of the document, across stories (the body, then the other stories on the
+// pages by index); past the last (first) one, the first (last) again. The change at the selection is skipped.
+function step(context: DocumentCommandContext, forward: boolean): boolean {
+	const editor = context.editor
+	const active = context.session
+	const changes: Change[] = []
+	let activeIndexed = false
+
+	for (const session of navigableSessions(editor)) {
+		if (!reviewIndexWanted(session)) continue
+		if (session === active) activeIndexed = true
+
+		storyChanges(editor, session, changes)
+	}
+
+	if (changes.length === 0) return false
+
+	const current = activeIndexed ? currentChange(active, changes) : undefined
+	const at = current === undefined ? -1 : changes.findIndex(change => change.session === active && change.id === current)
+	let next: number
+
+	if (at >= 0) next = (at + (forward ? 1 : -1) + changes.length) % changes.length
+	else {
+		const here = rankOf(editor, active)
+		const { from, to } = active.state.selection
+
+		next = forward
+			? changes.findIndex(change => change.rank > here || (change.rank === here && change.from >= to))
+			: changes.findLastIndex(change => change.rank < here || (change.rank === here && change.from < from))
+
+		if (next < 0) next = forward ? 0 : changes.length - 1
+	}
+
+	const target = changes[next]
+
+	return target !== undefined && selectChange(editor, target)
+}
+
+const move = <T extends "review.next" | "review.prev">(forward: boolean): DocumentCommandHandler<T> => ({
+	enabled: context => hasChanges(context.editor),
+	run: context => step(context, forward)
 })
 
 export const REVIEW_HANDLERS: FeatureHandlers = {

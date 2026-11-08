@@ -19,6 +19,9 @@ interface Definition {
 	readonly unhide?: boolean
 }
 
+// Twips of text a US Letter page with 1" margins holds: the width Header and Footer tabs fall back to.
+const LETTER_TEXT_WIDTH = 9360
+
 // The values are Word's built-in defaults (current Office theme) as observed in documents Word 16 wrote, in the
 // public test corpus (corpus/manifest.json): the paragraph styles from SHA-256
 // 599533082406a29a6238b5a1799c5395d884a8506feafd455fe91d4554218b62, the comment styles from
@@ -62,9 +65,13 @@ const DEFINITIONS: Readonly<Record<string, Definition>> = {
 	},
 	"annotation reference": { priority: 99, pPr: "", rPr: '<w:sz w:val="16"/><w:szCs w:val="16"/>', qFormat: false, hidden: true },
 	"Placeholder Text": { priority: 99, pPr: "", rPr: '<w:color w:val="666666"/>', qFormat: false, hidden: true, unhide: false },
+	// What bullets and numbering give a Normal paragraph (no w:next: the next item keeps it).
+	"List Paragraph": { priority: 34, pPr: '<w:ind w:left="720"/><w:contextualSpacing/>', rPr: "", qFormat: true, ownNext: true },
 	"table of figures": { priority: 99, pPr: '<w:spacing w:after="0"/>', rPr: "", qFormat: false, hidden: true },
-	header: headerFooter(),
-	footer: headerFooter(),
+	// What Word gives a link it inserts (the current Office theme's hyperlink colour; the theme colour rules).
+	Hyperlink: { priority: 99, pPr: "", rPr: '<w:color w:val="467886" w:themeColor="hyperlink"/><w:u w:val="single"/>', qFormat: false },
+	header: headerFooter(LETTER_TEXT_WIDTH),
+	footer: headerFooter(LETTER_TEXT_WIDTH),
 	"footnote text": noteText(),
 	"endnote text": noteText(),
 	"footnote reference": noteReference(),
@@ -82,13 +89,14 @@ const DEFINITIONS: Readonly<Record<string, Definition>> = {
 	)
 }
 
-// Header and footer (center and right tabs of a US Letter page with 1" margins), notes' text and number
-// marks: as Word 16 defines them in docx4j__loadAndSave.docx (SHA-256
-// 122f53311702e32affbc0ec99ced129990e6728a9b4b6df30f5684f73a20247f).
-function headerFooter(): Definition {
+// Header and footer, notes' text and number marks: as Word 16 defines them in docx4j__loadAndSave.docx (SHA-256
+// 122f53311702e32affbc0ec99ced129990e6728a9b4b6df30f5684f73a20247f). Header and footer have a centre tab at half
+// and a right tab at the whole text width of the section their story is made for (4513/9026 on A4 with 1"
+// margins in Word-saved files), a US Letter page's with 1" margins without one.
+function headerFooter(width: number): Definition {
 	return {
 		priority: 99,
-		pPr: '<w:tabs><w:tab w:val="center" w:pos="4680"/><w:tab w:val="right" w:pos="9360"/></w:tabs><w:spacing w:after="0" w:line="240" w:lineRule="auto"/>',
+		pPr: `<w:tabs><w:tab w:val="center" w:pos="${String(Math.round(width / 2))}"/><w:tab w:val="right" w:pos="${String(width)}"/></w:tabs><w:spacing w:after="0" w:line="240" w:lineRule="auto"/>`,
 		rPr: "",
 		qFormat: false,
 		ownNext: true
@@ -140,15 +148,19 @@ function withPrefix(markup: string, names: Names): string {
 		: markup.replace(/(<\/?)w:/g, `$1${names.w === "" ? "" : `${names.w}:`}`).replace(/ w:/g, names.w === "" ? " " : ` ${names.w}:`)
 }
 
+// Built-in styles whose definition depends on the text width of the section they were added for.
+const SIZED: Readonly<Record<string, (width: number) => Definition>> = { header: headerFooter, footer: headerFooter }
+
 // The w:style element for a built-in style content uses, based on the document's default style of its type
-// (`based`: their ids).
+// (`based`: their ids); `width`: the twips of text width a style that depends on it is defined for.
 export function styleDefinition(
 	names: Names,
 	id: string,
 	name: string,
-	based: { readonly paragraph: string | undefined; readonly character: string | undefined }
+	based: { readonly paragraph: string | undefined; readonly character: string | undefined },
+	width?: number
 ): string {
-	const definition = DEFINITIONS[name]
+	const definition = (width === undefined ? undefined : SIZED[name]?.(width)) ?? DEFINITIONS[name]
 
 	if (definition === undefined) throw new RangeError(`No definition for ${name}`)
 
@@ -171,11 +183,13 @@ export function styleDefinition(
 export const STYLES_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"
 
 // styles.xml with the definitions of `missing` (style id -> built-in name) appended after the last style,
-// or a new part holding only them.
+// or a new part holding only them; `widths`: the text width (twips) a style that depends on it was added for,
+// by id.
 export function stylesWithDefinitions(
 	document: XmlDocument | undefined,
 	styles: DocxStyles,
-	missing: ReadonlyMap<string, string>
+	missing: ReadonlyMap<string, string>,
+	widths?: ReadonlyMap<string, number>
 ): Uint8Array | null {
 	if (missing.size === 0) return null
 
@@ -183,7 +197,7 @@ export function stylesWithDefinitions(
 
 	if (document === undefined) {
 		const names = new Names("w", "")
-		const body = [...missing].map(([id, name]) => styleDefinition(names, id, name, based)).join("")
+		const body = [...missing].map(([id, name]) => styleDefinition(names, id, name, based, widths?.get(id))).join("")
 
 		return encodeUtf8(
 			`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\r\n<w:styles xmlns:w="${W_NAMESPACE}">${body}</w:styles>`
@@ -195,7 +209,7 @@ export function stylesWithDefinitions(
 	const names = new Names(reader.namespaces.prefixFor(root, W_NAMESPACE) ?? "", "")
 	const editor = new XmlEditor(document)
 
-	editor.append(root, [...missing].map(([id, name]) => styleDefinition(names, id, name, based)).join(""))
+	editor.append(root, [...missing].map(([id, name]) => styleDefinition(names, id, name, based, widths?.get(id))).join(""))
 
 	return editor.serialize()
 }

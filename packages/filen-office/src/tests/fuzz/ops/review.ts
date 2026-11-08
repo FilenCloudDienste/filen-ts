@@ -288,7 +288,7 @@ export const reviewOps: readonly EditOp[] = [
 
 			select(session, p)
 
-			const tr = splitParagraph(session.state)
+			const tr = splitParagraph(session.state, session.formats)
 
 			if (tr) session.dispatch(tr)
 

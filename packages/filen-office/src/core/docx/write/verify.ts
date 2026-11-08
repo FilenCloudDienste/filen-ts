@@ -68,6 +68,7 @@ const R_URIS = [
 	"http://schemas.openxmlformats.org/officeDocument/2006/relationships",
 	"http://purl.oclc.org/ooxml/officeDocument/relationships"
 ]
+const O_URI = "urn:schemas-microsoft-com:office:office"
 // Elements whose w:id must be unique, per kind.
 const REVISION_ELEMENTS = new Set([
 	"ins",
@@ -477,8 +478,8 @@ async function danglingRelationships(
 }
 
 // Calls `visit` with each element of `document` and the relationship id of each attribute of the relationships
-// namespace it has (the value decoded). Start tags are searched for the bound prefixes first; only the few that
-// hold one have their attributes read.
+// namespace, or VML o:relid, it has (the value decoded). Start tags are searched for the bound prefixes first;
+// only the few that hold one have their attributes read.
 async function eachRelationshipUse(
 	document: XmlDocument,
 	clock: SliceClock | undefined,
@@ -489,7 +490,9 @@ async function eachRelationshipUse(
 
 	for (const bindings of reader.namespaces.declarations().values()) {
 		for (const [prefix, uri] of bindings) {
-			if (prefix !== "" && R_URIS.includes(uri)) prefixes.push(encodeUtf8(`${prefix}:`))
+			if (prefix === "") continue
+			if (R_URIS.includes(uri)) prefixes.push(encodeUtf8(`${prefix}:`))
+			else if (uri === O_URI) prefixes.push(encodeUtf8(`${prefix}:relid`))
 		}
 	}
 
@@ -523,7 +526,11 @@ async function eachRelationshipUse(
 			const colon = attribute.name.indexOf(":")
 			const prefix = colon < 0 ? "" : attribute.name.slice(0, colon)
 
-			if (prefix !== "" && R_URIS.includes(reader.namespaces.uri(node, prefix) ?? "")) visit(node, attribute.value)
+			if (prefix === "") continue
+
+			const uri = reader.namespaces.uri(node, prefix) ?? ""
+
+			if (R_URIS.includes(uri) || (uri === O_URI && attribute.name.slice(colon + 1) === "relid")) visit(node, attribute.value)
 		}
 	}
 }
@@ -1890,8 +1897,15 @@ export function paragraphSignature(
 		// take back into the attribute.
 		for (const name of ["src", "end", "node", "markers", "index", "simple", "state"]) delete attributes[name]
 
-		// A bookmark's name is in its start's bytes, a new one's on its marker (checks/fields.ts checks them).
-		if (child.type === nodes.marker) delete attributes["name"]
+		// A bookmark's name is in its start's bytes, a new one's on its marker (checks/fields.ts checks them). A new
+		// move range has the save's own revision id, its start the author and date in its bytes.
+		if (child.type === nodes.marker) {
+			delete attributes["name"]
+			delete attributes["author"]
+			delete attributes["date"]
+
+			if (String(attributes["kind"]).startsWith("move")) attributes["id"] = null
+		}
 
 		// A field's tracked update gets the save's own revision ids.
 		if (child.type === nodes.field && attributes["update"] !== null && typeof attributes["update"] === "object")

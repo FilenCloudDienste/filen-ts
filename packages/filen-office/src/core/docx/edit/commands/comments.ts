@@ -18,7 +18,19 @@ export type CommentCommand =
 const document = { scope: "document", group: "comment", context: "comment" } as const
 
 export const COMMENT_COMMANDS: readonly DocxCommandInfo<CommentCommand["type"]>[] = [
-	{ type: "comment.add", labelKey: "docx.comment.add", icon: "comment-add", write: true, author: true, input: "text", ...document },
+	// Word's Ctrl+Alt+M (Cmd+Option+A): the host opens the new comment's input.
+	{
+		type: "comment.add",
+		labelKey: "docx.comment.add",
+		icon: "comment-add",
+		shortcut: "mod+alt+m",
+		appleShortcut: "mod+alt+a",
+		hostShortcut: true,
+		write: true,
+		author: true,
+		input: "text",
+		...document
+	},
 	{ type: "comment.reply", labelKey: "docx.comment.reply", icon: "comment-reply", write: true, author: true, input: "text", ...document },
 	{ type: "comment.edit", labelKey: "docx.comment.edit", icon: "comment-edit", write: true, author: true, input: "text", ...document },
 	{ type: "comment.resolve", labelKey: "docx.comment.resolve", icon: "comment-resolve", write: true, ...document },

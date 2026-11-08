@@ -9,6 +9,7 @@ import type { DocxPackage } from "../../package"
 import type { NewStoryContainer } from "../newStory"
 import type { StoryChange } from "../save"
 import { commentParts } from "./comments"
+import { coreParts } from "./core"
 import { customXmlParts } from "./customXml"
 import { mediaParts } from "./media"
 import { noteParts } from "./notes"
@@ -29,6 +30,8 @@ export interface SaveParts {
 	// `name` when neither the package nor this save has a part of that name, else the first free one with a
 	// number before the extension (word/comments.xml, word/comments1.xml...).
 	freeName(name: string): string
+	// Whether the save has written a part so far (a story part, a contributor's).
+	changed(): boolean
 	// The id of the main part's relationship to `target`, a part the save creates for stories the editor
 	// added (context.newStories), so a reference to it (a section's header reference) can be written.
 	storyRelationship(target: string): string | undefined
@@ -60,7 +63,7 @@ export interface RootDeclarations {
 }
 
 // A feature's share of a save beyond story content: the parts it keeps (comments, notes, media, settings,
-// custom XML) and where its new stories go.
+// custom XML, core properties) and where its new stories go.
 export interface PartContributor {
 	// The document attributes (doc node) this contributor writes; a save refuses one set that none writes.
 	readonly attributes?: readonly string[]
@@ -81,4 +84,5 @@ export interface PartContributor {
 	contribute?(parts: SaveParts, written: WrittenStories): Promise<void>
 }
 
-export const PART_CONTRIBUTORS: readonly PartContributor[] = [commentParts, noteParts, mediaParts, settingsParts, customXmlParts]
+// The core properties contributor goes last: it writes the core part bound controls edit.
+export const PART_CONTRIBUTORS: readonly PartContributor[] = [commentParts, noteParts, mediaParts, settingsParts, customXmlParts, coreParts]

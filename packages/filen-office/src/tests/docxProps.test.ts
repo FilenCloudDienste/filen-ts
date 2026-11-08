@@ -147,6 +147,12 @@ describe("run properties", () => {
 })
 
 describe("paragraph properties", () => {
+	it("drops firstLine when w:ind also gives hanging", () => {
+		expect(paragraphProps('<w:ind w:left="1440" w:firstLine="720" w:hanging="720"/>').indent).toEqual({ start: 1440, hanging: 720 })
+		expect(paragraphProps('<w:ind w:firstLineChars="100" w:hangingChars="200"/>').indent).toEqual({ hangingChars: 200 })
+		expect(paragraphProps('<w:ind w:firstLine="720" w:hangingChars="200"/>').indent).toEqual({ firstLine: 720, hangingChars: 200 })
+	})
+
 	it("reads layout properties", () => {
 		const props = paragraphProps(
 			'<w:pStyle w:val="Heading1"/><w:keepNext/><w:keepLines/><w:pageBreakBefore w:val="0"/><w:widowControl w:val="0"/>' +

@@ -33,7 +33,10 @@ import { readProtectionHash, type ProtectionHashRead } from "../protection/hash"
 // comments change, plus those ranges; "trackedChanges" records every edit as a tracked change: the switch cannot
 // be turned off and changes cannot be accepted or rejected (Word's behaviour); "readOnly" lets only those ranges
 // change, and keeps a document without them view-only (gate 0 reason "protected"). The password hash is kept as
-// it is: editing within the limits needs no password.
+// it is: editing within the limits needs no password. Word's Stop Protection: the app checks the password
+// (documentProtectionOf) and opens the document again with EditContextParts.protectionUnlocked, under which no
+// mode or formatting restriction applies and gate 0 reason "protected" is lifted; the save writes the element
+// with w:enforcement off and without its hash (write/parts/settings.ts).
 
 export type DocxProtectionMode = "none" | "forms" | "comments" | "trackedChanges" | "readOnly"
 
@@ -60,7 +63,7 @@ export function protectionOf(context: DocxEditContext): DocxProtection {
 	let found = protections.get(context)
 
 	if (found === undefined) {
-		const protection = context.model.package.facts.documentProtection
+		const protection = context.protectionUnlocked === true ? undefined : context.model.package.facts.documentProtection
 		// A read-only document gate 0 let through (ranges open to everyone in it): only those ranges change.
 		const mode =
 			protection === undefined
@@ -103,9 +106,33 @@ export function writeProtectionOf(context: DocxEditContext): DocxWriteProtection
 	}
 }
 
+// Enforced w:documentProtection the user can stop (Review > Restrict Editing > Stop Protection): its w:edit and
+// the password to check first ("unsupported": one that cannot be checked here, so it stays; undefined: none,
+// it stops at once). Undefined when nothing is enforced or the session was opened with it stopped.
+export interface DocxDocumentProtection {
+	readonly edit: string
+	readonly password: ProtectionHashRead
+}
+
+export function documentProtectionOf(context: DocxEditContext): DocxDocumentProtection | undefined {
+	const pkg = context.model.package
+	const facts = pkg.facts.documentProtection
+
+	if (context.protectionUnlocked === true || facts === undefined || !facts.enforced || facts.edit === undefined || facts.edit === "none")
+		return undefined
+
+	return {
+		edit: facts.edit,
+		password: facts.hashed ? (readProtectionHash(pkg.settings, "documentProtection") ?? "unsupported") : undefined
+	}
+}
+
 // Whether gate 0 reason `reason` is lifted for a session opened with `parts`.
-export function gateLifted(reason: DocxGateReason, parts: { readonly writeUnlocked?: boolean }): boolean {
-	return reason === "writeProtected" && parts.writeUnlocked === true
+export function gateLifted(
+	reason: DocxGateReason,
+	parts: { readonly writeUnlocked?: boolean; readonly protectionUnlocked?: boolean }
+): boolean {
+	return (reason === "writeProtected" && parts.writeUnlocked === true) || (reason === "protected" && parts.protectionUnlocked === true)
 }
 
 // Commands each mode allows; any other write command is refused (undo and redo stay: they only take back what
@@ -176,7 +203,7 @@ const DOCUMENT_WIDE = new Set<DocxEditorCommandType>([
 export function formattingRestricted(context: DocxEditContext): boolean {
 	const protection = context.model.package.facts.documentProtection
 
-	return protection !== undefined && protection.enforced && protection.formatting
+	return context.protectionUnlocked !== true && protection !== undefined && protection.enforced && protection.formatting
 }
 
 // Whether a style is locked against use (w:locked, ECMA-376 Part 1 §17.7.4.7; a built-in style the document does

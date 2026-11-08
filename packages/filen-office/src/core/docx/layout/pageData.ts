@@ -25,6 +25,9 @@ export interface DocxTextStyle {
 	// The colour slot (1..8) of the tracked change's author, 0 without one: inserted and deleted text is drawn
 	// in --fo-revision-<slot>.
 	readonly author?: number
+	// A document run's character effect (RunEffect) and emphasis mark (Emphasis), layout/effects.ts; absent for none.
+	readonly effect?: number
+	readonly emphasis?: number
 	// DrawingML text (presentations) carries more than a colour; with every field below absent the run draws exactly
 	// as it does without them. The fill drawn in place of `color` (index into the page's paints table).
 	readonly paint?: number

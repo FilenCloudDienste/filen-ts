@@ -8,9 +8,9 @@ import { EMPTY_RUN } from "../props/parse"
 import type { PropsStore } from "../props/store"
 import type { ResolvedRunProps, RunProps } from "../props/types"
 import type { CellFormat, ParagraphFormat, PropertyResolver } from "../styles/resolve"
-import { FieldKind, fieldInfo, formFieldLook, macroButtonText, numberText, type FieldCodes } from "./fields"
+import { FieldKind, dateTimeText, fieldInfo, formFieldLook, macroButtonText, numberText, type FieldCodes, type FieldInfo } from "./fields"
 import { objectAt, ObjectKind, type ObjectSizer, type ObjectTable } from "./objects"
-import { TrackedLook, revisionLook, type RunStyles } from "./styles"
+import { TrackedLook, revisionLook, shadingDark, type RunStyles } from "./styles"
 import { halfPoints, twips } from "./units"
 
 // Builds the text a paragraph lays out from the model: runs resolved to styles, fields shown as their
@@ -25,6 +25,32 @@ export interface PageValues {
 	pageFormat: string | undefined
 	numPages: number
 	sectionPages: number
+	// The chapter number and its separator page numbers begin with (w:pgNumType chapStyle, chapSep), absent
+	// without one.
+	chapter?: string | undefined
+}
+
+// A page number as fields and page lists show it: the chapter prefix, then the number in `format`.
+export function pageNumberText(page: number, format: string | undefined, chapter: string | undefined): string {
+	const text = numberText(page, format)
+
+	return chapter === undefined ? text : chapter + text
+}
+
+// The character w:chapSep names (§17.18.6), a hyphen by default.
+export function chapterSeparator(value: string | undefined): string {
+	switch (value) {
+		case "period":
+			return "."
+		case "colon":
+			return ":"
+		case "emDash":
+			return "—"
+		case "enDash":
+			return "–"
+		default:
+			return "-"
+	}
 }
 
 // Numbers of note references, assigned in layout order.
@@ -62,8 +88,9 @@ export class BuiltParagraph {
 	// The list marker's width and lvlJc ("left", "center", "right"), 0 / "" without a marker.
 	markerWidth = 0
 	markerAlignment = ""
-	// Anchored objects (ids) in text order.
+	// Anchored objects (ids) in text order, and the text offset each is anchored at.
 	readonly floats: number[] = []
+	readonly floatOffsets: number[] = []
 	// Note references: text offset, story index and 1 for endnotes.
 	readonly noteOffsets: number[] = []
 	readonly noteStories: number[] = []
@@ -91,6 +118,7 @@ export class BuiltParagraph {
 		this.markerWidth = 0
 		this.markerAlignment = ""
 		this.floats.length = 0
+		this.floatOffsets.length = 0
 		this.noteOffsets.length = 0
 		this.noteStories.length = 0
 		this.noteEndnote.length = 0
@@ -140,6 +168,8 @@ export interface ContentServices {
 	readonly memoKey: (part: number, item: number) => number
 	// The index of a tracked change's author (-1 for none), numbered as reviewers are.
 	readonly authors: (name: string | undefined) => number
+	// The time DATE and TIME fields show (LayoutOptions.date), read once per layout.
+	readonly now: Date
 }
 
 // A legacy check box's run properties at its own size (w:size), one object per run properties and size so
@@ -175,8 +205,8 @@ function sizedRun(direct: RunProps, size: number): RunProps {
 	return sized
 }
 
-// A computed field's value: a page field's \* format, or a legacy form field's look and the run it is
-// drawn in.
+// A computed field's value: a page field's \* format, a DATE or TIME field's text, or a legacy form field's look
+// and the run it is drawn in.
 interface FieldValue {
 	readonly format: string | undefined
 	readonly text: string | undefined
@@ -315,7 +345,8 @@ export class ContentBuilder {
 	}
 
 	// Builds paragraphs first..last (joined: every mark but the last hidden) into the paragraph builder;
-	// `parts` and `formats` are their parts and formats in order.
+	// `parts` and `formats` are their parts and formats in order. `dark`: the fill behind them (a cell's or a
+	// table's) is dark, which turns automatic text white where no paragraph shading lies between.
 	build(
 		story: StoryContext,
 		parts: readonly StoryPart[],
@@ -323,17 +354,22 @@ export class ContentBuilder {
 		formats: readonly ParagraphFormat[],
 		columnWidth: number,
 		page: PageValues,
-		out: BuiltParagraph
+		out: BuiltParagraph,
+		dark: boolean = false
 	): void {
 		const services = this.services
+		const styles = services.styles
 		const lastFormat = formats[formats.length - 1]
 		const first = items[0] ?? -1
 		const firstPart = parts[0] ?? story.part
+		const darkBehind = (format: ParagraphFormat): boolean =>
+			(format.props.shading === undefined ? undefined : shadingDark(format.props.shading)) ?? dark
 
 		out.reset()
 
 		if (lastFormat === undefined) return
 
+		styles.darkBackground = darkBehind(lastFormat)
 		this.out = out
 		this.page = page
 		this.story = story
@@ -353,16 +389,19 @@ export class ContentBuilder {
 
 		services.notes.beginParagraph()
 
+		styles.darkBackground = darkBehind(formats[0] ?? lastFormat)
 		this.marker(story, firstPart, first, formats[0] ?? lastFormat)
 		this.resetFields()
 
 		for (let k = 0; k < items.length; k++) {
 			const format = formats[k] ?? lastFormat
 
+			styles.darkBackground = darkBehind(format)
 			this.format = format
 			this.paragraph(parts[k] ?? firstPart, items[k] ?? -1, format)
 		}
 
+		styles.darkBackground = false
 		out.text = builder.finish().text
 
 		if (services.recordMaps) out.map = Int32Array.from(this.map)
@@ -509,7 +548,7 @@ export class ContentBuilder {
 					break
 				case Item.FieldSimple: {
 					const instruction = part.fieldInstruction(part.aux[item] ?? -1, view)
-					const info = fieldInfo(instruction)
+					const info = fieldInfo(instruction, part, item)
 
 					if (this.codes !== undefined && this.codeShown(part, item)) {
 						if (this.hidden === 0) this.text(`{${instruction}}`, run, revision)
@@ -535,12 +574,7 @@ export class ContentBuilder {
 								? run
 								: resolver.run(format, store.runLook(part.document, part.runs.rPr[part.aux[firstRun] ?? -1] ?? -1))
 
-						this.computedField(
-							info.kind,
-							info.format === undefined ? NO_VALUE : { format: info.format, text: undefined, run: undefined },
-							fieldRun,
-							revision
-						)
+						this.computedField(info.kind, this.computedValue(info, instruction, fieldRun), fieldRun, revision)
 					}
 
 					break
@@ -779,7 +813,7 @@ export class ContentBuilder {
 
 			const field = part.fieldOf(item)
 			const instruction = field < 0 ? "" : part.fieldInstruction(field, view)
-			const info = field < 0 ? undefined : fieldInfo(instruction)
+			const info = field < 0 ? undefined : fieldInfo(instruction, part, item)
 			const kind = info?.kind ?? FieldKind.OTHER
 
 			kinds.push(kind)
@@ -789,9 +823,9 @@ export class ContentBuilder {
 			this.fieldValues.push(
 				kind === FieldKind.CHECKBOX || kind === FieldKind.DROPDOWN
 					? this.formValue(part, item, kind)
-					: info?.format === undefined
+					: info === undefined
 						? NO_VALUE
-						: { format: info.format, text: undefined, run: undefined }
+						: this.computedValue(info, instruction, run)
 			)
 			modes.push(FIELD_CODE)
 			this.hidden++
@@ -888,6 +922,15 @@ export class ContentBuilder {
 		}
 	}
 
+	// A computed field's value: a page field's \* format, or a DATE or TIME field's text as of the layout's clock
+	// in the language of `run` (its first run's), computed once per field as it is laid out.
+	private computedValue(info: FieldInfo, instruction: string, run: ResolvedRunProps): FieldValue {
+		if (info.kind === FieldKind.DATE || info.kind === FieldKind.TIME)
+			return { format: undefined, text: dateTimeText(instruction, this.services.now, run.lang), run: undefined }
+
+		return info.format === undefined ? NO_VALUE : { format: info.format, text: undefined, run: undefined }
+	}
+
 	private computedField(kind: FieldKind, value: FieldValue, run: ResolvedRunProps, revision: TrackedLook): void {
 		const page = this.page
 		const format = value.format
@@ -898,7 +941,7 @@ export class ContentBuilder {
 			return
 		}
 
-		if (kind === FieldKind.DROPDOWN) {
+		if (kind === FieldKind.DROPDOWN || kind === FieldKind.DATE || kind === FieldKind.TIME) {
 			this.text(value.text ?? "", value.run ?? run, revision)
 
 			return
@@ -908,7 +951,7 @@ export class ContentBuilder {
 			const start = this.builder.length
 
 			this.out.fieldFlags |= 1
-			this.text(numberText(page.page, format ?? page.pageFormat), run, revision)
+			this.text(pageNumberText(page.page, format ?? page.pageFormat, page.chapter), run, revision)
 			this.out.pageFields.push(start, this.builder.length)
 
 			return
@@ -991,6 +1034,7 @@ export class ContentBuilder {
 
 		if (placed.anchored) {
 			this.out.floats.push(placed.id)
+			this.out.floatOffsets.push(this.builder.length)
 
 			return
 		}

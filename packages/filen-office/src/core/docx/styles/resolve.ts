@@ -212,6 +212,8 @@ export class PropertyResolver {
 	private readonly rowInterner = new Interner<ResolvedTableRowProps>()
 	private readonly cellInterner = new Interner<ResolvedTableCellProps>()
 	private readonly borderInterner = new Interner<ResolvedBorder>()
+	// Layout groups bordered paragraphs by identity of this set (17.3.1.24), so equal sets must share one object.
+	private readonly paragraphBordersInterner = new Interner<ResolvedParagraphBorders>()
 	private readonly shadingInterner = new Interner<ResolvedShading>()
 	private resolvedRuns = 0
 	// Style ids looked up that the styles do not define (they resolve as the defaults until defined).
@@ -722,7 +724,7 @@ export class PropertyResolver {
 			}
 
 			if (candidate.top || candidate.start || candidate.bottom || candidate.end || candidate.between || candidate.bar)
-				resolvedBorders = candidate
+				resolvedBorders = this.paragraphBordersInterner.intern(candidate)
 		}
 
 		const value = {

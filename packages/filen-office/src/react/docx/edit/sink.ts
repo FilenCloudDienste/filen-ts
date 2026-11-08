@@ -1,10 +1,12 @@
 import type { Mark, Node } from "prosemirror-model"
 import { Plugin, type EditorState, type Transaction } from "prosemirror-state"
 import { EditorView, type NodeView, type NodeViewConstructor } from "prosemirror-view"
-import { docxSchema } from "../../../core/docx/edit/index"
+import { docxSchema, isWriteCommand } from "../../../core/docx/edit/index"
 import {
 	besideNode,
 	commandForKey,
+	findForKey,
+	isRepeatKey,
 	joinBackward,
 	joinForward,
 	lineBreak,
@@ -29,7 +31,16 @@ import {
 	symbolText,
 	writeClipboardEvent
 } from "./clipboard"
-import { composedFormatting, deleteBeforeComposition, deleteSelectionKey, inputTransaction, selectionFormatting } from "./input"
+import {
+	autoLinked,
+	composedFormatting,
+	deleteBeforeComposition,
+	deleteSelectionKey,
+	inputTransaction,
+	selectionFormatting,
+	spaceEndsAddress,
+	spaceTransaction
+} from "./input"
 import {
 	blockIndex,
 	compositionFrom,
@@ -67,6 +78,8 @@ export interface EditSinkOptions {
 	readonly readOnly?: boolean
 	// Cmd (Apple platforms) or Ctrl as the shortcut modifier.
 	readonly apple?: boolean
+	// In the desktop app: the shortcuts the browser owns are the editor's (DocxKeyBinding).
+	readonly desktop?: boolean
 	// Top-level blocks held on each side of the selection's ends (default 20).
 	readonly window?: number
 	// The painted caret on screen (client px) and the width of its column, or undefined when it is not drawn.
@@ -74,8 +87,10 @@ export interface EditSinkOptions {
 		{ readonly left: number; readonly top: number; readonly height: number; readonly width?: number } | undefined
 	// Page Up / Page Down.
 	readonly pageMove?: (dir: 1 | -1, extend: boolean) => boolean
-	// The app's find (Mod+F): the browser's would search the hidden text.
-	readonly onFind?: () => void
+	// The app's find (Mod+F), with its replace row (Ctrl+H): the browser's would search the hidden text.
+	readonly onFind?: (replace: boolean) => void
+	// Word's Go To (Ctrl+G); without it the key finds.
+	readonly onGoTo?: () => void
 }
 
 const DEFAULT_WINDOW = 20
@@ -287,7 +302,8 @@ export class EditSink {
 					// Composed over a selection: the selection goes first, as a transaction.
 					if (!this.readOnly) {
 						this.readSelection(view)
-						this.composeFormatting = selectionFormatting(this.editor.state)
+						this.composeFormatting =
+							selectionFormatting(this.editor.state) ?? this.editor.session.typingMarks(this.editor.state)
 						this.run(deleteBeforeComposition(this.editor.state))
 					}
 
@@ -604,13 +620,22 @@ export class EditSink {
 
 		this.readSelection(view)
 
-		const tr = inputTransaction(view, this.editor.state, event)
+		const session = this.editor.session
+		const tr = inputTransaction(view, this.editor.state, event, state => session.typingMarks(state))
+		const linking = spaceEndsAddress(view, session, event)
+		const typed = tr ?? (linking ? spaceTransaction(session) : undefined)
 
-		if (tr === undefined) return false
+		if (typed === undefined) return false
 
 		event.preventDefault()
 
-		return this.run(tr)
+		if (!linking) return this.run(typed)
+
+		return autoLinked(
+			session,
+			() => this.run(typed),
+			link => this.run(link)
+		)
 	}
 
 	// A selection the browser made that the view has not read yet (a key's selectionchange still queued), taken
@@ -784,11 +809,24 @@ export class EditSink {
 			case "PageDown":
 				return this.options.pageMove?.(event.key === "PageDown" ? 1 : -1, extend) ?? false
 			case "Enter":
-				if (mod || event.altKey || readOnly) return false
+				if (event.altKey || readOnly) return false
+				// Mod+Enter: the page break's shortcut.
+				if (mod) break
 
-				return this.run(extend ? lineBreak(state) : splitParagraph(state))
+				return autoLinked(
+					editor.session,
+					() => this.run(extend ? lineBreak(state) : splitParagraph(state, editor.session.formats)),
+					tr => this.run(tr)
+				)
 			case "Tab":
-				return !readOnly && tabKey(editor, editor.session, event, apple, tr => this.run(tr))
+				return (
+					!readOnly &&
+					autoLinked(
+						editor.session,
+						() => tabKey(editor, editor.session, event, apple, tr => this.run(tr)),
+						tr => this.run(tr)
+					)
+				)
 			// At a paragraph's edge any deletion (a character, a word, to the line's start) joins paragraphs.
 			case "Backspace":
 				if (readOnly) return false
@@ -797,7 +835,7 @@ export class EditSink {
 
 				this.readSelection(view)
 
-				return this.run(deleteSelectionKey(editor.state) ?? joinBackward(editor.state))
+				return this.run(deleteSelectionKey(editor.state) ?? joinBackward(editor.state, editor.session.formats))
 			case "Delete":
 				// Shift+Delete cuts.
 				if (readOnly || extend) return false
@@ -830,17 +868,28 @@ export class EditSink {
 			const key = event.key.toLowerCase()
 
 			if (key === "a") return this.run(selectAll(state))
-
-			if (key === "f" || key === "g" || key === "h") {
-				this.options.onFind?.()
-
-				return this.options.onFind !== undefined
-			}
 		}
 
-		const command = readOnly ? undefined : commandForKey(event, apple)
+		const find = findForKey(event, apple)
 
-		if (command !== undefined) {
+		if (find === "goTo" && this.options.onGoTo !== undefined) {
+			this.options.onGoTo()
+
+			return true
+		}
+
+		if (find !== undefined) {
+			this.options.onFind?.(find === "replace")
+
+			return this.options.onFind !== undefined
+		}
+
+		if (!readOnly && isRepeatKey(event, apple)) return editor.repeat()
+
+		const command = commandForKey(event, apple, this.options.desktop === true)
+
+		// Read-only: only what changes nothing (the view: Alt+F9), as the host runs it.
+		if (command !== undefined && !(readOnly && isWriteCommand(command.type))) {
 			// Undo and redo follow the order across stories; story commands go to the story being edited.
 			void editor.execute(command)
 

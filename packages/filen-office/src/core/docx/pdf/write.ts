@@ -123,6 +123,7 @@ async function write(doc: DocxPdfDocument, options: DocxPdfOptions): Promise<Doc
 			tagged: options.tagged !== false,
 			deterministic: options.deterministic === true,
 			title: doc.title,
+			...(doc.properties === undefined ? {} : { properties: doc.properties }),
 			...((doc.lang ?? options.lang) === undefined ? {} : { lang: doc.lang ?? options.lang }),
 			...(options.password === undefined ? {} : { password: options.password }),
 			...(options.signal === undefined ? {} : { signal: options.signal }),

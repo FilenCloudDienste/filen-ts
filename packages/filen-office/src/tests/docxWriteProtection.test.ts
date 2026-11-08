@@ -6,9 +6,14 @@ import { describe, expect, it } from "vitest"
 import { bytesSource } from "@filen/office/core/opc"
 import { buildDocxModel, gateReasons, openDocxPackage, type DocxPackage } from "@filen/office/core/docx"
 import {
+	commandAllowed,
+	documentProtectionOf,
 	DocxEditorSession,
+	formattingRestricted,
 	legacyPasswordVerifier,
+	NO_PROTECTION,
 	openDocxEditContext,
+	protectionOf,
 	readProtectionHash,
 	writeProtectionOf,
 	type ProtectionHash
@@ -299,6 +304,130 @@ describe("the write protection gate", () => {
 			const editor = await editing.editor
 
 			expect(editor.session.readOnly).toBe(!writeUnlocked)
+			session.close()
+		}
+	})
+})
+
+// Review > Restrict Editing > Stop Protection (ECMA-376 Part 1 §17.15.1.29): the app checks the password against
+// documentProtectionOf and opens the document again with protectionUnlocked.
+describe("stopping document protection", () => {
+	const settingsOf = async (pkg: DocxPackage, context: Awaited<ReturnType<typeof openDocxEditContext>>, session: DocxEditorSession) =>
+		new TextDecoder().decode(
+			unzipSync((await saveDocx({ pkg, context, sessions: [session] })).bytes as Uint8Array)["word/settings.xml"]
+		)
+
+	it("tells the password to check, and nothing once unlocked or unenforced", async () => {
+		const pkg = await open(WORD_DOCUMENT_PROTECTION)
+		const model = await buildDocxModel(pkg)
+
+		expect(documentProtectionOf(await openDocxEditContext(pkg, model))).toMatchObject({
+			edit: "trackedChanges",
+			password: { algorithm: "SHA-1", input: "legacy" }
+		})
+		expect(documentProtectionOf(await openDocxEditContext(pkg, model, { protectionUnlocked: true }))).toBeUndefined()
+
+		const plain = await open('<w:documentProtection w:edit="forms" w:enforcement="1"/>')
+
+		expect(documentProtectionOf(await openDocxEditContext(plain, await buildDocxModel(plain)))).toEqual({
+			edit: "forms",
+			password: undefined
+		})
+
+		const odd = await open(
+			'<w:documentProtection w:edit="forms" w:enforcement="1" w:cryptAlgorithmSid="3" w:hash="aGFzaA==" w:salt="c2FsdA=="/>'
+		)
+
+		expect(documentProtectionOf(await openDocxEditContext(odd, await buildDocxModel(odd)))?.password).toBe("unsupported")
+
+		const off = await open('<w:documentProtection w:edit="forms" w:enforcement="0"/>')
+
+		expect(documentProtectionOf(await openDocxEditContext(off, await buildDocxModel(off)))).toBeUndefined()
+	})
+
+	it("lifts limited protection and its formatting restrictions, and saves the protection switched off", async () => {
+		const pkg = await open(
+			'<w:documentProtection w:edit="forms" w:formatting="1" w:enforcement="1" w:cryptProviderType="rsaFull" w:cryptAlgorithmClass="hash" w:cryptAlgorithmType="typeAny" w:cryptAlgorithmSid="4" w:cryptSpinCount="100000" w:hash="MUHbcmpC9AnlLsd9v3lW0j30y6E=" w:salt="2Z+i7o/0EZyUNakVeWzU/w=="/>'
+		)
+		const model = await buildDocxModel(pkg)
+		const locked = await openDocxEditContext(pkg, model)
+		const lockedSession = new DocxEditorSession(locked)
+
+		expect(protectionOf(locked).mode).toBe("forms")
+		expect(formattingRestricted(locked)).toBe(true)
+		expect(commandAllowed(lockedSession, "format.bold")).toBe(false)
+		expect(lockedSession.dispatch(lockedSession.state.tr.insertText("New ", 1))).toBe(false)
+
+		const context = await openDocxEditContext(pkg, model, { protectionUnlocked: true })
+		const session = new DocxEditorSession(context)
+
+		expect(protectionOf(context)).toBe(NO_PROTECTION)
+		expect(formattingRestricted(context)).toBe(false)
+		expect(commandAllowed(session, "format.bold")).toBe(true)
+		expect(session.dispatch(session.state.tr.insertText("New ", 1))).toBe(true)
+
+		const settings = await settingsOf(pkg, context, session)
+
+		expect(settings).toContain('<w:documentProtection w:edit="forms" w:formatting="1" w:enforcement="0"/>')
+		expect(settings).not.toContain("w:hash=")
+
+		// Saved without the unlock, the element stays as written.
+		expect(await settingsOf(pkg, locked, lockedSession)).not.toContain('w:enforcement="0"')
+	})
+
+	it("lifts the view-only gate of read-only protection, and the saved file opens unprotected", async () => {
+		const pkg = await open('<w:documentProtection w:edit="readOnly" w:enforcement="1"/>')
+		const model = await buildDocxModel(pkg)
+
+		expect((await openDocxEditContext(pkg, model)).gate).toEqual(["protected"])
+		expect((await openDocxEditContext(pkg, model, { writeUnlocked: true })).gate).toEqual(["protected"])
+
+		const context = await openDocxEditContext(pkg, model, { protectionUnlocked: true })
+		const session = new DocxEditorSession(context)
+
+		expect(context.gate).toEqual([])
+		expect(session.readOnly).toBe(false)
+		expect(session.dispatch(session.state.tr.insertText("New ", 1))).toBe(true)
+
+		const saved = (await saveDocx({ pkg, context, sessions: [session] })).bytes as Uint8Array
+		const reopened = await openDocxPackage(bytesSource(saved))
+
+		if (!reopened.ok) throw new Error(reopened.reason)
+
+		expect(reopened.package.facts.documentProtection).toMatchObject({ edit: "readOnly", enforced: false })
+		expect((await openDocxEditContext(reopened.package, await buildDocxModel(reopened.package))).gate).toEqual([])
+	})
+
+	it("keeps tracking on after tracked changes protection stops, and lets the user turn it off", async () => {
+		const pkg = await open(WORD_DOCUMENT_PROTECTION)
+		const context = await openDocxEditContext(pkg, await buildDocxModel(pkg), { protectionUnlocked: true })
+		const session = new DocxEditorSession(context)
+
+		expect(context.review.tracking).toBe(true)
+		expect(commandAllowed(session, "review.track")).toBe(true)
+		expect(commandAllowed(session, "review.acceptAll")).toBe(true)
+	})
+
+	it("opens unprotected through an editing host told protection was stopped", async () => {
+		for (const protectionUnlocked of [false, true]) {
+			const editing = inThreadEditingHost(
+				() => ({
+					fontHost: { addBytes: () => Promise.resolve(true), addLocal: () => Promise.resolve(false), remove: () => undefined },
+					replayFonts: false,
+					fontAssets: { read: () => Promise.resolve(new Uint8Array(4)) },
+					measurer,
+					yield: () => Promise.resolve(),
+					sliceMs: 8
+				}),
+				{ protectionUnlocked }
+			)
+			const session = editing.host(
+				bytesSource(buildDocx({ body: p("Some text"), settings: '<w:documentProtection w:edit="readOnly" w:enforcement="1"/>' })),
+				() => undefined
+			)
+			const editor = await editing.editor
+
+			expect(editor.session.readOnly).toBe(!protectionUnlocked)
 			session.close()
 		}
 	})

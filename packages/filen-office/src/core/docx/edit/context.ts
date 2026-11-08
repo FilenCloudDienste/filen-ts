@@ -26,6 +26,8 @@ export interface DocxEditContext {
 	readonly newLists: Map<number, NewList>
 	// Built-in paragraph styles commands used that the document lacks: id -> built-in name.
 	readonly newStyles: Map<string, string>
+	// Text width (twips) of the section an added style that depends on it was added for (Header, Footer), by id.
+	readonly newStyleWidths: Map<string, number>
 	// New ids per id space, shared by every session of the document.
 	readonly ids: DocxIds
 	// Who edits and when, for what records an author (comments, tracked changes).
@@ -36,6 +38,8 @@ export interface DocxEditContext {
 	readonly review: DocxReviewState
 	// Stories the editor added (a new note, comment, header), with where the save puts them.
 	readonly newStories: Map<Story, NewStory>
+	// The document's protection was stopped for this session (EditContextParts.protectionUnlocked).
+	readonly protectionUnlocked?: boolean
 }
 
 // The initials a comment records for an author (w:initials): the first letter of each part of the name, at
@@ -253,6 +257,9 @@ export interface EditContextParts {
 	// The document's password to modify was given: its write protection does not make it view-only
 	// (edit/protection.ts writeProtectionOf).
 	readonly writeUnlocked?: boolean
+	// The user stopped the document's protection (Word's Stop Protection, its password given where it has one):
+	// no protection applies and the save writes it switched off (edit/protection.ts documentProtectionOf).
+	readonly protectionUnlocked?: boolean
 }
 
 // Reads styles, numbering and theme for `model` (or reuses what a caller already parsed for layout).
@@ -299,6 +306,7 @@ export async function openDocxEditContext(pkg: DocxPackage, model: DocxModel, re
 		gate,
 		newLists: new Map(),
 		newStyles: new Map(),
+		newStyleWidths: new Map(),
 		ids: new DocxIds(model.maxIds),
 		identity: {
 			author: reuse.author,
@@ -306,14 +314,16 @@ export async function openDocxEditContext(pkg: DocxPackage, model: DocxModel, re
 			now: reuse.clock ?? (() => Date.now())
 		},
 		media: new DocxMediaStore(),
-		// Protection for tracked changes records every edit (ECMA-376 Part 1 §17.15.1.29).
+		// Protection for tracked changes records every edit (ECMA-376 Part 1 §17.15.1.29); stopped, it leaves
+		// tracking on for the user to turn off, as Word does.
 		review: {
 			tracking:
 				model.settings.trackRevisions ||
 				protectionMode(pkg.facts.documentProtection?.edit, pkg.facts.documentProtection?.enforced ?? false) === "trackedChanges",
 			persist: true
 		},
-		newStories: new Map()
+		newStories: new Map(),
+		...(reuse.protectionUnlocked === true ? { protectionUnlocked: true } : {})
 	}
 
 	// Under protection the track switch is the session's: limited to ranges (or comments, or controls), Word tracks

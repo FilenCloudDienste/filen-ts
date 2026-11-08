@@ -1,4 +1,6 @@
 import type { DecorationValue } from "../../../core/docx/layout/index"
+import { borderLines } from "../../../core/docx/layout/borderLines"
+import { runEffectCss, type Emphasis, type RunEffect } from "../../../core/docx/layout/effects"
 import {
 	DECORATION_FLOATS,
 	DECORATION_INTS,
@@ -34,7 +36,15 @@ const GRAPHIC_INTS = 3
 const OBJECT_FLOATS = 4
 const OBJECT_INTS = 3
 
-const Graphic = { SHADING: 1, BORDER: 2, COLUMN_SEPARATOR: 3, NOTE_SEPARATOR: 4, REVISION_BAR: 5 } as const
+const Graphic = {
+	SHADING: 1,
+	BORDER: 2,
+	COLUMN_SEPARATOR: 3,
+	NOTE_SEPARATOR: 4,
+	REVISION_BAR: 5,
+	DIAGONAL_DOWN: 6,
+	DIAGONAL_UP: 7
+} as const
 
 const HEX = /^[0-9A-Fa-f]{6}$/
 // cssFont() output: optional italic, weight, size, then an internal alias and a generic family, or a
@@ -152,6 +162,9 @@ function cssOf(style: DocxTextStyle | undefined): StyleCss {
 		let base = `font:${cssFont(style.font)};line-height:${height}px;color:${color};`
 
 		if (!style.kerning) base += "font-kerning:none;"
+		if (style.effect !== undefined || style.emphasis !== undefined) {
+			base += runEffectCss((style.effect ?? 0) as RunEffect, (style.emphasis ?? 0) as Emphasis)
+		}
 
 		css = { base, smallCapsFont: cssFont(style.smallCapsFont), ascent, shift: px(style.shift), color }
 		styleCss.set(style, css)
@@ -202,6 +215,22 @@ function borderStyle(style: string): string {
 		default:
 			return "solid"
 	}
+}
+
+// The lines of a multi-line border (borderLines) across a box as hard gradient stops: top to bottom, or left to
+// right when `vertical`.
+function borderStripes(lines: readonly number[], color: string, vertical: boolean): string {
+	const stops: string[] = []
+	let at = 0
+
+	for (let k = 0; k < lines.length; k++) {
+		const end = at + (lines[k] ?? 0)
+
+		stops.push(`${k % 2 === 0 ? color : "transparent"} ${round(at * 100)}% ${round(end * 100)}%`)
+		at = end
+	}
+
+	return `linear-gradient(${vertical ? "to right" : "to bottom"},${stops.join(",")})`
 }
 
 export interface PagePaintContext {
@@ -501,16 +530,20 @@ function paintGraphic(
 		case Graphic.BORDER: {
 			const color = decorationColor(value) ?? "var(--fo-auto-text, #000)"
 			const style = value?.kind === "border" ? borderStyle(value.style) : "solid"
+			const lines = value?.kind === "border" ? borderLines(value.style) : undefined
 
 			if (style === "none") return
 
-			// The box is the line itself: a thin side carries the stroke style.
+			// The box is the line itself: a thin side carries the stroke style, a multi-line border its lines as
+			// hard gradient stops across the box.
 			extra =
-				style === "solid"
-					? `background:${color};`
-					: width >= height
-						? `border-top:${px(height)}px ${style} ${color};height:0;`
-						: `border-left:${px(width)}px ${style} ${color};width:0;`
+				lines !== undefined
+					? `background:${borderStripes(lines, color, width < height)};`
+					: style === "solid"
+						? `background:${color};`
+						: width >= height
+							? `border-top:${px(height)}px ${style} ${color};height:0;`
+							: `border-left:${px(width)}px ${style} ${color};width:0;`
 
 			break
 		}
@@ -518,6 +551,17 @@ function paintGraphic(
 			extra = "background:var(--fo-revision-bar, #000);"
 
 			break
+		case Graphic.DIAGONAL_DOWN:
+		case Graphic.DIAGONAL_UP: {
+			// A line corner to corner of the box: the middle stop of a gradient towards the other two corners.
+			const color = decorationColor(value) ?? "var(--fo-auto-text, #000)"
+			const half = px(Math.max(1, value?.kind === "border" ? value.width : 1) / 2)
+			const toward = kind === Graphic.DIAGONAL_DOWN ? "top" : "bottom"
+
+			extra = `background:linear-gradient(to ${toward} right,transparent calc(50% - ${half}px),${color} calc(50% - ${half}px),${color} calc(50% + ${half}px),transparent calc(50% + ${half}px));`
+
+			break
+		}
 		default:
 			extra = "background:var(--fo-auto-text, #000);"
 	}
@@ -587,7 +631,23 @@ function paintDecoration(
 
 			if (style === "none") return
 
-			extra = `border:${px(Math.max(1, value.width))}px ${style} ${decorationColor(value) ?? colorAt(page, tables.styles, line, x)};box-sizing:border-box;`
+			const color = decorationColor(value) ?? colorAt(page, tables.styles, line, x)
+			const thickness = px(Math.max(1, value.width))
+			const lines = borderLines(value.style)
+
+			if (lines === undefined) {
+				extra = `border:${thickness}px ${style} ${color};box-sizing:border-box;`
+
+				break
+			}
+
+			// A multi-line border: each side's lines as a background layer along that side (top, bottom, left, right).
+			const across = borderStripes(lines, color, false)
+			const down = borderStripes(lines, color, true)
+
+			extra =
+				`background-image:${across},${across},${down},${down};background-position:top,bottom,left,right;` +
+				`background-size:100% ${thickness}px,100% ${thickness}px,${thickness}px 100%,${thickness}px 100%;background-repeat:no-repeat;`
 
 			break
 		}

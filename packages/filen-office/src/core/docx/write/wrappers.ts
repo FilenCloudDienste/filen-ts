@@ -80,8 +80,7 @@ const LINK: WrapperWriter = {
 	}
 }
 
-// A tracked change the editor recorded: w:ins or w:del with a new id, its author and date. (The editor never
-// records moves: a new move wrapper is refused.)
+// A tracked change the editor recorded: w:ins, w:del, w:moveFrom or w:moveTo with a new id, its author and date.
 function revisionWriter(type: MarkType, local: string): WrapperWriter {
 	return {
 		type,
@@ -110,10 +109,14 @@ function revisionWriter(type: MarkType, local: string): WrapperWriter {
 
 // Writers of new wrappers by mark type; a new wrapper of any other type is refused.
 const NEW_WRAPPERS: ReadonlyMap<MarkType, WrapperWriter> = new Map(
-	[LINK, revisionWriter(marks.insertion, "ins"), revisionWriter(marks.deletion, "del"), NEW_CONTROL_WRAPPER].map(writer => [
-		writer.type,
-		writer
-	])
+	[
+		LINK,
+		revisionWriter(marks.insertion, "ins"),
+		revisionWriter(marks.deletion, "del"),
+		revisionWriter(marks.move_from, "moveFrom"),
+		revisionWriter(marks.move_to, "moveTo"),
+		NEW_CONTROL_WRAPPER
+	].map(writer => [writer.type, writer])
 )
 
 export function isRevisionWrapper(mark: Mark): boolean {

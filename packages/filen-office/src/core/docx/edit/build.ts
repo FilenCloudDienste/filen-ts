@@ -744,7 +744,7 @@ export class DocxDocBuilder {
 		const itemKind = part.kinds[item] ?? 0
 		const kind = itemKind === Item.Opaque ? MARKER_ELEMENTS[part.reader.code(part.node(item))] : MARKER_KINDS[itemKind]
 
-		return kind === undefined ? undefined : { src: item, kind, id: part.id(item) ?? null, name: null }
+		return kind === undefined ? undefined : { src: item, kind, id: part.id(item) ?? null, name: null, author: null, date: null }
 	}
 
 	private commentReference(item: number): MarkerAttrs | undefined {

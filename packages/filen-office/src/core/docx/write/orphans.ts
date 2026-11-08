@@ -1,5 +1,5 @@
-import type { BytePieces, SliceClock } from "../../opc/index"
-import { decodeCharacterData, encodeUtf8, type XmlDocument } from "../../xml/index"
+import { partKey, type BytePieces, type Relationship, type SliceClock } from "../../opc/index"
+import { decodeCharacterData, decodeUtf8, encodeUtf8, type XmlDocument } from "../../xml/index"
 import type { StoryPart } from "../model/index"
 import { partReader } from "../model/reader"
 import type { DocxPackage } from "../package"
@@ -8,10 +8,30 @@ const R_URIS = [
 	"http://schemas.openxmlformats.org/officeDocument/2006/relationships",
 	"http://purl.oclc.org/ooxml/officeDocument/relationships"
 ]
-const HYPERLINK_TYPES = new Set([
-	"http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink",
-	"http://purl.oclc.org/ooxml/officeDocument/relationships/hyperlink"
+const O_URI = "urn:schemas-microsoft-com:office:office"
+const MS_RELATIONSHIPS = "http://schemas.microsoft.com/office"
+const ofBoth = (types: readonly string[]): string[] => types.flatMap(type => R_URIS.map(uri => `${uri}/${type}`))
+const HYPERLINK_TYPES = new Set(ofBoth(["hyperlink"]))
+// Relationships to what a story's markup holds (pictures, charts, embedded, linked and ink objects): Word writes
+// none no markup uses.
+const CONTENT_TYPES = new Set([
+	...ofBoth(["image", "chart", "oleObject", "package", "control", "aFChunk", "video", "audio", "customXml"]),
+	...ofBoth(["diagramData", "diagramLayout", "diagramQuickStyle", "diagramColors"]),
+	`${MS_RELATIONSHIPS}/2007/relationships/media`,
+	`${MS_RELATIONSHIPS}/2007/relationships/hdphoto`,
+	`${MS_RELATIONSHIPS}/2014/relationships/chartEx`
 ])
+// The main part's headers and footers, used by w:headerReference / w:footerReference of its sections.
+const SECTION_TYPES = new Set(ofBoth(["header", "footer"]))
+const DIAGRAM_DATA_TYPES = new Set(ofBoth(["diagramData"]))
+// A SmartArt's drawing is named from its data part (dsp:dataModelExt relId), not from the story's markup.
+const DIAGRAM_DRAWING_TYPE = `${MS_RELATIONSHIPS}/2007/relationships/diagramDrawing`
+
+function removable(relationship: Relationship, main: boolean): boolean {
+	if (relationship.external && HYPERLINK_TYPES.has(relationship.type)) return true
+
+	return CONTENT_TYPES.has(relationship.type) || (main && SECTION_TYPES.has(relationship.type))
+}
 // Bytes scanned between looks at the clock.
 const SCAN_STEP = 1024 * 1024
 // Bytes of markup scanned again at the start of the next window (an attribute split by a window's end).
@@ -108,36 +128,84 @@ async function sourceUses(document: XmlDocument, prefixes: readonly Uint8Array[]
 	return uses
 }
 
-// The "prefix:" names that may stand for the relationships namespace in `document` and in markup written for
-// it.
+// The attribute names that may name a relationship in `document` and in markup written for it: "prefix:" of the
+// relationships namespace, and VML's o:relid (v:imagedata, v:fill).
 function relationshipPrefixes(document: XmlDocument): Uint8Array[] {
-	const out = new Set<string>(["r"])
+	const out = new Set<string>(["r:", "o:relid"])
 
 	for (const bindings of partReader(document).namespaces.declarations().values()) {
-		for (const [prefix, uri] of bindings) if (prefix !== "" && R_URIS.includes(uri)) out.add(prefix)
+		for (const [prefix, uri] of bindings) {
+			if (prefix === "") continue
+			if (R_URIS.includes(uri)) out.add(`${prefix}:`)
+			else if (uri === O_URI) out.add(`${prefix}:relid`)
+		}
 	}
 
-	return [...out].map(prefix => encodeUtf8(`${prefix}:`))
+	return [...out].map(name => encodeUtf8(name))
 }
 
-// External hyperlink relationships of `part` that source markup the save rewrote used and its new content
-// (`bytes`: views of the source and new markup) does not: an edit took out the last link to them, and Word
-// drops such relationships on its next save. One the source did not use is never among them. Uses are
-// attributes of the relationships namespace, values decoded (an id written with character references counts).
-export async function orphanedHyperlinks(
+// Relationships of `part` to what a story holds (external hyperlinks, pictures, charts, embedded objects; of the
+// main part, headers and footers) that source markup the save rewrote used and its new content (`bytes`: views
+// of the source and new markup) does not: an edit took out the last use, and Word drops such relationships on
+// its next save, with the parts only they pointed at. One the source did not use is never among them. Uses are
+// attributes of the relationships namespace and o:relid, values decoded (an id written with character
+// references counts).
+export async function orphanedRelationships(
 	pkg: DocxPackage,
 	part: StoryPart,
 	bytes: BytePieces,
 	clock: SliceClock | undefined
 ): Promise<Set<string>> {
-	const candidates = new Set(
-		(await pkg.relationships(part.name)).all
-			.filter(relationship => relationship.external && HYPERLINK_TYPES.has(relationship.type))
-			.map(relationship => relationship.id)
-	)
+	const relationships = await pkg.relationships(part.name)
+	const main = partKey(part.name) === partKey(pkg.mainPart)
+	const candidates = new Set(relationships.all.filter(relationship => removable(relationship, main)).map(relationship => relationship.id))
 
 	if (candidates.size === 0) return candidates
 
+	const missing = await unusedOf(part, bytes, candidates, clock)
+
+	return missing.size === 0 ? missing : withDiagramDrawings(pkg, relationships.all, missing)
+}
+
+const REL_ID = /\brelId\s*=\s*(?:"([^"]*)"|'([^']*)')/g
+
+// The relationship ids a SmartArt data part names its drawing by.
+async function drawingIds(pkg: DocxPackage, relationship: Relationship): Promise<string[]> {
+	if (relationship.external || relationship.partName === undefined || !pkg.has(relationship.partName)) return []
+
+	const out: string[] = []
+
+	for (const match of decodeUtf8(await pkg.opc.read(relationship.partName)).matchAll(REL_ID)) out.push(match[1] ?? match[2] ?? "")
+
+	return out
+}
+
+// `missing` with the drawings of the SmartArt data it takes out that no kept SmartArt names.
+async function withDiagramDrawings(pkg: DocxPackage, all: readonly Relationship[], missing: Set<string>): Promise<Set<string>> {
+	const data = all.filter(relationship => DIAGRAM_DATA_TYPES.has(relationship.type))
+
+	if (!data.some(relationship => missing.has(relationship.id))) return missing
+
+	const drawings = new Set(all.filter(relationship => relationship.type === DIAGRAM_DRAWING_TYPE).map(r => r.id))
+	const named = new Set<string>()
+	const kept = new Set<string>()
+
+	for (const relationship of data) {
+		for (const id of await drawingIds(pkg, relationship)) (missing.has(relationship.id) ? named : kept).add(id)
+	}
+
+	for (const id of named) if (drawings.has(id) && !kept.has(id)) missing.add(id)
+
+	return missing
+}
+
+// Those of `candidates` the source of `part` used in what the save rewrote and `bytes` no longer uses.
+async function unusedOf(
+	part: StoryPart,
+	bytes: BytePieces,
+	candidates: ReadonlySet<string>,
+	clock: SliceClock | undefined
+): Promise<Set<string>> {
 	const document = part.document
 	const source = document.bytes
 	// The new content as source ranges (views) and new markup.

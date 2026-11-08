@@ -192,6 +192,29 @@ describe("calendars", () => {
 		expect(formatControlDate("2026-10-15", "yyyy g", "ar-SA", "hijri")).toBe("1448 هـ")
 	})
 
+	it("numbers Hebrew months from Tishri at a year's edges with a bounded number of Intl calls", () => {
+		// 1 Tishri 5787, 29 Elul 5787 (leap: the 13th month), 29 Elul 5786 (common: the 12th), 30 Tishri 5787.
+		const cases: [string, string][] = [
+			["2026-09-12", "1"],
+			["2027-10-01", "13"],
+			["2026-09-11", "12"],
+			["2026-10-11", "1"],
+			["2026-10-12", "2"]
+		]
+
+		for (const [iso, month] of cases) expect(formatControlDate(iso, "M", "he-IL", "hebrew")).toBe(month)
+
+		const parts = vi.spyOn(Intl.DateTimeFormat.prototype, "formatToParts")
+
+		try {
+			expect(formatControlDate("2027-10-01", "M", "he-IL", "hebrew")).toBe("13")
+			// One step per month back to Tishri, not one per day of the year.
+			expect(parts.mock.calls.length).toBeLessThanOrEqual(16)
+		} finally {
+			parts.mockRestore()
+		}
+	})
+
 	it("reads a DATE or TIME field's \\h as the Hijri calendar and \\s as Saka", async () => {
 		const opened = await pagedEditor(buildDocx({ body: '<w:p><w:r><w:t xml:space="preserve">On </w:t></w:r></w:p>' }))
 

@@ -70,6 +70,8 @@ export {
 	DOCX_VIEWER_CAPABILITIES,
 	DOCX_VIEWER_COMMANDS,
 	DOCX_ZOOM_STEPS,
+	canZoomIn,
+	canZoomOut,
 	clampZoom,
 	fitWidthZoom,
 	isDocxCommandEnabled,

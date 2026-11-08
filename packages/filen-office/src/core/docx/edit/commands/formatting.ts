@@ -81,6 +81,11 @@ export type FormattingCommand =
 	| { readonly type: "format.doubleStrike" }
 	| { readonly type: "format.smallCaps" }
 	| { readonly type: "format.allCaps" }
+	// w:u w:val="double" on, or underline off when all of the content has it.
+	| { readonly type: "format.doubleUnderline" }
+	// Word's Change Case (Shift+F3): the text itself, of the selection or the caret's word, cycled from lower
+	// case to title case to upper case and back to lower case.
+	| { readonly type: "format.changeCase" }
 	// Character formatting cleared (as format.clear) and the paragraphs reset to Normal: Word's Clear All
 	// Formatting.
 	| { readonly type: "format.clearAll" }
@@ -90,6 +95,9 @@ export type FormattingCommand =
 	| { readonly type: "font.size"; readonly halfPoints: number }
 	| { readonly type: "font.grow" }
 	| { readonly type: "font.shrink" }
+	// One point larger (smaller).
+	| { readonly type: "font.growPoint" }
+	| { readonly type: "font.shrinkPoint" }
 	// Character spacing in twips: positive expands, negative condenses, 0 is normal.
 	| { readonly type: "font.spacing"; readonly twips: number }
 	| { readonly type: "color.text"; readonly color: DocxTextColor }
@@ -111,17 +119,37 @@ export type FormattingCommand =
 
 const story = { write: true, scope: "story" } as const
 
+// Word's shortcuts. Shifted punctuation is named by its unshifted key ("mod+shift+." is Ctrl+Shift+>), which
+// matchesShortcut compares by physical key.
 export const FORMATTING_COMMANDS: readonly DocxCommandInfo<FormattingCommand["type"]>[] = [
-	{ type: "format.superscript", labelKey: "docx.format.superscript", icon: "superscript", group: "format", ...story },
-	{ type: "format.subscript", labelKey: "docx.format.subscript", icon: "subscript", group: "format", ...story },
+	{
+		type: "format.superscript",
+		labelKey: "docx.format.superscript",
+		icon: "superscript",
+		shortcut: "mod+shift+=",
+		group: "format",
+		...story
+	},
+	{ type: "format.subscript", labelKey: "docx.format.subscript", icon: "subscript", shortcut: "mod+shift+-", group: "format", ...story },
 	{ type: "format.doubleStrike", labelKey: "docx.format.doubleStrike", icon: "double-strikethrough", group: "format", ...story },
-	{ type: "format.smallCaps", labelKey: "docx.format.smallCaps", icon: "small-caps", group: "format", ...story },
-	{ type: "format.allCaps", labelKey: "docx.format.allCaps", icon: "all-caps", group: "format", ...story },
+	{ type: "format.smallCaps", labelKey: "docx.format.smallCaps", icon: "small-caps", shortcut: "mod+shift+k", group: "format", ...story },
+	{ type: "format.allCaps", labelKey: "docx.format.allCaps", icon: "all-caps", shortcut: "mod+shift+a", group: "format", ...story },
+	{
+		type: "format.doubleUnderline",
+		labelKey: "docx.format.doubleUnderline",
+		icon: "double-underline",
+		shortcut: "mod+shift+d",
+		group: "format",
+		...story
+	},
+	{ type: "format.changeCase", labelKey: "docx.format.changeCase", icon: "change-case", shortcut: "shift+F3", group: "format", ...story },
 	{ type: "format.clearAll", labelKey: "docx.format.clearAll", icon: "clear-all-formatting", group: "format", ...story },
 	{ type: "font.family", labelKey: "docx.font.family", icon: "font-family", group: "font", input: "font", ...story },
 	{ type: "font.size", labelKey: "docx.font.size", icon: "font-size", group: "font", input: "size", ...story },
-	{ type: "font.grow", labelKey: "docx.font.grow", icon: "font-grow", group: "font", ...story },
-	{ type: "font.shrink", labelKey: "docx.font.shrink", icon: "font-shrink", group: "font", ...story },
+	{ type: "font.grow", labelKey: "docx.font.grow", icon: "font-grow", shortcut: "mod+shift+.", group: "font", ...story },
+	{ type: "font.shrink", labelKey: "docx.font.shrink", icon: "font-shrink", shortcut: "mod+shift+,", group: "font", ...story },
+	{ type: "font.growPoint", labelKey: "docx.font.growPoint", icon: "font-grow", shortcut: "mod+]", group: "font", ...story },
+	{ type: "font.shrinkPoint", labelKey: "docx.font.shrinkPoint", icon: "font-shrink", shortcut: "mod+[", group: "font", ...story },
 	{ type: "font.spacing", labelKey: "docx.font.spacing", icon: "character-spacing", group: "font", ...story },
 	{ type: "color.text", labelKey: "docx.color.text", icon: "text-color", group: "color", input: "color", ...story },
 	{ type: "color.highlight", labelKey: "docx.color.highlight", icon: "highlight", group: "color", input: "highlight", ...story },

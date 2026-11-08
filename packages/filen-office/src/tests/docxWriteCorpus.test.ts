@@ -10,6 +10,7 @@ import { openBytes } from "./docxEditFixtures"
 import { runEditScript } from "./docxWriteFixtures"
 import { scriptOps } from "./fuzz/ops/index"
 import { sameBytes } from "../core/docx/write/bytes"
+import { corePropertiesPart } from "../core/opc/coreProperties"
 
 // The licensed real-world corpus is kept out of the repository (pnpm run corpus:fetch); this sweep runs only where it exists.
 const EXTENSIONS = ["docx", "docm", "dotx", "dotm"]
@@ -140,8 +141,11 @@ describe.skipIf(!existsSync(CORPUS))("docx writer over the real-world corpus", (
 
 					return writes.has(type) || writes.has(type.replace(/^.*[./]([\w-]+)\+xml$/, "$1"))
 				}
+				// Every save that changes the document stamps the core properties, as Word does.
+				const core = await corePropertiesPart(opened.pkg.opc)
 				const unexpected = result.changedParts.filter(
-					part => !allowed.has(part) && part !== opened.pkg.mainPart && !part.endsWith(".rels") && !declared(part)
+					part =>
+						!allowed.has(part) && part !== opened.pkg.mainPart && part !== core && !part.endsWith(".rels") && !declared(part)
 				)
 
 				if (unexpected.length > 0) failures.push(`${name}: unexpected changed parts ${unexpected.join(", ")}`)

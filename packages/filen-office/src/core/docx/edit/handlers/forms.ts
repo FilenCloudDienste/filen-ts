@@ -27,6 +27,7 @@ import { formatControlDate } from "../../forms/dates"
 import { watchBoundStories } from "../../forms/sync"
 import type { StoryPart } from "../../model/index"
 import type { DocxControlKind } from "../commands/forms"
+import { caretMarks } from "../formats"
 import {
 	formCommand,
 	formsAfter,
@@ -380,7 +381,7 @@ function selectionLanguage(context: StoryCommandContext): string {
 
 	if (!$from.parent.isTextblock) return "en-US"
 
-	const props = session.formats.runProps(context.state.storedMarks ?? $from.marks())
+	const props = session.formats.runProps(caretMarks(context.state, session.formats))
 	const language = context.context.resolver.run(session.formats.paragraph($from.parent), props).lang.latin
 
 	return language === undefined || language === null || !/^[A-Za-z]{2,8}(?:-[A-Za-z0-9]{1,8})*$/.test(language) ? "en-US" : language
@@ -509,7 +510,7 @@ const insert: StoryCommandHandler<"control.insert"> = {
 			return formCommand(tr, session, true)
 		}
 
-		const base = selection.empty ? (state.storedMarks ?? selection.$from.marks()) : (selection.$from.marksAcross(selection.$to) ?? [])
+		const base = selection.empty ? caretMarks(state, session.formats) : (selection.$from.marksAcross(selection.$to) ?? [])
 		const cleaned = base.filter(mark => mark.type !== marks.content_control && mark.type !== marks.link)
 		const info = controlOf(part, marks.content_control.create({ src: NO_SOURCE, state: { made: definition } }))
 

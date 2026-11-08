@@ -29,6 +29,8 @@ export interface DocxSettings {
 	readonly malformed: boolean
 	readonly strict: boolean
 	readonly trackRevisions: boolean
+	// w:doNotTrackMoves: tracked moves are recorded as a deletion and an insertion.
+	readonly doNotTrackMoves: boolean
 	readonly evenAndOddHeaders: boolean
 	readonly mirrorMargins: boolean
 	readonly gutterAtTop: boolean
@@ -39,6 +41,8 @@ export interface DocxSettings {
 	readonly displayBackgroundShape: boolean
 	// The document asks for spelling errors not to be marked (w:hideSpellingErrors).
 	readonly hideSpellingErrors: boolean
+	// w:removePersonalInformation: Word strips the user's name from the file properties on save.
+	readonly removePersonalInformation: boolean
 	// Twips.
 	readonly defaultTabStop: number | undefined
 	readonly hyphenationZone: number | undefined
@@ -78,6 +82,7 @@ export const NO_SETTINGS: DocxSettings = {
 	malformed: false,
 	strict: false,
 	trackRevisions: false,
+	doNotTrackMoves: false,
 	evenAndOddHeaders: false,
 	mirrorMargins: false,
 	gutterAtTop: false,
@@ -87,6 +92,7 @@ export const NO_SETTINGS: DocxSettings = {
 	doNotHyphenateCaps: false,
 	displayBackgroundShape: false,
 	hideSpellingErrors: false,
+	removePersonalInformation: false,
 	defaultTabStop: undefined,
 	hyphenationZone: undefined,
 	consecutiveHyphenLimit: undefined,
@@ -171,6 +177,7 @@ export function readSettings(document: XmlDocument): DocxSettings {
 
 		switch (local) {
 			case "trackRevisions":
+			case "doNotTrackMoves":
 			case "evenAndOddHeaders":
 			case "mirrorMargins":
 			case "gutterAtTop":
@@ -180,6 +187,7 @@ export function readSettings(document: XmlDocument): DocxSettings {
 			case "doNotHyphenateCaps":
 			case "displayBackgroundShape":
 			case "hideSpellingErrors":
+			case "removePersonalInformation":
 				flags.set(local, reader.onOff(child))
 
 				break
@@ -282,6 +290,7 @@ export function readSettings(document: XmlDocument): DocxSettings {
 		malformed: reader.hasMalformed(),
 		strict: namespaces.elementUri(root) === STRICT_WORDPROCESSINGML,
 		trackRevisions: flags.get("trackRevisions") ?? false,
+		doNotTrackMoves: flags.get("doNotTrackMoves") ?? false,
 		evenAndOddHeaders: flags.get("evenAndOddHeaders") ?? false,
 		mirrorMargins: flags.get("mirrorMargins") ?? false,
 		gutterAtTop: flags.get("gutterAtTop") ?? false,
@@ -291,6 +300,7 @@ export function readSettings(document: XmlDocument): DocxSettings {
 		doNotHyphenateCaps: flags.get("doNotHyphenateCaps") ?? false,
 		displayBackgroundShape: flags.get("displayBackgroundShape") ?? false,
 		hideSpellingErrors: flags.get("hideSpellingErrors") ?? false,
+		removePersonalInformation: flags.get("removePersonalInformation") ?? false,
 		defaultTabStop,
 		hyphenationZone,
 		consecutiveHyphenLimit,

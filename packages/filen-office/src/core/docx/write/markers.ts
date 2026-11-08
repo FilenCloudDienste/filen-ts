@@ -77,12 +77,71 @@ function bookmark(kind: "bookmarkStart" | "bookmarkEnd"): MarkerWriter {
 	}
 }
 
+// The w:id each new move range of a save is written with (by the editor's id): a revision id of the save's own,
+// the start's and the end's the same.
+const moveIds = new WeakMap<object, Map<string, number>>()
+
+function moveId(w: StoryWriting, key: string): number {
+	let ids = moveIds.get(w.env)
+
+	if (ids === undefined) moveIds.set(w.env, (ids = new Map()))
+
+	let id = ids.get(key)
+
+	if (id === undefined) ids.set(key, (id = w.env.nextRevisionId()))
+
+	return id
+}
+
+// A new move range recorded while tracking: the start (CT_MoveBookmark: id, name, author, date) or the end.
+function moveRange(kind: "moveFromRangeStart" | "moveFromRangeEnd" | "moveToRangeStart" | "moveToRangeEnd"): MarkerWriter {
+	const from = kind.startsWith("moveFrom")
+	const start = kind.endsWith("Start")
+
+	return {
+		kind,
+		write(w, out, marker, node) {
+			if (marker.id === null) throw new DocxWriteError("missingSource", `A new ${kind} without an id`)
+
+			const id = String(moveId(w, `${from ? "from" : "to"}:${marker.id}`))
+
+			if (!start) {
+				out.text(w.names.empty(kind, [["id", id]]))
+
+				return
+			}
+
+			const own = (node?.attrs ?? marker) as Partial<MarkerNodeAttrs>
+			const name = own.name
+			const author = own.author
+
+			if (typeof name !== "string" || name === "" || typeof author !== "string" || author === "")
+				throw new DocxWriteError("missingSource", `A new ${kind}`)
+
+			out.text(
+				w.names.empty(kind, [
+					["id", id],
+					["name", name],
+					["author", author],
+					["date", own.date ?? null]
+				])
+			)
+		}
+	}
+}
+
 // Writers of new markers by kind; a new marker of any other kind is refused.
 const NEW_MARKERS: ReadonlyMap<MarkerKind, MarkerWriter> = new Map(
-	[commentRange("commentRangeStart"), commentRange("commentRangeEnd"), bookmark("bookmarkStart"), bookmark("bookmarkEnd")].map(writer => [
-		writer.kind,
-		writer
-	])
+	[
+		commentRange("commentRangeStart"),
+		commentRange("commentRangeEnd"),
+		bookmark("bookmarkStart"),
+		bookmark("bookmarkEnd"),
+		moveRange("moveFromRangeStart"),
+		moveRange("moveFromRangeEnd"),
+		moveRange("moveToRangeStart"),
+		moveRange("moveToRangeEnd")
+	].map(writer => [writer.kind, writer])
 )
 
 // A marker standing before or after blocks (MarkerList).

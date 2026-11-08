@@ -410,7 +410,7 @@ export const baseOps: readonly EditOp[] = [
 
 			selectBetween(session, p)
 
-			const tr = splitParagraph(session.state)
+			const tr = splitParagraph(session.state, session.formats)
 
 			if (tr) session.dispatch(tr)
 
@@ -438,7 +438,7 @@ export const baseOps: readonly EditOp[] = [
 
 			selectBetween(session, p)
 
-			const tr = joinBackward(session.state)
+			const tr = joinBackward(session.state, session.formats)
 
 			if (tr) session.dispatch(tr)
 
@@ -630,7 +630,7 @@ export const baseOps: readonly EditOp[] = [
 			selectBetween(session, p)
 
 			if (context.rand() < 0.3) {
-				const tr = splitParagraph(session.state)
+				const tr = splitParagraph(session.state, session.formats)
 
 				if (tr) session.dispatch(tr)
 
@@ -731,7 +731,7 @@ export const baseOps: readonly EditOp[] = [
 			}
 
 			if (context.rand() < 0.2 && p !== undefined) {
-				const tr = splitParagraph(session.state)
+				const tr = splitParagraph(session.state, session.formats)
 
 				if (tr) session.dispatch(tr)
 			}

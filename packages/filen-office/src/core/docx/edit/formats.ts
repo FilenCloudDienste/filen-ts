@@ -1,4 +1,4 @@
-import type { Mark, MarkType, Node } from "prosemirror-model"
+import type { Mark, MarkType, Node, ResolvedPos } from "prosemirror-model"
 import type { EditorState, Transaction } from "prosemirror-state"
 import { Item, type StoryPart } from "../model/index"
 import {
@@ -9,14 +9,25 @@ import {
 	type RunProps,
 	type SpacingProps
 } from "../props/index"
+import type { Numbering, NumberingLevel } from "../numbering/index"
 import type { ParagraphFormat } from "../styles/index"
 import { HIGHLIGHT_COLORS } from "../theme/color"
 import type { DocxHighlightColor } from "./commands/formatting"
 import type { DocxEditContext } from "./context"
-import { runPropsOf } from "./formatting"
+import { formattingMarks, runPropsOf } from "./formatting"
 import { MarkChanges, MarkSetChanges, sameSet } from "./marks"
 import { holdsFormatting } from "../fields/format"
 import { FORMATTING_MARKS, NO_SOURCE, docxSchema, inlineLevel, type ColorAttrs, type IndentAttrs } from "./schema"
+
+const NO_MARKS: readonly Mark[] = []
+
+// The marks text typed at the caret takes: the stored marks, else, in a paragraph holding no content, its
+// paragraph mark's (FormatResolver.emptyParagraphMarks), else the caret's.
+export function caretMarks(state: EditorState, formats: FormatResolver): readonly Mark[] {
+	const $from = state.selection.$from
+
+	return state.storedMarks ?? formats.emptyParagraphMarks($from) ?? $from.marks()
+}
 
 export type ListKind = "bullet" | "numbered"
 
@@ -25,6 +36,15 @@ export type ListKind = "bullet" | "numbered"
 export interface NewList {
 	readonly kind: ListKind
 	readonly basedOn: number | null
+	// A numbered list AutoFormat started from a typed number ("3. ", "b) "): its first level's format, the text
+	// after the number and the first number, in a definition of its own.
+	readonly first?: ListStart
+}
+
+export interface ListStart {
+	readonly format: "decimal" | "lowerLetter" | "upperLetter" | "lowerRoman" | "upperRoman"
+	readonly suffix: "." | ")"
+	readonly start: number
 }
 
 export type RunToggle = "bold" | "italic" | "underline" | "strike"
@@ -35,6 +55,8 @@ export const TOGGLE_STYLE = 16
 
 const marks = docxSchema.marks
 const nodes = docxSchema.nodes
+const NUMBERING_OFF = { numId: null, ilvl: null } as const
+const NUMBERING_OFF_STYLED = { numId: 0, ilvl: null } as const
 const PROPERTY_TYPES: ReadonlySet<MarkType> = new Set(FORMATTING_MARKS.filter(name => name !== "plain").map(name => marks[name]))
 const HIGHLIGHT_NAMES = new Map(Object.entries(HIGHLIGHT_COLORS).map(([name, hex]) => [hex, name as DocxHighlightColor]))
 
@@ -101,6 +123,7 @@ const BUILT_IN_STYLES: Readonly<Record<string, { readonly type: "paragraph" | "c
 	"footnote reference": { type: "character", id: "FootnoteReference" },
 	"endnote reference": { type: "character", id: "EndnoteReference" },
 	"Placeholder Text": { type: "character", id: "PlaceholderText" },
+	Hyperlink: { type: "character", id: "Hyperlink" },
 	...Object.fromEntries(
 		[1, 2, 3, 4, 5, 6, 7, 8, 9].map(level => [`toc ${String(level)}`, { type: "paragraph", id: `TOC${String(level)}` } as const])
 	)
@@ -110,17 +133,25 @@ export function builtInStyleType(name: string): "paragraph" | "character" {
 	return BUILT_IN_STYLES[name]?.type ?? "paragraph"
 }
 
-// The id of built-in style `name` (a name the writer has a definition for): the document's own, else one
-// added to the styles the writer defines when content uses it (Word's id, made unique against the document's).
-export function builtInStyleId(context: DocxEditContext, name: string): string {
-	const type = builtInStyleType(name)
-	const styles = context.styles
-	const existing = styles.byName(name, type)
+// The id of built-in style `name` when the document defines it or a command added it, without adding it.
+export function knownBuiltInStyleId(context: DocxEditContext, name: string): string | undefined {
+	const existing = context.styles.byName(name, builtInStyleType(name))
 
 	if (existing !== undefined) return existing.id
 
 	for (const [id, missing] of context.newStyles) if (missing === name) return id
 
+	return undefined
+}
+
+// The id of built-in style `name` (a name the writer has a definition for): the document's own, else one
+// added to the styles the writer defines when content uses it (Word's id, made unique against the document's).
+export function builtInStyleId(context: DocxEditContext, name: string): string {
+	const known = knownBuiltInStyleId(context, name)
+
+	if (known !== undefined) return known
+
+	const styles = context.styles
 	const base = BUILT_IN_STYLES[name]?.id ?? name.replace(/(^|\s)(\S)/g, (_match, _space: string, letter: string) => letter.toUpperCase())
 	let id = base
 
@@ -179,6 +210,29 @@ export function runPiecesIn(doc: Node, ranges: readonly { readonly from: number;
 	}
 
 	return out
+}
+
+// Letters, digits, marks, apostrophes, "_", "-" and the zero-width (non-)joiners; an object reads as U+FFFC.
+const WORD_CHARACTER = /[\p{L}\p{N}\p{M}'’_-]|\p{Join_Control}/u
+const OBJECT_TEXT = String.fromCharCode(0xfffc)
+
+// The word an empty selection is inside of (not at either end of): what Word's character formatting and painter
+// take with no selection ("When selecting, automatically select entire word").
+export function wordAround(state: EditorState): { from: number; to: number } | undefined {
+	const $from = state.selection.$from
+	const parent = $from.parent
+
+	if (!state.selection.empty || parent.type !== nodes.paragraph) return undefined
+
+	const at = $from.parentOffset
+	let start = at
+	let end = at
+
+	// Only the characters around the caret are read (no copy of the paragraph's text per command).
+	while (start > 0 && WORD_CHARACTER.test(parent.textBetween(start - 1, start, undefined, OBJECT_TEXT))) start--
+	while (end < parent.content.size && WORD_CHARACTER.test(parent.textBetween(end, end + 1, undefined, OBJECT_TEXT))) end++
+
+	return start === at || end === at ? undefined : { from: $from.start() + start, to: $from.start() + end }
 }
 
 export interface ParagraphAt {
@@ -315,6 +369,9 @@ export class FormatResolver {
 	private readonly formattings = new Map<string, Formatting>()
 	private readonly trie: TrieNode = { next: undefined, leaf: [undefined, undefined] }
 	private readonly interned = new WeakMap<ResolvedRunProps, Map<string, RunValues>>()
+	// Paragraph-mark marks by w:pPr/w:rPr node, and by its interned properties (shared by equal marks).
+	private markMarks: Map<number, readonly Mark[]> | undefined = undefined
+	private readonly markMarksByProps = new WeakMap<RunProps, readonly Mark[]>()
 	// Lists created in this session (negative numIds) and their kind.
 	readonly newLists: Map<number, NewList>
 
@@ -362,6 +419,64 @@ export class FormatResolver {
 		}
 
 		return id
+	}
+
+	// The formatting marks of a paragraph node's source paragraph mark (w:pPr/w:rPr), none for a new
+	// paragraph: what Word types into the paragraph while it holds no content. Its revision records (w:ins,
+	// w:del, w:moveFrom, w:moveTo, w:rPrChange) and w:specVanish describe the mark only and give none.
+	paragraphMarkMarks(node: Node): readonly Mark[] {
+		const src = node.attrs["src"] as number
+		const part = this.part
+
+		if (src === NO_SOURCE || part.kinds[src] !== Item.Paragraph) return NO_MARKS
+
+		const markRPr = part.paragraphs.markRPr[part.aux[src] ?? -1] ?? -1
+
+		if (markRPr < 0) return NO_MARKS
+
+		const byNode = (this.markMarks ??= new Map())
+		let out = byNode.get(markRPr)
+
+		if (out === undefined) {
+			const props = this.context.store.run(part.document, markRPr)
+
+			out = this.markMarksByProps.get(props)
+
+			if (out === undefined) {
+				out = formattingMarks(props).filter(mark => mark.type !== marks.format_change)
+				this.markMarksByProps.set(props, out)
+			}
+
+			byNode.set(markRPr, out)
+		}
+
+		return out
+	}
+
+	// The paragraph mark's marks (paragraphMarkMarks) where text typed at `$pos` takes them: in a paragraph
+	// holding no content (range markers at most). Undefined elsewhere or when the mark has none.
+	emptyParagraphMarks($pos: ResolvedPos): readonly Mark[] | undefined {
+		const paragraph = $pos.parent
+
+		if (paragraph.type !== nodes.paragraph) return undefined
+
+		for (let k = 0; k < paragraph.childCount; k++) {
+			const type = paragraph.child(k).type
+
+			if (type !== nodes.marker && type !== nodes.proof_err) return undefined
+		}
+
+		const own = this.paragraphMarkMarks(paragraph)
+
+		if (own.length === 0) return undefined
+
+		let out = $pos.marks()
+
+		if (out.length === 0) return own
+
+		for (const mark of own) out = mark.addToSet(out)
+
+		return out
 	}
 
 	// The direct paragraph properties of a paragraph node: its source w:pPr's own (interned) object while
@@ -690,6 +805,30 @@ export class FormatResolver {
 		return this.context.resolver.paragraph(this.direct(node.type.create({ ...node.attrs, ...attrs })))
 	}
 
+	// The numbering attributes that take paragraph `node` out of its list: numbering its style gives is switched
+	// off explicitly (numId 0); direct numbering is removed.
+	numberingOff(node: Node): { readonly numId: number | null; readonly ilvl: null } {
+		const styled = this.styleParagraph(node.attrs["styleId"] as string | null).props.numbering
+
+		return styled !== undefined && styled.numId > 0 ? NUMBERING_OFF_STYLED : NUMBERING_OFF
+	}
+
+	// The paragraph style a new paragraph made by Enter at the end of `node` takes (its style's w:next, §17.7.4.10):
+	// a style id, null for the default paragraph style; undefined when it keeps `node`'s.
+	nextStyle(node: Node): string | null | undefined {
+		const styles = this.context.styles
+		const id = node.attrs["styleId"] as string | null
+		const style = id === null ? styles.defaultOf("paragraph") : styles.byId(id)
+
+		if (style?.next === undefined || style.type !== "paragraph") return undefined
+
+		const next = styles.byId(style.next)
+
+		if (next === undefined || next === style || next.type !== "paragraph") return undefined
+
+		return next === styles.defaultOf("paragraph") ? null : next.id
+	}
+
 	// The list a paragraph is in, by its effective numbering.
 	listOf(node: Node): { readonly kind: ListKind; readonly numId: number; readonly ilvl: number } | undefined {
 		const numbering = this.paragraph(node).props.numbering
@@ -720,11 +859,34 @@ export class FormatResolver {
 		for (const numId of [...numbering.instances.keys()].sort((a, b) => a - b)) {
 			const level = numbering.level(numId, 0)
 
-			if (level !== undefined && listKind(level.level.format) === kind) return numId
+			if (level !== undefined && listKind(level.level.format) === kind && plainList(numbering, numId, kind, level.level)) return numId
 		}
 
 		return undefined
 	}
+}
+
+// Word's list buttons apply a library format, never a style-linked (heading/outline) or legal definition:
+// only a plain list qualifies for reuse.
+function plainList(numbering: Numbering, numId: number, kind: ListKind, first: NumberingLevel): boolean {
+	if (first.legal || first.styleId !== undefined) return false
+
+	if (kind === "numbered" && first.text !== undefined && /%[2-9]/.test(first.text)) return false
+
+	const instance = numbering.instances.get(numId)
+
+	if (instance === undefined) return false
+
+	const declared = numbering.abstracts.get(instance.abstractId)
+	const abstract = numbering.abstractFor(instance)
+
+	if (declared?.numStyleLink !== undefined || declared?.styleLink !== undefined || abstract?.styleLink !== undefined) return false
+
+	if (abstract?.levels.some(level => level?.styleId !== undefined) === true) return false
+
+	for (const override of instance.overrides.values()) if (override.level?.styleId !== undefined) return false
+
+	return true
 }
 
 function listKind(format: string): ListKind | undefined {

@@ -44,6 +44,13 @@ import { StructTree, type PdfStructOptions } from "./tagged"
 // Peak memory: the compressed output so far, one page's content, and whatever one image or font needs while
 // it is written.
 
+// What a document says of itself beyond its title, as Word's "Document properties" export option writes it.
+export interface PdfDocumentProperties {
+	readonly author?: string | undefined
+	readonly subject?: string | undefined
+	readonly keywords?: string | undefined
+}
+
 export interface PdfAbortSignal {
 	readonly aborted: boolean
 	readonly reason?: unknown
@@ -52,6 +59,8 @@ export interface PdfAbortSignal {
 export interface PdfWriterOptions {
 	// The title viewers show (Info /Title, XMP dc:title, DisplayDocTitle); a tagged document claims PDF/UA only with one.
 	readonly title?: string
+	// The document's properties (Info /Author, /Subject, /Keywords and their XMP twins); blank values are none.
+	readonly properties?: PdfDocumentProperties
 	// BCP 47 language of the document (/Lang).
 	readonly lang?: string
 	// Tagged PDF with a structure tree, as PDF/UA-1 (ISO 14289-1) asks.
@@ -925,13 +934,17 @@ export class PdfWriter implements PdfObjectSink {
 
 		// A blank title is none. PDF/UA wants the title shown (ISO 14289-1 §7.1: dc:title, DisplayDocTitle): a tagged
 		// document without one is still tagged but makes no claim a reader would find false.
-		const title = this.options.title !== undefined && this.options.title.trim().length > 0 ? this.options.title : undefined
+		const title = nonBlank(this.options.title)
+		const properties = this.options.properties
+		const author = nonBlank(properties?.author)
+		const subject = nonBlank(properties?.subject)
+		const keywords = nonBlank(properties?.keywords)
 		const metadata = this.allocate()
 
 		await this.stream(
 			metadata,
 			{ Type: pdfName("Metadata"), Subtype: pdfName("XML") },
-			xmpMetadata({ title, lang: this.options.lang, pdfua: this.tagged && title !== undefined })
+			xmpMetadata({ title, author, subject, keywords, lang: this.options.lang, pdfua: this.tagged && title !== undefined })
 		)
 
 		const catalog = this.allocate()
@@ -953,7 +966,14 @@ export class PdfWriter implements PdfObjectSink {
 
 		const info = this.allocate()
 
-		this.object(info, { Producer: "Filen", Title: title, CreationDate: this.deterministic ? undefined : pdfDate(new Date()) })
+		this.object(info, {
+			Producer: "Filen",
+			Title: title,
+			Author: author,
+			Subject: subject,
+			Keywords: keywords,
+			CreationDate: this.deterministic ? undefined : pdfDate(new Date())
+		})
 		await this.flushObjects()
 
 		let encrypt: PdfRef | undefined
@@ -1151,6 +1171,10 @@ function pdfDate(date: Date): string {
 
 function round(value: number): number {
 	return Math.round(value * 1000) / 1000
+}
+
+function nonBlank(text: string | undefined): string | undefined {
+	return text !== undefined && text.trim().length > 0 ? text : undefined
 }
 
 function utf8Bytes(text: string): Uint8Array {

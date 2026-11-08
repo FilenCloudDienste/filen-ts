@@ -13,6 +13,15 @@ export const Strike = { NONE: 0, SINGLE: 1, DOUBLE: 2 } as const
 
 export type Strike = (typeof Strike)[keyof typeof Strike]
 
+// Where a style's emphasis marks go (w:em): the line keeps room for them there.
+export const MarkRoom = { NONE: 0, ABOVE: 1, BELOW: 2 } as const
+
+export type MarkRoom = (typeof MarkRoom)[keyof typeof MarkRoom]
+
+// The room kept for emphasis marks, as a share of the style's ascent + descent (LibreOffice keeps a quarter of the
+// font's line height). Not documented for Word; to calibrate.
+export const MARK_ROOM = 0.25
+
 // Lower-case letters of a small-caps run are drawn as capitals at this fraction of the size. Not
 // documented for Word; to calibrate.
 export const SMALL_CAPS_SCALE = 0.7
@@ -39,6 +48,8 @@ export interface TextStyle {
 	readonly highlight?: number
 	readonly shading?: number
 	readonly border?: number
+	// Emphasis marks over or under the text. Default none.
+	readonly marks?: MarkRoom
 }
 
 // Superscript and subscript as Word draws them by default (w:vertAlign): size and baseline shift as
@@ -81,6 +92,9 @@ export class StyleTable {
 	letterSpacing = new Float64Array(16)
 	scaleX = new Float64Array(16)
 	shift = new Float64Array(16)
+	// Room kept above and below the text for emphasis marks (px; 0 without).
+	markAbove = new Float64Array(16)
+	markBelow = new Float64Array(16)
 	caps = new Uint8Array(16)
 	// Decoration keys, DECORATION_SLOTS per style: shading, highlight, border, underline, strike.
 	decorations = new Int32Array(16 * DECORATION_SLOTS)
@@ -136,6 +150,11 @@ export class StyleTable {
 			this.descent[id] = extents.descent * metricsEm
 		}
 
+		const room =
+			style.marks === undefined || style.marks === MarkRoom.NONE ? 0 : MARK_ROOM * ((this.ascent[id] ?? 0) + (this.descent[id] ?? 0))
+
+		this.markAbove[id] = style.marks === MarkRoom.ABOVE ? room : 0
+		this.markBelow[id] = style.marks === MarkRoom.BELOW ? room : 0
 		this.letterSpacing[id] = letterSpacing
 		this.scaleX[id] = scaleX
 		this.shift[id] = style.baselineShift ?? 0
@@ -209,6 +228,8 @@ export class StyleTable {
 		this.letterSpacing = float64(this.letterSpacing)
 		this.scaleX = float64(this.scaleX)
 		this.shift = float64(this.shift)
+		this.markAbove = float64(this.markAbove)
+		this.markBelow = float64(this.markBelow)
 		this.em = float64(this.em)
 		this.hyphen = float64(this.hyphen)
 		this.caps = caps

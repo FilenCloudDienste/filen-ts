@@ -1,6 +1,7 @@
 import type { Mark, MarkType, Node } from "prosemirror-model"
 import { EditorState, TextSelection, type Transaction } from "prosemirror-state"
 import { closeHistory, history, isHistoryTransaction, redo, redoDepth, undo, undoDepth } from "prosemirror-history"
+import { ReplaceStep } from "prosemirror-transform"
 import { Item, type Story } from "../model/index"
 import { commentParaIds } from "../review/comments"
 import { ReviewIndex } from "../review/index"
@@ -26,7 +27,10 @@ import {
 	alignmentOf,
 	builtInStyleId,
 	builtInStyleType,
+	caretMarks,
+	wordAround,
 	type ListKind,
+	type ListStart,
 	type NewList,
 	type RunToggle
 } from "./formats"
@@ -34,6 +38,7 @@ import { docxInvariantPlugins, isInternal, markInternal, type ListNormalizer } f
 import type { CopiedElement, SourceCopies } from "./invariants/core"
 import { elementData } from "./copies"
 import { indexOriginals } from "../write/story"
+import { openDocumentTranslation } from "../layout/geometry"
 import { noteFieldCopy } from "./invariants/forms"
 import { legacyCopyState } from "../forms/controls"
 import { equationRunStyles } from "../math/edit"
@@ -116,7 +121,18 @@ export interface DocxEditorOptions {
 	// Turns each user transaction into what is applied (default: the features' registered transformers;
 	// null: none).
 	readonly transformer?: DocxTransactionTransformer | null
+	// AutoFormat As You Type (default: on, as in Word): a host's per-user setting turns each off.
+	readonly autoFormat?: DocxAutoFormat
 }
+
+export interface DocxAutoFormat {
+	// "1. ", "a) ", "* ", "- " or "> " typed at the start of a paragraph starts a list.
+	readonly lists: boolean
+	// Straight quotes typed become curly ones.
+	readonly quotes: boolean
+}
+
+const AUTO_FORMAT_ON: DocxAutoFormat = { lists: true, quotes: true }
 
 const nodes = docxSchema.nodes
 const marks = docxSchema.marks
@@ -133,6 +149,137 @@ const NO_DOUBLE_STRIKE = marks.double_strike.create({ value: false })
 // Word's default indent step and tab stop: half an inch.
 const INDENT_STEP = 720
 const MAX_LIST_LEVEL = 8
+// Word's built-in list item style (its w:name), and its canonical name.
+const LIST_PARAGRAPH = "List Paragraph"
+const LIST_PARAGRAPH_KEY = "list paragraph"
+// How an inline object reads in text.
+const OBJECT = String.fromCharCode(0xfffc)
+// The longest typed text a list AutoFormat reads ("999. ").
+const MAX_LIST_PREFIX = 5
+const NUMBERED_PREFIX = /^(?:(\d{1,3})|([a-hj-z])|([A-HJ-Z])|(i|[ivxlcdm]{2,})|(I|[IVXLCDM]{2,}))([.)])$/
+const BULLET_PREFIXES: ReadonlySet<string> = new Set(["*", "-", ">"])
+const ROMAN: Readonly<Record<string, number>> = { i: 1, v: 5, x: 10, l: 50, c: 100, d: 500, m: 1000 }
+// What a typed quote opens after (else it closes, as an apostrophe in a word does): white space, an opening
+// bracket or quote, a dash.
+const OPENS_AFTER = /[\s([{<‘“–—]/u
+// English curly quotes: Word follows the run's language; quotes of other languages are not told apart here.
+const CURLY: Readonly<Record<string, readonly [string, string]>> = { '"': ["“", "”"], "'": ["‘", "’"] }
+
+// The character a user transaction typed at a caret that AutoFormat As You Type acts on (a space, a tab, a
+// straight quote); undefined for anything else (a paste, a composition, a replacement, an undo).
+function typedTrigger(tr: Transaction): string | undefined {
+	if (tr.steps.length !== 1 || isHistoryTransaction(tr) || tr.getMeta("composition") !== undefined || tr.getMeta("uiEvent") !== undefined)
+		return undefined
+
+	const step = tr.steps[0]
+
+	if (!(step instanceof ReplaceStep) || step.from !== step.to || step.slice.openStart !== 0 || step.slice.content.childCount !== 1)
+		return undefined
+
+	const node = step.slice.content.child(0)
+
+	if (node.type === nodes.tab) return "\t"
+
+	return node.text === " " || node.text === '"' || node.text === "'" ? node.text : undefined
+}
+
+// The roman numeral `text` (lower case) stands for, 0 when it is none in its usual form.
+function romanValue(text: string): number {
+	let value = 0
+
+	for (let k = 0; k < text.length; k++) {
+		const digit = ROMAN[text.charAt(k)] ?? 0
+		const next = ROMAN[text.charAt(k + 1)] ?? 0
+
+		value += digit < next ? -digit : digit
+	}
+
+	return value > 0 && value < 4000 && romanText(value) === text ? value : 0
+}
+
+function romanText(value: number): string {
+	const table: readonly (readonly [number, string])[] = [
+		[1000, "m"],
+		[900, "cm"],
+		[500, "d"],
+		[400, "cd"],
+		[100, "c"],
+		[90, "xc"],
+		[50, "l"],
+		[40, "xl"],
+		[10, "x"],
+		[9, "ix"],
+		[5, "v"],
+		[4, "iv"],
+		[1, "i"]
+	]
+	let out = ""
+	let rest = value
+
+	for (const [amount, digits] of table) {
+		while (rest >= amount) {
+			out += digits
+			rest -= amount
+		}
+	}
+
+	return out
+}
+
+// The list a paragraph starting with `prefix` and a space becomes (Word's automatic bulleted and numbered lists):
+// a bullet for "*", "-" and ">", a numbered list from the number or letter before "." or ")" ("i" and "I" are
+// roman), undefined for any other text.
+function listPrefix(prefix: string): "bullet" | ListStart | undefined {
+	if (BULLET_PREFIXES.has(prefix)) return "bullet"
+
+	const match = NUMBERED_PREFIX.exec(prefix)
+
+	if (match === null) return undefined
+
+	const [, digits, lower, upper, lowerRoman, upperRoman, end] = match
+	const suffix = end === ")" ? ")" : "."
+
+	if (digits !== undefined) return { format: "decimal", suffix, start: Number(digits) }
+	if (lower !== undefined) return { format: "lowerLetter", suffix, start: lower.charCodeAt(0) - 96 }
+	if (upper !== undefined) return { format: "upperLetter", suffix, start: upper.charCodeAt(0) - 64 }
+
+	const roman = lowerRoman ?? upperRoman?.toLowerCase() ?? ""
+	const start = romanValue(roman)
+
+	return start === 0 ? undefined : { format: lowerRoman === undefined ? "upperRoman" : "lowerRoman", suffix, start }
+}
+
+// What an inline leaf reads as before a quote: white space for a tab or break, nothing for a range marker or a
+// proofing mark, an object otherwise.
+function leafText(leaf: Node): string {
+	if (leaf.type === nodes.tab) return "\t"
+	if (leaf.type === nodes.break) return "\n"
+
+	return leaf.type === nodes.marker || leaf.type === nodes.proof_err ? "" : OBJECT
+}
+
+// The straight quote typed right before the caret as Word's smart quote: opening at the start of a paragraph or
+// after OPENS_AFTER, else closing.
+function smartQuote(state: EditorState, typed: string): Transaction | null {
+	const $caret = state.selection.$from
+	const quote = $caret.nodeBefore
+	const pair = CURLY[typed]
+
+	if (quote === null || pair === undefined) return null
+
+	const paragraph = $caret.parent
+	let previous = ""
+
+	// The visible character before it (range markers and proofing marks have no text).
+	for (let at = $caret.parentOffset - 1; at > 0 && previous === ""; at--) {
+		previous = paragraph.textBetween(at - 1, at, undefined, leafText)
+	}
+
+	const curly = previous === "" || OPENS_AFTER.test(previous) ? pair[0] : pair[1]
+	const pos = $caret.pos
+
+	return state.tr.replaceWith(pos - 1, pos, docxSchema.text(curly, quote.marks))
+}
 
 interface RunPiece {
 	readonly from: number
@@ -342,6 +489,7 @@ export class DocxEditorSession {
 	private readonly hostReadOnly: boolean
 	private readonly reasons: readonly DocxReadOnlyReason[]
 	private readonly transformer: DocxTransactionTransformer | undefined
+	private readonly autoFormat: DocxAutoFormat
 	private readonly listeners = new Set<(snapshot: DocxEditorSnapshot) => void>()
 	private readonly appliedListeners = new Set<(transactions: readonly Transaction[], state: EditorState) => void>()
 	private readonly refusedListeners = new Set<(reason: DocxRefusalReason) => void>()
@@ -371,6 +519,7 @@ export class DocxEditorSession {
 		this.hostReadOnly = options.readOnly ?? false
 		this.reasons = readOnlyReasons(context, story, this.hostReadOnly)
 		this.transformer = options.transformer === null ? undefined : (options.transformer ?? registeredTransformer())
+		this.autoFormat = options.autoFormat ?? AUTO_FORMAT_ON
 
 		this.builder = new DocxDocBuilder(context)
 		this.story = options.built !== undefined && options.built.story === story ? options.built : this.builder.build(story)
@@ -681,13 +830,103 @@ export class DocxEditorSession {
 		return positions.length
 	}
 
+	// The marks a view gives text typed or composed at the caret of `state` (this session's), where they are not
+	// the caret's own (ProseMirror's choice): a paragraph mark's formatting in a paragraph holding no content.
+	// Undefined elsewhere, so the view leaves typing to the browser.
+	typingMarks(state: EditorState): readonly Mark[] | undefined {
+		const selection = state.selection
+
+		return selection.empty && state.storedMarks === null ? this.formats.emptyParagraphMarks(selection.$from) : undefined
+	}
+
 	// Applies a transaction from a view or a command. False when the invariants or the read-only gate
 	// refused it.
 	dispatch(tr: Transaction): boolean {
 		// The session's own transactions skip the transformers: protection still limits what they change.
 		if (isInternal(tr) && internalViolation(tr, this) !== undefined) return false
 
-		return this.apply(tr)
+		const typed = isInternal(tr) ? undefined : typedTrigger(tr)
+
+		if (!this.apply(tr)) return false
+		if (typed !== undefined) this.autoFormatTyped(typed)
+
+		return true
+	}
+
+	// Word's AutoFormat As You Type after `typed` (typedTrigger) was typed at the caret: its own undo step, so an
+	// undo right after it gives back what was typed.
+	private autoFormatTyped(typed: string): void {
+		const state = this.current
+		const { $from, empty } = state.selection
+		const before = $from.nodeBefore
+
+		// The typed character is right before the caret, in a paragraph.
+		if (!empty || $from.parent.type !== nodes.paragraph || before === null) return
+		if (typed === "\t" ? before.type !== nodes.tab : before.text?.endsWith(typed) !== true) return
+
+		const tr =
+			typed === " " || typed === "\t"
+				? this.autoFormat.lists
+					? this.autoList(state)
+					: null
+				: this.autoFormat.quotes
+					? smartQuote(state, typed)
+					: null
+
+		// Typing after it starts an undo step of its own too.
+		if (tr !== null && this.apply(closeHistory(tr))) this.apply(closeHistory(this.current.tr))
+	}
+
+	// "1. " (a number or letter and "." or ")") or "* ", "- ", "> " typed at the start of a paragraph in no list
+	// makes it a list item: the prefix goes. Not in content controls (their content is the control's).
+	private autoList(state: EditorState): Transaction | null {
+		const $caret = state.selection.$from
+		const paragraph = $caret.parent
+
+		for (let depth = $caret.depth - 1; depth > 0; depth--) if ($caret.node(depth).type === nodes.sdt) return null
+
+		if (this.formats.listOf(paragraph) !== undefined) return null
+
+		const caret = $caret.parentOffset
+		let typed = ""
+		let first = -1
+
+		// The paragraph's text up to the caret (range markers and proofing marks are not text): a short prefix only.
+		for (let k = 0, offset = 0; k < paragraph.childCount && offset < caret && typed.length <= MAX_LIST_PREFIX; k++) {
+			const child = paragraph.child(k)
+
+			if (child.isText) {
+				if (first < 0) first = offset
+				typed += (child.text ?? "").slice(0, caret - offset)
+			} else if (child.type !== nodes.marker && child.type !== nodes.proof_err) {
+				typed += child.type === nodes.tab ? "\t" : OBJECT
+			}
+
+			offset += child.nodeSize
+		}
+
+		const start = first < 0 ? undefined : listPrefix(typed.slice(0, -1))
+
+		if (start === undefined) return null
+
+		const pos = $caret.before()
+		const numId =
+			start === "bullet"
+				? (this.adjacentList(state, [{ node: paragraph, pos }], "bullet") ??
+					this.formats.firstList("bullet") ??
+					this.newList("bullet", null))
+				: this.newList("numbered", null, start)
+		const tr = state.tr.delete($caret.start() + first, $caret.pos)
+		const node = tr.doc.nodeAt(pos)
+
+		if (node === null) return null
+
+		const changes = new AttrChanges()
+
+		changes.set(node, pos, { numId, ilvl: 0, ...this.listParagraph(node) })
+		changes.step(tr)
+
+		return tr
 	}
 
 	// Runs a base command or a feature's story command; document commands (scope "document") run on the
@@ -918,13 +1157,10 @@ export class DocxEditorSession {
 
 	// Run-level content in the selection as [from, to) pieces with their paragraph (what formatting changes:
 	// not markers or locked blocks).
-	private runPieces(state: EditorState = this.current): RunPiece[] {
+	private runPieces(state: EditorState, ranges?: readonly { readonly from: number; readonly to: number }[]): RunPiece[] {
 		const out: RunPiece[] = []
 
-		for (const range of state.selection.ranges) {
-			const from = range.$from.pos
-			const to = range.$to.pos
-
+		for (const { from, to } of ranges ?? state.selection.ranges.map(range => ({ from: range.$from.pos, to: range.$to.pos }))) {
 			state.doc.nodesBetween(from, to, (node, pos, parent) => {
 				if (!node.isInline) return node.type !== nodes.locked_block
 
@@ -959,17 +1195,19 @@ export class DocxEditorSession {
 		const state = this.current
 		const selection = state.selection
 		const type = marks[toggle]
+		// A caret inside a word formats the word (Word's "automatically select entire word"), staying where it is.
+		const word = wordAround(state)
 
-		if (selection.empty) {
+		if (selection.empty && word === undefined) {
 			const paragraph = selection.$from.parent
 
 			if (paragraph.type !== nodes.paragraph) return null
 
 			const format = this.formats.paragraph(paragraph)
-			const current = state.storedMarks ?? selection.$from.marks()
+			const current = caretMarks(state, this.formats)
 			const value = this.formats.toggle(toggle, format, current)
 			const desired = !value.on
-			const tr = state.tr.removeStoredMark(type)
+			const tr = state.tr.setStoredMarks(current).removeStoredMark(type)
 
 			if (toggle === "strike" && desired) {
 				// Word allows one of strikethrough and double strikethrough.
@@ -981,7 +1219,7 @@ export class DocxEditorSession {
 			return desired === value.style ? tr : tr.addStoredMark(this.toggleMark(toggle, desired))
 		}
 
-		const pieces = this.runPieces(state)
+		const pieces = this.runPieces(state, word === undefined ? undefined : [word])
 
 		if (pieces.length === 0) return null
 
@@ -1029,16 +1267,17 @@ export class DocxEditorSession {
 		const state = this.current
 		const selection = state.selection
 		const plain = marks.plain.create()
+		const word = wordAround(state)
 
-		if (selection.empty) {
+		if (selection.empty && word === undefined) {
 			if (selection.$from.parent.type !== nodes.paragraph) return null
 
-			const current = state.storedMarks ?? selection.$from.marks()
+			const current = caretMarks(state, this.formats)
 
 			return state.tr.setStoredMarks(plain.addToSet(current.filter(mark => !CLEARED_TYPES.includes(mark.type))))
 		}
 
-		const pieces = this.runPieces(state)
+		const pieces = this.runPieces(state, word === undefined ? undefined : [word])
 
 		if (pieces.length === 0) return null
 
@@ -1071,8 +1310,13 @@ export class DocxEditorSession {
 			return normal === undefined || normal.canonicalName === "normal" ? null : (styles.byName("normal", "paragraph")?.id ?? null)
 		}
 
+		return this.builtInId(PARAGRAPH_STYLE_NAMES[style])
+	}
+
+	// The id of built-in style `name`, added to the styles the writer defines when the document lacks it.
+	private builtInId(name: string): string {
 		const added = this.context.newStyles.size
-		const id = builtInStyleId(this.context, PARAGRAPH_STYLE_NAMES[style])
+		const id = builtInStyleId(this.context, name)
 
 		// A paragraph naming the id before it was defined is named by it now.
 		if (this.context.newStyles.size !== added) {
@@ -1081,6 +1325,35 @@ export class DocxEditorSession {
 		}
 
 		return id
+	}
+
+	private get openDocument(): boolean {
+		return openDocumentTranslation(this.context.model.settings)
+	}
+
+	// The style a paragraph made a list item takes: List Paragraph for one in the default paragraph style (as
+	// Word, unless "Use Normal style for bulleted or numbered lists" is on); others keep theirs. A document
+	// translated from OpenDocument keeps every paragraph's style, as LibreOffice does.
+	private listParagraph(node: Node): { readonly styleId?: string } {
+		if (this.openDocument) return {}
+
+		const id = node.attrs["styleId"] as string | null
+		const styles = this.context.styles
+
+		return id === null || (styles.byId(id) !== undefined && styles.byId(id) === styles.defaultOf("paragraph"))
+			? { styleId: this.builtInId(LIST_PARAGRAPH) }
+			: {}
+	}
+
+	// The style a list item taken out of its list takes: Normal for one in List Paragraph, else its own (always
+	// its own in a document translated from OpenDocument, see listParagraph).
+	private unlistedParagraph(node: Node): { readonly styleId?: string | null } {
+		if (this.openDocument) return {}
+
+		const id = node.attrs["styleId"] as string | null
+		const name = id === null ? undefined : (this.context.newStyles.get(id) ?? this.context.styles.byId(id)?.canonicalName)
+
+		return name !== undefined && name.toLowerCase() === LIST_PARAGRAPH_KEY ? { styleId: this.styleIdFor("normal") } : {}
 	}
 
 	private setStyle(style: DocxParagraphStyle): Transaction | null {
@@ -1124,16 +1397,8 @@ export class DocxEditorSession {
 		const changes = new AttrChanges()
 
 		if (lists.every(list => list?.kind === kind)) {
-			for (const at of paragraphs) {
-				// Numbering the style gives is switched off explicitly (numId 0); direct numbering is removed.
-				const styled = this.formats.styleParagraph(at.node.attrs["styleId"] as string | null).props.numbering
-
-				changes.set(
-					at.node,
-					at.pos,
-					styled !== undefined && styled.numId > 0 ? { numId: 0, ilvl: null } : { numId: null, ilvl: null }
-				)
-			}
+			for (const at of paragraphs)
+				changes.set(at.node, at.pos, { ...this.formats.numberingOff(at.node), ...this.unlistedParagraph(at.node) })
 
 			return attrsTransaction(state, changes)
 		}
@@ -1144,7 +1409,12 @@ export class DocxEditorSession {
 		const numId =
 			this.adjacentList(state, paragraphs, kind) ?? (kind === "bullet" ? existing : undefined) ?? this.newList(kind, existing ?? null)
 
-		paragraphs.forEach((at, index) => changes.set(at.node, at.pos, { numId, ilvl: lists[index]?.ilvl ?? 0 }))
+		paragraphs.forEach((at, index) => {
+			const list = lists[index]
+
+			// A paragraph already in a list (of the other kind) keeps its style.
+			changes.set(at.node, at.pos, { numId, ilvl: list?.ilvl ?? 0, ...(list === undefined ? this.listParagraph(at.node) : {}) })
+		})
 
 		return attrsTransaction(state, changes)
 	}
@@ -1171,11 +1441,11 @@ export class DocxEditorSession {
 		return undefined
 	}
 
-	private newList(kind: ListKind, basedOn: number | null): number {
+	private newList(kind: ListKind, basedOn: number | null, first?: ListStart): number {
 		// One numbering for every session of the document: lists of different stories never share an id.
 		const id = -(this.formats.newLists.size + 1)
 
-		this.formats.newLists.set(id, { kind, basedOn })
+		this.formats.newLists.set(id, first === undefined ? { kind, basedOn } : { kind, basedOn, first })
 		this.facts = new WeakMap()
 		this.blockTallies = new WeakMap()
 
@@ -1421,7 +1691,7 @@ export class DocxEditorSession {
 			const paragraph = selection.$from.parent
 
 			if (paragraph.type === nodes.paragraph) {
-				const bits = this.formats.toggles(this.formats.paragraph(paragraph), state.storedMarks ?? selection.$from.marks())
+				const bits = this.formats.toggles(this.formats.paragraph(paragraph), caretMarks(state, this.formats))
 
 				RUN_TOGGLES.forEach((toggle, k) => {
 					formats[toggle] = (bits & (TOGGLE_ON << k)) !== 0 ? "on" : "off"
@@ -1540,6 +1810,7 @@ export class DocxEditorSession {
 
 		if (style !== undefined) return { style, name: null }
 
-		return { style: "custom", name: (id === undefined ? undefined : this.context.styles.byId(id)?.name) ?? null }
+		// A style a command added (List Paragraph) is named by its built-in name until the save defines it.
+		return { style: "custom", name: missing ?? (id === undefined ? undefined : this.context.styles.byId(id)?.name) ?? null }
 	}
 }

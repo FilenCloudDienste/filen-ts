@@ -2,6 +2,7 @@ import { Fragment, Slice, type Node } from "prosemirror-model"
 import { closeHistory } from "prosemirror-history"
 import { TextSelection, type EditorState, type Transaction } from "prosemirror-state"
 import { nfcWithMap, type NfcText } from "../../text/nfc"
+import { findPattern, type DocxFindPatternOptions } from "../findPattern"
 import { controlAround, controlOf, typeable } from "../forms/controls"
 import { controlSpans } from "../forms/positions"
 import { sessionOfDoc } from "../forms/sessions"
@@ -20,9 +21,9 @@ import type { DocxEditorSession } from "./session"
 // in content controls whose content cannot be typed into (locked, a checkbox...) as they are, as Word does, and
 // those in deleted text (which stays as it is).
 
-export interface StoryFindOptions {
-	readonly caseSensitive?: boolean
-}
+export type StoryFindOptions = DocxFindPatternOptions
+
+export { findPattern }
 
 export interface StoryMatch {
 	readonly from: number
@@ -31,7 +32,6 @@ export interface StoryMatch {
 
 // Stands for an inline atom in a paragraph's text: one position, matched by no query (a lone surrogate).
 const ATOM = "\uDFFF"
-const SPECIAL = /[.*+?^${}()|[\]\\]/g
 const nodes = docxSchema.nodes
 const marks = docxSchema.marks
 
@@ -47,15 +47,6 @@ function paragraphText(node: Node): NfcText {
 	}
 
 	return text
-}
-
-// The query as a pattern: literal, Unicode-aware, case-insensitive unless asked; null for an empty query.
-export function findPattern(query: string, options: StoryFindOptions = {}): RegExp | null {
-	const normalised = query.normalize("NFC")
-
-	if (normalised.length === 0) return null
-
-	return new RegExp(normalised.replace(SPECIAL, "\\$&"), options.caseSensitive === true ? "gu" : "giu")
 }
 
 // Matches a find shows at most (a counter shows "10,000+" beyond).
@@ -113,12 +104,15 @@ export function matchHolds(doc: Node, match: StoryMatch, query: string, options:
 	if (pattern === null) return false
 
 	const text = nfcWithMap(doc.textBetween(match.from, match.to, undefined, ATOM)).text
+	// A whole word is judged with the character on either side (two units: a surrogate pair is whole).
+	const before = options.wholeWord === true ? doc.textBetween(Math.max($from.start(), match.from - 2), match.from, undefined, ATOM) : ""
+	const after = options.wholeWord === true ? doc.textBetween(match.to, Math.min($from.end(), match.to + 2), undefined, ATOM) : ""
 
-	pattern.lastIndex = 0
+	pattern.lastIndex = before.length
 
-	const found = pattern.exec(text)
+	const found = pattern.exec(before + text + after)
 
-	return found !== null && found.index === 0 && found[0].length === text.length
+	return found !== null && found.index === before.length && found[0].length === text.length
 }
 
 // What a node holds, for Replace All: a content control or a block keeping rules of its own (LOCKS: taken out

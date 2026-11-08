@@ -161,10 +161,12 @@ function findOptions(value: unknown): DocxFindOptions {
 	if (!isRecord(value)) return {}
 
 	const caseSensitive = value["caseSensitive"]
+	const wholeWord = value["wholeWord"]
 	const limit = value["limit"]
 
 	return {
 		...(typeof caseSensitive === "boolean" ? { caseSensitive } : {}),
+		...(typeof wholeWord === "boolean" ? { wholeWord } : {}),
 		...(typeof limit === "number" && Number.isInteger(limit) && limit > 0 ? { limit } : {})
 	}
 }

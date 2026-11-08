@@ -3,10 +3,12 @@ import {
 	FRAGMENT_INTS,
 	FRAGMENT_KIND_MASK,
 	FragmentKind,
+	HitTester,
 	LINE_FLOATS,
 	LINE_INTS,
 	LayoutCursor,
 	LayoutStatus,
+	LineFlag,
 	LineInt,
 	LineRule,
 	ParagraphLayouter,
@@ -25,8 +27,8 @@ import type { ListMarker, NumberingCounters } from "../numbering/counter"
 import type { PropsStore } from "../props/store"
 import type { FrameProps, ResolvedBorder, ResolvedParagraphBorders, ResolvedParagraphProps } from "../props/types"
 import type { CellFormat, ParagraphFormat, PropertyResolver } from "../styles/resolve"
-import { BuiltParagraph, ContentBuilder, FieldFlag, type PageValues, type StoryContext } from "./content"
-import { FieldKind, fieldInfo, numberText } from "./fields"
+import { BuiltParagraph, ContentBuilder, FieldFlag, pageNumberText, type PageValues, type StoryContext } from "./content"
+import { FieldKind, fieldInfo } from "./fields"
 import {
 	borderInset,
 	FIXED_AUTO_SPACING,
@@ -131,6 +133,9 @@ export class Area {
 	inTable = false
 	start: AreaStart = AreaStart.DOCUMENT
 	exclusions: Exclusions | null = null
+	// Where a header's or footer's wrapping floats go without `exclusions`: the body's text wraps around them,
+	// the area's own text does not.
+	bodyExclusions: Exclusions | null = null
 	footnotes: FootnoteSink | null = null
 	values: PageValues = { page: 1, pageFormat: undefined, numPages: 1, sectionPages: 1 }
 	frame: PageFrame = { width: 816, height: 1056, marginLeft: 96, marginRight: 96, marginTop: 96, marginBottom: 96, odd: true }
@@ -149,6 +154,7 @@ export class Area {
 		this.inTable = from.inTable
 		this.start = from.start
 		this.exclusions = from.exclusions
+		this.bodyExclusions = from.bodyExclusions
 		this.footnotes = from.footnotes
 		this.values = from.values
 		this.frame = from.frame
@@ -179,6 +185,8 @@ export interface EngineInit {
 	readonly tuning: LayoutTuning
 	readonly recordMaps?: boolean
 	readonly edits?: LayoutEdits
+	// The time DATE and TIME fields show.
+	readonly now: Date
 }
 
 // Services shared by every flow of one document layout.
@@ -250,7 +258,8 @@ export class Engine {
 			recordMaps: init.recordMaps ?? false,
 			memoKey: (part, item) => this.memoKey(part, item),
 			// Numbered when a tracked change is first drawn (reading every part's changes).
-			authors: name => modelAuthors(init.model).index(name)
+			authors: name => modelAuthors(init.model).index(name),
+			now: init.now
 		})
 	}
 
@@ -388,7 +397,9 @@ export class Engine {
 		top: number,
 		width: number,
 		// Count the last paragraph's space after in the height.
-		trailing = true
+		trailing = true,
+		// Collects the wrapping floats' obstacles for the page body (headers and footers).
+		bodyExclusions: Exclusions | null = null
 	): number {
 		const part = story.part
 		const root = this.model.stories[story.story]
@@ -409,6 +420,7 @@ export class Engine {
 		area.bottom = Infinity
 		area.values = values
 		area.frame = frame
+		area.bodyExclusions = bodyExclusions
 		area.token = nextToken()
 		flow.run(area)
 
@@ -607,6 +619,8 @@ export class BlockFlow {
 	// Fonts that are missing suspend the flow (otherwise layout goes on with what resolves).
 	readonly suspendable: boolean
 	cell: CellFormat | undefined = undefined
+	// The fill behind the container (its cell's or table's, else an outer one's) is dark: see ContentBuilder.build.
+	darkFill = false
 	// The container's part (blocks may be laid out from overlay parts instead: see parts).
 	part: StoryPart | undefined = undefined
 	// Items of the blocks, and the parts they belong to.
@@ -643,6 +657,17 @@ export class BlockFlow {
 	// paragraph moves on without a line here.
 	private readonly floatMark = new OutputMark()
 	private floatExclusions = 0
+	// Per anchored float of the pending paragraph (by its index in BuiltParagraph.floats): its object's index on the
+	// page, 1 when it wraps text or holds a text box, and the top of its anchor's line and the anchor character's x
+	// once the lines are laid out (NaN before).
+	private readonly floatObjects: number[] = []
+	private readonly floatWraps: number[] = []
+	private readonly anchorAt: number[] = []
+	// A float of the pending paragraph is placed against its anchor's line or character.
+	private anchoring = false
+	private hitTester: HitTester | undefined = undefined
+	// Output before a float or frame that keeps its place on the page (PageOutput.pin).
+	private readonly pinMark = new OutputMark()
 	private readonly floatArea = new Area()
 	// Lays out the paragraphs of a frame (which do not float again).
 	private inFrame = false
@@ -679,6 +704,7 @@ export class BlockFlow {
 
 		this.part = part
 		this.cell = cell
+		this.darkFill = false
 		this.count = 0
 
 		for (let item = start; item < end;) {
@@ -711,6 +737,7 @@ export class BlockFlow {
 
 		this.part = part
 		this.cell = undefined
+		this.darkFill = false
 		this.count = 0
 
 		for (let k = from; k < to; k++) {
@@ -728,6 +755,7 @@ export class BlockFlow {
 	copyBlocks(flow: BlockFlow, from: number, to: number): this {
 		this.part = flow.part
 		this.cell = flow.cell
+		this.darkFill = flow.darkFill
 		this.count = 0
 
 		for (let k = from; k < to; k++) this.push(flow.parts[k] ?? -1, flow.blocks[k] ?? -1, undefined)
@@ -886,7 +914,7 @@ export class BlockFlow {
 					? began
 					: { ...began, numPages: area.values.numPages, sectionPages: area.values.sectionPages }
 
-		engine.content.build(this.story, parts, items, formats, area.width, values, this.built)
+		engine.content.build(this.story, parts, items, formats, area.width, values, this.built, this.darkFill)
 		this.builtValues = values
 		this.builtWidth = area.width
 		this.pageFields = undefined
@@ -920,7 +948,7 @@ export class BlockFlow {
 		let offset = cursor.offset >= 0 ? cursor.offset : (prepared.start[cursor.item] ?? prepared.text.length)
 		const { items, parts, formats } = this.group()
 
-		engine.content.build(this.story, parts, items, formats, area.width, area.values, built)
+		engine.content.build(this.story, parts, items, formats, area.width, area.values, built, this.darkFill)
 		this.builtValues = area.values
 		this.builtWidth = area.width
 		this.pageFields = undefined
@@ -972,7 +1000,7 @@ export class BlockFlow {
 
 		if (fields === null) return false
 
-		const result = numberText(values.page, fields.format ?? values.pageFormat)
+		const result = pageNumberText(values.page, fields.format ?? values.pageFormat, values.chapter)
 
 		if (resultKind(result) !== fields.kind) return false
 
@@ -1072,7 +1100,7 @@ export class BlockFlow {
 
 		const format = this.pageFieldFormat()
 
-		if (format === null || numberText(values.page, format ?? values.pageFormat) !== result) return null
+		if (format === null || pageNumberText(values.page, format ?? values.pageFormat, values.chapter) !== result) return null
 
 		return { segments, format, kind, styles, result, next: 0 }
 	}
@@ -1208,7 +1236,12 @@ export class BlockFlow {
 					if (floated === undefined) {
 						// A table that flows with the text (one too tall to float starts over).
 						this.table = table.floated ? new TableLayout(this, part, block, area) : table
-						status = this.runTable(area)
+
+						// The previous paragraph's space after lies above the table (none at the top of an area).
+						const top = this.y + (this.areaPlaced > 0 || (this.hasPrevious && !area.empty) ? this.after : 0)
+
+						this.after = 0
+						status = this.runTable(area, top)
 					} else status = floated
 				} else status = this.paragraph(area)
 			}
@@ -1318,13 +1351,13 @@ export class BlockFlow {
 		return FlowStatus.DONE
 	}
 
-	private runTable(area: Area): FlowStatus {
+	private runTable(area: Area, top = this.y): FlowStatus {
 		const table = this.table
 
 		if (table === undefined) return FlowStatus.DONE
 
 		const before = area.page.text.lineCount
-		const status = table.run(area, this.y)
+		const status = table.run(area, top)
 
 		this.y = table.y
 
@@ -1468,7 +1501,7 @@ export class BlockFlow {
 
 			const { items, parts, formats } = this.group()
 
-			engine.content.build(this.story, parts, items, formats, area.width, area.values, built)
+			engine.content.build(this.story, parts, items, formats, area.width, area.values, built, this.darkFill)
 			// The scratch is module-wide: emptied, so a long-lived worker keeps no closed document's parts.
 			parts.length = 0
 			formats.length = 0
@@ -1509,7 +1542,12 @@ export class BlockFlow {
 		const cursor = this.cursor
 		const first = cursor.rows === 0
 
-		if (!first && built.pageFields.length > 0 && this.builtValues !== undefined && this.builtValues.page !== area.values.page)
+		if (
+			!first &&
+			built.pageFields.length > 0 &&
+			this.builtValues !== undefined &&
+			(this.builtValues.page !== area.values.page || this.builtValues.chapter !== area.values.chapter)
+		)
 			this.renumber(area)
 
 		if (first && props.pageBreakBefore && area.breaks && !this.breakBeforeDone) {
@@ -1548,54 +1586,32 @@ export class BlockFlow {
 			else if (built.markerAlignment === "center") g.firstLineIndent -= built.markerWidth / 2
 		}
 
-		g.exclusions = area.exclusions !== null && area.exclusions.count > 0 && this.noRoom < 2 ? area.exclusions : null
-
-		if (this.source < 0) {
-			this.source = page.addSource(
-				this.region,
-				this.story.story,
-				built.first,
-				(area.inTable ? SourceFlag.IN_TABLE : 0) |
-					(built.fieldFlags & 1 ? SourceFlag.PAGE_FIELDS : 0) |
-					(built.fieldFlags & 2 ? SourceFlag.TOTAL_FIELDS : 0),
-				built.text,
-				this.region === Region.BODY && built.renderedBreaks.length > 0 ? built.renderedBreaks.slice() : undefined,
-				built.firstPart,
-				built.map
-			)
-		}
-
-		this.prepared.source = this.source
-
 		const footnotes = area.footnotes
 		const force = this.areaPlaced === 0 && area.empty
-		const start = page.text.lineCount
 		const footnoteMark = footnotes === null ? 0 : footnotes.mark()
 		const rowsBefore = cursor.rows
+		const bottom = area.bottom - (footnotes?.reserved ?? 0)
 
 		this.copyCursor(this.saved, cursor)
 
-		const bottom = area.bottom - (footnotes?.reserved ?? 0)
-		let status: LayoutStatus
-
-		if (first && force && area.breaks && engine.compat.suppressTopSpacing && g.lineRule !== LineRule.AUTO) {
-			// w:suppressTopSpacing: the page's first line takes its natural height.
-			const rule = g.lineRule
-			const spacing = g.lineSpacing
-
-			g.lineRule = LineRule.AUTO
-			g.lineSpacing = 1
-			status = engine.layouter.layout(this.prepared, g, page.text, cursor, top, top, true)
-			g.lineRule = rule
-			g.lineSpacing = spacing
-
-			if (status === LayoutStatus.OVERFLOW)
-				status = engine.layouter.layout(this.prepared, g, page.text, cursor, cursor.y, bottom, false)
-		} else {
-			status = engine.layouter.layout(this.prepared, g, page.text, cursor, top, bottom, force)
-		}
-
+		let start = page.text.lineCount
+		let status = this.layoutLines(area, g, props, top, bottom, force, first)
 		let placed = page.text.lineCount - start
+
+		// Floats placed against their anchor's line or character move there once the lines are known. One that wraps
+		// text or holds a text box is placed again and the lines are laid out around it once more (once: no oscillation).
+		if (first && this.anchoring && status !== LayoutStatus.NO_ROOM && placed > 0 && this.reanchor(area, start, placed, top)) {
+			page.rollback(this.floatMark)
+
+			if (area.exclusions !== null) area.exclusions.count = Math.min(area.exclusions.count, this.floatExclusions)
+
+			this.copyCursor(cursor, this.saved)
+			this.source = -1
+			this.placeFloats(area, top, true)
+			start = page.text.lineCount
+			status = this.layoutLines(area, g, props, top, bottom, force, first)
+			placed = page.text.lineCount - start
+		}
 
 		if (status === LayoutStatus.NO_ROOM) {
 			this.noRoom++
@@ -1718,6 +1734,121 @@ export class BlockFlow {
 	// Auto spacing applies between neighbouring paragraphs only: none after the last.
 	private spaceAfter(props: ResolvedParagraphProps): number {
 		return props.spacing.afterAutospacing && this.groupEnd >= this.count ? 0 : spaceAfter(props, this.engine.autoSpacing)
+	}
+
+	// Lays out the pending paragraph's lines from `top` (its source added to the page first).
+	private layoutLines(
+		area: Area,
+		g: Geometry,
+		props: ResolvedParagraphProps,
+		top: number,
+		bottom: number,
+		force: boolean,
+		first: boolean
+	): LayoutStatus {
+		const engine = this.engine
+		const page = area.page
+		const built = this.built
+		const cursor = this.cursor
+
+		g.exclusions = area.exclusions !== null && area.exclusions.count > 0 && this.noRoom < 2 ? area.exclusions : null
+
+		if (this.source < 0) {
+			this.source = page.addSource(
+				this.region,
+				this.story.story,
+				built.first,
+				(area.inTable ? SourceFlag.IN_TABLE : 0) |
+					(props.suppressLineNumbers ? SourceFlag.NO_LINE_NUMBERS : 0) |
+					(built.fieldFlags & 1 ? SourceFlag.PAGE_FIELDS : 0) |
+					(built.fieldFlags & 2 ? SourceFlag.TOTAL_FIELDS : 0),
+				built.text,
+				this.region === Region.BODY && built.renderedBreaks.length > 0 ? built.renderedBreaks.slice() : undefined,
+				built.firstPart,
+				built.map
+			)
+		}
+
+		this.prepared.source = this.source
+
+		if (first && force && area.breaks && engine.compat.suppressTopSpacing && g.lineRule !== LineRule.AUTO) {
+			// w:suppressTopSpacing: the page's first line takes its natural height.
+			const rule = g.lineRule
+			const spacing = g.lineSpacing
+
+			g.lineRule = LineRule.AUTO
+			g.lineSpacing = 1
+
+			let status = engine.layouter.layout(this.prepared, g, page.text, cursor, top, top, true)
+
+			g.lineRule = rule
+			g.lineSpacing = spacing
+
+			if (status === LayoutStatus.OVERFLOW)
+				status = engine.layouter.layout(this.prepared, g, page.text, cursor, cursor.y, bottom, false)
+
+			return status
+		}
+
+		return engine.layouter.layout(this.prepared, g, page.text, cursor, top, bottom, force)
+	}
+
+	// Records where the floats placed against their anchor's line (ST_RelFromV line) or character (ST_RelFromH
+	// character) belong now that lines [start, start + placed) are laid out, and moves those that neither wrap text
+	// nor hold a text box there. True when one that does moved: its paragraph is laid out again around it.
+	private reanchor(area: Area, start: number, placed: number, paragraphTop: number): boolean {
+		const engine = this.engine
+		const objects = engine.objects
+		const built = this.built
+		const page = area.page
+		const text = page.text
+		let again = false
+
+		for (let k = 0; k < built.floats.length; k++) {
+			const id = built.floats[k] ?? -1
+			const spec = objects.floats[id]
+			const index = this.floatObjects[k] ?? -1
+
+			if (spec === undefined || index < 0 || !byAnchorLine(spec)) continue
+
+			const offset = built.floatOffsets[k] ?? 0
+			const line = lineOfOffset(text, start, start + placed, offset)
+
+			// The anchor lies on a line in a later area: the float stays where its paragraph put it.
+			if (line < 0) continue
+
+			const lineTop = text.lineFloats[line * LINE_FLOATS] ?? 0
+			const character =
+				spec.horizontalFrom === "character"
+					? (this.hitTester ??= new HitTester(engine.layouter.styles)).xAtOffset(text, line, built.text, offset)
+					: Number.NaN
+
+			this.anchorAt[k * 2] = lineTop
+			this.anchorAt[k * 2 + 1] = character
+
+			const f = index * OBJECT_FLOATS
+			const width = objects.widths[id] ?? 0
+			const height = objects.heights[id] ?? 0
+			const x = horizontalPosition(spec, area, width, character)
+			const y =
+				spec.verticalFrom === "line"
+					? this.keptOnPage(area, spec, verticalPosition(spec, area, lineTop, height), height, paragraphTop)
+					: (page.objectFloats[f + 1] ?? 0)
+
+			// Positions are stored as float32.
+			if (Math.abs(x - (page.objectFloats[f] ?? 0)) < 0.01 && Math.abs(y - (page.objectFloats[f + 1] ?? 0)) < 0.01) continue
+
+			if (this.floatWraps[k] === 1) {
+				again = true
+
+				continue
+			}
+
+			page.objectFloats[f] = x
+			page.objectFloats[f + 1] = y
+		}
+
+		return again
 	}
 
 	private finishParagraph(props: ResolvedParagraphProps): void {
@@ -1966,20 +2097,38 @@ export class BlockFlow {
 
 	// Positions the paragraph's anchored objects and makes those that wrap text into obstacles. False when a float
 	// kept on its anchor's page (LayoutCompat.floatsOnAnchorPage) would have to rise above the paragraph to fit.
-	private placeFloats(area: Area, paragraphTop: number): boolean {
+	// `anchored`: placed again with the anchor lines reanchor() found; otherwise those placed against their anchor's
+	// line or character go provisionally where the paragraph starts until its lines are laid out.
+	private placeFloats(area: Area, paragraphTop: number, anchored = false): boolean {
 		const engine = this.engine
 		const objects = engine.objects
 		const onPage = engine.compat.floatsOnAnchorPage && area.region === Region.BODY && !area.inTable && area.breaks
+		const floats = this.built.floats
 		let fits = true
 
-		for (const id of this.built.floats) {
+		if (!anchored) {
+			this.anchorAt.length = 0
+			this.anchoring = false
+		}
+
+		this.floatObjects.length = 0
+		this.floatWraps.length = 0
+
+		for (let k = 0; k < floats.length; k++) {
+			const id = floats[k] ?? -1
 			const spec = objects.floats[id]
+
+			this.floatObjects.push(-1)
+			this.floatWraps.push(0)
 
 			if (spec === undefined) continue
 
 			const width = objects.widths[id] ?? 0
 			const height = objects.heights[id] ?? 0
-			const x = horizontalPosition(spec, area, width)
+			const lineTop = this.anchorAt[k * 2] ?? Number.NaN
+			const x = horizontalPosition(spec, area, width, this.anchorAt[k * 2 + 1] ?? Number.NaN)
+
+			if (byAnchorLine(spec)) this.anchoring = true
 
 			if (byParity(spec.horizontalAlign) || byParity(spec.verticalAlign) || marginByParity(spec.horizontalFrom))
 				this.engine.parityReads++
@@ -1987,20 +2136,23 @@ export class BlockFlow {
 			// Word stacks every float in front of the text in one order, wrapped or not (relativeHeight).
 			const behind = spec.behindDoc || this.behindText(area)
 			const layer = behind ? Layer.BEHIND : Layer.FRONT
-			const exclusions = area.exclusions
+			const exclusions = area.exclusions ?? area.bodyExclusions
 			const wraps = exclusions !== null && spec.wrap !== "none" && !spec.behindDoc && spec.wrap !== "unknown"
-			let y = verticalPosition(spec, area, paragraphTop, height)
+			// Placed on the page or its margins: section vertical alignment leaves it there unless the text wraps
+			// around it, and a footer laid out off-page is laid out again in place.
+			const pinned = !followsAnchor(spec) && ((area.region === Region.BODY && !wraps) || area.region === Region.FOOTER)
+			const mark = pinned ? area.page.mark(this.pinMark) : null
+			let y = verticalPosition(spec, area, spec.verticalFrom === "line" && !Number.isNaN(lineTop) ? lineTop : paragraphTop, height)
 
-			// Kept on the page: moved up from its bottom edge (LibreOffice), never above its paragraph.
-			if (onPage && followsAnchor(spec) && y + height > area.frame.height) {
-				y = Math.max(area.frame.height - height, paragraphTop)
+			y = this.keptOnPage(area, spec, y, height, paragraphTop)
 
-				if (y + height > area.frame.height) fits = false
-			}
+			if (onPage && followsAnchor(spec) && y + height > area.frame.height) fits = false
 
 			// An object that may not overlap others moves down below the anchored drawings it would cover.
 			if (wraps && !spec.allowOverlap) y = clearOfDrawings(area.page, objects, x, y, width, height)
 
+			this.floatObjects[k] = area.page.objectCount
+			this.floatWraps[k] = wraps || objects.textboxes[id] !== undefined ? 1 : 0
 			area.page.addObject(id, layer, -1, x, y, width, height)
 
 			if (wraps) {
@@ -2013,9 +2165,19 @@ export class BlockFlow {
 			}
 
 			if (objects.textboxes[id] !== undefined) this.textboxes(area, id, x, y, behind)
+
+			if (mark !== null) area.page.pin(mark)
 		}
 
 		return fits
+	}
+
+	// Kept on its anchor's page (LayoutCompat.floatsOnAnchorPage): moved up from the page's bottom edge (LibreOffice),
+	// never above its paragraph.
+	private keptOnPage(area: Area, spec: FloatSpec, y: number, height: number, paragraphTop: number): number {
+		const onPage = this.engine.compat.floatsOnAnchorPage && area.region === Region.BODY && !area.inTable && area.breaks
+
+		return onPage && followsAnchor(spec) && y + height > area.frame.height ? Math.max(area.frame.height - height, paragraphTop) : y
 	}
 
 	// Paragraphs in a frame (w:framePr other than drop caps; neighbours with the same frame share it): laid
@@ -2059,7 +2221,16 @@ export class BlockFlow {
 				const item = this.blocks[k] ?? -1
 				const other = this.partAt(k) ?? part
 
-				content.build(this.story, [other], [item], [content.formatOf(other, item, this.cell)], area.width, area.values, this.built)
+				content.build(
+					this.story,
+					[other],
+					[item],
+					[content.formatOf(other, item, this.cell)],
+					area.width,
+					area.values,
+					this.built,
+					this.darkFill
+				)
 			}
 
 			if (engine.styles.hasMissing) return FlowStatus.SUSPEND
@@ -2150,8 +2321,11 @@ export class BlockFlow {
 			page.addClip(x, y, Math.max(width, 1), height, mark.lines, end.lines, mark.objects, end.objects)
 		}
 
-		const exclusions = area.exclusions
+		const exclusions = area.exclusions ?? area.bodyExclusions
 		const wrap = frame.wrap ?? "around"
+
+		// Placed on the page or its margins (see placeFloats).
+		if (vAnchor !== "text" && ((wrap === "none" && area.region === Region.BODY) || area.region === Region.FOOTER)) page.pin(mark)
 
 		if (exclusions !== null && wrap !== "none") {
 			const hSpace = twips(frame.hSpace ?? 0)
@@ -2201,7 +2375,7 @@ export class BlockFlow {
 			this.region,
 			this.story.story,
 			this.built.first,
-			0,
+			props?.suppressLineNumbers === true ? SourceFlag.NO_LINE_NUMBERS : 0,
 			this.built.text,
 			undefined,
 			this.built.firstPart,
@@ -2227,19 +2401,15 @@ export class BlockFlow {
 
 		if (this.engine.compat.joinsBoxes) return this.joinBox(area, props, top)
 
+		// Only paragraphs with equal borders, shading and indents share a box (17.3.1.24).
 		if (
 			box.open &&
 			box.borders === borders &&
 			box.shading === shading &&
+			(borders !== undefined || shading !== 0) &&
 			box.left === area.left + paragraphLeft(props) &&
-			borders !== undefined
+			box.right === area.left + area.width - paragraphRight(props)
 		) {
-			box.joins.push(box.bottom)
-
-			return top
-		}
-
-		if (box.open && box.borders === borders && box.shading === shading && borders === undefined && shading !== 0) {
 			box.joins.push(box.bottom)
 
 			return top
@@ -2520,7 +2690,8 @@ function sameFrame(a: FrameProps | undefined, b: FrameProps): boolean {
 	)
 }
 
-function horizontalPosition(spec: FloatSpec, area: Area, width: number): number {
+// `character`: the anchor character's x for ST_RelFromH character (NaN until its line is laid out: the column then).
+function horizontalPosition(spec: FloatSpec, area: Area, width: number, character: number): number {
 	const frame = area.frame
 	let start: number
 	let size: number
@@ -2550,6 +2721,10 @@ function horizontalPosition(spec: FloatSpec, area: Area, width: number): number 
 			start = frame.odd ? frame.width - frame.marginRight : 0
 			size = frame.odd ? frame.marginRight : frame.marginLeft
 			break
+		case "character":
+			start = Number.isNaN(character) ? area.left : character
+			size = Number.isNaN(character) ? area.width : 0
+			break
 		default:
 			start = area.left
 			size = area.width
@@ -2561,6 +2736,24 @@ function horizontalPosition(spec: FloatSpec, area: Area, width: number): number 
 	}
 
 	return alignWithin(spec.horizontalAlign, start, size, width, frame.odd) ?? start + spec.horizontalOffset
+}
+
+// Placed relative to the line holding its anchor (ST_RelFromV line) or to the anchor character (ST_RelFromH character).
+function byAnchorLine(spec: FloatSpec): boolean {
+	return spec.verticalFrom === "line" || spec.horizontalFrom === "character"
+}
+
+// The line among [from, to) holding text offset `offset` (the paragraph's last line for its end), -1 when none does.
+function lineOfOffset(text: TextLayout, from: number, to: number, offset: number): number {
+	for (let line = from; line < to; line++) {
+		const i = line * LINE_INTS
+
+		if (offset < (text.lineInts[i + LineInt.TEXT_END] ?? 0)) return offset >= (text.lineInts[i + LineInt.TEXT_START] ?? 0) ? line : -1
+
+		if (((text.lineInts[i + LineInt.FLAGS] ?? 0) & LineFlag.LAST) !== 0) return line
+	}
+
+	return -1
 }
 
 // Placed relative to its anchor's text (paragraph, line or character), so the anchor decides its page.

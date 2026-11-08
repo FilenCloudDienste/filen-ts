@@ -16,7 +16,16 @@ import {
 import type { PropsStore } from "../props/index"
 import { formattingMarks } from "../edit/formatting"
 import { markInternal, reinsert } from "../edit/invariants/core"
-import { NO_MARKERS, NO_SOURCE, docxSchema, survivorsOf, tableEdge, type MarkerAttrs, type MarkerList } from "../edit/schema"
+import {
+	NO_MARKERS,
+	NO_SOURCE,
+	docxSchema,
+	markerNodeAttrs,
+	survivorsOf,
+	tableEdge,
+	type MarkerAttrs,
+	type MarkerList
+} from "../edit/schema"
 import type { DocxEditorSession } from "../edit/session"
 import { Ns } from "../model/namespaces"
 import { partReader } from "../model/reader"
@@ -739,7 +748,7 @@ function betweenNodes(dropped: ReadonlySet<string>, list: MarkerList): Node[] {
 		.map(marker =>
 			marker.kind === "commentReference"
 				? nodes.comment_ref.create({ src: marker.src, id: marker.id })
-				: nodes.marker.create({ src: marker.src, kind: marker.kind, id: marker.id })
+				: nodes.marker.create(markerNodeAttrs(marker))
 		)
 }
 

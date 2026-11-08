@@ -1,7 +1,8 @@
 import { Namespaces, XmlEditor, type XmlDocument } from "../../../xml/index"
 import { partReader } from "../../model/reader"
-import { BindingStores, boundNode, changedBindings, editedValue, type BoundControl } from "../../forms/binding"
+import { BindingStores, CORE_PROPERTIES_STORE, boundNode, changedBindings, editedValue, type BoundControl } from "../../forms/binding"
 import { holdsBindings } from "../../forms/positions"
+import { coreEdit } from "./core"
 import type { PartContributor, SaveParts, WrittenStories } from "./index"
 
 // The data bound content controls show (ECMA-376 Part 1 §17.5.2.6): Word replaces a bound control's content
@@ -66,13 +67,18 @@ async function contribute(parts: SaveParts, written: WrittenStories): Promise<vo
 
 	for (const [store, controls] of changed) {
 		const name = await stores.part(store)
-		const document = name === undefined ? undefined : await parts.xml(name)
 
-		if (name === undefined || document === undefined) continue
+		if (name === undefined) continue
+
+		// The core part is written once, by its own contributor (core.ts).
+		const core = store === CORE_PROPERTIES_STORE ? await coreEdit(parts) : undefined
+		const document = core?.editor.document ?? (await parts.xml(name))
+
+		if (document === undefined) continue
 
 		const namespaces = new Namespaces(document, { lenient: true })
 		const reader = partReader(document)
-		const editor = new XmlEditor(document)
+		const editor = core?.editor ?? new XmlEditor(document)
 
 		for (const control of controls.values()) {
 			const node = updatedNode(document, namespaces, control)
@@ -80,7 +86,7 @@ async function contribute(parts: SaveParts, written: WrittenStories): Promise<vo
 			if (node >= 0 && reader.text(node) !== control.value) editor.setText(node, control.value)
 		}
 
-		if (editor.changed) parts.replace(name, editor.serialize())
+		if (core === undefined && editor.changed) parts.replace(name, editor.serialize())
 	}
 }
 

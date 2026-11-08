@@ -1,3 +1,4 @@
+import { emphasisRoom, runEffect, runEmphasis, type Emphasis, type RunEffect } from "./effects"
 import { equationAuthors } from "./objects"
 import {
 	cssFont,
@@ -225,9 +226,46 @@ export interface RunStyleInfo {
 	readonly revision: TrackedLook
 	// The colour slot of the change's author (1..8), 0 without a tracked change.
 	readonly author: number
+	// Character effect and emphasis mark drawn (effects.ts).
+	readonly effect: RunEffect
+	readonly emphasis: Emphasis
 }
 
 const SLOT_INDEX: Readonly<Record<FontSlot, number>> = { ascii: 0, hAnsi: 1, eastAsia: 2, cs: 3 }
+
+// Automatic text over a fill darker than this (perceived brightness, 0..1) is drawn white, as Word draws it.
+export const AUTO_TEXT_DARK = 0.5
+const AUTO_TEXT_LIGHT_COLOR = "FFFFFF"
+const darkFills = new Map<string, boolean>()
+const darkShadings = new WeakMap<ResolvedShading, boolean | undefined>()
+
+// Whether `fill` (RRGGBB) is dark enough for automatic text to turn white.
+export function darkFill(fill: string): boolean {
+	let dark = darkFills.get(fill)
+
+	if (dark === undefined) {
+		const value = Number.parseInt(fill, 16)
+
+		dark =
+			/^[0-9A-Fa-f]{6}$/.test(fill) &&
+			(((value >> 16) & 255) * 0.299 + ((value >> 8) & 255) * 0.587 + (value & 255) * 0.114) / 255 < AUTO_TEXT_DARK
+		darkFills.set(fill, dark)
+	}
+
+	return dark
+}
+
+// Whether a shading darkens automatic text; undefined when it paints nothing (what lies behind it shows).
+export function shadingDark(shading: ResolvedShading): boolean | undefined {
+	if (darkShadings.has(shading)) return darkShadings.get(shading)
+
+	const color = shadingColor(shading.pattern, shading.color, shading.fill)
+	const dark = color === undefined ? undefined : darkFill(color)
+
+	darkShadings.set(shading, dark)
+
+	return dark
+}
 const NON_ASCII = /[^ -~\t\n\r]/
 
 // Maps resolved run formatting to core/text styles, one TextStyle per distinct look, and tracks the fonts
@@ -246,6 +284,9 @@ export class RunStyles {
 	// Per style, the code table of a symbol font drawn without the font itself, whose characters must be
 	// drawn as the Unicode characters they show.
 	private readonly symbols: (SymbolTable | undefined)[] = []
+	// Whether the fill behind the text being laid out (paragraph, cell or table shading) is dark: automatic
+	// text over it is drawn white unless the run's own highlight or shading lies between.
+	darkBackground = false
 
 	constructor(table: StyleTable, fonts: FontSource, decorations: DecorationTable) {
 		this.table = table
@@ -291,13 +332,15 @@ export class RunStyles {
 
 	// The style for a run's text drawn from `slot`; `fontOverride` names the family instead (w:sym).
 	style(run: ResolvedRunProps, slot: FontSlot, revision: TrackedLook = TrackedLook.NONE, fontOverride?: string): number {
+		const light = this.lightText(run)
+
 		if (fontOverride !== undefined) {
-			const key = `${run.id}|${revision}|${fontOverride}`
+			const key = `${run.id}|${revision}|${fontOverride}|${light ? 1 : 0}`
 			const cached = this.byFont.get(key)
 
 			if (cached !== undefined) return cached
 
-			const made = this.make(run, slot, revision, fontOverride)
+			const made = this.make(run, slot, revision, fontOverride, light)
 
 			if (made.cacheable) this.byFont.set(key, made.id)
 
@@ -308,12 +351,12 @@ export class RunStyles {
 		if (slot === "hAnsi" && run.fonts.hAnsi === run.fonts.ascii) slot = "ascii"
 		else if (slot === "eastAsia" && run.fonts.eastAsiaUsesAscii) slot = "ascii"
 
-		const key = (run.id * 4 + SLOT_INDEX[slot]) * 128 + revision
+		const key = ((run.id * 4 + SLOT_INDEX[slot]) * 128 + revision) * 2 + (light ? 1 : 0)
 		const cached = this.byKey.get(key)
 
 		if (cached !== undefined) return cached
 
-		const made = this.make(run, slot, revision, undefined)
+		const made = this.make(run, slot, revision, undefined, light)
 
 		if (made.cacheable) this.byKey.set(key, made.id)
 
@@ -358,6 +401,17 @@ export class RunStyles {
 		)
 	}
 
+	// Whether the run's automatic colour turns white over what lies behind it: its highlight, its shading, then
+	// the background (darkBackground).
+	private lightText(run: ResolvedRunProps): boolean {
+		if (run.color !== undefined) return false
+		if (run.highlight !== undefined) return darkFill(run.highlight)
+
+		const shading = run.shading === undefined ? undefined : shadingDark(run.shading)
+
+		return shading ?? this.darkBackground
+	}
+
 	private need(request: FontRequest): boolean {
 		const key = fontKey(request)
 
@@ -375,7 +429,8 @@ export class RunStyles {
 		run: ResolvedRunProps,
 		slot: FontSlot,
 		revision: TrackedLook,
-		fontOverride: string | undefined
+		fontOverride: string | undefined,
+		light: boolean
 	): { id: number; cacheable: boolean } {
 		const complex = slot === "cs"
 		const family =
@@ -419,7 +474,9 @@ export class RunStyles {
 		}
 
 		const decorations = this.decorations
-		let underline = run.underline === undefined ? 0 : decorations.underline(run.underline.style, run.underline.color ?? run.color)
+		const emphasis = runEmphasis(run)
+		const color = light ? AUTO_TEXT_LIGHT_COLOR : run.color
+		let underline = run.underline === undefined ? 0 : decorations.underline(run.underline.style, run.underline.color ?? color)
 		let strike: Strike = run.doubleStrike ? Strike.DOUBLE : run.strike ? Strike.SINGLE : Strike.NONE
 		const author = revision >> 3
 
@@ -444,11 +501,20 @@ export class RunStyles {
 			strike,
 			highlight: decorations.color(run.highlight),
 			shading: decorations.shading(run.shading),
-			border: decorations.border(run.border)
+			border: decorations.border(run.border),
+			marks: emphasisRoom(emphasis)
 		}
 		const id = this.table.add(style)
 
-		this.info[id] = { css: cssFont(font, size), color: run.color, run, revision, author: revision === TrackedLook.NONE ? 0 : author }
+		this.info[id] = {
+			css: cssFont(font, size),
+			color,
+			run,
+			revision,
+			author: revision === TrackedLook.NONE ? 0 : author,
+			effect: runEffect(run),
+			emphasis
+		}
 		this.symbols[id] = symbols
 
 		return { id, cacheable: ready }

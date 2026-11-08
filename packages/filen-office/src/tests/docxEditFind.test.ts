@@ -88,6 +88,44 @@ describe("findInStory", () => {
 		expect(matches.every(match => matchHolds(doc, match, "café"))).toBe(true)
 	})
 
+	it("finds whole words only when asked: a letter, digit, mark or underscore on either side rules a match out", async () => {
+		const session = await sessionOf({
+			body:
+				p("the other them, The. the2 the_ 2the") +
+				"<w:p><w:r><w:t>the</w:t></w:r><w:r><w:tab/></w:r><w:r><w:t>the</w:t></w:r></w:p>"
+		})
+		const doc = session.state.doc
+		const words = findInStory(doc, "the", { wholeWord: true })
+
+		expect(findInStory(doc, "the")).toHaveLength(9)
+		expect(words.map(match => doc.textBetween(match.from, match.to))).toEqual(["the", "The", "the", "the"])
+		expect(findInStory(doc, "the", { wholeWord: true, caseSensitive: true })).toHaveLength(3)
+		// Only an edge of the query that is a word character needs a boundary.
+		expect(findInStory(doc, "the ", { wholeWord: true })).toHaveLength(1)
+		expect(findInStory(doc, "m, the", { wholeWord: true })).toHaveLength(0)
+		expect(findInStory(doc, ". the2", { wholeWord: true })).toHaveLength(1)
+	})
+
+	it("judges a whole-word match against the text around it when checking that it holds", async () => {
+		const session = await sessionOf({ body: p("cat cat") })
+		const [first, second] = findInStory(session.state.doc, "cat", { wholeWord: true })
+
+		if (first === undefined || second === undefined) throw new Error("no match")
+
+		session.dispatch(session.state.tr.insertText("s", first.to))
+		expect(matchHolds(session.state.doc, first, "cat", { wholeWord: true })).toBe(false)
+		expect(matchHolds(session.state.doc, first, "cat")).toBe(true)
+
+		// "cats cat" to "cats xcat": the second match, moved by both insertions, now follows a letter.
+		session.dispatch(session.state.tr.insertText("x", second.from + 1))
+
+		const moved = { from: second.from + 2, to: second.to + 2 }
+
+		expect(session.state.doc.textBetween(moved.from, moved.to)).toBe("cat")
+		expect(matchHolds(session.state.doc, moved, "cat", { wholeWord: true })).toBe(false)
+		expect(matchHolds(session.state.doc, moved, "cat")).toBe(true)
+	})
+
 	it("honours the limit", async () => {
 		const session = await sessionOf({ body: p("x ".repeat(50)) })
 
@@ -206,6 +244,15 @@ describe("replaceAll", () => {
 		expect(nodeText(session.state.doc.child(1))).toBe(" ")
 		expect(replaceAll(session.state, "dog", "x")).toBeNull()
 		expect(replaceAll(session.state, "CAT", "x", { caseSensitive: true })).toBeNull()
+	})
+
+	it("leaves text inside longer words alone with whole words only", async () => {
+		const session = await sessionOf({ body: p("the other there the") })
+		const result = replacing(replaceAll(session.state, "the", "a", { wholeWord: true }))
+
+		expect(result.count).toBe(2)
+		session.dispatch(result.tr)
+		expect(nodeText(session.state.doc.child(0))).toBe("a other there a")
 	})
 })
 

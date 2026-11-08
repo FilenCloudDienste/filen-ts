@@ -636,8 +636,9 @@ function parseIndent(r: PropsReader, node: number): IndentProps {
 	if (endChars !== undefined) out.endChars = endChars
 	if (hanging !== undefined) out.hanging = hanging
 	if (hangingChars !== undefined) out.hangingChars = hangingChars
-	if (firstLine !== undefined) out.firstLine = firstLine
-	if (firstLineChars !== undefined) out.firstLineChars = firstLineChars
+	// Mutually exclusive: when both are given, firstLine is ignored (ECMA-376 17.3.1.12).
+	if (firstLine !== undefined && hanging === undefined) out.firstLine = firstLine
+	if (firstLineChars !== undefined && hangingChars === undefined) out.firstLineChars = firstLineChars
 
 	return out
 }

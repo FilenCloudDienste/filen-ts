@@ -5,11 +5,11 @@ import type { DocxEditorSession } from "../edit/session"
 import type { PagedEditor } from "../paged/editor"
 import type { PagedGeometry } from "../paged/geometry"
 import { numberSwitchFormat, numberText } from "../layout/fields"
-import { BreakType, FieldCharType, Item, RevisionView, TRANSPARENT, type StoryPart } from "../model/index"
+import { BreakType, FieldCharType, Item, RevisionView, TRANSPARENT, type Story, type StoryPart } from "../model/index"
 import { Ns } from "../model/namespaces"
 import { NumberingCounters, formatNumber, type Numbering } from "../numbering/index"
-import { languageTag, pictureDate } from "../forms/dates"
 import { bookmarkIndex, type DocxBookmark } from "./bookmarks"
+import { type FieldCode, caseFormat, dateTimeResult, generalSwitches, hasSwitch, parseFieldCode, switchOf } from "./code"
 import type { FieldUpdate } from "./result"
 
 // Field codes and what updating a field computes (ECMA-376 Part 1 §17.16): the instruction parsed into its
@@ -21,190 +21,19 @@ import type { FieldUpdate } from "./result"
 
 const nodes = docxSchema.nodes
 
-// ---- field codes ------------------------------------------------------------------------------------------
-
-export interface FieldSwitch {
-	// The switch character: "*", "#", "@", "!" or a letter as written.
-	readonly name: string
-	readonly arg: string | undefined
-}
-
-export interface FieldCode {
-	// Upper case ("PAGEREF"); "" when the instruction is empty.
-	readonly type: string
-	readonly args: readonly string[]
-	readonly switches: readonly FieldSwitch[]
-}
-
-// Field-specific switches that take an argument, per field type (the general ones always do).
-const ARGUMENT_SWITCHES: Readonly<Record<string, string>> = {
-	TOC: "abcdflnopst",
-	SEQ: "rs",
-	REF: "d",
-	HYPERLINK: "lmot",
-	STYLEREF: "",
-	PAGEREF: "",
-	NOTEREF: "",
-	DATE: "",
-	TIME: ""
-}
-
-interface Token {
-	readonly value: string
-	readonly quoted: boolean
-	readonly switch: boolean
-}
-
-function tokenize(instruction: string): Token[] {
-	const out: Token[] = []
-	const length = instruction.length
-	let at = 0
-
-	while (at < length) {
-		const char = instruction[at] ?? ""
-
-		if (/\s/.test(char)) {
-			at++
-
-			continue
-		}
-
-		if (char === '"') {
-			let value = ""
-
-			at++
-
-			while (at < length && instruction[at] !== '"') {
-				const next = instruction[at + 1]
-
-				// Inside quotes a backslash escapes a quote or a backslash (§17.16.1).
-				if (instruction[at] === "\\" && (next === '"' || next === "\\")) {
-					value += next
-					at += 2
-				} else {
-					value += instruction[at] ?? ""
-					at++
-				}
-			}
-
-			at++
-			out.push({ value, quoted: true, switch: false })
-
-			continue
-		}
-
-		if (char === "\\" && at + 1 < length) {
-			out.push({ value: instruction[at + 1] ?? "", quoted: false, switch: true })
-			at += 2
-
-			continue
-		}
-
-		let end = at
-
-		while (end < length && !/\s/.test(instruction[end] ?? "")) end++
-
-		out.push({ value: instruction.slice(at, end), quoted: false, switch: false })
-		at = end
-	}
-
-	return out
-}
-
-const CODES = new Map<string, FieldCode>()
-
-export function parseFieldCode(instruction: string): FieldCode {
-	const cached = CODES.get(instruction)
-
-	if (cached !== undefined) return cached
-
-	const tokens = tokenize(instruction)
-	const first = tokens[0]
-	const type = first === undefined || first.switch ? "" : first.value.toUpperCase()
-	const own = ARGUMENT_SWITCHES[type] ?? ""
-	const args: string[] = []
-	const switches: FieldSwitch[] = []
-
-	for (let index = type === "" ? 0 : 1; index < tokens.length; index++) {
-		const token = tokens[index] as Token
-
-		if (!token.switch) {
-			args.push(token.value)
-
-			continue
-		}
-
-		const name = token.value
-		const next = tokens[index + 1]
-		const takes = name === "*" || name === "#" || name === "@" || own.includes(name.toLowerCase())
-
-		if (takes && next !== undefined && !next.switch) {
-			switches.push({ name, arg: next.value })
-			index++
-		} else {
-			switches.push({ name, arg: undefined })
-		}
-	}
-
-	const code: FieldCode = Object.freeze({ type, args: Object.freeze(args), switches: Object.freeze(switches) })
-
-	if (CODES.size > 4096) CODES.clear()
-
-	CODES.set(instruction, code)
-
-	return code
-}
-
-// A switch by its character (letters match in either case).
-export function switchOf(code: FieldCode, name: string): FieldSwitch | undefined {
-	const lower = name.toLowerCase()
-
-	return code.switches.find(item => item.name.toLowerCase() === lower)
-}
-
-export function hasSwitch(code: FieldCode, name: string): boolean {
-	return switchOf(code, name) !== undefined
-}
-
-// The \* arguments, in order.
-function generalSwitches(code: FieldCode): string[] {
-	return code.switches.filter(item => item.name === "*" && item.arg !== undefined).map(item => item.arg as string)
-}
-
-// Whether a \* MERGEFORMAT switch asks for the previous result's formatting (§17.16.4.3).
-export function mergeFormat(code: FieldCode): boolean {
-	return generalSwitches(code).some(name => name.toUpperCase() === "MERGEFORMAT")
-}
+export {
+	DEFAULT_DATE_PICTURE,
+	DEFAULT_TIME_PICTURE,
+	datePicture,
+	hasSwitch,
+	mergeFormat,
+	parseFieldCode,
+	switchOf,
+	type FieldCode,
+	type FieldSwitch
+} from "./code"
 
 // ---- formatting -------------------------------------------------------------------------------------------
-
-// \* Upper, Lower, FirstCap and Caps (§17.16.4.3), applied to a result in the order written.
-function caseFormat(text: string, code: FieldCode): string {
-	let out = text
-
-	for (const name of generalSwitches(code)) {
-		switch (name.toLowerCase()) {
-			case "upper":
-				out = out.toUpperCase()
-
-				break
-			case "lower":
-				out = out.toLowerCase()
-
-				break
-			case "firstcap":
-				out = out.replace(/\p{L}/u, letter => letter.toUpperCase())
-
-				break
-			case "caps":
-				out = out.replace(/(^|[^\p{L}\p{N}'’])(\p{L})/gu, (_match, before: string, letter: string) => before + letter.toUpperCase())
-
-				break
-		}
-	}
-
-	return out
-}
 
 // The ST_NumberFormat of the last \* switch that formats numbers, if any.
 function numberFormatOf(code: FieldCode): string | undefined {
@@ -373,33 +202,6 @@ function splitUnquoted(text: string, separator: string): string[] {
 	out.push(current)
 
 	return out
-}
-
-// Word's defaults when no \@ is given: the en-US short date and time.
-export const DEFAULT_DATE_PICTURE = "M/d/yyyy"
-export const DEFAULT_TIME_PICTURE = "h:mm am/pm"
-
-// A date under a \@ date-time picture (§17.16.4.1), read as a date control's picture is (forms/dates.ts
-// pictureDate): `date`'s local day and time, month and day names in `language` (the field's w:lang), in `calendar`
-// (\h hijri, \s saka; Gregorian without), AM/PM as the user's regional settings have it. Era items (g, e, aaa) are
-// the Japanese imperial calendar's in a Japanese field (`eastAsia`, its w:lang/@w:eastAsia, else `language`, is
-// ja); in any other, they and B are literal characters.
-export function datePicture(date: Date, picture: string, language?: string, calendar?: string, eastAsia?: string): string {
-	const japanese = /^ja(?:-|$)/i.test(languageTag(eastAsia ?? language ?? "") ?? "")
-
-	return pictureDate(
-		new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate())),
-		{ hours: date.getHours(), minutes: date.getMinutes(), seconds: date.getSeconds() },
-		picture,
-		language ?? null,
-		calendar ?? null,
-		japanese ? "japanese" : "literal"
-	)
-}
-
-// The calendar a DATE or TIME field shows its date in: \h Hijri, \s Saka (§17.16.4.1), else Gregorian.
-function fieldCalendar(code: FieldCode): string | undefined {
-	return hasSwitch(code, "h") ? "hijri" : hasSwitch(code, "s") ? "saka" : undefined
 }
 
 // A number result: \# picture, else a \* number format, else `fallback` (the page's own format for pages).
@@ -575,8 +377,9 @@ export interface RangeSource {
 
 // What [from, to) of `doc` reads as in the final view: text, tabs, breaks and field results, paragraphs
 // joined by line breaks (a field result is inline content); with `source`, locked blocks too, as their bytes
-// read (from the bookmark's start to its end where they are inside).
-export function rangeText(doc: Node, from: number, to: number, source?: RangeSource): string {
+// read (from the bookmark's start to its end where they are inside); a field in `results` reads as its result
+// there (by position), in place of the one it holds.
+export function rangeText(doc: Node, from: number, to: number, source?: RangeSource, results?: ReadonlyMap<number, string>): string {
 	let out = ""
 	let paragraphs = 0
 
@@ -606,7 +409,7 @@ export function rangeText(doc: Node, from: number, to: number, source?: RangeSou
 		const end = Math.min(to, pos + node.nodeSize)
 
 		if (node.isText) out += (node.text ?? "").slice(start - pos, end - pos)
-		else if (node.type === nodes.field) out += node.attrs["result"] as string
+		else if (node.type === nodes.field) out += results?.get(pos) ?? (node.attrs["result"] as string)
 		else if (node.type === nodes.tab) out += "\t"
 		else if (node.type === nodes.break) out += node.attrs["type"] === "textWrapping" ? "\n" : ""
 		else if (node.type === nodes.symbol) out += String.fromCodePoint(node.attrs["char"] as number)
@@ -810,7 +613,12 @@ export class FieldEvaluation {
 	// The story's document the positions are in (the session's, or a transaction's about to apply).
 	readonly doc: Node
 	private readonly now: Date
+	// New results of fields of `doc` evaluated so far in this update, by position: a field after them in the
+	// update reads them (Word updates in document order).
+	readonly results = new Map<number, string>()
 	private sequences: Map<number, number> | undefined = undefined
+	// Whether counting the sequences walked this story's document.
+	private sequenceReached = false
 	private readonly lists = new Map<DocxEditorSession, ListNumbers>()
 
 	constructor(host: FieldHost, session: DocxEditorSession, now: number, doc: Node = session.state.doc) {
@@ -876,16 +684,7 @@ export class FieldEvaluation {
 			case "TIME": {
 				const lang = this.language(node, pos)
 
-				return caseFormat(
-					datePicture(
-						this.now,
-						switchOf(code, "@")?.arg ?? (code.type === "DATE" ? DEFAULT_DATE_PICTURE : DEFAULT_TIME_PICTURE),
-						lang?.latin,
-						fieldCalendar(code),
-						lang?.eastAsia
-					),
-					code
-				)
+				return dateTimeResult(code, this.now, lang?.latin, lang?.eastAsia)
 			}
 			case "REF":
 				return this.reference(code, pos)
@@ -991,7 +790,13 @@ export class FieldEvaluation {
 		const from = first === null ? bookmark.from : bookmark.startPos
 		const to = last === null ? bookmark.to : bookmark.endPos + last.nodeSize
 
-		return rangeText(doc, from, to, { part: holder.story.part, start: bookmark.startItem, end: bookmark.endItem })
+		return rangeText(
+			doc,
+			from,
+			to,
+			{ part: holder.story.part, start: bookmark.startItem, end: bookmark.endItem },
+			holder === this.session ? this.results : undefined
+		)
 	}
 
 	// The language of a field atom's runs (w:lang, its Latin script value; a field of the file's, its first run's),
@@ -1086,45 +891,136 @@ export class FieldEvaluation {
 		return numberResult(value, code)
 	}
 
-	private sequenceValues(): Map<number, number> {
-		if (this.sequences !== undefined) return this.sequences
+	// The document's text box stories under each story (by item) and the sessions editing them; undefined when
+	// it has none.
+	private textboxes(): TextboxIndex | undefined {
+		const byParent = new Map<number, { item: number; story: Story }[]>()
 
-		const values = new Map<number, number>()
-		const counters = new Map<string, number>()
-		const doc = this.doc
-		const fields: { pos: number; code: FieldCode }[] = []
-		const resets = new Map<string, number>()
+		for (const story of this.session.context.model.stories) {
+			if (story.kind !== "textbox" || story.parent < 0) continue
 
-		const part = this.session.story.part
+			let list = byParent.get(story.parent)
+
+			if (list === undefined) {
+				list = []
+				byParent.set(story.parent, list)
+			}
+
+			list.push({ item: story.item, story })
+		}
+
+		if (byParent.size === 0) return undefined
+
+		for (const list of byParent.values()) list.sort((a, b) => a.item - b.item)
+
+		const sessions = new Map<number, DocxEditorSession>()
+
+		for (const session of this.host.sessions)
+			if (session.story.story.kind === "textbox") sessions.set(session.story.story.index, session)
+
+		return { byParent, sessions }
+	}
+
+	// The body's session when this story is the body or a text box anchored in it (one sequence runs through
+	// both), else this story's own.
+	private sequenceRoot(): DocxEditorSession {
+		const body = this.host.body.session
+		const story = this.session.story.story
+
+		if (this.session === body || story.kind !== "textbox") return this.session
+
+		const stories = this.session.context.model.stories
+		const bodyStory = body.story.story
+		let at = story
+
+		for (let depth = 0; at.kind === "textbox" && at.parent >= 0 && depth < stories.length; depth++) {
+			const parent = stories[at.parent]
+
+			if (parent === undefined || parent.part !== at.part) return this.session
+
+			at = parent
+		}
+
+		return at.index === bodyStory.index && at.part === bodyStory.part ? body : this.session
+	}
+
+	// The SEQ fields of `session`'s document in order, the text boxes of its drawings at their anchors (`anchor`:
+	// the root document's position they count at, -1 for the root itself); `own` is set for this story's fields.
+	private collectSequences(
+		session: DocxEditorSession,
+		doc: Node,
+		anchor: number,
+		boxes: TextboxIndex | undefined,
+		out: SequenceEntry[]
+	): void {
+		const part = session.story.part
 		const kept = keptSequences(part)
-		// Fields kept in a locked block's bytes count where the block is; their results stay.
-		const counted = new Set<{ pos: number; code: FieldCode }>()
+		const own = session === this.session
+		const children = boxes?.byParent.get(session.story.story.index)
+
+		if (own) this.sequenceReached = true
 
 		doc.descendants((node, pos) => {
 			if (node.type === nodes.field) {
 				const code = parseFieldCode(node.attrs["instruction"] as string)
 
-				if (code.type === "SEQ" && !deleted(node.marks)) fields.push({ pos, code })
+				if (code.type === "SEQ" && !deleted(node.marks)) out.push({ pos: anchor < 0 ? pos : anchor, code, own: own ? pos : -1 })
 
 				return false
 			}
 
+			// Fields kept in a locked block's bytes (its text boxes' too) count where the block is; their results stay.
 			if (node.type === nodes.locked_block && kept.length > 0 && !deleted(node.marks)) {
 				const first = node.attrs["src"] as number
 
-				if (first >= 0 && first < part.count)
-					for (let k = lowerBound(kept, first); k < kept.length && (kept[k]?.item ?? 0) < part.end(first); k++) {
-						const entry = { pos, code: (kept[k] as { code: FieldCode }).code }
+				if (first >= 0 && first < part.count) pushKept(kept, first, part.end(first), anchor < 0 ? pos : anchor, out)
 
-						counted.add(entry)
-						fields.push(entry)
-					}
+				return false
+			}
+
+			if (node.type === nodes.drawing && children !== undefined && boxes !== undefined && !deleted(node.marks)) {
+				const first = node.attrs["src"] as number
+
+				if (first < 0 || first >= part.count) return false
+
+				const last = part.end(first)
+				const at = anchor < 0 ? pos : anchor
+
+				for (let k = lowerBound(children, first); k < children.length && (children[k]?.item ?? 0) < last; k++) {
+					const story = (children[k] as { story: Story }).story
+					const edited = boxes.sessions.get(story.index)
+
+					if (edited !== undefined) this.collectSequences(edited, this.docOf(edited), at, boxes, out)
+					else if (kept.length > 0) pushKept(kept, story.item, part.end(story.item), at, out)
+				}
 
 				return false
 			}
 
 			return !node.isLeaf
 		})
+	}
+
+	private sequenceValues(): Map<number, number> {
+		if (this.sequences !== undefined) return this.sequences
+
+		const values = new Map<number, number>()
+		const counters = new Map<string, number>()
+		let root = this.sequenceRoot()
+		const resets = new Map<string, number>()
+		let fields: SequenceEntry[] = []
+
+		this.sequenceReached = false
+		this.collectSequences(root, this.docOf(root), -1, root === this.host.body.session ? this.textboxes() : undefined, fields)
+
+		// A text box the body no longer reaches (its drawing gone) numbers on its own.
+		if (!this.sequenceReached) {
+			root = this.session
+			fields = []
+			this.collectSequences(root, this.doc, -1, undefined, fields)
+		}
+
+		const doc = this.docOf(root)
 
 		for (const { code } of fields) {
 			const level = Number(switchOf(code, "s")?.arg)
@@ -1137,7 +1033,7 @@ export class FieldEvaluation {
 		const headings: { pos: number; level: number }[] = []
 
 		if (resets.size > 0) {
-			const levelOf = outlineLevels(this.session)
+			const levelOf = outlineLevels(root)
 
 			doc.descendants((node, pos) => {
 				if (node.type !== nodes.paragraph) return node.type !== nodes.locked_block
@@ -1153,7 +1049,7 @@ export class FieldEvaluation {
 		let heading = 0
 		const lastHeading = new Map<string, number>()
 
-		for (const [index, { pos, code }] of fields.entries()) {
+		for (const { pos, code, own } of fields) {
 			const id = (code.args[0] ?? "").toLowerCase()
 
 			while (heading < headings.length && (headings[heading]?.pos ?? 0) < pos) {
@@ -1173,7 +1069,7 @@ export class FieldEvaluation {
 
 			counters.set(resetAt, counter)
 
-			if (!counted.has(fields[index] as { pos: number; code: FieldCode })) values.set(pos, counter)
+			if (own >= 0) values.set(own, counter)
 		}
 
 		this.sequences = values
@@ -1325,6 +1221,20 @@ function delimiters(text: string): string {
 	return text.replace(/[\p{L}\s]/gu, "")
 }
 
+// A SEQ field counted in an update: where it counts in the root document, its code, and its position in the
+// story being updated (-1: another story's, or kept in a locked block).
+interface SequenceEntry {
+	readonly pos: number
+	readonly code: FieldCode
+	readonly own: number
+}
+
+// Text box stories by the story holding them (sorted by item), and the sessions editing them by story.
+interface TextboxIndex {
+	readonly byParent: ReadonlyMap<number, readonly { readonly item: number; readonly story: Story }[]>
+	readonly sessions: ReadonlyMap<number, DocxEditorSession>
+}
+
 const KEPT_SEQUENCES = new WeakMap<StoryPart, readonly { readonly item: number; readonly code: FieldCode }[]>()
 
 // The SEQ fields of a part (their first items, in order, deleted ones left out), read once per part.
@@ -1347,6 +1257,18 @@ function keptSequences(part: StoryPart): readonly { readonly item: number; reado
 	}
 
 	return list
+}
+
+// Kept SEQ fields of items [first, last), counted at `pos` (their results stay).
+function pushKept(
+	kept: readonly { readonly item: number; readonly code: FieldCode }[],
+	first: number,
+	last: number,
+	pos: number,
+	out: SequenceEntry[]
+): void {
+	for (let k = lowerBound(kept, first); k < kept.length && (kept[k]?.item ?? 0) < last; k++)
+		out.push({ pos, code: (kept[k] as { code: FieldCode }).code, own: -1 })
 }
 
 // The first index of `list` whose item is at or after `item`.

@@ -77,8 +77,21 @@ const R_URIS: ReadonlySet<string> = new Set([
 	"http://schemas.openxmlformats.org/officeDocument/2006/relationships",
 	"http://purl.oclc.org/ooxml/officeDocument/relationships"
 ])
+const O_URI = "urn:schemas-microsoft-com:office:office"
 
-// The values of attributes in the relationships namespace in markup `bytes` written for `part` (whose root
+// Whether attribute `name` of element `node` names a relationship: one of the relationships namespace, or VML's
+// o:relid (v:imagedata, v:fill).
+function namesRelationship(namespaces: ReturnType<typeof partReader>["namespaces"], node: number, name: string): boolean {
+	const colon = name.indexOf(":")
+
+	if (colon <= 0 || name.startsWith("xmlns")) return false
+
+	const uri = namespaces.uri(node, name.slice(0, colon)) ?? ""
+
+	return R_URIS.has(uri) || (uri === O_URI && name.slice(colon + 1) === "relid")
+}
+
+// The values of attributes naming relationships (namesRelationship) in markup `bytes` written for `part` (whose root
 // declares what it uses), each a relationship id, with the byte span of the value: [from, to] by id.
 export function relationshipUses(part: StoryPart, bytes: Uint8Array): Map<string, number[]> {
 	const document = part.document
@@ -101,10 +114,7 @@ export function relationshipUses(part: StoryPart, bytes: Uint8Array): Map<string
 		const spans = parsed.attributeSpans(node)
 
 		for (let k = 0; k < spans.length; k += 4) {
-			const name = decodeUtf8(whole, spans[k] ?? 0, spans[k + 1] ?? 0)
-			const colon = name.indexOf(":")
-
-			if (colon < 0 || name.startsWith("xmlns") || !R_URIS.has(namespaces.uri(node, name.slice(0, colon)) ?? "")) continue
+			if (!namesRelationship(namespaces, node, decodeUtf8(whole, spans[k] ?? 0, spans[k + 1] ?? 0))) continue
 
 			const from = (spans[k + 2] ?? 0) - open.length
 			const to = (spans[k + 3] ?? 0) - open.length
@@ -122,7 +132,7 @@ export function relationshipUses(part: StoryPart, bytes: Uint8Array): Map<string
 	return out
 }
 
-// The relationship ids a whole part's markup `bytes` names in the relationships namespace.
+// The relationship ids a whole part's markup `bytes` names (namesRelationship).
 export function relationshipIdsOf(bytes: Uint8Array): Set<string> {
 	const parsed = parseXml(bytes)
 	const namespaces = partReader(parsed).namespaces
@@ -134,10 +144,7 @@ export function relationshipIdsOf(bytes: Uint8Array): Set<string> {
 		const spans = parsed.attributeSpans(node)
 
 		for (let k = 0; k < spans.length; k += 4) {
-			const name = decodeUtf8(bytes, spans[k] ?? 0, spans[k + 1] ?? 0)
-			const colon = name.indexOf(":")
-
-			if (colon > 0 && !name.startsWith("xmlns") && R_URIS.has(namespaces.uri(node, name.slice(0, colon)) ?? ""))
+			if (namesRelationship(namespaces, node, decodeUtf8(bytes, spans[k] ?? 0, spans[k + 1] ?? 0)))
 				out.add(decodeUtf8(bytes, spans[k + 2] ?? 0, spans[k + 3] ?? 0))
 		}
 	}

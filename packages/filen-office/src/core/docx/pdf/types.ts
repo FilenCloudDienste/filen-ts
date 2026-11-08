@@ -4,6 +4,7 @@ import type { RenderEffects } from "../../presentation/output"
 import type { BundledFamily } from "../../fonts/substitutes"
 import type { FontSlot } from "../../fonts/slots"
 import type { MathElement } from "../../math/index"
+import type { PdfDocumentProperties } from "../../pdfwrite/index"
 import type { DecorationValue } from "../layout/styles"
 
 // What the PDF painter reads: a laid-out document as plain data (numbers, strings, typed arrays), so it can
@@ -33,6 +34,11 @@ export interface DocxPdfStyle {
 	// A symbol font (Symbol, Wingdings...) drawn on screen from an installed copy and in the PDF by a bundled
 	// face: its codes are drawn as the Unicode characters they show (core/fonts/symbols.ts).
 	readonly symbolFont?: string | undefined
+	// A document run's character effect (RunEffect) and emphasis mark (Emphasis), layout/effects.ts; absent for none.
+	// `markY`: the marks' centre below the baseline, px (negative above it).
+	readonly effect?: number
+	readonly emphasis?: number
+	readonly markY?: number
 	// DrawingML text (presentations; DocxTextStyle's fields of the same names): the fill drawn in place of `color`
 	// (DocxPdfDocument.paints index), the glyphs' opacity, their outline (DocxPdfDocument.strokes index) and effects
 	// (DocxPdfDocument.textEffects index). Absent, the run draws exactly as without them.
@@ -173,6 +179,8 @@ export interface DocxPdfDocument {
 	// BCP 47 language of the document's text, and its title (its own, else its file name's).
 	readonly lang: string | undefined
 	readonly title: string
+	// Its core properties' author, subject and keywords (Info /Author, /Subject, /Keywords).
+	readonly properties?: PdfDocumentProperties
 	// The tables DrawingML text styles index (DocxPdfStyle.paint, .outline, .effects); absent for documents.
 	readonly paints?: readonly Paint[]
 	readonly strokes?: readonly Stroke[]

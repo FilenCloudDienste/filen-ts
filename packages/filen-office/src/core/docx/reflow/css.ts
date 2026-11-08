@@ -1,3 +1,4 @@
+import { runEffect, runEffectCss, runEmphasis } from "../layout/effects"
 import { borderWidth } from "../layout/styles"
 import { twips } from "../layout/units"
 import type { ResolvedBorder, ResolvedRunProps, ResolvedShading } from "../props/index"
@@ -223,6 +224,10 @@ export function runCss(run: ResolvedRunProps, faces?: CssFaces): string {
 	const text = color(run.color)
 
 	if (text !== undefined) out.push(`color: ${text}`)
+
+	const effects = runEffectCss(runEffect(run), runEmphasis(run))
+
+	if (effects.length > 0) out.push(effects.slice(0, -1))
 
 	const shading = run.shading
 	const background =

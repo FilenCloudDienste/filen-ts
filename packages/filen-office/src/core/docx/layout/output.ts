@@ -28,7 +28,11 @@ export const PageGraphic = {
 	// A note separator drawn without a separator story.
 	NOTE_SEPARATOR: 4,
 	// A changed-line bar in the margin (tracked changes shown as markup).
-	REVISION_BAR: 5
+	REVISION_BAR: 5,
+	// A cell's diagonal border from the box's top left to its bottom right corner (w:tl2br), and from its top
+	// right to its bottom left (w:tr2bl): key is a border key, the line's width the border's.
+	DIAGONAL_DOWN: 6,
+	DIAGONAL_UP: 7
 } as const
 
 export type PageGraphic = (typeof PageGraphic)[keyof typeof PageGraphic]
@@ -75,7 +79,9 @@ export const SourceFlag = {
 	// The paragraph's text contains page-dependent fields.
 	PAGE_FIELDS: 2,
 	// The text depends on the document's page count (NUMPAGES, SECTIONPAGES).
-	TOTAL_FIELDS: 4
+	TOTAL_FIELDS: 4,
+	// The paragraph's lines are neither numbered nor counted (w:suppressLineNumbers).
+	NO_LINE_NUMBERS: 8
 } as const
 
 // sourceInts: region, story, item (the first paragraph of a joined group), flags. Line SOURCE values index
@@ -114,6 +120,8 @@ export interface OutputView {
 // A source's map from items to its text: part, item, start and end offset of what the item laid out, in
 // text order (items of one paragraph ascending). Items that laid out nothing have no entry.
 export const SOURCE_MAP_INTS = 4
+
+const PIN_INTS = 8
 
 // A position in an output to roll back to or move content after.
 export class OutputMark {
@@ -190,8 +198,12 @@ export class PageOutput {
 	clipInts = new Int32Array(CLIP_INTS * 4)
 	// w:lastRenderedPageBreak offsets per source (body paragraphs only), for checks against Word's breaks.
 	sourceBreaks: (readonly number[] | undefined)[] = []
+	// Ranges that keep their place when the page's text moves (moveText): objects positioned on the page or
+	// its margins. PIN_INTS each: from and to of lines, graphics, objects and clips.
+	private pins: number[] = []
 
 	reset(): void {
+		this.pins.length = 0
 		this.text.reset()
 		this.graphicCount = 0
 		this.objectCount = 0
@@ -396,6 +408,7 @@ export class PageOutput {
 	}
 
 	rollback(mark: OutputMark): void {
+		this.unpin(mark)
 		this.text.truncate(mark.lines)
 		this.graphicCount = Math.min(this.graphicCount, mark.graphics)
 		this.objectCount = Math.min(this.objectCount, mark.objects)
@@ -472,6 +485,61 @@ export class PageOutput {
 			this.clipFloats[f] = (this.clipFloats[f] ?? 0) + dx
 			this.clipFloats[f + 1] = (this.clipFloats[f + 1] ?? 0) + dy
 		}
+	}
+
+	// Something keeps its place (pin).
+	get pinned(): boolean {
+		return this.pins.length > 0
+	}
+
+	// What was added since `from` keeps its place when moveText moves the rest.
+	pin(from: OutputMark): void {
+		this.unpin(from)
+		this.pins.push(
+			from.lines,
+			this.text.lineCount,
+			from.graphics,
+			this.graphicCount,
+			from.objects,
+			this.objectCount,
+			from.clips,
+			this.clipCount
+		)
+	}
+
+	// Drops the pins recorded since `mark`: they start at or after it in every list.
+	private unpin(mark: OutputMark): void {
+		const pins = this.pins
+
+		while (
+			pins.length > 0 &&
+			(pins[pins.length - PIN_INTS] ?? 0) >= mark.lines &&
+			(pins[pins.length - PIN_INTS + 2] ?? 0) >= mark.graphics &&
+			(pins[pins.length - PIN_INTS + 4] ?? 0) >= mark.objects &&
+			(pins[pins.length - PIN_INTS + 6] ?? 0) >= mark.clips
+		)
+			pins.length -= PIN_INTS
+	}
+
+	// Moves everything but the pinned ranges by dy (section vertical alignment).
+	moveText(dy: number): void {
+		const pins = this.pins
+		const from = new OutputMark()
+		const to = new OutputMark()
+
+		for (let at = 0; at < pins.length; at += PIN_INTS) {
+			to.lines = pins[at] ?? 0
+			to.graphics = pins[at + 2] ?? 0
+			to.objects = pins[at + 4] ?? 0
+			to.clips = pins[at + 6] ?? 0
+			this.move(from, to, 0, dy)
+			from.lines = pins[at + 1] ?? 0
+			from.graphics = pins[at + 3] ?? 0
+			from.objects = pins[at + 5] ?? 0
+			from.clips = pins[at + 7] ?? 0
+		}
+
+		this.move(from, null, 0, dy)
 	}
 
 	// Bottom of the content added since `from` (lines, graphics and objects), or -Infinity.

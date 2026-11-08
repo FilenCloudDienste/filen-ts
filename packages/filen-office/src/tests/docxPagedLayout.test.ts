@@ -2141,6 +2141,66 @@ describe("paged layout of edits", { timeout: 60_000 }, () => {
 		await expectSaved(edited)
 	})
 
+	it("shows the chapter numbers a fresh layout shows after edits to the text and the chapter headings", async () => {
+		const field = '<w:p><w:fldSimple w:instr=" PAGE "><w:r><w:t>1</w:t></w:r></w:fldSimple></w:p>'
+		const styles =
+			'<w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/><w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr></w:pPr></w:style>'
+		const numbering =
+			'<w:abstractNum w:abstractNumId="0"><w:lvl w:ilvl="0"><w:start w:val="1"/><w:numFmt w:val="decimal"/><w:lvlText w:val="%1"/></w:lvl></w:abstractNum>' +
+			'<w:num w:numId="1"><w:abstractNumId w:val="0"/></w:num>'
+		const chapter = (seed: number): string =>
+			para(`Chapter ${seed}`, '<w:pStyle w:val="Heading1"/>') +
+			Array.from({ length: 10 }, (_, k) => para(words(60, seed + k))).join("")
+		const body =
+			chapter(0) +
+			chapter(20) +
+			chapter(40) +
+			`<w:sectPr><w:footerReference w:type="default" r:id="rIdF1"/>${PAGE}<w:pgNumType w:chapStyle="1" w:chapSep="colon"/></w:sectPr>`
+		const edited = await editedLayout(
+			buildDocx({
+				body,
+				footers: { rIdF1: field },
+				parts: [
+					{
+						name: "word/styles.xml",
+						contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml",
+						data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">${styles}</w:styles>`
+					},
+					{
+						name: "word/numbering.xml",
+						contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.numbering+xml",
+						data: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:numbering xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">${numbering}</w:numbering>`
+					}
+				],
+				relationships: [
+					{ id: "rIdS", type: "styles", target: "styles.xml" },
+					{ id: "rIdN", type: "numbering", target: "numbering.xml" }
+				]
+			})
+		)
+		const headings = (): { node: Node; pos: number }[] =>
+			paragraphs(edited.session.state.doc, false, 1).filter(({ node }) => node.textContent.startsWith("Chapter"))
+
+		expect(edited.layout.pages.some(page => page.numberText.startsWith("3:"))).toBe(true)
+
+		// Text added in the second chapter: its pages and the third chapter's move on.
+		const second = headings()[1]
+
+		if (second === undefined) throw new Error("no heading")
+
+		await edited.edit(edited.session.state.tr.insertText(`${words(400, 3)} `, second.pos + second.node.nodeSize + 1))
+		await expectSaved(edited)
+
+		// The first heading gone: every later page shows a chapter less.
+		const first = headings()[0]
+
+		if (first === undefined) throw new Error("no heading")
+
+		await edited.edit(edited.session.state.tr.delete(first.pos, first.pos + first.node.nodeSize))
+		expect(edited.layout.pages.some(page => page.numberText.startsWith("3:"))).toBe(false)
+		await expectSaved(edited)
+	})
+
 	it("lets a shortened paragraph opening a page move back to the page before", async () => {
 		const p = (text: string): string => `<w:p><w:pPr><w:widowControl/></w:pPr><w:r><w:t xml:space="preserve">${text}</w:t></w:r></w:p>`
 		const body =

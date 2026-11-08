@@ -1,4 +1,5 @@
 import type { DocxGateReason, DocxOpenFailure, DocxVariant } from "../../core/docx/index"
+import type { DocxFindPatternOptions } from "../../core/docx/findPattern"
 import type { DecorationValue } from "../../core/docx/layout/index"
 import type { FontFaceDescriptor } from "../../core/fonts/index"
 import type { MathElement } from "../../core/math/index"
@@ -101,8 +102,7 @@ export interface DocxSessionApi {
 	close(): void
 }
 
-export interface DocxFindOptions {
-	readonly caseSensitive?: boolean
+export interface DocxFindOptions extends DocxFindPatternOptions {
 	// Stops after this many matches and one more, which tells that there are more (default DOCX_FIND_LIMIT).
 	readonly limit?: number
 }

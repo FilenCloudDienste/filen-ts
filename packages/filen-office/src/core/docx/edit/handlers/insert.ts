@@ -1,13 +1,24 @@
 import { Fragment, Slice, type Mark, type Node } from "prosemirror-model"
 import { TextSelection, type EditorState, type Transaction } from "prosemirror-state"
-import { MAX_LINK_TEXT, insertable as insertableText, linkTargetRefusal, linkTargetUri, type InsertCommand } from "../commands/insert"
+import { closeHistory } from "prosemirror-history"
+import {
+	MAX_LINK_TARGET,
+	MAX_LINK_TEXT,
+	insertable as insertableText,
+	linkTargetRefusal,
+	linkTargetUri,
+	type InsertCommand
+} from "../commands/insert"
+import { commandAllowed } from "../protection"
+import type { DocxEditorSession } from "../session"
 import { headingBookmark } from "../../fields/bookmarks"
 import type { DocxEditContext } from "../context"
-import { changeMarks, runPiecesIn } from "../formats"
+import { builtInStyleId, caretMarks, changeMarks, knownBuiltInStyleId, runPiecesIn, type FormatResolver } from "../formats"
 import type { FeatureHandlers, StoryCommandContext, StoryCommandHandler } from "../registry"
 import type { ParagraphBordersProps } from "../../props/index"
 import { NO_SOURCE, docxSchema } from "../schema"
 import { Ns } from "../../model/namespaces"
+import { openDocumentTranslation } from "../../layout/geometry"
 import { selectedLink, selectionHasLink } from "../snapshot/formats"
 
 // Links, breaks and characters from a symbol picker.
@@ -38,10 +49,10 @@ function inCell(state: EditorState): boolean {
 }
 
 // The caret's marks (what typing there gets), or those the whole selection shares.
-function marksAt(state: EditorState): readonly Mark[] {
+function marksAt(state: EditorState, formats: FormatResolver): readonly Mark[] {
 	const { $from, $to, empty } = state.selection
 
-	return empty ? (state.storedMarks ?? $from.marks()) : ($from.marksAcross($to) ?? $from.marks())
+	return empty ? caretMarks(state, formats) : ($from.marksAcross($to) ?? $from.marks())
 }
 
 // ---- breaks and characters -----------------------------------------------------------------------------
@@ -88,7 +99,7 @@ function horizontalLine(context: StoryCommandContext): Transaction | null {
 
 function symbol(context: StoryCommandContext, command: Cmd<"insert.symbol">): Transaction | null {
 	const state = context.state
-	const marksOf = marksAt(state)
+	const marksOf = marksAt(state, context.session.formats)
 	const content: Node[] = []
 
 	for (const part of command.text.split(SPECIAL)) {
@@ -109,11 +120,18 @@ function symbol(context: StoryCommandContext, command: Cmd<"insert.symbol">): Tr
 
 // ---- links ---------------------------------------------------------------------------------------------
 
-// The formatting a new link gets: the document's Hyperlink character style, else Word's look for it.
-function linkFormatting(context: DocxEditContext): readonly Mark[] {
-	const style = context.styles.byName("hyperlink", "character")
+const HYPERLINK_STYLE = "Hyperlink"
 
-	if (style !== undefined) return [marks.char_style.create({ styleId: style.id })]
+// The formatting a new link gets: the Hyperlink character style, added when the document lacks it (as Word). A
+// document translated from OpenDocument gets no style it lacks: its own Hyperlink style, else the look of one.
+function linkFormatting(context: DocxEditContext): readonly Mark[] {
+	if (!openDocumentTranslation(context.model.settings)) {
+		return [marks.char_style.create({ styleId: builtInStyleId(context, HYPERLINK_STYLE) })]
+	}
+
+	const style = knownBuiltInStyleId(context, HYPERLINK_STYLE)
+
+	if (style !== undefined) return [marks.char_style.create({ styleId: style })]
 
 	return [
 		marks.color.create({ value: context.resolver.color({ themeColor: "hyperlink" }) ?? "0563C1", themeColor: "hyperlink" }),
@@ -121,11 +139,15 @@ function linkFormatting(context: DocxEditContext): readonly Mark[] {
 	]
 }
 
-// Whether `mark` is formatting a link got for being one (see linkFormatting).
+// Whether `mark` is formatting a link got for being one (see linkFormatting; a direct theme colour and underline
+// is how other producers format one).
 function isLinkFormatting(context: DocxEditContext, mark: Mark): boolean {
 	switch (mark.type) {
-		case marks.char_style:
-			return mark.attrs["styleId"] === context.styles.byName("hyperlink", "character")?.id
+		case marks.char_style: {
+			const id = knownBuiltInStyleId(context, HYPERLINK_STYLE)
+
+			return id !== undefined && mark.attrs["styleId"] === id
+		}
 		case marks.color:
 			return mark.attrs["themeColor"] === "hyperlink"
 		default:
@@ -177,6 +199,18 @@ function withoutLink(context: DocxEditContext, marksOf: readonly Mark[]): readon
 	)
 }
 
+// [from, to] becomes `link`; `fresh`: a new link, which gets the formatting of one (see linkFormatting).
+function markLink(tr: Transaction, context: DocxEditContext, from: number, to: number, link: Mark, fresh: boolean): void {
+	tr.removeMark(from, to, marks.link)
+	tr.addMark(from, to, link)
+
+	if (!fresh) return
+
+	const pieces = runPiecesIn(tr.doc, [{ from, to }])
+
+	for (const mark of linkFormatting(context)) changeMarks(tr, pieces, mark.type, () => mark)
+}
+
 // link.set: the link at the selection gets the new target (and text); else the selection becomes a link, or
 // the text (by default the target, or the heading linked to) is inserted as one at the caret. A link to a
 // heading goes to its hidden bookmark, made in the same step when it has none (one undo takes both).
@@ -208,7 +242,7 @@ function setLink(context: StoryCommandContext, command: Cmd<"link.set">): Transa
 	const link = marks.link.create(linkAttrs(context, existing?.link, target, anchor))
 	let from = tr.mapping.map(existing?.from ?? selection.from, -1)
 	let to = tr.mapping.map(existing?.to ?? selection.to, 1)
-	const before = marksAt(state)
+	const before = marksAt(state, context.session.formats)
 
 	if (existing === undefined && selection.empty) {
 		const text = command.text ?? heading ?? target ?? anchor ?? ""
@@ -231,14 +265,7 @@ function setLink(context: StoryCommandContext, command: Cmd<"link.set">): Transa
 	if (existing !== undefined && existing.link.attrs["target"] === target && existing.link.attrs["anchor"] === anchor && !tr.docChanged)
 		return true
 
-	tr.removeMark(from, to, marks.link)
-	tr.addMark(from, to, link)
-
-	if (existing === undefined) {
-		const pieces = runPiecesIn(tr.doc, [{ from, to }])
-
-		for (const mark of linkFormatting(context.context)) changeMarks(tr, pieces, mark.type, () => mark)
-	}
+	markLink(tr, context.context, from, to, link, existing === undefined)
 
 	if (selection.empty) {
 		tr.setSelection(TextSelection.create(tr.doc, to))
@@ -277,6 +304,151 @@ function removeLink(context: StoryCommandContext): Transaction | null {
 	changeMarks(tr, after, marks.color, piece => (ofLink(piece, marks.color) ? undefined : marks.color.isInSet(piece.node.marks)))
 
 	return tr.docChanged ? tr : null
+}
+
+// ---- links as you type ---------------------------------------------------------------------------------
+
+// Word's AutoFormat As You Type, "Internet and network paths with hyperlinks": a web or e-mail address the
+// caret leaves with Space, Tab or Enter becomes a link.
+
+const SPACE = /\s/
+// Around an address: quotes and brackets before it, sentence punctuation after it.
+const LEADING = new Set(["(", "<", '"', "'", "“", "‘"])
+const TRAILING = new Set([".", ",", ";", ":", "!", "?", '"', "'", ">", "”", "’"])
+const WEB = /^(?:https?:\/\/[^/?#]+|www\.[^/?#.]+(?:\.[^/?#.]+)+(?=[/?#]|$))/i
+const EMAIL = /^(?:mailto:)?[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[\p{L}\p{N}-]+(?:\.[\p{L}\p{N}-]+)+$/u
+// What a link cannot be made of: text already linked, or deleted.
+const UNLINKABLE = [marks.link, marks.deletion, marks.move_from]
+
+// The word that ends at `pos` in its paragraph ([from, pos)): the text since the last space, tab or break.
+// Undefined when it is empty or too long to be an address, or when another inline node (a field, a bookmark,
+// a picture) or linked or deleted text is part of it.
+function wordBefore(doc: Node, pos: number): { readonly from: number; readonly text: string } | undefined {
+	const $pos = doc.resolve(pos)
+	const parent = $pos.parent
+
+	if (parent.type !== nodes.paragraph) return undefined
+
+	let index = $pos.textOffset > 0 ? $pos.index() : $pos.index() - 1
+	let cut = $pos.textOffset
+	let text = ""
+
+	for (; index >= 0; index--) {
+		const child = parent.child(index)
+
+		if (!child.isText) {
+			if (child.type === nodes.tab || child.type === nodes.break) break
+
+			return undefined
+		}
+
+		const own = cut > 0 ? (child.text ?? "").slice(0, cut) : (child.text ?? "")
+		let start = own.length
+
+		cut = 0
+
+		while (start > 0 && !SPACE.test(own[start - 1] ?? "")) {
+			if (own.length - start + text.length >= MAX_LINK_TARGET) return undefined
+
+			start--
+		}
+
+		if (start < own.length) {
+			if (child.marks.some(mark => UNLINKABLE.includes(mark.type))) return undefined
+
+			text = own.slice(start) + text
+		}
+
+		if (start > 0) break
+	}
+
+	return text === "" ? undefined : { from: pos - text.length, text }
+}
+
+// The address `word` holds and where in it ([start, end)), punctuation around it left out; undefined when it
+// holds none. www. goes to http://, a bare e-mail address to mailto:.
+function addressIn(word: string): { readonly start: number; readonly end: number; readonly target: string } | undefined {
+	let start = 0
+	let end = word.length
+
+	while (start < end && LEADING.has(word[start] ?? "")) start++
+
+	for (;;) {
+		const last = word[end - 1] ?? ""
+
+		if (end > start && (TRAILING.has(last) || (last === ")" && unbalanced(word, start, end)))) end--
+		else break
+	}
+
+	const address = word.slice(start, end)
+
+	if (WEB.test(address)) return { start, end, target: /^www\./i.test(address) ? `http://${address}` : address }
+	if (EMAIL.test(address)) return { start, end, target: /^mailto:/i.test(address) ? address : `mailto:${address}` }
+
+	return undefined
+}
+
+// Whether word[start, end) closes more brackets than it opens.
+function unbalanced(word: string, start: number, end: number): boolean {
+	let depth = 0
+
+	for (let k = start; k < end; k++) {
+		if (word[k] === "(") depth++
+		else if (word[k] === ")") depth--
+	}
+
+	return depth < 0
+}
+
+// Whether `pos` lies in a field's code or result (between a field character begin and its end).
+function inField(doc: Node, pos: number): boolean {
+	let depth = 0
+
+	doc.nodesBetween(0, pos, (node, at) => {
+		if (node.type === nodes.field_char && at < pos) {
+			const kind = node.attrs["kind"] as string
+
+			if (kind === "begin") depth++
+			else if (kind === "end") depth = Math.max(0, depth - 1)
+		}
+
+		return !node.isLeaf
+	})
+
+	return depth > 0
+}
+
+// The link the address ending at `pos` (the caret before the key that ends it) becomes, as its own undo step
+// (one undo right after the key takes back only the link, as in Word); null when the word there is no address,
+// is linked already, or may not be edited.
+export function autoLink(session: DocxEditorSession, pos: number): Transaction | null {
+	const state = session.state
+
+	if (session.readOnly) return null
+
+	const word = wordBefore(state.doc, pos)
+	const address = word === undefined ? undefined : addressIn(word.text)
+
+	if (word === undefined || address === undefined) return null
+
+	const written = linkTargetUri(address.target)
+
+	if ("refusal" in written || linkTargetRefusal(written.uri) !== undefined) return null
+
+	const from = word.from + address.start
+	const to = word.from + address.end
+
+	if (!commandAllowed(session, "link.set") || inField(state.doc, from)) return null
+
+	const context: StoryCommandContext = { session, state, context: session.context }
+	const tr = state.tr
+
+	markLink(tr, session.context, from, to, marks.link.create(linkAttrs(context, undefined, written.uri, null)), true)
+
+	// What is typed next keeps the formatting it was to have.
+	if (state.storedMarks !== null) tr.setStoredMarks(state.storedMarks)
+
+	return closeHistory(tr)
 }
 
 // ---- handlers ------------------------------------------------------------------------------------------

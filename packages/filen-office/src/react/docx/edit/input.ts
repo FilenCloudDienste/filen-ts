@@ -1,9 +1,11 @@
-import { Mark, type MarkType, type Node } from "prosemirror-model"
+import { Mark, type Node } from "prosemirror-model"
 import { TextSelection, type EditorState, type Transaction } from "prosemirror-state"
 import type { EditorView } from "prosemirror-view"
-import { FORMATTING_MARKS, docxSchema } from "../../../core/docx/edit/index"
+import { RUN_FORMATTING, docxSchema } from "../../../core/docx/edit/index"
 import { joinBackward, joinForward } from "../../../core/docx/paged/index"
 import { insidePair } from "../../../core/docx/edit/invariants/codePoints"
+import { autoLink } from "../../../core/docx/edit/handlers/insert"
+import type { DocxEditorSession } from "../../../core/docx/edit/session"
 
 // Edits over a selection, and word and line deletions, made as transactions on the document. Left to the
 // browser, they change the view's DOM across run spans and ProseMirror reads the result back: it rebuilds the
@@ -34,12 +36,8 @@ export function deleteBeforeComposition(state: EditorState): Transaction | null 
 	return state.selection.empty ? null : state.tr.deleteSelection().setStoredMarks(null).scrollIntoView()
 }
 
-// A run's own formatting: the formatting marks and its source run properties (scale, kerning, position).
-const RUN_FORMATTING: readonly MarkType[] = [...FORMATTING_MARKS.map(name => docxSchema.marks[name]), docxSchema.marks.run]
-const RUN_FORMATTING_SET: ReadonlySet<MarkType> = new Set(RUN_FORMATTING)
-
 function ownFormatting(marks: readonly Mark[]): readonly Mark[] {
-	return marks.filter(mark => RUN_FORMATTING_SET.has(mark.type))
+	return marks.filter(mark => RUN_FORMATTING.has(mark.type))
 }
 
 // The formatting text composed over the selection takes, as typing over it does: the first selected
@@ -73,7 +71,7 @@ export function composedFormatting(state: EditorState, from: number, text: strin
 
 	if (first === null || !first.isText || !differs) return null
 
-	let marks: readonly Mark[] = first.marks.filter(mark => !RUN_FORMATTING_SET.has(mark.type))
+	let marks: readonly Mark[] = first.marks.filter(mark => !RUN_FORMATTING.has(mark.type))
 
 	for (const mark of formatting) marks = mark.addToSet(marks)
 
@@ -112,8 +110,14 @@ function insertedText(event: InputEvent): string {
 
 // The transaction a beforeinput makes on `state` (the document's state, whose positions the view's are), or
 // undefined to leave it to the browser: typing with no selection and single-character deletions at a caret,
-// which stay inside one text node.
-export function inputTransaction(view: EditorView, state: EditorState, event: InputEvent): Transaction | undefined {
+// which stay inside one text node. Typing at a caret whose `typingMarks` (DocxEditorSession.typingMarks) differ
+// from the caret's own is a transaction too, with those marks.
+export function inputTransaction(
+	view: EditorView,
+	state: EditorState,
+	event: InputEvent,
+	typingMarks?: (state: EditorState) => readonly Mark[] | undefined
+): Transaction | undefined {
 	if (view.composing || event.isComposing) return undefined
 
 	const type = event.inputType
@@ -128,8 +132,11 @@ export function inputTransaction(view: EditorView, state: EditorState, event: In
 		const range = type === "insertReplacementText" || !selected ? targetRange(view, event, state.doc) : undefined
 
 		if (range !== undefined) return state.tr.insertText(text, range.from, range.to).scrollIntoView()
+		if (selected) return state.tr.insertText(text).scrollIntoView()
 
-		return selected ? state.tr.insertText(text).scrollIntoView() : undefined
+		const caretMarks = typingMarks?.(state)
+
+		return caretMarks === undefined ? undefined : state.tr.setStoredMarks(caretMarks).insertText(text).scrollIntoView()
 	}
 
 	if (CHARACTER_DELETES.has(type)) return selected ? state.tr.deleteSelection().scrollIntoView() : undefined
@@ -166,4 +173,58 @@ function withinParagraph(state: EditorState, type: string, range: { readonly fro
 	const to = Math.min(range.to, end)
 
 	return from < to ? state.tr.delete(from, to).scrollIntoView() : state.tr
+}
+
+// ---- links as you type ---------------------------------------------------------------------------------
+
+// Whether a beforeinput types a Space at the caret right after a web or e-mail address (see autoLink): the
+// Space is then typed as a transaction (spaceTransaction), so the link follows it at once (autoLinked).
+export function spaceEndsAddress(view: EditorView, session: DocxEditorSession, event: InputEvent): boolean {
+	if (view.composing || event.isComposing || event.inputType !== "insertText" || event.data !== " ") return false
+
+	const selection = session.state.selection
+
+	return selection.empty && selection instanceof TextSelection && autoLink(session, selection.from) !== null
+}
+
+// The Space spaceEndsAddress found, typed at the caret.
+export function spaceTransaction(session: DocxEditorSession): Transaction {
+	return session.state.tr.insertText(" ").scrollIntoView()
+}
+
+// Runs `act` (a key that may end a word: Space, Tab, Enter, Shift+Enter) and, when it put a space, a tab or a
+// break right after the caret it started from or split the paragraph there, makes the address before it a link
+// through `apply`. What `act` returns.
+export function autoLinked(session: DocxEditorSession, act: () => boolean, apply: (tr: Transaction) => unknown): boolean {
+	const before = session.state
+	const caret = before.selection
+
+	if (!caret.empty || session.readOnly) return act()
+
+	const done = act()
+	const state = session.state
+
+	if (state.doc !== before.doc && state.doc.content.size > before.doc.content.size && endsWord(state.doc, caret.from)) {
+		const tr = autoLink(session, caret.from)
+
+		if (tr !== null) apply(tr)
+	}
+
+	return done
+}
+
+// Whether a space, a tab or a break follows `pos`, or its paragraph ends there.
+function endsWord(doc: Node, pos: number): boolean {
+	const $pos = doc.resolve(pos)
+
+	if (!$pos.parent.isTextblock) return false
+
+	const after = $pos.nodeAfter
+
+	return (
+		after === null ||
+		after.type === docxSchema.nodes.tab ||
+		after.type === docxSchema.nodes.break ||
+		(after.isText && /^\s/.test(after.text ?? ""))
+	)
 }

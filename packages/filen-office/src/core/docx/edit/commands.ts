@@ -21,6 +21,9 @@ export {
 	DOCX_PARAGRAPH_STYLES,
 	DOCX_PARAGRAPH_STYLE_MENU,
 	PARAGRAPH_STYLE_NAMES,
+	browserReservedShortcut,
+	shortcutFor,
+	shortcutHint,
 	type BaseCommand,
 	type DocxAlignment,
 	type DocxCommandContext,
@@ -29,7 +32,8 @@ export {
 	type DocxCommandScope,
 	type DocxEditorCommandGroup,
 	type DocxParagraphStyle,
-	type DocxParagraphStyleInfo
+	type DocxParagraphStyleInfo,
+	type DocxShortcutEntry
 } from "./commands/base"
 
 export type DocxEditorCommand =

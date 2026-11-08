@@ -13,8 +13,9 @@ import { Region } from "../../core/docx/layout/index"
 import type { HitResult, ObjectHit, ObjectHitKind, PagedEditor } from "../../core/docx/paged/index"
 import { EditSink } from "./edit/sink"
 import { EditSurface, type DocxEditorMark } from "./edit/surface"
+import { unitDragSelection } from "./edit/unitDrag"
 import type { DocxDocument } from "./store"
-import { readViewport, type PagesViewport } from "./viewport"
+import { anchoredScrollTop, pageAt, readViewport, type PagesViewport } from "./viewport"
 
 // Paged editing on the rendered pages, unstyled: the pages (only those in view mounted, patched line by line
 // as edits lay them out again), the caret, selection and composition drawn over them, pointer and touch
@@ -25,6 +26,8 @@ export interface DocxEditorHandle {
 	focus(): void
 	scrollToCaret(): void
 	scrollToPage(index: number, y?: number): void
+	// Word's Go To a page: the caret to the start of the page's first body line, the page to the top of the view.
+	goToPage(index: number): void
 	// The selection's two ends on screen (client px; bottom of each end's line), for touch handles and a menu
 	// placed next to the selection; undefined where an end is not drawn.
 	selectionPoints(): { readonly start: ClientPoint | undefined; readonly end: ClientPoint | undefined }
@@ -97,8 +100,14 @@ export interface DocxEditorProps {
 	readonly readOnly?: boolean
 	// Cmd as the shortcut modifier (Apple platforms).
 	readonly apple?: boolean
-	// Find requested (Mod+F): the app's own find.
-	readonly onFind?: () => void
+	// In the desktop app: the shortcuts the browser owns are the editor's (Word's line spacing).
+	readonly desktop?: boolean
+	// Find requested (Mod+F), or Find and Replace (Ctrl+H): the app's own find.
+	readonly onFind?: (replace: boolean) => void
+	// Go To requested (Ctrl+G); without it the key finds.
+	readonly onGoTo?: () => void
+	// The page at the top of the view (index) and the page count, whenever either changes.
+	readonly onPage?: (page: number, count: number) => void
 	// Ranges to mark (spelling, search results), drawn as data-fo-mark boxes; sorted by `from` costs least.
 	readonly marks?: readonly DocxEditorMark[]
 	// Top-level blocks the input view renders on each side of the selection.
@@ -197,24 +206,21 @@ class PageLayouts {
 	}
 }
 
-// The first page whose bottom is below `y`.
-function pageAt(layout: Layout, y: number): number {
-	let low = 0
-	let high = layout.tops.length - 1
-
-	while (low < high) {
-		const middle = (low + high) >> 1
-
-		if ((layout.tops[middle] ?? 0) + (layout.heights[middle] ?? 0) < y) low = middle + 1
-		else high = middle
-	}
-
-	return low
-}
-
 interface Drag {
 	readonly pointer: number
 	readonly anchor: number
+	// What the press selected: a character position (a click), a word (double click), a paragraph (triple).
+	readonly unit: "char" | "word" | "paragraph"
+	// The word or paragraph pressed, kept selected whichever way the drag goes.
+	readonly from: number
+	readonly to: number
+	// Where the press was (client px); a word or paragraph drag starts once the pointer has left it.
+	readonly pressX: number
+	readonly pressY: number
+	moved: boolean
+	// The selection last made by a word or paragraph drag (a move within one unit changes nothing).
+	lastAnchor: number
+	lastHead: number
 	clientX: number
 	clientY: number
 	frame: number
@@ -252,6 +258,10 @@ export function DocxEditor(props: DocxEditorProps) {
 	// The end a touch handle drag keeps fixed.
 	const handleDragRef = useRef<{ end: "start" | "end"; fixed: number } | null>(null)
 	const revealRef = useRef(true)
+	// The scroll position as last scrolled to (a commit that shrinks the content clamps the element's own
+	// before its effects run), and the layout it was in.
+	const scrollTopRef = useRef(0)
+	const anchorLayoutRef = useRef<Layout | null>(null)
 	const [surface] = useState(() => new EditSurface(editor))
 	const [layouts] = useState(() => new PageLayouts())
 	const [viewport, setViewport] = useState<PagesViewport>({ top: 0, height: 0, width: 0 })
@@ -268,6 +278,8 @@ export function DocxEditor(props: DocxEditorProps) {
 					first: Math.max(0, pageAt(layout, viewport.top) - overscan),
 					last: Math.min(count - 1, pageAt(layout, viewport.top + viewport.height) + overscan)
 				}
+	// The page in view: the one across the middle of the view, as the viewer counts it (DocxPages).
+	const pageInView = count === 0 ? 0 : Math.min(count - 1, pageAt(layout, viewport.top + viewport.height / 2))
 	const leftOf = (index: number): number =>
 		Math.max(gap, ((Math.max(viewport.width, layout.contentWidth) - aside - (layout.widths[index] ?? 0)) / 2) | 0)
 
@@ -404,6 +416,19 @@ export function DocxEditor(props: DocxEditorProps) {
 			if (container !== null && index >= 0 && index < count)
 				container.scrollTop = Math.max(0, (layout.tops[index] ?? 0) + y * zoom - gap)
 		},
+		goToPage(index) {
+			const container = containerRef.current
+
+			if (container === null || index < 0 || index >= count) return
+			if (editor.activeStory !== editor.body.session.story.story.index) editor.exitStory()
+
+			const hit = editor.hitTest(index, 0, 0)
+
+			if (hit !== undefined) editor.moveTo(hit, false, false)
+
+			revealRef.current = false
+			container.scrollTop = Math.max(0, (layout.tops[index] ?? 0) - gap)
+		},
 		selectionPoints() {
 			const content = contentRef.current?.getBoundingClientRect()
 			const ends = editor.ends()
@@ -447,7 +472,24 @@ export function DocxEditor(props: DocxEditorProps) {
 	const caretClientRectRef = useRef(caretClientRect)
 	const pageMoveRef = useRef(pageMove)
 	const onFindRef = useRef(props.onFind)
+	const onGoToRef = useRef(props.onGoTo)
+	const onPageRef = useRef(props.onPage)
 	const scrollToCaretRef = useRef(scrollToCaret)
+
+	// Zooming keeps the same spot of the same page at the top of the view, before the view is read below.
+	useLayoutEffect(() => {
+		const container = containerRef.current
+		const previous = anchorLayoutRef.current
+
+		anchorLayoutRef.current = layout
+
+		if (container === null || previous === null || previous.zoom === layout.zoom || previous.tops.length === 0) return
+
+		const top = anchoredScrollTop(previous, layout, scrollTopRef.current)
+
+		container.scrollTop = top
+		scrollTopRef.current = container.scrollTop
+	}, [layout])
 
 	// The view's size and scroll position: read in the commit that sizes the content (a scrollbar it brings or
 	// takes away moves the pages in the same paint), then once per frame on scrolling and resizing.
@@ -455,7 +497,7 @@ export function DocxEditor(props: DocxEditorProps) {
 		const container = containerRef.current
 
 		if (container !== null) setViewport(readViewport(container))
-	}, [layout.total, layout.contentWidth])
+	}, [layout.total, layout.contentWidth, layout.zoom])
 
 	useEffect(() => {
 		const container = containerRef.current
@@ -470,6 +512,10 @@ export function DocxEditor(props: DocxEditorProps) {
 		const schedule = (): void => {
 			if (frame === 0) frame = requestAnimationFrame(read)
 		}
+		const onScroll = (): void => {
+			scrollTopRef.current = container.scrollTop
+			schedule()
+		}
 		const observer = typeof ResizeObserver === "function" ? new ResizeObserver(schedule) : undefined
 
 		// The user scrolling first: the caret is no longer brought into view (see revealCaret).
@@ -477,14 +523,15 @@ export function DocxEditor(props: DocxEditorProps) {
 			revealRef.current = false
 		}
 
-		container.addEventListener("scroll", schedule, { passive: true })
+		scrollTopRef.current = container.scrollTop
+		container.addEventListener("scroll", onScroll, { passive: true })
 		container.addEventListener("wheel", scrolled, { passive: true })
 		container.addEventListener("touchstart", scrolled, { passive: true })
 		container.addEventListener("keydown", scrolled)
 		observer?.observe(container)
 
 		return () => {
-			container.removeEventListener("scroll", schedule)
+			container.removeEventListener("scroll", onScroll)
 			container.removeEventListener("wheel", scrolled)
 			container.removeEventListener("touchstart", scrolled)
 			container.removeEventListener("keydown", scrolled)
@@ -505,10 +552,15 @@ export function DocxEditor(props: DocxEditorProps) {
 			...(props.describedBy === undefined ? {} : { describedBy: props.describedBy }),
 			readOnly: readOnlyRef.current,
 			apple: props.apple === true,
+			desktop: props.desktop === true,
 			...(props.window === undefined ? {} : { window: props.window }),
 			caretClientRect: () => caretClientRectRef.current(),
 			pageMove: (dir, extend) => pageMoveRef.current(dir, extend),
-			onFind: () => onFindRef.current?.()
+			onFind: replace => onFindRef.current?.(replace),
+			onGoTo: () => {
+				if (onGoToRef.current === undefined) onFindRef.current?.(false)
+				else onGoToRef.current()
+			}
 		})
 		const onFocus = (): void => setFocused(true)
 		const onBlur = (): void => setFocused(false)
@@ -547,8 +599,15 @@ export function DocxEditor(props: DocxEditorProps) {
 		caretClientRectRef.current = caretClientRect
 		pageMoveRef.current = pageMove
 		onFindRef.current = props.onFind
+		onGoToRef.current = props.onGoTo
+		onPageRef.current = props.onPage
 		scrollToCaretRef.current = scrollToCaret
 	})
+
+	// Reported only when the page in view or the count changes, not on every scroll.
+	useEffect(() => {
+		onPageRef.current?.(pageInView, count)
+	}, [pageInView, count])
 
 	// Shown in place of another view of the document (Mobile view), the pages bring the caret's paragraph into
 	// view once the layout has placed it, unless the user pressed or scrolled them first (revealRef).
@@ -676,6 +735,36 @@ export function DocxEditor(props: DocxEditorProps) {
 		if (drag !== null && drag.frame !== 0) cancelAnimationFrame(drag.frame)
 	}
 
+	// The selection to the pointer: by character from the press, or by whole words or paragraphs from the one
+	// pressed (Word's double- and triple-click drags), which a jitter within the click slop leaves as it is.
+	const extendDrag = (drag: Drag): void => {
+		if (drag.unit !== "char" && !drag.moved) {
+			if (Math.hypot(drag.clientX - drag.pressX, drag.clientY - drag.pressY) <= CLICK_SLOP) return
+
+			drag.moved = true
+		}
+
+		const hit = hitAt(drag.clientX, drag.clientY)
+
+		if (hit === undefined) return
+
+		if (drag.unit === "char") {
+			editor.selectRange(drag.anchor, hit)
+
+			return
+		}
+
+		const under = drag.unit === "word" ? editor.geometry.wordRange(hit.pos) : editor.geometry.paragraphRange(hit.pos)
+		const { anchor, head } = unitDragSelection(drag, under)
+
+		if (anchor === drag.lastAnchor && head === drag.lastHead) return
+
+		drag.lastAnchor = anchor
+		drag.lastHead = head
+		// A unit's end belongs to the line it ends, its start to the line it starts.
+		editor.selectRange(anchor, { ...hit, pos: head, affinity: head < anchor ? 1 : -1, atom: false })
+	}
+
 	// Dragging near or past the scroll area's edge scrolls, faster the farther past it.
 	const autoScroll = (time: number): void => {
 		const drag = dragRef.current
@@ -705,10 +794,9 @@ export function DocxEditor(props: DocxEditorProps) {
 		const speed = Math.min(AUTO_SCROLL_MAX, Math.abs(past) * AUTO_SCROLL_RATE)
 
 		container.scrollTop += Math.sign(past) * Math.max(1, Math.round(speed * elapsed))
-
-		const hit = hitAt(drag.clientX, drag.clientY)
-
-		if (hit !== undefined) editor.selectRange(drag.anchor, hit)
+		// The pages moved under the pointer: past any jitter.
+		drag.moved = true
+		extendDrag(drag)
 
 		drag.frame = requestAnimationFrame(autoScroll)
 	}
@@ -809,9 +897,20 @@ export function DocxEditor(props: DocxEditorProps) {
 		else editor.select(hit, event.shiftKey)
 
 		sinkRef.current?.focus()
+
+		const selection = editor.selection()
+
 		dragRef.current = {
 			pointer: event.pointerId,
-			anchor: editor.selection().anchor,
+			anchor: selection.anchor,
+			unit: clicks >= 3 ? "paragraph" : clicks === 2 ? "word" : "char",
+			from: selection.from,
+			to: selection.to,
+			pressX: event.clientX,
+			pressY: event.clientY,
+			moved: false,
+			lastAnchor: selection.anchor,
+			lastHead: selection.head,
 			clientX: event.clientX,
 			clientY: event.clientY,
 			frame: 0,
@@ -839,10 +938,7 @@ export function DocxEditor(props: DocxEditorProps) {
 
 		drag.clientX = event.clientX
 		drag.clientY = event.clientY
-
-		const hit = hitAt(event.clientX, event.clientY)
-
-		if (hit !== undefined) editor.selectRange(drag.anchor, hit)
+		extendDrag(drag)
 
 		if (drag.frame === 0) drag.frame = requestAnimationFrame(autoScroll)
 	}

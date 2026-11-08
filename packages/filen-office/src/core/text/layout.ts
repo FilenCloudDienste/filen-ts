@@ -16,7 +16,7 @@ export const Alignment = { START: 0, CENTER: 1, END: 2, BOTH: 3, DISTRIBUTE: 4 }
 
 export type Alignment = (typeof Alignment)[keyof typeof Alignment]
 
-export const LineRule = { AUTO: 0, EXACT: 1, AT_LEAST: 2 } as const
+export const LineRule = { AUTO: 0, EXACT: 1, AT_LEAST: 2, GRID: 3 } as const
 
 export type LineRule = (typeof LineRule)[keyof typeof LineRule]
 
@@ -65,8 +65,10 @@ export interface ParagraphGeometry {
 	readonly tabs: TabStops | null
 	readonly defaultTabStop: number
 	readonly lineRule: LineRule
-	// AUTO: a multiple of the single line height (Word: w:line / 240); EXACT and AT_LEAST: px.
+	// AUTO: a multiple of the single line height (Word: w:line / 240); EXACT, AT_LEAST and GRID: px.
 	readonly lineSpacing: number
+	// GRID: the document grid's row in px. A line takes whole rows, at least lineSpacing (Word's snap to grid).
+	readonly gridPitch?: number
 	// Justify lines ending in a line break (Word does unless w:doNotExpandShiftReturn). Default true.
 	readonly expandLineBreaks?: boolean
 	// A hanging indent is also a tab stop on the first line (unless w:doNotUseIndentAsNumberingTabStop).
@@ -863,7 +865,9 @@ export class ParagraphLayouter {
 
 	private estimateHeight(p: PreparedParagraph, g: ParagraphGeometry, item: number): number {
 		const style = item < p.count ? (p.style[item] ?? p.markStyle) : p.markStyle
-		const natural = (this.styles.ascent[style] ?? 0) + (this.styles.descent[style] ?? 0)
+		const styles = this.styles
+		const natural =
+			(styles.ascent[style] ?? 0) + (styles.descent[style] ?? 0) + (styles.markAbove[style] ?? 0) + (styles.markBelow[style] ?? 0)
 
 		return lineHeightFor(g, natural)
 	}
@@ -1403,8 +1407,8 @@ export class ParagraphLayouter {
 				a = (p.objectBox[box + 1] ?? 0) + shift
 				d = (p.objectBox[box + 2] ?? 0) - shift
 			} else {
-				a = (styles.ascent[style] ?? 0) + shift
-				d = (styles.descent[style] ?? 0) - shift
+				a = (styles.ascent[style] ?? 0) + (styles.markAbove[style] ?? 0) + shift
+				d = (styles.descent[style] ?? 0) + (styles.markBelow[style] ?? 0) - shift
 				objectsOnly = false
 			}
 
@@ -1420,14 +1424,14 @@ export class ParagraphLayouter {
 		const markOnLastLine = g.libreOfficeSpacing !== true && g.editEngineSpacing !== true
 
 		if (!any || (last && markOnLastLine && !(objectsOnly && g.markSizesObjectLines === false))) {
-			ascent = Math.max(ascent, styles.ascent[p.markStyle] ?? 0)
-			descent = Math.max(descent, styles.descent[p.markStyle] ?? 0)
+			ascent = Math.max(ascent, (styles.ascent[p.markStyle] ?? 0) + (styles.markAbove[p.markStyle] ?? 0))
+			descent = Math.max(descent, (styles.descent[p.markStyle] ?? 0) + (styles.markBelow[p.markStyle] ?? 0))
 		}
 
 		this.rowHeight = lineHeightFor(g, ascent + descent)
 		// Extra line spacing goes above the text (and a smaller exact height clips its top), or where LibreOffice puts it.
 		this.rowBaseline =
-			g.libreOfficeSpacing !== true || g.lineRule === LineRule.AT_LEAST
+			g.libreOfficeSpacing !== true || g.lineRule === LineRule.AT_LEAST || g.lineRule === LineRule.GRID
 				? g.editEngineSpacing === true && g.lineRule === LineRule.AUTO && g.lineSpacing < 1
 					? Math.min(ascent, (this.rowHeight * 4) / 5)
 					: this.rowHeight - descent
@@ -1981,12 +1985,18 @@ export class ParagraphLayouter {
 }
 
 // A line's height for its natural (font) height under the paragraph's spacing rule.
-export function lineHeightFor(g: Pick<ParagraphGeometry, "lineRule" | "lineSpacing">, natural: number): number {
+export function lineHeightFor(g: Pick<ParagraphGeometry, "lineRule" | "lineSpacing" | "gridPitch">, natural: number): number {
 	switch (g.lineRule) {
 		case LineRule.EXACT:
 			return g.lineSpacing
 		case LineRule.AT_LEAST:
 			return Math.max(g.lineSpacing, natural)
+		case LineRule.GRID: {
+			const pitch = g.gridPitch ?? 0
+
+			// The tolerance keeps a line exactly a row tall from rounding up to two.
+			return pitch > 0 ? Math.max(g.lineSpacing, Math.ceil(natural / pitch - 1e-6) * pitch) : Math.max(g.lineSpacing, natural)
+		}
 		default:
 			return natural * g.lineSpacing
 	}

@@ -101,6 +101,8 @@ function workerFactory(
 
 async function edited(bytes: Uint8Array, text = "Edited ") {
 	const opened = await openBytes(bytes)
+	// Saves compared byte for byte stamp the same core properties time.
+	opened.context.identity.now = () => Date.UTC(2026, 0, 1)
 	const session = new DocxEditorSession(opened.context)
 	let at = -1
 

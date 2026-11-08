@@ -22,8 +22,10 @@ export interface DocxReflowProps {
 	readonly readOnly?: boolean
 	// Cmd as the shortcut modifier (Apple platforms).
 	readonly apple?: boolean
-	// Find requested (Mod+F): the app's own find.
-	readonly onFind?: () => void
+	// In the desktop app: the shortcuts the browser owns are the editor's (Word's line spacing).
+	readonly desktop?: boolean
+	// Find requested (Mod+F), or Find and Replace (Ctrl+H): the app's own find.
+	readonly onFind?: (replace: boolean) => void
 	// Ranges to mark (spelling, search results).
 	readonly marks?: readonly DocxEditorMark[]
 	// Presses on objects in the text, by kind (a press's page is -1 and its page coordinates 0 here).
@@ -45,6 +47,7 @@ export function DocxReflow(props: DocxReflowProps): ReactNode {
 		describedBy: props.describedBy,
 		readOnly: props.readOnly === true,
 		apple: props.apple === true,
+		desktop: props.desktop === true,
 		onFind: props.onFind,
 		marks: props.marks ?? EMPTY_MARKS,
 		interactions: props.interactions,
@@ -57,6 +60,8 @@ export function DocxReflow(props: DocxReflowProps): ReactNode {
 		focus: () => viewRef.current?.focus(),
 		scrollToCaret: () => viewRef.current?.scrollToCaret(),
 		scrollToPage: index => viewRef.current?.scrollToPage(index),
+		// No pages here: the page's share of the document.
+		goToPage: index => viewRef.current?.scrollToPage(index),
 		selectionPoints: () => viewRef.current?.selectionPoints() ?? { start: undefined, end: undefined },
 		dragSelectionEnd: (end, clientX, clientY) => viewRef.current?.dragSelectionEnd(end, clientX, clientY),
 		endSelectionDrag: () => viewRef.current?.endSelectionDrag(),

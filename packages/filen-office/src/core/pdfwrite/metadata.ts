@@ -1,9 +1,13 @@
 import { utf8 } from "./objects"
 
-// The document's XMP metadata stream (ISO 32000-1 §14.3.2; ISO 16684-1): title, producer, and for tagged
+// The document's XMP metadata stream (ISO 32000-1 §14.3.2; ISO 16684-1): title, author, subject, keywords and
+// producer as the Info dictionary has them (§14.3.3: dc:creator, dc:description, pdf:Keywords), and for tagged
 // output the PDF/UA identification ISO 14289-1 §5 requires (pdfuaid:part).
 export function xmpMetadata(options: {
 	readonly title: string | undefined
+	readonly author?: string | undefined
+	readonly subject?: string | undefined
+	readonly keywords?: string | undefined
 	readonly lang: string | undefined
 	readonly pdfua: boolean
 }): Uint8Array {
@@ -11,6 +15,13 @@ export function xmpMetadata(options: {
 		options.title === undefined
 			? ""
 			: `<dc:title><rdf:Alt><rdf:li xml:lang="x-default">${escapeXml(options.title)}</rdf:li></rdf:Alt></dc:title>\n`
+	const author =
+		options.author === undefined ? "" : `<dc:creator><rdf:Seq><rdf:li>${escapeXml(options.author)}</rdf:li></rdf:Seq></dc:creator>\n`
+	const subject =
+		options.subject === undefined
+			? ""
+			: `<dc:description><rdf:Alt><rdf:li xml:lang="x-default">${escapeXml(options.subject)}</rdf:li></rdf:Alt></dc:description>\n`
+	const keywords = options.keywords === undefined ? "" : `<pdf:Keywords>${escapeXml(options.keywords)}</pdf:Keywords>\n`
 	const language =
 		options.lang === undefined ? "" : `<dc:language><rdf:Bag><rdf:li>${escapeXml(options.lang)}</rdf:li></rdf:Bag></dc:language>\n`
 	const pdfua = options.pdfua ? "<pdfuaid:part>1</pdfuaid:part>\n" : ""
@@ -22,7 +33,10 @@ export function xmpMetadata(options: {
 			'<rdf:Description rdf:about="" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:pdf="http://ns.adobe.com/pdf/1.3/" xmlns:pdfuaid="http://www.aiim.org/pdfua/ns/id/">\n' +
 			"<dc:format>application/pdf</dc:format>\n" +
 			title +
+			author +
+			subject +
 			language +
+			keywords +
 			"<pdf:Producer>Filen</pdf:Producer>\n" +
 			pdfua +
 			"</rdf:Description>\n</rdf:RDF>\n</x:xmpmeta>\n" +

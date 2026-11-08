@@ -2,6 +2,7 @@ import type { Mark, Node } from "prosemirror-model"
 import { relationshipKind, type DocxPackage } from "../package"
 import type { StoryPart } from "../model/index"
 import type { DocxEditContext } from "../edit/context"
+import { corePropertiesPart } from "../../opc/coreProperties"
 import { Namespaces, type XmlDocument } from "../../xml/index"
 import { controlKey, controlOf, simpleBinding, sourceControl, storeId, type ControlInfo, type SimpleBinding } from "./controls"
 import { formatControlDate, parseControlDate, storedDate } from "./dates"
@@ -20,9 +21,6 @@ export const EXTENDED_PROPERTIES_STORE = "6668398D-A668-4E3E-A5EB-62B293D839F1"
 // whose root is in the cover page properties namespace.
 export const COVER_PAGE_STORE = "55AF091B-3C7A-41E3-B477-F2FDAA23CFDA"
 const COVER_PAGE_NAMESPACE = "http://schemas.microsoft.com/office/2006/coverPageProps"
-
-const CORE_PROPERTIES = "http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties"
-const STRICT_CORE_PROPERTIES = "http://purl.oclc.org/ooxml/officeDocument/relationships/metadata/core-properties"
 
 // The node `binding` finds in `document`, or -1.
 export function boundNode(document: XmlDocument, namespaces: Namespaces, binding: SimpleBinding): number {
@@ -92,17 +90,7 @@ export class BindingStores {
 	}
 
 	async part(store: string): Promise<string | undefined> {
-		if (store === CORE_PROPERTIES_STORE) {
-			const relationships = await this.pkg.relationships("")
-			const core = relationships.all.find(
-				relationship =>
-					!relationship.external &&
-					(relationship.type === CORE_PROPERTIES || relationship.type === STRICT_CORE_PROPERTIES) &&
-					relationship.partName !== undefined
-			)
-
-			return core?.partName !== undefined && this.pkg.has(core.partName) ? core.partName : undefined
-		}
+		if (store === CORE_PROPERTIES_STORE) return corePropertiesPart(this.pkg.opc)
 
 		if (store === EXTENDED_PROPERTIES_STORE) {
 			const relationships = await this.pkg.relationships("")

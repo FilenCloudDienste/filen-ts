@@ -41,9 +41,19 @@ export interface MarkerAttrs {
 	readonly id: string | null
 }
 
-// A marker node's attributes: a new bookmark also has its name (a source one keeps it in its bytes).
+// A marker node's attributes: a new bookmark or move range start also has its name (a source one keeps it in
+// its bytes), a new move range start its author and date (CT_MoveBookmark).
 export interface MarkerNodeAttrs extends MarkerAttrs {
 	readonly name: string | null
+	readonly author?: string | null
+	readonly date?: string | null
+}
+
+// The attributes of a marker node standing for `marker` (one of a list, or a node's own).
+export function markerNodeAttrs(marker: MarkerAttrs): MarkerNodeAttrs {
+	const own = marker as Partial<MarkerNodeAttrs>
+
+	return { src: marker.src, kind: marker.kind, id: marker.id, name: own.name ?? null, author: own.author ?? null, date: own.date ?? null }
 }
 
 export type MarkerList = readonly MarkerAttrs[]
@@ -298,14 +308,15 @@ const nodes = {
 			update: nil
 		}
 	},
-	// A range marker inside a paragraph (see MarkerKind); `name` is a new bookmark's w:name.
+	// A range marker inside a paragraph (see MarkerKind); `name` is a new bookmark's or move range's w:name,
+	// `author` and `date` a new move range start's.
 	marker: {
 		group: "inline",
 		inline: true,
 		atom: true,
 		selectable: false,
 		docxLevel: "paragraph",
-		attrs: { src, kind: { default: "bookmarkStart" }, id: nil, name: nil }
+		attrs: { src, kind: { default: "bookmarkStart" }, id: nil, name: nil, author: nil, date: nil }
 	},
 	// m:oMath / m:oMathPara inside a paragraph; `omml` the equation's new XML (null: as the source has it).
 	math: {
@@ -495,6 +506,12 @@ export const FORMATTING_MARKS: readonly DocxMarkName[] = [
 	"web_hidden"
 ]
 
+// A run's own formatting: the formatting marks and its source run properties (scale, kerning, position).
+export const RUN_FORMATTING: ReadonlySet<MarkType> = new Set([
+	...FORMATTING_MARKS.map(name => docxSchema.marks[name]),
+	docxSchema.marks.run
+])
+
 // Source revision wrappers.
 export const REVISION_MARKS: readonly DocxMarkName[] = ["insertion", "deletion", "move_from", "move_to"]
 
@@ -611,9 +628,16 @@ export function survivorsOf(node: Node): MarkerList {
 			id: node.attrs["id"] as string | null
 		}
 		const name = node.attrs["name"] as string | null
+		const author = node.attrs["author"] as string | null
 
-		// A new bookmark's name (a source one has it in its bytes).
-		return [name === null ? marker : ({ ...marker, name } as MarkerNodeAttrs)]
+		// A new bookmark's name, a new move range start's name, author and date (a source one has them in its bytes).
+		if (name === null) return [marker]
+
+		return [
+			(author === null
+				? { ...marker, name }
+				: { ...marker, name, author, date: node.attrs["date"] as string | null }) as MarkerNodeAttrs
+		]
 	}
 	if (type === "comment_ref")
 		return [{ src: node.attrs["src"] as number, kind: "commentReference", id: node.attrs["id"] as string | null }]

@@ -25,7 +25,9 @@ import {
 } from "../../text/index"
 import { symbolTable, symbolToUnicode } from "../../fonts/index"
 import { GRAPHIC_FLOATS, GRAPHIC_INTS, Layer, OBJECT_FLOATS, OBJECT_INTS, PageGraphic } from "../layout/output"
+import { Emphasis, OUTLINE_WIDTH, PAPER, RunEffect, effectFillsPaper, effectShadows, effectStrokes } from "../layout/effects"
 import type { DecorationValue } from "../layout/styles"
+import { borderLines } from "../layout/borderLines"
 import { paintDrawingPdf, pictureSource } from "../../drawingml/pdf"
 import type { DrawingImage, Paint } from "../../drawingml/index"
 import {
@@ -315,7 +317,7 @@ function snap(start: number, size: number): [number, number] {
 }
 
 // A horizontal (or vertical) line `thickness` thick along the box's top (left) edge, as a CSS border of that
-// style draws it.
+// style draws it; a multi-line border (`lines`, see borderLines) as each of its lines.
 function edge(
 	page: PdfPage,
 	style: LineStyle,
@@ -324,9 +326,27 @@ function edge(
 	y: number,
 	length: number,
 	thickness: number,
-	vertical: boolean
+	vertical: boolean,
+	lines?: readonly number[]
 ): void {
 	if (style === "none" || !(length > 0) || !(thickness > 0)) return
+
+	if (lines !== undefined) {
+		let at = 0
+
+		for (let k = 0; k < lines.length; k++) {
+			const band = (lines[k] ?? 0) * thickness
+
+			if (k % 2 === 0) {
+				if (vertical) fillRect(page, color, x + at, y, band, length)
+				else fillRect(page, color, x, y + at, length, band)
+			}
+
+			at += band
+		}
+
+		return
+	}
 
 	if (style === "double" && thickness >= 3) {
 		const band = thickness / 3
@@ -396,16 +416,38 @@ function paintGraphic(page: PdfPage, data: DocxPdfPage, decorations: readonly De
 		}
 		case PageGraphic.BORDER: {
 			const style = value?.kind === "border" ? borderStyle(value.style) : "solid"
+			const lines = value?.kind === "border" ? borderLines(value.style) : undefined
 			const color = decorationColor(value) ?? BLACK
 
-			if (width >= height) edge(page, style, color, x, y, width, height, false)
-			else edge(page, style, color, x, y, height, width, true)
+			if (width >= height) edge(page, style, color, x, y, width, height, false, lines)
+			else edge(page, style, color, x, y, height, width, true, lines)
 
 			return
 		}
 		case PageGraphic.REVISION_BAR:
 			// Only the Markup view draws change bars; the export is the Final view.
 			return
+		case PageGraphic.DIAGONAL_DOWN:
+		case PageGraphic.DIAGONAL_UP: {
+			const style = value?.kind === "border" ? borderStyle(value.style) : "solid"
+			const thickness = value?.kind === "border" ? Math.max(1, value.width) : 1
+			const down = kind === PageGraphic.DIAGONAL_DOWN
+
+			if (style === "none") return
+
+			page.saveState()
+			page.strokeColor(decorationColor(value) ?? BLACK).lineWidth(thickness)
+
+			if (style === "dotted") page.lineCap("round").dash([0, thickness * 2], 0)
+			else if (style === "dashed") page.dash([thickness * 3, thickness * 3], 0)
+
+			page.moveTo(x, down ? y : y + height)
+				.lineTo(x + width, down ? y + height : y)
+				.stroke()
+			page.restoreState()
+
+			return
+		}
 		default:
 			fillRect(page, BLACK, x, y, width, height)
 	}
@@ -441,11 +483,12 @@ function paintDecoration(page: PdfPage, data: DocxPdfPage, doc: DocxPdfDocument,
 			const style = borderStyle(value.style)
 			const color = decorationColor(value) ?? colorAt(data, doc.styles, line, x)
 			const thickness = Math.max(1, value.width)
+			const lines = borderLines(value.style)
 
-			edge(page, style, color, x, y, width, thickness, false)
-			edge(page, style, color, x, y + height - thickness, width, thickness, false)
-			edge(page, style, color, x, y, height, thickness, true)
-			edge(page, style, color, x + width - thickness, y, height, thickness, true)
+			edge(page, style, color, x, y, width, thickness, false, lines)
+			edge(page, style, color, x, y + height - thickness, width, thickness, false, lines)
+			edge(page, style, color, x, y, height, thickness, true, lines)
+			edge(page, style, color, x + width - thickness, y, height, thickness, true, lines)
 
 			return
 		}
@@ -497,6 +540,68 @@ function paintLeader(page: PdfPage, leader: number, color: number, x: number, ba
 					: undefined
 
 	if (style !== undefined) edge(page, style, color, x, baseline - 1, width, 1, false)
+}
+
+// Emphasis mark sizes, em: a dot's radius, a circle's radius and line width.
+const MARK_DOT = 0.07
+const MARK_CIRCLE = 0.09
+const MARK_LINE = 0.03
+// Bézier circle control distance (4 / 3 · tan(π / 8)).
+const KAPPA = 0.5523
+
+function circlePath(page: PdfPage, cx: number, cy: number, r: number): void {
+	const k = r * KAPPA
+
+	page.moveTo(cx + r, cy)
+		.curveTo(cx + r, cy + k, cx + k, cy + r, cx, cy + r)
+		.curveTo(cx - k, cy + r, cx - r, cy + k, cx - r, cy)
+		.curveTo(cx - r, cy - k, cx - k, cy - r, cx, cy - r)
+		.curveTo(cx + k, cy - r, cx + r, cy - k, cx + r, cy)
+		.closePath()
+}
+
+// w:em marks centred at each of `centres` (x) on `y`, in the run's colour: one fill (dots, commas) or stroke
+// (circles) for the fragment.
+function paintEmphasis(page: PdfPage, emphasis: Emphasis, centres: readonly number[], y: number, size: number, color: number): void {
+	if (!(size > 0) || !Number.isFinite(y)) return
+
+	if (emphasis === Emphasis.CIRCLE) {
+		const r = size * MARK_CIRCLE
+
+		page.strokeColor(color).lineWidth(size * MARK_LINE)
+
+		for (const cx of centres) circlePath(page, cx, y, r)
+
+		page.stroke()
+
+		return
+	}
+
+	const r = size * MARK_DOT
+
+	page.fillColor(color)
+
+	if (emphasis === Emphasis.COMMA) {
+		for (const cx of centres) {
+			// A dot with a tail curling down to the left.
+			const cy = y - r * 0.5
+
+			// Filled apart, so their overlap never cancels out under the nonzero rule.
+			circlePath(page, cx, cy, r)
+			page.fill()
+				.moveTo(cx + r, cy)
+				.quadTo(cx + r * 1.1, cy + r * 2, cx - r * 0.8, cy + r * 2.6)
+				.quadTo(cx + r * 0.2, cy + r * 1.6, cx, cy + r)
+				.closePath()
+				.fill()
+		}
+
+		return
+	}
+
+	for (const cx of centres) circlePath(page, cx, y, r)
+
+	page.fill()
 }
 
 // Clip rectangle of each line and placed object, -1 for none.
@@ -1126,6 +1231,7 @@ export class DocxPagePainter {
 
 			return -1
 		}
+		const look = drawingLook(style, context.doc)
 		// Segments: consecutive glyphs drawn alike (size, link, faux style).
 		let at = 0
 		let pen = 0
@@ -1165,7 +1271,6 @@ export class DocxPagePainter {
 
 			pen += (segmentNatural + (next - at) * spread) * fit
 
-			const look = drawingLook(style, context.doc)
 			const base = [scaleX, 0, fauxItalic ? FAUX_SHEAR * scaleX : 0, 1] as const
 			// An upright cluster of sideways text: turned 90° counter-clockwise about the centre of its cell (x + width / 2,
 			// 0.38 em above the baseline: the ideographic em box's middle, as the style carries no font extents), so its
@@ -1225,6 +1330,39 @@ export class DocxPagePainter {
 
 			at = next
 		}
+
+		const emphasis = (style.emphasis ?? Emphasis.NONE) as Emphasis
+
+		// Sideways text keeps its marks off (they would go beside the turned glyphs).
+		if (emphasis === Emphasis.NONE || upright) return
+
+		const centres: number[] = []
+		let left = 0
+
+		for (let k = 0; k < placed.length; k++) {
+			const glyph = placed[k]
+			const advance = ((advances[k] ?? 0) + spread) * fit * scaleX
+
+			// One mark per character: none over spaces or the further glyphs of a cluster.
+			if (glyph !== undefined && glyph.cluster !== placed[k - 1]?.cluster && !/\s/.test(fragmentText.charAt(glyph.cluster))) {
+				centres.push(x0 + left + (advances[k] ?? 0) * fit * scaleX * 0.5)
+			}
+
+			left += advance
+		}
+
+		if (centres.length === 0) return
+
+		const artifact = node !== undefined && this.tagged
+
+		if (artifact) {
+			this.endOpenContent()
+			page.beginArtifact({ type: "Layout" })
+		}
+
+		paintEmphasis(page, emphasis, centres, y + (style.markY ?? -style.size), style.size, style.color)
+
+		if (artifact) page.endArtifact()
 	}
 
 	// Shows a fragment's runs; with a gradient fill (ISO 32000-1 §9.3.6 mode 7) the glyphs clip the shading painted
@@ -1238,6 +1376,15 @@ export class DocxPagePainter {
 	): Promise<void> {
 		const page = this.page
 		const gradient = look.gradient
+
+		if (look.shadows !== undefined && look.shadows.length > 0) {
+			const silent = runs.map(run => ({ ...run, actualText: "" }))
+			const { render: _render, strokeWidth: _width, strokeColor: _stroke, ...fill } = options
+
+			for (const shadow of look.shadows) {
+				page.text(silent, { ...fill, x: options.x + shadow.dx, y: options.y + shadow.dy, color: shadow.color })
+			}
+		}
 
 		if (gradient === undefined) {
 			page.text(runs, options)
@@ -1512,6 +1659,8 @@ interface DrawingLook {
 	readonly stroke: { readonly width: number; readonly color: number } | undefined
 	// A gradient fill, painted through the glyphs as a clip.
 	readonly gradient: Extract<Paint, { kind: "linear" | "path" | "gradient" }> | undefined
+	// Copies of the glyphs drawn under them (px offsets, y down), a character effect's shadow or relief.
+	readonly shadows?: readonly { readonly dx: number; readonly dy: number; readonly color: number }[]
 }
 
 // A gradient fill of text over its fragment's box (x, y, width, height px) as a PDF shading: a:lin along its angle
@@ -1550,7 +1699,23 @@ function textGradient(paint: NonNullable<DrawingLook["gradient"]>, box: readonly
 // or 1 for text without a fill, ISO 32000-1 §9.3.6). A document's styles have none of the fields: their colour as is.
 function drawingLook(style: DocxPdfStyle, doc: DocxPdfDocument): DrawingLook {
 	if (style.paint === undefined && style.alpha === undefined && style.outline === undefined) {
-		return { color: style.color, filled: true, stroke: undefined, gradient: undefined }
+		const effect = (style.effect ?? RunEffect.NONE) as RunEffect
+
+		if (effect === RunEffect.NONE) return { color: style.color, filled: true, stroke: undefined, gradient: undefined }
+
+		// A document run's character effect: hollow or relief glyphs filled with the paper, an outline in the run's
+		// colour, offset copies under them.
+		return {
+			color: effectFillsPaper(effect) ? PAPER : style.color,
+			filled: true,
+			stroke: effectStrokes(effect) ? { width: OUTLINE_WIDTH * style.size, color: style.color } : undefined,
+			gradient: undefined,
+			shadows: effectShadows(effect).map(shadow => ({
+				dx: shadow.dx * style.size,
+				dy: shadow.dy * style.size,
+				color: shadow.color
+			}))
+		}
 	}
 
 	const paint = style.paint === undefined ? undefined : doc.paints?.[style.paint]

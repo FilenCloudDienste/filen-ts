@@ -8,11 +8,11 @@ import { NumberingCounters, type CounterSnapshot, type ListMarker } from "../num
 import { PropsStore } from "../props/store"
 import type { ResolvedSectionProps } from "../props/types"
 import type { Numbering } from "../numbering/numbering"
-import type { DocxStyles } from "../styles/styles"
+import { headingLevel, type DocxStyles } from "../styles/styles"
 import { resolveSection, type PropertyResolver } from "../styles/resolve"
-import type { PageValues, StoryContext } from "./content"
+import { chapterSeparator, pageNumberText, type PageValues, type StoryContext } from "./content"
 import { REF_SPAN, refItem, refPart, type LayoutEdits } from "./edits"
-import { numberText, type FieldCodes } from "./fields"
+import type { FieldCodes } from "./fields"
 import {
 	Area,
 	AreaStart,
@@ -58,6 +58,9 @@ export interface LayoutOptions {
 	readonly recordMaps?: boolean
 	// Unsaved edits to lay out in place of their source (read whenever layout restarts).
 	readonly edits?: LayoutEdits
+	// The time (epoch ms) DATE and TIME fields show, as Word shows them as of opening or printing (default: when
+	// layout starts). Read once, so every page and relayout shows the same.
+	readonly date?: number
 }
 
 // A top-level body block an edit changed, as laid out now: relaying out cannot stop at a page that matches
@@ -391,6 +394,8 @@ interface PageSnapshot {
 	readonly markers: readonly (readonly [number, ListMarker | null])[]
 	// Note numbers assigned the same way.
 	readonly assigned: readonly (readonly [number, string])[]
+	// The chapter numbers of the pages before (see Paginator.chapters).
+	readonly chapters: readonly (string | undefined)[]
 }
 
 const Step = { PROGRESS: 0, PAGE: 1, SUSPEND: 2, FINISHED: 3 } as const
@@ -407,6 +412,8 @@ interface PageRecord {
 	// Where the header ends and the footer begins (they set the body's area).
 	readonly headerBottom: number
 	readonly footerTop: number
+	// Exclusions.key of the obstacles the header's and footer's floats made for the body.
+	readonly wraps: number
 	// The page's content before its header and footer were appended.
 	readonly body: OutputMark
 	readonly header: number
@@ -534,6 +541,11 @@ class Paginator {
 	private readonly header = new PageOutput()
 	private readonly footer = new PageOutput()
 	private readonly exclusions = new Exclusions()
+	// The obstacles one header or footer story's wrapping floats made, and those of both for the page body.
+	private readonly storyWraps = new Exclusions()
+	private readonly headerFooterWraps = new Exclusions()
+	private pageWraps = 0
+	private laidFooterTop = 0
 	private readonly footnotes: FootnoteArea
 	private readonly area = new Area()
 	// By page index.
@@ -572,6 +584,11 @@ class Paginator {
 	private bodyBottom = 0
 	private contentBottom = 0
 	private values: PageValues = { page: 1, pageFormat: undefined, numPages: 1, sectionPages: 1 }
+	// By heading level (Heading 1-9): the list number of the last numbered heading laid out on the pages closed
+	// so far, for chapter numbers (w:pgNumType chapStyle). Replaced, never changed in place (snapshots share it).
+	private chapters: readonly (string | undefined)[] = NO_CHAPTERS
+	// The heading levels the sections number chapters by (bit level - 1), -1 until read.
+	private chapterLevels = -1
 	private frame: PageFrame = { width: 816, height: 1056, marginLeft: 96, marginRight: 96, marginTop: 96, marginBottom: 96, odd: true }
 	private headerStory = -1
 	private footerStory = -1
@@ -827,7 +844,8 @@ class Paginator {
 			endnotes: previous !== undefined && sameList(previous.endnotes, endnotes) ? previous.endnotes : endnotes.slice(),
 			renderedBreaks: this.breakCount,
 			markers: markers.length === 0 ? NO_ENTRIES : markers,
-			assigned: assigned.length === 0 ? NO_ENTRIES : assigned
+			assigned: assigned.length === 0 ? NO_ENTRIES : assigned,
+			chapters: this.chapters
 		})
 	}
 
@@ -864,6 +882,8 @@ class Paginator {
 			dirty === undefined ? undefined : this.previousLayout(page, own, dirty, snapshot?.renderedBreaks ?? 0, least, through)
 		this.missedFonts = this.missedFonts >= page ? -1 : this.missedFonts
 		this.pageMissedFonts = false
+		// An edit may have changed the sections' page numbering.
+		this.chapterLevels = -1
 		this.resyncedAt = -1
 		this.pageOpen = false
 		this.finished = false
@@ -915,6 +935,7 @@ class Paginator {
 		this.lineSection = snapshot.lineSection
 		this.endnotesDone = snapshot.endnotesDone
 		this.globalLine = snapshot.globalLine
+		this.chapters = snapshot.chapters
 		spliceAll(this.sectionPageCounts, 0, this.sectionPageCounts.length, snapshot.sectionPageCounts)
 
 		// Taken before the document had lists (planned ones came since): nothing counted yet.
@@ -955,6 +976,7 @@ class Paginator {
 		this.lineSection = -1
 		this.endnotesDone = -1
 		this.globalLine = 0
+		this.chapters = NO_CHAPTERS
 		this.sectionPageCounts.length = 0
 		this.bodyStory?.counters?.reset()
 		this.engine.notes.restore(this.initialNotes)
@@ -1094,8 +1116,8 @@ class Paginator {
 		const sameSize = Math.abs(next.pageWidth - previous.pageWidth) < 1 && Math.abs(next.pageHeight - previous.pageHeight) < 1
 
 		if (this.pageOpen && next.type === "continuous" && sameSize) {
-			// The section's columns end level before the next section starts below them.
-			this.balanceColumns()
+			// The section's columns end level before the next section starts below them, unless w:noColumnBalance.
+			if (!this.compat.noColumnBalance) this.balanceColumns()
 
 			if (this.geometry !== undefined) this.columnSeparators(this.geometry)
 
@@ -1348,10 +1370,13 @@ class Paginator {
 		area.token = nextToken()
 	}
 
-	// Lays out a header or footer story at `top`; its height.
+	// Lays out a header or footer story at `top`; its height. Its wrapping floats' obstacles are left in
+	// storyWraps.
 	private layoutStory(story: number, output: PageOutput, region: Region, top: number): number {
 		const context = this.storyContext(story, true)
 		const geometry = this.geometry
+
+		this.storyWraps.clear()
 
 		if (context === undefined || geometry === undefined) return 0
 
@@ -1367,8 +1392,46 @@ class Paginator {
 			this.frame,
 			geometry.left,
 			top,
-			geometry.width - geometry.left - geometry.right
+			geometry.width - geometry.left - geometry.right,
+			true,
+			this.storyWraps
 		)
+	}
+
+	// Lays out the page's header and footer; the body's obstacles from their wrapping floats are left in
+	// headerFooterWraps. Returns the header's bottom; the footer's top is left in laidFooterTop.
+	private layoutHeaderFooter(header: number, footer: number, geometry: PageGeometry): number {
+		const wraps = this.headerFooterWraps
+		let headerBottom = 0
+		let footerTop = geometry.height
+
+		wraps.clear()
+
+		if (header >= 0) {
+			headerBottom = geometry.header + this.layoutStory(header, this.header, Region.HEADER, geometry.header)
+			wraps.addShifted(this.storyWraps, 0)
+		}
+
+		if (footer >= 0) {
+			const height = this.layoutStory(footer, this.footer, Region.FOOTER, 0)
+
+			footerTop = geometry.height - geometry.footer - height
+
+			// Laid out at 0 for its height, then moved; again in place when it placed something on the page or its
+			// margins, which moving would take along.
+			if (this.footer.pinned) {
+				this.footer.reset()
+				this.layoutStory(footer, this.footer, Region.FOOTER, footerTop)
+				wraps.addShifted(this.storyWraps, 0)
+			} else {
+				this.footer.move(new OutputMark(), null, 0, footerTop)
+				wraps.addShifted(this.storyWraps, footerTop)
+			}
+		}
+
+		this.laidFooterTop = footerTop
+
+		return headerBottom
 	}
 
 	private anchorHere(): PageAnchor {
@@ -1417,6 +1480,7 @@ class Paginator {
 		this.values = {
 			page: number,
 			pageFormat: section.pageNumbering.format,
+			chapter: this.chapterOf(section),
 			numPages: this.estimate,
 			sectionPages: this.sectionEstimates[this.sectionIndex] ?? 1
 		}
@@ -1451,18 +1515,12 @@ class Paginator {
 				(this.headerFooter(sectionInfo.effectiveHeaders, !odd) !== this.headerStory ||
 					this.headerFooter(sectionInfo.effectiveFooters, !odd) !== this.footerStory))
 
-		let headerBottom = 0
-		let footerTop = geometry.height
+		const headerBottom = this.layoutHeaderFooter(this.headerStory, this.footerStory, geometry)
+		const footerTop = this.laidFooterTop
 
-		if (this.headerStory >= 0)
-			headerBottom = geometry.header + this.layoutStory(this.headerStory, this.header, Region.HEADER, geometry.header)
-
-		if (this.footerStory >= 0) {
-			const height = this.layoutStory(this.footerStory, this.footer, Region.FOOTER, 0)
-
-			footerTop = geometry.height - geometry.footer - height
-			this.footer.move(new OutputMark(), null, 0, footerTop)
-		}
+		// Body text wraps around the header's and footer's wrapping floats (ECMA-376 §20.4.2.3).
+		this.exclusions.addShifted(this.headerFooterWraps, 0)
+		this.pageWraps = this.headerFooterWraps.key()
 
 		// The header and footer cannot wait for fonts: when they needed one still loading, the page is laid out
 		// again once it has loaded, even if it arrived before the page closes (between slices).
@@ -1516,6 +1574,7 @@ class Paginator {
 
 		this.lineNumbers(page)
 		this.pageBorders(page, geometry)
+		this.countChapters(page)
 
 		const index = this.progress
 		const inPlace = this.inPlace
@@ -1523,7 +1582,7 @@ class Paginator {
 		const info = {
 			index,
 			number: this.pageNumber,
-			numberText: numberText(this.pageNumber, this.values.pageFormat),
+			numberText: pageNumberText(this.pageNumber, this.values.pageFormat, this.values.chapter),
 			section: this.pageSection,
 			width: geometry.width,
 			height: geometry.height,
@@ -1552,6 +1611,7 @@ class Paginator {
 			numbers,
 			headerBottom: this.headerBottom,
 			footerTop: this.footerTop,
+			wraps: this.pageWraps,
 			body: page.mark(),
 			header: this.headerStory,
 			footer: this.footerStory,
@@ -1635,6 +1695,102 @@ class Paginator {
 		}
 	}
 
+	// Chapter numbers (w:pgNumType chapStyle, §17.6.12): a page shows the list number of the last numbered heading
+	// of the chapter level laid out on it or before. The page's headings are counted as it closes; when one
+	// changed the chapter the page opened with, a header or footer showing page numbers is laid out again (the
+	// body keeps its area).
+	private countChapters(page: PageOutput): void {
+		if (this.chapterLevels < 0) this.chapterLevels = this.readChapterLevels()
+
+		const levels = this.chapterLevels
+
+		if (levels === 0) return
+
+		const engine = this.engine
+		let chapters: (string | undefined)[] | undefined
+		let lastPart = -1
+		let lastItem = -1
+
+		for (let s = 0; s < page.sourceCount; s++) {
+			const at = s * SOURCE_INTS
+			const part = page.sourceParts[s] ?? -1
+			const item = page.sourceInts[at + SourceInt.ITEM] ?? -1
+
+			if (page.sourceInts[at] !== Region.BODY || (page.sourceOwners[s] ?? -1) >= 0 || (part === lastPart && item === lastItem))
+				continue
+
+			lastPart = part
+			lastItem = item
+
+			const level = this.isBodyPart(part) ? this.headingOf(part, item) : undefined
+
+			if (level === undefined || (levels & (1 << (level - 1))) === 0) continue
+
+			// Counted when the heading was built (unnumbered: none).
+			const text = engine.markers.get(engine.memoKey(part, item))?.text
+
+			if (text === undefined || text === "" || text === (chapters ?? this.chapters)[level - 1]) continue
+
+			chapters ??= this.chapters.slice()
+			chapters[level - 1] = text
+		}
+
+		if (chapters === undefined) return
+
+		this.chapters = chapters
+
+		const chapter = this.chapterOf(this.pageProps)
+		const geometry = this.geometry
+		const opened = this.openGeometry ?? geometry
+
+		if (chapter === this.values.chapter) return
+
+		this.values = { ...this.values, chapter }
+
+		if (opened === undefined || !(usesFlag(this.header, SourceFlag.PAGE_FIELDS) || usesFlag(this.footer, SourceFlag.PAGE_FIELDS)))
+			return
+
+		this.geometry = opened
+		this.header.reset()
+		this.footer.reset()
+		this.layoutHeaderFooter(this.headerStory, this.footerStory, opened)
+		this.geometry = geometry
+	}
+
+	// The chapter prefix pages of `section` show: the chapter number and its separator, undefined without one.
+	private chapterOf(section: ResolvedSectionProps): string | undefined {
+		const level = section.pageNumbering.chapterStyle
+		const text = level === undefined ? undefined : this.chapters[level - 1]
+
+		return text === undefined ? undefined : text + chapterSeparator(section.pageNumbering.chapterSeparator)
+	}
+
+	// The heading levels the sections number chapters by (bit level - 1).
+	private readChapterLevels(): number {
+		let levels = 0
+
+		for (let index = 0; index < this.model.sections.length; index++) {
+			const level = this.resolved(index).pageNumbering.chapterStyle
+
+			if (level !== undefined && level >= 1 && level <= 9) levels |= 1 << (level - 1)
+		}
+
+		return levels
+	}
+
+	// The built-in heading style (Heading 1-9) a paragraph is in: chapStyle names the style, not an outline level.
+	private headingOf(partIndex: number, item: number): number | undefined {
+		const part = this.model.parts[partIndex]
+		const row = part === undefined || item < 0 ? -1 : part.paragraphRow(item)
+
+		if (part === undefined || row < 0) return undefined
+
+		const engine = this.engine
+		const style = engine.resolver.paragraphStyle(engine.store.paragraphLook(part.document, part.paragraphs.pPr[row] ?? -1).styleId)
+
+		return style === undefined ? undefined : headingLevel(style)
+	}
+
 	private firstBodyItem(page: PageOutput): number {
 		for (let s = 0; s < page.sourceCount; s++)
 			if (page.sourceInts[s * SOURCE_INTS] === Region.BODY) return page.sourceInts[s * SOURCE_INTS + SourceInt.ITEM] ?? -1
@@ -1659,7 +1815,8 @@ class Paginator {
 
 		if (free <= EPSILON) return
 
-		page.move(new OutputMark(), null, 0, align === "center" ? free / 2 : free)
+		// Objects placed on the page or its margins stay (pinned when placed).
+		page.moveText(align === "center" ? free / 2 : free)
 	}
 
 	// Line numbers in the margin (w:lnNumType), counting body lines outside tables.
@@ -1692,6 +1849,7 @@ class Paginator {
 		const text = page.text
 		const engine = this.engine
 		const style = this.lineNumberStyle()
+		const rtl = this.pageProps.bidi
 		// Word numbers from w:start + 1 (MS-OI29500 2.1.215: the value is how many numbers to skip).
 		const start = (numbering.start ?? 0) + 1
 		let n =
@@ -1705,7 +1863,11 @@ class Paginator {
 		for (let line = 0; line < lines; line++) {
 			const source = text.lineInts[line * LINE_INTS + LineInt.SOURCE] ?? 0
 
-			if (page.sourceInts[source * SOURCE_INTS] !== Region.BODY || (page.sourceFlags(source) & SourceFlag.IN_TABLE) !== 0) continue
+			if (
+				page.sourceInts[source * SOURCE_INTS] !== Region.BODY ||
+				(page.sourceFlags(source) & (SourceFlag.IN_TABLE | SourceFlag.NO_LINE_NUMBERS)) !== 0
+			)
+				continue
 
 			n++
 
@@ -1716,7 +1878,12 @@ class Paginator {
 			const top = text.lineTop(line)
 			const height = text.lineHeight(line)
 			const baseline = text.lineBaseline(line)
-			const x = (text.lineFloats[line * LINE_FLOATS + 3] ?? geometry.left) - distance - width
+			// A fixed distance from the text margin of the line's column, whatever its indent or alignment
+			// (ECMA-376 §17.6.8); right of it in a right-to-left section.
+			const lineX = text.lineFloats[line * LINE_FLOATS + 3] ?? 0
+			const column = columnAt(geometry, lineX + (text.lineFloats[line * LINE_FLOATS + 4] ?? 0) / 2)
+			const columnLeft = geometry.left + (geometry.columnX[column] ?? 0)
+			const x = rtl ? columnLeft + (geometry.columnWidths[column] ?? 0) + distance : columnLeft - distance - width
 			const labelSource = page.addSource(Region.LINE_NUMBER, -1, -1, 0, label)
 
 			text.addLine(top, height, baseline, x, width, 0, label.length, 0, labelSource)
@@ -1884,21 +2051,16 @@ class Paginator {
 		this.header.reset()
 		this.footer.reset()
 
-		const headerBottom =
-			entry.header >= 0 ? geometry.header + this.layoutStory(entry.header, this.header, Region.HEADER, geometry.header) : 0
-		let footerTop = geometry.height
+		const headerBottom = this.layoutHeaderFooter(entry.header, entry.footer, geometry)
+		const footerTop = this.laidFooterTop
 
-		if (entry.footer >= 0) {
-			const height = this.layoutStory(entry.footer, this.footer, Region.FOOTER, 0)
-
-			footerTop = geometry.height - geometry.footer - height
-			this.footer.move(new OutputMark(), null, 0, footerTop)
-		}
-
-		// A header or footer of another height moves the body: it is laid out again instead.
+		// A header or footer of another height, or whose floats the body wraps around moved, moves the body: it
+		// is laid out again instead.
 		if (
 			(!geometry.topFixed && Math.abs(Math.max(geometry.top, headerBottom) - Math.max(geometry.top, entry.headerBottom)) > EPSILON) ||
-			(!geometry.bottomFixed && Math.abs(Math.min(geometry.bottom, footerTop) - Math.min(geometry.bottom, entry.footerTop)) > EPSILON)
+			(!geometry.bottomFixed &&
+				Math.abs(Math.min(geometry.bottom, footerTop) - Math.min(geometry.bottom, entry.footerTop)) > EPSILON) ||
+			this.headerFooterWraps.key() !== entry.wraps
 		)
 			return "moved"
 
@@ -2375,7 +2537,11 @@ class Paginator {
 				const moved =
 					page.index === at && number === page.number
 						? page
-						: page.moved(at, number, numberText(number, record?.values.pageFormat ?? this.formatOf(page.section)))
+						: page.moved(
+								at,
+								number,
+								pageNumberText(number, record?.values.pageFormat ?? this.formatOf(page.section), record?.values.chapter)
+							)
 				const oldAnchor = kept(resync.anchors, k)
 				const keptSnapshot = kept(resync.snapshots, k)
 
@@ -2613,6 +2779,27 @@ function usesFlag(output: PageOutput, flag: number): boolean {
 	return false
 }
 
+// The column nearest page x (a line's middle).
+function columnAt(geometry: PageGeometry, x: number): number {
+	const columns = geometry.columnX.length
+	let best = 0
+	let nearest = Infinity
+
+	if (columns < 2) return 0
+
+	for (let c = 0; c < columns; c++) {
+		const left = geometry.left + (geometry.columnX[c] ?? 0)
+		const distance = Math.max(left - x, x - left - (geometry.columnWidths[c] ?? 0), 0)
+
+		if (distance < nearest) {
+			nearest = distance
+			best = c
+		}
+	}
+
+	return best
+}
+
 function anchorKey(anchor: PageAnchor): string {
 	return `${anchor.section}:${anchor.story}:${anchor.part}:${anchor.block}:${anchor.row}:${anchor.offset}`
 }
@@ -2644,10 +2831,25 @@ function sameAnchor(a: PageAnchor, b: PageAnchor): boolean {
 function sameValues(a: PageValues | undefined, b: PageValues | undefined, pageShift: number): boolean {
 	if (a === undefined || b === undefined) return a === b
 
-	return a.page === b.page + pageShift && a.pageFormat === b.pageFormat && a.numPages === b.numPages && a.sectionPages === b.sectionPages
+	return (
+		a.page === b.page + pageShift &&
+		a.pageFormat === b.pageFormat &&
+		a.chapter === b.chapter &&
+		a.numPages === b.numPages &&
+		a.sectionPages === b.sectionPages
+	)
 }
 
 const NO_ENTRIES: readonly (readonly [number, never])[] = []
+const NO_CHAPTERS: readonly (string | undefined)[] = []
+
+function sameChapters(a: readonly (string | undefined)[], b: readonly (string | undefined)[]): boolean {
+	if (a === b) return true
+
+	for (let k = 0; k < 9; k++) if (a[k] !== b[k]) return false
+
+	return true
+}
 const NO_NOTES: readonly PlacedNote[] = []
 
 function sameList(a: readonly number[], b: readonly number[]): boolean {
@@ -2792,7 +2994,8 @@ function sameState(a: PageSnapshot, b: PageSnapshot): boolean {
 		a.endnotes.length === b.endnotes.length &&
 		a.endnotes.every((story, k) => story === b.endnotes[k]) &&
 		sameEntries(a.markers, b.markers, sameMarker) &&
-		sameEntries(a.assigned, b.assigned, (x, y) => x === y)
+		sameEntries(a.assigned, b.assigned, (x, y) => x === y) &&
+		sameChapters(a.chapters, b.chapters)
 	)
 }
 
@@ -3347,6 +3550,7 @@ export function layoutDocument(
 	const tuning = { ...DEFAULT_TUNING, ...options.tuning }
 	let view = options.view ?? RevisionView.Final
 	let codes: FieldCodes | undefined
+	const date = new Date(options.date ?? Date.now())
 	const engineOf = (): Engine => {
 		const engine = new Engine({
 			model,
@@ -3362,6 +3566,7 @@ export function layoutDocument(
 			compat: layoutCompat(model.settings),
 			tuning,
 			recordMaps: options.recordMaps ?? false,
+			now: date,
 			...(options.edits === undefined ? {} : { edits: options.edits })
 		})
 

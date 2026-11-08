@@ -407,6 +407,36 @@ describe("docx editor commands", () => {
 		expect([...session.newLists]).toEqual([])
 	})
 
+	it("never bases a new numbered list on heading-linked, legal or multi-placeholder numbering", async () => {
+		const numbering = NUMBERING_PART(
+			'<w:abstractNum w:abstractNumId="0"><w:multiLevelType w:val="multilevel"/><w:lvl w:ilvl="0"><w:numFmt w:val="upperRoman"/><w:pStyle w:val="Heading1"/><w:lvlText w:val="Article %1"/></w:lvl></w:abstractNum>' +
+				'<w:abstractNum w:abstractNumId="1"><w:lvl w:ilvl="0"><w:numFmt w:val="decimal"/><w:isLgl/><w:lvlText w:val="%1."/></w:lvl></w:abstractNum>' +
+				'<w:abstractNum w:abstractNumId="2"><w:styleLink w:val="Outline"/><w:lvl w:ilvl="0"><w:numFmt w:val="decimal"/><w:lvlText w:val="%1."/></w:lvl></w:abstractNum>' +
+				'<w:abstractNum w:abstractNumId="3"><w:lvl w:ilvl="0"><w:numFmt w:val="decimal"/><w:lvlText w:val="%1.%2"/></w:lvl></w:abstractNum>' +
+				'<w:abstractNum w:abstractNumId="4"><w:lvl w:ilvl="0"><w:numFmt w:val="decimal"/><w:lvlText w:val="Step %1"/></w:lvl></w:abstractNum>' +
+				'<w:num w:numId="1"><w:abstractNumId w:val="0"/></w:num><w:num w:numId="2"><w:abstractNumId w:val="1"/></w:num>' +
+				'<w:num w:numId="3"><w:abstractNumId w:val="2"/></w:num><w:num w:numId="4"><w:abstractNumId w:val="3"/></w:num>' +
+				'<w:num w:numId="5"><w:abstractNumId w:val="4"/></w:num>'
+		)
+		const session = await sessionOf({ body: p("a"), ...PARTS, parts: [STYLES, numbering] })
+
+		select(session, 1)
+		session.execute({ type: "list.numbered" })
+		expect([...session.newLists]).toEqual([[-1, { kind: "numbered", basedOn: 5 }]])
+	})
+
+	it("starts a built-in numbered list when only heading-linked numbering exists", async () => {
+		const numbering = NUMBERING_PART(
+			'<w:abstractNum w:abstractNumId="0"><w:lvl w:ilvl="0"><w:numFmt w:val="decimal"/><w:lvlText w:val="%1"/></w:lvl><w:lvl w:ilvl="1"><w:numFmt w:val="decimal"/><w:pStyle w:val="Heading2"/><w:lvlText w:val="%1.%2"/></w:lvl></w:abstractNum>' +
+				'<w:num w:numId="1"><w:abstractNumId w:val="0"/></w:num>'
+		)
+		const session = await sessionOf({ body: p("a"), ...PARTS, parts: [STYLES, numbering] })
+
+		select(session, 1)
+		session.execute({ type: "list.numbered" })
+		expect([...session.newLists]).toEqual([[-1, { kind: "numbered", basedOn: null }]])
+	})
+
 	it("counts an extended selection the same as a fresh one", async () => {
 		const session = await sessionOf(RICH)
 		const size = session.state.doc.content.size

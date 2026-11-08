@@ -742,7 +742,8 @@ export class DocumentEdits implements LayoutEdits {
 		this.plannedKey = key
 
 		const context = definitions.context
-		const stylesBytes = missing.size === 0 ? null : stylesWithDefinitions(definitions.styles, context.styles, missing)
+		const stylesBytes =
+			missing.size === 0 ? null : stylesWithDefinitions(definitions.styles, context.styles, missing, context.newStyleWidths)
 		const styles = stylesBytes === null ? context.styles : parseStyles(parseXml(stylesBytes), context.store)
 		const numbering = planNumbering(definitions.numbering, context.numbering, lists)
 		const numberingBytes = numbering.bytes()

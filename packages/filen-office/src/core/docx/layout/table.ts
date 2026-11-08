@@ -15,11 +15,11 @@ import type {
 import { shadingColor } from "../theme/color"
 import { marginTwips } from "../styles/cellMargins"
 import type { PropsStore } from "../props/store"
-import type { CellFormat, PropertyResolver, RowPosition, TableFormat } from "../styles/resolve"
+import type { CellFormat, ParagraphFormat, PropertyResolver, RowPosition, TableFormat } from "../styles/resolve"
 import { ref, refItem, refPart } from "./edits"
 import { Area, BlockFlow, byParity, FlowStatus, nextToken, type Engine, type FlowSnapshot } from "./flow"
 import { PageGraphic, Layer, OutputMark } from "./output"
-import { borderWidth } from "./styles"
+import { borderWidth, shadingDark } from "./styles"
 import { EPSILON, twips } from "./units"
 
 // Table layout: the grid from w:tblGrid (scaled to a percentage width), rows of cells laid out as block
@@ -45,6 +45,31 @@ interface RowInfo {
 	readonly table: TableFormat
 	readonly props: ResolvedTableRowProps
 	readonly slots: readonly Slot[]
+	// Every paragraph of its cells is kept with the next (undefined until asked).
+	keep: boolean | undefined
+}
+
+// A vertical merge's content in one area: the cell starting it, its output between `from` and `to`, from the
+// top of the row it starts or resumes in (`exact`: that row's height is exact).
+interface MergePart {
+	readonly slot: Slot
+	readonly from: OutputMark
+	readonly to: OutputMark
+	readonly top: number
+	readonly token: number
+	readonly exact: boolean
+}
+
+// Where a run of rows kept with the next began in an area (see TableLayout.run).
+interface RowChain {
+	readonly row: number
+	readonly y: number
+	readonly placed: number
+	readonly footnotes: number
+	readonly exclusions: number
+	readonly token: number
+	// It began at the area's top (or right under the header rows repeated there).
+	readonly top: boolean
 }
 
 function widthPx(width: WidthProps | undefined, reference: number): number {
@@ -134,6 +159,11 @@ function brightness(color: string | undefined, test: number): number {
 	return test === 0 ? r + b + 2 * g : test === 1 ? b + 2 * g : g
 }
 
+// A border that draws a line (not nil or none), or undefined.
+function visible(border: ResolvedBorder | undefined): ResolvedBorder | undefined {
+	return border === undefined || border.style === "nil" || border.style === "none" ? undefined : border
+}
+
 // The border drawn where `a` (first in reading order) and `b` meet. A cell's "nil" hides both.
 export function heavier(a: ResolvedBorder | undefined, b: ResolvedBorder | undefined): ResolvedBorder | undefined {
 	if (a?.style === "nil" || b?.style === "nil") return undefined
@@ -220,17 +250,17 @@ export function rowFormat(
 	return { table: format, props: resolver.row(format, store.rowLook(document, rowPart.rows.trPr[rowRow] ?? -1), position) }
 }
 
-// A cell's format in its row (`own` its w:tcPr) from grid column `column` of `columns`, and the columns it spans.
+// A cell's format in its row (`own` its w:tcPr) from grid column `column` of `columns`, and the columns it spans
+// (`span`: its own w:gridSpan unless given).
 export function cellFormat(
 	resolver: PropertyResolver,
 	table: TableFormat,
 	own: TableCellProps,
 	position: RowPosition,
 	column: number,
-	columns: number
+	columns: number,
+	span: number = Math.max(1, own.gridSpan ?? 1)
 ): { readonly format: CellFormat; readonly span: number } {
-	const span = Math.max(1, own.gridSpan ?? 1)
-
 	return {
 		format: resolver.cell(table, own, { ...position, gridColumn: column, gridSpan: span, gridColumnCount: columns }),
 		span
@@ -348,6 +378,9 @@ export function tableRows(part: StoryPart, table: number, view: RevisionView, ou
 
 // Token of a table resumed from a snapshot until its first area (no area has it).
 const RESUMED = -2
+
+// A point in px: how far a cell's preferred width may lie from its grid column before the grid is stale.
+const POINT = twips(20)
 
 // The index in `rows` (items of a table's rows, ascending) of the row holding `item`, or -1.
 export function rowIndex(part: StoryPart, rows: readonly number[], item: number): number {
@@ -526,6 +559,14 @@ export class TableLayout {
 	// merge spans on the next page, and the area (token) it last ran in.
 	private mergeFlows: (BlockFlow | undefined)[] = []
 	private mergeAreas: number[] = []
+	// Per grid column, the part of a vertical merge laid out in the area it last ran in (aligned where it ends).
+	private mergeParts: (MergePart | undefined)[] = []
+	// Per slot of the row laid out: it starts a vertical merge there.
+	private readonly mergedSlots: boolean[] = []
+	// Rows kept with the next one placed in this area since the last row that is not: where they began, to move
+	// them with a row that does not fit (see run).
+	private chain: RowChain | undefined = undefined
+	private readonly chainMark = new OutputMark()
 	// Set while header rows are repeated on a page: their merges are their own and end at the last header row.
 	// `cut`: a repeated header row did not fit (or a merge in them ran out of page).
 	private repeating = false
@@ -654,23 +695,44 @@ export class TableLayout {
 		}
 
 		const props = this.direct.props
+		const wanted = widthPx(props.width, area.width)
+		// An autofit table is laid out from its cells' preferred widths (w:tcW); its w:tblGrid is only the grid last
+		// computed from them (§17.4.53), stale in files from other generators. Per grid column the widest single
+		// column cell's, while every cell gives one; cells spanning columns as (column, span, width).
+		const preferred: number[] = []
+		const spanned: number[] = []
+		let usable = props.layout === "autofit"
 		let columns = 0
 
 		for (let k = 0; k < this.rows.length && k < 32; k++) {
 			const row = this.rows[k] ?? -1
 			const from = this.laid.partAt(k)
 			const rowProps = this.engine.store.rowLook(from.document, from.rows.trPr[from.aux[row] ?? -1] ?? -1)
-			let count = (rowProps.gridBefore ?? 0) + (rowProps.gridAfter ?? 0)
+			let column = rowProps.gridBefore ?? 0
 
-			for (const cell of this.cellItems(from, row)) count += this.cellProps(from, cell).gridSpan ?? 1
+			for (const cell of this.cellItems(from, row)) {
+				const own = this.cellProps(from, cell)
+				const span = own.gridSpan ?? 1
 
-			columns = Math.max(columns, count)
+				if (usable) {
+					const width = widthPx(own.width, wanted > 0 ? wanted : area.width)
+
+					if (width <= 0) usable = false
+					else if (span <= 1) preferred[column] = Math.max(preferred[column] ?? 0, width)
+					else spanned.push(column, span, width)
+				}
+
+				column += span
+			}
+
+			columns = Math.max(columns, column + (rowProps.gridAfter ?? 0))
 		}
 
 		while (grid.length < columns) grid.push(0)
 
+		if (usable) this.preferGrid(preferred, spanned, wanted)
+
 		const known = grid.reduce((sum, w) => sum + w, 0)
-		const wanted = widthPx(props.width, area.width)
 		const zero = grid.filter(w => w <= 0).length
 
 		if (zero > 0) {
@@ -733,6 +795,49 @@ export class TableLayout {
 		this.tableX = left
 	}
 
+	// Replaces the grid's columns with the cells' preferred widths (see computeGrid) when any differs from it by
+	// more than a point: a cell spanning columns gives the columns no single column cell sized their share of what
+	// those did not take. `wanted`: the table's preferred width (0 for none).
+	private preferGrid(preferred: number[], spanned: readonly number[], wanted: number): void {
+		const grid = this.grid
+
+		for (let s = 0; s < spanned.length; s += 3) {
+			const column = spanned[s] ?? 0
+			const end = Math.min(grid.length, column + (spanned[s + 1] ?? 1))
+			let taken = 0
+			let open = 0
+
+			for (let c = column; c < end; c++) {
+				const width = preferred[c]
+
+				if (width === undefined) open++
+				else taken += width
+			}
+
+			const share = open > 0 ? ((spanned[s + 2] ?? 0) - taken) / open : 0
+
+			if (share <= 0) continue
+
+			for (let c = column; c < end; c++) if (preferred[c] === undefined) preferred[c] = share
+		}
+
+		let differs = false
+		let total = 0
+
+		for (let c = 0; c < grid.length; c++) {
+			const width = preferred[c]
+
+			total += width ?? grid[c] ?? 0
+
+			if (width !== undefined && Math.abs(width - (grid[c] ?? 0)) > POINT) differs = true
+		}
+
+		// Cells wider or narrower together than the table's own preferred width are no truer than the grid.
+		if (!differs || (wanted > 0 && Math.abs(total - wanted) > POINT)) return
+
+		for (let c = 0; c < grid.length; c++) grid[c] = preferred[c] ?? grid[c] ?? 0
+	}
+
 	// w:tblpPr as Word applies it, when the table floats.
 	get position(): FloatingTablePosition | undefined {
 		return this.floating
@@ -780,13 +885,31 @@ export class TableLayout {
 		const slots: Slot[] = []
 		let column = props.gridBefore
 		const bidi = this.direct.props.bidiVisual
+		const cells = this.cellItems(from, item)
 
-		for (const cell of this.cellItems(from, item)) {
+		for (let c = 0; c < cells.length; c++) {
+			const cell = cells[c] ?? -1
 			const direct = this.cellProps(from, cell)
 
 			this.cells.delete(ref(from.index, cell))
 
-			const { format, span } = cellFormat(engine.resolver, table, direct, position, column, this.grid.length)
+			// A legacy horizontal merge (w:hMerge, §17.4.22): the cells continuing it widen the one starting it and
+			// show nothing of their own.
+			let own = Math.max(1, direct.gridSpan ?? 1)
+
+			if (direct.hMerge === "restart") {
+				while (c + 1 < cells.length) {
+					const next = this.cellProps(from, cells[c + 1] ?? -1)
+
+					if (next.hMerge !== "continue") break
+
+					this.cells.delete(ref(from.index, cells[c + 1] ?? -1))
+					own += Math.max(1, next.gridSpan ?? 1)
+					c++
+				}
+			}
+
+			const { format, span } = cellFormat(engine.resolver, table, direct, position, column, this.grid.length, own)
 			const end = Math.min(this.grid.length, column + span)
 			const start = this.gridX[Math.min(column, this.gridX.length - 1)] ?? 0
 			const width = (this.gridX[end - 1] ?? start) + (this.grid[end - 1] ?? 0) - start
@@ -805,7 +928,7 @@ export class TableLayout {
 			column += span
 		}
 
-		info = { item, table, props, slots }
+		info = { item, table, props, slots, keep: undefined }
 		this.infos.set(index, info)
 
 		return info
@@ -850,6 +973,7 @@ export class TableLayout {
 		const tokens = this.mergeTokens
 		const flows = this.mergeFlows
 		const areas = this.mergeAreas
+		const parts = this.mergeParts
 		const top = this.y
 		const mark = area.page.mark(new OutputMark())
 		const footnotes = area.footnotes?.mark() ?? 0
@@ -859,6 +983,7 @@ export class TableLayout {
 		this.mergeTokens = []
 		this.mergeFlows = []
 		this.mergeAreas = []
+		this.mergeParts = []
 		this.repeating = true
 		this.cut = false
 
@@ -870,6 +995,7 @@ export class TableLayout {
 			this.mergeTokens = tokens
 			this.mergeFlows = flows
 			this.mergeAreas = areas
+			this.mergeParts = parts
 		}
 
 		if (!this.cut && this.y <= area.bottom + EPSILON) {
@@ -901,6 +1027,7 @@ export class TableLayout {
 			this.rowsPlaced = 0
 			this.y = top
 			this.started = true
+			this.chain = undefined
 
 			if (!fresh && !crowded && this.headerRows > 0 && this.row >= this.headerRows && area.breaks) this.repeatHeaders(area)
 		}
@@ -920,6 +1047,8 @@ export class TableLayout {
 		}
 
 		let placed = 0
+		// Rows kept with the next move together with the row that does not fit, in a table flowing with the text.
+		const chains = area.breaks && !this.floated && this.floating === undefined
 
 		while (this.row < this.rows.length) {
 			const info = this.info(this.row)
@@ -937,11 +1066,31 @@ export class TableLayout {
 			placed++
 			page.mark(this.mark)
 
+			// A row kept with the next one (not the rest of a split row) begins a chain unless one is under way.
+			const keep = chains && this.keptWithNext(info)
+			const chain =
+				keep && this.chain === undefined && !this.continuing
+					? {
+							row: this.row,
+							y: this.y,
+							placed: this.rowsPlaced,
+							footnotes: area.footnotes?.mark() ?? 0,
+							exclusions: area.exclusions?.count ?? 0,
+							token: area.token,
+							top: this.rowsPlaced === 0 && (area.empty || this.stalled > 1)
+						}
+					: undefined
 			const status = this.layoutRow(area, this.row, this.pool, false, this.continuing)
 
 			if (status === FlowStatus.SUSPEND) return FlowStatus.SUSPEND
 
 			if (status === FlowStatus.DONE) {
+				if (!keep) this.chain = undefined
+				else if (chain !== undefined) {
+					this.chain = chain
+					this.chainMark.copy(this.mark)
+				}
+
 				this.continuing = false
 				this.infos.delete(this.row - 64)
 				this.row++
@@ -956,6 +1105,10 @@ export class TableLayout {
 				continue
 			}
 
+			// The row moved whole to the next area: the rows kept with it go along (a split row keeps them on its page).
+			if (this.continuing) this.chain = undefined
+			else this.rollbackChain(area)
+
 			return FlowStatus.OVERFLOW
 		}
 
@@ -969,12 +1122,40 @@ export class TableLayout {
 		return { top: px(margins.top), bottom: px(margins.bottom), start: px(margins.start), end: px(margins.end) }
 	}
 
+	// Word's cell spacing (w:tblCellSpacing, §17.4.44) in px, kept around every cell: cells lie that far in from
+	// the table's edge and twice it apart. A table translated from OpenDocument lays its spacing out as
+	// LibreOffice does instead (rowMargins).
+	private spacing(info: RowInfo): number {
+		if (this.engine.compat.libreOfficeSpacing) return 0
+
+		const width = info.props.cellSpacing ?? info.table.props.cellSpacing
+
+		return width === undefined ? 0 : Math.max(0, widthPx(width, this.tableWidth))
+	}
+
+	// The width a cell's content is laid out at.
+	private cellWidth(slot: Slot, info: RowInfo): number {
+		const margins = this.cellMargins(slot)
+
+		return Math.max(1, slot.width - margins.start - margins.end - 2 * this.spacing(info))
+	}
+
 	// A cell's margins in row `index` with the room its horizontal borders take in a table translated from OpenDocument,
 	// as LibreOffice lays it out (measured): with collapsing borders the border between two rows once, above the lower
 	// row, and the table's bottom border under its last row; with separate borders (cell spacing) each cell's own top
-	// and bottom. Word draws borders over the margins instead.
+	// and bottom. Word draws borders over the margins instead, with its cell spacing around them.
 	private rowMargins(slot: Slot, info: RowInfo, index: number): { top: number; bottom: number; start: number; end: number } {
 		const margins = this.cellMargins(slot)
+		const spacing = this.spacing(info)
+
+		if (spacing > 0) {
+			margins.top += spacing
+			margins.bottom += spacing
+			margins.start += spacing
+			margins.end += spacing
+
+			return margins
+		}
 
 		if (!this.engine.compat.libreOfficeSpacing || slot.continued) return margins
 
@@ -1044,8 +1225,12 @@ export class TableLayout {
 					pool[k] = flow
 				}
 
-				if (!slot.continued) flow.setContainer(slot.part, slot.item, slot.format)
-				else flow.setRange(this.part, 0, 0)
+				if (!slot.continued) {
+					const fill = cellFill(slot.format.props.shading, info.table.props.shading)
+
+					flow.setContainer(slot.part, slot.item, slot.format)
+					flow.darkFill = (fill === undefined ? undefined : shadingDark(fill)) ?? this.flow.darkFill
+				} else flow.setRange(this.part, 0, 0)
 			})
 		}
 
@@ -1055,16 +1240,20 @@ export class TableLayout {
 		let anyPlaced = false
 		let height = 0
 		const cellMarks: OutputMark[] = []
+		// Slots whose merge part (see mergeParts) began here: its end is the next slot's mark.
+		const parts: number[] = []
 
 		cellArea.breaks = false
 		cellArea.inTable = true
 		cellArea.token = token
+		this.mergedSlots.length = 0
 
 		info.slots.forEach((slot, k) => {
 			const flow = pool[k]
 			const margins = this.rowMargins(slot, info, index)
 
 			cellMarks.push(page.mark(new OutputMark()))
+			this.mergedSlots.push(false)
 			cellArea.left = slot.x + margins.start
 			cellArea.width = Math.max(1, slot.width - margins.start - margins.end)
 			cellArea.empty = atTop
@@ -1072,6 +1261,8 @@ export class TableLayout {
 			const merge = this.mergeFlows[slot.column]
 
 			if (merge !== undefined && (slot.continued || continuing)) {
+				this.mergedSlots[k] = true
+
 				// A merge that ran out of page continues at the top of this page's first row it spans.
 				if (this.mergeAreas[slot.column] === area.token) return
 
@@ -1095,6 +1286,20 @@ export class TableLayout {
 				this.mergeBottoms[slot.column] = merge.contentBottom() + margins.bottom
 				this.mergeTokens[slot.column] = area.token
 
+				const part = this.mergeParts[slot.column]
+
+				if (part !== undefined) {
+					this.mergeParts[slot.column] = {
+						...part,
+						from: cellMarks[k] ?? part.from,
+						to: new OutputMark(),
+						top,
+						token: area.token,
+						exact
+					}
+					parts.push(k)
+				}
+
 				return
 			}
 
@@ -1115,9 +1320,20 @@ export class TableLayout {
 
 			const bottom = flow.contentBottom() + margins.bottom
 
+			this.mergedSlots[k] = merged
+
 			if (merged) {
 				this.mergeBottoms[slot.column] = bottom
 				this.mergeTokens[slot.column] = area.token
+				this.mergeParts[slot.column] = {
+					slot,
+					from: cellMarks[k] ?? new OutputMark(),
+					to: new OutputMark(),
+					top,
+					token: area.token,
+					exact
+				}
+				parts.push(k)
 
 				if (status === FlowStatus.OVERFLOW) started.push({ slot: k, column: slot.column })
 			} else {
@@ -1126,6 +1342,16 @@ export class TableLayout {
 				height = Math.max(height, bottom - top)
 			}
 		})
+
+		if (parts.length > 0) {
+			const end = page.mark(new OutputMark())
+
+			for (const k of parts) {
+				const column = info.slots[k]?.column ?? -1
+
+				this.mergeParts[column]?.to.copy(cellMarks[k + 1] ?? end)
+			}
+		}
 
 		for (const slot of info.slots) {
 			if (!slot.continued) continue
@@ -1163,9 +1389,7 @@ export class TableLayout {
 
 					if (state === undefined || state === null || flow === undefined || slot.continued) return
 
-					const margins = this.cellMargins(slot)
-
-					cellArea.width = Math.max(1, slot.width - margins.start - margins.end)
+					cellArea.width = this.cellWidth(slot, info)
 					flow.restore(state, cellArea)
 				})
 			}
@@ -1206,7 +1430,7 @@ export class TableLayout {
 
 		this.alignCells(area, info, index, pool, cellMarks, top, height)
 
-		// A row of exact height cuts what its cells hold beyond it.
+		// A row of exact height cuts what its cells hold beyond it (a merge's, where the merge ends).
 		if (exact) {
 			const end = page.mark(new OutputMark())
 
@@ -1214,11 +1438,12 @@ export class TableLayout {
 				const from = cellMarks[k]
 				const to = cellMarks[k + 1] ?? end
 
-				if (from !== undefined && !slot.continued)
+				if (from !== undefined && !slot.continued && this.mergedSlots[k] !== true)
 					page.addClip(slot.x, top, slot.width, height, from.lines, to.lines, from.objects, to.objects)
 			})
 		}
 
+		this.endMerges(area, info, index, top, height)
 		this.drawRow(area, info, index, top, height, false)
 		this.y = top + height
 
@@ -1248,9 +1473,7 @@ export class TableLayout {
 			const slot = info.slots.find(candidate => candidate.column === entry.column)
 
 			if (flow !== undefined && entry.state !== undefined && slot !== undefined) {
-				const margins = this.cellMargins(slot)
-
-				this.cellArea.width = Math.max(1, slot.width - margins.start - margins.end)
+				this.cellArea.width = this.cellWidth(slot, info)
 				flow.restore(entry.state, this.cellArea)
 			}
 
@@ -1282,17 +1505,70 @@ export class TableLayout {
 		const part = slot.part
 
 		for (let item = slot.item + 1; item < part.end(slot.item); item++) {
-			if (part.kinds[item] !== Item.Paragraph) continue
-
-			// An edited paragraph is laid out from its overlay.
-			const substitute = this.engine.edits?.substitutes.get(ref(part.index, item))
-			const from = substitute === undefined ? part : this.engine.part(refPart(substitute))
-			const at = substitute === undefined ? item : refItem(substitute)
-
-			return from === undefined ? false : this.engine.content.formatOf(from, at, slot.format).props.pageBreakBefore
+			if (part.kinds[item] === Item.Paragraph) return this.paragraphProps(slot, item)?.pageBreakBefore === true
 		}
 
 		return false
+	}
+
+	// The properties paragraph `item` of a cell is laid out with (an edited one from its overlay).
+	private paragraphProps(slot: Slot, item: number): ParagraphFormat["props"] | undefined {
+		const part = slot.part
+		const substitute = this.engine.edits?.substitutes.get(ref(part.index, item))
+		const from = substitute === undefined ? part : this.engine.part(refPart(substitute))
+
+		return from === undefined
+			? undefined
+			: this.engine.content.formatOf(from, substitute === undefined ? item : refItem(substitute), slot.format).props
+	}
+
+	// Every paragraph of the row's cells is kept with the next (w:keepNext): the row stays on the page of the row
+	// after it, as Word keeps rows selected and set to keep with the next together.
+	private keptWithNext(info: RowInfo): boolean {
+		if (info.keep !== undefined) return info.keep
+
+		let keep = false
+
+		cells: for (const slot of info.slots) {
+			if (slot.continued) continue
+
+			const part = slot.part
+
+			for (let item = slot.item + 1; item < part.end(slot.item); item++) {
+				if (part.kinds[item] !== Item.Paragraph) continue
+
+				keep = this.paragraphProps(slot, item)?.keepNext === true
+
+				if (!keep) break cells
+			}
+		}
+
+		info.keep = keep
+
+		return keep
+	}
+
+	// Moves the rows kept with the next placed in this area since `chain` began to the next area; false when
+	// there are none or they began at its top (they cannot move anywhere better) or a merge runs on past them.
+	private rollbackChain(area: Area): boolean {
+		const chain = this.chain
+
+		this.chain = undefined
+
+		if (chain === undefined || chain.token !== area.token || chain.top) return false
+
+		for (const flow of this.mergeFlows) if (flow !== undefined) return false
+
+		area.page.rollback(this.chainMark)
+		area.footnotes?.rollback(chain.footnotes)
+
+		if (area.exclusions !== null) area.exclusions.count = chain.exclusions
+
+		this.row = chain.row
+		this.y = chain.y
+		this.rowsPlaced = chain.placed
+
+		return true
 	}
 
 	private lastOfMerge(index: number, column: number): boolean {
@@ -1321,7 +1597,14 @@ export class TableLayout {
 			const flow = pool[k]
 			const from = marks[k]
 
-			if ((align !== "center" && align !== "bottom") || flow === undefined || from === undefined || slot.continued || slot.rows !== 1)
+			// A merge is aligned across the rows it spans where it ends (endMerges).
+			if (
+				(align !== "center" && align !== "bottom") ||
+				flow === undefined ||
+				from === undefined ||
+				slot.continued ||
+				this.mergedSlots[k] === true
+			)
 				return
 
 			const margins = this.rowMargins(slot, info, index)
@@ -1335,7 +1618,154 @@ export class TableLayout {
 		})
 	}
 
+	// Where vertical merges end in this row with all their content laid out: their content aligned across the rows
+	// they span in this area (w:vAlign of the cell starting them), cut at an exact height and their diagonal
+	// borders drawn. A merge running on to the next area is aligned there, its earlier parts at their tops.
+	private endMerges(area: Area, info: RowInfo, index: number, top: number, height: number): void {
+		const page = area.page
+
+		for (const slot of info.slots) {
+			if (!slot.continued) continue
+
+			const column = slot.column
+			const part = this.mergeParts[column]
+
+			if (
+				part === undefined ||
+				part.token !== area.token ||
+				this.mergeTokens[column] !== area.token ||
+				this.mergeFlows[column] !== undefined ||
+				!this.lastOfMerge(index, column)
+			)
+				continue
+
+			this.mergeParts[column] = undefined
+
+			const start = part.slot
+			const align = start.format.props.vAlign
+			const bottom = top + height
+			const free = bottom - (this.mergeBottoms[column] ?? bottom)
+
+			if ((align === "center" || align === "bottom") && free > EPSILON)
+				page.move(part.from, part.to, 0, align === "center" ? free / 2 : free)
+
+			if (part.exact)
+				page.addClip(
+					start.x,
+					part.top,
+					start.width,
+					bottom - part.top,
+					part.from.lines,
+					part.to.lines,
+					part.from.objects,
+					part.to.objects
+				)
+
+			this.diagonals(area, start, info, part.top, bottom - part.top)
+		}
+	}
+
+	// A cell's diagonal borders (w:tl2br, w:tr2bl, §17.4.79-80) corner to corner of its box.
+	private diagonals(area: Area, slot: Slot, info: RowInfo, top: number, height: number): void {
+		const borders = slot.format.props.borders
+		const down = visible(borders.tl2br)
+		const up = visible(borders.tr2bl)
+
+		if (down === undefined && up === undefined) return
+
+		const spacing = this.spacing(info)
+		const x = slot.x + spacing
+		const y = top + spacing
+		const width = slot.width - 2 * spacing
+		const tall = height - 2 * spacing
+
+		if (width <= 0 || tall <= 0) return
+
+		const decorations = this.engine.decorations
+
+		if (down !== undefined) area.page.addGraphic(PageGraphic.DIAGONAL_DOWN, decorations.border(down), Layer.TEXT, x, y, width, tall)
+		if (up !== undefined) area.page.addGraphic(PageGraphic.DIAGONAL_UP, decorations.border(up), Layer.TEXT, x, y, width, tall)
+	}
+
+	// A row of a table with Word's cell spacing (see spacing): the table's fill and outer border around it, and
+	// in it every cell's own fill and four borders, inset by the spacing and shared with no other cell.
+	private drawSpaced(area: Area, info: RowInfo, index: number, top: number, height: number, split: boolean, spacing: number): void {
+		const page = area.page
+		const decorations = this.engine.decorations
+		const table = info.table.props.borders
+		const first = index === 0 || this.rowsPlaced === 0
+		const last = index === this.rows.length - 1 || split
+		const next = last ? undefined : this.info(index + 1)
+		const bidi = this.direct.props.bidiVisual
+		const line = (border: ResolvedBorder | undefined, x: number, y: number, horizontal: boolean, length: number): void => {
+			if (border === undefined || border.style === "nil" || length <= 0) return
+
+			const width = borderWidth(border)
+
+			page.addGraphic(
+				PageGraphic.BORDER,
+				decorations.border(border),
+				Layer.TEXT,
+				horizontal ? x : x - width / 2,
+				horizontal ? y - width / 2 : y,
+				horizontal ? length : width,
+				horizontal ? width : length
+			)
+		}
+		const left = this.tableX
+		const right = left + this.tableWidth
+		const fill = decorations.shading(info.table.props.shading)
+
+		if (fill !== 0) page.addGraphic(PageGraphic.SHADING, fill, Layer.BEHIND, left, top, this.tableWidth, height)
+
+		if (first) line(table.top, left, top, true, this.tableWidth)
+		if (last) line(table.bottom, left, top + height, true, this.tableWidth)
+
+		line(bidi ? table.end : table.start, left, top, false, height)
+		line(bidi ? table.start : table.end, right, top, false, height)
+
+		info.slots.forEach((slot, k) => {
+			const borders = slot.format.props.borders
+			const x = slot.x + spacing
+			const width = slot.width - 2 * spacing
+
+			if (width <= 0) return
+
+			// A merge's cells join up: no spacing between the rows it spans.
+			const below = next?.slots.find(candidate => candidate.column === slot.column)
+			const merged = below?.continued === true
+			const y = slot.continued ? top : top + spacing
+			const bottom = merged ? top + height : top + height - spacing
+			const own = slot.format.props.shading
+			const shading = own === undefined || shadingColor(own.pattern, own.color, own.fill) === undefined ? 0 : decorations.shading(own)
+
+			if (shading !== 0) page.addGraphic(PageGraphic.SHADING, shading, Layer.BEHIND, x, y, width, bottom - y)
+
+			if (!slot.continued) line(topEdge(borders, table, index === 0), x, y, true, width)
+
+			if (!merged) line(last ? (borders.bottom ?? table.bottom) : (borders.bottom ?? table.insideH), x, bottom, true, width)
+
+			const start = borders.start ?? (k === 0 ? table.start : table.insideV)
+			const end = borders.end ?? (k === info.slots.length - 1 ? table.end : table.insideV)
+
+			line(start, bidi ? x + width : x, y, false, bottom - y)
+			line(end, bidi ? x : x + width, y, false, bottom - y)
+		})
+	}
+
 	private drawRow(area: Area, info: RowInfo, index: number, top: number, height: number, split: boolean): void {
+		info.slots.forEach((slot, k) => {
+			if (!slot.continued && this.mergedSlots[k] !== true) this.diagonals(area, slot, info, top, height)
+		})
+
+		const spacing = this.spacing(info)
+
+		if (spacing > 0) {
+			this.drawSpaced(area, info, index, top, height, split, spacing)
+
+			return
+		}
+
 		const page = area.page
 		const decorations = this.engine.decorations
 		const tableBorders = info.table.props.borders

@@ -13,6 +13,7 @@ import {
 	type DocxOrientation,
 	type DocxPageNumberFormat
 } from "../edit/commands/sections"
+import { docxSchema } from "../edit/schema"
 import { NoteNumbering } from "../layout/notes"
 import { bodySectionsOf, caretSection, docSectionChanges, mirrorMargins, sectionProps } from "../stories/sections"
 import { resolveSection } from "../styles/index"
@@ -150,6 +151,41 @@ export function docxBookmarks(editor: PagedEditor): readonly DocxBookmark[] {
 	}
 
 	return shown
+}
+
+// A link a press can follow: its relationship target as written (an external link) and its anchor (a bookmark
+// of the document, or the target's fragment).
+export interface DocxLinkAt {
+	readonly target: string | null
+	readonly anchor: string | null
+}
+
+// The link at `pos` of the story being edited (the character after it, or the one before it at a link's end),
+// for Ctrl/Cmd+Click and Open link; undefined outside a link. Read on a press only.
+export function docxLinkAt(editor: PagedEditor, pos: number): DocxLinkAt | undefined {
+	const doc = editor.session.state.doc
+
+	if (pos < 0 || pos > doc.content.size) return undefined
+
+	const $pos = doc.resolve(pos)
+	const link = docxSchema.marks.link
+
+	if (!$pos.parent.isTextblock) return undefined
+
+	const mark = link.isInSet($pos.nodeAfter?.marks ?? []) ?? link.isInSet($pos.nodeBefore?.marks ?? [])
+
+	if (mark === undefined) return undefined
+
+	const target = mark.attrs["target"] as string | null
+	const anchor = mark.attrs["anchor"] as string | null
+
+	return target === null && anchor === null ? undefined : { target, anchor }
+}
+
+// Where an internal link goes: the start of the body's bookmark named `name` (names are case-insensitive, the
+// first of duplicates wins, as in Word); undefined when the document has none of that name.
+export function docxBookmarkStart(editor: PagedEditor, name: string): number | undefined {
+	return sessionBookmarks(editor.body.session).byName.get(name.toLowerCase())?.from
 }
 
 // The date `ms` (epoch milliseconds) under a \@ date-time picture, month and day names in `language`.

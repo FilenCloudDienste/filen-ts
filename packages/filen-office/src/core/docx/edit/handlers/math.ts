@@ -5,6 +5,7 @@ import { editedEquation, equationFault, equationRunProperties, mathNodeLatex, ne
 import type { XElement } from "../../../math/ommlTrack"
 import { formattingBase, revisionStamp, type RevisionStamp } from "../../review/track"
 import type { MathCommand } from "../commands/math"
+import { caretMarks } from "../formats"
 import { markCommand } from "../invariants/index"
 import type { FeatureHandlers, StoryCommandContext, StoryCommandHandler } from "../registry"
 import { NO_MARKERS, NO_SOURCE, docxSchema } from "../schema"
@@ -45,7 +46,7 @@ function selectedEquation(state: EditorState): { readonly pos: number; readonly 
 // The run properties where a new equation goes in (the caret's), in Word's math font.
 function caretRunProperties(context: StoryCommandContext): XElement {
 	const { $from, empty, $to } = context.state.selection
-	const marksAt = empty ? (context.state.storedMarks ?? $from.marks()) : ($from.marksAcross($to) ?? $from.marks())
+	const marksAt = empty ? caretMarks(context.state, context.session.formats) : ($from.marksAcross($to) ?? $from.marks())
 	const id = formattingBase(context.context, context.session.story.part, marksAt)
 
 	return equationRunProperties(id < 0 ? undefined : context.context.bases.get(id))

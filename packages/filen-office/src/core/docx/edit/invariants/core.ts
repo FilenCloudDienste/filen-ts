@@ -31,10 +31,10 @@ import {
 	endsWithTable,
 	inlineLevel,
 	markerKey,
+	markerNodeAttrs,
 	survivorsOf,
 	type MarkerAttrs,
-	type MarkerList,
-	type MarkerNodeAttrs
+	type MarkerList
 } from "../schema"
 
 // Transactions the session makes itself (locking blocks, the repairs appended here) skip the invariants
@@ -1322,12 +1322,7 @@ function markersOf(node: Node, names: readonly string[], out: Map<string, Marker
 export function markerNode(marker: MarkerAttrs): Node {
 	return marker.kind === "commentReference"
 		? nodes.comment_ref.create({ src: marker.src, id: marker.id })
-		: nodes.marker.create({
-				src: marker.src,
-				kind: marker.kind,
-				id: marker.id,
-				name: (marker as Partial<MarkerNodeAttrs>).name ?? null
-			})
+		: nodes.marker.create(markerNodeAttrs(marker))
 }
 
 // Puts lost markers back at `pos`: inline where the position is in a paragraph, otherwise in the

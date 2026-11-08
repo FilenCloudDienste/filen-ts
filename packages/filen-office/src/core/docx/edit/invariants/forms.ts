@@ -47,7 +47,7 @@ import {
 import { builtInStyleId } from "../formats"
 import { withoutRunStyles } from "../../math/edit"
 import { lockedStyleViolation, protectionOf, protectionViolation } from "../protection"
-import { NO_SOURCE, docxSchema, type MarkerList } from "../schema"
+import { NO_SOURCE, docxSchema, markerNodeAttrs, type MarkerList } from "../schema"
 import type { DocxEditorSession } from "../session"
 import {
 	insertedSlices,
@@ -1482,12 +1482,7 @@ function anchorsIn(doc: Node, from: number, to: number, blocksFrom: number): Nod
 				out.push(
 					marker.kind === "commentReference"
 						? docxSchema.nodes.comment_ref.create({ src: marker.src, id: marker.id })
-						: docxSchema.nodes.marker.create({
-								src: marker.src,
-								kind: marker.kind,
-								id: marker.id,
-								name: "name" in marker ? marker.name : null
-							})
+						: docxSchema.nodes.marker.create(markerNodeAttrs(marker))
 				)
 
 		return true

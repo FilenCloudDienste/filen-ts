@@ -313,6 +313,63 @@ describe("DocxEditor", () => {
 		expect(container.querySelectorAll(".fo-docx-caret").length).toBe(1)
 	})
 
+	it("reports the page in view and the count, and goes to a page with the caret at its start", async () => {
+		const { editor } = await pagedEditor(LONG)
+		const handle = { current: null as DocxEditorHandle | null }
+		const onPage = vi.fn()
+
+		act(() =>
+			root.render(
+				<DocxEditor
+					ref={value => {
+						handle.current = value
+					}}
+					editor={editor}
+					document={documentOf(editor)}
+					zoom={1}
+					label="Document"
+					onPage={onPage}
+				/>
+			)
+		)
+		await act(frame)
+
+		expect(editor.pageCount).toBeGreaterThan(2)
+		expect(onPage).toHaveBeenLastCalledWith(0, editor.pageCount)
+
+		const calls = onPage.mock.calls.length
+
+		// A render that changes neither reports nothing.
+		act(() => {
+			root.render(
+				<DocxEditor
+					ref={value => {
+						handle.current = value
+					}}
+					editor={editor}
+					document={documentOf(editor)}
+					zoom={1}
+					label="Document"
+					onPage={onPage}
+				/>
+			)
+		})
+		expect(onPage.mock.calls.length).toBe(calls)
+
+		await act(async () => {
+			handle.current?.goToPage(2)
+			await frame()
+		})
+
+		const page = editor.page(2)
+		const caret = editor.caret()
+
+		expect(caret?.page).toBe(2)
+		// The page's first line, at its start.
+		expect(page === undefined ? undefined : editor.geometry.hitTest(2, 0, 0)?.pos).toBe(editor.state.selection.head)
+		expect(editor.state.selection.empty).toBe(true)
+	})
+
 	it("types through the input view and patches the page", async () => {
 		const { editor } = await pagedEditor(LONG)
 		let document = documentOf(editor)
@@ -1123,6 +1180,84 @@ describe("EditSink", () => {
 		const line = editor.geometry.lineBoundary(paragraphPos(editor, 5) + 3, 1, 1)
 
 		expect(editor.selection().head).toBe(line?.pos)
+		sink.destroy()
+	})
+
+	it("breaks the page on Mod+Enter (Ctrl off Apple platforms, Cmd on them); Enter and Shift+Enter keep splitting and breaking lines", async () => {
+		const breaks = (editor: PagedEditor, type: string): number => {
+			let count = 0
+
+			editor.state.doc.descendants(node => {
+				if (node.type.name === "break" && node.attrs["type"] === type) count++
+			})
+
+			return count
+		}
+
+		for (const apple of [false, true]) {
+			const { editor } = await pagedEditor(LONG)
+			const sink = sinkOf(editor, { apple })
+			const count = editor.state.doc.childCount
+
+			caretAt(editor, paragraphPos(editor, 2) + 3)
+			expect(key(sink.view.dom, { key: "Enter", ctrlKey: !apple, metaKey: apple }).defaultPrevented).toBe(true)
+			expect(breaks(editor, "page")).toBe(1)
+			expect(editor.state.doc.childCount).toBe(count + 1)
+
+			// Mod+Shift+Enter and Mod+Alt+Enter are no command.
+			const doc = editor.state.doc
+
+			key(sink.view.dom, { key: "Enter", ctrlKey: !apple, metaKey: apple, shiftKey: true })
+			key(sink.view.dom, { key: "Enter", ctrlKey: !apple, metaKey: apple, altKey: true })
+			expect(editor.state.doc).toBe(doc)
+
+			key(sink.view.dom, { key: "Enter", shiftKey: true })
+			expect(breaks(editor, "textWrapping")).toBe(1)
+			key(sink.view.dom, { key: "Enter" })
+			expect(editor.state.doc.childCount).toBe(count + 2)
+			expect(breaks(editor, "page")).toBe(1)
+			sink.destroy()
+		}
+	})
+
+	it("opens Go To on Word's Ctrl+G (Cmd+Option+G on Apple platforms, where Cmd+G finds), find without a Go To", async () => {
+		const { editor } = await pagedEditor(LONG)
+		// happy-dom reports AltGraph for any Alt; a browser does only for AltGr.
+		const optionKey = (target: Element, init: KeyboardEventInit): KeyboardEvent => {
+			const event = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, ...init })
+
+			Object.defineProperty(event, "getModifierState", { value: (name: string) => name === "Alt" && event.altKey })
+			target.dispatchEvent(event)
+
+			return event
+		}
+
+		for (const apple of [false, true]) {
+			const onFind = vi.fn()
+			const onGoTo = vi.fn()
+			const sink = new EditSink(editor, host, { label: "Document", caretClientRect: () => undefined, apple, onFind, onGoTo })
+			const mod = { ctrlKey: !apple, metaKey: apple }
+
+			expect(optionKey(sink.view.dom, { key: apple ? "©" : "g", code: "KeyG", ...mod, altKey: apple }).defaultPrevented).toBe(true)
+			expect(onGoTo).toHaveBeenCalledTimes(1)
+			expect(onFind).not.toHaveBeenCalled()
+			key(sink.view.dom, { key: "f", code: "KeyF", ...mod })
+			expect(onFind).toHaveBeenLastCalledWith(false)
+
+			if (apple) {
+				key(sink.view.dom, { key: "g", code: "KeyG", ...mod })
+				expect(onFind).toHaveBeenCalledTimes(2)
+				expect(onGoTo).toHaveBeenCalledTimes(1)
+			}
+
+			sink.destroy()
+		}
+
+		const onFind = vi.fn()
+		const sink = new EditSink(editor, host, { label: "Document", caretClientRect: () => undefined, onFind })
+
+		expect(key(sink.view.dom, { key: "g", code: "KeyG", ctrlKey: true }).defaultPrevented).toBe(true)
+		expect(onFind).toHaveBeenLastCalledWith(false)
 		sink.destroy()
 	})
 

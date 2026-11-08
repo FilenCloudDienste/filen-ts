@@ -22,7 +22,15 @@ export type InsertCommand =
 export const INSERT_COMMANDS: readonly DocxCommandInfo<InsertCommand["type"]>[] = [
 	{ type: "link.set", labelKey: "docx.link.set", icon: "link", group: "link", write: true, scope: "story", input: "link" },
 	{ type: "link.remove", labelKey: "docx.link.remove", icon: "unlink", group: "link", write: true, scope: "story" },
-	{ type: "insert.pageBreak", labelKey: "docx.insert.pageBreak", icon: "page-break", group: "insert", write: true, scope: "story" },
+	{
+		type: "insert.pageBreak",
+		labelKey: "docx.insert.pageBreak",
+		icon: "page-break",
+		shortcut: "mod+enter",
+		group: "insert",
+		write: true,
+		scope: "story"
+	},
 	{ type: "insert.lineBreak", labelKey: "docx.insert.lineBreak", icon: "line-break", group: "insert", write: true, scope: "story" },
 	{
 		type: "insert.horizontalLine",
@@ -44,7 +52,7 @@ export const INSERT_COMMANDS: readonly DocxCommandInfo<InsertCommand["type"]>[] 
 ]
 
 // URLs a link may hold (as typed; what opening one allows is the app's link policy).
-const MAX_TARGET = 2048
+export const MAX_LINK_TARGET = 2048
 // Word's bookmark names.
 const BOOKMARK_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,39}$/
 export const MAX_LINK_TEXT = 1024
@@ -202,7 +210,7 @@ export const parseInsertCommand: DocxCommandParser<InsertCommand> = (type, value
 	if (hasText && (text === undefined || !insertable(text))) return undefined
 
 	const extra = text === undefined ? {} : { text }
-	const target = stringArg(value, "target", MAX_TARGET, 1)
+	const target = stringArg(value, "target", MAX_LINK_TARGET, 1)
 	const anchor = field(value, "anchor")
 	const heading = field(value, "heading")
 	const given = [field(value, "target"), anchor, heading].filter(arg => arg !== undefined).length

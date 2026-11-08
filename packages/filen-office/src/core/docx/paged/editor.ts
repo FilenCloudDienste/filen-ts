@@ -184,6 +184,9 @@ export class PagedEditor {
 		undefined
 	// Changes with the editor's own state document commands may depend on (painter, view, suspension, stories).
 	private stateVersion = 0
+	// What repeat() runs, and whether a story command is running (its transactions do not end it).
+	private repeatable: DocxEditorCommand | undefined = undefined
+	private commandRunning = false
 	private headersHidden = false
 	// While suspended: what the stories applied that their layout views have not taken yet, in order (keepUp),
 	// a story's consecutive applies folded into one change.
@@ -600,7 +603,21 @@ export class PagedEditor {
 
 		if (this.disposed || info === undefined || writesUnholdableText(command)) return false
 		if (command.type === "history.undo" || command.type === "history.redo") return this.step(command.type === "history.undo")
-		if (info.scope === "story") return this.session.execute(command)
+		if (info.scope === "story") {
+			this.commandRunning = true
+
+			let done: boolean
+
+			try {
+				done = this.session.execute(command)
+			} finally {
+				this.commandRunning = false
+			}
+
+			if (done && info.write) this.repeatable = command
+
+			return done
+		}
 		if (info.write && (this.body.session.readOnly || !commandAllowed(this.session, command.type))) return false
 
 		const handler = documentHandler(command.type)
@@ -609,6 +626,14 @@ export class PagedEditor {
 		if (handler === undefined || !handler.enabled(context)) return false
 
 		return handler.run(context, command as never)
+	}
+
+	// Word's Repeat (F4): the last story command that changed formatting or content, run again where the
+	// selection is now; false when there is none (an edit not made by a command ends it).
+	repeat(): boolean {
+		const command = this.repeatable
+
+		return command !== undefined && this.execute(command) === true
 	}
 
 	canExecute(type: DocxEditorCommandType): boolean {
@@ -985,6 +1010,8 @@ export class PagedEditor {
 		if (this.disposed) return
 
 		this.history.record(story, transactions, state)
+
+		if (!this.commandRunning && this.repeatable !== undefined && transactions.some(tr => tr.docChanged)) this.repeatable = undefined
 
 		let selectionSet = false
 

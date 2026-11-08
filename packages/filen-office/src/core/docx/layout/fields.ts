@@ -1,12 +1,16 @@
+import { dateTimeResult, parseFieldCode } from "../fields/code"
 import { Item } from "../model/kinds"
 import { Ns } from "../model/namespaces"
 import type { StoryPart } from "../model/part"
 import { macroButtonText } from "../model/macroButton"
 import { englishCardinal, englishOrdinal, formatNumber } from "../numbering/formats"
+import type { ResolvedLanguage } from "../props/types"
 
 // Fields whose result layout computes instead of showing the cached result Word stored: page numbers per page,
-// and legacy check boxes and drop-down lists, which Word draws from their w:ffData (ECMA-376 Part 1 §17.16.17).
-export const FieldKind = { OTHER: 0, PAGE: 1, NUMPAGES: 2, SECTIONPAGES: 3, CHECKBOX: 4, DROPDOWN: 5 } as const
+// legacy check boxes and drop-down lists, which Word draws from their w:ffData (ECMA-376 Part 1 §17.16.17), and
+// DATE and TIME, which Word shows as of the time the document is opened or printed unless the field is locked
+// (w:fldLock). CREATEDATE, SAVEDATE, PRINTDATE and EDITTIME keep their stored results.
+export const FieldKind = { OTHER: 0, PAGE: 1, NUMPAGES: 2, SECTIONPAGES: 3, CHECKBOX: 4, DROPDOWN: 5, DATE: 6, TIME: 7 } as const
 
 export type FieldKind = (typeof FieldKind)[keyof typeof FieldKind]
 
@@ -19,6 +23,8 @@ export interface FieldInfo {
 const OTHER: FieldInfo = { kind: FieldKind.OTHER, format: undefined }
 const CHECKBOX: FieldInfo = { kind: FieldKind.CHECKBOX, format: undefined }
 const DROPDOWN: FieldInfo = { kind: FieldKind.DROPDOWN, format: undefined }
+const DATE: FieldInfo = { kind: FieldKind.DATE, format: undefined }
+const TIME: FieldInfo = { kind: FieldKind.TIME, format: undefined }
 
 // \* general formatting switches that format numbers (ECMA-376 §17.16.4.3, Microsoft's "Format field results"),
 // as ST_NumberFormat values, or the switch's own name for text a field writes lower case (cardText, ordText,
@@ -51,8 +57,14 @@ export function numberSwitchFormat(name: string): string | undefined {
 const FIELD = /^\s*([A-Za-z]+)/
 const SWITCH = /\\\*\s*([A-Za-z]+)/g
 
-export function fieldInfo(instruction: string): FieldInfo {
+// What layout computes for a field with instruction `instruction`, whose begin w:fldChar (or w:fldSimple) is
+// `item` of `part`: a locked one (w:fldLock) keeps its stored date or time, as Word updates no locked field.
+export function fieldInfo(instruction: string, part?: StoryPart, item = -1): FieldInfo {
 	const type = FIELD.exec(instruction)?.[1]?.toUpperCase()
+
+	if (type === "DATE" || type === "TIME")
+		return part !== undefined && item >= 0 && fieldLocked(part, item) ? OTHER : type === "DATE" ? DATE : TIME
+
 	const kind =
 		type === "PAGE"
 			? FieldKind.PAGE
@@ -77,6 +89,17 @@ export function fieldInfo(instruction: string): FieldInfo {
 }
 
 export { macroButtonText }
+
+// Whether the field whose begin w:fldChar (or w:fldSimple) is `item` is locked (w:fldLock, §17.16.18, §17.16.19).
+export function fieldLocked(part: StoryPart, item: number): boolean {
+	return part.kinds[item] === Item.FieldChar ? part.fieldCharLocked(item) : part.reader.flag(part.node(item), Ns.W, "fldLock")
+}
+
+// What a DATE or TIME field with instruction `instruction` shows at `now` in language `lang` (its run's w:lang),
+// as an update computes it (fields/code.ts dateTimeResult).
+export function dateTimeText(instruction: string, now: Date, lang: ResolvedLanguage): string {
+	return dateTimeResult(parseFieldCode(instruction), now, lang.latin, lang.eastAsia)
+}
 
 // The text a field with result text `result` and instruction `instruction` shows: its result, else a
 // MACROBUTTON's display text.

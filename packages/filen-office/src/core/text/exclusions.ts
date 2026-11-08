@@ -49,6 +49,32 @@ export class Exclusions {
 		this.wraps[this.count++] = wrap
 	}
 
+	// Adds `from`'s obstacles moved down by dy.
+	addShifted(from: Exclusions, dy: number): void {
+		for (let k = 0; k < from.count; k++) {
+			const at = k * 4
+
+			this.add(
+				from.rects[at] ?? 0,
+				(from.rects[at + 1] ?? 0) + dy,
+				from.rects[at + 2] ?? 0,
+				(from.rects[at + 3] ?? 0) + dy,
+				(from.wraps[k] ?? Wrap.BOTH) as Wrap
+			)
+		}
+	}
+
+	// A hash of the obstacles, to tell whether they changed.
+	key(): number {
+		let hash = this.count
+
+		for (let k = 0; k < this.count * 4; k++) hash = (Math.imul(hash, 31) + Math.round((this.rects[k] ?? 0) * 64)) | 0
+
+		for (let k = 0; k < this.count; k++) hash = (Math.imul(hash, 31) + (this.wraps[k] ?? 0)) | 0
+
+		return hash
+	}
+
 	// Whether any obstacle overlaps the band [top, bottom) horizontally within [minX, maxX).
 	overlaps(top: number, bottom: number, minX: number, maxX: number): boolean {
 		for (let k = 0; k < this.count; k++) {

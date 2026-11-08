@@ -98,6 +98,7 @@ export const pdfJob: JobDefinition<"pdf"> = {
 			{
 				assets: realm.assets,
 				title: info.title ?? request.title ?? "",
+				...(info.properties === undefined ? {} : { properties: info.properties }),
 				lang: info.lang ?? request.lang ?? realm.lang ?? FALLBACK_LANG,
 				signal: context.signal,
 				deterministic: request.deterministic === true,

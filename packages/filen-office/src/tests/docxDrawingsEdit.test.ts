@@ -628,6 +628,31 @@ describe("docx picture insertion", () => {
 		expect(mediaInUse(editor.sessions.map(session => session.state)).has(media as number)).toBe(true)
 	})
 
+	it("writes a picture inserted twice as one media part that both relationships target", async () => {
+		const { editor, pkg, context } = await pagedEditor(docx(p("One") + p("Two"), false))
+
+		// The same bytes twice, then other bytes of the same length.
+		for (const picture of [png(96, 48), png(96, 48), png(48, 96)]) {
+			editor.dispatch(editor.session.state.tr.setSelection(TextSelection.create(editor.session.state.doc, 1)))
+			expect(await run(editor, { type: "image.insert", media: editor.addMedia(picture) as number })).toBe(true)
+		}
+
+		const after = await saved(editor, pkg, context)
+		const rels = (await partText(after.bytes, "word/_rels/document.xml.rels")) ?? ""
+		const reopened = await openBytes(after.bytes)
+		const parts = after.drawings.map(drawing => reopened.model.mediaRef(drawing.part, drawing.embedId ?? "")?.partName)
+
+		expect(after.drawings).toHaveLength(3)
+		expect([...rels.matchAll(/Target="media\/(image\d+\.png)"/g)].map(match => match[1]).sort()).toEqual([
+			"image1.png",
+			"image2.png",
+			"image2.png"
+		])
+		// Inserted at the start each time, the other picture comes first and the repeated one shares a part.
+		expect(parts).toEqual(["word/media/image1.png", "word/media/image2.png", "word/media/image2.png"])
+		expect(await partText(after.bytes, "word/media/image3.png")).toBeUndefined()
+	})
+
 	it("keeps a registered picture through saves until a picture insertion names it or it is given up", async () => {
 		const { editor } = await pagedEditor(docx(p("One"), false))
 		const context = editor.session.context

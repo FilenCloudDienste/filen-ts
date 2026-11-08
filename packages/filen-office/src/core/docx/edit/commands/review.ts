@@ -10,9 +10,10 @@ export type DocxMarkupView = (typeof DOCX_MARKUP_VIEWS)[number]
 export type ReviewCommand =
 	// Without `on`: toggles.
 	| { readonly type: "review.track"; readonly on?: boolean }
-	// Without `id`: the change at the selection.
-	| { readonly type: "review.accept"; readonly id?: string }
-	| { readonly type: "review.reject"; readonly id?: string }
+	// Without `id`: the change at the selection. `next`: then selects the next change (Word's "Accept and Move
+	// to Next"); without it the selection stays (Word's "Accept This Change").
+	| { readonly type: "review.accept"; readonly id?: string; readonly next?: boolean }
+	| { readonly type: "review.reject"; readonly id?: string; readonly next?: boolean }
 	| { readonly type: "review.acceptAll" }
 	| { readonly type: "review.rejectAll" }
 	| { readonly type: "review.next" }
@@ -22,7 +23,17 @@ export type ReviewCommand =
 const document = { scope: "document", group: "review", context: "revision" } as const
 
 export const REVIEW_COMMANDS: readonly DocxCommandInfo<ReviewCommand["type"]>[] = [
-	{ type: "review.track", labelKey: "docx.review.track", icon: "track-changes", write: true, author: true, ...document },
+	// Word's Ctrl+Shift+E (Cmd+Shift+E): the host toggles from the review state, asking for the author to turn it on.
+	{
+		type: "review.track",
+		labelKey: "docx.review.track",
+		icon: "track-changes",
+		shortcut: "mod+shift+e",
+		hostShortcut: true,
+		write: true,
+		author: true,
+		...document
+	},
 	{ type: "review.accept", labelKey: "docx.review.accept", icon: "accept", write: true, ...document },
 	{ type: "review.reject", labelKey: "docx.review.reject", icon: "reject", write: true, ...document },
 	{ type: "review.acceptAll", labelKey: "docx.review.acceptAll", icon: "accept-all", write: true, ...document },
@@ -46,11 +57,16 @@ export const parseReviewCommand: DocxCommandParser<ReviewCommand> = (type, value
 		}
 		case "review.accept":
 		case "review.reject": {
-			if (field(value, "id") === undefined) return { type }
+			const id = field(value, "id") === undefined ? null : idArg(value, "id")
 
-			const id = idArg(value, "id")
+			if (id === undefined) return undefined
+			if (field(value, "next") === undefined) return id === null ? { type } : { type, id }
 
-			return id === undefined ? undefined : { type, id }
+			const next = boolArg(value, "next")
+
+			if (next === undefined) return undefined
+
+			return id === null ? { type, next } : { type, id, next }
 		}
 		case "view.markup": {
 			const mode = choiceArg<DocxMarkupView>(value, "mode", VIEWS)

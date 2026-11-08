@@ -6,6 +6,8 @@ import { boolArg, hasControl, intArg, optional, stringArg, type DocxCommandInfo,
 export type FieldCommand =
 	| { readonly type: "field.update" }
 	| { readonly type: "field.updateAll" }
+	// Unlink Fields: the fields of the selection (or the one at the caret) become their results as text.
+	| { readonly type: "field.unlink" }
 	| { readonly type: "toc.insert"; readonly levels: number; readonly hyperlinks: boolean }
 	| { readonly type: "toc.update"; readonly pagesOnly: boolean }
 	| { readonly type: "insert.pageNumber" }
@@ -24,9 +26,18 @@ const document = { write: true, scope: "document", group: "field" } as const
 export const FIELD_COMMANDS: readonly DocxCommandInfo<FieldCommand["type"]>[] = [
 	{ type: "field.update", labelKey: "docx.field.update", icon: "field-update", shortcut: "F9", async: true, ...document },
 	{ type: "field.updateAll", labelKey: "docx.field.updateAll", icon: "field-update-all", async: true, ...document },
+	{ type: "field.unlink", labelKey: "docx.field.unlink", icon: "field-unlink", shortcut: "mod+shift+F9", ...document },
 	{ type: "toc.insert", labelKey: "docx.toc.insert", icon: "toc", async: true, ...document },
 	{ type: "toc.update", labelKey: "docx.toc.update", icon: "toc-update", async: true, ...document },
-	{ type: "insert.pageNumber", labelKey: "docx.insert.pageNumber", icon: "page-number", ...document },
+	// Alt+Shift+P; Word for Mac's Control+Shift+P (Option+Shift types a character there).
+	{
+		type: "insert.pageNumber",
+		labelKey: "docx.insert.pageNumber",
+		icon: "page-number",
+		shortcut: "alt+shift+p",
+		appleShortcut: "ctrl+shift+p",
+		...document
+	},
 	{ type: "insert.pageCount", labelKey: "docx.insert.pageCount", icon: "page-count", ...document },
 	{ type: "insert.date", labelKey: "docx.insert.date", icon: "date", input: "date", ...document },
 	{ type: "insert.field", labelKey: "docx.insert.field", icon: "field", input: "text", ...document },
@@ -35,14 +46,18 @@ export const FIELD_COMMANDS: readonly DocxCommandInfo<FieldCommand["type"]>[] = 
 	{ type: "bookmark.rename", labelKey: "docx.bookmark.rename", icon: "bookmark-rename", input: "text", ...document }
 ]
 
+// The codes Word's Alt+Shift+D and Alt+Shift+T insert (Control+Shift+D and T on a Mac).
+export const DATE_FIELD_CODE = ' DATE \\@ "M/d/yyyy" '
+export const TIME_FIELD_CODE = ' TIME \\@ "h:mm am/pm" '
+
 // The fields insert.field makes (those an update computes), with an example code each for a picker.
 export const FIELD_CATALOGUE: readonly { readonly type: string; readonly example: string }[] = [
 	{ type: "PAGE", example: " PAGE \\* MERGEFORMAT " },
 	{ type: "NUMPAGES", example: " NUMPAGES \\* MERGEFORMAT " },
 	{ type: "SECTIONPAGES", example: " SECTIONPAGES \\* MERGEFORMAT " },
 	{ type: "SECTION", example: " SECTION " },
-	{ type: "DATE", example: ' DATE \\@ "M/d/yyyy" ' },
-	{ type: "TIME", example: ' TIME \\@ "h:mm am/pm" ' },
+	{ type: "DATE", example: DATE_FIELD_CODE },
+	{ type: "TIME", example: TIME_FIELD_CODE },
 	{ type: "REF", example: " REF _Ref1 \\h " },
 	{ type: "PAGEREF", example: " PAGEREF _Ref1 \\h " },
 	{ type: "SEQ", example: " SEQ Figure \\* ARABIC " }

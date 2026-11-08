@@ -252,7 +252,11 @@ describe("docx writer", () => {
 		expect(numbering).toContain(
 			'<w:num w:numId="2"><w:abstractNumId w:val="1"/></w:num><w:num w:numId="3"><w:abstractNumId w:val="1"/><w:lvlOverride w:ilvl="0"><w:startOverride w:val="1"/></w:lvlOverride></w:num>'
 		)
-		expect(xml).toContain('<w:pPr><w:numPr><w:ilvl w:val="0"/><w:numId w:val="3"/></w:numPr></w:pPr>')
+		// The Normal paragraph made a list item takes List Paragraph, as in Word.
+		expect(xml).toContain('<w:pPr><w:pStyle w:val="ListParagraph"/><w:numPr><w:ilvl w:val="0"/><w:numId w:val="3"/></w:numPr></w:pPr>')
+		expect(styles).toContain(
+			'<w:style w:type="paragraph" w:styleId="ListParagraph"><w:name w:val="List Paragraph"/><w:basedOn w:val="Standard"/>'
+		)
 	})
 
 	it("copies a paragraph out of any list with the level the file gives it (numId 0, level past 8)", async () => {

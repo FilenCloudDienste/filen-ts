@@ -15,6 +15,7 @@ import type { CheckInput } from "../core/docx/write/checks/index"
 import { revisionChecks } from "../core/docx/write/checks/revisions"
 import { resolveChanges, storyReviewIndex } from "../core/docx/review/accept"
 import { ReviewKind } from "../core/docx/review/index"
+import { parseReviewCommand } from "../core/docx/edit/commands/review"
 import { flushComposition, minuteDate, paragraphChange, setParagraphChange } from "../core/docx/review/track"
 import { CORPUS_DIR } from "./corpusDir"
 import { openBytes, openSpec, type Opened } from "./docxEditFixtures"
@@ -1471,6 +1472,91 @@ describe("docx tracked changes: recording details", () => {
 		expect(forward[3]).toBe(forward[0])
 		expect(steps("review.prev", 3)).toEqual([forward[2], forward[1], forward[0]])
 		editor.dispose()
+	})
+
+	it("steps through the changes of every story on the pages, entering each, and wraps", async () => {
+		const ins = (id: number, text: string): string =>
+			`<w:ins w:id="${String(id)}" w:author="Bob" w:date="2026-01-01T00:00:00Z">${run(text)}</w:ins>`
+		const section =
+			'<w:sectPr><w:headerReference w:type="default" r:id="rIdH"/><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440" w:header="720" w:footer="720" w:gutter="0"/></w:sectPr>'
+		const { editor } = await pagedEditor(
+			buildDocx({ body: pr(run("Body ") + ins(10, "inbody")) + section, headers: { rIdH: pr(run("Head ") + ins(20, "inhead")) } })
+		)
+		const body = editor.body.session.story.story.index
+		const header = editor.edits.model.stories.find(story => story.kind === "header")?.index
+		const at = (): [number, string] => [
+			editor.activeStory,
+			editor.state.doc.textBetween(editor.state.selection.from, editor.state.selection.to)
+		]
+
+		await settleAll(editor)
+		expect(header).toBeDefined()
+		expect(editor.execute({ type: "review.next" })).toBe(true)
+		expect(at()).toEqual([body, "inbody"])
+		expect(editor.execute({ type: "review.next" })).toBe(true)
+		expect(at()).toEqual([header, "inhead"])
+		expect(editor.execute({ type: "review.next" })).toBe(true)
+		expect(at()).toEqual([body, "inbody"])
+		expect(editor.execute({ type: "review.prev" })).toBe(true)
+		expect(at()).toEqual([header, "inhead"])
+		editor.dispose()
+	})
+
+	it("enables next and previous for changes only in a story not being edited", async () => {
+		const section =
+			'<w:sectPr><w:headerReference w:type="default" r:id="rIdH"/><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440" w:header="720" w:footer="720" w:gutter="0"/></w:sectPr>'
+		const { editor } = await pagedEditor(
+			buildDocx({
+				body: pr(run("Body")) + section,
+				headers: {
+					rIdH: pr(`${run("Head ")}<w:ins w:id="20" w:author="Bob" w:date="2026-01-01T00:00:00Z">${run("inhead")}</w:ins>`)
+				}
+			})
+		)
+		const header = editor.edits.model.stories.find(story => story.kind === "header")?.index
+
+		await settleAll(editor)
+		expect(editor.snapshot().enabled["review.next"]).toBe(true)
+		expect(editor.snapshot().enabled["review.prev"]).toBe(true)
+		expect(editor.execute({ type: "review.prev" })).toBe(true)
+		expect(editor.activeStory).toBe(header)
+		expect(editor.state.doc.textBetween(editor.state.selection.from, editor.state.selection.to)).toBe("inhead")
+		editor.dispose()
+	})
+
+	it("accepts or rejects and moves to the next change with next; without it the selection stays", async () => {
+		const ins = (id: number, text: string): string =>
+			`<w:ins w:id="${String(id)}" w:author="Bob" w:date="2026-01-01T00:00:00Z">${run(text)}</w:ins>`
+
+		for (const type of ["review.accept", "review.reject"] as const) {
+			const bytes = buildDocx({ body: pr(run("Kept ") + ins(10, "one") + run(" mid ")) + pr(run("x ") + ins(11, "two")) })
+			const plain = await pagedEditor(bytes)
+
+			setIdentity(plain.context, "Ann")
+			plain.editor.dispatch(plain.editor.state.tr.setSelection(TextSelection.create(plain.editor.state.doc, 7)))
+			expect(plain.editor.execute({ type })).toBe(true)
+			expect(plain.editor.state.selection.empty).toBe(true)
+			plain.editor.dispose()
+
+			const { editor, context } = await pagedEditor(bytes)
+
+			setIdentity(context, "Ann")
+			editor.dispatch(editor.state.tr.setSelection(TextSelection.create(editor.state.doc, 7)))
+			expect(editor.execute({ type, next: true })).toBe(true)
+			expect(editor.state.doc.textBetween(editor.state.selection.from, editor.state.selection.to), type).toBe("two")
+			expect(storyReviewIndex(editor.session).revisionCount).toBe(1)
+			// The last one resolved: done, nothing left to move to.
+			expect(editor.execute({ type, next: true })).toBe(true)
+			expect(storyReviewIndex(editor.session).revisionCount).toBe(0)
+			editor.dispose()
+		}
+	})
+
+	it("reads next on accept and reject", () => {
+		expect(parseReviewCommand("review.accept", { next: true })).toEqual({ type: "review.accept", next: true })
+		expect(parseReviewCommand("review.reject", { id: "12", next: false })).toEqual({ type: "review.reject", id: "12", next: false })
+		expect(parseReviewCommand("review.accept", { id: "12" })).toEqual({ type: "review.accept", id: "12" })
+		expect(parseReviewCommand("review.accept", { next: "yes" })).toBeUndefined()
 	})
 
 	it("disables accept all and reject all once every change is resolved in the session", async () => {

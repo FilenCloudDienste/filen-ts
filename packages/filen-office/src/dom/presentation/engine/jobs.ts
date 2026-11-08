@@ -1,6 +1,6 @@
 import { EMU_PER_PX } from "../../../core/drawingml/index"
 import { metaTitle } from "../../../core/odf/meta"
-import { coreTitle } from "../../../core/opc/coreTitle"
+import { coreProperties, type CoreProperties } from "../../../core/opc/coreTitle"
 import { standardSecurityKey, type PdfSecurityKey } from "../../../core/pdfwrite/crypto"
 import { PdfWriteError } from "../../../core/pdfwrite/errors"
 import { findShape } from "../../../core/presentation/edit/changes"
@@ -92,22 +92,22 @@ function exportOf(session: EngineSession, render: SlideRender): SlideExport {
 	return { render, kinds: layerKinds(session.deck.nodes.get(render.ref), render) }
 }
 
-// The document's own title: an OPC package's core properties, an OpenDocument's meta.xml dc:title.
-async function documentTitle(session: EngineSession): Promise<string | undefined> {
+// The document's own title and properties: an OPC package's core properties, an OpenDocument's meta.xml dc:title.
+async function documentProperties(session: EngineSession): Promise<Partial<CoreProperties>> {
 	const opc = session.package.opc
 
-	if (opc !== undefined) return coreTitle(opc).catch(() => undefined)
+	if (opc !== undefined) return coreProperties(opc).catch(() => ({}))
 
 	const odf = odpParts(session.deck)?.odf
 
-	return odf === undefined ? undefined : metaTitle(odf)
+	return odf === undefined ? {} : { title: await metaTitle(odf) }
 }
 
 // The deck's slides, sizes, title (its document title, else its file name's) and language (its default text style's,
 // when it names one).
 async function deckInfo(session: EngineSession): Promise<JobDeckInfo> {
 	const deck = session.deck
-	const title = await documentTitle(session)
+	const { title, author, subject, keywords } = await documentProperties(session)
 	const style = deck.defaultTextStyle
 	const lang = style.levels[0]?.defRPr?.lang ?? style.def?.defRPr?.lang
 
@@ -117,7 +117,8 @@ async function deckInfo(session: EngineSession): Promise<JobDeckInfo> {
 		notesSize: { cx: deck.notesSize.cx, cy: deck.notesSize.cy },
 		// Untitled: its file name without the extension (a tagged PDF names a title).
 		title: title !== undefined && title.trim() !== "" ? title.trim() : session.options.fileName.replace(/\.[^.]*$/u, ""),
-		...(lang === undefined || lang === "" ? {} : { lang })
+		...(lang === undefined || lang === "" ? {} : { lang }),
+		...(author === undefined && subject === undefined && keywords === undefined ? {} : { properties: { author, subject, keywords } })
 	}
 }
 

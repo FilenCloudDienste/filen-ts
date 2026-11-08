@@ -610,6 +610,8 @@ describe("ReflowView", () => {
 			(view: EditorView) => view.dispatch(view.state.tr.insertText("typed ")),
 			(view: EditorView) => key(view, "Enter"),
 			(view: EditorView) => view.dispatch(view.state.tr.insertText("new paragraph")),
+			// Mod+Enter: a page break.
+			(view: EditorView) => key(view, "Enter", { ctrlKey: true }),
 			(view: EditorView) => key(view, "Backspace"),
 			(view: EditorView, editor: PagedEditor) => {
 				const at = paragraphPos(editor, 1) + 1
@@ -626,6 +628,13 @@ describe("ReflowView", () => {
 		}
 
 		expect(reflowed.editor.body.session.state.doc.toJSON()).toEqual(paged.editor.body.session.state.doc.toJSON())
+
+		let pageBreaks = 0
+
+		reflowed.editor.body.session.state.doc.descendants(node => {
+			if (node.type.name === "break" && node.attrs["type"] === "page") pageBreaks++
+		})
+		expect(pageBreaks).toBe(1)
 
 		const [a, b] = await Promise.all(
 			[reflowed, paged].map(

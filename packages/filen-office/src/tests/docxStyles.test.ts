@@ -356,6 +356,39 @@ describe("paragraph resolution", () => {
 		expect(f.resolver.paragraph(f.paragraph('<w:pStyle w:val="List"/>')).props.indent.firstLine).toBe(-360)
 	})
 
+	it("lets hanging win over firstLine given on the same w:ind", () => {
+		const f = fixture(NORMAL)
+		const indent = f.resolver.paragraph(
+			f.paragraph('<w:ind w:left="1440" w:firstLine="720" w:hanging="720" w:firstLineChars="100" w:hangingChars="200"/>')
+		).props.indent
+
+		expect(indent.firstLine).toBe(-720)
+		expect(indent.firstLineChars).toBe(-200)
+		// A direct firstLine still beats a hanging inherited from the style.
+		const styled = fixture(
+			NORMAL +
+				'<w:style w:type="paragraph" w:styleId="List"><w:pPr><w:ind w:left="720" w:firstLine="100" w:hanging="360"/></w:pPr></w:style>'
+		)
+
+		expect(styled.resolver.paragraph(styled.paragraph('<w:pStyle w:val="List"/>')).props.indent.firstLine).toBe(-360)
+		expect(
+			styled.resolver.paragraph(styled.paragraph('<w:pStyle w:val="List"/><w:ind w:firstLine="200"/>')).props.indent.firstLine
+		).toBe(200)
+	})
+
+	it("shares one borders object between paragraphs with equal w:pBdr and other differences", () => {
+		const f = fixture(NORMAL)
+		const pBdr =
+			'<w:pBdr><w:top w:val="single" w:sz="4"/><w:bottom w:val="single" w:sz="4"/><w:between w:val="single" w:sz="4"/></w:pBdr>'
+		const centred = f.resolver.paragraph(f.paragraph(pBdr + '<w:keepNext/><w:jc w:val="center"/>')).props
+		const plain = f.resolver.paragraph(f.paragraph(pBdr)).props
+
+		expect(centred).not.toBe(plain)
+		expect(centred.borders).toBeDefined()
+		expect(centred.borders).toBe(plain.borders)
+		expect(f.resolver.paragraph(f.paragraph('<w:pBdr><w:top w:val="double" w:sz="4"/></w:pBdr>')).props.borders).not.toBe(plain.borders)
+	})
+
 	it("maps alignment to the physical side for the paragraph direction", () => {
 		const f = fixture(NORMAL)
 		const align = (inner: string): string => f.resolver.paragraph(f.paragraph(inner)).props.physicalAlignment

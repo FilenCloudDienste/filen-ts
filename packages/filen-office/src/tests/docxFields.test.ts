@@ -387,6 +387,55 @@ describe("updating fields", () => {
 		expect(await opened.editor.execute({ type: "field.updateAll" })).toBe(true)
 		expect(fields(opened.editor.session.state.doc)).toEqual(["SEQ=2", "REF=Figure 1: kept"])
 	})
+
+	it("reads a renumbered caption's new number in a reference after it in one update", async () => {
+		const opened = await open({
+			body:
+				`<w:p><w:bookmarkStart w:id="7" w:name="Target"/><w:r><w:t xml:space="preserve">Figure </w:t></w:r>${complex(" SEQ Figure \\* ARABIC ", "9")}<w:bookmarkEnd w:id="7"/></w:p>` +
+				`<w:p><w:r><w:t xml:space="preserve">See </w:t></w:r>${complex(" REF Target \\h ", "old")}</w:p>`
+		})
+
+		expect(await opened.editor.execute({ type: "field.updateAll" })).toBe(true)
+		expect(fields(opened.editor.session.state.doc)).toEqual(["SEQ=1", "REF=Figure 1"])
+	})
+
+	it("numbers captions in body text boxes in one sequence with the body, by where each box is anchored", async () => {
+		const caption = (result: string): string =>
+			`<w:p><w:r><w:t xml:space="preserve">Figure </w:t></w:r>${complex(" SEQ Figure \\* ARABIC ", result)}</w:p>`
+		const box = (id: number, result: string): string =>
+			`<w:r><w:drawing><wp:anchor distT="0" distB="0" distL="0" distR="0" simplePos="0" relativeHeight="${String(id)}" behindDoc="0" locked="0" layoutInCell="1" allowOverlap="1">` +
+			'<wp:simplePos x="0" y="0"/><wp:positionH relativeFrom="column"><wp:posOffset>0</wp:posOffset></wp:positionH><wp:positionV relativeFrom="paragraph"><wp:posOffset>0</wp:posOffset></wp:positionV>' +
+			`<wp:extent cx="1828800" cy="457200"/><wp:effectExtent l="0" t="0" r="0" b="0"/><wp:wrapNone/><wp:docPr id="${String(id)}" name="Text Box ${String(id)}"/>` +
+			'<a:graphic><a:graphicData uri="http://schemas.microsoft.com/office/word/2010/wordprocessingShape"><wps:wsp><wps:cNvSpPr txBox="1"/>' +
+			'<wps:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="1828800" cy="457200"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></wps:spPr>' +
+			`<wps:txbx><w:txbxContent>${caption(result)}</w:txbxContent></wps:txbx><wps:bodyPr/></wps:wsp></a:graphicData></a:graphic></wp:anchor></w:drawing></w:r>`
+		const opened = await open({
+			body: caption("7") + `<w:p>${box(5, "7")}<w:r><w:t>Anchor</w:t></w:r>${box(6, "7")}</w:p>` + caption("7")
+		})
+		const editor = opened.editor
+		const boxes = editor.edits.model.stories.filter(story => story?.kind === "textbox")
+
+		expect(boxes).toHaveLength(2)
+
+		// The body counts the boxes anchored before its captions.
+		expect(await editor.execute({ type: "field.updateAll" })).toBe(true)
+		expect(fields(editor.session.state.doc)).toEqual(["SEQ=1", "SEQ=4"])
+
+		// Updated in a box, its caption runs on from the body before its anchor; boxes on one anchor in order.
+		for (const [index, expected] of [
+			[1, "SEQ=3"],
+			[0, "SEQ=2"]
+		] as const) {
+			expect(editor.enterStory(boxes[index]?.index ?? -1, 0)).toBe(true)
+			expect(await editor.execute({ type: "field.updateAll" })).toBe(true)
+			expect(fields(editor.session.state.doc)).toEqual([expected])
+			editor.exitStory()
+		}
+
+		// Counted again from the boxes' edited sessions.
+		expect(await editor.execute({ type: "field.updateAll" })).toBe(true)
+		expect(fields(editor.session.state.doc)).toEqual(["SEQ=1", "SEQ=4"])
+	})
 })
 
 describe("inserting fields", () => {

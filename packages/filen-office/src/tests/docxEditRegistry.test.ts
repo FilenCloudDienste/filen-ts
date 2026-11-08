@@ -50,11 +50,15 @@ const EXAMPLES: Readonly<Record<DocxEditorCommandType, object>> = {
 	"format.doubleStrike": {},
 	"format.smallCaps": {},
 	"format.allCaps": {},
+	"format.doubleUnderline": {},
+	"format.changeCase": {},
 	"format.clearAll": {},
 	"font.family": { family: "Calibri" },
 	"font.size": { halfPoints: 24 },
 	"font.grow": {},
 	"font.shrink": {},
+	"font.growPoint": {},
+	"font.shrinkPoint": {},
 	"font.spacing": { twips: -10 },
 	"color.text": { color: { kind: "theme", theme: "accent1", tint: 153 } },
 	"color.highlight": { name: "yellow" },
@@ -121,6 +125,7 @@ const EXAMPLES: Readonly<Record<DocxEditorCommandType, object>> = {
 	"note.options": { kind: "footnote", format: "lowerRoman", restart: "eachPage", scope: "document" },
 	"field.update": {},
 	"field.updateAll": {},
+	"field.unlink": {},
 	"toc.insert": { levels: 3, hyperlinks: true },
 	"toc.update": { pagesOnly: false },
 	"insert.pageNumber": {},
@@ -261,8 +266,8 @@ describe("docx editor command registry", () => {
 		for (const info of DOCX_EDITOR_COMMANDS) {
 			expect(info.labelKey).toBe(`docx.${info.type}`)
 			expect(commandInfo(info.type)).toBe(info)
-			// Shortcuts run commands from keys (no arguments to give).
-			if (info.shortcut !== undefined) expect(Object.keys(EXAMPLES[info.type])).toEqual([])
+			// Shortcuts run commands from keys (no arguments to give), save those the host runs.
+			if (info.shortcut !== undefined && info.hostShortcut !== true) expect(Object.keys(EXAMPLES[info.type])).toEqual([])
 		}
 
 		expect(commandInfo("comment.add")).toMatchObject({

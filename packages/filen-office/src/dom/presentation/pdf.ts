@@ -26,6 +26,7 @@ import {
 	type PdfAbortSignal,
 	type PdfDecodedImage,
 	type PdfDeflate,
+	type PdfDocumentProperties,
 	type PdfImage,
 	type PdfImageDecoder,
 	type PdfOutput,
@@ -61,6 +62,8 @@ import type { DocxFontFace } from "../docx/protocol"
 export interface PresentationPdfOptions {
 	readonly assets: PdfFontAssets
 	readonly title: string
+	// The deck's core properties' author, subject and keywords.
+	readonly properties?: PdfDocumentProperties
 	// BCP 47 (a tagged PDF must give one).
 	readonly lang: string
 	// AES-256 under the source's password, made where the password is (the presentation worker).
@@ -246,6 +249,7 @@ export class PresentationPdf {
 				tagged: true,
 				deterministic: options.deterministic === true,
 				title: options.title,
+				...(options.properties === undefined ? {} : { properties: options.properties }),
 				lang: options.lang,
 				...(options.securityKey === undefined ? {} : { securityKey: options.securityKey }),
 				...(options.signal === undefined ? {} : { signal: options.signal }),

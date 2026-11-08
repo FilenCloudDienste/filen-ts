@@ -16,7 +16,7 @@ import type { DocxMediaCache } from "./media"
 import { paintObjects } from "./paint/objects"
 import { paintPage, type PaintedPage } from "./paint/page"
 import type { DocxDocument, DocxTables } from "./store"
-import { readViewport, type PagesViewport } from "./viewport"
+import { anchoredScrollTop, pageAt, readViewport, type PagesViewport } from "./viewport"
 
 // The page list: scroll height from the page sizes, only the pages in view (plus `overscan` on each side)
 // mounted, each painted once from its display list and scaled by CSS for zoom. Structure and data-*
@@ -167,21 +167,6 @@ function PagesOverlay(props: {
 	return <>{props.overlay(frames)}</>
 }
 
-// The first page whose bottom is below `y`.
-function pageAt(layout: Layout, y: number): number {
-	let low = 0
-	let high = layout.tops.length - 1
-
-	while (low < high) {
-		const middle = (low + high) >> 1
-
-		if ((layout.tops[middle] ?? 0) + (layout.heights[middle] ?? 0) < y) low = middle + 1
-		else high = middle
-	}
-
-	return low
-}
-
 interface Range2 {
 	readonly first: number
 	readonly last: number
@@ -294,11 +279,7 @@ export function DocxPages({
 
 		if (container === null || previous === null || previous.zoom === zoom || previous.layout.tops.length === 0) return
 
-		const before = scrollTopRef.current
-		const page = pageAt(previous.layout, before)
-		const height = previous.layout.heights[page] ?? 0
-		const fraction = height > 0 ? (before - (previous.layout.tops[page] ?? 0)) / height : 0
-		const top = Math.max(0, (layout.tops[page] ?? 0) + fraction * (layout.heights[page] ?? 0))
+		const top = anchoredScrollTop(previous.layout, layout, scrollTopRef.current)
 
 		container.scrollTop = top
 		scrollTopRef.current = top

@@ -5,9 +5,12 @@ export {
 	DOCX_PARAGRAPH_STYLES,
 	DOCX_PARAGRAPH_STYLE_MENU,
 	PARAGRAPH_STYLE_NAMES,
+	browserReservedShortcut,
 	commandInfo,
 	isWriteCommand,
 	parseDocxEditorCommand,
+	shortcutFor,
+	shortcutHint,
 	type BaseCommand,
 	type DocxAlignment,
 	type DocxCommandContext,
@@ -21,12 +24,13 @@ export {
 	type DocxEditorCommandInfo,
 	type DocxEditorCommandType,
 	type DocxParagraphStyle,
-	type DocxParagraphStyleInfo
+	type DocxParagraphStyleInfo,
+	type DocxShortcutEntry
 } from "./commands"
 export type { CommentCommand } from "./commands/comments"
 export { CROP_WHOLE } from "./commands/drawings"
 export type { DocxCrop, DocxRelativeH, DocxRelativeV, DocxWrapMode, DrawingCommand } from "./commands/drawings"
-export { FIELD_CATALOGUE, fieldCodeType, type FieldCommand } from "./commands/fields"
+export { DATE_FIELD_CODE, FIELD_CATALOGUE, TIME_FIELD_CODE, fieldCodeType, type FieldCommand } from "./commands/fields"
 export { MAX_BOOKMARK_NAME, sessionBookmarks, validBookmarkName, type BookmarkIndex, type DocxBookmark } from "../fields/bookmarks"
 export {
 	DEFAULT_DATE_PICTURE,
@@ -117,10 +121,13 @@ export {
 export {
 	NO_PROTECTION,
 	commandAllowed,
+	documentProtectionOf,
+	formattingRestricted,
 	offeredParagraphStyles,
 	protectionMode,
 	protectionOf,
 	writeProtectionOf,
+	type DocxDocumentProtection,
 	type DocxProtection,
 	type DocxProtectionMode,
 	type DocxWriteProtection
@@ -193,6 +200,7 @@ export {
 	NO_MARKERS,
 	NO_SOURCE,
 	REVISION_MARKS,
+	RUN_FORMATTING,
 	docxSchema,
 	hasSource,
 	endsWithTable,
@@ -247,6 +255,7 @@ export {
 } from "../review/track"
 export {
 	DocxEditorSession,
+	type DocxAutoFormat,
 	type DocxEditorOptions,
 	type DocxEditorSnapshot,
 	type DocxReadOnlyReason,

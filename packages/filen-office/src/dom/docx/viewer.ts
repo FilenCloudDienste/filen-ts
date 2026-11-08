@@ -101,6 +101,15 @@ export function fitWidthZoom(viewportWidth: number, pageWidth: number, gutter: n
 	return clampZoom(upscale ? zoom : Math.min(1, zoom))
 }
 
+// Whether a step in (or out) changes the zoom: off at the limits.
+export function canZoomIn(zoom: number): boolean {
+	return zoom < DOCX_MAX_ZOOM - 1e-3
+}
+
+export function canZoomOut(zoom: number): boolean {
+	return zoom > DOCX_MIN_ZOOM + 1e-3
+}
+
 // The next step above (direction 1) or below (-1) the current zoom.
 export function stepZoom(zoom: number, direction: 1 | -1): number {
 	if (direction > 0) return DOCX_ZOOM_STEPS.find(step => step > zoom + 1e-3) ?? DOCX_MAX_ZOOM
@@ -119,9 +128,9 @@ export function isDocxCommandEnabled(state: DocxViewerState, type: DocxViewerCom
 		case "page.goto":
 			return ready && state.pageCount > 0
 		case "zoom.in":
-			return state.zoom < DOCX_MAX_ZOOM - 1e-3
+			return canZoomIn(state.zoom)
 		case "zoom.out":
-			return state.zoom > DOCX_MIN_ZOOM + 1e-3
+			return canZoomOut(state.zoom)
 		case "zoom.set":
 		case "zoom.by":
 			return true

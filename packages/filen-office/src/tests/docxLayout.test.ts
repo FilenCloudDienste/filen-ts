@@ -20,7 +20,7 @@ import {
 	type LayoutOptions
 } from "@filen/office/core/docx"
 import { CORPUS_DIR } from "./corpusDir"
-import { STYLES_PART } from "./docxEditFixtures"
+import { NUMBERING_PART, STYLES_PART } from "./docxEditFixtures"
 import { buildDocx, type SyntheticDocx } from "./docxSynthetic"
 import { HmtxMeasurer, layOut, layoutDigest, loadDocx, pageLines, type LineInfo } from "./layoutFixtures"
 import { wordLikeDocument } from "./wordLike"
@@ -464,6 +464,54 @@ describe("sections", () => {
 		expect(graphics(result, 0, PageGraphic.COLUMN_SEPARATOR)[0]?.height).toBeCloseTo(10 * LINE, 1)
 	})
 
+	it("fills each column in turn at a continuous section break under w:noColumnBalance", async () => {
+		const columns =
+			'<w:p><w:pPr><w:sectPr><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440" w:header="720" w:footer="720" w:gutter="0"/><w:cols w:num="2" w:space="720" w:sep="1"/></w:sectPr></w:pPr></w:p>'
+		const result = await layout({
+			body: lines(19) + columns + p("after"),
+			settings: "<w:compat><w:noColumnBalance/></w:compat>",
+			section:
+				'<w:sectPr><w:type w:val="continuous"/><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440" w:header="720" w:footer="720" w:gutter="0"/></w:sectPr>'
+		})
+		const all = body(result, 0)
+		const left = all.filter(line => line.x < 300 && line.text !== "after")
+		const right = all.filter(line => line.x >= 300)
+		const after = all.find(line => line.text === "after")
+
+		expect(result.pages.length).toBe(1)
+		expect(left.length).toBe(20)
+		expect(right.length).toBe(0)
+		expect(after?.top).toBeCloseTo(96 + 20 * LINE, 1)
+	})
+
+	it("snaps auto-spaced lines to whole rows of a lines document grid", async () => {
+		// An 18 pt (24 px) grid: 10 pt text takes one row, 20 pt (30.66 px) two and 36 pt (55.2 px) three. At 1.5
+		// lines a line takes at least 1.5 rows.
+		const grid =
+			'<w:sectPr><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440" w:header="720" w:footer="720" w:gutter="0"/><w:docGrid w:type="lines" w:linePitch="360"/></w:sectPr>'
+		const oneAndHalf = '<w:spacing w:line="360" w:lineRule="auto"/>'
+		const result = await layout({
+			body:
+				p("small") +
+				p("big", "", '<w:sz w:val="40"/>') +
+				p("huge", "", '<w:sz w:val="72"/>') +
+				p("half", oneAndHalf) +
+				p("half big", oneAndHalf, '<w:sz w:val="40"/>') +
+				p("free", '<w:snapToGrid w:val="0"/>') +
+				p("end"),
+			section: grid
+		})
+		const tops = body(result, 0).map(line => line.top)
+
+		expect(tops[0]).toBeCloseTo(96, 1)
+		expect(tops[1]).toBeCloseTo(96 + 24, 1)
+		expect(tops[2]).toBeCloseTo(96 + 24 + 48, 1)
+		expect(tops[3]).toBeCloseTo(96 + 24 + 48 + 72, 1)
+		expect(tops[4]).toBeCloseTo(96 + 24 + 48 + 72 + 36, 1)
+		expect(tops[5]).toBeCloseTo(96 + 24 + 48 + 72 + 36 + 48, 1)
+		expect(tops[6]).toBeCloseTo(96 + 24 + 48 + 72 + 36 + 48 + LINE, 1)
+	})
+
 	it("numbers pages in fields, restarts and formats page numbers", async () => {
 		const footer =
 			'<w:p><w:r><w:t xml:space="preserve">Page </w:t></w:r><w:fldSimple w:instr=" PAGE "><w:r><w:t>9</w:t></w:r></w:fldSimple><w:r><w:t xml:space="preserve"> of </w:t></w:r><w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText xml:space="preserve"> NUMPAGES </w:instrText></w:r><w:r><w:fldChar w:fldCharType="separate"/></w:r><w:r><w:t>9</w:t></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r></w:p>'
@@ -483,6 +531,52 @@ describe("sections", () => {
 		expect(result.pages[1]?.numberText).toBe("iv")
 		// The footer sits above its distance from the page bottom.
 		expect(pageLines(result, 0).find(line => line.region === Region.FOOTER)?.bottom).toBeCloseTo(1056 - 48, 1)
+	})
+
+	it("puts the chapter number before page numbers (pgNumType chapStyle, chapSep), as Word does", async () => {
+		const heading = (level: number): string =>
+			`<w:style w:type="paragraph" w:styleId="Heading${level}"><w:name w:val="heading ${level}"/><w:pPr><w:numPr><w:ilvl w:val="${level - 1}"/><w:numId w:val="1"/></w:numPr><w:outlineLvl w:val="${level - 1}"/></w:pPr></w:style>`
+		const numbering =
+			'<w:abstractNum w:abstractNumId="0"><w:lvl w:ilvl="0"><w:start w:val="1"/><w:numFmt w:val="decimal"/><w:lvlText w:val="%1"/></w:lvl>' +
+			'<w:lvl w:ilvl="1"><w:start w:val="1"/><w:numFmt w:val="decimal"/><w:lvlText w:val="%1.%2"/></w:lvl></w:abstractNum>' +
+			'<w:num w:numId="1"><w:abstractNumId w:val="0"/></w:num>'
+		const pageBreak = '<w:p><w:r><w:br w:type="page"/></w:r></w:p>'
+		const footer = '<w:p><w:fldSimple w:instr=" PAGE "><w:r><w:t>9</w:t></w:r></w:fldSimple></w:p>'
+		const chapters = async (separator: string): Promise<DocumentLayout> =>
+			layout({
+				// Page 1 before any chapter; chapter 1 from page 2 (a Heading 2 on page 3 is no chapter); chapter 2 begins
+				// halfway down page 4.
+				body:
+					p("front") +
+					p("One", '<w:pStyle w:val="Heading1"/><w:pageBreakBefore/>') +
+					p("a") +
+					pageBreak +
+					p("Section", '<w:pStyle w:val="Heading2"/>') +
+					pageBreak +
+					p("b") +
+					p("Two", '<w:pStyle w:val="Heading1"/>') +
+					p("c"),
+				footers: { rId20: footer },
+				parts: [STYLES_PART(heading(1) + heading(2)), NUMBERING_PART(numbering)],
+				relationships: [
+					{ id: "rIdS", type: "styles", target: "styles.xml" },
+					{ id: "rIdN", type: "numbering", target: "numbering.xml" }
+				],
+				section: `<w:sectPr><w:footerReference w:type="default" r:id="rId20"/><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440" w:header="720" w:footer="720" w:gutter="0"/><w:pgNumType w:chapStyle="1"${separator}/></w:sectPr>`
+			})
+		const footers = (result: DocumentLayout): string[] =>
+			result.pages.map((_, page) =>
+				pageLines(result, page)
+					.filter(line => line.region === Region.FOOTER)
+					.map(line => line.text)
+					.join("|")
+			)
+		const hyphen = await chapters("")
+		const enDash = await chapters(' w:chapSep="enDash"')
+
+		expect(footers(hyphen)).toEqual(["1", "1-2", "1-3", "2-4"])
+		expect(hyphen.pages.map(page => page.numberText)).toEqual(["1", "1-2", "1-3", "2-4"])
+		expect(footers(enDash)).toEqual(["1", "1–2", "1–3", "2–4"])
 	})
 
 	it("draws legacy check boxes and drop-down lists from their form field data, as Word does", async () => {
@@ -708,6 +802,18 @@ describe("lists, fields and hidden text", () => {
 		expect(lines.length).toBe(3)
 		expect(lines.every(line => line.height < 2)).toBe(true)
 	})
+
+	it("groups paragraphs with equal borders that differ in other properties, but not in indents", async () => {
+		const borders =
+			'<w:pBdr><w:top w:val="single" w:sz="8"/><w:bottom w:val="single" w:sz="8"/><w:between w:val="single" w:sz="8"/></w:pBdr>'
+		const grouped = await layout({ body: p("a", borders + '<w:keepNext/><w:jc w:val="center"/>') + p("b", borders) + p("c") })
+
+		expect(graphics(grouped, 0, PageGraphic.BORDER).length).toBe(3)
+
+		const split = await layout({ body: p("a", borders + '<w:ind w:right="720"/>') + p("b", borders) + p("c") })
+
+		expect(graphics(split, 0, PageGraphic.BORDER).length).toBe(4)
+	})
 })
 
 describe("tables", () => {
@@ -735,6 +841,24 @@ describe("tables", () => {
 		expect(all[5]?.top).toBeCloseTo(96 + 2 * LINE, 1)
 		// Two horizontal lines per cell edge row plus the vertical edges.
 		expect(graphics(result, 0, PageGraphic.BORDER).length).toBe(3 + 3 + 2 + 4 + 3)
+	})
+
+	it("starts a table below the previous paragraph's space after", async () => {
+		const row = `<w:tr>${cell("a")}${cell("b")}${cell("c")}</w:tr>`
+		const result = await layout({ body: p("first", '<w:spacing w:after="480"/>') + table(row + row) })
+
+		expect(
+			body(result, 0)
+				.filter(line => line.text === "a")
+				.map(line => line.top)
+		).toEqual([expect.closeTo(96 + LINE + 32, 1), expect.closeTo(96 + 2 * LINE + 32, 1)])
+
+		// Not fitting under the space after, the table starts at the next page's top without it.
+		const moved = await layout({ body: lines(54) + p("last", '<w:spacing w:after="480"/>') + table(row) })
+
+		expect(body(moved, 0).at(-1)?.text).toBe("last")
+		expect(body(moved, 1)[0]?.text).toBe("a")
+		expect(body(moved, 1)[0]?.top).toBe(96)
 	})
 
 	it("applies row heights, vertical alignment and vertical merges", async () => {
@@ -1198,6 +1322,39 @@ describe("objects", () => {
 		expect(page?.objectCount).toBe(2)
 		expect(page?.objectFloats[1]).toBe(96)
 		expect(page?.objectFloats[OBJECT_FLOATS + 1]).toBeCloseTo(196, 1)
+	})
+
+	it("places an object relative to its anchor's line and character", async () => {
+		const relative = (wrap: string): string =>
+			anchor(wrap, 0, 0, 952500, 476250)
+				.replace('relativeFrom="column"', 'relativeFrom="character"')
+				.replace('relativeFrom="paragraph"', 'relativeFrom="line"')
+		const tabs = '<w:pPr><w:tabs><w:tab w:val="left" w:pos="2880"/></w:tabs></w:pPr>'
+		const result = await layout({
+			body: `<w:p>${tabs}<w:r><w:t>one</w:t><w:br/><w:t>two</w:t><w:tab/></w:r>${relative("<wp:wrapNone/>")}<w:r><w:t>after</w:t></w:r></w:p>`
+		})
+		const page = result.pages[0]
+
+		// The anchor follows the tab on the second line: 2 in past the column's left edge, one line down.
+		expect(page?.objectFloats[0]).toBeCloseTo(96 + 192, 1)
+		expect(page?.objectFloats[1]).toBeCloseTo(96 + LINE, 1)
+
+		// Wrapping text: the lines above the anchor's line keep the full width, from it on they make room.
+		const square = anchor('<wp:wrapSquare wrapText="right"/>', 0, 0, 952500, 476250).replace(
+			'relativeFrom="paragraph"',
+			'relativeFrom="line"'
+		)
+		const wrapped = await layout({
+			body: `<w:p><w:r><w:t>${words(40)}</w:t></w:r>${square}<w:r><w:t xml:space="preserve"> ${words(80)}</w:t></w:r></w:p>`
+		})
+		const lines = body(wrapped, 0)
+		const y = wrapped.pages[0]?.objectFloats[1] ?? 0
+		const anchorLine = lines.findIndex(line => Math.abs(line.top - y) < 0.01)
+
+		expect(wrapped.pages[0]?.objectFloats[0]).toBe(96)
+		expect(anchorLine).toBeGreaterThan(0)
+		expect(lines.slice(0, anchorLine).every(line => line.x === 96)).toBe(true)
+		expect(lines[anchorLine]?.x).toBeGreaterThanOrEqual(96 + 100)
 	})
 
 	it("lays out a text box's story inside its frame", async () => {
