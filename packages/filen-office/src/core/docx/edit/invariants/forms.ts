@@ -45,6 +45,7 @@ import {
 	type MarksPiece
 } from "../marks"
 import { builtInStyleId } from "../formats"
+import { withoutRunStyles } from "../../math/edit"
 import { lockedStyleViolation, protectionOf, protectionViolation } from "../protection"
 import { NO_SOURCE, docxSchema, type MarkerList } from "../schema"
 import type { DocxEditorSession } from "../session"
@@ -1564,10 +1565,10 @@ export function placeholderStyle(context: DocxEditContext): string | undefined {
 // Whether a character style mark is the placeholder style (the document's, Word's id for it, or the one the
 // writer adds).
 export function placeholderStyled(context: DocxEditContext, mark: Mark): boolean {
-	if (mark.type !== marks.char_style) return false
+	return mark.type === marks.char_style && placeholderStyleId(context, mark.attrs["styleId"] as string)
+}
 
-	const id = mark.attrs["styleId"] as string
-
+function placeholderStyleId(context: DocxEditContext, id: string): boolean {
 	return id === "PlaceholderText" || id === placeholderStyle(context) || context.newStyles.get(id) === PLACEHOLDER_STYLE
 }
 
@@ -2114,6 +2115,15 @@ function replacePlaceholder(tr: Transaction, session: DocxEditorSession, around:
 	tr.doc.nodesBetween(start, end, (node, pos) => {
 		for (const mark of node.marks) {
 			if (placeholderStyled(session.context, mark)) tr.removeMark(Math.max(start, pos), Math.min(end, pos + node.nodeSize), mark)
+		}
+
+		// A new equation holds its runs' formatting (the caret's, the placeholder style too) in its XML.
+		const omml = node.type === nodes.math ? node.attrs["omml"] : null
+
+		if (typeof omml === "string") {
+			const without = withoutRunStyles(omml, id => placeholderStyleId(session.context, id))
+
+			if (without !== undefined) tr.setNodeAttribute(pos, "omml", without)
 		}
 	})
 

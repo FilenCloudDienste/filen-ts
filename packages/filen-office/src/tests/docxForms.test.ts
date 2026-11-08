@@ -373,6 +373,21 @@ describe("content controls: placeholders", () => {
 		expect(xml).toContain("or tap here to enter text.")
 	})
 
+	it("gives an equation put in for a placeholder no placeholder style", async () => {
+		const opened = await open({ body: inParagraph(TEXT_PLACEHOLDER()), ...STYLED })
+		const session = opened.session
+
+		select(session, find(session, "Click") + 2)
+		expect(run({ type: "equation.insert", latex: "x", display: false }, session)).toBe(true)
+		expect(control(session)).toMatchObject({ placeholder: false })
+
+		const xml = part(await save(opened), "word/document.xml")
+
+		expect(xml).not.toContain("showingPlcHdr")
+		expect(xml).not.toContain("PlaceholderText")
+		expect(xml).toContain('<m:r><w:rPr><w:rFonts w:ascii="Cambria Math" w:hAnsi="Cambria Math"/></w:rPr><m:t>x</m:t></m:r>')
+	})
+
 	it("turns a placeholder into text once part of it is deleted as a tracked change", async () => {
 		const opened = await open({ body: inParagraph(TEXT_PLACEHOLDER()), ...STYLED }, "Ada")
 		const session = opened.session

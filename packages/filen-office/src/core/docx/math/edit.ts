@@ -20,6 +20,7 @@ import {
 	type OmmlChange,
 	type OmmlStamp,
 	withRunProperties,
+	type XChild,
 	type XElement
 } from "../../math/ommlTrack"
 import type { OmmlRevisionView } from "../../math/omml"
@@ -393,6 +394,48 @@ export function equationRunProperties(base: { readonly document: XmlDocument; re
 
 	return { name: "w:rPr", attrs: declarations, children: [...children.slice(0, styled), fonts, ...children.slice(styled)] }
 }
+
+// The character styles the runs of an equation's XML (as the editor keeps it, w: prefixed) name, added to `out`:
+// a style a command added stays defined while only an equation names it.
+export function equationRunStyles(omml: string, out: Set<unknown>): void {
+	for (const match of omml.matchAll(RUN_STYLE)) out.add(match[1])
+}
+
+// An equation's XML (as the editor keeps it) without the character styles `dropped` says on its runs; undefined
+// when it has none of them. The formatting before a tracked change (w:rPrChange) stays.
+export function withoutRunStyles(omml: string, dropped: (id: string) => boolean): string | undefined {
+	if (!omml.includes("w:rStyle")) return undefined
+
+	const root = ommlStringTree(omml)
+
+	if (root === undefined) return undefined
+
+	const out = treeXml(withoutStyles(root, dropped))
+
+	return out === omml ? undefined : out
+}
+
+function withoutStyles(node: XElement, dropped: (id: string) => boolean): XElement {
+	if (node.name === "w:rPrChange") return node
+
+	const children: XChild[] = []
+
+	for (const child of node.children) {
+		if (typeof child === "string") {
+			children.push(child)
+		} else if (
+			node.name !== "w:rPr" ||
+			child.name !== "w:rStyle" ||
+			!dropped(child.attrs.find(([name]) => name === "w:val")?.[1] ?? "")
+		) {
+			children.push(withoutStyles(child, dropped))
+		}
+	}
+
+	return { name: node.name, attrs: node.attrs, children }
+}
+
+const RUN_STYLE = /<w:rStyle\b[^>]*?\sw:val="([^"]*)"/g
 
 // What a run's properties give no equation: fonts (the math font's), and revision records.
 const DROPPED_RUN_PROPERTIES: ReadonlySet<string> = new Set(["w:rFonts", "w:rPrChange", "w:ins", "w:del", "w:moveFrom", "w:moveTo"])

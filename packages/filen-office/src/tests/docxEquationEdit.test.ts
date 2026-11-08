@@ -8,6 +8,7 @@ import { saveDocx } from "@filen/office/core/docx/write"
 import { ommlToMathTree } from "@filen/office/core/math"
 import { decodeUtf8, encodeUtf8, parseXml } from "@filen/office/core/xml"
 import { equationTree } from "../core/docx/math/edit"
+import { builtInStyleId } from "../core/docx/edit/formats"
 import { OMML_ELEMENTS, mathChecks } from "../core/docx/write/checks/math"
 import type { CheckInput, CheckedPart } from "../core/docx/write/checks/index"
 import { partReader } from "../core/docx/model/reader"
@@ -150,6 +151,27 @@ describe("equation.insert", () => {
 		expect(xml).toContain(`<m:oMath xmlns:m="${M}"><m:rad>`)
 		await sameLayout(editor, saved)
 		expect(await savedLatex(saved)).toEqual(["\\sqrt{2}"])
+	})
+
+	it("defines a style a command added while only a new equation's runs name it", async () => {
+		const opened = await pagedEditor(docx(p("Before after")))
+		const editor = opened.editor
+		const style = builtInStyleId(opened.context, "Placeholder Text")
+
+		editor.dispatch(editor.session.state.tr.addMark(1, 7, docxSchema.marks.char_style.create({ styleId: style })))
+		caret(editor, 4)
+		expect(await run(editor, { type: "equation.insert", latex: "x", display: false })).toBe(true)
+		// The text that had the style loses it: only the equation (the caret's formatting) names it now.
+		editor.dispatch(editor.session.state.tr.removeMark(0, editor.session.state.doc.content.size, docxSchema.marks.char_style))
+		await settleAll(editor)
+		expect([...editor.session.missingStyles]).toEqual([[style, "Placeholder Text"]])
+
+		const saved = await saveOf(editor, opened)
+		const styles = decodeUtf8(await (await openBytes(saved)).pkg.opc.read("word/styles.xml"))
+
+		expect(await documentXml(saved)).toContain(`<w:rStyle w:val="${style}"/>`)
+		expect(styles).toContain(`w:styleId="${style}"`)
+		await sameLayout(editor, saved)
 	})
 
 	it("refuses LaTeX the subset cannot read", async () => {

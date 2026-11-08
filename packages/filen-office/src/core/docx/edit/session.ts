@@ -36,6 +36,7 @@ import { elementData } from "./copies"
 import { indexOriginals } from "../write/story"
 import { noteFieldCopy } from "./invariants/forms"
 import { legacyCopyState } from "../forms/controls"
+import { equationRunStyles } from "../math/edit"
 import { sessionGone, sessionMade } from "../forms/sessions"
 import { sourceCellProps, sourceRowProps } from "./tables/map"
 import { conservativeProof, lockBlocks, proveBlocks, type BlockProof, type BlockStart } from "./proof"
@@ -479,6 +480,8 @@ export class DocxEditorSession {
 
 			if (style !== undefined) out.add(style.attrs["styleId"])
 			if (styleBefore !== undefined) out.add(marks.char_style.isInSet(styleBefore)?.attrs["styleId"])
+			// A new or edited equation keeps its runs' properties in its XML.
+			if (node.type === nodes.math && typeof node.attrs["omml"] === "string") equationRunStyles(node.attrs["omml"], out)
 
 			return node.type !== nodes.locked_block
 		})
