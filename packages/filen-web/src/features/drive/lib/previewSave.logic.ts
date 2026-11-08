@@ -98,7 +98,9 @@ export interface PreviewSaveDeps {
 	uploadFileBytes: (parentUuid: string | null, data: Uint8Array, name: string, mime: string) => Promise<SdkFile>
 	// A save streamed over a port (a presentation's: the worker writes, the SDK worker uploads as it reads).
 	uploadFileFromPort?: (parentUuid: string | null, port: MessagePort, name: string, mime: string, size?: number) => Promise<SdkFile>
-	patchListing: (parentUuid: string | null, updater: (items: DriveItem[]) => DriveItem[]) => void
+	// `writeNow`: the listing reaches disk at once, not after its patches pause (a reload right after a save
+	// would otherwise restore the row naming the version it replaced).
+	patchListing: (parentUuid: string | null, updater: (items: DriveItem[]) => DriveItem[], options: { readonly writeNow: boolean }) => void
 	// The account's own root uuid — a real Dir.parent is never null (see sdk.worker.ts's own
 	// ListDirectoryTarget comment), so a root-level item's parent must collapse back to the `null`
 	// sentinel before it can resolve worker-side (resolveNormalDirParent) or key the right listing.
@@ -156,8 +158,10 @@ export async function runPreviewSave(
 	const newItem = narrowItem(uploaded)
 	const oldUuid = base.data.uuid
 
-	deps.patchListing(targetParent, prev =>
-		asNewFile === undefined ? dropUuid(upsertDriveItem(prev, newItem), oldUuid) : upsertDriveItem(prev, newItem)
+	deps.patchListing(
+		targetParent,
+		prev => (asNewFile === undefined ? dropUuid(upsertDriveItem(prev, newItem), oldUuid) : upsertDriveItem(prev, newItem)),
+		{ writeNow: true }
 	)
 
 	return { status: "success", item: newItem }

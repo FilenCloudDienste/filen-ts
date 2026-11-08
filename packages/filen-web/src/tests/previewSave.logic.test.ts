@@ -241,7 +241,7 @@ describe("runPreviewSave (injected deps, no worker or query client)", () => {
 		await runPreviewSave(h.deps, { item, content: "x" })
 
 		expect(h.uploadFileBytes).toHaveBeenCalledWith(null, expect.any(Uint8Array), "notes.txt", "text/plain")
-		expect(h.patchListing).toHaveBeenCalledWith(null, expect.any(Function))
+		expect(h.patchListing).toHaveBeenCalledWith(null, expect.any(Function), { writeNow: true })
 	})
 
 	it("patches the item's own (non-root) parent listing, dropping the old uuid, upserting the new one", async () => {
@@ -252,7 +252,7 @@ describe("runPreviewSave (injected deps, no worker or query client)", () => {
 		await runPreviewSave(h.deps, { item, content: "x" })
 
 		expect(h.patchListing).toHaveBeenCalledTimes(1)
-		expect(h.patchListing).toHaveBeenCalledWith(OTHER_PARENT_UUID, expect.any(Function))
+		expect(h.patchListing).toHaveBeenCalledWith(OTHER_PARENT_UUID, expect.any(Function), { writeNow: true })
 		const updater = h.patchListing.mock.calls[0]?.[1]
 		if (!updater) {
 			throw new Error("expected patchListing to receive an updater")

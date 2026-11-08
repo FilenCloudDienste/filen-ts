@@ -390,8 +390,10 @@ export async function restoreVersion(file: FileItem, version: FileVersion): Prom
 	// has no name to match against — so the stale uuid is dropped explicitly as well.
 	const updated = narrowItem(restored)
 	const oldUuid = file.data.uuid
-	driveListingQueryUpdate(normalizeParentUuid(file.data.parent, currentRootUuid()), prev =>
-		removeByUuid(upsertDriveItem(prev, updated), oldUuid)
+	driveListingQueryUpdate(
+		normalizeParentUuid(file.data.parent, currentRootUuid()),
+		prev => removeByUuid(upsertDriveItem(prev, updated), oldUuid),
+		{ writeNow: true }
 	)
 	followClipboardItem(updated, oldUuid)
 

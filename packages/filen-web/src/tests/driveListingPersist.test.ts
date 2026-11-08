@@ -5,11 +5,12 @@ import type { Query } from "@tanstack/react-query"
 import type { File } from "@filen/sdk-rs"
 import { testUuid } from "@/tests/support/uuid"
 
-// A save's listing patch reaches disk: the persister writes a row only after a read, so without this a reload
-// restores the listing as last read, naming the version the save replaced, and a click before its first read
+// A patched listing reaches disk: the persister writes a row only after a read, so without this a reload
+// restores the listing as last read, naming the versions a save replaced, and a click before its first read
 // lands opens that version. Serializing a listing blocks the main thread, so a patched listing is written once
 // its patches pause, one listing per task, at once when the page is hidden or left, and never once a sign-out
-// started.
+// started. A save's patch (the file's uuid rotates) is written at once: a reload right after it must restore
+// the saved version.
 
 const hooks = vi.hoisted(() => ({ persisted: [] as Query[], signOut: false, write: Promise.resolve() }))
 
@@ -27,7 +28,8 @@ vi.mock("@/queries/persist", () => ({
 vi.mock("@/lib/signOutPending", () => ({ readSignOutPending: () => hooks.signOut }))
 
 const { queryClient } = await import("@/queries/client")
-const { driveListingQueryKey, driveListingQueryUpdate, patchedListingsWritten } = await import("@/features/drive/queries/drive")
+const { batchListingPatches, driveListingQueryKey, driveListingQueryUpdate, patchedListingsWritten } =
+	await import("@/features/drive/queries/drive")
 const { runPreviewSave } = await import("@/features/drive/lib/previewSave.logic")
 const { narrowItem } = await import("@/features/drive/lib/item")
 
@@ -65,6 +67,11 @@ async function save(from: DriveItem, to: DriveItem): Promise<void> {
 	expect(outcome.status).toBe("success")
 }
 
+// An ordinary patch (a socket event, a bulk action's item): the row's uuid moves on, written once patches pause.
+function patch(from: string, to: string, parent = "parent", name?: string): void {
+	driveListingQueryUpdate(testUuid(parent), { type: "replace", uuid: testUuid(from), replace: () => file(to, name) })
+}
+
 function uuidsOf(query: Query | undefined): string[] {
 	return ((query?.state.data ?? []) as DriveItem[]).map(item => item.data.uuid)
 }
@@ -88,9 +95,87 @@ afterEach(() => {
 })
 
 describe("a drive listing patched after a save", () => {
-	it("is written to disk naming the saved version, once for every patch before the pause", async () => {
+	it("is written to disk at once, naming the saved version, once per save", async () => {
 		await save(file("v0"), file("v1"))
+
+		expect(hooks.persisted).toHaveLength(1)
+		expect(uuidsOf(hooks.persisted[0])).toEqual(expect.arrayContaining([testUuid("v1"), testUuid("other")]))
+		expect(uuidsOf(hooks.persisted[0])).not.toContain(testUuid("v0"))
+		expect(patchedListingsWritten()).toBe(true)
+
 		await save(file("v1"), file("v2"))
+
+		expect(hooks.persisted).toHaveLength(2)
+		expect(uuidsOf(hooks.persisted[1])).toContain(testUuid("v2"))
+		expect(uuidsOf(hooks.persisted[1])).not.toContain(testUuid("v1"))
+
+		// Nothing left for the pause.
+		await vi.advanceTimersByTimeAsync(3_000)
+		expect(hooks.persisted).toHaveLength(2)
+	})
+
+	it("is written at once with the patches waiting for the pause, which then write nothing more", async () => {
+		patch("other", "other 2", "parent", "notes.txt")
+		expect(hooks.persisted).toEqual([])
+
+		await save(file("v0"), file("v1"))
+
+		expect(hooks.persisted).toHaveLength(1)
+		expect(uuidsOf(hooks.persisted[0])).toEqual(expect.arrayContaining([testUuid("v1"), testUuid("other 2")]))
+
+		await vi.advanceTimersByTimeAsync(3_000)
+		expect(hooks.persisted).toHaveLength(1)
+	})
+
+	it("is written at once while a read is under way", async () => {
+		const read = Promise.withResolvers<DriveItem[]>()
+		const fetching = queryClient.query({ queryKey: KEY, queryFn: () => read.promise })
+
+		await vi.advanceTimersByTimeAsync(0)
+		expect(queryClient.getQueryCache().find({ queryKey: KEY })?.state.fetchStatus).toBe("fetching")
+		await save(file("v0"), file("v1"))
+		expect(hooks.persisted).toHaveLength(1)
+		expect(uuidsOf(hooks.persisted[0])).toContain(testUuid("v1"))
+
+		read.resolve([file("v1"), file("other", "notes.txt")])
+		await fetching
+	})
+
+	it("is written at once inside a bulk action's batch, once the batch lands", async () => {
+		await batchListingPatches(async () => {
+			await save(file("v0"), file("v1"))
+			expect(hooks.persisted).toEqual([])
+		})
+
+		expect(hooks.persisted).toHaveLength(1)
+		expect(uuidsOf(hooks.persisted[0])).toContain(testUuid("v1"))
+	})
+
+	it("is reported written only once its write is answered, so a reload restores it", async () => {
+		const write = Promise.withResolvers<undefined>()
+
+		hooks.write = write.promise
+		await save(file("v0"), file("v1"))
+		expect(hooks.persisted).toHaveLength(1)
+		expect(patchedListingsWritten()).toBe(false)
+
+		write.resolve(undefined)
+		await vi.advanceTimersByTimeAsync(0)
+		expect(patchedListingsWritten()).toBe(true)
+	})
+
+	it("is not written once a sign-out started", async () => {
+		hooks.signOut = true
+		await save(file("v0"), file("v1"))
+		expect(hooks.persisted).toEqual([])
+		expect(patchedListingsWritten()).toBe(true)
+	})
+})
+
+describe("a drive listing patched otherwise", () => {
+	it("is written to disk naming the new version, once for every patch before the pause", async () => {
+		patch("v0", "v1")
+		patch("v1", "v2")
 		expect(hooks.persisted).toEqual([])
 
 		await vi.advanceTimersByTimeAsync(3_000)
@@ -106,7 +191,7 @@ describe("a drive listing patched after a save", () => {
 
 		// A bulk action or a socket burst: a patch every 250 ms for 10 s.
 		for (let i = 0; i < 40; i++) {
-			await save(file(`v${String(version)}`), file(`v${String(version + 1)}`))
+			patch(`v${String(version)}`, `v${String(version + 1)}`)
 			version++
 			await vi.advanceTimersByTimeAsync(250)
 		}
@@ -121,8 +206,8 @@ describe("a drive listing patched after a save", () => {
 
 	it("writes one listing per task", async () => {
 		queryClient.setQueryData(OTHER_KEY, [file("w0")])
-		await save(file("v0"), file("v1"))
-		driveListingQueryUpdate(testUuid("other parent"), { type: "replace", uuid: testUuid("w0"), replace: () => file("w1") })
+		patch("v0", "v1")
+		patch("w0", "w1", "other parent")
 
 		await vi.advanceTimersByTimeAsync(2_000)
 		expect(hooks.persisted).toHaveLength(1)
@@ -133,12 +218,12 @@ describe("a drive listing patched after a save", () => {
 	})
 
 	it("is written at once when the page is hidden or left", async () => {
-		await save(file("v0"), file("v1"))
+		patch("v0", "v1")
 		setVisibility("hidden")
 		expect(hooks.persisted).toHaveLength(1)
 		setVisibility("visible")
 
-		await save(file("v1"), file("v2"))
+		patch("v1", "v2")
 		window.dispatchEvent(new Event("pagehide"))
 		expect(hooks.persisted).toHaveLength(2)
 		expect(uuidsOf(hooks.persisted[1])).toContain(testUuid("v2"))
@@ -152,11 +237,14 @@ describe("a drive listing patched after a save", () => {
 		const read = Promise.withResolvers<DriveItem[]>()
 		const fetching = queryClient.query({ queryKey: KEY, queryFn: () => read.promise })
 
-		await save(file("v0"), file("v1"))
+		// The read begins first: a patch before it would leave the rows fresh, and nothing to read.
+		await vi.advanceTimersByTimeAsync(0)
+		patch("v0", "v1")
 		await vi.advanceTimersByTimeAsync(5_000)
 		expect(hooks.persisted).toEqual([])
 
-		read.resolve([file("v1"), file("other", "notes.txt")])
+		// Rows other than the patched ones (equal ones would be kept by reference, as still to write).
+		read.resolve([file("v1"), file("other", "notes.txt"), file("new", "new.txt")])
 		await fetching
 		await vi.advanceTimersByTimeAsync(5_000)
 		expect(hooks.persisted).toEqual([])
@@ -164,7 +252,8 @@ describe("a drive listing patched after a save", () => {
 		const failing = Promise.withResolvers<DriveItem[]>()
 		const refetching = queryClient.query({ queryKey: KEY, queryFn: () => failing.promise, staleTime: 0 })
 
-		await save(file("v1"), file("v2"))
+		await vi.advanceTimersByTimeAsync(0)
+		patch("v1", "v2")
 		await vi.advanceTimersByTimeAsync(5_000)
 		expect(hooks.persisted).toEqual([])
 
@@ -176,19 +265,19 @@ describe("a drive listing patched after a save", () => {
 	})
 
 	it("is not written once a sign-out started, nor once the listing was dropped", async () => {
-		await save(file("v0"), file("v1"))
+		patch("v0", "v1")
 		hooks.signOut = true
 		await vi.advanceTimersByTimeAsync(3_000)
 		expect(hooks.persisted).toEqual([])
 
-		await save(file("v1"), file("v2"))
+		patch("v1", "v2")
 		setVisibility("hidden")
 		window.dispatchEvent(new Event("pagehide"))
 		expect(hooks.persisted).toEqual([])
 		setVisibility("visible")
 
 		hooks.signOut = false
-		await save(file("v2"), file("v3"))
+		patch("v2", "v3")
 		queryClient.removeQueries({ queryKey: KEY })
 		await vi.advanceTimersByTimeAsync(3_000)
 		setVisibility("hidden")
@@ -202,7 +291,7 @@ describe("a drive listing patched after a save", () => {
 		hooks.write = write.promise
 		expect(patchedListingsWritten()).toBe(true)
 
-		await save(file("v0"), file("v1"))
+		patch("v0", "v1")
 		expect(patchedListingsWritten()).toBe(false)
 
 		await vi.advanceTimersByTimeAsync(3_000)
@@ -217,7 +306,7 @@ describe("a drive listing patched after a save", () => {
 		const left = Promise.withResolvers<undefined>()
 
 		hooks.write = left.promise
-		await save(file("v1"), file("v2"))
+		patch("v1", "v2")
 		window.dispatchEvent(new Event("pagehide"))
 		expect(hooks.persisted).toHaveLength(2)
 		expect(patchedListingsWritten()).toBe(false)

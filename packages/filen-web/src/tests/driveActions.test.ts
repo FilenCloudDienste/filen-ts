@@ -103,6 +103,7 @@ vi.mock("@/lib/sdk/client", () => ({
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 
 import { queryClient as testQueryClient } from "@/queries/client"
+import { persister } from "@/queries/persist"
 import { subscribeBranchChanges, type BranchChange } from "@/features/drive/lib/branchChanges"
 import { ACCOUNT_QUERY_KEY } from "@/queries/account"
 import { socketAuthenticated } from "@/lib/sdk/socketSession"
@@ -1184,12 +1185,20 @@ describe("restoreVersion", () => {
 			})
 		)
 
+		// Written to disk at once, not after the patch pause: a reload right after must not restore the old uuid.
+		const write = vi.spyOn(persister, "persistQuery").mockResolvedValue(undefined)
+		onTestFinished(() => {
+			write.mockRestore()
+		})
+
 		const outcome = await restoreVersion(file, version)
 
 		expect(outcome.status).toBe("success")
 		expect(restoreFileVersionOp).toHaveBeenCalledExactlyOnceWith(file.data, version)
 		const patched = testQueryClient.getQueryData<DriveItem[]>(driveListing(null))
 		expect(patched?.map(i => i.data.uuid)).toEqual([testUuid("new")])
+		expect(write).toHaveBeenCalledOnce()
+		expect((write.mock.calls[0]?.[0].state.data as DriveItem[] | undefined)?.map(i => i.data.uuid)).toEqual([testUuid("new")])
 	})
 
 	it("drops the old uuid even when the file is undecryptable (no name for the intrinsic dedup to match on)", async () => {

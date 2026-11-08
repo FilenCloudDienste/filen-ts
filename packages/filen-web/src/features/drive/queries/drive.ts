@@ -544,9 +544,10 @@ function asListingChange(change: ListingChange | ListingPatch): ListingChange {
 	return typeof change === "function" ? { type: "update", update: change } : change
 }
 
-// A patch to one listing, or to every listing `where` picks (all of them without one).
+// A patch to one listing, or to every listing `where` picks (all of them without one). `writeNow`: the listing it
+// changes is written to disk at once instead of once its patches pause (ListingPatchOptions).
 type Patch =
-	| { params: DriveListingParams; change: ListingChange }
+	| { params: DriveListingParams; change: ListingChange; writeNow?: boolean }
 	| { params: undefined; where: ((params: DriveListingParams) => boolean) | undefined; change: ListingRowChange }
 
 function patchChangeFor(patch: Patch, params: DriveListingParams): ListingChange | undefined {
@@ -722,7 +723,7 @@ function applyPatches(queued: readonly Patch[]): void {
 		if (mirror === "reread") {
 			rereads.set(listingId(params.variant, params.uuid), params)
 		} else {
-			patches.push({ params, change: mirror })
+			patches.push({ params, change: mirror, writeNow: patch.writeNow === true })
 		}
 	}
 
@@ -745,12 +746,14 @@ function applyPatches(queued: readonly Patch[]): void {
 
 		const params = (query.queryKey as ReturnType<typeof driveListingQueryKey>)[2]
 		const changes: ListingChange[] = []
+		let writeNow = false
 
 		for (const patch of patches) {
 			const change = patchChangeFor(patch, params)
 
 			if (change !== undefined) {
 				changes.push(change)
+				writeNow ||= patch.params !== undefined && patch.writeNow === true
 			}
 		}
 
@@ -763,7 +766,12 @@ function applyPatches(queued: readonly Patch[]): void {
 		// Most cached listings don't hold the row; writing one would re-render it for nothing.
 		if (next !== prev) {
 			setQueryDataKeepInvalidated(query, next)
-			persistLater(query)
+
+			if (writeNow) {
+				persistNow(query)
+			} else {
+				persistLater(query)
+			}
 		}
 	}
 
@@ -777,8 +785,11 @@ function applyPatches(queued: readonly Patch[]): void {
 // read after the next boot lands. So patched listings are written too. Serializing one blocks the main
 // thread for about 50 ms per 20,000 rows, while a bulk upload or a socket burst patches it every few hundred
 // ms, so a listing is written only once its patches pause, one listing per task, and at once when the page
-// is hidden or left, which may be the last chance. Never once a sign-out started: its wipe must not be
-// undone.
+// is hidden or left, which may be the last chance (that write is async and can die with the page). A patch
+// that replaces a file's version in place (a save, a restored version: the uuid rotates) is written at once:
+// a reload before the pause would restore the row naming the version replaced, open it on a click, and swap
+// it away on the listing's first read. Such writes are rare, one per save. Never once a sign-out started:
+// its wipe must not be undone.
 const LISTING_PERSIST_IDLE_MS = 2_000
 // Each patched listing not yet written, with the rows its latest patch left.
 const unpersistedListings = new Map<Query, unknown>()
@@ -814,6 +825,15 @@ function persistLater(query: Query): void {
 				persistAllListings()
 			}
 		})
+	}
+}
+
+// Written at once, a read under way included (it writes again when it lands, its replay holding this patch).
+function persistNow(query: Query): void {
+	unpersistedListings.delete(query)
+
+	if (!readSignOutPending()) {
+		writeListing(query)
 	}
 }
 
@@ -980,12 +1000,22 @@ export async function batchListingPatches<T>(run: () => Promise<T>): Promise<T> 
 	}
 }
 
+// `writeNow`: the patch replaces a file's version (its uuid rotates), so the listing is written to disk at once
+// (see LISTING_PERSIST_IDLE_MS).
+export interface ListingPatchOptions {
+	readonly writeNow: boolean
+}
+
 // Confirm-then-patch for a write landing in My Drive (queries/client.ts's zero-useMutation
 // convention) — always the "drive" variant: the three flat listings (recents/favorites/trash) have
 // no navigable parent to create/move into. A ListingChange folds into a read's replay with the others; a
 // function costs that replay a pass of its own.
-export function driveListingQueryUpdate(parentUuid: string | null, change: ListingChange | ListingPatch): void {
-	submitPatch({ params: { variant: "drive", uuid: parentUuid }, change: asListingChange(change) })
+export function driveListingQueryUpdate(
+	parentUuid: string | null,
+	change: ListingChange | ListingPatch,
+	options?: ListingPatchOptions
+): void {
+	submitPatch({ params: { variant: "drive", uuid: parentUuid }, change: asListingChange(change), writeNow: options?.writeNow === true })
 }
 
 // The flat listings (recents/favorites/trash/links) patched by their one key.
