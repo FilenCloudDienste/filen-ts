@@ -9,7 +9,8 @@ vi.mock("@/workers/sdk.worker.ts?worker", () => ({
 		}
 	}
 }))
-vi.mock("comlink", () => ({ wrap: () => ({}) }))
+vi.mock("comlink", () => ({ wrap: () => ({ setLockSink: () => Promise.resolve() }), proxy: (value: unknown) => value }))
+vi.mock("@/lib/sdk/owedLocks", () => ({ installOwedLocksHandoff: vi.fn(), onLockEvent: vi.fn() }))
 vi.mock("@/e2e-hooks/sdkCalls", () => ({ trackSdkCalls: (remote: unknown) => remote }))
 
 const { threadCount } = await vi.importActual<typeof import("@/lib/sdk/client")>("@/lib/sdk/client")

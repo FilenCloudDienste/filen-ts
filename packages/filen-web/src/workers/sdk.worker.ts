@@ -85,7 +85,9 @@ import init, {
 	type GdprInfo,
 	type UserEvent,
 	type UserEventResult,
-	type JsClientConfig
+	type JsClientConfig,
+	type LockEvent,
+	type LockId
 } from "@filen/sdk-rs"
 import { InFlight, isUuid, nameCollisionKey, run, runEffect, runTimeout } from "@filen/shared"
 import { asErrorDTO, ErrorWithDTO, toErrorDTO, PARENT_NOT_FOUND_PREFIX, DIRECTORY_NOT_FOUND_PREFIX } from "@/lib/sdk/errors"
@@ -255,6 +257,29 @@ let socketListener: ListenerHandle | null = null
 function freeSocketListener(): void {
 	socketListener?.free()
 	socketListener = null
+}
+
+// The main thread's mirror of owed locks (lib/sdk/owedLocks.ts), set once at startup as the caller's Comlink.proxy.
+// Every client this worker makes live reports its lock events to it.
+let lockSink: ((event: LockEvent) => void) | null = null
+
+// How long a deliberate sign-out waits for the client's lock releases before the wipe goes on; a release still
+// unanswered then lapses by its lease TTL.
+const SIGN_OUT_LOCK_RELEASE_TIMEOUT_MS = 3_000
+
+// The listener goes with the client: a freed client reports nothing more, and the next one is attached anew.
+function attachLockSink(c: Client): void {
+	const sink = lockSink
+
+	if (sink === null) {
+		return
+	}
+
+	c.setLockListener(event => {
+		sink(event)
+	}).catch((e: unknown) => {
+		log.error("sdk.worker", "setLockListener failed", e)
+	})
 }
 
 // One upload/download call's controls: registered before fn's first await, so a stop or pause sent
@@ -791,6 +816,7 @@ function adoptClient(next: Client): void {
 	client?.free()
 	client = next
 	clearDirectoryCache()
+	attachLockSink(next)
 }
 
 // Null the live client FIRST so any subsequent authed op fails fast via requireClient() instead of
@@ -800,6 +826,11 @@ function adoptClient(next: Client): void {
 // already succeeded but a later step then failed — a caller-visible failure must never leave the
 // worker holding a client the caller believes is dead.
 function releaseClient(): void {
+	freeClientLater(detachClient())
+}
+
+// Everything releaseClient does but the free: the caller still has the handle, for a last call on it.
+function detachClient(): Client | null {
 	const prev = client
 	client = null
 	freeSocketListener() // the socket listener belongs to this client — free it before the client goes
@@ -807,6 +838,10 @@ function releaseClient(): void {
 	walkCoordinator.invalidate()
 	videoIndex.reset()
 	videoIndexUnsubscribe = null
+	return prev
+}
+
+function freeClientLater(prev: Client | null): void {
 	if (prev !== null) {
 		setTimeout(() => {
 			prev.free()
@@ -2908,9 +2943,29 @@ const api = {
 	},
 	// Closes every search BEFORE releasing the client — searchEngine.ts's teardown calls
 	// close()/free() on handles that belong to THIS client; releasing it first would race that.
+	// Detached first, so no new op takes a lock, then the releases still in flight get a bounded wait on the
+	// detached handle: a sign-out that cut them short would leave the next sign-in waiting out the leases.
 	async logout(): Promise<void> {
 		await searchEngine.shutdown()
-		releaseClient()
+		const prev = detachClient()
+		if (prev !== null) {
+			const waited = await runTimeout(() => prev.waitForLockReleases(), SIGN_OUT_LOCK_RELEASE_TIMEOUT_MS)
+			if (!waited.success) {
+				log.warn("sdk.worker", "lock releases did not finish before sign-out; continuing", waited.error)
+			}
+		}
+		freeClientLater(prev)
+	},
+	// Registered once by lib/sdk/client.ts before any client exists; attaches to a live client too.
+	setLockSink(sink: (event: LockEvent) => void): void {
+		lockSink = sink
+		if (client !== null) {
+			attachLockSink(client)
+		}
+	},
+	// The locks the page before this one owed (lib/sdk/owedLocks.ts), released by id before the first write.
+	async releaseLocks(locks: LockId[]): Promise<void> {
+		await requireClient().releaseLocks(locks)
 	},
 	hasClient(): boolean {
 		return client !== null

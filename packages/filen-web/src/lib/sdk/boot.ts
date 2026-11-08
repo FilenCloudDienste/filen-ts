@@ -17,6 +17,7 @@ import { restorePersistedQueries, purgePersistedQueries } from "@/queries/persis
 import { warmDriveRootUuid } from "@/queries/driveRoot"
 import { log } from "@/lib/log"
 import { advanceBootSplash } from "@/lib/bootSplash"
+import { releaseInheritedOwedLocks, takeInheritedOwedLocks } from "@/lib/sdk/owedLocks"
 import {
 	getTransferPreferences,
 	buildJsClientConfig,
@@ -96,12 +97,23 @@ async function resumeAndOpen(): Promise<boolean> {
 		return false
 	}
 
+	// Consumed whether or not a session resumed: the locks belong to the session the page before held, and no later
+	// boot of this tab may release them with another.
+	const inheritedLocks = takeInheritedOwedLocks()
+
 	if (resumed) {
-		// Warm the query cache from disk once per boot, before the first render that reads it
-		// (best-effort — never rejects; a failed restore just means an empty cache).
-		await restorePersistedQueries(queryClient)
-		// The drive root from the client just injected, so no listing renders before it (the root `.filen` filter).
-		await warmDriveRootUuid()
+		await Promise.all([
+			// Before setReady, so before the first write: a lock the page before still owed would make that write wait out
+			// the server lease. Bounded; runs beside the reads below.
+			releaseInheritedOwedLocks(inheritedLocks, locks => sdkApi.releaseLocks(locks)),
+			(async () => {
+				// Warm the query cache from disk once per boot, before the first render that reads it
+				// (best-effort — never rejects; a failed restore just means an empty cache).
+				await restorePersistedQueries(queryClient)
+				// The drive root from the client just injected, so no listing renders before it (the root `.filen` filter).
+				await warmDriveRootUuid()
+			})()
+		])
 	} else {
 		// An unauthed boot must not resurrect a leftover `<PERSIST_PREFIX>-*` row (e.g. a cross-tab
 		// logout/persister-write race) into the cache, where it would flash under whatever
