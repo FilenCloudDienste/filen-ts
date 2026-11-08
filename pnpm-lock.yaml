@@ -191,6 +191,7 @@ patchedDependencies:
   file-type@22.2.0: a25744dce2cc85b7b7df582aa7b56fd1bedf8ce9e2e2317655e87be4a4e3b24e
   hucre@1.2.0: 5f5ada98495cb608ef0d4f0d1097036950756915c8210d92cc290756afe3feec
   mediabunny@1.62.1: 50db84306781df1849862e95e649ff1391986d14794336f0d8876e8cf85bf854
+  playwright-core@1.64.1: 891e876c6a6220b04c7904723c5e63fbfb70834081168cf591231aff306169da
   pressto@0.7.0: ce80592e446002864888a4f51e2ceaf385c24a3f4c95a1266d5ff268deea4f4e
   react-native-ios-utilities@5.2.0: 5153d1d449fd7e01ce55ed1774332b5029f0065a7e968abc597635cade9b7954
   react-native-notify-kit@10.9.0: 5e3f20eed565eb625d67ebb2a8e56a2940472a6176625d7f8a28a2f5897db678
@@ -292,7 +293,7 @@ importers:
         version: 1.9.0
       playwright-core:
         specifier: 1.64.1
-        version: 1.64.1
+        version: 1.64.1(patch_hash=891e876c6a6220b04c7904723c5e63fbfb70834081168cf591231aff306169da)
       prettier:
         specifier: ^3.9.10
         version: 3.9.10
@@ -20005,11 +20006,11 @@ snapshots:
       pvutils: 1.2.0
       tslib: 2.8.1
 
-  playwright-core@1.64.1: {}
+  playwright-core@1.64.1(patch_hash=891e876c6a6220b04c7904723c5e63fbfb70834081168cf591231aff306169da): {}
 
   playwright@1.64.1:
     dependencies:
-      playwright-core: 1.64.1
+      playwright-core: 1.64.1(patch_hash=891e876c6a6220b04c7904723c5e63fbfb70834081168cf591231aff306169da)
 
   plist@3.1.0:
     dependencies:
