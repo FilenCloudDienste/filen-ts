@@ -191,7 +191,6 @@ patchedDependencies:
   file-type@22.2.0: a25744dce2cc85b7b7df582aa7b56fd1bedf8ce9e2e2317655e87be4a4e3b24e
   hucre@1.2.0: 5f5ada98495cb608ef0d4f0d1097036950756915c8210d92cc290756afe3feec
   mediabunny@1.62.1: 50db84306781df1849862e95e649ff1391986d14794336f0d8876e8cf85bf854
-  playwright-core@1.64.1: 891e876c6a6220b04c7904723c5e63fbfb70834081168cf591231aff306169da
   pressto@0.7.0: ce80592e446002864888a4f51e2ceaf385c24a3f4c95a1266d5ff268deea4f4e
   react-native-ios-utilities@5.2.0: 5153d1d449fd7e01ce55ed1774332b5029f0065a7e968abc597635cade9b7954
   react-native-notify-kit@10.9.0: 5e3f20eed565eb625d67ebb2a8e56a2940472a6176625d7f8a28a2f5897db678
@@ -292,8 +291,8 @@ importers:
         specifier: 1.9.0
         version: 1.9.0
       playwright-core:
-        specifier: 1.64.1
-        version: 1.64.1(patch_hash=891e876c6a6220b04c7904723c5e63fbfb70834081168cf591231aff306169da)
+        specifier: 1.65.0
+        version: 1.65.0
       prettier:
         specifier: ^3.9.10
         version: 3.9.10
@@ -1223,8 +1222,8 @@ importers:
         specifier: ^10
         version: 10.0.1(eslint@10.13.0(jiti@2.7.0)(supports-color@8.1.1))
       '@playwright/test':
-        specifier: 1.64.1
-        version: 1.64.1
+        specifier: 1.65.0
+        version: 1.65.0
       '@rolldown/plugin-babel':
         specifier: ^0.2.4
         version: 0.2.4(@babel/core@8.0.9)(@babel/plugin-transform-runtime@7.29.7(@babel/core@8.0.9)(supports-color@8.1.1))(@babel/runtime@7.29.7)(rolldown@1.2.15)(vite@8.3.5(@types/node@24.19.2)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
@@ -1274,8 +1273,8 @@ importers:
         specifier: ^23.1.1
         version: 23.1.1
       playwright:
-        specifier: 1.64.1
-        version: 1.64.1
+        specifier: 1.65.0
+        version: 1.65.0
       prettier:
         specifier: ^3.9.10
         version: 3.9.10
@@ -3539,8 +3538,8 @@ packages:
     resolution: {integrity: sha512-+1VkjdD0QBLPodGrJUeqarH8VAIvQODIbwh9XpP5Syisf7YoQgsJKPNFoqqLQlu+VQ/tVSshMR6loPMn8U+dPg==}
     engines: {node: '>=14'}
 
-  '@playwright/test@1.64.1':
-    resolution: {integrity: sha512-IaYGml/nSOiZWROfPtuIL7neuu9qDOZ3TNvNljUIrhDMxiGTgPjzj/g9p9RxpS2tSepPDRY+UwAaEeiKtUvIAg==}
+  '@playwright/test@1.65.0':
+    resolution: {integrity: sha512-iGURLGuKDLakSEl7Pgfv8h7f+XLT+V861Wfhz0zlEl5nyFuKUopdkFBPKqTllTUp06aOwPuH8iuUEb3yp3MpbQ==}
     engines: {node: '>=20'}
     hasBin: true
 
@@ -8686,13 +8685,13 @@ packages:
     resolution: {integrity: sha512-V9kOzaItwDgqlryhXysQsAXUEKi5O7kqWUaP3dXI7MLvkPqWWMb4wVb1QAtmEDCKI+XIAINsZoNKMFF7sZb1eg==}
     engines: {node: '>=16.0.0'}
 
-  playwright-core@1.64.1:
-    resolution: {integrity: sha512-BC4s8y6SEVA6Q1rSxZTto8hI1KUI3xXlHGZgvGqP4IqPdI/a6FX9H29IDNz7vKo9l21b6LfYosScPL6M3xxyDQ==}
+  playwright-core@1.65.0:
+    resolution: {integrity: sha512-vNSKgH6YqtN7cdT/L334zo0a+YwkrpicyrHJlWWPIm/Q+Nn2SWInil01oT0mbu96U4GgoRtCYQD9CzJQgju+lA==}
     engines: {node: '>=20'}
     hasBin: true
 
-  playwright@1.64.1:
-    resolution: {integrity: sha512-HCrVhHr5QQuwYoswEUGTb7gGp522yflbv/ST8nF4sFWGuLjQCt17Q/EubpGGSNKYn1tsTCPZxqHhHCfVURu7UA==}
+  playwright@1.65.0:
+    resolution: {integrity: sha512-F3AMWcR44qMBt4kq+6Kb6mX7bjGXshktKFOPULd7reED6ZJWevjbNRqysP7q+AATE9kdPEZBibex1BYsvpVoeA==}
     engines: {node: '>=20'}
     hasBin: true
 
@@ -13657,9 +13656,9 @@ snapshots:
   '@pkgjs/parseargs@0.11.0':
     optional: true
 
-  '@playwright/test@1.64.1':
+  '@playwright/test@1.65.0':
     dependencies:
-      playwright: 1.64.1
+      playwright: 1.65.0
 
   '@poppinss/colors@4.1.6':
     dependencies:
@@ -20006,11 +20005,11 @@ snapshots:
       pvutils: 1.2.0
       tslib: 2.8.1
 
-  playwright-core@1.64.1(patch_hash=891e876c6a6220b04c7904723c5e63fbfb70834081168cf591231aff306169da): {}
+  playwright-core@1.65.0: {}
 
-  playwright@1.64.1:
+  playwright@1.65.0:
     dependencies:
-      playwright-core: 1.64.1(patch_hash=891e876c6a6220b04c7904723c5e63fbfb70834081168cf591231aff306169da)
+      playwright-core: 1.65.0
 
   plist@3.1.0:
     dependencies:
