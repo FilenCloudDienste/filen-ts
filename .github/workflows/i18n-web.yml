@@ -1,12 +1,27 @@
 name: i18n translate (web)
 
-# filen-web's counterpart of i18n-translate.yml (filen-mobile); the job itself is shared via
-# i18n-translate-reusable.yml.
+# filen-web's counterpart of i18n-translate.yml (filen-mobile).
 #
-# TRIGGER: workflow_dispatch ONLY for now; the script translates into every language of
-# @filen/shared/languages. Until the target catalogs exist, any run (a "delta" one too) translates
-# every key for every language, so the push trigger stays off until the first full run (run locally,
-# see packages/filen-web/scripts/README.md) has merged with its snapshot. Then add, like mobile:
+# mode=delta (default): the shared i18n-translate-reusable.yml job: one run, one rolling PR
+# (i18n/auto-translate-web).
+#
+# mode=full: the first full translation (about 8,700 requests), far past one job's 6-hour limit, so it
+# is split and made resumable:
+#   1. plan      - the target languages (every one of @filen/shared/languages, or the `languages` input).
+#   2. full      - one job per language (`max-parallel` at once) running `translate-i18n --full <lang>
+#                  --budget-minutes=<budget>`. The script stops cleanly at a batch boundary once the
+#                  budget is spent (exit 3). Every job starts from, and pushes its catalog and resume
+#                  record (src/locales/.sources/<lang>.json) to, the progress branch
+#                  i18n/full-translate-web-progress, so re-dispatching continues where each language
+#                  stopped; a finished language costs nothing on a re-run.
+#   3. finalize  - collects every language from the progress branch and runs `--full --budget-minutes=0`,
+#                  which translates nothing: only when every language is complete does it write the
+#                  snapshot and the manifest and delete the resume records, and only then is ONE PR opened
+#                  or updated from i18n/full-translate-web. Otherwise it leaves a notice: re-dispatch.
+# Delete the progress branch once that PR has merged (or to start a full run from scratch).
+#
+# TRIGGER: workflow_dispatch ONLY until the first full run has merged with its snapshot. Then add, like
+# mobile:
 #   push: { branches: [main], paths: ['packages/filen-web/src/locales/en/**'] }
 # (target catalogs and the snapshot are workflow OUTPUTS, not triggers, or every run would fire on
 # its own commit).
@@ -21,28 +36,335 @@ on:
         options:
           - delta
           - full
+      languages:
+        description: 'full: comma-separated target languages (empty = every language)'
+        type: string
+        required: false
+        default: ''
+      max-parallel:
+        description: 'full: languages translated at once'
+        type: number
+        required: false
+        default: 6
+      budget-minutes:
+        description: 'full: minutes each language job translates before it saves and stops (job limit 345)'
+        type: number
+        required: false
+        default: 300
 
-permissions:
-  contents: write
-  pull-requests: write
+# Every job grants only what it needs.
+permissions: {}
 
 # Own group — deliberately NOT the same string as i18n-translate.yml's `i18n-translate-${{
 # github.ref }}`. Concurrency groups are repo-global (not scoped per workflow file), so reusing
 # mobile's exact group name would let a web dispatch cancel an in-flight MOBILE translation run
-# (or vice versa) purely by sharing a ref.
+# (or vice versa) purely by sharing a ref. One run at a time also keeps two runs from pushing the
+# same language to the progress branch.
 # Queued, never cancelled: a cancelled run throws away translations already paid for.
 concurrency:
   group: i18n-translate-web-${{ github.ref }}
   cancel-in-progress: false
 
+env:
+  LOCALES_DIR: packages/filen-web/src/locales
+  PROGRESS_BRANCH: i18n/full-translate-web-progress
+
 jobs:
   translate:
+    if: inputs.mode == 'delta'
+    permissions:
+      contents: write
+      pull-requests: write
     uses: ./.github/workflows/i18n-translate-reusable.yml
     with:
       package-dir: packages/filen-web
       pnpm-filter: '@filen/web'
       branch: i18n/auto-translate-web
       title: 'i18n: update web translations'
-      mode: ${{ inputs.mode }}
+      mode: delta
     secrets:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+
+  plan:
+    # Fork guard: a fork has neither the secret nor any use for the progress branch.
+    if: inputs.mode == 'full' && !github.event.repository.fork
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      requested: ${{ steps.languages.outputs.requested }}
+      all: ${{ steps.languages.outputs.all }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          sparse-checkout: packages/filen-shared/src/languages.ts
+          sparse-checkout-cone-mode: false
+
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+
+      - name: Resolve target languages
+        id: languages
+        env:
+          REQUESTED: ${{ inputs.languages }}
+        # languages.ts is import-free by contract, so Node loads it directly (type stripping).
+        run: |
+          node --input-type=module <<'EOF'
+          import { appendFileSync } from "node:fs"
+          const { SUPPORTED_LANGUAGES } = await import("./packages/filen-shared/src/languages.ts")
+          const all = SUPPORTED_LANGUAGES.filter(lang => lang !== "en")
+          const requested = (process.env.REQUESTED ?? "").split(",").map(lang => lang.trim()).filter(lang => lang.length > 0)
+          const unknown = requested.filter(lang => !all.includes(lang))
+          if (unknown.length > 0) {
+            console.error(`::error::Unknown target language(s): ${unknown.join(", ")}. Valid: ${all.join(", ")}`)
+            process.exit(1)
+          }
+          const out = `requested=${JSON.stringify(requested.length > 0 ? requested : all)}\nall=${JSON.stringify(all)}\n`
+          appendFileSync(process.env.GITHUB_OUTPUT, out)
+          console.log(out)
+          EOF
+
+  full:
+    needs: plan
+    name: full (${{ matrix.lang }})
+    runs-on: ubuntu-latest
+    # Under GitHub's 6-hour cap: the budget plus install, the batch in flight when it runs out, and saving.
+    timeout-minutes: 345
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      max-parallel: ${{ inputs.max-parallel }}
+      matrix:
+        lang: ${{ fromJSON(needs.plan.outputs.requested) }}
+    env:
+      TARGET_LANG: ${{ matrix.lang }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        working-directory: packages/filen-web
+        run: pnpm install --frozen-lockfile --filter "@filen/web..."
+
+      # The catalog and resume record from the progress branch, over the dispatched commit's English. A
+      # failing ls-remote (exit code other than 2, "no such ref") fails the job: starting this language
+      # over would overwrite paid progress.
+      - name: Restore progress
+        id: restore
+        run: |
+          status=0
+          git ls-remote --exit-code --heads origin "refs/heads/$PROGRESS_BRANCH" > /dev/null || status=$?
+
+          if [ "$status" -eq 2 ]; then
+            echo "No progress branch yet: $TARGET_LANG starts from scratch."
+            exit 0
+          elif [ "$status" -ne 0 ]; then
+            exit "$status"
+          fi
+
+          git fetch --no-tags --depth=1 origin "$PROGRESS_BRANCH"
+
+          for path in "$LOCALES_DIR/$TARGET_LANG.json" "$LOCALES_DIR/.sources/$TARGET_LANG.json"; do
+            if git cat-file -e "FETCH_HEAD:$path" 2> /dev/null; then
+              git checkout FETCH_HEAD -- "$path"
+              echo "Restored $path"
+            fi
+          done
+
+          git reset -q
+
+      - name: Translate
+        working-directory: packages/filen-web
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          BUDGET_MINUTES: ${{ inputs.budget-minutes }}
+        # Exit 3 = budget used up after a checkpoint: not a failure, the next dispatch continues.
+        run: |
+          status=0
+          pnpm run translate-i18n --full "$TARGET_LANG" "--budget-minutes=$BUDGET_MINUTES" || status=$?
+
+          if [ "$status" -eq 3 ]; then
+            echo "::notice title=i18n $TARGET_LANG::Time budget used up; progress saved. Re-dispatch (mode full) to continue."
+          elif [ "$status" -ne 0 ]; then
+            exit "$status"
+          fi
+
+      # Also after a failed translation: the script checkpoints every batch it got, and those are paid for.
+      # Each job owns its language's two files, so a push race with another language only needs a retry.
+      - name: Save progress
+        if: always() && steps.restore.outcome == 'success'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          files=()
+
+          for path in "$LOCALES_DIR/$TARGET_LANG.json" "$LOCALES_DIR/.sources/$TARGET_LANG.json"; do
+            if [ -f "$path" ]; then
+              files+=("$path")
+            fi
+          done
+
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "Nothing to save."
+            exit 0
+          fi
+
+          work="$RUNNER_TEMP/progress"
+
+          for attempt in 1 2 3 4 5; do
+            status=0
+            git ls-remote --exit-code --heads origin "refs/heads/$PROGRESS_BRANCH" > /dev/null || status=$?
+
+            if [ "$status" -eq 0 ]; then
+              git fetch --no-tags --depth=1 origin "$PROGRESS_BRANCH"
+              base=FETCH_HEAD
+            elif [ "$status" -eq 2 ]; then
+              base=HEAD
+            else
+              exit "$status"
+            fi
+
+            git worktree add --detach "$work" "$base"
+
+            for path in "${files[@]}"; do
+              mkdir -p "$work/$(dirname "$path")"
+              cp "$path" "$work/$path"
+            done
+
+            git -C "$work" add -- "${files[@]}"
+
+            if git -C "$work" diff --cached --quiet; then
+              echo "Progress branch already up to date for $TARGET_LANG."
+              exit 0
+            fi
+
+            git -C "$work" commit -q -m "chore(i18n): web full translation progress ($TARGET_LANG)"
+
+            if git -C "$work" push -q origin "HEAD:refs/heads/$PROGRESS_BRANCH"; then
+              echo "Saved $TARGET_LANG to $PROGRESS_BRANCH."
+              exit 0
+            fi
+
+            git worktree remove --force "$work"
+            sleep $((attempt * 5 + RANDOM % 10))
+          done
+
+          echo "::error::Could not push $TARGET_LANG to $PROGRESS_BRANCH; its progress is in this run's artifact."
+          exit 1
+
+      - name: Upload catalog
+        if: always() && steps.restore.outcome == 'success'
+        uses: actions/upload-artifact@v6
+        with:
+          name: i18n-web-${{ matrix.lang }}
+          path: |
+            ${{ env.LOCALES_DIR }}/${{ matrix.lang }}.json
+            ${{ env.LOCALES_DIR }}/.sources/${{ matrix.lang }}.json
+          include-hidden-files: true
+          if-no-files-found: ignore
+          retention-days: 14
+
+  finalize:
+    needs: [plan, full]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 2
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Install dependencies
+        working-directory: packages/filen-web
+        run: pnpm install --frozen-lockfile --filter "@filen/web..."
+
+      # Every target language, not only this dispatch's: the PR needs all of them.
+      - name: Collect every language
+        env:
+          LANGUAGES: ${{ needs.plan.outputs.all }}
+        run: |
+          git fetch --no-tags --depth=1 origin "$PROGRESS_BRANCH"
+
+          for lang in $(jq -r '.[]' <<< "$LANGUAGES"); do
+            for path in "$LOCALES_DIR/$lang.json" "$LOCALES_DIR/.sources/$lang.json"; do
+              if git cat-file -e "FETCH_HEAD:$path" 2> /dev/null; then
+                git checkout FETCH_HEAD -- "$path"
+              fi
+            done
+          done
+
+          git reset -q
+
+      # A zero budget translates nothing (so no API key). Exit 0 = every language complete: the snapshot
+      # and the manifest are written and the resume records deleted. Exit 3 = something is missing.
+      - name: Check completeness and write the snapshot
+        id: finalize
+        working-directory: packages/filen-web
+        run: |
+          status=0
+          pnpm run translate-i18n --full --budget-minutes=0 || status=$?
+
+          if [ "$status" -eq 0 ]; then
+            echo "complete=true" >> "$GITHUB_OUTPUT"
+          elif [ "$status" -eq 3 ]; then
+            echo "complete=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=i18n web::Not every language is complete yet; no PR opened. Re-dispatch (mode full) to continue."
+          else
+            exit "$status"
+          fi
+
+      - name: Create Pull Request
+        if: steps.finalize.outputs.complete == 'true'
+        uses: peter-evans/create-pull-request@v8
+        with:
+          # FIXED branch, so a re-dispatch updates this one PR. The progress branch is left as it is
+          # (resume records included) until it is deleted by hand after the merge.
+          branch: i18n/full-translate-web
+          delete-branch: true
+          add-paths: ${{ env.LOCALES_DIR }}
+          commit-message: 'i18n: full web translation'
+          title: 'i18n: full web translation'
+          labels: |
+            i18n
+            automated
+          body: |
+            ## Full web translation
+
+            Generated by the **${{ github.workflow }}** workflow in full mode
+            (`packages/filen-web/scripts/translate-i18n.ts`): every target-language catalog
+            (`packages/filen-web/src/locales/<lang>.json`), the English snapshot and the manifest.
+
+            **These translations are machine-generated and need human review** before merging —
+            check placeholders (`{{...}}`), `<link>…</link>` markup, plural forms, and tone.
+
+            After merging, delete the progress branch `i18n/full-translate-web-progress`.
+
+            > Note: PRs opened by the workflow's `GITHUB_TOKEN` do not trigger downstream CI
+            > (lint / typecheck / tests). Merging this PR by hand runs the full CI on `main`.
