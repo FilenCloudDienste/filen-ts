@@ -1,6 +1,7 @@
 import { useTranslation } from "react-i18next"
 import { useTheme, type Theme } from "@/providers/themeProvider"
 import { SettingsSelectRow } from "@/features/settings/components/settingRows"
+import { saveSetting } from "@/features/settings/components/appearance/saveSetting"
 
 const THEME_OPTIONS: { value: Theme; labelKey: "settingsThemeLight" | "settingsThemeDark" | "settingsThemeSystem" }[] = [
 	{ value: "light", labelKey: "settingsThemeLight" },
@@ -23,7 +24,11 @@ function ThemeRow() {
 			options={THEME_OPTIONS.map(option => ({ value: option.value, label: t(option.labelKey) }))}
 			value={theme}
 			disabled={false}
-			onChange={setTheme}
+			onChange={value =>
+				void saveSetting(() => {
+					setTheme(value)
+				})
+			}
 		/>
 	)
 }

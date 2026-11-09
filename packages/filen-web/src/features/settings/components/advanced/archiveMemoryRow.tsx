@@ -46,10 +46,17 @@ function ArchiveMemoryRow() {
 	const prefs = query.data
 	const inEffectMib = useInEffectMib()
 
-	async function apply(next: ArchivePreferences): Promise<void> {
-		await setArchivePreferences(next)
-		void query.refetch()
-		toast.info(t("settingsAdvancedRestartRequired"))
+	// The restart note only for a value that was stored.
+	function apply(next: ArchivePreferences): void {
+		setArchivePreferences(next).then(
+			() => {
+				void query.refetch()
+				toast.info(t("settingsAdvancedRestartRequired"))
+			},
+			() => {
+				toast.error(t("settingsDocumentsSaveFailed"))
+			}
+		)
 	}
 
 	const description: string[] = [
@@ -81,7 +88,7 @@ function ArchiveMemoryRow() {
 
 				// The select only renders once prefs loaded.
 				if (prefs !== undefined && size !== undefined) {
-					void apply({ ...prefs, codecMemoryMib: size })
+					apply({ ...prefs, codecMemoryMib: size })
 				}
 			}}
 		/>

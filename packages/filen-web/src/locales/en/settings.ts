@@ -271,7 +271,7 @@ export const settings = {
 	settingsDocumentsAutosave: "Save automatically",
 	/** Advanced settings — autosave row description */
 	settingsDocumentsAutosaveDescription: "Saves a new version about 30 seconds after you stop typing.",
-	/** Advanced settings — toast when a document setting could not be saved */
+	/** Settings — toast when a locally stored setting (Advanced rows, document settings, rail order) could not be saved */
 	settingsDocumentsSaveFailed: "The setting couldn't be saved. Try again.",
 
 	// ── Advanced: uploads ────────────────────────────────────────────────────

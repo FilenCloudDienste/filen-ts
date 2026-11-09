@@ -1,4 +1,14 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
+import { QueryClient } from "@tanstack/react-query"
+
+const { setRailOrder, toastError } = vi.hoisted(() => ({
+	setRailOrder: vi.fn<(next: readonly string[]) => Promise<void>>(),
+	toastError: vi.fn()
+}))
+
+vi.mock("@/features/shell/lib/railOrder", () => ({ getRailOrder: vi.fn(), setRailOrder }))
+vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
+vi.mock("sonner", () => ({ toast: { error: toastError } }))
 import {
 	DEFAULT_RAIL_ORDER,
 	mergeRailOrder,
@@ -9,6 +19,9 @@ import {
 	railShift,
 	visibleRailOrder
 } from "@/features/shell/lib/railOrder.logic"
+import { storeRailOrder } from "@/features/shell/queries/railOrder"
+import { queryClient } from "@/queries/client"
+import { settings as EN_SETTINGS } from "@/locales/en/settings"
 
 describe("normalizeRailOrder", () => {
 	it("defaults when nothing is stored", () => {
@@ -160,5 +173,34 @@ describe("railEntryActive", () => {
 		expect(railEntryActive("computer", "/sync/1")).toBe(true)
 		expect(railEntryActive("computer", "/mounts/webdav")).toBe(true)
 		expect(railEntryActive("computer", "/syncx")).toBe(false)
+	})
+})
+
+describe("storeRailOrder", () => {
+	const KEY = ["shell", "railOrder"]
+
+	it("shows the order at once and keeps it once stored", async () => {
+		queryClient.setQueryData(KEY, [...DEFAULT_RAIL_ORDER])
+		setRailOrder.mockResolvedValue(undefined)
+
+		const next = [...DEFAULT_RAIL_ORDER].reverse()
+		const saving = storeRailOrder(next)
+
+		expect(queryClient.getQueryData(KEY)).toEqual(next)
+		await expect(saving).resolves.toBe(true)
+		expect(queryClient.getQueryData(KEY)).toEqual(next)
+		expect(toastError).not.toHaveBeenCalled()
+	})
+
+	// The persisted query cache would otherwise bring an order back that was never stored.
+	it("puts the shown order back and says so when the write fails", async () => {
+		const previous = [...DEFAULT_RAIL_ORDER]
+
+		queryClient.setQueryData(KEY, previous)
+		setRailOrder.mockRejectedValue(new Error("quota"))
+
+		await expect(storeRailOrder([...DEFAULT_RAIL_ORDER].reverse())).resolves.toBe(false)
+		expect(queryClient.getQueryData(KEY)).toEqual(previous)
+		expect(toastError).toHaveBeenCalledExactlyOnceWith(EN_SETTINGS.settingsDocumentsSaveFailed)
 	})
 })

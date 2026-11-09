@@ -22,10 +22,17 @@ function TransferConfigRow() {
 	const query = useTransferPreferencesQuery()
 	const prefs = query.data
 
-	async function apply(next: TransferPreferences): Promise<void> {
-		await setTransferPreferences(next)
-		void query.refetch()
-		toast.info(t("settingsAdvancedRestartRequired"))
+	// The restart note only for a value that was stored.
+	function apply(next: TransferPreferences): void {
+		setTransferPreferences(next).then(
+			() => {
+				void query.refetch()
+				toast.info(t("settingsAdvancedRestartRequired"))
+			},
+			() => {
+				toast.error(t("settingsDocumentsSaveFailed"))
+			}
+		)
 	}
 
 	return (
@@ -39,7 +46,7 @@ function TransferConfigRow() {
 			onChange={preset => {
 				// The select only renders once prefs loaded.
 				if (prefs !== undefined) {
-					void apply({ ...prefs, preset })
+					apply({ ...prefs, preset })
 				}
 			}}
 		/>

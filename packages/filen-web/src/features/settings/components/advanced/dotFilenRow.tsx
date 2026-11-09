@@ -1,4 +1,5 @@
 import { useTranslation } from "react-i18next"
+import { toast } from "sonner"
 import { DEFAULT_SHOW_DOT_FILEN, setShowDotFilen } from "@/features/drive/lib/preferences"
 import { useShowDotFilenPreferenceQuery } from "@/features/drive/queries/drive"
 import { PreferenceToggleRow } from "@/features/settings/components/settingRows"
@@ -9,9 +10,15 @@ function DotFilenRow() {
 	const { t } = useTranslation("settings")
 	const query = useShowDotFilenPreferenceQuery()
 
-	async function setShow(next: boolean): Promise<void> {
-		await setShowDotFilen(next)
-		void query.refetch()
+	function setShow(next: boolean): void {
+		setShowDotFilen(next).then(
+			() => {
+				void query.refetch()
+			},
+			() => {
+				toast.error(t("settingsDocumentsSaveFailed"))
+			}
+		)
 	}
 
 	return (
@@ -21,7 +28,7 @@ function DotFilenRow() {
 			checked={query.data ?? DEFAULT_SHOW_DOT_FILEN}
 			disabled={query.data === undefined}
 			onCheckedChange={checked => {
-				void setShow(checked)
+				setShow(checked)
 			}}
 		/>
 	)

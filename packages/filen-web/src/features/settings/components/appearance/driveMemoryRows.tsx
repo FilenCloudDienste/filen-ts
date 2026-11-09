@@ -15,8 +15,26 @@ import {
 import type { DriveSortBy } from "@/features/drive/lib/sort"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 import { PreferenceToggleRow, ResetRow } from "@/features/settings/components/settingRows"
+import { saveSetting } from "@/features/settings/components/appearance/saveSetting"
 
 type ResetTarget = "sort" | "view" | null
+
+// The write a confirmed reset makes, or null while its preferences have not loaded.
+function resetWrite(
+	target: ResetTarget,
+	sort: DrivePreferences<DriveSortBy> | undefined,
+	view: DrivePreferences<DriveViewMode> | undefined
+): { target: "sort" | "view"; write: () => Promise<void> } | null {
+	if (target === "sort" && sort !== undefined) {
+		return { target, write: () => setSortPreferences(resetPreferences(sort, DEFAULT_SORT_PREFERENCES.global)) }
+	}
+
+	if (target === "view" && view !== undefined) {
+		return { target, write: () => setViewModePreferences(resetPreferences(view, DEFAULT_VIEW_MODE_PREFERENCES.global)) }
+	}
+
+	return null
+}
 
 // The rows giving the per-directory drive memory data model (drive/lib/preferences.ts's `mode: "perDirectory"` + per-target
 // reset, which already existed with no control writing them) a real UI, mirroring mobile's Appearance
@@ -31,37 +49,37 @@ function DriveMemoryRows() {
 	const [pending, setPending] = useState(false)
 
 	async function toggleSortMode(prefs: DrivePreferences<DriveSortBy>, checked: boolean): Promise<void> {
-		await setSortPreferences(withModeToggle(prefs, checked))
-		void sortQuery.refetch()
+		if (await saveSetting(() => setSortPreferences(withModeToggle(prefs, checked)))) {
+			void sortQuery.refetch()
+		}
 	}
 
 	async function toggleViewMode(prefs: DrivePreferences<DriveViewMode>, checked: boolean): Promise<void> {
-		await setViewModePreferences(withModeToggle(prefs, checked))
-		void viewQuery.refetch()
+		if (await saveSetting(() => setViewModePreferences(withModeToggle(prefs, checked)))) {
+			void viewQuery.refetch()
+		}
 	}
 
 	async function handleReset(): Promise<void> {
-		if (resetTarget === null) {
+		const reset = resetWrite(resetTarget, sortQuery.data, viewQuery.data)
+
+		if (reset === null) {
 			return
 		}
 
 		setPending(true)
 
-		try {
-			if (resetTarget === "sort" && sortQuery.data !== undefined) {
-				await setSortPreferences(resetPreferences(sortQuery.data, DEFAULT_SORT_PREFERENCES.global))
-				void sortQuery.refetch()
-				toast.success(t("settingsResetSortSuccess"))
-			} else if (resetTarget === "view" && viewQuery.data !== undefined) {
-				await setViewModePreferences(resetPreferences(viewQuery.data, DEFAULT_VIEW_MODE_PREFERENCES.global))
-				void viewQuery.refetch()
-				toast.success(t("settingsResetViewSuccess"))
-			}
+		const saved = await saveSetting(reset.write)
 
-			setResetTarget(null)
-		} finally {
-			setPending(false)
+		setPending(false)
+
+		if (!saved) {
+			return
 		}
+
+		void (reset.target === "sort" ? sortQuery.refetch() : viewQuery.refetch())
+		toast.success(t(reset.target === "sort" ? "settingsResetSortSuccess" : "settingsResetViewSuccess"))
+		setResetTarget(null)
 	}
 
 	return (
