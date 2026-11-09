@@ -11,7 +11,7 @@ import { BLANK_SORT_VALUE, SortType, sortOrder, textSortKey, type SortValue } fr
 // part of a row takes the sorted fields of another, and gives up the empty fields it no longer reaches.
 
 const MAX_KEYS = 64
-const ERRORS: ReadonlySet<string> = new Set([
+export const ERRORS: ReadonlySet<string> = new Set([
 	"#NULL!",
 	"#DIV/0!",
 	"#VALUE!",

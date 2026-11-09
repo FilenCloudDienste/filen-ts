@@ -4,7 +4,8 @@
    Drawn on the canvases (read when the grid mounts, when the colour scheme changes, and when the app changes
    SheetGrid's themeKey): --fo-sheet-bg (cell area), --fo-sheet-text (automatic text on cells without a fill),
    --fo-sheet-grid (gridlines), --fo-sheet-border (automatic borders), --fo-sheet-header-bg, --fo-sheet-header-text,
-   --fo-sheet-header-line, --fo-sheet-header-active-bg, --fo-sheet-header-active-text, --fo-sheet-selection-fill
+   --fo-sheet-header-line, --fo-sheet-header-active-bg, --fo-sheet-header-active-text, --fo-sheet-header-selected-bg
+   and --fo-sheet-header-selected-text (whole rows or columns selected), --fo-sheet-selection-fill
    (translucent), --fo-sheet-selection-line, --fo-sheet-selection-halo (a ring inside the line, 9:1 or more from it so
    one of the two shows on any fill), --fo-sheet-frozen-line, --fo-sheet-resize-line, --fo-sheet-font (the
    stack after a cell's own family), --fo-sheet-header-font (a CSS font shorthand).

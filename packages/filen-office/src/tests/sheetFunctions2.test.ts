@@ -581,6 +581,63 @@ describe("SORTBY", () => {
 	})
 })
 
+describe("SORT", () => {
+	it("orders as SORTBY and the Sort command do, ignoring hyphens and apostrophes", () => {
+		// "Sort data in a range or table": the default sort order ignores apostrophes and hyphens.
+		expect(grid('SORT({"-b";"a";"\'c"})', 3, 1)).toEqual([["a"], ["-b"], ["'c"]])
+		expect(grid('SORT({"b",TRUE,3,"a"},,,TRUE)', 1, 4)).toEqual(grid('SORTBY({"b",TRUE,3,"a"},{"b",TRUE,3,"a"})', 1, 4))
+	})
+
+	it("sorts errors in the data with the rest instead of giving the first one", () => {
+		expect(grid("SORT({2;#N/A;1})", 3, 1)).toEqual([[1], [2], ["!#N/A"]])
+		expect(grid("SORT({2,#N/A;1,5})", 2, 2)).toEqual([
+			[1, 5],
+			[2, "!#N/A"]
+		])
+	})
+
+	it("sorts by a column or row of the given index, descending when asked, blanks last", () => {
+		const rows: Typed[][] = [
+			[3, "'c"],
+			[null, "'z"],
+			[1, "'a"],
+			[2, "'b"],
+			["=INDEX(SORT(A1:B4,1,-1),1,2)", "=INDEX(SORT(A1:B4,1,-1),4,2)", "=INDEX(SORT(A1:B4,2,-1),1,2)"]
+		]
+
+		expect(calculate(rows)).toEqual({ A5: "c", B5: "z", C5: "z" })
+		expect(grid("SORT({3,1,2;30,10,20},2,1,TRUE)", 2, 3)).toEqual([
+			[1, 2, 3],
+			[10, 20, 30]
+		])
+	})
+
+	it("sorts by several keys given as arrays of indexes and orders", () => {
+		expect(grid("SORT({1,1;2,0;1,3},{1,2},{1,-1})", 3, 2)).toEqual([
+			[1, 3],
+			[1, 1],
+			[2, 0]
+		])
+		expect(grid("SORT({1,1;2,0;1,3},{1,2},-1)", 3, 2)).toEqual([
+			[2, 0],
+			[1, 3],
+			[1, 1]
+		])
+	})
+
+	it("gives #VALUE! for a sort order other than 1 or -1 and an index outside the array", () => {
+		expect(
+			values(
+				"INDEX(SORT({1;2},1,2),1,1)",
+				"INDEX(SORT({1;2},0),1,1)",
+				"INDEX(SORT({1;2},2),1,1)",
+				"INDEX(SORT({1,2;3,4},{1,2},{1,-1,1}),1,1)",
+				"INDEX(SORT({1;2},#DIV/0!),1,1)"
+			)
+		).toEqual(["!#VALUE!", "!#VALUE!", "!#VALUE!", "!#VALUE!", "!#DIV/0!"])
+	})
+})
+
 describe("TOCOL and TOROW", () => {
 	const names: Typed[][] = [
 		["'Ben", "'Peter", "'Mary", "'Sam"],

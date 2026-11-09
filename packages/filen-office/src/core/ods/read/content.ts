@@ -2,14 +2,15 @@ import { runSliced, type SliceClock } from "../../slicing"
 import type { SharedStrings } from "../../xlsx/model/sharedStrings"
 import { SHEET_MAX_COLS } from "../../sheet/protocol"
 import { CellKind } from "../../xlsx/model/types"
-import { translateFormula, volatileFormula } from "../formula/toXlsx"
+import { volatileFormula } from "../../sheet/functions/volatile"
+import { translateFormula } from "../formula/toXlsx"
 import type { OdsIssues } from "../issues"
 import type { OdsCellStyles } from "../styles/cell"
 import { OdsReadError } from "./errors"
 import { A, E, OdsScanner, UNKNOWN, type ScanHandler } from "./scan"
-import { OdsSheetBuilder, type OdsBuiltSheet, type OdsCellInput, type OdsRowInput } from "./sheet"
+import { OdsSheetBuilder, OdsValueType, type OdsBuiltSheet, type OdsCellInput, type OdsRowInput } from "./sheet"
 import { capturedElement, capturedValidationsSteps } from "./captured"
-import { dateValue, durationValue, nullDate, NULL_DATE_1899 } from "./values"
+import { dateValue, durationValue, nullDate, NULL_DATE_1899, NULL_DATE_1904 } from "./values"
 import type { OdfElement } from "../../odf/tree"
 import { decodeUtf8 } from "../../xml/index"
 import { ADDRESS_ATTRIBUTES, UnheldCollector } from "../unheld"
@@ -121,8 +122,13 @@ interface TableState {
 	readonly frames: OdsCellFrame[]
 	rowOutline: number
 	colOutline: number
-	rowsCollapsed: number
-	colsCollapsed: number
+	// Per open table:table-row-group / table:table-column-group, whether it is collapsed (table:display="false").
+	readonly rowGroups: boolean[]
+	readonly colGroups: boolean[]
+	// A collapsed group just closed: the row or column after it, its summary (Excel's default summaryBelow and
+	// summaryRight), carries the collapsed state (ECMA-376 Part 1 §18.3.1.73, §18.3.1.13).
+	rowSummaryCollapsed: boolean
+	colSummaryCollapsed: boolean
 	headerColumns: boolean
 }
 
@@ -142,6 +148,9 @@ export class ContentReader implements ScanHandler {
 	private pendingValidations: { readonly markup: Uint8Array; readonly prefixes: ReadonlyMap<string, string> } | null = null
 	private databaseRanges: OdfElement | undefined
 	private nullDateDays = NULL_DATE_1899
+	// The origin date cells are read on: the engine's (1904 or 1899-12-30), never another null date, so an
+	// office:date-value keeps its calendar date through display and save.
+	private dateBase = NULL_DATE_1899
 	private structureProtected = false
 	private protectionKey: string | undefined
 	private protectionAlgorithm: string | undefined
@@ -180,7 +189,9 @@ export class ContentReader implements ScanHandler {
 		note: undefined,
 		rich: false,
 		runs: undefined,
-		recalculate: false
+		recalculate: false,
+		valueType: OdsValueType.FLOAT,
+		currency: undefined
 	}
 	private valueType = NONE
 	private stringValue: string | undefined
@@ -378,13 +389,19 @@ export class ContentReader implements ScanHandler {
 			case E["table:table-row-group"]: {
 				const table = this.table
 
-				if (table !== null) table.rowOutline--
+				if (table !== null) {
+					table.rowOutline--
+					if (table.rowGroups.pop() === true) table.rowSummaryCollapsed = true
+				}
 				break
 			}
 			case E["table:table-column-group"]: {
 				const table = this.table
 
-				if (table !== null) table.colOutline--
+				if (table !== null) {
+					table.colOutline--
+					if (table.colGroups.pop() === true) table.colSummaryCollapsed = true
+				}
 				break
 			}
 			case E["table:table-header-rows"]:
@@ -454,6 +471,7 @@ export class ContentReader implements ScanHandler {
 				const date = settings.children.find(child => child.name === "table:null-date")?.attributes.get("table:date-value")
 
 				this.nullDateDays = nullDate(date)
+				this.dateBase = this.nullDateDays === NULL_DATE_1904 ? NULL_DATE_1904 : NULL_DATE_1899
 				break
 			}
 			case E["table:content-validations"]:
@@ -610,8 +628,10 @@ export class ContentReader implements ScanHandler {
 			frames: [],
 			rowOutline: 0,
 			colOutline: 0,
-			rowsCollapsed: 0,
-			colsCollapsed: 0,
+			rowGroups: [],
+			colGroups: [],
+			rowSummaryCollapsed: false,
+			colSummaryCollapsed: false,
 			headerColumns: false
 		}
 
@@ -644,9 +664,10 @@ export class ContentReader implements ScanHandler {
 					scanner.attribute(A["table:default-cell-style-name"]),
 					hidden,
 					table.colOutline,
-					table.colsCollapsed > 0,
+					table.colSummaryCollapsed,
 					table.headerColumns
 				)
+				table.colSummaryCollapsed = false
 
 				if (!selfClosing) this.ignore(false)
 				break
@@ -654,6 +675,7 @@ export class ContentReader implements ScanHandler {
 			case E["table:table-column-group"]:
 				if (!selfClosing) {
 					table.colOutline++
+					table.colGroups.push(scanner.is(A["table:display"], "false"))
 					this.stack.push(element)
 				}
 				break
@@ -670,6 +692,7 @@ export class ContentReader implements ScanHandler {
 			case E["table:table-row-group"]:
 				if (!selfClosing) {
 					table.rowOutline++
+					table.rowGroups.push(scanner.is(A["table:display"], "false"))
 					this.stack.push(element)
 				}
 				break
@@ -723,7 +746,8 @@ export class ContentReader implements ScanHandler {
 		row.defaultCellStyle = scanner.symbol(A["table:default-cell-style-name"])
 		row.hidden = visibility !== undefined && visibility !== "visible"
 		row.outline = this.table?.rowOutline ?? 0
-		row.collapsed = false
+		row.collapsed = this.table?.rowSummaryCollapsed === true
+		if (this.table !== null) this.table.rowSummaryCollapsed = false
 		this.table?.builder.beginRow()
 
 		if (selfClosing) {
@@ -771,6 +795,8 @@ export class ContentReader implements ScanHandler {
 		this.runCount = 0
 		cell.rich = false
 		cell.runs = undefined
+		cell.valueType = OdsValueType.FLOAT
+		cell.currency = undefined
 
 		let valueType = NONE
 
@@ -781,10 +807,19 @@ export class ContentReader implements ScanHandler {
 		} else {
 			switch (scanner.match(A["office:value-type"], VALUE_TYPES)) {
 				case 0:
+					valueType = NUMBER
+					cell.number = scanner.number(A["office:value"])
+					break
 				case 1:
+					valueType = NUMBER
+					cell.number = scanner.number(A["office:value"])
+					cell.valueType = OdsValueType.PERCENTAGE
+					break
 				case 2:
 					valueType = NUMBER
 					cell.number = scanner.number(A["office:value"])
+					cell.valueType = OdsValueType.CURRENCY
+					cell.currency = scanner.symbol(A["office:currency"])
 					break
 				case 3:
 					valueType = STRING
@@ -795,11 +830,13 @@ export class ContentReader implements ScanHandler {
 					break
 				case 4:
 					valueType = DATE
-					cell.number = dateValue(scanner.symbol(A["office:date-value"]) ?? "") - this.nullDateDays
+					cell.number = dateValue(scanner.symbol(A["office:date-value"]) ?? "") - this.dateBase
+					cell.valueType = OdsValueType.DATE
 					break
 				case 5:
 					valueType = TIME
 					cell.number = durationValue(scanner.attribute(A["office:time-value"]) ?? "")
+					cell.valueType = OdsValueType.TIME
 					break
 				case 6:
 					valueType = BOOLEAN
@@ -1058,6 +1095,10 @@ export class ContentReader implements ScanHandler {
 		this.where = Where.Body
 
 		if (table === null) return
+
+		// A collapsed group ending the declared rows or columns: its summary is the one after them.
+		if (table.rowSummaryCollapsed) table.builder.collapsedSummaryRow()
+		if (table.colSummaryCollapsed) table.builder.collapsedSummaryColumn()
 
 		this.tables.push({
 			name: table.name,

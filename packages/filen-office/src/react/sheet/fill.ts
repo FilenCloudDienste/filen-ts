@@ -1,4 +1,5 @@
 import { SHEET_MAX_COLS, SHEET_MAX_ROWS, type SheetId, type SheetRange, type SheetSessionApi } from "../../core/sheet/protocol"
+import { shownIndex, type GridAxis } from "./axis"
 import type { GridPoint } from "./selection"
 
 // The fill handle: the small square at the selection's bottom-right corner (bottom-left in a right-to-left sheet).
@@ -54,19 +55,26 @@ export function fillLeft(source: SheetRange, target: SheetRange): SheetRange | n
 	return null
 }
 
-// Where a double-click on the handle fills down to: the last row of the data in the column left of the selection
-// (else right of it), from the row below the selection; null when there is none.
-export async function fillDownTo(session: SheetSessionApi, sheet: SheetId, source: SheetRange): Promise<number | null> {
+// Where a double-click on the handle fills down to: the last row of the run of data in the column left of the
+// selection (else right of it) that starts on the row below the selection; null when there is none. A lone filled
+// cell there is the run: Ctrl+Down from it would go past the blank cells under it to the next block.
+export async function fillDownTo(session: SheetSessionApi, sheet: SheetId, source: SheetRange, rows: GridAxis): Promise<number | null> {
 	if (source.endRow >= SHEET_MAX_ROWS - 1) return null
+
+	const below = source.endRow + 1
 
 	for (const col of [source.startCol - 1, source.endCol + 1]) {
 		if (col < 0 || col >= SHEET_MAX_COLS) continue
 
-		const below = await session.query("cell", { sheet, row: source.endRow + 1, col })
+		const first = await session.query("cell", { sheet, row: below, col })
 
-		if (below.input === "") continue
+		if (first.input === "") continue
 
-		const edge = await session.query("navigate", { sheet, row: source.endRow + 1, col, direction: "down", to: "dataEdge" })
+		const next = below + 1 < rows.count ? shownIndex(rows, below + 1, 1) : -1
+
+		if (next < 0 || (await session.query("cell", { sheet, row: next, col })).input === "") return below
+
+		const edge = await session.query("navigate", { sheet, row: below, col, direction: "down", to: "dataEdge" })
 
 		return edge.row > source.endRow ? edge.row : null
 	}

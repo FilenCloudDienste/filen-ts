@@ -3,9 +3,11 @@ import { CellError, EmptyValue, FunctionArgumentType, SimpleRangeValue, type Imp
 import { formatValue, NUMFMT_EN_US, type NumFmtOptions } from "../../numfmt"
 import {
 	dateBaseOf,
+	MAX_TEXT,
 	naError,
 	rawNumber,
 	SheetFunctionPlugin,
+	textOf,
 	valueError,
 	type PluginCall,
 	type PluginScalar,
@@ -15,38 +17,6 @@ import {
 import { flatten, rowsOf } from "./values"
 
 // Text functions as Excel calculates them.
-
-// The longest text a cell holds ("Excel specifications and limits"): longer results are #VALUE!.
-const MAX_TEXT = 32767
-
-// A number as text in a formula (""&A1): at most 15 significant digits, exponential from 1E+15 and below 1E-9.
-export function numberText(value: number): string {
-	if (value === 0 || !Number.isFinite(value)) return "0"
-
-	const rounded = Number(value.toPrecision(15))
-	const exponent = Math.floor(Math.log10(Math.abs(rounded)))
-
-	if (exponent >= 15 || exponent < -9) {
-		const [mantissa = "0", power = "0"] = rounded.toExponential().split("e")
-		const shift = Number(power)
-
-		return `${mantissa}E${shift < 0 ? "-" : "+"}${String(Math.abs(shift)).padStart(2, "0")}`
-	}
-
-	return String(rounded).includes("e")
-		? rounded.toFixed(Math.min(100, Math.max(0, 14 - exponent))).replace(/\.?0+$/, "")
-		: String(rounded)
-}
-
-// A value as the text functions read it.
-function textOf(value: PluginScalar): string | CellError {
-	if (value instanceof CellError) return value
-	if (value === EmptyValue) return ""
-	if (typeof value === "string") return value
-	if (typeof value === "boolean") return value ? "TRUE" : "FALSE"
-
-	return numberText(rawNumber(value) ?? 0)
-}
 
 // Delimiters given as text or an array of texts.
 function delimitersOf(value: PluginValue): string[] | CellError {

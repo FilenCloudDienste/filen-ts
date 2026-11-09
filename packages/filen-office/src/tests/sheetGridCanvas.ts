@@ -11,6 +11,7 @@ export interface DrawCall {
 	readonly font: string
 	readonly lineWidth: number
 	readonly dash: readonly number[]
+	readonly dashOffset: number
 }
 
 export function fontPx(font: string): number {
@@ -22,6 +23,7 @@ export class RecordingCanvas implements GridCanvas {
 	fillStyle: string | object = "#000"
 	strokeStyle: string | object = "#000"
 	lineWidth = 1
+	lineDashOffset = 0
 	font = "10px sans-serif"
 	textAlign: GridCanvas["textAlign"] = "start"
 	textBaseline: GridCanvas["textBaseline"] = "alphabetic"
@@ -36,7 +38,8 @@ export class RecordingCanvas implements GridCanvas {
 			stroke: this.strokeStyle,
 			font: this.font,
 			lineWidth: this.lineWidth,
-			dash: this.dash
+			dash: this.dash,
+			dashOffset: this.lineDashOffset
 		})
 	}
 

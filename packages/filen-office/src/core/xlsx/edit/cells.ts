@@ -16,6 +16,7 @@ import type { SheetStore } from "../model/store"
 import { CellKind, FormulaKind, type XlsxSheetModel } from "../model/types"
 import { liveRelationships } from "../refs/state"
 import { dateSerial, type DateBase } from "../../sheet/numfmt/date"
+import { showsPercent } from "../../sheet/numfmt/format"
 import { encodeXstring, type XlsxDocument } from "./document"
 import type { RecalculatedCell } from "../../sheet/formula/index"
 import { ENGINE_SLICE, StyleLimitError, cellStep, clearFormats, reportLogged, typedXf } from "./format"
@@ -41,54 +42,18 @@ const ERRORS: ReadonlyMap<string, string> = new Map(
 	["#NULL!", "#DIV/0!", "#VALUE!", "#REF!", "#NAME?", "#NUM!", "#N/A"].map(error => [error, error])
 )
 
-const DATE_TIME = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{1,2}):(\d{2})(?::(\d{2}))?$/
-const TIME = /^(\d{1,2}):(\d{2})(?::(\d{2}))?$/
-
-function validDay(year: number, month: number, day: number): boolean {
-	if (month < 1 || month > 12 || day < 1) return false
-
-	const leap = (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0
-	const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1] ?? 0
-
-	return day <= days
-}
-
-// A date with a time ("2024-03-05 14:30"), or a time alone ("14:30", on the epoch day), as editing a date-time or
-// time cell starts from. Null for anything else.
-function dateTimeEntry(input: string, date1904: DateBase): Entry | null {
-	const trimmed = input.trim()
-	const dateTime = DATE_TIME.exec(trimmed)
-	const time = dateTime === null ? TIME.exec(trimmed) : null
-	const [hours, minutes, seconds] = (dateTime === null ? time?.slice(1, 4) : dateTime.slice(4, 7)) ?? []
-
-	if (hours === undefined || minutes === undefined || Number(hours) > 23 || Number(minutes) > 59 || Number(seconds ?? 0) > 59) return null
-
-	const ofDay = (Number(hours) * 3600 + Number(minutes) * 60 + Number(seconds ?? 0)) / 86_400
-	const format = seconds === undefined ? "h:mm" : "h:mm:ss"
-
-	if (dateTime === null) return { type: "number", value: ofDay, format }
-
-	const [, year = "", month = "", day = ""] = dateTime
-
-	if (!validDay(Number(year), Number(month), Number(day))) return null
-
-	return {
-		type: "number",
-		value: dateSerial(Number(year), Number(month), Number(day), date1904) + ofDay,
-		format: `yyyy-mm-dd ${format.replace("h", "hh")}`
-	}
+// The clock's year where the session runs, for a date typed without one (3/15, 1-Jan).
+export function entryYear(document: XlsxDocument): number {
+	return new Date((document.settings.clock ?? Date.now)()).getFullYear()
 }
 
 // What is typed into a cell, read as Excel reads it there: into a Text ("@") cell, as text, a formula too. With the
-// session's locale, as typed in it (cellInput.ts); without one, in the file's own (en-US) syntax.
-export function readEntry(input: string, textFormat: boolean, date1904: DateBase, locale?: SheetLocale): Entry {
+// session's locale, as typed in it (cellInput.ts); without one, in the file's own (en-US) syntax. `year` is the
+// clock's (entryYear), for a date typed without one.
+export function readEntry(input: string, textFormat: boolean, date1904: DateBase, locale?: SheetLocale, year?: number): Entry {
 	if (textFormat && input !== "" && !input.startsWith("'")) return { type: "text", text: input }
 
-	const dateTime = dateTimeEntry(input, date1904)
-
-	if (dateTime !== null) return dateTime
-
-	const parsed = parseCellInput(input, locale)
+	const parsed = parseCellInput(input, locale, year)
 
 	switch (parsed.type) {
 		case "empty":
@@ -108,9 +73,11 @@ export function readEntry(input: string, textFormat: boolean, date1904: DateBase
 	if (typeof value === "number")
 		return parsed.impliedFormat === undefined ? { type: "number", value } : { type: "number", value, format: parsed.impliedFormat }
 
+	const ofDay = (value.getUTCHours() * 3600 + value.getUTCMinutes() * 60 + value.getUTCSeconds()) / 86_400
+
 	return {
 		type: "number",
-		value: dateSerial(value.getUTCFullYear(), value.getUTCMonth() + 1, value.getUTCDate(), date1904),
+		value: dateSerial(value.getUTCFullYear(), value.getUTCMonth() + 1, value.getUTCDate(), date1904) + ofDay,
 		...(parsed.impliedFormat !== undefined && { format: parsed.impliedFormat })
 	}
 }
@@ -319,6 +286,9 @@ export interface CellInputs {
 	// 1 where the input is in the file's own (en-US) syntax rather than typed in the session's locale: a value or
 	// formula a paste carries exactly (this workbook's own copy, clipboard HTML's typed values).
 	readonly canonical?: ArrayLike<number>
+	// Typed by hand (cells.set, Ctrl+Enter): a number into a percent cell reads as percent, as Excel types it; a paste
+	// or a replace keeps its value.
+	readonly typed?: boolean
 }
 
 // Writes typed entries (cells.set, a paste). `prepare` runs once the edit is known to go ahead, before the cells
@@ -346,18 +316,33 @@ export async function setCells(
 
 	const store = model.store as SheetStore
 	const entries: Entry[] = []
+	const year = entryYear(document)
 
 	for (let i = 0; i < count; i++) {
 		const row = cells.rows[i] ?? 0
 		const col = cells.cols[i] ?? 0
 		const slot = store.locate(row, col)
-		const xf = slot < 0 ? document.startingStyle(model, row, col) : store.style(slot)
-		const entry = readEntry(
+		// Read by the format the cell takes: a supplied one (a paste of own cells) replaces the one it lands on.
+		const style = cells.styles?.[i] ?? -1
+		const xf = style >= 0 ? style : slot < 0 ? document.startingStyle(model, row, col) : store.style(slot)
+		const format = document.numFmt(xf)
+		const read = readEntry(
 			cells.inputs[i] ?? "",
-			document.numFmt(xf).isText,
+			format.isText,
 			document.dateBase,
-			cells.canonical?.[i] === 1 ? undefined : document.settings.locale
+			cells.canonical?.[i] === 1 ? undefined : document.settings.locale,
+			year
 		)
+		// Automatic percent entry ("Format numbers as percentages"): a plain number of 1 or more typed into a cell its
+		// format shows as a percentage is that many percent; one below 1 is kept, the format showing it times 100.
+		const entry: Entry =
+			cells.typed === true &&
+			read.type === "number" &&
+			read.format === undefined &&
+			Math.abs(read.value) >= 1 &&
+			showsPercent(format, read.value)
+				? { type: "number", value: read.value / 100 }
+				: read
 
 		if (entry.type === "formula" && !wellFormedFormula(entry.text)) return { refused: { reason: "formula" } }
 		// A pattern written in the formula that the app's regular expressions do not run (a backreference, a pattern

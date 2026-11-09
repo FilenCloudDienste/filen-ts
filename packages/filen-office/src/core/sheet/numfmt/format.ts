@@ -168,6 +168,17 @@ function pick(format: NumFmt, value: number): NumFmtSection | null {
 	return null
 }
 
+// Whether the section `value` shows in scales it by 100 ("%" in a number, scientific or fraction section).
+export function showsPercent(format: NumFmt, value: number): boolean {
+	const section = pick(format, value)
+
+	return (
+		section !== null &&
+		section.percent > 0 &&
+		(section.kind === SectionKind.NUMBER || section.kind === SectionKind.SCIENTIFIC || section.kind === SectionKind.FRACTION)
+	)
+}
+
 function firstTakesNegatives(sections: readonly NumFmtSection[]): boolean {
 	const first = sections[0]?.condition
 	const second = sections[1]?.condition

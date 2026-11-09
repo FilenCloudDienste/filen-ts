@@ -14,23 +14,25 @@ import { dateSerial, MAX_SERIAL_1900, serialDate, type DateParts } from "../core
 import { SHEET_MAX_EDIT_CELLS } from "../core/sheet/protocol"
 
 // The fill handle's series and the Series dialog's lines. Excel's documented cases ("Fill data automatically in
-// worksheet cells", "Project values in a series", "Create a list of sequential dates" on support.microsoft.com) are
-// pinned as Excel gives them; the rest as LibreOffice 7.5 fills them (XCellSeries.fillAuto and fillSeries over UNO,
-// en-US), Microsoft being silent there.
+// worksheet cells" and its earlier versions' AutoFill examples, "Project values in a series", "Create a list of
+// sequential dates" on support.microsoft.com) are pinned as Excel gives them; the rest as LibreOffice 7.5 fills them
+// (XCellSeries.fillAuto and fillSeries over UNO, en-US), Microsoft being silent there.
 
-type Source = number | string | { readonly date: number } | { readonly formula: true } | null
+type Source = number | string | { readonly date: number } | { readonly time: number } | { readonly formula: true } | null
 
 function cells(source: readonly Source[]): FillSourceCell[] {
 	return source.map(value =>
 		value === null
 			? { kind: "empty" }
 			: typeof value === "number"
-				? { kind: "number", value, date: false }
+				? { kind: "number", value, temporal: "none" }
 				: typeof value === "string"
 					? { kind: "text", text: value }
 					: "date" in value
-						? { kind: "number", value: value.date, date: true }
-						: { kind: "formula" }
+						? { kind: "number", value: value.date, temporal: "date" }
+						: "time" in value
+							? { kind: "number", value: value.time, temporal: "time" }
+							: { kind: "formula" }
 	)
 }
 
@@ -44,7 +46,7 @@ function shown(value: FillValue, source: readonly Source[], k: number): string {
 }
 
 function fill(source: readonly Source[], count: number, mode: FillMode = "auto", backward = false): string[] {
-	const next = fillSeries(cells(source), mode, backward)
+	const next = fillSeries(cells(source), mode, backward, CALENDAR)
 
 	return Array.from({ length: count }, (_, k) => shown(next(k), source, k))
 }
@@ -67,10 +69,40 @@ describe("the fill handle", () => {
 		expect(fill([{ date: 45306 }], 2, "alternate")).toEqual(["copy", "copy"])
 	})
 
-	it("steps a date or a time by a day", () => {
+	it("steps a date by a day and a time by an hour (Excel's documented 9:00 → 10:00, 11:00, 12:00)", () => {
 		expect(fill([{ date: 45306 }], 3)).toEqual(["45307", "45308", "45309"])
-		expect(fill([{ date: 0.3333333333333333 }], 2)).toEqual(["1.333333333", "2.333333333"])
+		// A date-time format shows a date: a day.
+		expect(fill([{ date: 45306.375 }], 1)).toEqual(["45307.375"])
+		expect(fill([{ time: 0.375 }], 3)).toEqual(["0.416666667", "0.458333333", "0.5"])
+		expect(fill([{ time: 0.375 }], 1, "auto", true)).toEqual(["0.333333333"])
+		// No error built up over many steps.
+		expect(fill([{ time: 0 }], 48).at(-1)).toBe("2")
+		expect(fill([{ time: 0.375 }], 2, "alternate")).toEqual(["copy", "copy"])
+		expect(fill([{ time: 0.375 }, { time: 0.5 }], 2)).toEqual(["0.625", "0.75"])
 		expect(fill([{ date: 45306 }, { date: 45313 }], 2)).toEqual(["45320", "45327"])
+	})
+
+	it("steps dates on the same day of the month by months or years (Excel's documented 15-Jan, 15-Apr → 15-Jul)", () => {
+		const serial = (year: number, month: number, day: number): number => dateSerial(year, month, day, false)
+		const dates = (...serials: number[]): { date: number }[] => serials.map(date => ({ date }))
+
+		expect(fill(dates(serial(2024, 1, 15), serial(2024, 2, 15)), 3)).toEqual(
+			[serial(2024, 3, 15), serial(2024, 4, 15), serial(2024, 5, 15)].map(String)
+		)
+		expect(fill(dates(serial(2024, 1, 15), serial(2024, 4, 15)), 2)).toEqual([serial(2024, 7, 15), serial(2024, 10, 15)].map(String))
+		expect(fill(dates(serial(1999, 1, 1), serial(1999, 4, 1)), 3)).toEqual(
+			[serial(1999, 7, 1), serial(1999, 10, 1), serial(2000, 1, 1)].map(String)
+		)
+		expect(fill(dates(serial(2020, 6, 1), serial(2021, 6, 1)), 2)).toEqual([serial(2022, 6, 1), serial(2023, 6, 1)].map(String))
+		// The day of the month is kept where the month has it.
+		expect(fill(dates(serial(2024, 1, 31), serial(2024, 3, 31)), 2)).toEqual([serial(2024, 5, 31), serial(2024, 7, 31)].map(String))
+		// The time of day goes along.
+		expect(fill(dates(serial(2024, 1, 15) + 0.5, serial(2024, 2, 15) + 0.5), 1)).toEqual([String(serial(2024, 3, 15) + 0.5)])
+		// Filled up: back by months.
+		expect(fill(dates(serial(2024, 3, 15), serial(2024, 2, 15)), 1, "auto", true)).toEqual([String(serial(2024, 1, 15))])
+		// Uneven months, different days, plain numbers: a linear trend.
+		expect(fill(dates(serial(2024, 1, 15), serial(2024, 2, 15), serial(2024, 4, 15)), 1)).not.toEqual([String(serial(2024, 5, 15))])
+		expect(fill([serial(2024, 1, 15), serial(2024, 2, 15)], 1)).toEqual([String(2 * serial(2024, 2, 15) - serial(2024, 1, 15))])
 	})
 
 	it("steps the number ending text, or else starting it, keeping its padding and ordinal suffix", () => {
@@ -82,12 +114,39 @@ describe("the fill handle", () => {
 		expect(fill(["1st"], 4)).toEqual(["2nd", "3rd", "4th", "5th"])
 		expect(fill(["11th"], 2)).toEqual(["12th", "13th"])
 		expect(fill(["1 Item"], 2)).toEqual(["2 Item", "3 Item"])
-		expect(fill(["Qtr1"], 4)).toEqual(["Qtr2", "Qtr3", "Qtr4", "Qtr5"])
 		expect(fill(["Item 1.5"], 5)).toEqual(["Item 1.6", "Item 1.7", "Item 1.8", "Item 1.9", "Item 1.10"])
 		expect(fill(["Item 1", "Item 3"], 2)).toEqual(["Item 5", "Item 7"])
 		// The first cell's text frames the series.
 		expect(fill(["Item 1", "Thing 3"], 1)).toEqual(["Item 5"])
 		expect(fill(["Item 1", "Item 1"], 2)).toEqual(["Item 1", "Item 1"])
+	})
+
+	it("steps an ordinal starting text (Excel's documented 1st Period → 2nd Period)", () => {
+		expect(fill(["1st Period"], 3)).toEqual(["2nd Period", "3rd Period", "4th Period"])
+		expect(fill(["11th Day"], 2)).toEqual(["12th Day", "13th Day"])
+		expect(fill(["1ST Period"], 1)).toEqual(["2ND Period"])
+		expect(fill(["1st, then"], 1)).toEqual(["2nd, then"])
+		// Not an ordinal: a letter follows, or the suffix is not the number's own.
+		expect(fill(["1sty"], 2)).toEqual(["2sty", "3sty"])
+		expect(fill(["2st Period"], 1)).toEqual(["3st Period"])
+	})
+
+	it("wraps quarters after 4 (Excel's documented Qtr3 → Qtr4, Qtr1, Qtr2)", () => {
+		expect(fill(["Qtr1"], 4)).toEqual(["Qtr2", "Qtr3", "Qtr4", "Qtr1"])
+		expect(fill(["Qtr3"], 3)).toEqual(["Qtr4", "Qtr1", "Qtr2"])
+		expect(fill(["Q3"], 3)).toEqual(["Q4", "Q1", "Q2"])
+		expect(fill(["Quarter 3"], 2)).toEqual(["Quarter 4", "Quarter 1"])
+		expect(fill(["quarter3"], 1)).toEqual(["quarter4"])
+		expect(fill(["Q1"], 2, "auto", true)).toEqual(["Q4", "Q3"])
+		expect(fill(["Q1", "Q3"], 3)).toEqual(["Q1", "Q3", "Q1"])
+		expect(fill(["Q4", "Q1"], 2)).toEqual(["Q2", "Q3"])
+		expect(fill(["Q1", "Q1"], 2)).toEqual(["Q1", "Q1"])
+		// Uneven: position by position, each the next quarter.
+		expect(fill(["Q1", "Q3", "Q2"], 6)).toEqual(["Q2", "Q4", "Q3", "Q3", "Q1", "Q4"])
+		// Not a quarter: a number past 4, or more after it.
+		expect(fill(["Q5"], 1)).toEqual(["Q6"])
+		expect(fill(["Qtr 12"], 1)).toEqual(["Qtr 13"])
+		expect(fill(["1st Quarter"], 1)).toEqual(["2nd Quarter"])
 	})
 
 	it("copies text whose number is neither at its end nor its start, and plain text", () => {
@@ -154,7 +213,7 @@ describe("the fill handle's target", () => {
 	})
 
 	it("takes, per column, its cells in fill order and maps each target to its source position", () => {
-		const read = (row: number, col: number): FillSourceCell => ({ kind: "number", value: row * 10 + col, date: false })
+		const read = (row: number, col: number): FillSourceCell => ({ kind: "number", value: row * 10 + col, temporal: "none" })
 		const writes = autoFillWrites(source, { ...source, startRow: 0 }, "auto", read, fillSeries)
 
 		if (writes === null || writes === "tooLarge") throw new Error("no writes")
@@ -259,7 +318,7 @@ describe("the Series dialog", () => {
 
 	it("writes each row's line, or each column's", () => {
 		const read = (row: number, col: number): FillSourceCell =>
-			col === 0 || row === 0 ? { kind: "number", value: row + col, date: false } : { kind: "empty" }
+			col === 0 || row === 0 ? { kind: "number", value: row + col, temporal: "none" } : { kind: "empty" }
 		const options: SeriesOptions = { type: "linear", dateUnit: "day", step: 1, stop: null, trend: false }
 		const writes = seriesWrites({ startRow: 0, startCol: 0, endRow: 1, endCol: 2 }, "rows", read, line =>
 			seriesLine(line, options, CALENDAR)

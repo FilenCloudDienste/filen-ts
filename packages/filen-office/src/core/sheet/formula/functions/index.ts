@@ -12,7 +12,7 @@ import { GroupFunctions } from "./groupby"
 import { IndirectFunctions } from "./indirect"
 import { LambdaFunctions } from "./lambda"
 import { LogicalFunctions } from "./logical"
-import { LookupFunctions } from "./lookup"
+import { installWildcardMatch, LookupFunctions } from "./lookup"
 import { MathFunctions } from "./math"
 import { MatrixFunctions } from "./matrix"
 import { MiscFunctions } from "./misc"
@@ -74,6 +74,7 @@ export function registerSheetFunctions(): void {
 	}
 
 	installExcelArguments()
+	installWildcardMatch()
 	installBlankTails(ARRAY_RESULTS)
 }
 

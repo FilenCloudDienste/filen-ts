@@ -286,6 +286,29 @@ describe("the app's functions, from their pages' examples", () => {
 		})
 	})
 
+	// support.microsoft.com MATCH: with match_type 0 and a text lookup_value, ? and * are wildcards and ~ escapes them.
+	it("MATCH with match_type 0 takes wildcards", () => {
+		expect(
+			calculate([
+				["apple", "ac", '=MATCH("b*",A1:A5,0)', '=MATCH("a?c",B1:B3,0)', '=INDEX(A1:A5,MATCH("*err*",A1:A5,0))'],
+				["Banana", "abc", '=MATCH("~*",A1:A5,0)', '=MATCH("x*",E:E,0)', '=MATCH("b*",{"a";"b";"b*";"c"},1)'],
+				["cherry", "x", '=MATCH("a~?c",B1:B5,0)', '=MATCH("a?c",{"ac";"abc";"x"},0)', '=MATCH("B*",A1:A5,0)'],
+				["*", "a?c", null, null, "xylophone"],
+				["b*", null, null, null, null]
+			])
+		).toEqual({
+			C1: 2,
+			D1: 2,
+			E1: "cherry",
+			C2: 4,
+			D2: 4,
+			E2: 3,
+			C3: 4,
+			D3: 2,
+			E3: 2
+		})
+	})
+
 	it("RANK, RANK.EQ and RANK.AVG", () => {
 		expect(
 			calculate([

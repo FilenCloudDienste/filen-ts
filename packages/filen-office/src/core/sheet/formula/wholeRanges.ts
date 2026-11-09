@@ -574,15 +574,15 @@ interface ReadRange {
 
 type Xlookup = (this: unknown, key: unknown, lookup: ReadRange, read: ReadRange, ...rest: unknown[]) => unknown
 
-// XLOOKUP's result row read alone from a whole-column return range: the engine reads the range's every row for the
-// one it returns.
+// XLOOKUP's result row read alone from a vertical return range (a whole column's too): the engine reads the range's
+// every row for the one it returns, each call.
 function installRowRead(prototype: { doXlookup: Xlookup }): void {
 	const xlookup = prototype.doXlookup
 
 	prototype.doXlookup = function (key, lookup, read, ...rest) {
 		const whole = read.range
 
-		if (whole === undefined || whole.isFinite() || lookup.width() !== 1 || read.height() !== lookup.height())
+		if (whole === undefined || lookup.width() !== 1 || read.height() !== lookup.height())
 			return xlookup.call(this, key, lookup, read, ...rest)
 
 		const rowAt = (index: number): unknown[] =>

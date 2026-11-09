@@ -4,6 +4,7 @@ import { openXlsxSession } from "../../../core/sheet/commands"
 import type { SheetFileKind, SheetSessionApi, SheetTile } from "../../../core/sheet/protocol"
 import type { SheetSession } from "../../../core/sheet/session"
 import type { XlsxDocument } from "../../../core/xlsx/edit/document"
+import { cellKeyOf } from "../../../core/xlsx/edit/history"
 import { decodeUtf8 } from "../../../core/xml/index"
 import { rng } from "../config"
 import { difference } from "../../xlsxWriteFixtures"
@@ -413,11 +414,20 @@ async function reopenProblems(
 			const shown = await shownTiles(live, entry.id, coordinates)
 			const again = await shownTiles(fresh, other.id, coordinates)
 
+			// A result the fresh session calculated again on open (the save asks for a full calculation, as it does
+			// once the editing session kept a result it could not calculate) is the engine's from the file, which may
+			// differ from what the editing session kept.
+			const recalculated = (key: string): boolean => {
+				const [row = 0, col = 0] = key.split(",").map(Number)
+
+				return fresh.document.shownResults.get(other.id)?.get(cellKeyOf(row, col))?.recalculated === true
+			}
+
 			for (const key of new Set([...shown.keys(), ...again.keys()])) {
 				const left = shown.get(key) ?? "|"
 				const right = again.get(key) ?? "|"
 
-				if (left !== right && problems.length < 8)
+				if (left !== right && !recalculated(key) && problems.length < 8)
 					problems.push(`${entry.name} ${key}: ${JSON.stringify(left)} → ${JSON.stringify(right)}`)
 			}
 		}

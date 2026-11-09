@@ -1,5 +1,15 @@
-import { CellError, EmptyValue, FunctionArgumentType, SimpleRangeValue, type ImplementedFunctions } from "hyperformula"
-import { INTERSECT_FUNCTION } from "../../functions/engineNames"
+import {
+	CellError,
+	EmptyValue,
+	FunctionArgumentType,
+	SimpleRangeValue,
+	type FunctionArgument,
+	type FunctionMetadata,
+	type ImplementedFunctions,
+	type SimpleCellAddress
+} from "hyperformula"
+import { INDEX_REFERENCE_FUNCTION, INTERSECT_FUNCTION } from "../../functions/engineNames"
+import { cellRange, recordRead, shownFormulaAt } from "./indirect"
 import { MAX_COLUMNS, MAX_ROWS } from "../../model/model"
 import { columnName } from "../../refs/cellRef"
 import { sheetNameNeedsQuotes } from "../../refs/formulaRefs"
@@ -8,10 +18,12 @@ import {
 	refError,
 	SheetFunctionPlugin,
 	valueError,
+	type PluginAst,
 	type PluginCall,
 	type PluginRange,
 	type PluginScalar,
-	type PluginState
+	type PluginState,
+	type PluginValue
 } from "./plugin"
 
 // A reference's rows and columns as Excel counts them: a whole column has the grid's every row, wherever the engine
@@ -24,19 +36,29 @@ function widthOf(value: SimpleRangeValue, range: PluginRange | undefined): numbe
 	return range !== undefined && range.end.col === Number.POSITIVE_INFINITY ? MAX_COLUMNS - range.start.col : value.width()
 }
 
+// The engine's evaluation before a one-cell result is read out of its range (private to the engine).
+interface RawEvaluation {
+	evaluateAstWithoutPostprocessing(ast: PluginAst, state: PluginState): PluginValue
+}
+
+// INDEX's row_num, column_num and area_num, read after its array (INDEX_REFERENCE_FUNCTION reads that itself).
+const INDEX_NUMBERS: FunctionArgument[] = [
+	{ argumentType: FunctionArgumentType.NUMBER, optionalArg: true },
+	{ argumentType: FunctionArgumentType.NUMBER, optionalArg: true },
+	{ argumentType: FunctionArgumentType.NUMBER, optionalArg: true }
+]
+const INDEX_REFERENCE: FunctionMetadata = {
+	method: "indexReference",
+	parameters: [{ argumentType: FunctionArgumentType.ANY }, ...INDEX_NUMBERS]
+}
+const INDEX_REFERENCE_NUMBERS: FunctionMetadata = { method: "indexReference", parameters: INDEX_NUMBERS }
+
 // References as Excel reads them where the engine differs.
 export class ReferenceFunctions extends SheetFunctionPlugin {
 	static override implementedFunctions: ImplementedFunctions = {
 		[INTERSECT_FUNCTION]: { method: "intersect", parameters: [{ argumentType: FunctionArgumentType.ANY }] },
-		INDEX: {
-			method: "index",
-			parameters: [
-				{ argumentType: FunctionArgumentType.RANGE },
-				{ argumentType: FunctionArgumentType.NUMBER, optionalArg: true },
-				{ argumentType: FunctionArgumentType.NUMBER, optionalArg: true },
-				{ argumentType: FunctionArgumentType.NUMBER, optionalArg: true }
-			]
-		},
+		INDEX: { method: "index", parameters: [{ argumentType: FunctionArgumentType.RANGE }, ...INDEX_NUMBERS] },
+		[INDEX_REFERENCE_FUNCTION]: INDEX_REFERENCE,
 		ADDRESS: {
 			method: "address",
 			parameters: [
@@ -50,7 +72,48 @@ export class ReferenceFunctions extends SheetFunctionPlugin {
 		HYPERLINK: {
 			method: "hyperlink",
 			parameters: [{ argumentType: FunctionArgumentType.STRING }, { argumentType: FunctionArgumentType.SCALAR, optionalArg: true }]
+		},
+		// The reference is no dependency (its own cell is no circle, as in Excel): the cell it names is a read
+		// (indirect.ts), so a change there calculates it again.
+		FORMULATEXT: {
+			method: "formulatext",
+			parameters: [{ argumentType: FunctionArgumentType.NOERROR }],
+			doesNotNeedArgumentsToBeComputed: true,
+			isDependentOnSheetStructureChange: true,
+			vectorizationForbidden: true
 		}
+	}
+
+	// FORMULATEXT(reference) (support.microsoft.com "FORMULATEXT function"): the formula of the reference's top-left
+	// cell as the formula bar shows it, #N/A for a cell without one. The engine's own gave its rewritten text
+	// (FILEN.* calls, INDEX wrappers, _xlpm. names). A function giving a reference (INDIRECT, OFFSET) is followed.
+	formulatext(ast: PluginCall, state: PluginState): unknown {
+		const at = (address: SimpleCellAddress): string | CellError => {
+			recordRead(state.formulaAddress, {
+				sheet: address.sheet,
+				startRow: address.row,
+				startCol: address.col,
+				endRow: address.row,
+				endCol: address.col
+			})
+
+			return shownFormulaAt(address) ?? naError()
+		}
+
+		let arg = ast.args.length === 1 ? ast.args[0] : undefined
+
+		while (arg?.type === ("PARENTHESIS" as PluginAst["type"])) arg = (arg as PluginAst & { expression: PluginAst }).expression
+
+		if (arg?.type === ("FUNCTION_CALL" as PluginAst["type"])) {
+			// Unwrapped: evaluateAst gives a one-cell reference's value, no longer the reference.
+			const value = (this.interpreter as unknown as RawEvaluation).evaluateAstWithoutPostprocessing(arg, state)
+
+			if (value instanceof CellError) return value
+
+			return value instanceof SimpleRangeValue && value.range !== undefined ? at(value.range.start) : naError()
+		}
+
+		return this.runFunctionWithReferenceArgument(ast.args, state, this.metadata("FORMULATEXT"), naError, at)
 	}
 
 	// A range where one value is wanted: its cell in the formula's row (a column of cells) or column (a row of cells),
@@ -89,54 +152,112 @@ export class ReferenceFunctions extends SheetFunctionPlugin {
 		return this.dependencyGraph.getScalarValue({ sheet: range.sheet, row: range.start.row + row, col: range.start.col + col })
 	}
 
+	// The cell `row` and `col` into a reference, as a reference.
+	private cellReference(range: PluginRange, row: number, col: number): PluginValue {
+		const cell = cellRange({
+			sheet: range.sheet,
+			startRow: range.start.row + row,
+			startCol: range.start.col + col,
+			endRow: range.start.row + row,
+			endCol: range.start.col + col
+		})
+
+		return cell === null ? refError() : SimpleRangeValue.onlyRange(cell, this.dependencyGraph)
+	}
+
 	// INDEX(array, row_num, [column_num], [area_num]) (support.microsoft.com "INDEX function"): over one row or
 	// column a single number counts along it; 0 (or nothing) for the row or column gives the whole column or row; a
 	// number outside the array is #REF!. The engine knew neither the single number along a row nor 0. Only the one
 	// area a reference here can have is 1.
 	index(ast: PluginCall, state: PluginState): unknown {
-		return this.runFunction(
-			ast.args,
-			state,
-			this.metadata("INDEX"),
-			(array: SimpleRangeValue, rowArg: number | undefined, colArg: number | undefined, area: number | undefined) => {
-				if (area !== undefined && Math.trunc(area) !== 1) return area < 1 ? valueError() : refError()
+		return this.runFunction(ast.args, state, this.metadata("INDEX"), this.pick(false))
+	}
 
-				const range = array.range
-				const height = heightOf(array, range)
-				const width = widthOf(array, range)
-				// One cell of the array, a reference's read alone.
-				const at = (row: number, col: number): PluginScalar | undefined =>
-					range === undefined ? array.data[row]?.[col] : this.cellOf(range, row, col)
-				let row = Math.trunc(rowArg ?? 0)
-				let col = Math.trunc(colArg ?? 0)
+	// INDEX at an end of a range (A1:INDEX(A:A,3)): the reference it gives, a single cell's too; #VALUE! for a cell of
+	// an array.
+	indexReference(ast: PluginCall, state: PluginState): unknown {
+		const [first, ...rest] = ast.args
 
-				if (colArg === undefined && height === 1 && width > 1) {
-					col = row
-					row = 0
-				} else if (colArg === undefined && width === 1) col = 1
+		if (first === undefined) return valueError()
 
-				if (row < 0 || col < 0) return valueError()
-				if (row > height || col > width) return refError()
+		// The reference as it is: a one-cell one the engine would read out as its value.
+		const array = this.referenceOf(first, state)
 
-				if (row > 0 && col > 0) return at(row - 1, col - 1) ?? refError()
-				if (row === 0 && col === 0) return array
-				if (height === 1 && row === 0 && col > 0) return at(0, col - 1) ?? refError()
-				if (width === 1 && col === 0 && row > 0) return at(row - 1, 0) ?? refError()
+		if (!(array instanceof SimpleRangeValue)) return array
 
-				if (range !== undefined) {
-					const part =
-						row === 0
-							? range.rangeWithSameHeight(range.start.col + col - 1, 1)
-							: range.rangeWithSameWidth(range.start.row + row - 1, 1)
+		const pick = this.pick(true)
 
-					return SimpleRangeValue.onlyRange(part, this.dependencyGraph)
-				}
-
-				const data = array.data
-
-				return SimpleRangeValue.onlyValues(row === 0 ? data.map(line => [line[col - 1] ?? EmptyValue]) : [data[row - 1] ?? []])
-			}
+		return this.runFunction(rest, state, INDEX_REFERENCE_NUMBERS, (row?: number, col?: number, area?: number) =>
+			pick(array, row, col, area)
 		)
+	}
+
+	// A reference argument as a reference, a one-cell one's too; #VALUE! for none.
+	private referenceOf(ast: PluginAst, state: PluginState): SimpleRangeValue | CellError {
+		const node = ast as PluginAst & { reference?: { toSimpleCellAddress(base: SimpleCellAddress): SimpleCellAddress } }
+
+		if (node.type === ("CELL_REFERENCE" as PluginAst["type"]) && node.reference !== undefined) {
+			const at = node.reference.toSimpleCellAddress(state.formulaAddress)
+			const cell = cellRange({ sheet: at.sheet, startRow: at.row, startCol: at.col, endRow: at.row, endCol: at.col })
+
+			return at.row < 0 || at.col < 0 || cell === null ? refError() : SimpleRangeValue.onlyRange(cell, this.dependencyGraph)
+		}
+
+		const value = (this.interpreter as unknown as RawEvaluation).evaluateAstWithoutPostprocessing(ast, state)
+
+		if (value instanceof CellError) return value
+
+		return value instanceof SimpleRangeValue && value.range !== undefined ? value : valueError()
+	}
+
+	// INDEX's choice of the array's cells, rows or columns; `reference`: a cell as a reference.
+	private pick(
+		reference: boolean
+	): (array: SimpleRangeValue, rowArg: number | undefined, colArg: number | undefined, area: number | undefined) => PluginValue {
+		return (array, rowArg, colArg, area) => {
+			if (area !== undefined && Math.trunc(area) !== 1) return area < 1 ? valueError() : refError()
+
+			const range = array.range
+			const height = heightOf(array, range)
+			const width = widthOf(array, range)
+			// One cell of the array, a reference's read alone (or, as a reference, that cell).
+			const at = (row: number, col: number): PluginValue | undefined =>
+				range === undefined
+					? reference
+						? valueError()
+						: array.data[row]?.[col]
+					: reference
+						? this.cellReference(range, row, col)
+						: this.cellOf(range, row, col)
+			let row = Math.trunc(rowArg ?? 0)
+			let col = Math.trunc(colArg ?? 0)
+
+			if (colArg === undefined && height === 1 && width > 1) {
+				col = row
+				row = 0
+			} else if (colArg === undefined && width === 1) col = 1
+
+			if (row < 0 || col < 0) return valueError()
+			if (row > height || col > width) return refError()
+
+			if (row > 0 && col > 0) return at(row - 1, col - 1) ?? refError()
+			if (row === 0 && col === 0) return array
+			if (height === 1 && row === 0 && col > 0) return at(0, col - 1) ?? refError()
+			if (width === 1 && col === 0 && row > 0) return at(row - 1, 0) ?? refError()
+
+			if (range !== undefined) {
+				const part =
+					row === 0
+						? range.rangeWithSameHeight(range.start.col + col - 1, 1)
+						: range.rangeWithSameWidth(range.start.row + row - 1, 1)
+
+				return SimpleRangeValue.onlyRange(part, this.dependencyGraph)
+			}
+
+			const data = array.data
+
+			return SimpleRangeValue.onlyValues(row === 0 ? data.map(line => [line[col - 1] ?? EmptyValue]) : [data[row - 1] ?? []])
+		}
 	}
 
 	// ADDRESS(row_num, column_num, [abs_num], [a1], [sheet_text]) (support.microsoft.com "ADDRESS function"): abs_num 1

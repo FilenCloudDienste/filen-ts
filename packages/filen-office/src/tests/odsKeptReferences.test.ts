@@ -156,7 +156,14 @@ describe("ODS formulas the model does not carry", () => {
 			'<calcext:conditional-formats><calcext:conditional-format calcext:target-range-address="S.C1:S.C6"><calcext:condition calcext:apply-style-name="Default" calcext:value="&gt;3" calcext:base-cell-address="S.C1"/></calcext:conditional-format></calcext:conditional-formats>'
 		const { session, sheets } = await open({ body: table("S", DATA + conditional, COLUMNS) })
 		const s = sheets[0] ?? 0
-		const refused = await run(session, { type: "axis.insert", sheet: s, axis: "cols", at: 0, count: 1 })
+		// Cells shifted down in the format's column: LibreOffice would not move its range so.
+		const refused = await run(session, {
+			type: "cells.shift",
+			sheet: s,
+			range: { startRow: 0, startCol: 2, endRow: 0, endCol: 2 },
+			edit: "insert",
+			axis: "rows"
+		})
 
 		expect(refused.ok ? "ok" : refused.refusal).toEqual({ reason: "unsupported", detail: "conditionalFormatting" })
 

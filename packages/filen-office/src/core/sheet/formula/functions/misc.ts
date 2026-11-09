@@ -1,7 +1,10 @@
 import { CellError, ErrorType, FunctionArgumentType, type ImplementedFunctions } from "hyperformula"
+import { NULL_FUNCTION, OFFSET_FUNCTION, RANGE_FUNCTION } from "../../functions/engineNames"
 import {
-	CALC_ERROR,
+	GENERIC_ERRORS,
+	genericErrorText,
 	naError,
+	nullError,
 	SheetFunctionPlugin,
 	valueError,
 	type PluginAst,
@@ -12,8 +15,8 @@ import {
 
 // ERROR.TYPE and AREAS as support.microsoft.com defines them.
 
-// ERROR.TYPE's number for each error ("ERROR.TYPE function"; #SPILL! 9 and #CALC! 14 are Excel's numbers for the
-// dynamic-array errors, which the page's table predates). #NULL! and #GETTING_DATA never reach a formula here.
+// ERROR.TYPE's number for each error the engine has a type for ("ERROR.TYPE function"; #SPILL! 9 is Excel's number
+// for the dynamic-array error, which the page's table predates). The others: GENERIC_ERRORS.
 const ERROR_NUMBERS: Readonly<Partial<Record<ErrorType, number>>> = {
 	[ErrorType.DIV_BY_ZERO]: 2,
 	[ErrorType.VALUE]: 3,
@@ -25,7 +28,7 @@ const ERROR_NUMBERS: Readonly<Partial<Record<ErrorType, number>>> = {
 }
 
 // Functions that give a reference (each one area here).
-const REFERENCE_FUNCTIONS: ReadonlySet<string> = new Set(["INDEX", "OFFSET", "INDIRECT"])
+const REFERENCE_FUNCTIONS: ReadonlySet<string> = new Set(["INDEX", "OFFSET", "INDIRECT", OFFSET_FUNCTION, RANGE_FUNCTION])
 
 function unwrap(ast: PluginAst): PluginAst {
 	let node = ast
@@ -38,21 +41,30 @@ function unwrap(ast: PluginAst): PluginAst {
 export class MiscFunctions extends SheetFunctionPlugin {
 	static override implementedFunctions: ImplementedFunctions = {
 		"ERROR.TYPE": { method: "errorType", parameters: [{ argumentType: FunctionArgumentType.SCALAR }] },
-		AREAS: { method: "areas", parameters: [{ argumentType: FunctionArgumentType.ANY }] }
+		AREAS: { method: "areas", parameters: [{ argumentType: FunctionArgumentType.ANY }] },
+		[NULL_FUNCTION]: { method: "nullValue", parameters: [] }
 	}
 
 	// ERROR.TYPE(error_val): the error's number; anything but an error is #N/A.
 	errorType(ast: PluginCall, state: PluginState): unknown {
 		return this.runFunction(ast.args, state, this.metadata("ERROR.TYPE"), (value: PluginScalar) => {
 			if (!(value instanceof CellError)) return naError()
-			if (value.type === ErrorType.ERROR && value.message === CALC_ERROR) return 14
+			const generic = genericErrorText(value)
+
+			if (generic !== undefined) return GENERIC_ERRORS.get(generic) ?? naError()
 
 			return ERROR_NUMBERS[value.type] ?? naError()
 		})
 	}
 
-	// AREAS(reference): how many areas the reference has. The engine reads no union of references ((A1:B2,C3)), so
-	// every reference is one area; a value that is no reference is #VALUE!.
+	// #NULL!, which the engine has no type for (NULL_FUNCTION).
+	nullValue(): CellError {
+		return nullError()
+	}
+
+	// AREAS(reference): how many areas the reference has. A union of literal references ((A1:B2,C3)) is counted where
+	// the formula is read (refs/formulaRefs.ts), so every reference here is one area; a value that is no reference is
+	// #VALUE!.
 	areas(ast: PluginCall, state: PluginState): unknown {
 		const [arg, ...rest] = ast.args
 

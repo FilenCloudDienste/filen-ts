@@ -8,6 +8,7 @@ import { XlsxWorkbook } from "../../xlsx/model/workbook"
 import type { CellWrite, RowProperties, SheetStore } from "../../xlsx/model/store"
 import {
 	CellKind,
+	FormulaKind,
 	RowFlag,
 	rowRunAt,
 	type XlsxColRange,
@@ -610,6 +611,20 @@ function excelErrors(model: XlsxSheetModel, sheet: string, report: SheetLossyRep
 	report.note("other", sheet, changed)
 }
 
+// Matrix formulas as array formulas of their own extent: the reader's dynamic-array cm (spill.ts) names a metadata
+// record this package does not hold.
+function fixedArrays(model: XlsxSheetModel): void {
+	const formulas = model.store.formulas
+
+	for (let id = 0; id < formulas.length; id++) {
+		if (formulas.kind(id) !== FormulaKind.ARRAY) continue
+
+		const formula = formulas.formula(id)
+
+		if (formula.cellMetadata >= 0) formulas.set(id, { ...formula, cellMetadata: -1 })
+	}
+}
+
 // Every row written: the writer writes the rows an edit marked.
 function markRows(model: XlsxSheetModel): void {
 	for (const block of model.store.blocks) {
@@ -839,6 +854,7 @@ export async function odsToXlsx(source: Uint8Array, options: SheetConvertOptions
 		if (model === null) return { ok: false, reason: "corrupt", message: `${entry.name} was not read` }
 
 		excelErrors(model, entry.name, report)
+		fixedArrays(model)
 		if (!placeStyleRuns(model, styles, budget, rowBudget, entry.name, report))
 			return { ok: false, reason: "tooLarge", message: `${entry.name} has more formatted rows than a conversion lays out` }
 		if (!placeRowRuns(model, rowBudget))

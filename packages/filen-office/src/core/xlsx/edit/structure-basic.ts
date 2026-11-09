@@ -1,22 +1,23 @@
 import { Relationships } from "../../opc/relationships"
 import { sliceClock, type SliceClock, type Slicing } from "../../slicing"
-import { SHEET_MAX_COLS, SHEET_MAX_ROWS, type SheetAxis, type SheetId, type SheetRefusal } from "../../sheet/protocol"
+import { SHEET_MAX_COLS, SHEET_MAX_EDIT_CELLS, SHEET_MAX_ROWS, type SheetAxis, type SheetId, type SheetRefusal } from "../../sheet/protocol"
+import { defaultColWidth } from "../../sheet/sizes/sizes"
 import type { SheetChangeSink, SheetHandled } from "../../sheet/registry"
 import type { AxisEdit } from "../../sheet/model/edits"
 import { sameSheet } from "../../sheet/refs/formulaRefs"
 import { ChangeLog } from "../model/changes"
 import { FormulaTable } from "../model/formulas"
-import { SheetStore } from "../model/store"
+import { BLOCK_ROWS, SheetStore, type CellWrite, type RowProperties } from "../model/store"
 import { SheetStrings } from "../model/strings"
-import { CellKind, type XlsxSheetEntry, type XlsxSheetModel } from "../model/types"
+import { CellKind, RowFlag, type XlsxSheetEntry, type XlsxSheetModel } from "../model/types"
 import { XlsxSheet } from "../read/index"
 import { preimage, type AxisShift } from "../refs/axis"
 import { planRefEdit, type RefPlan } from "../refs/plan"
 import { relationshipType } from "../write/index"
 import type { XlsxDocument } from "./document"
-import { reportLogged } from "./format"
+import { StyleLimitError, appendXf, reportLogged } from "./format"
 import type { RecalculatedCell } from "../../sheet/formula/index"
-import { CellLog, type CellState } from "./history"
+import { CellLog, rowState, type CellState } from "./history"
 
 // Rows and columns inserted or deleted, and sheets added and renamed. Every construct that refers to cells moves
 // through the references catalogue (refs/plan.ts), or the edit is refused with the construct that cannot move.
@@ -188,6 +189,9 @@ export async function moveAxis(
 
 	await turn(clock)
 	forward()
+
+	const inherited = type === "insert" ? await inheritFormat(document, sheet, model, axis, at, count, post, clock) : null
+
 	await document.loadTables()
 	await turnBeforeEngine(clock)
 	await document.applySliced(await engineForward(clock), post, changes, clock)
@@ -195,11 +199,12 @@ export async function moveAxis(
 	report(changes)
 
 	return {
-		bytes: planBytes(plan) + post.bytes + removed.length * 16,
+		bytes: planBytes(plan) + post.bytes + removed.length * 16 + (inherited?.bytes ?? 0),
 		undo: async sink => {
 			const clock = clockOf()
 
 			await document.restoreLogSliced(post, "before", clock)
+			inherited?.revert()
 			plan.revert()
 			document.shiftShown(sheet, inverse)
 			document.structureChanged()
@@ -245,6 +250,7 @@ export async function moveAxis(
 
 			await turn(clock)
 			forward()
+			await inherited?.apply(clock)
 			await document.loadTables()
 			await turnBeforeEngine(clock)
 			await engineForward(clock)
@@ -252,6 +258,162 @@ export async function moveAxis(
 			report(sink)
 		}
 	}
+}
+
+// What an insert takes from its neighbour besides cells: the axis format, put again on redo, taken back on undo
+// before the plan's revert.
+interface InheritedFormat {
+	readonly bytes: number
+	apply(clock: SliceClock | undefined): Promise<void>
+	revert(): void
+}
+
+// Cells written to the store at once.
+const INHERIT_BATCH = 1024
+
+// Excel's Insert Options default: inserted rows (columns) take the format of the row above (column to the left), of
+// the one below (to the right) at the sheet's first. The axis format is copied, and a cell of the neighbour whose
+// format differs from what an empty cell of the new line shows gets an empty cell of that format in each new line;
+// values, heights, widths and hidden state stay. Past the edit's cell limit only the axis format is copied. Called
+// after the plan's shift; the cells go into `log`.
+async function inheritFormat(
+	document: XlsxDocument,
+	sheet: SheetId,
+	model: XlsxSheetModel,
+	axis: SheetAxis,
+	at: number,
+	count: number,
+	log: CellLog,
+	clock: SliceClock | undefined
+): Promise<InheritedFormat | null> {
+	const store = model.store as SheetStore
+	const rows = axis === "rows"
+	const source = at > 0 ? at - 1 : at + count
+	const end = at + count
+
+	if (source >= (rows ? SHEET_MAX_ROWS : SHEET_MAX_COLS)) return null
+
+	const pause = async (): Promise<void> => {
+		if (clock?.due === true) await clock.pause()
+	}
+	let budget = SHEET_MAX_EDIT_CELLS
+	let bytes = 0
+	let apply: (clock: SliceClock | undefined) => Promise<void> = () => Promise.resolve()
+	let revert = (): void => undefined
+
+	if (rows) {
+		const state = rowState(store, source)
+
+		if ((state.flags & RowFlag.CUSTOM_FORMAT) !== 0 && state.style >= 0 && count <= budget) {
+			const style = state.style
+
+			budget -= count
+			bytes += count * 16
+			apply = async clock => {
+				for (let from = at; from < end; from += BLOCK_ROWS) {
+					const batch: RowProperties[] = []
+
+					for (let row = from; row < Math.min(end, from + BLOCK_ROWS); row++)
+						batch.push({ row, height: Number.NaN, style, flags: RowFlag.CUSTOM_FORMAT })
+
+					store.setRows(batch)
+
+					if (clock?.due === true) await clock.pause()
+				}
+
+				document.workbook.changes.sheetRows(sheet)
+			}
+		}
+	} else {
+		const shifted = model.cols
+		const range = shifted.find(entry => source >= entry.first && source <= entry.last)
+
+		// An insert inside a column range widens it: the new columns have its format already.
+		if (range !== undefined && range.style >= 0 && !shifted.some(entry => entry.first < end && entry.last >= at)) {
+			const next = [
+				...shifted,
+				{ first: at, last: end - 1, width: defaultColWidth(model.format, document.digitPx), style: range.style, flags: 0 }
+			].sort((a, b) => a.first - b.first)
+
+			bytes += 64
+			apply = () => {
+				model.cols = next
+				document.workbook.changes.sheetSection(sheet, "cols")
+
+				return Promise.resolve()
+			}
+			revert = () => {
+				model.cols = shifted
+			}
+		}
+	}
+
+	await apply(clock)
+
+	// The neighbour's cells whose format the new lines would not show: (position across, format) pairs.
+	const copied: number[] = []
+	let fits = true
+
+	store.forEachCell(
+		rows
+			? { startRow: source, startCol: 0, endRow: source, endCol: SHEET_MAX_COLS - 1 }
+			: { startRow: 0, startCol: source, endRow: SHEET_MAX_ROWS - 1, endCol: source },
+		(row, col, slot) => {
+			if (!fits) return
+
+			const style = store.style(slot)
+
+			if (style === (rows ? document.startingStyle(model, at, col) : document.startingStyle(model, row, at))) return
+
+			copied.push(rows ? col : row, style)
+			fits = (copied.length / 2) * count <= budget
+		}
+	)
+
+	if (!fits || copied.length === 0) return { bytes, apply, revert }
+
+	// A default-format cell without content is no cell: a record of its own stands for it.
+	let plain = -1
+
+	const base = document.workbook.styles.cellXfs[0]
+
+	if (base !== undefined && copied.some((value, k) => k % 2 === 1 && value === 0)) {
+		try {
+			plain = appendXf(document, { ...base }, true)
+		} catch (error) {
+			if (!(error instanceof StyleLimitError)) throw error
+		}
+	}
+
+	const pending: CellWrite[] = []
+	const flush = async (): Promise<void> => {
+		store.setCells(pending)
+		pending.length = 0
+		document.workbook.changes.sheetRows(sheet)
+		await pause()
+	}
+
+	for (let line = at; line < end; line++) {
+		for (let k = 0; k + 1 < copied.length; k += 2) {
+			const style = copied[k + 1] === 0 ? plain : (copied[k + 1] ?? -1)
+			const row = rows ? line : (copied[k] ?? 0)
+			const col = rows ? (copied[k] ?? 0) : line
+
+			// A cell the plan wrote there (a new table column's header) keeps its own.
+			if (style < 0 || store.locate(row, col) >= 0) continue
+
+			const state = document.state(sheet, row, col)
+
+			log.touch(sheet, row, col, () => state, true)
+			pending.push({ row, col, kind: CellKind.EMPTY, value: 0, style, formula: -1, origin: -1 })
+
+			if (pending.length >= INHERIT_BATCH) await flush()
+		}
+	}
+
+	if (pending.length > 0) await flush()
+
+	return { bytes, apply, revert }
 }
 
 // Seals a log's entries in parts, yielding between them once the clock's slice is up.

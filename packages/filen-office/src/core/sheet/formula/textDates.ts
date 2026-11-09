@@ -1,11 +1,12 @@
 import type { ConfigParams } from "hyperformula"
-import { EN_US_LOCALE, localizedDate } from "../input/locale"
+import { EN_US_LOCALE, formulaTextDate } from "../input/locale"
 import type { SheetLocale } from "../protocol"
 
-// Text read as a date or time inside formulas (DATEVALUE("8/22/2011"), MONTH("5/1/2020"), "1/2/2020"+1), as a typed
-// entry reads it (input/locale.ts): the locale's day, month and year order, ISO dates in every locale, and a time
-// of hours and minutes (seconds optional, AM/PM optional) alone or after the date. Excel reads text dates by the
-// system's date settings (support.microsoft.com "DATEVALUE function"); the engine's own default is day first.
+// Text read as a date or time inside formulas (DATEVALUE("8/22/2011"), MONTH("5/1/2020"), "22-MAY-2011"+1): the
+// locale's day, month and year order, ISO dates in every locale, English month names (input/locale.ts
+// formulaTextDate), and a time of hours and minutes (seconds optional, AM/PM optional) alone or after the date.
+// Excel reads text dates by the system's date settings (support.microsoft.com "DATEVALUE function"); the engine's
+// own default is day first.
 
 type TextDateTime = ReturnType<ConfigParams["parseDateTime"]>
 
@@ -36,25 +37,32 @@ export function parserLocale(parser: ConfigParams["parseDateTime"]): SheetLocale
 	return parserLocales.get(parser) ?? EN_US_LOCALE
 }
 
-export function textDateParser(locale: SheetLocale = EN_US_LOCALE): ConfigParams["parseDateTime"] {
+// `now` gives the year of a date without one ("5-JUL"), the clock TODAY() reads.
+export function textDateParser(locale: SheetLocale = EN_US_LOCALE, now: () => number = Date.now): ConfigParams["parseDateTime"] {
+	const currentYear = (): number => new Date(now()).getFullYear()
+	// 1900-02-29 is offered in every date system: the engine's own validation keeps it only where leapYear1900 is set.
+	const dateOf = (text: string): TextDateTime => formulaTextDate(text, locale, currentYear, true) ?? undefined
+
 	const parser = (text: string): TextDateTime => {
 		const trimmed = text.trim().replace(/\s+/g, " ")
-		const date = localizedDate(trimmed, locale)
+		const date = dateOf(trimmed)
 
-		if (date !== null) return date
+		if (date !== undefined) return date
 
 		const time = timeOf(trimmed)
 
 		if (time !== undefined) return time
 
-		const space = trimmed.indexOf(" ")
+		// The time is the run from the last space before its first ":" ("5 Jan 2024 6:35 AM").
+		const colon = trimmed.indexOf(":")
+		const space = colon < 0 ? -1 : trimmed.lastIndexOf(" ", colon)
 
 		if (space < 0) return undefined
 
-		const day = localizedDate(trimmed.slice(0, space), locale)
+		const day = dateOf(trimmed.slice(0, space))
 		const clock = timeOf(trimmed.slice(space + 1))
 
-		return day === null || clock === undefined ? undefined : { ...day, ...clock }
+		return day === undefined || clock === undefined ? undefined : { ...day, ...clock }
 	}
 
 	parserLocales.set(parser, locale)

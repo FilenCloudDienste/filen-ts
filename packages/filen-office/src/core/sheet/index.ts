@@ -193,6 +193,14 @@ export {
 } from "./functions/formulaEditing"
 export { autoSum, type AutoSumCells, type SheetAutoSum } from "./functions/autoSum"
 export {
+	autoCompleteIndex,
+	autoCompletion,
+	columnEntries,
+	type AutoCompleteCells,
+	type AutoCompleteIndex
+} from "./autoComplete/autoComplete"
+export type { SheetSelectionStats } from "./stats/stats"
+export {
 	delocalizeFormula,
 	EN_US_LOCALE,
 	localizedDate,

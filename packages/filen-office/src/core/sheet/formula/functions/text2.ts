@@ -1,11 +1,17 @@
 import { CellError, EmptyValue, ErrorType, FunctionArgumentType, SimpleRangeValue, type ImplementedFunctions } from "hyperformula"
-import { CALC_ERROR, rawNumber, SheetFunctionPlugin, valueError, type PluginCall, type PluginScalar, type PluginState } from "./plugin"
-import { numberText } from "./text"
+import {
+	genericErrorText,
+	MAX_TEXT,
+	numberText,
+	rawNumber,
+	SheetFunctionPlugin,
+	valueError,
+	type PluginCall,
+	type PluginScalar,
+	type PluginState
+} from "./plugin"
 
 // Text functions as support.microsoft.com defines them: ARRAYTOTEXT, VALUETOTEXT, BAHTTEXT and ENCODEURL.
-
-// The longest text a cell holds ("Excel specifications and limits").
-const MAX_TEXT = 32767
 
 const ERROR_TEXT: Readonly<Partial<Record<ErrorType, string>>> = {
 	[ErrorType.DIV_BY_ZERO]: "#DIV/0!",
@@ -18,9 +24,7 @@ const ERROR_TEXT: Readonly<Partial<Record<ErrorType, string>>> = {
 }
 
 function errorText(error: CellError): string {
-	if (error.type === ErrorType.ERROR && error.message === CALC_ERROR) return CALC_ERROR
-
-	return ERROR_TEXT[error.type] ?? "#VALUE!"
+	return genericErrorText(error) ?? ERROR_TEXT[error.type] ?? "#VALUE!"
 }
 
 // A value as text: concise as a cell in the General format shows it (a number at 15 significant digits, as ""&A1

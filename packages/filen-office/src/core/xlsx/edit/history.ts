@@ -27,6 +27,9 @@ export interface ShownResult {
 	// An edit's result the engine could not calculate (not one the file lacked at open), or a stored result an edit
 	// made stale: Excel recalculates on load.
 	readonly edited?: true
+	// Calculated once the engine was built over the result the cell stores (a volatile formula, what reads one, every
+	// formula under fullCalcOnLoad): shown in its place, the file's own kept until an edit stores the engine's.
+	readonly recalculated?: true
 }
 
 export const ABSENT: CellState = { present: false, kind: CellKind.EMPTY, value: 0, style: 0, formula: -1, shown: undefined }

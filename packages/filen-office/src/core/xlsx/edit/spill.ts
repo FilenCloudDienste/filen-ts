@@ -27,6 +27,12 @@ export interface DynamicArrays {
 
 const NONE: DynamicArrays = { dynamic: new Set(), cm: null, create: "xl/metadata.xml" }
 
+// OpenDocument has no dynamic-array metadata: a dynamic array is written as a matrix formula over its spill (ODF 1.3
+// Part 3 §19.680-§19.681), read back as one whose formula may give an array (typedSpills). The session marks those
+// with this cm, which no part holds.
+export const ODS_DYNAMIC_CM = 1
+export const ODS_DYNAMIC_ARRAYS: DynamicArrays = { dynamic: new Set([ODS_DYNAMIC_CM]), cm: ODS_DYNAMIC_CM, create: null }
+
 function attribute(tag: string, name: string): string | undefined {
 	return new RegExp(`\\s${name}="([^"]*)"`).exec(tag)?.[1]
 }

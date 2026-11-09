@@ -403,11 +403,15 @@ describe("grid shortcuts", () => {
 	it("shows formulas in their cells with Ctrl+`, and results again with a second press", async () => {
 		const { model, scroller, handle } = await mount({ sheets: [{ name: "One", body: sheetBody([[2, { f: "A1*3", v: 6 }]]) }] })
 		const cells = canvases.get(scroller.parentElement?.querySelector("canvas") as HTMLCanvasElement) as RecordingCanvas
+		// What was drawn since the last look (a frame with nothing new leaves the cells as drawn).
 		const drawn = (): string[] => {
-			cells.reset()
 			act(() => handle.renderer.paint())
 
-			return cells.texts()
+			const texts = cells.texts()
+
+			cells.reset()
+
+			return texts
 		}
 
 		expect(drawn()).toContain("6")
@@ -542,6 +546,67 @@ describe("selection on a protected sheet", () => {
 
 		key(scroller, { key: "ArrowRight", code: "ArrowRight" })
 		expect(model.getSnapshot().selection.active).toEqual({ row: 0, col: 1 })
+	})
+})
+
+// Excel: after Tab through a row of entries, Enter goes to the start of the next row (support.microsoft.com, "Enter
+// data manually in worksheet cells").
+describe("Enter after a run of Tabs", () => {
+	const editor = (): HTMLTextAreaElement => document.querySelector<HTMLTextAreaElement>("textarea.fo-sheet-editor") as HTMLTextAreaElement
+
+	it("goes to the next row in the column the entries began in", async () => {
+		const { model, scroller } = await mount()
+
+		key(scroller, { key: "a", code: "KeyA" })
+		key(editor(), { key: "Tab", code: "Tab" })
+		key(scroller, { key: "b", code: "KeyB" })
+		key(editor(), { key: "Tab", code: "Tab" })
+		key(scroller, { key: "c", code: "KeyC" })
+		key(editor(), { key: "Enter", code: "Enter" })
+		expect(model.getSnapshot().selection.active).toEqual({ row: 1, col: 0 })
+
+		// The run ended: Enter goes on down the column.
+		key(scroller, { key: "Enter", code: "Enter" })
+		expect(model.getSnapshot().selection.active).toEqual({ row: 2, col: 0 })
+		await settle()
+	})
+
+	it("goes back to where Tab moves without entries began", async () => {
+		const { model, scroller, handle } = await mount()
+
+		act(() => handle.goTo({ row: 0, col: 3 }))
+		key(scroller, { key: "Tab", code: "Tab" })
+		key(scroller, { key: "Tab", code: "Tab" })
+		key(scroller, { key: "Tab", code: "Tab", shiftKey: true })
+		key(scroller, { key: "Enter", code: "Enter" })
+		expect(model.getSnapshot().selection.active).toEqual({ row: 1, col: 3 })
+	})
+
+	it("goes down the current column once another move ends the run", async () => {
+		const { model, scroller } = await mount()
+
+		key(scroller, { key: "Tab", code: "Tab" })
+		key(scroller, { key: "ArrowRight", code: "ArrowRight" })
+		key(scroller, { key: "Enter", code: "Enter" })
+		expect(model.getSnapshot().selection.active).toEqual({ row: 1, col: 2 })
+
+		key(scroller, { key: "Tab", code: "Tab" })
+		key(scroller, { key: "ArrowUp", code: "ArrowUp" })
+		key(scroller, { key: "ArrowDown", code: "ArrowDown" })
+		key(scroller, { key: "Enter", code: "Enter" })
+		expect(model.getSnapshot().selection.active).toEqual({ row: 2, col: 3 })
+	})
+
+	it("lands on a merge's first cell when the column it began in is merged on the next row", async () => {
+		const { model, scroller, handle } = await mount({
+			sheets: [{ name: "One", body: `${sheetBody([[1, 2, 3]])}<mergeCells count="1"><mergeCell ref="A2:B2"/></mergeCells>` }]
+		})
+
+		act(() => handle.goTo({ row: 0, col: 1 }))
+		key(scroller, { key: "Tab", code: "Tab" })
+		key(scroller, { key: "Tab", code: "Tab" })
+		key(scroller, { key: "Enter", code: "Enter" })
+		expect(model.getSnapshot().selection.active).toEqual({ row: 1, col: 0 })
 	})
 })
 

@@ -44,6 +44,7 @@ export type SheetShortcut =
 	| "findNext"
 	| "findPrevious"
 	| "replace"
+	| "goTo"
 	| "save"
 	| "print"
 	| "formatCells"
@@ -71,6 +72,7 @@ export const APP_SHORTCUTS: ReadonlySet<SheetShortcut> = new Set<SheetShortcut>(
 	"findNext",
 	"findPrevious",
 	"replace",
+	"goTo",
 	"save",
 	"print",
 	"formatCells",
@@ -342,6 +344,13 @@ export const SHEET_SHORTCUTS: readonly ShortcutEntry[] = [
 			{ key: "h", control: true },
 			{ key: "h", primary: true, shift: true }
 		]
+	},
+	// "Ctrl+G: Displays the Go To dialog box. F5 also displays this dialog box"; Control+G on a Mac, whose Command+G
+	// stays the browser's Find Next. Plain F5 only: Shift+F5 is Find, Ctrl+F5 the browser's.
+	{
+		action: "goTo",
+		windows: [{ key: "g", primary: true }, { key: "F5" }],
+		mac: [{ key: "g", control: true }, { key: "F5" }]
 	},
 	{ action: "save", windows: [{ key: "s", primary: true }], mac: [{ key: "s", primary: true }] },
 	{ action: "print", windows: [{ key: "p", primary: true }], mac: [{ key: "p", primary: true }] },

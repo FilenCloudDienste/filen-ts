@@ -7,7 +7,7 @@ import { applyFormat } from "../xlsx/edit/format"
 import { notesFeature } from "../xlsx/comments/feature"
 import { linksFeature } from "../xlsx/hyperlinks/feature"
 import { threadsFeature } from "../xlsx/threaded/feature"
-import { filterFeature } from "../xlsx/edit/filter"
+import { filterFeature, visibleSelection } from "../xlsx/edit/filter"
 import { formattingFeature } from "../xlsx/edit/formatFeature"
 import { fitSample, resizeAxis } from "../xlsx/edit/resize"
 import { sortFeature } from "../xlsx/edit/sort"
@@ -20,9 +20,12 @@ import { dataValidationFeature } from "./dv/xlsx"
 import { xlsxFillFeature } from "./fill/xlsx"
 import { xlsxFindFeature } from "./find/xlsx"
 import { xlsxAutoSumFeature } from "./functions/autoSumXlsx"
+import { xlsxAutoCompleteFeature } from "./autoComplete/xlsx"
 import { xlsxNavigateFeature } from "./navigate/xlsx"
+import { xlsxSelectionStatsFeature } from "./stats/xlsx"
 import { xlsxPrintFeature } from "./print/xlsx"
 import { digitWidthFeature } from "../xlsx/edit/digitWidth"
+import { namesFeature } from "../xlsx/edit/names"
 import { chartsFeature } from "../xlsx/charts/feature"
 import { drawingsFeature } from "../xlsx/drawings/feature"
 import { saveAsFormatFeature } from "../ods/convert/feature"
@@ -37,12 +40,20 @@ export const cellsFeature = defineSheetFeature<XlsxDocument>({
 	commands: {
 		"cells.set": {
 			info: { write: true },
-			run: (context, command) => setCells(context.doc, command.sheet, command.cells, context.changes, undefined, context.slicing)
+			run: (context, command) =>
+				setCells(context.doc, command.sheet, { ...command.cells, typed: true }, context.changes, undefined, context.slicing)
 		},
 		"cells.clear": {
 			info: { write: true },
-			run: (context, command) =>
-				clearCells(context.doc, command.sheet, command.ranges, command.what, context.changes, context.slicing)
+			run: async (context, command) =>
+				clearCells(
+					context.doc,
+					command.sheet,
+					await visibleSelection(context.doc, command.sheet, command.ranges),
+					command.what,
+					context.changes,
+					context.slicing
+				)
 		}
 	}
 })
@@ -52,8 +63,15 @@ export const formatFeature = defineSheetFeature<XlsxDocument>({
 	commands: {
 		"format.apply": {
 			info: { write: true, protection: "formatCells" },
-			run: (context, command) =>
-				applyFormat(context.doc, command.sheet, command.ranges, command.patch, context.changes, context.slicing)
+			run: async (context, command) =>
+				applyFormat(
+					context.doc,
+					command.sheet,
+					await visibleSelection(context.doc, command.sheet, command.ranges),
+					command.patch,
+					context.changes,
+					context.slicing
+				)
 		}
 	}
 })
@@ -107,7 +125,17 @@ export const clipboardFeature = defineSheetFeature<XlsxDocument>({
 		"clipboard.paste": {
 			info: { write: true },
 			run: (context, command) =>
-				pasteCells(context.doc, command.sheet, command.at, command.text, command.clip, context.changes, context.slicing)
+				pasteCells(
+					context.doc,
+					command.sheet,
+					command.at,
+					command.text,
+					command.clip,
+					context.changes,
+					context.slicing,
+					command.values === true,
+					command.target
+				)
 		}
 	},
 	queries: {
@@ -125,9 +153,12 @@ export const XLSX_FEATURES: readonly SheetFeature<XlsxDocument>[] = [
 	...STRUCTURE_FEATURES,
 	xlsxFindFeature,
 	xlsxNavigateFeature,
+	xlsxSelectionStatsFeature,
 	xlsxAutoSumFeature,
+	xlsxAutoCompleteFeature,
 	xlsxPrintFeature,
 	digitWidthFeature,
+	namesFeature,
 	drawingsFeature,
 	chartsFeature,
 	xlsxFillFeature,

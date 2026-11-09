@@ -202,6 +202,34 @@ describe("xlsx to ods", () => {
 		expect(result.lossy).toEqual([])
 	})
 
+	it("carries an A Date Occurring rule over as LibreOffice's date-is and back with its period and look", async () => {
+		const source = buildWorkbook({
+			sheets: [
+				{
+					name: "S",
+					body:
+						'<sheetData><row r="1"><c r="A1"><v>45000</v></c></row></sheetData>' +
+						'<conditionalFormatting sqref="A1:A3"><cfRule type="timePeriod" dxfId="0" priority="1" timePeriod="last7Days"><formula>AND(TODAY()-FLOOR(A1,1)&lt;=6,FLOOR(A1,1)&lt;=TODAY())</formula></cfRule><cfRule type="timePeriod" dxfId="0" priority="2" timePeriod="someday"/></conditionalFormatting>'
+				}
+			]
+		})
+		const result = converted(await convertSheet(source, "xlsx", "ods"))
+		const content = strFromU8(unzipSync(result.bytes)["content.xml"] ?? new Uint8Array(0))
+
+		expect(content).toMatch(/<calcext:date-is calcext:date="last-7-days" calcext:style="ConditionalStyle_1"\/>/)
+
+		const back = await readOds(result.bytes)
+		const formats = model(back.workbook, 0)
+			.sections.filter(section => section.name === "conditionalFormatting")
+			.map(section => new TextDecoder().decode(section.bytes ?? new Uint8Array(0)))
+			.join("")
+		const dxf = /type="timePeriod"[^>]*dxfId="(\d+)"[^>]*timePeriod="last7Days"/.exec(formats)
+
+		expect(dxf).not.toBeNull()
+		expect(back.workbook.styles.dxfs[Number(dxf?.[1])]?.font?.bold).toBe(true)
+		expect(result.lossy).toContainEqual({ kind: "conditionalFormat", count: 1, sheets: ["S"] })
+	})
+
 	it("carries the page over as a master page: paper, margins, scale, headers with their fields, breaks and print titles", async () => {
 		const source = buildWorkbook({
 			sheets: [
@@ -744,6 +772,35 @@ describe("xlsx to ods", () => {
 
 		expect(content).toMatch(/<number:text>- {2,}<\/number:text>/)
 		expect(result.lossy).toEqual([])
+	})
+
+	it("carries Excel's Special formats and [ColorN] colours of the workbook's palette over", async () => {
+		const formats = ["00000-0000", "000-00-0000", "###-####", "[&lt;=9999999]###-####;(###) ###-####", "[Magenta]0;[Color10]-0"]
+		// [Color10] (index 17) recoloured blue: it reads back as [Blue].
+		const colors = Array.from({ length: 64 }, (_, k) => `<rgbColor rgb="${k === 17 ? "FF0000FF" : "FF000000"}"/>`).join("")
+		const styles =
+			`<numFmts count="${formats.length}">${formats.map((format, k) => `<numFmt numFmtId="${164 + k}" formatCode="${format}"/>`).join("")}</numFmts>` +
+			'<fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills>' +
+			'<borders count="1"><border/></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>' +
+			`<cellXfs count="${formats.length + 1}"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>${formats.map((_, k) => `<xf numFmtId="${164 + k}" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>`).join("")}</cellXfs>` +
+			`<colors><indexedColors>${colors}</indexedColors></colors>`
+		const values = [123456789, 123456789, 5551234, 2065551234, -3]
+		const source = buildWorkbook({
+			styles,
+			sheets: [
+				{
+					name: "S",
+					body: `<sheetData><row r="1">${values.map((value, k) => `<c r="${cellRef(0, k)}" s="${k + 1}"><v>${value}</v></c>`).join("")}</row></sheetData>`
+				}
+			]
+		})
+		const result = converted(await convertSheet(source, "xlsx", "ods"))
+		const content = strFromU8(unzipSync(result.bytes)["content.xml"] ?? new Uint8Array(0))
+
+		expect(result.lossy).toEqual([])
+		expect(content).toContain('<number:embedded-text number:position="4">-</number:embedded-text>')
+		expect(content).toContain('<style:text-properties fo:color="#0000ff"/>')
+		expect(shownRows(await readOds(result.bytes), 0)).toEqual([["12345-6789", "123-45-6789", "555-1234", "(206) 555-1234", "-3"]])
 	})
 
 	it("writes a link on an empty cell nowhere and reports it, so no empty field shows", async () => {

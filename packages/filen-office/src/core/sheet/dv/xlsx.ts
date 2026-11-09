@@ -2,7 +2,7 @@ import { CellFlag, type SheetCell, type SheetId, type SheetLocale } from "../pro
 import { localizedInput, localizeFormula } from "../input/locale"
 import { defineSheetFeature, type SheetReadContext } from "../registry"
 import { typedSerial, type XlsxDocument } from "../../xlsx/edit/document"
-import { readEntry } from "../../xlsx/edit/cells"
+import { entryYear, readEntry } from "../../xlsx/edit/cells"
 import { setValidation } from "../../xlsx/edit/dv"
 import { DocumentFormulaHost } from "../cf/host"
 import { SectionCache } from "../cf/sections"
@@ -195,7 +195,13 @@ function entryValue(
 	const model = document.model(cell.sheet)
 	const view = model === null ? null : document.cellView(cell.sheet, cell.row, cell.col)
 	// Read as the session will store it: in the session's locale ("1,5" is 1.5 where "," is the decimal).
-	const entry = readEntry(input, view !== null && (view.flags & CellFlag.TEXT_FORMAT) !== 0, document.date1904, document.settings.locale)
+	const entry = readEntry(
+		input,
+		view !== null && (view.flags & CellFlag.TEXT_FORMAT) !== 0,
+		document.date1904,
+		document.settings.locale,
+		entryYear(document)
+	)
 
 	switch (entry.type) {
 		case "empty":

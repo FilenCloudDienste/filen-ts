@@ -59,13 +59,15 @@ function cycle(selection: GridSelection, across: boolean, back: boolean, merges:
 	return { ...selection, active: { row, col } }
 }
 
+// `tabOrigin`: where the run of Tabs that reached the active cell began (SheetGridModel.tabOrigin), for Enter.
 export function keyMove(
 	pressed: GridKey,
 	selection: GridSelection,
 	axes: GridAxes,
 	layout: SheetLayout,
 	merges: readonly SheetRange[],
-	pageRows: number
+	pageRows: number,
+	tabOrigin: GridPoint | null = null
 ): GridKeyMove | null {
 	const key = visualKey(pressed.key, layout)
 	const event = key === pressed.key ? pressed : { ...pressed, key }
@@ -99,6 +101,21 @@ export function keyMove(
 	)
 
 	if (moved === null) return null
+
+	// Enter at the end of a run of Tabs: the next row, in the column the run began in (a merge there: its first cell).
+	if (
+		tabOrigin !== null &&
+		event.key === "Enter" &&
+		!event.shiftKey &&
+		tabOrigin.row === selection.active.row &&
+		moved.focus.row !== selection.active.row &&
+		!axes.cols.hidden(tabOrigin.col)
+	) {
+		const merge = mergeAt(merges, moved.focus.row, tabOrigin.col)
+		const point = merge === undefined ? { row: moved.focus.row, col: tabOrigin.col } : { row: merge.startRow, col: merge.startCol }
+
+		return { kind: "select", selection: cellSelection(point, merges), reveal: point }
+	}
 
 	if (moved.anchor.row !== moved.focus.row || moved.anchor.col !== moved.focus.col || extend) {
 		// Mod+A (the used area) moves the anchor too.

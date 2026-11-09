@@ -12,6 +12,8 @@ const VARIABLES: Record<keyof SheetGridTheme, string> = {
 	headerLine: "--fo-sheet-header-line",
 	headerActiveBackground: "--fo-sheet-header-active-bg",
 	headerActiveText: "--fo-sheet-header-active-text",
+	headerSelectedBackground: "--fo-sheet-header-selected-bg",
+	headerSelectedText: "--fo-sheet-header-selected-text",
 	selectionFill: "--fo-sheet-selection-fill",
 	selectionLine: "--fo-sheet-selection-line",
 	selectionHalo: "--fo-sheet-selection-halo",

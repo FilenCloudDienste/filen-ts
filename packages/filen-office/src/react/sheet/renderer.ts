@@ -1,4 +1,12 @@
-import { SHEET_MAX_COLS, SHEET_MAX_ROWS, TILE_COLS, TILE_ROWS, type SheetId, type SheetRange } from "../../core/sheet/protocol"
+import {
+	SHEET_MAX_COLS,
+	SHEET_MAX_ROWS,
+	TILE_COLS,
+	TILE_ROWS,
+	type SheetId,
+	type SheetLayout,
+	type SheetRange
+} from "../../core/sheet/protocol"
 import {
 	decoratePane,
 	decoratorInset,
@@ -9,11 +17,11 @@ import {
 	type GridExtensionParts,
 	type GridRect
 } from "./layers"
-import { EXTRA_COLS, EXTRA_ROWS, type SheetGridModel } from "./model"
+import { EXTRA_COLS, EXTRA_ROWS, type GridAxes, type SheetGridModel } from "./model"
 import { BorderPainter } from "./paint/borders"
 import type { GridCanvas } from "./paint/canvas"
 import { paintCells, TEXT_PADDING } from "./paint/cells"
-import { paintChrome } from "./paint/chrome"
+import { CLIP_DASH_PERIOD, paintChrome, type ChromeScene } from "./paint/chrome"
 import { canvasSwatches, PatternCache } from "./paint/patterns"
 import { TextMeasurer, textFont } from "./paint/text"
 import { domExtent, toDom, toVirtual } from "./scroll"
@@ -70,6 +78,8 @@ const GROW_SLACK = 8
 const TOUCH_FONT_PX = 16
 // A scroll this long without another event has settled (a momentum's frames come 16 ms apart).
 const SCROLL_IDLE_MS = 150
+// A step of the copy's moving border.
+const CLIP_STEP_MS = 100
 
 // The browser's scroll range for a scrolled part.
 function domRange(view: GridView["rows"]): number {
@@ -92,6 +102,22 @@ function panned(offset: number, dom: number, delta: number, view: GridView["rows
 	if (dom >= domRange(view) - 1 && view.axis.count >= cap) return range
 
 	return Math.max(0, Math.min(range, offset + delta))
+}
+
+// The inputs of a cells paint, compared by identity. The view is read through its own inputs (axes, layout, its
+// scroll and size).
+interface DrawnCells {
+	readonly version: number
+	readonly sheet: SheetId
+	readonly layout: SheetLayout
+	readonly axes: GridAxes
+	readonly top: number
+	readonly left: number
+	readonly width: number
+	readonly height: number
+	readonly pixelRatio: number
+	readonly theme: SheetGridTheme
+	readonly parts: GridExtensionParts
 }
 
 export class GridRenderer {
@@ -119,6 +145,11 @@ export class GridRenderer {
 	private pressed = false
 	// Whether a finger may be what edits (any coarse pointer): the editor's font stays at 16 px or more there.
 	private coarse: MediaQueryList | null = null
+	// The user asks for less motion: the copy's border holds still.
+	private stillMotion: MediaQueryList | null = null
+	// The last frame's chrome scene, which the copy's moving border steps redraw; its timer.
+	private chromeScene: ChromeScene | null = null
+	private clipTimer: ReturnType<typeof setInterval> | undefined = undefined
 	private idle: ReturnType<typeof setTimeout> | undefined = undefined
 	private sheet: SheetId | null = null
 	// Each sheet's scroll position when the user left it.
@@ -137,6 +168,9 @@ export class GridRenderer {
 	private parts: GridExtensionParts = NO_EXTENSIONS
 	private inset: ((flags: number) => number) | undefined = undefined
 	private readonly frameListeners = new Set<() => void>()
+	// What the cells canvas shows was drawn from: a frame whose inputs all match draws the chrome only (a selection
+	// move, an entry's keystroke). Null: the canvas holds nothing drawn (attached, resized, blanked).
+	private drawn: DrawnCells | null = null
 	// Frame costs (ms), for the perf harness.
 	readonly costs: number[] = []
 	measure = false
@@ -225,10 +259,12 @@ export class GridRenderer {
 			() => view?.removeEventListener("pointerup", onRelease, { capture: true }),
 			() => view?.removeEventListener("pointercancel", onRelease, { capture: true }),
 			() => clearTimeout(this.idle),
+			() => this.animateClip(false),
 			() => resize.disconnect(),
 			this.model.onPaint(() => this.schedule())
 		)
 		this.coarse = typeof globalThis.matchMedia === "function" ? globalThis.matchMedia("(any-pointer: coarse)") : null
+		this.stillMotion = typeof globalThis.matchMedia === "function" ? globalThis.matchMedia("(prefers-reduced-motion: reduce)") : null
 		// A theme that follows the system's scheme changes the variables without the app saying so.
 		if (typeof globalThis.matchMedia === "function") {
 			const scheme = globalThis.matchMedia("(prefers-color-scheme: dark)")
@@ -250,6 +286,7 @@ export class GridRenderer {
 
 		this.frame = 0
 		this.elements = null
+		this.drawn = null
 	}
 
 	refreshTheme(): void {
@@ -486,6 +523,8 @@ export class GridRenderer {
 		this.resizeCanvases(pixelRatio)
 
 		if (layout === null || axes === null) {
+			this.chromeScene = null
+			this.animateClip(false)
 			this.blank()
 
 			return
@@ -517,9 +556,30 @@ export class GridRenderer {
 				})
 			: null
 
-		if (this.cells !== null && this.measurer !== null && this.borders !== null) {
+		const version = this.model.cellsVersion()
+		const drawn = this.drawn
+		// A cells-stage layer is a whole pass that may read anything, so it draws on every frame; decorators mark tile
+		// entries, which move the model's cells version when they change.
+		const current =
+			drawn !== null &&
+			parts.cellLayers.length === 0 &&
+			drawn.version === version &&
+			drawn.sheet === snapshot.sheet &&
+			drawn.layout === layout &&
+			drawn.axes === axes &&
+			drawn.top === view.rows.scroll &&
+			drawn.left === view.cols.scroll &&
+			drawn.width === view.width &&
+			drawn.height === view.height &&
+			drawn.pixelRatio === pixelRatio &&
+			drawn.theme === theme &&
+			drawn.parts === parts
+
+		if (!current && this.cells !== null && this.measurer !== null && this.borders !== null) {
 			const cells = this.cells
 
+			// Cleared first: a paint that throws leaves the canvas to be drawn again.
+			this.drawn = null
 			paintCells(
 				{ canvas: cells, measurer: this.measurer, borders: this.borders, patterns: this.patterns },
 				{ model: this.model, sheet: snapshot.sheet, layout, view, theme, scale: axes.scale, pixelRatio, inset: this.inset },
@@ -531,14 +591,36 @@ export class GridRenderer {
 
 				paintLayers(cells, scene, parts.cellLayers)
 			}
+
+			// The version read before the paint: anything that moved it meanwhile draws again next frame.
+			this.drawn = {
+				version,
+				sheet: snapshot.sheet,
+				layout,
+				axes,
+				top: view.rows.scroll,
+				left: view.cols.scroll,
+				width: view.width,
+				height: view.height,
+				pixelRatio,
+				theme,
+				parts
+			}
 		}
+
+		const mark = this.model.clipMark()
+		const clipRange = mark !== null && mark.sheet === snapshot.sheet && !this.model.cellless(snapshot.sheet) ? mark.range : null
+
+		this.chromeScene = null
+		this.animateClip(clipRange !== null)
 
 		if (this.chrome !== null) {
 			const chrome = this.chrome
 
-			paintChrome(chrome, {
+			this.chromeScene = {
 				overSelection: scene === null ? undefined : () => paintLayers(chrome, scene, parts.chromeLayers),
 				fill: this.fill,
+				clip: clipRange === null ? null : { range: clipRange, offset: this.clipOffset() },
 				view,
 				theme,
 				pixelRatio,
@@ -554,7 +636,8 @@ export class GridRenderer {
 									screenOf(this.guide.axis === "rows" ? view.rows : view.cols, this.guide.index) +
 									(this.guide.axis === "rows" ? view.rows : view.cols).axis.size(this.guide.index)
 							}
-			})
+			}
+			paintChrome(chrome, this.chromeScene)
 		}
 
 		this.place(view, snapshot.selection.active)
@@ -565,8 +648,40 @@ export class GridRenderer {
 		if (this.measure) this.costs.push(performance.now() - started)
 	}
 
+	// The copy's moving border steps on a timer while it shows on the sheet shown, redrawing the chrome layer alone
+	// with the last frame's scene: a step is a few strokes, never the cells. Still where the user asks for less motion,
+	// and idle while the page is hidden.
+	private animateClip(on: boolean): void {
+		const still = this.stillMotion?.matches === true
+
+		if (on && !still) {
+			this.clipTimer ??= setInterval(() => this.stepClip(), CLIP_STEP_MS)
+		} else if (this.clipTimer !== undefined) {
+			clearInterval(this.clipTimer)
+			this.clipTimer = undefined
+		}
+	}
+
+	private clipOffset(): number {
+		return this.stillMotion?.matches === true ? 0 : Math.floor(performance.now() / CLIP_STEP_MS) % CLIP_DASH_PERIOD
+	}
+
+	private stepClip(): void {
+		const scene = this.chromeScene
+		const chrome = this.chrome
+
+		// A frame on its way draws the border at its step anyway.
+		if (scene === null || chrome === null || this.frame !== 0 || scene.clip === undefined || scene.clip === null) return
+		if (this.elements?.root.ownerDocument.visibilityState === "hidden") return
+
+		this.chromeScene = { ...scene, clip: { range: scene.clip.range, offset: this.clipOffset() } }
+		paintChrome(chrome, this.chromeScene)
+	}
+
 	private blank(): void {
 		const theme = this.currentTheme()
+
+		this.drawn = null
 
 		for (const canvas of [this.cells, this.chrome]) {
 			if (canvas === null) continue
@@ -596,7 +711,8 @@ export class GridRenderer {
 			canvas.style.height = `${String(this.height)}px`
 		}
 
-		// A resized canvas loses its state.
+		// A resized canvas loses its state and what it showed.
+		this.drawn = null
 		this.measurer?.reset()
 		this.borders?.reset()
 	}
@@ -656,7 +772,8 @@ export class GridRenderer {
 
 		if (editor === null || editing === null) return
 
-		const editBox = this.cellBox(view, { row: editing.row, col: editing.col })
+		// An entry open on another sheet (pointing at this one's cells) keeps its focus off screen.
+		const editBox = editing.sheet === this.model.getSnapshot().sheet ? this.cellBox(view, { row: editing.row, col: editing.col }) : null
 
 		if (editBox === null) {
 			editor.style.transform = "translate(-9999px, 0)"
@@ -902,6 +1019,35 @@ export class GridRenderer {
 		this.scroll.top = top
 		this.scroll.left = left
 		this.view = this.computeView()
+		this.writeScroll()
+		this.schedule()
+	}
+
+	// Scrolls a screen (Page Down, Alt+Page Down): as far as the active cell moved from `from` to `to`, so it keeps its
+	// place on screen as in Excel, then the least more that shows it fully (at the sheet's start, past frozen panes).
+	page(from: GridPoint, to: GridPoint): void {
+		this.model.grow(this.model.getSnapshot().sheet, to.row, to.col)
+		this.view = this.computeView()
+
+		const view = this.view
+
+		if (view === null) return
+
+		const moved = (axis: GridView["rows"], start: number, end: number): number =>
+			axis.scroll + axis.axis.offset(Math.max(end, axis.frozenEnd)) - axis.axis.offset(Math.max(start, axis.frozenEnd))
+
+		this.scroll.top = moved(view.rows, from.row, to.row)
+		this.scroll.left = moved(view.cols, from.col, to.col)
+		this.view = this.computeView()
+
+		const shifted = this.view
+
+		if (shifted !== null) {
+			this.scroll.top = revealOffset(shifted.rows, to.row)
+			this.scroll.left = revealOffset(shifted.cols, to.col)
+			this.view = this.computeView()
+		}
+
 		this.writeScroll()
 		this.schedule()
 	}

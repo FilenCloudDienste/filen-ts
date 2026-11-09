@@ -1,13 +1,10 @@
 import { CellError, FunctionArgumentType, SimpleRangeValue, type ImplementedFunctions } from "hyperformula"
 import { Regex, RegexSyntaxError, RegexUnsupportedError, STEP_BUDGET } from "../regex/index"
-import { naError, SheetFunctionPlugin, unmodeledError, valueError, type PluginCall, type PluginState } from "./plugin"
+import { MAX_TEXT, naError, SheetFunctionPlugin, unmodeledError, valueError, type PluginCall, type PluginState } from "./plugin"
 
 // REGEXTEST, REGEXEXTRACT and REGEXREPLACE as support.microsoft.com defines them, over PCRE2 patterns run by the
 // app's own linear-time engine (formula/regex). A pattern PCRE2 rejects is #VALUE!; one the engine does not run
 // (backreferences, lookaround and the like) keeps the file's result.
-
-// The longest text a cell holds ("Excel specifications and limits").
-const MAX_TEXT = 32767
 
 const CASE = { argumentType: FunctionArgumentType.INTEGER, defaultValue: 0, emptyAsDefault: true } as const
 const TEXT = { argumentType: FunctionArgumentType.STRING } as const

@@ -272,7 +272,8 @@ describe("sheet session: results held from the file", () => {
 	})
 
 	it.each([
-		["a legacy array formula", '<c r="C1"><f t="array" ref="C1">SUM(A1:A2*B1:B2)</f><v>19</v></c>', ""],
+		// Over a block: what it gives the block's other cells is not calculated (one of a single cell is).
+		["a legacy array formula", '<c r="C1"><f t="array" ref="C1:C2">SUM(A1:A2*B1:B2)</f><v>19</v></c>', '<c r="C2"><v>19</v></c>'],
 		["a dynamic array", '<c r="C1" cm="1"><f t="array" ref="C1:C2">_xlfn.SEQUENCE(2,1,A1,1)</f><v>1</v></c>', '<c r="C2"><v>2</v></c>']
 	] as const)("%s keeps its result and asks Excel to recalculate once a precedent changes", async (_label, cell, spill) => {
 		const { session, info } = await openFixture({
@@ -332,12 +333,12 @@ describe("sheet session: results held from the file", () => {
 		session.close()
 	})
 
-	it("keeps holding a stale array formula's result through undo, redo and later edits", async () => {
+	it("keeps holding a stale legacy array block's result through undo, redo and later edits", async () => {
 		const { session, info } = await openFixture({
 			sheets: [
 				{
 					name: "One",
-					body: '<sheetData><row r="1"><c r="A1"><v>1</v></c><c r="B1"><v>1</v></c><c r="C1"><f t="array" ref="C1">SUM(A1:A2*B1:B2)</f><v>19</v></c><c r="D1"><f>C1+1</f><v>20</v></c></row><row r="2"><c r="A2"><v>9</v></c><c r="B2"><v>2</v></c></row></sheetData>'
+					body: '<sheetData><row r="1"><c r="A1"><v>1</v></c><c r="B1"><v>1</v></c><c r="C1"><f t="array" ref="C1:C2">SUM(A1:A2*B1:B2)</f><v>19</v></c><c r="D1"><f>C1+1</f><v>20</v></c></row><row r="2"><c r="A2"><v>9</v></c><c r="B2"><v>2</v></c><c r="C2"><v>19</v></c></row></sheetData>'
 				}
 			]
 		})

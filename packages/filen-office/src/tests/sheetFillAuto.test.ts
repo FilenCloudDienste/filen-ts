@@ -3,6 +3,7 @@ import type { SeriesRequest } from "../core/sheet/fill/series"
 import type { SheetCommandResult, SheetRange, SheetSessionApi } from "../core/sheet/protocol"
 import { firstTile, openFixture, savedBytes, tileEntry } from "./sheetSessionFixtures"
 import { openKeys, sheetBody } from "./sheetKeysFixtures"
+import { STYLES } from "./xlsxWriteFixtures"
 
 // The fill handle (fill.auto) and the Series dialog (fill.series) over sessions: what the cells hold after, their
 // formats, formulas moved, the selection, undo, refusals, and saves that reopen as the session held them.
@@ -72,6 +73,34 @@ describe("fill.auto", () => {
 				[3, 3]
 			])
 		).toEqual(["7", "1/18/2024", "Sun"])
+	})
+
+	it("steps a time-formatted cell by an hour and dates a month apart by months", async () => {
+		const styles = STYLES.replace(
+			'<cellXfs count="2">',
+			'<cellXfs count="3"><xf numFmtId="20" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>'
+		)
+		// Style 0 is now h:mm, 1 General, 2 m/d/yyyy.
+		const body =
+			'<sheetData><row r="1"><c r="A1"><v>0.375</v></c><c r="B1" s="2"><v>45306</v></c></row>' +
+			'<row r="2"><c r="B2" s="2"><v>45337</v></c></row></sheetData>'
+		const { session } = await openFixture({ sheets: [{ name: "S", body }], styles })
+
+		expect(
+			(await auto(session, { startRow: 0, startCol: 0, endRow: 0, endCol: 0 }, { startRow: 0, startCol: 0, endRow: 3, endCol: 0 })).ok
+		).toBe(true)
+		expect(
+			(await auto(session, { startRow: 0, startCol: 1, endRow: 1, endCol: 1 }, { startRow: 0, startCol: 1, endRow: 3, endCol: 1 })).ok
+		).toBe(true)
+		expect(
+			await texts(session, [
+				[1, 0],
+				[2, 0],
+				[3, 0],
+				[2, 1],
+				[3, 1]
+			])
+		).toEqual(["10:00", "11:00", "12:00", "3/15/2024", "4/15/2024"])
 	})
 
 	it("copies one number, or extends it with Ctrl held, and undoes in one step", async () => {

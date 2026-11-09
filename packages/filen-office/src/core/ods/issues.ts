@@ -27,7 +27,8 @@ export type OdsIssueKind =
 	| "link"
 	// A named expression not carried into the engine's grammar.
 	| "name"
-	// The workbook's null date is neither 1899-12-30 nor 1904-01-01: dates show on the 1899-12-30 base.
+	// The workbook's null date is neither 1899-12-30 nor 1904-01-01: date cells keep their dates, but float serials
+	// and formulas computing on the file's own origin are taken on the 1899-12-30 base.
 	| "nullDate"
 	// Cells or rows repeated past what is materialised: the rest of the run is not shown (detail: how many).
 	| "repeat"

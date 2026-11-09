@@ -34,12 +34,14 @@ declare module "../protocol" {
 	interface SheetCommandMap {
 		// A paste whose clipboard holds HTML (sanitised by the host) beside its text: the session's own copy when
 		// `clip` names it and `text` is still its text, else the HTML's first table, else `text` as tab-separated values.
+		// `target` is the paste area, repeated over as clipboard.paste's is.
 		"clipboard.pasteHtml": {
 			readonly sheet: SheetId
 			readonly at: { readonly row: number; readonly col: number }
 			readonly html: string
 			readonly text: string
 			readonly clip?: number
+			readonly target?: SheetRange
 		}
 	}
 

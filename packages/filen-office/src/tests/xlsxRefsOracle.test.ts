@@ -233,7 +233,7 @@ const ACCEPTED: readonly { readonly pattern: RegExp; readonly reason: string }[]
 	},
 	{
 		pattern: /\/conditionalFormatting: ours only \[(\S+) \| [^\]]*\] LibreOffice only \[\S+ \|/,
-		reason: "LibreOffice gives an inserted column the format of the column to its left, conditional formats included: Excel's Insert Options default, which the structure command applies, not the reference catalogue"
+		reason: "LibreOffice gives an inserted column the format of the column to its left, conditional formats included; the structure command applies Excel's Insert Options default to cell and axis formats, and conditional formats' ranges move only as the reference catalogue moves them"
 	},
 	{
 		pattern: /formulas: ours only \[[^\]]*[A-Z]!#REF![^\]]*\] LibreOffice only \[[^\]]*#REF!/,

@@ -1,4 +1,4 @@
-import { EmptyValue, FunctionArgumentType, SimpleRangeValue, type ImplementedFunctions } from "hyperformula"
+import { EmptyValue, FunctionArgumentType, HyperFormula, SimpleRangeValue, type ImplementedFunctions } from "hyperformula"
 import { lastLineValue, uniformTail, type Plugin } from "./blankTails"
 import { naError, SheetFunctionPlugin, unmodeledError, valueError, type PluginCall, type PluginScalar, type PluginState } from "./plugin"
 import { binarySearch, compareLookup, lookupValue, rowsOf, sameClass, vectorOf, wildcard, type Lookup } from "./values"
@@ -52,6 +52,42 @@ function nearestIndex(values: readonly PluginScalar[], key: Lookup, mode: -1 | 1
 	}
 
 	return best
+}
+
+type MatchRange = { width(): number; height(): number }
+type MatchSearch = { advancedFind(matcher: (value: unknown) => boolean, range: MatchRange, options: object): number }
+type DoMatch = (this: { columnSearch: MatchSearch; rowSearch: MatchSearch }, key: unknown, range: MatchRange, type: number) => unknown
+
+const FIRST = { returnOccurrence: "first" } as const
+// * any run, ? one character, ~ escaping the next.
+const WILDCARD = /[*?~]/
+
+let wildcardMatch = false
+
+// The engine's MATCH with match_type 0 and a text key holding * ? or ~ searched with Excel's wildcards
+// (support.microsoft.com MATCH; the engine's own wildcard path reads ? as at most one character). The search is the
+// engine's advancedFind, so a whole column reads only its stored cells (wholeRanges.ts); match_type 1 and -1, other
+// keys and the argument checks stay the engine's own. Once.
+export function installWildcardMatch(): void {
+	if (wildcardMatch) return
+
+	wildcardMatch = true
+
+	const prototype = HyperFormula.getFunctionPlugin("MATCH")?.prototype as { doMatch?: DoMatch } | undefined
+	const doMatch = prototype?.doMatch
+
+	if (prototype === undefined || doMatch === undefined) return
+
+	prototype.doMatch = function (key, range, type) {
+		if (type !== 0 || typeof key !== "string" || !WILDCARD.test(key) || (range.width() > 1 && range.height() > 1))
+			return doMatch.call(this, key, range, type)
+
+		const test = wildcard(key)
+		const search = range.width() === 1 ? this.columnSearch : this.rowSearch
+		const index = search.advancedFind(value => typeof value === "string" && test(value), range, FIRST)
+
+		return index < 0 ? naError() : index + 1
+	}
 }
 
 export class LookupFunctions extends SheetFunctionPlugin {

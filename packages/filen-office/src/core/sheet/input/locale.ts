@@ -433,12 +433,197 @@ function readTextNumber(text: string, reader: TextNumberReader): number | undefi
 	return negative ? -scaled : scaled
 }
 
-const DATE = /^(\d{1,4})([/.-])(\d{1,2})\2(\d{1,4})$/
+const SCIENTIFIC = "0.00E+00"
 
-// A date as typed in the locale's order (day, month and year separated by "/", "-" or "."; a two-digit year is
-// 1930-2029, as Excel reads one: support.microsoft.com "How Excel works with two-digit year numbers"). ISO dates
-// (yyyy-mm-dd) read in every locale. Null for anything else.
-export function localizedDate(text: string, locale: SheetLocale): { year: number; month: number; day: number } | null {
+function hasExponent(text: string): boolean {
+	return text.includes("e") || text.includes("E")
+}
+
+// A number typed into a cell, as Excel reads one there, and the format it implies for a cell that has none: the
+// locale's plain, grouped and percent numbers (localizedNumber), an exponent (0.00E+00), one of the locale's currency
+// symbols before or after the number ($#,##0.00), parentheses around a negative number, a percent sign after a grouped
+// number (#,##0%), and a whole number with a fraction of a one- or two-digit denominator (1 1/2: # ?/?). A sign after
+// the number (5-) leaves it text, as Excel's entry does. Null when it reads as no number.
+export function entryNumber(text: string, locale: SheetLocale): { value: number; impliedFormat?: string } | null {
+	const simple = localizedNumber(text, locale)
+
+	if (simple !== null) {
+		return simple.impliedFormat === undefined && hasExponent(text) ? { value: simple.value, impliedFormat: SCIENTIFIC } : simple
+	}
+
+	const reader = textNumberReader(locale)
+	const first = text.charCodeAt(0)
+
+	if (
+		!isDigit(first) &&
+		first !== PLUS &&
+		first !== MINUS &&
+		first !== PAREN &&
+		first !== reader.decimalCode &&
+		!(first === POINT && reader.decimal === ARABIC_DECIMAL) &&
+		!reader.currencyCodes.includes(first)
+	) {
+		return null
+	}
+
+	let body = text
+	let negative = false
+	let signed = false
+	const parenthesised = first === PAREN
+
+	if (parenthesised) {
+		if (body.charCodeAt(body.length - 1) !== 41) return null
+
+		body = body.slice(1, -1).trim()
+		negative = true
+		signed = true
+	}
+
+	const sign = (): boolean => {
+		const code = body.charCodeAt(0)
+
+		if (code !== PLUS && code !== MINUS) return true
+		if (signed) return false
+
+		signed = true
+		negative = code === MINUS
+		body = body.slice(1)
+
+		return true
+	}
+
+	if (!sign()) return null
+
+	let symbol = ""
+	let leading = false
+	let spaced = false
+	const before = reader.currencies.find(currency => body.startsWith(currency))
+
+	if (before !== undefined) {
+		const rest = body.slice(before.length)
+
+		body = rest.trimStart()
+		symbol = before
+		leading = true
+		spaced = body.length !== rest.length
+
+		if (!sign()) return null
+	} else {
+		const after = reader.currencies.find(currency => body.endsWith(currency))
+
+		if (after !== undefined) {
+			const rest = body.slice(0, -after.length)
+
+			body = rest.trimEnd()
+			symbol = after
+			spaced = body.length !== rest.length
+		}
+	}
+
+	let percent = false
+
+	if (!parenthesised && symbol === "" && body.endsWith("%")) {
+		percent = true
+		body = body.slice(0, -1).trimEnd()
+	}
+
+	const magnitude = unsignedNumber(body, reader)
+
+	if (magnitude === undefined || !Number.isFinite(magnitude)) return null
+
+	const grouped = reader.grouped.test(body)
+	const fraction = !grouped && !reader.number.test(body)
+	const scaled = percent ? magnitude / 100 : magnitude
+	const value = negative ? -scaled : scaled
+	const decimals = body.includes(reader.decimal) || (reader.decimal === ARABIC_DECIMAL && body.includes(".")) ? ".00" : ""
+
+	if (fraction) {
+		const width = body.length - body.indexOf("/") - 1
+
+		return symbol !== "" || percent || width > 2 ? null : { value, impliedFormat: width === 1 ? "# ?/?" : "# ??/??" }
+	}
+
+	if (symbol !== "") {
+		const literal = symbol === "$" ? "$" : `"${symbol}"`
+		const space = spaced ? "\\ " : ""
+		const number = `#,##0${decimals}`
+
+		return { value, impliedFormat: leading ? `${literal}${space}${number}` : `${number}${space}${literal}` }
+	}
+
+	if (percent) return { value, impliedFormat: `${grouped ? "#,##0" : "0"}${decimals}%` }
+	if (hasExponent(body)) return { value, impliedFormat: SCIENTIFIC }
+	if (grouped) return { value, impliedFormat: `#,##0${decimals}` }
+
+	return { value }
+}
+
+const DATE = /^(\d{1,4})([/.-])(\d{1,2})\2(\d{1,4})$/
+// Two numbers without a year: "/" or "-" between them ("1.5" stays a number's, or no date, in every locale).
+const DAY_MONTH = /^(\d{1,4})[/-](\d{1,4})$/
+// d-mmm, d mmm yyyy, 5/Jan/24: the day before a month name, the year after it optional.
+const NAMED_DAY_FIRST = /^(\d{1,2})[-/ ]([a-z]+)\.?(?:[-/ ](\d{1,4}))?$/i
+// Jan-24, January 5, 2024, Jan 5 2024, Jan-2024: the month name first.
+const NAMED_MONTH_FIRST = /^([a-z]+)\.?[-/ ](\d{1,4})(?:(?:, ?|[-/ ])(\d{1,4}))?$/i
+
+const MONTH_NAMES = [
+	"january",
+	"february",
+	"march",
+	"april",
+	"may",
+	"june",
+	"july",
+	"august",
+	"september",
+	"october",
+	"november",
+	"december"
+]
+
+export interface LocalizedDate {
+	readonly year: number
+	readonly month: number
+	readonly day: number
+}
+
+// A month's English name, in full or its first three letters ("Sept" too), any case; 0 for none.
+function monthNamed(word: string): number {
+	const lower = word.toLowerCase()
+
+	if (lower.length < 3) return 0
+	if (lower === "sept") return 9
+
+	for (let index = 0; index < MONTH_NAMES.length; index++) {
+		const name = MONTH_NAMES[index] ?? ""
+
+		if (lower === name || lower === name.slice(0, 3)) return index + 1
+	}
+
+	return 0
+}
+
+// A two- or four-digit year as Excel reads it: a two-digit one is 1930-2029 (support.microsoft.com "How Excel
+// works with two-digit year numbers"). NaN for any other length.
+function yearOf(text: string): number {
+	if (text.length === 4) return Number(text)
+	if (text.length !== 2) return Number.NaN
+
+	const short = Number(text)
+
+	return short < 30 ? 2000 + short : 1900 + short
+}
+
+// Whether a day of a month exists from 1900 on; `leap1900` takes 1900-02-29, the day the 1900 date system counts
+// (serial 60).
+function validDate(year: number, month: number, day: number, leap1900: boolean): boolean {
+	if (!(year >= 1900 && year <= 9999) || month < 1 || month > 12 || day < 1) return false
+	if (leap1900 && year === 1900 && month === 2) return day <= 29
+
+	return day <= new Date(Date.UTC(year, month, 0)).getUTCDate()
+}
+
+function numericDate(text: string, locale: SheetLocale, leap1900: boolean): LocalizedDate | null {
 	const match = DATE.exec(text)
 
 	if (match === null) return null
@@ -453,17 +638,94 @@ export function localizedDate(text: string, locale: SheetLocale): { year: number
 	const [yearText = "", monthText = "", dayText = ""] = parts
 
 	if (order !== "ymd" && first.length > 2) return null
-	if (yearText.length !== 2 && yearText.length !== 4) return null
 
-	const short = Number(yearText)
-	const year = yearText.length === 2 ? (short < 30 ? 2000 + short : 1900 + short) : short
+	const year = yearOf(yearText)
 	const month = Number(monthText)
 	const day = Number(dayText)
-	const date = new Date(Date.UTC(year, month - 1, day))
 
-	if (year < 1900 || date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) return null
+	return validDate(year, month, day, leap1900) ? { year, month, day } : null
+}
 
-	return { year, month, day }
+// A date as typed in the locale's order (day, month and year separated by "/", "-" or "."; a two-digit year is
+// 1930-2029, as Excel reads one). ISO dates (yyyy-mm-dd) read in every locale. Null for anything else.
+export function localizedDate(text: string, locale: SheetLocale): LocalizedDate | null {
+	return numericDate(text, locale, false)
+}
+
+// A month and a number after or before it: the day of `year` when it is one (two digits at most), else the month's
+// first day of the year it reads as. Excel reads Jan-24 as 24 January this year and Jan-32 as January 1932.
+function dayOrYear(month: number, text: string, year: number, leap1900: boolean): LocalizedDate | null {
+	const day = Number(text)
+
+	if (text.length <= 2 && validDate(year, month, day, leap1900)) return { year, month, day }
+
+	const read = yearOf(text)
+
+	return validDate(read, month, 1, leap1900) ? { year: read, month, day: 1 } : null
+}
+
+// A date as text in a formula reads (DATEVALUE, "5-Jan-2024"+0), as Excel reads one by the system's settings
+// (support.microsoft.com "DATEVALUE function": "22-MAY-2011", "5-JUL" in the clock's year): the locale's numeric
+// order with a year, or without one (m/d, or d/m where the day comes first) in `currentYear`, a month and year (1/2024),
+// and an English month name with the day before or after it (d-mmm-yy, d mmm yyyy, mmmm d, yyyy, mmm-yy, d-mmm).
+// `leap1900` reads 1900-02-29, as the 1900 date system does. Null for anything else.
+export function formulaTextDate(text: string, locale: SheetLocale, currentYear: () => number, leap1900: boolean): LocalizedDate | null {
+	const first = text.charCodeAt(0)
+
+	if (isDigit(first)) {
+		const full = numericDate(text, locale, leap1900)
+
+		if (full !== null) return full
+
+		const pair = DAY_MONTH.exec(text)
+
+		if (pair !== null) {
+			const [, head = "", tail = ""] = pair
+
+			// yyyy-m: the month's first day.
+			if (head.length === 4) return dayOrYear(Number(tail), head, 0, leap1900)
+			if (head.length > 2) return null
+
+			if (locale.dateOrder !== "dmy") return dayOrYear(Number(head), tail, currentYear(), leap1900)
+
+			// d/m in the clock's year, else m/yy.
+			const year = currentYear()
+
+			if (tail.length <= 2 && validDate(year, Number(tail), Number(head), leap1900)) {
+				return { year, month: Number(tail), day: Number(head) }
+			}
+
+			const read = yearOf(tail)
+
+			return validDate(read, Number(head), 1, leap1900) ? { year: read, month: Number(head), day: 1 } : null
+		}
+
+		const named = NAMED_DAY_FIRST.exec(text)
+
+		if (named === null) return null
+
+		const [, dayText = "", name = "", yearText] = named
+		const month = monthNamed(name)
+		const year = yearText === undefined ? currentYear() : yearOf(yearText)
+		const day = Number(dayText)
+
+		return month > 0 && validDate(year, month, day, leap1900) ? { year, month, day } : null
+	}
+
+	const named = NAMED_MONTH_FIRST.exec(text)
+
+	if (named === null) return null
+
+	const [, name = "", second = "", third] = named
+	const month = monthNamed(name)
+
+	if (month === 0) return null
+	if (third === undefined) return dayOrYear(month, second, currentYear(), leap1900)
+
+	const year = yearOf(third)
+	const day = Number(second)
+
+	return second.length <= 2 && validDate(year, month, day, leap1900) ? { year, month, day } : null
 }
 
 // The format a date typed in the locale implies: its order with four-digit years (Excel's short date for the

@@ -100,41 +100,64 @@ function numberCode(element: OdfElement, held: string[]): string {
 
 	if (attributes.has("number:decimal-replacement")) held.push("decimalReplacement")
 
+	// Embedded texts by position, those at one position joined in order (§16.29.4), as LibreOffice reads them.
+	let texts: Map<number, string> | undefined
+
+	for (const embedded of element.children) {
+		if (embedded.name !== "number:embedded-text") continue
+
+		const position = digitsAttribute(embedded, "number:position", 0, held)
+
+		texts ??= new Map()
+		texts.set(position, (texts.get(position) ?? "") + embedded.text)
+	}
+
+	if (texts !== undefined) integer = embed(integer, texts)
+
 	let code = integer + (decimals > 0 ? `.${"0".repeat(minimum)}${"#".repeat(decimals - minimum)}` : "")
 
 	if (factor === 1000) code += ","
 	else if (factor === 1_000_000) code += ",,"
 	else if (factor !== 1 && Number.isFinite(factor)) held.push("displayFactor")
 
-	for (const embedded of element.children) {
-		if (embedded.name !== "number:embedded-text") continue
-
-		// The text sits `position` integer digits left of the decimal separator (§16.29.4).
-		const position = digitsAttribute(embedded, "number:position", 0, held)
-		const dot = code.indexOf(".")
-		let at = dot < 0 ? code.length : dot
-		let counted = 0
-
-		while (at > 0 && counted < position) {
-			at--
-
-			if (code[at] === "0" || code[at] === "#") counted++
-		}
-
-		// Digits the code lacks are optional ones, as LibreOffice adds them ("#": no leading zeros shown).
-		if (counted < position) {
-			code = "#".repeat(position - counted) + code
-			at = 0
-		}
-
-		code = code.slice(0, at) + literal(embedded.text) + code.slice(at)
-	}
-
 	return code
 }
 
-// One section: the format elements of one style in order.
-function sectionCode(style: OdfDataStyle, held: string[]): { code: string; locale: number | undefined } {
+// An integer part's placeholders ("0", "#", grouping ",") with each text `position` digits left of the decimal
+// separator. A digit stays left of the leftmost text so it is embedded, not leading: digits the part lacks are
+// optional ones ("#"), as LibreOffice adds them on import.
+function embed(integer: string, texts: ReadonlyMap<number, string>): string {
+	let digits = 0
+
+	for (const c of integer) if (c !== ",") digits++
+
+	let furthest = 0
+
+	for (const position of texts.keys()) furthest = Math.max(furthest, position)
+
+	const padded = digits > furthest ? integer : "#".repeat(furthest + 1 - digits) + integer
+	let out = literal(texts.get(0) ?? "")
+	let counted = 0
+
+	for (let at = padded.length - 1; at >= 0; at--) {
+		const c = padded[at] ?? ""
+
+		out = c + out
+
+		if (c === ",") continue
+
+		counted++
+
+		const text = texts.get(counted)
+
+		if (text !== undefined) out = literal(text) + out
+	}
+
+	return out
+}
+
+// One section: the format elements of one style in order. `general`: a style with none shows as General.
+function sectionCode(style: OdfDataStyle, held: string[], general: boolean): { code: string; locale: number | undefined } {
 	const elapsed = style.attributes.get("number:truncate-on-overflow") === "false"
 	let code = ""
 	let elapsedDone = false
@@ -275,7 +298,13 @@ function sectionCode(style: OdfDataStyle, held: string[]): { code: string; local
 		else tag = found
 	}
 
-	if (code === "") code = "General"
+	// No content elements (§16.29.2): a style alone shows as General, a condition's or a main style with conditions
+	// is an empty section that shows nothing (Excel's "0;-0;;@"), its colour and language moot.
+	if (code === "") {
+		if (!general) return { code: "", locale: undefined }
+
+		code = "General"
+	}
 
 	const facts = odsLocale(language, country)
 
@@ -296,7 +325,7 @@ export function dataStyleCode(sheet: OdfStyleSheet, style: OdfDataStyle, scope: 
 	// Each section with its own language's tag, as the formatter reads a tag per section.
 	const tagged = (section: { code: string; locale: number | undefined }): string =>
 		section.locale === undefined ? section.code : lcidTag(section.locale) + section.code
-	const main = { code: tagged(sectionCode(style, held)) }
+	const main = { code: tagged(sectionCode(style, held, style.maps.length === 0)) }
 	const conditions: { operator: string; value: string; code: string }[] = []
 
 	for (const map of style.maps) {
@@ -315,7 +344,11 @@ export function dataStyleCode(sheet: OdfStyleSheet, style: OdfDataStyle, scope: 
 			operator: match[1] === "!=" ? "<>" : (match[1] ?? ""),
 			value: match[2] ?? "",
 			code:
-				target === undefined ? (style.kind === "text" ? main.code.replace("@", "") : main.code) : tagged(sectionCode(target, held))
+				target === undefined
+					? style.kind === "text"
+						? main.code.replace("@", "")
+						: main.code
+					: tagged(sectionCode(target, held, false))
 		})
 	}
 

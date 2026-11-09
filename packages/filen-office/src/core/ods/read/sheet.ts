@@ -4,6 +4,7 @@ import { SheetStore, StoreBuilder } from "../../xlsx/model/store"
 import { SheetStrings } from "../../xlsx/model/strings"
 import { encodeXstring } from "../../xlsx/edit/document"
 import { cellKeyOf } from "../../xlsx/edit/history"
+import { ODS_DYNAMIC_CM, typedSpills } from "../../xlsx/edit/spill"
 import type { SharedStrings } from "../../xlsx/model/sharedStrings"
 import { MAX_SHEET_LINKS } from "../../xlsx/hyperlinks/edit"
 import {
@@ -58,6 +59,42 @@ export interface OdsCellInput {
 	runs: readonly { readonly start: number; readonly style: string | undefined }[] | undefined
 	// The engine calculates the result again once built (XlsxSheetModel.recalculate), the cached one shown till then.
 	recalculate: boolean
+	// office:value-type of a number (OdsValueType), and office:currency of a currency one.
+	valueType: OdsValueType
+	currency: string | undefined
+}
+
+// A number's office:value-type (ODF 1.3 Part 3 §19.385) where it names a format: LibreOffice shows such a value in
+// its type's standard format when the cell's format is General.
+export const OdsValueType = {
+	FLOAT: 0,
+	PERCENTAGE: 1,
+	CURRENCY: 2,
+	DATE: 3,
+	TIME: 4
+} as const
+
+export type OdsValueType = (typeof OdsValueType)[keyof typeof OdsValueType]
+
+// Standard formats by type: percent "0%" (9), short date (14), date and time (22) for a date with a time part, and
+// elapsed hours (46) for a time-value, a duration (PT36H is 36:00:00). Currency without office:currency is the
+// locale's (7).
+const PERCENT_FORMAT = 9
+const DATE_FORMAT = 14
+const DATE_TIME_FORMAT = 22
+const DURATION_FORMAT = 46
+const LOCALE_CURRENCY_FORMAT = 7
+
+// An ISO 4217 code's symbol as LibreOffice shows it (its locale tables give the narrow one: CAD "$"), the code
+// itself where the engine has no symbol for it.
+function currencySymbol(code: string): string {
+	try {
+		const parts = new Intl.NumberFormat("en", { style: "currency", currency: code, currencyDisplay: "narrowSymbol" }).formatToParts(0)
+
+		return parts.find(part => part.type === "currency")?.value ?? code
+	} catch {
+		return code
+	}
 }
 
 // Field by field: Object.assign takes SpiderMonkey's generic path, several times this per cell.
@@ -80,6 +117,8 @@ function copyInput(cell: OdsCellInput, input: OdsCellInput): void {
 	cell.rich = input.rich
 	cell.runs = input.runs
 	cell.recalculate = input.recalculate
+	cell.valueType = input.valueType
+	cell.currency = input.currency
 }
 
 export interface OdsRowInput {
@@ -211,6 +250,9 @@ export class OdsSheetBuilder {
 	private cellsInRow = 0
 	private rowCol = 0
 	cellCount = 0
+	// Typed values' formats: derived cell formats by base xf and number format, currency formats by code.
+	private readonly typedXfs = new Map<number, number>()
+	private readonly currencyFormats = new Map<string, number>()
 
 	private readonly sharedStrings: SharedStrings
 	private readonly budget: { left: number }
@@ -281,16 +323,12 @@ export class OdsSheetBuilder {
 		}
 
 		const end = Math.min(SHEET_MAX_COLS, first + repeat)
+		const defaultXf = defaultCellStyle === undefined ? 0 : this.styles.xf(defaultCellStyle)
+		// Collapsed is a summary column's state: the first of a repeated run only.
+		const split = collapsed ? first + 1 : end
 
-		this.columns.push({
-			first,
-			end,
-			style,
-			defaultXf: defaultCellStyle === undefined ? 0 : this.styles.xf(defaultCellStyle),
-			hidden,
-			outline,
-			collapsed
-		})
+		this.columns.push({ first, end: split, style, defaultXf, hidden, outline, collapsed })
+		if (split < end) this.columns.push({ first: split, end, style, defaultXf, hidden, outline, collapsed: false })
 		this.nextColumn = end
 
 		if (header) this.headerCols = this.headerCols === null ? [first, end - 1] : [this.headerCols[0], end - 1]
@@ -462,8 +500,9 @@ export class OdsSheetBuilder {
 		const flags =
 			(input.hidden ? RowFlag.HIDDEN : 0) |
 			(style.custom ? RowFlag.CUSTOM_HEIGHT : 0) |
-			(input.collapsed ? RowFlag.COLLAPSED : 0) |
 			(Math.min(7, input.outline) << RowFlag.OUTLINE_SHIFT)
+		// Collapsed is a summary row's state: the first of a repeated run only.
+		const firstFlags = input.collapsed ? flags | RowFlag.COLLAPSED : flags
 
 		if (!Number.isNaN(height)) this.heights.set(height, (this.heights.get(height) ?? 0) + repeat)
 		if (!Number.isNaN(height) && style.custom) this.setHeights.set(height, (this.setHeights.get(height) ?? 0) + repeat)
@@ -471,7 +510,14 @@ export class OdsSheetBuilder {
 		if (this.runs.pending) this.runs.endRows(first, first + repeat)
 
 		if (this.cellsInRow === 0) {
-			if (flags !== 0 || !Number.isNaN(height)) this.propertyRun(first, repeat, height, flags, Number.isNaN(style.heightPt))
+			const implicit = Number.isNaN(style.heightPt)
+
+			if (firstFlags !== flags) {
+				this.propertyRun(first, 1, height, firstFlags, implicit)
+				if (repeat > 1) this.propertyRun(first + 1, repeat - 1, height, flags, implicit)
+			} else if (flags !== 0 || !Number.isNaN(height)) {
+				this.propertyRun(first, repeat, height, flags, implicit)
+			}
 
 			return
 		}
@@ -495,8 +541,23 @@ export class OdsSheetBuilder {
 
 			for (let k = 0; k < this.cellsInRow; k++) this.place(this.pool[k] as OdsCellInput, row)
 
-			this.builder.endRow(row, NO_SPAN, NO_SPAN, flags, height, -1)
+			this.builder.endRow(row, NO_SPAN, NO_SPAN, r === 0 ? firstFlags : flags, height, -1)
 		}
+	}
+
+	// The summary row of a collapsed group that ends the table's rows: a row of its own past them.
+	collapsedSummaryRow(): void {
+		if (this.row < SHEET_MAX_ROWS) this.propertyRun(this.row, 1, Number.NaN, RowFlag.COLLAPSED, true)
+	}
+
+	// The summary column of a collapsed group that ends the table's columns.
+	collapsedSummaryColumn(): void {
+		const first = this.nextColumn
+
+		if (first >= SHEET_MAX_COLS) return
+
+		this.columns.push({ first, end: first + 1, style: undefined, defaultXf: 0, hidden: false, outline: 0, collapsed: true })
+		this.nextColumn = first + 1
 	}
 
 	// Rows of properties alone, joined to the run before when alike and next to it. Each run is charged to the
@@ -521,10 +582,64 @@ export class OdsSheetBuilder {
 		this.propertyRuns.push({ row, repeat, heightPt, flags, implicit })
 	}
 
+	// The cell format a typed number shows in: its own, else (General) the same with the type's standard format, as
+	// LibreOffice reads it (ScXMLImport::SetType). A format other than General is kept.
+	private typedXf(xf: number, cell: OdsCellInput): number {
+		const base = this.styles.table.cellXfs[xf]
+
+		if (base === undefined || base.numFmtId !== 0) return xf
+
+		let format: number
+
+		switch (cell.valueType) {
+			case OdsValueType.PERCENTAGE:
+				format = PERCENT_FORMAT
+				break
+			case OdsValueType.DATE:
+				format = cell.number % 1 === 0 ? DATE_FORMAT : DATE_TIME_FORMAT
+				break
+			case OdsValueType.TIME:
+				format = DURATION_FORMAT
+				break
+			case OdsValueType.CURRENCY:
+				format = this.currencyFormat(cell.currency)
+				break
+			default:
+				return xf
+		}
+
+		// xf is below 2^16 (the cellXfs limit): the key stays an exact integer.
+		const key = xf * 0x1_0000_0000 + format
+		let derived = this.typedXfs.get(key)
+
+		if (derived === undefined) {
+			derived = this.styles.table.appendXf({ ...base, numFmtId: format })
+			this.typedXfs.set(key, derived)
+		}
+
+		return derived
+	}
+
+	// A currency's standard format: its symbol and two decimals, the locale's currency without a code.
+	private currencyFormat(code: string | undefined): number {
+		if (code === undefined || code === "") return LOCALE_CURRENCY_FORMAT
+
+		let format = this.currencyFormats.get(code)
+
+		if (format === undefined) {
+			format = this.styles.table.numFmtId(`[$${currencySymbol(code).replaceAll("]", "")}]#,##0.00`)
+			this.currencyFormats.set(code, format)
+		}
+
+		return format
+	}
+
 	private place(cell: OdsCellInput, row: number): void {
-		const xf = cell.style === undefined ? this.columnXf(cell.col) : this.styles.xf(cell.style)
+		let xf = cell.style === undefined ? this.columnXf(cell.col) : this.styles.xf(cell.style)
 		let value = cell.number
 		let kind: CellKind = cell.kind
+
+		if (cell.valueType !== OdsValueType.FLOAT && kind === CellKind.NUMBER) xf = this.typedXf(xf, cell)
 
 		if (cell.kind === CellKind.INLINE_STRING && cell.rich) {
 			kind = CellKind.SHARED_STRING
@@ -533,13 +648,15 @@ export class OdsSheetBuilder {
 			value = this.strings.intern(cell.kind === CellKind.INLINE_STRING ? xstring(cell.text) : cell.text)
 		}
 
+		const matrix = cell.formula !== "" && (cell.matrixCols > 0 || cell.matrixRows > 0)
+		// A matrix whose formula may give an array is a dynamic array, as it was typed (spill.ts).
+		const cellMetadata = matrix && typedSpills(cell.formula) ? ODS_DYNAMIC_CM : -1
+
 		for (let k = 0; k < cell.repeat; k++) {
 			const col = cell.col + k
 			let formula = -1
 
 			if (cell.formula !== "") {
-				const matrix = cell.matrixCols > 0 || cell.matrixRows > 0
-
 				formula = this.formulas.add({
 					kind: matrix ? FormulaKind.ARRAY : FormulaKind.NORMAL,
 					text: cell.formula,
@@ -553,7 +670,7 @@ export class OdsSheetBuilder {
 							}
 						: null,
 					flags: 0,
-					cellMetadata: -1
+					cellMetadata
 				})
 			}
 

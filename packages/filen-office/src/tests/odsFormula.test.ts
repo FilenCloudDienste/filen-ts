@@ -153,3 +153,18 @@ describe("OpenFormula to Excel's grammar", () => {
 		expect(rangeAddress("Sheet1.A1:Sheet1.D20 'Sheet 2'.B2")).toEqual({ text: "Sheet1!A1:D20,'Sheet 2'!B2" })
 	})
 })
+
+describe("LET and LAMBDA names", () => {
+	it("reads OpenFormula's bare names as the store's _xlpm. names, scope by scope", () => {
+		expect(text("of:=COM.MICROSOFT.LET(x;1;x+1)")).toBe("_xlfn.LET(_xlpm.x,1,_xlpm.x+1)")
+		expect(text("of:=COM.MICROSOFT.LAMBDA(a;b;a*b)")).toBe("_xlfn.LAMBDA(_xlpm.a,_xlpm.b,_xlpm.a*_xlpm.b)")
+		expect(text("of:=COM.MICROSOFT.LET(f;COM.MICROSOFT.LAMBDA(n;n*2);x;[.A1];f(3)+x)")).toBe(
+			// A call takes a function name's case: the engine reads names in any case.
+			"_xlfn.LET(_xlpm.f,_xlfn.LAMBDA(_xlpm.n,_xlpm.n*2),_xlpm.x,A1,_xlpm.F(3)+_xlpm.x)"
+		)
+		// Already prefixed: left as it is.
+		expect(text("of:=COM.MICROSOFT.LET(_xlpm.x;1;_xlpm.x+1)")).toBe("_xlfn.LET(_xlpm.x,1,_xlpm.x+1)")
+		// Outside a scope a name stays a defined name.
+		expect(text("of:=x+COM.MICROSOFT.LET(x;1;x)")).toBe("x+_xlfn.LET(_xlpm.x,1,_xlpm.x)")
+	})
+})

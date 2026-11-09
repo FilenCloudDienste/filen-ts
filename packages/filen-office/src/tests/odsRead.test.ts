@@ -63,9 +63,47 @@ describe("the ODS reader", () => {
 		expect(cell(sheet, 0, 4)?.value).toBe(2.5)
 		expect(cell(sheet, 0, 5)?.value).toBeCloseTo(1.5208333333, 9)
 		expect(cell(sheet, 0, 6)).toEqual({ kind: CellKind.BOOLEAN, value: 1, formula: "" })
+		// Without a data style a typed value shows in its type's standard format (LibreOffice's ScXMLImport::SetType):
+		// a date with a time part as date and time, a time-value as elapsed hours.
 		expect(shownRows(odsDocument(result), 0)).toEqual([
-			["1.5", "0.25", "3", "45107", "2.5", "1.52083333333333", "TRUE", "from attribute", "a & b", "no type"]
+			["1.5", "25%", "€3.00", "6/30/2023", "1/1/1900 12:00", "36:30:00", "TRUE", "from attribute", "a & b", "no type"]
 		])
+	})
+
+	it("keeps a typed value's own data style and shares one derived format among cells of a type", async () => {
+		const result = await openOdsFixture({
+			automatic:
+				'<number:number-style style:name="N2"><number:number number:decimal-places="2" number:min-integer-digits="1"/></number:number-style>' +
+				'<style:style style:name="fixed" style:family="table-cell" style:parent-style-name="Default" style:data-style-name="N2"/>' +
+				'<style:style style:name="fill" style:family="table-cell" style:parent-style-name="Default"><style:table-cell-properties fo:background-color="#ffff00"/></style:style>',
+			body: table(
+				"S",
+				'<table:table-row table:number-rows-repeated="3">' +
+					CELL('table:style-name="fixed" office:value-type="percentage" office:value="0.25"') +
+					CELL('table:style-name="fill" office:value-type="percentage" office:value="0.5"') +
+					CELL('office:value-type="currency" office:value="-3.5"') +
+					CELL('office:value-type="currency" office:currency="GBP" office:value="2"') +
+					CELL('office:value-type="float" office:value="0.5"') +
+					CELL('office:value-type="time" office:time-value="PT1H"') +
+					"</table:table-row>"
+			)
+		})
+		const sheet = model(result)
+		const store = sheet.store as SheetStore
+		const xfs = result.workbook.styles.cellXfs
+
+		expect(shownRows(odsDocument(result), 0)).toEqual([
+			["0.25", "50%", "($3.50)", "£2.00", "0.5", "1:00:00"],
+			["0.25", "50%", "($3.50)", "£2.00", "0.5", "1:00:00"],
+			["0.25", "50%", "($3.50)", "£2.00", "0.5", "1:00:00"]
+		])
+
+		// The filled cell keeps its fill under the percent format, one record for all its rows.
+		const filled = store.style(store.locate(0, 1))
+
+		expect(xfs[filled]?.fillId).toBeGreaterThan(0)
+		expect(store.style(store.locate(2, 1))).toBe(filled)
+		expect(store.style(store.locate(0, 4))).toBe(0)
 	})
 
 	it("reads the 1904 null date as Excel's 1904 date system", async () => {
@@ -246,6 +284,24 @@ describe("the ODS reader", () => {
 
 		// What is not recalculated keeps the file's result, however stale.
 		expect(shownRows(document, 0)).toEqual([["#REF!", "6", "3", "9"]])
+		document.dropEngine()
+	})
+
+	it("reads LibreOffice's Calc A1 text in INDIRECT, its default reference syntax", async () => {
+		const result = await openOdsFixture({
+			body: table(
+				"S",
+				"<table:table-row>" +
+					CELL('table:formula="of:=INDIRECT(&quot;S.C1&quot;)" office:value-type="float" office:value="4"', "4") +
+					CELL('table:formula="of:=INDIRECT(&quot;$S.$C$1&quot;)" office:value-type="float" office:value="4"', "4") +
+					CELL('office:value-type="float" office:value="3"', "3") +
+					"</table:table-row>"
+			)
+		})
+		const document = odsDocument(result)
+
+		document.buildEngine()
+		expect(shownRows(document, 0)).toEqual([["3", "3", "3"]])
 		document.dropEngine()
 	})
 

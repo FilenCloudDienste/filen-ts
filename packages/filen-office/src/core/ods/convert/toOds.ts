@@ -800,6 +800,7 @@ function usedStyles(workbook: XlsxWorkbook): Set<number> {
 async function prepareNumberFormats(
 	styles: XlsxStyleTable,
 	codeOf: (xf: number) => string,
+	palette: readonly number[],
 	used: ReadonlySet<number>,
 	report: SheetLossyReport
 ): Promise<void> {
@@ -831,7 +832,7 @@ async function prepareNumberFormats(
 
 	for (const code of codes.keys()) {
 		const name = `N${order.length}`
-		const written = dataStyles(code, name)
+		const written = dataStyles(code, name, palette)
 
 		if ("refused" in written) {
 			for (const index of codes.get(code) ?? []) xfs[index] = { ...(xfs[index] as XlsxXf), numFmtId: 0 }
@@ -868,7 +869,8 @@ async function prepareNumberFormats(
 		const slot = (model.store as SheetStore).locate(0, k)
 		const back = slot < 0 ? "General" : document.styles.numFmtCode((model.store as SheetStore).style(slot))
 
-		if (back === code || sameShown(code, back)) return
+		// The colour shown, not the code: [Color3] reads back as [Red], and the file has the default palette.
+		if (back === code || sameShown(code, back, { palette }, {})) return
 
 		const id = back === "General" ? 0 : styles.numFmtId(back)
 
@@ -1728,7 +1730,7 @@ export async function xlsxToOds(source: Uint8Array, options: SheetConvertOptions
 
 	if (clock?.due === true) await clock.pause()
 	prepareStyles(workbook.styles, used, report)
-	await prepareNumberFormats(workbook.styles, xf => probe.styles.numFmtCode(xf), used, report)
+	await prepareNumberFormats(workbook.styles, xf => probe.styles.numFmtCode(xf), probe.styles.palette, used, report)
 	if (clock?.due === true) await clock.pause()
 	await reportParts(workbook, report)
 

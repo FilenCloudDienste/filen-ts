@@ -1,5 +1,5 @@
 import { SHEET_MAX_FORMULA_TEXT } from "../../sheet/protocol"
-import { referenceSpans, referenceText, type RefArea, type ReferenceSpan } from "../../sheet/refs/formulaRefs"
+import { referenceSpans, referenceText, withoutPrefix, type RefArea, type ReferenceSpan } from "../../sheet/refs/formulaRefs"
 import { OPENFORMULA_NAMES } from "./functions.generated"
 import { translateFormula, type Translated } from "./toXlsx"
 
@@ -297,7 +297,8 @@ class Writer {
 
 				while (j < to && isWord(text[j] ?? "") && this.spanAt(j) === undefined) j++
 
-				const word = text.slice(at, j)
+				// A LET or LAMBDA name bare, as OpenFormula holds it (_xlpm. is SpreadsheetML's file syntax).
+				const word = withoutPrefix(text.slice(at, j))
 				let k = j
 
 				while (k < to && text[k] === " ") k++

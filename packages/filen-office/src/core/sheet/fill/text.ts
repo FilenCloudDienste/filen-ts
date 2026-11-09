@@ -14,7 +14,7 @@ function read(document: TextSheetDocument, row: number, col: number): FillSource
 	const text = document.text(row, col)
 
 	if (text === "") return { kind: "empty" }
-	if (NUMBER.test(text)) return { kind: "number", value: Number(text), date: false }
+	if (NUMBER.test(text)) return { kind: "number", value: Number(text), temporal: "none" }
 
 	return { kind: "text", text }
 }

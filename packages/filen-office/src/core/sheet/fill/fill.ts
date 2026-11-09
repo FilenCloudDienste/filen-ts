@@ -1,5 +1,6 @@
 import { SHEET_MAX_COLS, SHEET_MAX_EDIT_CELLS, SHEET_MAX_ROWS, type SheetCellInputs, type SheetRange } from "../protocol"
 import { formulaTranslator } from "../refs/formulaRefs"
+import { rowHidden, visibleRanges, type RowSpan } from "../visibleRows"
 import type { FillMode, FillSourceCell, FillValue, SeriesRequest } from "./series"
 
 // Fill Down and Fill Right (Ctrl+D, Ctrl+R in Excel's "Keyboard shortcuts in Excel"), and Fill Up and Left: the
@@ -111,6 +112,55 @@ export function fillPlan(ranges: readonly SheetRange[], direction: FillDirection
 	}
 
 	return { rows, cols, sourceRows, sourceCols, ranges: filled }
+}
+
+// fillPlan on a filtered sheet (`hidden`: visibleRows.ts): each range from its first visible row to its last, the
+// visible rows taking the source as Excel fills filtered data, the hidden ones left as they are.
+export function visibleFillPlan(
+	ranges: readonly SheetRange[],
+	direction: FillDirection,
+	hidden: readonly RowSpan[]
+): FillPlan | "tooLarge" | null {
+	if (hidden.length === 0) return fillPlan(ranges, direction)
+
+	const trimmed: SheetRange[] = []
+
+	for (const range of ranges) {
+		const runs = visibleRanges([range], hidden)
+		const first = runs[0]
+		const last = runs[runs.length - 1]
+
+		if (first !== undefined && last !== undefined) trimmed.push({ ...range, startRow: first.startRow, endRow: last.endRow })
+	}
+
+	const plan = fillPlan(trimmed, direction)
+
+	if (plan === null || plan === "tooLarge") return plan
+
+	let count = 0
+
+	for (let i = 0; i < plan.rows.length; i++) if (!rowHidden(hidden, plan.rows[i] ?? 0)) count++
+
+	if (count === plan.rows.length) return plan
+	if (count === 0) return null
+
+	const rows = new Uint32Array(count)
+	const cols = new Uint32Array(count)
+	const sourceRows = new Uint32Array(count)
+	const sourceCols = new Uint32Array(count)
+	let at = 0
+
+	for (let i = 0; i < plan.rows.length; i++) {
+		if (rowHidden(hidden, plan.rows[i] ?? 0)) continue
+
+		rows[at] = plan.rows[i] ?? 0
+		cols[at] = plan.cols[i] ?? 0
+		sourceRows[at] = plan.sourceRows[i] ?? 0
+		sourceCols[at] = plan.sourceCols[i] ?? 0
+		at++
+	}
+
+	return { rows, cols, sourceRows, sourceCols, ranges: plan.ranges }
 }
 
 interface Merge {

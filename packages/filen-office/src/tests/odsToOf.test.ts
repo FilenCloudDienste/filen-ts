@@ -28,6 +28,14 @@ function refusal(text: string): string {
 }
 
 describe("Formulas written as OpenFormula", () => {
+	it("writes LET and LAMBDA names bare, without SpreadsheetML's _xlpm. prefix", () => {
+		expect(written("_xlfn.LET(_xlpm.x,1,_xlpm.x+1)")).toBe("of:=COM.MICROSOFT.LET(x;1;x+1)")
+		expect(written("_xlfn.LAMBDA(_xlpm.a,_xlpm.b,_xlpm.a*_xlpm.b)")).toBe("of:=COM.MICROSOFT.LAMBDA(a;b;a*b)")
+		expect(written("_xlfn.LET(_xlpm.f,_xlfn.LAMBDA(_xlpm.n,_xlpm.n*2),_xlpm.f(3))")).toBe(
+			"of:=COM.MICROSOFT.LET(f;COM.MICROSOFT.LAMBDA(n;n*2);F(3))"
+		)
+	})
+
 	it("writes references on the sheet and on others, quoted where needed, whole columns and rows (§5.8)", () => {
 		expect(written("A1+$B$2")).toBe("of:=[.A1]+[.$B$2]")
 		expect(written("SUM(A1:B2)")).toBe("of:=SUM([.A1:.B2])")

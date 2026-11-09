@@ -1,6 +1,6 @@
-import { functionPrefix, functionSupport, functionVolatility } from "../../sheet/functions/catalogue"
+import { functionPrefix } from "../../sheet/functions/catalogue"
 import { SHEET_MAX_COLS, SHEET_MAX_FORMULA_TEXT, SHEET_MAX_ROWS } from "../../sheet/protocol"
-import { sheetNameNeedsQuotes, wellFormedFormula } from "../../sheet/refs/formulaRefs"
+import { prefixParameters, sheetNameNeedsQuotes, wellFormedFormula } from "../../sheet/refs/formulaRefs"
 
 // OpenFormula (ODF 1.3 Part 4) as the store's formula grammar (SpreadsheetML file syntax without "="): references
 // [.A1] [Sheet.A1:.B2] become A1 Sheet!A1:B2, ";" separates arguments as ",", inline arrays {1;2|3;4} become
@@ -148,8 +148,48 @@ function readAddress(text: string): Address | null {
 	return { sheet, column: (match[1] ?? "").toUpperCase(), row: match[2] ?? "", error: false }
 }
 
-// The text of a reference in brackets (§5.8), without them.
-function reference(body: string): Translated {
+// How far an expression's relative references move: from the cell they are relative to in the source (a condition's
+// base cell, ODF 1.3 Part 3 §19.584) to the one the target resolves them against (the top-left of its range).
+export interface ReferenceShift {
+	readonly rows: number
+	readonly cols: number
+}
+
+// An address with its relative column and row moved by `shift`, null when either leaves the grid.
+function shifted(address: Address, shift: ReferenceShift): Address | null {
+	let column = address.column
+	let row = address.row
+
+	if (column !== "" && !column.startsWith("$")) {
+		const index = columnIndex(column) + shift.cols
+
+		if (index < 0 || index >= SHEET_MAX_COLS) return null
+
+		column = columnText(index)
+	}
+
+	if (row !== "" && !row.startsWith("$")) {
+		const index = Number(row) + shift.rows
+
+		if (index < 1 || index > SHEET_MAX_ROWS) return null
+
+		row = String(index)
+	}
+
+	return { sheet: address.sheet, column, row, error: false }
+}
+
+// A cell address of table:base-cell-address (§19.584) as its zero-based row and column, null when it names no cell.
+export function cellAddress(address: string): { readonly row: number; readonly col: number } | null {
+	const read = readAddress(address.trim())
+
+	if (read === null || read.error || read.column === "" || read.row === "" || !inGrid(read)) return null
+
+	return { row: Number(read.row.replace("$", "")) - 1, col: columnIndex(read.column.replace("$", "")) }
+}
+
+// The text of a reference in brackets (§5.8), without them; `shift` moves its relative parts.
+function reference(body: string, shift?: ReferenceShift): Translated {
 	const trimmed = body.trim()
 
 	if (trimmed.startsWith("'") && /^'[^']*(?:''[^']*)*'#/.test(trimmed)) return { refused: "external reference" }
@@ -167,13 +207,18 @@ function reference(body: string): Translated {
 		}
 	}
 
-	const first = readAddress(cut < 0 ? trimmed : trimmed.slice(0, cut))
-	const second = cut < 0 ? null : readAddress(trimmed.slice(cut + 1))
+	const read = readAddress(cut < 0 ? trimmed : trimmed.slice(0, cut))
+	const readSecond = cut < 0 ? null : readAddress(trimmed.slice(cut + 1))
 
-	if (first === null || (cut >= 0 && second === null)) return { refused: "reference" }
-	if (first.error || second?.error === true) return { text: "#REF!" }
-	if (!inGrid(first) || (second !== null && !inGrid(second))) return { refused: "reference" }
-	if (second !== null && second.sheet !== null && second.sheet !== first.sheet) return { refused: "3D reference" }
+	if (read === null || (cut >= 0 && readSecond === null)) return { refused: "reference" }
+	if (read.error || readSecond?.error === true) return { text: "#REF!" }
+	if (!inGrid(read) || (readSecond !== null && !inGrid(readSecond))) return { refused: "reference" }
+	if (readSecond !== null && readSecond.sheet !== null && readSecond.sheet !== read.sheet) return { refused: "3D reference" }
+
+	const first = shift === undefined ? read : shifted(read, shift)
+	const second = shift === undefined || readSecond === null ? readSecond : shifted(readSecond, shift)
+
+	if (first === null || (readSecond !== null && second === null)) return { refused: "shifted reference" }
 
 	const prefix = first.sheet === null ? "" : sheetRef(first.sheet)
 
@@ -260,8 +305,8 @@ function namesFunction(c: string): boolean {
 	return (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || c === "_" || c === "."
 }
 
-// An OpenFormula expression (no "="), translated in one pass over its text.
-export function translateExpression(source: string): Translated {
+// An OpenFormula expression (no "="), translated in one pass over its text; `shift` moves its relative references.
+export function translateExpression(source: string, shift?: ReferenceShift): Translated {
 	if (source.length > MAX_SOURCE) return { refused: "formula too long" }
 
 	const out: string[] = []
@@ -337,7 +382,7 @@ export function translateExpression(source: string): Translated {
 
 			if (j >= source.length) return { refused: "unterminated reference" }
 
-			const translated = reference(source.slice(i + 1, j))
+			const translated = reference(source.slice(i + 1, j), shift)
 
 			if ("refused" in translated) return translated
 			if (!operand(translated.text, true)) return { refused: "union" }
@@ -509,7 +554,8 @@ export function translateExpression(source: string): Translated {
 
 	if (top !== undefined) endChain(top, false)
 
-	const text = out.join("").trim()
+	// OpenFormula writes LET and LAMBDA names bare; the store holds them as SpreadsheetML does (_xlpm.x).
+	const text = prefixParameters(out.join("").trim())
 
 	if (text.length > SHEET_MAX_FORMULA_TEXT) return { refused: "formula too long" }
 
@@ -646,26 +692,6 @@ export function withoutSheet(reference: string): string {
 	}
 
 	return reference.slice(bang + 1)
-}
-
-// Whether a translated formula calls a volatile function the engine calculates (INDIRECT, OFFSET, NOW, TODAY, RAND...):
-// LibreOffice calculates such formulas again on load, whatever the file cached.
-export function volatileFormula(text: string): boolean {
-	const outside = text.replace(/"(?:[^"]|"")*"/g, '""')
-
-	for (const match of outside.matchAll(/([A-Za-z_][A-Za-z0-9_.]*)\(/g)) {
-		const name = (match[1] ?? "").toUpperCase().replace(/^_XLFN\.(?:_XLWS\.)?/, "")
-		const support = functionSupport(name) ?? functionSupport(`_xlfn.${name}`)
-
-		if (
-			(functionVolatility(name) ?? functionVolatility(`_xlfn.${name}`)) === "always" &&
-			(support === "hyperformula" || support === "plugin")
-		) {
-			return true
-		}
-	}
-
-	return false
 }
 
 export { columnText }

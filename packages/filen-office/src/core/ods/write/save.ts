@@ -326,7 +326,11 @@ export async function saveOds(document: XlsxDocument, options: OdsSaveOptions = 
 			try {
 				const styles = new OdsStyleWriter(source.styles, document.styles)
 				const unheld = source.unheld
-				const shifter = unheld.items.length === 0 ? null : shifterOf(document.workbook, source.tables)
+				// What names cells outside the model, and conditional formats, follow the sheets' moves.
+				const shifter =
+					unheld.items.length === 0 && source.tables.every(table => table.conditionalFormats.length === 0)
+						? null
+						: shifterOf(document.workbook, source.tables)
 				const moving = shifter !== null && shifter.changed ? shifter : null
 				const writer = new ContentWriter({
 					shifter: moving,

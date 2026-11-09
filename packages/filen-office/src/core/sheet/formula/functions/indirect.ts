@@ -4,12 +4,25 @@ import {
 	FunctionArgumentType,
 	HyperFormula,
 	SimpleRangeValue,
+	type FunctionArgument,
+	type FunctionMetadata,
 	type ImplementedFunctions,
 	type SimpleCellAddress
 } from "hyperformula"
+import { rangeAddresses } from "../../../ods/formula/toXlsx"
+import { OFFSET_FUNCTION, RANGE_FUNCTION } from "../../functions/engineNames"
 import { MAX_COLUMNS, MAX_ROWS } from "../../model/model"
 import { singleReference } from "../../refs/formulaRefs"
-import { refError, SheetFunctionPlugin, type PluginCall, type PluginRange, type PluginState } from "./plugin"
+import {
+	refError,
+	SheetFunctionPlugin,
+	valueError,
+	type PluginAst,
+	type PluginCall,
+	type PluginRange,
+	type PluginState,
+	type PluginValue
+} from "./plugin"
 
 // INDIRECT(ref_text, [a1]) (support.microsoft.com "INDIRECT function"): the reference a text names, in A1 or R1C1
 // style, a defined name's included. What it reads is known only once it has calculated, so the engine does not link
@@ -34,6 +47,12 @@ export interface IndirectHost {
 	// calculation's); null as it starts calculating, so one that reads nothing (a sheet or name not there) is known
 	// too, and calculated again when the sheets change.
 	read(formula: SimpleCellAddress, read: IndirectRead | null): void
+	// The formula of the cell `at` (an engine address) as the formula bar shows it, "=" first; null for a cell
+	// without one (FORMULATEXT).
+	formula(at: SimpleCellAddress): string | null
+	// The workbook came from an .ods file: text LibreOffice reads as a reference in its Calc A1 syntax (Sheet.A1) is
+	// read so too, where it is no A1 reference nor a defined name.
+	calcA1(): boolean
 }
 
 let host: IndirectHost | null = null
@@ -53,6 +72,11 @@ export function withIndirect<T>(next: IndirectHost | null, work: () => T): T {
 // Records what the formula at `formula` read where the engine did not link it, for the engine running now.
 export function recordRead(formula: SimpleCellAddress, read: IndirectRead): void {
 	host?.read(formula, read)
+}
+
+// The formula at `at` as the user sees it, for the engine running now; null without one.
+export function shownFormulaAt(at: SimpleCellAddress): string | null {
+	return host === null ? null : host.formula(at)
 }
 
 // The engine's range of a block, or null before installIndirect.
@@ -247,6 +271,32 @@ function a1Block(text: string): Block | null {
 	}
 }
 
+// A reference in LibreOffice's Calc A1 syntax ($Sheet.$A$1, 'My Sheet'.A1:B2's ends each with the sheet), its
+// default for text a reference is read from: as the file grammar's (ods/formula/toXlsx.ts) reads one.
+function calcA1Block(text: string): Block | null {
+	const translated = rangeAddresses(text)
+
+	if ("refused" in translated || translated.parts.length !== 1) return null
+
+	const [part] = translated.parts
+
+	return part === undefined || part === "#REF!" ? null : a1Block(part)
+}
+
+// The engine's evaluation before a one-cell result is read out of its range (private to the engine).
+interface RawEvaluation {
+	evaluateAstWithoutPostprocessing(ast: PluginAst, state: PluginState): PluginValue
+}
+
+// OFFSET's rows, cols, height and width, read after its reference; never lifted over an array.
+const SHIFTS: FunctionArgument[] = [
+	{ argumentType: FunctionArgumentType.NUMBER },
+	{ argumentType: FunctionArgumentType.NUMBER },
+	{ argumentType: FunctionArgumentType.NUMBER, optionalArg: true },
+	{ argumentType: FunctionArgumentType.NUMBER, optionalArg: true }
+]
+const OFFSET_SHIFTS: FunctionMetadata = { method: "offset", parameters: SHIFTS, vectorizationForbidden: true }
+
 // A defined name as INDIRECT reads one: letters, digits, "_", "\" and ".", starting with a letter, "_" or "\".
 const NAME = /^(?:(?:'(?:[^']|'')+'|[^!'"]+)!)?[A-Za-z_\\À-￿][\w.\\À-￿]*$/
 
@@ -259,7 +309,142 @@ export class IndirectFunctions extends SheetFunctionPlugin {
 			method: "indirect",
 			parameters: [{ argumentType: FunctionArgumentType.STRING }, { argumentType: FunctionArgumentType.BOOLEAN, defaultValue: true }],
 			isDependentOnSheetStructureChange: true
+		},
+		[OFFSET_FUNCTION]: { ...OFFSET_SHIFTS, parameters: [{ argumentType: FunctionArgumentType.ANY }, ...SHIFTS] },
+		[RANGE_FUNCTION]: {
+			method: "range",
+			parameters: [{ argumentType: FunctionArgumentType.ANY }, { argumentType: FunctionArgumentType.ANY }],
+			vectorizationForbidden: true
 		}
+	}
+
+	// The area a reference argument names: a cell's read from its syntax (its value is not what is wanted), any other
+	// evaluated; an error it gives as it is, null for no reference. A whole column (row) ends at the grid's last row
+	// (column).
+	private areaOf(ast: PluginAst, state: PluginState): IndirectRead | CellError | null {
+		let node = ast as PluginAst & {
+			expression?: PluginAst
+			reference?: { toSimpleCellAddress(base: SimpleCellAddress): SimpleCellAddress }
+		}
+
+		while (node.type === ("PARENTHESES" as PluginAst["type"]) && node.expression !== undefined) node = node.expression
+
+		if (node.type === ("CELL_REFERENCE" as PluginAst["type"]) && node.reference !== undefined) {
+			const at = node.reference.toSimpleCellAddress(state.formulaAddress)
+
+			return at.row < 0 || at.col < 0
+				? refError()
+				: { sheet: at.sheet, startRow: at.row, startCol: at.col, endRow: at.row, endCol: at.col }
+		}
+
+		// Unwrapped: evaluateAst gives a one-cell reference's value, no longer the reference.
+		const value = (this.interpreter as unknown as RawEvaluation).evaluateAstWithoutPostprocessing(node, state)
+
+		if (value instanceof CellError) return value
+		if (!(value instanceof SimpleRangeValue) || value.range === undefined) return null
+
+		const range = value.range
+
+		return {
+			sheet: range.sheet,
+			startRow: range.start.row,
+			startCol: range.start.col,
+			endRow: range.end.row === Number.POSITIVE_INFINITY ? MAX_ROWS - 1 : range.end.row,
+			endCol: range.end.col === Number.POSITIVE_INFINITY ? MAX_COLUMNS - 1 : range.end.col
+		}
+	}
+
+	// The cells of `area` as a reference: #REF! off the grid, a circle where the formula's own cell is among them. What
+	// it reads is recorded, the engine not linking the formula to it.
+	private reach(area: IndirectRead, state: PluginState): PluginValue {
+		const formula = state.formulaAddress
+		const made = classes
+
+		if (made === null || area.startRow < 0 || area.startCol < 0 || area.endRow >= MAX_ROWS || area.endCol >= MAX_COLUMNS)
+			return refError()
+
+		if (
+			area.sheet === formula.sheet &&
+			formula.row >= area.startRow &&
+			formula.row <= area.endRow &&
+			formula.col >= area.startCol &&
+			formula.col <= area.endCol
+		)
+			return new CellError(ErrorType.CYCLE)
+
+		host?.read(formula, area)
+
+		const columns = area.startRow === 0 && area.endRow === MAX_ROWS - 1
+		const rows = area.startCol === 0 && area.endCol === MAX_COLUMNS - 1
+		const range =
+			columns && !rows
+				? made.cols(area.sheet, area.startCol, area.endCol)
+				: rows && !columns
+					? made.rows(area.sheet, area.startRow, area.endRow)
+					: made.cells(area.sheet, area.startRow, area.startCol, area.endRow, area.endCol)
+
+		return SimpleRangeValue.onlyRange(range, this.dependencyGraph)
+	}
+
+	// OFFSET(reference, rows, cols, [height], [width]) (support.microsoft.com "OFFSET function") where the engine cannot
+	// resolve it as it parses: rows and cols moved by (a fraction cut off, an empty one 0), height and width the
+	// reference's own where omitted or empty. A result off the grid or with no height or width is #REF!, a reference
+	// that is none #VALUE!.
+	offset(ast: PluginCall, state: PluginState): unknown {
+		const [base, ...rest] = ast.args
+
+		if (base === undefined) return valueError()
+
+		host?.read(state.formulaAddress, null)
+
+		const area = this.areaOf(base, state)
+
+		if (area instanceof CellError) return area
+		if (area === null) return valueError()
+
+		const empty = (at: number) => rest[at]?.type === ("EMPTY" as PluginAst["type"])
+
+		return this.runFunction(rest, state, OFFSET_SHIFTS, (rows: number, cols: number, height?: number, width?: number) => {
+			const tall = height === undefined || empty(2) ? area.endRow - area.startRow + 1 : Math.trunc(height)
+			const wide = width === undefined || empty(3) ? area.endCol - area.startCol + 1 : Math.trunc(width)
+
+			if (tall < 1 || wide < 1) return refError()
+
+			const startRow = area.startRow + Math.trunc(rows)
+			const startCol = area.startCol + Math.trunc(cols)
+
+			return this.reach({ sheet: area.sheet, startRow, startCol, endRow: startRow + tall - 1, endCol: startCol + wide - 1 }, state)
+		})
+	}
+
+	// The range operator (first:last) where an end is a function's reference (A1:INDEX(A:A,3)): the cells from one to
+	// the other, on one sheet; #VALUE! for an end that is no reference.
+	range(ast: PluginCall, state: PluginState): unknown {
+		const [first, last] = ast.args
+
+		if (first === undefined || last === undefined || ast.args.length !== 2) return valueError()
+
+		host?.read(state.formulaAddress, null)
+
+		const a = this.areaOf(first, state)
+
+		if (a instanceof CellError) return a
+
+		const b = this.areaOf(last, state)
+
+		if (b instanceof CellError) return b
+		if (a === null || b === null || a.sheet !== b.sheet) return valueError()
+
+		return this.reach(
+			{
+				sheet: a.sheet,
+				startRow: Math.min(a.startRow, b.startRow),
+				startCol: Math.min(a.startCol, b.startCol),
+				endRow: Math.max(a.endRow, b.endRow),
+				endCol: Math.max(a.endCol, b.endCol)
+			},
+			state
+		)
 	}
 
 	// An engine sheet id by name (case-insensitive), or undefined.
@@ -293,7 +478,7 @@ export class IndirectFunctions extends SheetFunctionPlugin {
 
 				const named = reading.name(bang < 0 ? pending : pending.slice(bang + 1), scope)
 
-				if (named === undefined) return refError()
+				if (named === undefined) break
 
 				// A name's own text is A1 style, whatever INDIRECT was asked for.
 				a1 = true
@@ -301,6 +486,7 @@ export class IndirectFunctions extends SheetFunctionPlugin {
 				pending = named.text.trim()
 			}
 
+			if (block === null && a1 && reading.calcA1()) block = calcA1Block(pending)
 			if (block === null) return refError()
 
 			const sheet = block.sheet === null ? own : this.sheetId(block.sheet)

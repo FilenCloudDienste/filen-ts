@@ -4,12 +4,16 @@ import { ABSENT, CellLog, type CellState } from "../../xlsx/edit/history"
 import type { SheetStore } from "../../xlsx/model/store"
 import { CellKind, FormulaKind, type XlsxSheetModel } from "../../xlsx/model/types"
 import { dateSerial, MAX_SERIAL_1900, MAX_SERIAL_1904, serialDate, type DateParts } from "../numfmt/date"
+import { isTimeFormat } from "../numfmt/edit"
+import type { NumFmt } from "../numfmt/parse"
 import { defineSheetFeature, type SheetChangeSink, type SheetHandled } from "../registry"
 import type { Slicing } from "../../slicing"
 import { formulaTranslator } from "../refs/formulaRefs"
 import { SHEET_MAX_CELL_TEXT, type SheetId, type SheetRange } from "../protocol"
-import { autoFillWrites, entryCells, fillPlan, seriesWrites, type FillDirection, type FillPlan, type FillWrites } from "./fill"
-import { fillSeries, seriesLine, type FillCalendar, type FillSourceCell, type FillValue } from "./series"
+import { filteredOutRows } from "../../xlsx/edit/filter"
+import { visibleRanges } from "../visibleRows"
+import { autoFillWrites, entryCells, seriesWrites, visibleFillPlan, type FillDirection, type FillPlan, type FillWrites } from "./fill"
+import { fillSeries, seriesLine, type FillCalendar, type FillSourceCell, type FillTemporal, type FillValue } from "./series"
 
 // Fill over an xlsx sheet: each target takes its source cell as it is (its value of whatever type, its format), a
 // formula moved by the target's offset, so a copy is exact where a typed entry would be read again. Refused where a
@@ -29,6 +33,10 @@ function arraySource(model: XlsxSheetModel, formula: number): boolean {
 	return kind === FormulaKind.ARRAY || kind === FormulaKind.DATA_TABLE || model.store.formulas.formula(formula).cellMetadata >= 0
 }
 
+function temporal(format: NumFmt): FillTemporal {
+	return !format.isDate ? "none" : isTimeFormat(format) ? "time" : "date"
+}
+
 // What a fill reads a source cell as (series.ts).
 function sourceCell(document: XlsxDocument, model: XlsxSheetModel, sheet: SheetId, row: number, col: number): FillSourceCell {
 	const state = document.state(sheet, row, col)
@@ -40,7 +48,7 @@ function sourceCell(document: XlsxDocument, model: XlsxSheetModel, sheet: SheetI
 		case CellKind.EMPTY:
 			return { kind: "empty" }
 		case CellKind.NUMBER:
-			return { kind: "number", value: state.value, date: document.numFmt(state.style).isDate }
+			return { kind: "number", value: state.value, temporal: temporal(document.numFmt(state.style)) }
 		case CellKind.SHARED_STRING:
 		case CellKind.INLINE_STRING:
 		case CellKind.FORMULA_STRING:
@@ -116,9 +124,9 @@ export async function fillCells(
 	changes: SheetChangeSink,
 	slicing?: Slicing
 ): Promise<SheetHandled> {
-	await document.ready(sheet)
+	const model = await document.ready(sheet)
 
-	return writeFill(document, sheet, fillPlan(ranges, direction), changes, slicing)
+	return writeFill(document, sheet, visibleFillPlan(ranges, direction, filteredOutRows(document, model)), changes, slicing)
 }
 
 // Writes a fill: each target its source cell, or its own value in its source's format.
@@ -217,10 +225,13 @@ export const xlsxFillFeature = defineSheetFeature<XlsxDocument>({
 				const document = context.doc
 				const model = await document.ready(command.sheet)
 				const read = (row: number, col: number): FillSourceCell => sourceCell(document, model, command.sheet, row, col)
+				const dates = calendar(document)
 				const handled = await writeFill(
 					document,
 					command.sheet,
-					autoFillWrites(command.source, command.target, command.mode, read, fillSeries),
+					autoFillWrites(command.source, command.target, command.mode, read, (cells, mode, backward) =>
+						fillSeries(cells, mode, backward, dates)
+					),
 					context.changes,
 					context.slicing
 				)
@@ -270,12 +281,13 @@ export const xlsxFillFeature = defineSheetFeature<XlsxDocument>({
 			info: { write: true },
 			run: async (context, command) => {
 				const model = await context.doc.ready(command.sheet)
-				const cells = entryCells(command.ranges, model.merges, command.entry, command.from)
+				const ranges = visibleRanges(command.ranges, filteredOutRows(context.doc, model))
+				const cells = entryCells(ranges, model.merges, command.entry, command.from)
 
 				if (cells === null) return null
 				if (cells === "tooLarge") return { refused: { reason: "tooLarge" } }
 
-				return setCells(context.doc, command.sheet, cells, context.changes, undefined, context.slicing)
+				return setCells(context.doc, command.sheet, { ...cells, typed: true }, context.changes, undefined, context.slicing)
 			}
 		}
 	}

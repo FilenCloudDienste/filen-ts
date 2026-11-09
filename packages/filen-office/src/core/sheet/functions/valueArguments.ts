@@ -82,7 +82,7 @@ const ENGINE =
 	"IMCSC:vxxxxxx IMCSCH:vxxxxxx IMDIV:vvxxxxx IMEXP:vxxxxxx IMLN:vxxxxxx IMLOG10:vxxxxxx IMLOG2:vxxxxxx " +
 	"IMPOWER:vvxxxxx IMREAL:vxxxxxx IMSEC:vxxxxxx IMSECH:vxxxxxx IMSIN:vxxxxxx IMSINH:vxxxxxx " +
 	"IMSQRT:vxxxxxx IMSUB:vvxxxxx IMTAN:vxxxxxx MROUND:vvxxxxx OCT2BIN:vvxxxxx OCT2DEC:vxxxxxx " +
-	"OCT2HEX:vvxxxxx QUOTIENT:vvxxxxx RANDBETWEEN:vvxxxxx SEQUENCE:vvvvxxx SERIESSUM:vvvxxxx SORT:xvvxxxx " +
+	"OCT2HEX:vvxxxxx QUOTIENT:vvxxxxx RANDBETWEEN:vvxxxxx SEQUENCE:vvvvxxx SERIESSUM:vvvxxxx SORT:xxxvxxx " +
 	"SQRTPI:vxxxxxx TBILLEQ:vvvxxxx TBILLPRICE:vvvxxxx TBILLYIELD:vvvxxxx WORKDAY:vvxxxxx XIRR:xxvxxxx " +
 	"XLOOKUP:xxxxvvx XNPV:vxxxxxx YEARFRAC:vvvxxxx"
 

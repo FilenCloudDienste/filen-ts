@@ -23,6 +23,7 @@ import { NO_FEATURES, type SheetFeatures } from "./features"
 import type { ScopeNames } from "./names"
 import { nameKey } from "../features"
 import { ADDRESS_ATTRIBUTES, patchAttributes, type Shifter } from "../unheld"
+import { movedAttribute, movedTarget } from "./conditions"
 import { sameBytes } from "../../docx/write/bytes"
 
 // content.xml as a save writes it, streamed from the source's: everything an edit left alone passes through as its
@@ -60,7 +61,8 @@ const NAMES = [
 	"table:dde-links",
 	"office:font-face-decls",
 	"table:named-expressions",
-	"table:label-ranges"
+	"table:label-ranges",
+	"calcext:conditional-formats"
 ] as const
 
 const N = Object.fromEntries(NAMES.map((name, index) => [name, index + 1])) as Record<(typeof NAMES)[number], number>
@@ -218,6 +220,8 @@ export class ContentWriter implements StreamHandler {
 	private readonly patchedElements = new Set<number>()
 	private patchStart = -1
 	private patchDepth = -1
+	// The source table whose calcext:conditional-formats is under way (those moved), null for an element outside.
+	private patchTable: string | null = null
 
 	constructor(plan: ContentPlan) {
 		this.plan = plan
@@ -483,13 +487,62 @@ export class ContentWriter implements StreamHandler {
 		const element = decodeUtf8(this.stream.bytes(this.patchStart, end))
 
 		this.ownStructure(
-			this.moved(element, (local, value, shifter) =>
-				ADDRESS_ATTRIBUTES.get(local) === "address" ? shifter.address(value) : undefined
-			)
+			this.patchTable === null
+				? this.moved(element, (local, value, shifter) =>
+						ADDRESS_ATTRIBUTES.get(local) === "address" ? shifter.address(value) : undefined
+					)
+				: this.movedConditions(element, this.patchTable)
 		)
 		this.patchStart = -1
 		this.patchDepth = -1
+		this.patchTable = null
 		this.copyFrom = end
+	}
+
+	// A table's calcext:conditional-formats moved with its cells (conditions.ts): each format's ranges, base cells and
+	// references, one whose cells were all deleted left out; every other byte as written.
+	private movedConditions(element: string, own: string): string {
+		const shifter = this.shifter
+		const open = /^<[^>]*>/.exec(element)?.[0] ?? ""
+
+		if (shifter === null || open.endsWith("/>")) return element
+
+		const closeAt = element.lastIndexOf("<")
+		const out: string[] = [open]
+		const calcext = (prefix: string): boolean => this.plan.source.prefixes.get(prefix) === OdfNs.calcext
+
+		for (const child of topElements(element.slice(open.length, closeAt))) {
+			let text: string | undefined
+
+			patchAttributes(/^<[^>]*>/.exec(child)?.[0] ?? "", calcext, (local, value) => {
+				if (local === "target-range-address") text = value
+
+				return undefined
+			})
+
+			if (text === undefined) {
+				out.push(child)
+
+				continue
+			}
+
+			const target = movedTarget(text, shifter, own)
+
+			if (target === "gone") continue
+
+			const patched =
+				target === null
+					? null
+					: patchAttributes(child, calcext, (local, value) => movedAttribute(local, value, target, shifter, own))
+
+			if (patched === null) throw new ContentRefused("A conditional format's range cannot be moved with the cells")
+
+			out.push(patched)
+		}
+
+		out.push(element.slice(closeAt))
+
+		return out.join("")
 	}
 
 	private namesChanged(scope: number | null): boolean {
@@ -1256,6 +1309,17 @@ export class ContentWriter implements StreamHandler {
 			this.flush(start)
 			this.own(writer.rowsEnd())
 			table.rowsDone = true
+		}
+
+		// Its conditional formats, where the sheets moved: taken whole and written again moved.
+		if (child && name === N["calcext:conditional-formats"] && this.shifter !== null) {
+			this.flush(start)
+			this.copyFrom = -1
+			this.patchStart = start
+			this.patchDepth = depth
+			this.patchTable = this.plan.source.tables[table.index]?.name ?? ""
+
+			if (empty) this.endPatched(end)
 		}
 	}
 

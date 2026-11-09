@@ -4,7 +4,7 @@ import type { SheetStyles } from "../../sheet/style/resolve"
 import type { XlsxFont } from "../../xlsx/model/types"
 import { escapeAttribute } from "../../xml/index"
 import type { OdsCellStyles } from "../styles/cell"
-import { dataStyles } from "./dataStyle"
+import { dataStyles, readBack, sameShown } from "./dataStyle"
 
 // The automatic styles a save adds to content.xml (ODF 1.3 Part 3 §16.2): a cell format, a row height, a column
 // width, a sheet's look or a run's font the source has no style for gets one, each written once. A cell format the
@@ -507,9 +507,15 @@ export class OdsStyleWriter {
 		if (name === undefined) {
 			name = this.name("NF", null)
 
-			const written = dataStyles(code, name)
+			const palette = this.styles.palette
+			const written = dataStyles(code, name, palette)
 
 			if ("refused" in written) throw new StyleRefused(`the number format ${code} (${written.refused})`)
+
+			// What the save's verification reads back must show as the code did ("?" blanks have no attribute), the file
+			// read back with the default palette.
+			if (!sameShown(code, readBack(written.styles, name), { palette }, {}))
+				throw new StyleRefused(`the number format ${code} (read back)`)
 
 			for (const style of written.styles) {
 				if (style.name !== name) this.taken.add(style.name)

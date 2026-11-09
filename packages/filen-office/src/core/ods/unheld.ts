@@ -200,8 +200,9 @@ export class Shifter {
 		return out + text.slice(at)
 	}
 
-	// An attribute's cell, range or space-separated range list address (ODF 1.3 Part 3 §18.3.5-§18.3.7) moved.
-	address(text: string, kind: "formula" | "name" = "formula"): string | null {
+	// An attribute's cell, range or space-separated range list address (ODF 1.3 Part 3 §18.3.5-§18.3.7) moved; `own`:
+	// the table a part without a sheet is on.
+	address(text: string, kind: "formula" | "name" = "formula", own = ""): string | null {
 		if (!this.changed) return text
 
 		const parts = splitList(text)
@@ -211,7 +212,7 @@ export class Shifter {
 		const out: string[] = []
 
 		for (const part of parts) {
-			const moved = this.reference(part, "", kind)
+			const moved = this.reference(part, own, kind)
 
 			if (moved === null) return null
 
@@ -368,7 +369,7 @@ function referenceEnd(text: string, from: number): number {
 }
 
 // Space-separated addresses, past quoted names; null where a quote is not closed.
-function splitList(text: string): string[] | null {
+export function splitList(text: string): string[] | null {
 	const out: string[] = []
 	let start = -1
 

@@ -5,8 +5,9 @@ import { decodeUtf8 } from "../../xml/index"
 import { relationshipsPartName } from "../../opc/partNames"
 import { odsChartsRefusal } from "../charts/write"
 import { openFormula } from "../formula/toOf"
-import { odsSource } from "../source"
+import { odsSource, type OdsSource } from "../source"
 import { movedText, namedBoxes, shifterOf, type OdsUnheld, type Shifter } from "../unheld"
+import { conditionsRefusal } from "./conditions"
 import { CellRefused, declaresCalcext, paragraphText, STRICT_ERRORS, storeValue, Value } from "./cells"
 import { OdsStyleWriter, StyleRefused } from "./styles"
 import { printRanges } from "./content"
@@ -32,7 +33,9 @@ const SECTIONS: ReadonlySet<string> = new Set([
 	"sheetViews",
 	"sheetProtection",
 	"dataValidations",
-	"autoFilter"
+	"autoFilter",
+	// Written as the source's calcext:conditional-formats moved with the cells (conditions.ts).
+	"conditionalFormatting"
 ])
 // Workbook sections (defined names: print areas, checked below).
 const WORKBOOK_SECTIONS: ReadonlySet<string> = new Set(["sheets", "bookViews", "workbookProtection", "definedNames"])
@@ -89,6 +92,10 @@ export function odsEditRefusal(
 	const kept = unheldRefusal(document, touched, command)
 
 	if (kept !== null) return kept
+
+	const conditions = conditionsVerdict(document, source, journal)
+
+	if (conditions !== null) return conditions
 
 	const chart = odsChartsRefusal(document)
 
@@ -298,10 +305,11 @@ function unheldRefusal(
 
 	const shifter = shifterOf(document.workbook, source.tables)
 
-	// A paste of the session's own copy: from where it was copied (the paste handler takes it so, ownClip).
+	// A paste of the session's own copy: from where it was copied (the paste handler takes it so, ownClip). A values
+	// paste writes results and moves nothing.
 	const clip = clips.get(document) ?? null
 	const pasted =
-		(command?.type === "clipboard.paste" || command?.type === "clipboard.pasteHtml") &&
+		((command?.type === "clipboard.paste" && command.values !== true) || command?.type === "clipboard.pasteHtml") &&
 		clip !== null &&
 		command.clip === clip.id &&
 		lineEnds(command.text) === lineEnds(clip.tsv)
@@ -406,6 +414,27 @@ function unheldRefusal(
 	verdicts.set(document, { state, refusal })
 
 	return refusal
+}
+
+// What the last conditional formatting verdict was given for: each table's sheet name and axes now.
+const conditionVerdicts = new WeakMap<XlsxDocument, readonly unknown[]>()
+
+// The conditional formatting check (conditions.ts), where this edit marked it or moved or renamed a sheet.
+function conditionsVerdict(document: XlsxDocument, source: OdsSource, journal: ReadonlySet<string> | null): SheetRefusal | null {
+	const marked =
+		journal === null
+			? [...document.workbook.changes.sheets.values()].some(sheet => sheet.sections.has("conditionalFormatting"))
+			: [...journal].some(mark => mark.startsWith("s\u0000") && mark.endsWith("\u0000conditionalFormatting"))
+	const shifter = shifterOf(document.workbook, source.tables)
+	const state = [...shifter.moves.values()].flatMap(move => (move === null ? [null] : [move.name, move.rows, move.cols]))
+	const last = conditionVerdicts.get(document)
+
+	if (!marked && last !== undefined && last.length === state.length && last.every((value, index) => value === state[index])) return null
+	if (!marked && last === undefined && !shifter.changed) return null
+
+	conditionVerdicts.set(document, state)
+
+	return conditionsRefusal(document, source, shifter)
 }
 
 function structureRefusal(unheld: OdsUnheld, shifter: Shifter): SheetRefusal | null {

@@ -83,6 +83,7 @@ export function pastedInputs(clip: GridClip, to: CellPosition, sheet: string): M
 
 export interface PastedBlock {
 	cells: CellEntry[]
+	// The area written: the block, times the repeats over a paste area.
 	rows: number
 	cols: number
 	// The clip kept after the paste: a cut's cells now live where they were pasted, so pasting them again
@@ -90,64 +91,169 @@ export interface PastedBlock {
 	clip: GridClip | null
 }
 
-// A paste of clipboard `text` with its top-left cell at `to` on `sheet`. `clip` is the grid's own, given
-// only while `text` is its clipboard text: its range is then filled whole, since the text drops a trailing
-// row of blanks (and a lone blank cell altogether) while a cell showing nothing may still hold a formula.
-// Null past `limit` entries, before the rest is built.
-export function pastedCells(text: string, clip: GridClip | null, to: CellPosition, sheet: string, limit: number): PastedBlock | null {
+export interface PasteRepeats {
+	readonly down: number
+	readonly across: number
+}
+
+const ONCE: PasteRepeats = { down: 1, across: 1 }
+
+// How often a block of `rows` by `cols` pasted at `to` repeats down and across the paste area `target`, as Excel
+// fills one: an area starting at `to` whose height and width are whole multiples of the block takes it that many
+// times, unless a tile would cut through one of `merges` (quads: startRow, startCol, endRow, endCol); any other
+// area takes it once, at `to`.
+export function pasteRepeats(
+	rows: number,
+	cols: number,
+	to: CellPosition,
+	target: CellRange | undefined,
+	merges?: ArrayLike<number>
+): PasteRepeats {
+	if (target === undefined || rows <= 0 || cols <= 0 || target.startRow !== to.row || target.startCol !== to.col) return ONCE
+
+	const height = target.endRow - target.startRow + 1
+	const width = target.endCol - target.startCol + 1
+
+	if (height % rows !== 0 || width % cols !== 0 || (height === rows && width === cols)) return ONCE
+
+	if (merges !== undefined)
+		for (let k = 0; k + 3 < merges.length; k += 4) {
+			const startRow = merges[k] ?? 0
+			const startCol = merges[k + 1] ?? 0
+			const endRow = merges[k + 2] ?? 0
+			const endCol = merges[k + 3] ?? 0
+
+			if (startRow > target.endRow || endRow < target.startRow || startCol > target.endCol || endCol < target.startCol) continue
+
+			if (
+				startRow < target.startRow ||
+				endRow > target.endRow ||
+				startCol < target.startCol ||
+				endCol > target.endCol ||
+				Math.floor((startRow - target.startRow) / rows) !== Math.floor((endRow - target.startRow) / rows) ||
+				Math.floor((startCol - target.startCol) / cols) !== Math.floor((endCol - target.startCol) / cols)
+			)
+				return ONCE
+		}
+
+	return { down: height / rows, across: width / cols }
+}
+
+// A paste of clipboard `text` with its top-left cell at `to` on `sheet`, repeated over the paste area `target` as
+// pasteRepeats says (a cut never repeats: Excel moves its cells once). `clip` is the grid's own, given only while
+// `text` is its clipboard text: its range is then filled whole, since the text drops a trailing row of blanks (and a
+// lone blank cell altogether) while a cell showing nothing may still hold a formula; each repeat moves its formulas'
+// relative references to its own origin. Null past `limit` entries, before any is built.
+export function pastedCells(
+	text: string,
+	clip: GridClip | null,
+	to: CellPosition,
+	sheet: string,
+	limit: number,
+	target?: CellRange,
+	merges?: ArrayLike<number>
+): PastedBlock | null {
 	const fields = parseTsv(text)
 	const cells: CellEntry[] = []
 
 	if (clip === null) {
 		let cols = 0
+		let count = 0
 
-		for (const [rowOffset, values] of fields.entries()) {
+		for (const values of fields) {
 			cols = Math.max(cols, values.length)
+			count += values.length
+		}
 
-			for (const [colOffset, input] of values.entries()) {
-				if (cells.length === limit) {
-					return null
+		const rows = fields.length
+		const { down, across } = pasteRepeats(rows, cols, to, target, merges)
+
+		if (count * down * across > limit) {
+			return null
+		}
+
+		for (let row = 0; row < rows * down; row++) {
+			const values = fields[row % rows] ?? []
+
+			for (let tile = 0; tile < across; tile++) {
+				for (const [colOffset, input] of values.entries()) {
+					cells.push({ row: to.row + row, col: to.col + tile * cols + colOffset, input })
 				}
-
-				cells.push({ row: to.row + rowOffset, col: to.col + colOffset, input })
 			}
 		}
 
-		return { cells, rows: fields.length, cols, clip: null }
+		return { cells, rows: rows * down, cols: cols * across, clip: null }
 	}
 
-	const inputs = pastedInputs(clip, to, sheet)
 	const rows = rangeRows(clip.range)
 	const cols = rangeCols(clip.range)
 
-	for (let rowOffset = 0; rowOffset < rows; rowOffset++) {
-		for (let colOffset = 0; colOffset < cols; colOffset++) {
-			if (cells.length === limit) {
-				return null
+	if (clip.cut) {
+		if (rows * cols > limit) {
+			return null
+		}
+
+		const inputs = pastedInputs(clip, to, sheet)
+
+		for (let rowOffset = 0; rowOffset < rows; rowOffset++) {
+			for (let colOffset = 0; colOffset < cols; colOffset++) {
+				cells.push({
+					row: to.row + rowOffset,
+					col: to.col + colOffset,
+					input: inputs.get(cellKey(rowOffset, colOffset)) ?? fields[rowOffset]?.[colOffset] ?? ""
+				})
 			}
+		}
+
+		return {
+			cells,
+			rows,
+			cols,
+			clip: {
+				tsv: clip.tsv,
+				sheet,
+				range: { startRow: to.row, startCol: to.col, endRow: to.row + rows - 1, endCol: to.col + cols - 1 },
+				cut: false,
+				inputs
+			}
+		}
+	}
+
+	const { down, across } = pasteRepeats(rows, cols, to, target, merges)
+
+	if (rows * cols * down * across > limit) {
+		return null
+	}
+
+	// Each formula parsed once, moved to every repeat's origin.
+	const formulas = new Map<number, (rows: number, cols: number) => string>()
+
+	for (const [offset, input] of clip.inputs) {
+		if (input.startsWith("=") && input.length > 1) {
+			formulas.set(offset, formulaTranslator(input.slice(1)))
+		}
+	}
+
+	for (let row = 0; row < rows * down; row++) {
+		const rowOffset = row % rows
+
+		for (let col = 0; col < cols * across; col++) {
+			const colOffset = col % cols
+			const offset = cellKey(rowOffset, colOffset)
+			const formula = formulas.get(offset)
 
 			cells.push({
-				row: to.row + rowOffset,
-				col: to.col + colOffset,
-				input: inputs.get(cellKey(rowOffset, colOffset)) ?? fields[rowOffset]?.[colOffset] ?? ""
+				row: to.row + row,
+				col: to.col + col,
+				input:
+					formula === undefined
+						? (clip.inputs.get(offset) ?? fields[rowOffset]?.[colOffset] ?? "")
+						: `=${formula(to.row + row - rowOffset - clip.range.startRow, to.col + col - colOffset - clip.range.startCol)}`
 			})
 		}
 	}
 
-	return {
-		cells,
-		rows,
-		cols,
-		clip: clip.cut
-			? {
-					tsv: clip.tsv,
-					sheet,
-					range: { startRow: to.row, startCol: to.col, endRow: to.row + rows - 1, endCol: to.col + cols - 1 },
-					cut: false,
-					inputs
-				}
-			: clip
-	}
+	return { cells, rows: rows * down, cols: cols * across, clip }
 }
 
 // Tab-separated clipboard text back into rows of cells: quoted fields may hold tabs, line ends and doubled

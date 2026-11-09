@@ -2,12 +2,16 @@ import type { SheetStyles } from "../../sheet/style/resolve"
 import type { XlsxColor, XlsxDxf, XlsxStyleTable } from "../../xlsx/model/types"
 import { parseRangeRef } from "../../xlsx/write/text"
 import { encodeUtf8, escapeAttribute, parseXml, type XmlDocument } from "../../xml/index"
+import { DATES } from "../features"
 import { openFormula } from "../formula/toOf"
 
 // Conditional formats (ECMA-376 Part 1 §18.3.1.18) as LibreOffice's calcext:conditional-formats, which an ODF 1.3
 // document of extended conformance carries and LibreOffice reads (the inverse of the reader's features.ts cfRule):
-// each rule's look a common cell style in styles.xml. Rules it has no form for (colour scales, data bars, icon sets,
-// time periods, blanks) are left out and counted.
+// each rule's look a common cell style in styles.xml. Rules it has no form for (blanks, standard-deviation averages,
+// and colour scales, data bars or icon sets outside LibreOffice's forms) are left out and counted.
+
+// ST_TimePeriod (§18.18.82) to LibreOffice's calcext:date names.
+const PERIODS: ReadonlyMap<string, string> = new Map(Object.entries(DATES).map(([ods, period]) => [period, ods]))
 
 export interface SheetConditions {
 	// calcext:conditional-formats, or "" for none.
@@ -320,9 +324,20 @@ export function sheetConditions(sections: readonly string[], sheet: string, styl
 				continue
 			}
 
-			const value = conditionValue(document, rule)
 			const dxf = Number(document.attribute(rule, "dxfId") ?? "-1")
 			const style = dxf >= 0 ? styles.name(dxf) : undefined
+
+			// A Date Occurring (§18.3.1.10 @timePeriod): calcext:date-is, which has no value or base cell.
+			if (document.attribute(rule, "type") === "timePeriod") {
+				const date = PERIODS.get(document.attribute(rule, "timePeriod") ?? "")
+
+				if (date === undefined || style === undefined) lost++
+				else conditions.push(`<calcext:date-is calcext:date="${date}" calcext:style="${escapeAttribute(style)}"/>`)
+
+				continue
+			}
+
+			const value = conditionValue(document, rule)
 
 			if (value === null || style === undefined) {
 				lost++

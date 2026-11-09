@@ -1,5 +1,5 @@
 import { numFmt } from "./format"
-import { SectionKind, Tok, type NumFmtSection } from "./parse"
+import { SectionKind, Tok, type NumFmt, type NumFmtSection } from "./parse"
 
 // What the toolbar and the Format Cells dialog do with number format codes: name a code's category, offer Excel's
 // Home tab formats, and add or take away a decimal place (Increase and Decrease Decimal). Codes are en-US syntax,
@@ -37,6 +37,17 @@ function hasCurrency(code: string, section: NumFmtSection): boolean {
 	return /\[\$[^-\]]/u.test(code) || section.tokens.some(token => token.kind === Tok.LITERAL && /[$€£¥₹₩₽¤]/u.test(token.text))
 }
 
+function showsDay(section: NumFmtSection): boolean {
+	return hasToken(section, Tok.YEAR) || hasToken(section, Tok.MONTH) || hasToken(section, Tok.DAY)
+}
+
+// A date format showing no year, month or day: the Time category.
+export function isTimeFormat(format: NumFmt): boolean {
+	const first = format.sections[0]
+
+	return format.isDate && first !== undefined && !showsDay(first)
+}
+
 // The category a code falls in, as the Format Cells dialog lists it; "custom" when none fits.
 export function numFmtCategory(code: string): NumFmtCategory {
 	if (code.trim().toLowerCase() === "general") return "general"
@@ -57,7 +68,7 @@ export function numFmtCategory(code: string): NumFmtCategory {
 		case SectionKind.FRACTION:
 			return "fraction"
 		case SectionKind.DATE:
-			return hasToken(first, Tok.YEAR) || hasToken(first, Tok.MONTH) || hasToken(first, Tok.DAY) ? "date" : "time"
+			return showsDay(first) ? "date" : "time"
 		case SectionKind.NUMBER:
 			if (first.percent > 0) return "percentage"
 			if (hasToken(first, Tok.REPEAT)) return "accounting"

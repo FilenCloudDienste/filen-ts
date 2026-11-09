@@ -32,6 +32,7 @@ import {
 	type SheetReadContext
 } from "../../sheet/registry"
 import { SortType, compareSortValues, textSortKey, type SortValue } from "../../sheet/sort/order"
+import { visibleRanges, type RowSpan } from "../../sheet/visibleRows"
 import { decodeUtf8, parseXml, XmlEditor } from "../../xml/index"
 import type { SheetStore } from "../model/store"
 import { CellKind, RowFlag, type XlsxDefinedName, type XlsxSheetModel } from "../model/types"
@@ -910,21 +911,52 @@ export function trackFilteredRows(document: XlsxDocument): void {
 
 // Whether one of the sheet's filters with criteria hides a row of its range (sheetPr filterMode, §18.3.1.82).
 function filtering(document: XlsxDocument, model: XlsxSheetModel): boolean {
+	return filteredOutRows(document, model).length > 0
+}
+
+// The rows a selection's clear, format and fill pass over: while the sheet is filtered (filterMode), every hidden
+// row, as Excel then acts on visible cells only; none otherwise, rows hidden by hand being edited as any other.
+export function filteredOutRows(document: XlsxDocument, model: XlsxSheetModel): RowSpan[] {
+	const ranges = filterRanges(document, model)
+
+	if (ranges.length === 0) return []
+
 	const store = model.store as SheetStore
+	const spans: { first: number; last: number }[] = []
+	const add = (first: number, last: number): void => {
+		const previous = spans[spans.length - 1]
 
-	for (const { startRow, endRow } of filterRanges(document, model)) {
-		for (const block of store.blocks) {
-			if (block.firstRow > endRow) break
-
-			for (let i = 0; i < block.rowCount; i++) {
-				const row = block.firstRow + (block.rows[i] ?? 0)
-
-				if (row > startRow && row <= endRow && ((block.rowFlags[i] ?? 0) & RowFlag.HIDDEN) !== 0) return true
-			}
-		}
+		if (previous !== undefined && previous.last + 1 >= first) previous.last = Math.max(previous.last, last)
+		else spans.push({ first, last })
 	}
 
-	return false
+	for (const block of store.blocks)
+		for (let i = 0; i < block.rowCount; i++)
+			if (((block.rowFlags[i] ?? 0) & RowFlag.HIDDEN) !== 0) {
+				const row = block.firstRow + (block.rows[i] ?? 0)
+
+				add(row, row)
+			}
+
+	// Rows the store does not hold (an OpenDocument sheet's runs), in among the store's.
+	const runs = (model.rowRuns ?? []).filter(run => (run.flags & RowFlag.HIDDEN) !== 0)
+
+	if (runs.length > 0) {
+		const rows = spans.splice(0)
+
+		for (const span of [...rows, ...runs].sort((a, b) => a.first - b.first)) add(span.first, span.last)
+	}
+
+	return spans.some(span => ranges.some(range => span.last > range.startRow && span.first <= range.endRow)) ? spans : []
+}
+
+// A selection's ranges as the visible runs of their rows on a filtered sheet (filteredOutRows); as given otherwise.
+export async function visibleSelection(
+	document: XlsxDocument,
+	sheet: SheetId,
+	ranges: readonly SheetRange[]
+): Promise<readonly SheetRange[]> {
+	return visibleRanges(ranges, filteredOutRows(document, await document.ready(sheet)))
 }
 
 // The source's own filterMode, read from its sheetPr.

@@ -5,6 +5,7 @@ import { SHEET_MAX_COLS, SHEET_MAX_EDIT_CELLS, SHEET_MAX_ROWS, type SheetLocale 
 import { defineSheetFeature } from "../registry"
 import { textFeature, type TextSheetDocument } from "../text"
 import { clipboardHtml, MAX_HTML_COPY_CELLS, MAX_HTML_COPY_LENGTH, parseClipboardHtml, type ClipOutCell, type ClipValue } from "./html"
+import { pasteRepeats } from "./tsv"
 
 // Clipboard HTML over a text file: a copy's table of the fields as they are, and a paste of a table's values (a
 // text file keeps no formats or formulas: a formula's shown value is not on the clipboard, so its text is pasted).
@@ -42,13 +43,19 @@ export const textClipboardHtmlFeature = defineSheetFeature<TextSheetDocument>({
 						sheet: command.sheet,
 						at: command.at,
 						text: command.text,
-						...(command.clip !== undefined && { clip: command.clip })
+						...(command.clip !== undefined && { clip: command.clip }),
+						...(command.target !== undefined && { target: command.target })
 					})
 
 				if (command.at.row + table.rows > SHEET_MAX_ROWS || command.at.col + table.cols > SHEET_MAX_COLS)
 					return { refused: { reason: "tooLarge" } }
 
-				const inputs = table.cells.map(cell => {
+				const { down, across } = pasteRepeats(table.rows, table.cols, command.at, command.target)
+				const count = table.cells.length * down * across
+
+				if (count > SHEET_MAX_EDIT_CELLS) return { refused: { reason: "tooLarge" } }
+
+				const texts = table.cells.map(cell => {
 					const value = cell.value
 
 					switch (value.kind) {
@@ -63,16 +70,22 @@ export const textClipboardHtmlFeature = defineSheetFeature<TextSheetDocument>({
 							return cell.formula?.text ?? ""
 					}
 				})
+				// The table once per copy over the paste area; a text file keeps no formulas to move.
+				const rows = new Uint32Array(count)
+				const cols = new Uint16Array(count)
+				const inputs: string[] = []
+				let i = 0
 
-				return set.run(context, {
-					type: "cells.set",
-					sheet: command.sheet,
-					cells: {
-						rows: Uint32Array.from(table.cells, cell => command.at.row + cell.row),
-						cols: Uint16Array.from(table.cells, cell => command.at.col + cell.col),
-						inputs
-					}
-				})
+				for (let tileRow = 0; tileRow < down; tileRow++)
+					for (let tileCol = 0; tileCol < across; tileCol++)
+						table.cells.forEach((cell, k) => {
+							rows[i] = command.at.row + tileRow * table.rows + cell.row
+							cols[i] = command.at.col + tileCol * table.cols + cell.col
+							inputs.push(texts[k] ?? "")
+							i++
+						})
+
+				return set.run(context, { type: "cells.set", sheet: command.sheet, cells: { rows, cols, inputs } })
 			}
 		}
 	},

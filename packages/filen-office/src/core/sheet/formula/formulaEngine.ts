@@ -18,14 +18,15 @@ import type { AxisEdit } from "../model/edits"
 import type { SheetLocale } from "../protocol"
 import { runSliced, type SliceClock } from "../../slicing"
 import { cellName } from "../refs/cellRef"
-import { formulaInputs, quoteSheetNames, sameSheet, sheetNameNeedsQuotes } from "../refs/formulaRefs"
+import { formulaInputs, quoteSheetNames, sameSheet, sheetNameNeedsQuotes, spannedReferences } from "../refs/formulaRefs"
 import { MAX_COLUMNS, MAX_ROWS } from "../model/model"
 import type { SizeAxis } from "../sizes/sizes"
 import { registerSheetFunctions } from "./functions"
 import { installIndirect, withIndirect, type IndirectHost, type IndirectRead } from "./functions/indirect"
 import { spillError, withSpill, type SpillHost, type SpillSize } from "./functions/spill"
 import {
-	CALC_ERROR,
+	GENERIC_ERRORS,
+	genericErrorText,
 	guardFunctionPlugins,
 	installLiftTracking,
 	trackLifts,
@@ -34,6 +35,9 @@ import {
 	type PluginScalar
 } from "./functions/plugin"
 import { textDateParser } from "./textDates"
+import { installErrorValues } from "./errorValues"
+import { installExactSearch } from "./exactSearch"
+import { installSharedRanges } from "./sharedRanges"
 import { installWholeRanges, WholeRanges, withWholeRanges } from "./wholeRanges"
 
 // HyperFormula over a workbook, for recalculating what an edit changes. Built only once the workbook has a
@@ -186,7 +190,7 @@ function spilledValue(spilled: PluginScalar, held: PluginScalar): boolean {
 
 // A spilled value as content the engine takes: text stays text, an error its text.
 function spilledContent(value: PluginScalar): RawCellContent {
-	if (value instanceof CellError) return ERROR_TEXT[value.type] ?? "#VALUE!"
+	if (value instanceof CellError) return genericErrorText(value) ?? ERROR_TEXT[value.type] ?? "#VALUE!"
 	if (value === EmptyValue) return 0
 	if (typeof value === "string") return `'${value}`
 	if (typeof value === "object" && value !== null && "val" in value) return value.val
@@ -225,10 +229,9 @@ function changeKey(address: SimpleCellAddress): string {
 
 function exported(value: unknown): RecalculatedCell["value"] {
 	if (value instanceof DetailedCellError) {
-		// #CALC!, which the engine has no type for: its generic error with that message (functions/plugin.ts).
-		if (value.type === ErrorType.ERROR && value.message === CALC_ERROR) return CALC_ERROR
-
-		return ERROR_TEXT[value.type] ?? value.value
+		// #CALC!, #NULL! and the others the engine has no type for: its generic error with that message
+		// (functions/plugin.ts GENERIC_ERRORS).
+		return genericErrorText(value) ?? ERROR_TEXT[value.type] ?? value.value
 	}
 
 	return typeof value === "number" || typeof value === "string" || typeof value === "boolean" ? value : null
@@ -288,6 +291,9 @@ function registerHeld(): void {
 	registerSheetFunctions()
 	guardFunctionPlugins()
 	installWholeRanges(LICENSE_KEY)
+	installSharedRanges(LICENSE_KEY)
+	installExactSearch(LICENSE_KEY)
+	installErrorValues(LICENSE_KEY)
 	installIndirect(LICENSE_KEY)
 	installLiftTracking()
 	registered = true
@@ -329,6 +335,12 @@ function engineConfig(date1904: DateBase, locale: SheetLocale | undefined): Part
 		// Results to 15 significant digits, Excel's precision ("Excel specifications and limits"); the engine's own
 		// default keeps 11.
 		precisionRounding: 14,
+		// Text compares without case but with accents, as Excel's does: "é" is not "e" (support.microsoft.com MATCH,
+		// SUMIF and EXACT read case alone as alike).
+		accentSensitive: true,
+		// The engine's tolerance for sums and comparisons, relative: two numbers Excel tells apart at 15 significant
+		// digits (1.0000000000001 and 1) stay apart. Excel's own floating-point note.
+		precisionEpsilon: 1e-15,
 		// Undo is the document's own; the engine's would hold copies of what each operation replaced.
 		undoLimit: 0
 	}
@@ -395,13 +407,12 @@ function unreadable(
 	if (plain) return null
 
 	for (const ref of refs) {
-		// The engine has no 3-D references.
+		// The engine has no 3-D references: one left here is not spelled sheet by sheet (spanned).
 		if (ref.lastSheet !== null) return "sheet"
 
 		const first = ref.sheet === null ? sheets[own] : sheets.find(sheet => sameSheet(sheet.name, ref.sheet ?? ""))
 
-		if (first === undefined || (ref.lastSheet !== null && !sheets.some(sheet => sameSheet(sheet.name, ref.lastSheet ?? ""))))
-			return "sheet"
+		if (first === undefined) return "sheet"
 
 		const area = ref.area
 
@@ -461,6 +472,47 @@ function readsItself(content: unknown, own: number, row: number, col: number, sh
 	})
 }
 
+// The functions Excel takes 3-D references in ("Create a reference to the same cell range on multiple worksheets").
+const SPAN_FUNCTIONS: ReadonlySet<string> = new Set([
+	"SUM",
+	"AVERAGE",
+	"AVERAGEA",
+	"COUNT",
+	"COUNTA",
+	"MAX",
+	"MAXA",
+	"MIN",
+	"MINA",
+	"PRODUCT",
+	"STDEV",
+	"STDEVA",
+	"STDEVP",
+	"STDEVPA",
+	"STDEV.S",
+	"STDEV.P",
+	"VAR",
+	"VARA",
+	"VARP",
+	"VARPA",
+	"VAR.S",
+	"VAR.P"
+])
+
+// Text that may hold a 3-D reference: a colon before a sheet prefix's "!".
+const MAY_SPAN = /:[^(),]*!/
+
+// A formula with its 3-D references spelled sheet by sheet over the workbook's sheets in order, which the engine
+// reads; as given when it has none, or one it cannot be spelled for (unreadable holds it then). The sheets it spans
+// change only where the engine is built again (a sheet moved or deleted) or at an end (an added sheet, a removed last
+// one, whose references the engine makes #REF!), and a renamed one keeps its place.
+function spanned<T>(content: T, sheets: readonly string[]): T | string {
+	if (typeof content !== "string" || !content.startsWith("=") || !MAY_SPAN.test(content)) return content
+
+	const text = spannedReferences(content.slice(1), sheets, SPAN_FUNCTIONS)
+
+	return text === null ? content : `=${text}`
+}
+
 // What a formula the engine is not given shows when its file stored no result.
 function unreadableShows(reason: "sheet" | "range"): RawCellContent {
 	return reason === "sheet" ? REF_ERROR : UNPARSEABLE
@@ -505,7 +557,9 @@ function heldInterpreterValue(value: RawCellContent): number | string | boolean 
 
 	const type = ERROR_TYPES.get(value)
 
-	return type === undefined ? value : new CellError(type)
+	if (type !== undefined) return new CellError(type)
+
+	return GENERIC_ERRORS.has(value) ? new CellError(ErrorType.ERROR, value) : value
 }
 
 export class FormulaEngine {
@@ -539,6 +593,8 @@ export class FormulaEngine {
 	// SUBTOTAL and AGGREGATE leave out.
 	private readonly rows: ((sheet: number, row: number) => number) | undefined
 	private readonly blocking: ((sheet: number, range: SpillRange) => boolean) | undefined
+	private readonly shownFormula: ((sheet: number, row: number, col: number) => string | null) | undefined
+	private readonly calcA1: boolean
 	// The cells whose formula calls SUBTOTAL or AGGREGATE, by engine sheet id (row * MAX_COLUMNS + col): calculated
 	// again when rows are hidden or shown (rowsChanged).
 	private readonly totals = new Map<number, Set<number>>()
@@ -619,7 +675,17 @@ export class FormulaEngine {
 
 				this.indirectReads.set(key, { address, vertex, reads: read === null ? [] : [read], run: this.runs })
 			} else if (read !== null) known.reads.push(read)
-		}
+		},
+		formula: at => {
+			const shown = this.shownFormula
+
+			if (shown === undefined) return null
+
+			const sheet = this.building === null ? this.sheetIndex(at.sheet) : (this.building[at.sheet] ?? -1)
+
+			return sheet < 0 ? null : shown(sheet, at.row, at.col)
+		},
+		calcA1: () => this.calcA1
 	}
 	private readonly link: WholeLink = {
 		names: () => this.definedNames.size > 0,
@@ -663,7 +729,10 @@ export class FormulaEngine {
 	// `rows`: whether a row of a sheet (by grid sheet index) is shown (0), hidden (1) or hidden by a filter (2); every
 	// row shown without it. `locale`: how text dates in formulas read (en-US's month first without it). `blocking`:
 	// whether a range of a sheet (by grid sheet index) holds a merged cell or a table, which a dynamic array does not
-	// spill over.
+	// spill over. `shownFormula`: a cell's formula (by grid sheet index) as the formula bar shows it, "=" first, or
+	// null for a cell without one, which FORMULATEXT gives; it is #N/A everywhere without it (the engine's text is
+	// its own rewrite of the user's). `calcA1`: the workbook came from an .ods file, whose INDIRECT also reads
+	// LibreOffice's Calc A1 text (Sheet.A1).
 	constructor(
 		sheets: readonly EngineSheet[],
 		names: readonly EngineName[],
@@ -671,11 +740,15 @@ export class FormulaEngine {
 		held?: (sheet: number, row: number, col: number) => void,
 		rows?: (sheet: number, row: number) => number,
 		locale?: SheetLocale,
-		blocking?: (sheet: number, range: SpillRange) => boolean
+		blocking?: (sheet: number, range: SpillRange) => boolean,
+		shownFormula?: (sheet: number, row: number, col: number) => string | null,
+		calcA1 = false
 	) {
+		this.calcA1 = calcA1
 		this.held = held
 		this.rows = rows
 		this.blocking = blocking
+		this.shownFormula = shownFormula
 		this.config = engineConfig(date1904, locale)
 		this.sheetNames = sheets.map(sheet => sheet.name)
 
@@ -703,7 +776,11 @@ export class FormulaEngine {
 			}
 
 			sheet.rows.forEach((row, rowIndex) => {
-				row.forEach((value, col) => {
+				row.forEach((given, col) => {
+					const value = spanned(given, this.sheetNames)
+
+					if (value !== given) row[col] = value
+
 					const reason = unreadable(value, extents, index, this.reach, undefined, this.link)
 
 					if (reason === null || held === undefined) return
@@ -1770,9 +1847,10 @@ export class FormulaEngine {
 			if (cell.content !== null && cell.content !== undefined && cell.content !== "") this.whole.written(id, cell.row, cell.col)
 
 			try {
+				const given = spanned(cell.content, this.sheetNames)
 				const read =
-					typeof cell.content === "string" && cell.content.startsWith("=")
-						? unreadable(cell.content, extents(), sheet, this.reach, undefined, this.link)
+					typeof given === "string" && given.startsWith("=")
+						? unreadable(given, extents(), sheet, this.reach, undefined, this.link)
 						: null
 				const reason = this.held === undefined ? null : read
 
@@ -1782,7 +1860,7 @@ export class FormulaEngine {
 					reason === null &&
 					this.held !== undefined &&
 					cell.fallback !== undefined &&
-					readsItself(cell.content, sheet, cell.row, cell.col, this.sheetNames)
+					readsItself(given, sheet, cell.row, cell.col, this.sheetNames)
 				) {
 					this.engine.setCellContents(address, this.holding(new HeldResult(cell.fallback)))
 					this.heldBy(address)
@@ -1794,7 +1872,7 @@ export class FormulaEngine {
 					this.engine.setCellContents(address, this.holding(new HeldResult(cell.fallback ?? unreadableShows(reason))))
 					this.heldBy(address)
 				} else {
-					const content = this.contentOf(cell.content)
+					const content = this.contentOf(given)
 
 					this.engine.setCellContents(address, content)
 
@@ -2130,7 +2208,7 @@ export class FormulaEngine {
 
 			while (row.length < cell.col) row.push(null)
 
-			row[cell.col] = this.contentOf(cell.content)
+			row[cell.col] = this.contentOf(spanned(cell.content, this.sheetNames))
 		}
 
 		const extents: SheetExtent[] = names.map(name => {
@@ -2297,6 +2375,57 @@ export class FormulaEngine {
 		const value: unknown = id === undefined ? null : this.cellValue(this.engine, { sheet: id, row, col })
 
 		return value instanceof DetailedCellError ? { value: exported(value), error: true } : { value: exported(value) }
+	}
+
+	// The cells whose formulas read `cells` (grid sheet index), directly or through others, `cells` left out.
+	dependents(cells: readonly { readonly sheet: number; readonly row: number; readonly col: number }[]): {
+		sheet: number
+		row: number
+		col: number
+	}[] {
+		const seen = new Set<string>()
+		const queue: ReturnType<HyperFormula["getCellDependents"]> = []
+		const found: { sheet: number; row: number; col: number }[] = []
+
+		for (const cell of cells) {
+			const id = this.sheetIds[cell.sheet]
+
+			if (id === undefined) continue
+
+			const address = { sheet: id, row: cell.row, col: cell.col }
+
+			seen.add(changeKey(address))
+			queue.push(address)
+		}
+
+		for (let at = queue.pop(); at !== undefined; at = queue.pop()) {
+			let next: ReturnType<HyperFormula["getCellDependents"]>
+
+			try {
+				next = this.engine.getCellDependents(at)
+			} catch {
+				// A named expression's vertex (no sheet of its own) has no address to ask about.
+				continue
+			}
+
+			for (const dependent of next) {
+				const range = "start" in dependent
+				const key = range ? `${changeKey(dependent.start)}:${changeKey(dependent.end)}` : changeKey(dependent)
+
+				if (seen.has(key)) continue
+
+				seen.add(key)
+				queue.push(dependent)
+
+				if (range) continue
+
+				const sheet = this.sheetIndex(dependent.sheet)
+
+				if (sheet >= 0) found.push({ sheet, row: dependent.row, col: dependent.col })
+			}
+		}
+
+		return found
 	}
 
 	destroy(): void {

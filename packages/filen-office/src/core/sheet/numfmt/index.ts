@@ -7,6 +7,7 @@ export {
 	formatValue,
 	numFmt,
 	NumFmtOutput,
+	showsPercent,
 	type NumFmtOptions,
 	type NumFmtResult
 } from "./format"

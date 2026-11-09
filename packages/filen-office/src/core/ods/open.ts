@@ -233,7 +233,8 @@ async function open(source: ByteSource, options: OdsOpenOptions): Promise<OdsOpe
 				rows: table.built.rowCount,
 				columns: table.built.columnCount,
 				rowProps: table.built.rowProps,
-				validationNames: built.validationNames[index] ?? new Map()
+				validationNames: built.validationNames[index] ?? new Map(),
+				conditionalFormats: table.conditionalFormats
 			}
 		}),
 		parts: built.parts,

@@ -187,11 +187,86 @@ describe("SheetGrid", () => {
 		expect(model.getSnapshot().selection.active).toEqual({ row: 1, col: 0 })
 		expect(document.activeElement).toBe(scroller)
 
-		await settle()
+		// Recorded from before the answer: the frame it brings draws the cells again, and a frame after it with nothing
+		// new leaves them as drawn.
 		cells.reset()
+		await settle()
 		paint()
 
 		expect(cells.texts()).toEqual(expect.arrayContaining(["7", "21"]))
+	})
+
+	it("draws only the chrome for a selection move or an entry's keystroke, and the cells again once what they show changed", async () => {
+		const { scroller, model, cells, paint } = await mount()
+		const canvasList = scroller.parentElement?.querySelectorAll("canvas") ?? []
+		const chrome = canvases.get(canvasList[canvasList.length - 1] as HTMLCanvasElement) as RecordingCanvas
+
+		expect(chrome).not.toBe(cells)
+
+		cells.reset()
+		chrome.reset()
+
+		// Moves within the extent, and an entry typed into, change nothing the cells show.
+		for (const arrow of ["ArrowDown", "ArrowDown", "ArrowRight", "ArrowUp", "ArrowLeft", "ArrowUp"]) {
+			key(scroller, { key: arrow })
+			paint()
+		}
+
+		expect(cells.calls).toEqual([])
+
+		// Past the furthest row reached the extent grows, and the cells are laid out on the grown axes.
+		for (const arrow of ["ArrowDown", "ArrowDown", "ArrowDown"]) key(scroller, { key: arrow })
+
+		paint()
+
+		expect(cells.calls.length).toBeGreaterThan(0)
+
+		for (const arrow of ["ArrowUp", "ArrowUp", "ArrowUp"]) key(scroller, { key: arrow })
+
+		paint()
+		cells.reset()
+		chrome.reset()
+		key(scroller, { key: "7" })
+		paint()
+
+		const editor = document.querySelector<HTMLTextAreaElement>("textarea.fo-sheet-editor") as HTMLTextAreaElement
+
+		act(() => model.setEditText("75"))
+		paint()
+
+		expect(cells.calls).toEqual([])
+		expect(chrome.calls.length).toBeGreaterThan(0)
+
+		// The entry, shown before the session answers.
+		key(editor, { key: "Enter" })
+		paint()
+
+		expect(cells.texts()).toContain("75")
+
+		// Anything that may change what is drawn (here an extension's own repaint) draws them again.
+		cells.reset()
+		paint()
+
+		expect(cells.calls).toEqual([])
+
+		act(() => model.repaint())
+		paint()
+
+		expect(cells.texts().length).toBeGreaterThan(0)
+
+		// A resized canvas (here for a new pixel ratio) has lost what it showed.
+		const ratio = globalThis.devicePixelRatio
+
+		cells.reset()
+		Reflect.set(globalThis, "devicePixelRatio", 2)
+
+		try {
+			paint()
+		} finally {
+			Reflect.set(globalThis, "devicePixelRatio", ratio)
+		}
+
+		expect(cells.texts().length).toBeGreaterThan(0)
 	})
 
 	it("leaves the entry open when the window loses focus, and commits it when focus moves within the page", async () => {
@@ -383,11 +458,15 @@ describe("SheetGrid", () => {
 
 		const handle = ref.current as SheetGridHandle
 		const cells = canvases.get(container.querySelector("canvas") as HTMLCanvasElement) as RecordingCanvas
+		// The fill of the cells' last clear: a frame with nothing new to draw leaves the canvas as it was.
 		const background = (): unknown => {
-			cells.reset()
 			act(() => handle.renderer.paint())
 
-			return cells.calls.find(call => call.op === "fillRect")?.fill
+			const fill = cells.calls.findLast(call => call.op === "fillRect" && call.args[0] === 0 && call.args[1] === 0)?.fill
+
+			cells.reset()
+
+			return fill
 		}
 
 		expect(background()).toBe(BACKGROUNDS.light)
@@ -572,5 +651,36 @@ describe("SheetGrid: an entry on a cell whose input is not known yet", () => {
 		await settle()
 
 		expect(await inputOf(model, 0, 0)).toBe("")
+	})
+})
+
+describe("SheetGrid: a formula pointing at another sheet", () => {
+	it("moves through the sheets with Ctrl+Alt+Page Down keeping the entry, and Enter commits it on its own sheet", async () => {
+		const { scroller, model } = await mount()
+		const first = model.getSnapshot().sheet
+		const second = model.getSnapshot().sheets[1]?.id
+
+		key(scroller, { key: "=" })
+
+		const editor = document.querySelector<HTMLTextAreaElement>("textarea.fo-sheet-editor") as HTMLTextAreaElement
+
+		act(() => model.setEditText("=1+"))
+		key(editor, { key: "PageDown", code: "PageDown", ctrlKey: true, altKey: true })
+		await settle()
+
+		expect(model.getSnapshot().sheet).toBe(second)
+		expect(model.getSnapshot().editing).toMatchObject({ sheet: first, text: "=1+" })
+		expect(document.activeElement).toBe(editor)
+		// Its own cell is not on the sheet shown: the editor keeps focus off screen.
+		expect((editor.parentElement as HTMLElement).style.transform).toBe("translate(-9999px, 0)")
+
+		act(() => model.setEditText("=1+Two!A1"))
+		key(editor, { key: "Enter" })
+		await settle()
+
+		expect(model.getSnapshot().sheet).toBe(first)
+		expect(model.getSnapshot().editing).toBeNull()
+		expect(model.getSnapshot().selection.active).toEqual({ row: 1, col: 0 })
+		expect(await inputOf(model, 0, 0)).toBe("=1+Two!A1")
 	})
 })

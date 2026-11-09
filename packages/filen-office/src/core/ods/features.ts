@@ -4,7 +4,16 @@ import { parseColor } from "../odf/units"
 import { parseRelationships, type Relationship } from "../opc/relationships"
 import { escapeAttribute, escapeText } from "../xml/index"
 import type { XlsxDefinedName, XlsxDxf, XlsxSection } from "../xlsx/model/types"
-import { columnText, rangeAddress, rangeAddresses, sheetRef, translateExpression, withoutSheet } from "./formula/toXlsx"
+import {
+	cellAddress,
+	columnText,
+	rangeAddress,
+	rangeAddresses,
+	type ReferenceShift,
+	sheetRef,
+	translateExpression,
+	withoutSheet
+} from "./formula/toXlsx"
 import type { OdsIssues } from "./issues"
 import type { UnheldCollector } from "./unheld"
 import { capturedText, parseCaptured } from "./read/captured"
@@ -128,10 +137,20 @@ function withoutNamespace(text: string): string {
 	return text.replace(/^(?:of|oooc|msoxl):/, "").trim()
 }
 
-function expression(text: string): string | null {
-	const translated = translateExpression(text)
+function expression(text: string, shift?: ReferenceShift): string | null {
+	const translated = translateExpression(text, shift)
 
 	return "text" in translated ? translated.text : null
+}
+
+// The move from a condition's base cell (§19.584), which its relative references are relative to, to the cell at
+// `row`, `col` that SpreadsheetML resolves them against (the top-left of the range): undefined when there is none.
+function baseShift(base: string | undefined, row: number, col: number): ReferenceShift | undefined {
+	const cell = base === undefined ? null : cellAddress(base)
+
+	if (cell === null || (cell.row === row && cell.col === col)) return undefined
+
+	return { rows: row - cell.row, cols: col - cell.col }
 }
 
 // --- Notes ---
@@ -274,7 +293,7 @@ interface ValidationRule {
 }
 
 // table:condition (ODF 1.3 Part 3 §19.618) as a validation type, operator and formulas.
-function validationRule(condition: string): ValidationRule | string {
+function validationRule(condition: string, shift?: ReferenceShift): ValidationRule | string {
 	const text = withoutNamespace(condition)
 	const list = /^cell-content-is-in-list\((.*)\)$/s.exec(text)
 
@@ -285,7 +304,7 @@ function validationRule(condition: string): ValidationRule | string {
 		const only = (items[0] ?? "").trim()
 
 		if (items.length === 1 && (only.startsWith("[") || (!only.startsWith('"') && only !== "" && Number.isNaN(Number(only))))) {
-			const range = expression(only)
+			const range = expression(only, shift)
 
 			return range === null ? "list range" : { type: "list", operator: "between", formula1: range, formula2: null }
 		}
@@ -307,7 +326,7 @@ function validationRule(condition: string): ValidationRule | string {
 	const truth = /^is-true-formula\((.*)\)$/s.exec(text)
 
 	if (truth !== null) {
-		const formula = expression(truth[1] ?? "")
+		const formula = expression(truth[1] ?? "", shift)
 
 		return formula === null ? "formula" : { type: "custom", operator: "between", formula1: formula, formula2: null }
 	}
@@ -315,7 +334,7 @@ function validationRule(condition: string): ValidationRule | string {
 	const length = /^cell-content-text-length\(\)\s*(<=|>=|!=|<>|<|>|=)\s*(.*)$/s.exec(text)
 
 	if (length !== null) {
-		const value = expression(length[2] ?? "")
+		const value = expression(length[2] ?? "", shift)
 
 		return value === null
 			? "value"
@@ -324,7 +343,7 @@ function validationRule(condition: string): ValidationRule | string {
 
 	const lengthBetween = /^cell-content-text-length-is-(not-)?between\((.*)\)$/s.exec(text)
 
-	if (lengthBetween !== null) return between("textLength", lengthBetween[1] !== undefined, lengthBetween[2] ?? "")
+	if (lengthBetween !== null) return between("textLength", lengthBetween[1] !== undefined, lengthBetween[2] ?? "", shift)
 
 	const typed = /^cell-content-is-(whole-number|decimal-number|date|time)\(\)\s+and\s+(.*)$/s.exec(text)
 
@@ -335,23 +354,23 @@ function validationRule(condition: string): ValidationRule | string {
 		const compare = /^cell-content\(\)\s*(<=|>=|!=|<>|<|>|=)\s*(.*)$/s.exec(rest)
 
 		if (compare !== null) {
-			const value = expression(compare[2] ?? "")
+			const value = expression(compare[2] ?? "", shift)
 
 			return value === null ? "value" : { type, operator: OPERATORS[compare[1] ?? "="] ?? "equal", formula1: value, formula2: null }
 		}
 
 		const range = /^cell-content-is-(not-)?between\((.*)\)$/s.exec(rest)
 
-		if (range !== null) return between(type, range[1] !== undefined, range[2] ?? "")
+		if (range !== null) return between(type, range[1] !== undefined, range[2] ?? "", shift)
 	}
 
 	return "condition"
 }
 
-function between(type: string, negated: boolean, args: string): ValidationRule | string {
+function between(type: string, negated: boolean, args: string, shift?: ReferenceShift): ValidationRule | string {
 	const [low = "", high = ""] = splitArguments(args)
-	const formula1 = expression(low)
-	const formula2 = expression(high)
+	const formula1 = expression(low, shift)
+	const formula2 = expression(high, shift)
 
 	if (formula1 === null || formula2 === null) return "value"
 
@@ -425,8 +444,16 @@ function* validationsSection(
 		if (validation === undefined) continue
 
 		const condition = validation.attributes.get("table:condition")
+		const origin = rects[0]
 		const rule: ValidationRule | string =
-			condition === undefined ? { type: "none", operator: "between", formula1: null, formula2: null } : validationRule(condition)
+			condition === undefined
+				? { type: "none", operator: "between", formula1: null, formula2: null }
+				: validationRule(
+						condition,
+						origin === undefined
+							? undefined
+							: baseShift(validation.attributes.get("table:base-cell-address"), origin[0], origin[1])
+					)
 
 		if (typeof rule === "string") {
 			issues.add("validation", table.name, rule)
@@ -617,7 +644,8 @@ const ICON_SETS: ReadonlySet<string> = new Set([
 	"5Quarters"
 ])
 
-const DATES: Readonly<Record<string, string>> = {
+// LibreOffice's calcext:date names to ST_TimePeriod (§18.18.82).
+export const DATES: Readonly<Record<string, string>> = {
 	today: "today",
 	yesterday: "yesterday",
 	tomorrow: "tomorrow",
@@ -694,18 +722,19 @@ function dxfOf(styles: OdsCellStyles, name: string): XlsxDxf {
 	return dxf
 }
 
-function conditionalSections(table: OdsTable, styles: OdsCellStyles, issues: OdsIssues): string[] {
+// A table's calcext:conditional-formats as its conditionalFormatting sections, their looks as dxfs.
+export function conditionalSections(formats: readonly OdfElement[], tableName: string, styles: OdsCellStyles, issues: OdsIssues): string[] {
 	const out: string[] = []
 	let priority = 1
 
-	for (const container of table.conditionalFormats) {
+	for (const container of formats) {
 		for (const format of container.children) {
 			if (format.name !== "calcext:conditional-format") continue
 
 			const target = rangeAddresses(format.attributes.get("calcext:target-range-address") ?? "")
 
 			if ("refused" in target) {
-				issues.add("conditionalFormat", table.name, "target range")
+				issues.add("conditionalFormat", tableName, "target range")
 
 				continue
 			}
@@ -713,9 +742,20 @@ function conditionalSections(table: OdsTable, styles: OdsCellStyles, issues: Ods
 			const sqref = target.parts.map(part => withoutSheet(part).replaceAll("$", "")).join(" ")
 			const rules: string[] = []
 			const first = sqref.split(" ")[0]?.split(":")[0] ?? "A1"
+			// Its top-left cell (a whole column's or row's starts at row 1 or column A).
+			const corner = /^([A-Z]{0,3})(\d*)$/.exec(first)
+			const originRow = Math.max(0, Number(corner?.[2] || "1") - 1)
+			const originCol = Math.max(
+				0,
+				[...(corner?.[1] || "A")].reduce((index, letter) => index * 26 + letter.charCodeAt(0) - 64, 0) - 1
+			)
 
 			for (const rule of format.children) {
-				const markup = cfRule(rule, styles, issues, table.name, priority, first)
+				const shift =
+					rule.name === "calcext:condition"
+						? baseShift(rule.attributes.get("calcext:base-cell-address"), originRow, originCol)
+						: undefined
+				const markup = cfRule(rule, styles, issues, tableName, priority, first, shift)
 
 				if (markup !== null) {
 					rules.push(markup)
@@ -731,7 +771,15 @@ function conditionalSections(table: OdsTable, styles: OdsCellStyles, issues: Ods
 	return out
 }
 
-function cfRule(rule: OdfElement, styles: OdsCellStyles, issues: OdsIssues, table: string, priority: number, first: string): string | null {
+function cfRule(
+	rule: OdfElement,
+	styles: OdsCellStyles,
+	issues: OdsIssues,
+	table: string,
+	priority: number,
+	first: string,
+	shift: ReferenceShift | undefined
+): string | null {
 	const dxfId = (name: string | undefined): number => (name === undefined ? -1 : styles.table.appendDxf(dxfOf(styles, name)))
 
 	switch (rule.name) {
@@ -742,7 +790,7 @@ function cfRule(rule: OdfElement, styles: OdsCellStyles, issues: OdsIssues, tabl
 			const compare = /^(<=|>=|!=|<|>|=)(.*)$/s.exec(value)
 
 			if (compare !== null) {
-				const formula = expression(compare[2] ?? "")
+				const formula = expression(compare[2] ?? "", shift)
 
 				if (formula !== null)
 					return `<cfRule type="cellIs" ${head} operator="${CF_OPERATORS[compare[1] ?? "="] ?? "equal"}"><formula>${escapeText(formula)}</formula></cfRule>`
@@ -752,8 +800,8 @@ function cfRule(rule: OdfElement, styles: OdsCellStyles, issues: OdsIssues, tabl
 
 			if (range !== null) {
 				const [low = "", high = ""] = splitArguments(range[2] ?? "")
-				const formula1 = expression(low)
-				const formula2 = expression(high)
+				const formula1 = expression(low, shift)
+				const formula2 = expression(high, shift)
 
 				if (formula1 !== null && formula2 !== null) {
 					return `<cfRule type="cellIs" ${head} operator="${range[1] === undefined ? "between" : "notBetween"}"><formula>${escapeText(formula1)}</formula><formula>${escapeText(formula2)}</formula></cfRule>`
@@ -763,7 +811,7 @@ function cfRule(rule: OdfElement, styles: OdsCellStyles, issues: OdsIssues, tabl
 			const formula = /^formula-is\((.*)\)$/s.exec(value)
 
 			if (formula !== null) {
-				const text = expression(formula[1] ?? "")
+				const text = expression(formula[1] ?? "", shift)
 
 				if (text !== null) return `<cfRule type="expression" ${head}><formula>${escapeText(text)}</formula></cfRule>`
 			}
@@ -1052,7 +1100,8 @@ export function* featurePartsSteps(
 
 		if (filter !== undefined) sections.push(section("autoFilter", filter))
 
-		for (const markup of conditionalSections(table, styles, issues)) sections.push(section("conditionalFormatting", markup))
+		for (const markup of conditionalSections(table.conditionalFormats, table.name, styles, issues))
+			sections.push(section("conditionalFormatting", markup))
 
 		const validationNames = new Map<string, string>()
 		const validations = yield* validationsSection(

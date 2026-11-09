@@ -1,5 +1,5 @@
 import { columnName } from "../../../core/sheet/refs/cellRef"
-import type { SheetRange } from "../../../core/sheet/protocol"
+import { SHEET_MAX_COLS, SHEET_MAX_ROWS, type SheetRange } from "../../../core/sheet/protocol"
 import type { GridSelection } from "../selection"
 import type { SheetGridTheme } from "../theme"
 import { rangeRects, segments, type GridRect } from "../layers"
@@ -24,6 +24,8 @@ export interface ChromeScene {
 	readonly guide: { readonly axis: "rows" | "cols"; readonly at: number } | null
 	// A fill-handle drag: the range it would fill, outlined dashed.
 	readonly fill?: SheetRange | null
+	// The latest copy or cut on the sheet shown: a moving border round it, its dashes `offset` px along.
+	readonly clip?: { readonly range: SheetRange; readonly offset: number } | null
 	// The sheet is shown right to left (SheetLayout.rightToLeft): positions are laid out left to right and mirrored.
 	readonly rightToLeft?: boolean
 }
@@ -48,10 +50,27 @@ function label(canvas: GridCanvas, scene: ChromeScene, text: string, x: number, 
 	layOut(canvas, scene)
 }
 
-function covers(ranges: readonly SheetRange[], axis: "rows" | "cols", index: number): boolean {
-	return ranges.some(range =>
-		axis === "rows" ? index >= range.startRow && index <= range.endRow : index >= range.startCol && index <= range.endCol
-	)
+// How the selection covers a header's line: not at all, in part, or whole (a range of whole rows for a row header,
+// whole columns for a column one), which Excel's headers show more strongly.
+type Cover = "none" | "part" | "whole"
+
+function coverOf(ranges: readonly SheetRange[], axis: "rows" | "cols", index: number): Cover {
+	let cover: Cover = "none"
+
+	for (const range of ranges) {
+		if (axis === "rows" ? index < range.startRow || index > range.endRow : index < range.startCol || index > range.endCol) continue
+
+		if (
+			axis === "rows"
+				? range.startCol === 0 && range.endCol >= SHEET_MAX_COLS - 1
+				: range.startRow === 0 && range.endRow >= SHEET_MAX_ROWS - 1
+		)
+			return "whole"
+
+		cover = "part"
+	}
+
+	return cover
 }
 
 function headers(canvas: GridCanvas, scene: ChromeScene, axis: "rows" | "cols"): void {
@@ -83,10 +102,10 @@ function headers(canvas: GridCanvas, scene: ChromeScene, axis: "rows" | "cols"):
 			if (size === 0) continue
 
 			const start = screenOf(own, index)
-			const active = selection !== null && covers(selection.ranges, axis, index)
+			const cover = selection === null ? "none" : coverOf(selection.ranges, axis, index)
 
-			if (active) {
-				canvas.fillStyle = theme.headerActiveBackground
+			if (cover !== "none") {
+				canvas.fillStyle = cover === "whole" ? theme.headerSelectedBackground : theme.headerActiveBackground
 
 				if (axis === "cols") canvas.fillRect(start, 0, size, band)
 				else canvas.fillRect(0, start, band, size)
@@ -97,8 +116,15 @@ function headers(canvas: GridCanvas, scene: ChromeScene, axis: "rows" | "cols"):
 			if (axis === "cols") canvas.fillRect(start + size - 1, 0, 1, band)
 			else canvas.fillRect(0, start + size - 1, band, 1)
 
+			// Hidden lines just before: a second line a pixel past the boundary, so the run shows as Excel's double line.
+			if (index > 0 && size >= 3 && own.axis.size(index - 1) === 0) {
+				if (axis === "cols") canvas.fillRect(start + 1, 0, 1, band)
+				else canvas.fillRect(0, start + 1, band, 1)
+			}
+
 			if (size >= 6) {
-				canvas.fillStyle = active ? theme.headerActiveText : theme.headerText
+				canvas.fillStyle =
+					cover === "whole" ? theme.headerSelectedText : cover === "part" ? theme.headerActiveText : theme.headerText
 
 				if (axis === "cols") label(canvas, scene, columnName(index), start + size / 2, band / 2)
 				else label(canvas, scene, String(index + 1), band / 2, start + size / 2)
@@ -162,18 +188,21 @@ export function paintChrome(canvas: GridCanvas, scene: ChromeScene): void {
 
 	if (selection !== null) drawSelection(canvas, scene, selection)
 
+	// The copy's moving border, as Excel's: dashes of the line over the halo, so it shows on any fill.
+	if (scene.clip !== undefined && scene.clip !== null) {
+		canvas.lineWidth = 1
+		canvas.strokeStyle = theme.selectionHalo
+		dashedRing(canvas, view, scene.clip.range, [])
+		canvas.strokeStyle = theme.selectionLine
+		canvas.lineDashOffset = -scene.clip.offset
+		dashedRing(canvas, view, scene.clip.range, CLIP_DASH)
+		canvas.lineDashOffset = 0
+	}
+
 	if (scene.fill !== undefined && scene.fill !== null) {
 		canvas.strokeStyle = theme.selectionLine
 		canvas.lineWidth = 1
-		canvas.setLineDash([3, 2])
-
-		for (const rect of rangeRects(view, scene.fill)) {
-			canvas.beginPath()
-			canvas.rect(rect.x - 0.5, rect.y - 0.5, rect.width, rect.height)
-			canvas.stroke()
-		}
-
-		canvas.setLineDash([])
+		dashedRing(canvas, view, scene.fill, [3, 2])
 	}
 
 	if (scene.overSelection !== undefined) {
@@ -208,6 +237,23 @@ export function paintChrome(canvas: GridCanvas, scene: ChromeScene): void {
 		if (scene.guide.axis === "cols") canvas.fillRect(scene.guide.at - 1, 0, 2, view.height)
 		else canvas.fillRect(0, scene.guide.at - 1, view.width, 2)
 	}
+}
+
+// The copy's dashes: a step of the moving border moves them one pixel, round a period of CLIP_DASH_PERIOD.
+const CLIP_DASH = [4, 4]
+export const CLIP_DASH_PERIOD = 8
+
+// A 1 px line on a range's left and top gridlines and its right and bottom ones, dashed `dash`.
+function dashedRing(canvas: GridCanvas, view: GridView, range: SheetRange, dash: number[]): void {
+	canvas.setLineDash(dash)
+
+	for (const rect of rangeRects(view, range)) {
+		canvas.beginPath()
+		canvas.rect(rect.x - 0.5, rect.y - 0.5, rect.width, rect.height)
+		canvas.stroke()
+	}
+
+	canvas.setLineDash([])
 }
 
 // A ring `width` wide, `inset` inside the rectangle's edges (its left and top gridlines included), so it never

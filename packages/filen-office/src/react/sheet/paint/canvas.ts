@@ -5,6 +5,8 @@ export interface GridCanvas {
 	fillStyle: string | object
 	strokeStyle: string | object
 	lineWidth: number
+	// Where the dashes start along a path; a surface without it (print) draws them from the start.
+	lineDashOffset?: number
 	font: string
 	textAlign: "left" | "right" | "center" | "start" | "end"
 	textBaseline: "top" | "hanging" | "middle" | "alphabetic" | "ideographic" | "bottom"

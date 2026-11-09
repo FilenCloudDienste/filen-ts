@@ -1,4 +1,5 @@
 import type { OdfPackage } from "../odf/package"
+import type { OdfElement } from "../odf/tree"
 import type { ZipEntry } from "../opc/zipReader"
 import type { Relationship } from "../opc/relationships"
 import type { SheetId } from "../sheet/protocol"
@@ -105,6 +106,8 @@ export interface OdsTableSource {
 	readonly rowProps: OdsSourceRows
 	// Its validations' rules (dataValidation without sqref) to the table:content-validation names they came from.
 	readonly validationNames: ReadonlyMap<string, string>
+	// Its calcext:conditional-formats as read (moved with the cells and written back as they were otherwise).
+	readonly conditionalFormats: readonly OdfElement[]
 }
 
 export interface OdsSource {

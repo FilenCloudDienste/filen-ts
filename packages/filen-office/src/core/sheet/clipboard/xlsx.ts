@@ -18,7 +18,8 @@ export const xlsxClipboardHtmlFeature = defineSheetFeature<XlsxDocument>({
 					command.text,
 					command.clip,
 					context.changes,
-					context.slicing
+					context.slicing,
+					command.target
 				)
 		}
 	},

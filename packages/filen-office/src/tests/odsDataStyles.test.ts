@@ -4,7 +4,9 @@ import { formatStandard, formatValue, formatValue as formatWith } from "../core/
 import { OdfStyleSheet } from "../core/odf/styles"
 import { parseXml } from "../core/xml/index"
 import { dataStyleCode } from "../core/ods/styles/dataStyle"
+import { dataStyles, sameShown } from "../core/ods/write/dataStyle"
 import { numFmtLocaleFor } from "../core/ods/styles/locale"
+import { DEFAULT_PALETTE } from "../core/sheet/style/palette"
 import { ODS_NS } from "./odsFixtures"
 
 // ODF data styles (ODF 1.3 Part 3 §16.29) as number format codes, and the formatter's options for what LibreOffice
@@ -56,7 +58,95 @@ describe("ODF data styles as number formats", () => {
 				'<number:number-style style:name="N"><number:number number:decimal-places="0" number:min-integer-digits="1"><number:embedded-text number:position="3">-</number:embedded-text></number:number></number:number-style>',
 				"N"
 			).code
-		).toBe("-##0")
+		).toBe("#-##0")
+		expect(
+			code(
+				'<number:number-style style:name="N"><number:number number:decimal-places="0" number:min-integer-digits="0"><number:embedded-text number:position="4">-</number:embedded-text></number:number></number:number-style>',
+				"N"
+			).code
+		).toBe("#-####")
+		expect(
+			code(
+				'<number:number-style style:name="N"><number:number number:decimal-places="0" number:min-integer-digits="4"><number:embedded-text number:position="4">-</number:embedded-text></number:number></number:number-style>',
+				"N"
+			).code
+		).toBe("#-0000")
+	})
+
+	it("joins embedded texts at one position and counts no digit inside a quoted one", () => {
+		expect(
+			code(
+				'<number:number-style style:name="N"><number:number number:decimal-places="0" number:min-integer-digits="5"><number:embedded-text number:position="3">a</number:embedded-text><number:embedded-text number:position="3">0</number:embedded-text><number:embedded-text number:position="1">-</number:embedded-text></number:number></number:number-style>',
+				"N"
+			).code
+		).toBe('00"a0"00-0')
+	})
+
+	it("writes Excel's Special formats (Zip Code + 4, Phone Number, Social Security Number) as embedded text", () => {
+		const ssn = dataStyles("000-00-0000", "N")
+
+		if ("refused" in ssn) throw new Error(ssn.refused)
+
+		expect(ssn.styles[0]?.markup).toBe(
+			'<number:number-style style:name="N"><number:number number:decimal-places="0" number:min-integer-digits="9"><number:embedded-text number:position="6">-</number:embedded-text><number:embedded-text number:position="4">-</number:embedded-text></number:number></number:number-style>'
+		)
+
+		const shown: Record<string, readonly [number, string][]> = {
+			"00000-0000": [[123456789, "12345-6789"]],
+			"000-00-0000": [[123456789, "123-45-6789"]],
+			"###-####": [
+				[5551234, "555-1234"],
+				[12, "-12"]
+			],
+			"[<=9999999]###-####;(###) ###-####": [
+				[5551234, "555-1234"],
+				[2065551234, "(206) 555-1234"]
+			],
+			'#,##0" x "0': []
+		}
+
+		for (const [format, cases] of Object.entries(shown)) {
+			const written = dataStyles(format, "N")
+
+			if ("refused" in written) throw new Error(`${format}: ${written.refused}`)
+
+			const back = code(written.styles.map(style => style.markup).join(""), "N").code
+
+			expect(back === format || sameShown(format, back), `${format} read back as ${back}`).toBe(true)
+
+			for (const [value, text] of cases) expect(formatValue(value, back).text, `${format} ${String(value)}`).toBe(text)
+		}
+
+		// A literal in the fraction part, or before the point, has no element.
+		for (const format of ["0.0-0", "0-.0", "0%0"]) expect(dataStyles(format, "N")).toEqual({ refused: "embedded text" })
+	})
+
+	it("writes a [ColorN] colour as the workbook palette's entry", () => {
+		const markup = (written: ReturnType<typeof dataStyles>): string =>
+			"refused" in written ? written.refused : written.styles.map(style => style.markup).join("")
+
+		// [Color10] is palette index 17: dark green by default.
+		expect(markup(dataStyles("[Magenta]0;[Color10]-0", "N"))).toContain('<style:text-properties fo:color="#008000"/>')
+
+		const palette = DEFAULT_PALETTE.slice()
+
+		palette[17] = 0x123456
+
+		const custom = markup(dataStyles("[Color10]0", "N", palette))
+
+		expect(custom).toContain('<style:text-properties fo:color="#123456"/>')
+		expect(dataStyles("[Color10]0", "N", [])).toEqual({ refused: "colour index" })
+
+		// The colour shown, not the code, decides: [Color3] reads back as [Red].
+		const red = dataStyles("[Color3]0", "N")
+
+		if ("refused" in red) throw new Error(red.refused)
+
+		const back = code(red.styles.map(style => style.markup).join(""), "N").code
+
+		expect(back).toBe("[Red]0")
+		expect(sameShown("[Color3]0", back)).toBe(true)
+		expect(sameShown("[Color10]0", "[Color10]0", { palette }, {})).toBe(false)
 	})
 
 	it("bounds hostile digit counts and embedded text positions, holding the style", () => {
@@ -82,6 +172,39 @@ describe("ODF data styles as number formats", () => {
 		expect(
 			code('<number:number-style style:name="N0"><number:number number:min-integer-digits="1"/></number:number-style>', "N0").code
 		).toBe("General")
+	})
+
+	it("reads an empty map target, and an empty main with maps, as an empty section, not General", () => {
+		const positive =
+			'<number:number-style style:name="P"><number:number number:decimal-places="0" number:min-integer-digits="1"/></number:number-style>'
+		const negative =
+			'<number:number-style style:name="M"><number:text>-</number:text><number:number number:decimal-places="0" number:min-integer-digits="1"/></number:number-style>'
+		const zero = '<number:number-style style:name="Z"/>'
+		const read = code(
+			`${positive}${negative}${zero}<number:text-style style:name="T"><number:text-content/><style:map style:condition="value()&gt;0" style:apply-style-name="P"/><style:map style:condition="value()&lt;0" style:apply-style-name="M"/><style:map style:condition="value()=0" style:apply-style-name="Z"/></number:text-style>`,
+			"T"
+		).code
+
+		expect(read).toBe("0;-0;;@")
+		expect([5, 0, -3].map(value => formatValue(value, read).text)).toEqual(["5", "", "-3"])
+		expect(
+			code(
+				`${positive}<number:number-style style:name="N"><style:map style:condition="value()&gt;0" style:apply-style-name="P"/></number:number-style>`,
+				"N"
+			).code
+		).toBe("0;;")
+	})
+
+	it("round-trips codes with empty sections through the writer", () => {
+		for (const format of ["0;-0;;@", "#,##0;-#,##0;", "0;;", ";;;@"]) {
+			const written = dataStyles(format, "N")
+
+			if ("refused" in written) throw new Error(written.refused)
+
+			const back = code(written.styles.map(style => style.markup).join(""), "N").code
+
+			expect(sameShown(format, back), `${format} read back as ${back}`).toBe(true)
+		}
 	})
 
 	it("keeps a percent sign a percent only in a percentage style", () => {

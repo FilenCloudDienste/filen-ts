@@ -198,3 +198,34 @@ describe("a sheet an ODS save created", () => {
 		expect(second).toEqual(first)
 	})
 })
+
+describe("a number format an ODS data style cannot hold", () => {
+	// "?" placeholders are blanks a number:number element has no attribute for: written, they read back as "#" or "0".
+	for (const code of ["?.??", "??0.00"]) {
+		it(`is refused when applied, not at save, for ${code}`, async () => {
+			const bytes = odsBytes(LIBRE)
+			const { session, sheet } = await open(bytes)
+			const result = await session.command({
+				type: "format.apply",
+				sheet,
+				ranges: [{ startRow: 0, startCol: 0, endRow: 0, endCol: 0 }],
+				patch: { numFmt: code }
+			})
+
+			expect(result.ok ? null : result.refusal).toEqual({ reason: "unsupported", detail: `the number format ${code} (read back)` })
+
+			const saved = await session.save()
+
+			session.close()
+			expect(saved.ok).toBe(true)
+		})
+	}
+
+	it("is accepted when its data style reads back as it, with optional decimals", async () => {
+		const first = await save(odsBytes(LIBRE), sheet => [
+			{ type: "format.apply", sheet, ranges: [{ startRow: 0, startCol: 0, endRow: 0, endCol: 0 }], patch: { numFmt: "#,##0.0#" } }
+		])
+
+		expect(content(first)).toContain('number:min-decimal-places="1"')
+	})
+})

@@ -1,6 +1,10 @@
+import { OdfNs } from "../../odf/namespaces"
+import { OdfStyleSheet } from "../../odf/styles"
 import { formatValue } from "../../sheet/numfmt/format"
 import { LCID_SYSTEM_DATE, LCID_SYSTEM_TIME, SectionKind, Tok, parseNumFmt, type NumFmtSection, type Token } from "../../sheet/numfmt/parse"
-import { escapeAttribute, escapeText } from "../../xml/index"
+import { DEFAULT_PALETTE } from "../../sheet/style/palette"
+import { encodeUtf8, escapeAttribute, escapeText, parseXml } from "../../xml/index"
+import { dataStyleCode } from "../styles/dataStyle"
 import { localeOfLcid } from "../styles/locale"
 
 // A SpreadsheetML number format code (ECMA-376 Part 1 §18.8.31) as ODF data styles (ODF 1.3 Part 3 §16.29), the
@@ -31,8 +35,8 @@ interface Section {
 	readonly body: string
 }
 
-// The digit placeholders of a number section, written as number:number (§16.29.3).
-function numberElement(section: NumFmtSection): string {
+// The digit placeholders of a number section, written as number:number (§16.29.3), its embedded texts inside.
+function numberElement(section: NumFmtSection, embedded: string): string {
 	const fraction = section.patterns.fraction
 	const integer = section.patterns.integer
 	const decimals = fraction.length
@@ -47,11 +51,13 @@ function numberElement(section: NumFmtSection): string {
 		factor !== 1 ? `number:display-factor="${factor}"` : ""
 	]
 
-	return `<number:number ${attributes.filter(attribute => attribute !== "").join(" ")}/>`
+	const tag = `number:number ${attributes.filter(attribute => attribute !== "").join(" ")}`
+
+	return embedded === "" ? `<${tag}/>` : `<${tag}>${embedded}</number:number>`
 }
 
-// One section's elements, or the reason it cannot be written.
-function sectionMarkup(section: NumFmtSection): Section | { refused: string } {
+// One section's elements, or the reason it cannot be written. `palette`: the workbook's, for [ColorN].
+function sectionMarkup(section: NumFmtSection, palette: readonly number[]): Section | { refused: string } {
 	if (section.nativeDigits) return { refused: "native digits" }
 
 	const parts: string[] = []
@@ -61,6 +67,12 @@ function sectionMarkup(section: NumFmtSection): Section | { refused: string } {
 
 		pending = ""
 	}
+	// Literals between integer digits (Zip Code + 4, Phone Number, Social Security Number), placed by the integer
+	// digits right of them (§16.29.4), and where number:number sits in `parts`.
+	let embedded = ""
+	let numberAt = -1
+	let integersLeft = section.integerDigits
+	let pointSeen = false
 	let kind: Section["kind"] = "number"
 	let elapsed = false
 	let digitsWritten = false
@@ -116,16 +128,26 @@ function sectionMarkup(section: NumFmtSection): Section | { refused: string } {
 			case Tok.COMMA:
 				if (section.kind === SectionKind.FRACTION || section.kind === SectionKind.SCIENTIFIC) break
 
-				if (digitsWritten) {
-					// Literals inside the digits are embedded text (§16.29.4): not written.
-					if (pending !== "") return { refused: "embedded text" }
+				if (!digitsWritten) {
+					flush()
+					numberAt = parts.length
+					parts.push(numberElement(section, ""))
+					digitsWritten = true
+				} else if (pending !== "") {
+					// A literal before an integer digit is embedded text; one in the fraction part, before the point or
+					// holding a percentage's "%" (embedded, a literal) has no element. Before a trailing comma it shows after
+					// the digits, as written.
+					if (pointSeen || token.kind === Tok.POINT || (section.percent > 0 && pending.includes("%")) || numberAt < 0)
+						return { refused: "embedded text" }
 
-					break
+					if (integersLeft > 0) {
+						embedded += `<number:embedded-text number:position="${integersLeft}">${escapeText(pending)}</number:embedded-text>`
+						pending = ""
+					}
 				}
 
-				flush()
-				parts.push(numberElement(section))
-				digitsWritten = true
+				if (token.kind === Tok.POINT) pointSeen = true
+				else if (token.kind === Tok.DIGIT && !pointSeen) integersLeft--
 				break
 			case Tok.PERCENT:
 				pending += "%"
@@ -232,6 +254,8 @@ function sectionMarkup(section: NumFmtSection): Section | { refused: string } {
 
 	flush()
 
+	if (embedded !== "") parts[numberAt] = numberElement(section, embedded)
+
 	const attributes: string[] = []
 
 	if (elapsed) attributes.push('number:truncate-on-overflow="false"')
@@ -246,7 +270,8 @@ function sectionMarkup(section: NumFmtSection): Section | { refused: string } {
 		attributes.push(`number:language="${locale.language}"`, `number:country="${locale.country}"`)
 	}
 
-	const color = section.color
+	// [ColorN] as the workbook's palette shows it (the formatter's sectionColor).
+	const color = section.color >= 0 || section.colorIndex < 0 ? section.color : (palette[section.colorIndex] ?? -1)
 
 	if (color < 0 && section.colorIndex >= 0) return { refused: "colour index" }
 
@@ -269,12 +294,13 @@ function map(condition: string, name: string): string {
 
 // The data styles of a code: the main one named `name`, the conditions' ones after it with `name` and a suffix
 // (P0, P1, ...), each listed before the style naming it, as §16.3 requires of style:apply-style-name.
-export function dataStyles(code: string, name: string): DataStyleResult {
+// `palette`: the workbook's indexed one, which [ColorN] names an entry of.
+export function dataStyles(code: string, name: string, palette: readonly number[] = DEFAULT_PALETTE): DataStyleResult {
 	const format = parseNumFmt(code)
 	const numeric = format.sections
 	const textSection = format.text
-	const written: (Section | { refused: string })[] = numeric.map(sectionMarkup)
-	const text = textSection === null ? null : sectionMarkup(textSection)
+	const written: (Section | { refused: string })[] = numeric.map(section => sectionMarkup(section, palette))
+	const text = textSection === null ? null : sectionMarkup(textSection, palette)
 
 	for (const section of [...written, ...(text === null ? [] : [text])]) if ("refused" in section) return section
 
@@ -360,15 +386,30 @@ export function shownKey(text: string): string {
 	return text.replace(/\s+/g, " ").trim()
 }
 
-// Whether two codes show every probe alike (the text, its colour and its fill character).
-export function sameShown(a: string, b: string, options: Parameters<typeof formatValue>[2] = {}): boolean {
+// Whether two codes show every probe alike (the text, its colour and its fill character). `optionsB`: b's, when its
+// workbook differs (a palette [ColorN] reads through).
+export function sameShown(
+	a: string,
+	b: string,
+	options: Parameters<typeof formatValue>[2] = {},
+	optionsB: Parameters<typeof formatValue>[2] = options
+): boolean {
 	for (const value of PROBES) {
 		const left = formatValue(value, a, options)
-		const right = formatValue(value, b, options)
+		const right = formatValue(value, b, optionsB)
 
 		if (shownKey(left.text) !== shownKey(right.text) || left.color !== right.color || left.repeat?.char !== right.repeat?.char)
 			return false
 	}
 
 	return true
+}
+
+// The code dataStyles' `styles` (the main one named `name`) read back as, as styles/dataStyle.ts reads a file.
+export function readBack(styles: readonly DataStyleElement[], name: string): string {
+	const xml = `<office:document-styles xmlns:office="${OdfNs.office}" xmlns:style="${OdfNs.style}" xmlns:number="${OdfNs.number}" xmlns:fo="${OdfNs.fo}"><office:styles>${styles.map(style => style.markup).join("")}</office:styles></office:document-styles>`
+	const sheet = new OdfStyleSheet(parseXml(encodeUtf8(xml)), undefined)
+	const style = sheet.dataStyle(name, "styles")
+
+	return style === undefined ? "General" : dataStyleCode(sheet, style, "styles").code
 }

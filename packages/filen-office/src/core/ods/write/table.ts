@@ -1,5 +1,5 @@
 import { SHEET_MAX_COLS, SHEET_MAX_ROWS } from "../../sheet/protocol"
-import { ColFlag, RowFlag, type XlsxColRange, type XlsxSheetEntry, type XlsxSheetModel } from "../../xlsx/model/types"
+import { ColFlag, RowFlag, rowRunAt, type XlsxColRange, type XlsxSheetEntry, type XlsxSheetModel } from "../../xlsx/model/types"
 import { decodeUtf8, escapeAttribute } from "../../xml/index"
 import type { OdsCellStyles } from "../styles/cell"
 import type { OdsSourceRowProps, OdsTableSource } from "../source"
@@ -305,6 +305,42 @@ function startsWithName(tag: Uint8Array, name: Uint8Array): boolean {
 	return after === 32 || after === 9 || after === 10 || after === 13 || after === 47 || after === 62
 }
 
+function rowOutline(flags: number): number {
+	return (flags & RowFlag.OUTLINE_MASK) >> RowFlag.OUTLINE_SHIFT
+}
+
+function colOutline(flags: number): number {
+	return (flags & ColFlag.OUTLINE_MASK) >> ColFlag.OUTLINE_SHIFT
+}
+
+// Column groups shown collapsed, as start * 16 + level: Excel marks the summary column after a collapsed group
+// (col@collapsed, ECMA-376 Part 1 §18.3.1.13), ODF the group itself (table:display, ODF 1.3 Part 3 §19.614).
+// `ranges` ascend.
+function collapsedColumnGroups(ranges: readonly XlsxColRange[]): Set<number> {
+	const groups = new Set<number>()
+
+	for (let k = 0; k < ranges.length; k++) {
+		const range = ranges[k]
+
+		if (range === undefined || (range.flags & ColFlag.COLLAPSED) === 0) continue
+
+		const level = colOutline(range.flags) + 1
+		let start = range.first
+
+		for (let j = k - 1; j >= 0; j--) {
+			const before = ranges[j]
+
+			if (before === undefined || before.last + 1 !== start || colOutline(before.flags) < level) break
+
+			start = before.first
+		}
+
+		if (start < range.first) groups.add(start * 16 + level)
+	}
+
+	return groups
+}
+
 // Rows of a table written from the model joined into one piece of the stream.
 const ROWS_PER_PIECE = 512
 
@@ -359,6 +395,9 @@ export class TableWriter {
 	// otherwise than copied (the save's proof then reads it all back, comparing those).
 	unheldRows: ReadonlySet<number> | null = null
 	rewroteUnheld = false
+	// Rows before movedFrom anchoring a source merge the model no longer has as it was (rows went in or out inside
+	// it), ascending: each is written again with the span the model has.
+	private respanRows: number[] | null = null
 
 	constructor(context: TableContext, entry: XlsxSheetEntry, model: XlsxSheetModel, view: SheetView, source: OdsTableSource | null) {
 		this.context = context
@@ -397,8 +436,12 @@ export class TableWriter {
 		let col = 0
 		// Columns in groups as deep as their outline levels (table:table-column-group, ODF 1.3 Part 3 §9.1.10).
 		let level = 0
-		const nest = (to: number): void => {
-			for (; level < to; level++) parts.push("<table:table-column-group>")
+		const collapsed = collapsedColumnGroups(ranges)
+		const nest = (to: number, from: number): void => {
+			for (; level < to; level++)
+				parts.push(
+					collapsed.has(from * 16 + level + 1) ? '<table:table-column-group table:display="false">' : "<table:table-column-group>"
+				)
 			for (; level > to; level--) parts.push("</table:table-column-group>")
 		}
 
@@ -422,7 +465,7 @@ export class TableWriter {
 		const emit = (from: number, count: number, range: XlsxColRange | undefined): void => {
 			if (count <= 0) return
 
-			nest(range === undefined ? 0 : (range.flags & ColFlag.OUTLINE_MASK) >> ColFlag.OUTLINE_SHIFT)
+			nest(range === undefined ? 0 : (range.flags & ColFlag.OUTLINE_MASK) >> ColFlag.OUTLINE_SHIFT, from)
 
 			const end = from + count
 
@@ -453,7 +496,7 @@ export class TableWriter {
 		}
 
 		emit(col, total - col, undefined)
-		nest(0)
+		nest(0, total)
 
 		return parts.join("")
 	}
@@ -482,6 +525,59 @@ export class TableWriter {
 	}
 
 	// --- Rows ---
+
+	private respanned(): number[] {
+		if (this.respanRows !== null) return this.respanRows
+
+		const rows = new Set<number>()
+		const merges = this.source?.merges
+
+		// Columns moved write every row again; rows not moved leave a merge's height to an edit, which marks its rows.
+		if (merges !== undefined && !this.columnsMoved && (!this.rowAxis.identity || this.movedFrom < SHEET_MAX_ROWS)) {
+			for (let k = 0; k + 3 < merges.length; k += 4) {
+				const anchor = this.rowAxis.target(merges[k] ?? 0)
+
+				if (anchor < 0 || anchor >= this.movedFrom) continue
+
+				const col = merges[k + 1] ?? 0
+				const merge = this.view.mergeAt(anchor, col)
+
+				if (
+					merge === undefined ||
+					merge.endRow - merge.startRow !== (merges[k + 2] ?? 0) - (merges[k] ?? 0) ||
+					merge.endCol - merge.startCol !== (merges[k + 3] ?? 0) - col
+				)
+					rows.add(anchor)
+			}
+		}
+
+		this.respanRows = [...rows].sort((a, b) => a - b)
+
+		return this.respanRows
+	}
+
+	// Those of respanned() in [from, to).
+	private respannedIn(from: number, to: number): number[] {
+		const rows = this.respanned()
+
+		if (rows.length === 0 || to <= from) return []
+
+		let low = 0
+		let high = rows.length
+
+		while (low < high) {
+			const mid = (low + high) >> 1
+
+			if ((rows[mid] ?? 0) < from) low = mid + 1
+			else high = mid
+		}
+
+		const out: number[] = []
+
+		for (let k = low; k < rows.length && (rows[k] ?? 0) < to; k++) out.push(rows[k] ?? 0)
+
+		return out
+	}
 
 	private sourceProps(tag: Uint8Array, outline: number): SourceRowProps {
 		const attributes = tagAttributes(tag)
@@ -637,7 +733,8 @@ export class TableWriter {
 
 			const run = Math.min(end - at, this.rowAxis.runFrom(at))
 			const stop = target + run
-			const special = new Set<number>([...this.view.storeRowsIn(target, stop), ...this.view.markedIn(target, stop)])
+			const respanned = this.respannedIn(target, stop)
+			const special = new Set<number>([...this.view.storeRowsIn(target, stop), ...this.view.markedIn(target, stop), ...respanned])
 
 			for (const row of this.features.rows) if (row >= target && row < stop) special.add(row)
 
@@ -695,7 +792,7 @@ export class TableWriter {
 				const marked = this.view.markedIn(next, next + 1).length > 0 || this.features.rows.has(next)
 				const nextRun = this.view.runsIn(next, next + 1)[0]
 
-				if (marked || this.columnsMoved || next >= this.movedFrom) {
+				if (marked || this.columnsMoved || next >= this.movedFrom || respanned.includes(next)) {
 					add({ kind: "rewrite", target: next, count: 1 })
 					row = next + 1
 				} else if (nextRun !== undefined && this.view.storeRowsIn(next, next + 1).length === 0) {
@@ -915,6 +1012,45 @@ export class TableWriter {
 		else this.spanRows.push({ target, count, markup })
 	}
 
+	// Row groups shown collapsed, as start * 16 + level: Excel marks the summary row after a collapsed group
+	// (row@collapsed, ECMA-376 Part 1 §18.3.1.73), ODF the group itself (table:display, ODF 1.3 Part 3 §19.614).
+	private collapsedRowGroups(): Set<number> {
+		const groups = new Set<number>()
+		const runs = this.model.rowRuns
+		const summaries: number[] = []
+
+		for (const run of runs ?? []) if ((run.flags & RowFlag.COLLAPSED) !== 0) summaries.push(run.first)
+
+		for (const block of this.view.store.blocks) {
+			for (let i = 0; i < block.rowCount; i++)
+				if (((block.rowFlags[i] ?? 0) & RowFlag.COLLAPSED) !== 0) summaries.push(block.firstRow + (block.rows[i] ?? 0))
+		}
+
+		for (const row of summaries) {
+			const flags = this.view.rowProps(row).flags
+
+			// A store row over a run has its own flags.
+			if ((flags & RowFlag.COLLAPSED) === 0) continue
+
+			const level = rowOutline(flags) + 1
+			let start = row
+
+			// Back over the group's rows: a run's at a time, store rows one by one.
+			while (start > 0 && rowOutline(this.view.rowProps(start - 1).flags) >= level) {
+				const before = start - 1
+				const run = rowRunAt(runs, before)
+				const stored = run === undefined ? [] : this.view.storeRowsIn(run.first, before + 1)
+				const lastStored = stored[stored.length - 1]
+
+				start = run === undefined || lastStored === before ? before : Math.max(run.first, (lastStored ?? -1) + 1)
+			}
+
+			if (start < row) groups.add(start * 16 + level)
+		}
+
+		return groups
+	}
+
 	private spanFresh(from: number, to: number, out: string[]): number {
 		const next = this.freshRows(from, to, out)
 
@@ -938,15 +1074,21 @@ export class TableWriter {
 		// A new sheet's rows in groups as deep as their outline levels (table:table-row-group, ODF 1.3 Part 3 §9.1.9).
 		let level = 0
 		const grouped = this.source === null
-		const nest = (to: number): void => {
-			for (; level < to; level++) out.push("<table:table-row-group>")
+		const collapsed = grouped ? this.collapsedRowGroups() : null
+		const nest = (to: number, from: number): void => {
+			for (; level < to; level++)
+				out.push(
+					collapsed?.has(from * 16 + level + 1) === true
+						? '<table:table-row-group table:display="false">'
+						: "<table:table-row-group>"
+				)
 			for (; level > to; level--) out.push("</table:table-row-group>")
 		}
 
 		const titles = this.fresh.titleRows ?? null
 
 		for (let row = this.nextTarget; row <= last;) {
-			if (grouped) nest((this.view.rowProps(row).flags & RowFlag.OUTLINE_MASK) >> RowFlag.OUTLINE_SHIFT)
+			if (grouped) nest((this.view.rowProps(row).flags & RowFlag.OUTLINE_MASK) >> RowFlag.OUTLINE_SHIFT, row)
 
 			// Print titles are a run of their own.
 			const stop =
@@ -967,7 +1109,7 @@ export class TableWriter {
 		}
 
 		this.nextTarget = Math.max(this.nextTarget, last + 1)
-		nest(0)
+		nest(0, last + 1)
 
 		// Rows written or changed are followed by the rest of the grid at the sheet's default height, as LibreOffice
 		// writes a table: a reader takes the commonest height for the rows a table does not reach, which the rows

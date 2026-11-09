@@ -53,6 +53,7 @@ export {
 	type GridEditing,
 	type GridEngineState,
 	type GridResizeDraft,
+	type SheetGridClip,
 	type SheetGridKeptSizes,
 	type SheetGridModelOptions,
 	type SheetGridRefusalHandler,

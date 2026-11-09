@@ -28,7 +28,7 @@ import {
 import { createGridAxis, type GridAxis } from "./axis"
 import { checkEntry, type SheetEntryHook } from "./layers"
 import { RowFitter, type TextMeasure } from "./rowFit"
-import { cellSelection, fromSelectionState, mergeRanges, type GridPoint, type GridSelection } from "./selection"
+import { cellSelection, fromSelectionState, mergeRanges, singleCell, type GridPoint, type GridSelection } from "./selection"
 import { TileCache, entryInput, entryOf, entryText, regionHoldsTile, type GridEntry } from "./tiles"
 
 // What a grid knows of an open session, outside React: the sheet list, layouts, render styles and the tiles in
@@ -91,6 +91,14 @@ export interface SheetGridSnapshot {
 	readonly readOnly: boolean
 	// Formulas are shown in their cells instead of their results (Ctrl+`).
 	readonly showFormulas: boolean
+}
+
+// The session's latest copy or cut (the "copy" query's clip id) and the range it was taken from.
+export interface SheetGridClip {
+	readonly id: number
+	readonly sheet: SheetId
+	readonly range: SheetRange
+	readonly cut: boolean
 }
 
 export interface GridAxes {
@@ -226,6 +234,7 @@ export class SheetGridModel {
 	private snapshot: SheetGridSnapshot
 	private readonly listeners = new Set<() => void>()
 	private readonly painters = new Set<() => void>()
+	private cellsGeneration = 0
 	private readonly inFlight = new Map<number, InFlight>()
 	// What the last frame needed: never evicted.
 	private needed: ReadonlySet<number> = new Set()
@@ -236,6 +245,9 @@ export class SheetGridModel {
 	// Counts the user's selection moves (select, setSheet): a command's answer takes the selection it carries only
 	// when no move came after the command was sent, so a paste landing late never undoes where the user went.
 	private moves = 0
+	// A run of Tab moves on one row: the cell it began in and the cell the last Tab left. Enter at the end of the run
+	// goes to the next row in the column it began in, as Excel does; any other selection move ends the run.
+	private tabRun: { readonly sheet: SheetId; readonly origin: GridPoint; readonly at: GridPoint } | null = null
 	private readonly reach = new Map<SheetId, GridPoint>()
 	private readonly pending = new Map<string, string>()
 	// The commit each pending text is from: a later commit of the same cell owns it, and an earlier one's answer
@@ -268,6 +280,9 @@ export class SheetGridModel {
 	private entryHooks: readonly SheetEntryHook[] = []
 	// The last command that changed the file and can be done again on another selection (F4).
 	private lastRepeatable: SheetCommand | null = null
+	// The latest copy or cut, and whether its moving border shows (until Esc, an edit, or a cut's paste).
+	private clip: SheetGridClip | null = null
+	private clipShown = false
 	// Rows without a height of their own fitted to the wrapped text an edit changes (rowFit.ts).
 	private readonly fitter = new RowFitter(this)
 
@@ -331,8 +346,16 @@ export class SheetGridModel {
 		}
 	}
 
+	// What the cells layer draws from (tiles, styles, layouts, pending entries, show formulas) may have changed since
+	// this last moved: a frame draws the cells again only then (or when its own inputs moved). Every repaint() moves
+	// it; only a change the caller knows touches none of it (a selection move, the entry's text) leaves it.
+	cellsVersion(): number {
+		return this.cellsGeneration
+	}
+
 	// A new snapshot when anything in it changed (the active cell read again from the tiles held), and a frame.
-	private update(patch: Partial<SheetGridSnapshot>): void {
+	// `chromeOnly`: nothing the cells layer reads changed (the selection, the open entry).
+	private update(patch: Partial<SheetGridSnapshot>, chromeOnly = false): void {
 		const previous = this.snapshot
 		const next = { ...previous, ...patch }
 
@@ -348,10 +371,14 @@ export class SheetGridModel {
 			for (const listener of this.listeners) listener()
 		}
 
-		this.repaint()
+		if (!chromeOnly) this.cellsGeneration++
+
+		for (const painter of this.painters) painter()
 	}
 
 	repaint(): void {
+		this.cellsGeneration++
+
 		for (const painter of this.painters) painter()
 	}
 
@@ -670,11 +697,14 @@ export class SheetGridModel {
 
 	// --- Sheets ---
 
-	setSheet(sheet: SheetId): void {
+	// `keepEntry`: an open entry stays open on its own sheet while another is shown (pointing at that sheet's cells).
+	setSheet(sheet: SheetId, keepEntry = false): void {
 		if (sheet === this.snapshot.sheet || !this.snapshot.sheets.some(entry => entry.id === sheet)) return
 
 		this.moves++
-		this.commitOrDrop()
+		this.tabRun = null
+
+		if (!keepEntry) this.commitOrDrop()
 
 		const layout = this.layouts.get(sheet) ?? null
 
@@ -684,8 +714,30 @@ export class SheetGridModel {
 			sheet,
 			layout,
 			selection: this.selections.get(sheet) ?? fromSelectionState(layout?.selection, layout === null ? [] : this.merges(layout)),
-			editing: null
+			...(!keepEntry && { editing: null })
 		})
+	}
+
+	// Shows another sheet as the user asks (a tab, Ctrl+Page Down): an open formula entry stays open so its cells can
+	// be pointed at (Excel's point mode); any other entry is committed first, and the sheet shown once it is kept.
+	async showSheet(sheet: SheetId): Promise<void> {
+		if (this.formulaOpen()) {
+			this.setSheet(sheet, true)
+
+			return
+		}
+
+		if (await this.commitEditing(null)) this.setSheet(sheet)
+	}
+
+	// Whether the open entry is a formula, which stays open across sheets to point at their cells.
+	formulaOpen(): boolean {
+		return this.snapshot.editing?.text.startsWith("=") === true
+	}
+
+	// An entry ended while another sheet is shown: its own sheet is shown again.
+	private returnTo(editing: GridEditing): void {
+		if (editing.sheet !== this.snapshot.sheet) this.setSheet(editing.sheet)
 	}
 
 	// Switching sheets mid-entry drops the entry (the caller commits it first when it should be kept).
@@ -743,16 +795,32 @@ export class SheetGridModel {
 
 	// A selection the user made (a key, a click, the name box): its active cell must be selectable, else nothing
 	// changes. Answers whether it was taken.
-	choose(selection: GridSelection): boolean {
+	// `tabFrom`: the move is a Tab (or Shift+Tab) from that cell.
+	choose(selection: GridSelection, tabFrom?: GridPoint): boolean {
 		if (!this.selectable(this.snapshot.sheet, selection.active)) return false
 
-		this.select(selection)
+		this.select(selection, tabFrom)
 
 		return true
 	}
 
-	select(selection: GridSelection): void {
+	// `tabFrom`: the move is a Tab (or Shift+Tab) from that cell, which begins a run of them or goes on with one on
+	// the same row; any other move ends the run.
+	select(selection: GridSelection, tabFrom?: GridPoint): void {
 		const sheet = this.snapshot.sheet
+		const prior = this.selections.get(sheet)
+
+		if (tabFrom !== undefined && singleCell(selection) && (prior === undefined || singleCell(prior))) {
+			const run = this.tabRun
+			const goesOn =
+				run !== null &&
+				run.sheet === sheet &&
+				run.origin.row === tabFrom.row &&
+				run.at.row === tabFrom.row &&
+				run.at.col === tabFrom.col
+
+			this.tabRun = { sheet, origin: goesOn ? run.origin : tabFrom, at: selection.active }
+		} else this.tabRun = null
 
 		this.moves++
 		this.selections.set(sheet, selection)
@@ -761,12 +829,23 @@ export class SheetGridModel {
 		const focus =
 			selection.focus.row < SHEET_MAX_ROWS - 1 && selection.focus.col < SHEET_MAX_COLS - 1 ? selection.focus : selection.active
 
-		if (reach === undefined || reach.row < focus.row || reach.col < focus.col) {
+		// The extent may grow with the reach: axes() keys its memo on the extent, so the axes (and the cells drawn) change
+		// only when the extent does.
+		if (reach === undefined || reach.row < focus.row || reach.col < focus.col)
 			this.reach.set(sheet, { row: Math.max(focus.row, reach?.row ?? 0), col: Math.max(focus.col, reach?.col ?? 0) })
-			this.axesMemo = null
-		}
 
-		this.update({ selection })
+		this.update({ selection }, true)
+	}
+
+	// Where the run of Tab moves that left the active cell began (the column Enter goes back to), or null when the
+	// active cell was not reached by one.
+	tabOrigin(): GridPoint | null {
+		const run = this.tabRun
+		const { sheet, selection } = this.snapshot
+
+		if (run === null || run.sheet !== sheet || !singleCell(selection)) return null
+
+		return run.at.row === selection.active.row && run.at.col === selection.active.col ? run.origin : null
 	}
 
 	private activeCell(sheet: SheetId, point: GridPoint): GridActiveCell {
@@ -831,6 +910,15 @@ export class SheetGridModel {
 		return canEditSnapshot(this.snapshot)
 	}
 
+	// An edit of the active cell kept back only by its lock on a protected sheet goes to onRefusal as the session's
+	// refusal would (Excel says the cell is on a protected sheet); a view-only grid or a failed session says nothing.
+	refuseLocked(command: () => SheetCommand): void {
+		const snapshot = this.snapshot
+
+		if ((snapshot.active.flags & CellFlag.LOCKED) !== 0 && canEditSnapshot({ ...snapshot, active: NO_ACTIVE }))
+			this.onRefusal?.({ reason: "protectedSheet" }, command())
+	}
+
 	// Commands that change the file but not a cell's content (resizing) are allowed.
 	canChange(): boolean {
 		const { writability, failed, readOnly } = this.snapshot
@@ -860,16 +948,30 @@ export class SheetGridModel {
 	// Starts an entry in the active cell from `text`, or from what the cell holds (its input) when null. False when
 	// the cell cannot be edited.
 	startEditing(text: string | null, mode: GridEditing["mode"]): boolean {
-		if (!this.canEdit()) return false
+		if (!this.canEdit()) {
+			const { sheet, selection } = this.snapshot
+			const { row, col } = selection.active
+
+			this.refuseLocked(() => ({
+				type: "cells.set",
+				sheet,
+				cells: { rows: Uint32Array.of(row), cols: Uint16Array.of(col), inputs: [text ?? ""] }
+			}))
+
+			return false
+		}
 
 		const { sheet, selection, active } = this.snapshot
 		const { row, col } = selection.active
 		const initial = active.known ? active.input : null
 
 		void this.intent()
-		this.update({
-			editing: { sheet, row, col, text: text ?? initial ?? "", initial, fromInput: text === null, mode, invalid: false }
-		})
+		this.update(
+			{
+				editing: { sheet, row, col, text: text ?? initial ?? "", initial, fromInput: text === null, mode, invalid: false }
+			},
+			true
+		)
 
 		if (active.known) {
 			this.entryQuery = null
@@ -889,13 +991,16 @@ export class SheetGridModel {
 				if (this.entryQuery !== query || editing?.sheet !== sheet || editing.row !== row || editing.col !== col) return
 
 				this.entryQuery = null
-				this.update({
-					editing: {
-						...editing,
-						text: editing.fromInput && editing.text === "" ? detail.input : editing.text,
-						initial: detail.input
-					}
-				})
+				this.update(
+					{
+						editing: {
+							...editing,
+							text: editing.fromInput && editing.text === "" ? detail.input : editing.text,
+							initial: detail.input
+						}
+					},
+					true
+				)
 			},
 			() => undefined
 		)
@@ -906,17 +1011,22 @@ export class SheetGridModel {
 	setEditText(text: string): void {
 		const editing = this.snapshot.editing
 
-		if (editing !== null && editing.text !== text) this.update({ editing: { ...editing, text, invalid: false } })
+		if (editing !== null && editing.text !== text) this.update({ editing: { ...editing, text, invalid: false } }, true)
 	}
 
 	setEditMode(mode: GridEditing["mode"]): void {
 		const editing = this.snapshot.editing
 
-		if (editing !== null && editing.mode !== mode) this.update({ editing: { ...editing, mode } })
+		if (editing !== null && editing.mode !== mode) this.update({ editing: { ...editing, mode } }, true)
 	}
 
 	cancelEditing(): void {
-		if (this.snapshot.editing !== null) this.update({ editing: null })
+		const editing = this.snapshot.editing
+
+		if (editing === null) return
+
+		this.update({ editing: null }, true)
+		this.returnTo(editing)
 	}
 
 	// The extensions' entry hooks (layers.ts), asked before an entry is written.
@@ -948,10 +1058,10 @@ export class SheetGridModel {
 		return answer
 	}
 
-	// Commits the entry and moves the selection to `next` (null: stays). The cell shows what was typed until the
-	// session answers. Resolves false when the session refused it, or an extension stopped it (layers.ts entry
+	// Commits the entry and moves the selection to `next` (null: stays; `tabFrom`: by Tab from that cell). The cell
+	// shows what was typed until the session answers. Resolves false when the session refused it, or an extension stopped it (layers.ts entry
 	// hooks); a malformed formula reopens the entry, marked.
-	async commitEditing(next: GridSelection | null): Promise<boolean> {
+	async commitEditing(next: GridSelection | null, tabFrom?: GridPoint): Promise<boolean> {
 		const editing = this.snapshot.editing
 
 		if (editing === null) return true
@@ -975,8 +1085,9 @@ export class SheetGridModel {
 		}
 
 		this.update({ editing: null })
+		this.returnTo(editing)
 
-		if (next !== null && editing.sheet === this.snapshot.sheet) this.select(next)
+		if (next !== null && editing.sheet === this.snapshot.sheet) this.select(next, tabFrom)
 		if (!changed) return true
 
 		const checked = await this.checkEntry(editing)
@@ -1034,6 +1145,60 @@ export class SheetGridModel {
 		return true
 	}
 
+	// --- Clipboard ---
+
+	// A copy or cut the session answered: a paste names its id, and its range shows a moving border.
+	setClip(clip: SheetGridClip): void {
+		this.clip = clip
+		this.clipShown = true
+		this.repaint()
+	}
+
+	// The id a paste of the latest copy names; none once a cut was cancelled.
+	clipId(): number | undefined {
+		return this.clip?.id
+	}
+
+	// The copy or cut the moving border goes round, null when none shows.
+	clipMark(): SheetGridClip | null {
+		return this.clipShown ? this.clip : null
+	}
+
+	// Esc or an edit, as in Excel: the moving border goes, and a cut no longer moves its cells (a copy still pastes
+	// with its formulas and formats). False when no border showed.
+	cancelClip(): boolean {
+		if (!this.clipShown) return false
+
+		this.clipShown = false
+
+		if (this.clip?.cut === true) this.clip = null
+
+		this.repaint()
+
+		return true
+	}
+
+	// After a command that changed the file: a paste of the copy keeps its border, a paste of the cut ends it (its
+	// cells now live where they were pasted, which a paste again copies from), anything else cancels it.
+	private clipAfter(command: SheetCommand): void {
+		const clip = this.clip
+
+		if (clip === null || !this.clipShown) return
+
+		if ((command.type === "clipboard.paste" || command.type === "clipboard.pasteHtml") && command.clip === clip.id) {
+			// Paste Values pastes a cut as a copy: the cut still waits.
+			if (!clip.cut || (command.type === "clipboard.paste" && command.values === true)) return
+
+			this.clip = { ...clip, cut: false }
+			this.clipShown = false
+			this.repaint()
+
+			return
+		}
+
+		this.cancelClip()
+	}
+
 	// --- Commands ---
 
 	// Runs a command and applies its change. `report`: a refusal goes to onRefusal.
@@ -1066,6 +1231,8 @@ export class SheetGridModel {
 			this.follow(step, false)
 
 			if (repeatable(command)) this.lastRepeatable = withoutConsent(command)
+
+			this.clipAfter(command)
 		}
 
 		return result
@@ -1094,6 +1261,8 @@ export class SheetGridModel {
 
 		this.settle(result, "undo", moves)
 
+		if (result.ok) this.cancelClip()
+
 		if (result.ok) {
 			const step = this.shifts.undo.pop() ?? null
 
@@ -1109,6 +1278,8 @@ export class SheetGridModel {
 		const result = await this.session.redo()
 
 		this.settle(result, "redo", moves)
+
+		if (result.ok) this.cancelClip()
 
 		if (result.ok) {
 			const step = this.shifts.redo.pop() ?? null

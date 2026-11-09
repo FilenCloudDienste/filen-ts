@@ -16,6 +16,9 @@ export interface SheetGridTheme {
 	readonly headerLine: string
 	readonly headerActiveBackground: string
 	readonly headerActiveText: string
+	// The headers of whole rows or columns selected: stronger than a cell selection's.
+	readonly headerSelectedBackground: string
+	readonly headerSelectedText: string
 	readonly selectionFill: string
 	readonly selectionLine: string
 	// A ring inside the selection's outline. With a contrast of 9:1 or more against the line, one of the two has 3:1
@@ -38,6 +41,8 @@ export const DEFAULT_THEME: SheetGridTheme = {
 	headerLine: "#c8c8c8",
 	headerActiveBackground: "#dde6f3",
 	headerActiveText: "#1f3d6b",
+	headerSelectedBackground: "#b6c9e6",
+	headerSelectedText: "#0f2547",
 	selectionFill: "rgba(37, 99, 235, 0.12)",
 	selectionLine: "#1e3a8a",
 	selectionHalo: "#ffffff",

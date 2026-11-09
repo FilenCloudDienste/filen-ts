@@ -19,7 +19,8 @@ class PathCanvas extends RecordingCanvas {
 			stroke: this.strokeStyle,
 			font: this.font,
 			lineWidth: this.lineWidth,
-			dash: []
+			dash: [],
+			dashOffset: this.lineDashOffset
 		})
 	}
 
@@ -31,7 +32,8 @@ class PathCanvas extends RecordingCanvas {
 			stroke: this.strokeStyle,
 			font: this.font,
 			lineWidth: this.lineWidth,
-			dash: []
+			dash: [],
+			dashOffset: this.lineDashOffset
 		})
 	}
 }

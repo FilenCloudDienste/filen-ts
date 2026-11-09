@@ -22,7 +22,7 @@ import {
 	type ClipValue
 } from "../../sheet/clipboard/html"
 import { r1c1ToA1 } from "../../sheet/clipboard/r1c1"
-import { pastedCells, type GridClip } from "../../sheet/clipboard/tsv"
+import { pastedCells, pasteRepeats, type GridClip } from "../../sheet/clipboard/tsv"
 import { cellKey } from "../../sheet/model/model"
 import { formulaTranslator, rewriteFormula, sameSheet } from "../../sheet/refs/formulaRefs"
 import { sliceClock, type Slicing } from "../../slicing"
@@ -52,6 +52,9 @@ export interface XlsxClip {
 	// The source cells of copied cells holding markup the model does not (a picture in the cell, rich runs), by
 	// offset: a paste of this clip carries it (a cut moves it, a copy shares it), a paste of other text does not.
 	readonly sources: ReadonlyMap<number, XlsxSourceCell>
+	// What a values paste writes for numbers and formula results, by offset (a string is text): the value, not the
+	// text a format shows. Other cells paste their entry or text.
+	readonly values: ReadonlyMap<number, number | boolean | string>
 }
 
 function field(text: string): string {
@@ -82,14 +85,31 @@ export async function copyCells(
 	const inputs = new Map<number, string>()
 	const styles = new Map<number, number>()
 	const sources = new Map<number, XlsxSourceCell>()
+	const values = new Map<number, number | boolean | string>()
+	const { dateBase } = document
+	const locale = document.settings.locale
 
 	store.forEachCell(range, (row, col, slot) => {
 		const view = document.cellView(sheet, row, col)
 		const offset = cellKey(row - range.startRow, col - range.startCol)
 		const line = lines[row - range.startRow]
+		const value = copiedValue(document, model, sheet, row, col, view.text)
+		const formula = store.formula(slot) >= 0
 
 		if (line !== undefined) line[col - range.startCol] = field(view.text)
-		if (view.input !== null) inputs.set(offset, view.input)
+
+		if (!formula && value.kind === "text") {
+			// Text is pasted as text: quoted where it would read as a number, date, boolean or error (as the paste reads
+			// it, in the session's locale), so "007" stays "007".
+			const read = readEntry(value.text, false, dateBase, locale)
+			const entry = read.type === "text" && read.text === value.text ? value.text : `'${value.text}`
+
+			if (entry !== view.text) inputs.set(offset, entry)
+		} else if (view.input !== null) inputs.set(offset, view.input)
+
+		if (value.kind === "number" || (formula && (value.kind === "boolean" || value.kind === "text")))
+			values.set(offset, value.kind === "text" ? value.text : value.value)
+
 		if (view.xf !== 0) styles.set(offset, view.xf)
 
 		if (store.carriesMarkup(slot)) {
@@ -108,7 +128,8 @@ export async function copyCells(
 		sheet,
 		grid: { tsv: text, sheet: entry?.name ?? "", range, cut, inputs },
 		styles,
-		sources
+		sources,
+		values
 	}
 
 	return { clip: id, text }
@@ -416,8 +437,25 @@ function ownClip(document: XlsxDocument, clipId: number | undefined, text: strin
 		: null
 }
 
+// A values paste of `clip`: its values in full (numbers and formulas' results, in the file's own syntax), its other
+// entries but formulas (quoted text), else what the cells show; never a cut.
+function valuesGrid(clip: XlsxClip): GridClip {
+	const inputs = new Map<number, string>()
+
+	for (const [offset, input] of clip.grid.inputs) if (!input.startsWith("=")) inputs.set(offset, input)
+
+	for (const [offset, value] of clip.values)
+		inputs.set(
+			offset,
+			typeof value === "string" ? `'${value}` : typeof value === "boolean" ? (value ? "TRUE" : "FALSE") : String(value)
+		)
+
+	return { ...clip.grid, cut: false, inputs }
+}
+
 // clipboard.paste: the session's own copy when `clip` names it and the text is still its text, else the text read
-// as tab-separated values.
+// as tab-separated values. `values` pastes the copy's values alone (Paste Values): no formats, formulas or markup, and
+// a cut is a copy. Repeated over the paste area `area` as pasteRepeats says, each copy with its own formats and markup.
 export async function pasteCells(
 	document: XlsxDocument,
 	sheet: SheetId,
@@ -425,21 +463,34 @@ export async function pasteCells(
 	text: string,
 	clipId: number | undefined,
 	changes: SheetChangeSink,
-	slicing?: Slicing
+	slicing?: Slicing,
+	values = false,
+	area?: SheetRange
 ): Promise<SheetHandled> {
 	// The session's own copy, while the sheet it came from is there (a cut whose sheet went is a cut no more).
-	const own = ownClip(document, clipId, text)
+	const held = ownClip(document, clipId, text)
+	const grid = held === null ? null : values ? valuesGrid(held) : held.grid
+	// What the paste carries beyond entries: none for values.
+	const own = values ? null : held
 	const target = document.workbook.sheet(sheet)
 
 	if (target === undefined) return { refused: { reason: "tooLarge" } }
 
-	const block = pastedCells(text, own?.grid ?? null, at, target.name, SHEET_MAX_EDIT_CELLS)
+	// The paste area's merges: a copy that would cut through one is pasted once.
+	const merges = area === undefined ? undefined : (await document.ready(sheet)).merges
+	const block = pastedCells(text, grid, at, target.name, SHEET_MAX_EDIT_CELLS, area, merges)
 
 	if (block === null || block.cells.length === 0) return block === null ? { refused: { reason: "tooLarge" } } : null
 
 	const range = { startRow: at.row, startCol: at.col, endRow: at.row + block.rows - 1, endCol: at.col + block.cols - 1 }
-	const styles =
-		own === null ? undefined : Int32Array.from(block.cells, cell => own.styles.get(cellKey(cell.row - at.row, cell.col - at.col)) ?? 0)
+	// A pasted cell's offset in the clip (the same in every copy of it).
+	const clipRows = grid === null ? 1 : grid.range.endRow - grid.range.startRow + 1
+	const clipCols = grid === null ? 1 : grid.range.endCol - grid.range.startCol + 1
+	const offsetOf = (cell: { readonly row: number; readonly col: number }): number =>
+		cellKey((cell.row - at.row) % clipRows, (cell.col - at.col) % clipCols)
+	const styles = own === null ? undefined : Int32Array.from(block.cells, cell => own.styles.get(offsetOf(cell)) ?? 0)
+	// A values paste's own entries are in the file's own syntax; what the cells show is read in the session's locale.
+	const canonical = values && grid !== null ? Uint8Array.from(block.cells, cell => (grid.inputs.has(offsetOf(cell)) ? 1 : 0)) : undefined
 	const cut = own?.grid.cut === true ? own : null
 	const plan = cut === null ? null : await planCut(document, cut, sheet, range, slicing)
 
@@ -451,7 +502,7 @@ export async function pasteCells(
 		own === null || own.sources.size === 0
 			? undefined
 			: Float64Array.from(block.cells, cell => {
-					const source = own.sources.get(cellKey(cell.row - at.row, cell.col - at.col))
+					const source = own.sources.get(offsetOf(cell))
 
 					return source === undefined ? -1 : store.carry(source)
 				})
@@ -460,7 +511,8 @@ export async function pasteCells(
 		cols: Uint32Array.from(block.cells, cell => cell.col),
 		inputs: block.cells.map(cell => cell.input),
 		...(styles !== undefined && { styles }),
-		...(origins !== undefined && { origins })
+		...(origins !== undefined && { origins }),
+		...(canonical !== undefined && { canonical })
 	}
 
 	const handled = await setCells(
@@ -640,7 +692,8 @@ function borderedXf(document: XlsxDocument, index: number, borders: ClipBorders)
 }
 
 // clipboard.pasteHtml: the session's own copy when `clip` names it and the text is still its text; else the HTML's
-// first table, its values, formulas and formats (html.ts); else the text as tab-separated values.
+// first table, its values, formulas and formats (html.ts); else the text as tab-separated values. Repeated over the
+// paste area `area` as pasteRepeats says, each copy's formulas moved to where it lands.
 export async function pasteHtml(
 	document: XlsxDocument,
 	sheet: SheetId,
@@ -649,49 +702,70 @@ export async function pasteHtml(
 	text: string,
 	clipId: number | undefined,
 	changes: SheetChangeSink,
-	slicing?: Slicing
+	slicing?: Slicing,
+	area?: SheetRange
 ): Promise<SheetHandled> {
-	if (ownClip(document, clipId, text) !== null) return pasteCells(document, sheet, at, text, clipId, changes, slicing)
+	if (ownClip(document, clipId, text) !== null) return pasteCells(document, sheet, at, text, clipId, changes, slicing, false, area)
 
 	const table = parseClipboardHtml(html, SHEET_MAX_EDIT_CELLS)
 
 	if (table === "tooLarge") return { refused: { reason: "tooLarge" } }
-	if (table === null) return pasteCells(document, sheet, at, text, clipId, changes, slicing)
+	if (table === null) return pasteCells(document, sheet, at, text, clipId, changes, slicing, false, area)
 	if (at.row + table.rows > SHEET_MAX_ROWS || at.col + table.cols > SHEET_MAX_COLS) return { refused: { reason: "tooLarge" } }
 
-	await document.ready(sheet)
+	const model = await document.ready(sheet)
+	const { down, across } = pasteRepeats(table.rows, table.cols, at, area, model.merges)
+	const copies = down * across
+
+	if (table.cells.length * copies > SHEET_MAX_EDIT_CELLS) return { refused: { reason: "tooLarge" } }
 
 	// The table's spans are merged where they land, as Excel pastes them; one that cannot be is a refusal up front.
-	const merges = table.spans.map(span => ({
-		startRow: at.row + span.startRow,
-		startCol: at.col + span.startCol,
-		endRow: at.row + span.endRow,
-		endCol: at.col + span.endCol
-	}))
+	const merges: SheetRange[] = []
+
+	for (let tileRow = 0; tileRow < down; tileRow++)
+		for (let tileCol = 0; tileCol < across; tileCol++) {
+			const row = at.row + tileRow * table.rows
+			const col = at.col + tileCol * table.cols
+
+			for (const span of table.spans)
+				merges.push({
+					startRow: row + span.startRow,
+					startCol: col + span.startCol,
+					endRow: row + span.endRow,
+					endCol: col + span.endCol
+				})
+		}
+
 	const mergeRefused = merges.length === 0 ? null : await mergeRefusal(document, sheet, merges)
 
 	if (mergeRefused !== null) return { refused: mergeRefused }
 
 	const formatted = table.cells.some(cell => cell.format !== null || cell.borders !== null)
 	const made = new Map<string, number>()
-	const count = table.cells.length
+	const count = table.cells.length * copies
 	const rows = new Uint32Array(count)
 	const cols = new Uint32Array(count)
 	const inputs: string[] = []
 	const styles = new Int32Array(count)
-	const canonical = Uint8Array.from(table.cells, cell => (canonicalInput(cell) ? 1 : 0))
+	const canonical = new Uint8Array(count)
 
 	try {
-		table.cells.forEach((cell, i) => {
-			const row = at.row + cell.row
-			const col = at.col + cell.col
-			const input = pastedInput(cell, row, col)
+		let i = 0
 
-			rows[i] = row
-			cols[i] = col
-			inputs.push(input)
-			styles[i] = pastedXf(document, cell, input, formatted, made)
-		})
+		for (let tileRow = 0; tileRow < down; tileRow++)
+			for (let tileCol = 0; tileCol < across; tileCol++)
+				for (const cell of table.cells) {
+					const row = at.row + tileRow * table.rows + cell.row
+					const col = at.col + tileCol * table.cols + cell.col
+					const input = pastedInput(cell, row, col)
+
+					rows[i] = row
+					cols[i] = col
+					inputs.push(input)
+					styles[i] = pastedXf(document, cell, input, formatted, made)
+					canonical[i] = canonicalInput(cell) ? 1 : 0
+					i++
+				}
 	} catch (error) {
 		if (error instanceof StyleLimitError) return { refused: { reason: "styleLimit" } }
 
@@ -712,7 +786,7 @@ export async function pasteHtml(
 	changes.select(sheet, {
 		activeRow: at.row,
 		activeCol: at.col,
-		ranges: [{ startRow: at.row, startCol: at.col, endRow: at.row + table.rows - 1, endCol: at.col + table.cols - 1 }]
+		ranges: [{ startRow: at.row, startCol: at.col, endRow: at.row + table.rows * down - 1, endCol: at.col + table.cols * across - 1 }]
 	})
 
 	if (merges.length === 0) return handled

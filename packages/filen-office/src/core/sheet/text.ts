@@ -34,8 +34,10 @@ import {
 } from "./protocol"
 import { textClipboardHtmlFeature } from "./clipboard/text"
 import { textFillFeature } from "./fill/text"
+import { textAutoCompleteFeature } from "./autoComplete/text"
 import { textFindFeature } from "./find/text"
 import { textNavigateFeature } from "./navigate/text"
+import { textSelectionStatsFeature } from "./stats/text"
 import { textShiftFeature } from "./shift/text"
 import { textSortFeature } from "./sort/text"
 import { defineSheetFeature, sheetRegistry, type SheetChangeSink, type SheetFeature, type SheetHandled } from "./registry"
@@ -580,11 +582,12 @@ function pasteTexts(
 	at: { readonly row: number; readonly col: number },
 	text: string,
 	clip: number | undefined,
-	changes: SheetChangeSink
+	changes: SheetChangeSink,
+	area?: SheetRange
 ): SheetHandled {
 	const held = document.clip
 	const own = held !== null && clip === held.id && lineEnds(text) === lineEnds(held.grid.tsv) ? held : null
-	const block = pastedCells(text, own?.grid ?? null, at, "", SHEET_MAX_EDIT_CELLS)
+	const block = pastedCells(text, own?.grid ?? null, at, "", SHEET_MAX_EDIT_CELLS, area)
 
 	if (block === null) return { refused: { reason: "tooLarge" } }
 	if (block.cells.length === 0) return null
@@ -698,7 +701,16 @@ export const textFeature = defineSheetFeature<TextSheetDocument>({
 		"format.apply": { info: { write: true }, run: () => unsupported },
 		"clipboard.paste": {
 			info: { write: true },
-			run: (context, command) => pasteTexts(context.doc, command.at, command.text, command.clip, context.changes)
+			// A text file's cells hold their text: a values paste is the text read as tab-separated values.
+			run: (context, command) =>
+				pasteTexts(
+					context.doc,
+					command.at,
+					command.text,
+					command.values === true ? undefined : command.clip,
+					context.changes,
+					command.target
+				)
 		},
 		// Changes no file: no step, and a read-only text file freezes too.
 		"view.freeze": {
@@ -770,7 +782,9 @@ export async function openTextSession(
 					textFeature,
 					textFindFeature,
 					textNavigateFeature,
+					textSelectionStatsFeature,
 					textFillFeature,
+					textAutoCompleteFeature,
 					textShiftFeature,
 					textSortFeature,
 					textClipboardHtmlFeature,

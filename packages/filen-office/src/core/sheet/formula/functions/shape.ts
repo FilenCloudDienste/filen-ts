@@ -87,6 +87,18 @@ function trimmed(count: number, mode: number, blank: (line: number) => boolean):
 
 export class ShapeFunctions extends SheetFunctionPlugin {
 	static override implementedFunctions: ImplementedFunctions = {
+		// Replaces the engine's SORT, which takes one key, orders by the engine's collation and gives the first error
+		// anywhere in the array.
+		SORT: {
+			method: "sort",
+			parameters: [
+				{ argumentType: FunctionArgumentType.RANGE },
+				{ argumentType: FunctionArgumentType.RANGE, optionalArg: true, emptyAsDefault: true },
+				{ argumentType: FunctionArgumentType.RANGE, optionalArg: true, emptyAsDefault: true },
+				{ argumentType: FunctionArgumentType.BOOLEAN, defaultValue: false, emptyAsDefault: true }
+			],
+			...ARRAY_ARGUMENTS
+		},
 		SORTBY: {
 			method: "sortby",
 			parameters: [
@@ -132,6 +144,68 @@ export class ShapeFunctions extends SheetFunctionPlugin {
 			],
 			...ARRAY_ARGUMENTS
 		}
+	}
+
+	// SORT(array, [sort_index], [sort_order], [by_col]): array's rows (its columns when by_col) in the order of the
+	// column (row) at sort_index, ascending unless sort_order is -1, in SORTBY's order. sort_index and sort_order may be
+	// arrays, one key per index (a single order applies to every key). An index outside array or a sort order other
+	// than 1 or -1 is #VALUE!. Stable.
+	sort(ast: PluginCall, state: PluginState): unknown {
+		const [, indexed, ordered] = [0, 1, 2].map(index => given(ast, index))
+
+		return this.runFunction(
+			ast.args,
+			state,
+			this.metadata("SORT"),
+			(
+				array: SimpleRangeValue,
+				sortIndex: SimpleRangeValue | undefined,
+				sortOrders: SimpleRangeValue | undefined,
+				byCol: boolean
+			) => {
+				const height = array.height()
+				const width = array.width()
+
+				if (height === 0 || width === 0) return naError()
+
+				const indexes = indexed === true && sortIndex !== undefined ? sortIndex.data.flat() : [1]
+				const orders = ordered === true && sortOrders !== undefined ? sortOrders.data.flat() : [1]
+
+				if (orders.length !== 1 && orders.length !== indexes.length) return valueError()
+
+				const lines = byCol ? height : width
+				const at: number[] = []
+				const keys: { readonly descending: boolean }[] = []
+
+				for (let key = 0; key < indexes.length; key++) {
+					const index = this.numberOf(indexes[key] ?? EmptyValue)
+					const order = this.numberOf(orders[orders.length === 1 ? 0 : key] ?? EmptyValue)
+
+					if (index instanceof CellError) return index
+					if (order instanceof CellError) return order
+
+					const line = Math.trunc(index)
+
+					if (line < 1 || line > lines || (order !== 1 && order !== -1)) return valueError()
+
+					at.push(line - 1)
+					keys.push({ descending: order === -1 })
+				}
+
+				const rows = array.data
+				const order = sortOrder(byCol ? width : height, keys, (key, item) => {
+					const line = at[key] ?? 0
+
+					return sortValue((byCol ? rows[line]?.[item] : rows[item]?.[line]) ?? EmptyValue)
+				})
+
+				return SimpleRangeValue.onlyValues(
+					byCol
+						? rows.map(row => Array.from(order, item => row[item] ?? EmptyValue))
+						: Array.from(order, item => rows[item] ?? [])
+				)
+			}
+		)
 	}
 
 	// SORTBY(array, by_array1, [sort_order1], ...): array's rows (by columns) or columns (by rows) in the order of the

@@ -80,6 +80,8 @@ const TABLE: readonly (readonly [Press, Press | null, SheetShortcut])[] = [
 	[{ key: "F5", shift: true }, { key: "F5", shift: true }, "find"],
 	[{ key: "f", ctrl: true }, { key: "f", ctrl: true }, "find"],
 	[{ key: "F3", shift: true }, { key: "F3", shift: true }, "find"],
+	[{ key: "g", ctrl: true }, { key: "g", ctrl: true }, "goTo"],
+	[{ key: "F5" }, { key: "F5" }, "goTo"],
 	[{ key: "F4", shift: true }, { key: "F4", shift: true }, "findNext"],
 	[{ key: "F4", ctrl: true, shift: true }, { key: "F4", meta: true, shift: true }, "findPrevious"],
 	[{ key: "h", ctrl: true }, { key: "h", ctrl: true }, "replace"],
@@ -128,6 +130,13 @@ describe("the sheet shortcut table", () => {
 				}
 			}
 		}
+	})
+
+	it("reads F5 and Ctrl+G as Go To, leaving Shift+F5 Find, Ctrl+F5 and the Mac's Command+G to the browser", () => {
+		expect(press({ key: "F5", shift: true }, false)).toBe("find")
+		expect(press({ key: "F5", ctrl: true }, false)).toBeNull()
+		expect(press({ key: "g", meta: true }, true)).toBeNull()
+		expect(press({ key: "G", ctrl: true, shift: true }, false)).toBeNull()
 	})
 
 	it('leaves AutoSum to the "=" a layout types, not to whatever sits where a US layout has it', () => {

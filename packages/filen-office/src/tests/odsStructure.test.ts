@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { bytesSource } from "../core/opc/index"
 import { openOds } from "../core/ods/open"
 import type { SheetCommand } from "../core/sheet/protocol"
+import type { SheetStore } from "../core/xlsx/model/store"
 import { inThreadSheetHost } from "../dom/sheet/host"
 import { odsBytes, odsDocument, shownRows, table, type OdsParts } from "./odsFixtures"
 import { IMMEDIATE } from "./sheetSessionFixtures"
@@ -209,6 +210,79 @@ describe("ODS structure edits", () => {
 		)
 		session.close()
 	})
+
+	// A two-row merge read from the file, anchored on the first row in column `col`, with a third row below.
+	const merged = (col: number): string => {
+		const lead = col > 0 ? `<table:table-cell table:number-columns-repeated="${col}"/>` : ""
+
+		return (
+			'<table:table-column table:number-columns-repeated="3"/>' +
+			`<table:table-row>${lead}<table:table-cell table:style-name="ceB" office:value-type="string" table:number-rows-spanned="2"><text:p>m</text:p></table:table-cell>${cell("z")}</table:table-row>` +
+			`<table:table-row>${lead}<table:covered-table-cell/>${cell("y")}</table:table-row>` +
+			`<table:table-row>${lead}${cell("w")}</table:table-row>`
+		)
+	}
+	const mergesOf = (back: Awaited<ReturnType<typeof readBack>>): number[] => [...(back.document.workbook.sheets[0]?.model?.merges ?? [])]
+	const bold = '<style:style style:name="ceB" style:family="table-cell"><style:text-properties fo:font-weight="bold"/></style:style>'
+	const boldAnchor = (back: Awaited<ReturnType<typeof readBack>>, col: number): boolean | undefined => {
+		const model = back.document.workbook.sheets[0]?.model
+
+		if (model === null || model === undefined) return undefined
+
+		const store = model.store as SheetStore
+		const styles = back.document.workbook.styles
+
+		return styles.fonts[styles.cellXfs[store.style(store.locate(0, col))]?.fontId ?? 0]?.bold
+	}
+
+	for (const col of [0, 1]) {
+		it(`grows a merge read from the file when rows go in inside it (column ${col})`, async () => {
+			const { session, sheets } = await open({ automatic: bold, body: table("S", merged(col)) })
+
+			await run(session, { type: "axis.insert", sheet: sheets[0] ?? 0, axis: "rows", at: 1, count: 1 })
+
+			const bytes = await saved(session)
+			const back = await readBack(bytes)
+
+			expect(mergesOf(back)).toEqual([0, col, 2, col])
+			expect(content(bytes)).toContain('table:number-rows-spanned="3"')
+			expect(boldAnchor(back, col)).toBe(true)
+			session.close()
+		})
+
+		it(`drops a merge read from the file when rows deleted leave it one cell (column ${col})`, async () => {
+			const { session, sheets } = await open({ automatic: bold, body: table("S", merged(col)) })
+
+			await run(session, { type: "axis.delete", sheet: sheets[0] ?? 0, axis: "rows", at: 1, count: 1 })
+
+			const bytes = await saved(session)
+			const back = await readBack(bytes)
+			const lead = col > 0 ? Array<string>(col).fill("") : []
+
+			expect(mergesOf(back)).toEqual([])
+			expect(back.rows(0)).toEqual([
+				[...lead, "m", "z"],
+				[...lead, "w"]
+			])
+			expect(boldAnchor(back, col)).toBe(true)
+			session.close()
+		})
+
+		it(`keeps the rows below whole when a merge read from the file loses its anchor row (column ${col})`, async () => {
+			const { session, sheets } = await open({ automatic: bold, body: table("S", merged(col)) })
+
+			await run(session, { type: "axis.delete", sheet: sheets[0] ?? 0, axis: "rows", at: 0, count: 1 })
+
+			const back = await readBack(await saved(session))
+
+			expect(mergesOf(back)).toEqual([])
+			expect(back.rows(0)).toEqual([
+				[...Array<string>(col + 1).fill(""), "y"],
+				[...Array<string>(col).fill(""), "w"]
+			])
+			session.close()
+		})
+	}
 
 	it("hides and shows rows and columns", async () => {
 		const { session, sheets } = await open({ body: table("S", "", GRID) })

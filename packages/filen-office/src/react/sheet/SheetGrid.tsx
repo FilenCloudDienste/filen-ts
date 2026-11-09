@@ -18,7 +18,14 @@ import { isTypedCharacter } from "../../core/sheet/grid/navigation"
 import { cellName } from "../../core/sheet/refs/cellRef"
 import { cycleReference } from "../../core/sheet/refs/formulaRefs"
 import { clampSize, resizeTargets } from "../../core/sheet/sizes/sizes"
-import { SHEET_MAX_COLS, SHEET_MAX_ROWS, type SheetAxis, type SheetFormatPatch, type SheetRange } from "../../core/sheet/protocol"
+import {
+	SHEET_MAX_COLS,
+	SHEET_MAX_ROWS,
+	type SheetAxis,
+	type SheetCommand,
+	type SheetFormatPatch,
+	type SheetRange
+} from "../../core/sheet/protocol"
 import type { FillDirection } from "../../core/sheet/fill/fill"
 import { autofitSizes } from "./autofit"
 import { isImeKeydown } from "./ime"
@@ -86,6 +93,10 @@ export interface SheetGridHandle {
 	editActive(): boolean
 	// What of a range is on screen, as cellRect gives a cell's (a menu's anchor); null when none of it is.
 	rangeRect(range: SheetRange): GridRect | null
+	// A key in another field that edits the open entry (a formula bar, marked data-sheet-editor), handled as the
+	// in-cell editor handles it: Enter and Tab step as in the grid, Ctrl+Enter fills the selection, Alt+Enter breaks
+	// the line, F4 cycles a reference, the date and time shortcuts type at the caret.
+	editorKey(event: KeyboardEvent<HTMLTextAreaElement>): void
 	// The renderer's frame costs while `measure` is on (perf harness).
 	readonly renderer: GridRenderer
 }
@@ -192,7 +203,14 @@ const FORMAT_SHORTCUTS: ReadonlySet<SheetShortcut> = new Set<SheetShortcut>([
 ])
 
 // The shortcuts a chartsheet (no cells) keeps: the workbook's, not a cell's.
-const CELLLESS_SHORTCUTS: ReadonlySet<SheetShortcut> = new Set<SheetShortcut>(["save", "print", "newSheet", "nextSheet", "previousSheet"])
+const CELLLESS_SHORTCUTS: ReadonlySet<SheetShortcut> = new Set<SheetShortcut>([
+	"save",
+	"print",
+	"newSheet",
+	"nextSheet",
+	"previousSheet",
+	"goTo"
+])
 
 // Cells a move on a protected sheet passes over looking for one it may select.
 const MAX_PROTECTED_STEPS = 1024
@@ -234,6 +252,13 @@ interface CellEditorProps {
 
 function inRange(range: SheetRange, row: number, col: number): boolean {
 	return row >= range.startRow && row <= range.endRow && col >= range.startCol && col <= range.endCol
+}
+
+// Whether a range holds the whole column (row) `index`.
+function holdsWhole(range: SheetRange, axis: SheetAxis, index: number): boolean {
+	return axis === "cols"
+		? range.startRow === 0 && range.endRow >= SHEET_MAX_ROWS - 1 && index >= range.startCol && index <= range.endCol
+		: range.startCol === 0 && range.endCol >= SHEET_MAX_COLS - 1 && index >= range.startRow && index <= range.endRow
 }
 
 function rangeName(range: SheetRange): string {
@@ -521,8 +546,9 @@ export function SheetGrid({
 	}
 
 	// A selection the user made: none on a cell sheet protection keeps from being selected.
-	function select(next: GridSelection, reveal: GridPoint | null): void {
-		if (grid.choose(next) && reveal !== null) renderer.reveal(reveal)
+	// `tabFrom`: the move is a Tab from that cell (Enter after a run of them goes back to the column it began in).
+	function select(next: GridSelection, reveal: GridPoint | null, tabFrom?: GridPoint): void {
+		if (grid.choose(next, tabFrom) && reveal !== null) renderer.reveal(reveal)
 	}
 
 	// The active cell for a click on a column (row) header: the first row (column) on screen.
@@ -887,7 +913,8 @@ export function SheetGrid({
 	// keyboard comes up however the entry's own field appears; the entry's field then takes focus from it, which
 	// keeps the keyboard up.
 	function editByTouch(): boolean {
-		if (!grid.canEdit()) return false
+		// Refused (and a locked cell's refusal said) without moving focus.
+		if (!grid.canEdit()) return grid.startEditing(null, "edit")
 
 		sinkRef.current?.focus({ preventScroll: true })
 
@@ -1073,14 +1100,20 @@ export function SheetGrid({
 
 		leaveTouch()
 
-		// A right-click acts on the selection it lands in, or on the cell it lands on.
+		// A right-click acts on the selection it lands in, or on the cell it lands on. On a header it acts on that whole
+		// column (row) unless one selected already, as Excel selects it: a cell of it selected is not enough.
 		if (event.button === 2) {
-			if (hit.kind === "cell" && !grid.cellless()) {
-				const current = grid.getSnapshot().selection
-				const inside = current.ranges.some(range => inRange(range, hit.row, hit.col))
+			if (hit.kind === "corner" || grid.cellless()) return
 
-				if (!inside) selectHit(hit, false, false)
-			}
+			const ranges = grid.getSnapshot().selection.ranges
+			const inside =
+				hit.kind === "cell"
+					? ranges.some(range => inRange(range, hit.row, hit.col))
+					: ranges.some(range =>
+							holdsWhole(range, hit.kind === "colHeader" ? "cols" : "rows", hit.kind === "colHeader" ? hit.col : hit.row)
+						)
+
+			if (!inside) selectHit(hit, false, false)
 
 			return
 		}
@@ -1106,7 +1139,13 @@ export function SheetGrid({
 			return
 		}
 
+		const { sheet: shownSheet, editing: open } = grid.getSnapshot()
+
 		focusGrid()
+
+		// An entry pointing at another sheet that this press does not point with ends, and its own sheet is shown
+		// again: nothing is selected there from a press on this one.
+		if (open !== null && open.sheet !== shownSheet) return
 
 		// A chartsheet has no cells to select.
 		if (grid.cellless()) return
@@ -1288,11 +1327,16 @@ export function SheetGrid({
 
 	function clearContents(): void {
 		const { sheet, selection: current } = grid.getSnapshot()
+		const command: SheetCommand = { type: "cells.clear", sheet, ranges: current.ranges, what: "contents" }
 
-		if (!grid.canEdit()) return
+		if (!grid.canEdit()) {
+			grid.refuseLocked(() => command)
+
+			return
+		}
 
 		void grid.intent()
-		settled(grid.command({ type: "cells.clear", sheet, ranges: current.ranges, what: "contents" }))
+		settled(grid.command(command))
 	}
 
 	// Sends an edit, once the session was told the user set out to edit.
@@ -1389,10 +1433,11 @@ export function SheetGrid({
 
 		const { sheet, selection: current } = grid.getSnapshot()
 		const source = fillHandleShown(current.ranges)
+		const axes = grid.axes(sheet)
 
-		if (source === null || !grid.canEdit()) return
+		if (source === null || axes === null || !grid.canEdit()) return
 
-		fillDownTo(grid.session, sheet, source).then(
+		fillDownTo(grid.session, sheet, source, axes.rows).then(
 			last => {
 				if (last === null || grid.getSnapshot().selection !== current) return
 
@@ -1513,11 +1558,7 @@ export function SheetGrid({
 		const shown = sheets.filter(entry => entry.state === "visible")
 		const target = shown[shown.findIndex(entry => entry.id === sheet) + step]
 
-		if (target === undefined) return
-
-		void grid.commitEditing(null).then(done => {
-			if (done) grid.setSheet(target.id)
-		})
+		if (target !== undefined) void grid.showSheet(target.id)
 	}
 
 	// Rows or columns inserted or deleted when whole ones are selected; cells alone are the app's (a dialog asks how,
@@ -1618,7 +1659,7 @@ export function SheetGrid({
 				const step = renderer.pageCols() * (shortcut === "screenLeft" ? -1 : 1)
 				const point = { row: current.active.row, col: Math.max(0, Math.min(SHEET_MAX_COLS - 1, current.active.col + step)) }
 
-				select(cellSelection(point, merges_), point)
+				if (grid.choose(cellSelection(point, merges_))) renderer.page(current.active, point)
 
 				return true
 			}
@@ -1690,6 +1731,14 @@ export function SheetGrid({
 			return
 		}
 
+		// Esc takes the copy's moving border away (and cancels a cut), as in Excel; with none showing it is the app's.
+		if (event.key === "Escape" && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey && grid.cancelClip()) {
+			event.preventDefault()
+			event.stopPropagation()
+
+			return
+		}
+
 		const shortcut = shortcutOf(event, onMac)
 
 		// A chartsheet's keys move to nothing, enter nothing and select nothing; Ctrl+Y redoes, never repeats on cells.
@@ -1739,7 +1788,8 @@ export function SheetGrid({
 		const axes = grid.axes(sheet)
 
 		if (current !== null && axes !== null) {
-			const move = keyMove(event, currentSelection, axes, current, grid.merges(current), renderer.pageRows())
+			const tabOrigin = grid.tabOrigin()
+			const move = keyMove(event, currentSelection, axes, current, grid.merges(current), renderer.pageRows(), tabOrigin)
 
 			if (move !== null) {
 				event.preventDefault()
@@ -1767,7 +1817,11 @@ export function SheetGrid({
 					landed = next
 				}
 
-				select(landed.selection, landed.reveal)
+				// Page Up and Page Down scroll a screen with the cell they move.
+				if (event.key === "PageDown" || event.key === "PageUp") {
+					if (grid.choose(landed.selection))
+						renderer.page(event.shiftKey ? currentSelection.focus : currentSelection.active, landed.reveal)
+				} else select(landed.selection, landed.reveal, event.key === "Tab" ? currentSelection.active : undefined)
 
 				return
 			}
@@ -1780,7 +1834,8 @@ export function SheetGrid({
 			return
 		}
 
-		if (event.key === "Delete") {
+		// A Mac keyboard's delete key sends Backspace: Excel for Mac clears the selection on it.
+		if (event.key === "Delete" || (event.key === "Backspace" && onMac && !mod && !event.altKey && !event.shiftKey)) {
 			event.preventDefault()
 			clearContents()
 
@@ -1805,17 +1860,14 @@ export function SheetGrid({
 			return
 		}
 
-		// A character starts an entry that replaces the cell.
-		if (isTypedCharacter(event) && grid.canEdit()) {
-			event.preventDefault()
-			grid.startEditing(event.key, "enter")
-		}
+		// A character starts an entry that replaces the cell; on a locked cell the model reports the refusal.
+		if (isTypedCharacter(event) && grid.startEditing(event.key, "enter")) event.preventDefault()
 	}
 
 	// --- Editor ---
 
-	function commitTo(next: GridSelection | null): void {
-		void grid.commitEditing(next)
+	function commitTo(next: GridSelection | null, tabFrom?: GridPoint): void {
+		void grid.commitEditing(next, tabFrom)
 		focusGrid()
 
 		if (next !== null) renderer.reveal(next.active)
@@ -1824,13 +1876,45 @@ export function SheetGrid({
 	function handleEditorKey(event: KeyboardEvent<HTMLTextAreaElement>): void {
 		if (onEditorKey?.(event) === true || isImeKeydown(event.nativeEvent)) return
 
+		const { sheet: shownSheet, editing: open } = grid.getSnapshot()
+		const shortcut = shortcutOf(event, onMac)
+
+		// Go To (F5, Ctrl+G) is the grid's, not the browser's: F5 would reload the page under the entry.
+		if (shortcut === "goTo") {
+			event.preventDefault()
+
+			return
+		}
+
+		// A formula's entry moves through the sheets to point at their cells, as Excel's Ctrl+Page Down does.
+		if ((shortcut === "nextSheet" || shortcut === "previousSheet") && grid.formulaOpen()) {
+			event.preventDefault()
+			switchSheet(shortcut === "nextSheet" ? 1 : -1)
+
+			return
+		}
+
+		// A key that ends an entry pointing at another sheet acts on the entry's own sheet, shown again first.
+		if (
+			open !== null &&
+			open.sheet !== shownSheet &&
+			(event.key === "Enter" ||
+				event.key === "Tab" ||
+				(event.key.startsWith("Arrow") &&
+					open.mode === "enter" &&
+					!event.shiftKey &&
+					!event.ctrlKey &&
+					!event.metaKey &&
+					!event.altKey))
+		)
+			grid.setSheet(open.sheet, true)
+
 		const { sheet, layout: current, selection: currentSelection, editing: entry } = grid.getSnapshot()
 		const axes = grid.axes(sheet)
 
 		if (entry === null || current === null || axes === null) return
 
 		const mergeList = grid.merges(current)
-		const shortcut = shortcutOf(event, onMac)
 
 		if (shortcut !== null && EDITOR_SHORTCUTS.has(shortcut)) {
 			// Today's date or the time, typed at the caret.
@@ -1871,6 +1955,14 @@ export function SheetGrid({
 			return
 		}
 
+		// Ctrl+Shift+Enter (Cmd+Shift+Return): Excel's array entry, which keeps the active cell where it is.
+		if (event.key === "Enter" && (event.ctrlKey || event.metaKey) && !event.altKey && event.shiftKey) {
+			event.preventDefault()
+			commitTo(null)
+
+			return
+		}
+
 		if (event.key === "Enter" && event.altKey) {
 			// A line break in the entry.
 			event.preventDefault()
@@ -1892,10 +1984,11 @@ export function SheetGrid({
 				axes,
 				current,
 				mergeList,
-				1
+				1,
+				grid.tabOrigin()
 			)
 
-			commitTo(move?.kind === "select" ? move.selection : null)
+			commitTo(move?.kind === "select" ? move.selection : null, event.key === "Tab" ? { row: entry.row, col: entry.col } : undefined)
 
 			return
 		}
@@ -1982,9 +2075,10 @@ export function SheetGrid({
 			onFrame: listener => renderer.onFrame(listener),
 			editActive: () => editByTouch(),
 			rangeRect: range => renderer.rangeRect(range),
+			editorKey: event => handleEditorKey(event),
 			renderer
 		}),
-		[grid, renderer]
+		[grid, renderer, onEditorKey, onMac]
 	)
 
 	return (

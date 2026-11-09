@@ -510,12 +510,18 @@ export interface SheetCommandMap {
 	"sheet.rename": { readonly sheet: SheetId; readonly name: string }
 	// Text from the clipboard put at `at`. When `clip` names a copy this session made (SheetQueryMap "copy") and the
 	// text is still that copy's, the copy is pasted instead (formulas moved relative to `at`, formats; a cut moves
-	// its cells), else the text is read as tab-separated values.
+	// its cells), else the text is read as tab-separated values. `values` pastes values only (Paste Values): the copy's
+	// values in full and formulas' results, without formats; a cut is then a copy. `target` is the paste area, the
+	// selection starting at `at`: one whose height and width are whole multiples of the pasted block takes it that
+	// many times, as Excel fills it (each copy's relative references moved to its own origin); a cut, any other area,
+	// or one whose copies would cut through a merged cell takes it once.
 	"clipboard.paste": {
 		readonly sheet: SheetId
 		readonly at: { readonly row: number; readonly col: number }
 		readonly text: string
 		readonly clip?: number
+		readonly values?: boolean
+		readonly target?: SheetRange
 	}
 	// Rows of `range` (columns when `orientation` is "cols") ordered by `keys`, the first key first. Values order as
 	// Excel does: numbers, text, booleans, errors, then blanks, whatever the direction.

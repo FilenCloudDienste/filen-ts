@@ -10,6 +10,7 @@ import { SheetView } from "./write/sheet"
 import { currentLinks, currentNotes, currentSection, currentValidations, sectionText } from "./write/features"
 import { filterRange } from "./write/filters"
 import { sameRects } from "./write/validations"
+import { currentConditions, sameConditions } from "./write/conditions"
 import { sameView } from "./write/settings"
 import { printRanges } from "./write/content"
 import { odsSource } from "./source"
@@ -65,7 +66,9 @@ export class Styles {
 			if (left === undefined) this.keysA.set(xfA, (left = lookKey(this.a, xfA)))
 			if (right === undefined) this.keysB.set(xfB, (right = lookKey(this.b, xfB)))
 
-			same = left === right && sameShown(this.a.numFmtCode(xfA), this.b.numFmtCode(xfB))
+			same =
+				left === right &&
+				sameShown(this.a.numFmtCode(xfA), this.b.numFmtCode(xfB), { palette: this.a.palette }, { palette: this.b.palette })
 			this.memo.set(key, same)
 		}
 
@@ -301,6 +304,22 @@ export async function verifyOds(document: XlsxDocument, written: ByteSource, inf
 
 			if (filter(document.workbook, modelA) !== filter(again.workbook, modelB))
 				return { ok: false, message: `${entryA.name}: filter` }
+
+			// Conditional formats of a source table (a new one's are a conversion's, which reports what it could not say).
+			const table = sourceA.tables[entryA.id]
+
+			if (
+				table !== undefined &&
+				table.id === entryA.id &&
+				"rowAxis" in modelA &&
+				!sameConditions(
+					currentConditions(document.workbook, modelA),
+					document.workbook.styles.dxfs,
+					currentConditions(again.workbook, modelB),
+					again.workbook.styles.dxfs
+				)
+			)
+				return { ok: false, message: `${entryA.name}: conditional formatting` }
 		}
 	}
 

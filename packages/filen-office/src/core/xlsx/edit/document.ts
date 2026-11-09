@@ -78,6 +78,7 @@ import {
 import { localizedInput } from "../../sheet/input/locale"
 import { sheetFunction } from "../../sheet/functions/catalogue"
 import { takesOneValue } from "../../sheet/functions/valueArguments"
+import { volatileFormula } from "../../sheet/functions/volatile"
 import { SheetStyles } from "../../sheet/style/index"
 import type { CellWrite, SheetStore } from "../model/store"
 import { readWorksheet } from "../read/worksheet"
@@ -93,6 +94,8 @@ import {
 	rowRunAt,
 	type XlsxDefinedName,
 	type XlsxFont,
+	type XlsxFormula,
+	type XlsxFormulaTable,
 	type XlsxProtectionHash,
 	type XlsxSheetEntry,
 	type XlsxSheetModel,
@@ -107,7 +110,7 @@ import type { ChangeLog } from "../model/changes"
 import { RefRefused } from "../refs/catalogue"
 import { refState } from "../refs/state"
 import { ABSENT, cellKeyOf, cellState, type CellLog, type CellState, type ShownResult } from "./history"
-import { dynamicArrayCm, readDynamicArrays, type DynamicArrays, type MadeMetadata } from "./spill"
+import { dynamicArrayCm, ODS_DYNAMIC_ARRAYS, readDynamicArrays, type DynamicArrays, type MadeMetadata } from "./spill"
 
 // The xlsx session's document: the workbook model with what a session adds to it. It shows cells (their text
 // through their number format, their look through the render style table), lays sheets out, keeps the formula
@@ -574,9 +577,17 @@ export class XlsxDocument {
 		if (!this.closed) this.buildEngine(changes)
 	}
 
+	// Results the file lacks, or keeps that are calculated again on open: under calcPr fullCalcOnLoad (ECMA-376 Part 1
+	// §18.2.2) every formula's, else a volatile formula's (SpreadsheetML) or what the OpenDocument reader marked.
 	get hasMissingResults(): boolean {
+		if (this.workbook.calc.fullCalcOnLoad && this.hasFormulas) return true
+
+		const xlsx = this.workbook.format !== "ods"
+
 		for (const entry of this.workbook.sheets) {
-			for (const block of (entry.model?.store as SheetStore | undefined)?.blocks ?? []) {
+			const store = entry.model?.store as SheetStore | undefined
+
+			for (const block of store?.blocks ?? []) {
 				const formulas = block.formulas
 
 				if (formulas === null) continue
@@ -585,6 +596,10 @@ export class XlsxDocument {
 			}
 
 			if ((entry.model?.recalculate?.size ?? 0) > 0) return true
+
+			// A shared formula's text is its master's: the children call what it calls.
+			if (xlsx && store !== undefined)
+				for (let id = 0; id < store.formulas.length; id++) if (volatileFormula(store.formulas.text(id))) return true
 		}
 
 		return false
@@ -1017,6 +1032,32 @@ export class XlsxDocument {
 		return this.styles.numFmt(xf)
 	}
 
+	// A number as cell format `xf` shows it, in the workbook's date system and locale.
+	formatNumber(xf: number, value: number): string {
+		return formatNumberInto(this.styles.numFmt(xf), value, this.out, this.numFmtOptions).text
+	}
+
+	// A stored cell's value as it shows (a formula's shown result): a number, true or false, an error's text, text
+	// as `'text`; undefined when it shows none.
+	shownValue(
+		model: XlsxSheetModel,
+		row: number,
+		col: number,
+		kind: CellKind,
+		value: number,
+		formula: number
+	): RawCellContent | undefined {
+		if (formula < 0) return this.storedResult(model, kind, value)
+
+		const shown = this.shownResults.get(model.id)?.get(cellKeyOf(row, col))
+
+		if (kind !== CellKind.EMPTY && shown?.recalculated !== true) return this.storedResult(model, kind, value)
+		if (shown === undefined || shown.value === null) return undefined
+		if (typeof shown.value === "string") return shown.error ? shown.value : `'${shown.value}`
+
+		return shown.value
+	}
+
 	stringOf(model: XlsxSheetModel, kind: CellKind, value: number): string {
 		return decodeXstring(kind === CellKind.SHARED_STRING ? this.workbook.sharedStrings.text(value) : model.store.strings.text(value))
 	}
@@ -1135,11 +1176,11 @@ export class XlsxDocument {
 			shown.flags |= CellFlag.FORMULA
 			shown.input = localizedInput(`=${this.shownFormulaText(model, formula, row, col)}`, this.ownSettings.locale)
 
-			// A dynamic array calculates here; a legacy array formula or data table keeps its stored result, as does a
-			// formula the engine holds (a name or function it lacks).
+			// A dynamic array and a legacy array formula of one cell calculate here; a legacy one over a block or a data
+			// table keeps its stored result, as does a formula the engine holds (a name or function it lacks).
 			if (
 				formulaKind === FormulaKind.DATA_TABLE ||
-				(formulaKind === FormulaKind.ARRAY && !this.isDynamicArray(model.store.formulas.formula(formula).cellMetadata)) ||
+				(formulaKind === FormulaKind.ARRAY && this.legacyBlock(model.store.formulas.formula(formula))) ||
 				this.alone.get(model.id)?.has(cellKeyOf(row, col)) === true
 			)
 				shown.flags |= CellFlag.CACHED
@@ -1152,10 +1193,9 @@ export class XlsxDocument {
 				return shown
 			}
 
-			const recalculated =
-				model.recalculate?.has(cellKeyOf(row, col)) === true ? this.shownResults.get(model.id)?.get(cellKeyOf(row, col)) : undefined
+			const recalculated = this.shownResults.get(model.id)?.get(cellKeyOf(row, col))
 
-			if (recalculated !== undefined) {
+			if (recalculated?.recalculated === true) {
 				this.showResult(format, recalculated)
 
 				return shown
@@ -1738,6 +1778,14 @@ export class XlsxDocument {
 		return cellMetadata >= 0 && this.dynamicArrays?.dynamic.has(cellMetadata) === true
 	}
 
+	// Whether an array formula is a legacy one (Ctrl+Shift+Enter) over a block of cells: what it gives the block's
+	// other cells is not calculated here, so it keeps its stored results. One of a single cell is calculated.
+	legacyBlock(formula: XlsxFormula): boolean {
+		const ref = formula.ref
+
+		return ref !== null && (ref.endRow > ref.startRow || ref.endCol > ref.startCol) && !this.isDynamicArray(formula.cellMetadata)
+	}
+
 	// Whether a formula typed on a sheet gives an array as the engine calculates it now (a function lifted over a
 	// range: LEN(A1:A3)); false without an engine to ask.
 	givesArray(sheet: SheetId, formula: string): boolean {
@@ -1851,7 +1899,7 @@ export class XlsxDocument {
 	// Reads every table part once, as edits left it (what structured references in held formulas read). A table part
 	// another edit rewrites is left out: a formula naming it reads what is not known.
 	async loadTables(): Promise<void> {
-		this.dynamicArrays ??= await readDynamicArrays(this.workbook)
+		this.dynamicArrays ??= this.workbook.format === "ods" ? ODS_DYNAMIC_ARRAYS : await readDynamicArrays(this.workbook)
 
 		if (this.tables !== null) return
 
@@ -2140,13 +2188,24 @@ export class XlsxDocument {
 			}
 		}
 
-		// An array formula or data table keeps its stored result: its text is not read.
-		if ((formulaKind === FormulaKind.DATA_TABLE || formulaKind === FormulaKind.ARRAY) && stored !== undefined)
+		// A data table, or a legacy array formula over a block, keeps its stored result: its text is not read.
+		if (
+			stored !== undefined &&
+			(formulaKind === FormulaKind.DATA_TABLE ||
+				(formulaKind === FormulaKind.ARRAY && this.legacyBlock(store.formulas.formula(formula))))
+		)
 			return this.held(model, row, col, stored)
 
 		const text = this.formulaText(model, formula, row, col)
+		// A legacy array formula is evaluated as an array, its cell taking the first value (Excel's for one cell).
+		const array = formulaKind === FormulaKind.ARRAY
 		// A structured or external reference is known not to parse there: not given to it, which spares a failed parse.
-		const content = holdsBracket(text) ? null : engineCellFormula(text, this.nameAliases, this.lambdaNames)
+		const engineText = holdsBracket(text)
+			? null
+			: array
+				? engineArrayFormula(text, this.nameAliases, this.lambdaNames)
+				: engineCellFormula(text, this.nameAliases, this.lambdaNames)
+		const content = array && engineText !== null ? `=INDEX(${engineText.slice(1)},1,1)` : engineText
 
 		const lacks = engineLacks(text, this.unknownNames.size === 0 ? undefined : this.unknownName, this.lambdaNames)
 
@@ -2160,7 +2219,7 @@ export class XlsxDocument {
 
 		// An array constant gives an array too ({1,2}, IF(A1,{1,2},0)): its first value, as Excel reads an ordinary
 		// formula.
-		const read = holdsArrayConstant(text) ? `=INDEX((${content.slice(1)}),1,1)` : content
+		const read = !array && holdsArrayConstant(text) ? `=INDEX((${content.slice(1)}),1,1)` : content
 
 		return stored === undefined ? { row, col, content: read } : { row, col, content: read, fallback: stored }
 	}
@@ -2270,11 +2329,18 @@ export class XlsxDocument {
 		// First: which names the formulas may read decides which formulas hold their results.
 		const names = this.engineNames(entries)
 		const missing: { sheet: number; row: number; col: number }[] = []
+		// Formulas whose stored results are calculated again on open (Excel's full calculation under fullCalcOnLoad,
+		// its recalculation of volatile formulas), and what reads them: shown over what the file stores.
+		const fullCalc = this.workbook.calc.fullCalcOnLoad
+		const xlsx = this.workbook.format !== "ods"
+		const again: { sheet: number; row: number; col: number }[] = []
 		const sheets: EngineSheet[] = entries.map((entry, index) => {
 			const model = entry.model as XlsxSheetModel
 			const store = model.store as SheetStore
 			const rows: EngineSheet["rows"] = []
 			const formulas: EngineCell[] = []
+			// Whether a shared formula is volatile, by shared index: its cells call what its master calls.
+			const shared = new Map<number, boolean>()
 
 			for (const block of store.blocks) {
 				for (let i = 0; i < block.rowCount; i++) {
@@ -2292,14 +2358,20 @@ export class XlsxDocument {
 
 						values[col] = cell.content
 
-						if ((block.formulas?.[k] ?? -1) >= 0) {
+						const formula = block.formulas?.[k] ?? -1
+
+						if (formula >= 0) {
 							if (cell.fallback !== undefined || cell.content instanceof HeldResult || cell.spill !== undefined)
 								formulas.push(cell)
-							if (
-								block.kinds[k] === CellKind.EMPTY ||
-								(model.recalculate?.has(cellKeyOf(row, col)) === true && !(cell.content instanceof HeldResult))
+							if (block.kinds[k] === CellKind.EMPTY) missing.push({ sheet: index, row, col })
+							else if (
+								!(cell.content instanceof HeldResult) &&
+								cell.spill === undefined &&
+								(fullCalc ||
+									model.recalculate?.has(cellKeyOf(row, col)) === true ||
+									(xlsx && this.volatileAt(store.formulas, formula, row, col, shared)))
 							)
-								missing.push({ sheet: index, row, col })
+								again.push({ sheet: index, row, col })
 						}
 					}
 
@@ -2324,7 +2396,9 @@ export class XlsxDocument {
 			},
 			(index, row) => this.rowState(sheetAt(index), row),
 			this.ownSettings.locale,
-			(index, range) => this.spillBlocked(sheetAt(index), range)
+			(index, range) => this.spillBlocked(sheetAt(index), range),
+			(index, row, col) => this.formulaInput(sheetAt(index), row, col),
+			this.workbook.format === "ods"
 		)
 
 		this.engine = engine
@@ -2343,7 +2417,77 @@ export class XlsxDocument {
 			changes?.content(sheet, { startRow: cell.row, startCol: cell.col, endRow: cell.row, endCol: cell.col })
 		}
 
+		if (again.length > 0) {
+			for (const cell of again) this.showAgain(engine, cell.sheet, cell.row, cell.col, changes)
+
+			// Under fullCalcOnLoad every formula is in already.
+			if (!fullCalc)
+				for (const cell of engine.dependents(again)) this.showAgain(engine, cell.sheet, cell.row, cell.col, changes, true)
+		}
+
 		return engine
+	}
+
+	// Whether a formula calls a volatile function, a shared one's answer kept by shared index.
+	private volatileAt(formulas: XlsxFormulaTable, id: number, row: number, col: number, shared: Map<number, boolean>): boolean {
+		const kind = formulas.kind(id)
+
+		if (kind !== FormulaKind.SHARED_MASTER && kind !== FormulaKind.SHARED_CHILD) return volatileFormula(formulas.text(id))
+
+		const index = formulas.sharedIndex(id)
+		let known = shared.get(index)
+
+		if (known === undefined) {
+			known = volatileFormula(kind === FormulaKind.SHARED_MASTER ? formulas.text(id) : formulas.expanded(id, row, col))
+			shared.set(index, known)
+		}
+
+		return known
+	}
+
+	// A formula cell (engine sheet index) whose stored result is calculated again on open: the engine's result shown
+	// in its place where it differs (not a circle or a result the engine cannot give, which keep the file's).
+	// `reading`: a cell reading one, which may be no formula the engine calculates.
+	private showAgain(
+		engine: FormulaEngine,
+		index: number,
+		row: number,
+		col: number,
+		changes: SheetChangeSink | undefined,
+		reading = false
+	): void {
+		const sheet = this.engineSheets[index]
+		const model = sheet === undefined ? null : this.model(sheet)
+
+		if (sheet === undefined || model === null) return
+
+		if (reading) {
+			const store = model.store as SheetStore
+			const slot = store.locate(row, col)
+			const formula = slot < 0 ? -1 : store.formula(slot)
+
+			if (formula < 0 || store.kind(slot) === CellKind.EMPTY || this.alone.get(sheet)?.has(cellKeyOf(row, col)) === true) return
+
+			// A dynamic array's values spill beside it (calculated with the first edit), a data table's are held.
+			const kind = store.formulas.kind(formula)
+
+			if (
+				kind === FormulaKind.DATA_TABLE ||
+				(kind === FormulaKind.ARRAY && this.isDynamicArray(store.formulas.formula(formula).cellMetadata))
+			)
+				return
+		}
+
+		const result = { sheet: index, row, col, ...engine.result(index, row, col) }
+		const shows = result.value !== CYCLE && !FormulaEngine.unsupported(result.value) && !this.holdsResult(sheet, result)
+		const results = this.shownResults.get(sheet)
+		const key = cellKeyOf(row, col)
+
+		if (shows) this.setShown(sheet, row, col, { value: result.value, error: result.error === true, recalculated: true })
+		else if (results?.get(key)?.recalculated === true) results.delete(key)
+		else return
+
+		changes?.content(sheet, { startRow: row, startCol: col, endRow: row, endCol: col })
 	}
 
 	private setShown(sheet: SheetId, row: number, col: number, result: ShownResult): void {
@@ -2368,6 +2512,19 @@ export class XlsxDocument {
 	filteredRow: ((sheet: SheetId, row: number) => boolean) | null = null
 
 	// A row as SUBTOTAL and AGGREGATE read it: 0 shown, 1 hidden by hand, 2 hidden by a filter.
+	// A cell's formula as the formula bar shows it (Shown.input), or null for a cell without one: what FORMULATEXT gives.
+	private formulaInput(sheet: SheetId | undefined, row: number, col: number): string | null {
+		const model = sheet === undefined ? null : this.model(sheet)
+
+		if (model === null) return null
+
+		const store = model.store as SheetStore
+		const slot = store.locate(row, col)
+		const formula = slot < 0 ? -1 : store.formula(slot)
+
+		return formula < 0 ? null : localizedInput(`=${this.shownFormulaText(model, formula, row, col)}`, this.ownSettings.locale)
+	}
+
 	private rowState(sheet: SheetId | undefined, row: number): number {
 		const model = sheet === undefined ? null : this.model(sheet)
 

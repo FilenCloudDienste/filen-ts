@@ -20,28 +20,36 @@ interface Item {
 	readonly value: string
 }
 
-// The items a sheet's view comes to (settings.ts view() read backwards).
-function viewItems(view: XlsxSheetView): Item[] {
+// The items a sheet's view comes to (settings.ts view() read backwards); with split, the source's split pane items
+// stay as they are.
+function viewItems(view: XlsxSheetView, split = false): Item[] {
+	const items: Item[] = [
+		{ name: "CursorPositionX", type: "int", value: String(view.activeCol) },
+		{ name: "CursorPositionY", type: "int", value: String(view.activeRow) },
+		{ name: "PositionLeft", type: "int", value: String(view.leftCol) },
+		{ name: "PositionTop", type: "int", value: String(view.topRow) },
+		{ name: "ZoomValue", type: "int", value: String(view.zoom) },
+		{ name: "ShowGrid", type: "boolean", value: view.gridLines ? "true" : "false" }
+	]
+
+	if (split) return items
+
 	const frozen = view.frozen
 	const cols = frozen?.cols ?? 0
 	const rows = frozen?.rows ?? 0
 
-	return [
-		{ name: "CursorPositionX", type: "int", value: String(view.activeCol) },
-		{ name: "CursorPositionY", type: "int", value: String(view.activeRow) },
+	items.push(
 		{ name: "HorizontalSplitMode", type: "short", value: cols > 0 ? "2" : "0" },
 		{ name: "VerticalSplitMode", type: "short", value: rows > 0 ? "2" : "0" },
 		{ name: "HorizontalSplitPosition", type: "int", value: String(cols > 0 ? view.leftCol + cols : 0) },
 		{ name: "VerticalSplitPosition", type: "int", value: String(rows > 0 ? view.topRow + rows : 0) },
 		// The pane the cursor is in: 3 bottom right, 2 bottom left, 1 top right (LibreOffice's ScSplitPos).
 		{ name: "ActiveSplitRange", type: "short", value: rows > 0 ? (cols > 0 ? "3" : "2") : cols > 0 ? "1" : "2" },
-		{ name: "PositionLeft", type: "int", value: String(view.leftCol) },
 		{ name: "PositionRight", type: "int", value: String(cols > 0 ? (frozen?.topLeftCol ?? view.leftCol + cols) : 0) },
-		{ name: "PositionTop", type: "int", value: String(view.topRow) },
-		{ name: "PositionBottom", type: "int", value: String(rows > 0 ? (frozen?.topLeftRow ?? view.topRow + rows) : 0) },
-		{ name: "ZoomValue", type: "int", value: String(view.zoom) },
-		{ name: "ShowGrid", type: "boolean", value: view.gridLines ? "true" : "false" }
-	]
+		{ name: "PositionBottom", type: "int", value: String(rows > 0 ? (frozen?.topLeftRow ?? view.topRow + rows) : 0) }
+	)
+
+	return items
 }
 
 function itemMarkup(prefix: string, item: Item): string {
@@ -115,6 +123,20 @@ export function writeSettings(
 		if (added.length > 0) editor.append(entry, added.join(""))
 	}
 
+	// A split (mode 1 on either axis, LibreOffice's SC_SPLIT_NORMAL; Excel's pane state "split") reads as no frozen
+	// pane: an unfrozen view keeps it as the source has it, a freeze replaces it as in Excel.
+	const splitIn = (entry: number): boolean => {
+		for (const child of elements(document, entry)) {
+			if (!config(child, "config-item")) continue
+
+			const name = nameOf(child)
+
+			if ((name === "HorizontalSplitMode" || name === "VerticalSplitMode") && document.textContent(child).trim() === "1") return true
+		}
+
+		return false
+	}
+
 	if (activeChanged) setItems(view, [{ name: "ActiveTable", type: "string", value: activeSheet }])
 
 	const tables = elements(document, view).find(node => config(node, "config-item-map-named") && nameOf(node) === "Tables")
@@ -134,7 +156,7 @@ export function writeSettings(
 		if (entry !== undefined && sheet.name !== sheet.sourceName) editor.setAttribute(entry, `${prefix}name`, sheet.name)
 		if (!sheet.changed) continue
 
-		if (entry !== undefined) setItems(entry, viewItems(sheet.view))
+		if (entry !== undefined) setItems(entry, viewItems(sheet.view, sheet.view.frozen === null && splitIn(entry)))
 		else
 			fresh.push(
 				`<${prefix}config-item-map-entry ${prefix}name="${escapeAttribute(sheet.name)}">${viewItems(sheet.view)

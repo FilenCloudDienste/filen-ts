@@ -179,4 +179,32 @@ describe("an ODS save", () => {
 		expect(xml.split("<draw:image").length - 1).toBe(1)
 		session.close()
 	})
+
+	it("keeps a date cell's calendar date under any null date (ODF 1.3 Part 3 §19.379, §19.639)", async () => {
+		const body =
+			'<table:calculation-settings><table:null-date table:date-value="1900-01-01"/></table:calculation-settings>' +
+			table(
+				"One",
+				'<table:table-row><table:table-cell office:value-type="date" office:date-value="2024-01-01"><text:p>2024-01-01</text:p></table:table-cell><table:table-cell office:value-type="float" office:value="1"><text:p>1</text:p></table:table-cell></table:table-row>'
+			)
+		const { session, sheet } = await open({ body })
+
+		// The date (45292 on the engine's 1899-12-30 base) shows in the standard date format: it has no data style.
+		expect((await rows(odsBytes({ body })))[0]?.[0]).toBe("1/1/2024")
+
+		await session.command(set(sheet, 0, 1, "2"))
+
+		const unrelated = content(await saved(session))
+
+		expect(unrelated).toContain('office:date-value="2024-01-01"')
+		expect(unrelated).toContain('<table:null-date table:date-value="1900-01-01"/>')
+
+		await session.command(set(sheet, 0, 0, "2024-02-01"))
+
+		const typed = content(await saved(session))
+
+		expect(typed).toContain('office:date-value="2024-02-01"')
+		expect(typed).not.toContain('office:date-value="2024-01-01"')
+		session.close()
+	})
 })

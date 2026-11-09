@@ -2,7 +2,17 @@ import { functionPrefix, functionSupport, functionVolatility, sheetFunction } fr
 import { columnIndex, columnName } from "./cellRef"
 import type { AxisEdit } from "../model/edits"
 import { MAX_COLUMNS, MAX_ROWS } from "../model/model"
-import { ANCHOR_FUNCTION, CALL_FUNCTION, CRITERION_FUNCTION, INTERSECT_FUNCTION, SPILL_FUNCTION } from "../functions/engineNames"
+import {
+	ANCHOR_FUNCTION,
+	CALL_FUNCTION,
+	CRITERION_FUNCTION,
+	INDEX_REFERENCE_FUNCTION,
+	INTERSECT_FUNCTION,
+	NULL_FUNCTION,
+	OFFSET_FUNCTION,
+	RANGE_FUNCTION,
+	SPILL_FUNCTION
+} from "../functions/engineNames"
 
 // Cell references inside Excel formula text, found and rewritten without evaluating anything: filling a
 // shared formula down, moving references for inserted or deleted rows and columns, renaming a sheet. The
@@ -658,6 +668,96 @@ export function rewriteFormula(formula: string, visit: (ref: FormulaRef, prefix:
 	return render(formulaParts(formula), visit)
 }
 
+// The first character past spaces from `index` on (back: before it), or -1.
+function significant(text: string, index: number, back: boolean): number {
+	for (let at = index; back ? at >= 0 : at < text.length; at += back ? -1 : 1) {
+		const code = text.charCodeAt(at)
+
+		if (code !== 32 && code !== 10 && code !== 13 && code !== 9) return code
+	}
+
+	return -1
+}
+
+// The formula with each 3-D reference (Jan:Mar!A1) spelled as the references to every sheet it spans, `sheets` in
+// workbook order (Jan!A1,Feb!A1,Mar!A1), its ends in either order. Only an argument of its own to one of `functions`
+// (upper case) is spelled so: Excel takes 3-D references in those alone ("Create a reference to the same cell range on
+// multiple worksheets"). The formula unchanged when it has none; null when one stands elsewhere, names a sheet
+// `sheets` lacks or another workbook.
+export function spannedReferences(formula: string, sheets: readonly string[], functions: ReadonlySet<string>): string | null {
+	const parts = formulaParts(formula)
+
+	if (!parts.some(part => typeof part !== "string" && part.ref.lastSheet !== null)) return formula
+
+	// The function each open parenthesis belongs to (null: none), and the text so far.
+	const calls: (string | null)[] = []
+	let text = ""
+
+	for (let index = 0; index < parts.length; index++) {
+		const part = parts[index] as Part
+
+		if (typeof part === "string") {
+			let word = ""
+
+			for (let at = 0; at < part.length; at++) {
+				const code = part.charCodeAt(at)
+
+				if (code === QUOTE) {
+					at = skipQuoted(part, at, QUOTE) - 1
+					word = ""
+				} else if (code === 40) {
+					calls.push(word === "" ? null : word.toUpperCase().replace(/^_XLFN\./, ""))
+					word = ""
+				} else if (code === 41) {
+					calls.pop()
+					word = ""
+				} else if (isWordChar(code)) word += part.charAt(at)
+				else word = ""
+			}
+
+			text += part
+
+			continue
+		}
+
+		const { ref } = part
+
+		if (ref.lastSheet === null) {
+			text += part.prefix + part.areaText
+
+			continue
+		}
+
+		const before = significant(text, text.length - 1, true)
+		const next = parts[index + 1]
+		const after = typeof next === "string" ? significant(next, 0, false) : -1
+		const call = calls.at(-1)
+		const first = sheets.findIndex(name => sameSheet(name, ref.sheet ?? ""))
+		const last = sheets.findIndex(name => sameSheet(name, ref.lastSheet ?? ""))
+
+		if (
+			ref.external ||
+			ref.area === null ||
+			call === null ||
+			call === undefined ||
+			!functions.has(call) ||
+			(before !== 40 && before !== 44) ||
+			(after !== 41 && after !== 44) ||
+			first < 0 ||
+			last < 0
+		)
+			return null
+
+		const spanned: string[] = []
+
+		for (let at = Math.min(first, last); at <= Math.max(first, last); at++) spanned.push(sheetPrefix(sheets[at] ?? "") + part.areaText)
+
+		text += spanned.join(",")
+	}
+
+	return text
+}
+
 // Whether a sheet's name is quoted where a formula names it ('2024'!A1, 'Q1 Data'!A1).
 export function sheetNameNeedsQuotes(name: string): boolean {
 	return needsQuotes(name)
@@ -1162,7 +1262,8 @@ function isParameter(word: string): boolean {
 	return word.length > PARAMETER.length && word.slice(0, PARAMETER.length).toLowerCase() === PARAMETER
 }
 
-function withoutPrefix(name: string): string {
+// A LET or LAMBDA name as written in a formula (x), the file's _xlpm. prefix left out.
+export function withoutPrefix(name: string): string {
 	return name.length > PARAMETER.length && name.slice(0, PARAMETER.length).toLowerCase() === PARAMETER
 		? name.slice(PARAMETER.length)
 		: name
@@ -1196,7 +1297,7 @@ interface Scope {
 // The names LET and LAMBDA bind, where declared and where used within their call, with the prefix a file
 // stores them with (Excel reads the bare name as a defined name). A name already prefixed stays as it is.
 // A word beside ":" is a range's end, and one before "(" a function, unless the name is bound and names no function.
-function prefixParameters(formula: string): string {
+export function prefixParameters(formula: string): string {
 	if (!SCOPES.test(formula)) return formula
 
 	// One scope per open parenthesis or array constant.
@@ -2171,7 +2272,7 @@ export function mayReturnArray(formula: string): boolean {
 	if (CALLS_ARRAY_RESULT.test(formula) || rangeAlone(formula)) return true
 	if (!formula.includes(":")) return false
 
-	const parts = formulaParts(formula)
+	const parts = intersected(formulaParts(formula))
 
 	return parts.some((part, index) => {
 		if (typeof part === "string" || part.ref.external || part.ref.area === null) return false
@@ -2189,11 +2290,11 @@ export function mayReturnArray(formula: string): boolean {
 	})
 }
 
-// Whether the formula is one reference to more than one cell, and nothing else.
+// Whether the formula is one reference to more than one cell (an intersection of two too), and nothing else.
 function rangeAlone(formula: string): boolean {
 	if (!formula.includes(":")) return false
 
-	const parts = formulaParts(formula)
+	const parts = intersected(formulaParts(formula))
 	let ref: RefPart | null = null
 
 	for (const part of parts) {
@@ -2341,16 +2442,451 @@ function resizedArea(range: RefArea, sum: RefArea): RefArea | null {
 	}
 }
 
+// What an intersection of references that do not meet gives: Excel's #NULL!.
+const NULL_CALL = `${NULL_FUNCTION}()`
+
+// The text between the two operands of an intersection: spaces alone (support.microsoft.com "Calculation operators and
+// precedence in Excel": "space" is the intersection operator).
+const SPACES = /^ +$/
+
+// An area's rows and columns, low to high: top, left, bottom, right.
+function bounds(area: RefArea): readonly [number, number, number, number] {
+	return [
+		area.kind === "cols" ? 0 : Math.min(area.startRow, area.endRow),
+		area.kind === "rows" ? 0 : Math.min(area.startCol, area.endCol),
+		area.kind === "cols" ? MAX_ROWS - 1 : Math.max(area.startRow, area.endRow),
+		area.kind === "rows" ? MAX_COLUMNS - 1 : Math.max(area.startCol, area.endCol)
+	]
+}
+
+// The intersection of two references (A1:B3 B2:C4): the reference to the cells both hold, NULL_CALL where they hold
+// none, or null where the text cannot tell (another workbook, several sheets, a name, two sheets that may differ). The
+// engine reads the same cells whether a reference is absolute or not, so the one given is relative.
+function meeting(a: RefPart, b: RefPart): RefPart | string | null {
+	const first = a.ref
+	const second = b.ref
+
+	if (first.area === null || second.area === null || first.external || second.external) return null
+	if (first.lastSheet !== null || second.lastSheet !== null) return null
+	if (first.sheet === null ? second.sheet !== null : second.sheet === null || !sameSheet(first.sheet, second.sheet)) return null
+
+	const [aTop, aLeft, aBottom, aRight] = bounds(first.area)
+	const [bTop, bLeft, bBottom, bRight] = bounds(second.area)
+	const top = Math.max(aTop, bTop)
+	const left = Math.max(aLeft, bLeft)
+	const bottom = Math.min(aBottom, bBottom)
+	const right = Math.min(aRight, bRight)
+
+	if (top > bottom || left > right) return NULL_CALL
+
+	const kind = first.area.kind === second.area.kind ? first.area.kind : "cell"
+	const area: RefArea = {
+		kind,
+		range: kind !== "cell" || top !== bottom || left !== right,
+		startRow: top,
+		startCol: left,
+		endRow: bottom,
+		endCol: right,
+		startRowAbs: false,
+		startColAbs: false,
+		endRowAbs: false,
+		endColAbs: false
+	}
+
+	return { ref: { ...first, area }, prefix: a.prefix, areaText: areaText(area) }
+}
+
+// Whether the text around an intersection's operands leaves them whole: a range or spill operator beside one binds
+// first (INDEX(…):A1 B1), and @ is left as written.
+function wholeOperands(before: Part | undefined, after: Part | undefined): boolean {
+	const end = typeof before === "string" ? before.trimEnd().at(-1) : undefined
+	const start = typeof after === "string" ? after.trimStart()[0] : undefined
+
+	return end !== ":" && end !== "@" && start !== ":" && start !== "#"
+}
+
+// The parts with each intersection of two literal references on one sheet resolved: the reference both hold, or
+// NULL_CALL. Others (a name, OFFSET) are left as written, which the engine cannot read.
+function intersected(parts: readonly Part[]): readonly Part[] {
+	// Copied only once an intersection is resolved.
+	let out: Part[] | null = null
+
+	for (let index = 0; index < parts.length; index++) {
+		const part = parts[index] ?? ""
+		const held = out ?? parts
+		const length = out === null ? index : held.length
+		const gap = held[length - 1]
+		const left = held[length - 2]
+
+		if (
+			typeof part !== "string" &&
+			typeof gap === "string" &&
+			left !== undefined &&
+			SPACES.test(gap) &&
+			wholeOperands(held[length - 3], parts[index + 1])
+		) {
+			const met = left === NULL_CALL ? NULL_CALL : typeof left === "string" ? null : meeting(left, part)
+
+			if (met !== null) {
+				out ??= parts.slice(0, index)
+				out.splice(-2, 2, met)
+
+				continue
+			}
+		}
+
+		out?.push(part)
+	}
+
+	return out ?? parts
+}
+
+// The functions whose reference arguments are read alike one by one, so a union given as one ((A1,B2:C3)) reads as its
+// references given apart.
+const UNION_CALLS: ReadonlySet<string> = new Set([
+	"SUM",
+	"COUNT",
+	"COUNTA",
+	"AVERAGE",
+	"AVERAGEA",
+	"MIN",
+	"MAX",
+	"MINA",
+	"MAXA",
+	"PRODUCT",
+	"SUMSQ",
+	"STDEV",
+	"STDEV.S",
+	"STDEV.P",
+	"STDEVA",
+	"STDEVP",
+	"STDEVPA",
+	"VAR",
+	"VAR.S",
+	"VAR.P",
+	"VARA",
+	"VARP",
+	"VARPA",
+	"MEDIAN"
+])
+
+function partText(part: Part): string {
+	return typeof part === "string" ? part : part.prefix + part.areaText
+}
+
+// A union of references written whole as one argument, from its "(" at `open` in parts[at]: how many areas it has,
+// whether an intersection in it met nowhere, and where its ")" is (parts[last] at `close`); null for anything else.
+function unionAt(
+	parts: readonly Part[],
+	at: number,
+	open: number
+): { readonly count: number; readonly empty: boolean; readonly last: number; readonly close: number } | null {
+	const head = parts[at]
+
+	if (typeof head !== "string" || head.slice(open + 1).trim() !== "") return null
+
+	let count = 0
+	let empty = false
+
+	for (let index = at + 1; ; index += 2) {
+		const element = parts[index]
+		const separator = parts[index + 1]
+
+		if (element === undefined || typeof separator !== "string") return null
+
+		if (typeof element === "string") {
+			if (element !== NULL_CALL) return null
+
+			empty = true
+		} else if (element.ref.external || element.ref.area === null || element.ref.lastSheet !== null) return null
+
+		count++
+
+		const trimmed = separator.trimStart()
+
+		if (trimmed.startsWith(",")) {
+			if (trimmed.slice(1).trim() !== "") return null
+
+			continue
+		}
+
+		if (!trimmed.startsWith(")") || count < 2) return null
+
+		const close = separator.length - trimmed.length
+		const rest = separator.slice(close + 1).trimStart()
+
+		return rest.startsWith(",") || rest.startsWith(")") ? { count, empty, last: index + 1, close } : null
+	}
+}
+
+// Unions of literal references given to a function of UNION_CALLS, as its references given apart (SUM((A1,B2)) is
+// SUM(A1,B2)), and to AREAS, as their count. Others are left as written, which the engine cannot read.
+function unions(parts: readonly Part[]): string {
+	const frames: { readonly call: string | null; readonly at: number }[] = []
+	let text = ""
+	let call: { readonly name: string; readonly at: number } | null = null
+	let at = 0
+	let start = 0
+
+	while (at < parts.length) {
+		const part = parts[at] ?? ""
+
+		if (typeof part !== "string") {
+			text += partText(part)
+			call = null
+			at++
+
+			continue
+		}
+
+		let index = start
+		let resumed = false
+
+		start = 0
+
+		while (index < part.length) {
+			const code = part.charCodeAt(index)
+
+			if (code === QUOTE || code === APOSTROPHE || code === BRACKET_OPEN) {
+				const end = code === BRACKET_OPEN ? skipBracket(part, index) : skipQuoted(part, index, code)
+
+				text += part.slice(index, end)
+				index = end
+				call = null
+
+				continue
+			}
+
+			if (isWordChar(code)) {
+				const end = readWord(part, index)
+				const word = part.slice(index, end)
+
+				call = part.charCodeAt(end) === 40 ? { name: bareFunctionName(word).toUpperCase(), at: text.length } : null
+				text += word
+				index = end
+
+				continue
+			}
+
+			if (code === 40) {
+				const top = frames.at(-1)
+				const lead = text.trimEnd().at(-1)
+				const union =
+					call === null &&
+					top !== undefined &&
+					top.call !== null &&
+					(UNION_CALLS.has(top.call) || top.call === "AREAS") &&
+					(lead === "(" || lead === ",")
+						? unionAt(parts, at, index)
+						: null
+
+				if (top !== undefined && union !== null) {
+					const closing = parts[union.last] ?? ""
+					const after = partText(closing).slice(union.close + 1)
+
+					if (top.call !== "AREAS") {
+						text += part.slice(index + 1)
+
+						for (let next = at + 1; next < union.last; next++) text += partText(parts[next] ?? "")
+
+						at = union.last
+						start = union.close + 1
+						resumed = true
+
+						break
+					}
+
+					const sole = /^\s*\)/.exec(after)
+
+					if (lead === "(" && sole !== null) {
+						text = text.slice(0, top.at) + (union.empty ? NULL_CALL : String(union.count))
+						frames.pop()
+						at = union.last
+						start = union.close + 1 + sole[0].length
+						resumed = true
+
+						break
+					}
+				}
+
+				frames.push({ call: call?.name ?? null, at: call?.at ?? -1 })
+			} else if (code === 123) frames.push({ call: null, at: -1 })
+			else if (code === 41 || code === 125) frames.pop()
+
+			call = null
+			text += part[index] ?? ""
+			index++
+		}
+
+		if (!resumed) at++
+	}
+
+	return text
+}
+
+// Where a formula may hold what the engine cannot parse: OFFSET, which it resolves as it parses and so only with
+// integer literals, or a range with a function at an end (A1:INDEX(A:A,3)), of which it reads OFFSET's alone.
+const DYNAMIC_REFERENCE = /(?:OFFSET|INDEX|INDIRECT)\(/i
+
+// The first sheet of an unquoted 3-D reference at the end of the text so far (Jan: of Jan:Mar!A1).
+const SPAN_START = /(?:^|[^\p{L}\p{N}_.$'])([\p{L}_][\p{L}\p{N}_.]*):$/u
+
+// An operand dynamicReferences reads: its text as the engine takes it, and for a function call its name (upper case)
+// and arguments as the engine takes them.
+interface Operand {
+	readonly text: string
+	readonly end: number
+	readonly call: string | null
+	readonly args: string
+	// An OFFSET the engine resolves as it parses to one cell, which it reads at an end of a range too.
+	readonly staticCell: boolean
+}
+
+// Whether a text is one cell's reference (Sheet1!$A$1) and nothing else.
+function oneCellReference(text: string): boolean {
+	const ref = singleReference(text.trim())
+
+	return ref?.area?.kind === "cell" && !ref.area.range && !ref.external && ref.lastSheet === null
+}
+
+// Whether the engine resolves OFFSET with these arguments as it parses (its handleOffsetHeuristic): a cell reference,
+// integer rows and cols, and positive integer height and width, each a literal.
+function staticOffset(args: readonly string[]): boolean {
+	const [base, rows, cols, height, width] = args.map(arg => arg.trim())
+
+	return (
+		args.length >= 3 &&
+		args.length <= 5 &&
+		base !== undefined &&
+		oneCellReference(base) &&
+		/^[+-]?\d+$/.test(rows ?? "") &&
+		/^[+-]?\d+$/.test(cols ?? "") &&
+		(height === undefined || (/^\d+$/.test(height) && Number(height) > 0)) &&
+		(width === undefined || (/^\d+$/.test(width) && Number(width) > 0))
+	)
+}
+
+// The operand at `start`: a reference ('My Sheet'!A1, an end of A1:B2) or another word, or a function call, its
+// arguments read in turn; null where none starts.
+function dynamicOperand(text: string, start: number): Operand | null {
+	const code = text.charCodeAt(start)
+	let end: number
+
+	if (code === APOSTROPHE) {
+		end = skipQuoted(text, start, APOSTROPHE)
+
+		if (text.charCodeAt(end) !== 33) return null
+
+		end = readWord(text, end + 1)
+	} else if (isWordChar(code)) {
+		end = readWord(text, start)
+
+		if (text.charCodeAt(end) === 33) end = readWord(text, end + 1)
+		else if (text.charCodeAt(end) === 40) {
+			const call = callArguments(text, end)
+
+			if (call !== null) {
+				const name = text.slice(start, end).toUpperCase()
+				const args = call.args.map(dynamicReferences).join(",")
+				const offset = name === "OFFSET"
+				const fixed = offset && staticOffset(call.args)
+
+				return {
+					text: `${offset && !fixed ? OFFSET_FUNCTION : text.slice(start, end)}(${args})`,
+					end: call.end,
+					call: name,
+					args,
+					staticCell: fixed && call.args.length <= 3
+				}
+			}
+		}
+	} else return null
+
+	return { text: text.slice(start, end), end, call: null, args: "", staticCell: false }
+}
+
+// An operand as an end of a range given to RANGE_FUNCTION: INDEX as the reference it gives.
+function rangeEnd(operand: Operand): string {
+	return operand.call === "INDEX" ? `${INDEX_REFERENCE_FUNCTION}(${operand.args})` : operand.text
+}
+
+// A formula's text with each OFFSET the engine cannot resolve as it parses given to OFFSET_FUNCTION, and each range
+// with a function at an end (A1:INDEX(A:A,3), INDIRECT("A1"):B2, A1:OFFSET(A1,B1,0)) to RANGE_FUNCTION. A range of
+// two references, or of a cell and an OFFSET the engine resolves to one, stays as written.
+function dynamicReferences(text: string): string {
+	let out = ""
+	let index = 0
+
+	while (index < text.length) {
+		const code = text.charCodeAt(index)
+		let operand = code === QUOTE || code === HASH || code === BRACKET_OPEN ? null : dynamicOperand(text, index)
+
+		if (operand === null) {
+			const end =
+				code === QUOTE || code === APOSTROPHE
+					? skipQuoted(text, index, code)
+					: code === BRACKET_OPEN
+						? skipBracket(text, index)
+						: code === HASH
+							? skipError(text, index)
+							: index + 1
+
+			out += text.slice(index, end)
+			index = end
+
+			continue
+		}
+
+		while (text.charCodeAt(operand.end) === 58) {
+			const left: Operand = operand
+			const right = dynamicOperand(text, left.end + 1)
+
+			if (right === null) break
+
+			const plain =
+				(left.call === null && right.call === null) ||
+				(left.staticCell && (right.staticCell || (right.call === null && oneCellReference(right.text)))) ||
+				(right.staticCell && left.call === null && oneCellReference(left.text))
+
+			operand = {
+				text: plain ? `${left.text}:${right.text}` : `${RANGE_FUNCTION}(${rangeEnd(left)},${rangeEnd(right)})`,
+				end: right.end,
+				call: plain ? null : RANGE_FUNCTION,
+				args: "",
+				staticCell: false
+			}
+		}
+
+		out += operand.text
+		index = operand.end
+	}
+
+	return out
+}
+
+// A formula that may hold an intersection or a union of references.
+const REFERENCE_OPERATOR = /[\w$] +[^\s,)&+\-*/^=<>%]|[(,]\s*\(/
+
+// The reference operators the engine has none of, rewritten where the text tells what they give: an intersection of
+// literal references as the reference to the cells both hold (#NULL! when none), a union given whole to a function
+// reading its references alike (SUM, AREAS) as those references.
+function referenceOperators(formula: string): string {
+	return REFERENCE_OPERATOR.test(formula) ? unions(intersected(formulaParts(formula))) : formula
+}
+
 // Excel formula text as HyperFormula reads it, where only the spelling differs: function names lose the
 // _xlfn./_xlws. prefixes files store for newer functions, TRUE and FALSE become the functions HyperFormula
 // has for them, exponents take a lower-case "e", a string literal with a doubled quote is spelled with
 // CHAR(34) (HyperFormula has no escape for it; inside an array constant it is left to fail), and calls
-// that evaluate arrays are wrapped in ARRAYFORMULA. What HyperFormula still cannot read (intersections,
+// that evaluate arrays are wrapped in ARRAYFORMULA. Intersections and unions of references are rewritten where the
+// text tells what they give (referenceOperators). What HyperFormula still cannot read (other intersections and
 // unions, structured and external references) fails to parse there, and the caller keeps the file's own
 // result. A defined name in `aliases` (upper case) is spelled as its alias: the engine reads some names Excel
 // takes (CustomCost1, R2D2) as references.
-export function engineFormula(source: string, aliases?: ReadonlyMap<string, string>, lambdas?: ReadonlySet<string>): string {
-	const formula = /_xlfn\._TRO_/i.test(source) ? engineTrimReferences(source) : source
+export function engineFormula(written: string, aliases?: ReadonlyMap<string, string>, lambdas?: ReadonlySet<string>): string {
+	const source = referenceOperators(written)
+	const trimmed = /_xlfn\._TRO_/i.test(source) ? engineTrimReferences(source) : source
+	const formula = DYNAMIC_REFERENCE.test(trimmed) ? dynamicReferences(trimmed) : trimmed
 	let text = ""
 	let braces = 0
 	let index = 0
@@ -2428,8 +2964,16 @@ export function engineFormula(source: string, aliases?: ReadonlyMap<string, stri
 			} else if (numeric && /^(\d+\.?\d*|\.\d+)E\d+$/i.test(word)) {
 				text += word.replace(/E/i, "e")
 			} else if (next === 33) {
-				// HyperFormula reads only plain ASCII sheet names unquoted (not 数据!A1, not Q1.2024!A1).
-				text += `'${word.replaceAll("'", "''")}'`
+				// HyperFormula reads only plain ASCII sheet names unquoted (not 数据!A1, not Q1.2024!A1). A 3-D reference's
+				// first sheet (Jan:Mar!A1) is quoted with the last ('Jan:Mar'!A1), as one prefix.
+				const start = formula.charCodeAt(index - 1) === 58 ? SPAN_START.exec(text)?.[1] : undefined
+				// A cell before the colon (A1:Mar!B2) is a range's start, which no sheet name unquoted can be.
+				const first = start === undefined || /^[A-Za-z]{1,3}[0-9]+$/.test(start) ? undefined : start
+
+				text =
+					first === undefined
+						? `${text}'${word.replaceAll("'", "''")}'`
+						: `${text.slice(0, text.length - first.length - 1)}'${first}:${word}'`
 			} else if (next !== 58 && (word.length === 4 || word.length === 5) && /^(TRUE|FALSE)$/i.test(word)) {
 				text += `${word}()`
 			} else {
