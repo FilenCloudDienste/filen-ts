@@ -432,7 +432,12 @@ export function changeLevel(direction: 1 | -1, defaults: TextDefaults = NO_DEFAU
 		if (paragraphs.every(({ node }) => levelOf(node) === (direction === 1 ? 8 : 0))) return false
 
 		return mapParaProps(defaults, local => {
-			const level = Math.max(0, Math.min(8, (local.lvl ?? 0) + direction))
+			const current = Math.max(0, Math.min(8, (local.lvl ?? 0) | 0))
+			const level = Math.max(0, Math.min(8, current + direction))
+
+			// Already at the limit: neither the level nor its own indents move.
+			if (level === current) return local
+
 			const next: ParaProps = { ...local, lvl: level }
 
 			// Own indents move with the level; inherited ones come from the level's style.
@@ -535,6 +540,43 @@ export const selectAllText: TextCommand = (state, dispatch) => {
 	dispatch?.(state.tr.setSelection(new AllSelection(state.doc)))
 
 	return true
+}
+
+// Alt+Shift+Up/Down: the paragraphs the selection touches swap places with the one before or after them, in one
+// step, the selection moving with them; false at the body's edge.
+export function moveParagraphs(direction: 1 | -1): TextCommand {
+	return (state, dispatch) => {
+		const { doc, selection } = state
+		const { $from, $to } = selection
+		const first = $from.index(0)
+		const last = Math.min(doc.childCount - 1, $to.depth === 0 && $to.index(0) > first ? $to.index(0) - 1 : $to.index(0))
+		const other = direction === -1 ? first - 1 : last + 1
+
+		if (other < 0 || other >= doc.childCount || last < first) return false
+
+		if (dispatch !== undefined) {
+			let start = 0
+
+			for (let index = 0; index < first; index++) start += doc.child(index).nodeSize
+
+			let end = start
+
+			for (let index = first; index <= last; index++) end += doc.child(index).nodeSize
+
+			const moved = doc.child(other)
+			const size = moved.nodeSize
+			const tr =
+				direction === -1
+					? state.tr.delete(start - size, start).insert(end - size, moved)
+					: state.tr.delete(end, end + size).insert(start, moved)
+			const shift = direction === -1 ? -size : size
+
+			tr.setSelection(TextSelection.create(tr.doc, selection.anchor + shift, selection.head + shift))
+			dispatch(tr.scrollIntoView())
+		}
+
+		return true
+	}
 }
 
 // A state over a whole body with everything selected: formatting a selected shape that is not being edited.

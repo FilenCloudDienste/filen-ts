@@ -222,6 +222,64 @@ describe("the timegraph", () => {
 		expect(t.snapshot().step).toBe(2)
 	})
 
+	it("warps a behaviour's simple time through its tmFilter and ignores a malformed one", () => {
+		// A half turn over 2000 ms under the Bounce entrance's ppt_x filter as PowerPoint writes it.
+		const turn = (b: TimingBuilder, tmFilter: string, extra: Partial<Parameters<TimingBuilder["ctn"]>[0]> = {}) =>
+			b.root([
+				b.mainSeq([
+					b.click([
+						[
+							0,
+							[
+								b.effect(2, { presetID: 8, presetClass: "emph", presetSubtype: 0, nodeType: "clickEffect" }, 0, [
+									b.behavior(
+										{
+											type: "animRot",
+											common: { target: { kind: "shape", shape: 2 }, attrNames: ["r"] },
+											by: 10800000
+										},
+										{ dur: 2000, tmFilter, ...extra }
+									)
+								])
+							]
+						]
+					])
+				])
+			])
+		const bounce = "0,0; 0.14,0.36; 0.43,0.73; 0.71,0.91; 1.0,1.0"
+		const t = started(b => turn(b, bounce))
+
+		t.fire({ kind: "next" }, 1000)
+
+		// At each breakpoint t the rotation is t' of the half turn; between them it is linear.
+		for (const [at, filtered] of [
+			[0.14, 0.36],
+			[0.43, 0.73],
+			[0.71, 0.91]
+		] as const) {
+			expect(rotation(layer(t.sample(1000 + at * 2000), 0))).toBeCloseTo(filtered * 180, 4)
+		}
+
+		expect(rotation(layer(t.sample(1000 + 0.07 * 2000), 0))).toBeCloseTo(0.18 * 180, 4)
+
+		// The filter warps the eased time: accel 50% puts u = 0.5 at eased 1/3, filtered by the 0.14..0.43 segment.
+		const eased = started(b => turn(b, bounce, { accel: 50000 }))
+
+		eased.fire({ kind: "next" }, 1000)
+
+		const third = 1 / 3
+
+		expect(rotation(layer(eased.sample(2000), 0))).toBeCloseTo((0.36 + ((0.73 - 0.36) * (third - 0.14)) / (0.43 - 0.14)) * 180, 4)
+
+		// Descending t, a value past 1 and a single pair play linear time.
+		for (const malformed of ["0,0; 0.5,0.9; 0.4,1", "0,0; 0.5,1.2; 1,1", "0,0", "0,0; x,1; 1,1"]) {
+			const linear = started(b => turn(b, malformed))
+
+			linear.fire({ kind: "next" }, 1000)
+			expect(rotation(layer(linear.sample(1500), 0))).toBeCloseTo(45, 4)
+		}
+	})
+
 	it("refuses a tree past the node budget and depth", () => {
 		const b = new TimingBuilder()
 		const tree = b.root([b.mainSeq([b.click([[0, [b.flyIn(4, "clickEffect")]]])])])

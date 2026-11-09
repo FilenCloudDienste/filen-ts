@@ -107,7 +107,7 @@ export function resolvedXfrm(levels: readonly ResolveLevel[]): Xfrm {
 }
 
 const GEOMETRIES: ReadonlySet<string> = new Set(["prstGeom", "custGeom"])
-const EFFECTS: ReadonlySet<string> = new Set(["effectLst", "effectDag"])
+export const EFFECTS: ReadonlySet<string> = new Set(["effectLst", "effectDag"])
 
 function pictureImage(writer: ScratchWriter): Parameters<typeof fillXml>[1] {
 	return fill =>

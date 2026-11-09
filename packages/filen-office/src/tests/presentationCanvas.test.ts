@@ -152,6 +152,34 @@ describe("canvas painter: paths", () => {
 		])
 	})
 
+	it("keeps an unscaled linear angle true in pixels and skews a scaled one with the box (lin@scaled)", () => {
+		const stops = { offsets: new Float32Array([0, 1]), colors: new Uint32Array([rgba("FF0000"), rgba("0000FF")]) }
+		// The gradient line's angle in degrees, its centre and its length.
+		const line = (scaled: boolean): number[] => {
+			const ctx = new RecordingCanvas()
+
+			paintDrawingCanvas(ctx, shape({ kind: "linear", stops, angle: 45, scaled }), [1, 0, 0, 1, 0, 0], NO_IMAGES)
+
+			const [x0 = 0, y0 = 0, x1 = 0, y1 = 0] = (ctx.ops("fill")[0]?.fill as RecordedGradient).args
+
+			return [(Math.atan2(y1 - y0, x1 - x0) * 180) / Math.PI, (x0 + x1) / 2, (y0 + y1) / 2, Math.hypot(x1 - x0, y1 - y0)]
+		}
+		const [unscaledAngle, unscaledX, unscaledY, unscaledLength] = line(false)
+		const [scaledAngle, scaledX, scaledY, scaledLength] = line(true)
+		const angle = Math.atan2(100, 50)
+
+		// A 100 x 50 box: 45 degrees in pixels, through the centre, as long as the box's projection onto it.
+		expect(unscaledAngle).toBeCloseTo(45, 6)
+		expect(unscaledX).toBeCloseTo(50, 6)
+		expect(unscaledY).toBeCloseTo(25, 6)
+		expect(unscaledLength).toBeCloseTo(150 * Math.SQRT1_2, 6)
+		// Scaled: the unit-box 45 degree gradient stretched to the box, its pixel normal along (h cos, w sin).
+		expect(scaledAngle).toBeCloseTo((angle * 180) / Math.PI, 6)
+		expect(scaledX).toBeCloseTo(50, 6)
+		expect(scaledY).toBeCloseTo(25, 6)
+		expect(scaledLength).toBeCloseTo(100 * Math.cos(angle) + 50 * Math.sin(angle), 6)
+	})
+
 	it("draws a circle path gradient as a true circle through the box's corners, centred on its focus", () => {
 		const ctx = new RecordingCanvas()
 		const stops = { offsets: new Float32Array([0, 1]), colors: new Uint32Array([rgba("FFFFFF"), rgba("000000")]) }

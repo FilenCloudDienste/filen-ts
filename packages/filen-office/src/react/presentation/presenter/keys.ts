@@ -5,23 +5,41 @@ import type { InkStore } from "../ink/store"
 // presenter view alike, and from presentation clickers (which send PageDown, PageUp, B, F5 and Escape). The commands
 // a user may rebind come as combos in the app keymap's syntax, alternatives comma-separated ("arrowright,n"), so the
 // show and the shortcuts list agree. A slide number typed and then Enter goes to that slide; Escape puts a pen down
-// before it ends the show.
+// before it ends the show. Period and comma are named ("period", "comma", the recorder's tokens): a literal comma
+// separates alternatives.
 
 export type ShowKeyCommand =
-	"next" | "previous" | "first" | "last" | "black" | "white" | "end" | "laser" | "pen" | "arrow" | "eraseAll" | "start" | "startCurrent"
+	| "next"
+	| "previous"
+	| "first"
+	| "last"
+	| "nextHidden"
+	| "black"
+	| "white"
+	| "end"
+	| "laser"
+	| "pen"
+	| "eraser"
+	| "arrow"
+	| "eraseAll"
+	| "start"
+	| "startCurrent"
 
 export type ShowKeyBindings = Readonly<Record<ShowKeyCommand, string>>
 
 export const DEFAULT_SHOW_BINDINGS: ShowKeyBindings = {
 	next: "arrowright,arrowdown,pagedown,space,enter,n",
-	previous: "arrowleft,arrowup,pageup,p",
+	previous: "arrowleft,arrowup,pageup,backspace,p",
 	first: "home",
 	last: "end",
-	black: "b",
-	white: "w",
+	// The slide after the current one when it is hidden (the run skips hidden slides).
+	nextHidden: "h",
+	black: "b,period",
+	white: "w,comma",
 	end: "escape",
 	laser: "mod+l",
 	pen: "mod+p",
+	eraser: "mod+e",
 	arrow: "mod+a",
 	eraseAll: "e",
 	// In the editor: from the first slide, from the current one. In the show a clicker's F5 does nothing (and never
@@ -73,6 +91,8 @@ const NAMED: Readonly<Record<string, readonly string[]>> = {
 	delete: ["Delete"],
 	tab: ["Tab"],
 	".": ["Period"],
+	period: ["Period"],
+	comma: ["Comma"],
 	"/": ["Slash"],
 	"-": ["Minus"],
 	"=": ["Equal"]
@@ -86,6 +106,7 @@ function codesOf(key: string): readonly string[] {
 	if (/^[0-9]$/u.test(key)) return [`Digit${key}`, `Numpad${key}`]
 	if (/^f([1-9]|1[0-9]|2[0-4])$/u.test(key)) return [key.toUpperCase()]
 
+	// Any other key as the recorder spells it: its code lowercased ("semicolon", "bracketleft").
 	return [key]
 }
 
@@ -117,9 +138,10 @@ export function parseShowCombo(combo: string): Chord[] {
 	return out
 }
 
-function matches(event: ShowKeyEvent, chord: Chord, apple: boolean): boolean {
+// `code`: the event's code lowercased, for keys bound by their recorded token.
+function matches(event: ShowKeyEvent, code: string, chord: Chord, apple: boolean): boolean {
 	return (
-		chord.codes.includes(event.code) &&
+		(chord.codes.includes(event.code) || chord.codes.includes(code)) &&
 		event.ctrlKey === (chord.ctrl || (chord.mod && !apple)) &&
 		event.metaKey === (chord.meta || (chord.mod && apple)) &&
 		event.shiftKey === chord.shift &&
@@ -147,9 +169,24 @@ function chordsOf(bindings: ShowKeyBindings): readonly (readonly [ShowKeyCommand
 
 // The rebindable command `event` is, if any; `apple`: Mod is Cmd (else Ctrl).
 export function showKeyCommand(event: ShowKeyEvent, bindings: ShowKeyBindings, apple: boolean): ShowKeyCommand | undefined {
-	for (const [command, chord] of chordsOf(bindings)) if (matches(event, chord, apple)) return command
+	const code = event.code.toLowerCase()
+
+	for (const [command, chord] of chordsOf(bindings)) if (matches(event, code, chord, apple)) return command
 
 	return undefined
+}
+
+// Shift+F10 or the Menu key (PowerPoint's "Open a context menu"), on Windows and the Mac alike. Not rebindable.
+export function isContextMenuKey(event: {
+	readonly key: string
+	readonly shiftKey: boolean
+	readonly ctrlKey: boolean
+	readonly metaKey: boolean
+	readonly altKey: boolean
+}): boolean {
+	if (event.ctrlKey || event.metaKey || event.altKey) return false
+
+	return event.key === "ContextMenu" ? !event.shiftKey : event.key === "F10" && event.shiftKey
 }
 
 export interface ShowKeysOptions {
@@ -203,6 +240,9 @@ export function createShowKeys(options: ShowKeysOptions): ShowKeys {
 			case "last":
 				if (!callOptional(controller, "last")) controller?.goto(Math.max(0, (options.count?.() ?? 1) - 1))
 				return
+			case "nextHidden":
+				controller?.nextHidden?.()
+				return
 			case "black":
 				controller?.black()
 				return
@@ -218,6 +258,9 @@ export function createShowKeys(options: ShowKeysOptions): ShowKeys {
 				return
 			case "pen":
 				ink?.setTool(ink.getSnapshot().tool === "pen" ? "none" : "pen")
+				return
+			case "eraser":
+				ink?.setTool(ink.getSnapshot().tool === "eraser" ? "none" : "eraser")
 				return
 			case "arrow":
 				ink?.setTool("none")

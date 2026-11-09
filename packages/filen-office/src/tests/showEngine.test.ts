@@ -322,6 +322,16 @@ describe("pptxTransition", () => {
 		expect(pptxTransition(sld(""))).toBeUndefined()
 	})
 
+	it("reads an effectless transition and a plain cut as instant, a cut through black at its speed", () => {
+		expect(pptxTransition(sld('<p:transition advTm="5000"/>'))).toMatchObject({
+			kind: "cut",
+			durationMs: 0,
+			advance: { onClick: true, afterMs: 5000 }
+		})
+		expect(pptxTransition(sld('<p:transition spd="med"><p:cut/></p:transition>'))?.durationMs).toBe(0)
+		expect(pptxTransition(sld('<p:transition><p:cut thruBlk="1"/></p:transition>'))?.durationMs).toBe(500)
+	})
+
 	it("takes the Choice an ECMA kind with its p14:dur, and the Fallback for a 3D Choice", () => {
 		const ac = (choice: string, fallback: string) =>
 			`<mc:AlternateContent><mc:Choice Requires="p14">${choice}</mc:Choice><mc:Fallback>${fallback}</mc:Fallback></mc:AlternateContent>`

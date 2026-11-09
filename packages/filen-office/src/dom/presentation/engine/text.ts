@@ -2,9 +2,20 @@ import { reviveNotesFor } from "./edit"
 import type { FontRequest } from "../../../core/fonts/index"
 import type { Slicing } from "../../../core/opc/index"
 import { findShape } from "../../../core/presentation/edit/changes"
-import { PresentationError, type Refused, type RunProps, type ShapeRef, type TextBody } from "../../../core/presentation/model"
+import {
+	PresentationError,
+	type Refused,
+	type RunProps,
+	type ShapeNode,
+	type ShapeRef,
+	type TextBody
+} from "../../../core/presentation/model"
 import type { SlideLayer, TextPage, TextSeed, TransferableTextLayout } from "../../../core/presentation/output"
 import { editableParagraphs } from "../../../core/presentation/text/editable"
+import type { DeckOp } from "../../../core/presentation/edit/ops"
+import { resolveShape } from "../../../core/presentation/inherit"
+import { refitNormAutofit, spAutoFitXfrm } from "../../../core/presentation/text/autofit"
+import { turnOf } from "../../../core/presentation/text/vertical"
 import { fontRequests, layoutBody, type LayoutOptions, type TextEnvironment } from "../../../core/presentation/text/body"
 import { resolveBody, type BodyContext } from "../../../core/presentation/text/resolve"
 import { transferableLayout } from "../../../core/presentation/text/transfer"
@@ -32,6 +43,8 @@ export interface ShapeTextContext {
 	// Loads the faces `requests` name (a typed run may ask for a font the slide had not used).
 	prepare(requests: readonly FontRequest[]): Promise<void>
 	readonly options: LayoutOptions
+	// Whether an edited body's autofit is found anew (refitNormAutofit, spAutoFitXfrm) rather than drawn as stored.
+	readonly refit: boolean
 	// The slide's revision the context was read at.
 	readonly revision: number
 }
@@ -58,9 +71,102 @@ export async function layoutShapeText(
 
 	await found.prepare(fontRequests(resolved))
 
-	const result = layoutBody(resolved, found.box, found.environment, found.options)
+	// The body being edited shows the fit its text will commit with (autofit.ts refits the committed body the same way).
+	const result =
+		found.refit && resolved.bodyPr.autofit === "normal"
+			? refitNormAutofit(resolved, found.box, found.environment, found.options).layout
+			: layoutBody(resolved, found.box, found.environment, found.options)
 
 	return { page: result.page, layout: transferableLayout(result), revision: found.revision }
+}
+
+// A setText with the autofit PowerPoint gives its new text: a normAutofit body's fontScale and lnSpcReduction found
+// anew (in the body, so the step's inverse puts the old ones back), a spAutoFit shape's box sized to the text (a batch:
+// one step). Any other op, a body that does not autofit or refit, and a shape without text services, as it is.
+export async function autofitOp(session: EngineSession, op: DeckOp, slicing: Slicing): Promise<DeckOp> {
+	const services = session.services.text
+
+	if (services === undefined || op.family !== "text" || op.kind !== "setText" || op.target.cell !== undefined) return op
+
+	const node = session.deck.nodes.get(op.target.slide)
+	const at = node === undefined ? undefined : findShape(node.shapes, op.target.id)
+
+	if (node === undefined || at === undefined || at.shape.kind !== "sp") return op
+
+	let found: ShapeTextContext | Refused
+
+	try {
+		found = await services.shapeText(session, op.target, slicing)
+	} catch (error) {
+		// The op is applied as it is: its own apply answers for a shape the render could not read.
+		if (error instanceof PresentationError) return op
+
+		throw error
+	}
+
+	if (found.kind === "refused" || !found.refit) return op
+
+	const resolved = resolveBody(op.body, found.context)
+	const bodyPr = resolved.bodyPr
+
+	if (bodyPr.autofit !== "normal" && bodyPr.autofit !== "shape") return op
+
+	await found.prepare(fontRequests(resolved))
+
+	if (bodyPr.autofit === "normal") {
+		const fit = refitNormAutofit(resolved, found.box, found.environment, found.options)
+
+		if (sameFit(fit.fontScale, bodyPr.fontScale) && sameFit(fit.lineSpacingReduction, bodyPr.lineSpacingReduction)) return op
+
+		return {
+			...op,
+			body: {
+				...op.body,
+				bodyPr: { ...op.body.bodyPr, autofit: "normal", fontScale: fit.fontScale, lineSpacingReduction: fit.lineSpacingReduction }
+			}
+		}
+	}
+
+	// A shape locked against moving keeps its box (its text is still edited).
+	if (at.shape.lock !== undefined && at.shape.lock !== "alternateContent" && at.shape.lock !== "unknownFrame") return op
+
+	const xfrm = at.shape.xfrm ?? resolveShape(session.deck, node.ref, at.shape).xfrm
+
+	if (xfrm === undefined) return op
+
+	const needed = layoutBody(resolved, found.box, found.environment, found.options).height
+	const next = spAutoFitXfrm(xfrm, bodyPr.vertical, found.box, needed, childScale(node.shapes, at.parent, turnOf(bodyPr.vertical) !== 0))
+
+	return next === undefined
+		? op
+		: { family: "batch", kind: "batch", ops: [op, { family: "shape", kind: "setXfrm", target: op.target, xfrm: next }] }
+}
+
+// fontScale and lnSpcReduction as the file writes them (1/100,000).
+function sameFit(a: number, b: number): boolean {
+	return Math.round(a * 100_000) === Math.round(b * 100_000)
+}
+
+// A group child's EMU per slide EMU along x (`horizontal`) or y: each enclosing group's child extent over its extent.
+function childScale(shapes: readonly ShapeNode[], parent: number, horizontal: boolean): number {
+	let scale = 1
+	let id = parent
+
+	while (id !== 0) {
+		const group = findShape(shapes, id)
+
+		if (group === undefined) break
+
+		const xfrm = group.shape.xfrm
+		const extent = horizontal ? xfrm?.cx : xfrm?.cy
+		const child = horizontal ? xfrm?.chCx : xfrm?.chCy
+
+		if (extent !== undefined && child !== undefined && extent > 0 && child > 0) scale *= child / extent
+
+		id = group.parent
+	}
+
+	return scale
 }
 
 // The editor's start on one shape's body. The slide is rendered for the shape's text matrix (the render also reads

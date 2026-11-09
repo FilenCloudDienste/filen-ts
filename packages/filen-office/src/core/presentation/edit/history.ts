@@ -80,6 +80,15 @@ function sameFingerprint(a: Fingerprint, b: Fingerprint): boolean {
 	return a !== UNKNOWN_FINGERPRINT && b !== UNKNOWN_FINGERPRINT && a.exists === b.exists && a.digest === b.digest
 }
 
+// Whether every touch of `touches` is one of `within` (a burst's steps name the same few).
+function touchesWithin(touches: readonly Touch[], within: readonly Touch[]): boolean {
+	if (touches.length === 0) return true
+
+	const named = new Set(within.map(touchKey))
+
+	return touches.every(touch => named.has(touchKey(touch)))
+}
+
 let nextId = 1
 
 // An anchor as it was before the last push changed it: its scalars, and the keys the push added to its baseline and
@@ -239,7 +248,15 @@ export class DeckHistory {
 
 		const top = this.entries[this.cursor - 1]
 
-		if (step.burst !== undefined && top?.burst === step.burst && this.saved.pos !== this.cursor && !this.pendingAt(this.cursor)) {
+		// The coalesced step keeps the top's inverse: a step changing what that inverse does not restore (an autofit
+		// shape's box first resized mid-burst) starts a step of its own.
+		if (
+			step.burst !== undefined &&
+			top?.burst === step.burst &&
+			this.saved.pos !== this.cursor &&
+			!this.pendingAt(this.cursor) &&
+			touchesWithin(step.touches, top.touches)
+		) {
 			// A coalesced step is not retracted: its burst's earlier state is gone.
 			this.recording = undefined
 

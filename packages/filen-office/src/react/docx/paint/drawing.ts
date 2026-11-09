@@ -22,7 +22,8 @@ import {
 	type TextParagraph,
 	type TextRun
 } from "../../../core/drawingml/index"
-import { pathGradientCircle } from "../../../core/drawingml/displayList"
+import { compoundBands, compoundRadii, type CompoundRadii } from "../../../core/drawingml/compoundLine"
+import { pathGradientCircle, type Stroke } from "../../../core/drawingml/displayList"
 import { lumTransfer } from "../../../core/drawingml/lum"
 import { layoutBlock } from "../../../core/drawingml/textBlock"
 import type { DrawingData } from "../../../dom/docx/protocol"
@@ -197,6 +198,20 @@ function dashArray(dashes: ArrayLike<number>, width: number): string {
 	}
 
 	return total > 0 ? out : ""
+}
+
+// Whether every subpath of path data is closed.
+function closedPath(d: string): boolean {
+	if (!d.endsWith("Z")) return false
+
+	for (let k = d.indexOf("M", 1); k > 0; k = d.indexOf("M", k + 1)) if (d[k - 1] !== "Z") return false
+
+	return true
+}
+
+// Whether a stroke draws other than one pen centred on the path: compound lines, or an inset pen on a closed path.
+function layered(stroke: Stroke, d: string): boolean {
+	return compoundBands(stroke.compound).length > 1 || (stroke.inset === true && closedPath(d))
 }
 
 const BAYER = [
@@ -915,14 +930,8 @@ class Painter {
 			// The outline stays outside the fill's clip.
 			const both = this.el("g")
 
-			path.setAttribute("d", d)
-
-			if (transform !== "") path.setAttribute("transform", transform)
-
-			path.setAttribute("fill", "none")
-			this.applyStroke(path, stroke, width, height)
 			both.appendChild(clipped)
-			both.appendChild(path)
+			both.appendChild(this.outline(d, transform, stroke, f, (flags & ItemFlag.EVEN_ODD) !== 0))
 
 			return both
 		}
@@ -935,7 +944,112 @@ class Painter {
 
 		if ((flags & ItemFlag.EVEN_ODD) !== 0) path.setAttribute("fill-rule", "evenodd")
 
-		this.applyStroke(path, index(ints[i + ItemInt.STROKE]), width, height)
+		const strokeIndex = index(ints[i + ItemInt.STROKE])
+		const line = strokeIndex < 0 ? undefined : this.data.strokes[strokeIndex]
+
+		if (line === undefined || line === null || !layered(line, d)) {
+			this.applyStroke(path, strokeIndex, width, height)
+
+			return path
+		}
+
+		// A masked outline would mask the fill with it: the two are drawn apart.
+		const outline = this.outline(d, transform, strokeIndex, f, (flags & ItemFlag.EVEN_ODD) !== 0)
+
+		if (path.getAttribute("fill") === "none") return outline
+
+		const both = this.el("g")
+
+		both.appendChild(path)
+		both.appendChild(outline)
+
+		return both
+	}
+
+	// A path's outline alone. Compound lines and an inset pen stroke the full pen width under a mask that keeps
+	// only the bands of core/drawingml/compoundLine: a centred band is a white stroke as wide as its outer
+	// edge less a black one as wide as its inner; a band on one side of the path only is drawn twice, outside
+	// unclipped, then inside over a black fill clipped to the path's interior.
+	private outline(d: string, transform: string, strokeIndex: number, f: number, evenOdd: boolean): SVGPathElement {
+		const path = this.el("path")
+		const [x, y, width, height] = this.box(f)
+		const stroke = strokeIndex < 0 ? undefined : this.data.strokes[strokeIndex]
+
+		path.setAttribute("d", d)
+
+		if (transform !== "") path.setAttribute("transform", transform)
+
+		path.setAttribute("fill", "none")
+		this.applyStroke(path, strokeIndex, width, height)
+
+		if (stroke === undefined || stroke === null || !layered(stroke, d) || !path.hasAttribute("stroke")) return path
+
+		const lineWidth = clamp(stroke.width, 0, 10_000, 1) || 1
+		const radii = compoundRadii(stroke.compound, lineWidth, stroke.inset === true && closedPath(d))
+
+		if (radii.pen !== lineWidth) path.setAttribute("stroke-width", fmt(radii.pen))
+
+		const id = this.id("m")
+		const mask = this.el("mask")
+		// Joins reach out to the miter limit; the box may be flat (a straight line).
+		const margin = radii.pen * clamp(stroke.miterLimit, 1, 100, 8) + 16
+		const band = (target: SVGElement, diameter: number, color: string): void => {
+			const copy = this.el("path")
+
+			copy.setAttribute("d", d)
+			copy.setAttribute("fill", "none")
+			copy.setAttribute("stroke", color)
+			copy.setAttribute("stroke-width", fmt(diameter))
+
+			for (const name of ["stroke-linecap", "stroke-linejoin", "stroke-miterlimit"]) {
+				const value = path.getAttribute(name)
+
+				if (value !== null) copy.setAttribute(name, value)
+			}
+
+			target.appendChild(copy)
+		}
+		const bands = (target: SVGElement, side: CompoundRadii["outer"]): void => {
+			for (const [far, near] of side) {
+				band(target, far * 2, "#fff")
+
+				if (near > 0) band(target, near * 2, "#000")
+			}
+		}
+
+		mask.setAttribute("id", id)
+		mask.setAttribute("maskUnits", "userSpaceOnUse")
+		mask.setAttribute("x", fmt(x - width - margin))
+		mask.setAttribute("y", fmt(y - height - margin))
+		mask.setAttribute("width", fmt(width * 3 + margin * 2))
+		mask.setAttribute("height", fmt(height * 3 + margin * 2))
+		bands(mask, radii.outer)
+
+		if (!radii.symmetric) {
+			const clipId = this.id("c")
+			const clipPath = this.el("clipPath")
+			const area = this.el("path")
+			const inside = this.el("g")
+			const black = this.el("path")
+
+			area.setAttribute("d", d)
+
+			if (evenOdd) area.setAttribute("clip-rule", "evenodd")
+
+			clipPath.setAttribute("id", clipId)
+			clipPath.setAttribute("clipPathUnits", "userSpaceOnUse")
+			clipPath.appendChild(area)
+			this.defs().appendChild(clipPath)
+			inside.setAttribute("clip-path", `url(#${clipId})`)
+			black.setAttribute("d", d)
+			black.setAttribute("fill", "#000")
+			inside.appendChild(black)
+			bands(inside, radii.inner)
+			mask.appendChild(inside)
+		}
+
+		this.defs().appendChild(mask)
+		path.setAttribute("mask", `url(#${id})`)
 
 		return path
 	}
@@ -1372,7 +1486,8 @@ class Painter {
 		return viewport
 	}
 
-	// Grayscale, brightness/contrast, bi-level and duotone as one filter per image; colour change is not drawn.
+	// Colour change, grayscale, brightness/contrast, bi-level and duotone as one filter per image, in the order
+	// of recolorPixels (core/drawingml/canvas), which the canvas painter applies to the pixels.
 	private imageFilter(imageIndex: number, image: DrawingImage): string | undefined {
 		if (this.filterIds.has(imageIndex)) return this.filterIds.get(imageIndex)
 
@@ -1380,15 +1495,18 @@ class Painter {
 		const brightness = clamp(image.brightness, -1, 1, 0)
 		const contrast = clamp(image.contrast, -0.99, 0.99, 0)
 		const duotone = Array.isArray(image.duotone) && image.duotone.length === 2 ? image.duotone : undefined
+		const change = Array.isArray(image.colorChange) && image.colorChange.length === 2 ? image.colorChange : undefined
 		const gray = image.grayscale === true || biLevel >= 0 || duotone !== undefined
 
-		if (!gray && brightness === 0 && contrast === 0) return undefined
+		if (!gray && brightness === 0 && contrast === 0 && change === undefined) return undefined
 
 		const id = this.id("f")
 		const filter = this.el("filter")
 
 		filter.setAttribute("id", id)
 		filter.setAttribute("color-interpolation-filters", "sRGB")
+
+		if (change !== undefined) this.colorChange(filter, rgbaOf(change[0]), rgbaOf(change[1]))
 
 		if (gray) {
 			const matrix = this.el("feColorMatrix")
@@ -1417,6 +1535,60 @@ class Painter {
 		this.filterIds.set(imageIndex, id)
 
 		return id
+	}
+
+	// a:clrChange (§20.1.8.16) as recolorPixels draws it: pixels whose RGB is exactly `from` take `to`'s RGB and
+	// their alpha times `to`'s. A discrete 256-entry table maps channel value c (c / 255 in [c / 256, (c + 1) / 256))
+	// to 1 only at the `from` channel; their sum less 2 in alpha is the exact-match mask.
+	private colorChange(filter: SVGFilterElement, from: number, to: number): void {
+		const match = this.el("feComponentTransfer")
+		const mask = this.el("feColorMatrix")
+		const flood = this.el("feFlood")
+		const toAlpha = this.el("feComposite")
+		const replaced = this.el("feComposite")
+		const kept = this.el("feComposite")
+		const merge = this.el("feMerge")
+		const funcs = [this.el("feFuncR"), this.el("feFuncG"), this.el("feFuncB")]
+		const maskId = this.id("k")
+
+		match.setAttribute("in", "SourceGraphic")
+
+		for (let channel = 0; channel < 3; channel++) {
+			const func = funcs[channel]
+
+			if (func === undefined) continue
+
+			const table: string[] = new Array<string>(256).fill("0")
+
+			table[(from >>> (24 - channel * 8)) & 255] = "1"
+			func.setAttribute("type", "discrete")
+			func.setAttribute("tableValues", table.join(" "))
+			match.appendChild(func)
+		}
+
+		mask.setAttribute("type", "matrix")
+		mask.setAttribute("values", "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 1 1 0 -2")
+		mask.setAttribute("result", maskId)
+		flood.setAttribute("flood-color", hex(to))
+		flood.setAttribute("flood-opacity", fmt(alphaOf(to)))
+		toAlpha.setAttribute("in2", "SourceGraphic")
+		toAlpha.setAttribute("operator", "in")
+		replaced.setAttribute("in2", maskId)
+		replaced.setAttribute("operator", "in")
+		replaced.setAttribute("result", `${maskId}r`)
+		kept.setAttribute("in", "SourceGraphic")
+		kept.setAttribute("in2", maskId)
+		kept.setAttribute("operator", "out")
+		kept.setAttribute("result", `${maskId}o`)
+
+		const keptNode = this.el("feMergeNode")
+		const replacedNode = this.el("feMergeNode")
+
+		keptNode.setAttribute("in", `${maskId}o`)
+		replacedNode.setAttribute("in", `${maskId}r`)
+		merge.appendChild(keptNode)
+		merge.appendChild(replacedNode)
+		filter.append(match, mask, flood, toAlpha, replaced, kept, merge)
 	}
 
 	// feComponentTransfer over R, G and B: linear [slope, intercept], a shared table, or a two-colour ramp.

@@ -1,5 +1,5 @@
 import type { Transition } from "../../anim/model"
-import { SPEED_MS, transitionPreset } from "../../anim/presets/transitions/catalog"
+import { defaultDurationMs, transitionPreset } from "../../anim/presets/transitions/catalog"
 import type { XmlDocument } from "../../xml/index"
 import { relPart, sourceRef, type ReadContext } from "./drawing"
 import { G, partReader, type PartReader } from "./xml"
@@ -85,8 +85,8 @@ function readElement(r: PartReader, transition: number, context: ReadContext | u
 		kind,
 		namespace,
 		options,
-		// p14:dur, else the spd's (fast by default).
-		durationMs: Number.isFinite(duration) && duration >= 0 ? duration : SPEED_MS[speed === "slow" || speed === "med" ? speed : "fast"],
+		// p14:dur, else the spd's (fast by default); none for an instant cut.
+		durationMs: Number.isFinite(duration) && duration >= 0 ? duration : defaultDurationMs({ kind, namespace, options }, speed),
 		...(speed === "slow" || speed === "med" || speed === "fast" ? { speed } : {}),
 		advance: { onClick: click !== "false" && click !== "0", ...(Number.isFinite(after) && after >= 0 ? { afterMs: after } : {}) },
 		...(sound === undefined ? {} : { sound })

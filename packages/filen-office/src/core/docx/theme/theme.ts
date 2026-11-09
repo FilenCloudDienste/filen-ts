@@ -2,7 +2,7 @@ import type { XmlDocument } from "../../xml/index"
 import { Ns } from "../model/namespaces"
 import { partReader, type PartReader } from "../model/reader"
 import type { LanguageProps, ThemeColorName, ThemeFontRef } from "../props/types"
-import { applyColorTransforms, hslToRgb, rgbToHex, type ColorTransform } from "./color"
+import { applyColorTransforms, hslToRgb, rgbToHex, type ColorTransform, type ValuedColorTransformKind } from "./color"
 
 // word/theme/theme1.xml (DrawingML, ECMA-376 Part 1 §20.1.6): the colour scheme and the major/minor fonts.
 
@@ -204,20 +204,34 @@ const PRESET_COLORS: Readonly<Record<string, string>> = {
 	orange: "FFA500"
 }
 
-const TRANSFORM_KINDS = new Set([
+// alphaOff and alphaMod are read by drawingml readColor; a hex colour carries no alpha.
+const VALUED_TRANSFORM_KINDS: ReadonlySet<string> = new Set<ValuedColorTransformKind>([
 	"tint",
 	"shade",
+	"lum",
 	"lumMod",
 	"lumOff",
+	"sat",
 	"satMod",
 	"satOff",
+	"hue",
 	"hueMod",
 	"hueOff",
-	"alpha",
-	"comp",
-	"inv",
-	"gray"
+	"red",
+	"redOff",
+	"redMod",
+	"green",
+	"greenOff",
+	"greenMod",
+	"blue",
+	"blueOff",
+	"blueMod",
+	"alpha"
 ])
+
+function isValuedTransformKind(kind: string): kind is ValuedColorTransformKind {
+	return VALUED_TRANSFORM_KINDS.has(kind)
+}
 
 function drawingLocal(r: PartReader, node: number): string {
 	return r.group(node) === Ns.A ? r.document.localName(node) : ""
@@ -292,21 +306,14 @@ export function readDrawingColor(document: XmlDocument, node: number, scheme?: (
 	for (let child = document.firstChildElement(node); child >= 0; child = document.nextSiblingElement(child)) {
 		const kind = drawingLocal(r, child)
 
-		if (!TRANSFORM_KINDS.has(kind)) continue
-
-		if (kind === "comp" || kind === "inv" || kind === "gray") {
+		if (kind === "comp" || kind === "inv" || kind === "gray" || kind === "gamma" || kind === "invGamma") {
 			transforms.push({ kind })
-		} else {
+		} else if (isValuedTransformKind(kind)) {
 			const raw = r.attr(child, Ns.None, "val")
-			// hueOff is in 60000ths of a degree, the rest in 1000ths of a percent.
-			const value = kind === "hueOff" ? Number.parseFloat(raw ?? "0") / 60000 : percent(raw)
+			// hue and hueOff are in 60000ths of a degree, the rest (hueMod included) in 1000ths of a percent.
+			const value = kind === "hue" || kind === "hueOff" ? Number.parseFloat(raw ?? "0") / 60000 : percent(raw)
 
-			if (value !== undefined && Number.isFinite(value)) {
-				transforms.push({
-					kind: kind as "tint" | "shade" | "lumMod" | "lumOff" | "satMod" | "satOff" | "hueMod" | "hueOff" | "alpha",
-					value
-				})
-			}
+			if (value !== undefined && Number.isFinite(value)) transforms.push({ kind, value })
 		}
 	}
 

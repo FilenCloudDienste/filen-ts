@@ -370,6 +370,63 @@ describe("pptx splice writer", () => {
 			expect(sink.bytes().length).toBe(0)
 		}
 	})
+
+	it("writes a recoloured run hyperlink's colour (ahyp:hlinkClr) onto a split run, and drops it when the model does", async () => {
+		const AHYP = "http://schemas.microsoft.com/office/drawing/2018/hyperlinkcolor"
+		const link =
+			'<a:hlinkClick r:id="rId9"><a:extLst><a:ext uri="{A12FA001-AC4F-418D-AE19-62706E023703}">' +
+			`<ahyp:hlinkClr xmlns:ahyp="${AHYP}" val="tx"/></a:ext></a:extLst></a:hlinkClick>`
+		const source = buildPptx({
+			slides: [
+				{
+					shapes: sp(4, "Link", undefined, "", body(`<a:p><a:r><a:rPr lang="en-GB">${link}</a:rPr><a:t>Link</a:t></a:r></a:p>`)),
+					rels: [["rId9", "hyperlink", "https://filen.io", "External"]]
+				}
+			]
+		})
+		const runs = async (bytes: Uint8Array) =>
+			(shapeOf(slideNode(await openDeck(bytes), 0), 4).text?.paragraphs[0]?.runs ?? []).map(run =>
+				run.kind === "r" ? run.rPr.hlinkClick : undefined
+			)
+		const deck = await openDeck(source)
+		const node = slideNode(deck, 0)
+		const paragraph = shapeOf(node, 4).text?.paragraphs[0]
+		const run = paragraph?.runs[0]
+
+		if (paragraph === undefined || run?.kind !== "r" || run.rPr.hlinkClick === undefined) throw new Error("no linked run")
+
+		// "Link" split into "Li" and a bold "nk": the second run has no source of its own.
+		paragraph.runs = [
+			{ ...run, text: "Li" },
+			{ kind: "r", text: "nk", rPr: { ...run.rPr, b: true } }
+		]
+
+		const split = await save(deck, new Changes().shape(node.part, 4, { kind: "node" }).build())
+
+		if (split.outcome.kind !== "written") throw new Error(JSON.stringify(split.outcome))
+
+		expect(await runs(split.bytes)).toEqual([
+			{ kind: "url", href: "https://filen.io", color: "tx" },
+			{ kind: "url", href: "https://filen.io", color: "tx" }
+		])
+
+		// The colour taken off the source run: its extension leaves with it.
+		const plain = await openDeck(source)
+		const plainNode = slideNode(plain, 0)
+		const plainParagraph = shapeOf(plainNode, 4).text?.paragraphs[0]
+		const plainRun = plainParagraph?.runs[0]
+
+		if (plainParagraph === undefined || plainRun?.kind !== "r") throw new Error("no linked run")
+
+		plainParagraph.runs = [{ ...plainRun, rPr: { ...plainRun.rPr, hlinkClick: { kind: "url", href: "https://filen.io" } } }]
+
+		const uncolored = await save(plain, new Changes().shape(plainNode.part, 4, { kind: "node" }).build())
+
+		if (uncolored.outcome.kind !== "written") throw new Error(JSON.stringify(uncolored.outcome))
+
+		expect(await runs(uncolored.bytes)).toEqual([{ kind: "url", href: "https://filen.io" }])
+		expect(text((await partsOf(uncolored.bytes)).get("ppt/slides/slide1.xml"))).not.toContain("hlinkClr")
+	})
 })
 
 function placeholder(id: number, name: string, type: "title" | "body", idx?: number): ShapeNode {

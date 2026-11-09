@@ -752,6 +752,8 @@ export const presentationTextServices: TextServices = {
 				...(session.deck.format === "odp" ? { shrinkOnLayout: true } : {}),
 				...(request.cell === undefined ? {} : { lineMetrics: "face" as const })
 			},
+			// PowerPoint refits a body's autofit as it is edited; an ODF one shrinks on every layout (shrinkOnLayout).
+			refit: session.deck.format !== "odp" && request.cell === undefined && node.kind !== "notes",
 			revision: held.revision
 		}
 

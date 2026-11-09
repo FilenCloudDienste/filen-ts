@@ -431,47 +431,94 @@ const SHOW_JUMPS: Readonly<Record<Extract<Action, { kind: "internal" }>["jump"],
 // a:hlinkClick / a:hlinkHover / a:hlinkMouseOver of an action; undefined when the model cannot write it (a refused
 // action is only ever kept as its source; a jump to a slide without a part).
 export function actionXml(context: EmitContext, tag: string, action: Action): string | undefined {
+	const open = actionOpen(context, tag, action)
+
+	return open === undefined ? undefined : closeAction(tag, action, open)
+}
+
+function closeAction(tag: string, action: Action, open: string): string {
+	return action.color === "tx" ? `${open}><a:extLst>${HLINK_COLOR_EXT}</a:extLst></${tag}>` : `${open}/>`
+}
+
+// The start tag of an action's element, without its closing `/>` or `>`.
+function actionOpen(context: EmitContext, tag: string, action: Action): string | undefined {
 	switch (action.kind) {
 		case "internal":
-			return `<${tag} r:id=""${attr("action", `ppaction://hlinkshowjump?jump=${SHOW_JUMPS[action.jump]}`)}/>`
+			return `<${tag} r:id=""${attr("action", `ppaction://hlinkshowjump?jump=${SHOW_JUMPS[action.jump]}`)}`
 		case "slide": {
 			const part = context.slidePart?.(action.slide)
 
 			return part === undefined
 				? undefined
-				: `<${tag}${attr("r:id", context.parts.relate(part, `${RELATIONSHIPS}slide`))} action="ppaction://hlinksldjump"/>`
+				: `<${tag}${attr("r:id", context.parts.relate(part, `${RELATIONSHIPS}slide`))} action="ppaction://hlinksldjump"`
 		}
 		case "customShow":
-			return `<${tag} r:id=""${attr("action", `ppaction://customshow?id=${String(action.id)}${action.returnAfter ? "&return=true" : ""}`)}/>`
+			return `<${tag} r:id=""${attr("action", `ppaction://customshow?id=${String(action.id)}${action.returnAfter ? "&return=true" : ""}`)}`
 		case "media":
-			return `<${tag} r:id="" action="ppaction://media"/>`
+			return `<${tag} r:id="" action="ppaction://media"`
 		case "url":
-			return `<${tag}${attr("r:id", context.parts.relate(action.href, `${RELATIONSHIPS}hyperlink`, true))}/>`
+			return `<${tag}${attr("r:id", context.parts.relate(action.href, `${RELATIONSHIPS}hyperlink`, true))}`
 		case "refused":
 			return undefined
 	}
 }
 
+// The a:ext of a recoloured hyperlink: drawn in the run's text colour (ahyp:hlinkClr val="tx", [MS-ODRAWXML] 2.35.3.1).
+const HLINK_COLOR_EXT =
+	'<a:ext uri="{A12FA001-AC4F-418D-AE19-62706E023703}"><ahyp:hlinkClr xmlns:ahyp="http://schemas.microsoft.com/office/drawing/2018/hyperlinkcolor" val="tx"/></a:ext>'
+
 // An action written over its source element (an a:hlinkClick the model read): the model's target and verb, the
-// source's other attributes (tooltip, history, highlightClick…) and children (a:snd, a:extLst) kept.
-export function actionPieces(context: EmitContext, tag: string, action: Action, source: number): readonly EmitPiece[] | undefined {
-	const markup = actionXml(context, tag, action)
+// source's other attributes (tooltip, history, highlightClick…) and children (a:snd, a:extLst) kept. A run's action
+// (`colored`, the only one whose colour is read) has its colour extension follow the model's `color`: the source's
+// stays when it reads as the model, else it is rewritten.
+export function actionPieces(
+	context: EmitContext,
+	tag: string,
+	action: Action,
+	source: number,
+	colored = false
+): readonly EmitPiece[] | undefined {
+	const open = actionOpen(context, tag, action)
 	const document = context.document
+	const r = readerOf(context)
 
-	if (markup === undefined || source < 0 || document === undefined) return markup === undefined ? undefined : [markup]
+	if (open === undefined) return undefined
+	if (source < 0 || document === undefined || r === undefined) return [closeAction(tag, action, open)]
 
-	const open = markup.slice(0, markup.length - 2)
 	const kept = [...document.attributes(source)]
 		.filter(attribute => attribute.name !== "action" && !/(^|:)id$/u.test(attribute.name) && !attribute.name.startsWith("xmlns"))
 		.map(attribute => attr(attribute.name, attribute.value))
 		.join("")
 	const out = new Pieces().text(`${open}${context.copier === undefined || !kept.includes(":") ? kept : ""}`)
+	const extLst = r.child(source, G.A, "extLst")
+	const colorExts = r.children(extLst, G.A, "ext").filter(ext => r.child(ext, G.Ahyp, "hlinkClr") >= 0)
+	const first = colorExts[0]
+	const sourceColor = first !== undefined && r.attr(r.child(first, G.Ahyp, "hlinkClr"), "val") === "tx" ? "tx" : undefined
+	const rewrite = colored && sourceColor !== action.color
 	const children = childElements(document, source)
+	const added = colored && extLst < 0 && action.color === "tx"
 
-	if (children.length === 0) return out.text("/>").out
+	if (children.length === 0 && !added) return out.text("/>").out
 
 	out.text(">")
-	for (const child of children) out.hole(child)
+
+	for (const child of children) {
+		if (!rewrite || child !== extLst) {
+			out.hole(child)
+
+			continue
+		}
+
+		const others = childElements(document, extLst).filter(ext => !colorExts.includes(ext))
+
+		if (others.length === 0 && action.color === undefined) continue
+
+		out.text("<a:extLst>")
+		for (const ext of others) out.hole(ext)
+		out.text(`${action.color === "tx" ? HLINK_COLOR_EXT : ""}</a:extLst>`)
+	}
+
+	if (added) out.text(`<a:extLst>${HLINK_COLOR_EXT}</a:extLst>`)
 
 	return out.text(`</${tag}>`).out
 }

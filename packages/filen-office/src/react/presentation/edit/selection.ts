@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from "react"
 import type { Action, LockReason, ShapeLocks, ShapeNode, SlideRef, Xfrm } from "../../../core/presentation/model"
-import type { LayerRole, SlideMediaInfo, SlideRender } from "../../../core/presentation/output"
+import type { LayerRole, ShapeBodyKind, SlideMediaInfo, SlideRender } from "../../../core/presentation/output"
 
 // The editor's shape selection: which top-level shapes of the slide in view are selected, as an external store
 // the canvas overlay, the ribbon and the keyboard share. The shapes themselves come from the slide's render (each
@@ -22,6 +22,10 @@ export interface SlideShape {
 	readonly media?: SlideMediaInfo
 	// Drawn as a line between two ends (a connector or a line preset).
 	readonly line?: true
+	// A line's stroke when it is not the segment between its ends (the render box's path).
+	readonly path?: readonly number[]
+	// The text body it holds (none: a picture, a group, a chart, a connector).
+	readonly body?: ShapeBodyKind
 	// The roles of the layers that paint it and of the frames and media its members hold (what flipping it would mirror).
 	readonly roles?: readonly LayerRole[]
 }
@@ -80,6 +84,8 @@ export function slideShapes(render: SlideRender | undefined): readonly SlideShap
 			...(box.alt === undefined ? {} : { alt: box.alt }),
 			...(box.locks === undefined ? {} : { locks: box.locks }),
 			...(box.line === true ? { line: true as const } : {}),
+			...(box.line === true && box.path !== undefined ? { path: box.path } : {}),
+			...(box.body === undefined ? {} : { body: box.body }),
 			...(layer.actions === undefined || layer.shape.id !== box.id ? {} : { actions: layer.actions }),
 			...(layer.lock === undefined || layer.shape.id !== box.id ? {} : { lock: layer.lock }),
 			...(layer.media === undefined || layer.shape.id !== box.id ? {} : { media: layer.media }),
@@ -133,25 +139,70 @@ export function unionBounds(items: readonly Bounds[]): Bounds | undefined {
 	return { x, y, r, b }
 }
 
-// Whether slide point (px, py) lies on the shape's box as it shows, within `slack` EMU (so a line, whose box has
-// no height, is still hit near it).
+// Slide point (px, py) in the box's own frame, relative to its centre: turned back by rot.
+function unturned(xfrm: Xfrm, px: number, py: number): { dx: number; dy: number } {
+	const dx = px - (xfrm.x + xfrm.cx / 2)
+	const dy = py - (xfrm.y + xfrm.cy / 2)
+
+	if (xfrm.rot === 0) return { dx, dy }
+
+	const angle = (-xfrm.rot / 60000 / 180) * Math.PI
+	const cos = Math.cos(angle)
+	const sin = Math.sin(angle)
+
+	return { dx: dx * cos - dy * sin, dy: dx * sin + dy * cos }
+}
+
+// Whether slide point (px, py) lies on the shape's box as it shows, within `slack` EMU.
 export function onShape(xfrm: Xfrm, px: number, py: number, slack: number): boolean {
-	const cx = xfrm.x + xfrm.cx / 2
-	const cy = xfrm.y + xfrm.cy / 2
-	let dx = px - cx
-	let dy = py - cy
-
-	if (xfrm.rot !== 0) {
-		const angle = (-xfrm.rot / 60000 / 180) * Math.PI
-		const cos = Math.cos(angle)
-		const sin = Math.sin(angle)
-		const turned = dx * cos - dy * sin
-
-		dy = dx * sin + dy * cos
-		dx = turned
-	}
+	const { dx, dy } = unturned(xfrm, px, py)
 
 	return Math.abs(dx) <= xfrm.cx / 2 + slack && Math.abs(dy) <= xfrm.cy / 2 + slack
+}
+
+// Squared distance from (x, y) to the segment (ax, ay)-(bx, by).
+function segmentDistance2(x: number, y: number, ax: number, ay: number, bx: number, by: number): number {
+	const ex = bx - ax
+	const ey = by - ay
+	const length2 = ex * ex + ey * ey
+	const t = length2 > 0 ? Math.min(1, Math.max(0, ((x - ax) * ex + (y - ay) * ey) / length2)) : 0
+	const nx = ax + t * ex - x
+	const ny = ay + t * ey - y
+
+	return nx * nx + ny * ny
+}
+
+// Whether slide point (px, py) lies within `slack` EMU of a line's stroke as it shows: the segment from the box's
+// top-left to its bottom-right corner, or `path` (x y pairs in the box's EMU before its flips and turn, a NaN pair
+// between subpaths), mirrored by the flips and turned with the box (PowerPoint hits a line only near its stroke).
+export function onLine(xfrm: Xfrm, path: readonly number[] | undefined, px: number, py: number, slack: number): boolean {
+	const turned = unturned(xfrm, px, py)
+	// Into the unflipped box, origin at its top-left corner.
+	const x = (xfrm.flipH ? -turned.dx : turned.dx) + xfrm.cx / 2
+	const y = (xfrm.flipV ? -turned.dy : turned.dy) + xfrm.cy / 2
+
+	if (x < -slack || y < -slack || x > xfrm.cx + slack || y > xfrm.cy + slack) return false
+
+	const slack2 = slack * slack
+
+	if (path === undefined) return segmentDistance2(x, y, 0, 0, xfrm.cx, xfrm.cy) <= slack2
+
+	for (let k = 2; k + 1 < path.length; k += 2) {
+		const ax = path[k - 2] ?? Number.NaN
+		const ay = path[k - 1] ?? Number.NaN
+		const bx = path[k] ?? Number.NaN
+		const by = path[k + 1] ?? Number.NaN
+
+		if (Number.isNaN(ax) || Number.isNaN(bx)) continue
+		if (segmentDistance2(x, y, ax, ay, bx, by) <= slack2) return true
+	}
+
+	return false
+}
+
+// Whether slide point (px, py) hits the shape: a line near its stroke, any other shape on its box.
+function hitsShape(shape: SlideShape, px: number, py: number, slack: number): boolean {
+	return shape.line === true ? onLine(shape.xfrm, shape.path, px, py, slack) : onShape(shape.xfrm, px, py, slack)
 }
 
 // The front-most selectable shape at a slide point.
@@ -163,7 +214,7 @@ export function shapeAt(
 	for (let k = shapes.length - 1; k >= 0; k--) {
 		const shape = shapes[k] as SlideShape
 
-		if (selectable(shape) && onShape(shape.xfrm, point.x, point.y, slack)) return shape
+		if (selectable(shape) && hitsShape(shape, point.x, point.y, slack)) return shape
 	}
 
 	return undefined
@@ -203,8 +254,10 @@ export interface ShapeSelection {
 	set(ids: readonly number[]): void
 	toggle(id: number): void
 	clear(): void
-	// After a command on `slide`, select the top-level shapes the next render has beyond `before`.
-	selectNew(slide: SlideRef, before: Iterable<number>): void
+	// After a command on `slide`, select the top-level shapes the next render has beyond `before`. The returned
+	// withdraw, for a command that was refused: the selection goes back to what it was, unless the request was
+	// resolved or replaced meanwhile.
+	selectNew(slide: SlideRef, before: Iterable<number>): () => void
 	// The render of the slide in view arrived: keep only ids it still has, resolve a pending selectNew.
 	reconcile(render: SlideRender): void
 }
@@ -245,7 +298,14 @@ export function createShapeSelection(): ShapeSelection {
 			if (state.ids.length > 0 || state.pending !== undefined) commit({ slide: state.slide, ids: [] })
 		},
 		selectNew: (slide, before) => {
-			commit({ slide: state.slide, ids: state.ids, pending: { slide, before: new Set(before) } })
+			const asked = { slide, before: new Set(before) }
+			const ids = state.ids
+
+			commit({ slide: state.slide, ids, pending: asked })
+
+			return () => {
+				if (state.pending === asked) commit({ slide: state.slide, ids })
+			}
 		},
 		reconcile: render => {
 			if (render.ref !== state.slide) return

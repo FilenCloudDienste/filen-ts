@@ -29,11 +29,16 @@ export interface TransitionFrame {
 	readonly incoming: SlideMotion
 	readonly outgoing: SlideMotion
 	readonly reveal?: Region
-	// The opacity of black drawn between the slides (thruBlk).
+	// The opacity of the overlay drawn between the slides (thruBlk, flash).
 	readonly black: number
+	// The overlay's CSS colour: black, white for flash, an ODF fade's smil:fadeColor.
+	readonly overlay: string
 	// Whether the outgoing slide is drawn over the incoming one (pull, zoom out).
 	readonly outgoingOnTop: boolean
 }
+
+const BLACK = "#000000"
+const HEX_COLOR = /^#[\da-f]{6}$/iu
 
 const STILL: SlideMotion = { dx: 0, dy: 0, scale: 1, rotation: 0, opacity: 1 }
 
@@ -74,7 +79,7 @@ function rects(values: readonly number[]): Region {
 function frame(
 	incoming: Partial<SlideMotion>,
 	reveal?: Region,
-	extra: Partial<Pick<TransitionFrame, "black" | "outgoingOnTop">> = {},
+	extra: Partial<Pick<TransitionFrame, "black" | "overlay" | "outgoingOnTop">> = {},
 	outgoing: Partial<SlideMotion> = {}
 ): TransitionFrame {
 	return {
@@ -82,8 +87,46 @@ function frame(
 		outgoing: { ...STILL, ...outgoing },
 		...(reveal === undefined ? {} : { reveal }),
 		black: extra.black ?? 0,
+		overlay: extra.overlay ?? BLACK,
 		outgoingOnTop: extra.outgoingOnTop ?? false
 	}
+}
+
+// Out to `overlay` over the first half, in from it over the second.
+function fadeThrough(p: number, overlay: string): TransitionFrame {
+	return p < 0.5
+		? frame({ opacity: 0 }, undefined, { black: 2 * p, overlay })
+		: frame({ opacity: 2 * p - 1 }, undefined, { black: 1, overlay })
+}
+
+// The kinds p:random picks from: the ECMA ones drawn here, less cut (no visible transition) and random itself.
+export const RANDOM_TRANSITION_KINDS: readonly string[] = [
+	"blinds",
+	"checker",
+	"circle",
+	"comb",
+	"cover",
+	"diamond",
+	"dissolve",
+	"fade",
+	"newsflash",
+	"plus",
+	"pull",
+	"push",
+	"randomBar",
+	"split",
+	"strips",
+	"wedge",
+	"wheel",
+	"wipe",
+	"zoom"
+]
+
+// The kind p:random plays for a draw r in [0, 1). Picked once per run by the player, so frames depend on p only.
+export function randomTransitionKind(r: number): string {
+	const index = Math.min(RANDOM_TRANSITION_KINDS.length - 1, Math.max(0, Math.floor(r * RANDOM_TRANSITION_KINDS.length)))
+
+	return RANDOM_TRANSITION_KINDS[index] ?? "fade"
 }
 
 // A deterministic permutation (a linear congruential walk), so a dissolve or random-bar frame depends on p only.
@@ -211,11 +254,16 @@ export function transitionFrame(kind: string, options: TransitionOptions, progre
 		}
 		case "fade":
 			if (options["thruBlk"] === true) {
-				// Out to black over the first half, in from black over the second.
-				return p < 0.5 ? frame({ opacity: 0 }, undefined, { black: 2 * p }) : frame({ opacity: 2 * p - 1 }, undefined, { black: 1 })
+				// ODF fadeOverColor keeps its smil:fadeColor.
+				const color = options["smilFadeColor"]
+
+				return fadeThrough(p, typeof color === "string" && HEX_COLOR.test(color) ? color : BLACK)
 			}
 
 			return frame({ opacity: p })
+		case "flash":
+			// p14:flash: through white.
+			return fadeThrough(p, "#ffffff")
 		case "newsflash":
 			return frame({ scale: p, rotation: 720 * (1 - p) })
 		case "plus":
@@ -273,6 +321,7 @@ export function transitionFrame(kind: string, options: TransitionOptions, progre
 			return option(options, "dir", "out") === "in"
 				? frame({}, undefined, { outgoingOnTop: true }, { scale: 1 + p, opacity: 1 - p })
 				: frame({ scale: p })
+		// p:random is resolved to a kind by the player before it runs; unresolved it fades.
 		case "random":
 		default:
 			return frame({ opacity: p })

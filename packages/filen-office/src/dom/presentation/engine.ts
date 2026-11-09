@@ -2,6 +2,7 @@ import { bytesSource, type ByteSource, type OpcPackage, type Slicing, type ZipAr
 import type { SmartArtDefRef } from "../../core/presentation/edit/ops"
 import type { SmartArtInfo } from "../../core/smartart/edit"
 import {
+	DEFAULT_SLIDE_GRID,
 	PresentationError,
 	type Deck,
 	type DeckVariant,
@@ -291,6 +292,7 @@ export function openInfo(deck: Deck, opened: OpenedPackage, viewOnly = opened.vi
 		packageBytes: opened.bytes,
 		source: opened.sourceKind,
 		show: deck.show,
+		grid: deck.grid ?? DEFAULT_SLIDE_GRID,
 		design: designInfo(deck, part => pptxParts(deck)?.theme(part))
 	}
 }

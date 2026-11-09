@@ -4,6 +4,8 @@ import type { PresentationSessionApi, SlideLayer, SlideRender } from "../../../d
 import { presentationActions, type PresentationActionActivator, type PresentationActionPolicy, type PresentationJump } from "../links"
 import { SlideView, type SlidePainter } from "../SlideView"
 import type { ShowController, ShowEvent, ShowEventType, ShowFrom, ShowScreen } from "./controller"
+import { autoHidePointer } from "./pointer"
+import { hiddenAfter } from "./timeline"
 
 // The slideshow without timing: slide after slide on a black stage, hidden slides skipped (a jump may still show
 // one), black and white screens, the standard keys. It implements ShowController so the page drives it the way it
@@ -233,6 +235,11 @@ export function StaticShow({
 		next: () => advance(1),
 		prev: () => advance(-1),
 		goto,
+		nextHidden: () => {
+			const index = hiddenAfter(slides, position.index)
+
+			if (index !== undefined) goto(index)
+		},
 		black: () => toggle("black"),
 		white: () => toggle("white"),
 		end: finish,
@@ -263,6 +270,12 @@ export function StaticShow({
 
 	useEffect(() => {
 		if (ended && sequence.length === 0) onEnd()
+	}, [])
+
+	useEffect(() => {
+		const stage = stageRef.current
+
+		return stage === null ? undefined : autoHidePointer(stage)
 	}, [])
 
 	const onKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {

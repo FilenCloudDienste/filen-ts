@@ -35,7 +35,8 @@ import {
 	type TableModel,
 	type TextBody
 } from "../../presentation/model"
-import { builtinTableStyle } from "../../presentation/render/tableStyles"
+import { notesBody } from "../../presentation/notes"
+import { builtinTableStyle, builtinTableStyleFamily } from "../../presentation/render/tableStyles"
 import { D } from "../../drawingml/reader"
 import { resolveColor, themeTypeface, type ColorContext, type PresentationTheme } from "../../presentation/theme"
 import { decodeUtf8, encodeUtf8, escapeAttribute, escapeText } from "../../xml/index"
@@ -48,6 +49,7 @@ import { NEAR_NUMBERINGS, NUMBERING_ALIASES, ODF_NUMBERINGS } from "../read/text
 import {
 	IDENTITY,
 	OdpShapeWriter,
+	boxAttributes,
 	canonicalBox,
 	markupOf,
 	compose,
@@ -760,7 +762,7 @@ function odpTextLink(action: Action): boolean {
 // The accent slot of a table style of PowerPoint's built-in Medium Style 2 family (render/tableStyles.ts), from its
 // whole-table fill; undefined for any other style.
 function mediumStyle2(id: string | undefined): string | undefined {
-	const style = id === undefined ? undefined : builtinTableStyle(id)
+	const style = id === undefined || builtinTableStyleFamily(id) !== "Medium Style 2" ? undefined : builtinTableStyle(id)
 
 	if (style === undefined) return undefined
 
@@ -991,8 +993,9 @@ export async function freshOdp(deck: Deck, services: FreshOdpServices): Promise<
 	}
 
 	// Shapes as markup, flattened; pictures written here (their family is not built for new elements).
+	// `placeholder`: the shape is written as its presentation object (the notes page's notes), not as a plain shape.
 	const shapesMarkup = async (
-		shapes: readonly { readonly shape: ShapeNode; readonly node: SlideNode }[],
+		shapes: readonly { readonly shape: ShapeNode; readonly node: SlideNode; readonly placeholder?: boolean }[],
 		styles: OdpStyles,
 		owner: SlideNode,
 		m: Affine = IDENTITY
@@ -1001,7 +1004,7 @@ export async function freshOdp(deck: Deck, services: FreshOdpServices): Promise<
 		const writer = new OdpShapeWriter(emit, undefined, owner, () => undefined, idPrefix(owner))
 		let out = ""
 
-		for (const { shape, node } of shapes) {
+		for (const { shape, node, placeholder } of shapes) {
 			// Picture bullets are copied before the text that shows them is written.
 			for (const part of flattener.bulletPictures(shape, node)) {
 				const path = await picture(part)
@@ -1086,7 +1089,15 @@ export async function freshOdp(deck: Deck, services: FreshOdpServices): Promise<
 				continue
 			}
 
-			const pieces = writer.element(flat, m)
+			// A presentation object its class cannot hold (an outline other than a rectangle) is written as a plain shape.
+			const object =
+				placeholder === true && flat.kind === "sp" && shape.ph !== undefined
+					? writer.element({ ...flat, ph: shape.ph }, m)
+					: undefined
+
+			if (object !== undefined && isRefused(object)) count(report.approximated, "placeholder written as a shape")
+
+			const pieces = object !== undefined && !isRefused(object) ? object : writer.element(flat, m)
 
 			if (isRefused(pieces)) {
 				count(report.omitted, `shape (${pieces.detail ?? pieces.reason})`)
@@ -1145,8 +1156,11 @@ export async function freshOdp(deck: Deck, services: FreshOdpServices): Promise<
 	}
 
 	let pages = ""
+	let pageNumber = 0
 
 	for (const ref of deck.slides) {
+		pageNumber++
+
 		const slide = deck.nodes.get(ref)
 
 		if (slide === undefined) return refused("notFound", `slide ${String(ref)} is not parsed`)
@@ -1187,16 +1201,33 @@ export async function freshOdp(deck: Deck, services: FreshOdpServices): Promise<
 		let notes = ""
 		const notesNode = slide.notes === undefined ? undefined : deck.nodes.get(slide.notes)
 
+		// The notes page as ODF holds it (§16.9, as emit/notes.ts writes one): a thumbnail of the slide (class "page") and
+		// the notes body as the notes object (class "notes"); a further body placeholder as a plain shape.
 		if (notesNode !== undefined) {
+			const notesShape = notesBody(notesNode)
 			const body = notesNode.shapes.filter(shape => shape.ph?.type === "body")
 			const markup = await shapesMarkup(
-				body.map(shape => ({ shape, node: notesNode })),
+				body.map(shape => ({ shape, node: notesNode, placeholder: shape === notesShape })),
 				contentStyles,
 				notesNode
 			)
 
 			if (isRefused(markup)) return markup
-			if (markup !== "") notes = `<presentation:notes>${markup}</presentation:notes>`
+			if (body.length > 1) count(report.approximated, "notes body placeholder written as a shape")
+
+			const image = notesNode.shapes.find(shape => shape.ph?.type === "sldImg")
+			const imageBox = image === undefined ? undefined : resolveShape(deck, notesNode.ref, image, services.documents).xfrm
+			const imageAttributes =
+				(image === undefined || image.name === "" ? "" : ` draw:name="${escapeAttribute(image.name)}"`) +
+				(imageBox === undefined ? [] : boxAttributes(imageBox))
+					.map(change => (change.value === null ? "" : ` ${change.name}="${escapeAttribute(change.value)}"`))
+					.join("")
+			const thumbnail =
+				image === undefined
+					? ""
+					: `<draw:page-thumbnail${imageAttributes} draw:page-number="${String(pageNumber)}" presentation:class="page"/>`
+
+			if (markup !== "" || thumbnail !== "") notes = `<presentation:notes>${thumbnail}${markup}</presentation:notes>`
 		}
 
 		// The slide's timing (after the shapes, before the notes), on the shapes written with the ids it names them by: an

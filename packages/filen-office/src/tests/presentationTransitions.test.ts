@@ -12,7 +12,8 @@ import {
 	writtenOptions
 } from "../core/anim/presets/transitions/catalog"
 import { transitionToOdf } from "../core/anim/transitions"
-import { odpTransitionPar, odpTransitionStyle } from "../core/odp/write/emit/transition"
+import { readTransition as readOdpTransition } from "../core/odp/read/transitions"
+import { odpTransitionPar, odpTransitionStyle, odpWrittenTransition } from "../core/odp/write/emit/transition"
 import { styleChanges } from "../core/odp/write/styles"
 import { Relationships } from "../core/opc/index"
 import { DeckTally, DEFAULT_PRESENTATION_BUDGETS } from "../core/presentation/budget"
@@ -295,6 +296,24 @@ describe("pptx transition markup", () => {
 		expect(xml).toContain('<mc:Fallback><p:transition spd="slow"><p:fade/></p:transition></mc:Fallback>')
 	})
 
+	it("reads an effectless transition and a plain cut as instant, a cut through black at its speed", () => {
+		// PowerPoint's "None" with a rehearsed timing: no child element, so a plain cut.
+		expect(read(slideXml('<p:transition advTm="5000"/>'))).toMatchObject({
+			kind: "cut",
+			durationMs: 0,
+			advance: { onClick: true, afterMs: 5000 }
+		})
+		expect(read(slideXml('<p:transition spd="slow"><p:cut/></p:transition>'))?.durationMs).toBe(0)
+		expect(read(slideXml('<p:transition><p:cut thruBlk="1"/></p:transition>'))?.durationMs).toBe(500)
+		expect(read(slideXml('<p:transition spd="slow"><p:cut thruBlk="1"/></p:transition>'))?.durationMs).toBe(1000)
+
+		const cut: Transition = { kind: "cut", namespace: "p", options: {}, advance: { onClick: true } }
+		const xml = markup(cut)
+
+		expect(xml).toBe("<p:transition><p:cut/></p:transition>")
+		expect(read(slideXml(xml))?.durationMs).toBe(0)
+	})
+
 	it("writes an embedded sound through a relationship, and stop sound", () => {
 		const { context, related } = emitContext()
 		const sound: Transition = {
@@ -386,6 +405,73 @@ describe("ODP transition markup", () => {
 		expect([...(changes.attributes.get("drawing-page")?.values() ?? [])].every(value => value === null)).toBe(true)
 		expect(odpTransitionPar({ kind: "cut", namespace: "p", options: {}, advance: { onClick: true } }, "id1")).toBeUndefined()
 		expect(odpTransitionPar(undefined, "id1")).toBeUndefined()
+	})
+
+	const ROUND_TRIP: readonly (readonly [string, Transition["options"]])[] = [
+		["fade", {}],
+		["fade", { thruBlk: true }],
+		["cut", { thruBlk: true }],
+		...["l", "r", "u", "d"].map(dir => ["wipe", { dir }] as const),
+		...["l", "r", "u", "d"].map(dir => ["push", { dir }] as const),
+		...["l", "r", "u", "d", "lu", "ru", "ld", "rd"].flatMap(dir => [["cover", { dir }] as const, ["pull", { dir }] as const]),
+		["comb", { dir: "horz" }],
+		["comb", { dir: "vert" }],
+		["circle", {}],
+		["zoom", { dir: "in" }],
+		["zoom", { dir: "out" }],
+		["diamond", {}],
+		["plus", {}],
+		["wedge", {}],
+		...["1", "2", "3", "4", "8"].map(spokes => ["wheel", { spokes }] as const),
+		["blinds", { dir: "horz" }],
+		["blinds", { dir: "vert" }],
+		["checker", { dir: "horz" }],
+		["checker", { dir: "vert" }],
+		["dissolve", {}],
+		["randomBar", { dir: "horz" }],
+		["randomBar", { dir: "vert" }],
+		...["horz", "vert"].flatMap(orient => ["in", "out"].map(dir => ["split", { orient, dir }] as const)),
+		...["lu", "ld", "ru", "rd"].map(dir => ["strips", { dir }] as const),
+		["newsflash", {}],
+		["random", {}]
+	]
+
+	it("reads every ECMA transition back from the SMIL it is written with", () => {
+		for (const [kind, options] of ROUND_TRIP) {
+			const odf = transitionToOdf(kind, options)
+
+			expect(odf, kind).toBeDefined()
+
+			const filter = new Map<string, string>([["smil:type", odf?.type ?? ""]])
+
+			if (odf?.subtype !== undefined && odf.subtype !== "") filter.set("smil:subtype", odf.subtype)
+			if (odf?.reverse === true) filter.set("smil:direction", "reverse")
+
+			const read = readOdpTransition(new Map(), filter)
+			const semantic = Object.fromEntries(Object.entries(read?.options ?? {}).filter(([key]) => !key.startsWith("smil")))
+
+			expect({ kind: read?.kind, namespace: read?.namespace, options: semantic }, `${kind} ${JSON.stringify(options)}`).toEqual({
+				kind,
+				namespace: "p",
+				options
+			})
+		}
+
+		// LibreOffice's plus(in) is a plus too.
+		const plusIn = new Map([
+			["smil:type", "fourBoxWipe"],
+			["smil:subtype", "cornersIn"]
+		])
+
+		expect(readOdpTransition(new Map(), plusIn)?.kind).toBe("plus")
+	})
+
+	it("keeps the authored kind once an ODP deck's transition is written", () => {
+		for (const [kind, options] of ROUND_TRIP) {
+			const written = odpWrittenTransition({ kind, namespace: "p", options, advance: { onClick: true } })
+
+			expect(written.kind, `${kind} ${JSON.stringify(options)}`).toBe(kind)
+		}
 	})
 })
 

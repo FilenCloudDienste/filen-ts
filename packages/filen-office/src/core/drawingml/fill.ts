@@ -482,9 +482,15 @@ export function shapeEffects(context: PaintContext, reader: DrawingReader, spPr:
 
 				if (shadowColor === undefined) break
 
+				const sx = source.fraction(effect, "sx", 1)
+				const sy = source.fraction(effect, "sy", 1)
+
+				// The painters draw the shadow at the shape's size, unskewed: a scaled or skewed shadow is not as written.
 				if (
 					local === "outerShdw" &&
-					(source.attr(effect, "kx") !== undefined ||
+					(sx !== 1 ||
+						sy !== 1 ||
+						source.attr(effect, "kx") !== undefined ||
 						source.attr(effect, "ky") !== undefined ||
 						source.attr(effect, "algn") !== undefined)
 				)
@@ -495,8 +501,8 @@ export function shapeEffects(context: PaintContext, reader: DrawingReader, spPr:
 					color: shadowColor,
 					blur: source.emu(effect, "blurRad", 0) / EMU_PER_PX,
 					...offset(effect),
-					sx: source.fraction(effect, "sx", 1),
-					sy: source.fraction(effect, "sy", 1)
+					sx,
+					sy
 				})
 				sources.push(local)
 

@@ -37,14 +37,30 @@ export function tableShapeOfLayer(layer: {
 	return { grid: sizes(layer.columnEdges), heights: sizes(layer.rowEdges), areas }
 }
 
+interface LayerEdges {
+	// From the table's start edge: its right edge in a right-to-left table.
+	readonly columnEdges: readonly number[]
+	readonly rowEdges: readonly number[]
+	readonly flags?: TableModel["flags"]
+}
+
+// The layer x (px) of a distance from the table's start edge.
+function physicalX(shape: LayerEdges, offset: number): number {
+	return shape.flags?.rtl === true ? (shape.columnEdges[shape.columnEdges.length - 1] ?? 0) - offset : offset
+}
+
+// The horizontal extent (px in the layer's space) of grid columns col..col + cols - 1.
+export function columnsBox(shape: LayerEdges, col: number, cols: number): { readonly x: number; readonly width: number } {
+	const start = shape.columnEdges[col] ?? 0
+	const width = (shape.columnEdges[col + cols] ?? start) - start
+
+	return { x: shape.flags?.rtl === true ? physicalX(shape, start + width) : start, width }
+}
+
 // The cell under a point of the table (px in the layer's space), as its merged area's origin.
-export function cellAt(
-	shape: { readonly columnEdges: readonly number[]; readonly rowEdges: readonly number[] },
-	areas: readonly CellArea[],
-	x: number,
-	y: number
-): CellRange | undefined {
-	const col = shape.columnEdges.findIndex((edge, k) => k > 0 && x < edge) - 1
+export function cellAt(shape: LayerEdges, areas: readonly CellArea[], x: number, y: number): CellRange | undefined {
+	const offset = physicalX(shape, x)
+	const col = shape.columnEdges.findIndex((edge, k) => k > 0 && offset < edge) - 1
 	const row = shape.rowEdges.findIndex((edge, k) => k > 0 && y < edge) - 1
 
 	if (col < 0 || row < 0) return undefined

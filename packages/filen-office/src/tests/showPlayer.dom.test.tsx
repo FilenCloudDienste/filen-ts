@@ -14,9 +14,11 @@ import type { PresentationActionPolicy } from "../react/presentation/links"
 import type { ShowController, ShowEvent } from "../react/presentation/show/controller"
 import { layerTree } from "../react/presentation/show/layers"
 import { SlideShow } from "../react/presentation/show/player"
+import { POINTER_IDLE_MS } from "../react/presentation/show/pointer"
 import { buildStageSlide, type ShowMediaMount } from "../react/presentation/show/stage"
 import { SlideView, type SlidePainter } from "../react/presentation/SlideView"
 import { TimingBuilder } from "./animFixtures"
+import { budget, cpuMs } from "./timing"
 
 // Every timeline sample the player takes.
 const sampling = vi.hoisted(() => ({ count: 0 }))
@@ -210,6 +212,8 @@ async function mount(
 		overlay?: ReactNode
 		background?: readonly [number, number]
 		media?: ShowMediaMount
+		// The pointer's idle timer off, for counting the player's own timers.
+		keepPointer?: true
 	} = {}
 ): Promise<Mounted> {
 	const { api, plans } = session(specs, extra.background)
@@ -231,6 +235,7 @@ async function mount(
 				{...(extra.policy === undefined ? {} : { policy: extra.policy })}
 				{...(extra.overlay === undefined ? {} : { overlay: extra.overlay })}
 				{...(extra.media === undefined ? {} : { media: extra.media })}
+				{...(extra.keepPointer === true ? { autoHidePointer: false } : {})}
 				onSlide={onSlide}
 				onEnd={onEnd}
 				label="Slide show"
@@ -336,6 +341,11 @@ describe("SlideShow", () => {
 		show.key("n")
 		await settle(1000)
 		expect(show.onSlide).toHaveBeenLastCalledWith(3)
+		// PowerPoint's "End with black slide": the end screen first, then the next advance ends the show.
+		show.key("n")
+		await settle()
+		expect(show.onEnd).not.toHaveBeenCalled()
+		expect(show.stage.dataset["foScreen"]).toBe("end")
 		show.key("n")
 		await settle()
 		expect(show.onEnd).toHaveBeenCalledTimes(1)
@@ -421,7 +431,7 @@ describe("SlideShow", () => {
 				])
 			])
 		])
-		const show = await mount(new Map([[slides[0]!.ref, { timing }]]))
+		const show = await mount(new Map([[slides[0]!.ref, { timing }]]), { keepPointer: true })
 
 		show.key("ArrowRight")
 		await settle(1000)
@@ -433,6 +443,24 @@ describe("SlideShow", () => {
 		expect(show.layerOf(0, 1)?.style.visibility).toBe("")
 		await settle(1000)
 		expect(vi.getTimerCount()).toBe(0)
+	})
+
+	it("hides a still mouse pointer, and keeps it where the page asks", async () => {
+		const show = await mount(new Map())
+
+		await settle(POINTER_IDLE_MS)
+		expect(show.stage.getAttribute("data-fo-pointer")).toBe("hidden")
+		act(() => {
+			show.stage.dispatchEvent(new PointerEvent("pointermove", { pointerType: "mouse", bubbles: true }))
+		})
+		expect(show.stage.hasAttribute("data-fo-pointer")).toBe(false)
+
+		act(() => root.render(null))
+
+		const kept = await mount(new Map(), { keepPointer: true })
+
+		await settle(POINTER_IDLE_MS)
+		expect(kept.stage.hasAttribute("data-fo-pointer")).toBe(false)
 	})
 
 	it("goes back a step, then to the previous slide at its end state", async () => {
@@ -452,6 +480,45 @@ describe("SlideShow", () => {
 		show.key("ArrowLeft")
 		await settle(100)
 		expect(show.layerOf(0, 0)?.style.visibility).toBe("hidden")
+	})
+
+	it("shows every build at its end state without animation, a click and a back key moving whole slides", async () => {
+		const show = await mount(new Map([[slides[0]!.ref, { timing: flyIn() }]]), {
+			settings: { kind: "present", loop: false, showNarration: true, showAnimation: false, useTimings: true, range: { kind: "all" } }
+		})
+
+		expect(show.layerOf(0, 0)?.style.visibility).toBe("")
+		expect(show.layerOf(0, 0)?.style.transform).toBe("")
+		expect(show.events.find(event => event.type === "slide")).toMatchObject({ index: 0, step: 1, steps: 1 })
+		show.key("ArrowRight")
+		await settle(100)
+		expect(show.onSlide).toHaveBeenLastCalledWith(1)
+		expect(show.events.some(event => event.type === "step")).toBe(false)
+		show.key("ArrowLeft")
+		await settle(100)
+		expect(show.onSlide).toHaveBeenLastCalledWith(0)
+		expect(show.layerOf(0, 0)?.style.visibility).toBe("")
+		show.key("ArrowLeft")
+		await settle(100)
+		expect(show.layerOf(0, 0)?.style.visibility).toBe("")
+		expect(show.events.some(event => event.type === "step")).toBe(false)
+	})
+
+	it("keeps a slide's end state through its transition in a show without animation", async () => {
+		const fade: Transition = { kind: "fade", namespace: "p", options: {}, durationMs: 500, advance: { onClick: true } }
+		const show = await mount(new Map([[slides[1]!.ref, { timing: flyIn(), transition: fade }]]), {
+			settings: { kind: "present", loop: false, showNarration: true, showAnimation: false, useTimings: true, range: { kind: "all" } }
+		})
+
+		show.key("ArrowRight")
+		await settle(100)
+		expect(show.onSlide).toHaveBeenLastCalledWith(1)
+		expect(host.querySelectorAll(".fo-show-slide-box")).toHaveLength(2)
+		expect(show.layerOf(1, 0)?.style.visibility).toBe("")
+		await settle(1000)
+		// The outgoing slide has left: the incoming one is the only box.
+		expect(show.layerOf(0, 0)?.style.visibility).toBe("")
+		expect(show.layerOf(0, 0)?.style.transform).toBe("")
 	})
 
 	it("plays an interactive sequence when its trigger shape is clicked, without advancing", async () => {
@@ -498,6 +565,44 @@ describe("SlideShow", () => {
 		expect(show.onSlide).toHaveBeenLastCalledWith(0)
 
 		act(() => jump?.click())
+		await settle(1000)
+		expect(show.onSlide).toHaveBeenLastCalledWith(3)
+	})
+
+	it("keeps the stage focused when a hotspot is pressed, so Space goes on with the show", async () => {
+		const b = new TimingBuilder()
+		const timing = b.root([b.mainSeq([]), b.interactive(2, [b.flyIn(3, "clickEffect", 400)])])
+		const show = await mount(new Map([[slides[0]!.ref, { timing }]]))
+		const trigger = host.querySelector<HTMLButtonElement>('[data-fo-trigger="2"]')
+		const press = new MouseEvent("mousedown", { bubbles: true, cancelable: true })
+
+		expect(document.activeElement).toBe(show.stage)
+		act(() => trigger?.dispatchEvent(press))
+		// The default of a press on a button focuses it (Chromium, Firefox on Windows): the hotspot never takes it.
+		expect(press.defaultPrevented).toBe(true)
+		act(() => trigger?.click())
+		await settle(1000)
+		show.key(" ")
+		await settle(1000)
+		expect(show.onSlide).toHaveBeenLastCalledWith(1)
+	})
+
+	it("gives the keyboard back to the stage when the focused hotspot leaves with its slide", async () => {
+		const policy: PresentationActionPolicy = { link: { allow: () => true, open: vi.fn() }, refused: vi.fn() }
+		const show = await mount(new Map([[slides[0]!.ref, { actions: { 2: { kind: "slide", slide: slides[1]!.ref } } }]]), { policy })
+		const jump = host.querySelector<HTMLButtonElement>('[data-fo-action="slide"]')
+
+		// Reached with Tab and pressed with Enter (the browser's activation of a focused button is its click).
+		act(() => jump?.focus())
+		expect(document.activeElement).toBe(jump)
+		act(() => jump?.click())
+		await settle(1000)
+		expect(show.onSlide).toHaveBeenLastCalledWith(1)
+		expect(jump?.isConnected).toBe(false)
+		expect(document.activeElement).toBe(show.stage)
+		act(() => {
+			document.activeElement?.dispatchEvent(new KeyboardEvent("keydown", { key: "n", bubbles: true }))
+		})
 		await settle(1000)
 		expect(show.onSlide).toHaveBeenLastCalledWith(3)
 	})
@@ -830,6 +935,42 @@ describe("stage colour paint", () => {
 		stage.apply([{ layer: 1, ...still }], new Float64Array(8))
 		expect(glyphs?.style.visibility).toBe("")
 		expect(tint?.style.display).toBe("none")
+	})
+
+	it("applies a frame of many tinted by-letter runs in time linear in its layers", () => {
+		const count = 4000
+		// Shape 3's drawing (layer 0) holding `count - 1` by-letter runs (layers 1..), each drawn once.
+		const drawn = Array.from({ length: count }, (_, k): ShowLayer => ({
+			shape: 3,
+			...(k === 0 ? {} : { range: { target: "char", range: [k - 1, k - 1] } }),
+			bitmap: new Bitmap(1, 1),
+			x: 0,
+			y: 0,
+			width: 1,
+			height: 1
+		}))
+		const order = Int32Array.from({ length: count }, (_, k) => k)
+		const parents = Int32Array.from({ length: count }, (_, k) => (k === 0 ? -1 : 0))
+		const stage = buildStageSlide(document, { w: 1280, h: 720 }, drawn, layerTree(order, parents), count)
+		const boxes = new Float64Array(count * 4)
+		const still = { visible: true, opacity: 1, matrix: [1, 0, 0, 1, 0, 0] }
+		const dimmed = Array.from({ length: count }, (_, layer) => ({ layer, ...still, dom: { textColor: 0xa0a0a0ff } }))
+		const plain = Array.from({ length: count }, (_, layer) => ({ layer, ...still }))
+
+		// Every run tinted once (its tint then held for the slide), then frames with none tinted.
+		stage.apply(dimmed, boxes)
+		stage.apply(plain, boxes)
+
+		const frames = 20
+		const start = cpuMs()
+
+		for (let frame = 0; frame < frames; frame++) stage.apply(plain, boxes)
+
+		const perFrame = (cpuMs() - start) / frames
+
+		expect(stage.element.querySelectorAll<HTMLCanvasElement>("canvas.fo-show-tint")).toHaveLength(count)
+		expect(perFrame).toBeLessThan(budget(8))
+		stage.release()
 	})
 
 	it("paints a layer's colour text in a box of the slide's size, see-through", () => {

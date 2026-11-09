@@ -1,5 +1,6 @@
 import type { Transition } from "../../../core/anim/model"
 import type { CustomShow, ShowSettings, SlideRef } from "../../../core/presentation/model"
+import { DEFAULT_CLR_MAP, resolveColor } from "../../../core/presentation/theme"
 
 // Which slide the show is on and where next and previous go: the slides a show runs through (a custom show's in its
 // order; else the deck's, hidden ones skipped, within the settings' slide range), a slide shown by a jump outside
@@ -40,6 +41,11 @@ export function showSequence(
 	return out
 }
 
+// The deck index right after `index` when that slide is hidden (where PowerPoint's H goes), else undefined.
+export function hiddenAfter(slides: readonly ShowSlide[], index: number): number | undefined {
+	return slides[index + 1]?.hidden === true ? index + 1 : undefined
+}
+
 export interface ShowPosition {
 	// Into the run; -1 for a slide shown by a jump outside it (`index` holds it).
 	readonly step: number
@@ -59,6 +65,10 @@ export interface ShowOptions {
 	readonly customShow?: number
 	// Kiosk restart after this long without input (ms).
 	readonly restartMs?: number
+	// Show without animation (showAnimation="0"): every slide enters with its main sequence at its end state.
+	readonly withoutAnimation?: boolean
+	// The pen's colour (penClr), RGB hex; the ink's default without it.
+	readonly penColor?: string
 }
 
 export const DEFAULT_SHOW_OPTIONS: ShowOptions = { loop: false, kiosk: false, useTimings: true }
@@ -68,6 +78,8 @@ export function showOptionsOf(settings: ShowSettings | undefined): ShowOptions {
 	if (settings === undefined) return DEFAULT_SHOW_OPTIONS
 
 	const kiosk = settings.kind === "kiosk"
+	// A theme slot has no RGB outside a slide: the pen keeps its default.
+	const pen = settings.penColor === undefined ? undefined : resolveColor(settings.penColor, { theme: undefined, clrMap: DEFAULT_CLR_MAP })
 
 	return {
 		loop: settings.loop || kiosk,
@@ -75,7 +87,9 @@ export function showOptionsOf(settings: ShowSettings | undefined): ShowOptions {
 		useTimings: settings.useTimings || kiosk,
 		...(settings.range.kind === "range" ? { range: { start: settings.range.start, end: settings.range.end } } : {}),
 		...(settings.range.kind === "customShow" ? { customShow: settings.range.id } : {}),
-		...(kiosk && settings.restartMs !== undefined ? { restartMs: settings.restartMs } : {})
+		...(kiosk && settings.restartMs !== undefined ? { restartMs: settings.restartMs } : {}),
+		...(settings.showAnimation ? {} : { withoutAnimation: true }),
+		...(pen === undefined ? {} : { penColor: pen.hex })
 	}
 }
 

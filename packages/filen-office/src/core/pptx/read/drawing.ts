@@ -638,14 +638,14 @@ export function readRunProps(context: ReadContext, node: number): RunProps {
 				break
 			}
 			case "hlinkClick": {
-				const action = context.action(child)
+				const action = runAction(context, child)
 
 				if (action !== undefined) out.hlinkClick = action
 
 				break
 			}
 			case "hlinkMouseOver": {
-				const action = context.action(child)
+				const action = runAction(context, child)
 
 				if (action !== undefined) out.hlinkMouseOver = action
 
@@ -655,6 +655,25 @@ export function readRunProps(context: ReadContext, node: number): RunProps {
 	}
 
 	return out
+}
+
+// A run's a:hlinkClick / a:hlinkMouseOver with its colour extension: ahyp:hlinkClr val="tx" (PowerPoint 2019+, a
+// recoloured hyperlink) draws in the run's own colour. Found by its namespace, under any a:ext uri; the element stays
+// in the source, which a save keeps.
+function runAction(context: ReadContext, node: number): Action | undefined {
+	const action = context.action(node)
+
+	if (action === undefined) return undefined
+
+	const r = context.reader
+
+	for (const ext of r.children(r.child(node, G.A, "extLst"), G.A, "ext")) {
+		const color = r.child(ext, G.Ahyp, "hlinkClr")
+
+		if (color >= 0) return r.attr(color, "val") === "tx" ? { ...action, color: "tx" } : action
+	}
+
+	return action
 }
 
 function spacing(r: PartReader, node: number): Spacing | undefined {
@@ -1021,7 +1040,8 @@ export function readTable(context: ReadContext, node: number): TableModel {
 			firstCol: flag("firstCol"),
 			lastCol: flag("lastCol"),
 			bandRow: flag("bandRow"),
-			bandCol: flag("bandCol")
+			bandCol: flag("bandCol"),
+			...(flag("rtl") ? { rtl: true as const } : {})
 		},
 		src: sourceRef(context, node)
 	}

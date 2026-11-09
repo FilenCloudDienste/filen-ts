@@ -137,9 +137,10 @@ describe("VML shapes", () => {
 		expect(placement.width).toBeCloseTo(30 * PT)
 		expect(kinds(list)).toEqual([ItemKind.PATH, ItemKind.PATH, ItemKind.PATH])
 		expect(list.itemInt(0, ItemInt.FILL)).toBe(-1)
+		// The stroke ends at the block arrow's base (three widths of the 1 px line before its tip); the oval needs no trim.
 		expect(path(list, 0)).toEqual([
 			[PathCommand.MOVE, 0, 0],
-			[PathCommand.LINE, 40, 0]
+			[PathCommand.LINE, 37, 0]
 		])
 		expect(list.itemInt(1, ItemInt.FLAGS) & ItemFlag.DECORATION).toBe(ItemFlag.DECORATION)
 		// The block arrow's tip sits on the line's end.

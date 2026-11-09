@@ -103,6 +103,9 @@ export const TextStyleFloat = { LETTER_SPACING: 0, SCALE_X: 1, EM: 2, ASCENT: 3,
 export type LayerRole =
 	"master" | "layout" | "placeholder" | "shape" | "picture" | "table" | "chart" | "smartart" | "media" | "ole" | "ink" | "group"
 
+// The text body a slide's top-level shape holds (SlideLayer.box.body).
+export type ShapeBodyKind = "placeholder" | "textBox" | "shape" | "table"
+
 // A medium a layer plays: a picture shape with a:videoFile/a:audioFile (p14:media), an ODP draw:plugin frame.
 export interface SlideMediaInfo {
 	readonly kind: "audio" | "video"
@@ -144,6 +147,8 @@ export interface SlideLayer {
 	readonly textMatrix?: readonly number[]
 	// Shape effects drawn around the drawing (glow, soft edge, reflection…).
 	readonly effects?: RenderEffects
+	// The shape draws no fill, line or picture: its effects are drawn on its text instead (PowerPoint).
+	readonly effectsOnText?: true
 	readonly role: LayerRole
 	readonly alt?: string
 	readonly actions?: ActionSummary
@@ -159,13 +164,20 @@ export interface SlideLayer {
 	// layer of one of its children), its box as the model resolves it (EMU; a placeholder's inherited box when it has
 	// none of its own) and its alt text. What the editor's selection and arrange commands start from.
 	// `locks`: the file's own locks; `line`: drawn from the box's top-left to its bottom-right corner (flips swap the
-	// ends), a connector or a line preset: the editor drags its two ends, not its box.
+	// ends), a connector or a line preset: the editor drags its two ends, not its box. `body`: the text body the shape
+	// holds, absent for one with none (a picture, a group, a chart, a connector): a placeholder's or text box's (a
+	// click puts the caret in), another shape's (a click selects it, typing adds text), a table's (one per cell).
 	readonly box?: {
 		readonly id: number
 		readonly xfrm: Xfrm
 		readonly alt?: ShapeNode["alt"]
 		readonly locks?: ShapeLocks
 		readonly line?: true
+		// A line whose stroke is not the segment between its ends (an elbow or curved connector): the stroke as a
+		// polyline, x y pairs in EMU of the box before its turn and flips (a NaN pair between subpaths). What a click
+		// on the line is tested against.
+		readonly path?: readonly number[]
+		readonly body?: ShapeBodyKind
 	}
 	// On a table frame's base layer: its structure as drawn, for picking cells and building the table commands on the
 	// page. Column and row edges in px of the layer's matrix space (rows grown to their text), and the merged areas:
@@ -196,7 +208,32 @@ export interface SlideRender {
 	readonly background: DrawingData
 	readonly layers: readonly SlideLayer[]
 	readonly notesText: string
+	// The notes as the presenter view shows them; absent when the notes hold no text.
+	readonly notes?: readonly NotesParagraph[]
 	readonly animated: boolean
+}
+
+// A run of speaker notes with the character formatting PowerPoint's notes pane and Presenter view keep. Font, size and
+// colour are not carried: those views show neither. `text` holds a line break as "\n".
+export interface NotesRun {
+	readonly text: string
+	readonly b?: true
+	readonly i?: true
+	readonly u?: true
+	readonly strike?: true
+	readonly script?: "sup" | "sub"
+}
+
+// A paragraph of speaker notes: its level (0-8), alignment (left when absent), its left margin and first-line indent
+// in em of its own text size (so they scale with the size the presenter picks), and its bullet or number.
+export interface NotesParagraph {
+	readonly level: number
+	readonly align?: "ctr" | "r" | "just"
+	readonly rtl?: true
+	readonly start: number
+	readonly first: number
+	readonly marker?: string
+	readonly runs: readonly NotesRun[]
 }
 
 // What the text editor view starts from on entering a body: the body as the model holds it, the effective props

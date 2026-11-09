@@ -9,6 +9,8 @@ import {
 	scriptForLanguage,
 	shadingColor
 } from "../core/docx/theme/index"
+import type { ColorMod } from "../core/presentation/model"
+import { applyMods } from "../core/presentation/theme"
 import { A, OFFICE_THEME, W, xml } from "./docxFixtures"
 
 describe("theme part", () => {
@@ -123,6 +125,38 @@ describe("colour arithmetic", () => {
 		}
 
 		expect(colors).toEqual(["2F5597", "FF0000", "FFFFFF", "000080", "FF0000", "FF0000", "404040"])
+	})
+
+	it("applies hue, sat, lum, component and gamma transforms as the text colour path does", () => {
+		const elements =
+			'<a:srgbClr val="FF0000"><a:hue val="7200000"/></a:srgbClr><a:srgbClr val="FF0000"><a:sat val="0"/></a:srgbClr>' +
+			'<a:srgbClr val="FF0000"><a:lum val="100000"/></a:srgbClr><a:srgbClr val="000000"><a:green val="100000"/></a:srgbClr>' +
+			'<a:srgbClr val="808080"><a:redOff val="100000"/></a:srgbClr><a:srgbClr val="808080"><a:blueMod val="50000"/></a:srgbClr>' +
+			'<a:srgbClr val="808080"><a:gamma/></a:srgbClr><a:srgbClr val="808080"><a:invGamma/></a:srgbClr>' +
+			'<a:schemeClr val="accent1"><a:hueMod val="50000"/><a:satOff val="-20000"/></a:schemeClr>'
+		const document = xml(`<r xmlns:a="${A}">${elements}</r>`)
+		const theme = parseTheme(OFFICE_THEME)
+		const colors: (string | undefined)[] = []
+		const expected: string[] = []
+		const accent1 = theme.schemeColor("accent1") ?? ""
+
+		for (let child = document.firstChildElement(document.documentElement()); child >= 0; child = document.nextSiblingElement(child)) {
+			colors.push(readDrawingColor(document, child, name => theme.schemeColor(name)))
+
+			const base = document.localName(child) === "schemeClr" ? accent1 : (document.attribute(child, "val") ?? "")
+			const mods: ColorMod[] = []
+
+			for (let mod = document.firstChildElement(child); mod >= 0; mod = document.nextSiblingElement(mod)) {
+				const value = document.attribute(mod, "val")
+
+				mods.push(value === undefined ? { name: document.localName(mod) } : { name: document.localName(mod), value: Number(value) })
+			}
+
+			expected.push(applyMods(base, 1, mods).hex)
+		}
+
+		expect(colors.slice(0, 4)).toEqual(["00FF00", "808080", "FFFFFF", "00FF00"])
+		expect(colors).toEqual(expected)
 	})
 
 	it("flattens shading patterns", () => {

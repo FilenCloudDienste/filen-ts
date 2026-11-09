@@ -6,6 +6,7 @@ import {
 	canTurn,
 	constrainMove,
 	dragTurn,
+	duplicateOp,
 	lineEndXfrm,
 	lineEnds,
 	movedXfrm,
@@ -19,11 +20,11 @@ import {
 } from "../../../core/presentation/edit/commands/shape"
 import type { DeckOp } from "../../../core/presentation/edit/ops"
 import type { SlideRef, Xfrm } from "../../../core/presentation/model"
-import { SnapTargets, type Guide, type Spacing } from "./guides"
+import { SnapTargets, type Guide, type SnapGrid, type Spacing } from "./guides"
 import { boundsOf, unionBounds, type Bounds } from "./selection"
 
-// One pointer drag on the selection, headless: moving it, resizing it by a handle of one of its shapes (the rest
-// follow by the same proportions), turning it by that shape's rotate handle, or dragging one end of a line. The
+// One pointer drag on the selection, headless: moving it (copying it with Ctrl), resizing it by a handle of one of
+// its shapes (the rest follow by the same proportions), turning it by that shape's rotate handle, or dragging one end of a line. The
 // file's own locks hold: a shape locked against moving, resizing or turning shows no handle for it and keeps its box
 // while the rest of the selection changes, and a locked aspect keeps the proportions (Shift frees them, as in
 // PowerPoint). move() gives the boxes to show (the
@@ -183,13 +184,16 @@ export type DragKind = "move" | "resize" | "rotate" | "end"
 export interface DragModifiers {
 	// Shift: along one axis (move), proportions kept (corner resize), 15° steps (rotate).
 	readonly shift: boolean
-	// Ctrl: resize from the centre.
+	// Ctrl: resize from the centre; a move drag copies (Ctrl+drag), read again on every frame so a press or release
+	// during the drag decides at the drop.
 	readonly ctrl: boolean
 	// Alt: no snapping.
 	readonly alt: boolean
 }
 
 export interface DragFrame {
+	// A move drag's copies: `shapes` are the boxes the copies land in (the movable shapes only), the originals stay.
+	readonly copy?: true
 	readonly shapes: readonly PlacedShape[]
 	readonly guides: readonly Guide[]
 	readonly spacing: readonly Spacing[]
@@ -206,8 +210,13 @@ export interface ShapeDragOptions {
 	// The end of the line pressed (kind "end").
 	readonly end?: LineEnd
 	readonly start: Point
-	// The other shapes' bounds and the slide's size, for snapping (absent: no snapping).
-	readonly snap?: { readonly others: readonly Bounds[]; readonly slide: { readonly cx: number; readonly cy: number } }
+	// The other shapes' bounds, the slide's size and the grid objects snap to (absent: none), for snapping (absent: no
+	// snapping).
+	readonly snap?: {
+		readonly others: readonly Bounds[]
+		readonly slide: { readonly cx: number; readonly cy: number }
+		readonly grid?: SnapGrid
+	}
 	// The snap distance in EMU at the current zoom.
 	readonly threshold: number
 }
@@ -218,11 +227,13 @@ export class ShapeDrag {
 	private readonly targets: SnapTargets | undefined
 	private readonly primary: PlacedShape | undefined
 	private frame: DragFrame
+	// A move drag's offset at its last frame (EMU).
+	private offset = { dx: 0, dy: 0 }
 
 	constructor(options: ShapeDragOptions) {
 		this.kind = options.kind
 		this.options = options
-		this.targets = options.snap === undefined ? undefined : new SnapTargets(options.snap.others, options.snap.slide)
+		this.targets = options.snap === undefined ? undefined : new SnapTargets(options.snap.others, options.snap.slide, options.snap.grid)
 		this.primary = options.shapes.find(shape => shape.id === options.id) ?? options.shapes[options.shapes.length - 1]
 		this.frame = { shapes: options.shapes, guides: [], spacing: [] }
 	}
@@ -259,11 +270,14 @@ export class ShapeDrag {
 					spacing = snap.spacing
 				}
 
-				this.frame = {
-					shapes: shapes.map(shape => (canMove(shape) ? { ...shape, xfrm: movedXfrm(shape.xfrm, dx, dy) } : shape)),
-					guides,
-					spacing
-				}
+				this.offset = { dx, dy }
+				this.frame = modifiers.ctrl
+					? { copy: true, shapes: moving.map(shape => ({ ...shape, xfrm: movedXfrm(shape.xfrm, dx, dy) })), guides, spacing }
+					: {
+							shapes: shapes.map(shape => (canMove(shape) ? { ...shape, xfrm: movedXfrm(shape.xfrm, dx, dy) } : shape)),
+							guides,
+							spacing
+						}
 				break
 			}
 			case "resize":
@@ -308,26 +322,23 @@ export class ShapeDrag {
 		let next = resizedXfrm(primary.xfrm, handle, dx, dy, sizing)
 		let guides: Guide[] = []
 
-		// An unturned box snaps the edges its handle moves (not while proportions are kept: both edges would pull).
+		// An unturned box snaps the edges its handle moves, to a line or else the grid (not while proportions are kept:
+		// both edges would pull).
 		if (this.targets !== undefined && primary.xfrm.rot === 0 && !sizing.keepRatio && !modifiers.alt) {
 			const threshold = this.options.threshold
 			const xEdge = fx === 1 ? next.x + next.cx : fx === 0 ? next.x : undefined
 			const yEdge = fy === 1 ? next.y + next.cy : fy === 0 ? next.y : undefined
-			const snapX = xEdge === undefined ? undefined : this.targets.snapValues("x", [xEdge], threshold)
-			const snapY = yEdge === undefined ? undefined : this.targets.snapValues("y", [yEdge], threshold)
+			const snapX = xEdge === undefined ? undefined : this.targets.snapEdges("x", [xEdge], threshold)
+			const snapY = yEdge === undefined ? undefined : this.targets.snapEdges("y", [yEdge], threshold)
 
 			if (snapX !== undefined || snapY !== undefined) {
-				next = resizedXfrm(primary.xfrm, handle, dx + (snapX ?? 0), dy + (snapY ?? 0), sizing)
+				next = resizedXfrm(primary.xfrm, handle, dx + (snapX?.delta ?? 0), dy + (snapY?.delta ?? 0), sizing)
 
 				const landed = boundsOf(next)
 
 				guides = [
-					...(xEdge === undefined || snapX === undefined
-						? []
-						: this.targets.guidesAt("x", [fx === 1 ? landed.r : landed.x], landed)),
-					...(yEdge === undefined || snapY === undefined
-						? []
-						: this.targets.guidesAt("y", [fy === 1 ? landed.b : landed.y], landed))
+					...(snapX?.line === true ? this.targets.guidesAt("x", [fx === 1 ? landed.r : landed.x], landed) : []),
+					...(snapY?.line === true ? this.targets.guidesAt("y", [fy === 1 ? landed.b : landed.y], landed) : [])
 				]
 			}
 		}
@@ -361,16 +372,16 @@ export class ShapeDrag {
 
 		if (this.targets !== undefined && !modifiers.shift && !modifiers.alt) {
 			const threshold = this.options.threshold
-			const snapX = this.targets.snapValues("x", [point.x], threshold)
-			const snapY = this.targets.snapValues("y", [point.y], threshold)
+			const snapX = this.targets.snapEdges("x", [point.x], threshold)
+			const snapY = this.targets.snapEdges("y", [point.y], threshold)
 
-			to = { x: point.x + (snapX ?? 0), y: point.y + (snapY ?? 0) }
+			to = { x: point.x + (snapX?.delta ?? 0), y: point.y + (snapY?.delta ?? 0) }
 
 			const at = { x: to.x, y: to.y, r: to.x, b: to.y }
 
 			guides = [
-				...(snapX === undefined ? [] : this.targets.guidesAt("x", [to.x], at)),
-				...(snapY === undefined ? [] : this.targets.guidesAt("y", [to.y], at))
+				...(snapX?.line === true ? this.targets.guidesAt("x", [to.x], at) : []),
+				...(snapY?.line === true ? this.targets.guidesAt("y", [to.y], at) : [])
 			]
 		}
 
@@ -383,8 +394,22 @@ export class ShapeDrag {
 		}
 	}
 
-	// The op the drag ends with; undefined when no box changed.
+	// The op the drag ends with; undefined when no box changed. A copying move ends in one duplicate (one undo step)
+	// of the movable shapes, back to front as given, at the drop's offset.
 	end(): DeckOp | undefined {
+		if (this.frame.copy === true) {
+			const { dx, dy } = this.offset
+
+			if (dx === 0 && dy === 0) return undefined
+
+			return duplicateOp(
+				this.options.slide,
+				this.frame.shapes.map(shape => shape.id),
+				dx,
+				dy
+			)
+		}
+
 		return xfrmsOp(this.options.slide, this.options.shapes, this.frame.shapes)
 	}
 }

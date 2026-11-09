@@ -1,5 +1,5 @@
 import { groupBounds } from "../../presentation/groupBounds"
-import { NO_PROPERTIES, parseLength, type OdfListStyle, type OdfProperties, type StyleScope } from "../../odf/index"
+import { NO_PROPERTIES, parseLength, parsePercent, type OdfListStyle, type OdfProperties, type StyleScope } from "../../odf/index"
 import { Evaluator, GeometryError, enhancedPath, pointsPath, svgPath, type SubPath } from "../../odt/geometry"
 import { classifyHref } from "../../presentation/actions"
 import type { PictureAdjust } from "../../presentation/edit/ops"
@@ -32,7 +32,7 @@ import { presetOfOdfType } from "../../odf/presetShapes"
 import { readScene } from "../../metafile/dr3d"
 import { overlay, type Fragment, type OdpContext } from "./context"
 import { EMU_PER_PT, bodyPrOf, effectsOf, fillOf, lineOf, packagePart, srgb } from "./fills"
-import { asianSizeOf, embeddedListStyle, levelStyle, listStyleOf, readTextBody, type TextScope } from "./text"
+import { asianSizeOf, embeddedListStyle, levelStyle, listStyleOf, pageOfFragment, readTextBody, type TextScope } from "./text"
 
 // The shapes of a drawing page, master page or notes page (ODF 1.3 Part 3 §10.3 frames, §10.4 shapes, §10.5
 // custom shapes, §10.9 groups) as the model's shape nodes, back to front. Positions and sizes become EMU boxes:
@@ -333,6 +333,67 @@ function customPaths(
 	return out
 }
 
+interface ViewBox {
+	left: number
+	top: number
+	width: number
+	height: number
+}
+
+// The bounds of sub-paths' points (control points too) united with a rectangle.
+function pathBounds(
+	paths: readonly SubPath[],
+	start: { readonly left: number; readonly top: number; readonly right: number; readonly bottom: number }
+): ViewBox {
+	let { left, top, right, bottom } = start
+	const add = (x: number, y: number): void => {
+		if (!Number.isFinite(x) || !Number.isFinite(y)) return
+		if (x < left) left = x
+		if (x > right) right = x
+		if (y < top) top = y
+		if (y > bottom) bottom = y
+	}
+
+	for (const path of paths) {
+		for (const segment of path.segments) {
+			if (segment.kind === "Z") continue
+			if (segment.kind === "C") {
+				add(segment.x1, segment.y1)
+				add(segment.x2, segment.y2)
+			}
+
+			add(segment.x, segment.y)
+		}
+	}
+
+	return { left, top, width: right - left, height: bottom - top }
+}
+
+const MAX_POLYGON_CORNERS = 1000
+
+// draw:regular-polygon (ODF 1.3 Part 3): draw:corners vertices evenly round a centre, the first straight up, the
+// outline's bounds filling the shape's box. Concave (draw:concave), a star: an inner vertex between each two, its
+// radius shortened by draw:sharpness (absent, half the radius).
+function regularPolygon(corners: number, concave: boolean, sharpness: number | undefined): { path: SubPath; bounds: ViewBox } {
+	const n = Number.isFinite(corners) ? Math.min(MAX_POLYGON_CORNERS, Math.max(3, Math.round(corners))) : 5
+	const inner = 1 - Math.min(100, Math.max(0, sharpness ?? 50)) / 100
+	const count = concave ? 2 * n : n
+	const segments: SubPath["segments"] = []
+
+	for (let k = 0; k < count; k++) {
+		const angle = (k * 2 * Math.PI) / count
+		const radius = concave && k % 2 === 1 ? inner : 1
+
+		segments.push({ kind: k === 0 ? "M" : "L", x: radius * Math.sin(angle), y: -radius * Math.cos(angle) })
+	}
+
+	segments.push({ kind: "Z" })
+
+	const path: SubPath = { segments, fill: true, stroke: true }
+
+	return { path, bounds: pathBounds([path], { left: 0, top: -1, right: 0, bottom: -1 }) }
+}
+
 const RECT: Geometry = { kind: "preset", preset: "rect", guides: [] }
 
 interface ShapeStyle {
@@ -459,7 +520,7 @@ function graphicProps(
 	if (empty) return { ...(geometry === undefined ? {} : { geometry }), fill: "none", ln: "none" }
 
 	const resources = context.sheet.drawResources
-	const fill = picture ? undefined : fillOf(style.graphic, resources)
+	const fill = picture ? undefined : fillOf(style.graphic, resources, context.pictureSizes)
 	const ln = lineOf(style.graphic, resources)
 	const effects = effectsOf(style.graphic)
 
@@ -563,7 +624,7 @@ function eventAction(context: OdpContext, fragment: Fragment, node: number): Act
 				case "show": {
 					if (href === undefined) return undefined
 					if (href.startsWith("#")) {
-						const slide = context.pageNamed(href.slice(1))
+						const slide = pageOfFragment(context, href.slice(1))
 
 						return slide === undefined ? undefined : { kind: "slide", slide }
 					}
@@ -810,7 +871,7 @@ function cellProps(context: OdpContext, fragment: Fragment, styleName: string): 
 		context.ownProperties("table-cell", styleName, fragment.scope, "paragraph"),
 		context.ownProperties("table-cell", styleName, fragment.scope, "table-cell")
 	)
-	const fillFromGraphic = fillOf(graphic, context.sheet.drawResources)
+	const fillFromGraphic = fillOf(graphic, context.sheet.drawResources, context.pictureSizes)
 	const background = cell.attributes.get("fo:background-color")
 	const fill: FillProps | "none" | undefined =
 		fillFromGraphic ??
@@ -914,7 +975,7 @@ function readShape(context: OdpContext, scope: ShapeScope, node: number, depth: 
 				? undefined
 				: href.startsWith("#")
 					? (() => {
-							const slide = context.pageNamed(href.slice(1))
+							const slide = pageOfFragment(context, href.slice(1))
 
 							return slide === undefined ? undefined : ({ kind: "slide", slide } as const)
 						})()
@@ -1246,22 +1307,13 @@ function readShape(context: OdpContext, scope: ShapeScope, node: number, depth: 
 				geometry = { kind: "preset", preset: "ellipse", guides: [] }
 				break
 			case "draw:regular-polygon": {
-				const corners = Number(attributes.get("draw:corners") ?? "5")
+				const polygon = regularPolygon(
+					Number(attributes.get("draw:corners") ?? "5"),
+					attributes.get("draw:concave") === "true",
+					parsePercent(attributes.get("draw:sharpness"))
+				)
 
-				geometry = {
-					kind: "preset",
-					preset:
-						attributes.get("draw:concave") === "true"
-							? `star${String(Math.min(32, Math.max(4, corners)))}`
-							: corners === 3
-								? "triangle"
-								: corners === 6
-									? "hexagon"
-									: corners === 8
-										? "octagon"
-										: "pentagon",
-					guides: []
-				}
+				geometry = { kind: "custom", guides: [], paths: customPaths(context, [polygon.path], polygon.bounds) }
 				break
 			}
 			case "draw:line":
@@ -1270,27 +1322,37 @@ function readShape(context: OdpContext, scope: ShapeScope, node: number, depth: 
 				kind = "cxnSp"
 
 				const d = attributes.get("svg:d")
-
-				if (name === "draw:connector" && d !== undefined && box.w > 0) {
-					const viewBox = viewBoxOf(attributes.get("svg:viewBox"), box)
-
-					geometry = {
-						kind: "custom",
-						guides: [],
-						paths: customPaths(
-							context,
-							svgPath(d).map(path => ({ ...path, fill: false })),
-							viewBox
-						)
-					}
-					break
-				}
-
 				const x1 = parseLength(attributes.get("svg:x1")) ?? 0
 				const y1 = parseLength(attributes.get("svg:y1")) ?? 0
 				const x2 = parseLength(attributes.get("svg:x2")) ?? 0
 				const y2 = parseLength(attributes.get("svg:y2")) ?? 0
 				const lineBox = { x: Math.min(x1, x2), y: Math.min(y1, y2), w: Math.abs(x2 - x1), h: Math.abs(y2 - y1) }
+
+				// A routed connector's svg:d is in page space (1/100 mm, as LibreOffice writes it; its svg:viewBox only
+				// sizes it): the bends, boxed on the path's bounds with its ends. A path of one straight segment is the line.
+				if (name === "draw:connector" && d !== undefined) {
+					const paths = svgPath(d)
+					const bends = paths.reduce((count, path) => count + path.segments.length, 0) > 2
+
+					if (bends) {
+						for (const path of paths) path.fill = false
+
+						const toPage = 2540 / 72
+						const bounds = pathBounds(paths, {
+							left: lineBox.x * toPage,
+							top: lineBox.y * toPage,
+							right: (lineBox.x + lineBox.w) * toPage,
+							bottom: (lineBox.y + lineBox.h) * toPage
+						})
+
+						geometry = { kind: "custom", guides: [], paths: customPaths(context, paths, bounds) }
+						xfrm = xfrmOf(
+							{ x: bounds.left / toPage, y: bounds.top / toPage, w: bounds.width / toPage, h: bounds.height / toPage },
+							matrix
+						)
+						break
+					}
+				}
 
 				geometry = { kind: "preset", preset: "line", guides: [] }
 				xfrm = xfrmOf(lineBox, matrix, x2 < x1, y2 < y1)

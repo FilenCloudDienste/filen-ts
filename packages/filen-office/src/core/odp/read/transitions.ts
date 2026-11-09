@@ -36,6 +36,24 @@ const MOVES: Readonly<Record<string, string>> = {
 	fromTopLeft: "rd"
 }
 
+// The pinWheelWipe blades of p:wheel@spokes.
+const SPOKES: Readonly<Record<string, string>> = {
+	oneBlade: "1",
+	twoBladeVertical: "2",
+	twoBladeHorizontal: "2",
+	threeBlade: "3",
+	eightBlade: "8"
+}
+
+// The p:strips direction of a waterfallWipe (horizontalLeft runs down to the left, reversed up).
+function stripsDir(subtype: string, reverse: boolean): string | undefined {
+	if (subtype === "horizontalLeft") return reverse ? "lu" : "ld"
+	if (subtype === "horizontalRight") return reverse ? "ru" : "rd"
+
+	return undefined
+}
+
+// The inverse of core/anim/transitions.ts transitionToOdf, plus the SMIL types LibreOffice writes that it does not.
 function kindOf(type: string, subtype: string, direction: string): { kind: string; options: Record<string, string | boolean> } {
 	const reverse = direction === "reverse"
 
@@ -45,6 +63,9 @@ function kindOf(type: string, subtype: string, direction: string): { kind: strin
 				? { kind: "fade", options: { thruBlk: true } }
 				: { kind: "fade", options: {} }
 		case "barWipe":
+			// Written only for p:cut@thruBlk.
+			if (subtype === "fadeOverColor") return { kind: "cut", options: { thruBlk: true } }
+
 			return { kind: "wipe", options: { dir: subtype === "topToBottom" ? (reverse ? "u" : "d") : reverse ? "l" : "r" } }
 		case "pushWipe":
 			return subtype === "combHorizontal" || subtype === "combVertical"
@@ -54,13 +75,18 @@ function kindOf(type: string, subtype: string, direction: string): { kind: strin
 			// The eight directions of cover and pull (ST_TransitionEightDirectionType).
 			return { kind: reverse ? "pull" : "cover", options: { dir: MOVES[subtype] ?? "r" } }
 		case "irisWipe":
+			if (subtype === "rectangle") return { kind: "zoom", options: { dir: reverse ? "in" : "out" } }
+			if (subtype === "diamond") return { kind: "diamond", options: {} }
+
+			return { kind: "circle", options: {} }
 		case "ellipseWipe":
 		case "starWipe":
-			return { kind: type === "irisWipe" && subtype === "rectangle" ? "zoom" : "circle", options: {} }
+			return { kind: "circle", options: {} }
 		case "clockWipe":
 			return { kind: "wheel", options: { spokes: subtype === "fourBlade" ? "4" : "1" } }
-		case "fanWipe":
 		case "pinWheelWipe":
+			return { kind: "wheel", options: { spokes: SPOKES[subtype] ?? "4" } }
+		case "fanWipe":
 		case "singleSweepWipe":
 		case "doubleFanWipe":
 		case "doubleSweepWipe":
@@ -68,8 +94,11 @@ function kindOf(type: string, subtype: string, direction: string): { kind: strin
 		case "windshieldWipe":
 			return { kind: "wedge", options: {} }
 		case "fourBoxWipe":
+			return subtype === "cornersOut" || subtype === "cornersIn" ? { kind: "plus", options: {} } : { kind: "zoom", options: {} }
 		case "boxWipe":
 			return { kind: "zoom", options: {} }
+		case "barnDoorWipe":
+			return { kind: "split", options: { orient: subtype === "vertical" ? "vert" : "horz", dir: reverse ? "in" : "out" } }
 		case "blindsWipe":
 			return { kind: "blinds", options: { dir: subtype === "horizontal" ? "horz" : "vert" } }
 		case "checkerBoardWipe":
@@ -80,14 +109,18 @@ function kindOf(type: string, subtype: string, direction: string): { kind: strin
 			return { kind: "dissolve", options: {} }
 		case "random":
 			return { kind: "random", options: {} }
-		case "waterfallWipe":
+		case "waterfallWipe": {
+			const dir = stripsDir(subtype, reverse)
+
+			return { kind: "strips", options: dir === undefined ? {} : { dir } }
+		}
 		case "snakeWipe":
 		case "spiralWipe":
 		case "parallelSnakesWipe":
 		case "boxSnakesWipe":
 			return { kind: "strips", options: {} }
 		case "zoom":
-			return { kind: "zoom", options: {} }
+			return { kind: subtype === "rotateIn" ? "newsflash" : "zoom", options: {} }
 		default:
 			return { kind: "cut", options: {} }
 	}

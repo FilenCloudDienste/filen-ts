@@ -216,6 +216,8 @@ describe("the presentation protocol", () => {
 				sections: fixtureDeck().sections,
 				customShows: [],
 				show: fixtureDeck().show,
+				// The deck sets no grid: PowerPoint's default, 1/12 inch with snapping on.
+				grid: { cx: 76_200, cy: 76_200, snap: true },
 				protection: { writeProtected: false, encrypted: false },
 				gate: [],
 				editable: true,

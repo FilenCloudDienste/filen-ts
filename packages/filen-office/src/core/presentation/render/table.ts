@@ -11,7 +11,9 @@ import { builtinTableStyle } from "./tableStyles"
 // A table frame (a:tbl, §21.1.3) drawn from the model: the grid, rows grown to their text, merged cells, fills and
 // borders from each cell's own properties (typed edits first, then its a:tcPr), else from the table style
 // (§20.1.4.2.26 a:tblStyle in the tableStyles part) by region, later regions overriding earlier ones: the whole table,
-// banded columns, banded rows, first and last column, first and last row, then the corner cells.
+// banded columns, banded rows, first and last column, first and last row, then the corner cells. A right-to-left table
+// (a:tblPr@rtl, §21.1.3.15) is the same table mirrored: its first grid column on the right, the cells' left and right
+// lines at their start and end; regions stay by grid index, diagonals by corner.
 
 // Cell margins default to 0.1in left/right, 0.05in top/bottom (§21.1.3.17).
 const DEFAULT_MAR_LR = 91440
@@ -23,8 +25,22 @@ export const MAX_GRID_COLUMNS = 1000
 export const MAX_GRID_AREA = 1_000_000
 
 type Side = "left" | "right" | "top" | "bottom"
+type Diagonal = "tl2br" | "bl2tr"
+type Edge = Side | Diagonal
 
-const CELL_SIDES: Readonly<Record<Side, string>> = { left: "lnL", right: "lnR", top: "lnT", bottom: "lnB" }
+// Each line's a:tcPr child (§21.1.3.17) and its typed-edit key.
+const CELL_LINES: Readonly<Record<Edge, string>> = {
+	left: "lnL",
+	right: "lnR",
+	top: "lnT",
+	bottom: "lnB",
+	tl2br: "lnTlToBr",
+	bl2tr: "lnBlToTr"
+}
+const EDIT_KEYS = { left: "l", right: "r", top: "t", bottom: "b", tl2br: "tl2br", bl2tr: "bl2tr" } as const
+const EDGES = ["top", "bottom", "left", "right", "tl2br", "bl2tr"] as const
+// A style region's diagonals (a:tcBdr, §20.1.4.2.20): its bottom-left to top-right one is a:tr2bl.
+const STYLE_DIAGONALS: Readonly<Record<Diagonal, string>> = { tl2br: "tl2br", bl2tr: "tr2bl" }
 
 // One region of a table style: its node and the cells it covers (inclusive).
 interface Region {
@@ -58,7 +74,8 @@ export interface TableCellBox {
 export interface TableRender {
 	readonly list: DrawingList
 	readonly cells: readonly TableCellBox[]
-	// Column edges and row edges (px, frame-local).
+	// Column edges and row edges (px, frame-local). Column edges run from the table's start: from its right edge in a
+	// right-to-left table, where a cell box's x is mirrored (tableWidth - edge).
 	readonly columnEdges: readonly number[]
 	readonly rowEdges: readonly number[]
 	readonly refused?: "tooLarge"
@@ -72,8 +89,18 @@ export interface TableRenderInput {
 	readonly part: string | undefined
 	// The tableStyles part (§19.3.3.1) and its name.
 	readonly tableStyles: { readonly document: XmlDocument; readonly part: string } | undefined
-	// The laid-out text height of a cell (px) for an inner width, or 0 without a text engine.
-	readonly textHeight: (cell: TableCell, row: number, column: number, width: number, style: TableTextStyle | undefined) => number
+	// The extent a cell's text grows its rows by (px), or 0 without a text engine: the laid-out height at the inner
+	// width; for turned text (`vert`, tcPr@vert §21.1.3.17) its longest line, wrapped at `length` (the inner height
+	// of its row as stored, of a merge's rows as the single-row cells grew them).
+	readonly textHeight: (
+		cell: TableCell,
+		row: number,
+		column: number,
+		width: number,
+		style: TableTextStyle | undefined,
+		vert: string | undefined,
+		length: number
+	) => number
 }
 
 // The style a table names (else the part's default): the tableStyles part's, else PowerPoint's built-in one.
@@ -366,7 +393,8 @@ export function* renderTableSteps(input: TableRenderInput): Generator<void, Tabl
 
 			if (rowSpan === 1) {
 				const width = (columnEdges[c + columnSpan] ?? 0) - (columnEdges[c] ?? 0) - entry.marL - entry.marR
-				const text = input.textHeight(cell, r, c, Math.max(0, width), textStyle)
+				const length = Math.max(0, row.h) / EMU_PER_PX - entry.marT - entry.marB
+				const text = input.textHeight(cell, r, c, Math.max(0, width), textStyle, entry.vert, Math.max(0, length))
 
 				if (text > 0) heights[r] = Math.max(heights[r] ?? 0, text + entry.marT + entry.marB)
 			}
@@ -381,14 +409,15 @@ export function* renderTableSteps(input: TableRenderInput): Generator<void, Tabl
 
 	for (const entry of spanning) {
 		const width = (columnEdges[entry.column + entry.columnSpan] ?? 0) - (columnEdges[entry.column] ?? 0) - entry.marL - entry.marR
-		const text = input.textHeight(entry.cell, entry.row, entry.column, Math.max(0, width), entry.textStyle)
-
-		if (text <= 0) continue
-
 		const last = entry.row + entry.rowSpan - 1
 		let spanned = 0
 
 		for (let r = entry.row; r <= last; r++) spanned += heights[r] ?? 0
+
+		const length = Math.max(0, spanned - entry.marT - entry.marB)
+		const text = input.textHeight(entry.cell, entry.row, entry.column, Math.max(0, width), entry.textStyle, entry.vert, length)
+
+		if (text <= 0) continue
 
 		const lack = text + entry.marT + entry.marB - spanned
 
@@ -402,6 +431,7 @@ export function* renderTableSteps(input: TableRenderInput): Generator<void, Tabl
 	for (const height of heights) rowEdges.push((rowEdges[rowEdges.length - 1] ?? 0) + height)
 
 	const tableWidth = columnEdges[columnEdges.length - 1] ?? 0
+	const rtl = table.flags.rtl === true
 	const tableHeight = rowEdges[rowEdges.length - 1] ?? 0
 
 	// The table background (a:tblPr fill, the style's tblBg) under every cell.
@@ -424,9 +454,10 @@ export function* renderTableSteps(input: TableRenderInput): Generator<void, Tabl
 	const borders: { x1: number; y1: number; x2: number; y2: number; stroke: number }[] = []
 
 	for (const entry of pending) {
-		const x = columnEdges[entry.column] ?? 0
+		const start = columnEdges[entry.column] ?? 0
+		const width = (columnEdges[entry.column + entry.columnSpan] ?? start) - start
+		const x = rtl ? tableWidth - start - width : start
 		const y = rowEdges[entry.row] ?? 0
-		const width = (columnEdges[entry.column + entry.columnSpan] ?? x) - x
 		const height = (rowEdges[entry.row + entry.rowSpan] ?? y) - y
 		const edited = edits.get(entry.cell)
 
@@ -446,11 +477,11 @@ export function* renderTableSteps(input: TableRenderInput): Generator<void, Tabl
 				if (regionFills.has(region.node)) {
 					paint = regionFills.get(region.node)
 				} else {
-					paint = paintOf(
-						styleContext,
-						style.reader,
-						style.reader.child(style.reader.child(region.node, D.A, "tcStyle"), D.A, "fill")
-					)
+					// EG_ThemeableFillStyle: an a:fill, else an a:fillRef straight under a:tcStyle.
+					const tcStyle = style.reader.child(region.node, D.A, "tcStyle")
+					const holder = style.reader.child(tcStyle, D.A, "fill")
+
+					paint = paintOf(styleContext, style.reader, holder >= 0 ? holder : tcStyle)
 					regionFills.set(region.node, paint)
 				}
 
@@ -465,18 +496,29 @@ export function* renderTableSteps(input: TableRenderInput): Generator<void, Tabl
 		const bottom = entry.row + entry.rowSpan - 1
 		const right = entry.column + entry.columnSpan - 1
 
-		for (const side of ["top", "bottom", "left", "right"] as const) {
+		const x2 = x + width
+		const y2 = y + height
+		// The cell's logical left and right edges, mirrored in a right-to-left table.
+		const startX = rtl ? x2 : x
+		const endX = rtl ? x : x2
+
+		for (const side of EDGES) {
 			let stroke: number | undefined = edited?.borders.get(side)
 
 			if (stroke === undefined && entry.tcPr >= 0 && cellReader !== undefined) {
-				const ln = cellReader.child(entry.tcPr, D.A, CELL_SIDES[side])
+				const ln = cellReader.child(entry.tcPr, D.A, CELL_LINES[side])
 
 				if (ln >= 0) stroke = shapeLine(cellContext, cellReader, ln, undefined)?.stroke ?? -1
 			}
 
 			if (stroke === undefined && style !== undefined && styleContext !== undefined) {
 				for (const region of entry.regions) {
-					const which = regionSide(region, side, top, left, bottom, right)
+					const diagonal = side === "tl2br" || side === "bl2tr"
+
+					// A diagonal is the cell's own: from the regions its origin is in, as its fill.
+					if (diagonal && !covers(region, entry.row, entry.column)) continue
+
+					const which = diagonal ? STYLE_DIAGONALS[side] : regionSide(region, side, top, left, bottom, right)
 					const key = `${String(region.node)}:${which}`
 					let held = regionBorders.get(key)
 
@@ -495,17 +537,18 @@ export function* renderTableSteps(input: TableRenderInput): Generator<void, Tabl
 
 			if (stroke === undefined || stroke < 0) continue
 
-			const x2 = x + width
-			const y2 = y + height
-
 			borders.push(
 				side === "top"
 					? { x1: x, y1: y, x2, y2: y, stroke }
 					: side === "bottom"
 						? { x1: x, y1: y2, x2, y2, stroke }
 						: side === "left"
-							? { x1: x, y1: y, x2: x, y2, stroke }
-							: { x1: x2, y1: y, x2, y2, stroke }
+							? { x1: startX, y1: y, x2: startX, y2, stroke }
+							: side === "right"
+								? { x1: endX, y1: y, x2: endX, y2, stroke }
+								: side === "tl2br"
+									? { x1: x, y1: y, x2, y2, stroke }
+									: { x1: x, y1: y2, x2, y2: y, stroke }
 			)
 		}
 
@@ -531,7 +574,7 @@ export function* renderTableSteps(input: TableRenderInput): Generator<void, Tabl
 		yield
 	}
 
-	// Borders over every fill.
+	// Borders and diagonals over every fill, under the cells' text.
 	for (const border of borders) {
 		const firstCommand = list.commandCount
 		const firstCoord = list.coordCount
@@ -592,7 +635,7 @@ function borderOf(context: PaintContext, reader: DrawingReader, holder: number):
 
 interface EditedCell {
 	readonly fill: number | undefined
-	readonly borders: Map<Side, number>
+	readonly borders: Map<Edge, number>
 }
 
 // Typed cell properties (edits) as paints: written into one scratch document and read like source markup.
@@ -616,15 +659,14 @@ function editedProps(input: TableRenderInput, table: TableModel): Map<TableCell,
 
 		writer.push("<a:tcPr>")
 
-		for (const side of ["left", "right", "top", "bottom"] as const) {
-			const key = side === "left" ? "l" : side === "right" ? "r" : side === "top" ? "t" : "b"
-			const line = borders?.[key]
+		for (const side of EDGES) {
+			const line = borders?.[EDIT_KEYS[side]]
 
 			if (line !== undefined)
 				writer.push(
 					lineXml(line, image)
-						.replace(/^<a:ln/, `<a:${CELL_SIDES[side]}`)
-						.replace(/<\/a:ln>$/, `</a:${CELL_SIDES[side]}>`)
+						.replace(/^<a:ln/, `<a:${CELL_LINES[side]}`)
+						.replace(/<\/a:ln>$/, `</a:${CELL_LINES[side]}>`)
 				)
 		}
 
@@ -639,10 +681,10 @@ function editedProps(input: TableRenderInput, table: TableModel): Map<TableCell,
 	let node = document.firstChildElement(document.documentElement())
 
 	for (const cell of edited) {
-		const borders = new Map<Side, number>()
+		const borders = new Map<Edge, number>()
 
-		for (const side of ["left", "right", "top", "bottom"] as const) {
-			const ln = reader.child(node, D.A, CELL_SIDES[side])
+		for (const side of EDGES) {
+			const ln = reader.child(node, D.A, CELL_LINES[side])
 
 			if (ln >= 0) borders.set(side, shapeLine(context, reader, ln, undefined)?.stroke ?? -1)
 		}

@@ -1,6 +1,16 @@
-import type { CompiledTimegraph, LayerState, TimeEvent, TimegraphInstance, TimegraphSource, Transition } from "../../../core/anim/model"
+import type {
+	CompiledTimegraph,
+	LayerState,
+	TimeEvent,
+	TimegraphInstance,
+	TimegraphSource,
+	TimeNode,
+	TimingTree,
+	Transition
+} from "../../../core/anim/model"
 import { attributeEntry } from "../../../core/anim/attributes"
 import { compileSource, instantiate } from "../../../core/anim/timegraph"
+import { randomTransitionKind } from "../../../core/anim/transitions"
 import type { DocxLinkTarget } from "../../../core/docx/layout/pageData"
 import { EMU_PER_PX } from "../../../core/drawingml/index"
 import { DEFAULT_PRESENTATION_BUDGETS } from "../../../core/presentation/budget"
@@ -16,8 +26,16 @@ import {
 import type { PaintedSlide, SlidePainter } from "../SlideView"
 import type { ShowController, ShowEvent, ShowEventType, ShowFrom, ShowScreen, ShowStart } from "./controller"
 import { layerBoxes, layerIndices, layerPlanOf, layerTree } from "./layers"
-import { buildStageSlide, type ShowMediaHandle, type ShowMediaMount, type ShowSoundHandle, type StageSlide } from "./stage"
-import { advanceAt, ShowNavigator, type ShowOptions, type ShowPosition, type ShowSlide } from "./timeline"
+import {
+	buildStageSlide,
+	yieldFocus,
+	type ShowMediaControl,
+	type ShowMediaHandle,
+	type ShowMediaMount,
+	type ShowSoundHandle,
+	type StageSlide
+} from "./stage"
+import { advanceAt, hiddenAfter, ShowNavigator, type ShowOptions, type ShowPosition, type ShowSlide } from "./timeline"
 import { transitionDurationMs, transitionStyles } from "./transitions"
 import { transitions3d } from "./transitions3d"
 import { webglTransitions } from "./webgl/index"
@@ -120,6 +138,14 @@ function rendererOf(transition: Transition | undefined): ShowTransitionRenderer 
 	return TRANSITION_RENDERERS.find(renderer => renderer.draws(transition.kind, transition.namespace))
 }
 
+// p:random plays a kind picked afresh for each run (ECMA-376 Part 1 §19.3.1 random: it can differ each time), with
+// that kind's default options and random's own duration, advance and sound.
+function resolveRandom(transition: Transition | undefined): Transition | undefined {
+	if (transition?.kind !== "random" || transition.namespace !== "p") return transition
+
+	return { ...transition, kind: randomTransitionKind(Math.random()), options: {} }
+}
+
 // A renderer's preparation for a slide, held with the slide.
 interface TransitionPreparation {
 	readonly renderer: ShowTransitionRenderer
@@ -160,6 +186,19 @@ interface Prepared {
 	painted: PaintedSlide | undefined
 	// Shown without layers (the SVG compositor).
 	readonly fallback: boolean
+	// Media that play over more than their own slide (p:cMediaNode numSld): slides played over, by shape id.
+	readonly spans: ReadonlyMap<number, number>
+	// A medium was taken off it to play on (its targets are placed again when it is shown).
+	taken: boolean
+}
+
+// A medium playing on past its slide, in the show's carry host.
+interface Carried {
+	readonly index: number
+	readonly handle: ShowMediaHandle
+	readonly box: HTMLElement
+	// Slides it may still play over.
+	left: number
 }
 
 interface Playing {
@@ -207,6 +246,93 @@ export const SHOW_HELD_BYTES = 256 * 1024 * 1024
 const TRANSITION_GRACE_MS = 100
 const NEXT_KEYS = new Set(["ArrowRight", "ArrowDown", "PageDown", " ", "Enter", "n", "N"])
 const PREV_KEYS = new Set(["ArrowLeft", "ArrowUp", "PageUp", "Backspace", "p", "P"])
+// Media carried past their slide at once (the oldest stops first).
+const MAX_CARRIED = 4
+// PowerPoint's media keys: Alt+Up/Down volume, Alt+Shift+PageDown/PageUp 3 s, Alt+Shift+Right/Left 0.25 s.
+const VOLUME_STEP = 0.1
+const SKIP_MS = 3000
+const STEP_MS = 250
+
+// What a key does in the show (`code` for the Alt chords: Option changes the key's character on a Mac).
+export interface ShowKeyInput {
+	readonly key: string
+	readonly code?: string
+	readonly typed: string
+	readonly altKey?: boolean
+	readonly ctrlKey?: boolean
+	readonly metaKey?: boolean
+	readonly shiftKey?: boolean
+}
+
+type MediaKey = { readonly kind: "toggle" } | { readonly kind: "stop" } | ShowMediaControl
+
+// The media command of a slide show media chord (support.microsoft.com, keyboard shortcuts to deliver a presentation).
+function mediaKeyOf(event: ShowKeyInput): MediaKey | undefined {
+	const code = event.code ?? ""
+	const alt = event.altKey === true
+	const ctrl = event.ctrlKey === true
+	const meta = event.metaKey === true
+	const shift = event.shiftKey === true
+
+	if (ctrl && !alt && !meta && !shift && (code === "Space" || event.key === " ")) return { kind: "toggle" }
+	if (!alt || ctrl || meta) return undefined
+
+	if (shift) {
+		switch (code) {
+			case "PageDown":
+				return { kind: "seekBy", ms: SKIP_MS }
+			case "PageUp":
+				return { kind: "seekBy", ms: -SKIP_MS }
+			case "ArrowRight":
+				return { kind: "seekBy", ms: STEP_MS }
+			case "ArrowLeft":
+				return { kind: "seekBy", ms: -STEP_MS }
+		}
+
+		return undefined
+	}
+
+	switch (code) {
+		case "KeyP":
+			return { kind: "toggle" }
+		case "KeyQ":
+			return { kind: "stop" }
+		case "KeyU":
+			return { kind: "mute" }
+		case "ArrowUp":
+			return { kind: "volumeBy", by: VOLUME_STEP }
+		case "ArrowDown":
+			return { kind: "volumeBy", by: -VOLUME_STEP }
+		case "End":
+			return { kind: "bookmark", direction: 1 }
+		case "Home":
+			return { kind: "bookmark", direction: -1 }
+	}
+
+	return undefined
+}
+
+// Per shape, the slides its audio or video plays over when that is more than its own (numSld, ECMA-376 §19.5.17).
+function mediaSpans(timing: TimingTree | undefined): ReadonlyMap<number, number> {
+	const spans = new Map<number, number>()
+
+	if (timing === undefined) return spans
+
+	const stack: TimeNode[] = [timing.root]
+
+	for (let node = stack.pop(); node !== undefined; node = stack.pop()) {
+		if (node.kind === "behavior") {
+			const behavior = node.behavior
+
+			if ((behavior.type === "audio" || behavior.type === "video") && behavior.target.kind === "shape" && (behavior.numSld ?? 1) > 1)
+				spans.set(behavior.target.shape, Math.max(spans.get(behavior.target.shape) ?? 0, behavior.numSld ?? 1))
+		}
+
+		stack.push(...node.ctn.children, ...(node.ctn.subTnLst ?? []))
+	}
+
+	return spans
+}
 
 type Listeners = {
 	[T in ShowEventType]?: Set<(event: Extract<ShowEvent, { type: T }>) => void>
@@ -245,6 +371,9 @@ export class ShowPlayer implements ShowController {
 	private advance: ReturnType<typeof setTimeout> | undefined
 	private wakeAt = Number.NaN
 	private transitionEnd: ReturnType<typeof setTimeout> | undefined
+	// Media playing on past their slide (Play Across Slides), oldest first, their boxes in `carryHost`.
+	private readonly carried: Carried[] = []
+	private carryHost: HTMLDivElement | undefined
 	// The transition sound playing (a looped one until the next sound or a stop).
 	private sounding: ShowSoundHandle | undefined
 	private restart: ReturnType<typeof setTimeout> | undefined
@@ -253,6 +382,8 @@ export class ShowPlayer implements ShowController {
 	private stageWidth = 0
 	private dpr = 1
 	private readonly blackout: HTMLDivElement
+	// The blackout's colour as last written (black, or a transition's overlay).
+	private overlay = "#000000"
 	private activator: PresentationActionActivator | undefined
 
 	constructor(host: HTMLDivElement, props: PlayerProps, view: PlayerView) {
@@ -264,7 +395,7 @@ export class ShowPlayer implements ShowController {
 		this.nav = new ShowNavigator(props.slides, props.customShows, props.options)
 		this.blackout = this.document.createElement("div")
 		this.blackout.className = "fo-show-black"
-		this.blackout.style.cssText = "position:absolute;inset:0;background:#000;opacity:0;pointer-events:none;z-index:2"
+		this.blackout.style.cssText = "position:absolute;inset:0;background:#000000;opacity:0;pointer-events:none;z-index:2"
 		this.host.appendChild(this.blackout)
 		this.activator = this.activatorOf(props)
 	}
@@ -337,10 +468,17 @@ export class ShowPlayer implements ShowController {
 
 		this.ended = false
 
+		// A kiosk restarts after its inactivity time also when nobody touches it.
+		const started = (): ShowStart => {
+			this.armRestart()
+
+			return { kind: "started" }
+		}
+
 		if (from !== undefined && "customShow" in from) {
 			if (!this.nav.enterCustom(from.customShow, false)) return Promise.resolve({ kind: "refused", reason: "notFound" })
 
-			return this.show(this.nav.position, { transition: true }).then(() => ({ kind: "started" }) as const)
+			return this.show(this.nav.position, { transition: true }).then(started)
 		}
 
 		const index =
@@ -350,15 +488,24 @@ export class ShowPlayer implements ShowController {
 		if (index !== undefined && (index < 0 || index >= this.props.slides.length))
 			return Promise.resolve({ kind: "refused", reason: "notFound" })
 
-		return this.show(index === undefined ? this.nav.first() : this.nav.at(index), { transition: true }).then(
-			() => ({ kind: "started" }) as const
-		)
+		return this.show(index === undefined ? this.nav.first() : this.nav.at(index), { transition: true }).then(started)
 	}
 
 	next(): void {
 		this.input()
+		this.advanceStep()
+	}
 
+	// The next step or slide; a timed advance is no input (a kiosk's inactivity time runs on).
+	private advanceStep(): void {
 		if (this.ended) return
+		// Past the end screen the show ends.
+		if (this.screenState === "end") {
+			this.end()
+
+			return
+		}
+
 		if (this.screenState !== "slide") {
 			this.setScreen("slide")
 
@@ -406,7 +553,8 @@ export class ShowPlayer implements ShowController {
 
 		if (this.run !== undefined) this.finishTransition(this.now())
 
-		if (playing?.instance !== undefined && playing.step > 0) {
+		// Without animation a slide holds its end state: back goes to the previous slide.
+		if (playing?.instance !== undefined && playing.step > 0 && this.props.options.withoutAnimation !== true) {
 			playing.instance.fire({ kind: "prev" }, this.now() - playing.clock)
 			playing.step = stepOf(playing.instance)
 			this.emit({
@@ -432,6 +580,13 @@ export class ShowPlayer implements ShowController {
 		void this.show(this.nav.at(index), { transition: true })
 	}
 
+	nextHidden(): void {
+		const index = hiddenAfter(this.props.slides, this.nav.position.index)
+
+		if (index !== undefined) this.goto(index)
+		else this.input()
+	}
+
 	// The first and last slide of the running show (custom show, range, hidden slides skipped).
 	first(): void {
 		this.input()
@@ -443,14 +598,17 @@ export class ShowPlayer implements ShowController {
 		this.jump({ kind: "internal", jump: "last" })
 	}
 
+	// The end screen is already black: B and W leave it as it is.
 	black(): void {
 		this.input()
-		this.setScreen(this.screenState === "black" ? "slide" : "black")
+
+		if (this.screenState !== "end") this.setScreen(this.screenState === "black" ? "slide" : "black")
 	}
 
 	white(): void {
 		this.input()
-		this.setScreen(this.screenState === "white" ? "slide" : "white")
+
+		if (this.screenState !== "end") this.setScreen(this.screenState === "white" ? "slide" : "white")
 	}
 
 	end(): void {
@@ -475,10 +633,20 @@ export class ShowPlayer implements ShowController {
 
 	// --- Input from the stage ---
 
-	key(event: { readonly key: string; readonly typed: string }): "handled" | "typed" | "ignored" {
+	key(event: ShowKeyInput): "handled" | "typed" | "ignored" {
 		const key = event.key
+		const media = mediaKeyOf(event)
+
+		if (media !== undefined) {
+			this.input()
+			this.mediaKey(media)
+
+			return "handled"
+		}
 
 		if (key === "Escape") this.end()
+		// The show's own keys are unmodified (Shift only for a letter's capital).
+		else if (event.altKey === true || event.ctrlKey === true || event.metaKey === true) return "ignored"
 		else if (/^[0-9]$/u.test(key)) return "typed"
 		else if (key === "Enter" && event.typed !== "") this.goto(Number(event.typed) - 1)
 		else if (NEXT_KEYS.has(key)) this.next()
@@ -492,11 +660,46 @@ export class ShowPlayer implements ShowController {
 		return "handled"
 	}
 
-	// A plain click on the stage (not on a target): the next step, except in a kiosk.
+	// A plain click on the stage (not on a target): the next step, except in a kiosk. With the slide's "On Mouse Click"
+	// off (transition advClick="0") a click plays its builds and completes its transition, never leaves it.
 	click(): void {
 		this.input()
 
-		if (!this.props.options.kiosk) this.next()
+		if (this.props.options.kiosk) return
+
+		const playing = this.playing
+
+		if (
+			this.screenState === "slide" &&
+			this.run === undefined &&
+			playing !== undefined &&
+			playing.step >= playing.steps &&
+			playing.prepared.transition?.advance.onClick === false
+		)
+			return
+
+		this.next()
+	}
+
+	// The media chord on the slide's focused medium, else its only one, else the topmost one playing.
+	private mediaKey(command: MediaKey): void {
+		const stage = this.playing?.prepared.stage
+
+		if (stage === undefined || stage.media.size === 0) return
+
+		const active = this.document.activeElement
+		let target: ShowMediaHandle | undefined
+
+		for (const [shape, box] of stage.mediaBoxes) if (active !== null && box.contains(active)) target = stage.media.get(shape)
+
+		if (target === undefined && stage.media.size === 1) target = stage.media.values().next().value
+		if (target === undefined) for (const handle of stage.media.values()) if (handle.playing?.() === true) target = handle
+
+		if (target === undefined) return
+
+		if (command.kind === "toggle") target.command({ command: "toggle" })
+		else if (command.kind === "stop") target.command({ command: "stop" })
+		else target.control?.(command)
 	}
 
 	// --- Navigation ---
@@ -504,8 +707,16 @@ export class ShowPlayer implements ShowController {
 	private forward(): void {
 		const move = this.nav.following(1)
 
-		if (move.kind === "end") this.end()
+		// PowerPoint's "End with black slide": the next advance after the last slide ends the show.
+		if (move.kind === "end") this.endScreen()
 		else if (move.kind === "slide") void this.show(move.position, { transition: true })
+	}
+
+	private endScreen(): void {
+		if (this.advance !== undefined) clearTimeout(this.advance)
+
+		this.advance = undefined
+		this.setScreen("end")
 	}
 
 	private jump(target: PresentationJump): void {
@@ -550,6 +761,8 @@ export class ShowPlayer implements ShowController {
 	private setScreen(screen: ShowScreen): void {
 		if (this.screenState === screen) return
 
+		const from = this.screenState
+
 		this.screenState = screen
 		this.host.style.visibility = screen === "slide" ? "" : "hidden"
 		this.view.screen(screen)
@@ -557,11 +770,14 @@ export class ShowPlayer implements ShowController {
 
 		const playing = this.playing
 
-		if (screen === "slide" && playing?.began === true) this.armAdvance(playing)
+		// Back from the end screen the last slide stays (its timing already ran out).
+		if (screen === "slide" && from !== "end" && playing?.began === true) this.armAdvance(playing)
 	}
 
 	private async show(position: ShowPosition, how: { readonly transition: boolean; readonly atEnd?: boolean }): Promise<void> {
 		const generation = ++this.generation
+		// Show without animation: every slide enters with its main sequence played through.
+		const atEnd = how.atEnd === true || this.props.options.withoutAnimation === true
 
 		// The slide on stage advances no more by its timing (a navigation is under way).
 		if (this.advance !== undefined) clearTimeout(this.advance)
@@ -595,7 +811,9 @@ export class ShowPlayer implements ShowController {
 		const now = this.now()
 
 		if (this.run !== undefined) this.finishTransition(now)
-		if (from !== undefined && from.prepared !== prepared) this.leave(from)
+		if (from !== undefined && from.prepared !== prepared) this.leave(from, true)
+
+		this.countCarried(prepared)
 
 		const instance = prepared.graph === undefined ? undefined : instantiate(prepared.graph)
 		const playing: Playing = {
@@ -617,13 +835,13 @@ export class ShowPlayer implements ShowController {
 
 		prepared.stage.element.style.zIndex = "1"
 
-		const transition = how.transition && from !== undefined ? prepared.transition : undefined
+		const transition = how.transition && from !== undefined ? resolveRandom(prepared.transition) : undefined
 
 		// The slide entered with its transition plays its sound: a new one ends the one playing, as "stop previous sound"
 		// does.
 		if (how.transition) this.playSound(prepared.sound)
 
-		if (instance !== undefined && how.atEnd === true) {
+		if (instance !== undefined && atEnd) {
 			instance.fire({ kind: "slideBegin" }, 0)
 
 			for (let step = 1; step <= playing.steps; step++) instance.fire({ kind: "next" }, step * STEP_SPACING_MS)
@@ -668,7 +886,7 @@ export class ShowPlayer implements ShowController {
 		} else {
 			custom?.finish()
 			this.detach(from?.prepared, prepared)
-			this.begin(playing, now, how.atEnd === true)
+			this.begin(playing, now, atEnd)
 		}
 
 		this.view.slide(prepared.index)
@@ -825,14 +1043,77 @@ export class ShowPlayer implements ShowController {
 		this.prefetch()
 	}
 
-	private leave(playing: Playing): void {
-		for (const handle of playing.prepared.stage.media.values()) handle.command({ command: "stop" })
+	// The slide's media stop, but (`carry`) those playing that play over more slides (Play Across Slides, Play in
+	// Background) go on in the carry host: in the document all along, so the element is never paused by its removal.
+	private leave(playing: Playing, carry: boolean): void {
+		const prepared = playing.prepared
+		const stage = prepared.stage
+
+		for (const [shape, handle] of [...stage.media]) {
+			const span = carry ? (prepared.spans.get(shape) ?? 1) : 1
+
+			if (span <= 1 || handle.playing?.() !== true) {
+				handle.command({ command: "stop" })
+
+				continue
+			}
+
+			const taken = stage.take(shape)
+
+			if (taken === undefined) continue
+
+			if (this.carryHost === undefined) {
+				this.carryHost = this.document.createElement("div")
+				this.carryHost.className = "fo-show-carried"
+				this.carryHost.style.cssText = "position:absolute;left:0;top:0;width:0;height:0;overflow:hidden;visibility:hidden"
+				this.host.appendChild(this.carryHost)
+			}
+
+			yieldFocus(taken.box)
+			this.carryHost.appendChild(taken.box)
+			prepared.taken = true
+			this.carried.push({ index: prepared.index, handle: taken.handle, box: taken.box, left: span - 1 })
+
+			if (this.carried.length > MAX_CARRIED) this.dropCarried(0)
+		}
+	}
+
+	// A slide shown: each carried medium has one slide fewer to play over; one whose own slide this is stops (the
+	// slide plays it again from its timing). Backward moves count as slides shown too.
+	private countCarried(prepared: Prepared): void {
+		for (let k = this.carried.length - 1; k >= 0; k--) {
+			const entry = this.carried[k]
+
+			if (entry === undefined) continue
+
+			entry.left--
+
+			if (entry.index === prepared.index || entry.left < 0) this.dropCarried(k)
+		}
+
+		// Its medium went to the carry host: placed on it again.
+		if (prepared.taken) {
+			prepared.taken = false
+			prepared.render = undefined
+			this.place(prepared)
+		}
+	}
+
+	private dropCarried(at: number): void {
+		const [entry] = this.carried.splice(at, 1)
+
+		if (entry === undefined) return
+
+		entry.handle.command({ command: "stop" })
+		entry.handle.release()
+		entry.box.remove()
 	}
 
 	// Takes the outgoing slide off the stage (kept prepared for a return).
 	private detach(from: Prepared | undefined, to: Prepared): void {
 		if (from === undefined || from === to) return
 
+		yieldFocus(from.stage.element)
 		from.stage.element.remove()
 		from.stage.element.style.cssText += ";transform:;opacity:;clip-path:"
 	}
@@ -841,6 +1122,7 @@ export class ShowPlayer implements ShowController {
 	private swap(playing: Playing, prepared: Prepared): void {
 		const old = playing.prepared
 
+		yieldFocus(old.stage.element)
 		this.host.replaceChild(prepared.stage.element, old.stage.element)
 		;(playing as { prepared: Prepared }).prepared = prepared
 		this.ready.delete(old.index)
@@ -984,7 +1266,9 @@ export class ShowPlayer implements ShowController {
 			),
 			render: undefined,
 			painted: undefined,
-			fallback
+			fallback,
+			spans: mediaSpans(source?.timing),
+			taken: false
 		}
 
 		this.place(prepared)
@@ -1015,6 +1299,7 @@ export class ShowPlayer implements ShowController {
 			})
 
 			prepared.painted = painted
+			yieldFocus(prepared.stage.element)
 			prepared.stage.element.replaceChildren(painted.root)
 		}
 
@@ -1269,7 +1554,7 @@ export class ShowPlayer implements ShowController {
 
 				if (this.playing !== playing || this.screenState !== "slide" || this.ended || this.disposed) return
 
-				if (this.idle(playing)) this.next()
+				if (this.idle(playing)) this.advanceStep()
 				else this.armAdvance(playing, PROBES_MS[0])
 			},
 			Math.max(after, at - now)
@@ -1374,6 +1659,11 @@ export class ShowPlayer implements ShowController {
 
 		this.blackout.style.opacity = String(styles.black)
 
+		if (this.overlay !== styles.overlay) {
+			this.overlay = styles.overlay
+			this.blackout.style.background = styles.overlay
+		}
+
 		return true
 	}
 
@@ -1395,12 +1685,18 @@ export class ShowPlayer implements ShowController {
 		style.zIndex = "1"
 		this.blackout.style.opacity = "0"
 
+		if (this.overlay !== "#000000") {
+			this.overlay = "#000000"
+			this.blackout.style.background = "#000000"
+		}
+
 		if (run.from !== undefined && run.from !== run.to) {
 			const from = run.from.stage.element.style
 
 			from.transform = ""
 			from.opacity = ""
 			from.zIndex = ""
+			yieldFocus(run.from.stage.element)
 			run.from.stage.element.remove()
 
 			if (!this.ready.has(run.from.index) || this.ready.get(run.from.index) !== run.from) this.releasePrepared(run.from)
@@ -1408,7 +1704,8 @@ export class ShowPlayer implements ShowController {
 
 		const playing = this.playing
 
-		if (playing?.prepared === run.to) this.begin(playing, now, false)
+		// Only a show without animation enters a slide at its end with a transition (show() played it through).
+		if (playing?.prepared === run.to) this.begin(playing, now, this.props.options.withoutAnimation === true)
 	}
 
 	private clearTransitionEnd(): void {
@@ -1421,14 +1718,30 @@ export class ShowPlayer implements ShowController {
 
 	// Input restarts a kiosk's inactivity timer; the slide's timed advance runs on (it counts from the slide's start).
 	private input(): void {
+		this.armRestart()
+	}
+
+	// A kiosk goes back to its first slide after its inactivity time (armed when the show starts, again on input and
+	// after each restart); one already on its first slide at its start stays as it is.
+	private armRestart(): void {
 		const restartMs = this.props.options.restartMs
 
-		if (restartMs === undefined) return
+		if (restartMs === undefined || this.ended || this.disposed) return
 		if (this.restart !== undefined) clearTimeout(this.restart)
 
 		this.restart = setTimeout(() => {
 			this.restart = undefined
-			void this.show(this.nav.first(), { transition: true })
+
+			if (this.ended || this.disposed) return
+
+			const first = this.nav.first()
+			const playing = this.playing
+			const atStart =
+				this.screenState === "slide" && this.run === undefined && playing?.prepared.index === first.index && playing.step === 0
+
+			if (!atStart) void this.show(first, { transition: true })
+
+			this.armRestart()
 		}, restartMs)
 	}
 
@@ -1457,7 +1770,9 @@ export class ShowPlayer implements ShowController {
 		this.sounding?.stop()
 		this.sounding = undefined
 
-		if (this.playing !== undefined) this.leave(this.playing)
+		if (this.playing !== undefined) this.leave(this.playing, false)
+
+		while (this.carried.length > 0) this.dropCarried(this.carried.length - 1)
 	}
 
 	dispose(): void {
@@ -1479,6 +1794,8 @@ export class ShowPlayer implements ShowController {
 		this.playing = undefined
 		this.run = undefined
 		this.blackout.remove()
+		this.carryHost?.remove()
+		this.carryHost = undefined
 	}
 
 	// The slide on stage and its step (tests and the presenter's mirror).

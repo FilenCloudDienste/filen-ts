@@ -2,11 +2,22 @@ import { useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type Poin
 import { EMU_PER_PX } from "../../../core/drawingml/reader"
 import { canZOrder, zOrderOp } from "../../../core/presentation/edit/commands/arrange"
 import { canGroup, groupOp, ungroupOps } from "../../../core/presentation/edit/commands/group"
-import { canMove, deleteOp, lineEnds, nudgeOp, type PlacedShape } from "../../../core/presentation/edit/commands/shape"
+import {
+	ROTATE_SNAP,
+	canMove,
+	deleteOp,
+	duplicateOp,
+	lineEnds,
+	nudgeOp,
+	steppedShapes,
+	turnedShapes,
+	xfrmsOp,
+	type PlacedShape
+} from "../../../core/presentation/edit/commands/shape"
 import type { DeckOp } from "../../../core/presentation/edit/ops"
-import type { ShapeRef, SlideRef, Xfrm } from "../../../core/presentation/model"
+import type { ShapeRef, SlideGrid, SlideRef, Xfrm } from "../../../core/presentation/model"
 import type { SlideRender } from "../../../core/presentation/output"
-import type { CommandResult } from "../../../dom/presentation/protocol"
+import type { CommandResult, PresentationSessionApi } from "../../../dom/presentation/protocol"
 import { snapThreshold, type Guide, type Spacing } from "./guides"
 import {
 	DRAG_START_PX,
@@ -25,7 +36,8 @@ import {
 	rotatePoint,
 	type DragModifiers,
 	type HandleHit,
-	type Point
+	type Point,
+	type ShapeDragOptions
 } from "./handles"
 import { Z_ORDER_OF, cycleTarget, objectKeyAction, type ObjectCommand, type ObjectKeyBindings } from "./keyboard"
 import {
@@ -40,6 +52,8 @@ import {
 	type ShapeSelection,
 	type SlideShape
 } from "./selection"
+import { formatShapesOp, type TextEditing } from "./text/editing"
+import { defaultTextBindings, formatKey, textKeyCommand, type TextKeyBindings } from "./text/keys"
 
 // The editor's layer over the slide (SlideView's overlay slot, the frame's size, screen px): the selection's frames
 // and handles, the marquee and the smart guides, and the pointer and keys that select, move, resize, turn and
@@ -60,6 +74,8 @@ export interface ShapeEditLayerProps {
 	readonly render: SlideRender | undefined
 	// The slide's size, EMU.
 	readonly size: { readonly cx: number; readonly cy: number }
+	// The grid drags snap to when its `snap` is set (OpenInfo's grid); absent: none.
+	readonly grid?: SlideGrid
 	// Screen px per slide px (SlideView's onScale).
 	readonly scale: number
 	readonly selection: ShapeSelection
@@ -68,8 +84,21 @@ export interface ShapeEditLayerProps {
 	readonly labels: ShapeEditLabels
 	readonly command: (op: DeckOp) => Promise<CommandResult>
 	// A double click or Enter on one shape: edit its text.
-	// `at`: where a double-click entered it (slide px), for the first caret; absent from the keyboard (Enter).
-	readonly onEnterText?: (shape: ShapeRef, at?: { readonly x: number; readonly y: number }) => void
+	// `at`: where a double-click entered it (slide px), for the first caret; absent from the keyboard (Enter, F2).
+	// `selectAll`: the body opens with its text selected (Enter, as PowerPoint's).
+	readonly onEnterText?: (
+		shape: ShapeRef,
+		at?: { readonly x: number; readonly y: number },
+		options?: { readonly selectAll?: boolean }
+	) => void
+	// The shapes' text without a body open: a character typed on a selected shape opens its body with that character
+	// (`editing` holds it, and what follows, until the body is ready), and the body's formatting keys (`bindings`,
+	// PowerPoint's by default) format the whole text of the selected shapes, seeded from `session`, as one op.
+	readonly text?: {
+		readonly editing: TextEditing
+		readonly session: Pick<PresentationSessionApi, "textSeed">
+		readonly bindings?: TextKeyBindings
+	}
 }
 
 // More selected shapes than this show their frames only (no handles): a marquee over a busy slide stays cheap.
@@ -78,6 +107,8 @@ export const HANDLES_LIMIT = 64
 // How far (screen px) the layer reaches past the slide on every side, so handles drawn outside it (a rotate handle
 // above a shape at the top edge, half of every edge handle) still take a press, with a finger too.
 export const HIT_MARGIN_PX = ROTATE_OFFSET_PX + 2 * HANDLE_GRAB_PX
+// Keys whose press or release during a drag changes it without the pointer moving (Ctrl copies, Shift constrains).
+const MODIFIER_KEYS: ReadonlySet<string> = new Set(["Shift", "Control", "Alt", "Meta"])
 
 const FRAME = "var(--fo-selection, #2563eb)"
 const GUIDE = "var(--fo-guide, #ec4899)"
@@ -90,6 +121,25 @@ interface Pending {
 	readonly before: readonly number[]
 	// A modifier press on a selected shape: it leaves the selection on release, unless the press became a drag.
 	readonly deselect?: number
+	// A plain press on a shape a click puts the caret in: its body opens on a release without a drag.
+	readonly enter?: number
+}
+
+// Whether a shape's text can be entered (a double-click, Enter): one with a body, not drawn as a line. A picture, a
+// group, a chart or a medium has none (PowerPoint opens its tab or its child instead, never an error).
+function holdsText(shape: SlideShape): boolean {
+	return shape.body !== undefined && shape.line !== true && shape.media === undefined
+}
+
+// A click puts the caret in a placeholder, a text box or a table's cell (PowerPoint); it only selects another shape.
+function clickEntersText(shape: SlideShape): boolean {
+	return holdsText(shape) && shape.body !== "shape"
+}
+
+// A shape with one body, which typing on it adds to and the formatting keys format whole while it is selected (a
+// table's cells take either only once one is entered).
+function oneBody(shape: SlideShape): boolean {
+	return holdsText(shape) && shape.body !== "table"
 }
 
 // A selected shape as the commands take it: the box the editor shows (an op's, until its render arrives), with the
@@ -193,7 +243,19 @@ function guidePath(guides: readonly Guide[], spacing: readonly Spacing[], scale:
 	return path
 }
 
-export function ShapeEditLayer({ render, size, scale, selection, editable, bindings, labels, command, onEnterText }: ShapeEditLayerProps) {
+export function ShapeEditLayer({
+	render,
+	size,
+	grid,
+	scale,
+	selection,
+	editable,
+	bindings,
+	labels,
+	command,
+	onEnterText,
+	text
+}: ShapeEditLayerProps) {
 	const state = useShapeSelection(selection)
 	const rootRef = useRef<HTMLDivElement | null>(null)
 	const outlineRef = useRef<SVGPathElement | null>(null)
@@ -213,6 +275,8 @@ export function ShapeEditLayer({ render, size, scale, selection, editable, bindi
 	const [expected, setExpected] = useState<ReadonlyMap<number, Xfrm> | undefined>(undefined)
 	const inflightRef = useRef(0)
 	const missesRef = useRef(0)
+	// The formatting keys' runs on selected shapes, one after another.
+	const formattingRef = useRef<Promise<void>>(Promise.resolve())
 	const shapes = slideShapes(render)
 	const slide: SlideRef | undefined = render?.ref
 	const selected = selectedShapes(render, state)
@@ -311,11 +375,12 @@ export function ShapeEditLayer({ render, size, scale, selection, editable, bindi
 		})
 	}, [render])
 
-	const run = async (op: DeckOp | undefined, boxes?: readonly PlacedShape[]): Promise<void> => {
+	// The op's result; undefined for no op.
+	const run = async (op: DeckOp | undefined, boxes?: readonly PlacedShape[]): Promise<CommandResult | undefined> => {
 		if (op === undefined) {
 			restorePreview()
 
-			return
+			return undefined
 		}
 
 		if (boxes !== undefined) {
@@ -343,6 +408,8 @@ export function ShapeEditLayer({ render, size, scale, selection, editable, bindi
 			restorePreview()
 			setExpected(undefined)
 		}
+
+		return result
 	}
 
 	// The layer reaches HIT_MARGIN_PX past the slide: points are measured from the slide's own corner.
@@ -360,9 +427,15 @@ export function ShapeEditLayer({ render, size, scale, selection, editable, bindi
 		readonly altKey: boolean
 	}): DragModifiers => ({
 		shift: event.shiftKey,
-		ctrl: isApple() ? event.altKey : event.ctrlKey,
+		// On a Mac, Option; a move also copies with Control (PowerPoint's Control+drag), which a press cannot start
+		// with (the secondary click) but may hold once the drag runs.
+		ctrl: isApple() ? event.altKey || (event.ctrlKey && dragRef.current?.kind === "move") : event.ctrlKey,
 		alt: isApple() ? event.metaKey : event.altKey
 	})
+
+	// What a drag snaps to besides the guides: the grid, when objects snap to it.
+	const snapOf = (others: readonly Bounds[]): NonNullable<ShapeDragOptions["snap"]> =>
+		grid?.snap === true ? { others, slide: size, grid } : { others, slide: size }
 
 	const startDrag = (hit: HandleHit, start: Point): void => {
 		if (slide === undefined) return
@@ -380,7 +453,7 @@ export function ShapeEditLayer({ render, size, scale, selection, editable, bindi
 			...(hit.kind === "resize" ? { handle: hit.handle } : {}),
 			...(hit.kind === "end" ? { end: hit.end } : {}),
 			start,
-			snap: { others, slide: size },
+			snap: snapOf(others),
 			threshold: snapThreshold(scale, EMU_PER_PX)
 		})
 	}
@@ -396,7 +469,10 @@ export function ShapeEditLayer({ render, size, scale, selection, editable, bindi
 		if (drag !== undefined) {
 			const moved = drag.move(frame.point, frame.modifiers)
 
-			preview(moved.shapes)
+			// A copying move keeps the originals painted where they are and draws the copies' boxes.
+			if (moved.copy === true) restorePreview()
+			else preview(moved.shapes)
+
 			drawFrames(moved.shapes, moved.guides, moved.spacing)
 
 			return
@@ -435,7 +511,8 @@ export function ShapeEditLayer({ render, size, scale, selection, editable, bindi
 			return
 		}
 
-		if (event.button !== 0 || slide === undefined) return
+		// Control+click on a Mac is the secondary click: the context menu's (onContextMenu), not an additive press.
+		if (event.button !== 0 || (event.ctrlKey && event.pointerType === "mouse" && isApple()) || slide === undefined) return
 
 		const root = rootRef.current
 
@@ -481,7 +558,27 @@ export function ShapeEditLayer({ render, size, scale, selection, editable, bindi
 		if (additive && deselect === undefined) selection.set([...state.ids, shape.id])
 		else if (!additive && !state.ids.includes(shape.id)) selection.set([shape.id])
 
-		pendingRef.current = { start: point, screen, kind: "move", additive, before, ...(deselect === undefined ? {} : { deselect }) }
+		// A plain click on a text placeholder, text box or table puts the caret there, unless it lands in a selection of
+		// several (it keeps that selection); a finger's first tap only selects (a second one enters).
+		const enter =
+			!additive &&
+			editable &&
+			onEnterText !== undefined &&
+			clickEntersText(shape) &&
+			!(before.length > 1 && before.includes(shape.id)) &&
+			(event.pointerType !== "touch" || before.includes(shape.id))
+				? shape.id
+				: undefined
+
+		pendingRef.current = {
+			start: point,
+			screen,
+			kind: "move",
+			additive,
+			before,
+			...(deselect === undefined ? {} : { deselect }),
+			...(enter === undefined ? {} : { enter })
+		}
 	}
 
 	const onPointerMove = (event: PointerEvent<HTMLDivElement>): void => {
@@ -553,37 +650,58 @@ export function ShapeEditLayer({ render, size, scale, selection, editable, bindi
 			slide,
 			shapes: now,
 			start,
-			snap: { others, slide: size },
+			snap: snapOf(others),
 			threshold: snapThreshold(scale, EMU_PER_PX)
 		})
+	}
+
+	// Ends the press or drag the layer follows (its pointer's capture, the frame waiting to be drawn, the guides, the
+	// marquee); what it was is the caller's to finish or drop.
+	const endPointer = (): void => {
+		const pointer = pointerRef.current
+		const root = rootRef.current
+
+		pointerRef.current = undefined
+		dragRef.current = undefined
+		pendingRef.current = undefined
+		frameRef.current = undefined
+
+		if (rafRef.current !== 0) cancelAnimationFrame(rafRef.current)
+
+		rafRef.current = 0
+		guidesRef.current?.setAttribute("d", "")
+
+		if (marqueeRef.current !== null) marqueeRef.current.style.display = "none"
+		if (pointer !== undefined && root?.hasPointerCapture(pointer) === true) root.releasePointerCapture(pointer)
+	}
+
+	// An op that makes shapes (group, ungroup, duplicate, a Ctrl+drag's copies) selects what it makes; refused, the
+	// request is withdrawn and the selection is what it was (unless something replaced the request meanwhile).
+	const runSelectingNew = (op: DeckOp | undefined): boolean => {
+		if (op === undefined || slide === undefined) return false
+
+		const withdraw = selection.selectNew(
+			slide,
+			shapes.map(shape => shape.id)
+		)
+
+		void run(op).then(result => {
+			if (result?.ok !== true) withdraw()
+		})
+
+		return true
 	}
 
 	const finish = (event: PointerEvent<HTMLDivElement>, cancelled: boolean): void => {
 		if (pointerRef.current !== event.pointerId) return
 
-		pointerRef.current = undefined
-
-		const root = rootRef.current
-
-		if (root?.hasPointerCapture(event.pointerId) === true) root.releasePointerCapture(event.pointerId)
-		if (rafRef.current !== 0) cancelAnimationFrame(rafRef.current)
-
-		rafRef.current = 0
-
 		const drag = dragRef.current
 		const pending = pendingRef.current
+		const last = frameRef.current
 
-		dragRef.current = undefined
-		pendingRef.current = undefined
-		guidesRef.current?.setAttribute("d", "")
-
-		if (marqueeRef.current !== null) marqueeRef.current.style.display = "none"
+		endPointer()
 
 		if (drag !== undefined) {
-			const last = frameRef.current
-
-			frameRef.current = undefined
-
 			if (cancelled || last === undefined) {
 				restorePreview()
 				drawFrames(placed, [], [])
@@ -593,15 +711,25 @@ export function ShapeEditLayer({ render, size, scale, selection, editable, bindi
 
 			const moved = drag.move(slidePoint(event), modifiersOf(event))
 
+			if (moved.copy === true) {
+				// The originals stay; the copies become the selection once the render shows them.
+				drawFrames(placed, [], [])
+				runSelectingNew(drag.end())
+
+				return
+			}
+
 			void run(drag.end(), moved.shapes)
 
 			return
 		}
 
-		frameRef.current = undefined
-
 		// A modifier click on a selected shape, released without a drag: it leaves the selection.
 		if (pending?.kind === "move" && pending.deselect !== undefined && !cancelled) selection.toggle(pending.deselect)
+
+		// A plain click on a text placeholder, text box or table, released without a drag: the caret goes where it landed.
+		if (pending?.kind === "move" && pending.enter !== undefined && !cancelled && slide !== undefined)
+			onEnterText?.({ slide, id: pending.enter }, { x: pending.start.x / EMU_PER_PX, y: pending.start.y / EMU_PER_PX })
 
 		if (pending?.kind === "marquee" && !cancelled) {
 			const end = slidePoint(event)
@@ -617,7 +745,7 @@ export function ShapeEditLayer({ render, size, scale, selection, editable, bindi
 		}
 	}
 
-	const objectCommand = (name: ObjectCommand): boolean => {
+	const objectCommand = (name: ObjectCommand | "duplicate"): boolean => {
 		if (slide === undefined) return false
 
 		const ids = placed.map(shape => shape.id)
@@ -630,31 +758,20 @@ export function ShapeEditLayer({ render, size, scale, selection, editable, bindi
 
 		if (!editable || ids.length === 0) return false
 
-		if (name === "group") {
-			if (!canGroup(selected)) return false
+		// Ungroup: every selected group in one op (one undo step).
+		if (name === "group") return canGroup(selected) && runSelectingNew(groupOp(slide, ids))
+		if (name === "ungroup") return runSelectingNew(ungroupOps(slide, selected)[0])
 
-			selection.selectNew(
-				slide,
-				shapes.map(shape => shape.id)
+		if (name === "duplicate") {
+			// The copies stack as the originals do (back to front) and become the selection.
+			const chosen = new Set(ids)
+
+			return runSelectingNew(
+				duplicateOp(
+					slide,
+					shapes.filter(shape => chosen.has(shape.id)).map(shape => shape.id)
+				)
 			)
-			void run(groupOp(slide, ids))
-
-			return true
-		}
-
-		if (name === "ungroup") {
-			// Every selected group in one op (one undo step).
-			const op = ungroupOps(slide, selected)[0]
-
-			if (op === undefined) return false
-
-			selection.selectNew(
-				slide,
-				shapes.map(shape => shape.id)
-			)
-			void run(op)
-
-			return true
 		}
 
 		const to = Z_ORDER_OF[name]
@@ -674,23 +791,64 @@ export function ShapeEditLayer({ render, size, scale, selection, editable, bindi
 		return true
 	}
 
+	// A body's formatting key (Mod+B, Mod+E…) on shapes selected as objects formats their whole text, as the ribbon
+	// does, in one op (one undo step). Presses in a row apply in order, each on what the one before made.
+	const formatSelection = (event: KeyboardEvent<HTMLDivElement>): boolean => {
+		if (text === undefined || !editable || slide === undefined) return false
+
+		const apple = isApple()
+		const key = textKeyCommand(event, text.bindings ?? defaultTextBindings(apple), apple)
+		const format = key === undefined ? undefined : formatKey(key)
+		const targets = selected.filter(oneBody).map(shape => ({ slide, id: shape.id }))
+
+		if (format === undefined || targets.length === 0) return false
+
+		const session = text.session
+
+		formattingRef.current = formattingRef.current.then(async () => {
+			const op = await formatShapesOp(session, targets, format)
+
+			if (op !== undefined) await run(op)
+		})
+
+		return true
+	}
+
+	// A modifier pressed or released during a drag: the frame waiting to be drawn takes it.
+	const dragModifierKey = (event: KeyboardEvent<HTMLDivElement>): boolean => {
+		const frame = frameRef.current
+
+		if (dragRef.current === undefined || frame === undefined || !MODIFIER_KEYS.has(event.key)) return false
+
+		frameRef.current = { ...frame, modifiers: modifiersOf(event) }
+		schedule()
+
+		return true
+	}
+
 	const onKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
-		if (slide === undefined) return
+		if (slide === undefined || dragModifierKey(event)) return
 
 		const action = objectKeyAction(event, bindings, isApple())
 
-		if (action === undefined) return
+		if (action === undefined) {
+			if (formatSelection(event)) event.preventDefault()
+
+			return
+		}
 
 		switch (action.kind) {
 			case "command":
 				if (objectCommand(action.command)) event.preventDefault()
 
 				return
+			case "duplicate":
+				if (objectCommand("duplicate")) event.preventDefault()
+
+				return
 			case "escape":
 				if (dragRef.current !== undefined || pendingRef.current !== undefined) {
-					dragRef.current = undefined
-					pendingRef.current = undefined
-					pointerRef.current = undefined
+					endPointer()
 					restorePreview()
 					drawFrames(placed, [], [])
 				} else if (state.ids.length > 0) {
@@ -717,12 +875,26 @@ export function ShapeEditLayer({ render, size, scale, selection, editable, bindi
 				return
 			}
 			case "enter": {
-				const only = placed.length === 1 ? placed[0] : undefined
+				const only = selected.length === 1 ? selected[0] : undefined
 
-				if (only === undefined || onEnterText === undefined || !editable) return
+				if (only === undefined || !holdsText(only) || onEnterText === undefined || !editable) return
 
-				onEnterText({ slide, id: only.id })
+				onEnterText({ slide, id: only.id }, undefined, action.selectAll ? { selectAll: true } : undefined)
 				event.preventDefault()
+
+				return
+			}
+			case "type": {
+				// The character opens the body (the caret at the end of its text, nothing replaced) and is typed there.
+				const only = selected.length === 1 ? selected[0] : undefined
+
+				if (only === undefined || !oneBody(only) || onEnterText === undefined || text === undefined || !editable) return
+				// An input method's key: its composition is typed once the body is open, never as this key.
+				if (event.nativeEvent.isComposing || event.keyCode === 229) return
+
+				event.preventDefault()
+				text.editing.expect({ typed: action.text })
+				onEnterText({ slide, id: only.id })
 
 				return
 			}
@@ -763,7 +935,47 @@ export function ShapeEditLayer({ render, size, scale, selection, editable, bindi
 
 				return
 			}
+			case "resize":
+			case "rotate": {
+				if (!editable || placed.length === 0) return
+
+				event.preventDefault()
+
+				const boxes =
+					action.kind === "resize"
+						? steppedShapes(placed, action.direction)
+						: turnedShapes(placed, action.clockwise ? ROTATE_SNAP : -ROTATE_SNAP)
+				const op = xfrmsOp(slide, placed, boxes)
+
+				if (op !== undefined) void run(op, boxes)
+
+				return
+			}
 		}
+	}
+
+	// A secondary click selects what the menu will act on, as PowerPoint: a shape outside the selection becomes the
+	// selection, one inside it (or a handle of it) keeps it, empty slide clears it. The menu itself is the host's.
+	const onContextMenu = (event: { readonly clientX: number; readonly clientY: number }): void => {
+		if (slide === undefined || dragRef.current !== undefined) return
+
+		const point = slidePoint(event)
+		const shape = shapeAt(shapes, point, HANDLE_GRAB_PX * emuPerScreenPx * 0.5)
+
+		const ids = selection.getSnapshot().ids
+
+		if (shape !== undefined) {
+			if (!ids.includes(shape.id)) selection.set([shape.id])
+
+			return
+		}
+
+		const onHandle =
+			editable &&
+			placed.length <= HANDLES_LIMIT &&
+			handleAt(placed, point, HANDLE_GRAB_PX * emuPerScreenPx, ROTATE_OFFSET_PX * emuPerScreenPx, emuPerScreenPx) !== undefined
+
+		if (!onHandle && ids.length > 0) selection.clear()
 	}
 
 	const onDoubleClick = (event: { readonly clientX: number; readonly clientY: number }): void => {
@@ -772,7 +984,8 @@ export function ShapeEditLayer({ render, size, scale, selection, editable, bindi
 		const point = slidePoint(event)
 		const shape = shapeAt(shapes, point, HANDLE_GRAB_PX * emuPerScreenPx * 0.5)
 
-		if (shape !== undefined) onEnterText({ slide, id: shape.id }, { x: point.x / EMU_PER_PX, y: point.y / EMU_PER_PX })
+		if (shape !== undefined && holdsText(shape))
+			onEnterText({ slide, id: shape.id }, { x: point.x / EMU_PER_PX, y: point.y / EMU_PER_PX })
 	}
 
 	const paths = framePaths(placed, scale, editable && placed.length <= HANDLES_LIMIT)
@@ -801,6 +1014,10 @@ export function ShapeEditLayer({ render, size, scale, selection, editable, bindi
 				if (dragRef.current !== undefined || pendingRef.current !== undefined) finish(event, true)
 			}}
 			onKeyDown={onKeyDown}
+			onKeyUp={event => {
+				dragModifierKey(event)
+			}}
+			onContextMenu={onContextMenu}
 			onDoubleClick={onDoubleClick}
 		>
 			<svg

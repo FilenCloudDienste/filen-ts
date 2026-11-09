@@ -24,8 +24,20 @@ export interface ShowMediaHandle {
 	command(command: NonNullable<LayerState["media"]>): void
 	// A click on the media shape no trigger took.
 	click(): void
+	// Playing (or asked to play and still loading).
+	playing?(): boolean
+	// The show's media keys (PowerPoint's Alt chords) on this medium.
+	control?(control: ShowMediaControl): void
 	release(): void
 }
+
+// Seeks by `ms` within the part that plays, changes the volume by `by` (0..1), toggles mute, or goes to the next (1)
+// or previous (-1) bookmark.
+export type ShowMediaControl =
+	| { readonly kind: "seekBy"; readonly ms: number }
+	| { readonly kind: "volumeBy"; readonly by: number }
+	| { readonly kind: "mute" }
+	| { readonly kind: "bookmark"; readonly direction: 1 | -1 }
 
 export interface ShowMediaMount {
 	// Once per media layer of a slide on stage, `box` an element over the layer (slide px, scaled by the stage).
@@ -61,6 +73,10 @@ export interface StageSlide {
 	readonly bytes: number
 	// The media of the slide by shape id (mounted with the targets).
 	readonly media: ReadonlyMap<number, ShowMediaHandle>
+	// The box each medium's element is in, by shape id.
+	readonly mediaBoxes: ReadonlyMap<number, HTMLElement>
+	// Takes a medium off the slide (its box with it): the slide no longer moves, releases or removes it.
+	take(shape: number): { readonly handle: ShowMediaHandle; readonly box: HTMLElement } | undefined
 	// Places the click targets of a render (again: the previous ones are removed).
 	targets(render: SlideRender, owner: (layer: SlideLayer) => number, triggers: ReadonlySet<number>, targets: StageTargets): void
 	// The layers whose colours or text style animate, painted again as DOM (the SVG compositor's) for the frames that
@@ -79,6 +95,33 @@ export interface StageSlide {
 
 // 1 px, not 0: WebKit drops the opacity of a composited element with no area (its children's included).
 const LAYER_STYLE = "position:absolute;left:0;top:0;width:1px;height:1px;transform-origin:0 0"
+const AS_DRAWN = layerCss(undefined, { x: 0, y: 0, w: 0, h: 0 })
+
+// A press on a hotspot leaves focus where it is (the stage, whose keys go on with the show): a focused button would
+// take Enter and Space as its own click.
+function keepFocus(event: MouseEvent): void {
+	event.preventDefault()
+}
+
+// Before `node` leaves the stage: focus inside it (a hotspot reached with Tab) moves to the stage that owns the keys,
+// else it would fall to the body, where no key reaches the show.
+export function yieldFocus(node: Element): void {
+	const active = node.ownerDocument.activeElement
+
+	if (active === null || !node.contains(active)) return
+
+	node.parentElement?.closest<HTMLElement>("[tabindex]")?.focus({ preventScroll: true })
+}
+
+function hotspot(document: Document): HTMLButtonElement {
+	const button = document.createElement("button")
+
+	button.type = "button"
+	button.className = "fo-slide-hotspot"
+	button.addEventListener("mousedown", keepFocus)
+
+	return button
+}
 
 function layerElement(document: Document, layer: number): HTMLDivElement {
 	const element = document.createElement("div")
@@ -210,6 +253,8 @@ export function buildStageSlide(
 	build(tree, element)
 
 	const applied = new Map<HTMLElement, LayerCss>()
+	// Per layer, its state in the frame apply() is on (cleared as it ends).
+	const sampled: (LayerState | undefined)[] = Array.from({ length: layerCount }, () => undefined)
 	// Per layer without a DOM paint (a by-letter or by-word run: its glyphs only) whose text colour animates: its
 	// bitmaps with a tinted copy over each, and the colour on them ("" as drawn).
 	const tints = new Map<number, { key: string; readonly pairs: [HTMLCanvasElement, HTMLCanvasElement | undefined][] }>()
@@ -278,13 +323,19 @@ export function buildStageSlide(
 	const doms = new Map<number, { readonly painted: PaintedSlide; readonly element: HTMLElement; readonly base: number; key: string }>()
 	let placed: HTMLElement[] = []
 	let media = new Map<number, ShowMediaHandle>()
+	let mediaBoxes = new Map<number, HTMLElement>()
 
 	const removeTargets = (): void => {
-		for (const target of placed) target.remove()
+		for (const target of placed) {
+			yieldFocus(target)
+			target.remove()
+		}
+
 		for (const handle of media.values()) handle.release()
 
 		placed = []
 		media = new Map()
+		mediaBoxes = new Map()
 	}
 
 	return {
@@ -293,6 +344,21 @@ export function buildStageSlide(
 		bytes,
 		get media() {
 			return media
+		},
+		get mediaBoxes() {
+			return mediaBoxes
+		},
+		take(shape) {
+			const handle = media.get(shape)
+			const box = mediaBoxes.get(shape)
+
+			if (handle === undefined || box === undefined) return undefined
+
+			media.delete(shape)
+			mediaBoxes.delete(shape)
+			placed = placed.filter(target => target !== box)
+
+			return { handle, box }
 		},
 		targets(render, owner, triggers, targets) {
 			removeTargets()
@@ -307,10 +373,8 @@ export function buildStageSlide(
 				const medium = own && "media" in layer && layer.media !== undefined
 
 				if (!medium && (action !== undefined || (own && (triggers.has(layer.shape.id) || triggers.has(shape))))) {
-					const button = document.createElement("button")
+					const button = hotspot(document)
 
-					button.type = "button"
-					button.className = "fo-slide-hotspot"
 					button.style.width = `${String(layer.drawing.width)}px`
 					button.style.height = `${String(layer.drawing.height)}px`
 					button.style.transform = matrixCss(layer.matrix)
@@ -351,10 +415,8 @@ export function buildStageSlide(
 
 						if (target === undefined) continue
 
-						const button = document.createElement("button")
+						const button = hotspot(document)
 
-						button.type = "button"
-						button.className = "fo-slide-hotspot"
 						button.dataset["foLink"] = String(box.link)
 						button.style.left = `${String(box.x)}px`
 						button.style.top = `${String(box.y)}px`
@@ -375,10 +437,14 @@ export function buildStageSlide(
 				if (medium && targets.media !== undefined && !media.has(layer.shape.id)) {
 					const box = document.createElement("div")
 					const id = layer.shape.id
-					const handle = targets.media.mount(box, layer, targets.session, targets.mediaEvents(id))
 
 					box.className = "fo-show-media"
 					box.style.cssText = `${LAYER_STYLE};width:${String(layer.drawing.width)}px;height:${String(layer.drawing.height)}px;transform:${matrixCss(layer.matrix)}`
+					// Placed before the mount, which may style it and find its poster beside it.
+					host.appendChild(box)
+
+					const handle = targets.media.mount(box, layer, targets.session, targets.mediaEvents(id))
+
 					// A click on a medium never advances the slide: it is the medium's trigger, else plays or pauses it.
 					box.addEventListener("click", event => {
 						event.stopPropagation()
@@ -386,9 +452,9 @@ export function buildStageSlide(
 						if (triggers.has(id) || triggers.has(shape)) targets.trigger(triggers.has(id) ? id : shape)
 						else handle.click()
 					})
-					host.appendChild(box)
 					placed.push(box)
 					media.set(id, handle)
+					mediaBoxes.set(id, box)
 				}
 			}
 		},
@@ -433,23 +499,17 @@ export function buildStageSlide(
 			}
 		},
 		apply(states, boxes) {
-			const seen = new Set<number>()
+			// The frame's states indexed by layer (the first of a layer's), so each lookup below is O(1).
+			for (const state of states) if (state.layer >= 0 && state.layer < layerCount) sampled[state.layer] ??= state
 
-			for (const [index, dom] of doms) {
-				const state = states.find(candidate => candidate.layer === index)
-
-				domState(dom, state, byLayer[index]?.[0])
-			}
+			for (const [index, dom] of doms) domState(dom, sampled[index], byLayer[index]?.[0])
 
 			for (const state of states)
 				if (state.dom?.textColor !== undefined && !doms.has(state.layer)) tint(state.layer, state.dom.textColor)
 
-			for (const index of tints.keys())
-				if (!states.some(state => state.layer === index && state.dom?.textColor !== undefined)) tint(index, undefined)
+			for (const index of tints.keys()) if (sampled[index]?.dom?.textColor === undefined) tint(index, undefined)
 
 			for (const state of states) {
-				seen.add(state.layer)
-
 				const css = layerCss(state, {
 					x: boxes[state.layer * 4] ?? 0,
 					y: boxes[state.layer * 4 + 1] ?? 0,
@@ -464,20 +524,20 @@ export function buildStageSlide(
 			}
 
 			// Layers no behaviour addresses at this time are as drawn.
-			byLayer.forEach((targets, layer) => {
-				if (seen.has(layer)) return
+			for (let layer = 0; layer < layerCount; layer++) {
+				if (sampled[layer] !== undefined) continue
 
-				const css = layerCss(undefined, { x: 0, y: 0, w: 0, h: 0 })
-
-				for (const target of targets) {
+				for (const target of byLayer[layer] ?? []) {
 					const previous = applied.get(target)
 
 					if (previous === undefined) continue
 
-					setCss(target, previous, css)
+					setCss(target, previous, AS_DRAWN)
 					applied.delete(target)
 				}
-			})
+			}
+
+			for (const state of states) if (state.layer >= 0 && state.layer < layerCount) sampled[state.layer] = undefined
 		},
 		release() {
 			removeTargets()
@@ -492,6 +552,7 @@ export function buildStageSlide(
 				canvas.height = 0
 			}
 
+			yieldFocus(element)
 			element.remove()
 		}
 	}

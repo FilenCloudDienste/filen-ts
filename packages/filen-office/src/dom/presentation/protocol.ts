@@ -12,6 +12,7 @@ import type {
 	Section,
 	ShapeRef,
 	ShowSettings,
+	SlideGrid,
 	SlideRef,
 	TextBody
 } from "../../core/presentation/model"
@@ -92,6 +93,8 @@ export interface OpenInfo {
 	readonly source: "bytes" | "range"
 	// The deck's slide show settings (p:showPr, presentation:settings) as the file has them.
 	readonly show?: ShowSettings
+	// The grid shapes snap to while dragged (the file's, else PowerPoint's default).
+	readonly grid?: SlideGrid
 	// The deck's masters as the Design tab shows them (the file's own themes).
 	readonly design?: PresentationDesignInfo
 }

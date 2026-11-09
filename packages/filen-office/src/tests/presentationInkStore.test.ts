@@ -56,6 +56,26 @@ describe("ink store", () => {
 		expect(ink.getSnapshot().color).toBe("0070C0")
 	})
 
+	it("starts the pen in the show's pen colour and resets to it, the highlighter staying yellow", () => {
+		const ink = createInkStore()
+
+		ink.setDefaultPen("0070C0")
+		expect(ink.getSnapshot().color).toBe("0070C0")
+		ink.setTool("pen")
+		ink.begin(one, 1, 2)
+		ink.end()
+		expect(ink.strokes(one)[0]?.color).toBe("0070C0")
+		ink.setTool("highlighter")
+		expect(ink.getSnapshot().color).toBe(INK_HIGHLIGHTER_COLOR)
+		ink.setTool("pen")
+		ink.setColor("00B050")
+		ink.reset()
+		expect(ink.getSnapshot()).toEqual({ tool: "none", color: "0070C0", inked: false })
+		ink.setTool("highlighter")
+		ink.setTool("pen")
+		expect(ink.getSnapshot().color).toBe("0070C0")
+	})
+
 	it("erases the topmost stroke under the eraser and clears a slide", () => {
 		const ink = createInkStore()
 		const redraws: InkChange[] = []

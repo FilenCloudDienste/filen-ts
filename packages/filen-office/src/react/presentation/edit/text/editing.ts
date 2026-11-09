@@ -1,12 +1,13 @@
 import { useSyncExternalStore } from "react"
 import { EditorState } from "prosemirror-state"
+import { oneStep } from "../../../../core/presentation/edit/commands/batch"
 import { selectAllIn, type TextCommand } from "../../../../core/presentation/edit/commands/text"
 import type { DeckOp } from "../../../../core/presentation/edit/ops"
 import type { CommandResult, PresentationSessionApi } from "../../../../dom/presentation/protocol"
 import { PresentationError, type ShapeRef } from "../../../../core/presentation/model"
 import { bodyToDoc, docToBody, presentationTextSchema } from "../../../../core/presentation/text/schema"
 import { defaultsOf, type TextEditController } from "./controller"
-import { DEFAULT_TEXT_BINDINGS, textKeyCommand, type TextKeyBindings, type TextKeyCommand } from "./keys"
+import { defaultTextBindings, textKeyCommand, type TextKeyBindings, type TextKeyCommand } from "./keys"
 
 // The text editing of one open deck, for the ribbon and the find field: the controller of the body being edited (if
 // any). One store per deck; the editor view registers its controller while it is mounted.
@@ -37,10 +38,12 @@ export interface TextEditing {
 	// page around it (a click that focuses no button, as Safari's): focus on that page itself still holds, focus moved
 	// into any other control drops. A shortcut goes to the page and the holding goes on; only focus that really moves
 	// ends it and keeps the editor from taking focus. `keys`: the body's key bindings, so its formatting keys (Mod+B…) are held too and applied in order.
+	// `typed`: what the key that asked for the open typed (a character on a shape selected as an object), held first.
 	expect(options?: {
 		readonly onCancel?: () => void
 		readonly anchor?: Element | null
 		readonly keys?: { readonly bindings?: TextKeyBindings; readonly apple?: boolean }
+		readonly typed?: string
 	}): void
 	take(): TypedAhead[] & { readonly focusMoved: boolean }
 	drop(): void
@@ -143,11 +146,7 @@ export function createTextEditing(): TextEditing {
 
 		event.preventDefault()
 		event.stopImmediatePropagation()
-
-		const last = held[held.length - 1]
-
-		if (key.kind === "text" && last?.kind === "text") held[held.length - 1] = { kind: "text", text: last.text + key.text }
-		else held.push(key)
+		push(key)
 	}
 	// Focus that goes anywhere else (the find field, a ribbon tab, a dialog, a menu) drops what was held: those keys
 	// were the user's for that control, and nothing more is held.
@@ -161,6 +160,14 @@ export function createTextEditing(): TextEditing {
 		version++
 
 		for (const listener of listeners) listener()
+	}
+	const push = (key: TypedAhead): void => {
+		if (held === undefined) return
+
+		const last = held[held.length - 1]
+
+		if (key.kind === "text" && last?.kind === "text") held[held.length - 1] = { kind: "text", text: last.text + key.text }
+		else held.push(key)
 	}
 	const release = (): TypedAhead[] => {
 		const out = held ?? []
@@ -209,9 +216,16 @@ export function createTextEditing(): TextEditing {
 			// Focus went elsewhere while this body opened: it holds nothing more until it is taken or given up.
 			if (held === undefined && focusMoved) return
 			if (options?.onCancel !== undefined) cancel = options.onCancel
-			if (options?.keys !== undefined)
-				keys = { bindings: options.keys.bindings ?? DEFAULT_TEXT_BINDINGS, apple: options.keys.apple ?? applePlatform() }
-			if (held !== undefined) return
+			if (options?.keys !== undefined) {
+				const apple = options.keys.apple ?? applePlatform()
+
+				keys = { bindings: options.keys.bindings ?? defaultTextBindings(apple), apple }
+			}
+			if (held !== undefined) {
+				if (options?.typed !== undefined) push({ kind: "text", text: options.typed })
+
+				return
+			}
 
 			const focused = doc()?.activeElement ?? null
 			const anchor = options?.anchor ?? null
@@ -229,7 +243,7 @@ export function createTextEditing(): TextEditing {
 				return
 			}
 
-			held = []
+			held = options?.typed === undefined ? [] : [{ kind: "text", text: options.typed }]
 
 			// Focus on the page around the anchor (or nowhere): the anchor is where keys are held for.
 			if (anchor !== null && (focused === null || focused === anchor || focused.contains(anchor))) {
@@ -297,19 +311,9 @@ export async function formatShapes(
 		let result: CommandResult | undefined
 
 		try {
-			const seed = await session.textSeed(shape)
-			const { doc, origins } = bodyToDoc(seed.body)
-			const state = selectAllIn(EditorState.create({ doc, schema: presentationTextSchema }))
-			let next = state
+			const op = await formattedText(session, shape, command)
 
-			command(defaultsOf(seed))(state, tr => {
-				next = state.apply(tr)
-			})
-
-			result =
-				next.doc === state.doc
-					? undefined
-					: await send({ family: "text", kind: "setText", target: shape, body: docToBody(next.doc, seed.body, origins) })
+			result = op === undefined ? undefined : await send(op)
 		} catch (error) {
 			result = { ok: false, refusal: error instanceof PresentationError ? error.reason : "failed" }
 		}
@@ -318,4 +322,46 @@ export async function formatShapes(
 	}
 
 	return results
+}
+
+// The setText of `shape`'s whole body formatted by `command`; undefined when the command changes nothing there.
+async function formattedText(
+	session: Pick<PresentationSessionApi, "textSeed">,
+	shape: ShapeRef,
+	command: (defaults: ReturnType<typeof defaultsOf>) => TextCommand | undefined
+): Promise<DeckOp | undefined> {
+	const seed = await session.textSeed(shape)
+	const made = command(defaultsOf(seed))
+
+	if (made === undefined) return undefined
+
+	const { doc, origins } = bodyToDoc(seed.body)
+	const state = selectAllIn(EditorState.create({ doc, schema: presentationTextSchema }))
+	let next = state
+
+	made(state, tr => {
+		next = state.apply(tr)
+	})
+
+	return next.doc === state.doc
+		? undefined
+		: { family: "text", kind: "setText", target: shape, body: docToBody(next.doc, seed.body, origins) }
+}
+
+// The same over shapes selected as objects (a formatting key on the canvas), as one op: one undo step for them all.
+// A shape whose body cannot be read is left out.
+export async function formatShapesOp(
+	session: Pick<PresentationSessionApi, "textSeed">,
+	shapes: readonly ShapeRef[],
+	command: (defaults: ReturnType<typeof defaultsOf>) => TextCommand | undefined
+): Promise<DeckOp | undefined> {
+	const ops: DeckOp[] = []
+
+	for (const shape of shapes) {
+		const op = await formattedText(session, shape, command).catch(() => undefined)
+
+		if (op !== undefined) ops.push(op)
+	}
+
+	return oneStep(ops)[0]
 }

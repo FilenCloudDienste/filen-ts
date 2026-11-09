@@ -152,6 +152,32 @@ describe("presentation text commands", () => {
 		expect(changeLevel(-1)(state(BODY, 1))).toBe(false)
 	})
 
+	it("a paragraph already at the level limit keeps its pPr when the rest of a mixed selection moves", () => {
+		const bulleted: TextBody = {
+			bodyPr: {},
+			paragraphs: [
+				{ pPr: { bullet: DEFAULT_BULLET, marL: 342_900, indent: -342_900 }, runs: [{ kind: "r", text: "Top", rPr: {} }] },
+				{ pPr: { lvl: 1 }, runs: [{ kind: "r", text: "Sub", rPr: {} }] }
+			]
+		}
+		const up = body(run(changeLevel(-1), state(bulleted, 1, 9)), bulleted)
+
+		expect(up.paragraphs[0]?.pPr).toEqual({ bullet: DEFAULT_BULLET, marL: 342_900, indent: -342_900 })
+		expect(up.paragraphs[1]?.pPr).toEqual({})
+
+		const deep: TextBody = {
+			bodyPr: {},
+			paragraphs: [
+				{ pPr: { lvl: 8, marL: 3_657_600, indent: -342_900 }, runs: [{ kind: "r", text: "Deep", rPr: {} }] },
+				{ pPr: { lvl: 2, marL: 914_400 }, runs: [{ kind: "r", text: "Mid", rPr: {} }] }
+			]
+		}
+		const down = body(run(changeLevel(1), state(deep, 1, 10)), deep)
+
+		expect(down.paragraphs[0]?.pPr).toEqual({ lvl: 8, marL: 3_657_600, indent: -342_900 })
+		expect(down.paragraphs[1]?.pPr).toEqual({ lvl: 3, marL: 1_371_600 })
+	})
+
 	it("Shift+Enter puts a line break with the caret's properties", () => {
 		const broken = run(insertLineBreak, state(BODY, 6))
 

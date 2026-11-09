@@ -549,6 +549,8 @@ export function SlideView({
 			className={className === undefined ? "fo-slide-view" : `fo-slide-view ${className}`}
 			data-fo-slide-view=""
 			data-fo-mode={mode}
+			// A zoom outside a show may outgrow the element: it scrolls instead of clipping.
+			data-fo-zoomed={zoom === undefined || mode === "show" ? undefined : ""}
 		>
 			<div
 				className="fo-slide-frame"

@@ -31,17 +31,27 @@ export class RenderReport {
 export const FLAT: readonly string[] = ["scene3d", "sp3d"]
 
 // The effects of a resolved element's spPr (its own, else its style's effect reference) beyond the first outer
-// shadow, which the drawing itself carries.
+// shadow, which the drawing itself carries; with `carried` false (the drawing drew no fill or line to carry it) that
+// shadow too. A group's effects (grpSpPr, §20.1.2.2.22; no style) are all drawn around the group: its drawing carries
+// none of them, its children's shadows being their own.
 export function layerEffects(
 	context: PaintContext,
 	reader: DrawingReader,
 	element: number,
-	report: RenderReport
+	report: RenderReport,
+	carried: boolean = true
 ): RenderEffects | undefined {
-	const spPr = reader.child(element, D.P, "spPr")
-	const style = reader.child(element, D.P, "style")
-	const ref = styleRef(context, reader, reader.child(style, D.A, "effectRef"), "effect")
-	const read = shapeEffects(context, reader, spPr, ref)
+	const group = reader.local(element) === "grpSp"
+	const read = group
+		? shapeEffects(context, reader, reader.child(element, D.P, "grpSpPr"), undefined)
+		: shapeEffects(
+				context,
+				reader,
+				reader.child(element, D.P, "spPr"),
+				styleRef(context, reader, reader.child(reader.child(element, D.P, "style"), D.A, "effectRef"), "effect")
+			)
+
+	const skipFirstShadow = carried && !group
 
 	for (const name of read.approximated) report.approximate(name)
 	if (read.repeated > 0) report.approximate("effectLst:repeated", read.repeated)
@@ -50,7 +60,7 @@ export function layerEffects(
 	const out: ShapeEffect[] = []
 
 	read.effects.forEach((effect, k) => {
-		if (read.sources[k] === "outerShdw" && !shadowSeen) shadowSeen = true
+		if (skipFirstShadow && read.sources[k] === "outerShdw" && !shadowSeen) shadowSeen = true
 		else out.push(effect)
 	})
 

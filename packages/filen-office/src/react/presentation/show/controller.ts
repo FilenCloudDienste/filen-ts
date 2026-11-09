@@ -5,7 +5,8 @@ import { refused, type Refused, type SlideRef } from "../../../core/presentation
 // controller), and the presenter's window. The player (show/stage) implements the controller; the presenter view
 // listens to it in its portal.
 
-export type ShowScreen = "slide" | "black" | "white"
+// "end": the black screen after the last slide ("End of slide show, click to exit."); the next advance ends the show.
+export type ShowScreen = "slide" | "black" | "white" | "end"
 
 export type ShowEvent =
 	// The slide on stage and its main-sequence step (0 before the first click).
@@ -39,6 +40,8 @@ export interface ShowController {
 	// The first and last slide of the running sequence (custom show or visible slides).
 	first?(): void
 	last?(): void
+	// The slide right after the current one in the deck, only when it is hidden (PowerPoint's H); else nothing.
+	nextHidden?(): void
 	// Black or white screen; again the same one returns to the slide.
 	black(): void
 	white(): void

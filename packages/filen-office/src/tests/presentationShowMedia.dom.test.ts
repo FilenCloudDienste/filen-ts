@@ -480,3 +480,107 @@ describe("show media: a pause while a seek is in flight", () => {
 		expect(HTMLMediaElement.prototype.pause).toHaveBeenCalledOnce()
 	})
 })
+
+// PowerPoint's Video Playback options in the show: Hide While Not Playing (showWhenStopped="0") hides the poster and the
+// box until the medium plays; Play Full Screen (fullScrn) puts the playing video over the whole slide.
+describe("show media: hide while not playing and play full screen", () => {
+	const streams: ShowMediaStreams = { url: () => Promise.resolve({ kind: "url", url: "blob:media", release: () => undefined }) }
+
+	// The stage's nesting: the slide box, the medium's layer element with its poster bitmap, and the box beside it.
+	function stage(playback: SlideMediaInfo["playback"]) {
+		const slide = document.createElement("div")
+		const host = document.createElement("div")
+		const poster = document.createElement("canvas")
+		const box = document.createElement("div")
+
+		slide.dataset["foShowSlide"] = ""
+		poster.className = "fo-show-bitmap"
+		poster.dataset["foShowShape"] = "4"
+		host.append(poster, box)
+		slide.append(host)
+		document.body.append(slide)
+
+		return { slide, poster, box, layer: { ...LAYER, media: { ...MEDIA, playback } } as unknown as SlideLayer }
+	}
+
+	it("hides the poster and box while stopped in the show, showing them while it plays", async () => {
+		const play = vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined)
+		const { slide, poster, box, layer } = stage({ hideWhenStopped: true })
+		const handle = showMediaMount(streams, { labels: LABELS, hoverControls: true }).mount(box, layer, SESSION, EVENTS)
+
+		expect(box.style.visibility).toBe("hidden")
+		expect(poster.style.opacity).toBe("0")
+
+		handle.command({ command: "play" })
+		await flush()
+
+		const video = box.querySelector("video")
+
+		video?.dispatchEvent(new Event("play"))
+
+		expect(box.style.visibility).toBe("")
+		expect(poster.style.opacity).toBe("")
+
+		video?.dispatchEvent(new Event("pause"))
+
+		expect(box.style.visibility).toBe("hidden")
+		expect(poster.style.opacity).toBe("0")
+
+		handle.release()
+		slide.remove()
+		play.mockRestore()
+	})
+
+	it("leaves the poster shown on the editor's canvas and when the option is off", () => {
+		const editor = stage({ hideWhenStopped: true })
+		const off = stage({})
+
+		showMediaMount(streams, { labels: LABELS, hoverControls: false }).mount(editor.box, editor.layer, SESSION, EVENTS).release()
+		showMediaMount(streams, { labels: LABELS, hoverControls: true }).mount(off.box, off.layer, SESSION, EVENTS).release()
+
+		expect([editor.box.style.visibility, editor.poster.style.opacity, off.box.style.visibility, off.poster.style.opacity]).toEqual([
+			"",
+			"",
+			"",
+			""
+		])
+
+		editor.slide.remove()
+		off.slide.remove()
+	})
+
+	it("plays a full screen video over the whole slide on black, back in its box once paused", async () => {
+		const play = vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined)
+		const { slide, box, layer } = stage({ fullScreen: true })
+		const handle = showMediaMount(streams, { labels: LABELS, hoverControls: true }).mount(box, layer, SESSION, EVENTS)
+
+		handle.command({ command: "play" })
+		await flush()
+
+		const video = box.querySelector("video")
+
+		expect(video).not.toBeNull()
+
+		video?.dispatchEvent(new Event("play"))
+
+		expect(video?.parentElement).toBe(slide)
+		expect(video?.style.background).toBe("#000")
+
+		// A press on the picture over the slide still pauses it and never reaches the slide's advance.
+		const advance = vi.fn()
+
+		slide.addEventListener("click", advance)
+		video?.dispatchEvent(new MouseEvent("click", { bubbles: true, clientY: -1000 }))
+
+		expect(advance).not.toHaveBeenCalled()
+
+		video?.dispatchEvent(new Event("pause"))
+
+		expect(video?.parentElement).toBe(box)
+		expect(video?.style.background).toBe("transparent")
+
+		handle.release()
+		slide.remove()
+		play.mockRestore()
+	})
+})

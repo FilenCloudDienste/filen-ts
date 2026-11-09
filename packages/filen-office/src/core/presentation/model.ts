@@ -115,6 +115,8 @@ export interface Deck {
 	sections: Section[]
 	customShows: CustomShow[]
 	show: ShowSettings
+	// The slide view's grid as the file has it (pptx viewProps); absent: DEFAULT_SLIDE_GRID.
+	grid?: SlideGrid
 	defaultTextStyle: ListStyle
 	embeddedFonts: EmbeddedFontRef[]
 	protection: { modifyVerifier?: ModifyVerifier; encrypted?: EncryptionInfoSummary }
@@ -159,6 +161,8 @@ export interface SlideNode {
 	layoutType?: string
 	txStyles?: { title: ListStyle; body: ListStyle; other: ListStyle }
 	hf?: HeaderFooterFlags
+	// ODP: the page's own header and footer settings (ODF has no deck-level ones).
+	odpHeaderFooter?: OdpHeaderFooter
 	// In z-order, back to front.
 	shapes: ShapeNode[]
 	timing?: TimingTree
@@ -565,7 +569,8 @@ export interface TableModel {
 	rows: TableRow[]
 	// a:tableStyleId.
 	styleId?: string
-	flags: { firstRow: boolean; lastRow: boolean; firstCol: boolean; lastCol: boolean; bandRow: boolean; bandCol: boolean }
+	// The style options, and a:tblPr@rtl (present only when set): the first grid column on the right.
+	flags: { firstRow: boolean; lastRow: boolean; firstCol: boolean; lastCol: boolean; bandRow: boolean; bandCol: boolean; rtl?: true }
 	src?: SourceRef
 }
 
@@ -609,7 +614,11 @@ export interface MediaRef {
 	timing?: MediaTiming
 }
 
-export type Action =
+// `color: "tx"`: a run hyperlink drawn in the run's own text colour, not the theme's hlink (ahyp:hlinkClr val="tx",
+// [MS-ODRAWXML] 2.35.3.1); absent: the theme's hlink.
+export type Action = ActionTarget & { readonly color?: "tx" }
+
+type ActionTarget =
 	| { readonly kind: "internal"; readonly jump: "next" | "previous" | "first" | "last" | "end" | "lastViewed" }
 	| { readonly kind: "slide"; readonly slide: SlideRef }
 	| { readonly kind: "customShow"; readonly id: number; readonly returnAfter: boolean }
@@ -642,6 +651,17 @@ export interface ShowSettings {
 	// Kiosk restart after inactivity (ms).
 	restartMs?: number
 }
+
+// The grid shapes snap to while dragged (ECMA-376 Part 1 §19.2.2.4 p:gridSpacing, EMU; §19.2.2.2
+// p:cSldViewPr@snapToGrid).
+export interface SlideGrid {
+	readonly cx: number
+	readonly cy: number
+	readonly snap: boolean
+}
+
+// PowerPoint's grid when the file sets none: 1/12 in, objects snapping to it.
+export const DEFAULT_SLIDE_GRID: SlideGrid = { cx: 76_200, cy: 76_200, snap: true }
 
 export interface EmbeddedFontRef {
 	readonly typeface: string
@@ -713,6 +733,14 @@ export type Background =
 	| { readonly kind: "fill"; readonly fill: FillProps; readonly shadeToTitle?: boolean; readonly src?: SourceRef }
 	// p:bgRef: a background fill style of the theme (idx ≥ 1001) with its colour.
 	| { readonly kind: "ref"; readonly idx: number; readonly color?: ColorModel; readonly src?: SourceRef }
+
+// An ODP page's header and footer: the declarations it names (presentation:use-header-name, use-footer-name,
+// use-date-time-name) and its drawing-page style's display flags (ODF 1.3 Part 3 §20.233-§20.236
+// presentation:display-header, display-footer, display-date-time, display-page-number), each as written.
+export interface OdpHeaderFooter {
+	readonly use: Readonly<Partial<Record<"header" | "footer" | "date-time", string>>>
+	readonly display: Readonly<Partial<Record<"header" | "footer" | "date-time" | "page-number", boolean>>>
+}
 
 export interface HeaderFooterFlags {
 	readonly sldNum: boolean

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import { memorySink } from "@filen/office/core/opc"
 import { applyOp, opTouches } from "../core/presentation/edit/apply"
 import type { ShowSettings } from "../core/presentation/model"
+import { odfShow } from "../core/odp/write/emit/presentation"
 import { freshPptx } from "../core/pptx/write/fresh"
 import { Changes, openDeck, partsOf, save, saveEdits, text } from "./pptxWriteFixtures"
 import { changes as odpChanges, entriesOf, ODP_DECK, openOdpDeck, saveDeck, text as odpText } from "./odpWriteFixtures"
@@ -255,5 +256,19 @@ describe("Set Up Slide Show in an ODP save", () => {
 		expect(fresh.report.approximated).toMatchObject({ "kiosk mode": 1, "slide range end": 1 })
 		expect(fresh.report.omitted).toMatchObject({ narration: 1, "pen colour": 1, "kiosk restart": 1 })
 		expect((await openOdpDeck(fresh.bytes)).deck.show).toEqual({ ...DEFAULTS, loop: true, range: { kind: "range", start: 2, end: 4 } })
+	})
+
+	it("converts a kiosk show into an ODP that loops on its timings, as a kiosk always does", async () => {
+		const deck = (await openDeck(pptxBytes(undefined))).deck
+		const { show } = odfShow(deck, { ...DEFAULTS, kind: "kiosk", loop: false, useTimings: false })
+
+		expect(show).toMatchObject({ kind: "present", loop: true, useTimings: true })
+
+		const fresh = await freshFromPptx(pptxBytes('<p:showPr useTimings="0"><p:kiosk/></p:showPr>'))
+
+		if ("kind" in fresh) throw new Error(`refused: ${fresh.reason}`)
+
+		expect(fresh.report.approximated).toMatchObject({ "kiosk mode": 1 })
+		expect((await openOdpDeck(fresh.bytes)).deck.show).toEqual({ ...DEFAULTS, loop: true })
 	})
 })

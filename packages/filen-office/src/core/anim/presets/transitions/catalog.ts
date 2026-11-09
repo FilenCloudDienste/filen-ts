@@ -340,11 +340,24 @@ export function speedOf(durationMs: number | undefined): "slow" | "med" | "fast"
 	return "slow"
 }
 
-// The transition's duration in ms: its own, else its speed's.
-export function durationOf(transition: Pick<Transition, "durationMs" | "speed">): number {
+// A cut not through black (and an effectless p:transition, read as one): the new slide replaces the old at once
+// (ECMA-376 Part 1, p:cut), so it takes no time whatever its spd.
+export function isInstantCut(transition: Pick<Transition, "kind" | "namespace" | "options">): boolean {
+	return transition.kind === "cut" && transition.namespace === "p" && transitionOption(transition, "thruBlk") !== true
+}
+
+// The duration a p:transition without p14:dur has: none for an instant cut, else its spd's (fast by default).
+export function defaultDurationMs(transition: Pick<Transition, "kind" | "namespace" | "options">, speed: string | undefined): number {
+	if (isInstantCut(transition)) return 0
+
+	return SPEED_MS[speed === "slow" || speed === "med" ? speed : "fast"]
+}
+
+// The transition's duration in ms: its own, else the one a reader gives it (none for an instant cut, else its speed's).
+export function durationOf(transition: Pick<Transition, "durationMs" | "speed" | "kind" | "namespace" | "options">): number {
 	if (transition.durationMs !== undefined && Number.isFinite(transition.durationMs)) return Math.max(0, transition.durationMs)
 
-	return SPEED_MS[transition.speed ?? "fast"]
+	return defaultDurationMs(transition, transition.speed)
 }
 
 // --- what a player draws ---

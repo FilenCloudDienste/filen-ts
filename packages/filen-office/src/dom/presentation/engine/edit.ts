@@ -67,7 +67,7 @@ import type { RefusedEdits } from "../refusedEdits"
 import { bindSaveHistory, deckTurn, saveHistoryOf, type SaveHistory } from "../save"
 import { odpParts } from "./open/odp"
 import { pptxParts } from "./open/pptx"
-import { textSeedOf } from "./text"
+import { autofitOp, textSeedOf } from "./text"
 import { isRefused } from "../../../core/presentation/refusal"
 
 // The edit capability: commands, undo and redo over the session's model, with the deck history (edit/history.ts).
@@ -1421,6 +1421,21 @@ function madeTouches(deck: Deck, requested: DeckOp, applied: DeckOp): Touch[] {
 }
 
 function burstOf(op: DeckOp): string | undefined {
+	// A typed body with the box its autofit sized (autofitOp): the burst of its text.
+	if (op.family === "batch") {
+		const [text, box] = op.ops
+
+		return op.ops.length === 2 &&
+			text?.family === "text" &&
+			text.kind === "setText" &&
+			box?.family === "shape" &&
+			box.kind === "setXfrm" &&
+			box.target.slide === text.target.slide &&
+			box.target.id === text.target.id
+			? burstOf(text)
+			: undefined
+	}
+
 	if (op.family === "text" && op.kind === "setText" && op.burst !== undefined) {
 		return `text:${String(op.target.slide)}:${String(op.target.id)}:${String(op.burst)}`
 	}
@@ -1562,11 +1577,13 @@ async function command(context: CallContext, op: DeckOp, options: EditOptions, o
 
 		const revision = state.history.revision
 		const base = session.package
-		const first = await applyStep(session, state, op, context.slicing, options)
+		// A body PowerPoint autofits takes the fit of its new text in the same step.
+		const fitted = await autofitOp(session, op, context.slicing)
+		const first = await applyStep(session, state, fitted, context.slicing, options)
 		// A save's commit moved the session onto the file it made while the op was read against the old one (its reads
 		// wait for the commit, then miss parts the save rewrote; what it read is the old package's): refused, nothing
 		// changed, so the op once more against the file as it is now.
-		const result = !first.ok && session.package !== base ? await applyStep(session, state, op, context.slicing, options) : first
+		const result = !first.ok && session.package !== base ? await applyStep(session, state, fitted, context.slicing, options) : first
 
 		if (!result.ok || open === undefined || state.history.revision === revision) return result
 

@@ -1,4 +1,5 @@
 import type { Transition } from "../../../core/anim/model"
+import { isInstantCut } from "../../../core/anim/presets/transitions/catalog"
 import { transitionFrame, type SlideMotion } from "../../../core/anim/transitions"
 import { clipPathCss, polygonsOf } from "./filters"
 
@@ -20,12 +21,16 @@ export interface SlideBoxStyle {
 export interface TransitionStyles {
 	readonly incoming: SlideBoxStyle
 	readonly outgoing: SlideBoxStyle
-	// Opacity of black over the outgoing slide.
+	// Opacity of the overlay over the outgoing slide.
 	readonly black: number
+	// The overlay's CSS colour (black; white for flash).
+	readonly overlay: string
 	readonly outgoingOnTop: boolean
 }
 
+// The frame of an instant cut never changes, so it plays in no time: the timeline begins at once.
 export function transitionDurationMs(transition: Transition): number {
+	if (isInstantCut(transition)) return 0
 	if (transition.durationMs !== undefined && Number.isFinite(transition.durationMs)) return Math.max(0, transition.durationMs)
 
 	return TRANSITION_SPEED_MS[transition.speed ?? "fast"]
@@ -57,6 +62,7 @@ export function transitionStyles(
 		},
 		outgoing: { transform: motion(frame.outgoing, slide.w, slide.h), opacity: frame.outgoing.opacity, clipPath: "" },
 		black: frame.black,
+		overlay: frame.overlay,
 		outgoingOnTop: frame.outgoingOnTop
 	}
 }

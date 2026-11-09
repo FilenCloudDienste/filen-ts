@@ -28,7 +28,7 @@ const RENDER = {
 			role: "placeholder",
 			drawing: { width: 400, height: 100 },
 			matrix: [1, 0, 0, 1, 100, 50],
-			box: { id: 2, xfrm: XFRM }
+			box: { id: 2, xfrm: XFRM, body: "placeholder" }
 		}
 	],
 	notesText: "",

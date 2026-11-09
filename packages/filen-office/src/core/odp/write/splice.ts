@@ -82,9 +82,17 @@ export interface OdpSaveInput {
 	readonly own?: readonly string[]
 }
 
-// One page of the written content.xml: copied from the source (its span), or written (and read back by gate 2).
+// A copied page's notes thumbnail number rewritten: the value's byte range in content.xml and the bytes it takes.
+export interface PageNumberPatch {
+	readonly start: number
+	readonly end: number
+	readonly value: Uint8Array
+}
+
+// One page of the written content.xml: copied from the source (its span, its notes thumbnail's page number set to
+// its position when that moved), or written (and read back by gate 2).
 export type WrittenPage =
-	| { readonly kind: "copied"; readonly ref: SlideRef; readonly span: PageSpan }
+	| { readonly kind: "copied"; readonly ref: SlideRef; readonly span: PageSpan; readonly number?: PageNumberPatch }
 	| { readonly kind: "written"; readonly ref: SlideRef; readonly bytes: Uint8Array; readonly name: string; readonly source?: PageSpan }
 
 export interface OdpSplice {
@@ -119,6 +127,178 @@ function concat(chunks: readonly Uint8Array[]): Uint8Array {
 	}
 
 	return out
+}
+
+const LT = 0x3c
+const GT = 0x3e
+const SLASH = 0x2f
+const EQUALS = 0x3d
+const QUOTE = 0x22
+const APOSTROPHE = 0x27
+const NOTES = encodeUtf8(":notes")
+const THUMBNAIL = encodeUtf8(":page-thumbnail")
+const PAGE_NUMBER = encodeUtf8(":page-number")
+
+function isSpace(byte: number | undefined): boolean {
+	return byte === 0x20 || byte === 0x09 || byte === 0x0a || byte === 0x0d
+}
+
+function isNameEnd(byte: number | undefined): boolean {
+	return byte === undefined || isSpace(byte) || byte === GT || byte === SLASH
+}
+
+function isNameByte(byte: number | undefined): boolean {
+	return (
+		byte !== undefined &&
+		((byte >= 0x61 && byte <= 0x7a) ||
+			(byte >= 0x41 && byte <= 0x5a) ||
+			(byte >= 0x30 && byte <= 0x39) ||
+			byte === 0x2d ||
+			byte === 0x2e ||
+			byte === 0x5f ||
+			byte >= 0x80)
+	)
+}
+
+function matchesAt(bytes: Uint8Array, at: number, needle: Uint8Array): boolean {
+	for (let k = 0; k < needle.length; k++) if (bytes[at + k] !== needle[k]) return false
+
+	return true
+}
+
+// The tag a qualified name whose prefix ends at `colon` opens: its "<" and whether it is an end tag, or undefined
+// (text, or a prefix reaching back past `from`).
+function tagAt(bytes: Uint8Array, colon: number, from: number): { readonly open: number; readonly end: boolean } | undefined {
+	let at = colon - 1
+
+	while (at >= from && isNameByte(bytes[at])) at--
+
+	if (at === colon - 1 || at < from) return undefined
+	if (bytes[at] === LT) return { open: at, end: false }
+	if (bytes[at] === SLASH && at - 1 >= from && bytes[at - 1] === LT) return { open: at - 1, end: true }
+
+	return undefined
+}
+
+// Where the notes of the page in bytes [start, end) name another page than `number` (draw:page-number on the
+// draw:page-thumbnail of its presentation:notes, ODF 1.3 Part 3 §10.3.4): the value's range and the bytes it takes,
+// or undefined. Only the page's tail is scanned (the notes end it); a thumbnail without the attribute stays so.
+export function staleThumbnailNumber(bytes: Uint8Array, start: number, end: number, number: number): PageNumberPatch | undefined {
+	let close = end
+	let notes = -1
+
+	for (let at = end - NOTES.length; at >= start && notes < 0; at--) {
+		if (bytes[at] !== NOTES[0] || !matchesAt(bytes, at, NOTES) || !isNameEnd(bytes[at + NOTES.length])) continue
+
+		const tag = tagAt(bytes, at, start)
+
+		if (tag === undefined) continue
+		if (tag.end) close = tag.open
+		else notes = at + NOTES.length
+	}
+
+	if (notes < 0) return undefined
+
+	for (let at = notes; at + THUMBNAIL.length <= close; at++) {
+		if (bytes[at] !== THUMBNAIL[0] || !matchesAt(bytes, at, THUMBNAIL) || !isNameEnd(bytes[at + THUMBNAIL.length])) continue
+
+		const tag = tagAt(bytes, at, notes)
+
+		if (tag === undefined || tag.end) continue
+
+		return numberAttribute(bytes, bytes.subarray(tag.open + 1, at), at + THUMBNAIL.length, close, number)
+	}
+
+	return undefined
+}
+
+// The page-number attribute (in the thumbnail's own prefix) of the start tag whose attributes begin at `from`, when
+// its value is not `number`.
+function numberAttribute(bytes: Uint8Array, prefix: Uint8Array, from: number, close: number, number: number): PageNumberPatch | undefined {
+	let at = from
+
+	while (at < close) {
+		while (at < close && isSpace(bytes[at])) at++
+
+		const nameStart = at
+
+		while (at < close && bytes[at] !== EQUALS && !isNameEnd(bytes[at])) at++
+
+		const nameEnd = at
+
+		while (at < close && isSpace(bytes[at])) at++
+
+		if (nameEnd === nameStart || bytes[at] !== EQUALS) return undefined
+
+		at++
+
+		while (at < close && isSpace(bytes[at])) at++
+
+		const quote = bytes[at]
+
+		if (quote !== QUOTE && quote !== APOSTROPHE) return undefined
+
+		const valueStart = at + 1
+		const valueEnd = bytes.indexOf(quote, valueStart)
+
+		if (valueEnd < 0 || valueEnd >= close) return undefined
+
+		if (
+			nameEnd - nameStart === prefix.length + PAGE_NUMBER.length &&
+			matchesAt(bytes, nameStart, prefix) &&
+			matchesAt(bytes, nameStart + prefix.length, PAGE_NUMBER)
+		) {
+			const value = encodeUtf8(String(number))
+
+			return sameBytes(bytes.subarray(valueStart, valueEnd), value) ? undefined : { start: valueStart, end: valueEnd, value }
+		}
+
+		at = valueEnd + 1
+	}
+
+	return undefined
+}
+
+// A written page's notes thumbnail naming the page at `number`.
+function withPageNumber(bytes: Uint8Array, number: number): Uint8Array {
+	const patch = staleThumbnailNumber(bytes, 0, bytes.length, number)
+
+	return patch === undefined ? bytes : concat([bytes.subarray(0, patch.start), patch.value, bytes.subarray(patch.end)])
+}
+
+// A copied page at position `number` (1-based).
+function copiedPage(bytes: Uint8Array, ref: SlideRef, span: PageSpan, number: number): WrittenPage {
+	const patch = staleThumbnailNumber(bytes, span.start, span.end, number)
+
+	return patch === undefined ? { kind: "copied", ref, span } : { kind: "copied", ref, span, number: patch }
+}
+
+// A copied page's bytes, in pieces of `source` (content.xml) and its number.
+function copiedChunks(source: Uint8Array, page: WrittenPage & { kind: "copied" }): Uint8Array[] {
+	const { span, number } = page
+
+	return number === undefined
+		? [source.subarray(span.start, span.end)]
+		: [source.subarray(span.start, number.start), number.value, source.subarray(number.end, span.end)]
+}
+
+// Whether `other` [start, end) holds a copied page as the splice wrote it.
+export function sameCopied(
+	source: Uint8Array,
+	page: WrittenPage & { kind: "copied" },
+	other: Uint8Array,
+	start: number,
+	end: number
+): boolean {
+	let at = start
+
+	for (const piece of copiedChunks(source, page)) {
+		if (at + piece.length > end || !sameBytes(piece, other.subarray(at, at + piece.length))) return false
+
+		at += piece.length
+	}
+
+	return at === end
 }
 
 function walk(shapes: readonly ShapeNode[], visit: (shape: ShapeNode) => void): void {
@@ -1224,6 +1404,9 @@ export async function odpSplice(input: OdpSaveInput): Promise<OdpSplice | Refuse
 	const splicer = new Splicer(deck, parts, source, names)
 	const pages: WrittenPage[] = []
 	let structural = deck.slides.length !== base.length
+	// A page copied where it was keeps its bytes; one that moved has its notes thumbnail name its new place.
+	const copied = (ref: SlideRef, span: PageSpan, index: number): WrittenPage =>
+		content.pages[index] === span ? { kind: "copied", ref, span } : copiedPage(content.bytes, ref, span, index + 1)
 
 	try {
 		for (const [index, ref] of deck.slides.entries()) {
@@ -1237,7 +1420,7 @@ export async function odpSplice(input: OdpSaveInput): Promise<OdpSplice | Refuse
 
 				if (span === undefined) return refused("notFound", `slide ${String(ref)} is neither parsed nor in the source`)
 
-				pages.push({ kind: "copied", ref, span })
+				pages.push(copied(ref, span, index))
 
 				continue
 			}
@@ -1271,9 +1454,12 @@ export async function odpSplice(input: OdpSaveInput): Promise<OdpSplice | Refuse
 				pages.push({
 					kind: "written",
 					ref,
-					bytes: inScope(
-						bytes ?? held.document.raw(held.document.firstChildElement(held.document.documentElement())),
-						splicer.scope
+					bytes: withPageNumber(
+						inScope(
+							bytes ?? held.document.raw(held.document.firstChildElement(held.document.documentElement())),
+							splicer.scope
+						),
+						index + 1
 					),
 					name
 				})
@@ -1294,7 +1480,7 @@ export async function odpSplice(input: OdpSaveInput): Promise<OdpSplice | Refuse
 			const touched = duplicate || node.revision > 0 || (notes?.revision ?? 0) > 0 || names.get(ref) !== parts.pageName(ref)
 
 			if (!touched) {
-				pages.push({ kind: "copied", ref, span })
+				pages.push(copied(ref, span, index))
 
 				continue
 			}
@@ -1314,8 +1500,8 @@ export async function odpSplice(input: OdpSaveInput): Promise<OdpSplice | Refuse
 				if (differs !== undefined)
 					return refused("failed", `page ${String(index + 1)} (${node.part}) differs from its source unwritten: ${differs}`)
 
-				pages.push({ kind: "copied", ref, span })
-			} else pages.push({ kind: "written", ref, bytes, name: names.get(ref) ?? "", source: span })
+				pages.push(copied(ref, span, index))
+			} else pages.push({ kind: "written", ref, bytes: withPageNumber(bytes, index + 1), name: names.get(ref) ?? "", source: span })
 		}
 	} catch (error) {
 		if (error instanceof PresentationError) return refused(error.reason, error.message)
@@ -1746,7 +1932,7 @@ function assemble(
 
 		chunks.push(bytes.subarray(bodyFrom, insertAt))
 
-		for (const page of pages) chunks.push(page.kind === "copied" ? bytes.subarray(page.span.start, page.span.end) : page.bytes)
+		for (const page of pages) chunks.push(...(page.kind === "copied" ? copiedChunks(bytes, page) : [page.bytes]))
 
 		const failed = tail(insertAt)
 
@@ -1771,7 +1957,7 @@ function assemble(
 			if (!isWhitespace(gap)) return refused("unsupported", "markup between pages")
 		}
 
-		for (const page of pages) chunks.push(page.kind === "copied" ? bytes.subarray(page.span.start, page.span.end) : page.bytes)
+		for (const page of pages) chunks.push(...(page.kind === "copied" ? copiedChunks(bytes, page) : [page.bytes]))
 	}
 
 	// The tail: the settings (custom shows, start page, the show's attributes) as the deck has them.

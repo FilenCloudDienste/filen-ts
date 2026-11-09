@@ -15,6 +15,8 @@ import {
 	tickLabels,
 	type AxisState
 } from "./axes"
+import type { ErrorBarData } from "./data"
+import { drawChartex } from "./chartex"
 import { formatNumber } from "./format"
 import { ChartBuilder, PX_PER_PT, estimateHeight, estimateWidth, labelBody, type Rect } from "./builder"
 import { emitLabels, type PendingLabel } from "./labels"
@@ -28,6 +30,7 @@ import {
 	drawRadar,
 	drawScatter,
 	drawSurface,
+	errorSpans,
 	plotCategories,
 	surfaceTruncated,
 	type Blanks,
@@ -45,7 +48,8 @@ export { computeScale, scaleTicks, type Scale } from "./scale"
 
 // Charts (c:chartSpace, ECMA-376 Part 1 §21.2) drawn from the values cached in the chart part into the
 // drawing display list: plot area, gridlines, series, axes, data labels, legend and title. Text is placed
-// in boxes for the layout engine; its size is only estimated here (see builder.ts).
+// in boxes for the layout engine; its size is only estimated here (see builder.ts). Chartex parts
+// (cx:chartSpace) are drawn by chartex.ts.
 
 export interface ChartConversion {
 	readonly list: DrawingList
@@ -283,6 +287,14 @@ export function convertChart(
 
 	const reader = drawingReader(document)
 	const root = document.documentElement()
+
+	// Office 2016 chart types (waterfall, treemap...) live in a cx:chartSpace part.
+	if (root >= 0 && reader.is(root, D.Cx, "chartSpace")) {
+		const result = drawChartex(paintContext, reader, root, W, H, matrix)
+
+		return { list: target, ...result }
+	}
+
 	const chart = root >= 0 && reader.is(root, D.C, "chartSpace") ? reader.child(root, D.C, "chart") : -1
 
 	if (chart < 0) return { list: target, supported: false, plots: [], unsupported: ["chart"] }
@@ -385,6 +397,17 @@ export function convertChart(
 		range.percent ||= percent
 		ranges.set(id, range)
 	}
+	// Automatic axis bounds take in the error bars' ends, as Office scales them.
+	const widenErrorBars = (bars: ErrorBarData, data: ArrayLike<number> | null, count: number, id: number): void => {
+		const spans = errorSpans(bars, data, count)
+
+		for (let k = 0; k < count; k++) {
+			const v = data?.[k] ?? Number.NaN
+
+			widen(id, v + (spans[k * 2] ?? Number.NaN), false)
+			widen(id, v + (spans[k * 2 + 1] ?? Number.NaN), false)
+		}
+	}
 	const categories = new Map<Plot, string[]>()
 
 	for (const plot of drawable) {
@@ -484,6 +507,15 @@ export function convertChart(
 
 					if (category.axis.kind === "val") widen(category.axis.id, xs === null ? k + 1 : (xs[k] ?? Number.NaN), false)
 				}
+
+				for (const bars of series.errorBars) {
+					if (bars.direction === "x" && category.axis.kind !== "val") continue
+
+					const data = bars.direction === "x" ? xs : series.values.numbers
+					const count = bars.direction === "x" ? (xs?.length ?? 0) : series.values.count
+
+					widenErrorBars(bars, data, count, bars.direction === "x" ? category.axis.id : value.axis.id)
+				}
 			}
 		} else if (stacked) {
 			const positive = new Float64Array(count)
@@ -510,8 +542,12 @@ export function convertChart(
 				widen(value.axis.id, percent ? (negative[k] ?? 0) / total : (negative[k] ?? 0), percent)
 			}
 		} else {
-			for (const series of plot.series)
+			for (const series of plot.series) {
 				for (let k = 0; k < series.values.count; k++) widen(value.axis.id, series.values.numbers?.[k] ?? Number.NaN, false)
+				for (const bars of series.errorBars)
+					if (bars.direction === "y" || plot.horizontal)
+						widenErrorBars(bars, series.values.numbers, series.values.count, value.axis.id)
+			}
 		}
 
 		if (category.axis.kind !== "val") {

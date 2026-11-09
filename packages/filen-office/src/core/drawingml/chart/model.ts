@@ -55,6 +55,8 @@ export interface Plot {
 	readonly dataLabels: number
 	// c:hiLowLines (§21.2.2.80, line and stock charts): a line per category from its highest to its lowest value; -1.
 	readonly hiLowLines: number
+	// c:dropLines (§21.2.2.53, line and area charts): a line per category from its data points to the category axis; -1.
+	readonly dropLines: number
 	// Bubble charts: c:bubbleScale (percent of the default size), c:sizeRepresents (area or width), c:showNegBubbles.
 	readonly bubbleScale: number
 	readonly sizeByWidth: boolean
@@ -178,6 +180,7 @@ function readPlot(reader: DrawingReader, node: number, kind: PlotKind, budget: P
 		smooth,
 		dataLabels: reader.child(node, D.C, "dLbls"),
 		hiLowLines: kind === "line" ? reader.child(node, D.C, "hiLowLines") : -1,
+		dropLines: kind === "line" || kind === "area" ? reader.child(node, D.C, "dropLines") : -1,
 		bubbleScale: Math.max(0, Math.min(300, numberValue(reader, node, "bubbleScale") ?? 100)),
 		sizeByWidth: value(reader, node, "sizeRepresents") === "w",
 		negativeBubbles: flag(reader, node, "showNegBubbles", false),
@@ -224,6 +227,13 @@ function readAxis(reader: DrawingReader, node: number, kind: AxisKind): Axis {
 	}
 }
 
+// Trendlines are drawn; their equation and R² labels (c:dispEq, c:dispRSqr, c:trendlineLbl) are not.
+function trendlineLabelled(reader: DrawingReader, series: SeriesData): boolean {
+	return series.trendlines.some(
+		node => reader.child(node, D.C, "trendlineLbl") >= 0 || flag(reader, node, "dispEq", false) || flag(reader, node, "dispRSqr", false)
+	)
+}
+
 export interface PlotArea {
 	readonly node: number
 	readonly plots: Plot[]
@@ -257,6 +267,8 @@ export function readPlotArea(reader: DrawingReader, plotArea: number): PlotArea 
 
 			if (reader.child(child, D.C, "upDownBars") >= 0) unsupported.push("upDownBars")
 			if (local === "surface3DChart") unsupported.push(local)
+			if (!unsupported.includes("trendlineLbl") && plots[plots.length - 1]?.series.some(series => trendlineLabelled(reader, series)))
+				unsupported.push("trendlineLbl")
 		} else if (axisKind !== undefined) {
 			const axis = readAxis(reader, child, axisKind)
 

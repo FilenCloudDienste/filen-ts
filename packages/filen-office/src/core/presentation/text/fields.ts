@@ -25,13 +25,46 @@ function names(date: Date, locale: string | undefined): { month: string; monthSh
 
 	if (locale === undefined || /^en(?:-|$)/i.test(locale) || typeof intl !== "object" || intl === null) return fallback
 
-	try {
-		const format = (options: Intl.DateTimeFormatOptions): string => new Intl.DateTimeFormat(locale, options).format(date)
+	const formats = formatsOf(locale)
 
-		return { month: format({ month: "long" }), monthShort: format({ month: "short" }), day: format({ weekday: "long" }) }
+	return formats === null
+		? fallback
+		: { month: formats.month.format(date), monthShort: formats.monthShort.format(date), day: formats.day.format(date) }
+}
+
+interface NameFormats {
+	readonly month: Intl.DateTimeFormat
+	readonly monthShort: Intl.DateTimeFormat
+	readonly day: Intl.DateTimeFormat
+}
+
+// The name formats of each language a deck's fields name (a few per deck): made once, a layout per field reuses them.
+// null: the host cannot format the language.
+const nameFormats = new Map<string, NameFormats | null>()
+const MAX_NAME_FORMATS = 32
+
+function formatsOf(locale: string): NameFormats | null {
+	const held = nameFormats.get(locale)
+
+	if (held !== undefined) return held
+
+	let made: NameFormats | null
+
+	try {
+		made = {
+			month: new Intl.DateTimeFormat(locale, { month: "long" }),
+			monthShort: new Intl.DateTimeFormat(locale, { month: "short" }),
+			day: new Intl.DateTimeFormat(locale, { weekday: "long" })
+		}
 	} catch {
-		return fallback
+		made = null
 	}
+
+	if (nameFormats.size >= MAX_NAME_FORMATS) nameFormats.clear()
+
+	nameFormats.set(locale, made)
+
+	return made
 }
 
 function two(value: number): string {
@@ -48,8 +81,8 @@ function clock24(date: Date, seconds: boolean): string {
 	return `${date.getHours()}:${two(date.getMinutes())}${seconds ? `:${two(date.getSeconds())}` : ""}`
 }
 
-// The text a field shows; `stored` is the a:t the file holds.
-export function fieldText(type: string, stored: string, context: FieldContext): string {
+// The text a field shows; `stored` is the a:t the file holds, `locale` the field run's language (else the context's).
+export function fieldText(type: string, stored: string, context: FieldContext, locale = context.locale): string {
 	if (type === "slidenum") return context.slideNumber === undefined ? stored : String(context.slideNumber)
 
 	const match = /^datetime(\d{0,2})$/.exec(type)
@@ -63,7 +96,7 @@ export function fieldText(type: string, stored: string, context: FieldContext): 
 	const day = date.getDate()
 	const month = date.getMonth() + 1
 	const year = date.getFullYear()
-	const { month: monthName, monthShort, day: dayName } = names(date, context.locale)
+	const { month: monthName, monthShort, day: dayName } = names(date, locale)
 
 	switch (match[1]) {
 		case "":

@@ -1,10 +1,12 @@
 import type { NudgeDirection } from "../../../core/presentation/edit/commands/shape"
 import type { ZOrder } from "../../../core/presentation/edit/ops"
 
-// The canvas's keys while shapes are selected. The editing keys PowerPoint fixes (arrows nudge, Shift+arrows nudge
-// further, Delete/Backspace, Tab/Shift+Tab to the next/previous shape, Enter into the text, Escape) are fixed here;
-// the commands a user may rebind (select all, group, ungroup, z-order) come as combos from the app's keymap, in
-// react-hotkeys-hook's syntax ("mod+shift+g"), so the canvas and the shortcuts list agree.
+// The canvas's keys while shapes are selected. The editing keys PowerPoint fixes are fixed here: arrows nudge (on a
+// Mac Cmd+arrows too, and Shift+arrows resize; elsewhere Shift+arrows nudge further), Alt+Left/Right turn 15°, Mod+D
+// duplicates the objects (the slide's Mod+D is the slide list's), Delete/Backspace, Tab/Shift+Tab to the
+// next/previous shape, Enter into the text, Escape. The commands a user may rebind (select all, group, ungroup,
+// z-order) come as combos from the app's keymap, in react-hotkeys-hook's syntax ("mod+shift+g"), so the canvas and
+// the shortcuts list agree.
 
 export type ObjectCommand = "selectAll" | "group" | "ungroup" | "bringToFront" | "sendToBack" | "bringForward" | "sendBackward"
 
@@ -29,11 +31,16 @@ export type ObjectKeyBindings = Readonly<Record<ObjectCommand, string>>
 
 export type ObjectKeyAction =
 	| { readonly kind: "nudge"; readonly direction: NudgeDirection; readonly large: boolean }
+	| { readonly kind: "resize"; readonly direction: NudgeDirection }
+	| { readonly kind: "rotate"; readonly clockwise: boolean }
+	| { readonly kind: "duplicate" }
 	| { readonly kind: "delete" }
 	| { readonly kind: "cycle"; readonly back: boolean }
-	| { readonly kind: "enter" }
+	| { readonly kind: "enter"; readonly selectAll: boolean }
 	| { readonly kind: "escape" }
 	| { readonly kind: "command"; readonly command: ObjectCommand }
+	// A character typed on the selection: it goes into the shape's text (PowerPoint's "select the shape, then type").
+	| { readonly kind: "type"; readonly text: string }
 
 export interface KeyLike {
 	readonly key: string
@@ -42,6 +49,8 @@ export interface KeyLike {
 	readonly ctrlKey: boolean
 	readonly metaKey: boolean
 	readonly altKey: boolean
+	// An input method's key (its composition's): never typed as is.
+	readonly isComposing?: boolean
 }
 
 interface Combo {
@@ -76,7 +85,11 @@ const NAMED_CODES: Readonly<Record<string, string>> = {
 	up: "ArrowUp",
 	down: "ArrowDown",
 	left: "ArrowLeft",
-	right: "ArrowRight"
+	right: "ArrowRight",
+	arrowup: "ArrowUp",
+	arrowdown: "ArrowDown",
+	arrowleft: "ArrowLeft",
+	arrowright: "ArrowRight"
 }
 
 function codeOf(key: string): string {
@@ -127,6 +140,8 @@ export function matchesCombo(event: KeyLike, combo: Combo, apple: boolean): bool
 	)
 }
 
+const DUPLICATE: Combo = { mod: true, ctrl: false, meta: false, shift: false, alt: false, code: "KeyD" }
+
 const ARROWS: Readonly<Record<string, NudgeDirection>> = { ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up", ArrowDown: "down" }
 
 // Parsed once per bindings object.
@@ -150,14 +165,32 @@ function combosOf(bindings: ObjectKeyBindings): readonly (readonly [ObjectComman
 	return out
 }
 
+// An arrow with exactly these modifiers: none (nudge), Alt with Left/Right (turn 15°), and per platform Shift (resize
+// on a Mac, a larger nudge elsewhere) and, on a Mac, Cmd (nudge).
+function arrowAction(event: KeyLike, direction: NudgeDirection, apple: boolean): ObjectKeyAction | undefined {
+	const { shiftKey: shift, ctrlKey: ctrl, metaKey: meta, altKey: alt } = event
+
+	if (alt)
+		return shift || ctrl || meta || direction === "up" || direction === "down"
+			? undefined
+			: { kind: "rotate", clockwise: direction === "right" }
+	if (ctrl) return undefined
+	if (meta) return apple && !shift ? { kind: "nudge", direction, large: false } : undefined
+	if (shift && apple) return { kind: "resize", direction }
+
+	return { kind: "nudge", direction, large: shift }
+}
+
 // What a key press on the canvas does; undefined: not the canvas's (it goes on to the editor and the app).
 export function objectKeyAction(event: KeyLike, bindings: ObjectKeyBindings, apple: boolean): ObjectKeyAction | undefined {
 	for (const [command, combo] of combosOf(bindings)) if (matchesCombo(event, combo, apple)) return { kind: "command", command }
 
+	if (matchesCombo(event, DUPLICATE, apple)) return { kind: "duplicate" }
+
 	const modified = event.ctrlKey || event.metaKey || event.altKey
 	const direction = ARROWS[event.code] ?? ARROWS[event.key]
 
-	if (direction !== undefined && !modified) return { kind: "nudge", direction, large: event.shiftKey }
+	if (direction !== undefined) return arrowAction(event, direction, apple)
 	if (modified) return undefined
 
 	switch (event.key) {
@@ -166,13 +199,14 @@ export function objectKeyAction(event: KeyLike, bindings: ObjectKeyBindings, app
 			return event.shiftKey ? undefined : { kind: "delete" }
 		case "Tab":
 			return { kind: "cycle", back: event.shiftKey }
+		// Enter selects the shape's text (PowerPoint); F2 puts the caret at its start.
 		case "Enter":
 		case "F2":
-			return event.shiftKey ? undefined : { kind: "enter" }
+			return event.shiftKey ? undefined : { kind: "enter", selectAll: event.key === "Enter" }
 		case "Escape":
 			return { kind: "escape" }
 		default:
-			return undefined
+			return [...event.key].length === 1 && event.isComposing !== true ? { kind: "type", text: event.key } : undefined
 	}
 }
 

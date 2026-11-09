@@ -178,12 +178,13 @@ function writeChars(cursor: Cursor, text: string, last: boolean): Refused | unde
 
 const FIELD_ELEMENTS: Readonly<Record<string, string>> = {
 	slidenum: "text:page-number",
-	"odf:page-count": "text:page-count",
-	datetime10: "text:time"
+	"odf:page-count": "text:page-count"
 }
 
 function fieldElement(type: string): string | undefined {
 	if (FIELD_ELEMENTS[type] !== undefined) return FIELD_ELEMENTS[type]
+	// datetime10 to datetime13 are time formats (ST_TextField); the rest, date plus time included, are dates.
+	if (/^datetime1[0-3]$/u.test(type)) return "text:time"
 	if (/^datetime\d*$/u.test(type)) return "text:date"
 	if (/^odf:[a-z-]+$/u.test(type)) return `text:${type.slice(4)}`
 

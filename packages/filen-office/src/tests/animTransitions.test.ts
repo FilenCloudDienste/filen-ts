@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest"
-import { inRegion, transitionFrame, transitionToOdf, type TransitionFrame } from "../core/anim/transitions"
+import {
+	inRegion,
+	RANDOM_TRANSITION_KINDS,
+	randomTransitionKind,
+	transitionFrame,
+	transitionToOdf,
+	type TransitionFrame
+} from "../core/anim/transitions"
+import { playableTransition } from "../core/anim/presets/transitions/catalog"
+import { stageDraws } from "../dom/presentation/engine/show"
 
 // The ECMA transitions' progress functions at t = 0, 0.5 and 1: the share of the slide the incoming slide shows, or
 // the slides' offsets, scale and opacity.
@@ -56,6 +65,38 @@ describe("transition progress", () => {
 		expect(transitionFrame("fade", { thruBlk: true }, 0.25)).toMatchObject({ incoming: { opacity: 0 }, black: 0.5 })
 		expect(transitionFrame("fade", { thruBlk: true }, 0.75)).toMatchObject({ incoming: { opacity: 0.5 }, black: 1 })
 		expect(transitionFrame("fade", {}, 1).incoming.opacity).toBe(1)
+	})
+
+	it("flashes through white over each half, and fades ODF fadeOverColor through its smil:fadeColor", () => {
+		expect(transitionFrame("fade", { thruBlk: true }, 0.25).overlay).toBe("#000000")
+		expect(transitionFrame("fade", {}, 0.5)).toMatchObject({ black: 0 })
+		expect(transitionFrame("flash", {}, 0.25)).toMatchObject({ incoming: { opacity: 0 }, black: 0.5, overlay: "#ffffff" })
+		expect(transitionFrame("flash", {}, 0.75)).toMatchObject({ incoming: { opacity: 0.5 }, black: 1, overlay: "#ffffff" })
+		expect(transitionFrame("flash", {}, 1).incoming.opacity).toBe(1)
+		expect(transitionFrame("fade", { thruBlk: true, smilFadeColor: "#ff0000" }, 0.25).overlay).toBe("#ff0000")
+		expect(transitionFrame("fade", { thruBlk: true, smilFadeColor: "red;x" }, 0.25).overlay).toBe("#000000")
+	})
+
+	it("picks p:random's kind from the drawn ECMA kinds, never cut or random", () => {
+		expect(RANDOM_TRANSITION_KINDS).not.toContain("cut")
+		expect(RANDOM_TRANSITION_KINDS).not.toContain("random")
+
+		const seen = new Set<string>()
+
+		for (let k = 0; k < RANDOM_TRANSITION_KINDS.length; k++) seen.add(randomTransitionKind((k + 0.5) / RANDOM_TRANSITION_KINDS.length))
+
+		expect(seen.size).toBe(RANDOM_TRANSITION_KINDS.length)
+		expect(randomTransitionKind(0)).toBe(RANDOM_TRANSITION_KINDS[0])
+		expect(randomTransitionKind(1)).toBe(RANDOM_TRANSITION_KINDS[RANDOM_TRANSITION_KINDS.length - 1])
+		expect(transitionFrame(randomTransitionKind(0.99), {}, 0.5)).not.toEqual(transitionFrame("fade", {}, 0.5))
+	})
+
+	it("plays p14:flash itself on the stage, not its plain-fade Fallback", () => {
+		const flash = { kind: "flash", namespace: "p14" as const, options: {}, advance: { onClick: true } }
+		const fileFallback = { ...flash, kind: "fade", namespace: "p" as const }
+
+		expect(playableTransition(flash, stageDraws, fileFallback)).toBe(flash)
+		expect(playableTransition({ ...flash, kind: "vortex" }, stageDraws, fileFallback)).toBe(fileFallback)
 	})
 
 	it("zooms and spins newsflash in", () => {

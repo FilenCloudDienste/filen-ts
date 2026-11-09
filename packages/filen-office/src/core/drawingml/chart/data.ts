@@ -136,6 +136,62 @@ export interface SeriesData {
 	// c:bubbleSize of a bubble series.
 	readonly sizes?: CachedValues
 	readonly spPr: number
+	// c:errBars (§21.2.2.55) and c:trendline nodes (§21.2.2.211) of the series.
+	readonly errorBars: readonly ErrorBarData[]
+	readonly trendlines: readonly number[]
+}
+
+export type ErrorValueType = "cust" | "fixedVal" | "percentage" | "stdDev" | "stdErr"
+
+export interface ErrorBarData {
+	readonly node: number
+	// c:errDir: along the x or the y values (category plots use only the value direction).
+	readonly direction: "x" | "y"
+	readonly plus: boolean
+	readonly minus: boolean
+	readonly valueType: ErrorValueType
+	// c:val: the fixed amount, percentage or number of standard deviations.
+	readonly value: number
+	// c:plus / c:minus amounts of a custom error bar.
+	readonly custom: { readonly plus: CachedValues; readonly minus: CachedValues } | undefined
+	readonly endCaps: boolean
+	readonly spPr: number
+}
+
+const NO_ERROR_BARS: readonly ErrorBarData[] = []
+const NO_TRENDLINES: readonly number[] = []
+const ERROR_VALUE_TYPES: ReadonlySet<string> = new Set(["cust", "fixedVal", "percentage", "stdDev", "stdErr"])
+
+function readErrorBars(reader: DrawingReader, ser: number, budget: PointBudget): readonly ErrorBarData[] {
+	const nodes = reader.children(ser, D.C, "errBars")
+
+	if (nodes.length === 0) return NO_ERROR_BARS
+
+	return nodes.map(node => {
+		const value = (local: string): string | undefined => reader.attr(reader.child(node, D.C, local), "val")
+		const type = value("errBarType") ?? "both"
+		const valueType = value("errValType") ?? "fixedVal"
+		const resolved = (ERROR_VALUE_TYPES.has(valueType) ? valueType : "fixedVal") as ErrorValueType
+		const noEndCap = reader.child(node, D.C, "noEndCap")
+
+		return {
+			node,
+			direction: value("errDir") === "x" ? "x" : "y",
+			plus: type !== "minus",
+			minus: type !== "plus",
+			valueType: resolved,
+			value: reader.number(reader.child(node, D.C, "val"), "val", 0),
+			custom:
+				resolved === "cust"
+					? {
+							plus: readCache(reader, reader.child(node, D.C, "plus"), budget),
+							minus: readCache(reader, reader.child(node, D.C, "minus"), budget)
+						}
+					: undefined,
+			endCaps: noEndCap < 0 || !reader.bool(noEndCap, "val", true),
+			spPr: reader.child(node, D.C, "spPr")
+		}
+	})
 }
 
 // Every c:ser of a plot (the first MAX_SERIES of the chart), sorted by c:order.
@@ -166,7 +222,9 @@ export function readSeries(
 			categories: readCache(reader, reader.child(ser, D.C, scatter ? "xVal" : "cat"), budget),
 			values: readCache(reader, reader.child(ser, D.C, scatter ? "yVal" : "val"), budget),
 			...(bubble ? { sizes: readCache(reader, reader.child(ser, D.C, "bubbleSize"), budget) } : {}),
-			spPr: reader.child(ser, D.C, "spPr")
+			spPr: reader.child(ser, D.C, "spPr"),
+			errorBars: readErrorBars(reader, ser, budget),
+			trendlines: reader.child(ser, D.C, "trendline") < 0 ? NO_TRENDLINES : reader.children(ser, D.C, "trendline")
 		})
 	})
 

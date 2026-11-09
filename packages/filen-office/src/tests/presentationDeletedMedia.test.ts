@@ -172,6 +172,8 @@ describe("a source picture deleted", () => {
 // An embedded object of an ODP deck (a chart, an OLE object) deleted: its whole Object N/ folder and its
 // ObjectReplacements image leave the file with their manifest entries, and an undo after that save puts every entry
 // back byte for byte.
+const ODP_THUMBNAIL = "Thumbnails/thumbnail.png"
+
 describe("a source embedded object deleted (ODP)", () => {
 	for (const name of ["odftk__Presentation1_INVALID.odp", "lo__BarChartVeryLongLabel.odp"]) {
 		const path = join(CORPUS_DIR, "odp", name)
@@ -204,7 +206,11 @@ describe("a source embedded object deleted (ODP)", () => {
 			expect(deleted.result.kind).toBe("written")
 
 			const after = await entries(deleted.bytes as Uint8Array)
-			const gone = [...before.keys()].filter(entry => !after.has(entry))
+			// The first page's preview is stale once content.xml is rewritten, so the save drops it (ODF 1.3 Part 2 §3.8)
+			// and nothing brings it back.
+			const gone = [...before.keys()].filter(entry => !after.has(entry) && entry !== ODP_THUMBNAIL)
+
+			expect(after.has(ODP_THUMBNAIL)).toBe(false)
 			const folder = gone.find(entry => /^Object [^/]+\/$|^Object [^/]+\/content\.xml$/u.test(entry))?.split("/")[0] ?? ""
 
 			expect(folder).not.toBe("")

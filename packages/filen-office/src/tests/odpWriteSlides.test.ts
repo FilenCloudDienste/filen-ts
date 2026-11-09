@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest"
 import { applyOp } from "../core/presentation/edit/apply"
 import type { DeckOp } from "../core/presentation/edit/ops"
-import { slideRef } from "../core/presentation/model"
+import { slideRef, type SlideNode } from "../core/presentation/model"
 import { odpSourceReading } from "../core/odp/write/session"
 import { odpWriteSource } from "../core/odp/write/source"
-import { plainText } from "./odpFixtures"
+import { odpBytes, plainText } from "./odpFixtures"
 import { changes, entriesOf, odpDeck, openOdpDeck, saveDeck, shapeNamed, slideAt, text, type OpenedOdp } from "./odpWriteFixtures"
 
 // Slide structure ops through the slide and shape families (the edit session's ODP source reading), saved.
@@ -167,5 +167,71 @@ describe("ODP writer: slides", () => {
 
 		expect(a.bytes).toEqual(b.bytes)
 		expect((await saveDeck(await openOdpDeck(a.bytes))).outcome.kind).toBe("unchanged")
+	})
+})
+
+// A deck whose first page shows the master's footer (a declaration) and page number; the second shows neither.
+const FOOTED = odpBytes({
+	automatic:
+		'<style:style style:name="dp1" style:family="drawing-page"><style:drawing-page-properties presentation:display-footer="true" presentation:display-page-number="true"/></style:style>',
+	body:
+		'<presentation:footer-decl presentation:name="ftr1">Company</presentation:footer-decl>' +
+		'<draw:page draw:name="one" draw:style-name="dp1" draw:master-page-name="M" presentation:use-footer-name="ftr1"/>' +
+		'<draw:page draw:name="two" draw:master-page-name="M"/>'
+})
+
+function masterFooters(node: SlideNode): string[] {
+	return node.shapes.filter(shape => shape.synthetic === true && shape.lock === "master").map(shape => plainText(shape))
+}
+
+describe("ODP writer: a new slide's header and footer", () => {
+	it.each([
+		["after a footed page", 1],
+		["first, before a footed page", 0]
+	])("takes the neighbouring page's footer and page number %s", async (_, at) => {
+		const opened = await openOdpDeck(FOOTED)
+		const apply = applier(opened)
+		const layout = slideAt(opened, 0).parent
+
+		if (layout === undefined) throw new Error("no layout")
+
+		apply({ family: "slide", kind: "add", layout, at })
+
+		const added = slideAt(opened, at)
+
+		expect(added.odpHeaderFooter).toEqual({ use: { footer: "ftr1" }, display: { footer: true, "page-number": true } })
+		expect(masterFooters(added)).toHaveLength(2)
+		expect(masterFooters(added)).toContain("Company")
+
+		const saved = await saveDeck(opened, changes("slideList"))
+
+		expect(saved.outcome.kind === "refused" ? saved.outcome : "written").toBe("written")
+		expect(text((await entriesOf(saved.bytes)).get("content.xml"))).toContain('<presentation:footer-decl presentation:name="ftr1">')
+
+		const reread = slideAt(await openOdpDeck(saved.bytes), at)
+
+		expect(reread.odpHeaderFooter).toEqual(added.odpHeaderFooter)
+		expect(masterFooters(reread)).toEqual(masterFooters(added))
+	})
+
+	it("gives a slide after a page without footers none", async () => {
+		const opened = await openOdpDeck(FOOTED)
+		const apply = applier(opened)
+		const layout = slideAt(opened, 0).parent
+
+		if (layout === undefined) throw new Error("no layout")
+
+		apply({ family: "slide", kind: "add", layout, at: 2 })
+
+		const added = slideAt(opened, 2)
+
+		expect(added.odpHeaderFooter).toBeUndefined()
+		expect(masterFooters(added)).toEqual([])
+
+		const saved = await saveDeck(opened, changes("slideList"))
+		const reread = slideAt(await openOdpDeck(saved.bytes), 2)
+
+		expect(reread.odpHeaderFooter).toBeUndefined()
+		expect(masterFooters(reread)).toEqual([])
 	})
 })

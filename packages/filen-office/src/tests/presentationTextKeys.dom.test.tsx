@@ -13,7 +13,7 @@ import { MeasureCache } from "../core/text/index"
 import type { CommandResult, PresentationSessionApi } from "../dom/presentation/protocol"
 import { PresentationTextEditor } from "../react/presentation/edit/text/TextEditor"
 import { createTextEditing } from "../react/presentation/edit/text/editing"
-import { DEFAULT_TEXT_BINDINGS } from "../react/presentation/edit/text/keys"
+import { DEFAULT_TEXT_BINDINGS, textKeyCommand } from "../react/presentation/edit/text/keys"
 import { FakeMeasurer, testFont } from "./textFixtures"
 
 // The editor view's keys as the user's keymap binds them (a rebound key moves, the old one no longer acts; the link
@@ -130,6 +130,54 @@ describe("presentation text editor keys and painting", () => {
 		await act(async () => {
 			root.unmount()
 		})
+	})
+
+	it("Ctrl+= subscripts, Ctrl+Shift+= superscripts, again removes it; Ctrl+Space clears the formatting", async () => {
+		const { editing, root, sink } = await mount()
+		const controller = editing.active
+
+		controller?.setSelection(1, 3)
+		key(sink, { key: "=", code: "Equal", ctrlKey: true })
+		expect(controller?.format().run.baseline).toBe(-25_000)
+		key(sink, { key: "+", code: "Equal", ctrlKey: true, shiftKey: true })
+		expect(controller?.format().run.baseline).toBe(30_000)
+		key(sink, { key: "+", code: "Equal", ctrlKey: true, shiftKey: true })
+		expect(controller?.format().run.baseline).toBeUndefined()
+
+		key(sink, { key: "b", code: "KeyB", ctrlKey: true })
+		key(sink, { key: "=", code: "Equal", ctrlKey: true })
+		expect(controller?.format().run.b).toBe(true)
+		const space = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: " ", code: "Space", ctrlKey: true })
+
+		sink.dispatchEvent(space)
+		expect(space.defaultPrevented).toBe(true)
+		expect(controller?.format().run.b).toBeUndefined()
+		expect(controller?.format().run.baseline).toBeUndefined()
+
+		await act(async () => {
+			root.unmount()
+		})
+	})
+
+	it("matches the baseline keys as PowerPoint does on each platform", () => {
+		const press = (code: string, mods: { ctrl?: boolean; meta?: boolean; shift?: boolean }) => ({
+			key: "",
+			code,
+			ctrlKey: mods.ctrl === true,
+			metaKey: mods.meta === true,
+			shiftKey: mods.shift === true,
+			altKey: false
+		})
+
+		expect(textKeyCommand(press("Equal", { ctrl: true }), DEFAULT_TEXT_BINDINGS, false)).toBe("subscript")
+		expect(textKeyCommand(press("Equal", { ctrl: true, shift: true }), DEFAULT_TEXT_BINDINGS, false)).toBe("superscript")
+		expect(textKeyCommand(press("Space", { ctrl: true }), DEFAULT_TEXT_BINDINGS, false)).toBe("clearFormatting")
+		// Mac: Cmd+Control+= and Cmd+Control+Shift+=; Cmd+= stays the browser's zoom; Control+Space, not Cmd+Space.
+		expect(textKeyCommand(press("Equal", { ctrl: true, meta: true }), DEFAULT_TEXT_BINDINGS, true)).toBe("subscript")
+		expect(textKeyCommand(press("Equal", { ctrl: true, meta: true, shift: true }), DEFAULT_TEXT_BINDINGS, true)).toBe("superscript")
+		expect(textKeyCommand(press("Equal", { meta: true }), DEFAULT_TEXT_BINDINGS, true)).toBeUndefined()
+		expect(textKeyCommand(press("Space", { ctrl: true }), DEFAULT_TEXT_BINDINGS, true)).toBe("clearFormatting")
+		expect(textKeyCommand(press("Space", { meta: true }), DEFAULT_TEXT_BINDINGS, true)).toBeUndefined()
 	})
 
 	it("the link key asks the host for its dialog", async () => {

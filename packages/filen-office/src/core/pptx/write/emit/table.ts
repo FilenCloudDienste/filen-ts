@@ -50,7 +50,7 @@ const CELL_BORDERS = [
 	["bl2tr", "lnBlToTr"]
 ] as const
 
-const FLAGS = ["firstRow", "firstCol", "lastRow", "lastCol", "bandRow", "bandCol"] as const
+const FLAGS = ["rtl", "firstRow", "firstCol", "lastRow", "lastCol", "bandRow", "bandCol"] as const
 
 const FILL_LOCALS: ReadonlySet<string> = new Set(["noFill", "solidFill", "gradFill", "blipFill", "pattFill", "grpFill"])
 

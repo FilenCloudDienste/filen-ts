@@ -787,6 +787,128 @@ function insert(node: SlideNode, op: OpOf<"shape"> & { kind: "insert" }, context
 	}
 }
 
+// What a copy cannot carry as a shape of its own: a placeholder (a second one of its idx), a part the copy would share
+// with its original (a chart, diagram, embedded object, medium or ink), markup kept whole, or a locked element.
+function uncopyable(shape: ShapeNode): Refused | undefined {
+	if (shape.lock !== undefined) return refused("locked", shape.lock)
+	if (shape.ph !== undefined) return refused("unsupported", "a placeholder is not duplicated")
+	if (shape.synthetic === true || shape.kind === "opaque" || shape.kind === "ink" || shape.ink === true || shape.media !== undefined)
+		return refused("unsupported", "this object is not duplicated")
+	if (shape.kind === "frame" && shape.frame?.kind !== "table") return refused("unsupported", "this object is not duplicated")
+
+	for (const child of shape.children ?? []) {
+		const inner = uncopyable(child)
+
+		if (inner !== undefined) return inner
+	}
+
+	return undefined
+}
+
+function withoutSourceIds(shape: ShapeNode): void {
+	delete shape.sourceId
+
+	for (const child of shape.children ?? []) withoutSourceIds(child)
+}
+
+// The copy of a shape: its typed state over its source markup read again as a new element of the slide (a source
+// of its own, so the original's stays the original's).
+function copyOf(node: SlideNode, shape: ShapeNode, context: ApplyContext): ShapeNode | Refused {
+	const raw = rawOf(shape, context)
+
+	if (isRefused(raw)) return raw
+
+	let copy: ShapeNode
+
+	if (raw === undefined) {
+		copy = clone(shape)
+	} else {
+		const reader = reading(context)
+
+		if (reader === undefined) return refused("unsupported", "source markup cannot be read here")
+
+		const read = reader.readShape(node, raw)
+
+		if (isRefused(read)) return read
+
+		copy = overlay(clone(shape), read)
+	}
+
+	withoutSourceIds(copy)
+
+	return copy
+}
+
+function duplicate(deck: Deck, node: SlideNode, op: OpOf<"shape"> & { kind: "duplicate" }, context: ApplyContext): ApplyResult<typeof op> {
+	if (
+		op.shapes.length === 0 ||
+		new Set(op.shapes).size !== op.shapes.length ||
+		(op.ids !== undefined && op.ids.length !== op.shapes.length)
+	)
+		return refused("malformed", "duplicate")
+	if (!Number.isFinite(op.dx) || !Number.isFinite(op.dy)) return refused("malformed", "offset")
+
+	const copies: { readonly copy: ShapeNode; readonly siblings: ShapeNode[] }[] = []
+
+	for (const id of op.shapes) {
+		const at = findShape(node.shapes, id)
+
+		if (at === undefined) return refused("notFound", `shape ${String(id)}`)
+
+		const blocked = uncopyable(at.shape)
+
+		if (blocked !== undefined) return blocked
+
+		const siblings = siblingsOf(node, at.parent)
+
+		if (siblings === undefined) return refused("notFound", `group ${String(at.parent)}`)
+
+		const copy = copyOf(node, at.shape, context)
+
+		if (isRefused(copy)) return copy
+
+		if (copy.xfrm !== undefined) copy.xfrm = { ...copy.xfrm, x: Math.round(copy.xfrm.x + op.dx), y: Math.round(copy.xfrm.y + op.dy) }
+
+		copies.push({ copy, siblings })
+	}
+
+	const used = idsOf(node.shapes)
+	let next = context.newShapeId(node.ref)
+	const fresh = (): number => {
+		while (used.has(next)) next++
+
+		return next
+	}
+	const ids: number[] = []
+
+	copies.forEach(({ copy, siblings }, k) => {
+		const wanted = op.ids?.[k]
+
+		copy.id = wanted !== undefined && wanted > 0 && !used.has(wanted) ? wanted : fresh()
+		used.add(copy.id)
+		ids.push(copy.id)
+
+		if (copy.children !== undefined) {
+			eachShape(copy.children, child => {
+				child.id = fresh()
+				used.add(child.id)
+			})
+		}
+
+		siblings.push(copy)
+	})
+
+	if (deck.format === "odp") refitGroups(node.shapes, new Set(ids))
+
+	bump(node)
+
+	return {
+		kind: "applied",
+		inverse: { ops: [{ family: "shape", kind: "delete", slide: node.ref, shapes: ids }], bytes: 0 },
+		op: { ...op, ids }
+	}
+}
+
 function remove(node: SlideNode, op: OpOf<"shape"> & { kind: "delete" }, context: ApplyContext): ApplyResult<typeof op> {
 	const found: At[] = []
 
@@ -1249,6 +1371,8 @@ function applyOne(deck: Deck, op: ShapeOp, context: ApplyContext): ApplyResult<S
 			return group(deck, node, op, context)
 		case "ungroup":
 			return ungroup(node, op, context)
+		case "duplicate":
+			return duplicate(deck, node, op, context)
 		case "align":
 			return align(deck, node, op, context)
 		case "distribute":
@@ -1285,6 +1409,8 @@ function shapeTouches(op: ShapeOp): readonly Touch[] {
 			return [...(op.id === undefined ? [] : [nodeTouch(op.slide, op.id)]), ...op.shapes.map(id => nodeTouch(op.slide, id))]
 		case "ungroup":
 			return [nodeTouch(op.slide, op.group)]
+		case "duplicate":
+			return (op.ids ?? []).map(id => nodeTouch(op.slide, id))
 		case "align":
 		case "distribute":
 			return op.shapes.map(id => ({ kind: "shape", slide: op.slide, shape: id, dirt: { kind: "xfrm" } }) as const)

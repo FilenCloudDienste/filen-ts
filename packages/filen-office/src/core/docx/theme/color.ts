@@ -109,13 +109,36 @@ function fromLinear(channel: number): number {
 	return channel <= 0.0031308 ? channel * 12.92 : 1.055 * channel ** (1 / 2.4) - 0.055
 }
 
-// A DrawingML colour transform (§20.1.2.3): values are fractions (val / 100000) and degrees for hue.
+export type ValuedColorTransformKind =
+	| "tint"
+	| "shade"
+	| "lum"
+	| "lumMod"
+	| "lumOff"
+	| "sat"
+	| "satMod"
+	| "satOff"
+	| "hue"
+	| "hueOff"
+	| "hueMod"
+	| "red"
+	| "redOff"
+	| "redMod"
+	| "green"
+	| "greenOff"
+	| "greenMod"
+	| "blue"
+	| "blueOff"
+	| "blueMod"
+	| "alpha"
+
+// A DrawingML colour transform (§20.1.2.3): values are fractions (val / 100000) and degrees for hue and hueOff.
 export type ColorTransform =
 	| {
-			readonly kind: "tint" | "shade" | "lumMod" | "lumOff" | "satMod" | "satOff" | "hueOff" | "hueMod" | "alpha"
+			readonly kind: ValuedColorTransformKind
 			readonly value: number
 	  }
-	| { readonly kind: "comp" | "inv" | "gray" }
+	| { readonly kind: "comp" | "inv" | "gray" | "gamma" | "invGamma" }
 
 // Applies transforms in document order. Alpha is not representable in a hex colour and is ignored here.
 export function applyColorTransforms(hex: string, transforms: readonly ColorTransform[]): string {
@@ -142,25 +165,81 @@ export function applyColorTransforms(hex: string, transforms: readonly ColorTran
 
 				break
 			}
+			case "lum":
 			case "lumMod":
 			case "lumOff":
+			case "sat":
 			case "satMod":
 			case "satOff":
+			case "hue":
 			case "hueMod":
 			case "hueOff": {
 				const hsl = rgbToHsl(rgb)
+				const value = transform.value
 
-				if (transform.kind === "lumMod") hsl.l *= transform.value
-				if (transform.kind === "lumOff") hsl.l += transform.value
-				if (transform.kind === "satMod") hsl.s *= transform.value
-				if (transform.kind === "satOff") hsl.s += transform.value
-				if (transform.kind === "hueMod") hsl.h *= transform.value
-				if (transform.kind === "hueOff") hsl.h += transform.value
+				switch (transform.kind) {
+					case "lum":
+						hsl.l = value
+						break
+					case "lumMod":
+						hsl.l *= value
+						break
+					case "lumOff":
+						hsl.l += value
+						break
+					case "sat":
+						hsl.s = value
+						break
+					case "satMod":
+						hsl.s *= value
+						break
+					case "satOff":
+						hsl.s += value
+						break
+					case "hue":
+						hsl.h = value
+						break
+					case "hueMod":
+						hsl.h *= value
+						break
+					case "hueOff":
+						hsl.h += value
+						break
+				}
 
 				rgb = hslToRgb(hsl)
 
 				break
 			}
+			// The component transforms are defined on linear RGB (scRGB).
+			case "red":
+			case "redOff":
+			case "redMod":
+			case "green":
+			case "greenOff":
+			case "greenMod":
+			case "blue":
+			case "blueOff":
+			case "blueMod": {
+				const kind = transform.kind
+				const channel = kind.startsWith("red") ? "r" : kind.startsWith("green") ? "g" : "b"
+				const linear = toLinear(rgb[channel])
+				const next = kind.endsWith("Off")
+					? linear + transform.value
+					: kind.endsWith("Mod")
+						? linear * transform.value
+						: transform.value
+
+				rgb = { ...rgb, [channel]: fromLinear(clamp01(next)) }
+
+				break
+			}
+			case "gamma":
+				rgb = { r: clamp01(fromLinear(rgb.r)), g: clamp01(fromLinear(rgb.g)), b: clamp01(fromLinear(rgb.b)) }
+				break
+			case "invGamma":
+				rgb = { r: clamp01(toLinear(rgb.r)), g: clamp01(toLinear(rgb.g)), b: clamp01(toLinear(rgb.b)) }
+				break
 			case "comp": {
 				const hsl = rgbToHsl(rgb)
 

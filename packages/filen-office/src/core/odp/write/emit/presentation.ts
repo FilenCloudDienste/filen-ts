@@ -91,10 +91,12 @@ export function odfShow(
 	const omitted: string[] = []
 	const out: ShowSettings = { ...show }
 
-	// A kiosk's restart after inactivity is no pause between loops.
+	// A kiosk always loops on its timings (as the player runs it); its restart after inactivity is no pause between loops.
 	if (out.kind === "kiosk") {
 		approximated.push("kiosk mode")
 		out.kind = "present"
+		out.loop = true
+		out.useTimings = true
 
 		if (out.restartMs !== undefined) {
 			omitted.push("kiosk restart")

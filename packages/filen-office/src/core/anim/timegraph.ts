@@ -140,6 +140,9 @@ class Graph implements CompiledTimegraph {
 	readonly speed: Float64Array
 	readonly accel: Float64Array
 	readonly decel: Float64Array
+	// Behaviour time filters (p:cTn tmFilter): node n's (t, t') pairs are filters[filterAt[n]..filterAt[n + 1]).
+	readonly filterAt: Int32Array
+	readonly filters: Float64Array
 	readonly frozen: Uint8Array
 	readonly restart: Uint8Array
 	readonly seek: Uint8Array
@@ -184,6 +187,8 @@ class Graph implements CompiledTimegraph {
 		this.speed = fields.speed
 		this.accel = fields.accel
 		this.decel = fields.decel
+		this.filterAt = fields.filterAt
+		this.filters = fields.filters
 		this.frozen = fields.frozen
 		this.restart = fields.restart
 		this.seek = fields.seek
@@ -285,6 +290,56 @@ function propagationLimit(count: number): number {
 
 // A node condition that closed a cycle: waits for an event nothing fires, so it never resolves.
 const CYCLE: Condition = { key: "\u0000cycle", node: -1, onBegin: true, delay: 0 }
+
+// A p:cTn tmFilter (ECMA-376 §19.5.33; MS-OI29500 2.1.1157: semicolon-separated "t,t'" pairs, both 0..1) appended to
+// `out` as flat (t, t') pairs. Nothing is appended for a malformed filter: a pair outside 0..1 or not two numbers, t
+// not strictly ascending, or fewer than two pairs.
+function parseTimeFilter(source: string, out: number[]): void {
+	const pairs = source.split(";")
+
+	if (pairs.length < 2) return
+
+	const start = out.length
+	let last = -1
+
+	for (const pair of pairs) {
+		const comma = pair.indexOf(",")
+		const ts = comma < 0 ? "" : pair.slice(0, comma).trim()
+		const vs = comma < 0 ? "" : pair.slice(comma + 1).trim()
+		const t = ts === "" ? Number.NaN : Number(ts)
+		const v = vs === "" ? Number.NaN : Number(vs)
+
+		if (!(t >= 0 && t <= 1 && v >= 0 && v <= 1) || t <= last) {
+			out.length = start
+
+			return
+		}
+
+		out.push(t, v)
+		last = t
+	}
+}
+
+// The piecewise-linear time filter of pairs [from, to) of `filters` at `u` (0..1); held flat before the first and
+// after the last point.
+function timeFiltered(filters: Float64Array, from: number, to: number, u: number): number {
+	let t0 = filters[from] ?? 0
+	let v0 = filters[from + 1] ?? 0
+
+	if (u <= t0) return v0
+
+	for (let i = from + 2; i < to; i += 2) {
+		const t1 = filters[i] ?? 1
+		const v1 = filters[i + 1] ?? 1
+
+		if (u <= t1) return v0 + ((v1 - v0) * (u - t0)) / (t1 - t0)
+
+		t0 = t1
+		v0 = v1
+	}
+
+	return v0
+}
 
 // Cycles among the node conditions (tn begin/end references, SMIL syncbases) broken as SMIL 3.0 §5.4.5 "Detecting
 // Cycles" does: a change notice that reaches an element already on its propagation path is ignored. The paths are the
@@ -407,6 +462,8 @@ export function compile(slide: SlideNode, layers: LayerIndex, budgets: TimingBud
 	const speed = new Float64Array(count)
 	const accel = new Float64Array(count)
 	const decel = new Float64Array(count)
+	const filterAt = new Int32Array(count + 1)
+	const filterPairs: number[] = []
 	const frozen = new Uint8Array(count)
 	const restart = new Uint8Array(count)
 	const seek = new Uint8Array(count)
@@ -495,6 +552,11 @@ export function compile(slide: SlideNode, layers: LayerIndex, budgets: TimingBud
 		speed[n] = ctn.spd === undefined || ctn.spd <= 0 ? 1 : ctn.spd / 100000
 		accel[n] = Math.min(1, Math.max(0, (ctn.accel ?? 0) / 100000))
 		decel[n] = Math.min(1, Math.max(0, (ctn.decel ?? 0) / 100000))
+
+		// Only behaviours play a filter: one on a container would warp its children's times, which no deck shows.
+		if (kind[n] === KIND_BEHAVIOR && ctn.tmFilter !== undefined) parseTimeFilter(ctn.tmFilter, filterPairs)
+
+		filterAt[n + 1] = filterPairs.length
 		restart[n] = ctn.restart === "never" ? RESTART_NEVER : ctn.restart === "whenNotActive" ? RESTART_WHEN_NOT_ACTIVE : RESTART_ALWAYS
 		seek[n] = ctn.nextAc === "seek" ? 1 : 0
 		concurrent[n] = ctn.concurrent === true ? 1 : 0
@@ -914,6 +976,8 @@ export function compile(slide: SlideNode, layers: LayerIndex, budgets: TimingBud
 		speed,
 		accel,
 		decel,
+		filterAt,
+		filters: Float64Array.from(filterPairs),
 		frozen,
 		restart,
 		seek,
@@ -1616,7 +1680,12 @@ class Instance implements TimegraphInstance {
 
 		if (u > 1) u = 2 - u
 
-		return ease(Math.min(1, Math.max(0, u)), g.accel[n] ?? 0, g.decel[n] ?? 0)
+		const eased = ease(Math.min(1, Math.max(0, u)), g.accel[n] ?? 0, g.decel[n] ?? 0)
+		const from = g.filterAt[n] ?? 0
+		const to = g.filterAt[n + 1] ?? 0
+
+		// The time filter warps the eased simple time.
+		return to > from ? timeFiltered(g.filters, from, to, eased) : eased
 	}
 
 	sample(tMs: number): LayerState[] {

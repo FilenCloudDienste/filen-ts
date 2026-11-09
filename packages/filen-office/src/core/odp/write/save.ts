@@ -20,7 +20,7 @@ import { openOdp, type OdpOpen, type OdpParts } from "../read/document"
 import { packagePart } from "../read/fills"
 import { notesDiffer, slideDiffers } from "./meaning"
 import { withoutManifestEntries } from "./manifestPrune"
-import { odpSplice, withManifestEntries, type OdpSaveInput, type OdpSplice } from "./splice"
+import { odpSplice, sameCopied, withManifestEntries, type OdpSaveInput, type OdpSplice } from "./splice"
 import { isRefused } from "../../presentation/refusal"
 
 // Saving an ODP deck into its own source (§1.5.4): the splice (splice.ts) at revision R, proof gate 2, then the zip.
@@ -67,6 +67,7 @@ const CHUNK = 1024 * 1024
 // The entries the media emit adds (Media/media<id>.<ext>).
 const MEDIA_ENTRY = /^Media\//u
 const MANIFEST = "META-INF/manifest.xml"
+const THUMBNAIL = "Thumbnails/thumbnail.png"
 
 export async function odpSnapshot(input: OdpSaveInput): Promise<OdpSnapshot | Refused> {
 	const parts = input.source.parts
@@ -96,8 +97,15 @@ export async function odpSnapshot(input: OdpSaveInput): Promise<OdpSnapshot | Re
 		new Set([...replacedNames, ...proposed, ...(input.own ?? [])].map(name => name.toLowerCase()))
 	)
 	const pruned = proposed.length === 0 ? proposed : unnamed(proposed, splice, parts)
-	const prune = [...pruned, ...media.released]
-	const unlisted = [...pruned, ...media.manifest]
+	// ODF Part 2 §3.8: the preview shows the first page; a save that rewrites the pages cannot redraw it, so drops it.
+	const thumbnail =
+		(replacedNames.has("content.xml") || replacedNames.has("styles.xml")) &&
+		!pruned.includes(THUMBNAIL) &&
+		archive.entries.some(entry => entry.name === THUMBNAIL)
+			? [THUMBNAIL]
+			: []
+	const prune = [...pruned, ...thumbnail, ...media.released]
+	const unlisted = [...pruned, ...thumbnail, ...media.manifest]
 	let replace = splice.replace
 
 	if (unlisted.length > 0 || media.restored.length > 0) {
@@ -408,7 +416,7 @@ async function verifyPages(snapshot: OdpSnapshot, opened: OdpOpen, copiedBytes: 
 
 			const span = opened.parts.content.pages[index]
 
-			if (span === undefined || !sameRange(source, page.span.start, page.span.end, opened.parts.content.bytes, span.start, span.end))
+			if (span === undefined || !sameCopied(source, page, opened.parts.content.bytes, span.start, span.end))
 				return pageRefusal(snapshot, index, page.ref, "was not copied as it was")
 
 			continue

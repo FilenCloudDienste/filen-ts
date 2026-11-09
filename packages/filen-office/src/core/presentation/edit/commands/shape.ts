@@ -205,16 +205,55 @@ export function dragTurn(
 	return Math.round((((end - start) * 180) / Math.PI) * DEGREE)
 }
 
-// Rotate ▸ Right 90° / Left 90°: each shape about its own centre; one the file locks against turning stays.
+// The shapes turned by `delta` (60,000ths, clockwise), each about its own centre; one the file locks against turning
+// stays.
+export function turnedShapes(shapes: readonly PlacedShape[], delta: number): PlacedShape[] {
+	return shapes.map(shape => (shape.locks?.noRot === true ? shape : { ...shape, xfrm: turnedXfrm(shape.xfrm, delta, false) }))
+}
+
+// Rotate ▸ Right 90° / Left 90°.
 export function rotateOp(slide: SlideRef, shapes: readonly PlacedShape[], quarter: 1 | -1): DeckOp | undefined {
-	return xfrmsOp(
-		slide,
-		shapes,
-		shapes.map(shape => ({
-			id: shape.id,
-			xfrm: shape.locks?.noRot === true ? shape.xfrm : turnedXfrm(shape.xfrm, quarter * 90 * DEGREE, false)
-		}))
-	)
+	return xfrmsOp(slide, shapes, turnedShapes(shapes, quarter * 90 * DEGREE))
+}
+
+// Shift+arrow on a Mac: the right (bottom) edge moves NUDGE_PX the arrow's way along the box's own axes, the left (top)
+// edge staying; a shape whose file locks its aspect scales both sides, one locked against resizing keeps its box, and
+// no side shrinks below one step.
+export function steppedShapes(shapes: readonly PlacedShape[], direction: NudgeDirection): PlacedShape[] {
+	const step = NUDGE_PX * EMU_PER_PX
+	const sign = direction === "right" || direction === "down" ? 1 : -1
+	const horizontal = direction === "left" || direction === "right"
+
+	return shapes.map(shape => {
+		const xfrm = shape.xfrm
+
+		if (!canResize(shape) || (sign < 0 && (horizontal ? xfrm.cx : xfrm.cy) < 2 * step)) return shape
+
+		const angle = radians(xfrm.rot)
+		const along = sign * step
+		const dx = horizontal ? along * Math.cos(angle) : -along * Math.sin(angle)
+		const dy = horizontal ? along * Math.sin(angle) : along * Math.cos(angle)
+
+		return {
+			...shape,
+			xfrm: resizedXfrm(xfrm, horizontal ? "e" : "s", dx, dy, { keepRatio: shape.locks?.noChangeAspect === true })
+		}
+	})
+}
+
+// Duplicate (Ctrl+D): copies DUPLICATE_OFFSET_PX right and down of the originals; a Ctrl+drag gives its own offset
+// (EMU).
+export const DUPLICATE_OFFSET_PX = 10
+
+export function duplicateOp(
+	slide: SlideRef,
+	ids: readonly number[],
+	dx = DUPLICATE_OFFSET_PX * EMU_PER_PX,
+	dy = DUPLICATE_OFFSET_PX * EMU_PER_PX
+): DeckOp | undefined {
+	if (ids.length === 0) return undefined
+
+	return { family: "shape", kind: "duplicate", slide, shapes: [...ids], dx, dy }
 }
 
 // A line's two ends as they show (slide EMU): it draws from its box's top-left to its bottom-right corner, a flip

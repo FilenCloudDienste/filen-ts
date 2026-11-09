@@ -49,8 +49,8 @@ export interface CommonTimeNode {
 	autoRev?: boolean
 	syncBehavior?: "canSlip" | "locked"
 	masterRel?: "sameClick" | "lastClick" | "nextClick"
-	// The rest of CT_TLCommonTimeNodeData (ECMA-376 §19.5.33) as written: none plays here, all are written back (a
-	// regenerated mc:Fallback, a node written from the model keep them).
+	// The rest of CT_TLCommonTimeNodeData (ECMA-376 §19.5.33) as written: only a behaviour's tmFilter plays here, all
+	// are written back (a regenerated mc:Fallback, a node written from the model keep them).
 	evtFilter?: string
 	tmFilter?: string
 	display?: string

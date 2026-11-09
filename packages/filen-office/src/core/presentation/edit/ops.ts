@@ -161,6 +161,17 @@ export type ShapeOp =
 			readonly name?: string
 	  }
 	| { readonly family: "shape"; readonly kind: "ungroup"; readonly slide: SlideRef; readonly group: number }
+	// Copies of shapes of one slide (Duplicate, Ctrl+D), each moved by (dx, dy) EMU and put on top of its siblings, in
+	// the order named. `ids`: the copies' ids, which the op as applied carries (a redo gives them the same).
+	| {
+			readonly family: "shape"
+			readonly kind: "duplicate"
+			readonly slide: SlideRef
+			readonly shapes: readonly number[]
+			readonly dx: number
+			readonly dy: number
+			readonly ids?: readonly number[]
+	  }
 	| {
 			readonly family: "shape"
 			readonly kind: "align"

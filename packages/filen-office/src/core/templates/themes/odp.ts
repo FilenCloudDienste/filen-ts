@@ -90,6 +90,14 @@ const FOOTERS = [
 	["page-number", 0.70625, 0.225, "end"]
 ] as const
 export const ODP_TITLE_SLIDE = { title: [0.125, 0.1637, 0.75, 0.3481], subtitle: [0.125, 0.5252, 0.75, 0.2414] } as const
+// The content layouts' boxes, as the PresentationML master's Title and Content and Two Content layouts place them.
+const HALF_W = (CONTENT_W - 0.0187) / 2
+export const ODP_CONTENT_SLIDE = {
+	title: TITLE,
+	body: BODY,
+	left: [MARGIN_X, BODY[1], HALF_W, BODY[3]],
+	right: [MARGIN_X + HALF_W + 0.0187, BODY[1], HALF_W, BODY[3]]
+} as const
 
 const BODY_SIZES = [28, 24, 20, 18, 18, 18, 18, 18, 18]
 

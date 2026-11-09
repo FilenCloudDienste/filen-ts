@@ -16,9 +16,9 @@ import type { SlidePainter } from "../SlideView"
 // and repaint the layers that show them; the bitmaps a drawing carries (a metafile's embedded images) take theirs at
 // once, under the names the worker gives them. The URLs are shared by every paint of the session (the next slide, the show, a slide
 // painted again) and kept, least recently used out, up to a byte budget once no paint shows them;
-// releaseSlidePictures revokes a closed session's. Effects beyond the drawing's own shadow are CSS
-// filters (glow, blur, further outer shadows) and a masked mirror copy (reflection); soft edges and inner shadows are
-// not drawn.
+// releaseSlidePictures revokes a closed session's. Effects beyond the drawing's own shadow are an SVG filter (inner
+// shadow, soft edge), CSS filters (glow, blur, further outer shadows) and a masked mirror copy (reflection), on the
+// drawing, or on the text of a shape with no fill or line (SlideLayer.effectsOnText).
 
 // Types the page shows natively (an SVG in <image> runs no script).
 const SHOWN_TYPES: ReadonlySet<string> = new Set(["image/png", "image/jpeg", "image/gif", "image/bmp", "image/webp", "image/svg+xml"])
@@ -226,11 +226,87 @@ function imageKey(image: DrawingImage): string | undefined {
 	return typeof key === "string" ? key : undefined
 }
 
-// The CSS filter of a layer's effects (those a filter can draw).
-function effectFilter(effects: RenderEffects | undefined): string {
+const SVG_NS = "http://www.w3.org/2000/svg"
+
+function primitive(document: Document, parent: Element, name: string, attributes: Readonly<Record<string, string>>): Element {
+	const element = document.createElementNS(SVG_NS, name)
+
+	for (const key in attributes) element.setAttribute(key, attributes[key] as string)
+
+	parent.append(element)
+
+	return element
+}
+
+// The SVG filter (in a zero-size SVG) of the effects no CSS filter function draws: an inner shadow (§20.1.8.40: the
+// colour, offset and blurred, shown inside the shape's alpha only) and a soft edge (§20.1.8.53: the alpha eroded by
+// half the radius and blurred, so the edge fades out over it); undefined for neither.
+function effectSvg(document: Document, effects: RenderEffects | undefined, id: string): SVGSVGElement | undefined {
+	let inner: Extract<RenderEffects[number], { kind: "outerShadow" | "innerShadow" }> | undefined
+	let soft: Extract<RenderEffects[number], { kind: "softEdge" }> | undefined
+
+	for (const effect of effects ?? []) {
+		if (effect.kind === "innerShadow") inner ??= effect
+		else if (effect.kind === "softEdge" && finite(effect.radius) > 0) soft ??= effect
+	}
+
+	if (inner === undefined && soft === undefined) return undefined
+
+	const svg = document.createElementNS(SVG_NS, "svg")
+	const filter = primitive(document, svg, "filter", { id, "color-interpolation-filters": "sRGB" })
+	let current = "SourceGraphic"
+
+	svg.setAttribute("aria-hidden", "true")
+	svg.setAttribute("width", "0")
+	svg.setAttribute("height", "0")
+	svg.style.cssText = "position:absolute;width:0;height:0;overflow:hidden"
+
+	if (inner !== undefined) {
+		const value = inner.color >>> 0
+
+		// The shape's alpha offset and blurred, inverted (blurring first keeps the region edge out of it).
+		primitive(document, filter, "feOffset", {
+			in: "SourceAlpha",
+			dx: String(finite(inner.dx)),
+			dy: String(finite(inner.dy)),
+			result: "io"
+		})
+		primitive(document, filter, "feGaussianBlur", { in: "io", stdDeviation: String(Math.max(0, finite(inner.blur)) / 2), result: "ib" })
+		primitive(document, primitive(document, filter, "feComponentTransfer", { in: "ib", result: "ii" }), "feFuncA", {
+			type: "table",
+			tableValues: "1 0"
+		})
+		primitive(document, filter, "feFlood", {
+			"flood-color": `rgb(${String(value >>> 24)},${String((value >>> 16) & 255)},${String((value >>> 8) & 255)})`,
+			"flood-opacity": String(Math.round(((value & 255) / 255) * 1000) / 1000),
+			result: "ic"
+		})
+		primitive(document, filter, "feComposite", { in: "ic", in2: "ii", operator: "in", result: "is" })
+		primitive(document, filter, "feComposite", { in: "is", in2: "SourceAlpha", operator: "in", result: "it" })
+
+		const merge = primitive(document, filter, "feMerge", { result: "inner" })
+
+		primitive(document, merge, "feMergeNode", { in: current })
+		primitive(document, merge, "feMergeNode", { in: "it" })
+		current = "inner"
+	}
+
+	if (soft !== undefined) {
+		const radius = finite(soft.radius)
+
+		primitive(document, filter, "feMorphology", { in: "SourceAlpha", operator: "erode", radius: String(radius / 2), result: "se" })
+		primitive(document, filter, "feGaussianBlur", { in: "se", stdDeviation: String(radius / 4), result: "sb" })
+		primitive(document, filter, "feComposite", { in: current, in2: "sb", operator: "in", result: "soft" })
+	}
+
+	return svg
+}
+
+// The CSS filter of a layer's effects (those a filter can draw), after the SVG filter `svg` (effectSvg) when given.
+function effectFilter(effects: RenderEffects | undefined, svg: string | undefined): string {
 	if (effects === undefined) return ""
 
-	const out: string[] = []
+	const out: string[] = svg === undefined ? [] : [`url(#${svg})`]
 
 	for (const effect of effects) {
 		switch (effect.kind) {
@@ -796,58 +872,14 @@ function paint(render: Parameters<SlidePainter>[0], context: Parameters<SlidePai
 				? "position:absolute;left:0;top:0;width:0;height:0"
 				: `position:absolute;left:0;top:0;width:${String(width)}px;height:${String(height)}px;transform-origin:0 0;transform:${cssMatrix(layer.matrix)}`
 
-		if (layer.drawing.itemCount > 0) {
-			const drawing = positioned(document, "fo-slide-drawing", own)
-			const filter = effectFilter(layer.effects)
-
-			if (filter !== "") drawing.style.filter = filter
-			if (layer.alt !== undefined) {
-				drawing.setAttribute("role", "img")
-				drawing.setAttribute("aria-label", layer.alt)
-			}
-
-			drawInto(drawing, layer.drawing, `fo-s${String(id)}-${String(index)}-`)
-
-			for (const effect of layer.effects ?? []) {
-				if (effect.kind !== "reflection") continue
-
-				// A mirror copy under the shape, faded from startAlpha to endAlpha over endPos of its height.
-				const mirror = positioned(document, "fo-slide-reflection", own)
-				const inner = document.createElement("div")
-				const h = finite(layer.drawing.height)
-				const end = Math.max(0, Math.min(1, effect.endPos)) * 100
-
-				inner.style.cssText =
-					`transform-origin:0 0;transform:translate(0,${String(2 * h + finite(effect.distance))}px) scale(1,-1);` +
-					`mask-image:linear-gradient(to top,rgba(0,0,0,${String(effect.startAlpha)}) 0%,rgba(0,0,0,${String(effect.endAlpha)}) ${String(end)}%,transparent ${String(end)}%)` +
-					(effect.blur > 0 ? `;filter:blur(${String(finite(effect.blur))}px)` : "")
-				mirror.setAttribute("aria-hidden", "true")
-				drawInto(inner, layer.drawing, `fo-s${String(id)}-${String(index)}-r-`)
-				mirror.append(inner)
-				element.append(mirror)
-			}
-
-			element.append(drawing)
-		}
-
-		const prompt = prompts && layer.text === undefined ? layer.prompt : undefined
-		const text = layer.text ?? prompt
-
-		if (text !== undefined) {
-			const textMatrix = layer.textMatrix ?? layer.matrix
-			const holder = positioned(
-				document,
-				prompt === undefined ? "fo-slide-text" : "fo-slide-prompt",
-				inverse === undefined ? textMatrix : multiply(inverse, textMatrix)
-			)
-
-			// A prompt is no content: screen readers, selection and find skip it.
-			if (prompt !== undefined) {
-				holder.setAttribute("aria-hidden", "true")
-				holder.dataset["foPrompt"] = ""
-				holder.style.userSelect = "none"
-			}
-
+		// A shape with no fill or line draws its effects on its text (effectsOnText), else on its drawing.
+		const onText = layer.effectsOnText === true && layer.text !== undefined
+		const svgId = `fo-s${String(id)}-${String(index)}-fx`
+		const svg = effectSvg(document, layer.effects, svgId)
+		const filter = effectFilter(layer.effects, svg === undefined ? undefined : svgId)
+		const textMatrix = layer.textMatrix ?? layer.matrix
+		const textPlace = inverse === undefined ? textMatrix : multiply(inverse, textMatrix)
+		const textInto = (holder: HTMLElement, text: TextPage): void => {
 			// The TextPage is both the page's tables and the DrawingML paint tables its styles index.
 			const page = paintPage(text.page, { document, tables: text, paints: text })
 
@@ -857,6 +889,80 @@ function paint(render: Parameters<SlidePainter>[0], context: Parameters<SlidePai
 
 			bulletPictures(page, text)
 			holder.append(page.root)
+		}
+		// Mirror copies under the shape, each faded from startAlpha to endAlpha over endPos of its height.
+		const reflect = (fill: (inner: HTMLElement) => void): void => {
+			for (const effect of layer.effects ?? []) {
+				if (effect.kind !== "reflection") continue
+
+				const mirror = positioned(document, "fo-slide-reflection", own)
+				const inner = document.createElement("div")
+				const h = finite(layer.drawing.height)
+				const end = Math.max(0, Math.min(1, effect.endPos)) * 100
+				const filters = [svg === undefined ? "" : `url(#${svgId})`, effect.blur > 0 ? `blur(${String(finite(effect.blur))}px)` : ""]
+					.filter(part => part !== "")
+					.join(" ")
+
+				inner.style.cssText =
+					`transform-origin:0 0;transform:translate(0,${String(2 * h + finite(effect.distance))}px) scale(1,-1);` +
+					`mask-image:linear-gradient(to top,rgba(0,0,0,${String(effect.startAlpha)}) 0%,rgba(0,0,0,${String(effect.endAlpha)}) ${String(end)}%,transparent ${String(end)}%)` +
+					(filters === "" ? "" : `;filter:${filters}`)
+				mirror.setAttribute("aria-hidden", "true")
+				fill(inner)
+				mirror.append(inner)
+				element.append(mirror)
+			}
+		}
+
+		if (svg !== undefined) element.append(svg)
+
+		if (layer.drawing.itemCount > 0) {
+			const drawing = positioned(document, "fo-slide-drawing", own)
+
+			if (filter !== "" && !onText) drawing.style.filter = filter
+			if (layer.alt !== undefined) {
+				drawing.setAttribute("role", "img")
+				drawing.setAttribute("aria-label", layer.alt)
+			}
+
+			drawInto(drawing, layer.drawing, `fo-s${String(id)}-${String(index)}-`)
+
+			if (!onText) reflect(inner => drawInto(inner, layer.drawing, `fo-s${String(id)}-${String(index)}-r-`))
+
+			element.append(drawing)
+		}
+
+		const prompt = prompts && layer.text === undefined ? layer.prompt : undefined
+		const text = layer.text ?? prompt
+
+		if (text !== undefined) {
+			const holder = positioned(document, prompt === undefined ? "fo-slide-text" : "fo-slide-prompt", textPlace)
+
+			// A prompt is no content: screen readers, selection and find skip it.
+			if (prompt !== undefined) {
+				holder.setAttribute("aria-hidden", "true")
+				holder.dataset["foPrompt"] = ""
+				holder.style.userSelect = "none"
+			}
+
+			// The text's mirror copy is inert (its links take no focus or pointer; selection and find skip it). A layer
+			// whose matrix cannot be inverted has no local space to mirror the text in (its drawing's mirror collapses too).
+			if (onText) {
+				if (filter !== "") holder.style.filter = filter
+				if (inverse !== undefined) {
+					reflect(inner => {
+						const copy = positioned(document, "fo-slide-reflection-text", textPlace)
+
+						copy.setAttribute("inert", "")
+						copy.style.pointerEvents = "none"
+						copy.style.userSelect = "none"
+						textInto(copy, text)
+						inner.append(copy)
+					})
+				}
+			}
+
+			textInto(holder, text)
 			element.append(holder)
 		}
 

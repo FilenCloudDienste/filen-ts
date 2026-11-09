@@ -41,6 +41,8 @@ export interface InkStore {
 	listen(listener: (change: InkChange) => void): () => void
 	setTool(tool: InkTool): void
 	setColor(color: string): void
+	// The pen's colour at the show's start and after a reset (the deck's pen colour).
+	setDefaultPen(color: string): void
 	strokes(slide: SlideRef): readonly InkStrokeBuffer[]
 	// A pen or highlighter stroke (by the tool) starting at a point; ignored under any other tool.
 	begin(slide: SlideRef, x: number, y: number): void
@@ -100,6 +102,7 @@ export function createInkStore(): InkStore {
 	let current: { slide: SlideRef; stroke: InkStrokeBuffer } | undefined
 	// The pen's colour, kept while the highlighter (which starts yellow) is picked.
 	let penColor = INK_PEN_COLOR
+	let defaultPen = INK_PEN_COLOR
 
 	const set = (next: Partial<InkState>): void => {
 		const merged = { ...state, ...next }
@@ -159,6 +162,12 @@ export function createInkStore(): InkStore {
 			if (state.tool !== "highlighter") penColor = color
 
 			set({ color })
+		},
+		setDefaultPen: color => {
+			defaultPen = color
+			penColor = color
+
+			if (state.tool !== "highlighter") set({ color })
 		},
 		strokes: slide => slides.get(slide) ?? [],
 		begin: (slide, x, y) => {
@@ -254,8 +263,8 @@ export function createInkStore(): InkStore {
 
 			for (const slide of inked) emit({ kind: "redraw", slide })
 
-			set({ tool: "none", color: INK_PEN_COLOR, inked: false })
-			penColor = INK_PEN_COLOR
+			set({ tool: "none", color: defaultPen, inked: false })
+			penColor = defaultPen
 		}
 	}
 }

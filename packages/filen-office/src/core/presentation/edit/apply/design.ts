@@ -1,5 +1,6 @@
 import { filenTheme } from "../../../templates/themes/catalog"
 import { parseThemeName, themeName } from "../../../templates/themes/model"
+import { odpLayoutType } from "../../../odp/read/layoutType"
 import { odpGalleryMaster } from "../../../templates/themes/odp"
 import { LAYOUT_TYPES, designSet, type FilenLayoutType } from "../../../templates/themes/pptx"
 import { encodeUtf8 } from "../../../xml/index"
@@ -1455,6 +1456,8 @@ export function designLayouts(
 ): { readonly ref: SlideRef; readonly master: SlideRef; readonly type?: string; readonly name?: string }[] {
 	return deck.layouts.flatMap(ref => {
 		const node = deck.nodes.get(ref)
+		// ODP: layoutType is the presentation page layout's style:name; the type is what its placeholders make it.
+		const type = node === undefined ? undefined : deck.format === "odp" ? odpLayoutType(node) : node.layoutType
 
 		return node === undefined || node.parent === undefined
 			? []
@@ -1462,7 +1465,7 @@ export function designLayouts(
 					{
 						ref,
 						master: node.parent,
-						...(node.layoutType === undefined ? {} : { type: node.layoutType }),
+						...(type === undefined ? {} : { type }),
 						...(node.name === undefined ? {} : { name: node.name })
 					}
 				]

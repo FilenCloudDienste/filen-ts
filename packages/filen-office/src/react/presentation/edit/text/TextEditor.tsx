@@ -6,18 +6,16 @@ import { EditorView } from "prosemirror-view"
 import {
 	backspaceAtStart,
 	caretRunProps,
+	changeLevel,
 	deleteAtEnd,
 	horizontalMove,
 	insertLineBreak,
+	moveParagraphs,
 	pastedSlice,
 	plainTextSlice,
 	selectAllText,
-	setParaProps,
 	splitParagraph,
-	stepFontSize,
 	tabKey,
-	toggleRunFlag,
-	toggleUnderline,
 	type PastedElement,
 	type TextCommand
 } from "../../../../core/presentation/edit/commands/text"
@@ -32,8 +30,9 @@ import { safeClipboardHtml } from "../../../docx/edit/clipboard"
 import { TextEditController } from "./controller"
 import { applePlatform, type TextEditing } from "./editing"
 import { pendingInsertion, TextEcho } from "./echo"
-import { DEFAULT_TEXT_BINDINGS, textKeyCommand, type TextKeyBindings, type TextKeyCommand } from "./keys"
+import { defaultTextBindings, formatKey, textKeyCommand, type TextKeyBindings, type TextKeyCommand } from "./keys"
 import { measureCacheFor } from "./layoutMap"
+import { cellNavigation, placeholderNavigation, type CellMove, type TextNavigation } from "./navigate"
 
 // The body being edited on the slide: the worker's TextPage painted under the shape's text matrix, the caret and the
 // selection drawn over it from the transferred layout, and an invisible ProseMirror view that holds focus and takes
@@ -58,13 +57,18 @@ export interface PresentationTextEditorProps {
 	readonly readOnly?: boolean
 	// Where a click lands first, in slide px (the click that opened the body).
 	readonly at?: { readonly x: number; readonly y: number }
+	// The body opens with all its text selected (Enter on a shape selected as an object); `at` wins when both are set.
+	readonly selectAll?: boolean
 	readonly onExit: () => void
+	// Another body to open (a table's next cell, the next placeholder): this one is closed, its text sent, first.
+	// Without it the cell and placeholder keys do what they do in any body.
+	readonly onNavigate?: (to: TextNavigation) => void
 	readonly onRefused: (reason: PresentationRefusal) => void
 	// Cmd (Apple platforms) or Ctrl as the shortcut modifier.
 	readonly apple?: boolean
 	// What carets are measured with: this realm's OffscreenCanvas (or <canvas>) by default.
 	readonly measurer?: TextMeasurer
-	// The rebindable keys as the app's keymap resolves them (PowerPoint's by default).
+	// The rebindable keys as the app's keymap resolves them (PowerPoint's for the platform by default).
 	readonly bindings?: TextKeyBindings
 }
 
@@ -125,8 +129,6 @@ function isTyping(tr: Transaction): boolean {
 	)
 }
 
-const ALIGN_OF = { alignLeft: "l", alignCenter: "ctr", alignRight: "r", justify: "just" } as const
-
 const insertTab: TextCommand = (state, dispatch) => {
 	dispatch?.(state.tr.insertText("\t").scrollIntoView())
 
@@ -151,12 +153,16 @@ export function PresentationTextEditor({
 	render,
 	readOnly,
 	at,
+	selectAll,
 	onExit,
+	onNavigate,
 	onRefused,
 	apple: appleProp,
 	measurer: measurerProp,
-	bindings = DEFAULT_TEXT_BINDINGS
+	bindings: bindingsProp
 }: PresentationTextEditorProps) {
+	const apple = appleProp ?? applePlatform()
+	const bindings = bindingsProp ?? defaultTextBindings(apple)
 	const rootRef = useRef<HTMLDivElement | null>(null)
 	const boxRef = useRef<HTMLDivElement | null>(null)
 	const pageRef = useRef<HTMLDivElement | null>(null)
@@ -165,13 +171,11 @@ export function PresentationTextEditor({
 	const [controller, setController] = useState<TextEditController | undefined>(undefined)
 	// Draws the body again (a new scale moves the box, the caret and the sink with it).
 	const redraw = useRef<(() => void) | undefined>(undefined)
-	const latest = useRef({ onExit, onRefused, scale, readOnly: readOnly === true, bindings })
-	// The first caret's place: read once, when the body opens.
-	const firstAt = useRef(at)
+	const latest = useRef({ onExit, onRefused, onNavigate, render, shape, scale, readOnly: readOnly === true, bindings })
+	// The first caret's place (or the whole text selected): read once, when the body opens.
+	const firstAt = useRef<{ readonly x: number; readonly y: number } | "all" | undefined>(at ?? (selectAll === true ? "all" : undefined))
 
-	latest.current = { onExit, onRefused, scale, readOnly: readOnly === true, bindings }
-
-	const apple = appleProp ?? applePlatform()
+	latest.current = { onExit, onRefused, onNavigate, render, shape, scale, readOnly: readOnly === true, bindings }
 
 	// The seed: once per mounted body. Keys typed from now until the view is ready are held, then typed into the body.
 	useEffect(() => {
@@ -300,21 +304,28 @@ export function PresentationTextEditor({
 
 		const run = (command: TextCommand, typing = false): boolean => !latest.current.readOnly && controller.run(command, typing)
 		const defaults = (): typeof controller.defaults => controller.defaults
+		// Leaves this body for another one, its text sent first; false when there is nowhere to go.
+		const navigate = (to: TextNavigation | undefined): boolean => {
+			const host = latest.current.onNavigate
+
+			if (to === undefined || host === undefined || (to.kind !== "open" && latest.current.readOnly)) return false
+
+			void controller.close().then(() => {
+				host(to)
+			})
+
+			return true
+		}
+		const cellKey = (move: CellMove): boolean =>
+			latest.current.shape.cell !== undefined &&
+			latest.current.onNavigate !== undefined &&
+			navigate(cellNavigation(latest.current.render, latest.current.shape, move))
 		const bound = (command: TextKeyCommand): boolean => {
+			const format = formatKey(command)
+
+			if (format !== undefined) return run(format(defaults())) || true
+
 			switch (command) {
-				case "bold":
-				case "italic":
-					return run(toggleRunFlag(command === "bold" ? "b" : "i", defaults())) || true
-				case "underline":
-					return run(toggleUnderline(defaults())) || true
-				case "growFont":
-				case "shrinkFont":
-					return run(stepFontSize(command === "growFont" ? 1 : -1, defaults())) || true
-				case "alignLeft":
-				case "alignCenter":
-				case "alignRight":
-				case "justify":
-					return run(setParaProps({ algn: ALIGN_OF[command] }, defaults())) || true
 				case "lineBreak":
 					return run(insertLineBreak) || true
 				case "levelDown":
@@ -322,6 +333,16 @@ export function PresentationTextEditor({
 					return run(tabKey(command === "levelDown" ? 1 : -1, defaults())) || true
 				case "link":
 					return (!latest.current.readOnly && editing.requestLink()) || true
+				case "promote":
+				case "demote":
+					return run(changeLevel(command === "demote" ? 1 : -1, defaults())) || true
+				case "moveParagraphUp":
+				case "moveParagraphDown":
+					return run(moveParagraphs(command === "moveParagraphDown" ? 1 : -1)) || true
+				case "nextPlaceholder":
+					return navigate(placeholderNavigation(latest.current.render, latest.current.shape)) || true
+				default:
+					return true
 			}
 		}
 
@@ -336,6 +357,20 @@ export function PresentationTextEditor({
 
 				return true
 			}
+
+			// In a table cell Tab and Shift+Tab go to the next and previous cell, over the level keys; a tab character is
+			// Ctrl+Tab (Option+Shift+Tab on a Mac).
+			if (key === "Tab" && latest.current.shape.cell !== undefined && latest.current.onNavigate !== undefined && !event.metaKey) {
+				const tab = apple ? event.altKey && event.shiftKey && !event.ctrlKey : event.ctrlKey && !event.altKey && !event.shiftKey
+
+				if (tab) return run(insertTab) || true
+				if (!event.ctrlKey && !event.altKey) return cellKey(event.shiftKey ? "previous" : "next") || true
+			}
+
+			// The rebindable keys first: some are arrows (Alt+Shift+arrows promote, demote and move paragraphs).
+			const command = event.isComposing ? undefined : textKeyCommand(event, latest.current.bindings, apple)
+
+			if (command !== undefined) return bound(command)
 
 			if (key === "ArrowLeft" || key === "ArrowRight") {
 				const direction = key === "ArrowRight" ? 1 : -1
@@ -374,9 +409,6 @@ export function PresentationTextEditor({
 				if (lower === "a" && !event.shiftKey) return run(selectAllText) || true
 			}
 
-			const command = event.isComposing ? undefined : textKeyCommand(event, latest.current.bindings, apple)
-
-			if (command !== undefined) return bound(command)
 			if (mod) return false
 
 			if (key === "Enter" && !event.isComposing) return run(splitParagraph)
@@ -414,6 +446,10 @@ export function PresentationTextEditor({
 				const box = controller.map.caret(head)
 				const goal = controller.goalX ?? box?.x ?? 0
 				const target = controller.map.lineMove(head, key === "ArrowUp" ? -1 : 1, goal)
+
+				// Past a table cell's first or last line: the cell above or below.
+				if (target === undefined && !event.shiftKey && !event.altKey && cellKey(key === "ArrowUp" ? "up" : "down")) return true
+
 				const next = target ?? (key === "ArrowUp" ? 1 : state.doc.content.size - 1)
 
 				controller.setSelection(event.shiftKey ? state.selection.anchor : next, next)
@@ -716,7 +752,9 @@ export function PresentationTextEditor({
 
 		firstAt.current = undefined
 
-		if (at !== undefined) {
+		// Enter on the shape: its whole text selected, so what is typed ahead replaces it.
+		if (at === "all") selectAllText(controller.state, tr => controller.dispatch(tr))
+		else if (at !== undefined) {
 			const inverse = invert(controller.matrix)
 			const point = inverse === undefined ? undefined : apply(inverse, at.x, at.y)
 

@@ -202,6 +202,44 @@ describe("the canvas layer's pointer", () => {
 		expect(ops).toMatchObject([{ kind: "setXfrm", xfrm: { rot: 90 * 60000 } }])
 	})
 
+	it("a right click selects the shape under it, keeps a selection it lands in, and clears it on empty slide", () => {
+		const menu = (x: number, y: number): void => {
+			act(() => {
+				layer().dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, button: 2, clientX: x, clientY: y }))
+			})
+		}
+
+		mount([{ xfrm: box(100, 100, 200, 100) }, { xfrm: box(400, 100, 100, 100) }])
+		menu(450, 150)
+		expect(selection.getSnapshot().ids).toEqual([3])
+		click(150, 150, { shiftKey: true })
+		menu(150, 150)
+		expect(selection.getSnapshot().ids).toEqual([3, 2])
+		// A corner handle of the selection, just outside its box, keeps it.
+		menu(305, 205)
+		expect(selection.getSnapshot().ids).toEqual([3, 2])
+		menu(700, 400)
+		expect(selection.getSnapshot().ids).toEqual([])
+	})
+
+	it("a secondary press neither selects nor starts a drag; the context menu event does the selecting", async () => {
+		mount([{ xfrm: box(100, 100, 200, 100) }])
+		pointer("pointerdown", 150, 150, { button: 2, pointerType: "mouse" })
+		pointer("pointermove", 250, 150, { button: 2, pointerType: "mouse" })
+		pointer("pointerup", 250, 150, { button: 2, pointerType: "mouse" })
+		await settle()
+		expect(selection.getSnapshot().ids).toEqual([])
+		expect(ops).toEqual([])
+	})
+
+	it("Control+click on a Mac is the secondary click, not an additive press", () => {
+		vi.spyOn(navigator, "platform", "get").mockReturnValue("MacIntel")
+		mount([{ xfrm: box(100, 100, 200, 100) }, { xfrm: box(400, 100, 100, 100) }])
+		click(150, 150)
+		click(450, 150, { ctrlKey: true, pointerType: "mouse" })
+		expect(selection.getSnapshot().ids).toEqual([2])
+	})
+
 	it("a press past the slide that misses every handle clears the selection, as empty canvas does", () => {
 		mount([{ xfrm: box(100, 100, 200, 100) }])
 		click(150, 150)
@@ -288,6 +326,79 @@ describe("the canvas layer's keys", () => {
 					{ family: "shape", kind: "ungroup", slide: ref, group: 3 }
 				]
 			}
+		])
+	})
+
+	it("Mod+D duplicates the selected objects back to front and stops the key there (not the slide's)", async () => {
+		mount([{ xfrm: box(100, 100, 200, 100) }, { xfrm: box(400, 100, 200, 100) }])
+		act(() => {
+			selection.set([3, 2])
+		})
+
+		const event = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "d", code: "KeyD", ...MOD })
+
+		act(() => {
+			layer().dispatchEvent(event)
+		})
+		await settle()
+		expect(event.defaultPrevented).toBe(true)
+		expect(ops).toEqual([{ family: "shape", kind: "duplicate", slide: ref, shapes: [2, 3], dx: 10 * EMU, dy: 10 * EMU }])
+		expect(selection.getSnapshot().pending?.before).toEqual(new Set([2, 3]))
+	})
+
+	it("Ctrl+drag copies the selection to the drop and selects the copies; the originals stay", async () => {
+		const COPY = APPLE ? { altKey: true } : { ctrlKey: true }
+
+		mount([{ xfrm: box(100, 100, 200, 100) }, { xfrm: box(400, 100, 200, 100) }])
+		act(() => {
+			selection.set([3, 2])
+		})
+		pointer("pointerdown", 150, 150, COPY)
+		pointer("pointermove", 200, 170, COPY)
+		pointer("pointerup", 250, 190, COPY)
+		await settle()
+		expect(ops).toEqual([{ family: "shape", kind: "duplicate", slide: ref, shapes: [2, 3], dx: 100 * EMU, dy: 40 * EMU }])
+		expect(selection.getSnapshot().pending?.before).toEqual(new Set([2, 3]))
+		// The press on a selected shape with Ctrl became a drag: it does not leave the selection.
+		expect(selection.getSnapshot().ids).toEqual([3, 2])
+	})
+
+	it("Ctrl pressed during a move drag shows the originals where they are and copies at the drop", async () => {
+		mount([{ xfrm: box(100, 100, 200, 100) }])
+		click(150, 150)
+		pointer("pointerdown", 150, 150)
+		pointer("pointermove", 200, 150)
+		await vi.waitFor(() => {
+			expect(host.querySelector<HTMLElement>("[data-fo-layer='0']")?.style.transform).not.toBe("")
+		})
+		act(() => {
+			layer().dispatchEvent(
+				new KeyboardEvent("keydown", {
+					bubbles: true,
+					key: APPLE ? "Alt" : "Control",
+					...(APPLE ? { altKey: true } : { ctrlKey: true })
+				})
+			)
+		})
+		await vi.waitFor(() => {
+			expect(host.querySelector<HTMLElement>("[data-fo-layer='0']")?.style.transform).toBe("")
+		})
+		pointer("pointerup", 200, 150, APPLE ? { altKey: true } : { ctrlKey: true })
+		await settle()
+		expect(ops).toMatchObject([{ kind: "duplicate", shapes: [2], dx: 50 * EMU, dy: 0 }])
+	})
+
+	it("Alt+Right turns the selection 15° clockwise, Alt+Left back; a shape locked against turning stays", async () => {
+		mount([{ xfrm: box(100, 100, 200, 100) }, { xfrm: box(400, 100, 200, 100), locks: { noRot: true } }])
+		act(() => {
+			selection.set([2, 3])
+		})
+		act(() => {
+			layer().dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "ArrowRight", code: "ArrowRight", altKey: true }))
+		})
+		await settle()
+		expect(ops).toEqual([
+			{ family: "shape", kind: "setXfrm", target: { slide: ref, id: 2 }, xfrm: { ...box(100, 100, 200, 100), rot: 900_000 } }
 		])
 	})
 })

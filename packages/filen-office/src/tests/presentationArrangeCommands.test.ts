@@ -13,6 +13,8 @@ import {
 	resizedXfrm,
 	rotateOp,
 	scaledXfrm,
+	steppedShapes,
+	turnedShapes,
 	turnedXfrm,
 	xfrmsOp
 } from "../core/presentation/edit/commands/shape"
@@ -113,6 +115,45 @@ describe("presentation shape transforms", () => {
 		expect(turnedXfrm(box(0, 0, 10, 10), -10 * DEG, false).rot).toBe(350 * DEG)
 		// From above the centre to the right of it: a quarter turn clockwise.
 		expect(dragTurn(box(0, 0, 100, 100), { x: 50, y: -100 }, { x: 200, y: 50 })).toBe(90 * DEG)
+	})
+
+	it("Alt+arrows turn by 15° about each centre; a shape locked against turning keeps its box", () => {
+		const free = { id: 3, xfrm: box(0, 0, 100, 50, 350 * DEG) }
+		const locked = { id: 4, xfrm: box(0, 0, 100, 50), locks: { noRot: true as const } }
+
+		expect(turnedShapes([free, locked], 15 * DEG)).toEqual([{ ...free, xfrm: box(0, 0, 100, 50, 5 * DEG) }, locked])
+		expect(turnedShapes([free], -15 * DEG)[0]?.xfrm.rot).toBe(335 * DEG)
+	})
+
+	it("Shift+arrows on a Mac move the right or bottom edge one step along the box's axes, keeping locks and a minimum", () => {
+		const step = 9525
+		const plain = { id: 3, xfrm: box(1000, 1000, 100_000, 50_000) }
+
+		expect(steppedShapes([plain], "right")[0]?.xfrm).toEqual(box(1000, 1000, 100_000 + step, 50_000))
+		expect(steppedShapes([plain], "left")[0]?.xfrm).toEqual(box(1000, 1000, 100_000 - step, 50_000))
+		expect(steppedShapes([plain], "down")[0]?.xfrm).toEqual(box(1000, 1000, 100_000, 50_000 + step))
+		expect(steppedShapes([plain], "up")[0]?.xfrm).toEqual(box(1000, 1000, 100_000, 50_000 - step))
+
+		// Turned a quarter: the box's own right edge grows, its left edge stays where it shows.
+		const turned = { id: 3, xfrm: box(0, 0, 100_000, 50_000, 90 * DEG) }
+		const grown = steppedShapes([turned], "right")[0]?.xfrm as Xfrm
+
+		expect(grown.cx).toBe(100_000 + step)
+		// Within the EMU the box's whole-number position rounds to.
+		expect(Math.abs(corner(grown, 0, 0).x - corner(turned.xfrm, 0, 0).x)).toBeLessThanOrEqual(1)
+		expect(Math.abs(corner(grown, 0, 0).y - corner(turned.xfrm, 0, 0).y)).toBeLessThanOrEqual(1)
+
+		const aspect = { id: 4, xfrm: box(0, 0, 200_000, 100_000), locks: { noChangeAspect: true as const } }
+
+		expect(steppedShapes([aspect], "right")[0]?.xfrm).toMatchObject({
+			cx: 200_000 + step,
+			cy: Math.round(100_000 * (1 + step / 200_000))
+		})
+
+		const fixed = { id: 5, xfrm: box(0, 0, 100_000, 50_000), locks: { noResize: true as const } }
+		const tiny = { id: 6, xfrm: box(0, 0, step, 50_000) }
+
+		expect(steppedShapes([fixed, tiny], "left")).toEqual([fixed, tiny])
 	})
 
 	it("Rotate turns each shape a quarter about its centre; Flip mirrors each in place and reverses its turn", () => {

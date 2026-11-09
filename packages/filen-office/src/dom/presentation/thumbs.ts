@@ -109,10 +109,11 @@ export function paintSlideCanvas(
 	paintDrawingCanvas(ctx, render.background, base, images)
 
 	for (const layer of render.layers) {
-		const paint = (extra: Matrix): void => {
+		// The effects are the drawing's, or its text's when the shape draws no fill or line (effectsOnText).
+		const paint = (extra: Matrix, text: boolean = true): void => {
 			paintDrawingCanvas(ctx, layer.drawing, times(base, times(extra, layer.matrix)), images)
 
-			if (layer.text !== undefined) {
+			if (text && layer.text !== undefined) {
 				const matrix = times(base, times(extra, layer.textMatrix ?? layer.matrix))
 
 				paintTextPageCanvas(ctx, layer.text, matrix)
@@ -124,7 +125,15 @@ export function paintSlideCanvas(
 		if (effects.length > 0) {
 			const [, , , d = 1, , f = 0] = layer.matrix
 
-			paintEffects(ctx, effects, scale, paint, undrawn, f + d * layer.drawing.height, away)
+			paintEffects(
+				ctx,
+				effects,
+				scale,
+				extra => paint(extra, layer.effectsOnText === true),
+				undrawn,
+				f + d * layer.drawing.height,
+				away
+			)
 		}
 
 		paint([1, 0, 0, 1, 0, 0])

@@ -4,7 +4,7 @@ import type { PdfGradient } from "../pdfwrite/shading"
 import type { PdfImageData } from "../pdfwrite/images"
 import type { PdfImage, PdfPage } from "../pdfwrite/page"
 import type { PdfImageSource } from "../pdfwrite/writer"
-import { recolorPixels, recolors } from "./canvas"
+import { linearGradientLine, recolorPixels, recolors } from "./canvas"
 import {
 	ITEM_FILL_MODIFIER_MASK,
 	ITEM_FLOATS,
@@ -607,32 +607,10 @@ class DrawingPainter {
 
 		switch (paint.kind) {
 			case "linear": {
-				const angle = mod(finite(paint.angle, 0), 360)
-				const radians = (angle * Math.PI) / 180
-				let dx = Math.cos(radians)
-				let dy = Math.sin(radians)
-
-				if (paint.scaled !== true && angle % 90 !== 0) {
-					dx *= width
-					dy *= height
-
-					const length = Math.hypot(dx, dy)
-
-					dx = length > 0 ? dx / length : 1
-					dy = length > 0 ? dy / length : 0
-				}
-
-				const half = (Math.abs(dx) + Math.abs(dy)) / 2
-
 				await page.gradient(
 					this.gradient(
 						"axial",
-						[
-							x + (0.5 - dx * half) * width,
-							y + (0.5 - dy * half) * height,
-							x + (0.5 + dx * half) * width,
-							y + (0.5 + dy * half) * height
-						],
+						linearGradientLine(paint.angle, paint.scaled, x, y, width, height),
 						paint.stops,
 						0,
 						"pad",

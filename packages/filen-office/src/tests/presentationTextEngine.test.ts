@@ -43,6 +43,7 @@ const context: ShapeTextContext = {
 		return Promise.resolve()
 	},
 	options: {},
+	refit: false,
 	revision: 7
 }
 

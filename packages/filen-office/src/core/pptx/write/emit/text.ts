@@ -154,7 +154,7 @@ export function runPropsXml(context: EmitContext, tag: string, props: RunProps, 
 
 		const r = readerOf(context)
 		const kept = r === undefined || source < 0 ? -1 : r.child(source, G.A, name)
-		const markup = actionPieces(context, `a:${name}`, action, kept)
+		const markup = actionPieces(context, `a:${name}`, action, kept, true)
 		// A refused action is written only as the source wrote it: a run made from one (part of it formatted
 		// otherwise) carries the element of a source run with that action, as PowerPoint copies it onto both.
 		const donor = markup !== undefined || kept >= 0 ? kept : actionDonor(context, name, action)

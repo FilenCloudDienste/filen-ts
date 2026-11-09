@@ -652,7 +652,7 @@ function setStyle(table: TableModel, op: Op<"setStyle">): TableModel {
 	else next.styleId = op.styleId
 
 	for (const [flag, value] of Object.entries(op.flags ?? {})) {
-		if (value !== undefined) next.flags[flag as keyof TableModel["flags"]] = value
+		if (value !== undefined) next.flags[flag as keyof NonNullable<Op<"setStyle">["flags"]>] = value
 	}
 
 	return next

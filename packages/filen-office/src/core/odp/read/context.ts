@@ -11,6 +11,7 @@ import {
 } from "../../odf/index"
 import type { DeckTally, PresentationBudgets } from "../../presentation/budget"
 import { BUILTIN_SUFFIX, builtinPresentationStyle } from "./builtinStyles"
+import type { PictureSizes } from "./fills"
 import type { SlideRef, SourceRef } from "../../presentation/model"
 import { tooLarge } from "../../presentation/refusal"
 import type { Namespaces, XmlDocument } from "../../xml/index"
@@ -122,6 +123,8 @@ export interface PackageFacts {
 	// Whether the package has a stream (a picture an object's replacement names).
 	has(path: string): boolean
 	readonly templates: ReadonlyMap<string, TableTemplate>
+	// The sizes of the package's pictures read so far (bitmap tiles sized by lengths); absent: none.
+	readonly pictureSize?: PictureSizes
 }
 
 export interface OwnStyle {
@@ -168,6 +171,9 @@ export class OdpContext {
 	hasPart(part: string): boolean {
 		return this.facts.has(part)
 	}
+
+	// The package's picture sizes as fillOf takes them.
+	readonly pictureSizes: PictureSizes = part => this.facts.pictureSize?.(part)
 
 	// An embedded object that is a chart (its manifest entry says so, Part 2 §4.3).
 	isChart(part: string): boolean {

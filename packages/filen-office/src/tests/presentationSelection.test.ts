@@ -309,6 +309,47 @@ describe("presentation canvas keys", () => {
 		expect(objectKeyAction(key("KeyA", "a", { ctrlKey: true }), BINDINGS, false)).toEqual({ kind: "command", command: "selectAll" })
 	})
 
+	it("Mod+D duplicates the selected objects (Ctrl+D, Cmd+D on a Mac), not the slide", () => {
+		expect(objectKeyAction(key("KeyD", "d", { ctrlKey: true }), BINDINGS, false)).toEqual({ kind: "duplicate" })
+		expect(objectKeyAction(key("KeyD", "d", { metaKey: true }), BINDINGS, true)).toEqual({ kind: "duplicate" })
+		expect(objectKeyAction(key("KeyD", "d", { ctrlKey: true }), BINDINGS, true)).toBeUndefined()
+		// Mod+Shift+D is the slide's (the editor's), not the canvas's.
+		expect(objectKeyAction(key("KeyD", "D", { ctrlKey: true, shiftKey: true }), BINDINGS, false)).toBeUndefined()
+	})
+
+	it("Alt+Left/Right turn 15°; on a Mac Cmd+arrows nudge and Shift+arrows resize", () => {
+		for (const apple of [false, true]) {
+			expect(objectKeyAction(key("ArrowRight", "ArrowRight", { altKey: true }), BINDINGS, apple)).toEqual({
+				kind: "rotate",
+				clockwise: true
+			})
+			expect(objectKeyAction(key("ArrowLeft", "ArrowLeft", { altKey: true }), BINDINGS, apple)).toEqual({
+				kind: "rotate",
+				clockwise: false
+			})
+			expect(objectKeyAction(key("ArrowUp", "ArrowUp", { altKey: true }), BINDINGS, apple)).toBeUndefined()
+			expect(objectKeyAction(key("ArrowRight", "ArrowRight", { altKey: true, shiftKey: true }), BINDINGS, apple)).toBeUndefined()
+			expect(objectKeyAction(key("ArrowDown", "ArrowDown", { ctrlKey: true }), BINDINGS, apple)).toBeUndefined()
+		}
+
+		expect(objectKeyAction(key("ArrowUp", "ArrowUp", { metaKey: true }), BINDINGS, true)).toEqual({
+			kind: "nudge",
+			direction: "up",
+			large: false
+		})
+		expect(objectKeyAction(key("ArrowUp", "ArrowUp", { metaKey: true }), BINDINGS, false)).toBeUndefined()
+		expect(objectKeyAction(key("ArrowUp", "ArrowUp", { metaKey: true, shiftKey: true }), BINDINGS, true)).toBeUndefined()
+		expect(objectKeyAction(key("ArrowRight", "ArrowRight", { shiftKey: true }), BINDINGS, true)).toEqual({
+			kind: "resize",
+			direction: "right"
+		})
+		expect(objectKeyAction(key("ArrowRight", "ArrowRight", { shiftKey: true }), BINDINGS, false)).toEqual({
+			kind: "nudge",
+			direction: "right",
+			large: true
+		})
+	})
+
 	it("arrows nudge (Shift further), Delete deletes, Tab cycles, Enter edits, Escape leaves; modified arrows are not the canvas's", () => {
 		expect(objectKeyAction(key("ArrowLeft", "ArrowLeft"), BINDINGS, false)).toEqual({ kind: "nudge", direction: "left", large: false })
 		expect(objectKeyAction(key("ArrowDown", "ArrowDown", { shiftKey: true }), BINDINGS, false)).toEqual({
@@ -320,9 +361,13 @@ describe("presentation canvas keys", () => {
 		expect(objectKeyAction(key("Delete", "Delete"), BINDINGS, false)).toEqual({ kind: "delete" })
 		expect(objectKeyAction(key("Backspace", "Backspace"), BINDINGS, false)).toEqual({ kind: "delete" })
 		expect(objectKeyAction(key("Tab", "Tab", { shiftKey: true }), BINDINGS, false)).toEqual({ kind: "cycle", back: true })
-		expect(objectKeyAction(key("Enter", "Enter"), BINDINGS, false)).toEqual({ kind: "enter" })
+		// Enter selects the shape's text (PowerPoint's "Select text within an object"); F2 opens it with the caret.
+		expect(objectKeyAction(key("Enter", "Enter"), BINDINGS, false)).toEqual({ kind: "enter", selectAll: true })
+		expect(objectKeyAction(key("F2", "F2"), BINDINGS, false)).toEqual({ kind: "enter", selectAll: false })
 		expect(objectKeyAction(key("Escape", "Escape"), BINDINGS, false)).toEqual({ kind: "escape" })
-		expect(objectKeyAction(key("KeyX", "x"), BINDINGS, false)).toBeUndefined()
+		// A character goes into the selected shape's text (PowerPoint: select the shape, then type).
+		expect(objectKeyAction(key("KeyX", "x"), BINDINGS, false)).toEqual({ kind: "type", text: "x" })
+		expect(objectKeyAction(key("KeyX", "x", { ctrlKey: true }), BINDINGS, false)).toBeUndefined()
 	})
 
 	it("Tab goes to the shape after the front-most selected one, wrapping; Shift+Tab before the back-most", () => {

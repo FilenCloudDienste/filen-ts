@@ -264,6 +264,22 @@ export function odpSourceReading(deck: Deck, source: OdpWriteSource, refs: OdpSe
 		},
 		// A new page (an add or a duplicate) is a part of its own under a ref nothing else names.
 		newPart: () => odpPagePart(refs.next()),
+		headerFooterFrom(slide, neighbour) {
+			const node = deck.nodes.get(neighbour)
+			// A page an op made holds its own; a source page's (parsed or not, or restored) are its head's.
+			const settings =
+				node?.odpHeaderFooter ?? (node !== undefined && node.src === undefined ? undefined : parts.headerFooter(neighbour))
+
+			if (settings === undefined) return
+
+			slide.odpHeaderFooter = settings
+
+			const layout = slide.parent === undefined ? undefined : deck.nodes.get(slide.parent)
+			const master = layout?.kind === "master" ? layout.ref : layout?.parent
+			let next = nextShapeId(slide.shapes) - 1
+
+			parts.pushNewPageFooters(slide.shapes, master, settings, () => ++next)
+		},
 		facts: NO_FACTS,
 		partOf: ref => deck.nodes.get(ref)?.part ?? (deck.slides.includes(ref) ? odpPagePart(ref) : undefined),
 		// A gallery theme is a master page of styles.xml: only a master is held (ODP has no theme or layout parts; layouts

@@ -250,6 +250,30 @@ describe("pptx shapes", () => {
 		})
 		expect(run?.kind === "r" ? run.rPr.hlinkClick : undefined).toMatchObject({ kind: "slide" })
 	})
+
+	it("reads a recoloured run hyperlink (ahyp:hlinkClr val=tx) by its namespace, under any a:ext uri", async () => {
+		const ext = (uri: string, val: string) =>
+			`<a:extLst><a:ext uri="${uri}"><ahyp:hlinkClr xmlns:ahyp="http://schemas.microsoft.com/office/drawing/2018/hyperlinkcolor" val="${val}"/></a:ext></a:extLst>`
+		const linked = (text: string, inner: string) =>
+			`<a:r><a:rPr><a:hlinkClick r:id="rId30">${inner}</a:hlinkClick></a:rPr><a:t>${text}</a:t></a:r>`
+		const shapes = await shapesOf(
+			'<p:sp><p:nvSpPr><p:cNvPr id="2" name="Links"/><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr/><p:txBody><a:bodyPr/><a:p>' +
+				linked("tx", ext("{A12FA001-AC4F-418D-AE19-62706E023703}", "tx")) +
+				linked("other uri", ext("{00000000-0000-0000-0000-000000000000}", "tx")) +
+				linked("hlink", ext("{A12FA001-AC4F-418D-AE19-62706E023703}", "hlink")) +
+				linked("plain", "") +
+				"</a:p></p:txBody></p:sp>",
+			{ slides: [{ shapes: "", rels: [["rId30", "hyperlink", "https://filen.io/", "External"]] }] }
+		)
+		const links = (shapes[0]?.text?.paragraphs[0]?.runs ?? []).map(run => (run.kind === "r" ? run.rPr.hlinkClick : undefined))
+
+		expect(links).toEqual([
+			{ kind: "url", href: "https://filen.io/", color: "tx" },
+			{ kind: "url", href: "https://filen.io/", color: "tx" },
+			{ kind: "url", href: "https://filen.io/" },
+			{ kind: "url", href: "https://filen.io/" }
+		])
+	})
 })
 
 describe("pptx text", () => {

@@ -185,9 +185,38 @@ function hatchFill(element: OdfElement, background: ColorModel | undefined): Fil
 	return { kind: "pattern", preset, fg: color, bg: background ?? { kind: "srgb", rgb: "FFFFFF", mods: [{ name: "alpha", value: 0 }] } }
 }
 
-// A bitmap fill (§16.42 draw:fill-image, §20.236 style:repeat): stretched, tiled at its own size, or (no-repeat)
-// stretched, the nearest DrawingML form.
-function bitmapFill(element: OdfElement, attributes: Attributes): FillProps | undefined {
+// A package picture's own size in points (its pixels at its resolution), when already read; synchronous, so every
+// reading of a fill (a page, a held page, a master) gives the same tile.
+export type PictureSizes = (part: string) => { readonly width: number; readonly height: number } | undefined
+
+// draw:fill-image-ref-point as a:tile algn (ST_RectAlignment).
+const REF_POINTS: Readonly<Record<string, string>> = {
+	"top-left": "tl",
+	top: "t",
+	"top-right": "tr",
+	left: "l",
+	center: "ctr",
+	right: "r",
+	"bottom-left": "bl",
+	bottom: "b",
+	"bottom-right": "br"
+}
+
+// A tile side's scale in 1/1,000 %: a percent as written; a length (draw:fill-image-width/height take either) over
+// the picture's own size on that side; else (0, absent, the size unread) the picture's own size.
+function tileScale(value: string | undefined, own: number | undefined): number {
+	const percent = parsePercent(value)
+
+	if (percent !== undefined) return (percent > 0 ? percent : 100) * 1000
+
+	const points = parseLength(value)
+
+	return points !== undefined && points > 0 && own !== undefined && own > 0 ? Math.round((points / own) * 100_000) : 100_000
+}
+
+// A bitmap fill (§16.42 draw:fill-image, §20.236 style:repeat): stretched, tiled, or (no-repeat) stretched, the
+// nearest DrawingML form.
+function bitmapFill(element: OdfElement, attributes: Attributes, sizes: PictureSizes | undefined): FillProps | undefined {
 	const part = packagePart(element.attributes.get("xlink:href"))
 
 	if (part === undefined) return undefined
@@ -195,8 +224,7 @@ function bitmapFill(element: OdfElement, attributes: Attributes): FillProps | un
 	const repeat = attributes.get("style:repeat") ?? "repeat"
 
 	if (repeat === "repeat") {
-		const sx = parsePercent(attributes.get("draw:fill-image-width"))
-		const sy = parsePercent(attributes.get("draw:fill-image-height"))
+		const size = sizes?.(part)
 
 		return {
 			kind: "picture",
@@ -204,10 +232,10 @@ function bitmapFill(element: OdfElement, attributes: Attributes): FillProps | un
 			tile: {
 				tx: 0,
 				ty: 0,
-				sx: (sx !== undefined && sx > 0 ? sx : 100) * 1000,
-				sy: (sy !== undefined && sy > 0 ? sy : 100) * 1000,
+				sx: tileScale(attributes.get("draw:fill-image-width"), size?.width),
+				sy: tileScale(attributes.get("draw:fill-image-height"), size?.height),
 				flip: "none",
-				algn: "tl"
+				algn: REF_POINTS[attributes.get("draw:fill-image-ref-point") ?? ""] ?? "tl"
 			}
 		}
 	}
@@ -216,8 +244,8 @@ function bitmapFill(element: OdfElement, attributes: Attributes): FillProps | un
 }
 
 // The fill a graphic or drawing-page property set describes; undefined when it names none (draw:fill absent),
-// "none" for draw:fill="none".
-export function fillOf(properties: OdfProperties, resources: DrawResources): FillProps | "none" | undefined {
+// "none" for draw:fill="none". `sizes` gives the pictures' sizes a tile sized by a length scales by.
+export function fillOf(properties: OdfProperties, resources: DrawResources, sizes?: PictureSizes): FillProps | "none" | undefined {
 	const attributes = properties.attributes
 	const fill = attributes.get("draw:fill")
 
@@ -253,7 +281,7 @@ export function fillOf(properties: OdfProperties, resources: DrawResources): Fil
 		case "bitmap": {
 			const element = resources.get("draw:fill-image")?.get(attributes.get("draw:fill-image-name") ?? "")
 
-			return element === undefined ? "none" : (bitmapFill(element, attributes) ?? "none")
+			return element === undefined ? "none" : (bitmapFill(element, attributes, sizes) ?? "none")
 		}
 		default:
 			return undefined

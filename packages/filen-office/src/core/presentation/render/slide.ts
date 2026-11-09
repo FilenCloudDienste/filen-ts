@@ -6,6 +6,8 @@ import {
 	ItemFloat,
 	ItemInt,
 	ItemKind,
+	PATH_COMMAND_COORDS,
+	PathCommand,
 	boxMatrix,
 	multiply,
 	type TextBodyProps
@@ -13,13 +15,14 @@ import {
 import type { DrawingData } from "../../drawingml/data"
 import type { DrawingTheme } from "../../drawingml/color"
 import { D, EMU_PER_PX, drawingReader, type DrawingReader } from "../../drawingml/reader"
-import { convertShapeTree, type ShapeContext } from "../../drawingml/shape"
+import { emitPaths, evaluateGuides } from "../../drawingml/geometry/evaluate"
+import { convertShapeTree, shapeGeometry, type ShapeContext } from "../../drawingml/shape"
 import { NodeKind, parseXml, sliceClock, type SliceClock, type XmlDocument } from "../../xml/index"
 import { runSliced, type Slicing } from "../../slicing"
 import { DEFAULT_PRESENTATION_BUDGETS, type PresentationBudgets } from "../budget"
 import { bookmarkTriggers } from "../../anim/media"
 import { mediaPlayback } from "../edit/apply/media"
-import { notesText } from "../notes"
+import { notesParagraphs, notesText } from "../notes"
 import {
 	PresentationError,
 	type Deck,
@@ -30,13 +33,15 @@ import {
 	type TextBody,
 	type Xfrm
 } from "../model"
-import type { LayerRole, SlideLayer, SlideMediaInfo, SlideRender, TextPage } from "../output"
+import type { LayerRole, ShapeBodyKind, SlideLayer, SlideMediaInfo, SlideRender, TextPage } from "../output"
+import { LINE_FLOATS } from "../../text/displayList"
 import { turnOf } from "../text/vertical"
 import { FLAT, RenderReport, layerEffects } from "./effects"
 import { drawFrame, olePicture } from "./frame"
 import { SmartArtTexts } from "./smartartText"
-import { ScratchWriter, colorXml, fillXml } from "./markup"
+import { ScratchWriter, colorXml, effectsXml, fillXml } from "./markup"
 import {
+	EFFECTS,
 	TEXT_MARK,
 	hasText,
 	levelSource,
@@ -224,16 +229,102 @@ const LINE_PRESETS: ReadonlySet<string> = new Set([
 	"curvedConnector5"
 ])
 
-// Whether an entry draws as a line between two ends: a connector, or a shape whose resolved geometry (as written to
-// the scratch tree) is a line preset.
-function drawnAsLine(entry: Entry, reader: DrawingReader, document: XmlDocument, tree: number): boolean {
-	if (entry.shape.kind === "cxnSp") return true
-	if (entry.shape.kind !== "sp" || tree < 0) return false
+// The text body a shape holds (textSeedOf's rule: an sp's, a table's per cell; a picture, group or other frame none).
+function bodyKindOf(shape: ShapeNode): ShapeBodyKind | undefined {
+	if (shape.kind === "frame") return shape.frame?.kind === "table" ? "table" : undefined
+	if (shape.kind !== "sp") return undefined
 
-	const element = document.firstChildElement(tree)
-	const preset = reader.attr(reader.child(reader.child(element, D.P, "spPr"), D.A, "prstGeom"), "prst")
+	return shape.ph !== undefined ? "placeholder" : shape.txBox === true ? "textBox" : "shape"
+}
 
-	return preset !== undefined && LINE_PRESETS.has(preset)
+// Presets whose stroke is the segment between the line's two ends.
+const STRAIGHT_PRESETS: ReadonlySet<string> = new Set(["line", "straightConnector1"])
+// Steps a cubic or quadratic of a line's stroke is flattened into for hit testing.
+const STROKE_CURVE_STEPS = 12
+const strokeScratch = new DrawingList()
+
+// Whether an entry draws as a line between two ends (a connector, or a shape whose resolved geometry, as written to
+// the scratch tree, is a line preset), and for one whose stroke is not that segment (an elbow, a curve, a connector's
+// own geometry) the stroke as a polyline: x y pairs in EMU of the box before its turn and flips.
+function lineOf(
+	entry: Entry,
+	reader: DrawingReader,
+	document: XmlDocument,
+	tree: number,
+	xfrm: Xfrm
+): { readonly path?: number[] } | undefined {
+	const connector = entry.shape.kind === "cxnSp"
+
+	if (!connector && (entry.shape.kind !== "sp" || tree < 0)) return undefined
+
+	const spPr = tree < 0 ? -1 : reader.child(document.firstChildElement(tree), D.P, "spPr")
+	const preset = reader.attr(reader.child(spPr, D.A, "prstGeom"), "prst")
+
+	if (!connector && (preset === undefined || !LINE_PRESETS.has(preset))) return undefined
+	// A connector with no geometry of its own, or a straight one, draws the segment.
+	if (spPr < 0 || (preset !== undefined ? STRAIGHT_PRESETS.has(preset) : reader.child(spPr, D.A, "custGeom") < 0)) return {}
+
+	const { program, adjust } = shapeGeometry(reader, spPr)
+	const list = strokeScratch
+
+	list.rewindPath(0, 0)
+	emitPaths(list, program, evaluateGuides(program, xfrm.cx, xfrm.cy, adjust), xfrm.cx, xfrm.cy)
+
+	const path: number[] = []
+	const coords = list.coords
+	let at = 0
+	let x = 0
+	let y = 0
+	let startX = 0
+	let startY = 0
+	const to = (nx: number, ny: number): void => {
+		path.push(nx * EMU_PER_PX, ny * EMU_PER_PX)
+		x = nx
+		y = ny
+	}
+
+	for (let k = 0; k < list.commandCount; k++) {
+		const command = list.commands[k]
+
+		if (command === PathCommand.MOVE) {
+			// A new subpath: a gap in the polyline (NaN pair), then its start.
+			if (path.length > 0) path.push(Number.NaN, Number.NaN)
+
+			to(coords[at] ?? 0, coords[at + 1] ?? 0)
+			startX = x
+			startY = y
+		} else if (command === PathCommand.LINE) to(coords[at] ?? 0, coords[at + 1] ?? 0)
+		else if (command === PathCommand.CLOSE) to(startX, startY)
+		else if (command === PathCommand.CUBIC || command === PathCommand.QUAD) {
+			const cubic = command === PathCommand.CUBIC
+			const x0 = x
+			const y0 = y
+			const x1 = coords[at] ?? 0
+			const y1 = coords[at + 1] ?? 0
+			const x2 = cubic ? (coords[at + 2] ?? 0) : 0
+			const y2 = cubic ? (coords[at + 3] ?? 0) : 0
+			const x3 = coords[at + (cubic ? 4 : 2)] ?? 0
+			const y3 = coords[at + (cubic ? 5 : 3)] ?? 0
+
+			for (let step = 1; step <= STROKE_CURVE_STEPS; step++) {
+				const t = step / STROKE_CURVE_STEPS
+				const u = 1 - t
+
+				if (cubic) {
+					to(
+						u * u * u * x0 + 3 * u * u * t * x1 + 3 * u * t * t * x2 + t * t * t * x3,
+						u * u * u * y0 + 3 * u * u * t * y1 + 3 * u * t * t * y2 + t * t * t * y3
+					)
+				} else to(u * u * x0 + 2 * u * t * x1 + t * t * x3, u * u * y0 + 2 * u * t * y1 + t * t * y3)
+			}
+		}
+
+		at += PATH_COMMAND_COORDS[command ?? 0] ?? 0
+	}
+
+	list.rewindPath(0, 0)
+
+	return path.length >= 4 ? { path } : {}
 }
 
 // One resolved element. `local`: the top-level element in its own box (offset and rotation in the layer matrix).
@@ -284,6 +375,16 @@ function writeElement(
 					D.A,
 					new Set(["noFill", "solidFill", "gradFill", "blipFill", "pattFill", "grpFill"])
 				)
+
+				if (node >= 0) writer.copy(source.reader, source.part, node)
+			}
+
+			// The group's effects (EG_EffectProperties after the fill), drawn around the whole group.
+			const effects = shape.props?.effects
+
+			if (effects !== undefined && effects.src === undefined) writer.push(effectsXml(effects))
+			else if (source !== undefined) {
+				const node = source.reader.childOf(source.properties, D.A, EFFECTS)
 
 				if (node >= 0) writer.copy(source.reader, source.part, node)
 			}
@@ -642,12 +743,16 @@ async function renderOnce(
 		// The slide's own shapes carry their box for the editor (every layer the entry made, overlays included).
 		if (entry.owner === node) {
 			const shape = entry.shape
+			const body = bodyKindOf(shape)
+			const line = lineOf(entry, scratchReader, scratch.document, scratch.trees[k] ?? -1, entry.xfrm)
 			const box = {
 				id: shape.id,
 				xfrm: { ...entry.xfrm },
 				...(shape.alt === undefined ? {} : { alt: { ...shape.alt } }),
 				...(shape.locks === undefined ? {} : { locks: shape.locks }),
-				...(drawnAsLine(entry, scratchReader, scratch.document, scratch.trees[k] ?? -1) ? { line: true as const } : {})
+				...(line === undefined ? {} : { line: true as const }),
+				...(line?.path === undefined ? {} : { path: line.path }),
+				...(body === undefined ? {} : { body })
 			}
 
 			for (let layer = first; layer < layers.length; layer++) layers[layer] = { ...(layers[layer] as SlideLayer), box }
@@ -662,6 +767,8 @@ async function renderOnce(
 		}
 	}
 
+	const notes = notesParagraphs(deck, node)
+
 	return {
 		ref,
 		index: deck.slides.indexOf(ref),
@@ -672,6 +779,7 @@ async function renderOnce(
 		background: drawingData(background),
 		layers,
 		notesText: notesText(deck, node),
+		...(notes === undefined ? {} : { notes }),
 		animated: node.timing !== undefined
 	}
 }
@@ -819,11 +927,8 @@ function layoutText(
 	services: RenderServices,
 	theme: DrawingTheme,
 	target: TextTarget,
-	box: { readonly width: number; readonly height: number },
-	report: RenderReport
+	box: { readonly width: number; readonly height: number }
 ): TextPage | undefined {
-	if (target.bodyPr.rotation !== 0) report.approximate("bodyPr:rot")
-
 	return services.layoutText?.(textRequest(deck, slide, theme, target, box))?.page
 }
 
@@ -1010,6 +1115,7 @@ async function renderEntry(
 	const list = expanded.list
 
 	if (conversion.unsupported > 0) report.refuse("element", conversion.unsupported)
+	if (conversion.childEffects > 0) report.approximate("group:childEffects", conversion.childEffects)
 
 	// 3D is never copied into the resolved element: counted from the nearest level that has it.
 	for (const name of FLAT) {
@@ -1021,7 +1127,18 @@ async function renderEntry(
 	}
 
 	const element = scratch.document.firstChildElement(tree)
-	const effects = element < 0 ? undefined : layerEffects(context, scratchReader, element, report)
+	// A shape that draws no fill or line: PowerPoint draws its effects (its first outer shadow too, which no item
+	// carries) on its text. Only a p:sp is judged: a picture always draws, and a group's items are its children's.
+	const sp = element >= 0 && scratch.document.localName(element) === "sp"
+	let carried = !sp
+	let painted = !sp
+
+	for (let item = 0; sp && item < list.itemCount && !carried; item++) {
+		if (list.itemInt(item, ItemInt.SHADOW) >= 0) carried = true
+		if (list.kind(item) !== ItemKind.TEXT) painted = true
+	}
+
+	const effects = element < 0 ? undefined : layerEffects(context, scratchReader, element, report, carried)
 	await layersOf({
 		deck,
 		slide,
@@ -1032,6 +1149,7 @@ async function renderEntry(
 		matrix,
 		base,
 		effects,
+		effectsOnText: !painted,
 		theme,
 		services,
 		report,
@@ -1062,6 +1180,7 @@ async function layersOf(input: {
 	readonly matrix: number[]
 	readonly base: ReturnType<typeof layerBase>
 	readonly effects: SlideLayer["effects"]
+	readonly effectsOnText?: boolean
 	readonly theme: DrawingTheme
 	readonly services: RenderServices
 	readonly report: RenderReport
@@ -1101,7 +1220,11 @@ async function layersOf(input: {
 		return { ...piece, drawing: part }
 	}
 	const push = (layer: SlideLayer): void => {
-		layers.push(first && effects !== undefined ? { ...layer, effects } : layer)
+		layers.push(
+			first && effects !== undefined
+				? { ...layer, effects, ...(input.effectsOnText === true ? { effectsOnText: true as const } : {}) }
+				: layer
+		)
 		first = false
 	}
 
@@ -1124,7 +1247,7 @@ async function layersOf(input: {
 				list.itemFloat(item, ItemFloat.HEIGHT),
 				target.bodyPr
 			)
-			const page = target.empty === true ? undefined : layoutText(deck, slide, services, theme, target, box, report)
+			const page = target.empty === true ? undefined : layoutText(deck, slide, services, theme, target, box)
 			const warp = page === undefined ? undefined : warpOf(services, target, box, page, report)
 
 			// The text adapter still hears of an empty body (the editor's text context is read from it); nothing paints.
@@ -1318,7 +1441,8 @@ async function renderTableLayer(
 		cellText: TextBody,
 		width: number,
 		height: number,
-		cell: { row: number; column: number; style: TableTextStyle | undefined }
+		cell: { row: number; column: number; style: TableTextStyle | undefined },
+		bodyPr: TextBodyProps = CELL_BODY
 	) =>
 		services.layoutText?.({
 			deck,
@@ -1327,7 +1451,7 @@ async function renderTableLayer(
 			shape: entry.shape,
 			chain: [],
 			body: cellText,
-			bodyPr: { ...CELL_BODY },
+			bodyPr: { ...bodyPr },
 			width,
 			height,
 			theme,
@@ -1343,7 +1467,17 @@ async function renderTableLayer(
 		tableStyles: stylesDocument === undefined || stylesPart === undefined ? undefined : { document: stylesDocument, part: stylesPart },
 		// An empty cell still holds its paragraph mark's line: a row never shrinks below it (as PowerPoint and LibreOffice
 		// lay a table out).
-		textHeight: (cell, row, column, width, style) => {
+		// A turned cell's lines run down (or up) the cell: wrapped at its row's height, they grow the row by the longest
+		// (unwrapped where the row stores no height).
+		textHeight: (cell, row, column, width, style, vert, length) => {
+			const turned = turnedCellBody(vert)
+
+			if (turned !== undefined) {
+				const measured = request(cell.text, length, 0, { row, column, style }, length > 0 ? turned : { ...turned, wrap: false })
+
+				return measured === undefined ? 0 : longestLine(measured.page)
+			}
+
 			const result = request(cell.text, width, 0, { row, column, style })
 			const height = result?.height ?? 0
 
@@ -1387,7 +1521,37 @@ async function renderTableLayer(
 
 	for (const cell of rendered.cells) {
 		if (clock.due) await clock.pause()
-		if (!cellHasText(cell.cell.text)) continue
+
+		const turned = turnedCellBody(cell.vert)
+		const hasText = cellHasText(cell.cell.text)
+
+		if (turned !== undefined) {
+			// Laid out in the turned inner box (textBox swaps its sides), anchored across the cell. An empty one still gets
+			// its box, so the editor types into it turned. The rows grew to its longest line, so it wraps where it measured.
+			const insets = { left: cell.marL, top: cell.marT, right: cell.marR, bottom: cell.marB }
+			const box = textBox(IDENTITY, cell.x, cell.y, cell.width, cell.height, { ...turned, insets })
+			const where = { row: cell.row, column: cell.column, style: cell.textStyle }
+			const result = request(cell.cell.text, box.width, box.height, where, turned)
+
+			if (result === undefined) continue
+
+			const spare = box.height - result.height
+			const offset = Math.max(0, cell.anchor === "ctr" ? spare / 2 : cell.anchor === "b" ? spare : 0)
+
+			layers.push({
+				...base,
+				drawing: emptyDrawing(0, 0),
+				...(hasText ? { text: result.page } : {}),
+				matrix,
+				textMatrix: multiply(matrix, multiply(box.matrix, [1, 0, 0, 1, 0, offset])),
+				cell: [cell.row, cell.column]
+			})
+
+			continue
+		}
+
+		if (!hasText) continue
+		// Stacked WordArt (wordArtVert, wordArtVertRtl) is drawn horizontally.
 		if (cell.vert !== undefined && cell.vert !== "horz") report.approximate("tableCell:vert")
 
 		const width = Math.max(0, cell.width - cell.marL - cell.marR)
@@ -1424,6 +1588,34 @@ const CELL_BODY: TextBodyProps = {
 	autofit: "none",
 	fontScale: 1,
 	lineSpacingReduction: 0
+}
+
+// A cell body turned by its tcPr@vert (§21.1.3.17; the values turnOf turns); undefined for horizontal and stacked text.
+function turnedCellBody(vert: string | undefined): TextBodyProps | undefined {
+	switch (vert) {
+		case "vert":
+		case "vert270":
+		case "eaVert":
+		case "mongolianVert":
+			return { ...CELL_BODY, vertical: vert }
+		default:
+			return undefined
+	}
+}
+
+// The longest line of a laid-out page along its lines (px).
+function longestLine(page: TextPage): number {
+	const lines = page.page.lineFloats
+	let longest = 0
+
+	for (let line = 0; line < page.page.lineCount; line++) {
+		const x = lines[line * LINE_FLOATS + 3] ?? 0
+		const width = lines[line * LINE_FLOATS + 4] ?? 0
+
+		longest = Math.max(longest, width, x + width)
+	}
+
+	return longest
 }
 
 function cellHasText(body: TextBody): boolean {

@@ -456,3 +456,200 @@ describe("SmartArt", () => {
 		expect(convertSmartArt(context(), document, 1, 1)).toBeUndefined()
 	})
 })
+
+// The text item of a converted shape: its matrix applied to a point of its rectangle, and the rectangle.
+function textItem(list: DrawingList): {
+	readonly at: (x: number, y: number) => [number, number]
+	readonly rect: [number, number, number, number]
+	readonly turn: number
+} {
+	const item = items(list, ItemKind.TEXT)[0] ?? -1
+	const f = (field: number): number => list.itemFloat(item, field)
+	const x = f(ItemFloat.X)
+	const y = f(ItemFloat.Y)
+
+	return {
+		at: (px, py) => [
+			f(ItemFloat.A) * px + f(ItemFloat.C) * py + f(ItemFloat.E),
+			f(ItemFloat.B) * px + f(ItemFloat.D) * py + f(ItemFloat.F)
+		],
+		rect: [x, y, x + f(ItemFloat.WIDTH), y + f(ItemFloat.HEIGHT)],
+		turn: ((((Math.atan2(f(ItemFloat.B), f(ItemFloat.A)) * 180) / Math.PI) % 360) + 360) % 360
+	}
+}
+
+// The page-space bounds of a text item's rectangle.
+function textBounds(list: DrawingList): [number, number, number, number] {
+	const { at, rect } = textItem(list)
+	const corners = [at(rect[0], rect[1]), at(rect[2], rect[1]), at(rect[0], rect[3]), at(rect[2], rect[3])]
+	const xs = corners.map(point => point[0])
+	const ys = corners.map(point => point[1])
+
+	return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)]
+}
+
+function textShape(xfrm: string, preset: string, bodyPr: string = "<wps:bodyPr/>"): DrawingList {
+	return graphic(
+		wsp(
+			`<a:xfrm${xfrm}><a:off x="0" y="0"/><a:ext cx="952500" cy="476250"/></a:xfrm><a:prstGeom prst="${preset}"/>`,
+			"<wps:txbx><w:txbxContent><w:p><w:r><w:t>Hi</w:t></w:r></w:p></w:txbxContent></wps:txbx>"
+		).replace("<wps:bodyPr/>", bodyPr)
+	).list
+}
+
+describe("text in flipped shapes", () => {
+	it("mirrors the geometry's text rectangle with flipH and keeps the text unmirrored", () => {
+		const plain = textBounds(textShape("", "rtTriangle"))
+		const flipped = textShape(' flipH="1"', "rtTriangle")
+		const bounds = textBounds(flipped)
+
+		// rtTriangle's text rectangle sits towards its right angle, so mirroring moves it.
+		expect(plain[0]).not.toBeCloseTo(100 - plain[2], 1)
+		expect(bounds[0]).toBeCloseTo(100 - plain[2], 3)
+		expect(bounds[2]).toBeCloseTo(100 - plain[0], 3)
+		expect(bounds[1]).toBeCloseTo(plain[1], 3)
+		expect(bounds[3]).toBeCloseTo(plain[3], 3)
+		expect(textItem(flipped).turn).toBeCloseTo(0, 3)
+		// Never mirrored: the determinant stays positive.
+		const { at } = textItem(flipped)
+		const origin = at(0, 0)
+		const right = at(1, 0)
+		const down = at(0, 1)
+
+		expect((right[0] - origin[0]) * (down[1] - origin[1]) - (right[1] - origin[1]) * (down[0] - origin[0])).toBeGreaterThan(0)
+	})
+
+	it("turns the text half round with flipV, over the vertically mirrored text rectangle", () => {
+		const rect = textShape(' flipV="1"', "rect")
+
+		expect(textItem(rect).turn).toBeCloseTo(180, 3)
+		expect(textBounds(rect).map(value => Math.round(value * 1000) / 1000)).toEqual([0, 0, 100, 50])
+
+		const plain = textBounds(textShape("", "rtTriangle"))
+		const flipped = textShape(' flipV="1"', "rtTriangle")
+		const bounds = textBounds(flipped)
+
+		expect(textItem(flipped).turn).toBeCloseTo(180, 3)
+		expect(bounds[0]).toBeCloseTo(plain[0], 3)
+		expect(bounds[2]).toBeCloseTo(plain[2], 3)
+		expect(bounds[1]).toBeCloseTo(50 - plain[3], 3)
+		expect(bounds[3]).toBeCloseTo(50 - plain[1], 3)
+		// The text's top edge (its rectangle's first row) faces down the page.
+		const { at, rect: local } = textItem(flipped)
+
+		expect(at(local[0], local[1])[1]).toBeCloseTo(bounds[3], 3)
+	})
+
+	it("turns once round for flipH and flipV together, over the point-mirrored text rectangle", () => {
+		const plain = textBounds(textShape("", "rtTriangle"))
+		const flipped = textShape(' flipH="1" flipV="1"', "rtTriangle")
+		const bounds = textBounds(flipped)
+
+		expect(textItem(flipped).turn).toBeCloseTo(180, 3)
+		expect(bounds[0]).toBeCloseTo(100 - plain[2], 3)
+		expect(bounds[1]).toBeCloseTo(50 - plain[3], 3)
+	})
+})
+
+describe("bodyPr rot and upright", () => {
+	it("turns the text by bodyPr rot about its rectangle's centre", () => {
+		const list = textShape("", "rect", '<wps:bodyPr rot="5400000"/>')
+
+		expect(textItem(list).turn).toBeCloseTo(90, 3)
+
+		const { at, rect } = textItem(list)
+		const centre = at((rect[0] + rect[2]) / 2, (rect[1] + rect[3]) / 2)
+
+		expect(centre[0]).toBeCloseTo(50, 3)
+		expect(centre[1]).toBeCloseTo(25, 3)
+	})
+
+	it("keeps upright text level on a turned shape, its box swapped on a quarter turn", () => {
+		const list = textShape(' rot="5400000"', "rect", '<wps:bodyPr upright="1"/>')
+		const { rect } = textItem(list)
+
+		expect(textItem(list).turn).toBeCloseTo(0, 3)
+		// The 100 x 50 shape stands 50 wide and 100 tall on the page; the upright text fills that.
+		expect(rect[2] - rect[0]).toBeCloseTo(50, 3)
+		expect(rect[3] - rect[1]).toBeCloseTo(100, 3)
+		expect(textBounds(list).map(value => Math.round(value * 1000) / 1000)).toEqual([25, -25, 75, 75])
+
+		// Upright on a vertically flipped shape cancels the half turn too.
+		expect(textItem(textShape(' flipV="1"', "rect", '<wps:bodyPr upright="1"/>')).turn).toBeCloseTo(0, 3)
+		// Upright plus its own rot turns by rot from the page.
+		expect(textItem(textShape(' rot="2700000"', "rect", '<wps:bodyPr upright="1" rot="1800000"/>')).turn).toBeCloseTo(30, 3)
+	})
+})
+
+describe("arrowheads", () => {
+	// A horizontal 100 px line 5 px thick with the given tail end.
+	function arrowLine(tail: string, fill: string = ""): DrawingList {
+		return graphic(
+			wsp(
+				`<a:xfrm><a:off x="0" y="0"/><a:ext cx="952500" cy="0"/></a:xfrm><a:prstGeom prst="line"/>${fill}<a:ln w="47625"><a:solidFill><a:srgbClr val="000000"/></a:solidFill>${tail}</a:ln>`
+			)
+		).list
+	}
+
+	function strokeEnd(list: DrawingList): [number, number] {
+		const line = items(list, ItemKind.PATH).find(item => (list.itemInt(item, ItemInt.FLAGS) & ItemFlag.DECORATION) === 0) ?? 0
+		const end = list.itemInt(line, ItemInt.FIRST_COORD) + 2
+
+		return [list.coords[end] ?? Number.NaN, list.coords[end + 1] ?? Number.NaN]
+	}
+
+	function decoration(list: DrawingList): number {
+		return items(list, ItemKind.PATH).find(item => (list.itemInt(item, ItemInt.FLAGS) & ItemFlag.DECORATION) !== 0) ?? -1
+	}
+
+	it("ends the line at a triangle's base so its tip stays sharp", () => {
+		const list = arrowLine('<a:tailEnd type="triangle"/>')
+		// Medium: three line widths deep.
+		const [x, y] = strokeEnd(list)
+
+		expect(x).toBeCloseTo(100 - 15, 3)
+		expect(y).toBeCloseTo(0, 3)
+		// The head's tip is still at the original end.
+		const head = decoration(list)
+
+		expect(list.coords[list.itemInt(head, ItemInt.FIRST_COORD)]).toBeCloseTo(100, 3)
+	})
+
+	it("pulls a stealth back 0.6 of its depth and leaves open, oval and diamond ends full length", () => {
+		expect(strokeEnd(arrowLine('<a:tailEnd type="stealth"/>'))[0]).toBeCloseTo(100 - 9, 3)
+		expect(strokeEnd(arrowLine('<a:tailEnd type="arrow"/>'))[0]).toBeCloseTo(100, 3)
+		expect(strokeEnd(arrowLine('<a:tailEnd type="oval"/>'))[0]).toBeCloseTo(100, 3)
+		expect(strokeEnd(arrowLine('<a:tailEnd type="diamond"/>'))[0]).toBeCloseTo(100, 3)
+	})
+
+	it("trims the head end forwards and never past the other end", () => {
+		const list = arrowLine('<a:headEnd type="triangle" len="lg"/><a:tailEnd type="triangle" len="lg"/>')
+		const line = items(list, ItemKind.PATH).find(item => (list.itemInt(item, ItemInt.FLAGS) & ItemFlag.DECORATION) === 0) ?? 0
+		const start = list.itemInt(line, ItemInt.FIRST_COORD)
+
+		// Large: five widths, 25 px from either end.
+		expect(list.coords[start]).toBeCloseTo(25, 3)
+		expect(list.coords[start + 2]).toBeCloseTo(75, 3)
+
+		const short = graphic(
+			wsp(
+				'<a:xfrm><a:off x="0" y="0"/><a:ext cx="190500" cy="0"/></a:xfrm><a:prstGeom prst="line"/><a:ln w="47625"><a:solidFill><a:srgbClr val="000000"/></a:solidFill><a:headEnd type="triangle" len="lg"/><a:tailEnd type="triangle" len="lg"/></a:ln>'
+			)
+		).list
+		const shortLine = items(short, ItemKind.PATH).find(item => (short.itemInt(item, ItemInt.FLAGS) & ItemFlag.DECORATION) === 0) ?? 0
+		const shortStart = short.itemInt(shortLine, ItemInt.FIRST_COORD)
+
+		// A 20 px line under two 25 px heads collapses rather than crossing over.
+		expect(short.coords[shortStart] ?? 0).toBeLessThanOrEqual((short.coords[shortStart + 2] ?? 0) + 1e-6)
+	})
+
+	it("centres a diamond on the line's end", () => {
+		const list = arrowLine('<a:tailEnd type="diamond"/>')
+		const head = decoration(list)
+		const first = list.itemInt(head, ItemInt.FIRST_COORD)
+
+		// Tip, side, back, side: the tip half the depth past the end, the back half the depth before it.
+		expect(list.coords[first]).toBeCloseTo(100 + 7.5, 3)
+		expect(list.coords[first + 4]).toBeCloseTo(100 - 7.5, 3)
+	})
+})

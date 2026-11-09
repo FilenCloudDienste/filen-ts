@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest"
-import { saveOdp } from "../core/odp/write/save"
+import { bytesSource, ZipArchive } from "@filen/office/core/opc"
+import { odpSnapshot, saveOdp } from "../core/odp/write/save"
+import { isRefused } from "../core/presentation/refusal"
+import { decodeUtf8 } from "../core/xml/index"
 import { odpBytes } from "./odpFixtures"
-import { changes, odpDeck, openOdpDeck, saveDeck, shapeNamed, slideAt, touched } from "./odpWriteFixtures"
+import { changes, ODP_DECK, odpDeck, openOdpDeck, saveDeck, shapeNamed, slideAt, touched } from "./odpWriteFixtures"
 
 // Gate 2 of an ODP save: the written pages read back by the reader and compared with the session's slides.
 
@@ -136,4 +139,47 @@ describe("ODP writer: the streamed check's package", () => {
 
 			expect(kinds).toEqual(["written", "written"])
 		})
+})
+
+// ODF 1.3 Part 2 §3.8: the preview shows the first page; a save that rewrites the pages drops a stale one.
+describe("ODP writer: the package's preview image", () => {
+	const THUMBNAIL = "Thumbnails/thumbnail.png"
+	const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+
+	async function entryText(bytes: Uint8Array, name: string): Promise<string> {
+		const archive = await ZipArchive.open(bytesSource(bytes))
+		const entry = archive.get(name)
+
+		return entry === undefined ? "" : decodeUtf8(await archive.read(entry))
+	}
+
+	it("drops the thumbnail and its manifest entry on an edit, on both paths", async () => {
+		for (const inMemoryLimit of [Number.POSITIVE_INFINITY, 0]) {
+			const opened = await openOdpDeck(odpBytes({ ...ODP_DECK, extra: [{ name: THUMBNAIL, data: PNG, mediaType: "image/png" }] }))
+
+			shapeNamed(touched(slideAt(opened, 0)), "Box").hidden = true
+
+			const { outcome, bytes } = await saveDeck(opened, changes(), { inMemoryLimit })
+
+			expect(outcome).toMatchObject({ kind: "written" })
+
+			const archive = await ZipArchive.open(bytesSource(bytes))
+
+			expect(archive.get(THUMBNAIL)).toBeUndefined()
+			expect(await entryText(bytes, "META-INF/manifest.xml")).not.toContain("Thumbnails")
+			expect(await entryText(bytes, "META-INF/manifest.xml")).toContain('full-path="content.xml"')
+		}
+	})
+
+	it("keeps the thumbnail on a save that rewrites nothing", async () => {
+		const opened = await openOdpDeck(odpBytes({ ...ODP_DECK, extra: [{ name: THUMBNAIL, data: PNG, mediaType: "image/png" }] }))
+		const snapshot = await odpSnapshot({ deck: opened.deck, source: { parts: opened.parts }, changes: changes(), revision: 1 })
+
+		expect(isRefused(snapshot)).toBe(false)
+
+		if (isRefused(snapshot)) return
+
+		expect(snapshot.splice.content).toBeUndefined()
+		expect(snapshot.changes.remove ?? []).not.toContain(THUMBNAIL)
+	})
 })

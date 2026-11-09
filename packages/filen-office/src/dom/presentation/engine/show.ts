@@ -40,7 +40,7 @@ import type { RenderEffects, SlideLayer, SlideRender, TextPage } from "../../../
 import { drawingData } from "../../../core/presentation/render/slide"
 import { G, PartReader } from "../../../core/pptx/read/xml"
 import { fileFallback } from "../../../core/pptx/read/transition"
-import { playableTransition, transitionOption } from "../../../core/anim/presets/transitions/catalog"
+import { defaultDurationMs, playableTransition, transitionOption } from "../../../core/anim/presets/transitions/catalog"
 import { deckWebglTransitions, morphShapes, pptxGeometry } from "../../../core/anim/morphShapes"
 import { pptxParts } from "./open/pptx"
 import { effectiveClrMap, resolveColor, themeOf, toRgba } from "../../../core/presentation/theme"
@@ -661,13 +661,12 @@ const ECMA_TRANSITIONS: ReadonlySet<string> = new Set([
 	"wipe",
 	"zoom"
 ])
-// Whether the stage draws a transition kind itself (others play their fallback).
-function stageDraws(kind: string, namespace: Transition["namespace"]): boolean {
-	return namespace === "p" && ECMA_TRANSITIONS.has(kind)
+// Whether the stage draws a transition kind itself (others play their fallback): the ECMA ones and p14:flash (a
+// fade through white, whose Fallback is a plain fade).
+export function stageDraws(kind: string, namespace: Transition["namespace"]): boolean {
+	return namespace === "p" ? ECMA_TRANSITIONS.has(kind) : namespace === "p14" && kind === "flash"
 }
 
-// p:transition spd (PowerPoint's durations, as the ODP reader's presentation:transition-speed).
-const SPEED_MS: Readonly<Record<string, number>> = { slow: 1000, med: 750, fast: 500 }
 const OPTIONS = ["dir", "orient", "spokes", "thruBlk", "pattern", "invX", "invY"] as const
 
 function readTransitionElement(r: PartReader, transition: number): Transition | undefined {
@@ -700,11 +699,11 @@ function readTransitionElement(r: PartReader, transition: number): Transition | 
 	const after = Number(r.attr(transition, "advTm") ?? Number.NaN)
 	const click = r.attr(transition, "advClick")
 
+	const read = { kind: kind ?? "cut", namespace, options }
+
 	return {
-		kind: kind ?? "cut",
-		namespace,
-		options,
-		durationMs: Number.isFinite(duration) && duration >= 0 ? duration : (SPEED_MS[speed ?? "fast"] ?? 500),
+		...read,
+		durationMs: Number.isFinite(duration) && duration >= 0 ? duration : defaultDurationMs(read, speed),
 		...(speed === "slow" || speed === "med" || speed === "fast" ? { speed } : {}),
 		advance: { onClick: click !== "false" && click !== "0", ...(Number.isFinite(after) && after >= 0 ? { afterMs: after } : {}) }
 	}

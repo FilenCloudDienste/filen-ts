@@ -319,6 +319,32 @@ describe("presentation text layout", () => {
 		expect((view[0]?.x ?? 0) < 0).toBe(true)
 	})
 
+	it("places an unwrapped right-to-left line inside the box by its physical algn", () => {
+		// "abc" with the fake font is 24 px wide in a 200 px box.
+		const at = (pPr: Paragraph["pPr"]) =>
+			pageLines(
+				laidOut(body([paragraph("abc", SMALL, { rtl: true, ...pPr })], { wrap: false }), { width: 200, height: 40 }).result
+			)[0]?.x
+
+		expect(at({})).toBeCloseTo(0, 3)
+		expect(at({ algn: "l" })).toBeCloseTo(0, 3)
+		expect(at({ algn: "ctr" })).toBeCloseTo(88, 3)
+		expect(at({ algn: "r" })).toBeCloseTo(176, 3)
+
+		// The justify family leaves a single line at its start edge, the right one, less marL as when wrapped.
+		for (const algn of ["just", "justLow", "dist", "thaiDist"] as const) expect(at({ algn })).toBeCloseTo(176, 3)
+
+		expect(at({ algn: "just", marL: 12 * 9525 })).toBeCloseTo(164, 3)
+
+		// Left-to-right lines keep their positions.
+		const ltr = (pPr: Paragraph["pPr"]) =>
+			pageLines(laidOut(body([paragraph("abc", SMALL, pPr)], { wrap: false }), { width: 200, height: 40 }).result)[0]?.x
+
+		expect(ltr({})).toBeCloseTo(0, 3)
+		expect(ltr({ algn: "just", marL: 12 * 9525 })).toBeCloseTo(12, 3)
+		expect(ltr({ algn: "r" })).toBeCloseTo(176, 3)
+	})
+
 	it("turns vert270 text and stacks WordArt vertical text upright, one character per line", () => {
 		// The renderer hands turned text its box turned (textBox): the page is that box.
 		const turned = laidOut(body([paragraph("ab cd ef", SMALL)], { vertical: "vert270" }), { width: 200, height: 50 }).result
@@ -556,6 +582,21 @@ describe("presentation text layout", () => {
 		expect(kinds).toContain(DecorationKind.UNDERLINE)
 	})
 
+	it("draws a recoloured hyperlink (color tx) in its own colour, still underlined", () => {
+		const rPr: RunProps = {
+			sz: 1200,
+			fill: { kind: "solid", color: { kind: "srgb", rgb: "00B050" } },
+			hlinkClick: { kind: "url", href: "https://filen.io", color: "tx" }
+		}
+		const page = laidOut(body([paragraph("own", rPr)])).result.page
+		const kinds = Array.from({ length: page.page.decorationCount }, (_, d) => page.page.decorationInts[d * DECORATION_INTS])
+
+		expect(page.page.linkCount).toBe(1)
+		expect(page.styles.some(style => style.color === "00B050")).toBe(true)
+		expect(page.styles.some(style => style.color === "0563C1")).toBe(false)
+		expect(kinds).toContain(DecorationKind.UNDERLINE)
+	})
+
 	it("refuses a body over the run budget before laying anything out", () => {
 		const runs = Array.from({ length: MAX_BODY_RUNS + 1 }, () => ({ kind: "br" as const, rPr: {} }))
 
@@ -644,6 +685,21 @@ describe("text fields", () => {
 		expect(fieldText("datetime13", "x", { now })).toBe("2:05:09 PM")
 		expect(fieldText("ftr", "Footer text", { now })).toBe("Footer text")
 		expect(fieldText("datetime1", "stored", {})).toBe("stored")
+	})
+
+	it("names months and days in the field run's language, the numeric patterns as ECMA-376 lists them", () => {
+		const german = new Intl.DateTimeFormat("de-DE", { weekday: "long" }).format(now)
+		const month = new Intl.DateTimeFormat("de-DE", { month: "long" }).format(now)
+		const field: TextBody = {
+			bodyPr: {},
+			paragraphs: [{ pPr: {}, runs: [{ kind: "fld", type: "datetime2", id: "{1}", text: "x", rPr: { lang: "de-DE" } }] }]
+		}
+		const laid = layoutBody(resolveBody(field, CONTEXT), { width: 2000, height: 300 }, environment(), { fields: { now } })
+
+		expect(fieldText("datetime2", "x", { now }, "de-DE")).toBe(`${german}, ${month} 26, 2026`)
+		expect(fieldText("datetime1", "x", { now }, "de-DE")).toBe("10/26/2026")
+		expect(fieldText("datetime2", "x", { now }, "x-none")).toBe("Monday, October 26, 2026")
+		expect(laid.page.page.sourceTexts).toEqual([`${german}, ${month} 26, 2026`])
 	})
 })
 

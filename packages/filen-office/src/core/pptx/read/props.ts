@@ -1,4 +1,4 @@
-import type { Author, ShowSettings } from "../../presentation/model"
+import { DEFAULT_SLIDE_GRID, type Author, type ShowSettings, type SlideGrid } from "../../presentation/model"
 import { tooLarge } from "../../presentation/refusal"
 import { colorIn, type ReadContext } from "./drawing"
 import { G } from "./xml"
@@ -42,6 +42,22 @@ export function readShowSettings(context: ReadContext, presentationPr: number): 
 		...(pen === undefined ? {} : { penColor: pen }),
 		// The kiosk restart (ST_Ms, default 300,000 ms).
 		...(kiosk >= 0 ? { restartMs: restart ?? 300_000 } : {})
+	}
+}
+
+// The view properties part's grid (p:viewPr, §19.2.2.18): p:gridSpacing and p:slideViewPr/p:cSldViewPr@snapToGrid,
+// PowerPoint's defaults for what is absent or not a positive size.
+export function readViewGrid(context: ReadContext, viewPr: number): SlideGrid {
+	const r = context.reader
+	const spacing = r.child(viewPr, G.P, "gridSpacing")
+	const slideView = r.child(viewPr, G.P, "slideViewPr")
+	const common = slideView < 0 ? -1 : r.child(slideView, G.P, "cSldViewPr")
+	const size = (value: number | undefined, fallback: number): number => (value !== undefined && value > 0 ? value : fallback)
+
+	return {
+		cx: size(r.int(spacing, "cx"), DEFAULT_SLIDE_GRID.cx),
+		cy: size(r.int(spacing, "cy"), DEFAULT_SLIDE_GRID.cy),
+		snap: r.bool(common, "snapToGrid") ?? DEFAULT_SLIDE_GRID.snap
 	}
 }
 

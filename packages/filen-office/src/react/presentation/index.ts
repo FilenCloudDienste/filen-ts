@@ -37,6 +37,7 @@ export {
 } from "./links"
 export { SlideRail, type SlideRailProps } from "./rail/SlideRail"
 export { NotesPanel, type NotesPanelProps } from "./notes/NotesPanel"
+export { NotesText } from "./notes/NotesText"
 export { StaticShow, type StaticShowProps } from "./show/static"
 export { paintEditorSlide, paintSlide } from "./paint/slide"
 export {
@@ -58,7 +59,16 @@ export { OBJECT_COMMANDS, type ObjectCommand, type ObjectKeyBindings } from "./e
 export { PresentationTextEditor, type PresentationTextEditorProps, type TextEditorLabels } from "./edit/text/TextEditor"
 export { TextEditController, COMMIT_IDLE_MS, type TextEditFormat } from "./edit/text/controller"
 export { createTextEditing, formatShapes, useTextEditing, type TextEditing } from "./edit/text/editing"
-export { DEFAULT_TEXT_BINDINGS, textKeyCommand, type TextKeyBindings, type TextKeyCommand } from "./edit/text/keys"
+export { formatPainterOf, useFormatPainter, type FormatPainter, type FormatPainterHost, type FormatPainterMode } from "./edit/text/painter"
+export {
+	APPLE_TEXT_BINDINGS,
+	DEFAULT_TEXT_BINDINGS,
+	defaultTextBindings,
+	textKeyCommand,
+	type TextKeyBindings,
+	type TextKeyCommand
+} from "./edit/text/keys"
+export { cellNavigation, cellStep, firstPlaceholder, placeholderNavigation, type CellMove, type TextNavigation } from "./edit/text/navigate"
 export { SlideShow, type SlideShowProps } from "./show/player"
 export { type ShowMediaEvents, type ShowMediaHandle, type ShowMediaMount } from "./show/stage"
 export { DEFAULT_SHOW_OPTIONS, showOptionsOf, type ShowOptions } from "./show/timeline"

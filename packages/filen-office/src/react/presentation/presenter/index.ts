@@ -1,6 +1,7 @@
 export {
 	createShowKeys,
 	DEFAULT_SHOW_BINDINGS,
+	isContextMenuKey,
 	parseShowCombo,
 	showKeyCommand,
 	type ShowKeyBindings,

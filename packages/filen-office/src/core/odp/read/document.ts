@@ -11,6 +11,7 @@ import {
 	type CommentRef,
 	type CustomShow,
 	type Deck,
+	type OdpHeaderFooter,
 	type Refused,
 	type ShapeNode,
 	type ShowSettings,
@@ -33,8 +34,9 @@ import type { Transition } from "../../anim/model"
 // Opening an OpenDocument presentation (.odp, .otp; ODF 1.3 Part 3 §3.2, §10) into the shared model, the reader
 // building the model directly (sources are page fragments, `src.format = "odp"`):
 //   style:master-page   → a master (its shapes; its presentation:notes → that master's notes master);
-//   (master, presentation:presentation-page-layout-name) pairs in use → synthesized layouts (`synthetic`, never
-//                        written to ODP) holding the style:presentation-page-layout's placeholder boxes (§16.43–44);
+//   (master, style:presentation-page-layout) pairs, every page layout on every master, and pairs pages name that
+//                        styles.xml lacks → synthesized layouts (`synthetic`, never written to ODP) holding the page
+//                        layout's placeholder boxes (§16.43–44);
 //   draw:page           → a slide, parsed when first needed from its byte span (scan.ts); its presentation:notes →
 //                        its notes page;
 //   a master's header, footer, date-time and page-number frames → the slide's own shapes where the page's style
@@ -65,7 +67,8 @@ export type OdpOpen = { readonly kind: "opened"; readonly deck: Deck; readonly p
 
 const CHART_TYPE = "application/vnd.oasis.opendocument.chart"
 const MAX_OBJECT_BYTES = 16 * 1024 * 1024
-const MAX_SNIFF_BYTES = 4 * 1024 * 1024
+// The picture types whose header states a size (pictureSize).
+const SIZED_TYPES: ReadonlySet<string> = new Set(["image/png", "image/jpeg", "image/gif", "image/bmp"])
 const MAX_CLIP_BYTES = 64 * 1024 * 1024
 
 // Media types of package streams as the renderer and the image service read them.
@@ -84,8 +87,17 @@ const IMAGE_EXTENSIONS: Readonly<Record<string, string>> = {
 	svm: "image/x-svm"
 }
 
+type PictureSize = { readonly width: number; readonly height: number }
+
 // A raster picture's size in points from its header: PNG (IHDR, pHYs), JPEG (SOFn, JFIF APP0), GIF and BMP.
-export function pictureSize(bytes: Uint8Array): { readonly width: number; readonly height: number } | undefined {
+export function pictureSize(bytes: Uint8Array): PictureSize | undefined {
+	const size = pictureHeader(bytes, true)
+
+	return size === "more" ? undefined : size
+}
+
+// pictureSize of the first bytes of a picture: "more" while the header may lie past them (`complete` false).
+function pictureHeader(bytes: Uint8Array, complete: boolean): PictureSize | undefined | "more" {
 	const u16 = (at: number): number => ((bytes[at] ?? 0) << 8) | (bytes[at + 1] ?? 0)
 	const u32 = (at: number): number =>
 		(bytes[at] ?? 0) * 0x1000000 + ((bytes[at + 1] ?? 0) << 16) + ((bytes[at + 2] ?? 0) << 8) + (bytes[at + 3] ?? 0)
@@ -93,17 +105,22 @@ export function pictureSize(bytes: Uint8Array): { readonly width: number; readon
 	const le32 = (at: number): number => le16(at) + le16(at + 2) * 0x10000
 	const points = (pixels: number, perInch: number): number => (pixels * 72) / (perInch > 0 ? perInch : 96)
 
+	if (!complete && bytes.length < 4) return "more"
+
 	if (bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) {
 		const width = u32(16)
 		const height = u32(20)
 		let dpiX = 96
 		let dpiY = 96
+		let at = 8
 
-		for (let at = 8; at + 12 <= bytes.length && at < 1_048_576;) {
+		for (; at + 12 <= bytes.length && at < 1_048_576;) {
 			const length = u32(at)
 			const type = String.fromCharCode(bytes[at + 4] ?? 0, bytes[at + 5] ?? 0, bytes[at + 6] ?? 0, bytes[at + 7] ?? 0)
 
 			if (type === "pHYs" && bytes[at + 16] === 1) {
+				if (!complete && at + 17 > bytes.length) return "more"
+
 				dpiX = u32(at + 8) * 0.0254
 				dpiY = u32(at + 12) * 0.0254
 			}
@@ -112,6 +129,8 @@ export function pictureSize(bytes: Uint8Array): { readonly width: number; readon
 
 			at += 12 + length
 		}
+
+		if (!complete && at + 12 > bytes.length && at < 1_048_576) return "more"
 
 		return { width: points(width, dpiX), height: points(height, dpiY) }
 	}
@@ -127,6 +146,8 @@ export function pictureSize(bytes: Uint8Array): { readonly width: number; readon
 			const length = u16(at + 2)
 
 			if (marker === 0xe0 && bytes[at + 4] === 0x4a && bytes[at + 5] === 0x46 && (bytes[at + 11] === 1 || bytes[at + 11] === 2)) {
+				if (!complete && at + 16 > bytes.length) return "more"
+
 				const scale = bytes[at + 11] === 2 ? 2.54 : 1
 
 				dpiX = u16(at + 12) * scale
@@ -139,12 +160,18 @@ export function pictureSize(bytes: Uint8Array): { readonly width: number; readon
 			at += 2 + length
 		}
 
-		return undefined
+		return complete ? undefined : "more"
 	}
 
-	if (bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46) return { width: points(le16(6), 96), height: points(le16(8), 96) }
+	if (bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46) {
+		if (!complete && bytes.length < 10) return "more"
+
+		return { width: points(le16(6), 96), height: points(le16(8), 96) }
+	}
 
 	if (bytes[0] === 0x42 && bytes[1] === 0x4d) {
+		if (!complete && bytes.length < 46) return "more"
+
 		const perMeterX = le32(38)
 		const perMeterY = le32(42)
 
@@ -186,6 +213,37 @@ function imageType(mediaType: string | undefined): string | undefined {
 	return undefined
 }
 
+const DECL_KINDS = ["header", "footer", "date-time"] as const
+const DISPLAY_KINDS = ["header", "footer", "date-time", "page-number"] as const
+
+// A page's header and footer settings as written: the declarations its start tag names and its drawing-page style's
+// display flags (the style's chain resolved), or undefined when it has none.
+function headerFooterOf(page: ReadonlyMap<string, string>, style: ReadonlyMap<string, string>): OdpHeaderFooter | undefined {
+	const use: { -readonly [K in keyof OdpHeaderFooter["use"]]: string } = {}
+	const display: { -readonly [K in keyof OdpHeaderFooter["display"]]: boolean } = {}
+	let any = false
+
+	for (const kind of DECL_KINDS) {
+		const name = page.get(`presentation:use-${kind}-name`)
+
+		if (name === undefined) continue
+
+		use[kind] = name
+		any = true
+	}
+
+	for (const kind of DISPLAY_KINDS) {
+		const value = style.get(`presentation:display-${kind}`)
+
+		if (value === undefined) continue
+
+		display[kind] = value === "true"
+		any = true
+	}
+
+	return any ? { use, display } : undefined
+}
+
 interface PageHead {
 	readonly name: string
 	readonly style: string | undefined
@@ -203,6 +261,8 @@ interface MasterInfo {
 	readonly notesMaster: SlideRef | undefined
 	readonly notesBoxes: Map<string, Xfrm>
 	readonly size: { cx: number; cy: number } | undefined
+	// The page size of its presentation:notes' style:page-layout-name (§19.506), when written.
+	readonly notesSize: { cx: number; cy: number } | undefined
 }
 
 // The view a package stream offers the renderer and the image service (OPC-shaped; ODF has no relationships).
@@ -236,6 +296,8 @@ export class OdpParts {
 	deck!: Deck
 	private readonly entries = new Map<string, ZipEntry>()
 	private readonly types = new Map<string, string>()
+	// Pictures' own sizes by part (pictureSizeOf), undefined for one whose header states none.
+	private readonly sizes = new Map<string, PictureSize | undefined>()
 	private readonly documents = new Map<string, XmlDocument>()
 	private readonly pending = new Map<SlideRef, Promise<SlideNode>>()
 	private readonly spans = new Map<SlideRef, PageSpan>()
@@ -279,7 +341,8 @@ export class OdpParts {
 		this.context = new OdpContext(sheet, budgets, this.tally, pages, {
 			mediaType: part => manifest.get(partKey(part)) ?? this.held?.(part)?.mediaType,
 			has: part => this.entries.has(partKey(part)) || this.held?.(part) !== undefined,
-			templates
+			templates,
+			pictureSize: part => this.sizes.get(partKey(part))
 		})
 		this.opc = {
 			entry: name => this.entries.get(partKey(name)),
@@ -439,6 +502,17 @@ export class OdpParts {
 		return node
 	}
 
+	// The sizes of the bitmap fills' pictures (§16.42 draw:fill-image), read before anything is read: a tile sized by
+	// a length scales by its picture's own size, and every reading (pages, masters, held pages) is synchronous. The
+	// header of each picture only.
+	async readFillImageSizes(): Promise<void> {
+		for (const element of this.sheet.drawResources.get("draw:fill-image")?.values() ?? []) {
+			const part = packagePart(element.attributes.get("xlink:href"))
+
+			if (part !== undefined) await this.pictureSizeOf(part)
+		}
+	}
+
 	// A page's background and transition as a reading of the page gives them, for a page in any fragment (one an
 	// undo holds, read again by the writer), its styles resolved through `context` (the deck's by default).
 	pageFields(
@@ -467,7 +541,7 @@ export class OdpParts {
 		const attributes = style.attributes
 		const transition = readTransition(attributes, filter, sound)
 		// The page's own fill, else (when the page hides its master's background) white paper, else the master's.
-		const own = fillOf(style, this.sheet.drawResources)
+		const own = fillOf(style, this.sheet.drawResources, this.context.pictureSizes)
 		const fill =
 			own !== undefined && own !== "none"
 				? own
@@ -491,23 +565,9 @@ export class OdpParts {
 		const master = this.masters.get(head.master) ?? this.masters.values().next().value
 		const style = this.pageStyle(head.style, "content")
 		const attributes = style.attributes
-		const display = (name: string, fallback: boolean): boolean => {
-			const value = attributes.get(`presentation:display-${name}`)
-
-			return value === undefined ? fallback : value === "true"
-		}
+		const headerFooter = headerFooterOf(head.attributes, attributes)
 		let next = 1
-		const fields = {
-			...(head.attributes.get("presentation:use-header-name") === undefined
-				? {}
-				: { header: this.decl("header", head.attributes.get("presentation:use-header-name"))?.text ?? "" }),
-			...(head.attributes.get("presentation:use-footer-name") === undefined
-				? {}
-				: { footer: this.decl("footer", head.attributes.get("presentation:use-footer-name"))?.text ?? "" }),
-			...(head.attributes.get("presentation:use-date-time-name") === undefined
-				? {}
-				: { dateTime: this.decl("date-time", head.attributes.get("presentation:use-date-time-name")) ?? { fixed: false } })
-		}
+		const fields = this.declFields(headerFooter)
 		const scope: ShapeScope = {
 			fragment,
 			text: { fields },
@@ -521,32 +581,7 @@ export class OdpParts {
 		}
 		const shapes = page < 0 ? [] : readShapes(this.context, scope, page)
 
-		// The master's footers this page shows (§20.233–§20.236; LibreOffice's defaults when unwritten: header,
-		// footer and date-time shown, the page number not).
-		if (master !== undefined && this.stylesFragment !== undefined) {
-			const shown: readonly [string, boolean][] = [
-				["date-time", display("date-time", true) && fields.dateTime !== undefined],
-				["footer", display("footer", true) && (fields.footer ?? "") !== ""],
-				["page-number", display("page-number", false)]
-			]
-
-			for (const [kind, visible] of shown) {
-				const element = master.footers.get(kind)
-
-				if (!visible || element === undefined) continue
-
-				const footerScope: ShapeScope = { ...scope, fragment: this.stylesFragment, masterBoxes: new Map() }
-				const footer: ShapeNode | undefined = readShapeElements(this.context, footerScope, [element])[0]
-
-				if (footer === undefined) continue
-
-				// The master's frame (ODF holds no per-page copy of it): no edit of the slide can change it.
-				footer.synthetic = true
-				footer.lock = "master"
-				shapes.push(footer)
-			}
-		}
-
+		this.pushMasterFooters(shapes, master, headerFooter, scope)
 		this.unread += scope.unread
 
 		let notes: SlideRef | undefined
@@ -579,6 +614,7 @@ export class OdpParts {
 			...(background === undefined ? {} : { background }),
 			showMasterShapes: attributes.get("presentation:background-objects-visible") !== "false",
 			hidden: attributes.get("presentation:visibility") === "hidden",
+			...(headerFooter === undefined ? {} : { odpHeaderFooter: headerFooter }),
 			shapes,
 			...(transition === undefined ? {} : { transition }),
 			...(timing === undefined ? {} : { timing }),
@@ -728,6 +764,83 @@ export class OdpParts {
 		return name === undefined ? undefined : this.decls.get(kind)?.get(name)
 	}
 
+	// The field texts a page's declarations give (a name with no declaration: empty, the date-time current).
+	private declFields(settings: OdpHeaderFooter | undefined): NonNullable<ShapeScope["text"]["fields"]> {
+		const use = settings?.use
+
+		return {
+			...(use?.header === undefined ? {} : { header: this.decl("header", use.header)?.text ?? "" }),
+			...(use?.footer === undefined ? {} : { footer: this.decl("footer", use.footer)?.text ?? "" }),
+			...(use?.["date-time"] === undefined ? {} : { dateTime: this.decl("date-time", use["date-time"]) ?? { fixed: false } })
+		}
+	}
+
+	// The master's footers a page with `settings` shows, pushed onto its shapes (§20.233–§20.236; LibreOffice's defaults
+	// when unwritten: header, footer and date-time shown, the page number not). Each is the master's frame (ODF holds
+	// no per-page copy of it): synthetic, and no edit of the slide can change it.
+	private pushMasterFooters(
+		shapes: ShapeNode[],
+		master: MasterInfo | undefined,
+		settings: OdpHeaderFooter | undefined,
+		scope: ShapeScope
+	): void {
+		if (master === undefined || this.stylesFragment === undefined) return
+
+		const fields = scope.text.fields
+		const display = (name: "date-time" | "footer" | "page-number", fallback: boolean): boolean => settings?.display[name] ?? fallback
+		const shown: readonly [string, boolean][] = [
+			["date-time", display("date-time", true) && fields?.dateTime !== undefined],
+			["footer", display("footer", true) && (fields?.footer ?? "") !== ""],
+			["page-number", display("page-number", false)]
+		]
+
+		for (const [kind, visible] of shown) {
+			const element = master.footers.get(kind)
+
+			if (!visible || element === undefined) continue
+
+			const footerScope: ShapeScope = { ...scope, fragment: this.stylesFragment, masterBoxes: new Map() }
+			const footer: ShapeNode | undefined = readShapeElements(this.context, footerScope, [element])[0]
+
+			if (footer === undefined) continue
+
+			footer.synthetic = true
+			footer.lock = "master"
+			shapes.push(footer)
+		}
+	}
+
+	// A source page's header and footer settings (parsed or not), from its start tag and drawing-page style.
+	headerFooter(ref: SlideRef): OdpHeaderFooter | undefined {
+		const head = this.heads.get(ref)
+
+		return head === undefined ? undefined : headerFooterOf(head.attributes, this.pageStyle(head.style, "content").attributes)
+	}
+
+	// The master footers a page an op made on `master` shows with `settings`, as a read page with them shows them,
+	// pushed onto its shapes with ids from `nextId`.
+	pushNewPageFooters(shapes: ShapeNode[], master: SlideRef | undefined, settings: OdpHeaderFooter, nextId: () => number): void {
+		let info: MasterInfo | undefined
+
+		for (const each of this.masters.values()) if (each.ref === master) info = each
+
+		if (info === undefined || this.stylesFragment === undefined) return
+
+		const scope: ShapeScope = {
+			fragment: this.stylesFragment,
+			text: { fields: this.declFields(settings) },
+			masterBoxes: new Map(),
+			nextId,
+			images: new Set(),
+			charts: new Set(),
+			clips: [],
+			unread: 0,
+			...(info === undefined ? {} : { masterName: info.name })
+		}
+
+		this.pushMasterFooters(shapes, info, settings, scope)
+	}
+
 	// A drawing-page style's properties (§17.25), its chain resolved.
 	pageStyle(name: string | undefined, scope: "content" | "styles", context: OdpContext = this.context): OdfProperties {
 		return name === undefined ? NO_PROPERTIES : context.resolver.resolve("drawing-page", name, scope).properties("drawing-page")
@@ -772,18 +885,12 @@ export class OdpParts {
 	// A clipped picture's crop as fractions of its size: the picture's pixels at its own resolution (PNG pHYs, JFIF,
 	// BMP), else 96 per inch, as LibreOffice sizes a picture that states none.
 	private async cropPicture(entry: ShapeScope["clips"][number]): Promise<void> {
-		const zip = this.entries.get(partKey(entry.part))
+		const isPicture = (props: typeof entry.shape.props): boolean =>
+			props?.fill !== undefined && props.fill !== "none" && props.fill.kind === "picture"
 
-		if (zip === undefined || zip.uncompressedSize > MAX_CLIP_BYTES) return
+		if (!isPicture(entry.shape.props)) return
 
-		let size: { readonly width: number; readonly height: number } | undefined
-
-		try {
-			size = pictureSize(await this.odf.archive.read(zip))
-		} catch (error) {
-			if (!(error instanceof ZipError)) throw error
-		}
-
+		const size = await this.pictureSizeOf(entry.part)
 		const fill = entry.shape.props?.fill
 
 		if (size === undefined || size.width <= 0 || size.height <= 0 || fill === undefined || fill === "none" || fill.kind !== "picture")
@@ -814,15 +921,79 @@ export class OdpParts {
 
 		const entry = this.entries.get(key)
 
-		if (entry === undefined || entry.uncompressedSize > MAX_SNIFF_BYTES) return
+		if (entry === undefined) return
+
+		const type = await this.head(entry, bytes => (bytes.length >= 256 ? sniff(bytes) : "more"), sniff)
+
+		if (type !== undefined) this.types.set(key, type)
+	}
+
+	// A picture's own size from its entry's header, read once per part (the header only: the entry is streamed until
+	// the header is in). Only PNG, JPEG, GIF and BMP state one.
+	private async pictureSizeOf(part: string): Promise<PictureSize | undefined> {
+		const key = partKey(part)
+
+		if (this.sizes.has(key)) return this.sizes.get(key)
+
+		const entry = this.entries.get(key)
+		const type = this.contentTypes.typeOf(part)
+		const size =
+			entry === undefined || entry.uncompressedSize > MAX_CLIP_BYTES || (type !== undefined && !SIZED_TYPES.has(type))
+				? undefined
+				: await this.head(
+						entry,
+						bytes => pictureHeader(bytes, false),
+						bytes => pictureSize(bytes)
+					)
+
+		this.sizes.set(key, size)
+
+		return size
+	}
+
+	// What `read` makes of an entry's first bytes, streamed chunk by chunk until it has enough ("more" asks for the
+	// next); `end` reads what the whole entry gave when it ends first. Undefined when the entry cannot be read.
+	private async head<T>(
+		entry: ZipEntry,
+		read: (bytes: Uint8Array) => T | "more",
+		end: (bytes: Uint8Array) => T | undefined
+	): Promise<T | undefined> {
+		let held: Uint8Array | undefined
+		let length = 0
 
 		try {
-			const type = sniff((await this.odf.archive.read(entry)).subarray(0, 256))
+			for await (const chunk of this.odf.archive.stream(entry)) {
+				let bytes = chunk
 
-			if (type !== undefined) this.types.set(key, type)
+				// A stream's chunk is its own only until the next is asked for: a header across chunks is copied.
+				if (held !== undefined) {
+					if (length + chunk.length > held.length) {
+						const grown = new Uint8Array(Math.max(length + chunk.length, held.length * 2))
+
+						grown.set(held.subarray(0, length))
+						held = grown
+					}
+
+					held.set(chunk, length)
+					length += chunk.length
+					bytes = held.subarray(0, length)
+				}
+
+				const result = read(bytes)
+
+				if (result !== "more") return result
+				if (held === undefined) {
+					held = chunk.slice()
+					length = chunk.length
+				}
+			}
 		} catch (error) {
 			if (!(error instanceof ZipError)) throw error
+
+			return undefined
 		}
+
+		return end(held === undefined ? new Uint8Array(0) : held.subarray(0, length))
 	}
 
 	// A page's draw:name, or undefined.
@@ -890,7 +1061,7 @@ export class OdpParts {
 			}
 
 			const style = this.pageStyle(page.drawStyle, "styles")
-			const background = fillOf(style, sheet.drawResources)
+			const background = fillOf(style, sheet.drawResources, this.context.pictureSizes)
 			let notesMaster: SlideRef | undefined
 			const notesBoxes = new Map<string, Xfrm>()
 
@@ -923,9 +1094,10 @@ export class OdpParts {
 				})
 			}
 
-			const layout = page.pageLayout === undefined ? undefined : sheet.pageLayouts.get(page.pageLayout)
-			const width = parseLength(layout?.properties.attributes.get("fo:page-width"))
-			const height = parseLength(layout?.properties.attributes.get("fo:page-height"))
+			const notesSize =
+				notesElement < 0 || stylesFragment === undefined
+					? undefined
+					: this.pageSize(stylesFragment.attributes(notesElement).get("style:page-layout-name"))
 
 			nodes.set(ref, {
 				ref,
@@ -949,10 +1121,8 @@ export class OdpParts {
 				footers,
 				notesMaster,
 				notesBoxes,
-				size:
-					width === undefined || height === undefined
-						? undefined
-						: { cx: Math.round(width * EMU_PER_PT), cy: Math.round(height * EMU_PER_PT) }
+				size: this.pageSize(page.pageLayout),
+				notesSize
 			})
 		}
 
@@ -980,7 +1150,8 @@ export class OdpParts {
 				footers: new Map(),
 				notesMaster: undefined,
 				notesBoxes: new Map(),
-				size: undefined
+				size: undefined,
+				notesSize: undefined
 			})
 		}
 
@@ -989,7 +1160,8 @@ export class OdpParts {
 		const hiddenSlides = new Set<SlideRef>()
 		const pageLayouts = this.presentationPageLayouts()
 		const pageLayoutNames = this.pageLayoutNames()
-		const shownNames = new Map<string, number>()
+		// The page layout names the pages use, by master, in first use.
+		const usedLayouts = new Map<string, string[]>()
 
 		for (const [index, span] of this.content.pages.entries()) {
 			const ref = refs.next()
@@ -1005,19 +1177,64 @@ export class OdpParts {
 			let layout = this.layoutOf.get(key)
 
 			if (layout === undefined && master !== undefined) {
-				if (layouts.length >= this.budgets.layouts) tooLarge("layouts", this.budgets.layouts)
+				if (this.layoutOf.size >= this.budgets.layouts) tooLarge("layouts", this.budgets.layouts)
 
 				layout = refs.next()
 				this.layoutOf.set(key, layout)
+
+				const own = usedLayouts.get(master.name)
+
+				if (own === undefined) usedLayouts.set(master.name, [layoutName])
+				else own.push(layoutName)
+			}
+
+			const head: PageHead = {
+				name: attributes.get("draw:name") ?? `page${String(index + 1)}`,
+				style: attributes.get("draw:style-name"),
+				master: master?.name ?? "",
+				layout: layoutName,
+				attributes
+			}
+
+			this.spans.set(ref, span)
+			this.heads.set(ref, head)
+			this.context.pageCount++
+			slides.push(ref)
+
+			if (this.pageStyle(head.style, "content").attributes.get("presentation:visibility") === "hidden") hiddenSlides.add(ref)
+		}
+
+		// Every master offers every presentation page layout of styles.xml, in its order, as PowerPoint's masters offer
+		// their whole layout set (LibreOffice offers all its AutoLayouts on any master), then the ones pages name that
+		// styles.xml lacks. The budget is the pages' to spend first: layouts no page uses stop at what it leaves.
+		let spare = this.budgets.layouts - this.layoutOf.size
+
+		for (const master of this.masters.values()) {
+			const own = usedLayouts.get(master.name) ?? []
+			const shownNames = new Map<string, number>()
+
+			for (const layoutName of [...pageLayouts.keys(), ...own.filter(name => !pageLayouts.has(name))]) {
+				const key = `${master.name}\u0000${layoutName}`
+				let layout = this.layoutOf.get(key)
+
+				if (layout === undefined) {
+					if (spare <= 0) continue
+
+					spare--
+					layout = refs.next()
+					this.layoutOf.set(key, layout)
+				}
+
 				layouts.push(layout)
 
 				// Shown by the names the file gives for display: the presentation page layout's (§16.41 style:display-name,
 				// else the style:name of one styles.xml defines), else its master page's style:display-name (§16.9). A
-				// master's internal style:name is never shown: with neither, the layout has no name and the page shows
-				// "Layout N", as PowerPoint shows an unnamed layout. Two layouts that would read the same are numbered.
+				// master's internal style:name and LibreOffice's "AL<n>T<k>" page layout names are never shown: the layout
+				// has no name and the page names it by its type, else "Layout N", as PowerPoint shows an unnamed layout. Two
+				// layouts of a master that would read the same are numbered.
 				const pageLayout = pageLayoutNames.get(layoutName)
-				const masterDisplay = sheet.masterPages.get(master.name)?.displayName
-				let display = pageLayout ?? masterDisplay ?? ""
+				let display =
+					pageLayout === undefined ? (sheet.masterPages.get(master.name)?.displayName ?? "") : (pageLayout.display ?? "")
 				const seen = shownNames.get(display) ?? 0
 
 				shownNames.set(display, seen + 1)
@@ -1039,25 +1256,13 @@ export class OdpParts {
 					revision: 0
 				})
 			}
-
-			const head: PageHead = {
-				name: attributes.get("draw:name") ?? `page${String(index + 1)}`,
-				style: attributes.get("draw:style-name"),
-				master: master?.name ?? "",
-				layout: layoutName,
-				attributes
-			}
-
-			this.spans.set(ref, span)
-			this.heads.set(ref, head)
-			this.context.pageCount++
-			slides.push(ref)
-
-			if (this.pageStyle(head.style, "content").attributes.get("presentation:visibility") === "hidden") hiddenSlides.add(ref)
 		}
 
 		const size = this.deckSize(this.masters.get(this.heads.get(slides[0] ?? (-1 as SlideRef))?.master ?? "") ?? firstMaster)
-		const notesMaster = [...this.masters.values()].find(master => master.notesMaster !== undefined)?.notesMaster
+		const notesInfo = [...this.masters.values()].find(master => master.notesMaster !== undefined)
+		const notesMaster = notesInfo?.notesMaster
+		// The notes page's own size (its master's notes page layout), else the slide's turned (no notes page layout).
+		const notesSize = notesInfo?.notesSize ?? { cx: size.cy, cy: size.cx }
 		const settings = this.settings(slides)
 		const graphicDefaults = sheet.defaults.get("graphic")
 		const defaultLevel = levelStyle(graphicDefaults?.properties.get("paragraph"), graphicDefaults?.properties.get("text"), this.context)
@@ -1066,7 +1271,7 @@ export class OdpParts {
 			format: "odp",
 			variant: template ? "otp" : "odp",
 			size,
-			notesSize: { cx: size.cy, cy: size.cx },
+			notesSize,
 			firstSlideNumber: 1,
 			slides,
 			masters,
@@ -1091,15 +1296,27 @@ export class OdpParts {
 		return deck
 	}
 
+	// A style:page-layout's fo:page-width and fo:page-height (§17.2) in EMU, when both are written.
+	private pageSize(name: string | undefined): { cx: number; cy: number } | undefined {
+		const layout = name === undefined ? undefined : this.sheet.pageLayouts.get(name)
+		const width = parseLength(layout?.properties.attributes.get("fo:page-width"))
+		const height = parseLength(layout?.properties.attributes.get("fo:page-height"))
+
+		return width === undefined || height === undefined
+			? undefined
+			: { cx: Math.round(width * EMU_PER_PT), cy: Math.round(height * EMU_PER_PT) }
+	}
+
 	private deckSize(master: MasterInfo | undefined): { cx: number; cy: number } {
 		// LibreOffice's default page: 28 cm × 21 cm.
 		return master?.size ?? { cx: Math.round((28 / 2.54) * 72 * EMU_PER_PT), cy: Math.round((21 / 2.54) * 72 * EMU_PER_PT) }
 	}
 
 	// style:presentation-page-layout (§16.43): its placeholders' classes and boxes (lengths, or percents of the page).
-	// style:presentation-page-layout display names by style:name (§16.41: style:display-name, else style:name).
-	private pageLayoutNames(): Map<string, string> {
-		const out = new Map<string, string>()
+	// style:presentation-page-layout display names by style:name (§16.41: style:display-name, else style:name; none for
+	// LibreOffice's internal "AL<n>T<AutoLayout>" names, which it never shows).
+	private pageLayoutNames(): Map<string, { readonly display: string | undefined }> {
+		const out = new Map<string, { readonly display: string | undefined }>()
 		const fragment = this.stylesFragment
 
 		if (fragment === undefined) return out
@@ -1119,7 +1336,8 @@ export class OdpParts {
 				const attributes = fragment.attributes(layout)
 				const name = attributes.get("style:name")
 
-				if (name !== undefined && !out.has(name)) out.set(name, attributes.get("style:display-name") ?? name)
+				if (name !== undefined && !out.has(name))
+					out.set(name, { display: attributes.get("style:display-name") ?? (/^AL\d+T\d+$/u.test(name) ? undefined : name) })
 			}
 		}
 
@@ -1629,6 +1847,7 @@ export async function openOdp(source: ByteSource, options: OdpOpenOptions = {}):
 					: new Fragment(sheet.stylesDocument, sheet.stylesNamespaces, "styles.xml", -1, "styles", 0)
 			)
 		)
+		await parts.readFillImageSizes()
 		parts.build(odf.facts.template, odf.facts.signed, odf.facts.macros)
 
 		if (options.adopt !== undefined) parts.adopt(options.adopt, options.refsAbove, options.adoptOrder)

@@ -2,7 +2,7 @@ import type { TextAlign, TextUnderline } from "../../drawingml/index"
 import { parseLength, parsePercent, type OdfElement, type OdfListLevel, type OdfListStyle, type OdfProperties } from "../../odf/index"
 import { classifyHref } from "../../presentation/actions"
 import { tooDeep, tooLarge } from "../../presentation/refusal"
-import type { Action, Bullet, FontRef, ListStyle, Paragraph, ParaProps, Run, RunProps, TextBody } from "../../presentation/model"
+import type { Action, Bullet, FontRef, ListStyle, Paragraph, ParaProps, Run, RunProps, SlideRef, TextBody } from "../../presentation/model"
 import { NodeKind } from "../../xml/index"
 import { EMU_PER_PT, packagePart, srgb } from "./fills"
 import type { Fragment, OdpContext } from "./context"
@@ -513,7 +513,7 @@ function linkAction(context: OdpContext, href: string | undefined): Action | und
 	const trimmed = href.trim()
 
 	if (trimmed.startsWith("#")) {
-		const slide = context.pageNamed(decodeName(trimmed.slice(1)))
+		const slide = pageOfFragment(context, trimmed.slice(1))
 
 		return slide === undefined ? undefined : { kind: "slide", slide }
 	}
@@ -521,12 +521,18 @@ function linkAction(context: OdpContext, href: string | undefined): Action | und
 	return classifyHref(trimmed)
 }
 
-function decodeName(name: string): string {
+// The page an href fragment ("#name", an IRI reference) names: its escapes decoded, else the name as written (a
+// producer that writes "%" raw, or a raw name its decoding does not match).
+export function pageOfFragment(context: OdpContext, fragment: string): SlideRef | undefined {
+	let decoded = fragment
+
 	try {
-		return decodeURIComponent(name)
+		decoded = decodeURIComponent(fragment)
 	} catch {
-		return name
+		// Not a valid escape sequence: the raw name.
 	}
+
+	return context.pageNamed(decoded) ?? (decoded === fragment ? undefined : context.pageNamed(fragment))
 }
 
 // Nesting past these is refused, never read in part (the annotation reader shares the span bound).

@@ -24,7 +24,8 @@ export const G = {
 	P159: 15,
 	Pic: 16,
 	Dsp: 17,
-	Other: 18
+	Other: 18,
+	Ahyp: 19
 } as const
 
 export type G = (typeof G)[keyof typeof G]
@@ -52,7 +53,8 @@ const GROUPS: readonly (readonly [G, readonly string[]])[] = [
 	[G.P188, ["http://schemas.microsoft.com/office/powerpoint/2018/8/main"]],
 	[G.P159, ["http://schemas.microsoft.com/office/powerpoint/2015/09/main"]],
 	[G.Pic, ["http://schemas.openxmlformats.org/drawingml/2006/picture", "http://purl.oclc.org/ooxml/drawingml/picture"]],
-	[G.Dsp, ["http://schemas.microsoft.com/office/drawing/2008/diagram"]]
+	[G.Dsp, ["http://schemas.microsoft.com/office/drawing/2008/diagram"]],
+	[G.Ahyp, ["http://schemas.microsoft.com/office/drawing/2018/hyperlinkcolor"]]
 ]
 
 const GROUP_BY_URI = new Map<string, G>()

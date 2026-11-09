@@ -3,7 +3,7 @@ import type { LayerState } from "../../../core/anim/model"
 import type { SlideLayer, SlideMediaInfo } from "../../../core/presentation/output"
 import type { MediaRefusal, PresentationSessionApi } from "../../../dom/presentation/protocol"
 import { MediaTimingDriver, noteMediaDuration } from "./mediaTiming"
-import type { ShowMediaEvents, ShowMediaHandle, ShowMediaMount, ShowSoundHandle } from "./stage"
+import type { ShowMediaControl, ShowMediaEvents, ShowMediaHandle, ShowMediaMount, ShowSoundHandle } from "./stage"
 
 // A medium on a slide as a native <video>/<audio> over its layer, for the show and the editor's canvas alike. The
 // layer's bitmap beneath is the poster: the element is transparent until it has a frame, and nothing is fetched until
@@ -60,7 +60,11 @@ export interface ShowMediaOptions {
 const WEB_LINK = /^https?:\/\//iu
 // The height of a native media control bar at the element's bottom (every engine's is under it).
 const CONTROL_BAR_PX = 48
+const BOOKMARK_SLACK_MS = 250
 const BOX_STYLE = "position:absolute;inset:0;width:100%;height:100%"
+const VIDEO_STYLE = `${BOX_STYLE};object-fit:contain;background:transparent`
+// Play Full Screen (p:video fullScrn): over the whole slide, letterboxed on black.
+const FULL_STYLE = `${BOX_STYLE};object-fit:contain;background:#000`
 // A chip over the poster (in the slide's own colours whatever the app's theme: it sits on the slide).
 const CHIP_STYLE =
 	"position:absolute;left:8px;bottom:8px;max-width:calc(100% - 16px);padding:4px 8px;border:0;border-radius:6px;background:rgba(0,0,0,0.72);color:#fff;font:500 12px/16px system-ui,sans-serif"
@@ -116,6 +120,11 @@ class MountedMedia implements ShowMediaHandle {
 	private reopened = false
 	// What the last command asked for, applied once the element can play.
 	private wanted: { playing: boolean; atMs?: number } = { playing: false }
+	// Hide While Not Playing (p:cMediaNode showWhenStopped="0", the show only): the poster bitmaps it hides with the box.
+	private readonly posters: readonly HTMLElement[] | undefined
+	// Play Full Screen (a video's fullScrn, the show only), and whether the element is over the slide now.
+	private readonly fullScreen: boolean
+	private filling = false
 
 	constructor(
 		box: HTMLElement,
@@ -134,7 +143,48 @@ class MountedMedia implements ShowMediaHandle {
 		this.options = options
 		this.shape = layer.shape.id
 
+		const show = options.hoverControls !== false
+		const playback = media.playback
+
+		this.fullScreen = show && media.kind === "video" && media.part !== undefined && playback?.fullScreen === true
+		// A linked medium never plays here, so it stays shown (its link with it).
+		this.posters =
+			show && media.part !== undefined && playback?.hideWhenStopped === true
+				? Array.from(
+						box.parentElement?.querySelectorAll<HTMLElement>(
+							`canvas.fo-show-bitmap[data-fo-show-shape="${String(this.shape)}"]`
+						) ?? []
+					)
+				: undefined
+
 		if (media.part === undefined) this.linked()
+		else this.shown(false)
+	}
+
+	// Whether the medium shows (Hide While Not Playing; otherwise always).
+	private shown(visible: boolean): void {
+		if (this.posters === undefined) return
+
+		this.box.style.visibility = visible ? "" : "hidden"
+
+		// Opacity, not visibility: the stage's DOM paint and tints own the bitmaps' visibility.
+		for (const poster of this.posters) poster.style.opacity = visible ? "" : "0"
+	}
+
+	// Play Full Screen: the element over the whole slide while it plays, back in its box otherwise. Moved within the
+	// document in one task, so it keeps playing (HTML's pause on removal checks once the task is done).
+	private fill(on: boolean): void {
+		const element = this.element
+
+		if (!this.fullScreen || element === undefined || on === this.filling) return
+
+		const host = on ? this.box.closest<HTMLElement>("[data-fo-show-slide]") : this.box
+
+		if (host === null) return
+
+		this.filling = on
+		element.style.cssText = on ? FULL_STYLE : VIDEO_STYLE
+		host.append(element)
 	}
 
 	command(command: MediaCommand): void {
@@ -167,6 +217,54 @@ class MountedMedia implements ShowMediaHandle {
 		const element = this.element
 
 		return element === undefined ? this.wanted.playing && this.loading !== undefined : playsOn(element)
+	}
+
+	playing(): boolean {
+		return !this.released && this.isPlaying()
+	}
+
+	// Only on an element that has loaded: the keys never fetch a medium.
+	control(control: ShowMediaControl): void {
+		const element = this.element
+
+		if (this.released || element === undefined) return
+
+		switch (control.kind) {
+			case "mute":
+				element.muted = !element.muted
+				return
+			case "volumeBy":
+				element.volume = Math.max(0, Math.min(1, element.volume + control.by))
+				return
+			case "seekBy":
+				this.seekTo(element.currentTime * 1000 + control.ms)
+				return
+			case "bookmark": {
+				const bookmarks = this.media.timing?.bookmarks ?? []
+				const at = element.currentTime * 1000
+				// Past one within the slack, so a press at a bookmark goes to the one after (or before) it.
+				const target =
+					control.direction > 0
+						? bookmarks.find(bookmark => bookmark.timeMs > at + BOOKMARK_SLACK_MS)
+						: bookmarks.findLast(bookmark => bookmark.timeMs < at - BOOKMARK_SLACK_MS)
+
+				if (target !== undefined) this.seekTo(target.timeMs)
+			}
+		}
+	}
+
+	// An element position (ms from the medium's start), kept within the part that plays.
+	private seekTo(ms: number): void {
+		const element = this.element
+
+		if (element === undefined) return
+
+		const window = this.timing?.playWindow
+		const endMs = window?.endMs ?? (Number.isFinite(element.duration) ? element.duration * 1000 : Number.POSITIVE_INFINITY)
+		const seconds = Math.max(window?.startMs ?? 0, Math.min(ms, endMs)) / 1000
+
+		if (this.remux !== undefined) this.remux.seek(seconds)
+		else element.currentTime = seconds
 	}
 
 	click(): void {
@@ -215,6 +313,9 @@ class MountedMedia implements ShowMediaHandle {
 	}
 
 	private status(status: ShowMediaStatus): void {
+		// Stopped: idle, paused or ended. A notice (preparing, unplayable) shows on the medium.
+		this.shown(status !== "idle" && status !== "paused" && status !== "ended")
+		this.fill(status === "playing")
 		this.options.onStatus?.(this.shape, status)
 	}
 
@@ -291,10 +392,7 @@ class MountedMedia implements ShowMediaHandle {
 		const element = document.createElement(this.media.kind === "video" ? "video" : "audio")
 
 		element.className = "fo-show-media"
-		element.style.cssText =
-			this.media.kind === "video"
-				? `${BOX_STYLE};object-fit:contain;background:transparent`
-				: "position:absolute;left:0;right:0;bottom:0;width:100%"
+		element.style.cssText = this.media.kind === "video" ? VIDEO_STYLE : "position:absolute;left:0;right:0;bottom:0;width:100%"
 		element.preload = "metadata"
 		// Its length, for the Trim dialog (no second load of the medium to learn it).
 		element.addEventListener("loadedmetadata", () => {
@@ -338,6 +436,16 @@ class MountedMedia implements ShowMediaHandle {
 			this.box.addEventListener("pointerleave", () => {
 				element.controls = false
 			})
+
+			// Over the slide (Play Full Screen) it is out of its box, so its own hover shows the bar.
+			if (this.fullScreen) {
+				element.addEventListener("pointerenter", () => {
+					element.controls = true
+				})
+				element.addEventListener("pointerleave", () => {
+					if (this.filling) element.controls = false
+				})
+			}
 		}
 
 		// Presses on it are its own: the stage's click (advance) must not see them. A press on the picture plays or

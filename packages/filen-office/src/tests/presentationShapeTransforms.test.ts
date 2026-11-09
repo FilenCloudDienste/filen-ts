@@ -165,6 +165,58 @@ describe("the file's own locks in commands", () => {
 	})
 })
 
+describe("Ctrl+drag duplicates", () => {
+	const back: PlacedShape = { id: 7, xfrm: box(0, 0, 1000, 500) }
+	const front: PlacedShape = { id: 8, xfrm: box(2000, 0, 1000, 500) }
+	const pinned: PlacedShape = { id: 9, xfrm: box(4000, 0, 1000, 500), locks: { noMove: true } }
+	const CTRL = { shift: false, ctrl: true, alt: false }
+
+	it("a move with Ctrl held ends in one duplicate of what may move, at the drop offset", () => {
+		const drag = new ShapeDrag({ kind: "move", slide, shapes: [back, front, pinned], start: { x: 0, y: 0 }, threshold: 0 })
+		const frame = drag.move({ x: 300, y: 700 }, CTRL)
+
+		expect(frame.copy).toBe(true)
+		// The boxes shown are the copies'; the locked shape has none.
+		expect(frame.shapes.map(shape => [shape.id, shape.xfrm.x, shape.xfrm.y])).toEqual([
+			[7, 300, 700],
+			[8, 2300, 700]
+		])
+		expect(drag.end()).toEqual({ family: "shape", kind: "duplicate", slide, shapes: [7, 8], dx: 300, dy: 700 })
+	})
+
+	it("Ctrl pressed or released during the drag decides at the drop, and Shift still constrains the copy", () => {
+		const drag = new ShapeDrag({ kind: "move", slide, shapes: [back], start: { x: 0, y: 0 }, threshold: 0 })
+
+		drag.move({ x: 300, y: 50 }, CTRL)
+		drag.move({ x: 300, y: 50 }, NO_KEYS)
+		expect(drag.current.copy).toBeUndefined()
+		expect(drag.end()).toMatchObject({ kind: "setXfrm" })
+
+		drag.move({ x: 300, y: 50 }, { shift: true, ctrl: true, alt: false })
+		expect(drag.end()).toMatchObject({ kind: "duplicate", dx: 300, dy: 0 })
+	})
+
+	it("a Ctrl+drag back to where it started copies nothing, and Ctrl on a resize still sizes from the centre", () => {
+		const drag = new ShapeDrag({ kind: "move", slide, shapes: [back], start: { x: 0, y: 0 }, threshold: 0 })
+
+		drag.move({ x: 0, y: 0 }, CTRL)
+		expect(drag.end()).toBeUndefined()
+
+		const resize = new ShapeDrag({
+			kind: "resize",
+			slide,
+			shapes: [back],
+			id: 7,
+			handle: "e",
+			start: { x: 1000, y: 250 },
+			threshold: 0
+		})
+
+		expect(resize.move({ x: 1500, y: 250 }, CTRL).copy).toBeUndefined()
+		expect(resize.current.shapes[0]?.xfrm).toMatchObject({ x: -500, cx: 2000 })
+	})
+})
+
 describe("ungroup", () => {
 	it("a nested group without a child space keeps its children where they showed when its parent is ungrouped", async () => {
 		const inner =

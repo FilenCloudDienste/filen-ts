@@ -1,4 +1,8 @@
-import type { Deck, ListStyle, ParaProps, ShapeNode, ShapeRef, SlideNode, SlideRef, TextBody, ThemeRef, Xfrm } from "./model"
+import { symbolTable, symbolText } from "../fonts/symbols"
+import { resolveParagraph, resolveRun, type ResolvedShape, resolveShape } from "./inherit"
+import type { Deck, ListStyle, Paragraph, ParaProps, ShapeNode, ShapeRef, SlideNode, SlideRef, TextBody, ThemeRef, Xfrm } from "./model"
+import type { NotesParagraph, NotesRun } from "./output"
+import { AutonumberCounters, autonumberText } from "./text/autonum"
 
 // A slide's speaker notes: the body placeholder of its notes slide (ECMA-376 Part 1 §19.3.1.26), which inherits from
 // the notes master's (§19.3.1.27; MS-OI29500 §2.1.1127(b), by type). A slide without a notes slide gets one made from
@@ -75,6 +79,111 @@ export function notesText(deck: Deck, node: SlideNode): string {
 		.flatMap(shape => shape.text?.paragraphs ?? [])
 		.map(paragraph => paragraph.runs.map(run => (run.kind === "br" ? "\n" : run.text)).join(""))
 		.join("\n")
+}
+
+// The notes text size a paragraph's indents are measured against when neither it nor its style sets one (12 pt).
+const NOTES_SZ = 1200
+// EMU per hundredth of a point.
+const EMU_PER_SZ = 127
+
+// A slide's speaker notes as the presenter view shows them (SlideRender.notes): the notes body placeholders'
+// paragraphs with their formatting resolved through the notes master's notesStyle; undefined when they hold no text.
+export function notesParagraphs(deck: Deck, node: SlideNode): readonly NotesParagraph[] | undefined {
+	const notes = node.notes === undefined ? undefined : deck.nodes.get(node.notes)
+
+	if (notes === undefined) return undefined
+
+	const out: NotesParagraph[] = []
+	let text = false
+
+	for (const shape of notes.shapes) {
+		if (shape.ph?.type !== "body" || shape.text === undefined) continue
+
+		const resolved = resolveShape(deck, notes.ref, shape)
+		const counters = new AutonumberCounters()
+
+		for (const paragraph of shape.text.paragraphs) {
+			const made = notesParagraph(resolved, paragraph, counters)
+
+			if (made.runs.length > 0) text = true
+
+			out.push(made)
+		}
+	}
+
+	return text ? out : undefined
+}
+
+function notesParagraph(resolved: ResolvedShape, paragraph: Paragraph, counters: AutonumberCounters): NotesParagraph {
+	const { level, pPr } = resolveParagraph(resolved, paragraph)
+	const runs: NotesRun[] = []
+	let first: number | undefined
+
+	for (const run of paragraph.runs) {
+		const props = run.kind === "opaque" ? undefined : resolveRun({ level, pPr }, run.rPr)
+		const text = run.kind === "br" ? "\n" : run.text
+
+		first ??= props?.sz
+
+		if (text.length > 0) pushRun(runs, text, props)
+	}
+
+	const em = (first ?? pPr.defRPr?.sz ?? NOTES_SZ) * EMU_PER_SZ
+	const bullet = pPr.bullet
+	let marker: string | undefined
+
+	if (bullet?.kind === "autoNum" && runs.length > 0) {
+		marker = autonumberText(bullet.scheme, counters.next(level, bullet.scheme, bullet.startAt ?? 1))
+	} else {
+		counters.skip(level)
+
+		if (runs.length > 0 && bullet !== undefined && bullet.kind !== "none") {
+			const font = pPr.buFont
+			const table = bullet.kind !== "char" || font === undefined || font === "text" ? undefined : symbolTable(font.typeface)
+
+			marker = bullet.kind === "char" ? (table === undefined ? bullet.char : symbolText(table, bullet.char)) : "•"
+		}
+	}
+
+	const algn = pPr.algn
+	const align = algn === "ctr" || algn === "r" ? algn : algn === undefined || algn === "l" ? undefined : "just"
+
+	return {
+		level,
+		...(align === undefined ? {} : { align }),
+		...(pPr.rtl === true ? { rtl: true as const } : {}),
+		start: (pPr.marL ?? 0) / em,
+		first: (pPr.indent ?? 0) / em,
+		...(marker === undefined || marker === "" ? {} : { marker }),
+		runs
+	}
+}
+
+// Appends a run, joined to the one before when their formatting is the same.
+function pushRun(runs: NotesRun[], text: string, props: ReturnType<typeof resolveRun> | undefined): void {
+	const baseline = props?.baseline ?? 0
+	const run: NotesRun = {
+		text,
+		...(props?.b === true ? { b: true as const } : {}),
+		...(props?.i === true ? { i: true as const } : {}),
+		...(props?.u !== undefined && props.u !== "none" ? { u: true as const } : {}),
+		...(props?.strike !== undefined && props.strike !== "noStrike" ? { strike: true as const } : {}),
+		...(baseline > 0 ? { script: "sup" as const } : baseline < 0 ? { script: "sub" as const } : {})
+	}
+	const last = runs[runs.length - 1]
+
+	if (
+		last !== undefined &&
+		last.b === run.b &&
+		last.i === run.i &&
+		last.u === run.u &&
+		last.strike === run.strike &&
+		last.script === run.script
+	) {
+		runs[runs.length - 1] = { ...last, text: last.text + text }
+	} else {
+		runs.push(run)
+	}
 }
 
 // What a slide's notes fingerprint digests: whether it has a notes slide (and which part holds it), and the notes

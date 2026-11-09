@@ -234,6 +234,39 @@ function rgbaOf(value: Rgba | undefined): number {
 	return value !== undefined && Number.isFinite(value) ? value >>> 0 : 0
 }
 
+// A linear paint's gradient line in pixels (x0, y0, x1, y1): through the box's centre, as long as the box's
+// projection onto it. Unscaled (lin@scaled false), the angle holds in pixels; scaled, it is the unit-square angle
+// stretched with the box, whose pixel normal is (h cos, w sin), as the SVG painter's objectBoundingBox gradient.
+export function linearGradientLine(
+	angle: number | undefined,
+	scaled: boolean | undefined,
+	x: number,
+	y: number,
+	width: number,
+	height: number
+): [number, number, number, number] {
+	const degrees = mod(finite(angle, 0), 360)
+	const radians = (degrees * Math.PI) / 180
+	// Exact on the axes, so a vertical or horizontal line carries no trig residue.
+	let dx = degrees === 90 || degrees === 270 ? 0 : Math.cos(radians)
+	let dy = degrees === 0 || degrees === 180 ? 0 : Math.sin(radians)
+
+	if (scaled === true) {
+		const sx = height * dx
+		const sy = width * dy
+		const length = Math.hypot(sx, sy)
+
+		dx = length > 0 ? sx / length : 1
+		dy = length > 0 ? sy / length : 0
+	}
+
+	const half = (width * Math.abs(dx) + height * Math.abs(dy)) / 2
+	const cx = x + width / 2
+	const cy = y + height / 2
+
+	return [cx - dx * half, cy - dy * half, cx + dx * half, cy + dy * half]
+}
+
 const cssColors = new Map<number, string>()
 
 // 0xRRGGBBAA as CSS (#rrggbbaa), memoised: colours repeat across items and slides.
@@ -1009,29 +1042,8 @@ class CanvasDrawingPainter<I extends CanvasSized> {
 			case "linear": {
 				if (flat || stopCount(paint.stops) === 0) return canvasColor(averageColor(paint.stops))
 
-				const angle = mod(finite(paint.angle, 0), 360)
-				const radians = (angle * Math.PI) / 180
-				let dx = Math.cos(radians)
-				let dy = Math.sin(radians)
-
-				// An unscaled angle stays true in the box (the SVG painter's objectBoundingBox gradient).
-				if (paint.scaled !== true && angle % 90 !== 0) {
-					dx *= width
-					dy *= height
-
-					const length = Math.hypot(dx, dy)
-
-					dx = length > 0 ? dx / length : 1
-					dy = length > 0 ? dy / length : 0
-				}
-
-				const half = (Math.abs(dx) + Math.abs(dy)) / 2
-				const gradient = ctx.createLinearGradient(
-					x + (0.5 - dx * half) * width,
-					y + (0.5 - dy * half) * height,
-					x + (0.5 + dx * half) * width,
-					y + (0.5 + dy * half) * height
-				)
+				const [x0, y0, x1, y1] = linearGradientLine(paint.angle, paint.scaled, x, y, width, height)
+				const gradient = ctx.createLinearGradient(x0, y0, x1, y1)
 
 				this.stops(gradient, paint.stops, 0, 1, 0)
 

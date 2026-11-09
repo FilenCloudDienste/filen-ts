@@ -21,7 +21,7 @@ import type { ArrowType, LineEnd } from "../drawingml/fill"
 import type { GeometryPath } from "../drawingml/geometry/evaluate"
 import { MISSING_IMAGE, imageFormat, imageHandling, type ImageResolver } from "../drawingml/picture"
 import { D, drawingReader, type DrawingReader } from "../drawingml/reader"
-import { addArrowhead, pathEnds } from "../drawingml/shape"
+import { addLineEnds } from "../drawingml/shape"
 import { plainParagraph } from "../drawingml/text"
 import { NodeKind, type XmlDocument } from "../xml/index"
 import { parseVmlColor } from "./color"
@@ -558,12 +558,7 @@ class VmlWalker {
 
 			if (strokeIndex < 0 || !segment.open || line === undefined || (line.head === undefined && line.tail === undefined)) return
 
-			const ends = pathEnds(list, geometryPath(segment))
-
-			if (ends === undefined) return
-
-			if (line.head !== undefined) addArrowhead(list, matrix, line.head, ends[0], ends[1], ends[2], ends[3], strokeIndex, source)
-			if (line.tail !== undefined) addArrowhead(list, matrix, line.tail, ends[4], ends[5], ends[6], ends[7], strokeIndex, source)
+			addLineEnds(list, matrix, line.head, line.tail, geometryPath(segment), strokeIndex, source, fillIndex < 0)
 		}
 	}
 

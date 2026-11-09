@@ -16,6 +16,18 @@
 	contain: strict;
 }
 
+/* At a zoom the slide scrolls inside the view: centred while it fits, from its top left edge once it does not (auto
+   margins, unlike centring alignment, never push an overflowing side out of reach). */
+.fo-slide-view[data-fo-zoomed] {
+	align-items: flex-start;
+	justify-content: flex-start;
+	overflow: auto;
+}
+
+.fo-slide-view[data-fo-zoomed] > .fo-slide-frame {
+	margin: auto;
+}
+
 .fo-slide-frame {
 	position: relative;
 	flex: none;
@@ -344,15 +356,30 @@
 	display: flex;
 	background: #000;
 	outline: none;
-	cursor: none;
 }
 
-.fo-show-stage:hover {
-	cursor: default;
+/* The mouse has been still (show/pointer.ts); a pen's inline cursor on the ink layer still wins. */
+.fo-show-stage[data-fo-pointer="hidden"],
+.fo-show-stage[data-fo-pointer="hidden"] * {
+	cursor: none;
 }
 
 .fo-show-stage[data-fo-screen="white"] {
 	background: #fff;
+}
+
+/* The black screen after the last slide: its line at the top, as PowerPoint draws it. */
+.fo-show-end {
+	position: absolute;
+	top: 12px;
+	right: 16px;
+	left: 16px;
+	color: #d4d4d8;
+	font:
+		400 16px/24px system-ui,
+		sans-serif;
+	text-align: center;
+	pointer-events: none;
 }
 
 .fo-show-slide {

@@ -30,6 +30,8 @@ export interface PageAspects {
 	readonly background?: boolean
 	readonly transition?: boolean
 	readonly timing?: boolean
+	// A new page's header and footer display flags (written whole only).
+	readonly headerFooter?: boolean
 }
 
 export function pageAspects(node: SlideNode, pristine: SlideNode | undefined, name: string): PageAspects {
@@ -110,6 +112,15 @@ function pageStyle(
 		setProperty(changes, "drawing-page", "presentation:background-objects-visible", node.showMasterShapes ? "true" : "false")
 	if (aspects.transition === true) odpTransitionStyle(changes, node.transition, sound)
 
+	// A new page's header and footer display flags (§20.233–§20.236), as the page it took them from has them.
+	let display = false
+
+	if (aspects.headerFooter === true)
+		for (const [kind, shown] of Object.entries(node.odpHeaderFooter?.display ?? {})) {
+			setProperty(changes, "drawing-page", `presentation:display-${kind}`, String(shown))
+			display = true
+		}
+
 	if (aspects.background === true) {
 		const refusal = odpBackgroundStyle(changes, node.background, context)
 
@@ -117,7 +128,14 @@ function pageStyle(
 	}
 
 	if (changes.attributes.size === 0) return undefined
-	if (base === undefined && !node.hidden && node.showMasterShapes && node.transition === undefined && node.background === undefined)
+	if (
+		base === undefined &&
+		!node.hidden &&
+		node.showMasterShapes &&
+		node.transition === undefined &&
+		node.background === undefined &&
+		!display
+	)
 		return undefined
 
 	return styles.derived("drawing-page", base, changes)
@@ -160,6 +178,17 @@ export function pageChanges(
 	return out
 }
 
+// A new page's presentation:use-header-name, use-footer-name and use-date-time-name: the declarations of content.xml
+// the page it took its header and footer from names (kept by the splice with the rest of office:presentation).
+function useNames(node: SlideNode): string {
+	let out = ""
+
+	for (const [kind, name] of Object.entries(node.odpHeaderFooter?.use ?? {}))
+		out += ` presentation:use-${kind}-name="${escapeAttribute(name)}"`
+
+	return out
+}
+
 // A page an op made, written whole: its start tag and its shapes. `newId`: an id no element of the content holds
 // (the page's, when its transition par begins by it).
 // `newId(base)`: an id no element of the document holds, `base` itself when it is free.
@@ -192,7 +221,8 @@ export function newPage(
 			hidden: node.hidden,
 			showMasterShapes: node.showMasterShapes,
 			...(node.transition === undefined ? {} : { transition: true }),
-			...(node.background === undefined ? {} : { background: true })
+			...(node.background === undefined ? {} : { background: true }),
+			...(node.odpHeaderFooter === undefined ? {} : { headerFooter: true })
 		},
 		node,
 		sound
@@ -254,6 +284,7 @@ export function newPage(
 		(style === undefined ? "" : ` draw:style-name="${escapeAttribute(style)}"`) +
 		(master === undefined ? "" : ` draw:master-page-name="${escapeAttribute(master)}"`) +
 		(layout === undefined || layout === "" ? "" : ` presentation:presentation-page-layout-name="${escapeAttribute(layout)}"`) +
+		useNames(node) +
 		(id === undefined ? "" : ` xml:id="${escapeAttribute(id)}" draw:id="${escapeAttribute(id)}"`)
 
 	const own = timingMarkup(node, context)

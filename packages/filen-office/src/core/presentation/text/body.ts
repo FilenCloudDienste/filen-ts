@@ -356,7 +356,8 @@ class Session {
 		const kerning = props.kern === undefined || props.kern === 0 || sizePt * 100 >= props.kern
 		const letterSpacing = ((props.spc ?? 0) / 100) * PT_PX
 		const linked = this.options.hyperlinks !== false && props.hlinkClick !== undefined && linkTarget(props.hlinkClick) !== undefined
-		const hlink = linked ? colorOf({ kind: "scheme", slot: "hlink" }) : undefined
+		// A recoloured hyperlink (color "tx") keeps the run's own colour; the underline below applies either way.
+		const hlink = linked && props.hlinkClick?.color !== "tx" ? colorOf({ kind: "scheme", slot: "hlink" }) : undefined
 		const fill =
 			colorOverride !== undefined
 				? { kind: "color" as const, color: colorOverride }
@@ -652,7 +653,8 @@ function appendRuns(
 		}
 
 		const props = run.kind === "opaque" ? paragraph.defRPr : run.rPr
-		const text = run.kind === "fld" ? fieldText(run.type, run.text, fields) : run.text
+		// A field's names in its run's language (a:rPr@lang, the paragraph's and the chain's merged in).
+		const text = run.kind === "fld" ? fieldText(run.type, run.text, fields, props.lang) : run.text
 
 		if (text.length === 0) {
 			runEnds.push(builder.length)
@@ -1134,13 +1136,26 @@ function largestSize(session: Session, out: TextLayout, line: number, prefix: nu
 }
 
 // wrap="none": each line placed by its paragraph's alignment against the box (a centred line overhangs both sides).
+// Lines come laid out at the start edge of an UNWRAPPED-wide line, which for a right-to-left paragraph is its right
+// edge: l puts such a line at the box's left edge, and the justify family (a single line is a last line) moves its
+// start edge onto the box's right edge, its start indent kept as when wrapped.
 function alignUnwrapped(out: TextLayout, resolved: ResolvedBody, frameWidth: number): void {
 	for (let line = 0; line < out.lineCount; line++) {
 		const source = out.lineInts[line * 7 + 5] ?? 0
-		const algn = resolved.paragraphs[source]?.pPr.algn ?? "l"
+		const pPr = resolved.paragraphs[source]?.pPr
+		const algn = pPr?.algn ?? "l"
 		const width = out.lineFloats[line * 5 + 4] ?? 0
 		const x = out.lineFloats[line * 5 + 3] ?? 0
-		const dx = algn === "ctr" ? (frameWidth - width) / 2 - x : algn === "r" ? frameWidth - width - x : 0
+		const dx =
+			algn === "ctr"
+				? (frameWidth - width) / 2 - x
+				: algn === "r"
+					? frameWidth - width - x
+					: pPr?.rtl !== true
+						? 0
+						: algn === "l"
+							? -x
+							: frameWidth - UNWRAPPED
 
 		if (dx !== 0) shiftLine(out, line, dx)
 	}

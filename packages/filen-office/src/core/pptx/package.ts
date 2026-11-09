@@ -41,7 +41,7 @@ import { readTheme, type PresentationTheme } from "../presentation/theme"
 import { decodeUtf8, XmlError, type XmlDocument } from "../xml/index"
 import { type ReadContext } from "./read/drawing"
 import { readPresentation } from "./read/presentation"
-import { readLegacyAuthors, readModernAuthors, readShowSettings, DEFAULT_SHOW } from "./read/props"
+import { readLegacyAuthors, readModernAuthors, readShowSettings, readViewGrid, DEFAULT_SHOW } from "./read/props"
 import { readCustomShows, readSections } from "./read/sections"
 import { legacyOlePreviews } from "./read/legacyOle"
 import { readSlidePart, SlidePartError } from "./read/slide"
@@ -1080,6 +1080,15 @@ export class PptxParts {
 				props.documentElement()
 			)
 			if (propsReader.malformed) addGate(deck.gate, "malformed")
+		}
+
+		for (const part of relatedParts(relationships, "viewProps")) {
+			if (!this.opc.has(part)) continue
+
+			const view = await this.xml(part)
+			const viewReader = partReader(view)
+
+			deck.grid = readViewGrid(this.context(part, viewReader, relationships), view.documentElement())
 		}
 
 		for (const part of relatedParts(relationships, "commentAuthors")) {

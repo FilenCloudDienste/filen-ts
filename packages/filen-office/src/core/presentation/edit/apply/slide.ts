@@ -38,6 +38,9 @@ export interface SlideSourceReading extends SourceReading {
 	readSlides(ref: SlideRef, parts: readonly RawPart[]): readonly SlideNode[] | Refused
 	// A new part name for a slide or a notes slide, unused in the package and the session.
 	newPart(kind: "slide" | "notesSlide"): string
+	// ODP, which keeps header and footer settings per page: a slide an add made takes `neighbour`'s (as LibreOffice
+	// gives an inserted page the current page's), with the master footers they show.
+	headerFooterFrom?(slide: SlideNode, neighbour: SlideRef): void
 	// Whether a part name an op gave before can be given again (a redo) to `ref`: no node has it, and the package
 	// either has no such part or binds it to `ref` itself (a slide an undo after a save took out, made again).
 	partFree?(name: string, ref: SlideRef): boolean
@@ -145,8 +148,13 @@ function add(deck: Deck, op: OpOf<"slide"> & { kind: "add" }, context: SlideSour
 	const back: DeckOp[] = [{ family: "slide", kind: "delete", slides: [ref] }, ...sectionsBack(deck, sections)]
 
 	const part = partFor(context, MADE_PARTS.get(op)?.slide, "slide", ref)
+	const node = newSlide(ref, part, layout)
+	// The slide before it, else (first) the one after.
+	const neighbour = deck.slides[at - 1] ?? deck.slides[at]
 
-	deck.nodes.set(ref, newSlide(ref, part, layout))
+	if (neighbour !== undefined) context.headerFooterFrom?.(node, neighbour)
+
+	deck.nodes.set(ref, node)
 	deck.slides = order
 
 	if (sections !== undefined) deck.sections = sections

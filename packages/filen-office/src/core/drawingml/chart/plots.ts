@@ -3,7 +3,7 @@ import { D } from "../reader"
 import { plainParagraph } from "../text"
 import { categoryBand, categoryPosition, crossingValue, valuePosition, axisPosition, type AxisState } from "./axes"
 import { estimateHeight, estimateWidth, labelBody, PX_PER_PT, type ChartBuilder, type Rect } from "./builder"
-import { cacheLabels, type SeriesData } from "./data"
+import { cacheLabels, type CachedValues, type ErrorBarData, type SeriesData } from "./data"
 import { formatNumber } from "./format"
 import { labelText, placeLabel, pointConfig, seriesLabels, type PendingLabel } from "./labels"
 import type { Plot } from "./model"
@@ -61,6 +61,556 @@ function categoryTotals(plot: Plot, count: number, blanks: Blanks): Float64Array
 	}
 
 	return totals
+}
+
+// Error bar end caps' half length, and the segments a curved trendline is drawn with.
+const ERROR_CAP = 2.5 * PX_PER_PT
+const TREND_SEGMENTS = 64
+const TREND_WIDTH = 1.5 * PX_PER_PT
+
+// Clips the segment to `box` (Liang-Barsky) into `out`; false when it misses.
+function clipSegment(x0: number, y0: number, x1: number, y1: number, box: Rect, out: Float64Array): boolean {
+	const dx = x1 - x0
+	const dy = y1 - y0
+	let t0 = 0
+	let t1 = 1
+	const edges = [-dx, x0 - box.x, dx, box.x + box.w - x0, -dy, y0 - box.y, dy, box.y + box.h - y0]
+
+	for (let e = 0; e < 8; e += 2) {
+		const p = edges[e] ?? 0
+		const q = edges[e + 1] ?? 0
+
+		if (p === 0) {
+			if (q < 0) return false
+
+			continue
+		}
+
+		const t = q / p
+
+		if (p < 0) t0 = Math.max(t0, t)
+		else t1 = Math.min(t1, t)
+
+		if (t0 > t1) return false
+	}
+
+	out[0] = x0 + t0 * dx
+	out[1] = y0 + t0 * dy
+	out[2] = x0 + t1 * dx
+	out[3] = y0 + t1 * dy
+
+	return true
+}
+
+// A polyline through the (x, y) pairs of `points` clipped to `box`; a non-finite pair breaks it.
+function clippedPolyline(builder: ChartBuilder, points: readonly number[], box: Rect): void {
+	const clipped = new Float64Array(4)
+	let penX = Number.NaN
+	let penY = Number.NaN
+
+	for (let k = 2; k + 1 < points.length; k += 2) {
+		const x0 = points[k - 2] ?? Number.NaN
+		const y0 = points[k - 1] ?? Number.NaN
+		const x1 = points[k] ?? Number.NaN
+		const y1 = points[k + 1] ?? Number.NaN
+
+		if (!Number.isFinite(x0) || !Number.isFinite(y0) || !Number.isFinite(x1) || !Number.isFinite(y1)) continue
+		if (!clipSegment(x0, y0, x1, y1, box, clipped)) continue
+
+		const sx = clipped[0] ?? 0
+		const sy = clipped[1] ?? 0
+
+		if (sx !== penX || sy !== penY) builder.list.moveTo(sx, sy)
+
+		penX = clipped[2] ?? 0
+		penY = clipped[3] ?? 0
+		builder.list.lineTo(penX, penY)
+	}
+}
+
+// Least-squares polynomial of `order` through the points, in x scaled (and centred unless the value at x = 0 is
+// fixed) so high orders stay well conditioned; undefined with too few points or a singular system.
+export function fitPolynomial(
+	xs: readonly number[],
+	ys: readonly number[],
+	order: number,
+	fixed: number | undefined
+): ((x: number) => number) | undefined {
+	const n = xs.length
+	const terms = fixed === undefined ? order + 1 : order
+	const first = fixed === undefined ? 0 : 1
+
+	if (n < order + 1 || terms < 1) return undefined
+
+	let centre = 0
+
+	if (fixed === undefined) {
+		for (const x of xs) centre += x
+
+		centre /= n
+	}
+
+	let spread = 0
+
+	for (const x of xs) spread = Math.max(spread, Math.abs(x - centre))
+
+	spread = spread || 1
+
+	// Normal equations: matrix (terms x terms) then the right-hand side, row by row.
+	const width = terms + 1
+	const system = new Float64Array(terms * width)
+	const powers = new Float64Array(terms)
+
+	for (let k = 0; k < n; k++) {
+		const u = ((xs[k] ?? 0) - centre) / spread
+		const target = (ys[k] ?? 0) - (fixed ?? 0)
+		let power = first === 0 ? 1 : u
+
+		for (let j = 0; j < terms; j++) {
+			powers[j] = power
+			power *= u
+		}
+
+		for (let r = 0; r < terms; r++) {
+			const pr = powers[r] ?? 0
+
+			for (let c = 0; c < terms; c++) system[r * width + c] = (system[r * width + c] ?? 0) + pr * (powers[c] ?? 0)
+
+			system[r * width + terms] = (system[r * width + terms] ?? 0) + pr * target
+		}
+	}
+
+	// Gaussian elimination with partial pivoting.
+	for (let col = 0; col < terms; col++) {
+		let pivot = col
+
+		for (let r = col + 1; r < terms; r++)
+			if (Math.abs(system[r * width + col] ?? 0) > Math.abs(system[pivot * width + col] ?? 0)) pivot = r
+
+		const lead = system[pivot * width + col] ?? 0
+
+		if (Math.abs(lead) < 1e-12 * n) return undefined
+
+		if (pivot !== col) {
+			for (let c = 0; c < width; c++) {
+				const swap = system[col * width + c] ?? 0
+
+				system[col * width + c] = system[pivot * width + c] ?? 0
+				system[pivot * width + c] = swap
+			}
+		}
+
+		for (let r = 0; r < terms; r++) {
+			if (r === col) continue
+
+			const factor = (system[r * width + col] ?? 0) / lead
+
+			if (factor === 0) continue
+
+			for (let c = col; c < width; c++) system[r * width + c] = (system[r * width + c] ?? 0) - factor * (system[col * width + c] ?? 0)
+		}
+	}
+
+	const coefficients = new Float64Array(terms)
+
+	for (let r = 0; r < terms; r++) coefficients[r] = (system[r * width + terms] ?? 0) / (system[r * width + r] ?? 1)
+
+	return (x: number): number => {
+		const u = (x - centre) / spread
+		let sum = 0
+
+		for (let j = terms - 1; j >= 0; j--) sum = sum * u + (coefficients[j] ?? 0)
+
+		return (fixed ?? 0) + (first === 0 ? sum : sum * u)
+	}
+}
+
+function nodeNumber(builder: ChartBuilder, node: number, local: string): number {
+	return builder.reader.number(builder.reader.child(node, D.C, local), "val", Number.NaN)
+}
+
+// The fitted curve of a c:trendline over the points, as Office fits it: exponential, logarithmic and power fits
+// are least squares on the logarithms and are not drawn when a point has no logarithm.
+function trendCurve(builder: ChartBuilder, node: number, type: string, xs: number[], ys: number[]): ((x: number) => number) | undefined {
+	const intercept = nodeNumber(builder, node, "intercept")
+	const fixed = Number.isFinite(intercept) ? intercept : undefined
+
+	switch (type) {
+		case "poly": {
+			const order = Math.round(nodeNumber(builder, node, "order"))
+
+			return fitPolynomial(xs, ys, Number.isFinite(order) ? clamp(order, 2, 6) : 2, fixed)
+		}
+		case "exp": {
+			if (ys.some(y => y <= 0)) return undefined
+
+			const fit = fitPolynomial(
+				xs,
+				ys.map(y => Math.log(y)),
+				1,
+				fixed !== undefined && fixed > 0 ? Math.log(fixed) : undefined
+			)
+
+			return fit === undefined ? undefined : x => Math.exp(fit(x))
+		}
+		case "log": {
+			if (xs.some(x => x <= 0)) return undefined
+
+			const fit = fitPolynomial(
+				xs.map(x => Math.log(x)),
+				ys,
+				1,
+				undefined
+			)
+
+			return fit === undefined ? undefined : x => (x > 0 ? fit(Math.log(x)) : Number.NaN)
+		}
+		case "power": {
+			if (xs.some(x => x <= 0) || ys.some(y => y <= 0)) return undefined
+
+			const fit = fitPolynomial(
+				xs.map(x => Math.log(x)),
+				ys.map(y => Math.log(y)),
+				1,
+				undefined
+			)
+
+			return fit === undefined ? undefined : x => (x > 0 ? Math.exp(fit(Math.log(x))) : Number.NaN)
+		}
+		default:
+			return fitPolynomial(xs, ys, 1, fixed)
+	}
+}
+
+// Pixel (x, y) pairs of data points: x along the category (or x) axis, y on the value axis.
+function pushPixel(frame: PlotFrame, out: number[], x: number, y: number): void {
+	const along = frame.categoryAxis
+	const across = frame.valueAxis
+
+	if (along === undefined || across === undefined) return
+
+	const a = Number.isFinite(x) ? axisPosition(along, along.scale === undefined ? x - 1 : x) : Number.NaN
+	const logBase = across.scale?.logBase ?? 0
+	const c = Number.isFinite(y) && (logBase <= 1 || y > 0) ? valuePosition(across, y) : Number.NaN
+
+	if (across.horizontal) out.push(c, a)
+	else out.push(a, c)
+}
+
+// c:trendline of a series (§21.2.2.211) over its points (x a category number or an x value, in data order).
+function drawTrendlines(frame: PlotFrame, series: SeriesData, style: SeriesStyle, xs: number[], ys: number[]): void {
+	const { builder, inner } = frame
+	const reader = builder.reader
+
+	for (const node of series.trendlines) {
+		const type = reader.attr(reader.child(node, D.C, "trendlineType"), "val") ?? "linear"
+		const spPr = reader.child(node, D.C, "spPr")
+		const points: number[] = []
+
+		if (type === "movingAvg") {
+			const period = Math.round(nodeNumber(builder, node, "period"))
+			const span = Number.isFinite(period) ? clamp(period, 2, 255) : 2
+			let sum = 0
+
+			for (let k = 0; k < ys.length; k++) {
+				sum += ys[k] ?? 0
+
+				if (k >= span) sum -= ys[k - span] ?? 0
+				if (k >= span - 1) pushPixel(frame, points, xs[k] ?? Number.NaN, sum / span)
+			}
+		} else {
+			const curve = trendCurve(builder, node, type, xs, ys)
+
+			if (curve === undefined || xs.length === 0) continue
+
+			const forward = nodeNumber(builder, node, "forward")
+			const backward = nodeNumber(builder, node, "backward")
+			let first = Infinity
+			let last = -Infinity
+
+			for (const x of xs) {
+				first = Math.min(first, x)
+				last = Math.max(last, x)
+			}
+
+			let low = first - (Number.isFinite(backward) ? Math.max(0, backward) : 0)
+			const high = last + (Number.isFinite(forward) ? Math.max(0, forward) : 0)
+
+			if ((type === "log" || type === "power") && low <= 0) low = first * 1e-3
+			// A straight line stays straight on linear axes: one segment.
+			const straight =
+				type !== "poly" &&
+				type !== "exp" &&
+				type !== "log" &&
+				type !== "power" &&
+				(frame.valueAxis?.scale?.logBase ?? 0) <= 1 &&
+				(frame.categoryAxis?.scale?.logBase ?? 0) <= 1
+			const segments = straight ? 1 : TREND_SEGMENTS
+
+			for (let s = 0; s <= segments; s++) {
+				const x = low + ((high - low) * s) / segments
+
+				pushPixel(frame, points, x, curve(x))
+			}
+		}
+
+		const ln = reader.child(spPr, D.A, "ln")
+		// Office's default trendline: a dotted 1.5pt line in the series colour.
+		const stroke =
+			ln < 0
+				? builder.list.stroke({
+						width: TREND_WIDTH,
+						paint: builder.solid(style.color),
+						dash: "sysDot",
+						customDash: null,
+						cap: "round",
+						join: "round",
+						miterLimit: 8,
+						compound: "sng",
+						inset: false
+					})
+				: builder.line(spPr, { color: style.color, width: TREND_WIDTH, round: true })
+
+		if (stroke < 0) continue
+
+		builder.begin()
+		clippedPolyline(builder, points, inner)
+		builder.end(-1, stroke, inner, 0, node)
+	}
+}
+
+function customAmount(values: CachedValues, index: number): number {
+	const numbers = values.numbers
+
+	if (numbers === null) return 0
+
+	// A single value applies to every point.
+	const value = numbers[values.count === 1 ? 0 : index] ?? Number.NaN
+
+	return Number.isFinite(value) ? value : 0
+}
+
+// The error bar of each point of `data` as offsets from its value: low at [2k], high at [2k + 1], NaN where it has
+// none. Standard deviation bars centre on the series mean, as Office draws them; standard error is Office's
+// sqrt(Σy² / (n(n - 1))). Both are of the series alone.
+export function errorSpans(bars: ErrorBarData, data: ArrayLike<number> | null, count: number): Float64Array {
+	const out = new Float64Array(count * 2).fill(Number.NaN)
+	let mean = Number.NaN
+	let deviation = 0
+	let error = 0
+
+	if (bars.valueType === "stdDev" || bars.valueType === "stdErr") {
+		let n = 0
+		let sum = 0
+		let squares = 0
+
+		for (let k = 0; k < count; k++) {
+			const v = data?.[k] ?? Number.NaN
+
+			if (!Number.isFinite(v)) continue
+
+			n++
+			sum += v
+			squares += v * v
+		}
+
+		mean = n > 0 ? sum / n : Number.NaN
+
+		let spread = 0
+
+		for (let k = 0; k < count; k++) {
+			const v = data?.[k] ?? Number.NaN
+
+			if (Number.isFinite(v)) spread += (v - mean) * (v - mean)
+		}
+
+		deviation = n > 1 ? Math.sqrt(spread / (n - 1)) : 0
+		error = n > 1 ? Math.sqrt(squares / (n * (n - 1))) : 0
+	}
+
+	for (let k = 0; k < count; k++) {
+		const v = data?.[k] ?? Number.NaN
+
+		if (!Number.isFinite(v)) continue
+
+		let centre = 0
+		let plus: number
+		let minus: number
+
+		switch (bars.valueType) {
+			case "percentage":
+				plus = minus = (Math.abs(v) * bars.value) / 100
+				break
+			case "stdDev":
+				centre = mean - v
+				plus = minus = bars.value * deviation
+				break
+			case "stdErr":
+				plus = minus = error
+				break
+			case "cust":
+				plus = bars.custom === undefined ? 0 : customAmount(bars.custom.plus, k)
+				minus = bars.custom === undefined ? 0 : customAmount(bars.custom.minus, k)
+				break
+			default:
+				plus = minus = bars.value
+		}
+
+		const low = centre - (bars.minus ? minus : 0)
+		const high = centre + (bars.plus ? plus : 0)
+
+		if (Number.isFinite(low) && Number.isFinite(high)) {
+			out[k * 2] = low
+			out[k * 2 + 1] = high
+		}
+	}
+
+	return out
+}
+
+// c:errBars (§21.2.2.55) along `axis`: `data` the values the amounts derive from, `anchors` the axis value each
+// point is drawn at (NaN where it is not), `totals` the percent-stacking totals, `cross` each point's pixel on the
+// other direction.
+function drawErrorBars(
+	frame: PlotFrame,
+	bars: ErrorBarData,
+	axis: AxisState,
+	data: ArrayLike<number> | null,
+	count: number,
+	anchors: ArrayLike<number>,
+	totals: Float64Array | null,
+	cross: ArrayLike<number>
+): void {
+	const builder = frame.builder
+	const stroke = builder.line(bars.spPr, { color: mutedText(builder.theme, 0.65), width: 0.75 * PX_PER_PT, round: false })
+
+	if (stroke < 0) return
+
+	const spans = errorSpans(bars, data, count)
+	const horizontal = axis.horizontal
+	const cap = (end: number, c: number): void => {
+		if (horizontal) builder.segment(end, c - ERROR_CAP, end, c + ERROR_CAP)
+		else builder.segment(c - ERROR_CAP, end, c + ERROR_CAP, end)
+	}
+
+	builder.begin()
+
+	for (let k = 0; k < count; k++) {
+		const anchor = anchors[k] ?? Number.NaN
+		const c = cross[k] ?? Number.NaN
+		const lowOffset = spans[k * 2] ?? Number.NaN
+		const highOffset = spans[k * 2 + 1] ?? Number.NaN
+
+		if (!Number.isFinite(anchor) || !Number.isFinite(c) || Number.isNaN(lowOffset)) continue
+
+		const unit = totals === null ? 1 : 1 / ((totals[k] ?? 0) || 1)
+		const lowRaw = axisPosition(axis, anchor + lowOffset * unit)
+		const highRaw = axisPosition(axis, anchor + highOffset * unit)
+		const low = axisClamp(axis, lowRaw)
+		const high = axisClamp(axis, highRaw)
+
+		if (low !== high) {
+			if (horizontal) builder.segment(low, c, high, c)
+			else builder.segment(c, low, c, high)
+		}
+
+		// A cap only where the bar ends inside the plot.
+		if (!bars.endCaps) continue
+		if (bars.minus && low === lowRaw) cap(low, c)
+		if (bars.plus && high === highRaw) cap(high, c)
+	}
+
+	builder.end(-1, stroke, frame.inner, 0, bars.node)
+}
+
+// Error bars and trendlines of a series on a category plot: `anchors` the value each point is drawn at
+// (stacked, NaN where it is not), `cross` its pixel along the category axis. Trendlines fit the raw values
+// at x = 1, 2, 3...
+function categoryOverlays(
+	frame: PlotFrame,
+	series: SeriesData,
+	style: SeriesStyle,
+	count: number,
+	anchors: ArrayLike<number>,
+	totals: Float64Array | null,
+	cross: ArrayLike<number>
+): void {
+	const value = frame.valueAxis
+	const values = series.values.numbers
+
+	if (value === undefined) return
+
+	for (const bars of series.errorBars)
+		if (bars.direction === "y" || frame.plot.horizontal) drawErrorBars(frame, bars, value, values, count, anchors, totals, cross)
+
+	if (series.trendlines.length === 0) return
+
+	const xs: number[] = []
+	const ys: number[] = []
+
+	for (let k = 0; k < Math.min(count, series.values.count); k++) {
+		const v = values?.[k] ?? Number.NaN
+
+		if (!Number.isFinite(v)) continue
+
+		xs.push(k + 1)
+		ys.push(v)
+	}
+
+	drawTrendlines(frame, series, style, xs, ys)
+}
+
+// Error bars (x and y) and trendlines of a scatter or bubble series: `xData` its x values, `xs`/`ys` its points'
+// pixels.
+function xyOverlays(
+	frame: PlotFrame,
+	series: SeriesData,
+	style: SeriesStyle,
+	xData: Float64Array,
+	xs: Float64Array,
+	ys: Float64Array
+): void {
+	const xAxis = frame.categoryAxis
+	const yAxis = frame.valueAxis
+	const count = xs.length
+	const yData = series.values.numbers
+
+	if (xAxis === undefined || yAxis === undefined || yData === null) return
+
+	for (const bars of series.errorBars) {
+		if (bars.direction === "y") {
+			const anchors = new Float64Array(count)
+
+			for (let k = 0; k < count; k++) anchors[k] = Number.isFinite(ys[k] ?? Number.NaN) ? (yData[k] ?? Number.NaN) : Number.NaN
+
+			drawErrorBars(frame, bars, yAxis, yData, count, anchors, null, xs)
+		} else {
+			const anchors = new Float64Array(count)
+			const shift = xAxis.scale === undefined ? 1 : 0
+
+			for (let k = 0; k < count; k++)
+				anchors[k] = Number.isFinite(xs[k] ?? Number.NaN) ? (xData[k] ?? Number.NaN) - shift : Number.NaN
+
+			drawErrorBars(frame, bars, xAxis, xData, count, anchors, null, ys)
+		}
+	}
+
+	if (series.trendlines.length === 0) return
+
+	const px: number[] = []
+	const py: number[] = []
+
+	for (let k = 0; k < count; k++) {
+		const x = xData[k] ?? Number.NaN
+		const y = yData[k] ?? Number.NaN
+
+		if (!Number.isFinite(x) || !Number.isFinite(y)) continue
+
+		px.push(x)
+		py.push(y)
+	}
+
+	drawTrendlines(frame, series, style, px, py)
 }
 
 export function drawBars(frame: PlotFrame): void {
@@ -161,6 +711,14 @@ export function drawBars(frame: PlotFrame): void {
 			builder.begin()
 			builder.rect(position.x, position.y, position.w, position.h)
 			builder.end(pointFill(builder, style, k), pointStroke(style, k), inner, 0, series.node)
+		}
+
+		if (series.errorBars.length > 0 || series.trendlines.length > 0) {
+			const centres = new Float64Array(points)
+
+			for (let k = 0; k < points; k++) centres[k] = categoryPosition(category, k) + start + offset + width / 2
+
+			categoryOverlays(frame, series, style, points, highs, totals, centres)
 		}
 
 		if (labels === undefined) return
@@ -317,9 +875,25 @@ export function drawLinesOrAreas(frame: PlotFrame): void {
 	const base = crossingValue(value, category.axis)
 	const baseY = axisClamp(value, valuePosition(value, base))
 	const xs = new Float64Array(count)
-	// Per category, the series' highest and lowest y (for the high-low lines).
-	const tops = plot.hiLowLines >= 0 ? new Float64Array(count).fill(Number.NaN) : null
-	const bottoms = plot.hiLowLines >= 0 ? new Float64Array(count).fill(Number.NaN) : null
+	// Per category, the series' highest and lowest y (for the high-low and drop lines).
+	const extents = plot.hiLowLines >= 0 || plot.dropLines >= 0
+	const tops = extents ? new Float64Array(count).fill(Number.NaN) : null
+	const bottoms = extents ? new Float64Array(count).fill(Number.NaN) : null
+	const widen = (ys: Float64Array): void => {
+		if (tops === null || bottoms === null) return
+
+		for (let k = 0; k < count; k++) {
+			const y = ys[k] ?? Number.NaN
+
+			if (!Number.isFinite(y)) continue
+
+			const top = tops[k] ?? Number.NaN
+			const bottom = bottoms[k] ?? Number.NaN
+
+			tops[k] = Number.isFinite(top) ? Math.min(top, y) : y
+			bottoms[k] = Number.isFinite(bottom) ? Math.max(bottom, y) : y
+		}
+	}
 
 	for (let k = 0; k < count; k++) xs[k] = categoryPosition(category, k)
 
@@ -330,6 +904,8 @@ export function drawLinesOrAreas(frame: PlotFrame): void {
 
 		const ys = new Float64Array(count).fill(Number.NaN)
 		const previous = area && stacked ? cumulative.slice() : null
+		// The value each point is drawn at, for its error bars.
+		const tips = series.errorBars.length > 0 ? new Float64Array(count).fill(Number.NaN) : null
 
 		for (let k = 0; k < Math.min(count, series.values.count); k++) {
 			let v = seriesValue(series, k, blanks)
@@ -342,7 +918,11 @@ export function drawLinesOrAreas(frame: PlotFrame): void {
 			}
 
 			ys[k] = axisClamp(value, valuePosition(value, v))
+
+			if (tips !== null) tips[k] = v
 		}
+
+		widen(ys)
 
 		if (area) {
 			builder.begin()
@@ -369,6 +949,7 @@ export function drawLinesOrAreas(frame: PlotFrame): void {
 			}
 
 			builder.end(style.fill, style.stroke, inner, ItemFlag.EVEN_ODD, series.node)
+			categoryOverlays(frame, series, style, count, tips ?? ys, totals, xs)
 			pointLabels(frame, series, order, xs, ys, null, "ctr")
 
 			return
@@ -378,25 +959,40 @@ export function drawLinesOrAreas(frame: PlotFrame): void {
 		polyline(builder, xs, ys, smoothFlag(frame, series), blanks === "span", false)
 		builder.end(-1, style.stroke, inner, 0, series.node)
 		drawMarkers(builder, style, xs, ys, inner, series.node)
+		categoryOverlays(frame, series, style, count, tips ?? ys, totals, xs)
 		pointLabels(frame, series, order, xs, ys, null, "r")
-
-		if (tops === null || bottoms === null) return
-
-		for (let k = 0; k < count; k++) {
-			const y = ys[k] ?? Number.NaN
-
-			if (!Number.isFinite(y)) continue
-
-			const top = tops[k] ?? Number.NaN
-			const bottom = bottoms[k] ?? Number.NaN
-
-			tops[k] = Number.isFinite(top) ? Math.min(top, y) : y
-			bottoms[k] = Number.isFinite(bottom) ? Math.max(bottom, y) : y
-		}
 	})
 
+	// Drop lines: from each category's points to the category axis.
+	if (tops !== null && bottoms !== null && plot.dropLines >= 0) {
+		const stroke = builder.line(builder.reader.child(plot.dropLines, D.C, "spPr"), {
+			color: mutedText(builder.theme, 0.65),
+			width: 0.75 * PX_PER_PT,
+			round: false
+		})
+		const axisLine = axisClamp(value, category.line)
+
+		if (stroke >= 0) {
+			builder.begin()
+
+			for (let k = 0; k < count; k++) {
+				const top = tops[k] ?? Number.NaN
+				const bottom = bottoms[k] ?? Number.NaN
+
+				if (!Number.isFinite(top) || !Number.isFinite(bottom)) continue
+
+				const from = Math.min(top, axisLine)
+				const to = Math.max(bottom, axisLine)
+
+				if (from !== to) builder.segment(xs[k] ?? 0, from, xs[k] ?? 0, to)
+			}
+
+			builder.end(-1, stroke, inner, 0, plot.dropLines)
+		}
+	}
+
 	// High-low lines: from each category's highest value to its lowest.
-	if (tops !== null && bottoms !== null) {
+	if (tops !== null && bottoms !== null && plot.hiLowLines >= 0) {
 		const reader = builder.reader
 		const stroke = builder.line(reader.child(plot.hiLowLines, D.C, "spPr"), {
 			color: mutedText(builder.theme, 0.75),
@@ -435,6 +1031,8 @@ export function drawScatter(frame: PlotFrame): void {
 		const xs = new Float64Array(count)
 		const ys = new Float64Array(count)
 		const xNumbers = series.categories.numbers
+		const overlays = series.errorBars.length > 0 || series.trendlines.length > 0
+		const xData = overlays ? new Float64Array(count) : null
 
 		for (let k = 0; k < count; k++) {
 			// String x values plot at 1, 2, 3... as Office does.
@@ -443,12 +1041,17 @@ export function drawScatter(frame: PlotFrame): void {
 
 			xs[k] = Number.isFinite(x) ? axisPosition(xAxis, xAxis.scale === undefined ? x - 1 : x) : Number.NaN
 			ys[k] = Number.isFinite(y) ? valuePosition(yAxis, y) : Number.NaN
+
+			if (xData !== null) xData[k] = x
 		}
 
 		builder.begin()
 		polyline(builder, xs, ys, smoothFlag(frame, series), frame.blanks === "span", false)
 		builder.end(-1, style.stroke, inner, 0, series.node)
 		drawMarkers(builder, style, xs, ys, inner, series.node)
+
+		if (xData !== null) xyOverlays(frame, series, style, xData, xs, ys)
+
 		pointLabels(frame, series, order, xs, ys, null, "r")
 	})
 }
@@ -489,6 +1092,7 @@ export function drawBubbles(frame: PlotFrame): void {
 		const radii = new Float64Array(count)
 		const xNumbers = series.categories.numbers
 		const drawn: number[] = []
+		const xData = series.errorBars.length > 0 || series.trendlines.length > 0 ? new Float64Array(count) : null
 
 		for (let k = 0; k < count; k++) {
 			const x = xNumbers === null ? k + 1 : (xNumbers[k] ?? Number.NaN)
@@ -497,6 +1101,8 @@ export function drawBubbles(frame: PlotFrame): void {
 
 			xs[k] = Number.isFinite(x) ? axisPosition(xAxis, xAxis.scale === undefined ? x - 1 : x) : Number.NaN
 			ys[k] = Number.isFinite(y) ? valuePosition(yAxis, y) : Number.NaN
+
+			if (xData !== null) xData[k] = x
 
 			if (!Number.isFinite(xs[k] ?? Number.NaN) || !Number.isFinite(ys[k] ?? Number.NaN) || !Number.isFinite(size)) continue
 			if (size === 0 || (size < 0 && !plot.negativeBubbles)) continue
@@ -530,6 +1136,8 @@ export function drawBubbles(frame: PlotFrame): void {
 				series.node
 			)
 		}
+
+		if (xData !== null) xyOverlays(frame, series, style, xData, xs, ys)
 
 		pointLabels(frame, series, order, xs, ys, null, "r")
 	})

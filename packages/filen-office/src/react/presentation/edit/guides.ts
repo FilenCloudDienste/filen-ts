@@ -4,7 +4,8 @@ import type { Bounds } from "./selection"
 // Smart guides while dragging: the moving box snaps to the edges and centres of the other shapes and of the slide,
 // and to equal spacing among the shapes beside it in its row or column (the slide edges count as neighbours), when
 // it comes within SNAP_PX screen px. The targets are built once per drag (sorted lines, binary searched), so each
-// pointer move costs O(log n) for lines plus one pass over the shapes for spacing.
+// pointer move costs O(log n) for lines plus one pass over the shapes for spacing. With a grid (snap objects to grid,
+// PowerPoint's default), an axis no guide reaches lands its nearer edge on the grid: arithmetic, no line array.
 
 // How near (screen px) a box comes before it snaps.
 export const SNAP_PX = 6
@@ -25,6 +26,12 @@ export interface Spacing {
 	readonly from: number
 	readonly to: number
 	readonly at: number
+}
+
+// The grid's spacing (p:viewPr/p:gridSpacing), EMU; its origin is the slide's top-left corner.
+export interface SnapGrid {
+	readonly cx: number
+	readonly cy: number
 }
 
 export interface Snap {
@@ -117,13 +124,19 @@ export class SnapTargets {
 	private readonly slide: { readonly cx: number; readonly cy: number }
 	private readonly x: Lines
 	private readonly y: Lines
+	// The grid's steps (0: no grid on that axis).
+	private readonly gridX: number
+	private readonly gridY: number
 
-	// `items`: the bounds of the shapes that do not move; `slide`: its size. EMU.
-	constructor(items: readonly Bounds[], slide: { readonly cx: number; readonly cy: number }) {
+	// `items`: the bounds of the shapes that do not move; `slide`: its size; `grid`: the grid objects snap to (absent:
+	// none). EMU.
+	constructor(items: readonly Bounds[], slide: { readonly cx: number; readonly cy: number }, grid?: SnapGrid) {
 		this.items = items
 		this.slide = slide
 		this.x = linesOf(items, "x", slide.cx)
 		this.y = linesOf(items, "y", slide.cy)
+		this.gridX = grid !== undefined && grid.cx > 0 && Number.isFinite(grid.cx) ? grid.cx : 0
+		this.gridY = grid !== undefined && grid.cy > 0 && Number.isFinite(grid.cy) ? grid.cy : 0
 	}
 
 	private lines(axis: Axis): Lines {
@@ -154,6 +167,35 @@ export class SnapTargets {
 		}
 
 		return best
+	}
+
+	// The smallest move along `axis` that puts one of `values` on a grid line; undefined without a grid.
+	snapGrid(axis: Axis, values: readonly number[]): number | undefined {
+		const step = axis === "x" ? this.gridX : this.gridY
+
+		if (step === 0) return undefined
+
+		let best: number | undefined
+
+		for (const value of values) {
+			const delta = Math.round(value / step) * step - value
+
+			if (best === undefined || Math.abs(delta) < Math.abs(best)) best = delta
+		}
+
+		return best
+	}
+
+	// The move along `axis` for edges being dragged: onto a line within `threshold` (`line`: draw its guide), else onto
+	// the grid.
+	snapEdges(axis: Axis, values: readonly number[], threshold: number): { readonly delta: number; readonly line: boolean } | undefined {
+		const line = this.snapValues(axis, values, threshold)
+
+		if (line !== undefined) return { delta: line, line: true }
+
+		const grid = this.snapGrid(axis, values)
+
+		return grid === undefined ? undefined : { delta: grid, line: false }
 	}
 
 	// Guides for every line one of `values` lies on, spanning the lines' owners and `box` across.
@@ -290,7 +332,8 @@ export class SnapTargets {
 	}
 
 	// Where a box dragged to `box` lands, and what to draw: per axis, an edge or centre line, or equal spacing,
-	// whichever is nearer; `threshold` in EMU. `free` axes (none snapped) keep the pointer's position.
+	// whichever is nearer, else the grid (an edge on it); `threshold` in EMU. Axes not in `axes` keep the pointer's
+	// position.
 	snapMove(box: Bounds, threshold: number, axes: { readonly x: boolean; readonly y: boolean } = { x: true, y: true }): Snap {
 		if (threshold <= 0) return NO_SNAP
 
@@ -315,8 +358,11 @@ export class SnapTargets {
 		}
 		const chosenX = pick(lineX, spaceX)
 		const chosenY = pick(lineY, spaceY)
-		const dx = chosenX === "line" ? (lineX as number) : chosenX === "space" ? (spaceX as { delta: number }).delta : 0
-		const dy = chosenY === "line" ? (lineY as number) : chosenY === "space" ? (spaceY as { delta: number }).delta : 0
+		const edges = (axis: Axis): number => this.snapGrid(axis, [startOf(box, axis), endOf(box, axis)]) ?? 0
+		const dx =
+			chosenX === "line" ? (lineX as number) : chosenX === "space" ? (spaceX as { delta: number }).delta : axes.x ? edges("x") : 0
+		const dy =
+			chosenY === "line" ? (lineY as number) : chosenY === "space" ? (spaceY as { delta: number }).delta : axes.y ? edges("y") : 0
 		const landed = shifted(box, dx, dy)
 		const guides: Guide[] = []
 		const spacing: Spacing[] = []

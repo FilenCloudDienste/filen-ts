@@ -6,7 +6,14 @@ import type { ShowLayer } from "../dom/presentation/protocol"
 import { clipPathCss, filterFrame } from "../react/presentation/show/filters"
 import { layerBoxes, layerCss, layerIndices, layerPlanOf, layerTree, type LayerNode } from "../react/presentation/show/layers"
 import { linkBoxes } from "../react/presentation/show/links"
-import { advanceAt, DEFAULT_SHOW_OPTIONS, ShowNavigator, showOptionsOf, showSequence } from "../react/presentation/show/timeline"
+import {
+	advanceAt,
+	DEFAULT_SHOW_OPTIONS,
+	hiddenAfter,
+	ShowNavigator,
+	showOptionsOf,
+	showSequence
+} from "../react/presentation/show/timeline"
 import { transitionDurationMs, transitionStyles } from "../react/presentation/show/transitions"
 import { fixtureTextPage } from "./fixtures/presentation/textPage"
 
@@ -112,6 +119,7 @@ describe("transitions as CSS", () => {
 				expect(styles.incoming.opacity).toBe(frame.incoming.opacity)
 				expect(styles.outgoing.opacity).toBe(frame.outgoing.opacity)
 				expect(styles.black).toBe(frame.black)
+				expect(styles.overlay).toBe(frame.overlay)
 				expect(styles.outgoingOnTop).toBe(frame.outgoingOnTop)
 			}
 		}
@@ -131,6 +139,15 @@ describe("transitions as CSS", () => {
 		expect(transitionDurationMs({ ...transition("fade", {}), speed: "slow" })).toBe(1000)
 		expect(transitionDurationMs({ ...transition("fade", {}), speed: "med" })).toBe(750)
 		expect(transitionDurationMs(transition("fade", {}))).toBe(500)
+	})
+
+	it("plays a plain cut in no time, whatever its duration, and a cut through black for its duration", () => {
+		// Zero takes the runtime's instant branch: the timeline begins at once and no click goes to the transition.
+		expect(transitionDurationMs(transition("cut", {}))).toBe(0)
+		expect(transitionDurationMs({ ...transition("cut", {}), durationMs: 2000, speed: "slow" })).toBe(0)
+		expect(transitionDurationMs({ ...transition("cut", { thruBlk: false }), speed: "slow" })).toBe(0)
+		expect(transitionDurationMs(transition("cut", { thruBlk: true }))).toBe(500)
+		expect(transitionDurationMs({ ...transition("cut", { thruBlk: true }), durationMs: 1200 })).toBe(1200)
 	})
 })
 
@@ -375,6 +392,13 @@ describe("show navigation", () => {
 		expect(new ShowNavigator(slides, [], { ...DEFAULT_SHOW_OPTIONS, kiosk: true, loop: false }).peek()).toBe(1)
 	})
 
+	it("H's target: the deck's next slide only when it is hidden", () => {
+		expect(hiddenAfter(slides, 1)).toBe(2)
+		expect(hiddenAfter(slides, 0)).toBeUndefined()
+		expect(hiddenAfter(slides, 2)).toBeUndefined()
+		expect(hiddenAfter(slides, 4)).toBeUndefined()
+	})
+
 	it("returns from a custom show an action entered, or ends with one the show was started as", () => {
 		const nav = new ShowNavigator(slides, [custom], DEFAULT_SHOW_OPTIONS)
 
@@ -428,6 +452,32 @@ describe("show navigation", () => {
 				range: { kind: "customShow", id: 4 }
 			})
 		).toEqual({ loop: false, kiosk: false, useTimings: true, customShow: 4 })
+	})
+
+	it("reads Show without animation and the pen colour, resolved to RGB", () => {
+		const base = {
+			kind: "present",
+			loop: false,
+			showNarration: true,
+			showAnimation: true,
+			useTimings: true,
+			range: { kind: "all" }
+		} as const
+
+		expect(showOptionsOf({ ...base, showAnimation: false, penColor: { kind: "preset", name: "blue" } })).toEqual({
+			loop: false,
+			kiosk: false,
+			useTimings: true,
+			withoutAnimation: true,
+			penColor: "0000FF"
+		})
+		expect(showOptionsOf({ ...base, penColor: { kind: "srgb", rgb: "00b050" } }).penColor).toBe("00B050")
+		// A colour with no RGB here (a theme slot) leaves the pen's default.
+		expect(showOptionsOf({ ...base, penColor: { kind: "scheme", slot: "accent1" } })).toEqual({
+			loop: false,
+			kiosk: false,
+			useTimings: true
+		})
 	})
 
 	it("advances by timing once the slide is idle and its advance-after has passed, never without timings", () => {

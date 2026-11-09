@@ -2,7 +2,7 @@ import { odfPackage } from "./odf"
 import { templateLocale } from "./locale"
 import { FILEN_THEME, themeName, type FilenTheme } from "./themes/model"
 import { WIDESCREEN, type SlideSize } from "./themes/pptx"
-import { NS, ODP_ROOT_NS, ODP_TITLE_SLIDE, cm, fontFaces, odpGradient, odpThemeStyles } from "./themes/odp"
+import { NS, ODP_CONTENT_SLIDE, ODP_ROOT_NS, ODP_TITLE_SLIDE, cm, fontFaces, odpGradient, odpThemeStyles } from "./themes/odp"
 import { zipParts } from "./zip"
 
 // A blank OpenDocument presentation (ODF 1.3 Part 3 §3.6 office:presentation): 33.867 × 19.05 cm (16:9), one title
@@ -27,6 +27,35 @@ export const ODP_MASTER = "Filen"
 // The title-slide presentation page layout (LibreOffice's name for it): a title and a subtitle.
 const TITLE_LAYOUT = "AL1T0"
 
+// The presentation page layouts (§16.43) the deck offers, named as LibreOffice names its AutoLayouts
+// ("AL<n>T<AutoLayout id>"): Title Slide, Title and Content, Two Content, Title Only and Blank, with their placeholders.
+const PAGE_LAYOUTS: readonly (readonly [string, readonly (readonly [string, readonly number[]])[]])[] = [
+	[
+		TITLE_LAYOUT,
+		[
+			["title", ODP_TITLE_SLIDE.title],
+			["subtitle", ODP_TITLE_SLIDE.subtitle]
+		]
+	],
+	[
+		"AL2T1",
+		[
+			["title", ODP_CONTENT_SLIDE.title],
+			["outline", ODP_CONTENT_SLIDE.body]
+		]
+	],
+	[
+		"AL3T3",
+		[
+			["title", ODP_CONTENT_SLIDE.title],
+			["outline", ODP_CONTENT_SLIDE.left],
+			["outline", ODP_CONTENT_SLIDE.right]
+		]
+	],
+	["AL4T19", [["title", ODP_CONTENT_SLIDE.title]]],
+	["AL5T20", []]
+]
+
 function escape(text: string): string {
 	return text.replace(/&/gu, "&amp;").replace(/</gu, "&lt;").replace(/>/gu, "&gt;").replace(/"/gu, "&quot;")
 }
@@ -46,12 +75,14 @@ export function blankOdpParts(options: BlankOdpOptions): ReturnType<typeof odfPa
 	const size = options.size ?? WIDESCREEN
 	const language = templateLocale(options.locale).tag
 	const set = odpThemeStyles(theme, variant, size, { master: ODP_MASTER, displayName: themeName(theme, variant), prefix: "M" }, language)
-	const [titleX, titleY, titleW, titleH] = ODP_TITLE_SLIDE.title
-	const layout =
-		`<style:presentation-page-layout style:name="${TITLE_LAYOUT}">` +
-		`<presentation:placeholder presentation:object="title" ${frameBox([titleX, titleY, titleW, titleH], size)}/>` +
-		`<presentation:placeholder presentation:object="subtitle" ${frameBox(ODP_TITLE_SLIDE.subtitle, size)}/>` +
-		"</style:presentation-page-layout>"
+	const placeholder = (object: string, box: readonly number[]): string =>
+		`<presentation:placeholder presentation:object="${object}" ${frameBox(box, size)}/>`
+	const layout = PAGE_LAYOUTS.map(
+		([name, placeholders]) =>
+			`<style:presentation-page-layout style:name="${name}">` +
+			placeholders.map(([object, box]) => placeholder(object, box)).join("") +
+			"</style:presentation-page-layout>"
+	).join("")
 	const styles =
 		`<office:document-styles ${ODP_ROOT_NS} office:version="1.3">` +
 		`<office:font-face-decls>${fontFaces(theme)}</office:font-face-decls>` +

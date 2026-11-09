@@ -9,7 +9,7 @@ import { newSettingsAttributes, type SettingsAttribute } from "./emit/presentati
 //   - custom shows list the names of the pages they hold, as the deck now has them (a deleted page leaves them);
 //   - the show's start page, when it is gone, is no longer named;
 //   - a copied page's xml:id and draw:id values are renamed (an ID is unique in the document) and the references
-//     inside the copy to them follow (animation targets, connector ends, caption ids).
+//     inside the copy to them follow (animation targets and timing, connector ends, caption ids).
 
 // The pages' names after the save: each page's own, a duplicate's made unique.
 export function pageNames(
@@ -86,6 +86,34 @@ const IDREF_ATTRIBUTES: ReadonlySet<string> = new Set([
 	"presentation:master-element",
 	"draw:chain-next-name"
 ])
+// SMIL begin/end lists, whose syncbase and event values name an ID ("id2.click", "pid1.begin+0.5s").
+const TIMING_ATTRIBUTES: ReadonlySet<string> = new Set(["smil:begin", "smil:end"])
+
+// A begin/end list with each value naming a renamed ID renamed; undefined when none does. An ID is an NCName and may
+// hold '.', so the longest renamed prefix followed by '.' is the ID; other values (clock, next, indefinite) stay.
+function renamedTiming(value: string, renamed: ReadonlyMap<string, string>): string | undefined {
+	if (!value.includes(".")) return undefined
+
+	const tokens = value.split(";")
+	let changed = false
+
+	for (const [index, token] of tokens.entries()) {
+		const start = token.length - token.trimStart().length
+
+		for (let dot = token.lastIndexOf("."); dot > start; dot = token.lastIndexOf(".", dot - 1)) {
+			const next = renamed.get(token.slice(start, dot))
+
+			if (next === undefined) continue
+
+			tokens[index] = token.slice(0, start) + next + token.slice(dot)
+			changed = true
+
+			break
+		}
+	}
+
+	return changed ? tokens.join(";") : undefined
+}
 
 // A copied page's IDs renamed (`taken`: the IDs in use in the document, grown by the new ones) and its references
 // to them following. `canonical(document, node, attribute)` gives an attribute's canonical name.
@@ -139,6 +167,10 @@ export function renameIds(
 			if (ID_ATTRIBUTES.has(name) || IDREF_ATTRIBUTES.has(name)) {
 				const value = attribute.value
 				const next = name === "anim:sub-item" ? undefined : renamed.get(value)
+
+				if (next !== undefined) editor.setAttribute(node, attribute.name, next)
+			} else if (TIMING_ATTRIBUTES.has(name)) {
+				const next = renamedTiming(attribute.value, renamed)
 
 				if (next !== undefined) editor.setAttribute(node, attribute.name, next)
 			}

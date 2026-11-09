@@ -6,13 +6,15 @@ import {
 	NO_PAINT,
 	fillChild,
 	readFillElement,
+	shapeEffects,
 	shapeFill,
 	shapeLine,
 	shapeShadow,
 	styleRef,
 	type LineEnd,
 	type LineStyle,
-	type PaintContext
+	type PaintContext,
+	type StyleRef
 } from "./fill"
 import { compileCustomGeometry } from "./geometry/custom"
 import { emitPaths, evaluateGuides, formulaAdjust, presetProgram, textRect, type GeometryPath } from "./geometry/evaluate"
@@ -53,6 +55,8 @@ export interface ShapeConversion {
 	readonly textboxes: number[]
 	// Elements that were skipped because they are not supported (graphic frames inside groups, ink).
 	readonly unsupported: number
+	// Effects of nested elements (group children) that are not drawn: all but each one's first outer shadow.
+	readonly childEffects: number
 }
 
 // Nesting of groups (and alternate content) drawn; Office itself nests far less.
@@ -280,13 +284,14 @@ export function addArrowhead(
 			list.close()
 			break
 		case "diamond": {
-			const cx = x - (ux * depth) / 2
-			const cy = y - (uy * depth) / 2
+			// Centred on the end point, like the oval.
+			const ax = (ux * depth) / 2
+			const ay = (uy * depth) / 2
 
-			list.moveTo(x, y)
-			list.lineTo(cx - uy * halfWidth, cy + ux * halfWidth)
-			list.lineTo(bx, by)
-			list.lineTo(cx + uy * halfWidth, cy - ux * halfWidth)
+			list.moveTo(x + ax, y + ay)
+			list.lineTo(x - uy * halfWidth, y + ux * halfWidth)
+			list.lineTo(x - ax, y - ay)
+			list.lineTo(x + uy * halfWidth, y - ux * halfWidth)
 			list.close()
 
 			break
@@ -320,15 +325,118 @@ export function addArrowhead(
 	list.addItem(ItemKind.PATH, matrix, 0, 0, 0, 0, firstCommand, firstCoord, fill, outline, -1, -1, ItemFlag.DECORATION, source)
 }
 
+// How far the stroke ends before the tip of a head: at the base of a triangle, at the notch of a stealth. Open, oval
+// and diamond heads sit over the full line.
+function headTrim(end: LineEnd, width: number): number {
+	const depth = end.length * Math.max(width, 1)
+
+	return end.type === "triangle" ? depth : end.type === "stealth" ? depth * 0.6 : 0
+}
+
+// Moves the point at `at` (and the cubic control point at `control`, unless -1) by (-x, -y).
+function shiftBack(coords: Float32Array, at: number, control: number, x: number, y: number): void {
+	coords[at] = (coords[at] ?? 0) - x
+	coords[at + 1] = (coords[at + 1] ?? 0) - y
+
+	if (control < 0) return
+
+	coords[control] = (coords[control] ?? 0) - x
+	coords[control + 1] = (coords[control + 1] ?? 0) - y
+}
+
+// Arrowheads at the ends of an open stroked path (the item just added for it). With `trim` (an unfilled path,
+// whose shape the trim cannot change) the stroke is pulled back under triangle and stealth heads, as Office does,
+// so a thick line's flat end does not stick out of the head's tip.
+export function addLineEnds(
+	list: DrawingList,
+	matrix: ArrayLike<number>,
+	head: LineEnd | undefined,
+	tail: LineEnd | undefined,
+	path: GeometryPath,
+	strokeIndex: number,
+	source: number,
+	trim: boolean
+): void {
+	const ends = pathEnds(list, path)
+
+	if (ends === undefined) return
+
+	const [sx, sy, sdx, sdy, ex, ey, edx, edy] = ends
+
+	if (head !== undefined) addArrowhead(list, matrix, head, sx, sy, sdx, sdy, strokeIndex, source)
+	if (tail !== undefined) addArrowhead(list, matrix, tail, ex, ey, edx, edy, strokeIndex, source)
+
+	if (!trim) return
+
+	const width = list.strokes[strokeIndex]?.width ?? 0
+	const startLength = Math.hypot(sdx, sdy)
+	const endLength = Math.hypot(edx, edy)
+	// Never past the neighbouring point the end's direction comes from.
+	let startCut = head === undefined ? 0 : Math.min(headTrim(head, width), startLength)
+	let endCut = tail === undefined ? 0 : Math.min(headTrim(tail, width), endLength)
+
+	if (startCut === 0 && endCut === 0) return
+
+	// The coordinate slots of either end point and of the cubic control point beside it.
+	const commands = list.commands
+	const last = path.firstCommand + path.commandCount
+	let at = path.firstCoord
+	let pairs = 0
+	let startControl = -1
+	let endPoint = -1
+	let endControl = -1
+
+	for (let k = path.firstCommand; k < last; k++) {
+		const command = commands[k]
+		const count = command === PathCommand.CUBIC ? 6 : command === PathCommand.QUAD ? 4 : command === PathCommand.CLOSE ? 0 : 2
+
+		if (count === 0) continue
+		if (k === path.firstCommand + 1 && command === PathCommand.CUBIC) startControl = at
+
+		endPoint = at + count - 2
+		endControl = command === PathCommand.CUBIC ? at + 2 : -1
+		pairs += count / 2
+		at += count
+	}
+
+	// One straight segment gives both ends no more than its length: the line collapses instead of crossing over.
+	if (pairs === 2 && startCut + endCut > startLength) {
+		const scale = startLength / (startCut + endCut)
+
+		startCut *= scale
+		endCut *= scale
+	}
+
+	const coords = list.coords
+
+	if (startCut > 0) shiftBack(coords, path.firstCoord, startControl, (sdx / startLength) * startCut, (sdy / startLength) * startCut)
+	if (endCut > 0) shiftBack(coords, endPoint, endControl, (edx / endLength) * endCut, (edy / endLength) * endCut)
+}
+
 class ShapeWalker {
 	readonly context: ShapeContext
 	readonly list: DrawingList
 	readonly textboxes: number[] = []
 	unsupported = 0
+	childEffects = 0
 
 	constructor(context: ShapeContext) {
 		this.context = context
 		this.list = context.list
+	}
+
+	// Counts the effects of a nested element that are not drawn: all but the first outer shadow its items carry
+	// (`shadowDrawn`), an effect DAG as one. Only with effects on, as nothing is drawn or counted otherwise.
+	private countChildEffects(reader: DrawingReader, properties: number, effectRef: StyleRef | undefined, shadowDrawn: boolean): void {
+		if (!this.context.effects) return
+
+		const read = shapeEffects(this.context, reader, properties, effectRef)
+		let lost = read.effects.length
+
+		if (shadowDrawn && read.sources.includes("outerShdw")) lost--
+		if (read.approximated.includes("effectDag")) lost++
+
+		this.childEffects += lost
 	}
 
 	// `depth` counts nesting of groups and alternate content; a group or alternate content past MAX_DEPTH
@@ -350,9 +458,9 @@ class ShapeWalker {
 		if (hidden(reader, node)) return
 
 		if (local === "pic") {
-			this.picture(reader, node, frame)
+			this.picture(reader, node, frame, depth)
 		} else if (SHAPES.has(local)) {
-			this.shape(reader, node, frame)
+			this.shape(reader, node, frame, depth)
 		} else if (GROUPS.has(local)) {
 			if (depth > MAX_DEPTH) this.unsupported++
 			else this.group(reader, node, frame, depth)
@@ -468,6 +576,9 @@ class ShapeWalker {
 
 		if (fill !== undefined && fill !== GROUP_PAINT) child = { ...child, groupFill: fill }
 
+		// A nested group draws none of its effects (the host draws the outermost element's).
+		if (depth > 0) this.countChildEffects(reader, grpSpPr, undefined, false)
+
 		const document = reader.document
 
 		for (let element = document.firstChildElement(node); element >= 0; element = document.nextSiblingElement(element)) {
@@ -475,7 +586,7 @@ class ShapeWalker {
 		}
 	}
 
-	private shape(reader: DrawingReader, node: number, frame: Frame): void {
+	private shape(reader: DrawingReader, node: number, frame: Frame, depth: number): void {
 		const spPr = propertiesOf(reader, node, "spPr")
 		const xfrm = readXfrm(reader, reader.child(spPr, D.A, "xfrm"))
 		const box = this.box(xfrm, frame)
@@ -503,6 +614,8 @@ class ShapeWalker {
 		const line = shapeLine(context, reader, reader.child(spPr, D.A, "ln"), lnRef)
 		const shadow = shapeShadow(context, reader, spPr, effectRef)
 		const { program, adjust } = shapeGeometry(reader, spPr)
+
+		if (depth > 0) this.countChildEffects(reader, spPr, effectRef, shadow >= 0)
 
 		this.paths(program, adjust, box.w, box.h, matrix, fill ?? NO_PAINT, line, shadow, node)
 		this.text(reader, node, frame, program, adjust, box, style)
@@ -550,14 +663,8 @@ class ShapeWalker {
 			)
 			shadowLeft = -1
 
-			if (stroke >= 0 && path.open && line !== undefined && (line.head !== undefined || line.tail !== undefined)) {
-				const ends = pathEnds(list, path)
-
-				if (ends !== undefined) {
-					if (line.head !== undefined) addArrowhead(list, matrix, line.head, ends[0], ends[1], ends[2], ends[3], stroke, source)
-					if (line.tail !== undefined) addArrowhead(list, matrix, line.tail, ends[4], ends[5], ends[6], ends[7], stroke, source)
-				}
-			}
+			if (stroke >= 0 && path.open && line !== undefined && (line.head !== undefined || line.tail !== undefined))
+				addLineEnds(list, matrix, line.head, line.tail, path, stroke, source, pathFill < 0)
 		}
 	}
 
@@ -592,11 +699,32 @@ class ShapeWalker {
 
 		if (content < 0 && txBody < 0) return
 
+		const hosted = content < 0 && context.body !== undefined ? context.body(txBody) : undefined
+		let body: TextBodyProps
+		let parsed: ReturnType<typeof readTextBody> | undefined
+
+		if (content >= 0 || hosted !== undefined) {
+			body = readBodyProps(reader, bodyPr >= 0 ? bodyPr : reader.child(txBody, D.A, "bodyPr"))
+		} else {
+			// DrawingML text: the style's font reference supplies the default typeface and colour.
+			const fontRef = reader.child(style, D.A, "fontRef")
+			const base = context.text ?? DEFAULT_TEXT
+			const refColor: Rgba | undefined = fontRef < 0 ? undefined : readColor(reader, colorChild(reader, fontRef), context.theme)
+			const refFont =
+				fontRef < 0 ? undefined : resolveTypeface(context.theme, reader.attr(fontRef, "idx") === "major" ? "+mj-lt" : "+mn-lt")
+			const defaults: TextDefaults = { ...base, color: refColor ?? base.color, font: refFont ?? base.font }
+
+			parsed = readTextBody(reader, context.theme, txBody, defaults, bodyPr >= 0 ? readBodyProps(reader, bodyPr) : {})
+
+			if (parsed.paragraphs.every(paragraph => paragraph.runs.every(run => run.text === ""))) return
+
+			body = parsed.body
+		}
+
 		// The text rectangle: dsp:txXfrm (its own placement), else the geometry's text rectangle.
 		let textMatrix: readonly number[]
 		let rect: [number, number, number, number]
 		const textXfrm = readXfrm(reader, txXfrm)
-		// Text does not mirror with the shape, but turns with it.
 		const xfrm = readXfrm(reader, reader.child(propertiesOf(reader, node, "spPr"), D.A, "xfrm"))
 		const turn = xfrm?.rotation ?? 0
 
@@ -618,62 +746,51 @@ class ShapeWalker {
 			)
 			rect = [0, 0, textBox.w / EMU_PER_PX, textBox.h / EMU_PER_PX]
 		} else {
+			// The text rectangle follows the flipped geometry, but the text never mirrors: it turns with the shape, and
+			// a vertical flip turns it half round, which maps y itself, so x is mirrored for exactly one of the flips.
+			const flipH = xfrm?.flipH ?? false
+			const flipV = xfrm?.flipV ?? false
+			const textTurn = flipV ? turn + 180 : turn
+			const w = box.w / EMU_PER_PX
+
 			textMatrix = multiply(
 				frame.matrix,
-				boxMatrix(box.x / EMU_PER_PX, box.y / EMU_PER_PX, box.w / EMU_PER_PX, box.h / EMU_PER_PX, turn, false, false)
+				boxMatrix(box.x / EMU_PER_PX, box.y / EMU_PER_PX, w, box.h / EMU_PER_PX, textTurn, false, false)
 			)
 			rect = textRect(program, evaluateGuides(program, box.w, box.h, adjust), box.w, box.h)
+
+			if (flipH !== flipV) rect = [w - rect[2], rect[1], w - rect[0], rect[3]]
+
+			// bodyPr rot turns the text about the rectangle's centre; upright text first turns back to the page.
+			const extra = body.rotation - (body.upright ? textTurn : 0)
+			const half = ((extra % 180) + 180) % 180
+
+			if (extra % 360 !== 0) {
+				const cx = (rect[0] + rect[2]) / 2
+				const cy = (rect[1] + rect[3]) / 2
+				// Upright text a quarter turn off its shape lays out across the box the page shows.
+				const swap = body.upright && half > 45 && half < 135
+				const rw = Math.max(0, swap ? rect[3] - rect[1] : rect[2] - rect[0])
+				const rh = Math.max(0, swap ? rect[2] - rect[0] : rect[3] - rect[1])
+
+				textMatrix = multiply(textMatrix, boxMatrix(cx - rw / 2, cy - rh / 2, rw, rh, extra, false, false))
+				rect = [0, 0, rw, rh]
+			}
 		}
 
-		const width = Math.max(0, rect[2] - rect[0])
-		const height = Math.max(0, rect[3] - rect[1])
-		const hosted = content < 0 && context.body !== undefined ? context.body(txBody) : undefined
+		const text =
+			parsed === undefined
+				? list.text({ kind: "story", body, story: hosted ?? context.story?.(content) ?? content })
+				: list.text({ kind: "body", body, paragraphs: parsed.paragraphs })
 
-		if (content >= 0 || hosted !== undefined) {
-			const body: TextBodyProps = readBodyProps(reader, bodyPr >= 0 ? bodyPr : reader.child(txBody, D.A, "bodyPr"))
-			const text = list.text({ kind: "story", body, story: hosted ?? context.story?.(content) ?? content })
-
-			if (content >= 0) this.textboxes.push(content)
-			list.addItem(
-				ItemKind.TEXT,
-				textMatrix,
-				rect[0],
-				rect[1],
-				width,
-				height,
-				list.commandCount,
-				list.coordCount,
-				-1,
-				-1,
-				text,
-				-1,
-				0,
-				node
-			)
-
-			return
-		}
-
-		// DrawingML text: the style's font reference supplies the default typeface and colour.
-		const fontRef = reader.child(style, D.A, "fontRef")
-		const base = context.text ?? DEFAULT_TEXT
-		const refColor: Rgba | undefined = fontRef < 0 ? undefined : readColor(reader, colorChild(reader, fontRef), context.theme)
-		const refFont =
-			fontRef < 0 ? undefined : resolveTypeface(context.theme, reader.attr(fontRef, "idx") === "major" ? "+mj-lt" : "+mn-lt")
-		const defaults: TextDefaults = { ...base, color: refColor ?? base.color, font: refFont ?? base.font }
-		const parsed = readTextBody(reader, context.theme, txBody, defaults, bodyPr >= 0 ? readBodyProps(reader, bodyPr) : {})
-
-		if (parsed.paragraphs.every(paragraph => paragraph.runs.every(run => run.text === ""))) return
-
-		const text = list.text({ kind: "body", body: parsed.body, paragraphs: parsed.paragraphs })
-
+		if (content >= 0) this.textboxes.push(content)
 		list.addItem(
 			ItemKind.TEXT,
 			textMatrix,
 			rect[0],
 			rect[1],
-			width,
-			height,
+			Math.max(0, rect[2] - rect[0]),
+			Math.max(0, rect[3] - rect[1]),
 			list.commandCount,
 			list.coordCount,
 			-1,
@@ -685,7 +802,7 @@ class ShapeWalker {
 		)
 	}
 
-	private picture(reader: DrawingReader, node: number, frame: Frame): void {
+	private picture(reader: DrawingReader, node: number, frame: Frame, depth: number): void {
 		const context = this.context
 		const list = this.list
 		const spPr = propertiesOf(reader, node, "spPr")
@@ -712,6 +829,8 @@ class ShapeWalker {
 		const clipped = reader.child(spPr, D.A, "custGeom") >= 0 || (preset !== undefined && preset !== "rect")
 		const background = readFillElement(context, reader, fillChild(reader, spPr))
 		const shadow = shapeShadow(context, reader, spPr, undefined)
+
+		if (depth > 0) this.countChildEffects(reader, spPr, undefined, shadow >= 0 && image >= 0)
 
 		if (background !== undefined && background >= 0) this.paths(program, adjust, box.w, box.h, matrix, background, undefined, -1, node)
 
@@ -789,7 +908,7 @@ export function convertGraphic(
 		walker.element(reader, element, frame)
 	}
 
-	return { list, textboxes: walker.textboxes, unsupported: walker.unsupported }
+	return { list, textboxes: walker.textboxes, unsupported: walker.unsupported, childEffects: walker.childEffects }
 }
 
 // Converts a shape tree whose coordinates are already in the frame's EMU (dsp:spTree of a SmartArt drawing,
@@ -813,5 +932,5 @@ export function convertShapeTree(
 		walker.element(reader, element, frame)
 	}
 
-	return { list, textboxes: walker.textboxes, unsupported: walker.unsupported }
+	return { list, textboxes: walker.textboxes, unsupported: walker.unsupported, childEffects: walker.childEffects }
 }

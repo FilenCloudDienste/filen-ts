@@ -1391,7 +1391,9 @@ export class OdpShapeWriter {
 
 		if (isRefused(text)) return text
 
-		const placeholder = shape.ph === undefined ? undefined : CLASS_OF[shape.ph.type]
+		// A notes page's body placeholder is its notes object (ODF 1.3 Part 3 §19.432 presentation:class "notes").
+		const placeholder =
+			shape.ph === undefined ? undefined : shape.ph.type === "body" && this.slide.kind === "notes" ? "notes" : CLASS_OF[shape.ph.type]
 		const rectangle =
 			geometry === undefined || (geometry.kind === "preset" && geometry.preset === "rect" && geometry.guides.length === 0)
 		// A shape that fits its text (a:spAutoFit, §21.1.2.1.4) grows and shrinks to it: a text frame's height is its

@@ -76,6 +76,44 @@ describe("show keys", () => {
 		expect(command("KeyQ")).toBeUndefined()
 	})
 
+	it("takes PowerPoint's Backspace, period and comma in the presenter view too", () => {
+		const command = (code: string, init?: Partial<ShowKeyEvent>) => showKeyCommand(key(code, init), DEFAULT_SHOW_BINDINGS, false)
+
+		expect(command("Backspace")).toBe("previous")
+		expect(command("Period", { key: "." })).toBe("black")
+		expect(command("Comma", { key: "," })).toBe("white")
+		// The recorder's tokens for those keys.
+		expect(parseShowCombo("period,comma").map(chord => chord.codes)).toEqual([["Period"], ["Comma"]])
+	})
+
+	it("matches a recorded key the named table does not list by its code", () => {
+		expect(showKeyCommand(key("Semicolon"), { ...DEFAULT_SHOW_BINDINGS, black: "semicolon" }, false)).toBe("black")
+		expect(showKeyCommand(key("BracketLeft"), { ...DEFAULT_SHOW_BINDINGS, white: "bracketleft" }, false)).toBe("white")
+	})
+
+	it("Mod+E toggles the eraser and H shows the next slide only through the controller's hidden-slide step", () => {
+		const calls: string[] = []
+		const controller = { ...spyController(), nextHidden: () => calls.push("nextHidden") }
+		const ink = createInkStore()
+		const keys = createShowKeys({ controller: () => controller, ink, apple: false })
+
+		expect(showKeyCommand(key("KeyE", { ctrlKey: true }), DEFAULT_SHOW_BINDINGS, false)).toBe("eraser")
+		expect(showKeyCommand(key("KeyE", { metaKey: true }), DEFAULT_SHOW_BINDINGS, true)).toBe("eraser")
+		keys.onKeyDown(key("KeyE", { ctrlKey: true }))
+		expect(ink.getSnapshot().tool).toBe("eraser")
+		keys.onKeyDown(key("KeyE", { ctrlKey: true }))
+		expect(ink.getSnapshot().tool).toBe("none")
+		keys.onKeyDown(key("KeyH"))
+		expect(calls).toEqual(["nextHidden"])
+		expect(controller.calls).toEqual([])
+		// A player without the step takes H and does nothing.
+		const plain = spyController()
+		const fallback = createShowKeys({ controller: () => plain, apple: false })
+
+		expect(fallback.onKeyDown(key("KeyH"))).toBe(true)
+		expect(plain.calls).toEqual([])
+	})
+
 	it("parses alternatives and skips sequences", () => {
 		expect(parseShowCombo("mod+shift+x,n").map(chord => chord.codes)).toEqual([["KeyX"], ["KeyN"]])
 		expect(parseShowCombo("g>i")).toEqual([])
