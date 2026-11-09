@@ -178,31 +178,18 @@ describe("legacySession", () => {
 		expect(sessionEnvelopeSchema(JSON.parse(session.blob)) instanceof type.errors).toBe(false)
 	})
 
-	it("needs the old client's signed-in flag", () => {
+	// The refusal cases live with the shared converter (filen-shared legacySession.test.ts); these only show they pass
+	// through.
+	it("passes the shared converter's refusals through", () => {
 		expect(legacySession(snapshot({ [LEGACY_KEYS.authed]: false }))).toEqual({ ok: false, reason: "not-signed-in" })
-		expect(legacySession(snapshot({ [LEGACY_KEYS.authed]: undefined }))).toEqual({ ok: false, reason: "not-signed-in" })
-	})
-
-	it.each([
-		["the anonymous config", { apiKey: "anonymous" }],
-		["a short api key", { apiKey: "short" }],
-		["the signed-out user id", { userId: 1 }],
-		["a fractional user id", { userId: 2.5 }],
-		["an unsafe user id", { userId: 2 ** 60 }],
-		["an unknown auth version", { authVersion: 4 }],
-		["no master keys", { masterKeys: [] }],
-		["a master key with the separator", { masterKeys: ["a|b"] }],
-		["a value the envelope would have to escape", { email: "$bigint:1n" }],
-		["a missing field", { privateKey: undefined }]
-	])("refuses %s", (_label, change) => {
-		expect(legacySession(snapshot({ [LEGACY_KEYS.sdkConfig]: { ...SDK_CONFIG, ...change } }))).toEqual({
+		expect(legacySession(snapshot({ [LEGACY_KEYS.sdkConfig]: { ...SDK_CONFIG, apiKey: "anonymous" } }))).toEqual({
 			ok: false,
 			reason: "invalid-account"
 		})
 	})
 
-	it("refuses an unparsable config", () => {
-		expect(legacySession({ [LEGACY_KEYS.authed]: "true", [LEGACY_KEYS.sdkConfig]: "{" })).toEqual({
+	it("refuses an account whose envelope is too large to store", () => {
+		expect(legacySession(snapshot({ [LEGACY_KEYS.sdkConfig]: { ...SDK_CONFIG, privateKey: "k".repeat(1024 * 1024) } }))).toEqual({
 			ok: false,
 			reason: "invalid-account"
 		})

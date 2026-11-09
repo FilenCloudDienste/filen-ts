@@ -28,7 +28,8 @@
 		"./desktopLock": "./src/desktopLock.ts",
 		"./desktopShellStrings": "./src/desktopShellStrings.ts",
 		"./languages": "./src/languages.ts",
-		"./session": "./src/session.ts"
+		"./session": "./src/session.ts",
+		"./legacySession": "./src/legacySession.ts"
 	},
 	"scripts": {
 		"typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.test.json && tsc -p tsconfig.dom.json && tsc -p tsconfig.tooling.json",

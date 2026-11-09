@@ -1,13 +1,14 @@
 import { type } from "arktype"
 import { desktopPinSchema } from "@filen/shared/desktopLock"
 import { sessionEnvelopeSchema } from "@filen/shared/session"
+import { convertLegacySession, LEGACY_SESSION_KEYS, LEGACY_USER_ID, type LegacySessionFailure } from "@filen/shared/legacySession"
 import { SESSION_BLOB_MAX_LENGTH } from "../shared/channels.ts"
 
 // What the old client (3.0.53) kept in its renderer's localStorage on filendesktop://bundle. Its web app wrote every
 // value with JSON.stringify (usehooks' useLocalStorage), so each raw string is JSON, `authed` included ("true").
 export const LEGACY_KEYS = {
-	authed: "authed:4:4:4",
-	sdkConfig: "sdkConfig:4:4",
+	authed: LEGACY_SESSION_KEYS.authed,
+	sdkConfig: LEGACY_SESSION_KEYS.sdkConfig,
 	desktopConfig: "desktopConfig:4:4",
 	sync: "syncConfig:1",
 	networkDrive: "networkDriveConfig:1",
@@ -106,62 +107,25 @@ function parseJson(raw: string | undefined): unknown {
 	}
 }
 
-// A safe integer: the old userId is a JS number.
-const USER_ID = "1 < number.integer <= 9007199254740991"
-
-// The old JS SDK's FilenSDKConfig, only the fields the session needs. `password` and `twoFactorCode` were stored as
-// "redacted" and are never read. The old client's own test for a real key: longer than 32 and not "anonymous".
-const sdkConfigSchema = type({
-	email: "string > 0",
-	masterKeys: type("string > 0").array().atLeastLength(1),
-	apiKey: "string > 32",
-	privateKey: "string > 0",
-	authVersion: "1 | 2 | 3",
-	baseFolderUUID: "string > 0",
-	// The old client treats 1 (and anything not positive) as signed out.
-	userId: USER_ID
-})
-
-export type LegacySessionFailure = "not-signed-in" | "invalid-account"
-
 export type LegacySession = { ok: true; blob: string; userId: number } | { ok: false; reason: LegacySessionFailure }
 
-// The old account as the web's session envelope (the shape `persistSession` stores), converted like sdk-rs's
-// `From<FilenSDKConfig> for StringifiedClient`: rootUuid is baseFolderUUID, authInfo the master keys joined by "|",
-// the public key dropped (derived from the private key). Only `userId` is a bigint, which the envelope writes as
-// "$bigint:<digits>n". A value starting with "$" would need the envelope's escape; no real one does, so such an
-// account is refused instead. Failures name a reason, never a value.
+// The old account (converted by the shared core) as the session envelope the vault stores. Only `userId` is a
+// bigint, which the envelope writes as "$bigint:<digits>n"; the core already refused any value needing an escape.
 export function legacySession(snapshot: LegacySnapshot): LegacySession {
-	if (snapshot[LEGACY_KEYS.authed] !== "true") {
-		return { ok: false, reason: "not-signed-in" }
+	const converted = convertLegacySession(snapshot[LEGACY_KEYS.authed], snapshot[LEGACY_KEYS.sdkConfig])
+
+	if (!converted.ok) {
+		return converted
 	}
 
-	const config = sdkConfigSchema(parseJson(snapshot[LEGACY_KEYS.sdkConfig]))
-
-	if (config instanceof type.errors || config.apiKey === "anonymous" || config.masterKeys.some(key => key.includes("|"))) {
-		return { ok: false, reason: "invalid-account" }
-	}
-
-	const strings = {
-		email: config.email,
-		rootUuid: config.baseFolderUUID,
-		authInfo: config.masterKeys.join("|"),
-		privateKey: config.privateKey,
-		apiKey: config.apiKey
-	}
-
-	if (Object.values(strings).some(value => value.startsWith("$"))) {
-		return { ok: false, reason: "invalid-account" }
-	}
-
-	const envelope = { ...strings, userId: `$bigint:${String(config.userId)}n`, authVersion: config.authVersion }
+	const envelope = { ...converted.session, userId: `$bigint:${String(converted.session.userId)}n` }
 	const blob = JSON.stringify(envelope)
 
 	if (blob.length > SESSION_BLOB_MAX_LENGTH || sessionEnvelopeSchema(envelope) instanceof type.errors) {
 		return { ok: false, reason: "invalid-account" }
 	}
 
-	return { ok: true, blob, userId: config.userId }
+	return { ok: true, blob, userId: converted.userId }
 }
 
 // The old lock was active only with both a PIN and an inactivity timeout; a PIN alone never locked anything, so it
@@ -249,7 +213,7 @@ const usersSchema = recordSchema.pipe(usersOf)
 
 const stashSchema = type({
 	version: "1",
-	userId: type(USER_ID).or("null"),
+	userId: type(LEGACY_USER_ID).or("null"),
 	users: type({ sync: usersSchema, networkDrive: usersSchema, webdav: usersSchema, s3: usersSchema }),
 	fallback: type({ "sync?": "unknown", "networkDrive?": "unknown", "webdav?": "unknown", "s3?": "unknown" })
 })
