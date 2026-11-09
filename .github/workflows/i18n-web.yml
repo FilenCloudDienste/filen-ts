@@ -20,12 +20,12 @@ name: i18n translate (web)
 #                  or updated from i18n/full-translate-web. Otherwise it leaves a notice: re-dispatch.
 # Delete the progress branch once that PR has merged (or to start a full run from scratch).
 #
-# TRIGGER: workflow_dispatch ONLY until the first full run has merged with its snapshot. Then add, like
-# mobile:
-#   push: { branches: [main], paths: ['packages/filen-web/src/locales/en/**'] }
-# (target catalogs and the snapshot are workflow OUTPUTS, not triggers, or every run would fire on
-# its own commit).
+# TRIGGER: a push that changes the English source runs a delta, like mobile. Target catalogs and the snapshot
+# are workflow OUTPUTS, not triggers, or every run would fire on its own commit.
 on:
+  push:
+    branches: [main]
+    paths: ['packages/filen-web/src/locales/en/**']
   workflow_dispatch:
     inputs:
       mode:
@@ -71,7 +71,8 @@ env:
 
 jobs:
   translate:
-    if: inputs.mode == 'delta'
+    # A push carries no inputs: it is always a delta.
+    if: github.event_name == 'push' || inputs.mode == 'delta'
     permissions:
       contents: write
       pull-requests: write

@@ -103,7 +103,8 @@ git), or the app offers the stub languages.
 
    After that PR has merged, delete `i18n/full-translate-web-progress`. Locally the same works one machine at a time:
    `ANTHROPIC_API_KEY=… pnpm run translate-i18n --full`, re-run until it exits 0.
-3. After that has merged: enable the push trigger in `.github/workflows/i18n-web.yml` (see its header).
+3. After that has merged, a push that changes `src/locales/en/**` on `main` runs a delta translation on its own
+   (the push trigger in `.github/workflows/i18n-web.yml`).
 
 `mode=delta` (the default) runs the shared single-job workflow and opens or updates the rolling PR
 `i18n: update web translations`. Either PR is opened by the workflow's `GITHUB_TOKEN`, so it does not trigger
