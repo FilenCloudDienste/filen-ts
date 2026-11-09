@@ -287,6 +287,17 @@ class RelationshipsEdit {
 	}
 }
 
+// A relationships part listing `relationships` of `source` (a zip name), their internal targets relative to it.
+export function relationshipsPartBytes(source: string, relationships: readonly PendingRelationship[]): Uint8Array {
+	const lines = relationships.map(relationship => {
+		const target = relationship.external ? relationship.target : relativeTarget(source, relationship.target)
+
+		return `<Relationship Id="${escapeAttribute(relationship.id)}" Type="${escapeAttribute(relationship.type)}" Target="${escapeAttribute(target)}"${relationship.external ? ' TargetMode="External"' : ""}/>`
+	})
+
+	return encodeUtf8(`${XML_DECLARATION}<Relationships xmlns="${RELS_NAMESPACE}">${lines.join("")}</Relationships>`)
+}
+
 interface AddedPart {
 	readonly name: string
 	readonly contentType: string
@@ -355,6 +366,8 @@ interface ReleasedMedia {
 	readonly contentType: string | undefined
 	readonly bytes: Uint8Array | undefined
 	readonly external?: true
+	// Related with the relationship of this id, which names its target (a pasted diagram's drawing, by its data part).
+	readonly with?: string
 }
 
 const releasedMedia = new WeakMap<object, Map<string, Map<string, ReleasedMedia>>>()
@@ -405,6 +418,7 @@ export function carryRelationship(
 		readonly external?: boolean
 		readonly contentType?: string
 		readonly bytes?: Uint8Array
+		readonly with?: string
 	}
 ): void {
 	const key = partKey(owner)
@@ -430,9 +444,34 @@ export function carryRelationship(
 		name: relationship.target,
 		contentType: relationship.contentType,
 		bytes: relationship.bytes,
-		...(relationship.external === true ? { external: true as const } : {})
+		...(relationship.external === true ? { external: true as const } : {}),
+		...(relationship.with === undefined ? {} : { with: relationship.with })
 	})
 	retired.set(key, (retired.get(key) ?? new Set()).add(id))
+}
+
+// A part a carried relationship holds (a pasted chart, its workbook…; a picture a save let go of): its bytes and the
+// relationships carried for it as its owner, until a save writes it. Undefined for a part nothing holds.
+export function carriedPart(
+	deck: object,
+	part: string
+):
+	| {
+			readonly bytes: Uint8Array
+			readonly contentType: string
+			readonly relationships: readonly {
+				readonly id: string
+				readonly type: string
+				readonly name: string
+				readonly external: boolean
+			}[]
+	  }
+	| undefined {
+	const held = releasedMediaBytes(deck, part)
+
+	if (held === undefined) return undefined
+
+	return { ...held, relationships: [...heldRelationships(deck, part)].map(([id, relationship]) => ({ id, ...relationship })) }
 }
 
 // The released and carried relationships `owner` holds, by id.
@@ -461,10 +500,29 @@ export function keepReleasedMedia(deck: object, named: ReadonlyMap<string, Reado
 
 	if (owners === undefined) return
 
+	// A kept relationship's target keeps what is held for it as an owner (a pasted chart's workbook), transitively.
+	const kept = new Set<string>()
+	const keep = (owner: string): void => {
+		if (kept.has(owner)) return
+
+		kept.add(owner)
+
+		for (const media of owners.get(owner)?.values() ?? []) if (media.external !== true) keep(partKey(media.name))
+	}
+
 	for (const [owner, byId] of owners) {
 		const ids = named.get(owner)
 
-		for (const id of byId.keys()) if (ids?.has(id) !== true) byId.delete(id)
+		for (const [id, media] of byId)
+			if (ids?.has(id) === true || (media.with !== undefined && ids?.has(media.with) === true)) keep(partKey(media.name))
+	}
+
+	for (const [owner, byId] of owners) {
+		const ids = named.get(owner)
+
+		if (!kept.has(owner))
+			for (const [id, media] of byId)
+				if (ids?.has(id) !== true && !(media.with !== undefined && ids?.has(media.with) === true)) byId.delete(id)
 
 		if (byId.size === 0) owners.delete(owner)
 	}
@@ -520,6 +578,46 @@ export class PackageWriter {
 		for (const entry of opc.entries()) this.taken.add(partKey(entry.name))
 	}
 
+	// A writer whose output is read back (exportPart) and never saved: the deck's issued names avoided and what pasted
+	// elements carried written as a save writes them, with nothing noted for the deck's own saves.
+	private scratch = false
+
+	exportFor(deck: object): void {
+		this.issued = issuedNames(deck)
+		this.deck = deck
+		this.scratch = true
+	}
+
+	// A part as this writer's edits leave it: its bytes, content type and relationships; undefined for none.
+	async exportPart(
+		name: string
+	): Promise<
+		{ readonly bytes: Uint8Array; readonly contentType: string; readonly relationships: readonly PendingRelationship[] } | undefined
+	> {
+		const key = partKey(name)
+		const added = this.added.get(key)
+		const editor = this.editors.get(key)
+		const replaced = this.replaced.get(key)
+		const entry = this.opc.entry(key)
+		const bytes =
+			editor?.changed === true
+				? editor.serialize()
+				: replaced !== undefined
+					? await joinBytes(replaced)
+					: added !== undefined
+						? added.bytes === undefined
+							? undefined
+							: await this.bytesOf(added)
+						: entry === undefined || this.removed.has(key)
+							? undefined
+							: await this.opc.read(entry.name)
+		const contentType = this.typeOf(name)
+
+		if (bytes === undefined || contentType === undefined) return undefined
+
+		return { bytes, contentType, relationships: (await this.loadRelationships(added?.name ?? entry?.name ?? name)).all() }
+	}
+
 	// The names the deck's session has issued (issuedPartNames), this package's among them from now on: allocate never
 	// gives them out (a name the model chose is still claimed as it is).
 	issue(deck: object): void {
@@ -538,7 +636,7 @@ export class PackageWriter {
 		const own = deck === undefined ? undefined : formerName(deck, key)
 		const name = own !== undefined && this.claim(own) ? own : this.allocate(kind, contentType, like)
 
-		if (deck !== undefined) noteFormerName(deck, key, name)
+		if (deck !== undefined && !this.scratch) noteFormerName(deck, key, name)
 
 		return name
 	}
@@ -850,6 +948,8 @@ export class PackageWriter {
 		const edit = this.relationshipsOf(source)
 		const key = external ? target : partKey(target)
 
+		if (!external && !this.exists(target)) this.writeHeld(target)
+
 		for (const relationship of edit.all()) {
 			if (
 				relationship.type === type &&
@@ -936,11 +1036,16 @@ export class PackageWriter {
 				const external = options?.external === true
 				const to = external ? target : target.startsWith("/") ? target.slice(1) : target
 
-				return options?.id === undefined
-					? this.relate(source, to, type, external)
-					: this.relationshipsOf(source).add(type, to, external, options.id)
+				if (options?.id === undefined) return this.relate(source, to, type, external)
+				if (!external && !this.exists(to)) this.writeHeld(to)
+
+				return this.relationshipsOf(source).add(type, to, external, options.id)
 			},
-			has: part => this.exists(part.startsWith("/") ? part.slice(1) : part),
+			has: part => {
+				const name = part.startsWith("/") ? part.slice(1) : part
+
+				return this.exists(name) || this.writeHeld(name)
+			},
 			relate: (target, type, external) =>
 				made(
 					this.relate(
@@ -953,7 +1058,14 @@ export class PackageWriter {
 			target: rId => {
 				const relationship = this.relationshipsOf(ownerName).byId(rId)
 
-				return relationship === undefined || relationship.external ? undefined : `/${relationship.target}`
+				if (relationship !== undefined) return relationship.external ? undefined : `/${relationship.target}`
+
+				// One a pasted element names that the save relates once it writes the part (restoreMedia).
+				const held = this.deck === undefined ? undefined : releasedMedia.get(this.deck)?.get(partKey(ownerName))?.get(rId)
+
+				return held === undefined || held.external === true
+					? undefined
+					: `/${held.name.startsWith("/") ? held.name.slice(1) : held.name}`
 			},
 			removePart: part => this.remove(part.startsWith("/") ? part.slice(1) : part),
 			replacePart: (part, content) => {
@@ -1283,19 +1395,53 @@ export class PackageWriter {
 		}
 	}
 
+	// A part a paste carried (or a save let go of) that the package written lacks: added from its held bytes under its
+	// own name, with what is held for it as an owner, once a part this save writes relates it (an edit of a pasted chart
+	// or diagram before any save stored it). A held part as restored parts are: an edit's version may replace it.
+	private writeHeld(name: string): boolean {
+		const deck = this.deck
+		const held = deck === undefined ? undefined : releasedMediaBytes(deck, name)
+
+		if (deck === undefined || held === undefined || !this.claim(name)) return false
+
+		this.add(name, held.contentType, held.bytes)
+		this.restored.add(partKey(name))
+
+		if (!this.scratch) noteRestoredMedia(deck, name)
+
+		const owned = releasedMedia.get(deck)?.get(partKey(name))
+
+		if (owned !== undefined && owned.size > 0) {
+			this.addedSource(name)
+			this.seed(
+				name,
+				[...owned.keys()].map(id => ({ id }))
+			)
+			this.restoreMedia(name, "", name, true)
+		}
+
+		return true
+	}
+
 	// Released media `owner`'s written markup (`text`) names again (an undo put the shape back): related under their
 	// ids, a part that left the package added again from its held bytes, under its own name where it is free. Carried
 	// relationships (carryRelationship) are written the same way. `from`: the part whose held relationships these are
 	// (a copy's source slide; the owner itself otherwise).
-	restoreMedia(owner: string, text: string, from: string = owner): void {
-		const byId = this.deck === undefined ? undefined : releasedMedia.get(this.deck)?.get(partKey(from))
+	// A part added here that a carried tree holds relationships for (a pasted chart's workbook, style and colours) is
+	// given them all, whatever its markup names, and the parts they reach are added the same way.
+	restoreMedia(owner: string, text: string, from: string = owner, all = false): void {
+		const deck = this.deck
+		const byId = deck === undefined ? undefined : releasedMedia.get(deck)?.get(partKey(from))
 
-		if (byId === undefined) return
+		if (deck === undefined || byId === undefined) return
 
 		const edit = this.relationshipsOf(owner)
+		const restored: string[] = []
 
 		for (const [id, media] of byId) {
-			if (!text.includes(`"${id}"`) || edit.byId(id) !== undefined) continue
+			const named = all || text.includes(`"${id}"`) || (media.with !== undefined && text.includes(`"${media.with}"`))
+
+			if (!named || edit.byId(id) !== undefined) continue
 
 			if (media.external === true) {
 				edit.restore(media.type, media.name, id, true)
@@ -1310,11 +1456,24 @@ export class PackageWriter {
 
 				name = this.claim(name) ? name : this.allocate(undefined, media.contentType, name)
 				this.add(name, media.contentType, media.bytes)
-				noteRestoredMedia(this.deck as object, name)
+				if (!this.scratch) noteRestoredMedia(deck, name)
+
+				const held = releasedMedia.get(deck)?.get(partKey(media.name))
+
+				if (held !== undefined && held.size > 0) {
+					this.addedSource(name)
+					this.seed(
+						name,
+						[...held.keys()].map(each => ({ id: each }))
+					)
+					restored.push(name, media.name)
+				}
 			}
 
 			edit.restore(media.type, name, id)
 		}
+
+		for (let at = 0; at < restored.length; at += 2) this.restoreMedia(restored[at] ?? "", "", restored[at + 1], true)
 	}
 
 	// The base parts emits unrelated (PartsApi.unrelate) that nothing relates now, removed with what only they kept.

@@ -408,6 +408,8 @@ async function translate(odf: OdfPackage, options: OdtTranslateOptions): Promise
 
 	const endState = translator.blockState()
 
+	translator.endBody()
+
 	// Comment ranges of the body with no office:annotation-end end with it.
 	translator.closeOpenAnnotations(body)
 
@@ -420,7 +422,14 @@ async function translate(odf: OdfPackage, options: OdtTranslateOptions): Promise
 	body.finish(translator.pages.finalSectPr())
 	body.writer.add("</w:body></w:document>")
 
-	return { ok: true, translation: { ...assemble(odf, translator, body, origins, originsExact, floatsOnPage, gap, title), endState } }
+	return {
+		ok: true,
+		translation: {
+			...assemble(odf, translator, body, origins, originsExact, floatsOnPage, gap, title),
+			endState,
+			...(translator.tableSpacing.size === 0 ? {} : { tableSpacing: translator.tableSpacing })
+		}
+	}
 }
 
 const BODY = encodeUtf8("body")
@@ -481,6 +490,17 @@ function assemble(
 		)
 		override("word/numbering.xml", "numbering")
 		relate("numbering", "numbering.xml")
+
+		const numberingRelationships = translator.lists.numberingRelationships()
+
+		if (numberingRelationships.length > 0) {
+			parts.set(
+				"word/_rels/numbering.xml.rels",
+				encodeUtf8(
+					`${XML_DECLARATION}<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${numberingRelationships.join("")}</Relationships>`
+				)
+			)
+		}
 	}
 
 	const defaults = translator.sheet.defaults.get("paragraph")?.properties.get("paragraph")?.attributes

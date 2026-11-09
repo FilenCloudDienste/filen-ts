@@ -633,8 +633,11 @@ class Paginator {
 	private openGeometry: PageGeometry | undefined = undefined
 	private column = 0
 	// Where the section's part of the open page began (undefined until its first step there; null when it
-	// cannot be laid out again: it began inside a table): to balance its columns.
+	// cannot be laid out again: it began inside a table): to balance its columns, or to align it vertically
+	// around obstacles that stay.
 	private balanceStart: BalanceStart | null | undefined = undefined
+	// What the last step's run of the flow ended with.
+	private lastStatus: FlowStatus = FlowStatus.DONE
 	// Each column of the page has notes of its own (the page began in a section with columns); the lowest
 	// content of the column being filled.
 	private notesPerColumn = false
@@ -814,7 +817,7 @@ class Paginator {
 			this.column === 0 &&
 			this.flowIndex === 0 &&
 			flow.region === Region.BODY &&
-			(this.geometry?.columnX.length ?? 1) > 1
+			((this.geometry?.columnX.length ?? 1) > 1 || (this.pageSection === this.sectionIndex && aligned(this.section)))
 		) {
 			const state = flow.snapshot()
 
@@ -842,6 +845,7 @@ class Paginator {
 
 		this.contentBottom = Math.max(this.contentBottom, flow.y)
 		this.columnBottom = Math.max(this.columnBottom, flow.y)
+		this.lastStatus = status
 
 		switch (status) {
 			case FlowStatus.DONE:
@@ -1322,20 +1326,20 @@ class Paginator {
 			for (let k = 0; k < BALANCE_STEPS && high - low > 0.5; k++) {
 				const middle = (low + high) / 2
 
-				if (this.fillColumns(start, flow, middle, geometry.columnX.length)) high = middle
+				if (this.fillColumns(start, flow, middle, geometry.columnX.length) === FlowStatus.DONE) high = middle
 				else low = middle
 			}
 
-			if (!this.fillColumns(start, flow, high, geometry.columnX.length))
+			if (this.fillColumns(start, flow, high, geometry.columnX.length) !== FlowStatus.DONE)
 				this.fillColumns(start, flow, this.bodyBottom, geometry.columnX.length)
 		} finally {
 			this.engine.yieldAt = yieldAt
 		}
 	}
 
-	// Lays the section's part of the page out from `start` into its columns ending at `bottom`; whether it
-	// all fitted.
-	private fillColumns(start: BalanceStart, flow: BlockFlow, bottom: number, columns: number): boolean {
+	// Lays the section's part of the page out from `start` into its columns from sectionTop to `bottom`; what
+	// the last column ended with (DONE: it all fitted).
+	private fillColumns(start: BalanceStart, flow: BlockFlow, bottom: number, columns: number): FlowStatus {
 		this.page.rollback(start.mark)
 		this.footnotes.load(start.notes)
 		this.exclusions.count = start.exclusions
@@ -1351,10 +1355,11 @@ class Paginator {
 			const status = flow.run(this.area)
 
 			this.contentBottom = Math.max(this.contentBottom, flow.y)
+			this.columnBottom = Math.max(this.columnBottom, flow.y)
 
-			if (status === FlowStatus.DONE) return true
+			if (status === FlowStatus.DONE) return status
 
-			if ((status !== FlowStatus.OVERFLOW && status !== FlowStatus.COLUMN_BREAK) || this.column + 1 >= columns) return false
+			if ((status !== FlowStatus.OVERFLOW && status !== FlowStatus.COLUMN_BREAK) || this.column + 1 >= columns) return status
 
 			if (this.notesPerColumn) this.closeColumnNotes()
 
@@ -1876,16 +1881,79 @@ class Paginator {
 
 	// Section vertical alignment (w:vAlign) on pages of one section.
 	private verticalAlign(page: PageOutput): void {
-		const align = this.pageProps.vAlign
+		if (!aligned(this.pageProps) || this.pageSection !== this.sectionIndex) return
 
-		if ((align !== "center" && align !== "bottom") || this.pageSection !== this.sectionIndex) return
+		const dy = this.alignShift(this.contentBottom)
 
-		const free = this.bodyBottom - this.footnotes.reserved - this.contentBottom
+		if (dy <= EPSILON) return
 
-		if (free <= EPSILON) return
+		// Objects placed on the page or its margins stay (pinned when placed). When the text wraps around one of
+		// them or the header's or footer's, Word lays it out again in its new place.
+		if ((!page.fixedWraps && this.headerFooterWraps.count === 0) || !this.alignAgain(dy)) page.moveText(dy)
+	}
 
-		// Objects placed on the page or its margins stay (pinned when placed).
-		page.moveText(align === "center" ? free / 2 : free)
+	// How far section vertical alignment moves text ending at `bottom` (laid out from sectionTop).
+	private alignShift(bottom: number): number {
+		const free = this.bodyBottom - this.footnotes.reserved - bottom
+
+		return this.pageProps.vAlign === "center" ? free / 2 : free
+	}
+
+	// Lays the page's text out again `dy` lower, then with the height that took, or less low while it no longer
+	// ends the page where it did (bisected); false when it cannot be laid out again.
+	private alignAgain(dy: number): boolean {
+		const start = this.balanceStart
+		const flow = this.flows[0]
+		const geometry = this.geometry
+		const end = flow?.snapshot()
+
+		if (
+			start === undefined ||
+			start === null ||
+			flow !== start.body ||
+			this.flows.length !== 1 ||
+			geometry === undefined ||
+			end === undefined
+		)
+			return false
+
+		const status = this.lastStatus
+		const top = this.sectionTop
+		const columns = geometry.columnX.length
+		const yieldAt = this.engine.yieldAt
+		// The lowest shift known to end the page where it did, and the highest one known not to.
+		let good = 0
+		let bad = Infinity
+		let laid = 0
+
+		// Each try runs to its end (see balanceColumns).
+		this.engine.yieldAt = Infinity
+
+		try {
+			for (let round = 0; round < ALIGN_ROUNDS && Math.abs(dy - good) > ALIGN_TOLERANCE && dy > EPSILON; round++) {
+				laid = dy
+				this.sectionTop = top + dy
+
+				if (this.fillColumns(start, flow, this.bodyBottom, columns) === status && sameEnd(flow.snapshot(), end)) {
+					good = dy
+					dy = Math.min(this.alignShift(this.contentBottom - dy), (good + bad) / 2)
+				} else {
+					// Going around the obstacles it no longer fits: as low as it still does.
+					bad = dy
+					dy = (good + bad) / 2
+				}
+			}
+
+			if (laid !== good) {
+				this.sectionTop = top + good
+				this.fillColumns(start, flow, this.bodyBottom, columns)
+			}
+		} finally {
+			this.engine.yieldAt = yieldAt
+		}
+
+		// Not tried: too small a shift to lay out again for.
+		return laid > 0
 	}
 
 	// Line numbers in the margin (w:lnNumType), counting body lines outside tables.
@@ -3133,6 +3201,28 @@ const LINE_NUMBER_RUN = { styleId: "LineNumber" }
 
 // Halvings of the column bottom when balancing columns (to under a pixel on any page).
 const BALANCE_STEPS = 12
+
+// Layouts again for section vertical alignment around obstacles that stay (to under a pixel of a full page
+// when bisecting), and how close it gets.
+const ALIGN_ROUNDS = 12
+const ALIGN_TOLERANCE = 0.5
+
+// The section aligns its pages' text vertically (w:vAlign; "both" is laid out as top).
+function aligned(section: ResolvedSectionProps): boolean {
+	return section.vAlign === "center" || section.vAlign === "bottom"
+}
+
+// Two flow states stand at the same place (outside tables).
+function sameEnd(a: FlowSnapshot | undefined, b: FlowSnapshot): boolean {
+	return (
+		a !== undefined &&
+		a.index === b.index &&
+		a.inParagraph === b.inParagraph &&
+		a.item === b.item &&
+		a.offset === b.offset &&
+		a.rows === b.rows
+	)
+}
 
 // Where a section's part of a page began, to lay it out again.
 interface BalanceStart {

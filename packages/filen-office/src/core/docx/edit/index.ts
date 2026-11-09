@@ -126,10 +126,13 @@ export {
 	offeredParagraphStyles,
 	protectionMode,
 	protectionOf,
+	setDocumentProtection,
 	writeProtectionOf,
 	type DocxDocumentProtection,
 	type DocxProtection,
+	type DocxProtectionEdit,
 	type DocxProtectionMode,
+	type DocxProtectionSetting,
 	type DocxWriteProtection
 } from "./protection"
 export {
@@ -137,6 +140,7 @@ export {
 	legacyPasswordVerifier,
 	protectionHashInputs,
 	readProtectionHash,
+	type DocumentProtectionHash,
 	type ProtectionHash,
 	type ProtectionHashName,
 	type ProtectionHashRead
@@ -163,15 +167,18 @@ export type {
 } from "./snapshot/index"
 export {
 	STORY_FIND_LIMIT,
+	findInStories,
 	findInStory,
 	findPattern,
 	matchHolds,
 	replaceAll,
 	replaceMatches,
 	selectMatch,
+	type DocumentMatch,
 	type ReplaceAllResult,
 	type StoryFindOptions,
-	type StoryMatch
+	type StoryMatch,
+	type StorySearch
 } from "./find"
 export { FormatResolver, alignmentOf, type ListKind, type RunToggle } from "./formats"
 export { RunBases, formattingMarks, type RunBase } from "./formatting"

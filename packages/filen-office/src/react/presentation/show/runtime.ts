@@ -189,6 +189,8 @@ interface Prepared {
 	readonly fallback: boolean
 	// Media that play over more than their own slide (p:cMediaNode numSld): slides played over, by shape id.
 	readonly spans: ReadonlyMap<number, number>
+	// Show without narration: the shapes whose recorded narration is never played (empty otherwise).
+	readonly narration: ReadonlySet<number>
 	// A medium was taken off it to play on (its targets are placed again when it is shown).
 	taken: boolean
 }
@@ -333,6 +335,29 @@ function mediaSpans(timing: TimingTree | undefined): ReadonlyMap<number, number>
 	}
 
 	return spans
+}
+
+const NO_SHAPES: ReadonlySet<number> = new Set()
+
+// The shapes a slide's timing plays as recorded narration (p:audio isNarration, ECMA-376 §19.5.1).
+function narrationShapes(timing: TimingTree | undefined): ReadonlySet<number> {
+	if (timing === undefined) return NO_SHAPES
+
+	const shapes = new Set<number>()
+	const stack: TimeNode[] = [timing.root]
+
+	for (let node = stack.pop(); node !== undefined; node = stack.pop()) {
+		if (node.kind === "behavior") {
+			const behavior = node.behavior
+
+			if (behavior.type === "audio" && behavior.isNarration === true && behavior.target.kind === "shape")
+				shapes.add(behavior.target.shape)
+		}
+
+		stack.push(...node.ctn.children, ...(node.ctn.subTnLst ?? []))
+	}
+
+	return shapes.size === 0 ? NO_SHAPES : shapes
 }
 
 type Listeners = {
@@ -1271,6 +1296,7 @@ export class ShowPlayer implements ShowController {
 			painted: undefined,
 			fallback,
 			spans: mediaSpans(source?.timing),
+			narration: this.props.options.withoutNarration === true ? narrationShapes(source?.timing) : NO_SHAPES,
 			taken: false
 		}
 
@@ -1606,11 +1632,15 @@ export class ShowPlayer implements ShowController {
 		if (media.size === 0) return
 
 		const shapes = playing.prepared.source?.layers.shapes
+		const narration = playing.prepared.narration
 
 		for (const state of states) {
 			if (state.media === undefined) continue
 
 			const shape = shapes?.[state.layer] ?? -1
+
+			if (narration.has(shape)) continue
+
 			const handle: ShowMediaHandle | undefined = media.get(shape)
 			const key = JSON.stringify(state.media)
 

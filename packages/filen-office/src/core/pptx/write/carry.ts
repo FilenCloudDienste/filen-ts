@@ -1,5 +1,5 @@
 import { partKey, type Relationship, Relationships } from "../../opc/index"
-import type { CarriedRelationship } from "../../presentation/edit/ops"
+import type { CarriedPart, CarriedRelationship } from "../../presentation/edit/ops"
 import { refused, type Refused } from "../../presentation/model"
 import { Namespaces, NodeKind, XmlEditor, parseXml, type XmlDocument } from "../../xml/index"
 import { carryRelationship, heldRelationshipIds, heldRelationships } from "./parts"
@@ -100,8 +100,33 @@ function sameTarget(relationship: Relationship, type: string, target: string, ex
 	)
 }
 
+// The data part's drawing reference (dsp:dataModelExt@relId, MS-ODRAWXML §2.3.4: an id of the slide's relationships)
+// renamed by `rename`; undefined when it names none of them.
+function renameDrawingReference(bytes: Uint8Array, rename: ReadonlyMap<string, string>): Uint8Array {
+	if (rename.size === 0) return bytes
+
+	const document = parseXml(bytes)
+	const editor = new XmlEditor(document)
+
+	for (let node = 0; node < document.count; node++) {
+		if (document.kinds[node] !== NodeKind.Element || document.localName(node) !== "dataModelExt") continue
+
+		for (const attribute of document.attributes(node)) {
+			const to = attribute.name === "relId" ? rename.get(attribute.value) : undefined
+
+			if (to !== undefined) editor.setAttribute(node, "relId", to)
+		}
+	}
+
+	return editor.changed ? editor.serialize() : bytes
+}
+
+const DIAGRAM_DATA = /\/diagramData$/u
+
 // The relationships given to the slide and the markup renamed to the ids they took. A relationship the slide has under
-// the same id keeps it; one whose id the slide holds for another target takes the next free "rIdN".
+// the same id keeps it; one whose id the slide holds for another target takes the next free "rIdN". A carried tree
+// (a pasted chart, diagram, embedded object or ink) is named anew in this deck, part by part, and each part is given the
+// relationships it had (held for it as their owner until a save writes it); a redo keeps the names it took.
 export function carryRelationships(
 	input: CarryInput,
 	raws: readonly Uint8Array[],
@@ -128,14 +153,23 @@ export function carryRelationships(
 		return id
 	}
 	const rename = new Map<string, string>()
-	const out: CarriedRelationship[] = []
+	const placedOut: { relationship: CarriedRelationship; id: string; target: string; tree?: CarriedPart[]; carry: boolean }[] = []
 	const seen = new Set<string>()
 
 	for (const relationship of relationships) {
 		const external = relationship.external === true
+		const tree = relationship.tree
 
 		if (!ID.test(relationship.id) || seen.has(relationship.id)) return refused("malformed", "a pasted relationship id")
 		if (relationship.target === "") return refused("malformed", "a pasted relationship target")
+		if (
+			tree !== undefined &&
+			(external ||
+				relationship.bytes === undefined ||
+				tree.length === 0 ||
+				partKey(tree[0]?.name ?? "") !== partKey(relationship.target))
+		)
+			return refused("malformed", "a pasted part tree")
 
 		seen.add(relationship.id)
 
@@ -153,8 +187,44 @@ export function carryRelationships(
 		if (!external && relationship.bytes === undefined && !input.has(target))
 			return refused("stale", `the pasted part ${relationship.target} is not in the deck`)
 
+		let named: CarriedPart[] | undefined
+
+		if (tree !== undefined) {
+			// Every part of the tree under a name of this deck (the target's taken above), its links to them renamed.
+			const names = new Map<string, string>([[partKey(relationship.target), target]])
+
+			for (const part of tree.slice(1)) {
+				if (names.has(partKey(part.name))) return refused("malformed", "a pasted part tree names a part twice")
+
+				names.set(partKey(part.name), placed ? part.name : input.name(part.name))
+			}
+
+			named = []
+
+			for (const part of tree) {
+				const links: CarriedPart["links"][number][] = []
+
+				for (const link of part.links) {
+					if (link.external === true) {
+						links.push({ id: link.id, type: link.type, target: link.target, external: true })
+
+						continue
+					}
+
+					const to = names.get(partKey(link.target))
+
+					if (to === undefined || !ID.test(link.id)) return refused("malformed", "a pasted part tree relates outside itself")
+
+					links.push({ id: link.id, type: link.type, target: to })
+				}
+
+				named.push({ name: names.get(partKey(part.name)) ?? part.name, contentType: part.contentType, bytes: part.bytes, links })
+			}
+		}
+
 		const base = input.relationships.byId(relationship.id)
 		let id = relationship.id
+		let carry = false
 
 		if (base === undefined || !sameTarget(base, relationship.type, target, external)) {
 			const ownSame =
@@ -165,22 +235,63 @@ export function carryRelationships(
 
 			if (base !== undefined || (taken.has(id) && !ownSame)) id = free()
 
-			carryRelationship(input.deck, input.part, id, {
-				type: relationship.type,
-				target,
-				external,
-				...(relationship.contentType === undefined ? {} : { contentType: relationship.contentType }),
-				...(relationship.bytes === undefined ? {} : { bytes: relationship.bytes })
-			})
 			taken.add(id)
+			carry = true
 		}
 
 		if (id !== relationship.id) rename.set(relationship.id, id)
 
-		out.push({ ...relationship, id, target })
+		placedOut.push({ relationship, id, target, ...(named === undefined ? {} : { tree: named }), carry })
 	}
 
+	const out: CarriedRelationship[] = []
+
 	try {
+		for (const entry of placedOut) {
+			const { relationship, id, target } = entry
+			// A diagram's data part names its drawing by the slide's id for it.
+			const tree = entry.tree?.map(part =>
+				DIAGRAM_DATA.test(relationship.type) && part.name === target
+					? { ...part, bytes: renameDrawingReference(part.bytes, rename) }
+					: part
+			)
+			const bytes = tree?.[0]?.bytes ?? relationship.bytes
+			const accompanies = relationship.with === undefined ? undefined : (rename.get(relationship.with) ?? relationship.with)
+
+			if (entry.carry) {
+				carryRelationship(input.deck, input.part, id, {
+					type: relationship.type,
+					target,
+					external: relationship.external === true,
+					...(relationship.contentType === undefined ? {} : { contentType: relationship.contentType }),
+					...(bytes === undefined ? {} : { bytes }),
+					...(accompanies === undefined ? {} : { with: accompanies })
+				})
+			}
+
+			// Each part of the tree holds its own relationships, with the bytes of the parts they reach.
+			for (const part of tree ?? [])
+				for (const link of part.links) {
+					const reached = link.external === true ? undefined : tree?.find(each => each.name === link.target)
+
+					carryRelationship(input.deck, part.name, link.id, {
+						type: link.type,
+						target: link.target,
+						external: link.external === true,
+						...(reached === undefined ? {} : { bytes: reached.bytes, contentType: reached.contentType })
+					})
+				}
+
+			out.push({
+				...relationship,
+				id,
+				target,
+				...(bytes === undefined ? {} : { bytes }),
+				...(tree === undefined ? {} : { tree }),
+				...(accompanies === undefined ? {} : { with: accompanies })
+			})
+		}
+
 		return { raws: raws.map(raw => renameRelationshipIds(raw, rename)), relationships: out }
 	} catch {
 		return refused("malformed", "pasted markup")

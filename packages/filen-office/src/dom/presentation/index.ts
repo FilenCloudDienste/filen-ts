@@ -12,6 +12,7 @@ export {
 	type BitmapLike,
 	type ClipPart,
 	type ClipPartsResult,
+	type ClipSlidesResult,
 	type ClipRequest,
 	type ClipResult,
 	type CommandResult,

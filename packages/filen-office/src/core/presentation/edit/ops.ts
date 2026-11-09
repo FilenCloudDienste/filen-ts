@@ -85,6 +85,15 @@ export interface RawPart {
 	readonly absent?: readonly string[]
 }
 
+// A slide of another deck as a save writes a copy of it (pptx: core/pptx/write/splice.ts exportSlides): its parts, the
+// slide first, its relationships to its layout and notes master still naming its deck's; its layout's
+// ST_SlideLayoutType and name; its notes' body, for a deck without a notes master of its own.
+export interface ImportedSlide {
+	readonly parts: readonly RawPart[]
+	readonly layout: { readonly type?: string; readonly name?: string }
+	readonly notes?: TextBody
+}
+
 export type SlideOp =
 	// `ref` is allocated by the page's session mirror or by apply (absent); `at` is the index in deck.slides.
 	| { readonly family: "slide"; readonly kind: "add"; readonly at: number; readonly layout: SlideRef; readonly ref?: SlideRef }
@@ -106,6 +115,17 @@ export type SlideOp =
 				readonly jumps?: readonly JumpRewrite[]
 			}[]
 	  }
+	// Slides of another deck pasted at `at`, each on this deck's layout that matches its own (PowerPoint's "Use
+	// Destination Theme"). As applied, the op carries the slides' refs and the layouts they took (a redo gives them the
+	// same).
+	| {
+			readonly family: "slide"
+			readonly kind: "import"
+			readonly at: number
+			readonly slides: readonly ImportedSlide[]
+			readonly refs?: readonly SlideRef[]
+			readonly layouts?: readonly SlideRef[]
+	  }
 	| { readonly family: "slide"; readonly kind: "move"; readonly slides: readonly SlideRef[]; readonly to: number }
 	| { readonly family: "slide"; readonly kind: "hide"; readonly slides: readonly SlideRef[]; readonly hidden: boolean }
 	| { readonly family: "slide"; readonly kind: "setLayout"; readonly slide: SlideRef; readonly layout: SlideRef }
@@ -125,6 +145,22 @@ export interface CarriedRelationship {
 	readonly external?: boolean
 	readonly bytes?: Uint8Array
 	readonly contentType?: string
+	// A part the pasted element owns (a chart, a diagram's parts, an embedded object, ink): the target first (its bytes
+	// the relationship's), then every part it reaches. The slide is given a copy of its own under new names, as
+	// PowerPoint pastes them, never the original's part.
+	readonly tree?: readonly CarriedPart[]
+	// The id of the relationship whose target names this one (a diagram's data part naming its drawing by
+	// dsp:dataModelExt@relId): related with it, though no pasted markup names it.
+	readonly with?: string
+}
+
+// A part of a carried tree and the relationships it has (`target`: another part of the tree by its name, or an
+// external URL).
+export interface CarriedPart {
+	readonly name: string
+	readonly contentType: string
+	readonly bytes: Uint8Array
+	readonly links: readonly { readonly id: string; readonly type: string; readonly target: string; readonly external?: boolean }[]
 }
 
 // One element of a paste: markup read as a new element of the slide (pptx: the shape written out with its edits when

@@ -22,8 +22,9 @@ function isColor(value: unknown): value is ColorModel {
 export function checkShow(deck: Deck, show: ShowSettings): Refused | undefined {
 	if (!KINDS.has(show.kind)) return refused("malformed", `show kind ${String(show.kind)}`)
 
-	for (const flag of [show.loop, show.showNarration, show.showAnimation, show.useTimings])
+	for (const flag of [show.loop, show.showAnimation, show.useTimings])
 		if (typeof flag !== "boolean") return refused("malformed", "show flag")
+	if (show.showNarration !== undefined && typeof show.showNarration !== "boolean") return refused("malformed", "show flag")
 
 	const range = show.range
 
@@ -56,11 +57,11 @@ export function checkShow(deck: Deck, show: ShowSettings): Refused | undefined {
 			: undefined
 }
 
-// ODF presentation:settings (§9.6) has no kiosk mode, narration, pen colour or range end: a range runs from its start
+// ODF presentation:settings (§9.6) has no kiosk mode, show without narration, pen colour or range end: a range runs from its start
 // page to the last page, and a pause is the one between loops.
 export function checkOdpShow(deck: Deck, show: ShowSettings): Refused | undefined {
 	if (show.kind === "kiosk") return refused("unsupported", "kiosk mode in ODF")
-	if (show.showNarration) return refused("unsupported", "narration in ODF")
+	if (show.showNarration === false) return refused("unsupported", "a show without narration in ODF")
 	if (show.penColor !== undefined) return refused("unsupported", "a pen colour in ODF")
 	if (show.range.kind === "range" && show.range.end !== deck.slides.length)
 		return refused("unsupported", "a slide range ending before the last slide in ODF")

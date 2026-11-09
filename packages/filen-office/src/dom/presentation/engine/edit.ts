@@ -2,8 +2,10 @@ import { prepareOdpPictureOp } from "../../../core/odp/write/emit/picture"
 import { prepareChartOp, type ChartPartSource } from "../../../core/presentation/edit/apply/chart"
 import { clearDormantNotes, dormantNotesOfBody, dormantNotesOfOrigin, setDormantNotes } from "./dormantNotes"
 import { notesTarget } from "../../../core/presentation/notes"
-import { issuedPartNames, releasedMediaBytes } from "../../../core/pptx/write/parts"
+import { carriedPart, issuedPartNames, releasedMediaBytes } from "../../../core/pptx/write/parts"
+import { noteIssuedNames } from "../../../core/presentation/issuedNames"
 import { carryRelationships, withHeldRelationships } from "../../../core/pptx/write/carry"
+import { importedSlideParts } from "../../../core/pptx/write/importSlide"
 import { notesBoxOf, prepareReview } from "./review"
 import { proveOdpSlide } from "../../../core/odp/write/proof"
 import { odpSourceReading } from "../../../core/odp/write/session"
@@ -371,6 +373,7 @@ function referencesOf(relationships: Relationships): PartReference[] {
 }
 
 const XML_PART = /\.xml$/iu
+const XML_CONTENT = /[+/]xml$/iu
 
 // A part's references: the ones held for its relationships entry when the entry is unchanged (same CRC-32 and size;
 // an in-memory package's entries carry no CRC and are read), else read.
@@ -535,6 +538,8 @@ function newMediaName(state: EditState, deck: Deck, parts: PptxParts, like: stri
 		if (taken.has(partKey(candidate))) continue
 
 		state.allocatedParts.add(candidate)
+		// Never given to another part by a save before the paste's own save writes it.
+		noteIssuedNames(deck, [candidate])
 
 		return candidate
 	}
@@ -788,8 +793,8 @@ function contextFor(
 
 			return shape === undefined ? refused("malformed", "held shape markup") : shape
 		},
-		carry: (slide, raws, carried) =>
-			carryRelationships(
+		carry: (slide, raws, carried) => {
+			const result = carryRelationships(
 				{
 					deck,
 					part: slide.part,
@@ -799,7 +804,26 @@ function contextFor(
 				},
 				raws,
 				carried
-			),
+			)
+
+			if (isRefused(result)) return result
+
+			// A carried tree's XML parts (a chart, a diagram's parts) read as the package's are: the frame reading them
+			// back, the render and the chart and diagram tools find them before any save writes them.
+			for (const relationship of result.relationships)
+				for (const part of relationship.tree ?? []) {
+					if (parts.document(part.name) !== undefined || !XML_CONTENT.test(part.contentType)) continue
+					if (part.bytes.length > parts.budgets.xmlPartBytes) return refused("tooLarge", `the pasted part ${part.name}`)
+
+					try {
+						parts.adopt(part.name, parseXml(part.bytes))
+					} catch {
+						return refused("malformed", `the pasted part ${part.name}`)
+					}
+				}
+
+			return result
+		},
 		rawParts(slide, removed) {
 			// A held list stands for the slide only while its held document is the node's live source: once a save wrote
 			// the slide and the rebase moved its source into the package, the package's parts are the slide's.
@@ -854,6 +878,21 @@ function contextFor(
 			}
 
 			return out
+		},
+		importSlide(ref, held, layout) {
+			const node = deck.nodes.get(layout)
+
+			if (node?.kind !== "layout") return refused("notFound", `layout ${String(layout)}`)
+
+			// The deck's notes master once its package has it (one the session made has no part yet to relate to).
+			const notesMaster = deck.notesMaster === undefined ? undefined : parts.partOf(deck.notesMaster)
+			const imported = importedSlideParts(held, {
+				layout: node.part,
+				placeholders: node.shapes.flatMap(shape => (shape.ph === undefined ? [] : [{ type: shape.ph.type, idx: shape.ph.idx }])),
+				...(notesMaster === undefined || !parts.opc.has(notesMaster) ? {} : { notesMaster })
+			})
+
+			return isRefused(imported) ? imported : this.readSlides(ref, imported)
 		},
 		readSlides(ref, held) {
 			const slidePart = held[0]
@@ -930,7 +969,7 @@ function contextFor(
 		diagramDocument: part =>
 			part.startsWith(RAW_PREFIX)
 				? state.raw.get(part)?.document
-				: parts.opc.has(part) || heldRestorePart(state, deck, part) !== undefined
+				: parts.opc.has(part) || heldRestorePart(state, deck, part) !== undefined || carriedPart(deck, part) !== undefined
 					? parts.document(part)
 					: undefined,
 		holdDiagram: (document, name) => {
@@ -1187,6 +1226,12 @@ async function prepare(
 		if (op.kind === "duplicate" || op.kind === "setLayout" || op.kind === "reset") slides.add(op.slide)
 	}
 
+	// Slides of another deck take a layout of the master of the slide they follow: it and the layouts read first.
+	if (op.family === "slide" && op.kind === "import") {
+		for (const ref of [deck.slides[op.at - 1], deck.slides[op.at]]) if (ref !== undefined) await parse(ref)
+		for (const ref of deck.layouts) if (!deck.nodes.has(ref)) await parts.slide(ref, slicing)
+	}
+
 	// A paste names no shape before it applies: its slide is read (its relationships, its scope) first.
 	if (op.family === "shape" && op.kind === "paste") slides.add(op.slide)
 
@@ -1244,7 +1289,13 @@ async function prepare(
 	}
 
 	// A picture put into a diagram whose data holds pictures of its own: that data part's relationships name them.
-	for (const part of diagramPicturePartsOf(deck, op)) await relationshipsOf(state, parts, part)
+	for (const part of diagramPicturePartsOf(deck, op)) {
+		// A pasted diagram's data no save stored yet relates its pictures through what the paste carried for it.
+		if (!parts.opc.has(part) && carriedPart(deck, part) !== undefined)
+			cacheOf(state, parts).relationships.set(partKey(part), withHeldRelationships(deck, part, new Relationships([])))
+
+		await relationshipsOf(state, parts, part)
+	}
 
 	// A chart op's chart part, its embedded workbook, a new workbook's cells, an inserted chart's workbook.
 	await prepareChartOp(deck, op, chartPartSource(session, parts), slicing)
@@ -2095,11 +2146,28 @@ export function chartPartSource(session: EngineSession, parts: PptxParts): Chart
 	}
 	const opc = parts.opc
 
+	// A chart a paste carried (its workbook, its style) that no save wrote yet.
+	const carried = (name: string): ReturnType<typeof carriedPart> => (opc.has(name) ? undefined : carriedPart(session.deck, name))
+
 	return {
 		opc: {
-			entry: name => opc.entry(name) ?? restoredEntry(restored(name)),
-			read: async (name, slicing) => (opc.has(name) ? opc.read(name, slicing) : (restored(name)?.bytes ?? opc.read(name, slicing))),
+			entry: name => opc.entry(name) ?? restoredEntry(carried(name) ?? restored(name)),
+			read: async (name, slicing) =>
+				opc.has(name) ? opc.read(name, slicing) : ((carried(name) ?? restored(name))?.bytes ?? opc.read(name, slicing)),
 			relationships: async name => {
+				const pasted = carried(name)
+
+				if (pasted !== undefined)
+					return new Relationships(
+						pasted.relationships.map(relationship => ({
+							id: relationship.id,
+							type: relationship.type,
+							target: relationship.name,
+							external: relationship.external,
+							partName: relationship.external ? undefined : withoutSlash(relationship.name)
+						}))
+					)
+
 				const held = opc.has(name) ? undefined : restored(name)
 
 				if (held === undefined) return opc.relationships(name)
@@ -2113,7 +2181,11 @@ export function chartPartSource(session: EngineSession, parts: PptxParts): Chart
 	}
 }
 
-function restoredEntry(part: RawPart | undefined): { readonly uncompressedSize: number } | undefined {
+function withoutSlash(name: string): string {
+	return name.startsWith("/") ? name.slice(1) : name
+}
+
+function restoredEntry(part: { readonly bytes: Uint8Array } | undefined): { readonly uncompressedSize: number } | undefined {
 	return part === undefined ? undefined : { uncompressedSize: part.bytes.length }
 }
 

@@ -321,9 +321,13 @@ export class PageOutput {
 	// Ranges that keep their place when the page's text moves (moveText): objects positioned on the page or
 	// its margins. PIN_INTS each: from and to of lines, graphics, objects, clips and turns.
 	private pins: number[] = []
+	// The text wraps around something positioned on the page or its margins: section vertical alignment lays
+	// the text out again rather than moving it (kept through rollbacks: at worst laid out again for nothing).
+	fixedWraps = false
 
 	reset(): void {
 		this.pins.length = 0
+		this.fixedWraps = false
 		this.text.reset()
 		this.graphicCount = 0
 		this.objectCount = 0

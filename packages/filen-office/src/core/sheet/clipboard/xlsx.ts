@@ -24,6 +24,6 @@ export const xlsxClipboardHtmlFeature = defineSheetFeature<XlsxDocument>({
 		}
 	},
 	queries: {
-		copyHtml: { run: (context, request) => copyHtml(context.doc, request.sheet, request.range) }
+		copyHtml: { run: (context, request) => copyHtml(context.doc, request.sheet, request.range, request.cut === true) }
 	}
 })

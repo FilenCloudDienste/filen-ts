@@ -15,6 +15,7 @@ import { installPresentationRealm } from "../dom/presentation/services"
 import { inThreadSheetHost } from "../dom/sheet/host"
 import { exportSheetPdf } from "../react/sheet/print/pdfExport"
 import { CORPUS_DIR } from "./corpusDir"
+import { runVeraPdf } from "./oracles/veraPdf"
 import { pdfAssets } from "./docxPdfFixtures"
 import { HmtxMeasurer, nodeFontAssets as layoutFontAssets, nodeFontHost } from "./layoutFixtures"
 import { deckPdf, installTestRealm, openDeck } from "./presentationExportFixtures"
@@ -26,10 +27,20 @@ import { budget } from "./timing"
 // laid out and painted (exportDocxPdf), workbooks printed whole (exportSheetPdf), decks written by the PDF job. Each
 // export either yields a complete PDF with the model's page count, or is refused with a typed reason Office also stops
 // at; it never throws. With qpdf on the PATH (or FILEN_OFFICE_QPDF), every PDF must also pass `qpdf --check` cleanly.
+// With FILEN_OFFICE_VERAPDF naming veraPDF's CLI (the nightly office-corpus job), a smaller sample is exported and each
+// PDF must pass veraPDF's PDF/UA-1 profile, but for the rules UA_ALLOWED names for its source.
 
-// Files per directory, evenly spread over its sorted names, and the largest source taken (CPU and RAM bound).
-const PER_DIRECTORY = 8
+const VERAPDF = process.env["FILEN_OFFICE_VERAPDF"] || undefined
+
+// Files per directory, evenly spread over its sorted names, and the largest source taken (CPU and RAM bound). veraPDF
+// starts a JVM per file, hence its smaller sample.
+const PER_DIRECTORY = VERAPDF === undefined ? 8 : 3
 const MAX_SOURCE_BYTES = 1_500_000
+
+// Sources whose export cannot conform to PDF/UA-1 for a reason of their content, keyed "<directory>/<name>": the
+// veraPDF rules ("<clause>-<testNumber>" of ISO 14289-1) the export may fail, with why. An entry must still fail each of
+// its rules, so a fix removes it.
+const UA_ALLOWED: Readonly<Record<string, { readonly rules: readonly string[]; readonly reason: string }>> = {}
 
 const WORD = ["docx", "docm", "dotx", "odt"] as const
 const SHEET = ["xlsx", "xlsm", "xltx", "ods"] as const satisfies readonly SheetFileKind[]
@@ -141,7 +152,7 @@ async function deckPdfOf(bytes: Uint8Array, format: "pptx" | "odp"): Promise<Out
 }
 
 const QPDF = qpdfBinary()
-const scratch = QPDF === undefined ? "" : mkdtempSync(join(tmpdir(), "pdfexportcorpus-"))
+const scratch = QPDF === undefined && VERAPDF === undefined ? "" : mkdtempSync(join(tmpdir(), "pdfexportcorpus-"))
 const TAIL = new TextEncoder().encode("%%EOF")
 
 afterAll(() => {
@@ -173,16 +184,24 @@ async function expectValidPdf(outcome: Extract<Outcome, { kind: "pdf" }>, label:
 		await task.destroy()
 	}
 
-	if (QPDF === undefined) return
+	if (scratch === "") return
 
 	const path = join(scratch, "out.pdf")
 
 	writeFileSync(path, bytes)
 
-	// qpdf exits 0 only when clean (2 on errors, 3 on warnings).
-	const check = spawnSync(QPDF, ["--check", path], { encoding: "utf8" })
+	if (QPDF !== undefined) {
+		// qpdf exits 0 only when clean (2 on errors, 3 on warnings).
+		const check = spawnSync(QPDF, ["--check", path], { encoding: "utf8" })
 
-	expect(check.status, `${label}: ${check.stdout}${check.stderr}`).toBe(0)
+		expect(check.status, `${label}: ${check.stdout}${check.stderr}`).toBe(0)
+	}
+
+	if (VERAPDF !== undefined) {
+		expect(runVeraPdf(VERAPDF, "ua1", path).failedRules, `${label}: PDF/UA-1 rules failed`).toEqual(
+			UA_ALLOWED[label]?.rules.toSorted() ?? []
+		)
+	}
 }
 
 async function check(label: string, outcome: Promise<Outcome>): Promise<void> {
@@ -206,6 +225,14 @@ describe("PDF export of a corpus sample", () => {
 
 	afterAll(() => {
 		installPresentationRealm(undefined)
+	})
+
+	it.skipIf(VERAPDF === undefined)("allows PDF/UA-1 failures only for sampled sources", () => {
+		for (const key of Object.keys(UA_ALLOWED)) {
+			const [directory = "", name = ""] = key.split("/")
+
+			expect(corpusSample(directory), key).toContain(name)
+		}
 	})
 
 	for (const directory of WORD)

@@ -331,6 +331,7 @@ describe("stopping document protection", () => {
 
 		expect(documentProtectionOf(await openDocxEditContext(plain, await buildDocxModel(plain)))).toEqual({
 			edit: "forms",
+			formatting: false,
 			password: undefined
 		})
 

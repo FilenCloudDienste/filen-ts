@@ -195,6 +195,39 @@ describe("show keys", () => {
 		expect(controller.calls).toEqual(["black", "next"])
 	})
 
+	it("hides the pointer on Ctrl+H (Ctrl on a Mac too), toggles it on A or = and returns it to automatic on Mod+A", () => {
+		const changes: string[] = []
+		const ink = createInkStore()
+		const pointer = (change: string): void => {
+			changes.push(change)
+		}
+		const keys = createShowKeys({ controller: () => undefined, ink, apple: false, pointer })
+		const mac = createShowKeys({ controller: () => undefined, ink, apple: true, pointer })
+
+		const hide = key("KeyH", { ctrlKey: true })
+
+		expect(keys.onKeyDown(hide)).toBe(true)
+		expect(hide.prevented).toBe(true)
+		keys.onKeyDown(key("KeyA"))
+		keys.onKeyDown(key("Equal"))
+		keys.onKeyDown(key("KeyA", { repeat: true }))
+		ink.setTool("pen")
+		keys.onKeyDown(key("KeyA", { ctrlKey: true }))
+		expect(ink.getSnapshot().tool).toBe("none")
+		mac.onKeyDown(key("KeyH", { ctrlKey: true }))
+		mac.onKeyDown(key("KeyA", { metaKey: true }))
+		expect(mac.onKeyDown(key("KeyH", { metaKey: true }))).toBe(false)
+		expect(changes).toEqual(["hide", "toggle", "toggle", "automatic", "hide", "automatic"])
+
+		// A typed slide number is unaffected.
+		const controller = spyController()
+		const numbered = createShowKeys({ controller: () => controller, apple: false, pointer })
+
+		numbered.onKeyDown(key("Digit3"))
+		numbered.onKeyDown(key("Enter"))
+		expect(controller.calls).toEqual(["goto 2"])
+	})
+
 	it("follows rebound keys", () => {
 		const controller = spyController()
 		const keys = createShowKeys({

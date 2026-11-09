@@ -3,6 +3,7 @@ import type { DocxEditContext } from "../../edit/context"
 import { decodeUtf8 } from "../../../xml/index"
 import { documentNotePosition } from "../../layout/notes"
 import { Ns } from "../../model/namespaces"
+import { documentProtectionHashAttributes } from "../../protection/hash"
 import { partReader, type PartReader } from "../../model/reader"
 import { trackingPersisted } from "../../review/track"
 import { docSectionChanges, sectionStoryReferenced } from "../../stories/sections"
@@ -13,7 +14,7 @@ import type { PartContributor, SaveParts, WrittenStories } from "./index"
 
 // settings.xml: the track switch (w:trackRevisions) where the editor turned it from what the file has, the
 // even/odd headers switch (w:evenAndOddHeaders), mirror margins (w:mirrorMargins) and where notes go (w:pos of w:footnotePr / w:endnotePr) as the
-// body's section edits set them, and w:documentProtection switched off once the user stopped it; nothing else of the part changes. A package without settings gets a part holding only those. A notes part the save makes gets no
+// body's section edits set them, and w:documentProtection as the user started it, or switched off once they stopped it; nothing else of the part changes. A package without settings gets a part holding only those. A notes part the save makes gets no
 // separator list here: its separator notes carry w:type, and layout reads the list as the source has it. The
 // contributor also claims the body's section edits (written with the stories, see write/sections.ts) and the
 // header and footer stories sections refer to.
@@ -233,9 +234,21 @@ export const settingsParts: PartContributor = {
 			})
 		}
 
+		const change = context.protectionChange
+
+		// Protection started in the session: the element as Word writes it, replacing what the file had.
+		if (change !== undefined && change !== "stopped")
+			changes.set("documentProtection", names =>
+				names.empty("documentProtection", [
+					["edit", change.edit],
+					["formatting", change.formatting ? "1" : undefined],
+					["enforcement", "1"],
+					...(change.password === undefined ? [] : documentProtectionHashAttributes(change.password))
+				])
+			)
 		// Stop Protection: the element stays with its restriction choices, enforcement off and the hash dropped
 		// (the password went with the protection).
-		if (context.protectionUnlocked === true && model.settings.documentProtection?.enforced === true)
+		else if ((change === "stopped" || context.protectionUnlocked === true) && model.settings.documentProtection?.enforced === true)
 			changes.set("documentProtection", (names, existing) => {
 				const attr = (local: string): string | undefined => existing?.reader.attr(existing.node, Ns.W, local)
 

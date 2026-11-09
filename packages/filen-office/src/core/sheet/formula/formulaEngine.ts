@@ -18,7 +18,15 @@ import type { AxisEdit } from "../model/edits"
 import type { SheetLocale } from "../protocol"
 import { runSliced, type SliceClock } from "../../slicing"
 import { cellName } from "../refs/cellRef"
-import { formulaInputs, quoteSheetNames, sameSheet, sheetNameNeedsQuotes, spannedReferences } from "../refs/formulaRefs"
+import {
+	formulaInputs,
+	quoteSheetNames,
+	renameSheetInFormula,
+	sameSheet,
+	sheetNameNeedsQuotes,
+	shiftFormula,
+	spannedReferences
+} from "../refs/formulaRefs"
 import { MAX_COLUMNS, MAX_ROWS } from "../model/model"
 import type { SizeAxis } from "../sizes/sizes"
 import { registerSheetFunctions } from "./functions"
@@ -617,6 +625,10 @@ export class FormulaEngine {
 	// The cells whose formula calls SUBTOTAL or AGGREGATE, by engine sheet id (row * MAX_COLUMNS + col): calculated
 	// again when rows are hidden or shown (rowsChanged).
 	private readonly totals = new Map<number, Set<number>>()
+	// The cells given a formula with a 3-D reference spelled sheet by sheet (spanned), by engine sheet id
+	// (row * MAX_COLUMNS + col): the formula as written, given again when rows or columns of a sheet it spans move,
+	// where the engine would move that sheet's part of the span alone.
+	private readonly spans = new Map<number, Map<number, string>>()
 	// Each engine sheet id's grid index while the first build calculates (sheetIds is filled after it).
 	private building: number[] | null = null
 	// Where its whole-column and whole-row references end (wholeRanges.ts).
@@ -805,6 +817,7 @@ export class FormulaEngine {
 			width: sheet.rows.reduce((width, row) => Math.max(width, row.length), 0)
 		}))
 		const missing: { sheet: number; row: number; col: number }[] = []
+		const spannedCells: { sheet: number; row: number; col: number; formula: string }[] = []
 
 		sheets.forEach((sheet, index) => {
 			const fallbacks = new Map<number, RawCellContent>()
@@ -824,7 +837,12 @@ export class FormulaEngine {
 
 					const reason = unreadable(value, extents, index, this.reach, undefined, this.link)
 
-					if (reason === null || held === undefined) return
+					if (reason === null || held === undefined) {
+						if (value !== given && typeof given === "string")
+							spannedCells.push({ sheet: index, row: rowIndex, col, formula: given })
+
+						return
+					}
 
 					row[col] = this.holding(new HeldResult(fallbacks.get(rowIndex * MAX_COLUMNS + col) ?? unreadableShows(reason)))
 					missing.push({ sheet: index, row: rowIndex, col })
@@ -917,6 +935,12 @@ export class FormulaEngine {
 				})
 			})
 		})
+
+		for (const cell of spannedCells) {
+			const id = this.sheetIds[cell.sheet]
+
+			if (id !== undefined) this.noteSpan(id, cell.row, cell.col, cell.formula)
+		}
 
 		let pending = sheets.flatMap((sheet, index) => sheet.formulas.flatMap(cell => this.pending(index, cell)))
 
@@ -1456,6 +1480,84 @@ export class FormulaEngine {
 		this.totals.set(id, moved)
 	}
 
+	// Keeps the registry of cells with 3-D references in step with what a cell is given: the formula as written, null
+	// for anything else.
+	private noteSpan(id: number, row: number, col: number, formula: string | null): void {
+		if (formula === null) {
+			this.spans.get(id)?.delete(row * MAX_COLUMNS + col)
+
+			return
+		}
+
+		let cells = this.spans.get(id)
+
+		if (cells === undefined) {
+			cells = new Map()
+			this.spans.set(id, cells)
+		}
+
+		cells.set(row * MAX_COLUMNS + col, formula)
+	}
+
+	// After rows or columns of sheet `id` moved in the engine: each formula with a 3-D reference moved as the file's is
+	// (shiftFormula), and given again where a span of it takes in that sheet, whose part of it the engine moved alone.
+	// Run with evaluation suspended.
+	private respan(id: number, edit: AxisEdit): void {
+		if (this.spans.size === 0) return
+
+		const target = this.engine.getSheetName(id) ?? ""
+		const edited = this.sheetNames.findIndex(name => sameSheet(name, target))
+		const given: { address: SimpleCellAddress; formula: string }[] = []
+
+		for (const [owner, cells] of this.spans) {
+			if (cells.size === 0) continue
+
+			const own = this.engine.getSheetName(owner) ?? ""
+			const next = new Map<number, string>()
+
+			for (const [key, formula] of cells) {
+				let row = Math.floor(key / MAX_COLUMNS)
+				let col = key % MAX_COLUMNS
+
+				if (owner === id) {
+					const index = edit.axis === "rows" ? row : col
+
+					if (edit.type === "delete" && index >= edit.at && index < edit.at + edit.count) continue
+
+					const moved = index < edit.at ? index : edit.type === "insert" ? index + edit.count : index - edit.count
+
+					if (edit.axis === "rows") row = moved
+					else col = moved
+				}
+
+				const text = `=${shiftFormula(formula.slice(1), own, target, edit).formula}`
+
+				next.set(row * MAX_COLUMNS + col, text)
+
+				const spansEdited = formulaInputs(text.slice(1)).refs.some(ref => {
+					if (ref.lastSheet === null || ref.sheet === null) return false
+
+					const first = this.sheetNames.findIndex(name => sameSheet(name, ref.sheet ?? ""))
+					const last = this.sheetNames.findIndex(name => sameSheet(name, ref.lastSheet ?? ""))
+
+					return first >= 0 && last >= 0 && edited >= Math.min(first, last) && edited <= Math.max(first, last)
+				})
+
+				if (spansEdited) given.push({ address: { sheet: owner, row, col }, formula: text })
+			}
+
+			this.spans.set(owner, next)
+		}
+
+		for (const { address, formula } of given) {
+			const content = spanned(formula, this.sheetNames)
+
+			// Spelled out when written, so again now; one that no longer is (it cannot be) keeps what the engine moved.
+			if (content === formula) this.noteSpan(address.sheet, address.row, address.col, null)
+			else this.engine.setCellContents(address, content)
+		}
+	}
+
 	// Rows were hidden or shown (by hand or by a filter): every SUBTOTAL and AGGREGATE is calculated again, and what
 	// changed reported as `set` reports it.
 	rowsChanged(): RecalculatedCell[] {
@@ -1658,6 +1760,8 @@ export class FormulaEngine {
 	}
 
 	private heldBy(address: SimpleCellAddress): void {
+		this.noteSpan(address.sheet, address.row, address.col, null)
+
 		const sheet = this.sheetIndex(address.sheet)
 
 		if (sheet >= 0) this.held?.(sheet, address.row, address.col)
@@ -2054,6 +2158,8 @@ export class FormulaEngine {
 			// Any cell written, a held one too, can move where whole columns and rows end.
 			if (cell.content !== null && cell.content !== undefined && cell.content !== "") this.whole.written(id, cell.row, cell.col)
 
+			this.noteSpan(id, cell.row, cell.col, null)
+
 			try {
 				const given = spanned(cell.content, this.sheetNames)
 				const read =
@@ -2086,6 +2192,8 @@ export class FormulaEngine {
 					const content = this.contentOf(given)
 
 					this.engine.setCellContents(address, content)
+
+					if (given !== cell.content && typeof cell.content === "string") this.noteSpan(id, cell.row, cell.col, cell.content)
 
 					// A spilled array fills cells besides its own.
 					if (typeof content === "string" && content.startsWith("=") && this.engine.isCellPartOfArray(address)) this.whole.reset()
@@ -2200,6 +2308,8 @@ export class FormulaEngine {
 				if (axis === "rows") this.engine.addRows(id, [at, run])
 				else this.engine.addColumns(id, [at, run])
 			}
+
+			this.respan(id, { type: "insert", axis, at, count })
 		})
 
 		return [...changes.values()]
@@ -2226,6 +2336,8 @@ export class FormulaEngine {
 		const changes = yield* this.movingSteps(() => {
 			if (axis === "rows") this.engine.removeRows(id, [at, count])
 			else this.engine.removeColumns(id, [at, count])
+
+			this.respan(id, { type: "delete", axis, at, count })
 		})
 
 		yield* this.orphanedSpills(orphans, changes)
@@ -2303,6 +2415,7 @@ export class FormulaEngine {
 		this.sheetIds.pop()
 		this.sheetNames = this.sheetNames.slice(0, -1)
 		this.totals.delete(id)
+		this.spans.delete(id)
 		this.whole.reset()
 
 		for (const [key, entry] of this.spills) if (entry.address.sheet === id) this.spills.delete(key)
@@ -2326,12 +2439,17 @@ export class FormulaEngine {
 		const id = this.sheetIds[sheet]
 
 		if (id !== undefined) {
-			const before = (this.engine.getSheetName(id) ?? "").toUpperCase()
+			const was = this.engine.getSheetName(id) ?? ""
+			const before = was.toUpperCase()
 			const reach = this.reaches.get(before)
 
 			this.run(() => {
 				this.engine.renameSheet(id, name)
 			})
+
+			for (const cells of this.spans.values())
+				for (const [key, formula] of cells) cells.set(key, `=${renameSheetInFormula(formula.slice(1), was, name)}`)
+
 			this.whole.rename(before, name)
 			this.sheetNames = this.sheetNames.map((known, index) => (index === sheet ? name : known))
 			this.sheetsChanged = true
@@ -2516,6 +2634,26 @@ export class FormulaEngine {
 			...address,
 			sheet: ids[this.sheetIds.indexOf(address.sheet)] ?? address.sheet
 		})
+		const spans = new Map(this.spans)
+
+		this.spans.clear()
+		this.sheetIds.forEach((previous, index) => {
+			const cells = spans.get(previous)
+			const next = ids[index]
+
+			if (cells !== undefined && next !== undefined) this.spans.set(next, cells)
+		})
+
+		for (const cell of cells) {
+			const formula = typeof cell.content === "string" ? cell.content : null
+
+			this.noteSpan(
+				ids[sheet] ?? 0,
+				cell.row,
+				cell.col,
+				formula !== null && spanned(formula, this.sheetNames) !== formula ? formula : null
+			)
+		}
 
 		for (const address of holds) this.heldBy(remap(address))
 

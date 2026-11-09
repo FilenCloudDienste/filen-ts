@@ -1,9 +1,13 @@
 import {
+	legacyPasswordBytes,
+	legacyPasswordVerifier,
 	legacyVerifierText,
 	MAX_PROTECTION_SALT_BYTES,
 	MAX_PROTECTION_SPIN_COUNT,
 	protectionHashInputs,
-	type ProtectionHash
+	type DocumentProtectionHash,
+	type ProtectionHash,
+	type ProtectionHashName
 } from "../core/docx/protection/hash"
 import { constantTimeEqual, decodeBase64, encodeBase64, utf16LE } from "./encryption/bytes"
 import { OfficeCryptoError } from "./encryption/errors"
@@ -168,6 +172,29 @@ export interface LegacyProtectionHash {
 // upper-case hex of its little-endian bytes), spun as §2.4.2.4 says. The verifier is the input Word hashes for that
 // attribute set (ECMA-376 1st ed. Part 4 §2.15.1.28), so the document asks for the same password as the original.
 export async function hashLegacyProtectionKey(verifier: number, options: OfficeCryptoOptions = {}): Promise<LegacyProtectionHash> {
+	const { hash, salt, spinCount } = await hashVerifier(verifier, "SHA-1", options)
+
+	return { hash, salt, spinCount }
+}
+
+// The w:documentProtection hash Word 2013 and later write for `password` (Restrict Editing, Lock Tracking):
+// SHA-512 (cryptAlgorithmSid 14), a 16-byte salt and 100,000 spins over the password's legacy verifier as Word
+// writes its bytes (each UTF-16 unit's low byte, else its high one; truncated to 15, [MS-OFFCRYPTO] §2.3.7.4).
+// An empty password takes no hash: the protection is written without one, as Word does.
+export async function hashDocumentProtectionPassword(password: string, options: OfficeCryptoOptions = {}): Promise<DocumentProtectionHash> {
+	const bytes = legacyPasswordBytes(password)
+	const verifier = legacyPasswordVerifier(bytes[0] ?? new Uint8Array(0))
+
+	for (const form of bytes) form.fill(0)
+
+	return await hashVerifier(verifier, "SHA-512", options)
+}
+
+async function hashVerifier(
+	verifier: number,
+	algorithm: ProtectionHashName,
+	options: OfficeCryptoOptions
+): Promise<DocumentProtectionHash> {
 	const salt = randomBytes(LEGACY_PROTECTION_SALT_BYTES)
 	const encoded = utf16LE(legacyVerifierText(verifier >>> 0))
 	const first = new Uint8Array(salt.length + encoded.length)
@@ -177,13 +204,13 @@ export async function hashLegacyProtectionKey(verifier: number, options: OfficeC
 	encoded.fill(0)
 
 	const found = await spin(
-		{ algorithm: "SHA-1", hash: "", salt: "", spinCount: LEGACY_PROTECTION_SPIN_COUNT, input: "legacy" },
+		{ algorithm, hash: "", salt: "", spinCount: LEGACY_PROTECTION_SPIN_COUNT, input: "legacy" },
 		first,
 		turnsOf(options)
 	)
 
 	try {
-		return { hash: encodeBase64(found), salt: encodeBase64(salt), spinCount: LEGACY_PROTECTION_SPIN_COUNT }
+		return { algorithm, hash: encodeBase64(found), salt: encodeBase64(salt), spinCount: LEGACY_PROTECTION_SPIN_COUNT }
 	} finally {
 		found.fill(0)
 	}

@@ -20,7 +20,8 @@ export type DocxViewerCommand =
 	| { readonly type: "zoom.fitWidth" }
 	| { readonly type: "find.open" }
 	| { readonly type: "find.close" }
-	| { readonly type: "find.query"; readonly query: string; readonly caseSensitive?: boolean }
+	// Options left out keep the last search's.
+	| { readonly type: "find.query"; readonly query: string; readonly caseSensitive?: boolean; readonly wholeWord?: boolean }
 	| { readonly type: "find.next" }
 	| { readonly type: "find.previous" }
 
@@ -50,6 +51,8 @@ export interface DocxViewerState {
 		readonly open: boolean
 		readonly query: string
 		readonly caseSensitive: boolean
+		// Word's "Find whole words only".
+		readonly wholeWord: boolean
 		readonly count: number
 		// There are more matches than `count` (DOCX_FIND_LIMIT).
 		readonly capped: boolean
@@ -184,9 +187,15 @@ export function parseDocxViewerCommand(value: unknown): DocxViewerCommand | unde
 		case "find.query": {
 			const query: unknown = Reflect.get(value, "query")
 			const caseSensitive: unknown = Reflect.get(value, "caseSensitive")
+			const wholeWord: unknown = Reflect.get(value, "wholeWord")
 
 			return typeof query === "string" && query.length <= 1000
-				? { type, query, ...(typeof caseSensitive === "boolean" ? { caseSensitive } : {}) }
+				? {
+						type,
+						query,
+						...(typeof caseSensitive === "boolean" ? { caseSensitive } : {}),
+						...(typeof wholeWord === "boolean" ? { wholeWord } : {})
+					}
 				: undefined
 		}
 		default:

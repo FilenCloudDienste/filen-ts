@@ -969,9 +969,20 @@ function cut(area: RefArea, edit: AxisEdit): boolean {
 	return rowsAxis ? inRun(area.startRow) || inRun(area.endRow) : inRun(area.startCol) || inRun(area.endCol)
 }
 
+// Whether a reference in a formula on the edited sheet (`own`) or another one points into sheet `target` alone. A 3-D
+// reference does only when it spans `target` and no other: Excel moves one for rows or columns inserted or deleted on
+// every sheet it spans at once (grouped sheets), never for an edit on one of them, as a single area cannot point
+// differently into each.
+export function pointsInto(ref: FormulaRef, own: boolean, target: string): boolean {
+	if (ref.external || ref.area === null) return false
+	if (ref.sheet === null) return own
+
+	return sameSheet(ref.sheet, target) && (ref.lastSheet === null || sameSheet(ref.lastSheet, target))
+}
+
 // A formula on `ownSheet` after rows or columns of `target` were inserted or deleted, and whether the
-// deletion cut into one of its references. References into other workbooks and 3D references are left as
-// written.
+// deletion cut into one of its references. References into other workbooks, and 3-D references spanning sheets
+// besides `target` (pointsInto), are left as written.
 export function shiftFormula(formula: string, ownSheet: string, target: string, edit: AxisEdit): { formula: string; cut: boolean } {
 	const own = sameSheet(ownSheet, target)
 	let wasCut = false
@@ -981,7 +992,7 @@ export function shiftFormula(formula: string, ownSheet: string, target: string, 
 	}
 
 	const shifted = rewriteFormula(formula, ref => {
-		if (ref.external || ref.lastSheet !== null || ref.area === null || !(ref.sheet === null ? own : sameSheet(ref.sheet, target))) {
+		if (ref.area === null || !pointsInto(ref, own, target)) {
 			return undefined
 		}
 

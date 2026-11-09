@@ -1,4 +1,4 @@
-import type { Stroke } from "./displayList"
+import { PATH_COMMAND_COORDS, PathCommand, type Stroke } from "./displayList"
 
 // ST_CompoundLine (ECMA-376 Part 1 §20.1.10.15) as the lines a stroke draws across its width: [from, to] fractions
 // of the width, 0 at the edge outside the path and 1 at the edge inside it. The gaps between bands are unpainted.
@@ -79,4 +79,91 @@ export function compoundRadii(compound: Stroke["compound"], width: number, inset
 		})
 
 	return { pen: inset ? width * 2 : width, outer, inner, symmetric }
+}
+
+// One stroke of an outline's mask, centred on the path: it keeps what lies under it, or clears it.
+export interface MaskStroke {
+	readonly width: number
+	readonly keep: boolean
+}
+
+// How every painter draws a compound or inset outline: the full pen (dashed as the line is) shown only where the
+// mask keeps it. `outer` strokes go down in order over the whole path; `inner`, for bands that differ on the two
+// sides, then go down clipped to the path's interior after clearing it.
+export interface CompoundMask {
+	readonly pen: number
+	readonly outer: readonly MaskStroke[]
+	readonly inner: readonly MaskStroke[] | null
+}
+
+function maskStrokes(side: readonly BandRadii[]): MaskStroke[] {
+	const strokes: MaskStroke[] = []
+
+	for (const [far, near] of side) {
+		strokes.push({ width: far * 2, keep: true })
+
+		if (near > 0) strokes.push({ width: near * 2, keep: false })
+	}
+
+	return strokes
+}
+
+// The mask of a `width` line; undefined for one centred single line, which is stroked as is. `inset` only for
+// closed paths (see closedCommands).
+export function compoundMask(compound: Stroke["compound"], width: number, inset: boolean): CompoundMask | undefined {
+	if (!inset && compoundBands(compound).length === 1) return undefined
+
+	const radii = compoundRadii(compound, width, inset)
+
+	return { pen: radii.pen, outer: maskStrokes(radii.outer), inner: radii.symmetric ? null : maskStrokes(radii.inner) }
+}
+
+// Whether every subpath of a display-list command range is closed.
+export function closedCommands(commands: ArrayLike<number>, first: number, count: number): boolean {
+	const end = Math.min(commands.length, first + count)
+
+	if (first < 0 || end <= first || commands[end - 1] !== PathCommand.CLOSE) return false
+
+	for (let k = first + 1; k < end; k++) if (commands[k] === PathCommand.MOVE && commands[k - 1] !== PathCommand.CLOSE) return false
+
+	return true
+}
+
+// The bounds [minX, minY, maxX, maxY] of a command range's points and control points (which hold its curves);
+// undefined for none.
+export function commandBounds(
+	commands: ArrayLike<number>,
+	coords: ArrayLike<number>,
+	first: number,
+	count: number,
+	firstCoord: number
+): [number, number, number, number] | undefined {
+	let minX = Infinity
+	let minY = Infinity
+	let maxX = -Infinity
+	let maxY = -Infinity
+	let at = firstCoord
+	const end = Math.min(commands.length, first + count)
+
+	for (let k = Math.max(0, first); k < end && at >= 0; k++) {
+		const needed = PATH_COMMAND_COORDS[commands[k] ?? -1] ?? -1
+
+		if (needed < 0 || at + needed > coords.length) break
+
+		for (let c = at; c < at + needed; c += 2) {
+			const x = coords[c] ?? 0
+			const y = coords[c + 1] ?? 0
+
+			if (!Number.isFinite(x) || !Number.isFinite(y)) continue
+
+			minX = Math.min(minX, x)
+			minY = Math.min(minY, y)
+			maxX = Math.max(maxX, x)
+			maxY = Math.max(maxY, y)
+		}
+
+		at += needed
+	}
+
+	return minX <= maxX ? [minX, minY, maxX, maxY] : undefined
 }

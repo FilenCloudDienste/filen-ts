@@ -9,19 +9,22 @@ import {
 	type OdfStyleSheet,
 	type StyleScope
 } from "../odf/index"
-import { MarkupFlow, paragraph, type Flow, type ParagraphBlock } from "./flow"
+import { MarkupFlow, paragraph, type Block, type Flow, type ParagraphBlock, type RawBlock } from "./flow"
 import { Frames } from "./frames"
 import { listIndent, levelGeometry, Lists } from "./lists"
 import { Pages } from "./pages"
 import { modeRtl, paragraphProperties, runProperties, type Attributes, type PropsSink } from "./props"
 import { StyleMapper } from "./styles"
 import { translateTable } from "./tables"
-import type { OdtLossyReason } from "./types"
+import type { OdtLossyReason, OdtTableSpacing } from "./types"
 import { OdtScanError } from "./scan"
-import { esc, escText, PartWriter, REL } from "./wml"
+import { esc, escText, PartWriter, REL, twips } from "./wml"
 
 // Nested blocks and spans (each frame, table cell, note or list level adds about two).
 const MAX_NESTING = 128
+// The first pPr child w:spacing comes before (ECMA-376 Part 1 §17.3.1.26): w:ind ... w:cnfStyle.
+const AFTER_SPACING =
+	/<w:(?:ind|contextualSpacing|mirrorIndents|suppressOverlap|jc|textDirection|textAlignment|textboxTightWrap|outlineLvl|divId|cnfStyle)[\s/>]/u
 
 // The ODT body and stories as WordprocessingML. Blocks come from the body scanner a batch at a time (or from
 // styles.xml for headers and footers); the translator reads them through `document`/`namespaces`, which
@@ -277,6 +280,12 @@ export class Translator implements PropsSink {
 	readonly pendingAnchors: string[] = []
 	// A page break the last block asked for after itself (fo:break-after).
 	breakAfter = false
+	// Tables of the body with space above or below, by block index (OdtTranslation.tableSpacing); the body's last
+	// paragraph (its style name), and a table's space below waiting for the paragraph after it.
+	readonly tableSpacing = new Map<number, OdtTableSpacing>()
+	private lastParagraph: ParagraphBlock | undefined = undefined
+	private lastParagraphStyle: string | undefined = undefined
+	private spaceBelow: { readonly table: Block; readonly twips: number } | undefined = undefined
 	// The available width of the story being translated (points), for relative table widths.
 	readonly widths: number[] = []
 	// The direction a paragraph's "page" writing mode takes when a header or footer, table cell or frame sets it
@@ -292,7 +301,7 @@ export class Translator implements PropsSink {
 			tabsRelativeToIndent: settings.tabsRelativeToIndent,
 			...(settings.keepAtMost === undefined ? {} : { keepAtMost: settings.keepAtMost })
 		})
-		this.lists = new Lists(sheet)
+		this.lists = new Lists(sheet, resolver, href => this.frames.mediaPart(href))
 		this.pages = new Pages(this)
 		this.frames = new Frames(this)
 	}
@@ -325,11 +334,12 @@ export class Translator implements PropsSink {
 	}
 
 	// The state a top-level block of the body starts in, as a key: the master page it is on; undefined when it
-	// carries more than that (a page break or frames waiting for the next paragraph, an annotation or tracked change
-	// open, columns).
+	// carries more than that (a page break, a table's space below or frames waiting for the next paragraph, an
+	// annotation or tracked change open, columns).
 	blockState(): string | undefined {
 		if (
 			this.breakAfter ||
+			this.spaceBelow !== undefined ||
 			this.pendingAnchors.length > 0 ||
 			this.openAnnotations.size > 0 ||
 			this.insertion !== undefined ||
@@ -342,10 +352,12 @@ export class Translator implements PropsSink {
 	}
 
 	// Whether what was translated left nothing a later block reads (lists, notes, comments, relationships, ids,
-	// bookmarks, tracked changes, pictures, sections, header and footer parts) and ends in state `state`.
+	// bookmarks, tracked changes, pictures, sections, header and footer parts, a table's space that its neighbours
+	// carry) and ends in state `state`.
 	leftAsIn(state: string): boolean {
 		return (
 			this.lists.empty &&
+			this.tableSpacing.size === 0 &&
 			this.noteCount === 0 &&
 			this.endnoteCount === 0 &&
 			this.commentCount === 0 &&
@@ -790,15 +802,131 @@ export class Translator implements PropsSink {
 
 		// A paragraph ending inside a tracked insertion has its mark inserted too (ECMA-376 Part 1 §17.13.5.16): rejecting
 		// the insertion joins it with the next.
-		flow.add(
-			paragraph(
-				pPr,
-				insertion === undefined
-					? markRPr
-					: `<w:ins w:id="${this.id()}" w:author="${esc(insertion.author)}" w:date="${esc(insertion.date)}"/>${markRPr}`,
-				runs.result()
-			)
+		const block = paragraph(
+			pPr,
+			insertion === undefined
+				? markRPr
+				: `<w:ins w:id="${this.id()}" w:author="${esc(insertion.author)}" w:date="${esc(insertion.date)}"/>${markRPr}`,
+			runs.result()
 		)
+
+		if (flow.body) {
+			const below = this.spaceBelow
+
+			if (below !== undefined) {
+				this.spaceBelow = undefined
+
+				if (flow.last === below.table) this.addSpacing(block, styleName, below.twips, 0)
+				else this.lossy("tableSpacing")
+			}
+
+			this.lastParagraph = block
+			this.lastParagraphStyle = styleName
+		}
+
+		flow.add(block)
+	}
+
+	// A table: its space above and below (twips, fo:margin-top/bottom) go to the paragraphs beside it in the body, as
+	// LibreOffice adds them to those paragraphs' own (measured). WordprocessingML has no space around a table.
+	spaceTable(flow: Flow, table: RawBlock, top: number, bottom: number): void {
+		if (!flow.body || this.pages.body === undefined) {
+			if (top > 0 || bottom > 0) this.lossy("tableSpacing")
+
+			flow.add(table)
+
+			return
+		}
+
+		// The space below an earlier table that no paragraph took.
+		if (this.spaceBelow !== undefined) {
+			this.spaceBelow = undefined
+			this.lossy("tableSpacing")
+		}
+
+		if (top > 0) {
+			const last = flow.last
+
+			// A paragraph ending a section stays as it is: the table starts on a page of its own.
+			if (last !== undefined && last === this.lastParagraph && last.sectPr === "")
+				this.addSpacing(last, this.lastParagraphStyle, 0, top)
+			else this.lossy("tableSpacing")
+		}
+
+		flow.add(table)
+
+		if (top > 0 || bottom > 0) this.tableSpacing.set(this.pages.body.count - 1, { top, bottom })
+		if (bottom > 0) this.spaceBelow = { table, twips: bottom }
+	}
+
+	// The end of the body: a table's space below with no paragraph after it.
+	endBody(): void {
+		if (this.spaceBelow === undefined) return
+
+		this.spaceBelow = undefined
+		this.lossy("tableSpacing")
+	}
+
+	// Adds to a paragraph's space above and below (twips), both then its own.
+	private addSpacing(block: ParagraphBlock, styleName: string | undefined, before: number, after: number): void {
+		const spacing = /<w:spacing\b[^>]*\/>/u.exec(block.pPr)
+		const own = (name: string): number | undefined => {
+			const value = spacing === null ? undefined : new RegExp(`\\sw:${name}="(-?\\d+)"`, "u").exec(spacing[0])?.[1]
+
+			return value === undefined ? undefined : Number(value)
+		}
+		let ownBefore = own("before")
+		let ownAfter = own("after")
+
+		if (ownBefore === undefined || ownAfter === undefined) {
+			const inherited = this.inheritedSpacing(styleName)
+
+			ownBefore ??= inherited.before
+			ownAfter ??= inherited.after
+		}
+
+		const attributes = ` w:before="${ownBefore + before}" w:after="${ownAfter + after}"`
+
+		if (spacing === null) {
+			const at = AFTER_SPACING.exec(block.pPr)?.index
+
+			block.pPr =
+				at === undefined
+					? `${block.pPr}<w:spacing${attributes}/>`
+					: `${block.pPr.slice(0, at)}<w:spacing${attributes}/>${block.pPr.slice(at)}`
+
+			return
+		}
+
+		const rest = spacing[0].replace(/\sw:(?:before|after)="[^"]*"/gu, "").replace(/^<w:spacing/u, "")
+
+		block.pPr = `${block.pPr.slice(0, spacing.index)}<w:spacing${attributes}${rest}${block.pPr.slice(spacing.index + spacing[0].length)}`
+	}
+
+	// A paragraph style's space above and below as its translation gives them (twips): the nearest style of its chain
+	// setting either sets both (props.ts paragraphProperties), the other 0.
+	private inheritedSpacing(styleName: string | undefined): { readonly before: number; readonly after: number } {
+		const odf = styleName === undefined ? undefined : this.sheet.style("paragraph", styleName, this.scope)
+		const name = odf === undefined ? this.styles.defaultParagraphStyle : styleName
+		const chain = this.resolver.resolve("paragraph", name, this.scope).chain
+
+		for (let k = chain.length - 1; k >= 0; k--) {
+			const style = chain[k]
+			const own = style?.properties.get("paragraph")?.attributes
+
+			if (style === undefined || own === undefined || (!own.has("fo:margin-top") && !own.has("fo:margin-bottom"))) continue
+
+			const resolved =
+				style.isDefault || style.name === undefined
+					? own
+					: this.resolver.resolve("paragraph", style.name, this.scope).properties("paragraph").attributes
+			const side = (attribute: string): number =>
+				own.has(attribute) ? twips(Math.max(0, parseLength(resolved.get(attribute)) ?? parseLength(own.get(attribute)) ?? 0)) : 0
+
+			return { before: side("fo:margin-top"), after: side("fo:margin-bottom") }
+		}
+
+		return { before: 0, after: 0 }
 	}
 
 	// --- Inline content ---

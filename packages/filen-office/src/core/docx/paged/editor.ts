@@ -18,7 +18,9 @@ import {
 	type DocxEditorSnapshot,
 	type DocxMediaInfo,
 	type DocxRefusalReason,
-	type NewStoryKind
+	type NewStoryKind,
+	type StoryDoc,
+	type StorySearch
 } from "../edit/index"
 import { writesUnholdableText } from "../edit/commands/base"
 import { commandAllowed } from "../edit/protection"
@@ -181,6 +183,14 @@ export class PagedEditor {
 	private formattingMarksValue = false
 	private readonly codeToggles = new Set<Node>()
 	private readonly pendingStories = new Set<number>()
+	// Find across stories (searchStories): documents built for stories not entered (handed to their sessions
+	// when entered, so matches keep their positions), the stories on the pages in order as of `pages` (bumped
+	// with every pages event) and the list last returned.
+	private readonly searchBuilt = new Map<number, StoryDoc>()
+	private searchBuilder: DocxDocBuilder | undefined = undefined
+	private pagesVersion = 0
+	private searchOrder: { readonly pages: number; readonly headers: boolean; readonly stories: readonly number[] } | undefined = undefined
+	private searchList: readonly StorySearch[] | undefined = undefined
 	private readonly settledWaiters: (() => void)[] = []
 	private snapshotOf: { session: DocxEditorSnapshot; history: number; state: number; snapshot: DocxEditorSnapshot } | undefined =
 		undefined
@@ -293,6 +303,94 @@ export class PagedEditor {
 		return edited?.region === undefined ? undefined : edited
 	}
 
+	// The stories Word's Find with Search: All goes through, each with its document as it stands: the body, then
+	// the headers, footers, notes and text boxes laid out on the pages so far (as the pages show them: in the order
+	// of the page each first shows on), those enterStory enters and storyAt would. A story not entered is
+	// searched in a document built for it, never a session (kept until entered, which takes it, or until
+	// releaseSearch). The same list is returned while no story's document and no page changed.
+	searchStories(): readonly StorySearch[] {
+		const order = this.searchOrderNow()
+		const previous = this.searchList
+		const list: StorySearch[] = [{ story: this.body.session.story.story.index, doc: this.body.session.state.doc }]
+
+		for (const story of order) {
+			const doc = this.stories.get(story)?.session.state.doc ?? this.searchDoc(story)
+
+			if (doc !== undefined) list.push({ story, doc })
+		}
+
+		const same =
+			previous !== undefined &&
+			previous.length === list.length &&
+			list.every((entry, k) => {
+				const was = previous[k]
+
+				return was?.story === entry.story && was.doc === entry.doc
+			})
+
+		if (same) return previous
+
+		this.searchList = list
+
+		return list
+	}
+
+	// Drops the documents searchStories built (a find closed).
+	releaseSearch(): void {
+		this.searchBuilt.clear()
+		this.searchBuilder = undefined
+		this.searchOrder = undefined
+		this.searchList = undefined
+	}
+
+	private searchOrderNow(): readonly number[] {
+		const cached = this.searchOrder
+
+		if (cached?.pages === this.pagesVersion && cached.headers === this.headersHidden) return cached.stories
+
+		const context = this.body.session.context
+		const own = readOnlyReasons(context, this.body.session.story.story, false).length
+		const seen = new Set<number>()
+		const stories: number[] = []
+
+		for (const list of this.shown) {
+			if (list === undefined) continue
+
+			for (const box of regionsOf(list).boxes) {
+				if (seen.has(box.story)) continue
+
+				seen.add(box.story)
+
+				// Headers and footers are not shown in Mobile view; stories storyAt passes over are not entered.
+				const target = this.edits.model.stories[box.story]
+				const shown = !this.headersHidden || (box.region !== Region.HEADER && box.region !== Region.FOOTER)
+
+				if (shown && target !== undefined && ordinaryNote(target) && readOnlyReasons(context, target, false).length === own)
+					stories.push(box.story)
+			}
+		}
+
+		this.searchOrder = { pages: this.pagesVersion, headers: this.headersHidden, stories }
+
+		return stories
+	}
+
+	private searchDoc(story: number): Node | undefined {
+		const built = this.searchBuilt.get(story)
+
+		if (built !== undefined) return built.doc
+
+		const target = this.modelStory(story)
+
+		if (target === undefined) return undefined
+
+		const doc = (this.searchBuilder ??= new DocxDocBuilder(this.body.session.context)).build(target)
+
+		this.searchBuilt.set(story, doc)
+
+		return doc.doc
+	}
+
 	// Story `story` of the document's model; one edited blocks bring (a text box) is there once layout's view of
 	// them caught up.
 	private modelStory(story: number): Story | undefined {
@@ -322,7 +420,18 @@ export class PagedEditor {
 			textboxHolderLocked(holder.session.state.doc, holder.session.story.part, target)
 		}
 
-		return this.edited(new DocxEditorSession(this.body.session.context, { ...this.sessionOptions, story: target }))
+		// A document Find built for it is its session's (built alike: positions found in it hold).
+		const built = this.searchBuilt.get(story)
+
+		this.searchBuilt.delete(story)
+
+		return this.edited(
+			new DocxEditorSession(this.body.session.context, {
+				...this.sessionOptions,
+				story: target,
+				...(built === undefined ? {} : { built })
+			})
+		)
 	}
 
 	// Adds a story of `kind` (a new note, comment, header or footer) with one empty paragraph and returns its
@@ -538,6 +647,7 @@ export class PagedEditor {
 		this.listeners.clear()
 		this.refusedListeners.clear()
 		this.behind.length = 0
+		this.releaseSearch()
 
 		for (const resolve of this.settledWaiters.splice(0)) resolve()
 
@@ -1363,6 +1473,8 @@ export class PagedEditor {
 	}
 
 	private emit(event: PagedEditorEvent): void {
+		if (event.type === "pages") this.pagesVersion++
+
 		for (const listener of this.listeners) listener(event)
 	}
 

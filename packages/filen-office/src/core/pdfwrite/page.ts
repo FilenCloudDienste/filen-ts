@@ -256,6 +256,17 @@ export class PdfPage extends ContentBuilder {
 		return this.named(name.name, "gs")
 	}
 
+	// Masks what is painted next, until restoreState, by the luminosity `content` paints over `bbox` (current space).
+	async softMask(content: Uint8Array, bbox: readonly [number, number, number, number]): Promise<this> {
+		this.live()
+
+		const state = await this.writer.softMask(content, bbox)
+
+		this.extGStates.set(state.name, state.ref)
+
+		return this.named(state.name, "gs")
+	}
+
 	// Paints a gradient over the current clip (set one with a path and clip() first), inside q/Q.
 	async gradient(gradient: PdfGradient): Promise<void> {
 		this.live()

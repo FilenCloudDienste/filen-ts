@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { boxStats, histogramBins, quantile, squarify } from "../core/drawingml/chart/chartex"
+import { boxStats, chartexDrawable, histogramBins, quantile, squarify } from "../core/drawingml/chart/chartex"
 import { convertChart } from "../core/drawingml/chart/index"
 import { drawingTheme } from "../core/drawingml/color"
 import { DrawingList, ItemFloat, ItemInt, ItemKind, rgba, type DrawingText } from "../core/drawingml/displayList"
@@ -106,6 +106,23 @@ function filled(list: DrawingList, color: number): Box[] {
 const BLUE = rgba("4472C4")
 const ORANGE = rgba("ED7D31")
 const GRAY = rgba("A5A5A5")
+
+describe("chartexDrawable", () => {
+	it("draws a visible series of a drawn layout, not region maps, hidden or Pareto-only series, or c:chartSpace", () => {
+		const values = data(0, [["A", "B"]], [1, 2])
+
+		expect(chartexDrawable(part(values, seriesXml("waterfall", 0, "S")))).toBe(true)
+		expect(chartexDrawable(part(values, seriesXml("regionMap", 0, "S")))).toBe(false)
+		expect(chartexDrawable(part(values, seriesXml("treemap", 0, "S", "", ' hidden="1"')))).toBe(false)
+		expect(chartexDrawable(part(values, seriesXml("paretoLine", 0, "S")))).toBe(false)
+		expect(chartexDrawable(part(values, ""))).toBe(false)
+		expect(
+			chartexDrawable(
+				parseXml(new TextEncoder().encode('<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart"/>'))
+			)
+		).toBe(false)
+	})
+})
 
 describe("chartex statistics", () => {
 	it("computes quartiles as QUARTILE.EXC and QUARTILE.INC", () => {

@@ -19,8 +19,8 @@ import { Namespaces, NodeKind, XmlError, decodeUtf8, parseXml } from "../../xml/
 import { openOdp, type OdpOpen, type OdpParts } from "../read/document"
 import { packagePart } from "../read/fills"
 import { notesDiffer, slideDiffers } from "./meaning"
-import { withoutManifestEntries } from "./manifestPrune"
-import { odpSplice, sameCopied, withManifestEntries, type OdpSaveInput, type OdpSplice } from "./splice"
+import { withManifestEntries, withoutManifestEntries } from "./manifestPrune"
+import { odpSplice, sameCopied, type OdpSaveInput, type OdpSplice } from "./splice"
 import { isRefused } from "../../presentation/refusal"
 
 // Saving an ODP deck into its own source (§1.5.4): the splice (splice.ts) at revision R, proof gate 2, then the zip.

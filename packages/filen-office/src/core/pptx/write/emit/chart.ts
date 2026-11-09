@@ -70,7 +70,7 @@ function graphicXml(prefix: string, rId: string): string {
 	)
 }
 
-function newFrame(shape: ShapeNode, rId: string): EmitResult {
+export function newFrame(shape: ShapeNode, rId: string): EmitResult {
 	const xfrm = shape.xfrm
 
 	if (xfrm === undefined) return refused("malformed", "a new chart without its box")

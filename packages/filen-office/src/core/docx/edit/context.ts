@@ -3,7 +3,7 @@ import { XmlError, type XmlDocument } from "../../xml/index"
 import type { DocxModel, MaxIds, Story } from "../model/index"
 import { parseNumbering, type Numbering } from "../numbering/index"
 import { gateReasons, withGate, type DocxGateReason, type DocxPackage } from "../package"
-import { gateLifted, protectionMode, protectionOf, readOnlyExceptions } from "./protection"
+import { gateLifted, protectionMode, protectionOf, readOnlyExceptions, type DocxProtectionChange } from "./protection"
 import { bindingsKnown, partHasBindings } from "../forms/binding"
 import { PropsStore } from "../props/index"
 import { DocxStyles, PropertyResolver, parseStyles, styleSettings } from "../styles/index"
@@ -40,6 +40,8 @@ export interface DocxEditContext {
 	readonly newStories: Map<Story, NewStory>
 	// The document's protection was stopped for this session (EditContextParts.protectionUnlocked).
 	readonly protectionUnlocked?: boolean
+	// Protection set or stopped since (edit/protection.ts setDocumentProtection); undefined: as opened.
+	protectionChange?: DocxProtectionChange | undefined
 }
 
 // The initials a comment records for an author (w:initials): the first letter of each part of the name, at

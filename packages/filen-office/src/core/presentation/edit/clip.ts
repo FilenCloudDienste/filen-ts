@@ -2,7 +2,7 @@ import { EMU_PER_PX } from "../../drawingml/reader"
 import type { Format, ShapeNode, SlideNode, SlideRef, TextBody, Xfrm } from "../model"
 import { oneStep } from "./commands/batch"
 import { inDeckOrder } from "./commands/slide"
-import type { CarriedRelationship, DeckOp, OpOf, PastedShape, RawPart } from "./ops"
+import type { CarriedPart, CarriedRelationship, DeckOp, ImportedSlide, OpOf, PastedShape, RawPart } from "./ops"
 
 // Cut, Copy and Paste of shapes and slides, as PowerPoint does them. A clip is what the worker hands the page for a
 // copy (dom/presentation engine/clip.ts); the page keeps it (one app-wide clipboard, so a paste reaches another open
@@ -18,7 +18,9 @@ import type { CarriedRelationship, DeckOp, OpOf, PastedShape, RawPart } from "./
 
 // A relationship a clip's markup names, as the clip holds it: a part of the deck by name (its bytes asked for only when
 // a paste goes into another deck, clipParts), a part the copy made (an image an edit inserted and no save stored yet:
-// its `bytes`), or an external target. `jump`: a link to a slide of the clip's deck.
+// its `bytes`), or an external target. `jump`: a link to a slide of the clip's deck. `tree`: a part the copied object
+// owns (a chart, a diagram's parts, an embedded object, ink) with every part it reaches, as the copy found them; a
+// paste gives the slide copies of its own (ops.ts CarriedRelationship).
 export interface ClipRelationship {
 	readonly id: string
 	readonly type: string
@@ -28,6 +30,8 @@ export interface ClipRelationship {
 	readonly size?: number
 	readonly bytes?: Uint8Array
 	readonly jump?: true
+	readonly tree?: readonly CarriedPart[]
+	readonly with?: string
 }
 
 export interface ShapeClip {
@@ -54,6 +58,8 @@ export interface SlideClip {
 	readonly held?: readonly { readonly ref: SlideRef; readonly parts: readonly RawPart[]; readonly nodes?: readonly SlideNode[] }[]
 	// Each slide's paragraphs as text, for other apps.
 	readonly text: readonly (readonly string[])[]
+	// A cut's slides as a paste into another deck takes them (pptx), made when they were cut.
+	readonly foreign?: readonly ImportedSlide[]
 }
 
 export type PresentationClip = ShapeClip | SlideClip
@@ -107,6 +113,14 @@ export function clipPartNames(clip: ShapeClip): string[] {
 	]
 }
 
+// The parts a relationship's target owns, and the relationship naming it, as the paste carries them.
+function owns(relationship: ClipRelationship): Pick<CarriedRelationship, "tree" | "with"> {
+	return {
+		...(relationship.tree === undefined ? {} : { tree: relationship.tree }),
+		...(relationship.with === undefined ? {} : { with: relationship.with })
+	}
+}
+
 // Paste of copied shapes: one op. A clip from another deck pastes only between PresentationML decks (an ODP clip's
 // markup names its own document's styles), never with a link to one of its own slides, and with the bytes of every
 // part it names.
@@ -140,7 +154,8 @@ export function pasteShapesOp(clip: ShapeClip, target: ShapePasteTarget): OpOf<"
 				type: relationship.type,
 				target: relationship.target,
 				bytes: part.bytes,
-				contentType: part.contentType
+				contentType: part.contentType,
+				...owns(relationship)
 			})
 		}
 	} else {
@@ -152,7 +167,8 @@ export function pasteShapesOp(clip: ShapeClip, target: ShapePasteTarget): OpOf<"
 				...(relationship.external === true ? { external: true } : {}),
 				...(relationship.bytes === undefined
 					? {}
-					: { bytes: relationship.bytes, contentType: relationship.contentType ?? "application/octet-stream" })
+					: { bytes: relationship.bytes, contentType: relationship.contentType ?? "application/octet-stream" }),
+				...owns(relationship)
 			})
 	}
 
@@ -170,7 +186,7 @@ export function pasteShapesOp(clip: ShapeClip, target: ShapePasteTarget): OpOf<"
 }
 
 // Paste of copied slides after the slide at `after` (-1: first), as one step: slides of the deck duplicated, a cut's
-// slides that are no longer in it put back from what the cut held. A clip of another deck is not pasted here.
+// slides that are no longer in it put back from what the cut held. A clip of another deck pastes by importSlidesOp.
 export function pasteSlidesOps(clip: SlideClip, order: readonly SlideRef[], after: number, sameDeck: boolean): DeckOp[] | PasteRefusal {
 	if (!sameDeck) return "unsupported"
 	if (clip.slides.length === 0) return "notFound"
@@ -199,6 +215,14 @@ export function pasteSlidesOps(clip: SlideClip, order: readonly SlideRef[], afte
 	}
 
 	return oneStep(ops)
+}
+
+// Paste of another deck's slides (as it handed them over, ImportedSlide) after the slide at `after` (-1: first): one op,
+// each slide on this deck's layout that matches its own (PowerPoint's "Use Destination Theme").
+export function importSlidesOp(slides: readonly ImportedSlide[], order: readonly SlideRef[], after: number): DeckOp | PasteRefusal {
+	if (slides.length === 0) return "notFound"
+
+	return { family: "slide", kind: "import", at: Math.max(0, Math.min(order.length, after + 1)), slides }
 }
 
 // The slides a Cut or Copy in the slide list takes: the selection in deck order.

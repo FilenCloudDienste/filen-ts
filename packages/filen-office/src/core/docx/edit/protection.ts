@@ -25,7 +25,8 @@ import { sectionNode } from "../stories/sections"
 import { rowGrid } from "./tables/map"
 import type { DocxEditorSession } from "./session"
 import type { DocxGateReason } from "../package"
-import { readProtectionHash, type ProtectionHashRead } from "../protection/hash"
+import { wantReviewIndex } from "../review/index"
+import { documentProtectionHashRead, readProtectionHash, type DocumentProtectionHash, type ProtectionHashRead } from "../protection/hash"
 
 // Document protection that allows editing within limits (ECMA-376 Part 1 §17.15.1.29 w:documentProtection
 // with w:enforcement on): "forms" lets only content controls and legacy form fields change, plus the ranges an
@@ -36,7 +37,9 @@ import { readProtectionHash, type ProtectionHashRead } from "../protection/hash"
 // it is: editing within the limits needs no password. Word's Stop Protection: the app checks the password
 // (documentProtectionOf) and opens the document again with EditContextParts.protectionUnlocked, under which no
 // mode or formatting restriction applies and gate 0 reason "protected" is lifted; the save writes the element
-// with w:enforcement off and without its hash (write/parts/settings.ts).
+// with w:enforcement off and without its hash (write/parts/settings.ts). Protection that allows edits stops in
+// place too (setDocumentProtection), and Start Enforcing Protection and Lock Tracking set one in place, its
+// password hashed as Word does (dom/protection.ts hashDocumentProtectionPassword).
 
 export type DocxProtectionMode = "none" | "forms" | "comments" | "trackedChanges" | "readOnly"
 
@@ -50,8 +53,22 @@ export interface DocxProtection {
 
 export const NO_PROTECTION: DocxProtection = { mode: "none", forcesTracking: false, hashed: false }
 
+// Word's Restrict Editing > Start Enforcing Protection (and Lock Tracking: "trackedChanges" with a password), set in
+// the session (setDocumentProtection). `password`: undefined for none (dom/protection.ts hashes one).
+export type DocxProtectionEdit = Exclude<DocxProtectionMode, "none">
+
+export interface DocxProtectionSetting {
+	readonly edit: DocxProtectionEdit
+	// Limit formatting to the unlocked styles (w:formatting).
+	readonly formatting: boolean
+	readonly password?: DocumentProtectionHash
+}
+
+// What the session changed of the file's protection: one set, or the file's stopped.
+export type DocxProtectionChange = DocxProtectionSetting | "stopped"
+
 const LIMITED_MODES = new Set<string>(["forms", "comments", "trackedChanges"])
-const protections = new WeakMap<DocxEditContext, DocxProtection>()
+const protections = new WeakMap<DocxEditContext, { readonly change: DocxProtectionChange | undefined; readonly found: DocxProtection }>()
 
 // The mode an enforced w:documentProtection w:edit opens the document in ("none" for the view-only and
 // unprotected ones).
@@ -59,27 +76,76 @@ export function protectionMode(edit: string | undefined, enforced: boolean): Doc
 	return enforced && edit !== undefined && LIMITED_MODES.has(edit) ? (edit as DocxProtectionMode) : "none"
 }
 
+interface Enforced {
+	readonly edit: string | undefined
+	readonly formatting: boolean
+	readonly hashed: boolean
+	// Set in the session (not the file's).
+	readonly set: DocxProtectionSetting | undefined
+}
+
+// The protection that applies now: one set in the session, else the file's while enforced and not stopped.
+function enforcedProtection(context: DocxEditContext): Enforced | undefined {
+	const change = context.protectionChange
+
+	if (change !== undefined && change !== "stopped")
+		return { edit: change.edit, formatting: change.formatting, hashed: change.password !== undefined, set: change }
+	if (change === "stopped" || context.protectionUnlocked === true) return undefined
+
+	const facts = context.model.package.facts.documentProtection
+
+	return facts?.enforced === true ? { edit: facts.edit, formatting: facts.formatting, hashed: facts.hashed, set: undefined } : undefined
+}
+
 export function protectionOf(context: DocxEditContext): DocxProtection {
-	let found = protections.get(context)
+	const change = context.protectionChange
+	const cached = protections.get(context)
 
-	if (found === undefined) {
-		const protection = context.protectionUnlocked === true ? undefined : context.model.package.facts.documentProtection
-		// A read-only document gate 0 let through (ranges open to everyone in it): only those ranges change.
-		const mode =
-			protection === undefined
-				? "none"
-				: protection.enforced && protection.edit === "readOnly" && !context.gate.includes("protected")
-					? "readOnly"
-					: protectionMode(protection.edit, protection.enforced)
+	if (cached !== undefined && cached.change === change) return cached.found
 
-		found =
-			mode === "none"
-				? NO_PROTECTION
-				: Object.freeze({ mode, forcesTracking: mode === "trackedChanges", hashed: protection?.hashed ?? false })
-		protections.set(context, found)
-	}
+	const protection = enforcedProtection(context)
+	// A read-only document gate 0 let through (ranges open to everyone in it), or one made read-only in the session:
+	// only those ranges change.
+	const mode =
+		protection === undefined
+			? "none"
+			: protection.edit === "readOnly" && (protection.set !== undefined || !context.gate.includes("protected"))
+				? "readOnly"
+				: protectionMode(protection.edit, true)
+	const found: DocxProtection =
+		mode === "none"
+			? NO_PROTECTION
+			: Object.freeze({ mode, forcesTracking: mode === "trackedChanges", hashed: protection?.hashed ?? false })
+
+	protections.set(context, { change, found })
 
 	return found
+}
+
+// Starts protection (`setting`) or stops what applies (undefined) for the document `sessions` edit, at once and
+// without a password: the app checks one first where documentProtectionOf asks for it. Tracked changes protection
+// turns tracking on; stopped, tracking stays as it is for the user to turn off, as in Word. The track switch is the
+// user's from then on (saved), and the save writes the protection (write/parts/settings.ts): a change of it is an
+// edit (DocxEditorSession dirty).
+export function setDocumentProtection(
+	context: DocxEditContext,
+	sessions: readonly DocxEditorSession[],
+	setting: DocxProtectionSetting | undefined
+): void {
+	const facts = context.model.package.facts.documentProtection
+	const fileEnforced = context.protectionUnlocked !== true && facts?.enforced === true
+
+	// Stopped, a protection set in the session leaves the file's as it was opened (none, or stopped).
+	context.protectionChange = setting ?? (fileEnforced ? "stopped" : undefined)
+	context.review.persist = true
+
+	if (setting?.edit === "trackedChanges" && !context.review.tracking) {
+		context.review.tracking = true
+
+		for (const session of sessions) wantReviewIndex(session)
+	}
+
+	for (const session of sessions) session.invalidate()
 }
 
 // w:writeProtection (ECMA-376 Part 1 §17.15.1.93): Word's "password to modify" and "read-only recommended".
@@ -107,23 +173,31 @@ export function writeProtectionOf(context: DocxEditContext): DocxWriteProtection
 }
 
 // Enforced w:documentProtection the user can stop (Review > Restrict Editing > Stop Protection): its w:edit and
-// the password to check first ("unsupported": one that cannot be checked here, so it stays; undefined: none,
-// it stops at once). Undefined when nothing is enforced or the session was opened with it stopped.
+// w:formatting, and the password to check first ("unsupported": one that cannot be checked here, so it stays;
+// undefined: none, it stops at once). Undefined when nothing is enforced, the session was opened with it stopped,
+// or it was stopped since.
 export interface DocxDocumentProtection {
 	readonly edit: string
+	readonly formatting: boolean
 	readonly password: ProtectionHashRead
 }
 
 export function documentProtectionOf(context: DocxEditContext): DocxDocumentProtection | undefined {
-	const pkg = context.model.package
-	const facts = pkg.facts.documentProtection
+	const protection = enforcedProtection(context)
 
-	if (context.protectionUnlocked === true || facts === undefined || !facts.enforced || facts.edit === undefined || facts.edit === "none")
-		return undefined
+	if (protection === undefined || protection.edit === undefined || protection.edit === "none") return undefined
+
+	const set = protection.set?.password
 
 	return {
-		edit: facts.edit,
-		password: facts.hashed ? (readProtectionHash(pkg.settings, "documentProtection") ?? "unsupported") : undefined
+		edit: protection.edit,
+		formatting: protection.formatting,
+		password:
+			set !== undefined
+				? documentProtectionHashRead(set)
+				: protection.set === undefined && protection.hashed
+					? (readProtectionHash(context.model.package.settings, "documentProtection") ?? "unsupported")
+					: undefined
 	}
 }
 
@@ -201,9 +275,7 @@ const DOCUMENT_WIDE = new Set<DocxEditorCommandType>([
 // Enforced formatting restrictions (w:documentProtection w:formatting): no direct formatting, as Word allows only
 // styles then ("Limit formatting to a selection of styles", Microsoft Q&A answers by Word MVPs).
 export function formattingRestricted(context: DocxEditContext): boolean {
-	const protection = context.model.package.facts.documentProtection
-
-	return context.protectionUnlocked !== true && protection !== undefined && protection.enforced && protection.formatting
+	return enforcedProtection(context)?.formatting === true
 }
 
 // Whether a style is locked against use (w:locked, ECMA-376 Part 1 §17.7.4.7; a built-in style the document does
@@ -310,19 +382,14 @@ const OPEN_GROUPS = new Set(["everyone"])
 // every transaction the session applies: the ranges' markers always survive, so their positions move with the
 // edits.
 export class PermissionRanges {
-	private ranges: number[]
+	private ranges: number[] = []
 	private doc: Node
+	// Made under forms protection (with its open sections).
+	forms = false
 
 	constructor(session: DocxEditorSession) {
 		this.doc = session.state.doc
-		this.ranges = openRanges(session.story.part, this.doc, session.context.store)
-
-		// Under forms protection, sections whose w:formProt is off stay editable (ECMA-376 Part 1 §17.6.6).
-		if (protectionOf(session.context).mode === "forms" && session.story.story.kind === "body") {
-			const sections = openSections(session.story.part, this.doc)
-
-			if (sections.length > 0) this.ranges = sortRanges([...this.ranges, ...sections])
-		}
+		this.build(session)
 		session.onApplied((transactions, state) => {
 			for (const tr of transactions) {
 				if (!tr.docChanged || this.ranges.length === 0) continue
@@ -335,6 +402,20 @@ export class PermissionRanges {
 
 			this.doc = state.doc
 		})
+	}
+
+	// From the session's document as it is now (again when protection set in the session changes to or from forms).
+	build(session: DocxEditorSession): void {
+		this.doc = session.state.doc
+		this.ranges = openRanges(session.story.part, this.doc, session.context.store)
+		this.forms = protectionOf(session.context).mode === "forms"
+
+		// Under forms protection, sections whose w:formProt is off stay editable (ECMA-376 Part 1 §17.6.6).
+		if (this.forms && session.story.story.kind === "body") {
+			const sections = openSections(session.story.part, this.doc)
+
+			if (sections.length > 0) this.ranges = sortRanges([...this.ranges, ...sections])
+		}
 	}
 
 	// Whether [from, to] lies in an open range of `ranges` (by default the session document's).
@@ -360,7 +441,7 @@ export function permissionRanges(session: DocxEditorSession): PermissionRanges {
 	if (found === undefined) {
 		found = new PermissionRanges(session)
 		permissions.set(session, found)
-	}
+	} else if (found.forms !== (protectionOf(session.context).mode === "forms")) found.build(session)
 
 	return found
 }

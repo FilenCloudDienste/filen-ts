@@ -385,6 +385,41 @@ describe("Play Across Slides", () => {
 	})
 })
 
+describe("Show without narration", () => {
+	// Recorded narration as PowerPoint writes it: an after-previous playFrom(0.0) on the slide's audio shape starting with
+	// the slide, and that shape's p:audio isNarration beside the main sequence.
+	function narrated(b: TimingBuilder): TimingTree {
+		const play = b.effect(4, { presetID: 1, presetClass: "mediacall", presetSubtype: 0, nodeType: "afterEffect" }, 0, [
+			b.behavior(
+				{ type: "cmd", common: { target: { kind: "shape", shape: 4 }, attrNames: [] }, cmdType: "call", cmd: "playFrom(0.0)" },
+				{ dur: 1 }
+			)
+		])
+		const probe = b.mainSeq([])
+		const group = b.click([[0, [play]]], [{ delay: "indefinite" }, { evt: "onBegin", delay: 0, tn: probe.ctn.id }])
+
+		return b.root([
+			{ kind: "seq", ctn: { ...probe.ctn, children: [group] } },
+			b.behavior({ type: "audio", target: { kind: "shape", shape: 4 }, isNarration: true }, { stCondLst: [{ delay: "indefinite" }] })
+		])
+	}
+
+	const absent: ShowSettings = { kind: "present", loop: false, showAnimation: true, useTimings: true, range: { kind: "all" } }
+
+	it.each([
+		['showNarration="0"', { ...absent, showNarration: false }, false],
+		['showNarration="1"', { ...absent, showNarration: true }, true],
+		["no showNarration", absent, true]
+	] as const)("plays or skips recorded narration as PowerPoint does with %s", async (_name, settings, plays) => {
+		const { mount: media, media: mounted } = fakeMedia()
+
+		await mount(new Map([[slides[0]!.ref, { timing: narrated(new TimingBuilder()), media: true }]]), { settings, media })
+		await settle(500)
+		expect(mounted).toHaveLength(1)
+		expect(mounted[0]?.log.includes("play")).toBe(plays)
+	})
+})
+
 describe("media keys", () => {
 	it("plays, pauses, stops, seeks and mutes the slide's medium by PowerPoint's chords, and Alt never reaches the show's keys", async () => {
 		const { mount: media, media: mounted } = fakeMedia()

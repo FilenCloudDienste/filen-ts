@@ -14,6 +14,7 @@ import {
 	type Relationships,
 	type Slicing
 } from "../opc/index"
+import { chartexDrawable } from "../drawingml/chart/chartex"
 import { DeckTally, DEFAULT_PRESENTATION_BUDGETS, type PresentationBudgets } from "../presentation/budget"
 import { classifyAction } from "../presentation/actions"
 import { addGate, gateReasons } from "../presentation/gate"
@@ -643,6 +644,42 @@ export class PptxParts {
 		}
 	}
 
+	// Whether each chartex part a slide relates draws (chartexDrawable), so the slide reads a chartex mc:Choice over
+	// its Fallback only where the chart renders. Undefined when the slide relates none; a part over the XML budget or
+	// unreadable does not draw. Parts the session did not hold before are not kept.
+	private async drawableChartex(relationships: Relationships): Promise<((part: string) => boolean) | undefined> {
+		let draws: Map<string, boolean> | undefined
+
+		for (const relationship of relationships.all) {
+			if (relationship.external || relationship.partName === undefined || !isChartEx(relationship.type)) continue
+
+			const part = `/${relationship.partName}`
+			const key = partKey(part)
+
+			if (draws?.has(key) === true) continue
+
+			const entry = this.opc.entry(part)
+			let drawable = false
+
+			if (entry !== undefined && entry.uncompressedSize <= this.budgets.xmlPartBytes) {
+				const held = this.documents.has(key)
+
+				try {
+					drawable = chartexDrawable(await this.xml(part))
+				} catch {
+					drawable = false
+				}
+
+				if (!held) this.documents.delete(key)
+			}
+
+			draws ??= new Map()
+			draws.set(key, drawable)
+		}
+
+		return draws === undefined ? undefined : part => draws.get(partKey(part)) === true
+	}
+
 	private context(part: string, reader: PartReader, relationships: Relationships): ReadContext {
 		return {
 			reader,
@@ -726,6 +763,7 @@ export class PptxParts {
 		const themeParts = relatedParts(relationships, "theme")
 		const themeRef = themeParts[0] === undefined ? undefined : await this.loadTheme(themeParts[0])
 		const legacyPreview = await this.legacyPreviews(relationships)
+		const chartex = await this.drawableChartex(relationships)
 		const read = this.tally.count(ref, () =>
 			readSlidePart({
 				ref,
@@ -741,7 +779,8 @@ export class PptxParts {
 				refOf: name => this.refOf(name),
 				themeOf: name => (themeRef !== undefined && partKey(name) === partKey(themeRef.part) ? themeRef : undefined),
 				action: (reader, rels, node) => this.action(reader, rels, node),
-				...(legacyPreview === undefined ? {} : { legacyPreview })
+				...(legacyPreview === undefined ? {} : { legacyPreview }),
+				...(chartex === undefined ? {} : { chartex })
 			})
 		)
 
@@ -1114,6 +1153,12 @@ export class PptxParts {
 	}
 }
 
+// A chartEx relationship (http://schemas.microsoft.com/office/2014/relationships/chartEx, a base relationshipKind
+// does not list).
+function isChartEx(type: string): boolean {
+	return type.endsWith("/chartEx")
+}
+
 // The chart parts `part` relates (pptx chart and chartEx), each with its embedded workbook, by relationship id.
 async function relatedCharts(opc: OpcPackage, part: string): Promise<ReadonlyMap<string, ChartFrameRef> | undefined> {
 	let charts: Map<string, ChartFrameRef> | undefined
@@ -1121,7 +1166,7 @@ async function relatedCharts(opc: OpcPackage, part: string): Promise<ReadonlyMap
 	for (const relationship of (await opc.relationships(part.slice(1))).all) {
 		const kind = relationshipKind(relationship.type)
 
-		if ((kind !== "chart" && kind !== "chartEx") || relationship.external || relationship.partName === undefined) continue
+		if ((kind !== "chart" && !isChartEx(relationship.type)) || relationship.external || relationship.partName === undefined) continue
 		if (!opc.has(relationship.partName)) continue
 
 		const embedded = (await opc.relationships(relationship.partName)).all.find(

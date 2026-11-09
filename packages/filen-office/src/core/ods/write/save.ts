@@ -5,7 +5,8 @@ import type { InflateHook } from "../../opc/zipReader"
 import { SliceClock, sliceClock, type Slicing } from "../../slicing"
 import type { XlsxDocument } from "../../xlsx/edit/document"
 import type { XlsxSheetModel } from "../../xlsx/model/types"
-import { decodeUtf8, encodeUtf8, escapeAttribute } from "../../xml/index"
+import { encodeUtf8, escapeAttribute } from "../../xml/index"
+import { withManifestEntries, withoutManifestEntries } from "../../odp/write/manifestPrune"
 import { OdfNs } from "../../odf/namespaces"
 import { NULL_DATE_1899, NULL_DATE_1904 } from "../read/values"
 import { odsSource, type OdsSource } from "../source"
@@ -127,23 +128,25 @@ async function settingsChange(document: XlsxDocument, source: OdsSource): Promis
 const emptySettings = (version: string | undefined): string =>
 	`<?xml version="1.0" encoding="UTF-8"?><office:document-settings xmlns:office="${OdfNs.office}" xmlns:config="${OdfNs.config}" xmlns:ooo="${OdfNs.ooo}"${version === undefined ? "" : ` office:version="${escapeAttribute(version)}"`}><office:settings><config:config-item-set config:name="ooo:view-settings"><config:config-item-map-indexed config:name="Views"><config:config-item-map-entry><config:config-item config:name="ViewId" config:type="string">view1</config:config-item></config:config-item-map-entry></config:config-item-map-indexed></config:config-item-set></office:settings></office:document-settings>`
 
-// META-INF/manifest.xml with an entry for a part added (ODF 1.3 Part 2 §4.3).
-async function withManifestEntry(source: OdsSource, path: string, mediaType: string): Promise<PartChange | null> {
+// META-INF/manifest.xml as the save writes it (ODF 1.3 Part 2 §4.3): settings.xml listed when one is added, the
+// dropped preview's entry gone. Null when it stays as it is; undefined when it cannot list settings.xml.
+async function manifestChange(source: OdsSource, settings: boolean, thumbnail: boolean): Promise<PartChange | null | undefined> {
 	const entry = source.odf.archive.get(MANIFEST)
 
-	if (entry === undefined) return null
+	if (entry === undefined) return settings ? undefined : null
 
-	const text = decodeUtf8(await source.odf.archive.read(entry))
-	const close = text.lastIndexOf("</manifest:manifest>")
+	const read = await source.odf.archive.read(entry)
+	const without = thumbnail ? withoutManifestEntries(read, [THUMBNAIL]) : read
+	const bytes = settings ? withManifestEntries(without, [{ path: SETTINGS, mediaType: "text/xml" }]) : without
 
-	if (close < 0) return null
+	if (bytes === undefined) return undefined
 
-	const line = `<manifest:file-entry manifest:full-path="${path}" manifest:media-type="${mediaType}"/>`
-
-	return { name: MANIFEST, bytes: encodeUtf8(text.slice(0, close) + line + text.slice(close)) }
+	return bytes === read ? null : { name: MANIFEST, bytes }
 }
 
 const MANIFEST = "META-INF/manifest.xml"
+// ODF 1.3 Part 2 §3.8: the preview shows the document as it opens; a save that rewrites it cannot redraw it, so drops it.
+const THUMBNAIL = "Thumbnails/thumbnail.png"
 
 // The source content.xml's entry as it streams out of the archive.
 function contentStream(source: OdsSource): AsyncIterable<Uint8Array> {
@@ -202,10 +205,11 @@ async function zip(
 	source: OdsSource,
 	replace: readonly PartChange[],
 	clock: SliceClock | undefined,
-	add: readonly PartChange[] = []
+	add: readonly PartChange[] = [],
+	remove: readonly string[] = []
 ): Promise<Uint8Array> {
 	const archive = source.odf.archive
-	const plan = planZip({ entries: archive.entries, comment: archive.comment, zip64: archive.zip64 }, { replace, add })
+	const plan = planZip({ entries: archive.entries, comment: archive.comment, zip64: archive.zip64 }, { replace, add, remove })
 	const sink = memorySink()
 	const deflate = nativeDeflate()
 	const deflateChunks = nativeDeflateChunks()
@@ -350,27 +354,27 @@ export async function saveOds(document: XlsxDocument, options: OdsSaveOptions = 
 				const others: PartChange[] = [...charts.replace]
 				const settings = await settingsChange(document, source)
 				const added: PartChange[] = []
+				const fresh = settings?.fresh === true
 
-				if (settings !== null) {
-					if (settings.fresh) {
-						const manifest = await withManifestEntry(source, SETTINGS, "text/xml")
+				if (settings !== null) (fresh ? added : others).push({ name: SETTINGS, bytes: settings.bytes })
 
-						if (manifest === null) return { ok: false, reason: "unsupported", message: "The manifest cannot list settings.xml" }
+				// Apart from `others`: the rows' proof (spanGate) does not read the package's manifest or preview.
+				const thumbnail = source.odf.archive.get(THUMBNAIL) !== undefined ? [THUMBNAIL] : []
+				const manifest = fresh || thumbnail.length > 0 ? await manifestChange(source, fresh, thumbnail.length > 0) : null
 
-						others.push(manifest)
-						added.push({ name: SETTINGS, bytes: settings.bytes })
-					} else {
-						others.push({ name: SETTINGS, bytes: settings.bytes })
-					}
-				}
+				if (manifest === undefined) return { ok: false, reason: "unsupported", message: "The manifest cannot list settings.xml" }
 
-				let bytes = await zip(source, [{ name: CONTENT, bytes: content }, ...others], clock, added)
-				const changed: string[] = [CONTENT, ...others.map(change => change.name)]
+				const listed = manifest === null ? [] : [manifest]
+				let bytes = await zip(source, [{ name: CONTENT, bytes: content }, ...others, ...listed], clock, added, thumbnail)
+				const changed: string[] = [CONTENT, ...others.map(change => change.name), ...listed.map(change => change.name)]
 
-				// Written as it was (every edit undone): the source's entry as stored.
+				// Written as it was (every edit undone): the source's entry as stored, and its preview kept when nothing else
+				// changed either.
 				if (!writer.changed && content.length === source.content.uncompressedSize) {
-					bytes = await zip(source, others, clock, added)
-					changed.splice(0, 1)
+					const kept = others.length === 0 && added.length === 0
+
+					bytes = kept ? await zip(source, [], clock) : await zip(source, [...others, ...listed], clock, added, thumbnail)
+					changed.splice(0, changed.length, ...(kept ? [] : changed.slice(1)))
 				}
 
 				appendAll(

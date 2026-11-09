@@ -560,8 +560,8 @@ function writePictureData(context: EmitContext, shape: ShapeNode, frame: Diagram
 	return { data: data.rId, drawing: drawing?.rId }
 }
 
-// A new frame (Insert ▸ SmartArt): written whole from the model.
-function newFrame(shape: ShapeNode, ids: Readonly<Record<DefinitionRole, string>>): EmitResult {
+// A new frame (Insert ▸ SmartArt): written whole from the model (a copy of one names its parts by `ids` too).
+export function newFrame(shape: ShapeNode, ids: Readonly<Record<DefinitionRole, string>>): EmitResult {
 	const xfrm = shape.xfrm
 
 	if (xfrm === undefined) return refused("malformed", "a new diagram without its box")

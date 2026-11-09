@@ -717,6 +717,51 @@ describe("presentation viewer components", () => {
 		document.body.removeEventListener("keydown", outer)
 	})
 
+	it("hides a static show's pointer on Ctrl+H, toggles it on A and returns it to automatic on Ctrl+A", () => {
+		const slides = slideList(2)
+		const renders = new Map(slides.map(slide => [slide.ref, plainRender(slide.ref)]))
+		const onSlide = vi.fn()
+
+		act(() =>
+			root.render(
+				<StaticShow
+					slides={slides}
+					customShows={[]}
+					renders={renders}
+					size={SIZE}
+					painter={painter}
+					onSlide={onSlide}
+					onEnd={() => undefined}
+					label="Slide show"
+					slideLabel={(index, count) => `Slide ${String(index + 1)} of ${String(count)}`}
+				/>
+			)
+		)
+
+		const stage = host.querySelector<HTMLElement>(".fo-show-stage")
+		const press = (code: string, key: string, ctrlKey = false): KeyboardEvent => {
+			const event = new KeyboardEvent("keydown", { code, key, ctrlKey, bubbles: true, cancelable: true })
+
+			act(() => {
+				stage?.dispatchEvent(event)
+			})
+
+			return event
+		}
+
+		expect(press("KeyH", "h", true).defaultPrevented).toBe(true)
+		expect(stage?.getAttribute("data-fo-pointer")).toBe("hidden")
+		stage?.dispatchEvent(new PointerEvent("pointermove", { pointerType: "mouse", bubbles: true }))
+		expect(stage?.getAttribute("data-fo-pointer")).toBe("hidden")
+		press("KeyA", "a")
+		expect(stage?.hasAttribute("data-fo-pointer")).toBe(false)
+		press("KeyA", "a")
+		expect(stage?.getAttribute("data-fo-pointer")).toBe("hidden")
+		press("KeyA", "a", true)
+		expect(stage?.hasAttribute("data-fo-pointer")).toBe(false)
+		expect(onSlide).toHaveBeenLastCalledWith(0)
+	})
+
 	it("names a static show's stage only by the page's label and announces each slide politely", () => {
 		const slides = slideList(2)
 		const renders = new Map(slides.map(slide => [slide.ref, plainRender(slide.ref)]))

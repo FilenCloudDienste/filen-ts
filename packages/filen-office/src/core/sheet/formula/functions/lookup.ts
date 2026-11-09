@@ -1,22 +1,70 @@
 import { EmptyValue, FunctionArgumentType, HyperFormula, SimpleRangeValue, type ImplementedFunctions } from "hyperformula"
 import { lastLineValue, uniformTail, type Plugin } from "./blankTails"
 import { naError, SheetFunctionPlugin, unmodeledError, valueError, type PluginCall, type PluginScalar, type PluginState } from "./plugin"
-import { binarySearch, compareLookup, lookupValue, rowsOf, sameClass, vectorOf, wildcard, type Lookup } from "./values"
+import { binarySearch, compareLookup, lookupValue, sameClass, vectorOf, wildcard, type Lookup } from "./values"
 
 // LOOKUP and XMATCH as support.microsoft.com defines them. Their arrays are evaluated as arrays
 // (LOOKUP(2,1/(A1:A9="x"),B1:B9) in an ordinary formula), as Excel does.
 
 const ARRAY_ARGUMENTS = { enableArrayArithmeticForArguments: true, vectorizationForbidden: true } as const
 
+// A row or column read value by value: a range's cells straight from the engine's graph, so a search reads only up to
+// its match and copies nothing (the range's `data` builds a row array per cell at each call).
+interface Vector {
+	readonly length: number
+	at(index: number): PluginScalar
+}
+
+type CellRead = { getCellValue(address: { readonly sheet: number; readonly row: number; readonly col: number }): unknown }
+
+function arrayVector(values: readonly PluginScalar[]): Vector {
+	return { length: values.length, at: index => values[index] ?? EmptyValue }
+}
+
+// The values of a one-row or one-column argument, or null for a block.
+function vectorIn(where: SimpleRangeValue, graph: CellRead): Vector | null {
+	const width = where.width()
+	const height = where.height()
+
+	if (width !== 1 && height !== 1) return null
+
+	const range = where.range
+
+	if (range === undefined) {
+		const values = vectorOf(where.data)
+
+		return values === null ? null : arrayVector(values)
+	}
+
+	const across = height === 1
+	const { sheet, start } = range
+
+	return {
+		length: across ? width : height,
+		at: index => {
+			const value = graph.getCellValue({
+				sheet,
+				row: across ? start.row : start.row + index,
+				col: across ? start.col + index : start.col
+			})
+
+			// A cell holding an array reads as the range's data gives it.
+			if (value instanceof SimpleRangeValue) return (across ? where.data[0]?.[index] : where.data[index]?.[0]) ?? EmptyValue
+
+			return value as PluginScalar
+		}
+	}
+}
+
 // The position of the value equal to `key` (text without regard to case, with wildcards when asked), the first or
 // the last; -1 when none.
-function exactIndex(values: readonly PluginScalar[], key: Lookup, wildcards: boolean, fromEnd: boolean): number {
+function exactIndex(values: Vector, key: Lookup, wildcards: boolean, fromEnd: boolean): number {
 	const test = wildcards && typeof key === "string" ? wildcard(key) : null
 	const count = values.length
 
 	for (let step = 0; step < count; step++) {
 		const index = fromEnd ? count - 1 - step : step
-		const value = lookupValue(values[index] ?? EmptyValue)
+		const value = lookupValue(values.at(index))
 
 		if (value === null) continue
 		if (test !== null ? typeof value === "string" && test(value) : sameClass(value, key) && compareLookup(value, key) === 0)
@@ -27,24 +75,22 @@ function exactIndex(values: readonly PluginScalar[], key: Lookup, wildcards: boo
 }
 
 // The exact match, else the next smaller (-1) or larger (1) value of key's class; -1 when none.
-function nearestIndex(values: readonly PluginScalar[], key: Lookup, mode: -1 | 1, fromEnd: boolean): number {
-	const exact = exactIndex(values, key, false, fromEnd)
-
-	if (exact >= 0) return exact
-
+// One pass: the first exact match in search order ends it.
+function nearestIndex(values: Vector, key: Lookup, mode: -1 | 1, fromEnd: boolean): number {
 	let best = -1
 	let bestValue: Lookup | null = null
 	const count = values.length
 
 	for (let step = 0; step < count; step++) {
 		const index = fromEnd ? count - 1 - step : step
-		const value = lookupValue(values[index] ?? EmptyValue)
+		const value = lookupValue(values.at(index))
 
 		if (value === null || !sameClass(value, key)) continue
 
 		const order = compareLookup(value, key)
 
-		if (mode === -1 ? order >= 0 : order <= 0) continue
+		if (order === 0) return index
+		if (mode === -1 ? order > 0 : order < 0) continue
 		if (bestValue === null || (mode === -1 ? compareLookup(value, bestValue) > 0 : compareLookup(value, bestValue) < 0)) {
 			best = index
 			bestValue = value
@@ -147,7 +193,7 @@ export class LookupFunctions extends SheetFunctionPlugin {
 
 				// A whole column's empty rows past where the engine ends reading it: as many more of its last value (the
 				// first empty row's), Excel's search ending in the grid's last row (LOOKUP(2,1/(A:A=""),ROW(A:A))).
-				const tail = this.tailOf(ast, 1, state, searched)
+				const tail = this.tailOf(ast, 1, state, searched.at(-1))
 
 				if (tail === null) return unmodeledError()
 
@@ -187,7 +233,7 @@ export class LookupFunctions extends SheetFunctionPlugin {
 			this.metadata("XMATCH"),
 			(value: PluginScalar, where: SimpleRangeValue, matchMode: number, searchMode: number) => {
 				const key = lookupValue(value)
-				const values = vectorOf(rowsOf(where))
+				const values = vectorIn(where, this.dependencyGraph as unknown as CellRead)
 
 				if (values === null) return valueError()
 				if (![0, -1, 1, 2].includes(matchMode) || ![1, -1, 2, -2].includes(searchMode)) return valueError()
@@ -195,14 +241,15 @@ export class LookupFunctions extends SheetFunctionPlugin {
 
 				let found: number
 
-				const tail = this.tailOf(ast, 1, state, values)
+				const tail = this.tailOf(ast, 1, state, values.length === 0 ? undefined : values.at(values.length - 1))
 
 				if (tail === null) return unmodeledError()
 
 				if (searchMode === 2 || searchMode === -2) {
 					const descending = searchMode === -2
-					const at = binarySearch(values, key, descending, tail)
-					const atValue = at >= values.length ? tail?.value : values[at]
+					const all = Array.from({ length: values.length }, (_, index) => values.at(index))
+					const at = binarySearch(all, key, descending, tail)
+					const atValue = at >= all.length ? tail?.value : all[at]
 					const exact = at >= 0 && compareLookup(lookupValue(atValue ?? EmptyValue) ?? key, key) === 0
 
 					if (matchMode === 0 || matchMode === 2) found = exact ? at : -1
@@ -222,16 +269,16 @@ export class LookupFunctions extends SheetFunctionPlugin {
 		)
 	}
 
-	// The empty rows of the whole columns argument `index` reads past where the engine ends reading them, each as the
-	// vector's last value (its first empty row's); undefined when it reads none, null when they are not read the same.
+	// The empty rows of the whole columns argument `index` reads past where the engine ends reading them, each as
+	// `value`, the vector's last (its first empty row's); undefined when it reads none, null when they are not read the
+	// same.
 	private tailOf(
 		ast: PluginCall,
 		index: number,
 		state: PluginState,
-		vector: readonly PluginScalar[]
+		value: PluginScalar | undefined
 	): { readonly value: PluginScalar; readonly count: number } | undefined | null {
 		const count = uniformTail(this as unknown as Plugin, ast.args[index], state)
-		const value = vector.at(-1)
 
 		if (count === null) return null
 
@@ -239,9 +286,9 @@ export class LookupFunctions extends SheetFunctionPlugin {
 	}
 
 	// The value of key's class after `at` (the first when `at` is -1), as a binary search's other side.
-	private neighbour(values: readonly PluginScalar[], at: number, key: Lookup): number {
+	private neighbour(values: Vector, at: number, key: Lookup): number {
 		for (let index = at + 1; index < values.length; index++) {
-			const value = lookupValue(values[index] ?? EmptyValue)
+			const value = lookupValue(values.at(index))
 
 			if (value !== null && sameClass(value, key)) return index
 		}

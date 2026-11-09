@@ -11,6 +11,11 @@ const LIST =
 const WIDE =
 	'<style:style style:name="Wide" style:family="paragraph"><style:paragraph-properties fo:margin-left="5cm" fo:text-indent="1cm"/></style:style>'
 const CM = 1440 / 2.54
+// A 2 x 2 PNG.
+const PNG = Uint8Array.from(
+	atob("iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEklEQVR4nGP4z8DAAMIM/4EAAB/uBfsL2WiLAAAAAElFTkSuQmCC"),
+	character => character.charCodeAt(0)
+)
 
 function paragraphs(xml: string): string[] {
 	return xml.split("<w:p>").slice(1)
@@ -215,5 +220,68 @@ describe("ODT lists", () => {
 		expect(
 			await lossy(level('<text:list-level-style-bullet text:level="1" text:bullet-char="•" text:bullet-relative-size="100%"/>'))
 		).toBe(false)
+	})
+
+	it("writes a picture bullet as w:numPicBullet with its image related from numbering.xml", async () => {
+		const image = (size: string): string =>
+			`<text:list-level-style-image text:level="1" xlink:href="Pictures/a.png" xlink:type="simple"><style:list-level-properties ${size}/></text:list-level-style-image>`
+		const translation = await translated({
+			styles: `<text:list-style style:name="L9">${image('fo:width="0.4cm" fo:height="0.2cm"')}</text:list-style><text:list-style style:name="L8">${image('fo:width="0.4cm" fo:height="0.2cm"')}</text:list-style>`,
+			body: '<text:list text:style-name="L9"><text:list-item><text:p>x</text:p></text:list-item></text:list><text:list text:style-name="L8"><text:list-item><text:p>y</text:p></text:list-item></text:list><text:p><draw:frame text:anchor-type="as-char" svg:width="1cm" svg:height="1cm"><draw:image xlink:href="Pictures/a.png"/></draw:frame></text:p>',
+			extra: [{ name: "Pictures/a.png", data: PNG }]
+		})
+		const numbering = partText(translation, "word/numbering.xml")
+		const width = Math.round((0.4 / 2.54) * 72 * 100) / 100
+		const height = Math.round((0.2 / 2.54) * 72 * 100) / 100
+
+		expect(translation.lossy.has("listLevel")).toBe(false)
+		// One w:numPicBullet for the same picture and size, ahead of the abstract definitions (CT_Numbering).
+		expect(numbering.match(/<w:numPicBullet /g)).toHaveLength(1)
+		expect(numbering.indexOf("<w:numPicBullet ")).toBeLessThan(numbering.indexOf("<w:abstractNum "))
+		expect(numbering).toContain(`style="width:${width}pt;height:${height}pt" o:bullet="t"><v:imagedata r:id="rId1"`)
+		expect(numbering).toContain('<w:lvlText w:val="•"/><w:lvlPicBulletId w:val="0"/><w:lvlJc')
+		// The picture's one media part serves the bullet and the frame.
+		expect(partText(translation, "word/_rels/numbering.xml.rels")).toContain(
+			'<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/image1.png"/>'
+		)
+		expect([...translation.media]).toEqual([["word/media/image1.png", "Pictures/a.png"]])
+		expect(partText(translation, "word/_rels/document.xml.rels")).toContain('Target="media/image1.png"')
+
+		const parsed = parseNumbering(xml(numbering), new PropsStore())
+
+		expect(parsed.pictureBullets.get(0)?.relationshipId).toBe("rId1")
+		expect(parsed.level(1, 0)?.level.pictureBulletId).toBe(0)
+	})
+
+	it("keeps a plain bullet, flagged, for a picture bullet whose image the translation does not carry", async () => {
+		const translation = await translated({
+			styles: '<text:list-style style:name="L9"><text:list-level-style-image text:level="1"><office:binary-data>iVBORw0KGgo=</office:binary-data></text:list-level-style-image></text:list-style>',
+			body: '<text:list text:style-name="L9"><text:list-item><text:p>x</text:p></text:list-item></text:list>'
+		})
+
+		expect(translation.lossy.has("listLevel")).toBe(true)
+		expect(partText(translation, "word/numbering.xml")).not.toContain("numPicBullet")
+		expect(translation.parts.has("word/_rels/numbering.xml.rels")).toBe(false)
+	})
+
+	it("formats a level's label with its character style, the level's own font and size winning", async () => {
+		const symbols =
+			'<style:style style:name="Base" style:family="text"><style:text-properties fo:color="#C00000" style:font-name="Arial"/></style:style><style:style style:name="Numbering_20_Symbols" style:display-name="Numbering Symbols" style:family="text" style:parent-style-name="Base"><style:text-properties fo:font-weight="bold" fo:font-size="14pt"/></style:style>'
+		const numbering = partText(
+			await translated({
+				styles: `${symbols}<text:list-style style:name="L9"><text:list-level-style-number text:level="1" text:style-name="Numbering_20_Symbols" style:num-format="1"/><text:list-level-style-bullet text:level="2" text:style-name="Numbering_20_Symbols" text:bullet-char="•"><style:text-properties style:font-name="OpenSymbol" fo:font-size="9pt"/></text:list-level-style-bullet><text:list-level-style-number text:level="3" text:style-name="Missing" style:num-format="1"/></text:list-style>`,
+				body: '<text:list text:style-name="L9"><text:list-item><text:p>x</text:p></text:list-item></text:list>'
+			}),
+			"word/numbering.xml"
+		)
+		const level = (ilvl: number): string => numbering.split(`<w:lvl w:ilvl="${ilvl}">`)[1]?.split("</w:lvl>")[0] ?? ""
+
+		expect(level(0)).toContain(
+			'<w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial"/><w:b/><w:color w:val="C00000"/><w:sz w:val="28"/></w:rPr>'
+		)
+		expect(level(1)).toContain(
+			'<w:rPr><w:rFonts w:ascii="OpenSymbol" w:hAnsi="OpenSymbol" w:cs="OpenSymbol"/><w:b/><w:color w:val="C00000"/><w:sz w:val="18"/></w:rPr>'
+		)
+		expect(level(2)).not.toContain("<w:rPr>")
 	})
 })

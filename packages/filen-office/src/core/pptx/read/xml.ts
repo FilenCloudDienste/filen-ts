@@ -76,6 +76,14 @@ export function understood(uri: string): boolean {
 	return UNDERSTOOD.has(uri)
 }
 
+// The chartex namespaces an mc:Choice requires (cx, cx1, cx2…: .../office/drawing/<date>/chartex). Their Choice is
+// read only where its chart part draws (else the Fallback, usually a "chart not available" message shape).
+const CHARTEX_REQUIRES = /^http:\/\/schemas\.microsoft\.com\/office\/drawing\/\d{4}(?:\/\d{1,2}){0,3}\/chartex$/
+
+function understoodWithChartex(uri: string): boolean {
+	return UNDERSTOOD.has(uri) || CHARTEX_REQUIRES.test(uri)
+}
+
 const UNSET = -1
 
 export class PartReader {
@@ -185,6 +193,17 @@ export class PartReader {
 	alternate(node: number): number {
 		try {
 			return selectAlternateContent(this.namespaces, node, understood)
+		} catch {
+			this.malformed = true
+
+			return -1
+		}
+	}
+
+	// The branch alternate() reads when chartex namespaces count as understood (-1 when unreadable).
+	alternateChartex(node: number): number {
+		try {
+			return selectAlternateContent(this.namespaces, node, understoodWithChartex)
 		} catch {
 			this.malformed = true
 

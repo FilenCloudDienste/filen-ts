@@ -260,7 +260,9 @@ export function translateTable(translator: Translator, node: number, flow: Flow)
 		xml += `${rowXml}</w:tr>`
 	}
 
-	flow.add({ kind: "raw", xml: `${xml}</w:tbl>` })
+	const space = (side: "top" | "bottom"): number => twips(Math.max(0, parseLength(properties.get(`fo:margin-${side}`)) ?? 0))
+
+	translator.spaceTable(flow, { kind: "raw", xml: `${xml}</w:tbl>` }, space("top"), space("bottom"))
 }
 
 function cellMarkup(

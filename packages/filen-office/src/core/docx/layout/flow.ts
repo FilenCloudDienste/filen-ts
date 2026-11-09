@@ -508,6 +508,9 @@ interface Chain {
 	exclusions: number
 	footnotes: number
 	token: number
+	// The chain began with the rows that end this table (kept with the next, see TableLayout.keptRows): it moves
+	// back into the table, which takes back its own output.
+	table: TableLayout | undefined
 }
 
 // A chain carried over from an earlier area (a page break inside it): it can no longer move, it only keeps
@@ -523,9 +526,12 @@ const STALE_CHAIN: Chain = {
 	mark: new OutputMark(),
 	exclusions: 0,
 	footnotes: 0,
-	token: -1
+	token: -1,
+	table: undefined
 }
 
+// Chains that roll back into a table leave the output to it.
+const TABLE_MARK = new OutputMark()
 const NO_MOVES: readonly number[] = []
 const NO_ROWS = new Float64Array(0)
 
@@ -1410,7 +1416,7 @@ export class BlockFlow {
 			area.empty = false
 			this.areaPlaced++
 
-			if (table.rowsPlaced > 0) this.endChain()
+			if (table.rowsPlaced > 0 && !(status === FlowStatus.DONE && this.keepTableRows(area, table))) this.endChain()
 		}
 
 		if (status === FlowStatus.DONE) {
@@ -1441,8 +1447,38 @@ export class BlockFlow {
 			mark: area.page.mark(),
 			exclusions: area.exclusions?.count ?? 0,
 			footnotes: footnotes === null ? 0 : footnotes.mark(),
-			token: area.token
+			token: area.token,
+			table: undefined
 		}
+	}
+
+	// The table under way ended with rows kept with the next (in every paragraph, see TableLayout.keptRows): they
+	// stay with the block after it, as Word keeps a table with the paragraph after its last row. False when it
+	// did not.
+	private keepTableRows(area: Area, table: TableLayout): boolean {
+		const rows = table.keptRows(area)
+
+		if (rows === undefined) return false
+
+		// They began with the table's first rows here: a chain under way before the table takes them along.
+		if (rows.placed === 0 && this.chain !== undefined) return true
+
+		this.chain = {
+			index: this.index,
+			y: rows.y,
+			after: 0,
+			contextual: this.contextual,
+			style: this.styleId,
+			hasPrevious: this.hasPrevious,
+			empty: rows.top,
+			mark: TABLE_MARK,
+			exclusions: 0,
+			footnotes: 0,
+			token: area.token,
+			table
+		}
+
+		return true
 	}
 
 	// A block not kept with the next one placed content: the chain ends with it.
@@ -1485,12 +1521,17 @@ export class BlockFlow {
 
 		if (chain === undefined || chain.token !== area.token || chain.empty) return false
 
+		const table = chain.table
+
+		if (table === undefined) {
+			area.page.rollback(chain.mark)
+
+			if (area.exclusions !== null) area.exclusions.count = Math.min(area.exclusions.count, chain.exclusions)
+
+			area.footnotes?.rollback(chain.footnotes)
+		} else if (!table.moveKeptRows(area)) return false
+
 		this.moves.push(0, this.index)
-		area.page.rollback(chain.mark)
-
-		if (area.exclusions !== null) area.exclusions.count = Math.min(area.exclusions.count, chain.exclusions)
-
-		area.footnotes?.rollback(chain.footnotes)
 		this.index = chain.index
 		this.y = chain.y
 		this.after = chain.after
@@ -1498,7 +1539,7 @@ export class BlockFlow {
 		this.styleId = chain.style
 		this.hasPrevious = chain.hasPrevious
 		this.inParagraph = false
-		this.table = undefined
+		this.table = table
 		this.box.open = false
 
 		return true
@@ -2233,6 +2274,8 @@ export class BlockFlow {
 			area.page.addObject(id, layer, -1, x, y, width, height)
 
 			if (wraps) {
+				if (area.region === Region.BODY && !followsAnchor(spec)) area.page.fixedWraps = true
+
 				const top = y - spec.distTop
 				const bottom = y + height + spec.distBottom
 
@@ -2403,6 +2446,8 @@ export class BlockFlow {
 
 		// Placed on the page or its margins (see placeFloats).
 		if (vAnchor !== "text" && ((wrap === "none" && area.region === Region.BODY) || area.region === Region.FOOTER)) page.pin(mark)
+
+		if (vAnchor !== "text" && exclusions !== null && wrap !== "none" && area.region === Region.BODY) page.fixedWraps = true
 
 		if (exclusions !== null && wrap !== "none") {
 			const hSpace = twips(frame.hSpace ?? 0)

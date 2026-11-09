@@ -65,6 +65,7 @@ const EXAMPLES: Readonly<Record<DocxEditorCommandType, object>> = {
 	"paragraph.lineSpacing": { rule: "auto", value: 276 },
 	"paragraph.spacing": { before: 120, after: 0 },
 	"paragraph.indent": { start: 720, hanging: 360 },
+	"paragraph.hangingIndent": { direction: 1 },
 	"format.copy": {},
 	"format.paste": {},
 	"link.set": { target: "https://filen.io/", text: "Filen" },

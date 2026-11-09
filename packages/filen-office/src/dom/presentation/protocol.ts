@@ -1,6 +1,6 @@
 import type { CompiledTimegraph } from "../../core/anim/model"
 import type { PresentationDesignInfo } from "../../core/presentation/edit/commands/design"
-import type { DeckOp, FileLike, InsertedMedia, SmartArtDefRef } from "../../core/presentation/edit/ops"
+import type { DeckOp, FileLike, ImportedSlide, InsertedMedia, SmartArtDefRef } from "../../core/presentation/edit/ops"
 import type { PresentationClip } from "../../core/presentation/edit/clip"
 import type { SlideReview } from "../../core/presentation/comments"
 import type { SlideOutline } from "../../core/presentation/outline"
@@ -185,6 +185,10 @@ export interface ClipPart {
 export type ClipPartsResult =
 	{ readonly ok: true; readonly parts: readonly ClipPart[] } | { readonly ok: false; readonly refusal: PresentationRefusal }
 
+// Slides of this deck as a paste into another takes them (engine/clip.ts clipSlides).
+export type ClipSlidesResult =
+	{ readonly ok: true; readonly slides: readonly ImportedSlide[] } | { readonly ok: false; readonly refusal: PresentationRefusal }
+
 export interface FindOptions {
 	readonly caseSensitive?: boolean
 	readonly wholeWord?: boolean
@@ -300,6 +304,8 @@ export interface PresentationSessionApi {
 	clip(request: ClipRequest): Promise<ClipResult>
 	// The bytes of parts a clip of this deck names (core/presentation/edit/clip.ts clipPartNames), for a paste into another.
 	clipParts(names: readonly string[]): Promise<ClipPartsResult>
+	// Slides of this deck as a save writes a copy of each, for a paste into another (pptx).
+	clipSlides(slides: readonly SlideRef[]): Promise<ClipSlidesResult>
 	undo(open?: ShapeRef): Promise<CommandResult>
 	redo(open?: ShapeRef): Promise<CommandResult>
 	// Takes back the step whose command answered `revision`, while it is still the last thing done (saves aside): the
@@ -368,6 +374,7 @@ export const PRESENTATION_METHODS: readonly PresentationMethod[] = [
 	"command",
 	"clip",
 	"clipParts",
+	"clipSlides",
 	"undo",
 	"redo",
 	"retract",
@@ -514,11 +521,15 @@ function resultTransferables(result: PresentationResult, into: Set<unknown>): vo
 		case "find":
 			addView(result.value, into)
 			return
-		// Made for the answer: a shape clip's markup, the parts' bytes (held ones copied first).
+		// Made for the answer: a shape clip's markup and owned parts, the parts' bytes (held ones copied first).
 		case "clip":
-			if (result.value.ok && result.value.clip.kind === "shapes")
+			if (result.value.ok && result.value.clip.kind === "shapes") {
 				for (const shape of result.value.clip.shapes)
 					if (shape.raw !== undefined && shape.shape === undefined) addView(shape.raw, into)
+				// The parts copied objects own, read or copied for the answer.
+				for (const relationship of result.value.clip.relationships)
+					for (const part of relationship.tree ?? []) addView(part.bytes, into)
+			}
 			return
 		case "clipParts":
 			if (result.value.ok) for (const part of result.value.parts) addView(part.bytes, into)

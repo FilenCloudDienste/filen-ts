@@ -120,6 +120,42 @@ describe("lookups", () => {
 			expect(elapsed).toBeLessThan(budget(5000))
 		})
 	})
+
+	it("XMATCH reads a shared table cell by cell, ending at the match", { timeout: budget(20_000) }, () => {
+		const rows = 5000
+		const cells: EngineSheet["rows"] = Array.from({ length: rows }, (_, row) => [
+			`v${String(row)}`,
+			row,
+			`=XMATCH(A${String(row + 1)},$A$1:$A$${String(rows)})+XMATCH(B${String(row + 1)},$B$1:$B$${String(rows)},0,-1)`
+		])
+		const start = cpuMs()
+
+		withEngine([sheet("S", cells)], engine => {
+			const elapsed = cpuMs() - start
+
+			expect(engine.result(0, rows - 1, 2).value).toBe(2 * rows)
+			expect(engine.result(0, 0, 2).value).toBe(2)
+			expect(elapsed).toBeLessThan(budget(2000))
+		})
+	})
+
+	it("XMATCH reads rows, columns and arrays alike", () => {
+		withEngine(
+			[
+				sheet("S", [
+					[3, 1, "=XMATCH(2,A1:A4,1)"],
+					[2, 2, '=XMATCH("a",A4:B4)'],
+					[5, 3, "=XMATCH(4,A1:A4,-1,-1)"],
+					[4, "a", "=XMATCH(3,{1,2,3})"],
+					[null, null, "=XMATCH(2,A1:B2)"],
+					[null, null, '=XMATCH("A",B1:B4)']
+				])
+			],
+			engine => {
+				expect(columnC(engine, 6)).toEqual([2, 2, 4, 3, "#VALUE!", 4])
+			}
+		)
+	})
 })
 
 describe("text compared with accents and without case", () => {

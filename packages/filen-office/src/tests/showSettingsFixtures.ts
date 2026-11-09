@@ -23,7 +23,6 @@ const SHOWS =
 export const DEFAULTS: ShowSettings = {
 	kind: "present",
 	loop: false,
-	showNarration: false,
 	showAnimation: true,
 	useTimings: true,
 	range: { kind: "all" }

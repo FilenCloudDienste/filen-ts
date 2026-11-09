@@ -88,6 +88,7 @@ export const PRESENTATION_LANES: { readonly [M in PresentationMethod]: Lane } = 
 	command: "priority",
 	clip: "priority",
 	clipParts: "background",
+	clipSlides: "background",
 	undo: "priority",
 	redo: "priority",
 	retract: "priority",
@@ -182,7 +183,7 @@ export type JobsCapability = Capability<"jobsPort">
 export type ConvertCapability = Capability<"freshParts">
 export type ReviewCapability = Capability<"review">
 export type OutlineCapability = Capability<"outline">
-export type ClipCapability = Capability<"clip" | "clipParts">
+export type ClipCapability = Capability<"clip" | "clipParts" | "clipSlides">
 
 // The faces the deck's text is measured and drawn with (bundled substitutes and decoded embedded fonts).
 export interface FontsCapability {

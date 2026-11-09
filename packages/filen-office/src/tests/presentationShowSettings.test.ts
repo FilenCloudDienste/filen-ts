@@ -71,7 +71,7 @@ describe("Set Up Slide Show op", () => {
 
 		for (const show of [
 			{ ...DEFAULTS, kind: "kiosk" },
-			{ ...DEFAULTS, showNarration: true },
+			{ ...DEFAULTS, showNarration: false },
 			{ ...DEFAULTS, penColor: { kind: "srgb", rgb: "FF0000" } },
 			{ ...DEFAULTS, range: { kind: "range", start: 1, end: 2 } },
 			{ ...DEFAULTS, restartMs: 5000 }
@@ -192,6 +192,34 @@ describe("Set Up Slide Show in a pptx save", () => {
 		expect(await freshPptx(bare.deck, bare.source, second, {})).toMatchObject({ kind: "written" })
 		expect((await openDeck(second.bytes())).deck.show).toEqual(kiosk)
 	})
+
+	it("reads showNarration as absent, on or off, writing an explicit off and taking out what the settings drop", async () => {
+		const showPr = (attributes: string) => `<p:showPr${attributes}><p:present/><p:sldAll/></p:showPr>`
+
+		expect((await openDeck(pptxBytes(showPr("")))).deck.show).not.toHaveProperty("showNarration")
+		expect((await openDeck(pptxBytes(undefined))).deck.show).not.toHaveProperty("showNarration")
+		expect((await openDeck(pptxBytes(showPr(' showNarration="0"')))).deck.show.showNarration).toBe(false)
+
+		// Off is written (an absent attribute plays narration), in place and in a new showPr.
+		const off: ShowSettings = { ...DEFAULTS, showNarration: false }
+		const inPlace = await savedPptxShow(pptxBytes(SOURCE_SHOW_PR), off)
+		const added = await savedPptxShow(pptxBytes(undefined), off)
+
+		expect(inPlace.show.showNarration).toBe(false)
+		expect(text((await partsOf(inPlace.bytes)).get("ppt/presProps.xml"))).toContain('showNarration="0"')
+		expect(added.show.showNarration).toBe(false)
+		expect(text((await partsOf(added.bytes)).get("ppt/presProps.xml"))).toContain('showNarration="0"')
+
+		// Settings without it take the source's attribute out.
+		const dropped = await savedPptxShow(pptxBytes(SOURCE_SHOW_PR), {
+			...DEFAULTS,
+			loop: true,
+			penColor: { kind: "preset", name: "red" }
+		})
+
+		expect(dropped.show).not.toHaveProperty("showNarration")
+		expect(text((await partsOf(dropped.bytes)).get("ppt/presProps.xml"))).not.toContain("showNarration")
+	})
 })
 
 describe("Set Up Slide Show in an ODP save", () => {
@@ -247,7 +275,7 @@ describe("Set Up Slide Show in an ODP save", () => {
 	it("writes the nearest settings into a fresh ODP and reports what ODF cannot hold", async () => {
 		const fresh = await freshFromPptx(
 			pptxBytes(
-				'<p:showPr loop="1" showNarration="1"><p:kiosk restart="60000"/><p:sldRg st="2" end="3"/><p:penClr><a:prstClr val="red"/></p:penClr></p:showPr>'
+				'<p:showPr loop="1" showNarration="0"><p:kiosk restart="60000"/><p:sldRg st="2" end="3"/><p:penClr><a:prstClr val="red"/></p:penClr></p:showPr>'
 			)
 		)
 

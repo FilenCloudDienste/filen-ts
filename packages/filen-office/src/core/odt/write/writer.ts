@@ -66,6 +66,7 @@ import { runMeaning, translateRun, type SpanFrame } from "./span"
 import { odfText, sourceTextOf, wmlText, type SourceText } from "./sourceText"
 import { runProperties } from "../props"
 import type { OdtSource } from "./source"
+import { TableSpacing, withoutTableSpacing, type SpacingShift } from "./tableSpacing"
 
 // The source-preserving ODT writer. The document was edited as the WordprocessingML package the translator made
 // of it; the docx writer wrote the edited parts, unchanged blocks byte for byte. Each top-level block of the body
@@ -2169,6 +2170,8 @@ class OdtWrite {
 	}
 
 	private pageChanged = false
+	// The space the body's tables add to the paragraphs beside them (tableSpacing.ts); undefined: no table has any.
+	private tableSpacing: TableSpacing | undefined = undefined
 	// A new section's first part set up as the rest of the section it split, by that rest's w:sectPr: its start block.
 	private readonly followers = new Map<number, number>()
 	// Layouts a new section's first part shows as the source had them (a page setup elsewhere keeps them).
@@ -3826,6 +3829,15 @@ class OdtWrite {
 
 		await turn(job)
 
+		const spacing = plan.translation.tableSpacing
+
+		if (spacing !== undefined) {
+			const tables = new TableSpacing(doc, spacing, match, this.context.chains)
+
+			this.tableSpacing = tables
+			this.context.tableSpacing = (document, paragraph) => tables.shift(document, paragraph)
+		}
+
 		// Units kept as they are: every block matched, in order, with nothing inserted between.
 		const kept = new Map<number, { from: number; to: number }>()
 
@@ -4493,7 +4505,7 @@ class OdtWrite {
 
 				if (block === undefined || doc.tBody.localName(block) !== "p") return
 
-				const source = paragraphSource(tree, emitter, doc.tBody, block)
+				const source = paragraphSource(tree, emitter, doc.tBody, block, this.tableSpacing?.shift(doc.tBody, block))
 
 				if (source === undefined || this.breaksPage(source.styleName)) return
 
@@ -5172,7 +5184,7 @@ class OdtWrite {
 				return [restyled]
 			}
 
-			const source = paragraphSource(tree, node, tDoc, t)
+			const source = paragraphSource(tree, node, tDoc, t, this.tableSpacing?.shift(tDoc, t))
 
 			this.written++
 
@@ -5682,7 +5694,9 @@ class OdtWrite {
 
 	// A kept unit's tables that follow the page, where the page setup changed.
 	private fixedTables(unit: Unit): Replacement[] {
-		if (!this.pageChanged) return []
+		const reduced = this.tableSpacing?.reduced
+
+		if (!this.pageChanged && (reduced === undefined || reduced.size === 0)) return []
 
 		const tables: number[] = []
 
@@ -5692,7 +5706,7 @@ class OdtWrite {
 			if (this.doc.tBody.localName(block) === "tbl") tables.push(block)
 		}
 
-		if (tables.length === 0) return []
+		if (tables.length === 0 || (!this.pageChanged && !tables.some(table => reduced?.has(table) === true))) return []
 
 		// The unit's tables in their order (a section's translation may add blocks of its own).
 		const tree = this.plan.tree(unit)
@@ -5741,7 +5755,10 @@ class OdtWrite {
 	): Replacement | undefined {
 		const tDoc = story.tDoc
 
-		if (tDoc.localName(table) !== "tbl" || (!this.pageChanged && master === undefined)) return undefined
+		// Space above or below the edit leaves less of than the table has (tableSpacing.ts).
+		const spacing = tDoc === this.doc.tBody ? this.tableSpacing?.reduced.get(table) : undefined
+
+		if (tDoc.localName(table) !== "tbl" || (!this.pageChanged && master === undefined && spacing === undefined)) return undefined
 
 		const name = attributeNamed(tree, node, "table:style-name")
 
@@ -5752,7 +5769,7 @@ class OdtWrite {
 		const align = properties.attributes.get("table:align") ?? "margins"
 		const follows = this.pageChanged && (align === "margins" || properties.attributes.has("style:rel-width"))
 
-		if (!follows && master === undefined) return undefined
+		if (!follows && master === undefined && spacing === undefined) return undefined
 		if (properties.children.length > 0) throw new OdtWriteRefusal("sections", "restyling a table with a background image")
 
 		const own = resolved.chain[resolved.chain.length - 1]
@@ -5773,7 +5790,9 @@ class OdtWrite {
 		let props = ""
 
 		for (const [key, value] of properties.attributes) {
-			if (!follows || (key !== "style:rel-width" && key !== "style:width" && key !== "table:align"))
+			if (spacing !== undefined && (key === "fo:margin-top" || key === "fo:margin-bottom"))
+				props += ` ${key}="${(key === "fo:margin-top" ? spacing.top : spacing.bottom) / 20}pt"`
+			else if (!follows || (key !== "style:rel-width" && key !== "style:width" && key !== "table:align"))
 				props += ` ${key}="${esc(value)}"`
 		}
 
@@ -6346,14 +6365,21 @@ function numberingOf(document: XmlDocument, paragraph: number): string {
 	return numPr < 0 ? "" : canonicalElement(document, numPr)
 }
 
-// A source paragraph as a written one may take after: its start tag, and its translation's properties.
-function paragraphSource(tree: UnitTree, node: number, tDoc: XmlDocument, paragraph: number): ParagraphSource | undefined {
+// A source paragraph as a written one may take after: its start tag, and its translation's properties (less what the
+// tables beside it add, `shift`).
+function paragraphSource(
+	tree: UnitTree,
+	node: number,
+	tDoc: XmlDocument,
+	paragraph: number,
+	shift?: SpacingShift
+): ParagraphSource | undefined {
 	const name = elementName(tree.document, tree.namespaces, node)
 
 	if (name !== "text:p" && name !== "text:h") return undefined
 
 	const pPr = childNamed(tDoc, paragraph, "pPr")
-	const direct: Props = new Map()
+	let direct: Props = new Map()
 	const mark: Props = new Map()
 
 	if (pPr >= 0) {
@@ -6363,6 +6389,9 @@ function paragraphSource(tree: UnitTree, node: number, tDoc: XmlDocument, paragr
 
 		if (markNode >= 0) readProps(tDoc, markNode, mark)
 	}
+
+	// The translation writes both sides beside a table (Translator.addSpacing): nothing is inherited.
+	if (shift !== undefined) direct = withoutTableSpacing(direct, shift, undefined)
 
 	return {
 		element: name,

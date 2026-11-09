@@ -17,7 +17,8 @@ import type { ApplyContext, ApplyFamily, ApplyResult, Dirt, Touch } from "../app
 import { cloneModel, findShape, sameDigest } from "../changes"
 import { holdDiagramCopies } from "./smartart"
 import { planDelete, sectionsAfterInsert, sectionsAfterMove, type JumpRewrite, type PartOf, type ReferenceFacts } from "../integrity"
-import type { DeckOp, OpOf, RawPart, SlideOp } from "../ops"
+import type { DeckOp, ImportedSlide, NotesOp, OpOf, RawPart, SlideOp } from "../ops"
+import { applyNotes } from "./notes"
 import { type SourceReading } from "./shape"
 import { isRefused } from "../../refusal"
 
@@ -49,6 +50,9 @@ export interface SlideSourceReading extends SourceReading {
 	// A slide restored onto the package's parts (bound to `epoch`), with the parts its delete held: a save in flight
 	// may commit a file without them, and the engine then gives the slide its held parts back.
 	restoredLive?(ref: SlideRef, parts: readonly RawPart[]): void
+	// A slide of another deck (pptx) read from the parts its copy holds as a slide of `layout` (the slide first, then its
+	// notes): related to this deck's layout and notes master (core/pptx/write/importSlide.ts).
+	importSlide?(ref: SlideRef, parts: readonly RawPart[], layout: SlideRef): readonly SlideNode[] | Refused
 	readonly facts: ReferenceFacts
 	readonly partOf: PartOf
 }
@@ -496,6 +500,127 @@ function restore(deck: Deck, op: OpOf<"slide"> & { kind: "restore" }, context: S
 	return { kind: "applied", inverse: { ops: [{ family: "slide", kind: "delete", slides: restored }], bytes: 0 }, op }
 }
 
+// The layout a slide of another deck takes here (PowerPoint's "Use Destination Theme"): among the layouts of the master
+// of the slide it follows (else of the one after it, else the first master), the one of its type and name, else of
+// its type, else of its name, else the first content layout, else the first.
+export function importLayout(deck: Deck, wanted: ImportedSlide["layout"], at: number): SlideRef | undefined {
+	const neighbour = at > 0 ? deck.slides[at - 1] : deck.slides[at]
+	const node = neighbour === undefined ? undefined : deck.nodes.get(neighbour)
+	const master = (node?.parent === undefined ? undefined : deck.nodes.get(node.parent)?.parent) ?? deck.masters[0]
+	const parsed = deck.layouts.flatMap(ref => {
+		const layout = deck.nodes.get(ref)
+
+		return layout?.kind === "layout" ? [layout] : []
+	})
+	const own = parsed.filter(layout => layout.parent === master)
+	const candidates = own.length > 0 ? own : parsed
+	const type = wanted.type === undefined || wanted.type === "cust" ? undefined : wanted.type
+	const name = wanted.name?.trim().toLowerCase()
+	const named = (layout: SlideNode): boolean => name !== undefined && name !== "" && layout.name?.trim().toLowerCase() === name
+	const typed = (layout: SlideNode): boolean => type !== undefined && layout.layoutType === type
+
+	return (
+		candidates.find(layout => typed(layout) && named(layout)) ??
+		candidates.find(typed) ??
+		candidates.find(named) ??
+		candidates.find(layout => layout.layoutType === "obj") ??
+		candidates[0]
+	)?.ref
+}
+
+// The notes ops an import made for slides of a deck without a notes master (their notes as notes the deck makes), by
+// the op as applied: a redo makes them under the same refs.
+const IMPORT_NOTES = new WeakMap<object, readonly NotesOp[]>()
+
+function importSlides(deck: Deck, op: OpOf<"slide"> & { kind: "import" }, context: SlideSourceReading): ApplyResult<typeof op> {
+	if (op.slides.length === 0 || (op.refs !== undefined && op.refs.length !== op.slides.length)) return refused("malformed", "import")
+	if (deck.format !== "pptx" || context.importSlide === undefined) return refused("unsupported", "slides of another deck")
+
+	const at = Math.max(0, Math.min(op.at, deck.slides.length))
+	const read: { readonly ref: SlideRef; readonly layout: SlideRef; readonly nodes: readonly SlideNode[] }[] = []
+	const taken = new Set<SlideRef>()
+
+	// Read first, all or nothing: a refusal leaves the deck as it was.
+	for (const [k, entry] of op.slides.entries()) {
+		const given = op.layouts?.[k]
+		const layout = given !== undefined && deck.nodes.get(given)?.kind === "layout" ? given : importLayout(deck, entry.layout, at)
+
+		if (layout === undefined) return refused("notFound", "a layout for the pasted slide")
+
+		const wanted = op.refs?.[k]
+		let ref = wanted !== undefined && !taken.has(wanted) ? freshRef(deck, wanted, context) : context.newSlideRef()
+
+		while (taken.has(ref) || deck.nodes.has(ref)) ref = context.newSlideRef()
+
+		taken.add(ref)
+
+		const nodes = context.importSlide(ref, entry.parts, layout)
+
+		if (isRefused(nodes)) return nodes
+		if (nodes[0] === undefined) return refused("malformed", "a pasted slide without its part")
+
+		read.push({ ref, layout, nodes })
+	}
+
+	const before = { slides: [...deck.slides], sections: deck.sections }
+	const order = [...deck.slides]
+	let sections: Section[] | undefined
+
+	read.forEach(({ ref, nodes }, k) => {
+		const slide = nodes[0] as SlideNode
+
+		slide.ref = ref
+
+		for (const node of nodes) deck.nodes.set(node.ref, node)
+
+		order.splice(at + k, 0, ref)
+		sections = sectionsAfterInsert(sections ?? deck.sections, order, ref) ?? sections
+	})
+
+	const back: DeckOp[] = [{ family: "slide", kind: "delete", slides: read.map(each => each.ref) }, ...sectionsBack(deck, sections)]
+
+	deck.slides = order
+
+	if (sections !== undefined) deck.sections = sections
+
+	// Notes the deck has no master for come as notes it makes (and its master with the first).
+	const made = IMPORT_NOTES.get(op) ?? []
+	const notesOps: NotesOp[] = []
+	const notesBack: DeckOp[] = []
+
+	for (const [k, entry] of op.slides.entries()) {
+		const slide = read[k]
+
+		if (entry.notes === undefined || slide === undefined || slide.nodes[0]?.notes !== undefined) continue
+
+		const notesOp: NotesOp = made.find(each => each.slide === slide.ref) ?? {
+			family: "notes",
+			kind: "setNotes",
+			slide: slide.ref,
+			body: entry.notes
+		}
+		const applied = applyNotes.apply(deck, notesOp, context)
+
+		if (isRefused(applied)) {
+			for (const each of read) for (const node of each.nodes) deck.nodes.delete(node.ref)
+
+			deck.slides = before.slides
+			deck.sections = before.sections
+
+			return applied
+		}
+
+		notesOps.push(applied.op)
+		notesBack.unshift(...applied.inverse.ops)
+	}
+
+	const applied = { ...op, at, refs: read.map(each => each.ref), layouts: read.map(each => each.layout) }
+
+	if (notesOps.length > 0) IMPORT_NOTES.set(applied, notesOps)
+
+	return { kind: "applied", inverse: { ops: [...notesBack, ...back], bytes: 0 }, op: applied }
+}
+
 function move(deck: Deck, op: OpOf<"slide"> & { kind: "move" }): ApplyResult<typeof op> {
 	const missing = listed(deck, op.slides)
 
@@ -699,6 +824,8 @@ function applyOne(deck: Deck, op: SlideOp, context: ApplyContext): ApplyResult<S
 			return source === undefined ? refused("unsupported", "the reference graph") : remove(deck, op, source)
 		case "restore":
 			return source === undefined ? refused("unsupported", "source markup cannot be read back here") : restore(deck, op, source)
+		case "import":
+			return source === undefined ? refused("unsupported", "slides of another deck") : importSlides(deck, op, source)
 		case "move":
 			return move(deck, op)
 		case "hide":
@@ -752,6 +879,14 @@ function slideTouches(op: SlideOp): readonly Touch[] {
 					]
 				})
 				.concat([presentation("slideList"), presentation("sections"), presentation("customShows")])
+		case "import":
+			return [
+				...(op.refs ?? []).map(ref => slideTouch(ref, { kind: "node" })),
+				...(IMPORT_NOTES.get(op) ?? []).flatMap(notes => applyNotes.touches(notes)),
+				presentation("slideList"),
+				presentation("sections"),
+				presentation("customShows")
+			]
 		case "move":
 			return [presentation("slideList"), presentation("sections")]
 		case "hide":

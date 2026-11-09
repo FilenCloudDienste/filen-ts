@@ -11,6 +11,7 @@ import {
 	type DocxTextColor,
 	type FormattingCommand
 } from "../commands/formatting"
+import { MAX_TWIPS } from "../commands/base"
 import { AttrChanges } from "../attrs"
 import { changeCase } from "../changeCase"
 import type { DocxEditContext } from "../context"
@@ -595,6 +596,46 @@ function indent(context: StoryCommandContext, command: Cmd<"paragraph.indent">):
 	)
 }
 
+// Word's Hanging Indent and Unhang: the start indent steps to the next default tab stop past both the text and
+// the first line (to the previous one, not before the first line), the first line staying put. In twips, the
+// character-unit forms switched off as in indent().
+function hangingIndent(context: StoryCommandContext, command: Cmd<"paragraph.hangingIndent">): Transaction | null {
+	const formats = context.session.formats
+	const tab = context.context.model.settings.defaultTabStop
+	const step = tab !== undefined && tab > 0 ? tab : 720
+
+	return paragraphProperty<IndentAttrs>(
+		context,
+		"indent",
+		(current, at) => {
+			const resolved = formats.paragraph(at.node).props.indent
+			const first = resolved.start + resolved.firstLine
+			let start: number
+
+			if (command.direction > 0) {
+				start = (Math.floor(Math.max(resolved.start, first) / step) + 1) * step
+			} else {
+				if (resolved.firstLine >= 0) return current
+
+				start = Math.max(first, (Math.ceil(resolved.start / step) - 1) * step)
+			}
+
+			if (start > MAX_TWIPS || start < -MAX_TWIPS || start - first > MAX_TWIPS) return current
+
+			const styled = formats.paragraphWith(at.node, { indent: null }).props.indent
+
+			return {
+				...without(current, ["startChars", "firstLine", "firstLineChars", "hangingChars"]),
+				start,
+				hanging: start - first,
+				...(styled.startChars === undefined ? {} : { startChars: 0 }),
+				...(styled.firstLineChars === undefined ? {} : { hangingChars: 0 })
+			}
+		},
+		[]
+	)
+}
+
 interface SpacingValue {
 	readonly before?: number
 	readonly beforeLines?: number
@@ -865,6 +906,7 @@ export const FORMATTING_HANDLERS: FeatureHandlers = {
 		"color.text": runHandler<"color.text">((context, command) => [colorChange(context.context, command.color)]),
 		"color.highlight": runHandler<"color.highlight">((_context, command) => [highlightChange(command.name)]),
 		"paragraph.indent": storyHandler(indent),
+		"paragraph.hangingIndent": storyHandler(hangingIndent),
 		"paragraph.spacing": storyHandler<"paragraph.spacing">(spacing, writable),
 		"paragraph.lineSpacing": storyHandler<"paragraph.lineSpacing">(spacing, writable)
 	},

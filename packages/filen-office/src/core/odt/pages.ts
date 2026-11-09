@@ -76,6 +76,10 @@ export class BodyFlow implements Flow {
 	count = 0
 	private held: Block | undefined
 
+	get last(): Block | undefined {
+		return this.held
+	}
+
 	add(block: Block): void {
 		if (this.held !== undefined) this.writer.add(blockXml(this.held))
 

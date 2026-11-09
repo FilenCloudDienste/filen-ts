@@ -1,6 +1,6 @@
-import { parseLength, type OdfListLevel, type OdfListStyle, type OdfStyleSheet, type StyleScope } from "../odf/index"
-import { fontFamily, type PropsSink } from "./props"
-import { esc, twips } from "./wml"
+import { parseLength, type OdfListLevel, type OdfListStyle, type OdfStyleResolver, type OdfStyleSheet, type StyleScope } from "../odf/index"
+import { fontFamily, runProperties, type Attributes, type PropsSink } from "./props"
+import { esc, REL, twips } from "./wml"
 
 // ODF list styles (Part 3 §16.32) as WordprocessingML abstract numbering, and list instances as w:num:
 // text:list starts a new list unless it continues one (text:continue-numbering, text:continue-list), and a
@@ -87,9 +87,19 @@ export class Lists {
 	private last: { readonly key: string; readonly instance: ListInstance } | undefined
 	private readonly byId = new Map<string, ListInstance>()
 	private outlineInstance: ListInstance | undefined
+	private readonly resolver: OdfStyleResolver
+	// A package picture's word/-relative media part (Frames.mediaPart), shared with the document's pictures.
+	private readonly media: (href: string) => string | undefined
+	// w:numPicBullet elements by picture and size, and numbering.xml's image relationships by media part.
+	private readonly pictureBullets: string[] = []
+	private readonly pictureBulletIds = new Map<string, number>()
+	private readonly relationships: string[] = []
+	private readonly relationshipIds = new Map<string, string>()
 
-	constructor(sheet: OdfStyleSheet) {
+	constructor(sheet: OdfStyleSheet, resolver: OdfStyleResolver, media: (href: string) => string | undefined) {
 		this.sheet = sheet
+		this.resolver = resolver
+		this.media = media
 	}
 
 	get empty(): boolean {
@@ -172,7 +182,12 @@ export class Lists {
 	}
 
 	numberingXml(): string {
-		return `${this.abstracts.join("")}${this.nums.join("")}`
+		return `${this.pictureBullets.join("")}${this.abstracts.join("")}${this.nums.join("")}`
+	}
+
+	// word/_rels/numbering.xml.rels's relationships (picture bullets' images); empty when there are none.
+	numberingRelationships(): readonly string[] {
+		return this.relationships
 	}
 
 	private newInstance(list: OdfListStyle, style: string, scope: StyleScope, sink: PropsSink): ListInstance {
@@ -182,7 +197,7 @@ export class Lists {
 
 		if (known === undefined) {
 			this.abstractIds.set(key, abstract)
-			this.abstracts.push(this.abstractXml(list, abstract, sink))
+			this.abstracts.push(this.abstractXml(list, abstract, scope, sink))
 		}
 
 		// The first list of a style counts from fresh counters; a later one restarts every level.
@@ -216,7 +231,7 @@ export class Lists {
 		return id
 	}
 
-	private abstractXml(list: OdfListStyle, id: number, sink: PropsSink): string {
+	private abstractXml(list: OdfListStyle, id: number, scope: StyleScope, sink: PropsSink): string {
 		let out = `<w:abstractNum w:abstractNumId="${id}"><w:multiLevelType w:val="multilevel"/>`
 		const starts: number[] = []
 
@@ -226,7 +241,7 @@ export class Lists {
 			const style = list.levels.get(level)
 
 			starts.push(levelStart(style))
-			out += this.levelXml(style, level, sink)
+			out += this.levelXml(style, level, scope, sink)
 		}
 
 		this.starts[id] = starts
@@ -234,10 +249,12 @@ export class Lists {
 		return `${out}</w:abstractNum>`
 	}
 
-	private levelXml(level: OdfListLevel | undefined, number: number, sink: PropsSink): string {
+	private levelXml(level: OdfListLevel | undefined, number: number, scope: StyleScope, sink: PropsSink): string {
 		let format = "none"
 		let text = ""
 		let font = ""
+		let bulletFont = false
+		let picture = ""
 
 		if (level?.kind === "bullet") {
 			format = "bullet"
@@ -245,12 +262,19 @@ export class Lists {
 
 			const family = level.textProperties === undefined ? undefined : fontFamily(this.sheet, level.textProperties.attributes, "")
 
+			bulletFont = family !== undefined
+
 			if (family !== undefined) font = `<w:rFonts w:ascii="${esc(family)}" w:hAnsi="${esc(family)}" w:cs="${esc(family)}"/>`
 		} else if (level?.kind === "image") {
-			// A picture bullet (text:list-level-style-image): shown as a plain bullet.
+			// A picture bullet (text:list-level-style-image) as w:numPicBullet; "•" is what a reader without picture
+			// bullets shows. Embedded office:binary-data and pictures the translation does not carry stay "•".
+			const id = this.pictureBullet(level)
+
 			format = "bullet"
 			text = "•"
-			sink.lossy("listLevel")
+
+			if (id === undefined) sink.lossy("listLevel")
+			else picture = `<w:lvlPicBulletId w:val="${id}"/>`
 		} else if (level !== undefined) {
 			const numFormat = level.attributes.get("style:num-format") ?? "1"
 
@@ -294,12 +318,92 @@ export class Lists {
 		const fontSize = level?.textProperties?.attributes.get("fo:font-size")
 		const size = parseLength(fontSize)
 		const relative = level?.attributes.get("text:bullet-relative-size")
-		const rPr = `${font}${size === undefined ? "" : `<w:sz w:val="${Math.round(size * 2)}"/>`}`
+		// The label's character style (text:style-name, §19.874) under the level's own font and size.
+		const label = level?.kind === "image" ? NO_ATTRIBUTES : this.labelAttributes(level?.attributes.get("text:style-name"), scope)
+		const rPr =
+			label.size === 0
+				? `${font}${size === undefined ? "" : `<w:sz w:val="${Math.round(size * 2)}"/>`}`
+				: runProperties(this.sheet, labelWithLevel(label, bulletFont ? level?.textProperties?.attributes : undefined, size), sink)
 
 		// A label size relative to the paragraph's font (text:bullet-relative-size, Part 3 §19.762; a percent fo:font-size) has no w:lvl counterpart: w:sz is absolute.
 		if ((relative !== undefined && relative !== "100%") || (fontSize?.endsWith("%") === true && fontSize !== "100%"))
 			sink.lossy("listLevel")
 
-		return `<w:lvl w:ilvl="${number - 1}"><w:start w:val="${levelStart(level)}"/><w:numFmt w:val="${format}"/>${suffix}<w:lvlText w:val="${esc(text)}"/><w:lvlJc w:val="${jc}"/><w:pPr>${tab}${indent}</w:pPr>${rPr === "" ? "" : `<w:rPr>${rPr}</w:rPr>`}</w:lvl>`
+		return `<w:lvl w:ilvl="${number - 1}"><w:start w:val="${levelStart(level)}"/><w:numFmt w:val="${format}"/>${suffix}<w:lvlText w:val="${esc(text)}"/>${picture}<w:lvlJc w:val="${jc}"/><w:pPr>${tab}${indent}</w:pPr>${rPr === "" ? "" : `<w:rPr>${rPr}</w:rPr>`}</w:lvl>`
 	}
+
+	// A character style's text properties with inheritance; none for a name no text style has.
+	private labelAttributes(name: string | undefined, scope: StyleScope): Attributes {
+		if (name === undefined || name === "" || this.sheet.style("text", name, scope) === undefined) return NO_ATTRIBUTES
+
+		return this.resolver.resolve("text", name, scope).properties("text").attributes
+	}
+
+	// The w:numPicBullet id of an image level's picture (xlink:href), one per picture and size.
+	private pictureBullet(level: OdfListLevel): number | undefined {
+		const href = level.attributes.get("xlink:href")
+		const part = href === undefined ? undefined : this.media(href)
+
+		if (part === undefined) return undefined
+
+		const properties = level.properties.attributes
+		const width = parseLength(properties.get("fo:width"))
+		const height = parseLength(properties.get("fo:height"))
+		// Word scales a picture bullet to the text; the shape's size is what a reader without that uses.
+		const w = Math.round((width ?? height ?? DEFAULT_PICTURE_BULLET) * 100) / 100
+		const h = Math.round((height ?? width ?? DEFAULT_PICTURE_BULLET) * 100) / 100
+		const key = `${part}\u0000${w}\u0000${h}`
+		const known = this.pictureBulletIds.get(key)
+
+		if (known !== undefined) return known
+
+		let rId = this.relationshipIds.get(part)
+
+		if (rId === undefined) {
+			rId = `rId${this.relationships.length + 1}`
+			this.relationshipIds.set(part, rId)
+			this.relationships.push(`<Relationship Id="${rId}" Type="${REL}image" Target="${esc(part)}"/>`)
+		}
+
+		const id = this.pictureBullets.length
+
+		this.pictureBulletIds.set(key, id)
+		this.pictureBullets.push(
+			`<w:numPicBullet w:numPicBulletId="${id}"><w:pict><v:shape xmlns:v="${NS_V}" xmlns:o="${NS_O}" style="width:${w}pt;height:${h}pt" o:bullet="t"><v:imagedata r:id="${rId}" o:title=""/></v:shape></w:pict></w:numPicBullet>`
+		)
+
+		return id
+	}
+}
+
+const NO_ATTRIBUTES: Attributes = new Map()
+const NS_V = "urn:schemas-microsoft-com:vml"
+const NS_O = "urn:schemas-microsoft-com:office:office"
+// Points: Word's own picture bullets' shape size.
+const DEFAULT_PICTURE_BULLET = 9
+
+// A label's character style attributes with what the level sets itself winning: its bullet font (`font`, the
+// level's text properties) and absolute size.
+function labelWithLevel(label: Attributes, font: Attributes | undefined, size: number | undefined): Attributes {
+	const out = new Map(label)
+
+	if (font !== undefined) {
+		for (const name of ["style:font-name", "fo:font-family", "style:font-name-complex", "style:font-family-complex"]) out.delete(name)
+
+		const name = font.get("style:font-name")
+		const family = font.get("fo:font-family")
+
+		// The bullet font for complex script too, as without a character style.
+		if (name !== undefined) {
+			out.set("style:font-name", name)
+			out.set("style:font-name-complex", name)
+		} else if (family !== undefined) {
+			out.set("fo:font-family", family)
+			out.set("style:font-family-complex", family)
+		}
+	}
+
+	if (size !== undefined) out.set("fo:font-size", `${size}pt`)
+
+	return out
 }

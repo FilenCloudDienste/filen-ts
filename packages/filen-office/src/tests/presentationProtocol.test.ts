@@ -140,6 +140,7 @@ function echoHandlers(): { readonly [M in PresentationMethod]: MethodHandler<M> 
 			),
 		clipParts: (_context, names) =>
 			Promise.resolve({ ok: true, parts: names.map(name => ({ name, bytes: new Uint8Array([1, 2]), contentType: "image/png" })) }),
+		clipSlides: () => Promise.resolve({ ok: false, refusal: "unsupported" }),
 		undo: (_context, open) =>
 			Promise.resolve({
 				ok: true,
@@ -315,6 +316,7 @@ describe("the presentation protocol", () => {
 			ok: true,
 			parts: [{ name: "ppt/media/image1.png", bytes: new Uint8Array([1, 2]), contentType: "image/png" }]
 		})
+		expect(await session.call("clipSlides", [slideRef(10)]).answer).toEqual({ ok: false, refusal: "unsupported" })
 		expect(await session.call("image", "/ppt/media/image1.png").answer).toEqual({
 			bytes: new Uint8Array([0x89, 0x50]),
 			type: "image/png"
@@ -472,6 +474,7 @@ describe("the presentation protocol", () => {
 			command: () => session.call("command", { family: "slide", kind: "reset", slide: slideRef(10) }).answer,
 			clip: () => session.call("clip", { kind: "shapes", slide: slideRef(10), shapes: [2] }).answer,
 			clipParts: () => session.call("clipParts", ["ppt/media/image1.png"]).answer,
+			clipSlides: () => session.call("clipSlides", [slideRef(10)]).answer,
 			undo: () => session.call("undo").answer,
 			redo: () => session.call("redo").answer,
 			retract: () => session.call("retract", 1).answer,
@@ -517,6 +520,7 @@ describe("the presentation protocol", () => {
 			"review",
 			"clip",
 			"clipParts",
+			"clipSlides",
 			"outline"
 		])
 

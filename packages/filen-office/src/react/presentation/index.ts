@@ -82,6 +82,7 @@ export {
 } from "./edit/text/keys"
 export { cellNavigation, cellStep, firstPlaceholder, placeholderNavigation, type CellMove, type TextNavigation } from "./edit/text/navigate"
 export { SlideShow, type ShowBarState, type SlideShowProps } from "./show/player"
+export { changePointer, type PointerChange } from "./show/pointer"
 export { type ShowMediaEvents, type ShowMediaHandle, type ShowMediaMount } from "./show/stage"
 export { DEFAULT_SHOW_OPTIONS, showOptionsOf, type ShowOptions } from "./show/timeline"
 export {

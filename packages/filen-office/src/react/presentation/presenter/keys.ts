@@ -1,5 +1,6 @@
 import type { ShowController } from "../show/controller"
 import type { InkStore } from "../ink/store"
+import type { PointerChange } from "../show/pointer"
 
 // The slideshow's keys, PowerPoint's: they drive the show's controller and the ink, from the audience stage and the
 // presenter view alike, and from presentation clickers (which send PageDown, PageUp, B, F5 and Escape). The commands
@@ -21,6 +22,8 @@ export type ShowKeyCommand =
 	| "pen"
 	| "eraser"
 	| "arrow"
+	| "hidePointer"
+	| "togglePointer"
 	| "eraseAll"
 	| "start"
 	| "startCurrent"
@@ -40,7 +43,11 @@ export const DEFAULT_SHOW_BINDINGS: ShowKeyBindings = {
 	laser: "mod+l",
 	pen: "mod+p",
 	eraser: "mod+e",
+	// Also returns the pointer to automatic (hidden once still).
 	arrow: "mod+a",
+	// Ctrl even on a Mac, where the system takes Cmd+H.
+	hidePointer: "ctrl+h",
+	togglePointer: "a,=",
 	eraseAll: "e",
 	// In the editor: from the first slide, from the current one. In the show a clicker's F5 does nothing (and never
 	// reloads the page).
@@ -198,6 +205,8 @@ export interface ShowKeysOptions {
 	readonly count?: () => number
 	readonly bindings?: ShowKeyBindings
 	readonly apple: boolean
+	// The audience stage's pointer (show/pointer.ts changePointer).
+	readonly pointer?: (change: PointerChange) => void
 }
 
 export interface ShowKeys {
@@ -264,6 +273,13 @@ export function createShowKeys(options: ShowKeysOptions): ShowKeys {
 				return
 			case "arrow":
 				ink?.setTool("none")
+				options.pointer?.("automatic")
+				return
+			case "hidePointer":
+				options.pointer?.("hide")
+				return
+			case "togglePointer":
+				options.pointer?.("toggle")
 				return
 			case "eraseAll": {
 				const slide = options.slide?.()
@@ -315,7 +331,10 @@ export function createShowKeys(options: ShowKeysOptions): ShowKeys {
 			event.stopPropagation()
 
 			// Holding a toggle or Escape does not flip it back and forth; held arrows step on.
-			if (event.repeat === true && (command === "black" || command === "white" || command === "end" || command === "eraseAll"))
+			if (
+				event.repeat === true &&
+				(command === "black" || command === "white" || command === "end" || command === "eraseAll" || command === "togglePointer")
+			)
 				return true
 
 			run(command)

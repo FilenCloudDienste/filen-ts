@@ -211,8 +211,9 @@ describe("drawings on a PDF page", () => {
 		fonts.close()
 		expect(text).toContain("2 0 0 2 10 10 cm")
 		expect(text).toContain("1 0 0 1 5 5 cm")
-		expect(text).toContain("0 0 m\n10 10 l\nh\n0.2 0.4 0.6 rg\nf")
-		expect(text).toContain("[4 3 ] 0 d\nS")
+		// Colour, width and dashes set before the path is built (no state operators inside a path object).
+		expect(text).toContain("0.2 0.4 0.6 rg\n0 0 m\n10 10 l\nh\nf")
+		expect(text).toContain("[4 3 ] 0 d\n0 0 m\n10 10 l\nh\nS")
 		expect(text).toMatch(/\/F\d+ 13\.33 Tf/)
 		expect(ItemFloat.WIDTH).toBe(8)
 		expect(ItemInt.REF).toBe(6)

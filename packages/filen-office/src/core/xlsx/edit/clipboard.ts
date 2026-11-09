@@ -22,8 +22,9 @@ import {
 	type ClipValue
 } from "../../sheet/clipboard/html"
 import { r1c1ToA1 } from "../../sheet/clipboard/r1c1"
-import { pastedCells, pasteRepeats, type GridClip } from "../../sheet/clipboard/tsv"
+import { clipRows, parseTsv, pastedCells, pasteRepeats, type GridClip } from "../../sheet/clipboard/tsv"
 import { cellKey } from "../../sheet/model/model"
+import { rowHidden, visibleRanges, type RowSpan } from "../../sheet/visibleRows"
 import { formulaTranslator, rewriteFormula, sameSheet } from "../../sheet/refs/formulaRefs"
 import { sliceClock, type Slicing } from "../../slicing"
 import type { SheetStore } from "../model/store"
@@ -34,6 +35,7 @@ import { nameWithFormula } from "../refs/plan"
 import { parseRef } from "../refs/sqref"
 import type { XlsxDocument } from "./document"
 import { readEntry, setCells, splitsArray, unshare, type CellInputs } from "./cells"
+import { filteredOutRows } from "./filter"
 import { appendXf, patchXf, StyleLimitError } from "./format"
 import { mergeCells, mergeRefusal } from "./merge"
 import { changedBorder } from "./formatBorders"
@@ -79,20 +81,73 @@ export async function copyCells(
 	// A sheet an edit took away while the request was on its way has nothing to copy.
 	if (document.workbook.sheet(sheet) === undefined) return { clip: document.nextClip++, text: "" }
 
-	const clip = await clipOf(document, sheet, range, cut, document.nextClip++)
+	// A copy of filtered data takes its visible rows only; a cut moves the whole range, hidden rows too, as Excel's does.
+	const clip = await clipOf(document, sheet, range, cut, document.nextClip++, !cut)
 
 	document.clip = clip
 
 	return { clip: clip.id, text: clip.grid.tsv }
 }
 
+interface CopiedRows {
+	// The runs of rows copied, in order.
+	readonly runs: readonly SheetRange[]
+	// The source row of each copied row, when the runs leave rows out.
+	readonly sourceRows?: Uint32Array
+}
+
+// The rows a copy of `range` takes: while the sheet is filtered, its visible rows only (filteredOutRows), as Excel
+// copies filtered data; every row otherwise.
+function copiedRows(document: XlsxDocument, model: XlsxSheetModel, range: SheetRange, visibleOnly: boolean): CopiedRows {
+	const whole = [range]
+	const runs = visibleOnly ? visibleRanges(whole, filteredOutRows(document, model)) : whole
+
+	if (runs === whole) return { runs }
+
+	let count = 0
+
+	for (const run of runs) count += run.endRow - run.startRow + 1
+
+	const sourceRows = new Uint32Array(count)
+	let i = 0
+
+	for (const run of runs) for (let row = run.startRow; row <= run.endRow; row++) sourceRows[i++] = row
+
+	return { runs, sourceRows }
+}
+
+// Each cell of `runs` with its row in the copy (the runs' rows one after the other).
+function forEachCopied(
+	store: SheetStore,
+	runs: readonly SheetRange[],
+	visit: (row: number, col: number, slot: number, clipRow: number) => void
+): void {
+	let base = 0
+
+	for (const run of runs) {
+		const start = run.startRow - base
+
+		store.forEachCell(run, (row, col, slot) => visit(row, col, slot, row - start))
+		base += run.endRow - run.startRow + 1
+	}
+}
+
 // The record a copy of `range` makes (its text, entries, formats and markup), held nowhere: a copy keeps it as the
-// session's latest, a drag of the cells (cells.move) pastes it at once and leaves the clipboard's alone.
-export async function clipOf(document: XlsxDocument, sheet: SheetId, range: SheetRange, cut: boolean, id: number): Promise<XlsxClip> {
-	const rows = range.endRow - range.startRow + 1
+// session's latest, a drag of the cells (cells.move) pastes it at once and leaves the clipboard's alone. `visibleOnly`:
+// the rows a filter hides are left out.
+export async function clipOf(
+	document: XlsxDocument,
+	sheet: SheetId,
+	range: SheetRange,
+	cut: boolean,
+	id: number,
+	visibleOnly = false
+): Promise<XlsxClip> {
 	const cols = range.endCol - range.startCol + 1
 	const model = await document.ready(sheet)
 	const store = model.store as SheetStore
+	const { runs, sourceRows } = copiedRows(document, model, range, visibleOnly)
+	const rows = sourceRows?.length ?? range.endRow - range.startRow + 1
 	const lines: string[][] = Array.from({ length: rows }, () => new Array<string>(cols).fill(""))
 	const inputs = new Map<number, string>()
 	const styles = new Map<number, number>()
@@ -101,10 +156,10 @@ export async function clipOf(document: XlsxDocument, sheet: SheetId, range: Shee
 	const { dateBase } = document
 	const locale = document.settings.locale
 
-	store.forEachCell(range, (row, col, slot) => {
+	forEachCopied(store, runs, (row, col, slot, clipRow) => {
 		const view = document.cellView(sheet, row, col)
-		const offset = cellKey(row - range.startRow, col - range.startCol)
-		const line = lines[row - range.startRow]
+		const offset = cellKey(clipRow, col - range.startCol)
+		const line = lines[clipRow]
 		const value = copiedValue(document, model, sheet, row, col, view.text)
 		const formula = store.formula(slot) >= 0
 
@@ -137,7 +192,7 @@ export async function clipOf(document: XlsxDocument, sheet: SheetId, range: Shee
 	return {
 		id,
 		sheet,
-		grid: { tsv: text, sheet: entry?.name ?? "", range, cut, inputs },
+		grid: { tsv: text, sheet: entry?.name ?? "", range, cut, inputs, ...(sourceRows !== undefined && { sourceRows }) },
 		styles,
 		sources,
 		values
@@ -446,6 +501,17 @@ function ownClip(document: XlsxDocument, clipId: number | undefined, text: strin
 		: null
 }
 
+const NO_ROWS: readonly RowSpan[] = []
+
+// The rows a paste repeated down an area leaves out: while the sheet is filtered and the pasted block is one row
+// (`tileRows`, read only then), the hidden ones, as Excel fills a filtered selection's visible cells only; none
+// otherwise, a taller block landing on consecutive rows.
+function repeatSkips(document: XlsxDocument, model: XlsxSheetModel, tileRows: () => number): readonly RowSpan[] {
+	const hidden = filteredOutRows(document, model)
+
+	return hidden.length > 0 && tileRows() === 1 ? hidden : NO_ROWS
+}
+
 // A values paste of `clip`: its values in full (numbers and formulas' results, in the file's own syntax), its other
 // entries but formulas (quoted text), else what the cells show; never a cut.
 function valuesGrid(clip: XlsxClip): GridClip {
@@ -502,20 +568,23 @@ export async function pasteClip(
 	if (target === undefined) return { refused: { reason: "tooLarge" } }
 
 	// The paste area's merges: a copy that would cut through one is pasted once.
-	const merges = area === undefined ? undefined : (await document.ready(sheet)).merges
-	const block = pastedCells(text, grid, at, target.name, SHEET_MAX_EDIT_CELLS, area, merges)
+	const model = await document.ready(sheet)
+	const block = pastedCells(text, grid, at, target.name, SHEET_MAX_EDIT_CELLS, area, area === undefined ? undefined : model.merges)
 
 	if (block === null || block.cells.length === 0) return block === null ? { refused: { reason: "tooLarge" } } : null
 
 	const range = { startRow: at.row, startCol: at.col, endRow: at.row + block.rows - 1, endCol: at.col + block.cols - 1 }
 	// A pasted cell's offset in the clip (the same in every copy of it).
-	const clipRows = grid === null ? 1 : grid.range.endRow - grid.range.startRow + 1
+	const heldRows = grid === null ? 1 : clipRows(grid)
 	const clipCols = grid === null ? 1 : grid.range.endCol - grid.range.startCol + 1
 	const offsetOf = (cell: { readonly row: number; readonly col: number }): number =>
-		cellKey((cell.row - at.row) % clipRows, (cell.col - at.col) % clipCols)
-	const styles = own === null ? undefined : Int32Array.from(block.cells, cell => own.styles.get(offsetOf(cell)) ?? 0)
+		cellKey((cell.row - at.row) % heldRows, (cell.col - at.col) % clipCols)
+	// One row repeated down a filtered area lands on its visible rows only, as Excel pastes it.
+	const skipped = block.rows > 1 ? repeatSkips(document, model, () => (grid === null ? parseTsv(text).length : heldRows)) : NO_ROWS
+	const cells = skipped.length === 0 ? block.cells : block.cells.filter(cell => !rowHidden(skipped, cell.row))
+	const styles = own === null ? undefined : Int32Array.from(cells, cell => own.styles.get(offsetOf(cell)) ?? 0)
 	// A values paste's own entries are in the file's own syntax; what the cells show is read in the session's locale.
-	const canonical = values && grid !== null ? Uint8Array.from(block.cells, cell => (grid.inputs.has(offsetOf(cell)) ? 1 : 0)) : undefined
+	const canonical = values && grid !== null ? Uint8Array.from(cells, cell => (grid.inputs.has(offsetOf(cell)) ? 1 : 0)) : undefined
 	const cut = own?.grid.cut === true ? own : null
 	const plan = cut === null ? null : await planCut(document, cut, sheet, range, slicing)
 
@@ -526,15 +595,15 @@ export async function pasteClip(
 	const origins =
 		own === null || own.sources.size === 0
 			? undefined
-			: Float64Array.from(block.cells, cell => {
+			: Float64Array.from(cells, cell => {
 					const source = own.sources.get(offsetOf(cell))
 
 					return source === undefined ? -1 : store.carry(source)
 				})
 	const inputs: CellInputs = {
-		rows: Uint32Array.from(block.cells, cell => cell.row),
-		cols: Uint32Array.from(block.cells, cell => cell.col),
-		inputs: block.cells.map(cell => cell.input),
+		rows: Uint32Array.from(cells, cell => cell.row),
+		cols: Uint32Array.from(cells, cell => cell.col),
+		inputs: cells.map(cell => cell.input),
 		...(styles !== undefined && { styles }),
 		...(origins !== undefined && { origins }),
 		...(canonical !== undefined && { canonical })
@@ -609,7 +678,12 @@ function copiedValue(document: XlsxDocument, model: XlsxSheetModel, sheet: Sheet
 
 // A range as clipboard HTML (html.ts): what each cell shows, its value, formula and format. Null past
 // MAX_HTML_COPY_CELLS or MAX_HTML_COPY_LENGTH.
-export async function copyHtml(document: XlsxDocument, sheet: SheetId, range: SheetRange): Promise<SheetQueryResult<"copyHtml">> {
+export async function copyHtml(
+	document: XlsxDocument,
+	sheet: SheetId,
+	range: SheetRange,
+	cut = false
+): Promise<SheetQueryResult<"copyHtml">> {
 	const rows = range.endRow - range.startRow + 1
 	const cols = range.endCol - range.startCol + 1
 
@@ -618,12 +692,14 @@ export async function copyHtml(document: XlsxDocument, sheet: SheetId, range: Sh
 	const model = await document.ready(sheet)
 	const store = model.store as SheetStore
 	const cells = new Map<number, ClipOutCell>()
+	// The rows copyCells takes, so the HTML and the text hold the same cells.
+	const { runs, sourceRows } = copiedRows(document, model, range, !cut)
 
-	store.forEachCell(range, (row, col, slot) => {
+	forEachCopied(store, runs, (row, col, slot, clipRow) => {
 		const view = document.cellView(sheet, row, col)
 		const formula = store.formula(slot)
 
-		cells.set(cellKey(row - range.startRow, col - range.startCol), {
+		cells.set(cellKey(clipRow, col - range.startCol), {
 			text: view.text,
 			value: copiedValue(document, model, sheet, row, col, view.text),
 			// In the file's own syntax, whatever the session's locale shows (a paste reads it so).
@@ -636,11 +712,12 @@ export async function copyHtml(document: XlsxDocument, sheet: SheetId, range: Sh
 
 	return {
 		html: clipboardHtml(
-			rows,
+			sourceRows?.length ?? rows,
 			cols,
 			{ row: range.startRow, col: range.startCol },
 			(row, col) => cells.get(cellKey(row, col)) ?? null,
-			MAX_HTML_COPY_LENGTH
+			MAX_HTML_COPY_LENGTH,
+			sourceRows
 		)
 	}
 }
@@ -744,11 +821,14 @@ export async function pasteHtml(
 
 	if (table.cells.length * copies > SHEET_MAX_EDIT_CELLS) return { refused: { reason: "tooLarge" } }
 
+	// One row repeated down a filtered area lands on its visible rows only (repeatSkips).
+	const skipped = down > 1 ? repeatSkips(document, model, () => table.rows) : NO_ROWS
+	const skips = (tileRow: number): boolean => skipped.length > 0 && rowHidden(skipped, at.row + tileRow)
 	// The table's spans are merged where they land, as Excel pastes them; one that cannot be is a refusal up front.
 	const merges: SheetRange[] = []
 
 	for (let tileRow = 0; tileRow < down; tileRow++)
-		for (let tileCol = 0; tileCol < across; tileCol++) {
+		for (let tileCol = 0; tileCol < across && !skips(tileRow); tileCol++) {
 			const row = at.row + tileRow * table.rows
 			const col = at.col + tileCol * table.cols
 
@@ -773,12 +853,11 @@ export async function pasteHtml(
 	const inputs: string[] = []
 	const styles = new Int32Array(count)
 	const canonical = new Uint8Array(count)
+	let i = 0
 
 	try {
-		let i = 0
-
 		for (let tileRow = 0; tileRow < down; tileRow++)
-			for (let tileCol = 0; tileCol < across; tileCol++)
+			for (let tileCol = 0; tileCol < across && !skips(tileRow); tileCol++)
 				for (const cell of table.cells) {
 					const row = at.row + tileRow * table.rows + cell.row
 					const col = at.col + tileCol * table.cols + cell.col
@@ -797,10 +876,11 @@ export async function pasteHtml(
 		throw error
 	}
 
+	const written = { rows: rows.subarray(0, i), cols: cols.subarray(0, i), inputs, canonical: canonical.subarray(0, i) }
 	const handled = await setCells(
 		document,
 		sheet,
-		formatted ? { rows, cols, inputs, styles, canonical } : { rows, cols, inputs, canonical },
+		formatted ? { ...written, styles: styles.subarray(0, i) } : written,
 		changes,
 		undefined,
 		slicing

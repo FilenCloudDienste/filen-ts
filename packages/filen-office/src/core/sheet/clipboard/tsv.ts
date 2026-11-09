@@ -12,6 +12,19 @@ export interface GridClip {
 	range: CellRange
 	cut: boolean
 	inputs: ReadonlyMap<number, string>
+	// A copy of a filtered range holds its visible rows only (as Excel copies one): the source row of each, in order.
+	// Absent, the clip holds every row of the range.
+	sourceRows?: ArrayLike<number>
+}
+
+// How many rows the clip holds.
+export function clipRows(clip: GridClip): number {
+	return clip.sourceRows?.length ?? rangeRows(clip.range)
+}
+
+// The row clip row `offset` was copied from.
+function sourceRow(clip: GridClip, offset: number): number {
+	return clip.sourceRows === undefined ? clip.range.startRow + offset : (clip.sourceRows[offset] ?? clip.range.startRow + offset)
 }
 
 // A cut formula's references as spreadsheets move them: one into the cut range follows its cells to
@@ -60,6 +73,10 @@ function movedFormula(formula: string, clip: GridClip, to: CellPosition, sheet: 
 // The clip's own entries pasted with its top-left cell at `to` on `sheet`, by offset in the range. A
 // formula's references move as spreadsheets move them: a copy's relative ones by the paste's offset, a
 // cut's as movedFormula does.
+function rowOf(offset: number): number {
+	return Math.floor(offset / MAX_COLUMNS)
+}
+
 export function pastedInputs(clip: GridClip, to: CellPosition, sheet: string): Map<number, string> {
 	const pasted = new Map<number, string>()
 
@@ -74,7 +91,11 @@ export function pastedInputs(clip: GridClip, to: CellPosition, sheet: string): M
 
 		pasted.set(
 			offset,
-			`=${clip.cut ? movedFormula(formula, clip, to, sheet) : formulaTranslator(formula)(to.row - clip.range.startRow, to.col - clip.range.startCol)}`
+			`=${
+				clip.cut
+					? movedFormula(formula, clip, to, sheet)
+					: formulaTranslator(formula)(to.row + rowOf(offset) - sourceRow(clip, rowOf(offset)), to.col - clip.range.startCol)
+			}`
 		)
 	}
 
@@ -185,7 +206,7 @@ export function pastedCells(
 		return { cells, rows: rows * down, cols: cols * across, clip: null }
 	}
 
-	const rows = rangeRows(clip.range)
+	const rows = clipRows(clip)
 	const cols = rangeCols(clip.range)
 
 	if (clip.cut) {
@@ -248,7 +269,7 @@ export function pastedCells(
 				input:
 					formula === undefined
 						? (clip.inputs.get(offset) ?? fields[rowOffset]?.[colOffset] ?? "")
-						: `=${formula(to.row + row - rowOffset - clip.range.startRow, to.col + col - colOffset - clip.range.startCol)}`
+						: `=${formula(to.row + row - sourceRow(clip, rowOffset), to.col + col - colOffset - clip.range.startCol)}`
 			})
 		}
 	}

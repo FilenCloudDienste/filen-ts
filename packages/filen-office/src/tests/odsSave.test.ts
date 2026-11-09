@@ -208,3 +208,56 @@ describe("an ODS save", () => {
 		session.close()
 	})
 })
+
+// ODF 1.3 Part 2 §3.8: the preview shows the document as it opens; a save that rewrites it cannot redraw it.
+describe("an ODS save's preview image", () => {
+	const THUMBNAIL = "Thumbnails/thumbnail.png"
+	const PNG = Uint8Array.of(0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a)
+	const withPreview = (parts: Partial<OdsParts> = {}): Uint8Array =>
+		odsBytes({ body: table("One", "", ROWS), extra: [{ name: THUMBNAIL, data: PNG }], ...parts })
+	const manifest = (bytes: Uint8Array): string => strFromU8(unzipSync(bytes)["META-INF/manifest.xml"] ?? new Uint8Array(0))
+
+	it("is dropped with its manifest entry once a cell is edited", async () => {
+		const { session, sheet } = await open(withPreview())
+
+		await session.command(set(sheet, 0, 1, "hello"))
+
+		const written = await saved(session)
+
+		expect(Object.keys(unzipSync(written))).not.toContain(THUMBNAIL)
+		expect(manifest(written)).not.toContain(THUMBNAIL)
+		expect(manifest(written)).toContain('manifest:full-path="content.xml"')
+		expect(await rows(written)).toEqual([["1", "hello", "2"], ["7"], ["7"], ["7"]])
+		session.close()
+	})
+
+	it("is kept by a save that writes nothing new", async () => {
+		const { session, sheet, bytes } = await open(withPreview())
+
+		expect(await saved(session)).toEqual(bytes)
+
+		await session.command(set(sheet, 0, 1, "hello"))
+		await session.undo()
+
+		const written = await saved(session)
+
+		expect(unzipSync(written)[THUMBNAIL]).toEqual(PNG)
+		expect(manifest(written)).toContain(THUMBNAIL)
+		session.close()
+	})
+
+	it("is dropped while a new settings.xml is listed in the same manifest", async () => {
+		const { session, sheet } = await open(withPreview())
+
+		await session.command({ type: "view.freeze", sheet, rows: 2, cols: 0 })
+
+		const written = await saved(session)
+		const files = unzipSync(written)
+
+		expect(Object.keys(files)).toContain("settings.xml")
+		expect(Object.keys(files)).not.toContain(THUMBNAIL)
+		expect(manifest(written)).toContain('manifest:full-path="settings.xml"')
+		expect(manifest(written)).not.toContain(THUMBNAIL)
+		session.close()
+	})
+})

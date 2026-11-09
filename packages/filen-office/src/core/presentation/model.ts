@@ -640,7 +640,8 @@ export type LockReason = "proofFailed" | "alternateContent" | "unknownFrame" | "
 export interface ShowSettings {
 	kind: "present" | "browse" | "kiosk"
 	loop: boolean
-	showNarration: boolean
+	// Absent: the file does not say, and narration plays (PowerPoint); false: Show without narration.
+	showNarration?: boolean
 	showAnimation: boolean
 	useTimings: boolean
 	range:

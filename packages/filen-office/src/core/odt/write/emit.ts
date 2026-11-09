@@ -17,6 +17,7 @@ import { PARAGRAPH_SKIPPED, StyleChains, canonicalElement, descendant, readProps
 import { mapText, wmlText, type SourceText, type TextMapping } from "./sourceText"
 import { ByteKeyMap } from "./byteKeys"
 import { effectiveTable, gridSpan, type EffectiveTable } from "./tables"
+import { withoutTableSpacing, type SpacingShift } from "./tableSpacing"
 import { levelGeometry } from "../lists"
 
 // WordprocessingML blocks written as ODF text (Part 3 §5, §9, §6): paragraphs and headings with their runs as
@@ -539,6 +540,8 @@ export interface EmitContext {
 	bookmarkName(document: XmlDocument, id: string): string | undefined
 	// A table the source has (as it was, or with rows changed), by the edited w:tbl.
 	table?: ((document: XmlDocument, table: number) => string | undefined) | undefined
+	// The space tables beside a paragraph of the body add to its own when read (tableSpacing.ts).
+	tableSpacing?: ((document: XmlDocument, paragraph: number) => SpacingShift | undefined) | undefined
 }
 
 // A paragraph's inline content as written: a trailing raw space as text:s, which consumers keep (Part 3 §6.1.2 step 5).
@@ -1004,7 +1007,7 @@ export class OdfEmitter {
 
 		if (pPr >= 0 && child(document, pPr, "pPrChange") >= 0) this.refuseProperty("paragraph", "pPrChange")
 
-		const own = this.paragraphProps(document, pPr)
+		const own = this.shifted(this.paragraphProps(document, pPr), context.tableSpacing?.(document, node))
 		const direct = this.listIndents(own.props)
 		// Numbering is where the paragraph sits (its list), not how it looks: a source paragraph matches without it.
 		const pPrKey = direct === own.props ? own.key : propsKey(withoutNumbering(direct))
@@ -1603,6 +1606,19 @@ export class OdfEmitter {
 		}
 
 		return known
+	}
+
+	// Paragraph properties less the space tables beside the paragraph add when read (tableSpacing.ts).
+	private shifted(
+		own: { readonly props: Props; readonly key: string },
+		shift: SpacingShift | undefined
+	): { readonly props: Props; readonly key: string } {
+		if (shift === undefined) return own
+
+		const inherited = this.context.chains.paragraph(own.props.get("pStyle")?.attributes.get("val")).pPr.get("spacing")
+		const props = withoutTableSpacing(own.props, shift, inherited)
+
+		return { props, key: propsKey(withoutNumbering(props)) }
 	}
 
 	// A run's properties and their key, by the rPr's bytes (documents repeat a few run property sets). Read only.

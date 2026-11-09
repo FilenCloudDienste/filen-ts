@@ -15,12 +15,12 @@ import type { ByteChunks } from "../../opc/pieces"
 import { DEFAULT_PRESENTATION_BUDGETS } from "../../presentation/budget"
 import { MIN_MASTER_LAYOUT_ID, MIN_SLIDE_ID } from "../../presentation/ids"
 import { PresentationError, refused, slideRef, type Deck, type Refused, type SlideNode, type SlideRef } from "../../presentation/model"
-import { NodeKind, decodeUtf8, encodeUtf8, escapeAttribute, escapeText, parseXml, type XmlDocument } from "../../xml/index"
+import { NodeKind, XmlEditor, decodeUtf8, encodeUtf8, escapeAttribute, escapeText, parseXml, type XmlDocument } from "../../xml/index"
 import { G, partReader, type PartReader } from "../read/xml"
 import { IMAGE_RELATIONSHIP, PREFIXES, URIS, attr, type EmitContext, type SourceCopier } from "./emit/shape"
 import { emitFamilyOf, emitPptx } from "./emit"
 import { slideRoot } from "./emit/slide"
-import { spliceShowPr } from "./emit/presentation"
+import { freshViewPr, spliceShowPr } from "./emit/presentation"
 import { listStyleXml } from "./emit/text"
 import { XLSX_CONTENT_TYPE } from "../../presentation/edit/apply/chart"
 import { PART_CONTENT_TYPES, PackageWriter, RELATIONSHIPS, modelName, zipName } from "./parts"
@@ -1035,7 +1035,11 @@ class Fresh {
 			packageRels.add(`${TRANSITIONAL_RELATIONSHIPS}custom-properties`, "docProps/custom.xml", false)
 		}
 
-		writer.add("ppt/viewProps.xml", PART_CONTENT_TYPES.viewProps, encodeUtf8(`${XML_DECLARATION}<p:viewPr${ROOT_NAMESPACES}/>`))
+		writer.add(
+			"ppt/viewProps.xml",
+			PART_CONTENT_TYPES.viewProps,
+			(await this.sourceViewPr()) ?? encodeUtf8(`${XML_DECLARATION}<p:viewPr${ROOT_NAMESPACES}/>`)
+		)
 		presentationRels.add(`${RELATIONSHIPS}viewProps`, "ppt/viewProps.xml", false)
 
 		const presentation = await this.presentationXml(masterIds, notesMasterId, handoutId, slideIds, presentationRels)
@@ -1084,6 +1088,26 @@ class Fresh {
 		)?.partName
 
 		return main !== undefined && opc.has(main) ? main : undefined
+	}
+
+	// The source's view settings (grid, guides, snapping) as a fresh viewProps part keeps them; undefined without a
+	// readable one.
+	private async sourceViewPr(): Promise<Uint8Array | undefined> {
+		const part = await this.related("viewProps")
+
+		if (part === undefined || this.source === undefined) return undefined
+
+		let document: XmlDocument
+
+		try {
+			document = await this.source.package.xml(part)
+		} catch (error) {
+			if (error instanceof XmlError) return undefined
+
+			throw error
+		}
+
+		return freshViewPr(document, new XmlEditor(document))
 	}
 
 	private async related(kind: string): Promise<string | undefined> {

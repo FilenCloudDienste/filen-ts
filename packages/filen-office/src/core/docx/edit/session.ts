@@ -49,7 +49,7 @@ import { MarkChanges, MarkSetChanges } from "./marks"
 import { AttrChanges } from "./attrs"
 import { baseFits } from "./formatting"
 import { knowOrigins } from "./origin"
-import { commandAllowed, internalViolation } from "./protection"
+import { commandAllowed, internalViolation, type DocxProtectionChange } from "./protection"
 import { readOnlyReasons, type DocxReadOnlyReason } from "./readOnly"
 import { registeredTransformer, storyHandler, type DocxTransactionTransformer, type StoryCommandContext } from "./registry"
 import { FORMATTING_MARKS, NO_SOURCE, docxSchema, inlineLevel, type IndentAttrs, type LockReason } from "./schema"
@@ -497,6 +497,8 @@ export class DocxEditorSession {
 	private saved: Node
 	// The track switch as last saved (or opened): a save writes it into settings.xml, so turning it is an edit.
 	private savedTracking: boolean
+	// The protection set or stopped as last saved (or opened): a save writes it too.
+	private savedProtection: DocxProtectionChange | undefined
 	private version = 0
 	private cached: DocxEditorSnapshot | null = null
 	private disposed = false
@@ -552,6 +554,7 @@ export class DocxEditorSession {
 
 		this.saved = this.current.doc
 		this.savedTracking = context.review.tracking
+		this.savedProtection = context.protectionChange
 
 		sessionMade(context, this)
 	}
@@ -947,13 +950,19 @@ export class DocxEditorSession {
 		return this.snapshot().enabled[type]
 	}
 
-	// Call after the document was written: it is no longer dirty. `doc` and `tracking` are the document and the
-	// track switch as the save read them, so edits made while the file was written or stored stay unsaved.
-	markSaved(doc: Node = this.current.doc, tracking: boolean = this.context.review.tracking): void {
-		if (doc === this.saved && tracking === this.savedTracking) return
+	// Call after the document was written: it is no longer dirty. `doc`, `tracking` and `protection` are the
+	// document, the track switch and the protection change as the save read them, so edits made while the file was
+	// written or stored stay unsaved.
+	markSaved(
+		doc: Node = this.current.doc,
+		tracking: boolean = this.context.review.tracking,
+		protection: DocxProtectionChange | undefined = this.context.protectionChange
+	): void {
+		if (doc === this.saved && tracking === this.savedTracking && protection === this.savedProtection) return
 
 		this.saved = doc
 		this.savedTracking = tracking
+		this.savedProtection = protection
 		this.changed()
 	}
 
@@ -1671,6 +1680,7 @@ export class DocxEditorSession {
 		const cached = this.dirtyOf
 
 		if (this.context.review.persist && this.context.review.tracking !== this.savedTracking) return true
+		if (this.context.protectionChange !== this.savedProtection) return true
 		if (cached !== null && cached.doc === doc && cached.saved === this.saved) return cached.dirty
 
 		const dirty = !this.saved.eq(doc)

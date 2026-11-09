@@ -598,6 +598,30 @@ export class PdfWriter implements PdfObjectSink {
 		return { shading, state: this.extGState({ softMask: form }) }
 	}
 
+	// A luminosity soft mask drawn by `content` (gray operators only, no resources) over `bbox`, in the space the
+	// ExtGState is set in (§11.6.5.2): what it leaves black, outside its painting included, is masked out.
+	async softMask(
+		content: Uint8Array,
+		bbox: readonly [number, number, number, number]
+	): Promise<{ readonly name: string; readonly ref: PdfRef }> {
+		const form = this.allocate()
+
+		await this.stream(
+			form,
+			{
+				Type: pdfName("XObject"),
+				Subtype: pdfName("Form"),
+				BBox: bbox.map(round),
+				Group: { Type: pdfName("Group"), S: pdfName("Transparency"), CS: pdfName("DeviceGray") },
+				Resources: {}
+			},
+			content,
+			{ compress: true }
+		)
+
+		return this.extGState({ softMask: form })
+	}
+
 	// A Gouraud mesh as a shading, written once per document however often it is painted (a scene on a master, a
 	// deck's repeated picture): the same stream and opacity share one shading. Undefined for a mesh the stream
 	// refuses (bounds that are no page geometry); the caller paints its mean colour.

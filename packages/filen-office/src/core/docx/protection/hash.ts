@@ -3,8 +3,8 @@ import { partReader } from "../model/reader"
 import type { DocxSettings } from "../model/settings"
 
 // The password hash of w:writeProtection (ECMA-376 Part 1 §17.15.1.93, "password to modify") and of
-// w:documentProtection (§17.15.1.29), read for verifying a password; nothing here hashes (that is the
-// platform's: dom/protection.ts). Word writes the transitional attributes (w:cryptAlgorithmSid,
+// w:documentProtection (§17.15.1.29), read for verifying a password, and the attributes a new one is written
+// with; nothing here hashes (that is the platform's: dom/protection.ts). Word writes the transitional attributes (w:cryptAlgorithmSid,
 // w:cryptSpinCount, w:hash, w:salt; ECMA-376 1st ed. Part 4 §2.15.1.28, §2.15.1.94), or the ISO ones
 // (w:algorithmName, w:hashValue, w:saltValue, w:spinCount) when UseIsoPasswordVerifier is set (MS-OI29500
 // §2.1.426 b). Both hash alike ([MS-OFFCRYPTO] §2.4.2.4): H0 = H(salt + input), then Hn = H(Hn-1 + LE32(i))
@@ -35,6 +35,15 @@ export interface ProtectionHash {
 // computes (MD2, MD4, MD5, RIPEMD, WHIRLPOOL, an extension algorithm) or with out-of-bounds parameters.
 export type ProtectionHashRead = ProtectionHash | "unsupported" | undefined
 
+// A w:documentProtection password hash to write, as Word writes one: the transitional attributes, the password's
+// legacy verifier hashed (dom/protection.ts hashDocumentProtectionPassword). base64Binary.
+export interface DocumentProtectionHash {
+	readonly algorithm: ProtectionHashName
+	readonly hash: string
+	readonly salt: string
+	readonly spinCount: number
+}
+
 // The cryptAlgorithmSid values (Part 4 §2.15.1.28) with a platform digest; the rest are unsupported.
 const ALGORITHM_SIDS: ReadonlyMap<string, ProtectionHashName> = new Map([
 	["4", "SHA-1"],
@@ -42,6 +51,27 @@ const ALGORITHM_SIDS: ReadonlyMap<string, ProtectionHashName> = new Map([
 	["13", "SHA-384"],
 	["14", "SHA-512"]
 ])
+
+const SIDS: Readonly<Record<ProtectionHashName, string>> = { "SHA-1": "4", "SHA-256": "12", "SHA-384": "13", "SHA-512": "14" }
+
+// The transitional attributes of `hash`, in schema order (AG_TransitionalPassword): Word writes rsaAES with SHA-2
+// and rsaFull with SHA-1.
+export function documentProtectionHashAttributes(hash: DocumentProtectionHash): readonly (readonly [string, string])[] {
+	return [
+		["cryptProviderType", hash.algorithm === "SHA-1" ? "rsaFull" : "rsaAES"],
+		["cryptAlgorithmClass", "hash"],
+		["cryptAlgorithmType", "typeAny"],
+		["cryptAlgorithmSid", SIDS[hash.algorithm]],
+		["cryptSpinCount", String(hash.spinCount)],
+		["hash", hash.hash],
+		["salt", hash.salt]
+	]
+}
+
+// A written hash as one to check a password against.
+export function documentProtectionHashRead(hash: DocumentProtectionHash): ProtectionHash {
+	return { algorithm: hash.algorithm, hash: hash.hash, salt: hash.salt, spinCount: hash.spinCount, input: "legacy" }
+}
 
 const ALGORITHM_NAMES: ReadonlyMap<string, ProtectionHashName> = new Map([
 	["SHA-1", "SHA-1"],

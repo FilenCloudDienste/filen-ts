@@ -38,6 +38,7 @@ import {
 	noteDeckReleased,
 	copiedKind,
 	modelName,
+	relationshipsPartBytes,
 	zipName,
 	type PendingRelationship,
 	type SaveNotice
@@ -469,8 +470,9 @@ class Splice {
 		return part === undefined ? undefined : modelName(part)
 	}
 
-	async run(): Promise<SpliceSnapshot | Refused> {
-		const { writer, deck } = this
+	// The package's main part and its slide list, as the slides are written against them.
+	private async base(): Promise<XmlDocument | Refused> {
+		const writer = this.writer
 		const packageRelationships = await writer.opc.relationships("")
 		const main = packageRelationships.all.find(
 			relationship => !relationship.external && relationshipKind(relationship.type) === "officeDocument"
@@ -497,6 +499,52 @@ class Splice {
 
 			if (ref !== undefined) this.baseRefs.add(ref)
 		}
+
+		return presentation
+	}
+
+	// Slides as a save writes a copy of each (exportSlides).
+	async export(refs: readonly SlideRef[]): Promise<RawPart[][] | Refused> {
+		const writer = this.writer
+		const based = await this.base()
+
+		if (isRefused(based)) return based
+
+		await this.noteSharedDiagramParts()
+		await this.notePackageDiagramData()
+
+		const out: RawPart[][] = []
+
+		for (const ref of refs) {
+			const node = this.deck.nodes.get(ref)
+
+			if (node?.kind !== "slide") return refused("notFound", `slide ${String(ref)} is not parsed`)
+
+			const name = writer.allocate("slide", PART_CONTENT_TYPES.slide)
+
+			this.finalParts.set(ref, name)
+
+			const failed = await this.addSlide(ref, node)
+
+			this.finalParts.delete(ref)
+
+			if (failed !== undefined) return failed
+
+			const parts = await exportedParts(writer, name)
+
+			if (isRefused(parts)) return parts
+
+			out.push(parts)
+		}
+
+		return out
+	}
+
+	async run(): Promise<SpliceSnapshot | Refused> {
+		const { writer, deck } = this
+		const presentation = await this.base()
+
+		if (isRefused(presentation)) return presentation
 
 		// Which slides stay, which are new, which go.
 		const kept = new Set<string>()
@@ -2087,6 +2135,87 @@ export async function spliceSnapshot(input: PptxSaveInput): Promise<SpliceSnapsh
 		noteDeckReleased(input.deck, [...writer.releasedParts()])
 
 		return snapshot
+	} catch (error) {
+		if (error instanceof PresentationError) return refused(error.reason, error.message)
+
+		throw error
+	}
+}
+
+// What a copy of a slide leaves out for another deck: its layout and notes master (that deck's own take their place),
+// other slides (a jump to one is that deck's to rewrite) and comments (their authors are the presentation's).
+const LEFT_OUT: ReadonlySet<string> = new Set([
+	"slideLayout",
+	"slideMaster",
+	"notesMaster",
+	"handoutMaster",
+	"slide",
+	"comments",
+	"commentAuthors"
+])
+const MODERN_COMMENT_TYPES = /\/(?:comments|authors)$/u
+
+function leftOut(type: string): boolean {
+	return LEFT_OUT.has(relationshipKind(type) ?? "") || (MODERN_COMMENT_TYPES.test(type) && type.includes("/2018/"))
+}
+
+// The parts of a slide a scratch writer wrote (its copy), the slide first: every part it reaches, but for those another
+// deck has its own of (LEFT_OUT, kept as relationships to rewrite there, comments dropped). Model names.
+async function exportedParts(writer: PackageWriter, slide: string): Promise<RawPart[] | Refused> {
+	const out: RawPart[] = []
+	const queue = [slide]
+	const seen = new Set<string>([partKey(slide)])
+
+	for (let at = 0; at < queue.length; at++) {
+		const name = queue[at] ?? ""
+		const part = await writer.exportPart(name)
+
+		if (part === undefined) return refused("stale", `the copied slide's part ${name}`)
+
+		const kept: PendingRelationship[] = []
+
+		for (const relationship of part.relationships) {
+			const kind = relationshipKind(relationship.type) ?? ""
+
+			if (
+				!relationship.external &&
+				(kind === "comments" || kind === "commentAuthors" || MODERN_COMMENT_TYPES.test(relationship.type))
+			)
+				continue
+
+			kept.push(relationship)
+
+			if (relationship.external || leftOut(relationship.type)) continue
+
+			const key = partKey(relationship.target)
+
+			if (seen.has(key)) continue
+
+			seen.add(key)
+			queue.push(relationship.target)
+		}
+
+		out.push({
+			name: modelName(name),
+			contentType: part.contentType,
+			bytes: part.bytes,
+			...(kept.length === 0 ? {} : { rels: relationshipsPartBytes(name, kept) })
+		})
+	}
+
+	return out
+}
+
+// Slides as a save would write a copy of each (their edits in, their charts, diagrams and notes copied), read back as
+// the parts a restore holds, for a paste into another deck. A scratch writer: nothing is saved, no name it gives is the
+// deck's.
+export async function exportSlides(input: PptxSaveInput, refs: readonly SlideRef[]): Promise<RawPart[][] | Refused> {
+	const writer = new PackageWriter(input.source.package, await input.source.package.contentTypes())
+
+	writer.exportFor(input.deck)
+
+	try {
+		return await new Splice(input, writer).export(refs)
 	} catch (error) {
 		if (error instanceof PresentationError) return refused(error.reason, error.message)
 

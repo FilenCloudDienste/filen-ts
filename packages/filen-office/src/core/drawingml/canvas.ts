@@ -14,6 +14,7 @@ import {
 	LINE_INTS
 } from "../text/displayList"
 import { TabLeader } from "../text/paragraph"
+import { closedCommands, commandBounds, compoundMask, type CompoundMask } from "./compoundLine"
 import type { DrawingData } from "./data"
 import {
 	ITEM_FILL_MODIFIER_MASK,
@@ -48,8 +49,8 @@ import { layoutBlock } from "./textBlock"
 // (react/docx/paint/drawing.ts and page.ts) item for item, so a thumbnail, an exported PNG and a show layer look like
 // the slide on screen: paths with every paint kind (solid, linear and path gradients, preset patterns, pictures
 // stretched or tiled, Gouraud-shaded meshes rasterised at the drawn resolution, metafile gradients with their spread),
-// strokes with caps, joins and dashes, clips and boolean clip regions, pictures cropped and recoloured, shadows, and
-// text drawn with fillText in the faces the worker registered.
+// strokes with caps, joins, dashes and compound or inset lines, clips and boolean clip regions, pictures cropped and
+// recoloured, shadows, and text drawn with fillText in the faces the worker registered.
 //
 // The canvas is typed structurally (Canvas2DLike), so the module needs no DOM and runs against a recorder in tests.
 // The data crossed a thread boundary: every number is checked before it reaches the context. Nothing is fetched or
@@ -657,7 +658,8 @@ class CanvasDrawingPainter<I extends CanvasSized> {
 	private readonly chains = new Map<number, readonly number[] | undefined>()
 	private readonly patterns = new Map<number, CanvasPatternLike | null>()
 	private readonly recolored = new Map<DrawingImage, I | null>()
-	private readonly ctx: Canvas2DLike<I>
+	// The context drawn on: a scratch layer's while a masked outline is drawn (maskedStroke).
+	private ctx: Canvas2DLike<I>
 	private readonly data: DrawingData
 	private readonly context: CanvasPaintContext<I>
 	// Drawing space → device.
@@ -1023,7 +1025,7 @@ class CanvasDrawingPainter<I extends CanvasSized> {
 		const stroke = index(ints[i + ItemInt.STROKE])
 		const line: Stroke | undefined = stroke < 0 ? undefined : data.strokes[stroke]
 
-		if (line !== undefined && line !== null) this.strokePath(line, box)
+		if (line !== undefined && line !== null) this.strokePath(line, box, i, rule)
 	}
 
 	// A paint as a fill or stroke style in the item's local space: a colour, a gradient or a pattern; null for one
@@ -1285,7 +1287,7 @@ class CanvasDrawingPainter<I extends CanvasSized> {
 		return pattern ?? undefined
 	}
 
-	private strokePath(stroke: Stroke, box: Box): void {
+	private strokePath(stroke: Stroke, box: Box, i: number, rule: "nonzero" | "evenodd"): void {
 		const { ctx } = this
 		const paint = this.data.paints[index(stroke.paint)]
 
@@ -1317,11 +1319,125 @@ class CanvasDrawingPainter<I extends CanvasSized> {
 		const custom = stroke.customDash
 		const dashes = custom !== null && custom !== undefined && custom.length > 0 ? Array.from(custom) : presetDashes(stroke.dash)
 
-		if (dashes !== undefined && dashes.some(length => length > 0)) {
-			ctx.setLineDash(dashes.slice(0, MAX_DASHES).map(length => clamp(length, 0, 1000, 0) * width))
-		}
+		const dashList =
+			dashes !== undefined && dashes.some(length => length > 0)
+				? dashes.slice(0, MAX_DASHES).map(length => clamp(length, 0, 1000, 0) * width)
+				: undefined
+
+		if (dashList !== undefined) ctx.setLineDash(dashList)
+
+		const ints = this.data.itemInts
+		const mask = compoundMask(
+			stroke.compound,
+			width,
+			stroke.inset === true &&
+				closedCommands(this.data.commands, index(ints[i + ItemInt.FIRST_COMMAND]), index(ints[i + ItemInt.COMMAND_COUNT]))
+		)
+
+		if (mask !== undefined && this.maskedStroke(i, mask, dashList, rule)) return
 
 		ctx.stroke()
+	}
+
+	// A compound or inset outline: core/drawingml/compoundLine's mask, then the pen kept only where it is (source-in),
+	// on a scratch layer over the outline's device bounds, placed with the item's alpha, blend and shadow. False
+	// without a scratch canvas (the line is then drawn as one pen).
+	private maskedStroke(i: number, mask: CompoundMask, dashes: number[] | undefined, rule: "nonzero" | "evenodd"): boolean {
+		const { ctx, data } = this
+		const ints = data.itemInts
+		const bounds = commandBounds(
+			data.commands,
+			data.coords,
+			index(ints[i + ItemInt.FIRST_COMMAND]),
+			index(ints[i + ItemInt.COMMAND_COUNT]),
+			index(ints[i + ItemInt.FIRST_COORD])
+		)
+
+		if (bounds === undefined || this.context.surface === undefined) return false
+
+		const m = this.local
+		// Miter joins reach out miterLimit half pens, square caps √2.
+		const reach = (mask.pen / 2) * Math.max(ctx.miterLimit, Math.SQRT2) + 1
+		let left = Infinity
+		let top = Infinity
+		let right = -Infinity
+		let bottom = -Infinity
+
+		for (const [x, y] of [
+			[bounds[0] - reach, bounds[1] - reach],
+			[bounds[2] + reach, bounds[1] - reach],
+			[bounds[0] - reach, bounds[3] + reach],
+			[bounds[2] + reach, bounds[3] + reach]
+		] as const) {
+			const dx = clamp(m[0] * x + m[2] * y + m[4], -MAX_COORD, MAX_COORD, 0)
+			const dy = clamp(m[1] * x + m[3] * y + m[5], -MAX_COORD, MAX_COORD, 0)
+
+			left = Math.min(left, dx)
+			top = Math.min(top, dy)
+			right = Math.max(right, dx)
+			bottom = Math.max(bottom, dy)
+		}
+
+		left = Math.floor(left)
+		top = Math.floor(top)
+
+		const width = Math.max(1, Math.ceil(right) - left)
+		const height = Math.max(1, Math.ceil(bottom) - top)
+		// Device pixels, within the scratch budget.
+		const scale = Math.min(1, MAX_SURFACE_SIDE / width, MAX_SURFACE_SIDE / height, Math.sqrt(MAX_SURFACE_PIXELS / (width * height)))
+		const pixelsWide = Math.max(1, Math.round(width * scale))
+		const pixelsHigh = Math.max(1, Math.round(height * scale))
+		const surface = this.context.surface(pixelsWide, pixelsHigh)
+
+		if (surface === undefined) return false
+
+		const layer = surface.context
+		const sx = pixelsWide / width
+		const sy = pixelsHigh / height
+		const layered = (strokes: CompoundMask["outer"]): void => {
+			for (const step of strokes) {
+				layer.globalCompositeOperation = step.keep ? "source-over" : "destination-out"
+				layer.lineWidth = step.width
+				layer.stroke()
+			}
+		}
+
+		this.ctx = layer
+		this.local = times([sx, 0, 0, sy, -left * sx, -top * sy], m)
+
+		try {
+			this.path(i)
+			layer.lineCap = ctx.lineCap
+			layer.lineJoin = ctx.lineJoin
+			layer.miterLimit = ctx.miterLimit
+			layer.strokeStyle = "#000"
+			layered(mask.outer)
+
+			if (mask.inner !== null) {
+				layer.save()
+				layer.clip(rule)
+				layer.globalCompositeOperation = "destination-out"
+				layer.fill(rule)
+				layered(mask.inner)
+				layer.restore()
+			}
+
+			layer.globalCompositeOperation = "source-in"
+			layer.strokeStyle = ctx.strokeStyle
+			layer.lineWidth = mask.pen
+
+			if (dashes !== undefined) layer.setLineDash(dashes)
+
+			layer.stroke()
+		} finally {
+			this.ctx = ctx
+			this.local = m
+		}
+
+		ctx.setTransform(1, 0, 0, 1, 0, 0)
+		ctx.drawImage(surface.canvas, left, top, width, height)
+
+		return true
 	}
 
 	// --- Pictures ---

@@ -471,6 +471,38 @@ describe("useDocxDocument and DocxPages", () => {
 		expect(viewer?.state.find.active).toBe(0)
 	})
 
+	it("searches whole words when asked and keeps the option for later queries", async () => {
+		const manual = manualHost()
+		const source: DocxSource = { host: manual.host, bytes: bytesSource(new Uint8Array(1)) }
+		let viewer: DocxViewer | undefined
+
+		function Viewer() {
+			const document = useDocxDocument(source)
+
+			viewer = useDocxViewer(document)
+
+			return null
+		}
+
+		act(() => root.render(<Viewer />))
+		manual.emit(pagesEvent([page(0, ["text text"])], true))
+		await flush()
+
+		act(() => viewer?.dispatch({ type: "find.query", query: "text" }))
+		await flush()
+		expect(manual.session.find).toHaveBeenLastCalledWith("text", { caseSensitive: false, wholeWord: false })
+		expect(viewer?.state.find.wholeWord).toBe(false)
+
+		act(() => viewer?.dispatch({ type: "find.query", query: "text", wholeWord: true }))
+		await flush()
+		expect(manual.session.find).toHaveBeenLastCalledWith("text", { caseSensitive: false, wholeWord: true })
+		expect(viewer?.state.find.wholeWord).toBe(true)
+
+		act(() => viewer?.dispatch({ type: "find.query", query: "tex" }))
+		await flush()
+		expect(manual.session.find).toHaveBeenLastCalledWith("tex", { caseSensitive: false, wholeWord: true })
+	})
+
 	it("reports engine errors and closes the session, and closes it on unmount", async () => {
 		const manual = manualHost()
 		let latest: DocxDocument | undefined
@@ -597,6 +629,13 @@ describe("find and viewer commands", () => {
 		expect(parseDocxViewerCommand({ type: "page.goto", page: -1 })).toBeUndefined()
 		expect(parseDocxViewerCommand({ type: "eval" })).toBeUndefined()
 		expect(parseDocxViewerCommand("zoom.in")).toBeUndefined()
+		expect(parseDocxViewerCommand({ type: "find.query", query: "a", caseSensitive: true, wholeWord: true })).toEqual({
+			type: "find.query",
+			query: "a",
+			caseSensitive: true,
+			wholeWord: true
+		})
+		expect(parseDocxViewerCommand({ type: "find.query", query: "a", wholeWord: "yes" })).toEqual({ type: "find.query", query: "a" })
 
 		const state: DocxViewerState = {
 			status: "ready",
@@ -606,7 +645,7 @@ describe("find and viewer commands", () => {
 			pageCountFinal: true,
 			zoom: 1,
 			zoomMode: "custom",
-			find: { open: false, query: "", caseSensitive: false, count: 0, capped: false, active: -1 }
+			find: { open: false, query: "", caseSensitive: false, wholeWord: false, count: 0, capped: false, active: -1 }
 		}
 
 		expect(state.capabilities.readOnly).toBe(true)

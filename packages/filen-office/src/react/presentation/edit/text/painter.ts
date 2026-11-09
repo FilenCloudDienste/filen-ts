@@ -114,6 +114,12 @@ export interface FormatPainter {
 	// The host as it is now (a newer render of the slide), while the painter is on.
 	rebind(host: FormatPainterHost): void
 	cancel(): void
+	// Copy Formatting (Ctrl+Shift+C): holds the formatting of what `host` has selected for pasteFormat, without turning
+	// the painter on; false when there is none (the held format stays).
+	copyFormat(host: FormatPainterHost): Promise<boolean>
+	// Paste Formatting (Ctrl+Shift+V): the held format onto the open body's selection (the word at a caret) or onto the
+	// whole text of the selected shapes, one undo step; false when nothing is held or nothing takes it.
+	pasteFormat(host: FormatPainterHost): boolean
 }
 
 // Where a click paints: the canvas overlay and the open body.
@@ -124,6 +130,8 @@ export function createFormatPainter(text: TextEditing): FormatPainter {
 	const listeners = new Set<() => void>()
 	let mode: FormatPainterMode = "off"
 	let carried: RunProps = {}
+	// Copy Formatting's format, kept until the next copy (the painter's own is `carried`).
+	let held: RunProps | undefined
 	let host: FormatPainterHost | undefined
 	// The press on the canvas the next release paints after: whether it was in the open body, and that body.
 	let down: { readonly inBody: boolean; readonly controller: TextEditController | undefined } | undefined
@@ -259,17 +267,7 @@ export function createFormatPainter(text: TextEditing): FormatPainter {
 			}
 		},
 		copy: async (target, sticky = false) => {
-			const controller = target.text.active
-			let format: RunProps | undefined
-
-			if (controller !== undefined) {
-				format = copiedRunProps(controller.state, controller.defaults)
-			} else {
-				const first = target.targets().shapes[0]
-				const seed = first === undefined ? undefined : await target.session.textSeed(first).catch(() => undefined)
-
-				format = seed === undefined ? undefined : seedRunProps(seed)
-			}
+			const format = await readFormat(target)
 
 			if (format === undefined) return false
 
@@ -286,8 +284,52 @@ export function createFormatPainter(text: TextEditing): FormatPainter {
 		rebind: target => {
 			if (mode !== "off") host = target
 		},
-		cancel: off
+		cancel: off,
+		copyFormat: async target => {
+			const format = await readFormat(target)
+
+			if (format === undefined) return false
+
+			held = format
+
+			return true
+		},
+		pasteFormat: target => {
+			const format = held
+
+			if (format === undefined) return false
+
+			const controller = target.text.active
+
+			if (controller !== undefined) {
+				controller.run(paintRuns(format, controller.defaults))
+
+				return true
+			}
+
+			const { shapes } = target.targets()
+
+			if (shapes.length === 0) return false
+
+			void formatShapesOp(target.session, shapes, defaults => paintRuns(format, defaults)).then(op =>
+				op === undefined ? undefined : target.command(op)
+			)
+
+			return true
+		}
 	}
+}
+
+// The format a host's selection gives: the open body's selection, else the first selected text shape's first run.
+async function readFormat(target: FormatPainterHost): Promise<RunProps | undefined> {
+	const controller = target.text.active
+
+	if (controller !== undefined) return copiedRunProps(controller.state, controller.defaults)
+
+	const first = target.targets().shapes[0]
+	const seed = first === undefined ? undefined : await target.session.textSeed(first).catch(() => undefined)
+
+	return seed === undefined ? undefined : seedRunProps(seed)
 }
 
 const painters = new WeakMap<TextEditing, FormatPainter>()

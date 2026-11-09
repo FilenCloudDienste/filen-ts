@@ -1,5 +1,13 @@
 import { SHEET_MAX_COLS, SHEET_MAX_ROWS } from "../../sheet/protocol"
-import { formulaTranslator, renameSheetInFormula, rewriteFormula, sameSheet, shiftFormula, shiftSpan } from "../../sheet/refs/formulaRefs"
+import {
+	formulaTranslator,
+	pointsInto,
+	renameSheetInFormula,
+	rewriteFormula,
+	sameSheet,
+	shiftFormula,
+	shiftSpan
+} from "../../sheet/refs/formulaRefs"
 import type { AxisShift } from "./axis"
 import { moveReference, type CellMove } from "./moveRefs"
 import { quickShift } from "./quick"
@@ -267,8 +275,7 @@ function bandShift(text: string, own: string | null, target: string, shift: Axis
 	return rewriteFormula(text, ref => {
 		const area = ref.area
 
-		if (ref.external || ref.lastSheet !== null || area === null || area.kind !== "cell") return undefined
-		if (!(ref.sheet === null ? onTarget : sameSheet(ref.sheet, target))) return undefined
+		if (area === null || area.kind !== "cell" || !pointsInto(ref, onTarget, target)) return undefined
 
 		const crossLow = rows ? Math.min(area.startCol, area.endCol) : Math.min(area.startRow, area.endRow)
 		const crossHigh = rows ? Math.max(area.startCol, area.endCol) : Math.max(area.startRow, area.endRow)

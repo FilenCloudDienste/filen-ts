@@ -327,10 +327,31 @@ export const DOCX_KEY_BINDINGS: readonly DocxKeyBinding[] = [
 	{ shortcut: "mod+1", desktop: true, command: { type: "paragraph.lineSpacing", rule: "auto", value: 240 } },
 	{ shortcut: "mod+2", desktop: true, command: { type: "paragraph.lineSpacing", rule: "auto", value: 480 } },
 	{ shortcut: "mod+5", desktop: true, command: { type: "paragraph.lineSpacing", rule: "auto", value: 360 } },
+	// Hanging Indent and Unhang, Word for Mac's too (Mod+T opens a browser tab).
+	{ shortcut: "mod+t", desktop: true, command: { type: "paragraph.hangingIndent", direction: 1 } },
+	{ shortcut: "mod+shift+t", desktop: true, command: { type: "paragraph.hangingIndent", direction: -1 } },
 	// DATE and TIME fields: Alt+Shift+D and T, Word for Mac's Control+Shift+D and T (Option+Shift types a character).
 	{ shortcut: "alt+shift+d", appleShortcut: "ctrl+shift+d", command: { type: "insert.field", instruction: DATE_FIELD_CODE } },
 	{ shortcut: "alt+shift+t", appleShortcut: "ctrl+shift+t", command: { type: "insert.field", instruction: TIME_FIELD_CODE } }
 ]
+
+// The shortcut of the binding that runs `command` exactly (a toolbar item's tooltip), if any on this platform.
+export function commandShortcut(command: DocxEditorCommand, apple: boolean, desktop: boolean): string | undefined {
+	for (const binding of DOCX_KEY_BINDINGS) {
+		if (sameCommand(binding.command, command)) return bindingShortcut(binding, apple, desktop)
+	}
+
+	return undefined
+}
+
+function sameCommand(a: DocxEditorCommand, b: DocxEditorCommand): boolean {
+	if (a.type !== b.type) return false
+
+	const left: [string, unknown][] = Object.entries(a)
+	const right = new Map<string, unknown>(Object.entries(b))
+
+	return left.length === right.size && left.every(([key, value]) => right.get(key) === value)
+}
 
 // The shortcut `binding` has on this platform, if any.
 export function bindingShortcut(binding: DocxKeyBinding, apple: boolean, desktop: boolean): string | undefined {

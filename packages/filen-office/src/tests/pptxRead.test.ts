@@ -225,6 +225,44 @@ describe("pptx shapes", () => {
 		expect(shapes[1]?.src).toBeDefined()
 	})
 
+	it("reads a chartex mc:Choice only where its chart part draws, else the Fallback", async () => {
+		const CX = "http://schemas.microsoft.com/office/drawing/2014/chartex"
+		const alternate = (id: number, relId: string): string =>
+			'<mc:AlternateContent xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"><mc:Choice xmlns:cx1="http://schemas.microsoft.com/office/drawing/2015/9/8/chartex" Requires="cx1">' +
+			`<p:graphicFrame><p:nvGraphicFramePr><p:cNvPr id="${id}" name="Chart ${id}"/><p:cNvGraphicFramePr/><p:nvPr/></p:nvGraphicFramePr>` +
+			`<p:xfrm><a:off x="1" y="2"/><a:ext cx="3" cy="4"/></p:xfrm><a:graphic><a:graphicData uri="${CX}"><cx:chart xmlns:cx="${CX}" r:id="${relId}"/></a:graphicData></a:graphic></p:graphicFrame></mc:Choice>` +
+			`<mc:Fallback>${sp(id, `Fallback ${id}`, undefined)}</mc:Fallback></mc:AlternateContent>`
+		const chartex = (layout: string): string =>
+			`<?xml version="1.0" encoding="UTF-8"?><cx:chartSpace xmlns:cx="${CX}"><cx:chartData><cx:data id="0"><cx:numDim type="val"><cx:lvl ptCount="1"><cx:pt idx="0">1</cx:pt></cx:lvl></cx:numDim></cx:data></cx:chartData>` +
+			`<cx:chart><cx:plotArea><cx:plotAreaRegion><cx:series layoutId="${layout}"><cx:dataId val="0"/></cx:series></cx:plotAreaRegion></cx:plotArea></cx:chart></cx:chartSpace>`
+		const type = "application/vnd.ms-office.chartex+xml"
+		const chartEx = "http://schemas.microsoft.com/office/2014/relationships/chartEx"
+		const shapes = await shapesOf(alternate(2, "rId10") + alternate(3, "rId11") + alternate(4, "rId12"), {
+			slides: [
+				{
+					shapes: "",
+					rels: [
+						["rId10", chartEx, "../charts/chartEx1.xml"],
+						["rId11", chartEx, "../charts/chartEx2.xml"],
+						["rId12", chartEx, "../charts/chartEx3.xml"]
+					]
+				}
+			],
+			parts: {
+				"ppt/charts/chartEx1.xml": { data: chartex("waterfall"), type },
+				"ppt/charts/chartEx2.xml": { data: chartex("regionMap"), type }
+			}
+		})
+
+		expect(shapes.map(shape => shape.name)).toEqual(["Chart 2", "Fallback 3", "Fallback 4"])
+		expect(shapes[0]).toMatchObject({
+			kind: "frame",
+			lock: "alternateContent",
+			frame: { kind: "chart", part: "/ppt/charts/chartEx1.xml" }
+		})
+		expect(shapes[1]).toMatchObject({ kind: "sp", lock: "alternateContent" })
+	})
+
 	it("classifies click and hover actions on shapes and runs", async () => {
 		const shapes = await shapesOf(
 			'<p:sp><p:nvSpPr><p:cNvPr id="2" name="Link"><a:hlinkClick r:id="rId30"/><a:hlinkHover r:id="" action="ppaction://program"/></p:cNvPr><p:cNvSpPr/><p:nvPr/></p:nvSpPr><p:spPr/>' +

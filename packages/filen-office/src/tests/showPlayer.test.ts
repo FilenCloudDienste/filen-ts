@@ -480,6 +480,14 @@ describe("show navigation", () => {
 		})
 	})
 
+	it('shows without narration only when the file says showNarration="0", never when it leaves it out', () => {
+		const base = { kind: "present", loop: false, showAnimation: true, useTimings: true, range: { kind: "all" } } as const
+
+		expect(showOptionsOf(base)).not.toHaveProperty("withoutNarration")
+		expect(showOptionsOf({ ...base, showNarration: true })).not.toHaveProperty("withoutNarration")
+		expect(showOptionsOf({ ...base, showNarration: false }).withoutNarration).toBe(true)
+	})
+
 	it("advances by timing once the slide is idle and its advance-after has passed, never without timings", () => {
 		const after: Transition = { kind: "fade", namespace: "p", options: {}, advance: { onClick: true, afterMs: 3000 } }
 

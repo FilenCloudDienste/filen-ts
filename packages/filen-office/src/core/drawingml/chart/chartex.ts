@@ -1,6 +1,7 @@
 import type { TextParagraph } from "../displayList"
 import type { PaintContext } from "../fill"
-import { D, type DrawingReader } from "../reader"
+import type { XmlDocument } from "../../xml/index"
+import { D, drawingReader, type DrawingReader } from "../reader"
 import { plainParagraph, readTextBody, type TextDefaults } from "../text"
 import { ChartBuilder, PX_PER_PT, estimateHeight, estimateWidth, labelBody, type LineDefault, type Rect } from "./builder"
 import { formatNumber } from "./format"
@@ -1344,6 +1345,34 @@ function legendSize(entries: readonly Legend[], text: TextDefaults, room: Rect, 
 	return { w: Math.min(room.w, Math.max(widest, line) + 8), h: Math.min(room.h * 0.5, rows * row + 8) }
 }
 
+function drawn(layout: string): boolean {
+	return DRAWN.has(layout) && layout !== "paretoLine"
+}
+
+// The plot area's series, the visible ones, and the one whose layout the chart is drawn as.
+function seriesOf(reader: DrawingReader, root: number) {
+	const region = reader.child(reader.child(reader.child(root, D.Cx, "chart"), D.Cx, "plotArea"), D.Cx, "plotAreaRegion")
+	const nodes = reader.children(region, D.Cx, "series")
+	const visible = nodes.filter(series => !reader.bool(series, "hidden", false))
+	const primary = visible.find(series => (reader.attr(series, "layoutId") ?? "") !== "paretoLine") ?? visible[0]
+	const layout = primary === undefined ? "" : (reader.attr(primary, "layoutId") ?? "")
+
+	return { nodes, visible, primary, layout }
+}
+
+// Whether drawChartex draws a part (a cx:chartSpace with a visible series of a drawn layout) at a non-empty size,
+// read without converting it: hosts choose a chartex mc:Choice over its Fallback by it.
+export function chartexDrawable(document: XmlDocument): boolean {
+	const reader = drawingReader(document)
+	const root = document.documentElement()
+
+	if (root < 0 || !reader.is(root, D.Cx, "chartSpace")) return false
+
+	const { primary, layout } = seriesOf(reader, root)
+
+	return primary !== undefined && drawn(layout)
+}
+
 // Converts a cx:chartSpace at `W` x `H` px into the builder's list.
 export function drawChartex(
 	context: PaintContext,
@@ -1355,16 +1384,11 @@ export function drawChartex(
 ): ChartexConversion {
 	const chart = reader.child(root, D.Cx, "chart")
 	const plotArea = reader.child(chart, D.Cx, "plotArea")
-	const region = reader.child(plotArea, D.Cx, "plotAreaRegion")
-	const nodes = reader.children(region, D.Cx, "series")
+	const { nodes, visible, primary, layout } = seriesOf(reader, root)
 	const plots = [...new Set(nodes.map(series => reader.attr(series, "layoutId") ?? ""))]
 
-	const visible = nodes.filter(series => !reader.bool(series, "hidden", false))
-	const primary = visible.find(series => (reader.attr(series, "layoutId") ?? "") !== "paretoLine") ?? visible[0]
-	const layout = primary === undefined ? "" : (reader.attr(primary, "layoutId") ?? "")
-
 	if (primary === undefined || W <= 0 || H <= 0) return { supported: false, plots, unsupported: ["empty"] }
-	if (!DRAWN.has(layout) || layout === "paretoLine") return { supported: false, plots, unsupported: [`chartex:${layout}`] }
+	if (!drawn(layout)) return { supported: false, plots, unsupported: [`chartex:${layout}`] }
 
 	const theme = context.theme
 	const base: TextDefaults = { size: 10, color: textColor(theme), font: theme.minorFont.latin, bold: false, italic: false }

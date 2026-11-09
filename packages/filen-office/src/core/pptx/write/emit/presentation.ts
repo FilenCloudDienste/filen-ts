@@ -17,13 +17,14 @@ const A_MAIN = URIS["a"] ?? ""
 const DEFAULT_RESTART = 300_000
 const CHOICES: ReadonlySet<string> = new Set(["present", "browse", "kiosk"])
 const RANGES: ReadonlySet<string> = new Set(["sldAll", "sldRg", "custShow"])
-// showPr's attributes with their defaults (§19.2.1.30).
-const FLAGS = [
+// showPr's attributes with their defaults (§19.2.1.30). showNarration has none: the model keeps it absent when the file
+// does, and an explicit "0" is written as such.
+const FLAGS: readonly (readonly [string, "loop" | "showNarration" | "showAnimation" | "useTimings", boolean | undefined])[] = [
 	["loop", "loop", false],
-	["showNarration", "showNarration", false],
+	["showNarration", "showNarration", undefined],
 	["showAnimation", "showAnimation", true],
 	["useTimings", "useTimings", true]
-] as const
+]
 
 function choiceMarkup(q: (local: string) => string, show: ShowSettings): string {
 	return show.kind === "kiosk" && show.restartMs !== undefined
@@ -55,7 +56,11 @@ function qualifier(prefix: string): (local: string) => string {
 // A whole p:showPr for the settings (a part without one).
 export function showPrMarkup(show: ShowSettings, prefix = "p", declare = false, aBound = true): string {
 	const q = qualifier(prefix)
-	const flags = FLAGS.map(([name, key, fallback]) => (show[key] === fallback ? "" : ` ${name}="${show[key] ? "1" : "0"}"`)).join("")
+	const flags = FLAGS.map(([name, key, fallback]) => {
+		const value = show[key]
+
+		return value === undefined || value === fallback ? "" : ` ${name}="${value ? "1" : "0"}"`
+	}).join("")
 	const pen = show.penColor === undefined ? "" : penMarkup(q, show.penColor, aBound)
 
 	return `<${q("showPr")}${declare ? ` xmlns:${prefix}="${P_MAIN}"` : ""}${flags}>${choiceMarkup(q, show)}${rangeMarkup(q, show)}${pen}</${q("showPr")}>`
@@ -92,8 +97,12 @@ export function spliceShowPr(document: XmlDocument, editor: XmlEditor, show: Sho
 
 	for (const [name, key, fallback] of FLAGS) {
 		const written = r.bool(showPr, name)
+		const value = show[key]
 
-		if ((written ?? fallback) !== show[key]) editor.setAttribute(showPr, name, show[key] ? "1" : "0")
+		if ((written ?? fallback) === value) continue
+
+		if (value === undefined) editor.removeAttribute(showPr, name)
+		else editor.setAttribute(showPr, name, value ? "1" : "0")
 	}
 
 	// Elements to write where the source has none, in schema order, flushed before the next source element kept.
@@ -168,4 +177,30 @@ function insertShowPr(r: PartReader, editor: XmlEditor, root: number, show: Show
 	else editor.append(root, markup)
 
 	return undefined
+}
+
+// The view settings a fresh package keeps from the source's p:viewPr (ECMA-376 Part 1 §19.2.2.18): the grid, guides,
+// snapping, zoom and pane sizes, none of which names a relationship. p:outlineViewPr (its p:sldLst names slides by the
+// source's relationship ids), p:extLst and anything unknown are dropped.
+const KEPT_VIEWS: ReadonlySet<string> = new Set([
+	"normalViewPr",
+	"slideViewPr",
+	"notesTextViewPr",
+	"sorterViewPr",
+	"notesViewPr",
+	"gridSpacing"
+])
+
+// The source's viewProps cut to what a fresh package keeps, its own markup otherwise as written; undefined when it is
+// not a readable Transitional p:viewPr.
+export function freshViewPr(document: XmlDocument, editor: XmlEditor): Uint8Array | undefined {
+	const r = partReader(document)
+	const root = document.documentElement()
+
+	if (r.malformed || root < 0 || r.namespaces.elementUri(root) !== P_MAIN || document.localName(root) !== "viewPr") return undefined
+
+	for (let child = r.first(root); child >= 0; child = r.next(child))
+		if (r.namespaces.elementUri(child) !== P_MAIN || !KEPT_VIEWS.has(r.local(child))) editor.remove(child)
+
+	return editor.serialize()
 }

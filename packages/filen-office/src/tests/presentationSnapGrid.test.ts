@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest"
-import { bytesSource } from "@filen/office/core/opc"
+import { bytesSource, memorySink } from "@filen/office/core/opc"
 import { openPptx } from "../core/pptx/package"
 import { DEFAULT_SLIDE_GRID, slideRef, type Deck, type Xfrm } from "../core/presentation/model"
 import { SnapTargets } from "../react/presentation/edit/guides"
 import { ShapeDrag } from "../react/presentation/edit/handles"
+import { freshPptx } from "../core/pptx/write/fresh"
 import { buildPptx, type FixtureOptions } from "./pptxFixtures"
+import { openDeck as openWriteDeck, partsOf, text } from "./pptxWriteFixtures"
 
 // Snap objects to grid (PowerPoint's View > Grid Settings, on by default): the grid is read from ppt/viewProps.xml,
 // and moves, resizes and line ends land on its lines unless a smart guide is within reach; Alt turns both off.
@@ -110,5 +112,40 @@ describe("snap to grid", () => {
 		expect((await openDeck(withView('<p:gridSpacing cx="0" cy="-5"/>'))).grid).toEqual(DEFAULT_SLIDE_GRID)
 		expect((await openDeck({ slides: [{ shapes: "" }] })).grid).toBeUndefined()
 		expect(DEFAULT_SLIDE_GRID).toEqual({ cx: 76_200, cy: 76_200, snap: true })
+	})
+
+	it("a fresh save keeps the source's grid, guides and snapping as written, dropping what names a relationship", async () => {
+		const slideView =
+			'<p:slideViewPr><p:cSldViewPr snapToGrid="0" showGuides="1"><p:cViewPr varScale="1"><p:scale><a:sx n="94" d="100"/><a:sy n="94" d="100"/></p:scale><p:origin x="-120" y="-90"/></p:cViewPr><p:guideLst><p:guide orient="horz" pos="2160"/><p:guide pos="2880"/></p:guideLst></p:cSldViewPr></p:slideViewPr>'
+		const spacing = '<p:gridSpacing cx="38100" cy="57150"/>'
+		const opened = await openWriteDeck(
+			buildPptx({
+				slides: [{ shapes: "" }],
+				presentationRels: [["rId80", "viewProps", "viewProps.xml"]],
+				parts: {
+					"ppt/viewProps.xml": {
+						data: `<p:viewPr ${VIEW_NS} xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" lastView="sldView">${slideView}<p:outlineViewPr><p:cViewPr><p:scale><a:sx n="33" d="100"/><a:sy n="33" d="100"/></p:scale><p:origin x="0" y="0"/></p:cViewPr><p:sldLst><p:sld r:id="rId2"/></p:sldLst></p:outlineViewPr>${spacing}<p:extLst><p:ext uri="{00000000-0000-0000-0000-000000000000}"/></p:extLst></p:viewPr>`
+					}
+				}
+			})
+		)
+		const sink = memorySink()
+
+		expect(await freshPptx(opened.deck, opened.source, sink, {})).toMatchObject({ kind: "written" })
+
+		const view = text((await partsOf(sink.bytes())).get("ppt/viewProps.xml"))
+
+		expect((await openWriteDeck(sink.bytes())).deck.grid).toEqual({ cx: 38_100, cy: 57_150, snap: false })
+		expect(view).toContain(`lastView="sldView">${slideView}${spacing}</p:viewPr>`)
+		expect(view).not.toContain("outlineViewPr")
+		expect(view).not.toContain("extLst")
+	})
+
+	it("a fresh save of a deck without view settings writes an empty p:viewPr, not PowerPoint's defaults", async () => {
+		const opened = await openWriteDeck(buildPptx({ slides: [{ shapes: "" }] }))
+		const sink = memorySink()
+
+		expect(await freshPptx(opened.deck, opened.source, sink, {})).toMatchObject({ kind: "written" })
+		expect(text((await partsOf(sink.bytes())).get("ppt/viewProps.xml"))).toMatch(/<p:viewPr[^>]*\/>$/u)
 	})
 })

@@ -9,6 +9,7 @@ import { savePortReader, savePortWriter, type SavePortEnd } from "../dom/present
 import { CallRefused, loopback, LoopbackSession } from "./fixtures/presentation/loopback"
 import { odpDeck } from "./odpWriteFixtures"
 import { buildPpt, FIXTURE_PNG, type FixtureOptions } from "./pptFixtures"
+import { budget } from "./timing"
 
 // Conversions through the presentation worker's protocol (freshParts over the loopback, the package read from the
 // save port as the page reads it), and the jobs worker's convert job reading the session's port into its output.
@@ -80,7 +81,9 @@ describe("conversions through the presentation worker", () => {
 		stop()
 	})
 
-	it("seals a password-protected deck's .pptx copy and refuses its .odp copy", async () => {
+	// About 1.8 s alone (0.6 s CPU on the test thread: the ppt read and its conversion), well over the default 5 s under
+	// the full suite's load.
+	it("seals a password-protected deck's .pptx copy and refuses its .odp copy", { timeout: budget(20_000) }, async () => {
 		const { session, stop } = await opened(
 			(await buildPpt({ ...PPT, password: "secret" })).bytes,
 			{

@@ -113,6 +113,9 @@ export type FormattingCommand =
 			readonly firstLine?: number
 			readonly hanging?: number
 	  }
+	// Word's Hanging Indent (1, Ctrl+T) and Unhang (-1, Ctrl+Shift+T): the lines after the first move to the next
+	// (previous) default tab stop, the first line stays where it is.
+	| { readonly type: "paragraph.hangingIndent"; readonly direction: 1 | -1 }
 	// `sticky`: the painter stays on after a paste (a double click on it) until cancelled.
 	| { readonly type: "format.copy"; readonly sticky?: boolean }
 	| { readonly type: "format.paste" }
@@ -156,6 +159,7 @@ export const FORMATTING_COMMANDS: readonly DocxCommandInfo<FormattingCommand["ty
 	{ type: "paragraph.lineSpacing", labelKey: "docx.paragraph.lineSpacing", icon: "line-spacing", group: "paragraph", ...story },
 	{ type: "paragraph.spacing", labelKey: "docx.paragraph.spacing", icon: "paragraph-spacing", group: "paragraph", ...story },
 	{ type: "paragraph.indent", labelKey: "docx.paragraph.indent", icon: "indent", group: "paragraph", ...story },
+	{ type: "paragraph.hangingIndent", labelKey: "docx.paragraph.hangingIndent", icon: "indent", group: "paragraph", ...story },
 	// The painter's formatting is the editor's (it outlives story switches): document commands. Copying it
 	// changes nothing; applying it does.
 	{ type: "format.copy", labelKey: "docx.format.copy", icon: "format-painter", group: "painter", write: false, scope: "document" },
@@ -281,6 +285,11 @@ export const parseFormattingCommand: DocxCommandParser<FormattingCommand> = (typ
 				...(firstLine.value === undefined ? {} : { firstLine: firstLine.value }),
 				...(hanging.value === undefined ? {} : { hanging: hanging.value })
 			}
+		}
+		case "paragraph.hangingIndent": {
+			const direction = field(value, "direction")
+
+			return direction === 1 || direction === -1 ? { type, direction } : undefined
 		}
 		default:
 			return { type } as FormattingCommand

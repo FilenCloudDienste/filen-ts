@@ -116,6 +116,52 @@ describe("table rows kept with the next", () => {
 		expect(find(result, 0, "k1")?.top).toBe(find(result, 0, "line 52")?.bottom)
 	})
 
+	it("keeps a table whose rows are all kept with the next with the paragraph after it", async () => {
+		const result = await layout(lines(52) + table(rows(4, 4), [2880, 2880]) + p("after"))
+
+		expect(find(result, 0, "k1")).toBeUndefined()
+		expect(find(result, 1, "k1")?.top).toBe(96)
+		expect(find(result, 1, "after")).toBeDefined()
+	})
+
+	it("moves only the last row, kept with the next, with the paragraph after the table", async () => {
+		const last = Array.from(
+			{ length: 4 },
+			(_, k) => `<w:tr>${cell(`k${k + 1}`, "", k === 3 ? KEEP : "")}${cell("", "", k === 3 ? KEEP : "")}</w:tr>`
+		).join("")
+		const result = await layout(lines(52) + table(last, [2880, 2880]) + p("after"))
+
+		expect(find(result, 0, "k3")).toBeDefined()
+		expect(find(result, 0, "k4")).toBeUndefined()
+		expect(find(result, 1, "k4")?.top).toBe(96)
+		expect(find(result, 1, "after")).toBeDefined()
+	})
+
+	it("moves the paragraph kept with a table along with the table and the paragraph after it", async () => {
+		const result = await layout(lines(51) + p("caption", KEEP) + table(rows(4, 4), [2880, 2880]) + p("after"))
+
+		expect(find(result, 0, "caption")).toBeUndefined()
+		expect(find(result, 1, "caption")?.top).toBe(96)
+		expect(find(result, 1, "after")).toBeDefined()
+	})
+
+	it("leaves a table whose last row is not kept with the next on its page", async () => {
+		const result = await layout(lines(52) + table(rows(3, 4), [2880, 2880]) + p("after"))
+
+		expect(find(result, 0, "k4")).toBeDefined()
+		expect(find(result, 1, "after")?.top).toBe(96)
+	})
+
+	it("breaks a table kept with the next paragraph that starts at a page's top where the page ends", async () => {
+		const result = await layout(table(rows(80, 80), [2880, 2880]) + p("after"))
+		const all = result.pages.flatMap((_, k) => texts(result, k))
+
+		expect(find(result, 0, "k1")?.top).toBe(96)
+		expect(result.pages.length).toBe(2)
+		expect(all.filter(text => /^k\d+$/.test(text)).length).toBe(80)
+		expect(all.at(-1)).toBe("after")
+	})
+
 	function texts(result: DocumentLayout, page: number): string[] {
 		return body(result, page).map(line => line.text)
 	}

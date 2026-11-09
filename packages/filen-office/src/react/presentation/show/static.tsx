@@ -4,7 +4,7 @@ import type { PresentationSessionApi, SlideLayer, SlideRender } from "../../../d
 import { presentationActions, type PresentationActionActivator, type PresentationActionPolicy, type PresentationJump } from "../links"
 import { SlideView, type SlidePainter } from "../SlideView"
 import type { ShowController, ShowEvent, ShowEventType, ShowFrom, ShowScreen } from "./controller"
-import { autoHidePointer } from "./pointer"
+import { autoHidePointer, changePointer } from "./pointer"
 import { hiddenAfter } from "./timeline"
 
 // The slideshow without timing: slide after slide on a black stage, hidden slides skipped (a jump may still show
@@ -282,7 +282,15 @@ export function StaticShow({
 		const key = event.key
 		let handled = true
 
-		if (key === "Escape") finish()
+		const stage = event.currentTarget
+		const mod = event.ctrlKey || event.metaKey
+
+		// The pointer's arrow options (show/pointer.ts), as the player's keys bind them by default.
+		if (event.code === "KeyH" && event.ctrlKey && !event.metaKey) changePointer(stage, "hide")
+		else if (event.code === "KeyA" && mod) changePointer(stage, "automatic")
+		else if ((event.code === "KeyA" || event.code === "Equal") && !mod && !event.altKey && !event.shiftKey)
+			changePointer(stage, "toggle")
+		else if (key === "Escape") finish()
 		else if (/^[0-9]$/u.test(key)) setTyped(previous => previous + key)
 		else if (key === "Enter" && typed !== "") {
 			goto(Number(typed) - 1)

@@ -48,7 +48,8 @@ declare module "../protocol" {
 	interface SheetQueryMap {
 		// The cells to copy as clipboard HTML, beside the "copy" query's text; null past what a copy writes as HTML.
 		copyHtml: {
-			request: { readonly sheet: SheetId; readonly range: SheetRange }
+			// `cut`: the cells of a cut, every row of the range (a copy of filtered data takes its visible rows only).
+			request: { readonly sheet: SheetId; readonly range: SheetRange; readonly cut?: boolean }
 			result: { readonly html: string | null }
 		}
 	}
@@ -1378,7 +1379,9 @@ export function clipboardHtml(
 	cols: number,
 	origin: { readonly row: number; readonly col: number },
 	cell: (row: number, col: number) => ClipOutCell | null,
-	maxLength: number
+	maxLength: number,
+	// The source row of each table row, when they are not origin's rows in order (a filtered copy's visible rows).
+	sourceRows?: ArrayLike<number>
 ): string | null {
 	const parts: string[] = [
 		'<html><head><meta charset="utf-8"><style>td{white-space:nowrap}br{mso-data-placement:same-cell}</style></head><body><table style="border-collapse:collapse">'
@@ -1404,7 +1407,7 @@ export function clipboardHtml(
 			if (value !== null) attributes += ` data-sheets-value="${escapeAttribute(value)}"`
 			if (found.value.kind === "number") attributes += ` x:num="${String(found.value.value)}"`
 			if (found.formula !== null)
-				attributes += ` data-filen-formula="${escapeAttribute(found.formula)}" data-filen-cell="${String(origin.row + row)},${String(origin.col + col)}"`
+				attributes += ` data-filen-formula="${escapeAttribute(found.formula)}" data-filen-cell="${String(sourceRows?.[row] ?? origin.row + row)},${String(origin.col + col)}"`
 
 			line += `<td${attributes}>${escapeText(found.text).replaceAll("\r\n", "<br>").replaceAll("\n", "<br>")}</td>`
 		}

@@ -33,6 +33,8 @@ export function blockXml(block: Block): string {
 // Where translated blocks go: a story's markup (cells, notes, text boxes, headers) or the document body.
 export interface Flow {
 	readonly body: boolean
+	// The block added last.
+	readonly last: Block | undefined
 	add(block: Block): void
 	// Adds `content` to the end of the last paragraph, or as a paragraph of its own after another block or none.
 	appendToLast(content: string): void
@@ -51,6 +53,10 @@ export class MarkupFlow implements Flow {
 
 		if (last?.kind === "p") last.content += content
 		else this.add(paragraph("", "", content))
+	}
+
+	get last(): Block | undefined {
+		return this.blocks[this.blocks.length - 1]
 	}
 
 	get endsWithParagraph(): boolean {

@@ -105,6 +105,8 @@ export interface SlideReadInput {
 	action(reader: PartReader, relationships: Relationships, node: number): Action | undefined
 	// The preview part of a PowerPoint 2007-style OLE object (in the part's legacy VML drawing), by its spid.
 	legacyPreview?(spid: string): string | undefined
+	// Whether a chartex part the slide relates draws (chartexDrawable); absent when it relates none.
+	chartex?(part: string): boolean
 }
 
 export interface SlideRead {
@@ -284,7 +286,7 @@ class ShapeReader {
 			const local = r.local(child)
 
 			if (group === G.MC && local === "AlternateContent") {
-				const branch = r.alternate(child)
+				const branch = this.branch(child)
 
 				if (branch >= 0) {
 					for (const shape of this.tree(branch, depth, true)) out.push(shape)
@@ -314,6 +316,36 @@ class ShapeReader {
 		}
 
 		return out
+	}
+
+	// The branch of a shape-level mc:AlternateContent: a chartex Choice (Office 2016 charts) when every cx:chart in it
+	// names a part that draws, else the one alternate() reads.
+	private branch(node: number): number {
+		const r = this.context.reader
+		const branch = r.alternate(node)
+		const draws = this.input.chartex
+
+		if (draws === undefined) return branch
+
+		const choice = r.alternateChartex(node)
+
+		if (choice < 0 || choice === branch || !r.is(choice, G.MC, "Choice")) return branch
+
+		const document = r.document
+		const end = document.end(choice)
+		let charts = 0
+
+		for (let at = choice + 1; at < document.count && document.start(at) < end; at++) {
+			if (!r.is(at, G.Cx, "chart")) continue
+
+			const part = relPart(this.context, r.rel(at, "id"))
+
+			if (part === undefined || !draws(part)) return branch
+
+			charts++
+		}
+
+		return charts > 0 ? choice : branch
 	}
 
 	private shape(node: number, local: string, depth: number): ShapeNode | undefined {

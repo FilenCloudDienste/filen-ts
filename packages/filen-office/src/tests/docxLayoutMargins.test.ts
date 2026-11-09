@@ -173,4 +173,53 @@ describe("section vertical alignment", () => {
 		expect(objectY(result, 0)).toBeCloseTo(96, 1)
 		expect(objectY(result, 1)).toBeCloseTo(title?.top ?? Number.NaN, 1)
 	})
+
+	it("lays the text out again around an object on the page it wraps around, and centres what that takes", async () => {
+		// 1 x 1 in at 5 in from the page top (480 to 576 px), at the margin's left: where the centred text lands.
+		const picture = anchor('<wp:wrapSquare wrapText="bothSides"/>', "margin", "page", 0, 4572000)
+		const result = await layout({
+			body: `<w:p>${picture}<w:r><w:t xml:space="preserve">${words(120)}</w:t></w:r></w:p>`,
+			section: `<w:sectPr>${MARGINS}<w:vAlign w:val="center"/></w:sectPr>`
+		})
+		const lines = body(result)
+		const beside = lines.filter(line => line.bottom > 480 + 0.01 && line.top < 576 - 0.01)
+		const first = lines[0]
+		const last = lines[lines.length - 1]
+
+		expect(objectY(result, 0)).toBeCloseTo(480, 1)
+		expect(beside.length).toBeGreaterThan(0)
+		expect(beside.every(line => line.x >= 96 + 96 - 0.01)).toBe(true)
+		// As much room above the text as below it, to a line.
+		expect(Math.abs((first?.top ?? 0) - 96 - (960 - (last?.bottom ?? 0)))).toBeLessThan(24)
+	})
+
+	it("lays the text out again around the header's objects it wraps around", async () => {
+		const header = `<w:p>${anchor('<wp:wrapSquare wrapText="bothSides"/>', "margin", "page", 0, 4572000)}<w:r><w:t>head</w:t></w:r></w:p>`
+		const result = await layout({
+			body: p(words(120)),
+			headers: { rId30: header },
+			section: `<w:sectPr><w:headerReference w:type="default" r:id="rId30"/>${MARGINS}<w:vAlign w:val="center"/></w:sectPr>`
+		})
+		const beside = body(result).filter(line => line.bottom > 480 + 0.01 && line.top < 576 - 0.01)
+
+		expect(beside.length).toBeGreaterThan(0)
+		expect(beside.every(line => line.x >= 96 + 96 - 0.01)).toBe(true)
+	})
+
+	it("moves the text only as low as it still fits on the page when going around the object", async () => {
+		// Across the page at 9 in (864 to 960 px): bottom-aligned text going around it would not fit.
+		const picture = anchor("<wp:wrapTopAndBottom/>", "margin", "page", 0, 8229600, 5943600)
+		const text = `<w:p>${picture}<w:r><w:t xml:space="preserve">${words(120)}</w:t></w:r></w:p>`
+		const top = await layout({ body: text, section: `<w:sectPr>${MARGINS}</w:sectPr>` })
+		const result = await layout({ body: text, section: `<w:sectPr>${MARGINS}<w:vAlign w:val="bottom"/></w:sectPr>` })
+		const lines = body(result)
+
+		expect(result.pages.length).toBe(1)
+		expect(lines.length).toBe(body(top).length)
+		expect(objectY(result, 0)).toBeCloseTo(864, 1)
+		// Down to the object's top, not over it.
+		expect(lines[0]?.top).toBeGreaterThan((body(top)[0]?.top ?? 0) + 400)
+		expect(lines[lines.length - 1]?.bottom).toBeLessThanOrEqual(864 + 0.01)
+		expect(lines[lines.length - 1]?.bottom).toBeGreaterThan(864 - 2)
+	})
 })

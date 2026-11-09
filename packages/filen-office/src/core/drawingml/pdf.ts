@@ -1,10 +1,12 @@
-import type { Matrix } from "../pdfwrite/content"
+import { ByteWriter } from "../pdfwrite/bytes"
+import { ContentBuilder, type Matrix } from "../pdfwrite/content"
 import type { PdfFontFaceRequest, PdfFontSet, PdfShapedText } from "../pdfwrite/fonts/fontSet"
 import type { PdfGradient } from "../pdfwrite/shading"
 import type { PdfImageData } from "../pdfwrite/images"
 import type { PdfImage, PdfPage } from "../pdfwrite/page"
 import type { PdfImageSource } from "../pdfwrite/writer"
 import { linearGradientLine, recolorPixels, recolors } from "./canvas"
+import { closedCommands, commandBounds, compoundMask, type CompoundMask } from "./compoundLine"
 import {
 	ITEM_FILL_MODIFIER_MASK,
 	ITEM_FLOATS,
@@ -31,9 +33,10 @@ import { layoutBlock } from "./textBlock"
 
 // A drawing's display list painted onto a PDF page as vectors: paths with their fills (solid, linear and path
 // gradients as shadings, patterns as the blend of their colours, pictures clipped by the path), strokes with
-// widths, caps, joins and dashes, clips (and their parents), pictures with their crop and opacity, and text shaped
-// by the export's fonts. What it draws matches the SVG painter (react/docx/paint/drawing.ts) item for item; shadows
-// and a clip group's opacity as one group are not drawn (each item takes the group's opacity).
+// widths, caps, joins, dashes and compound or inset lines (soft-masked), clips (and their parents), pictures with
+// their crop and opacity, and text shaped by the export's fonts. What it draws matches the SVG painter
+// (react/docx/paint/drawing.ts) item for item; shadows and a clip group's opacity as one group are not drawn (each
+// item takes the group's opacity).
 //
 // Coordinates are the drawing's px; `placement` maps them onto the page's px (see core/pdfwrite/page.ts). The
 // caller opens the marked content (a Figure, or an artifact) around it.
@@ -516,6 +519,17 @@ class DrawingPainter {
 		]
 	}
 
+	// Whether the item has a path of its own. State operators go before one is built (none inside a path object, §8.2).
+	private hasPath(i: number): boolean {
+		const ints = this.data.itemInts
+
+		return (
+			index(ints[i + ItemInt.FIRST_COMMAND]) >= 0 &&
+			index(ints[i + ItemInt.COMMAND_COUNT]) > 0 &&
+			index(ints[i + ItemInt.FIRST_COORD]) >= 0
+		)
+	}
+
 	// Appends the item's own path; false when it has none.
 	private path(i: number): boolean {
 		const ints = this.data.itemInts
@@ -523,7 +537,7 @@ class DrawingPainter {
 		const count = index(ints[i + ItemInt.COMMAND_COUNT])
 		const coord = index(ints[i + ItemInt.FIRST_COORD])
 
-		if (first < 0 || count <= 0 || coord < 0) return false
+		if (!this.hasPath(i)) return false
 
 		this.page.pathCommands(this.data.commands, this.data.coords, first, Math.min(count, this.data.commands.length - first), coord)
 
@@ -553,12 +567,20 @@ class DrawingPainter {
 				// exactly: no clip path is written. One the writer refuses fills the outline in its mean colour.
 				const colors = opacity >= 1 ? paint.colors : paint.colors.map(color => this.alpha(color >>> 0, opacity))
 
-				if (!(await page.mesh({ points: paint.points, colors })) && this.path(i))
-					page.fillColor(this.alpha(this.color(averageShade(paint.colors)), opacity)).fill(evenOdd)
+				if (!(await page.mesh({ points: paint.points, colors })) && this.hasPath(i)) {
+					page.fillColor(this.alpha(this.color(averageShade(paint.colors)), opacity))
+					this.path(i)
+					page.fill(evenOdd)
+				}
 			} else if (solid !== undefined) {
-				if ((solid & 255) > 0 && this.path(i)) page.fillColor(this.alpha(this.color(solid), opacity)).fill(evenOdd)
-			} else if (this.path(i)) {
+				if ((solid & 255) > 0 && this.hasPath(i)) {
+					page.fillColor(this.alpha(this.color(solid), opacity))
+					this.path(i)
+					page.fill(evenOdd)
+				}
+			} else if (this.hasPath(i)) {
 				page.saveState()
+				this.path(i)
 				page.clip(evenOdd)
 				await this.paintArea(paint, box, opacity)
 				page.restoreState()
@@ -567,7 +589,7 @@ class DrawingPainter {
 
 		const line: Stroke | undefined = stroke < 0 ? undefined : this.data.strokes[stroke]
 
-		if (line !== undefined) this.strokePath(i, line, box, opacity)
+		if (line !== undefined) await this.strokePath(i, line, box, opacity, evenOdd)
 	}
 
 	// A paint as one colour when it is one (or is drawn as one: a pattern, a flat box's gradient, a shaded mesh);
@@ -728,33 +750,106 @@ class DrawingPainter {
 		return { type, coords, offsets, colors, spread, bounds }
 	}
 
-	private strokePath(i: number, stroke: Stroke, box: readonly [number, number, number, number], opacity: number): void {
+	private async strokePath(
+		i: number,
+		stroke: Stroke,
+		box: readonly [number, number, number, number],
+		opacity: number,
+		evenOdd: boolean
+	): Promise<void> {
 		const page = this.page
 		const paint = this.data.paints[index(stroke.paint)]
+		const ints = this.data.itemInts
+		const first = index(ints[i + ItemInt.FIRST_COMMAND])
+		const count = index(ints[i + ItemInt.COMMAND_COUNT])
 
-		if (paint === undefined) return
+		if (paint === undefined || !this.hasPath(i)) return
 
 		// A gradient or picture outline is drawn in its mean colour.
 		const color =
 			this.solidOf(paint, box, 0) ??
 			(paint.kind === "linear" || paint.kind === "path" || paint.kind === "gradient" ? averageColor(paint.stops) : 0x000000ff)
 
-		if ((color & 255) === 0 || !this.path(i)) return
+		if ((color & 255) === 0) return
 
 		const width = clamp(stroke.width, 0, 10_000, 1) || 1
+		const cap = stroke.cap === "round" ? "round" : stroke.cap === "square" ? "square" : "butt"
+		const join = stroke.join === "round" ? "round" : stroke.join === "bevel" ? "bevel" : "miter"
+		const miterLimit = clamp(stroke.miterLimit, 1, 100, 8)
+		const mask = compoundMask(stroke.compound, width, stroke.inset && closedCommands(this.data.commands, first, count))
 
-		page.strokeColor(this.alpha(this.color(color), opacity)).lineWidth(width)
-		page.lineCap(stroke.cap === "round" ? "round" : stroke.cap === "square" ? "square" : "butt")
-		page.lineJoin(stroke.join === "round" ? "round" : stroke.join === "bevel" ? "bevel" : "miter")
+		if (mask !== undefined) {
+			page.saveState()
+			await this.strokeMask(i, mask, cap, join, miterLimit, evenOdd)
+		}
 
-		if (stroke.join === "miter") page.miterLimit(clamp(stroke.miterLimit, 1, 100, 8))
+		page.strokeColor(this.alpha(this.color(color), opacity)).lineWidth(mask?.pen ?? width)
+		page.lineCap(cap)
+		page.lineJoin(join)
+
+		if (join === "miter") page.miterLimit(miterLimit)
 
 		const custom = stroke.customDash
 		const dashes = custom !== null && custom.length > 0 ? Array.from(custom).slice(0, 32) : presetDashes(stroke.dash)
 
 		if (dashes !== undefined && dashes.some(length => length > 0)) page.dash(dashes.map(length => clamp(length, 0, 1000, 0) * width))
 
+		this.path(i)
 		page.stroke()
+
+		if (mask !== undefined) page.restoreState()
+	}
+
+	// A compound or inset outline's mask (core/drawingml/compoundLine) as a soft mask on the stroke that follows: the
+	// keeping strokes white, the clearing ones and the cleared interior black.
+	private async strokeMask(
+		i: number,
+		mask: CompoundMask,
+		cap: "butt" | "round" | "square",
+		join: "miter" | "round" | "bevel",
+		miterLimit: number,
+		evenOdd: boolean
+	): Promise<void> {
+		const { commands, coords, itemInts: ints } = this.data
+		const first = index(ints[i + ItemInt.FIRST_COMMAND])
+		const count = Math.min(index(ints[i + ItemInt.COMMAND_COUNT]), commands.length - first)
+		const coord = index(ints[i + ItemInt.FIRST_COORD])
+		const bounds = commandBounds(commands, coords, first, count, coord)
+
+		if (bounds === undefined) return
+
+		const content = new ContentBuilder(new ByteWriter(1024))
+		const outline = (): void => {
+			content.pathCommands(commands, coords, first, count, coord)
+		}
+		const strokes = (list: CompoundMask["outer"]): void => {
+			for (const step of list) {
+				content.op(step.keep ? "1 G" : "0 G").lineWidth(step.width)
+				outline()
+				content.stroke()
+			}
+		}
+		// Miter joins reach out miterLimit half pens, square caps √2.
+		const reach = (mask.pen / 2) * Math.max(join === "miter" ? miterLimit : 1, Math.SQRT2) + 1
+
+		content.lineCap(cap).lineJoin(join)
+
+		if (join === "miter") content.miterLimit(miterLimit)
+
+		strokes(mask.outer)
+
+		if (mask.inner !== null) {
+			content.saveState()
+			outline()
+			content.clip(evenOdd)
+			content.op("0 g")
+			outline()
+			content.fill(evenOdd)
+			strokes(mask.inner)
+			content.restoreState()
+		}
+
+		await this.page.softMask(content.out.view().slice(), [bounds[0] - reach, bounds[1] - reach, bounds[2] + reach, bounds[3] + reach])
 	}
 
 	// --- Pictures ---

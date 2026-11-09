@@ -44,6 +44,7 @@ export {
 	besideNode,
 	bindingShortcut,
 	commandForKey,
+	commandShortcut,
 	findForKey,
 	hostCommandForKey,
 	isRepeatKey,

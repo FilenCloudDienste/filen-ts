@@ -1476,7 +1476,6 @@ export class OdpParts {
 		const show: ShowSettings = {
 			kind: "present",
 			loop: false,
-			showNarration: false,
 			showAnimation: true,
 			useTimings: true,
 			range: { kind: "all" }

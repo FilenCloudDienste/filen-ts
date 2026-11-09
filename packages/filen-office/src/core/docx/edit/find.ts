@@ -57,8 +57,88 @@ export function findInStory(doc: Node, query: string, options: StoryFindOptions 
 	const pattern = findPattern(query, options)
 	const out: StoryMatch[] = []
 
-	if (pattern === null) return out
+	if (pattern !== null) collect(doc, pattern, limit, out, (from, to) => ({ from, to }))
 
+	return out
+}
+
+// A story Find goes through: its index and its document as it stands.
+export interface StorySearch {
+	readonly story: number
+	readonly doc: Node
+}
+
+// A match in one of the document's stories.
+export interface DocumentMatch extends StoryMatch {
+	readonly story: number
+}
+
+// A search's matches, by what it searched (documents are immutable: an edited story is a new document): a
+// story's for its last search, and a list's for its last search, so a search again (each render while typing
+// pauses, each keystroke in one story) goes through only the documents that changed. `limit`: the bound the
+// matches were collected under (fewer than it: all there are).
+interface FoundIn<T> {
+	readonly key: string
+	readonly limit: number
+	readonly matches: readonly T[]
+}
+
+const foundInStory = new WeakMap<Node, FoundIn<DocumentMatch>>()
+const foundInStories = new WeakMap<readonly StorySearch[], FoundIn<DocumentMatch>>()
+
+function foundFor<T>(found: FoundIn<T> | undefined, key: string, limit: number): readonly T[] | undefined {
+	return found !== undefined && found.key === key && (found.limit >= limit || found.matches.length < found.limit)
+		? found.matches
+		: undefined
+}
+
+// Every match of `query` in `stories`, story by story in the order given (Word's Search: All goes through the
+// main text, then the other stories), each tagged with its story. `limit` bounds the matches returned. The same
+// list (never to be changed) is returned for the same stories and search.
+export function findInStories(
+	stories: readonly StorySearch[],
+	query: string,
+	options: StoryFindOptions = {},
+	limit = STORY_FIND_LIMIT
+): readonly DocumentMatch[] {
+	const pattern = findPattern(query, options)
+
+	if (pattern === null) return []
+
+	const key = `${query}\u0000${String(options.caseSensitive === true)}\u0000${String(options.wholeWord === true)}`
+	const listed = foundInStories.get(stories)
+
+	if (listed !== undefined && listed.key === key && listed.limit === limit) return listed.matches
+
+	const out: DocumentMatch[] = []
+
+	for (const { story, doc } of stories) {
+		if (out.length >= limit) break
+
+		const storyKey = `${String(story)}\u0000${key}`
+		let matches = foundFor(foundInStory.get(doc), storyKey, limit)
+
+		if (matches === undefined) {
+			const collected: DocumentMatch[] = []
+
+			collect(doc, pattern, limit, collected, (from, to) => ({ story, from, to }))
+			foundInStory.set(doc, { key: storyKey, limit, matches: collected })
+			matches = collected
+		}
+
+		for (const match of matches) {
+			if (out.length >= limit) break
+
+			out.push(match)
+		}
+	}
+
+	foundInStories.set(stories, { key, limit, matches: out })
+
+	return out
+}
+
+function collect<T extends StoryMatch>(doc: Node, pattern: RegExp, limit: number, out: T[], make: (from: number, to: number) => T): void {
 	doc.descendants((node, pos) => {
 		if (out.length >= limit) return false
 		if (node.type === nodes.locked_block) return false
@@ -82,13 +162,11 @@ export function findInStory(doc: Node, query: string, options: StoryFindOptions 
 			const start = starts === null ? found : (starts[found] ?? found)
 			const end = ends === null ? foundEnd : (ends[foundEnd - 1] ?? foundEnd)
 
-			out.push({ from: pos + 1 + start, to: pos + 1 + end })
+			out.push(make(pos + 1 + start, pos + 1 + end))
 		}
 
 		return false
 	})
-
-	return out
 }
 
 // Whether a match still covers text equal to the query (the document may have changed since it was found).

@@ -35,6 +35,7 @@ interface FindState {
 	readonly open: boolean
 	readonly query: string
 	readonly caseSensitive: boolean
+	readonly wholeWord: boolean
 	// Index into matches, or -1 until the first results pick one.
 	readonly active: number
 	readonly matches: readonly DocxFindMatch[]
@@ -44,7 +45,16 @@ interface FindState {
 	readonly from: number
 }
 
-const CLOSED: FindState = { open: false, query: "", caseSensitive: false, active: -1, matches: [], capped: false, from: 0 }
+const CLOSED: FindState = {
+	open: false,
+	query: "",
+	caseSensitive: false,
+	wholeWord: false,
+	active: -1,
+	matches: [],
+	capped: false,
+	from: 0
+}
 
 export function useDocxViewer(document: DocxDocument, options: DocxViewerOptions = {}): DocxViewer {
 	const gap = options.gap ?? 16
@@ -61,7 +71,7 @@ export function useDocxViewer(document: DocxDocument, options: DocxViewerOptions
 	const session = document.session
 	const laidOut = document.pages.length
 	const status = document.status
-	const { open, query, caseSensitive } = find
+	const { open, query, caseSensitive, wholeWord } = find
 	const searching = open && query.length > 0
 
 	// The engine searches every page laid out so far, and again as more arrive. A newer query wins.
@@ -71,7 +81,7 @@ export function useDocxViewer(document: DocxDocument, options: DocxViewerOptions
 		let current = true
 
 		session
-			.find(query, { caseSensitive })
+			.find(query, { caseSensitive, wholeWord })
 			.then(found => {
 				if (!current) return
 
@@ -80,7 +90,13 @@ export function useDocxViewer(document: DocxDocument, options: DocxViewerOptions
 				const matches = capped ? all.slice(0, DOCX_FIND_LIMIT) : all
 
 				setFind(previous => {
-					if (previous.query !== query || previous.caseSensitive !== caseSensitive || !previous.open) return previous
+					if (
+						previous.query !== query ||
+						previous.caseSensitive !== caseSensitive ||
+						previous.wholeWord !== wholeWord ||
+						!previous.open
+					)
+						return previous
 
 					let active = previous.active
 
@@ -99,7 +115,7 @@ export function useDocxViewer(document: DocxDocument, options: DocxViewerOptions
 		return () => {
 			current = false
 		}
-	}, [searching, session, query, caseSensitive, laidOut, status])
+	}, [searching, session, query, caseSensitive, wholeWord, laidOut, status])
 
 	// A newly selected match scrolls into view once the state that holds it has rendered.
 	useEffect(() => {
@@ -168,11 +184,27 @@ export function useDocxViewer(document: DocxDocument, options: DocxViewerOptions
 			case "find.query":
 				setFind(previous => {
 					const caseSensitive = command.caseSensitive ?? previous.caseSensitive
+					const wholeWord = command.wholeWord ?? previous.wholeWord
 
 					// The same search again keeps its results: nothing would run it anew.
-					if (previous.open && previous.query === command.query && previous.caseSensitive === caseSensitive) return previous
+					if (
+						previous.open &&
+						previous.query === command.query &&
+						previous.caseSensitive === caseSensitive &&
+						previous.wholeWord === wholeWord
+					)
+						return previous
 
-					return { open: true, query: command.query, caseSensitive, active: -1, matches: [], capped: false, from: page }
+					return {
+						open: true,
+						query: command.query,
+						caseSensitive,
+						wholeWord,
+						active: -1,
+						matches: [],
+						capped: false,
+						from: page
+					}
 				})
 
 				break
@@ -196,7 +228,7 @@ export function useDocxViewer(document: DocxDocument, options: DocxViewerOptions
 		pageCountFinal: status === "ready",
 		zoom,
 		zoomMode: zoomMode === "fitWidth" ? "fitWidth" : "custom",
-		find: { open, query, caseSensitive, count: find.matches.length, capped: find.capped, active }
+		find: { open, query, caseSensitive, wholeWord, count: find.matches.length, capped: find.capped, active }
 	}
 
 	return {

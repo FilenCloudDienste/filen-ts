@@ -45,6 +45,8 @@ export type OdtLossyReason =
 	| "listLevel"
 	// Tables wider than 63 columns, repeated rows cut short, or a table that may not break between rows.
 	| "tableLimit"
+	// A table's space above or below (fo:margin-top/bottom) with no paragraph beside it to carry it: not shown.
+	| "tableSpacing"
 	// Tracked changes beyond inserted and deleted text (format changes, deleted paragraphs).
 	| "trackedChange"
 	// An element the translator does not know; its text content is kept.
@@ -90,6 +92,14 @@ export interface OdtTranslation {
 	readonly sections: readonly { readonly master: string; readonly layout: string | undefined; readonly start?: string }[]
 	// The translator's state past the body's last block (Translator.blockState).
 	readonly endState?: string | undefined
+	// The space above and below (twips) of each table of the body that has some, by its index among the body's blocks:
+	// the paragraphs beside it carry it (Translator.spaceTable).
+	readonly tableSpacing?: ReadonlyMap<number, OdtTableSpacing>
+}
+
+export interface OdtTableSpacing {
+	readonly top: number
+	readonly bottom: number
 }
 
 export type OdtTranslateResult =

@@ -182,6 +182,58 @@ describe("presentation format painter", () => {
 		expect(commands).toHaveLength(1)
 	})
 
+	it("holds a copied format for Paste Formatting without turning the painter on", async () => {
+		const source: ShapeRef = { slide: SLIDE, id: 3 }
+		const target: ShapeRef = { slide: SLIDE, id: 7 }
+		const commands: DeckOp[] = []
+		let selected: readonly ShapeRef[] = [source]
+		const host: FormatPainterHost = {
+			session: {
+				textSeed: shape => Promise.resolve(seed(shape, shape.id === source.id ? [{ u: "sng", sz: 4000 }] : [{ sz: 1800 }]))
+			},
+			text: createTextEditing(),
+			targets: () => ({ shapes: selected, entersText: false }),
+			command: op => {
+				commands.push(op)
+
+				return Promise.resolve({ ok: true, revision: 1 } as Awaited<ReturnType<FormatPainterHost["command"]>>)
+			}
+		}
+		const painter = createFormatPainter(host.text)
+
+		// Nothing held yet.
+		expect(painter.pasteFormat(host)).toBe(false)
+		expect(await painter.copyFormat(host)).toBe(true)
+		expect(painter.mode).toBe("off")
+
+		selected = []
+		expect(painter.pasteFormat(host)).toBe(false)
+
+		selected = [target]
+		expect(painter.pasteFormat(host)).toBe(true)
+		await vi.waitFor(() => {
+			expect(commands).toHaveLength(1)
+		})
+
+		const op = commands[0]
+
+		expect(op?.family === "text" && op.kind === "setText" ? op.target : undefined).toEqual(target)
+		expect(
+			op?.family === "text" && op.kind === "setText"
+				? op.body.paragraphs[0]?.runs.map(each => ("rPr" in each ? each.rPr : undefined))
+				: undefined
+		).toEqual([
+			{ u: "sng", sz: 4000, b: false, lang: "en-GB" },
+			{ u: "sng", sz: 4000, i: false, lang: "de-DE", hlinkClick: { kind: "url", href: "https://filen.io" } }
+		])
+
+		// Held until the next copy: a second paste paints again.
+		expect(painter.pasteFormat(host)).toBe(true)
+		await vi.waitFor(() => {
+			expect(commands).toHaveLength(2)
+		})
+	})
+
 	it("carries a shape's first resolved run", () => {
 		expect(seedRunProps(seed({ slide: SLIDE, id: 1 }, [{ b: true, hlinkClick: { kind: "url", href: "https://x" } }]))).toEqual({
 			b: true

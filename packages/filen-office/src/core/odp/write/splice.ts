@@ -39,6 +39,7 @@ import { newPage, pageAspects, pageChanges, startTag, timingPieces } from "./emi
 import { odpTransitionPar, odpTransitionSound, pageIdOf, placeTransitionPar, transitionParOf, withTransitionPar } from "./emit/transition"
 import { odpOwnParagraphSource, odpParagraphKey, odpParagraphTargets, odpTargetIds, odpTimingRoot } from "../../anim/odf"
 import { newSettingsMarkup, pageNames, renameIds, settingsMarkup } from "./integrity"
+import { withManifestEntries } from "./manifestPrune"
 import { settingsAttributes, type SettingsAttribute } from "./emit/presentation"
 import { OdpWriteSource, odpWriteSource } from "./source"
 import { notesDiffer, slideDiffers } from "./meaning"
@@ -1581,29 +1582,6 @@ export async function odpSplice(input: OdpSaveInput): Promise<OdpSplice | Refuse
 			...(entry.crc32 === undefined ? {} : { crc32: entry.crc32 })
 		}))
 	}
-}
-
-// META-INF/manifest.xml with `entries` added as manifest:file-entry elements (Part 2 §4.3) before the root's end tag,
-// in the prefix the root uses; undefined when the root's end cannot be found.
-export function withManifestEntries(
-	bytes: Uint8Array,
-	entries: readonly { readonly path: string; readonly mediaType: string }[]
-): Uint8Array | undefined {
-	const text = decodeUtf8(bytes, 0, bytes.length)
-	const close = /<\/([\w.-]+:)?manifest>\s*$/u.exec(text)
-
-	if (close === null) return undefined
-
-	const prefix = close[1] ?? ""
-	const lines = entries
-		.map(
-			entry =>
-				` <${prefix}file-entry ${prefix}full-path="${escapeAttribute(entry.path)}" ${prefix}media-type="${escapeAttribute(entry.mediaType)}"/>\n`
-		)
-		.join("")
-	const at = encodeUtf8(text.slice(0, close.index)).length
-
-	return concat([bytes.subarray(0, at), encodeUtf8(lines), bytes.subarray(at)])
 }
 
 // Names a stream refers to styles by (§19.4xx *-style-name, list styles, data styles, master pages): every value of

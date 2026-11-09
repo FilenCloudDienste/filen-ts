@@ -448,9 +448,16 @@ export class Frames {
 		)
 	}
 
-	private picture(placement: Placement, source: string): string {
-		const translator = this.translator
-		const properties = placement.graphic.attributes
+	// The word/-relative media part a package picture is linked as, one per source; undefined when it is not a
+	// picture the translation carries (unknown, SVM, or not in the package).
+	mediaPart(href: string): string | undefined {
+		const source = packagePath(href)
+		const kind = source === undefined ? undefined : this.kinds.get(source)
+
+		return source === undefined || kind === undefined || kind === "svm" || kind === "unknown" ? undefined : this.partOf(source)
+	}
+
+	private partOf(source: string): string {
 		let part = this.mediaParts.get(source)
 
 		if (part === undefined) {
@@ -461,6 +468,13 @@ export class Frames {
 			this.media.push({ source, part: `word/${part}` })
 		}
 
+		return part
+	}
+
+	private picture(placement: Placement, source: string): string {
+		const translator = this.translator
+		const properties = placement.graphic.attributes
+		const part = this.partOf(source)
 		const rId = translator.relationship("image", part, false)
 		const mirror = properties.get("style:mirror") ?? "none"
 		const flipH = mirror.includes("horizontal") ? ' flipH="1"' : ""

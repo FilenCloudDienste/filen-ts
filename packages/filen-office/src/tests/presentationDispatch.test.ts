@@ -133,6 +133,7 @@ const BUILT_METHODS: ReadonlySet<PresentationMethod> = new Set([
 	"shade",
 	"clip",
 	"clipParts",
+	"clipSlides",
 	"outline"
 ])
 

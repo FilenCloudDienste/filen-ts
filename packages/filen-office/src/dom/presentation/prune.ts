@@ -406,7 +406,8 @@ function heldMarkupNames(history: DeckHistory): Set<string> {
 	return out
 }
 
-const RELATIONSHIP_ID = /\s[\w.-]+:(?:id|embed|link|pict)="([^"]+)"/gu
+// A diagram frame names its parts by dgm:relIds r:dm, r:lo, r:qs and r:cs.
+const RELATIONSHIP_ID = /\s[\w.-]+:(?:id|embed|link|pict|dm|lo|qs|cs)="([^"]+)"/gu
 
 // The relationship ids the shapes the history holds as markup (a deleted shape an undo puts back) name, by the part
 // key of the slide they go back into.

@@ -1,4 +1,34 @@
-import { decodeUtf8, encodeUtf8 } from "../../xml/index"
+import { decodeUtf8, encodeUtf8, escapeAttribute } from "../../xml/index"
+
+// META-INF/manifest.xml with `entries` added as manifest:file-entry elements (ODF 1.3 Part 2 §4.3) before the root's end tag,
+// in the prefix the root uses; undefined when the root's end cannot be found.
+export function withManifestEntries(
+	bytes: Uint8Array,
+	entries: readonly { readonly path: string; readonly mediaType: string }[]
+): Uint8Array | undefined {
+	const text = decodeUtf8(bytes, 0, bytes.length)
+	const close = /<\/([\w.-]+:)?manifest>\s*$/u.exec(text)
+
+	if (close === null) return undefined
+
+	const prefix = close[1] ?? ""
+	const lines = encodeUtf8(
+		entries
+			.map(
+				entry =>
+					` <${prefix}file-entry ${prefix}full-path="${escapeAttribute(entry.path)}" ${prefix}media-type="${escapeAttribute(entry.mediaType)}"/>\n`
+			)
+			.join("")
+	)
+	const at = encodeUtf8(text.slice(0, close.index)).length
+	const out = new Uint8Array(bytes.length + lines.length)
+
+	out.set(bytes.subarray(0, at))
+	out.set(lines, at)
+	out.set(bytes.subarray(at), at + lines.length)
+
+	return out
+}
 
 // META-INF/manifest.xml without the manifest:file-entry elements of `names` (ODF 1.3 Part 2 §4.3), every other byte
 // as it was: entries a save leaves out leave the manifest with them. An entry goes with its indent and, when its line

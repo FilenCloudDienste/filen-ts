@@ -104,9 +104,10 @@ export function odfShow(
 		}
 	}
 
-	if (out.showNarration) {
-		omitted.push("narration")
-		out.showNarration = false
+	if (out.showNarration !== undefined) {
+		// ODF has no narration: an explicit "without narration" is lost, "with" is what a reader assumes anyway.
+		if (!out.showNarration) omitted.push("narration")
+		delete out.showNarration
 	}
 
 	if (out.penColor !== undefined) {

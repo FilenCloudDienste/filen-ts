@@ -22,7 +22,7 @@ import {
 	type TextParagraph,
 	type TextRun
 } from "../../../core/drawingml/index"
-import { compoundBands, compoundRadii, type CompoundRadii } from "../../../core/drawingml/compoundLine"
+import { compoundBands, compoundMask, type MaskStroke } from "../../../core/drawingml/compoundLine"
 import { pathGradientCircle, type Stroke } from "../../../core/drawingml/displayList"
 import { lumTransfer } from "../../../core/drawingml/lum"
 import { layoutBlock } from "../../../core/drawingml/textBlock"
@@ -982,10 +982,12 @@ class Painter {
 		path.setAttribute("fill", "none")
 		this.applyStroke(path, strokeIndex, width, height)
 
-		if (stroke === undefined || stroke === null || !layered(stroke, d) || !path.hasAttribute("stroke")) return path
+		if (stroke === undefined || stroke === null || !path.hasAttribute("stroke")) return path
 
 		const lineWidth = clamp(stroke.width, 0, 10_000, 1) || 1
-		const radii = compoundRadii(stroke.compound, lineWidth, stroke.inset === true && closedPath(d))
+		const radii = compoundMask(stroke.compound, lineWidth, stroke.inset === true && closedPath(d))
+
+		if (radii === undefined) return path
 
 		if (radii.pen !== lineWidth) path.setAttribute("stroke-width", fmt(radii.pen))
 
@@ -1009,12 +1011,8 @@ class Painter {
 
 			target.appendChild(copy)
 		}
-		const bands = (target: SVGElement, side: CompoundRadii["outer"]): void => {
-			for (const [far, near] of side) {
-				band(target, far * 2, "#fff")
-
-				if (near > 0) band(target, near * 2, "#000")
-			}
+		const bands = (target: SVGElement, strokes: readonly MaskStroke[]): void => {
+			for (const step of strokes) band(target, step.width, step.keep ? "#fff" : "#000")
 		}
 
 		mask.setAttribute("id", id)
@@ -1025,7 +1023,7 @@ class Painter {
 		mask.setAttribute("height", fmt(height * 3 + margin * 2))
 		bands(mask, radii.outer)
 
-		if (!radii.symmetric) {
+		if (radii.inner !== null) {
 			const clipId = this.id("c")
 			const clipPath = this.el("clipPath")
 			const area = this.el("path")

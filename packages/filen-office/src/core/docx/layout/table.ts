@@ -1769,6 +1769,20 @@ export class TableLayout {
 		return keep
 	}
 
+	// The rows kept with the next that end the table in area `area` (their chain), undefined when it does not end
+	// with any there: they stay with the block after the table (see BlockFlow.keepTableRows).
+	keptRows(area: Area): { readonly placed: number; readonly y: number; readonly top: boolean } | undefined {
+		const chain = this.chain
+
+		return chain !== undefined && chain.token === area.token && this.row >= this.rows.length ? chain : undefined
+	}
+
+	// The block after the table does not fit with the rows that end it: they move to the next area, from where
+	// the table goes on (see rollbackChain).
+	moveKeptRows(area: Area): boolean {
+		return this.rollbackChain(area)
+	}
+
 	// Moves the rows kept with the next placed in this area since `chain` began to the next area; false when
 	// there are none or they began at its top (they cannot move anywhere better) or a merge runs on past them.
 	private rollbackChain(area: Area): boolean {

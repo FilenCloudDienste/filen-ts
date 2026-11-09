@@ -9,7 +9,6 @@ import { G } from "./xml"
 export const DEFAULT_SHOW: ShowSettings = {
 	kind: "present",
 	loop: false,
-	showNarration: false,
 	showAnimation: true,
 	useTimings: true,
 	range: { kind: "all" }
@@ -26,11 +25,13 @@ export function readShowSettings(context: ReadContext, presentationPr: number): 
 	const custom = r.child(showPr, G.P, "custShow")
 	const pen = colorIn(r, r.child(showPr, G.P, "penClr"))
 	const restart = r.int(kiosk, "restart")
+	// Kept absent when unwritten: only an explicit showNarration="0" mutes narration.
+	const narration = r.bool(showPr, "showNarration")
 
 	return {
 		kind: kiosk >= 0 ? "kiosk" : r.child(showPr, G.P, "browse") >= 0 ? "browse" : "present",
 		loop: r.bool(showPr, "loop") ?? false,
-		showNarration: r.bool(showPr, "showNarration") ?? false,
+		...(narration === undefined ? {} : { showNarration: narration }),
 		showAnimation: r.bool(showPr, "showAnimation") ?? true,
 		useTimings: r.bool(showPr, "useTimings") ?? true,
 		range:
