@@ -1,5 +1,31 @@
 import type { ActionDef } from "@/lib/keymap/registry"
 
+// The PDF viewer's zoom, fit and rotate keys, as in Edge's and Acrobat's PDF viewers: Mod+Plus wherever the layout
+// puts "+" (US: Mod+= or Mod+Shift+=, the numpad's, a German keyboard's own key), Mod+Minus, Mod+0 for 100 %,
+// Mod+\ between fit to width and fit to page, Mod+] and Mod+[ to rotate. The viewer matches them on its own keydown by
+// the key's character (pdfKeys.logic.ts), so they keep the browser's page zoom out while it has focus.
+export type PdfViewerAction =
+	| "preview.pdfZoomIn"
+	| "preview.pdfZoomOut"
+	| "preview.pdfZoomReset"
+	| "preview.pdfToggleFit"
+	| "preview.pdfRotateCw"
+	| "preview.pdfRotateCcw"
+
+export const PDF_VIEWER_ACTIONS: readonly (ActionDef & { readonly id: PdfViewerAction })[] = [
+	{
+		id: "preview.pdfZoomIn",
+		defaultCombo: "mod+plus,mod+=,mod+shift+plus",
+		scope: "editor",
+		descriptionKey: "preview:previewPdfKeyZoomIn"
+	},
+	{ id: "preview.pdfZoomOut", defaultCombo: "mod+-", scope: "editor", descriptionKey: "preview:previewPdfKeyZoomOut" },
+	{ id: "preview.pdfZoomReset", defaultCombo: "mod+0", scope: "editor", descriptionKey: "preview:previewPdfKeyZoomReset" },
+	{ id: "preview.pdfToggleFit", defaultCombo: "mod+\\", scope: "editor", descriptionKey: "preview:previewPdfKeyToggleFit" },
+	{ id: "preview.pdfRotateCw", defaultCombo: "mod+]", scope: "editor", descriptionKey: "preview:previewPdfKeyRotateCw" },
+	{ id: "preview.pdfRotateCcw", defaultCombo: "mod+[", scope: "editor", descriptionKey: "preview:previewPdfKeyRotateCcw" }
+]
+
 // The text editors' commands — the file editor in the preview overlay and the note editors share them
 // (codeMirrorShared.ts's useEditorKeymap binds them inside CodeMirror). Scope "editor" because the
 // overlay is hosted by the drive and photos dialog hosts and the chat embeds — it CO-MOUNTS with those
@@ -25,5 +51,6 @@ export const PREVIEW_ACTIONS: readonly ActionDef[] = [
 	{ id: "editor.togglePreview", defaultCombo: "mod+shift+v", scope: "editor", descriptionKey: "preview:previewEditorTogglePreview" },
 	// The image editor matches these on its own keydown and in its layer (imageEditor.tsx).
 	{ id: "preview.imageUndo", defaultCombo: "mod+z", scope: "editor", descriptionKey: "preview:previewImageEditKeyUndo" },
-	{ id: "preview.imageRedo", defaultCombo: "mod+y,mod+shift+z", scope: "editor", descriptionKey: "preview:previewImageEditKeyRedo" }
+	{ id: "preview.imageRedo", defaultCombo: "mod+y,mod+shift+z", scope: "editor", descriptionKey: "preview:previewImageEditKeyRedo" },
+	...PDF_VIEWER_ACTIONS
 ]

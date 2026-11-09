@@ -51,9 +51,9 @@ export const previewPptxEditor = {
 	previewPptxClipboardCopy: "Copy",
 	/** Ribbon button and menu item (Home ▸ Clipboard) — puts what is on the clipboard on the slide (objects) or after it (slides) */
 	previewPptxClipboardPaste: "Paste",
-	/** Toast — Cut or Copy refused: a chart, SmartArt graphic, embedded object or ink drawing is among what is selected */
-	previewPptxClipboardNotCopied: "Charts, SmartArt graphics, embedded objects and ink can't be copied here yet.",
-	/** Toast — Paste refused: what was copied can't go into this presentation (slides from another presentation, objects between different file formats, or a link to a slide of the other presentation) */
+	/** Toast — Cut or Copy refused: something selected can't be copied (an object of an OpenDocument presentation that holds data of its own, or a video or a SmartArt picture added since the last save) */
+	previewPptxClipboardNotCopied: "Something you selected can't be copied here.",
+	/** Toast — Paste refused: what was copied can't go into this presentation (objects or slides between different file formats, or a link to a slide of the other presentation) */
 	previewPptxClipboardNotHere: "What you copied can't be pasted into this presentation.",
 	/** Toast — Paste refused: what was copied is gone (its presentation was closed, or its slides were deleted) */
 	previewPptxClipboardGone: "What you copied is no longer available. Copy it again.",

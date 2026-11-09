@@ -35,14 +35,15 @@ describe("findSeed", () => {
 
 describe("find state across closing", () => {
 	it("keeps the query and case option once closed, and a seed replaces them as a new search", () => {
-		const searched = { ...FIND_CLOSED, open: true, query: "zebra", caseSensitive: true, active: 3 }
+		const searched = { ...FIND_CLOSED, open: true, query: "zebra", caseSensitive: true, wholeWord: true, active: 3 }
 		const closed = closedFind(searched)
 
-		expect(closed).toMatchObject({ open: false, query: "zebra", caseSensitive: true, active: -1 })
+		expect(FIND_CLOSED.wholeWord).toBe(false)
+		expect(closed).toMatchObject({ open: false, query: "zebra", caseSensitive: true, wholeWord: true, active: -1 })
 
 		const reopened = openedFind(closed, false, undefined)
 
-		expect(reopened).toMatchObject({ open: true, replace: false, query: "zebra", caseSensitive: true, active: -1 })
+		expect(reopened).toMatchObject({ open: true, replace: false, query: "zebra", caseSensitive: true, wholeWord: true, active: -1 })
 		expect(openedFind(closed, true, "okapi")).toMatchObject({ open: true, replace: true, query: "okapi", active: -1 })
 		// Open already: a seed starts a new search there, the same query keeps the current match.
 		expect(openedFind(searched, false, "okapi")).toMatchObject({ query: "okapi", active: -1, focus: searched.focus + 1 })

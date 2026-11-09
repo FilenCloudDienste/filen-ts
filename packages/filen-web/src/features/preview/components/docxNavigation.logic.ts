@@ -1,5 +1,7 @@
 import type { Node } from "prosemirror-model"
 import type { StoryMatch } from "@filen/office/core/docx/edit"
+import type { StoryKind } from "@filen/office/core/docx"
+import type { PreviewKey } from "@/lib/i18n"
 import { outlineSectionEnd, type DocxOutline, type DocxOutlineEntry } from "@filen/office/core/docx/paged"
 import type { FindState } from "@/features/preview/components/docxEditorFind.logic"
 
@@ -139,4 +141,17 @@ export function matchContext(doc: Node, match: StoryMatch, chars = CONTEXT_CHARS
 	}
 
 	return { before, match: doc.textBetween(from, to, " ", " "), after }
+}
+
+const STORY_LABELS: Readonly<Partial<Record<StoryKind, PreviewKey>>> = {
+	header: "previewDocxNavigationInHeader",
+	footer: "previewDocxNavigationInFooter",
+	footnote: "previewDocxNavigationInFootnote",
+	endnote: "previewDocxNavigationInEndnote",
+	textbox: "previewDocxNavigationInTextBox"
+}
+
+// What a result outside the main text is labelled with (where it was found); undefined in the body.
+export function storyLabel(kind: StoryKind | undefined): PreviewKey | undefined {
+	return kind === undefined ? undefined : STORY_LABELS[kind]
 }

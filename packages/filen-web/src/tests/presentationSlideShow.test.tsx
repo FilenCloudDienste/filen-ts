@@ -303,10 +303,18 @@ describe("Set Up Slide Show form", () => {
 		expect(setUpOptions(setUpForm({ ...DEFAULT_SHOW_OPTIONS, customShow: 7 }, 4))).toEqual({ ...DEFAULT_SHOW_OPTIONS, customShow: 7 })
 	})
 
-	it("keeps the file's show without animation and pen colour, which the form does not show", () => {
-		const options = { ...DEFAULT_SHOW_OPTIONS, withoutAnimation: true, penColor: "0070C0" }
+	it("keeps the file's show without animation or narration and pen colour, which the form does not show", () => {
+		const options = { ...DEFAULT_SHOW_OPTIONS, withoutAnimation: true, withoutNarration: true, penColor: "0070C0" }
 
 		expect(setUpOptions({ ...setUpForm(options, 4), loop: true }, options)).toEqual({ ...options, loop: true })
+	})
+
+	it("keeps the file's narration setting as it was, adding none to a file that leaves it out", () => {
+		const base: ShowSettings = { kind: "present", loop: false, showAnimation: true, useTimings: true, range: { kind: "all" } }
+
+		expect(showSettingsOf(DEFAULT_SHOW_OPTIONS, base)).not.toHaveProperty("showNarration")
+		expect(showSettingsOf(DEFAULT_SHOW_OPTIONS, undefined)).not.toHaveProperty("showNarration")
+		expect(showSettingsOf(DEFAULT_SHOW_OPTIONS, { ...base, showNarration: false }).showNarration).toBe(false)
 	})
 
 	it("offers a file's range that ends past the last slide up to the last slide", () => {

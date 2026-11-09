@@ -22,8 +22,10 @@ import {
 	type DocxValuesSnapshot,
 	type DocxReadOnlyReason,
 	type LockReason,
+	type DocumentMatch,
 	type ReplaceAllResult,
-	type StoryMatch
+	type StoryMatch,
+	type StorySearch
 } from "@filen/office/core/docx/edit"
 import { HIGHLIGHT_COLORS, RevisionView, applyThemeShade, applyThemeTint, hexToRgb, rgbToHsl } from "@filen/office/core/docx"
 import { DEFAULT_MARKUP_MODE, markupInfo, type DocxMarkupInfo, type DocxMarkupMode } from "@filen/office/dom/docx"
@@ -94,6 +96,7 @@ export const DOCX_COMMAND_CATALOGUE = {
 		"paragraph.lineSpacing",
 		"paragraph.spacing",
 		"paragraph.indent",
+		"paragraph.hangingIndent",
 		"format.copy",
 		"format.paste"
 	],
@@ -666,6 +669,72 @@ export function stepMatch(active: number, count: number, direction: 1 | -1): num
 	}
 
 	return (active + direction + count) % count
+}
+
+// Matches across stories are in the order of `stories`, then of position: whether a match comes before
+// position `pos` of story `story` (a story not searched comes before every match).
+function matchBefore(match: DocumentMatch, rank: ReadonlyMap<number, number>, storyRank: number, pos: number): boolean {
+	const own = rank.get(match.story) ?? 0
+
+	return own < storyRank || (own === storyRank && match.from < pos)
+}
+
+function storyRanks(stories: readonly StorySearch[]): Map<number, number> {
+	return new Map(stories.map((entry, k) => [entry.story, k]))
+}
+
+// The first of `matches` (in `stories`' order) not before position `pos` of story `story`, by binary search.
+function firstNotBefore(matches: readonly DocumentMatch[], stories: readonly StorySearch[], story: number, pos: number): number {
+	const rank = storyRanks(stories)
+	const storyRank = rank.get(story) ?? -1
+	let low = 0
+	let high = matches.length
+
+	while (low < high) {
+		const middle = (low + high) >> 1
+		const match = matches[middle]
+
+		if (match !== undefined && matchBefore(match, rank, storyRank, pos)) {
+			low = middle + 1
+		} else {
+			high = middle
+		}
+	}
+
+	return low
+}
+
+// The match to make current for a new search across stories: the first at or after the caret in the story it is
+// in, else the first after that story's (Word's Search: All goes on through the other stories), else the first.
+export function firstStoryMatchFrom(
+	matches: readonly DocumentMatch[],
+	stories: readonly StorySearch[],
+	story: number,
+	pos: number
+): number {
+	if (matches.length === 0) {
+		return -1
+	}
+
+	const found = firstNotBefore(matches, stories, story, pos)
+
+	return found < matches.length ? found : 0
+}
+
+// The matches [start, end) of story `story` (matches of a story are consecutive).
+export function storyMatchRange(
+	matches: readonly DocumentMatch[],
+	stories: readonly StorySearch[],
+	story: number
+): { readonly start: number; readonly end: number } {
+	const start = firstNotBefore(matches, stories, story, 0)
+	let end = start
+
+	while (end < matches.length && matches[end]?.story === story) {
+		end++
+	}
+
+	return { start, end }
 }
 
 const NO_MARKS: readonly DocxEditorMark[] = []
@@ -1351,6 +1420,27 @@ export function replaceAllToast(
 		return changed ? { key: "previewDocxReplacedCount", count: result.count } : { key: "previewDocxReplaceAllUnreplaceable" }
 
 	return { key: result.refused === "tooLarge" ? "previewDocxReplaceAllTooLarge" : "previewDocxReplaceAllUnreplaceable" }
+}
+
+// What Replace All across stories tells: the replacements made in all of them, else why none was (too large
+// before unreplaceable), else nothing.
+export function replaceAllStoriesToast(
+	outcomes: readonly { readonly result: ReplaceAllResult | null; readonly changed: boolean }[]
+): ReturnType<typeof replaceAllToast> {
+	let count = 0
+	let refused: ReturnType<typeof replaceAllToast>
+
+	for (const { result, changed } of outcomes) {
+		const notice = replaceAllToast(result, changed)
+
+		if (notice?.key === "previewDocxReplacedCount") {
+			count += notice.count
+		} else if (notice !== undefined && refused?.key !== "previewDocxReplaceAllTooLarge") {
+			refused = notice
+		}
+	}
+
+	return count > 0 ? { key: "previewDocxReplacedCount", count } : refused
 }
 
 // Why a content control's content cannot be changed, as the control popover and context menu say it.

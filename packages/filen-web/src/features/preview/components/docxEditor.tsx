@@ -6,9 +6,12 @@ import {
 	DOCX_PARAGRAPH_STYLES,
 	STORY_FIND_LIMIT,
 	docxFontList,
-	findInStory,
+	documentProtectionOf,
+	findInStories,
 	isWriteCommand,
 	offeredParagraphStyles,
+	protectionOf,
+	setDocumentProtection,
 	replaceAll,
 	replaceMatches,
 	selectMatch,
@@ -17,7 +20,9 @@ import {
 	type DocxFontChoice,
 	type DocxParagraphStyle,
 	type DocxWriteProtection,
-	type StoryMatch,
+	type DocumentMatch,
+	type ReplaceAllResult,
+	type StorySearch,
 	writeProtectionOf
 } from "@filen/office/core/docx/edit"
 import { docxLinkAt, hostCommandForKey, type DocxLinkAt, type PagedEditor } from "@filen/office/core/docx/paged"
@@ -68,14 +73,15 @@ import {
 	editorMarks,
 	featureLanded,
 	editorViewOnlyReasons,
-	firstMatchFrom,
+	firstStoryMatchFrom,
 	hostKeyAction,
 	markupRelayout,
 	objectInteractions,
-	replaceAllToast,
+	replaceAllStoriesToast,
 	shownMarkup,
 	sameToolbarSnapshot,
 	stepMatch,
+	storyMatchRange,
 	themeSwatches,
 	type DocxInputRequest,
 	type DocxPainterState,
@@ -116,6 +122,7 @@ import { useDocxImageInsert } from "@/features/preview/components/docxImageInser
 import { useReflowMode } from "@/features/preview/components/docxReflow.logic"
 import { setDocxFormattingMarks, useDocxFormattingMarks } from "@/features/preview/lib/docxFormattingMarks"
 import { DocxWriteProtectionBar } from "@/features/preview/components/docxWriteProtection"
+import type { DocxProtectionControls } from "@/features/preview/components/docxRestrictEditing"
 import { DocxNavigationPane } from "@/features/preview/components/docxNavigationPane"
 import { DocxMiniToolbar, type DocxMiniToolbarRequest } from "@/features/preview/components/docxMiniToolbar"
 import { mouseContextMenu } from "@/features/preview/components/docxMiniToolbar.logic"
@@ -163,7 +170,25 @@ const PAGE_GAP = 16
 const APPLE = isMacPlatform()
 // The desktop app owns the keys a browser keeps for itself (Ctrl/Cmd+digit): the editor takes Word's there.
 const DESKTOP = desktopBridge() !== undefined
-const NO_MATCHES: readonly StoryMatch[] = []
+const NO_MATCHES: readonly DocumentMatch[] = []
+const NO_STORIES: readonly StorySearch[] = []
+
+function noStories(): readonly StorySearch[] {
+	return NO_STORIES
+}
+
+// Find's options, one object per combination: the find controls' replace closures hold them, so a new object
+// per render would re-render the toolbar on every keystroke.
+const FIND_OPTIONS = [
+	{ caseSensitive: false, wholeWord: false },
+	{ caseSensitive: false, wholeWord: true },
+	{ caseSensitive: true, wholeWord: false },
+	{ caseSensitive: true, wholeWord: true }
+] as const
+
+function findOptionsOf(caseSensitive: boolean, wholeWord: boolean): (typeof FIND_OPTIONS)[number] {
+	return FIND_OPTIONS[(caseSensitive ? 2 : 0) + (wholeWord ? 1 : 0)] ?? FIND_OPTIONS[0]
+}
 const NO_SPELLING: readonly SpellingMark[] = []
 // The toast shown while a save looks for the blocks the writer refuses.
 const SEARCH_TOAST = "docx-save-search"
@@ -180,14 +205,16 @@ interface Opened {
 // `writeUnlocked`: the document's password to modify was given (docxWriteProtection.tsx). `encryption`: it was
 // opened with its password, and saves are sealed with its key.
 // `backend`: the proof and writer of a document saved in another format (an RTF document).
+// `protectionUnlocked`: the user stopped the protection that kept it view-only (docxRestrictEditing.tsx).
 function openEditing(
 	bytes: Uint8Array,
 	mode: DocxMarkupMode,
 	writeUnlocked = false,
 	encryption?: DocxSealer,
-	backend?: DocxEditingBackend
+	backend?: DocxEditingBackend,
+	protectionUnlocked = false
 ): Opened {
-	const editing = docxEditingHost(writeUnlocked, encryption, backend)
+	const editing = docxEditingHost(writeUnlocked, encryption, backend, protectionUnlocked)
 
 	return {
 		editing,
@@ -590,6 +617,8 @@ export function DocxEditView({
 	const onAutosaveRef = useLatestRef(onAutosave)
 	// The user gave the password to modify, or chose to edit a document recommended read-only, this session.
 	const [writeUnlocked, setWriteUnlocked] = useState(false)
+	// The user stopped the protection that kept the document view-only, this session.
+	const [protectionUnlocked, setProtectionUnlocked] = useState(false)
 	// Write protection keeps the document view-only until then (a password gates the editor itself too).
 	const writeProtection = writable && !writeUnlocked ? current?.writeProtection : undefined
 	const readOnly = !writable || writeProtection !== undefined
@@ -674,15 +703,25 @@ export function DocxEditView({
 	)
 	// Find runs on the document as it stands once typing pauses, never inside a keystroke (and nothing is
 	// deferred while it is closed: a keystroke renders once). One match past the limit tells that there are more.
-	// The main text (the body), whichever story the caret is in.
+	// Word's Search: All: the main text (the body), then the headers, footers, notes and text boxes, whichever story
+	// the caret is in (the editor's list of them changes only when a story's document or the pages do).
 	// The Navigation pane's search is the same find: its matches are marked and listed while the pane is open.
 	const finding = find.open || navigation.open
-	const bodyState = editor?.body.session.state
-	const searchedDoc = useDeferredValue(finding && find.query.length > 0 ? bodyState?.doc : undefined)
+	const searching = finding && find.query.length > 0 && editor !== undefined
+	const findOptions = findOptionsOf(find.caseSensitive, find.wholeWord)
+	const liveStories = useSyncExternalStore(
+		searching
+			? listener =>
+					editor.subscribe(() => {
+						listener()
+					})
+			: subscribeNothing,
+		searching ? () => editor.searchStories() : noStories,
+		noStories
+	)
+	const searchedStories = useDeferredValue(liveStories)
 	const found =
-		finding && find.query.length > 0 && searchedDoc !== undefined
-			? findInStory(searchedDoc, find.query, { caseSensitive: find.caseSensitive }, STORY_FIND_LIMIT + 1)
-			: NO_MATCHES
+		searching && searchedStories.length > 0 ? findInStories(searchedStories, find.query, findOptions, STORY_FIND_LIMIT + 1) : NO_MATCHES
 	const capped = found.length > STORY_FIND_LIMIT
 	const matches = capped ? found.slice(0, STORY_FIND_LIMIT) : found
 	const active =
@@ -690,9 +729,17 @@ export function DocxEditView({
 			? -1
 			: find.active >= 0
 				? Math.min(find.active, matches.length - 1)
-				: firstMatchFrom(matches, bodyState?.selection.from ?? 0)
-	// Marks are drawn in the story being edited: find's only while that is the body.
-	const marks = editorMarks(spellingMarks, bodyActive ? matches : NO_MATCHES, active)
+				: firstStoryMatchFrom(matches, searchedStories, activeStory ?? -1, editor?.state.selection.from ?? 0)
+	// Marks are drawn in the story being edited: its matches only.
+	const shownRange = storyMatchRange(matches, searchedStories, activeStory ?? -1)
+	const marks = editorMarks(spellingMarks, matches.slice(shownRange.start, shownRange.end), active - shownRange.start)
+
+	// What a search built for stories not entered is dropped once nothing searches.
+	useEffect(() => {
+		if (!searching) {
+			editor?.releaseSearch()
+		}
+	}, [searching, editor])
 	const selection = controls.state?.selection
 	const viewOnly = editorViewOnlyReasons(toolbarSnapshot?.readOnlyReasons ?? [], writable, renamed)
 	// Comments and tracked changes in the document: the markup menu is offered.
@@ -903,28 +950,28 @@ export function DocxEditView({
 	}, [wrapper, fitZoomRef])
 
 	// Shows the match `index` of `list`: selected, scrolled to.
-	// Matches are in the body: one shown from a header, footer or note goes back to the body first.
-	const showMatch = (match: StoryMatch | undefined): void => {
+	// A match in another story (the body, a header, a footer, a note, a text box) enters that story first.
+	const showMatch = (match: DocumentMatch | undefined): void => {
 		if (editor === undefined || match === undefined) {
 			return
 		}
 
-		const body = editor.body.session
-		const tr = selectMatch(body.state, match)
+		const session = editor.storySession(match.story)
+		const tr = session === undefined ? null : selectMatch(session.state, match)
 
-		if (tr === null) {
+		if (session === undefined || tr === null) {
 			return
 		}
 
-		if (editor.activeStory !== body.story.story.index) {
-			editor.exitStory()
+		if (editor.activeStory !== match.story && !editor.enterStory(match.story, -1)) {
+			return
 		}
 
-		body.dispatch(tr)
+		session.dispatch(tr)
 		handleRef.current?.scrollToCaret()
 	}
 
-	const reveal = (list: readonly StoryMatch[], index: number): void => {
+	const reveal = (list: readonly DocumentMatch[], index: number): void => {
 		showMatch(list[index])
 	}
 
@@ -936,7 +983,7 @@ export function DocxEditView({
 			return
 		}
 
-		const key = `${find.query}\u0000${String(find.caseSensitive)}`
+		const key = `${find.query}\u0000${String(find.caseSensitive)}\u0000${String(find.wholeWord)}`
 
 		if (revealedRef.current !== key) {
 			revealedRef.current = key
@@ -1105,7 +1152,7 @@ export function DocxEditView({
 	const changeMarkup = (mode: DocxMarkupMode): void => {
 		if (editor === undefined) {
 			if (markupInfo(mode).view !== markupInfo(markupMode).view) {
-				setOpened(openEditing(bytes, mode, writeUnlocked, encryption, backend))
+				setOpened(openEditing(bytes, mode, writeUnlocked, encryption, backend, protectionUnlocked))
 				setPress(null)
 			}
 		} else {
@@ -1125,21 +1172,61 @@ export function DocxEditView({
 		setWriteUnlocked(true)
 
 		if (writeProtection?.password !== undefined) {
-			setOpened(openEditing(bytes, markupMode, true, encryption, backend))
+			setOpened(openEditing(bytes, markupMode, true, encryption, backend, protectionUnlocked))
 			setPress(null)
 		}
 	}
+
+	// Review > Protect. Protection that allows edits starts and stops in place (the change is an edit, saved as one);
+	// one keeping the document view-only stops by opening it again unlocked (nothing was edited). Lock Tracking
+	// records edits under the author's name, asked first.
+	const editContext = editor?.body.session.context
+	const protectionControls: DocxProtectionControls | undefined =
+		editor === undefined || editContext === undefined || !writable || writeProtection !== undefined
+			? undefined
+			: {
+					mode: editContext.gate.includes("protected") ? "readOnly" : protectionOf(editContext).mode,
+					canStart: !readOnly && toolbarSnapshot?.readOnly !== true,
+					read: () => documentProtectionOf(editContext),
+					set: setting => {
+						if (setting === undefined && editContext.gate.includes("protected")) {
+							setProtectionUnlocked(true)
+							setOpened(openEditing(bytes, markupMode, writeUnlocked, encryption, backend, true))
+							setPress(null)
+
+							return
+						}
+
+						const apply = (): void => {
+							setDocumentProtection(editContext, editor.sessions, setting)
+							setReady(previous =>
+								previous?.editor === editor ? { ...previous, styles: offeredParagraphStyles(editContext) } : previous
+							)
+							focusEditor()
+						}
+
+						if (setting?.edit === "trackedChanges") {
+							withAuthor(author => {
+								opened.editing.setAuthor(author)
+								apply()
+							})
+						} else {
+							apply()
+						}
+					}
+				}
 
 	const canReplace = !readOnly && snapshot !== undefined && !snapshot.readOnly
 	const findControls: DocxFindControls = {
 		query: find.query,
 		caseSensitive: find.caseSensitive,
+		wholeWord: find.wholeWord,
 		count: matches.length,
 		capped,
 		active,
-		search: (query, caseSensitive) => {
+		search: (query, caseSensitive, wholeWord) => {
 			revealedRef.current = null
-			setFind(previous => ({ ...previous, query, caseSensitive, active: -1 }))
+			setFind(previous => ({ ...previous, query, caseSensitive, wholeWord: wholeWord ?? previous.wholeWord, active: -1 }))
 		},
 		step: direction => {
 			const next = stepMatch(active, matches.length, direction)
@@ -1160,35 +1247,51 @@ export function DocxEditView({
 					return
 				}
 
-				const body = editor.body.session
-				const tr = replaceMatches(body.state, [match], find.query, replacement, { caseSensitive: find.caseSensitive })
+				const session = editor.storySession(match.story)
+				const tr = session === undefined ? null : replaceMatches(session.state, [match], find.query, replacement, findOptions)
 
-				if (tr === null || !body.dispatch(tr)) {
+				if (session === undefined || tr === null || !session.dispatch(tr)) {
 					return
 				}
 
 				// The next match takes the replaced one's place.
-				const after = findInStory(body.state.doc, find.query, { caseSensitive: find.caseSensitive })
-				const next = after.length === 0 ? -1 : firstMatchFrom(after, match.from + replacement.length)
+				const stories = editor.searchStories()
+				const after = findInStories(stories, find.query, findOptions, STORY_FIND_LIMIT)
+				const next = firstStoryMatchFrom(after, stories, match.story, match.from + replacement.length)
 
 				setFind(previous => ({ ...previous, active: next }))
 				reveal(after, next)
 			},
-			// Every match, however many the find shows.
+			// Every match in every story, however many the find shows; a story without one gets no session.
 			all: replacement => {
 				if (editor === undefined || matches.length === 0) {
 					return
 				}
 
-				const body = editor.body.session
-				const result = replaceAll(body.state, find.query, replacement, { caseSensitive: find.caseSensitive })
-				const before = body.state.doc
+				const outcomes: { result: ReplaceAllResult | null; changed: boolean }[] = []
 
-				if (result !== null && "tr" in result && !body.dispatch(result.tr)) {
-					return
+				for (const { story, doc } of editor.searchStories()) {
+					if (findInStories([{ story, doc }], find.query, findOptions, 1).length === 0) {
+						continue
+					}
+
+					const session = editor.storySession(story)
+
+					if (session === undefined) {
+						continue
+					}
+
+					const before = session.state.doc
+					const result = replaceAll(session.state, find.query, replacement, findOptions)
+
+					if (result !== null && "tr" in result && !session.dispatch(result.tr)) {
+						continue
+					}
+
+					outcomes.push({ result, changed: session.state.doc !== before })
 				}
 
-				const notice = replaceAllToast(result, body.state.doc !== before)
+				const notice = replaceAllStoriesToast(outcomes)
 
 				if (notice?.key === "previewDocxReplacedCount") {
 					toast.success(t(notice.key, { count: notice.count }))
@@ -1553,6 +1656,7 @@ export function DocxEditView({
 				onFindClosed={focusEditor}
 				markup={reviewing ? shownMode : null}
 				onMarkupChange={changeMarkup}
+				protection={protectionControls}
 				zoom={zoom}
 				zoomFit={zoomMode === "fit"}
 				onZoom={change => {
@@ -1607,7 +1711,7 @@ export function DocxEditView({
 						onTab={setNavigationTab}
 						onClose={closeNavigation}
 						find={findControls}
-						results={{ doc: searchedDoc, matches }}
+						results={{ stories: searchedStories, matches }}
 						onResult={showResult}
 						pages={pages}
 						surface={surface}

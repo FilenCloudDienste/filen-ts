@@ -10,7 +10,8 @@ import {
 	matchContext,
 	openedNavigation,
 	sameHeadings,
-	seededFind
+	seededFind,
+	storyLabel
 } from "@/features/preview/components/docxNavigation.logic"
 
 // Word's Navigation pane: the Headings tree (collapsing, depth, drop places), and the Results' context.
@@ -124,5 +125,17 @@ describe("pane state", () => {
 		expect(seededFind(last, "old")).toBe(last)
 		expect(seededFind(last, "new")).toEqual({ ...last, query: "new", active: -1 })
 		expect(seededFind(last, "new").open).toBe(false)
+	})
+})
+
+describe("storyLabel", () => {
+	it("labels results outside the main text with where they were found", () => {
+		expect(storyLabel("header")).toBe("previewDocxNavigationInHeader")
+		expect(storyLabel("footer")).toBe("previewDocxNavigationInFooter")
+		expect(storyLabel("footnote")).toBe("previewDocxNavigationInFootnote")
+		expect(storyLabel("endnote")).toBe("previewDocxNavigationInEndnote")
+		expect(storyLabel("textbox")).toBe("previewDocxNavigationInTextBox")
+		expect(storyLabel("body")).toBeUndefined()
+		expect(storyLabel(undefined)).toBeUndefined()
 	})
 })

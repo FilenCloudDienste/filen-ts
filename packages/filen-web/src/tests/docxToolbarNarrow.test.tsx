@@ -23,7 +23,7 @@ const STATE: DocxViewerState = {
 	pageCountFinal: true,
 	zoom: 0.5,
 	zoomMode: "custom",
-	find: { open: false, query: "", caseSensitive: false, count: 0, capped: false, active: -1 }
+	find: { open: false, query: "", caseSensitive: false, wholeWord: false, count: 0, capped: false, active: -1 }
 }
 
 function phone(matches: boolean): void {

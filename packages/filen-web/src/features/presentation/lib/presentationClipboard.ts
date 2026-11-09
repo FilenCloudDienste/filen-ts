@@ -3,6 +3,7 @@ import {
 	clipIdOf,
 	clipPartNames,
 	clipPlainText,
+	importSlidesOp,
 	pasteShapesOp,
 	pasteSlidesOps,
 	xmlSafeText,
@@ -11,23 +12,25 @@ import {
 	type PasteRefusal,
 	type PresentationClip,
 	type PresentationRefusal,
+	type SlideClip,
 	type SlideRef,
 	type Xfrm
 } from "@filen/office/core/presentation"
-import type { ClipPartsResult, PresentationSessionApi } from "@filen/office/dom/presentation"
+import type { ClipPartsResult, ClipSlidesResult, PresentationSessionApi } from "@filen/office/dom/presentation"
 import type { PreviewKey } from "@/lib/i18n"
 
 // The presentation editor's clipboard, one for every open deck (PowerPoint keeps one clipboard for all its windows):
 // the clip the last Cut or Copy made, with the session it came from, so a paste reaches another deck. The system
 // clipboard gets its text, HTML naming the clip, and a picture where there is one; a paste reads the clipboard and
 // pastes the clip when the HTML on it names it (or, where the browser gives no HTML back, its text is the clip's),
-// else the other app's picture or text.
+// else the other app's picture or text. Slides pasted into another deck take its theme (PowerPoint's default "Use
+// Destination Theme": each on its matching layout); the editor has no paste options to keep their source formatting.
 
 export interface HeldClip {
 	readonly id: string
 	readonly clip: PresentationClip
-	// The deck's session it came from (its parts are asked for by a paste into another deck).
-	readonly source: Pick<PresentationSessionApi, "clipParts">
+	// The deck's session it came from (its parts and slides are asked for by a paste into another deck).
+	readonly source: Pick<PresentationSessionApi, "clipParts" | "clipSlides">
 }
 
 let held: HeldClip | undefined
@@ -48,7 +51,8 @@ export function releaseClipsOf(source: HeldClip["source"]): void {
 
 	const clip = held.clip
 
-	if (clip.kind === "slides" || clipPartNames(clip).length > 0) held = undefined
+	// A cut's slides hold what another deck takes of them; copied ones are the deck's to hand over.
+	if (clip.kind === "slides" ? clip.foreign === undefined : clipPartNames(clip).length > 0) held = undefined
 }
 
 export function forgetClips(): void {
@@ -88,7 +92,7 @@ export type PastePlan =
 	| { readonly kind: "refused"; readonly reason: PasteRefusal | PresentationRefusal }
 
 export interface PasteTarget {
-	readonly session: Pick<PresentationSessionApi, "clipParts">
+	readonly session: Pick<PresentationSessionApi, "clipParts" | "clipSlides">
 	readonly format: Format
 	readonly order: readonly SlideRef[]
 	// The slide in view and its index.
@@ -110,12 +114,37 @@ async function partsOf(clip: HeldClip, names: readonly string[]): Promise<ClipPa
 	}
 }
 
+// Slides of another deck as it hands them over (a cut's, as they were cut).
+async function slidesOf(clip: HeldClip, made: SlideClip): Promise<ClipSlidesResult> {
+	if (made.foreign !== undefined) return { ok: true, slides: made.foreign }
+
+	try {
+		return await clip.source.clipSlides(made.slides)
+	} catch {
+		// Its deck closed meanwhile.
+		return { ok: false, refusal: "notFound" }
+	}
+}
+
 // What a paste of `clip` does here: shapes onto the slide in view, slides after it.
 export async function planPaste(clip: HeldClip, target: PasteTarget): Promise<PastePlan> {
 	const sameDeck = clip.source === target.session
 	const made = clip.clip
 
 	if (made.kind === "slides") {
+		if (!sameDeck) {
+			// PresentationML slides between PresentationML decks (an ODP page names its own document's styles).
+			if (made.format !== "pptx" || target.format !== "pptx") return { kind: "refused", reason: "unsupported" }
+
+			const slides = await slidesOf(clip, made)
+
+			if (!slides.ok) return { kind: "refused", reason: slides.refusal }
+
+			const op = importSlidesOp(slides.slides, target.order, target.current)
+
+			return typeof op === "string" ? { kind: "refused", reason: op } : { kind: "slides", ops: [op], select: target.current + 1 }
+		}
+
 		const ops = pasteSlidesOps(made, target.order, target.current, sameDeck)
 
 		return typeof ops === "string" ? { kind: "refused", reason: ops } : { kind: "slides", ops, select: target.current + 1 }

@@ -18,6 +18,7 @@ const KEY_LABELS: Record<string, string> = {
 	shift: IS_MAC ? "⇧" : "Shift",
 	escape: "Esc",
 	slash: "/",
+	plus: "+",
 	backspace: "⌫",
 	delete: IS_MAC ? "⌦" : "Del",
 	enter: "↵",

@@ -24,6 +24,8 @@ export type PresentationEditorAction =
 	| "presentation.zoomOut"
 	| "presentation.zoomFit"
 	| "presentation.selectionPane"
+	| "presentation.copyFormat"
+	| "presentation.pasteFormat"
 
 export const PRESENTATION_EDITOR_ACTIONS: readonly (ActionDef & { readonly id: PresentationEditorAction })[] = [
 	{ id: "presentation.newSlide", defaultCombo: "ctrl+m", scope: "editor", descriptionKey: "preview:previewPptxEditorKeyNewSlide" },
@@ -75,6 +77,20 @@ export const PRESENTATION_EDITOR_ACTIONS: readonly (ActionDef & { readonly id: P
 		defaultCombo: "alt+f10",
 		scope: "editor",
 		descriptionKey: "preview:previewPptxEditorKeySelectionPane"
+	},
+	// PowerPoint's Copy and Paste Formatting, on the slide and in a body being edited only: Mod+Shift+V stays the
+	// notes' and other fields' paste as plain text, Mod+Shift+C the browser's elsewhere.
+	{
+		id: "presentation.copyFormat",
+		defaultCombo: "mod+shift+c",
+		scope: "editor",
+		descriptionKey: "preview:previewPptxEditorKeyCopyFormat"
+	},
+	{
+		id: "presentation.pasteFormat",
+		defaultCombo: "mod+shift+v",
+		scope: "editor",
+		descriptionKey: "preview:previewPptxEditorKeyPasteFormat"
 	}
 ]
 

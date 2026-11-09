@@ -13,6 +13,7 @@ import {
 	FileDiffIcon,
 	ImageIcon,
 	LinkIcon,
+	LockIcon,
 	MessageSquarePlusIcon,
 	MessagesSquareIcon,
 	MinusIcon,
@@ -36,6 +37,7 @@ import { ConvertNotesMenu, FormControlMenu, PageNumbersMenu, PicturesMenu, Table
 import { slotCommand } from "@/features/preview/components/docxRibbon.logic"
 import { DocxCommandButton } from "@/features/preview/components/docxRibbonControls"
 import { DecideMenu, MarkupMenu, NewCommentButton, StepButton, TrackChangesButton } from "@/features/preview/components/docxReviewMenu"
+import { DocxProtectButtons, type DocxProtectionControls } from "@/features/preview/components/docxRestrictEditing"
 import {
 	TableAlignment,
 	TableDesign,
@@ -254,12 +256,14 @@ export function docxReferencesGroups(props: DocxToolbarSlotProps, t: TFunction<"
 	return groups
 }
 
-// Comments, tracking (`markup` null for a document without comments or tracked changes) and changes.
+// Comments, tracking (`markup` null for a document without comments or tracked changes), changes and protection
+// (`protection` undefined while the document cannot be protected or stopped here).
 export function docxReviewGroups(
 	props: DocxToolbarSlotProps,
 	markup: DocxMarkupMode | null,
 	onMarkupChange: (mode: DocxMarkupMode) => void,
-	t: TFunction<"preview">
+	t: TFunction<"preview">,
+	protection?: DocxProtectionControls
 ): RibbonGroup[] {
 	const groups: RibbonGroup[] = []
 	const track = has(props.commands, "review.track")
@@ -338,6 +342,22 @@ export function docxReviewGroups(
 						accept={false}
 					/>
 				</>
+			)
+		})
+	}
+
+	if (protection !== undefined) {
+		groups.push({
+			id: "protect",
+			label: t("previewDocxRibbonProtect"),
+			icon: LockIcon,
+			width: track ? 300 : 150,
+			priority: 2,
+			content: (
+				<DocxProtectButtons
+					controls={protection}
+					lockTracking={track}
+				/>
 			)
 		})
 	}

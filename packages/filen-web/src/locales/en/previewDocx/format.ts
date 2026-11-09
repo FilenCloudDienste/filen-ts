@@ -52,6 +52,8 @@ export const previewDocxFormat = {
 	previewDocxParagraphSpacing: "Paragraph spacing",
 	/** Docx editor — label of the paragraph indent command */
 	previewDocxIndents: "Indents",
+	/** Docx editor — label of the hanging indent command (Ctrl+T / Ctrl+Shift+T) */
+	previewDocxHangingIndent: "Hanging indent",
 	/** Docx editor — label of applying the format painter's formatting */
 	previewDocxPasteFormatting: "Paste formatting",
 	/** Docx editor — toolbar menu holding the other character formatting (sub/superscript, caps, spacing) */

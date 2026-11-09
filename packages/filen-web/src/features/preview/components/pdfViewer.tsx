@@ -21,6 +21,8 @@ import { isSafeAbsoluteHref } from "@/lib/safeUrl"
 import { keyForEditor } from "@/lib/keymap/dialogGuard"
 import { useEditorLayerKeys } from "@/lib/keymap/editorLayerKeys"
 import { IN_EDITORS, useAction } from "@/lib/keymap/useAction"
+import { useOverrides } from "@/lib/keymap/registry"
+import { pdfViewerKey, pdfViewerKeyCommand } from "@/features/preview/lib/pdfKeys.logic"
 import { LoadingState } from "@/components/loadingState"
 import { Button } from "@/components/ui/button"
 import { InputDialog } from "@/components/dialogs/inputDialog"
@@ -165,10 +167,38 @@ function PdfReader({ document, alt, size }: { document: PdfDomDocument; alt: str
 		viewer.pages.scrollerRef.current?.focus()
 	}
 
-	// F6 pressed elsewhere in the viewer's layer (focus left on the preview overlay itself after a click, as Safari and
-	// macOS Firefox do).
+	const overrides = useOverrides()
+
+	// Zoom, fit and rotate keys for the layer the document is shown in, never a dialog over it. A key the viewer takes
+	// is always kept from the browser, even at a zoom limit, so its page zoom never scales the app instead.
+	const onViewerKey = (event: KeyboardEvent, root: HTMLElement): boolean => {
+		if (event.defaultPrevented || !keyForEditor(root, event.target)) {
+			return false
+		}
+
+		const action = pdfViewerKey(event, overrides)
+
+		if (action === undefined) {
+			return false
+		}
+
+		event.preventDefault()
+
+		const command = pdfViewerKeyCommand(action, state)
+
+		if (command !== null) {
+			dispatch(command)
+		}
+
+		return true
+	}
+
+	// F6 and the viewer's keys pressed elsewhere in the viewer's layer (focus left on the preview overlay itself after a
+	// click, as Safari and macOS Firefox do).
 	useEditorLayerKeys(rootRef, (event, root) => {
-		onCommandBarF6(event, root, focusPages)
+		if (!onViewerKey(event, root)) {
+			onCommandBarF6(event, root, focusPages)
+		}
 	})
 
 	return (
@@ -179,6 +209,10 @@ function PdfReader({ document, alt, size }: { document: PdfDomDocument; alt: str
 				onRibbonEscape(event, event.currentTarget, focusPages, "capture")
 			}}
 			onKeyDown={event => {
+				if (onViewerKey(event.nativeEvent, event.currentTarget)) {
+					return
+				}
+
 				if (!onRibbonEscape(event, event.currentTarget, focusPages, "bubble"))
 					onCommandBarF6(event, event.currentTarget, focusPages)
 			}}

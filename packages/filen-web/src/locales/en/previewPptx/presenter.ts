@@ -81,6 +81,10 @@ export const previewPptxPresenter = {
 	previewPptxShortcutShowEraser: "Slide show: eraser",
 	/** Presentation shortcuts — back to the normal pointer (no pen) in a slideshow */
 	previewPptxShortcutShowArrow: "Slide show: arrow pointer",
+	/** Presentation shortcuts — hide the mouse pointer in a slideshow until it is shown again */
+	previewPptxShortcutShowHidePointer: "Slide show: hide the pointer",
+	/** Presentation shortcuts — hide the mouse pointer, or keep it always shown, in a slideshow */
+	previewPptxShortcutShowTogglePointer: "Slide show: show or hide the pointer",
 	/** Presentation shortcuts — erase all ink on the current slide in a slideshow */
 	previewPptxShortcutShowEraseAll: "Slide show: erase all ink on the slide",
 	/** Presentation shortcuts — start the slideshow from the first slide */

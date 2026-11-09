@@ -14,6 +14,7 @@ import {
 	ReplaceAllIcon,
 	ReplaceIcon,
 	SearchIcon,
+	WholeWordIcon,
 	XIcon,
 	ZoomInIcon
 } from "lucide-react"
@@ -351,13 +352,13 @@ export function DocxFindField({
 		}
 	}, [])
 
-	const search = (query: string, caseSensitive: boolean): void => {
+	const search = (query: string, caseSensitive: boolean, wholeWord: boolean | undefined): void => {
 		if (timer.current !== null) {
 			clearTimeout(timer.current)
 			timer.current = null
 		}
 
-		find.search(query, caseSensitive)
+		find.search(query, caseSensitive, wholeWord)
 	}
 
 	const close = (): void => {
@@ -411,13 +412,13 @@ export function DocxFindField({
 
 						timer.current = setTimeout(() => {
 							timer.current = null
-							find.search(query, find.caseSensitive)
+							find.search(query, find.caseSensitive, find.wholeWord)
 						}, FIND_DEBOUNCE_MS)
 					}}
 					onKeyDown={event => {
 						onFieldKeyDown(event, shift => {
 							if (!searched) {
-								search(text, find.caseSensitive)
+								search(text, find.caseSensitive, find.wholeWord)
 							} else {
 								find.step(shift ? -1 : 1)
 							}
@@ -464,11 +465,23 @@ export function DocxFindField({
 				pressed={find.caseSensitive}
 				className={find.caseSensitive ? "bg-accent text-foreground" : undefined}
 				onClick={() => {
-					search(text, !find.caseSensitive)
+					search(text, !find.caseSensitive, find.wholeWord)
 				}}
 			>
 				<CaseSensitiveIcon />
 			</TooltipIconButton>
+			{find.wholeWord === undefined ? null : (
+				<TooltipIconButton
+					label={t("previewDocxFindWholeWords")}
+					pressed={find.wholeWord}
+					className={find.wholeWord ? "bg-accent text-foreground" : undefined}
+					onClick={() => {
+						search(text, find.caseSensitive, find.wholeWord !== true)
+					}}
+				>
+					<WholeWordIcon />
+				</TooltipIconButton>
+			)}
 			{replace === undefined ? null : (
 				<TooltipIconButton
 					label={t("previewDocxShowReplace")}

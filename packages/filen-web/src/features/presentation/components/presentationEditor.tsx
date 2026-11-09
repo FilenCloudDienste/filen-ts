@@ -83,6 +83,7 @@ import {
 } from "@/features/presentation/hooks/usePresentationSession"
 import { useDeckPresentation, type DeckKeyEvent } from "@/features/presentation/hooks/useDeckPresentation"
 import { presentationEditorKey } from "@/features/presentation/lib/keymap/editor"
+import { onFormatKey } from "@/features/presentation/lib/formatKeys"
 import {
 	presentationWheelZoom,
 	presentationZoom,
@@ -817,7 +818,8 @@ export function PresentationEditor({ store, document: deck, alt, item, variant, 
 
 					if (
 						onRibbonEscape(event, event.currentTarget, focusDocument, "bubble") ||
-						onPaneKey(event, event.currentTarget, focusCanvas)
+						onPaneKey(event, event.currentTarget, focusCanvas) ||
+						onFormatKey(event, slideEditor, editor.editable, overrides)
 					)
 						return
 

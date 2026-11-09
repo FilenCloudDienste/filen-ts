@@ -471,12 +471,24 @@ describe("DocxViewer", () => {
 		fireEvent.keyDown(field, { key: "Enter" })
 
 		await waitFor(() => {
-			expect(find).toHaveBeenCalledWith("hel", { caseSensitive: false })
+			expect(find).toHaveBeenCalledWith("hel", { caseSensitive: false, wholeWord: false })
 		})
 		expect(await screen.findByText("1/2")).toBeTruthy()
 
 		fireEvent.keyDown(field, { key: "Enter" })
 		expect(await screen.findByText("2/2")).toBeTruthy()
+
+		// Find whole words only searches again, and stays pressed.
+		const wholeWords = screen.getByRole("button", { name: "Find whole words only" })
+
+		expect(wholeWords.getAttribute("aria-pressed")).toBe("false")
+		fireEvent.click(wholeWords)
+
+		await waitFor(() => {
+			expect(find).toHaveBeenLastCalledWith("hel", { caseSensitive: false, wholeWord: true })
+		})
+		expect(screen.getByRole("button", { name: "Find whole words only" }).getAttribute("aria-pressed")).toBe("true")
+		expect(await screen.findByText("1/2")).toBeTruthy()
 
 		const escape = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })
 

@@ -223,6 +223,16 @@ export const previewDocxEditor = {
 	previewDocxNavigationCollapse: "Collapse “{{heading}}”",
 	/** Docx editor, Navigation pane — accessible name of a page thumbnail, which goes to that page */
 	previewDocxNavigationPage: "Page {{page, number}}",
+	/** Docx editor, Navigation pane — Results tab: label before a match found in a page header */
+	previewDocxNavigationInHeader: "Header",
+	/** Docx editor, Navigation pane — Results tab: label before a match found in a page footer */
+	previewDocxNavigationInFooter: "Footer",
+	/** Docx editor, Navigation pane — Results tab: label before a match found in a footnote */
+	previewDocxNavigationInFootnote: "Footnote",
+	/** Docx editor, Navigation pane — Results tab: label before a match found in an endnote */
+	previewDocxNavigationInEndnote: "Endnote",
+	/** Docx editor, Navigation pane — Results tab: label before a match found in a text box */
+	previewDocxNavigationInTextBox: "Text box",
 	/** Docx editor — status bar: the document's word count (Word's) */
 	previewDocxWordCountStatus_one: "{{count, number}} word",
 	/** Docx editor — as previewDocxWordCountStatus_one, for several */

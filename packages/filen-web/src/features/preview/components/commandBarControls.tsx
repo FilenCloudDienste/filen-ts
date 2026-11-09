@@ -175,7 +175,9 @@ export function ZoomControls({
 	onIn,
 	onOut,
 	onPercent,
-	onFit
+	onFit,
+	inShortcut,
+	outShortcut
 }: {
 	percent: number
 	presets: readonly number[]
@@ -188,6 +190,9 @@ export function ZoomControls({
 	onOut: () => void
 	onPercent: (percent: number) => void
 	onFit: (fit: ZoomFit) => void
+	// The zoom keys, in the buttons' tooltips.
+	inShortcut?: ReactNode
+	outShortcut?: ReactNode
 }) {
 	const { t } = useTranslation("preview")
 
@@ -197,6 +202,7 @@ export function ZoomControls({
 				label={t("previewPdfZoomOutAction")}
 				icon={<ZoomOutIcon />}
 				disabled={!canOut}
+				shortcut={outShortcut}
 				onClick={onOut}
 			/>
 			<DropdownMenu>
@@ -218,6 +224,7 @@ export function ZoomControls({
 				label={t("previewPdfZoomInAction")}
 				icon={<ZoomInIcon />}
 				disabled={!canIn}
+				shortcut={inShortcut}
 				onClick={onIn}
 			/>
 		</>

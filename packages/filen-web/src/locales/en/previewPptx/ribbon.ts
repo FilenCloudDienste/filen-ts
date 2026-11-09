@@ -87,5 +87,9 @@ export const previewPptxRibbon = {
 	/** Shortcuts list — zooms the slide out, in the presentation editor */
 	previewPptxEditorKeyZoomOut: "Zoom out (presentations)",
 	/** Shortcuts list — fits the whole slide in the window, in the presentation editor */
-	previewPptxEditorKeyZoomFit: "Zoom to fit (presentations)"
+	previewPptxEditorKeyZoomFit: "Zoom to fit (presentations)",
+	/** Shortcuts list — copies the formatting of the selected text or text shapes, in the presentation editor */
+	previewPptxEditorKeyCopyFormat: "Copy formatting (presentations)",
+	/** Shortcuts list — applies the copied formatting to the selected text or text shapes, in the presentation editor */
+	previewPptxEditorKeyPasteFormat: "Paste formatting (presentations)"
 }

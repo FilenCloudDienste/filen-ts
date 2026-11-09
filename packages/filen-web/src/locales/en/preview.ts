@@ -311,6 +311,18 @@ export const preview = {
 	previewPdfZoomInAction: "Zoom in",
 	/** Document viewers — a zoom level ({{percent}}): the zoom menu button, its steps and the status */
 	previewPdfZoomIndicator: "{{percent}}%",
+	/** Shortcuts list — the PDF viewer's zoom in key */
+	previewPdfKeyZoomIn: "Zoom in (PDF)",
+	/** Shortcuts list — the PDF viewer's zoom out key */
+	previewPdfKeyZoomOut: "Zoom out (PDF)",
+	/** Shortcuts list — the PDF viewer's key back to 100 % zoom */
+	previewPdfKeyZoomReset: "Reset zoom to 100% (PDF)",
+	/** Shortcuts list — the PDF viewer's key switching between fit to width and fit to page */
+	previewPdfKeyToggleFit: "Switch between fit to width and fit to page (PDF)",
+	/** Shortcuts list — the PDF viewer's key rotating the pages 90° clockwise */
+	previewPdfKeyRotateCw: "Rotate clockwise (PDF)",
+	/** Shortcuts list — the PDF viewer's key rotating the pages 90° counterclockwise */
+	previewPdfKeyRotateCcw: "Rotate counterclockwise (PDF)",
 
 	// ── Docx ─────────────────────────────────────────────────────────────────
 	/** Docx viewer — shown in place of the document when it fails to load or render */
@@ -381,6 +393,8 @@ export const preview = {
 	previewDocxFindNext: "Next match",
 	/** Docx viewer — find bar toggle: only matches with the same upper and lower case */
 	previewDocxFindMatchCase: "Match case",
+	/** Docx viewer — find bar toggle: only matches that are whole words, not part of a longer word (Word's "Find whole words only") */
+	previewDocxFindWholeWords: "Find whole words only",
 	/** Docx viewer — find bar button closing the field (also Escape) */
 	previewDocxFindClose: "Close find",
 	/** Docx viewer — toolbar menu (and its tooltip) choosing how comments and tracked changes show, as Word's "Display for Review" */

@@ -94,7 +94,16 @@ export const RESOLVED_COLLISIONS: readonly (readonly [string, string])[] = [
 	["presentation.show.previous", "presentation.deleteSlide"],
 	// The running show takes Mod+E on its stage and stops it there; editor.code never mounts inside a presentation.
 	["presentation.show.eraser", "presentation.text.alignCenter"],
-	["presentation.show.eraser", "editor.code"]
+	["presentation.show.eraser", "editor.code"],
+	// Paste Formatting takes Mod+Shift+V on the slide and in a body being edited only; editor.togglePreview acts in the
+	// Markdown viewer and editors alone, which never mount inside a presentation.
+	["presentation.pasteFormat", "editor.togglePreview"],
+	// The PDF viewer and the presentation editor are both bodies of the preview overlay, which shows one file at a time,
+	// and each matches these keys on its own keydown only.
+	["preview.pdfZoomIn", "presentation.zoomIn"],
+	["preview.pdfZoomOut", "presentation.zoomOut"],
+	["preview.pdfRotateCw", "presentation.objects.bringForward"],
+	["preview.pdfRotateCcw", "presentation.objects.sendBackward"]
 ]
 
 export function scopesCanCollide(a: ActionScope, b: ActionScope): boolean {

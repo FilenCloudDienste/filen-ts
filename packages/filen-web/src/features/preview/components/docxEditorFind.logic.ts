@@ -11,11 +11,21 @@ export interface FindState {
 	focus: number
 	query: string
 	caseSensitive: boolean
+	// Word's "Find whole words only".
+	wholeWord: boolean
 	// The current match; -1 until a search picks one (the first after the caret).
 	active: number
 }
 
-export const FIND_CLOSED: FindState = { open: false, replace: false, focus: 0, query: "", caseSensitive: false, active: -1 }
+export const FIND_CLOSED: FindState = {
+	open: false,
+	replace: false,
+	focus: 0,
+	query: "",
+	caseSensitive: false,
+	wholeWord: false,
+	active: -1
+}
 
 // The longest selection Find takes as its query (Word's Find what holds 255 characters).
 export const FIND_SEED_MAX = 255

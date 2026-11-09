@@ -879,6 +879,43 @@ describe("DocxEditView", () => {
 		})
 	})
 
+	it("finds in headers too (Word's Search: All), entering the header to show its match, and replaces there", async () => {
+		const { editor } = await openEditor()
+
+		typeAtStart(editor, "zebra zebra ")
+		act(() => {
+			void editor.execute({ type: "header.edit" })
+		})
+		await screen.findByRole("group", { name: "Header" })
+		act(() => {
+			editor.dispatch(editor.state.tr.insertText("zebra", 1))
+			editor.exitStory()
+		})
+		await openFindField()
+
+		const field = await screen.findByRole("searchbox", { name: "Find" })
+
+		fireEvent.change(field, { target: { value: "zebra" } })
+		await waitFor(() => {
+			expect(screen.getByRole("status").textContent).toContain("of 3")
+		})
+
+		for (let step = 0; step < 3 && editor.snapshot().context.story.kind !== "header"; step++) {
+			fireEvent.keyDown(field, { key: "Enter" })
+		}
+
+		expect(editor.snapshot().context.story.kind).toBe("header")
+		expect(editor.state.doc.textBetween(editor.state.selection.from, editor.state.selection.to)).toBe("zebra")
+
+		fireEvent.click(screen.getByRole("button", { name: "Toggle replace" }))
+		fireEvent.change(screen.getByRole("textbox", { name: "Replace with" }), { target: { value: "okapi" } })
+		fireEvent.click(screen.getByRole("button", { name: "Replace all" }))
+		await waitFor(() => {
+			expect(editor.body.session.state.doc.textContent).toContain("okapi okapi")
+		})
+		expect(editor.state.doc.textContent).toBe("okapi")
+	})
+
 	it("checks spelling in a header and suggests from its context menu, as in the body", async () => {
 		hooks.misspelled = "qzxv"
 

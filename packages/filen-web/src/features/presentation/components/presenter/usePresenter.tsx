@@ -7,6 +7,7 @@ import {
 	createInkStore,
 	createPresenterPortal,
 	createScreenPlacement,
+	changePointer,
 	createShowKeys,
 	createShowSwipe,
 	DEFAULT_SHOW_BINDINGS,
@@ -188,7 +189,12 @@ export function usePresenter({ deck, editable, fullscreen, fullscreenActive, ret
 			get bindings() {
 				return live.bindings
 			},
-			apple: isMacPlatform()
+			apple: isMacPlatform(),
+			pointer: change => {
+				const stage = document.querySelector<HTMLElement>("[data-fo-show-stage]")
+
+				if (stage !== null) changePointer(stage, change)
+			}
 		})
 	)
 	const [swipe] = useState(() =>

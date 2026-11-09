@@ -95,7 +95,7 @@ export function useSheetClipboard({
 		// Decided now, inside the gesture: an item the clipboard is promised must arrive.
 		const html =
 			cells <= MAX_HTML_COPY_CELLS
-				? grid.session.query("copyHtml", { sheet, range }).then(answer => {
+				? grid.session.query("copyHtml", { sheet, range, ...(cut && { cut }) }).then(answer => {
 						if (answer.html === null) {
 							throw new RangeError("tooLarge")
 						}

@@ -44,6 +44,7 @@ import {
 	type DocxParagraphStyle,
 	type LockReason
 } from "@filen/office/core/docx/edit"
+import { commandShortcut } from "@filen/office/core/docx/paged"
 import { canZoomIn, canZoomOut, type DocxMarkupMode } from "@filen/office/dom/docx"
 import { cn } from "@filen/shared"
 import {
@@ -71,6 +72,7 @@ import { DocxFormatControls, DocxFormatPainter } from "@/features/preview/compon
 import { useCommandMenuFocus } from "@/features/preview/components/docxInsert.logic"
 import { DocxBreaksMenu } from "@/features/preview/components/docxInsertMenu"
 import { docxInsertGroups, docxReferencesGroups, docxReviewGroups, docxTableGroups } from "@/features/preview/components/docxRibbonGroups"
+import type { DocxProtectionControls } from "@/features/preview/components/docxRestrictEditing"
 import { reflowCommands } from "@/features/preview/components/docxReflow.logic"
 import {
 	DOCX_ZOOM_FITS,
@@ -177,6 +179,8 @@ export interface DocxEditToolbarProps {
 	onFindClosed: () => void
 	markup: DocxMarkupMode | null
 	onMarkupChange: (mode: DocxMarkupMode) => void
+	// Restrict Editing, Stop Protection and Lock Tracking (undefined: not offered).
+	protection?: DocxProtectionControls | undefined
 	zoom: number
 	// Zoom follows the width of the view.
 	zoomFit: boolean
@@ -468,14 +472,16 @@ function ClipboardControls({
 	)
 }
 
-// Line spacing ▾: Word's multiples.
+// Line spacing ▾: Word's multiples, with the keys of those that have one (in the desktop app).
 function LineSpacingMenu({
 	value,
 	disabled,
+	apple,
 	execute
 }: {
 	value: number | null
 	disabled: boolean
+	apple: boolean
 	execute: (command: DocxEditorCommand) => void
 }) {
 	const { t } = useTranslation("preview")
@@ -499,18 +505,30 @@ function LineSpacingMenu({
 						focus.ran()
 					}}
 				>
-					{LINE_SPACINGS.map(spacing => (
-						<DropdownMenuRadioItem
-							key={spacing}
-							value={String(spacing)}
-							closeOnClick
-						>
-							{t("previewDocxLineSpacingValue", {
-								value: spacing / 240,
-								formatParams: { value: { minimumFractionDigits: 1 } }
-							})}
-						</DropdownMenuRadioItem>
-					))}
+					{LINE_SPACINGS.map(spacing => {
+						const shortcut = commandShortcut({ type: "paragraph.lineSpacing", rule: "auto", value: spacing }, apple, !BROWSER)
+
+						return (
+							<DropdownMenuRadioItem
+								key={spacing}
+								value={String(spacing)}
+								closeOnClick
+							>
+								{t("previewDocxLineSpacingValue", {
+									value: spacing / 240,
+									formatParams: { value: { minimumFractionDigits: 1 } }
+								})}
+								{shortcut === undefined ? null : (
+									<span
+										className="ml-auto pl-4"
+										aria-hidden
+									>
+										<KbdKeys keys={shortcutKeys(shortcut, apple)} />
+									</span>
+								)}
+							</DropdownMenuRadioItem>
+						)
+					})}
 				</DropdownMenuRadioGroup>
 			</DropdownMenuContent>
 		</DropdownMenu>
@@ -709,6 +727,7 @@ export function DocxEditToolbar(props: DocxEditToolbarProps) {
 		<LineSpacingMenu
 			value={lineSpacing?.rule === "auto" ? lineSpacing.value : null}
 			disabled={commandOff("paragraph.lineSpacing")}
+			apple={apple}
 			execute={execute}
 		/>
 	) : null
@@ -936,7 +955,7 @@ export function DocxEditToolbar(props: DocxEditToolbarProps) {
 				})
 			}
 
-			groups.push(...docxReviewGroups(slotProps(REVIEW_SLOT), props.markup, props.onMarkupChange, t))
+			groups.push(...docxReviewGroups(slotProps(REVIEW_SLOT), props.markup, props.onMarkupChange, t, props.protection))
 			break
 		}
 		case "view": {

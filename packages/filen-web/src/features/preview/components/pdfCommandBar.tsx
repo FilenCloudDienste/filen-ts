@@ -173,6 +173,8 @@ export function PdfCommandBar({
 					canOut={isPdfCommandEnabled(state, "zoom.out")}
 					onIn={command({ type: "zoom.in" })}
 					onOut={command({ type: "zoom.out" })}
+					inShortcut={<Kbd action="preview.pdfZoomIn" />}
+					outShortcut={<Kbd action="preview.pdfZoomOut" />}
 					onPercent={percent => {
 						dispatch({ type: "zoom.set", scale: pdfPercentScale(percent) })
 					}}
@@ -193,11 +195,13 @@ export function PdfCommandBar({
 					<RibbonButton
 						label={t("previewCommandBarRotateLeft")}
 						icon={<RotateCcwIcon />}
+						shortcut={<Kbd action="preview.pdfRotateCcw" />}
 						onClick={command({ type: "rotate.counterClockwise" })}
 					/>
 					<RibbonButton
 						label={t("previewCommandBarRotateRight")}
 						icon={<RotateCwIcon />}
+						shortcut={<Kbd action="preview.pdfRotateCw" />}
 						onClick={command({ type: "rotate.clockwise" })}
 					/>
 				</>

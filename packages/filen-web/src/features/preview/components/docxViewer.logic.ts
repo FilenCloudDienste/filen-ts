@@ -400,12 +400,15 @@ export interface DocxFindControls {
 	// The query last searched, and how.
 	query: string
 	caseSensitive: boolean
+	// Word's "Find whole words only"; absent where the find has no such option (its toggle is not shown).
+	wholeWord?: boolean
 	count: number
 	// There are more matches than `count` (a find shows so many at most).
 	capped: boolean
 	// The current match (0-based), -1 for none.
 	active: number
-	search: (query: string, caseSensitive: boolean) => void
+	// `wholeWord` is passed back as `wholeWord` holds it (undefined where the find has no such option).
+	search: (query: string, caseSensitive: boolean, wholeWord?: boolean) => void
 	step: (direction: 1 | -1) => void
 	close: () => void
 	// Editing: replace the current match or every match; absent while viewing.
@@ -420,11 +423,12 @@ export function viewerFindControls(state: DocxViewerState, dispatch: (command: D
 	return {
 		query: state.find.query,
 		caseSensitive: state.find.caseSensitive,
+		wholeWord: state.find.wholeWord,
 		count: state.find.count,
 		capped: state.find.capped,
 		active: state.find.active,
-		search: (query, caseSensitive) => {
-			dispatch({ type: "find.query", query, caseSensitive })
+		search: (query, caseSensitive, wholeWord) => {
+			dispatch({ type: "find.query", query, caseSensitive, ...(wholeWord === undefined ? {} : { wholeWord }) })
 		},
 		step: direction => {
 			dispatch({ type: direction > 0 ? "find.next" : "find.previous" })

@@ -6,7 +6,8 @@ import {
 	NO_REVIEW,
 	NO_VALUES,
 	type DocxEditorSnapshot,
-	type ReplaceAllResult
+	type ReplaceAllResult,
+	type StorySearch
 } from "@filen/office/core/docx/edit"
 import {
 	COMMAND_LABELS,
@@ -45,8 +46,11 @@ import {
 	editorMarks,
 	editorViewOnlyReasons,
 	firstMatchFrom,
+	firstStoryMatchFrom,
 	hostKeyAction,
+	replaceAllStoriesToast,
 	replaceAllToast,
+	storyMatchRange,
 	lockReasonKey,
 	featureLanded,
 	markupRelayout,
@@ -723,6 +727,59 @@ describe("replaceAllToast", () => {
 		expect(replaceAllToast({ refused: "tooLarge" }, false)).toEqual({ key: "previewDocxReplaceAllTooLarge" })
 		expect(replaceAllToast({ refused: "unreplaceable" }, false)).toEqual({ key: "previewDocxReplaceAllUnreplaceable" })
 		expect(replaceAllToast(null, false)).toBeUndefined()
+	})
+
+	it("adds up Replace all across stories, else says why none was replaced", () => {
+		const tr = {} as Extract<ReplaceAllResult, { readonly tr: unknown }>["tr"]
+
+		expect(
+			replaceAllStoriesToast([
+				{ result: { tr, count: 2 }, changed: true },
+				{ result: { refused: "unreplaceable" }, changed: false },
+				{ result: { tr, count: 1 }, changed: true }
+			])
+		).toEqual({ key: "previewDocxReplacedCount", count: 3 })
+		expect(
+			replaceAllStoriesToast([
+				{ result: { refused: "tooLarge" }, changed: false },
+				{ result: { refused: "unreplaceable" }, changed: false }
+			])
+		).toEqual({ key: "previewDocxReplaceAllTooLarge" })
+		expect(replaceAllStoriesToast([])).toBeUndefined()
+	})
+})
+
+describe("find across stories", () => {
+	const doc = {} as StorySearch["doc"]
+	// The body (story 0), then a header (3) and a footnote (7).
+	const stories: StorySearch[] = [
+		{ story: 0, doc },
+		{ story: 3, doc },
+		{ story: 7, doc }
+	]
+	const matches = [
+		{ story: 0, from: 5, to: 8 },
+		{ story: 0, from: 20, to: 23 },
+		{ story: 3, from: 2, to: 5 },
+		{ story: 7, from: 1, to: 4 },
+		{ story: 7, from: 9, to: 12 }
+	]
+
+	it("starts at the first match from the caret in its story, then the stories after it, wrapping to the first", () => {
+		expect(firstStoryMatchFrom(matches, stories, 0, 21)).toBe(2)
+		expect(firstStoryMatchFrom(matches, stories, 3, 1)).toBe(2)
+		expect(firstStoryMatchFrom(matches, stories, 3, 3)).toBe(3)
+		expect(firstStoryMatchFrom(matches, stories, 7, 10)).toBe(0)
+		// A story not searched (a comment): from the first.
+		expect(firstStoryMatchFrom(matches, stories, 12, 4)).toBe(0)
+		expect(firstStoryMatchFrom([], stories, 0, 0)).toBe(-1)
+	})
+
+	it("finds a story's matches, the ones marked while it is edited", () => {
+		expect(storyMatchRange(matches, stories, 0)).toEqual({ start: 0, end: 2 })
+		expect(storyMatchRange(matches, stories, 3)).toEqual({ start: 2, end: 3 })
+		expect(storyMatchRange(matches, stories, 7)).toEqual({ start: 3, end: 5 })
+		expect(storyMatchRange(matches, stories, 12)).toEqual({ start: 0, end: 0 })
 	})
 })
 

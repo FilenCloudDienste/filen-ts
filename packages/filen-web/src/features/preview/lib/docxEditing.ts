@@ -66,13 +66,20 @@ export interface DocxEditingBackend {
 // `writeUnlocked`: the document's password to modify was given (docxWriteProtection.tsx). `encryption`: it was
 // opened with its password (docxViewer.tsx): every save is sealed with its key after the zip and checked.
 // `backend`: the proof and writer of a document saved in another format (default: the docx writer's).
-export function docxEditingHost(writeUnlocked = false, encryption?: DocxSealer, backend?: DocxEditingBackend): DocxEditingHost {
+// `protectionUnlocked`: the user stopped the protection that kept it view-only (docxRestrictEditing.tsx).
+export function docxEditingHost(
+	writeUnlocked = false,
+	encryption?: DocxSealer,
+	backend?: DocxEditingBackend,
+	protectionUnlocked = false
+): DocxEditingHost {
 	return inThreadEditingHost(
 		options => windowServices(window, fetchFontAssets(options.fontUrls ?? DOCX_FONT_URLS), hyphenationLibrary(OFFICE_HYPHENATION_URLS)),
 		{
 			proof: backend?.proof ?? writerProof,
 			writer: backend?.writer ?? { prepare: prepareDocxSave, zipper },
 			writeUnlocked,
+			...(protectionUnlocked ? { protectionUnlocked } : {}),
 			...(encryption === undefined ? {} : { encryption }),
 			...(backend?.gate === undefined || backend.gate.length === 0 ? {} : { gate: backend.gate })
 		}
@@ -184,6 +191,7 @@ async function writeOnce(
 ): Promise<DocxSaveSnapshot> {
 	const written = write.map(session => session.state.doc)
 	const tracking = live[0]?.context.review.tracking
+	const protection = live[0]?.context.protectionChange
 	const result = await host.save(write)
 
 	return {
@@ -193,7 +201,7 @@ async function writeOnce(
 				const doc = written[index]
 
 				if (doc !== undefined) {
-					session.markSaved(doc, tracking)
+					session.markSaved(doc, tracking, protection)
 				}
 			})
 		},

@@ -46,7 +46,7 @@ export function setUpRangeValid(form: SetUpForm, slideCount: number): boolean {
 	return from !== undefined && to !== undefined && from >= 1 && to <= slideCount && from <= to
 }
 
-// `opened`: the options the dialog opened with, whose settings it does not show (show without animation, pen colour)
+// `opened`: the options the dialog opened with, whose settings it does not show (show without animation or narration, pen colour)
 // are kept.
 export function setUpOptions(form: SetUpForm, opened?: ShowOptions): ShowOptions {
 	const from = slideNumber(form.from)
@@ -54,6 +54,7 @@ export function setUpOptions(form: SetUpForm, opened?: ShowOptions): ShowOptions
 
 	return {
 		...(opened?.withoutAnimation === true ? { withoutAnimation: true } : {}),
+		...(opened?.withoutNarration === true ? { withoutNarration: true } : {}),
 		...(opened?.penColor === undefined ? {} : { penColor: opened.penColor }),
 		kiosk: form.kiosk,
 		...(form.browse && !form.kiosk ? { browse: true } : {}),
@@ -74,7 +75,8 @@ export function showSettingsOf(options: ShowOptions, previous: ShowSettings | un
 	return {
 		kind,
 		loop: options.loop,
-		showNarration: previous?.showNarration ?? true,
+		// Kept absent when the file leaves it out: writing it would add showNarration to a part that never had it.
+		...(previous?.showNarration === undefined ? {} : { showNarration: previous.showNarration }),
 		showAnimation: previous?.showAnimation ?? true,
 		useTimings: options.useTimings,
 		range:

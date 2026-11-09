@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { insertTextBoxOp, slideRef, type ShapeClip, type SlideClip } from "@filen/office/core/presentation"
+import { insertTextBoxOp, slideRef, type ImportedSlide, type ShapeClip, type SlideClip } from "@filen/office/core/presentation"
+import type { ClipSlidesResult } from "@filen/office/dom/presentation"
 import {
 	clipboardPayload,
 	clipboardRefusalKey,
@@ -18,6 +19,16 @@ import {
 
 const SLIDE = slideRef(1)
 const IMAGE = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"
+const IMPORTED: ImportedSlide = {
+	parts: [
+		{
+			name: "/ppt/slides/slide3.xml",
+			contentType: "application/vnd.openxmlformats-officedocument.presentationml.slide+xml",
+			bytes: new Uint8Array([1])
+		}
+	],
+	layout: { type: "obj", name: "Title and Content" }
+}
 
 function shapes(overrides: Partial<ShapeClip> = {}): ShapeClip {
 	return {
@@ -33,7 +44,10 @@ function shapes(overrides: Partial<ShapeClip> = {}): ShapeClip {
 }
 
 function session() {
-	return { clipParts: vi.fn(() => Promise.resolve({ ok: true as const, parts: [] })) }
+	return {
+		clipParts: vi.fn(() => Promise.resolve({ ok: true as const, parts: [] })),
+		clipSlides: vi.fn((): Promise<ClipSlidesResult> => Promise.resolve({ ok: true, slides: [IMPORTED] }))
+	}
 }
 
 function target(on: ReturnType<typeof session>, overrides: Partial<PasteTarget> = {}): PasteTarget {
@@ -100,7 +114,7 @@ describe("the presentation clipboard", () => {
 		expect(clipboardRefusalKey("notFound", true)).toBe("previewPptxClipboardGone")
 	})
 
-	it("plans slides after the slide in view, and refuses them into another deck", async () => {
+	it("plans slides after the slide in view, and into another deck as the slides it hands over", async () => {
 		const deck = session()
 		const clip: SlideClip = { kind: "slides", format: "pptx", slides: [SLIDE], text: [] }
 		const held = holdClip(clip, deck)
@@ -110,9 +124,33 @@ describe("the presentation clipboard", () => {
 			ops: [{ family: "slide", kind: "duplicate", slide: SLIDE, at: 1 }],
 			select: 1
 		})
-		expect(await planPaste(held, target(session()))).toEqual({ kind: "refused", reason: "unsupported" })
+		expect(deck.clipSlides).not.toHaveBeenCalled()
+		expect(await planPaste(held, target(session()))).toEqual({
+			kind: "slides",
+			ops: [{ family: "slide", kind: "import", at: 1, slides: [IMPORTED] }],
+			select: 1
+		})
+		expect(deck.clipSlides).toHaveBeenCalledWith([SLIDE])
+		// Between formats: refused.
+		expect(await planPaste(held, target(session(), { format: "odp" }))).toEqual({ kind: "refused", reason: "unsupported" })
 		expect(clipboardRefusalKey("unsupported", true)).toBe("previewPptxClipboardNotHere")
 		expect(clipboardRefusalKey("unsupported", false)).toBe("previewPptxClipboardNotCopied")
+	})
+
+	it("pastes a cut's slides into another deck as they were cut, and tells what is gone when the deck closed", async () => {
+		const deck = session()
+		const cut = holdClip({ kind: "slides", format: "pptx", slides: [SLIDE], text: [], foreign: [IMPORTED] }, deck)
+
+		expect(await planPaste(cut, target(session()))).toMatchObject({ kind: "slides", ops: [{ kind: "import", slides: [IMPORTED] }] })
+		expect(deck.clipSlides).not.toHaveBeenCalled()
+
+		const closed = session()
+
+		closed.clipSlides.mockRejectedValue(new Error("closed"))
+
+		const copied = holdClip({ kind: "slides", format: "pptx", slides: [SLIDE], text: [] }, closed)
+
+		expect(await planPaste(copied, target(session()))).toEqual({ kind: "refused", reason: "notFound" })
 	})
 
 	it("lets go of a clip that needs its closing deck, and keeps one that does not", () => {
@@ -125,6 +163,11 @@ describe("the presentation clipboard", () => {
 		holdClip({ kind: "slides", format: "pptx", slides: [SLIDE], text: [] }, deck)
 		releaseClipsOf(deck)
 		expect(heldClip()).toBeUndefined()
+
+		// A cut's slides carry what another deck takes of them.
+		holdClip({ kind: "slides", format: "pptx", slides: [SLIDE], text: [], foreign: [IMPORTED] }, deck)
+		releaseClipsOf(deck)
+		expect(heldClip()).toBeDefined()
 	})
 
 	it("makes another app's text a text box, a paragraph a line", () => {

@@ -245,5 +245,61 @@ export const previewDocxReview = {
 	/** Docx editor — toast: an edit refused because what it changes can't be saved as a tracked change */
 	previewDocxEditUnsupported: "This edit can't be made here",
 	/** Docx editor — toast body: why the edit was refused */
-	previewDocxEditUnsupportedBody: "Part of what it changes can't be saved as a tracked change."
+	previewDocxEditUnsupportedBody: "Part of what it changes can't be saved as a tracked change.",
+	/** Docx editor — Review ribbon group holding document protection (Word's "Protect") */
+	previewDocxRibbonProtect: "Protect",
+	/** Docx editor — Review ribbon button limiting what others may change (Word's "Restrict Editing") */
+	previewDocxRestrictEditing: "Restrict editing",
+	/** Docx editor — Review ribbon button lifting the document's protection (Word's "Stop Protection") */
+	previewDocxStopProtection: "Stop protection",
+	/** Docx editor — Review ribbon button keeping others from turning off track changes (Word's "Lock Tracking") */
+	previewDocxLockTracking: "Lock tracking",
+	/** Docx editor — Review ribbon button lifting locked tracking (Word's "Unlock Tracking") */
+	previewDocxUnlockTracking: "Unlock tracking",
+	/** Restrict editing dialog — title */
+	previewDocxRestrictTitle: "Restrict editing",
+	/** Restrict editing dialog — description */
+	previewDocxRestrictBody: "Choose what others may do with the document. A password keeps them from lifting the protection.",
+	/** Restrict editing dialog — heading above the editing choices */
+	previewDocxRestrictAllow: "Allow only this type of editing",
+	/** Restrict editing dialog — choice: nothing may change (Word's "No changes (Read only)") */
+	previewDocxRestrictReadOnly: "No changes (read only)",
+	/** Restrict editing dialog — choice: every edit is recorded as a tracked change */
+	previewDocxRestrictTrackedChanges: "Tracked changes",
+	/** Restrict editing dialog — choice: only comments may be added */
+	previewDocxRestrictComments: "Comments",
+	/** Restrict editing dialog — choice: only form fields may be filled in */
+	previewDocxRestrictForms: "Filling in forms",
+	/** Restrict editing dialog — checkbox allowing styles only, no direct formatting (Word's "Limit formatting to a selection of styles") */
+	previewDocxRestrictFormatting: "Limit formatting to styles",
+	/** Restrict editing dialog — submit button (Word's "Yes, Start Enforcing Protection") */
+	previewDocxRestrictAction: "Start protection",
+	/** Lock tracking dialog — title */
+	previewDocxLockTrackingTitle: "Lock tracking",
+	/** Lock tracking dialog — description */
+	previewDocxLockTrackingBody: "Every edit is recorded as a tracked change. A password keeps others from turning tracking off.",
+	/** Restrict editing and lock tracking dialogs — the optional password field's label */
+	previewDocxProtectPassword: "Password (optional)",
+	/** Restrict editing and lock tracking dialogs — the field repeating the password */
+	previewDocxProtectConfirm: "Confirm password",
+	/** Restrict editing and lock tracking dialogs — inline error when the two passwords differ */
+	previewDocxProtectMismatch: "The passwords don't match.",
+	/** Lock tracking dialog — submit button */
+	previewDocxLockTrackingAction: "Lock",
+	/** Stop protection prompt — title */
+	previewDocxUnprotectTitle: "Stop protection",
+	/** Stop protection prompt — description above the password field */
+	previewDocxUnprotectBody: "Enter the password that protects the document.",
+	/** Stop protection prompt — the password field's label */
+	previewDocxUnprotectPassword: "Password",
+	/** Stop protection prompt — the submit button */
+	previewDocxUnprotectAction: "Stop protection",
+	/** Stop protection prompt — while the password is checked */
+	previewDocxUnprotectChecking: "Checking…",
+	/** Stop protection prompt — under the field after a wrong password */
+	previewDocxUnprotectWrong: "That password isn't correct.",
+	/** Toast — the protection's password uses a hash this app can't check */
+	previewDocxUnprotectUnsupported: "This document's protection password can't be checked here.",
+	/** Toast — protecting the document failed */
+	previewDocxProtectFailed: "The document couldn't be protected."
 } as const

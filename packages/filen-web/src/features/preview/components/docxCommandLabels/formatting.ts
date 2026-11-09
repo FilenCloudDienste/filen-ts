@@ -22,6 +22,7 @@ export const FORMATTING_LABELS: Required<DocxCommandLabels<"formatting">> = {
 	"paragraph.lineSpacing": "previewDocxLineSpacing",
 	"paragraph.spacing": "previewDocxParagraphSpacing",
 	"paragraph.indent": "previewDocxIndents",
+	"paragraph.hangingIndent": "previewDocxHangingIndent",
 	"format.copy": "previewOfficeFormatPainter",
 	"format.paste": "previewDocxPasteFormatting"
 }

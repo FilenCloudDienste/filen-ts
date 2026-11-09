@@ -1,9 +1,8 @@
 import { useEffect, useRef, useState, useSyncExternalStore, type DragEvent, type RefObject } from "react"
 import { useTranslation } from "react-i18next"
 import { useVirtualizer } from "@tanstack/react-virtual"
-import type { Node } from "prosemirror-model"
 import { ChevronDownIcon, ChevronRightIcon, ChevronUpIcon, SearchIcon, XIcon } from "lucide-react"
-import type { StoryMatch } from "@filen/office/core/docx/edit"
+import type { DocumentMatch, StorySearch } from "@filen/office/core/docx/edit"
 import {
 	canMoveOutlineEntry,
 	docxOutline,
@@ -24,6 +23,7 @@ import {
 	headingRows,
 	matchContext,
 	sameHeadings,
+	storyLabel,
 	type DocxNavigationState,
 	type DocxNavigationTab,
 	type HeadingRow
@@ -59,8 +59,8 @@ export interface DocxNavigationPaneProps {
 	onTab: (tab: DocxNavigationTab) => void
 	onClose: () => void
 	find: DocxFindControls
-	// The matches, and the document they were found in.
-	results: { readonly doc: Node | undefined; readonly matches: readonly StoryMatch[] }
+	// The matches, and the stories they were found in (empty until a search ran).
+	results: { readonly stories: readonly StorySearch[]; readonly matches: readonly DocumentMatch[] }
 	onResult: (index: number) => void
 	pages: DocxPageStore
 	surface: DocxSurface
@@ -186,7 +186,7 @@ export function DocxNavigationPane(props: DocxNavigationPaneProps) {
 						onChange={event => {
 							const query = event.target.value
 
-							find.search(query, find.caseSensitive)
+							find.search(query, find.caseSensitive, find.wholeWord)
 
 							if (query.length > 0) {
 								props.onTab("results")
@@ -201,7 +201,7 @@ export function DocxNavigationPane(props: DocxNavigationPaneProps) {
 								event.stopPropagation()
 
 								if (searching) {
-									find.search("", find.caseSensitive)
+									find.search("", find.caseSensitive, find.wholeWord)
 								} else {
 									props.focusEditor()
 								}
@@ -287,6 +287,7 @@ export function DocxNavigationPane(props: DocxNavigationPaneProps) {
 					/>
 				) : (
 					<ResultsTab
+						editor={props.editor}
 						query={find.query}
 						active={find.active}
 						results={props.results}
@@ -704,11 +705,13 @@ function PagesTab({ editor, handleRef, pages, focusEditor }: TabProps & { pages:
 }
 
 function ResultsTab({
+	editor,
 	query,
 	active,
 	results,
 	onResult
 }: {
+	editor: PagedEditor
 	query: string
 	active: number
 	results: DocxNavigationPaneProps["results"]
@@ -716,9 +719,10 @@ function ResultsTab({
 }) {
 	const { t } = useTranslation("preview")
 	const [scroller, setScroller] = useState<HTMLDivElement | null>(null)
-	const { doc, matches } = results
+	const { stories, matches } = results
+	const searched = stories.length > 0
 	const virtualizer = useVirtualizer({
-		count: doc === undefined ? 0 : matches.length,
+		count: searched ? matches.length : 0,
 		getScrollElement: () => scroller,
 		observeElementOffset: observeElementOffsetFromAttach,
 		initialRect: INITIAL_RECT,
@@ -732,7 +736,7 @@ function ResultsTab({
 		}
 	}, [active, virtualizer])
 
-	if (query.length === 0 || doc === undefined) {
+	if (query.length === 0 || !searched) {
 		return <p className="px-3 py-4 text-xs text-muted-foreground">{t("previewDocxNavigationSearchHint")}</p>
 	}
 
@@ -752,12 +756,15 @@ function ResultsTab({
 			>
 				{virtualizer.getVirtualItems().map(item => {
 					const match = matches[item.index]
+					// A few stories: found by a scan, for the rows in view only.
+					const doc = match === undefined ? undefined : stories.find(entry => entry.story === match.story)?.doc
 
-					if (match === undefined) {
+					if (match === undefined || doc === undefined) {
 						return null
 					}
 
 					const context = matchContext(doc, match)
+					const label = storyLabel(editor.edits.model.stories[match.story]?.kind)
 
 					return (
 						<li
@@ -777,6 +784,7 @@ function ResultsTab({
 								}}
 							>
 								<span className="line-clamp-2 break-words">
+									{label === undefined ? null : <span className="mr-1 text-muted-foreground">{t(label)}</span>}
 									{context.before}
 									<mark className="rounded-[2px] bg-yellow-200 px-0.5 font-semibold text-inherit dark:bg-yellow-500/40">
 										{context.match}

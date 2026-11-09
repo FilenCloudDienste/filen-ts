@@ -396,4 +396,68 @@ describe("PdfViewer", () => {
 		fireEvent.click(within(row).getByRole("button", { name: "Zoom level, 200%" }))
 		expect(await screen.findByRole("menuitemradio", { name: "Fit page" })).toBeTruthy()
 	})
+
+	// Edge's and Acrobat's PDF keys; each is kept from the browser, whose page zoom would scale the whole app.
+	it("zooms, resets, fits and rotates from the keyboard instead of zooming the page", async () => {
+		await mount()
+
+		const row = screen.getByRole("toolbar", { name: "Commands" })
+		const scroller = document.querySelector<HTMLElement>(".fo-pdf-page")?.closest<HTMLElement>("[tabindex]") ?? document.body
+
+		expect(fireEvent.keyDown(scroller, { key: "=", code: "Equal", ctrlKey: true })).toBe(false)
+		expect(await within(row).findByRole("button", { name: "Zoom level, 125%" })).toBeTruthy()
+		expect(fireEvent.keyDown(scroller, { key: "+", code: "Equal", ctrlKey: true, shiftKey: true })).toBe(false)
+		expect(await within(row).findByRole("button", { name: "Zoom level, 150%" })).toBeTruthy()
+		expect(fireEvent.keyDown(scroller, { key: "-", code: "Minus", ctrlKey: true })).toBe(false)
+		expect(await within(row).findByRole("button", { name: "Zoom level, 125%" })).toBeTruthy()
+		expect(fireEvent.keyDown(scroller, { key: "0", code: "Digit0", ctrlKey: true })).toBe(false)
+		expect(await within(row).findByRole("button", { name: "Zoom level, 100%" })).toBeTruthy()
+
+		expect(fireEvent.keyDown(scroller, { key: "]", code: "BracketRight", ctrlKey: true })).toBe(false)
+		await waitFor(() => {
+			expect(pages.get(1)?.getViewport).toHaveBeenLastCalledWith({ scale: 1.5, rotation: 90 })
+		})
+		expect(fireEvent.keyDown(scroller, { key: "[", code: "BracketLeft", ctrlKey: true })).toBe(false)
+		await waitFor(() => {
+			expect(pages.get(1)?.getViewport).toHaveBeenLastCalledWith({ scale: 1.5, rotation: 0 })
+		})
+
+		expect(fireEvent.keyDown(scroller, { key: "\\", code: "Backslash", ctrlKey: true })).toBe(false)
+		fireEvent.click(within(row).getByRole("button", { name: /^Zoom level/u }))
+		expect((await screen.findByRole("menuitemradio", { name: "Fit to width" })).getAttribute("aria-checked")).toBe("true")
+	})
+
+	it("takes the zoom keys pressed outside the viewer in its layer, and at a zoom limit", async () => {
+		await mount()
+
+		const row = screen.getByRole("toolbar", { name: "Commands" })
+
+		expect(fireEvent.keyDown(document.body, { key: "=", code: "Equal", ctrlKey: true })).toBe(false)
+		expect(await within(row).findByRole("button", { name: "Zoom level, 125%" })).toBeTruthy()
+
+		for (let step = 0; step < 20; step++) {
+			fireEvent.keyDown(document.body, { key: "-", code: "Minus", ctrlKey: true })
+		}
+
+		expect(within(row).getByRole<HTMLButtonElement>("button", { name: "Zoom out" }).disabled).toBe(true)
+		// Nothing left to zoom, but still not the browser's page zoom.
+		expect(fireEvent.keyDown(document.body, { key: "-", code: "Minus", ctrlKey: true })).toBe(false)
+	})
+
+	it("leaves the zoom keys alone in a dialog over the viewer and without the modifier", async () => {
+		await mount()
+
+		const scroller = document.querySelector<HTMLElement>(".fo-pdf-page")?.closest<HTMLElement>("[tabindex]") ?? document.body
+
+		expect(fireEvent.keyDown(scroller, { key: "=", code: "Equal" })).toBe(true)
+
+		fireEvent.click(screen.getByRole("button", { name: "File" }))
+		fireEvent.click(await screen.findByRole("menuitem", { name: "Document properties" }))
+
+		const dialog = await screen.findByRole("dialog", { name: "Document properties" })
+
+		expect(fireEvent.keyDown(dialog, { key: "=", code: "Equal", ctrlKey: true })).toBe(true)
+		// The modal hides the command bar from the accessibility tree.
+		expect(screen.getByRole("button", { name: "Zoom level, 100%", hidden: true })).toBeTruthy()
+	})
 })
