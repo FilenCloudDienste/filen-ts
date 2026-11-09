@@ -624,6 +624,41 @@ describe("tables", () => {
 		expect(workbook.sheets[0]?.name).toBe("Data")
 	})
 
+	it("go together when one delete takes several, the others kept", async () => {
+		const table = (id: number, col: string) =>
+			`${DECLARATION}<table xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" id="${String(id)}" name="T${String(id)}" displayName="T${String(id)}" ref="${col}1:${col}2">` +
+			`<autoFilter ref="${col}1:${col}2"/><tableColumns count="1"><tableColumn id="1" name="H${String(id)}"/></tableColumns></table>`
+		const header = (col: string, id: number) => `<c r="${col}1" t="inlineStr"><is><t>H${String(id)}</t></is></c>`
+		const fixture: Fixture = {
+			sheets: [
+				{
+					name: "Data",
+					body:
+						`<sheetData><row r="1">${header("A", 1)}${header("B", 2)}${header("D", 3)}</row>` +
+						'<row r="2"><c r="A2"><v>1</v></c><c r="B2"><v>2</v></c><c r="D2"><v>3</v></c></row></sheetData>' +
+						'<tableParts count="3"><tablePart r:id="rId1"/><tablePart r:id="rId2"/><tablePart r:id="rId3"/></tableParts>',
+					rels:
+						relationship("rId1", "table", "../tables/table1.xml") +
+						relationship("rId2", "table", "../tables/table2.xml") +
+						relationship("rId3", "table", "../tables/table3.xml")
+				}
+			],
+			parts: {
+				"xl/tables/table1.xml": { text: table(1, "A"), type: TYPES.table },
+				"xl/tables/table2.xml": { text: table(2, "B"), type: TYPES.table },
+				"xl/tables/table3.xml": { text: table(3, "D"), type: TYPES.table }
+			}
+		}
+		const { files, sheet } = await edited(fixture, cols("delete", 0, 2), ["tables"])
+
+		expect(files["xl/tables/table1.xml"]).toBeUndefined()
+		expect(files["xl/tables/table2.xml"]).toBeUndefined()
+		expect(files["xl/tables/table3.xml"]).toContain('ref="B1:B2"')
+		expect(sheet).toContain('<tableParts count="1"><tablePart r:id="rId3"/></tableParts>')
+		expect(files["xl/worksheets/_rels/sheet1.xml.rels"]).not.toMatch(/rId1|rId2/)
+		expect(files["[Content_Types].xml"]).not.toMatch(/table1\.xml|table2\.xml/)
+	})
+
 	it("refuse deleting the header row, the totals row or every data row alone", async () => {
 		expect(await refused(tables(tableXml("A1:C3", COLUMNS)), rows("delete", 0, 1))).toEqual({
 			reason: "structureLocked",

@@ -43,7 +43,7 @@ import {
 import { MODEL_SECTIONS, PLAIN_SECTIONS, rewriteSection, sectionKnown } from "./sections"
 import { formatRef, parseRef } from "./sqref"
 import { liveRelationships, refState } from "./state"
-import { readTable, rewriteTable, shiftTable, tableEdit, withoutTablePart, type TableInfo, type TableShift } from "./tables"
+import { readTable, rewriteTable, shiftTable, tableEdit, withoutTableParts, type TableInfo, type TableShift } from "./tables"
 import type { TableEdit } from "./structured"
 import { shiftCols, shiftMerges, shiftRowRuns, shiftView } from "./views"
 
@@ -509,6 +509,8 @@ async function plan(workbook: XlsxWorkbookModel, edit: RefEdit): Promise<RefPlan
 
 	// --- Parts ---
 
+	const removedTables: TableInfo[] = []
+
 	for (const part of parts) {
 		const ownerName = part.owner?.name ?? null
 		const onTarget = shift !== null && part.owner?.id === edit.sheet
@@ -571,7 +573,7 @@ async function plan(workbook: XlsxWorkbookModel, edit: RefEdit): Promise<RefPlan
 				const moved = tableShifts.get(partKey(part.name)) ?? null
 
 				if (moved?.ref === null) {
-					planTableRemoval(workbook, table, steps, touch)
+					removedTables.push(table)
 
 					break
 				}
@@ -604,6 +606,8 @@ async function plan(workbook: XlsxWorkbookModel, edit: RefEdit): Promise<RefPlan
 			revert: () => state.setPart(part.name, contentType, held)
 		})
 	}
+
+	if (removedTables.length > 0) planTableRemovals(workbook, removedTables, steps, touch)
 
 	if (shift !== null || formulaCells.size > 0) {
 		if ([...workbook.parts.parts()].some(part => subtype(part.contentType) === "calcchain+xml")) touch("calcChain")
@@ -1086,33 +1090,44 @@ export function nameWithFormula(name: XlsxDefinedName, formula: string): XlsxDef
 	}
 }
 
-// A table whose every row or column was deleted: its part (and related parts) removed, the sheet's relationship
-// and tablePart entry with it.
-function planTableRemoval(workbook: XlsxWorkbookModel, table: TableInfo, steps: Step[], touch: (construct: RefConstruct) => void): void {
-	const entry = workbook.sheet(table.sheet)
-	const model = entry?.model ?? null
-
-	if (entry === undefined || model === null) refuse("structureLocked", "tables")
-
+// Tables whose every row or column was deleted: their parts (and related parts) removed, the sheets' relationships
+// and tablePart entries with them, one tableParts step per sheet.
+function planTableRemovals(
+	workbook: XlsxWorkbookModel,
+	tables: readonly TableInfo[],
+	steps: Step[],
+	touch: (construct: RefConstruct) => void
+): void {
 	const state = refState(workbook)
-	const before = state.sectionMarkup(model, "tableParts")
-	const after = before.map(markup => withoutTablePart(markup, table.relationship))
-	const removed = [table.part, ...table.related]
 	const changes = workbook.changes
 
 	touch("tables")
-	steps.push({
-		apply: () => {
-			for (const part of removed) changes.removePart(part)
 
-			changes.removeRelationship(model.part, table.relationship)
-			state.setSection(model, "tableParts", after)
-		},
-		revert: () => {
-			state.setSection(model, "tableParts", before)
-			if (changes instanceof ChangeLog) changes.restoreRelationship(model.part, table.relationship)
+	for (const sheet of new Set(tables.map(table => table.sheet))) {
+		const model = workbook.sheet(sheet)?.model ?? null
 
-			for (const part of removed) changes.restorePart(part)
-		}
-	})
+		if (model === null) refuse("structureLocked", "tables")
+
+		const removed = tables.filter(table => table.sheet === sheet)
+		const relationships = new Set(removed.map(table => table.relationship))
+		const parts = removed.flatMap(table => [table.part, ...table.related])
+		const before = state.sectionMarkup(model, "tableParts")
+		const after = before.map(markup => withoutTableParts(markup, relationships))
+
+		steps.push({
+			apply: () => {
+				for (const part of parts) changes.removePart(part)
+				for (const relationship of relationships) changes.removeRelationship(model.part, relationship)
+
+				state.setSection(model, "tableParts", after)
+			},
+			revert: () => {
+				state.setSection(model, "tableParts", before)
+
+				if (changes instanceof ChangeLog)
+					for (const relationship of relationships) changes.restoreRelationship(model.part, relationship)
+				for (const part of parts) changes.restorePart(part)
+			}
+		})
+	}
 }

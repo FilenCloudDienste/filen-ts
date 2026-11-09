@@ -227,8 +227,8 @@ function shiftTableFormula(edited: ReturnType<typeof editMarkup>, node: number, 
 	}
 }
 
-// The tableParts section without the relationship `id` ("" when none is left).
-export function withoutTablePart(markup: string, id: string): string {
+// The tableParts section without the relationships `ids` ("" when none is left).
+export function withoutTableParts(markup: string, ids: ReadonlySet<string>): string {
 	const edited = editMarkup(encodeUtf8(markup), "section tableParts")
 	const { document, editor } = edited
 	const root = document.documentElement()
@@ -237,7 +237,7 @@ export function withoutTablePart(markup: string, id: string): string {
 	for (const part of childElements(document, root)) {
 		const rid = document.attributes(part).find(attribute => attribute.name.endsWith(":id") || attribute.name === "id")?.value
 
-		if (rid === id) editor.remove(part)
+		if (rid !== undefined && ids.has(rid)) editor.remove(part)
 		else left++
 	}
 
