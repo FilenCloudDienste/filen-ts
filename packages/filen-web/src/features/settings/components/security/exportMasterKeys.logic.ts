@@ -20,12 +20,6 @@ export function shouldShowExportReminder(params: {
 	return !params.alreadyFired && params.accountStatus === "success" && !params.didExportMasterKeys
 }
 
-// Storage-over-limit trigger, ported verbatim from the mobile account reminders (`storageUsed >
-// maxStorage`). Bigint-typed to match UserInfo's fields — never coerce to Number for the comparison.
-export function isStorageOverLimit(storageUsed: bigint, maxStorage: bigint): boolean {
-	return storageUsed > maxStorage
-}
-
 // The two startup reminders, in the order they surface.
 export type ReminderKind = "exportKeys" | "storage"
 

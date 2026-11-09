@@ -43,7 +43,7 @@ import { copyJobStatus, copyJobTitle } from "@/features/transfers/components/cop
 import { useTransfersStore } from "@/features/transfers/store/useTransfersStore"
 import { getCopyJob, jobsAccess, useDriveJobsStore } from "@/features/transfers/store/useDriveJobsStore"
 import { queryClient } from "@/queries/client"
-import { ACCOUNT_QUERY_KEY } from "@/queries/account"
+import { ACCOUNT_QUERY_KEY, fetchAccount } from "@/queries/account"
 import { accountQuotaDeps, addAccountStorageUsed } from "@/features/drive/lib/quota"
 import { discardListingPatches, driveListingQueryKey, flushListingCreates } from "@/features/drive/queries/drive"
 import { testUuid } from "@/tests/support/uuid"
@@ -197,7 +197,11 @@ function row(id = "job") {
 	return useTransfersStore.getState().transfers.find(transfer => transfer.id === id)
 }
 
-beforeEach(() => {
+beforeEach(async () => {
+	// A server read this page, as the boot's account query makes: the cached figures below count as recent.
+	getUserInfo.mockResolvedValueOnce({} as UserInfo)
+	await fetchAccount()
+	getUserInfo.mockClear()
 	useTransfersStore.setState({ transfers: [], speedSamples: [] })
 	useDriveJobsStore.setState({ jobs: {} })
 	queryClient.clear()
@@ -489,6 +493,34 @@ describe("runCopyJob quota", () => {
 		expect(deps.account.fetchFresh).toHaveBeenCalledTimes(1)
 		expect(deps.copyItems.mock.calls.map(call => call[3])).toEqual([100, 1_000])
 		expect(job?.outcome).toEqual({ status: "done" })
+	})
+
+	// A cached figure that is not from a recent read is read once up front; a refusal against that is the answer.
+	it("starts from one fresh read when the cached account is not recent, and does not read again after a refusal", async () => {
+		const deps = makeDeps()
+		const account = { ...deps.account, isCachedFresh: () => false }
+
+		deps.account.cached.mockReturnValue({ maxStorage: 1_000n, storageUsed: 0n })
+		deps.account.fetchFresh.mockResolvedValue({ maxStorage: 1_000n, storageUsed: 900n })
+		deps.copyItems.mockResolvedValue(QUOTA_REPORT)
+
+		await runCopyJob({ ...deps, account }, request())
+
+		expect(deps.account.fetchFresh).toHaveBeenCalledTimes(1)
+		expect(deps.copyItems.mock.calls.map(call => call[3])).toEqual([100])
+	})
+
+	it("starts from the cached figure when the up-front read fails", async () => {
+		const deps = makeDeps()
+		const account = { ...deps.account, isCachedFresh: () => false }
+
+		deps.account.cached.mockReturnValue({ maxStorage: 1_000n, storageUsed: 250n })
+		deps.account.fetchFresh.mockRejectedValue(new Error("offline"))
+		deps.copyItems.mockResolvedValue(report())
+
+		await runCopyJob({ ...deps, account }, request())
+
+		expect(deps.copyItems.mock.calls[0]?.[3]).toBe(750)
 	})
 
 	it("reports the fresh free storage when the fresh read frees nothing more, without running again", async () => {

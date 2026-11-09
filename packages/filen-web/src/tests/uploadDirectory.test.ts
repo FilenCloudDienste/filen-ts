@@ -43,7 +43,7 @@ vi.mock("@/features/transfers/lib/transferStartToast", () => ({ toastTransferSta
 
 import { queryClient as testQueryClient } from "@/queries/client"
 import { driveListingQueryKey } from "@/features/drive/queries/drive"
-import { ACCOUNT_QUERY_KEY } from "@/queries/account"
+import { ACCOUNT_QUERY_KEY, fetchAccount } from "@/queries/account"
 import {
 	collectDirectoryUploads,
 	runDirectoryUpload,
@@ -196,7 +196,11 @@ function mockDirEntry(name: string, reader: FileSystemDirectoryReader): FileSyst
 	} as FileSystemDirectoryEntry
 }
 
-beforeEach(() => {
+beforeEach(async () => {
+	// A server read this page, as the boot's account query makes: the cached figures below count as recent.
+	getUserInfo.mockResolvedValueOnce({})
+	await fetchAccount()
+	getUserInfo.mockClear()
 	vi.clearAllMocks()
 	testQueryClient.clear()
 	useTransfersStore.setState({ transfers: [] })
@@ -937,6 +941,55 @@ describe("runDirectoryUpload — listing runs", () => {
 		})
 		// Every run ended clean, so none is left behind.
 		expect(useTransfersStore.getState().uploadBatches).toEqual({})
+	})
+
+	it("stops a run the server refused for storage, keeping its files that did not upload as errors, and reacts once", async () => {
+		const h = makeHarness()
+		const cancel = vi.fn<(id: string) => void>()
+		const onStorageRefusal = vi.fn<() => void>()
+		const refusal = sdkDto("MaxStorageReached")
+		const waiting: ((dto: ErrorDTO) => void)[] = []
+
+		h.upload.mockImplementation((_parentUuid, _transferId, file) => {
+			if (file.name === "big.bin") {
+				return new Promise((_resolve, reject) => {
+					setTimeout(() => {
+						// The worker boundary's error shape: an Error carrying the DTO.
+						reject(Object.assign(new Error(refusal.message), { dto: refusal }))
+					}, 0)
+				})
+			}
+
+			return new Promise((_resolve, reject) => {
+				waiting.push(reject)
+			})
+		})
+		cancel.mockImplementation(() => {
+			for (const reject of waiting) {
+				reject(sdkDto("Cancelled"))
+			}
+		})
+
+		await runDirectoryUpload(
+			{ ...h.deps, upload: { ...h.deps.upload, cancel }, onStorageRefusal },
+			{
+				rootParentUuid: "target",
+				dirs: ["a"],
+				files: [
+					{ file: mockBrowserFile("big.bin"), relPath: "a/big.bin" },
+					{ file: mockBrowserFile("x.txt"), relPath: "a/x.txt" }
+				]
+			}
+		)
+
+		// One cancel for the run (its files share its controls), one reaction for the run.
+		expect(cancel).toHaveBeenCalledOnce()
+		expect(onStorageRefusal).toHaveBeenCalledOnce()
+
+		const failed = useTransfersStore.getState().transfers.filter(transfer => transfer.status === "error")
+
+		expect(failed.map(transfer => transfer.name).sort()).toEqual(["a/big.bin", "a/x.txt"])
+		expect(failed.every(transfer => transfer.error?.kind === "MaxStorageReached")).toBe(true)
 	})
 
 	it("keeps a directory's run as failed, with the error, when a sub-directory under it could not be created", async () => {

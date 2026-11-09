@@ -1,12 +1,15 @@
 import { toast } from "sonner"
 import { formatBytes, resolveQuotaVerdict, type QuotaCheckDeps, type QuotaVerdict } from "@filen/shared"
 import { i18n } from "@/lib/i18n"
-import { accountQueryGet, accountQueryUpdate, fetchAccountFresh } from "@/queries/account"
+import { accountQueryGet, accountQueryUpdate, fetchAccountFresh, isAccountReadRecent } from "@/queries/account"
 
 // The fresh read also refreshes every other account consumer, unless the account was written meanwhile.
+// A cached "fits" older than this page's last recent read (a restored persisted account above all) is
+// read again, so a delete or upload made elsewhere cannot leave it trusting old figures.
 export const accountQuotaDeps: QuotaCheckDeps = {
 	cached: accountQueryGet,
-	fetchFresh: fetchAccountFresh
+	fetchFresh: fetchAccountFresh,
+	isCachedFresh: isAccountReadRecent
 }
 
 // Upload pre-flight against the cached account; see resolveQuotaVerdict for when it reads fresh.

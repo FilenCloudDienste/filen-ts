@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { QueryClient } from "@tanstack/react-query"
 import type { Dir, File as SdkFile, UserInfo } from "@filen/sdk-rs"
 import { formatBytes } from "@filen/shared"
@@ -40,7 +40,7 @@ vi.mock("@/features/drive/lib/heicUpload", async importOriginal => {
 })
 
 import { queryClient } from "@/queries/client"
-import { ACCOUNT_QUERY_KEY, markAccountStale } from "@/queries/account"
+import { ACCOUNT_QUERY_KEY, ACCOUNT_QUOTA_TRUST_MS, fetchAccount, markAccountStale } from "@/queries/account"
 import { addAccountStorageUsed, checkUploadQuota } from "@/features/drive/lib/quota"
 import { startUploads } from "@/features/drive/lib/upload"
 import { startDirectoryUpload } from "@/features/drive/lib/uploadDirectory"
@@ -89,7 +89,11 @@ function exceededMessage(needed: number, free: number): string {
 	return i18n.t("transfers:transfersQuotaExceeded", { needed: formatBytes(needed), free: formatBytes(free) })
 }
 
-beforeEach(() => {
+beforeEach(async () => {
+	// A server read this page, as the boot's account query makes: the cached figures below count as recent.
+	getUserInfo.mockResolvedValueOnce(account(0n, 0n))
+	await fetchAccount()
+	getUserInfo.mockClear()
 	queryClient.clear()
 	useTransfersStore.setState({ transfers: [] })
 	uploadFile.mockImplementation((_parent, _id, file) => Promise.resolve(sdkFile(BigInt(file.size))))
@@ -330,5 +334,49 @@ describe("startDirectoryUpload quota pre-flight", () => {
 		// Swaps the scanning toast in place rather than stacking a second one.
 		expect(toastError).toHaveBeenCalledExactlyOnceWith(exceededMessage(2_000, 1_500), { id: "scan-toast-id" })
 		expect(toastDismiss).not.toHaveBeenCalled()
+	})
+})
+
+// A persisted account restores with its old figures, and local patches (one per uploaded file) must not make
+// them look recent: only a server read does.
+describe("freshness of the cached account", () => {
+	afterEach(() => {
+		vi.useRealTimers()
+	})
+
+	function pastTrustWindow(): void {
+		vi.useFakeTimers({ toFake: ["Date"] })
+		vi.setSystemTime(Date.now() + ACCOUNT_QUOTA_TRUST_MS + 1)
+	}
+
+	it("reads once past a cached fit that is older than the trust window", async () => {
+		queryClient.setQueryData(ACCOUNT_QUERY_KEY, account(0n, 10_000n))
+		pastTrustWindow()
+		getUserInfo.mockResolvedValue(account(9_900n, 10_000n))
+
+		await expect(checkUploadQuota(1_000n)).resolves.toEqual({ status: "exceeds", neededBytes: 1_000n, freeBytes: 100n })
+		expect(getUserInfo).toHaveBeenCalledOnce()
+	})
+
+	it("is not made recent by a local storage patch", async () => {
+		queryClient.setQueryData(ACCOUNT_QUERY_KEY, account(0n, 10_000n))
+		pastTrustWindow()
+		addAccountStorageUsed(10n)
+		getUserInfo.mockResolvedValue(account(0n, 10_000n))
+
+		await expect(checkUploadQuota(1_000n)).resolves.toEqual({ status: "fits" })
+		expect(getUserInfo).toHaveBeenCalledOnce()
+
+		// The read the cache took is recent again.
+		await expect(checkUploadQuota(1_000n)).resolves.toEqual({ status: "fits" })
+		expect(getUserInfo).toHaveBeenCalledOnce()
+	})
+
+	it("never reads for nothing to store, however full or stale the cache", async () => {
+		queryClient.setQueryData(ACCOUNT_QUERY_KEY, account(10_000n, 10_000n))
+		pastTrustWindow()
+
+		await expect(checkUploadQuota(0n)).resolves.toEqual({ status: "fits" })
+		expect(getUserInfo).not.toHaveBeenCalled()
 	})
 })

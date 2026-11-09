@@ -1,6 +1,8 @@
 import type { File as SdkFile } from "@filen/sdk-rs"
 import { extensionOf } from "@/features/drive/lib/preview.logic"
-import { asErrorDTO } from "@/lib/sdk/errors"
+import type { QuotaVerdict } from "@filen/shared"
+import { asErrorDTO, plainErrorDTO } from "@/lib/sdk/errors"
+import { checkUploadQuota, quotaExceededMessage } from "@/features/drive/lib/quota"
 import { type ActionOutcome } from "@/lib/actions/outcome"
 import { narrowItem, upsertDriveItem, type DriveItem } from "@/features/drive/lib/item"
 
@@ -20,6 +22,8 @@ export interface CreateFileDeps {
 	patchListing: (parentUuid: string | null, updater: (prev: DriveItem[]) => DriveItem[]) => void
 	// An upload onto a taken name makes a new version of that file, never a new one.
 	nameTaken: (parentUuid: string | null, name: string) => Promise<boolean>
+	// The storage pre-flight; left out, the account's (checkUploadQuota). An empty file always fits.
+	checkQuota?: (neededBytes: bigint) => Promise<QuotaVerdict>
 }
 
 // "taken" leaves every file as it was; the caller asks for another name.
@@ -37,6 +41,13 @@ export async function runCreateFile(
 	data: Uint8Array,
 	mime: string
 ): Promise<CreateFileOutcome> {
+	const verdict = await (deps.checkQuota ?? checkUploadQuota)(BigInt(data.byteLength))
+
+	// Tagged as the server's refusal so callers treat both alike.
+	if (verdict.status === "exceeds") {
+		return { status: "error", dto: plainErrorDTO(quotaExceededMessage(verdict), "MaxStorageReached") }
+	}
+
 	let created: SdkFile
 	try {
 		if (await deps.nameTaken(parentUuid, name)) {

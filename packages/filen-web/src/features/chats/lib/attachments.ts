@@ -19,6 +19,7 @@ import { noop } from "@/lib/utils"
 import { getDotFilenSubdir } from "@/lib/dotFilen"
 import { markAccountStale } from "@/queries/account"
 import { addAccountStorageUsed, ensureUploadQuota } from "@/features/drive/lib/quota"
+import { isStorageRefusal, reactToStorageRefusal } from "@/features/drive/lib/upload"
 
 // Composer attachment flow: no first-class attachment message type
 // on either mobile or old-web — attachments are Filen public links pasted into the message body. A
@@ -155,6 +156,10 @@ export async function uploadAttachment(file: File, onProgress: (bytesTransferred
 		const dto = asErrorDTO(e)
 
 		settleTransferFailure(store, transferId, dto)
+
+		if (isStorageRefusal(dto)) {
+			reactToStorageRefusal()
+		}
 
 		return { status: "error", dto }
 	} finally {

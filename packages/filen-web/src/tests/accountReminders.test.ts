@@ -1,12 +1,13 @@
 // @vitest-environment jsdom
 
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { render, screen, fireEvent } from "@testing-library/react"
+import { act, render, screen, fireEvent } from "@testing-library/react"
 import { createElement } from "react"
 import "@/lib/i18n"
 import { auth as EN_AUTH } from "@/locales/en/auth"
 import { AccountReminders } from "@/features/shell/components/accountReminders"
-import { useReminderStore } from "@/features/shell/store/useReminderStore"
+import { openStorageFull, useReminderStore } from "@/features/shell/store/useReminderStore"
+import { settings as EN_SETTINGS } from "@/locales/en/settings"
 
 // Covers the wiring the e2e suite deliberately no longer exercises. src/main.tsx latches both reminders
 // closed before the first render, because a standing modal aria-hides the whole shell and made every
@@ -20,6 +21,10 @@ const { useAccountQuery, navigate } = vi.hoisted(() => ({
 }))
 
 vi.mock("@/queries/account", () => ({ useAccountQuery }))
+
+const { desktopBridge } = vi.hoisted(() => ({ desktopBridge: vi.fn<() => object | undefined>(() => undefined) }))
+
+vi.mock("@/lib/desktop", () => ({ desktopBridge }))
 vi.mock("@tanstack/react-router", () => ({ useNavigate: () => navigate }))
 
 // Read from the catalog rather than retyped: a hardcoded copy that drifts turns every queryByText
@@ -49,7 +54,7 @@ function renderReminders(): void {
 // The store lives for the page load, so a test that dismisses one reminder would otherwise decide the
 // next one's starting state.
 beforeEach(() => {
-	useReminderStore.setState({ keysDismissed: false, storageDismissed: false })
+	useReminderStore.setState({ keysDismissed: false, storageDismissed: false, storageFullRequested: false })
 })
 
 describe("AccountReminders", () => {
@@ -131,5 +136,82 @@ describe("AccountReminders", () => {
 
 		expect(screen.queryByText(KEYS_TITLE)).toBeNull()
 		expect(screen.queryByText(STORAGE_TITLE)).toBeNull()
+	})
+
+	it("treats an exact fill as over the limit, and a 0-byte quota as unknown", () => {
+		useAccountQuery.mockReturnValue(account({ storageUsed: 10n, maxStorage: 10n }))
+
+		const full = render(createElement(AccountReminders))
+
+		expect(screen.getByText(STORAGE_TITLE)).toBeDefined()
+
+		full.unmount()
+		useReminderStore.setState({ storageDismissed: false })
+		useAccountQuery.mockReturnValue(account({ storageUsed: 0n, maxStorage: 0n }))
+
+		renderReminders()
+
+		expect(screen.queryByText(STORAGE_TITLE)).toBeNull()
+	})
+})
+
+describe("the storage-full dialog on demand", () => {
+	const UPGRADE = EN_SETTINGS.settingsStorageFullUpgrade
+
+	it("opens when a refusal asks for it, even once the boot reminder was dismissed, and closes on dismiss", () => {
+		useAccountQuery.mockReturnValue(account())
+		useReminderStore.setState({ storageDismissed: true })
+
+		renderReminders()
+
+		expect(screen.queryByText(STORAGE_TITLE)).toBeNull()
+
+		act(() => {
+			openStorageFull()
+		})
+
+		expect(screen.getByText(STORAGE_TITLE)).toBeDefined()
+
+		fireEvent.click(screen.getByRole("button", { name: STORAGE_DISMISS }))
+
+		expect(screen.queryByText(STORAGE_TITLE)).toBeNull()
+		expect(useReminderStore.getState().storageFullRequested).toBe(false)
+	})
+
+	it("waits behind the keys reminder rather than stacking on it", () => {
+		useAccountQuery.mockReturnValue(account({ didExportMasterKeys: false }))
+
+		renderReminders()
+		act(() => {
+			openStorageFull()
+		})
+
+		expect(screen.queryByText(STORAGE_TITLE)).toBeNull()
+
+		fireEvent.click(screen.getByRole("button", { name: KEYS_DISMISS }))
+
+		expect(screen.getByText(STORAGE_TITLE)).toBeDefined()
+	})
+
+	it("Upgrade opens billing in the app on the web", () => {
+		useAccountQuery.mockReturnValue(account(OVER_LIMIT))
+
+		renderReminders()
+		fireEvent.click(screen.getByRole("button", { name: UPGRADE }))
+
+		expect(navigate).toHaveBeenCalledWith({ to: "/settings/billing" })
+		expect(screen.queryByText(STORAGE_TITLE)).toBeNull()
+	})
+
+	it("Upgrade opens the web app's billing in the browser on desktop", () => {
+		const open = vi.spyOn(window, "open").mockReturnValue(null)
+		desktopBridge.mockReturnValue({})
+		useAccountQuery.mockReturnValue(account(OVER_LIMIT))
+
+		renderReminders()
+		fireEvent.click(screen.getByRole("button", { name: UPGRADE }))
+
+		expect(open).toHaveBeenCalledWith("https://app.filen.io/settings/billing", "_blank", "noopener,noreferrer")
+		expect(navigate).not.toHaveBeenCalled()
 	})
 })

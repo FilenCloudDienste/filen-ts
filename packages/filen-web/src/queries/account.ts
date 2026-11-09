@@ -27,7 +27,7 @@ let readThisSession = false
 // project's node-environment unit tests cannot exercise (no DOM/React renderer — see
 // vitest.config.ts), so the fetch itself is exported and unit-tested against a mocked `sdkApi`
 // instead, mirroring how session.test.ts mocks the same module boundary.
-export async function fetchAccount(): Promise<UserInfo> {
+async function readUserInfo(): Promise<UserInfo> {
 	const info = await sdkApi.getUserInfo()
 
 	// The first authed request of the page that succeeded: the stored session works.
@@ -38,6 +38,26 @@ export async function fetchAccount(): Promise<UserInfo> {
 	readThisSession = true
 
 	return info
+}
+
+export async function fetchAccount(): Promise<UserInfo> {
+	const info = await readUserInfo()
+
+	lastServerReadAt = Date.now()
+
+	return info
+}
+
+// When the cached account last took a server read this page. Kept apart from the query's
+// dataUpdatedAt, which every local patch (one per uploaded file) moves to now.
+let lastServerReadAt: number | undefined
+
+// How long upload pre-flights answer from the cached account, local patches on top included.
+export const ACCOUNT_QUOTA_TRUST_MS = 10 * 60 * 1000
+
+// A persisted account restored at boot is never recent, however recent its stored read time.
+export function isAccountReadRecent(): boolean {
+	return lastServerReadAt !== undefined && Date.now() - lastServerReadAt < ACCOUNT_QUOTA_TRUST_MS
 }
 
 // No socket event covers the account, so a change made on another device (plan, storage used,
@@ -131,9 +151,10 @@ export function accountQueryUpdate(updater: (prev: UserInfo) => UserInfo, option
 }
 
 async function readAccountFresh(writes: number): Promise<UserInfo> {
-	const info = await fetchAccount()
+	const info = await readUserInfo()
 
 	if (accountWrites === writes) {
+		lastServerReadAt = Date.now()
 		queryClient.setQueryData(ACCOUNT_QUERY_KEY, info)
 	}
 

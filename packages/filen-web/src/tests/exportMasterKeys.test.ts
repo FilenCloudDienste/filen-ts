@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest"
+import { isStorageOverLimit } from "@filen/shared"
 import {
 	buildMasterKeysFilename,
 	shouldShowExportReminder,
-	isStorageOverLimit,
 	selectActiveReminder
 } from "@/features/settings/components/security/exportMasterKeys.logic"
 
@@ -43,17 +43,21 @@ describe("shouldShowExportReminder", () => {
 	})
 })
 
-describe("isStorageOverLimit", () => {
-	it("is true only when used strictly exceeds max (bigint)", () => {
-		expect(isStorageOverLimit(11n, 10n)).toBe(true)
-		expect(isStorageOverLimit(10n, 10n)).toBe(false)
-		expect(isStorageOverLimit(9n, 10n)).toBe(false)
+describe("isStorageOverLimit (shared)", () => {
+	it("is over the limit once used reaches the quota", () => {
+		expect(isStorageOverLimit({ storageUsed: 11n, maxStorage: 10n })).toBe(true)
+		expect(isStorageOverLimit({ storageUsed: 10n, maxStorage: 10n })).toBe(true)
+		expect(isStorageOverLimit({ storageUsed: 9n, maxStorage: 10n })).toBe(false)
+	})
+
+	it("is never over an unresolvable 0-byte quota", () => {
+		expect(isStorageOverLimit({ storageUsed: 0n, maxStorage: 0n })).toBe(false)
 	})
 
 	it("stays exact past Number's safe-integer range", () => {
 		const max = 9_007_199_254_740_993n // Number.MAX_SAFE_INTEGER + 2
-		expect(isStorageOverLimit(max + 1n, max)).toBe(true)
-		expect(isStorageOverLimit(max, max)).toBe(false)
+		expect(isStorageOverLimit({ storageUsed: max, maxStorage: max })).toBe(true)
+		expect(isStorageOverLimit({ storageUsed: max - 1n, maxStorage: max })).toBe(false)
 	})
 })
 

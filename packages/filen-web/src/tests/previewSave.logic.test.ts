@@ -222,8 +222,9 @@ describe("isUnresolvableParentError", () => {
 function makeHarness() {
 	const uploadFileBytes = vi.fn<(parentUuid: string | null, data: Uint8Array, name: string, mime: string) => Promise<SdkFile>>()
 	const patchListing = vi.fn<(parentUuid: string | null, updater: (items: DriveItem[]) => DriveItem[]) => void>()
-	const deps: PreviewSaveDeps = { uploadFileBytes, patchListing, rootUuid: ROOT_UUID }
-	return { deps, uploadFileBytes, patchListing }
+	const checkQuota = vi.fn<NonNullable<PreviewSaveDeps["checkQuota"]>>(() => Promise.resolve({ status: "fits" }))
+	const deps: PreviewSaveDeps = { uploadFileBytes, patchListing, checkQuota, rootUuid: ROOT_UUID }
+	return { deps, uploadFileBytes, patchListing, checkQuota }
 }
 
 describe("canEditImage", () => {
@@ -426,5 +427,84 @@ describe("runPreviewSave (injected deps, no worker or query client)", () => {
 			}
 		})
 		expect(h.patchListing).not.toHaveBeenCalled()
+	})
+})
+
+describe("runPreviewSave storage pre-flight", () => {
+	const exceeds = { status: "exceeds", neededBytes: 5n, freeBytes: 1n } as const
+
+	it("checks the encoded size of a text save and refuses it before any upload, tagged as the server's refusal", async () => {
+		const h = makeHarness()
+		h.checkQuota.mockResolvedValue(exceeds)
+
+		const outcome = await runPreviewSave(h.deps, { item: fileItem(), content: "héllo" })
+
+		expect(h.checkQuota).toHaveBeenCalledExactlyOnceWith(6n)
+		expect(h.uploadFileBytes).not.toHaveBeenCalled()
+		expect(h.patchListing).not.toHaveBeenCalled()
+		expect(outcome).toMatchObject({ status: "error", dto: { species: "plain", kind: "MaxStorageReached" } })
+	})
+
+	it("uploads once the check passes", async () => {
+		const h = makeHarness()
+		h.uploadFileBytes.mockResolvedValue(mockFile())
+
+		await runPreviewSave(h.deps, { item: fileItem(), content: new Uint8Array(3) })
+
+		expect(h.checkQuota).toHaveBeenCalledExactlyOnceWith(3n)
+		expect(h.uploadFileBytes).toHaveBeenCalledOnce()
+	})
+
+	it("sizes a Blob by its size and an Orientation rewrite by the file's own", async () => {
+		const checkQuota = vi.fn<NonNullable<PreviewSaveDeps["checkQuota"]>>(() => Promise.resolve(exceeds))
+		const uploadFileBlob = vi.fn<NonNullable<PreviewSaveDeps["uploadFileBlob"]>>()
+		const rewriteOrientation = vi.fn<NonNullable<PreviewSaveDeps["rewriteOrientation"]>>()
+		const deps: PreviewSaveDeps = {
+			uploadFileBytes: vi.fn(),
+			uploadFileBlob,
+			rewriteOrientation,
+			patchListing: vi.fn(),
+			checkQuota,
+			rootUuid: ROOT_UUID
+		}
+		const item = fileItem({ size: 4_096n, meta: byMime("photo.jpg", "image/jpeg") })
+
+		await runPreviewSave(deps, { item, content: { blob: new Blob([new Uint8Array(7)]) } })
+		await runPreviewSave(deps, { item, content: { orientation: 6 } })
+
+		expect(checkQuota.mock.calls).toEqual([[7n], [4_096n]])
+		expect(uploadFileBlob).not.toHaveBeenCalled()
+		expect(rewriteOrientation).not.toHaveBeenCalled()
+	})
+
+	it("closes a refused port save's channel, so the writer on its other end never blocks", async () => {
+		const h = makeHarness()
+		const uploadFileFromPort = vi.fn<NonNullable<PreviewSaveDeps["uploadFileFromPort"]>>()
+		const channel = new MessageChannel()
+		const close = vi.spyOn(channel.port2, "close")
+		h.checkQuota.mockResolvedValue(exceeds)
+
+		const outcome = await runPreviewSave(
+			{ ...h.deps, uploadFileFromPort },
+			{ item: fileItem(), content: { port: channel.port2, size: 9 } }
+		)
+
+		expect(h.checkQuota).toHaveBeenCalledExactlyOnceWith(9n)
+		expect(close).toHaveBeenCalledOnce()
+		expect(uploadFileFromPort).not.toHaveBeenCalled()
+		expect(outcome.status).toBe("error")
+		channel.port1.close()
+	})
+
+	it("leaves a port save of unknown size to the server", async () => {
+		const h = makeHarness()
+		const uploadFileFromPort = vi.fn<NonNullable<PreviewSaveDeps["uploadFileFromPort"]>>(() => Promise.resolve(mockFile()))
+		const channel = new MessageChannel()
+
+		await runPreviewSave({ ...h.deps, uploadFileFromPort }, { item: fileItem(), content: { port: channel.port2 } })
+
+		expect(h.checkQuota).not.toHaveBeenCalled()
+		expect(uploadFileFromPort).toHaveBeenCalledOnce()
+		channel.port1.close()
 	})
 })

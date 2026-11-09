@@ -24,6 +24,13 @@ export async function readFreshAccount(account: QuotaCheckDeps): Promise<Storage
 	}
 }
 
+// What a job starts from when the cached account is not from a recent read: one fresh read, the cached
+// figure if that fails. A refusal against a fresh figure is already the answer, so callers skip the
+// re-read they make after a refusal against a cached one.
+export async function readStartingAccount(account: QuotaCheckDeps): Promise<StorageCounters | undefined> {
+	return (await readFreshAccount(account)) ?? account.cached()
+}
+
 // Settles a job the user stopped as cancelled; never shown.
 export const STOPPED: ErrorDTO = { species: "sdk", kind: "Cancelled", message: "", label: "" }
 

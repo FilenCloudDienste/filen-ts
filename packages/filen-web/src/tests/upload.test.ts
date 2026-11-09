@@ -62,6 +62,7 @@ import {
 } from "@/features/drive/lib/upload"
 import { warmUploadThumbnail } from "@/features/drive/lib/thumbGenerators"
 import { useTransfersStore } from "@/features/transfers/store/useTransfersStore"
+import { useReminderStore } from "@/features/shell/store/useReminderStore"
 import { queryClient } from "@/queries/client"
 import { ACCOUNT_QUERY_KEY } from "@/queries/account"
 import { addAccountStorageUsed } from "@/features/drive/lib/quota"
@@ -495,6 +496,71 @@ describe("startUploads (real runUpload + defaultUploadDeps, mocked sdk client/qu
 })
 
 // The run the target listing shows while the pick uploads (pendingUploads.logic.ts).
+describe("startUploads — the server refuses a file for storage", () => {
+	beforeEach(() => {
+		useReminderStore.setState({ storageFullRequested: false })
+	})
+
+	it("stops the rest of the batch, keeps every file not uploaded as an error row, reads the account once and raises the storage-full dialog", async () => {
+		const refusal = sdkDto("MaxStorageReached")
+		const pending = new Map<string, (dto: ErrorDTO) => void>()
+		let preflightReads: number | undefined
+
+		uploadFile.mockImplementation((_parent, id, file) => {
+			preflightReads ??= getUserInfo.mock.calls.length
+
+			if (file.name === "a.txt") {
+				return Promise.resolve(mockSdkFile())
+			}
+
+			if (file.name === "big.bin") {
+				return new Promise((_resolve, reject) => {
+					// Refused once the others are under way.
+					setTimeout(() => {
+						// The worker boundary's error shape: an Error carrying the DTO.
+						reject(Object.assign(new Error(refusal.message), { dto: refusal }))
+					}, 0)
+				})
+			}
+
+			return new Promise((_resolve, reject) => {
+				pending.set(id, reject)
+			})
+		})
+		cancelTransfer.mockImplementation((id: string) => {
+			pending.get(id)?.(sdkDto("Cancelled"))
+		})
+		getUserInfo.mockResolvedValue({ storageUsed: 1n << 40n, maxStorage: 1n << 40n })
+
+		await startUploads([mockBrowserFile("a.txt"), mockBrowserFile("big.bin"), mockBrowserFile("c.txt"), mockBrowserFile("d.txt")], null)
+
+		expect(cancelTransfer).toHaveBeenCalledTimes(2)
+
+		const byName = new Map(useTransfersStore.getState().transfers.map(transfer => [transfer.name, transfer]))
+
+		expect(byName.get("a.txt")?.status).toBe("done")
+
+		for (const name of ["big.bin", "c.txt", "d.txt"]) {
+			expect(byName.get(name)).toMatchObject({ status: "error", error: refusal })
+		}
+
+		// One read after the batch, whatever the number of refused files.
+		await vi.waitFor(() => {
+			expect(useReminderStore.getState().storageFullRequested).toBe(true)
+		})
+		expect(getUserInfo.mock.calls.length - (preflightReads ?? 0)).toBe(1)
+	})
+
+	it("leaves the batch alone for any other failure", async () => {
+		uploadFile.mockRejectedValueOnce(sdkDto("Server")).mockResolvedValue(mockSdkFile())
+
+		await startUploads([mockBrowserFile("a.txt"), mockBrowserFile("b.txt")], null)
+
+		expect(cancelTransfer).not.toHaveBeenCalled()
+		expect(useReminderStore.getState().storageFullRequested).toBe(false)
+	})
+})
+
 describe("startUploads — listing run", () => {
 	it("tags every file with one run keyed to the listing, the root named null however the upload named it", async () => {
 		const rootDirUuid = testUuid("root")

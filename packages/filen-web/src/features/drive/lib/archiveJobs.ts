@@ -47,6 +47,7 @@ import {
 	patchJobCreatedItem,
 	pruneSettledDriveJobs,
 	readFreshAccount,
+	readStartingAccount,
 	STOPPED,
 	type JobSettledEffects
 } from "@/features/drive/lib/driveJobs"
@@ -431,11 +432,18 @@ export async function runCompressJob(deps: RunArchiveDeps, request: CompressJobR
 
 	const cancelRequested = (): boolean => deps.compressJobs.get(id)?.cancelRequest != null
 	const initial = deps.compressJobs.get(id)
-	let maxBytes = copyMaxBytes(deps.account.cached())
+	const cachedFresh = deps.account.isCachedFresh?.() ?? true
+	let maxBytes = copyMaxBytes(cachedFresh ? deps.account.cached() : await readStartingAccount(deps.account))
 	let settlement = await attemptCompress(deps, request, maxBytes, onEvent)
 
 	// A bare tar states its size up front; a refusal of it reads the account once fresh, as a copy's does.
-	if ("report" in settlement && isCompressPreflightRefusal(settlement.report) && maxBytes !== undefined && !cancelRequested()) {
+	if (
+		cachedFresh &&
+		"report" in settlement &&
+		isCompressPreflightRefusal(settlement.report) &&
+		maxBytes !== undefined &&
+		!cancelRequested()
+	) {
 		const freshMaxBytes = copyMaxBytes(await readFreshAccount(deps.account))
 
 		if (freshMaxBytes !== undefined && freshMaxBytes > maxBytes && !cancelRequested()) {
@@ -743,12 +751,13 @@ export async function runExtractJob(deps: RunArchiveDeps, request: ExtractJobReq
 	}
 
 	const cancelRequested = (): boolean => deps.extractJobs.get(id)?.cancelRequest != null
-	let maxBytes = copyMaxBytes(deps.account.cached())
+	const cachedFresh = deps.account.isCachedFresh?.() ?? true
+	let maxBytes = copyMaxBytes(cachedFresh ? deps.account.cached() : await readStartingAccount(deps.account))
 	// What the last call could write: the job's limit less what its earlier calls wrote.
 	let callMaxBytes = maxBytes
 	const remainingMaxBytes = (): number | undefined =>
 		maxBytes === undefined || earlierCounts === undefined ? maxBytes : Math.max(0, maxBytes - earlierCounts.bytesDone)
-	let freshRead = false
+	let freshRead = !cachedFresh
 	let report: ExtractJobReport | undefined
 	let rejection: ErrorDTO | undefined
 	let refusedUpFront = false

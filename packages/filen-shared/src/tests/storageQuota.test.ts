@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest"
 import {
 	deriveStorageBreakdown,
 	freeBytes,
+	isStorageOverLimit,
 	quotaVerdict,
 	resolveQuotaVerdict,
 	storageSummary,
@@ -128,6 +129,19 @@ describe("sumBytes", () => {
 	})
 })
 
+describe("isStorageOverLimit", () => {
+	it("is over the limit once used reaches the quota, as the server refuses", () => {
+		expect(isStorageOverLimit(counters(99n, 100n))).toBe(false)
+		expect(isStorageOverLimit(counters(100n, 100n))).toBe(true)
+		expect(isStorageOverLimit(counters(150n, 100n))).toBe(true)
+	})
+
+	it("is never over an unresolvable quota", () => {
+		expect(isStorageOverLimit(counters(0n, 0n))).toBe(false)
+		expect(isStorageOverLimit(counters(5n, 0n))).toBe(false)
+	})
+})
+
 describe("resolveQuotaVerdict", () => {
 	function harness(cached: StorageCounters | undefined, fresh: () => Promise<StorageCounters>, isCachedFresh?: () => boolean) {
 		const fetchFresh = vi.fn(fresh)
@@ -174,6 +188,16 @@ describe("resolveQuotaVerdict", () => {
 		const h = harness(counters(95n, 100n), () => Promise.reject(new Error("offline")))
 
 		expect(await resolveQuotaVerdict(h.deps, 50n)).toEqual({ status: "unknown" })
+	})
+
+	it("lets nothing-to-store through without a read, even on a full or stale cache", async () => {
+		const full = harness(counters(100n, 100n), () => Promise.reject(new Error("unexpected read")), () => false)
+		const none = harness(undefined, () => Promise.reject(new Error("unexpected read")))
+
+		expect(await resolveQuotaVerdict(full.deps, 0n)).toEqual({ status: "fits" })
+		expect(await resolveQuotaVerdict(none.deps, 0n)).toEqual({ status: "fits" })
+		expect(full.fetchFresh).not.toHaveBeenCalled()
+		expect(none.fetchFresh).not.toHaveBeenCalled()
 	})
 
 	it("does not block when the fresh read returns an unresolvable quota", async () => {

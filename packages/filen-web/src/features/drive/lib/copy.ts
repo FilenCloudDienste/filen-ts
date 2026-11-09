@@ -29,6 +29,7 @@ import {
 	patchJobCreatedItem,
 	pruneSettledDriveJobs,
 	readFreshAccount,
+	readStartingAccount,
 	STOPPED
 } from "@/features/drive/lib/driveJobs"
 import {
@@ -316,12 +317,19 @@ export async function runCopyJob(deps: RunCopyDeps, request: CopyJobRequest): Pr
 	}
 
 	const cancelRequested = (): boolean => deps.jobs.get(id)?.cancelRequest != null
-	let maxBytes = copyMaxBytes(deps.account.cached())
+	const cachedFresh = deps.account.isCachedFresh?.() ?? true
+	let maxBytes = copyMaxBytes(cachedFresh ? deps.account.cached() : await readStartingAccount(deps.account))
 	let settlement = await attempt(deps, id, source, maxBytes, onEvent)
 
 	// A cached figure can predate a delete made elsewhere, so a pre-flight refusal reads it once fresh
 	// and runs again only if that frees enough to matter to the SDK's own check.
-	if ("report" in settlement && isQuotaPreflightFailure(settlement.report) && maxBytes !== undefined && !cancelRequested()) {
+	if (
+		cachedFresh &&
+		"report" in settlement &&
+		isQuotaPreflightFailure(settlement.report) &&
+		maxBytes !== undefined &&
+		!cancelRequested()
+	) {
 		const freshMaxBytes = copyMaxBytes(await readFreshAccount(deps.account))
 
 		if (freshMaxBytes !== undefined && freshMaxBytes > maxBytes && !cancelRequested()) {

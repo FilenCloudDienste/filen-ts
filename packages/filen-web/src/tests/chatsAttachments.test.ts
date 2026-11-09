@@ -51,7 +51,7 @@ import { useTransfersStore } from "@/features/transfers/store/useTransfersStore"
 import { noop } from "@/lib/utils"
 import { formatBytes } from "@filen/shared"
 import { queryClient } from "@/queries/client"
-import { ACCOUNT_QUERY_KEY } from "@/queries/account"
+import { ACCOUNT_QUERY_KEY, fetchAccount } from "@/queries/account"
 import { driveListingQueryKey } from "@/features/drive/queries/drive"
 import { testUuid } from "@/tests/support/uuid"
 
@@ -121,8 +121,12 @@ function mockDirPublicLinkRW(overrides: Partial<DirPublicLinkRW> = {}): DirPubli
 	}
 }
 
-beforeEach(() => {
+beforeEach(async () => {
 	vi.clearAllMocks()
+	// A server read this page, as the boot's account query makes: the cached figures below count as recent.
+	getUserInfo.mockResolvedValueOnce({} as UserInfo)
+	await fetchAccount()
+	getUserInfo.mockClear()
 	useTransfersStore.setState({ transfers: [] })
 	// The `.filen` resolver memoizes the uploads-directory uuid for the tab's lifetime, so without this the
 	// directory-creation tests can only ever pass in the one order where they run before the memo is

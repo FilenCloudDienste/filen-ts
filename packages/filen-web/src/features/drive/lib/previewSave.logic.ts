@@ -2,7 +2,7 @@ import * as Comlink from "comlink"
 import type { File as SdkFile } from "@filen/sdk-rs"
 import type { DriveFileRef, PortLike, SaveResult } from "@filen/office/dom/presentation"
 import { savePortAnnounced } from "@filen/office/dom/presentation/savePort"
-import { driveItemName } from "@filen/shared"
+import { driveItemName, type QuotaVerdict } from "@filen/shared"
 import { asDirectoryOrFile, narrowItem, upsertDriveItem, type DriveItem } from "@/features/drive/lib/item"
 import { extensionOf, previewType, type PreviewCategory } from "@/features/drive/lib/preview.logic"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
@@ -14,6 +14,7 @@ import { captureTimestamp } from "@/features/photos/lib/captureSort"
 import { runOp, type ActionOutcome } from "@/lib/actions/outcome"
 import type { PreviewKey } from "@/lib/i18n"
 import { asErrorDTO, plainErrorDTO, PARENT_NOT_FOUND_PREFIX, type ErrorDTO } from "@/lib/sdk/errors"
+import { checkUploadQuota, quotaExceededMessage } from "@/features/drive/lib/quota"
 
 // Editable-preview eligibility gate (mobile parity): only a decryptable text/code/markdown file, spreadsheet, Word document, deck or image
 // inside the navigable "drive" variant — never trash/recents/favorites/sharedIn/sharedOut (no
@@ -151,6 +152,9 @@ export interface PreviewSaveDeps {
 	// `writeNow`: the listing reaches disk at once, not after its patches pause (a reload right after a save
 	// would otherwise restore the row naming the version it replaced).
 	patchListing: (parentUuid: string | null, updater: (items: DriveItem[]) => DriveItem[], options: { readonly writeNow: boolean }) => void
+	// The storage pre-flight; left out, the account's (checkUploadQuota). Every save, copy and converted copy runs
+	// through here, so this is the one place it is made.
+	checkQuota?: (neededBytes: bigint) => Promise<QuotaVerdict>
 	// The account's own root uuid — a real Dir.parent is never null (see sdk.worker.ts's own
 	// ListDirectoryTarget comment), so a root-level item's parent must collapse back to the `null`
 	// sentinel before it can resolve worker-side (resolveNormalDirParent) or key the right listing.
@@ -208,14 +212,30 @@ export async function runPreviewSave(
 	const name = asNewFile ?? driveItemName(base)
 	const mime = args.mime ?? base.data.decryptedMeta?.mime ?? ""
 	const options: UploadTimes = times === undefined ? {} : { ...times, noExifOverride: true }
-	// Root-sentinel collapse inlined rather than importing normalizeParentUuid (queries/drive.ts): the
-	// .logic.ts split keeps this file framework-free (no queryClient import anywhere in it, direct or
-	// transitive) — the one-line uuid compare isn't worth crossing that boundary for.
+	// Root-sentinel collapse inlined: the one-line uuid compare is all normalizeParentUuid (queries/drive.ts) does.
 	const targetParent = base.data.parent === deps.rootUuid ? null : base.data.parent
+
+	// Encoded once: the pre-flight and the upload both need the bytes.
+	const body = typeof content === "string" ? new TextEncoder().encode(content) : content
+	const needed = neededBytes(body, base.data)
+
+	if (needed !== null) {
+		const verdict = await (deps.checkQuota ?? checkUploadQuota)(needed)
+
+		if (verdict.status === "exceeds") {
+			// The writer on the port's other end would otherwise block on a reader that never comes.
+			if (!(body instanceof Uint8Array) && "port" in body) {
+				body.port.close()
+			}
+
+			// Tagged as the server's refusal so callers treat both alike; the buffer stays dirty for a retry.
+			return { status: "error", dto: plainErrorDTO(quotaExceededMessage(verdict), "MaxStorageReached") }
+		}
+	}
 
 	let uploaded: SdkFile
 	try {
-		uploaded = await runOp(upload(deps, base.data, targetParent, content, name, mime, options))
+		uploaded = await runOp(upload(deps, base.data, targetParent, body, name, mime, options))
 	} catch (e) {
 		return { status: "error", dto: asErrorDTO(e) }
 	}
@@ -232,19 +252,35 @@ export async function runPreviewSave(
 	return { status: "success", item: newItem }
 }
 
+// What a save adds to the account: the bytes, the Blob, or for an Orientation rewrite the file itself (only its head
+// changes). Null when not known up front (a port without a stated size): the server decides then.
+function neededBytes(content: Exclude<PreviewSaveContent, string>, file: SdkFile): bigint | null {
+	if (content instanceof Uint8Array) {
+		return BigInt(content.byteLength)
+	}
+
+	if ("blob" in content) {
+		return BigInt(content.blob.size)
+	}
+
+	if ("orientation" in content) {
+		return file.size
+	}
+
+	return content.size === undefined ? null : BigInt(content.size)
+}
+
 function upload(
 	deps: PreviewSaveDeps,
 	file: SdkFile,
 	parent: string | null,
-	content: PreviewSaveContent,
+	content: Exclude<PreviewSaveContent, string>,
 	name: string,
 	mime: string,
 	options: UploadTimes
 ): Promise<SdkFile> {
-	if (typeof content === "string" || content instanceof Uint8Array) {
-		const bytes = typeof content === "string" ? new TextEncoder().encode(content) : content
-
-		return deps.uploadFileBytes(parent, Comlink.transfer(bytes, [bytes.buffer]), name, mime, options)
+	if (content instanceof Uint8Array) {
+		return deps.uploadFileBytes(parent, Comlink.transfer(content, [content.buffer]), name, mime, options)
 	}
 
 	if ("blob" in content) {

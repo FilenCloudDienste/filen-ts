@@ -17,7 +17,8 @@ import {
 	normalizeParentUuid,
 	queueListingCreate
 } from "@/features/drive/queries/drive"
-import { accountQueryGet, markAccountStale } from "@/queries/account"
+import { accountQueryGet, fetchAccountFresh, markAccountStale } from "@/queries/account"
+import { openStorageFull } from "@/features/shell/store/useReminderStore"
 import {
 	useTransfersStore,
 	type Transfer,
@@ -66,6 +67,23 @@ export interface RunUploadDeps {
 
 export type UploadOutcome = VoidActionOutcome | { status: "cancelled" }
 
+// One batch's reaction to the server refusing a file for storage. The server judges each file against a
+// storage-used figure that lags behind parallel uploads, so once one is refused the rest are stopped too:
+// each file still uploading or waiting ends as an error row carrying that refusal (never removed like a
+// cancel), so the list of what did not upload survives.
+export interface QuotaStop {
+	refusal: ErrorDTO | undefined
+	readonly inFlight: Set<string>
+}
+
+export function newQuotaStop(): QuotaStop {
+	return { refusal: undefined, inFlight: new Set() }
+}
+
+export function isStorageRefusal(dto: ErrorDTO): boolean {
+	return dto.kind === "MaxStorageReached"
+}
+
 // A plain upload's row, as runUpload adds it; startUploads adds a whole selection's in one write.
 export function uploadRow(file: File, parentUuid: string | null, batch: UploadBatchRef | undefined): Omit<Transfer, "paused"> {
 	return {
@@ -101,6 +119,8 @@ export async function runUpload(
 		counted?: number
 		name?: string
 		row?: Omit<Transfer, "paused">
+		// Plain files of one batch share it (startUploads).
+		quotaStop?: QuotaStop
 	}
 ): Promise<UploadOutcome> {
 	const { parentUuid, file, batch } = args
@@ -116,14 +136,29 @@ export async function runUpload(
 		deps.store.add(row, args.counted)
 	}
 
+	const stop = args.quotaStop
+
+	// Refused before it started: nothing to upload against a full account.
+	if (stop?.refusal !== undefined) {
+		deps.store.settle(id, "error", stop.refusal)
+
+		return { status: "error", dto: stop.refusal }
+	}
+
+	stop?.inFlight.add(id)
+
 	let uploaded: SdkFile
 	try {
 		uploaded = await runOp(deps.upload(parentUuid, id, file))
 	} catch (e) {
-		const dto = asErrorDTO(e)
+		stop?.inFlight.delete(id)
 
-		return settleTransferFailure(deps.store, id, dto) ? { status: "cancelled" } : { status: "error", dto }
+		const failure = quotaStopFailure(deps, stop, asErrorDTO(e))
+
+		return settleTransferFailure(deps.store, id, failure) ? { status: "cancelled" } : { status: "error", dto: failure }
 	}
+
+	stop?.inFlight.delete(id)
 
 	deps.store.settle(id, "done")
 	deps.store.setItem(id, narrowItem(uploaded))
@@ -132,20 +167,52 @@ export async function runUpload(
 	return { status: "success" }
 }
 
+// The first storage refusal stops the batch's other files (their aborts reject as Cancelled, read back here
+// as that refusal); any other failure is the file's own.
+function quotaStopFailure(deps: RunUploadDeps, stop: QuotaStop | undefined, dto: ErrorDTO): ErrorDTO {
+	if (stop === undefined) {
+		return dto
+	}
+
+	if (stop.refusal !== undefined && dto.kind === "Cancelled") {
+		return stop.refusal
+	}
+
+	if (stop.refusal === undefined && isStorageRefusal(dto)) {
+		stop.refusal = dto
+
+		for (const other of stop.inFlight) {
+			deps.cancel?.(other)
+		}
+	}
+
+	return dto
+}
+
+// A run's files share its stop and pause controls, so a storage stop cancels the run by its id.
 async function runRunFileUpload(
 	deps: RunUploadDeps,
-	args: { parentUuid: string | null; file: File; batch: UploadBatchRef; counted?: number; name?: string }
+	args: { parentUuid: string | null; file: File; batch: UploadBatchRef; counted?: number; name?: string; quotaStop?: QuotaStop }
 ): Promise<UploadOutcome> {
 	const { parentUuid, file, batch } = args
 	const id = crypto.randomUUID()
+	const stop = args.quotaStop
 
 	deps.store.startRunFile({ id, batchId: batch.id, size: file.size, ...(args.counted === undefined ? {} : { counted: args.counted }) })
+
+	if (stop?.refusal !== undefined) {
+		deps.store.settleRunFile(id, "error", stop.refusal, { name: args.name ?? file.name, parentUuid })
+
+		return { status: "error", dto: stop.refusal }
+	}
+
+	stop?.inFlight.add(batch.id)
 
 	let uploaded: SdkFile
 	try {
 		uploaded = await runOp(deps.upload(parentUuid, id, file, batch.id))
 	} catch (e) {
-		const dto = asErrorDTO(e)
+		const dto = quotaStopFailure(deps, stop, asErrorDTO(e))
 
 		if (dto.kind === "Cancelled") {
 			deps.store.settleRunFile(id, "cancelled")
@@ -354,6 +421,7 @@ export async function startUploads(files: File[], parentUuid: string | null): Pr
 	toastTransferStarted({ direction: "upload", name: files[0]?.name ?? "", count: files.length, noun: "files" })
 
 	const rows = files.map(file => (convertHeic && isHeicUploadCandidate(file) ? undefined : uploadRow(file, parentUuid, batch)))
+	const quotaStop = newQuotaStop()
 
 	useTransfersStore.getState().addMany(rows.filter(row => row !== undefined))
 
@@ -362,7 +430,7 @@ export async function startUploads(files: File[], parentUuid: string | null): Pr
 			const row = rows[index]
 
 			if (row !== undefined) {
-				return await runUpload(defaultUploadDeps, { parentUuid, file, batch, row })
+				return await runUpload(defaultUploadDeps, { parentUuid, file, batch, row, quotaStop })
 			}
 
 			const prepared = await maybeConvertHeicUpload(defaultHeicUploadDeps.convert, file, convertHeic)
@@ -372,7 +440,7 @@ export async function startUploads(files: File[], parentUuid: string | null): Pr
 				return { status: "cancelled" }
 			}
 
-			return await runUpload(defaultUploadDeps, { parentUuid, file: prepared, batch, counted: file.size })
+			return await runUpload(defaultUploadDeps, { parentUuid, file: prepared, batch, counted: file.size, quotaStop })
 		})
 	)
 
@@ -388,4 +456,15 @@ export async function startUploads(files: File[], parentUuid: string | null): Pr
 		complete: "transfers:transfersUploadSummaryComplete",
 		withFailures: "transfers:transfersUploadSummaryCompleteWithFailures"
 	})
+
+	if (quotaStop.refusal !== undefined) {
+		reactToStorageRefusal()
+	}
+}
+
+// Once per batch or run the server refused for storage, after it ended: one account read (the figure the
+// server answered from lags, so a read per refused file would only repeat it) and the storage-full dialog.
+export function reactToStorageRefusal(): void {
+	fetchAccountFresh().catch(() => undefined)
+	openStorageFull()
 }

@@ -9,6 +9,8 @@ import { toastSummary } from "@/lib/actions/bulkToast"
 import { sdkApi } from "@/lib/sdk/client"
 import { runCreateDirectory, type CreateDirectoryDeps } from "@/features/drive/lib/createDirectory"
 import {
+	newQuotaStop,
+	reactToStorageRefusal,
 	runUpload,
 	defaultUploadDeps,
 	discardUploadRuns,
@@ -296,6 +298,8 @@ export interface RunDirectoryUploadDeps {
 	// Optional for the same DI reason: holds the directory creates' listing patches, which land together on
 	// the batching timer instead of one listing write per directory.
 	batchPatches?: <T>(run: () => Promise<T>) => Promise<T>
+	// Optional for the same DI reason: what follows a run the server refused for storage (reactToStorageRefusal).
+	onStorageRefusal?: () => void
 }
 
 // The top-level segment of a picked path: the directory a file or sub-directory lands under in the
@@ -467,6 +471,7 @@ export async function runDirectoryUpload(
 
 	// Files fan out in parallel — no JS queue/semaphore, same rationale as startUploads: the SDK's own
 	// Tower layer throttles real upload concurrency, never reimplemented here.
+	const quotaStop = newQuotaStop()
 	const [fileOutcomes] = await Promise.all([
 		Promise.all(
 			files.map(async ({ file, relPath }): Promise<UploadOutcome["status"]> => {
@@ -498,6 +503,7 @@ export async function runDirectoryUpload(
 						file: prepared,
 						batch: run,
 						name: relPath,
+						quotaStop,
 						...(run === undefined ? {} : { counted: file.size })
 					})
 				).status
@@ -527,6 +533,12 @@ export async function runDirectoryUpload(
 		complete: "transfers:transfersDirectoryUploadSummaryComplete",
 		withFailures: "transfers:transfersDirectoryUploadSummaryCompleteWithFailures"
 	})
+
+	if (quotaStop.refusal !== undefined) {
+		const react = deps.onStorageRefusal ?? reactToStorageRefusal
+
+		react()
+	}
 }
 
 // ---------------------------------------------------------------------------

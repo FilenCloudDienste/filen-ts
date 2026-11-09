@@ -29,7 +29,7 @@ vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn(), custom: vi
 
 import { queryClient } from "@/queries/client"
 import { queryClientWrapper } from "@/tests/testQueryClient"
-import { ACCOUNT_QUERY_KEY } from "@/queries/account"
+import { ACCOUNT_QUERY_KEY, fetchAccount } from "@/queries/account"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { discardListingPatches, driveListingQueryKey, flushListingCreates, useDirectoryListingQuery } from "@/features/drive/queries/drive"
 import { handleDriveEvent } from "@/features/drive/lib/socketHandlers"
@@ -124,7 +124,11 @@ function copyEchoes(): void {
 	}
 }
 
-beforeEach(() => {
+beforeEach(async () => {
+	// A server read this page, as the boot's account query makes: the cached figures below count as recent.
+	getUserInfo.mockResolvedValueOnce({} as UserInfo)
+	await fetchAccount()
+	getUserInfo.mockClear()
 	queryClient.clear()
 	discardListingPatches()
 	socketAuthenticated()

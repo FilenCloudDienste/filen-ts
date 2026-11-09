@@ -36,8 +36,9 @@ function makeHarness() {
 	const uploadFileBytes = vi.fn<(parentUuid: string | null, data: Uint8Array, name: string, mime: string) => Promise<SdkFile>>()
 	const patchListing = vi.fn<(parentUuid: string | null, updater: (prev: DriveItem[]) => DriveItem[]) => void>()
 	const nameTaken = vi.fn<(parentUuid: string | null, name: string) => Promise<boolean>>(() => Promise.resolve(false))
-	const deps: CreateFileDeps = { uploadFileBytes, patchListing, nameTaken }
-	return { deps, uploadFileBytes, patchListing, nameTaken }
+	const checkQuota = vi.fn<NonNullable<CreateFileDeps["checkQuota"]>>(() => Promise.resolve({ status: "fits" }))
+	const deps: CreateFileDeps = { uploadFileBytes, patchListing, nameTaken, checkQuota }
+	return { deps, uploadFileBytes, patchListing, nameTaken, checkQuota }
 }
 
 beforeEach(() => {
@@ -172,5 +173,29 @@ describe("runCreateFile", () => {
 		expect(outcome.status).toBe("success")
 		expect(h.nameTaken).toHaveBeenCalledWith(null, "Untitled document.docx")
 		expect(h.uploadFileBytes).toHaveBeenCalledWith(null, bytes, "Untitled document.docx", "application/x-test")
+	})
+})
+
+describe("runCreateFile storage pre-flight", () => {
+	it("refuses a file that does not fit before naming or uploading it, tagged as the server's refusal", async () => {
+		const h = makeHarness()
+		h.checkQuota.mockResolvedValue({ status: "exceeds", neededBytes: 4n, freeBytes: 0n })
+
+		const outcome = await runCreateFile(h.deps, null, "Untitled document.docx", new Uint8Array(4), "application/x-test")
+
+		expect(h.checkQuota).toHaveBeenCalledExactlyOnceWith(4n)
+		expect(h.nameTaken).not.toHaveBeenCalled()
+		expect(h.uploadFileBytes).not.toHaveBeenCalled()
+		expect(outcome).toMatchObject({ status: "error", dto: { species: "plain", kind: "MaxStorageReached" } })
+	})
+
+	it("asks for nothing to store for an empty text file", async () => {
+		const h = makeHarness()
+		h.uploadFileBytes.mockResolvedValue(mockFile())
+
+		await runCreateTextFile(h.deps, null, "notes.txt")
+
+		expect(h.checkQuota).toHaveBeenCalledExactlyOnceWith(0n)
+		expect(h.uploadFileBytes).toHaveBeenCalledOnce()
 	})
 })

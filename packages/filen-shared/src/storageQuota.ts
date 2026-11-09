@@ -68,6 +68,12 @@ export function deriveStorageBreakdown(storageUsed: bigint, maxStorage: bigint, 
 	}
 }
 
+// The server refuses any non-empty upload once storageUsed reaches maxStorage, so an exact fill is
+// already over the limit. An unresolvable quota (maxStorage <= 0) is never over it.
+export function isStorageOverLimit(info: StorageCounters): boolean {
+	return info.maxStorage > 0n && info.storageUsed >= info.maxStorage
+}
+
 export type QuotaVerdict = { status: "fits" } | { status: "exceeds"; neededBytes: bigint; freeBytes: bigint } | { status: "unknown" }
 
 export function quotaVerdict(neededBytes: bigint, info: StorageCounters | undefined): QuotaVerdict {
@@ -99,8 +105,13 @@ export interface QuotaCheckDeps {
 
 // A fresh cached "fits" is trusted as is. A cached "exceeds" may predate a delete made elsewhere, and a
 // stale or missing cache proves nothing, so those read once fresh. "unknown" never blocks: the server
-// decides.
+// decides. Nothing to store always fits: empty files are not counted against the quota, and a fresh
+// read could not change that.
 export async function resolveQuotaVerdict(deps: QuotaCheckDeps, neededBytes: bigint): Promise<QuotaVerdict> {
+	if (neededBytes <= 0n) {
+		return { status: "fits" }
+	}
+
 	const cached = deps.cached()
 	const cachedVerdict = quotaVerdict(neededBytes, cached)
 

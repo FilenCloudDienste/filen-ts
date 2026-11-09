@@ -223,7 +223,7 @@ describe("DriveJobToast for a copy", () => {
 		expect(screen.getByText("Nothing to report yet.")).toBeTruthy()
 	})
 
-	it("offers a retry of the failures once settled, which supersedes this card", () => {
+	it("offers a retry of the failures once settled, which supersedes this card", async () => {
 		const failed = [failure("a.txt"), failure("b.txt")]
 
 		seed({
@@ -255,7 +255,10 @@ describe("DriveJobToast for a copy", () => {
 
 		fireEvent.click(screen.getByRole("button", { name: "Retry failed" }))
 
-		expect(copyItemsTo).toHaveBeenCalledTimes(1)
+		// No account read was made this page, so the retry reads the account before it starts.
+		await vi.waitFor(() => {
+			expect(copyItemsTo).toHaveBeenCalledTimes(1)
+		})
 		expect(onRetried).toHaveBeenCalledTimes(1)
 		expect(onRetried.mock.calls[0]?.[0]).not.toBe("job")
 	})
