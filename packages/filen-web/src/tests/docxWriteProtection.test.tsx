@@ -173,9 +173,10 @@ describe("DocxEditView with write protection", () => {
 		submit("A")
 
 		expect(await screen.findByRole("button", { name: "Checking…" })).toBeTruthy()
+		// Each check spins Word's 100,000 SHA-512 rounds, a second or more apiece on a loaded runner.
 		expect(
 			await screen.findByText("That password isn't right. Try again, or cancel to keep viewing.", undefined, {
-				timeout: 10_000
+				timeout: 25_000
 			})
 		).toBeTruthy()
 		expect(hooks.hosts).toHaveLength(1)
@@ -187,7 +188,7 @@ describe("DocxEditView with write protection", () => {
 			() => {
 				expect(hooks.hosts).toHaveLength(2)
 			},
-			{ timeout: 10_000 }
+			{ timeout: 25_000 }
 		)
 		expect(hooks.hosts[1]?.writeUnlocked).toBe(true)
 
@@ -198,7 +199,7 @@ describe("DocxEditView with write protection", () => {
 			expect(screen.queryByRole("dialog")).toBeNull()
 		})
 		expect(screen.queryByText("This document needs a password to be edited. You can view it without one.")).toBeNull()
-	}, 30_000)
+	}, 60_000)
 
 	it("lifts a read-only recommendation with Edit anyway, without opening the document again", async () => {
 		const editor = await openEditor(await protectedDocx(RECOMMENDED))
