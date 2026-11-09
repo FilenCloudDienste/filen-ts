@@ -14,7 +14,8 @@ const captured = vi.hoisted(() => ({
 const mocks = vi.hoisted(() => ({
 	updatePersonalInfo: vi.fn(async () => {}),
 	accountQueryPatch: vi.fn(),
-	inputPrompt: vi.fn(async (): Promise<string | null> => null)
+	markAccountStale: vi.fn(),
+	inputPrompt: vi.fn(async (..._args: unknown[]): Promise<string | null> => null)
 }))
 
 vi.mock("@/lib/logger", async () => await import("@/tests/mocks/logger"))
@@ -42,7 +43,7 @@ vi.mock("@/components/dismissStack", () => ({ default: () => null }))
 vi.mock("expo-router", () => ({ useLocalSearchParams: () => captured.params }))
 vi.mock("@/lib/router", () => ({ goBackIfPossible: vi.fn() }))
 vi.mock("uniwind", () => ({ useResolveClassNames: () => ({ color: "blue" }) }))
-vi.mock("@/queries/useAccount.query", () => ({ accountQueryPatch: mocks.accountQueryPatch }))
+vi.mock("@/queries/useAccount.query", () => ({ accountQueryPatch: mocks.accountQueryPatch, markAccountStale: mocks.markAccountStale }))
 vi.mock("@/lib/promptFlow", () => ({ inputPrompt: mocks.inputPrompt }))
 vi.mock("@/lib/auth", () => ({
 	default: { getSdkClients: async () => ({ authedSdkClient: { updatePersonalInfo: mocks.updatePersonalInfo } }) }
@@ -67,10 +68,10 @@ const seed = {
 	country: null
 }
 
-async function editCompanyAndSave(): Promise<void> {
-	mocks.inputPrompt.mockResolvedValueOnce("Acme")
+async function editCompanyAndSave(value = "Acme", title = "company_name"): Promise<void> {
+	mocks.inputPrompt.mockResolvedValueOnce(value)
 
-	const company = captured.buttons.find(button => button.title === "company_name")
+	const company = captured.buttons.find(button => button.title === title)
 
 	await act(async () => {
 		await company?.onPress()
@@ -116,5 +117,28 @@ describe("Personal save", () => {
 
 		expect(mocks.updatePersonalInfo).toHaveBeenCalledTimes(1)
 		expect(mocks.accountQueryPatch).not.toHaveBeenCalled()
+	})
+
+	// The server rejects "" and clears a field sent as undefined.
+	it("clears an emptied field, sending it as undefined", async () => {
+		render(<Personal />)
+
+		await editCompanyAndSave("", "first_name")
+
+		const saved = { ...seed, firstName: undefined }
+
+		expect(mocks.inputPrompt.mock.calls[0]?.[2]).toEqual({ trim: true, allowEmpty: true })
+		expect(mocks.updatePersonalInfo).toHaveBeenCalledWith(saved)
+		expect(mocks.accountQueryPatch).toHaveBeenCalledWith({ personal: saved })
+		expect(mocks.markAccountStale).not.toHaveBeenCalled()
+	})
+
+	// The server stores its own normalized VAT ID.
+	it("marks the account stale after saving a VAT ID", async () => {
+		render(<Personal />)
+
+		await editCompanyAndSave("DE123", "vat_id")
+
+		expect(mocks.markAccountStale).toHaveBeenCalledOnce()
 	})
 })

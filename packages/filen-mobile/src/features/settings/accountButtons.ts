@@ -2,7 +2,7 @@ import { type Button } from "@/components/ui/settingsGroup"
 import { type TFunction } from "i18next"
 import { type ResolvedStyle } from "@/hooks/useResolveClassNames"
 import useAccountQuery, { accountQueryPatch } from "@/queries/useAccount.query"
-import { formatBytes } from "@filen/shared"
+import { formatBytes, isValidNickname } from "@filen/shared"
 import { confirmPrompt, inputPrompt } from "@/lib/promptFlow"
 import alerts from "@/lib/alerts"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
@@ -311,8 +311,9 @@ export function buildProfileButtons({
 				const result = await runWithLoading(async () => {
 					const { authedSdkClient } = await auth.getSdkClients()
 
+					// Only a pending change is recorded: email, login and session stay as they are until the
+					// confirmation link is clicked, so there is nothing to read back.
 					await authedSdkClient.changeEmail(password, newEmail)
-					await accountQuery.refetch()
 				})
 
 				if (!result.success) {
@@ -321,6 +322,8 @@ export function buildProfileButtons({
 
 					return
 				}
+
+				alerts.normal(t("change_email_confirmation_sent", { email: newEmail }))
 			}
 		},
 		{
@@ -338,20 +341,30 @@ export function buildProfileButtons({
 						okText: t("save")
 					},
 					{ tag: "settings", message: "change nickname prompt failed" },
-					{ trim: true }
+					// Emptying it clears the nickname.
+					{ trim: true, allowEmpty: true }
 				)
 
 				if (newNickname === null) {
 					return
 				}
 
+				if (!isValidNickname(newNickname)) {
+					alerts.error(t("nickname_invalid"))
+
+					return
+				}
+
+				// Empty clears the nickname.
+				const nickName = newNickname === "" ? undefined : newNickname
+
 				const result = await runWithLoading(async () => {
 					const { authedSdkClient } = await auth.getSdkClients()
 
-					await authedSdkClient.setNickname(newNickname)
+					await authedSdkClient.setNickname(nickName)
 
 					accountQueryPatch({
-						nickName: newNickname
+						nickName
 					})
 				})
 

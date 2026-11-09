@@ -89,6 +89,7 @@ export const {
 	sanitizeFileName,
 	errorMessage,
 	validateUuid,
+	isValidNickname,
 	CODE_FILE_EXTENSIONS,
 	resolveFileKind,
 	verdictChangesKind,

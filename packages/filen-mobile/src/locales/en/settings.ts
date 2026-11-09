@@ -97,6 +97,9 @@ export const settings = {
 	enter_new_email_address: "Enter your new email address",
 	/** Account screen — input prompt to confirm the new email address a second time */
 	confirm_new_email_address: "Confirm your new email address",
+	/** Alert after requesting an email change; {{email}} is the new address. Nothing changes until the user clicks the link in that email */
+	change_email_confirmation_sent:
+		"We have sent a confirmation email to {{email}} if it can be used. Please click the link in the email to confirm your new email address. Make sure to also check your spam folder.",
 	/** Error toast when the two entered email addresses differ */
 	email_addresses_do_not_match: "Email addresses do not match",
 	/** Input prompt asking for the account password to authorize a change */
@@ -105,6 +108,8 @@ export const settings = {
 	change_nickname: "Change nickname",
 	/** Account screen — input prompt for the new nickname */
 	enter_nickname: "Enter your nickname",
+	/** Error when an entered nickname breaks the server's rule; an empty nickname is allowed and clears it */
+	nickname_invalid: "3–32 letters, digits, spaces, _ or -",
 	/** Account screen — row opening the personal information sub-screen */
 	personal_information: "Personal information",
 	/** Account screen — subtitle for the personal information row */

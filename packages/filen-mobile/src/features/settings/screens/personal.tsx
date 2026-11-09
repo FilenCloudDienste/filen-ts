@@ -7,7 +7,7 @@ import { goBackIfPossible } from "@/lib/router"
 import { COUNTRIES } from "@filen/shared"
 import { useResolveClassNames } from "@/hooks/useResolveClassNames"
 import SettingsHeader from "@/components/ui/settingsHeader"
-import { type fetchData, accountQueryPatch } from "@/queries/useAccount.query"
+import { type fetchData, accountQueryPatch, markAccountStale } from "@/queries/useAccount.query"
 import { runWithLoading } from "@/components/ui/fullScreenLoadingModal"
 import { inputPrompt } from "@/lib/promptFlow"
 import alerts from "@/lib/alerts"
@@ -54,7 +54,8 @@ function Personal() {
 						defaultValue: personalData[field] ?? undefined
 					},
 					{ tag: "settings", message: "personal info field prompt failed", context: { field } },
-					{ trim: true }
+					// Emptying a field clears it.
+					{ trim: true, allowEmpty: true }
 				)
 
 				if (value === null) {
@@ -67,9 +68,10 @@ function Personal() {
 						return prev
 					}
 
+					// The server rejects "" and clears a field sent as undefined.
 					return {
 						...prev,
-						[field]: value
+						[field]: value === "" ? undefined : value
 					}
 				})
 			}
@@ -112,6 +114,11 @@ function Personal() {
 
 									// The Account screen seeds this route from the cache; stale fields would be resent on the next save.
 									accountQueryPatch({ personal })
+
+									// The server stores its own normalized VAT ID; the next mount reads it.
+									if (typeof personal.vatId === "string") {
+										markAccountStale()
+									}
 								}
 							}
 						}

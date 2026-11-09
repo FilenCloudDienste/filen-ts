@@ -894,6 +894,29 @@ describe("account writes — patch vs reread", () => {
 		expect(mockRefetch).not.toHaveBeenCalled()
 	})
 
+	it("nickname: refuses one the server would reject, sending nothing", async () => {
+		mockPromptsInput.mockResolvedValueOnce({ cancelled: false, value: "jane.doe" })
+
+		await buildProfileButtons({ t, accountQuery: makeAccountQuery() })
+			.find(b => b.title === "change_nickname")
+			?.onPress?.()
+
+		expect(mockAlertsError).toHaveBeenCalledExactlyOnceWith(t("nickname_invalid"))
+		expect(mockAuthedSdkClient.setNickname).not.toHaveBeenCalled()
+		expect(mockAccountQueryPatch).not.toHaveBeenCalled()
+	})
+
+	it("nickname: an empty one clears it, patched out rather than stored as empty", async () => {
+		mockPromptsInput.mockResolvedValueOnce({ cancelled: false, value: "   " })
+
+		await buildProfileButtons({ t, accountQuery: makeAccountQuery() })
+			.find(b => b.title === "change_nickname")
+			?.onPress?.()
+
+		expect(mockAuthedSdkClient.setNickname).toHaveBeenCalledWith(undefined)
+		expect(mockAccountQueryPatch).toHaveBeenCalledWith({ nickName: undefined })
+	})
+
 	it("enabling 2FA patches it on and withholds the key like getUserInfo does, no reread", async () => {
 		mockPromptsInput.mockResolvedValueOnce({ cancelled: false, value: "123456" })
 		mockAuthedSdkClient.enable2faGetRecoveryKey.mockResolvedValueOnce("recovery-key")
@@ -938,7 +961,8 @@ describe("account writes — patch vs reread", () => {
 		expect(mockAccountQueryPatch).not.toHaveBeenCalled()
 	})
 
-	it("changing email still rereads (whether it applies before confirmation is the server's call)", async () => {
+	// The server only records a pending change and mails a link: nothing local changes until it is clicked.
+	it("changing email says where the confirmation went, without a reread or a patch", async () => {
 		mockPromptsInput
 			.mockResolvedValueOnce({ cancelled: false, value: "new@example.com" })
 			.mockResolvedValueOnce({ cancelled: false, value: "new@example.com" })
@@ -947,7 +971,8 @@ describe("account writes — patch vs reread", () => {
 		await buildProfileButtons({ t, accountQuery: makeAccountQuery() })[0]?.onPress?.()
 
 		expect(mockAuthedSdkClient.changeEmail).toHaveBeenCalledWith("secret", "new@example.com")
-		expect(mockRefetch).toHaveBeenCalledTimes(1)
+		expect(mockAlertsNormal).toHaveBeenCalledExactlyOnceWith(t("change_email_confirmation_sent", { email: "new@example.com" }))
+		expect(mockRefetch).not.toHaveBeenCalled()
 		expect(mockAccountQueryPatch).not.toHaveBeenCalled()
 	})
 
