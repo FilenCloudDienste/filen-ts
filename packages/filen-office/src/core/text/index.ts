@@ -90,5 +90,16 @@ export {
 	verticalAlignment,
 	type TextStyle
 } from "./styles"
+export {
+	HYPHENATION_LANGUAGES,
+	HyphenationLibrary,
+	HyphenationPatterns,
+	TextHyphenator,
+	hyphenationLanguage,
+	type HyphenationAssets,
+	type HyphenationLanguage,
+	type HyphenationRules
+} from "./hyphenation/index"
 export { UNICODE_VERSION } from "./unicode.generated"
+export { anyUpright, isUpright, splitUpright, type UprightMeasure } from "./upright"
 export { WORD_KANA, WORD_LETTER, WORD_LOWER, WORD_NUMBER, WORD_UPPER, nextWordBoundary, wordSegments, type WordVisitor } from "./wordBreak"

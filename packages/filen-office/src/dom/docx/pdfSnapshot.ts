@@ -3,6 +3,7 @@ import {
 	Region,
 	SOURCE_INTS,
 	SourceInt,
+	objectTurnsOf,
 	type DocumentLayout,
 	type DocxModel,
 	type PageDisplayList,
@@ -447,11 +448,16 @@ function copied<T extends Float32Array | Int32Array>(array: T, copy: boolean): T
 
 // The page's placed objects plus its inline ones, which the text layout carries as object fragments (as the
 // renderer's pages have them).
-function objectsOf(layout: DocumentLayout, page: PageDisplayList): { count: number; floats: Float32Array; ints: Int32Array } {
+function objectsOf(
+	layout: DocumentLayout,
+	page: PageDisplayList
+): { count: number; floats: Float32Array; ints: Int32Array; turns: Int32Array | undefined } {
 	const table = layout.objects
 	const text = page.text
 	const floats = Array.from(page.objectFloats.subarray(0, page.objectCount * 4))
 	const ints = Array.from(page.objectInts.subarray(0, page.objectCount * 3))
+	// The line of each inline object, for the turn it is drawn through.
+	const lines: number[] = []
 
 	for (let line = 0; line < text.lineCount; line++) {
 		const baseline = text.lineFloats[line * LINE_FLOATS + 2] ?? 0
@@ -473,10 +479,17 @@ function objectsOf(layout: DocumentLayout, page: PageDisplayList): { count: numb
 				height
 			)
 			ints.push(id, 1, text.lineInts[line * LINE_INTS + LineInt.SOURCE] ?? -1)
+
+			if (page.turnCount > 0) lines.push(line)
 		}
 	}
 
-	return { count: ints.length / 3, floats: Float32Array.from(floats), ints: Int32Array.from(ints) }
+	return {
+		count: ints.length / 3,
+		floats: Float32Array.from(floats),
+		ints: Int32Array.from(ints),
+		turns: objectTurnsOf(page.turnCount, page.turnInts, text.lineCount, page.objectCount, lines)
+	}
 }
 
 // The renderer's object data as the painter takes it (core/drawingml/pdf.ts reads its lists as arrays).
@@ -626,6 +639,14 @@ export async function docxPdfSnapshot(live: DocxPdfLive, options: DocxPdfSnapsho
 			clipCount: page.clipCount,
 			clipFloats: copied(page.clipFloats, copy),
 			clipInts: copied(page.clipInts, copy),
+			...(objects.turns === undefined
+				? {}
+				: {
+						turnCount: page.turnCount,
+						turnFloats: copied(page.turnFloats, copy),
+						turnInts: copied(page.turnInts, copy),
+						objectTurns: objects.turns
+					}),
 			roles,
 			keys
 		})
@@ -713,9 +734,12 @@ export function snapshotTransfer(doc: DocxPdfDocument): ArrayBuffer[] {
 			page.sourceInts,
 			page.linkInts,
 			page.clipFloats,
-			page.clipInts
+			page.clipInts,
+			page.turnFloats,
+			page.turnInts,
+			page.objectTurns
 		])
-			add(array)
+			if (array !== undefined) add(array)
 	}
 
 	return [...out]

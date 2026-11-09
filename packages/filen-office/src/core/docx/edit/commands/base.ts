@@ -211,7 +211,8 @@ export function shortcutFor(entry: DocxShortcutEntry, apple: boolean): string | 
 // Keys a browser keeps for itself (Chromium never delivers them to a page; on macOS the app menu takes the
 // rest): bound all the same (a desktop shell delivers them), never advertised on a browser host.
 const BROWSER_RESERVED: ReadonlySet<string> = new Set(["mod+n", "mod+shift+n", "mod+t", "mod+shift+t", "mod+w", "mod+shift+w"])
-const APPLE_BROWSER_RESERVED: ReadonlySet<string> = new Set(["mod+q", "mod+h", "mod+m"])
+// Cmd+digit selects a browser tab (the Window menu's).
+const APPLE_BROWSER_RESERVED: ReadonlySet<string> = new Set(["mod+q", "mod+h", "mod+m", "mod+8"])
 
 export function browserReservedShortcut(shortcut: string, apple: boolean): boolean {
 	const combo = shortcut.toLowerCase()

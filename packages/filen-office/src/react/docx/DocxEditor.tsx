@@ -13,6 +13,7 @@ import { Region } from "../../core/docx/layout/index"
 import type { HitResult, ObjectHit, ObjectHitKind, PagedEditor } from "../../core/docx/paged/index"
 import { EditSink } from "./edit/sink"
 import { EditSurface, type DocxEditorMark } from "./edit/surface"
+import { DOCX_MARK_LABELS, type DocxMarkLabels } from "./paint/marks"
 import { unitDragSelection } from "./edit/unitDrag"
 import type { DocxDocument } from "./store"
 import { anchoredScrollTop, pageAt, readViewport, type PagesViewport } from "./viewport"
@@ -116,6 +117,8 @@ export interface DocxEditorProps {
 	readonly interactions?: DocxEditorInteractions
 	// Drawn over each page in view, above the caret and selection.
 	readonly overlays?: (page: DocxPageOverlay) => ReactNode
+	// The words formatting marks label breaks with (PagedEditor.formattingMarks shows them), English by default.
+	readonly markLabels?: DocxMarkLabels
 	readonly ref?: Ref<DocxEditorHandle>
 }
 
@@ -663,9 +666,12 @@ export function DocxEditor(props: DocxEditorProps) {
 		})
 	}
 	const requestFrameRef = useRef(requestFrame)
+	const markLabels = props.markLabels ?? DOCX_MARK_LABELS
+	const markLabelsRef = useRef(markLabels)
 
 	useLayoutEffect(() => {
 		requestFrameRef.current = requestFrame
+		markLabelsRef.current = markLabels
 		revealCaretRef.current = revealCaret
 	})
 
@@ -681,6 +687,8 @@ export function DocxEditor(props: DocxEditorProps) {
 					if (event.final && editor.caret() === undefined) revealRef.current = false
 				} else {
 					if (event.type === "story") setRegion(editor.activeRegion)
+					// Formatting marks shown or hidden (Show/Hide ¶).
+					if (event.type === "document") surface.setFormattingMarks(editor.formattingMarks ? markLabelsRef.current : undefined)
 
 					requestFrameRef.current({ draw: true, scroll: true })
 				}
@@ -724,6 +732,8 @@ export function DocxEditor(props: DocxEditorProps) {
 			session !== undefined && media !== undefined && surface.update(document.pages, { session, media, tables: document.tables })
 		const marks = props.marks ?? EMPTY_MARKS
 		const marked = surface.setMarks(marks)
+
+		surface.setFormattingMarks(editor.formattingMarks ? markLabels : undefined)
 		const changed = surface.setFocused(focused) || marked
 
 		if (repainted || changed) requestFrame({ draw: true })

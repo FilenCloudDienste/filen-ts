@@ -398,7 +398,7 @@ export class EditAnnotations {
 					const caret = change.story.geometry.locate(point, -1)
 
 					if (caret !== undefined && pages.includes(caret.page) && boxes.length < MAX_RECTS * BOX)
-						boxes.push(caret.page, caret.x, caret.top, 0, caret.height)
+						boxes.push(caret.page, caret.x, caret.top, caret.width ?? 0, caret.height)
 				}
 			}
 
@@ -622,7 +622,7 @@ export class EditAnnotations {
 				for (const point of change.points) {
 					const caret = story.geometry.locate(point, -1)
 
-					if (caret?.page === page) boxes.push(page, caret.x, caret.top, 0, caret.height)
+					if (caret?.page === page) boxes.push(page, caret.x, caret.top, caret.width ?? 0, caret.height)
 				}
 
 				return { key, change, boxes }
@@ -806,11 +806,12 @@ export class EditAnnotations {
 		return out
 	}
 
-	// A zero-width box where `pos` is drawn, when that is on page `page`: its owner, then the box.
+	// A zero-width box where `pos` is drawn (zero-height in sideways text), when that is on page `page`: its owner,
+	// then the box.
 	private caretBox(geometry: PagedGeometry, pos: number, page: number, owner: number, out: number[], affinity: Affinity = 1): void {
 		const caret = geometry.locate(pos, affinity)
 
-		if (caret?.page === page) out.push(owner, page, caret.x, caret.top, 0, caret.height)
+		if (caret?.page === page) out.push(owner, page, caret.x, caret.top, caret.width ?? 0, caret.height)
 	}
 
 	// The changes with an entry on page `page` of a story, added to `changes` (one per change). `seen`: the

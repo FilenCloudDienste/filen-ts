@@ -72,6 +72,28 @@ export function cellTables(part: StoryPart, cell: number): number[] {
 	return out
 }
 
+// A cell's text direction (ST_TextDirection) as a CSS writing mode, "" for horizontal text: top to bottom with every
+// glyph turned (tbRl) or East Asian characters upright (tbRlV, and tbLrV with lines left to right); bottom to top
+// (btLr) as sideways-lr where the browser has it, top to bottom where it does not.
+export function writingMode(value: string | undefined): string {
+	switch (value) {
+		case "tbRl":
+		case "rl":
+			return "writing-mode: vertical-rl; text-orientation: sideways"
+		case "tbRlV":
+		case "rlV":
+			return "writing-mode: vertical-rl"
+		case "tbLrV":
+		case "lrV":
+			return "writing-mode: vertical-lr"
+		case "btLr":
+		case "lr":
+			return "writing-mode: vertical-rl; text-orientation: sideways; writing-mode: sideways-lr"
+		default:
+			return ""
+	}
+}
+
 function edge(side: string, border: ResolvedBorder | undefined): string {
 	return `border-${side}: ${border === undefined || border.style === "nil" ? "none" : (borderCss(border) ?? "none")}`
 }
@@ -165,6 +187,9 @@ export function tableLook(
 				padding(props.margins),
 				`vertical-align: ${props.vAlign === "center" ? "middle" : props.vAlign === "bottom" ? "bottom" : "top"}`
 			]
+			const mode = writingMode(props.textDirection)
+
+			if (mode !== "") out.push(mode)
 			const below = next?.slots.find(candidate => candidate.column === slot.column)
 
 			out.push(

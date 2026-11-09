@@ -552,6 +552,10 @@ const document: DocumentHandlers = {
 		enabled: () => true,
 		run: context => context.editor.setFieldCodes(!context.editor.fieldCodes)
 	},
+	"view.formattingMarks": {
+		enabled: () => true,
+		run: context => context.editor.setFormattingMarks(!context.editor.formattingMarks)
+	},
 	"view.fieldCode": {
 		enabled: context => {
 			const state = context.session.state

@@ -22,6 +22,8 @@ export interface DocxTextStyle {
 	readonly descent: number
 	// TrackedLook of the run (0 none).
 	readonly revision: number
+	// Hidden text (w:vanish, w:specVanish), laid out while formatting marks show it; absent for visible text.
+	readonly hidden?: true
 	// The colour slot (1..8) of the tracked change's author, 0 without one: inserted and deleted text is drawn
 	// in --fo-revision-<slot>.
 	readonly author?: number
@@ -76,6 +78,15 @@ export interface DocxPageData {
 	// Per source, the object (by id) whose text box its paragraph is laid out in, -1 for none; absent when the page
 	// has no text box text. The text is drawn with its box.
 	readonly sourceOwners?: Int32Array
+	// What formatting marks need of each source (SOURCE_MARK_FLOATS per source, output.ts); absent for text laid out
+	// without them (a presentation's).
+	readonly sourceMarks?: Float32Array
 	readonly linkCount: number
 	readonly linkInts: Int32Array
+	// Text turned sideways in a box (layout/turns.ts: TURN_FLOATS and TURN_INTS each), and per object the turn it is
+	// drawn through (-1 for none); all absent on a page without turns.
+	readonly turnCount?: number
+	readonly turnFloats?: Float32Array
+	readonly turnInts?: Int32Array
+	readonly objectTurns?: Int32Array
 }

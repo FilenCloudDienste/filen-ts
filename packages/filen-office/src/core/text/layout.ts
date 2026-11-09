@@ -91,10 +91,11 @@ export interface ParagraphGeometry {
 	readonly editEngineSpacing?: boolean
 }
 
-// Marks hyphenation opportunities: sets breaks[i] = BREAK_HYPHEN for positions i inside words of
-// text[start, end) (breaks indexed by paragraph offset).
+// Marks automatic hyphenation opportunities: sets breaks[i] = BREAK_HYPHEN for positions i inside the paragraph's
+// words where breaks[i] is BREAK_NONE (breaks indexed by paragraph offset), each word in its style's language
+// (StyleTable.language). See TextHyphenator.
 export interface Hyphenator {
-	hyphenate(text: string, start: number, end: number, breaks: Uint8Array): void
+	hyphenate(paragraph: ParagraphText, styles: StyleTable, breaks: Uint8Array): void
 }
 
 export interface PrepareOptions {
@@ -107,6 +108,12 @@ export interface PrepareOptions {
 	readonly wordWrap?: boolean
 	readonly kinsoku?: Kinsoku | null
 	readonly hyphenator?: Hyphenator | null
+	// With a hyphenator: a word is broken at one of its points only when moving it to the next line whole would
+	// leave at least this much room at the line's end (px; Word's hyphenation zone, w:hyphenationZone). Default 0.
+	readonly hyphenationZone?: number
+	// With a hyphenator: the most consecutive lines that may end at one of its points (w:consecutiveHyphenLimit,
+	// fo:hyphenation-ladder-count); lines ending at a soft hyphen count too. Default 0: any number.
+	readonly hyphenLimit?: number
 	// East Asian full stops and commas may hang past the line end (w:overflowPunct). Default false.
 	readonly hangingPunctuation?: boolean
 	// The caller's id for the paragraph, stored on every line.
@@ -142,6 +149,9 @@ export class PreparedParagraph {
 	level = 0
 	markStyle = 0
 	source = 0
+	// PrepareOptions.hyphenationZone and hyphenLimit (0 without a hyphenator).
+	hyphenationZone = 0
+	hyphenLimit = 0
 
 	start = new Int32Array(32)
 	end = new Int32Array(32)
@@ -247,6 +257,8 @@ export class LayoutCursor {
 	pendingMark = false
 	// Bottom of the last row; after NO_ROOM, where floats pushed the row.
 	y = 0
+	// Rows just laid out that ended in a hyphen, one after another (PrepareOptions.hyphenLimit).
+	hyphens = 0
 
 	reset(): void {
 		this.item = 0
@@ -254,6 +266,7 @@ export class LayoutCursor {
 		this.rows = 0
 		this.pendingMark = false
 		this.y = 0
+		this.hyphens = 0
 	}
 }
 
@@ -326,6 +339,9 @@ export class ParagraphLayouter {
 	private segFill = new Uint8Array(8)
 	// Where the last positioned segment's content starts after alignment: an empty line's position.
 	private segAligned = 0
+	// The least room left on a segment positioned since the caller last set it (Infinity): how much shorter lines
+	// could have been and have laid out alike (the length sideways text needs).
+	leastFree = Infinity
 	private intervals = new Float64Array(16)
 	private intervalsAgain = new Float64Array(16)
 
@@ -341,6 +357,8 @@ export class ParagraphLayouter {
 	// Fill state.
 	private nextItem = 0
 	private nextOffset = -1
+	// The row may not end at an automatic hyphenation point (PrepareOptions.hyphenLimit reached).
+	private hyphenBlocked = false
 	private tabPending = false
 	private tabStart = 0
 	private tabStop = 0
@@ -399,7 +417,11 @@ export class ParagraphLayouter {
 			if (breaks[i] === BREAK_ALLOWED && text.charCodeAt(i - 1) === 0xad) breaks[i] = BREAK_HYPHEN
 		}
 
-		options.hyphenator?.hyphenate(text, 0, n, breaks)
+		const hyphenator = options.hyphenator ?? null
+
+		hyphenator?.hyphenate(paragraph, styles, breaks)
+		p.hyphenationZone = hyphenator === null ? 0 : (options.hyphenationZone ?? 0)
+		p.hyphenLimit = hyphenator === null ? 0 : (options.hyphenLimit ?? 0)
 
 		const keep = options.keepTogether
 
@@ -687,6 +709,7 @@ export class ParagraphLayouter {
 
 			const ended = this.emitRow(p, g, out, rowTop, cursor.rows === 0)
 
+			cursor.hyphens = this.rowHyphenated() ? cursor.hyphens + 1 : 0
 			cursor.rows++
 			cursor.item = this.nextItem
 			cursor.offset = this.nextOffset
@@ -887,6 +910,7 @@ export class ParagraphLayouter {
 		this.segCount = 0
 		this.nextItem = cursor.item
 		this.nextOffset = cursor.offset
+		this.hyphenBlocked = p.hyphenLimit > 0 && cursor.hyphens >= p.hyphenLimit
 
 		const segments = intervalCount < 0 ? 1 : intervalCount
 
@@ -956,6 +980,13 @@ export class ParagraphLayouter {
 		let candidatePieces = -1
 		let candidateItem = 0
 		let candidateHyphen = false
+		// The candidate is a hyphenator's point, and the last candidate that is not (where the line ends instead when
+		// breaking at the point would leave less than the hyphenation zone), with where content ended there.
+		let candidateAutomatic = false
+		let plainPieces = -1
+		let plainItem = 0
+		let plainHyphen = false
+		let plainContent = 0
 
 		this.tabPending = false
 
@@ -1004,12 +1035,16 @@ export class ParagraphLayouter {
 
 				if (overflows) {
 					if (placed && candidatePieces >= 0) {
-						this.pieceCount = candidatePieces
-						this.nextItem = candidateItem
+						// The word moves to the next line whole when that leaves less room than the zone.
+						const whole = candidateAutomatic && plainPieces >= 0 && segEnd - plainContent < p.hyphenationZone - EPSILON
+						const pieces = whole ? plainPieces : candidatePieces
+
+						this.pieceCount = pieces
+						this.nextItem = whole ? plainItem : candidateItem
 						this.nextOffset = -1
 
-						if (candidateHyphen)
-							this.pFlags[candidatePieces - 1] = (this.pFlags[candidatePieces - 1] ?? 0) | FragmentFlag.HYPHEN
+						if (whole ? plainHyphen : candidateHyphen)
+							this.pFlags[pieces - 1] = (this.pFlags[pieces - 1] ?? 0) | FragmentFlag.HYPHEN
 
 						return Fill.WRAP
 					}
@@ -1090,15 +1125,27 @@ export class ParagraphLayouter {
 					return item >= p.count ? Fill.END : Fill.FORCED
 				}
 
+				if (after !== BREAK_ALLOWED && after !== BREAK_HYPHEN) continue
+
+				const content = this.tabPending ? this.extent(pen[PEN_CONTENT] ?? 0) : (pen[PEN_CONTENT] ?? 0)
+				// A hyphenator's point, not a soft hyphen's.
+				const automatic = after === BREAK_HYPHEN && p.text.charCodeAt((p.start[item] ?? 0) - 1) !== 0xad
+
 				if (
 					after === BREAK_ALLOWED ||
-					(after === BREAK_HYPHEN &&
-						(this.tabPending ? this.extent(pen[PEN_CONTENT] ?? 0) : (pen[PEN_CONTENT] ?? 0)) + styles.hyphenWidth(style) <=
-							segEnd + EPSILON)
+					(!(automatic && this.hyphenBlocked) && content + styles.hyphenWidth(style) <= segEnd + EPSILON)
 				) {
 					candidatePieces = this.pieceCount
 					candidateItem = item
 					candidateHyphen = after === BREAK_HYPHEN && (p.kind[item - 1] ?? 0) === ItemKind.TEXT
+					candidateAutomatic = automatic
+
+					if (!automatic) {
+						plainPieces = candidatePieces
+						plainItem = item
+						plainHyphen = candidateHyphen
+						plainContent = content
+					}
 				}
 
 				continue
@@ -1181,6 +1228,11 @@ export class ParagraphLayouter {
 				candidatePieces = this.pieceCount
 				candidateItem = item
 				candidateHyphen = false
+				candidateAutomatic = false
+				plainPieces = candidatePieces
+				plainItem = item
+				plainHyphen = false
+				plainContent = pen[PEN_CONTENT] ?? 0
 			}
 		}
 
@@ -1442,6 +1494,14 @@ export class ParagraphLayouter {
 			g.libreOfficeSpacing === true && g.lineRule === LineRule.AUTO ? Math.max(0, this.rowHeight - ascent - descent) : 0
 	}
 
+	// Whether the fitted row ends in a hyphen (its last segment's last piece shows one).
+	private rowHyphenated(): boolean {
+		const s = this.segCount - 1
+		const last = (this.segTo[s] ?? 0) - 1
+
+		return s >= 0 && last >= (this.segFrom[s] ?? 0) && ((this.pFlags[last] ?? 0) & FragmentFlag.HYPHEN) !== 0
+	}
+
 	// Positions the fitted row's pieces and appends its lines; returns the break kind the row ended with,
 	// or -1.
 	private emitRow(p: PreparedParagraph, g: ParagraphGeometry, out: TextLayout, top: number, firstRow: boolean): number {
@@ -1522,6 +1582,8 @@ export class ParagraphLayouter {
 
 		const free = segEnd - segStart - used
 		let alignment: number = g.alignment
+
+		if (free < this.leastFree) this.leastFree = free
 		let justified = false
 
 		if (alignment === Alignment.BOTH || alignment === Alignment.DISTRIBUTE) {

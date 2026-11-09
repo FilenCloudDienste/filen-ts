@@ -19,7 +19,6 @@ import {
 	type DocxEditorCommandType,
 	type DocxFontChoice,
 	type DocxLineSpacingRule,
-	type DocxTextColor,
 	type DocxValuesSnapshot
 } from "@filen/office/core/docx/edit"
 import { cn } from "@filen/shared"
@@ -43,9 +42,11 @@ import {
 import { DocxChoiceField } from "@/features/preview/components/docxFields"
 import { FormatPainterButton } from "@/features/office/components/formatPainterButton"
 import {
+	colorsOf,
 	fontMatches,
 	listedFont,
 	parseFontSize,
+	textColor,
 	typedFont,
 	type DocxFontItem
 } from "@/features/preview/components/docxFormatControls.logic"
@@ -98,7 +99,7 @@ export interface DocxFormatControlsProps extends DocxToolbarSlotProps {
 export { DocxColorGrid } from "@/features/office/components/officeColorGrid"
 
 // The highlighter's colours and No color.
-function HighlightGrid({ chosen, onPick }: { chosen: string | undefined; onPick: (name: string) => void }) {
+export function HighlightGrid({ chosen, onPick }: { chosen: string | undefined; onPick: (name: string) => void }) {
 	const { t } = useTranslation("preview")
 
 	return (
@@ -129,10 +130,6 @@ function HighlightGrid({ chosen, onPick }: { chosen: string | undefined; onPick:
 			</div>
 		</div>
 	)
-}
-
-function textColor(swatch: DocxSwatch | null): DocxTextColor {
-	return swatch === null ? { kind: "auto" } : swatch.color
 }
 
 // A toolbar button opening a colour picker: its icon over a bar of the colour in effect.
@@ -443,7 +440,7 @@ function ComboItem({ value, label }: { value: string; label: string }) {
 	)
 }
 
-function FontPicker({
+export function FontPicker({
 	fonts,
 	font,
 	disabled,
@@ -501,7 +498,7 @@ function sizeLabel(halfPoints: string): string {
 	return points(Number(halfPoints))
 }
 
-function SizePicker({
+export function SizePicker({
 	size,
 	disabled,
 	execute,
@@ -571,13 +568,7 @@ export function DocxFormatControls(props: DocxFormatControlsProps) {
 		{ type: "font.grow", icon: <AArrowUpIcon /> },
 		{ type: "font.shrink", icon: <AArrowDownIcon /> }
 	]
-	const chosenColor = values === undefined ? undefined : single(values.color)
-	const chosenHighlight = values === undefined ? undefined : single(values.highlight)
-	const colorRgb = values === undefined ? undefined : single(values.colorRgb)
-	const highlightRgb =
-		chosenHighlight === undefined || chosenHighlight === "none"
-			? undefined
-			: HIGHLIGHT_SWATCHES.find(swatch => swatch.name === chosenHighlight)?.rgb
+	const { chosenColor, chosenHighlight, colorRgb, highlightRgb } = colorsOf(values)
 	const spacing = values === undefined ? undefined : single(values.charSpacing)
 	const pickColor = (swatch: DocxSwatch | null): void => {
 		execute({ type: "color.text", color: textColor(swatch) })

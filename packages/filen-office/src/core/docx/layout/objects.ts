@@ -87,6 +87,8 @@ export class ObjectTable {
 	readonly textboxes: (readonly number[] | undefined)[] = []
 	// Insets of a text box (left, top, right, bottom px).
 	readonly insets: (readonly number[] | undefined)[] = []
+	// How a text box's text runs (wps:bodyPr@vert, ST_TextVerticalType), undefined for horizontal text.
+	readonly verticals: (string | undefined)[] = []
 	// Equations measured while a font was still loading: measured again once fonts are in.
 	readonly provisional = new Set<number>()
 	private readonly byItem = new Map<number, number>()
@@ -117,7 +119,8 @@ export class ObjectTable {
 		ascent: number,
 		float: FloatSpec | undefined,
 		textboxes: readonly number[] | undefined,
-		insets: readonly number[] | undefined
+		insets: readonly number[] | undefined,
+		vertical?: string
 	): number {
 		const id = this.count++
 
@@ -131,6 +134,7 @@ export class ObjectTable {
 		this.floats.push(float)
 		this.textboxes.push(textboxes)
 		this.insets.push(insets)
+		this.verticals.push(vertical)
 
 		if (item >= 0) this.byItem.set(part * 0x4000000 + item, id)
 
@@ -297,6 +301,15 @@ function drawingInsets(part: StoryPart, drawing: DrawingInfo): number[] {
 	const inset = (name: string, fallback: number): number => emu(bodyPr < 0 ? fallback : reader.int(bodyPr, Ns.None, name, fallback))
 
 	return [inset("lIns", 91440), inset("tIns", 45720), inset("rIns", 91440), inset("bIns", 45720)]
+}
+
+// wps:bodyPr@vert (ST_TextVerticalType, ECMA-376 §20.1.10.83): how the text box's text runs, undefined for "horz".
+function drawingVertical(part: StoryPart, drawing: DrawingInfo): string | undefined {
+	const reader = part.reader
+	const bodyPr = drawing.graphicData < 0 ? -1 : reader.descendant(drawing.graphicData, Ns.Wps, "bodyPr")
+	const value = bodyPr < 0 ? undefined : reader.attr(bodyPr, Ns.None, "vert")
+
+	return value === undefined || value === "horz" ? undefined : value
 }
 
 const VIEW_NAMES: Readonly<Record<RevisionView, OmmlRevisionView["view"]>> = {
@@ -486,7 +499,8 @@ export function objectAt(
 			custom?.ascent ?? height,
 			float,
 			textboxes,
-			textboxes === undefined ? undefined : drawingInsets(part, drawing)
+			textboxes === undefined ? undefined : drawingInsets(part, drawing),
+			textboxes === undefined ? undefined : drawingVertical(part, drawing)
 		)
 
 		return { id, width, height, ascent: custom?.ascent ?? height, anchored }

@@ -2,7 +2,13 @@ import type { RefObject } from "react"
 import { useTranslation } from "react-i18next"
 import type { PagedEditor } from "@filen/office/core/docx/paged"
 import type { DocxDocument } from "@filen/office/react/docx"
-import { DocxReflow, type DocxEditorHandle, type DocxEditorInteractions, type DocxEditorMark } from "@filen/office/react/docx/editor"
+import {
+	DocxReflow,
+	type DocxEditorHandle,
+	type DocxEditorInteractions,
+	type DocxEditorMark,
+	type DocxMarkLabels
+} from "@filen/office/react/docx/editor"
 
 export interface DocxReflowSurfaceProps {
 	editor: PagedEditor
@@ -17,6 +23,8 @@ export interface DocxReflowSurfaceProps {
 	apple: boolean
 	desktop: boolean
 	marks: readonly DocxEditorMark[]
+	// The words formatting marks label breaks with.
+	markLabels?: DocxMarkLabels
 	onFind: (replace: boolean) => void
 	// Presses on objects in the text (comment highlights, controls), as on the pages.
 	interactions?: DocxEditorInteractions
@@ -47,6 +55,7 @@ export function DocxReflowSurface({ handleRef, interactions, ...props }: DocxRef
 			apple={props.apple}
 			desktop={props.desktop}
 			marks={props.marks}
+			{...(props.markLabels === undefined ? {} : { markLabels: props.markLabels })}
 			onFind={props.onFind}
 			storyLabel={(kind, mark) => (kind === "textbox" || mark === "" ? t(STORY_LABELS[kind]) : t(NUMBERED_LABELS[kind], { mark }))}
 			{...(interactions === undefined ? {} : { interactions })}

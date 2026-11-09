@@ -1,6 +1,7 @@
-import type { DecorationValue } from "../../../core/docx/layout/index"
+import { SOURCE_INTS, SOURCE_MARK_FLOATS, SourceInt, type DecorationValue } from "../../../core/docx/layout/index"
 import { borderLines } from "../../../core/docx/layout/borderLines"
 import { runEffectCss, type Emphasis, type RunEffect } from "../../../core/docx/layout/effects"
+import { TurnInt, turnCss, turnMatrixAt, turnTransform, turnsOf, type TurnMatrix } from "../../../core/docx/layout/turns"
 import {
 	DECORATION_FLOATS,
 	DECORATION_INTS,
@@ -86,6 +87,8 @@ export interface PaintedLine {
 	readonly under: HTMLElement | undefined
 	readonly over: HTMLElement | undefined
 	readonly texts: readonly PaintedText[]
+	// The CSS transform turning the line's groups sideways onto the page ("" for an upright line).
+	turn: string
 }
 
 export interface PaintedPage {
@@ -124,7 +127,7 @@ function cssFont(font: string): string {
 	return CSS_FONT.test(font) ? font : FALLBACK_FONT
 }
 
-interface StyleCss {
+export interface StyleCss {
 	// Declarations every span of the style starts with.
 	readonly base: string
 	readonly smallCapsFont: string
@@ -135,7 +138,7 @@ interface StyleCss {
 
 const styleCss = new WeakMap<DocxTextStyle, StyleCss>()
 
-function cssOf(style: DocxTextStyle | undefined): StyleCss {
+export function cssOf(style: DocxTextStyle | undefined): StyleCss {
 	if (style === undefined) {
 		return {
 			base: `font:${FALLBACK_FONT};line-height:20px;`,
@@ -501,7 +504,8 @@ function paintGraphic(
 	layers: readonly HTMLElement[],
 	page: DocxPageData,
 	decorations: readonly DecorationValue[],
-	index: number
+	index: number,
+	turn?: TurnMatrix
 ): void {
 	const f = index * GRAPHIC_FLOATS
 	const i = index * GRAPHIC_INTS
@@ -566,7 +570,7 @@ function paintGraphic(
 			extra = "background:var(--fo-auto-text, #000);"
 	}
 
-	layer.appendChild(box(document, "fo-docx-box", x, y, width, height, extra))
+	layer.appendChild(box(document, "fo-docx-box", x, y, width, height, turn === undefined ? extra : extra + turnCss(turn, x, y)))
 }
 
 // The style colour of the fragment under x on a line (for decorations drawn in the text's colour).
@@ -848,6 +852,14 @@ function lineLook(page: DocxPageData, line: number, links: Map<number, number[]>
 	lookValue(n++, round(page.lineFloats[lf + 4]))
 	lookValue(n++, flags)
 	lookValue(n++, count)
+	// What formatting marks draw of the line besides its fragments: its paragraph's flags and edges.
+	lookValue(n++, page.sourceInts[source * SOURCE_INTS + SourceInt.FLAGS] ?? 0)
+
+	for (let m = 0; m < SOURCE_MARK_FLOATS; m++) {
+		const value = page.sourceMarks?.[source * SOURCE_MARK_FLOATS + m] ?? Number.NaN
+
+		lookValue(n++, Number.isNaN(value) ? -1e9 : round(value))
+	}
 
 	for (let k = first; k < first + count; k++) {
 		const ff = k * FRAGMENT_FLOATS
@@ -1176,7 +1188,49 @@ function paintLine(
 		paintDecoration(document, target, page, tables, d, fill, lineTop)
 	}
 
-	return { look, top: lineTop, text: textGroup, under, over, texts: lineTexts }
+	return { look, top: lineTop, text: textGroup, under, over, texts: lineTexts, turn: "" }
+}
+
+// The page's sideways text (layout/turns.ts): the turn each line and graphic is drawn through (-1 for none) and
+// each turn's matrix; undefined for a page without, which then pays nothing for them.
+interface PageTurns {
+	readonly lines: Int32Array
+	readonly graphics: Int32Array
+	readonly matrices: readonly TurnMatrix[]
+}
+
+function pageTurns(page: DocxPageData): PageTurns | undefined {
+	const count = page.turnCount ?? 0
+	const floats = page.turnFloats
+	const ints = page.turnInts
+
+	if (count <= 0 || floats === undefined || ints === undefined) return undefined
+
+	const lines = turnsOf(count, ints, page.lineCount, TurnInt.LINE_FROM)
+	const graphics = turnsOf(count, ints, page.graphicCount, TurnInt.GRAPHIC_FROM)
+	const matrices: TurnMatrix[] = []
+
+	for (let t = 0; t < count; t++) matrices.push(turnMatrixAt(floats, ints, t))
+
+	return lines === undefined || graphics === undefined ? undefined : { lines, graphics, matrices }
+}
+
+// Turns a line's groups (positioned at the page's left edge, at the line's top) through its turn, or back upright.
+function turnLine(painted: PaintedLine, turns: PageTurns | undefined, line: number): void {
+	const turn = turns?.lines[line] ?? -1
+	const matrix = turn < 0 ? undefined : turns?.matrices[turn]
+	const transform = matrix === undefined ? "" : turnTransform(matrix, 0, painted.top)
+
+	if (painted.turn === transform) return
+
+	painted.turn = transform
+
+	for (const element of [painted.text, painted.under, painted.over]) {
+		if (element === undefined) continue
+
+		element.style.transform = transform
+		element.style.transformOrigin = transform === "" ? "" : "0 0"
+	}
 }
 
 function isFill(page: DocxPageData, decoration: number): boolean {
@@ -1185,8 +1239,35 @@ function isFill(page: DocxPageData, decoration: number): boolean {
 	return kind === DecorationKind.SHADING || kind === DecorationKind.HIGHLIGHT
 }
 
-function paintGraphics(document: Document, page: DocxPageData, tables: DocxTables, into: readonly HTMLElement[]): void {
-	for (let g = 0; g < page.graphicCount; g++) paintGraphic(document, into, page, tables.decorations, g)
+function paintGraphics(
+	document: Document,
+	page: DocxPageData,
+	tables: DocxTables,
+	into: readonly HTMLElement[],
+	turns: PageTurns | undefined
+): void {
+	for (let g = 0; g < page.graphicCount; g++) {
+		const turn = turns?.graphics[g] ?? -1
+
+		paintGraphic(document, into, page, tables.decorations, g, turn < 0 ? undefined : turns?.matrices[turn])
+	}
+}
+
+const NO_NUMBERS = new Int32Array(0)
+
+// What the graphics and the placed objects are drawn from, to repaint them only when it changed.
+function graphicsKeyOf(page: DocxPageData): string {
+	return arraysKey(page.graphicFloats, page.graphicInts, page.turnFloats ?? NO_NUMBERS, page.turnInts ?? NO_NUMBERS)
+}
+
+function objectsKeyOf(page: DocxPageData): string {
+	return arraysKey(
+		page.objectFloats,
+		page.objectInts,
+		page.objectKinds,
+		page.objectTurns ?? NO_NUMBERS,
+		page.objectTurns === undefined ? NO_NUMBERS : (page.turnFloats ?? NO_NUMBERS)
+	)
 }
 
 // How the page's objects and text box lines stack (CSS z-index in the page content's own stacking context): the
@@ -1247,13 +1328,21 @@ function paintPlaced(
 	stack: Stacking
 ): PaintedObject[] {
 	const objects: PaintedObject[] = []
+	const turns = page.objectTurns
+	const turnFloats = page.turnFloats
+	const turnInts = page.turnInts
 
 	for (let o = 0; o < page.objectCount; o++) {
 		const f = o * OBJECT_FLOATS
 		const i = o * OBJECT_INTS
+		const x = page.objectFloats[f] ?? 0
+		const y = page.objectFloats[f + 1] ?? 0
 		const width = page.objectFloats[f + 2] ?? 0
 		const height = page.objectFloats[f + 3] ?? 0
-		const element = box(document, "fo-docx-object", page.objectFloats[f] ?? 0, page.objectFloats[f + 1] ?? 0, width, height, "")
+		const turn = turns?.[o] ?? -1
+		const extra =
+			turn < 0 || turnFloats === undefined || turnInts === undefined ? "" : turnCss(turnMatrixAt(turnFloats, turnInts, turn), x, y)
+		const element = box(document, "fo-docx-object", x, y, width, height, extra)
 		const layer = page.objectInts[i + 1] ?? LAYER_TEXT
 		const id = page.objectInts[i] ?? -1
 
@@ -1308,7 +1397,9 @@ export function paintPage(page: DocxPageData, context: PagePaintContext): Painte
 		container(document, "fo-docx-layer")
 	]
 
-	paintGraphics(document, page, tables, graphics)
+	const turns = pageTurns(page)
+
+	paintGraphics(document, page, tables, graphics, turns)
 
 	const stack = stacking(page)
 	const links = linksBySource(page)
@@ -1322,6 +1413,8 @@ export function paintPage(page: DocxPageData, context: PagePaintContext): Painte
 		const source = page.lineInts[line * LINE_INTS + 5] ?? -1
 		const text = page.sourceTexts[source] ?? ""
 		const painted = paintLine(document, page, tables, line, links, keptLook(lookHash(count, text), count, text), context.paints)
+
+		if (turns !== undefined) turnLine(painted, turns, line)
 
 		stackLine(painted, stack.sources[source] ?? "")
 		lines.push(painted)
@@ -1353,8 +1446,8 @@ export function paintPage(page: DocxPageData, context: PagePaintContext): Painte
 			overLines,
 			graphics,
 			objects: placed,
-			graphicsKey: arraysKey(page.graphicFloats, page.graphicInts),
-			objectsKey: arraysKey(page.objectFloats, page.objectInts, page.objectKinds)
+			graphicsKey: graphicsKeyOf(page),
+			objectsKey: objectsKeyOf(page)
 		}
 	}
 }
@@ -1371,6 +1464,7 @@ export function patchPage(
 	const parts = painted.parts
 	const links = linksBySource(page)
 	const stack = stacking(page)
+	const turns = pageTurns(page)
 	const old = painted.lines
 	// Painted lines by how they look (the hash of it): the first of each, and the next with the same hash.
 	const firstByHash = new Map<number, number>()
@@ -1454,9 +1548,12 @@ export function patchPage(
 								source,
 								start: text.start + shift,
 								end: text.end + shift
-							}))
+							})),
+							turn: kept.turn
 						}
 		}
+
+		if (turns !== undefined || next.turn !== "") turnLine(next, turns, line)
 
 		if (next.under !== undefined && next.under.parentNode !== parts.fills) parts.fills.appendChild(next.under)
 		if (next.over !== undefined && next.over.parentNode !== parts.overLines) parts.overLines.appendChild(next.over)
@@ -1490,17 +1587,17 @@ export function patchPage(
 		previous = line.text
 	}
 
-	const graphicsKey = arraysKey(page.graphicFloats, page.graphicInts)
+	const graphicsKey = graphicsKeyOf(page)
 
 	if (graphicsKey !== parts.graphicsKey) {
 		for (const element of parts.graphics) element.replaceChildren()
 
-		paintGraphics(document, page, tables, parts.graphics)
+		paintGraphics(document, page, tables, parts.graphics, turns)
 	}
 
 	parts.graphics[0].style.zIndex = stack.behindGraphics
 
-	const objectsKey = arraysKey(page.objectFloats, page.objectInts, page.objectKinds)
+	const objectsKey = objectsKeyOf(page)
 	const objectsChanged = objectsKey !== parts.objectsKey
 	let objects = painted.objects
 

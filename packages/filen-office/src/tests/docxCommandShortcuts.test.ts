@@ -25,14 +25,16 @@ describe("docx command shortcuts", () => {
 		expect(shortcutFor(info("format.clear"), false)).toBe("mod+space")
 	})
 
-	it("bullets with Mod+Shift+L, leaving Mod+Shift+8 (Show/Hide ¶) free", () => {
+	it("bullets with Mod+Shift+L, leaving Ctrl+Shift+8 to Show/Hide ¶", () => {
 		for (const apple of [false, true]) {
 			const mod = apple ? { metaKey: true } : { ctrlKey: true }
 
 			expect(commandForKey(key("L", "KeyL", { ...mod, shiftKey: true }), apple)).toEqual({ type: "list.bullet" })
-			expect(commandForKey(key("*", "Digit8", { ...mod, shiftKey: true }), apple)).toBeUndefined()
 			expect(shortcutFor(info("list.bullet"), apple)).toBe("mod+shift+l")
 		}
+
+		expect(commandForKey(key("*", "Digit8", { ctrlKey: true, shiftKey: true }), false)).toEqual({ type: "view.formattingMarks" })
+		expect(commandForKey(key("*", "Digit8", { metaKey: true, shiftKey: true }), true)).toBeUndefined()
 	})
 
 	it("advertises Mod+Y for redo and takes it on every platform, Mod+Shift+Z too", () => {

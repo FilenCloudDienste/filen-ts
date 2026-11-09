@@ -13,6 +13,7 @@ import {
 	LineRule,
 	ParagraphLayouter,
 	PreparedParagraph,
+	TextHyphenator,
 	TextLayout,
 	Wrap,
 	kinsokuLists,
@@ -45,6 +46,7 @@ import { PageGraphic, Layer, OBJECT_FLOATS, OBJECT_INTS, OutputMark, PageOutput,
 import { REF_SPAN, refItem, refPart, type LayoutEdits } from "./edits"
 import { borderWidth, modelAuthors, type DecorationTable, type RunStyles } from "./styles"
 import { TableLayout, type TableSnapshot } from "./table"
+import { verticalTurn } from "./turns"
 import { EPSILON, twips } from "./units"
 
 export const FlowStatus = {
@@ -181,6 +183,8 @@ export interface EngineInit {
 	readonly notes: NoteNumbering
 	readonly view: RevisionView
 	readonly showHidden: boolean
+	// See ContentServices.hidden.
+	readonly hidden?: { seen: boolean }
 	readonly compat: LayoutCompat
 	readonly tuning: LayoutTuning
 	readonly recordMaps?: boolean
@@ -204,6 +208,8 @@ export class Engine {
 	readonly tuning: LayoutTuning
 	readonly content: ContentBuilder
 	readonly layouter: ParagraphLayouter
+	// Automatic hyphenation (LayoutCompat.autoHyphenation, with patterns to load), or null.
+	readonly hyphenator: TextHyphenator | null
 	readonly markers = new Map<number, ListMarker | null>()
 	// Body content went onto the page drawn with stand-ins for fonts still loading (a table row that could not
 	// wait for them): the page is laid out again once they loaded. The paginator reads and clears it.
@@ -223,6 +229,9 @@ export class Engine {
 	readonly autoSpacing: AutoSpacing
 	// Unsaved edits laid out in place of their source (see LayoutEdits), read whenever a flow is set up.
 	readonly edits: LayoutEdits | undefined
+	// What formatting marks need of each source is recorded (PageOutput.markSource): with the maps, in layouts for
+	// editing, where they are shown; a viewer's pages carry none.
+	readonly recordMarks: boolean
 	// The body flow yields (FlowStatus.SUSPEND, fonts loaded) between two blocks or table rows once `clock()`
 	// reaches this, so that a page too slow for one slice is laid out over several (see LayoutDriver.advance).
 	yieldAt = Infinity
@@ -240,7 +249,19 @@ export class Engine {
 		this.compat = init.compat
 		this.tuning = init.tuning
 		this.edits = init.edits
+		this.recordMarks = init.recordMaps ?? false
 		this.layouter = new ParagraphLayouter(init.styles.table)
+
+		const library = init.styles.hyphenation
+		const chars = init.compat.hyphenationChars
+
+		this.hyphenator =
+			library === null || !init.compat.autoHyphenation
+				? null
+				: new TextHyphenator(library, {
+						caps: init.compat.hyphenateCaps,
+						...(chars === undefined ? {} : { left: chars[0], right: chars[1], minWord: chars[2] })
+					})
 		this.autoSpacing = init.compat.htmlSpacing
 			? { before: (init.tuning.htmlAutoSpacing[0] * 4) / 3, after: (init.tuning.htmlAutoSpacing[1] * 4) / 3 }
 			: FIXED_AUTO_SPACING
@@ -255,6 +276,7 @@ export class Engine {
 			stretchObjects: init.tuning.multipleStretches === "all",
 			view: init.view,
 			showHidden: init.showHidden,
+			...(init.hidden === undefined ? {} : { hidden: init.hidden }),
 			markers: this.markers,
 			recordMaps: init.recordMaps ?? false,
 			mapParagraph: init.mapParagraph,
@@ -318,6 +340,7 @@ export class Engine {
 		copy.offset = cursor.offset
 		copy.rows = cursor.rows
 		copy.pendingMark = cursor.pendingMark
+		copy.hyphens = cursor.hyphens
 		copy.y = 0
 		scratch.reset()
 		g.exclusions = null
@@ -441,6 +464,8 @@ export interface FlowSnapshot {
 	readonly offset: number
 	readonly rows: number
 	readonly pendingMark: boolean
+	// LayoutCursor.hyphens.
+	readonly hyphens: number
 	readonly after: number
 	readonly contextual: boolean
 	readonly styleId: string | undefined
@@ -623,6 +648,12 @@ export class BlockFlow {
 	cell: CellFormat | undefined = undefined
 	// The fill behind the container (its cell's or table's, else an outer one's) is dark: see ContentBuilder.build.
 	darkFill = false
+	// For formatting marks (set after setContainer, setRange or setRefs, which clear them): the SourceFlag bits of the
+	// source of the container's last paragraph (a cell's end, a section's break) and of its first (a row's last cell
+	// opening), and the x of the row's trailing edge (NaN outside a row's last cell).
+	lastFlags = 0
+	firstFlags = 0
+	rowEnd = Number.NaN
 	// The container's part (blocks may be laid out from overlay parts instead: see parts).
 	part: StoryPart | undefined = undefined
 	// Items of the blocks, and the parts they belong to.
@@ -707,6 +738,7 @@ export class BlockFlow {
 		this.part = part
 		this.cell = cell
 		this.darkFill = false
+		this.clearMarks()
 		this.count = 0
 
 		for (let item = start; item < end;) {
@@ -740,6 +772,7 @@ export class BlockFlow {
 		this.part = part
 		this.cell = undefined
 		this.darkFill = false
+		this.clearMarks()
 		this.count = 0
 
 		for (let k = from; k < to; k++) {
@@ -758,6 +791,7 @@ export class BlockFlow {
 		this.part = flow.part
 		this.cell = flow.cell
 		this.darkFill = flow.darkFill
+		this.clearMarks()
 		this.count = 0
 
 		for (let k = from; k < to; k++) this.push(flow.parts[k] ?? -1, flow.blocks[k] ?? -1, undefined)
@@ -801,6 +835,12 @@ export class BlockFlow {
 	// The ref of block k as laid out.
 	refAt(k: number): number {
 		return (this.parts[k] ?? 0) * REF_SPAN + (this.blocks[k] ?? 0)
+	}
+
+	private clearMarks(): void {
+		this.lastFlags = 0
+		this.firstFlags = 0
+		this.rowEnd = Number.NaN
 	}
 
 	reset(): void {
@@ -859,6 +899,7 @@ export class BlockFlow {
 			offset: inside ? cursor.offset : -1,
 			rows: inside ? cursor.rows : 0,
 			pendingMark: inside && cursor.pendingMark,
+			hyphens: inside ? cursor.hyphens : 0,
 			after: this.after,
 			contextual: this.contextual,
 			styleId: this.styleId,
@@ -932,6 +973,7 @@ export class BlockFlow {
 		this.cursor.offset = snapshot.offset
 		this.cursor.rows = snapshot.rows
 		this.cursor.pendingMark = snapshot.pendingMark
+		this.cursor.hyphens = snapshot.hyphens
 		this.breakBeforeDone = snapshot.breakBeforeDone
 		this.floatsPlaced = true
 		this.source = -1
@@ -1763,12 +1805,22 @@ export class BlockFlow {
 				(area.inTable ? SourceFlag.IN_TABLE : 0) |
 					(props.suppressLineNumbers ? SourceFlag.NO_LINE_NUMBERS : 0) |
 					(built.fieldFlags & 1 ? SourceFlag.PAGE_FIELDS : 0) |
-					(built.fieldFlags & 2 ? SourceFlag.TOTAL_FIELDS : 0),
+					(built.fieldFlags & 2 ? SourceFlag.TOTAL_FIELDS : 0) |
+					(this.groupEnd >= this.count ? this.lastFlags : 0) |
+					(this.index === 0 ? this.firstFlags : 0),
 				built.text,
 				this.region === Region.BODY && built.renderedBreaks.length > 0 ? built.renderedBreaks.slice() : undefined,
 				built.firstPart,
 				built.map
 			)
+			if (engine.recordMarks)
+				page.markSource(
+					this.source,
+					area.left,
+					area.left + area.width,
+					built.markStyle,
+					this.index === 0 && (this.firstFlags & SourceFlag.ROW_END) !== 0 ? this.rowEnd : Number.NaN
+				)
 		}
 
 		this.prepared.source = this.source
@@ -1868,13 +1920,18 @@ export class BlockFlow {
 	private prepareOptions(props: ResolvedParagraphProps): PrepareOptions {
 		const language = this.built.format?.runBase.lang?.eastAsia
 		const lists = props.kinsoku ? kinsokuLists(language, false) : null
+		const engine = this.engine
+		const hyphenator = props.suppressAutoHyphens ? null : engine.hyphenator
 
 		return {
 			rtl: props.bidi,
 			source: 0,
 			kinsoku: lists === null ? null : kinsokuOf(lists),
 			hangingPunctuation: props.overflowPunct && lists !== null,
-			wordWrap: props.wordWrap
+			wordWrap: props.wordWrap,
+			hyphenator,
+			hyphenationZone: engine.compat.hyphenationZone,
+			hyphenLimit: engine.compat.hyphenLimit
 		}
 	}
 
@@ -1982,6 +2039,7 @@ export class BlockFlow {
 		to.offset = from.offset
 		to.rows = from.rows
 		to.pendingMark = from.pendingMark
+		to.hyphens = from.hyphens
 		to.y = from.y
 	}
 
@@ -2038,10 +2096,17 @@ export class BlockFlow {
 
 		if (stories === undefined) return
 
-		const width = (objects.widths[id] ?? 0) - (insets[0] ?? 0) - (insets[2] ?? 0)
+		const across = (objects.widths[id] ?? 0) - (insets[0] ?? 0) - (insets[2] ?? 0)
+		const vertical = objects.verticals[id]
+		const turn = verticalTurn(vertical)
+		const tall = (objects.heights[id] ?? 0) - (insets[1] ?? 0) - (insets[3] ?? 0)
+		// Sideways text runs along the box's height (layout/turns.ts).
+		const width = turn === 0 ? across : tall
 		const firstSource = area.page.sourceCount
 		const outer = engine.boxBehindText
-		let top = y + (insets[1] ?? 0)
+		const boxTop = y + (insets[1] ?? 0)
+		const mark = turn === 0 ? undefined : area.page.mark(new OutputMark())
+		let top = boxTop
 
 		engine.boxBehindText = behind
 
@@ -2068,6 +2133,16 @@ export class BlockFlow {
 			}
 		} finally {
 			engine.boxBehindText = outer
+		}
+
+		if (mark !== undefined && turn !== 0) {
+			const page = area.page
+
+			// eaVert and mongolianVert keep East Asian characters upright; mongolianVert's lines run left to right.
+			if (vertical === "eaVert" || vertical === "mongolianVert") page.uprightSince(mark, engine.styles.table)
+			if (vertical === "mongolianVert") page.mirrorSince(mark, boxTop, across)
+
+			page.addTurn(turn, x + (insets[0] ?? 0), boxTop, across, tall, mark)
 		}
 
 		area.page.ownSources(firstSource, area.page.sourceCount, id)
@@ -2383,6 +2458,8 @@ export class BlockFlow {
 			this.built.firstPart,
 			this.built.map
 		)
+		if (engine.recordMarks) page.markSource(this.prepared.source, g.left, g.left + g.width, this.built.markStyle)
+
 		engine.layouter.layout(this.prepared, g, page.text, cursor, top, Infinity, true)
 
 		if (this.built.dropCap === "drop" && area.exclusions !== null)

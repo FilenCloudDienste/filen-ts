@@ -71,6 +71,7 @@ import {
 	windowedState
 } from "../edit/window"
 import type { DocxDocument } from "../store"
+import { DOCX_MARK_LABELS, sameLabels, type DocxMarkLabels } from "../paint/marks"
 import { StoryCounters, markerCopy } from "../../../core/docx/reflow/counters"
 import { laidTable, sameTableLook, sourceTable } from "../../../core/docx/reflow/tables"
 import { CodeScan, blockPositions, storyDecorations, type ReflowSource, type TableSource } from "./decorate"
@@ -101,6 +102,8 @@ export interface ReflowViewOptions {
 	// The accessible name of a note's or text box's text shown at its reference.
 	// A note's text (`mark` its mark as shown, "" for a custom one) or a text box's (`mark` "").
 	readonly storyLabel?: ((kind: "footnote" | "endnote" | "textbox", mark: string) => string) | undefined
+	// The words formatting marks label breaks with (English by default).
+	readonly markLabels?: DocxMarkLabels | undefined
 }
 
 // Blocks held on each side of the selection's ends.
@@ -472,7 +475,8 @@ class StoryView {
 					tables: this.tables,
 					codeShown: field => host.editor.fieldCodeShown(field),
 					codeScan: this.windowed ? this.codeScan : undefined,
-					shownTables: this.shownTables
+					shownTables: this.shownTables,
+					formattingMarks: host.formattingMarks
 				})
 
 		return state
@@ -932,7 +936,8 @@ class ShownStory {
 			marks: [],
 			tables: table => sourceTable(part, table),
 			codeShown: field => host.editor.fieldCodeShown(field),
-			codeScan: undefined
+			codeScan: undefined,
+			formattingMarks: host.formattingMarks
 		})
 	}
 
@@ -1038,6 +1043,7 @@ export class ReflowView implements ReflowNodeHost {
 		this.main = new StoryView(this, editor.body.session, this.content, true)
 		this.rendered(this.main)
 		this.showRevisions()
+		this.showMarks()
 		scroller.scrollTop = top + this.origin()
 
 		const listen = <K extends keyof HTMLElementEventMap>(
@@ -1075,6 +1081,9 @@ export class ReflowView implements ReflowNodeHost {
 				// Another revision view: equations are painted anew for it (their trees differ per view) and tables'
 				// banding counts the rows it shows, in place.
 				if (this.showRevisions()) this.refresh()
+
+				// Formatting marks shown or hidden: the stories only shown drawn anew (the others are below).
+				if (this.showMarks()) for (const shown of [...this.shown]) shown.redraw()
 
 				// The view of field codes may have changed: decorations drawn anew.
 				for (const story of [...this.stories.values()]) {
@@ -2011,6 +2020,28 @@ export class ReflowView implements ReflowNodeHost {
 		if (options.label !== previous.label || options.describedBy !== previous.describedBy)
 			for (const story of this.stories.values()) story.view.setProps({})
 		if (options.marks !== previous.marks) this.main.redraw()
+
+		const labels = options.markLabels ?? DOCX_MARK_LABELS
+		const before = previous.markLabels ?? DOCX_MARK_LABELS
+
+		if (this.editor.formattingMarks && labels !== before && !sameLabels(labels, before)) this.refresh()
+	}
+
+	// The labels formatting marks are drawn with while the editor shows them (Show/Hide ¶), else undefined.
+	get formattingMarks(): DocxMarkLabels | undefined {
+		return this.editor.formattingMarks ? (this.options.markLabels ?? DOCX_MARK_LABELS) : undefined
+	}
+
+	// Formatting marks shown or not on the view (its stylesheet draws some of them); true when that changed.
+	private showMarks(): boolean {
+		const shown = this.editor.formattingMarks
+
+		if ((this.scroller.dataset["foMarks"] !== undefined) === shown) return false
+
+		if (shown) this.scroller.dataset["foMarks"] = ""
+		else delete this.scroller.dataset["foMarks"]
+
+		return true
 	}
 
 	// The revision view (tracked changes shown inline, or the text as it will be or was); true when it changed.

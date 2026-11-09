@@ -14,6 +14,19 @@ import {
 	type TextLayout
 } from "../../text/index"
 import { Region, SOURCE_INTS, SourceFlag, SourceInt, type PageDisplayList } from "../layout/index"
+import {
+	TURN_INTS,
+	TurnInt,
+	turnMatrixAt,
+	turnRect,
+	turnX,
+	turnY,
+	turnsOf,
+	unturnX,
+	type TurnAngle,
+	type TurnMatrix,
+	type TurnedRect
+} from "../layout/turns"
 import type { StoryPart } from "../model/index"
 import type { StoryEdits } from "./edits"
 import { offsetMap, type OffsetMap } from "./maps"
@@ -35,6 +48,11 @@ export interface CaretBox {
 	readonly height: number
 	// The line's base direction is right to left.
 	readonly rtl: boolean
+	// The line runs sideways (layout/turns.ts): the caret then lies across the page, from (x, top) `width` long
+	// (height 0), and `along` is its x in the line's own frame (what moving between lines keeps).
+	readonly turn?: TurnAngle
+	readonly width?: number
+	readonly along?: number
 }
 
 export interface HitResult {
@@ -151,6 +169,9 @@ export class PagedGeometry {
 	private readonly rectsScratch: PageRect[] = []
 	// A story shown on many pages (a header) is located on this page first.
 	private preferred = -1
+	// Pages with sideways text: the turn of each line (-1 for none) and each turn's matrix.
+	private readonly turned = new WeakMap<PageDisplayList, { readonly lines: Int32Array; readonly matrices: readonly TurnMatrix[] }>()
+	private readonly turnedScratch: TurnedRect = { x: 0, y: 0, width: 0, height: 0 }
 
 	constructor(story: StoryEdits, index: PageIndex, pages: PageSource, tester: HitTester, region: Region = Region.BODY) {
 		this.story = story
@@ -163,6 +184,91 @@ export class PagedGeometry {
 	// Positions of a story drawn on several pages (a header, a footer) are located on `page` (-1: the first).
 	preferPage(page: number): void {
 		this.preferred = page
+	}
+
+	// ---- sideways text ------------------------------------------------------------------------------------
+
+	// The turn `line` is drawn through, -1 for none (a page without turns answers at once).
+	private turnOf(page: PageDisplayList, line: number): number {
+		if (page.turnCount === 0) return -1
+
+		let turned = this.turned.get(page)
+
+		if (turned === undefined) {
+			const matrices: TurnMatrix[] = []
+
+			for (let t = 0; t < page.turnCount; t++) matrices.push(turnMatrixAt(page.turnFloats, page.turnInts, t))
+
+			turned = {
+				lines: turnsOf(page.turnCount, page.turnInts, page.text.lineCount, TurnInt.LINE_FROM) ?? new Int32Array(0),
+				matrices
+			}
+			this.turned.set(page, turned)
+		}
+
+		return turned.lines[line] ?? -1
+	}
+
+	private matrixOf(page: PageDisplayList, turn: number): TurnMatrix | undefined {
+		return turn < 0 ? undefined : this.turned.get(page)?.matrices[turn]
+	}
+
+	// The box `line` covers on the page (written into the scratch rect, read before the next call).
+	private pageBox(page: PageDisplayList, line: number): TurnedRect {
+		const floats = page.text.lineFloats
+		const x = floats[line * LINE_FLOATS + LineFloat.X] ?? 0
+		const y = floats[line * LINE_FLOATS + LineFloat.TOP] ?? 0
+		const width = floats[line * LINE_FLOATS + LineFloat.WIDTH] ?? 0
+		const height = floats[line * LINE_FLOATS + LineFloat.HEIGHT] ?? 0
+		const out = this.turnedScratch
+		const matrix = this.matrixOf(page, this.turnOf(page, line))
+
+		if (matrix !== undefined) return turnRect(matrix, x, y, width, height, out)
+
+		out.x = x
+		out.y = y
+		out.width = width
+		out.height = height
+
+		return out
+	}
+
+	// A caret box of `line`'s own frame as drawn on the page.
+	private onPage(page: PageDisplayList, box: CaretBox): CaretBox {
+		const turn = this.turnOf(page, box.line)
+		const matrix = this.matrixOf(page, turn)
+
+		if (matrix === undefined) return box
+
+		const x0 = turnX(matrix, box.x, box.top)
+		const x1 = turnX(matrix, box.x, box.top + box.height)
+
+		return {
+			...box,
+			x: Math.min(x0, x1),
+			top: turnY(matrix, box.x, box.top),
+			height: 0,
+			width: Math.abs(x1 - x0),
+			along: box.x,
+			turn: page.turnInts[turn * TURN_INTS + TurnInt.ANGLE] === 270 ? 270 : 90
+		}
+	}
+
+	// The boxes of `line` pushed to `out` from `from` on, in the line's frame, as they cover the page.
+	private rectsOnPage(page: PageDisplayList, line: number, out: PageRect[], from: number): void {
+		const matrix = this.matrixOf(page, this.turnOf(page, line))
+
+		if (matrix === undefined) return
+
+		for (let k = from; k < out.length; k++) {
+			const rect = out[k]
+
+			if (rect === undefined) continue
+
+			const box = turnRect(matrix, rect.x, rect.y, rect.width, rect.height, this.turnedScratch)
+
+			out[k] = { page: rect.page, x: box.x, y: box.y, width: box.width, height: box.height }
+		}
 	}
 
 	// ---- sources -----------------------------------------------------------------------------------------
@@ -359,6 +465,14 @@ export class PagedGeometry {
 
 	// Where position `pos` is drawn (with `affinity` choosing between a line's end and the next line's start).
 	locate(pos: number, affinity: Affinity = 1): CaretBox | undefined {
+		const box = this.locateIn(pos, affinity)
+		const page = box === undefined ? undefined : this.pages.page(box.page)
+
+		return box === undefined || page === undefined ? box : this.onPage(page, box)
+	}
+
+	// locate() in the frame of the line found (the page's, unless the line runs sideways).
+	private locateIn(pos: number, affinity: Affinity): CaretBox | undefined {
 		const block = this.textblock(pos)
 
 		if (block === undefined) return undefined
@@ -437,26 +551,28 @@ export class PagedGeometry {
 
 		const text = page.text
 		let best = -1
+		let bestX = x
 		let distance = Infinity
 
 		for (let line = 0; line < text.lineCount; line++) {
 			if (this.storyLine(page, line) < 0) continue
 
-			const top = text.lineFloats[line * LINE_FLOATS + LineFloat.TOP] ?? 0
-			const height = text.lineFloats[line * LINE_FLOATS + LineFloat.HEIGHT] ?? 0
-			const left = text.lineFloats[line * LINE_FLOATS + LineFloat.X] ?? 0
-			const width = text.lineFloats[line * LINE_FLOATS + LineFloat.WIDTH] ?? 0
+			// Lines are near by the boxes they cover on the page; a sideways line places the point along it in its frame.
+			const { x: left, y: top, width, height } = this.pageBox(page, line)
 			const dy = y < top ? top - y : y > top + height ? y - top - height : 0
 			const dx = x < left ? left - x : x > left + width ? x - left - width : 0
 			const d = dy * 1000 + dx
 
 			if (d < distance) {
+				const matrix = this.matrixOf(page, this.turnOf(page, line))
+
 				distance = d
 				best = line
+				bestX = matrix === undefined ? x : unturnX(matrix, x, y)
 			}
 		}
 
-		return best < 0 ? undefined : this.atLine(page, best, x)
+		return best < 0 ? undefined : this.atLine(page, best, bestX)
 	}
 
 	// The position at x on `line` of `page`.
@@ -497,7 +613,7 @@ export class PagedGeometry {
 	// The position one line down (dir 1) or up (-1) from `pos`, nearest to `goalX`; undefined at the story's
 	// ends.
 	verticalMove(pos: number, affinity: Affinity, goalX: number, dir: 1 | -1): HitResult | undefined {
-		const caret = this.locate(pos, affinity)
+		const caret = this.locateIn(pos, affinity)
 
 		if (caret === undefined) return undefined
 
@@ -508,7 +624,7 @@ export class PagedGeometry {
 
 		const next = this.nextLine(page, caret.line, goalX, dir)
 
-		if (next >= 0) return this.atLine(page, next, goalX)
+		if (next >= 0) return this.atLine(page, next, this.goalOn(page, caret.line, next, goalX, dir))
 
 		// The first (last) line of the next (previous) page with a line of the story.
 		for (;;) {
@@ -519,8 +635,33 @@ export class PagedGeometry {
 
 			const edge = this.edgeLine(page, dir, goalX)
 
-			if (edge >= 0) return this.atLine(page, edge, goalX)
+			if (edge >= 0) return this.atLine(page, edge, this.goalOn(page, -1, edge, goalX, dir))
 		}
+	}
+
+	// The x on line `to` that motion from line `from` (-1: from another page) by `dir` aims at, given `goalX` in
+	// the frame `from` is in. Within one frame it is kept; entering a sideways line from upright ones, the point
+	// where the goal meets the line's box on the side it is entered from; leaving one, the line's start (end
+	// going back).
+	private goalOn(page: PageDisplayList, from: number, to: number, goalX: number, dir: 1 | -1): number {
+		const fromTurn = from < 0 ? -1 : this.turnOf(page, from)
+		const toTurn = this.turnOf(page, to)
+
+		if (fromTurn === toTurn) return goalX
+
+		const floats = page.text.lineFloats
+		const lineX = floats[to * LINE_FLOATS + LineFloat.X] ?? 0
+
+		if (fromTurn >= 0) return dir > 0 ? lineX : lineX + (floats[to * LINE_FLOATS + LineFloat.WIDTH] ?? 0)
+
+		const matrix = this.matrixOf(page, toTurn)
+		const box = this.pageBox(page, to)
+
+		if (matrix === undefined) return goalX
+
+		const x = Math.max(box.x, Math.min(goalX, box.x + box.width))
+
+		return unturnX(matrix, x, dir > 0 ? box.y : box.y + box.height)
 	}
 
 	// The column `line` of `page` stands in (a text column, or a table's column of cells): the x extent of
@@ -571,7 +712,8 @@ export class PagedGeometry {
 			const lines: number[] = []
 
 			for (let line = 0; line < text.lineCount; line++) {
-				if (this.storyLine(page, line) >= 0 && this.inTable(page, line) === inTable) lines.push(line)
+				// Sideways lines stand in no column of the page's (their x runs along the text).
+				if (this.storyLine(page, line) >= 0 && this.inTable(page, line) === inTable && this.turnOf(page, line) < 0) lines.push(line)
 			}
 
 			lines.sort((a, b) => left(a) - left(b))
@@ -622,6 +764,10 @@ export class PagedGeometry {
 	// The story line below (above) `line` on `page`: the nearest by y in its column (x nearest to goalX
 	// among lines level with each other), else the top (bottom) line of the next (previous) text column.
 	private nextLine(page: PageDisplayList, line: number, goalX: number, dir: 1 | -1): number {
+		const turn = this.turnOf(page, line)
+
+		if (turn >= 0) return this.nextTurned(page, line, turn, goalX, dir)
+
 		const text = page.text
 		const top = text.lineFloats[line * LINE_FLOATS + LineFloat.TOP] ?? 0
 		const height = text.lineFloats[line * LINE_FLOATS + LineFloat.HEIGHT] ?? 0
@@ -636,10 +782,12 @@ export class PagedGeometry {
 		for (let other = 0; other < text.lineCount; other++) {
 			if (other === line || this.storyLine(page, other) < 0) continue
 
-			const lineTop = text.lineFloats[other * LINE_FLOATS + LineFloat.TOP] ?? 0
-			const lineHeight = text.lineFloats[other * LINE_FLOATS + LineFloat.HEIGHT] ?? 0
-			const x = text.lineFloats[other * LINE_FLOATS + LineFloat.X] ?? 0
-			const end = x + (text.lineFloats[other * LINE_FLOATS + LineFloat.WIDTH] ?? 0)
+			// Sideways lines by the boxes they cover on the page.
+			const box = this.pageBox(page, other)
+			const lineTop = box.y
+			const lineHeight = box.height
+			const x = box.x
+			const end = x + box.width
 
 			if (end >= left - 1 && x <= right + 1) {
 				const beyond = dir > 0 ? lineTop >= top + height - 0.5 : lineTop + lineHeight <= top + 0.5
@@ -668,6 +816,54 @@ export class PagedGeometry {
 		return best >= 0 ? best : column
 	}
 
+	// The next line (dir 1) or the one before (-1) across the lines of sideways frame `turn`, in its own frame (x
+	// along the text nearest to goalX); past its first or last line, the story's line laid out after (before) the
+	// frame's lines.
+	private nextTurned(page: PageDisplayList, line: number, turn: number, goalX: number, dir: 1 | -1): number {
+		const text = page.text
+		const floats = text.lineFloats
+		const top = floats[line * LINE_FLOATS + LineFloat.TOP] ?? 0
+		const height = floats[line * LINE_FLOATS + LineFloat.HEIGHT] ?? 0
+		const from = page.turnInts[turn * TURN_INTS + TurnInt.LINE_FROM] ?? 0
+		const to = Math.min(text.lineCount, page.turnInts[turn * TURN_INTS + TurnInt.LINE_TO] ?? 0)
+		let best = -1
+		let bestDy = Infinity
+		let bestDx = Infinity
+
+		for (let other = from; other < to; other++) {
+			if (other === line || this.storyLine(page, other) < 0 || this.turnOf(page, other) !== turn) continue
+
+			const lineTop = floats[other * LINE_FLOATS + LineFloat.TOP] ?? 0
+			const lineHeight = floats[other * LINE_FLOATS + LineFloat.HEIGHT] ?? 0
+			const x = floats[other * LINE_FLOATS + LineFloat.X] ?? 0
+			const end = x + (floats[other * LINE_FLOATS + LineFloat.WIDTH] ?? 0)
+			const beyond = dir > 0 ? lineTop >= top + height - 0.5 : lineTop + lineHeight <= top + 0.5
+
+			if (!beyond) continue
+
+			const dy = dir > 0 ? lineTop - top : top - lineTop
+			const dx = goalX < x ? x - goalX : goalX > end ? goalX - end : 0
+
+			if (dy < bestDy - 0.5 || (dy <= bestDy + 0.5 && dx < bestDx)) {
+				bestDy = dy
+				bestDx = dx
+				best = other
+			}
+		}
+
+		if (best >= 0) return best
+
+		if (dir > 0) {
+			for (let other = to; other < text.lineCount; other++)
+				if (this.storyLine(page, other) >= 0 && this.turnOf(page, other) !== turn) return other
+		} else {
+			for (let other = from - 1; other >= 0; other--)
+				if (this.storyLine(page, other) >= 0 && this.turnOf(page, other) !== turn) return other
+		}
+
+		return -1
+	}
+
 	private edgeLine(page: PageDisplayList, dir: 1 | -1, goalX: number): number {
 		const text = page.text
 		let best = -1
@@ -676,10 +872,7 @@ export class PagedGeometry {
 		for (let line = 0; line < text.lineCount; line++) {
 			if (this.storyLine(page, line) < 0) continue
 
-			const top = text.lineFloats[line * LINE_FLOATS + LineFloat.TOP] ?? 0
-			const height = text.lineFloats[line * LINE_FLOATS + LineFloat.HEIGHT] ?? 0
-			const x = text.lineFloats[line * LINE_FLOATS + LineFloat.X] ?? 0
-			const width = text.lineFloats[line * LINE_FLOATS + LineFloat.WIDTH] ?? 0
+			const { x, y: top, width, height } = this.pageBox(page, line)
 			const dx = goalX < x ? x - goalX : goalX > x + width ? goalX - x - width : 0
 			// Down: the top line (first column); up: the bottom line (last column).
 			const score = (dir > 0 ? top : -(top + height)) * 1000 + (dir > 0 ? x : -x) * 0.001 + dx * 1e-6
@@ -695,7 +888,7 @@ export class PagedGeometry {
 
 	// The start (dir -1) or end (1) of the line `pos` is drawn on.
 	lineBoundary(pos: number, affinity: Affinity, dir: 1 | -1): HitResult | undefined {
-		const caret = this.locate(pos, affinity)
+		const caret = this.locateIn(pos, affinity)
 		const page = caret === undefined ? undefined : this.pages.page(caret.page)
 
 		if (caret === undefined || page === undefined) return undefined
@@ -733,7 +926,7 @@ export class PagedGeometry {
 	// The caret one step left (dir -1) or right (1) on screen along a line with right-to-left text, or
 	// undefined at the line's visual edge or on a line with none (logical order is visual order there).
 	visualMove(pos: number, affinity: Affinity, dir: 1 | -1): HitResult | undefined {
-		const caret = this.locate(pos, affinity)
+		const caret = this.locateIn(pos, affinity)
 		const page = caret === undefined ? undefined : this.pages.page(caret.page)
 
 		if (caret === undefined || page === undefined) return undefined
@@ -823,8 +1016,10 @@ export class PagedGeometry {
 			const lb = map.toLayout[b - content] ?? end
 			// The selection continues past this line (its paragraph mark included at a paragraph's end).
 			const past = to > lineTo || (last && to > content + size)
+			const before = out.length
 
 			this.lineRects(page, line, la, lb, past, last, out)
+			this.rectsOnPage(page, line, out, before)
 		}
 
 		return out
@@ -903,6 +1098,7 @@ export class PagedGeometry {
 			const lineTo = last ? content + size : content + (map.toPm[end] ?? 0)
 			const top = text.lineFloats[line * LINE_FLOATS + LineFloat.TOP] ?? 0
 			const height = text.lineFloats[line * LINE_FLOATS + LineFloat.HEIGHT] ?? 0
+			const matrix = this.matrixOf(page, this.turnOf(page, line))
 			let memo: LineMemo | undefined
 
 			for (k = firstFrom(ranges, lineFrom - longest); k < ranges.length; k++) {
@@ -958,6 +1154,15 @@ export class PagedGeometry {
 					values[box + 1] = height
 					values[box + 2] = boxes[at] ?? 0
 					values[box + 3] = boxes[at + 1] ?? 0
+
+					if (matrix !== undefined) {
+						const turned = turnRect(matrix, boxes[at] ?? 0, top, boxes[at + 1] ?? 0, height, this.turnedScratch)
+
+						values[box] = turned.y
+						values[box + 1] = turned.height
+						values[box + 2] = turned.x
+						values[box + 3] = turned.width
+					}
 				}
 			}
 		}

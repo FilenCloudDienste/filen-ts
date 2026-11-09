@@ -5,10 +5,17 @@ export { offsetMap, type OffsetMap, type SourceMap } from "./maps"
 export { OBJECT_HIT_PROVIDERS, hitObject, type ObjectHit, type ObjectHitKind, type ObjectHitProvider } from "./objects"
 export { PageIndex } from "./pages"
 export {
+	canMoveOutlineEntry,
+	countRange,
 	countSession,
+	docxLineCount,
 	docxOutline,
+	docxRangeLayout,
 	docxWordCount,
 	goToOutlineEntry,
+	moveOutlineEntry,
+	outlineEntryAt,
+	outlineSectionEnd,
 	type DocxOutline,
 	type DocxOutlineEntry,
 	type DocxQuerySlicing,

@@ -18,8 +18,9 @@ import type { PropsStore } from "../props/store"
 import type { CellFormat, ParagraphFormat, PropertyResolver, RowPosition, TableFormat } from "../styles/resolve"
 import { ref, refItem, refPart } from "./edits"
 import { Area, BlockFlow, byParity, FlowStatus, nextToken, type Engine, type FlowSnapshot } from "./flow"
-import { PageGraphic, Layer, OutputMark } from "./output"
+import { PageGraphic, Layer, OutputMark, SourceFlag } from "./output"
 import { borderWidth, shadingDark } from "./styles"
+import { textDirectionLeftToRight, textDirectionTurn, textDirectionUpright, type TurnAngle } from "./turns"
 import { EPSILON, twips } from "./units"
 
 // Table layout: the grid from w:tblGrid (scaled to a percentage width), rows of cells laid out as block
@@ -36,8 +37,21 @@ interface Slot {
 	readonly x: number
 	readonly width: number
 	readonly continued: boolean
+	// The cell's text runs sideways (w:textDirection, see turns.ts): 90 or 270, 0 for horizontal text. `mirrored`:
+	// its lines follow each other left to right (tbLrV); `upright`: its East Asian characters stand upright.
+	readonly turn: 0 | TurnAngle
+	readonly mirrored: boolean
+	readonly upright: boolean
 	// Rows a vertical merge starting here spans (1 otherwise; -1 until counted).
 	rows: number
+}
+
+// A vertical merge of sideways text: laid out once its last row is, from the top of the first row it spans on that
+// page (`token` the area that top is in).
+interface TurnedMerge {
+	readonly slot: Slot
+	top: number
+	token: number
 }
 
 interface RowInfo {
@@ -563,6 +577,8 @@ export class TableLayout {
 	private mergeParts: (MergePart | undefined)[] = []
 	// Per slot of the row laid out: it starts a vertical merge there.
 	private readonly mergedSlots: boolean[] = []
+	// Per grid column, a vertical merge of sideways text under way (see TurnedMerge).
+	private turnedMerges: (TurnedMerge | undefined)[] = []
 	// Rows kept with the next one placed in this area since the last row that is not: where they began, to move
 	// them with a row that does not fit (see run).
 	private chain: RowChain | undefined = undefined
@@ -923,6 +939,9 @@ export class TableLayout {
 				x: bidi ? this.tableX + this.tableWidth - start - width : this.tableX + start,
 				width: Math.max(1, width),
 				continued: format.props.vMerge === "continue",
+				turn: textDirectionTurn(format.props.textDirection),
+				mirrored: textDirectionLeftToRight(format.props.textDirection),
+				upright: textDirectionUpright(format.props.textDirection),
 				rows: format.props.vMerge === "restart" ? -1 : 1
 			})
 			column += span
@@ -974,6 +993,7 @@ export class TableLayout {
 		const flows = this.mergeFlows
 		const areas = this.mergeAreas
 		const parts = this.mergeParts
+		const turned = this.turnedMerges
 		const top = this.y
 		const mark = area.page.mark(new OutputMark())
 		const footnotes = area.footnotes?.mark() ?? 0
@@ -984,6 +1004,7 @@ export class TableLayout {
 		this.mergeFlows = []
 		this.mergeAreas = []
 		this.mergeParts = []
+		this.turnedMerges = []
 		this.repeating = true
 		this.cut = false
 
@@ -996,6 +1017,7 @@ export class TableLayout {
 			this.mergeFlows = flows
 			this.mergeAreas = areas
 			this.mergeParts = parts
+			this.turnedMerges = turned
 		}
 
 		if (!this.cut && this.y <= area.bottom + EPSILON) {
@@ -1225,12 +1247,8 @@ export class TableLayout {
 					pool[k] = flow
 				}
 
-				if (!slot.continued) {
-					const fill = cellFill(slot.format.props.shading, info.table.props.shading)
-
-					flow.setContainer(slot.part, slot.item, slot.format)
-					flow.darkFill = (fill === undefined ? undefined : shadingDark(fill)) ?? this.flow.darkFill
-				} else flow.setRange(this.part, 0, 0)
+				if (!slot.continued) this.startCell(flow, slot, info)
+				else flow.setRange(this.part, 0, 0)
 			})
 		}
 
@@ -1239,16 +1257,20 @@ export class TableLayout {
 		let overflow = false
 		let anyPlaced = false
 		let height = 0
+		// Where each slot's output begins and ends (sideways text is laid out after the others, see layTurned).
 		const cellMarks: OutputMark[] = []
-		// Slots whose merge part (see mergeParts) began here: its end is the next slot's mark.
+		const cellEnds: OutputMark[] = []
+		// Slots whose merge part (see mergeParts) began here: its end is the slot's end mark.
 		const parts: number[] = []
+		// Slots of sideways text, laid out once the row's height is known.
+		const turned: number[] = []
 
 		cellArea.breaks = false
 		cellArea.inTable = true
 		cellArea.token = token
 		this.mergedSlots.length = 0
 
-		info.slots.forEach((slot, k) => {
+		const laySlot = (slot: Slot, k: number): void => {
 			const flow = pool[k]
 			const margins = this.rowMargins(slot, info, index)
 
@@ -1305,6 +1327,13 @@ export class TableLayout {
 
 			if (flow === undefined || slot.continued) return
 
+			// Sideways text is laid out whole on the row's first page (the rest of a split row holds none of it).
+			if (slot.turn !== 0) {
+				if (!continuing) turned.push(k)
+
+				return
+			}
+
 			cellArea.top = top + (continuing ? 0 : margins.top)
 
 			const span = this.spanOf(index, slot)
@@ -1341,15 +1370,41 @@ export class TableLayout {
 
 				height = Math.max(height, bottom - top)
 			}
-		})
+		}
 
-		if (parts.length > 0) {
-			const end = page.mark(new OutputMark())
+		info.slots.forEach(laySlot)
 
-			for (const k of parts) {
-				const column = info.slots[k]?.column ?? -1
+		// Each slot ends where the next begins (sideways text laid out later gets marks of its own).
+		const rowEnd = page.mark(new OutputMark())
 
-				this.mergeParts[column]?.to.copy(cellMarks[k + 1] ?? end)
+		for (let k = 0; k < info.slots.length; k++) cellEnds.push(cellMarks[k + 1] ?? rowEnd)
+
+		for (const k of parts) {
+			const column = info.slots[k]?.column ?? -1
+			const end = cellEnds[k]
+
+			if (end !== undefined) this.mergeParts[column]?.to.copy(end)
+		}
+
+		// Sideways text needs the length its longest line takes, which the row grows to (in a merge, the rows it spans).
+		for (const k of turned) {
+			const slot = info.slots[k]
+			const flow = pool[k]
+
+			if (slot === undefined || flow === undefined) continue
+
+			const margins = this.rowMargins(slot, info, index)
+			const span = this.spanOf(index, slot)
+			const merged = (this.repeating ? Math.min(span, this.headerRows - index) : span) > 1
+			const length = exact && !merged ? 0 : this.measureTurned(area, info, flow, slot, margins, top, atTop)
+
+			this.mergedSlots[k] = merged
+
+			if (merged) {
+				this.mergeBottoms[slot.column] = top + margins.top + length + margins.bottom
+				this.mergeTokens[slot.column] = area.token
+			} else {
+				height = Math.max(height, margins.top + length + margins.bottom)
 			}
 		}
 
@@ -1417,6 +1472,7 @@ export class TableLayout {
 				// Split: this part reaches the area's bottom, the rest continues on the next page.
 				height = Math.max(0, area.bottom - top)
 				this.keepMerges(area, pool, started)
+				this.layTurned(area, info, index, pool, turned, cellMarks, cellEnds, top, height)
 				this.drawRow(area, info, index, top, height, true)
 				this.y = top + height
 				this.continuing = true
@@ -1427,27 +1483,192 @@ export class TableLayout {
 		}
 
 		this.keepMerges(area, pool, started)
-
-		this.alignCells(area, info, index, pool, cellMarks, top, height)
+		this.layTurned(area, info, index, pool, turned, cellMarks, cellEnds, top, height)
+		this.alignCells(area, info, index, pool, cellMarks, cellEnds, top, height)
 
 		// A row of exact height cuts what its cells hold beyond it (a merge's, where the merge ends).
 		if (exact) {
-			const end = page.mark(new OutputMark())
-
 			info.slots.forEach((slot, k) => {
 				const from = cellMarks[k]
-				const to = cellMarks[k + 1] ?? end
+				const to = cellEnds[k]
 
-				if (from !== undefined && !slot.continued && this.mergedSlots[k] !== true)
+				if (from !== undefined && to !== undefined && !slot.continued && this.mergedSlots[k] !== true)
 					page.addClip(slot.x, top, slot.width, height, from.lines, to.lines, from.objects, to.objects)
 			})
 		}
 
 		this.endMerges(area, info, index, top, height)
+		this.endTurnedMerges(area, info, index, top, height)
 		this.drawRow(area, info, index, top, height, false)
 		this.y = top + height
 
 		return FlowStatus.DONE
+	}
+
+	// Sets `flow` to lay out the cell of `slot` from its start.
+	private startCell(flow: BlockFlow, slot: Slot, info: RowInfo): void {
+		const fill = cellFill(slot.format.props.shading, info.table.props.shading)
+
+		flow.setContainer(slot.part, slot.item, slot.format)
+		flow.darkFill = (fill === undefined ? undefined : shadingDark(fill)) ?? this.flow.darkFill
+		flow.lastFlags = SourceFlag.CELL_END
+
+		// The row's end mark follows its last cell, on the side the row ends (a mirrored row's left).
+		if (slot === info.slots[info.slots.length - 1]) {
+			const first = info.slots[0]
+			const mirrored = first !== undefined && first !== slot && first.x > slot.x
+
+			flow.firstFlags = SourceFlag.ROW_END
+			flow.rowEnd = mirrored ? slot.x : slot.x + slot.width
+		}
+	}
+
+	// The scratch area sideways text of a cell is laid out in: its lines `length` long from (x, y), nothing below it
+	// to stop at and no wrapping of the page's text around what it holds (its frame is not the page's).
+	private turnedArea(area: Area, x: number, y: number, length: number): Area {
+		const cellArea = this.cellArea.copy(area)
+
+		cellArea.breaks = false
+		cellArea.inTable = true
+		cellArea.token = nextToken()
+		cellArea.left = x
+		cellArea.width = Math.max(1, length)
+		cellArea.top = y
+		cellArea.bottom = Infinity
+		cellArea.empty = true
+		cellArea.exclusions = null
+		cellArea.bodyExclusions = null
+
+		return cellArea
+	}
+
+	// The length the lines of sideways text in `slot` need, as Word grows the row to fit them: laid out as long as
+	// the page allows (on a page with rows above it, a whole page's height, so that a row that cannot fit moves on),
+	// the room its longest line left over taken off. The trial layout is taken back and the flow set to start over.
+	private measureTurned(
+		area: Area,
+		info: RowInfo,
+		flow: BlockFlow,
+		slot: Slot,
+		margins: { top: number; bottom: number; start: number },
+		top: number,
+		atTop: boolean
+	): number {
+		const page = area.page
+		const frame = area.frame
+		const body = frame.height - frame.marginTop - frame.marginBottom
+		const left = area.bottom - top
+		const room = !Number.isFinite(left) ? body : atTop ? left : Math.max(left, body)
+		const length = Math.max(1, room - margins.top - margins.bottom)
+		const mark = page.mark(new OutputMark())
+		const footnotes = area.footnotes?.mark() ?? 0
+		const layouter = this.engine.layouter
+		const outer = layouter.leastFree
+
+		layouter.leastFree = Infinity
+		flow.run(this.turnedArea(area, slot.x + margins.start, top + margins.top, length))
+
+		const free = layouter.leastFree
+
+		layouter.leastFree = outer
+		page.rollback(mark)
+		area.footnotes?.rollback(footnotes)
+		this.startCell(flow, slot, info)
+
+		return free === Infinity ? 0 : Math.min(length, Math.max(0, length - free))
+	}
+
+	// Sideways text of the row's cells (`turned`), once the row's height is known: a cell starting a vertical merge
+	// waits for the merge's last row (endTurnedMerges).
+	private layTurned(
+		area: Area,
+		info: RowInfo,
+		index: number,
+		pool: BlockFlow[],
+		turned: readonly number[],
+		marks: OutputMark[],
+		ends: OutputMark[],
+		top: number,
+		height: number
+	): void {
+		const page = area.page
+
+		for (const k of turned) {
+			const slot = info.slots[k]
+			const flow = pool[k]
+
+			if (slot === undefined || flow === undefined) continue
+
+			if (this.mergedSlots[k] === true) {
+				this.turnedMerges[slot.column] = { slot, top, token: area.token }
+
+				continue
+			}
+
+			marks[k] = page.mark(new OutputMark())
+			this.placeTurned(area, slot, flow, this.rowMargins(slot, info, index), top, top + height)
+			ends[k] = page.mark(new OutputMark())
+		}
+	}
+
+	// Lays out the sideways text of `slot` in its box between `top` and `bottom`: lines as long as the box is tall,
+	// aligned across it (w:vAlign: top is where the first line is), then turned onto it.
+	private placeTurned(
+		area: Area,
+		slot: Slot,
+		flow: BlockFlow,
+		margins: { top: number; bottom: number; start: number; end: number },
+		top: number,
+		bottom: number
+	): void {
+		if (slot.turn === 0) return
+
+		const page = area.page
+		const x = slot.x + margins.start
+		const y = top + margins.top
+		const across = Math.max(1, slot.width - margins.start - margins.end)
+		const length = Math.max(1, bottom - y - margins.bottom)
+		const mark = page.mark(new OutputMark())
+
+		flow.run(this.turnedArea(area, x, y, length))
+
+		if (slot.upright) page.uprightSince(mark, this.engine.styles.table)
+
+		const align = slot.format.props.vAlign
+		const free = across - (flow.contentBottom() - y)
+
+		if ((align === "center" || align === "bottom") && free > EPSILON) page.move(mark, null, 0, align === "center" ? free / 2 : free)
+		if (slot.mirrored) page.mirrorSince(mark, y, across)
+
+		page.addTurn(slot.turn, x, y, across, length, mark)
+	}
+
+	// Where vertical merges of sideways text end in this row: their text laid out over the rows they span on this
+	// page. A merge running on to the next page starts over at the top of its first row there.
+	private endTurnedMerges(area: Area, info: RowInfo, index: number, top: number, height: number): void {
+		for (const slot of info.slots) {
+			if (!slot.continued) continue
+
+			const entry = this.turnedMerges[slot.column]
+
+			if (entry === undefined) continue
+
+			if (entry.token !== area.token) {
+				entry.top = top
+				entry.token = area.token
+			}
+
+			if (!this.lastOfMerge(index, slot.column)) continue
+
+			this.turnedMerges[slot.column] = undefined
+
+			const start = entry.slot
+			const flow = this.cellFlow()
+
+			this.startCell(flow, start, info)
+			this.placeTurned(area, start, flow, this.cellMargins(start), entry.top, top + height)
+			this.diagonals(area, start, info, entry.top, top + height - entry.top)
+		}
 	}
 
 	private cellFlow(): BlockFlow {
@@ -1587,6 +1808,7 @@ export class TableLayout {
 		index: number,
 		pool: BlockFlow[],
 		marks: OutputMark[],
+		ends: OutputMark[],
 		top: number,
 		height: number
 	): void {
@@ -1596,13 +1818,17 @@ export class TableLayout {
 			const align = slot.format.props.vAlign
 			const flow = pool[k]
 			const from = marks[k]
+			const to = ends[k]
 
-			// A merge is aligned across the rows it spans where it ends (endMerges).
+			// A merge is aligned across the rows it spans where it ends (endMerges); sideways text across its cell
+			// (placeTurned).
 			if (
 				(align !== "center" && align !== "bottom") ||
 				flow === undefined ||
 				from === undefined ||
+				to === undefined ||
 				slot.continued ||
+				slot.turn !== 0 ||
 				this.mergedSlots[k] === true
 			)
 				return
@@ -1611,8 +1837,6 @@ export class TableLayout {
 			const free = top + height - margins.bottom - flow.contentBottom()
 
 			if (free <= EPSILON) return
-
-			const to = marks[k + 1] ?? null
 
 			page.move(from, to, 0, align === "center" ? free / 2 : free)
 		})

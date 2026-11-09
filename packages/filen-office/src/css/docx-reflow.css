@@ -272,3 +272,88 @@
 .fo-docx-reflow ::selection {
 	background: var(--fo-selection, rgb(37 99 235 / 0.3));
 }
+
+/* Formatting marks (Show/Hide ¶, data-fo-marks): drawn where the text would go next, absolutely, so nothing moves.
+   Variable: --fo-docx-marks (the marks' colour). */
+.fo-docx-reflow[data-fo-marks] {
+	--fo-reflow-hidden: inline;
+	--fo-reflow-hidden-line: underline dotted;
+}
+
+.fo-docx-reflow-format-mark,
+.fo-docx-reflow[data-fo-marks] .fo-docx-reflow-p::after,
+.fo-docx-reflow[data-fo-marks] .fo-docx-reflow-tab::before,
+.fo-docx-reflow[data-fo-marks] .fo-docx-reflow-table tr > td:last-child::after {
+	position: absolute;
+	color: var(--fo-docx-marks, #7f7f7f);
+	font-style: normal;
+	font-weight: normal;
+	text-decoration: none;
+	text-indent: 0;
+	white-space: pre;
+	pointer-events: none;
+	user-select: none;
+	-webkit-user-select: none;
+}
+
+.fo-docx-reflow-format-mark {
+	/* A space's dot over its middle. */
+	margin-inline-start: 0.06em;
+}
+
+.fo-docx-reflow[data-fo-marks] .fo-docx-reflow-p::after {
+	content: "\00b6";
+}
+
+.fo-docx-reflow[data-fo-marks] .fo-docx-reflow-table td > .fo-docx-reflow-p:last-child::after {
+	content: "\00a4";
+}
+
+.fo-docx-reflow[data-fo-marks] .fo-docx-reflow-table tr > td:last-child {
+	position: relative;
+}
+
+.fo-docx-reflow[data-fo-marks] .fo-docx-reflow-table tr > td:last-child::after {
+	content: "\00a4";
+	top: 0.25em;
+	left: 100%;
+	padding-inline-start: 2px;
+}
+
+.fo-docx-reflow[data-fo-marks] .fo-docx-reflow-tab::before {
+	content: "\2192";
+}
+
+/* A section break's paragraph: its label between double dotted rules in place of the paragraph mark. */
+.fo-docx-reflow[data-fo-marks] .fo-docx-reflow-p[data-fo-section] {
+	overflow-x: clip;
+}
+
+.fo-docx-reflow[data-fo-marks] .fo-docx-reflow-p[data-fo-section]::after {
+	content: "::::" attr(data-fo-section) "::::";
+	padding-inline-start: 0.25em;
+	letter-spacing: 0.05em;
+}
+
+/* A page or column break: its rule dotted, labelled in the middle. */
+.fo-docx-reflow[data-fo-marks] .fo-docx-reflow-break[data-fo-label] {
+	position: relative;
+	border-top-style: dotted;
+	border-top-color: var(--fo-docx-marks, #7f7f7f);
+}
+
+.fo-docx-reflow[data-fo-marks] .fo-docx-reflow-break[data-fo-label]::after {
+	content: attr(data-fo-label);
+	position: absolute;
+	top: 0;
+	left: 50%;
+	transform: translate(-50%, -50%);
+	padding: 0 0.5em;
+	background: var(--fo-reflow-bg, #fff);
+	color: var(--fo-docx-marks, #7f7f7f);
+	font-size: 0.8em;
+	line-height: 1;
+	white-space: pre;
+	user-select: none;
+	-webkit-user-select: none;
+}

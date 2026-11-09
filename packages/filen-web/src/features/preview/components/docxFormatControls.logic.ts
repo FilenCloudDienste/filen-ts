@@ -1,3 +1,6 @@
+import type { DocxTextColor, DocxValuesSnapshot } from "@filen/office/core/docx/edit"
+import { HIGHLIGHT_SWATCHES, single, type DocxSwatch } from "@/features/preview/components/docxEditor.logic"
+
 // The Font group's editable boxes: what a typed size or font name applies.
 
 // Word's size range, 1 to 1638 pt in half-point steps (w:sz is ST_HpsMeasure, half-points).
@@ -47,4 +50,24 @@ export function fontMatches(label: string, query: string): boolean {
 	const typed = query.trim().toLocaleLowerCase()
 
 	return lower.startsWith(typed) || lower.includes(` ${typed}`)
+}
+
+// A colour picked in the font colour grid as the command takes it (none: Automatic).
+export function textColor(swatch: DocxSwatch | null): DocxTextColor {
+	return swatch === null ? { kind: "auto" } : swatch.color
+}
+
+// The selection's text and highlight colours as the colour buttons show them (undefined where they differ).
+export function colorsOf(values: DocxValuesSnapshot | undefined) {
+	const chosenHighlight = values === undefined ? undefined : single(values.highlight)
+
+	return {
+		chosenColor: values === undefined ? undefined : single(values.color),
+		chosenHighlight,
+		colorRgb: values === undefined ? undefined : single(values.colorRgb),
+		highlightRgb:
+			chosenHighlight === undefined || chosenHighlight === "none"
+				? undefined
+				: HIGHLIGHT_SWATCHES.find(swatch => swatch.name === chosenHighlight)?.rgb
+	}
 }

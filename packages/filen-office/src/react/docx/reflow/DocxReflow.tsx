@@ -2,6 +2,7 @@ import { useEffect, useImperativeHandle, useLayoutEffect, useRef, type ReactNode
 import type { PagedEditor } from "../../../core/docx/paged/index"
 import type { DocxEditorHandle, DocxEditorInteractions } from "../DocxEditor"
 import type { DocxEditorMark } from "../edit/surface"
+import type { DocxMarkLabels } from "../paint/marks"
 import type { DocxDocument } from "../store"
 import { ReflowView, type ReflowViewOptions } from "./view"
 
@@ -32,6 +33,8 @@ export interface DocxReflowProps {
 	readonly interactions?: DocxEditorInteractions
 	// The accessible name of a note's or text box's text shown at its reference.
 	readonly storyLabel?: (kind: "footnote" | "endnote" | "textbox", mark: string) => string
+	// The words formatting marks label breaks with (PagedEditor.formattingMarks shows them), English by default.
+	readonly markLabels?: DocxMarkLabels
 	// The same handle the paged editor fills.
 	readonly ref?: Ref<DocxEditorHandle>
 }
@@ -52,7 +55,8 @@ export function DocxReflow(props: DocxReflowProps): ReactNode {
 		marks: props.marks ?? EMPTY_MARKS,
 		interactions: props.interactions,
 		document: props.document,
-		storyLabel: props.storyLabel
+		storyLabel: props.storyLabel,
+		markLabels: props.markLabels
 	}
 	const optionsRef = useRef(options)
 

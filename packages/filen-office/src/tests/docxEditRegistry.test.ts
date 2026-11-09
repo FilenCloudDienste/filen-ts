@@ -167,7 +167,8 @@ const EXAMPLES: Readonly<Record<DocxEditorCommandType, object>> = {
 	"equation.edit": { latex: "x^2" },
 	"view.reflow": { on: true },
 	"view.fieldCodes": {},
-	"view.fieldCode": {}
+	"view.fieldCode": {},
+	"view.formattingMarks": {}
 }
 
 // Arguments each command must refuse.

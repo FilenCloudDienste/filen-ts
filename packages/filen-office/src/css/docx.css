@@ -104,6 +104,109 @@
 	pointer-events: none;
 }
 
+/* Formatting marks (Show/Hide ¶): a layer over everything on the page, never hit, selected or read. Variable:
+   --fo-docx-marks (the marks' colour). */
+.fo-docx-marks {
+	z-index: 2147483647;
+	user-select: none;
+	-webkit-user-select: none;
+	color: var(--fo-docx-marks, #7f7f7f);
+}
+
+.fo-docx-mark,
+.fo-docx-mark-copy {
+	position: absolute;
+	margin: 0;
+	padding: 0;
+	white-space: pre;
+	pointer-events: none;
+}
+
+.fo-docx-mark-copy,
+.fo-docx-mark-copy * {
+	color: transparent !important;
+	-webkit-text-fill-color: transparent !important;
+	-webkit-text-stroke: 0 !important;
+	text-shadow: none !important;
+	text-emphasis: none !important;
+	background: none !important;
+}
+
+/* Hidden text shows with a dotted underline in its own colour. */
+.fo-docx-mark-copy[data-fo-hidden] {
+	text-decoration: underline dotted var(--fo-docx-hidden-color, currentColor) !important;
+	text-decoration-skip-ink: none;
+}
+
+.fo-docx-mark-space,
+.fo-docx-mark-nbsp {
+	position: relative;
+}
+
+.fo-docx-mark-space::after,
+.fo-docx-mark-nbsp::after {
+	position: absolute;
+	left: 0;
+	right: 0;
+	text-align: center;
+	color: var(--fo-docx-marks, #7f7f7f);
+	-webkit-text-fill-color: var(--fo-docx-marks, #7f7f7f);
+	letter-spacing: 0;
+	text-decoration: none;
+}
+
+.fo-docx-mark-space::after {
+	content: "\00b7";
+}
+
+.fo-docx-mark-nbsp::after {
+	content: "\00b0";
+}
+
+.fo-docx-mark-tab {
+	text-align: center;
+	overflow: visible;
+}
+
+.fo-docx-mark-end[data-fo-before] {
+	transform: translateX(-100%);
+}
+
+/* A break's rule: dotted (a page or column break) or double dotted (a section break), its label in the middle. */
+.fo-docx-mark-rule {
+	display: flex;
+	align-items: center;
+	gap: 0.25em;
+}
+
+.fo-docx-mark-rule::before,
+.fo-docx-mark-rule::after {
+	content: "";
+	flex: 1 1 0;
+	min-width: 0.5em;
+	border-top: 1px dotted currentColor;
+}
+
+.fo-docx-mark-section::before,
+.fo-docx-mark-section::after {
+	height: 2px;
+	border-bottom: 1px dotted currentColor;
+}
+
+.fo-docx-mark-label {
+	flex: none;
+}
+
+.fo-docx-mark-anchor > svg {
+	display: block;
+	width: 100%;
+	height: 100%;
+	fill: none;
+	stroke: currentColor;
+	stroke-width: 1.5;
+	stroke-linecap: round;
+}
+
 .fo-docx-object > svg {
 	display: block;
 	width: 100%;

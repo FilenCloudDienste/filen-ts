@@ -162,6 +162,7 @@ export function renderRibbon(props: Partial<DocxEditToolbarProps> = {}) {
 			painter="off"
 			onPainterCancel={onPainterCancel}
 			fieldCodes={false}
+			formattingMarks={false}
 			inputRequest={null}
 			requestInput={requestInput}
 			onInputDone={vi.fn()}

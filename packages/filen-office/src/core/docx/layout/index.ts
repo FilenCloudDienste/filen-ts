@@ -29,8 +29,13 @@ export {
 	Region,
 	SOURCE_INTS,
 	SOURCE_MAP_INTS,
+	SOURCE_MARK_FLOATS,
+	SECTION_SHIFT,
+	SectionMark,
 	SourceFlag,
 	SourceInt,
+	SourceMark,
+	sectionBreakFlags,
 	type OutputView
 } from "./output"
 export {
@@ -44,4 +49,25 @@ export {
 	type FontSource,
 	type RunStyleInfo
 } from "./styles"
+export {
+	TURN_FLOATS,
+	TURN_INTS,
+	TurnInt,
+	objectTurnsOf,
+	textDirectionTurn,
+	turnCss,
+	turnMatrix,
+	turnMatrixAt,
+	turnRect,
+	turnTransform,
+	turnX,
+	turnY,
+	turnsOf,
+	unturnX,
+	unturnY,
+	verticalTurn,
+	type TurnAngle,
+	type TurnMatrix,
+	type TurnedRect
+} from "./turns"
 export { LINK_INTS, type DocxLinkTarget, type DocxPageData, type DocxTextStyle } from "./pageData"

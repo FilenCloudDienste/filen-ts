@@ -19,6 +19,7 @@ import {
 	ListOrderedIcon,
 	LockIcon,
 	MoveHorizontalIcon,
+	PanelLeftIcon,
 	PilcrowIcon,
 	Redo2Icon,
 	RemoveFormattingIcon,
@@ -29,6 +30,7 @@ import {
 	TypeIcon,
 	UnderlineIcon,
 	Undo2Icon,
+	WholeWordIcon,
 	ZoomInIcon,
 	type LucideIcon
 } from "lucide-react"
@@ -80,6 +82,8 @@ import { DocxFindField, PasswordBadge, ViewOnlyBadge, type PasswordIntegrity } f
 import { StatusZoomMenu, ZoomControls } from "@/features/preview/components/commandBarControls"
 import { ZOOM_CONTROLS_WIDTH } from "@/features/preview/components/commandBar.logic"
 import { goToPageIndex, type DocxPageStore } from "@/features/preview/components/docxGoTo.logic"
+import { DocxWordCountIndicator } from "@/features/preview/components/docxWordCount"
+import type { DocxWordCountStore } from "@/features/preview/components/docxWordCount.logic"
 import { OfficeRibbon, type RibbonGroup, type RibbonTab } from "@/features/office/components/ribbon/officeRibbon"
 import { RibbonButton, RibbonMenuTrigger } from "@/features/office/components/ribbon/ribbonControls"
 import { Badge } from "@/components/ui/badge"
@@ -197,6 +201,13 @@ export interface DocxEditToolbarProps {
 	onPainterCancel: () => void
 	// Every field shows its code (view.fieldCodes).
 	fieldCodes: boolean
+	// Formatting marks are shown (view.formattingMarks, Show/Hide ¶).
+	formattingMarks: boolean
+	// Word's Navigation pane: shown or not (View ▸ Navigation pane), and its search (Home ▸ Find, as Ctrl+F); without
+	// it Find opens the find bar.
+	navigation?: { open: boolean; onChange: (open: boolean) => void; onSearch: () => void } | undefined
+	// The status bar's word count and the Word Count dialog it opens (Review ▸ Word count too).
+	words?: { store: DocxWordCountStore; onOpen: () => void } | undefined
 	// The input request channel the tabs take part in (docxEditor.logic.ts DocxInputRequest).
 	inputRequest: DocxInputRequest | null
 	requestInput: DocxRequestInput
@@ -255,10 +266,46 @@ function CommandButton({
 	)
 }
 
+// Home > Paragraph's Show/Hide ¶: formatting marks shown (a view of the document, enabled read-only too).
+const FORMATTING_MARKS = VIEW_SLOT.find(command => command.info.type === "view.formattingMarks")
+
+function FormattingMarksButton({
+	command,
+	pressed,
+	disabled,
+	apple,
+	execute
+}: {
+	command: DocxToolbarCommand
+	pressed: boolean
+	disabled: boolean
+	apple: boolean
+	execute: (command: DocxEditorCommand) => void
+}) {
+	const { t } = useTranslation("preview")
+	const shortcut = shortcutHint(command.info, apple, BROWSER)
+
+	return (
+		<TooltipIconButton
+			label={t(command.label)}
+			disabled={disabled}
+			pressed={pressed}
+			className={cn(pressed && "bg-accent text-foreground")}
+			shortcut={shortcut === undefined ? undefined : <KbdKeys keys={shortcutKeys(shortcut, apple)} />}
+			onMouseDown={keepFocus}
+			onClick={() => {
+				execute({ type: "view.formattingMarks" })
+			}}
+		>
+			<PilcrowIcon />
+		</TooltipIconButton>
+	)
+}
+
 const STYLE_MIXED = "mixed"
 const STYLE_CUSTOM = "custom"
 
-function StylePicker({
+export function StylePicker({
 	styles,
 	style,
 	styleName,
@@ -470,9 +517,18 @@ function LineSpacingMenu({
 	)
 }
 
-// Find ▾: find, or find and replace.
+// Find ▾: find (the Navigation pane's search, as Word's Find; the find bar without the pane), Word's Advanced Find
+// (the find bar), or find and replace.
 // Word's Find and Replace is Ctrl+H, Control+H on a Mac (findForKey); shown as a hint, kept out of the item's name.
-function FindMenu({ onFindOpen, apple }: { onFindOpen: (replace: boolean) => void; apple: boolean }) {
+function FindMenu({
+	onFindOpen,
+	onSearch,
+	apple
+}: {
+	onFindOpen: (replace: boolean) => void
+	onSearch: (() => void) | undefined
+	apple: boolean
+}) {
 	const { t } = useTranslation("preview")
 	const replaceCombo = apple ? "ctrl+h" : "mod+h"
 
@@ -486,11 +542,24 @@ function FindMenu({ onFindOpen, apple }: { onFindOpen: (replace: boolean) => voi
 			<DropdownMenuContent data-preview-surface>
 				<DropdownMenuItem
 					onClick={() => {
-						onFindOpen(false)
+						if (onSearch === undefined) {
+							onFindOpen(false)
+						} else {
+							onSearch()
+						}
 					}}
 				>
 					{t("previewDocxFindAction")}
 				</DropdownMenuItem>
+				{onSearch === undefined ? null : (
+					<DropdownMenuItem
+						onClick={() => {
+							onFindOpen(false)
+						}}
+					>
+						{t("previewDocxFindAdvanced")}
+					</DropdownMenuItem>
+				)}
 				<DropdownMenuItem
 					aria-keyshortcuts="Control+H"
 					onClick={() => {
@@ -733,7 +802,11 @@ export function DocxEditToolbar(props: DocxEditToolbarProps) {
 					id: "paragraph",
 					label: t("previewDocxRibbonParagraph"),
 					icon: PilcrowIcon,
-					width: (LISTS.length + ALIGN.length) * BUTTON + (LINE_SPACING ? MENU : 0) + (PARAGRAPH_DIALOG ? BUTTON : 0),
+					width:
+						(LISTS.length + ALIGN.length) * BUTTON +
+						(LINE_SPACING ? MENU : 0) +
+						(PARAGRAPH_DIALOG ? BUTTON : 0) +
+						(FORMATTING_MARKS === undefined ? 0 : BUTTON),
 					priority: 5,
 					content: (
 						<>
@@ -741,6 +814,15 @@ export function DocxEditToolbar(props: DocxEditToolbarProps) {
 							{ALIGN.map(button)}
 							{lineSpacingMenu}
 							{paragraphDialog(false)}
+							{FORMATTING_MARKS === undefined ? null : (
+								<FormattingMarksButton
+									command={FORMATTING_MARKS}
+									pressed={props.formattingMarks}
+									disabled={snapshot?.enabled["view.formattingMarks"] !== true}
+									apple={apple}
+									execute={execute}
+								/>
+							)}
 						</>
 					)
 				},
@@ -771,6 +853,7 @@ export function DocxEditToolbar(props: DocxEditToolbarProps) {
 					content: (
 						<FindMenu
 							onFindOpen={props.onFindOpen}
+							onSearch={props.navigation?.onSearch}
 							apple={apple}
 						/>
 					)
@@ -831,9 +914,31 @@ export function DocxEditToolbar(props: DocxEditToolbarProps) {
 		case "references":
 			groups.push(...docxReferencesGroups(slotProps(REFERENCES_SLOT), t))
 			break
-		case "review":
+		case "review": {
+			const words = props.words
+
+			if (words !== undefined) {
+				groups.push({
+					id: "proofing",
+					label: t("previewDocxRibbonProofing"),
+					icon: WholeWordIcon,
+					width: 116,
+					priority: 1,
+					single: true,
+					content: (
+						<RibbonButton
+							label={t("previewDocxWordCountTitle")}
+							icon={<WholeWordIcon />}
+							text={t("previewDocxWordCountTitle")}
+							onClick={words.onOpen}
+						/>
+					)
+				})
+			}
+
 			groups.push(...docxReviewGroups(slotProps(REVIEW_SLOT), props.markup, props.onMarkupChange, t))
 			break
+		}
 		case "view": {
 			const reflow = VIEW_SLOT.find(command => command.info.type === "view.reflow")
 			const fieldCodes = VIEW_SLOT.find(command => command.info.type === "view.fieldCodes")
@@ -907,25 +1012,42 @@ export function DocxEditToolbar(props: DocxEditToolbarProps) {
 				})
 			}
 
-			if (fieldCodes !== undefined) {
+			const navigation = props.navigation
+
+			if (fieldCodes !== undefined || navigation !== undefined) {
 				groups.push({
 					id: "show",
 					label: t("previewOfficeRibbonShow"),
 					icon: CodeIcon,
-					width: 150,
+					width: (fieldCodes === undefined ? 0 : 150) + (navigation === undefined ? 0 : 160),
 					priority: 1,
-					single: true,
+					single: fieldCodes === undefined || navigation === undefined,
 					content: (
-						<RibbonButton
-							label={t(fieldCodes.label)}
-							icon={<CodeIcon />}
-							text={t(fieldCodes.label)}
-							pressed={props.fieldCodes}
-							disabled={snapshot?.enabled["view.fieldCodes"] !== true}
-							onClick={() => {
-								execute({ type: "view.fieldCodes" })
-							}}
-						/>
+						<>
+							{navigation === undefined ? null : (
+								<RibbonButton
+									label={t("previewDocxNavigationPane")}
+									icon={<PanelLeftIcon />}
+									text={t("previewDocxNavigationPane")}
+									pressed={navigation.open}
+									onClick={() => {
+										navigation.onChange(!navigation.open)
+									}}
+								/>
+							)}
+							{fieldCodes === undefined ? null : (
+								<RibbonButton
+									label={t(fieldCodes.label)}
+									icon={<CodeIcon />}
+									text={t(fieldCodes.label)}
+									pressed={props.fieldCodes}
+									disabled={snapshot?.enabled["view.fieldCodes"] !== true}
+									onClick={() => {
+										execute({ type: "view.fieldCodes" })
+									}}
+								/>
+							)}
+						</>
 					)
 				})
 			}
@@ -976,6 +1098,12 @@ export function DocxEditToolbar(props: DocxEditToolbarProps) {
 								pages={props.pages}
 								onGoTo={props.onGoTo}
 								onClosed={props.onGoToClosed}
+							/>
+						)}
+						{props.words === undefined ? null : (
+							<DocxWordCountIndicator
+								store={props.words.store}
+								onOpen={props.words.onOpen}
 							/>
 						)}
 						<StatusZoomMenu

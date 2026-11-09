@@ -160,6 +160,9 @@ export interface ContentServices {
 	readonly stretchObjects: boolean
 	readonly view: RevisionView
 	readonly showHidden: boolean
+	// Set once anything hidden (w:vanish, w:specVanish) is met, shown or not: showing hidden text changes nothing
+	// laid out before then.
+	readonly hidden?: { seen: boolean }
 	// List markers already counted, by paragraph: a paragraph laid out again must not count twice.
 	readonly markers: Map<number, ListMarker | null>
 	// Record where each item's content lands in the paragraph text (editing maps positions through it).
@@ -280,6 +283,14 @@ export class ContentBuilder {
 	constructor(services: ContentServices) {
 		this.services = services
 		this.table = services.styles.table
+		this.showHidden = services.showHidden
+	}
+
+	// Whether hidden text is laid out (ContentServices.showHidden), for the paragraphs built from now on.
+	private showHidden: boolean
+
+	setShowHidden(on: boolean): void {
+		this.showHidden = on
 	}
 
 	// Shows fields as their codes (see FieldCodes), or as their results when undefined. Takes effect for the
@@ -343,7 +354,11 @@ export class ContentBuilder {
 		if (this.codes !== undefined && part.fields.count > 0 && this.codeMarksOf(part).has(item)) return true
 		if (this.codes?.within?.(part, item) === true) return true
 
-		return markVanishes(this.services.resolver.paragraphMark(format), this.services.showHidden)
+		const mark = this.services.resolver.paragraphMark(format)
+
+		if ((mark.vanish || mark.specVanish) && this.services.hidden !== undefined) this.services.hidden.seen = true
+
+		return markVanishes(mark, this.showHidden)
 	}
 
 	// Builds paragraphs first..last (joined: every mark but the last hidden) into the paragraph builder;
@@ -431,7 +446,8 @@ export class ContentBuilder {
 
 		const run = services.resolver.listMarker(format)
 
-		if (run === undefined || (run.vanish && !services.showHidden)) return
+		if (run?.vanish === true && services.hidden !== undefined) services.hidden.seen = true
+		if (run === undefined || (run.vanish && !this.showHidden)) return
 
 		const builder = this.builder
 		const text = listMarkerText(marker)
@@ -524,7 +540,11 @@ export class ContentBuilder {
 					run = resolver.run(format, store.runLook(part.document, row))
 					runEnd = next
 					revision = view === RevisionView.Markup ? this.revisionOf(part, item, paragraph) : TrackedLook.NONE
-					runHidden = (run.vanish || run.specVanish) && !services.showHidden
+					runHidden = run.vanish || run.specVanish
+
+					if (runHidden && services.hidden !== undefined) services.hidden.seen = true
+
+					runHidden &&= !this.showHidden
 					next = item + 1
 
 					break

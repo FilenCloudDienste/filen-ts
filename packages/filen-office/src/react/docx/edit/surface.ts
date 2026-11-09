@@ -4,8 +4,12 @@ import { MarkBoxes, type CaretBox, type PagedEditor, type PageRect } from "../..
 import type { DocxPageData, DocxSessionApi } from "../../../dom/docx/protocol"
 import type { DocxMediaCache } from "../media"
 import { paintObjects } from "../paint/objects"
+import { paintMarks, sameLabels, type DocxMarkLabels } from "../paint/marks"
 import { paintPage, patchPage, type PaintedPage } from "../paint/page"
 import type { DocxTables } from "../store"
+
+// The formatting marks layer of each painted page's root (a page painted anew gets a new root, and a new layer).
+const MARKS_LAYERS = new WeakMap<HTMLElement, HTMLElement>()
 
 // Draws the pages of a paged editor: each mounted page is painted from its display list and, when laid out
 // again, patched line by line; above it a layer with the caret, the selection, the text being composed and
@@ -127,6 +131,8 @@ export class EditSurface {
 	private marks: readonly DocxEditorMark[] = []
 	private orderedFor: Node | undefined = undefined
 	private longestMark = 0
+	// The labels formatting marks are shown with, undefined while they are hidden.
+	private markLabels: DocxMarkLabels | undefined = undefined
 	private focused = false
 	private caretPage: { index: number; box: CaretBox } | undefined = undefined
 	// One caret element, moved rather than made again: its blink runs on the compositor, and a new one each
@@ -267,6 +273,8 @@ export class EditSurface {
 			objectsChanged = patched.objectsChanged
 		}
 
+		this.paintFormattingMarks(mounted.painted)
+
 		if (objectsChanged) {
 			mounted.signal.aborted = true
 			mounted.release()
@@ -283,6 +291,37 @@ export class EditSurface {
 		}
 
 		return true
+	}
+
+	// Formatting marks shown with these labels (Show/Hide ¶), or none (undefined). Whether that changed.
+	setFormattingMarks(labels: DocxMarkLabels | undefined): boolean {
+		if (labels === this.markLabels || (labels !== undefined && this.markLabels !== undefined && sameLabels(labels, this.markLabels)))
+			return false
+
+		this.markLabels = labels
+
+		for (const mounted of this.mounted.values()) if (mounted.painted !== undefined) this.paintFormattingMarks(mounted.painted)
+
+		return true
+	}
+
+	// The marks layer of a painted page brought to what it shows now (taken away while marks are hidden).
+	private paintFormattingMarks(painted: PaintedPage): void {
+		const sources = this.sources
+		const root = painted.root
+		const layer = MARKS_LAYERS.get(root)
+
+		if (this.markLabels === undefined || sources === undefined) {
+			layer?.remove()
+
+			return
+		}
+
+		const next = paintMarks(painted, { document: root.ownerDocument, tables: sources.tables, labels: this.markLabels }, layer)
+
+		if (next.parentNode !== root) root.appendChild(next)
+
+		MARKS_LAYERS.set(root, next)
 	}
 
 	// ---- overlays -----------------------------------------------------------------------------------------
@@ -356,7 +395,11 @@ export class EditSurface {
 
 		if (element.parentNode !== mounted.caret) mounted.caret.appendChild(element)
 
-		const style = `left:${round(box.x)}px;top:${round(box.top)}px;height:${round(box.height)}px;`
+		// In sideways text the caret lies across the page.
+		const style =
+			box.turn === undefined
+				? `left:${round(box.x)}px;top:${round(box.top)}px;height:${round(box.height)}px;`
+				: `left:${round(box.x)}px;top:${round(box.top)}px;width:${round(box.width ?? 0)}px;height:var(--fo-caret-width, 1.5px);margin-left:0;margin-top:calc(var(--fo-caret-width, 1.5px) / -2);`
 
 		if (style !== this.caretStyle) {
 			element.style.cssText = style

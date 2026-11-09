@@ -12,6 +12,7 @@ import {
 	SourceInt,
 	buildDocxModel,
 	drawingAltText,
+	objectTurnsOf,
 	layoutDocument,
 	openDocxPackage,
 	gateReasons,
@@ -55,6 +56,7 @@ import {
 	LINE_INTS,
 	LineInt,
 	SMALL_CAPS_SCALE,
+	type HyphenationLibrary,
 	type TextMeasurer
 } from "../../core/text/index"
 import { XmlError, type XmlDocument } from "../../core/xml/index"
@@ -92,6 +94,9 @@ export interface DocxEngineServices {
 	readonly fontHost: FontHost
 	readonly replayFonts: boolean
 	readonly fontAssets: FontAssets
+	// Patterns for documents that hyphenate automatically, shared by every document of the realm; without them only
+	// soft hyphens break words.
+	readonly hyphenation?: HyphenationLibrary
 	readonly measurer: TextMeasurer
 	// Gives the host a turn between layout slices (a macrotask, so requests are answered meanwhile).
 	readonly yield: () => Promise<void>
@@ -497,6 +502,7 @@ export class DocxEngine implements DocxSessionApi {
 			sliceMs: services.sliceMs ?? 12,
 			yield: services.yield,
 			...(services.now === undefined ? {} : { now: services.now }),
+			...(services.hyphenation === undefined ? {} : { hyphenation: services.hyphenation }),
 			...(prepared === undefined ? { mapParagraph: linkMapParagraph(this.view) } : { edits: prepared.edits, recordMaps: true })
 		})
 
@@ -607,6 +613,7 @@ export class DocxEngine implements DocxSessionApi {
 			const color = info[id]?.color
 			const effect = info[id]?.effect
 			const emphasis = info[id]?.emphasis
+			const run = info[id]?.run
 
 			out.push({
 				font,
@@ -620,6 +627,7 @@ export class DocxEngine implements DocxSessionApi {
 				descent: extents.descent,
 				revision: info[id]?.revision ?? 0,
 				author: info[id]?.author ?? 0,
+				...(run?.vanish === true || run?.specVanish === true ? { hidden: true as const } : {}),
 				...(effect === undefined || effect === 0 ? {} : { effect }),
 				...(emphasis === undefined || emphasis === 0 ? {} : { emphasis })
 			})
@@ -681,11 +689,19 @@ export class DocxEngine implements DocxSessionApi {
 
 	// The page's placed objects plus its inline ones, which the text layout carries as object fragments
 	// on their lines (box: the fragment's x and width, the object's ascent above the baseline).
-	private inlineObjects(page: PageDisplayList): { count: number; floats: Float32Array; ints: Int32Array; kinds: Uint8Array } {
+	private inlineObjects(page: PageDisplayList): {
+		count: number
+		floats: Float32Array
+		ints: Int32Array
+		kinds: Uint8Array
+		turns: Int32Array | undefined
+	} {
 		const table = this.layout?.objects
 		const text = page.text
 		const floats = Array.from(page.objectFloats)
 		const ints = Array.from(page.objectInts)
+		// The line of each inline object, for the turn it is drawn through.
+		const lines: number[] = []
 
 		for (let line = 0; line < text.lineCount; line++) {
 			const baseline = text.lineFloats[line * LINE_FLOATS + 2] ?? 0
@@ -707,6 +723,8 @@ export class DocxEngine implements DocxSessionApi {
 					height
 				)
 				ints.push(id, Layer.TEXT, text.lineInts[line * LINE_INTS + LineInt.SOURCE] ?? -1)
+
+				if (page.turnCount > 0) lines.push(line)
 			}
 		}
 
@@ -717,7 +735,13 @@ export class DocxEngine implements DocxSessionApi {
 
 		for (let o = 0; o < total; o++) kinds[o] = table?.kinds[ints[o * OBJECT_INTS] ?? -1] ?? 0
 
-		return { count: total, floats: Float32Array.from(floats), ints: Int32Array.from(ints), kinds }
+		return {
+			count: total,
+			floats: Float32Array.from(floats),
+			ints: Int32Array.from(ints),
+			kinds,
+			turns: objectTurnsOf(page.turnCount, page.turnInts, text.lineCount, page.objectCount, lines)
+		}
 	}
 
 	private pageData(page: PageDisplayList, transfer: ArrayBuffer[]): DocxPageData {
@@ -760,8 +784,17 @@ export class DocxEngine implements DocxSessionApi {
 			sourceInts: page.sourceInts.slice(),
 			sourceTexts: page.sourceTexts,
 			...(page.sourceOwners.some(owner => owner >= 0) ? { sourceOwners: page.sourceOwners.slice() } : {}),
+			...(page.marked ? { sourceMarks: page.sourceMarks.slice() } : {}),
 			linkCount: linkInts.length / LINK_INTS,
-			linkInts: Int32Array.from(linkInts)
+			linkInts: Int32Array.from(linkInts),
+			...(objects.turns === undefined
+				? {}
+				: {
+						turnCount: page.turnCount,
+						turnFloats: page.turnFloats.slice(),
+						turnInts: page.turnInts.slice(),
+						objectTurns: objects.turns
+					})
 		}
 
 		for (const array of [
@@ -778,7 +811,11 @@ export class DocxEngine implements DocxSessionApi {
 			data.objectKinds,
 			data.sourceInts,
 			data.sourceOwners,
-			data.linkInts
+			data.sourceMarks,
+			data.linkInts,
+			data.turnFloats,
+			data.turnInts,
+			data.objectTurns
 		]) {
 			if (array === undefined) continue
 
@@ -1151,6 +1188,7 @@ export class DocxEngine implements DocxSessionApi {
 				if (signal?.aborted === true || this.closed) stop.aborted = true
 			},
 			...(services.now === undefined ? {} : { now: services.now }),
+			...(services.hyphenation === undefined ? {} : { hyphenation: services.hyphenation }),
 			...(this.layoutEdits === undefined ? {} : { edits: this.layoutEdits })
 		})
 

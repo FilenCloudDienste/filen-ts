@@ -1,5 +1,5 @@
 import type { Mark, Node } from "prosemirror-model"
-import { Plugin, type EditorState, type Transaction } from "prosemirror-state"
+import { Plugin, Selection, type EditorState, type Transaction } from "prosemirror-state"
 import { EditorView, type NodeView, type NodeViewConstructor } from "prosemirror-view"
 import { docxSchema, isWriteCommand } from "../../../core/docx/edit/index"
 import {
@@ -755,6 +755,13 @@ export class EditSink {
 		const extend = event.shiftKey
 		const state = editor.state
 
+		// In sideways text (a table cell's text direction) the arrows move as the text is drawn.
+		if (event.key.startsWith("Arrow") && !mod && !event.altKey && !event.metaKey && !event.ctrlKey) {
+			const turn = editor.caretTurn()
+
+			if (turn !== 0) return turnedArrow(editor, event.key, turn, extend)
+		}
+
 		switch (event.key) {
 			case "ArrowUp":
 			case "ArrowDown": {
@@ -898,6 +905,50 @@ export class EditSink {
 
 		return false
 	}
+}
+
+// An arrow key in sideways text (`turn` 90: top to bottom, lines right to left; 270: bottom to top, lines left to
+// right), as Word moves in it: along the text by characters (on into the next or previous paragraph), across it by
+// lines.
+export function turnedArrow(editor: PagedEditor, key: string, turn: 90 | 270, extend: boolean): boolean {
+	const forward = turn === 90 ? "ArrowDown" : "ArrowUp"
+	const backward = turn === 90 ? "ArrowUp" : "ArrowDown"
+
+	if (key === forward || key === backward) {
+		const dir = key === forward ? 1 : -1
+		const selection = editor.state.selection
+		const doc = editor.state.doc
+
+		// A selection collapses to its end in the direction of the key.
+		if (!extend && !selection.empty) {
+			const pos = dir > 0 ? selection.to : selection.from
+
+			return editor.moveTo({ pos, affinity: 1, page: -1, line: -1, atom: false }, false, false)
+		}
+
+		const head = selection.head
+		const pos = stepCharacter(doc, head, dir) ?? Selection.findFrom(doc.resolve(edgeOf(doc, head, dir)), dir, true)?.head
+
+		if (pos === undefined) return true
+
+		return editor.moveTo({ pos, affinity: 1, page: -1, line: -1, atom: false }, extend, false)
+	}
+
+	if (key !== "ArrowLeft" && key !== "ArrowRight") return false
+
+	// The next line lies left of a top to bottom line, right of a bottom to top one.
+	const next = turn === 90 ? "ArrowLeft" : "ArrowRight"
+
+	editor.moveVertical(key === next ? 1 : -1, extend)
+
+	return true
+}
+
+// Just past the end (dir 1) or before the start (-1) of the textblock holding `pos`.
+function edgeOf(doc: Node, pos: number, dir: 1 | -1): number {
+	const $pos = doc.resolve(pos)
+
+	return $pos.depth === 0 ? pos : dir > 0 ? $pos.after() : $pos.before()
 }
 
 // The position one character (a surrogate pair, an inline atom) after (dir 1) or before (-1) `pos` in its

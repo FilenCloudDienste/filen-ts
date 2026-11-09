@@ -7,6 +7,8 @@ import {
 	GRAPHIC_INTS,
 	OBJECT_FLOATS,
 	OBJECT_INTS,
+	TURN_FLOATS,
+	TURN_INTS,
 	type DocumentLayout,
 	type PageDisplayList
 } from "@filen/office/core/docx"
@@ -160,6 +162,25 @@ function digestGraphics(layout: Pick<DocumentLayout, "decorations">, page: PageD
 				round(page.clipFloats[f + 3]),
 				(page.clipInts[i + 1] ?? 0) - (page.clipInts[i] ?? 0),
 				(page.clipInts[i + 3] ?? 0) - (page.clipInts[i + 2] ?? 0)
+			].join(" ")
+		)
+	}
+
+	for (let k = 0; k < page.turnCount; k++) {
+		const f = k * TURN_FLOATS
+		const i = k * TURN_INTS
+
+		out.push(
+			[
+				"turn",
+				page.turnInts[i] ?? 0,
+				round(page.turnFloats[f]),
+				round(page.turnFloats[f + 1]),
+				round(page.turnFloats[f + 2]),
+				round(page.turnFloats[f + 3]),
+				(page.turnInts[i + 2] ?? 0) - (page.turnInts[i + 1] ?? 0),
+				(page.turnInts[i + 4] ?? 0) - (page.turnInts[i + 3] ?? 0),
+				(page.turnInts[i + 6] ?? 0) - (page.turnInts[i + 5] ?? 0)
 			].join(" ")
 		)
 	}

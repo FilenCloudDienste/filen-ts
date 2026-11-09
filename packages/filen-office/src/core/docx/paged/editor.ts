@@ -177,6 +177,8 @@ export class PagedEditor {
 	// Fields shown as their codes (Word's Alt+F9), and the fields switched the other way one by one (Shift+F9,
 	// by their nodes): a view, never saved.
 	private fieldCodesAll = false
+	// Word's formatting marks shown (Show/Hide ¶): a view, never saved.
+	private formattingMarksValue = false
 	private readonly codeToggles = new Set<Node>()
 	private readonly pendingStories = new Set<number>()
 	private readonly settledWaiters: (() => void)[] = []
@@ -806,6 +808,43 @@ export class PagedEditor {
 		return this.fieldCodesAll
 	}
 
+	// Shows or hides Word's formatting marks (Show/Hide ¶): the surfaces draw them over the text, and hidden text is
+	// laid out (from the first page, as setView does) when there is any. A view, never saved. False when it already
+	// is so.
+	setFormattingMarks(on: boolean): boolean {
+		if (on === this.formattingMarksValue) return false
+
+		this.formattingMarksValue = on
+
+		const layout = this.layout
+
+		if (layout.showHidden !== on) {
+			this.keepUp()
+
+			const restart = layout.setShowHidden(on)
+
+			if (restart >= 0) {
+				for (const story of this.stories.values()) if (story.region !== undefined) story.index.truncate(0)
+
+				this.changed.clear()
+
+				if (this.suspendedValue) this.pendingPage = 0
+				else this.advanceFrom(restart)
+
+				this.heads.delete(this.active)
+				this.keepVisible(this.active, this.session.state)
+			}
+		}
+
+		this.changedState()
+
+		return true
+	}
+
+	get formattingMarks(): boolean {
+		return this.formattingMarksValue
+	}
+
 	// Switches fields (nodes of the story being edited: field atoms, or the begin character of a field spanning
 	// paragraphs) between code and result (Word's Shift+F9). Laid out again from the first page showing `range`
 	// of the story's document (where the fields are, whole) when the story is the body and layout knows it as
@@ -1423,7 +1462,8 @@ export class PagedEditor {
 		const state = this.session.state
 		const head = state.selection.head
 		const caret = this.geometry.locate(head, this.affinityValue)
-		const goal = this.goal ?? caret?.x ?? 0
+		// Sideways text keeps the caret's place along its line (in the line's own frame).
+		const goal = this.goal ?? caret?.along ?? caret?.x ?? 0
 		const hit = this.geometry.verticalMove(head, this.affinityValue, goal, dir)
 
 		if (hit === undefined) {
@@ -1435,8 +1475,16 @@ export class PagedEditor {
 		}
 
 		const anchor = extend ? state.selection.anchor : hit.pos
+		// Into or out of sideways text: the goal was in the other frame, the caret's own is kept from here.
+		const kept = caret?.turn === this.geometry.locate(hit.pos, hit.affinity)?.turn ? goal : undefined
 
-		return this.apply(state.tr.setSelection(textSelection(state.doc, anchor, hit.pos)), hit.affinity, goal)
+		return this.apply(state.tr.setSelection(textSelection(state.doc, anchor, hit.pos)), hit.affinity, kept)
+	}
+
+	// How the caret's line runs: 0 upright, 90 top to bottom, 270 bottom to top (text turned in a table cell); arrow
+	// keys move along and across it as it is drawn.
+	caretTurn(): 0 | 90 | 270 {
+		return this.caret()?.turn ?? 0
 	}
 
 	// The caret to the start or end of its line.
@@ -1470,7 +1518,10 @@ export class PagedEditor {
 
 	// The x vertical motion keeps (the caret's own when none was kept).
 	goalX(): number | undefined {
-		return this.goal ?? this.caret()?.x
+		const caret = this.caret()
+
+		// A caret in sideways text keeps its goal in the line's frame: the page's x is where it is drawn.
+		return caret?.turn !== undefined ? caret.x : (this.goal ?? caret?.x)
 	}
 
 	private apply(tr: Transaction, affinity: Affinity, goal: number | undefined): boolean {

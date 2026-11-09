@@ -185,9 +185,10 @@ function selectWord(editor: PagedEditor, word: string): void {
 	})
 }
 
+// The find bar: Word's Advanced Find (Find itself is the Navigation pane's search).
 async function openFindField(): Promise<void> {
 	fireEvent.click(screen.getByRole("button", { name: "Find in document" }))
-	fireEvent.click(await screen.findByRole("menuitem", { name: "Find in document" }))
+	fireEvent.click(await screen.findByRole("menuitem", { name: "Advanced find…" }))
 }
 
 async function readBack(bytes: Uint8Array): Promise<string> {
@@ -512,8 +513,7 @@ describe("DocxEditView", () => {
 		const { editor } = await openEditor()
 
 		typeAtStart(editor, "zebra zebra ")
-		fireEvent.click(screen.getByRole("button", { name: "Find in document" }))
-		fireEvent.click(await screen.findByRole("menuitem", { name: "Find in document" }))
+		await openFindField()
 
 		const field = await screen.findByRole("searchbox", { name: "Find" })
 
@@ -556,8 +556,9 @@ describe("DocxEditView", () => {
 
 		await screen.findAllByRole("menuitem")
 
-		expect(screen.getAllByRole("menuitem").map(item => item.getAttribute("aria-keyshortcuts"))).toEqual([null, "Control+H"])
+		expect(screen.getAllByRole("menuitem").map(item => item.getAttribute("aria-keyshortcuts"))).toEqual([null, null, "Control+H"])
 		expect(screen.getByRole("menuitem", { name: "Find in document" })).toBeTruthy()
+		expect(screen.getByRole("menuitem", { name: "Advanced find…" })).toBeTruthy()
 
 		const replace = screen.getByRole("menuitem", { name: "Find and replace" })
 

@@ -139,6 +139,12 @@ export interface DocxPdfPage {
 	readonly clipCount: number
 	readonly clipFloats: Float32Array
 	readonly clipInts: Int32Array
+	// Text turned sideways in a box (layout/turns.ts), and per object the turn it is drawn through (-1 for none); absent
+	// on a page without turns.
+	readonly turnCount?: number
+	readonly turnFloats?: Float32Array
+	readonly turnInts?: Int32Array
+	readonly objectTurns?: Int32Array
 	// Per source: its role, and the key of its paragraph in the document ("" for generated text).
 	readonly roles: readonly DocxPdfRole[]
 	readonly keys: readonly string[]

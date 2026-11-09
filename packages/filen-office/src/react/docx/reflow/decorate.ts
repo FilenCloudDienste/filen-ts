@@ -6,8 +6,11 @@ import { markerText, type StoryCounters } from "../../../core/docx/reflow/counte
 import { paragraphCss, runCss, type CssFaces } from "../../../core/docx/reflow/css"
 import { cellTables, tableLook, type LaidTable } from "../../../core/docx/reflow/tables"
 import { ReviewKind, reviewIndexKept } from "../../../core/docx/review/index"
+import { SECTION_SHIFT, sectionBreakFlags } from "../../../core/docx/layout/output"
+import { bodySections, endsSection, sectionNode } from "../../../core/docx/stories/sections"
 import type { DocxEditorMark } from "../edit/surface"
 import { gapRowCount, type StoryStarts } from "../edit/window"
+import { LINE_BREAK_MARK, NBSP_MARK, SPACE_MARK, sectionLabel, type DocxMarkLabels } from "../paint/marks"
 
 // What the reflowed view draws over a story's text: each run's look where it differs from its paragraph's,
 // list markers and note marks (counted from the nearest checkpoint, never from the document's start on a
@@ -441,6 +444,104 @@ export interface StoryDecorations {
 	readonly codeScan: CodeScan | undefined
 	// Long tables the view holds some rows of, by top-level index, as it holds them.
 	readonly shownTables?: ReadonlyMap<number, Node>
+	// Word's formatting marks shown (Show/Hide ¶), with the words breaks are labelled with; undefined: hidden.
+	readonly formattingMarks?: DocxMarkLabels | undefined
+}
+
+function spaceMark(text: string): () => HTMLElement {
+	return () => {
+		const element = document.createElement("span")
+
+		element.className = "fo-docx-reflow-format-mark"
+		element.contentEditable = "false"
+		element.setAttribute("aria-hidden", "true")
+		element.textContent = text
+
+		return element
+	}
+}
+
+const SPACE_WIDGET = spaceMark(SPACE_MARK)
+const NBSP_WIDGET = spaceMark(NBSP_MARK)
+const LINE_BREAK_WIDGET = spaceMark(LINE_BREAK_MARK)
+
+// How the section after the one paragraph `node` ends starts, as its break is labelled; undefined when it ends none.
+function sectionBreakLabel(session: ReflowSource, doc: Node, node: Node, labels: DocxMarkLabels): string | undefined {
+	const part = session.story.part
+
+	if (session.story.story.kind !== "body" || !endsSection(part, node)) return undefined
+
+	const sections = bodySections(doc, part)
+	const index = sections.findIndex(section => section.node === node)
+	const next = index < 0 ? undefined : sections[index + 1]
+
+	if (next === undefined) return undefined
+
+	// An edit's type (null: none, a new page) stands for the source's.
+	const edited = next.edit?.type
+	const sectPr = edited === undefined ? sectionNode(part, next.key) : -1
+	const type = edited !== undefined ? edited : sectPr < 0 ? undefined : session.context.store.section(part.document, sectPr).type
+
+	return sectionLabel(labels, sectionBreakFlags(type) >> SECTION_SHIFT)
+}
+
+// Formatting marks in what the view holds: a dot on each space and a degree sign on each non-breaking space, an
+// arrow at each line break, page and column breaks labelled, and a section break's paragraph its label (the
+// paragraph, tab, end-of-cell and end-of-row marks and hidden text are the stylesheet's, under data-fo-marks).
+function formattingMarks(
+	session: ReflowSource,
+	doc: Node,
+	ranges: readonly [number, number][],
+	labels: DocxMarkLabels,
+	out: Decoration[]
+): void {
+	for (const [from, to] of ranges) {
+		doc.nodesBetween(from, to, (node, pos) => {
+			if (node.isText) {
+				const text = node.text ?? ""
+
+				for (let k = 0; k < text.length; k++) {
+					const code = text.charCodeAt(k)
+					const at = pos + k
+
+					if (at < from || at >= to) continue
+
+					if (code === 0x20 || code === 0x3000)
+						out.push(Decoration.widget(at, SPACE_WIDGET, { side: 1, key: "s", marks: [], ignoreSelection: true }))
+					else if (code === 0xa0 || code === 0x202f)
+						out.push(Decoration.widget(at, NBSP_WIDGET, { side: 1, key: "n", marks: [], ignoreSelection: true }))
+				}
+
+				return false
+			}
+
+			if (node.type === nodes.break) {
+				const type = node.attrs["type"]
+
+				if (type === "page" || type === "column")
+					out.push(Decoration.node(pos, pos + 1, breakAttrs(type === "page" ? labels.pageBreak : labels.columnBreak)))
+				else out.push(Decoration.widget(pos, LINE_BREAK_WIDGET, { side: -1, key: "b", marks: [], ignoreSelection: true }))
+
+				return false
+			}
+
+			if (node.type === nodes.paragraph) {
+				const label = sectionBreakLabel(session, doc, node, labels)
+
+				if (label !== undefined) out.push(Decoration.node(pos, pos + node.nodeSize, sectionAttrs(label)))
+			}
+
+			return true
+		})
+	}
+}
+
+function breakAttrs(label: string): Readonly<Record<string, string>> {
+	return interned(`break:${label}`, () => ({ "data-fo-label": label }))
+}
+
+function sectionAttrs(label: string): Readonly<Record<string, string>> {
+	return interned(`section:${label}`, () => ({ "data-fo-section": label }))
 }
 
 function markerElement(text: string, css: string): () => HTMLElement {
@@ -600,6 +701,8 @@ export function storyDecorations(input: StoryDecorations): DecorationSet {
 			}
 		}
 	}
+
+	if (input.formattingMarks !== undefined) formattingMarks(session, doc, ranges, input.formattingMarks, decorations)
 
 	// The app's marks, those in the blocks held.
 	const marks = input.marks

@@ -27,6 +27,8 @@ export {
 } from "./edit/objects"
 export { EditSink, plainText, type EditSinkOptions } from "./edit/sink"
 export { paintMath } from "./paint/math"
+export { DOCX_MARK_LABELS, paintMarks, type DocxMarkLabels, type PageMarksContext } from "./paint/marks"
+export { paintThumbnail, thumbnailHeight, type ThumbnailCanvas, type ThumbnailContext } from "./paint/thumbnail"
 export { EditSurface, type DocxEditorMark } from "./edit/surface"
 export { useDocxEditor, type DocxEditorControls, type DocxEditorState } from "./useDocxEditor"
 export * from "./reflow/index"

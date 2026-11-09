@@ -239,8 +239,11 @@ export function runCss(run: ResolvedRunProps, faces?: CssFaces): string {
 	const frame = borderCss(run.border)
 
 	if (frame !== undefined) out.push(`border: ${frame}`)
-	// Hidden text (w:vanish) is not shown, as Word shows it without formatting marks.
-	if (run.vanish && !run.specVanish) out.push("display: none")
+	// Hidden text (w:vanish) is not shown, as Word shows it without formatting marks; with them (the view sets
+	// --fo-reflow-hidden) it shows dotted underlined.
+	if (run.vanish && !run.specVanish) {
+		out.push("display: var(--fo-reflow-hidden, none)", "text-decoration: var(--fo-reflow-hidden-line, none)")
+	}
 
 	const css = out.join("; ")
 

@@ -41,6 +41,7 @@ import {
 	plainText,
 	useDocxEditor,
 	type DocxEditorHandle,
+	type DocxMarkLabels,
 	type DocxObjectPress,
 	type DocxPageOverlay
 } from "@filen/office/react/docx/editor"
@@ -113,7 +114,19 @@ import { DocxTableBorderDrag } from "@/features/preview/components/docxTableBord
 import { DocxTableSplitDialog } from "@/features/preview/components/docxTableMenu"
 import { useDocxImageInsert } from "@/features/preview/components/docxImageInsert"
 import { useReflowMode } from "@/features/preview/components/docxReflow.logic"
+import { setDocxFormattingMarks, useDocxFormattingMarks } from "@/features/preview/lib/docxFormattingMarks"
 import { DocxWriteProtectionBar } from "@/features/preview/components/docxWriteProtection"
+import { DocxNavigationPane } from "@/features/preview/components/docxNavigationPane"
+import { DocxMiniToolbar, type DocxMiniToolbarRequest } from "@/features/preview/components/docxMiniToolbar"
+import { mouseContextMenu } from "@/features/preview/components/docxMiniToolbar.logic"
+import {
+	NAVIGATION_CLOSED,
+	openedNavigation,
+	seededFind,
+	type DocxNavigationState
+} from "@/features/preview/components/docxNavigation.logic"
+import { DocxWordCountDialog } from "@/features/preview/components/docxWordCount"
+import { createDocxWordCountStore, editorCountSource, type DocxWordCountStore } from "@/features/preview/components/docxWordCount.logic"
 import { DocxReflowSurface } from "@/features/preview/components/docxReflowSurface"
 import { DocxDrawingPress, DocxObjectHandles } from "@/features/preview/components/docxObjectHandles"
 import { DocxReviewLayer, DocxReviewPageOverlay } from "@/features/preview/components/docxReviewLayer"
@@ -213,6 +226,8 @@ function executeNothing(): void {
 
 // Every input request gets its own (DocxInputRequest.nonce).
 let inputNonce = 0
+// Every showing of the Mini toolbar gets its own.
+let miniNonce = 0
 
 function subscribeNothing(): () => void {
 	return () => undefined
@@ -460,6 +475,31 @@ export function DocxEditView({
 	const current = ready?.opened === opened ? ready : null
 	const openedRef = useLatestRef(onEditorOpened)
 	const editor = current?.editor
+	// Word's formatting marks (Show/Hide ¶): the device's choice goes to each editor, and a toggle in the editor (its
+	// key, the ribbon's button) is kept as the choice.
+	const formattingMarks = useDocxFormattingMarks()
+	const markLabels: DocxMarkLabels = {
+		pageBreak: t("previewDocxMarkPageBreak"),
+		columnBreak: t("previewDocxMarkColumnBreak"),
+		sectionNextPage: t("previewDocxMarkSectionNextPage"),
+		sectionContinuous: t("previewDocxMarkSectionContinuous"),
+		sectionEvenPage: t("previewDocxMarkSectionEvenPage"),
+		sectionOddPage: t("previewDocxMarkSectionOddPage"),
+		sectionNextColumn: t("previewDocxMarkSectionNextColumn")
+	}
+
+	useEffect(() => {
+		editor?.setFormattingMarks(formattingMarks)
+	}, [editor, formattingMarks])
+
+	useEffect(
+		() =>
+			editor?.subscribe(event => {
+				if (event.type === "document") setDocxFormattingMarks(editor.formattingMarks)
+			}),
+		[editor]
+	)
+
 	// The font picker's fonts, read once the editor is open.
 	const [fonts, setFonts] = useState<{ editor: PagedEditor; fonts: readonly DocxFontChoice[] } | null>(null)
 	const controls = useDocxEditor(editor)
@@ -501,6 +541,36 @@ export function DocxEditView({
 	const inputChannel = { inputRequest, requestInput, onInputDone }
 	// The page in view for the status bar's Page X of Y, and Go To (Ctrl+G): read by the indicator alone.
 	const [pages] = useState(createDocxPageStore)
+	// Word's Navigation pane (left of the pages) and Word Count dialog. The editor's word count store does nothing
+	// until the status bar subscribes to it, and counts only while something does.
+	const [navigation, setNavigation] = useState<DocxNavigationState>(NAVIGATION_CLOSED)
+	const [wordCountOpen, setWordCountOpen] = useState(false)
+	const [words, setWords] = useState<{ editor: PagedEditor; store: DocxWordCountStore } | null>(null)
+	// Word's Mini toolbar, shown after a selection made with the mouse or with a context menu opened by it (nothing is
+	// mounted otherwise); `key` makes each showing a new one. The row it is placed in, its element, the context menu's.
+	const [mini, setMini] = useState<(DocxMiniToolbarRequest & { key: number }) | null>(null)
+	const [paneRow, setPaneRow] = useState<HTMLDivElement | null>(null)
+	const miniRef = useRef<HTMLDivElement | null>(null)
+	const contextMenuRef = useRef<HTMLDivElement | null>(null)
+	// The press in the document was the mouse's primary button: its release may show the Mini toolbar.
+	const mousePressRef = useRef(false)
+	// The context menu closed for a press on the Mini toolbar, which keeps it (and the focus it took).
+	const keepMiniRef = useRef(false)
+
+	if (editor !== undefined && words?.editor !== editor) {
+		setWords({ editor, store: createDocxWordCountStore(editorCountSource(editor)) })
+	}
+
+	const wordStore = words !== null && words.editor === editor ? words.store : undefined
+	const openWordCount = (): void => {
+		setWordCountOpen(true)
+	}
+	const setNavigationOpen = (open: boolean): void => {
+		setNavigation(previous => (open ? openedNavigation(previous, false) : { ...previous, open: false }))
+	}
+	const setNavigationTab = (tab: DocxNavigationState["tab"]): void => {
+		setNavigation(previous => (previous.tab === tab ? previous : { ...previous, tab }))
+	}
 	const openGoTo = (): void => {
 		pages.setGoTo(true)
 	}
@@ -605,10 +675,12 @@ export function DocxEditView({
 	// Find runs on the document as it stands once typing pauses, never inside a keystroke (and nothing is
 	// deferred while it is closed: a keystroke renders once). One match past the limit tells that there are more.
 	// The main text (the body), whichever story the caret is in.
+	// The Navigation pane's search is the same find: its matches are marked and listed while the pane is open.
+	const finding = find.open || navigation.open
 	const bodyState = editor?.body.session.state
-	const searchedDoc = useDeferredValue(find.open && find.query.length > 0 ? bodyState?.doc : undefined)
+	const searchedDoc = useDeferredValue(finding && find.query.length > 0 ? bodyState?.doc : undefined)
 	const found =
-		find.open && find.query.length > 0 && searchedDoc !== undefined
+		finding && find.query.length > 0 && searchedDoc !== undefined
 			? findInStory(searchedDoc, find.query, { caseSensitive: find.caseSensitive }, STORY_FIND_LIMIT + 1)
 			: NO_MATCHES
 	const capped = found.length > STORY_FIND_LIMIT
@@ -860,7 +932,7 @@ export function DocxEditView({
 	const revealedRef = useRef<string | null>(null)
 
 	useEffect(() => {
-		if (!find.open || active < 0 || editor === undefined) {
+		if (!finding || active < 0 || editor === undefined) {
 			return
 		}
 
@@ -872,8 +944,9 @@ export function DocxEditView({
 		}
 	})
 
-	// Opens with the selection's text when it is short and in one paragraph, else with the last search (Word's).
-	const openFind = (replace: boolean): void => {
+	// The find bar (Advanced find, Find and replace) opens with the selection's text when it is short and in one
+	// paragraph, else with the last search (Word's).
+	const openFindBar = (replace: boolean): void => {
 		const seed = editor === undefined ? undefined : findSeed(editor)
 
 		if (seed !== undefined) {
@@ -881,6 +954,38 @@ export function DocxEditView({
 		}
 
 		setFind(previous => openedFind(previous, replace, seed))
+	}
+
+	// Find (Ctrl+F, Home ▸ Find) is the Navigation pane's search box, seeded the same way; a seed lists its results.
+	const openNavigationSearch = (): void => {
+		const seed = editor === undefined ? undefined : findSeed(editor)
+
+		if (seed !== undefined) {
+			revealedRef.current = null
+		}
+
+		setFind(previous => seededFind(previous, seed))
+		setNavigation(previous => ({ ...openedNavigation(previous, true), ...(seed === undefined ? {} : { tab: "results" as const }) }))
+	}
+
+	const openFind = (replace: boolean): void => {
+		if (replace) {
+			openFindBar(true)
+		} else {
+			openNavigationSearch()
+		}
+	}
+
+	// A result picked in the Navigation pane: the current match, shown.
+	const showResult = (index: number): void => {
+		setFind(previous => ({ ...previous, active: index }))
+		reveal(matches, index)
+	}
+
+	const closeNavigation = (): void => {
+		revealedRef.current = null
+		setNavigationOpen(false)
+		focusEditor()
 	}
 
 	const focusEditor = (): void => {
@@ -1361,6 +1466,42 @@ export function DocxEditView({
 	const editable = !readOnly && snapshot !== undefined && !snapshot.readOnly
 	const menuIssue = menu?.issue
 
+	// Nothing to format: the Mini toolbar goes (and does not come back when the document can change again).
+	if (mini !== null && (!editable || editor === undefined)) {
+		setMini(null)
+	}
+
+	// After a mouse selection, read in the next frame (Mobile view's selection follows the browser's own): above the
+	// line its moving end is on, at the pointer.
+	const showMiniForSelection = (x: number, y: number): void => {
+		requestAnimationFrame(() => {
+			const handle = handleRef.current
+			const current = editor?.selection()
+
+			if (handle === null || current === undefined || current.empty || current.node) {
+				return
+			}
+
+			const points = handle.selectionPoints()
+			const end = current.head === current.from ? points.start : points.end
+
+			miniNonce += 1
+			setMini({
+				kind: "selection",
+				at: end === undefined ? { x, y, below: 0 } : { x, y: end.y - end.height, below: end.height },
+				pointer: { x, y },
+				key: miniNonce
+			})
+		})
+	}
+	const closeMini = (focusDocument: boolean): void => {
+		setMini(null)
+
+		if (focusDocument) {
+			focusEditor()
+		}
+	}
+
 	if (document.status === "error") {
 		return viewer()
 	}
@@ -1408,7 +1549,7 @@ export function DocxEditView({
 							}
 				}
 				find={{ open: find.open, replace: find.replace, focus: find.focus, controls: findControls }}
-				onFindOpen={openFind}
+				onFindOpen={openFindBar}
 				onFindClosed={focusEditor}
 				markup={reviewing ? shownMode : null}
 				onMarkupChange={changeMarkup}
@@ -1433,6 +1574,9 @@ export function DocxEditView({
 				painter={painter}
 				onPainterCancel={cancelPainter}
 				fieldCodes={editor?.fieldCodes === true}
+				formattingMarks={formattingMarks}
+				navigation={{ open: navigation.open, onChange: setNavigationOpen, onSearch: openNavigationSearch }}
+				words={wordStore === undefined ? undefined : { store: wordStore, onOpen: openWordCount }}
 				{...inputChannel}
 			/>
 			{writeProtection === undefined ? null : (
@@ -1450,354 +1594,464 @@ export function DocxEditView({
 					{t("previewDocxAutosaveHeld", { shortcut: shortcut("S") })}
 				</p>
 			) : null}
-			<ContextMenu
-				onOpenChange={open => {
-					if (!open) {
-						focusEditor()
-					}
-				}}
+			{/* The Navigation pane docks left of the pages, which fit the width left to them. */}
+			<div
+				ref={setPaneRow}
+				className="relative flex min-h-0 flex-1"
 			>
-				<ContextMenuTrigger
-					ref={setWrapper}
-					data-preview-surface
-					className="relative min-h-0 flex-1 select-auto"
-					onKeyDownCapture={event => {
-						if (
-							event.key === "ArrowDown" &&
-							event.altKey &&
-							!event.ctrlKey &&
-							!event.metaKey &&
-							!event.shiftKey &&
-							!inReview(event.target) &&
-							openControlPicker()
-						) {
-							event.preventDefault()
-							event.stopPropagation()
-						}
-					}}
-					onPointerDownCapture={event => {
-						setTouch(event.pointerType === "touch" || event.pointerType === "pen")
-
-						// Ctrl+Click (Cmd+Click on a Mac) follows a link, placing no caret; a plain click edits it (Word's).
-						if (
-							event.button !== 0 ||
-							!(APPLE ? event.metaKey : event.ctrlKey) ||
-							editor === undefined ||
-							inReview(event.target)
-						) {
+				{editor === undefined || !navigation.open ? null : (
+					<DocxNavigationPane
+						editor={editor}
+						handleRef={handleRef}
+						state={navigation}
+						onTab={setNavigationTab}
+						onClose={closeNavigation}
+						find={findControls}
+						results={{ doc: searchedDoc, matches }}
+						onResult={showResult}
+						pages={pages}
+						surface={surface}
+						readOnly={readOnly}
+						focusEditor={focusEditor}
+					/>
+				)}
+				<ContextMenu
+					onOpenChange={(open, details) => {
+						if (open) {
 							return
 						}
 
-						const hit = handleRef.current?.hitTest(event.clientX, event.clientY)
-						const link = hit === undefined ? undefined : docxLinkAt(editor, hit.pos)
+						// A press on the Mini toolbar closes the menu and keeps the toolbar, as Word's; else both go.
+						const target = details.event.target
+						const onMini = target instanceof Node && miniRef.current?.contains(target) === true
 
-						if (link !== undefined) {
-							event.preventDefault()
-							event.stopPropagation()
-							links.follow(link)
-						}
-					}}
-					// The format painter paints the selection a press in the document made (Word's).
-					onPointerUp={event => {
-						// The primary button's release only: a right click opens the context menu, it paints nothing.
-						if (
-							painter !== "off" &&
-							event.isPrimary &&
-							event.button === 0 &&
-							press === null &&
-							event.target instanceof Node &&
-							wrapper?.contains(event.target) === true
-						) {
-							execute({ type: "format.paste" })
-						}
-					}}
-					// Touch gets the touch menu (below), not this menu's long press.
-					onTouchStartCapture={event => {
-						event.stopPropagation()
-					}}
-					{...pasteAndDrop}
-					onContextMenuCapture={event => {
-						// The review layer's balloons and fields keep the browser's own menu (spelling in a comment).
-						if (inReview(event.target)) {
-							event.stopPropagation()
+						keepMiniRef.current = onMini
+						setMini(previous => (previous === null || !onMini ? null : { ...previous, kind: "selection" }))
 
-							return
-						}
-
-						const handle = handleRef.current
-
-						if (touch || handle === null || editor === undefined) {
-							event.preventDefault()
-							event.stopPropagation()
-
-							return
-						}
-
-						const hit = handle.hitTest(event.clientX, event.clientY)
-						const current = editor.selection()
-
-						// A press outside the selection moves the caret there first, as in Word.
-						if (hit !== undefined && (hit.pos < current.from || hit.pos > current.to)) {
-							editor.select(hit)
-						}
-
-						const pos = hit?.pos ?? current.head
-						const issue = spelling?.spellingAt(pos)
-
-						setMenu({ pos, issue, suggestions: issue?.kind === "spelling" ? undefined : [], link: docxLinkAt(editor, pos) })
-
-						if (issue?.kind === "spelling" && spelling !== undefined) {
-							spelling
-								.suggestions(pos)
-								.then(found => {
-									setMenu(previous =>
-										previous?.pos === pos ? { ...previous, suggestions: found.slice(0, MAX_SUGGESTIONS) } : previous
-									)
-								})
-								.catch(() => {
-									setMenu(previous => (previous?.pos === pos ? { ...previous, suggestions: [] } : previous))
-								})
+						if (!onMini) {
+							focusEditor()
 						}
 					}}
 				>
-					{describedBy === undefined ? null : (
-						<span
-							id={describedBy}
-							className="sr-only"
-						>
-							{t("previewDocxEditorKeys")}
-						</span>
-					)}
-					{editor === undefined ? null : reflow ? (
-						<DocxReflowSurface
-							editor={editor}
-							document={document}
-							handleRef={handleRef}
-							label={alt}
-							{...(describedBy === undefined ? {} : { describedBy })}
-							readOnly={readOnly}
-							apple={APPLE}
-							desktop={DESKTOP}
-							marks={marks}
-							onFind={openFind}
-							{...(interactions === undefined ? {} : { interactions })}
-						/>
-					) : (
-						<>
-							<DocxEditor
-								ref={handleRef}
+					<ContextMenuTrigger
+						ref={setWrapper}
+						data-preview-surface
+						className="relative min-h-0 min-w-0 flex-1 select-auto"
+						onKeyDownCapture={event => {
+							if (
+								event.key === "ArrowDown" &&
+								event.altKey &&
+								!event.ctrlKey &&
+								!event.metaKey &&
+								!event.shiftKey &&
+								!inReview(event.target) &&
+								openControlPicker()
+							) {
+								event.preventDefault()
+								event.stopPropagation()
+							}
+						}}
+						onPointerDownCapture={event => {
+							setTouch(event.pointerType === "touch" || event.pointerType === "pen")
+							mousePressRef.current = event.pointerType === "mouse" && event.button === 0 && !inReview(event.target)
+
+							// Ctrl+Click (Cmd+Click on a Mac) follows a link, placing no caret; a plain click edits it (Word's).
+							if (
+								event.button !== 0 ||
+								!(APPLE ? event.metaKey : event.ctrlKey) ||
+								editor === undefined ||
+								inReview(event.target)
+							) {
+								return
+							}
+
+							const hit = handleRef.current?.hitTest(event.clientX, event.clientY)
+							const link = hit === undefined ? undefined : docxLinkAt(editor, hit.pos)
+
+							if (link !== undefined) {
+								event.preventDefault()
+								event.stopPropagation()
+								links.follow(link)
+							}
+						}}
+						// The format painter paints the selection a press in the document made (Word's).
+						onPointerUp={event => {
+							// The primary button's release only: a right click opens the context menu, it paints nothing.
+							if (
+								painter !== "off" &&
+								event.isPrimary &&
+								event.button === 0 &&
+								press === null &&
+								event.target instanceof Node &&
+								wrapper?.contains(event.target) === true
+							) {
+								execute({ type: "format.paste" })
+							}
+
+							// A selection made with the mouse (dragged, a word or paragraph clicked, Shift+click) shows the Mini
+							// toolbar; one the keyboard makes never does.
+							if (
+								mousePressRef.current &&
+								event.pointerType === "mouse" &&
+								event.button === 0 &&
+								painter === "off" &&
+								press === null &&
+								editable
+							) {
+								showMiniForSelection(event.clientX, event.clientY)
+							}
+
+							mousePressRef.current = false
+						}}
+						// Touch gets the touch menu (below), not this menu's long press.
+						onTouchStartCapture={event => {
+							event.stopPropagation()
+						}}
+						{...pasteAndDrop}
+						onContextMenuCapture={event => {
+							// The review layer's balloons and fields keep the browser's own menu (spelling in a comment).
+							if (inReview(event.target)) {
+								event.stopPropagation()
+
+								return
+							}
+
+							const handle = handleRef.current
+
+							if (touch || handle === null || editor === undefined) {
+								event.preventDefault()
+								event.stopPropagation()
+
+								return
+							}
+
+							const hit = handle.hitTest(event.clientX, event.clientY)
+							const current = editor.selection()
+
+							// A press outside the selection moves the caret there first, as in Word.
+							if (hit !== undefined && (hit.pos < current.from || hit.pos > current.to)) {
+								editor.select(hit)
+							}
+
+							const pos = hit?.pos ?? current.head
+							const issue = spelling?.spellingAt(pos)
+
+							setMenu({ pos, issue, suggestions: issue?.kind === "spelling" ? undefined : [], link: docxLinkAt(editor, pos) })
+
+							// A right click shows the Mini toolbar above the menu (not the keyboard's menu key).
+							const native = event.nativeEvent
+
+							if (
+								editable &&
+								mouseContextMenu({
+									button: event.button,
+									pointerType: native instanceof PointerEvent ? native.pointerType : undefined
+								})
+							) {
+								miniNonce += 1
+								setMini({
+									kind: "menu",
+									at: { x: event.clientX, y: event.clientY, below: 0 },
+									pointer: { x: event.clientX, y: event.clientY },
+									key: miniNonce
+								})
+							} else {
+								setMini(null)
+							}
+
+							if (issue?.kind === "spelling" && spelling !== undefined) {
+								spelling
+									.suggestions(pos)
+									.then(found => {
+										setMenu(previous =>
+											previous?.pos === pos ? { ...previous, suggestions: found.slice(0, MAX_SUGGESTIONS) } : previous
+										)
+									})
+									.catch(() => {
+										setMenu(previous => (previous?.pos === pos ? { ...previous, suggestions: [] } : previous))
+									})
+							}
+						}}
+					>
+						{describedBy === undefined ? null : (
+							<span
+								id={describedBy}
+								className="sr-only"
+							>
+								{t("previewDocxEditorKeys")}
+							</span>
+						)}
+						{editor === undefined ? null : reflow ? (
+							<DocxReflowSurface
 								editor={editor}
 								document={document}
-								zoom={zoom}
-								gap={PAGE_GAP}
-								className="size-full"
+								handleRef={handleRef}
 								label={alt}
 								{...(describedBy === undefined ? {} : { describedBy })}
 								readOnly={readOnly}
 								apple={APPLE}
 								desktop={DESKTOP}
-								onFind={openFind}
-								onGoTo={openGoTo}
-								onPage={pages.setPage}
 								marks={marks}
-								aside={aside}
+								markLabels={markLabels}
+								onFind={openFind}
 								{...(interactions === undefined ? {} : { interactions })}
-								{...(overlays === undefined ? {} : { overlays })}
 							/>
-							{reviewLayer}
-							<DocxLayoutBusy busy={document.status === "streaming"} />
-						</>
-					)}
-					{editor === undefined || reflow ? null : (
-						<DocxTableBorderDrag
-							editor={editor}
-							press={press?.hit.kind === "tableBorder" ? press : null}
-							onPressDone={onPressDone}
+						) : (
+							<>
+								<DocxEditor
+									ref={handleRef}
+									editor={editor}
+									document={document}
+									zoom={zoom}
+									gap={PAGE_GAP}
+									className="size-full"
+									label={alt}
+									{...(describedBy === undefined ? {} : { describedBy })}
+									readOnly={readOnly}
+									apple={APPLE}
+									desktop={DESKTOP}
+									onFind={openFind}
+									onGoTo={openGoTo}
+									onPage={pages.setPage}
+									marks={marks}
+									markLabels={markLabels}
+									aside={aside}
+									{...(interactions === undefined ? {} : { interactions })}
+									{...(overlays === undefined ? {} : { overlays })}
+								/>
+								{reviewLayer}
+								<DocxLayoutBusy busy={document.status === "streaming"} />
+							</>
+						)}
+						{editor === undefined || reflow ? null : (
+							<DocxTableBorderDrag
+								editor={editor}
+								press={press?.hit.kind === "tableBorder" ? press : null}
+								onPressDone={onPressDone}
+								container={wrapper}
+								zoom={zoom}
+								readOnly={readOnly}
+								execute={execute}
+							/>
+						)}
+						{header === null || toolbarSnapshot === undefined ? null : (
+							<DocxHeaderChip
+								header={header}
+								enabled={toolbarSnapshot.enabled}
+								readOnly={readOnly}
+								execute={execute}
+								onClose={() => {
+									editor?.exitStory()
+									focusEditor()
+								}}
+							/>
+						)}
+						{objectProps === null ? null : (
+							<>
+								<DocxFormControls
+									{...objectProps}
+									press={press?.hit.kind === "control" ? press : null}
+								/>
+								<DocxEquationPopover
+									{...objectProps}
+									press={press?.hit.kind === "equation" ? press : null}
+								/>
+								<DocxFieldChip
+									{...objectProps}
+									press={press?.hit.kind === "field" || press?.hit.kind === "noteRef" ? press : null}
+								/>
+								<DocxDrawingPress
+									{...objectProps}
+									press={press?.hit.kind === "drawing" ? press : null}
+								/>
+								<DocxCommentPopover
+									{...objectProps}
+									withAuthor={withAuthor}
+									press={press?.hit.kind === "commentMarker" ? press : null}
+								/>
+							</>
+						)}
+						<DocxTouchSelection
+							handleRef={handleRef}
 							container={wrapper}
-							zoom={zoom}
-							readOnly={readOnly}
-							execute={execute}
-						/>
-					)}
-					{header === null || toolbarSnapshot === undefined ? null : (
-						<DocxHeaderChip
-							header={header}
-							enabled={toolbarSnapshot.enabled}
-							readOnly={readOnly}
-							execute={execute}
-							onClose={() => {
-								editor?.exitStory()
-								focusEditor()
+							shown={touch && hasSelection && !reflow}
+							selectionKey={
+								selection === undefined || !touch
+									? ""
+									: `${String(selection.anchor)}:${String(selection.head)}:${String(zoom)}`
+							}
+							actions={{
+								cut: editable
+									? () => {
+											void cut()
+										}
+									: null,
+								copy: () => {
+									void copy()
+								},
+								paste: editable
+									? () => {
+											void paste(false)
+										}
+									: null,
+								selectAll
 							}}
 						/>
-					)}
-					{objectProps === null ? null : (
-						<>
-							<DocxFormControls
-								{...objectProps}
-								press={press?.hit.kind === "control" ? press : null}
+						{/* The pages' layout rests while Mobile view shows the document: it waits for the editor only. */}
+						{editor === undefined || (!reflow && document.status === "loading") ? (
+							<LoadingState
+								size="lg"
+								className="absolute inset-0 text-inherit"
 							/>
-							<DocxEquationPopover
-								{...objectProps}
-								press={press?.hit.kind === "equation" ? press : null}
-							/>
-							<DocxFieldChip
-								{...objectProps}
-								press={press?.hit.kind === "field" || press?.hit.kind === "noteRef" ? press : null}
-							/>
-							<DocxDrawingPress
-								{...objectProps}
-								press={press?.hit.kind === "drawing" ? press : null}
-							/>
-							<DocxCommentPopover
-								{...objectProps}
-								withAuthor={withAuthor}
-								press={press?.hit.kind === "commentMarker" ? press : null}
-							/>
-						</>
-					)}
-					<DocxTouchSelection
-						handleRef={handleRef}
-						container={wrapper}
-						shown={touch && hasSelection && !reflow}
-						selectionKey={
-							selection === undefined || !touch ? "" : `${String(selection.anchor)}:${String(selection.head)}:${String(zoom)}`
-						}
-						actions={{
-							cut: editable
-								? () => {
-										void cut()
-									}
-								: null,
-							copy: () => {
+						) : null}
+					</ContextMenuTrigger>
+					<ContextMenuContent
+						ref={contextMenuRef}
+						data-preview-surface
+						// Focus stays where a press on the Mini toolbar put it.
+						finalFocus={() => {
+							const keep = keepMiniRef.current
+
+							keepMiniRef.current = false
+
+							return !keep
+						}}
+					>
+						{menuIssue?.kind === "spelling" && spelling !== undefined && menu !== null ? (
+							<>
+								{menu.suggestions === undefined ? (
+									<ContextMenuItem disabled>{t("previewDocxSpellingLoading")}</ContextMenuItem>
+								) : menu.suggestions.length === 0 ? (
+									<ContextMenuItem disabled>{t("previewDocxSpellingNone")}</ContextMenuItem>
+								) : (
+									menu.suggestions.map(suggestion => (
+										<ContextMenuItem
+											key={suggestion}
+											className="font-medium"
+											disabled={!editable}
+											onClick={() => {
+												spelling.replaceWord(menu.pos, suggestion)
+											}}
+										>
+											{suggestion}
+										</ContextMenuItem>
+									))
+								)}
+								<ContextMenuItem
+									onClick={() => {
+										spelling.ignoreAll(menu.pos)
+									}}
+								>
+									{t("previewDocxSpellingIgnoreAll")}
+								</ContextMenuItem>
+								<ContextMenuItem
+									onClick={() => {
+										void spelling.addToDictionary(menu.pos)
+									}}
+								>
+									{t("previewDocxSpellingAdd")}
+								</ContextMenuItem>
+								<ContextMenuSeparator />
+							</>
+						) : null}
+						{menuIssue?.kind === "repeated" && spelling !== undefined && menu !== null ? (
+							<>
+								<ContextMenuItem
+									disabled={!editable}
+									onClick={() => {
+										spelling.replaceWord(menu.pos, "")
+									}}
+								>
+									{t("previewDocxSpellingDeleteRepeated")}
+								</ContextMenuItem>
+								<ContextMenuItem
+									onClick={() => {
+										spelling.ignoreAll(menu.pos)
+									}}
+								>
+									{t("previewDocxSpellingIgnoreRepeated")}
+								</ContextMenuItem>
+								<ContextMenuSeparator />
+							</>
+						) : null}
+						{menu?.link === undefined ? null : (
+							<>
+								<ContextMenuItem
+									onClick={() => {
+										if (menu.link !== undefined) {
+											links.follow(menu.link)
+										}
+									}}
+								>
+									{t("previewDocxOpenLink")}
+									<span className="ml-auto pl-4 text-xs text-muted-foreground">
+										{t("previewDocxOpenLinkClick", { modifier: APPLE ? "⌘" : "Ctrl" })}
+									</span>
+								</ContextMenuItem>
+								<ContextMenuSeparator />
+							</>
+						)}
+						<ContextMenuItem
+							disabled={!hasSelection || !editable}
+							onClick={() => {
+								void cut()
+							}}
+						>
+							{t("previewDocxCut")}
+						</ContextMenuItem>
+						<ContextMenuItem
+							disabled={!hasSelection}
+							onClick={() => {
 								void copy()
-							},
-							paste: editable
-								? () => {
-										void paste(false)
-									}
-								: null,
-							selectAll
-						}}
-					/>
-					{/* The pages' layout rests while Mobile view shows the document: it waits for the editor only. */}
-					{editor === undefined || (!reflow && document.status === "loading") ? (
-						<LoadingState
-							size="lg"
-							className="absolute inset-0 text-inherit"
+							}}
+						>
+							{t("previewDocxCopy")}
+						</ContextMenuItem>
+						<ContextMenuItem
+							disabled={!editable}
+							onClick={() => {
+								void paste(false)
+							}}
+						>
+							{t("previewDocxPaste")}
+						</ContextMenuItem>
+						<ContextMenuSeparator />
+						<ContextMenuItem onClick={selectAll}>{t("previewDocxSelectAll")}</ContextMenuItem>
+						<DocxContextCommands
+							snapshot={toolbarSnapshot}
+							readOnly={readOnly}
+							execute={execute}
+							requestInput={requestInput}
+							surface={surface}
 						/>
-					) : null}
-				</ContextMenuTrigger>
-				<ContextMenuContent data-preview-surface>
-					{menuIssue?.kind === "spelling" && spelling !== undefined && menu !== null ? (
-						<>
-							{menu.suggestions === undefined ? (
-								<ContextMenuItem disabled>{t("previewDocxSpellingLoading")}</ContextMenuItem>
-							) : menu.suggestions.length === 0 ? (
-								<ContextMenuItem disabled>{t("previewDocxSpellingNone")}</ContextMenuItem>
-							) : (
-								menu.suggestions.map(suggestion => (
-									<ContextMenuItem
-										key={suggestion}
-										className="font-medium"
-										disabled={!editable}
-										onClick={() => {
-											spelling.replaceWord(menu.pos, suggestion)
-										}}
-									>
-										{suggestion}
-									</ContextMenuItem>
-								))
-							)}
-							<ContextMenuItem
-								onClick={() => {
-									spelling.ignoreAll(menu.pos)
-								}}
-							>
-								{t("previewDocxSpellingIgnoreAll")}
-							</ContextMenuItem>
-							<ContextMenuItem
-								onClick={() => {
-									void spelling.addToDictionary(menu.pos)
-								}}
-							>
-								{t("previewDocxSpellingAdd")}
-							</ContextMenuItem>
-							<ContextMenuSeparator />
-						</>
-					) : null}
-					{menuIssue?.kind === "repeated" && spelling !== undefined && menu !== null ? (
-						<>
-							<ContextMenuItem
-								disabled={!editable}
-								onClick={() => {
-									spelling.replaceWord(menu.pos, "")
-								}}
-							>
-								{t("previewDocxSpellingDeleteRepeated")}
-							</ContextMenuItem>
-							<ContextMenuItem
-								onClick={() => {
-									spelling.ignoreAll(menu.pos)
-								}}
-							>
-								{t("previewDocxSpellingIgnoreRepeated")}
-							</ContextMenuItem>
-							<ContextMenuSeparator />
-						</>
-					) : null}
-					{menu?.link === undefined ? null : (
-						<>
-							<ContextMenuItem
-								onClick={() => {
-									if (menu.link !== undefined) {
-										links.follow(menu.link)
-									}
-								}}
-							>
-								{t("previewDocxOpenLink")}
-								<span className="ml-auto pl-4 text-xs text-muted-foreground">
-									{t("previewDocxOpenLinkClick", { modifier: APPLE ? "⌘" : "Ctrl" })}
-								</span>
-							</ContextMenuItem>
-							<ContextMenuSeparator />
-						</>
-					)}
-					<ContextMenuItem
-						disabled={!hasSelection || !editable}
-						onClick={() => {
-							void cut()
-						}}
-					>
-						{t("previewDocxCut")}
-					</ContextMenuItem>
-					<ContextMenuItem
-						disabled={!hasSelection}
-						onClick={() => {
-							void copy()
-						}}
-					>
-						{t("previewDocxCopy")}
-					</ContextMenuItem>
-					<ContextMenuItem
-						disabled={!editable}
-						onClick={() => {
-							void paste(false)
-						}}
-					>
-						{t("previewDocxPaste")}
-					</ContextMenuItem>
-					<ContextMenuSeparator />
-					<ContextMenuItem onClick={selectAll}>{t("previewDocxSelectAll")}</ContextMenuItem>
-					<DocxContextCommands
+					</ContextMenuContent>
+				</ContextMenu>
+				{/* Outside the menu's trigger: its presses are not the document's. */}
+				{mini === null || paneRow === null ? null : (
+					<DocxMiniToolbar
+						key={mini.key}
+						request={mini}
+						container={paneRow}
+						bounds={rootRef}
+						elementRef={miniRef}
+						menu={() => contextMenuRef.current}
+						scroller={() => handleRef.current?.scrollElement() ?? null}
 						snapshot={toolbarSnapshot}
 						readOnly={readOnly}
 						execute={execute}
-						requestInput={requestInput}
-						surface={surface}
+						fonts={fonts !== null && fonts.editor === editor ? fonts.fonts : NO_FONTS}
+						styles={current?.styles ?? DOCX_PARAGRAPH_STYLES}
+						theme={current?.theme ?? []}
+						onClose={closeMini}
 					/>
-				</ContextMenuContent>
-			</ContextMenu>
+				)}
+			</div>
+			<DocxWordCountDialog
+				editor={editor}
+				store={wordStore}
+				open={wordCountOpen}
+				onOpenChange={setWordCountOpen}
+			/>
 			{authorDialog}
 			{links.gate}
 			{pdf.prompt}

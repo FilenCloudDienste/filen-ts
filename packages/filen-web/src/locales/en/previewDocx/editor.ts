@@ -138,6 +138,22 @@ export const previewDocxEditor = {
 	previewDocxShowFieldCodes: "Show field codes",
 	/** Docx editor — context menu item on a field: shows its code instead of its result, or back (Word's Shift+F9) */
 	previewDocxToggleFieldCode: "Toggle field code",
+	/** Docx editor — Home > Paragraph toggle button: shows paragraph marks, spaces, tabs, breaks and hidden text (Word's "Show/Hide ¶", Ctrl+Shift+8) */
+	previewDocxShowFormattingMarks: "Show/Hide ¶",
+	/** Docx editor, formatting marks shown — label on the dotted line drawn for a page break (as Word labels it) */
+	previewDocxMarkPageBreak: "Page Break",
+	/** Docx editor, formatting marks shown — label on the dotted line drawn for a column break */
+	previewDocxMarkColumnBreak: "Column Break",
+	/** Docx editor, formatting marks shown — label on the double dotted line of a section break after which the next section starts on a new page */
+	previewDocxMarkSectionNextPage: "Section Break (Next Page)",
+	/** Docx editor, formatting marks shown — label of a section break after which the next section continues on the same page */
+	previewDocxMarkSectionContinuous: "Section Break (Continuous)",
+	/** Docx editor, formatting marks shown — label of a section break after which the next section starts on the next even-numbered page */
+	previewDocxMarkSectionEvenPage: "Section Break (Even Page)",
+	/** Docx editor, formatting marks shown — label of a section break after which the next section starts on the next odd-numbered page */
+	previewDocxMarkSectionOddPage: "Section Break (Odd Page)",
+	/** Docx editor, formatting marks shown — label of a section break after which the next section starts in the next column */
+	previewDocxMarkSectionNextColumn: "Section Break (Next Column)",
 	/** Docx editor — screen reader description of the document's editing area: Tab works as in Word instead of moving focus, Escape leaves (from a header, footer or note it first goes back to the body text) */
 	previewDocxEditorKeys: "Tab inserts a tab or moves to the next table cell. Press Escape to leave the editor.",
 	/** Docx editor — bar above a document Word protects with a password to modify (w:writeProtection): it opens view-only until the password is given */
@@ -170,5 +186,73 @@ export const previewDocxEditor = {
 	/** Docx editor — Go To popover: label of the page number field */
 	previewDocxGoToPage: "Enter page number",
 	/** Docx editor — Go To popover: button that goes to the page typed */
-	previewDocxGoToAction: "Go to"
+	previewDocxGoToAction: "Go to",
+	/** Docx editor — Home tab Find menu: Word's "Advanced Find", the find bar above the document (Find opens the Navigation pane) */
+	previewDocxFindAdvanced: "Advanced find…",
+	/** Docx editor — View tab toggle and title of the pane left of the pages listing the headings, page thumbnails and search results (Word's "Navigation Pane") */
+	previewDocxNavigation: "Navigation",
+	/** Docx editor — View tab: label of the toggle showing the Navigation pane (Word's "Navigation Pane" check box) */
+	previewDocxNavigationPane: "Navigation pane",
+	/** Docx editor, Navigation pane — button closing the pane */
+	previewDocxNavigationClose: "Close navigation pane",
+	/** Docx editor, Navigation pane — placeholder and accessible name of the search box (Ctrl+F focuses it) */
+	previewDocxNavigationSearch: "Search document",
+	/** Docx editor, Navigation pane — tab listing the document's headings */
+	previewDocxNavigationHeadings: "Headings",
+	/** Docx editor, Navigation pane — tab showing a thumbnail of each page */
+	previewDocxNavigationPages: "Pages",
+	/** Docx editor, Navigation pane — tab listing each search match with the text around it */
+	previewDocxNavigationResults: "Results",
+	/** Docx editor, Navigation pane — under the search box: which match is selected, of how many */
+	previewDocxNavigationResultOf: "Result {{current, number}} of {{total, number}}",
+	/** Docx editor, Navigation pane — as previewDocxNavigationResultOf when there are more matches than are listed */
+	previewDocxNavigationResultCapped: "Result {{current, number}} of more than {{total, number}}",
+	/** Docx editor, Navigation pane — the search found nothing */
+	previewDocxNavigationNoMatches: "No matches",
+	/** Docx editor, Navigation pane — button going to the previous search match */
+	previewDocxNavigationPrevious: "Previous result",
+	/** Docx editor, Navigation pane — button going to the next search match */
+	previewDocxNavigationNext: "Next result",
+	/** Docx editor, Navigation pane — Results tab before anything is searched */
+	previewDocxNavigationSearchHint: "Search the document to list each match here.",
+	/** Docx editor, Navigation pane — Headings tab of a document with no headings */
+	previewDocxNavigationNoHeadings: "No headings. Apply a heading style on the Home tab to list a heading here.",
+	/** Docx editor, Navigation pane — accessible name of the button showing a heading's subheadings; heading is its text */
+	previewDocxNavigationExpand: "Expand “{{heading}}”",
+	/** Docx editor, Navigation pane — accessible name of the button hiding a heading's subheadings; heading is its text */
+	previewDocxNavigationCollapse: "Collapse “{{heading}}”",
+	/** Docx editor, Navigation pane — accessible name of a page thumbnail, which goes to that page */
+	previewDocxNavigationPage: "Page {{page, number}}",
+	/** Docx editor — status bar: the document's word count (Word's) */
+	previewDocxWordCountStatus_one: "{{count, number}} word",
+	/** Docx editor — as previewDocxWordCountStatus_one, for several */
+	previewDocxWordCountStatus_other: "{{count, number}} words",
+	/** Docx editor — status bar with a selection: words selected of the document's word count */
+	previewDocxWordCountSelected_one: "{{selected, number}} of {{count, number}} word",
+	/** Docx editor — as previewDocxWordCountSelected_one, for several */
+	previewDocxWordCountSelected_other: "{{selected, number}} of {{count, number}} words",
+	/** Docx editor — accessible name of the status bar's word count, which opens the Word Count dialog; status is its text */
+	previewDocxWordCountAction: "{{status}}, word count",
+	/** Docx editor — Review tab button and title of Word's Word Count dialog */
+	previewDocxWordCountTitle: "Word count",
+	/** Docx editor, Word Count dialog — heading of the statistics list */
+	previewDocxWordCountStatistics: "Statistics:",
+	/** Docx editor, Word Count dialog — row: pages */
+	previewDocxWordCountPages: "Pages",
+	/** Docx editor, Word Count dialog — row: words */
+	previewDocxWordCountWords: "Words",
+	/** Docx editor, Word Count dialog — row: characters, spaces left out */
+	previewDocxWordCountCharactersNoSpaces: "Characters (no spaces)",
+	/** Docx editor, Word Count dialog — row: characters, spaces included */
+	previewDocxWordCountCharacters: "Characters (with spaces)",
+	/** Docx editor, Word Count dialog — row: paragraphs */
+	previewDocxWordCountParagraphs: "Paragraphs",
+	/** Docx editor, Word Count dialog — row: lines */
+	previewDocxWordCountLines: "Lines",
+	/** Docx editor, Word Count dialog — check box: whether text boxes, footnotes and endnotes count (Word's) */
+	previewDocxWordCountIncludeNotes: "Include text boxes, footnotes and endnotes",
+	/** Docx editor, Word Count dialog — button closing it */
+	previewDocxWordCountClose: "Close",
+	/** Docx editor — Review tab ribbon group: spelling and word count (Word's "Proofing") */
+	previewDocxRibbonProofing: "Proofing"
 } as const

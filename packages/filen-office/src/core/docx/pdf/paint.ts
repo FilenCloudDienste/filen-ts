@@ -28,6 +28,7 @@ import { GRAPHIC_FLOATS, GRAPHIC_INTS, Layer, OBJECT_FLOATS, OBJECT_INTS, PageGr
 import { Emphasis, OUTLINE_WIDTH, PAPER, RunEffect, effectFillsPaper, effectShadows, effectStrokes } from "../layout/effects"
 import type { DecorationValue } from "../layout/styles"
 import { borderLines } from "../layout/borderLines"
+import { TurnInt, turnMatrixAt, turnsOf, type TurnMatrix } from "../layout/turns"
 import { paintDrawingPdf, pictureSource } from "../../drawingml/pdf"
 import type { DrawingImage, Paint } from "../../drawingml/index"
 import {
@@ -622,6 +623,33 @@ function clipsOf(data: DocxPdfPage): { lines: Int32Array; objects: Int32Array } 
 	return { lines, objects }
 }
 
+// The page's sideways text (layout/turns.ts): the turn each line, graphic and object is drawn through (-1 for none),
+// and each turn's matrix.
+interface PdfTurns {
+	readonly lines: Int32Array
+	readonly graphics: Int32Array
+	readonly objects: Int32Array
+	readonly matrices: readonly TurnMatrix[]
+}
+
+function turnsOfPage(data: DocxPdfPage): PdfTurns | undefined {
+	const count = data.turnCount ?? 0
+	const floats = data.turnFloats
+	const ints = data.turnInts
+
+	if (count <= 0 || floats === undefined || ints === undefined) return undefined
+
+	const lines = turnsOf(count, ints, data.lineCount, TurnInt.LINE_FROM)
+	const graphics = turnsOf(count, ints, data.graphicCount, TurnInt.GRAPHIC_FROM)
+	const matrices: TurnMatrix[] = []
+
+	for (let t = 0; t < count; t++) matrices.push(turnMatrixAt(floats, ints, t))
+
+	if (lines === undefined || graphics === undefined) return undefined
+
+	return { lines, graphics, objects: data.objectTurns ?? new Int32Array(data.objectCount).fill(-1), matrices }
+}
+
 function clipTo(page: PdfPage, data: DocxPdfPage, clip: number): void {
 	const f = clip * PDF_CLIP_FLOATS
 
@@ -640,6 +668,7 @@ export class DocxPagePainter {
 	private readonly page: PdfPage
 	private readonly data: DocxPdfPage
 	private readonly clips: { lines: Int32Array; objects: Int32Array }
+	private readonly turns: PdfTurns | undefined
 	// Text box text drawn with its box (in the box's place in the stacking order): sources by box object id, and
 	// those sources.
 	private readonly boxed = new Map<number, number[]>()
@@ -653,6 +682,7 @@ export class DocxPagePainter {
 		this.page = page
 		this.data = data
 		this.clips = clipsOf(data)
+		this.turns = turnsOfPage(data)
 
 		const owners = data.sourceOwners
 
@@ -693,14 +723,13 @@ export class DocxPagePainter {
 	}
 
 	async paint(): Promise<void> {
-		const { page, data, context } = this
-		const doc = context.doc
+		const { page, data } = this
 
 		// Behind the text: graphics and objects of the BEHIND layer.
 		page.beginArtifact({ type: "Layout" })
 
 		for (let g = 0; g < data.graphicCount; g++) {
-			if ((data.graphicInts[g * GRAPHIC_INTS + 2] ?? Layer.TEXT) === Layer.BEHIND) paintGraphic(page, data, doc.decorations, g)
+			if ((data.graphicInts[g * GRAPHIC_INTS + 2] ?? Layer.TEXT) === Layer.BEHIND) this.graphic(g)
 		}
 
 		page.endArtifact()
@@ -710,7 +739,7 @@ export class DocxPagePainter {
 		page.beginArtifact({ type: "Layout" })
 
 		for (let g = 0; g < data.graphicCount; g++) {
-			if ((data.graphicInts[g * GRAPHIC_INTS + 2] ?? Layer.TEXT) === Layer.TEXT) paintGraphic(page, data, doc.decorations, g)
+			if ((data.graphicInts[g * GRAPHIC_INTS + 2] ?? Layer.TEXT) === Layer.TEXT) this.graphic(g)
 		}
 
 		for (let line = 0; line < data.lineCount; line++) if (!this.inBox(line)) this.lineDecorations(line, true)
@@ -731,7 +760,7 @@ export class DocxPagePainter {
 		page.beginArtifact({ type: "Layout" })
 
 		for (let g = 0; g < data.graphicCount; g++) {
-			if ((data.graphicInts[g * GRAPHIC_INTS + 2] ?? Layer.TEXT) === Layer.FRONT) paintGraphic(page, data, doc.decorations, g)
+			if ((data.graphicInts[g * GRAPHIC_INTS + 2] ?? Layer.TEXT) === Layer.FRONT) this.graphic(g)
 		}
 
 		page.endArtifact()
@@ -740,6 +769,33 @@ export class DocxPagePainter {
 		for (const id of [...this.boxed.keys()]) await this.paintBoxText(id)
 
 		this.closeAll()
+	}
+
+	// Saves the graphics state and clips to `clip` and turns by `turn` (each -1 for none): false, and nothing done,
+	// for neither. The clip is the page's, so it comes before the turn.
+	private enterFrame(clip: number, turn: number): boolean {
+		const matrix = turn < 0 ? undefined : this.turns?.matrices[turn]
+
+		if (clip < 0 && matrix === undefined) return false
+
+		this.page.saveState()
+
+		if (clip >= 0) clipTo(this.page, this.data, clip)
+		if (matrix !== undefined) this.page.concat(matrix)
+
+		return true
+	}
+
+	private lineTurn(line: number): number {
+		return this.turns?.lines[line] ?? -1
+	}
+
+	private graphic(g: number): void {
+		const entered = this.enterFrame(-1, this.turns?.graphics[g] ?? -1)
+
+		paintGraphic(this.page, this.data, this.context.doc.decorations, g)
+
+		if (entered) this.page.restoreState()
 	}
 
 	private inBox(line: number): boolean {
@@ -769,10 +825,7 @@ export class DocxPagePainter {
 
 		if (last <= first) return
 
-		if (clip >= 0) {
-			page.saveState()
-			clipTo(page, data, clip)
-		}
+		const entered = this.enterFrame(clip, this.lineTurn(line))
 
 		for (let d = first; d < last; d++) {
 			if (isFillDecoration(data.decorationInts[d * DECORATION_INTS] ?? 0) === fills) paintDecoration(page, data, this.context.doc, d)
@@ -780,7 +833,7 @@ export class DocxPagePainter {
 
 		if (!fills) this.leaders(line)
 
-		if (clip >= 0) page.restoreState()
+		if (entered) page.restoreState()
 	}
 
 	private leaders(line: number): void {
@@ -1105,6 +1158,7 @@ export class DocxPagePainter {
 		const source = data.lineInts[li + 5] ?? -1
 		const text = data.sourceTexts[source] ?? ""
 		const clip = this.clips.lines[line] ?? -1
+		const turn = this.lineTurn(line)
 
 		for (let k = first; k < first + count; k++) {
 			const fi = k * FRAGMENT_INTS
@@ -1117,15 +1171,13 @@ export class DocxPagePainter {
 
 			if (end <= start && (info & FragmentFlag.HYPHEN) === 0) continue
 
-			if (clip >= 0) {
-				this.endOpenContent()
-				page.saveState()
-				clipTo(page, data, clip)
-			}
+			if (clip >= 0 || turn >= 0) this.endOpenContent()
+
+			const entered = this.enterFrame(clip, turn)
 
 			await this.paintFragment(k, text, source, baseline, top, height, node)
 
-			if (clip >= 0) {
+			if (entered) {
 				this.endOpenContent()
 				page.restoreState()
 			}
@@ -1509,10 +1561,7 @@ export class DocxPagePainter {
 			page.beginArtifact({ type: "Layout" })
 		}
 
-		if (clip >= 0) {
-			page.saveState()
-			clipTo(page, data, clip)
-		}
+		const entered = this.enterFrame(clip, object < (this.turns?.objects.length ?? 0) ? (this.turns?.objects[object] ?? -1) : -1)
 
 		switch (entry.kind) {
 			case "drawing": {
@@ -1560,7 +1609,7 @@ export class DocxPagePainter {
 				break
 		}
 
-		if (clip >= 0) page.restoreState()
+		if (entered) page.restoreState()
 
 		if (node === undefined) {
 			page.endArtifact()

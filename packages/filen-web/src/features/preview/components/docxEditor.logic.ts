@@ -186,7 +186,7 @@ export const DOCX_COMMAND_CATALOGUE = {
 		"drawing.delete"
 	],
 	math: ["equation.insert", "equation.edit"],
-	view: ["view.reflow", "view.fieldCodes", "view.fieldCode"]
+	view: ["view.reflow", "view.fieldCodes", "view.fieldCode", "view.formattingMarks"]
 } as const satisfies Record<string, readonly DocxEditorCommandType[]>
 
 export type DocxCommandFeature = keyof typeof DOCX_COMMAND_CATALOGUE

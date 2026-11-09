@@ -1,6 +1,16 @@
 import { spliceAll } from "../../arrays"
 import type { LineSpacingRule } from "../../fonts/index"
-import { Exclusions, LINE_FLOATS, LINE_INTS, LineInt, MeasureCache, StyleTable, Wrap, type TextMeasurer } from "../../text/index"
+import {
+	Exclusions,
+	LINE_FLOATS,
+	LINE_INTS,
+	LineInt,
+	MeasureCache,
+	StyleTable,
+	Wrap,
+	type HyphenationLibrary,
+	type TextMeasurer
+} from "../../text/index"
 import type { DocxModel, Section } from "../model/document"
 import { Item, RevisionView } from "../model/kinds"
 import type { StoryPart } from "../model/part"
@@ -28,7 +38,18 @@ import {
 import { layoutCompat, lineSpacingRule, pageGeometry, type LayoutCompat, type PageGeometry } from "./geometry"
 import { FootnoteArea, NoteNumbering, type FootnoteState, type NoteNumberingSnapshot, type PlacedNote } from "./notes"
 import { ObjectTable, type ObjectSizer } from "./objects"
-import { PageGraphic, Layer, OutputMark, PageDisplayList, PageOutput, Region, SOURCE_INTS, SourceFlag, SourceInt } from "./output"
+import {
+	PageGraphic,
+	Layer,
+	OutputMark,
+	PageDisplayList,
+	PageOutput,
+	Region,
+	SOURCE_INTS,
+	SourceFlag,
+	SourceInt,
+	sectionBreakFlags
+} from "./output"
 import { DecorationTable, RunStyles, borderWidth, type DecorationValue, type FontSource, type RunStyleInfo } from "./styles"
 import { laidRows, sameNumbers, type TableSnapshot } from "./table"
 import { EPSILON, twips } from "./units"
@@ -63,6 +84,9 @@ export interface LayoutOptions {
 	// The time (epoch ms) DATE and TIME fields show, as Word shows them as of opening or printing (default: when
 	// layout starts). Read once, so every page and relayout shows the same.
 	readonly date?: number
+	// The hyphenation patterns of a document that hyphenates automatically (w:autoHyphenation); without them only
+	// soft hyphens break words.
+	readonly hyphenation?: HyphenationLibrary
 }
 
 // A top-level body block an edit changed, as laid out now: relaying out cannot stop at a page that matches
@@ -193,7 +217,8 @@ export class DocumentLayout {
 		running?: () => boolean,
 		driver?: LayoutDriver,
 		viewSwitch?: (view: RevisionView) => void,
-		codesSwitch?: (codes: FieldCodes | undefined, fresh: boolean) => void
+		codesSwitch?: (codes: FieldCodes | undefined, fresh: boolean) => void,
+		hiddenSwitch?: { readonly shown: boolean; readonly set: (on: boolean, fresh: boolean) => void }
 	): void {
 		this.relayout = relayout
 
@@ -201,6 +226,39 @@ export class DocumentLayout {
 		if (driver !== undefined) this.driver = driver
 		if (viewSwitch !== undefined) this.viewSwitch = viewSwitch
 		if (codesSwitch !== undefined) this.codesSwitch = codesSwitch
+		if (hiddenSwitch !== undefined) {
+			this.hiddenSwitch = hiddenSwitch.set
+			this.showHiddenValue = hiddenSwitch.shown
+		}
+	}
+
+	private hiddenSwitch: ((on: boolean, fresh: boolean) => void) | undefined = undefined
+	private showHiddenValue = false
+	// Anything hidden met while laying out (see ContentServices.hidden).
+	readonly hidden = { seen: false }
+
+	get showHidden(): boolean {
+		return this.showHiddenValue
+	}
+
+	// Editing: lays hidden text (w:vanish) out or leaves it out, as Word does with its formatting marks shown or
+	// not. When nothing hidden was met so far only what is laid out from now on changes (-1 is returned); else it
+	// lays the document out again from the first page as setView does and returns that page.
+	setShowHidden(on: boolean): number {
+		if (this.hiddenSwitch === undefined || this.driver === undefined) throw new Error("No layout to edit")
+		if (on === this.showHiddenValue) return -1
+
+		this.showHiddenValue = on
+
+		const fresh = this.hidden.seen
+
+		this.hiddenSwitch(on, fresh)
+
+		if (!fresh) return -1
+
+		this.cancelled = false
+
+		return this.driver.begin(0, undefined)
 	}
 
 	// Editing: lays the document out again in revision view `view`, from the first page (the pages laid out
@@ -654,6 +712,11 @@ class Paginator {
 		this.engine.content.setFieldCodes(codes)
 	}
 
+	// Hidden text laid out or not in what is built from now on (see ContentBuilder.setShowHidden).
+	setShowHidden(on: boolean): void {
+		this.engine.content.setShowHidden(on)
+	}
+
 	// The resolver's definitions changed (styles and lists an editor added): counting goes on with them. Whether
 	// a style laid out as missing is defined now.
 	redefine(styles: DocxStyles, numbering: Numbering | undefined): boolean {
@@ -1073,9 +1136,13 @@ class Paginator {
 		const flow = new BlockFlow(this.engine, story, Region.BODY, true)
 		const blocks = this.engine.edits?.body
 
-		if (blocks === undefined) return flow.setRange(body, section.start, section.end)
+		if (blocks === undefined) flow.setRange(body, section.start, section.end)
+		else flow.setRefs(body, blocks.refs, index === 0 ? 0 : (blocks.sectionEnds[index - 1] ?? 0), blocks.sectionEnds[index] ?? 0)
 
-		return flow.setRefs(body, blocks.refs, index === 0 ? 0 : (blocks.sectionEnds[index - 1] ?? 0), blocks.sectionEnds[index] ?? 0)
+		// The section's last paragraph holds its break: formatting marks show how the next section starts.
+		if (index + 1 < this.model.sections.length) flow.lastFlags = sectionBreakFlags(this.resolved(index + 1).type)
+
+		return flow
 	}
 
 	private startSection(index: number): boolean {
@@ -2925,6 +2992,7 @@ function sameFlow(fa: FlowSnapshot, fb: FlowSnapshot, pageShift: number): boolea
 		fa.offset === fb.offset &&
 		fa.rows === fb.rows &&
 		fa.pendingMark === fb.pendingMark &&
+		fa.hyphens === fb.hyphens &&
 		fa.after === fb.after &&
 		fa.contextual === fb.contextual &&
 		fa.styleId === fb.styleId &&
@@ -3545,13 +3613,14 @@ export function layoutDocument(
 	const cache = new MeasureCache(measurer)
 	const table = new StyleTable(cache, options.lineSpacingRule ?? lineSpacingRule(model.settings))
 	const decorations = new DecorationTable()
-	const runStyles = new RunStyles(table, fonts, decorations)
+	const runStyles = new RunStyles(table, fonts, decorations, model.settings.autoHyphenation ? (options.hyphenation ?? null) : null)
 	const objects = new ObjectTable()
 	const layout = new DocumentLayout(model, table, runStyles, objects)
 	const store = options.store ?? new PropsStore()
 	const tuning = { ...DEFAULT_TUNING, ...options.tuning }
 	let view = options.view ?? RevisionView.Final
 	let codes: FieldCodes | undefined
+	let showHidden = options.showHidden ?? false
 	const date = new Date(options.date ?? Date.now())
 	const engineOf = (): Engine => {
 		const engine = new Engine({
@@ -3564,7 +3633,8 @@ export function layoutDocument(
 			sizer: options.sizer,
 			notes: new NoteNumbering(model),
 			view,
-			showHidden: options.showHidden ?? false,
+			showHidden,
+			hidden: layout.hidden,
 			compat: layoutCompat(model.settings),
 			tuning,
 			recordMaps: options.recordMaps ?? false,
@@ -3667,6 +3737,22 @@ export function layoutDocument(
 
 			paginator = new Paginator(engineOf(), layout, options.estimatedPages, options.maxPages ?? 100000)
 			driver.use(paginator)
+		},
+		{
+			shown: showHidden,
+			set: (next, fresh) => {
+				showHidden = next
+
+				// Nothing hidden laid out so far: what is built from now on follows.
+				if (!fresh) {
+					paginator.setShowHidden(next)
+
+					return
+				}
+
+				paginator = new Paginator(engineOf(), layout, options.estimatedPages, options.maxPages ?? 100000)
+				driver.use(paginator)
+			}
 		}
 	)
 	layout.done = drive(true)

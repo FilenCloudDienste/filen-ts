@@ -44,5 +44,7 @@ export const previewDocxRibbon = {
 	/** Docx editor — ribbon group on the Table tab: header row, shading and table style */
 	previewDocxRibbonTableDesign: "Design",
 	/** Docx editor — Table tab dropdown: delete the selected rows, columns or the whole table */
-	previewDocxRibbonTableDelete: "Delete"
+	previewDocxRibbonTableDelete: "Delete",
+	/** Docx editor — accessible name of Word's Mini toolbar, the small formatting toolbar shown above selected text */
+	previewDocxMiniToolbar: "Mini toolbar"
 }
