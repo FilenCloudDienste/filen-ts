@@ -11,6 +11,7 @@ import type {
 } from "../../core/sheet/protocol"
 import type { SheetFeature } from "../../core/sheet/registry"
 import type { XlsxDocument } from "../../core/xlsx/edit/document"
+import { XlsxReadError } from "../../core/xlsx/read/errors"
 import { decryptXlsWorkbook, xlsEncryption, type XlsEncryption } from "../../core/xls/decrypt"
 import { decryptionOf } from "../encryption/legacyDecryption"
 import { packageSealer } from "../encryption/seal"
@@ -22,7 +23,8 @@ import { DEFAULT_OFFICE_PASSWORD, passwordOfficeKey } from "../encryption/webCry
 // every save (Save as .xlsx) as an Agile package under that same password, as a Word 97–2003 document's .docx is
 // sealed; the password itself is not kept. A cipher none of these is refused "unsupported", before any password.
 
-// The .xlsx of an Excel 97–2003 compound file (web: hucre's BIFF8 reader); throws what it cannot read.
+// The .xlsx of an Excel 97–2003 compound file (web: hucre's BIFF8 reader); throws what it cannot read, an
+// XlsxReadError "tooLarge" for a sheet past the cell limit.
 export type LegacyWorkbookConverter = (file: Uint8Array) => Promise<Uint8Array>
 
 type Encrypted = Extract<XlsEncryption, { kind: "encrypted" }>
@@ -46,12 +48,16 @@ function opened(result: XlsxSessionOpen, track: (session: SheetSessionApi) => vo
 	return result
 }
 
+type Failed = Extract<SheetOpenResult, { kind: "failed" }>
+
 // The .xlsx of `file`, or why it is not one.
-async function converted(file: Uint8Array, convert: LegacyWorkbookConverter): Promise<Uint8Array | { readonly message: string }> {
+async function converted(file: Uint8Array, convert: LegacyWorkbookConverter): Promise<Uint8Array | Failed> {
 	try {
 		return await convert(file)
 	} catch (error) {
-		return { message: error instanceof Error ? error.message : String(error) }
+		const reason = error instanceof XlsxReadError && error.code === "tooLarge" ? "tooLarge" : "malformed"
+
+		return { kind: "failed", reason, message: error instanceof Error ? error.message : String(error) }
 	}
 }
 
@@ -80,7 +86,7 @@ async function unlockWith(file: Uint8Array, encryption: Encrypted, password: str
 
 	decrypted.file.fill(0)
 
-	if (!(xlsx instanceof Uint8Array)) return { kind: "opened", result: { kind: "failed", reason: "malformed", message: xlsx.message } }
+	if (!(xlsx instanceof Uint8Array)) return { kind: "opened", result: xlsx }
 	if (context.options.signal?.aborted === true) return { kind: "opened", result: { kind: "aborted" } }
 
 	const sealing = await sealedUnder(password)
@@ -161,7 +167,7 @@ export async function openLegacyWorkbook(source: ByteSource, context: LegacyCont
 		case "plain": {
 			const xlsx = await converted(file, context.convert)
 
-			if (!(xlsx instanceof Uint8Array)) return { kind: "failed", reason: "malformed", message: xlsx.message }
+			if (!(xlsx instanceof Uint8Array)) return xlsx
 
 			return opened(await openXlsxSession(bytesSource(xlsx), context.options, context.onEvent, context.features), context.track)
 		}

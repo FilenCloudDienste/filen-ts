@@ -620,12 +620,21 @@ export class FieldEvaluation {
 	// Whether counting the sequences walked this story's document.
 	private sequenceReached = false
 	private readonly lists = new Map<DocxEditorSession, ListNumbers>()
+	// The [from, to) of `doc` this update recomputes, when it recomputes a range of fields.
+	private readonly scope: { readonly from: number; readonly to: number } | undefined
 
-	constructor(host: FieldHost, session: DocxEditorSession, now: number, doc: Node = session.state.doc) {
+	constructor(
+		host: FieldHost,
+		session: DocxEditorSession,
+		now: number,
+		doc: Node = session.state.doc,
+		scope?: { readonly from: number; readonly to: number }
+	) {
 		this.host = host
 		this.session = session
 		this.doc = doc
 		this.now = new Date(now)
+		this.scope = scope
 	}
 
 	private docOf(session: DocxEditorSession): Node {
@@ -790,6 +799,8 @@ export class FieldEvaluation {
 		const from = first === null ? bookmark.from : bookmark.startPos
 		const to = last === null ? bookmark.to : bookmark.endPos + last.nodeSize
 
+		if (holder === this.session) this.sequencesAhead(from, to)
+
 		return rangeText(
 			doc,
 			from,
@@ -797,6 +808,26 @@ export class FieldEvaluation {
 			{ part: holder.story.part, start: bookmark.startItem, end: bookmark.endItem },
 			holder === this.session ? this.results : undefined
 		)
+	}
+
+	// Records in `results` the SEQ fields of [from, to) this update recomputes but has yet to reach: a reference
+	// before a caption reads the caption's new number (the numbers are counted once for the whole story).
+	private sequencesAhead(from: number, to: number): void {
+		const scope = this.scope
+
+		if (scope === undefined) return
+
+		this.doc.nodesBetween(Math.max(from, scope.from), Math.min(to, scope.to, this.doc.content.size), (node, pos) => {
+			if (node.type !== nodes.field) return !node.isLeaf
+			if (pos < scope.from || this.results.has(pos) || deleted(node.marks) || !updatableField(this.session, node)) return false
+
+			const code = parseFieldCode(node.attrs["instruction"] as string)
+			const result = code.type === "SEQ" ? this.sequence(code, pos) : undefined
+
+			if (result !== undefined) this.results.set(pos, result)
+
+			return false
+		})
 	}
 
 	// The language of a field atom's runs (w:lang, its Latin script value; a field of the file's, its first run's),

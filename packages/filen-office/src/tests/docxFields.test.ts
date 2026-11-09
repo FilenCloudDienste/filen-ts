@@ -399,6 +399,32 @@ describe("updating fields", () => {
 		expect(fields(opened.editor.session.state.doc)).toEqual(["SEQ=1", "REF=Figure 1"])
 	})
 
+	it("reads a renumbered caption's new number in a reference before it in one update", async () => {
+		const opened = await open({
+			body:
+				p("Intro") +
+				`<w:p><w:r><w:t xml:space="preserve">See </w:t></w:r>${complex(" REF T \\h ", "old")}</w:p>` +
+				`<w:p><w:bookmarkStart w:id="7" w:name="T"/><w:r><w:t xml:space="preserve">Figure </w:t></w:r>${complex(" SEQ Figure ", "9")}<w:bookmarkEnd w:id="7"/></w:p>`
+		})
+
+		expect(await opened.editor.execute({ type: "field.updateAll" })).toBe(true)
+		expect(fields(opened.editor.session.state.doc)).toEqual(["REF=Figure 1", "SEQ=1"])
+	})
+
+	it("reads a caption's stored number in a reference updated without it", async () => {
+		const opened = await open({
+			body:
+				`<w:p><w:r><w:t xml:space="preserve">See </w:t></w:r>${complex(" REF T \\h ", "old")}</w:p>` +
+				`<w:p><w:bookmarkStart w:id="7" w:name="T"/><w:r><w:t xml:space="preserve">Figure </w:t></w:r>${complex(" SEQ Figure ", "9")}<w:bookmarkEnd w:id="7"/></w:p>`
+		})
+		const editor = opened.editor
+
+		select(editor, 1, editor.session.state.doc.child(0).nodeSize - 1)
+
+		expect(await editor.execute({ type: "field.update" })).toBe(true)
+		expect(fields(editor.session.state.doc)).toEqual(["REF=Figure 9", "SEQ=9"])
+	})
+
 	it("numbers captions in body text boxes in one sequence with the body, by where each box is anchored", async () => {
 		const caption = (result: string): string =>
 			`<w:p><w:r><w:t xml:space="preserve">Figure </w:t></w:r>${complex(" SEQ Figure \\* ARABIC ", result)}</w:p>`

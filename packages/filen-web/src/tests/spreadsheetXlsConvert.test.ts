@@ -2,6 +2,9 @@ import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
 import { openXlsx } from "hucre/xlsx"
+import { bytesSource } from "@filen/office/core/opc"
+import { XlsxReadError } from "@filen/office/core/xlsx"
+import { workbookOpener } from "@filen/office/dom/sheet"
 import { xlsChart, xlsFile, xlsLabel, xlsNumber, xlsRecord, xlsWorkbookStream, XLS_CHART } from "@filen/office/testing/encryption"
 import { xlsToXlsx, xlsxCopyName } from "@/features/spreadsheet/lib/xlsConvert"
 
@@ -62,6 +65,27 @@ describe("xlsToXlsx", () => {
 		const workbook = await openXlsx(await xlsToXlsx(await xlsFile(stream)))
 
 		expect(workbook.sheets[0]?.rows).toEqual([["2 Wow"], ["10"], ["plain"]])
+	})
+
+	// The workbook opener answers a converter's XlsxReadError "tooLarge" as a typed "tooLarge" failure.
+	it("refuses a sheet past the cell limit as too large, not damaged", async () => {
+		const error: unknown = await xlsToXlsx(XLS, 2).catch((thrown: unknown) => thrown)
+
+		expect(error).toBeInstanceOf(XlsxReadError)
+		expect(error instanceof XlsxReadError && error.code).toBe("tooLarge")
+
+		const result = await workbookOpener({ legacy: file => xlsToXlsx(file, 2) })(
+			bytesSource(XLS),
+			{ kind: "xls" },
+			() => undefined,
+			() => undefined
+		)
+
+		expect(result.kind === "failed" && result.reason).toBe("tooLarge")
+	})
+
+	it("still throws damage as hucre's own error", async () => {
+		await expect(xlsToXlsx(XLS.slice(0, 600))).rejects.not.toBeInstanceOf(XlsxReadError)
 	})
 
 	it("gives a chart sheet no cells", async () => {

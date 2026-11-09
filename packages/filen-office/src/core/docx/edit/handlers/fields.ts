@@ -191,7 +191,7 @@ function updated(session: DocxEditorSession, node: Node, result: string, stamp: 
 
 // New results for the fields of [from, to) of the session's document (deleted fields stay as they are).
 function fieldChanges(host: FieldHost, session: DocxEditorSession, from: number, to: number, stamp?: RevisionStamp): AttrChanges {
-	const evaluation = new FieldEvaluation(host, session, session.context.identity.now())
+	const evaluation = new FieldEvaluation(host, session, session.context.identity.now(), session.state.doc, { from, to })
 	const changes = new AttrChanges()
 
 	session.state.doc.nodesBetween(from, to, (node, pos) => {
