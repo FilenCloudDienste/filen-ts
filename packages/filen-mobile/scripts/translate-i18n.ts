@@ -1,9 +1,10 @@
 // i18n translation pipeline — fills the target-language catalogs (src/locales/<lang>.json)
 // from the English source catalog (src/locales/en/*.ts) via the Anthropic Messages API.
 //
-// Run with: pnpm run translate-i18n          (DELTA mode — only changed English keys)
-//           pnpm run translate-i18n --full   (FULL mode — every key for every language)
-//           pnpm run translate-i18n de,fr    (restrict to specific languages)
+// Run with: pnpm run translate-i18n                      (DELTA mode — only changed English keys)
+//           pnpm run translate-i18n --full               (FULL mode — every key for every language, resumable)
+//           pnpm run translate-i18n de,fr                (restrict to specific languages)
+//           pnpm run translate-i18n --budget-minutes=300 (stop at the next batch boundary after 300 minutes, exit 3)
 //           No `--` separator: pnpm forwards it to the script as a literal argument.
 //
 // Modes:
@@ -16,6 +17,9 @@
 //                     treated as added (covers a brand-new empty stub or a previously-failed run).
 //                     After a successful run the snapshot is rewritten to the current English catalog.
 //   FULL (--full)   — translate every English key for every target language (ignores the snapshot).
+//                     Resumable: src/locales/.sources/<lang>.json records the English each key was
+//                     translated from, and a re-run skips keys whose English is unchanged. A run that
+//                     completes for every language deletes the records, so the next FULL starts over.
 //
 // DRY_RUN=1 — skip the Anthropic API entirely; stub each translation as "<lang>:<english>"
 //             (e.g. "de:Cancel"). Lets the catalog-read / delta / file-write logic be exercised
@@ -24,20 +28,25 @@
 // Reads ANTHROPIC_API_KEY from the environment — never hardcoded, never logged.
 
 import Anthropic from "@anthropic-ai/sdk"
-import { readFileSync, readdirSync } from "node:fs"
+import { readFileSync, readdirSync, rmSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import { dirname, join } from "node:path"
 import {
 	applyRemovals,
+	BUDGET_EXHAUSTED_EXIT_CODE,
 	buildSystemPrompt,
 	computeDelta,
 	coversEveryLanguage,
+	deadlineAfter,
 	englishSource as toEnglishSource,
 	keysToTranslate,
 	LANGUAGE_NAMES,
 	parseCliArgs,
 	readJsonObject,
+	recordSources,
 	sortRecord,
+	SOURCES_DIR_NAME,
+	staleKeys,
 	translateBatch,
 	translateDryRun,
 	translateSubset,
@@ -67,6 +76,8 @@ const LOCALES_DIR = join(PACKAGE_DIR, "src", "locales")
 // Baseline for the DELTA diff: the English catalog as of the last translation (key -> value). Lives
 // alongside the language catalogs but is never loaded as one (not a TARGET_LANGUAGE; a dotfile).
 const EN_SNAPSHOT_PATH = join(LOCALES_DIR, ".en-snapshot.json")
+// Per language, the English each key was translated from (key -> hash): what a FULL re-run skips.
+const SOURCES_DIR = join(LOCALES_DIR, SOURCES_DIR_NAME)
 
 // "en" is the source language; never a translation target.
 type SupportedLanguage = (typeof SUPPORTED_LANGUAGES)[number]
@@ -120,7 +131,8 @@ function writeSortedJson(path: string, record: Catalog): void {
 // Main
 // ---------------------------------------------------------------------------
 
-async function main(): Promise<void> {
+// The process exit code: 0 when done, BUDGET_EXHAUSTED_EXIT_CODE when the time budget stopped the run.
+async function main(): Promise<number> {
 	const args = parseCliArgs(process.argv.slice(2), TARGET_LANGUAGES)
 	const delta = args.full
 		? { upsert: {}, removed: [] }
@@ -137,80 +149,133 @@ async function main(): Promise<void> {
 		)
 	}
 
-	let createMessage: CreateMessage | null = null
+	// Created on the first request, so a run with nothing left to translate needs no key.
+	let client: Anthropic | null = null
+	const createMessage: CreateMessage | null = DRY_RUN
+		? null
+		: request => {
+				if (client === null) {
+					const apiKey = process.env["ANTHROPIC_API_KEY"]
 
-	if (!DRY_RUN) {
-		const apiKey = process.env["ANTHROPIC_API_KEY"]
+					if (apiKey === undefined || apiKey.length === 0) {
+						throw new Error("ANTHROPIC_API_KEY is not set (and DRY_RUN is not enabled)")
+					}
 
-		if (apiKey === undefined || apiKey.length === 0) {
-			throw new Error("ANTHROPIC_API_KEY is not set (and DRY_RUN is not enabled)")
-		}
+					// The SDK reads ANTHROPIC_API_KEY from the environment itself; constructing without
+					// passing the value keeps it out of any logged constructor args.
+					client = new Anthropic()
+				}
 
-		// The SDK reads ANTHROPIC_API_KEY from the environment itself; constructing without
-		// passing the value keeps it out of any logged constructor args.
-		const client = new Anthropic()
-
-		createMessage = request => client.beta.messages.create(request)
-	}
+				return client.beta.messages.create(request)
+			}
+	const shouldStop = deadlineAfter(args.budgetMinutes)
 
 	for (const lang of args.languages) {
 		const catalogPath = join(LOCALES_DIR, `${lang}.json`)
+		const sourcesPath = join(SOURCES_DIR, `${lang}.json`)
 		const existing = readCatalog(catalogPath, `Catalog ${lang}.json`) ?? {}
-		const subset = keysToTranslate({ source: EN_SOURCE, full: args.full, delta, existing, lang })
+		// FULL keeps a resume record; DELTA updates the record a stopped FULL run left behind.
+		const storedRecord = readCatalog(sourcesPath, `Resume record ${lang}.json`)
+		const record: Catalog | null = storedRecord !== null || args.full ? { ...storedRecord } : null
+		const subset = keysToTranslate({
+			source: EN_SOURCE,
+			full: args.full,
+			delta,
+			existing,
+			lang,
+			sources: args.full ? record : null
+		})
 		const merged: Catalog = {
 			...existing
 		}
 
-		applyRemovals(merged, delta.removed)
+		// DELTA removes what left English since the snapshot; FULL whatever English no longer has.
+		applyRemovals(merged, args.full ? staleKeys(EN_SOURCE, merged) : delta.removed)
 
-		const subsetKeyCount = Object.keys(subset).length
-
-		if (subsetKeyCount > 0) {
-			console.log(`[translate-i18n] ${lang}: translating ${subsetKeyCount} keys`)
-
-			const send = createMessage
-			const translated =
-				send === null
-					? translateDryRun(lang, subset)
-					: await translateSubset({
-							label: lang,
-							subset,
-							translateBatch: batch =>
-								translateBatch({
-									createMessage: send,
-									model: MODEL,
-									system,
-									lang,
-									languageName: LANGUAGE_NAMES[lang],
-									batch
-								})
-						})
-
-			Object.assign(merged, translated)
-		} else {
-			console.log(`[translate-i18n] ${lang}: nothing to translate`)
+		if (record !== null) {
+			applyRemovals(record, args.full ? staleKeys(EN_SOURCE, record) : delta.removed)
 		}
 
-		writeSortedJson(catalogPath, merged)
+		const subsetKeyCount = Object.keys(subset).length
+		let finished = true
+
+		// Written even when the language fails, so the batches it already got are kept.
+		try {
+			if (subsetKeyCount > 0) {
+				console.log(`[translate-i18n] ${lang}: translating ${subsetKeyCount} keys`)
+
+				const send = createMessage
+
+				finished = await translateSubset({
+					label: lang,
+					subset,
+					translateBatch:
+						send === null
+							? batch => Promise.resolve(translateDryRun(lang, batch))
+							: batch =>
+									translateBatch({
+										createMessage: send,
+										model: MODEL,
+										system,
+										lang,
+										languageName: LANGUAGE_NAMES[lang],
+										batch
+									}),
+					onBatch: translated => {
+						Object.assign(merged, translated)
+
+						if (record !== null) {
+							recordSources(record, translated, subset)
+						}
+					},
+					shouldStop
+				})
+			} else {
+				console.log(`[translate-i18n] ${lang}: nothing to translate`)
+			}
+		} finally {
+			writeSortedJson(catalogPath, merged)
+
+			if (record !== null) {
+				writeSortedJson(sourcesPath, record)
+			}
+		}
 
 		console.log(`[translate-i18n] ${lang}: wrote ${Object.keys(merged).length} keys`)
+
+		if (!finished) {
+			console.log(
+				"[translate-i18n] time budget used up: stopped after a checkpoint. Run the same command again to continue; the snapshot was not advanced."
+			)
+
+			return BUDGET_EXHAUSTED_EXIT_CODE
+		}
 	}
 
 	// Advance the baseline only after every language succeeded — a mid-run throw leaves the old
 	// snapshot in place, so a re-run re-detects the same delta and retries — and only when the run
 	// covered every language, or the ones left out would never see the changed keys. Written into
-	// the same PR as the translations, so the baseline only advances once that PR is merged.
+	// the same PR as the translations, so the baseline only advances once that PR is merged. The
+	// resume records go with it: every language is complete, so the next FULL run starts over.
 	if (coversEveryLanguage(args.languages, TARGET_LANGUAGES)) {
 		writeSortedJson(EN_SNAPSHOT_PATH, EN_CATALOG)
+		rmSync(SOURCES_DIR, { recursive: true, force: true })
 	} else {
 		console.log("[translate-i18n] snapshot not advanced: the run covered only some languages")
 	}
 
 	console.log("[translate-i18n] done")
+
+	return 0
 }
 
-main().catch(error => {
-	// Surface a clean message; never echo the API key.
-	console.error("[translate-i18n] failed:", error instanceof Error ? error.message : String(error))
-	process.exit(1)
-})
+main().then(
+	code => {
+		process.exitCode = code
+	},
+	(error: unknown) => {
+		// Surface a clean message; never echo the API key.
+		console.error("[translate-i18n] failed:", error instanceof Error ? error.message : String(error))
+		process.exit(1)
+	}
+)

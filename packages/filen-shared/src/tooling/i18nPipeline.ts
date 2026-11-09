@@ -1,13 +1,15 @@
 /**
- * The core of the apps' translate-i18n scripts: CLI parsing, the English-vs-snapshot delta, CLDR plural expansion,
- * the per-language key plan, removals, the translator system prompt, the request and its structured-output schema,
- * batching and reading a batch's reply. Every function works on one flat key → string catalog (mobile has one, the
+ * The core of the apps' translate-i18n scripts: CLI parsing and the time budget, the English-vs-snapshot delta, CLDR
+ * plural expansion, the per-language key plan and the FULL resume record, removals, the translator system prompt, the
+ * request and its structured-output schema, batching with retries and validation, and reading a batch's reply. Every function works on one flat key → string catalog (mobile has one, the
  * web app one per namespace). Each script keeps its catalog files, prompt context and Anthropic client, which it
  * passes in as `createMessage`, so this module needs no SDK. Node-only build tooling, reachable solely through the
  * "@filen/shared/tooling/i18n" subpath so it never enters an app bundle.
  */
 
-import { existsSync, readFileSync, writeFileSync } from "node:fs"
+import { createHash } from "node:crypto"
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs"
+import { dirname } from "node:path"
 import { type } from "arktype"
 
 export type Catalog = Record<string, string>
@@ -49,16 +51,37 @@ export const LANGUAGE_NAMES = {
 export type CliArgs<L extends string> = {
 	full: boolean
 	languages: readonly L[]
+	// Minutes the run may spend before it stops at the next batch boundary; null = unbounded.
+	budgetMinutes: number | null
 }
 
-/** `--full` plus a bare or comma-separated language list, e.g. `de` or `de,fr,ja`. No list means every language. */
+const BUDGET_FLAG = "--budget-minutes="
+
+/**
+ * `--full`, `--budget-minutes=<n>` (decimals allowed, 0 = translate nothing) plus a bare or comma-separated language
+ * list, e.g. `de` or `de,fr,ja`. No list means every language.
+ */
 export function parseCliArgs<L extends string>(argv: readonly string[], allowed: readonly L[]): CliArgs<L> {
 	let full = false
+	let budgetMinutes: number | null = null
 	const requested: L[] = []
 
 	for (const arg of argv) {
 		if (arg === "--full") {
 			full = true
+
+			continue
+		}
+
+		if (arg.startsWith(BUDGET_FLAG)) {
+			const raw = arg.slice(BUDGET_FLAG.length)
+			const value = Number(raw)
+
+			if (raw.trim().length === 0 || !Number.isFinite(value) || value < 0) {
+				throw new Error(`Invalid ${BUDGET_FLAG}${raw}: expected a non-negative number of minutes`)
+			}
+
+			budgetMinutes = value
 
 			continue
 		}
@@ -82,8 +105,27 @@ export function parseCliArgs<L extends string>(argv: readonly string[], allowed:
 
 	return {
 		full,
-		languages: requested.length > 0 ? requested : allowed
+		languages: requested.length > 0 ? requested : allowed,
+		budgetMinutes
 	}
+}
+
+/**
+ * The process exit code of a run that stopped because its time budget ran out. Everything translated so far is on
+ * disk; re-running the same command continues from there. Distinct from 1 (failure) so a CI job can tell the two
+ * apart.
+ */
+export const BUDGET_EXHAUSTED_EXIT_CODE = 3
+
+/** A stop check for `minutes` from now (never true for null; true at once for 0). */
+export function deadlineAfter(minutes: number | null, now: () => number = Date.now): () => boolean {
+	if (minutes === null) {
+		return () => false
+	}
+
+	const end = now() + minutes * 60_000
+
+	return () => now() >= end
 }
 
 // --- CLDR plural expansion -------------------------------------------------
@@ -312,21 +354,115 @@ export function chunkEntries(subset: Record<string, string>, size: number): Reco
 }
 
 /**
- * Translates a subset batch by batch through the caller's model call and merges the results. Throws if
- * the model omits any requested key, so a truncated batch never writes an incomplete catalog. `label`
- * prefixes the log lines and errors (e.g. "de" or "de/common").
+ * A reply that came back but cannot be used: a missing key, placeholders or markup that differ from English, an early
+ * stop or unparseable output. Retried once (the model may well get it right the second time), then fatal.
+ */
+export class TranslationValidationError extends Error {
+	override name = "TranslationValidationError"
+}
+
+/** Attempts per batch for transient failures (rate limit, overload, 5xx, network). */
+export const MAX_TRANSIENT_ATTEMPTS = 4
+
+/** Attempts per batch for validation failures. */
+export const MAX_VALIDATION_ATTEMPTS = 2
+
+const TRANSIENT_STATUSES = new Set([408, 409, 429])
+const TRANSIENT_MESSAGE = /overloaded|rate.?limit|fetch failed|socket hang up|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|ENOTFOUND/i
+
+/**
+ * Whether a failed request is worth retrying: an HTTP 408/409/429/5xx (Anthropic's overload is 529), a connection
+ * error or timeout, or an overload/network message. Structural, so this module needs no SDK: the SDK's errors carry
+ * `status` and are named APIConnectionError / APIConnectionTimeoutError.
+ */
+export function isTransientError(error: unknown): boolean {
+	if (!(error instanceof Error)) {
+		return false
+	}
+
+	const status: unknown = Reflect.get(error, "status")
+
+	if (typeof status === "number" && (TRANSIENT_STATUSES.has(status) || status >= 500)) {
+		return true
+	}
+
+	return error.name.startsWith("APIConnection") || TRANSIENT_MESSAGE.test(error.message)
+}
+
+/** Backoff before transient retry n (1-based): 5 s, 15 s, 45 s, capped at a minute. */
+export function retryDelayMs(retry: number): number {
+	return Math.min(60_000, 5_000 * 3 ** (retry - 1))
+}
+
+function errorMessage(error: unknown): string {
+	return error instanceof Error ? error.message : String(error)
+}
+
+function defaultSleep(ms: number): Promise<void> {
+	return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+/**
+ * What is wrong with a batch reply, one line per problem: requested keys it lacks, and placeholder or markup sets that
+ * differ from the English text sent (a `_one` form may leave out `{{count}}`). The per-batch counterpart of
+ * catalogIssues, so a bad reply is retried instead of reaching a catalog.
+ */
+export function batchIssues(batch: Catalog, reply: Catalog): string[] {
+	const issues: string[] = []
+
+	for (const [key, english] of Object.entries(batch)) {
+		const value = reply[key]
+
+		if (value === undefined) {
+			issues.push(`model did not return a translation for key "${key}"`)
+
+			continue
+		}
+
+		const expected = placeholderSet(english)
+		const actual = placeholderSet(value)
+
+		if (splitPluralKey(key)?.category === "one") {
+			expected.delete("count")
+			actual.delete("count")
+		}
+
+		if (!sameSet(expected, actual)) {
+			issues.push(`${key}: placeholders ${[...actual].join(",")} differ from English ${[...expected].join(",")}`)
+		}
+
+		if (!sameSet(markupSet(english), markupSet(value))) {
+			issues.push(`${key}: markup differs from English`)
+		}
+	}
+
+	return issues
+}
+
+/**
+ * Translates a subset batch by batch through the caller's model call. Each validated batch goes to `onBatch` at once
+ * (only the requested keys), so the caller can checkpoint it and a later failure keeps everything already paid for.
+ * A transient failure is retried with backoff up to MAX_TRANSIENT_ATTEMPTS, a validation failure once; anything else,
+ * or a failure past its attempts, throws. `shouldStop` is checked before every batch and instead of a backoff wait:
+ * true ends the subset early. Resolves true when every batch was translated, false when stopped. `label` prefixes the
+ * log lines and errors (e.g. "de" or "de/common").
  */
 export async function translateSubset({
 	label,
 	subset,
-	translateBatch
+	translateBatch,
+	onBatch,
+	shouldStop = () => false,
+	sleep = defaultSleep
 }: {
 	label: string
-	subset: Record<string, string>
-	translateBatch: (batch: Record<string, string>) => Promise<Record<string, string>>
-}): Promise<Record<string, string>> {
+	subset: Catalog
+	translateBatch: (batch: Catalog) => Promise<Catalog>
+	onBatch: (translated: Catalog) => void
+	shouldStop?: () => boolean
+	sleep?: (ms: number) => Promise<void>
+}): Promise<boolean> {
 	const batches = chunkEntries(subset, BATCH_SIZE)
-	const result: Record<string, string> = {}
 
 	for (let index = 0; index < batches.length; index++) {
 		const batch = batches[index]
@@ -335,18 +471,71 @@ export async function translateSubset({
 			continue
 		}
 
-		console.log(`[translate-i18n] ${label}: batch ${index + 1}/${batches.length} (${Object.keys(batch).length} keys)`)
+		const name = `${label}: batch ${index + 1}/${batches.length}`
+		let transientFailures = 0
+		let validationFailures = 0
+		let translated: Catalog | null = null
 
-		Object.assign(result, await translateBatch(batch))
-	}
+		while (translated === null) {
+			if (shouldStop()) {
+				return false
+			}
 
-	for (const key of Object.keys(subset)) {
-		if (!(key in result)) {
-			throw new Error(`${label}: model did not return a translation for key "${key}"`)
+			console.log(`[translate-i18n] ${name} (${Object.keys(batch).length} keys)`)
+
+			try {
+				const reply = await translateBatch(batch)
+				const issues = batchIssues(batch, reply)
+
+				if (issues.length > 0) {
+					throw new TranslationValidationError(issues.join("; "))
+				}
+
+				translated = {}
+
+				for (const key of Object.keys(batch)) {
+					translated[key] = reply[key] ?? ""
+				}
+			} catch (error) {
+				if (error instanceof TranslationValidationError) {
+					validationFailures++
+
+					if (validationFailures >= MAX_VALIDATION_ATTEMPTS) {
+						throw new Error(`${name}: ${error.message}`, { cause: error })
+					}
+
+					console.warn(`[translate-i18n] ${name}: invalid reply (${error.message}); retrying`)
+
+					continue
+				}
+
+				if (!isTransientError(error)) {
+					throw error
+				}
+
+				transientFailures++
+
+				if (transientFailures >= MAX_TRANSIENT_ATTEMPTS) {
+					throw new Error(`${name}: gave up after ${MAX_TRANSIENT_ATTEMPTS} attempts: ${errorMessage(error)}`, { cause: error })
+				}
+
+				// Out of time: stop now rather than wait out a backoff the budget no longer has.
+				if (shouldStop()) {
+					return false
+				}
+
+				const delay = retryDelayMs(transientFailures)
+
+				console.warn(`[translate-i18n] ${name}: transient failure (${errorMessage(error)}); retry in ${delay / 1000}s`)
+
+				await sleep(delay)
+			}
 		}
+
+		onBatch(translated)
 	}
 
-	return result
+	return true
 }
 
 /** Copy with keys in sorted order, for stable catalog diffs. */
@@ -406,9 +595,17 @@ export function readJsonObject(path: string, label: string): Record<string, unkn
 	return parsed as Record<string, unknown>
 }
 
-/** Tab-indented JSON plus a trailing newline, for stable diffs. */
+/**
+ * Tab-indented JSON plus a trailing newline, for stable diffs. Written to a temporary file and renamed over the target,
+ * so a run killed mid-write (a CI job cancelled at its time limit) never leaves a truncated catalog. Creates the
+ * directory when needed.
+ */
 export function writeJsonFile(path: string, value: unknown): void {
-	writeFileSync(path, `${JSON.stringify(value, null, "\t")}\n`, "utf8")
+	const temporary = `${path}.tmp`
+
+	mkdirSync(dirname(path), { recursive: true })
+	writeFileSync(temporary, `${JSON.stringify(value, null, "\t")}\n`, "utf8")
+	renameSync(temporary, path)
 }
 
 // --- Delta -----------------------------------------------------------------
@@ -491,6 +688,47 @@ export function coversEveryLanguage<L extends string>(requested: readonly L[], a
 	return all.every(lang => set.has(lang))
 }
 
+// --- Resume record ---------------------------------------------------------
+//
+// Per target language, the English text each key was translated from, so a FULL run that stopped (a failure, a time
+// budget, a CI job limit) resumes where it left off instead of paying for the same keys again. Stored as a short hash
+// of the English (key → hash) in `src/locales/.sources/<lang>.json` (a dot directory, never served or bundled). A run
+// that completes for every language deletes the directory along with advancing the snapshot, so the next FULL run
+// translates everything again.
+
+export type SourceRecord = Record<string, string>
+
+/** The resume records' directory, inside the locales directory. */
+export const SOURCES_DIR_NAME = ".sources"
+
+const sourceHashCache = new Map<string, string>()
+
+/** 64 bits of the SHA-256 of an English string: equality only, so collisions between a key's versions are moot. */
+export function sourceHash(english: string): string {
+	const cached = sourceHashCache.get(english)
+
+	if (cached !== undefined) {
+		return cached
+	}
+
+	const hash = createHash("sha256").update(english).digest("hex").slice(0, 16)
+
+	sourceHashCache.set(english, hash)
+
+	return hash
+}
+
+/** Records, in place, the English each translated key came from (`subset` holds the text sent for it). */
+export function recordSources(record: SourceRecord, translated: Catalog, subset: Catalog): void {
+	for (const key of Object.keys(translated)) {
+		const english = subset[key]
+
+		if (english !== undefined) {
+			record[key] = sourceHash(english)
+		}
+	}
+}
+
 // --- Per-language plan -----------------------------------------------------
 
 /** An English catalog with its plural groups computed once. */
@@ -541,7 +779,8 @@ export function pluralGroupSources(source: EnglishSource, base: string, lang: st
 
 /**
  * The English keys (key → source text) a language needs translated. FULL = the whole catalog with plural groups
- * expanded to the language's CLDR set. DELTA = changed English keys + non-plural keys missing from the target + the
+ * expanded to the language's CLDR set, minus what `sources` shows was already translated from the current English
+ * (the key is in the target and its recorded hash matches; a plural group is skipped only when every form is). DELTA = changed English keys + non-plural keys missing from the target + the
  * plural categories missing from the target. A changed English plural retranslates its whole group (the wording
  * shifted); a merely incomplete group only fills the missing categories, so reviewed `_one` / `_other` forms are never
  * clobbered.
@@ -551,32 +790,43 @@ export function keysToTranslate({
 	full,
 	delta,
 	existing,
-	lang
+	lang,
+	sources = null
 }: {
 	source: EnglishSource
 	full: boolean
 	delta: Delta
 	existing: Catalog
 	lang: string
+	// FULL only: the language's resume record; null translates everything.
+	sources?: SourceRecord | null
 }): Catalog {
 	const { catalog } = source
 	const result: Catalog = {}
 
 	if (full) {
+		const done = (key: string, text: string): boolean => sources !== null && key in existing && sources[key] === sourceHash(text)
 		const fullGroups = new Set<string>()
 
 		for (const [key, value] of Object.entries(catalog)) {
 			const base = pluralBaseOf(source, key)
 
 			if (base === null) {
-				result[key] = value
+				if (!done(key, value)) {
+					result[key] = value
+				}
 			} else {
 				fullGroups.add(base)
 			}
 		}
 
+		// A group is translated as a whole, so its forms stay consistent with one another.
 		for (const base of fullGroups) {
-			Object.assign(result, pluralGroupSources(source, base, lang))
+			const group = pluralGroupSources(source, base, lang)
+
+			if (Object.entries(group).some(([key, value]) => !done(key, value))) {
+				Object.assign(result, group)
+			}
 		}
 
 		return result
@@ -625,6 +875,15 @@ export function keysToTranslate({
 	}
 
 	return result
+}
+
+/**
+ * The keys of a target catalog (or resume record) that no English key produces: neither an English key nor a form of
+ * an English plural group. FULL has no snapshot diff to find removals with, so a resumed run drops these itself;
+ * otherwise a key deleted from English while the run was paused would ship in the catalog.
+ */
+export function staleKeys(source: EnglishSource, target: Catalog): string[] {
+	return Object.keys(target).filter(key => !(key in source.catalog) && pluralBaseOf(source, key) === null)
 }
 
 /** The number of `english` keys a target catalog holds; the share of the English catalog it covers. */
@@ -749,7 +1008,7 @@ export function buildBatchRequest({
 	}
 }
 
-/** Sends one batch and reads its reply; throws when the model stopped early or returned no text. */
+/** Sends one batch and reads its reply; throws a TranslationValidationError when the reply is unusable. */
 export async function translateBatch({
 	createMessage,
 	model,
@@ -768,16 +1027,20 @@ export async function translateBatch({
 	const response = await createMessage(buildBatchRequest({ model, system, languageName, batch }))
 
 	if (response.stop_reason === "refusal" || response.stop_reason === "max_tokens") {
-		throw new Error(`Translation for ${lang} stopped early (${response.stop_reason})`)
+		throw new TranslationValidationError(`Translation for ${lang} stopped early (${response.stop_reason})`)
 	}
 
 	const block = response.content.find(part => part.type === "text")
 
 	if (block?.text === undefined) {
-		throw new Error(`No text content returned for ${lang}`)
+		throw new TranslationValidationError(`No text content returned for ${lang}`)
 	}
 
-	return parseTranslatedBatch(block.text)
+	try {
+		return parseTranslatedBatch(block.text)
+	} catch (error) {
+		throw new TranslationValidationError(`Unreadable reply for ${lang}: ${errorMessage(error)}`, { cause: error })
+	}
 }
 
 // --- Catalog checks (tests of both apps) -----------------------------------

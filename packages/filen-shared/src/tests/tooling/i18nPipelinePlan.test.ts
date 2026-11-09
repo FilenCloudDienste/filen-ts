@@ -12,7 +12,11 @@ import {
 	markupSet,
 	missingKeys,
 	placeholderSet,
+	recordSources,
+	sourceHash,
+	staleKeys,
 	translateBatch,
+	TranslationValidationError,
 	translateDryRun,
 	type BatchResponse
 } from "@filen/shared/tooling/i18n"
@@ -66,6 +70,62 @@ describe("keysToTranslate", () => {
 	})
 })
 
+describe("keysToTranslate resuming a FULL run", () => {
+	const source = englishSource(EN)
+	const delta = { upsert: {}, removed: [] }
+	const translated = { cancel: "Abbrechen", files_one: "{{count}} Datei", files_other: "{{count}} Dateien", link: "Öffne <link>{{name}}</link>" }
+
+	function recordOf(english: Record<string, string>): Record<string, string> {
+		const record: Record<string, string> = {}
+
+		recordSources(record, english, english)
+
+		return record
+	}
+
+	it("translates everything without a record", () => {
+		expect(keysToTranslate({ source, full: true, delta, existing: translated, lang: "de", sources: null })).toEqual(EN)
+	})
+
+	it("skips keys translated from the current English", () => {
+		expect(keysToTranslate({ source, full: true, delta, existing: translated, lang: "de", sources: recordOf(EN) })).toEqual({})
+	})
+
+	it("retranslates a key whose English changed, or that the catalog lacks", () => {
+		const sources = recordOf({ ...EN, cancel: "Abort" })
+		const withoutLink: Record<string, string> = { ...translated }
+
+		Reflect.deleteProperty(withoutLink, "link")
+
+		expect(keysToTranslate({ source, full: true, delta, existing: withoutLink, lang: "de", sources })).toEqual({ cancel: "Cancel", link: EN.link })
+	})
+
+	it("retranslates a plural group whole when one form is stale", () => {
+		const sources = recordOf({ ...EN, files_one: "{{count}} item" })
+
+		expect(keysToTranslate({ source, full: true, delta, existing: translated, lang: "de", sources })).toEqual({
+			files_one: EN.files_one,
+			files_other: EN.files_other
+		})
+	})
+
+	it("records the English the _few / _many forms were translated from", () => {
+		const subset = keysToTranslate({ source, full: true, delta, existing: {}, lang: "ru", sources: {} })
+		const record: Record<string, string> = {}
+
+		recordSources(record, { files_few: "x" }, subset)
+		expect(record).toEqual({ files_few: sourceHash(EN.files_other) })
+		expect(sourceHash("Cancel")).toMatch(/^[0-9a-f]{16}$/)
+		expect(sourceHash("Cancel")).not.toBe(sourceHash("Cancel "))
+	})
+})
+
+describe("staleKeys", () => {
+	it("lists keys no English key or plural group produces", () => {
+		expect(staleKeys(englishSource(EN), { cancel: "a", files_few: "b", files_one: "c", gone: "d", gone_one: "e" })).toEqual(["gone", "gone_one"])
+	})
+})
+
 describe("applyRemovals", () => {
 	it("drops a removed key and every plural sibling", () => {
 		const target = { gone_one: "a", gone_few: "b", gone_other: "c", kept: "d" }
@@ -105,8 +165,12 @@ describe("translateBatch", () => {
 		])
 	})
 
-	it("throws when the model stops early or returns no text", async () => {
+	it("throws a validation error when the model stops early, returns no text or unreadable JSON", async () => {
 		const args = { model: "m", system: [], lang: "de", languageName: "German", batch: {} }
+
+		await expect(
+			translateBatch({ ...args, createMessage: () => Promise.resolve({ stop_reason: "end_turn", content: [{ type: "text", text: "{" }] }) })
+		).rejects.toBeInstanceOf(TranslationValidationError)
 
 		await expect(translateBatch({ ...args, createMessage: () => Promise.resolve({ stop_reason: "max_tokens", content: [] }) })).rejects.toThrow(
 			"stopped early"

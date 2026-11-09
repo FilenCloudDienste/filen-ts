@@ -7,10 +7,11 @@
 // Every target-language catalog nests translations under the same namespace keys, e.g.
 // `{ "common": {...}, "errors": {...} }`.
 //
-// Run with: pnpm run translate-i18n                  (DELTA mode — only changed English keys)
-//           pnpm run translate-i18n --full           (FULL mode — every key for every language)
-//           pnpm run translate-i18n de,fr            (restrict to specific languages)
-//           pnpm run translate-i18n --snapshot-only  (write the snapshot and manifest, translate nothing)
+// Run with: pnpm run translate-i18n                     (DELTA mode — only changed English keys)
+//           pnpm run translate-i18n --full              (FULL mode — every key for every language, resumable)
+//           pnpm run translate-i18n de,fr               (restrict to specific languages)
+//           pnpm run translate-i18n --budget-minutes=300 (stop at the next batch boundary after 300 minutes, exit 3)
+//           pnpm run translate-i18n --snapshot-only     (write the snapshot and manifest, translate nothing)
 //           No `--` separator: pnpm forwards it to the script as a literal argument.
 //
 // DRY_RUN=1 — skip the Anthropic API entirely; stub each translation as "<lang>:<english>".
@@ -18,21 +19,26 @@
 // Reads ANTHROPIC_API_KEY from the environment — never hardcoded, never logged.
 
 import Anthropic from "@anthropic-ai/sdk"
-import { readFileSync } from "node:fs"
+import { readFileSync, rmSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import { dirname, join, relative } from "node:path"
 import {
 	applyRemovals,
+	BUDGET_EXHAUSTED_EXIT_CODE,
 	buildSystemPrompt,
 	computeDelta,
 	coveredKeyCount,
 	coversEveryLanguage,
+	deadlineAfter,
 	englishSource,
 	keysToTranslate,
 	LANGUAGE_NAMES,
 	parseCliArgs,
 	readJsonObject,
+	recordSources,
 	sortRecord,
+	SOURCES_DIR_NAME,
+	staleKeys,
 	translateBatch,
 	translateDryRun,
 	translateSubset,
@@ -62,6 +68,8 @@ const LOCALES_DIR = join(PACKAGE_DIR, "src", "locales")
 const EN_SNAPSHOT_PATH = join(LOCALES_DIR, ".en-snapshot.json")
 // How many English keys each catalog holds; the runtime offers a language only when it is nearly complete.
 const MANIFEST_PATH = join(LOCALES_DIR, ".catalogs.json")
+// Per language, the English each key was translated from (namespace -> key -> hash): what a FULL re-run skips.
+const SOURCES_DIR = join(LOCALES_DIR, SOURCES_DIR_NAME)
 
 // Every supported language but English, the source.
 const TARGET_LANGUAGES: readonly TargetLanguage[] = SUPPORTED_LANGUAGES.filter((lang): lang is TargetLanguage => lang !== "en")
@@ -225,6 +233,10 @@ function languagePath(lang: TargetLanguage): string {
 	return join(LOCALES_DIR, `${lang}.json`)
 }
 
+function sourcesPath(lang: TargetLanguage): string {
+	return join(SOURCES_DIR, `${lang}.json`)
+}
+
 // How many current English keys each catalog on disk holds.
 function writeManifest(catalogs: ReadonlyMap<TargetLanguage, NestedCatalog>): void {
 	const languages: Partial<Record<TargetLanguage, number>> = {}
@@ -248,7 +260,8 @@ function countKeys(catalog: NestedCatalog): number {
 	return NAMESPACES.reduce((sum, ns) => sum + Object.keys(catalog[ns]).length, 0)
 }
 
-async function main(): Promise<void> {
+// The process exit code: 0 when done, BUDGET_EXHAUSTED_EXIT_CODE when the time budget stopped the run.
+async function main(): Promise<number> {
 	const argv = process.argv.slice(2)
 	const snapshotOnly = argv.includes("--snapshot-only")
 	const args = parseCliArgs(
@@ -261,7 +274,7 @@ async function main(): Promise<void> {
 		writeManifest(new Map())
 		console.log("[translate-i18n] wrote the snapshot and the manifest; nothing translated")
 
-		return
+		return 0
 	}
 
 	const snapshot = args.full ? null : readNested(EN_SNAPSHOT_PATH, ".en-snapshot.json")
@@ -280,85 +293,171 @@ async function main(): Promise<void> {
 		console.log(`[translate-i18n] delta: ${String(upsertCount)} added/changed, ${String(removedCount)} removed`)
 	}
 
-	let createMessage: CreateMessage | null = null
+	// Created on the first request, so a run with nothing left to translate (a finished language, a zero budget) needs
+	// no key.
+	let client: Anthropic | null = null
+	const createMessage: CreateMessage | null = DRY_RUN
+		? null
+		: request => {
+				if (client === null) {
+					const apiKey = process.env["ANTHROPIC_API_KEY"]
 
-	if (!DRY_RUN) {
-		const apiKey = process.env["ANTHROPIC_API_KEY"]
+					if (apiKey === undefined || apiKey.length === 0) {
+						throw new Error("ANTHROPIC_API_KEY is not set (and DRY_RUN is not enabled)")
+					}
 
-		if (apiKey === undefined || apiKey.length === 0) {
-			throw new Error("ANTHROPIC_API_KEY is not set (and DRY_RUN is not enabled)")
-		}
+					// The SDK reads ANTHROPIC_API_KEY from the environment itself; constructing without
+					// passing the value keeps it out of any logged constructor args.
+					client = new Anthropic()
+				}
 
-		// The SDK reads ANTHROPIC_API_KEY from the environment itself; constructing without
-		// passing the value keeps it out of any logged constructor args.
-		const client = new Anthropic()
+				return client.beta.messages.create(request)
+			}
+	const shouldStop = deadlineAfter(args.budgetMinutes)
 
-		createMessage = request => client.beta.messages.create(request)
-	}
-
-	// Every requested language held in memory (about 0.5 MB each), so each namespace can be written as a checkpoint.
+	// Every requested language held in memory (about 0.5 MB each, twice that with its resume record), so each unit can
+	// be written as a checkpoint.
 	const catalogs = new Map<TargetLanguage, NestedCatalog>()
+	// FULL keeps a resume record for every language; DELTA updates the records a stopped FULL run left behind.
+	const records = new Map<TargetLanguage, NestedCatalog>()
 
 	for (const lang of args.languages) {
 		const existing = readNested(languagePath(lang), `Catalog ${lang}.json`)
+		const record = readNested(sourcesPath(lang), `Resume record ${lang}.json`)
 
 		catalogs.set(
 			lang,
 			perNamespace(ns => ({ ...(existing?.[ns] ?? {}) }))
 		)
+
+		if (record !== null || args.full) {
+			records.set(
+				lang,
+				perNamespace(ns => ({ ...(record?.[ns] ?? {}) }))
+			)
+		}
 	}
 
-	// Namespace outer, language inner: every language of a unit sends the same cached system prompt, so one cache
-	// write serves all of them.
-	for (const ns of NAMESPACES) {
-		for (const catalog of catalogs.values()) {
-			applyRemovals(catalog[ns], delta[ns].removed)
-		}
+	// Languages changed since their last checkpoint; all of them at first, so every requested catalog is written (sorted,
+	// with every namespace) even when nothing in it changes.
+	const dirty = new Set<TargetLanguage>(catalogs.keys())
 
-		for (const unit of await unitsOf(ns)) {
-			const source = englishSource(pick(EN_CATALOG[ns], unit.keys))
-			const unitDelta: Delta = { upsert: pick(delta[ns].upsert, unit.keys), removed: [] }
-			const system = [buildSystemPrompt(unitContext(unit), "web", true)]
+	const checkpoint = (): void => {
+		for (const lang of dirty) {
+			const catalog = catalogs.get(lang)
+			const record = records.get(lang)
 
-			for (const [lang, catalog] of catalogs) {
-				const subset = keysToTranslate({ source, full: args.full, delta: unitDelta, existing: catalog[ns], lang })
-				const subsetKeyCount = Object.keys(subset).length
+			if (catalog !== undefined) {
+				writeNested(languagePath(lang), catalog)
+			}
 
-				if (subsetKeyCount === 0) {
-					continue
-				}
-
-				console.log(`[translate-i18n] ${lang}/${unit.label}: translating ${String(subsetKeyCount)} keys`)
-
-				const send = createMessage
-				const translated =
-					send === null
-						? translateDryRun(lang, subset)
-						: await translateSubset({
-								label: `${lang}/${unit.label}`,
-								subset,
-								translateBatch: batch =>
-									translateBatch({
-										createMessage: send,
-										model: MODEL,
-										system,
-										lang,
-										languageName: LANGUAGE_NAMES[lang],
-										batch
-									})
-							})
-
-				Object.assign(catalog[ns], translated)
+			if (record !== undefined) {
+				writeNested(sourcesPath(lang), record)
 			}
 		}
 
-		// Checkpoint: a later failure keeps every namespace already paid for.
-		for (const [lang, catalog] of catalogs) {
-			writeNested(languagePath(lang), catalog)
-		}
+		dirty.clear()
+	}
 
+	let complete = true
+
+	// Namespace outer, language inner: every language of a unit sends the same cached system prompt, so one cache
+	// write serves all of them. A checkpoint after every unit; a failure also writes the batches it already got.
+	try {
+		translation: for (const ns of NAMESPACES) {
+			// DELTA removes what left English since the snapshot; FULL whatever English no longer has.
+			const namespaceSource = args.full ? englishSource(EN_CATALOG[ns]) : null
+
+			for (const [lang, catalog] of catalogs) {
+				const record = records.get(lang)?.[ns]
+				const removed = namespaceSource === null ? delta[ns].removed : staleKeys(namespaceSource, catalog[ns])
+
+				applyRemovals(catalog[ns], removed)
+
+				if (record !== undefined) {
+					applyRemovals(record, namespaceSource === null ? removed : staleKeys(namespaceSource, record))
+				}
+
+				if (removed.length > 0) {
+					dirty.add(lang)
+				}
+			}
+
+			for (const unit of await unitsOf(ns)) {
+				const source = englishSource(pick(EN_CATALOG[ns], unit.keys))
+				const unitDelta: Delta = { upsert: pick(delta[ns].upsert, unit.keys), removed: [] }
+				const system = [buildSystemPrompt(unitContext(unit), "web", true)]
+
+				for (const [lang, catalog] of catalogs) {
+					const record = records.get(lang)?.[ns]
+					const subset = keysToTranslate({
+						source,
+						full: args.full,
+						delta: unitDelta,
+						existing: catalog[ns],
+						lang,
+						sources: args.full ? (record ?? null) : null
+					})
+					const subsetKeyCount = Object.keys(subset).length
+
+					if (subsetKeyCount === 0) {
+						continue
+					}
+
+					console.log(`[translate-i18n] ${lang}/${unit.label}: translating ${String(subsetKeyCount)} keys`)
+
+					const send = createMessage
+					const finished = await translateSubset({
+						label: `${lang}/${unit.label}`,
+						subset,
+						translateBatch:
+							send === null
+								? batch => Promise.resolve(translateDryRun(lang, batch))
+								: batch =>
+										translateBatch({
+											createMessage: send,
+											model: MODEL,
+											system,
+											lang,
+											languageName: LANGUAGE_NAMES[lang],
+											batch
+										}),
+						onBatch: translated => {
+							Object.assign(catalog[ns], translated)
+
+							if (record !== undefined) {
+								recordSources(record, translated, subset)
+							}
+
+							dirty.add(lang)
+						},
+						shouldStop
+					})
+
+					if (!finished) {
+						complete = false
+
+						break translation
+					}
+				}
+
+				checkpoint()
+			}
+
+			writeManifest(catalogs)
+			console.log(`[translate-i18n] ${ns}: written for ${String(catalogs.size)} languages`)
+		}
+	} finally {
+		checkpoint()
+	}
+
+	if (!complete) {
 		writeManifest(catalogs)
-		console.log(`[translate-i18n] ${ns}: written for ${String(catalogs.size)} languages`)
+		console.log(
+			"[translate-i18n] time budget used up: stopped after a checkpoint. Run the same command again to continue; the snapshot was not advanced."
+		)
+
+		return BUDGET_EXHAUSTED_EXIT_CODE
 	}
 
 	for (const [lang, catalog] of catalogs) {
@@ -367,18 +466,27 @@ async function main(): Promise<void> {
 
 	// Advance the baseline only after every namespace succeeded, and only when the run covered every language, or the
 	// ones left out would never see the changed keys again. Written into the same PR as the translations, so the
-	// baseline only advances once that PR is merged.
+	// baseline only advances once that PR is merged. The resume records go with it: every language is complete, so the
+	// next FULL run starts over.
 	if (coversEveryLanguage(args.languages, TARGET_LANGUAGES)) {
 		writeNested(EN_SNAPSHOT_PATH, EN_CATALOG)
+		rmSync(SOURCES_DIR, { recursive: true, force: true })
 	} else {
 		console.log("[translate-i18n] snapshot not advanced: the run covered only some languages")
 	}
 
 	console.log("[translate-i18n] done")
+
+	return 0
 }
 
-main().catch((error: unknown) => {
-	// Surface a clean message; never echo the API key.
-	console.error("[translate-i18n] failed:", error instanceof Error ? error.message : String(error))
-	process.exit(1)
-})
+main().then(
+	code => {
+		process.exitCode = code
+	},
+	(error: unknown) => {
+		// Surface a clean message; never echo the API key.
+		console.error("[translate-i18n] failed:", error instanceof Error ? error.message : String(error))
+		process.exit(1)
+	}
+)
