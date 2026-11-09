@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next"
 import { formatBytes } from "@filen/shared"
-import { subscriptionStatus, SUBSCRIPTION_STATUS_META, formatBillingCost } from "@/features/settings/lib/billing"
+import { subscriptionStatus, SUBSCRIPTION_STATUS_META, formatBillingCost, toMillis } from "@/features/settings/lib/billing"
 import { formatShortDate } from "@/lib/formatDate"
 import type { AccountQuerySuccess } from "@/queries/account"
 import { Badge } from "@/components/ui/badge"
@@ -24,7 +24,15 @@ function SubscriptionsBlock({ accountQuery }: SubscriptionsBlockProps) {
 				{ header: t("settingsBillingColumnPlan"), cell: sub => sub.planName },
 				{ header: t("settingsBillingColumnStorage"), className: "tabular-nums", cell: sub => formatBytes(Number(sub.storage)) },
 				{ header: t("settingsBillingColumnCost"), className: "tabular-nums", cell: sub => formatBillingCost(sub.planCost) },
-				{ header: t("settingsBillingColumnStarted"), className: "tabular-nums", cell: sub => formatShortDate(sub.startTimestamp) },
+				{
+					header: t("settingsBillingColumnStarted"),
+					className: "tabular-nums",
+					cell: sub => {
+						const start = toMillis(sub.startTimestamp)
+
+						return start === undefined ? "—" : formatShortDate(start)
+					}
+				},
 				{
 					header: t("settingsBillingColumnStatus"),
 					cell: sub => {

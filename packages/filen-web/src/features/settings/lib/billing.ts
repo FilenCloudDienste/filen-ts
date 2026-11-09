@@ -52,3 +52,8 @@ export const SUBSCRIPTION_STATUS_META = {
 	cancelled: { labelKey: "settingsBillingStatusCancelled", badge: "destructive" },
 	pending: { labelKey: "settingsBillingStatusPending", badge: "secondary" }
 } as const satisfies Record<SubscriptionStatus, { labelKey: SettingsKey; badge: "default" | "destructive" | "secondary" }>
+
+// Subscription timestamps arrive as bigint millis, absent when the server holds none.
+export function toMillis(value: bigint | number | undefined): number | undefined {
+	return value === undefined ? undefined : Number(value)
+}
