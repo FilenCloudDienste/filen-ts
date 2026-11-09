@@ -7,12 +7,12 @@ import {
 	insertedDiagramParts
 } from "../../core/presentation/edit/apply/smartart"
 import { insertedImageWritten, insertedImageWrittenFor } from "../../core/presentation/edit/apply/picture"
-import type { InsertedImage, RawPart } from "../../core/presentation/edit/ops"
+import type { DeckOp, InsertedImage, RawPart } from "../../core/presentation/edit/ops"
 import type { PartChange } from "../../core/opc/index"
 import { hasHeldOdpMedia, keepHeldOdpMedia } from "../../core/odp/write/save"
 import { isRestoredMedia } from "../../core/presentation/restoredMedia"
 import { hasReleasedMedia, keepReleasedMedia } from "../../core/pptx/write/parts"
-import type { Deck } from "../../core/presentation/model"
+import type { Deck, SlideRef } from "../../core/presentation/model"
 import { decodeUtf8, NodeKind, transcodeUtf16, type XmlDocument } from "../../core/xml/index"
 import type { EngineSession } from "./engine"
 import type { DeckHistory } from "../../core/presentation/edit/history"
@@ -413,21 +413,39 @@ const RELATIONSHIP_ID = /\s[\w.-]+:(?:id|embed|link|pict)="([^"]+)"/gu
 function heldShapeIds(deck: Deck, history: DeckHistory): Map<string, Set<string>> {
 	const out = new Map<string, Set<string>>()
 
-	for (const step of history.steps())
-		for (const op of [step.op, ...step.inverse.ops]) {
-			if (op.family !== "shape" || (op.kind !== "insert" && op.kind !== "restore") || op.raw === undefined) continue
+	const note = (slide: SlideRef, raw: Uint8Array): void => {
+		const part = deck.nodes.get(slide)?.part
 
-			const slide = op.kind === "insert" ? op.slide : op.target.slide
-			const part = deck.nodes.get(slide)?.part
+		if (part === undefined) return
 
-			if (part === undefined) continue
+		const ids = out.get(key(part)) ?? new Set<string>()
 
-			const ids = out.get(key(part)) ?? new Set<string>()
+		for (const id of namedIn(raw, RELATIONSHIP_ID, id => id)) ids.add(id)
 
-			for (const id of namedIn(op.raw, RELATIONSHIP_ID, id => id)) ids.add(id)
+		out.set(key(part), ids)
+	}
+	const visit = (op: DeckOp): void => {
+		if (op.family === "batch") {
+			for (const each of op.ops) visit(each)
 
-			out.set(key(part), ids)
+			return
 		}
+
+		if (op.family !== "shape") return
+
+		// A paste's markup names the relationships it carried to its slide.
+		if (op.kind === "paste") {
+			for (const shape of op.shapes) if (shape.raw !== undefined) note(op.slide, shape.raw)
+
+			return
+		}
+
+		if ((op.kind !== "insert" && op.kind !== "restore") || op.raw === undefined) return
+
+		note(op.kind === "insert" ? op.slide : op.target.slide, op.raw)
+	}
+
+	for (const step of history.steps()) for (const op of [step.op, ...step.inverse.ops]) visit(op)
 
 	return out
 }

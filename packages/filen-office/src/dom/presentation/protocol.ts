@@ -1,7 +1,9 @@
 import type { CompiledTimegraph } from "../../core/anim/model"
 import type { PresentationDesignInfo } from "../../core/presentation/edit/commands/design"
 import type { DeckOp, FileLike, InsertedMedia, SmartArtDefRef } from "../../core/presentation/edit/ops"
+import type { PresentationClip } from "../../core/presentation/edit/clip"
 import type { SlideReview } from "../../core/presentation/comments"
+import type { SlideOutline } from "../../core/presentation/outline"
 import type { SmartArtInfo } from "../../core/smartart/edit"
 import type {
 	CustomShow,
@@ -164,6 +166,25 @@ export type CommandResult =
 	| { readonly ok: true; readonly revision: number; readonly dirty: boolean; readonly seed?: TextSeed }
 	| { readonly ok: false; readonly refusal: PresentationRefusal }
 
+// Cut and Copy (engine/clip.ts): the shapes of one slide, or slides (a cut's held as its delete holds them, for the
+// paste that puts them back).
+export type ClipRequest =
+	| { readonly kind: "shapes"; readonly slide: SlideRef; readonly shapes: readonly number[] }
+	| { readonly kind: "slides"; readonly slides: readonly SlideRef[]; readonly cut?: boolean }
+
+export type ClipResult =
+	{ readonly ok: true; readonly clip: PresentationClip } | { readonly ok: false; readonly refusal: PresentationRefusal }
+
+// A part a clip names, for a paste into another deck.
+export interface ClipPart {
+	readonly name: string
+	readonly bytes: Uint8Array
+	readonly contentType: string
+}
+
+export type ClipPartsResult =
+	{ readonly ok: true; readonly parts: readonly ClipPart[] } | { readonly ok: false; readonly refusal: PresentationRefusal }
+
 export interface FindOptions {
 	readonly caseSensitive?: boolean
 	readonly wholeWord?: boolean
@@ -275,6 +296,10 @@ export interface PresentationSessionApi {
 	): Promise<{ readonly page: TextPage; readonly layout: TransferableTextLayout; readonly revision: number }>
 	// `open`: the body open in the text editor view, reseeded in the answer when the command or step touches it.
 	command(op: DeckOp, open?: ShapeRef): Promise<CommandResult>
+	// What a Cut or Copy takes (nothing changes; a cut's delete is a command of its own).
+	clip(request: ClipRequest): Promise<ClipResult>
+	// The bytes of parts a clip of this deck names (core/presentation/edit/clip.ts clipPartNames), for a paste into another.
+	clipParts(names: readonly string[]): Promise<ClipPartsResult>
 	undo(open?: ShapeRef): Promise<CommandResult>
 	redo(open?: ShapeRef): Promise<CommandResult>
 	// Takes back the step whose command answered `revision`, while it is still the last thing done (saves aside): the
@@ -327,6 +352,8 @@ export interface PresentationSessionApi {
 	// A slide's notes body and comments for the review panes (core/presentation/comments.ts); `comments: false` (the
 	// notes pane): the slide's comments are neither read nor kept, and `comments` is empty.
 	review(slide: SlideRef, options?: { readonly comments?: boolean }): Promise<SlideReview>
+	// The slide's own objects for the Selection Pane: hidden ones included, groups with their members, back to front.
+	outline(slide: SlideRef): Promise<SlideOutline>
 	// Drops the session's password and caches.
 	close(): void
 }
@@ -339,6 +366,8 @@ export const PRESENTATION_METHODS: readonly PresentationMethod[] = [
 	"textSeed",
 	"layoutText",
 	"command",
+	"clip",
+	"clipParts",
 	"undo",
 	"redo",
 	"retract",
@@ -356,7 +385,8 @@ export const PRESENTATION_METHODS: readonly PresentationMethod[] = [
 	"commitSaved",
 	"jobsPort",
 	"freshParts",
-	"review"
+	"review",
+	"outline"
 ]
 
 export type PresentationArgs<M extends PresentationMethod> = Parameters<PresentationSessionApi[M]>
@@ -483,6 +513,15 @@ function resultTransferables(result: PresentationResult, into: Set<unknown>): vo
 			return
 		case "find":
 			addView(result.value, into)
+			return
+		// Made for the answer: a shape clip's markup, the parts' bytes (held ones copied first).
+		case "clip":
+			if (result.value.ok && result.value.clip.kind === "shapes")
+				for (const shape of result.value.clip.shapes)
+					if (shape.raw !== undefined && shape.shape === undefined) addView(shape.raw, into)
+			return
+		case "clipParts":
+			if (result.value.ok) for (const part of result.value.parts) addView(part.bytes, into)
 			return
 		case "image":
 			if (result.value !== null) addView(result.value.bytes, into)

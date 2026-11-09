@@ -1,5 +1,6 @@
 import { useEffect } from "react"
-import { ClipboardPasteIcon, PanelTopIcon, SearchIcon, Undo2Icon } from "lucide-react"
+import { useTranslation } from "react-i18next"
+import { ClipboardPasteIcon, CopyIcon, PanelTopIcon, ScissorsIcon, SearchIcon, Undo2Icon } from "lucide-react"
 import type { ShapeRef } from "@filen/office/core/presentation"
 import {
 	formatPainterOf,
@@ -9,7 +10,12 @@ import {
 	useTextEditing,
 	type FormatPainterHost
 } from "@filen/office/react/presentation"
+import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
 import { FormatPainterButton } from "@/features/office/components/formatPainterButton"
+import { keepFocus } from "@/features/office/lib/officeControls"
+import { usePresentationEditor } from "@/features/presentation/hooks/usePresentationSession"
+import { isMacPlatform } from "@/lib/keymap/kbd.logic"
+import { KbdKeys } from "@/lib/keymap/kbd"
 import { TEXT_ROLES, editorOf, type TextRibbonEditor } from "@/features/presentation/components/ribbon/homeText.logic"
 import type { PresentationGroups } from "@/features/presentation/components/ribbon/tabs"
 import {
@@ -21,8 +27,8 @@ import {
 	UndoControls
 } from "@/features/presentation/components/slideControls"
 
-// The presentation ribbon's Home groups that are the editor's own: Undo and Redo, Clipboard (the Format Painter for
-// text; cut, copy and paste stay with the keys, as the browser keeps clipboard reads from buttons), and the Slides group (New slide
+// The presentation ribbon's Home groups that are the editor's own: Undo and Redo, Clipboard (Paste, Cut, Copy and the
+// Format Painter for text), and the Slides group (New slide
 // with its layout menu, Layout, Section, Reset, Duplicate, Delete, Hide), PowerPoint's Home ▸ Slides. A deck that can
 // only be viewed offers none of them (it finds with Mod+F). Editing (Find ▾) comes last, after the text groups.
 
@@ -82,6 +88,57 @@ function FormatPainterControl({ editor }: { editor: TextRibbonEditor }) {
 	)
 }
 
+// Paste, Cut and Copy (PowerPoint's Clipboard group): the objects selected on the slide, else the slides selected in
+// the list; Paste reads the clipboard inside the press (the keys work where the browser keeps it from buttons).
+function ClipboardButtons() {
+	const { t } = useTranslation("preview")
+	const scope = usePresentationEditor()
+
+	if (scope?.clipboard === undefined) return null
+
+	const { editor, clipboard } = scope
+	const none = !editor.editable || editor.document.slides.length === 0
+	const mod = isMacPlatform() ? "⌘" : "Ctrl"
+
+	return (
+		<>
+			<TooltipIconButton
+				label={t("previewPptxClipboardPaste")}
+				disabled={none}
+				shortcut={<KbdKeys keys={[mod, "V"]} />}
+				onMouseDown={keepFocus}
+				onClick={() => {
+					clipboard.paste()
+				}}
+			>
+				<ClipboardPasteIcon />
+			</TooltipIconButton>
+			<TooltipIconButton
+				label={t("previewPptxClipboardCut")}
+				disabled={none}
+				shortcut={<KbdKeys keys={[mod, "X"]} />}
+				onMouseDown={keepFocus}
+				onClick={() => {
+					clipboard.copy(true)
+				}}
+			>
+				<ScissorsIcon />
+			</TooltipIconButton>
+			<TooltipIconButton
+				label={t("previewPptxClipboardCopy")}
+				disabled={editor.document.slides.length === 0}
+				shortcut={<KbdKeys keys={[mod, "C"]} />}
+				onMouseDown={keepFocus}
+				onClick={() => {
+					clipboard.copy(false)
+				}}
+			>
+				<CopyIcon />
+			</TooltipIconButton>
+		</>
+	)
+}
+
 export const homeGroups: PresentationGroups = context => {
 	if (!context.editable) return []
 
@@ -103,10 +160,14 @@ export const homeGroups: PresentationGroups = context => {
 						id: "clipboard",
 						label: context.t("previewOfficeRibbonClipboard", { ns: "preview" }),
 						icon: ClipboardPasteIcon,
-						width: BUTTON,
+						width: 4 * BUTTON,
 						priority: 4,
-						single: true,
-						content: <FormatPainterControl editor={editor} />
+						content: (
+							<>
+								<ClipboardButtons />
+								<FormatPainterControl editor={editor} />
+							</>
+						)
 					}
 				]),
 		{

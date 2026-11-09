@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next"
 import {
 	presentationActions,
 	showKeyCommand,
+	showOptionsOf,
 	type PresentationActionActivator,
 	type PresentationActionPolicy,
 	type PresentationDocument,
@@ -17,6 +18,7 @@ import { isSafeAbsoluteHref } from "@/lib/safeUrl"
 import { fullscreenSupported } from "@/lib/media/fullscreen"
 import { log } from "@/lib/log"
 import { SetUpShowHost } from "@/features/presentation/components/slideshow/setUpHost"
+import { useChosenShowOptions } from "@/features/presentation/components/slideshow/showSettings"
 import {
 	focusByRibbonRule,
 	ribbonFocusTarget,
@@ -28,7 +30,8 @@ import { isMacPlatform } from "@/lib/keymap/kbd.logic"
 
 // The deck's links, jumps and slide show, as the presentation viewer and editor share them: links on the slide are
 // judged when clicked, a refused action says so for a moment, and the show runs over the whole page (in full screen
-// where the browser allows it), with the presenter view when it is asked for.
+// where the browser allows it), with the presenter view when it is asked for. A show browsed by an individual runs in
+// this window with its status bar instead, full screen only from its menu.
 
 // How long the note about a refused action stays.
 const REFUSED_NOTE_MS = 4000
@@ -136,8 +139,12 @@ export function useDeckPresentation({
 	useEffect(() => {
 		gate.current = linkGate
 	})
-	// Where the running show started (`from` undefined: its first slide; undefined: none runs).
-	const [showing, setShowing] = useState<{ readonly from: ShowFrom | undefined } | undefined>(undefined)
+	// Where the running show started (`from` undefined: its first slide; undefined: none runs); `browse`: browsed by an
+	// individual, in this window with its status bar (full screen only when asked from its menu).
+	const [showing, setShowing] = useState<{ readonly from: ShowFrom | undefined; readonly browse: boolean } | undefined>(undefined)
+	// The running show is browsed, for the full-screen listener: leaving full screen goes back to its window.
+	const browsing = useRef(false)
+	const chosen = useChosenShowOptions(store)
 	const bindings = usePresentationShowBindings()
 	const [fullscreenActive, setFullscreenActive] = useState(false)
 	// Counts refused actions while their note is up (0: none shown).
@@ -250,6 +257,7 @@ export function useDeckPresentation({
 	// Ending the show closes the link confirmation it opened.
 	const endShow = (): void => {
 		setShowing(undefined)
+		browsing.current = false
 		linkGate.cancel()
 
 		if (enteredFullscreen.current && document.fullscreenElement !== null) void document.exitFullscreen().catch(() => undefined)
@@ -273,8 +281,19 @@ export function useDeckPresentation({
 		origin.current = showOrigin()
 		// A menu left open by the last show (it ended under it) says nothing about this one.
 		showMenu.current = { open: false, escapedAt: -Infinity }
-		setShowing({ from })
-		void fullscreen()
+
+		const browse = (chosen ?? showOptionsOf(deck.info?.show)).browse === true
+
+		browsing.current = browse
+		setShowing({ from, browse })
+
+		if (!browse) void fullscreen()
+	}
+
+	// The browsed show's Full screen: in, or back to its window.
+	const toggleFullscreen = (): void => {
+		if (document.fullscreenElement === null) void fullscreen()
+		else void document.exitFullscreen().catch(() => undefined)
 	}
 
 	const startPresenter = (from: ShowFrom): void => {
@@ -284,7 +303,9 @@ export function useDeckPresentation({
 
 		const where = presenter.openPresenter()
 
-		setShowing({ from })
+		// The presenter view runs the audience's show full screen, whatever the show type.
+		browsing.current = false
+		setShowing({ from, browse: false })
 
 		if (where === "sameWindow") void fullscreen()
 	}
@@ -352,8 +373,9 @@ export function useDeckPresentation({
 
 			const menu = showMenu.current
 
+			// A browsed show goes back to its window.
 			if (gate.current.pending) gate.current.cancel()
-			else if (!menu.open && performance.now() - menu.escapedAt >= MENU_ESCAPE_MS) setShowing(undefined)
+			else if (!browsing.current && !menu.open && performance.now() - menu.escapedAt >= MENU_ESCAPE_MS) setShowing(undefined)
 		}
 
 		document.addEventListener("fullscreenchange", onChange)
@@ -423,6 +445,14 @@ export function useDeckPresentation({
 									escapedAt: state === "escaped" ? performance.now() : showMenu.current.escapedAt
 								}
 							}}
+							{...(showing.browse
+								? {
+										browse: {
+											fullscreen: fullscreenSupported() ? fullscreenActive : undefined,
+											onFullscreen: toggleFullscreen
+										}
+									}
+								: {})}
 						/>
 						{refusedNote("show")}
 					</div>

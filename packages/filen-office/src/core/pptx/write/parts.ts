@@ -226,9 +226,9 @@ class RelationshipsEdit {
 	}
 
 	// A relationship under an id of its own that no live relationship has (a retired one an undo's markup names).
-	restore(type: string, target: string, id: string): void {
+	restore(type: string, target: string, id: string, external = false): void {
 		this.claim(id)
-		this.added.push({ id, type, target, external: false })
+		this.added.push({ id, type, target, external })
 	}
 
 	remove(id: string): void {
@@ -347,11 +347,14 @@ export { issuedNames as issuedPartNames } from "../../presentation/issuedNames"
 // by its relationship id, with the part's bytes when the part left the package, while a step the history holds names
 // the part (an undo puts the shape back: the save writing it relates them again, the part re-added). By deck, then
 // owner part key.
+// A pasted element's relationships (carryRelationship) are held the same way, under the ids its markup names.
 interface ReleasedMedia {
 	readonly type: string
+	// The part (a zip name), or an external target's URL.
 	readonly name: string
 	readonly contentType: string | undefined
 	readonly bytes: Uint8Array | undefined
+	readonly external?: true
 }
 
 const releasedMedia = new WeakMap<object, Map<string, Map<string, ReleasedMedia>>>()
@@ -371,10 +374,10 @@ export function releasedMediaRelationship(
 	deck: object,
 	owner: string,
 	id: string
-): { readonly type: string; readonly name: string } | undefined {
+): { readonly type: string; readonly name: string; readonly external: boolean } | undefined {
 	const media = releasedMedia.get(deck)?.get(partKey(owner))?.get(id)
 
-	return media === undefined ? undefined : { type: media.type, name: media.name }
+	return media === undefined ? undefined : { type: media.type, name: media.name, external: media.external === true }
 }
 
 // The bytes of a part a save let go of, held for an undo (by part name).
@@ -383,10 +386,72 @@ export function releasedMediaBytes(deck: object, part: string): { readonly bytes
 
 	for (const byId of releasedMedia.get(deck)?.values() ?? [])
 		for (const media of byId.values())
-			if (partKey(media.name) === key && media.bytes !== undefined && media.contentType !== undefined)
+			if (media.external !== true && partKey(media.name) === key && media.bytes !== undefined && media.contentType !== undefined)
 				return { bytes: media.bytes, contentType: media.contentType }
 
 	return undefined
+}
+
+// A relationship a pasted element's markup names under `id` that `owner` (a slide part) does not have: held as
+// released media are, so the render resolves it and the save writing the slide relates it under that id (the part
+// added from `bytes` when the package has none by its name). The id is never handed to another relationship.
+export function carryRelationship(
+	deck: object,
+	owner: string,
+	id: string,
+	relationship: {
+		readonly type: string
+		readonly target: string
+		readonly external?: boolean
+		readonly contentType?: string
+		readonly bytes?: Uint8Array
+	}
+): void {
+	const key = partKey(owner)
+	let owners = releasedMedia.get(deck)
+
+	if (owners === undefined) {
+		owners = new Map()
+		releasedMedia.set(deck, owners)
+	}
+
+	let retired = retiredIds.get(deck)
+
+	if (retired === undefined) {
+		retired = new Map()
+		retiredIds.set(deck, retired)
+	}
+
+	const byId = owners.get(key) ?? new Map<string, ReleasedMedia>()
+
+	owners.set(key, byId)
+	byId.set(id, {
+		type: relationship.type,
+		name: relationship.target,
+		contentType: relationship.contentType,
+		bytes: relationship.bytes,
+		...(relationship.external === true ? { external: true as const } : {})
+	})
+	retired.set(key, (retired.get(key) ?? new Set()).add(id))
+}
+
+// The released and carried relationships `owner` holds, by id.
+export function heldRelationships(
+	deck: object,
+	owner: string
+): ReadonlyMap<string, { readonly type: string; readonly name: string; readonly external: boolean }> {
+	const out = new Map<string, { readonly type: string; readonly name: string; readonly external: boolean }>()
+
+	for (const [id, media] of releasedMedia.get(deck)?.get(partKey(owner)) ?? [])
+		out.set(id, { type: media.type, name: media.name, external: media.external === true })
+
+	return out
+}
+
+// The relationship ids `owner` holds for released or carried relationships, and ids retired there: not free for
+// another relationship.
+export function heldRelationshipIds(deck: object, owner: string): ReadonlySet<string> {
+	return retiredIds.get(deck)?.get(partKey(owner)) ?? new Set()
 }
 
 // Lets go of released media no step the history holds names: `named` (owner part key → relationship ids the held
@@ -1174,9 +1239,16 @@ export class PackageWriter {
 	async writtenText(name: string): Promise<string> {
 		const key = partKey(name)
 		const editor = this.editors.get(key)
+		const added = this.added.get(key)
 		const entry = this.opc.entry(key)
 		const bytes =
-			editor?.changed === true ? editor.serialize() : entry === undefined ? new Uint8Array(0) : await this.opc.read(entry.name)
+			editor?.changed === true
+				? editor.serialize()
+				: added?.bytes !== undefined
+					? await this.bytesOf(added)
+					: entry === undefined
+						? new Uint8Array(0)
+						: await this.opc.read(entry.name)
 
 		return decodeUtf8(bytes)
 	}
@@ -1212,9 +1284,11 @@ export class PackageWriter {
 	}
 
 	// Released media `owner`'s written markup (`text`) names again (an undo put the shape back): related under their
-	// ids, a part that left the package added again from its held bytes, under its own name where it is free.
-	restoreMedia(owner: string, text: string): void {
-		const byId = this.deck === undefined ? undefined : releasedMedia.get(this.deck)?.get(partKey(owner))
+	// ids, a part that left the package added again from its held bytes, under its own name where it is free. Carried
+	// relationships (carryRelationship) are written the same way. `from`: the part whose held relationships these are
+	// (a copy's source slide; the owner itself otherwise).
+	restoreMedia(owner: string, text: string, from: string = owner): void {
+		const byId = this.deck === undefined ? undefined : releasedMedia.get(this.deck)?.get(partKey(from))
 
 		if (byId === undefined) return
 
@@ -1222,6 +1296,12 @@ export class PackageWriter {
 
 		for (const [id, media] of byId) {
 			if (!text.includes(`"${id}"`) || edit.byId(id) !== undefined) continue
+
+			if (media.external === true) {
+				edit.restore(media.type, media.name, id, true)
+
+				continue
+			}
 
 			let name = media.name
 

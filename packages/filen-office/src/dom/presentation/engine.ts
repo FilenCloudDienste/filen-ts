@@ -31,6 +31,8 @@ import {
 import { designInfo, designLayouts } from "../../core/presentation/edit/apply/design"
 import { chartCapability } from "./engine/chart"
 import { reviewCapability } from "./engine/review"
+import { outlineCapability } from "./engine/outline"
+import { clipCapability } from "./engine/clip"
 import { convertCapability } from "./engine/convert"
 import { editCapability } from "./engine/edit"
 import { findCapability } from "./engine/find"
@@ -84,6 +86,8 @@ export const PRESENTATION_LANES: { readonly [M in PresentationMethod]: Lane } = 
 	textSeed: "priority",
 	layoutText: "priority",
 	command: "priority",
+	clip: "priority",
+	clipParts: "background",
 	undo: "priority",
 	redo: "priority",
 	retract: "priority",
@@ -101,7 +105,8 @@ export const PRESENTATION_LANES: { readonly [M in PresentationMethod]: Lane } = 
 	commitSaved: "background",
 	jobsPort: "background",
 	freshParts: "background",
-	review: "priority"
+	review: "priority",
+	outline: "priority"
 }
 
 export interface CallSignal {
@@ -176,6 +181,8 @@ export type FindCapability = Capability<"find">
 export type JobsCapability = Capability<"jobsPort">
 export type ConvertCapability = Capability<"freshParts">
 export type ReviewCapability = Capability<"review">
+export type OutlineCapability = Capability<"outline">
+export type ClipCapability = Capability<"clip" | "clipParts">
 
 // The faces the deck's text is measured and drawn with (bundled substitutes and decoded embedded fonts).
 export interface FontsCapability {
@@ -231,7 +238,9 @@ export const CAPABILITIES = {
 	jobs: jobsCapability,
 	convert: convertCapability,
 	chart: chartCapability,
-	review: reviewCapability satisfies ReviewCapability
+	review: reviewCapability satisfies ReviewCapability,
+	outline: outlineCapability satisfies OutlineCapability,
+	clip: clipCapability satisfies ClipCapability
 } as const
 
 export const SERVICES: EngineServices = { fonts: fontsCapability, smartart: smartartCapability }
@@ -257,6 +266,8 @@ export const METHOD_HANDLERS: Handlers = {
 	...CAPABILITIES.convert,
 	...CAPABILITIES.chart,
 	...CAPABILITIES.review,
+	...CAPABILITIES.clip,
+	...CAPABILITIES.outline,
 	smartArtPreview: (context, ...args) => context.session.services.smartart.smartArtPreview(context, ...args),
 	smartArtInfo: (context, ...args) => context.session.services.smartart.smartArtInfo(context, ...args)
 }

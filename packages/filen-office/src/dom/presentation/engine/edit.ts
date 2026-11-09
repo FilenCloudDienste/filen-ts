@@ -2,7 +2,8 @@ import { prepareOdpPictureOp } from "../../../core/odp/write/emit/picture"
 import { prepareChartOp, type ChartPartSource } from "../../../core/presentation/edit/apply/chart"
 import { clearDormantNotes, dormantNotesOfBody, dormantNotesOfOrigin, setDormantNotes } from "./dormantNotes"
 import { notesTarget } from "../../../core/presentation/notes"
-import { issuedPartNames } from "../../../core/pptx/write/parts"
+import { issuedPartNames, releasedMediaBytes } from "../../../core/pptx/write/parts"
+import { carryRelationships, withHeldRelationships } from "../../../core/pptx/write/carry"
 import { notesBoxOf, prepareReview } from "./review"
 import { proveOdpSlide } from "../../../core/odp/write/proof"
 import { odpSourceReading } from "../../../core/odp/write/session"
@@ -46,6 +47,7 @@ import {
 } from "../../../core/presentation/edit/integrity"
 import type { DeckOp, RawPart } from "../../../core/presentation/edit/ops"
 import { isMovable, proveSlide, type EmitFunction, type ProofTally } from "../../../core/presentation/edit/proof"
+import { holdingGroups } from "../../../core/presentation/groupSpace"
 import { nextShapeId } from "../../../core/presentation/ids"
 import { sliceClock, type Slicing } from "../../../core/slicing"
 import {
@@ -512,6 +514,32 @@ function newPartName(state: EditState, deck: Deck, parts: PptxParts, kind: keyof
 	return name
 }
 
+// A zip name for a part another deck had (a pasted picture's, a medium's), in its directory with its stem and extension
+// and the next number nothing in the package, the session or a former package of it has.
+function newMediaName(state: EditState, deck: Deck, parts: PptxParts, like: string): string {
+	const name = like.startsWith("/") ? like.slice(1) : like
+	const slash = name.lastIndexOf("/")
+	const file = name.slice(slash + 1)
+	const dot = file.lastIndexOf(".")
+	const directory = slash < 0 ? "ppt/media/" : name.slice(0, slash + 1)
+	const stem = (dot > 0 ? file.slice(0, dot) : file).replace(/\d+$/u, "") || "media"
+	const extension = dot > 0 ? file.slice(dot) : ""
+	const taken = new Set<string>([...state.allocatedParts].map(partKey))
+
+	for (const entry of parts.opc.entries()) taken.add(partKey(entry.name))
+	for (const issued of issuedPartNames(deck)) taken.add(issued)
+
+	for (let n = 1; ; n++) {
+		const candidate = `${directory}${stem}${String(n)}${extension}`
+
+		if (taken.has(partKey(candidate))) continue
+
+		state.allocatedParts.add(candidate)
+
+		return candidate
+	}
+}
+
 // The declarations of a part document's root (what a held element is read inside).
 function rootScope(document: XmlDocument | undefined): string {
 	if (document === undefined) return ""
@@ -737,7 +765,11 @@ function contextFor(
 		readShape(slide, raw) {
 			const held = parts.document(slide.part) ?? rawDocumentOf(state, slide.part)
 			const scope = held === undefined ? (cache.scopes.get(partKey(slide.part)) ?? "") : rootScope(held)
-			const relationships = cache.relationships.get(partKey(slide.part)) ?? new Relationships([])
+			const relationships = withHeldRelationships(
+				deck,
+				slide.part,
+				cache.relationships.get(partKey(slide.part)) ?? new Relationships([])
+			)
 			let document: XmlDocument
 
 			try {
@@ -756,6 +788,18 @@ function contextFor(
 
 			return shape === undefined ? refused("malformed", "held shape markup") : shape
 		},
+		carry: (slide, raws, carried) =>
+			carryRelationships(
+				{
+					deck,
+					part: slide.part,
+					relationships: cache.relationships.get(partKey(slide.part)) ?? new Relationships([]),
+					has: name => parts.opc.has(name) || releasedMediaBytes(deck, name) !== undefined,
+					name: like => newMediaName(state, deck, parts, like)
+				},
+				raws,
+				carried
+			),
 		rawParts(slide, removed) {
 			// A held list stands for the slide only while its held document is the node's live source: once a save wrote
 			// the slide and the rebase moved its source into the package, the package's parts are the slide's.
@@ -875,7 +919,12 @@ function contextFor(
 
 			if (document === undefined) return refused("stale", "the picture's source is not held")
 
-			return sourcePictureFill(document, shape, cache.relationships.get(partKey(slide.part)) ?? new Relationships([]), parts.tally)
+			return sourcePictureFill(
+				document,
+				shape,
+				withHeldRelationships(deck, slide.part, cache.relationships.get(partKey(slide.part)) ?? new Relationships([])),
+				parts.tally
+			)
 		},
 		// A diagram part prepare read (one the package no longer has is no part to name), or one an op held.
 		diagramDocument: part =>
@@ -1138,6 +1187,9 @@ async function prepare(
 		if (op.kind === "duplicate" || op.kind === "setLayout" || op.kind === "reset") slides.add(op.slide)
 	}
 
+	// A paste names no shape before it applies: its slide is read (its relationships, its scope) first.
+	if (op.family === "shape" && op.kind === "paste") slides.add(op.slide)
+
 	for (const ref of slides) {
 		const node = await parse(ref)
 
@@ -1278,6 +1330,23 @@ function predictedTouches(deck: Deck, op: DeckOp): Touch[] {
 			op.kind === "ungroup" ? (findShape(node?.shapes ?? [], op.group)?.shape.children ?? []).map(child => child.id) : op.shapes
 
 		for (const id of ids) out.push({ kind: "shape", slide: op.slide, shape: id, dirt: { kind: "node" } })
+	}
+
+	// A pptx group holding shapes an op moves, copies or deletes is fitted to its members in the same step.
+	if (op.family === "shape" && deck.format !== "odp") {
+		const fits =
+			op.kind === "setXfrm"
+				? { slide: op.target.slide, ids: [op.target.id] }
+				: op.kind === "setXfrms" && op.exact !== true
+					? { slide: op.slide, ids: op.xfrms.map(each => each.id) }
+					: op.kind === "delete" || op.kind === "duplicate" || op.kind === "align" || op.kind === "distribute"
+						? { slide: op.slide, ids: op.shapes }
+						: undefined
+		const shapes = fits === undefined ? undefined : deck.nodes.get(fits.slide)?.shapes
+
+		if (fits !== undefined && shapes !== undefined)
+			for (const group of holdingGroups(shapes, new Set(fits.ids)))
+				out.push({ kind: "shape", slide: fits.slide, shape: group.id, dirt: { kind: "xfrm" } })
 	}
 
 	// A content op on a shape backed by source is undone by replacing the shape (its node).
@@ -1974,6 +2043,25 @@ async function revert(
 }
 
 // The edit capability, proving slides with `options.emit` (tests pass their own emitters).
+// What a copy reads (engine/clip.ts), queued with the commands: the deck prepared as `op` would be (its slides parsed
+// and proved, the parts a slide delete holds read) and the session's reading of its sources, handed to `task`. Nothing
+// is applied.
+export function withClipReading<T>(
+	context: CallContext,
+	op: DeckOp,
+	task: (reading: SlideSourceReading & Partial<PictureReading>) => T | Promise<T>,
+	options: EditOptions = {}
+): Promise<T> {
+	const session = context.session
+	const state = stateOf(session)
+
+	return serial(session, async () => {
+		await prepare(session, state, op, context.slicing, options)
+
+		return task(contextFor(session, state))
+	})
+}
+
 export function createEditCapability(options: EditOptions = {}): EditCapability {
 	return {
 		command: (context, op, open) => command(context, op, options, open),

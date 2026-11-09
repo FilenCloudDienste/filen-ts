@@ -986,3 +986,87 @@ describe("stage colour paint", () => {
 		expect(stage.element.querySelector<HTMLElement>(".fo-show-dom > *")?.style.background).toBe("transparent")
 	})
 })
+
+describe("presenter mirror", () => {
+	const copyLayer = (target: HTMLElement, slide: number, index: number): HTMLElement | null =>
+		[...target.querySelectorAll<HTMLElement>(".fo-show-slide-box")][slide]?.querySelector<HTMLElement>(
+			`[data-fo-show-layer="${String(index)}"]`
+		) ?? null
+
+	it("copies the audience frame (build state, transition, screens) as the player writes it, sampling nothing more", async () => {
+		const fade: Transition = { kind: "fade", namespace: "p", options: {}, durationMs: 500, advance: { onClick: true } }
+		const show = await mount(
+			new Map([
+				[slides[0]!.ref, { timing: flyIn() }],
+				[slides[1]!.ref, { timing: flyIn(), transition: fade }]
+			])
+		)
+
+		// Slide 1's build without a copy: the samples it takes.
+		let before = sampling.count
+
+		show.key("ArrowRight")
+		await settle(1500)
+
+		const alone = sampling.count - before
+		const target = document.createElement("div")
+
+		document.body.appendChild(target)
+
+		const mirror = show.controller.mirror?.(target, 1)
+
+		expect(mirror).toBeDefined()
+		expect(target.querySelectorAll(".fo-show-slide-box")).toHaveLength(1)
+		// Click targets and the stage's own scale are not copied; the bitmaps are.
+		expect(target.querySelector("button")).toBeNull()
+		expect(target.querySelectorAll("canvas").length).toBe(host.querySelectorAll(".fo-show-slide-box canvas").length)
+
+		// Slide 2 fades in: both boxes in the copy, the incoming one at the audience's opacity in the same frame.
+		show.key(" ")
+		await settle(100)
+
+		const boxes = (root: ParentNode): HTMLElement[] => [...root.querySelectorAll<HTMLElement>(".fo-show-slide-box")]
+
+		expect(boxes(target)).toHaveLength(2)
+		expect(boxes(target).map(box => box.style.opacity)).toEqual(boxes(host).map(box => box.style.opacity))
+		await settle(600)
+		expect(boxes(target)).toHaveLength(1)
+		// Before its click the fly-in shape is hidden in both.
+		expect(copyLayer(target, 0, 0)?.style.visibility).toBe("hidden")
+
+		// The same build with the copy attached: the same samples, and the copy moves with the stage.
+		before = sampling.count
+		show.key("ArrowRight")
+		await settle(250)
+
+		const audience = show.layerOf(0, 0)
+
+		expect(audience?.style.transform).toMatch(/^matrix\(/u)
+		expect(copyLayer(target, 0, 0)?.style.transform).toBe(audience?.style.transform)
+		expect(copyLayer(target, 0, 0)?.style.visibility).toBe("")
+		await settle(1250)
+		expect(sampling.count - before).toBe(alone)
+
+		// Black screen: the slide hidden in the copy as on stage.
+		show.key("b")
+		await settle()
+		expect(target.style.visibility).toBe("hidden")
+		show.key("b")
+		await settle()
+		expect(target.style.visibility).toBe("")
+
+		mirror?.release()
+		expect(target.childNodes).toHaveLength(0)
+		target.remove()
+	})
+
+	it("drops its copy when the show goes away", async () => {
+		const show = await mount(new Map())
+		const target = document.createElement("div")
+
+		show.controller.mirror?.(target, 1)
+		expect(target.querySelectorAll(".fo-show-slide-box")).toHaveLength(1)
+		act(() => root.render(null))
+		expect(target.childNodes).toHaveLength(0)
+	})
+})

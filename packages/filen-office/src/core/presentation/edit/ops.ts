@@ -115,6 +115,26 @@ export type SlideOp =
 
 export type ZOrder = "front" | "back" | "forward" | "backward"
 
+// A relationship pasted markup names by `id` in the part it was copied from (pptx). The slide it is pasted onto is
+// given it under an id of its own (the markup renamed to match): `target` is a part of the deck the paste is in (a zip
+// name), a part of another deck whose `bytes` come along (named in this deck when applied), or an external URL.
+export interface CarriedRelationship {
+	readonly id: string
+	readonly type: string
+	readonly target: string
+	readonly external?: boolean
+	readonly bytes?: Uint8Array
+	readonly contentType?: string
+}
+
+// One element of a paste: markup read as a new element of the slide (pptx: the shape written out with its edits when
+// it was copied, its namespaces declared on it; ODP: its source element), and over it the typed state it had where
+// the markup is its source's (ODP, within one deck); a shape an op made has no markup, only its typed state.
+export interface PastedShape {
+	readonly raw?: Uint8Array
+	readonly shape?: ShapeNode
+}
+
 export type ShapeOp =
 	// `parent`: a group's id on the slide; `index`: z-position among its siblings (end when absent). With `raw`, the
 	// shape is that source element (an undone delete).
@@ -131,12 +151,14 @@ export type ShapeOp =
 	// undefined removes the local xfrm (the placeholder inherits its box again).
 	| { readonly family: "shape"; readonly kind: "setXfrm"; readonly target: ShapeRef; readonly xfrm: Xfrm | undefined }
 	// Several shapes of one slide moved, resized or turned at once (a drag or nudge of a multi-selection): one step.
-	// undefined removes that shape's local xfrm.
+	// undefined removes that shape's local xfrm. A pptx group holding a moved, copied or deleted member is fitted to
+	// its members again in the same step; `exact` (an undo's) sets the boxes as given and fits nothing.
 	| {
 			readonly family: "shape"
 			readonly kind: "setXfrms"
 			readonly slide: SlideRef
 			readonly xfrms: readonly { readonly id: number; readonly xfrm: Xfrm | undefined }[]
+			readonly exact?: true
 	  }
 	// The shape's element replaced by these bytes (whole-node dirt): the inverse of setProps, setStyle, setAlt,
 	// setAction, picture crop/adjust/replace, media setPoster/setPlayback, every mediaTiming op and the table ops
@@ -145,13 +167,25 @@ export type ShapeOp =
 	// Each present group replaces that group; undefined in `props` for a group restores the source group.
 	| { readonly family: "shape"; readonly kind: "setProps"; readonly target: ShapeRef; readonly props: ShapePropsEdit }
 	| { readonly family: "shape"; readonly kind: "setStyle"; readonly target: ShapeRef; readonly style: ShapeStyleRefs | undefined }
+	// `to` a number (the Selection Pane's drag): the shapes put at that index among their siblings that are not moved,
+	// back to front, keeping their order among themselves.
 	| {
 			readonly family: "shape"
 			readonly kind: "zOrder"
 			readonly slide: SlideRef
 			readonly shapes: readonly number[]
-			readonly to: ZOrder
+			readonly to: ZOrder | number
 	  }
+	// Shapes of one slide hidden or shown (cNvPr hidden; ODF draw:display="none"), in edit view and the show alike.
+	| {
+			readonly family: "shape"
+			readonly kind: "setHidden"
+			readonly slide: SlideRef
+			readonly shapes: readonly number[]
+			readonly hidden: boolean
+	  }
+	// The shape's name (cNvPr name; ODF draw:name), as the Selection Pane lists it.
+	| { readonly family: "shape"; readonly kind: "setName"; readonly target: ShapeRef; readonly name: string }
 	| {
 			readonly family: "shape"
 			readonly kind: "group"
@@ -168,6 +202,19 @@ export type ShapeOp =
 			readonly kind: "duplicate"
 			readonly slide: SlideRef
 			readonly shapes: readonly number[]
+			readonly dx: number
+			readonly dy: number
+			readonly ids?: readonly number[]
+	  }
+	// Copied shapes put on top of the slide, in the order named, each moved by (dx, dy) EMU (Paste). `relationships`:
+	// what their markup names that the slide is given (pptx). As applied, the op carries the markup renamed to the
+	// slide's ids, the relationships under them and the shapes' ids (a redo gives them the same).
+	| {
+			readonly family: "shape"
+			readonly kind: "paste"
+			readonly slide: SlideRef
+			readonly shapes: readonly PastedShape[]
+			readonly relationships?: readonly CarriedRelationship[]
 			readonly dx: number
 			readonly dy: number
 			readonly ids?: readonly number[]

@@ -8,6 +8,8 @@ export const KIOSK_RESTART_MS = 5 * 60 * 1000
 
 export interface SetUpForm {
 	readonly kiosk: boolean
+	// Browsed by an individual (a window, not full screen); never with kiosk.
+	readonly browse: boolean
 	readonly loop: boolean
 	readonly slides: "all" | "range" | "custom"
 	// Slide numbers as typed.
@@ -20,6 +22,7 @@ export interface SetUpForm {
 export function setUpForm(options: ShowOptions, slideCount: number): SetUpForm {
 	return {
 		kiosk: options.kiosk,
+		browse: !options.kiosk && options.browse === true,
 		loop: options.loop,
 		slides: options.customShow !== undefined ? "custom" : options.range !== undefined ? "range" : "all",
 		from: String(options.range?.start ?? 1),
@@ -53,6 +56,7 @@ export function setUpOptions(form: SetUpForm, opened?: ShowOptions): ShowOptions
 		...(opened?.withoutAnimation === true ? { withoutAnimation: true } : {}),
 		...(opened?.penColor === undefined ? {} : { penColor: opened.penColor }),
 		kiosk: form.kiosk,
+		...(form.browse && !form.kiosk ? { browse: true } : {}),
 		loop: form.loop || form.kiosk,
 		useTimings: form.timings || form.kiosk,
 		...(form.slides === "range" && from !== undefined && to !== undefined ? { range: { start: from, end: to } } : {}),
@@ -62,9 +66,9 @@ export function setUpOptions(form: SetUpForm, opened?: ShowOptions): ShowOptions
 }
 
 // The deck's show settings (saved in the file) after Set Up Slide Show: what the form sets, and what it does not show
-// (browsed by an individual, narration, animation, pen colour, a kiosk's own restart time) kept from `previous`.
+// (narration, animation, pen colour, a kiosk's own restart time) kept from `previous`.
 export function showSettingsOf(options: ShowOptions, previous: ShowSettings | undefined): ShowSettings {
-	const kind = options.kiosk ? "kiosk" : previous?.kind === "kiosk" || previous === undefined ? "present" : previous.kind
+	const kind = options.kiosk ? "kiosk" : options.browse === true ? "browse" : "present"
 	const restartMs = options.kiosk ? ((previous?.kind === "kiosk" ? previous.restartMs : undefined) ?? options.restartMs) : undefined
 
 	return {

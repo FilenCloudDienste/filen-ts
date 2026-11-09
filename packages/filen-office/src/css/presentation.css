@@ -368,6 +368,22 @@
 	background: #fff;
 }
 
+/* Browsed by an individual: the slide over the page's status bar. */
+.fo-show-stage[data-fo-browse] {
+	flex-direction: column;
+}
+
+.fo-show-area {
+	position: relative;
+	flex: 1;
+	min-height: 0;
+	overflow: hidden;
+}
+
+.fo-show-bar {
+	flex: none;
+}
+
 /* The black screen after the last slide: its line at the top, as PowerPoint draws it. */
 .fo-show-end {
 	position: absolute;

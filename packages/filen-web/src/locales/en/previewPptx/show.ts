@@ -32,6 +32,8 @@ export const previewPptxShow = {
 	previewPptxShowType: "Show type",
 	/** Set Up Slide Show dialog — show type: a speaker moves through the slides */
 	previewPptxShowTypeSpeaker: "Presented by a speaker",
+	/** Set Up Slide Show dialog — show type: runs in a window with a status bar (previous, next, menu) instead of full screen */
+	previewPptxShowTypeBrowse: "Browsed by an individual (window)",
 	/** Set Up Slide Show dialog — show type: runs on its own; clicks do not advance, it loops and restarts */
 	previewPptxShowTypeKiosk: "Browsed at a kiosk",
 	/** Set Up Slide Show dialog — switch: start over after the last slide until Esc is pressed */
@@ -80,5 +82,14 @@ export const previewPptxShow = {
 	/** Slide show menu — submenu with the black and white screens */
 	previewPptxShowMenuScreen: "Screen",
 	/** Slide show menu — submenu with the pointer and ink tools (arrow, pen, highlighter, laser pointer, eraser) */
-	previewPptxShowMenuPointer: "Pointer options"
+	previewPptxShowMenuPointer: "Pointer options",
+
+	/** Slide show in a window — accessible name of the bar under the slide (slide counter, previous, next, menu) */
+	previewPptxShowBrowseBar: "Slide show status bar",
+	/** Slide show in a window, status bar — button that opens the show's menu */
+	previewPptxShowBrowseMenu: "Menu",
+	/** Slide show in a window, status bar menu — submenu listing every slide, to go straight to one */
+	previewPptxShowBrowseGoTo: "Go to slide",
+	/** Slide show in a window, status bar menu — shows the window full screen (checked while it is) */
+	previewPptxShowBrowseFullScreen: "Full screen"
 }

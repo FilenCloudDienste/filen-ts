@@ -1,4 +1,5 @@
 import { refitGroups } from "../../groupBounds"
+import { FULL_TURN, childInParent, fittedGroupXfrm, fromParent, holdingGroups, toParent } from "../../groupSpace"
 import type { TimeNode } from "../../../anim/model"
 import { holdMarkup, timingTargets, withoutShapes } from "../../../anim/prune"
 import { matchShapes } from "./match"
@@ -19,7 +20,7 @@ import {
 } from "../../model"
 import type { ApplyContext, ApplyFamily, ApplyResult, Inverse, Touch } from "../apply"
 import { cloneModel, findShape, sameDigest } from "../changes"
-import type { DeckOp, OpOf, ShapeOp } from "../ops"
+import type { CarriedRelationship, DeckOp, OpOf, ShapeOp } from "../ops"
 import { xmlSafeText } from "../xmlText"
 import { isRefused } from "../../refusal"
 import { sameBytes } from "../../../docx/write/bytes"
@@ -38,6 +39,14 @@ export interface SourceReading extends ApplyContext {
 	readShape(slide: SlideNode, raw: Uint8Array): ShapeNode | Refused
 	// Whether a shape locked by proof gate 1 still moves (its xfrm proves on its own).
 	movable(shape: ShapeNode): boolean
+	// Pasted markup and the relationships it names given to `slide` (pptx): each relationship under an id the slide has
+	// free (its own where it is), the markup renamed to match, a part of another deck named in this one. Applied again
+	// (a redo), the op as applied keeps its ids.
+	carry?(
+		slide: SlideNode,
+		raws: readonly Uint8Array[],
+		relationships: readonly CarriedRelationship[]
+	): { readonly raws: readonly Uint8Array[]; readonly relationships: readonly CarriedRelationship[] } | Refused
 }
 
 function reading(context: ApplyContext): SourceReading | undefined {
@@ -305,17 +314,56 @@ function moveAll(node: SlideNode, moves: readonly { shape: ShapeNode; xfrm: Xfrm
 
 const NOTHING: Inverse = { ops: [], bytes: 0 }
 
+// The slide's rectangle in the child space of group `parent` (0: the slide itself), where Align and Distribute to the
+// slide place a group's members; undefined when a group on the way is turned (the slide's edges are not along the
+// members' axes there). Mirrors and scales keep them along.
+function slideIn(deck: Deck, node: SlideNode, parent: number): { x: number; y: number; r: number; b: number } | undefined {
+	let corners = [
+		{ x: 0, y: 0 },
+		{ x: deck.size.cx, y: deck.size.cy }
+	]
+
+	if (parent !== 0) {
+		const holder = findShape(node.shapes, parent)
+
+		if (holder === undefined) return undefined
+
+		// Innermost first; the slide's corners go in through the outermost first.
+		const groups = [holder.shape, ...holdingGroups(node.shapes, new Set([parent]))]
+
+		for (let k = groups.length - 1; k >= 0; k--) {
+			const group = (groups[k] as ShapeNode).xfrm
+
+			if (group === undefined) continue
+			if (group.rot % FULL_TURN !== 0) return undefined
+
+			corners = corners.map(point => fromParent(group, point.x, point.y))
+		}
+	}
+
+	const [a, b] = corners as [{ x: number; y: number }, { x: number; y: number }]
+
+	return {
+		x: Math.round(Math.min(a.x, b.x)),
+		y: Math.round(Math.min(a.y, b.y)),
+		r: Math.round(Math.max(a.x, b.x)),
+		b: Math.round(Math.max(a.y, b.y))
+	}
+}
+
 function align(deck: Deck, node: SlideNode, op: OpOf<"shape"> & { kind: "align" }, context: ApplyContext): ApplyResult<typeof op> {
 	const placed = placedSiblings(deck, node, op.shapes, shape => moveLock(shape, context))
 
 	if (isRefused(placed)) return placed
 	if (placed.length === 0 || (op.relativeTo === "selection" && placed.length < 2)) return { kind: "applied", inverse: NOTHING, op }
-	if (op.relativeTo === "slide" && (placed[0]?.parent ?? 0) !== 0) return refused("unsupported", "align a group's shapes to the slide")
+	const slideFrame = op.relativeTo === "slide" ? slideIn(deck, node, placed[0]?.parent ?? 0) : undefined
+
+	if (op.relativeTo === "slide" && slideFrame === undefined) return refused("unsupported", "align a turned group's shapes to the slide")
 
 	const bounds = placed.map(item => rotatedBounds(item.xfrm))
 	const frame =
-		op.relativeTo === "slide"
-			? { x: 0, y: 0, r: deck.size.cx, b: deck.size.cy }
+		slideFrame !== undefined
+			? slideFrame
 			: {
 					x: Math.min(...bounds.map(box => box.x)),
 					y: Math.min(...bounds.map(box => box.y)),
@@ -366,8 +414,10 @@ function distribute(
 
 	if (isRefused(placed)) return placed
 	if (placed.length === 0 || (op.relativeTo === "selection" && placed.length < 3)) return { kind: "applied", inverse: NOTHING, op }
-	if (op.relativeTo === "slide" && (placed[0]?.parent ?? 0) !== 0)
-		return refused("unsupported", "distribute a group's shapes on the slide")
+	const slideFrame = op.relativeTo === "slide" ? slideIn(deck, node, placed[0]?.parent ?? 0) : undefined
+
+	if (op.relativeTo === "slide" && slideFrame === undefined)
+		return refused("unsupported", "distribute a turned group's shapes on the slide")
 
 	const horizontal = op.axis === "horizontal"
 	const items = placed.map(item => {
@@ -380,8 +430,8 @@ function distribute(
 
 	const first = items[0] as (typeof items)[number]
 	const last = items[items.length - 1] as (typeof items)[number]
-	const spanStart = op.relativeTo === "slide" ? 0 : first.start
-	const spanEnd = op.relativeTo === "slide" ? (horizontal ? deck.size.cx : deck.size.cy) : last.start + last.size
+	const spanStart = slideFrame !== undefined ? (horizontal ? slideFrame.x : slideFrame.y) : first.start
+	const spanEnd = slideFrame !== undefined ? (horizontal ? slideFrame.r : slideFrame.b) : last.start + last.size
 	const total = items.reduce((sum, entry) => sum + entry.size, 0)
 	const shifted = (entry: (typeof items)[number], delta: number): Xfrm =>
 		horizontal ? { ...entry.item.xfrm, x: entry.item.xfrm.x + delta } : { ...entry.item.xfrm, y: entry.item.xfrm.y + delta }
@@ -461,59 +511,6 @@ function group(deck: Deck, node: SlideNode, op: OpOf<"shape"> & { kind: "group" 
 	bump(node)
 
 	return { kind: "applied", inverse: inverseOf(back), op: { ...op, id, name } }
-}
-
-// A point of a group's child space in its parent's space: scaled, mirrored, then turned about the group's centre.
-function toParent(group: Xfrm, px: number, py: number): { x: number; y: number } {
-	const sx = group.chCx === undefined || group.chCx === 0 ? 1 : group.cx / group.chCx
-	const sy = group.chCy === undefined || group.chCy === 0 ? 1 : group.cy / group.chCy
-	let x = group.x + (px - (group.chX ?? group.x)) * sx
-	let y = group.y + (py - (group.chY ?? group.y)) * sy
-	const cx = group.x + group.cx / 2
-	const cy = group.y + group.cy / 2
-
-	if (group.flipH) x = 2 * cx - x
-	if (group.flipV) y = 2 * cy - y
-
-	if (group.rot !== 0) {
-		const angle = ((group.rot / 60000) * Math.PI) / 180
-		const dx = x - cx
-		const dy = y - cy
-
-		x = cx + dx * Math.cos(angle) - dy * Math.sin(angle)
-		y = cy + dx * Math.sin(angle) + dy * Math.cos(angle)
-	}
-
-	return { x, y }
-}
-
-const FULL_TURN = 21_600_000
-
-function childInParent(group: Xfrm, child: Xfrm): Xfrm {
-	const sx = group.chCx === undefined || group.chCx === 0 ? 1 : group.cx / group.chCx
-	const sy = group.chCy === undefined || group.chCy === 0 ? 1 : group.cy / group.chCy
-	const centre = toParent(group, child.x + child.cx / 2, child.y + child.cy / 2)
-	const cx = Math.round(child.cx * sx)
-	const cy = Math.round(child.cy * sy)
-	// A mirrored group mirrors its children: each flips too, and its turn runs the other way.
-	const mirrored = group.flipH !== group.flipV
-	const rot = ((((mirrored ? -child.rot : child.rot) + group.rot) % FULL_TURN) + FULL_TURN) % FULL_TURN
-	const out: Xfrm = {
-		x: Math.round(centre.x - cx / 2),
-		y: Math.round(centre.y - cy / 2),
-		cx,
-		cy,
-		rot,
-		flipH: group.flipH !== child.flipH,
-		flipV: group.flipV !== child.flipV
-	}
-
-	if (child.chX !== undefined) out.chX = child.chX
-	if (child.chY !== undefined) out.chY = child.chY
-	if (child.chCx !== undefined) out.chCx = child.chCx
-	if (child.chCy !== undefined) out.chCy = child.chCy
-
-	return out
 }
 
 const GROUP_FILL = new TextEncoder().encode("grpFill")
@@ -616,21 +613,20 @@ function zOrder(node: SlideNode, op: OpOf<"shape"> & { kind: "zOrder" }, context
 
 	if (siblings === undefined || placed.length === 0) return { kind: "applied", inverse: NOTHING, op }
 
-	// The inverse takes the moved shapes out and puts each back at its index, lowest first.
-	const ascending = [...placed].sort((a, b) => a.index - b.index)
-	const back: DeckOp[] = ascending.map(item => ({ family: "shape", kind: "delete", slide: node.ref, shapes: [item.shape.id] }))
-
-	for (const item of ascending) {
-		const put = reinsert(node.ref, item.shape, item.parent, item.index, context)
-
-		if (isRefused(put)) return put
-
-		back.push(put)
-	}
-
 	let order: ShapeNode[]
 
-	if (op.to === "front") order = [...siblings.filter(shape => !ids.has(shape.id)), ...siblings.filter(shape => ids.has(shape.id))]
+	if (typeof op.to === "number") {
+		if (!Number.isInteger(op.to)) return refused("malformed", "z-order index")
+
+		const kept = siblings.filter(shape => !ids.has(shape.id))
+		const moved = siblings.filter(shape => ids.has(shape.id))
+		const at = Math.max(0, Math.min(op.to, kept.length))
+
+		order = [...kept.slice(0, at), ...moved, ...kept.slice(at)]
+
+		// Already in place: nothing to do or undo.
+		if (order.every((shape, index) => shape === siblings[index])) return { kind: "applied", inverse: NOTHING, op }
+	} else if (op.to === "front") order = [...siblings.filter(shape => !ids.has(shape.id)), ...siblings.filter(shape => ids.has(shape.id))]
 	else if (op.to === "back") order = [...siblings.filter(shape => ids.has(shape.id)), ...siblings.filter(shape => !ids.has(shape.id))]
 	else {
 		// One place past the nearest sibling not moving; moved shapes keep their order among themselves.
@@ -651,6 +647,18 @@ function zOrder(node: SlideNode, op: OpOf<"shape"> & { kind: "zOrder" }, context
 			order[target] = order[index] as ShapeNode
 			order[index] = neighbour
 		}
+	}
+
+	// The inverse takes the moved shapes out and puts each back at its index, lowest first.
+	const ascending = [...placed].sort((a, b) => a.index - b.index)
+	const back: DeckOp[] = ascending.map(item => ({ family: "shape", kind: "delete", slide: node.ref, shapes: [item.shape.id] }))
+
+	for (const item of ascending) {
+		const put = reinsert(node.ref, item.shape, item.parent, item.index, context)
+
+		if (isRefused(put)) return put
+
+		back.push(put)
 	}
 
 	siblings.splice(0, siblings.length, ...order)
@@ -742,6 +750,42 @@ function setField(
 	bump(node)
 
 	return back
+}
+
+// Hide or show shapes: the inverse sets each back to what it was (one op per prior value). A shape already as asked is
+// left alone; none changing is no step.
+function setHidden(node: SlideNode, op: OpOf<"shape"> & { kind: "setHidden" }): ApplyResult<typeof op> {
+	if (op.shapes.length === 0) return refused("malformed", "no shapes")
+
+	const changing: ShapeNode[] = []
+
+	for (const id of new Set(op.shapes)) {
+		const at = findShape(node.shapes, id)
+
+		if (at === undefined) return refused("notFound", `shape ${String(id)}`)
+
+		const locked = contentLock(at.shape)
+
+		if (locked !== undefined) return locked
+		if (at.shape.synthetic === true) return refused("unsupported", "a master's field shown on the slide")
+
+		if (at.shape.hidden !== op.hidden) changing.push(at.shape)
+	}
+
+	if (changing.length === 0) return { kind: "applied", inverse: NOTHING, op }
+
+	for (const shape of changing) shape.hidden = op.hidden
+
+	bump(node)
+
+	return {
+		kind: "applied",
+		inverse: {
+			ops: [{ family: "shape", kind: "setHidden", slide: node.ref, shapes: changing.map(shape => shape.id), hidden: !op.hidden }],
+			bytes: 0
+		},
+		op
+	}
 }
 
 function insert(node: SlideNode, op: OpOf<"shape"> & { kind: "insert" }, context: ApplyContext): ApplyResult<typeof op> {
@@ -906,6 +950,108 @@ function duplicate(deck: Deck, node: SlideNode, op: OpOf<"shape"> & { kind: "dup
 		kind: "applied",
 		inverse: { ops: [{ family: "shape", kind: "delete", slide: node.ref, shapes: ids }], bytes: 0 },
 		op: { ...op, ids }
+	}
+}
+
+// Paste: each element read from its markup as a new element of the slide (with its relationships given to the slide
+// first), its typed state over it where the op holds one, moved by (dx, dy) and put on top. Ids as duplicate gives them.
+function paste(deck: Deck, node: SlideNode, op: OpOf<"shape"> & { kind: "paste" }, context: ApplyContext): ApplyResult<typeof op> {
+	if (op.shapes.length === 0 || (op.ids !== undefined && op.ids.length !== op.shapes.length)) return refused("malformed", "paste")
+	if (!Number.isFinite(op.dx) || !Number.isFinite(op.dy)) return refused("malformed", "offset")
+
+	const reader = reading(context)
+
+	if (reader === undefined) return refused("unsupported", "pasted markup cannot be read here")
+
+	if (op.shapes.some(shape => shape.raw === undefined && shape.shape === undefined)) return refused("malformed", "an empty pasted shape")
+
+	// The markup of each element (empty for one with typed state only), renamed together.
+	const empty = new Uint8Array(0)
+	let raws: readonly Uint8Array[] = op.shapes.map(shape => shape.raw ?? empty)
+	let relationships: readonly CarriedRelationship[] = op.relationships ?? []
+
+	if (relationships.length > 0) {
+		if (reader.carry === undefined) return refused("unsupported", "relationships of pasted markup")
+
+		const carried = reader.carry(
+			node,
+			raws.filter(raw => raw.length > 0),
+			relationships
+		)
+
+		if (isRefused(carried)) return carried
+
+		let at = 0
+
+		raws = raws.map(raw => (raw.length > 0 ? (carried.raws[at++] ?? raw) : raw))
+		relationships = carried.relationships
+	}
+
+	const copies: ShapeNode[] = []
+
+	for (const [k, raw] of raws.entries()) {
+		const typed = op.shapes[k]?.shape
+		let copy: ShapeNode
+
+		if (raw.length === 0) {
+			if (typed === undefined) return refused("malformed", "an empty pasted shape")
+
+			copy = clone(typed)
+		} else {
+			const read = reader.readShape(node, raw)
+
+			if (isRefused(read)) return read
+
+			copy = typed === undefined ? read : overlay(clone(typed), read)
+		}
+
+		withoutSourceIds(copy)
+
+		if (copy.xfrm !== undefined) copy.xfrm = { ...copy.xfrm, x: Math.round(copy.xfrm.x + op.dx), y: Math.round(copy.xfrm.y + op.dy) }
+
+		copies.push(copy)
+	}
+
+	const used = idsOf(node.shapes)
+	let next = context.newShapeId(node.ref)
+	const fresh = (): number => {
+		while (used.has(next)) next++
+
+		return next
+	}
+	const ids: number[] = []
+
+	copies.forEach((copy, k) => {
+		const wanted = op.ids?.[k]
+
+		copy.id = wanted !== undefined && wanted > 0 && !used.has(wanted) ? wanted : fresh()
+		used.add(copy.id)
+		ids.push(copy.id)
+
+		if (copy.children !== undefined) {
+			eachShape(copy.children, child => {
+				if (child.id <= 0 || used.has(child.id)) child.id = fresh()
+
+				used.add(child.id)
+			})
+		}
+
+		node.shapes.push(copy)
+	})
+
+	if (deck.format === "odp") refitGroups(node.shapes, new Set(ids))
+
+	bump(node)
+
+	return {
+		kind: "applied",
+		inverse: { ops: [{ family: "shape", kind: "delete", slide: node.ref, shapes: ids }], bytes: 0 },
+		op: {
+			...op,
+			shapes: op.shapes.map((shape, k) => (shape.raw === undefined ? shape : { ...shape, raw: raws[k] ?? shape.raw })),
+			...(relationships.length === 0 ? {} : { relationships }),
+			ids
+		}
 	}
 }
 
@@ -1254,6 +1400,54 @@ function refitted<R>(deck: Deck, node: SlideNode, ids: readonly number[], result
 	return result
 }
 
+// A pptx group whose members moved, were copied in or deleted takes their bounds again, as PowerPoint keeps a group's
+// box: the fit keeps the mapping, so nothing moves on the slide. Groups the file locks against moving keep theirs.
+// The inverse sets every fitted group's box back exactly, after the members (an ODP deck refits through refitted).
+function fitted<O extends ShapeOp>(
+	deck: Deck,
+	node: SlideNode,
+	ids: readonly number[],
+	context: ApplyContext,
+	run: () => ApplyResult<O>
+): ApplyResult<O> {
+	if (deck.format === "odp") return run()
+
+	const holders = holdingGroups(node.shapes, new Set(ids))
+
+	if (holders.length === 0) return run()
+
+	const result = run()
+
+	if (isRefused(result)) return result
+
+	const priors: { id: number; xfrm: Xfrm }[] = []
+
+	for (const group of holders) {
+		const prior = group.xfrm
+
+		if (prior === undefined || moveLock(group, context) !== undefined || findShape(node.shapes, group.id)?.shape !== group) continue
+
+		const next = fittedGroupXfrm(group)
+
+		if (next === undefined) continue
+
+		priors.push({ id: group.id, xfrm: { ...prior } })
+		group.xfrm = next
+	}
+
+	if (priors.length === 0) return result
+
+	bump(node)
+
+	return {
+		...result,
+		inverse: {
+			ops: [...result.inverse.ops, { family: "shape", kind: "setXfrms", slide: node.ref, xfrms: priors, exact: true }],
+			bytes: result.inverse.bytes
+		}
+	}
+}
+
 function applied<O extends ShapeOp>(back: Inverse | Refused, op: O): ApplyResult<O> {
 	return isRefused(back) ? back : { kind: "applied", inverse: back, op }
 }
@@ -1269,21 +1463,20 @@ function applyOne(deck: Deck, op: ShapeOp, context: ApplyContext): ApplyResult<S
 		case "insert":
 			return insert(node, op, context)
 		case "delete":
-			return remove(node, op, context)
+			return fitted(deck, node, op.shapes, context, () => remove(node, op, context))
 		case "setXfrm":
 			return refitted(
 				deck,
 				node,
 				[op.target.id],
-				withLockedPaths(deck, node, () => setXfrm(node, op, context), context)
+				fitted(deck, node, [op.target.id], context, () => withLockedPaths(deck, node, () => setXfrm(node, op, context), context))
 			)
-		case "setXfrms":
-			return refitted(
-				deck,
-				node,
-				op.xfrms.map(each => each.id),
-				withLockedPaths(deck, node, () => setXfrms(node, op, context), context)
-			)
+		case "setXfrms": {
+			const ids = op.xfrms.map(each => each.id)
+			const move = (): ApplyResult<ShapeOp> => withLockedPaths(deck, node, () => setXfrms(node, op, context), context)
+
+			return refitted(deck, node, ids, op.exact === true ? move() : fitted(deck, node, ids, context, move))
+		}
 		case "restore":
 			return restore(node, op, context)
 		case "setProps":
@@ -1367,16 +1560,43 @@ function applyOne(deck: Deck, op: ShapeOp, context: ApplyContext): ApplyResult<S
 			)
 		case "zOrder":
 			return zOrder(node, op, context)
+		case "setHidden":
+			return setHidden(node, op)
+		case "setName": {
+			// A name the writer could not carry would read back as another and refuse the save; an empty one is no name.
+			if (op.name.trim() === "" || !carries(op.name)) return refused("malformed", "not a name the deck can carry")
+
+			const synthetic = findShape(node.shapes, op.target.id)?.shape.synthetic === true
+
+			if (synthetic) return refused("unsupported", "a master's field shown on the slide")
+
+			return applied(
+				setField(
+					node,
+					op.target,
+					context,
+					shape => ({ family: "shape", kind: "setName", target: op.target, name: shape.name }),
+					shape => {
+						shape.name = op.name
+					},
+					true
+				),
+				op
+			)
+		}
 		case "group":
 			return group(deck, node, op, context)
 		case "ungroup":
 			return ungroup(node, op, context)
 		case "duplicate":
-			return duplicate(deck, node, op, context)
+			// The copies join their originals' groups.
+			return fitted(deck, node, op.shapes, context, () => duplicate(deck, node, op, context))
+		case "paste":
+			return paste(deck, node, op, context)
 		case "align":
-			return align(deck, node, op, context)
+			return fitted(deck, node, op.shapes, context, () => align(deck, node, op, context))
 		case "distribute":
-			return distribute(deck, node, op, context)
+			return fitted(deck, node, op.shapes, context, () => distribute(deck, node, op, context))
 	}
 }
 
@@ -1389,10 +1609,12 @@ function shapeTouches(op: ShapeOp): readonly Touch[] {
 		// A delete that takes effects out of the slide's timing names it through its inverse (timing.setTiming).
 		case "delete":
 		case "zOrder":
+		case "setHidden":
 			return op.shapes.map(id => nodeTouch(op.slide, id))
 		case "setXfrm":
 			return [{ kind: "shape", slide: op.target.slide, shape: op.target.id, dirt: { kind: "xfrm" } }]
 		case "restore":
+		case "setName":
 		case "setAlt":
 		case "setAction":
 			return [nodeTouch(op.target.slide, op.target.id)]
@@ -1410,6 +1632,7 @@ function shapeTouches(op: ShapeOp): readonly Touch[] {
 		case "ungroup":
 			return [nodeTouch(op.slide, op.group)]
 		case "duplicate":
+		case "paste":
 			return (op.ids ?? []).map(id => nodeTouch(op.slide, id))
 		case "align":
 		case "distribute":

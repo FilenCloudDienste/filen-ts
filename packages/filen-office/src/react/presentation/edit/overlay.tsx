@@ -42,10 +42,15 @@ import {
 import { Z_ORDER_OF, cycleTarget, objectKeyAction, type ObjectCommand, type ObjectKeyBindings } from "./keyboard"
 import {
 	boundsOf,
+	clickTarget,
+	hitPath,
+	placements,
 	selectable,
 	selectedShapes,
-	shapeAt,
+	selectionGroup,
+	shapeOf,
 	shapesInside,
+	siblingShapes,
 	slideShapes,
 	useShapeSelection,
 	type Bounds,
@@ -123,6 +128,10 @@ interface Pending {
 	readonly deselect?: number
 	// A plain press on a shape a click puts the caret in: its body opens on a release without a drag.
 	readonly enter?: number
+	// A plain press on a selected group over one of its members: the member is selected on a release without a drag
+	// (`intoEnters`: and its body opened where the press landed, for a text box or placeholder).
+	readonly into?: number
+	readonly intoEnters?: boolean
 }
 
 // Whether a shape's text can be entered (a double-click, Enter): one with a body, not drawn as a line. A picture, a
@@ -149,8 +158,24 @@ function placedOf(shape: SlideShape, expected: ReadonlyMap<number, Xfrm> | undef
 		id: shape.id,
 		xfrm: expected?.get(shape.id) ?? shape.xfrm,
 		...(shape.locks === undefined ? {} : { locks: shape.locks }),
-		...(shape.line === true ? { line: true as const } : {})
+		...(shape.line === true ? { line: true as const } : {}),
+		...(shape.space === undefined ? {} : { space: shape.space })
 	}
+}
+
+// The top-level shape a shape is in (itself at the slide's level).
+function outermostOf(render: SlideRender | undefined, shape: SlideShape): SlideShape {
+	let at = shape
+
+	for (let depth = 0; at.parent !== undefined && depth < 129; depth++) {
+		const parent = shapeOf(render, at.parent)
+
+		if (parent === undefined) break
+
+		at = parent
+	}
+
+	return at
 }
 
 function isApple(): boolean {
@@ -165,6 +190,22 @@ function cssMatrix(matrix: readonly number[]): string {
 
 function sameBox(a: Xfrm, b: Xfrm): boolean {
 	return a.x === b.x && a.y === b.y && a.cx === b.cx && a.cy === b.cy && a.rot === b.rot && a.flipH === b.flipH && a.flipV === b.flipV
+}
+
+// Within the rounding a box takes through a group's child space and back (a few EMU, a 1/60,000° turn).
+function nearBox(a: Xfrm, b: Xfrm): boolean {
+	const near = (p: number, q: number, slack: number): boolean => Math.abs(p - q) <= slack
+	const turn = Math.abs(a.rot - b.rot)
+
+	return (
+		near(a.x, b.x, 4) &&
+		near(a.y, b.y, 4) &&
+		near(a.cx, b.cx, 4) &&
+		near(a.cy, b.cy, 4) &&
+		(turn <= 1 || turn >= 21_600_000 - 1) &&
+		a.flipH === b.flipH &&
+		a.flipV === b.flipV
+	)
 }
 
 // The SVG path of the boxes' outlines and of their handles (screen px).
@@ -281,6 +322,10 @@ export function ShapeEditLayer({
 	const slide: SlideRef | undefined = render?.ref
 	const selected = selectedShapes(render, state)
 	const placed: PlacedShape[] = selected.map(shape => placedOf(shape, expected))
+	// Members of one group selected: that group (framed dashed), and the shapes at their level (what Tab, Select All
+	// and the z-order commands go through); else the slide's top-level shapes.
+	const group = selectionGroup(render, selected)
+	const level = group === undefined ? shapes : siblingShapes(render, selected[0])
 	const emuPerScreenPx = scale > 0 ? EMU_PER_PX / scale : EMU_PER_PX
 
 	// The layer elements of the painted slide, by layer index.
@@ -303,17 +348,17 @@ export function ShapeEditLayer({
 		previewedRef.current.clear()
 	}
 
-	// Shows each shape's painted layers in the box it is moving to.
+	// Shows each shape's painted layers in the box it is moving to. A group member is drawn on its group's layers, so
+	// only its frame shows where it is going.
 	const preview = (boxes: readonly PlacedShape[]): void => {
 		if (render === undefined) return
 
 		const elements = layerElements()
-		const byId = new Map(shapes.map(shape => [shape.id, shape] as const))
 
 		for (const box of boxes) {
-			const shape = byId.get(box.id)
+			const shape = shapeOf(render, box.id)
 
-			if (shape === undefined) continue
+			if (shape === undefined || shape.parent !== undefined) continue
 
 			const delta = sameBox(shape.xfrm, box.xfrm) ? undefined : previewMatrix(shape.xfrm, box.xfrm)
 
@@ -348,11 +393,11 @@ export function ShapeEditLayer({
 
 		if (expected === undefined) return
 
-		const byId = new Map(slideShapes(render).map(shape => [shape.id, shape.xfrm] as const))
 		const shown = [...expected].every(([id, xfrm]) => {
-			const now = byId.get(id)
+			const now = shapeOf(render, id)
 
-			return now === undefined || sameBox(now, xfrm)
+			// A member's box comes back through its group's child space, rounded on the way there and back.
+			return now === undefined || (now.parent === undefined ? sameBox(now.xfrm, xfrm) : nearBox(now.xfrm, xfrm))
 		})
 
 		missesRef.current = shown ? 0 : missesRef.current + 1
@@ -437,13 +482,28 @@ export function ShapeEditLayer({
 	const snapOf = (others: readonly Bounds[]): NonNullable<ShapeDragOptions["snap"]> =>
 		grid?.snap === true ? { others, slide: size, grid } : { others, slide: size }
 
+	// The boxes a drag of `moving` snaps to: every other shape on the slide; for members of a group, their siblings
+	// and the shapes outside the group (whose own box follows its members).
+	const othersOf = (moving: readonly SlideShape[]): Bounds[] => {
+		const ids = new Set(moving.map(shape => shape.id))
+		const first = moving[0]
+		const outer = first?.parent === undefined ? undefined : outermostOf(render, first).id
+		const others: Bounds[] = []
+
+		for (const shape of shapes)
+			if (!ids.has(shape.id) && shape.id !== outer) others.push(boundsOf(expected?.get(shape.id) ?? shape.xfrm))
+
+		if (outer !== undefined)
+			for (const shape of siblingShapes(render, first))
+				if (!ids.has(shape.id)) others.push(boundsOf(expected?.get(shape.id) ?? shape.xfrm))
+
+		return others
+	}
+
 	const startDrag = (hit: HandleHit, start: Point): void => {
 		if (slide === undefined) return
 
-		const moving = new Set(placed.map(shape => shape.id))
-		const others: Bounds[] = []
-
-		for (const shape of shapes) if (!moving.has(shape.id)) others.push(boundsOf(expected?.get(shape.id) ?? shape.xfrm))
+		const others = othersOf(selected)
 
 		dragRef.current = new ShapeDrag({
 			kind: hit.kind,
@@ -540,7 +600,8 @@ export function ShapeEditLayer({
 			}
 		}
 
-		const shape = shapeAt(shapes, point, grab * 0.5)
+		const target = clickTarget(render, state.ids, point, grab * 0.5)
+		const shape = target?.shape
 		const before = state.ids
 
 		if (shape === undefined) {
@@ -552,11 +613,18 @@ export function ShapeEditLayer({
 		}
 
 		// A modifier press adds the shape at once (a drag then moves it with the rest); one already selected leaves
-		// the selection only on a release without a drag, so Shift held from the start constrains a move.
+		// the selection only on a release without a drag, so Shift held from the start constrains a move. Only shapes
+		// of one level are selected together: a shape at another one replaces the selection.
 		const deselect = additive && state.ids.includes(shape.id) ? shape.id : undefined
+		const sameLevel = before.length === 0 || shapeOf(render, before[0] ?? -1)?.parent === shape.parent
 
-		if (additive && deselect === undefined) selection.set([...state.ids, shape.id])
+		if (additive && deselect === undefined) selection.set(sameLevel ? [...state.ids, shape.id] : [shape.id])
 		else if (!additive && !state.ids.includes(shape.id)) selection.set([shape.id])
+
+		// A click on a selected group goes into it on release (its press still drags the group).
+		const into = additive ? undefined : target?.into
+		const intoEnters =
+			into !== undefined && editable && onEnterText !== undefined && clickEntersText(into) && event.pointerType !== "touch"
 
 		// A plain click on a text placeholder, text box or table puts the caret there, unless it lands in a selection of
 		// several (it keeps that selection); a finger's first tap only selects (a second one enters).
@@ -577,7 +645,8 @@ export function ShapeEditLayer({
 			additive,
 			before,
 			...(deselect === undefined ? {} : { deselect }),
-			...(enter === undefined ? {} : { enter })
+			...(enter === undefined ? {} : { enter }),
+			...(into === undefined ? {} : { into: into.id, ...(intoEnters ? { intoEnters } : {}) })
 		}
 	}
 
@@ -598,7 +667,8 @@ export function ShapeEditLayer({
 				editable && placed.length <= HANDLES_LIMIT
 					? handleAt(placed, point, HANDLE_GRAB_PX * emuPerScreenPx, ROTATE_OFFSET_PX * emuPerScreenPx, emuPerScreenPx)
 					: undefined
-			const over = hit === undefined ? shapeAt(shapes, point, HANDLE_GRAB_PX * emuPerScreenPx * 0.5) : undefined
+			const over =
+				hit === undefined ? hitPath(render, point, HANDLE_GRAB_PX * emuPerScreenPx * 0.5, new Set(state.ids))[0] : undefined
 			const box = hit === undefined ? undefined : placed.find(shape => shape.id === hit.id)?.xfrm
 
 			root.style.cursor =
@@ -639,11 +709,9 @@ export function ShapeEditLayer({
 	const startDragFromSelection = (start: Point): void => {
 		if (slide === undefined || render === undefined) return
 
-		const now = selectedShapes(render, selection.getSnapshot()).map(shape => placedOf(shape, expected))
-		const moving = new Set(now.map(shape => shape.id))
-		const others: Bounds[] = []
-
-		for (const shape of shapes) if (!moving.has(shape.id)) others.push(boundsOf(expected?.get(shape.id) ?? shape.xfrm))
+		const chosen = selectedShapes(render, selection.getSnapshot())
+		const now = chosen.map(shape => placedOf(shape, expected))
+		const others = othersOf(chosen)
 
 		dragRef.current = new ShapeDrag({
 			kind: "move",
@@ -675,15 +743,13 @@ export function ShapeEditLayer({
 		if (pointer !== undefined && root?.hasPointerCapture(pointer) === true) root.releasePointerCapture(pointer)
 	}
 
-	// An op that makes shapes (group, ungroup, duplicate, a Ctrl+drag's copies) selects what it makes; refused, the
-	// request is withdrawn and the selection is what it was (unless something replaced the request meanwhile).
+	// An op that makes shapes (group, ungroup, duplicate, a Ctrl+drag's copies) selects what it makes, at any level
+	// (inside a group too); refused, the request is withdrawn and the selection is what it was (unless something
+	// replaced the request meanwhile).
 	const runSelectingNew = (op: DeckOp | undefined): boolean => {
 		if (op === undefined || slide === undefined) return false
 
-		const withdraw = selection.selectNew(
-			slide,
-			shapes.map(shape => shape.id)
-		)
+		const withdraw = selection.selectNew(slide, { placements: placements(render) })
 
 		void run(op).then(result => {
 			if (result?.ok !== true) withdraw()
@@ -727,6 +793,15 @@ export function ShapeEditLayer({
 		// A modifier click on a selected shape, released without a drag: it leaves the selection.
 		if (pending?.kind === "move" && pending.deselect !== undefined && !cancelled) selection.toggle(pending.deselect)
 
+		// A click on a selected group, released without a drag: the member under it is selected (a text box's or
+		// placeholder's body opens where the click landed).
+		if (pending?.kind === "move" && pending.into !== undefined && !cancelled && slide !== undefined) {
+			selection.set([pending.into])
+
+			if (pending.intoEnters === true)
+				onEnterText?.({ slide, id: pending.into }, { x: pending.start.x / EMU_PER_PX, y: pending.start.y / EMU_PER_PX })
+		}
+
 		// A plain click on a text placeholder, text box or table, released without a drag: the caret goes where it landed.
 		if (pending?.kind === "move" && pending.enter !== undefined && !cancelled && slide !== undefined)
 			onEnterText?.({ slide, id: pending.enter }, { x: pending.start.x / EMU_PER_PX, y: pending.start.y / EMU_PER_PX })
@@ -750,36 +825,42 @@ export function ShapeEditLayer({
 
 		const ids = placed.map(shape => shape.id)
 
+		// Inside a group, Select All selects the group's members (PowerPoint).
 		if (name === "selectAll") {
-			selection.set(shapes.filter(selectable).map(shape => shape.id))
+			selection.set(level.filter(selectable).map(shape => shape.id))
 
 			return true
 		}
 
 		if (!editable || ids.length === 0) return false
 
-		// Ungroup: every selected group in one op (one undo step).
+		// Ungroup: every selected group in one op (one undo step). Inside a group, members group into a group of their
+		// own there, and a member group ungroups into its group.
 		if (name === "group") return canGroup(selected) && runSelectingNew(groupOp(slide, ids))
 		if (name === "ungroup") return runSelectingNew(ungroupOps(slide, selected)[0])
 
 		if (name === "duplicate") {
-			// The copies stack as the originals do (back to front) and become the selection.
+			// The copies stack as the originals do (back to front), in their group for members, and become the selection.
 			const chosen = new Set(ids)
 
 			return runSelectingNew(
 				duplicateOp(
 					slide,
-					shapes.filter(shape => chosen.has(shape.id)).map(shape => shape.id)
+					level.filter(shape => chosen.has(shape.id)).map(shape => shape.id),
+					undefined,
+					undefined,
+					selected[0]?.space
 				)
 			)
 		}
 
 		const to = Z_ORDER_OF[name]
 
+		// Members move among their siblings.
 		if (
 			to === undefined ||
 			!canZOrder(
-				shapes.map(shape => shape.id),
+				level.map(shape => shape.id),
 				new Set(ids),
 				to
 			)
@@ -851,6 +932,9 @@ export function ShapeEditLayer({
 					endPointer()
 					restorePreview()
 					drawFrames(placed, [], [])
+				} else if (group !== undefined) {
+					// Out of the group: the group is selected again (PowerPoint), one level per press.
+					selection.set([group.id])
 				} else if (state.ids.length > 0) {
 					selection.clear()
 				} else {
@@ -861,8 +945,9 @@ export function ShapeEditLayer({
 
 				return
 			case "cycle": {
+				// Inside a group, Tab goes round its members.
 				const next = cycleTarget(
-					shapes.filter(selectable).map(shape => shape.id),
+					level.filter(selectable).map(shape => shape.id),
 					state.ids,
 					action.back
 				)
@@ -960,9 +1045,9 @@ export function ShapeEditLayer({
 		if (slide === undefined || dragRef.current !== undefined) return
 
 		const point = slidePoint(event)
-		const shape = shapeAt(shapes, point, HANDLE_GRAB_PX * emuPerScreenPx * 0.5)
-
 		const ids = selection.getSnapshot().ids
+		// A selected group keeps its selection under the click (its menu, not its member's).
+		const shape = clickTarget(render, ids, point, HANDLE_GRAB_PX * emuPerScreenPx * 0.5)?.shape
 
 		if (shape !== undefined) {
 			if (!ids.includes(shape.id)) selection.set([shape.id])
@@ -982,13 +1067,20 @@ export function ShapeEditLayer({
 		if (!editable || slide === undefined || onEnterText === undefined) return
 
 		const point = slidePoint(event)
-		const shape = shapeAt(shapes, point, HANDLE_GRAB_PX * emuPerScreenPx * 0.5)
+		// The innermost shape under it: a double click on a grouped shape's text edits that text (PowerPoint).
+		const path = hitPath(render, point, HANDLE_GRAB_PX * emuPerScreenPx * 0.5, new Set(selection.getSnapshot().ids))
+		const shape = path[path.length - 1]
 
-		if (shape !== undefined && holdsText(shape))
-			onEnterText({ slide, id: shape.id }, { x: point.x / EMU_PER_PX, y: point.y / EMU_PER_PX })
+		if (shape === undefined || !holdsText(shape)) return
+		if (shape.parent !== undefined && !selection.getSnapshot().ids.includes(shape.id)) selection.set([shape.id])
+
+		onEnterText({ slide, id: shape.id }, { x: point.x / EMU_PER_PX, y: point.y / EMU_PER_PX })
 	}
 
 	const paths = framePaths(placed, scale, editable && placed.length <= HANDLES_LIMIT)
+	// The group whose members are selected, framed dashed (its box as an op left it until the render shows it).
+	const groupOutline =
+		group === undefined ? "" : framePaths([{ id: group.id, xfrm: expected?.get(group.id) ?? group.xfrm }], scale, false).outline
 	const announcement = labels.describe(selected)
 	const keysId = useId()
 
@@ -1059,6 +1151,14 @@ export function ShapeEditLayer({
 					stroke={FRAME}
 					strokeWidth={1}
 					d={paths.handles}
+				/>
+				<path
+					data-fo-group-frame=""
+					fill="none"
+					stroke={FRAME}
+					strokeWidth={1}
+					strokeDasharray="4 3"
+					d={groupOutline}
 				/>
 				<rect
 					ref={marqueeRef}

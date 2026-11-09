@@ -343,7 +343,8 @@ describe("the canvas layer's keys", () => {
 		await settle()
 		expect(event.defaultPrevented).toBe(true)
 		expect(ops).toEqual([{ family: "shape", kind: "duplicate", slide: ref, shapes: [2, 3], dx: 10 * EMU, dy: 10 * EMU }])
-		expect(selection.getSnapshot().pending?.before).toEqual(new Set([2, 3]))
+		// Compared at every level (the slide's is 0).
+		expect(selection.getSnapshot().pending?.before).toEqual(new Set(["0:2", "0:3"]))
 	})
 
 	it("Ctrl+drag copies the selection to the drop and selects the copies; the originals stay", async () => {
@@ -358,7 +359,7 @@ describe("the canvas layer's keys", () => {
 		pointer("pointerup", 250, 190, COPY)
 		await settle()
 		expect(ops).toEqual([{ family: "shape", kind: "duplicate", slide: ref, shapes: [2, 3], dx: 100 * EMU, dy: 40 * EMU }])
-		expect(selection.getSnapshot().pending?.before).toEqual(new Set([2, 3]))
+		expect(selection.getSnapshot().pending?.before).toEqual(new Set(["0:2", "0:3"]))
 		// The press on a selected shape with Ctrl became a drag: it does not leave the selection.
 		expect(selection.getSnapshot().ids).toEqual([3, 2])
 	})

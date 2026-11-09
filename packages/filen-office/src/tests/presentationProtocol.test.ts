@@ -121,6 +121,25 @@ function echoHandlers(): { readonly [M in PresentationMethod]: MethodHandler<M> 
 		},
 		command: (_context, op) =>
 			Promise.resolve(op.family === "slide" ? { ok: true, revision: 5, dirty: true } : { ok: false, refusal: "viewOnly" }),
+		clip: (_context, request) =>
+			Promise.resolve(
+				request.kind === "shapes"
+					? {
+							ok: true,
+							clip: {
+								kind: "shapes",
+								format: "pptx",
+								slide: request.slide,
+								shapes: [{ raw: new TextEncoder().encode("<p:sp/>") }],
+								boxes: [undefined],
+								relationships: [],
+								text: [["x"]]
+							}
+						}
+					: { ok: false, refusal: "notFound" }
+			),
+		clipParts: (_context, names) =>
+			Promise.resolve({ ok: true, parts: names.map(name => ({ name, bytes: new Uint8Array([1, 2]), contentType: "image/png" })) }),
 		undo: (_context, open) =>
 			Promise.resolve({
 				ok: true,
@@ -190,7 +209,9 @@ function echoHandlers(): { readonly [M in PresentationMethod]: MethodHandler<M> 
 				notes: { slide: slideRef(30), id: 3 },
 				notesText: "Speak slowly",
 				can: { reply: true, resolve: true }
-			})
+			}),
+		outline: (_context, slide) =>
+			Promise.resolve({ slide, revision: 4, shapes: [{ id: 2, name: "Title 1", hidden: false, role: "placeholder" }] })
 	}
 }
 
@@ -285,6 +306,15 @@ describe("the presentation protocol", () => {
 		expect(reseeded.ok && reseeded.seed?.page.page.sourceTexts).toEqual(["Slide 1"])
 		expect(await session.call("redo").answer).toEqual({ ok: true, revision: 5, dirty: true })
 		expect(await session.call("retract", 4).answer).toEqual({ ok: true, revision: 5, dirty: false })
+
+		const copied = await session.call("clip", { kind: "shapes", slide: slideRef(10), shapes: [2] }).answer
+
+		expect(copied.ok && copied.clip.kind === "shapes" && new TextDecoder().decode(copied.clip.shapes[0]?.raw)).toBe("<p:sp/>")
+		expect(await session.call("clip", { kind: "slides", slides: [] }).answer).toEqual({ ok: false, refusal: "notFound" })
+		expect(await session.call("clipParts", ["ppt/media/image1.png"]).answer).toEqual({
+			ok: true,
+			parts: [{ name: "ppt/media/image1.png", bytes: new Uint8Array([1, 2]), contentType: "image/png" }]
+		})
 		expect(await session.call("image", "/ppt/media/image1.png").answer).toEqual({
 			bytes: new Uint8Array([0x89, 0x50]),
 			type: "image/png"
@@ -381,6 +411,11 @@ describe("the presentation protocol", () => {
 			notesText: "Speak slowly",
 			can: { reply: true, resolve: true }
 		})
+		expect(await session.call("outline", slideRef(10)).answer).toEqual({
+			slide: slideRef(10),
+			revision: 4,
+			shapes: [{ id: 2, name: "Title 1", hidden: false, role: "placeholder" }]
+		})
 
 		const called = new Set(channel.toWorker.flatMap(message => (message.t === "call" ? [message.method] : [])))
 
@@ -435,6 +470,8 @@ describe("the presentation protocol", () => {
 			textSeed: () => session.call("textSeed", shape).answer,
 			layoutText: () => session.call("layoutText", shape, fixtureBody(["x"])).answer,
 			command: () => session.call("command", { family: "slide", kind: "reset", slide: slideRef(10) }).answer,
+			clip: () => session.call("clip", { kind: "shapes", slide: slideRef(10), shapes: [2] }).answer,
+			clipParts: () => session.call("clipParts", ["ppt/media/image1.png"]).answer,
 			undo: () => session.call("undo").answer,
 			redo: () => session.call("redo").answer,
 			retract: () => session.call("retract", 1).answer,
@@ -456,7 +493,8 @@ describe("the presentation protocol", () => {
 			chartData: () => session.call("chartData", shape).answer,
 			jobsPort: () => session.call("jobsPort", ports()).answer,
 			freshParts: () => session.call("freshParts", "pptx", ports()).answer,
-			review: () => session.call("review", slideRef(10)).answer
+			review: () => session.call("review", slideRef(10)).answer,
+			outline: () => session.call("outline", slideRef(10)).answer
 		}
 
 		// Built by their slices: edits (command, undo, redo), saving (save, commitSaved), find, the SmartArt text pane's
@@ -476,7 +514,10 @@ describe("the presentation protocol", () => {
 			"jobsPort",
 			"jobsPort",
 			"freshParts",
-			"review"
+			"review",
+			"clip",
+			"clipParts",
+			"outline"
 		])
 
 		for (const method of PRESENTATION_METHODS.filter(method => !built.has(method))) {

@@ -906,8 +906,9 @@ describe("tables", () => {
 		expect(fills).toEqual([["AA0000"], ["00AA00"]])
 		expect(render.layers[0]?.text).toBeDefined()
 		expect(render.layers[1]?.text).toBeUndefined()
-		// The text layer names the child whose body it is; the rest of the group's drawing keeps the group's id.
-		expect(render.layers.map(layer => layer.shape.id)).toEqual([3, 2])
+		// Each layer names the child whose body it is (the empty one's carries its text box for the editor to enter).
+		expect(render.layers.map(layer => layer.shape.id)).toEqual([3, 4])
+		expect(render.layers[1]?.textMatrix).toBeDefined()
 	})
 
 	it("refuses a table over the cell budget rather than drawing part of it", async () => {

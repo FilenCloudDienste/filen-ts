@@ -187,5 +187,47 @@ export const previewPptxArrange = {
 	/** Keyboard shortcuts — presentation editor */
 	previewPptxShortcutBringForward: "Bring the selected objects forward",
 	/** Keyboard shortcuts — presentation editor */
-	previewPptxShortcutSendBackward: "Send the selected objects backward"
+	previewPptxShortcutSendBackward: "Send the selected objects backward",
+
+	/** Presentation editor, Home tab — menu of the commands that stack, group and list the objects on the slide (PowerPoint's Arrange) */
+	previewPptxHomeArrange: "Arrange",
+	/** Presentation editor, Home ▸ Arrange — heading of the stacking order commands */
+	previewPptxOrderObjects: "Order Objects",
+	/** Presentation editor, Home ▸ Arrange — heading of the group and ungroup commands */
+	previewPptxGroupObjects: "Group Objects",
+	/** Presentation editor — opens or closes the pane listing every object on the slide (PowerPoint's Selection Pane) */
+	previewPptxSelectionPane: "Selection Pane",
+	/** Keyboard shortcuts — presentation editor: opens or closes the Selection Pane */
+	previewPptxEditorKeySelectionPane: "Selection Pane (presentations)",
+	/** Selection Pane — its title, at the top of the pane */
+	previewPptxSelectionTitle: "Selection",
+	/** Selection Pane — accessible name of the button that closes the pane */
+	previewPptxSelectionClose: "Close Selection Pane",
+	/** Selection Pane — button that shows every object on the slide */
+	previewPptxSelectionShowAll: "Show All",
+	/** Selection Pane — button that hides every object on the slide */
+	previewPptxSelectionHideAll: "Hide All",
+	/** Selection Pane — accessible name of the list of the slide's objects */
+	previewPptxSelectionList: "Objects on this slide",
+	/** Selection Pane — accessible description of the list: its keyboard commands */
+	previewPptxSelectionKeys:
+		"Front-most object first. Arrow keys move between objects, Left and Right collapse and expand groups. Space selects, Ctrl+Space adds to the selection. F2 renames, Ctrl+Shift+S shows or hides, Ctrl+Shift+F and Ctrl+Shift+B bring forward and send backward. Escape returns to the slide.",
+	/** Selection Pane — the slide has no objects to list */
+	previewPptxSelectionEmpty: "There are no objects on this slide.",
+	/** Selection Pane — shown while the slide's objects are being read */
+	previewPptxSelectionLoading: "Loading objects…",
+	/** Selection Pane — the slide's objects could not be read */
+	previewPptxSelectionFailed: "The objects on this slide could not be listed.",
+	/** Selection Pane — accessible name of the eye button that hides one object; {{name}} is the object's name */
+	previewPptxSelectionHide: "Hide {{name}}",
+	/** Selection Pane — accessible name of the eye button that shows one hidden object; {{name}} is the object's name */
+	previewPptxSelectionShow: "Show {{name}}",
+	/** Selection Pane — accessible name of a hidden object's row, e.g. "Rectangle 3, hidden" */
+	previewPptxSelectionHiddenRow: "{{name}}, hidden",
+	/** Selection Pane — accessible name of the box for typing an object's new name */
+	previewPptxSelectionRename: "Name of {{name}}",
+	/** Selection Pane — the name shown for an object the file gives no name; {{kind}} is what it is, e.g. "Picture 4" */
+	previewPptxSelectionUnnamed: "{{kind}} {{id}}",
+	/** Selection Pane — screen reader announcement after objects were moved by dragging */
+	previewPptxSelectionMoved: "Moved"
 } as const

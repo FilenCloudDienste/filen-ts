@@ -2,6 +2,8 @@ import { useRef, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import {
 	BringToFrontIcon,
+	ClipboardPasteIcon,
+	CopyIcon,
 	CopyPlusIcon,
 	EyeOffIcon,
 	GroupIcon,
@@ -9,6 +11,7 @@ import {
 	PaintBucketIcon,
 	PlusIcon,
 	RotateCcwIcon,
+	ScissorsIcon,
 	SendToBackIcon,
 	TextCursorInputIcon,
 	TextQuoteIcon,
@@ -27,7 +30,7 @@ import {
 	type ZOrder
 } from "@filen/office/core/presentation"
 import type { PresentationLayoutInfo } from "@filen/office/dom/presentation"
-import { boundsOf, slideShapes } from "@filen/office/react/presentation"
+import { boundsOf, selectedShapes } from "@filen/office/react/presentation"
 import {
 	ContextMenu,
 	ContextMenuCheckboxItem,
@@ -49,11 +52,12 @@ import { useRibbonDialog } from "@/features/presentation/components/ribbon/ribbo
 import type { PresentationRibbonEditor } from "@/features/presentation/components/ribbon/tabs"
 import { usePresentationEditor } from "@/features/presentation/hooks/usePresentationSession"
 import { presentationShortcutKeys } from "@/features/presentation/lib/keymap/editor"
+import type { ClipboardScope } from "@/features/presentation/lib/presentationClipboard"
 import { isMacPlatform } from "@/lib/keymap/kbd.logic"
 import { useOverrides } from "@/lib/keymap/registry"
 
 // The slide list's context menu (right click, or a long press on touch): the slide commands on the selection, as in
-// PowerPoint's slide pane: New, Duplicate, Delete, Layout, Reset, Hide, Move (the way touch moves slides) and the
+// PowerPoint's slide pane: Cut, Copy, Paste, New, Duplicate, Delete, Layout, Reset, Hide, Move (the way touch moves slides) and the
 // sections. A right click on a slide outside the selection selects it first. A deck that can only be viewed has no
 // menu here.
 
@@ -96,6 +100,49 @@ function LayoutSubItems({
 	))
 }
 
+// Cut, Copy and Paste, first in both menus as in PowerPoint's; `cuts`: there is a selection to cut or copy.
+function ClipboardItems({ at, cuts }: { at: ClipboardScope; cuts: boolean }) {
+	const { t } = useTranslation("preview")
+	const clipboard = usePresentationEditor()?.clipboard
+
+	if (clipboard === undefined) return null
+
+	return (
+		<>
+			<ContextMenuItem
+				disabled={!cuts}
+				onClick={() => {
+					clipboard.copy(true, at)
+				}}
+			>
+				<ScissorsIcon />
+				{t("previewPptxClipboardCut")}
+				<Shortcut keys={[MAC ? "⌘" : "Ctrl", "X"]} />
+			</ContextMenuItem>
+			<ContextMenuItem
+				disabled={!cuts}
+				onClick={() => {
+					clipboard.copy(false, at)
+				}}
+			>
+				<CopyIcon />
+				{t("previewPptxClipboardCopy")}
+				<Shortcut keys={[MAC ? "⌘" : "Ctrl", "C"]} />
+			</ContextMenuItem>
+			<ContextMenuItem
+				onClick={() => {
+					clipboard.paste(at)
+				}}
+			>
+				<ClipboardPasteIcon />
+				{t("previewPptxClipboardPaste")}
+				<Shortcut keys={[MAC ? "⌘" : "Ctrl", "V"]} />
+			</ContextMenuItem>
+			<ContextMenuSeparator />
+		</>
+	)
+}
+
 export function SlideListContextMenu({ children }: { children: ReactNode }) {
 	const { t } = useTranslation("preview")
 	const scope = usePresentationEditor()
@@ -128,6 +175,10 @@ export function SlideListContextMenu({ children }: { children: ReactNode }) {
 				{children}
 			</ContextMenuTrigger>
 			<ContextMenuContent data-preview-surface>
+				<ClipboardItems
+					at="slides"
+					cuts={any}
+				/>
 				<ContextMenuItem
 					disabled={editor.layouts.length === 0}
 					onClick={() => {
@@ -314,6 +365,10 @@ function CanvasMenuItems({ ribbon, onEditText }: { ribbon: PresentationRibbonEdi
 
 		return (
 			<>
+				<ClipboardItems
+					at="shapes"
+					cuts
+				/>
 				{only !== undefined && (only.role === "shape" || only.role === "placeholder") ? (
 					<>
 						<ContextMenuItem
@@ -336,7 +391,7 @@ function CanvasMenuItems({ ribbon, onEditText }: { ribbon: PresentationRibbonEdi
 						<ContextMenuItem
 							disabled={!canGroup(selected)}
 							onClick={() => {
-								runGrouping(ribbon, slide, selected, order, "group")
+								runGrouping(ribbon, slide, selected, "group")
 							}}
 						>
 							<GroupIcon />
@@ -345,7 +400,7 @@ function CanvasMenuItems({ ribbon, onEditText }: { ribbon: PresentationRibbonEdi
 						<ContextMenuItem
 							disabled={!canUngroup(selected)}
 							onClick={() => {
-								runGrouping(ribbon, slide, selected, order, "ungroup")
+								runGrouping(ribbon, slide, selected, "ungroup")
 							}}
 						>
 							<UngroupIcon />
@@ -395,6 +450,10 @@ function CanvasMenuItems({ ribbon, onEditText }: { ribbon: PresentationRibbonEdi
 
 	return (
 		<>
+			<ClipboardItems
+				at="shapes"
+				cuts={false}
+			/>
 			<ContextMenuItem
 				disabled={editor.layouts.length === 0}
 				onClick={() => {
@@ -501,10 +560,8 @@ export function SlideCanvasContextMenu({
 					const frame = trigger.querySelector(".fo-slide-frame") ?? trigger.firstElementChild
 					const render = ribbon.render
 					const state = ribbon.selection.getSnapshot()
-					const ids = new Set(render?.ref === state.slide ? state.ids : [])
-					const bounds = slideShapes(render)
-						.filter(shape => ids.has(shape.id))
-						.map(shape => boundsOf(shape.xfrm))
+					// Members of a group included, at their boxes on the slide.
+					const bounds = selectedShapes(render, state).map(shape => boundsOf(shape.xfrm))
 
 					const at = contextMenuPoint(
 						frame?.getBoundingClientRect() ?? { left: 0, top: 0, width: 0, height: 0 },

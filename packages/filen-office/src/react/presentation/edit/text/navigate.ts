@@ -16,9 +16,10 @@ export type TextNavigation =
 	// A new slide after this one on its layout, its first placeholder opened.
 	| { readonly kind: "addSlide" }
 
-// The table layer of a frame on the slide in view.
+// The table layer of a frame on the slide in view (a group's member's names the member, its box the group).
 function tableOf(render: SlideRender, id: number): NonNullable<SlideRender["layers"][number]["table"]> | undefined {
-	for (const layer of render.layers) if (layer.box?.id === id && layer.table !== undefined) return layer.table
+	for (const layer of render.layers)
+		if (layer.table !== undefined && layer.box !== undefined && (layer.box.id === id || layer.shape.id === id)) return layer.table
 
 	return undefined
 }

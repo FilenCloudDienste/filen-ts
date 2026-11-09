@@ -45,6 +45,22 @@ export const previewPptxEditor = {
 	previewPptxEditorRefusedTooLarge: "That change would make the presentation too large.",
 	/** Toast — a change was refused because the slide changed meanwhile (another change, a save); trying again works */
 	previewPptxEditorRefusedStale: "The presentation changed meanwhile. Try again.",
+	/** Ribbon button and menu item (Home ▸ Clipboard) — removes the selected objects or slides and puts them on the clipboard */
+	previewPptxClipboardCut: "Cut",
+	/** Ribbon button and menu item (Home ▸ Clipboard) — puts the selected objects or slides on the clipboard */
+	previewPptxClipboardCopy: "Copy",
+	/** Ribbon button and menu item (Home ▸ Clipboard) — puts what is on the clipboard on the slide (objects) or after it (slides) */
+	previewPptxClipboardPaste: "Paste",
+	/** Toast — Cut or Copy refused: a chart, SmartArt graphic, embedded object or ink drawing is among what is selected */
+	previewPptxClipboardNotCopied: "Charts, SmartArt graphics, embedded objects and ink can't be copied here yet.",
+	/** Toast — Paste refused: what was copied can't go into this presentation (slides from another presentation, objects between different file formats, or a link to a slide of the other presentation) */
+	previewPptxClipboardNotHere: "What you copied can't be pasted into this presentation.",
+	/** Toast — Paste refused: what was copied is gone (its presentation was closed, or its slides were deleted) */
+	previewPptxClipboardGone: "What you copied is no longer available. Copy it again.",
+	/** Toast — Paste refused: the copied pictures and media are too large to bring into this presentation */
+	previewPptxClipboardTooLarge: "What you copied is too large to paste here.",
+	/** Toast — a ribbon or menu Cut, Copy or Paste the browser blocked; {{shortcut}} is the keyboard shortcut that still works, e.g. "Ctrl+V" */
+	previewPptxClipboardBlocked: "The browser blocked the clipboard. Press {{shortcut}} instead.",
 	/** Toast — after a save: changes that could not be written safely were undone; {{count}} is how many */
 	previewPptxEditorSaveReverted_one: "{{count}} change couldn't be saved and was undone.",
 	/** Toast — after a save: changes that could not be written safely were undone; {{count}} is how many */

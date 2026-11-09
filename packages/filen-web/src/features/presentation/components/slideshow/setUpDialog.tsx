@@ -11,8 +11,9 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectVa
 import { Switch } from "@/components/ui/switch"
 import { setUpForm, setUpOptions, setUpRangeValid, type SetUpForm } from "@/features/presentation/components/slideshow/setUpDialog.logic"
 
-// PowerPoint's Set Up Slide Show: who runs the show (a speaker, or a kiosk that loops and ignores clicks), whether it
-// loops, which slides (all, a range, a custom show) and whether slides advance by their timings. Each opening starts
+// PowerPoint's Set Up Slide Show: who runs the show (a speaker, an individual in a window, or a kiosk that loops and
+// ignores clicks), whether it loops, which slides (all, a range, a custom show) and whether slides advance by their
+// timings. Each opening starts
 // from what the shows use now. `saved`: the settings are saved with the presentation (else kept until it closes);
 // `odf`: saved in an OpenDocument presentation, which has no kiosk mode and runs a range to the last slide.
 export function SetUpShowDialog({
@@ -109,13 +110,14 @@ export function SetUpShowDialog({
 				{radio(
 					"type",
 					t("previewPptxShowType"),
-					form.kiosk ? "kiosk" : "speaker",
+					form.kiosk ? "kiosk" : form.browse ? "browse" : "speaker",
 					[
 						["speaker", t("previewPptxShowTypeSpeaker")],
+						["browse", t("previewPptxShowTypeBrowse")],
 						["kiosk", t("previewPptxShowTypeKiosk"), odf]
 					],
 					value => {
-						change({ kiosk: value === "kiosk" })
+						change({ kiosk: value === "kiosk", browse: value === "browse" })
 					},
 					odf ? t("previewPptxShowOdfNoKiosk") : undefined
 				)}

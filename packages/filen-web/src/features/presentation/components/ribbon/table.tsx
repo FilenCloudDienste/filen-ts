@@ -61,7 +61,10 @@ interface SelectedTable {
 }
 
 function tableLayer(render: SlideRender | undefined, id: number): SelectedTable["layer"] | undefined {
-	const layer = render?.layers.find(each => each.box?.id === id && each.table !== undefined)
+	// A group member's table layer names the member; its box is the group's.
+	const layer = render?.layers.find(
+		each => each.table !== undefined && each.box !== undefined && (each.box.id === id || each.shape.id === id)
+	)
 
 	return layer?.table === undefined ? undefined : (layer as SelectedTable["layer"])
 }

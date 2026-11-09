@@ -69,6 +69,9 @@ export interface ShowOptions {
 	readonly withoutAnimation?: boolean
 	// The pen's colour (penClr), RGB hex; the ink's default without it.
 	readonly penColor?: string
+	// Browsed by an individual (p:browse; ODF presentation:full-screen="false"): the page runs it in a window with a
+	// status bar instead of full screen.
+	readonly browse?: boolean
 }
 
 export const DEFAULT_SHOW_OPTIONS: ShowOptions = { loop: false, kiosk: false, useTimings: true }
@@ -89,7 +92,8 @@ export function showOptionsOf(settings: ShowSettings | undefined): ShowOptions {
 		...(settings.range.kind === "customShow" ? { customShow: settings.range.id } : {}),
 		...(kiosk && settings.restartMs !== undefined ? { restartMs: settings.restartMs } : {}),
 		...(settings.showAnimation ? {} : { withoutAnimation: true }),
-		...(pen === undefined ? {} : { penColor: pen.hex })
+		...(pen === undefined ? {} : { penColor: pen.hex }),
+		...(settings.kind === "browse" ? { browse: true } : {})
 	}
 }
 

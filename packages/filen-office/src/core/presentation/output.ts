@@ -131,6 +131,25 @@ export interface ActionSummary {
 	readonly hover?: Action
 }
 
+// A member of one of the slide's groups, however deep: what selecting, moving and entering it inside its group start
+// from (PowerPoint's click into a group). `own`: its box in its group's child space, as the model holds it (a member
+// group's with its child space); `xfrm`: that box as it shows on the slide (EMU), through every enclosing group
+// (groupSpace.ts shownThrough). `locks`, `line` and `body` as on SlideLayer.box; `lock`: the reason the editor may not
+// change it (its own, else its group's); `members`: a member group's.
+export interface GroupMember {
+	readonly id: number
+	readonly role: LayerRole
+	readonly own: Xfrm
+	readonly xfrm: Xfrm
+	readonly alt?: ShapeNode["alt"]
+	readonly locks?: ShapeLocks
+	readonly line?: true
+	readonly body?: ShapeBodyKind
+	readonly lock?: LockReason
+	readonly media?: SlideMediaInfo
+	readonly members?: readonly GroupMember[]
+}
+
 export interface SlideLayer {
 	// The shape the layer draws, named in the node that owns it: a layout's or master's shape drawn on a slide names
 	// that layout or master (never the slide, whose own shapes may repeat its ids).
@@ -178,6 +197,8 @@ export interface SlideLayer {
 		// on the line is tested against.
 		readonly path?: readonly number[]
 		readonly body?: ShapeBodyKind
+		// A group's shown members, back to front (one hidden or without a box of its own is not drawn).
+		readonly members?: readonly GroupMember[]
 	}
 	// On a table frame's base layer: its structure as drawn, for picking cells and building the table commands on the
 	// page. Column and row edges in px of the layer's matrix space (rows grown to their text), and the merged areas:

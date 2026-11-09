@@ -78,6 +78,7 @@ export {
 	TextStyleFloat,
 	TextStyleInt,
 	type ActionSummary,
+	type GroupMember,
 	type LayerRole,
 	type NotesParagraph,
 	type NotesRun,
@@ -172,9 +173,40 @@ export {
 	type PlacedShape
 } from "./edit/commands/shape"
 export { canZOrder, zOrderOp, Z_ORDERS } from "./edit/commands/arrange"
+export {
+	nameOp,
+	outlineEditable,
+	outlineIds,
+	outlineLevel,
+	outlineRows,
+	reorderOp,
+	visibilityAllOp,
+	visibilityOp,
+	type OutlineRow
+} from "./edit/commands/selectionPane"
+export { slideOutline, type OutlineShape, type SlideOutline } from "./outline"
 export { presentationHref, xmlSafeText } from "./edit/xmlText"
 export { canGroup, canUngroup, groupOp, ungroupOps } from "./edit/commands/group"
 export { oneStep } from "./edit/commands/batch"
+export {
+	CLIP_ATTRIBUTE,
+	clipHtml,
+	clipIdOf,
+	clipPartNames,
+	clipPlainText,
+	clippedSlides,
+	PASTE_STEP,
+	pasteOffset,
+	pasteShapesOp,
+	pasteSlidesOps,
+	shapeText,
+	type ClipRelationship,
+	type PasteRefusal,
+	type PresentationClip,
+	type ShapePasteTarget,
+	type ShapeClip,
+	type SlideClip
+} from "./edit/clip"
 export { initialsOf, MAX_COMMENT_CHARACTERS, type CommentFormat, type CommentView, type SlideReview } from "./comments"
 export {
 	DEFAULT_TABLE_STYLE,

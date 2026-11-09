@@ -33,7 +33,8 @@ import {
 	type TextBody,
 	type Xfrm
 } from "../model"
-import type { LayerRole, ShapeBodyKind, SlideLayer, SlideMediaInfo, SlideRender, TextPage } from "../output"
+import { shownThrough } from "../groupSpace"
+import type { GroupMember, LayerRole, ShapeBodyKind, SlideLayer, SlideMediaInfo, SlideRender, TextPage } from "../output"
 import { LINE_FLOATS } from "../../text/displayList"
 import { turnOf } from "../text/vertical"
 import { FLAT, RenderReport, layerEffects } from "./effects"
@@ -197,7 +198,8 @@ function writeChildren(
 	shapes: readonly ShapeNode[],
 	texts: TextTarget[],
 	frames: ShapeNode[],
-	depth: number
+	depth: number,
+	editable: boolean
 ): void {
 	if (depth > 128) return
 
@@ -210,7 +212,7 @@ function writeChildren(
 
 		if (xfrm === undefined) continue
 
-		writeElement(writer, deck, services, owner, child, levels, [], xfrm, false, texts, frames, depth + 1, false)
+		writeElement(writer, deck, services, owner, child, levels, [], xfrm, false, texts, frames, depth + 1, editable)
 	}
 }
 
@@ -328,8 +330,8 @@ function lineOf(
 }
 
 // One resolved element. `local`: the top-level element in its own box (offset and rotation in the layer matrix).
-// `editable`: a top-level shape of the rendered node (what the editor enters), so one with no visible text still gets
-// its text box (a group's children are not entered: they keep one layer for the group's drawing).
+// `editable`: a shape of the rendered node, however deep in its groups (what the editor enters), so one with no
+// visible text still gets its text box (a group member's on a layer of its own over the group's drawing).
 function writeElement(
 	writer: ScratchWriter,
 	deck: Deck,
@@ -390,7 +392,7 @@ function writeElement(
 			}
 
 			writer.push("</p:grpSpPr>")
-			writeChildren(writer, deck, services, owner, shape.children ?? [], texts, frames, depth)
+			writeChildren(writer, deck, services, owner, shape.children ?? [], texts, frames, depth, editable)
 			writer.push("</p:grpSp>")
 
 			return
@@ -745,6 +747,7 @@ async function renderOnce(
 			const shape = entry.shape
 			const body = bodyKindOf(shape)
 			const line = lineOf(entry, scratchReader, scratch.document, scratch.trees[k] ?? -1, entry.xfrm)
+			const members = entryMembers(entry, services)
 			const box = {
 				id: shape.id,
 				xfrm: { ...entry.xfrm },
@@ -752,7 +755,8 @@ async function renderOnce(
 				...(shape.locks === undefined ? {} : { locks: shape.locks }),
 				...(line === undefined ? {} : { line: true as const }),
 				...(line?.path === undefined ? {} : { path: line.path }),
-				...(body === undefined ? {} : { body })
+				...(body === undefined ? {} : { body }),
+				...(members === undefined ? {} : { members })
 			}
 
 			for (let layer = first; layer < layers.length; layer++) layers[layer] = { ...(layers[layer] as SlideLayer), box }
@@ -889,6 +893,84 @@ function heldRoles(shape: ShapeNode): LayerRole[] {
 	}
 
 	return [...out]
+}
+
+// A group's shown members for the editor (SlideLayer.box.members), each placed on the slide through its groups; once
+// per entry (the scratch keeps its entries per slide revision).
+const membersOf = new WeakMap<Entry, readonly GroupMember[]>()
+
+function entryMembers(entry: Entry, services: RenderServices): readonly GroupMember[] | undefined {
+	if (entry.shape.kind !== "grpSp" || entry.shape.children === undefined) return undefined
+
+	let members = membersOf.get(entry)
+
+	if (members === undefined) {
+		members = groupMembers(entry.owner, services, entry.shape.children, [entry.xfrm], entry.shape.lock, 0)
+		membersOf.set(entry, members)
+	}
+
+	return members
+}
+
+// Whether a member draws as a line between two ends: a connector, or a shape whose geometry (its edit's, else its
+// source's) is a line preset.
+function memberLine(services: RenderServices, shape: ShapeNode): boolean {
+	if (shape.kind === "cxnSp") return true
+	if (shape.kind !== "sp") return false
+
+	const geometry = shape.props?.geometry
+
+	if (geometry !== undefined) return geometry.kind === "preset" && LINE_PRESETS.has(geometry.preset)
+
+	const source = levelSource(services, shape)
+
+	if (source === undefined || source.properties < 0) return false
+
+	const preset = source.reader.attr(source.reader.child(source.properties, D.A, "prstGeom"), "prst")
+
+	return preset !== undefined && LINE_PRESETS.has(preset)
+}
+
+function groupMembers(
+	owner: SlideNode,
+	services: RenderServices,
+	shapes: readonly ShapeNode[],
+	chain: readonly Xfrm[],
+	groupLock: ShapeNode["lock"],
+	depth: number
+): GroupMember[] {
+	const out: GroupMember[] = []
+
+	if (depth > 128) return out
+
+	for (const shape of shapes) {
+		const own = shape.xfrm
+
+		if (shape.hidden || own === undefined) continue
+
+		const body = bodyKindOf(shape)
+		const lock = shape.lock ?? groupLock
+		const members =
+			shape.kind === "grpSp" && shape.children !== undefined
+				? groupMembers(owner, services, shape.children, [...chain, own], lock, depth + 1)
+				: undefined
+
+		out.push({
+			id: shape.id,
+			role: roleOf(owner, shape),
+			own: { ...own },
+			xfrm: shownThrough(chain, own),
+			...(shape.alt === undefined ? {} : { alt: { ...shape.alt } }),
+			...(shape.locks === undefined ? {} : { locks: shape.locks }),
+			...(memberLine(services, shape) ? { line: true as const } : {}),
+			...(body === undefined ? {} : { body }),
+			...(lock === undefined ? {} : { lock }),
+			...(shape.media === undefined ? {} : { media: mediaInfo(shape.media, owner, shape.id) }),
+			...(members === undefined ? {} : { members })
+		})
+	}
+
+	return out
 }
 
 // What a medium's layer plays, with its playback options from the slide's timing.

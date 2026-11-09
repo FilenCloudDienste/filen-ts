@@ -2,7 +2,7 @@ import { useState, type KeyboardEvent, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { Maximize2Icon, MoveHorizontalIcon, MoveVerticalIcon } from "lucide-react"
 import { oneStep, type DeckOp, type SlideRef, type Xfrm } from "@filen/office/core/presentation"
-import { selectedShapes, useShapeSelection, type SlideShape } from "@filen/office/react/presentation"
+import { ownXfrm, selectedShapes, useShapeSelection, type SlideShape } from "@filen/office/react/presentation"
 import { Input } from "@/components/ui/input"
 import { fromTwips, lengthUnit, toTwips, type DocxLengthUnit } from "@/features/preview/components/docxEditor.logic"
 import type { PresentationRibbonContext, PresentationRibbonEditor } from "@/features/presentation/components/ribbon/tabs"
@@ -64,7 +64,8 @@ export function sizeOp(slide: SlideRef, shapes: readonly SlideShape[], axis: Axi
 		const xfrm = resizedTo(shape.xfrm, axis, value, shape.locks?.noChangeAspect === true)
 
 		if (xfrm === undefined) return undefined
-		if (xfrm !== null) ops.push({ family: "shape", kind: "setXfrm", target: { slide, id: shape.id }, xfrm })
+		// A group member's size is its size on the slide, written back in its group's child space.
+		if (xfrm !== null) ops.push({ family: "shape", kind: "setXfrm", target: { slide, id: shape.id }, xfrm: ownXfrm(shape, xfrm) })
 	}
 
 	return oneStep(ops)[0]

@@ -770,6 +770,9 @@ class Splice {
 
 			if (refusal !== undefined) return refusal
 
+			// Relationships an element pasted onto the source (not saved since) names: the copy's markup names them too.
+			if (writer.hasReleasedMedia(original)) writer.restoreMedia(name, await writer.writtenText(name), original)
+
 			await writer.dropUnnamedCopies(name)
 
 			if (layoutPart !== undefined) await this.retargetLayout(name, layoutPart)
@@ -833,6 +836,9 @@ class Splice {
 
 		writer.replace(name, concat(encodeUtf8(XML_DECLARATION), assemble(undefined, result)))
 		this.expect(name, node)
+
+		// Relationships an element pasted onto the new slide names.
+		if (writer.hasReleasedMedia(name)) writer.restoreMedia(name, await writer.writtenText(name))
 
 		return undefined
 	}

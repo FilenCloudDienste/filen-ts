@@ -1,6 +1,7 @@
 import { EMU_PER_PX } from "../../../drawingml/reader"
 import { HANDLE_PLACES, type DrawingHandle } from "../../../docx/objects/hits"
 import type { Action, ShapeLocks, ShapeRef, SlideRef, Xfrm } from "../../model"
+import { ownDelta, ownThrough } from "../../groupSpace"
 import type { DeckOp } from "../ops"
 import { presentationHref, xmlSafeText } from "../xmlText"
 
@@ -18,6 +19,9 @@ export interface PlacedShape {
 	readonly xfrm: Xfrm
 	readonly locks?: ShapeLocks
 	readonly line?: true
+	// A group member's: its enclosing groups' own boxes, outermost first (groupSpace.ts). Its `xfrm` is the box as it
+	// shows on the slide; the op writes it back in the group's child space.
+	readonly space?: readonly Xfrm[]
 }
 
 // Whether the file lets the editor move, resize or turn a shape (ECMA-376 Part 1 §20.1.2.2 noMove, noResize, noRot).
@@ -58,23 +62,29 @@ function sameXfrm(a: Xfrm, b: Xfrm): boolean {
 }
 
 // The op that gives the shapes of `slide` the boxes in `after` (`before` holds what they have now): undefined
-// when nothing changes, setXfrm for one shape, setXfrms for several (one history step).
+// when nothing changes, setXfrm for one shape, setXfrms for several (one history step). A group member's box (its
+// `space` in `before`) is written in its group's child space.
 export function xfrmsOp(slide: SlideRef, before: readonly PlacedShape[], after: readonly PlacedShape[]): DeckOp | undefined {
-	const prior = new Map<number, Xfrm>()
+	const prior = new Map<number, PlacedShape>()
 
-	for (const shape of before) prior.set(shape.id, shape.xfrm)
+	for (const shape of before) prior.set(shape.id, shape)
 
 	const changed = after.filter(shape => {
 		const was = prior.get(shape.id)
 
-		return was === undefined || !sameXfrm(was, shape.xfrm)
+		return was === undefined || !sameXfrm(was.xfrm, shape.xfrm)
 	})
+	const own = (shape: PlacedShape): Xfrm => {
+		const space = prior.get(shape.id)?.space ?? shape.space
+
+		return space === undefined || space.length === 0 ? { ...shape.xfrm } : ownThrough(space, shape.xfrm)
+	}
 	const only = changed[0]
 
 	if (only === undefined) return undefined
-	if (changed.length === 1) return { family: "shape", kind: "setXfrm", target: { slide, id: only.id }, xfrm: { ...only.xfrm } }
+	if (changed.length === 1) return { family: "shape", kind: "setXfrm", target: { slide, id: only.id }, xfrm: own(only) }
 
-	return { family: "shape", kind: "setXfrms", slide, xfrms: changed.map(shape => ({ id: shape.id, xfrm: { ...shape.xfrm } })) }
+	return { family: "shape", kind: "setXfrms", slide, xfrms: changed.map(shape => ({ id: shape.id, xfrm: own(shape) })) }
 }
 
 export function movedXfrm(xfrm: Xfrm, dx: number, dy: number): Xfrm {
@@ -242,18 +252,22 @@ export function steppedShapes(shapes: readonly PlacedShape[], direction: NudgeDi
 }
 
 // Duplicate (Ctrl+D): copies DUPLICATE_OFFSET_PX right and down of the originals; a Ctrl+drag gives its own offset
-// (EMU).
+// (slide EMU). Members of a group (`space`, their enclosing groups' boxes) are copied into it, the offset taken into
+// its child space so the copies land that far away on the slide.
 export const DUPLICATE_OFFSET_PX = 10
 
 export function duplicateOp(
 	slide: SlideRef,
 	ids: readonly number[],
 	dx = DUPLICATE_OFFSET_PX * EMU_PER_PX,
-	dy = DUPLICATE_OFFSET_PX * EMU_PER_PX
+	dy = DUPLICATE_OFFSET_PX * EMU_PER_PX,
+	space?: readonly Xfrm[]
 ): DeckOp | undefined {
 	if (ids.length === 0) return undefined
 
-	return { family: "shape", kind: "duplicate", slide, shapes: [...ids], dx, dy }
+	const offset = space === undefined || space.length === 0 ? { dx, dy } : ownDelta(space, dx, dy)
+
+	return { family: "shape", kind: "duplicate", slide, shapes: [...ids], ...offset }
 }
 
 // A line's two ends as they show (slide EMU): it draws from its box's top-left to its bottom-right corner, a flip

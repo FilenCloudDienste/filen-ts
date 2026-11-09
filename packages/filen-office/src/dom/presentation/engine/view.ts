@@ -179,7 +179,11 @@ function stateOf(session: EngineSession): ViewState {
 				// Media a save let go of that an undo put back: related as before until the next save writes them again.
 				const released = releasedMediaRelationship(session.deck, owner, id)
 
-				return released === undefined ? undefined : { target: `/${released.name}`, external: false, type: released.type }
+				if (released === undefined) return undefined
+
+				return released.external
+					? { target: released.name, external: true, type: released.type }
+					: { target: `/${released.name}`, external: false, type: released.type }
 			}
 
 			return relationship.external || relationship.partName === undefined

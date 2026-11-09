@@ -402,11 +402,13 @@ export class ShapeDrag {
 
 			if (dx === 0 && dy === 0) return undefined
 
+			// A selection inside a group shares its members' space.
 			return duplicateOp(
 				this.options.slide,
 				this.frame.shapes.map(shape => shape.id),
 				dx,
-				dy
+				dy,
+				this.options.shapes[0]?.space
 			)
 		}
 

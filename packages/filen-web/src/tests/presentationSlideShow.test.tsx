@@ -152,6 +152,19 @@ describe("presentation Slide Show tab", () => {
 
 		expect(show.chosen()).toEqual({ kiosk: true, loop: true, useTimings: true, restartMs: KIOSK_RESTART_MS })
 	})
+
+	it("sets up a show browsed by an individual, in a window", async () => {
+		const show = mount([])
+
+		fireEvent.click(within(commands()).getByRole("button", { name: "Set up slide show" }))
+
+		const dialog = await screen.findByRole("dialog", { name: "Set up slide show" })
+
+		fireEvent.click(within(dialog).getByRole("radio", { name: "Browsed by an individual (window)" }))
+		fireEvent.click(within(dialog).getByRole("button", { name: "Apply" }))
+
+		expect(show.chosen()).toEqual({ ...DEFAULT_SHOW_OPTIONS, browse: true })
+	})
 })
 
 describe("Set Up Slide Show saved in the presentation", () => {

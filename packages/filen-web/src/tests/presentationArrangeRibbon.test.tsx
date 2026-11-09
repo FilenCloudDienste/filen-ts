@@ -138,7 +138,8 @@ describe("presentation Arrange tab", () => {
 
 		fireEvent.click(within(commands()).getByRole("button", { name: "Group" }))
 		expect(ops[1]).toEqual({ family: "shape", kind: "group", slide: ref, shapes: [2, 3] })
-		expect(selection.getSnapshot().pending?.before).toEqual(new Set([2, 3, 4]))
+		// Compared at every level (the slide's is 0), so grouping inside a group selects its new group too.
+		expect(selection.getSnapshot().pending?.before).toEqual(new Set(["0:2", "0:3", "0:4"]))
 		expect(within(commands()).getByRole<HTMLButtonElement>("button", { name: "Ungroup" }).disabled).toBe(true)
 	})
 

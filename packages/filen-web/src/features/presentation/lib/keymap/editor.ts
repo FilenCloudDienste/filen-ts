@@ -23,6 +23,7 @@ export type PresentationEditorAction =
 	| "presentation.zoomIn"
 	| "presentation.zoomOut"
 	| "presentation.zoomFit"
+	| "presentation.selectionPane"
 
 export const PRESENTATION_EDITOR_ACTIONS: readonly (ActionDef & { readonly id: PresentationEditorAction })[] = [
 	{ id: "presentation.newSlide", defaultCombo: "ctrl+m", scope: "editor", descriptionKey: "preview:previewPptxEditorKeyNewSlide" },
@@ -67,7 +68,14 @@ export const PRESENTATION_EDITOR_ACTIONS: readonly (ActionDef & { readonly id: P
 		descriptionKey: "preview:previewPptxEditorKeyZoomIn"
 	},
 	{ id: "presentation.zoomOut", defaultCombo: "mod+-", scope: "editor", descriptionKey: "preview:previewPptxEditorKeyZoomOut" },
-	{ id: "presentation.zoomFit", defaultCombo: "mod+alt+o", scope: "editor", descriptionKey: "preview:previewPptxEditorKeyZoomFit" }
+	{ id: "presentation.zoomFit", defaultCombo: "mod+alt+o", scope: "editor", descriptionKey: "preview:previewPptxEditorKeyZoomFit" },
+	// PowerPoint's Alt+F10 (Home ▸ Arrange ▸ Selection Pane).
+	{
+		id: "presentation.selectionPane",
+		defaultCombo: "alt+f10",
+		scope: "editor",
+		descriptionKey: "preview:previewPptxEditorKeySelectionPane"
+	}
 ]
 
 const MODIFIERS = new Set(["mod", "ctrl", "control", "meta", "cmd", "command", "shift", "alt", "option"])

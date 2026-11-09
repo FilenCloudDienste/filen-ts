@@ -1,10 +1,12 @@
 import { useSyncExternalStore } from "react"
 import type { Action, LockReason, ShapeLocks, ShapeNode, SlideRef, Xfrm } from "../../../core/presentation/model"
-import type { LayerRole, ShapeBodyKind, SlideMediaInfo, SlideRender } from "../../../core/presentation/output"
+import { ownThrough } from "../../../core/presentation/groupSpace"
+import type { GroupMember, LayerRole, ShapeBodyKind, SlideMediaInfo, SlideRender } from "../../../core/presentation/output"
 
-// The editor's shape selection: which top-level shapes of the slide in view are selected, as an external store
-// the canvas overlay, the ribbon and the keyboard share. The shapes themselves come from the slide's render (each
-// layer of the slide's own shapes carries its box), so selecting, hit testing and the marquee never ask the worker.
+// The editor's shape selection: which shapes of the slide in view are selected (top-level shapes, or members of one
+// group), as an external store the canvas overlay, the ribbon and the keyboard share. The shapes themselves come from
+// the slide's render (each layer of the slide's own shapes carries its box, a group's its members'), so selecting,
+// hit testing and the marquee never ask the worker.
 
 // A top-level shape of the slide in view: its box (EMU), what it is, and the layers that paint it.
 export interface SlideShape {
@@ -28,6 +30,12 @@ export interface SlideShape {
 	readonly body?: ShapeBodyKind
 	// The roles of the layers that paint it and of the frames and media its members hold (what flipping it would mirror).
 	readonly roles?: readonly LayerRole[]
+	// A group member's (selected inside its group, as PowerPoint's second click does): the group it is in, and the
+	// own boxes of its enclosing groups, outermost first, which a box it is given on the slide goes back through
+	// (ownXfrm). Its `xfrm` is its box as it shows on the slide; its `layers` the ones that draw its text or frame on
+	// their own (the rest of it is on its group's).
+	readonly parent?: number
+	readonly space?: readonly Xfrm[]
 }
 
 // Whether a click, the marquee, Tab or Select All may select the shape: not one the file locks against selection
@@ -102,6 +110,232 @@ export function slideShapes(render: SlideRender | undefined): readonly SlideShap
 	shapesOfRender.set(render, shapes)
 
 	return shapes
+}
+
+// ---- group members ------------------------------------------------------------------------------------------
+
+interface ShapeIndex {
+	// Every shape of the slide by id, members however deep included.
+	readonly byId: ReadonlyMap<number, SlideShape>
+	// A group's members, back to front, by the group's id.
+	readonly members: ReadonlyMap<number, readonly SlideShape[]>
+}
+
+const indexOfRender = new WeakMap<SlideRender, ShapeIndex>()
+
+// The roles a member and everything it holds draw with (what flipping it would mirror).
+function memberRoles(member: GroupMember, into: LayerRole[]): LayerRole[] {
+	into.push(member.role)
+
+	if (member.media !== undefined) into.push("media")
+
+	for (const inner of member.members ?? []) memberRoles(inner, into)
+
+	return into
+}
+
+// Built once per render, on the first ask (a slide without groups only indexes its top-level shapes).
+function shapeIndex(render: SlideRender): ShapeIndex {
+	const known = indexOfRender.get(render)
+
+	if (known !== undefined) return known
+
+	const byId = new Map<number, SlideShape>()
+	const members = new Map<number, readonly SlideShape[]>()
+	const top = slideShapes(render)
+	let layersOf: Map<number, number[]> | undefined
+
+	// The layers that draw a member's text or frame on their own, named by the member.
+	const ownLayers = (id: number): readonly number[] => {
+		if (layersOf === undefined) {
+			const built = new Map<number, number[]>()
+
+			render.layers.forEach((layer, index) => {
+				if (layer.box === undefined || layer.shape.id === layer.box.id) return
+
+				const list = built.get(layer.shape.id)
+
+				if (list === undefined) built.set(layer.shape.id, [index])
+				else list.push(index)
+			})
+			layersOf = built
+		}
+
+		return layersOf.get(id) ?? []
+	}
+	const add = (list: readonly GroupMember[], parent: number, space: readonly Xfrm[], depth: number): void => {
+		const out: SlideShape[] = []
+
+		for (const member of list) {
+			const shape: SlideShape = {
+				id: member.id,
+				xfrm: member.xfrm,
+				role: member.role,
+				layers: ownLayers(member.id),
+				...(member.alt === undefined ? {} : { alt: member.alt }),
+				...(member.lock === undefined ? {} : { lock: member.lock }),
+				...(member.locks === undefined ? {} : { locks: member.locks }),
+				...(member.media === undefined ? {} : { media: member.media }),
+				...(member.line === true ? { line: true as const } : {}),
+				...(member.body === undefined ? {} : { body: member.body }),
+				roles: member.members === undefined && member.media === undefined ? [member.role] : memberRoles(member, []),
+				parent,
+				space
+			}
+
+			if (!byId.has(shape.id)) byId.set(shape.id, shape)
+
+			out.push(shape)
+
+			if (member.members !== undefined && depth < 128) add(member.members, member.id, [...space, member.own], depth + 1)
+		}
+
+		members.set(parent, out)
+	}
+
+	for (const shape of top) if (!byId.has(shape.id)) byId.set(shape.id, shape)
+
+	for (const shape of top) {
+		const box = render.layers[shape.layers[0] ?? -1]?.box
+
+		if (box?.members !== undefined) add(box.members, shape.id, [box.xfrm], 0)
+	}
+
+	const index = { byId, members }
+
+	indexOfRender.set(render, index)
+
+	return index
+}
+
+// The slide's shape with this id, a group's member however deep included.
+export function shapeOf(render: SlideRender | undefined, id: number): SlideShape | undefined {
+	return render === undefined ? undefined : shapeIndex(render).byId.get(id)
+}
+
+// A group's shown members, back to front; none for a shape that is no group.
+export function groupMembers(render: SlideRender | undefined, group: number): readonly SlideShape[] {
+	return render === undefined ? [] : (shapeIndex(render).members.get(group) ?? [])
+}
+
+// The shapes at a shape's own level, back to front: its group's members, or the slide's top-level shapes.
+export function siblingShapes(render: SlideRender | undefined, shape: SlideShape | undefined): readonly SlideShape[] {
+	return shape?.parent === undefined ? slideShapes(render) : groupMembers(render, shape.parent)
+}
+
+// The box a shape takes in its own terms (its group's child space for a member) for a box `shown` on the slide.
+export function ownXfrm(shape: { readonly space?: readonly Xfrm[] }, shown: Xfrm): Xfrm {
+	return shape.space === undefined || shape.space.length === 0 ? shown : ownThrough(shape.space, shown)
+}
+
+// Whether a press at the point lands on the shape: a group on one of its members (however deep; a press on the empty
+// space between them goes through to what lies behind, as in PowerPoint), or on its box once it is selected (so it
+// is dragged from anywhere in its frame); any other shape on its box, a line near its stroke.
+function hitsDeep(index: ShapeIndex, shape: SlideShape, px: number, py: number, slack: number, selected: ReadonlySet<number>): boolean {
+	const members = index.members.get(shape.id)
+
+	if (members === undefined || members.length === 0) return hitsShape(shape, px, py, slack)
+	if (selected.has(shape.id) && onShape(shape.xfrm, px, py, slack)) return true
+
+	for (let k = members.length - 1; k >= 0; k--) if (hitsDeep(index, members[k] as SlideShape, px, py, slack, selected)) return true
+
+	return false
+}
+
+// What lies under a slide point, outermost first: the front-most selectable top-level shape, then within a group the
+// front-most selectable member under it, and so on down. Empty when nothing selectable is there.
+export function hitPath(
+	render: SlideRender | undefined,
+	point: { readonly x: number; readonly y: number },
+	slack: number,
+	selected: ReadonlySet<number> = new Set()
+): SlideShape[] {
+	if (render === undefined) return []
+
+	const index = shapeIndex(render)
+	const path: SlideShape[] = []
+	let level: readonly SlideShape[] = slideShapes(render)
+
+	while (path.length < 129) {
+		let found: SlideShape | undefined
+
+		for (let k = level.length - 1; k >= 0 && found === undefined; k--) {
+			const shape = level[k] as SlideShape
+
+			if (selectable(shape) && hitsDeep(index, shape, point.x, point.y, slack, selected)) found = shape
+		}
+
+		if (found === undefined) break
+
+		path.push(found)
+
+		const members = index.members.get(found.id)
+
+		if (members === undefined || members.length === 0) break
+
+		level = members
+	}
+
+	return path
+}
+
+// What a press selects, PowerPoint's way into groups: the first click on a group selects the group; a click on it
+// once it is selected selects the member under the press (`into`, on a release without a drag, so a drag still moves
+// the group); while members of a group are selected, a click on another member of that group selects it at once;
+// anywhere else the top-level shape. One level per click (a group in a group is selected before its own members).
+export interface ClickTarget {
+	readonly shape: SlideShape
+	readonly into?: SlideShape
+}
+
+export function clickTarget(
+	render: SlideRender | undefined,
+	ids: readonly number[],
+	point: { readonly x: number; readonly y: number },
+	slack: number
+): ClickTarget | undefined {
+	const selected = new Set(ids)
+	const path = hitPath(render, point, slack, selected)
+	const outer = path[0]
+
+	if (outer === undefined) return undefined
+
+	const open = new Set<number>()
+
+	for (const id of ids) {
+		const parent = shapeOf(render, id)?.parent
+
+		if (parent !== undefined) open.add(parent)
+	}
+
+	for (let k = path.length - 1; k >= 0; k--) {
+		const shape = path[k] as SlideShape
+		const inner = path[k + 1]
+
+		if (selected.has(shape.id)) return inner === undefined ? { shape } : { shape, into: inner }
+		if (open.has(shape.id)) return { shape: inner ?? shape }
+	}
+
+	return { shape: outer }
+}
+
+// The group whose members are selected (the dashed frame PowerPoint keeps around it); undefined at the slide's level.
+export function selectionGroup(render: SlideRender | undefined, shapes: readonly SlideShape[]): SlideShape | undefined {
+	const parent = shapes[0]?.parent
+
+	return parent === undefined ? undefined : shapeOf(render, parent)
+}
+
+// Where each shape of the slide sits, members included ("group:id", 0 for the slide's level): what selectNew compares
+// after a command that moves shapes between levels (group, ungroup inside a group).
+export function placements(render: SlideRender | undefined): string[] {
+	if (render === undefined) return []
+
+	const out: string[] = []
+
+	for (const shape of shapeIndex(render).byId.values()) out.push(`${String(shape.parent ?? 0)}:${String(shape.id)}`)
+
+	return out
 }
 
 export function boundsOf(xfrm: Xfrm): Bounds {
@@ -239,11 +473,12 @@ export function shapesInside(shapes: readonly SlideShape[], area: Bounds): numbe
 
 export interface ShapeSelectionState {
 	readonly slide: SlideRef | undefined
-	// Top-level shape ids, in the order they were selected (the first is the one Tab moves on from).
+	// Shape ids, in the order they were selected (the first is the one Tab moves on from): top-level shapes, or
+	// members of one group.
 	readonly ids: readonly number[]
-	// A command that adds or removes top-level shapes (group, ungroup) asked to select what the next render of
-	// this slide has that `before` did not.
-	readonly pending?: { readonly slide: SlideRef; readonly before: ReadonlySet<number> }
+	// A command that adds or removes shapes (group, ungroup) asked to select what the next render of this slide has
+	// that `before` did not: top-level ids, or `placements` (any level; the outermost new ones are selected).
+	readonly pending?: { readonly slide: SlideRef; readonly before: ReadonlySet<number | string>; readonly deep: boolean }
 }
 
 export interface ShapeSelection {
@@ -254,15 +489,24 @@ export interface ShapeSelection {
 	set(ids: readonly number[]): void
 	toggle(id: number): void
 	clear(): void
-	// After a command on `slide`, select the top-level shapes the next render has beyond `before`. The returned
-	// withdraw, for a command that was refused: the selection goes back to what it was, unless the request was
-	// resolved or replaced meanwhile.
-	selectNew(slide: SlideRef, before: Iterable<number>): () => void
+	// After a command on `slide`, select the shapes the next render has beyond `before` (top-level ids, or the
+	// render's `placements` to compare every level). The returned withdraw, for a command that was refused: the
+	// selection goes back to what it was, unless the request was resolved or replaced meanwhile.
+	selectNew(slide: SlideRef, before: Iterable<number> | { readonly placements: Iterable<string> }): () => void
 	// The render of the slide in view arrived: keep only ids it still has, resolve a pending selectNew.
 	reconcile(render: SlideRender): void
 }
 
 const EMPTY: ShapeSelectionState = { slide: undefined, ids: [] }
+
+// The shapes of the render at a placement `before` did not hold, the outermost only (a new group's members are not
+// new on their own), back to front.
+function freshPlacements(render: SlideRender, before: ReadonlySet<number | string>): SlideShape[] {
+	const fresh = [...shapeIndex(render).byId.values()].filter(shape => !before.has(`${String(shape.parent ?? 0)}:${String(shape.id)}`))
+	const ids = new Set(fresh.map(shape => shape.id))
+
+	return fresh.filter(shape => shape.parent === undefined || !ids.has(shape.parent))
+}
 
 export function createShapeSelection(): ShapeSelection {
 	let state = EMPTY
@@ -298,7 +542,8 @@ export function createShapeSelection(): ShapeSelection {
 			if (state.ids.length > 0 || state.pending !== undefined) commit({ slide: state.slide, ids: [] })
 		},
 		selectNew: (slide, before) => {
-			const asked = { slide, before: new Set(before) }
+			const deep = "placements" in before
+			const asked = { slide, before: new Set<number | string>(deep ? before.placements : before), deep }
 			const ids = state.ids
 
 			commit({ slide: state.slide, ids, pending: asked })
@@ -314,16 +559,16 @@ export function createShapeSelection(): ShapeSelection {
 			const pending = state.pending
 
 			if (pending !== undefined && pending.slide === render.ref) {
-				const fresh = shapes.filter(shape => !pending.before.has(shape.id)).map(shape => shape.id)
+				const fresh = pending.deep ? freshPlacements(render, pending.before) : shapes.filter(shape => !pending.before.has(shape.id))
 
 				// The command's render may not be this one yet (an older render arriving first changes nothing).
-				if (fresh.length > 0) commit({ slide: state.slide, ids: fresh })
+				if (fresh.length > 0) commit({ slide: state.slide, ids: fresh.map(shape => shape.id) })
 
 				return
 			}
 
-			const present = new Set(shapes.map(shape => shape.id))
-			const kept = state.ids.filter(id => present.has(id))
+			const top = new Set(shapes.map(shape => shape.id))
+			const kept = state.ids.every(id => top.has(id)) ? state.ids : state.ids.filter(id => shapeOf(render, id) !== undefined)
 
 			if (kept.length !== state.ids.length) commit({ slide: state.slide, ids: kept })
 		}
@@ -334,13 +579,18 @@ export function useShapeSelection(store: ShapeSelection): ShapeSelectionState {
 	return useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot)
 }
 
-// The selected shapes in back-to-front order.
+// The selected shapes in back-to-front order (members in their groups' order).
 export function selectedShapes(render: SlideRender | undefined, state: ShapeSelectionState): SlideShape[] {
 	if (render === undefined || render.ref !== state.slide || state.ids.length === 0) return []
 
 	const ids = new Set(state.ids)
+	const top = slideShapes(render).filter(shape => ids.has(shape.id))
 
-	return slideShapes(render).filter(shape => ids.has(shape.id))
+	if (top.length === ids.size) return top
+
+	for (const members of shapeIndex(render).members.values()) for (const shape of members) if (ids.has(shape.id)) top.push(shape)
+
+	return top
 }
 
 // What the selection holds, for the ribbon's contextual tabs.

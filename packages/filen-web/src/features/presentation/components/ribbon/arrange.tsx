@@ -50,8 +50,9 @@ import {
 } from "@filen/office/core/presentation"
 import {
 	ShapeEditLayer,
+	placements,
 	selectedShapes,
-	slideShapes,
+	siblingShapes,
 	useShapeSelection,
 	type ShapeEditLabels,
 	type SlideShape
@@ -77,6 +78,7 @@ import { DocxChoiceField } from "@/features/preview/components/docxFields"
 import { useCommandMenuFocus } from "@/features/preview/components/docxInsert.logic"
 import { useRibbonDialog, type RibbonDialogRender } from "@/features/presentation/components/ribbon/ribbonDialogs"
 import type { PresentationGroups, PresentationRibbonEditor } from "@/features/presentation/components/ribbon/tabs"
+import { SelectionPaneButton } from "@/features/presentation/components/selectionPane"
 import { usePresentationObjectBindings } from "@/features/presentation/lib/keymap/objects"
 import { usePresentationTextBindings } from "@/features/presentation/lib/keymap/text"
 import type { PreviewKey } from "@/lib/i18n"
@@ -170,7 +172,6 @@ export function runGrouping(
 	editor: PresentationRibbonEditor,
 	slide: SlideRef,
 	selected: readonly SlideShape[],
-	order: readonly number[],
 	kind: "group" | "ungroup"
 ): void {
 	const op =
@@ -183,7 +184,8 @@ export function runGrouping(
 
 	if (op === undefined) return
 
-	const withdraw = editor.selection.selectNew(slide, order)
+	// Compared at every level: members of a group group (and a member group ungroups) inside it.
+	const withdraw = editor.selection.selectNew(slide, { placements: placements(editor.render) })
 
 	void editor.command(op).then(result => {
 		if (!result.ok) withdraw()
@@ -230,7 +232,8 @@ export function useArrange(editor: PresentationRibbonEditor): {
 		slide: editor.render?.ref,
 		selected,
 		ids: selected.map(shape => shape.id),
-		order: slideShapes(editor.render).map(shape => shape.id),
+		// Members of a group are stacked among their siblings.
+		order: siblingShapes(editor.render, selected[0]).map(shape => shape.id),
 		run: op => {
 			if (op !== undefined) void editor.command(op)
 		}
@@ -251,7 +254,7 @@ function MenuItem({ icon: Icon, label, disabled, onClick }: { icon: LucideIcon; 
 
 // ---- order -------------------------------------------------------------------------------------------------------
 
-const Z_ITEMS: readonly { readonly to: ZOrder; readonly label: PreviewKey; readonly icon: LucideIcon }[] = [
+export const Z_ITEMS: readonly { readonly to: ZOrder; readonly label: PreviewKey; readonly icon: LucideIcon }[] = [
 	{ to: "forward", label: "previewPptxBringForward", icon: BringToFrontIcon },
 	{ to: "front", label: "previewPptxBringToFront", icon: BringToFrontIcon },
 	{ to: "backward", label: "previewPptxSendBackward", icon: SendToBackIcon },
@@ -326,7 +329,7 @@ function OrderControls({ editor }: { editor: PresentationRibbonEditor }) {
 
 function GroupControls({ editor }: { editor: PresentationRibbonEditor }) {
 	const { t } = useTranslation("preview")
-	const { slide, selected, order } = useArrange(editor)
+	const { slide, selected } = useArrange(editor)
 
 	return (
 		<>
@@ -335,7 +338,7 @@ function GroupControls({ editor }: { editor: PresentationRibbonEditor }) {
 				icon={<GroupIcon />}
 				disabled={slide === undefined || !canGroup(selected)}
 				onClick={() => {
-					if (slide !== undefined) runGrouping(editor, slide, selected, order, "group")
+					if (slide !== undefined) runGrouping(editor, slide, selected, "group")
 				}}
 			/>
 			<RibbonButton
@@ -343,7 +346,7 @@ function GroupControls({ editor }: { editor: PresentationRibbonEditor }) {
 				icon={<UngroupIcon />}
 				disabled={slide === undefined || !canUngroup(selected)}
 				onClick={() => {
-					if (slide !== undefined) runGrouping(editor, slide, selected, order, "ungroup")
+					if (slide !== undefined) runGrouping(editor, slide, selected, "ungroup")
 				}}
 			/>
 		</>
@@ -818,9 +821,15 @@ export const arrangeGroups: PresentationGroups = context => {
 			id: "order",
 			label: t("previewPptxArrangeOrder", { ns: "preview" }),
 			icon: BringToFrontIcon,
-			width: 2 * MENU,
+			width: 2 * MENU + BUTTON,
 			priority: 4,
-			content: <OrderControls editor={editor} />
+			content: (
+				<>
+					<OrderControls editor={editor} />
+					{/* PowerPoint's Arrange group: Bring Forward, Send Backward, Selection Pane. */}
+					<SelectionPaneButton />
+				</>
+			)
 		},
 		{
 			id: "group",

@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react"
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent } from "react"
 import { useTranslation } from "react-i18next"
 import {
 	AArrowDownIcon,
@@ -22,10 +22,12 @@ import {
 	InkLayer,
 	NotesText,
 	paintSlide,
+	ShowMirrorView,
 	SlideView,
 	type InkStore,
 	type PresentationDocument,
 	type ShowController,
+	type ShowMirrorLink,
 	type ShowTimer
 } from "@filen/office/react/presentation"
 import { Button } from "@/components/ui/button"
@@ -50,6 +52,9 @@ export interface PresenterViewProps {
 	readonly deck: PresentationDocument
 	readonly position: PresenterPosition
 	readonly controller: () => ShowController | undefined
+	// The current slide: the audience's stage copied live (builds, transitions, video), kept on whichever controller
+	// drives the show.
+	readonly mirror: ShowMirrorLink
 	readonly ink: InkStore
 	readonly onKeyDown: (event: KeyboardEvent<HTMLElement>) => void
 	// Kept by the caller, so it runs on while the view is hidden or moves between windows.
@@ -63,21 +68,9 @@ export interface PresenterViewProps {
 	readonly start?: { readonly onStart: () => void; readonly hint: boolean }
 }
 
-// A slide fitted to its box. The box is measured with its own window's ResizeObserver: an observer from the page's
-// realm never sees layout in the popup.
-function FitSlide({
-	deck,
-	index,
-	label,
-	overlay,
-	className
-}: {
-	deck: PresentationDocument
-	index: number
-	label: string
-	overlay?: ReactNode
-	className?: string
-}) {
+// A slide fitted to its box (the next slide's preview). The box is measured with its own window's ResizeObserver: an
+// observer from the page's realm never sees layout in the popup.
+function FitSlide({ deck, index, label, className }: { deck: PresentationDocument; index: number; label: string; className?: string }) {
 	const boxRef = useRef<HTMLDivElement | null>(null)
 	const [box, setBox] = useState({ width: 0, height: 0 })
 	const size = deck.info?.size ?? DEFAULT_SLIDE_SIZE
@@ -119,7 +112,6 @@ function FitSlide({
 					mode="show"
 					zoom={fitScale(box, { width: size.cx / EMU_PER_PX, height: size.cy / EMU_PER_PX })}
 					className="!absolute inset-0 !bg-transparent"
-					{...(overlay === undefined ? {} : { overlay })}
 				/>
 			)}
 		</div>
@@ -196,6 +188,7 @@ export function PresenterView({
 	deck,
 	position,
 	controller,
+	mirror,
 	ink,
 	onKeyDown,
 	timer,
@@ -335,20 +328,27 @@ export function PresenterView({
 				</p>
 			) : null}
 			<div className="grid min-h-0 flex-1 grid-rows-[auto_auto_minmax(0,1fr)] gap-2 overflow-y-auto p-2 md:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] md:grid-rows-[minmax(0,1fr)_auto] md:overflow-visible">
-				<FitSlide
-					deck={deck}
-					index={position.index}
-					label={t("previewPptxPresenterCurrent")}
-					className={cn("bg-black md:row-span-1", position.screen !== "slide" && "opacity-60")}
-					overlay={
-						<InkLayer
-							store={ink}
-							slide={slide?.ref}
-							size={size}
-							label={t("previewPptxInkLayer")}
-						/>
-					}
-				/>
+				<div
+					className="relative min-h-0 min-w-0 max-md:aspect-(--fo-slide-ratio) md:row-span-1"
+					style={{ "--fo-slide-ratio": `${String(size.cx)} / ${String(size.cy)}` } as CSSProperties}
+				>
+					<ShowMirrorView
+						link={mirror}
+						size={size}
+						label={t("previewPptxPresenterCurrent")}
+						screen={position.screen}
+						endLabel={t("previewPptxShowEnd")}
+						className="!absolute inset-0"
+						overlay={
+							<InkLayer
+								store={ink}
+								slide={slide?.ref}
+								size={size}
+								label={t("previewPptxInkLayer")}
+							/>
+						}
+					/>
+				</div>
 				<div className="flex min-h-0 flex-col gap-2 max-md:row-start-3 md:row-span-2">
 					<section
 						aria-label={t("previewPptxPresenterNext")}

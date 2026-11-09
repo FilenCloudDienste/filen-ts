@@ -8,9 +8,12 @@ export {
 	type ShowEvent,
 	type ShowEventType,
 	type ShowFrom,
+	type ShowMirror,
 	type ShowScreen,
 	type ShowStart
 } from "./show/controller"
+export { ShowMirrorLink } from "./show/mirror"
+export { ShowMirrorView, type ShowMirrorViewProps } from "./show/mirrorView"
 export { SlideView, type PaintedSlide, type SlidePaintContext, type SlidePainter, type SlideViewProps } from "./SlideView"
 export {
 	createPresentationStore,
@@ -42,12 +45,21 @@ export { StaticShow, type StaticShowProps } from "./show/static"
 export { paintEditorSlide, paintSlide } from "./paint/slide"
 export {
 	boundsOf,
+	clickTarget,
 	createShapeSelection,
+	groupMembers,
+	hitPath,
+	ownXfrm,
+	placements,
 	selectedShapes,
+	selectionGroup,
 	selectionKinds,
+	shapeOf,
+	siblingShapes,
 	slideShapes,
 	useShapeSelection,
 	type Bounds,
+	type ClickTarget,
 	type SelectionKind,
 	type ShapeSelection,
 	type ShapeSelectionState,
@@ -69,7 +81,7 @@ export {
 	type TextKeyCommand
 } from "./edit/text/keys"
 export { cellNavigation, cellStep, firstPlaceholder, placeholderNavigation, type CellMove, type TextNavigation } from "./edit/text/navigate"
-export { SlideShow, type SlideShowProps } from "./show/player"
+export { SlideShow, type ShowBarState, type SlideShowProps } from "./show/player"
 export { type ShowMediaEvents, type ShowMediaHandle, type ShowMediaMount } from "./show/stage"
 export { DEFAULT_SHOW_OPTIONS, showOptionsOf, type ShowOptions } from "./show/timeline"
 export {

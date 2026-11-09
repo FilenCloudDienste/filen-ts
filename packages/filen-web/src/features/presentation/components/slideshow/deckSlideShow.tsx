@@ -8,10 +8,12 @@ import {
 	type PresentationActionPolicy,
 	type PresentationDocument,
 	type PresentationStore,
+	type ShowBarState,
 	type ShowController,
 	type ShowFrom,
 	type ShowScreen
 } from "@filen/office/react/presentation"
+import { BrowseBar } from "@/features/presentation/components/slideshow/browseBar"
 import { ShowMenu, type ShowMenuAt } from "@/features/presentation/components/slideshow/showMenu"
 import { actionLabel, DEFAULT_SLIDE_SIZE } from "@/features/presentation/components/deckChrome.logic"
 import { useShowMediaMount } from "@/features/presentation/hooks/useMediaInsert"
@@ -48,6 +50,9 @@ export interface DeckSlideShowProps {
 	readonly ink?: InkStore
 	// The show menu opened, closed, or was closed by Escape (which in full screen also leaves it).
 	readonly onMenu?: (state: "open" | "closed" | "escaped") => void
+	// Browsed by an individual: the show in the page's window with its status bar; `fullscreen` says whether the page
+	// is in full screen (undefined: the browser has none), which Escape leaves before it ends the show. Read once.
+	readonly browse?: { readonly fullscreen: boolean | undefined; readonly onFullscreen: () => void }
 }
 
 export function DeckSlideShow({
@@ -62,7 +67,8 @@ export function DeckSlideShow({
 	onKey,
 	onPointer,
 	ink,
-	onMenu
+	onMenu,
+	browse
 }: DeckSlideShowProps) {
 	const { t } = useTranslation("preview")
 	const chosen = useChosenShowOptions(store)
@@ -160,7 +166,32 @@ export function DeckSlideShow({
 				policy={policy}
 				media={media}
 				{...(overlay === undefined ? {} : { overlay })}
-				{...(onKey === undefined ? {} : { onKey })}
+				{...(browse === undefined
+					? onKey === undefined
+						? {}
+						: { onKey }
+					: {
+							// Escape in full screen goes back to the window; the next one ends the show.
+							onKey: (event: KeyboardEvent<HTMLDivElement>) => {
+								if (event.key === "Escape" && browse.fullscreen === true) {
+									event.preventDefault()
+									browse.onFullscreen()
+
+									return true
+								}
+
+								return onKey?.(event) === true
+							},
+							statusBar: ({ index }: ShowBarState) => (
+								<BrowseBar
+									index={index}
+									slides={deck.slides}
+									controller={() => live.current.controller}
+									fullscreen={browse.fullscreen}
+									onFullscreen={browse.onFullscreen}
+								/>
+							)
+						})}
 				{...(onPointer === undefined ? {} : { onPointer })}
 				onContextMenu={({ x, y, stage }) => {
 					const index = live.current.index
@@ -184,7 +215,7 @@ export function DeckSlideShow({
 				<div
 					key={note.at}
 					role="status"
-					className="pointer-events-none fixed bottom-3 left-1/2 z-[2147483647] max-w-[90%] -translate-x-1/2 rounded-md bg-popover px-3 py-1.5 text-center text-xs text-popover-foreground shadow-md"
+					className={`pointer-events-none fixed ${browse === undefined ? "bottom-3" : "bottom-10"} left-1/2 z-[2147483647] max-w-[90%] -translate-x-1/2 rounded-md bg-popover px-3 py-1.5 text-center text-xs text-popover-foreground shadow-md`}
 				>
 					{t(note.key)}
 				</div>

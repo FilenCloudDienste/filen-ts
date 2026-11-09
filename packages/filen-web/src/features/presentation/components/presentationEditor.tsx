@@ -49,12 +49,16 @@ import { PresentationNotesPane } from "@/features/presentation/components/notesP
 import { SmartArtPrompts, SmartArtTextPane } from "@/features/presentation/components/smartartTextPane"
 import { AnimationPane, AnimationPreview } from "@/features/presentation/components/animationPane"
 import { PresentationCommentsPane } from "@/features/presentation/components/commentsPane"
+import { SelectionPane } from "@/features/presentation/components/selectionPane"
+import { createSelectionPane, type SelectionPaneStore } from "@/features/presentation/lib/selectionPane"
 import { PresentationFileMenu } from "@/features/presentation/components/presentationFileMenu"
 import { usePresentationFind } from "@/features/presentation/components/presentationFind"
 import { PresentationMediaFrames } from "@/features/presentation/components/mediaFrame"
 import { PresentationShapeLayer } from "@/features/presentation/components/ribbon/arrange"
 import { ribbonSlide } from "@/features/presentation/lib/ribbonSlide"
-import { usePresentationPictureDrop } from "@/features/presentation/components/ribbon/insertObjects"
+import { usePresentationPictureDrop, usePresentationPictures } from "@/features/presentation/components/ribbon/insertObjects"
+import { usePresentationClipboard } from "@/features/presentation/hooks/usePresentationClipboard"
+import { fileSource } from "@/features/preview/lib/docxImages"
 import { PresentationTableRange, tableCellAt } from "@/features/presentation/components/ribbon/table"
 import { presentationTextLabels } from "@/features/presentation/components/ribbon/homeText.logic"
 import { TextLinkHost } from "@/features/presentation/components/ribbon/homeTextControls"
@@ -308,11 +312,25 @@ function onEditorKey(
 	event: EditorKeyEvent,
 	editor: Editor,
 	overrides: Readonly<Record<string, string>>,
-	zoom: (change: PresentationZoomChange) => void
+	zoom: (change: PresentationZoomChange) => void,
+	selectionPane: SelectionPaneStore,
+	focusSlide: () => void
 ): void {
 	if (event.defaultPrevented) return
 
 	const action = presentationEditorKey(event, overrides)
+
+	// Alt+F10 opens the Selection Pane (into it) and closes it, wherever the editor has focus, as PowerPoint does.
+	if (action === "presentation.selectionPane") {
+		event.preventDefault()
+		selectionPane.toggle(true)
+
+		// Closed from inside it: focus goes back to the slide rather than to nowhere.
+		if (!selectionPane.getSnapshot().open && event.target instanceof Element && event.target.closest("[data-selection-pane]") !== null)
+			focusSlide()
+
+		return
+	}
 
 	if (isTextField(event.target)) {
 		if (
@@ -435,6 +453,8 @@ export function PresentationEditor({ store, document: deck, alt, item, variant, 
 	const shapeState = useShapeSelection(shapes)
 	// The body open in the text editor (one store per deck: the ribbon's text groups read it), and its shape.
 	const [text] = useState(createTextEditing)
+	// The Selection Pane's state, this editor's own (closed when the deck opens).
+	const [selectionPane] = useState(createSelectionPane)
 	const [editingText, setEditingText] = useState<ShapeRef | undefined>(undefined)
 	// Where a double-click entered the body (slide px): the first caret goes there; "all": Enter, its text selected.
 	const [textAt, setTextAt] = useState<{ readonly x: number; readonly y: number } | "all" | undefined>(undefined)
@@ -657,7 +677,7 @@ export function PresentationEditor({ store, document: deck, alt, item, variant, 
 	useEditorLayerKeys(rootRef, (event, root) => {
 		if (show.onKey(event) || onPaneKey(event, root, focusCanvas)) return
 
-		onEditorKey(event, editor, overrides, zoomBy)
+		onEditorKey(event, editor, overrides, zoomBy, selectionPane, focusCanvas)
 	})
 
 	// Ctrl/Cmd+wheel (a trackpad pinch) zooms the slide, as the document editor's page; a plain wheel scrolls. A native
@@ -713,6 +733,18 @@ export function PresentationEditor({ store, document: deck, alt, item, variant, 
 			: { info, render, selection: shapes, command: editor.command, session, text }
 	// Pictures pasted or dropped on the slide go in as inserted pictures.
 	const pictureDrop = usePresentationPictureDrop(slideEditor)
+	const pictures = usePresentationPictures(slideEditor)
+	const clipboard = usePresentationClipboard({
+		editor,
+		selection: shapes,
+		slideEditor,
+		rootRef,
+		takePictures: files => {
+			void pictures.take(files.map(fileSource))
+		},
+		t
+	})
+	const scoped: PresentationEditorScope = { ...scope, clipboard, selectionPane }
 	const ribbonRender = shapeState.slide === ref && shapeState.ids.length > 0 ? render : undefined
 	const kinds = ribbonRender === undefined ? NO_KINDS : selectionKinds(selectedShapes(ribbonRender, shapeState))
 	const fileMenu = (
@@ -770,7 +802,7 @@ export function PresentationEditor({ store, document: deck, alt, item, variant, 
 			: []
 
 	return (
-		<PresentationEditorContext value={scope}>
+		<PresentationEditorContext value={scoped}>
 			<div
 				ref={rootRef}
 				role="region"
@@ -789,7 +821,7 @@ export function PresentationEditor({ store, document: deck, alt, item, variant, 
 					)
 						return
 
-					onEditorKey(event, editor, overrides, zoomBy)
+					onEditorKey(event, editor, overrides, zoomBy, selectionPane, focusCanvas)
 					onPageKey(event, show.showing, step => {
 						go(step === "first" ? 0 : step === "last" ? count - 1 : index + step)
 					})
@@ -859,6 +891,7 @@ export function PresentationEditor({ store, document: deck, alt, item, variant, 
 							<div
 								ref={canvasRef}
 								data-preview-surface
+								data-fo-slide-canvas
 								tabIndex={0}
 								{...(slideEditor === undefined ? {} : pictureDrop)}
 								className="relative min-h-0 flex-1 bg-muted/40 p-3 outline-none focus-visible:ring-[3px] focus-visible:ring-ring/30"
@@ -987,6 +1020,16 @@ export function PresentationEditor({ store, document: deck, alt, item, variant, 
 							editor={slideEditor}
 							editable={editor.editable}
 							phone={phone}
+						/>
+					)}
+					{/* Docked right of the slide, as PowerPoint's. */}
+					{show.showing ? null : (
+						<SelectionPane
+							editor={slideEditor}
+							store={selectionPane}
+							editable={editor.editable}
+							phone={phone}
+							onLeave={focusCanvas}
 						/>
 					)}
 				</div>

@@ -12,6 +12,7 @@ import {
 	DEFAULT_SHOW_BINDINGS,
 	INK_PEN_COLOR,
 	InkLayer,
+	ShowMirrorLink,
 	showOptionsOf,
 	startShowTimer,
 	type InkStore,
@@ -95,6 +96,8 @@ class PresenterLive {
 	position: PresenterPosition = PRESENTER_START
 	bindings: ShowKeyBindings = DEFAULT_SHOW_BINDINGS
 	deck: PresentationDocument
+	// The presenter's current slide: the stage copied live from whichever controller drives the show.
+	readonly mirror = new ShowMirrorLink()
 
 	constructor(deck: PresentationDocument) {
 		this.deck = deck
@@ -117,6 +120,7 @@ class PresenterLive {
 	// Whether this controller starts a show (none ran): the position starts over.
 	attach(controller: ShowController): boolean {
 		this.controller = controller
+		this.mirror.connect(controller)
 
 		if (this.running) return false
 
@@ -128,6 +132,8 @@ class PresenterLive {
 
 	detach(controller: ShowController): void {
 		if (this.controller === controller) this.controller = undefined
+
+		this.mirror.disconnect(controller)
 	}
 
 	// The show ended, or its player went away for good.
@@ -333,6 +339,7 @@ export function usePresenter({ deck, editable, fullscreen, fullscreenActive, ret
 			deck={deck}
 			position={position}
 			controller={() => live.controller}
+			mirror={live.mirror}
 			ink={ink}
 			onKeyDown={onKeyDown}
 			timer={timer}

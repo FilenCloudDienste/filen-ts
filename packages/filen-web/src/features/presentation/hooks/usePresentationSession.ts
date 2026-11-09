@@ -32,7 +32,9 @@ import { narrowToAnyFile } from "@/features/drive/lib/download"
 import { presentationSaveEdits, type PresentationSaveSource } from "@/features/drive/lib/previewSave.logic"
 import { autosaveTier, type AutosaveTier } from "@/features/presentation/lib/autosavePolicy"
 import type { PresentationZoomChange } from "@/features/presentation/lib/zoom"
+import type { SelectionPaneStore } from "@/features/presentation/lib/selectionPane"
 import { usePresentationAutosave } from "@/features/presentation/hooks/usePresentationAutosave"
+import type { PresentationClipboardCommands } from "@/features/presentation/hooks/usePresentationClipboard"
 import { sdkApi } from "@/lib/sdk/client"
 import { log } from "@/lib/log"
 import { useLatestRef } from "@/lib/useLatestRef"
@@ -139,6 +141,10 @@ export interface PresentationZoomView {
 export interface PresentationEditorScope {
 	readonly editor: PresentationEditor
 	readonly view: PresentationEditorView
+	// Cut, Copy and Paste for the ribbon and the menus (hooks/usePresentationClipboard.ts).
+	readonly clipboard?: PresentationClipboardCommands
+	// The Selection Pane's state for this editor (lib/selectionPane.ts): Home ▸ Arrange and the Arrange tab open it.
+	readonly selectionPane?: SelectionPaneStore
 }
 
 export const PresentationEditorContext = createContext<PresentationEditorScope | null>(null)

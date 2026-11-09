@@ -10,6 +10,7 @@ import { chartGroups } from "@/features/presentation/components/ribbon/chart"
 import { designGroups } from "@/features/presentation/components/ribbon/design"
 import { homeEditingGroups, homeGroups } from "@/features/presentation/components/ribbon/home"
 import { homeTextGroups } from "@/features/presentation/components/ribbon/homeText"
+import { homeArrangeGroups } from "@/features/presentation/components/ribbon/homeArrange"
 import { insertGroups } from "@/features/presentation/components/ribbon/insert"
 import { insertChartsGroups } from "@/features/presentation/components/ribbon/insertCharts"
 import { insertMediaGroups } from "@/features/presentation/components/ribbon/insertMedia"
@@ -72,7 +73,7 @@ export type PresentationTab =
 	  }
 
 export const PRESENTATION_TABS: readonly PresentationTab[] = [
-	{ id: "home", groups: [homeGroups, homeTextGroups, homeEditingGroups] },
+	{ id: "home", groups: [homeGroups, homeTextGroups, homeArrangeGroups, homeEditingGroups] },
 	{ id: "insert", groups: [insertGroups, insertObjectsGroups, insertChartsGroups, insertMediaGroups, insertSmartArtGroups] },
 	{ id: "design", groups: [designGroups] },
 	{ id: "transitions", groups: [transitionsGroups] },

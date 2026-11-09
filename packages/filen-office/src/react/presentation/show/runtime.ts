@@ -24,8 +24,9 @@ import {
 	type PresentationJump
 } from "../links"
 import type { PaintedSlide, SlidePainter } from "../SlideView"
-import type { ShowController, ShowEvent, ShowEventType, ShowFrom, ShowScreen, ShowStart } from "./controller"
+import type { ShowController, ShowEvent, ShowEventType, ShowFrom, ShowMirror, ShowScreen, ShowStart } from "./controller"
 import { layerBoxes, layerIndices, layerPlanOf, layerTree } from "./layers"
+import { StageMirror } from "./mirror"
 import {
 	buildStageSlide,
 	yieldFocus,
@@ -385,6 +386,8 @@ export class ShowPlayer implements ShowController {
 	// The blackout's colour as last written (black, or a transition's overlay).
 	private overlay = "#000000"
 	private activator: PresentationActionActivator | undefined
+	// Live copies of the stage (the presenter's current slide), given each frame as it is written.
+	private readonly mirrors = new Set<StageMirror>()
 
 	constructor(host: HTMLDivElement, props: PlayerProps, view: PlayerView) {
 		this.host = host
@@ -1465,6 +1468,8 @@ export class ShowPlayer implements ShowController {
 
 		if (playing !== undefined && this.run === undefined) more = this.frameOf(playing, now) || more
 
+		for (const mirror of this.mirrors) mirror.frame()
+
 		if (more) this.raf = this.window.requestAnimationFrame(this.tick)
 	}
 
@@ -1783,6 +1788,8 @@ export class ShowPlayer implements ShowController {
 		this.generation++
 		this.run?.custom?.finish()
 
+		for (const mirror of [...this.mirrors]) mirror.release()
+
 		for (const warmed of this.warmed ?? []) warmed.release()
 
 		this.warmed = []
@@ -1798,7 +1805,27 @@ export class ShowPlayer implements ShowController {
 		this.carryHost = undefined
 	}
 
-	// The slide on stage and its step (tests and the presenter's mirror).
+	// A live copy of the stage in `target` (the presenter's current slide): each frame as written here, at `ratio`
+	// device px per slide px.
+	mirror(target: HTMLElement, ratio: number): ShowMirror | undefined {
+		if (this.disposed) return undefined
+
+		const mirror = new StageMirror(
+			this.host,
+			target,
+			ratio,
+			() => (this.stageWidth > 0 ? (this.stageWidth * EMU_PER_PX) / this.props.size.cx : 1) * this.dpr,
+			() => {
+				this.mirrors.delete(mirror)
+			}
+		)
+
+		this.mirrors.add(mirror)
+
+		return mirror
+	}
+
+	// The slide on stage and its step (tests).
 	state():
 		| {
 				readonly index: number

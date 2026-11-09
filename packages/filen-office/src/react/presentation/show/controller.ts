@@ -47,6 +47,15 @@ export interface ShowController {
 	white(): void
 	end(): void
 	on<T extends ShowEventType>(type: T, listener: (event: Extract<ShowEvent, { type: T }>) => void): () => void
+	// A live copy of the stage in `target` (any same-origin document) at `ratio` device px per slide px: the frames the
+	// audience sees (builds, transitions, video), copied as the player writes them, never sampled again.
+	mirror?(target: HTMLElement, ratio: number): ShowMirror | undefined
+}
+
+export interface ShowMirror {
+	// Device px per slide px of the copy (its scale times its window's devicePixelRatio).
+	resize(ratio: number): void
+	release(): void
 }
 
 // The presenter view's window: a same-origin popup the presenter is portaled into, or the show's own window when the

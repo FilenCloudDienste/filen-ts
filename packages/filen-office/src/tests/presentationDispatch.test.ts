@@ -130,7 +130,10 @@ const BUILT_METHODS: ReadonlySet<PresentationMethod> = new Set([
 	"jobsPort",
 	"review",
 	"retract",
-	"shade"
+	"shade",
+	"clip",
+	"clipParts",
+	"outline"
 ])
 
 const context: ApplyContext = {

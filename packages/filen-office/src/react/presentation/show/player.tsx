@@ -21,10 +21,12 @@ import { autoHidePointer } from "./pointer"
 import { ShowPlayer, type PlayerProps } from "./runtime"
 import type { ShowMediaMount } from "./stage"
 import { showOptionsOf, type ShowOptions, type ShowSlide } from "./timeline"
+import { WheelSteps } from "./wheel"
 
 // The slide show: the player (show/runtime.ts) on a stage over the whole viewport (the page puts the document in full
 // screen around it), the slide letterboxed and scaled to fit. The stage takes the keyboard while it is shown;
-// clicks advance (in a kiosk only actions, triggers and timings do). It implements ShowController through `ref`.
+// clicks advance (in a kiosk only actions, triggers and timings do). A browsed show keeps the page out of full screen
+// and puts its status bar under the slide. It implements ShowController through `ref`.
 
 export interface SlideShowProps {
 	readonly slides: readonly ShowSlide[]
@@ -66,7 +68,18 @@ export interface SlideShowProps {
 	readonly onContextMenu?: (at: { readonly x: number; readonly y: number; readonly stage: HTMLElement }) => void
 	// The mouse pointer hides once still (show/pointer.ts); false keeps it (a preview inside the editor). Read once.
 	readonly autoHidePointer?: boolean
+	// Browsed by an individual (ShowOptions.browse): the show in a window, this status bar under the slide (PowerPoint's
+	// slide counter, previous, next and menu), the mouse wheel stepping through it and the pointer always shown. Clicks,
+	// pointers and the shortcut menu on the bar are not the slide's; what the bar portals (its menus) is not the show's.
+	// Read once, as the show mounts.
+	readonly statusBar?: (state: ShowBarState) => ReactNode
 	readonly ref?: Ref<ShowController>
+}
+
+export interface ShowBarState {
+	// The deck index on stage (undefined before the first slide shows).
+	readonly index: number | undefined
+	readonly screen: ShowScreen
 }
 
 function playerProps(props: SlideShowProps): PlayerProps {
@@ -101,9 +114,23 @@ function isControl(target: EventTarget): boolean {
 	return typeof element.closest === "function" && element.closest("button, a[href], input, select, textarea, [role='button']") !== null
 }
 
+function onBar(target: EventTarget): boolean {
+	const element = target as Partial<Element>
+
+	return typeof element.closest === "function" && element.closest("[data-fo-show-bar]") !== null
+}
+
+// An event React bubbled to the stage from outside its DOM (a menu the status bar portals to the body).
+function portaled(event: { readonly currentTarget: Node; readonly target: EventTarget }): boolean {
+	return !event.currentTarget.contains(event.target as Node)
+}
+
 export function SlideShow(props: SlideShowProps) {
 	const { size, label, endLabel, slideLabel, slides, overlay, onKey, onPointer, ref } = props
+	const [browse] = useState(() => props.statusBar !== undefined)
 	const stageRef = useRef<HTMLDivElement | null>(null)
+	// Where the slide is fitted: the stage, or the part of it over a status bar.
+	const areaRef = useRef<HTMLDivElement | null>(null)
 	const hostRef = useRef<HTMLDivElement | null>(null)
 	const playerRef = useRef<ShowPlayer | null>(null)
 	const [index, setIndex] = useState<number | undefined>(undefined)
@@ -121,14 +148,15 @@ export function SlideShow(props: SlideShowProps) {
 	useLayoutEffect(() => {
 		const host = hostRef.current
 		const stage = stageRef.current
+		const area = areaRef.current ?? stage
 
-		if (host === null || stage === null) return
+		if (host === null || stage === null || area === null) return
 
 		const player = new ShowPlayer(host, playerProps(props), { slide: setIndex, screen: setScreen })
 		const view = stage.ownerDocument.defaultView
 		const measure = (): void => {
-			const width = stage.clientWidth
-			const height = stage.clientHeight
+			const width = area.clientWidth
+			const height = area.clientHeight
 			const scale = width > 0 && height > 0 ? Math.min(width / slideWidth, height / slideHeight) : 0
 
 			setFit(previous =>
@@ -140,16 +168,32 @@ export function SlideShow(props: SlideShowProps) {
 		}
 		const observer = typeof ResizeObserver === "function" ? new ResizeObserver(measure) : undefined
 
-		const showPointer = props.autoHidePointer === false ? undefined : autoHidePointer(stage)
+		const showPointer = props.autoHidePointer === false || browse ? undefined : autoHidePointer(stage)
+		// A browsed show's wheel (not passive: the page under the stage never scrolls); Ctrl+wheel stays the browser's zoom.
+		const steps = browse ? new WheelSteps() : undefined
+		const onWheel = (event: WheelEvent): void => {
+			if (steps === undefined || event.ctrlKey) return
+
+			event.preventDefault()
+
+			const step = steps.take(event)
+
+			if (step > 0) player.next()
+			else if (step < 0) player.prev()
+		}
+
+		if (steps !== undefined) stage.addEventListener("wheel", onWheel, { passive: false })
 
 		playerRef.current = player
 		measure()
-		observer?.observe(stage)
+		observer?.observe(area)
 		// The stage owns the keyboard while it is shown.
 		stage.focus({ preventScroll: true })
 		void player.start(props.from)
 
 		return () => {
+			if (steps !== undefined) stage.removeEventListener("wheel", onWheel)
+
 			showPointer?.()
 			observer?.disconnect()
 			player.dispose()
@@ -174,7 +218,8 @@ export function SlideShow(props: SlideShowProps) {
 			first: () => playerRef.current?.first(),
 			last: () => playerRef.current?.last(),
 			nextHidden: () => playerRef.current?.nextHidden(),
-			on: (type, listener) => playerRef.current?.on(type, listener) ?? (() => undefined)
+			on: (type, listener) => playerRef.current?.on(type, listener) ?? (() => undefined),
+			mirror: (target, ratio) => playerRef.current?.mirror(target, ratio)
 		}
 
 		return controller
@@ -191,6 +236,9 @@ export function SlideShow(props: SlideShowProps) {
 		// Every key stays in the show: the page under it (an editor, the preview's own keys) never sees one. Tab moves
 		// focus between the show's own controls.
 		if (event.key !== "Tab") event.stopPropagation()
+
+		// A key in the status bar's menu is the menu's.
+		if (browse && portaled(event)) return
 
 		// Enter and Space press a focused control over the slide (the ink tools), not the show's next.
 		if ((event.key === "Enter" || event.key === " ") && event.target !== event.currentTarget && isControl(event.target)) return
@@ -231,48 +279,12 @@ export function SlideShow(props: SlideShowProps) {
 		event.preventDefault()
 	}
 
-	return (
-		<div
-			ref={stageRef}
-			className="fo-show-stage"
-			role="region"
-			aria-label={label}
-			data-fo-show-stage=""
-			data-fo-screen={screen}
-			tabIndex={-1}
-			style={{ touchAction: "none" }}
-			onKeyDown={onKeyDown}
-			onPointerDown={event => {
-				swallowed.current = onPointer?.(event) === true
-			}}
-			onPointerUp={event => {
-				if (onPointer?.(event) === true) swallowed.current = true
-			}}
-			onPointerCancel={event => {
-				onPointer?.(event)
-			}}
-			onContextMenu={event => {
-				event.preventDefault()
-				event.stopPropagation()
+	// The status bar's own (its buttons, the menus it portals): not the slide's.
+	const barEvent = (event: { readonly currentTarget: Node; readonly target: EventTarget }): boolean =>
+		browse && (portaled(event) || onBar(event.target))
 
-				const keyed = keyedMenu.current
-
-				keyedMenu.current = undefined
-
-				if (keyed !== undefined && event.timeStamp - keyed < KEY_ECHO_MS) return
-
-				menu(event.clientX, event.clientY, event.currentTarget)
-			}}
-			onClick={event => {
-				const consumed = swallowed.current
-
-				swallowed.current = false
-
-				if (consumed || event.button !== 0) return
-
-				playerRef.current?.click()
-			}}
-		>
+	const slide = (
+		<>
 			<div
 				className="fo-show-viewport"
 				style={{ left: fit.left, top: fit.top, width: slideWidth * fit.scale, height: slideHeight * fit.scale }}
@@ -305,6 +317,72 @@ export function SlideShow(props: SlideShowProps) {
 					{endLabel}
 				</div>
 			) : null}
+		</>
+	)
+
+	return (
+		<div
+			ref={stageRef}
+			className="fo-show-stage"
+			role="region"
+			aria-label={label}
+			data-fo-show-stage=""
+			data-fo-screen={screen}
+			{...(browse ? { "data-fo-browse": "" } : {})}
+			tabIndex={-1}
+			style={{ touchAction: "none" }}
+			onKeyDown={onKeyDown}
+			onPointerDown={event => {
+				swallowed.current = !barEvent(event) && onPointer?.(event) === true
+			}}
+			onPointerUp={event => {
+				if (!barEvent(event) && onPointer?.(event) === true) swallowed.current = true
+			}}
+			onPointerCancel={event => {
+				if (!barEvent(event)) onPointer?.(event)
+			}}
+			onContextMenu={event => {
+				event.preventDefault()
+				event.stopPropagation()
+
+				if (barEvent(event)) return
+
+				const keyed = keyedMenu.current
+
+				keyedMenu.current = undefined
+
+				if (keyed !== undefined && event.timeStamp - keyed < KEY_ECHO_MS) return
+
+				menu(event.clientX, event.clientY, event.currentTarget)
+			}}
+			onClick={event => {
+				const consumed = swallowed.current
+
+				swallowed.current = false
+
+				if (consumed || event.button !== 0 || barEvent(event)) return
+
+				playerRef.current?.click()
+			}}
+		>
+			{browse ? (
+				<>
+					<div
+						ref={areaRef}
+						className="fo-show-area"
+					>
+						{slide}
+					</div>
+					<div
+						className="fo-show-bar"
+						data-fo-show-bar=""
+					>
+						{props.statusBar?.({ index, screen })}
+					</div>
+				</>
+			) : (
+				slide
+			)}
 			<div
 				className="fo-show-live"
 				aria-live="polite"

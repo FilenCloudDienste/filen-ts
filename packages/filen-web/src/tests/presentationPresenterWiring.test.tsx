@@ -23,6 +23,8 @@ vi.mock("@/lib/storage/adapter", () => ({
 }))
 
 const listeners = vi.hoisted(() => new Map<string, Set<(event: unknown) => void>>())
+// The stage copies the player made for the presenter's current slide, and those still held.
+const mirrors = vi.hoisted(() => ({ made: [] as HTMLElement[], live: 0 }))
 
 vi.mock("@filen/office/react/presentation", async importOriginal => {
 	const actual = await importOriginal<typeof import("@filen/office/react/presentation")>()
@@ -35,6 +37,17 @@ vi.mock("@filen/office/react/presentation", async importOriginal => {
 			set.add(listener as (event: unknown) => void)
 
 			return () => set.delete(listener as (event: unknown) => void)
+		},
+		mirror: target => {
+			mirrors.made.push(target)
+			mirrors.live++
+
+			return {
+				resize: () => undefined,
+				release: () => {
+					mirrors.live--
+				}
+			}
 		}
 	}
 
@@ -105,6 +118,8 @@ function Host({ onRender }: { onRender: (handles: Handles) => void }) {
 afterEach(() => {
 	cleanup()
 	listeners.clear()
+	mirrors.made = []
+	mirrors.live = 0
 	vi.restoreAllMocks()
 })
 
@@ -132,6 +147,50 @@ describe("presenter wiring through the deck's stage", () => {
 			})
 
 		expect(listeners.get("slide")?.size ?? 0).toBe(1)
+	})
+
+	it("shows the audience's stage live in the presenter's current slide, one copy at a time, let go when the view closes", async () => {
+		vi.spyOn(window, "open").mockReturnValue(null)
+		let handles: Handles | undefined
+
+		render(
+			<Host
+				onRender={value => {
+					handles = value
+				}}
+			/>
+		)
+		expect(mirrors.made).toHaveLength(0)
+		act(() => {
+			handles?.presenter.openPresenter()
+		})
+		act(() => {
+			emitSlide()
+		})
+
+		const pane = document.querySelector<HTMLElement>("[data-fo-show-mirror]")
+
+		expect(pane?.getAttribute("role")).toBe("img")
+		expect(pane?.getAttribute("aria-label")).toBe("Current slide")
+		expect(mirrors.live).toBe(1)
+		expect(pane?.contains(mirrors.made.at(-1) ?? null)).toBe(true)
+		expect(mirrors.made.at(-1)?.hasAttribute("inert")).toBe(true)
+
+		for (let k = 0; k < 5; k++)
+			act(() => {
+				handles?.rerender()
+			})
+
+		expect(mirrors.live).toBe(1)
+
+		act(() => {
+			handles?.setShowing(false)
+		})
+		await act(async () => {
+			await Promise.resolve()
+			await Promise.resolve()
+		})
+		expect(mirrors.live).toBe(0)
 	})
 
 	it("ends the presenter side when the stage goes away without an ended event", async () => {
