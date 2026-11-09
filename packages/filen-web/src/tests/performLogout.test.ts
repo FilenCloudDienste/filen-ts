@@ -30,7 +30,8 @@ const {
 	wipeVideoIndexStore,
 	resetVideoSession,
 	officeSettingsReset,
-	confirmMountsSignOut
+	confirmMountsSignOut,
+	wipeLegacyWebOnSignOut
 } = vi.hoisted(() => {
 	const calls: string[] = []
 	const record =
@@ -68,7 +69,8 @@ const {
 		wipeVideoIndexStore: vi.fn(() => Promise.resolve()),
 		resetVideoSession: vi.fn(record("resetVideoSession", () => undefined)),
 		officeSettingsReset: vi.fn(),
-		confirmMountsSignOut: vi.fn(() => Promise.resolve(true))
+		confirmMountsSignOut: vi.fn(() => Promise.resolve(true)),
+		wipeLegacyWebOnSignOut: vi.fn(() => Promise.resolve())
 	}
 })
 
@@ -93,6 +95,7 @@ const TEARDOWN_STEPS = [
 ]
 
 vi.mock("@/lib/logout", () => ({ runLogout }))
+vi.mock("@/lib/legacyWebMigration", () => ({ wipeLegacyWebOnSignOut }))
 vi.mock("@/features/notes/lib/sync", () => ({ sync: { cancel: notesCancel } }))
 vi.mock("@/features/chats/lib/sync", () => ({ sync: { cancel: chatsCancel } }))
 vi.mock("@/features/chats/lib/typing", () => ({ clearAllTyping }))
@@ -183,6 +186,13 @@ describe("performLogout", () => {
 		expect(wipeThumbnailStore).toHaveBeenCalledTimes(1)
 		expect(wipeArtStore).toHaveBeenCalledTimes(1)
 		expect(wipeVideoIndexStore).toHaveBeenCalledTimes(1)
+	})
+
+	it("hands the wipe the previous web app's leftovers, so its session cannot be imported again", async () => {
+		await performLogout()
+		await runLogout.mock.calls[0]?.[0].wipeLegacyWeb()
+
+		expect(wipeLegacyWebOnSignOut).toHaveBeenCalledTimes(1)
 	})
 
 	it("still wipes the drive thumbnails and reports the failure when the artwork wipe fails", async () => {

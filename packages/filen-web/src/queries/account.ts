@@ -4,6 +4,7 @@ import { sdkApi } from "@/lib/sdk/client"
 import { queryClient } from "@/queries/client"
 import { cachedQuery, cancelInFlightIfCached, patchQuery } from "@/queries/patch"
 import { desktopBridge } from "@/lib/desktop"
+import { noteAccountReadForLegacyImport } from "@/lib/legacyWebMigration.logic"
 
 // Query key taxonomy per client.ts ([domain, entity, params?]): this resource has exactly one
 // entity per session (there is no per-account param to key on — the worker only ever holds a
@@ -33,6 +34,8 @@ async function readUserInfo(): Promise<UserInfo> {
 	// The first authed request of the page that succeeded: the stored session works.
 	if (!readThisSession) {
 		desktopBridge()?.session.markVerified()
+		// A previous-app session imported while offline counts as verified from here.
+		noteAccountReadForLegacyImport()
 	}
 
 	readThisSession = true

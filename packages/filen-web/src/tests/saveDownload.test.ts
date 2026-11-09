@@ -20,7 +20,7 @@ import {
 	SW_REQUEST_TIMEOUT_MS,
 	type SwDownloadStatus
 } from "@/lib/sw/protocol"
-import { asErrorDTO, plainErrorDTO } from "@/lib/sdk/errors"
+import { asErrorDTO, DOWNLOAD_NEEDS_RELOAD, plainErrorDTO } from "@/lib/sdk/errors"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { errors } from "@/locales/en/errors"
 
@@ -29,9 +29,17 @@ import { errors } from "@/locales/en/errors"
 // tests dynamically re-import after vi.resetModules() instead of relying on a single static import
 // (same freshModule() pattern as lib/sw/register.test.ts). sdkApi is mocked module-wide up front;
 // vi.mock is hoisted above imports regardless of where it's written.
-const { toStringified } = vi.hoisted(() => ({ toStringified: vi.fn() }))
+const { toStringified, controllerIsCurrent } = vi.hoisted(() => ({
+	toStringified: vi.fn(),
+	controllerIsCurrent: vi.fn(() => Promise.resolve(true))
+}))
 
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: { toStringified } }))
+// The controlling worker is this build's unless a test says otherwise.
+vi.mock("@/lib/sw/register", async importOriginal => ({
+	...(await importOriginal<typeof import("@/lib/sw/register")>()),
+	controllerIsCurrent
+}))
 
 async function freshModule() {
 	vi.resetModules()
@@ -275,6 +283,19 @@ describe("saveDownload — sw branch (no FSA)", () => {
 
 		expect(target.name).toBe("report.pdf")
 		expect(target.url).toBe(`${SW_DOWNLOAD_PREFIX}${target.id}`)
+	})
+
+	it("never hands the session to an older worker still controlling the page", async () => {
+		stubWindow()
+		const sw = fakeServiceWorker(() => ({ ok: true }))
+		stubServiceWorkerReady(sw)
+		controllerIsCurrent.mockResolvedValueOnce(false)
+
+		const { saveDownload } = await freshModule()
+
+		await expect(saveDownload("report.pdf")).rejects.toMatchObject({ dto: { kind: DOWNLOAD_NEEDS_RELOAD } })
+		expect(toStringified).not.toHaveBeenCalled()
+		expect(sw.calls).toEqual([])
 	})
 
 	it("memoizes the sw-client-ready handshake across multiple saveDownload calls", async () => {

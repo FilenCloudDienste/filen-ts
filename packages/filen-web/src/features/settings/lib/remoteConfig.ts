@@ -225,8 +225,10 @@ export function currentAnnouncement(candidates: readonly Announcement[], dismiss
 }
 
 // Lives in kv, so a sign-out (which clears kv) brings dismissed announcements back.
+export const DISMISSED_ANNOUNCEMENTS_KV_KEY = "remoteConfig.dismissedAnnouncements.v1"
+
 const dismissedAnnouncements = kvPreference({
-	key: "remoteConfig.dismissedAnnouncements.v1",
+	key: DISMISSED_ANNOUNCEMENTS_KV_KEY,
 	schema: type("string[]"),
 	fallback: []
 })

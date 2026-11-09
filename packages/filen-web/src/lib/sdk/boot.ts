@@ -6,6 +6,8 @@ import { parseEnvelope } from "@filen/shared/session"
 import { takeSeededSession } from "@/e2e-hooks/sessionSeed"
 import { kvClear, storage } from "@/lib/storage/adapter"
 import { readSignOutPending, writeSignOutPending } from "@/lib/signOutPending"
+import { runLegacyWebMigration, wipeLegacyWebOnSignOut } from "@/lib/legacyWebMigration"
+import { withSessionCheckHeld } from "@/lib/sdk/sessionHealth"
 import { wipeImageCaches } from "@/features/shell/lib/wipeImageCaches"
 import { wipePendingWatch } from "@/features/videos/lib/watchState.logic"
 import { wipeSwClient } from "@/features/drive/lib/saveDownload"
@@ -49,7 +51,13 @@ export function whenBootReady(): Promise<void> {
 async function finishPendingSignOut(): Promise<void> {
 	wipePendingWatch(() => localStorage)
 
-	const outcomes = await Promise.allSettled([kvClear(), clearSessionOutsideKv(), wipeImageCaches(), wipeSwClient()])
+	const outcomes = await Promise.allSettled([
+		kvClear(),
+		clearSessionOutsideKv(),
+		wipeImageCaches(),
+		wipeSwClient(),
+		wipeLegacyWebOnSignOut()
+	])
 	const failed = outcomes.find(outcome => outcome.status === "rejected")
 
 	if (failed !== undefined) {
@@ -80,12 +88,12 @@ function readClientConfig<P>(
 // then read hasClient(), so the client must already be injected. Self-heals an invalid blob; a missing one just leaves
 // the tab unauthed. Runs before the query-cache restore, which is gated on whether this boot is authed. False when
 // the desktop vault cannot read its session: BootGate shows the recovery screen instead of the routes until a retry
-// gets through.
-async function resumeAndOpen(): Promise<boolean> {
+// gets through. `injected`: the previous web app's session import already injected (and saved) the session.
+async function resumeAndOpen(injected = false): Promise<boolean> {
 	let resumed: boolean
 
 	try {
-		resumed = await resumeSession()
+		resumed = injected || (await resumeSession())
 	} catch (e) {
 		if (!(e instanceof SessionUnreadableError)) {
 			throw e
@@ -218,6 +226,10 @@ export async function bootSdk(): Promise<void> {
 		} catch (e) {
 			log.warn("boot", "failed to apply client config; using defaults", e)
 		}
+		// The previous web app's session, on the first boot after the switch (after the client config, which the client
+		// it injects is built with). Never after a sign-out this boot could not finish. A dead session it finds is its
+		// own business, not a sign-out.
+		let injected = readSignOutPending() ? false : await withSessionCheckHeld(() => runLegacyWebMigration())
 		// E2E only: the harness serves the session through a page binding rather than the login form.
 		// Persisting it before the resume below makes the very first load already authed, so the route
 		// guards never see an unauthed state and no navigation is needed to correct one.
@@ -225,9 +237,10 @@ export async function bootSdk(): Promise<void> {
 			const seeded = await takeSeededSession()
 			if (seeded !== null) {
 				await persistSession(parseEnvelope(seeded) as StringifiedClient)
+				injected = false
 			}
 		}
-		if (await resumeAndOpen()) {
+		if (await resumeAndOpen(injected)) {
 			log.info("boot", `ready (${String(result.threads)} threads)`)
 		}
 	} catch (e) {

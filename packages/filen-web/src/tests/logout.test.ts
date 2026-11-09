@@ -36,6 +36,10 @@ function makeHarness() {
 		calls.push("wipeServiceWorker")
 		return Promise.resolve()
 	})
+	const wipeLegacyWeb = vi.fn<() => Promise<void>>().mockImplementation(() => {
+		calls.push("wipeLegacyWeb")
+		return Promise.resolve()
+	})
 	const wipesLanded = vi.fn<() => void>().mockImplementation(() => {
 		calls.push("wipesLanded")
 	})
@@ -54,6 +58,7 @@ function makeHarness() {
 		kvClear,
 		wipeThumbnails,
 		wipeServiceWorker,
+		wipeLegacyWeb,
 		wipesLanded,
 		broadcast,
 		reload
@@ -69,6 +74,7 @@ function makeHarness() {
 		kvClear,
 		wipeThumbnails,
 		wipeServiceWorker,
+		wipeLegacyWeb,
 		wipesLanded,
 		broadcast,
 		reload
@@ -86,9 +92,9 @@ describe("runLogout (injected deps, no worker)", () => {
 		await runLogout(h.deps)
 
 		expect(h.calls.slice(0, 3)).toEqual(["cancelQueries", "clearQueryCache", "sdkLogout"])
-		expect(h.calls.slice(3, 7).sort()).toEqual(["clearSession", "kvClear", "wipeServiceWorker", "wipeThumbnails"])
+		expect(h.calls.slice(3, 8).sort()).toEqual(["clearSession", "kvClear", "wipeLegacyWeb", "wipeServiceWorker", "wipeThumbnails"])
 		expect(h.calls.indexOf("clearSession")).toBeLessThan(h.calls.indexOf("kvClear"))
-		expect(h.calls.slice(7)).toEqual(["wipesLanded", "broadcast", "reload"])
+		expect(h.calls.slice(8)).toEqual(["wipesLanded", "broadcast", "reload"])
 	})
 
 	it("reports the wipes landed only when every one succeeded", async () => {
@@ -115,7 +121,7 @@ describe("runLogout (injected deps, no worker)", () => {
 		expect(h.wipesLanded).not.toHaveBeenCalled()
 	})
 
-	it("runs the three wipes side by side and broadcasts only once the slowest has landed", async () => {
+	it("runs the wipes side by side and broadcasts only once the slowest has landed", async () => {
 		const h = makeHarness()
 		let finishThumbs: () => void = () => undefined
 
@@ -188,6 +194,18 @@ describe("runLogout (injected deps, no worker)", () => {
 		expect(h.broadcast).toHaveBeenCalledTimes(1)
 		expect(h.reload).toHaveBeenCalledTimes(1)
 		expect(errorSpy).toHaveBeenCalledWith("logout", expect.stringContaining("wipe-service-worker"), expect.anything())
+	})
+
+	it("a failing previous-app wipe keeps the sign-out pending for the next start", async () => {
+		const errorSpy = vi.spyOn(log, "error").mockImplementation(() => undefined)
+		const h = makeHarness()
+		h.wipeLegacyWeb.mockRejectedValue(new Error("storage blocked"))
+
+		await runLogout(h.deps)
+
+		expect(h.wipesLanded).not.toHaveBeenCalled()
+		expect(h.reload).toHaveBeenCalledTimes(1)
+		expect(errorSpy).toHaveBeenCalledWith("logout", expect.stringContaining("wipe-legacy-web"), expect.anything())
 	})
 
 	it("an async-rejecting phase is logged and never blocks a later phase", async () => {

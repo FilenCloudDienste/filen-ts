@@ -23,7 +23,7 @@ import {
 	SW_READING_PROTOCOL,
 	type SwDownloadStatus
 } from "@/lib/sw/protocol"
-import { controllerProtocolVersion } from "@/lib/sw/register"
+import { controllerIsCurrent, controllerProtocolVersion } from "@/lib/sw/register"
 
 // The disk mechanism a download writes to, picked once per saveDownload() call by capability —
 // callers (features/drive/lib/download.ts) branch on `kind`, never on the browser directly. FSA carries a
@@ -172,6 +172,12 @@ export async function activeServiceWorker(): Promise<ServiceWorker> {
 let swClientReady: Promise<void> | null = null
 
 async function initSwClient(): Promise<void> {
+	// Until this app's worker has taken over (the first load after an update, or after the previous web app's), the
+	// page is still controlled by an older one: it would answer the handoff wrongly and must not receive the session.
+	if (!(await controllerIsCurrent())) {
+		throw new ErrorWithDTO(plainErrorDTO("downloads need the page reloaded", DOWNLOAD_NEEDS_RELOAD))
+	}
+
 	const blob = await sdkApi.toStringified()
 	const target = await activeServiceWorker()
 

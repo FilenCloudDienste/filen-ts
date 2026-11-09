@@ -90,8 +90,10 @@ export const DEFAULT_NOTE_TYPE: NoteType = "text"
 
 const noteTypeSchema: Type<NoteType> = type.enumerated(...NOTE_TYPES)
 
+export const DEFAULT_NOTE_TYPE_KV_KEY = "notes.defaultType.v1"
+
 export const { get: getDefaultNoteType, set: setDefaultNoteType } = kvPreference({
-	key: "notes.defaultType.v1",
+	key: DEFAULT_NOTE_TYPE_KV_KEY,
 	schema: noteTypeSchema,
 	fallback: DEFAULT_NOTE_TYPE
 })

@@ -16,6 +16,8 @@ export interface LogoutDeps {
 	kvClear: () => Promise<void>
 	wipeThumbnails: () => Promise<void>
 	wipeServiceWorker: () => Promise<void>
+	// What the previous web app left on this origin, its session copies included.
+	wipeLegacyWeb: () => Promise<void>
 	// Only once every wipe succeeded: what tells the next boot there is nothing left to finish.
 	wipesLanded: () => void
 	broadcast: () => void
@@ -53,7 +55,7 @@ export async function runLogout(deps: LogoutDeps): Promise<void> {
 	// Worker nulls the client immediately (new ops fail fast); the handle free is deferred. Before the
 	// wipes, so no thumbnail write of this account starts after its cache is gone.
 	await phase("sdk-logout", deps.sdkLogout)
-	// The three wipes touch separate stores, so they run side by side and sign-out waits only as long as
+	// The wipes touch separate stores, so they run side by side and sign-out waits only as long as
 	// the slowest, the thumbnail cache, whose deletion grows with its file count.
 	const wiped = await Promise.all([
 		// Session row first, then every remaining kv row — query-persist rows and keymap overrides
@@ -70,7 +72,9 @@ export async function runLogout(deps: LogoutDeps): Promise<void> {
 		// The service worker keeps its own reconstructed Client (decrypted key material) that no store
 		// wipe reaches — signal it to drop that + any pending downloads before the reload, so no secret
 		// survives sign-out inside the worker.
-		phase("wipe-service-worker", deps.wipeServiceWorker)
+		phase("wipe-service-worker", deps.wipeServiceWorker),
+		// The previous web app's session copies: otherwise the next start would import that account again.
+		phase("wipe-legacy-web", deps.wipeLegacyWeb)
 	])
 	// Before the broadcast, so the tabs it reloads never redo a wipe that already landed: one of those boots
 	// running late could otherwise wipe a session signed in here meanwhile.

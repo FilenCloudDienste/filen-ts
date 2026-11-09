@@ -14,8 +14,10 @@ import { NotFoundScreen } from "@/features/shell/components/notFoundScreen"
 import { useReminderStore } from "@/features/shell/store/useReminderStore"
 import { connectFileKindVerdictStorage } from "@/features/drive/lib/fileKindVerdictStorage"
 import "@/features/assistant/loop/register" // side-effect: registers the on-device assistant with its UI
-import { startLanguage } from "@/lib/i18n/language"
+import { LANGUAGE_STORAGE_KEY, startLanguage } from "@/lib/i18n/language"
+import { prepareLegacyWebStartup } from "@/lib/legacyWebMigration.logic"
 import { installSessionEndedCheck } from "@/features/shell/lib/sessionEnded"
+import { desktopBridge } from "@/lib/desktop"
 import { syncDesktopShellStrings } from "@/lib/i18n/desktopShell"
 import { refreshDocumentTitle } from "@/lib/head/refreshTitle"
 
@@ -33,6 +35,12 @@ const router = createRouter({ routeTree, defaultNotFoundComponent: NotFoundScree
 // NOT live inside a render effect: a guard awaiting boot while boot awaited first paint would
 // deadlock. Not awaited — BootGate observes the zustand boot phases and holds the boot screen until
 // ready. Runs exactly once (module code is not double-invoked, unlike StrictMode effects).
+// The previous web app's language and signed-in state, read before the splash weights its phases and the language is
+// detected. The desktop app never ran it.
+if (desktopBridge() === undefined) {
+	prepareLegacyWebStartup(LANGUAGE_STORAGE_KEY)
+}
+
 // Signs out, with a note on the sign-in screen, once the server stops accepting the session.
 installSessionEndedCheck()
 

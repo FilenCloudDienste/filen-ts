@@ -8,6 +8,7 @@ import { resetSocketReconnectState } from "@/features/chats/lib/socketHandlers"
 import { socketBridge } from "@/lib/sdk/socket"
 import { sdkApi } from "@/lib/sdk/client"
 import { wipeSwClient } from "@/features/drive/lib/saveDownload"
+import { wipeLegacyWebOnSignOut } from "@/lib/legacyWebMigration"
 import { clearSession, broadcastAuth } from "@/lib/sdk/session"
 import { kvClear } from "@/lib/storage/adapter"
 import { wipeImageCaches } from "@/features/shell/lib/wipeImageCaches"
@@ -182,6 +183,7 @@ export async function performLogout(options?: PerformLogoutOptions): Promise<boo
 		kvClear: () => withHistoryWritesHeld(kvClear),
 		wipeThumbnails: wipeImageCaches,
 		wipeServiceWorker: wipeSwClient,
+		wipeLegacyWeb: wipeLegacyWebOnSignOut,
 		wipesLanded: () => {
 			writeSignOutPending(false)
 		},

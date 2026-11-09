@@ -83,8 +83,10 @@ export const DEFAULT_SORT_PREFERENCES: DrivePreferences<DriveSortBy> = {
 	perDirectory: {}
 }
 
+export const SORT_PREFERENCES_KV_KEY = "drive.sortPreferences.v1"
+
 export const { get: getSortPreferences, set: setSortPreferences } = kvPreference({
-	key: "drive.sortPreferences.v1",
+	key: SORT_PREFERENCES_KV_KEY,
 	schema: sortPreferencesSchema,
 	fallback: DEFAULT_SORT_PREFERENCES
 })
@@ -153,8 +155,10 @@ export const DEFAULT_VIEW_MODE_PREFERENCES: DrivePreferences<DriveViewMode> = {
 	perDirectory: {}
 }
 
+export const VIEW_MODE_PREFERENCES_KV_KEY = "drive.viewModePreferences.v1"
+
 export const { get: getViewModePreferences, set: setViewModePreferences } = kvPreference({
-	key: "drive.viewModePreferences.v1",
+	key: VIEW_MODE_PREFERENCES_KV_KEY,
 	schema: viewModePreferencesSchema,
 	fallback: DEFAULT_VIEW_MODE_PREFERENCES
 })
