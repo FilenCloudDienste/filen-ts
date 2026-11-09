@@ -294,6 +294,7 @@ describe("desktop vault", () => {
 				setUnloadHolds: () => undefined,
 				setAudioPlaying: () => undefined,
 				setMenuShortcuts: () => undefined,
+				setShellStrings: () => undefined,
 				onMenuAction: () => () => undefined,
 				onUpdateReady: () => () => undefined,
 				installUpdate: () => undefined

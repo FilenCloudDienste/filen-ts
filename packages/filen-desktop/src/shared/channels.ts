@@ -18,6 +18,7 @@ export const CHANNELS = {
 	setUnloadHolds: "app:set-unload-holds",
 	setAudioPlaying: "app:set-audio-playing",
 	setMenuShortcuts: "app:set-menu-shortcuts",
+	setShellStrings: "app:set-shell-strings",
 	menuReady: "app:menu-ready",
 	menuAction: "app:menu-action",
 	updateReady: "app:update-ready",

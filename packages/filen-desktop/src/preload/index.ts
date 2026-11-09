@@ -226,6 +226,9 @@ const bridge: DesktopBridge = {
 		setMenuShortcuts: combos => {
 			ipcRenderer.send(CHANNELS.setMenuShortcuts, combos)
 		},
+		setShellStrings: payload => {
+			ipcRenderer.send(CHANNELS.setShellStrings, payload)
+		},
 		onMenuAction: callback => {
 			menuActionListeners.add(callback)
 

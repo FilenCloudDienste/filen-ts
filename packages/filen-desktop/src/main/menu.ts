@@ -1,14 +1,16 @@
 import type { MenuItemConstructorOptions } from "electron"
 import type { DesktopMenuAction } from "@filen/shared/desktop"
+import type { DesktopShellStringKey } from "@filen/shared/desktopShellStrings"
+import { shellText } from "./shellStrings.ts"
 
 export type MenuShortcuts = Partial<Record<DesktopMenuAction, string>>
 
-const ACTION_LABELS: Record<DesktopMenuAction, string> = {
-	"app.openSettings": "Settings…",
-	"app.openShortcuts": "Keyboard Shortcuts",
-	"app.toggleTheme": "Toggle Theme",
-	"app.toggleAssistant": "Toggle Assistant",
-	"app.openTransfers": "Transfers"
+const ACTION_LABELS: Record<DesktopMenuAction, DesktopShellStringKey> = {
+	"app.openSettings": "shellMenuSettings",
+	"app.openShortcuts": "shellMenuShortcuts",
+	"app.toggleTheme": "shellMenuToggleTheme",
+	"app.toggleAssistant": "shellMenuToggleAssistant",
+	"app.openTransfers": "shellMenuTransfers"
 }
 
 export const MENU_ACTIONS = new Set(Object.keys(ACTION_LABELS)) as ReadonlySet<DesktopMenuAction>
@@ -114,7 +116,7 @@ export function menuTemplate({ shortcuts, devTools, onAction, onLock, onWebsite 
 		const accelerator = toAccelerator(shortcuts[id] ?? "")
 
 		return {
-			label: ACTION_LABELS[id],
+			label: shellText(ACTION_LABELS[id]),
 			...(accelerator === undefined ? {} : { accelerator, registerAccelerator: false }),
 			click: () => {
 				onAction(id)
@@ -129,7 +131,7 @@ export function menuTemplate({ shortcuts, devTools, onAction, onLock, onWebsite 
 				{ role: "about" },
 				{ type: "separator" },
 				action("app.openSettings"),
-				...(onLock === null ? [] : ([{ label: "Lock Filen", click: onLock }] as const)),
+				...(onLock === null ? [] : ([{ label: shellText("shellLock"), click: onLock }] as const)),
 				{ type: "separator" },
 				{ role: "services" },
 				{ type: "separator" },
@@ -157,7 +159,7 @@ export function menuTemplate({ shortcuts, devTools, onAction, onLock, onWebsite 
 		{ role: "windowMenu" },
 		{
 			role: "help",
-			submenu: [action("app.openShortcuts"), { type: "separator" }, { label: "Filen Website", click: onWebsite }]
+			submenu: [action("app.openShortcuts"), { type: "separator" }, { label: shellText("shellWebsite"), click: onWebsite }]
 		}
 	]
 }

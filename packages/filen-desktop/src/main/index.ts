@@ -63,6 +63,7 @@ import {
 import { READ_SCRIPT, WIPE_SCRIPT } from "./legacyData.ts"
 import { deleteLegacyStores, LEGACY_SCHEME, legacyProfileExists, runInLegacyOrigin } from "./legacyOrigin.ts"
 import { isMenuAction, type MenuShortcuts, menuTemplate } from "./menu.ts"
+import { applyShellStrings, loadShellStrings, shellPlural, shellText } from "./shellStrings.ts"
 import {
 	createMigration,
 	createStashStore,
@@ -221,6 +222,9 @@ const sessionVault = createSessionVault(vaultCipher, atomicFile(sessionVaultPath
 
 // Read before ready; the window and every pref-dependent decision come after ready, once this has settled.
 const prefsLoading = loadPrefs(atomicFile(path.join(app.getPath("userData"), "prefs.json")), warn)
+// The shell's text in the UI language the page last reported (menu, tray, notifications, dialogs).
+const shellStringsFile = atomicFile(path.join(app.getPath("userData"), "shellStrings.json"))
+const shellStringsLoading = loadShellStrings(shellStringsFile, warn)
 let prefs: PrefsStore | null = null
 
 const userDataPath = app.getPath("userData")
@@ -617,11 +621,11 @@ const syncService = createSyncService({
 async function confirmMountsSignOut(pending: number): Promise<boolean> {
 	const options = {
 		type: "warning" as const,
-		buttons: ["Wait", "Sign out"],
+		buttons: [shellText("shellWait"), shellText("shellSignOut")],
 		defaultId: 0,
 		cancelId: 0,
-		message: "The network drive is still uploading",
-		detail: `${pending === 1 ? "1 file is" : `${String(pending)} files are`} not uploaded yet. If you sign out now, they finish uploading when you sign in again.`
+		message: shellText("shellSignOutUploadingTitle"),
+		detail: shellPlural("shellSignOutUploadingDetail", pending)
 	}
 	const { response } = await (mainWindow === null ? dialog.showMessageBox(options) : dialog.showMessageBox(mainWindow, options))
 
@@ -804,8 +808,8 @@ function updateInstallFailed(): void {
 
 	const options = {
 		type: "warning" as const,
-		message: "The update could not be installed",
-		detail: "Filen keeps running on this version and tries again later."
+		message: shellText("shellUpdateFailedTitle"),
+		detail: shellText("shellUpdateFailedDetail")
 	}
 
 	void (mainWindow === null ? dialog.showMessageBox(options) : dialog.showMessageBox(mainWindow, options))
@@ -977,11 +981,11 @@ function confirmUnload(window: BrowserWindow, action: string): boolean {
 
 	const choice = dialog.showMessageBoxSync(window, {
 		type: "warning",
-		buttons: [action, "Cancel"],
+		buttons: [action, shellText("shellCancel")],
 		defaultId: 1,
 		cancelId: 1,
-		message: "Filen is still working",
-		detail: "Transfers are running or changes are not saved yet. They stop if you continue."
+		message: shellText("shellBusyTitle"),
+		detail: shellText("shellBusyDetail")
 	})
 
 	return choice === 0
@@ -1089,7 +1093,7 @@ function createWindow(): void {
 	})
 
 	window.webContents.on("will-prevent-unload", event => {
-		if (installingUpdate || confirmUnload(window, quitting ? "Quit" : "Leave")) {
+		if (installingUpdate || confirmUnload(window, shellText(quitting ? "shellBusyQuit" : "shellBusyLeave"))) {
 			event.preventDefault()
 		} else {
 			quitting = false
@@ -1235,7 +1239,7 @@ function notify(body: string, onClick: () => void): void {
 function notifySyncAttention(host: DesktopSyncHostState): void {
 	const pairId = host.state === "failed" ? null : syncAttentionPair
 
-	notify(host.state === "failed" ? "Sync stopped. Open Filen to see why." : "A sync pair needs your attention.", () => {
+	notify(shellText(host.state === "failed" ? "shellNotifySyncStopped" : "shellNotifySyncAttention"), () => {
 		if (pairId !== null) {
 			openSyncPair(pairId)
 		}
@@ -1296,17 +1300,17 @@ function applyTrayMenu(): void {
 				? []
 				: [
 						{
-							label: "Open network drive",
+							label: shellText("shellOpenNetworkDrive"),
 							click: () => {
 								void mountsService.revealDrive()
 							}
 						}
 					]),
 			...(trayLines.length === 0 ? [] : [{ type: "separator" as const }]),
-			{ label: "Open Filen", click: showWindow },
-			...(canLock() ? [{ label: "Lock Filen", click: lockNow }] : []),
+			{ label: shellText("shellOpen"), click: showWindow },
+			...(canLock() ? [{ label: shellText("shellLock"), click: lockNow }] : []),
 			{ type: "separator" },
-			{ label: "Quit Filen", click: () => app.quit() }
+			{ label: shellText("shellQuit"), click: () => app.quit() }
 		])
 	)
 }
@@ -1347,9 +1351,9 @@ async function exportLogs(webLog: string): Promise<DesktopLogsExport> {
 		.replaceAll(":", "-")
 		.replace(/\.\d+Z$/, "Z")
 	const options = {
-		title: "Export logs",
+		title: shellText("shellExportLogsTitle"),
 		defaultPath: path.join(app.getPath("downloads"), `filen-desktop-logs-${stamp}.txt`),
-		filters: [{ name: "Text", extensions: ["txt"] }]
+		filters: [{ name: shellText("shellTextFiles"), extensions: ["txt"] }]
 	}
 	const choice = await (mainWindow === null ? dialog.showSaveDialog(options) : dialog.showSaveDialog(mainWindow, options))
 
@@ -1621,6 +1625,16 @@ if (!instanceLock.held) {
 		scheduleIdleDestroy()
 	})
 
+	ipcMain.on(CHANNELS.setShellStrings, (event, payload: unknown) => {
+		if (!isTrusted(event.senderFrame) || !applyShellStrings(payload, shellStringsFile, warn)) {
+			return
+		}
+
+		applyMenu()
+		applyTray()
+		applyTrayMenu()
+	})
+
 	ipcMain.on(CHANNELS.setMenuShortcuts, (event, payload: unknown) => {
 		const combos = menuShortcutsSchema(payload)
 
@@ -1659,7 +1673,7 @@ if (!instanceLock.held) {
 
 		// Asked here, before the installer starts (Windows and Linux launch it before quitting, so the page's own
 		// unload confirm would come too late). A cancel installs nothing; the update still installs on the next quit.
-		if (unloadHolds > 0 && !confirmUnload(window, "Restart")) {
+		if (unloadHolds > 0 && !confirmUnload(window, shellText("shellBusyRestart"))) {
 			return
 		}
 
@@ -1794,6 +1808,7 @@ if (!instanceLock.held) {
 	app.whenReady()
 		.then(async () => {
 			prefs = await prefsLoading
+			await shellStringsLoading
 			appLock = await appLockLoading
 			applyMenu()
 			createTray()
@@ -1858,7 +1873,7 @@ if (!instanceLock.held) {
 			}
 		})
 		.catch((error: unknown) => {
-			dialog.showErrorBox("Filen", `Filen could not start.\n\n${error instanceof Error ? error.message : String(error)}`)
+			dialog.showErrorBox("Filen", `${shellText("shellStartFailed")}\n\n${error instanceof Error ? error.message : String(error)}`)
 			app.exit(1)
 		})
 }

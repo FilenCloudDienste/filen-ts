@@ -4,6 +4,7 @@ import { type } from "arktype"
 import type { OpenDialogOptions, OpenDialogReturnValue } from "electron"
 import type { DesktopMountPointChoice, DesktopMountPointProblem } from "@filen/shared/desktop"
 import { driveLetterSchema } from "../../shared/nativeProtocol.ts"
+import { shellText } from "../shellStrings.ts"
 import { isWithin, realOrSelf, type RootTokens, samePath } from "../sync/localRoot.ts"
 import type { MountsConfig } from "./store.ts"
 
@@ -150,7 +151,7 @@ export async function chooseMountPoint(
 	tokens: RootTokens
 ): Promise<DesktopMountPointChoice> {
 	const result = await showOpenDialog({
-		title: "Choose where to mount the network drive",
+		title: shellText("shellChooseMountPoint"),
 		properties: ["openDirectory", "createDirectory"]
 	})
 	const chosen = result.filePaths[0]

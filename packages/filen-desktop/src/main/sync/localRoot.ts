@@ -3,6 +3,7 @@ import { access, constants, realpath, stat } from "node:fs/promises"
 import path from "node:path"
 import type { OpenDialogOptions, OpenDialogReturnValue } from "electron"
 import type { DesktopSyncLocalRootChoice, DesktopSyncRootProblem, DesktopSyncRootWarning } from "@filen/shared/desktop"
+import { shellText } from "../shellStrings.ts"
 
 // Where a sync pair's local root may not be. Every path is absolute; the checks resolve none of them, so the caller
 // passes real paths (inspectLocalRoot does).
@@ -234,7 +235,7 @@ export async function chooseLocalDirectory(
 	context: () => LocalRootContext | Promise<LocalRootContext>,
 	tokens: RootTokens
 ): Promise<DesktopSyncLocalRootChoice> {
-	const result = await showOpenDialog({ title: "Choose a directory to sync", properties: ["openDirectory", "createDirectory"] })
+	const result = await showOpenDialog({ title: shellText("shellChooseSyncDirectory"), properties: ["openDirectory", "createDirectory"] })
 	const chosen = result.filePaths[0]
 
 	if (result.canceled || chosen === undefined) {

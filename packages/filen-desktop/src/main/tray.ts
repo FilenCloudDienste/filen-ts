@@ -1,5 +1,7 @@
 import type { DesktopMountsRole, DesktopPlatform, DesktopSyncActivityKind, DesktopSyncHostState } from "@filen/shared/desktop"
+import type { DesktopShellStringKey } from "@filen/shared/desktopShellStrings"
 import type { NativeActivity, NativeAggregate, NativeMountsStatus } from "../shared/nativeProtocol.ts"
+import { shellText } from "./shellStrings.ts"
 
 export type TrayState = "idle" | "syncing" | "attention"
 
@@ -35,14 +37,14 @@ export function trayState(sync: NativeAggregate, mounts: NativeAggregate, host: 
 // Sync's line of the tray menu; null while sync is off.
 export function traySyncStatus(state: TrayState, host: DesktopSyncHostState): string | null {
 	if (state === "attention") {
-		return host.state === "failed" ? "Sync stopped" : "Sync needs attention"
+		return shellText(host.state === "failed" ? "shellTraySyncStopped" : "shellTraySyncAttention")
 	}
 
 	if (state === "syncing") {
-		return "Syncing…"
+		return shellText("shellTraySyncing")
 	}
 
-	return host.state === "running" ? "Sync up to date" : null
+	return host.state === "running" ? shellText("shellTraySyncUpToDate") : null
 }
 
 // The tray menu's status lines, the most urgent first: sync's, then what the mounts report. `mountPoint` is where the
@@ -56,13 +58,13 @@ export function trayStatusLines(
 	const running = host.state === "running"
 	const syncState = trayState(sync, "idle", host)
 	const syncLine = traySyncStatus(syncState, host)
-	const mountsLine = running && mounts === "attention" ? "Mounts need attention" : null
+	const mountsLine = running && mounts === "attention" ? shellText("shellTrayMountsAttention") : null
 	const urgent = syncState === "attention" ? [syncLine, mountsLine] : [mountsLine, syncLine]
 
 	return [
 		...urgent,
-		running && mounts === "syncing" ? "Uploading from the network drive…" : null,
-		running && mountPoint !== null ? `Network drive: mounted at ${mountPoint}` : null
+		running && mounts === "syncing" ? shellText("shellTrayDriveUploading") : null,
+		running && mountPoint !== null ? shellText("shellTrayDriveMounted", { path: mountPoint }) : null
 	].filter(line => line !== null)
 }
 
@@ -101,21 +103,19 @@ export function newlyFailedRoles(prev: NativeMountsStatus | null, next: NativeMo
 	return (next?.roles ?? []).filter(role => role.state === "error" && !failed.has(role.role)).map(role => role.role)
 }
 
-const ROLE_NAMES: Record<DesktopMountsRole, string> = {
-	drive: "The network drive",
-	webdav: "The WebDAV server",
-	s3: "The S3 server",
-	ftp: "The FTP server",
-	sftp: "The SFTP server",
-	http: "The HTTP server",
-	restic: "The restic server",
-	nfs: "The NFS server"
+const ROLE_FAILURES: Record<DesktopMountsRole, DesktopShellStringKey> = {
+	drive: "shellNotifyDriveStopped",
+	webdav: "shellNotifyWebdavStopped",
+	s3: "shellNotifyS3Stopped",
+	ftp: "shellNotifyFtpStopped",
+	sftp: "shellNotifySftpStopped",
+	http: "shellNotifyHttpStopped",
+	restic: "shellNotifyResticStopped",
+	nfs: "shellNotifyNfsStopped"
 }
 
 export function roleFailureMessage(roles: readonly DesktopMountsRole[]): string {
 	const [first] = roles
 
-	return first === undefined || roles.length > 1
-		? "Mounts stopped. Open Filen to see why."
-		: `${ROLE_NAMES[first]} stopped. Open Filen to see why.`
+	return shellText(first === undefined || roles.length > 1 ? "shellNotifyMountsStopped" : ROLE_FAILURES[first])
 }

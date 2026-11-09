@@ -1,6 +1,8 @@
 // The contract between the Filen web app and the desktop shell's preload, exposed as `window.desktop`.
 // Types only: the browser build pays nothing for it, and an absent `window.desktop` means a plain browser.
 
+import type { DesktopShellStringsPayload } from "./desktopShellStrings"
+
 export type DesktopPlatform = "darwin" | "win32" | "linux"
 
 // Window chrome colours (CSS colour strings): the controls overlay Windows and Linux draw top-right, and the border
@@ -71,6 +73,9 @@ export interface DesktopApp {
 	setAudioPlaying(playing: boolean): void
 	// The combo in effect per action ("" when unassigned), in the web keymap's notation.
 	setMenuShortcuts(combos: Partial<Record<DesktopMenuAction, string>>): void
+	// The shell's own text (menu, tray, main's notifications and dialogs) in the UI language; main keeps the last one
+	// across restarts.
+	setShellStrings(payload: DesktopShellStringsPayload): void
 	// Subscribing tells main the page can take menu actions, so it delivers the ones clicked while the page loaded.
 	onMenuAction(callback: (action: DesktopMenuAction) => void): () => void
 	// A downloaded update waiting to be installed: calls back with its version right away when one is ready, and when
