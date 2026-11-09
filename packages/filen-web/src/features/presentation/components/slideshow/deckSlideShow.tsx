@@ -1,15 +1,18 @@
-import { useEffect, useState, type KeyboardEvent, type PointerEvent, type ReactNode } from "react"
+import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import {
 	paintSlide,
 	presentationActions,
 	SlideShow,
+	type InkStore,
 	type PresentationActionPolicy,
 	type PresentationDocument,
 	type PresentationStore,
 	type ShowController,
-	type ShowFrom
+	type ShowFrom,
+	type ShowScreen
 } from "@filen/office/react/presentation"
+import { ShowMenu, type ShowMenuAt } from "@/features/presentation/components/slideshow/showMenu"
 import { actionLabel, DEFAULT_SLIDE_SIZE } from "@/features/presentation/components/deckChrome.logic"
 import { useShowMediaMount } from "@/features/presentation/hooks/useMediaInsert"
 import { useChosenShowOptions } from "@/features/presentation/components/slideshow/showSettings"
@@ -41,13 +44,56 @@ export interface DeckSlideShowProps {
 	readonly overlay?: ReactNode
 	readonly onKey?: (event: KeyboardEvent<HTMLDivElement>) => boolean
 	readonly onPointer?: (event: PointerEvent<HTMLDivElement>) => boolean
+	// The presenter's ink, for the show menu's Pointer options.
+	readonly ink?: InkStore
+	// The show menu opened, closed, or was closed by Escape (which in full screen also leaves it).
+	readonly onMenu?: (state: "open" | "closed" | "escaped") => void
 }
 
-export function DeckSlideShow({ store, deck, from, policy, onSlide, onEnd, controllerRef, overlay, onKey, onPointer }: DeckSlideShowProps) {
+export function DeckSlideShow({
+	store,
+	deck,
+	from,
+	policy,
+	onSlide,
+	onEnd,
+	controllerRef,
+	overlay,
+	onKey,
+	onPointer,
+	ink,
+	onMenu
+}: DeckSlideShowProps) {
 	const { t } = useTranslation("preview")
 	const chosen = useChosenShowOptions(store)
 	const media = useShowMediaMount(presentationActions(policy), store)
 	const [note, setNote] = useState<{ readonly key: PreviewKey; readonly at: number } | undefined>(undefined)
+	const [menu, setMenu] = useState<ShowMenuAt | undefined>(undefined)
+	// The player's controller and the deck index on stage, read as the menu opens (no render per slide).
+	const live = useRef<{ controller: ShowController | undefined; index: number | undefined }>({ controller: undefined, index: undefined })
+
+	const closeMenu = (escaped: boolean): void => {
+		setMenu(undefined)
+		onMenu?.(escaped ? "escaped" : "closed")
+	}
+
+	// Leaving full screen (Escape, which Firefox and Safari keep from the page) closes the menu.
+	useEffect(() => {
+		if (menu === undefined) return
+
+		const onChange = (): void => {
+			if (document.fullscreenElement === null) {
+				setMenu(undefined)
+				onMenu?.("escaped")
+			}
+		}
+
+		document.addEventListener("fullscreenchange", onChange)
+
+		return () => {
+			document.removeEventListener("fullscreenchange", onChange)
+		}
+	}, [menu, onMenu])
 
 	useEffect(() => {
 		if (note === undefined) return
@@ -72,8 +118,13 @@ export function DeckSlideShow({ store, deck, from, policy, onSlide, onEnd, contr
 			if (key !== undefined) setNote({ key, at: performance.now() })
 		})
 
+		live.current.controller = controller
+
 		return () => {
 			off()
+
+			if (live.current.controller === controller) live.current.controller = undefined
+
 			detach?.()
 		}
 	}
@@ -89,9 +140,13 @@ export function DeckSlideShow({ store, deck, from, policy, onSlide, onEnd, contr
 				{...(deck.session === undefined ? {} : { session: deck.session })}
 				{...(chosen === undefined ? (deck.info?.show === undefined ? {} : { settings: deck.info.show }) : { options: chosen })}
 				{...(from === undefined ? {} : { from })}
-				onSlide={onSlide}
+				onSlide={index => {
+					live.current.index = index
+					onSlide(index)
+				}}
 				onEnd={onEnd}
 				label={t("previewPptxShowLabel")}
+				endLabel={t("previewPptxShowEnd")}
 				slideLabel={(slide, total) => t("previewPptxSlideLabel", { current: slide + 1, total })}
 				actionLabel={(action, layer) => actionLabel(t, action, layer)}
 				triggerLabel={layer => {
@@ -107,7 +162,23 @@ export function DeckSlideShow({ store, deck, from, policy, onSlide, onEnd, contr
 				{...(overlay === undefined ? {} : { overlay })}
 				{...(onKey === undefined ? {} : { onKey })}
 				{...(onPointer === undefined ? {} : { onPointer })}
+				onContextMenu={({ x, y, stage }) => {
+					const index = live.current.index
+					// The stage says which screen it shows.
+					const shown = stage.dataset["foScreen"]
+					const screen: ShowScreen = shown === "black" || shown === "white" || shown === "end" ? shown : "slide"
+
+					setMenu({ x, y, stage, index, slide: index === undefined ? undefined : deck.slides[index]?.ref, screen })
+					onMenu?.("open")
+				}}
 				ref={attach}
+			/>
+			<ShowMenu
+				at={menu}
+				slides={deck.slides}
+				controller={() => live.current.controller}
+				ink={ink}
+				onClose={closeMenu}
 			/>
 			{note === undefined ? null : (
 				<div

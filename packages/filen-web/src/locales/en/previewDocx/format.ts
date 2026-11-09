@@ -52,12 +52,8 @@ export const previewDocxFormat = {
 	previewDocxParagraphSpacing: "Paragraph spacing",
 	/** Docx editor — label of the paragraph indent command */
 	previewDocxIndents: "Indents",
-	/** Docx editor — toolbar button: format painter (click copies the formatting for the next selection, double click keeps it on) */
-	previewDocxFormatPainter: "Format painter",
 	/** Docx editor — label of applying the format painter's formatting */
 	previewDocxPasteFormatting: "Paste formatting",
-	/** Docx editor — format painter tooltip while it is on for every selection until clicked again */
-	previewDocxFormatPainterSticky: "Format painter (on until clicked again)",
 	/** Docx editor — toolbar menu holding the other character formatting (sub/superscript, caps, spacing) */
 	previewDocxMoreFormatting: "More formatting",
 	/** Docx editor — font picker group: the theme's fonts */

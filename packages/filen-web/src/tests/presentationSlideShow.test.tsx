@@ -290,6 +290,12 @@ describe("Set Up Slide Show form", () => {
 		expect(setUpOptions(setUpForm({ ...DEFAULT_SHOW_OPTIONS, customShow: 7 }, 4))).toEqual({ ...DEFAULT_SHOW_OPTIONS, customShow: 7 })
 	})
 
+	it("keeps the file's show without animation and pen colour, which the form does not show", () => {
+		const options = { ...DEFAULT_SHOW_OPTIONS, withoutAnimation: true, penColor: "0070C0" }
+
+		expect(setUpOptions({ ...setUpForm(options, 4), loop: true }, options)).toEqual({ ...options, loop: true })
+	})
+
 	it("offers a file's range that ends past the last slide up to the last slide", () => {
 		expect(setUpForm({ ...DEFAULT_SHOW_OPTIONS, range: { start: 2, end: 9 } }, 4)).toMatchObject({ from: "2", to: "4" })
 	})

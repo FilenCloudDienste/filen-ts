@@ -344,7 +344,7 @@ const EMPTY_SELECTION: PresentationRibbonEditor["selection"] = {
 	set: () => undefined,
 	toggle: () => undefined,
 	clear: () => undefined,
-	selectNew: () => undefined,
+	selectNew: () => () => undefined,
 	reconcile: () => undefined
 }
 
@@ -669,9 +669,11 @@ function SmartArtGalleryDialog({
 	]
 	const insert = (layout: SmartArtLayoutEntry): void => {
 		onClose()
-		editor.selection.selectNew(slide, before)
+		const withdraw = editor.selection.selectNew(slide, before)
+
 		void editor.command(insertSmartArtOp(slide, editor.info.size, layout, t("previewPptxSmartArtDefaultName"))).then(result => {
 			if (result.ok) smartArtPane.setOpen(true)
+			else withdraw()
 		})
 	}
 

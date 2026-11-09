@@ -31,6 +31,7 @@ import type { PresentationDocument, PresentationStore, ShowFrom } from "@filen/o
 import { narrowToAnyFile } from "@/features/drive/lib/download"
 import { presentationSaveEdits, type PresentationSaveSource } from "@/features/drive/lib/previewSave.logic"
 import { autosaveTier, type AutosaveTier } from "@/features/presentation/lib/autosavePolicy"
+import type { PresentationZoomChange } from "@/features/presentation/lib/zoom"
 import { usePresentationAutosave } from "@/features/presentation/hooks/usePresentationAutosave"
 import { sdkApi } from "@/lib/sdk/client"
 import { log } from "@/lib/log"
@@ -124,6 +125,15 @@ export interface PresentationEditorView {
 	readonly askSection: (mode: "add" | "rename") => void
 	// Opens the find field in place of the command row (with its replace field).
 	readonly openFind: (replace: boolean) => void
+	// The slide's zoom (View ▸ Zoom, the status bar, Ctrl+Plus and Ctrl+Minus).
+	readonly zoom: PresentationZoomView
+}
+
+export interface PresentationZoomView {
+	// Screen px per slide px as shown (the fitting zoom while fitting).
+	readonly scale: number
+	readonly fit: boolean
+	readonly set: (change: PresentationZoomChange) => void
 }
 
 export interface PresentationEditorScope {

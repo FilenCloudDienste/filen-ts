@@ -151,8 +151,9 @@ export async function insertObject(
 
 	if (op === undefined) return
 
-	editor.selection.selectNew(slide, order)
-	await editor.command(op)
+	const withdraw = editor.selection.selectNew(slide, order)
+
+	if (!(await editor.command(op)).ok) withdraw()
 }
 
 // ---- pictures ----------------------------------------------------------------------------------------------------

@@ -105,6 +105,12 @@ export const previewPptxObjects = {
 	previewPptxShapeOutlineWeight: "Weight",
 	/** Presentation editor — an outline thickness in points, e.g. "1.5 pt" */
 	previewPptxShapeOutlinePoints: "{{points}} pt",
+	/** Presentation editor — Shape Format, Picture and SmartArt Format group with the selection's height and width */
+	previewPptxSize: "Size",
+	/** Presentation editor — Size group: height of the selection; {{unit}} is "cm" or "in" */
+	previewPptxSizeHeight: "Height ({{unit}})",
+	/** Presentation editor — Size group: width of the selection; {{unit}} is "cm" or "in" */
+	previewPptxSizeWidth: "Width ({{unit}})",
 	/** Presentation editor — Picture tab group */
 	previewPptxPictureAdjust: "Adjust",
 	/** Presentation editor — Picture tab button and dialog: change brightness, contrast, colour and transparency */

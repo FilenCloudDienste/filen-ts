@@ -247,7 +247,7 @@ const EMPTY_SELECTION: PresentationRibbonEditor["selection"] = {
 	set: () => undefined,
 	toggle: () => undefined,
 	clear: () => undefined,
-	selectNew: () => undefined,
+	selectNew: () => () => undefined,
 	reconcile: () => undefined
 }
 

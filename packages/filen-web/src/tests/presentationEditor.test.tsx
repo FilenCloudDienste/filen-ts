@@ -340,8 +340,8 @@ describe("presentation editor ribbon", () => {
 			within(commands())
 				.getAllByRole("group")
 				.map(group => group.getAttribute("aria-label"))
-				.slice(0, 2)
-		).toEqual(["Undo", "Slides"])
+				.slice(0, 3)
+		).toEqual(["Undo", "Clipboard", "Slides"])
 		expect(screen.getByRole("button", { name: "File" })).toBeTruthy()
 		expect(screen.getByRole("button", { name: "Present" })).toBeTruthy()
 	})
@@ -455,10 +455,54 @@ describe("presentation editor slide list", () => {
 			expect(engine.commands.at(-1)).toEqual({ family: "slide", kind: "duplicate", slide: 3, at: 3 })
 		})
 
+		// Ctrl+Shift+D, PowerPoint's Duplicate Slide wherever the focus is.
+		const count = engine.commands.length
+
+		fireEvent.keyDown(list, { key: "D", ctrlKey: true, shiftKey: true })
+		await waitFor(() => {
+			expect(engine.commands.length).toBe(count + 1)
+		})
+		expect(engine.commands.at(-1)).toMatchObject({ family: "slide", kind: "duplicate" })
+
 		fireEvent.keyDown(list, { key: "m", ctrlKey: true })
 		await waitFor(() => {
 			expect(engine.commands.at(-1)).toMatchObject({ family: "slide", kind: "add" })
 		})
+	})
+
+	it("adds a slide with Ctrl+M from a slide's text or the notes, and takes no other editor key there", async () => {
+		await openEditor()
+
+		const region = screen.getByRole("region", { name: "deck.pptx" })
+		const host = document.createElement("div")
+		const body = document.createElement("div")
+		const field = document.createElement("input")
+
+		host.setAttribute("data-fo-text-editor", "")
+		body.setAttribute("contenteditable", "true")
+		Object.defineProperty(body, "isContentEditable", { value: true })
+		host.append(body)
+		region.append(host, field)
+
+		// Duplicate and undo stay the text body's; another text field takes none.
+		fireEvent.keyDown(body, { key: "D", code: "KeyD", ctrlKey: true, metaKey: true, shiftKey: true })
+		fireEvent.keyDown(body, { key: "z", code: "KeyZ", ctrlKey: true, metaKey: true })
+		fireEvent.keyDown(field, { key: "m", code: "KeyM", ctrlKey: true })
+		expect(engine.commands).toEqual([])
+		expect(engine.steps).toEqual([])
+
+		const key = new KeyboardEvent("keydown", { key: "m", code: "KeyM", ctrlKey: true, bubbles: true, cancelable: true })
+
+		act(() => {
+			body.dispatchEvent(key)
+		})
+		expect(key.defaultPrevented).toBe(true)
+		await waitFor(() => {
+			expect(engine.commands.at(-1)).toMatchObject({ family: "slide", kind: "add" })
+		})
+		expect(engine.commands).toHaveLength(1)
+		host.remove()
+		field.remove()
 	})
 
 	it("shows the deck's sections before their slides and adds one at the current slide", async () => {
@@ -684,5 +728,93 @@ describe("presentation editor saving", () => {
 		expect(autosave.getAttribute("aria-checked")).toBe("false")
 		expect(autosave.hasAttribute("data-disabled")).toBe(true)
 		expect(within(autosave).getByText("Off for presentations over 256 MB")).toBeTruthy()
+	})
+})
+
+describe("presentation editor zoom", () => {
+	// The slide view measures 640 × 360 px: a 1280 × 720 px slide fits at 50 %.
+	function measureView(): void {
+		for (const name of ["clientWidth", "clientHeight"] as const)
+			vi.spyOn(HTMLElement.prototype, name, "get").mockImplementation(function (this: HTMLElement) {
+				return this.hasAttribute("data-fo-slide-view") ? (name === "clientWidth" ? 640 : 360) : 0
+			})
+	}
+
+	function view(): HTMLElement {
+		const element = document.querySelector<HTMLElement>("[data-fo-slide-view]")
+
+		if (element === null) throw new Error("no slide view")
+
+		return element
+	}
+
+	function frameWidth(): number {
+		return Number.parseFloat(view().querySelector<HTMLElement>(".fo-slide-frame")?.style.width ?? "")
+	}
+
+	afterEach(() => {
+		vi.restoreAllMocks()
+	})
+
+	it("zooms with Ctrl+Plus and Ctrl+Minus on every layout's plus key, and fits again with Ctrl+Alt+O", async () => {
+		measureView()
+		await openEditor()
+		expect(frameWidth()).toBeCloseTo(640)
+		expect(view().hasAttribute("data-fo-zoomed")).toBe(false)
+
+		const plus = new KeyboardEvent("keydown", { key: "=", code: "Equal", ctrlKey: true, bubbles: true, cancelable: true })
+
+		act(() => {
+			view().dispatchEvent(plus)
+		})
+		// Kept from the browser's page zoom.
+		expect(plus.defaultPrevented).toBe(true)
+		expect(frameWidth()).toBeCloseTo(1280 * 0.67)
+		expect(view().hasAttribute("data-fo-zoomed")).toBe(true)
+
+		fireEvent.keyDown(view(), { key: "+", code: "Equal", ctrlKey: true, shiftKey: true })
+		expect(frameWidth()).toBeCloseTo(1280 * 0.75)
+		fireEvent.keyDown(view(), { key: "+", code: "NumpadAdd", ctrlKey: true })
+		expect(frameWidth()).toBeCloseTo(1280 * 0.8)
+		fireEvent.keyDown(view(), { key: "-", code: "Minus", ctrlKey: true })
+		expect(frameWidth()).toBeCloseTo(1280 * 0.75)
+		expect(screen.getByRole("button", { name: "Zoom level, 75%" })).toBeTruthy()
+
+		fireEvent.keyDown(view(), { key: "o", code: "KeyO", ctrlKey: true, altKey: true })
+		expect(frameWidth()).toBeCloseTo(640)
+		expect(view().hasAttribute("data-fo-zoomed")).toBe(false)
+
+		// Alt turns the letter into another character (a Mac's Option+O): the physical key is read.
+		fireEvent.keyDown(view(), { key: "=", code: "Equal", ctrlKey: true })
+		fireEvent.keyDown(view(), { key: "ø", code: "KeyO", ctrlKey: true, altKey: true })
+		expect(frameWidth()).toBeCloseTo(640)
+		expect(engine.commands).toEqual([])
+	})
+
+	it("zooms with Ctrl+wheel from the zoom shown, and from View ▸ Zoom and Fit to Window", async () => {
+		measureView()
+		await openEditor()
+
+		const canvas = view().closest<HTMLElement>("[data-preview-surface]")
+
+		if (canvas === null) throw new Error("no canvas")
+
+		const wheel = new WheelEvent("wheel", { deltaY: -100, ctrlKey: true, bubbles: true, cancelable: true })
+
+		act(() => {
+			canvas.dispatchEvent(wheel)
+		})
+		expect(wheel.defaultPrevented).toBe(true)
+		expect(frameWidth()).toBeCloseTo(1280 * 0.65)
+
+		fireEvent.click(screen.getByRole("tab", { name: "View" }))
+
+		const zoom = within(commands()).getByRole("group", { name: "Zoom" })
+
+		fireEvent.click(within(zoom).getByRole("button", { name: "Zoom in" }))
+		expect(frameWidth()).toBeCloseTo(1280 * 0.67)
+		fireEvent.click(within(zoom).getByRole("button", { name: "Fit to Window" }))
+		expect(frameWidth()).toBeCloseTo(640)
+		expect(within(zoom).getByRole("button", { name: "Fit to Window" }).getAttribute("aria-pressed")).toBe("true")
 	})
 })

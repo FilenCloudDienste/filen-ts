@@ -43,11 +43,15 @@ export function setUpRangeValid(form: SetUpForm, slideCount: number): boolean {
 	return from !== undefined && to !== undefined && from >= 1 && to <= slideCount && from <= to
 }
 
-export function setUpOptions(form: SetUpForm): ShowOptions {
+// `opened`: the options the dialog opened with, whose settings it does not show (show without animation, pen colour)
+// are kept.
+export function setUpOptions(form: SetUpForm, opened?: ShowOptions): ShowOptions {
 	const from = slideNumber(form.from)
 	const to = slideNumber(form.to)
 
 	return {
+		...(opened?.withoutAnimation === true ? { withoutAnimation: true } : {}),
+		...(opened?.penColor === undefined ? {} : { penColor: opened.penColor }),
 		kiosk: form.kiosk,
 		loop: form.loop || form.kiosk,
 		useTimings: form.timings || form.kiosk,

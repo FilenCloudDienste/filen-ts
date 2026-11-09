@@ -32,7 +32,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
 import { RibbonButton, RibbonMenuTrigger } from "@/features/office/components/ribbon/ribbonControls"
 import { keepFocus } from "@/features/office/lib/officeControls"
-import { layoutsByMaster } from "@/features/presentation/components/deckChrome.logic"
+import { layoutLabel, layoutsByMaster } from "@/features/presentation/components/deckChrome.logic"
 import { usePresentationEditor } from "@/features/presentation/hooks/usePresentationSession"
 import { presentationShortcutKeys } from "@/features/presentation/lib/keymap/editor"
 import { Kbd, KbdKeys } from "@/lib/keymap/kbd"
@@ -101,7 +101,7 @@ function LayoutItems({
 							onChoose(layout.ref)
 						}}
 					>
-						{layout.name ?? t("previewPptxRibbonLayoutNumber", { number: layout.number })}
+						{layoutLabel(t, layout)}
 					</DropdownMenuItem>
 				))
 			) : (
@@ -119,7 +119,7 @@ function LayoutItems({
 							value={String(layout.ref)}
 							closeOnClick
 						>
-							{layout.name ?? t("previewPptxRibbonLayoutNumber", { number: layout.number })}
+							{layoutLabel(t, layout)}
 						</DropdownMenuRadioItem>
 					))}
 				</DropdownMenuRadioGroup>

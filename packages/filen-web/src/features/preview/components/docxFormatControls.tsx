@@ -9,7 +9,6 @@ import {
 	CheckIcon,
 	ChevronDownIcon,
 	HighlighterIcon,
-	PaintbrushVerticalIcon,
 	SubscriptIcon,
 	SuperscriptIcon,
 	TypeIcon
@@ -33,7 +32,6 @@ import {
 	lengthUnit,
 	paragraphCommands,
 	paragraphForm,
-	painterAction,
 	single,
 	type DocxInputChannelProps,
 	type DocxParagraphForm,
@@ -43,6 +41,7 @@ import {
 	type DocxToolbarSlotProps
 } from "@/features/preview/components/docxEditor.logic"
 import { DocxChoiceField } from "@/features/preview/components/docxFields"
+import { FormatPainterButton } from "@/features/office/components/formatPainterButton"
 import {
 	fontMatches,
 	listedFont,
@@ -794,32 +793,20 @@ export function DocxFormatPainter({
 	painter,
 	onPainterCancel
 }: Pick<DocxFormatControlsProps, "commands" | "snapshot" | "readOnly" | "execute" | "painter" | "onPainterCancel">) {
-	const { t } = useTranslation("preview")
-
 	if (!commands.some(command => command.info.type === "format.copy")) {
 		return null
 	}
 
 	return (
-		<TooltipIconButton
-			label={painter === "sticky" ? t("previewDocxFormatPainterSticky") : t("previewDocxFormatPainter")}
-			pressed={painter !== "off"}
+		<FormatPainterButton
+			state={painter}
 			// Its paste writes: off while the document cannot change.
 			disabled={readOnly || (painter === "off" && snapshot?.enabled["format.copy"] !== true)}
-			className={cn(painter !== "off" && "bg-accent text-foreground")}
-			onMouseDown={keepFocus}
-			onClick={event => {
-				const action = painterAction(event.detail, painter)
-
-				if (action === "cancel") {
-					onPainterCancel()
-				} else {
-					execute({ type: "format.copy", ...(action === "sticky" ? { sticky: true } : {}) })
-				}
+			onCopy={sticky => {
+				execute({ type: "format.copy", ...(sticky ? { sticky: true } : {}) })
 			}}
-		>
-			<PaintbrushVerticalIcon />
-		</TooltipIconButton>
+			onCancel={onPainterCancel}
+		/>
 	)
 }
 

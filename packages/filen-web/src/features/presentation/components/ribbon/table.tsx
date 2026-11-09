@@ -21,6 +21,7 @@ import {
 	canSplit,
 	cellAt,
 	cellPropsOp,
+	columnsBox,
 	oneStep,
 	selectionRange,
 	tableCommandOps,
@@ -303,7 +304,8 @@ export function PresentationTableRange({ editor, scale }: { editor: Presentation
 			: undefined
 	const edges = table?.layer.table
 	const [a = 1, b = 0, c = 0, d = 1, e = 0, f = 0] = table?.layer.matrix ?? []
-	const x = shown === undefined ? 0 : (edges?.columnEdges[shown.col] ?? 0)
+	const columns = shown === undefined || edges === undefined ? undefined : columnsBox(edges, shown.col, shown.cols)
+	const x = columns?.x ?? 0
 	const y = shown === undefined ? 0 : (edges?.rowEdges[shown.row] ?? 0)
 
 	return (
@@ -324,7 +326,7 @@ export function PresentationTableRange({ editor, scale }: { editor: Presentation
 						style={{
 							left: x,
 							top: y,
-							width: (edges?.columnEdges[shown.col + shown.cols] ?? x) - x,
+							width: columns?.width ?? 0,
 							height: (edges?.rowEdges[shown.row + shown.rows] ?? y) - y
 						}}
 					/>

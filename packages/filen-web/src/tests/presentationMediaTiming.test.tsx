@@ -473,6 +473,10 @@ describe("an inserted clip", () => {
 		const selection = createShapeSelection()
 		const selectNew = vi.spyOn(selection, "selectNew").mockImplementation(() => {
 			order.push("select")
+
+			return () => {
+				order.push("withdraw")
+			}
 		})
 		const live = {} as PresentationSessionApi
 		const editor = {

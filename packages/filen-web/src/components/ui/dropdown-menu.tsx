@@ -31,11 +31,13 @@ function DropdownMenuContent({
 	alignOffset: alignOffsetProp,
 	side: sideProp,
 	sideOffset: sideOffsetProp,
+	anchor,
 	container,
 	className,
 	...props
 }: MenuPrimitive.Popup.Props &
-	Pick<MenuPrimitive.Positioner.Props, "align" | "alignOffset" | "side" | "sideOffset"> &
+	// anchor: a menu without a trigger (one opened at a point).
+	Pick<MenuPrimitive.Positioner.Props, "align" | "alignOffset" | "side" | "sideOffset" | "anchor"> &
 	// A fullscreen element shows only its own subtree, so a menu opened inside one portals into it.
 	Pick<MenuPrimitive.Portal.Props, "container">) {
 	// Not destructuring defaults, which the React Compiler cannot lower.
@@ -52,6 +54,7 @@ function DropdownMenuContent({
 				alignOffset={alignOffset}
 				side={side}
 				sideOffset={sideOffset}
+				anchor={anchor}
 			>
 				{/* Sized to its entries, never below the trigger or 8rem: a narrow trigger (Sort, an item's ⋯) would
 				    otherwise wrap its labels. */}

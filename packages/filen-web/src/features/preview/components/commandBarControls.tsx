@@ -22,6 +22,8 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { RibbonButton, RibbonMenuTrigger } from "@/features/office/components/ribbon/ribbonControls"
 import { toggleViewerFullScreen, typedPage, type ZoomFit } from "@/features/preview/components/commandBar.logic"
+import { useCommandMenuFocus } from "@/features/preview/components/docxInsert.logic"
+import { keepFocus } from "@/features/office/lib/officeControls"
 import { fullscreenSupported, useIsFullscreen } from "@/lib/media/fullscreen"
 import { log } from "@/lib/log"
 
@@ -219,6 +221,60 @@ export function ZoomControls({
 				onClick={onIn}
 			/>
 		</>
+	)
+}
+
+// An editor's status bar zoom percentage: the zoom menu (steps, the editor's fits), as Office's opens its Zoom dialog.
+// Focus stays in the document it zooms.
+export function StatusZoomMenu({
+	percent,
+	presets,
+	fits,
+	mode,
+	onPercent,
+	onFit
+}: {
+	percent: number
+	presets: readonly number[]
+	fits: readonly ZoomFit[]
+	mode: ZoomFit | "custom"
+	onPercent: (percent: number) => void
+	onFit: (fit: ZoomFit) => void
+}) {
+	const { t } = useTranslation("preview")
+	const focus = useCommandMenuFocus()
+
+	return (
+		<DropdownMenu onOpenChange={focus.opened}>
+			<DropdownMenuTrigger
+				render={
+					<Button
+						variant="ghost"
+						size="xs"
+						aria-label={t("previewCommandBarZoomLevel", { percent })}
+						className="w-12 shrink-0 px-0 text-muted-foreground tabular-nums max-sm:hidden"
+						onMouseDown={keepFocus}
+					>
+						{t("previewDocxZoomIndicator", { percent })}
+					</Button>
+				}
+			/>
+			<ZoomMenuContent
+				percent={percent}
+				presets={presets}
+				fits={fits}
+				mode={mode}
+				finalFocus={focus.finalFocus}
+				onPercent={next => {
+					focus.kept()
+					onPercent(next)
+				}}
+				onFit={fit => {
+					focus.kept()
+					onFit(fit)
+				}}
+			/>
+		</DropdownMenu>
 	)
 }
 

@@ -27,6 +27,8 @@ export const previewPptxViewer = {
 	previewPptxStartShow: "Present",
 	/** Presentation viewer — accessible name of the full-screen slide show */
 	previewPptxShowLabel: "Slide show",
+	/** Presentation viewer — shown on the black screen after the last slide of the slide show */
+	previewPptxShowEnd: "End of slide show, click to exit.",
 	/** Presentation viewer — command bar button: shows or hides the slide list */
 	previewPptxRailToggle: "Slide list",
 	/** Presentation viewer — the deck could not be read: damaged, or not a presentation */

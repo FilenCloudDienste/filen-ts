@@ -33,6 +33,9 @@ import { isMacPlatform } from "@/lib/keymap/kbd.logic"
 // How long the note about a refused action stays.
 const REFUSED_NOTE_MS = 4000
 
+// How long after Escape closed the show menu the browser may leave full screen for that same key.
+const MENU_ESCAPE_MS = 1000
+
 // The ribbon command a show is started from (undefined: none, as for a key).
 function showOrigin(): RibbonOrigin | undefined {
 	const origin = takeRibbonOrigin()
@@ -140,6 +143,8 @@ export function useDeckPresentation({
 	// Counts refused actions while their note is up (0: none shown).
 	const [refusedAt, setRefusedAt] = useState(0)
 	const enteredFullscreen = useRef(false)
+	// The show menu is open, or when Escape last closed it.
+	const showMenu = useRef<{ open: boolean; escapedAt: number }>({ open: false, escapedAt: -Infinity })
 	const count = deck.slides.length
 
 	// The slide shown before this one, for "last viewed" jumps.
@@ -266,6 +271,8 @@ export function useDeckPresentation({
 
 	const startShowFrom = (from?: ShowFrom): void => {
 		origin.current = showOrigin()
+		// A menu left open by the last show (it ended under it) says nothing about this one.
+		showMenu.current = { open: false, escapedAt: -Infinity }
 		setShowing({ from })
 		void fullscreen()
 	}
@@ -273,6 +280,7 @@ export function useDeckPresentation({
 	const startPresenter = (from: ShowFrom): void => {
 		// The popup spends the click's activation: the stage then offers Start slideshow, whose click goes full screen.
 		origin.current = showOrigin()
+		showMenu.current = { open: false, escapedAt: -Infinity }
 
 		const where = presenter.openPresenter()
 
@@ -330,8 +338,8 @@ export function useDeckPresentation({
 	}, [running, focusSlide])
 
 	// Escape in full screen is the browser's (Firefox and Safari never pass it on): leaving the full screen the show
-	// entered ends the show too, unless a link confirmation was open over it: that Escape closes the confirmation and
-	// the show goes on (the next Escape is the stage's).
+	// entered ends the show too, unless a link confirmation or the show menu was open over it: that Escape closes the
+	// confirmation or the menu and the show goes on (the next Escape is the stage's).
 	useEffect(() => {
 		const onChange = (): void => {
 			setFullscreenActive(document.fullscreenElement !== null)
@@ -342,8 +350,10 @@ export function useDeckPresentation({
 
 			enteredFullscreen.current = false
 
+			const menu = showMenu.current
+
 			if (gate.current.pending) gate.current.cancel()
-			else setShowing(undefined)
+			else if (!menu.open && performance.now() - menu.escapedAt >= MENU_ESCAPE_MS) setShowing(undefined)
 		}
 
 		document.addEventListener("fullscreenchange", onChange)
@@ -406,6 +416,13 @@ export function useDeckPresentation({
 							overlay={presenter.stageOverlay}
 							onKey={presenter.stageProps.onKey}
 							onPointer={presenter.stageProps.onPointer}
+							ink={presenter.ink}
+							onMenu={state => {
+								showMenu.current = {
+									open: state === "open",
+									escapedAt: state === "escaped" ? performance.now() : showMenu.current.escapedAt
+								}
+							}}
 						/>
 						{refusedNote("show")}
 					</div>

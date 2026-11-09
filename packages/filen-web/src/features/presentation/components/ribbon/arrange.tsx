@@ -75,9 +75,10 @@ import { Switch } from "@/components/ui/switch"
 import { RibbonButton, RibbonMenuTrigger } from "@/features/office/components/ribbon/ribbonControls"
 import { DocxChoiceField } from "@/features/preview/components/docxFields"
 import { useCommandMenuFocus } from "@/features/preview/components/docxInsert.logic"
-import { useRibbonDialog } from "@/features/presentation/components/ribbon/ribbonDialogs"
+import { useRibbonDialog, type RibbonDialogRender } from "@/features/presentation/components/ribbon/ribbonDialogs"
 import type { PresentationGroups, PresentationRibbonEditor } from "@/features/presentation/components/ribbon/tabs"
-import { PRESENTATION_OBJECT_BINDINGS } from "@/features/presentation/lib/keymap/objects"
+import { usePresentationObjectBindings } from "@/features/presentation/lib/keymap/objects"
+import { usePresentationTextBindings } from "@/features/presentation/lib/keymap/text"
 import type { PreviewKey } from "@/lib/i18n"
 
 // The Arrange tab: stacking order, group and ungroup, align and distribute, rotate and flip, and the selected
@@ -138,29 +139,84 @@ export function PresentationShapeLayer({
 	editor: PresentationRibbonEditor
 	// Screen px per slide px (SlideView's onScale).
 	scale: number
-	onEnterText?: (shape: ShapeRef, at?: { readonly x: number; readonly y: number }) => void
+	onEnterText?: (shape: ShapeRef, at?: { readonly x: number; readonly y: number }, options?: { readonly selectAll?: boolean }) => void
 }) {
 	const { t } = useTranslation("preview")
+	const bindings = usePresentationObjectBindings()
+	const textBindings = usePresentationTextBindings()
 
 	return (
 		<ShapeEditLayer
 			render={editor.render}
 			size={editor.info.size}
+			{...(editor.info.grid === undefined ? {} : { grid: editor.info.grid })}
 			scale={scale}
 			selection={editor.selection}
 			editable={editor.info.editable}
-			bindings={PRESENTATION_OBJECT_BINDINGS}
+			bindings={bindings}
 			labels={shapeEditLabels(t)}
 			command={op => editor.command(op)}
 			{...(onEnterText === undefined ? {} : { onEnterText })}
+			{...(editor.text === undefined ? {} : { text: { editing: editor.text, session: editor.session, bindings: textBindings } })}
 		/>
 	)
 }
 
 // ---- shared ------------------------------------------------------------------------------------------------------
 
+// Group (or Ungroup every selected group, one op: one undo step, all or nothing) on the selection, the ribbon's and
+// the canvas menu's: the shapes the op makes are selected once its render arrives.
+export function runGrouping(
+	editor: PresentationRibbonEditor,
+	slide: SlideRef,
+	selected: readonly SlideShape[],
+	order: readonly number[],
+	kind: "group" | "ungroup"
+): void {
+	const op =
+		kind === "group"
+			? groupOp(
+					slide,
+					selected.map(shape => shape.id)
+				)
+			: ungroupOps(slide, selected)[0]
+
+	if (op === undefined) return
+
+	const withdraw = editor.selection.selectNew(slide, order)
+
+	void editor.command(op).then(result => {
+		if (!result.ok) withdraw()
+	})
+}
+
+// The Alt Text and Action dialogs on one shape, for useRibbonDialog's open.
+export function altTextDialog(shape: SlideShape, slide: SlideRef): RibbonDialogRender {
+	return (live, close) => (
+		<AltTextDialog
+			shape={shape}
+			slide={slide}
+			run={op => {
+				void live.command(op)
+			}}
+			onClose={close}
+		/>
+	)
+}
+
+export function actionDialog(shape: SlideShape, slide: SlideRef): RibbonDialogRender {
+	return (live, close) => (
+		<ActionDialog
+			shape={shape}
+			slide={slide}
+			editor={live}
+			onClose={close}
+		/>
+	)
+}
+
 // The selected shapes of the slide in view and the commands' common inputs.
-function useArrange(editor: PresentationRibbonEditor): {
+export function useArrange(editor: PresentationRibbonEditor): {
 	readonly slide: SlideRef | undefined
 	readonly selected: readonly SlideShape[]
 	readonly ids: readonly number[]
@@ -270,7 +326,7 @@ function OrderControls({ editor }: { editor: PresentationRibbonEditor }) {
 
 function GroupControls({ editor }: { editor: PresentationRibbonEditor }) {
 	const { t } = useTranslation("preview")
-	const { slide, selected, ids, order, run } = useArrange(editor)
+	const { slide, selected, order } = useArrange(editor)
 
 	return (
 		<>
@@ -279,10 +335,7 @@ function GroupControls({ editor }: { editor: PresentationRibbonEditor }) {
 				icon={<GroupIcon />}
 				disabled={slide === undefined || !canGroup(selected)}
 				onClick={() => {
-					if (slide === undefined) return
-
-					editor.selection.selectNew(slide, order)
-					run(groupOp(slide, ids))
+					if (slide !== undefined) runGrouping(editor, slide, selected, order, "group")
 				}}
 			/>
 			<RibbonButton
@@ -290,11 +343,7 @@ function GroupControls({ editor }: { editor: PresentationRibbonEditor }) {
 				icon={<UngroupIcon />}
 				disabled={slide === undefined || !canUngroup(selected)}
 				onClick={() => {
-					if (slide === undefined) return
-
-					editor.selection.selectNew(slide, order)
-					// Every selected group in one op: one undo step, all or nothing.
-					run(ungroupOps(slide, selected)[0])
+					if (slide !== undefined) runGrouping(editor, slide, selected, order, "ungroup")
 				}}
 			/>
 		</>
@@ -739,18 +788,7 @@ function ObjectControls({ editor }: { editor: PresentationRibbonEditor }) {
 				icon={<TextQuoteIcon />}
 				disabled={only === undefined}
 				onClick={() => {
-					if (only === undefined || slide === undefined) return
-
-					dialog.open((live, close) => (
-						<AltTextDialog
-							shape={only}
-							slide={slide}
-							run={op => {
-								void live.command(op)
-							}}
-							onClose={close}
-						/>
-					))
+					if (only !== undefined && slide !== undefined) dialog.open(altTextDialog(only, slide))
 				}}
 			/>
 			<RibbonButton
@@ -758,16 +796,7 @@ function ObjectControls({ editor }: { editor: PresentationRibbonEditor }) {
 				icon={<MousePointerClickIcon />}
 				disabled={only === undefined}
 				onClick={() => {
-					if (only === undefined || slide === undefined) return
-
-					dialog.open((live, close) => (
-						<ActionDialog
-							shape={only}
-							slide={slide}
-							editor={live}
-							onClose={close}
-						/>
-					))
+					if (only !== undefined && slide !== undefined) dialog.open(actionDialog(only, slide))
 				}}
 			/>
 			{dialog.view}

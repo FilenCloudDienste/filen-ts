@@ -65,6 +65,8 @@ export const previewPptxPresenter = {
 	previewPptxShortcutShowFirst: "Slide show: first slide",
 	/** Presentation shortcuts — last slide of a slideshow */
 	previewPptxShortcutShowLast: "Slide show: last slide",
+	/** Presentation shortcuts — show the next slide in a slideshow when it is a hidden slide */
+	previewPptxShortcutShowNextHidden: "Slide show: next slide if it is hidden",
 	/** Presentation shortcuts — black screen in a slideshow */
 	previewPptxShortcutShowBlack: "Slide show: black screen",
 	/** Presentation shortcuts — white screen in a slideshow */
@@ -75,6 +77,8 @@ export const previewPptxPresenter = {
 	previewPptxShortcutShowLaser: "Slide show: laser pointer",
 	/** Presentation shortcuts — turn the pen on or off in a slideshow */
 	previewPptxShortcutShowPen: "Slide show: pen",
+	/** Presentation shortcuts — turn the eraser on or off in a slideshow */
+	previewPptxShortcutShowEraser: "Slide show: eraser",
 	/** Presentation shortcuts — back to the normal pointer (no pen) in a slideshow */
 	previewPptxShortcutShowArrow: "Slide show: arrow pointer",
 	/** Presentation shortcuts — erase all ink on the current slide in a slideshow */

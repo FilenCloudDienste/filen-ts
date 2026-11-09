@@ -23,6 +23,10 @@ export const previewOfficeRibbon = {
 	previewOfficeRibbonUndo: "Undo",
 	/** Office editors — ribbon group: paste, cut and copy */
 	previewOfficeRibbonClipboard: "Clipboard",
+	/** Office editors — Clipboard group button: format painter (click copies the formatting for the next selection, double click keeps it on) */
+	previewOfficeFormatPainter: "Format painter",
+	/** Office editors — format painter tooltip while it is on for every selection until clicked again */
+	previewOfficeFormatPainterSticky: "Format painter (on until clicked again)",
 	/** Office editors — ribbon group: font, size and colours */
 	previewOfficeRibbonFont: "Font",
 	/** Office editors — ribbon group: bold, italic, underline, strikethrough (and in documents subscript, superscript) */

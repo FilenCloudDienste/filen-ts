@@ -12,6 +12,7 @@ import { RibbonButton } from "@/features/office/components/ribbon/ribbonControls
 import { AltTextDialog } from "@/features/presentation/components/ribbon/arrange"
 import { PictureSourceMenu } from "@/features/presentation/components/ribbon/insertObjects"
 import { useRibbonDialog } from "@/features/presentation/components/ribbon/ribbonDialogs"
+import { sizeGroup } from "@/features/presentation/components/ribbon/sizeControls"
 import type { PresentationGroups, PresentationRibbonEditor } from "@/features/presentation/components/ribbon/tabs"
 import type { PreviewKey } from "@/lib/i18n"
 
@@ -20,6 +21,11 @@ import type { PreviewKey } from "@/lib/i18n"
 
 const BUTTON = 30
 const MENU = 44
+
+// The selected shapes the Size group sizes: pictures the slide may edit.
+function isPicture(shape: SlideShape): boolean {
+	return shape.role === "picture" && shape.lock === undefined
+}
 
 function useSelectedPicture(editor: PresentationRibbonEditor): { readonly target: ShapeRef; readonly shape: SlideShape } | undefined {
 	const state = useShapeSelection(editor.selection)
@@ -342,6 +348,7 @@ export const pictureGroups: PresentationGroups = context => {
 					group="arrange"
 				/>
 			)
-		}
+		},
+		sizeGroup(context, editor, "pictureSize", isPicture)
 	]
 }

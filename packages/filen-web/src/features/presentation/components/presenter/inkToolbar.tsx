@@ -1,32 +1,15 @@
-import { useSyncExternalStore, type ReactNode } from "react"
+import { useSyncExternalStore } from "react"
 import { useTranslation } from "react-i18next"
-import { CircleDotIcon, EraserIcon, HighlighterIcon, MousePointer2Icon, PenLineIcon, Trash2Icon } from "lucide-react"
-import { INK_COLORS, type InkStore, type InkTool } from "@filen/office/react/presentation"
+import { Trash2Icon } from "lucide-react"
+import { INK_COLORS, type InkStore } from "@filen/office/react/presentation"
 import type { SlideRef } from "@filen/office/core/presentation"
 import { Button } from "@/components/ui/button"
 import { cn } from "@filen/shared"
-import type { PreviewKey } from "@/lib/i18n"
+import { INK_COLOR_LABELS, INK_TOOLS } from "@/features/presentation/components/presenter/inkTools"
 
 // The pointer and ink tools (arrow, pen, highlighter, laser pointer, eraser), the pen's colours and Erase all, in the
 // presenter view and over the stage. Plain buttons only: menus and tooltips portal to the page's body, which is the
 // wrong window for the presenter's popup.
-
-const TOOLS: readonly { readonly tool: InkTool; readonly label: PreviewKey; readonly icon: ReactNode }[] = [
-	{ tool: "none", label: "previewPptxInkArrow", icon: <MousePointer2Icon /> },
-	{ tool: "pen", label: "previewPptxInkPen", icon: <PenLineIcon /> },
-	{ tool: "highlighter", label: "previewPptxInkHighlighter", icon: <HighlighterIcon /> },
-	{ tool: "laser", label: "previewPptxInkLaser", icon: <CircleDotIcon /> },
-	{ tool: "eraser", label: "previewPptxInkEraser", icon: <EraserIcon /> }
-]
-
-const COLOR_LABELS: Readonly<Record<string, PreviewKey>> = {
-	FF0000: "previewPptxInkColorRed",
-	"0070C0": "previewPptxInkColorBlue",
-	"00B050": "previewPptxInkColorGreen",
-	FFFF00: "previewPptxInkColorYellow",
-	"000000": "previewPptxInkColorBlack",
-	FFFFFF: "previewPptxInkColorWhite"
-}
 
 export function InkToolbar({
 	ink,
@@ -56,7 +39,7 @@ export function InkToolbar({
 				event.stopPropagation()
 			}}
 		>
-			{TOOLS.map(entry => (
+			{INK_TOOLS.map(entry => (
 				<Button
 					key={entry.tool}
 					variant="ghost"
@@ -79,7 +62,7 @@ export function InkToolbar({
 					className="flex items-center gap-0.5 px-1"
 				>
 					{INK_COLORS.map(color => {
-						const label = COLOR_LABELS[color]
+						const label = INK_COLOR_LABELS[color]
 
 						return (
 							<button

@@ -1,5 +1,5 @@
 import type { ObjectKeyBindings } from "@filen/office/react/presentation"
-import type { ActionDef } from "@/lib/keymap/registry"
+import { useOverrides, type ActionDef } from "@/lib/keymap/registry"
 
 // Object commands of the presentation editor's slide canvas that a user may rebind: select all, group, ungroup and
 // the stacking order (PowerPoint's keys). The editing keys PowerPoint fixes (arrows nudge, Delete, Tab, Enter,
@@ -59,4 +59,19 @@ export function presentationObjectBindings(
 	return bindings as unknown as ObjectKeyBindings
 }
 
-export const PRESENTATION_OBJECT_BINDINGS: ObjectKeyBindings = presentationObjectBindings()
+// One bindings object per override record: the store swaps the record only when the user edits a binding, so the
+// canvas gets the same object between renders and its combo parse cache keeps hitting.
+const BY_OVERRIDES = new WeakMap<Readonly<Record<string, string>>, ObjectKeyBindings>()
+
+// The bindings for the mounted canvas, following overrides as the user changes them.
+export function usePresentationObjectBindings(): ObjectKeyBindings {
+	const overrides = useOverrides()
+	let bindings = BY_OVERRIDES.get(overrides)
+
+	if (bindings === undefined) {
+		bindings = presentationObjectBindings((id, fallback) => overrides[id] ?? fallback)
+		BY_OVERRIDES.set(overrides, bindings)
+	}
+
+	return bindings
+}

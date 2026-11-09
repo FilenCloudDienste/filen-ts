@@ -2,15 +2,17 @@ import { useState } from "react"
 import { useTranslation } from "react-i18next"
 import { PaintBucketIcon, PenLineIcon } from "lucide-react"
 import { oneStep, type DeckOp, type FillProps, type LineProps, type SlideRef } from "@filen/office/core/presentation"
-import { selectedShapes, useShapeSelection } from "@filen/office/react/presentation"
+import { selectedShapes, useShapeSelection, type SlideShape } from "@filen/office/react/presentation"
 import { cn } from "@filen/shared"
 import { Button } from "@/components/ui/button"
 import { DocxColorGrid } from "@/features/office/components/officeColorGrid"
 import { STANDARD_SWATCHES, keepFocus } from "@/features/office/lib/officeControls"
 import { DocxColorButton } from "@/features/preview/components/docxFormatControls"
+import { sizeGroup } from "@/features/presentation/components/ribbon/sizeControls"
 import type { PresentationGroups, PresentationRibbonEditor } from "@/features/presentation/components/ribbon/tabs"
 
-// The Shape Format tab: the fill and the outline (colour and weight) of the selected shapes, one op for all of them.
+// The Shape Format tab: the fill and the outline (colour and weight) of the selected shapes, one op for all of them,
+// and their size.
 // Colours are sRGB, which both formats hold as they are (ODF graphic properties take no theme colours).
 
 const BUTTON = 30
@@ -22,10 +24,15 @@ function solid(rgb: string): FillProps {
 	return { kind: "solid", color: { kind: "srgb", rgb } }
 }
 
+// The selected shapes this tab formats and sizes: shapes and placeholders the slide may edit.
+function formats(shape: SlideShape): boolean {
+	return (shape.role === "shape" || shape.role === "placeholder") && shape.lock === undefined
+}
+
 function useFormatTargets(editor: PresentationRibbonEditor): { readonly slide: SlideRef | undefined; readonly ids: readonly number[] } {
 	const state = useShapeSelection(editor.selection)
 	const ids = selectedShapes(editor.render, state)
-		.filter(shape => (shape.role === "shape" || shape.role === "placeholder") && shape.lock === undefined)
+		.filter(formats)
 		.map(shape => shape.id)
 
 	return { slide: editor.render?.ref, ids }
@@ -157,6 +164,7 @@ export const shapeFormatGroups: PresentationGroups = context => {
 					<OutlineControl editor={editor} />
 				</>
 			)
-		}
+		},
+		sizeGroup(context, editor, "shapeSize", formats)
 	]
 }

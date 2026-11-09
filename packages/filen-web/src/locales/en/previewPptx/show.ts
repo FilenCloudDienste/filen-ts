@@ -68,5 +68,17 @@ export const previewPptxShow = {
 	/** Slide show — note while a slide plays: its animations exceed what can be played, so it shows without them */
 	previewPptxShowTimingTooLarge: "This slide's animations are too complex to play. It is shown without them.",
 	/** Slide show — note while a slide plays: a text size animation is shown by scaling the text, so lines may look different than in PowerPoint */
-	previewPptxShowFontScaled: "A text size animation on this slide is shown by scaling the text."
+	previewPptxShowFontScaled: "A text size animation on this slide is shown by scaling the text.",
+	/** Slide show — accessible name of the menu a right click (or Shift+F10) opens during the show */
+	previewPptxShowMenu: "Slide show menu",
+	/** Slide show menu — submenu listing every slide, to go straight to one */
+	previewPptxShowMenuSeeAll: "See all slides",
+	/** Slide show menu, See all slides — a slide by its number in the presentation */
+	previewPptxShowMenuSlide: "Slide {{number}}",
+	/** Slide show menu, See all slides — a slide the show skips (hidden), by its number in the presentation */
+	previewPptxShowMenuSlideHidden: "Slide {{number}} (hidden)",
+	/** Slide show menu — submenu with the black and white screens */
+	previewPptxShowMenuScreen: "Screen",
+	/** Slide show menu — submenu with the pointer and ink tools (arrow, pen, highlighter, laser pointer, eraser) */
+	previewPptxShowMenuPointer: "Pointer options"
 }

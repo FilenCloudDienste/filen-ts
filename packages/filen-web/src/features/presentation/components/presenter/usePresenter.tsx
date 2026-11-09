@@ -10,7 +10,9 @@ import {
 	createShowKeys,
 	createShowSwipe,
 	DEFAULT_SHOW_BINDINGS,
+	INK_PEN_COLOR,
 	InkLayer,
+	showOptionsOf,
 	startShowTimer,
 	type InkStore,
 	type PresentationDocument,
@@ -237,6 +239,8 @@ export function usePresenter({ deck, editable, fullscreen, fullscreenActive, ret
 			setPosition(PRESENTER_START)
 			setTimer(startShowTimer(performance.now()))
 			ink.setTool("none")
+			// The deck's pen colour (Set Up Slide Show), PowerPoint's red without one.
+			ink.setDefaultPen(showOptionsOf(live.deck.info?.show).penColor ?? INK_PEN_COLOR)
 			wakeLock.set(true)
 		}
 

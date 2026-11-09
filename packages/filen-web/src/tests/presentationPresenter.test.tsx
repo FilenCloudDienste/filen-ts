@@ -3,7 +3,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { useState, type ReactNode } from "react"
-import { slideRef, type DeckOp } from "@filen/office/core/presentation"
+import { slideRef, type DeckOp, type NotesParagraph, type SlideRender } from "@filen/office/core/presentation"
 import type { CommandResult, PresentationSessionApi } from "@filen/office/dom/presentation"
 import {
 	DEFAULT_SHOW_BINDINGS,
@@ -459,5 +459,79 @@ describe("presenter view", () => {
 			for (const listener of gone) listener()
 		})
 		expect(document.activeElement).toBe(screen.getByTestId("stage"))
+	})
+})
+
+describe("presenter notes", () => {
+	it("shows the speaker notes with their formatting, bullets and numbers", () => {
+		vi.spyOn(window, "open").mockReturnValue(null)
+
+		const { controller, emit } = testController()
+		const notes: NotesParagraph[] = [
+			{ level: 0, start: 0, first: 0, runs: [{ text: "Say " }, { text: "this", b: true }, { text: " now", i: true, u: true }] },
+			{
+				level: 1,
+				align: "ctr",
+				start: 3,
+				first: -1.5,
+				marker: "1.",
+				runs: [{ text: "H" }, { text: "2", script: "sub" }, { text: "O" }]
+			}
+		]
+		const render10 = {
+			ref: slideRef(10),
+			index: 0,
+			revision: 1,
+			hidden: false,
+			background: {
+				width: 0,
+				height: 0,
+				commands: new Uint8Array(0),
+				coords: new Float32Array(0),
+				itemCount: 0,
+				itemFloats: new Float32Array(0),
+				itemInts: new Int32Array(0),
+				paints: [],
+				strokes: [],
+				images: [],
+				texts: [],
+				shadows: []
+			},
+			layers: [],
+			notesText: "Say this now\nH2O",
+			notes,
+			animated: false
+		} as unknown as SlideRender
+		let session: PresenterSession | undefined
+
+		render(
+			<Host
+				deck={{ ...deckOf(), renders: new Map([[slideRef(10), render10]]) }}
+				onSession={value => {
+					session = value
+				}}
+			/>
+		)
+		act(() => {
+			expect(session?.openPresenter()).toBe("sameWindow")
+			session?.attach(controller)
+			emit({ type: "slide", index: 0, slide: slideRef(10), step: 0, steps: 0 })
+		})
+
+		const region = screen.getByRole("region", { name: "Speaker notes" })
+		const bold = Array.from(region.querySelectorAll("span")).find(span => span.textContent === "this")
+
+		expect(bold?.style.fontWeight).toBe("700")
+		expect(Array.from(region.querySelectorAll("span")).find(span => span.textContent === " now")?.style.textDecorationLine).toBe(
+			"underline"
+		)
+		expect(region.querySelector("sub")?.textContent).toBe("2")
+
+		const numbered = region.querySelectorAll("p")[1]
+
+		expect(numbered?.textContent).toBe("1.H2O")
+		expect(numbered?.style.textAlign).toBe("center")
+		expect(numbered?.style.paddingInlineStart).toBe("3em")
+		expect(numbered?.style.textIndent).toBe("-1.5em")
 	})
 })

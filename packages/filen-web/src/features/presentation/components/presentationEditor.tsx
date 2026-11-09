@@ -3,10 +3,11 @@ import { useTranslation } from "react-i18next"
 import type { TFunction } from "i18next"
 import { toast } from "sonner"
 import { EyeIcon, PresentationIcon } from "lucide-react"
-import type { ShapeRef, SlideRef } from "@filen/office/core/presentation"
+import { addSlideOp, type ShapeRef, type SlideRef } from "@filen/office/core/presentation"
 import {
 	createShapeSelection,
 	createTextEditing,
+	firstPlaceholder,
 	paintEditorSlide,
 	paintSlide,
 	PresentationTextEditor,
@@ -17,7 +18,8 @@ import {
 	type PresentationDocument,
 	type PresentationStore,
 	type ShapeSelection,
-	type TextEditing
+	type TextEditing,
+	type TextNavigation
 } from "@filen/office/react/presentation"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -31,7 +33,7 @@ import { usePhoneWidth } from "@/features/office/components/ribbon/phoneMedia"
 import { onRibbonEscape, ribbonLanding } from "@/features/office/components/ribbon/ribbonFocus"
 import { keepFocus } from "@/features/office/lib/officeControls"
 import { usePreviewDownloadable } from "@/features/preview/lib/accessMode"
-import { SlideListContextMenu } from "@/features/presentation/components/contextMenu"
+import { SlideCanvasContextMenu, SlideListContextMenu } from "@/features/presentation/components/contextMenu"
 import { DeckNotes } from "@/features/presentation/components/deckChrome"
 import {
 	actionLabel,
@@ -77,6 +79,14 @@ import {
 } from "@/features/presentation/hooks/usePresentationSession"
 import { useDeckPresentation, type DeckKeyEvent } from "@/features/presentation/hooks/useDeckPresentation"
 import { presentationEditorKey } from "@/features/presentation/lib/keymap/editor"
+import {
+	presentationWheelZoom,
+	presentationZoom,
+	type PresentationZoom,
+	type PresentationZoomChange
+} from "@/features/presentation/lib/zoom"
+import { useLatestRef } from "@/lib/useLatestRef"
+import { PresentationStatusZoom } from "@/features/presentation/components/ribbon/view"
 import { usePresentationTextBindings } from "@/features/presentation/lib/keymap/text"
 import { DocxFindField } from "@/features/preview/components/docxToolbar"
 import { keyForEditor } from "@/lib/keymap/dialogGuard"
@@ -292,11 +302,33 @@ function onPaneKey(event: EditorKeyEvent, root: Element, focusSlide: () => void)
 	return true
 }
 
-// The keys the editor takes wherever it has focus (outside a text being typed in); the rail's own take the selection.
-function onEditorKey(event: EditorKeyEvent, editor: Editor, overrides: Readonly<Record<string, string>>): void {
-	if (event.defaultPrevented || isTextField(event.target)) return
+// The keys the editor takes wherever it has focus (outside a text being typed in, bar New Slide from a slide's text or
+// the notes, as PowerPoint); the rail's own take the selection.
+function onEditorKey(
+	event: EditorKeyEvent,
+	editor: Editor,
+	overrides: Readonly<Record<string, string>>,
+	zoom: (change: PresentationZoomChange) => void
+): void {
+	if (event.defaultPrevented) return
 
-	switch (presentationEditorKey(event, overrides)) {
+	const action = presentationEditorKey(event, overrides)
+
+	if (isTextField(event.target)) {
+		if (
+			action === "presentation.newSlide" &&
+			editor.editable &&
+			event.target instanceof Element &&
+			event.target.closest("[data-fo-text-editor]") !== null
+		) {
+			event.preventDefault()
+			editor.slides.add()
+		}
+
+		return
+	}
+
+	switch (action) {
 		case "presentation.undo":
 			event.preventDefault()
 			editor.undo()
@@ -312,6 +344,19 @@ function onEditorKey(event: EditorKeyEvent, editor: Editor, overrides: Readonly<
 		case "presentation.duplicateSlide":
 			event.preventDefault()
 			editor.slides.duplicate()
+			return
+		// Kept from the browser, whose own Ctrl+Plus would scale the ribbon with the slide.
+		case "presentation.zoomIn":
+			event.preventDefault()
+			zoom("in")
+			return
+		case "presentation.zoomOut":
+			event.preventDefault()
+			zoom("out")
+			return
+		case "presentation.zoomFit":
+			event.preventDefault()
+			zoom("fit")
 			return
 		default:
 			return
@@ -391,10 +436,17 @@ export function PresentationEditor({ store, document: deck, alt, item, variant, 
 	// The body open in the text editor (one store per deck: the ribbon's text groups read it), and its shape.
 	const [text] = useState(createTextEditing)
 	const [editingText, setEditingText] = useState<ShapeRef | undefined>(undefined)
-	// Where a double-click entered the body (slide px): the first caret goes there.
-	const [textAt, setTextAt] = useState<{ readonly x: number; readonly y: number } | undefined>(undefined)
-	// Screen px per slide px, as the slide view fits it.
+	// Where a double-click entered the body (slide px): the first caret goes there; "all": Enter, its text selected.
+	const [textAt, setTextAt] = useState<{ readonly x: number; readonly y: number } | "all" | undefined>(undefined)
+	// Screen px per slide px, as the slide view shows it (fitting, or at the zoom).
 	const [scale, setScale] = useState(1)
+	// Fit to the window, or a zoom; this session's only, never written to the file.
+	const [zoomMode, setZoomMode] = useState<PresentationZoom>("fit")
+	// Read by the wheel's steps, which build on the zoom shown.
+	const scaleRef = useLatestRef(scale)
+	const zoomBy = (change: PresentationZoomChange): void => {
+		setZoomMode(previous => presentationZoom(previous, scaleRef.current, change))
+	}
 	// The find field in place of the command row (Mod+F; with its replace field, the editors' replace key).
 	const [find, setFind] = useState({ open: false, replace: false, focus: 0 })
 	// The ribbon's command row mounts in a transition after the first paint: its controls are most of the editor's
@@ -420,6 +472,63 @@ export function PresentationEditor({ store, document: deck, alt, item, variant, 
 	useEffect(() => {
 		store.setWindow(index)
 	}, [store, index])
+
+	// The body a cell or placeholder key went to (the one it left is closed, its text sent): another cell or
+	// placeholder, a cell of a row added at the table's bottom, or the first placeholder of a new slide on this layout.
+	const navigateText = (to: TextNavigation): void => {
+		setTextAt(undefined)
+
+		if (to.kind === "open") {
+			shapes.set([to.shape.id])
+			setEditingText(to.shape)
+
+			return
+		}
+
+		setEditingText(undefined)
+
+		if (to.kind === "addRow") {
+			void editor.command({ family: "table", kind: "insertRows", target: to.table, at: to.at, count: 1 }).then(result => {
+				if (result.ok) setEditingText(to.shape)
+			})
+
+			return
+		}
+
+		const layout = render?.layout
+
+		if (layout === undefined) return
+
+		const at = index + 1
+
+		void editor.run(addSlideOp(at, layout), at).then(ok => {
+			const added = ok ? store.getSnapshot().slides[at]?.ref : undefined
+
+			if (added === undefined) return
+
+			// Its first placeholder opens once the new slide has rendered.
+			const open = (): boolean => {
+				const shown = store.getSnapshot().renders.get(added)
+
+				if (shown === undefined) return false
+
+				const first = firstPlaceholder(shown)
+
+				if (first !== undefined) {
+					shapes.set([first.id])
+					setEditingText(first)
+				}
+
+				return true
+			}
+
+			if (open()) return
+
+			const off = store.subscribe(() => {
+				if (open()) off()
+			})
+		})
+	}
 
 	// The slide takes focus as the deck opens (unless something else already has it), so keys page slides from the
 	// start instead of reaching the preview's own file paging.
@@ -548,8 +657,32 @@ export function PresentationEditor({ store, document: deck, alt, item, variant, 
 	useEditorLayerKeys(rootRef, (event, root) => {
 		if (show.onKey(event) || onPaneKey(event, root, focusCanvas)) return
 
-		onEditorKey(event, editor, overrides)
+		onEditorKey(event, editor, overrides, zoomBy)
 	})
+
+	// Ctrl/Cmd+wheel (a trackpad pinch) zooms the slide, as the document editor's page; a plain wheel scrolls. A native
+	// non-passive listener, so the browser's own page zoom stays out.
+	useEffect(() => {
+		const canvas = canvasRef.current
+
+		if (canvas === null) return undefined
+
+		const onWheel = (event: WheelEvent): void => {
+			if (!event.ctrlKey && !event.metaKey) return
+
+			event.preventDefault()
+
+			const { deltaY } = event
+
+			setZoomMode(previous => presentationWheelZoom(previous, scaleRef.current, deltaY))
+		}
+
+		canvas.addEventListener("wheel", onWheel, { passive: false })
+
+		return () => {
+			canvas.removeEventListener("wheel", onWheel)
+		}
+	}, [scaleRef])
 	const scope: PresentationEditorScope = {
 		editor,
 		view: {
@@ -568,7 +701,8 @@ export function PresentationEditor({ store, document: deck, alt, item, variant, 
 				onSave()
 			},
 			askSection: setSectionDialog,
-			openFind
+			openFind,
+			zoom: { scale, fit: zoomMode === "fit", set: zoomBy }
 		}
 	}
 	const session = deck.session
@@ -601,6 +735,7 @@ export function PresentationEditor({ store, document: deck, alt, item, variant, 
 				dirty={deck.dirty}
 			/>
 			{reasons.length > 0 ? <ViewOnlyBadge reasons={reasons} /> : null}
+			{count === 0 ? null : <PresentationStatusZoom />}
 			<Button
 				variant="ghost"
 				size="sm"
@@ -654,7 +789,7 @@ export function PresentationEditor({ store, document: deck, alt, item, variant, 
 					)
 						return
 
-					onEditorKey(event, editor, overrides)
+					onEditorKey(event, editor, overrides, zoomBy)
 					onPageKey(event, show.showing, step => {
 						go(step === "first" ? 0 : step === "last" ? count - 1 : index + step)
 					})
@@ -713,102 +848,117 @@ export function PresentationEditor({ store, document: deck, alt, item, variant, 
 						/>
 					)}
 					<div className="flex min-h-0 min-w-0 flex-1 flex-col">
-						<div
-							ref={canvasRef}
-							data-preview-surface
-							tabIndex={0}
-							{...(slideEditor === undefined ? {} : pictureDrop)}
-							className="relative min-h-0 flex-1 bg-muted/40 p-3 outline-none focus-visible:ring-[3px] focus-visible:ring-ring/30"
+						<SlideCanvasContextMenu
+							editor={slideEditor}
+							disabled={show.showing}
+							onEditText={shape => {
+								setTextAt(undefined)
+								setEditingText(shape)
+							}}
 						>
-							{count === 0 ? (
-								<p className="flex size-full items-center justify-center p-4 text-center text-sm text-muted-foreground">
-									{t("previewPptxEmptyDeck")}
-								</p>
-							) : show.showing ? null : (
-								<SlideView
-									render={render}
-									size={size}
-									painter={editor.editable ? paintEditorSlide : paintSlide}
-									{...(session === undefined ? {} : { session })}
-									label={t("previewPptxSlideLabel", { current: index + 1, total: count })}
-									actionLabel={(action, layer) => actionLabel(t, action, layer)}
-									mode={editor.editable ? "edit" : "view"}
-									actions={show.actions}
-									className="size-full"
-									onScale={setScale}
-									overlay={
-										slideEditor === undefined ? (
-											<PresentationMediaFrames
-												render={render}
-												session={session}
-												scale={scale}
-												notices={deck.notices}
-												actions={show.actions}
-											/>
-										) : (
-											<>
-												{/* The media under the selection layer; their play controls in the layer above it (below). */}
+							<div
+								ref={canvasRef}
+								data-preview-surface
+								tabIndex={0}
+								{...(slideEditor === undefined ? {} : pictureDrop)}
+								className="relative min-h-0 flex-1 bg-muted/40 p-3 outline-none focus-visible:ring-[3px] focus-visible:ring-ring/30"
+							>
+								{count === 0 ? (
+									<p className="flex size-full items-center justify-center p-4 text-center text-sm text-muted-foreground">
+										{t("previewPptxEmptyDeck")}
+									</p>
+								) : show.showing ? null : (
+									<SlideView
+										render={render}
+										size={size}
+										painter={editor.editable ? paintEditorSlide : paintSlide}
+										{...(session === undefined ? {} : { session })}
+										label={t("previewPptxSlideLabel", { current: index + 1, total: count })}
+										actionLabel={(action, layer) => actionLabel(t, action, layer)}
+										mode={editor.editable ? "edit" : "view"}
+										actions={show.actions}
+										className="size-full"
+										{...(zoomMode === "fit" ? {} : { zoom: zoomMode })}
+										onScale={setScale}
+										overlay={
+											slideEditor === undefined ? (
 												<PresentationMediaFrames
 													render={render}
-													session={slideEditor.session}
+													session={session}
 													scale={scale}
 													notices={deck.notices}
 													actions={show.actions}
-													controlsHost={mediaControls}
 												/>
-												<PresentationShapeLayer
-													editor={slideEditor}
-													scale={scale}
-													onEnterText={(shape, at) => {
-														setTextAt(at)
-														// A table opens the cell under the press.
-														setEditingText(tableCellAt(render, shape, at))
-													}}
-												/>
-												<PresentationTableRange
-													editor={slideEditor}
-													scale={scale}
-												/>
-												<PresentationMotionPaths
-													editor={slideEditor}
-													scale={scale}
-												/>
-												<div
-													ref={setMediaControls}
-													className="pointer-events-none absolute inset-0"
-												/>
-												<SmartArtPrompts
-													editor={slideEditor}
-													scale={scale}
-												/>
-												{editingText === undefined || editingText.slide !== ref ? null : (
-													<PresentationTextEditor
-														key={`${String(editingText.slide)}:${String(editingText.id)}:${editingText.cell === undefined ? "" : `${String(editingText.cell.row)}:${String(editingText.cell.col)}`}`}
+											) : (
+												<>
+													{/* The media under the selection layer; their play controls in the layer above it (below). */}
+													<PresentationMediaFrames
+														render={render}
 														session={slideEditor.session}
-														shape={editingText}
 														scale={scale}
-														editing={text}
-														bindings={textBindings}
-														labels={presentationTextLabels(t)}
-														{...(render === undefined ? {} : { render })}
-														{...(textAt === undefined ? {} : { at: textAt })}
-														readOnly={!editor.editable}
-														onExit={() => {
-															setEditingText(undefined)
-														}}
-														onRefused={reason => {
-															toast.error(t(refusalKey(reason)))
+														notices={deck.notices}
+														actions={show.actions}
+														controlsHost={mediaControls}
+													/>
+													<PresentationShapeLayer
+														editor={slideEditor}
+														scale={scale}
+														onEnterText={(shape, at, options) => {
+															setTextAt(at ?? (options?.selectAll === true ? "all" : undefined))
+															// A table opens the cell under the press.
+															setEditingText(tableCellAt(render, shape, at))
 														}}
 													/>
-												)}
-											</>
-										)
-									}
-								/>
-							)}
-							{show.showing ? null : show.refusedNote("canvas")}
-							{show.showing || slideEditor === undefined ? null : <AnimationPreview editor={slideEditor} />}
-						</div>
+													<PresentationTableRange
+														editor={slideEditor}
+														scale={scale}
+													/>
+													<PresentationMotionPaths
+														editor={slideEditor}
+														scale={scale}
+													/>
+													<div
+														ref={setMediaControls}
+														className="pointer-events-none absolute inset-0"
+													/>
+													<SmartArtPrompts
+														editor={slideEditor}
+														scale={scale}
+													/>
+													{editingText === undefined || editingText.slide !== ref ? null : (
+														<PresentationTextEditor
+															key={`${String(editingText.slide)}:${String(editingText.id)}:${editingText.cell === undefined ? "" : `${String(editingText.cell.row)}:${String(editingText.cell.col)}`}`}
+															session={slideEditor.session}
+															shape={editingText}
+															scale={scale}
+															editing={text}
+															bindings={textBindings}
+															labels={presentationTextLabels(t)}
+															{...(render === undefined ? {} : { render })}
+															{...(textAt === undefined
+																? {}
+																: textAt === "all"
+																	? { selectAll: true }
+																	: { at: textAt })}
+															readOnly={!editor.editable}
+															onNavigate={navigateText}
+															onExit={() => {
+																setEditingText(undefined)
+															}}
+															onRefused={reason => {
+																toast.error(t(refusalKey(reason)))
+															}}
+														/>
+													)}
+												</>
+											)
+										}
+									/>
+								)}
+								{show.showing ? null : show.refusedNote("canvas")}
+								{show.showing || slideEditor === undefined ? null : <AnimationPreview editor={slideEditor} />}
+							</div>
+						</SlideCanvasContextMenu>
 						{notesOpen && count > 0 ? (
 							<PresentationNotesPane
 								text={render?.notesText ?? ""}

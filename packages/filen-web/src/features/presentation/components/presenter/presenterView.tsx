@@ -20,6 +20,7 @@ import {
 	resumeTimer,
 	timerElapsed,
 	InkLayer,
+	NotesText,
 	paintSlide,
 	SlideView,
 	type InkStore,
@@ -209,7 +210,8 @@ export function PresenterView({
 	const size = deck.info?.size ?? DEFAULT_SLIDE_SIZE
 	const slide = deck.slides[position.index]
 	const next = presenterNext(position, deck.slides, sequence)
-	const notes = slide === undefined ? "" : (deck.renders.get(slide.ref)?.notesText ?? "")
+	const render = slide === undefined ? undefined : deck.renders.get(slide.ref)
+	const notes = render?.notesText ?? ""
 	const total = deck.slides.length
 
 	// The keys go to the presenter view as soon as it shows, and again whenever its window gets focus with nothing
@@ -403,7 +405,13 @@ export function PresenterView({
 							style={{ fontSize: NOTES_SIZES[notesSize] }}
 							tabIndex={0}
 						>
-							{notes === "" ? <span className="text-muted-foreground">{t("previewPptxPresenterNoNotes")}</span> : notes}
+							{render?.notes !== undefined ? (
+								<NotesText paragraphs={render.notes} />
+							) : notes === "" ? (
+								<span className="text-muted-foreground">{t("previewPptxPresenterNoNotes")}</span>
+							) : (
+								notes
+							)}
 						</div>
 					</section>
 				</div>

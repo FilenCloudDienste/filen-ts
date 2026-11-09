@@ -86,12 +86,6 @@ export const previewPptxSmartArt = {
 	previewPptxSmartArtChangeStyle: "Style",
 	/** Presentation editor — SmartArt Design ribbon: menu of color sets */
 	previewPptxSmartArtChangeColors: "Change colors",
-	/** Presentation editor — SmartArt Format ribbon: group with the graphic's height and width */
-	previewPptxSmartArtSize: "Size",
-	/** Presentation editor — SmartArt Format ribbon: height of the graphic; {{unit}} is "cm" or "in" */
-	previewPptxSmartArtHeight: "Height ({{unit}})",
-	/** Presentation editor — SmartArt Format ribbon: width of the graphic; {{unit}} is "cm" or "in" */
-	previewPptxSmartArtWidth: "Width ({{unit}})",
 	/** Presentation editor — text pane: accessible name of the pane beside the slide */
 	previewPptxSmartArtTextPaneLabel: "SmartArt text pane",
 	/** Presentation editor — text pane: heading */

@@ -65,6 +65,8 @@ export const previewPptxEditor = {
 	previewPptxEditorMenuLayout: "Layout",
 	/** Slide list menu — puts the selected slides' placeholders back as their layout has them */
 	previewPptxEditorMenuReset: "Reset slide",
+	/** Slide canvas menu — opens the right-clicked shape's text for editing */
+	previewPptxEditorMenuEditText: "Edit text",
 	/** Slide list menu — submenu moving the selected slides */
 	previewPptxEditorMenuMove: "Move slide",
 	/** Slide list menu → Move slide — to the start of the presentation */

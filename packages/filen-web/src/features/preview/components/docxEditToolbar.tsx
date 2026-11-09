@@ -77,7 +77,7 @@ import {
 	type DocxViewOnlyReason
 } from "@/features/preview/components/docxViewer.logic"
 import { DocxFindField, PasswordBadge, ViewOnlyBadge, type PasswordIntegrity } from "@/features/preview/components/docxToolbar"
-import { ZoomControls, ZoomMenuContent } from "@/features/preview/components/commandBarControls"
+import { StatusZoomMenu, ZoomControls } from "@/features/preview/components/commandBarControls"
 import { ZOOM_CONTROLS_WIDTH } from "@/features/preview/components/commandBar.logic"
 import { goToPageIndex, type DocxPageStore } from "@/features/preview/components/docxGoTo.logic"
 import { OfficeRibbon, type RibbonGroup, type RibbonTab } from "@/features/office/components/ribbon/officeRibbon"
@@ -89,8 +89,7 @@ import {
 	DropdownMenuContent,
 	DropdownMenuItem,
 	DropdownMenuRadioGroup,
-	DropdownMenuRadioItem,
-	DropdownMenuTrigger
+	DropdownMenuRadioItem
 } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -507,45 +506,6 @@ function FindMenu({ onFindOpen, apple }: { onFindOpen: (replace: boolean) => voi
 					</span>
 				</DropdownMenuItem>
 			</DropdownMenuContent>
-		</DropdownMenu>
-	)
-}
-
-// The status bar's zoom percentage: the zoom menu (steps, fit to width), as Word's opens its Zoom dialog.
-function StatusZoomMenu({ percent, fit, onZoom }: { percent: number; fit: boolean; onZoom: (change: "fit" | number) => void }) {
-	const { t } = useTranslation("preview")
-	const focus = useCommandMenuFocus()
-
-	return (
-		<DropdownMenu onOpenChange={focus.opened}>
-			<DropdownMenuTrigger
-				render={
-					<Button
-						variant="ghost"
-						size="xs"
-						aria-label={t("previewCommandBarZoomLevel", { percent })}
-						className="w-12 shrink-0 px-0 text-muted-foreground tabular-nums max-sm:hidden"
-						onMouseDown={keepFocus}
-					>
-						{t("previewDocxZoomIndicator", { percent })}
-					</Button>
-				}
-			/>
-			<ZoomMenuContent
-				percent={percent}
-				presets={DOCX_ZOOM_PRESETS}
-				fits={DOCX_ZOOM_FITS}
-				mode={fit ? "fitWidth" : "custom"}
-				finalFocus={focus.finalFocus}
-				onPercent={next => {
-					focus.kept()
-					onZoom(next / 100)
-				}}
-				onFit={() => {
-					focus.kept()
-					onZoom("fit")
-				}}
-			/>
 		</DropdownMenu>
 	)
 }
@@ -1020,8 +980,15 @@ export function DocxEditToolbar(props: DocxEditToolbarProps) {
 						)}
 						<StatusZoomMenu
 							percent={percent}
-							fit={props.zoomFit}
-							onZoom={props.onZoom}
+							presets={DOCX_ZOOM_PRESETS}
+							fits={DOCX_ZOOM_FITS}
+							mode={props.zoomFit ? "fitWidth" : "custom"}
+							onPercent={next => {
+								props.onZoom(next / 100)
+							}}
+							onFit={() => {
+								props.onZoom("fit")
+							}}
 						/>
 					</>
 				}

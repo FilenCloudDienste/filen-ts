@@ -42,6 +42,28 @@ export const previewPptxRibbon = {
 	previewPptxRibbonLayout: "Layout",
 	/** Presentation editor — a layout in the Layout menus when the file gives it no name; {{number}} counts from 1 */
 	previewPptxRibbonLayoutNumber: "Layout {{number}}",
+	/** Presentation editor — a Title Slide layout in the Layout menus when the file gives it no name */
+	previewPptxRibbonLayoutTitle: "Title Slide",
+	/** Presentation editor — a Title and Content layout in the Layout menus when the file gives it no name */
+	previewPptxRibbonLayoutObj: "Title and Content",
+	/** Presentation editor — a Section Header layout in the Layout menus when the file gives it no name */
+	previewPptxRibbonLayoutSecHead: "Section Header",
+	/** Presentation editor — a Two Content layout in the Layout menus when the file gives it no name */
+	previewPptxRibbonLayoutTwoObj: "Two Content",
+	/** Presentation editor — a Comparison layout in the Layout menus when the file gives it no name */
+	previewPptxRibbonLayoutTwoTxTwoObj: "Comparison",
+	/** Presentation editor — a Title Only layout in the Layout menus when the file gives it no name */
+	previewPptxRibbonLayoutTitleOnly: "Title Only",
+	/** Presentation editor — a Blank layout in the Layout menus when the file gives it no name */
+	previewPptxRibbonLayoutBlank: "Blank",
+	/** Presentation editor — a Content with Caption layout in the Layout menus when the file gives it no name */
+	previewPptxRibbonLayoutObjTx: "Content with Caption",
+	/** Presentation editor — a Picture with Caption layout in the Layout menus when the file gives it no name */
+	previewPptxRibbonLayoutPicTx: "Picture with Caption",
+	/** Presentation editor — a Title and Vertical Text layout in the Layout menus when the file gives it no name */
+	previewPptxRibbonLayoutVertTx: "Title and Vertical Text",
+	/** Presentation editor — a Vertical Title and Text layout in the Layout menus when the file gives it no name */
+	previewPptxRibbonLayoutVertTitleAndTx: "Vertical Title and Text",
 	/** Presentation editor — heading of one slide master's layouts in the Layout menus when the deck has several masters; {{number}} counts from 1 */
 	previewPptxRibbonMasterNumber: "Slide master {{number}}",
 	/** Presentation editor — ribbon button: puts the placeholders of the selected slides back where their layout has them, with its formatting */
@@ -57,5 +79,13 @@ export const previewPptxRibbon = {
 	/** Presentation editor — ribbon group on the View tab: the slide list and the notes pane */
 	previewPptxRibbonPanes: "Show",
 	/** Presentation editor — ribbon button at the end of the tab row: starts the slide show from the current slide */
-	previewPptxRibbonPresent: "Present"
+	previewPptxRibbonPresent: "Present",
+	/** Presentation editor — View tab ▸ Zoom: fits the whole slide in the window again (PowerPoint's Fit to Window) */
+	previewPptxRibbonFitToWindow: "Fit to Window",
+	/** Shortcuts list — zooms the slide in, in the presentation editor */
+	previewPptxEditorKeyZoomIn: "Zoom in (presentations)",
+	/** Shortcuts list — zooms the slide out, in the presentation editor */
+	previewPptxEditorKeyZoomOut: "Zoom out (presentations)",
+	/** Shortcuts list — fits the whole slide in the window, in the presentation editor */
+	previewPptxEditorKeyZoomFit: "Zoom to fit (presentations)"
 }

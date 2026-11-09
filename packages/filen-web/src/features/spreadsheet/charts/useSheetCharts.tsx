@@ -209,7 +209,7 @@ export function useSheetCharts({ grid, gridRef, handle, canEdit, text }: SheetCh
 	}
 
 	const renderChart = (object: SheetDrawingObject, width: number, height: number, scale = 1): ReactNode =>
-		object.chartPart === undefined || object.kind !== "chart" ? undefined : (
+		object.chartPart === undefined || (object.kind !== "chart" && object.kind !== "chartex") ? undefined : (
 			<SheetChart
 				part={object.chartPart}
 				width={width / (scale > 0 ? scale : 1)}

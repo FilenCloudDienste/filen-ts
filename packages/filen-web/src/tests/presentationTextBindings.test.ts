@@ -1,3 +1,4 @@
+import { DEFAULT_TEXT_BINDINGS } from "@filen/office/react/presentation"
 import { describe, expect, it } from "vitest"
 import { presentationTextBindings } from "@/features/presentation/lib/keymap/text"
 
@@ -13,6 +14,18 @@ describe("presentation text key bindings", () => {
 		expect(bindings.underline).toBe("mod+u")
 		expect(bindings.lineBreak).toBe("shift+enter")
 		expect(bindings.levelUp).toBe("shift+tab")
+	})
+
+	it("default to the text editor's own PowerPoint keys, subscript, superscript and clear formatting included", () => {
+		const bindings = presentationTextBindings({})
+
+		expect(bindings.subscript).toBe("mod+ctrl+=")
+		expect(bindings.superscript).toBe("mod+ctrl+shift+=")
+		expect(bindings.clearFormatting).toBe("ctrl+space")
+
+		for (const command of ["subscript", "superscript", "clearFormatting"] as const) {
+			expect(bindings[command]).toBe(DEFAULT_TEXT_BINDINGS[command])
+		}
 	})
 
 	it("take a user's override, including the shared editor actions", () => {

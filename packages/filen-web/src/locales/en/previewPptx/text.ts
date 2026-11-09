@@ -142,6 +142,12 @@ export const previewPptxText = {
 	previewPptxTextLinkCancel: "Cancel",
 	/** Shortcut description — presentation editor: underline the selected text */
 	previewPptxShortcutUnderline: "Underline",
+	/** Shortcut description — presentation editor: lowers the selected text below the line, again removes it */
+	previewPptxShortcutSubscript: "Subscript",
+	/** Shortcut description — presentation editor: raises the selected text above the line, again removes it */
+	previewPptxShortcutSuperscript: "Superscript",
+	/** Shortcut description — presentation editor: removes the selected text's character formatting */
+	previewPptxShortcutClearFormatting: "Clear formatting",
 	/** Shortcut description — presentation editor: the next larger font size */
 	previewPptxShortcutGrowFont: "Increase font size",
 	/** Shortcut description — presentation editor: the next smaller font size */
@@ -159,5 +165,15 @@ export const previewPptxText = {
 	/** Shortcut description — presentation editor: one list level down (at a paragraph's start) */
 	previewPptxShortcutLevelDown: "Increase list level",
 	/** Shortcut description — presentation editor: one list level up */
-	previewPptxShortcutLevelUp: "Decrease list level"
+	previewPptxShortcutLevelUp: "Decrease list level",
+	/** Shortcut description — presentation editor: the paragraph one level up */
+	previewPptxShortcutPromote: "Promote paragraph",
+	/** Shortcut description — presentation editor: the paragraph one level down */
+	previewPptxShortcutDemote: "Demote paragraph",
+	/** Shortcut description — presentation editor: the selected paragraphs above the one before them */
+	previewPptxShortcutMoveParagraphUp: "Move paragraphs up",
+	/** Shortcut description — presentation editor: the selected paragraphs below the one after them */
+	previewPptxShortcutMoveParagraphDown: "Move paragraphs down",
+	/** Shortcut description — presentation editor: the next title or body placeholder, or a new slide after the last */
+	previewPptxShortcutNextPlaceholder: "Next placeholder"
 }

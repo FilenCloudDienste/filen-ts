@@ -81,7 +81,7 @@ describe("presentation registries", () => {
 		expect(presentationTabGroups(tab("insert"), all).map(group => group.id)).toContain("slides")
 		expect(presentationTabGroups(tab("home"), viewOnly).map(group => group.id)).not.toContain("slides")
 		expect(presentationTabGroups(tab("insert"), viewOnly)).toEqual([])
-		expect(presentationTabGroups(tab("view"), viewOnly).map(group => group.id)).toEqual(["panes"])
+		expect(presentationTabGroups(tab("view"), viewOnly).map(group => group.id)).toEqual(["panes", "zoom"])
 	})
 
 	it("lists one File menu entry component per owner, and names its keys uniquely", () => {

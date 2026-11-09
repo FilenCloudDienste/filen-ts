@@ -650,7 +650,7 @@ function PreviewStage({ editor, request }: { editor: PresentationRibbonEditor; r
 
 	return (
 		<div
-			className="absolute inset-0 [transform:translateZ(0)] overflow-hidden [&_.fo-show-stage]:cursor-default! [&_.fo-show-stage]:bg-muted!"
+			className="absolute inset-0 [transform:translateZ(0)] overflow-hidden [&_.fo-show-stage]:bg-muted!"
 			style={STAGE_STYLE}
 		>
 			<SlideShow
@@ -668,6 +668,7 @@ function PreviewStage({ editor, request }: { editor: PresentationRibbonEditor; r
 				}}
 				label={t("previewPptxAnimPreview")}
 				slideLabel={() => ""}
+				autoHidePointer={false}
 				onPointer={event => {
 					if (event.type === "pointerdown") animationPane.stop()
 

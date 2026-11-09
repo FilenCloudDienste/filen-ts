@@ -294,13 +294,15 @@ export async function insertMediaShape(
 	const render = editor.render?.ref === slide ? editor.render : (await editor.session.render([slide]))[0]
 
 	if (media.durationMs !== undefined) noteMediaDuration(editor.session, `inserted:${String(media.id)}`, media.durationMs / 1000)
-	if (render !== undefined)
-		editor.selection.selectNew(
-			slide,
-			slideShapes(render).map(entry => entry.id)
-		)
+	const withdraw =
+		render === undefined
+			? undefined
+			: editor.selection.selectNew(
+					slide,
+					slideShapes(render).map(entry => entry.id)
+				)
 
-	await editor.command({ family: "media", kind: "insert", slide, shape, media })
+	if (!(await editor.command({ family: "media", kind: "insert", slide, shape, media })).ok) withdraw?.()
 }
 
 // Inserts one medium into the slide in view; resolves once it is in (or refused, with a toast).

@@ -100,23 +100,54 @@ export function viewOnlyKey(reason: PresentationViewOnlyReason): PreviewKey {
 	return reason === "legacy" ? "previewPptxEditorViewOnlyLegacy" : viewOnlyReasonKey(reason)
 }
 
-// The deck's layouts as the layout menus list them: by master, each layout numbered within its master (the name a
-// menu shows when the file gives none).
+// The deck's layouts as the layout menus list them: by master, each layout numbered within its master, with its
+// ST_SlideLayoutType (what a menu names it by when the file gives no name, else by its number).
+export interface LayoutChoice {
+	readonly ref: SlideRef
+	readonly number: number
+	readonly name: string | undefined
+	readonly type: string | undefined
+}
+
 export interface LayoutChoiceGroup {
 	readonly master: SlideRef
-	readonly layouts: readonly { readonly ref: SlideRef; readonly number: number; readonly name: string | undefined }[]
+	readonly layouts: readonly LayoutChoice[]
 }
 
 export function layoutsByMaster(layouts: readonly PresentationLayoutInfo[]): LayoutChoiceGroup[] {
-	const groups = new Map<SlideRef, { ref: SlideRef; number: number; name: string | undefined }[]>()
+	const groups = new Map<SlideRef, LayoutChoice[]>()
 
 	for (const layout of layouts) {
 		const own = groups.get(layout.master) ?? []
 		const name = layout.name?.trim()
 
-		own.push({ ref: layout.ref, number: own.length + 1, name: name === "" ? undefined : name })
+		own.push({ ref: layout.ref, number: own.length + 1, name: name === "" ? undefined : name, type: layout.type })
 		groups.set(layout.master, own)
 	}
 
 	return [...groups].map(([master, own]) => ({ master, layouts: own }))
+}
+
+// PowerPoint's names of the layout types of its default master (ECMA-376 §19.7.15 ST_SlideLayoutType).
+const LAYOUT_TYPE_KEYS: Readonly<Record<string, PreviewKey>> = {
+	title: "previewPptxRibbonLayoutTitle",
+	obj: "previewPptxRibbonLayoutObj",
+	secHead: "previewPptxRibbonLayoutSecHead",
+	twoObj: "previewPptxRibbonLayoutTwoObj",
+	twoTxTwoObj: "previewPptxRibbonLayoutTwoTxTwoObj",
+	titleOnly: "previewPptxRibbonLayoutTitleOnly",
+	blank: "previewPptxRibbonLayoutBlank",
+	objTx: "previewPptxRibbonLayoutObjTx",
+	picTx: "previewPptxRibbonLayoutPicTx",
+	vertTx: "previewPptxRibbonLayoutVertTx",
+	vertTitleAndTx: "previewPptxRibbonLayoutVertTitleAndTx"
+}
+
+// What a layout menu shows for a layout: the file's name, else its type's name, else "Layout N".
+export function layoutLabel(t: TFunction<"preview">, layout: LayoutChoice): string {
+	if (layout.name !== undefined) return layout.name
+
+	const key = layout.type === undefined ? undefined : LAYOUT_TYPE_KEYS[layout.type]
+
+	return key === undefined ? t("previewPptxRibbonLayoutNumber", { number: layout.number }) : t(key)
 }

@@ -17,7 +17,8 @@ import {
 	smartArtPane
 } from "@/features/presentation/components/ribbon/insertSmartArt"
 import { smartartDesignGroups } from "@/features/presentation/components/ribbon/smartartDesign"
-import { resizedXfrm, smartartFormatGroups } from "@/features/presentation/components/ribbon/smartartFormat"
+import { resizedXfrm } from "@/features/presentation/components/ribbon/sizeControls"
+import { smartartFormatGroups } from "@/features/presentation/components/ribbon/smartartFormat"
 import type { PresentationGroups, PresentationRibbonContext } from "@/features/presentation/components/ribbon/tabs"
 import { previewPptxSmartArt } from "@/locales/en/previewPptx/smartart"
 import "@/lib/i18n"

@@ -101,7 +101,7 @@ export function SetUpShowDialog({
 
 				if (rangeInvalid) return
 
-				onApply(setUpOptions(form))
+				onApply(setUpOptions(form, options))
 				close()
 			}}
 		>

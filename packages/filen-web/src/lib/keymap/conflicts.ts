@@ -80,7 +80,15 @@ export const RESOLVED_COLLISIONS: readonly (readonly [string, string])[] = [
 	["presentation.show.end", "drive.clearSelection"],
 	["presentation.show.end", "photos.clearSelection"],
 	["presentation.show.end", "chats.clearSelection"],
-	["presentation.show.end", "notes.clearSelection"]
+	["presentation.show.end", "notes.clearSelection"],
+	// Backspace goes back a slide only in the running show, whose stage and presenter view stop every key they take.
+	["presentation.show.previous", "drive.trash"],
+	["presentation.show.previous", "photos.trash"],
+	["presentation.show.previous", "notes.trash"],
+	["presentation.show.previous", "presentation.deleteSlide"],
+	// The running show takes Mod+E on its stage and stops it there; editor.code never mounts inside a presentation.
+	["presentation.show.eraser", "presentation.text.alignCenter"],
+	["presentation.show.eraser", "editor.code"]
 ]
 
 export function scopesCanCollide(a: ActionScope, b: ActionScope): boolean {

@@ -3,9 +3,12 @@ import { comboAlternatives, isMacPlatform } from "@/lib/keymap/kbd.logic"
 
 // The presentation editor's own commands: slides (new, duplicate, delete, move) and undo/redo, PowerPoint's keys.
 // New slide is Ctrl+M on every platform, as in PowerPoint for the web (Cmd+M minimizes the window on a Mac).
+// Duplicate slide is Mod+Shift+D anywhere and Mod+D in the slide list; on the slide canvas Mod+D duplicates the
+// selected objects (the canvas takes it before the editor).
 // They act where the editor has focus (its rail and slide), so the editor matches them on its own keydown (the
 // spreadsheet grid's precedent) against the combo in effect: the default here, or the user's once the shortcuts
-// catalog lists them. Save is the overlay's preview.save (Mod+S).
+// catalog lists them. Save is the overlay's preview.save (Mod+S). Zoom in is Ctrl+Plus wherever the layout puts "+"
+// (US: Ctrl+= or Ctrl+Shift+=, the numpad's, a German keyboard's own key); Zoom to fit is Ctrl+Alt+O.
 export type PresentationEditorAction =
 	| "presentation.newSlide"
 	| "presentation.duplicateSlide"
@@ -17,10 +20,18 @@ export type PresentationEditorAction =
 	| "presentation.undo"
 	| "presentation.redo"
 	| "presentation.selectAllSlides"
+	| "presentation.zoomIn"
+	| "presentation.zoomOut"
+	| "presentation.zoomFit"
 
 export const PRESENTATION_EDITOR_ACTIONS: readonly (ActionDef & { readonly id: PresentationEditorAction })[] = [
 	{ id: "presentation.newSlide", defaultCombo: "ctrl+m", scope: "editor", descriptionKey: "preview:previewPptxEditorKeyNewSlide" },
-	{ id: "presentation.duplicateSlide", defaultCombo: "mod+d", scope: "editor", descriptionKey: "preview:previewPptxEditorKeyDuplicate" },
+	{
+		id: "presentation.duplicateSlide",
+		defaultCombo: "mod+d,mod+shift+d",
+		scope: "editor",
+		descriptionKey: "preview:previewPptxEditorKeyDuplicate"
+	},
 	{
 		id: "presentation.deleteSlide",
 		defaultCombo: "delete,backspace",
@@ -48,16 +59,43 @@ export const PRESENTATION_EDITOR_ACTIONS: readonly (ActionDef & { readonly id: P
 	},
 	{ id: "presentation.undo", defaultCombo: "mod+z", scope: "editor", descriptionKey: "preview:previewPptxEditorKeyUndo" },
 	{ id: "presentation.redo", defaultCombo: "mod+y,mod+shift+z", scope: "editor", descriptionKey: "preview:previewPptxEditorKeyRedo" },
-	{ id: "presentation.selectAllSlides", defaultCombo: "mod+a", scope: "editor", descriptionKey: "preview:previewPptxEditorKeySelectAll" }
+	{ id: "presentation.selectAllSlides", defaultCombo: "mod+a", scope: "editor", descriptionKey: "preview:previewPptxEditorKeySelectAll" },
+	{
+		id: "presentation.zoomIn",
+		defaultCombo: "mod+plus,mod+=,mod+shift+plus",
+		scope: "editor",
+		descriptionKey: "preview:previewPptxEditorKeyZoomIn"
+	},
+	{ id: "presentation.zoomOut", defaultCombo: "mod+-", scope: "editor", descriptionKey: "preview:previewPptxEditorKeyZoomOut" },
+	{ id: "presentation.zoomFit", defaultCombo: "mod+alt+o", scope: "editor", descriptionKey: "preview:previewPptxEditorKeyZoomFit" }
 ]
 
 const MODIFIERS = new Set(["mod", "ctrl", "control", "meta", "cmd", "command", "shift", "alt", "option"])
+
+// Key names a combo cannot spell as the character ("+" separates a chord's keys).
+const KEY_TOKENS: Readonly<Record<string, string>> = { "+": "plus" }
+
+// The key a chord names: its character, else (with Alt, which turns a Mac's letters and digits into other
+// characters, Option+O into "ø") the physical key's letter or digit.
+function eventKey(event: { readonly key: string; readonly code?: string; readonly altKey: boolean }): string {
+	const key = event.key.toLowerCase()
+
+	if (event.altKey && !/^[a-z0-9]$/u.test(key) && event.code !== undefined) {
+		const physical = /^(?:Key([A-Z])|Digit([0-9]))$/u.exec(event.code)
+		const name = physical?.[1] ?? physical?.[2]
+
+		if (name !== undefined) return name.toLowerCase()
+	}
+
+	return KEY_TOKENS[key] ?? key
+}
 
 // Whether `event` is one chord of `combo` ("mod+shift+arrowup", alternatives comma-separated): the same modifiers
 // exactly, and the key by its name.
 export function matchesCombo(
 	event: {
 		readonly key: string
+		readonly code?: string
 		readonly ctrlKey: boolean
 		readonly metaKey: boolean
 		readonly shiftKey: boolean
@@ -66,7 +104,7 @@ export function matchesCombo(
 	combo: string,
 	mac: boolean
 ): boolean {
-	const key = event.key.toLowerCase()
+	const key = eventKey(event)
 
 	return comboAlternatives(combo).some(tokens => {
 		const keys = tokens.filter(token => !MODIFIERS.has(token))
@@ -90,6 +128,7 @@ export function matchesCombo(
 export function presentationEditorKey(
 	event: {
 		readonly key: string
+		readonly code?: string
 		readonly ctrlKey: boolean
 		readonly metaKey: boolean
 		readonly shiftKey: boolean
@@ -111,7 +150,8 @@ const KEY_NAMES: Readonly<Record<string, readonly [mac: string, other: string]>>
 	arrowup: ["↑", "↑"],
 	arrowdown: ["↓", "↓"],
 	delete: ["Del", "Del"],
-	backspace: ["⌫", "Backspace"]
+	backspace: ["⌫", "Backspace"],
+	plus: ["+", "+"]
 }
 
 // The keys of an action's first combo as a tooltip shows them (KbdKeys).
