@@ -52,7 +52,7 @@ describe("desktop e2e workflow secrets", () => {
 			expect(text).toContain(`run: node scripts/ci/e2eCloud.ts session --slot ${slot}\n`)
 			expect(text).toMatch(
 				new RegExp(
-					`if: steps\\.${slot}\\.outputs\\.minted == 'true'\\n\\s+uses: actions/cache/save@v4\\n[\\s\\S]{0,120}${key.replace(/[$.{}|]/g, "\\$&")}`
+					`if: steps\\.${slot}\\.outputs\\.minted == 'true'\\n\\s+uses: actions/cache/save@[0-9a-f]{40} # v4\\n[\\s\\S]{0,120}${key.replace(/[$.{}|]/g, "\\$&")}`
 				)
 			)
 			expect(text.split(key).length - 1).toBe(2)
