@@ -15,6 +15,7 @@ import { useReminderStore } from "@/features/shell/store/useReminderStore"
 import { connectFileKindVerdictStorage } from "@/features/drive/lib/fileKindVerdictStorage"
 import "@/features/assistant/loop/register" // side-effect: registers the on-device assistant with its UI
 import { startLanguage } from "@/lib/i18n/language"
+import { installSessionEndedCheck } from "@/features/shell/lib/sessionEnded"
 import { syncDesktopShellStrings } from "@/lib/i18n/desktopShell"
 import { refreshDocumentTitle } from "@/lib/head/refreshTitle"
 
@@ -32,6 +33,9 @@ const router = createRouter({ routeTree, defaultNotFoundComponent: NotFoundScree
 // NOT live inside a render effect: a guard awaiting boot while boot awaited first paint would
 // deadlock. Not awaited — BootGate observes the zustand boot phases and holds the boot screen until
 // ready. Runs exactly once (module code is not double-invoked, unlike StrictMode effects).
+// Signs out, with a note on the sign-in screen, once the server stops accepting the session.
+installSessionEndedCheck()
+
 advanceBootSplash("bundle")
 void bootSdk()
 

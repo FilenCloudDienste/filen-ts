@@ -8,6 +8,7 @@ import { desktopBridge } from "@/lib/desktop"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { log } from "@/lib/log"
 import { writeSignedInHint } from "@/lib/signedInHint"
+import { clearSessionEndedNote } from "@/lib/sessionEndedNote"
 
 // The single kv key the persisted SDK session blob lives under in the browser. The blob is written via
 // `kvSetJson` (envelope-serialized, bigint-safe — the StringifiedClient carries a bigint `userId`).
@@ -28,6 +29,7 @@ export async function persistSession(blob: StringifiedClient): Promise<void> {
 
 	await (vault === undefined ? kvSetJson(SESSION_KV_KEY, blob) : vault.set(stringifyEnvelope(blob)))
 	writeSignedInHint(true)
+	clearSessionEndedNote()
 }
 
 export async function clearSession(): Promise<void> {
@@ -98,14 +100,21 @@ function decodeSession(raw: string): StringifiedClient | null {
 	return result
 }
 
+// The persisted session, validated; null when there is none or it is unusable. Rejects with SessionUnreadableError
+// like resumeSession.
+export async function readPersistedSession(): Promise<StringifiedClient | null> {
+	const vault = desktopBridge()?.session
+	const raw = await (vault === undefined ? kvGet(SESSION_KV_KEY) : readVault(vault))
+
+	return raw === null ? null : decodeSession(raw)
+}
+
 // Read the persisted blob, validate it, and inject it into the worker. Returns false when there is
 // no session, an unreadable one (decodeSession dropped it), or one the SDK rejects. Reconciles the
 // signed-in hint either way, so a stale one corrects itself on the next boot. Rejects with SessionUnreadableError when
 // the desktop vault holds a session it cannot read right now: boot shows the recovery screen and nothing is cleared.
 export async function resumeSession(): Promise<boolean> {
-	const vault = desktopBridge()?.session
-	const raw = await (vault === undefined ? kvGet(SESSION_KV_KEY) : readVault(vault))
-	const blob = raw === null ? null : decodeSession(raw)
+	const blob = await readPersistedSession()
 
 	if (blob === null) {
 		writeSignedInHint(false)

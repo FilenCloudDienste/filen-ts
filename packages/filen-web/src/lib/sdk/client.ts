@@ -3,6 +3,7 @@ import SdkWorker from "@/workers/sdk.worker.ts?worker"
 import type { SdkWorkerApi } from "@/workers/sdk.worker"
 import { trackSdkCalls } from "@/e2e-hooks/sdkCalls"
 import { installOwedLocksHandoff, onLockEvent } from "@/lib/sdk/owedLocks"
+import { watchSessionHealth } from "@/lib/sdk/sessionHealth"
 
 // rayon pool sizing: every core but two, which stay free for the UI thread and the SDK's single
 // coordinator thread (rayon only runs chunk crypto and hashing). Capped at 12: past that, worker spawn
@@ -23,4 +24,6 @@ const remote = Comlink.wrap<SdkWorkerApi>(new SdkWorker())
 void remote.setLockSink(Comlink.proxy(onLockEvent))
 installOwedLocksHandoff()
 
-export const sdkApi: Comlink.Remote<SdkWorkerApi> = import.meta.env.VITE_E2E === "1" ? trackSdkCalls(remote) : remote
+// Every call's rejection also reaches the session check (lib/sdk/sessionHealth.ts), so an API key the server no
+// longer accepts signs the user out wherever it first shows.
+export const sdkApi: Comlink.Remote<SdkWorkerApi> = watchSessionHealth(import.meta.env.VITE_E2E === "1" ? trackSdkCalls(remote) : remote)

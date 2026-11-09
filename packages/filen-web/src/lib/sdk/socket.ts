@@ -4,6 +4,7 @@ import { sdkApi } from "@/lib/sdk/client"
 import { log } from "@/lib/log"
 import { desktopBridge } from "@/lib/desktop"
 import { currentSocketEpoch, socketAuthenticated, socketDropped } from "@/lib/sdk/socketSession"
+import { reportSessionSuspect } from "@/lib/sdk/sessionHealth"
 
 // The main-thread half of the realtime socket bridge — the FIRST socket wiring in filen-web, kept
 // generic so drive/chats reuse it later; the note handlers live in features/notes, never here. One
@@ -60,6 +61,11 @@ function dispatch(event: SocketEvent): void {
 		socketAuthenticated()
 	} else if (event.type === "reconnecting" || event.type === "authFailed" || event.type === "unsubscribed") {
 		socketDropped()
+	}
+
+	// The server refused the socket's API key: the same check as a refused call.
+	if (event.type === "authFailed") {
+		reportSessionSuspect()
 	}
 
 	const handlers = registry.get(event.type)

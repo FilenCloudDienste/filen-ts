@@ -2,6 +2,7 @@ import { useState, type SubmitEvent } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { isPasswordStrongEnough, ratePasswordStrength } from "@filen/shared"
+import { withSessionCheckHeld } from "@/lib/sdk/sessionHealth"
 import { sdkApi } from "@/lib/sdk/client"
 import { persistSession, clearSession } from "@/lib/sdk/session"
 import { errorLabel } from "@/lib/i18n/errorLabel"
@@ -53,13 +54,16 @@ function ChangePasswordRow() {
 		setPending(true)
 
 		try {
-			const outcome = await runChangePasswordAttempt(
-				{
-					changePassword: params => sdkApi.changePassword(params),
-					persist: persistSession,
-					clearSession
-				},
-				{ currentPassword, newPassword }
+			// The change revokes the key calls already in flight carry; their refusals must not read as a session that ended.
+			const outcome = await withSessionCheckHeld(() =>
+				runChangePasswordAttempt(
+					{
+						changePassword: params => sdkApi.changePassword(params),
+						persist: persistSession,
+						clearSession
+					},
+					{ currentPassword, newPassword }
+				)
 			)
 
 			switch (outcome.status) {
