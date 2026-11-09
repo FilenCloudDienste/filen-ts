@@ -3,7 +3,7 @@ import { writeXlsx } from "hucre/xlsx"
 import { test, expect } from "./fixtures"
 import { withScratchDirectory, LAZY_VIEWER_TIMEOUT_MS, LIVE_WRITE_TIMEOUT_MS, uploadFiles } from "./helpers/listing"
 import { resolveModKey } from "./helpers/modkey"
-import { activeCell, expectCell, goTo, nameBox, XLSX_MIME } from "./helpers/sheet"
+import { activeCell, expectCell, expectSelection, goTo, nameBox, XLSX_MIME } from "./helpers/sheet"
 import { preview } from "@/locales/en/preview"
 
 // The office engine's grid keyboard end to end: Excel's shortcuts (Ctrl+arrow to
@@ -50,9 +50,9 @@ test("the grid's Excel shortcuts and the find bar", async ({ page }) => {
 		// Ctrl+A: the data region, then the whole sheet.
 		await goTo(dialog, "B2")
 		await page.keyboard.press(`${mod}+A`)
-		await expect(nameBox(dialog)).toHaveValue("A1:B4")
+		await expectSelection(dialog, "A1:B4")
 		await page.keyboard.press(`${mod}+A`)
-		await expect(nameBox(dialog)).toHaveValue("A1:XFD1048576")
+		await expectSelection(dialog, "A1:XFD1048576")
 
 		// Ctrl+D: the first row of the selection copied down it.
 		await goTo(dialog, "B2")

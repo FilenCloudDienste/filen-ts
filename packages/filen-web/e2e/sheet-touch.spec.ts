@@ -5,7 +5,7 @@ import { withScratchDirectory, LAZY_VIEWER_TIMEOUT_MS, uploadFiles } from "./hel
 import { common } from "@/locales/en/common"
 import { ribbonControl } from "./helpers/ribbon"
 import { framedCenterOf } from "./helpers/geometry"
-import { activeCell, nameBox, selectByNameBox, XLSX_MIME } from "./helpers/sheet"
+import { activeCell, expectSelection, nameBox, selectByNameBox, XLSX_MIME } from "./helpers/sheet"
 import { preview } from "@/locales/en/preview"
 
 // The office engine's grid under a finger, on a sheet's whole range and for a screen reader. A tap selects and a pan
@@ -229,13 +229,13 @@ test.describe("touch", () => {
 			const a3 = { x: b3.x - (c4.x - b3.x), y: b3.y }
 
 			await touch(page, browserName, [from, { x: (from.x + a3.x) / 2, y: (from.y + a3.y) / 2 }, a3])
-			await expect(nameBox(dialog)).toHaveValue("A3:C6")
+			await expectSelection(dialog, "A3:C6")
 			await expect(menu).toBeVisible()
 			await expect(dialog.getByRole("status").filter({ hasText: "A3:C6 selected" })).toHaveCount(1)
 
 			// Select all from the menu.
 			await menu.getByRole("button", { name: preview.previewSheetTouchSelectAll }).click()
-			await expect(nameBox(dialog)).toHaveValue("A1:XFD1048576")
+			await expectSelection(dialog, "A1:XFD1048576")
 
 			// A tap on the cell that is the selection shows the menu; Edit opens its entry.
 			const b5 = await cellCentre(dialog, "B5")

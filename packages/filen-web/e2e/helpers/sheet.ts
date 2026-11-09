@@ -23,6 +23,29 @@ export function activeCell(dialog: Locator): Locator {
 	return dialog.getByRole("grid").getByRole("gridcell")
 }
 
+// A range's cell with the lowest row and column ("C6:A3" -> "A3"): the active cell a range typed into the name box
+// makes, which the box then shows, as Excel's does.
+function topLeft(ref: string): string {
+	const corners = ref.toUpperCase().split(":")
+
+	if (corners.length !== 2) return ref.toUpperCase()
+
+	const parsed = corners.map(corner => /^\$?([A-Z]+)\$?([0-9]+)$/.exec(corner))
+	const columns = parsed.map(match => match?.[1] ?? "")
+	const rows = parsed.map(match => Number(match?.[2] ?? "0"))
+	const column = [...columns].sort((a, b) => a.length - b.length || a.localeCompare(b))[0] ?? ""
+
+	return `${column}${String(Math.min(...rows))}`
+}
+
+// The selection is `range` (more than one cell): the grid's live region ends saying it (SheetGrid's selectionPhrase).
+// The name box shows only the active cell, as Excel's does.
+export async function expectSelection(dialog: Locator, range: string): Promise<void> {
+	const said = preview.previewSheetRangeSelected.replace("{{range}}", range)
+
+	await expect(dialog.locator(".fo-sheet-live")).toHaveText(new RegExp(`, ${said.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`))
+}
+
 // Makes `ref` ("B4", "A2:A4") the selection through the name box, without asserting where focus goes after.
 // `timeout` bounds the wait for the viewer itself (the name box), which a first open after a reload spends loading
 // the engine; without it the click's default action timeout applies.
@@ -36,7 +59,9 @@ export async function selectByNameBox(dialog: Locator, ref: string, timeout?: nu
 	await box.click()
 	await box.fill(ref)
 	await box.press("Enter")
-	await expect(box).toHaveValue(ref)
+	await expect(box).toHaveValue(topLeft(ref))
+
+	if (ref.includes(":")) await expectSelection(dialog, ref.toUpperCase())
 }
 
 // selectByNameBox, and the grid has focus after.

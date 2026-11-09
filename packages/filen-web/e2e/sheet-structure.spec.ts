@@ -4,7 +4,7 @@ import { test, expect } from "./fixtures"
 import { withScratchDirectory, uploadFiles, reloadAfterWrite } from "./helpers/listing"
 import { resolveModKey } from "./helpers/modkey"
 import { ribbonButton, ribbonTab } from "./helpers/ribbon"
-import { closeDialog, expectCell, goTo, nameBox, openRow, saveAndClose, XLSX_MIME } from "./helpers/sheet"
+import { closeDialog, expectCell, expectSelection, goTo, nameBox, openRow, saveAndClose, XLSX_MIME } from "./helpers/sheet"
 import { preview } from "@/locales/en/preview"
 
 // Sheet structure on the office engine end to end: rows and columns inserted,
@@ -194,7 +194,7 @@ test("rows and columns inserted, deleted, hidden and shown, the top row frozen, 
 		await nameBox(dialog).fill("A1")
 		await nameBox(dialog).press("Enter")
 		// The merge is selected whole.
-		await expect(nameBox(dialog)).toHaveValue("A1:B1")
+		await expectSelection(dialog, "A1:B1")
 		await expect(dialog.getByRole("grid").getByRole("gridcell")).toHaveText("Item")
 		await (await merge()).click()
 		await expect(menuItem(page, preview.previewSheetUnmerge)).toBeEnabled()

@@ -3,7 +3,7 @@ import { writeXlsx } from "hucre/xlsx"
 import { test, expect } from "./fixtures"
 import { withScratchDirectory, LAZY_VIEWER_TIMEOUT_MS, uploadFiles } from "./helpers/listing"
 import { framedCenterOf } from "./helpers/geometry"
-import { expectCell, goTo, nameBox, XLSX_MIME } from "./helpers/sheet"
+import { expectCell, expectSelection, goTo, XLSX_MIME } from "./helpers/sheet"
 import { preview } from "@/locales/en/preview"
 
 // The office engine's fill and clipboard end to end: the fill handle dragged with
@@ -83,7 +83,7 @@ test("the fill handle by mouse and touch, the Series dialog, and HTML pasted fro
 
 		await goTo(dialog, "A1:A2")
 		await dragHandle(page, dialog, a5)
-		await expect(nameBox(dialog)).toHaveValue("A1:A5")
+		await expectSelection(dialog, "A1:A5")
 		await expectCell(dialog, "A5", "5")
 
 		// Ctrl held at release: "Mon" is copied instead of stepping through the days.
@@ -166,7 +166,7 @@ test("the fill handle by mouse and touch, the Series dialog, and HTML pasted fro
 			grid.dispatchEvent(event)
 		}, PASTED_HTML)
 		// The engine's answer selects the pasted range; waited for, as a name box move before it lands keeps the move.
-		await expect(nameBox(dialog)).toHaveValue("F2:H2")
+		await expectSelection(dialog, "F2:H2")
 		await expectCell(dialog, "F2", "007")
 		await expectCell(dialog, "G2", "12.5%")
 		await expectCell(dialog, "H2", "0.25")
