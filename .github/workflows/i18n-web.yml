@@ -138,7 +138,8 @@ jobs:
       contents: write
     strategy:
       fail-fast: false
-      max-parallel: ${{ inputs.max-parallel }}
+      # A dispatched input arrives as a string, which max-parallel refuses: parse it into a number.
+      max-parallel: ${{ fromJSON(format('{0}', inputs.max-parallel)) }}
       matrix:
         lang: ${{ fromJSON(needs.plan.outputs.requested) }}
     env:
