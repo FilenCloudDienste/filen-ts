@@ -160,6 +160,101 @@ jobs:
           FILEN_OFFICE_CORPUS: ${{ github.workspace }}/packages/filen-office/.corpus
         run: pnpm exec vitest run src/tests/spreadsheetXlsConvertCorpus.test.ts
 
+  # Nightly and on demand: a smaller sample of src/tests/pdfExportCorpus.test.ts's PDF exports against veraPDF's
+  # PDF/UA-1 profile; its UA_ALLOWED lists the rules a source's export may fail, with why.
+  pdf-ua-office-corpus:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    needs: test-office-corpus
+    concurrency:
+      group: filen-office-pdf-ua-${{ github.ref }}
+      cancel-in-progress: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      FILEN_OFFICE_CORPUS: ${{ github.workspace }}/packages/filen-office/.corpus
+      # The installer veraPDF's GitHub release (veraPDF/veraPDF-library) points to, from software.verapdf.org, which
+      # keeps every release; its .asc is signed by 13DD102B4DD69354D12DE5A83184863278B17FE7.
+      VERAPDF_VERSION: 1.30.3
+      VERAPDF_SHA256: b512bf24945503a33fc10738ecffc1f2dccaaf8593a448e94ee9ac86a9559a59
+      FILEN_OFFICE_VERAPDF: ${{ github.workspace }}/verapdf/verapdf
+      # Slower runners, as in test-office-corpus.
+      FILEN_PERF_BUDGET_SCALE: '3'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install dependencies
+        working-directory: packages/filen-office
+        run: pnpm install --frozen-lockfile --filter @filen/office...
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: 17
+      - name: Restore veraPDF
+        id: verapdf-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/verapdf.zip
+          key: verapdf-${{ env.VERAPDF_VERSION }}
+      - name: Download veraPDF
+        if: steps.verapdf-cache.outputs.cache-hit != 'true'
+        run: |
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/verapdf.zip" \
+            "https://software.verapdf.org/releases/${VERAPDF_VERSION%.*}/verapdf-greenfield-${VERAPDF_VERSION}-installer.zip"
+          echo "${VERAPDF_SHA256}  $RUNNER_TEMP/verapdf.zip" | sha256sum -c -
+      - name: Save veraPDF
+        if: steps.verapdf-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/verapdf.zip
+          key: verapdf-${{ env.VERAPDF_VERSION }}
+      # The IzPack installer, unattended: the CLI pack only.
+      - name: Install veraPDF
+        run: |
+          echo "${VERAPDF_SHA256}  $RUNNER_TEMP/verapdf.zip" | sha256sum -c -
+          unzip -q "$RUNNER_TEMP/verapdf.zip" -d "$RUNNER_TEMP/verapdf-installer"
+          cat > "$RUNNER_TEMP/verapdf-install.xml" <<EOF
+          <?xml version="1.0" encoding="UTF-8" standalone="no"?>
+          <AutomatedInstallation langpack="eng">
+            <com.izforge.izpack.panels.htmlhello.HTMLHelloPanel id="welcome"/>
+            <com.izforge.izpack.panels.target.TargetPanel id="install_dir">
+              <installpath>$(dirname "$FILEN_OFFICE_VERAPDF")</installpath>
+            </com.izforge.izpack.panels.target.TargetPanel>
+            <com.izforge.izpack.panels.packs.PacksPanel id="sdk_pack_select">
+              <pack index="0" name="veraPDF GUI" selected="false"/>
+              <pack index="1" name="veraPDF CLI" selected="true"/>
+              <pack index="2" name="veraPDF Documentation" selected="false"/>
+              <pack index="3" name="veraPDF Sample Plugins" selected="false"/>
+            </com.izforge.izpack.panels.packs.PacksPanel>
+            <com.izforge.izpack.panels.install.InstallPanel id="install"/>
+            <com.izforge.izpack.panels.finish.FinishPanel id="finish"/>
+          </AutomatedInstallation>
+          EOF
+          java -jar "$RUNNER_TEMP/verapdf-installer/verapdf-greenfield-${VERAPDF_VERSION}/verapdf-izpack-installer-${VERAPDF_VERSION}.jar" \
+            "$RUNNER_TEMP/verapdf-install.xml"
+          version=$("$FILEN_OFFICE_VERAPDF" --version)
+          echo "$version"
+          case "$version" in *"${VERAPDF_VERSION}"*) ;; *) echo "::error::expected veraPDF ${VERAPDF_VERSION}"; exit 1 ;; esac
+      - name: Restore the corpus
+        uses: actions/cache/restore@v4
+        with:
+          path: packages/filen-office/.corpus
+          key: office-corpus-${{ hashFiles('packages/filen-office/corpus/manifest.json') }}
+          restore-keys: office-corpus-
+      - name: Fetch the corpus
+        working-directory: packages/filen-office
+        run: pnpm run corpus:fetch
+      - name: PDF/UA-1 of the exports
+        working-directory: packages/filen-office
+        run: pnpm exec vitest run --reporter=verbose src/tests/pdfExportCorpus.test.ts
+
   # Nightly and on demand: the paged-editing fuzz (edited layout = fresh layout of the saved file) and the writer
   # damage fuzz (Gate 2 against an independent reader) over the cached corpus, one new seed per run. Findings
   # name file, seed and mode; FILEN_OFFICE_FUZZ_SEED, _FILTER and _MODES replay one locally (src/tests/fuzz).
