@@ -15,6 +15,8 @@ import {
 import { SidebarPanel } from "@/features/shell/components/sidebarPanel"
 import { SIDEBAR_NAV_ITEM_CLASS } from "@/features/shell/lib/sidebarNavItem"
 import { desktopBridge } from "@/lib/desktop"
+import { useMasterKeysNotExported } from "@/queries/account"
+import { RailStatusDot } from "@/features/shell/components/railProgressBar"
 
 type IconType = ComponentType<{ className?: string }>
 
@@ -68,6 +70,8 @@ const SETTINGS_ITEMS: SettingsSidebarItem[] = [
 // (unlike DriveSidebar's splat routes, every settings route here takes no params).
 export function SettingsSidebar() {
 	const { t } = useTranslation(["settings", "common"])
+	// A selector over the held account: no request, and a re-render only when the answer flips.
+	const keysNotExported = useMasterKeysNotExported()
 
 	return (
 		<SidebarPanel>
@@ -79,9 +83,27 @@ export function SettingsSidebar() {
 							key={item.id}
 							to={item.to}
 							className={SIDEBAR_NAV_ITEM_CLASS}
+							// The status is a description, not part of the name: the link stays "Security" for everything that
+							// finds it by name.
+							aria-label={item.id === "security" && keysNotExported ? t(item.labelKey) : undefined}
+							aria-describedby={item.id === "security" && keysNotExported ? "settings-security-status" : undefined}
 						>
 							<item.icon className="text-muted-foreground group-data-[status=active]:text-primary" />
 							<span className="truncate">{t(item.labelKey)}</span>
+							{item.id === "security" && keysNotExported ? (
+								<>
+									<span
+										id="settings-security-status"
+										className="sr-only"
+									>
+										{t("settingsMasterKeysNotExportedStatus")}
+									</span>
+									<RailStatusDot
+										dot="attention"
+										className="ml-auto"
+									/>
+								</>
+							) : null}
 						</Link>
 					))}
 				</div>
