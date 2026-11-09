@@ -10,6 +10,8 @@
 	--fo-sheet-header-line: var(--border);
 	--fo-sheet-header-active-bg: color-mix(in oklab, var(--primary) 14%, var(--background));
 	--fo-sheet-header-active-text: var(--foreground);
+	--fo-sheet-header-selected-bg: color-mix(in oklab, var(--primary) 32%, var(--background));
+	--fo-sheet-header-selected-text: var(--foreground);
 	--fo-sheet-selection-fill: color-mix(in oklab, var(--primary) 8%, transparent);
 	/* The line and its halo are the theme's ink and paper (at least 14:1 apart in both themes), so one of them has 3:1
 	   on any fill a file draws. */

@@ -155,8 +155,9 @@ async function goTo(reference: string): Promise<void> {
 	fireEvent.focus(box)
 	fireEvent.change(box, { target: { value: reference } })
 	fireEvent.keyDown(box, { key: "Enter" })
+	// The box shows the active cell: a range's top left.
 	await waitFor(() => {
-		expect(nameBox()).toBe(reference)
+		expect(nameBox()).toBe(reference.split(":")[0])
 	})
 }
 
@@ -391,7 +392,7 @@ describe("the spreadsheet find bar", () => {
 		fireEvent.change(box, { target: { value: "A1:A3" } })
 		fireEvent.keyDown(box, { key: "Enter" })
 		await waitFor(() => {
-			expect(nameBox()).toBe("A1:A3")
+			expect(nameBox()).toBe("A1")
 		})
 
 		fireEvent.keyDown(grid, { key: "f", code: "KeyF", ctrlKey: true })
@@ -403,7 +404,8 @@ describe("the spreadsheet find bar", () => {
 		await waitFor(() => {
 			expect(screen.getByText("1/1")).toBeTruthy()
 		})
-		expect(nameBox()).toBe("A1:A3")
+		// The name box shows the active cell, as Excel's does.
+		expect(nameBox()).toBe("A2")
 		// The active cell is A2 (the grid names it for assistive technology).
 		expect(within(grid).getByRole("row").getAttribute("aria-rowindex")).toBe("2")
 		expect(within(grid).getByRole("gridcell").getAttribute("aria-colindex")).toBe("1")

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react"
+import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from "react"
 import {
 	acceptSuggestion,
 	formulaContext,
@@ -11,7 +11,15 @@ import {
 	type SheetLocale,
 	type SheetRange
 } from "@filen/office/core/sheet"
-import type { SheetCellDrag, SheetCellPointer, SheetGridHandle, SheetGridState, SheetShortcut } from "@filen/office/react/sheet"
+import {
+	stepFrom,
+	type GridPoint,
+	type SheetCellDrag,
+	type SheetCellPointer,
+	type SheetGridHandle,
+	type SheetGridState,
+	type SheetShortcut
+} from "@filen/office/react/sheet"
 import { resolveTheme, useTheme } from "@/providers/themeProvider"
 import type { SheetBodyExtension } from "@/features/spreadsheet/components/sheetExtension"
 import type { SheetHandle } from "@/features/spreadsheet/hooks/useSheetSession"
@@ -20,11 +28,13 @@ import { REFERENCE_COLORS, referenceColors } from "@/features/spreadsheet/formul
 import { referenceLayer } from "@/features/spreadsheet/formulaBar/referenceLayer"
 import { ReferenceText } from "@/features/spreadsheet/formulaBar/referenceText"
 import { browserLanguage, sheetLocaleOf } from "@/features/spreadsheet/formulaBar/sheetLocale"
+import { useEntryAutoComplete } from "@/features/spreadsheet/formulaBar/autoComplete"
 
 // Typing a formula, in the cell or the formula bar (Excel's formula UX): its references outlined on the cells in
 // their colours and shown in them in the text, a click or drag on cells putting a reference at the caret where one may go (Point mode), function
 // names offered as they are typed (Tab takes one) and the arguments of the call the caret is in, and AutoSum
-// (Alt+=). The locale entries are typed in is given to the session here.
+// (Alt+=). A text entry completes from the column's entries (AutoComplete). The locale entries are typed in is
+// given to the session here.
 
 type Editor = HTMLInputElement | HTMLTextAreaElement
 
@@ -38,11 +48,30 @@ function focusedEditor(): Editor | null {
 		: null
 }
 
-// A reference pointed at, which a further drag or click moves until something else is typed.
+// A reference pointed at, which a further drag, click or arrow moves until something else is typed: where it is in the
+// entry, and the cells it runs from (anchor) and to (focus, where an arrow steps from).
 interface Pointed {
 	readonly start: number
 	readonly end: number
 	readonly text: string
+	readonly anchor: GridPoint
+	readonly focus: GridPoint
+}
+
+const ARROWS: Readonly<Record<string, "up" | "down" | "left" | "right">> = {
+	ArrowUp: "up",
+	ArrowDown: "down",
+	ArrowLeft: "left",
+	ArrowRight: "right"
+}
+
+function spanOf(anchor: GridPoint, focus: GridPoint): SheetRange {
+	return {
+		startRow: Math.min(anchor.row, focus.row),
+		startCol: Math.min(anchor.col, focus.col),
+		endRow: Math.max(anchor.row, focus.row),
+		endCol: Math.max(anchor.col, focus.col)
+	}
 }
 
 export interface FormulaCaret {
@@ -57,6 +86,8 @@ export interface SheetFormulaExtension extends SheetBodyExtension {
 	readonly caret: FormulaCaret
 	readonly coloredText: ReactNode
 	readonly autoSum: () => void
+	// The in-cell editor's keys before the grid's (SheetGrid onEditorKey): arrows point in a formula.
+	readonly editorKey: (event: ReactKeyboardEvent<HTMLTextAreaElement>) => boolean
 }
 
 export function useSheetFormula({
@@ -86,6 +117,9 @@ export function useSheetFormula({
 	const word = context?.word ?? null
 	const suggestions = word === null || `${String(word.start)}:${word.text}` === dismissed ? [] : functionSuggestions(word.text, 8)
 	const sheetName = (sheet: number | undefined): string => grid.sheets.find(entry => entry.id === sheet)?.name ?? ""
+
+	// A text entry completes from the column's entries (formulaBar/autoComplete.ts).
+	useEntryAutoComplete({ model, session: handle.session, canEdit, editing })
 
 	// The session reads entries in the browser's locale and shows inputs in it.
 	useEffect(() => {
@@ -174,6 +208,78 @@ export function useSheetFormula({
 		}
 	})
 
+	// Puts the reference to the cells from `anchor` to `focus` at `at` in the entry (over `base`, a reference pointed a
+	// moment ago, when given) and keeps it as the pointed one.
+	function putReference(
+		anchor: GridPoint,
+		focus: GridPoint,
+		at: number,
+		base: { start: number; end: number } | undefined,
+		sheet: string | null,
+		fallback: string
+	): { text: string; caret: number } {
+		const range = spanOf(anchor, focus)
+		const single = range.startRow === range.endRow && range.startCol === range.endCol
+		const reference = pointedReference(
+			{
+				kind: "cell",
+				range: !single,
+				...range,
+				startRowAbs: false,
+				startColAbs: false,
+				endRowAbs: false,
+				endColAbs: false
+			},
+			sheet
+		)
+		const current = model.getSnapshot().editing?.text ?? fallback
+		const next = insertReference(current, at, reference, base)
+
+		pointed.current = { start: next.span.start, end: next.span.end, text: next.text, anchor, focus }
+		model.setEditText(next.text)
+
+		return next
+	}
+
+	// Point mode from the keyboard (Excel's status bar "Point"): in a formula's entry, where a reference may go or over
+	// the one pointed last, an arrow points at the next cell (from the edited one at first) and Shift+arrow widens the
+	// reference to a range. Any other key, or a caret where no reference may go, is the grid's (an arrow commits).
+	function editorKey(event: ReactKeyboardEvent<HTMLTextAreaElement>): boolean {
+		const direction = ARROWS[event.key]
+
+		if (direction === undefined || event.ctrlKey || event.metaKey || event.altKey || event.nativeEvent.isComposing) return false
+
+		const snapshot = model.getSnapshot()
+		const entry = snapshot.editing
+		const layout = snapshot.layout
+		const axes = model.axes(snapshot.sheet)
+
+		if (entry?.mode !== "enter" || !entry.text.startsWith("=") || layout === null || axes === null) return false
+
+		const input = event.currentTarget
+		const at = input.selectionEnd
+		const previous = pointed.current
+		const replacing = previous !== null && previous.text === entry.text && at === previous.end ? previous : undefined
+
+		if (input.selectionStart !== at) return false
+		if (replacing === undefined && formulaContext(entry.text, at, locale.argument)?.points !== true) return false
+
+		const shown = snapshot.sheet
+		const from = replacing?.focus ?? (shown === entry.sheet ? { row: entry.row, col: entry.col } : snapshot.selection.active)
+		const focus = stepFrom(from, direction, axes, layout, model.merges(layout)).active
+		const anchor = event.shiftKey ? (replacing?.anchor ?? from) : focus
+		const next = putReference(anchor, focus, at, replacing, shown === entry.sheet ? null : sheetName(shown), entry.text)
+
+		// The caret goes after the reference now, as F4 puts it: a next arrow before the render still finds it there.
+		event.preventDefault()
+		input.value = next.text
+		input.setSelectionRange(next.caret, next.caret)
+		setCaret({ editor: input, caret: next.caret })
+		gridRef.current?.reveal(focus)
+
+		return true
+	}
+
 	// A click on a cell while a formula is typed where a reference may go puts the cell's; a drag widens it to a range.
 	function pointer(event: SheetCellPointer): boolean | SheetCellDrag | undefined {
 		if (event.kind !== "down" || !event.editing) return undefined
@@ -193,43 +299,19 @@ export function useSheetFormula({
 		const shown = model.getSnapshot().sheet
 		const sheet = shown === entry.sheet ? null : sheetName(shown)
 		const anchor = { row: event.row, col: event.col }
-		const put = (range: SheetRange, base: { start: number; end: number } | undefined): void => {
-			const single = range.startRow === range.endRow && range.startCol === range.endCol
-			const reference = pointedReference(
-				{
-					kind: "cell",
-					range: !single,
-					...range,
-					startRowAbs: false,
-					startColAbs: false,
-					endRowAbs: false,
-					endColAbs: false
-				},
-				sheet
-			)
-			const current = model.getSnapshot().editing?.text ?? entry.text
-			const next = insertReference(current, base?.end ?? at, reference, base)
+		const put = (focus: GridPoint, base: { start: number; end: number } | undefined): void => {
+			const next = putReference(anchor, focus, base?.end ?? at, base, sheet, entry.text)
 
-			pointed.current = { start: next.span.start, end: next.span.end, text: next.text }
-			model.setEditText(next.text)
 			placeCaret(editor, next.caret)
 		}
 
-		put({ startRow: anchor.row, startCol: anchor.col, endRow: anchor.row, endCol: anchor.col }, replacing)
+		put(anchor, replacing)
 
 		return {
 			move(point) {
 				const span = pointed.current ?? undefined
 
-				put(
-					{
-						startRow: Math.min(anchor.row, point.row),
-						startCol: Math.min(anchor.col, point.col),
-						endRow: Math.max(anchor.row, point.row),
-						endCol: Math.max(anchor.col, point.col)
-					},
-					span === undefined ? undefined : { start: span.start, end: span.end }
-				)
+				put(point, span === undefined ? undefined : { start: span.start, end: span.end })
 			},
 			end() {
 				// The pointed reference stays movable until something else is typed.
@@ -309,6 +391,7 @@ export function useSheetFormula({
 
 			return true
 		},
-		autoSum: autoSumAction
+		autoSum: autoSumAction,
+		editorKey
 	}
 }

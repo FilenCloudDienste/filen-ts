@@ -16,6 +16,7 @@ const { toasts } = vi.hoisted(() => ({ toasts: [] as string[] }))
 vi.mock("sonner", () => ({ toast: { error: (message: string) => toasts.push(message), success: () => undefined } }))
 
 const { SheetTabs } = await import("@/features/spreadsheet/tabs/sheetTabs")
+const { insertSheetBefore } = await import("@/features/spreadsheet/tabs/sheetTabs.logic")
 
 async function opened(): Promise<SheetGridModel> {
 	return await openGrid(
@@ -245,5 +246,112 @@ describe("the sheet tabs' menu", () => {
 			expect(insert?.getAttribute("aria-disabled") ?? insert?.hasAttribute("data-disabled")).toBeTruthy()
 		})
 		expect(await screen.findByText(label("previewSheetUnprotectWorkbook"))).toBeTruthy()
+	})
+})
+
+describe("the sheet tabs while an entry is open", () => {
+	beforeEach(() => {
+		vi.stubGlobal("crypto", webcrypto)
+	})
+
+	function sheetId(model: SheetGridModel, name: string): number | undefined {
+		return model.getSnapshot().sheets.find(sheet => sheet.name === name)?.id
+	}
+
+	it("keeps a formula open on its sheet to point at another one, as Excel's point mode does", async () => {
+		const model = await opened()
+		const one = sheetId(model, "One")
+
+		show(model)
+		act(() => {
+			model.startEditing("=1+", "enter")
+		})
+
+		const tab = screen.getByRole("tab", { name: "Two" })
+
+		// The press does not take focus from the editor (its blur would commit the incomplete formula).
+		expect(fireEvent.mouseDown(tab, { button: 0 })).toBe(false)
+		fireEvent.click(tab)
+		await waitFor(() => {
+			expect(model.getSnapshot().sheet).toBe(sheetId(model, "Two"))
+		})
+		expect(model.getSnapshot().editing).toMatchObject({ sheet: one, text: "=1+" })
+
+		act(() => {
+			model.setEditText("=1+Two!A1")
+		})
+
+		let kept = false
+
+		await act(async () => {
+			kept = await model.commitEditing(null)
+		})
+
+		expect(kept).toBe(true)
+		expect(model.getSnapshot().sheet).toBe(one)
+		expect(model.getSnapshot().editing).toBeNull()
+
+		const cell = await model.session.query("cell", { sheet: one ?? 0, row: 0, col: 0 })
+
+		expect(cell.input).toBe("=1+Two!A1")
+	})
+
+	it("commits a plain entry before showing the sheet chosen", async () => {
+		const model = await opened()
+		const one = sheetId(model, "One")
+
+		show(model)
+		act(() => {
+			model.startEditing("typed", "enter")
+		})
+
+		const tab = screen.getByRole("tab", { name: "Two" })
+
+		expect(fireEvent.mouseDown(tab, { button: 0 })).toBe(true)
+		fireEvent.click(tab)
+		await waitFor(() => {
+			expect(model.getSnapshot().sheet).toBe(sheetId(model, "Two"))
+		})
+		expect(model.getSnapshot().editing).toBeNull()
+		expect((await model.session.query("cell", { sheet: one ?? 0, row: 0, col: 0 })).input).toBe("typed")
+	})
+})
+
+describe("Shift+F11", () => {
+	beforeEach(() => {
+		vi.stubGlobal("crypto", webcrypto)
+	})
+
+	it("inserts a new sheet in front of the active one and shows it, as Excel's Insert Sheet does", async () => {
+		const model = await opened()
+		const two = model.getSnapshot().sheets.find(sheet => sheet.name === "Two")?.id
+
+		act(() => {
+			model.setSheet(two ?? 0)
+		})
+		await act(async () => {
+			await insertSheetBefore(model, "Sheet4")
+		})
+
+		expect(names(model)).toEqual(["One", "Sheet4", "Two", "Three"])
+
+		const snapshot = model.getSnapshot()
+
+		expect(snapshot.sheets.find(sheet => sheet.id === snapshot.sheet)?.name).toBe("Sheet4")
+	})
+
+	it("counts hidden sheets in the position", async () => {
+		const model = await opened()
+		const sheets = model.getSnapshot().sheets
+		const two = sheets.find(sheet => sheet.name === "Two")?.id ?? 0
+		const three = sheets.find(sheet => sheet.name === "Three")?.id ?? 0
+
+		await act(async () => {
+			await model.command({ type: "sheet.state", sheet: two, state: "hidden" })
+			model.setSheet(three)
+			await insertSheetBefore(model, "Sheet4")
+		})
+
+		expect(model.getSnapshot().sheets.map(sheet => sheet.name)).toEqual(["One", "Two", "Sheet4", "Three"])
 	})
 })

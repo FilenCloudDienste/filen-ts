@@ -34,6 +34,13 @@ async function openMenu(chartsheet: boolean): Promise<void> {
 					grid={asChartsheets(grid, chartsheet)}
 					canEdit
 					run={() => undefined}
+					actions={{
+						copy: () => undefined,
+						paste: () => undefined,
+						insertCells: () => undefined,
+						deleteCells: () => undefined,
+						formatCells: () => undefined
+					}}
 					items={[{ id: "charts", node: <ContextMenuItem>Edit chart…</ContextMenuItem> }]}
 				>
 					<div />

@@ -72,8 +72,9 @@ async function goTo(reference: string): Promise<void> {
 	fireEvent.focus(box)
 	fireEvent.change(box, { target: { value: reference } })
 	fireEvent.keyDown(box, { key: "Enter" })
+	// The box shows the active cell: a range's top left.
 	await waitFor(() => {
-		expect(nameBox()).toBe(reference)
+		expect(nameBox()).toBe(reference.split(":")[0])
 	})
 }
 

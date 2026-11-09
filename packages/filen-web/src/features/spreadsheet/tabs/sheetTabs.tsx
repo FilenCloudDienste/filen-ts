@@ -2,7 +2,7 @@ import { useEffect, useState, type ComponentType, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { CheckIcon, MoreHorizontalIcon, PlusIcon } from "lucide-react"
 import { cn } from "@filen/shared"
-import { newSheetName, type SheetCommand, type SheetCommandResult, type SheetId, type SheetSummary } from "@filen/office/core/sheet"
+import { newSheetName, type SheetCommand, type SheetId, type SheetSummary } from "@filen/office/core/sheet"
 import type { SheetGridState } from "@filen/office/react/sheet"
 import { Button } from "@/components/ui/button"
 import {
@@ -30,7 +30,7 @@ import { useEscapeClosesMenu } from "@/features/spreadsheet/components/menuEscap
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 import { FormDialog } from "@/components/dialogs/formDialog"
 import { InputDialog } from "@/components/dialogs/inputDialog"
-import { TAB_COLORS, addedSheet, cssColor, moveTarget, nextShown } from "@/features/spreadsheet/tabs/sheetTabs.logic"
+import { TAB_COLORS, addSheetAndShow, cssColor, moveTarget, nextShown } from "@/features/spreadsheet/tabs/sheetTabs.logic"
 import { useProtection } from "@/features/spreadsheet/tabs/useProtection"
 import { useSheetTabRequests } from "@/features/spreadsheet/tabs/tabRequests"
 
@@ -140,33 +140,15 @@ export function SheetTabs({ grid, canEdit, run }: { grid: SheetGridState; canEdi
 		}
 	})
 
+	// A formula being typed stays open on its sheet to point at the chosen one's cells; any other entry is committed.
 	function select(sheet: SheetId): void {
-		if (sheet === grid.sheet) {
-			return
+		if (sheet !== grid.sheet) {
+			void model.showSheet(sheet)
 		}
-
-		void model.commitEditing(null).then(done => {
-			if (done) {
-				model.setSheet(sheet)
-			}
-		})
 	}
 
-	// Runs a command that adds a sheet, and shows the sheet it added.
 	function addAndShow(command: SheetCommand): void {
-		const before = model.getSnapshot().sheets
-
-		void model.intent()
-		void model.command(command).then(
-			(result: SheetCommandResult) => {
-				const added = result.ok ? addedSheet(before, result.change.sheets) : null
-
-				if (added !== null) {
-					model.setSheet(added)
-				}
-			},
-			() => undefined
-		)
+		void addSheetAndShow(model, command)
 	}
 
 	function insertAfter(sheet: SheetId): void {
@@ -411,6 +393,12 @@ export function SheetTabs({ grid, canEdit, run }: { grid: SheetGridState; canEdi
 													? "bg-background font-medium text-foreground shadow-sm ring-1 ring-border"
 													: "text-muted-foreground hover:bg-accent/60"
 											)}
+											onMouseDown={event => {
+												// The formula's editor keeps focus (its blur would commit the entry).
+												if (event.button === 0 && model.formulaOpen()) {
+													event.preventDefault()
+												}
+											}}
 											onClick={() => {
 												select(sheet.id)
 											}}

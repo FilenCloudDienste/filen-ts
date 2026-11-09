@@ -90,6 +90,8 @@ export const previewSheetConditional = {
 	previewSheetValidationOpenList: "Show allowed values",
 	/** Spreadsheet — the list of a cell's allowed values */
 	previewSheetValidationListLabel: "Allowed values",
+	/** Spreadsheet — the list of entries already in the cell's column (Alt+Down on a cell) */
+	previewSheetAutoCompleteListLabel: "Column entries",
 	/** Spreadsheet — a list whose items could not be read */
 	previewSheetValidationListUnavailable: "The allowed values can't be shown.",
 	/** Invalid entry alert — default title */

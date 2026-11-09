@@ -1,4 +1,4 @@
-import { useEffect, useRef, type RefObject } from "react"
+import { useEffect, type RefObject } from "react"
 import { MAX_HTML_COPY_CELLS } from "@filen/office/core/sheet"
 import { isMacPlatform, type SheetGridModel } from "@filen/office/react/sheet"
 import type { TFunction } from "i18next"
@@ -28,8 +28,8 @@ export function sayClipboardRefusal(result: SheetClipboardResult, key: string, t
 
 export interface SheetClipboardCommands {
 	copy(cut: boolean): Promise<SheetClipboardResult>
-	// Values only: the clipboard's text read as tab-separated values, never its formats or formulas (the ribbon's
-	// Paste values).
+	// Values only, never formats or formulas (the ribbon's Paste values): the session's own copy's values in full and
+	// formulas' results, else the clipboard's text read as tab-separated values.
 	paste(values: boolean): Promise<SheetClipboardResult>
 }
 
@@ -70,8 +70,6 @@ export function useSheetClipboard({
 	onRefused: (reason: "tooLarge" | "failed") => void
 }): SheetClipboardCommands {
 	const latest = useLatestRef({ model, canEdit, onRefused })
-	// The session's latest copy (or cut): a paste of it names it.
-	const lastClip = useRef<number | null>(null)
 
 	function copy(cut: boolean): Promise<SheetClipboardResult> {
 		const { model: grid } = latest.current
@@ -88,7 +86,8 @@ export function useSheetClipboard({
 				throw new RangeError("tooLarge")
 			}
 
-			lastClip.current = answer.clip
+			// The session's latest copy (or cut): a paste of it names it, and the grid shows its moving border.
+			grid.setClip({ id: answer.clip, sheet, range, cut })
 
 			return answer.text
 		})
@@ -134,13 +133,18 @@ export function useSheetClipboard({
 		}
 
 		const at = { row: range.startRow, col: range.startCol }
-		const clip = lastClip.current === null || values ? {} : { clip: lastClip.current }
+		const id = grid.clipId()
+		const clip = id === undefined ? {} : { clip: id }
+		// One range of more than one cell is the paste area Excel repeats the copy over; with several, the paste
+		// lands once at the last one's corner.
+		const area =
+			selection.ranges.length === 1 && (range.endRow > range.startRow || range.endCol > range.startCol) ? { target: range } : {}
 
 		void grid.intent()
 		void grid.command(
-			html === "" || html.length > MAX_PASTE_HTML
-				? { type: "clipboard.paste", sheet, at, text, ...clip }
-				: { type: "clipboard.pasteHtml", sheet, at, text, html: sanitizeSheetClipboard(html), ...clip }
+			values || html === "" || html.length > MAX_PASTE_HTML
+				? { type: "clipboard.paste", sheet, at, text, ...clip, ...area, ...(values && { values }) }
+				: { type: "clipboard.pasteHtml", sheet, at, text, html: sanitizeSheetClipboard(html), ...clip, ...area }
 		)
 	}
 

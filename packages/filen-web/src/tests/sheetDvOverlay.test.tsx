@@ -205,6 +205,70 @@ describe("data validation over the grid", () => {
 		expect(focus).toHaveBeenCalled()
 	})
 
+	it("lists the column's entries, sorted, on a cell without a list (Alt+Down), and writes the one picked", async () => {
+		const run = vi.fn<(command: SheetCommand) => void>()
+		const query = vi.fn().mockResolvedValue({
+			entries: [
+				{ text: "pear", input: "pear" },
+				{ text: "Apple", input: "Apple" },
+				{ text: "007", input: "'007" }
+			]
+		})
+
+		render(
+			<Overlay
+				grid={grid(20, 5)}
+				gridRef={{ current: HANDLE }}
+				session={{ query } as unknown as SheetSessionApi}
+				canEdit
+				run={run}
+				opened="column:3:20:5"
+			/>
+		)
+
+		await act(async () => {
+			await Promise.resolve()
+		})
+
+		expect(query).toHaveBeenCalledWith("autoComplete.entries", { sheet: 3, row: 20, col: 5 })
+		expect(screen.getByRole("listbox", { name: preview.previewSheetAutoCompleteListLabel })).toBeTruthy()
+		expect(screen.getAllByRole("option").map(option => option.textContent)).toEqual(["007", "Apple", "pear"])
+		// No button shows on a plain cell.
+		expect(screen.queryByRole("button", { name: preview.previewSheetValidationOpenList })).toBeNull()
+
+		fireEvent.click(screen.getByRole("option", { name: "007" }))
+
+		expect(run).toHaveBeenCalledWith({
+			type: "cells.set",
+			sheet: 3,
+			cells: { rows: Uint32Array.of(20), cols: Uint16Array.of(5), inputs: ["'007"] }
+		})
+	})
+
+	it("closes the column's list again when the column holds no entries", async () => {
+		focus.mockClear()
+
+		const query = vi.fn().mockResolvedValue({ entries: [] })
+
+		render(
+			<Overlay
+				grid={grid(20, 5)}
+				gridRef={{ current: HANDLE }}
+				session={{ query } as unknown as SheetSessionApi}
+				canEdit
+				run={vi.fn()}
+				opened="column:3:20:5"
+			/>
+		)
+
+		await act(async () => {
+			await new Promise(resolve => setTimeout(resolve, 20))
+		})
+
+		expect(screen.queryByRole("listbox")).toBeNull()
+		expect(focus).toHaveBeenCalled()
+	})
+
 	it("moves the input message beside the open list, so both show", async () => {
 		show(grid(2, 0))
 

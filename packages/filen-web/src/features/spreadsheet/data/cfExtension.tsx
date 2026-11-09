@@ -17,12 +17,12 @@ import { useValidationAlert, type ValidationVerdict } from "@/features/spreadshe
 import { NEW_RULE } from "@/features/spreadsheet/data/dvDialog.logic"
 import { ValidationDialog } from "@/features/spreadsheet/data/dvDialog"
 import { ValidationOverlay } from "@/features/spreadsheet/data/dvOverlay"
-import { listCellKey, listShown } from "@/features/spreadsheet/data/dvOverlay.logic"
+import { columnListKey, columnListShown, listCellKey, listShown } from "@/features/spreadsheet/data/dvOverlay.logic"
 
 // Conditional formatting and data validation in the sheet view: the grid draws the formats' bars and icons (the
 // session evaluates the rules), a typed entry is checked against its cell's validation before it is written, a list
-// validation's values open from beside the cell (or with Alt+Down), its input message shows under it, and the grid's
-// menu opens the Data validation dialog.
+// validation's values open from beside the cell (or with Alt+Down; on another cell Alt+Down lists the column's
+// entries), its input message shows under it, and the grid's menu opens the Data validation dialog.
 
 // Where a typed entry goes once checked: the session's answer, then the user's for an alert.
 export async function checkEntry(
@@ -96,11 +96,16 @@ export function useSheetConditional({
 		return result.ok ? null : result.refusal.reason
 	}
 
-	// Alt+Down on a cell with a list validation opens its values (a filter header's menu takes it first).
+	// Alt+Down on a cell with a list validation opens its values, on another cell the column's entries (Excel's
+	// AutoComplete list); a filter header's menu takes it first.
 	function shortcut(key: SheetShortcut): boolean {
-		if (key !== "openDropdown" || text || !listShown(grid, canEdit)) return false
+		if (key !== "openDropdown") return false
 
-		setOpenList(listCellKey(sheet, selection.active.row, selection.active.col))
+		const { row, col } = selection.active
+
+		if (!text && listShown(grid, canEdit)) setOpenList(listCellKey(sheet, row, col))
+		else if (columnListShown(grid, canEdit)) setOpenList(columnListKey(sheet, row, col))
+		else return false
 
 		return true
 	}
@@ -109,7 +114,7 @@ export function useSheetConditional({
 		id: "conditional",
 		grid: gridExtension,
 		shortcut,
-		overlay: text ? null : (
+		overlay: (
 			<ValidationOverlay
 				grid={grid}
 				gridRef={gridRef}

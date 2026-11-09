@@ -55,6 +55,8 @@ import { structureShortcut } from "@/features/spreadsheet/menus/structureShortcu
 import { useMergeCommands } from "@/features/spreadsheet/menus/useMergeCommands"
 import { SheetModifyPassword } from "@/features/spreadsheet/menus/modifyPassword"
 import { SheetTabs } from "@/features/spreadsheet/tabs/sheetTabs"
+import { insertSheetBefore } from "@/features/spreadsheet/tabs/sheetTabs.logic"
+import { SheetStatusBar } from "@/features/spreadsheet/components/sheetStatusBar"
 import type { SheetHandle } from "@/features/spreadsheet/hooks/useSheetSession"
 import { isTextSheetKind } from "@/features/spreadsheet/lib/sheetHosts"
 import { isLegacySheetKind } from "@/features/spreadsheet/lib/sheetKind"
@@ -90,7 +92,8 @@ const LAYER_SHORTCUTS: ReadonlySet<SheetShortcut> = new Set<SheetShortcut>([
 	"findNext",
 	"findPrevious",
 	"print",
-	"newSheet"
+	"newSheet",
+	"goTo"
 ])
 const MAC = isMacPlatform()
 
@@ -464,15 +467,16 @@ export function SheetBody({
 				}
 
 				return true
+			// Shift+F11: Excel's Insert Sheet, a new worksheet in front of the active one, shown.
 			case "newSheet":
 				if (canEdit && !text) {
-					run({
-						type: "sheet.add",
-						name: newSheetName(
+					void insertSheetBefore(
+						model,
+						newSheetName(
 							grid.sheets.map(sheet => sheet.name),
 							number => t("previewSpreadsheetNewSheetName", { number })
 						)
-					})
+					)
 				}
 
 				return true
@@ -488,6 +492,12 @@ export function SheetBody({
 
 				return target !== null
 			}
+			// F5 and Ctrl+G: Excel's Go To is the name box here, focused with its text selected (its onFocus). Taken on a
+			// chartsheet too, where the box is disabled, so the key never reloads the page.
+			case "goTo":
+				containerRef.current?.querySelector<HTMLInputElement>("[data-sheet-name-box]")?.focus()
+
+				return true
 			// Shift+F10: the grid's menu, at the active cell.
 			case "contextMenu": {
 				const cells = containerRef.current?.querySelector(".fo-sheet-scroller")
@@ -762,6 +772,12 @@ export function SheetBody({
 						canEdit={cellsWritable}
 						run={run}
 						text={text}
+						actions={{
+							...ribbonActions,
+							formatCells: () => {
+								setFormatCellsOpen(model, true)
+							}
+						}}
 						items={menuGroups(cellless ? extensions.filter(extension => CHARTSHEET_MENU_GROUPS.has(extension.id)) : extensions)}
 						onOpenChange={touch.onGridMenu}
 						{...(text && { localPane: layerKey })}
@@ -787,6 +803,7 @@ export function SheetBody({
 								describeSelection={range => t("previewSheetRangeSelected", { range })}
 								onTouchMenu={touch.onTouchMenu}
 								onShortcut={handleShortcut}
+								onEditorKey={formula.editorKey}
 								extensions={gridExtensions(extensions)}
 							>
 								{extensions.map(extension => (
@@ -829,6 +846,11 @@ export function SheetBody({
 					/>
 				</div>
 			)}
+			<SheetStatusBar
+				grid={grid}
+				session={handle.session}
+				cellless={cellless}
+			/>
 			{onSaveAsXlsx === undefined ? null : (
 				<ConfirmDialog
 					open={xlsxAsked}

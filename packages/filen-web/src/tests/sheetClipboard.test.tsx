@@ -1,12 +1,12 @@
 // @vitest-environment jsdom
 
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { useRef } from "react"
+import { useEffect, useRef } from "react"
 import { render } from "@testing-library/react"
 import type { SheetCommand } from "@filen/office/core/sheet"
-import type { SheetGridModel } from "@filen/office/react/sheet"
+import type { SheetGridClip, SheetGridModel } from "@filen/office/react/sheet"
 import { MAX_PASTE_HTML, sanitizeSheetClipboard } from "@/features/spreadsheet/clipboard/sheetClipboardSanitizer"
-import { useSheetClipboard } from "@/features/spreadsheet/clipboard/useSheetClipboard"
+import { useSheetClipboard, type SheetClipboardCommands } from "@/features/spreadsheet/clipboard/useSheetClipboard"
 
 // The sheet clipboard on the web: HTML goes through the shared sheet clipboard sanitizer both ways, a copy puts text
 // and HTML on the clipboard (text alone past the HTML size), and a paste hands the session sanitised HTML beside the
@@ -52,12 +52,17 @@ describe("the sheet clipboard sanitizer", () => {
 interface Harness {
 	readonly commands: SheetCommand[]
 	readonly queries: string[]
+	clipboard: SheetClipboardCommands | null
+	readonly clips: SheetGridClip[]
 }
 
-function Mount({ model }: { model: SheetGridModel }) {
+function Mount({ model, onCommands }: { model: SheetGridModel; onCommands: (commands: SheetClipboardCommands) => void }) {
 	const ref = useRef<HTMLDivElement>(null)
+	const commands = useSheetClipboard({ model, container: ref, canEdit: true, onRefused: () => undefined })
 
-	useSheetClipboard({ model, container: ref, canEdit: true, onRefused: () => undefined })
+	useEffect(() => {
+		onCommands(commands)
+	})
 
 	return (
 		<div ref={ref}>
@@ -70,8 +75,12 @@ function Mount({ model }: { model: SheetGridModel }) {
 }
 
 function mount(range: { startRow: number; startCol: number; endRow: number; endCol: number }, chartsheet = false): Harness {
-	const harness: Harness = { commands: [], queries: [] }
+	const harness: Harness = { commands: [], queries: [], clipboard: null, clips: [] }
 	const model = {
+		setClip: (clip: SheetGridClip) => {
+			harness.clips.push(clip)
+		},
+		clipId: () => harness.clips.at(-1)?.id,
 		getSnapshot: () => ({ sheet: 0, selection: { ranges: [range] } }),
 		cellless: () => chartsheet,
 		intent: () => Promise.resolve(),
@@ -91,7 +100,14 @@ function mount(range: { startRow: number; startCol: number; endRow: number; endC
 		}
 	} as unknown as SheetGridModel
 
-	render(<Mount model={model} />)
+	render(
+		<Mount
+			model={model}
+			onCommands={commands => {
+				harness.clipboard = commands
+			}}
+		/>
+	)
 	document.querySelector<HTMLElement>("[role=grid]")?.focus()
 
 	return harness
@@ -166,6 +182,36 @@ describe("useSheetClipboard", () => {
 
 		expect(first?.type === "clipboard.pasteHtml" ? first.html : "").not.toContain("script")
 		expect(first).toMatchObject({ sheet: 0, at: { row: 2, col: 1 }, text: "x" })
+	})
+
+	it("pastes values of the session's own copy by naming it, as values", async () => {
+		vi.stubGlobal("ClipboardItem", undefined)
+		vi.stubGlobal("navigator", {
+			clipboard: {
+				writeText: vi.fn(() => Promise.resolve()),
+				read: vi.fn(() => Promise.reject(new Error("no read"))),
+				readText: vi.fn(() => Promise.resolve("a\tb"))
+			}
+		})
+
+		const harness = mount({ startRow: 0, startCol: 0, endRow: 0, endCol: 1 })
+
+		expect(await harness.clipboard?.copy(false)).toBe("done")
+		// The grid holds the copy: its id for the paste, its range for the moving border.
+		expect(harness.clips).toEqual([{ id: 7, sheet: 0, range: { startRow: 0, startCol: 0, endRow: 0, endCol: 1 }, cut: false }])
+		expect(await harness.clipboard?.paste(true)).toBe("done")
+		expect(harness.commands).toEqual([
+			{
+				type: "clipboard.paste",
+				sheet: 0,
+				at: { row: 0, col: 0 },
+				// The selection pasted into, which a copy repeats across when it tiles it.
+				target: { startRow: 0, startCol: 0, endRow: 0, endCol: 1 },
+				text: "a\tb",
+				clip: 7,
+				values: true
+			}
+		])
 	})
 
 	it("copies and pastes nothing on a chartsheet, which has no cells", async () => {

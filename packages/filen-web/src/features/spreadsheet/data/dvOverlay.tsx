@@ -9,13 +9,14 @@ import {
 	type SheetGridState,
 	type ValidationPlacement
 } from "@filen/office/react/sheet"
-import { listCellKey, listShown } from "@/features/spreadsheet/data/dvOverlay.logic"
+import { columnListKey, columnListShown, listCellKey, listShown, sortedEntries } from "@/features/spreadsheet/data/dvOverlay.logic"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Spinner } from "@/components/ui/spinner"
 
 // What a cell's data validation shows over the grid: the button that opens a list validation's values beside the
 // active cell (the chosen value is written as typed; Alt+Down opens them too, the keys then pick), and the input
-// message under it while it is selected.
+// message under it while it is selected. On a cell without one, Alt+Down lists the column's entries (AutoComplete's,
+// sorted) from the same place, with no button shown.
 
 type ListState =
 	| { readonly status: "loading" }
@@ -45,6 +46,7 @@ export function ValidationOverlay({
 	const rightToLeft = grid.layout?.rightToLeft ?? false
 	const messageShown = entry !== null && entry.prompt !== null && grid.editing === null
 	const cell = listCellKey(grid.sheet, row, col)
+	const column = columnListKey(grid.sheet, row, col)
 
 	return (
 		<>
@@ -52,6 +54,7 @@ export function ValidationOverlay({
 				<ValidationList
 					// A new cell starts closed.
 					key={cell}
+					source="validation"
 					grid={grid}
 					gridRef={gridRef}
 					session={session}
@@ -60,6 +63,20 @@ export function ValidationOverlay({
 					open={openList === cell}
 					onOpenChange={open => {
 						onOpenList(open ? cell : null)
+					}}
+				/>
+			) : openList === column && columnListShown(grid, canEdit) ? (
+				<ValidationList
+					key={column}
+					source="column"
+					grid={grid}
+					gridRef={gridRef}
+					session={session}
+					rightToLeft={rightToLeft}
+					run={run}
+					open
+					onOpenChange={open => {
+						if (!open) onOpenList(null)
 					}}
 				/>
 			) : null}
@@ -79,6 +96,7 @@ export function ValidationOverlay({
 }
 
 function ValidationList({
+	source,
 	grid,
 	gridRef,
 	session,
@@ -87,6 +105,7 @@ function ValidationList({
 	open,
 	onOpenChange
 }: {
+	source: ListSource
 	grid: SheetGridState
 	gridRef: RefObject<SheetGridHandle | null>
 	session: SheetSessionApi
@@ -115,9 +134,15 @@ function ValidationList({
 		>
 			<PopoverTrigger
 				ref={ref}
-				aria-label={t("previewSheetValidationOpenList")}
 				data-sheet-validation-button
-				className="pointer-events-auto absolute top-0 left-0 flex w-5 items-center justify-center border border-border bg-background text-foreground hover:bg-muted"
+				// The column's entries open from where a list's button is, which a plain cell does not show.
+				{...(source === "column"
+					? { "aria-hidden": true, tabIndex: -1, className: "pointer-events-none absolute top-0 left-0 w-5 opacity-0" }
+					: {
+							"aria-label": t("previewSheetValidationOpenList"),
+							className:
+								"pointer-events-auto absolute top-0 left-0 flex w-5 items-center justify-center border border-border bg-background text-foreground hover:bg-muted"
+						})}
 				style={{ visibility: "hidden" }}
 			>
 				<ChevronDownIcon className="size-3" />
@@ -138,40 +163,52 @@ function ValidationList({
 			>
 				<ListItems
 					listRef={listRef}
+					source={source}
 					session={session}
 					sheet={sheet}
 					row={row}
 					col={col}
 					current={grid.active.text}
 					onPick={pick}
+					onEmpty={() => {
+						onOpenChange(false)
+						gridRef.current?.focus()
+					}}
 				/>
 			</PopoverContent>
 		</Popover>
 	)
 }
 
+// A validation's list, or the column's entries (Alt+Down on a cell without a list).
+type ListSource = "validation" | "column"
+
 // How long typed letters keep adding to what the list jumps to.
 const TYPEAHEAD_MS = 700
 
 // The list's values, read when it opens: arrows, Home and End move the highlight, typing jumps to the next value
 // starting with what was typed, Enter picks (support.microsoft.com, "Keyboard shortcuts in Excel": Alt+Down opens
-// a drop-down list).
+// a drop-down list, and Option+Down the AutoComplete list). The column's entries close again when there are none.
 function ListItems({
 	listRef,
+	source,
 	session,
 	sheet,
 	row,
 	col,
 	current,
-	onPick
+	onPick,
+	onEmpty
 }: {
 	listRef: RefObject<HTMLDivElement | null>
+	source: ListSource
 	session: SheetSessionApi
 	sheet: number
 	row: number
 	col: number
 	current: string
 	onPick: (item: DvListItem) => void
+	onEmpty: () => void
 }) {
 	const { t } = useTranslation("preview")
 	const id = useId()
@@ -182,8 +219,12 @@ function ListItems({
 	// The values are the session's, read once the list opens (this mounts then).
 	useEffect(() => {
 		let live = true
+		const read =
+			source === "validation"
+				? session.query("validation.list", { sheet, row, col })
+				: session.query("autoComplete.entries", { sheet, row, col }).then(result => ({ items: sortedEntries(result.entries) }))
 
-		session.query("validation.list", { sheet, row, col }).then(
+		read.then(
 			result => {
 				if (!live) return
 
@@ -209,7 +250,14 @@ function ListItems({
 		return () => {
 			live = false
 		}
-	}, [session, sheet, row, col, current])
+	}, [source, session, sheet, row, col, current])
+
+	const empty = source === "column" && list.status === "ready" && list.items.length === 0
+
+	// A column with no entries lists nothing: the list closes again.
+	useEffect(() => {
+		if (empty) onEmpty()
+	}, [empty, onEmpty])
 
 	const items = list.status === "ready" ? list.items : []
 
@@ -286,7 +334,7 @@ function ListItems({
 			ref={listRef}
 			role="listbox"
 			tabIndex={0}
-			aria-label={t("previewSheetValidationListLabel")}
+			aria-label={t(source === "validation" ? "previewSheetValidationListLabel" : "previewSheetAutoCompleteListLabel")}
 			aria-busy={list.status === "loading"}
 			aria-activedescendant={items.length === 0 ? undefined : `${id}-${String(active)}`}
 			className="outline-hidden"

@@ -1,25 +1,125 @@
 import { describe, expect, it } from "vitest"
-import { parseNameBox } from "@/features/spreadsheet/lib/nameBox.logic"
+import {
+	nameBoxNames,
+	nameBoxSelection,
+	nameBoxShown,
+	parseNameBox,
+	resolveNameBox,
+	type NameBoxDefinedNames
+} from "@/features/spreadsheet/lib/nameBox.logic"
 import { csvRefusalKey, readOnlyNoteKey, refusalKey, viewOnlyKey } from "@/features/spreadsheet/lib/sheetMessages.logic"
 import { SheetEventRelay } from "@/features/spreadsheet/lib/sheetEvents"
-import type { SheetEvent } from "@filen/office/core/sheet"
+import { SHEET_MAX_COLS, SHEET_MAX_ROWS, type SheetEvent, type SheetRange, type SheetSummary } from "@filen/office/core/sheet"
 import { preview } from "@/locales/en/preview"
 
 describe("name box", () => {
+	const here = (range: SheetRange) => ({ kind: "range", sheet: null, range })
+
 	it("reads a cell, absolute or not, in either case", () => {
-		expect(parseNameBox("B4")).toEqual({ startRow: 3, startCol: 1, endRow: 3, endCol: 1 })
-		expect(parseNameBox(" $b$4 ")).toEqual({ startRow: 3, startCol: 1, endRow: 3, endCol: 1 })
-		expect(parseNameBox("XFD1048576")).toEqual({ startRow: 1_048_575, startCol: 16_383, endRow: 1_048_575, endCol: 16_383 })
+		expect(parseNameBox("B4")).toEqual(here({ startRow: 3, startCol: 1, endRow: 3, endCol: 1 }))
+		expect(parseNameBox(" $b$4 ")).toEqual(here({ startRow: 3, startCol: 1, endRow: 3, endCol: 1 }))
+		expect(parseNameBox("XFD1048576")).toEqual(here({ startRow: 1_048_575, startCol: 16_383, endRow: 1_048_575, endCol: 16_383 }))
 	})
 
 	it("reads a range from either corner", () => {
-		expect(parseNameBox("C3:A1")).toEqual({ startRow: 0, startCol: 0, endRow: 2, endCol: 2 })
+		expect(parseNameBox("C3:A1")).toEqual(here({ startRow: 0, startCol: 0, endRow: 2, endCol: 2 }))
 	})
 
-	it("refuses anything past the grid or not a reference", () => {
-		for (const input of ["", "A0", "XFE1", "A1048577", "A1:B2:C3", "Sheet1!A1", "1A", "=A1"]) {
+	it("reads whole columns and rows", () => {
+		expect(parseNameBox("A:A")).toEqual(here({ startRow: 0, startCol: 0, endRow: SHEET_MAX_ROWS - 1, endCol: 0 }))
+		expect(parseNameBox("$C:b")).toEqual(here({ startRow: 0, startCol: 1, endRow: SHEET_MAX_ROWS - 1, endCol: 2 }))
+		expect(parseNameBox("3:$1")).toEqual(here({ startRow: 0, startCol: 0, endRow: 2, endCol: SHEET_MAX_COLS - 1 }))
+	})
+
+	it("reads a sheet before the reference, quoted or bare", () => {
+		expect(parseNameBox("Sheet2!A1")).toEqual({
+			kind: "range",
+			sheet: "Sheet2",
+			range: { startRow: 0, startCol: 0, endRow: 0, endCol: 0 }
+		})
+		expect(parseNameBox("'Bob''s data'!B2:B3")).toEqual({
+			kind: "range",
+			sheet: "Bob's data",
+			range: { startRow: 1, startCol: 1, endRow: 2, endCol: 1 }
+		})
+		expect(parseNameBox("Sheet2!Totals")).toEqual({ kind: "name", sheet: "Sheet2", name: "Totals" })
+	})
+
+	it("reads a defined name", () => {
+		expect(parseNameBox("Sales_2024")).toEqual({ kind: "name", sheet: null, name: "Sales_2024" })
+		expect(parseNameBox("ABCD1")).toEqual({ kind: "name", sheet: null, name: "ABCD1" })
+	})
+
+	it("refuses anything past the grid or neither a reference nor a name", () => {
+		for (const input of ["", "A0", "XFE1", "A1048577", "A1:B2:C3", "A1:B", "1A", "=A1", "!A1", "My sheet!A1", "'x'y'!A1", "a b"]) {
 			expect(parseNameBox(input), input).toBeNull()
 		}
+	})
+
+	const sheets: SheetSummary[] = [
+		{ id: 1, name: "Data", state: "visible", kind: "worksheet", ready: true },
+		{ id: 2, name: "Bob's data", state: "visible", kind: "worksheet", ready: true },
+		{ id: 3, name: "Chart1", state: "visible", kind: "chartsheet", ready: true }
+	]
+	const names: NameBoxDefinedNames = [
+		{ name: "Totals", sheet: null, formula: "Data!$B$2:$B$9" },
+		{ name: "Totals", sheet: 2, formula: "'Bob''s data'!$C$1" },
+		{ name: "Whole", sheet: null, formula: "=Data!$A:$A" },
+		{ name: "Alias", sheet: null, formula: "Totals" },
+		{ name: "Loop", sheet: null, formula: "Loop" },
+		{ name: "Two", sheet: null, formula: "Data!$A$1,Data!$C$3" },
+		{ name: "Rate", sheet: null, formula: "0.2" },
+		{ name: "_xlnm.Print_Area", sheet: 1, formula: "Data!$A$1:$D$20" },
+		{ name: "Other", sheet: 2, formula: "'Bob''s data'!$A$1" }
+	]
+	const go = (input: string, own: number) => {
+		const target = parseNameBox(input)
+
+		return target === null ? null : resolveNameBox(target, own, sheets, names)
+	}
+
+	it("finds another sheet whatever its case, never a chartsheet or a missing one", () => {
+		expect(go("data!A1", 2)).toEqual({ sheet: 1, range: { startRow: 0, startCol: 0, endRow: 0, endCol: 0 } })
+		expect(go("Chart1!A1", 1)).toBeNull()
+		expect(go("Nowhere!A1", 1)).toBeNull()
+		expect(go("B2", 2)).toEqual({ sheet: 2, range: { startRow: 1, startCol: 1, endRow: 1, endCol: 1 } })
+	})
+
+	it("follows a name: the sheet's own before the workbook's, through other names, to one area only", () => {
+		expect(go("totals", 1)).toEqual({ sheet: 1, range: { startRow: 1, startCol: 1, endRow: 8, endCol: 1 } })
+		expect(go("Totals", 2)).toEqual({ sheet: 2, range: { startRow: 0, startCol: 2, endRow: 0, endCol: 2 } })
+		expect(go("Data!Totals", 2)).toBeNull()
+		expect(go("'Bob''s data'!Totals", 1)).toEqual({ sheet: 2, range: { startRow: 0, startCol: 2, endRow: 0, endCol: 2 } })
+		expect(go("Whole", 2)).toEqual({ sheet: 1, range: { startRow: 0, startCol: 0, endRow: SHEET_MAX_ROWS - 1, endCol: 0 } })
+		expect(go("Alias", 1)).toEqual(go("Totals", 1))
+		expect(go("Print_Area", 1)).toEqual({ sheet: 1, range: { startRow: 0, startCol: 0, endRow: 19, endCol: 3 } })
+		for (const name of ["Loop", "Two", "Rate", "Missing", "Other"]) {
+			expect(go(name, 1), name).toBeNull()
+		}
+	})
+
+	it("lists the names a sheet can go to, sorted, its own hiding the workbook's", () => {
+		expect(nameBoxNames(1, sheets, names)).toEqual(["Alias", "Print_Area", "Totals", "Whole"])
+		expect(nameBoxNames(2, sheets, names)).toEqual(["Alias", "Other", "Totals", "Whole"])
+	})
+
+	it("selects a place grown to the merges it cuts, from its top-left cell", () => {
+		const merges = [{ startRow: 0, startCol: 0, endRow: 1, endCol: 1 }]
+		const selection = nameBoxSelection({ startRow: 1, startCol: 1, endRow: 2, endCol: 2 }, merges)
+
+		expect(selection.ranges).toEqual([{ startRow: 0, startCol: 0, endRow: 2, endCol: 2 }])
+		expect(selection.active).toEqual({ row: 0, col: 0 })
+	})
+
+	it("shows the active cell, a merge by its top left", () => {
+		const range = { startRow: 0, startCol: 0, endRow: 2, endCol: 2 }
+
+		const merge = { startRow: 0, startCol: 0, endRow: 1, endCol: 1 }
+
+		const active = { row: 1, col: 2 }
+
+		expect(nameBoxShown({ active, anchor: { row: 0, col: 0 }, focus: { row: 2, col: 2 }, ranges: [range] })).toBe("C2")
+		expect(nameBoxShown(nameBoxSelection({ startRow: 1, startCol: 1, endRow: 1, endCol: 1 }, [merge]))).toBe("A1")
 	})
 })
 

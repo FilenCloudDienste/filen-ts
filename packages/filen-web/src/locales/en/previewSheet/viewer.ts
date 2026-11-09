@@ -4,7 +4,7 @@ export const previewSheetViewer = {
 	/** Spreadsheet viewer — accessible label of the name box (the selected cell or range, e.g. "B2:D7"), which also takes a cell or range to go to */
 	previewSheetNameBox: "Name box",
 	/** Spreadsheet viewer — toast when the name box was given something that is not a cell or range like "B4" or "A1:C3" */
-	previewSheetNameBoxInvalid: "Enter a cell like B4 or a range like A1:C3.",
+	previewSheetNameBoxInvalid: "Enter a cell like B4, a range like A1:C3, a sheet's cell like Sheet2!A1 or a defined name.",
 	/** Spreadsheet viewer — accessible label of the in-cell editor */
 	previewSheetCellEditor: "Edit cell",
 	/** Spreadsheet viewer — note beside the cell contents when a file carries a digital signature, which any edit would break */
@@ -32,5 +32,11 @@ export const previewSheetViewer = {
 	/** Toast — the file's format can't hold the change */
 	previewSheetUnsupported: "That change can't be saved in this file's format.",
 	/** Spreadsheet viewer — the engine behind the open spreadsheet stopped; nothing more can be edited or saved */
-	previewSheetFailed: "This spreadsheet stopped working. Close it and open it again."
+	previewSheetFailed: "This spreadsheet stopped working. Close it and open it again.",
+	/** Spreadsheet status bar — the average of the numbers in the selected cells, shown as the first number's cell shows it */
+	previewSheetStatusAverage: "Average: {{value}}",
+	/** Spreadsheet status bar — how many of the selected cells hold something */
+	previewSheetStatusCount: "Count: {{value}}",
+	/** Spreadsheet status bar — the sum of the numbers in the selected cells, shown as the first number's cell shows it */
+	previewSheetStatusSum: "Sum: {{value}}"
 }

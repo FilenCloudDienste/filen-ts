@@ -2,13 +2,14 @@
 
 import { describe, expect, it, vi } from "vitest"
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
-import { AxisFlag, SHEET_MAX_COLS, SHEET_MAX_ROWS, type SheetCommand } from "@filen/office/core/sheet"
+import { AxisFlag, SHEET_MAX_COLS, SHEET_MAX_ROWS, type SheetCommand, type SheetRange } from "@filen/office/core/sheet"
 import type { SheetGridModel, SheetGridState } from "@filen/office/react/sheet"
 import { bytesSource } from "@filen/office/core/opc"
 import { openXlsx, saveXlsx } from "@filen/office/core/xlsx"
 import { inThreadSheetHost } from "@filen/office/dom/sheet"
 import { label, openGrid, workbook } from "@/tests/sheetMenusFixtures"
 import { GridHarness } from "@/tests/sheetMenusHarness"
+import { preview } from "@/locales/en/preview"
 
 // The structure items of the spreadsheet viewer: rows and columns hidden and shown from the grid's
 // menu, merges (with Excel's value-loss question), and a text file's frozen panes kept beside it across a reopen.
@@ -297,6 +298,138 @@ describe("a text file's frozen panes", () => {
 		await waitFor(() => {
 			expect(second.getSnapshot().layout?.pane).toEqual({ rows: 1, cols: 0, firstRow: 0, firstCol: 0, topRow: 1, leftCol: 0 })
 		})
+	})
+})
+
+describe("the grid menu's clipboard and cell items", () => {
+	type Key =
+		| "previewSheetTouchCut"
+		| "previewSheetTouchCopy"
+		| "previewSheetTouchPaste"
+		| "previewSheetRibbonPasteValues"
+		| "previewSheetRibbonInsertCells"
+		| "previewSheetRibbonDeleteCells"
+		| "previewSheetFormatCells"
+
+	const KEYS: readonly Key[] = [
+		"previewSheetTouchCut",
+		"previewSheetTouchCopy",
+		"previewSheetTouchPaste",
+		"previewSheetRibbonPasteValues",
+		"previewSheetRibbonInsertCells",
+		"previewSheetRibbonDeleteCells",
+		"previewSheetFormatCells"
+	]
+
+	// The menu's items by catalog key, in menu order: the English text or, untranslated, the key.
+	function shownKeys(): Key[] {
+		const texts = screen.getAllByRole("menuitem").map(item => item.textContent)
+
+		return texts.flatMap(text => KEYS.filter(key => text === preview[key] || text === key))
+	}
+
+	function item(key: Key): HTMLElement {
+		const found = screen.getAllByRole("menuitem").find(entry => entry.textContent === preview[key] || entry.textContent === key)
+
+		if (found === undefined) {
+			throw new Error(`no ${key}`)
+		}
+
+		return found
+	}
+
+	async function open(kind: "xlsx" | "csv", canEdit: boolean, ranges?: SheetRange) {
+		const bytes =
+			kind === "csv" ? Uint8Array.from(new TextEncoder().encode("a,b\r\n1,2\r\n")) : await workbook([{ name: "One", rows: [["a"]] }])
+		const model = await openGrid(bytes, kind)
+		const calls: string[] = []
+		const actions = {
+			copy: (cut: boolean) => calls.push(cut ? "cut" : "copy"),
+			paste: (values: boolean) => calls.push(values ? "pasteValues" : "paste"),
+			insertCells: () => calls.push("insertCells"),
+			deleteCells: () => calls.push("deleteCells"),
+			formatCells: () => calls.push("formatCells")
+		}
+		const view = render(
+			<GridHarness model={model}>
+				{grid => (
+					<SheetGridMenu
+						grid={grid}
+						canEdit={canEdit}
+						run={() => undefined}
+						text={kind === "csv"}
+						actions={actions}
+					>
+						<div />
+					</SheetGridMenu>
+				)}
+			</GridHarness>
+		)
+
+		if (ranges !== undefined) {
+			act(() => {
+				const corner = { row: ranges.startRow, col: ranges.startCol }
+
+				model.select({ active: corner, anchor: corner, focus: { row: ranges.endRow, col: ranges.endCol }, ranges: [ranges] })
+			})
+		}
+
+		openMenu(view.container)
+		await screen.findAllByRole("menuitem")
+
+		return calls
+	}
+
+	it("leads with Excel's cut, copy and paste, the cell dialogs and format cells, each through the ribbon's handler", async () => {
+		const calls = await open("xlsx", true)
+
+		expect(shownKeys()).toEqual([
+			"previewSheetTouchCut",
+			"previewSheetTouchCopy",
+			"previewSheetTouchPaste",
+			"previewSheetRibbonPasteValues",
+			"previewSheetRibbonInsertCells",
+			"previewSheetRibbonDeleteCells",
+			"previewSheetFormatCells"
+		])
+		expect(screen.getAllByRole("menuitem")[0]).toBe(item("previewSheetTouchCut"))
+
+		for (const key of KEYS) {
+			if (screen.queryAllByRole("menuitem").length === 0) {
+				openMenu(document.body)
+				await screen.findAllByRole("menuitem")
+			}
+
+			fireEvent.click(item(key))
+		}
+
+		expect(calls).toEqual(["cut", "copy", "paste", "pasteValues", "insertCells", "deleteCells", "formatCells"])
+	})
+
+	it("offers only copy read-only", async () => {
+		await open("xlsx", false)
+
+		expect(shownKeys()).toEqual(["previewSheetTouchCopy"])
+	})
+
+	it("offers no paste values or format cells for a text file", async () => {
+		await open("csv", true)
+
+		expect(shownKeys()).toEqual([
+			"previewSheetTouchCut",
+			"previewSheetTouchCopy",
+			"previewSheetTouchPaste",
+			"previewSheetRibbonInsertCells",
+			"previewSheetRibbonDeleteCells"
+		])
+	})
+
+	it("leaves whole rows to their own insert and delete items", async () => {
+		await open("xlsx", true, { startRow: 1, startCol: 0, endRow: 1, endCol: SHEET_MAX_COLS - 1 })
+
+		expect(shownKeys()).not.toContain("previewSheetRibbonInsertCells")
+		expect(shownKeys()).not.toContain("previewSheetRibbonDeleteCells")
+		expect(shownKeys()).toContain("previewSheetTouchCopy")
 	})
 })
 

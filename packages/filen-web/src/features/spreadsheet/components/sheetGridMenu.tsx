@@ -1,7 +1,7 @@
 import { Fragment, useState, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { AxisFlag, resetTargets, type LayerKey, type SheetAxis, type SheetAxisLayout, type SheetCommand } from "@filen/office/core/sheet"
-import { axisEntry, celllessSheet, type SheetGridState } from "@filen/office/react/sheet"
+import { axisEntry, celllessSheet, wholeAxis, type SheetGridState } from "@filen/office/react/sheet"
 import {
 	ContextMenu,
 	ContextMenuContent,
@@ -17,6 +17,7 @@ import { useLocalPane } from "@/features/spreadsheet/menus/localPane"
 import { FREEZE_ITEMS, MERGE_ITEMS, freezeEnabled, freezeTo, selectionHasMerge } from "@/features/spreadsheet/menus/structureCommands"
 import { useMergeCommands } from "@/features/spreadsheet/menus/useMergeCommands"
 import { selectionSpans, spanCount, unhideSpans } from "@/features/spreadsheet/menus/structure.logic"
+import type { SheetRibbonActions } from "@/features/spreadsheet/toolbar/sheetToolbar"
 
 // The structural items, in menu order; a separator follows each axis's delete. `after` inserts past the
 // selection's end rather than at its start.
@@ -34,13 +35,19 @@ const HIDE_ITEMS = [
 	{ axis: "cols", hide: "previewSheetHideColumns", unhide: "previewSheetUnhideColumns" }
 ] as const
 
+// The ribbon's own handlers, so the clipboard with its refusals, and the dialogs, are reached one way.
+export type SheetGridMenuActions = Pick<SheetRibbonActions, "copy" | "paste" | "insertCells" | "deleteCells"> & {
+	formatCells: () => void
+}
+
 // An entry may stand for a run of rows or columns: looked up, never listed one by one.
 function hiddenIn(layout: SheetAxisLayout): (index: number) => boolean {
 	return index => ((axisEntry(layout, index)?.flags ?? 0) & AxisFlag.HIDDEN) !== 0
 }
 
-// The grid's menu: rows and columns inserted, deleted, hidden and shown, contents cleared, panes frozen, cells merged,
-// sizes reset. Read-only, it holds only the size resets (and a text file's frozen panes, which it keeps beside the
+// The grid's menu, in Excel's order: cut, copy and paste (`actions`), cells, rows and columns inserted, deleted,
+// hidden and shown, contents cleared, cells formatted, panes frozen, cells merged, sizes reset. Read-only, it holds
+// only copy, the size resets (and a text file's frozen panes, which it keeps beside the
 // file: `localPane`, the file's key, for a text file). Features add groups of their own (`items`, each followed by a
 // separator), shown read-only too: an item that edits checks for itself.
 export function SheetGridMenu({
@@ -50,6 +57,7 @@ export function SheetGridMenu({
 	text,
 	localPane,
 	items,
+	actions,
 	onOpenChange,
 	children
 }: {
@@ -60,6 +68,7 @@ export function SheetGridMenu({
 	text?: boolean
 	localPane?: LayerKey
 	items?: readonly { readonly id: string; readonly node: ReactNode }[]
+	actions?: SheetGridMenuActions
 	// Hears the menu open and close (the touch menu's ⋯ opens it with finger-sized items).
 	onOpenChange?: (open: boolean) => void
 	children: ReactNode
@@ -102,6 +111,8 @@ export function SheetGridMenu({
 	// A chartsheet or dialog sheet has no cells: only the features' groups (its chart's) are shown.
 	const cellless = celllessSheet(grid, sheet)
 	const freezes = (canEdit || textFile) && !cellless
+	// Excel's Insert… and Delete… ask how cells shift; whole rows or columns have their own items below.
+	const cellDialogs = actions !== undefined && wholeAxis(selection) === null
 
 	return (
 		<>
@@ -111,8 +122,57 @@ export function SheetGridMenu({
 			>
 				<ContextMenuTrigger className="flex min-h-0 flex-1 flex-col">{children}</ContextMenuTrigger>
 				<ContextMenuContent aria-label={t("previewSheetGridMenu")}>
+					{actions !== undefined && range !== undefined && !cellless ? (
+						<>
+							{canEdit ? (
+								<ContextMenuItem
+									onClick={() => {
+										actions.copy(true)
+									}}
+								>
+									{t("previewSheetTouchCut")}
+								</ContextMenuItem>
+							) : null}
+							<ContextMenuItem
+								onClick={() => {
+									actions.copy(false)
+								}}
+							>
+								{t("previewSheetTouchCopy")}
+							</ContextMenuItem>
+							{canEdit ? (
+								<>
+									<ContextMenuItem
+										onClick={() => {
+											actions.paste(false)
+										}}
+									>
+										{t("previewSheetTouchPaste")}
+									</ContextMenuItem>
+									{/* A text file holds no formats: its paste is values already. */}
+									{textFile ? null : (
+										<ContextMenuItem
+											onClick={() => {
+												actions.paste(true)
+											}}
+										>
+											{t("previewSheetRibbonPasteValues")}
+										</ContextMenuItem>
+									)}
+								</>
+							) : null}
+							<ContextMenuSeparator />
+						</>
+					) : null}
 					{canEdit && range !== undefined && !cellless ? (
 						<>
+							{cellDialogs ? (
+								<>
+									<ContextMenuItem onClick={actions.insertCells}>{t("previewSheetRibbonInsertCells")}</ContextMenuItem>
+									<ContextMenuItem onClick={actions.deleteCells}>{t("previewSheetRibbonDeleteCells")}</ContextMenuItem>
+									<ContextMenuSeparator />
+								</>
+							) : null}
 							{STRUCTURE_ITEMS.map(item => {
 								const rows = item.axis === "rows"
 								const count = rows ? range.endRow - range.startRow + 1 : range.endCol - range.startCol + 1
@@ -196,6 +256,9 @@ export function SheetGridMenu({
 							>
 								{t("previewSpreadsheetClearCells")}
 							</ContextMenuItem>
+							{actions === undefined || textFile ? null : (
+								<ContextMenuItem onClick={actions.formatCells}>{t("previewSheetFormatCells")}</ContextMenuItem>
+							)}
 							<ContextMenuSeparator />
 						</>
 					) : null}
