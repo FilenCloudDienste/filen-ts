@@ -26,6 +26,8 @@
 		"./linkPolicy": "./src/linkPolicy.ts",
 		"./desktop": "./src/desktop.ts",
 		"./desktopLock": "./src/desktopLock.ts",
+		"./desktopShellStrings": "./src/desktopShellStrings.ts",
+		"./languages": "./src/languages.ts",
 		"./session": "./src/session.ts"
 	},
 	"scripts": {

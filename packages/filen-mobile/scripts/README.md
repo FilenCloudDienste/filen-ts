@@ -32,6 +32,9 @@ src/locales/en/*.ts ──(merged barrel: src/locales/en)──▶ key → Engli
   deleted, untouched translations are preserved. Catalogs are written with **sorted keys** and a
   **trailing newline** for stable diffs.
 
+The delta, plural expansion, removals and the request itself are shared with filen-web's script
+(`@filen/shared/tooling/i18n`); this script keeps the flat catalog files and the prompt context.
+
 The glossary keeps the brand (`Filen` / `Filen.io`) untranslated, preserves `{{variables}}`
 exactly, preserves react-i18next `<link>…</link>` markup, and treats plural `_one`/`_other`
 keys as separate entries.
@@ -42,7 +45,7 @@ keys as separate entries.
 | --- | --- | --- |
 | `pnpm run translate-i18n` | **DELTA** (default) | Keys added/changed in `src/locales/en` since the last translation (diffed against the committed `src/locales/.en-snapshot.json`, which a successful run rewrites), plus any English key missing from a target catalog (covers fresh/empty stubs). Removed keys are deleted from every catalog. |
 | `pnpm run translate-i18n --full` | **FULL** | Every English key for every target language. |
-| `pnpm run translate-i18n de,fr` | (either) | Restrict to specific languages (comma-separated or repeated args). |
+| `pnpm run translate-i18n de,fr` | (either) | Restrict to specific languages (comma-separated or repeated args). Such a run leaves the snapshot alone, so the languages it skipped still see the changed keys next time. |
 
 ### `DRY_RUN=1` — preview with zero token spend
 
@@ -80,11 +83,13 @@ A language only becomes selectable in the app once its catalog has at least one 
 (`hasTranslations()` in `src/lib/i18n.ts` gates the picker), so the wiring and the translations
 can land independently. To add one (example: Korean `ko`):
 
-1. `src/locales/languages.ts` — add `"ko"` to `SUPPORTED_LANGUAGES`.
-2. `src/lib/language.ts` — add a native `LANGUAGE_LABELS` entry (e.g. `ko: "한국어"`).
+1. `@filen/shared/languages` (`packages/filen-shared/src/languages.ts`) — add `"ko"` to `SUPPORTED_LANGUAGES` and a
+   native `LANGUAGE_LABELS` entry (e.g. `ko: "한국어"`). The web app offers it too once its catalog exists.
+2. `src/locales/languages.ts` — add `"ko"` to this literal copy (`src/tests/i18nCatalogParity.test.ts` keeps the two
+   equal). It changes the app's declared localizations, so it ships with a native release.
 3. `src/locales/catalogs.ts` — add `ko: () => require("@/locales/ko.json") as Record<string, string>`
    to `CATALOG_LOADERS` — typed `Record<Exclude<Language, "en">, …>`, so this is a compile error until you do.
-4. `scripts/translate-i18n.ts` — add the English name to `LANGUAGE_NAMES` (e.g. `ko: "Korean"`)
-   — typed `Record<TargetLanguage, string>`, so this is a compile error until you do.
+4. `@filen/shared/tooling/i18n` — add the English name to `LANGUAGE_NAMES` (e.g. `ko: "Korean"`); both scripts
+   index it by language, so this is a compile error until you do.
 5. Create the empty stub: `echo '{}' > src/locales/ko.json`.
 6. Run the pipeline (`--full`, or restrict to `ko`) to populate it.

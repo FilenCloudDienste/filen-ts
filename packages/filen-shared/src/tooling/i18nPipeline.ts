@@ -1,11 +1,50 @@
 /**
- * The core of the apps' translate-i18n scripts: CLI parsing, CLDR plural expansion, the translator
- * system prompt, the structured-output schema, batching and reading a batch's reply. Each script keeps its own
- * catalog shape, model, target languages and Anthropic call. Node-only build tooling, reachable solely
- * through the "@filen/shared/tooling/i18n" subpath so it never enters an app bundle.
+ * The core of the apps' translate-i18n scripts: CLI parsing, the English-vs-snapshot delta, CLDR plural expansion,
+ * the per-language key plan, removals, the translator system prompt, the request and its structured-output schema,
+ * batching and reading a batch's reply. Every function works on one flat key → string catalog (mobile has one, the
+ * web app one per namespace). Each script keeps its catalog files, prompt context and Anthropic client, which it
+ * passes in as `createMessage`, so this module needs no SDK. Node-only build tooling, reachable solely through the
+ * "@filen/shared/tooling/i18n" subpath so it never enters an app bundle.
  */
 
+import { existsSync, readFileSync, writeFileSync } from "node:fs"
 import { type } from "arktype"
+
+export type Catalog = Record<string, string>
+
+/**
+ * English names of the target languages, telling the model what to translate into. Keyed by the literal codes, so a
+ * script indexing it with a language of @filen/shared/languages fails to compile when one is missing here.
+ */
+export const LANGUAGE_NAMES = {
+	de: "German",
+	es: "Spanish",
+	fr: "French",
+	it: "Italian",
+	"pt-BR": "Brazilian Portuguese (Português do Brasil)",
+	"pt-PT": "European Portuguese (Português de Portugal)",
+	ru: "Russian",
+	ja: "Japanese",
+	zh: "Chinese (Simplified)",
+	"zh-TW": "Traditional Chinese (Taiwan)",
+	bn: "Bengali",
+	cs: "Czech",
+	da: "Danish",
+	fi: "Finnish",
+	hi: "Hindi",
+	hu: "Hungarian",
+	id: "Indonesian",
+	ko: "Korean",
+	nl: "Dutch",
+	no: "Norwegian",
+	pl: "Polish",
+	ro: "Romanian",
+	sv: "Swedish",
+	th: "Thai",
+	tr: "Turkish",
+	uk: "Ukrainian",
+	vi: "Vietnamese"
+} as const
 
 export type CliArgs<L extends string> = {
 	full: boolean
@@ -134,10 +173,11 @@ export function computePluralBases(catalog: Record<string, string>): ReadonlyMap
 // --- Translation -----------------------------------------------------------
 
 /**
- * The stable, cached system prefix: instructions plus the full JSDoc-rich English source. `product`
- * names the app the strings belong to ("mobile" / "web").
+ * The stable, cached system prefix: instructions plus the JSDoc-rich English source. `product`
+ * names the app the strings belong to ("mobile" / "web"). `partial` says the source is only the part of the catalog
+ * the requested keys come from (plus shared terms), not all of it.
  */
-export function buildSystemPrompt(englishSource: string, product: string): string {
+export function buildSystemPrompt(englishSource: string, product: string, partial = false): string {
 	return [
 		"You are a professional software localizer translating the user-interface strings of Filen,",
 		`an end-to-end-encrypted cloud storage ${product} app. You translate from English into the target`,
@@ -204,8 +244,16 @@ export function buildSystemPrompt(englishSource: string, product: string): strin
 		"    and agreeing adjectives into the right case (Slavic: `_few` → genitive singular, `_many` →",
 		"    genitive plural). Keep every `{{placeholder}}` byte-identical.",
 		"",
-		"The full English source catalog follows, WITH its JSDoc comments, so you can see exactly where",
-		"and how each key is used. Use it as context; only translate the keys requested in each message.",
+		...(partial
+			? [
+					"The English source files the requested keys come from follow, WITH their JSDoc comments, together",
+					"with the app's shared common strings, so you can see exactly where and how each key is used. Use them",
+					"as context and keep the common strings' terminology; only translate the keys requested in each message."
+				]
+			: [
+					"The full English source catalog follows, WITH its JSDoc comments, so you can see exactly where",
+					"and how each key is used. Use it as context; only translate the keys requested in each message."
+				]),
 		"",
 		"===== BEGIN ENGLISH SOURCE CATALOG =====",
 		englishSource,
@@ -330,4 +378,494 @@ export function parseTranslatedBatch(text: string): Record<string, string> {
 	}
 
 	return translatedBatch.assert(parsed)
+}
+
+// --- Catalog files ---------------------------------------------------------
+
+/**
+ * A JSON file holding a plain object, or null when it is absent or blank. Throws on any other shape, so a corrupt
+ * catalog or snapshot fails loudly instead of silently re-translating everything.
+ */
+export function readJsonObject(path: string, label: string): Record<string, unknown> | null {
+	if (!existsSync(path)) {
+		return null
+	}
+
+	const raw = readFileSync(path, "utf8").trim()
+
+	if (raw.length === 0) {
+		return null
+	}
+
+	const parsed: unknown = JSON.parse(raw)
+
+	if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+		throw new Error(`${label} is not a JSON object`)
+	}
+
+	return parsed as Record<string, unknown>
+}
+
+/** Tab-indented JSON plus a trailing newline, for stable diffs. */
+export function writeJsonFile(path: string, value: unknown): void {
+	writeFileSync(path, `${JSON.stringify(value, null, "\t")}\n`, "utf8")
+}
+
+// --- Delta -----------------------------------------------------------------
+
+export type Delta = {
+	// Keys whose English value was added or changed → (re)translate for every target.
+	upsert: Catalog
+	// Keys removed from English → delete from every target catalog.
+	removed: readonly string[]
+}
+
+export function emptyDelta(): Delta {
+	return {
+		upsert: {},
+		removed: []
+	}
+}
+
+/**
+ * The English catalog diffed against the snapshot of the last translation. A key whose value changed (or a key absent
+ * from the snapshot) is an upsert; a snapshot key no longer in English is a removal. Content-based, so a changed value
+ * is caught whichever commit it landed in. With no snapshot, an empty delta: the missing-key safety net in
+ * keysToTranslate still fills every absent key.
+ */
+export function computeDelta(snapshot: Catalog | null, catalog: Catalog): Delta {
+	const upsert: Catalog = {}
+	const removed: string[] = []
+
+	if (snapshot === null) {
+		return {
+			upsert,
+			removed
+		}
+	}
+
+	for (const [key, value] of Object.entries(catalog)) {
+		if (snapshot[key] !== value) {
+			upsert[key] = value
+		}
+	}
+
+	for (const key of Object.keys(snapshot)) {
+		if (!(key in catalog)) {
+			removed.push(key)
+		}
+	}
+
+	return {
+		upsert,
+		removed
+	}
+}
+
+/**
+ * Deletes the removed keys from a target catalog in place. A removed plural variant drops every CLDR-category
+ * sibling, including target-only `_few` / `_many` that never appear in the English diff. Run before merging new
+ * translations, so a key removed and re-added in one delta nets to the new value.
+ */
+export function applyRemovals(target: Catalog, removed: readonly string[]): void {
+	for (const key of removed) {
+		Reflect.deleteProperty(target, key)
+
+		const split = splitPluralKey(key)
+
+		if (split !== null) {
+			for (const suffix of PLURAL_SUFFIXES) {
+				Reflect.deleteProperty(target, `${split.base}_${suffix}`)
+			}
+		}
+	}
+}
+
+/**
+ * Whether a run may advance the snapshot: only when it covered every target language. Advanced after a subset run,
+ * the languages left out would never see the changed keys again (only missing ones are recovered).
+ */
+export function coversEveryLanguage<L extends string>(requested: readonly L[], all: readonly L[]): boolean {
+	const set = new Set(requested)
+
+	return all.every(lang => set.has(lang))
+}
+
+// --- Per-language plan -----------------------------------------------------
+
+/** An English catalog with its plural groups computed once. */
+export type EnglishSource = {
+	catalog: Catalog
+	pluralBases: ReadonlyMap<string, ReadonlySet<string>>
+}
+
+export function englishSource(catalog: Catalog): EnglishSource {
+	return {
+		catalog,
+		pluralBases: computePluralBases(catalog)
+	}
+}
+
+function pluralBaseOf(source: EnglishSource, key: string): string | null {
+	const split = splitPluralKey(key)
+
+	if (split === null) {
+		return null
+	}
+
+	return source.pluralBases.has(split.base) ? split.base : null
+}
+
+/**
+ * Every (key → English source text) entry a target language needs for one plural base: the union of the categories
+ * English defines and the categories the language requires. Categories English lacks (`_few` / `_many`) use the
+ * English `_other` text as the translation template.
+ */
+export function pluralGroupSources(source: EnglishSource, base: string, lang: string): Catalog {
+	const { catalog } = source
+	const englishCategories = source.pluralBases.get(base) ?? new Set<string>()
+	const categories = new Set<string>([...englishCategories, ...cldrCategories(lang)])
+	const template = catalog[`${base}_other`] ?? catalog[`${base}_one`]
+	const out: Catalog = {}
+
+	for (const category of categories) {
+		const text = catalog[`${base}_${category}`] ?? template
+
+		if (text !== undefined) {
+			out[`${base}_${category}`] = text
+		}
+	}
+
+	return out
+}
+
+/**
+ * The English keys (key → source text) a language needs translated. FULL = the whole catalog with plural groups
+ * expanded to the language's CLDR set. DELTA = changed English keys + non-plural keys missing from the target + the
+ * plural categories missing from the target. A changed English plural retranslates its whole group (the wording
+ * shifted); a merely incomplete group only fills the missing categories, so reviewed `_one` / `_other` forms are never
+ * clobbered.
+ */
+export function keysToTranslate({
+	source,
+	full,
+	delta,
+	existing,
+	lang
+}: {
+	source: EnglishSource
+	full: boolean
+	delta: Delta
+	existing: Catalog
+	lang: string
+}): Catalog {
+	const { catalog } = source
+	const result: Catalog = {}
+
+	if (full) {
+		const fullGroups = new Set<string>()
+
+		for (const [key, value] of Object.entries(catalog)) {
+			const base = pluralBaseOf(source, key)
+
+			if (base === null) {
+				result[key] = value
+			} else {
+				fullGroups.add(base)
+			}
+		}
+
+		for (const base of fullGroups) {
+			Object.assign(result, pluralGroupSources(source, base, lang))
+		}
+
+		return result
+	}
+
+	// A changed plural variant flags its whole group for retranslation.
+	const changedGroups = new Set<string>()
+
+	for (const [key, value] of Object.entries(delta.upsert)) {
+		const base = pluralBaseOf(source, key)
+
+		if (base === null) {
+			result[key] = value
+		} else {
+			changedGroups.add(base)
+		}
+	}
+
+	// Non-plural English keys missing from the target (a new stub or a failed earlier run).
+	for (const [key, value] of Object.entries(catalog)) {
+		if (pluralBaseOf(source, key) !== null) {
+			continue
+		}
+
+		if (!(key in existing)) {
+			result[key] = value
+		}
+	}
+
+	// Plural groups: the whole group when its English wording changed, otherwise only the CLDR categories the target
+	// lacks (this is what supplies `_few` / `_many`).
+	for (const base of source.pluralBases.keys()) {
+		const sources = pluralGroupSources(source, base, lang)
+
+		if (changedGroups.has(base)) {
+			Object.assign(result, sources)
+
+			continue
+		}
+
+		for (const [key, value] of Object.entries(sources)) {
+			if (!(key in existing)) {
+				result[key] = value
+			}
+		}
+	}
+
+	return result
+}
+
+/** The number of `english` keys a target catalog holds; the share of the English catalog it covers. */
+export function coveredKeyCount(english: Catalog, target: Catalog): number {
+	let count = 0
+
+	for (const key of Object.keys(english)) {
+		if (key in target) {
+			count++
+		}
+	}
+
+	return count
+}
+
+// --- Model call ------------------------------------------------------------
+
+/** DRY_RUN stub: every English value prefixed with the language code ("de:Cancel"). Free and deterministic. */
+export function translateDryRun(lang: string, subset: Catalog): Catalog {
+	const result: Catalog = {}
+
+	for (const [key, value] of Object.entries(subset)) {
+		result[key] = `${lang}:${value}`
+	}
+
+	return result
+}
+
+type CachedText = {
+	type: "text"
+	text: string
+	cache_control: {
+		type: "ephemeral"
+	}
+}
+
+/** The Messages API request of one batch, structurally; each script passes it to its own SDK client. */
+export type BatchRequest = {
+	model: string
+	max_tokens: number
+	betas: string[]
+	fallbacks: "default"
+	system: CachedText[]
+	output_config: {
+		effort: "high"
+		format: {
+			type: "json_schema"
+			schema: Record<string, unknown>
+		}
+	}
+	messages: {
+		role: "user"
+		content: {
+			type: "text"
+			text: string
+		}[]
+	}[]
+}
+
+export type BatchResponse = {
+	stop_reason: string | null
+	content: readonly {
+		type: string
+		text?: string
+	}[]
+}
+
+export type CreateMessage = (request: BatchRequest) => Promise<BatchResponse>
+
+/**
+ * The request of one batch. The cached system blocks (instructions plus English context) are identical across every
+ * batch and language that shares them, so only the first call writes the cache; the batch and the language name
+ * live in the user message. Thinking is always on for this model and counts against max_tokens; "default" fallbacks
+ * route a refused request to another model inside the same call.
+ */
+export function buildBatchRequest({
+	model,
+	system,
+	languageName,
+	batch
+}: {
+	model: string
+	system: readonly string[]
+	languageName: string
+	batch: Catalog
+}): BatchRequest {
+	return {
+		model,
+		max_tokens: 16000,
+		betas: ["server-side-fallback-2026-07-01"],
+		fallbacks: "default",
+		system: system.map(text => ({
+			type: "text",
+			text,
+			cache_control: {
+				type: "ephemeral"
+			}
+		})),
+		output_config: {
+			effort: "high",
+			format: {
+				type: "json_schema",
+				schema: buildOutputSchema(Object.keys(batch))
+			}
+		},
+		messages: [
+			{
+				role: "user",
+				content: [
+					{
+						type: "text",
+						text: [
+							`Translate these English UI strings to ${languageName}.`,
+							"Return ONLY the JSON map of the same keys to their translated values.",
+							"",
+							JSON.stringify(batch, null, 2)
+						].join("\n")
+					}
+				]
+			}
+		]
+	}
+}
+
+/** Sends one batch and reads its reply; throws when the model stopped early or returned no text. */
+export async function translateBatch({
+	createMessage,
+	model,
+	system,
+	lang,
+	languageName,
+	batch
+}: {
+	createMessage: CreateMessage
+	model: string
+	system: readonly string[]
+	lang: string
+	languageName: string
+	batch: Catalog
+}): Promise<Catalog> {
+	const response = await createMessage(buildBatchRequest({ model, system, languageName, batch }))
+
+	if (response.stop_reason === "refusal" || response.stop_reason === "max_tokens") {
+		throw new Error(`Translation for ${lang} stopped early (${response.stop_reason})`)
+	}
+
+	const block = response.content.find(part => part.type === "text")
+
+	if (block?.text === undefined) {
+		throw new Error(`No text content returned for ${lang}`)
+	}
+
+	return parseTranslatedBatch(block.text)
+}
+
+// --- Catalog checks (tests of both apps) -----------------------------------
+
+const PLACEHOLDER_PATTERN = /\{\{\s*([^{}]+?)\s*\}\}/g
+const MARKUP_PATTERN = /<\s*(\/?)\s*([A-Za-z][\w-]*)\s*(\/?)\s*>/g
+
+/** The `{{name}}` placeholders of a string, as a set (a translation may repeat one). */
+export function placeholderSet(text: string): Set<string> {
+	return new Set(Array.from(text.matchAll(PLACEHOLDER_PATTERN), match => match[1] ?? ""))
+}
+
+/** The react-i18next markup tags of a string (`<link>`, `</link>`, `<br/>`), as a set. */
+export function markupSet(text: string): Set<string> {
+	return new Set(Array.from(text.matchAll(MARKUP_PATTERN), match => `<${match[1] ?? ""}${match[2] ?? ""}${match[3] ?? ""}>`))
+}
+
+function sameSet(a: ReadonlySet<string>, b: ReadonlySet<string>): boolean {
+	return a.size === b.size && [...a].every(value => b.has(value))
+}
+
+/**
+ * What is wrong with a translated catalog against its English source, one line per problem: keys English does not
+ * have, placeholder or markup sets that differ from English (`_few` / `_many` compare against `_other`; a `_one` form
+ * may leave out `{{count}}`), and plural groups missing a category an integer count selects in that language or
+ * holding one it cannot. Empty when the catalog is clean.
+ */
+export function catalogIssues(english: Catalog, target: Catalog, lang: string): string[] {
+	const issues: string[] = []
+	const pluralBases = computePluralBases(english)
+	const reachable = new Set(cldrCategories(lang))
+	const targetGroups = new Map<string, Set<string>>()
+
+	for (const [key, value] of Object.entries(target)) {
+		const split = splitPluralKey(key)
+		const group = split !== null && pluralBases.has(split.base) ? split : null
+		const source = english[key] ?? (group === null ? undefined : english[`${group.base}_other`])
+
+		if (source === undefined) {
+			issues.push(`${key}: not in English`)
+
+			continue
+		}
+
+		if (group !== null) {
+			const categories = targetGroups.get(group.base) ?? new Set<string>()
+
+			categories.add(group.category)
+			targetGroups.set(group.base, categories)
+		}
+
+		const expected = placeholderSet(source)
+		const actual = placeholderSet(value)
+
+		if (group?.category === "one") {
+			expected.delete("count")
+			actual.delete("count")
+		}
+
+		if (!sameSet(expected, actual)) {
+			issues.push(`${key}: placeholders ${[...actual].join(",")} differ from English ${[...expected].join(",")}`)
+		}
+
+		if (!sameSet(markupSet(source), markupSet(value))) {
+			issues.push(`${key}: markup differs from English`)
+		}
+	}
+
+	for (const [base, categories] of targetGroups) {
+		const allowed = new Set([...(pluralBases.get(base) ?? []), ...reachable])
+
+		for (const category of reachable) {
+			if (!categories.has(category)) {
+				issues.push(`${base}: missing plural form _${category}`)
+			}
+		}
+
+		for (const category of categories) {
+			if (!allowed.has(category)) {
+				issues.push(`${base}: plural form _${category} is never selected in ${lang}`)
+			}
+		}
+	}
+
+	return issues
+}
+
+/** The `english` keys a target catalog lacks. */
+export function missingKeys(english: Catalog, target: Catalog): string[] {
+	return Object.keys(english).filter(key => !(key in target))
 }

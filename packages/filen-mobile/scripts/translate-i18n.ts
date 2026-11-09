@@ -24,21 +24,26 @@
 // Reads ANTHROPIC_API_KEY from the environment — never hardcoded, never logged.
 
 import Anthropic from "@anthropic-ai/sdk"
-import { readFileSync, writeFileSync, readdirSync, existsSync } from "node:fs"
+import { readFileSync, readdirSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import { dirname, join } from "node:path"
 import {
-	buildOutputSchema,
+	applyRemovals,
 	buildSystemPrompt,
-	computePluralBases,
-	cldrCategories,
+	computeDelta,
+	coversEveryLanguage,
+	englishSource as toEnglishSource,
+	keysToTranslate,
+	LANGUAGE_NAMES,
 	parseCliArgs,
-	parseTranslatedBatch,
-	PLURAL_SUFFIXES,
+	readJsonObject,
 	sortRecord,
-	splitPluralKey,
+	translateBatch,
+	translateDryRun,
 	translateSubset,
-	type CliArgs
+	writeJsonFile,
+	type Catalog,
+	type CreateMessage
 } from "@filen/shared/tooling/i18n"
 
 import { en } from "@/locales/en"
@@ -47,8 +52,8 @@ import { SUPPORTED_LANGUAGES } from "@/locales/languages"
 // NOTE: do NOT import from `@/lib/language` here — it transitively pulls in React Native
 // (via secureStore), which a Node/tsx run cannot evaluate. `@/locales/languages` is import-free
 // by contract (its own comment), so it's the only locale module safe to import in this script.
-// The target-language display names below are local to the script for the same reason; the
-// single source of truth for WHICH languages exist is still SUPPORTED_LANGUAGES.
+// The delta, plural, removal and model-call logic is shared with the web script
+// (@filen/shared/tooling/i18n); this file keeps the flat catalog files and the prompt context.
 
 // ---------------------------------------------------------------------------
 // Paths & constants
@@ -71,42 +76,10 @@ const TARGET_LANGUAGES: readonly TargetLanguage[] = SUPPORTED_LANGUAGES.filter(
 	(lang): lang is TargetLanguage => lang !== "en"
 )
 
-// English names of the target languages, used only to tell the model what to translate into.
-// Typed Record<TargetLanguage, string> so adding a SUPPORTED_LANGUAGES entry forces a name here
-// (compile error otherwise). Keep in step with LANGUAGE_LABELS in src/lib/language.ts.
-const LANGUAGE_NAMES: Record<TargetLanguage, string> = {
-	de: "German",
-	es: "Spanish",
-	fr: "French",
-	it: "Italian",
-	"pt-BR": "Brazilian Portuguese (Português do Brasil)",
-	"pt-PT": "European Portuguese (Português de Portugal)",
-	ru: "Russian",
-	ja: "Japanese",
-	zh: "Chinese (Simplified)",
-	"zh-TW": "Traditional Chinese (Taiwan)",
-	bn: "Bengali",
-	cs: "Czech",
-	da: "Danish",
-	fi: "Finnish",
-	hi: "Hindi",
-	hu: "Hungarian",
-	id: "Indonesian",
-	ko: "Korean",
-	nl: "Dutch",
-	no: "Norwegian",
-	pl: "Polish",
-	ro: "Romanian",
-	sv: "Swedish",
-	th: "Thai",
-	tr: "Turkish",
-	uk: "Ukrainian",
-	vi: "Vietnamese"
-}
-
 // English catalog as a flat key→value map. The barrel merges the area files into one `as const`
 // object; every value is a string (plural keys are separate `_one`/`_other` entries).
-const EN_CATALOG: Record<string, string> = en
+const EN_CATALOG: Catalog = en
+const EN_SOURCE = toEnglishSource(EN_CATALOG)
 
 const DRY_RUN = process.env["DRY_RUN"] === "1"
 
@@ -116,7 +89,7 @@ const DRY_RUN = process.env["DRY_RUN"] === "1"
 
 // Concatenate the raw `src/locales/en/*.ts` files as text. Their JSDoc comments describe what
 // each key means and where it's used — invaluable context for the translator, and a stable
-// prefix that prompt caching reuses across all eight languages.
+// prefix that prompt caching reuses across every language.
 function readEnglishSourceFiles(): string {
 	const files = readdirSync(EN_SOURCE_DIR)
 		.filter(name => name.endsWith(".ts"))
@@ -133,279 +106,14 @@ function readEnglishSourceFiles(): string {
 	return parts.join("\n\n")
 }
 
-// ---------------------------------------------------------------------------
-// Delta computation (English catalog vs. committed snapshot)
-// ---------------------------------------------------------------------------
-
-type Delta = {
-	// Keys whose English value was added or changed → (re)translate for every target.
-	upsert: Record<string, string>
-	// Keys removed from English → delete from every target catalog.
-	removed: readonly string[]
+// A flat catalog file (the snapshot or a target). Null when absent or blank; throws on a non-object.
+function readCatalog(path: string, label: string): Catalog | null {
+	return readJsonObject(path, label) as Catalog | null
 }
 
-// Read a flat string-record JSON file (the English snapshot or a target catalog). Returns null when
-// absent or empty; throws on a non-object so a corrupt file fails loudly rather than silently
-// re-translating the whole catalog.
-function readStringRecord(path: string, label: string): Record<string, string> | null {
-	if (!existsSync(path)) {
-		return null
-	}
-
-	const raw = readFileSync(path, "utf8").trim()
-
-	if (raw.length === 0) {
-		return null
-	}
-
-	const parsed: unknown = JSON.parse(raw)
-
-	if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-		throw new Error(`${label} is not a JSON object`)
-	}
-
-	return parsed as Record<string, string>
-}
-
-// DELTA = the current English catalog diffed against the snapshot baseline. A key whose value changed
-// (or a brand-new key absent from the snapshot) is an upsert; a key in the snapshot but no longer in
-// English is a removal. Purely content-based — a modified value is caught no matter which commit it
-// landed in. With no snapshot yet, assume the catalogs are in sync (empty delta); the per-language
-// missing-key fallback in keysToTranslate still fills any genuinely-absent key.
-function computeDelta(): Delta {
-	const snapshot = readStringRecord(EN_SNAPSHOT_PATH, ".en-snapshot.json")
-	const upsert: Record<string, string> = {}
-	const removed: string[] = []
-
-	if (snapshot === null) {
-		return {
-			upsert,
-			removed
-		}
-	}
-
-	for (const [key, value] of Object.entries(EN_CATALOG)) {
-		if (snapshot[key] !== value) {
-			upsert[key] = value
-		}
-	}
-
-	for (const key of Object.keys(snapshot)) {
-		if (!(key in EN_CATALOG)) {
-			removed.push(key)
-		}
-	}
-
-	return {
-		upsert,
-		removed
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Per-language merge planning
-// ---------------------------------------------------------------------------
-
-// Plural expansion: English defines only `_one` / `_other`; each target gets the CLDR categories an
-// integer count can select in that language (see cldrCategories).
-const ENGLISH_PLURAL_BASES = computePluralBases(EN_CATALOG)
-
-function pluralBaseOf(key: string): string | null {
-	const split = splitPluralKey(key)
-
-	if (split === null) {
-		return null
-	}
-
-	return ENGLISH_PLURAL_BASES.has(split.base) ? split.base : null
-}
-
-// Every (key -> English source text) entry a target language needs for one plural base: the union of
-// the categories English defines and the categories the language requires. Categories English lacks
-// (`_few` / `_many`) use the English `_other` text as the translation template.
-function pluralGroupSources(base: string, lang: TargetLanguage): Record<string, string> {
-	const englishCategories = ENGLISH_PLURAL_BASES.get(base) ?? new Set<string>()
-	const categories = new Set<string>([...englishCategories, ...cldrCategories(lang)])
-	const template = EN_CATALOG[`${base}_other`] ?? EN_CATALOG[`${base}_one`]
-	const out: Record<string, string> = {}
-
-	for (const category of categories) {
-		const source = EN_CATALOG[`${base}_${category}`] ?? template
-
-		if (source !== undefined) {
-			out[`${base}_${category}`] = source
-		}
-	}
-
-	return out
-}
-
-// The subset of English keys (key -> source text) this language needs translated, given the mode and
-// its existing catalog. FULL = the whole catalog with plural groups expanded to the language's full
-// CLDR set. DELTA = changed English keys + non-plural keys missing from the target + the CLDR plural
-// categories missing from the target. A *changed* English plural retranslates its whole group (the
-// wording shifted); a merely *incomplete* group only fills the missing categories, so human-reviewed
-// `_one` / `_other` forms are never clobbered.
-function keysToTranslate(
-	args: CliArgs<TargetLanguage>,
-	delta: Delta,
-	existing: Record<string, string>,
-	lang: TargetLanguage
-): Record<string, string> {
-	const result: Record<string, string> = {}
-
-	if (args.full) {
-		const fullGroups = new Set<string>()
-
-		for (const [key, value] of Object.entries(EN_CATALOG)) {
-			const base = pluralBaseOf(key)
-
-			if (base === null) {
-				result[key] = value
-			} else {
-				fullGroups.add(base)
-			}
-		}
-
-		for (const base of fullGroups) {
-			Object.assign(result, pluralGroupSources(base, lang))
-		}
-
-		return result
-	}
-
-	// English-source changes: a changed plural variant flags its whole group for retranslation.
-	const changedGroups = new Set<string>()
-
-	for (const [key, value] of Object.entries(delta.upsert)) {
-		const base = pluralBaseOf(key)
-
-		if (base === null) {
-			result[key] = value
-		} else {
-			changedGroups.add(base)
-		}
-	}
-
-	// Non-plural English keys missing from the target (new stub / failed prior run).
-	for (const [key, value] of Object.entries(EN_CATALOG)) {
-		if (pluralBaseOf(key) !== null) {
-			continue
-		}
-
-		if (!(key in existing)) {
-			result[key] = value
-		}
-	}
-
-	// Plural groups: retranslate the whole group if its English wording changed, otherwise fill only
-	// the CLDR categories the target is missing (this is what supplies `_few` / `_many`).
-	for (const base of ENGLISH_PLURAL_BASES.keys()) {
-		const sources = pluralGroupSources(base, lang)
-
-		if (changedGroups.has(base)) {
-			Object.assign(result, sources)
-
-			continue
-		}
-
-		for (const [key, value] of Object.entries(sources)) {
-			if (!(key in existing)) {
-				result[key] = value
-			}
-		}
-	}
-
-	return result
-}
-
-// ---------------------------------------------------------------------------
-// Translation — Anthropic Messages API (with prompt caching) or DRY_RUN stub
-// ---------------------------------------------------------------------------
-
-// DRY_RUN stub: prefix every English value with the lang code. Obvious, deterministic, free.
-function translateDryRun(lang: TargetLanguage, subset: Record<string, string>): Record<string, string> {
-	const result: Record<string, string> = {}
-
-	for (const [key, value] of Object.entries(subset)) {
-		result[key] = `${lang}:${value}`
-	}
-
-	return result
-}
-
-async function translateBatch(args: {
-	client: Anthropic
-	lang: TargetLanguage
-	batch: Record<string, string>
-	systemPrompt: string
-}): Promise<Record<string, string>> {
-	const { client, lang, batch, systemPrompt } = args
-	const languageName = LANGUAGE_NAMES[lang]
-
-	// Stable, cached system prefix (instructions + full English source) is reused across every batch
-	// and all eight languages — the first call writes the cache, the rest read it. The varying part
-	// (the batch subset + the target language name) lives in the per-language user message.
-	// Thinking is always on for this model and counts against max_tokens; "default" fallbacks route a
-	// refused request to another model inside the same call.
-	const response = await client.beta.messages.create({
-		model: MODEL,
-		max_tokens: 16000,
-		betas: ["server-side-fallback-2026-07-01"],
-		fallbacks: "default",
-		system: [
-			{
-				type: "text",
-				text: systemPrompt,
-				cache_control: {
-					type: "ephemeral"
-				}
-			}
-		],
-		output_config: {
-			effort: "high",
-			format: {
-				type: "json_schema",
-				schema: buildOutputSchema(Object.keys(batch))
-			}
-		},
-		messages: [
-			{
-				role: "user",
-				content: [
-					{
-						type: "text",
-						text: [
-							`Translate these English UI strings to ${languageName}.`,
-							"Return ONLY the JSON map of the same keys to their translated values.",
-							"",
-							JSON.stringify(batch, null, 2)
-						].join("\n")
-					}
-				]
-			}
-		]
-	})
-
-	if (response.stop_reason === "refusal" || response.stop_reason === "max_tokens") {
-		throw new Error(`Translation for ${lang} stopped early (${response.stop_reason})`)
-	}
-
-	const block = response.content.find(part => part.type === "text")
-
-	if (block === undefined || block.type !== "text") {
-		throw new Error(`No text content returned for ${lang}`)
-	}
-
-	return parseTranslatedBatch(block.text)
-}
-
-// ---------------------------------------------------------------------------
-// Catalog write (sorted keys + trailing newline for stable diffs)
-// ---------------------------------------------------------------------------
-
-function writeSortedJson(path: string, record: Record<string, string>): void {
-	writeFileSync(path, `${JSON.stringify(sortRecord(record), null, "\t")}\n`, "utf8")
+// Sorted keys + trailing newline for stable diffs.
+function writeSortedJson(path: string, record: Catalog): void {
+	writeJsonFile(path, sortRecord(record))
 }
 
 // ---------------------------------------------------------------------------
@@ -414,9 +122,10 @@ function writeSortedJson(path: string, record: Record<string, string>): void {
 
 async function main(): Promise<void> {
 	const args = parseCliArgs(process.argv.slice(2), TARGET_LANGUAGES)
-	const delta = args.full ? { upsert: {}, removed: [] } : computeDelta()
-	const englishSource = readEnglishSourceFiles()
-	const systemPrompt = buildSystemPrompt(englishSource, "mobile")
+	const delta = args.full
+		? { upsert: {}, removed: [] }
+		: computeDelta(readCatalog(EN_SNAPSHOT_PATH, ".en-snapshot.json"), EN_CATALOG)
+	const system = [buildSystemPrompt(readEnglishSourceFiles(), "mobile")]
 
 	console.log(`[translate-i18n] mode=${args.full ? "FULL" : "DELTA"} dryRun=${DRY_RUN}`)
 	console.log(`[translate-i18n] english catalog: ${Object.keys(EN_CATALOG).length} keys`)
@@ -428,7 +137,7 @@ async function main(): Promise<void> {
 		)
 	}
 
-	let client: Anthropic | null = null
+	let createMessage: CreateMessage | null = null
 
 	if (!DRY_RUN) {
 		const apiKey = process.env["ANTHROPIC_API_KEY"]
@@ -439,50 +148,43 @@ async function main(): Promise<void> {
 
 		// The SDK reads ANTHROPIC_API_KEY from the environment itself; constructing without
 		// passing the value keeps it out of any logged constructor args.
-		client = new Anthropic()
+		const client = new Anthropic()
+
+		createMessage = request => client.beta.messages.create(request)
 	}
 
 	for (const lang of args.languages) {
 		const catalogPath = join(LOCALES_DIR, `${lang}.json`)
-		const existing = readStringRecord(catalogPath, `Catalog ${lang}.json`) ?? {}
-		const subset = keysToTranslate(args, delta, existing, lang)
-		const merged: Record<string, string> = {
+		const existing = readCatalog(catalogPath, `Catalog ${lang}.json`) ?? {}
+		const subset = keysToTranslate({ source: EN_SOURCE, full: args.full, delta, existing, lang })
+		const merged: Catalog = {
 			...existing
 		}
 
-		// Apply removals first so a key removed AND re-added in the same delta nets to the new value.
-		// A removed plural variant drops every CLDR-category sibling — including target-only `_few` /
-		// `_many` that never appear in the English diff.
-		for (const key of delta.removed) {
-			delete merged[key]
-
-			const split = splitPluralKey(key)
-
-			if (split !== null) {
-				for (const suffix of PLURAL_SUFFIXES) {
-					delete merged[`${split.base}_${suffix}`]
-				}
-			}
-		}
+		applyRemovals(merged, delta.removed)
 
 		const subsetKeyCount = Object.keys(subset).length
 
 		if (subsetKeyCount > 0) {
 			console.log(`[translate-i18n] ${lang}: translating ${subsetKeyCount} keys`)
 
-			const translated = DRY_RUN
-				? translateDryRun(lang, subset)
-				: await translateSubset({
-						label: lang,
-						subset,
-						translateBatch: batch =>
-							translateBatch({
-								client: client as Anthropic,
-								lang,
-								batch,
-								systemPrompt
-							})
-					})
+			const send = createMessage
+			const translated =
+				send === null
+					? translateDryRun(lang, subset)
+					: await translateSubset({
+							label: lang,
+							subset,
+							translateBatch: batch =>
+								translateBatch({
+									createMessage: send,
+									model: MODEL,
+									system,
+									lang,
+									languageName: LANGUAGE_NAMES[lang],
+									batch
+								})
+						})
 
 			Object.assign(merged, translated)
 		} else {
@@ -495,9 +197,14 @@ async function main(): Promise<void> {
 	}
 
 	// Advance the baseline only after every language succeeded — a mid-run throw leaves the old
-	// snapshot in place, so a re-run re-detects the same delta and retries. Written into the same PR
-	// as the translations, so the baseline only advances once that PR is merged.
-	writeSortedJson(EN_SNAPSHOT_PATH, EN_CATALOG)
+	// snapshot in place, so a re-run re-detects the same delta and retries — and only when the run
+	// covered every language, or the ones left out would never see the changed keys. Written into
+	// the same PR as the translations, so the baseline only advances once that PR is merged.
+	if (coversEveryLanguage(args.languages, TARGET_LANGUAGES)) {
+		writeSortedJson(EN_SNAPSHOT_PATH, EN_CATALOG)
+	} else {
+		console.log("[translate-i18n] snapshot not advanced: the run covered only some languages")
+	}
 
 	console.log("[translate-i18n] done")
 }
