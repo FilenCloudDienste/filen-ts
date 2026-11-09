@@ -3,6 +3,35 @@ import { isSignedIn } from "@/features/auth/lib/guard"
 import { DEFAULT_START_SCREEN, getStartScreen } from "@/features/shell/lib/startScreen"
 import { deriveLegacyRedirect } from "@/features/publicLinks/lib/format.logic"
 import { DEFAULT_CONTACTS_SECTION_FILTER } from "@/features/contacts/components/contactsList.logic"
+import { parsePlanId } from "@/features/settings/lib/billingLinks"
+import { rememberPlansTarget } from "@/features/settings/lib/pendingPlans"
+
+export type LegacyAppRedirect = { kind: "plans"; plan?: number } | { kind: "login"; plan?: number } | { kind: "register" }
+
+// The previous web app's hash routes that other sites link to: the pricing page's plan links
+// (`#/settings/plans?id=<planId>`), its own sign-in hop (`#/login?planId=`) and registration. A malformed plan id
+// is dropped, never the redirect.
+const LEGACY_APP_HASH_RE = /^#\/(settings\/plans|login|register)\/?(?:\?(.*))?$/
+
+export function deriveLegacyAppRedirect(hash: string): LegacyAppRedirect | null {
+	const m = LEGACY_APP_HASH_RE.exec(hash)
+
+	if (m === null) {
+		return null
+	}
+
+	const route = m[1]
+	const query = new URLSearchParams(m[2] ?? "")
+
+	if (route === "register") {
+		return { kind: "register" }
+	}
+
+	const plan = parsePlanId(query.get(route === "login" ? "planId" : "id") ?? undefined)
+	const kind = route === "login" ? "login" : "plans"
+
+	return plan === undefined ? { kind } : { kind, plan }
+}
 
 // The root route (`/`) has no UI of its own — it forwards to the app when a session is present, else
 // to sign-in. Split out of routes/index.tsx (same "extract the beforeLoad body so it's unit-testable
@@ -30,7 +59,31 @@ export async function resolveRootRedirect(): Promise<void> {
 		})
 	}
 
-	if (!(await isSignedIn())) {
+	const legacyApp = typeof window === "undefined" ? null : deriveLegacyAppRedirect(window.location.hash)
+
+	if (legacyApp?.kind === "register") {
+		throw redirect({ to: "/register", replace: true })
+	}
+
+	const signedIn = await isSignedIn()
+
+	// A bare sign-in link names no plan, so it is the normal landing.
+	if (legacyApp !== null && !(legacyApp.kind === "login" && legacyApp.plan === undefined)) {
+		if (signedIn) {
+			throw redirect({
+				to: "/settings/plans",
+				search: legacyApp.plan === undefined ? {} : { plan: legacyApp.plan },
+				replace: true
+			})
+		}
+
+		// Both meant "choose a plan after signing in"; the plans open once the session exists.
+		rememberPlansTarget(legacyApp.plan)
+
+		throw redirect({ to: "/login", replace: true })
+	}
+
+	if (!signedIn) {
 		throw redirect({ to: "/login" })
 	}
 	// The persisted "start screen" preference (Appearance section) — kv is already warm by this

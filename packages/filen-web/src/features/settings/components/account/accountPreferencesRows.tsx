@@ -7,19 +7,20 @@ import { runPreferenceToggle } from "@/features/settings/components/account/acco
 import { useIsOnline } from "@/lib/useIsOnline"
 import { accountQueryUpdate, type AccountQuerySuccess } from "@/queries/account"
 import { PreferenceToggleRow } from "@/features/settings/components/settingRows"
+import { setAppearOffline } from "@/features/settings/lib/billingActions"
 
 interface AccountPreferencesRowsProps {
 	accountQuery: AccountQuerySuccess
 }
 
-// Two safe, reversible toggles — versioning and login-alerts — each a direct flip with no confirm
+// Safe, reversible toggles — versioning, login alerts and appear offline — each a direct flip with no confirm
 // dialog (unlike the destructive delete rows below them on the Account page). `checked` is driven
 // straight from the account query, never local optimistic state: a failed mutation never patches it,
 // so the switch stays on the pre-toggle server value (accountPreferences.logic.ts).
 function AccountPreferencesRows({ accountQuery }: AccountPreferencesRowsProps) {
 	const { t } = useTranslation(["settings", "common"])
 	const isOnline = useIsOnline()
-	const { versioningEnabled, loginAlertsEnabled } = accountQuery.data
+	const { versioningEnabled, loginAlertsEnabled, appearOffline } = accountQuery.data
 	// Only offline earns the tooltip — an in-flight toggle clears itself a moment later.
 	const offlineReason = !isOnline ? t("common:offlineActionDisabled") : undefined
 
@@ -43,6 +44,16 @@ function AccountPreferencesRows({ accountQuery }: AccountPreferencesRowsProps) {
 				setEnabled={enabled => sdkApi.setLoginAlertsEnabled(enabled)}
 				patchKey="loginAlertsEnabled"
 			/>
+			{/* The server hides the account's presence everywhere on its own; nothing here reads the flag back. */}
+			<AccountToggleRow
+				title={t("settingsAppearOfflineTitle")}
+				description={t("settingsAppearOfflineDescription")}
+				checked={appearOffline}
+				isOnline={isOnline}
+				offlineReason={offlineReason}
+				setEnabled={setAppearOffline}
+				patchKey="appearOffline"
+			/>
 		</>
 	)
 }
@@ -63,7 +74,7 @@ function AccountToggleRow({
 	isOnline: boolean
 	offlineReason: string | undefined
 	setEnabled: (enabled: boolean) => Promise<void>
-	patchKey: "versioningEnabled" | "loginAlertsEnabled"
+	patchKey: "versioningEnabled" | "loginAlertsEnabled" | "appearOffline"
 }) {
 	const [pending, setPending] = useState(false)
 

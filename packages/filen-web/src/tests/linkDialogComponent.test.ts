@@ -20,8 +20,12 @@ vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
 vi.mock("@/features/drive/hooks/useThumbnail", () => ({ useThumbnail: () => null }))
 vi.mock("@/features/drive/lib/thumbnails", () => ({ invalidateThumbnail: vi.fn() }))
 vi.mock("@tanstack/react-router", () => ({
-	Link: ({ children }: { children: ReactNode }) => createElement("a", null, children)
+	Link: ({ children, to, search }: { children: ReactNode; to: string; search?: { view?: string } }) =>
+		createElement("a", { href: search?.view === undefined ? to : `${to}?view=${search.view}` }, children)
 }))
+const { desktopBridge } = vi.hoisted(() => ({ desktopBridge: vi.fn<() => object | undefined>(() => undefined) }))
+
+vi.mock("@/lib/desktop", () => ({ desktopBridge, desktopPlatform: () => undefined }))
 vi.mock("@/queries/account", () => ({ useAccountQuery: () => accountState.current }))
 vi.mock("@/features/drive/lib/actions", () => ({ createLink: vi.fn(), disableLink: vi.fn(), updateLink }))
 
@@ -105,5 +109,29 @@ describe("LinkDialog", () => {
 		fireEvent.click(screen.getByRole("button", { name: "Try again" }))
 
 		expect(refetchAccount).toHaveBeenCalledTimes(1)
+	})
+})
+
+describe("LinkDialog premium gate", () => {
+	beforeEach(() => {
+		accountState.current = { status: "success", data: { subs: [] }, error: null, refetch: refetchAccount }
+	})
+
+	it("sends a free account to the plans on the web", () => {
+		desktopBridge.mockReturnValue(undefined)
+		renderDialog()
+
+		expect(screen.getByRole("link", { name: "Upgrade" }).getAttribute("href")).toBe("/settings/plans")
+	})
+
+	it("opens web billing in the browser from the desktop app", () => {
+		desktopBridge.mockReturnValue({})
+		renderDialog()
+
+		const link = screen.getByRole("link", { name: "Upgrade" })
+
+		expect(link.getAttribute("href")).toBe("https://app.filen.io/settings/billing")
+		expect(link.getAttribute("target")).toBe("_blank")
+		expect(link.getAttribute("rel")).toBe("noopener noreferrer")
 	})
 })

@@ -21,8 +21,10 @@ import {
 	HardDriveIcon,
 	ImagePlayIcon,
 	MonitorIcon,
+	FileXIcon,
 	type LucideIcon
 } from "lucide-react"
+import type { UserAccountSubs } from "@filen/sdk-rs"
 import { cn } from "@filen/shared"
 import { DEFAULT_CONTACTS_SECTION_FILTER } from "@/features/contacts/components/contactsList.logic"
 import { flushOutboxes, performLogout } from "@/features/shell/lib/performLogout"
@@ -31,6 +33,8 @@ import { logoutConfirmBodyKey } from "@/features/shell/hooks/useUnsyncedWork.log
 import { useChatsUnreadCount } from "@/features/chats/hooks/useChatsUnreadCount"
 import { useContactRequestsQuery } from "@/features/contacts/queries/contacts"
 import { useAccountQuery, useMasterKeysNotExported } from "@/queries/account"
+import { useWithdrawalNotice } from "@/features/settings/hooks/useWithdrawalNotice"
+import { WithdrawalDialog } from "@/features/settings/components/billing/withdrawalDialog"
 import { RailStatusDot, RailTooltipDetail } from "@/features/shell/components/railProgressBar"
 import { useHasActiveTransfers } from "@/features/transfers/store/useTransfersStore"
 import { Logo } from "@/features/shell/components/logo"
@@ -112,6 +116,8 @@ function HelpEntry() {
 	)
 }
 
+const NO_SUBS: UserAccountSubs[] = []
+
 function AccountMenu() {
 	const { t } = useTranslation(["common", "auth", "settings"])
 	const navigate = useNavigate()
@@ -123,6 +129,10 @@ function AccountMenu() {
 	const [confirmOpen, setConfirmOpen] = useState(false)
 	const [shortcutsOpen, setShortcutsOpen] = useState(false)
 	const [pending, setPending] = useState(false)
+	const [withdrawOpen, setWithdrawOpen] = useState(false)
+	// Withdrawal lives with web billing, never in the desktop app.
+	const { now, notice: withdrawal } = useWithdrawalNotice(IS_DESKTOP ? NO_SUBS : (accountQuery.data?.subs ?? NO_SUBS))
+	const withdrawUntil = withdrawal?.until
 
 	// Same guard as the rail's route-nav actions (useNavigateAction): an open dialog owns the
 	// keyboard, so the overlay never stacks on top of one.
@@ -158,14 +168,24 @@ function AccountMenu() {
 						<Button
 							variant="ghost"
 							size="icon-lg"
-							aria-label={t("account")}
-							className="rounded-full app-region-no-drag"
+							aria-label={
+								withdrawUntil === undefined
+									? t("account")
+									: `${t("account")}, ${t("settings:settingsBillingWithdrawStatus", { date: withdrawUntil })}`
+							}
+							className="relative rounded-full app-region-no-drag"
 						>
 							<Avatar size="sm">
 								<AvatarFallback>
 									<UserIcon className="size-4" />
 								</AvatarFallback>
 							</Avatar>
+							{withdrawUntil === undefined ? null : (
+								<RailStatusDot
+									dot="notice"
+									className="absolute top-1 right-1 ring-2 ring-canvas"
+								/>
+							)}
 						</Button>
 					}
 				/>
@@ -175,6 +195,27 @@ function AccountMenu() {
 					sideOffset={8}
 					className="min-w-52"
 				>
+					{withdrawUntil === undefined ? null : (
+						<>
+							<DropdownMenuGroup>
+								<DropdownMenuItem
+									className="text-warning-foreground focus:text-warning-foreground"
+									onClick={() => {
+										setWithdrawOpen(true)
+									}}
+								>
+									<FileXIcon className="text-warning-foreground" />
+									<span className="flex min-w-0 flex-col">
+										<span>{t("settings:settingsBillingWithdraw")}</span>
+										<span className="text-xs">
+											{t("settings:settingsBillingWithdrawUntil", { date: withdrawUntil })}
+										</span>
+									</span>
+								</DropdownMenuItem>
+							</DropdownMenuGroup>
+							<DropdownMenuSeparator />
+						</>
+					)}
 					<DropdownMenuGroup>
 						{/* Base UI MenuGroupLabel requires an enclosing group. */}
 						<DropdownMenuLabel className="truncate">{accountQuery.data?.email ?? t("account")}</DropdownMenuLabel>
@@ -261,6 +302,15 @@ function AccountMenu() {
 				open={shortcutsOpen}
 				onOpenChange={setShortcutsOpen}
 			/>
+			{IS_DESKTOP || accountQuery.data === undefined ? null : (
+				<WithdrawalDialog
+					open={withdrawOpen}
+					account={accountQuery.data}
+					now={now}
+					subId={withdrawal?.sub.id}
+					onOpenChange={setWithdrawOpen}
+				/>
+			)}
 		</>
 	)
 }

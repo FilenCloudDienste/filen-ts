@@ -16,6 +16,6 @@ export const settingsAccountFixes = {
 		"Please export your master keys and store them in a separate safe location. You need your master keys when you reset your password to avoid data loss. You need to export your master keys every time you change your password.",
 	/** Short status read by screen readers and shown in the tooltip on the Settings entry (rail and account menu) while the master keys are not exported */
 	settingsMasterKeysNotExportedStatus: "Master keys not exported",
-	/** Storage-full dialog — button opening the plans (in the browser on the desktop app) */
+	/** Upgrade buttons (storage-full dialog, chat attachment menu and its toast) — open the plans (in the browser on the desktop app) */
 	settingsStorageFullUpgrade: "Upgrade"
 } as const

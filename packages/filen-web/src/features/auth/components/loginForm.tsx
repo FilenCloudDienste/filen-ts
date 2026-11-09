@@ -15,6 +15,7 @@ import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { TwoFactorDialog } from "@/features/auth/components/twoFactorDialog"
+import { takePlansTarget } from "@/features/settings/lib/pendingPlans"
 import { PasswordInput } from "@/features/auth/components/passwordInput"
 
 // Forgot-password dialog: small enough to live as a private sibling of the login form rather than
@@ -94,6 +95,13 @@ function ForgotPasswordDialog({
 	)
 }
 
+// A plans link opened while signed out lands on the plans; everything else on Drive.
+async function navigateAfterLogin(navigate: ReturnType<typeof useNavigate>): Promise<void> {
+	const plans = takePlansTarget()
+
+	await (plans === null ? navigate({ to: "/drive/$", params: { _splat: "" } }) : navigate({ to: "/settings/plans", search: plans }))
+}
+
 function LoginForm() {
 	const { t } = useTranslation(["auth", "common"])
 	const isOnline = useIsOnline()
@@ -148,7 +156,7 @@ function LoginForm() {
 						// resume-after-close is lost — navigating beats failing a successful login.
 						toast.warning(t("sessionPersistFailed"))
 					}
-					await navigate({ to: "/drive/$", params: { _splat: "" } })
+					await navigateAfterLogin(navigate)
 					break
 				case "two-factor":
 					setTwoFactorError(outcome.wrongCode ? t("twoFactorWrongCode") : undefined)

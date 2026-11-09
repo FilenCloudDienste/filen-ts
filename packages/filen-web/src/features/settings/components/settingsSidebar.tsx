@@ -10,7 +10,8 @@ import {
 	CreditCardIcon,
 	SlidersHorizontalIcon,
 	MonitorIcon,
-	DatabaseIcon
+	DatabaseIcon,
+	GemIcon
 } from "lucide-react"
 import { SidebarPanel } from "@/features/shell/components/sidebarPanel"
 import { SIDEBAR_NAV_ITEM_CLASS } from "@/features/shell/lib/sidebarNavItem"
@@ -26,6 +27,7 @@ type SettingsRoute =
 	| "/settings/appearance"
 	| "/settings/keyboard"
 	| "/settings/events"
+	| "/settings/plans"
 	| "/settings/billing"
 	| "/settings/storage"
 	| "/settings/advanced"
@@ -39,6 +41,7 @@ interface SettingsSidebarItem {
 		| "settingsSectionAppearance"
 		| "settingsSectionKeyboard"
 		| "settingsSectionEvents"
+		| "settingsSectionPlans"
 		| "settingsSectionBilling"
 		| "settingsSectionStorage"
 		| "settingsSectionAdvanced"
@@ -48,7 +51,7 @@ interface SettingsSidebarItem {
 }
 
 // Account first (the index redirect's landing section — see routes/_app/settings/index.tsx),
-// Security second (the already-shipped page, unchanged), then Appearance/Keyboard/Events/Billing/
+// Security second (the already-shipped page, unchanged), then Appearance/Keyboard/Events/Plans (web only)/Billing/
 // Storage/Advanced, and Desktop in the desktop app only.
 const SETTINGS_ITEMS: SettingsSidebarItem[] = [
 	{ id: "account", labelKey: "settingsSectionAccount", icon: UserIcon, to: "/settings/account" },
@@ -56,6 +59,10 @@ const SETTINGS_ITEMS: SettingsSidebarItem[] = [
 	{ id: "appearance", labelKey: "settingsSectionAppearance", icon: SunMoonIcon, to: "/settings/appearance" },
 	{ id: "keyboard", labelKey: "settingsSectionKeyboard", icon: KeyboardIcon, to: "/settings/keyboard" },
 	{ id: "events", labelKey: "settingsSectionEvents", icon: HistoryIcon, to: "/settings/events" },
+	// Plans and checkout exist only in the web app.
+	...(desktopBridge() === undefined
+		? [{ id: "plans", labelKey: "settingsSectionPlans", icon: GemIcon, to: "/settings/plans" } as const]
+		: []),
 	{ id: "billing", labelKey: "settingsSectionBilling", icon: CreditCardIcon, to: "/settings/billing" },
 	{ id: "storage", labelKey: "settingsSectionStorage", icon: DatabaseIcon, to: "/settings/storage" },
 	{ id: "advanced", labelKey: "settingsSectionAdvanced", icon: SlidersHorizontalIcon, to: "/settings/advanced" },

@@ -3,7 +3,7 @@ import { useNavigate } from "@tanstack/react-router"
 import { useAccountQuery } from "@/queries/account"
 import { isStorageOverLimit } from "@filen/shared"
 import { selectActiveReminder, type ReminderKind } from "@/features/settings/components/security/exportMasterKeys.logic"
-import { desktopBridge } from "@/lib/desktop"
+import { isDesktopBilling, openWebBilling } from "@/features/settings/lib/billingLinks"
 import { useReminderStore } from "@/features/shell/store/useReminderStore"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 import {
@@ -17,9 +17,6 @@ import {
 	AlertDialogTitle
 } from "@/components/ui/alert-dialog"
 
-// The plans and checkout exist only in the web app.
-const WEB_BILLING_URL = "https://app.filen.io/settings/billing"
-
 // Blocking startup reminders for the authed shell, mounted once from AppShell (they concern any
 // authed surface, not one route). Two account nags surface as modal dialogs on every boot until
 // actioned: exporting master keys and being over the storage limit. The active reminder is DERIVED
@@ -27,7 +24,7 @@ const WEB_BILLING_URL = "https://app.filen.io/settings/billing"
 // setState-in-effect. Dismissal flips the page-load-scoped reminder store, so the selector re-runs
 // and advances the sequence (keys → storage → done). The storage dialog doubles as the storage-full
 // dialog any refused upload raises through openStorageFull; it waits behind the keys reminder rather
-// than stacking on it. Billing lives only in the web app, so desktop's Upgrade opens it in the browser.
+// than stacking on it. Upgrade opens the plans; the desktop app opens web billing in the browser.
 export function AccountReminders() {
 	const { t } = useTranslation(["auth", "settings"])
 	const navigate = useNavigate()
@@ -59,14 +56,13 @@ export function AccountReminders() {
 	function upgrade(): void {
 		closeStorage()
 
-		if (desktopBridge() !== undefined) {
-			// Desktop's window-open handler hands this to the system browser.
-			window.open(WEB_BILLING_URL, "_blank", "noopener,noreferrer")
+		if (isDesktopBilling()) {
+			openWebBilling()
 
 			return
 		}
 
-		void navigate({ to: "/settings/billing" })
+		void navigate({ to: "/settings/plans" })
 	}
 
 	return (

@@ -5,15 +5,14 @@ import { CurrentPlanRow } from "@/features/settings/components/billing/currentPl
 import { SubscriptionsBlock } from "@/features/settings/components/billing/subscriptionsBlock"
 import { InvoicesBlock } from "@/features/settings/components/billing/invoicesBlock"
 import { ReferralRow } from "@/features/settings/components/billing/referralRow"
+import { isDesktopBilling, WEB_BILLING_URL } from "@/features/settings/lib/billingLinks"
 import { AccountGate } from "@/features/settings/components/accountGate"
-import { SettingsGroup } from "@/features/settings/components/settingsLayout"
+import { SettingsGroup, SettingsLinkRow } from "@/features/settings/components/settingsLayout"
 import { routeHead } from "@/lib/head/routeHead"
 import { i18n } from "@/lib/i18n"
 
-// Read-only billing: plans/subscriptions/invoices tables (from getUserInfo — no separate billing
-// read exists) + a referral copy-link + "manage on filen.io" external links wherever a mutation would
-// otherwise live. Billing MANAGEMENT ops are a known SDK gap — sdk-rs has no cancelSubscription/
-// generateInvoice/withdrawal equivalent — this section only ever reads.
+// Plan, subscriptions (cancel, withdrawal), invoices and referral, all read from getUserInfo; the plans are their own
+// page. The desktop app keeps the plan display and sends everything else to the web app.
 export const Route = createFileRoute("/_app/settings/billing")({
 	head: routeHead({ title: () => [i18n.t("settings:settingsSectionBilling"), i18n.t("common:settings")] }),
 	component: BillingPage
@@ -27,28 +26,43 @@ function BillingPage() {
 			icon={CreditCardIcon}
 			title={t("settingsSectionBilling")}
 		>
-			{accountQuery => (
-				<>
-					<SettingsGroup title={t("settingsGroupPlan")}>
-						<CurrentPlanRow accountQuery={accountQuery} />
-					</SettingsGroup>
-					<SettingsGroup
-						title={t("settingsBillingSubscriptionsTitle")}
-						description={t("settingsBillingSubscriptionsDescription")}
-					>
-						<SubscriptionsBlock accountQuery={accountQuery} />
-					</SettingsGroup>
-					<SettingsGroup
-						title={t("settingsBillingInvoicesTitle")}
-						description={t("settingsBillingInvoicesDescription")}
-					>
-						<InvoicesBlock accountQuery={accountQuery} />
-					</SettingsGroup>
-					<SettingsGroup title={t("settingsBillingReferralTitle")}>
-						<ReferralRow accountQuery={accountQuery} />
-					</SettingsGroup>
-				</>
-			)}
+			{accountQuery =>
+				isDesktopBilling() ? (
+					<>
+						<SettingsGroup title={t("settingsGroupPlan")}>
+							<CurrentPlanRow accountQuery={accountQuery} />
+							<SettingsLinkRow
+								href={WEB_BILLING_URL}
+								label={t("settingsBillingManageOnWeb")}
+							/>
+						</SettingsGroup>
+						<SettingsGroup title={t("settingsBillingReferralTitle")}>
+							<ReferralRow accountQuery={accountQuery} />
+						</SettingsGroup>
+					</>
+				) : (
+					<>
+						<SettingsGroup title={t("settingsGroupPlan")}>
+							<CurrentPlanRow accountQuery={accountQuery} />
+						</SettingsGroup>
+						<SettingsGroup
+							title={t("settingsBillingSubscriptionsTitle")}
+							description={t("settingsBillingSubscriptionsDescription")}
+						>
+							<SubscriptionsBlock accountQuery={accountQuery} />
+						</SettingsGroup>
+						<SettingsGroup
+							title={t("settingsBillingInvoicesTitle")}
+							description={t("settingsBillingInvoicesDescription")}
+						>
+							<InvoicesBlock accountQuery={accountQuery} />
+						</SettingsGroup>
+						<SettingsGroup title={t("settingsBillingReferralTitle")}>
+							<ReferralRow accountQuery={accountQuery} />
+						</SettingsGroup>
+					</>
+				)
+			}
 		</AccountGate>
 	)
 }

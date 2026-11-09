@@ -3,6 +3,7 @@ import { openRoute, type AssistantSignal } from "@filen/shared/assistant"
 import { DEFAULT_CONTACTS_SECTION_FILTER } from "@/features/contacts/components/contactsList.logic"
 import { pathIsUnder } from "@/features/shell/lib/appShell.logic"
 import { navigateChecked } from "@/features/assistant/tools/navigation"
+import { desktopBridge } from "@/lib/desktop"
 
 export type AssistantRouteName = (typeof openRoute.input.route.type)["infer"]
 
@@ -27,6 +28,7 @@ const ROUTE_PATHS: readonly (readonly [AssistantRouteName, string])[] = [
 	["settings_appearance", "/settings/appearance"],
 	["settings_keyboard", "/settings/keyboard"],
 	["settings_events", "/settings/events"],
+	["settings_plans", "/settings/plans"],
 	["settings_billing", "/settings/billing"],
 	["settings_storage", "/settings/storage"],
 	["settings_advanced", "/settings/advanced"],
@@ -38,8 +40,11 @@ export function screenOfPath(pathname: string): AssistantRouteName | "other" {
 	return ROUTE_PATHS.find(([, root]) => pathIsUnder(pathname, root))?.[0] ?? "other"
 }
 
-// Sections that exist in the shared tool but not in the web app.
-export const UNAVAILABLE_ROUTES: ReadonlySet<AssistantRouteName> = new Set(["settings_camera_upload"])
+// Sections that exist in the shared tool but not in this app: no camera upload on the web, and the desktop app sells
+// no plans (its Plans URL lands on Billing).
+export const UNAVAILABLE_ROUTES: ReadonlySet<AssistantRouteName> = new Set(
+	desktopBridge() === undefined ? ["settings_camera_upload"] : ["settings_camera_upload", "settings_plans"]
+)
 
 // The same navigations the icon rail and the settings sidebar make. False when the section does not
 // exist on the web.
@@ -118,6 +123,9 @@ async function navigateRaw(router: RegisteredRouter, route: AssistantRouteName):
 			break
 		case "settings_events":
 			await router.navigate({ to: "/settings/events" })
+			break
+		case "settings_plans":
+			await router.navigate({ to: "/settings/plans" })
 			break
 		case "settings_billing":
 			await router.navigate({ to: "/settings/billing" })

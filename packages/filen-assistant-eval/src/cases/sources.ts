@@ -566,6 +566,26 @@ export const SOURCES_CASES: EvalCase[] = [
 		]
 	},
 	{
+		id: "sources-settings-plans-en",
+		category: "sources",
+		lang: "en",
+		prompt: "Show me the plans I can upgrade to",
+		routes: ["navigation"],
+		calls: [
+			{
+				tool: "open_route",
+				args: {
+					route: "settings_plans"
+				}
+			}
+		],
+		state: [
+			{
+				screen: "settings_plans"
+			}
+		]
+	},
+	{
 		id: "sources-settings-events-fr",
 		category: "sources",
 		lang: "fr",

@@ -6,6 +6,7 @@ import { formatItemSize } from "@/features/drive/lib/format"
 import type { DriveItemLinkStatus } from "@/features/drive/queries/drive"
 import type { DriveKey } from "@/lib/i18n"
 import { desktopPlatform } from "@/lib/desktop"
+import { WEB_APP_ORIGIN } from "@/lib/webApp"
 
 // Normalized shape the dialog's form reads from — collapses the dir/file field-name asymmetry
 // (`enableDownload` vs `downloadable`) into one internal name.
@@ -91,9 +92,8 @@ export function buildLinkUpdate(current: DriveItemLinkStatus, edits: LinkFormEdi
 	}
 }
 
-// The desktop app is served from its own filen://app origin, which no recipient can open, so its links
-// point at the web app instead. Every copied, shared or chat-attached link is built below.
-const DESKTOP_PUBLIC_LINK_ORIGIN = "https://app.filen.io"
+// No recipient can open the desktop app's own origin, so its links point at the web app instead. Every copied,
+// shared or chat-attached link is built below.
 
 // A file link's key is the ITEM's own decrypted metadata key (FilePublicLink itself carries no key
 // field); a directory link's key is the LINK's own linkKey (absent until the link finishes
@@ -109,7 +109,7 @@ const DESKTOP_PUBLIC_LINK_ORIGIN = "https://app.filen.io"
 
 export function buildPublicLinkUrl(item: DriveItem, status: DriveItemLinkStatus): string | null {
 	const base = asDirectoryOrFile(item)
-	const origin = desktopPlatform() === undefined ? location.origin : DESKTOP_PUBLIC_LINK_ORIGIN
+	const origin = desktopPlatform() === undefined ? location.origin : WEB_APP_ORIGIN
 
 	if (base.type === "file" && status.type === "file") {
 		const key = base.data.decryptedMeta?.key

@@ -1395,6 +1395,26 @@ const api = {
 	async setLoginAlertsEnabled(enabled: boolean): Promise<void> {
 		await requireClient().setLoginAlertsEnabled(enabled)
 	},
+	async setAppearOffline(appearOffline: boolean): Promise<void> {
+		await requireClient().setAppearOffline(appearOffline)
+	},
+	// ── Billing ── the checkout URL for a config plan id; the caller opens it.
+	createSubscription(planId: number, method: "stripe" | "paypal" | "crypto"): Promise<string> {
+		return requireClient().createSubscription(planId, method)
+	},
+	async cancelSubscription(uuid: string): Promise<void> {
+		await requireClient().cancelSubscription(uuid)
+	},
+	// The PDF crosses back transferred, never copied.
+	async generateInvoice(invoiceUuid: string): Promise<Uint8Array> {
+		const bytes = await requireClient().generateInvoice(invoiceUuid)
+
+		return Comlink.transfer(bytes, [bytes.buffer])
+	},
+	// When the withdrawal was received, in millis; a repeated request answers with the first one's time.
+	withdrawSubscription(uuid: string, name: string, email: string, lang: "de" | "en"): Promise<bigint> {
+		return requireClient().withdrawSubscription(uuid, name, email, lang)
+	},
 	async deleteAllVersions(): Promise<void> {
 		await requireClient().deleteAllVersions()
 	},

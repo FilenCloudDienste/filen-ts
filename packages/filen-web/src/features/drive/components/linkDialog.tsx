@@ -35,6 +35,7 @@ import { Switch } from "@/components/ui/switch"
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from "@/components/ui/empty"
 import { PreviewErrorState } from "@/features/preview/components/previewErrorState"
+import { isDesktopBilling, WEB_BILLING_URL } from "@/features/settings/lib/billingLinks"
 
 export interface LinkDialogProps {
 	item: DriveItem
@@ -212,13 +213,25 @@ export function LinkDialog({ item, onClose }: LinkDialogProps) {
 								<EmptyDescription>{t("driveLinkPremiumRequiredDescription")}</EmptyDescription>
 							</EmptyHeader>
 							<EmptyContent>
-								<Link
-									to="/settings/billing"
-									onClick={onClose}
-									className={buttonVariants({ variant: "outline" })}
-								>
-									{t("driveLinkUpgradeAction")}
-								</Link>
+								{isDesktopBilling() ? (
+									<a
+										href={WEB_BILLING_URL}
+										target="_blank"
+										rel="noopener noreferrer"
+										onClick={onClose}
+										className={buttonVariants({ variant: "outline" })}
+									>
+										{t("driveLinkUpgradeAction")}
+									</a>
+								) : (
+									<Link
+										to="/settings/plans"
+										onClick={onClose}
+										className={buttonVariants({ variant: "outline" })}
+									>
+										{t("driveLinkUpgradeAction")}
+									</Link>
+								)}
 							</EmptyContent>
 						</Empty>
 					) : (

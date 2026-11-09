@@ -792,6 +792,16 @@ const CPU_THROTTLE_RATE = Number(process.env["E2E_CPU_THROTTLE"] ?? "1")
 // when no session was minted (no credentials). SDK-free and logged-out tests opt out with
 // `test.use({ injectSession: false })`, which also keeps them running for contributors without
 // credentials. Requested by name only where the blob itself is consumed.
+// cfg.json and dev's cfg.test.json alike.
+const REMOTE_CONFIG_ROUTE = /^https:\/\/cdn\.filen\.io\/cfg[^/]*\.json(?:\?.*)?$/
+
+const NEUTRAL_REMOTE_CONFIG = JSON.stringify({
+	maintenance: false,
+	readOnly: false,
+	announcements: [],
+	pricing: { lifetimeEnabled: false, saleEnabled: false, plans: [] }
+})
+
 export const test = base.extend<{
 	injectSession: boolean
 	injectedSession: string
@@ -956,6 +966,16 @@ export const test = base.extend<{
 	],
 	// CDP is chromium-only, so firefox/webkit run at full speed whatever the variable says.
 	page: async ({ page, context, browserName }, use, testInfo) => {
+		// The live remote config would let an announcement strip or a maintenance notice change any page under test.
+		await context.route(REMOTE_CONFIG_ROUTE, route =>
+			route.fulfill({
+				status: 200,
+				contentType: "application/json",
+				headers: { "access-control-allow-origin": "*" },
+				body: NEUTRAL_REMOTE_CONFIG
+			})
+		)
+
 		// Read lanes share the read-only fixture tree: a DOCX edited there never saves on its own (E2E builds read
 		// this key, features/office/lib/officeAutosave.ts E2E_AUTOSAVE_OFF; the spreadsheet editor reads it too).
 		if (testInfo.project.name.endsWith("-read")) {

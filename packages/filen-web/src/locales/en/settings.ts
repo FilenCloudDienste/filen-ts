@@ -187,12 +187,11 @@ export const settings = {
 	settingsDeleteAllItemsConfirmBody: 'Type "{{phrase}}" below to permanently delete every file and directory. This cannot be undone.',
 	settingsDeleteAllItemsSuccess: "Everything has been deleted.",
 
-	// ── Billing (read-only) ───────────────────────────────────────────────
+	// ── Billing ───────────────────────────────────────────────────────────
 	/** Tier label rule (account-plans-stack): derived from isProAccount(subs) only, never a raw plan name or isPremium */
 	settingsBillingTierFree: "Free",
 	settingsBillingTierPro: "Pro",
 	settingsBillingCurrentPlanTitle: "Current plan",
-	settingsBillingManageOnFilen: "Manage on filen.io",
 	settingsBillingSubscriptionsTitle: "Subscriptions",
 	settingsBillingSubscriptionsDescription: "Every plan contributing to your account's total storage",
 	settingsBillingSubscriptionsEmptyTitle: "No subscriptions",

@@ -1,7 +1,8 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
-import { ArrowUpIcon, PlusIcon, UploadIcon, HardDriveIcon } from "lucide-react"
+import { useNavigate } from "@tanstack/react-router"
+import { ArrowUpIcon, PlusIcon, UploadIcon, HardDriveIcon, SparklesIcon } from "lucide-react"
 import type { Chat, ChatMessage, ChatParticipant } from "@filen/sdk-rs"
 import { cn, isProAccount } from "@filen/shared"
 import { noop } from "@/lib/utils"
@@ -43,7 +44,15 @@ import { toastObstructionRef } from "@/lib/toastClearance"
 import { useAccountQuery } from "@/queries/account"
 import { Button } from "@/components/ui/button"
 import { GLASS_SURFACE_CLASS } from "@/components/ui/surface"
-import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem } from "@/components/ui/dropdown-menu"
+import {
+	DropdownMenu,
+	DropdownMenuTrigger,
+	DropdownMenuContent,
+	DropdownMenuItem,
+	DropdownMenuGroup,
+	DropdownMenuLabel
+} from "@/components/ui/dropdown-menu"
+import { isDesktopBilling, openWebBilling } from "@/features/settings/lib/billingLinks"
 
 // Grow the input with its content up to this many px, then scroll internally (mobile caps at a quarter
 // screen; a fixed desktop cap reads cleaner).
@@ -72,7 +81,8 @@ export function Composer({
 	// Fired after an own send is enqueued so the thread can jump to the bottom (mobile parity).
 	onSent: () => void
 }) {
-	const { t } = useTranslation(["chats", "common"])
+	const { t } = useTranslation(["chats", "common", "settings"])
+	const navigate = useNavigate()
 	const isOnline = useIsOnline()
 	const sender = useAccountQuery().data
 	// Pre-gates the attach menu for a free-tier account, proactively rather than after an upload
@@ -133,6 +143,19 @@ export function Composer({
 	// Why attaching is refused (trigger tooltip, drop toast). Offline wins when both apply: going online fixes
 	// that one, while reconnecting alone can't fix a non-Pro rejection.
 	const attachGateReason = !isOnline ? t("common:offlineActionDisabled") : !isPro ? t("chatComposerAttachPremiumRequired") : undefined
+	// A free account opens the menu to learn why and upgrade; only offline, an upload in flight or a still-loading
+	// account keep the trigger off.
+	const attachTriggerDisabled = sender === undefined || isAttachDisabled(uploadingCount, isOnline, true)
+
+	function upgrade(): void {
+		if (isDesktopBilling()) {
+			openWebBilling()
+
+			return
+		}
+
+		void navigate({ to: "/settings/plans" })
+	}
 
 	// Hydrate the draft from disk once per chat, but never clobber a live draft already in the store (the
 	// user may have typed during the async read, or a menu may have loaded an edit body).
@@ -336,6 +359,14 @@ export function Composer({
 
 		// Same gate as the attach menu trigger: a drop is the one path to an upload that bypasses it.
 		if (isAttachDisabled(uploadingCount, isOnline, isPro)) {
+			if (isOnline && uploadingCount === 0 && !isPro) {
+				toast.error(t("chatComposerAttachPremiumRequired"), {
+					action: { label: t("settings:settingsStorageFullUpgrade"), onClick: upgrade }
+				})
+
+				return
+			}
+
 			toast.error(attachGateReason ?? t("chatComposerAttachInProgress"))
 
 			return
@@ -519,8 +550,8 @@ export function Composer({
 								// Attach-menu pre-gate — both entries need network right away (an upload/
 								// drive-attach start, not a durably-queued send), unlike the send button below,
 								// which stays enabled offline by design (its outbox queues and flushes later).
-								// Also pre-gated on Pro status.
-								disabled={isAttachDisabled(uploadingCount, isOnline, isPro)}
+								// A free account gets the reason and an upgrade inside instead.
+								disabled={attachTriggerDisabled}
 								aria-label={t("chatComposerAttach")}
 								title={attachGateReason}
 							>
@@ -534,22 +565,36 @@ export function Composer({
 						sideOffset={8}
 						className="w-auto"
 					>
-						<DropdownMenuItem
-							onClick={() => {
-								fileInputRef.current?.click()
-							}}
-						>
-							<UploadIcon aria-hidden="true" />
-							{t("chatComposerAttachUpload")}
-						</DropdownMenuItem>
-						<DropdownMenuItem
-							onClick={() => {
-								setAttachDriveOpen(true)
-							}}
-						>
-							<HardDriveIcon aria-hidden="true" />
-							{t("chatComposerAttachFromDrive")}
-						</DropdownMenuItem>
+						{isPro ? (
+							<>
+								<DropdownMenuItem
+									onClick={() => {
+										fileInputRef.current?.click()
+									}}
+								>
+									<UploadIcon aria-hidden="true" />
+									{t("chatComposerAttachUpload")}
+								</DropdownMenuItem>
+								<DropdownMenuItem
+									onClick={() => {
+										setAttachDriveOpen(true)
+									}}
+								>
+									<HardDriveIcon aria-hidden="true" />
+									{t("chatComposerAttachFromDrive")}
+								</DropdownMenuItem>
+							</>
+						) : (
+							<DropdownMenuGroup>
+								<DropdownMenuLabel className="max-w-64 font-normal whitespace-normal">
+									{t("chatComposerAttachPremiumRequired")}
+								</DropdownMenuLabel>
+								<DropdownMenuItem onClick={upgrade}>
+									<SparklesIcon aria-hidden="true" />
+									{t("settings:settingsStorageFullUpgrade")}
+								</DropdownMenuItem>
+							</DropdownMenuGroup>
+						)}
 					</DropdownMenuContent>
 				</DropdownMenu>
 				{/* The popover is the pill's sibling, not its child, so the pill's rounded clip never cuts it off. */}

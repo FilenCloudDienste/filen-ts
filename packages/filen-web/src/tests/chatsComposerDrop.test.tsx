@@ -11,7 +11,8 @@ import type { Chat, ChatMessage } from "@filen/sdk-rs"
 // reason instead of uploading a file whose link can only fail (or racing the one in flight). Also the
 // edit mode's emptied-input behaviour, the reply banner, and the suggestion listbox's keyboard/ARIA wiring.
 
-const { state, preflightAttachments, uploadAttachment, toastError } = vi.hoisted(() => ({
+const { state, preflightAttachments, uploadAttachment, toastError, navigate } = vi.hoisted(() => ({
+	navigate: vi.fn(),
 	// Pro follows the subscriptions (isProAccount, the backend's isUserPro), never the account's isPremium flag:
 	// the default here is a subscriber whose isPremium is false, as it is for every subscription-only account.
 	state: { isOnline: true, subs: [{ activated: true }] as { activated: boolean }[], isPremium: false },
@@ -29,6 +30,7 @@ vi.mock("@/features/chats/lib/typing", () => ({ signalTyping: vi.fn(), signalSto
 vi.mock("@/features/chats/lib/drafts", () => ({ loadDraft: () => Promise.resolve(""), saveDraftDebounced: vi.fn() }))
 vi.mock("@/features/chats/components/thread/attachDriveDialog", () => ({ AttachDriveDialog: () => null }))
 vi.mock("sonner", () => ({ toast: { error: toastError } }))
+vi.mock("@tanstack/react-router", () => ({ useNavigate: () => navigate }))
 
 import "@/lib/i18n"
 import { Composer } from "@/features/chats/components/thread/composer"
@@ -93,7 +95,15 @@ describe("Composer — dropping files", () => {
 		await dropFile(renderComposer())
 
 		expect(uploadAttachment).not.toHaveBeenCalled()
-		expect(toastError).toHaveBeenCalledWith("Attachments require a Pro subscription")
+		expect(toastError.mock.calls[0]?.[0]).toBe("Attachments require a Pro subscription")
+		expect(toastError.mock.calls[0]?.[1]).toHaveProperty("action")
+
+		// The toast's Upgrade opens the plans.
+		const options = toastError.mock.calls[0]?.[1] as { action: { label: string; onClick: () => void } }
+
+		expect(options.action.label).toBe("Upgrade")
+		options.action.onClick()
+		expect(navigate).toHaveBeenCalledWith({ to: "/settings/plans" })
 	})
 
 	it("refuses the drop when only the one-off isPremium flag is set and no subscription is active", async () => {
@@ -103,7 +113,8 @@ describe("Composer — dropping files", () => {
 		await dropFile(renderComposer())
 
 		expect(uploadAttachment).not.toHaveBeenCalled()
-		expect(toastError).toHaveBeenCalledWith("Attachments require a Pro subscription")
+		expect(toastError.mock.calls[0]?.[0]).toBe("Attachments require a Pro subscription")
+		expect(toastError.mock.calls[0]?.[1]).toHaveProperty("action")
 	})
 
 	it("refuses a second drop while an attachment is still uploading", async () => {
@@ -156,6 +167,41 @@ const EDITED: ChatMessage = {
 	editedTimestamp: 0n,
 	sentTimestamp: 0n
 }
+
+describe("Composer — attach menu on a free account", () => {
+	it("opens with the reason and an Upgrade to the plans instead of the attach entries", async () => {
+		state.subs = []
+		renderComposer()
+
+		const trigger = screen.getByRole<HTMLButtonElement>("button", { name: "Attach" })
+
+		expect(trigger.disabled).toBe(false)
+
+		await act(async () => {
+			trigger.focus()
+			fireEvent.keyDown(trigger, { key: "ArrowDown" })
+			await Promise.resolve()
+		})
+
+		expect(screen.queryByRole("menuitem", { name: "Upload a file" })).toBeNull()
+		expect(screen.getByText("Attachments require a Pro subscription")).toBeDefined()
+
+		await act(async () => {
+			fireEvent.click(screen.getByRole("menuitem", { name: "Upgrade" }))
+			await Promise.resolve()
+		})
+
+		expect(navigate).toHaveBeenCalledWith({ to: "/settings/plans" })
+	})
+
+	it("stays off offline", () => {
+		state.subs = []
+		state.isOnline = false
+		renderComposer()
+
+		expect(screen.getByRole<HTMLButtonElement>("button", { name: "Attach" }).disabled).toBe(true)
+	})
+})
 
 describe("Composer — editing", () => {
 	it("keeps an edit open when its input is emptied, instead of putting the pre-edit draft back under the cursor", () => {

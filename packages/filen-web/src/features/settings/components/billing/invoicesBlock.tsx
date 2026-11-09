@@ -1,20 +1,44 @@
+import { useState } from "react"
 import { useTranslation } from "react-i18next"
-import { ReceiptIcon } from "lucide-react"
-import { formatBillingCost } from "@/features/settings/lib/billing"
+import { toast } from "sonner"
+import type { UserAccountSubsInvoices } from "@filen/sdk-rs"
+import { DownloadIcon, ReceiptIcon } from "lucide-react"
+import { formatBillingCost, toMillis } from "@/features/settings/lib/billing"
+import { billingErrorLabel, downloadInvoice } from "@/features/settings/lib/billingActions"
 import { formatShortDate } from "@/lib/formatDate"
+import { useIsOnline } from "@/lib/useIsOnline"
 import type { AccountQuerySuccess } from "@/queries/account"
+import { Button } from "@/components/ui/button"
+import { Spinner } from "@/components/ui/spinner"
 import { SettingsTableBlock } from "@/features/settings/components/billing/billingTable"
 
 interface InvoicesBlockProps {
 	accountQuery: AccountQuerySuccess
 }
 
-// No download column: `UserAccountSubsInvoices` carries no URL and sdk-rs has no `generateInvoice`
-// equivalent — old-web's own per-row download hits a raw v3 endpoint this SDK doesn't expose, and
-// this codebase never reimplements API calls in JS to work around a gap in the SDK. This table is
-// read-only by construction, not by an omitted button.
+function invoiceDate(invoice: UserAccountSubsInvoices): string {
+	const at = toMillis(invoice.timestamp)
+
+	return at === undefined ? "—" : formatShortDate(at)
+}
+
+// The server renders each PDF on demand and one at a time per account, so one download runs at a time here too.
 function InvoicesBlock({ accountQuery }: InvoicesBlockProps) {
-	const { t } = useTranslation("settings")
+	const { t } = useTranslation(["settings", "common"])
+	const isOnline = useIsOnline()
+	const [downloadingId, setDownloadingId] = useState<string | null>(null)
+
+	async function handleDownload(invoice: UserAccountSubsInvoices): Promise<void> {
+		setDownloadingId(invoice.id)
+
+		const outcome = await downloadInvoice(invoice)
+
+		setDownloadingId(null)
+
+		if (outcome.status === "error") {
+			toast.error(billingErrorLabel(outcome.dto))
+		}
+	}
 
 	return (
 		<SettingsTableBlock
@@ -24,7 +48,26 @@ function InvoicesBlock({ accountQuery }: InvoicesBlockProps) {
 				{ header: t("settingsBillingColumnPlan"), cell: invoice => invoice.planName },
 				{ header: t("settingsBillingColumnGateway"), className: "capitalize", cell: invoice => invoice.gateway },
 				{ header: t("settingsBillingColumnCost"), className: "tabular-nums", cell: invoice => formatBillingCost(invoice.planCost) },
-				{ header: t("settingsBillingColumnDate"), className: "tabular-nums", cell: invoice => formatShortDate(invoice.timestamp) }
+				{ header: t("settingsBillingColumnDate"), className: "tabular-nums", cell: invoiceDate },
+				{
+					header: t("settingsBillingColumnDownload"),
+					className: "text-right",
+					cell: invoice => (
+						<Button
+							type="button"
+							variant="ghost"
+							size="icon-sm"
+							disabled={downloadingId !== null || !isOnline}
+							title={isOnline ? undefined : t("common:offlineActionDisabled")}
+							aria-label={t("settingsBillingInvoiceDownload", { date: invoiceDate(invoice) })}
+							onClick={() => {
+								void handleDownload(invoice)
+							}}
+						>
+							{downloadingId === invoice.id ? <Spinner /> : <DownloadIcon />}
+						</Button>
+					)
+				}
 			]}
 			empty={{
 				icon: ReceiptIcon,

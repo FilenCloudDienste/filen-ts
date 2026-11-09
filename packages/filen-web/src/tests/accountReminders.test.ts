@@ -193,13 +193,13 @@ describe("the storage-full dialog on demand", () => {
 		expect(screen.getByText(STORAGE_TITLE)).toBeDefined()
 	})
 
-	it("Upgrade opens billing in the app on the web", () => {
+	it("Upgrade opens the plans in the app on the web", () => {
 		useAccountQuery.mockReturnValue(account(OVER_LIMIT))
 
 		renderReminders()
 		fireEvent.click(screen.getByRole("button", { name: UPGRADE }))
 
-		expect(navigate).toHaveBeenCalledWith({ to: "/settings/billing" })
+		expect(navigate).toHaveBeenCalledWith({ to: "/settings/plans" })
 		expect(screen.queryByText(STORAGE_TITLE)).toBeNull()
 	})
 
