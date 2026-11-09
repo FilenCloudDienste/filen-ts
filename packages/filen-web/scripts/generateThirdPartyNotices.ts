@@ -879,6 +879,55 @@ function officeFallbackFontNotices(fonts: ReturnType<typeof officeFontRecords>):
 	})
 }
 
+/**
+ * The hyphenation patterns the app serves at /office/hyphenation/ (vite/office-hyphenation-plugin.ts), one entry per
+ * language from assets/hyphenation/manifest.json: its copyright and the licence block of its own header, verbatim,
+ * and the record THIRD_PARTY_NOTICES.md keeps (with the MIT text the MIT-licensed files name).
+ */
+const OFFICE_HYPHENATION_MANIFEST = `${OFFICE_DIR}/assets/hyphenation/manifest.json`
+const OFFICE_HYPHENATION_SECTION = "Hyphenation patterns (hyph-utf8)"
+
+function officeHyphenationNotices(): Collected[] {
+	const manifest = requireJson(OFFICE_HYPHENATION_MANIFEST)
+	const commit = stringField(manifest, "commit", OFFICE_HYPHENATION_MANIFEST)
+	const source = stringField(manifest, "source", OFFICE_HYPHENATION_MANIFEST)
+	const languages = manifest["languages"]
+	const sections = noticeSections()
+	const record = noticeSection(sections, OFFICE_HYPHENATION_SECTION)
+		.body.replace(/^```\n[\s\S]*?\n```$/gm, "")
+		.replaceAll("`", "")
+		.replace(/\n{3,}/g, "\n\n")
+		.trim()
+	const mit = noticeFence(sections, OFFICE_HYPHENATION_SECTION)
+
+	if (!Array.isArray(languages) || languages.length === 0) {
+		throw new Error(`${OFFICE_HYPHENATION_MANIFEST}: "languages" is missing`)
+	}
+
+	return languages.map(value => {
+		const language = asRecord(value, OFFICE_HYPHENATION_MANIFEST)
+		const name = stringField(language, "name", OFFICE_HYPHENATION_MANIFEST)
+		const license = stringField(language, "licence", OFFICE_HYPHENATION_MANIFEST)
+
+		return vendoredNotice(
+			{
+				name: `hyph-utf8 ${name} hyphenation patterns`,
+				version: commit.slice(0, 12),
+				license,
+				copyright: [stringField(language, "copyright", OFFICE_HYPHENATION_MANIFEST)],
+				repository: source,
+				terms: [
+					`The ${name} hyphenation patterns of hyph-utf8, ${source} at commit ${commit}, served with the app as ${stringField(language, "file", OFFICE_HYPHENATION_MANIFEST)} by @filen/office (${OFFICE_REPO_DIR}/assets/hyphenation in the filen-ts repository, ${FILEN_TS_REPOSITORY}) to hyphenate documents.`,
+					`${OFFICE_REPO_DIR}/THIRD_PARTY_NOTICES.md records the hyphenation patterns as:\n${record}`,
+					stringField(language, "licenceText", OFFICE_HYPHENATION_MANIFEST),
+					...(license === "MIT" ? [mit] : [])
+				]
+			},
+			"vendored"
+		)
+	})
+}
+
 /** THIRD_PARTY_NOTICES.md by its level-2 headings: each section's prose and its first fenced block, verbatim. */
 function noticeSections(): Map<string, NoticeSection> {
 	const sections = new Map<string, NoticeSection>()
@@ -1078,7 +1127,12 @@ const ffmpeg = ffmpegModuleNotices()
 const engine = wllamaEngineNotices()
 const model = assistantModelNotice(QWEN35_4B)
 const fontRecords = officeFontRecords()
-const office = [...officeFontNotices(fontRecords), ...officeFallbackFontNotices(fontRecords), ...officeDerivedNotices()]
+const office = [
+	...officeFontNotices(fontRecords),
+	...officeFallbackFontNotices(fontRecords),
+	...officeDerivedNotices(),
+	...officeHyphenationNotices()
+]
 
 if (fontRecords.rest().length > 0) {
 	throw new Error(`${OFFICE_NOTICES}: fonts recorded but not in ${OFFICE_FONTS_MANIFEST}: ${fontRecords.rest().join(", ")}`)

@@ -153,7 +153,7 @@ describe("greedy line breaking", () => {
 			{},
 			{
 				hyphenator: {
-					hyphenate(_text, _start, _end, breaks) {
+					hyphenate(_paragraph, _styles, breaks) {
 						breaks[5] = 3
 					}
 				}

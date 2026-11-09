@@ -63,7 +63,7 @@ export {
 	type DocxZipper,
 	type DocxZipperFactory
 } from "./save"
-export { fetchFontAssets, windowServices, workerServices, type FontLocation } from "./services"
+export { fetchFontAssets, hyphenationLibrary, windowServices, workerServices, type FontLocation } from "./services"
 export {
 	DOCX_MAX_ZOOM,
 	DOCX_MIN_ZOOM,

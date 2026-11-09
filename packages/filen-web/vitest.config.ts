@@ -1,10 +1,12 @@
 import { defineConfig } from "vitest/config"
 import { SINGLETONS } from "./vite/singletons"
 import { officeFonts } from "./vite/office-fonts-plugin"
+import { officeHyphenation } from "./vite/office-hyphenation-plugin"
 import { spellcheckAssets } from "./vite/spellcheck-assets-plugin"
 export default defineConfig({
-	// virtual:office-fonts (the viewer's font URLs) and virtual:spellcheck-assets resolve in tests as in the app.
-	plugins: [officeFonts(), spellcheckAssets()],
+	// virtual:office-fonts (the viewer's font URLs), virtual:office-hyphenation and virtual:spellcheck-assets resolve
+	// in tests as in the app.
+	plugins: [officeFonts(), officeHyphenation(), spellcheckAssets()],
 	// The same single copies the app build resolves (vite.config.ts): tests render @filen/office's components.
 	resolve: { alias: { "@": new URL("./src", import.meta.url).pathname }, dedupe: SINGLETONS },
 	test: {

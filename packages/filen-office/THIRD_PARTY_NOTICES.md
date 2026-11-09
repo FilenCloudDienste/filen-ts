@@ -316,6 +316,66 @@ This file incorporates work covered by the following license notice:
   the License at http://www.apache.org/licenses/LICENSE-2.0 .
 ```
 
+## Hyphenation patterns (hyph-utf8)
+
+- Source: hyph-utf8 at tex-hyphen `5684c0f51c0b81133db2efbe60a408b4155a3ff5`, https://github.com/hyphenation/tex-hyphen
+- Copyright: the authors each file names, below
+- Licence: each pattern file's own, from its header. Only files whose header grants a permissive licence (MIT, BSD-style, public domain or an all-permissive notice, alone or among the licences it offers) are bundled; LPPL-only, GPL-only and unlicensed ones are not, nor Basque's, whose licence asks for a notice inside each modified file. Files offering several licences are used under the MIT licence (text below). Each file's licence block is recorded verbatim, with its upstream URLs and both SHA-256 sums, in `assets/hyphenation/manifest.json`, which ships beside the files.
+- Files: `assets/hyphenation/hyph-<language>.txt.gz`, the patterns of `txt/hyph-<language>.pat.txt` and the exceptions of `txt/hyph-<language>.hyp.txt` (space-separated, one line each), gzip-compressed and otherwise unchanged; written, with `src/core/text/hyphenation/languages.generated.ts`, by `src/scripts/hyphenationPatterns.ts`.
+- Use: automatic hyphenation of Word and OpenDocument text documents (`src/core/text/hyphenation/`), a language fetched the first time a document hyphenates text in it.
+- Languages, files, copyright and licence (SPDX):
+  - Afrikaans: `hyph-af.txt.gz`; Copyright (C) 2013 Tilla Fick and Chris Swanepoel; MIT
+  - Belarusian: `hyph-be.txt.gz`; Copyright (C) 2016 Maksim Salau; MIT
+  - Bulgarian: `hyph-bg.txt.gz`; Copyright (C) 2000, 2004, 2017 Anton Zinoviev; LicenseRef-hyph-bg (BSD-style)
+  - Welsh: `hyph-cy.txt.gz`; Copyright (C) 1996 Yannis Haralambous; MIT
+  - Danish: `hyph-da.txt.gz`; Copyright (C) 1994 Frank Jensen; MIT
+  - German (reformed spelling): `hyph-de-1996.txt.gz`; Copyright (c) 2013-2024 Stephan Hennig, Werner Lemberg, Günter Milde, Sander van Geloven, Georg Pfeiffer, Gisbert W. Selke, Tobias Wendorf, Keno Wehr; MIT
+  - Greek (monotonic): `hyph-el-monoton.txt.gz`; Copyright (C) 2008-2011 Dimitrios Filippou; MIT
+  - English (British): `hyph-en-gb.txt.gz`; Copyright (C) 1992, 1996, 2005, 2016 Dominik Wujastyk, Graham Toal; MIT
+  - English (American): `hyph-en-us.txt.gz`; Copyright (C) 1990, 2004, 2005 Gerard D.C. Kuiken; FSFAP
+  - Spanish: `hyph-es.txt.gz`; Copyright (C) 1993, 1997 Javier Bezos, 2001-2019 Javier Bezos, CervanTeX; MIT
+  - Estonian: `hyph-et.txt.gz`; Copyright (C) 2004-2015 Enn Saar; MIT
+  - French: `hyph-fr.txt.gz`; Copyright (C) 1994-2002 Daniel Flipo, Bernard Gaulle, 2016 Arthur Reutenauer; MIT
+  - Irish: `hyph-ga.txt.gz`; Copyright (C) 2004-2015 Kevin P. Scannell; MIT
+  - Galician: `hyph-gl.txt.gz`; Copyright (C) 2006, 2007, 2008, 2010 Javier A. Múgica; Unlicense
+  - Italian: `hyph-it.txt.gz`; Copyright (C) 2008-2011 Claudio Beccari; MIT
+  - Georgian: `hyph-ka.txt.gz`; Copyright (C) 2013 Levan Shoshiashvili; MIT
+  - Kazakh: `hyph-kk.txt.gz`; Copyright (C) 2010 Mojca Miklavec, 2025 Robert Ermers, 2026 Arthur Rosendahl; LicenseRef-Public-Domain
+  - Lithuanian: `hyph-lt.txt.gz`; Copyright (C) 1992 Sigitas Tolušis, Yannis Haralambous; MIT
+  - Mongolian (Cyrillic): `hyph-mn-cyrl.txt.gz`; Copyright (C) 2007-2015 by Dorjgotov Batmunkh; MIT
+  - Norwegian Bokmål: `hyph-nb.txt.gz`; Copyright (C) 2004, 2005 Rune Kleveland, Ole Michael Selberg; Copyright (C) 2004–2005 Rune Kleveland, Ole Michael Selberg, 2007 Karl Ove Hufthammer; FSFAP
+  - Dutch: `hyph-nl.txt.gz`; Copyright (C) 1996 Piet Tutelaers; MIT
+  - Norwegian Nynorsk: `hyph-nn.txt.gz`; Copyright (C) 2004, 2005 Rune Kleveland, Ole Michael Selberg; Copyright (C) 2007 Karl Ove Hufthammer; FSFAP
+  - Occitan: `hyph-oc.txt.gz`; Copyright (C) 2016 Claudio Beccari; MIT
+  - Polish: `hyph-pl.txt.gz`; Copyright (C) 1987-1995 Hanna Kołodziejska, Bogusław Jackowski, Marek Ryćko; MIT
+  - Portuguese: `hyph-pt.txt.gz`; Copyright (C) 1987, 1994, 1996, 2015 Pedro J. de Rezende, 1996, 2015 J. Joao Dias Almeida, 2024 Leonardo Araujo and Aline Benevides; BSD-3-Clause
+  - Romansh: `hyph-rm.txt.gz`; Copyright (C) 2012 Claudio Beccari, 2024 far.ch; MIT
+  - Slovak: `hyph-sk.txt.gz`; Copyright (C) 1992 Jana Chlebíková; MIT
+  - Slovenian: `hyph-sl.txt.gz`; Copyright (C) 1990 Matjaž Vrečko; MIT
+  - Albanian: `hyph-sq.txt.gz`; Copyright (C) 2020 Claudio Beccari, Sabina Koliqi (C) 2025 Arthur Rosendahl; MIT
+  - Turkmen: `hyph-tk.txt.gz`; Copyright (C) 2010-2015 Nazar Annagurban; MIT
+  - Ukrainian: `hyph-uk.txt.gz`; Copyright (C) 1998-2001 Maksym Polyakov; MIT
+
+```
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
 ## Bundled fonts (SIL Open Font License 1.1)
 
 - Source: the upstream repositories and commits below; every file, its upstream URL and both SHA-256 sums are recorded in `assets/fonts/manifest.json`.

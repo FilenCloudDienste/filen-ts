@@ -1,0 +1,867 @@
+{
+	"comment": "Hyphenation patterns from hyph-utf8, one gzip'd UTF-8 file per language: the patterns space-separated on the first line, the exceptions (hyphens marking breaks) on the second. Regenerated with src/scripts/hyphenationPatterns.ts, which also writes src/core/text/hyphenation/languages.generated.ts. licenceText is the licence block of each pattern file's own header, verbatim.",
+	"source": "https://github.com/hyphenation/tex-hyphen",
+	"commit": "5684c0f51c0b81133db2efbe60a408b4155a3ff5",
+	"languages": [
+		{
+			"id": "af",
+			"name": "Afrikaans",
+			"tags": [
+				"af"
+			],
+			"file": "hyph-af.txt.gz",
+			"bytes": 38462,
+			"sha256": "e99fb99a35aeff74e83d42e07dd564dc8ee368da78455f0d90817fd6048de3ff",
+			"size": 79316,
+			"left": 1,
+			"right": 2,
+			"licence": "MIT",
+			"copyright": "Copyright (C) 2013 Tilla Fick and Chris Swanepoel",
+			"licenceText": "licence:\n    name: MIT\n    text: |-\n        Permission is hereby granted, free of charge, to any person obtaining a copy\n        of this software and associated documentation files (the \"Software\"), to deal\n        in the Software without restriction, including without limitation the rights\n        to use, copy, modify, merge, publish, distribute, sublicense, and/or sell\n        copies of the Software, and to permit persons to whom the Software is\n        furnished to do so, subject to the following conditions:\n\n        The above copyright notice and this permission notice shall be included in\n        all copies or substantial portions of the Software.\n\n        THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\n        IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\n        FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\n        AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\n        LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\n        OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\n        SOFTWARE.",
+			"upstream": {
+				"tex": {
+					"url": "https://raw.githubusercontent.com/hyphenation/tex-hyphen/5684c0f51c0b81133db2efbe60a408b4155a3ff5/hyph-utf8/tex/generic/hyph-utf8/patterns/tex/hyph-af.tex",
+					"sha256": "a5de62ec8e5fd38251de838d8ebbdc44b21c76d30e9b486005fbfa641a93abe6"
+				},
+				"patterns": {
+					"url": "https://raw.githubusercontent.com/hyphenation/tex-hyphen/5684c0f51c0b81133db2efbe60a408b4155a3ff5/hyph-utf8/tex/generic/hyph-utf8/patterns/txt/hyph-af.pat.txt",
+					"sha256": "094be0ccc966cb8a9919abffb4d481566bbc25d62bb182647be9feb431de5b5b"
+				},
+				"exceptions": {
+					"url": "https://raw.githubusercontent.com/hyphenation/tex-hyphen/5684c0f51c0b81133db2efbe60a408b4155a3ff5/hyph-utf8/tex/generic/hyph-utf8/patterns/txt/hyph-af.hyp.txt",
+					"sha256": "f1a77063f393d227aa29b085279307d2c728f4200e54c41e4507707ae5aca6b8"
+				}
+			}
+		},
+		{
+			"id": "be",
+			"name": "Belarusian",
+			"tags": [
+				"be"
+			],
+			"file": "hyph-be.txt.gz",
+			"bytes": 6759,
+			"sha256": "32721d9910b039b21179a36e06fdd4fb87c6e81825150e5db06733969f8c458f",
+			"size": 28035,
+			"left": 2,
+			"right": 2,
+			"licence": "MIT",
+			"copyright": "Copyright (C) 2016 Maksim Salau",
+			"licenceText": "licence:\n    name: MIT\n    url: https://opensource.org/licenses/MIT\n    text: >\n            Permission is hereby granted, free of charge, to any person\n            obtaining a copy of this software and associated documentation\n            files (the \"Software\"), to deal in the Software without\n            restriction, including without limitation the rights to use,\n            copy, modify, merge, publish, distribute, sublicense, and/or sell\n            copies of the Software, and to permit persons to whom the\n            Software is furnished to do so, subject to the following\n            conditions:\n\n            The above copyright notice and this permission notice shall be\n            included in all copies or substantial portions of the Software.\n\n            THE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND,\n            EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES\n            OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND\n            NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT\n            HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,\n            WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING\n            FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR\n            OTHER DEALINGS IN THE SOFTWARE.",
+			"upstream": {
+				"tex": {
+					"url": "https://raw.githubusercontent.com/hyphenation/tex-hyphen/5684c0f51c0b81133db2efbe60a408b4155a3ff5/hyph-utf8/tex/generic/hyph-utf8/patterns/tex/hyph-be.tex",
+					"sha256": "ce0c69d86e03c40bdd0ab9f4535cee2503fe2894590380e45a99974f029cea6f"
+				},
+				"patterns": {
+					"url": "https://raw.githubusercontent.com/hyphenation/tex-hyphen/5684c0f51c0b81133db2efbe60a408b4155a3ff5/hyph-utf8/tex/generic/hyph-utf8/patterns/txt/hyph-be.pat.txt",
+					"sha256": "ee8f3dc26a89a1b4428bc2cb82260ca0dc242f2833c9c5b23fb6d0cc71f00ba4"
+				}
+			}
+		},
+		{
+			"id": "bg",
+			"name": "Bulgarian",
+			"tags": [
+				"bg"
+			],
+			"file": "hyph-bg.txt.gz",
+			"bytes": 18298,
+			"sha256": "8ceccd7d1c643a6e1ffc9ed763b93cfb872d0c28aac6988531b54e0d0ab3501e",
+			"size": 61488,
+			"left": 2,
+			"right": 2,
+			"licence": "LicenseRef-hyph-bg",
+			"copyright": "Copyright (C) 2000, 2004, 2017 Anton Zinoviev",
+			"licenceText": "licence:\n    text: > # Seems equivalent to 3-clause BSD\n        This software may be used, modified, copied, distributed, and sold,\n        both in source and binary form provided that the above copyright\n        notice and these terms are retained. The name of the author may not\n        be used to endorse or promote products derived from this software\n        without prior permission.  THIS SOFTWARE IS PROVIDES \"AS IS\" AND\n        ANY EXPRESS OR IMPLIED WARRANTIES ARE DISCLAIMED.  IN NO EVENT\n        SHALL THE AUTHOR BE LIABLE FOR ANY DAMAGES ARISING IN ANY WAY OUT\n        OF THE USE OF THIS SOFTWARE.",
+			"upstream": {
+				"tex": {
+					"url": "https://raw.githubusercontent.com/hyphenation/tex-hyphen/5684c0f51c0b81133db2efbe60a408b4155a3ff5/hyph-utf8/tex/generic/hyph-utf8/patterns/tex/hyph-bg.tex",
+					"sha256": "d37886f8cecea60bf829e4dd9dc1107aea8e8ee3eb92425423534bafac5f59b0"
+				},
+				"patterns": {
+					"url": "https://raw.githubusercontent.com/hyphenation/tex-hyphen/5684c0f51c0b81133db2efbe60a408b4155a3ff5/hyph-utf8/tex/generic/hyph-utf8/patterns/txt/hyph-bg.pat.txt",
+					"sha256": "ca3a154c7b5303050bb78e6ac1d4090b2130795db0e6d9665156b1126a4ad402"
+				}
+			}
+		},
+		{
+			"id": "cy",
+			"name": "Welsh",
+			"tags": [
+				"cy"
+			],
+			"file": "hyph-cy.txt.gz",
+			"bytes": 20743,
+			"sha256": "0e83133d4d4e4a196dc5dd77d2a8dc77556bcf9c26c260f3e717e749d2a5c703",
+			"size": 43101,
+			"left": 2,
+			"right": 3,
+			"licence": "MIT",
+			"copyright": "Copyright (C) 1996 Yannis Haralambous",
+			"licenceText": "licence:\n    - This file is available under any of these licences:\n    -\n        name: LPPL\n        status: maintained\n        maintainer: Yannis Haralambous\n        version: 1.0\n        or_later: true\n        url: http://www.latex-project.org/lppl/lppl-1-0.html\n    -\n        name: MIT\n        url: https://opensource.org/licences/MIT\n        text: >\n            Permission is hereby granted, free of charge, to any person\n            obtaining a copy of this software and associated documentation\n            files (the \"Software\"), to deal in the Software without\n            restriction, including without limitation the rights to use,\n            copy, modify, merge, publish, distribute, sublicense, and/or sell\n            copies of the Software, and to permit persons to whom the\n            Software is furnished to do so, subject to the following\n            conditions:\n\n            The above copyright notice and this permission notice shall be\n            included in all copies or substantial portions of the Software.\n\n            THE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND,\n            EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES\n            OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND\n            NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT\n            HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,\n            WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING\n            FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR\n            OTHER DEALINGS IN THE SOFTWARE.",
+			"upstream": {
+				"tex": {
+					"url": "https://raw.githubusercontent.com/hyphenation/tex-hyphen/5684c0f51c0b81133db2efbe60a408b4155a3ff5/hyph-utf8/tex/generic/hyph-utf8/patterns/tex/hyph-cy.tex",
+					"sha256": "22c4d441e790c035bd208c4cccbe9a8254ab81c3da0ca0a8b062f8ed34f3e14c"
+				},
+				"patterns": {
+					"url": "https://raw.githubusercontent.com/hyphenation/tex-hyphen/5684c0f51c0b81133db2efbe60a408b4155a3ff5/hyph-utf8/tex/generic/hyph-utf8/patterns/txt/hyph-cy.pat.txt",
+					"sha256": "ba1025eecf4464bd1709d6e4d19c4744fd79d540509ed1dc8d8e00e4b243786c"
+				}
+			}
+		},
+		{
+			"id": "da",
+			"name": "Danish",
+			"tags": [
+				"da"
+			],
+			"file": "hyph-da.txt.gz",
+			"bytes": 3280,
+			"sha256": "271bc105e2c46914d0403edc9c73d319273862bc5fb2c424dc6fe8fd486b156d",
+			"size": 6154,
+			"left": 2,
+			"right": 2,
+			"licence": "MIT",
+			"copyright": "Copyright (C) 1994 Frank Jensen",
+			"licenceText": "licence:\n    - This file is available under any of these licences:\n    -\n        name: LPPL\n        version: 1.3\n        or_later: true\n        url: http://www.latex-project.org/lppl/lppl-1-3.html\n    -\n        name: MIT\n        url: https://opensource.org/licenses/MIT\n        text: >\n            Permission is hereby granted, free of charge, to any person\n            obtaining a copy of this software and associated documentation\n            files (the \"Software\"), to deal in the Software without\n            restriction, including without limitation the rights to use,\n            copy, modify, merge, publish, distribute, sublicense, and/or sell\n            copies of the Software, and to permit persons to whom the\n            Software is furnished to do so, subject to the following\n            conditions:\n\n            The above copyright notice and this permission notice shall be\n            included in all copies or substantial portions of the Software.\n\n            THE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND,\n            EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES\n            OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND\n            NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT\n            HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,\n            WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING\n            FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR\n            OTHER DEALINGS IN THE SOFTWARE.",
+			"upstream": {
+				"tex": {
+					"url": "https://raw.githubusercontent.com/hyphenation/tex-hyphen/5684c0f51c0b81133db2efbe60a408b4155a3ff5/hyph-utf8/tex/generic/hyph-utf8/patterns/tex/hyph-da.tex",
+					"sha256": "23e0a50f0c20d632be06f973e700323463961eac737bb14f6c3787675a4f5575"
+				},
+				"patterns": {
+					"url": "https://raw.githubusercontent.com/hyphenation/tex-hyphen/5684c0f51c0b81133db2efbe60a408b4155a3ff5/hyph-utf8/tex/generic/hyph-utf8/patterns/txt/hyph-da.pat.txt",
+					"sha256": "a093ef99375717fe34d261b05d2fdc8e64f8a9f741578c020204374f4c39a20c"
+				}
+			}
+		},
+		{
+			"id": "de-1996",
+			"name": "German (reformed spelling)",
+			"tags": [
+				"de"
+			],
+			"file": "hyph-de-1996.txt.gz",
+			"bytes": 121018,
+			"sha256": "474cf2fcba80e35fed5292d55fa2da4b7f1c451f0de03cb0712e9a858ce3e2d9",
+			"size": 271681,
+			"left": 2,
+			"right": 2,
+			"licence": "MIT",
+			"copyright": "Copyright (c) 2013-2024 Stephan Hennig, Werner Lemberg, Günter Milde, Sander van Geloven, Georg Pfeiffer, Gisbert W. Selke, Tobias Wendorf, Keno Wehr",
+			"licenceText": "licence:\n    name: MIT\n    url:  https://opensource.org/licenses/mit-license.php\n    text: >\n          Permission is hereby granted, free of charge, to any person\n          obtaining a copy of this software and associated documentation\n          files (the “Software”), to deal in the Software without\n          restriction, including without limitation the rights to use,\n          copy, modify, merge, publish, distribute, sublicense, and/or\n          sell copies of the Software, and to permit persons to whom the\n          Software is furnished to do so, subject to the following\n          conditions:\n\n          The above copyright notice and this permission notice shall be\n          included in all copies or substantial portions of the Software.\n\n          THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND,\n          EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES\n          OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND\n          NONINFRINGEMENT.  IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT\n          HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,\n          WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING\n          FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR\n          OTHER DEALINGS IN THE SOFTWARE.",
+			"upstream": {
+				"tex": {
+					"url": "https://raw.githubusercontent.com/hyphenation/tex-hyphen/5684c0f51c0b81133db2efbe60a408b4155a3ff5/hyph-utf8/tex/generic/hyph-utf8/patterns/tex/hyph-de-1996.tex",
+					"sha256": "374ad1ce3263f8a2791ec070ef9b516c532dae64456f3fb656e617e8ae53a9d3"
+				},
+				"patterns": {
+					"url": "https://raw.githubusercontent.com/hyphenation/tex-hyphen/5684c0f51c0b81133db2efbe60a408b4155a3ff5/hyph-utf8/tex/generic/hyph-utf8/patterns/txt/hyph-de-1996.pat.txt",
+					"sha256": "0570839683e4843a6210b188e2a586fe06f2b6b73952ec8106a634209d735adb"
+				}
+			}
+		},
+		{
+			"id": "el-monoton",
+			"name": "Greek (monotonic)",
+			"tags": [
+				"el"
+			],
+			"file": "hyph-el-monoton.txt.gz",
+			"bytes": 1424,
+			"sha256": "7b16405dc59e66f9b5e7486a0d338993a28ee46dce72db02aee940c94a18eb6a",
+			"size": 3906,
+			"left": 1,
+			"right": 1,
+			"licence": "MIT",
+			"copyright": "Copyright (C) 2008-2011 Dimitrios Filippou",
+			"licenceText": "licence:\n    - This file is available under any of the following licences:\n    -\n        name: LPPL\n        url: https://latex-project.org/lppl/\n    -\n        name: MIT\n        url: https://opensource.org/licenses/MIT",
+			"upstream": {
+				"tex": {
+					"url": "https://raw.githubusercontent.com/hyphenation/tex-hyphen/5684c0f51c0b81133db2efbe60a408b4155a3ff5/hyph-utf8/tex/generic/hyph-utf8/patterns/tex/hyph-el-monoton.tex",
+					"sha256": "a3aa9ecba9c00dd958a2b1d1d3b3aa851701f6d0027ef9cc9d7365e432c5acb0"
+				},
+				"patterns": {
+					"url": "https://raw.githubusercontent.com/hyphenation/tex-hyphen/5684c0f51c0b81133db2efbe60a408b4155a3ff5/hyph-utf8/tex/generic/hyph-utf8/patterns/txt/hyph-el-monoton.pat.txt",
+					"sha256": "ae58ac05e9c88dcfa6a2ebecb2fd6aebb08c3f36c4bf3c4e96984c0a2a71ad2e"
+				}
+			}
+		},
+		{
+			"id": "en-gb",
+			"name": "English (British)",
+			"tags": [
+				"en-gb",
+				"en-au",
+				"en-nz",
+				"en-ie",
+				"en-za",
+				"en-in"
+			],
+			"file": "hyph-en-gb.txt.gz",
+			"bytes": 27891,
+			"sha256": "3be50b49e3f9bf272ef018a2353d11ee9327ccde28e416fe1dc3ca30e18c06fd",
+			"size": 54872,
+			"left": 2,
+			"right": 3,
+			"licence": "MIT",
+			"copyright": "Copyright (C) 1992, 1996, 2005, 2016 Dominik Wujastyk, Graham Toal",
+			"licenceText": "licence:\n    name: MIT\n    url: https://opensource.org/licenses/MIT\n    text: >\n          Permission is hereby granted, free of charge, to any person\n          obtaining a copy of this software and associated documentation\n          files (the “Software”), to deal in the Software without\n          restriction, including without limitation the rights to use,\n          copy, modify, merge, publish, distribute, sublicense, and/or\n          sell copies of the Software, and to permit persons to whom the\n          Software is furnished to do so, subject to the following\n          conditions:\n\n          The above copyright notice and this permission notice shall be\n          included in all copies or substantial portions of the Software.\n\n          THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND,\n          EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES\n          OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND\n          NONINFRINGEMENT.  IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT\n          HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,\n          WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING\n          FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR\n          OTHER DEALINGS IN THE SOFTWARE.",
+			"upstream": {
+				"tex": {
+					"url": "https://raw.githubusercontent.com/hyphenation/tex-hyphen/5684c0f51c0b81133db2efbe60a408b4155a3ff5/hyph-utf8/tex/generic/hyph-utf8/patterns/tex/hyph-en-gb.tex",
+					"sha256": "e95bb4ab350f620c41c231c4785d7bdb4f91949d3e631b30e08b3ead3c340a52"
+				},
+				"patterns": {
+					"url": "https://raw.githubusercontent.com/hyphenation/tex-hyphen/5684c0f51c0b81133db2efbe60a408b4155a3ff5/hyph-utf8/tex/generic/hyph-utf8/patterns/txt/hyph-en-gb.pat.txt",
+					"sha256": "651b89b4a0d4051995db8586e81ab109a4c7395d7706c06483893ebab5af013b"
+				},
+				"exceptions": {
+					"url": "https://raw.githubusercontent.com/hyphenation/tex-hyphen/5684c0f51c0b81133db2efbe60a408b4155a3ff5/hyph-utf8/tex/generic/hyph-utf8/patterns/txt/hyph-en-gb.hyp.txt",
+					"sha256": "947b7b8e76f6a0d8ebe296178ff92ad624e4912ffbaaf59b26f81a395124e366"
+				}
+			}
+		},
+		{
+			"id": "en-us",
+			"name": "English (American)",
+			"tags": [
+				"en"
+			],
+			"file": "hyph-en-us.txt.gz",
+			"bytes": 16893,
+			"sha256": "f4b4d4258b55590da722d95d9d4a9cebaadc3533280c1b690143072d33032635",
+			"size": 31658,
+			"left": 2,
+			"right": 3,
+			"licence": "FSFAP",
+			"copyright": "Copyright (C) 1990, 2004, 2005 Gerard D.C. Kuiken",
+			"licenceText": "licence:\n    text: >\n        Copying and distribution of this file, with or without modification,\n        are permitted in any medium without royalty provided the copyright\n        notice and this notice are preserved.",
+			"upstream": {
+				"tex": {
+					"url": "https://raw.githubusercontent.com/hyphenation/tex-hyphen/5684c0f51c0b81133db2efbe60a408b4155a3ff5/hyph-utf8/tex/generic/hyph-utf8/patterns/tex/hyph-en-us.tex",
+					"sha256": "f4ffcd96c5cbc886bdad23f95dcae8edc3cd3620eae62f7946eceda97c4e68f8"
+				},
+				"patterns": {
+					"url": "https://raw.githubusercontent.com/hyphenation/tex-hyphen/5684c0f51c0b81133db2efbe60a408b4155a3ff5/hyph-utf8/tex/generic/hyph-utf8/patterns/txt/hyph-en-us.pat.txt",
+					"sha256": "0f57318b878b132547ae92db39a6e1d1cf2a05d9008874955d6ecb910007a463"
+				},
+				"exceptions": {
+					"url": "https://raw.githubusercontent.com/hyphenation/tex-hyphen/5684c0f51c0b81133db2efbe60a408b4155a3ff5/hyph-utf8/tex/generic/hyph-utf8/patterns/txt/hyph-en-us.hyp.txt",
+					"sha256": "5e785c27e151f878c312991d937b5582615b77737ab30bac413d5967d6aa21da"
+				}
+			}
+		},
+		{
+			"id": "es",
+			"name": "Spanish",
+			"tags": [
+				"es"
+			],
+			"file": "hyph-es.txt.gz",
+			"bytes": 12960,
+			"sha256": "13f0081801c727b762cc95c5bdc58c3979c66775324bd3111f4d54022d18c8c3",
+			"size": 39990,
+			"left": 2,
+			"right": 2,
+			"licence": "MIT",
+			"copyright": "Copyright (C) 1993, 1997 Javier Bezos, 2001-2019 Javier Bezos, CervanTeX",
+			"licenceText": "licence:\n    name: MIT/X11\n    url: https://opensource.org/licenses/MIT\n    text: >\n        Permission is hereby granted, free of charge, to any person obtaining a copy\n        of this software and associated documentation files (the \"Software\"), to deal\n        in the Software without restriction, including without limitation the rights\n        to use, copy, modify, merge, publish, distribute, sublicense, and/or sell\n        copies of the Software, and to permit persons to whom the Software is\n        furnished to do so, subject to the following conditions:\n\n        The above copyright notice and this permission notice shall be included in\n        all copies or substantial portions of the Software.\n\n        THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\n        IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\n        FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\n        AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\n        LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\n        OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\n        SOFTWARE.",
+			"upstream": {
+				"tex": {
+					"url": "https://raw.githubusercontent.com/hyphenation/tex-hyphen/5684c0f51c0b81133db2efbe60a408b4155a3ff5/hyph-utf8/tex/generic/hyph-utf8/patterns/tex/hyph-es.tex",
+					"sha256": "6a2e5f39a991a23d1cd8a23dbd0f6fe96a9f07561a6695f4f3320f47030e236c"
+				},
+				"patterns": {
+					"url": "https://raw.githubusercontent.com/hyphenation/tex-hyphen/5684c0f51c0b81133db2efbe60a408b4155a3ff5/hyph-utf8/tex/generic/hyph-utf8/patterns/txt/hyph-es.pat.txt",
+					"sha256": "7ae8fa8d6a61ea4111c4a0412d019b62e7c07a62673121d0b711c5bc08d8e00c"
+				}
+			}
+		},
+		{
+			"id": "et",
+			"name": "Estonian",
+			"tags": [
+				"et"
+			],
+			"file": "hyph-et.txt.gz",
+			"bytes": 11720,
+			"sha256": "1ac770a33e2f5164cf51ce01ae03698323308f54f9b22f66be1b4ffb2c46feb3",
+			"size": 23267,
+			"left": 2,
+			"right": 3,
+			"licence": "MIT",
+			"copyright": "Copyright (C) 2004-2015 Enn Saar",
+			"licenceText": "licence:\n    - This file is dual-licensed under both these licences, at your discretion:\n    -\n        name: MIT\n        url: https://opensource.org/licenses/MIT\n        text: >\n            Permission is hereby granted, free of charge, to any person\n            obtaining a copy of this software and associated documentation\n            files (the \"Software\"), to deal in the Software without\n            restriction, including without limitation the rights to use,\n            copy, modify, merge, publish, distribute, sublicense, and/or sell\n            copies of the Software, and to permit persons to whom the\n            Software is furnished to do so, subject to the following\n            conditions:\n\n            The above copyright notice and this permission notice shall be\n            included in all copies or substantial portions of the Software.\n\n            THE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND,\n            EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES\n            OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND\n            NONINFRINGEMENT.  IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT\n            HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,\n            WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING\n            FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR\n            OTHER DEALINGS IN THE SOFTWARE.\n    -\n        name: LPPL\n        version: 1.3\n        or_later: true\n        status: author-maintained\n        url: http://www.latex-project.org/lppl.txt",
+			"upstream": {
+				"tex": {
+					"url": "https://raw.githubusercontent.com/hyphenation/tex-hyphen/5684c0f51c0b81133db2efbe60a408b4155a3ff5/hyph-utf8/tex/generic/hyph-utf8/patterns/tex/hyph-et.tex",
+					"sha256": "617abc528446e33c1690a3d13ae7629292d2f00557b1b4ec96cb2a1d790ac090"
+				},
+				"patterns": {
+					"url": "https://raw.githubusercontent.com/hyphenation/tex-hyphen/5684c0f51c0b81133db2efbe60a408b4155a3ff5/hyph-utf8/tex/generic/hyph-utf8/patterns/txt/hyph-et.pat.txt",
+					"sha256": "e04675ba1851dca1cdaab9fe5cb8dea2f7b04dfc9bf89820fc6bc9ef7eb7fd16"
+				}
+			}
+		},
+		{
+			"id": "fr",
+			"name": "French",
+			"tags": [
+				"fr"
+			],
+			"file": "hyph-fr.txt.gz",
+			"bytes": 3880,
+			"sha256": "2dde0c9e5d0ec1913da288b11a6ac44426c5c46eb6837d70861ecd235182a37f",
+			"size": 9675,
+			"left": 2,
+			"right": 2,
+			"licence": "MIT",
+			"copyright": "Copyright (C) 1994-2002 Daniel Flipo, Bernard Gaulle, 2016 Arthur Reutenauer",
+			"licenceText": "licence:\n    name: MIT\n    url: https://opensource.org/licenses/MIT\n    text: >\n        Permission is hereby granted, free of charge, to any person obtaining\n        a copy of this software and associated documentation files (the\n        \"Software\"), to deal in the Software without restriction, including\n        without limitation the rights to use, copy, modify, merge, publish,\n        distribute, sublicense, and/or sell copies of the Software, and to\n        permit persons to whom the Software is furnished to do so, subject to\n        the following conditions:\n\n        The above copyright notice and this permission notice shall be\n        included in all copies or substantial portions of the Software.\n\n        THE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND,\n        EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF\n        MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND\n        NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS\n        BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN\n        ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN\n        CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\n        SOFTWARE.",
+			"upstream": {
+				"tex": {
+					"url": "https://raw.githubusercontent.com/hyphenation/tex-hyphen/5684c0f51c0b81133db2efbe60a408b4155a3ff5/hyph-utf8/tex/generic/hyph-utf8/patterns/tex/hyph-fr.tex",
+					"sha256": "526cad6fe8f52fcd3caa3fcaf667cb1740cfc14bca198680e00dc343a84594de"
+				},
+				"patterns": {
+					"url": "https://raw.githubusercontent.com/hyphenation/tex-hyphen/5684c0f51c0b81133db2efbe60a408b4155a3ff5/hyph-utf8/tex/generic/hyph-utf8/patterns/txt/hyph-fr.pat.txt",
+					"sha256": "fd40a89e9e8eb0784a0919e50378814843e44afa41c5beaf0a85f6562820f6c2"
+				}
+			}
+		},
+		{
+			"id": "ga",
+			"name": "Irish",
+			"tags": [
+				"ga"
+			],
+			"file": "hyph-ga.txt.gz",
+			"bytes": 20380,
+			"sha256": "33e29282ea93ecc0f288e7e485dbe1b5d5b0ee8cd844f808616aa976e576abb4",
+			"size": 43664,
+			"left": 2,
+			"right": 3,
+			"licence": "MIT",
+			"copyright": "Copyright (C) 2004-2015 Kevin P. Scannell",
+			"licenceText": "licence:\n    - This file available under any of these licences:\n    -\n        name: GPL\n        version: 2\n        or_later: true\n        url: http://www.gnu.org/licenses/gpl-2.0.html\n        text: >\n            This program is free software; you can redistribute it and/or\n            modify it under the terms of the GNU General Public License\n            as published by the Free Software Foundation; either version 2\n            of the License, or (at your option) any later version.\n           \n            This program is distributed in the hope that it will be useful,\n            but WITHOUT ANY WARRANTY; without even the implied warranty of\n            MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the\n            GNU General Public License for more details.\n    -\n        name: MIT\n        url: https://opensource.org/licenses/MIT\n        text: >\n            Permission is hereby granted, free of charge, to any person\n            obtaining a copy of this software and associated documentation\n            files (the \"Software\"), to deal in the Software without\n            restriction, including without limitation the rights to use,\n            copy, modify, merge, publish, distribute, sublicense, and/or sell\n            copies of the Software, and to permit persons to whom the\n            Software is furnished to do so, subject to the following\n            conditions:\n\n            The above copyright notice and this permission notice shall be\n            included in all copies or substantial portions of the Software.\n\n            THE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND,\n            EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES\n            OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND\n            NONINFRINGEMENT.  IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT\n            HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,\n            WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING\n            FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR\n            OTHER DEALINGS IN THE SOFTWARE.",
+			"upstream": {
+				"tex": {
+					"url": "https://raw.githubusercontent.com/hyphenation/tex-hyphen/5684c0f51c0b81133db2efbe60a408b4155a3ff5/hyph-utf8/tex/generic/hyph-utf8/patterns/tex/hyph-ga.tex",
+					"sha256": "7856cb341fd978b910c3807aa6918b39791e2f507d803253daccb5c71bbc02c6"
+				},
+				"patterns": {
+					"url": "https://raw.githubusercontent.com/hyphenation/tex-hyphen/5684c0f51c0b81133db2efbe60a408b4155a3ff5/hyph-utf8/tex/generic/hyph-utf8/patterns/txt/hyph-ga.pat.txt",
+					"sha256": "207d76d5666607cf1ec73b736cc821f8502fc0eeae822e5c460ed5615cb7202b"
+				},
+				"exceptions": {
+					"url": "https://raw.githubusercontent.com/hyphenation/tex-hyphen/5684c0f51c0b81133db2efbe60a408b4155a3ff5/hyph-utf8/tex/generic/hyph-utf8/patterns/txt/hyph-ga.hyp.txt",
+					"sha256": "80e8b010b6615bb43f8759d4339de69e556e249ed606f86c89781324f4ea89ac"
+				}
+			}
+		},
+		{
+			"id": "gl",
+			"name": "Galician",
+			"tags": [
+				"gl"
+			],
+			"file": "hyph-gl.txt.gz",
+			"bytes": 6036,
+			"sha256": "1f2d3fc1a69e1b6fe76119d03ed60df2b65633d12bdbc7fc1c41251bc6f74c25",
+			"size": 20715,
+			"left": 2,
+			"right": 2,
+			"licence": "Unlicense",
+			"copyright": "Copyright (C) 2006, 2007, 2008, 2010 Javier A. Múgica",
+			"licenceText": "licence:\n    name: Unlicence\n    url: https://unlicense.org/",
+			"upstream": {
+				"tex": {
+					"url": "https://raw.githubusercontent.com/hyphenation/tex-hyphen/5684c0f51c0b81133db2efbe60a408b4155a3ff5/hyph-utf8/tex/generic/hyph-utf8/patterns/tex/hyph-gl.tex",
+					"sha256": "a7dbf7fd11c646921a40be561fb1ba362cd79ce93d0099dec9f86676abb5273a"
+				},
+				"patterns": {
+					"url": "https://raw.githubusercontent.com/hyphenation/tex-hyphen/5684c0f51c0b81133db2efbe60a408b4155a3ff5/hyph-utf8/tex/generic/hyph-utf8/patterns/txt/hyph-gl.pat.txt",
+					"sha256": "78185ecaff922fc2fb7c8acc164ed5a303119eb280d4af48745fd7513a628522"
+				}
+			}
+		},
+		{
+			"id": "it",
+			"name": "Italian",
+			"tags": [
+				"it"
+			],
+			"file": "hyph-it.txt.gz",
+			"bytes": 962,
+			"sha256": "b720e071622af50d3174a659bf70bd0289b1825407a74a77df0e4d63932a72d2",
+			"size": 1841,
+			"left": 2,
+			"right": 2,
+			"licence": "MIT",
+			"copyright": "Copyright (C) 2008-2011 Claudio Beccari",
+			"licenceText": "licence:\n    - This file is available under any of the following licences:\n    -\n        name: LPPL\n        version: 1.3\n        or_later: true\n        url: http://www.latex-project.org/lppl.txt\n        status: maintained\n        maintainer: Claudio Beccari, e-mail claudio dot beccari at gmail dot com\n    -\n        name: MIT\n        url: https://opensource.org/licenses/MIT\n        text: >\n            Permission is hereby granted, free of charge, to any person\n            obtaining a copy of this software and associated documentation\n            files (the \"Software\"), to deal in the Software without\n            restriction, including without limitation the rights to use,\n            copy, modify, merge, publish, distribute, sublicense, and/or sell\n            copies of the Software, and to permit persons to whom the\n            Software is furnished to do so, subject to the following\n            conditions:\n\n            The above copyright notice and this permission notice shall be\n            included in all copies or substantial portions of the Software.\n\n            THE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND,\n            EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES\n            OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND\n            NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT\n            HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,\n            WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING\n            FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR\n            OTHER DEALINGS IN THE SOFTWARE.",
+			"upstream": {
+				"tex": {
+					"url": "https://raw.githubusercontent.com/hyphenation/tex-hyphen/5684c0f51c0b81133db2efbe60a408b4155a3ff5/hyph-utf8/tex/generic/hyph-utf8/patterns/tex/hyph-it.tex",
+					"sha256": "6ce56ed6ed2ca7c0688838e366e6595e0429f984f4fc6e96ec045cebb1e76a47"
+				},
+				"patterns": {
+					"url": "https://raw.githubusercontent.com/hyphenation/tex-hyphen/5684c0f51c0b81133db2efbe60a408b4155a3ff5/hyph-utf8/tex/generic/hyph-utf8/patterns/txt/hyph-it.pat.txt",
+					"sha256": "ce650cffad4e81ecaf04591f3274a8ed909e82c587698c55e33b00e2aa7746de"
+				}
+			}
+		},
+		{
+			"id": "ka",
+			"name": "Georgian",
+			"tags": [
+				"ka"
+			],
+			"file": "hyph-ka.txt.gz",
+			"bytes": 6341,
+			"sha256": "42e9a2bd2fcf69b208e9e9b63706905d9092725b657c770b80cf49793f39edb3",
+			"size": 25710,
+			"left": 1,
+			"right": 2,
+			"licence": "MIT",
+			"copyright": "Copyright (C) 2013 Levan Shoshiashvili",
+			"licenceText": "licence:\n    name: MIT\n    url: https://opensource.org/licenses/MIT",
+			"upstream": {
+				"tex": {
+					"url": "https://raw.githubusercontent.com/hyphenation/tex-hyphen/5684c0f51c0b81133db2efbe60a408b4155a3ff5/hyph-utf8/tex/generic/hyph-utf8/patterns/tex/hyph-ka.tex",
+					"sha256": "909f290e3a018e6b28692606ed2c1cf26d64f2d8bb1ec43e6133aba6d4704759"
+				},
+				"patterns": {
+					"url": "https://raw.githubusercontent.com/hyphenation/tex-hyphen/5684c0f51c0b81133db2efbe60a408b4155a3ff5/hyph-utf8/tex/generic/hyph-utf8/patterns/txt/hyph-ka.pat.txt",
+					"sha256": "80eac1aa8ea0e34f9751858b22df777b22c65a6efdd9a92e0d71054d83550cbe"
+				}
+			}
+		},
+		{
+			"id": "kk",
+			"name": "Kazakh",
+			"tags": [
+				"kk"
+			],
+			"file": "hyph-kk.txt.gz",
+			"bytes": 14732,
+			"sha256": "1ea0728a2dc52d60d488af0c4539f50d391a92566118bbebdb474490893717bb",
+			"size": 44116,
+			"left": 2,
+			"right": 2,
+			"licence": "LicenseRef-Public-Domain",
+			"copyright": "Copyright (C) 2010 Mojca Miklavec, 2025 Robert Ermers, 2026 Arthur Rosendahl",
+			"licenceText": "licence:\n    name: Public domain",
+			"upstream": {
+				"tex": {
+					"url": "https://raw.githubusercontent.com/hyphenation/tex-hyphen/5684c0f51c0b81133db2efbe60a408b4155a3ff5/hyph-utf8/tex/generic/hyph-utf8/patterns/tex/hyph-kk.tex",
+					"sha256": "76a394f5b13f60862a9842bd399643af37d386a1737bc42a09439b090a623e19"
+				},
+				"patterns": {
+					"url": "https://raw.githubusercontent.com/hyphenation/tex-hyphen/5684c0f51c0b81133db2efbe60a408b4155a3ff5/hyph-utf8/tex/generic/hyph-utf8/patterns/txt/hyph-kk.pat.txt",
+					"sha256": "736c83bed9314f9793b1436e022030d4c74b7936ddb3cc74bdda28abdc61bc54"
+				}
+			}
+		},
+		{
+			"id": "lt",
+			"name": "Lithuanian",
+			"tags": [
+				"lt"
+			],
+			"file": "hyph-lt.txt.gz",
+			"bytes": 4257,
+			"sha256": "62525e0c887cafc8e9d6c401dff397f456f985adf8067e4b6a47e5947e1b08a4",
+			"size": 8418,
+			"left": 2,
+			"right": 2,
+			"licence": "MIT",
+			"copyright": "Copyright (C) 1992 Sigitas Tolušis, Yannis Haralambous",
+			"licenceText": "licence:\n    name: MIT\n    url: https://opensource.org/licenses/MIT\n    text: >\n        Permission is hereby granted, free of charge, to any person\n        obtaining a copy of this software and associated documentation\n        files (the \"Software\"), to deal in the Software without\n        restriction, including without limitation the rights to use,\n        copy, modify, merge, publish, distribute, sublicense, and/or sell\n        copies of the Software, and to permit persons to whom the\n        Software is furnished to do so, subject to the following\n        conditions:\n\n        The above copyright notice and this permission notice shall be\n        included in all copies or substantial portions of the Software.\n\n        THE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND,\n        EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES\n        OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND\n        NONINFRINGEMENT.  IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT\n        HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,\n        WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING\n        FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR\n        OTHER DEALINGS IN THE SOFTWARE.",
+			"upstream": {
+				"tex": {
+					"url": "https://raw.githubusercontent.com/hyphenation/tex-hyphen/5684c0f51c0b81133db2efbe60a408b4155a3ff5/hyph-utf8/tex/generic/hyph-utf8/patterns/tex/hyph-lt.tex",
+					"sha256": "6162b566620367abb827ba1457567e7a79680596919886a7138e48b346e983d1"
+				},
+				"patterns": {
+					"url": "https://raw.githubusercontent.com/hyphenation/tex-hyphen/5684c0f51c0b81133db2efbe60a408b4155a3ff5/hyph-utf8/tex/generic/hyph-utf8/patterns/txt/hyph-lt.pat.txt",
+					"sha256": "38e3ac46376bc32db4197facffedff4ee442c3871f0244e08cd520d62665d56d"
+				}
+			}
+		},
+		{
+			"id": "mn-cyrl",
+			"name": "Mongolian (Cyrillic)",
+			"tags": [
+				"mn"
+			],
+			"file": "hyph-mn-cyrl.txt.gz",
+			"bytes": 2870,
+			"sha256": "7306587ac22de1a6280097b93b9ad4b6878e2cd5fc5ddddcff50d911e30909e6",
+			"size": 12895,
+			"left": 2,
+			"right": 2,
+			"licence": "MIT",
+			"copyright": "Copyright (C) 2007-2015 by Dorjgotov Batmunkh",
+			"licenceText": "licence:\n    - This file is available under any of the following licenses:\n    -\n        name: LPPL\n        version: 1.3\n        or_later: true\n        url: http://www.latex-project.org/lppl/lppl-1-3.txt\n    -\n       name: MIT\n       url: https://opensource.org/licenses/MIT\n       text: >\n            Permission is hereby granted, free of charge, to any person obtaining a copy\n            of this software and associated documentation files (the \"Software\"), to deal\n            in the Software without restriction, including without limitation the rights\n            to use, copy, modify, merge, publish, distribute, sublicense, and/or sell\n            copies of the Software, and to permit persons to whom the Software is\n            furnished to do so, subject to the following conditions:\n            \n            The above copyright notice and this permission notice shall be included in\n            all copies or substantial portions of the Software.\n            \n            THE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\n            IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\n            FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE\n            AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\n            LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\n            OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN\n            THE SOFTWARE.",
+			"upstream": {
+				"tex": {
+					"url": "https://raw.githubusercontent.com/hyphenation/tex-hyphen/5684c0f51c0b81133db2efbe60a408b4155a3ff5/hyph-utf8/tex/generic/hyph-utf8/patterns/tex/hyph-mn-cyrl.tex",
+					"sha256": "22903e12e25e5348d7c2285f8d3173215540296e1b47f38515936618993988fa"
+				},
+				"patterns": {
+					"url": "https://raw.githubusercontent.com/hyphenation/tex-hyphen/5684c0f51c0b81133db2efbe60a408b4155a3ff5/hyph-utf8/tex/generic/hyph-utf8/patterns/txt/hyph-mn-cyrl.pat.txt",
+					"sha256": "476463ab5b28ad58b080259f85cf8a974a1cda36c0fb379a47fc4c37df00be42"
+				}
+			}
+		},
+		{
+			"id": "nb",
+			"name": "Norwegian Bokmål",
+			"tags": [
+				"nb",
+				"no"
+			],
+			"file": "hyph-nb.txt.gz",
+			"bytes": 95258,
+			"sha256": "14bfe105a5dc79024ca4b19a10f7f97691e6101a6dc576446460d964f341fc24",
+			"size": 192747,
+			"left": 2,
+			"right": 2,
+			"licence": "FSFAP",
+			"copyright": "Copyright (C) 2004, 2005 Rune Kleveland, Ole Michael Selberg; Copyright (C) 2004–2005 Rune Kleveland, Ole Michael Selberg, 2007 Karl Ove Hufthammer",
+			"licenceText": "licence:\n    - text: >\n        Copying and distribution of this file, with or without modification,\n        is permitted in any medium without royalty provided the copyright\n        notice and this notice are preserved.",
+			"upstream": {
+				"tex": {
+					"url": "https://raw.githubusercontent.com/hyphenation/tex-hyphen/5684c0f51c0b81133db2efbe60a408b4155a3ff5/hyph-utf8/tex/generic/hyph-utf8/patterns/tex/hyph-nb.tex",
+					"sha256": "b111264f46d59089d4cf96691c66b637166f5aae5b86719a5b9fe32737cc0169"
+				},
+				"licence": {
+					"url": "https://raw.githubusercontent.com/hyphenation/tex-hyphen/5684c0f51c0b81133db2efbe60a408b4155a3ff5/hyph-utf8/tex/generic/hyph-utf8/patterns/tex/hyph-no.tex",
+					"sha256": "05a2ac5fbf88bdc78c580e5cb8a158e6aa760d13756604f9523aa99feec3ec65"
+				},
+				"patterns": {
+					"url": "https://raw.githubusercontent.com/hyphenation/tex-hyphen/5684c0f51c0b81133db2efbe60a408b4155a3ff5/hyph-utf8/tex/generic/hyph-utf8/patterns/txt/hyph-nb.pat.txt",
+					"sha256": "e080c77da3d0f8de7e464f69082f5e2485e43ed349a2a7018b84e0adef785806"
+				},
+				"exceptions": {
+					"url": "https://raw.githubusercontent.com/hyphenation/tex-hyphen/5684c0f51c0b81133db2efbe60a408b4155a3ff5/hyph-utf8/tex/generic/hyph-utf8/patterns/txt/hyph-nb.hyp.txt",
+					"sha256": "6484bbd793e20a206a2f0d7abfc499a5f8688c54ea7e91ee7af87fba53959d00"
+				}
+			}
+		},
+		{
+			"id": "nl",
+			"name": "Dutch",
+			"tags": [
+				"nl"
+			],
+			"file": "hyph-nl.txt.gz",
+			"bytes": 40434,
+			"sha256": "237d10d423d2b680db0a23c415f0ee653d39f6f0497497028ae92d668587afb0",
+			"size": 83825,
+			"left": 2,
+			"right": 2,
+			"licence": "MIT",
+			"copyright": "Copyright (C) 1996 Piet Tutelaers",
+			"licenceText": "licence:\n    name: MIT\n    url: https://opensource.org/licenses/MIT",
+			"upstream": {
+				"tex": {
+					"url": "https://raw.githubusercontent.com/hyphenation/tex-hyphen/5684c0f51c0b81133db2efbe60a408b4155a3ff5/hyph-utf8/tex/generic/hyph-utf8/patterns/tex/hyph-nl.tex",
+					"sha256": "d21499bfbee53e4d50e867ef92a41fd28b65725d7c91c980e4f8f02889bf6b2a"
+				},
+				"patterns": {
+					"url": "https://raw.githubusercontent.com/hyphenation/tex-hyphen/5684c0f51c0b81133db2efbe60a408b4155a3ff5/hyph-utf8/tex/generic/hyph-utf8/patterns/txt/hyph-nl.pat.txt",
+					"sha256": "ac5795c1d6cd7027e6ec3a9e58e173789f999669e40ffd81755a4db7d3214165"
+				},
+				"exceptions": {
+					"url": "https://raw.githubusercontent.com/hyphenation/tex-hyphen/5684c0f51c0b81133db2efbe60a408b4155a3ff5/hyph-utf8/tex/generic/hyph-utf8/patterns/txt/hyph-nl.hyp.txt",
+					"sha256": "5902ba4d760815a51a972b6d05f514dde1842c16fa2859b907e2d299edbb3299"
+				}
+			}
+		},
+		{
+			"id": "nn",
+			"name": "Norwegian Nynorsk",
+			"tags": [
+				"nn"
+			],
+			"file": "hyph-nn.txt.gz",
+			"bytes": 95258,
+			"sha256": "6f54c4c51be1ef2934e2cee3d7144383e48a6ddd2fa721bf164a6961807a9737",
+			"size": 192747,
+			"left": 2,
+			"right": 2,
+			"licence": "FSFAP",
+			"copyright": "Copyright (C) 2004, 2005 Rune Kleveland, Ole Michael Selberg; Copyright (C) 2007 Karl Ove Hufthammer",
+			"licenceText": "licence:\n    - text: >\n        Copying and distribution of this file, with or without modification,\n        is permitted in any medium without royalty provided the copyright\n        notice and this notice are preserved.",
+			"upstream": {
+				"tex": {
+					"url": "https://raw.githubusercontent.com/hyphenation/tex-hyphen/5684c0f51c0b81133db2efbe60a408b4155a3ff5/hyph-utf8/tex/generic/hyph-utf8/patterns/tex/hyph-nn.tex",
+					"sha256": "f217dca0e815443bc9feac27d9eb48cf795b3f4f222afacf7f87fb6c2b0e196e"
+				},
+				"licence": {
+					"url": "https://raw.githubusercontent.com/hyphenation/tex-hyphen/5684c0f51c0b81133db2efbe60a408b4155a3ff5/hyph-utf8/tex/generic/hyph-utf8/patterns/tex/hyph-no.tex",
+					"sha256": "05a2ac5fbf88bdc78c580e5cb8a158e6aa760d13756604f9523aa99feec3ec65"
+				},
+				"patterns": {
+					"url": "https://raw.githubusercontent.com/hyphenation/tex-hyphen/5684c0f51c0b81133db2efbe60a408b4155a3ff5/hyph-utf8/tex/generic/hyph-utf8/patterns/txt/hyph-nn.pat.txt",
+					"sha256": "e080c77da3d0f8de7e464f69082f5e2485e43ed349a2a7018b84e0adef785806"
+				},
+				"exceptions": {
+					"url": "https://raw.githubusercontent.com/hyphenation/tex-hyphen/5684c0f51c0b81133db2efbe60a408b4155a3ff5/hyph-utf8/tex/generic/hyph-utf8/patterns/txt/hyph-nn.hyp.txt",
+					"sha256": "817480ec60623d17564f87366200de408421ed2ad3d6feba284ff5350ff245e4"
+				}
+			}
+		},
+		{
+			"id": "oc",
+			"name": "Occitan",
+			"tags": [
+				"oc"
+			],
+			"file": "hyph-oc.txt.gz",
+			"bytes": 747,
+			"sha256": "8499c607d323f606ac72f961f48fabc213276fe5ba76c4757a5c6b89ec35f3ea",
+			"size": 1449,
+			"left": 2,
+			"right": 2,
+			"licence": "MIT",
+			"copyright": "Copyright (C) 2016 Claudio Beccari",
+			"licenceText": "licence:\n    - This file is available under any of the following licences:\n    -\n        name: MIT\n        url: https://opensource.org/licenses/MIT\n        text: >\n            Permission is hereby granted, free of charge, to any person\n            obtaining a copy of this software and associated documentation\n            files (the “Software”), to deal in the Software without\n            restriction, including without limitation the rights to use,\n            copy, modify, merge, publish, distribute, sublicense, and/or sell\n            copies of the Software, and to permit persons to whom the\n            Software is furnished to do so, subject to the following\n            conditions:\n\n            The above copyright notice and this permission notice shall be\n            included in all copies or substantial portions of the Software.\n\n            THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND,\n            EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES\n            OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND\n            NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT\n            HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,\n            WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING\n            FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR\n            OTHER DEALINGS IN THE SOFTWARE.\n    -\n        name: LPPL\n        version: 1\n        or_later: true\n        url: https://latex-project.org/lppl/",
+			"upstream": {
+				"tex": {
+					"url": "https://raw.githubusercontent.com/hyphenation/tex-hyphen/5684c0f51c0b81133db2efbe60a408b4155a3ff5/hyph-utf8/tex/generic/hyph-utf8/patterns/tex/hyph-oc.tex",
+					"sha256": "0a968a3588697da7c0ef13f219f45973fc75c08e8ee9253ff1a4bf567167c8fb"
+				},
+				"patterns": {
+					"url": "https://raw.githubusercontent.com/hyphenation/tex-hyphen/5684c0f51c0b81133db2efbe60a408b4155a3ff5/hyph-utf8/tex/generic/hyph-utf8/patterns/txt/hyph-oc.pat.txt",
+					"sha256": "1645fb6be70a2a13c9cee9dbbd4b1e8e18950fd6ebada2e73261c813e3884293"
+				}
+			}
+		},
+		{
+			"id": "pl",
+			"name": "Polish",
+			"tags": [
+				"pl"
+			],
+			"file": "hyph-pl.txt.gz",
+			"bytes": 11185,
+			"sha256": "8dd8b8169cbdcd02a65e0e4f4324647a0aff7ec428c0eee449730eecd8e5fd1b",
+			"size": 30541,
+			"left": 2,
+			"right": 2,
+			"licence": "MIT",
+			"copyright": "Copyright (C) 1987-1995 Hanna Kołodziejska, Bogusław Jackowski, Marek Ryćko",
+			"licenceText": "licence:\n    - This file is made available under any of the following licences:\n    -\n        name: MIT\n        url: https://opensource.org/licenses/MIT\n        text: >\n            Permission is hereby granted, free of charge, to any person\n            obtaining a copy of this software and associated documentation\n            files (the “Software”), to deal in the Software without\n            restriction, including without limitation the rights to use,\n            copy, modify, merge, publish, distribute, sublicense, and/or sell\n            copies of the Software, and to permit persons to whom the\n            Software is furnished to do so, subject to the following\n            conditions:\n\n            The above copyright notice and this permission notice shall be\n            included in all copies or substantial portions of the Software.\n\n            THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND,\n            EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES\n            OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND\n            NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT\n            HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,\n            WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING\n            FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR\n            OTHER DEALINGS IN THE SOFTWARE.\n    - text: >\n        This macro file belongs to the public domain\n        under the conditions specified by the author of TeX:\n\n           “Macro files like PLAIN.TEX should not be changed in any way,\n            except with respect to preloaded fonts,\n            unless the changes are authorized by the authors of the macros.”\n\n                                                  Donald E. Knuth",
+			"upstream": {
+				"tex": {
+					"url": "https://raw.githubusercontent.com/hyphenation/tex-hyphen/5684c0f51c0b81133db2efbe60a408b4155a3ff5/hyph-utf8/tex/generic/hyph-utf8/patterns/tex/hyph-pl.tex",
+					"sha256": "83ddbbd21bc06a44bc4f4a4c49c38782e809cff5f026b764c044daa29e818843"
+				},
+				"patterns": {
+					"url": "https://raw.githubusercontent.com/hyphenation/tex-hyphen/5684c0f51c0b81133db2efbe60a408b4155a3ff5/hyph-utf8/tex/generic/hyph-utf8/patterns/txt/hyph-pl.pat.txt",
+					"sha256": "4b9c3583f176efb76dccee7e630ac7516567abd96dcbc3ebaa2388e795774b48"
+				},
+				"exceptions": {
+					"url": "https://raw.githubusercontent.com/hyphenation/tex-hyphen/5684c0f51c0b81133db2efbe60a408b4155a3ff5/hyph-utf8/tex/generic/hyph-utf8/patterns/txt/hyph-pl.hyp.txt",
+					"sha256": "0e3fd28ea45ec144f5f1438a7bbfb5b55c14dd0cccfefe4ddfbe95fee14d82cf"
+				}
+			}
+		},
+		{
+			"id": "pt",
+			"name": "Portuguese",
+			"tags": [
+				"pt"
+			],
+			"file": "hyph-pt.txt.gz",
+			"bytes": 1030,
+			"sha256": "2b925b3a08e4f67abc2ecfdaf72d546a93bee9aabc8faf30dbf4e8adf95a5a1b",
+			"size": 2129,
+			"left": 2,
+			"right": 3,
+			"licence": "BSD-3-Clause",
+			"copyright": "Copyright (C) 1987, 1994, 1996, 2015 Pedro J. de Rezende, 1996, 2015 J. Joao Dias Almeida, 2024 Leonardo Araujo and Aline Benevides",
+			"licenceText": "licence:\n    name: BSD 3-clause licence\n    url: https://opensource.org/licenses/BSD-3-Clause\n    text: >\n        Redistribution and use in source and binary forms, with or without\n        modification, are permitted provided that the following conditions\n        are met:\n        * Redistributions of source code must retain the above copyright\n          notice, this list of conditions and the following disclaimer.\n        * Redistributions in binary form must reproduce the above copyright\n          notice, this list of conditions and the following disclaimer in the\n          documentation and/or other materials provided with the\n          distribution.\n        * Neither the name of the University of Campinas, of the University\n          of Minho nor the names of its contributors may be used to endorse\n          or promote products derived from this software without specific\n          prior written permission.\n\n        THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS\n        \"AS IS\" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT\n        LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR\n        A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL PEDRO J. DE\n        REZENDE OR J.JOAO DIAS ALMEIDA BE LIABLE FOR ANY DIRECT, INDIRECT,\n        INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,\n        BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS\n        OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED\n        AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT\n        LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY\n        WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE\n        POSSIBILITY OF SUCH DAMAGE.",
+			"upstream": {
+				"tex": {
+					"url": "https://raw.githubusercontent.com/hyphenation/tex-hyphen/5684c0f51c0b81133db2efbe60a408b4155a3ff5/hyph-utf8/tex/generic/hyph-utf8/patterns/tex/hyph-pt.tex",
+					"sha256": "c110a39e501db372d1d755e1c64464321a2efa7d8e9617f66001000389b941f2"
+				},
+				"patterns": {
+					"url": "https://raw.githubusercontent.com/hyphenation/tex-hyphen/5684c0f51c0b81133db2efbe60a408b4155a3ff5/hyph-utf8/tex/generic/hyph-utf8/patterns/txt/hyph-pt.pat.txt",
+					"sha256": "37cab85eee09030843f74d7e34453422b69404491abb0d8fa61ad42539b22ee8"
+				},
+				"exceptions": {
+					"url": "https://raw.githubusercontent.com/hyphenation/tex-hyphen/5684c0f51c0b81133db2efbe60a408b4155a3ff5/hyph-utf8/tex/generic/hyph-utf8/patterns/txt/hyph-pt.hyp.txt",
+					"sha256": "5c093a9e48dc8f87624693f31b8da7d090ed1e6eeb07fce7bcfd5689d7f941a8"
+				}
+			}
+		},
+		{
+			"id": "rm",
+			"name": "Romansh",
+			"tags": [
+				"rm"
+			],
+			"file": "hyph-rm.txt.gz",
+			"bytes": 1090,
+			"sha256": "5d77a34348fce102d369c35aabf6d45590f8c8ea42bf420d7b6f5f88455cc656",
+			"size": 2026,
+			"left": 2,
+			"right": 2,
+			"licence": "MIT",
+			"copyright": "Copyright (C) 2012 Claudio Beccari, 2024 far.ch",
+			"licenceText": "licence:\n    - This file may be distributed under any of the following licences:\n    -\n        name: MIT\n        url: https://opensource.org/licenses/MIT\n        text: >\n            Permission is hereby granted, free of charge, to any person\n            obtaining a copy of this software and associated documentation\n            files (the \"Software\"), to deal in the Software without\n            restriction, including without limitation the rights to use,\n            copy, modify, merge, publish, distribute, sublicense, and/or sell\n            copies of the Software, and to permit persons to whom the\n            Software is furnished to do so, subject to the following\n            conditions:\n\n            The above copyright notice and this permission notice shall be\n            included in all copies or substantial portions of the Software.\n\n            THE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND,\n            EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES\n            OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND\n            NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT\n            HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,\n            WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING\n            FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR\n            OTHER DEALINGS IN THE SOFTWARE.\n    -\n        name: LPPL\n        version: 1.3\n        or_later: true\n        status: maintained\n        maintainer: far.ch, da@far.ch",
+			"upstream": {
+				"tex": {
+					"url": "https://raw.githubusercontent.com/hyphenation/tex-hyphen/5684c0f51c0b81133db2efbe60a408b4155a3ff5/hyph-utf8/tex/generic/hyph-utf8/patterns/tex/hyph-rm.tex",
+					"sha256": "e79c432ffdf1611a23ed9368ee25612a8e7bde78f6cff24a8f6a36abd02440c9"
+				},
+				"patterns": {
+					"url": "https://raw.githubusercontent.com/hyphenation/tex-hyphen/5684c0f51c0b81133db2efbe60a408b4155a3ff5/hyph-utf8/tex/generic/hyph-utf8/patterns/txt/hyph-rm.pat.txt",
+					"sha256": "d0d52b25a0106699a94c7912f63c94b690cdff949452d5bd165e5db8cec16f8d"
+				}
+			}
+		},
+		{
+			"id": "sk",
+			"name": "Slovak",
+			"tags": [
+				"sk"
+			],
+			"file": "hyph-sk.txt.gz",
+			"bytes": 7353,
+			"sha256": "5b2880ce44e1eec77668ae2a9a409a092037c6951074807e46b49e184d1bba56",
+			"size": 19420,
+			"left": 2,
+			"right": 3,
+			"licence": "MIT",
+			"copyright": "Copyright (C) 1992 Jana Chlebíková",
+			"licenceText": "licence:\n    name: MIT\n    url: http://www.opensource.org/licenses/MIT",
+			"upstream": {
+				"tex": {
+					"url": "https://raw.githubusercontent.com/hyphenation/tex-hyphen/5684c0f51c0b81133db2efbe60a408b4155a3ff5/hyph-utf8/tex/generic/hyph-utf8/patterns/tex/hyph-sk.tex",
+					"sha256": "55b51962da5ad3f48ff62007006ecb7768bf2665e407c920e968d08b10b40369"
+				},
+				"patterns": {
+					"url": "https://raw.githubusercontent.com/hyphenation/tex-hyphen/5684c0f51c0b81133db2efbe60a408b4155a3ff5/hyph-utf8/tex/generic/hyph-utf8/patterns/txt/hyph-sk.pat.txt",
+					"sha256": "6d98c4164657cbf2da4dfb7e34cc919a6304aa4416e7bd03807e4f321dfc7102"
+				},
+				"exceptions": {
+					"url": "https://raw.githubusercontent.com/hyphenation/tex-hyphen/5684c0f51c0b81133db2efbe60a408b4155a3ff5/hyph-utf8/tex/generic/hyph-utf8/patterns/txt/hyph-sk.hyp.txt",
+					"sha256": "f5c5f2728787dc00a4a1600437f6dc39d1eaa2b0f33d857f6759a1001befe1cb"
+				}
+			}
+		},
+		{
+			"id": "sl",
+			"name": "Slovenian",
+			"tags": [
+				"sl"
+			],
+			"file": "hyph-sl.txt.gz",
+			"bytes": 3241,
+			"sha256": "d86a962e5e89372906f6a9e47e789648017c4d3f0fd75a22563f23a7e77c6851",
+			"size": 6054,
+			"left": 2,
+			"right": 2,
+			"licence": "MIT",
+			"copyright": "Copyright (C) 1990 Matjaž Vrečko",
+			"licenceText": "licence:\n    - This file is available under any of these licences:\n    -\n        name: LPPL\n        version: 1\n        or_later: true\n        url: http://www.latex-project.org/lppl/lppl-1-0.html\n    -\n        name: MIT\n        url: https://opensource.org/licences/MIT\n        text: >\n            Permission is hereby granted, free of charge, to any person\n            obtaining a copy of this software and associated documentation\n            files (the \"Software\"), to deal in the Software without\n            restriction, including without limitation the rights to use,\n            copy, modify, merge, publish, distribute, sublicense, and/or sell\n            copies of the Software, and to permit persons to whom the\n            Software is furnished to do so, subject to the following\n            conditions:\n\n            The above copyright notice and this permission notice shall be\n            included in all copies or substantial portions of the Software.\n\n            THE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND,\n            EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES\n            OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND\n            NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT\n            HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,\n            WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING\n            FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR\n            OTHER DEALINGS IN THE SOFTWARE.",
+			"upstream": {
+				"tex": {
+					"url": "https://raw.githubusercontent.com/hyphenation/tex-hyphen/5684c0f51c0b81133db2efbe60a408b4155a3ff5/hyph-utf8/tex/generic/hyph-utf8/patterns/tex/hyph-sl.tex",
+					"sha256": "27da982d03b881fe84f1c4fb42ba0948f33e01a3a44eaa5ebd07e01d20c72691"
+				},
+				"patterns": {
+					"url": "https://raw.githubusercontent.com/hyphenation/tex-hyphen/5684c0f51c0b81133db2efbe60a408b4155a3ff5/hyph-utf8/tex/generic/hyph-utf8/patterns/txt/hyph-sl.pat.txt",
+					"sha256": "7a08718a42e1bfbfc0547ec117d82b51c55987c46f7445cf14f1af3cffd69c39"
+				}
+			}
+		},
+		{
+			"id": "sq",
+			"name": "Albanian",
+			"tags": [
+				"sq"
+			],
+			"file": "hyph-sq.txt.gz",
+			"bytes": 764,
+			"sha256": "04470fe4578fe4c5d3e0de65190179a9a912af6c857981422f934d09eeee4585",
+			"size": 1426,
+			"left": 2,
+			"right": 2,
+			"licence": "MIT",
+			"copyright": "Copyright (C) 2020 Claudio Beccari, Sabina Koliqi (C) 2025 Arthur Rosendahl",
+			"licenceText": "licence:\n    name: MIT\n    url:  http://opensource.org/licenses/mit-license.php\n    text: >\n          Permission is hereby granted, free of charge, to any person\n          obtaining a copy of this software and associated documentation\n          files (the “Software”), to deal in the Software without\n          restriction, including without limitation the rights to use,\n          copy, modify, merge, publish, distribute, sublicense, and/or\n          sell copies of the Software, and to permit persons to whom the\n          Software is furnished to do so, subject to the following\n          conditions:\n\n          The above copyright notice and this permission notice shall be\n          included in all copies or substantial portions of the Software.\n\n          THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND,\n          EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES\n          OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND\n          NONINFRINGEMENT.  IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT\n          HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,\n          WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING\n          FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR\n          OTHER DEALINGS IN THE SOFTWARE.",
+			"upstream": {
+				"tex": {
+					"url": "https://raw.githubusercontent.com/hyphenation/tex-hyphen/5684c0f51c0b81133db2efbe60a408b4155a3ff5/hyph-utf8/tex/generic/hyph-utf8/patterns/tex/hyph-sq.tex",
+					"sha256": "632e3c5c02d0f2260b4195e7b6e9f6e348c2deb57c61d2a0dc832209a332ee9f"
+				},
+				"patterns": {
+					"url": "https://raw.githubusercontent.com/hyphenation/tex-hyphen/5684c0f51c0b81133db2efbe60a408b4155a3ff5/hyph-utf8/tex/generic/hyph-utf8/patterns/txt/hyph-sq.pat.txt",
+					"sha256": "b5a91734b8ec76a8178dacd9606c8de67e3acde81e1e0330da16c188937330ad"
+				}
+			}
+		},
+		{
+			"id": "tk",
+			"name": "Turkmen",
+			"tags": [
+				"tk"
+			],
+			"file": "hyph-tk.txt.gz",
+			"bytes": 5584,
+			"sha256": "f949d77eb31d5da363fc966cf74de8ad01a0175b54f46fd0f8f81493a11df2a6",
+			"size": 13247,
+			"left": 2,
+			"right": 2,
+			"licence": "MIT",
+			"copyright": "Copyright (C) 2010-2015 Nazar Annagurban",
+			"licenceText": "licence:\n    name: MIT\n    url: https://opensource.org/licenses/MIT\n    text: >\n        Permission is hereby granted, free of charge, to any person obtaining a copy\n        of this software and associated documentation files (the \"Software\"), to deal\n        in the Software without restriction, including without limitation the rights\n        to use, copy, modify, merge, publish, distribute, sublicense, and/or sell\n        copies of the Software, and to permit persons to whom the Software is\n        furnished to do so, subject to the following conditions:\n        \n        The above copyright notice and this permission notice shall be included in\n        all copies or substantial portions of the Software.\n        \n        THE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\n        IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\n        FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE\n        AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\n        LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\n        OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN\n        THE SOFTWARE.",
+			"upstream": {
+				"tex": {
+					"url": "https://raw.githubusercontent.com/hyphenation/tex-hyphen/5684c0f51c0b81133db2efbe60a408b4155a3ff5/hyph-utf8/tex/generic/hyph-utf8/patterns/tex/hyph-tk.tex",
+					"sha256": "801ef59c14dab4fec0a9ae178632e63b8ef9f0362dcea74f4a3689a4a7908690"
+				},
+				"patterns": {
+					"url": "https://raw.githubusercontent.com/hyphenation/tex-hyphen/5684c0f51c0b81133db2efbe60a408b4155a3ff5/hyph-utf8/tex/generic/hyph-utf8/patterns/txt/hyph-tk.pat.txt",
+					"sha256": "a016ebc51d23accd92d958f58b4c10583432f56ea4e70ab2987bbf517ca8ec50"
+				}
+			}
+		},
+		{
+			"id": "uk",
+			"name": "Ukrainian",
+			"tags": [
+				"uk"
+			],
+			"file": "hyph-uk.txt.gz",
+			"bytes": 13505,
+			"sha256": "3f23a590496d70cc663181fdc2f82086a94e173a66f47a4ddd4877ea29499b44",
+			"size": 43683,
+			"left": 2,
+			"right": 2,
+			"licence": "MIT",
+			"copyright": "Copyright (C) 1998-2001 Maksym Polyakov",
+			"licenceText": "licence:\n    - This file is available under any of the following licences:\n    -\n        name: MIT\n        url: https://opensource.org/licenses/MIT\n    -\n        name: LPPL\n        url: https://latex-project.org/lppl/",
+			"upstream": {
+				"tex": {
+					"url": "https://raw.githubusercontent.com/hyphenation/tex-hyphen/5684c0f51c0b81133db2efbe60a408b4155a3ff5/hyph-utf8/tex/generic/hyph-utf8/patterns/tex/hyph-uk.tex",
+					"sha256": "9f57d9593f4b8a93e033f7f9649aaf3abb49d17117cbd987692b626e13374c55"
+				},
+				"patterns": {
+					"url": "https://raw.githubusercontent.com/hyphenation/tex-hyphen/5684c0f51c0b81133db2efbe60a408b4155a3ff5/hyph-utf8/tex/generic/hyph-utf8/patterns/txt/hyph-uk.pat.txt",
+					"sha256": "48c8640eb073bee879fb3d57cd91068bf70129b0bb8f7f5db6ecf9e056b57d1e"
+				}
+			}
+		}
+	]
+}

@@ -2,7 +2,8 @@ import type { Node } from "prosemirror-model"
 import { findUnsavableBlocks, type DocxEditorSession } from "@filen/office/core/docx/edit"
 import { DocxSaveError, prepareDocxSave, writerProof } from "@filen/office/core/docx/write"
 import type { ConvertEdited } from "@/features/preview/lib/docxLiveFile"
-import { fetchFontAssets, windowServices, type DocxUnlockedDocument } from "@filen/office/dom/docx"
+import { OFFICE_HYPHENATION_URLS } from "virtual:office-hyphenation"
+import { fetchFontAssets, hyphenationLibrary, windowServices, type DocxUnlockedDocument } from "@filen/office/dom/docx"
 import {
 	docxSealer,
 	inThreadEditingHost,
@@ -66,13 +67,16 @@ export interface DocxEditingBackend {
 // opened with its password (docxViewer.tsx): every save is sealed with its key after the zip and checked.
 // `backend`: the proof and writer of a document saved in another format (default: the docx writer's).
 export function docxEditingHost(writeUnlocked = false, encryption?: DocxSealer, backend?: DocxEditingBackend): DocxEditingHost {
-	return inThreadEditingHost(options => windowServices(window, fetchFontAssets(options.fontUrls ?? DOCX_FONT_URLS)), {
-		proof: backend?.proof ?? writerProof,
-		writer: backend?.writer ?? { prepare: prepareDocxSave, zipper },
-		writeUnlocked,
-		...(encryption === undefined ? {} : { encryption }),
-		...(backend?.gate === undefined || backend.gate.length === 0 ? {} : { gate: backend.gate })
-	})
+	return inThreadEditingHost(
+		options => windowServices(window, fetchFontAssets(options.fontUrls ?? DOCX_FONT_URLS), hyphenationLibrary(OFFICE_HYPHENATION_URLS)),
+		{
+			proof: backend?.proof ?? writerProof,
+			writer: backend?.writer ?? { prepare: prepareDocxSave, zipper },
+			writeUnlocked,
+			...(encryption === undefined ? {} : { encryption }),
+			...(backend?.gate === undefined || backend.gate.length === 0 ? {} : { gate: backend.gate })
+		}
+	)
 }
 
 // A password-protected document as the editor holds it: its own copy of the decrypted package (taken from where

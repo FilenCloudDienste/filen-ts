@@ -1,5 +1,5 @@
 import type { FontAssets } from "../../core/fonts/index"
-import type { TextMeasurer } from "../../core/text/index"
+import { HyphenationLibrary, type TextMeasurer } from "../../core/text/index"
 import { canMeasureOffscreen, canvasMeasurer, offscreenMeasurer, type CanvasContextLike } from "../canvasMeasurer"
 import { fontFaceHost, type FontFaceScope } from "../fontFaceHost"
 import { openOdtAsDocx } from "../../core/odt/index"
@@ -62,6 +62,37 @@ export function fetchFontAssets(location: FontLocation, options: { readonly shar
 	}
 }
 
+// Libraries by where their patterns are served, for the realm's lifetime: each language is fetched and compiled
+// once, whatever the number of documents.
+const libraries = new Map<FontLocation, HyphenationLibrary>()
+
+// The bundled hyphenation patterns (paths under assets/hyphenation), fetched on first use from where the app serves
+// them (same origin, like the fonts), as stored: the library inflates them.
+export function hyphenationLibrary(location: FontLocation): HyphenationLibrary {
+	let library = libraries.get(location)
+
+	if (library === undefined) {
+		library = new HyphenationLibrary({
+			async read(file) {
+				const url = fontUrl(location, file)
+				const fetcher: unknown = Reflect.get(globalThis, "fetch")
+
+				if (url === undefined) throw new Error(`Hyphenation patterns ${file} are not served`)
+				if (typeof fetcher !== "function") throw new Error("fetch is not available")
+
+				const response = await (fetcher as Fetch)(url)
+
+				if (!response.ok) throw new Error(`Hyphenation patterns ${file}: HTTP ${response.status}`)
+
+				return new Uint8Array(await response.arrayBuffer())
+			}
+		})
+		libraries.set(location, library)
+	}
+
+	return library
+}
+
 function isFontFaceScope(scope: unknown): scope is FontFaceScope {
 	return (
 		typeof scope === "object" &&
@@ -73,14 +104,16 @@ function isFontFaceScope(scope: unknown): scope is FontFaceScope {
 
 // Services for an engine in a worker: faces registered in the worker's own FontFaceSet (and replayed to
 // the page), widths measured on an OffscreenCanvas. OpenDocument text is translated here, so the translator
-// is in the worker's bundle only.
-export function workerServices(scope: unknown, fonts: FontLocation): DocxEngineServices {
+// is in the worker's bundle only. `hyphenation`: where the hyphenation patterns are served (none: no automatic
+// hyphenation).
+export function workerServices(scope: unknown, fonts: FontLocation, hyphenation?: FontLocation): DocxEngineServices {
 	if (!isFontFaceScope(scope)) throw new Error("The CSS Font Loading API is not available in this worker")
 
 	return {
 		fontHost: fontFaceHost(scope),
 		replayFonts: true,
 		fontAssets: fetchFontAssets(fonts, { shared: true }),
+		...(hyphenation === undefined ? {} : { hyphenation: hyphenationLibrary(hyphenation) }),
 		measurer: offscreenMeasurer(scope),
 		yield: macrotaskYield(),
 		sliceMs: 12,
@@ -108,8 +141,9 @@ function elementMeasurer(scope: unknown): TextMeasurer {
 
 // Services for an engine on the page's own thread (an Expo DOM component, where workers are not
 // assumed): faces go straight into the page's FontFaceSet, so nothing is replayed; layout yields often to
-// keep input responsive. `assets` reads the bundled fonts (on mobile from the app bundle, as bytes).
-export function windowServices(scope: unknown, assets: FontAssets): DocxEngineServices {
+// keep input responsive. `assets` reads the bundled fonts (on mobile from the app bundle, as bytes); `hyphenation`
+// holds the hyphenation patterns (none: no automatic hyphenation).
+export function windowServices(scope: unknown, assets: FontAssets, hyphenation?: HyphenationLibrary): DocxEngineServices {
 	const document: unknown = typeof scope === "object" && scope !== null ? Reflect.get(scope, "document") : undefined
 	const fonts: unknown = typeof document === "object" && document !== null ? Reflect.get(document, "fonts") : undefined
 	const FontFace: unknown = typeof scope === "object" && scope !== null ? Reflect.get(scope, "FontFace") : undefined
@@ -121,6 +155,7 @@ export function windowServices(scope: unknown, assets: FontAssets): DocxEngineSe
 		fontHost: fontFaceHost(fontScope),
 		replayFonts: false,
 		fontAssets: assets,
+		...(hyphenation === undefined ? {} : { hyphenation }),
 		measurer: canMeasureOffscreen(scope) ? offscreenMeasurer(scope) : elementMeasurer(scope),
 		yield: macrotaskYield(),
 		sliceMs: 6

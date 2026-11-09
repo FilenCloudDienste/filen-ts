@@ -68,6 +68,16 @@ export interface LayoutCompat {
 	// Lines measured and spaced, and table borders given room in their rows, as LibreOffice does, asked for by a
 	// document translated from OpenDocument (ODF_LINE_GAP).
 	readonly libreOfficeSpacing: boolean
+	// Automatic hyphenation (w:autoHyphenation) of paragraphs without w:suppressAutoHyphens: the room a line may
+	// leave before its next word is hyphenated (px; w:hyphenationZone, 0.25" when absent, ECMA-376 §17.15.1.53), the
+	// most consecutive lines ending in a hyphen (w:consecutiveHyphenLimit; 0 any), whether words in capitals are
+	// hyphenated (no w:doNotHyphenateCaps), and the fewest characters before and after a break and in a word
+	// hyphenated (ODF_HYPHENATION; undefined: the patterns' own).
+	readonly autoHyphenation: boolean
+	readonly hyphenationZone: number
+	readonly hyphenLimit: number
+	readonly hyphenateCaps: boolean
+	readonly hyphenationChars: readonly [left: number, right: number, word: number] | undefined
 }
 
 // The compatibility settings an OpenDocument translation writes: style:flow-with-text, how tall a line of only
@@ -78,6 +88,18 @@ export const ODF_STYLE_NS = "urn:oasis:names:tc:opendocument:xmlns:style:1.0"
 export const ODF_OBJECT_LINES = "object-line-height"
 export const ODF_PADDING = "paragraph-padding"
 export const ODF_LINE_GAP = "line-gap"
+// "<remain> <push> <word>": fo:hyphenation-remain-char-count, fo:hyphenation-push-char-count and
+// loext:hyphenation-word-char-count, which WordprocessingML has no setting for.
+export const ODF_HYPHENATION = "hyphenation-chars"
+
+function hyphenationChars(settings: DocxSettings): readonly [number, number, number] | undefined {
+	const value = settings.compatSettings.find(setting => setting.name === ODF_HYPHENATION && setting.uri === ODF_STYLE_NS)?.value
+	const counts = value?.split(" ").map(Number)
+
+	if (counts?.length !== 3 || !counts.every(count => Number.isInteger(count) && count >= 0)) return undefined
+
+	return [counts[0] ?? 0, counts[1] ?? 0, counts[2] ?? 0]
+}
 
 // How the layout measures a font's line: Word's way, or LibreOffice's for a translation that asks (ODF_LINE_GAP).
 export function lineSpacingRule(settings: DocxSettings): LineSpacingRule {
@@ -115,7 +137,12 @@ export function layoutCompat(settings: DocxSettings): LayoutCompat {
 			setting => setting.name === ODF_OBJECT_LINES && setting.uri === ODF_STYLE_NS && setting.value === "objects"
 		),
 		joinsBoxes: odfPadding(settings),
-		libreOfficeSpacing: openDocumentTranslation(settings)
+		libreOfficeSpacing: openDocumentTranslation(settings),
+		autoHyphenation: settings.autoHyphenation,
+		hyphenationZone: twips(Math.max(0, settings.hyphenationZone ?? 360)),
+		hyphenLimit: Math.max(0, settings.consecutiveHyphenLimit ?? 0),
+		hyphenateCaps: !settings.doNotHyphenateCaps,
+		hyphenationChars: hyphenationChars(settings)
 	}
 }
 

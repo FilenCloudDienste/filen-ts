@@ -6,6 +6,7 @@ import { tanstackRouter } from "@tanstack/router-plugin/vite"
 import babel from "@rolldown/plugin-babel"
 import { sdkArtifacts, COI_HEADERS, SDK_ARTIFACTS } from "./vite/sdk-artifacts-plugin"
 import { officeFonts, OFFICE_FONTS_BASE } from "./vite/office-fonts-plugin"
+import { officeHyphenation } from "./vite/office-hyphenation-plugin"
 import { spellcheckAssets, SPELLCHECK_BASE } from "./vite/spellcheck-assets-plugin"
 import { SINGLETONS } from "./vite/singletons"
 import { assistantModelDev } from "./vite/assistant-model"
@@ -206,6 +207,7 @@ export default defineConfig(({ mode }) => ({
 		tailwindcss(),
 		sdkArtifacts(),
 		officeFonts(),
+		officeHyphenation(),
 		spellcheckAssets(),
 		assistantModelDev()
 	],
@@ -279,7 +281,7 @@ export default defineConfig(({ mode }) => ({
 	// for the page build: ~70 KB of comments across the workers.
 	worker: {
 		format: "es",
-		plugins: () => [officeFonts()],
+		plugins: () => [officeFonts(), officeHyphenation()],
 		rolldownOptions: { output: { codeSplitting: false, comments: { annotation: false } } }
 	}
 }))

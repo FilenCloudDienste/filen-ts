@@ -12,7 +12,15 @@ import {
 	type SymbolTable
 } from "../../fonts/index"
 import { SYMBOL_FALLBACK_METRICS } from "../../fonts/metrics"
-import { Caps, Strike, verticalAlignment, type StyleTable, type TextStyle } from "../../text/index"
+import {
+	Caps,
+	Strike,
+	hyphenationLanguage,
+	verticalAlignment,
+	type HyphenationLibrary,
+	type StyleTable,
+	type TextStyle
+} from "../../text/index"
 import type { DocxModel } from "../model/index"
 import type { ResolvedBorder, ResolvedRunProps, ResolvedShading } from "../props/types"
 import { shadingColor } from "../theme/color"
@@ -287,16 +295,20 @@ export class RunStyles {
 	// Whether the fill behind the text being laid out (paragraph, cell or table shading) is dark: automatic
 	// text over it is drawn white unless the run's own highlight or shading lies between.
 	darkBackground = false
+	// The patterns of a document that hyphenates automatically: each style's language is loaded as it is made, and
+	// counts as missing (as a font does) until it is, so the text laid out meanwhile is laid out again.
+	readonly hyphenation: HyphenationLibrary | null
 
-	constructor(table: StyleTable, fonts: FontSource, decorations: DecorationTable) {
+	constructor(table: StyleTable, fonts: FontSource, decorations: DecorationTable, hyphenation: HyphenationLibrary | null = null) {
 		this.table = table
 		this.fonts = fonts
 		this.decorations = decorations
+		this.hyphenation = hyphenation
 	}
 
-	// Fonts styles were made without are not loaded yet (requested, or loading).
+	// Fonts styles were made without are not loaded yet (requested, or loading), or hyphenation patterns.
 	get hasMissing(): boolean {
-		return this.missing.length > 0 || this.pending.size > 0
+		return this.missing.length > 0 || this.pending.size > 0 || this.hyphenation?.loading === true
 	}
 
 	// Loads the missing fonts, those requested while loading too; styles needing them can be made afterwards.
@@ -317,9 +329,9 @@ export class RunStyles {
 				void load.then(() => this.loads.delete(load))
 			}
 
-			if (this.loads.size === 0) return
+			if (this.loads.size === 0 && this.hyphenation?.loading !== true) return
 
-			await Promise.all(this.loads)
+			await Promise.all([...this.loads, this.hyphenation?.whenLoaded()])
 		}
 	}
 
@@ -412,6 +424,19 @@ export class RunStyles {
 		return shading ?? this.darkBackground
 	}
 
+	// The hyphenation language of text drawn from `slot` (its w:lang attribute), its patterns requested; 0 when the
+	// document does not hyphenate. Text without a language (Word: its own editing language) is taken as US English.
+	private language(run: ResolvedRunProps, slot: FontSlot): number {
+		if (this.hyphenation === null) return 0
+
+		const tag = slot === "cs" ? run.lang.bidi : slot === "eastAsia" ? run.lang.eastAsia : run.lang.latin
+		const language = hyphenationLanguage(tag ?? "en-US")
+
+		if (language !== 0) this.hyphenation.request(language)
+
+		return language
+	}
+
 	private need(request: FontRequest): boolean {
 		const key = fontKey(request)
 
@@ -502,7 +527,8 @@ export class RunStyles {
 			highlight: decorations.color(run.highlight),
 			shading: decorations.shading(run.shading),
 			border: decorations.border(run.border),
-			marks: emphasisRoom(emphasis)
+			marks: emphasisRoom(emphasis),
+			language: this.language(run, slot)
 		}
 		const id = this.table.add(style)
 

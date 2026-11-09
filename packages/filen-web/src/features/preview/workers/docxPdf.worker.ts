@@ -1,6 +1,7 @@
 import { workerServices } from "@filen/office/dom/docx"
 import { serveDocxPdfWorker } from "@filen/office/dom/docx/pdf"
 import { officePdfFontAssets } from "@/features/office/lib/pdfFontAssets"
+import { OFFICE_HYPHENATION_URLS } from "virtual:office-hyphenation"
 import { OFFICE_FONTS_PATH } from "@/features/preview/lib/officeFonts"
 
 // PDF export of a Word document (lib/docxPdf.ts): one worker per export, ended with it. A file given as bytes is
@@ -17,6 +18,7 @@ serveDocxPdfWorker(
 			})
 		}
 	},
-	input => workerServices(self, input.kind === "bytes" ? (input.fontUrls ?? OFFICE_FONTS_PATH) : OFFICE_FONTS_PATH),
+	input =>
+		workerServices(self, input.kind === "bytes" ? (input.fontUrls ?? OFFICE_FONTS_PATH) : OFFICE_FONTS_PATH, OFFICE_HYPHENATION_URLS),
 	officePdfFontAssets
 )

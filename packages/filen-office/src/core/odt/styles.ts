@@ -7,6 +7,7 @@ import {
 	type OdfStyleSheet,
 	type StyleScope
 } from "../odf/index"
+import { odfHyphenates } from "./hyphenation"
 import { defaultPageRtl } from "./pages"
 import { paragraphProperties, runProperties, setsIndent, type Attributes, type PropsSink } from "./props"
 import type { OdtLossyReason } from "./types"
@@ -224,7 +225,10 @@ export class StyleMapper {
 				marginLeft: 0,
 				indents: false,
 				fontSize: DEFAULT_SIZE,
-				hyphenate: defaults?.properties.get("text")?.attributes.get("fo:hyphenate"),
+				// ODF hyphenates nothing by default (§20.209): the w:autoHyphenation of a document with styles that turn
+				// it on applies to those alone.
+				hyphenate:
+					defaults?.properties.get("text")?.attributes.get("fo:hyphenate") ?? (odfHyphenates(this.sheet) ? "false" : undefined),
 				pageRtl: this.pageRtl,
 				// No writing mode is "page" (§20.404.3): every style inherits the first page's direction from here.
 				bidi: this.pageRtl ? true : undefined

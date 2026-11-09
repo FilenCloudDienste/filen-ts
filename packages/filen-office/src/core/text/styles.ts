@@ -50,6 +50,8 @@ export interface TextStyle {
 	readonly border?: number
 	// Emphasis marks over or under the text. Default none.
 	readonly marks?: MarkRoom
+	// Automatic hyphenation's language: a pattern set (hyphenationLanguage); 0 none. Default 0.
+	readonly language?: number
 }
 
 // Superscript and subscript as Word draws them by default (w:vertAlign): size and baseline shift as
@@ -96,6 +98,8 @@ export class StyleTable {
 	markAbove = new Float64Array(16)
 	markBelow = new Float64Array(16)
 	caps = new Uint8Array(16)
+	// Automatic hyphenation's language (TextStyle.language).
+	language = new Uint8Array(16)
 	// Decoration keys, DECORATION_SLOTS per style: shading, highlight, border, underline, strike.
 	decorations = new Int32Array(16 * DECORATION_SLOTS)
 	underlineWords = new Uint8Array(16)
@@ -161,6 +165,7 @@ export class StyleTable {
 		this.scaleX[id] = scaleX
 		this.shift[id] = style.baselineShift ?? 0
 		this.caps[id] = style.caps ?? Caps.NONE
+		this.language[id] = style.language ?? 0
 
 		const keys = [style.shading ?? 0, style.highlight ?? 0, style.border ?? 0, style.underline ?? 0, style.strike ?? 0]
 
@@ -210,6 +215,7 @@ export class StyleTable {
 			return out
 		}
 		const caps = new Uint8Array(size)
+		const language = new Uint8Array(size)
 		const decorations = new Int32Array(size * DECORATION_SLOTS)
 		const underlineWords = new Uint8Array(size)
 		const decorated = new Uint8Array(size)
@@ -222,6 +228,8 @@ export class StyleTable {
 		this.decorated = decorated
 
 		caps.set(this.caps)
+		language.set(this.language)
+		this.language = language
 		this.fontKey = int32(this.fontKey)
 		this.smallFontKey = int32(this.smallFontKey)
 		this.ascent = float64(this.ascent)

@@ -30,6 +30,7 @@ import {
 	type XmlDocument
 } from "../xml/index"
 import { paragraph } from "./flow"
+import { hyphenationSettings } from "./hyphenation"
 import { imageKind } from "./frames"
 import { GeometryError } from "./geometry"
 import { readContentPrologueSliced } from "../odf/prologue"
@@ -486,6 +487,7 @@ function assemble(
 	const tabStop = parseLength(defaults?.get("style:tab-stop-distance")) ?? (1.25 / 2.54) * 72
 	const footnotePr = notesProperties(translator, "footnote")
 	const endnotePr = notesProperties(translator, "endnote")
+	const hyphenation = hyphenationSettings(translator.sheet)
 
 	// What the common styles, defaults and note settings approximate, past the last block's bookkeeping.
 	translator.takeDocumentLossy()
@@ -498,7 +500,7 @@ function assemble(
 	parts.set(
 		"word/settings.xml",
 		encodeUtf8(
-			`${XML_DECLARATION}<w:settings ${PART_NAMESPACES}><w:defaultTabStop w:val="${Math.max(1, twips(tabStop))}"/>${translator.pages.evenAndOdd ? "<w:evenAndOddHeaders/>" : ""}${footnotePr}${endnotePr}<w:compat><w:doNotUseHTMLParagraphAutoSpacing/><w:compatSetting w:name="compatibilityMode" w:uri="http://schemas.microsoft.com/office/word" w:val="15"/>${floatsOnPage ? `<w:compatSetting w:name="flow-with-text" w:uri="${ODF_STYLE_NS}" w:val="false"/>` : ""}<w:compatSetting w:name="${ODF_OBJECT_LINES}" w:uri="${ODF_STYLE_NS}" w:val="objects"/><w:compatSetting w:name="${ODF_PADDING}" w:uri="${ODF_STYLE_NS}" w:val="borders"/><w:compatSetting w:name="${ODF_LINE_GAP}" w:uri="${ODF_STYLE_NS}" w:val="${gap}"/></w:compat></w:settings>`
+			`${XML_DECLARATION}<w:settings ${PART_NAMESPACES}><w:defaultTabStop w:val="${Math.max(1, twips(tabStop))}"/>${hyphenation.settings}${translator.pages.evenAndOdd ? "<w:evenAndOddHeaders/>" : ""}${footnotePr}${endnotePr}<w:compat><w:doNotUseHTMLParagraphAutoSpacing/><w:compatSetting w:name="compatibilityMode" w:uri="http://schemas.microsoft.com/office/word" w:val="15"/>${floatsOnPage ? `<w:compatSetting w:name="flow-with-text" w:uri="${ODF_STYLE_NS}" w:val="false"/>` : ""}<w:compatSetting w:name="${ODF_OBJECT_LINES}" w:uri="${ODF_STYLE_NS}" w:val="objects"/><w:compatSetting w:name="${ODF_PADDING}" w:uri="${ODF_STYLE_NS}" w:val="borders"/><w:compatSetting w:name="${ODF_LINE_GAP}" w:uri="${ODF_STYLE_NS}" w:val="${gap}"/>${hyphenation.compat}</w:compat></w:settings>`
 		)
 	)
 	override("word/settings.xml", "settings")
