@@ -8,6 +8,7 @@ import {
 	type SheetAxisLayout,
 	type SheetChange,
 	type SheetId,
+	type SheetRange,
 	type SheetRenderStyle
 } from "../../core/sheet/protocol"
 // The axis.fit command's type (erased: no core code comes with it).
@@ -34,33 +35,79 @@ export interface TextMeasure {
 	font(): string
 }
 
-// A row's cells in one tile as a string (column, style and text of each), and whether any wraps: a row is fitted
-// when this changed and it wraps before or after.
-interface RowLook {
-	readonly look: string
-	readonly wraps: boolean
-}
+// The cells of each row in one tile that has wrapped text, as a string (column, style and text of each): a row is
+// fitted when this changed, or when it is there on one side of an edit only. Rows without wrapped text build none.
+function rowLooks(model: SheetGridModel, tile: GridTile): Map<number, string> {
+	const looks = new Map<number, string>()
+	let start = 0
 
-function rowLooks(model: SheetGridModel, tile: GridTile): Map<number, RowLook> {
-	const looks = new Map<number, { look: string; wraps: boolean }>()
+	// Positions ascend row by row, so each row's entries are one run.
+	while (start < tile.count) {
+		const local = Math.floor((tile.positions[start] ?? 0) / TILE_COLS)
+		let end = start
+		let wraps = false
 
-	for (let i = 0; i < tile.count; i++) {
-		const position = tile.positions[i] ?? 0
-		const row = tile.tileRow * TILE_ROWS + Math.floor(position / TILE_COLS)
-		const style = tile.styles[i] ?? 0
-		const text = entryText(tile, i)
-		const part = `${String(position % TILE_COLS)}\u0000${String(style)}\u0000${text}\u0000`
-		const known = looks.get(row)
-		const wraps = text !== "" && wrapsText(model.style(style))
+		for (; end < tile.count && Math.floor((tile.positions[end] ?? 0) / TILE_COLS) === local; end++)
+			if (!wraps && wrapsText(model.style(tile.styles[end] ?? 0)) && entryText(tile, end) !== "") wraps = true
 
-		if (known === undefined) looks.set(row, { look: part, wraps })
-		else {
-			known.look += part
-			known.wraps ||= wraps
+		if (wraps) {
+			let look = ""
+
+			for (let i = start; i < end; i++)
+				look += `${String((tile.positions[i] ?? 0) % TILE_COLS)}\u0000${String(tile.styles[i] ?? 0)}\u0000${entryText(tile, i)}\u0000`
+
+			looks.set(tile.tileRow * TILE_ROWS + local, look)
 		}
+
+		start = end
 	}
 
 	return looks
+}
+
+// The first entry of a tile at or after a position.
+function entryAt(tile: GridTile, position: number): number {
+	let low = 0
+	let high = tile.count
+
+	while (low < high) {
+		const mid = (low + high) >>> 1
+
+		if ((tile.positions[mid] ?? 0) < position) low = mid + 1
+		else high = mid
+	}
+
+	return low
+}
+
+// The merges over each of the rows, for those rows only; null when the sheet has none.
+function mergesByRow(merges: readonly SheetRange[], rows: ReadonlySet<number>): Map<number, SheetRange[]> | null {
+	if (merges.length === 0) return null
+
+	const sorted = Uint32Array.from(rows).sort()
+	const byRow = new Map<number, SheetRange[]>()
+
+	for (const merge of merges) {
+		let low = 0
+		let high = sorted.length
+
+		while (low < high) {
+			const mid = (low + high) >>> 1
+
+			if ((sorted[mid] ?? 0) < merge.startRow) low = mid + 1
+			else high = mid
+		}
+
+		for (let k = low; k < sorted.length && (sorted[k] ?? 0) <= merge.endRow; k++) {
+			const row = sorted[k] ?? 0
+			const known = byRow.get(row)
+
+			if (known === undefined) byRow.set(row, [merge])
+			else known.push(merge)
+		}
+	}
+
+	return byRow
 }
 
 // The columns whose widths differ between two layouts of a sheet's columns; null: every column (the default width).
@@ -86,7 +133,7 @@ export class RowFitter {
 	private readonly model: SheetGridModel
 	private measure: TextMeasure | null = null
 	// Tiles an edit changes, with their rows' looks before it; the rows a column's new width rewraps.
-	private readonly before = new Map<number, Map<number, RowLook>>()
+	private readonly before = new Map<number, Map<number, string>>()
 	private readonly rewrapped = new Map<SheetId, Set<number>>()
 	private scheduled = false
 
@@ -220,16 +267,14 @@ export class RowFitter {
 			const after = rowLooks(this.model, tile)
 			const sheet = tileKeySheet(key)
 
-			for (const row of new Set([...before.keys(), ...after.keys()])) {
-				const was = before.get(row)
-				const now = after.get(row)
-
-				if (was?.look === now?.look || (was?.wraps !== true && now?.wraps !== true)) continue
+			for (const [row, was] of before) {
+				if (after.get(row) === was) continue
 
 				rowsOf(sheet).add(row)
-
-				if (was?.wraps === true) wrappedBefore.add(row)
+				wrappedBefore.add(row)
 			}
+
+			for (const row of after.keys()) if (!before.has(row)) rowsOf(sheet).add(row)
 		}
 
 		for (const [sheet, set] of this.rewrapped) for (const row of set) rowsOf(sheet).add(row)
@@ -282,7 +327,7 @@ export function measureRows(
 
 	if (layout === null || axes === null) return null
 
-	const merges = model.merges(layout)
+	const merges = mergesByRow(model.merges(layout), rows)
 	const base = model.style(0)
 	const tiles = new Map<number, GridTile[]>()
 	let firstCol = Number.POSITIVE_INFINITY
@@ -310,20 +355,19 @@ export function measureRows(
 		if (band === undefined) continue
 
 		let tallest = Number.NaN
+		const local = (row % TILE_ROWS) * TILE_COLS
+		const rowMerges = merges?.get(row)
 
 		for (const tile of band) {
-			for (let i = 0; i < tile.count; i++) {
-				const position = tile.positions[i] ?? 0
+			const end = entryAt(tile, local + TILE_COLS)
 
-				if (Math.floor(position / TILE_COLS) !== row % TILE_ROWS) continue
-
-				const col = tile.tileCol * TILE_COLS + (position % TILE_COLS)
+			for (let i = entryAt(tile, local); i < end; i++) {
+				const col = tile.tileCol * TILE_COLS + ((tile.positions[i] ?? 0) % TILE_COLS)
 				const style = model.style(tile.styles[i] ?? 0)
 
 				// Excel fits no row to a merged cell's text.
 				if (!wrapsText(style)) continue
-				if (merges.some(merge => row >= merge.startRow && row <= merge.endRow && col >= merge.startCol && col <= merge.endCol))
-					continue
+				if (rowMerges?.some(merge => col >= merge.startCol && col <= merge.endCol) === true) continue
 
 				const text = entryText(tile, i)
 

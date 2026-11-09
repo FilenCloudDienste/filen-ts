@@ -541,6 +541,15 @@ export interface EmitContext {
 	table?: ((document: XmlDocument, table: number) => string | undefined) | undefined
 }
 
+// A paragraph's inline content as written: a trailing raw space as text:s, which consumers keep (Part 3 §6.1.2 step 5).
+function paragraphEnd(state: InlineState): string {
+	const at = state.space
+
+	if (!state.trimLeading || at === undefined) return state.out
+
+	return `${state.out.slice(0, at)}<text:s/>${state.out.slice(at + 1)}`
+}
+
 interface InlineState {
 	trimLeading: boolean
 	out: string
@@ -553,6 +562,8 @@ interface InlineState {
 	skip?: number
 	// Notes met where ODF holds none (a ruby's base), written after it.
 	deferred?: string[]
+	// Index in out of the last raw single space; trailing while trimLeading holds (only that space sets it).
+	space?: number
 }
 
 // What span styles give text over one paragraph text base (its properties, size and scope), learned as asked and
@@ -1364,7 +1375,7 @@ export class OdfEmitter {
 		this.content(document, paragraph, styling, state)
 		this.closeSpan(state)
 
-		return state.out
+		return paragraphEnd(state)
 	}
 
 	private closeSpan(state: InlineState): void {
@@ -1410,14 +1421,21 @@ export class OdfEmitter {
 					const tag = instruction === "PAGE" ? "text:page-number" : instruction === "NUMPAGES" ? "text:page-count" : undefined
 
 					if (tag === undefined) {
-						// A cross-reference as the source has it, while its code and result stay.
+						// A cross-reference as the source has it, while its code and result stay; a current date or time
+						// (DATE, TIME) whatever result an update gave it, shown as that.
 						const atom = this.context.atoms.take(this.context.fieldKey(document, at))
+						const live =
+							atom === undefined && (instruction === "DATE" || instruction === "TIME")
+								? this.context.atoms.take(`live:${(document.attribute(at, "w:instr") ?? "").trim().replace(/\s+/gu, " ")}`)
+								: undefined
+						const bytes =
+							atom?.bytes ?? (live === undefined ? undefined : withContent(live.bytes, escText(document.textContent(at))))
 
-						if (atom === undefined) this.refuse("field", `the field ${instruction ?? ""}`)
+						if (bytes === undefined) this.refuse("field", `the field ${instruction ?? ""}`)
 
 						// In the style of its result's first run, as the span around it gave.
 						this.openSpan(document, child(document, at, "r"), styling, state, state.offset++)
-						state.out += atom.bytes
+						state.out += bytes
 						state.trimLeading = false
 						break
 					}
@@ -1523,6 +1541,7 @@ export class OdfEmitter {
 
 					this.content(document, at, styling, deleted)
 					this.closeSpan(deleted)
+					deleted.out = paragraphEnd(deleted)
 
 					const style = this.currentStyle === undefined ? "" : ` text:style-name="${esc(this.currentStyle)}"`
 					const id = this.context.change(
@@ -1983,6 +2002,7 @@ export class OdfEmitter {
 				out += spaces === 1 ? "<text:s/>" : `<text:s text:c="${spaces}"/>`
 				state.trimLeading = false
 			} else {
+				state.space = state.out.length + out.length
 				out += " "
 
 				if (spaces > 1) {
@@ -2636,6 +2656,18 @@ function round(value: number): string {
 
 function attributeOf(document: XmlDocument, node: number, name: string): string | undefined {
 	return node < 0 ? undefined : document.attribute(node, name)
+}
+
+// A source element's markup (its start tag as written) holding `content` in place of what it held.
+function withContent(bytes: string, content: string): string {
+	const close = bytes.indexOf(">")
+	const name = /^<([^\s/>]+)/u.exec(bytes)?.[1]
+
+	if (close < 0 || name === undefined) return bytes
+
+	const start = bytes[close - 1] === "/" ? `${bytes.slice(0, close - 1).trimEnd()}>` : bytes.slice(0, close + 1)
+
+	return `${start}${content}</${name}>`
 }
 
 function sameValue(a: PropertyValue, b: PropertyValue): boolean {

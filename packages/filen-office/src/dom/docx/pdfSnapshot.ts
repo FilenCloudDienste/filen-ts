@@ -27,9 +27,9 @@ import { Emphasis, RunEffect } from "../../core/docx/layout/effects"
 import { symbolTable, type FontManager, type FontRequest, type FontSlot } from "../../core/fonts/index"
 import { FRAGMENT_FLOATS, FRAGMENT_INTS, FRAGMENT_KIND_MASK, FragmentKind, LINE_FLOATS, LINE_INTS, LineInt } from "../../core/text/index"
 import { sliceClock, type Slicing } from "../../core/slicing"
-import { languageTag } from "../../core/docx/forms/dates"
+import { pdfLanguage } from "../../core/docx/pdf/lang"
 import { coreProperties } from "../../core/opc/coreTitle"
-import { bookmarkIndex, paragraphLinks, paragraphOf } from "./links"
+import { bookmarkIndex, paragraphLinks, paragraphOf, sourceLinkMap } from "./links"
 import type { DocxMedia, DocxObjectData } from "./protocol"
 
 // A laid-out document as DocxPdfDocument: what the pages show (the layout's display lists, its styles with the
@@ -562,7 +562,7 @@ export async function docxPdfSnapshot(live: DocxPdfLive, options: DocxPdfSnapsho
 
 			const text = page.sourceTexts[source] ?? ""
 
-			for (const range of paragraphLinks(found.part, found.item, text, view)) {
+			for (const range of paragraphLinks(found.part, found.item, text, view, sourceLinkMap(page, source))) {
 				const target: DocxPdfLinkTarget =
 					range.target.kind === "external"
 						? { kind: "external", href: range.target.href }
@@ -688,25 +688,6 @@ export async function docxPdfSnapshot(live: DocxPdfLive, options: DocxPdfSnapsho
 		lang,
 		title: core.title ?? options.title,
 		properties: { author: core.author, subject: core.subject, keywords: core.keywords }
-	}
-}
-
-// A w:lang value as the well-formed BCP 47 tag (RFC 5646) /Lang must be (ISO 32000-1 §14.9.2, ISO 14289-1 §7.2):
-// a Windows language identifier (ST_Lang's hex form) through its table, Word's sort-order suffix ("es-ES_tradnl")
-// cut, an underscore read as the separator ("en_US"); undefined for anything else, so the next candidate is taken.
-function pdfLanguage(value: string | undefined): string | undefined {
-	if (value === undefined || value.length === 0) return undefined
-
-	const tag = languageTag(value)
-
-	if (tag === undefined) return undefined
-
-	const sorted = /^([A-Za-z]{2,3}(?:-[A-Za-z0-9]{1,8})+)_[A-Za-z]+$/.exec(tag)
-
-	try {
-		return Intl.getCanonicalLocales((sorted?.[1] ?? tag).replaceAll("_", "-"))[0]
-	} catch {
-		return undefined
 	}
 }
 

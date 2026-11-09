@@ -1,5 +1,5 @@
 export { translateOdt, type OdtTranslateOptions } from "./translate"
-export { openOdtAsDocx, type OdtDocxOpenResult } from "./open"
+export { odtGate, openOdtAsDocx, type OdtDocxOpenResult } from "./open"
 export { BodyScanner, OdtScanError, type BodyBatch, type BodyBlock } from "./scan"
 export { MIN_WRAP_WIDTH } from "./frames"
 export type { OdtLossyReason, OdtOpenFailure, OdtOrigin, OdtTranslateResult, OdtTranslation } from "./types"

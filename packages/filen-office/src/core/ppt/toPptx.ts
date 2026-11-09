@@ -30,6 +30,7 @@ import {
 import {
 	adjustGuides,
 	alphaOf,
+	anchorBox,
 	artColorOf,
 	colorRef,
 	colorXml,
@@ -37,12 +38,14 @@ import {
 	EMU_PER_MASTER,
 	flag,
 	hex,
+	i32Value,
 	isConnector,
 	isWordArt,
 	lookup,
 	msoArray,
 	P,
 	presetOf,
+	shapeGeometry,
 	value,
 	type ColorSources,
 	type PptShape,
@@ -51,7 +54,7 @@ import {
 } from "./officeArt"
 import { PptMedia } from "./media"
 import { PptOle } from "./ole"
-import { i32, RT, u16, u32, type PptRecord as PptRecordRef } from "./records"
+import { RT, u16, u32, type PptRecord as PptRecordRef } from "./records"
 import { PptReport, type PptLoss } from "./report"
 import { readSlides, SLIDE_FLAGS, type PptSlide, type PptSlides } from "./slides"
 import {
@@ -310,26 +313,6 @@ interface PartContext {
 	readonly ids: Set<number>
 }
 
-function round(value: number): number {
-	return Math.round(value)
-}
-
-// The rectangle of a shape as DrawingML places it: a rotation of 45°–135° or 225°–315° stores the rectangle turned by
-// 90° about its centre (MS-ODRAW §2.3.18.5), so its width and height swap back.
-function placement(rect: Rect, rotation: number): { readonly x: number; readonly y: number; readonly w: number; readonly h: number } {
-	const width = rect.right - rect.left
-	const height = rect.bottom - rect.top
-	const turned = ((rotation % 360) + 360) % 360
-	const swap = (turned >= 45 && turned < 135) || (turned >= 225 && turned < 315)
-
-	if (!swap) return { x: rect.left, y: rect.top, w: width, h: height }
-
-	const cx = rect.left + width / 2
-	const cy = rect.top + height / 2
-
-	return { x: cx - height / 2, y: cy - width / 2, w: height, h: width }
-}
-
 function rotationOf(chain: PropertyChain): number {
 	const raw = value(chain, P.rotation)
 
@@ -536,123 +519,13 @@ class Converter {
 	// --- Geometry ---
 
 	geometry(shape: PptShape, chain: PropertyChain, context: PartContext): string {
-		const vertices = msoArray(lookup(chain, P.pVertices)?.complex)
+		const geometry = shapeGeometry(chain, shape.shapeType)
 
-		if (vertices !== undefined && vertices.count > 0 && (shape.shapeType === 0 || presetOf(shape.shapeType) === undefined)) {
-			return this.customGeometry(chain, vertices, context)
-		}
+		if (geometry === undefined) return `<a:prstGeom prst="rect"><a:avLst>${adjustGuides(chain, shape.shapeType)}</a:avLst></a:prstGeom>`
 
-		const preset = presetOf(shape.shapeType) ?? "rect"
+		if (geometry.approximations > 0) this.report.note("customGeometry", context.slideNumber, geometry.approximations)
 
-		return `<a:prstGeom prst="${preset}"><a:avLst>${adjustGuides(chain, shape.shapeType)}</a:avLst></a:prstGeom>`
-	}
-
-	private customGeometry(
-		chain: PropertyChain,
-		vertices: { readonly count: number; readonly size: number; readonly data: Uint8Array },
-		context: PartContext
-	): string {
-		const left = i32Value(value(chain, P.geoLeft))
-		const top = i32Value(value(chain, P.geoTop))
-		const right = i32Value(value(chain, P.geoRight) ?? 21600)
-		const bottom = i32Value(value(chain, P.geoBottom) ?? 21600)
-		const width = Math.max(1, right - left)
-		const height = Math.max(1, bottom - top)
-		const points: [number, number][] = []
-
-		for (let k = 0; k < vertices.count; k++) {
-			const at = k * vertices.size
-			const x = vertices.size >= 8 ? i32(vertices.data, at) : (u16(vertices.data, at) << 16) >> 16
-			const y = vertices.size >= 8 ? i32(vertices.data, at + 4) : (u16(vertices.data, at + 2) << 16) >> 16
-
-			// A coordinate that names a guide (0x80000000–0x8000007F) has no value without the guides: the origin.
-			points.push([x >= -0x80000000 && x <= -0x7fffff81 ? left : x, y >= -0x80000000 && y <= -0x7fffff81 ? top : y])
-		}
-
-		const point = (index: number): string => {
-			const [x, y] = points[Math.min(index, points.length - 1)] ?? [left, top]
-
-			return `<a:pt x="${String(round(x - left))}" y="${String(round(y - top))}"/>`
-		}
-		const segments = msoArray(lookup(chain, P.pSegmentInfo)?.complex)
-		const paths: string[] = []
-		let current = ""
-		let next = 0
-		let fill = true
-		let stroke = true
-		const close = (): void => {
-			if (current !== "")
-				paths.push(
-					`<a:path w="${String(width)}" h="${String(height)}"${fill ? "" : ' fill="none"'}${stroke ? "" : ' stroke="false"'}>${current}</a:path>`
-				)
-
-			current = ""
-		}
-
-		if (segments === undefined || segments.size !== 2) {
-			const closed = (value(chain, P.shapePath) ?? 1) % 2 === 1
-
-			current = `<a:moveTo>${point(0)}</a:moveTo>`
-
-			for (let k = 1; k < points.length; k++) current += `<a:lnTo>${point(k)}</a:lnTo>`
-
-			if (closed) current += "<a:close/>"
-
-			close()
-		} else {
-			let commands = 0
-
-			for (let k = 0; k < segments.count; k++) {
-				const info = u16(segments.data, 2 * k)
-				const type = info >>> 13
-				const count = info & 0x1fff
-
-				if (++commands > 100_000) break
-
-				switch (type) {
-					case 0:
-						for (let n = 0; n < Math.max(1, count); n++) current += `<a:lnTo>${point(next++)}</a:lnTo>`
-						break
-					case 1:
-						for (let n = 0; n < Math.max(1, count); n++) {
-							current += `<a:cubicBezTo>${point(next)}${point(next + 1)}${point(next + 2)}</a:cubicBezTo>`
-							next += 3
-						}
-
-						break
-					case 2:
-						current += `<a:moveTo>${point(next++)}</a:moveTo>`
-						break
-					case 3:
-						current += "<a:close/>"
-						break
-					case 4:
-						close()
-						fill = true
-						stroke = true
-						break
-					default: {
-						// §2.2.54: the escape code in bits 8–12, its POINT count in the low byte.
-						const escape = (info >>> 8) & 0x1f
-						const used = info & 0xff
-
-						if (escape === 0x0a) fill = false
-						else if (escape === 0x0b) stroke = false
-						else if (used > 0) {
-							this.report.note("customGeometry", context.slideNumber)
-
-							for (let n = 0; n < used; n++) current += `<a:lnTo>${point(next++)}</a:lnTo>`
-						}
-					}
-				}
-			}
-
-			close()
-		}
-
-		if (paths.length === 0) paths.push(`<a:path w="${String(width)}" h="${String(height)}"/>`)
-
-		return `<a:custGeom><a:avLst/><a:gdLst/><a:ahLst/><a:cxnLst/><a:rect l="0" t="0" r="r" b="b"/><a:pathLst>${paths.join("")}</a:pathLst></a:custGeom>`
+		return geometry.xml
 	}
 
 	// --- Text ---
@@ -784,7 +657,7 @@ class Converter {
 		// A group written without an anchor places its members in its own coordinate space as they are (PowerPoint draws
 		// them there; LibreOffice 7.5 leaves the group out).
 		const rect = (child ? shape.childAnchor : shape.anchor) ?? (shape.children === undefined ? undefined : shape.groupRect)
-		const box = rect === undefined ? undefined : placement(rect, rotation)
+		const box = rect === undefined ? undefined : anchorBox(rect, rotation)
 		const flipH = (shape.flags & 0x40) !== 0
 		const flipV = (shape.flags & 0x80) !== 0
 		const xfrmAttributes = `${rotation === 0 ? "" : ` rot="${String(Math.round((((rotation % 360) + 360) % 360) * 60000))}"`}${flipH ? ' flipH="1"' : ""}${flipV ? ' flipV="1"' : ""}`
@@ -1105,10 +978,6 @@ class Converter {
 
 		return `<p:bg><p:bgPr>${this.fill(chain, scheme, context)}<a:effectLst/></p:bgPr></p:bg>`
 	}
-}
-
-function i32Value(raw: number | undefined): number {
-	return raw === undefined ? 0 : raw | 0
 }
 
 // UTF-16 text of a complex property (names, WordArt text), up to its terminator.

@@ -55,17 +55,19 @@ function fixture(name: string): Uint8Array {
 
 const PICTURE = "http://schemas.openxmlformats.org/drawingml/2006/picture"
 
+const LINKED_BODY =
+	'<w:p><w:hyperlink r:id="rIdLink" w:tooltip="Site"><w:r><w:t>Visit us</w:t></w:r></w:hyperlink><w:r><w:t> and </w:t></w:r>' +
+	'<w:hyperlink w:anchor="target"><w:r><w:t>jump</w:t></w:r></w:hyperlink></w:p>' +
+	'<w:p><w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText xml:space="preserve"> HYPERLINK "mailto:a@b.c" </w:instrText></w:r>' +
+	'<w:r><w:fldChar w:fldCharType="separate"/></w:r><w:r><w:t>Mail</w:t></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r></w:p>' +
+	'<w:p><w:r><w:br w:type="page"/></w:r></w:p>' +
+	'<w:p><w:bookmarkStart w:id="0" w:name="target"/><w:r><w:t>Here</w:t></w:r><w:bookmarkEnd w:id="0"/></w:p>' +
+	'<w:p><w:r><w:drawing><wp:inline><wp:extent cx="952500" cy="476250"/><wp:docPr id="1" name="d"/><a:graphic><a:graphicData uri="' +
+	PICTURE +
+	'"><pic:pic><pic:nvPicPr><pic:cNvPr id="1" name="p"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="rIdImg"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="952500" cy="476250"/></a:xfrm><a:prstGeom prst="rect"/></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>'
+
 const LINKED = buildDocx({
-	body:
-		'<w:p><w:hyperlink r:id="rIdLink" w:tooltip="Site"><w:r><w:t>Visit us</w:t></w:r></w:hyperlink><w:r><w:t> and </w:t></w:r>' +
-		'<w:hyperlink w:anchor="target"><w:r><w:t>jump</w:t></w:r></w:hyperlink></w:p>' +
-		'<w:p><w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText xml:space="preserve"> HYPERLINK "mailto:a@b.c" </w:instrText></w:r>' +
-		'<w:r><w:fldChar w:fldCharType="separate"/></w:r><w:r><w:t>Mail</w:t></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r></w:p>' +
-		'<w:p><w:r><w:br w:type="page"/></w:r></w:p>' +
-		'<w:p><w:bookmarkStart w:id="0" w:name="target"/><w:r><w:t>Here</w:t></w:r><w:bookmarkEnd w:id="0"/></w:p>' +
-		'<w:p><w:r><w:drawing><wp:inline><wp:extent cx="952500" cy="476250"/><wp:docPr id="1" name="d"/><a:graphic><a:graphicData uri="' +
-		PICTURE +
-		'"><pic:pic><pic:nvPicPr><pic:cNvPr id="1" name="p"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="rIdImg"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="952500" cy="476250"/></a:xfrm><a:prstGeom prst="rect"/></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>',
+	body: LINKED_BODY,
 	relationships: [
 		{ id: "rIdLink", type: "hyperlink", target: "https://example.com/a", external: true },
 		{ id: "rIdImg", type: "image", target: "media/image1.png" }
@@ -182,6 +184,76 @@ describe("DocxEngine", () => {
 		expect((await engine.locate("target"))?.page).toBe(1)
 		expect((await engine.media("word/media/image1.png"))?.bytes.length).toBe(IMAGE.length)
 		expect(Array.from(await engine.find("jump"))).toEqual([0, 0, 13, 17])
+	})
+
+	it("answers objects and bookmarks while it prepares the rest, building each object once", async () => {
+		const drawing = /<w:p><w:r><w:drawing>.*<\/w:drawing><\/w:r><\/w:p>/.exec(LINKED_BODY)?.[0] ?? ""
+		const bytes = buildDocx({
+			body:
+				'<w:p><w:bookmarkStart w:id="0" w:name="target"/><w:r><w:t>Here</w:t></w:r><w:bookmarkEnd w:id="0"/></w:p>' +
+				drawing.repeat(6),
+			relationships: [{ id: "rIdImg", type: "image", target: "media/image1.png" }],
+			parts: [{ name: "word/media/image1.png", data: IMAGE }]
+		})
+		const pages: DocxPageData[] = []
+		let final = false
+		let held: (() => void) | undefined
+		let clock = 0
+		const engine = new DocxEngine(
+			bytesSource(bytes),
+			{
+				...services(),
+				sliceMs: 0,
+				now: () => clock++,
+				// The release after the last page stops at its first yield until let go.
+				yield: () => (final ? new Promise<void>(resolve => (held = resolve)) : Promise.resolve())
+			},
+			event => {
+				if (event.type !== "pages") return
+
+				for (const page of event.pages) pages[page.index] = page
+
+				if (event.final) final = true
+			}
+		)
+		const built = new Map<number, number>()
+		const objectData = Reflect.get(engine, "objectData") as (id: number, transfer: ArrayBuffer[]) => Promise<unknown>
+
+		Reflect.set(engine, "objectData", (id: number, transfer: ArrayBuffer[]) => {
+			built.set(id, (built.get(id) ?? 0) + 1)
+
+			return objectData.call(engine, id, transfer)
+		})
+
+		const running = engine.run()
+
+		while (held === undefined) await new Promise(resolve => setTimeout(resolve, 0))
+
+		const ids = pages.flatMap(page => Array.from({ length: page.objectCount }, (_, k) => page.objectInts[k * 3] ?? -1))
+		const stalled = new Promise<"stalled">(resolve => setTimeout(() => resolve("stalled"), 500))
+
+		expect(ids).toHaveLength(6)
+
+		const last = ids[ids.length - 1] ?? -1
+		const answered = await Promise.race([engine.objects([last]), stalled])
+
+		expect(answered === "stalled" ? answered : answered[0]?.kind).toBe("drawing")
+		expect(await Promise.race([engine.locate("target"), stalled])).toEqual({ page: 0, y: expect.any(Number) })
+
+		let done = false
+
+		void running.then(() => (done = true))
+
+		while (!done) {
+			held?.()
+			held = undefined
+			await new Promise(resolve => setTimeout(resolve, 0))
+		}
+
+		expect(Reflect.get(engine, "model")).toBeUndefined()
+		expect(Math.max(...built.values())).toBe(1)
+		expect([...built.keys()].sort((a, b) => a - b)).toEqual([...ids].sort((a, b) => a - b))
+		expect((await engine.objects([last]))[0]?.kind).toBe("drawing")
 	})
 
 	it("keeps the model when asked to", async () => {

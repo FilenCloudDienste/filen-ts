@@ -8,8 +8,10 @@ import {
 	type ByteSink,
 	type PartBytes,
 	type PartChange,
-	ZipArchive
+	ZipArchive,
+	ZipError
 } from "../../opc/index"
+import { metaDate, metaOnSave } from "../../odf/meta"
 import {
 	OdfNs,
 	OdfPackage,
@@ -42,7 +44,7 @@ import {
 import { nativeDeflate, nativeDeflateChunks } from "../../docx/write/zip"
 import { StyleMapper } from "../styles"
 import { configBoolean, translateOdt } from "../translate"
-import { FIELDS_AS_TEXT, PASS_THROUGH_INLINE } from "../translator"
+import { dateCode, FIELDS_AS_TEXT, PASS_THROUGH_INLINE, referenceCode } from "../translator"
 import type { OdtOrigin, OdtTranslation } from "../types"
 import { esc, escText, twips as twipsOf } from "../wml"
 import {
@@ -6484,9 +6486,14 @@ function unescape(value: string): string {
 
 // The field code the translator writes for a field element (its instruction's first word, and for DOCPROPERTY the
 // element it names).
-function fieldCode(name: string): string {
-	if (name === "text:note-ref") return "NOTEREF"
-	if (name === "text:reference-ref" || name === "text:bookmark-ref" || name === "text:sequence-ref") return "REF"
+function fieldCode(name: string, bytes: string): string {
+	if (name === "text:note-ref" || name === "text:reference-ref" || name === "text:bookmark-ref" || name === "text:sequence-ref")
+		return referenceCode(name, startTagAttribute(bytes, "reference-format"))
+	if (name === "text:date" || name === "text:time") {
+		const code = dateCode(name, startTagAttribute(bytes, "fixed"), startTagAttribute(bytes, `${name.slice(5)}-adjust`) !== undefined)
+
+		if (code !== undefined) return code
+	}
 	if (name === "text:bibliography-mark") return "CITATION"
 	if (name === "text:sequence") return "SEQ"
 	if (FIELDS_AS_TEXT.has(name)) return "DOCVARIABLE"
@@ -6504,19 +6511,33 @@ function pairFields(keys: readonly string[], sources: readonly { name: string; b
 		const words = instruction.split(" ")
 		const code = words[0] === "DOCPROPERTY" ? `DOCPROPERTY ${words[1] ?? ""}` : (words[0] ?? "")
 
-		while (at < sources.length && fieldCode(sources[at]?.name ?? "") !== code) at++
+		while (at < sources.length && fieldCode(sources[at]?.name ?? "", sources[at]?.bytes ?? "") !== code) at++
 
 		const source = sources[at++]
 
 		if (source === undefined) return
 
-		pool.add(key, { bytes: source.bytes, used: false })
+		const atom = { bytes: source.bytes, used: false }
+
+		pool.add(key, atom)
+
+		// A date or time shown as the current one is the same field whatever result an update gave it.
+		if (code === "DATE" || code === "TIME") pool.add(`live:${instruction}`, atom)
 	}
 }
 
-// A cross-reference field the translator wrote (REF, NOTEREF), and its key: its code and shown text.
+// An attribute of a source element's start tag by its local name, entities left as written (the values read are
+// enumerations), undefined when absent.
+function startTagAttribute(bytes: string, local: string): string | undefined {
+	const end = bytes.indexOf(">")
+	const tag = end < 0 ? bytes : bytes.slice(0, end)
+
+	return new RegExp(`\\s(?:[A-Za-z0-9_.-]+:)?${local}\\s*=\\s*(?:"([^"]*)"|'([^']*)')`, "u").exec(tag)?.slice(1).find(Boolean)
+}
+
+// A field the translator wrote that holds a source element (cross-references, citations, variables, metadata, dates).
 export function fieldAtom(document: XmlDocument, field: number): boolean {
-	return /^\s*(REF|NOTEREF|CITATION|SEQ|DOCVARIABLE|DOCPROPERTY)\s/u.test(document.attribute(field, "w:instr") ?? "")
+	return /^\s*(REF|PAGEREF|NOTEREF|CITATION|SEQ|DOCVARIABLE|DOCPROPERTY|DATE|TIME)\s/u.test(document.attribute(field, "w:instr") ?? "")
 }
 
 export function fieldKey(document: XmlDocument, field: number): string {
@@ -6819,14 +6840,32 @@ function bufferSink(size: number): ByteSink & { bytes(): Uint8Array } {
 
 // The preview image (Part 2 §3.8): a picture of the first page, which an edit may change and the writer cannot draw.
 const THUMBNAIL = "Thumbnails/thumbnail.png"
+const META = "meta.xml"
 
-// The package with content.xml (and styles.xml) replaced; every other entry copied as stored, mimetype first. A
-// preview image goes: Part 2 §3.8 says a producer should make one of the first page, never that a stale one may
-// stay. The manifest as written (undefined: the source's, copied).
+// The source's meta.xml as a save at `date` leaves it (metaOnSave); undefined: copied as it is (none, or it does not
+// read).
+async function savedMeta(source: OdtSource, date: string): Promise<Uint8Array | undefined> {
+	const entry = source.archive.get(META)
+
+	if (entry === undefined) return undefined
+
+	try {
+		return metaOnSave(await source.archive.read(entry), date)
+	} catch (error) {
+		if (error instanceof ZipError) return undefined
+
+		throw error
+	}
+}
+
+// The package with content.xml (and styles.xml, meta.xml) replaced; every other entry copied as stored, mimetype
+// first. A preview image goes: Part 2 §3.8 says a producer should make one of the first page, never that a stale one
+// may stay. The manifest as written (undefined: the source's, copied).
 async function writePackage(
 	source: OdtSource,
 	content: PartBytes,
 	styles: PartBytes | undefined,
+	meta: Uint8Array | undefined,
 	pictures: ReadonlyMap<string, Uint8Array>,
 	job: RtfJob | undefined
 ): Promise<{ readonly bytes: Uint8Array; readonly manifest: Uint8Array | undefined }> {
@@ -6837,6 +6876,7 @@ async function writePackage(
 	let written: Uint8Array | undefined
 
 	if (styles !== undefined) replace.push({ name: "styles.xml", bytes: styles })
+	if (meta !== undefined) replace.push({ name: META, bytes: meta })
 	if (thumbnail) remove.push(THUMBNAIL)
 
 	if (pictures.size > 0 || thumbnail) {
@@ -6872,6 +6912,7 @@ async function writePackage(
 		source.bytes.length +
 			content.length / 4 +
 			(styles?.length ?? 0) / 4 +
+			(meta?.length ?? 0) / 4 +
 			[...pictures.values()].reduce((sum, picture) => sum + picture.length, 0)
 	)
 	const deflate = nativeDeflate()
@@ -7127,6 +7168,7 @@ async function proveSpans(
 	packaged: Uint8Array,
 	source: ZipArchive,
 	manifest: Uint8Array | undefined,
+	meta: Uint8Array | undefined,
 	job: RtfJob | undefined
 ): Promise<boolean> {
 	if (span.stylesPart === undefined) return false
@@ -7137,8 +7179,9 @@ async function proveSpans(
 
 	const odf = opened.package
 
-	// Every entry but content.xml is the source's as stored (styles.xml, settings...), the manifest the one written
-	// and the preview image gone: the proof reads only content.xml, so what it takes as copied is checked, not assumed.
+	// Every entry but content.xml is the source's as stored (styles.xml, settings...), the manifest and meta.xml the
+	// ones written and the preview image gone: the proof reads only content.xml, so what it takes as copied is checked,
+	// not assumed.
 	const dropped = source.get(THUMBNAIL) === undefined ? 0 : 1
 
 	if (odf.archive.entries.length !== source.entries.length - dropped || odf.archive.get(THUMBNAIL) !== undefined) return false
@@ -7148,6 +7191,12 @@ async function proveSpans(
 
 		if (entry.name === "META-INF/manifest.xml" && manifest !== undefined) {
 			if (!equalBytes(await odf.archive.read(entry), manifest)) return false
+
+			continue
+		}
+
+		if (entry.name === META && meta !== undefined) {
+			if (!equalBytes(await odf.archive.read(entry), meta)) return false
 
 			continue
 		}
@@ -7257,11 +7306,11 @@ function sameAs(written: BytePieces, from: number, chunk: Uint8Array, chunkFrom:
 }
 
 // Writes the edited document as ODT; refuses (OdtWriteRefusal) what it cannot write as edited, and any failure on the
-// way is such a refusal. `turns`: in slices.
+// way is such a refusal. `turns`: in slices. `now`: the save time in epoch milliseconds (meta.xml's dc:date).
 export async function writeOdt(
 	source: OdtSource,
 	edits: OdtEdits,
-	options: { readonly turns?: RtfTurns; readonly spanProof?: boolean } = {}
+	options: { readonly turns?: RtfTurns; readonly spanProof?: boolean; readonly now?: () => number } = {}
 ): Promise<OdtWritten> {
 	try {
 		return await write(source, edits, options)
@@ -7275,9 +7324,17 @@ export async function writeOdt(
 async function write(
 	source: OdtSource,
 	edits: OdtEdits,
-	options: { readonly turns?: RtfTurns; readonly spanProof?: boolean }
+	options: { readonly turns?: RtfTurns; readonly spanProof?: boolean; readonly now?: () => number }
 ): Promise<OdtWritten> {
 	if (edits.parts.size === 0 && (edits.removed?.length ?? 0) === 0) return { bytes: source.bytes, written: 0, rounds: 0 }
+
+	// The package's other entries are copied as stored: META-INF/documentsignatures.xml would keep digests the edit
+	// no longer matches (the document opens view-only: odtGate).
+	if (source.translation.facts.signed)
+		throw new OdtWriteRefusal("signed", "The document is digitally signed: an edit saved in place would invalidate its signatures")
+
+	// Read once, on the first round that writes; every round writes the same.
+	let meta: Promise<Uint8Array | undefined> | undefined
 
 	const job = jobOf(options.turns)
 	let plan = await OdtPlan.create(source, edits, job)
@@ -7330,14 +7387,18 @@ async function write(
 		}
 
 		const { content, styles } = result
-		const { bytes: packaged, manifest } = await writePackage(source, content, styles, result.pictures, job)
+
+		meta ??= savedMeta(source, new Date((options.now ?? Date.now)()).toISOString())
+
+		const metaBytes = await meta
+		const { bytes: packaged, manifest } = await writePackage(source, content, styles, metaBytes, result.pictures, job)
 
 		await turn(job)
 
 		if (
 			span !== undefined &&
 			content instanceof BytePieces &&
-			(await proveSpans(span, expected, content, packaged, source.archive, manifest, job))
+			(await proveSpans(span, expected, content, packaged, source.archive, manifest, metaBytes, job))
 		)
 			return { bytes: packaged, written: result.written, rounds: round, proof: "span", notices }
 
@@ -7393,6 +7454,15 @@ async function expectedManifest(source: OdtSource): Promise<Uint8Array | undefin
 	return encodeUtf8(withoutThumbnail(decodeUtf8(await source.archive.read(entry))))
 }
 
+// The meta.xml a write saved when `written` was dated: the source's as a save then leaves it (undefined: copied).
+async function expectedMeta(source: OdtSource, written: Uint8Array): Promise<Uint8Array | undefined> {
+	const archive = await ZipArchive.open(bytesSource(written))
+	const entry = archive.get(META)
+	const date = entry === undefined ? undefined : metaDate(await archive.read(entry))
+
+	return date === undefined ? undefined : savedMeta(source, date)
+}
+
 // A manifest without the preview image's entry.
 function withoutThumbnail(manifest: string): string {
 	const prefix = /<([A-Za-z0-9_.-]+:)?manifest[\s>]/u.exec(manifest)?.[1] ?? ""
@@ -7425,7 +7495,16 @@ export async function proveOdtWritten(
 	const span =
 		spanned !== undefined &&
 		result.content instanceof BytePieces &&
-		(await proveSpans(spanned, expected, result.content, written, source.archive, await expectedManifest(source), undefined))
+		(await proveSpans(
+			spanned,
+			expected,
+			result.content,
+			written,
+			source.archive,
+			await expectedManifest(source),
+			await expectedMeta(source, written),
+			undefined
+		))
 
 	try {
 		const checked = await verify(expected, result, written, source.archive, undefined)
@@ -7458,7 +7537,8 @@ export async function proveOdt(source: OdtSource, turns?: RtfTurns): Promise<Odt
 
 	if (result.contentChanged) {
 		const { content, styles } = result
-		const { bytes: packaged } = await writePackage(source, content, styles, result.pictures, job)
+		// Gate 1 proves the blocks only: meta.xml is copied.
+		const { bytes: packaged } = await writePackage(source, content, styles, undefined, result.pictures, job)
 
 		await turn(job)
 

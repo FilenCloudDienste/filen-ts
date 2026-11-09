@@ -1,5 +1,5 @@
 import { DecorationTable } from "../../docx/layout/styles"
-import { cssFont, symbolTable, symbolText, verticalMetrics, type FontRequest, type ResolvedFont } from "../../fonts/index"
+import { cssFont, glyphWidthScale, symbolTable, symbolText, verticalMetrics, type FontRequest, type ResolvedFont } from "../../fonts/index"
 import { forEachDrawingSlotRun, type DrawingSlot } from "../../fonts/drawingSlots"
 import { rgba, rgbaAlpha, rgbaHex, type Paint, type Rgba, type Stroke } from "../../drawingml/index"
 import type { DocxLinkTarget, DocxTextStyle } from "../../docx/layout/index"
@@ -400,8 +400,9 @@ class Session {
 			smallCapsFont: cssFont(drawn, size * 0.7),
 			color: fill.kind === "none" && outline === undefined ? "" : rgbaHex(color),
 			kerning,
-			letterSpacing,
-			scaleX: 1,
+			// As the style table stores them.
+			letterSpacing: letterSpacing / glyphWidthScale(drawn),
+			scaleX: glyphWidthScale(drawn),
 			shift,
 			ascent: extents.ascent,
 			descent: extents.descent,

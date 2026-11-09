@@ -3,6 +3,7 @@ import { Readable } from "node:stream"
 import { gunzipSync } from "node:zlib"
 import { describe, expect, it } from "vitest"
 import type { PdfFaceSource } from "../core/fonts/manager"
+import { symbolTable, symbolText } from "../core/fonts/symbols"
 import { PdfName, PdfRaw, PdfRef, type PdfDict, type PdfValue } from "../core/pdfwrite/objects"
 import type { PdfObjectSink, PdfStreamData } from "../core/pdfwrite/writer"
 import { readFace, type PdfByteStream, type PdfFontAssets } from "../core/pdfwrite/fonts/assets"
@@ -214,6 +215,51 @@ describe("PDF font set", () => {
 		expect(await names("漢字")).toEqual(["NotoSansSC-Regular"])
 		expect(await names("한글")).toEqual(["NotoSansKR-Regular"])
 		expect(await names("Hi مرحبا")).toEqual(["Carlito-Regular", "NotoNaskhArabic-Regular"])
+		expect(fonts.missing().size).toBe(0)
+
+		fonts.close()
+	})
+
+	it("draws Wingdings bullets and check boxes from the symbol fallback (w:sym, ECMA-376 17.3.2.41)", async () => {
+		const fonts = new PdfFontSet({ assets })
+		const wingdings = symbolTable("Wingdings")
+
+		if (wingdings === undefined) throw new Error("no Wingdings table")
+
+		// Wingdings 0xA7 ▪, 0xD8 ⮚, 0xFC ✓, 0x76 ❖, 0x71 ❑, then ballot boxes and a check mark after Calibri text.
+		const bullets = symbolText(wingdings, "§Øüvq")
+		const symbols = (await shape(fonts, bullets, { ...CALIBRI, family: "Wingdings" })).runs.map(run => run.font.postScriptName)
+		const mixed = (await shape(fonts, "Done ✓ ☐ ☒ ➢")).runs.map(run => run.font.postScriptName)
+
+		expect(symbols).toContain("NotoSansSymbols2-Regular")
+		expect(mixed[0]).toBe("Carlito-Regular")
+		expect(mixed).toContain("NotoSansSymbols2-Regular")
+		expect(mixed).not.toContain("NotoSansMath-Regular")
+		expect(fonts.missing().size).toBe(0)
+
+		fonts.close()
+	})
+
+	it("draws math operators of a Cambria Math equation from the math fallback (ECMA-376 22.1)", async () => {
+		const fonts = new PdfFontSet({ assets })
+		const math = { ...CALIBRI, family: "Cambria Math" }
+		const names = (await shape(fonts, "∀x∈A ∃y⊂B ⇒ x≤y ⟹ ⨁ 𝑥", math)).runs.map(run => run.font.postScriptName)
+
+		expect(names).toContain("NotoSansMath-Regular")
+		expect(names).not.toContain("NotoSansSymbols2-Regular")
+		expect(fonts.missing().size).toBe(0)
+
+		fonts.close()
+	})
+
+	it("loads no symbol or math face for symbols the text face has", async () => {
+		const fonts = new PdfFontSet({ assets })
+
+		await shape(fonts, "Hello")
+
+		const text = "• → ↔ ≤ ≠ ∑ √ ∞ ©"
+
+		expect(fonts.prepare(text, 0, text.length, CALIBRI)).toBeUndefined()
 		expect(fonts.missing().size).toBe(0)
 
 		fonts.close()

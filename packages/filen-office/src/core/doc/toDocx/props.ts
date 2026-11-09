@@ -338,8 +338,19 @@ export function runProperties(props: DocChar, base: DocChar, context: PropsConte
 	return out.join("")
 }
 
-// sprmPJc values → ST_Jc (transitional names).
-const JUSTIFICATION = ["left", "center", "right", "both", "distribute", "mediumKashida", "numTab", "lowKashida", "thaiDistribute"]
+// sprmPJc values → ST_Jc (transitional names). 6 ("paragraph is indented") has no ST_Jc name; numTab stands in.
+const JUSTIFICATION = [
+	"left",
+	"center",
+	"right",
+	"both",
+	"distribute",
+	"mediumKashida",
+	"numTab",
+	"highKashida",
+	"lowKashida",
+	"thaiDistribute"
+]
 const TAB_ALIGN = ["left", "center", "right", "decimal", "bar", "left", "num", "left"]
 const TAB_LEADER = ["none", "dot", "hyphen", "underscore", "heavy", "middleDot", "none", "none"]
 

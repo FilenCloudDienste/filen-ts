@@ -407,6 +407,9 @@ async function translate(odf: OdfPackage, options: OdtTranslateOptions): Promise
 
 	const endState = translator.blockState()
 
+	// Comment ranges of the body with no office:annotation-end end with it.
+	translator.closeOpenAnnotations(body)
+
 	// Frames anchored to the page with no paragraph after them.
 	if (translator.pendingAnchors.length > 0) {
 		body.add(paragraph("", "", translator.pendingAnchors.join("")))

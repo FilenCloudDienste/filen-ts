@@ -2,7 +2,7 @@ import * as pdfjs from "pdfjs-dist/legacy/build/pdf.mjs"
 import { describe, expect, it } from "vitest"
 import { ByteWriter } from "../core/pdfwrite/bytes"
 import { preparePassword } from "../core/pdfwrite/crypto"
-import { ByteSource, readJpeg } from "../core/pdfwrite/images"
+import { ByteSource, platformImageDecoder, readJpeg } from "../core/pdfwrite/images"
 import { serialize } from "../core/pdfwrite/objects"
 import { PdfWriteError, PdfWriter, pdfName, type PdfBlobLike, type PdfImageDecoder, type PdfTextRun } from "../core/pdfwrite"
 import { buildSyntheticPdf, encodePng, inflatedStreams, JPEG_32x24, latin1, naturalWidth, StubFont, TestDecoder } from "./pdfWriteFixtures"
@@ -195,6 +195,59 @@ describe("PDF writer", () => {
 		])
 
 		expect(await readJpeg(new ByteSource(bytes))).toMatchObject({ orientation: 6, width: 20, height: 10, passthrough: true })
+	})
+
+	it("keeps a decoded EXIF JPEG upright once: oriented pixels draw at orientation 1, stored pixels keep the tag", async () => {
+		// The orientation-6 JPEG above (20 x 10 stored), recoloured so it is decoded instead of passed through.
+		const tiff = [0x4d, 0x4d, 0, 0x2a, 0, 0, 0, 8, 0, 1, 0x01, 0x12, 0, 3, 0, 0, 0, 1, 0, 6, 0, 0, 0, 0, 0, 0, 0, 0]
+		const app1 = [0x45, 0x78, 0x69, 0x66, 0, 0, ...tiff]
+		const sof = [0xff, 0xc0, 0, 17, 8, 0, 10, 0, 20, 3, ...Array.from({ length: 9 }, () => 1)]
+		const bytes = Uint8Array.from([0xff, 0xd8, 0xff, 0xe1, 0, app1.length + 2, ...app1, ...sof])
+		const transform = (rgba: Uint8Array): void => void rgba.fill(128, 0, 1)
+		// As createImageBitmap returns it: EXIF applied, so 10 x 20.
+		const oriented: PdfImageDecoder = {
+			decode: () => Promise.resolve({ width: 10, height: 20, rgba: new Uint8Array(10 * 20 * 4).fill(255), oriented: true })
+		}
+		const stored: PdfImageDecoder = {
+			decode: () => Promise.resolve({ width: 20, height: 10, rgba: new Uint8Array(20 * 10 * 4).fill(255) })
+		}
+		const upright = await PdfWriter.create({ deterministic: true, deflate: null, decoder: oriented })
+		const kept = await PdfWriter.create({ deterministic: true, deflate: null, decoder: stored })
+
+		expect(await upright.image({ data: bytes, transform })).toMatchObject({ width: 10, height: 20, orientation: 1 })
+		expect(await kept.image({ data: bytes, transform })).toMatchObject({ width: 20, height: 10, orientation: 6 })
+	})
+
+	it("reports the platform decoder's pixels as already oriented", async () => {
+		const scope = globalThis as { createImageBitmap?: unknown; OffscreenCanvas?: unknown }
+		const saved = { createImageBitmap: scope.createImageBitmap, OffscreenCanvas: scope.OffscreenCanvas }
+
+		scope.createImageBitmap = () => Promise.resolve({ width: 2, height: 3, close: () => undefined })
+		scope.OffscreenCanvas = class {
+			width: number
+			height: number
+
+			constructor(width: number, height: number) {
+				this.width = width
+				this.height = height
+			}
+
+			getContext(): object {
+				return {
+					drawImage: () => undefined,
+					getImageData: (_x: number, _y: number, w: number, h: number) => ({ data: new Uint8ClampedArray(w * h * 4) })
+				}
+			}
+		}
+
+		try {
+			const decoder = platformImageDecoder()
+
+			expect(await decoder?.decode(new Uint8Array(4), "jpeg", 100)).toMatchObject({ width: 2, height: 3, oriented: true })
+		} finally {
+			scope.createImageBitmap = saved.createImageBitmap
+			scope.OffscreenCanvas = saved.OffscreenCanvas
+		}
 	})
 
 	it("draws display-list paths: quadratics as the same cubic, points through the matrix, even-odd fill", async () => {

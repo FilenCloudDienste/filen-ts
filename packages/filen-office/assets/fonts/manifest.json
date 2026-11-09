@@ -1,5 +1,5 @@
 {
-	"comment": "Bundled substitutes for document fonts, each family with its licence file. Arimo, Tinos, Cousine, Gelasio and Selawik are the upstream WOFF2 files unchanged; Carlito and Caladea are published upstream only as TTF and were compressed to WOFF2 here (see each face's conversion). Apps serve or read the files by their path here and must ship each family's licence file with them. Regenerate src/core/fonts/tables.generated.ts with `pnpm run generate:fonts` after any change. Each family's \"pdf\" faces are TrueType files for PDF embedding, gzip-compressed and fetched only when a PDF is exported (upstream TTFs, or static instances of the variable fonts); \"fallbacks\" are Noto families fetched only when exported text is in a script the bundled families lack. Regenerate src/core/pdfwrite/fonts/faces.generated.ts with `pnpm run generate:pdf-fonts` after any change to those.",
+	"comment": "Bundled substitutes for document fonts, each family with its licence file. Arimo, Tinos, Cousine, Gelasio and Selawik are the upstream WOFF2 files unchanged; Carlito and Caladea are published upstream only as TTF and were compressed to WOFF2 here (see each face's conversion). Apps serve or read the files by their path here and must ship each family's licence file with them. Regenerate src/core/fonts/tables.generated.ts with `pnpm run generate:fonts` after any change. Each family's \"pdf\" faces are TrueType files for PDF embedding, gzip-compressed and fetched only when a PDF is exported (upstream TTFs, or static instances of the variable fonts); \"fallbacks\" are Noto families fetched only when exported text is in a script, or uses symbols or math operators, the bundled families lack. Regenerate src/core/pdfwrite/fonts/faces.generated.ts with `pnpm run generate:pdf-fonts` after any change to those.",
 	"families": [
 		{
 			"id": "carlito",
@@ -2106,6 +2106,72 @@
 						"sha256": "194018e6b2b293a7964f037b25c0249ce1418bc9ab3c971060a03aa57861e252"
 					},
 					"conversion": "Static instance at wght=400 of the upstream variable font, made with fontTools 4.60.1 varLib.instancer (updateFontNames, timestamps kept) with PostScript name NotoSansKR-Regular, then gzip-compressed (level 9, no name or time stamp). Generating an instance modifies the font (a Modified Version under the OFL); the family has no Reserved Font Name in its OFL.txt."
+				}
+			]
+		},
+		{
+			"id": "noto-sans-symbols-2",
+			"name": "Noto Sans Symbols 2",
+			"version": "2.008",
+			"scripts": ["Zsym"],
+			"license": "OFL-1.1",
+			"licenseFile": "noto/noto-sans-symbols-2/OFL.txt",
+			"reservedFontName": null,
+			"source": "https://github.com/google/fonts/tree/45e3d5269e4a17d823f6d84470bc084dc5ae46f6/ofl/notosanssymbols2",
+			"commit": "45e3d5269e4a17d823f6d84470bc084dc5ae46f6",
+			"faces": [
+				{
+					"file": "noto/noto-sans-symbols-2/NotoSansSymbols2-Regular.ttf.gz",
+					"weight": 400,
+					"italic": false,
+					"bytes": 535467,
+					"sha256": "6df8c983b114ea4863ad184e94d35a3c005abf829cb920401dfbc49614dfb746",
+					"ttf": {
+						"bytes": 1233128,
+						"sha256": "7d5fb73b7ca67a6798101741f5d280a3d016a56a197afcd4199dbb57b4b82a21",
+						"postScriptName": "NotoSansSymbols2-Regular",
+						"version": "Version 2.008; ttfautohint (v1.8.4.7-5d5b)",
+						"fsType": 0,
+						"glyphs": 2976
+					},
+					"upstream": {
+						"url": "https://raw.githubusercontent.com/google/fonts/45e3d5269e4a17d823f6d84470bc084dc5ae46f6/ofl/notosanssymbols2/NotoSansSymbols2-Regular.ttf",
+						"sha256": "7d5fb73b7ca67a6798101741f5d280a3d016a56a197afcd4199dbb57b4b82a21"
+					},
+					"conversion": "Upstream TTF unchanged, gzip-compressed (level 9, no name or time stamp) for transfer; the font data is not modified."
+				}
+			]
+		},
+		{
+			"id": "noto-sans-math",
+			"name": "Noto Sans Math",
+			"version": "3.000",
+			"scripts": ["Zmth"],
+			"license": "OFL-1.1",
+			"licenseFile": "noto/noto-sans-math/OFL.txt",
+			"reservedFontName": null,
+			"source": "https://github.com/google/fonts/tree/45e3d5269e4a17d823f6d84470bc084dc5ae46f6/ofl/notosansmath",
+			"commit": "45e3d5269e4a17d823f6d84470bc084dc5ae46f6",
+			"faces": [
+				{
+					"file": "noto/noto-sans-math/NotoSansMath-Regular.ttf.gz",
+					"weight": 400,
+					"italic": false,
+					"bytes": 481428,
+					"sha256": "7477333a44fc39c8432ab811a4c35fbccff446eccab415b9771d5144658b4fce",
+					"ttf": {
+						"bytes": 1015396,
+						"sha256": "3f495fe933c06786e4d5f6d86b8ee70b6753a68ee3b9d87528726de0f6e2c47d",
+						"postScriptName": "NotoSansMath-Regular",
+						"version": "Version 3.000; ttfautohint (v1.8.4.7-5d5b)",
+						"fsType": 0,
+						"glyphs": 5130
+					},
+					"upstream": {
+						"url": "https://raw.githubusercontent.com/google/fonts/45e3d5269e4a17d823f6d84470bc084dc5ae46f6/ofl/notosansmath/NotoSansMath-Regular.ttf",
+						"sha256": "3f495fe933c06786e4d5f6d86b8ee70b6753a68ee3b9d87528726de0f6e2c47d"
+					},
+					"conversion": "Upstream TTF unchanged, gzip-compressed (level 9, no name or time stamp) for transfer; the font data is not modified."
 				}
 			]
 		}

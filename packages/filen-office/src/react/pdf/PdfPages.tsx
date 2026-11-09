@@ -11,8 +11,11 @@ import {
 	resolveDestination,
 	PDF_PAGE_EVICT_MARGIN_PX,
 	PDF_PAGE_RENDER_MARGIN_PX,
+	PDF_ZOOM_RENDER_DELAY_MS,
+	type PdfDestination,
 	type PdfPage as PdfPageProxy,
-	type PdfRect
+	type PdfRect,
+	type PdfRenderTask
 } from "../../dom/pdf/index"
 import { paintMatches } from "./highlight"
 import type { PdfDomDocument, PdfJsDom, PdfTextLayer } from "./types"
@@ -20,7 +23,9 @@ import type { PdfDomDocument, PdfJsDom, PdfTextLayer } from "./types"
 // The page column, unstyled: every page gets a sized wrapper at once (so the scroll height is right), and only
 // pages near the view hold a canvas, a text layer and links. A page renders once it nears the view and releases
 // its canvas, text layer and pdf.js resources once it is far away again, so a long document never holds more
-// than a screenful or so of bitmaps. Two IntersectionObservers serve all pages.
+// than a screenful or so of bitmaps. Two IntersectionObservers serve all pages. A page reads its pdf.js page only
+// once it nears the view (a long document opens without a worker round trip per page); until then it is sized
+// from page 1, as pdf.js's own viewer does.
 
 // The largest canvas a page allocates: WebKit refuses canvases over 16,777,216 pixels, and a large page zoomed
 // in on a high-density screen would pass that. Above it the page renders at a lower pixel ratio.
@@ -30,7 +35,9 @@ export const PDF_MAX_PAGE_CANVAS_BYTES = 64 * 1024 * 1024
 export interface PdfPagesClassNames {
 	readonly column?: string
 	readonly page?: string
-	readonly canvas?: (rendered: boolean) => string
+	// `painted`: the canvas holds a bitmap to show (after a zoom, the previous one stretched until the sharper one
+	// replaces it).
+	readonly canvas?: (painted: boolean) => string
 	readonly textLayer?: string
 	readonly link?: string
 }
@@ -50,9 +57,9 @@ export interface PdfPagesBinding {
 	readonly rotation: number
 	readonly find: PdfPagesFind
 	readonly scrollerRef: RefObject<HTMLDivElement | null>
-	readonly onVisible: (page: number, ratio: number) => void
 	readonly registerPage: (page: number, element: HTMLElement | null) => void
-	readonly onNavigate: (page: number) => void
+	// An in-document link was followed.
+	readonly onNavigate: (to: PdfDestination) => void
 }
 
 export interface PdfPagesProps extends PdfPagesBinding {
@@ -73,17 +80,19 @@ export interface PdfPagesProps extends PdfPagesBinding {
 	readonly onAuxClick?: (event: MouseEvent<HTMLDivElement>) => void
 }
 
+// A page's size before page 1 has been read.
+const DEFAULT_PAGE_WIDTH = 300
+const DEFAULT_PAGE_HEIGHT = 400
+
 function classes(own: string, host: string | undefined): string {
 	return host === undefined || host.length === 0 ? own : `${own} ${host}`
 }
 
 type EntryHandler = (entry: IntersectionObserverEntry) => void
 
-const THRESHOLDS = [0, 0.25, 0.5, 0.75, 1]
-
-// Both observers for every page: one with ratio thresholds at the render margin (render gate and the page most
-// in view), one at the evict margin. Pages register before the scroller attaches (children's effects run
-// first); they are observed once it does.
+// Both observers for every page: one at the render margin (the render gate), one at the evict margin. The page
+// in view is measured by the viewer from the page boxes, not from these. Pages register before the scroller
+// attaches (children's effects run first); they are observed once it does.
 class PageWatcher {
 	private readonly renders = new Map<Element, EntryHandler>()
 	private readonly evicts = new Map<Element, EntryHandler>()
@@ -97,11 +106,7 @@ class PageWatcher {
 				for (const entry of entries) handlers.get(entry.target)?.(entry)
 			}
 
-		this.render = new IntersectionObserver(dispatch(this.renders), {
-			root,
-			rootMargin: `${String(PDF_PAGE_RENDER_MARGIN_PX)}px 0px`,
-			threshold: THRESHOLDS
-		})
+		this.render = new IntersectionObserver(dispatch(this.renders), { root, rootMargin: `${String(PDF_PAGE_RENDER_MARGIN_PX)}px 0px` })
 		this.evict = new IntersectionObserver(dispatch(this.evicts), { root, rootMargin: `${String(PDF_PAGE_EVICT_MARGIN_PX)}px 0px` })
 
 		for (const element of this.renders.keys()) {
@@ -132,6 +137,178 @@ class PageWatcher {
 	}
 }
 
+// pdf.js's text-selection aid (TextLayerBuilder and its global selection listener). The layer is spans with gaps
+// between them; with nothing under the pointer in a gap, Chromium snaps a drag selection to the layer's start or
+// end. Each layer ends in an .endOfContent block that covers the whole layer while a selection is made in it
+// (.selecting, pdf.css), and where the browser needs it (not Firefox, not Chromium 148+) it moves next to the
+// selection's moving end. One set of document listeners serves every page's layer.
+const selectionLayers = new Map<HTMLElement, HTMLElement>()
+let selectionListeners: AbortController | null = null
+// Firefox or Chromium 148+, which select across the gaps by themselves; read once, on the first change.
+let selectsAcrossGaps: boolean | undefined
+let previousRange: Range | null = null
+
+function resetSelection(end: HTMLElement, layer: HTMLElement): void {
+	layer.append(end)
+	end.style.width = ""
+	end.style.height = ""
+	end.style.userSelect = ""
+	layer.classList.remove("selecting")
+}
+
+function resetSelections(): void {
+	selectionLayers.forEach(resetSelection)
+}
+
+function chromiumMajor(): number | null {
+	const data: unknown = Reflect.get(navigator, "userAgentData")
+	const brands: unknown = typeof data === "object" && data !== null ? Reflect.get(data, "brands") : undefined
+
+	if (Array.isArray(brands)) {
+		for (const brand of brands as unknown[]) {
+			if (typeof brand === "object" && brand !== null && Reflect.get(brand, "brand") === "Chromium") {
+				const version = Number.parseInt(String(Reflect.get(brand, "version")), 10)
+
+				return Number.isFinite(version) ? version : null
+			}
+		}
+
+		return null
+	}
+
+	const match = /\bChrome\/(\d+)\b/.exec(navigator.userAgent)
+
+	return match?.[1] === undefined ? null : Number.parseInt(match[1], 10)
+}
+
+function onSelectionChange(): void {
+	const selection = globalThis.document.getSelection()
+
+	if (selection === null || selection.rangeCount === 0) {
+		resetSelections()
+
+		return
+	}
+
+	const active = new Set<HTMLElement>()
+
+	for (let index = 0; index < selection.rangeCount; index++) {
+		const range = selection.getRangeAt(index)
+
+		for (const layer of selectionLayers.keys()) {
+			if (!active.has(layer) && range.intersectsNode(layer)) active.add(layer)
+		}
+	}
+
+	for (const [layer, end] of selectionLayers) {
+		if (active.has(layer)) layer.classList.add("selecting")
+		else resetSelection(end, layer)
+	}
+
+	if (selectsAcrossGaps === undefined) {
+		const first = selectionLayers.values().next().value
+
+		// pdf.css gives .endOfContent -moz-user-select: none, which only Firefox reports back.
+		selectsAcrossGaps =
+			(first !== undefined && getComputedStyle(first).getPropertyValue("-moz-user-select") === "none") ||
+			(chromiumMajor() ?? 0) >= 148
+	}
+
+	if (selectsAcrossGaps) return
+
+	const range = selection.getRangeAt(0)
+	const modifyStart =
+		previousRange !== null &&
+		(range.compareBoundaryPoints(Range.END_TO_END, previousRange) === 0 ||
+			range.compareBoundaryPoints(Range.START_TO_END, previousRange) === 0)
+	let anchor: Node | null = modifyStart ? range.startContainer : range.endContainer
+
+	if (anchor.nodeType === Node.TEXT_NODE) anchor = anchor.parentNode
+
+	if (anchor instanceof Element && anchor.classList.contains("highlight")) anchor = anchor.parentNode
+
+	if (!modifyStart && range.endOffset === 0) {
+		do {
+			while (anchor !== null && anchor.previousSibling === null) anchor = anchor.parentNode
+
+			anchor = anchor?.previousSibling ?? null
+		} while (anchor !== null && anchor.childNodes.length === 0)
+	}
+
+	const parent = anchor?.parentElement ?? null
+	const layer = parent?.closest<HTMLElement>(".fo-pdf-text-layer") ?? null
+	const end = layer === null ? undefined : selectionLayers.get(layer)
+
+	if (anchor !== null && parent !== null && layer !== null && end !== undefined) {
+		end.style.width = layer.style.width
+		end.style.height = layer.style.height
+		end.style.userSelect = "text"
+		parent.insertBefore(end, modifyStart ? anchor : anchor.nextSibling)
+	}
+
+	previousRange = range.cloneRange()
+}
+
+function watchSelection(layer: HTMLElement, end: HTMLElement): () => void {
+	const onPointerDown = (): void => {
+		layer.classList.add("selecting")
+	}
+
+	layer.addEventListener("mousedown", onPointerDown)
+	selectionLayers.set(layer, end)
+
+	if (selectionListeners === null) {
+		const listeners = new AbortController()
+		const { signal } = listeners
+		let pointerDown = false
+
+		selectionListeners = listeners
+		globalThis.document.addEventListener(
+			"pointerdown",
+			() => {
+				pointerDown = true
+			},
+			{ signal }
+		)
+		globalThis.document.addEventListener(
+			"pointerup",
+			() => {
+				pointerDown = false
+				resetSelections()
+			},
+			{ signal }
+		)
+		window.addEventListener(
+			"blur",
+			() => {
+				pointerDown = false
+				resetSelections()
+			},
+			{ signal }
+		)
+		globalThis.document.addEventListener(
+			"keyup",
+			() => {
+				if (!pointerDown) resetSelections()
+			},
+			{ signal }
+		)
+		globalThis.document.addEventListener("selectionchange", onSelectionChange, { signal })
+	}
+
+	return () => {
+		layer.removeEventListener("mousedown", onPointerDown)
+		layer.classList.remove("selecting")
+		selectionLayers.delete(layer)
+
+		if (selectionLayers.size === 0) {
+			selectionListeners?.abort()
+			selectionListeners = null
+			previousRange = null
+		}
+	}
+}
+
 export function PdfPages({
 	pdfjs,
 	document,
@@ -139,7 +316,6 @@ export function PdfPages({
 	rotation,
 	find,
 	scrollerRef,
-	onVisible,
 	registerPage,
 	onNavigate,
 	className,
@@ -155,6 +331,27 @@ export function PdfPages({
 	const total = document.numPages
 	const [watcher] = useState(() => new PageWatcher())
 	const pages = Array.from({ length: total }, (_, index) => index + 1)
+	// Page 1, which sizes every page not read yet (pdf.js caches the page, so its own view reads it again free).
+	const [first, setFirst] = useState<{ readonly document: PdfDomDocument; readonly page: PdfPageProxy<ReadableStream> } | null>(null)
+	const firstPage = first?.document === document ? first.page : null
+	const fallback = firstPage?.getViewport({ scale, rotation: pdfPageRotation(firstPage.rotate, rotation) })
+
+	useEffect(() => {
+		let live = true
+
+		void document.getPage(1).then(
+			page => {
+				if (live) setFirst({ document, page })
+			},
+			() => {
+				// The unread pages keep the default size.
+			}
+		)
+
+		return () => {
+			live = false
+		}
+	}, [document])
 
 	useEffect(() => {
 		const root = scrollerRef.current
@@ -201,7 +398,8 @@ export function PdfPages({
 							placeholder={placeholder}
 							allowLink={allowLink}
 							maxCanvasBytes={maxCanvasBytes ?? PDF_MAX_PAGE_CANVAS_BYTES}
-							onVisible={onVisible}
+							fallbackWidth={fallback?.width ?? DEFAULT_PAGE_WIDTH}
+							fallbackHeight={fallback?.height ?? DEFAULT_PAGE_HEIGHT}
 							registerPage={registerPage}
 							onNavigate={onNavigate}
 						/>
@@ -214,7 +412,7 @@ export function PdfPages({
 
 type PageLink =
 	| { readonly kind: "external"; readonly rect: PdfRect; readonly url: string }
-	| { readonly kind: "internal"; readonly rect: PdfRect; readonly page: number }
+	| { readonly kind: "internal"; readonly rect: PdfRect; readonly to: PdfDestination }
 
 function viewportPoint(point: readonly unknown[]): readonly [number, number] {
 	const [x, y] = point
@@ -247,9 +445,11 @@ interface PdfPageViewProps {
 	readonly placeholder: ReactNode
 	readonly allowLink: ((url: string) => boolean) | undefined
 	readonly maxCanvasBytes: number
-	readonly onVisible: (page: number, ratio: number) => void
+	// The size until this page has been read: page 1's at the current scale and turn.
+	readonly fallbackWidth: number
+	readonly fallbackHeight: number
 	readonly registerPage: (page: number, element: HTMLElement | null) => void
-	readonly onNavigate: (page: number) => void
+	readonly onNavigate: (to: PdfDestination) => void
 }
 
 function PdfPageView({
@@ -270,7 +470,8 @@ function PdfPageView({
 	placeholder,
 	allowLink,
 	maxCanvasBytes,
-	onVisible,
+	fallbackWidth,
+	fallbackHeight,
 	registerPage,
 	onNavigate
 }: PdfPageViewProps) {
@@ -293,8 +494,17 @@ function PdfPageView({
 	const [textEpoch, setTextEpoch] = useState(0)
 	const [links, setLinks] = useState<readonly PageLink[]>([])
 	const rendered = paintedAt !== null && paintedAt.scale === scale && paintedAt.rotation === rotation
+	// The canvas holds a bitmap at this turn: a zoom keeps it on screen, stretched to the new size, until the sharper
+	// one replaces it. A turn does not (stretched across, it would be distorted).
+	const painted = paintedAt !== null && paintedAt.rotation === rotation
+	// The scale and turn a new text layer is laid out at; later changes reach it through update().
+	const layoutRef = useRef({ scale, rotation })
 
+	// Read once the page nears the view, not at open: pdf.js's worker answers one page read at a time, and N reads
+	// queued at open would hold up the first paint (and fetch every page's data from a ranged source).
 	useEffect(() => {
+		if (!nearView) return
+
 		let live = true
 
 		void document.getPage(pageNumber).then(
@@ -313,7 +523,7 @@ function PdfPageView({
 			live = false
 			proxyRef.current = null
 		}
-	}, [document, pageNumber])
+	}, [document, pageNumber, nearView])
 
 	useEffect(() => {
 		const element = wrapperRef.current
@@ -326,8 +536,6 @@ function PdfPageView({
 			element,
 			entry => {
 				if (entry.isIntersecting) setNearView(true)
-
-				onVisible(pageNumber, entry.intersectionRatio)
 			},
 			entry => {
 				setInView(entry.isIntersecting)
@@ -353,7 +561,7 @@ function PdfPageView({
 			unwatch()
 			registerPage(pageNumber, null)
 		}
-	}, [watcher, pageNumber, onVisible, registerPage])
+	}, [watcher, pageNumber, registerPage])
 
 	useEffect(() => {
 		const canvas = canvasRef.current
@@ -361,50 +569,97 @@ function PdfPageView({
 		if (proxy === null || !nearView || canvas === null || pdfPageAction(inView, rendered) !== "render") return
 
 		let cancelled = false
-		const viewport = proxy.getViewport({ scale, rotation: pdfPageRotation(proxy.rotate, rotation) })
-		const ratio = pdfRenderRatio(viewport.width, viewport.height, window.devicePixelRatio, maxCanvasBytes)
-		const dims = pdfCanvasDims(viewport.width, viewport.height, ratio)
+		let task: PdfRenderTask | null = null
+		// While the canvas shows a stale bitmap the new one renders offscreen and is copied over in one step: sizing
+		// the canvas itself would clear it for the whole render.
+		let offscreen: HTMLCanvasElement | null = null
 
-		canvas.width = dims.bufferWidth
-		canvas.height = dims.bufferHeight
-		canvas.style.width = `${String(dims.cssWidth)}px`
-		canvas.style.height = `${String(dims.cssHeight)}px`
+		const start = (): void => {
+			const viewport = proxy.getViewport({ scale, rotation: pdfPageRotation(proxy.rotate, rotation) })
+			const ratio = pdfRenderRatio(viewport.width, viewport.height, window.devicePixelRatio, maxCanvasBytes)
+			const dims = pdfCanvasDims(viewport.width, viewport.height, ratio)
+			const target = painted ? canvas.ownerDocument.createElement("canvas") : canvas
 
-		const task = proxy.render({ canvas, viewport, transform: pdfRenderTransform(ratio) })
+			if (target !== canvas) offscreen = target
 
-		task.promise.then(
-			() => {
-				if (!cancelled) setPaintedAt({ scale, rotation })
-			},
-			() => {
-				// A cancelled render (scrolled away, zoomed) rejects too. A page that fails to render stays a
-				// placeholder; the document opened, so the rest still shows.
-			}
-		)
+			target.width = dims.bufferWidth
+			target.height = dims.bufferHeight
+			task = proxy.render({ canvas: target, viewport, transform: pdfRenderTransform(ratio) })
+			task.promise.then(
+				() => {
+					if (cancelled) return
+
+					if (target !== canvas) {
+						canvas.width = dims.bufferWidth
+						canvas.height = dims.bufferHeight
+						canvas.getContext("2d")?.drawImage(target, 0, 0)
+						target.width = 0
+						target.height = 0
+						offscreen = null
+					}
+
+					setPaintedAt({ scale, rotation })
+				},
+				() => {
+					// A cancelled render (scrolled away, zoomed) rejects too. A page that fails to render stays a
+					// placeholder; the document opened, so the rest still shows.
+				}
+			)
+		}
+
+		// A stale bitmap stays up while zoom steps keep coming; the render starts once they pause.
+		const timer = painted ? setTimeout(start, PDF_ZOOM_RENDER_DELAY_MS) : null
+
+		if (timer === null) start()
 
 		return () => {
 			cancelled = true
-			task.cancel()
+
+			if (timer !== null) clearTimeout(timer)
+
+			task?.cancel()
+
+			if (offscreen !== null) {
+				offscreen.width = 0
+				offscreen.height = 0
+			}
 		}
-	}, [proxy, nearView, inView, rendered, scale, rotation, maxCanvasBytes])
+	}, [proxy, nearView, inView, rendered, painted, scale, rotation, maxCanvasBytes])
+
+	// Before the text layer's effect, which reads it.
+	useEffect(() => {
+		layoutRef.current = { scale, rotation }
+	}, [scale, rotation])
 
 	// Its own effect, not the canvas's: that one re-runs as soon as its render resolves (`rendered` changes), and a
-	// text layer torn down there would be gone right after every paint. Leaving the evict margin tears it down.
+	// text layer torn down there would be gone right after every paint. Built once while the page stays near the
+	// view (a zoom or a turn re-lays out its spans below, without reading the text again); leaving the evict margin
+	// tears it down.
 	useEffect(() => {
 		const container = textRef.current
 
 		if (proxy === null || !nearView || !inView || container === null) return
 
+		const layout = layoutRef.current
 		const layer = new pdfjs.TextLayer({
 			textContentSource: proxy.streamTextContent(),
 			container,
-			viewport: proxy.getViewport({ scale, rotation: pdfPageRotation(proxy.rotate, rotation) })
+			viewport: proxy.getViewport({ scale: layout.scale, rotation: pdfPageRotation(proxy.rotate, layout.rotation) })
 		})
+		let unwatch: (() => void) | null = null
 
 		layerRef.current = layer
 		layer.render().then(
 			() => {
-				if (layerRef.current === layer) setTextEpoch(epoch => epoch + 1)
+				if (layerRef.current !== layer) return
+
+				// pdf.js's selection aid (TextLayerBuilder): see watchSelection.
+				const end = container.ownerDocument.createElement("div")
+
+				end.className = "endOfContent"
+				container.append(end)
+				unwatch = watchSelection(container, end)
+				setTextEpoch(epoch => epoch + 1)
 			},
 			() => {
 				// The page stays readable, only not selectable.
@@ -414,10 +669,25 @@ function PdfPageView({
 		return () => {
 			layer.cancel()
 			layerRef.current = null
+			unwatch?.()
 			// render() appends as it streams and the constructor never clears, so a rebuild would stack spans.
 			container.replaceChildren()
 		}
-	}, [pdfjs, proxy, nearView, inView, scale, rotation])
+	}, [pdfjs, proxy, nearView, inView])
+
+	// A zoom or a turn re-lays out the spans in place, once the steps pause as the canvas does (it measures every
+	// span again); meanwhile --total-scale-factor resizes them. The selection and the find highlights stay.
+	useEffect(() => {
+		if (proxy === null || layerRef.current === null) return
+
+		const timer = setTimeout(() => {
+			layerRef.current?.update({ viewport: proxy.getViewport({ scale, rotation: pdfPageRotation(proxy.rotate, rotation) }) })
+		}, PDF_ZOOM_RENDER_DELAY_MS)
+
+		return () => {
+			clearTimeout(timer)
+		}
+	}, [proxy, scale, rotation])
 
 	// Matches painted into the text layer; the active one is scrolled to when `reveal` asks.
 	useEffect(() => {
@@ -458,7 +728,7 @@ function PdfPageView({
 
 						const target = await resolveDestination(document, link.dest)
 
-						return target === null ? null : { kind: "internal", rect: link.rect, page: target }
+						return target === null ? null : { kind: "internal", rect: link.rect, to: target }
 					})
 				)
 
@@ -478,13 +748,19 @@ function PdfPageView({
 			className={classes("fo-pdf-page", classNames?.page)}
 			data-page={pageNumber}
 			data-rendered={rendered}
-			style={viewport === undefined ? { width: 300, height: 400 } : { width: viewport.width, height: viewport.height }}
+			style={
+				viewport === undefined
+					? { width: fallbackWidth, height: fallbackHeight }
+					: { width: viewport.width, height: viewport.height }
+			}
 		>
-			{rendered ? null : placeholder}
+			{painted ? null : placeholder}
+			{/* The CSS box follows every zoom step at once, so a stale bitmap stretches to the new size. */}
 			<canvas
 				ref={canvasRef}
 				aria-label={pageLabel(pageNumber, total)}
-				className={classNames?.canvas?.(rendered)}
+				className={classNames?.canvas?.(painted)}
+				style={viewport === undefined ? undefined : { width: Math.floor(viewport.width), height: Math.floor(viewport.height) }}
 			/>
 			<div
 				ref={textRef}
@@ -518,20 +794,20 @@ function PdfPageView({
 						) : (
 							// No href: a middle click would open the host page itself in a new tab.
 							<a
-								key={`#${String(link.page)}-${String(box.left)}-${String(box.top)}`}
+								key={`#${String(link.to.page)}-${String(box.left)}-${String(box.top)}`}
 								role="link"
 								tabIndex={0}
-								aria-label={pageLabel(link.page, total)}
+								aria-label={pageLabel(link.to.page, total)}
 								className={classes("fo-pdf-link", classNames?.link)}
 								style={style}
 								onClick={event => {
 									event.preventDefault()
-									onNavigate(link.page)
+									onNavigate(link.to)
 								}}
 								onKeyDown={event => {
 									if (event.key === "Enter") {
 										event.preventDefault()
-										onNavigate(link.page)
+										onNavigate(link.to)
 									}
 								}}
 							/>

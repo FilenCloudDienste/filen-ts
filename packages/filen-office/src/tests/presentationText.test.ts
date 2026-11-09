@@ -122,6 +122,24 @@ function fragmentFlags(result: ReturnType<typeof laidOut>["result"]): [string, n
 }
 
 describe("presentation text layout", () => {
+	it("paints a condensed original's substitute at the horizontal scale it was laid out with", () => {
+		const env = environment()
+		const narrow = testFont(2, "fo-narrow", 1, 0.5)
+		const result = layoutBody(
+			resolveBody(body([paragraph("aaa", { ...SMALL, spc: 300 })]), CONTEXT),
+			{ width: 400, height: 300 },
+			{
+				...env,
+				fonts: { resolve: request => ({ ...narrow, weight: request.bold ? 700 : 400, italic: request.italic }) }
+			}
+		)
+		const id = result.page.styles.findIndex(s => s.letterSpacing !== 0)
+
+		expect(result.page.styles[id]).toMatchObject({ scaleX: 0.5, letterSpacing: (3 * 96) / 72 / 0.5 })
+		expect(result.styles.scaleX[id]).toBe(0.5)
+		expect(result.styles.letterSpacing[id]).toBeCloseTo((3 * 96) / 72 / 0.5, 9)
+	})
+
 	it("lays out paragraphs into a complete page the docx painters read", () => {
 		const { result } = laidOut(body([paragraph("Hello world", SMALL), paragraph("Second", SMALL)]))
 		const page = result.page.page

@@ -261,7 +261,9 @@ describe("media sniffing", () => {
 		["mp3", head([0xff, 0xfb, 0x90])],
 		["flac", head("fLaC")],
 		["midi", head("MThd")],
-		["amr", head("#!AMR")]
+		["amr", head("#!AMR")],
+		["au", head(".snd", [0, 0, 0, 24, 0xff, 0xff, 0xff, 0xff, 0, 0, 0, 2])],
+		["caf", head("caff", [0, 1, 0, 0], "desc")]
 	] as const)("knows %s", (container, bytes) => {
 		expect(sniffMedia(bytes)).toBe(container)
 	})
@@ -316,5 +318,23 @@ describe("image decode budget", () => {
 		new DataView(huge.buffer).setUint32(20, 5_000)
 		expect(imageWithinBudget(huge)).toBe(true)
 		expect(imageWithinBudget(strToU8("unknown"))).toBe(true)
+	})
+
+	it("reads WORD sizes from an OS/2 BITMAPCOREHEADER BMP", () => {
+		const core = new Uint8Array(26)
+		const view = new DataView(core.buffer)
+
+		core.set([0x42, 0x4d])
+		view.setUint32(14, 12, true)
+		view.setUint16(18, 640, true)
+		view.setUint16(20, 480, true)
+		view.setUint16(22, 1, true)
+		view.setUint16(24, 24, true)
+		expect(imageDimensions(core)).toEqual({ width: 640, height: 480 })
+		expect(imageDimensions(core.subarray(0, 22))).toEqual({ width: 640, height: 480 })
+		expect(imageWithinBudget(core)).toBe(true)
+		view.setUint16(18, 10_000, true)
+		view.setUint16(20, 5_001, true)
+		expect(imageWithinBudget(core)).toBe(false)
 	})
 })

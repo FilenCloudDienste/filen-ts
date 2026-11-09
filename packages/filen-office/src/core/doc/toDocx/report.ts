@@ -2,10 +2,10 @@
 // silently: each item is either converted, kept in another form (a placeholder picture), or counted here.
 
 export type DocNotConvertedKind =
-	// A floating shape other than a picture, text box or simple preset shape: shown as a placeholder picture.
+	// A floating shape with neither a picture, text, a preset geometry nor a path: shown as a placeholder picture.
 	| "shape"
-	// A group of shapes: shown as a placeholder picture, the text its shapes hold in text boxes where it is.
-	| "group"
+	// A freeform path segment (MS-ODRAW §2.2.54 escape) drawn as straight lines.
+	| "customGeometry"
 	// WordArt: its text in a text box of the shape's size (not drawn as WordArt).
 	| "wordArt"
 	// The data of an embedded object (only its picture is shown).

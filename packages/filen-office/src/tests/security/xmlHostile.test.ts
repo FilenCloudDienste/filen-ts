@@ -8,7 +8,7 @@ import { saveDocx } from "@filen/office/core/docx/write"
 import { NAMESPACES, buildDocx, modelOf, type SyntheticDocx } from "../docxSynthetic"
 import { pagedEditor, settleAll } from "../pagedFixtures"
 import { engineServices, nest, trapGlobals, type Trap } from "./generate"
-import { budget } from "../timing"
+import { budget, cpuMs } from "../timing"
 
 // XML from documents: no entity can expand, no external resource is read, and no part reader recurses on
 // the document's nesting.
@@ -160,6 +160,23 @@ describe("size and shape", () => {
 
 		expect(document.count).toBe(depth + 1)
 		expect(() => assertWellFormed(document)).not.toThrow()
+	})
+
+	it("checks a start tag with many prefixed attributes for duplicates by expanded name in linear time", () => {
+		const count = 40_000
+		const declarations = 'xmlns:a="urn:x" xmlns:b="urn:x"'
+		let attributes = ""
+
+		for (let i = 0; i < count; i++) attributes += ` a:x${i}="1"`
+
+		const distinct = parseXml(encoder.encode(`<r ${declarations}${attributes}/>`))
+		// b:x7 is a:x7 by expanded name: both prefixes are bound to the same URI.
+		const repeated = parseXml(encoder.encode(`<r ${declarations}${attributes} b:x${count - 7}="2"/>`))
+		const started = cpuMs()
+
+		expect(() => assertWellFormed(distinct)).not.toThrow()
+		expect(xmlCode(() => assertWellFormed(repeated))).toBe("invalidAttribute")
+		expect(cpuMs() - started).toBeLessThan(budget(500))
 	})
 })
 

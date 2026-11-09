@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import {
-	mostVisiblePage,
 	pdfFitScale,
+	pdfPageInView,
 	pdfPageRotation,
 	pdfRotate,
 	pdfStepZoomScale,
@@ -11,6 +11,7 @@ import {
 	PdfFinder,
 	PDF_BASE_SCALE,
 	PDF_FIND_INTS,
+	type PdfDestination,
 	type PdfFindResult,
 	type PdfViewerCommand,
 	type PdfViewerState
@@ -53,9 +54,62 @@ const FIND_SLICING: Slicing = {
 }
 
 interface Fit {
-	readonly mode: "fitWidth" | "fitPage"
+	// "auto": the opening zoom (pdfFitScale), shown as a custom percent.
+	readonly mode: "fitWidth" | "fitPage" | "auto"
 	// The page whose size is fitted (the one in view when asked).
 	readonly page: number
+}
+
+const OPENING_FIT: Fit = { mode: "auto", page: 1 }
+
+// How long a Next/Previous target stands as the page to step from while its scroll runs: a target that never
+// becomes the page most in view (a last page shorter than the view) expires after it.
+const NAVIGATION_SETTLE_MS = 1000
+
+// A point of the view (from the scroller's top-left) as fractions of the page under it, kept there across a zoom.
+interface ZoomAnchor {
+	readonly page: number
+	readonly fx: number
+	readonly fy: number
+	readonly viewX: number
+	readonly viewY: number
+}
+
+// The page under the point is the first ending below it (a binary search: O(log n) boxes read); a point in the
+// gap above a page belongs to it, with a fraction just under 0. Null while the pages are not laid out.
+function zoomAnchor(scroller: HTMLElement, elements: ReadonlyMap<number, HTMLElement>, viewX: number, viewY: number): ZoomAnchor | null {
+	const view = scroller.getBoundingClientRect()
+	const y = view.top + viewY
+	let low = 1
+	let high = elements.size
+
+	while (low < high) {
+		const middle = (low + high) >>> 1
+		const box = elements.get(middle)?.getBoundingClientRect()
+
+		if (box === undefined) return null
+
+		if (box.bottom <= y) low = middle + 1
+		else high = middle
+	}
+
+	const box = elements.get(low)?.getBoundingClientRect()
+
+	if (box === undefined || box.width <= 0 || box.height <= 0) return null
+
+	return { page: low, fx: (view.left + viewX - box.left) / box.width, fy: (y - box.top) / box.height, viewX, viewY }
+}
+
+function restoreAnchor(scroller: HTMLElement, element: HTMLElement, anchor: ZoomAnchor): void {
+	const view = scroller.getBoundingClientRect()
+	const box = element.getBoundingClientRect()
+
+	scroller.scrollTop += box.top + anchor.fy * box.height - (view.top + anchor.viewY)
+	scroller.scrollLeft += box.left + anchor.fx * box.width - (view.left + anchor.viewX)
+}
+
+function centreAnchor(scroller: HTMLElement, elements: ReadonlyMap<number, HTMLElement>): ZoomAnchor | null {
+	return zoomAnchor(scroller, elements, scroller.clientWidth / 2, scroller.clientHeight / 2)
 }
 
 function reducedMotion(): boolean {
@@ -65,13 +119,21 @@ function reducedMotion(): boolean {
 export function usePdfViewer(document: PdfDomDocument): PdfViewer {
 	const scrollerRef = useRef<HTMLDivElement | null>(null)
 	const elements = useRef(new Map<number, HTMLElement>())
-	const ratios = useRef(new Map<number, number>())
 	const [page, setPage] = useState(1)
 	const [scale, setScale] = useState(PDF_BASE_SCALE)
-	const [fit, setFit] = useState<Fit | null>(null)
+	// A document opens fitted to the view (narrow views) or at 100 %.
+	const [fit, setFit] = useState<Fit | null>(OPENING_FIT)
 	const [rotation, setRotation] = useState(0)
-	// The page brought back into view once a fit, a preset or a turn has laid the pages out again.
+	// The page brought back to its start once a turn has laid the pages out again.
 	const keepRef = useRef<number | null>(null)
+	// The point a zoom keeps in place (the pointer's for Ctrl+wheel, else the view's centre). Written by every
+	// scale change, so a zoom that changed nothing leaves no stale anchor for the next.
+	const anchorRef = useRef<ZoomAnchor | null>(null)
+	// The last Next/Previous/go-to target while its scroll runs: the next step counts from it, not from the page
+	// most in view, which lags a smooth scroll.
+	const pendingRef = useRef<{ readonly page: number; readonly until: number } | null>(null)
+	// Bumped by every navigation, so a destination whose page loads late does not override a newer one.
+	const navigation = useRef(0)
 	const [find, setFind] = useState<FindState>(CLOSED)
 	const [finder, setFinder] = useState(() => ({ document, finder: new PdfFinder(document, FIND_SLICING) }))
 	const pageCount = document.numPages
@@ -87,19 +149,87 @@ export function usePdfViewer(document: PdfDomDocument): PdfViewer {
 
 		if (scroller === null) return
 
+		// The user scrolling takes over from a pending Next/Previous target.
+		const onPointerDown = (): void => {
+			pendingRef.current = null
+		}
+
 		const onWheel = (event: WheelEvent): void => {
-			if (!event.ctrlKey && !event.metaKey) return
+			if (!event.ctrlKey && !event.metaKey) {
+				pendingRef.current = null
+
+				return
+			}
 
 			event.preventDefault()
+
+			const view = scroller.getBoundingClientRect()
+
 			keepRef.current = null
+			// Read before the commit, so several wheel steps in one frame all measure the same layout.
+			anchorRef.current = zoomAnchor(scroller, elements.current, event.clientX - view.left, event.clientY - view.top)
 			setFit(null)
 			setScale(previous => pdfWheelZoomScale(previous, event.deltaY))
 		}
 
 		scroller.addEventListener("wheel", onWheel, { passive: false })
+		scroller.addEventListener("pointerdown", onPointerDown, { passive: true })
 
 		return () => {
 			scroller.removeEventListener("wheel", onWheel)
+			scroller.removeEventListener("pointerdown", onPointerDown)
+		}
+	}, [])
+
+	// The page shown is the one taking the most of the view, measured from the page boxes once a frame after a
+	// scroll or a layout change (a zoom, a turn, a page's size arriving), not from margin-inflated observer ratios.
+	useEffect(() => {
+		const scroller = scrollerRef.current
+
+		if (scroller === null) return
+
+		let frame = 0
+
+		const measure = (): void => {
+			frame = 0
+
+			const view = scroller.getBoundingClientRect()
+			const visible = pdfPageInView(
+				elements.current.size,
+				target => {
+					const box = elements.current.get(target)?.getBoundingClientRect()
+
+					return box === undefined ? null : [box.top, box.bottom]
+				},
+				view.top,
+				view.bottom
+			)
+
+			if (visible === null) return
+
+			if (pendingRef.current?.page === visible) pendingRef.current = null
+
+			setPage(visible)
+		}
+
+		const schedule = (): void => {
+			if (frame === 0) frame = requestAnimationFrame(measure)
+		}
+
+		scroller.addEventListener("scroll", schedule, { passive: true })
+
+		const observer = typeof ResizeObserver === "function" ? new ResizeObserver(schedule) : null
+
+		observer?.observe(scroller)
+
+		if (scroller.firstElementChild !== null) observer?.observe(scroller.firstElementChild)
+
+		schedule()
+
+		return () => {
+			scroller.removeEventListener("scroll", schedule)
+			observer?.disconnect()
+			cancelAnimationFrame(frame)
 		}
 	}, [])
 
@@ -151,6 +281,8 @@ export function usePdfViewer(document: PdfDomDocument): PdfViewer {
 			const fitted = size
 
 			if (live && fitted !== null) {
+				// The view's centre stays put, unless the view is at the document's start (opening, or a fit there).
+				anchorRef.current = scroller.scrollTop > 0 || scroller.scrollLeft > 0 ? centreAnchor(scroller, elements.current) : null
 				setScale(previous =>
 					pdfFitScale(fit.mode, fitted.width, fitted.height, scroller.clientWidth, scroller.clientHeight, previous)
 				)
@@ -179,30 +311,103 @@ export function usePdfViewer(document: PdfDomDocument): PdfViewer {
 		}
 	}, [document, fit, rotation])
 
-	const goToPage = (target: number, smooth: boolean): void => {
+	// `left`/`top` (PDF user space) put a destination's point at the view's top-left corner; without `top` the
+	// page's top goes there. The point needs the page's viewport, read only now: a newer navigation while it
+	// loads wins.
+	const goToPage = (target: number, smooth: boolean, left: number | null = null, top: number | null = null): void => {
 		const clamped = Math.min(Math.max(1, Math.round(target)), pageCount)
+		const sequence = ++navigation.current
+		const element = elements.current.get(clamped)
+		const behavior: ScrollBehavior = smooth && !reducedMotion() ? "smooth" : "auto"
 
-		elements.current.get(clamped)?.scrollIntoView({ behavior: smooth && !reducedMotion() ? "smooth" : "auto", block: "start" })
+		if (element === undefined) return
+
+		pendingRef.current = { page: clamped, until: performance.now() + NAVIGATION_SETTLE_MS }
+
+		if (top === null) {
+			element.scrollIntoView({ behavior, block: "start" })
+
+			return
+		}
+
+		const at = scale
+		const turn = rotation
+
+		document.getPage(clamped).then(
+			proxy => {
+				const scroller = scrollerRef.current
+
+				if (navigation.current !== sequence || scroller === null) return
+
+				const [x, y] = proxy
+					.getViewport({ scale: at, rotation: pdfPageRotation(proxy.rotate, turn) })
+					.convertToViewportPoint(left ?? 0, top)
+				const box = element.getBoundingClientRect()
+				const view = scroller.getBoundingClientRect()
+				const options: ScrollToOptions = {
+					top: box.top - view.top - scroller.clientTop + scroller.scrollTop + element.clientTop + (typeof y === "number" ? y : 0),
+					behavior
+				}
+
+				// Across only when the page is wider than the view: a narrower one stays where the layout centres it.
+				if (left !== null && typeof x === "number" && box.width > scroller.clientWidth) {
+					options.left = box.left - view.left - scroller.clientLeft + scroller.scrollLeft + element.clientLeft + x
+				}
+
+				scroller.scrollTo(options)
+			},
+			() => {
+				// An unreadable page is still a page to go to.
+				if (navigation.current === sequence) element.scrollIntoView({ behavior, block: "start" })
+			}
+		)
 	}
 
-	useEffect(() => {
+	// Before paint, once the pages are laid out at the new scale or turn: a turn brings the page in view back to
+	// its start, a zoom puts its anchor back where it was in the view.
+	useLayoutEffect(() => {
 		const keep = keepRef.current
+		const anchor = anchorRef.current
+		const scroller = scrollerRef.current
+
+		keepRef.current = null
+		anchorRef.current = null
 
 		if (keep !== null) {
-			keepRef.current = null
 			elements.current.get(keep)?.scrollIntoView({ block: "start" })
+
+			return
 		}
+
+		const element = anchor === null ? undefined : elements.current.get(anchor.page)
+
+		if (anchor !== null && element !== undefined && scroller !== null) restoreAnchor(scroller, element, anchor)
 	}, [scale, rotation])
 
 	const shownPage = Math.min(page, pageCount)
 
+	// The page a Next/Previous steps from: the target still scrolling into view, else the page in view.
+	const stepFrom = (): number => {
+		const pending = pendingRef.current
+
+		return pending !== null && performance.now() < pending.until ? pending.page : page
+	}
+
+	// Every scale change records where the view's centre is, so the zoom keeps it there.
+	const anchorCentre = (): void => {
+		const scroller = scrollerRef.current
+
+		keepRef.current = null
+		anchorRef.current = scroller === null ? null : centreAnchor(scroller, elements.current)
+	}
+
 	const dispatch = (command: PdfViewerCommand): void => {
 		switch (command.type) {
 			case "page.previous":
-				goToPage(page - 1, true)
+				goToPage(stepFrom() - 1, true)
 				break
 			case "page.next":
-				goToPage(page + 1, true)
+				goToPage(stepFrom() + 1, true)
 				break
 			case "page.first":
 				goToPage(1, false)
@@ -211,36 +416,37 @@ export function usePdfViewer(document: PdfDomDocument): PdfViewer {
 				goToPage(pageCount, false)
 				break
 			case "page.goto":
-				goToPage(command.page, true)
+				goToPage(command.page, true, command.left ?? null, command.top ?? null)
 				break
 			case "zoom.in":
-				keepRef.current = null
+				anchorCentre()
 				setFit(null)
 				setScale(previous => pdfStepZoomScale(previous, 1))
 				break
 			case "zoom.out":
-				keepRef.current = null
+				anchorCentre()
 				setFit(null)
 				setScale(previous => pdfStepZoomScale(previous, -1))
 				break
 			case "zoom.set":
-				keepRef.current = shownPage
+				anchorCentre()
 				setFit(null)
 				setScale(clampPdfScale(command.scale))
 				break
 			case "zoom.by":
-				keepRef.current = null
+				anchorCentre()
 				setFit(null)
 				setScale(previous => clampPdfScale(previous + command.delta))
 				break
 			case "zoom.fitWidth":
 			case "zoom.fitPage":
-				keepRef.current = shownPage
+				// The fit's own effect anchors the view's centre once it knows the scale.
 				setFit({ mode: command.type === "zoom.fitWidth" ? "fitWidth" : "fitPage", page: shownPage })
 				break
 			case "rotate.clockwise":
 			case "rotate.counterClockwise":
 				keepRef.current = shownPage
+				anchorRef.current = null
 				setRotation(previous => pdfRotate(previous, command.type === "rotate.clockwise" ? 1 : -1))
 				break
 			case "find.open":
@@ -281,21 +487,13 @@ export function usePdfViewer(document: PdfDomDocument): PdfViewer {
 		}
 	}
 
-	const onVisible = (visiblePage: number, ratio: number): void => {
-		ratios.current.set(visiblePage, ratio)
-
-		const visible = mostVisiblePage(ratios.current)
-
-		if (visible !== null) setPage(visible)
-	}
-
 	const registerPage = (registered: number, element: HTMLElement | null): void => {
 		if (element === null) elements.current.delete(registered)
 		else elements.current.set(registered, element)
 	}
 
-	const onNavigate = (target: number): void => {
-		goToPage(target, false)
+	const onNavigate = (to: PdfDestination): void => {
+		goToPage(to.page, false, to.left, to.top)
 	}
 
 	const count = find.result === null ? 0 : find.result.matches.length / PDF_FIND_INTS
@@ -304,7 +502,7 @@ export function usePdfViewer(document: PdfDomDocument): PdfViewer {
 		pageCount,
 		scale,
 		zoom: pdfZoomPercent(scale),
-		zoomMode: fit?.mode ?? "custom",
+		zoomMode: fit === null || fit.mode === "auto" ? "custom" : fit.mode,
 		rotation,
 		find: {
 			open: find.open,
@@ -326,7 +524,6 @@ export function usePdfViewer(document: PdfDomDocument): PdfViewer {
 			rotation,
 			find: { matches: find.open ? (find.result?.matches ?? null) : null, active: find.active, reveal: find.reveal },
 			scrollerRef,
-			onVisible,
 			registerPage,
 			onNavigate
 		}

@@ -1,6 +1,6 @@
 import { parseLength, parsePercent, parseRelativeLength, type OdfProperties } from "../odf/index"
 import { MarkupFlow, type Flow } from "./flow"
-import { border } from "./props"
+import { border, modeRtl } from "./props"
 import type { Translator } from "./translator"
 import { twips } from "./wml"
 
@@ -288,9 +288,14 @@ function cellMarkup(
 	const flow = new MarkupFlow()
 	const inner = Math.max(1, width - padding("left") - padding("right"))
 
+	const direction = translator.direction
+
+	// A cell setting a direction is its paragraphs' superordinate object for a "page" writing mode.
+	translator.direction = modeRtl(writingMode) ?? direction
 	translator.widths.push(inner)
-	translator.blocks(cell, flow)
+	translator.storyBlocks(cell, flow)
 	translator.widths.pop()
+	translator.direction = direction
 
 	let content = flow.xml()
 

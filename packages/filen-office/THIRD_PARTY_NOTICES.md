@@ -614,6 +614,22 @@ This file incorporates work covered by the following license notice:
 - Files (SHA-256 of the shipped file; of the upstream file):
   - `assets/fonts/noto/noto-sans-kr/NotoSansKR-Regular.ttf.gz` `80a1106a71f586b26deae45bdcd766db999c63f7d439ae876081528ba2e98d22`; upstream https://raw.githubusercontent.com/google/fonts/45e3d5269e4a17d823f6d84470bc084dc5ae46f6/ofl/notosanskr/NotoSansKR%5Bwght%5D.ttf `194018e6b2b293a7964f037b25c0249ce1418bc9ab3c971060a03aa57861e252`; static instance of the upstream variable font, gzip-compressed (a Modified Version under the OFL)
 
+#### Noto Sans Symbols 2 2.008
+
+- Source: https://github.com/google/fonts/tree/45e3d5269e4a17d823f6d84470bc084dc5ae46f6/ofl/notosanssymbols2
+- Copyright: Copyright 2022 The Noto Project Authors (https://github.com/notofonts/symbols)
+- Licence: OFL-1.1 (`assets/fonts/noto/noto-sans-symbols-2/OFL.txt`); no Reserved Font Name
+- Files (SHA-256 of the shipped file; of the upstream file):
+  - `assets/fonts/noto/noto-sans-symbols-2/NotoSansSymbols2-Regular.ttf.gz` `6df8c983b114ea4863ad184e94d35a3c005abf829cb920401dfbc49614dfb746`; upstream https://raw.githubusercontent.com/google/fonts/45e3d5269e4a17d823f6d84470bc084dc5ae46f6/ofl/notosanssymbols2/NotoSansSymbols2-Regular.ttf `7d5fb73b7ca67a6798101741f5d280a3d016a56a197afcd4199dbb57b4b82a21`; gzip-compressed, font data unchanged
+
+#### Noto Sans Math 3.000
+
+- Source: https://github.com/google/fonts/tree/45e3d5269e4a17d823f6d84470bc084dc5ae46f6/ofl/notosansmath
+- Copyright: Copyright 2022 The Noto Project Authors (https://github.com/notofonts/math)
+- Licence: OFL-1.1 (`assets/fonts/noto/noto-sans-math/OFL.txt`); no Reserved Font Name
+- Files (SHA-256 of the shipped file; of the upstream file):
+  - `assets/fonts/noto/noto-sans-math/NotoSansMath-Regular.ttf.gz` `7477333a44fc39c8432ab811a4c35fbccff446eccab415b9771d5144658b4fce`; upstream https://raw.githubusercontent.com/google/fonts/45e3d5269e4a17d823f6d84470bc084dc5ae46f6/ofl/notosansmath/NotoSansMath-Regular.ttf `3f495fe933c06786e4d5f6d86b8ee70b6753a68ee3b9d87528726de0f6e2c47d`; gzip-compressed, font data unchanged
+
 ## Apache License 2.0
 
 ```

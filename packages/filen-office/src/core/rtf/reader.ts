@@ -1,4 +1,7 @@
 import { appendAll } from "../arrays"
+import { presetGeometry, shapeGraphic, type ShapeLook } from "../doc/toDocx/drawing"
+import { artColor } from "../doc/toDocx/officeArt"
+import { isConnector, presetOf } from "../ppt/officeArt"
 import { escapeAttribute, escapeText } from "../xml/index"
 import { CHECKPOINT_SPACING, deepCopy, deepEqual, type Checkpoint, type FrameState, type RtfCheckpoints } from "./checkpoint"
 import { SYMBOL_CODEPAGE, charsetCodepage, codepageSupported, decodeCodepage } from "./codepage"
@@ -15,6 +18,7 @@ import {
 	type SourceRange,
 	type StyleDef
 } from "./document"
+import { OmmlBuilder } from "./math"
 import { PictureBuilder, type Picture } from "./pict"
 import { sliceClock } from "../slicing"
 import { jobOf, turn, type RtfJob, type RtfTurns } from "./turns"
@@ -44,9 +48,10 @@ import { dttm, isoDate } from "./values"
 
 // The RTF reader (Microsoft RTF Specification 1.9.1): one pass over the tokens with a stack of group states
 // (character and paragraph properties, \ucN, the destination), filling a WordprocessingML document the
-// docx engine opens. What the model does not hold (shapes beyond their pictures, drawing objects, embedded
-// objects, math, form-field data, unknown \* destinations) is skipped and reported with its source range;
-// the source bytes stay the file's truth, never dropped.
+// docx engine opens. What the model does not hold (shapes beyond their pictures, preset geometry, text and WordArt,
+// drawing objects, embedded objects, form-field data, unknown \* destinations) is skipped and reported with its
+// source range; the source bytes stay the file's truth, never dropped. Equations and drawn shapes are reported so too:
+// their source is written again as it was.
 
 // Why an RTF file cannot be read at all.
 export type RtfFailure = "notRtf"
@@ -132,6 +137,8 @@ type Dest =
 	// \\picprop: the property being read (\\sn) and the picture it goes to.
 	| { readonly kind: "picprop"; readonly picture: PictureBuilder; name: string }
 	| { readonly kind: "shape"; readonly shape: ShapeState }
+	// An equation (\\mmath, \\moMath): its groups are Office Math elements.
+	| { readonly kind: "math"; readonly math: OmmlBuilder }
 	| { readonly kind: "datetime"; readonly date: number[]; readonly done: (date: number[]) => void }
 
 interface ShapeState {
@@ -154,6 +161,22 @@ interface ShapeState {
 	textbox: boolean
 	// WordArt's text (the gtextUNICODE property), "" for none.
 	wordArt: string
+	// Its look (MS-ODRAW §2.3: shapeType, fFilled, fillColor, fLine, lineColor, lineWidth, rotation, fFlipH, fFlipV,
+	// dxTextLeft...): -1 or undefined when unset.
+	shapeType: number
+	filled: boolean | undefined
+	fillColor: number | undefined
+	lined: boolean | undefined
+	lineColor: number | undefined
+	lineWidth: number | undefined
+	rotation: number
+	flipH: boolean
+	flipV: boolean
+	insets: [number, number, number, number]
+	// A group member's rectangle in its group's coordinates (relLeft, relTop, relRight, relBottom), and a group's
+	// coordinate space (groupLeft...; 0, 0, 20000, 20000 by default).
+	rel: [number, number, number, number] | undefined
+	readonly space: [number, number, number, number]
 	// A group (\\shpgrp), and the group a shape is in.
 	readonly group: boolean
 	readonly parent: ShapeState | undefined
@@ -299,7 +322,8 @@ const SKIPPED: ReadonlySet<string> = new Set([
 	"xmlopen"
 ])
 
-// Skipped destinations that hold content the document shows elsewhere or not at all, reported by kind.
+// Skipped destinations that hold content the document shows elsewhere or not at all, reported by kind (an equation
+// where text shows is read as Office Math, its group reported as math).
 const PRESERVED_KIND: ReadonlyMap<string, RtfPreservedKind> = new Map([
 	["objdata", "object"],
 	["formfield", "formField"],
@@ -1609,6 +1633,9 @@ class Reader {
 			case "capture":
 				dest.text += text
 				break
+			case "math":
+				dest.math.text(text, this.frame.char.xml(this.doc))
+				break
 			case "fonts": {
 				const font = this.currentFont
 
@@ -1826,6 +1853,19 @@ class Reader {
 
 	private word(name: string, param: number, hasParam: boolean): void {
 		const frame = this.frame
+
+		if (frame.dest.kind === "math") {
+			this.mathWord(frame.dest.math, name, param, hasParam)
+
+			return
+		}
+
+		if (name === "mmath" || name === "moMath" || name === "moMathPara") {
+			frame.ignorable = false
+			this.math(name)
+
+			return
+		}
 
 		if (frame.ignorable) {
 			frame.ignorable = false
@@ -2142,7 +2182,19 @@ class Reader {
 					ignoreX: false,
 					ignoreY: false,
 					textbox: false,
-					wordArt: ""
+					wordArt: "",
+					shapeType: -1,
+					filled: undefined,
+					fillColor: undefined,
+					lined: undefined,
+					lineColor: undefined,
+					lineWidth: undefined,
+					rotation: 0,
+					flipH: false,
+					flipV: false,
+					insets: [91440, 45720, 91440, 45720],
+					rel: undefined,
+					space: [0, 0, 20000, 20000]
 				}
 				const start = this.frame.start
 
@@ -2153,8 +2205,10 @@ class Reader {
 					// A group's shapes are in its source range.
 					if (parent === undefined)
 						this.preserve(shape.group ? "shapeGroup" : shape.textbox ? "textbox" : "shape", shape.name, start, end)
-					// A group's shapes are counted one by one.
-					if (!shape.group && shape.picture === undefined && !shape.textbox && shape.wordArt === "") this.undrawn++
+					// A group's shapes are counted one by one; one with no picture, text or WordArt is drawn by its
+					// preset geometry, if it has one.
+					if (!shape.group && shape.picture === undefined && !shape.textbox && shape.wordArt === "" && !this.geometryShape(shape))
+						this.undrawn++
 					if (shape.picture !== undefined) this.anchoredPicture(shape)
 					if (shape.wordArt !== "" && !shape.textbox) this.wordArt(shape)
 				}
@@ -2823,6 +2877,94 @@ class Reader {
 		return true
 	}
 
+	// ---- equations
+
+	// An equation (\\mmath, or \\moMath / \\moMathPara alone): Office Math between the paragraph's runs. Its group stays
+	// in the source (reported as math), written again as it was.
+	private math(name: string): void {
+		const frame = this.frame
+		const dest = frame.dest
+
+		// Where no text shows (a field's instruction, an ignored group), or not opening its own group (the rest of an
+		// enclosing one would be read as the equation): skipped.
+		if (dest.kind !== "story" || dest.mode !== "text" || !this.firstInGroup(frame) || frame.onEnd !== undefined) {
+			this.skipGroup(name, "math")
+
+			return
+		}
+
+		const story = dest.story
+		const start = frame.start
+		const math = new OmmlBuilder()
+
+		story.touch(start)
+		frame.dest = { kind: "math", math }
+		if (name !== "mmath") math.begin(name.slice(1), frame, undefined)
+		frame.onEnd = () => {
+			math.end(frame)
+
+			const xml = math.result()
+
+			this.preserve("math", name, start, this.tokens.position)
+			if (xml !== "") story.math(xml)
+		}
+	}
+
+	// A word in an equation: an element's (\\mf, \\mr...) opens its group, a property's inside another element is
+	// an empty element with its value; character words give runs their properties. Other groups are skipped (an
+	// \\mmathPict fallback picture among them).
+	private mathWord(math: OmmlBuilder, name: string, param: number, hasParam: boolean): void {
+		const frame = this.frame
+		const ignorable = frame.ignorable
+		const element = name.length > 1 && name.charCodeAt(0) === 0x6d ? name.slice(1) : ""
+		const first = this.firstInGroup(frame)
+
+		frame.ignorable = false
+
+		if (element !== "" && OmmlBuilder.known(element)) {
+			if (!first) {
+				math.property(element, param, hasParam)
+
+				return
+			}
+
+			math.begin(element, frame, hasParam ? param : undefined)
+			frame.onEnd = () => math.end(frame)
+
+			return
+		}
+
+		if (ignorable || (first && (element !== "" || DESTINATIONS.has(name) || SKIPPED.has(name)))) {
+			this.tokens.skipGroup()
+			this.popSkipped()
+
+			return
+		}
+
+		this.characterWord(name, param, hasParam)
+	}
+
+	// Whether the word just read is the first in its group (after \\* and spaces).
+	private firstInGroup(frame: Frame): boolean {
+		const bytes = this.bytes
+		const end = this.tokens.start
+
+		for (let at = frame.start + 1; at < end; at++) {
+			const byte = bytes[at]
+
+			if (byte === 0x20 || byte === 0x0d || byte === 0x0a || byte === 0x09) continue
+			if (byte === 0x5c && bytes[at + 1] === 0x2a) {
+				at++
+
+				continue
+			}
+
+			return false
+		}
+
+		return true
+	}
+
 	// ---- pictures and shapes
 
 	// `source`: the picture's group.
@@ -2842,10 +2984,50 @@ class Reader {
 
 		if (picture === undefined) return
 
-		const place = shapePlace(shape)
+		const id = this.doc.media(shape.story, picture)
 
+		this.anchored(shape, "Picture", "", (cx, cy, docPr) => graphic(id, { ...picture, cx, cy }, docPr))
+	}
+
+	// A shape with no picture, text or WordArt drawn as its preset geometry (MSOSPT, MS-ODRAW §2.4.24) with its fill
+	// and line, as Word draws it. Returns whether it has one.
+	private geometryShape(shape: ShapeState): boolean {
+		const preset = shape.shapeType < 0 ? undefined : presetOf(shape.shapeType)
+
+		if (preset === undefined) return false
+
+		// Lines and connectors have no inside to fill; fFilled and fLine default to on, white and black.
+		const line = shape.shapeType === 20 || isConnector(shape.shapeType)
+		const look: ShapeLook = {
+			geometry: presetGeometry(preset),
+			fill: shape.filled !== false && !line ? (artColor(shape.fillColor) ?? 0xffffff) : undefined,
+			line: shape.lined !== false ? (artColor(shape.lineColor) ?? 0) : undefined,
+			lineWidth: shape.lineWidth ?? 9525,
+			textBox: false,
+			insets: shape.insets
+		}
+		const degrees = shape.rotation / 65536
+		const transform = {
+			rotation: Math.round((((degrees % 360) + 360) % 360) * 60000),
+			flipH: shape.flipH,
+			flipV: shape.flipV
+		}
+
+		this.anchored(shape, "Shape", SHAPE_NAMESPACES, (cx, cy) => shapeGraphic(cx, cy, look, undefined, transform))
+
+		return true
+	}
+
+	// A drawing anchored where the shape is (wp:anchor, ECMA-376 Part 1 §20.4.2.3): `content` its a:graphic at its size
+	// in EMUs, `namespaces` what that markup declares.
+	private anchored(
+		shape: ShapeState,
+		kind: string,
+		namespaces: string,
+		content: (cx: number, cy: number, docPr: number) => string
+	): void {
+		const place = shapePlace(shape)
 		const story = shape.story
-		const id = this.doc.media(story, picture)
 		const docPr = this.doc.nextDrawingId()
 		const width = Math.max(1, place.right - place.left)
 		const height = Math.max(1, place.bottom - place.top)
@@ -2876,7 +3058,7 @@ class Reader {
 
 		this.inlineIn(
 			story,
-			`<w:drawing><wp:anchor distT="0" distB="0" distL="114300" distR="114300" simplePos="0" relativeHeight="${docPr}" behindDoc="${shape.behind ? 1 : 0}" locked="0" layoutInCell="1" allowOverlap="1"><wp:simplePos x="0" y="0"/><wp:positionH relativeFrom="${relH}"><wp:posOffset>${Math.round(place.left * 635)}</wp:posOffset></wp:positionH><wp:positionV relativeFrom="${relV}"><wp:posOffset>${Math.round(place.top * 635)}</wp:posOffset></wp:positionV><wp:extent cx="${cx}" cy="${cy}"/><wp:effectExtent l="0" t="0" r="0" b="0"/>${wrap}<wp:docPr id="${docPr}" name="Picture ${docPr}"/>${graphic(id, { ...picture, cx, cy }, docPr)}</wp:anchor></w:drawing>`
+			`<w:drawing><wp:anchor${namespaces} distT="0" distB="0" distL="114300" distR="114300" simplePos="0" relativeHeight="${docPr}" behindDoc="${shape.behind ? 1 : 0}" locked="0" layoutInCell="1" allowOverlap="1"><wp:simplePos x="0" y="0"/><wp:positionH relativeFrom="${relH}"><wp:posOffset>${Math.round(place.left * 635)}</wp:posOffset></wp:positionH><wp:positionV relativeFrom="${relV}"><wp:posOffset>${Math.round(place.top * 635)}</wp:posOffset></wp:positionV><wp:extent cx="${cx}" cy="${cy}"/><wp:effectExtent l="0" t="0" r="0" b="0"/>${wrap}<wp:docPr id="${docPr}" name="${kind} ${docPr}"/>${content(cx, cy, docPr)}</wp:anchor></w:drawing>`
 		)
 	}
 
@@ -2933,10 +3115,28 @@ class Reader {
 	}
 
 	private shapeProperty(shape: ShapeState, name: string, value: string): void {
-		if (name === "posrelh") shape.relHProp = Number(value)
-		else if (name === "posrelv") shape.relVProp = Number(value)
-		else if (name === "fBehindDocument") shape.behind = value === "1"
-		else if (name === "gtextUNICODE") shape.wordArt = value
+		switch (name) {
+			case "posrelh":
+				shape.relHProp = Number(value)
+				break
+			case "posrelv":
+				shape.relVProp = Number(value)
+				break
+			case "fBehindDocument":
+				shape.behind = value === "1"
+				break
+			case "gtextUNICODE":
+				shape.wordArt = value
+				break
+			default: {
+				// The rest are integers (booleans 0 / 1, colours OfficeArtCOLORREF, lengths EMUs).
+				const number = Number.parseInt(value, 10)
+
+				if (!Number.isFinite(number)) return
+
+				shapeNumber(shape, name, number)
+			}
+		}
 	}
 
 	private pictWord(picture: PictureBuilder, name: string, param: number, hasParam: boolean): void {
@@ -4525,24 +4725,111 @@ export function symbolField(instruction: string): string | undefined {
 	return `<w:t>${escapeText(String.fromCodePoint(code))}</w:t>`
 }
 
-// Where a shape is: its own place, or for a shape of a group the group's place (a group's shapes are placed in its
-// coordinate space, which the reader does not scale: they show at the group's corner, each at its own size).
+// A shape's integer property (RTF 1.9.1 "Shapes", MS-ODRAW §2.3).
+function shapeNumber(shape: ShapeState, name: string, value: number): void {
+	switch (name) {
+		case "shapeType":
+			shape.shapeType = value
+			break
+		case "fFilled":
+			shape.filled = value !== 0
+			break
+		case "fillColor":
+			shape.fillColor = value >>> 0
+			break
+		case "fLine":
+			shape.lined = value !== 0
+			break
+		case "lineColor":
+			shape.lineColor = value >>> 0
+			break
+		case "lineWidth":
+			shape.lineWidth = Math.max(0, value)
+			break
+		case "rotation":
+			shape.rotation = value | 0
+			break
+		case "fFlipH":
+			shape.flipH = value !== 0
+			break
+		case "fFlipV":
+			shape.flipV = value !== 0
+			break
+		case "dxTextLeft":
+			shape.insets[0] = value
+			break
+		case "dyTextTop":
+			shape.insets[1] = value
+			break
+		case "dxTextRight":
+			shape.insets[2] = value
+			break
+		case "dyTextBottom":
+			shape.insets[3] = value
+			break
+		case "relLeft":
+		case "relTop":
+		case "relRight":
+		case "relBottom": {
+			const rel = (shape.rel ??= [0, 0, 0, 0])
+
+			rel[["relLeft", "relTop", "relRight", "relBottom"].indexOf(name)] = value
+			break
+		}
+		case "groupLeft":
+			shape.space[0] = value
+			break
+		case "groupTop":
+			shape.space[1] = value
+			break
+		case "groupRight":
+			shape.space[2] = value
+			break
+		case "groupBottom":
+			shape.space[3] = value
+			break
+		default:
+			break
+	}
+}
+
+// Where a shape is: its own place, or for a shape of a group its rectangle in the group's coordinate space
+// (relLeft..., in groupLeft...) mapped onto the group's place. A member without one shows at the group's corner at
+// its own size.
 function shapePlace(shape: ShapeState): { left: number; top: number; right: number; bottom: number; relH: string; relV: string } {
-	let outer = shape
+	const parent = shape.parent
 
-	while (outer.parent !== undefined) outer = outer.parent
+	if (parent === undefined) return shape
 
-	if (outer === shape) return shape
+	const outer = shapePlace(parent)
+	const rel = shape.rel
+
+	if (rel === undefined)
+		return {
+			left: outer.left,
+			top: outer.top,
+			right: outer.left + (shape.right - shape.left),
+			bottom: outer.top + (shape.bottom - shape.top),
+			relH: outer.relH,
+			relV: outer.relV
+		}
+
+	const [x0, y0, x1, y1] = parent.space
+	const scaleX = x1 === x0 ? 1 : (outer.right - outer.left) / (x1 - x0)
+	const scaleY = y1 === y0 ? 1 : (outer.bottom - outer.top) / (y1 - y0)
 
 	return {
-		left: outer.left,
-		top: outer.top,
-		right: outer.left + (shape.right - shape.left),
-		bottom: outer.top + (shape.bottom - shape.top),
+		left: outer.left + (rel[0] - x0) * scaleX,
+		top: outer.top + (rel[1] - y0) * scaleY,
+		right: outer.left + (rel[2] - x0) * scaleX,
+		bottom: outer.top + (rel[3] - y0) * scaleY,
 		relH: outer.relH,
 		relV: outer.relV
 	}
 }
+
+const SHAPE_NAMESPACES =
+	' xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape"'
 
 // Destinations of \\formfield holding text.
 const FORM_TEXTS = new Set(["ffname", "ffdeftext", "ffformat", "ffhelptext", "ffstattext", "ffentrymcr", "ffexitmcr", "ffl"])

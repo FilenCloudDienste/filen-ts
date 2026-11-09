@@ -1,11 +1,11 @@
 import { BIDI_REMOVED, BidiResolver, hasRightToLeft, reorder } from "./bidi"
-import { EAST_ASIAN_FLAG, LINE_BREAK_CLASS_MASK, LineBreakClass } from "./classes"
+import { EAST_ASIAN_FLAG, LINE_BREAK_CLASS_MASK, LineBreakClass, PICTOGRAPHIC_FLAG } from "./classes"
 import { DecorationKind, FRAGMENT_LEVEL_SHIFT, FragmentFlag, FragmentKind, LineFlag, type TextLayout } from "./displayList"
 import { ClearSide, type Exclusions } from "./exclusions"
 import { BREAK_ALLOWED, BREAK_HYPHEN, BREAK_MANDATORY, BREAK_NONE, BreakFinder, type Kinsoku } from "./lineBreak"
 import { BreakKind, TabAlignment, TabLeader, type ParagraphText } from "./paragraph"
 import { Caps, DECORATION_SLOTS, Strike, type StyleTable } from "./styles"
-import { lineBreakTable } from "./unicode"
+import { lineBreakTable, wordBreakTable } from "./unicode"
 
 // Word-style paragraph layout: greedy line filling (no paragraph-wide optimisation), trailing spaces
 // hanging past the line end, tabs, justification, indents, line spacing rules and text flowing around
@@ -2049,39 +2049,192 @@ function countSpaces(text: string, start: number, end: number): number {
 	return n
 }
 
-// The end of the cluster starting at `at`: one code point plus following combining marks and joiners
-// (and the character a joiner joins).
+// The end of the extended grapheme cluster (UAX #29) starting at `at`, a cluster boundary.
 export function nextCluster(text: string, at: number, end: number): number {
 	return clusterEnd(text, at, end, null)
 }
 
+// Grapheme_Cluster_Break Control in the BMP (the code units UAX #29 GB4/GB5 break around).
+function isControl(unit: number): boolean {
+	return (
+		unit < 0x20 ||
+		(unit >= 0x7f && unit <= 0x9f) ||
+		unit === 0xad ||
+		unit === 0x061c ||
+		unit === 0x180e ||
+		unit === 0x200b ||
+		unit === 0x200e ||
+		unit === 0x200f ||
+		(unit >= 0x2028 && unit <= 0x202e) ||
+		(unit >= 0x2060 && unit <= 0x206f) ||
+		unit === 0xfeff ||
+		(unit >= 0xfff0 && unit <= 0xfffb)
+	)
+}
+
+// Grapheme_Cluster_Break Prepend in the BMP.
+function isPrepend(unit: number): boolean {
+	return (
+		(unit >= 0x0600 && unit <= 0x0605) ||
+		unit === 0x06dd ||
+		unit === 0x070f ||
+		unit === 0x0890 ||
+		unit === 0x0891 ||
+		unit === 0x08e2 ||
+		unit === 0x0d4e
+	)
+}
+
+const JAMO_L = 1
+const JAMO_V = 2
+const JAMO_T = 3
+const JAMO_LV = 4
+const JAMO_LVT = 5
+
+// Hangul_Syllable_Type of a code unit (0 none), by range: classify() may rewrite the Hangul Line_Break classes.
+function jamo(unit: number): number {
+	if (unit < 0x1100) return 0
+	if (unit <= 0x115f) return JAMO_L
+	if (unit <= 0x11a7) return JAMO_V
+	if (unit <= 0x11ff) return JAMO_T
+	if (unit >= 0xa960 && unit <= 0xa97c) return JAMO_L
+	if (unit >= 0xac00 && unit <= 0xd7a3) return (unit - 0xac00) % 28 === 0 ? JAMO_LV : JAMO_LVT
+	if (unit >= 0xd7b0 && unit <= 0xd7c6) return JAMO_V
+	if (unit >= 0xd7cb && unit <= 0xd7fb) return JAMO_T
+
+	return 0
+}
+
+// GB6-GB8: whether jamo `next` continues a syllable ending in jamo `prev`.
+function jamoJoins(prev: number, next: number): boolean {
+	if (prev === JAMO_L) return next === JAMO_L || next === JAMO_V || next === JAMO_LV || next === JAMO_LVT
+	if (prev === JAMO_V || prev === JAMO_LV) return next === JAMO_V || next === JAMO_T
+
+	return (prev === JAMO_T || prev === JAMO_LVT) && next === JAMO_T
+}
+
+// The scripts with Indic_Conjunct_Break Linker (Devanagari, Bengali, Gujarati, Oriya, Telugu, Malayalam).
+function conjunctScript(unit: number): boolean {
+	const block = unit & ~0x7f
+
+	return block === 0x0900 || block === 0x0980 || block === 0x0a80 || block === 0x0b00 || block === 0x0c00 || block === 0x0d00
+}
+
+// Indic_Conjunct_Break Consonant (gaps in the ranges are unassigned).
+function isConsonant(unit: number): boolean {
+	if (!conjunctScript(unit)) return false
+
+	const offset = unit & 0x7f
+
+	if (offset >= 0x15 && offset <= 0x39) return true
+
+	switch (unit) {
+		case 0x0d3a:
+		case 0x09dc:
+		case 0x09dd:
+		case 0x09df:
+		case 0x09f0:
+		case 0x09f1:
+		case 0x0af9:
+		case 0x0b5c:
+		case 0x0b5d:
+		case 0x0b5f:
+		case 0x0b71:
+			return true
+		default:
+			return (unit >= 0x0958 && unit <= 0x095f) || (unit >= 0x0978 && unit <= 0x097f) || (unit >= 0x0c58 && unit <= 0x0c5a)
+	}
+}
+
+function isPictographic(text: string, at: number): boolean {
+	return (wordBreakTable().get(text.codePointAt(at) ?? 0) & PICTOGRAPHIC_FLAG) !== 0
+}
+
 // nextCluster() with Line_Break values per code unit already at hand (prepare's), so counting, splitting
-// and hit testing agree on clusters.
+// and hit testing agree on clusters. Extend and SpacingMark are Line_Break CM and ZWJ (but Control), plus EM;
+// Hangul, regional indicators and conjunct consonants go by code point. Regional indicators pair from `at`,
+// so `at` must be a boundary.
 function clusterEnd(text: string, at: number, end: number, classes: Uint8Array | null): number {
-	const lead = text.charCodeAt(at)
-	let k = at + (lead >= 0xd800 && lead < 0xdc00 && at + 1 < end && isTrail(text.charCodeAt(at + 1)) ? 2 : 1)
-	const table = classes === null ? lineBreakTable() : null
+	const first = text.charCodeAt(at)
+
+	// GB3-GB5.
+	if (first === 0x0d) return at + 1 < end && text.charCodeAt(at + 1) === 0x0a ? at + 2 : at + 1
+	if (isControl(first)) return at + 1
+
+	// GB9b.
+	let base = at
+
+	while (isPrepend(text.charCodeAt(base)) && base + 1 < end && !isControl(text.charCodeAt(base + 1))) base++
+
+	const lead = text.charCodeAt(base)
+	const pair = lead >= 0xd800 && lead < 0xdc00 && base + 1 < end && isTrail(text.charCodeAt(base + 1))
+	let k = base + (pair ? 2 : 1)
+	// The last code point not joined by GB9: its jamo type, and whether it starts a pair of regional indicators.
+	let syllable = jamo(lead)
+	let regional = pair && lead === 0xd83c && text.charCodeAt(base + 1) >= 0xdde6 && text.charCodeAt(base + 1) <= 0xddff
+	// GB9c: the cluster ends in a consonant, and a linker follows it.
+	let consonant = isConsonant(lead)
+	let linked = false
+	let table: ReturnType<typeof lineBreakTable> | null = null
 
 	while (k < end) {
 		const unit = text.charCodeAt(k)
+
+		// Nothing below U+0300 extends a cluster.
+		if (unit < 0x300) break
+
 		const wide = unit >= 0xd800 && unit < 0xdc00 && k + 1 < end && isTrail(text.charCodeAt(k + 1))
-		const cls = (table === null ? (classes?.[k] ?? 0) : table.get(wide ? (text.codePointAt(k) ?? unit) : unit)) & LINE_BREAK_CLASS_MASK
+		const size = wide ? 2 : 1
 
-		if (cls === LineBreakClass.ZWJ) {
-			k += 1
+		if (unit === 0x200d) {
+			// GB9, and GB11: a pictograph, extenders, ZWJ, then a pictograph.
+			k++
+			syllable = 0
+			regional = false
 
-			if (k < end) {
-				const next = text.charCodeAt(k)
+			if (k < end && isPictographic(text, k) && isPictographic(text, base)) {
+				const joined = text.charCodeAt(k)
 
-				k += next >= 0xd800 && next < 0xdc00 && k + 1 < end && isTrail(text.charCodeAt(k + 1)) ? 2 : 1
+				base = k
+				k += joined >= 0xd800 && joined < 0xdc00 && k + 1 < end && isTrail(text.charCodeAt(k + 1)) ? 2 : 1
+				consonant = false
 			}
 
 			continue
 		}
 
-		if (cls !== LineBreakClass.CM || unit < 0x20) break
+		const cls =
+			classes !== null
+				? (classes[k] ?? 0) & LINE_BREAK_CLASS_MASK
+				: (table ??= lineBreakTable()).get(wide ? (text.codePointAt(k) ?? unit) : unit) & LINE_BREAK_CLASS_MASK
 
-		k += wide ? 2 : 1
+		// GB9, GB9a: Extend, SpacingMark (Thai and Lao SARA AM are letters to Line_Break), emoji modifiers.
+		if ((cls === LineBreakClass.CM && !isControl(unit)) || cls === LineBreakClass.EM || unit === 0x0e33 || unit === 0x0eb3) {
+			if (consonant && conjunctScript(unit) && (unit & 0x7f) === 0x4d) linked = true
+
+			syllable = 0
+			regional = false
+			k += size
+
+			continue
+		}
+
+		const next = jamo(unit)
+
+		if (syllable !== 0 && next !== 0 && jamoJoins(syllable, next)) {
+			syllable = next
+			consonant = false
+		} else if (regional && wide && unit === 0xd83c && text.charCodeAt(k + 1) >= 0xdde6 && text.charCodeAt(k + 1) <= 0xddff) {
+			// GB12, GB13: regional indicators pair.
+			regional = false
+		} else if (consonant && linked && isConsonant(unit)) {
+			linked = false
+		} else {
+			break
+		}
+
+		base = k
+		k += size
 	}
 
 	return Math.min(k, end)

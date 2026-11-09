@@ -13,6 +13,7 @@ import {
 	BytePieces,
 	type SliceClock,
 	CONTENT_TYPES_PART,
+	deflatesWell,
 	type ByteSink,
 	type ByteSource,
 	type NewRelationship,
@@ -557,7 +558,7 @@ export async function serializeDocx(input: DocxSaveInput, options: DocxPrepareOp
 		if (contentType === undefined) throw new DocxWriteError("unsupported", `${source} has no content type to copy`)
 
 		copies.set(partKey(source), name)
-		parts.add(name, await pkg.opc.read(source), contentType)
+		parts.add(name, await pkg.opc.read(source), contentType, { compress: pkg.opc.entry(source)?.method !== 0 })
 
 		const relsName = relationshipsPartName(source)
 
@@ -837,11 +838,11 @@ export async function serializeDocx(input: DocxSaveInput, options: DocxPrepareOp
 
 			put(replace, { name: pkg.opc.entry(name)?.name ?? name, bytes })
 		},
-		add(name, bytes, contentType) {
+		add(name, bytes, contentType, options = {}) {
 			if (own(name)) throw new DocxWriteError("unsupported", `${name} is the save's own to write`)
 			if (pkg.has(name) || taken.has(partKey(name))) throw new DocxWriteError("unsupported", `${name} is already in the package`)
 
-			put(add, { name, bytes })
+			put(add, { name, bytes, compress: options.compress ?? deflatesWell(contentType) })
 			taken.add(partKey(name))
 			typed.push({ name, contentType })
 		},

@@ -21,6 +21,8 @@ export interface PdfDecodedImage {
 	readonly height: number
 	// width × height × 4 bytes, not premultiplied.
 	readonly rgba: Uint8Array
+	// The pixels are upright (the decoder applied the EXIF orientation), so the writer does not apply it again.
+	readonly oriented?: boolean
 }
 
 // Decodes what PDF cannot take as is. Refusals throw PdfWriteError ("imageUnsupported", "imageTooLarge").
@@ -455,7 +457,9 @@ export function platformImageDecoder(): PdfImageDecoder | undefined {
 				canvas.width = 0
 				canvas.height = 0
 
-				return { width, height, rgba: new Uint8Array(pixels.buffer, pixels.byteOffset, pixels.length) }
+				// createImageBitmap always applies EXIF orientation ("none" is gone from the standard and treated as
+				// "from-image"); ImageDecoder frames only serve PNG, which carries none here.
+				return { width, height, rgba: new Uint8Array(pixels.buffer, pixels.byteOffset, pixels.length), oriented: true }
 			} finally {
 				bitmap.close()
 			}

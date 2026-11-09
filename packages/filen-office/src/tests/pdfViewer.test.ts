@@ -2,11 +2,11 @@ import { describe, expect, it } from "vitest"
 import {
 	clampPdfScale,
 	isPdfCommandEnabled,
-	mostVisiblePage,
 	pdfBox,
 	pdfCanvasDims,
 	pdfFitScale,
 	pdfPageAction,
+	pdfPageInView,
 	pdfPageRotation,
 	pdfPercentScale,
 	pdfRenderRatio,
@@ -20,39 +20,45 @@ import {
 	PDF_MIN_SCALE,
 	PDF_PAGE_EVICT_MARGIN_PX,
 	PDF_PAGE_RENDER_MARGIN_PX,
-	PDF_ZOOM_STEP,
 	type PdfViewerState
 } from "../dom/pdf/index"
 
-describe("mostVisiblePage", () => {
-	it("picks the page with the highest ratio", () => {
-		expect(
-			mostVisiblePage(
-				new Map([
-					[1, 0.2],
-					[2, 0.9],
-					[3, 0.5]
-				])
-			)
-		).toBe(2)
+describe("pdfPageInView", () => {
+	// `count` pages `height` tall with `gap` between them, the first starting at 0.
+	const stack =
+		(height: number, gap: number, reads: number[] = []) =>
+		(page: number): readonly [number, number] => {
+			reads.push(page)
+
+			const top = (page - 1) * (height + gap)
+
+			return [top, top + height]
+		}
+
+	it("picks the page taking the most of the view", () => {
+		// View 450..1250 over 1000-tall pages: page 1 shows 550, page 2 shows 234.
+		expect(pdfPageInView(3, stack(1000, 16), 450, 1250)).toBe(1)
+		// View 700..1500: page 1 shows 300, page 2 shows 484.
+		expect(pdfPageInView(3, stack(1000, 16), 700, 1500)).toBe(2)
 	})
 
-	it("ignores pages with no visible part and keeps the first on a tie", () => {
-		expect(
-			mostVisiblePage(
-				new Map([
-					[1, 0],
-					[2, -0.1],
-					[3, 0.5],
-					[4, 0.5]
-				])
-			)
-		).toBe(3)
+	it("keeps the topmost of several whole pages at a low zoom, not a page above the view", () => {
+		// 100-tall pages 110 apart, view 990..1790: pages 10-16 show whole, pages 1-9 are above it (inside what an
+		// observer's margin would count).
+		expect(pdfPageInView(40, stack(100, 10), 990, 1790)).toBe(10)
 	})
 
-	it("gives null when nothing is visible, so the current page stays", () => {
-		expect(mostVisiblePage(new Map([[1, 0]]))).toBeNull()
-		expect(mostVisiblePage(new Map())).toBeNull()
+	it("reads O(log n) page boxes, not every page", () => {
+		const reads: number[] = []
+
+		expect(pdfPageInView(10_000, stack(100, 10, reads), 550_000, 550_800)).toBe(5001)
+		expect(reads.length).toBeLessThan(30)
+	})
+
+	it("gives null when no page is in view or a page is not laid out, so the current page stays", () => {
+		expect(pdfPageInView(0, stack(100, 0), 0, 100)).toBeNull()
+		expect(pdfPageInView(2, stack(100, 0), 500, 600)).toBeNull()
+		expect(pdfPageInView(4, () => null, 0, 100)).toBeNull()
 	})
 })
 
@@ -111,16 +117,35 @@ describe("zoom", () => {
 		expect(clampPdfScale(2)).toBe(2)
 	})
 
-	it("steps by one zoom step and stops at the ends", () => {
-		expect(pdfStepZoomScale(PDF_BASE_SCALE, 1)).toBeCloseTo(PDF_BASE_SCALE + PDF_ZOOM_STEP, 10)
-		expect(pdfStepZoomScale(PDF_BASE_SCALE, -1)).toBeCloseTo(PDF_BASE_SCALE - PDF_ZOOM_STEP, 10)
+	const walk = (direction: 1 | -1): number[] => {
+		const shown: number[] = []
+		let scale = PDF_BASE_SCALE
+
+		for (;;) {
+			const next = pdfStepZoomScale(scale, direction)
+
+			if (next === scale) return shown
+
+			scale = next
+			shown.push(pdfZoomPercent(scale))
+		}
+	}
+
+	it("steps along the zoom menu's percentages, then to the ends of the range", () => {
+		expect(walk(1)).toEqual([125, 150, 200, 250, 267])
+		expect(walk(-1)).toEqual([75, 50, 33])
 		expect(pdfStepZoomScale(PDF_MAX_SCALE, 1)).toBe(PDF_MAX_SCALE)
 		expect(pdfStepZoomScale(PDF_MIN_SCALE, -1)).toBe(PDF_MIN_SCALE)
+		expect(pdfStepZoomScale(PDF_MAX_SCALE, -1)).toBe(pdfPercentScale(250))
+		expect(pdfStepZoomScale(PDF_MIN_SCALE, 1)).toBe(pdfPercentScale(50))
 	})
 
-	it("steps from a wheel zoom back onto the step grid", () => {
-		expect(pdfStepZoomScale(1.6, 1)).toBeCloseTo(1.75, 10)
-		expect(pdfStepZoomScale(1.6, -1)).toBeCloseTo(1.5, 10)
+	it("steps from a wheel zoom to the nearest menu percentage that way", () => {
+		expect(pdfZoomPercent(pdfStepZoomScale(pdfPercentScale(110), 1))).toBe(125)
+		expect(pdfZoomPercent(pdfStepZoomScale(pdfPercentScale(110), -1))).toBe(100)
+		// A scale a rounding error off a preset counts as on it.
+		expect(pdfZoomPercent(pdfStepZoomScale(PDF_BASE_SCALE + 1e-12, 1))).toBe(125)
+		expect(pdfZoomPercent(pdfStepZoomScale(PDF_BASE_SCALE - 1e-12, -1))).toBe(75)
 	})
 
 	it("zooms in on a wheel up and out on a wheel down, within the range", () => {
@@ -171,6 +196,16 @@ describe("fit, presets and rotation", () => {
 		expect(pdfFitScale("fitPage", 200, 400, 432, 332, 1.5)).toBe(0.75)
 		expect(pdfFitScale("fitWidth", 10, 10, 2000, 2000, 1.5)).toBe(PDF_MAX_SCALE)
 		expect(pdfFitScale("fitPage", 1000, 1000, 200, 200, 1.5)).toBe(PDF_MIN_SCALE)
+	})
+
+	it("opens fitted: a portrait page's width or all of a landscape page, never past 100 %", () => {
+		// A 612 pt Letter page on a 390 px phone: (390 - 32) / 612.
+		expect(pdfFitScale("auto", 612, 792, 390, 700, 1.5)).toBeCloseTo(358 / 612)
+		// A wide view leaves it at 100 %.
+		expect(pdfFitScale("auto", 612, 792, 2000, 700, 1.5)).toBe(PDF_BASE_SCALE)
+		// A landscape page fits whole: min((1032 - 32) / 400, (332 - 32) / 300).
+		expect(pdfFitScale("auto", 400, 300, 1032, 332, 1.5)).toBe(1)
+		expect(pdfFitScale("auto", 612, 792, 0, 0, 1.25)).toBe(1.25)
 	})
 
 	it("keeps the scale while the view or the page has no size", () => {

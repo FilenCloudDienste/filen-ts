@@ -1,6 +1,7 @@
 // File extension -> code language, shared by every app's code editor. The extensions are mobile's
 // CodeMirror language table (CodeMirror's own language-data lists), lowercased, plus the ones web already
-// recognised; lookups take the extension lowercased and without its dot. Grammars live in dom/code.
+// recognised, except "text", which is left as plain text rather than LaTeX; lookups take the extension
+// lowercased and without its dot. Grammars live in dom/code.
 
 export type CodeLanguageId =
 	| "apl"
@@ -459,7 +460,6 @@ const BY_EXTENSION: ReadonlyMap<string, CodeLanguageId> = new Map<string, CodeLa
 	["swift", "swift"],
 	["tcl", "tcl"],
 	["tex", "latex"],
-	["text", "latex"],
 	["textile", "textile"],
 	["toml", "toml"],
 	["ts", "typescript"],

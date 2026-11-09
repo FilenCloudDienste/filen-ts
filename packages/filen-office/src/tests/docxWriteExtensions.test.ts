@@ -822,6 +822,46 @@ describe("docx writer extension points: new stories and parts", () => {
 		expect(await read(result.bytes, "word/_rels/document.xml.rels")).toContain('Target="people.xml"')
 	})
 
+	it("stores a new part whose content type is compressed already and deflates the rest", async () => {
+		const document = await withComments()
+		const edit = session(document)
+
+		edit.dispatch(edit.state.tr.insertText("New ", 2))
+
+		// A 1 × 1 PNG header plus filler: deflate would shrink it, so only the content type decides.
+		const png = new Uint8Array(4096)
+
+		png.set([
+			0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0
+		])
+
+		const added: PartContributor = {
+			contribute(parts) {
+				parts.add("word/media/image1.png", png, "image/png")
+				parts.add("word/media/image2.svg", encodeUtf8('<svg xmlns="http://www.w3.org/2000/svg"/>'), "image/svg+xml")
+				parts.add("word/media/image3.png", png, "image/png", { compress: true })
+				parts.add(
+					"word/people.xml",
+					encodeUtf8('<?xml version="1.0"?><w15:people xmlns:w15="http://schemas.microsoft.com/office/word/2012/wordml"/>'),
+					"application/vnd.openxmlformats-officedocument.wordprocessingml.people+xml"
+				)
+
+				return Promise.resolve()
+			}
+		}
+		const result = await saveDocx({ pkg: document.pkg, context: document.context, sessions: [edit], parts: [added] })
+
+		if (result.bytes === undefined) throw new Error("No bytes")
+
+		const saved = await OpcPackage.open(bytesSource(result.bytes))
+
+		expect(saved.entry("word/media/image1.png")?.method).toBe(0)
+		expect(saved.entry("word/media/image2.svg")?.method).toBe(8)
+		expect(saved.entry("word/media/image3.png")?.method).toBe(8)
+		expect(saved.entry("word/people.xml")?.method).toBe(8)
+		expect(await saved.read("word/media/image1.png")).toEqual(png)
+	})
+
 	it("never retypes what the package types: not in the writer, not past gate 2", async () => {
 		const document = await withComments()
 		const edit = session(document)

@@ -60,6 +60,8 @@ export interface ResolvedFont {
 	readonly italic: boolean
 	// Font-size factor for substitutes drawn at a corrected size.
 	readonly scale: number
+	// Horizontal-only factor for a condensed original drawn in a normal-width substitute.
+	readonly widthScale: number
 	readonly metrics: VerticalMetrics | null
 	readonly metricsBasis: MetricsBasis
 	readonly source: FontSource
@@ -110,6 +112,12 @@ export function cssFont(font: ResolvedFont, sizePx: number): string {
 	const family = font.family === null ? font.generic : `"${font.family}", ${font.generic}`
 
 	return `${font.italic ? "italic " : ""}${font.weight} ${size}px ${family}`
+}
+
+// The resolved face's horizontal-only factor, 1 when absent or invalid. Text tables fold it into scaleX and
+// divide letter spacing by it, so a condensed original's substitute narrows the glyphs and not the spacing.
+export function glyphWidthScale(font: ResolvedFont): number {
+	return font.widthScale > 0 && Number.isFinite(font.widthScale) ? font.widthScale : 1
 }
 
 interface EmbeddedFace {
@@ -734,6 +742,7 @@ export class FontManager {
 				this.weightFor(request, substitution.weight),
 				request.italic,
 				substitution.scale,
+				substitution.widthScale,
 				substitution.generic,
 				lower
 			)
@@ -747,7 +756,7 @@ export class FontManager {
 			if (local !== undefined && local !== null) return this.fromLocal(local, weight, request.italic, generic)
 
 			if (fallback.family !== undefined) {
-				const substituted = this.fromBundled(fallback.family, weight, request.italic, 1, generic, null)
+				const substituted = this.fromBundled(fallback.family, weight, request.italic, 1, 1, generic, null)
 
 				if (substituted !== null) return substituted
 			}
@@ -759,6 +768,7 @@ export class FontManager {
 			weight,
 			italic: request.italic,
 			scale: 1,
+			widthScale: 1,
 			metrics: null,
 			metricsBasis: "runtime",
 			source: "generic"
@@ -779,6 +789,7 @@ export class FontManager {
 			weight,
 			italic,
 			scale: 1,
+			widthScale: 1,
 			metrics: face?.metrics ?? null,
 			metricsBasis: face === undefined ? "runtime" : "font",
 			source: "embedded"
@@ -792,6 +803,7 @@ export class FontManager {
 			weight,
 			italic,
 			scale: 1,
+			widthScale: 1,
 			metrics: null,
 			metricsBasis: "runtime",
 			source: "local"
@@ -806,6 +818,7 @@ export class FontManager {
 		weight: number,
 		italic: boolean,
 		scale: number,
+		widthScale: number,
 		generic: GenericFamily,
 		original: string | null
 	): ResolvedFont | null {
@@ -822,6 +835,7 @@ export class FontManager {
 			weight,
 			italic,
 			scale,
+			widthScale,
 			metrics: published ? line.metrics : (CLONE_METRICS.get(family)?.metrics ?? face.metrics),
 			metricsBasis: published ? "original" : "substitute",
 			source: "bundled"
@@ -830,7 +844,7 @@ export class FontManager {
 
 	private intern(font: Omit<ResolvedFont, "id">): ResolvedFont {
 		const metrics = font.metrics === null ? "" : Object.values(font.metrics).join(",")
-		const key = `${font.source}|${font.family ?? ""}|${font.generic}|${font.weight}|${font.italic}|${font.scale}|${font.metricsBasis}|${metrics}`
+		const key = `${font.source}|${font.family ?? ""}|${font.generic}|${font.weight}|${font.italic}|${font.scale}|${font.widthScale}|${font.metricsBasis}|${metrics}`
 		let interned = this.interned.get(key)
 
 		if (interned === undefined) {

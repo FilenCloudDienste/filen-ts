@@ -210,6 +210,9 @@ interface FormatObject {
 	readonly align: number
 	readonly lineAlign: number
 	readonly trimming: number
+	// Space before and after each line, in ems.
+	readonly leadingMargin: number
+	readonly trailingMargin: number
 }
 
 type PlusObject =
@@ -474,7 +477,9 @@ export class EmfPlus {
 				const points = this.points(countAt + 4, b.u32(countAt), type === 0x4018 ? flags & 0x4000 : flags, d + size)
 				const builder = this.builder(this.matrix())
 
-				curve(builder, points, tension, type !== 0x4018)
+				// DrawCurve strokes NumSegments segments from point Offset; the other points only shape tangents.
+				if (type === 0x4018) curve(builder, points, tension, false, b.u32(d + 4), b.u32(d + 8))
+				else curve(builder, points, tension, true)
 
 				if (fill) this.fill(builder, flags, b.u32(d), (flags & 0x2000) === 0)
 				else this.strokeWith(builder, flags & 0xff)
@@ -1410,29 +1415,50 @@ export class EmfPlus {
 		const [x, y, w, h] = layout
 		const position = (value: number): "start" | "middle" | "end" => (value === 1 ? "middle" : value === 2 ? "end" : "start")
 		const trims = ["none", "character", "word", "ellipsisCharacter", "ellipsisWord", "ellipsisPath"] as const
+		const rtl = (formatFlags & 0x1) !== 0
+		// DirectionVertical: lines run down the rectangle and advance right to left, so the block is laid out
+		// with the sides swapped and turned a quarter clockwise about the rectangle's top-right corner.
+		const vertical = (formatFlags & 0x2) !== 0
+		const width = Math.max(0, vertical ? h : w)
+		const height = Math.max(0, vertical ? w : h)
+		// GDI+ pads each line by the format's margins, 1/6 em each without a format (GenericDefault).
+		const lead = (format?.kind === "format" ? format.leadingMargin : 1 / 6) * em
+		const trail = (format?.kind === "format" ? format.trailingMargin : 1 / 6) * em
+		const before = rtl ? trail : lead
+		const after = rtl ? lead : trail
+		const padded = width <= 0 || width > before + after
+		const inner = padded && width > 0 ? width - before - after : width
+		const blockAlign = position(align)
+		// An unbounded line is placed at the origin per its alignment, with the margins outside its text.
+		const shift = !padded ? 0 : width > 0 || blockAlign === "start" ? before : blockAlign === "end" ? -after : (before - after) / 2
+		const clip = (formatFlags & 0x4000) === 0 && width > 0 && height > 0
+		// The clip stays the whole layout rectangle when the block is narrower than it.
+		const outer = clip && inner < width
+		const placement: Matrix = vertical ? [0, 1, -1, 0, x + w, y + shift] : [1, 0, 0, 1, x + shift, y]
+		const m = this.matrix()
 
 		this.out.text(
 			{
 				kind: "block",
 				run: this.run(font, brush.color, text, em),
-				width: Math.max(0, w),
-				height: Math.max(0, h),
-				align: position(align),
+				width: inner,
+				height,
+				align: blockAlign,
 				lineAlign: position(lineAlign),
-				wrap: (formatFlags & 0x1000) === 0 && w > 0,
-				clip: (formatFlags & 0x4000) === 0 && w > 0 && h > 0,
+				wrap: (formatFlags & 0x1000) === 0 && width > 0,
+				clip: clip && !outer,
 				lineLimit: (formatFlags & 0x2000) !== 0,
 				trimming: trims[trimming] ?? "none",
 				lineHeight: em * (font.font.ascent + font.font.descent),
 				ascent: font.font.ascent,
-				rtl: (formatFlags & 0x1) !== 0
+				rtl
 			},
-			mul(this.matrix(), [1, 0, 0, 1, x, y]),
+			mul(m, placement),
 			0,
 			0,
-			Math.max(0, w),
-			Math.max(0, h),
-			this.clip,
+			inner,
+			height,
+			outer ? intersectClips(this.clip, rectClip(x, y, x + w, y + h, m, this.out.env), this.out.env) : this.clip,
 			brush.fill
 		)
 	}
@@ -2237,7 +2263,15 @@ function parseObject(b: Bytes, at: number, size: number, type: number, owner: { 
 			return { kind: "font", size: Math.max(0, b.f32(at + 4)), unit: b.u32(at + 8), font }
 		}
 		case 7:
-			return { kind: "format", flags: b.u32(at + 4), align: b.u32(at + 12), lineAlign: b.u32(at + 16), trimming: b.u32(at + 48) }
+			return {
+				kind: "format",
+				flags: b.u32(at + 4),
+				align: b.u32(at + 12),
+				lineAlign: b.u32(at + 16),
+				trimming: b.u32(at + 48),
+				leadingMargin: margin(b.f32(at + 36)),
+				trailingMargin: margin(b.f32(at + 40))
+			}
 		case 8:
 			return { kind: "attributes", wrap: b.u32(at + 8), clamp: argb(b.u32(at + 12)) }
 		default:
@@ -2245,8 +2279,20 @@ function parseObject(b: Bytes, at: number, size: number, type: number, owner: { 
 	}
 }
 
-// A cardinal spline through `points` (tension 0..1) as Béziers, closed or open.
-function curve(builder: PathBuilder, points: Float64Array, tension: number, closed: boolean): void {
+function margin(value: number): number {
+	return Number.isFinite(value) && value > 0 ? value : 0
+}
+
+// A cardinal spline through `points` (tension 0..1) as Béziers, closed or open; an open one only over
+// `count` segments from point `offset` (both clamped), with tangents still taken from every point.
+function curve(
+	builder: PathBuilder,
+	points: Float64Array,
+	tension: number,
+	closed: boolean,
+	offset: number = 0,
+	count: number = Infinity
+): void {
 	const n = points.length / 2
 
 	if (n < 2) return
@@ -2254,11 +2300,14 @@ function curve(builder: PathBuilder, points: Float64Array, tension: number, clos
 	const t = (Number.isFinite(tension) ? tension : 0.5) / 3
 	const px = (k: number): number => points[((closed ? (k + n) % n : Math.min(n - 1, Math.max(0, k))) * 2) | 0] ?? 0
 	const py = (k: number): number => points[((closed ? (k + n) % n : Math.min(n - 1, Math.max(0, k))) * 2 + 1) | 0] ?? 0
-	const segments = closed ? n : n - 1
+	const start = closed ? 0 : Math.min(n - 2, offset)
+	const end = closed ? n : start + Math.min(n - 1 - start, count)
 
-	builder.moveTo(px(0), py(0))
+	if (end <= start) return
 
-	for (let k = 0; k < segments; k++) {
+	builder.moveTo(px(start), py(start))
+
+	for (let k = start; k < end; k++) {
 		builder.cubicTo(
 			px(k) + (px(k + 1) - px(k - 1)) * t,
 			py(k) + (py(k + 1) - py(k - 1)) * t,

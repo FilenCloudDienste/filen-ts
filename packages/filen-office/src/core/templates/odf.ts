@@ -1,9 +1,9 @@
-import type { TemplateLocale } from "./locale"
+import { languageSlots, tagParts, type TemplateLocale } from "./locale"
 import type { TemplatePart } from "./zip"
 
 // What the blank OpenDocument packages share: the package frame (ODF 1.3 Part 2 §3.3 mimetype, §4 manifest), the
 // Calibri font declaration (Part 3 §16.23) and the default text properties: Calibri 11 pt in the user's language
-// (§20.185 fo:font-size, §20.190 fo:language, §20.182 fo:country), set for Latin, Asian and complex text alike.
+// (§20.185 fo:font-size), the font set for Latin, Asian and complex text alike, the language in its script's slot.
 
 export const OFFICE = "urn:oasis:names:tc:opendocument:xmlns:office:1.0"
 export const STYLE = "urn:oasis:names:tc:opendocument:xmlns:style:1.0"
@@ -27,13 +27,34 @@ export function pageLayout(paper: TemplateLocale["paper"]): string {
 	)
 }
 
-// templateLocale's tag split into fo:language and fo:country (no country when the region is unknown).
-export function textProperties({ tag }: TemplateLocale): string {
-	const [language, country] = tag.split("-")
-	const lang = `fo:language="${language ?? "en"}"${country === undefined ? "" : ` fo:country="${country}"`}`
+function languagePair(tag: string, suffix: string): string {
+	const { language, script, region } = tagParts(tag)
+	const style = suffix === "" ? "fo" : "style"
 
 	return (
-		`<style:text-properties style:font-name="Calibri" fo:font-size="11pt" ${lang} ` +
+		` ${style}:language${suffix}="${language}"` +
+		(script === undefined ? "" : ` ${style}:script${suffix}="${script}"`) +
+		(region === undefined ? "" : ` ${style}:country${suffix}="${region}"`)
+	)
+}
+
+// A tag as the ODF language attributes, each in its script's slot (no country when the region is unknown):
+// fo:language / fo:script / fo:country (§20.190, §20.182), style:language-asian / style:script-asian /
+// style:country-asian (§20.276) and the -complex trio (§20.277); a script only where the tag names one.
+// Starts with a space.
+export function languageAttributes(tag: string): string {
+	const { latin, eastAsia, complex } = languageSlots(tag)
+
+	return (
+		languagePair(latin, "") +
+		(eastAsia === undefined ? "" : languagePair(eastAsia, "-asian")) +
+		(complex === undefined ? "" : languagePair(complex, "-complex"))
+	)
+}
+
+export function textProperties({ tag }: TemplateLocale): string {
+	return (
+		`<style:text-properties style:font-name="Calibri" fo:font-size="11pt"${languageAttributes(tag)} ` +
 		'style:font-name-asian="Calibri" style:font-size-asian="11pt" style:font-name-complex="Calibri" style:font-size-complex="11pt"/>'
 	)
 }

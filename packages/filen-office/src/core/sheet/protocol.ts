@@ -463,6 +463,14 @@ export interface SheetFileSharing {
 	readonly userName?: string
 }
 
+// What a workbook says of itself beyond its title (ECMA-376 Part 2 §11.1: dc:creator, dc:subject, cp:keywords); each
+// whitespace-collapsed and present only when not blank.
+export interface SheetDocumentProperties {
+	readonly author?: string
+	readonly subject?: string
+	readonly keywords?: string
+}
+
 export interface SheetWorkbookInfo {
 	readonly kind: SheetFileKind
 	readonly sheets: readonly SheetSummary[]
@@ -478,6 +486,8 @@ export interface SheetWorkbookInfo {
 	// The workbook's own title (docProps/core.xml dc:title, an OpenDocument spreadsheet's meta.xml dc:title); absent:
 	// it names none (a PDF of it is titled from its file name).
 	readonly title?: string
+	// The workbook's author, subject and keywords (docProps/core.xml); absent: none named. A PDF of it carries them.
+	readonly properties?: SheetDocumentProperties
 	// The file was password-protected: opened decrypted, and every save is sealed. verified: the Agile HMAC
 	// matched; unchecked: the file carries none.
 	readonly encrypted?: "verified" | "unchecked"

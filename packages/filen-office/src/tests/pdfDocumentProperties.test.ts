@@ -80,6 +80,26 @@ describe("PDF document properties", () => {
 		}
 	})
 
+	it("dates the XMP packet as the Info dictionary, and only when the output is not deterministic", async () => {
+		const writer = await PdfWriter.create({ deflate: null, title: "Report" })
+
+		await writer.endPage(writer.beginPage(100, 100))
+
+		const chunks: Uint8Array[] = []
+
+		for (const part of (await writer.finish()).parts)
+			chunks.push(part instanceof Uint8Array ? part : new Uint8Array(await part.arrayBuffer()))
+
+		const text = new TextDecoder("latin1").decode(Buffer.concat(chunks))
+		const info = /\/CreationDate \(D:(\d{4})(\d\d)(\d\d)(\d\d)(\d\d)(\d\d)Z\)/u.exec(text)
+		const xmp = /<xmp:CreateDate>([^<]*)<\/xmp:CreateDate>/u.exec(text)
+
+		expect(info).not.toBeNull()
+		expect(text).toContain('xmlns:xmp="http://ns.adobe.com/xap/1.0/"')
+		expect(xmp?.[1]).toBe(`${info?.[1]}-${info?.[2]}-${info?.[3]}T${info?.[4]}:${info?.[5]}:${info?.[6]}Z`)
+		expect(new TextDecoder("latin1").decode(await written(undefined))).not.toMatch(/CreationDate|xmp:CreateDate/u)
+	})
+
 	it("encrypts the properties with the rest of an encrypted document", async () => {
 		const bytes = await written({ author: "Ann", subject: "Plans", keywords: "secret" }, "pw")
 

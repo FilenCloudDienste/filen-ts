@@ -1,4 +1,4 @@
-import { cssFont, type LineSpacingRule, type ResolvedFont } from "../fonts/index"
+import { cssFont, glyphWidthScale, type LineSpacingRule, type ResolvedFont } from "../fonts/index"
 import { lineAscentDescent } from "../fonts/metrics"
 import type { MeasureCache } from "./measure"
 
@@ -130,8 +130,10 @@ export class StyleTable {
 		// Published metrics of the original describe it at the nominal size; others the face as drawn.
 		const metricsEm = style.font.metricsBasis === "original" ? style.size : em
 		const extents = lineExtents(style.font, this.rule)
-		const scaleX = style.scaleX ?? 1
-		const letterSpacing = style.letterSpacing ?? 0
+		// Every reader multiplies (advance + letterSpacing) by scaleX.
+		const widthScale = glyphWidthScale(style.font)
+		const scaleX = (style.scaleX ?? 1) * widthScale
+		const letterSpacing = (style.letterSpacing ?? 0) / widthScale
 
 		this.ids.set(style, id)
 		this.list.push(style)

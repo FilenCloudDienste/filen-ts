@@ -89,7 +89,7 @@ describe("VML shapes", () => {
 			[PathCommand.CLOSE]
 		])
 		expect(fillOf(list, 0)).toEqual({ kind: "solid", color: rgba("FF0000") })
-		expect(list.strokes[list.itemInt(0, ItemInt.STROKE)]).toMatchObject({ width: 2 * PT, cap: "round", join: "round" })
+		expect(list.strokes[list.itemInt(0, ItemInt.STROKE)]).toMatchObject({ width: 2 * PT, cap: "flat", join: "round" })
 		expect(list.paints[list.strokes[0]?.paint ?? -1]).toEqual({ kind: "solid", color: rgba("0000FF") })
 		expect(placement).toMatchObject({
 			position: "absolute",
@@ -226,6 +226,35 @@ describe("VML shapes", () => {
 		expect(Array.from(fill.stops.colors)).toEqual([rgba("FFFFFF", 0.5), rgba("000000", 0.5)])
 	})
 
+	it("turns gradient angles counter-clockwise, as VML does", () => {
+		const angle = (value: string): number => {
+			const { list } = convert(
+				`<v:rect style="width:10px;height:10px" fillcolor="blue"><v:fill type="gradient" color2="red" angle="${value}"/></v:rect>`
+			)
+
+			return (fillOf(list, 0) as { angle: number }).angle
+		}
+
+		// The reference's 45 degree example: red (color2) top left, blue bottom right.
+		expect(angle("45")).toBe(225)
+		expect(angle("90")).toBe(180)
+		expect(angle("-90")).toBe(0)
+		expect(angle("-135")).toBe(45)
+	})
+
+	it("draws stroke ends flat unless endcap says otherwise", () => {
+		const cap = (stroke: string): unknown => {
+			const { list } = convert(`<v:line from="0,0" to="10pt,0">${stroke}</v:line>`)
+
+			return list.strokes[0]?.cap
+		}
+
+		expect(cap("")).toBe("flat")
+		expect(cap('<v:stroke endcap="round"/>')).toBe("round")
+		expect(cap('<v:stroke endcap="square"/>')).toBe("square")
+		expect(cap('<v:stroke endcap="bogus"/>')).toBe("flat")
+	})
+
 	it("reads an axial gradient from a 50% focus and colour stops", () => {
 		const { list } = convert(
 			'<v:rect style="width:10px;height:10px" fillcolor="red"><v:fill type="gradient" color2="blue" focus="50%"/></v:rect>'
@@ -248,13 +277,40 @@ describe("VML shapes", () => {
 
 		const text = list.texts[0]
 
-		expect(text?.kind).toBe("body")
+		// fitshape (from the shapetype): stretched to the 300 x 100pt box, one line an em tall; the style's 1pt is ignored.
+		expect(text).toMatchObject({
+			kind: "block",
+			width: 300 * PT,
+			height: 100 * PT,
+			lineHeight: 100 * PT,
+			align: "middle",
+			lineAlign: "middle",
+			wrap: false,
+			stretch: true
+		})
 
-		if (text?.kind !== "body") return
+		if (text?.kind !== "block") return
 
-		expect(text.paragraphs[0]?.runs[0]).toMatchObject({ text: "DRAFT", font: "Calibri", bold: true, size: 1, color: rgba("C0C0C0") })
+		expect(text.run).toMatchObject({ text: "DRAFT", font: "Calibri", bold: true, color: rgba("C0C0C0") })
+		expect(text.run.size).toBeCloseTo(100)
+		expect(text.fill).toBeUndefined()
 		// Rotated about the box centre.
 		expect(list.itemFloat(0, ItemFloat.A)).toBeCloseTo(Math.cos((315 * Math.PI) / 180))
+	})
+
+	it("keeps a text path's own size without fitshape and paints it with a gradient fill", () => {
+		const { list } = convert(
+			'<v:shape style="width:300pt;height:100pt" fillcolor="blue" stroked="f"><v:fill type="gradient" color2="red"/><v:textpath on="t" style="font-family:Arial;font-size:20pt" string="Hi"/></v:shape>'
+		)
+		const text = list.texts[0]
+
+		expect(text).toMatchObject({ kind: "block", width: 300 * PT, height: 100 * PT, lineHeight: 20 * PT * 1.2 })
+
+		if (text?.kind !== "block") return
+
+		expect(text.stretch).toBeUndefined()
+		expect(text.run).toMatchObject({ text: "Hi", size: 20 })
+		expect(list.paints[text.fill ?? -1]).toMatchObject({ kind: "linear", angle: 270 })
 	})
 
 	it("exposes text box stories with their insets and anchor", () => {

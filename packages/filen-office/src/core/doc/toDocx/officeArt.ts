@@ -14,6 +14,8 @@ export const RT_FSP = 0xf00a
 export const RT_OPT = 0xf00b
 export const RT_SECONDARY_OPT = 0xf121
 export const RT_TERTIARY_OPT = 0xf122
+const RT_FSPGR = 0xf009
+const RT_CHILD_ANCHOR = 0xf00f
 const RT_BLIP_FIRST = 0xf018
 const RT_BLIP_LAST = 0xf117
 
@@ -100,6 +102,29 @@ export interface ArtShape {
 	readonly properties: ReadonlyMap<number, ArtProperty>
 	// A group: the shapes it holds (a group's first SpContainer describes the group itself).
 	readonly children: readonly ArtShape[] | undefined
+	// A group's coordinate space (OfficeArtFSPGR, §2.2.38).
+	readonly groupRect?: ArtRect
+	// A group member's place in its group's coordinate space (OfficeArtChildAnchor, §2.2.39).
+	readonly childAnchor?: ArtRect
+}
+
+export interface ArtRect {
+	readonly left: number
+	readonly top: number
+	readonly right: number
+	readonly bottom: number
+}
+
+// §2.2.38 / §2.2.39: left, top, right, bottom (32-bit).
+function ltrb(data: Uint8Array, record: ArtRecord): ArtRect | undefined {
+	if (record.end - record.start < 16) return undefined
+
+	return {
+		left: i32(data, record.start),
+		top: i32(data, record.start + 4),
+		right: i32(data, record.start + 8),
+		bottom: i32(data, record.start + 12)
+	}
 }
 
 export function readShape(data: Uint8Array, container: ArtRecord): ArtShape | undefined {
@@ -107,9 +132,15 @@ export function readShape(data: Uint8Array, container: ArtRecord): ArtShape | un
 	let spid: number | undefined
 	let shapeType = 0
 	let flags = 0
+	let groupRect: ArtRect | undefined
+	let childAnchor: ArtRect | undefined
 
 	for (const record of records(data, container.start, container.end)) {
-		if (record.type === RT_FSP && record.end - record.start >= 8) {
+		if (record.type === RT_FSPGR) {
+			groupRect = ltrb(data, record)
+		} else if (record.type === RT_CHILD_ANCHOR) {
+			childAnchor = ltrb(data, record)
+		} else if (record.type === RT_FSP && record.end - record.start >= 8) {
 			spid = u32(data, record.start)
 			flags = u32(data, record.start + 4)
 			shapeType = record.instance
@@ -118,7 +149,17 @@ export function readShape(data: Uint8Array, container: ArtRecord): ArtShape | un
 		}
 	}
 
-	return spid === undefined ? undefined : { spid, shapeType, flags, properties, children: undefined }
+	if (spid === undefined) return undefined
+
+	return {
+		spid,
+		shapeType,
+		flags,
+		properties,
+		children: undefined,
+		...(groupRect === undefined ? {} : { groupRect }),
+		...(childAnchor === undefined ? {} : { childAnchor })
+	}
 }
 
 // Shapes stack in the order their drawing lists them, first at the bottom ([MS-ODRAW] §2.2.14
@@ -480,6 +521,10 @@ export const PID = {
 	lineStyleBooleans: 0x01ff,
 	shapeName: 0x0380,
 	description: 0x0381,
+	posH: 0x038f,
+	posRelH: 0x0390,
+	posV: 0x0391,
+	posRelV: 0x0392,
 	groupShapeBooleans: 0x03bf
 } as const
 

@@ -38,6 +38,7 @@ import {
 	type SheetSessionApi,
 	type SheetSessionOptions,
 	type SheetSessionSettings,
+	type SheetDocumentProperties,
 	type SheetStyleAppend,
 	type SheetSummary,
 	type SheetTile,
@@ -92,6 +93,8 @@ export interface SheetSessionDocument {
 	fileSharing(): SheetFileSharing | null
 	// The workbook's own title (its core properties or meta.xml), none for a text file.
 	title(): string | undefined
+	// Its author, subject and keywords; none: undefined.
+	properties?(): SheetDocumentProperties | undefined
 	initialWritability(): SheetWritability
 	prove(
 		slicing: Slicing | undefined,
@@ -658,6 +661,7 @@ export class SheetSession<D extends SheetSessionDocument> implements SheetSessio
 		}
 
 		const title = document.title()
+		const properties = document.properties?.()
 		const info: SheetWorkbookInfo = {
 			kind: document.kind,
 			sheets: document.sheets(),
@@ -670,6 +674,7 @@ export class SheetSession<D extends SheetSessionDocument> implements SheetSessio
 			protection: document.workbookProtection(),
 			fileSharing: document.fileSharing(),
 			...(title !== undefined && { title }),
+			...(properties !== undefined && { properties }),
 			...(document.encrypted !== undefined && { encrypted: document.encrypted })
 		}
 

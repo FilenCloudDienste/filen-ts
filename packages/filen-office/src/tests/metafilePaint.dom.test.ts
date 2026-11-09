@@ -438,6 +438,39 @@ describe("metafile paints, blending and text layout in the drawing painter", () 
 		expect(group?.getAttribute("transform")).toBe("matrix(1 0 0 1 10 10)")
 	})
 
+	it("stretches block text with textLength so the widest line spans the rectangle, leaving the paint unscaled", () => {
+		const svg = (stretch: boolean): SVGSVGElement => {
+			const list = new DrawingList()
+			const block = {
+				kind: "block" as const,
+				run: { ...RUN, text: "AB\nABCD" },
+				width: 180,
+				height: 40,
+				align: "middle" as const,
+				lineAlign: "middle" as const,
+				wrap: false,
+				clip: false,
+				lineLimit: false,
+				trimming: "none" as const,
+				lineHeight: 20,
+				ascent: 0.8,
+				rtl: false,
+				...(stretch && { stretch: true })
+			}
+
+			list.addItem(ItemKind.TEXT, IDENTITY, 0, 0, 180, 40, 0, 0, -1, -1, list.text(block), -1, 0, 0)
+
+			return paintDrawing(data(list), { document, idPrefix: "m9", imageUrl: () => undefined, measureText: text => text.length * 10 })
+		}
+		const lengths = (root: SVGSVGElement): (string | null)[] =>
+			Array.from(root.querySelectorAll("text"), line => line.getAttribute("textLength"))
+
+		expect(lengths(svg(false))).toEqual([null, null])
+		expect(lengths(svg(true))).toEqual(["90", "180"])
+		expect(svg(true).querySelector("text")?.getAttribute("lengthAdjust")).toBe("spacingAndGlyphs")
+		expect(svg(true).querySelector("text")?.getAttribute("transform")).toBeNull()
+	})
+
 	it("measures each word and character of block text once", () => {
 		const list = new DrawingList()
 		const words = Array.from({ length: 4000 }, (_, k) => `w${k % 50}`).join(" ")

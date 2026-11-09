@@ -81,6 +81,8 @@ export interface PagePaintContext {
 	readonly fonts: PdfFontSet
 	readonly doc: DocxPdfDocument
 	readonly requests: readonly PdfFontFaceRequest[]
+	// By style: the /Lang of its text where its language is not the document's (empty untagged).
+	readonly langs: readonly (string | undefined)[]
 	// Image bytes by part name, for the drawings' pictures.
 	readonly media: ReadonlyMap<string, Uint8Array>
 	// Keys of paragraphs drawn on earlier pages (repeated table header rows are drawn as artifacts).
@@ -935,13 +937,16 @@ export class DocxPagePainter {
 	// The structure element whose marked-content sequence is open: a paragraph's text is one sequence where
 	// nothing else (a link, a clip, an object) comes between.
 	private contentNode: number | undefined = undefined
+	// The open sequence's /Lang (a run in another language is a sequence of its own).
+	private contentLang: string | undefined = undefined
 
-	private useContent(node: number): void {
-		if (this.contentNode === node) return
+	private useContent(node: number, lang: string | undefined): void {
+		if (this.contentNode === node && this.contentLang === lang) return
 
 		this.endOpenContent()
-		this.page.beginContent(node)
+		this.page.beginContent(node, lang)
 		this.contentNode = node
+		this.contentLang = lang
 	}
 
 	private endOpenContent(): void {
@@ -949,6 +954,7 @@ export class DocxPagePainter {
 
 		this.page.endContent()
 		this.contentNode = undefined
+		this.contentLang = undefined
 	}
 
 	// Opens the structure elements `role` needs (keeping those already open that it shares) and returns the
@@ -1232,6 +1238,7 @@ export class DocxPagePainter {
 			return -1
 		}
 		const look = drawingLook(style, context.doc)
+		const lang = context.langs[styleId]
 		// Segments: consecutive glyphs drawn alike (size, link, faux style).
 		let at = 0
 		let pen = 0
@@ -1315,17 +1322,19 @@ export class DocxPagePainter {
 
 				const linkNode = context.writer.open("Link")
 
-				page.beginContent(linkNode)
+				page.beginContent(linkNode, lang)
 				await this.showText(runs, options, look, [x, lineTop, segmentWidth * scaleX, lineHeight])
 				page.endContent()
 				context.writer.close(linkNode)
 				this.addLink(target, x, lineTop, segmentWidth * scaleX, lineHeight, fragmentText, placed, at, next, linkNode)
 			} else {
-				this.useContent(node)
+				this.useContent(node, lang)
 				await this.showText(runs, options, look, [x, lineTop, segmentWidth * scaleX, lineHeight])
 			}
 
-			if (!this.tagged && allowed)
+			// Untagged, or an artifact's text (a header's, a repeated header row's): the glyphs stay where they are
+			// drawn, and a tagged document's annotation gets a Link element of its own (ISO 14289-1 §7.18.1).
+			if (allowed && (node === undefined || !this.tagged))
 				this.addLink(target, x, lineTop, segmentWidth * scaleX, lineHeight, fragmentText, placed, at, next, undefined)
 
 			at = next

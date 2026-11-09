@@ -10,11 +10,12 @@ export const NS_WP = "http://schemas.openxmlformats.org/drawingml/2006/wordproce
 export const NS_A = "http://schemas.openxmlformats.org/drawingml/2006/main"
 export const NS_PIC = "http://schemas.openxmlformats.org/drawingml/2006/picture"
 export const NS_WPS = "http://schemas.microsoft.com/office/word/2010/wordprocessingShape"
+export const NS_WPG = "http://schemas.microsoft.com/office/word/2010/wordprocessingGroup"
 
 export const DECLARATION = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\r\n'
 
 // The root attributes of every WordprocessingML story part.
-export const STORY_NAMESPACES = `xmlns:w="${NS_W}" xmlns:r="${NS_R}" xmlns:wp="${NS_WP}" xmlns:a="${NS_A}" xmlns:pic="${NS_PIC}" xmlns:wps="${NS_WPS}"`
+export const STORY_NAMESPACES = `xmlns:w="${NS_W}" xmlns:r="${NS_R}" xmlns:wp="${NS_WP}" xmlns:a="${NS_A}" xmlns:pic="${NS_PIC}" xmlns:wps="${NS_WPS}" xmlns:wpg="${NS_WPG}"`
 
 export function attr(name: string, value: string | number): string {
 	return ` ${name}="${typeof value === "number" ? String(Math.round(value)) : escapeAttribute(value)}"`

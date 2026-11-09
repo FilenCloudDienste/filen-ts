@@ -2,6 +2,8 @@ import type { Slicing } from "../../core/slicing"
 import { isRtf, type RtfPreservedKind, type RtfReadResult } from "../../core/rtf/reader"
 import { RtfWriteRefusal } from "../../core/rtf/write/out"
 import { RtfAborted, openRtfSource, proveRtf, writeRtf, type RtfTurns } from "../../core/rtf/write/writer"
+import type { DocxGateReason } from "../../core/docx/package"
+import { odtGate } from "../../core/odt/open"
 import { openOdtSource } from "../../core/odt/write/source"
 import { OdtWriteRefusal, proveOdt, writeOdt } from "../../core/odt/write/writer"
 import type { DocxEngineServices } from "./engine"
@@ -28,8 +30,10 @@ export type DocxSourceFormat = "rtf" | "odt"
 interface SourceDocument {
 	// The translation's package.
 	readonly docx: Uint8Array
-	// What the file shows that the package leaves out (an equation, a shape, a form field...), counted.
+	// What the file shows that the package leaves out (a drawing object, an undrawn shape, a picture no reader takes...), counted.
 	readonly untranslated: number
+	// What makes the document view-only that the package does not say (a signed ODT: odtGate).
+	readonly gate: readonly DocxGateReason[]
 	prove(turns: RtfTurns): Promise<readonly RtfLockedBlock[]>
 	// The file as edited; `bytes` is the source itself for an untouched one.
 	write(edits: DocxRtfEdits, turns: RtfTurns): Promise<DocxRtfSaved>
@@ -56,11 +60,12 @@ async function editedPackage(docx: Uint8Array, edits: DocxRtfEdits): Promise<Uin
 }
 
 // What an RTF file shows that its pages, as the package draws them, leave out: shapes and objects drawn nowhere
-// (RtfReadResult.undrawn), equations, drawing objects, pictures in formats no reader takes, groups nested too deep,
-// and text in code pages the platform cannot decode. Not counted: what the package draws another way (a shape's
-// picture, a text box's text as paragraphs, WordArt, an object's result, a form field's result), state words the
-// text is shown under, and what no page shows (unknown destinations, bytes past the end, groups left open).
-const UNDRAWN: ReadonlySet<RtfPreservedKind> = new Set<RtfPreservedKind>(["math", "drawingObject", "picture", "tooDeep"])
+// (RtfReadResult.undrawn), drawing objects, pictures in formats no reader takes, groups nested too deep, and text in
+// code pages the platform cannot decode. Not counted: what the package draws another way (a shape's picture or preset
+// geometry, a text box's text as paragraphs, WordArt, an equation as Office Math, an object's result, a form field's
+// result), state words the text is shown under, and what no page shows (unknown destinations, bytes past the end,
+// groups left open).
+const UNDRAWN: ReadonlySet<RtfPreservedKind> = new Set<RtfPreservedKind>(["drawingObject", "picture", "tooDeep"])
 
 function undrawn(read: RtfReadResult): number {
 	let count = read.undrawn + read.unsupportedCodepages.length + (read.truncatedBinary ? 1 : 0)
@@ -81,6 +86,7 @@ async function openSource(format: DocxSourceFormat, bytes: Uint8Array, turns: Rt
 			: {
 					docx: source.read.docx,
 					untranslated: undrawn(source.read),
+					gate: [],
 					bytes: source.bytes,
 					prove: async proofTurns => (await proveRtf(source, proofTurns)).locked.map(({ part, offset }) => ({ part, offset })),
 					write: async (edits, writeTurns) => ({
@@ -116,6 +122,8 @@ async function openSource(format: DocxSourceFormat, bytes: Uint8Array, turns: Rt
 		docx: source.docx,
 		// The engine lays out the same translation an ODT file is shown and exported as.
 		untranslated: 0,
+		// Opened view-only and saved only as a new file: an edit saved in place would leave its signatures invalid.
+		gate: odtGate(source.translation.facts),
 		bytes: source.bytes,
 		prove: async proofTurns => (await proveOdt(source, proofTurns)).locked,
 		write: async (edits, writeTurns) => {
@@ -131,7 +139,8 @@ async function openSource(format: DocxSourceFormat, bytes: Uint8Array, turns: Rt
 }
 
 export type DocxRtfOpened =
-	{ readonly ok: true; readonly size: number; readonly untranslated: number } | { readonly ok: false; readonly notRtf: boolean }
+	| { readonly ok: true; readonly size: number; readonly untranslated: number; readonly gate: readonly DocxGateReason[] }
+	| { readonly ok: false; readonly notRtf: boolean }
 
 export type DocxRtfWritten =
 	({ readonly ok: true } & DocxRtfSaved) | { readonly ok: false; readonly reason: string; readonly message: string }
@@ -140,6 +149,8 @@ export interface DocxRtfServer {
 	open(id: number, bytes: Uint8Array, format?: DocxSourceFormat): Promise<DocxRtfOpened>
 	// The translation of an open document, for an engine session opened on it.
 	package(id: number): Uint8Array | undefined
+	// What makes an open document view-only that its translation does not say, for an engine session opened on it.
+	gate(id: number): readonly DocxGateReason[] | undefined
 	take(id: number): Uint8Array
 	prove(id: number): Promise<readonly RtfLockedBlock[]>
 	write(id: number, edits: DocxRtfEdits): Promise<DocxRtfWritten>
@@ -229,10 +240,13 @@ export function docxRtfServer(slicing?: Slicing): DocxRtfServer {
 
 			document.source = source
 
-			return { ok: true, size: source.docx.length, untranslated: source.untranslated }
+			return { ok: true, size: source.docx.length, untranslated: source.untranslated, gate: source.gate }
 		},
 		package(id) {
 			return held.get(id)?.source?.docx
+		},
+		gate(id) {
+			return held.get(id)?.source?.gate
 		},
 		take(id) {
 			const document = held.get(id)
@@ -304,8 +318,6 @@ export function docxRtfServer(slicing?: Slicing): DocxRtfServer {
 
 // The same on the calling thread (tests, a host without workers).
 export function inThreadDocxRtf(services: (options: DocxOpenOptions) => DocxEngineServices, format: DocxSourceFormat = "rtf"): DocxRtf {
-	const engines = inThreadDocxHost(services)
-
 	return {
 		async open(bytes, options = {}) {
 			if (options.signal?.aborted === true) return { kind: "aborted" }
@@ -315,6 +327,8 @@ export function inThreadDocxRtf(services: (options: DocxOpenOptions) => DocxEngi
 
 			if (!opened.ok) return opened.notRtf ? { kind: "notRtf" } : { kind: "aborted" }
 
+			const engines = inThreadDocxHost(services, opened.gate)
+
 			return {
 				kind: "opened",
 				document: {
@@ -322,6 +336,7 @@ export function inThreadDocxRtf(services: (options: DocxOpenOptions) => DocxEngi
 						engines(bytesSource(server.package(0) ?? new Uint8Array(0)), listener, openOptions),
 					bytes: heldSource(opened.size),
 					untranslated: opened.untranslated,
+					gate: opened.gate,
 					take: () => Promise.resolve(server.take(0)),
 					prove: () => server.prove(0),
 					async write(edits) {

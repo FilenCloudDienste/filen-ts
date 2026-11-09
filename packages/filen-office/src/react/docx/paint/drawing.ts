@@ -1848,8 +1848,14 @@ class Painter {
 			group.setAttribute("clip-path", `url(#${id})`)
 		}
 
+		// Stretched glyphs: each line's natural width scaled so the widest spans the rectangle. The paint stays
+		// in the item's box (textLength stretches the glyphs, not the user space).
+		const widths = text.stretch === true && width > 0 ? lines.map(measure) : undefined
+		const widest = widths === undefined ? 0 : widths.reduce((max, value) => Math.max(max, value), 0)
+
 		for (let k = 0; k < lines.length; k++) {
 			const line = this.el("text")
+			const natural = widths?.[k] ?? 0
 
 			line.setAttribute("x", fmt(x))
 			line.setAttribute("y", fmt(top + k * lineHeight + ascent))
@@ -1857,6 +1863,11 @@ class Painter {
 
 			if (anchor !== "start") line.setAttribute("text-anchor", anchor)
 			if (text.rtl === true) line.setAttribute("direction", "rtl")
+
+			if (widest > 0 && natural > 0) {
+				line.setAttribute("textLength", fmt((natural * width) / widest))
+				line.setAttribute("lengthAdjust", "spacingAndGlyphs")
+			}
 
 			line.textContent = lines[k] ?? ""
 			this.runStyle(line, run, 1, family)

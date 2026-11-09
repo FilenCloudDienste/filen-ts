@@ -39,7 +39,8 @@ import {
 	applySection,
 	applyTable,
 	defaultRow,
-	defaultSection
+	defaultSection,
+	dttm
 } from "./props"
 import { forEachPrl, sprmName } from "./sprms"
 import { STK_TABLE, StyleResolver, readStyles } from "./styles"
@@ -1001,6 +1002,9 @@ function readComments(context: Context, story: DocStory | undefined): DocComment
 		})
 	}
 
+	// AtrdExtra: 18-byte ATRDPost10s parallel to the ATRDPre10s, dttm first; absent before Word 2002.
+	const [fcExtra, lcbExtra] = fcLcb(context, "atrdExtra")
+	const dated = lcbExtra >= 18 && table.has(fcExtra, lcbExtra) ? Math.floor(lcbExtra / 18) : 0
 	const out: DocComment[] = []
 
 	for (let k = 0; k < refs.count && k + 1 < texts.cps.length; k++) {
@@ -1016,6 +1020,7 @@ function readComments(context: Context, story: DocStory | undefined): DocComment
 			text: { kind: "comments", start, end: Math.max(start, Math.min(story.end, story.start + (texts.cps[k + 1] ?? 0))) },
 			author: owners[ibst] ?? "",
 			initials,
+			date: k < dated ? dttm(table.u32(fcExtra + 18 * k)) : undefined,
 			rangeStart: range?.[0],
 			rangeEnd: range?.[1]
 		})

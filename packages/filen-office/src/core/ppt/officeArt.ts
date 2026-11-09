@@ -671,6 +671,160 @@ export function adjustGuides(chain: PropertyChain, shapeType: number): string {
 	return parts.join("")
 }
 
+// A signed 32-bit property value, 0 when unset.
+export function i32Value(raw: number | undefined): number {
+	return raw === undefined ? 0 : raw | 0
+}
+
+// The rectangle of a shape as DrawingML places it: a rotation of 45°–135° or 225°–315° stores the rectangle turned by
+// 90° about its centre (MS-ODRAW §2.3.18.5), so its width and height swap back.
+export function anchorBox(
+	rect: Rect,
+	rotation: number
+): { readonly x: number; readonly y: number; readonly w: number; readonly h: number } {
+	const width = rect.right - rect.left
+	const height = rect.bottom - rect.top
+	const turned = ((rotation % 360) + 360) % 360
+	const swap = (turned >= 45 && turned < 135) || (turned >= 225 && turned < 315)
+
+	if (!swap) return { x: rect.left, y: rect.top, w: width, h: height }
+
+	const cx = rect.left + width / 2
+	const cy = rect.top + height / 2
+
+	return { x: cx - height / 2, y: cy - width / 2, w: height, h: width }
+}
+
+export interface ShapeGeometry {
+	readonly xml: string
+	// Path escapes (MS-ODRAW §2.2.54) drawn as straight lines.
+	readonly approximations: number
+}
+
+// A shape's geometry as DrawingML: a freeform (or a type with no preset) with vertices as a custom geometry, else its
+// preset with the adjust values that carry over; undefined for a type with neither.
+export function shapeGeometry(chain: PropertyChain, shapeType: number): ShapeGeometry | undefined {
+	const vertices = msoArray(lookup(chain, P.pVertices)?.complex)
+	const preset = presetOf(shapeType)
+
+	if (vertices !== undefined && vertices.count > 0 && (shapeType === 0 || preset === undefined)) return customGeometry(chain, vertices)
+
+	if (preset === undefined) return undefined
+
+	return { xml: `<a:prstGeom prst="${preset}"><a:avLst>${adjustGuides(chain, shapeType)}</a:avLst></a:prstGeom>`, approximations: 0 }
+}
+
+function customGeometry(
+	chain: PropertyChain,
+	vertices: { readonly count: number; readonly size: number; readonly data: Uint8Array }
+): ShapeGeometry {
+	const left = i32Value(value(chain, P.geoLeft))
+	const top = i32Value(value(chain, P.geoTop))
+	const right = i32Value(value(chain, P.geoRight) ?? 21600)
+	const bottom = i32Value(value(chain, P.geoBottom) ?? 21600)
+	const width = Math.max(1, right - left)
+	const height = Math.max(1, bottom - top)
+	const points: [number, number][] = []
+
+	for (let k = 0; k < vertices.count; k++) {
+		const at = k * vertices.size
+		const x = vertices.size >= 8 ? i32(vertices.data, at) : (u16(vertices.data, at) << 16) >> 16
+		const y = vertices.size >= 8 ? i32(vertices.data, at + 4) : (u16(vertices.data, at + 2) << 16) >> 16
+
+		// A coordinate that names a guide (0x80000000–0x8000007F) has no value without the guides: the origin.
+		points.push([x >= -0x80000000 && x <= -0x7fffff81 ? left : x, y >= -0x80000000 && y <= -0x7fffff81 ? top : y])
+	}
+
+	const point = (index: number): string => {
+		const [x, y] = points[Math.min(index, points.length - 1)] ?? [left, top]
+
+		return `<a:pt x="${String(Math.round(x - left))}" y="${String(Math.round(y - top))}"/>`
+	}
+	const segments = msoArray(lookup(chain, P.pSegmentInfo)?.complex)
+	const paths: string[] = []
+	let approximations = 0
+	let current = ""
+	let next = 0
+	let fill = true
+	let stroke = true
+	const close = (): void => {
+		if (current !== "")
+			paths.push(
+				`<a:path w="${String(width)}" h="${String(height)}"${fill ? "" : ' fill="none"'}${stroke ? "" : ' stroke="false"'}>${current}</a:path>`
+			)
+
+		current = ""
+	}
+
+	if (segments === undefined || segments.size !== 2) {
+		const closed = (value(chain, P.shapePath) ?? 1) % 2 === 1
+
+		current = `<a:moveTo>${point(0)}</a:moveTo>`
+
+		for (let k = 1; k < points.length; k++) current += `<a:lnTo>${point(k)}</a:lnTo>`
+
+		if (closed) current += "<a:close/>"
+
+		close()
+	} else {
+		let commands = 0
+
+		for (let k = 0; k < segments.count; k++) {
+			const info = u16(segments.data, 2 * k)
+			const type = info >>> 13
+			const count = info & 0x1fff
+
+			if (++commands > 100_000) break
+
+			switch (type) {
+				case 0:
+					for (let n = 0; n < Math.max(1, count); n++) current += `<a:lnTo>${point(next++)}</a:lnTo>`
+					break
+				case 1:
+					for (let n = 0; n < Math.max(1, count); n++) {
+						current += `<a:cubicBezTo>${point(next)}${point(next + 1)}${point(next + 2)}</a:cubicBezTo>`
+						next += 3
+					}
+
+					break
+				case 2:
+					current += `<a:moveTo>${point(next++)}</a:moveTo>`
+					break
+				case 3:
+					current += "<a:close/>"
+					break
+				case 4:
+					close()
+					fill = true
+					stroke = true
+					break
+				default: {
+					// §2.2.54: the escape code in bits 8–12, its POINT count in the low byte.
+					const escape = (info >>> 8) & 0x1f
+					const used = info & 0xff
+
+					if (escape === 0x0a) fill = false
+					else if (escape === 0x0b) stroke = false
+					else if (used > 0) {
+						approximations++
+
+						for (let n = 0; n < used; n++) current += `<a:lnTo>${point(next++)}</a:lnTo>`
+					}
+				}
+			}
+		}
+
+		close()
+	}
+
+	if (paths.length === 0) paths.push(`<a:path w="${String(width)}" h="${String(height)}"/>`)
+
+	return {
+		xml: `<a:custGeom><a:avLst/><a:gdLst/><a:ahLst/><a:cxnLst/><a:rect l="0" t="0" r="r" b="b"/><a:pathLst>${paths.join("")}</a:pathLst></a:custGeom>`,
+		approximations
+	}
+}
+
 export interface ColorSources {
 	// The slide's colour scheme (8 RGB colours).
 	readonly scheme: readonly number[]

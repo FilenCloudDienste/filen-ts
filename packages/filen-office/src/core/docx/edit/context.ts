@@ -2,7 +2,7 @@ import { OpcError, ZipError } from "../../opc/index"
 import { XmlError, type XmlDocument } from "../../xml/index"
 import type { DocxModel, MaxIds, Story } from "../model/index"
 import { parseNumbering, type Numbering } from "../numbering/index"
-import { gateReasons, type DocxGateReason, type DocxPackage } from "../package"
+import { gateReasons, withGate, type DocxGateReason, type DocxPackage } from "../package"
 import { gateLifted, protectionMode, protectionOf, readOnlyExceptions } from "./protection"
 import { bindingsKnown, partHasBindings } from "../forms/binding"
 import { PropsStore } from "../props/index"
@@ -260,6 +260,9 @@ export interface EditContextParts {
 	// The user stopped the document's protection (Word's Stop Protection, its password given where it has one):
 	// no protection applies and the save writes it switched off (edit/protection.ts documentProtectionOf).
 	readonly protectionUnlocked?: boolean
+	// What makes the document view-only that the package does not say (a signed ODT translates to a package
+	// without its signatures): added to the gate, never lifted.
+	readonly gate?: readonly DocxGateReason[]
 }
 
 // Reads styles, numbering and theme for `model` (or reuses what a caller already parsed for layout).
@@ -287,13 +290,16 @@ export async function openDocxEditContext(pkg: DocxPackage, model: DocxModel, re
 		resolver = new PropertyResolver({ styles, numbering, theme, settings: styleSettings(model.settings) })
 	}
 
-	const gate = gateReasons(pkg.facts, model, resolver.styles, resolver.numbering, {
-		malformed: unreadable.length > 0 || store.malformed.length > 0
-	}).filter(
-		// A read-only document with ranges open to everyone opens editable within them (edit/protection.ts).
-		reason =>
-			!gateLifted(reason, reuse) &&
-			(reason !== "protected" || pkg.facts.documentProtection?.edit !== "readOnly" || !readOnlyExceptions(model))
+	const gate = withGate(
+		gateReasons(pkg.facts, model, resolver.styles, resolver.numbering, {
+			malformed: unreadable.length > 0 || store.malformed.length > 0
+		}).filter(
+			// A read-only document with ranges open to everyone opens editable within them (edit/protection.ts).
+			reason =>
+				!gateLifted(reason, reuse) &&
+				(reason !== "protected" || pkg.facts.documentProtection?.edit !== "readOnly" || !readOnlyExceptions(model))
+		),
+		reuse.gate
 	)
 
 	const context: DocxEditContext = {

@@ -69,6 +69,13 @@ export class TextMeasurer {
 		return width
 	}
 
+	// A width not kept in the table: probes for a break point, which would otherwise crowd out every other text's.
+	measureUncached(font: string, text: string): number {
+		this.use(font)
+
+		return this.canvas.measureText(text).width
+	}
+
 	// Sets the canvas's font, when it is not that already.
 	use(font: string): void {
 		if (this.font !== font) {
@@ -132,6 +139,111 @@ export interface LayoutOptions {
 
 // The lines a cell's text draws as. Without wrapping, line breaks in the text show as nothing (Excel draws the
 // text on one line).
+function nextPoint(text: string, at: number): number {
+	return at + ((text.codePointAt(at) ?? 0) > 0xffff ? 2 : 1)
+}
+
+function previousPoint(text: string, at: number): number {
+	const low = text.charCodeAt(at - 1)
+
+	return low >= 0xdc00 && low <= 0xdfff && at >= 2 && (text.charCodeAt(at - 2) & 0xfc00) === 0xd800 ? at - 2 : at - 1
+}
+
+function advance(text: string, at: number, count: number): number {
+	let position = at
+
+	for (let k = 0; k < count && position < text.length; k++) position = nextPoint(text, position)
+
+	return position
+}
+
+function codePoints(text: string, from: number, to: number): number {
+	let count = 0
+
+	for (let position = from; position < to; position = nextPoint(text, position)) count++
+
+	return count
+}
+
+// fitPrefix's width of the prefix it returns.
+let fitWidth = 0
+
+// The end of the longest prefix of text from start that fits in width, at least one code point. Probes `hint` code
+// points first (the previous line's length, so even lines take about two measurements), gallops from there up or
+// down and bisects the last step; probes are not cached.
+function fitPrefix(measurer: TextMeasurer, font: string, text: string, start: number, width: number, hint: number): number {
+	const first = nextPoint(text, start)
+	const measure = (end: number): number => measurer.measureUncached(font, text.slice(start, end))
+	let low = first
+	let lowWidth = Number.NaN
+	let high = -1
+	const guess = advance(text, start, Math.max(1, hint))
+	const guessWidth = guess > first ? measure(guess) : Number.NaN
+
+	if (guess > first && guessWidth > width) {
+		high = guess
+
+		for (let step = 1; ; step *= 2) {
+			let probe = high
+
+			for (let k = 0; k < step && probe > first; k++) probe = previousPoint(text, probe)
+
+			if (probe <= first) break
+
+			const probeWidth = measure(probe)
+
+			if (probeWidth <= width) {
+				low = probe
+				lowWidth = probeWidth
+				break
+			}
+
+			high = probe
+		}
+	} else {
+		if (guess > first) {
+			low = guess
+			lowWidth = guessWidth
+		}
+
+		for (let step = 1; low < text.length; step *= 2) {
+			const probe = advance(text, low, step)
+			const probeWidth = measure(probe)
+
+			if (probeWidth > width) {
+				high = probe
+				break
+			}
+
+			low = probe
+			lowWidth = probeWidth
+		}
+	}
+
+	if (high >= 0) {
+		for (;;) {
+			let middle = (low + high) >>> 1
+
+			if (middle > low && (text.charCodeAt(middle) & 0xfc00) === 0xdc00 && (text.charCodeAt(middle - 1) & 0xfc00) === 0xd800) middle--
+			if (middle <= low) middle = nextPoint(text, low)
+			if (middle >= high) break
+
+			const middleWidth = measure(middle)
+
+			if (middleWidth <= width) {
+				low = middle
+				lowWidth = middleWidth
+			} else {
+				high = middle
+			}
+		}
+	}
+
+	fitWidth = Number.isNaN(lowWidth) ? measure(low) : lowWidth
+
+	return low
+}
+
 export function layoutText(
 	measurer: TextMeasurer,
 	text: string,
@@ -151,10 +263,10 @@ export function layoutText(
 		px = textFont(cell, options.base, options.fallback, options.scale).px
 	}
 
-	const place = (piece: string, style: SheetRenderStyle, font: TextFont): void => {
+	const place = (piece: string, style: SheetRenderStyle, font: TextFont, known?: number): void => {
 		if (piece === "") return
 
-		const pieceWidth = measurer.width(font.css, piece)
+		const pieceWidth = known ?? measurer.width(font.css, piece)
 		const last = fragments[fragments.length - 1]
 
 		if (last !== undefined && last.style === style) {
@@ -191,20 +303,24 @@ export function layoutText(
 					continue
 				}
 
-				// A word longer than the line breaks between characters.
-				let chunk = ""
+				// A word longer than the line breaks between characters; the spaces after it stay on its last line.
+				const core = word.trimEnd()
+				let start = 0
+				let hint = 1
 
-				for (const char of word) {
-					if (chunk !== "" && measurer.width(font.css, chunk + char) > options.width) {
-						place(chunk, style, font)
-						flush()
-						chunk = ""
-					}
+				for (;;) {
+					const end = fitPrefix(measurer, font.css, core, start, options.width, hint)
 
-					chunk += char
+					place(core.slice(start, end), style, font, fitWidth)
+
+					if (end >= core.length) break
+
+					flush()
+					hint = codePoints(core, start, end)
+					start = end
 				}
 
-				place(chunk, style, font)
+				place(word.slice(core.length), style, font)
 			}
 		})
 	}

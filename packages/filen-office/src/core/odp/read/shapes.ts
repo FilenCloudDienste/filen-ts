@@ -29,6 +29,7 @@ import {
 } from "../../presentation/model"
 import { NodeKind } from "../../xml/index"
 import { presetOfOdfType } from "../../odf/presetShapes"
+import { decompose, transformMatrix, type Matrix } from "../../odf/transform"
 import { readScene } from "../../metafile/dr3d"
 import { overlay, type Fragment, type OdpContext } from "./context"
 import { EMU_PER_PT, bodyPrOf, effectsOf, fillOf, lineOf, packagePart, srgb } from "./fills"
@@ -94,106 +95,7 @@ interface Box {
 	h: number
 }
 
-type Matrix = [number, number, number, number, number, number]
-
-function multiply(m: Matrix, n: Matrix): Matrix {
-	// m after n.
-	return [
-		m[0] * n[0] + m[2] * n[1],
-		m[1] * n[0] + m[3] * n[1],
-		m[0] * n[2] + m[2] * n[3],
-		m[1] * n[2] + m[3] * n[3],
-		m[0] * n[4] + m[2] * n[5] + m[4],
-		m[1] * n[4] + m[3] * n[5] + m[5]
-	]
-}
-
-// draw:transform's calls in order, as /([a-zA-Z]+)\s*\(([^)]*)\)/g reads them, in time linear in the value: a name
-// starts where a run of letters does, and its arguments end at the next ")" (none: no later call closes either).
-export function transformCalls(transform: string): { readonly name: string; readonly args: string }[] {
-	const out: { name: string; args: string }[] = []
-	const opening = /(?<![a-zA-Z])([a-zA-Z]+)\s*\(/gu
-
-	for (let match = opening.exec(transform); match !== null; match = opening.exec(transform)) {
-		const from = match.index + match[0].length
-		const close = transform.indexOf(")", from)
-
-		if (close < 0) break
-
-		out.push({ name: match[1] ?? "", args: transform.slice(from, close) })
-		opening.lastIndex = close + 1
-	}
-
-	return out
-}
-
-// draw:transform as one matrix (points), the transforms applied in the order written.
-export function transformMatrix(transform: string): Matrix | undefined {
-	let out: Matrix = [1, 0, 0, 1, 0, 0]
-	let found = false
-
-	for (const call of transformCalls(transform)) {
-		const name = call.name.toLowerCase()
-		const args = call.args
-			.trim()
-			.split(/[\s,]+/u)
-			.filter(item => item !== "")
-		let step: Matrix | undefined
-
-		switch (name) {
-			case "rotate": {
-				const angle = Number(args[0] ?? "0")
-
-				if (!Number.isFinite(angle)) return undefined
-
-				// Counter-clockwise on the page (y down): x' = x cos + y sin, y' = −x sin + y cos.
-				step = [Math.cos(angle), -Math.sin(angle), Math.sin(angle), Math.cos(angle), 0, 0]
-				break
-			}
-			case "translate": {
-				const x = parseLength(args[0]) ?? (Number(args[0] ?? "0") / 1000 / 2.54) * 72
-				const y = parseLength(args[1] ?? "0") ?? (Number(args[1] ?? "0") / 1000 / 2.54) * 72
-
-				step = [1, 0, 0, 1, Number.isFinite(x) ? x : 0, Number.isFinite(y) ? y : 0]
-				break
-			}
-			case "scale": {
-				const sx = Number(args[0] ?? "1")
-				const sy = Number(args[1] ?? args[0] ?? "1")
-
-				step = [Number.isFinite(sx) ? sx : 1, 0, 0, Number.isFinite(sy) ? sy : 1, 0, 0]
-				break
-			}
-			case "skewx": {
-				const angle = Number(args[0] ?? "0")
-
-				step = [1, 0, Number.isFinite(angle) ? Math.tan(angle) : 0, 1, 0, 0]
-				break
-			}
-			case "skewy": {
-				const angle = Number(args[0] ?? "0")
-
-				step = [1, Number.isFinite(angle) ? Math.tan(angle) : 0, 0, 1, 0, 0]
-				break
-			}
-			case "matrix": {
-				const values = args.map(arg => parseLength(arg) ?? Number(arg))
-
-				if (values.length === 6 && values.every(Number.isFinite)) step = values as Matrix
-				break
-			}
-			default:
-				break
-		}
-
-		if (step !== undefined) {
-			out = multiply(step, out)
-			found = true
-		}
-	}
-
-	return found ? out : undefined
-}
+export { transformCalls, transformMatrix } from "../../odf/transform"
 
 // An EMU box from a box in points and an optional transform: DrawingML's offset and extent of the unrotated box and
 // its clockwise rotation about the centre.
@@ -216,33 +118,16 @@ export function xfrmOf(box: Box, matrix: Matrix | undefined, flipH = false, flip
 		}
 	}
 
-	// The box's own scale (a "scale" step, or a mirror) folded into its size and flips.
-	const sx = Math.hypot(matrix[0], matrix[1])
-	const sy = Math.hypot(matrix[2], matrix[3])
-	const determinant = matrix[0] * matrix[3] - matrix[1] * matrix[2]
-	const w = box.w * sx
-	const h = box.h * sy
-	const centerX = matrix[0] * (box.x + box.w / 2) + matrix[2] * (box.y + box.h / 2) + matrix[4]
-	const centerY = matrix[1] * (box.x + box.w / 2) + matrix[3] * (box.y + box.h / 2) + matrix[5]
-	let degrees = (Math.atan2(matrix[1], matrix[0]) * 180) / Math.PI
-	let mirrored = flipV
-
-	if (determinant < 0) {
-		// A mirror: a vertical flip of the box turned by the angle.
-		mirrored = !mirrored
-		degrees = (Math.atan2(matrix[1], matrix[0]) * 180) / Math.PI
-	}
-
-	degrees = ((degrees % 360) + 360) % 360
+	const parts = decompose(box, matrix)
 
 	return {
-		x: Math.round((centerX - w / 2) * EMU_PER_PT),
-		y: Math.round((centerY - h / 2) * EMU_PER_PT),
-		cx: Math.round(Math.max(0, w) * EMU_PER_PT),
-		cy: Math.round(Math.max(0, h) * EMU_PER_PT),
-		rot: Math.round(degrees * 60_000) % 21_600_000,
+		x: Math.round(parts.x * EMU_PER_PT),
+		y: Math.round(parts.y * EMU_PER_PT),
+		cx: Math.round(Math.max(0, parts.w) * EMU_PER_PT),
+		cy: Math.round(Math.max(0, parts.h) * EMU_PER_PT),
+		rot: Math.round(parts.degrees * 60_000) % 21_600_000,
 		flipH,
-		flipV: mirrored
+		flipV: parts.mirrored !== flipV
 	}
 }
 

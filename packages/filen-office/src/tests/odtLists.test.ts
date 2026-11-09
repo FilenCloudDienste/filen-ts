@@ -1,4 +1,7 @@
 import { describe, expect, it } from "vitest"
+import { NumberingCounters, parseNumbering } from "../core/docx/numbering/index"
+import { PropsStore } from "../core/docx/props/index"
+import { xml } from "./docxFixtures"
 import { documentXml, partText, translated } from "./odtFixtures"
 
 // Expectations measured on LibreOffice 7.5 over UNO (view cursor positions of each paragraph's first and second
@@ -100,5 +103,78 @@ describe("ODT lists", () => {
 		// LibreOffice 7.5 numbers c 1. after the bullet list, and 2. after a paragraph.
 		expect(interrupted[2]).not.toBe(interrupted[0])
 		expect(following[1]).toBe(following[0])
+	})
+
+	it("numbers each new list from its start value, as Word counts the written w:nums (ODF 1.3 Part 3 §19.785, §19.786)", async () => {
+		const SUB =
+			'<text:list-style style:name="L3"><text:list-level-style-number text:level="2" style:num-format="a" style:num-suffix=")" text:start-value="3"/></text:list-style>'
+		const item = (text: string, inner = ""): string => `<text:list-item><text:p>${text}</text:p>${inner}</text:list-item>`
+		const sub = (text: string): string => `<text:list text:style-name="L3">${item(text)}${item(`${text}2`)}</text:list>`
+		const translation = await translated({
+			styles: `${LIST}${SUB}`,
+			body: `<text:list text:style-name="L1">${item("a")}${item("b")}</text:list><text:p/><text:list text:style-name="L1">${item("c")}</text:list><text:p/><text:list text:style-name="L1" text:continue-numbering="true">${item("d")}</text:list><text:p/><text:list text:style-name="L1">${item("e", sub("x"))}${item("f", sub("y"))}</text:list>`
+		})
+		const store = new PropsStore()
+		const counters = new NumberingCounters(parseNumbering(xml(partText(translation, "word/numbering.xml")), store))
+		const labels = [...partText(translation, "word/document.xml").matchAll(/<w:ilvl w:val="(\d+)"\/><w:numId w:val="(\d+)"\/>/g)].map(
+			match => counters.next(Number(match[2]), Number(match[1]))?.text
+		)
+
+		// LibreOffice: a 1. b 2., c restarts at 1., d continues at 2., e restarts; each sublist starts at its c).
+		expect(labels).toEqual(["1.", "2.", "1.", "2.", "1.", "c)", "d)", "2.", "c)", "d)"])
+	})
+
+	it("keeps a new list's restarts of levels not numbered yet when an item restarts a deeper level", async () => {
+		const TWO =
+			'<text:list-style style:name="L4"><text:list-level-style-number text:level="1" style:num-format="1" style:num-suffix="."/><text:list-level-style-number text:level="2" style:num-format="a" style:num-suffix=")"/></text:list-style>'
+		const translation = await translated({
+			styles: TWO,
+			body: '<text:list text:style-name="L4"><text:list-item><text:p>a</text:p></text:list-item><text:list-item><text:p>b</text:p></text:list-item></text:list><text:p/><text:list text:style-name="L4"><text:list-item><text:list><text:list-item text:start-value="5"><text:p>q</text:p></text:list-item></text:list></text:list-item><text:list-item><text:p>r</text:p></text:list-item></text:list>'
+		})
+		const counters = new NumberingCounters(parseNumbering(xml(partText(translation, "word/numbering.xml")), new PropsStore()))
+		const labels = [...partText(translation, "word/document.xml").matchAll(/<w:ilvl w:val="(\d+)"\/><w:numId w:val="(\d+)"\/>/g)].map(
+			match => counters.next(Number(match[2]), Number(match[1]))?.text
+		)
+
+		// r is the second list's first numbered level-1 paragraph: it starts at 1, not after b.
+		expect(labels).toEqual(["1.", "2.", "e)", "1."])
+	})
+
+	it("adds no level overrides to the first list of a style", async () => {
+		const numbering = partText(
+			await translated({
+				styles: LIST,
+				body: '<text:list text:style-name="L1"><text:list-item><text:p>x</text:p></text:list-item></text:list>'
+			}),
+			"word/numbering.xml"
+		)
+
+		expect(numbering).not.toContain("<w:lvlOverride")
+	})
+
+	it("flags picture bullets and relative bullet sizes as lossy", async () => {
+		const level = (body: string): string => `<text:list-style style:name="L9">${body}</text:list-style>`
+		const lossy = async (style: string): Promise<boolean> =>
+			(
+				await translated({
+					styles: style,
+					body: '<text:list text:style-name="L9"><text:list-item><text:p>x</text:p></text:list-item></text:list>'
+				})
+			).lossy.has("listLevel")
+
+		expect(await lossy(level('<text:list-level-style-image text:level="1" xlink:href="Pictures/b.png"/>'))).toBe(true)
+		expect(
+			await lossy(level('<text:list-level-style-bullet text:level="1" text:bullet-char="•" text:bullet-relative-size="45%"/>'))
+		).toBe(true)
+		expect(
+			await lossy(
+				level(
+					'<text:list-level-style-number text:level="1" style:num-format="1"><style:text-properties fo:font-size="60%"/></text:list-level-style-number>'
+				)
+			)
+		).toBe(true)
+		expect(
+			await lossy(level('<text:list-level-style-bullet text:level="1" text:bullet-char="•" text:bullet-relative-size="100%"/>'))
+		).toBe(false)
 	})
 })

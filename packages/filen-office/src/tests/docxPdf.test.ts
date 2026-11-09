@@ -362,6 +362,19 @@ describe("DOCX to PDF", () => {
 		expect(await pageText(await openPdf(bytes), 1)).toContain("\u2022")
 	})
 
+	it("draws Wingdings bullets and check boxes (w:sym) with real glyphs", async () => {
+		const sym = (char: string) => `<w:r><w:sym w:font="Wingdings" w:char="${char}"/></w:r>`
+		const docx = buildDocx({
+			body: `<w:p>${["F0A7", "F0D8", "F0FC", "F076", "F071"].map(sym).join("")}<w:r><w:t xml:space="preserve"> ☐ ☒</w:t></w:r></w:p>`
+		})
+		const { bytes, report } = await pdfOf(await snapshotOf(docx))
+		const text = await pageText(await openPdf(bytes), 1)
+
+		expect(report.missing.size).toBe(0)
+
+		for (const char of ["▪", "⮚", "✓", "❖", "❑", "☐", "☒"]) expect(text).toContain(char)
+	})
+
 	it("finds the bookmarks of a model whose editing layout dropped parts", async () => {
 		const { model } = (await layOut(structuredDocx(), { view: RevisionView.Final })).loaded
 		const sparse = { ...model, parts: [undefined, ...model.parts] } as unknown as typeof model
@@ -377,6 +390,80 @@ describe("DOCX to PDF", () => {
 
 		expect(text.toLowerCase()).toContain("shout")
 		expect(text.toLowerCase()).toContain("small caps")
+	})
+
+	it("keeps a header's hyperlink clickable on every page, its annotation under a Link element", async () => {
+		const rels =
+			'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+			'<Relationship Id="rIdHL" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="https://example.com/header" TargetMode="External"/></Relationships>'
+		const docx = buildDocx({
+			body:
+				paragraph("First page") +
+				'<w:p><w:r><w:br w:type="page"/></w:r></w:p>' +
+				paragraph("Second page") +
+				'<w:sectPr><w:headerReference w:type="default" r:id="rIdH"/><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440" w:header="720" w:footer="720"/></w:sectPr>',
+			headers: { rIdH: '<w:p><w:hyperlink r:id="rIdHL"><w:r><w:t>Visit us</w:t></w:r></w:hyperlink></w:p>' },
+			parts: [{ name: "word/_rels/header1.xml.rels", data: rels }]
+		})
+		const document = await snapshotOf(docx)
+
+		expect(document.pages.length).toBe(2)
+
+		const pdf = await openPdf((await pdfOf(document)).bytes)
+
+		for (const index of [1, 2]) {
+			const page = await pdf.getPage(index)
+			const link = (await page.getAnnotations()).find(
+				annotation => annotation.subtype === "Link" && annotation.url === "https://example.com/header"
+			) as { id: string } | undefined
+
+			expect(link).toBeDefined()
+
+			const tree = (await page.getStructTree()) as unknown as StructNode
+			const owners: StructNode[] = []
+			const visit = (node: StructNode): void => {
+				if (
+					node.role === "Link" &&
+					(node.children ?? []).some(
+						child => Reflect.get(child, "type") === "annotation" && Reflect.get(child, "id") === `pdfjs_internal_id_${link?.id}`
+					)
+				)
+					owners.push(node)
+
+				for (const child of node.children ?? []) visit(child)
+			}
+
+			visit(tree)
+			expect(owners).toHaveLength(1)
+		}
+	})
+
+	it("tags a run in another language with its /Lang, not one that differs only by region, nor in an artifact", async () => {
+		const styles =
+			'<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:docDefaults><w:rPrDefault><w:rPr><w:lang w:val="en-GB"/></w:rPr></w:rPrDefault></w:docDefaults><w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/></w:style></w:styles>'
+		const run = (text: string, lang: string): string =>
+			`<w:r><w:rPr><w:lang w:val="${lang}"/></w:rPr><w:t xml:space="preserve">${text}</w:t></w:r>`
+		const docx = buildDocx({
+			body:
+				`<w:p><w:r><w:t xml:space="preserve">He said </w:t></w:r>${run("bonjour", "fr-FR")}${run(" and colour", "en-US")}${run(" Tschüss", "0407")}</w:p>` +
+				'<w:sectPr><w:headerReference w:type="default" r:id="rIdH"/><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440" w:header="720" w:footer="720"/></w:sectPr>',
+			headers: { rIdH: `<w:p>${run("Kopfzeile", "nl-NL")}</w:p>` },
+			relationships: [{ id: "rIdS", type: "styles", target: "styles.xml" }],
+			parts: [
+				{
+					name: "word/styles.xml",
+					contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml",
+					data: styles
+				}
+			]
+		})
+		const { bytes } = await pdfOf(await snapshotOf(docx), { deflate: null })
+		const text = Buffer.from(bytes).toString("latin1")
+		const marked = [...text.matchAll(/<<\/MCID \d+ \/Lang \(([^)]*)\)>> BDC/g)].map(match => match[1])
+
+		// The document's own language on the catalog only; French and German (a Windows identifier) on their runs.
+		expect(/\/Lang \(([^)]*)\)/.exec(text.slice(text.indexOf("/Type /Catalog")))?.[1]).toBe("en-GB")
+		expect(marked).toEqual(["fr-FR", "de-DE"])
 	})
 
 	it("embeds only subsets of the bundled faces", async () => {

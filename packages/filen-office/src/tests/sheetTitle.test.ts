@@ -34,6 +34,21 @@ describe("a workbook's own title", () => {
 		expect((await openFixture(BASIC)).info.title).toBeUndefined()
 	})
 
+	it("comes with the core part's author, subject and keywords, as Excel's Save as PDF carries them", async () => {
+		const core = CORE.replace(
+			"</cp:coreProperties>",
+			"<dc:creator> Ann\n Author </dc:creator><dc:subject>Q3</dc:subject><cp:keywords> </cp:keywords></cp:coreProperties>"
+		)
+		const { info } = await openFixture({
+			...BASIC,
+			parts: { "docProps/core.xml": { text: core, type: "application/vnd.openxmlformats-package.core-properties+xml" } },
+			packageRelationships: CORE_REL
+		})
+
+		expect(info.properties).toEqual({ author: "Ann Author", subject: "Q3" })
+		expect((await openFixture(BASIC)).info.properties).toBeUndefined()
+	})
+
 	it("is read from an OpenDocument spreadsheet's meta.xml", async () => {
 		const body = table("Sheet1", '<table:table-row><table:table-cell office:value-type="float" office:value="1"/></table:table-row>')
 

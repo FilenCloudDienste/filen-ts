@@ -14,6 +14,8 @@ export interface Substitution {
 	readonly generic: GenericFamily
 	// Font-size factor bringing the substitute's widths closer to the original's.
 	readonly scale: number
+	// Horizontal-only factor for a condensed original drawn in a normal-width substitute; heights stay.
+	readonly widthScale: number
 	// The weight a family name implies ("Segoe UI Semibold"); undefined for regular families.
 	readonly weight: number | undefined
 	// Use an installed font of the original name first: there is no free width-compatible clone, and only
@@ -38,12 +40,23 @@ export const UNCALIBRATED_APTOS_NARROW_SCALE = 1
 // (leave one file out: 12.2 % -> 17.1 % of 41 breaks on the same line).
 export const CALIBRATED_TAHOMA_SCALE = 1.01
 
+// Arial Narrow set in Arimo, narrowed only horizontally: Arial Narrow's advances are about 82 % of Arial's,
+// its heights Arial's. Not fitted to recorded page breaks.
+export const ARIAL_NARROW_WIDTH_SCALE = 0.82
+
 function substitute(
 	family: BundledFamily,
 	generic: GenericFamily,
-	options: { scale?: number; weight?: number; preferLocal?: boolean } = {}
+	options: { scale?: number; widthScale?: number; weight?: number; preferLocal?: boolean } = {}
 ): Substitution {
-	return { family, generic, scale: options.scale ?? 1, weight: options.weight, preferLocal: options.preferLocal ?? false }
+	return {
+		family,
+		generic,
+		scale: options.scale ?? 1,
+		widthScale: options.widthScale ?? 1,
+		weight: options.weight,
+		preferLocal: options.preferLocal ?? false
+	}
 }
 
 // Keyed by the lower-cased family name as documents write it.
@@ -86,6 +99,7 @@ export const SUBSTITUTIONS: ReadonlyMap<string, Substitution> = new Map([
 	// where the corpus holds enough evidence (assets/fonts/manifest.json calibratedLineMetrics), with the
 	// family's own metrics otherwise.
 	["tahoma", substitute("arimo", "sans-serif", { scale: CALIBRATED_TAHOMA_SCALE, preferLocal: true })],
+	["arial narrow", substitute("arimo", "sans-serif", { widthScale: ARIAL_NARROW_WIDTH_SCALE, preferLocal: true })],
 	["consolas", substitute("cousine", "monospace", { preferLocal: true })],
 	["palatino linotype", substitute("tinos", "serif", { preferLocal: true })],
 	["univers", substitute("arimo", "sans-serif", { preferLocal: true })],
@@ -163,20 +177,32 @@ const SANS_NAMES: readonly string[] = [
 	"verdana"
 ]
 
+// Whole words only: "Roboto Mono" and "Courier 10 Pitch" are monospaced, "Monotype Corsiva" is not.
+const MONOSPACED_NAME = /\b(?:mono(?:spaced?)?|courier)\b/u
+
+// The font table's classification (w:pitch, w:family, PANOSE proportion) decides; the name only without it.
+function monospacedFor(lower: string, hints: FontHints): boolean {
+	if (hints.pitch === "fixed") return true
+	if (hints.pitch === "variable") return false
+	if (hints.fontClass === "modern") return true
+	if (hints.fontClass !== undefined && hints.fontClass !== "auto") return false
+
+	const panose = hints.panose
+
+	// Proportion 0 (any) and 1 (no fit) say nothing.
+	if (panose !== undefined && panose[0] === PANOSE_LATIN_TEXT && (panose[3] ?? 0) >= 2) return panose[3] === PANOSE_MONOSPACED
+
+	return MONOSPACED_NAME.test(lower)
+}
+
 // The bundled family to stand in for a font we have no substitute for, from the font table's hints. Text
 // in the East Asian or complex-script slots goes to the platform: the bundled families are Latin fonts.
 export function fallbackFor(name: string, hints: FontHints, latinSlot: boolean): Fallback {
 	const lower = name.toLowerCase()
 	const panose = hints.panose
 	const latin = latinSlot && (hints.charset === undefined || LATIN_CHARSETS.has(hints.charset))
-	const monospaced =
-		hints.pitch === "fixed" ||
-		hints.fontClass === "modern" ||
-		(panose !== undefined && panose[0] === PANOSE_LATIN_TEXT && panose[3] === PANOSE_MONOSPACED) ||
-		lower.includes("mono") ||
-		lower.includes("courier")
 
-	if (monospaced) return { family: latin ? "cousine" : undefined, generic: "monospace" }
+	if (monospacedFor(lower, hints)) return { family: latin ? "cousine" : undefined, generic: "monospace" }
 
 	let serif: boolean
 

@@ -70,22 +70,18 @@ const VALIGN = ["top", "center", "both", "bottom"]
 const FLOWS: Readonly<Record<number, string>> = { 0: "lrTb", 1: "tbRl", 3: "btLr", 4: "lrTbV", 5: "tbRlV" }
 const RESTARTS = ["continuous", "eachSect", "eachPage"]
 
+// Footnote placement is per section (sprmSFpc); endnote placement has no sprm and lives in settings (DopBase epc).
 function notePr(
 	name: "footnotePr" | "endnotePr",
-	position: number | undefined,
+	footnotePosition: number | undefined,
 	format: number | undefined,
 	start: number | undefined,
 	restart: number | undefined
 ): string {
 	let inner = ""
 
-	if (position !== undefined) {
-		inner += val(
-			"pos",
-			// sprmSFpc: 2 immediately after the text, else the bottom margin; sprmSEpc: 3 the end of the document.
-			name === "footnotePr" ? (position === 2 ? "beneathText" : "pageBottom") : position === 3 ? "docEnd" : "sectEnd"
-		)
-	}
+	// sprmSFpc: 2 immediately after the text, else the bottom margin.
+	if (footnotePosition !== undefined) inner += val("pos", footnotePosition === 2 ? "beneathText" : "pageBottom")
 
 	if (format !== undefined) inner += val("numFmt", numberFormat(format))
 	if (start !== undefined && start > 0) inner += val("numStart", start)

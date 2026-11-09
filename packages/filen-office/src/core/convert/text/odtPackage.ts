@@ -89,11 +89,15 @@ function attributesMarkup(document: XmlDocument, node: number, changes: Readonly
 }
 
 function renamed(instruction: string, bookmarks: Bookmarks): string {
-	return instruction.replace(/(\b(?:REF|PAGEREF|NOTEREF)\s+|\\l\s+"?)([^\s"\\]+)/gu, (match, head: string, name: string) => {
-		const to = bookmarks.renamed.get(name)
+	// A name quoted (one with spaces, quotes or backslashes, §17.16.1) or bare.
+	return instruction.replace(
+		/(\b(?:REF|PAGEREF|NOTEREF)\s+)"((?:[^"\\]|\\.)*)"|(\b(?:REF|PAGEREF|NOTEREF)\s+|\\l\s+"?)([^\s"\\]+)/gu,
+		(match, quotedHead: string | undefined, quoted: string | undefined, head: string | undefined, name: string | undefined) => {
+			const to = bookmarks.renamed.get(quoted === undefined ? (name ?? "") : quoted.replace(/\\(.)/gu, "$1"))
 
-		return to === undefined ? match : `${head}${to}`
-	})
+			return to === undefined ? match : `${quotedHead ?? head ?? ""}${to}`
+		}
+	)
 }
 
 // The translator's field codes that are not fields a .docx can update: DOCPROPERTY naming the ODF element a field was
@@ -366,14 +370,14 @@ function joinBytes(pieces: readonly Uint8Array[]): Uint8Array {
 }
 
 interface Bookmarks {
-	// Names a bookmark is written under, by its name and by the name the translator's fields refer to it by.
+	// Names a bookmark is written under, by its name (the translator's fields name it so, quoted where needed).
 	readonly renamed: ReadonlyMap<string, string>
 	// Every bookmark's written name, lower case (Word matches names case-insensitively).
 	readonly names: ReadonlySet<string>
 }
 
-// Bookmark names as a .docx holds them: at most 40 characters, spaces, quotes and backslashes as "_"
-// (as the translator's REF fields name them: a field instruction's argument holds none), unique case-insensitively.
+// Bookmark names as a .docx holds them: at most 40 characters, spaces, quotes and backslashes as "_" (Word takes no
+// such name), unique case-insensitively.
 function bookmarkNames(documents: Iterable<XmlDocument>): Bookmarks {
 	const all: string[] = []
 
@@ -404,8 +408,6 @@ function bookmarkNames(documents: Iterable<XmlDocument>): Bookmarks {
 
 		names.add(to.toLowerCase())
 		renamed.set(name, to)
-
-		if (!renamed.has(plain)) renamed.set(plain, to)
 	}
 
 	return { renamed, names }

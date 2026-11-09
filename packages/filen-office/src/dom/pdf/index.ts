@@ -19,7 +19,7 @@ export {
 	type PdfFindSignal,
 	type PdfPageText
 } from "./find"
-export { pdfLinks, resolveDestination, type PdfLink, type PdfRect } from "./links"
+export { pdfLinks, resolveDestination, type PdfDestination, type PdfLink, type PdfRect } from "./links"
 export {
 	loadPdfInfo,
 	loadPdfOutline,
@@ -57,11 +57,11 @@ export type {
 export {
 	clampPdfScale,
 	isPdfCommandEnabled,
-	mostVisiblePage,
 	pdfBox,
 	pdfCanvasDims,
 	pdfFitScale,
 	pdfPageAction,
+	pdfPageInView,
 	pdfPageRotation,
 	pdfPercentScale,
 	pdfRenderRatio,
@@ -77,7 +77,7 @@ export {
 	PDF_PAGE_EVICT_MARGIN_PX,
 	PDF_PAGE_RENDER_MARGIN_PX,
 	PDF_ZOOM_PRESETS,
-	PDF_ZOOM_STEP,
+	PDF_ZOOM_RENDER_DELAY_MS,
 	PDF_ZOOM_WHEEL_SENSITIVITY,
 	type PdfBox,
 	type PdfCanvasDims,

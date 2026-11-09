@@ -7,6 +7,8 @@ export type PdfDomDocument = PdfDocument<ReadableStream>
 export interface PdfTextLayer {
 	render(): Promise<unknown>
 	cancel(): void
+	// Lays the spans out again for a new scale or turn, without reading the text again.
+	update(params: { readonly viewport: PdfViewport }): void
 	readonly textDivs: readonly HTMLElement[]
 	readonly textContentItemsStr: readonly string[]
 }

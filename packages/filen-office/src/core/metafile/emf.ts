@@ -496,6 +496,21 @@ function play(bytes: Bytes, head: Header, gdi: Gdi, plus: EmfPlus | undefined, n
 
 				break
 			}
+			case 72: {
+				const brush = gdi.objects.get(u32(28))
+				const rects = regionRects(bytes, at + 40, Math.min(u32(24), size - 40))
+
+				if (rects !== null && brush?.kind === "brush") gdi.frameRects(gdi.deviceRects(rects), i32(32), i32(36), brush)
+
+				break
+			}
+			case 73: {
+				const rects = regionRects(bytes, at + 28, Math.min(u32(24), size - 28))
+
+				if (rects !== null) gdi.invertRects(gdi.deviceRects(rects))
+
+				break
+			}
 			case 75: {
 				const dataSize = u32(8)
 				const mode = u32(12)
@@ -712,13 +727,25 @@ function play(bytes: Bytes, head: Header, gdi: Gdi, plus: EmfPlus | undefined, n
 				break
 			}
 			case 108: {
+				// x, y, cChars, fuOptions, iGraphicsMode, exScale, eyScale, Bounds unless ETO_NO_RECT, then the string
+				// (8-bit with ETO_SMALL_CHARS).
 				const options = u32(20)
 				const count = Math.min(u32(16), 65_536)
-				const textAt = at + 36 + ((options & 0x100) !== 0 ? 0 : 16)
+				const hasRect = (options & 0x100) === 0
+				const textAt = at + 36 + (hasRect ? 16 : 0)
 				const small = (options & 0x200) !== 0
+
+				if (count === 0 || textAt + count * (small ? 1 : 2) > end || gdi.suppress) break
+
+				// ETO_GLYPH_INDEX, as in EmrText.
+				if ((options & 0x10) !== 0) {
+					out.unsupported++
+					break
+				}
+
 				const units = small ? decodeAnsi(bytes.sub(textAt, count), gdi.dc.font.charset) : bytes.utf16(textAt, count, false)
 
-				gdi.text(i32(8), i32(12), units, null, 1, options & 0x6, null)
+				gdi.text(i32(8), i32(12), units, null, 1, options & 0x6, hasRect ? [i32(36), i32(40), i32(44), i32(48)] : null)
 				break
 			}
 			case 118:

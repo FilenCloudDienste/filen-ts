@@ -7,6 +7,7 @@ import {
 	type OdfStyleSheet,
 	type StyleScope
 } from "../odf/index"
+import { defaultPageRtl } from "./pages"
 import { paragraphProperties, runProperties, setsIndent, type Attributes, type PropsSink } from "./props"
 import type { OdtLossyReason } from "./types"
 import { esc } from "./wml"
@@ -34,6 +35,13 @@ export interface ParagraphStyle {
 	readonly fontSize: number
 	// What the common style it names (with the styles it is based on) approximates: the paragraph shows that too.
 	readonly reasons: readonly OdtLossyReason[]
+	// The tab stops the common style it names gives, and the margin its w:style placed them from.
+	readonly inheritedTabs: InheritedTabs | undefined
+}
+
+export interface InheritedTabs {
+	readonly stops: OdfElement
+	readonly marginLeft: number
 }
 
 // A common style translated once: its w:style and what that approximates.
@@ -71,13 +79,17 @@ export class StyleMapper {
 	private readonly runCache = new Map<string, string>()
 	private readonly commonCache = new Map<string, CommonStyle>()
 	private readonly chainCache = new Map<string, readonly OdtLossyReason[]>()
+	private readonly tabsCache = new Map<string, InheritedTabs | null>()
 	readonly defaultParagraphStyle: string | undefined
+	// The first page style's direction: what the styles' "page" writing mode (or none) is translated as.
+	readonly pageRtl: boolean
 
 	constructor(sheet: OdfStyleSheet, resolver: OdfStyleResolver, options: StyleOptions) {
 		this.sheet = sheet
 		this.resolver = resolver
 		this.options = options
 		this.defaultParagraphStyle = sheet.commonStyle("paragraph", "Standard") !== undefined ? "Standard" : undefined
+		this.pageRtl = defaultPageRtl(sheet)
 	}
 
 	paragraphStyleId(name: string): string {
@@ -111,6 +123,7 @@ export class StyleMapper {
 			style = {
 				styleId: parent === undefined ? undefined : this.paragraphStyleId(parent),
 				reasons: parent === undefined ? NO_REASONS : this.reasons("paragraph", parent),
+				inheritedTabs: this.inheritedTabs(parent),
 				paragraph: ownResolved(own?.attributes, resolvedParagraph),
 				children: own?.children ?? [],
 				text: ownResolved(odf.properties.get("text")?.attributes, resolvedText),
@@ -125,6 +138,7 @@ export class StyleMapper {
 			style = {
 				styleId: common === undefined ? undefined : this.paragraphStyleId(common),
 				reasons: common === undefined ? NO_REASONS : this.reasons("paragraph", common),
+				inheritedTabs: this.inheritedTabs(common),
 				paragraph: NO_ATTRIBUTES,
 				children: [],
 				text: NO_ATTRIBUTES,
@@ -210,7 +224,10 @@ export class StyleMapper {
 				marginLeft: 0,
 				indents: false,
 				fontSize: DEFAULT_SIZE,
-				hyphenate: defaults?.properties.get("text")?.attributes.get("fo:hyphenate")
+				hyphenate: defaults?.properties.get("text")?.attributes.get("fo:hyphenate"),
+				pageRtl: this.pageRtl,
+				// No writing mode is "page" (§20.404.3): every style inherits the first page's direction from here.
+				bidi: this.pageRtl ? true : undefined
 			},
 			sink
 		)
@@ -255,6 +272,42 @@ export class StyleMapper {
 		return common
 	}
 
+	// The tab stops a common paragraph style gives (its own or the nearest style's it is based on that sets them,
+	// ODF replacing them whole), with the left margin that style's w:style placed them from (paragraphStyleXml).
+	private inheritedTabs(name: string | undefined): InheritedTabs | undefined {
+		if (name === undefined) return undefined
+
+		let found = this.tabsCache.get(name)
+
+		if (found === undefined) {
+			found = null
+
+			const seen = new Set<string>()
+
+			for (let style = this.sheet.commonStyle("paragraph", name); style !== undefined && !seen.has(style.name);) {
+				seen.add(style.name)
+
+				const stops = style.properties.get("paragraph")?.children.find(child => child.name === "style:tab-stops")
+
+				if (stops !== undefined) {
+					const margin = this.resolver
+						.resolve("paragraph", style.name, "styles")
+						.properties("paragraph")
+						.attributes.get("fo:margin-left")
+
+					found = { stops, marginLeft: parseLength(margin) ?? 0 }
+					break
+				}
+
+				style = style.parent === undefined || style.parent === "" ? undefined : this.sheet.commonStyle("paragraph", style.parent)
+			}
+
+			this.tabsCache.set(name, found)
+		}
+
+		return found ?? undefined
+	}
+
 	// The reasons of a common style and the common styles it is based on (a cycle or a missing parent ends the
 	// chain, as the resolver's inheritance does).
 	private reasons(family: "paragraph" | "text", name: string): readonly OdtLossyReason[] {
@@ -295,7 +348,8 @@ export class StyleMapper {
 				marginLeft: parseLength(resolvedParagraph.get("fo:margin-left")) ?? 0,
 				indents: ownIndent,
 				fontSize: parseLength(resolvedText.get("fo:font-size")) ?? DEFAULT_SIZE,
-				hyphenate: style.properties.get("text")?.attributes.get("fo:hyphenate")
+				hyphenate: style.properties.get("text")?.attributes.get("fo:hyphenate"),
+				pageRtl: this.pageRtl
 			},
 			sink
 		)

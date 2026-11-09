@@ -34,6 +34,8 @@ export function blockXml(block: Block): string {
 export interface Flow {
 	readonly body: boolean
 	add(block: Block): void
+	// Adds `content` to the end of the last paragraph, or as a paragraph of its own after another block or none.
+	appendToLast(content: string): void
 }
 
 export class MarkupFlow implements Flow {
@@ -42,6 +44,13 @@ export class MarkupFlow implements Flow {
 
 	add(block: Block): void {
 		this.blocks.push(block)
+	}
+
+	appendToLast(content: string): void {
+		const last = this.blocks[this.blocks.length - 1]
+
+		if (last?.kind === "p") last.content += content
+		else this.add(paragraph("", "", content))
 	}
 
 	get endsWithParagraph(): boolean {

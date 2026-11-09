@@ -184,6 +184,7 @@ export interface EngineInit {
 	readonly compat: LayoutCompat
 	readonly tuning: LayoutTuning
 	readonly recordMaps?: boolean
+	readonly mapParagraph?: (part: StoryPart, paragraph: number) => boolean
 	readonly edits?: LayoutEdits
 	// The time DATE and TIME fields show.
 	readonly now: Date
@@ -256,6 +257,7 @@ export class Engine {
 			showHidden: init.showHidden,
 			markers: this.markers,
 			recordMaps: init.recordMaps ?? false,
+			mapParagraph: init.mapParagraph,
 			memoKey: (part, item) => this.memoKey(part, item),
 			// Numbered when a tracked change is first drawn (reading every part's changes).
 			authors: name => modelAuthors(init.model).index(name),

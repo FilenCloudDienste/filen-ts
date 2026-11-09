@@ -59,34 +59,67 @@ export function entryInput(tile: SheetTile, entry: number): string {
 	return index < 0 ? entryText(tile, entry) : (tile.strings[index] ?? "")
 }
 
-// The runs of a RICH entry as [start, style] pairs, or null.
-export function entryRuns(tile: SheetTile, entry: number): number[] | null {
-	const runs = tile.layers?.runs
+type RunsLayer = NonNullable<SheetTileLayers["runs"]>
+type RepeatsLayer = NonNullable<SheetTileLayers["repeats"]>
 
-	if (runs === undefined) return null
+export interface EntryRepeat {
+	readonly offset: number
+	readonly char: string
+}
 
-	let found: number[] | null = null
+// Per layer (shared by a tile and its keyed copy), each entry's answer, built when the layer is first looked into:
+// painting asks for every visible cell twice a frame.
+const runIndexes = new WeakMap<RunsLayer, (readonly number[] | undefined)[]>()
+const repeatIndexes = new WeakMap<RepeatsLayer, (EntryRepeat | undefined)[]>()
 
-	for (let i = 0; i < runs.runEntries.length; i++) {
-		if (runs.runEntries[i] !== entry) continue
+function runIndex(runs: RunsLayer): (readonly number[] | undefined)[] {
+	let index = runIndexes.get(runs)
 
-		found ??= []
-		found.push(runs.runStarts[i] ?? 0, runs.runStyles[i] ?? 0)
+	if (index === undefined) {
+		const built: (number[] | undefined)[] = []
+
+		// Table order within an entry: the table need not be grouped or sorted by entry.
+		for (let i = 0; i < runs.runEntries.length; i++)
+			(built[runs.runEntries[i] ?? 0] ??= []).push(runs.runStarts[i] ?? 0, runs.runStyles[i] ?? 0)
+
+		index = built
+		runIndexes.set(runs, index)
 	}
 
-	return found
+	return index
+}
+
+function repeatIndex(repeats: RepeatsLayer): (EntryRepeat | undefined)[] {
+	let index = repeatIndexes.get(repeats)
+
+	if (index === undefined) {
+		index = []
+
+		// The first row of an entry wins.
+		for (let i = 0; i < repeats.entries.length; i++) {
+			const entry = repeats.entries[i] ?? 0
+
+			index[entry] ??= { offset: repeats.offsets[i] ?? 0, char: repeats.chars[i] ?? "" }
+		}
+
+		repeatIndexes.set(repeats, index)
+	}
+
+	return index
+}
+
+// The runs of a RICH entry as [start, style] pairs, or null. Shared: never mutated by callers.
+export function entryRuns(tile: SheetTile, entry: number): readonly number[] | null {
+	const runs = tile.layers?.runs
+
+	return runs === undefined ? null : (runIndex(runs)[entry] ?? null)
 }
 
 // Where a REPEAT entry's fill goes and what fills it, or null.
-export function entryRepeat(tile: SheetTile, entry: number): { readonly offset: number; readonly char: string } | null {
+export function entryRepeat(tile: SheetTile, entry: number): EntryRepeat | null {
 	const repeats = tile.layers?.repeats
 
-	if (repeats === undefined) return null
-
-	for (let i = 0; i < repeats.entries.length; i++)
-		if (repeats.entries[i] === entry) return { offset: repeats.offsets[i] ?? 0, char: repeats.chars[i] ?? "" }
-
-	return null
+	return repeats === undefined ? null : (repeatIndex(repeats)[entry] ?? null)
 }
 
 function keyed(tile: SheetTile): GridTile {

@@ -41,6 +41,7 @@ const FONTS: FontSource = {
 			weight: request.bold ? 700 : 400,
 			italic: request.italic,
 			scale: 1,
+			widthScale: 1,
 			metrics: METRICS,
 			metricsBasis: "original",
 			source: "generic"

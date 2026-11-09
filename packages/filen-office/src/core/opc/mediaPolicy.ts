@@ -210,7 +210,22 @@ export function checkPackage(
 }
 
 export type MediaContainer =
-	"isoBmff" | "matroska" | "ogg" | "avi" | "wav" | "asf" | "mpegPs" | "mpegTs" | "mpegVideo" | "mp3" | "aiff" | "flac" | "midi" | "amr"
+	| "isoBmff"
+	| "matroska"
+	| "ogg"
+	| "avi"
+	| "wav"
+	| "asf"
+	| "mpegPs"
+	| "mpegTs"
+	| "mpegVideo"
+	| "mp3"
+	| "aiff"
+	| "flac"
+	| "midi"
+	| "amr"
+	| "au"
+	| "caf"
 
 const ISO_BOXES: ReadonlySet<string> = new Set(["ftyp", "moov", "mdat", "free", "wide", "skip", "pnot"])
 
@@ -251,6 +266,9 @@ export function sniffMedia(head: Uint8Array): MediaContainer | undefined {
 	if (ascii(head, 0, 4) === "fLaC") return "flac"
 	if (ascii(head, 0, 4) === "MThd") return "midi"
 	if (ascii(head, 0, 5) === "#!AMR") return "amr"
+	// Sun/NeXT AU (.au, .snd) and Core Audio Format: PowerPoint for Mac plays both.
+	if (ascii(head, 0, 4) === ".snd") return "au"
+	if (ascii(head, 0, 4) === "caff") return "caf"
 	if (ascii(head, 0, 3) === "ID3") return "mp3"
 	// An MPEG audio frame (or ADTS AAC) sync word.
 	if (b0 === 0xff && (b1 & 0xe0) === 0xe0) return "mp3"
@@ -363,8 +381,14 @@ export function imageDimensions(head: Uint8Array): { readonly width: number; rea
 
 	if (head.length >= 10 && ascii(head, 0, 3) === "GIF") return { width: uint16le(head, 6), height: uint16le(head, 8) }
 
-	if (head.length >= 26 && ascii(head, 0, 2) === "BM") {
-		return { width: Math.abs(int32le(head, 18)), height: Math.abs(int32le(head, 22)) }
+	if (head.length >= 18 && ascii(head, 0, 2) === "BM") {
+		// A 12-byte OS/2 BITMAPCOREHEADER gives WORD sizes; every later DIB header gives LONGs (negative height:
+		// top-down).
+		if (int32le(head, 14) === 12) {
+			if (head.length >= 22) return { width: uint16le(head, 18), height: uint16le(head, 20) }
+		} else if (head.length >= 26) {
+			return { width: Math.abs(int32le(head, 18)), height: Math.abs(int32le(head, 22)) }
+		}
 	}
 
 	if (head.length >= 30 && ascii(head, 0, 4) === "RIFF" && ascii(head, 8, 4) === "WEBP") {

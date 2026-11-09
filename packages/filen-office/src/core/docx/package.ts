@@ -83,6 +83,14 @@ export function gateReasons(facts: DocxFacts, ...parts: readonly ({ readonly mal
 	return reasons
 }
 
+// `reasons` with those of `added` it lacks: what the file a package was translated from says that the package
+// does not (a signed ODT translates to a package without its signatures).
+export function withGate(reasons: DocxGateReason[], added: readonly DocxGateReason[] | undefined): DocxGateReason[] {
+	if (added !== undefined) for (const reason of added) if (!reasons.includes(reason)) reasons.push(reason)
+
+	return reasons
+}
+
 const RELATIONSHIP_BASES = [
 	"http://schemas.openxmlformats.org/officeDocument/2006/relationships/",
 	"http://purl.oclc.org/ooxml/officeDocument/relationships/",

@@ -1,8 +1,8 @@
-import { templateLocale } from "./locale"
+import { languageSlots, templateLocale } from "./locale"
 import { zipParts } from "./zip"
 
 // A blank WordprocessingML document: one empty paragraph in Calibri 11 pt, the paper of the user's region
-// with 1-inch margins, the user's language as the proofing default, and Word 2013+ layout
+// with 1-inch margins, the user's language as the proofing default of its script's slot, and Word 2013+ layout
 // (compatibilityMode 15). ECMA-376 Part 1 §11.3.10 (document), §17.7.4 (styles), §17.15.1 (settings),
 // §17.6.13 / §17.6.11 (pgSz, pgMar). No theme, properties or author: nothing about the user is written.
 
@@ -57,11 +57,23 @@ function document(paper: keyof typeof PAGES): string {
 	)
 }
 
-function styles(lang: string): string {
+// §17.3.2.20: w:val proofs Latin text, w:eastAsia East Asian text, w:bidi complex-script text.
+function lang(tag: string): string {
+	const { latin, eastAsia, complex } = languageSlots(tag)
+
+	return (
+		`<w:lang w:val="${latin}"` +
+		(eastAsia === undefined ? "" : ` w:eastAsia="${eastAsia}"`) +
+		(complex === undefined ? "" : ` w:bidi="${complex}"`) +
+		"/>"
+	)
+}
+
+function styles(tag: string): string {
 	return (
 		`<w:styles xmlns:w="${W}"><w:docDefaults>` +
 		'<w:rPrDefault><w:rPr><w:rFonts w:ascii="Calibri" w:eastAsia="Calibri" w:hAnsi="Calibri" w:cs="Calibri"/>' +
-		`<w:sz w:val="22"/><w:szCs w:val="22"/><w:lang w:val="${lang}"/></w:rPr></w:rPrDefault>` +
+		`<w:sz w:val="22"/><w:szCs w:val="22"/>${lang(tag)}</w:rPr></w:rPrDefault>` +
 		'<w:pPrDefault><w:pPr><w:spacing w:after="160" w:line="259" w:lineRule="auto"/></w:pPr></w:pPrDefault>' +
 		"</w:docDefaults>" +
 		'<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:qFormat/></w:style>' +

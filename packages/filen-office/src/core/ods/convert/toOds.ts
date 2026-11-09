@@ -48,7 +48,7 @@ import { sheetValidationsSteps, ValidationRefused } from "../write/validations"
 import { dataStyles, sameShown } from "../write/dataStyle"
 import { cellStyleProperties } from "../write/styles"
 import { paragraphText, STRICT_ERRORS } from "../write/cells"
-import { templateLocale } from "../../templates/locale"
+import { tagParts, templateLocale } from "../../templates/locale"
 import { SheetLossyReport, type SheetLossyKind } from "./report"
 import { readSheetTable, resolveStructured, sheetErrorsAsErrors, type SheetTable } from "./structured"
 import { ConditionStyles, sheetConditions } from "./conditional"
@@ -1530,12 +1530,12 @@ function emptyPackage(
 	const family = styles.renderStyle(0).font ?? "Calibri"
 	const faces = `<office:font-face-decls><style:font-face${attr("style:name", family)}${attr("svg:font-family", family)}/></office:font-face-decls>`
 	// A cell style writes its paragraph properties only where it has them: the default has none to pass on.
-	const [tongue = "en", country] = templateLocale(language).tag.split("-")
+	const { language: tongue, script, region } = tagParts(templateLocale(language).tag)
 	const defaults = cellStyleProperties(styles, 0, name => name)
 		.replace(/<style:paragraph-properties\b[^>]*\/>/, "<style:paragraph-properties/>")
 		.replace(
 			"<style:text-properties",
-			`<style:text-properties${attr("fo:language", tongue)}${country === undefined ? "" : attr("fo:country", country)}`
+			`<style:text-properties${attr("fo:language", tongue)}${script === undefined ? "" : attr("fo:script", script)}${region === undefined ? "" : attr("fo:country", region)}`
 		)
 
 	return packageOf(

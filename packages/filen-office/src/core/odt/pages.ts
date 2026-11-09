@@ -4,10 +4,11 @@ import {
 	type OdfElement,
 	type OdfMasterPage,
 	type OdfPageLayout,
-	type OdfProperties
+	type OdfProperties,
+	type OdfStyleSheet
 } from "../odf/index"
 import { blockXml, MarkupFlow, paragraph, type Block, type Flow } from "./flow"
-import { border } from "./props"
+import { border, layoutRtl } from "./props"
 import type { Translator } from "./translator"
 import type { OdtOrigin } from "./types"
 import { encodeUtf8 } from "../xml/index"
@@ -37,6 +38,38 @@ interface SectionState {
 	readonly pageStart: number | undefined
 }
 
+// The master page the document's first section is on unless a block names one.
+function firstMasterName(sheet: OdfStyleSheet): string {
+	return sheet.masterPages.has("Standard") ? "Standard" : (sheet.masterOrder[0] ?? "Standard")
+}
+
+function masterLayout(sheet: OdfStyleSheet, master: OdfMasterPage | undefined): OdfPageLayout | undefined {
+	return master?.pageLayout === undefined
+		? sheet.defaultPageLayout
+		: (sheet.pageLayouts.get(master.pageLayout) ?? sheet.defaultPageLayout)
+}
+
+// The master page the first page's next-style-name leads to, when it is another.
+function followerOf(sheet: OdfStyleSheet, master: OdfMasterPage | undefined): OdfMasterPage | undefined {
+	const next = master?.next
+
+	if (master === undefined || next === undefined || next === "" || next === master.name) return undefined
+
+	return sheet.masterPages.get(next)
+}
+
+// Whether the pages of a section on master page `name` run right to left (its sectPr's page layout).
+function masterRtl(sheet: OdfStyleSheet, name: string): boolean {
+	const master = sheet.masterPages.get(name)
+
+	return layoutRtl(masterLayout(sheet, followerOf(sheet, master) ?? master))
+}
+
+// The direction of the document's first page style: what the translated styles' "page" writing mode takes.
+export function defaultPageRtl(sheet: OdfStyleSheet): boolean {
+	return masterRtl(sheet, firstMasterName(sheet))
+}
+
 export class BodyFlow implements Flow {
 	readonly body = true
 	readonly writer = new PartWriter()
@@ -48,6 +81,11 @@ export class BodyFlow implements Flow {
 
 		this.held = block
 		this.count++
+	}
+
+	appendToLast(content: string): void {
+		if (this.held?.kind === "p") this.held.content += content
+		else this.add(paragraph("", "", content))
 	}
 
 	// Ends a section: its sectPr goes into the last paragraph, or a paragraph of its own after a table.
@@ -118,9 +156,12 @@ export class Pages {
 	}
 
 	private get firstMaster(): string {
-		const masters = this.translator.sheet.masterPages
+		return firstMasterName(this.translator.sheet)
+	}
 
-		return masters.has("Standard") ? "Standard" : (this.translator.sheet.masterOrder[0] ?? "Standard")
+	// Whether the current section's pages run right to left.
+	get rtl(): boolean {
+		return masterRtl(this.translator.sheet, this.state?.master ?? this.firstMaster)
 	}
 
 	// The document's first section starts with the default page style unless a block names one.
@@ -180,11 +221,7 @@ export class Pages {
 	}
 
 	private layout(master: OdfMasterPage | undefined): OdfPageLayout | undefined {
-		const sheet = this.translator.sheet
-
-		return master?.pageLayout === undefined
-			? sheet.defaultPageLayout
-			: (sheet.pageLayouts.get(master.pageLayout) ?? sheet.defaultPageLayout)
+		return masterLayout(this.translator.sheet, master)
 	}
 
 	// The current page's left margin (points): frames placed from the page edge.
@@ -213,11 +250,7 @@ export class Pages {
 
 	// The master page the first page's next-style-name leads to, when it is another.
 	private follower(master: OdfMasterPage | undefined): OdfMasterPage | undefined {
-		const next = master?.next
-
-		if (master === undefined || next === undefined || next === "" || next === master.name) return undefined
-
-		return this.translator.sheet.masterPages.get(next)
+		return followerOf(this.translator.sheet, master)
 	}
 
 	private sectPr(state: SectionState): string {
@@ -236,7 +269,10 @@ export class Pages {
 		}
 
 		let references = ""
-		let titlePage = false
+		// One region's first-page variant makes a title page for both; the other keeps its regular region on page 1
+		// (ODF 1.3 Part 3 §16.11, §16.13), since titlePg with no first reference blanks it (ECMA-376 Part 1 §17.10.5).
+		const titlePage =
+			follower !== undefined || this.region(master, "header-first") !== undefined || this.region(master, "footer-first") !== undefined
 		const reference = (tag: "header" | "footer", type: string, part: string | undefined): void => {
 			if (part !== undefined) references += `<w:${tag}Reference w:type="${type}" r:id="${part}"/>`
 		}
@@ -248,16 +284,10 @@ export class Pages {
 
 			if (this.evenAndOdd) reference(tag, "even", this.region(main, `${tag}-left`) ?? main_)
 
-			let first: string | undefined
-
-			if (follower !== undefined) {
-				first = this.region(master, `${tag}-first`) ?? this.region(master, tag) ?? this.emptyRegion(tag)
-				titlePage = true
-			} else {
-				first = this.region(master, `${tag}-first`)
-
-				if (first !== undefined) titlePage = true
-			}
+			const first =
+				follower !== undefined
+					? (this.region(master, `${tag}-first`) ?? this.region(master, tag) ?? this.emptyRegion(tag))
+					: (this.region(master, `${tag}-first`) ?? (titlePage ? main_ : undefined))
 
 			reference(tag, "first", first)
 		}
@@ -292,7 +322,7 @@ export class Pages {
 				? `<w:pgNumType${format === undefined || format === "decimal" ? "" : ` w:fmt="${format}"`}${state.pageStart === undefined ? "" : ` w:start="${state.pageStart}"`}/>`
 				: ""
 
-		return `<w:sectPr>${references}<w:type w:val="${state.type}"/><w:pgSz w:w="${twips(pageWidth)}" w:h="${twips(pageHeight)}"${orientation}/><w:pgMar w:top="${twips(top + headerExtent)}" w:right="${twips(right)}" w:bottom="${twips(bottom + footerExtent)}" w:left="${twips(left)}" w:header="${twips(headerAt)}" w:footer="${twips(footerAt)}" w:gutter="0"/>${borders === "" || !/w:val="(?!nil)/.test(borders) ? "" : `<w:pgBorders w:offsetFrom="text">${borders}</w:pgBorders>`}${numbering}${this.columnsXml(columns)}${titlePage ? "<w:titlePg/>" : ""}</w:sectPr>`
+		return `<w:sectPr>${references}<w:type w:val="${state.type}"/><w:pgSz w:w="${twips(pageWidth)}" w:h="${twips(pageHeight)}"${orientation}/><w:pgMar w:top="${twips(top + headerExtent)}" w:right="${twips(right)}" w:bottom="${twips(bottom + footerExtent)}" w:left="${twips(left)}" w:header="${twips(headerAt)}" w:footer="${twips(footerAt)}" w:gutter="0"/>${borders === "" || !/w:val="(?!nil)/.test(borders) ? "" : `<w:pgBorders w:offsetFrom="text">${borders}</w:pgBorders>`}${numbering}${this.columnsXml(columns)}${titlePage ? "<w:titlePg/>" : ""}${layoutRtl(layout) ? "<w:bidi/>" : ""}</w:sectPr>`
 	}
 
 	private columnsXml(columns: OdfElement | undefined): string {
@@ -375,18 +405,25 @@ export class Pages {
 			const properties = header ? layout?.header : layout?.footer
 			const spacing = parseLength(properties?.attributes.get(header ? "fo:margin-bottom" : "fo:margin-top")) ?? 0
 			const translator = this.translator
-			const saved = { document: translator.document, namespaces: translator.namespaces, scope: translator.scope }
+			const saved = {
+				document: translator.document,
+				namespaces: translator.namespaces,
+				scope: translator.scope,
+				direction: translator.direction
+			}
 
 			translator.document = sheet.stylesDocument
 			translator.namespaces = sheet.stylesNamespaces
 			translator.scope = "styles"
+			// A header or footer runs in its own master page's direction.
+			translator.direction = layoutRtl(layout)
 
 			const flow = new MarkupFlow()
 			const lossyBefore = new Set(translator.blockLossy)
 
 			translator.blockLossy.clear()
 			translator.widths.push(this.textWidthOfMaster(master))
-			translator.blocks(region.node, flow)
+			translator.storyBlocks(region.node, flow)
 			translator.widths.pop()
 
 			const lossy = translator.takeLossy()
@@ -396,6 +433,7 @@ export class Pages {
 			translator.document = saved.document
 			translator.namespaces = saved.namespaces
 			translator.scope = saved.scope
+			translator.direction = saved.direction
 
 			const count = flow.blocks.length
 			const spacer = spacing > 0 ? spacerParagraph(spacing) : undefined

@@ -98,6 +98,8 @@ export interface DocComment {
 	readonly text: DocStory
 	readonly author: string
 	readonly initials: string
+	// ATRDPost10.dttm (AtrdExtra, Word 2002+) as an ISO 8601 local time; undefined when absent or zero.
+	readonly date: string | undefined
 	// Commented range when the comment has one (SttbfAtnBkmk + PlcfAtnBkf/Bkl).
 	readonly rangeStart: number | undefined
 	readonly rangeEnd: number | undefined

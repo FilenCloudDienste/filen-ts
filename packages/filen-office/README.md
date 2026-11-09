@@ -24,7 +24,7 @@ Document engines and editors shared by the Filen apps. `pnpm run lint`, `pnpm ru
 
 ## PDF
 
-- `@filen/office/dom/pdf` opens a PDF with the pdf.js module the host passes in (typed structurally; web: `pdfjs-dist` with a worker script; mobile: the legacy build with the in-thread worker). Assets come from `none`, `urls` or `inline`; the source is the whole file or ranged reads. A password loop runs on one loading task, and errors map to a closed set. Links pass `@filen/shared`'s link policy, in-document destinations resolve to a page, and find runs over the text content.
+- `@filen/office/dom/pdf` opens a PDF with the pdf.js module the host passes in (typed structurally; web: `pdfjs-dist` with a worker script; mobile: the legacy build with the in-thread worker). Assets come from `none`, `urls` or `inline`; the source is the whole file or ranged reads. A password loop runs on one loading task, and errors map to a closed set. Links pass `@filen/shared`'s link policy, in-document destinations resolve to a page and the point on it (the zoom they name is ignored), and find runs over the text content.
 - `@filen/office/react/pdf` is headless: `<PdfPages>` (virtualised pages with pdf.js's text layer), `usePdfDocument` and `usePdfViewer`, with commands and state like the DOCX viewer. `@filen/office/css/pdf.css` is structural; its colours are `--fo-pdf-*` variables.
 - `pdfjs-dist` is an optional peer dependency (Apache-2.0); this package bundles none of it. An app that uses these entry points adds it as its own dependency, dedupes it, and adds its notice.
 

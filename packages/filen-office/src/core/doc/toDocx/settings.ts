@@ -304,8 +304,9 @@ export function settingsPart(model: DocModel, notes: NoteSettings, protectionHas
 	if (bit(dop[0] ?? 0, 0)) out.push("<w:evenAndOddHeaders/>")
 	if (dop.length >= 56 && !bit(formFlags, 12)) out.push("<w:doNotShadeFormData/>")
 
-	// Before Word 2002 (nFib ≤ 0x00D9) note placement and numbering are document-wide (DopBase fpc/rncFtn/nFtn,
-	// epc/rncEdn/nEdn); later files keep them per section.
+	// Before Word 2002 (nFib ≤ 0x00D9) footnote placement and note numbering are document-wide (DopBase fpc/rncFtn/
+	// nFtn, rncEdn/nEdn); later files keep them per section. Endnote placement (DopBase epc) is document-wide in every
+	// version: no section sprm carries it.
 	const documentWide = model.fib.nFib <= 0x00d9 && dop.length >= 56
 
 	if (notes.footnotes) {
@@ -324,13 +325,11 @@ export function settingsPart(model: DocModel, notes: NoteSettings, protectionHas
 	}
 
 	if (notes.endnotes) {
-		let props = ""
+		let props = dop.length >= 56 ? val("pos", (formFlags & 3) === 3 ? "docEnd" : "sectEnd") : ""
 
 		if (documentWide) {
-			const epc = formFlags & 3
 			const word = u16(dop, 52)
 
-			props += val("pos", epc === 3 ? "docEnd" : "sectEnd")
 			if (word >> 2 > 0) props += val("numStart", word >> 2)
 			props += val("numRestart", ["continuous", "eachSect", "eachPage"][word & 3] ?? "continuous")
 		}

@@ -348,7 +348,7 @@ export async function convertDocFile(
 
 		model.comments.forEach((comment, id) => {
 			out.push(
-				`<w:comment${attr("w:id", id)}${attr("w:author", comment.author === "" ? "Unknown" : comment.author)}${comment.initials === "" ? "" : attr("w:initials", comment.initials)}>${write(
+				`<w:comment${attr("w:id", id)}${attr("w:author", comment.author === "" ? "Unknown" : comment.author)}${comment.date === undefined ? "" : attr("w:date", `${comment.date}Z`)}${comment.initials === "" ? "" : attr("w:initials", comment.initials)}>${write(
 					relationships,
 					comment.text
 				)}</w:comment>`

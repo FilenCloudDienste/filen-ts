@@ -10,6 +10,7 @@ import {
 } from "../../pdfwrite/index"
 import { PdfFontSet, type PdfFontAssets, type PdfFontFaceRequest } from "../../pdfwrite/fonts/index"
 import type { Slicing } from "../../slicing"
+import { styleLanguages } from "./lang"
 import { DocxPagePainter, type DocxPdfRefusal, type PagePaintContext } from "./paint"
 import type { DocxPdfDocument, DocxPdfFace } from "./types"
 
@@ -145,6 +146,12 @@ async function write(doc: DocxPdfDocument, options: DocxPdfOptions): Promise<Doc
 			fonts,
 			doc,
 			requests,
+			langs: writer.tagged
+				? styleLanguages(
+						doc.styles.map(style => style.language),
+						doc.lang ?? options.lang
+					)
+				: [],
 			media: doc.media,
 			seen: new Set(),
 			heading: 0,

@@ -29,7 +29,7 @@ export {
 	type DocxUnlockedDocument
 } from "./protection"
 export { inThreadDocxProtection } from "./protectionWorker"
-export { DocxEngine, type DocxEmit, type DocxEngineServices } from "./engine"
+export { DocxEngine, type DocxEmit, type DocxEngineOptions, type DocxEngineServices } from "./engine"
 export { findMatches, lineOf, type FindablePage } from "./find"
 export {
 	docxWorkerPool,

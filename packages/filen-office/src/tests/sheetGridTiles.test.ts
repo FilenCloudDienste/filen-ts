@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { CellFlag, tileKey, tilePosition, type SheetTile, type SheetTilePatch } from "../core/sheet/protocol"
 import { TileCache, entryInput, entryOf, entryRepeat, entryRuns, entryText, mergeTile } from "../react/sheet/tiles"
+import { cpuMs } from "./timing"
 
 // The grid's tile cache: least recently used out within its capacity, never a tile a frame needs; patches folded
 // in by version; regions dropped; releases batched and withheld for tiles fetched again.
@@ -134,5 +135,102 @@ describe("grid tiles", () => {
 		expect(cache.has(tileKey(1, 0, 0))).toBe(true)
 		expect(cache.has(tileKey(1, 1, 0))).toBe(false)
 		expect(cache.has(tileKey(1, 2, 0))).toBe(true)
+	})
+
+	it("reads runs and repeat fills from tables not sorted by entry, runs in table order, first repeat winning", () => {
+		const base = tile(0, 0, [
+			[0, 0, "abc"],
+			[0, 1, "def"],
+			[0, 2, "ghi"]
+		])
+		const layered: SheetTile = {
+			...base,
+			layers: {
+				runs: {
+					runEntries: Uint16Array.of(2, 0, 2, 0),
+					runStarts: Uint32Array.of(0, 0, 2, 1),
+					runStyles: Uint32Array.of(5, 6, 7, 8)
+				},
+				repeats: { entries: Uint16Array.of(2, 0, 2), offsets: Uint32Array.of(1, 3, 9), chars: ["-", "*", "="] }
+			}
+		}
+
+		expect(entryRuns(layered, 0)).toEqual([0, 6, 1, 8])
+		expect(entryRuns(layered, 1)).toBeNull()
+		expect(entryRuns(layered, 2)).toEqual([0, 5, 2, 7])
+		expect(entryRuns(layered, 9)).toBeNull()
+		expect(entryRepeat(layered, 0)).toEqual({ offset: 3, char: "*" })
+		expect(entryRepeat(layered, 1)).toBeNull()
+		expect(entryRepeat(layered, 2)).toEqual({ offset: 1, char: "-" })
+		expect(entryRuns(base, 0)).toBeNull()
+		expect(entryRepeat(base, 0)).toBeNull()
+
+		// A tile held by the cache shares the layers: same answers.
+		const held = new TileCache().put(layered)
+
+		expect(entryRuns(held, 2)).toEqual([0, 5, 2, 7])
+		expect(entryRepeat(held, 0)).toEqual({ offset: 3, char: "*" })
+	})
+
+	it("looks runs and repeats up in at most 10 ms of CPU for 10 frames of 1500 cells of a 2048-entry rich tile", () => {
+		const ENTRIES = 2048
+		const RUNS_PER_ENTRY = 3
+		const total = ENTRIES * RUNS_PER_ENTRY
+		const runEntries = new Uint16Array(total)
+		const runStarts = new Uint32Array(total)
+		const runStyles = new Uint32Array(total)
+
+		// Interleaved by run index so the table is not grouped by entry.
+		for (let r = 0; r < RUNS_PER_ENTRY; r++)
+			for (let e = 0; e < ENTRIES; e++) {
+				const i = r * ENTRIES + e
+
+				runEntries[i] = e
+				runStarts[i] = r
+				runStyles[i] = e + r
+			}
+
+		const repeatEntries = Uint16Array.from({ length: ENTRIES }, (_, e) => ENTRIES - 1 - e)
+		const make = (): SheetTile => ({
+			sheet: 1,
+			tileRow: 0,
+			tileCol: 0,
+			version: 1,
+			count: ENTRIES,
+			positions: Uint16Array.from({ length: ENTRIES }, (_, e) => e),
+			texts: new Int32Array(ENTRIES).fill(-1),
+			inputs: new Int32Array(ENTRIES).fill(-1),
+			styles: new Uint32Array(ENTRIES),
+			flags: new Uint32Array(ENTRIES).fill(CellFlag.RICH | CellFlag.REPEAT),
+			strings: [],
+			layers: {
+				runs: { runEntries, runStarts: runStarts.slice(), runStyles },
+				repeats: { entries: repeatEntries, offsets: new Uint32Array(ENTRIES), chars: new Array<string>(ENTRIES).fill("-") }
+			}
+		})
+		let best = Number.POSITIVE_INFINITY
+		let found = 0
+
+		for (let run = 0; run < 3; run++) {
+			// A fresh tile each run: the cost includes indexing it.
+			const subject = make()
+			const start = cpuMs()
+
+			for (let frame = 0; frame < 10; frame++)
+				for (let cell = 0; cell < 750; cell++) {
+					const entry = (cell * 7 + frame) % ENTRIES
+
+					// Painting asks twice per cell.
+					for (let twice = 0; twice < 2; twice++) {
+						found += entryRuns(subject, entry)?.length ?? 0
+						found += entryRepeat(subject, entry) === null ? 0 : 1
+					}
+				}
+
+			best = Math.min(best, cpuMs() - start)
+		}
+
+		expect(found).toBe(3 * 10 * 750 * 2 * (RUNS_PER_ENTRY * 2 + 1))
+		expect(best).toBeLessThan(10)
 	})
 })

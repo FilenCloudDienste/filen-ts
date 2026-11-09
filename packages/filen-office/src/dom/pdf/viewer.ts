@@ -6,7 +6,6 @@
 export const PDF_BASE_SCALE = 1.5
 export const PDF_MIN_SCALE = 0.5
 export const PDF_MAX_SCALE = 4
-export const PDF_ZOOM_STEP = 0.25
 export const PDF_ZOOM_WHEEL_SENSITIVITY = 0.0015
 
 // A page renders once it is this close to the view, and its canvas is released once it is further than the
@@ -20,8 +19,9 @@ export type PdfViewerCommand =
 	| { readonly type: "page.next" }
 	| { readonly type: "page.first" }
 	| { readonly type: "page.last" }
-	// 1-based.
-	| { readonly type: "page.goto"; readonly page: number }
+	// 1-based. `left` and `top` (PDF user space, a resolved destination's point) go to the view's top-left
+	// corner; without `top` the page's top does.
+	| { readonly type: "page.goto"; readonly page: number; readonly left?: number | null; readonly top?: number | null }
 	| { readonly type: "zoom.in" }
 	| { readonly type: "zoom.out" }
 	// pdf.js scale (PDF_BASE_SCALE is 100 %).
@@ -98,13 +98,27 @@ export function clampPdfScale(scale: number): number {
 	return Math.min(PDF_MAX_SCALE, Math.max(PDF_MIN_SCALE, scale))
 }
 
-// The +/- steps land on the PDF_ZOOM_STEP grid wherever a wheel zoom left the scale.
+// The +/- steps walk PDF_ZOOM_PRESETS (the next preset strictly that way from wherever a wheel zoom left the
+// scale), then the end of the range.
 export function pdfStepZoomScale(current: number, direction: 1 | -1): number {
-	const steps = (current - PDF_BASE_SCALE) / PDF_ZOOM_STEP
-	const onGrid = Math.abs(steps - Math.round(steps)) < 1e-9
-	const next = onGrid ? Math.round(steps) + direction : direction > 0 ? Math.ceil(steps) : Math.floor(steps)
+	const percent = (current / PDF_BASE_SCALE) * 100
+	const epsilon = 1e-6
 
-	return clampPdfScale(PDF_BASE_SCALE + next * PDF_ZOOM_STEP)
+	if (direction > 0) {
+		for (const preset of PDF_ZOOM_PRESETS) {
+			if (preset > percent + epsilon) return pdfPercentScale(preset)
+		}
+
+		return PDF_MAX_SCALE
+	}
+
+	for (let i = PDF_ZOOM_PRESETS.length - 1; i >= 0; i--) {
+		const preset = PDF_ZOOM_PRESETS[i]
+
+		if (preset !== undefined && preset < percent - epsilon) return pdfPercentScale(preset)
+	}
+
+	return PDF_MIN_SCALE
 }
 
 export function pdfWheelZoomScale(current: number, deltaY: number): number {
@@ -117,9 +131,10 @@ export function pdfPercentScale(percent: number): number {
 }
 
 // The scale that fits a page (`width` × `height` at scale 1, already turned) into the view: its width, or all of
-// it. A view not laid out yet keeps the current scale.
+// it. "auto", a document's opening zoom, fits a portrait page's width or all of a landscape page, and never
+// enlarges past 100 % (PDF_BASE_SCALE). A view not laid out yet keeps the current scale.
 export function pdfFitScale(
-	mode: "fitWidth" | "fitPage",
+	mode: "fitWidth" | "fitPage" | "auto",
 	width: number,
 	height: number,
 	viewWidth: number,
@@ -129,6 +144,12 @@ export function pdfFitScale(
 	const room = viewWidth - 2 * PDF_FIT_MARGIN_PX
 
 	if (width <= 0 || height <= 0 || room <= 0) return current
+
+	if (mode === "auto") {
+		const fitted = pdfFitScale(width > height ? "fitPage" : "fitWidth", width, height, viewWidth, viewHeight, current)
+
+		return clampPdfScale(Math.min(fitted, PDF_BASE_SCALE))
+	}
 
 	const byWidth = room / width
 
@@ -163,22 +184,50 @@ export function pdfPageAction(withinExtendedView: boolean, rendered: boolean): P
 	return rendered ? "idle" : "render"
 }
 
-// The page with the highest visible ratio, or null when none is visible (keep the current one). A tie keeps the
-// first in iteration order.
-export function mostVisiblePage(ratios: ReadonlyMap<number, number>): number | null {
-	let bestPage: number | null = null
-	let bestRatio = 0
+// A page whose painted canvas went stale on a zoom keeps showing it, stretched, and renders again this long after
+// the last zoom step: a pinch or a Ctrl+wheel sends steps far faster than a page renders.
+export const PDF_ZOOM_RENDER_DELAY_MS = 120
 
-	for (const [page, ratio] of ratios) {
-		if (ratio <= 0) continue
+// The page taking the most of the view's height, or null when none is in view (keep the current one). Pages 1..count
+// stack top to bottom; `edges` gives a page's top and bottom on the view's axis (null: not laid out). A binary
+// search finds the first page ending below the view's top, so a scroll reads O(log n + pages in view) boxes. A tie
+// keeps the upper page.
+export function pdfPageInView(
+	count: number,
+	edges: (page: number) => readonly [number, number] | null,
+	viewTop: number,
+	viewBottom: number
+): number | null {
+	let low = 1
+	let high = count
 
-		if (bestPage === null || ratio > bestRatio) {
-			bestPage = page
-			bestRatio = ratio
+	while (low < high) {
+		const middle = (low + high) >>> 1
+		const box = edges(middle)
+
+		if (box === null) return null
+
+		if (box[1] <= viewTop) low = middle + 1
+		else high = middle
+	}
+
+	let best: number | null = null
+	let bestHeight = 0
+
+	for (let page = low; page <= count; page++) {
+		const box = edges(page)
+
+		if (box === null || box[0] >= viewBottom) break
+
+		const height = Math.min(box[1], viewBottom) - Math.max(box[0], viewTop)
+
+		if (height > bestHeight) {
+			best = page
+			bestHeight = height
 		}
 	}
 
-	return bestPage
+	return best
 }
 
 export interface PdfCanvasDims {

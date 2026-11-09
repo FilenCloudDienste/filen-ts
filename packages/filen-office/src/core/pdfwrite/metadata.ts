@@ -8,6 +8,8 @@ export function xmpMetadata(options: {
 	readonly author?: string | undefined
 	readonly subject?: string | undefined
 	readonly keywords?: string | undefined
+	// The Info dictionary's CreationDate (§14.3.3: xmp:CreateDate); none in deterministic output.
+	readonly created?: Date | undefined
 	readonly lang: string | undefined
 	readonly pdfua: boolean
 }): Uint8Array {
@@ -24,13 +26,16 @@ export function xmpMetadata(options: {
 	const keywords = options.keywords === undefined ? "" : `<pdf:Keywords>${escapeXml(options.keywords)}</pdf:Keywords>\n`
 	const language =
 		options.lang === undefined ? "" : `<dc:language><rdf:Bag><rdf:li>${escapeXml(options.lang)}</rdf:li></rdf:Bag></dc:language>\n`
+	// ISO 8601 to the second in UTC, as the Info date is written.
+	const created =
+		options.created === undefined ? "" : `<xmp:CreateDate>${options.created.toISOString().replace(/\.\d+Z$/u, "Z")}</xmp:CreateDate>\n`
 	const pdfua = options.pdfua ? "<pdfuaid:part>1</pdfuaid:part>\n" : ""
 
 	return utf8(
 		'<?xpacket begin="﻿" id="W5M0MpCehiHzreSzNTczkc9d"?>\n' +
 			'<x:xmpmeta xmlns:x="adobe:ns:meta/">\n' +
 			'<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">\n' +
-			'<rdf:Description rdf:about="" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:pdf="http://ns.adobe.com/pdf/1.3/" xmlns:pdfuaid="http://www.aiim.org/pdfua/ns/id/">\n' +
+			'<rdf:Description rdf:about="" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:pdf="http://ns.adobe.com/pdf/1.3/" xmlns:pdfuaid="http://www.aiim.org/pdfua/ns/id/" xmlns:xmp="http://ns.adobe.com/xap/1.0/">\n' +
 			"<dc:format>application/pdf</dc:format>\n" +
 			title +
 			author +
@@ -38,6 +43,7 @@ export function xmpMetadata(options: {
 			language +
 			keywords +
 			"<pdf:Producer>Filen</pdf:Producer>\n" +
+			created +
 			pdfua +
 			"</rdf:Description>\n</rdf:RDF>\n</x:xmpmeta>\n" +
 			'<?xpacket end="w"?>'

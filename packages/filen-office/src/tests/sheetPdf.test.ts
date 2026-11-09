@@ -104,6 +104,26 @@ describe("a sheet's print as a PDF", () => {
 		session.close()
 	})
 
+	it("carries the workbook's author, subject and keywords, as Excel's Save as PDF does", async () => {
+		const { session, info } = await opened(rows(2))
+		const result = await exportSheetPdf(
+			{ ...request(info, 2), properties: { author: "Ann", subject: "Q3", keywords: "money" } },
+			{ session, assets: nodeFontAssets, deterministic: true }
+		)
+
+		expect(result.ok).toBe(true)
+
+		if (!result.ok) return
+
+		const text = readable(pdfBytes(result.output.parts))
+
+		expect(text).toContain("/Author (Ann)")
+		expect(text).toContain("/Subject (Q3)")
+		expect(text).toContain("/Keywords (money)")
+		expect(text).toContain("<dc:creator><rdf:Seq><rdf:li>Ann</rdf:li></rdf:Seq></dc:creator>")
+		session.close()
+	})
+
 	it("refuses a print with nothing to print", async () => {
 		const { session, info } = await opened("<sheetData/>")
 		const result = await exportSheetPdf(

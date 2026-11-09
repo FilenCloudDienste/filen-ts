@@ -82,7 +82,7 @@ function sizeOf(font: string): number {
 }
 
 // A face with ascent 0.8 em and descent 0.2 em under both line spacing rules: single lines are 1 em.
-export function testFont(id = 1, family = "fo-test", scale = 1): ResolvedFont {
+export function testFont(id = 1, family = "fo-test", scale = 1, widthScale = 1): ResolvedFont {
 	return {
 		id,
 		family,
@@ -90,6 +90,7 @@ export function testFont(id = 1, family = "fo-test", scale = 1): ResolvedFont {
 		weight: 400,
 		italic: false,
 		scale,
+		widthScale,
 		metrics: verticalMetrics(1000, 800, -200, 0, 800, -200, 0, 800, 200, false),
 		metricsBasis: "font",
 		source: "bundled"

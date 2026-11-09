@@ -359,7 +359,7 @@ describe("presentation conversions", () => {
 				"table style": 1,
 				chart: 2
 			},
-			omitted: { "chart frame": 1, "smartart frame": 1, "line end": 2, ink: 1, "shape (notImplemented)": 1, "kiosk restart": 1 }
+			omitted: { "chart frame": 1, "smartart frame": 1, "dash pattern": 2, ink: 1, "shape (notImplemented)": 1, "kiosk restart": 1 }
 		})
 
 		expect(report.losses()).toEqual([
@@ -374,6 +374,31 @@ describe("presentation conversions", () => {
 			{ kind: "smartArt", count: 1 },
 			{ kind: "tableStyle", count: 1 },
 			{ kind: "text", count: 3 }
+		])
+	})
+
+	it("names the fill, line and bullet approximations the ODP writer reports by what they are, not as shapes", () => {
+		const report = new ConversionReport()
+
+		noteFresh(report, {
+			approximated: {
+				"gradient of more than two stops": 1,
+				"gradient along the shape's outline": 1,
+				"pattern dkDnDiag": 1,
+				"cropped picture fill": 1,
+				"dash pattern": 1,
+				"compound line dbl": 1,
+				"bullet of more than one character": 1,
+				"outline level of a paragraph without a bullet": 1
+			},
+			omitted: {}
+		})
+
+		expect(report.losses()).toEqual([
+			{ kind: "fill", count: 4 },
+			{ kind: "line", count: 2 },
+			{ kind: "outlineLevel", count: 1 },
+			{ kind: "text", count: 1 }
 		])
 	})
 

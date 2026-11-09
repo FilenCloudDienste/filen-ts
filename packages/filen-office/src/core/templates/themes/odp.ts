@@ -1,3 +1,4 @@
+import { languageAttributes } from "../odf"
 import { decorationOf, variantOf, type SlideSize } from "./pptx"
 import type { FilenTheme, ThemeColorSlot } from "./model"
 
@@ -105,11 +106,8 @@ const BODY_SIZES = [28, 24, 20, 18, 18, 18, 18, 18, 18]
 // every reader lays the text out alike (LibreOffice's own default differs).
 const INSETS = 'fo:padding-top="0.127cm" fo:padding-bottom="0.127cm" fo:padding-left="0.254cm" fo:padding-right="0.254cm"'
 
-function textProperties(font: string, sizePt: number, color: string, language: string | undefined): string {
-	const [lang, country] = (language ?? "").split("-")
-	const locale =
-		lang === undefined || lang === "" ? "" : ` fo:language="${lang}"${country === undefined ? "" : ` fo:country="${country}"`}`
-
+// `locale`: languageAttributes of the deck's language, or "" for none.
+function textProperties(font: string, sizePt: number, color: string, locale: string): string {
 	return (
 		`<style:text-properties fo:color="${color}" style:font-name="${escape(font)}" fo:font-size="${String(sizePt)}pt"${locale} ` +
 		`style:font-name-asian="${escape(font)}" style:font-size-asian="${String(sizePt)}pt" style:font-name-complex="${escape(font)}" style:font-size-complex="${String(sizePt)}pt"/>`
@@ -150,6 +148,7 @@ export function odpThemeStyles(
 	language?: string
 ): OdpThemeStyles {
 	const variant = variantOf(theme, variantIndex)
+	const locale = language === undefined || language === "" ? "" : languageAttributes(language)
 	const m = escape(names.master)
 	const p = names.prefix
 	const text = odpColor(theme, variantIndex, "tx1")
@@ -163,7 +162,7 @@ export function odpThemeStyles(
 		`<style:style style:name="${m}-outline1" style:family="presentation"><style:graphic-properties draw:stroke="none" draw:fill="none" ${INSETS}>` +
 		`${outlineListStyle(`${p}L`, text)}</style:graphic-properties>` +
 		'<style:paragraph-properties fo:margin-top="0.25cm" fo:margin-bottom="0cm" fo:line-height="90%" style:font-independent-line-spacing="true"/>' +
-		`${textProperties(theme.minor, BODY_SIZES[0] ?? 28, text, language)}</style:style>` +
+		`${textProperties(theme.minor, BODY_SIZES[0] ?? 28, text, locale)}</style:style>` +
 		BODY_SIZES.slice(1)
 			.map(
 				(points, index) =>
@@ -180,19 +179,19 @@ export function odpThemeStyles(
 			"title",
 			`draw:stroke="none" draw:fill="none" draw:textarea-vertical-align="middle" ${INSETS}`,
 			'<style:paragraph-properties fo:text-align="start" fo:line-height="90%" style:font-independent-line-spacing="true"/>',
-			textProperties(theme.major, 44, text, language)
+			textProperties(theme.major, 44, text, locale)
 		) +
 		presentationStyle(
 			"subtitle",
 			`draw:stroke="none" draw:fill="none" draw:textarea-vertical-align="top" ${INSETS}`,
 			'<style:paragraph-properties fo:text-align="center" style:font-independent-line-spacing="true"/>',
-			textProperties(theme.minor, 24, text, language)
+			textProperties(theme.minor, 24, text, locale)
 		) +
 		outline +
 		// LibreOffice draws a master's background from this style; the drawing-page style below is the standard's.
 		presentationStyle("background", `draw:stroke="none" ${fill}`, "", "") +
 		presentationStyle("backgroundobjects", 'draw:stroke="none" draw:fill="none"', "", "") +
-		presentationStyle("notes", 'draw:stroke="none" draw:fill="none"', "", textProperties(theme.minor, 12, "#000000", language))
+		presentationStyle("notes", 'draw:stroke="none" draw:fill="none"', "", textProperties(theme.minor, 12, "#000000", locale))
 	const decoration = decorationOf(theme)
 	const automatic =
 		`<style:page-layout style:name="${p}PM"><style:page-layout-properties fo:margin-top="0cm" fo:margin-bottom="0cm" fo:margin-left="0cm" fo:margin-right="0cm" ` +
@@ -209,7 +208,7 @@ export function odpThemeStyles(
 			([kind, , , align]) =>
 				`<style:style style:name="${p}${kind}" style:family="presentation" style:parent-style-name="${m}-backgroundobjects">` +
 				'<style:graphic-properties draw:textarea-vertical-align="middle"/>' +
-				`<style:paragraph-properties fo:text-align="${align}" style:font-independent-line-spacing="true"/>${textProperties(theme.minor, 12, footerColor, language)}</style:style>`
+				`<style:paragraph-properties fo:text-align="${align}" style:font-independent-line-spacing="true"/>${textProperties(theme.minor, 12, footerColor, locale)}</style:style>`
 		).join("")
 	const decorationShape =
 		decoration === undefined

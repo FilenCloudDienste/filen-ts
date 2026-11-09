@@ -321,7 +321,7 @@ describe("ODT writer", () => {
 			/<office:text><text:tracked-changes text:track-changes="true"><text:changed-region xml:id="ctFilen1" text:id="ctFilen1"><text:insertion><office:change-info><dc:creator>Ann<\/dc:creator><dc:date>[^<]+<\/dc:date><\/office:change-info><\/text:insertion><\/text:changed-region><text:changed-region xml:id="ctFilen2" text:id="ctFilen2"><text:deletion><office:change-info><dc:creator>Ann<\/dc:creator><dc:date>[^<]+<\/dc:date><\/office:change-info><text:p>three<\/text:p><\/text:deletion><\/text:changed-region><\/text:tracked-changes>/u
 		)
 		expect(content).toContain(
-			'<text:p>One <text:change-start text:change-id="ctFilen1"/>new <text:change-end text:change-id="ctFilen1"/>two <text:change text:change-id="ctFilen2"/></text:p>'
+			'<text:p>One <text:change-start text:change-id="ctFilen1"/>new <text:change-end text:change-id="ctFilen1"/>two<text:s/><text:change text:change-id="ctFilen2"/></text:p>'
 		)
 	})
 

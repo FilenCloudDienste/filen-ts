@@ -5,7 +5,8 @@ import { decodeUtf8, parseXml } from "@filen/office/core/xml"
 import { convertDocToDocx, type DocConversionResult } from "../core/doc/toDocx/index"
 import { legacyPasswordVerifier, readProtectionHash } from "../core/docx/protection/hash"
 import { hashLegacyProtectionKey, verifyProtectionPassword } from "../dom/protection"
-import { compatElements } from "../core/doc/toDocx/settings"
+import { compatElements, settingsPart } from "../core/doc/toDocx/settings"
+import { readDoc } from "../core/doc/read"
 import { buildDoc, lists, plc, prl, stsh, type DocSpec } from "./docFixtures"
 import { docxBodyText, reopen } from "./docToDocxFixtures"
 
@@ -41,6 +42,21 @@ describe("Word binary to WordprocessingML", () => {
 			/<w:r><w:t xml:space="preserve">plain <\/w:t><\/w:r><w:r><w:rPr><w:b\/><\/w:rPr><w:t xml:space="preserve">bold<\/w:t><\/w:r>/u
 		)
 		expect(docxBodyText(await reopen(result))).toBe("plain bold")
+	})
+
+	it("maps the kashida and Thai sprmPJc values to their ST_Jc names", async () => {
+		const result = await convert({
+			pieces: [{ text: "a\rb\rc\rd\r" }],
+			paragraphs: [
+				{ end: 2, grpprl: prl.u8(0x2461, 5) },
+				{ end: 4, grpprl: prl.u8(0x2461, 7) },
+				{ end: 6, grpprl: prl.u8(0x2461, 8) },
+				{ end: 8, grpprl: prl.u8(0x2461, 9) }
+			]
+		})
+		const jc = [...part(result, "word/document.xml").matchAll(/<w:jc w:val="([^"]+)"\/>/gu)].map(match => match[1])
+
+		expect(jc).toEqual(["mediumKashida", "highKashida", "lowKashida", "thaiDistribute"])
 	})
 
 	it("writes styles with what each adds to its base style", async () => {
@@ -178,6 +194,27 @@ describe("Word binary to WordprocessingML", () => {
 				dop[598] = 0x08 | (7 << 4)
 			})
 		).toBeNull()
+	})
+
+	it("keeps endnote placement from DopBase.epc in every version, numbering only before Word 2002", async () => {
+		// epc is bits 0–1 of the u16 at Dop byte 54 (0 end of section, 3 end of document); rncEdn/nEdn the u16 at 52.
+		const endnotePr = async (nFib: number, epc: number): Promise<string | undefined> => {
+			const dop = new Uint8Array(88)
+
+			dop[54] = epc
+			dop[52] = (4 << 2) | 1
+
+			const model = await readDoc(bytesSource(await buildDoc({ pieces: [{ text: "x\r" }], structures: { dop }, nFib })))
+
+			return /<w:endnotePr>.*?<\/w:endnotePr>/u.exec(settingsPart(model, { footnotes: true, endnotes: true }))?.[0]
+		}
+		const separators = '<w:endnote w:id="-1"/><w:endnote w:id="0"/>'
+
+		expect(await endnotePr(0x10d, 0)).toBe(`<w:endnotePr><w:pos w:val="sectEnd"/>${separators}</w:endnotePr>`)
+		expect(await endnotePr(0x10d, 3)).toBe(`<w:endnotePr><w:pos w:val="docEnd"/>${separators}</w:endnotePr>`)
+		expect(await endnotePr(0xc1, 0)).toBe(
+			`<w:endnotePr><w:pos w:val="sectEnd"/><w:numStart w:val="4"/><w:numRestart w:val="eachSect"/>${separators}</w:endnotePr>`
+		)
 	})
 
 	// Three spins of Word's 100,000 SHA-1s.

@@ -4,6 +4,7 @@ import {
 	DrawingList,
 	IDENTITY,
 	ItemFlag,
+	ItemFloat,
 	ItemInt,
 	ItemKind,
 	type DrawingImage,
@@ -528,6 +529,77 @@ describe("EMF+ paints, pens and text", () => {
 		expect(block?.kind === "block" && block.run).toMatchObject({ text: "Hello world", bold: true })
 	})
 
+	it("pads DrawString without a format by 1/6 em per side and clips at the full layout rectangle", () => {
+		const font = plusRecord(0x4008, 0x0602, writer => writer.u32(0xdbc01002).f32(12).u32(2).i32(0).u32(0).u32(5).utf16("Arial"))
+		// Format id 9 names no object: GDI+ falls back to its generic default format.
+		const text = plusRecord(0x401c, 0x8002, writer => writer.u32(0xff000000).u32(9).u32(2).f32(5).f32(5).f32(40).f32(20).utf16("Hi"))
+		const list = converted(
+			new EmfBuilder()
+				.plus([plusHeader(false)])
+				.plus([font, text])
+				.build()
+		).list
+		const block = list.texts[0]
+
+		expect(block).toMatchObject({ kind: "block", width: 36, height: 20, clip: false })
+		expect(list.itemFloat(0, ItemFloat.E)).toBeCloseTo(7)
+		expect(list.itemFloat(0, ItemFloat.F)).toBeCloseTo(5)
+		expect(list.itemClip(0)).toBeGreaterThanOrEqual(0)
+	})
+
+	it("reads DrawString margins from the string format and lays vertical text down the layout rectangle", () => {
+		const font = plusRecord(0x4008, 0x0602, writer => writer.u32(0xdbc01002).f32(12).u32(2).i32(0).u32(0).u32(5).utf16("Arial"))
+		const format = (flags: number, leading: number, trailing: number): Uint8Array =>
+			plusRecord(0x4008, 0x0703, writer => {
+				writer.u32(0xdbc01002).u32(flags).u32(0).u32(0).u32(0).u32(0).u32(0).f32(0).u32(0).f32(leading).f32(trailing).f32(1)
+				writer.u32(0).u32(0).u32(0)
+			})
+		const text = plusRecord(0x401c, 0x8002, writer => writer.u32(0xff000000).u32(3).u32(2).f32(5).f32(5).f32(40).f32(20).utf16("Hi"))
+		const draw = (records: Uint8Array): ReturnType<typeof converted>["list"] =>
+			converted(
+				new EmfBuilder()
+					.plus([plusHeader(false)])
+					.plus([font, records, text])
+					.build()
+			).list
+		// RTL puts the leading margin on the right.
+		const rtl = draw(format(0x1, 0.5, 0.25))
+
+		expect(rtl.texts[0]).toMatchObject({ kind: "block", width: 31, rtl: true })
+		expect(rtl.itemFloat(0, ItemFloat.E)).toBeCloseTo(8)
+
+		const vertical = draw(format(0x2, 0, 0))
+
+		expect(vertical.texts[0]).toMatchObject({ kind: "block", width: 20, height: 40, clip: true })
+		expect([0, 1, 2, 3, 4, 5].map(field => vertical.itemFloat(0, field))).toEqual([0, 1, -1, 0, 45, 5])
+	})
+
+	it("strokes only DrawCurve's segments from Offset, shaped by the hidden points", () => {
+		const pen = plusRecord(0x4008, 0x0200, writer =>
+			writer.u32(0xdbc01002).u32(0).u32(0).u32(0).f32(1).u32(0xdbc01002).u32(0).u32(0xff000000)
+		)
+		const curve = (offset: number, segments: number): Uint8Array =>
+			plusRecord(0x4018, 0, writer =>
+				writer.f32(0.5).u32(offset).u32(segments).u32(4).f32(0).f32(0).f32(10).f32(0).f32(20).f32(0).f32(30).f32(0)
+			)
+		const draw = (record: Uint8Array): ReturnType<typeof converted>["list"] =>
+			converted(
+				new EmfBuilder()
+					.plus([plusHeader(false)])
+					.plus([pen, record])
+					.build()
+			).list
+		const list = draw(curve(1, 1))
+		const first = list.itemInt(0, ItemInt.FIRST_COORD)
+
+		expect(list.itemInt(0, ItemInt.COMMAND_COUNT)).toBe(2)
+		// Tangents at 10 and 20 come from the hidden end points 0 and 30.
+		expect(Array.from(list.coords.subarray(first, first + 8), value => Math.round(value * 100) / 100)).toEqual([
+			10, 0, 13.33, 0, 16.67, 0, 20, 0
+		])
+		expect(draw(curve(1, 0)).itemCount).toBe(0)
+	})
+
 	it("fills text drawn with a gradient brush with that gradient in the text's space", () => {
 		const font = plusRecord(0x4008, 0x0602, writer => writer.u32(0xdbc01002).f32(10).u32(2).i32(0).u32(0).u32(5).utf16("Arial"))
 		const gradient = brushObject(0, writer =>
@@ -793,5 +865,109 @@ describe("shading", () => {
 		// Inside the focus scale the centre colour is solid; at the edge the edge colour shows.
 		expect(rampColor(ramp, 0.6, 0x000000ff)).toBe(0xffffffff)
 		expect(rampColor(ramp, 0, 0x000000ff)).toBe(0x000000ff)
+	})
+})
+
+describe("EMF region frames, inversions and small text", () => {
+	// The record's fields, then RGNDATA: header (size, type, count, buffer size, bounds) and the rectangles in
+	// device units.
+	const region =
+		(fields: readonly number[], rects: readonly number[]): ((writer: ByteWriter) => void) =>
+		writer => {
+			for (const value of [...fields, 32, 1, rects.length / 4, rects.length * 4, 0, 0, 0, 0, ...rects]) writer.i32(value)
+		}
+	const coordsOf = (list: DrawingList): number[] => Array.from(list.coords.subarray(0, list.coordCount), value => Math.round(value))
+
+	it("frames a region with its brush, Width across and Height down (EMR_FRAMERGN)", () => {
+		// Bounds, RgnDataSize, ihBrush, Width, Height.
+		const builder = brush(emf(), 1, 0x0000ff).record(72, region([0, 0, 0, 0, 48, 1, 250, 125], [0, 0, 96, 96]))
+		const result = converted(builder.build())
+		const list = result.list
+
+		expect(result.unsupported).toBe(0)
+		expect(list.itemCount).toBe(1)
+		expect(paintOf(list, 0)).toEqual({ kind: "solid", color: 0xff0000ff })
+		expect(bounds(list, 0)).toEqual([0, 0, 96, 96])
+
+		// 250 logical units are 24 pixels, 125 are 12: the region minus its inside [24, 12, 72, 84].
+		const coords = coordsOf(list)
+
+		expect(coords).toContain(24)
+		expect(coords).toContain(72)
+		expect(coords).toContain(12)
+		expect(coords).toContain(84)
+		expect(coords).not.toContain(48)
+	})
+
+	it("frames the inner corner of an L-shaped region as well as its outline", () => {
+		// An L: the top band full width, the bottom band only its left half.
+		const builder = brush(emf(), 1, 0x0000ff).record(72, region([0, 0, 0, 0, 64, 1, 125, 125], [0, 0, 96, 48, 0, 48, 48, 96]))
+		const list = converted(builder.build()).list
+		const coords = coordsOf(list)
+
+		// The inside of the L (12 pixels in) leaves a frame along the inner edges x = 48 and y = 48 too.
+		expect(list.itemCount).toBe(1)
+		expect(coords).toContain(36)
+		expect(coords).toContain(84)
+	})
+
+	it("inverts a region as white differenced with the destination (EMR_INVERTRGN)", () => {
+		// Bounds, RgnDataSize.
+		const builder = emf().record(73, region([0, 0, 0, 0, 48], [0, 0, 48, 48]))
+		const result = converted(builder.build())
+		const list = result.list
+
+		expect(result.unsupported).toBe(0)
+		expect(list.itemCount).toBe(1)
+		expect(blendOf(list, 0)).toBe(ItemFlag.BLEND_DIFFERENCE)
+		expect(paintOf(list, 0)).toEqual({ kind: "solid", color: 0xffffffff })
+		expect(bounds(list, 0)).toEqual([0, 0, 48, 48])
+	})
+
+	// x, y, cChars, fuOptions (with ETO_SMALL_CHARS), iGraphicsMode, exScale, eyScale, Bounds unless ETO_NO_RECT.
+	const smallText =
+		(options: number): ((writer: ByteWriter) => void) =>
+		writer => {
+			const rect = (options & 0x100) === 0 ? [0, 0, 500, 500] : []
+
+			for (const value of [0, 0, 2, options | 0x200, 1, 0, 0, ...rect]) writer.i32(value)
+
+			writer.ascii("Hi").pad(4)
+		}
+
+	it("fills EMR_SMALLTEXTOUT's Bounds with the background colour for ETO_OPAQUE", () => {
+		const list = converted(
+			emf()
+				.record(25, writer => writer.u32(0x00ff00))
+				.record(108, smallText(0x2))
+				.build()
+		).list
+
+		expect(paintOf(list, 0)).toEqual({ kind: "solid", color: 0x00ff00ff })
+		expect(bounds(list, 0)).toEqual([0, 0, 48, 48])
+		expect(glyphs(list)[0]?.run.text).toBe("Hi")
+	})
+
+	it("clips EMR_SMALLTEXTOUT to its Bounds for ETO_CLIPPED and reads no Bounds with ETO_NO_RECT", () => {
+		const clipped = converted(emf().record(108, smallText(0x4)).build()).list
+		// ETO_CLIPPED | ETO_NO_RECT.
+		const unclipped = converted(emf().record(108, smallText(0x104)).build()).list
+
+		expect(clipped.itemClip(0)).toBeGreaterThanOrEqual(0)
+		expect(unclipped.itemClip(0)).toBe(-1)
+		expect(glyphs(unclipped)[0]?.run.text).toBe("Hi")
+	})
+
+	it("counts glyph-index and overlong EMR_SMALLTEXTOUT strings without drawing them", () => {
+		const glyphIndex = converted(emf().record(108, smallText(0x10)).build())
+		const overlong = converted(
+			emf()
+				.record(108, writer => writer.i32(0).i32(0).u32(400).u32(0x300).u32(1).f32(0).f32(0).ascii("Hi").pad(4))
+				.build()
+		)
+
+		expect(glyphIndex.list.itemCount).toBe(0)
+		expect(glyphIndex.unsupported).toBe(1)
+		expect(overlong.list.itemCount).toBe(0)
 	})
 })

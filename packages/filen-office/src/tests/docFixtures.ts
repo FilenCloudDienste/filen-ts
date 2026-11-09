@@ -279,9 +279,12 @@ export async function buildDoc(spec: DocSpec): Promise<Uint8Array> {
 
 	for (let k = 0; k < 22; k++) word.u32(lw[k] ?? 0)
 
-	word.u16(FIB_PAIRS)
+	// FibRgFcLcb97 unless a structure needs a later Fib's pairs.
+	const pairCount = Math.max(FIB_PAIRS, ...[...pairs.keys()].map(index => index + 1))
 
-	for (let k = 0; k < FIB_PAIRS; k++) {
+	word.u16(pairCount)
+
+	for (let k = 0; k < pairCount; k++) {
 		const [fc, lcb] = pairs.get(k) ?? [0, 0]
 
 		word.u32(fc).u32(lcb)

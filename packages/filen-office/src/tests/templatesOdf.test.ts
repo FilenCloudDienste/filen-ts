@@ -4,6 +4,7 @@ import { unzipSync } from "fflate"
 import { describe, expect, it } from "vitest"
 import { blankOdt } from "../core/templates/odt"
 import { blankOds } from "../core/templates/ods"
+import { blankOdp } from "../core/templates/odp"
 import { bytesSource } from "@filen/office/core/opc"
 import { decodeUtf8 } from "../core/xml/index"
 import { openOds } from "../core/ods/open"
@@ -93,9 +94,33 @@ describe.each([
 		expect(de).toContain('<style:font-face style:name="Calibri" svg:font-family="Calibri"')
 		expect(de).toMatch(/<style:text-properties style:font-name="Calibri" fo:font-size="11pt" fo:language="de" fo:country="DE"/)
 		expect(us).toContain('fo:language="en" fo:country="US"')
-		expect(bare).toContain('fo:language="ja" fo:country="JP"')
+		expect(de).not.toMatch(/(language|country)-(asian|complex)=/)
+		expect(bare).toContain('fo:language="en" fo:country="US" style:language-asian="ja" style:country-asian="JP" ')
 		expect(de).toContain('fo:page-width="21cm" fo:page-height="29.7cm"')
 		expect(us).toContain('fo:page-width="8.5in" fo:page-height="11in"')
+	})
+
+	// ODF 1.3 Part 3 §20.276 / §20.277: East Asian and complex-script languages have their own slots; the Latin
+	// slot keeps a Latin language so Latin text is not proofed as the user's script.
+	it("puts an East Asian or complex-script language in its own slot, not in fo:language", async () => {
+		const zh = partsOf(await build("zh-CN"))["styles.xml"] ?? ""
+		const ar = partsOf(await build("ar-SA"))["styles.xml"] ?? ""
+		const he = partsOf(await build("he-IL"))["styles.xml"] ?? ""
+
+		expect(zh).toContain('fo:language="en" fo:country="US" style:language-asian="zh" style:country-asian="CN" ')
+		expect(ar).toContain('fo:language="en" fo:country="US" style:language-complex="ar" style:country-complex="SA" ')
+		expect(he).toContain('fo:language="en" fo:country="US" style:language-complex="he" style:country-complex="IL" ')
+		expect(ar).not.toContain('-asian="ar"')
+	})
+
+	// ODF 1.3 Part 3 fo:script / style:script-asian: the script subtag has its own attribute, never fo:country.
+	it("writes a script the locale names as fo:script", async () => {
+		const sr = partsOf(await build("sr-Latn-RS"))["styles.xml"] ?? ""
+		const zh = partsOf(await build("zh-Hant-TW"))["styles.xml"] ?? ""
+
+		expect(sr).toContain('fo:language="sr" fo:script="Latn" fo:country="RS" ')
+		expect(zh).toContain('style:language-asian="zh" style:script-asian="Hant" style:country-asian="TW" ')
+		expect(sr).not.toContain('fo:country="Latn"')
 	})
 })
 
@@ -191,5 +216,18 @@ describe.skipIf(OUT === undefined)("blank OpenDocument templates for the ODF 1.3
 		writeFileSync(join(out, "a4.odt"), await blankOdt({ locale: "de-DE" }))
 		writeFileSync(join(out, "letter.ods"), await blankOds({ locale: "en-US", sheetName: "Sheet1" }))
 		writeFileSync(join(out, "a4.ods"), await blankOds({ locale: "fr-FR", sheetName: "Feuille 1 & co" }))
+	})
+})
+
+describe("blankOdp", () => {
+	it("puts the deck's East Asian or complex-script language in its own slot", async () => {
+		const ja = partsOf(await blankOdp({ locale: "ja-JP" }))["styles.xml"] ?? ""
+		const ar = partsOf(await blankOdp({ locale: "ar-SA" }))["styles.xml"] ?? ""
+		const de = partsOf(await blankOdp({ locale: "de-DE" }))["styles.xml"] ?? ""
+
+		expect(ja).toContain('fo:language="en" fo:country="US" style:language-asian="ja" style:country-asian="JP" ')
+		expect(ja).not.toContain('fo:language="ja"')
+		expect(ar).toContain('fo:language="en" fo:country="US" style:language-complex="ar" style:country-complex="SA" ')
+		expect(de).toContain('fo:language="de" fo:country="DE" style:font-name-asian=')
 	})
 })

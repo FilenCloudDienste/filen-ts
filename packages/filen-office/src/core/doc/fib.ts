@@ -90,7 +90,9 @@ export const FC = {
 	plcfAsumy: 89,
 	plcfGram: 90,
 	sttbListNames: 91,
-	sttbfUssr: 92
+	sttbfUssr: 92,
+	// FibRgFcLcb2002: after the 15 pairs FibRgFcLcb2000 adds, then fcUnused1, fcPlcfPgp, fcPlcfuim, fcPlfguidUim.
+	atrdExtra: 112
 } as const
 
 export type FcName = keyof typeof FC

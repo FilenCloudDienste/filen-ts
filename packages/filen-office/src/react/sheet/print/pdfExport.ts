@@ -8,7 +8,7 @@ import type { PdfImageDecoder } from "../../../core/pdfwrite/images"
 import type { PdfImage, PdfPage } from "../../../core/pdfwrite/page"
 import { preparePassword } from "../../../core/pdfwrite/crypto"
 import { PdfWriteError } from "../../../core/pdfwrite/errors"
-import { PdfWriter, type PdfAbortSignal, type PdfOutput } from "../../../core/pdfwrite/writer"
+import { PdfWriter, type PdfAbortSignal, type PdfDocumentProperties, type PdfOutput } from "../../../core/pdfwrite/writer"
 import { parseHeaderFooter, type HeaderFooterStyle, type HeaderFooterValues } from "../../../core/sheet/print/headerFooter"
 import { MAX_PRINT_PAGES, type PrintPage } from "../../../core/sheet/print/paginate"
 import type { SheetHeaderImage, SheetPrintNote } from "../../../core/sheet/print/xlsx"
@@ -74,6 +74,8 @@ export interface SheetPdfRequest {
 	// The file's name and path (&F, &Z) and the date and time (&D, &T) as the app formats them.
 	readonly values: Omit<HeaderFooterValues, "page" | "pages" | "sheet">
 	readonly title: string
+	// The workbook's author, subject and keywords, as Excel's Save as PDF writes them (SheetWorkbookInfo.properties).
+	readonly properties?: PdfDocumentProperties
 	// BCP 47.
 	readonly lang?: string
 	// What the page's grid shows: the workbook's kind, its sheets and whether formulas show instead of values.
@@ -265,6 +267,7 @@ class SheetPdfExport {
 
 			const writer = await PdfWriter.create({
 				title: request.title,
+				...(request.properties !== undefined && { properties: request.properties }),
 				...(request.lang !== undefined && { lang: request.lang }),
 				tagged: true,
 				deterministic: environment.deterministic === true,

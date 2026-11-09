@@ -383,6 +383,13 @@ export class Story {
 		this.content += xml
 	}
 
+	// An equation (m:oMath, m:oMathPara) between runs, outside any tracked change.
+	math(xml: string): void {
+		this.closeRun()
+		this.closeRevision()
+		this.content += xml
+	}
+
 	// Content read for a \listtext or \pntext label goes aside until the paragraph says whether it is numbered.
 	beginLabel(): void {
 		this.closeRun()

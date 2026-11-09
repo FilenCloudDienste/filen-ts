@@ -144,8 +144,9 @@ describe("convertText", () => {
 
 		const ids = [...body.matchAll(/<w:ins w:id="(\d+)"/gu)].map(match => match[1])
 
-		expect(ids.length).toBe(2)
-		expect(new Set(ids).size).toBe(2)
+		// The two inserted runs and the paragraph mark the insertion runs over (§17.13.5.16).
+		expect(ids.length).toBe(3)
+		expect(new Set(ids).size).toBe(3)
 
 		const names = [...body.matchAll(/<w:bookmarkStart w:id="\d+" w:name="([^"]*)"/gu)].map(match => match[1] ?? "")
 

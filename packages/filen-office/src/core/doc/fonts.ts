@@ -20,6 +20,19 @@ export interface DocFont {
 const FFN_HEADER = 39
 const MAX_FONTS = 4096
 
+// Empty name: every consumer treats it as absent; empty panose/signature: never written.
+const UNREADABLE_FONT: DocFont = Object.freeze({
+	name: "",
+	altName: undefined,
+	pitch: 0,
+	trueType: false,
+	family: 0,
+	weight: 0,
+	charset: 0,
+	panose: new Uint8Array(0),
+	signature: new Uint8Array(0)
+})
+
 function zeroTerminated(data: Uint8Array, at: number, end: number): readonly [string, number] {
 	let text = ""
 	let cursor = at
@@ -50,7 +63,12 @@ export function readFonts(table: Bytes, fc: number, lcb: number): DocFont[] {
 
 		at = ffn + size
 
-		if (ffn + FFN_HEADER > ffnEnd) continue
+		// ftc is an index into the entries, so an unreadable FFN keeps its slot.
+		if (ffn + FFN_HEADER > ffnEnd) {
+			fonts.push(UNREADABLE_FONT)
+
+			continue
+		}
 
 		const ffid = table.u8(ffn)
 		const ixchSzAlt = table.u8(ffn + 4)

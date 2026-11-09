@@ -2,8 +2,13 @@ import { describe, expect, it } from "vitest"
 import { CODE_LANGUAGES, codeLanguageExtensions, codeLanguageForExtension, isCodeLanguageId } from "../core/code/index"
 
 describe("code language table", () => {
-	it("covers mobile's 228 extensions (two of them only reachable lowercased) plus web's own seven", () => {
-		expect(codeLanguageExtensions()).toHaveLength(226 + 8)
+	it("covers mobile's 228 extensions (two of them only reachable lowercased, .text left plain) plus web's own seven", () => {
+		expect(codeLanguageExtensions()).toHaveLength(225 + 8)
+	})
+
+	it("leaves .text as plain text rather than LaTeX", () => {
+		expect(codeLanguageForExtension("text")).toBeNull()
+		expect(codeLanguageExtensions()).not.toContain("text")
 	})
 
 	it("keys every extension lowercased and without its dot, each to a known language", () => {

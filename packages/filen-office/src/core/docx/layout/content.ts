@@ -164,6 +164,8 @@ export interface ContentServices {
 	readonly markers: Map<number, ListMarker | null>
 	// Record where each item's content lands in the paragraph text (editing maps positions through it).
 	readonly recordMaps: boolean
+	// Without recordMaps, the paragraphs whose maps are recorded anyway (those holding links).
+	readonly mapParagraph: ((part: StoryPart, paragraph: number) => boolean) | undefined
 	// The key list markers are counted under for paragraph `item` of part `part`.
 	readonly memoKey: (part: number, item: number) => number
 	// The index of a tracked change's author (-1 for none), numbered as reviewers are.
@@ -404,7 +406,7 @@ export class ContentBuilder {
 		styles.darkBackground = false
 		out.text = builder.finish().text
 
-		if (services.recordMaps) out.map = Int32Array.from(this.map)
+		if (services.recordMaps || this.map.length > 0) out.map = Int32Array.from(this.map)
 
 		this.story = undefined
 		this.format = undefined
@@ -477,7 +479,7 @@ export class ContentBuilder {
 		let runEnd = -1
 		let revision: TrackedLook = TrackedLook.NONE
 		let runHidden = false
-		const map = services.recordMaps ? this.map : undefined
+		const map = services.recordMaps || services.mapParagraph?.(part, paragraph) === true ? this.map : undefined
 		// A w:fldSimple MACROBUTTON open: it and its end, its display text, where its result started and its run.
 		let simpleItem = -1
 		let simpleEnd = -1

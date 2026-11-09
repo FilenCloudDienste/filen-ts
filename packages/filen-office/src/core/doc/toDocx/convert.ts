@@ -2,9 +2,26 @@ import { appendAll } from "../../arrays"
 import type { DocModel, DocBlock, DocParagraph, DocPlaceholder, DocRun, DocStoryKind, DocTable, DocTextBox } from "../model"
 import type { DocChar, DocCell, DocRevision, DocRow, DocWidth } from "../props"
 import type { DocFile } from "../read"
-import { anchor, EMU_PER_TWIP, inline, pictureGraphic, shapeGraphic, type DrawingName, type ShapeLook, type Transform } from "./drawing"
+import { anchorBox, isConnector, shapeGeometry } from "../../ppt/officeArt"
+import {
+	anchor,
+	type Box,
+	EMU_PER_TWIP,
+	groupElement,
+	groupGraphic,
+	inline,
+	pictureElement,
+	pictureGraphic,
+	type Placement,
+	presetGeometry,
+	shapeElement,
+	shapeGraphic,
+	type DrawingName,
+	type ShapeLook,
+	type Transform
+} from "./drawing"
 import { crop, inlinePicture, type MediaStore, shapeBlip } from "./media"
-import { type ArtContent, type ArtShape, artColor, booleanProperty, complexText, PID } from "./officeArt"
+import { type ArtContent, type ArtRect, type ArtShape, artColor, booleanProperty, complexText, PID } from "./officeArt"
 import { type PropsContext, border, paragraphProperties, runProperties, shading } from "./props"
 import type { ConversionReport } from "./report"
 import { type HeaderReferences, sectionProperties } from "./sections"
@@ -79,11 +96,6 @@ export interface Conversion {
 	readonly objectPreviews: ReadonlyMap<number, string>
 	// Text boxes a group's text box shows (the others show from their own anchor, or after the body).
 	readonly shownBoxes: Set<number>
-}
-
-// The shapes of a group, its subgroups' included.
-function members(group: ArtShape): ArtShape[] {
-	return (group.children ?? []).flatMap(child => (child.children === undefined ? [child] : members(child)))
 }
 
 const GTEXT_UNICODE = 0x00c0
@@ -568,25 +580,38 @@ export class StoryWriter {
 		return { id, name: `${kind} ${String(id)}`, description }
 	}
 
-	private placeholderDrawing(width: number, height: number, floating: Extract<DocPlaceholder, { kind: "shape" }> | undefined): string {
-		const media = this.conversion.media.placeholder()
-		const rel = this.part.add(REL_IMAGE, media.part.slice("word/".length))
+	private placeholderRelationship(): string {
+		return this.part.add(REL_IMAGE, this.conversion.media.placeholder().part.slice("word/".length))
+	}
+
+	private placeholderDrawing(width: number, height: number, floating: Placement | undefined): string {
+		const rel = this.placeholderRelationship()
 		const w = Math.max(EMU_PER_TWIP, width)
 		const h = Math.max(EMU_PER_TWIP, height)
 		const name = this.name("Placeholder", "Not converted")
 		const graphic = pictureGraphic(rel, w, h, name, undefined)
 
-		return floating === undefined ? inline(graphic, w, h, name) : anchor(graphic, w, h, name, this.placement(floating, undefined))
+		return floating === undefined ? inline(graphic, w, h, name) : anchor(graphic, w, h, name, floating)
 	}
 
-	private placement(shape: Extract<DocPlaceholder, { kind: "shape" }>, art: ArtShape | undefined) {
+	// `at`: the shape's top left corner in twips from the reference edge.
+	private placement(
+		shape: Extract<DocPlaceholder, { kind: "shape" }>,
+		at: { readonly x: number; readonly y: number },
+		art: ArtShape | undefined
+	): Placement {
 		const distance = (pid: number, fallback: number): number => art?.properties.get(pid)?.value ?? fallback
+		// posrelh / posrelv, where set, take the place of FSPA bx / by ([MS-DOC] §2.9.253).
+		const relativeH = art?.properties.get(PID.posRelH)?.value
+		const relativeV = art?.properties.get(PID.posRelV)?.value
 
 		return {
-			relativeH: shape.relativeH,
-			relativeV: shape.relativeV,
-			x: shape.left * EMU_PER_TWIP,
-			y: shape.top * EMU_PER_TWIP,
+			relativeH: relativeH !== undefined && relativeH <= 3 ? relativeH : shape.relativeH,
+			relativeV: relativeV !== undefined && relativeV <= 3 ? relativeV : shape.relativeV,
+			x: at.x * EMU_PER_TWIP,
+			y: at.y * EMU_PER_TWIP,
+			alignH: ALIGN_H[art?.properties.get(PID.posH)?.value ?? 0],
+			alignV: ALIGN_V[art?.properties.get(PID.posV)?.value ?? 0],
 			wrap: shape.wrap,
 			wrapSide: shape.wrapSide,
 			behindText: shape.behindText,
@@ -644,123 +669,151 @@ export class StoryWriter {
 
 	private floating(placeholder: Extract<DocPlaceholder, { kind: "shape" }>, paragraph: DocParagraph): string {
 		const conversion = this.conversion
-		const width = Math.max(1, placeholder.right - placeholder.left) * EMU_PER_TWIP
-		const height = Math.max(1, placeholder.bottom - placeholder.top) * EMU_PER_TWIP
 		const shape = conversion.art.shapes.get(placeholder.spid)
 
 		void paragraph
 
+		// The FSPA rectangle holds a shape turned by 45°–135° or 225°–315° turned by 90° (MS-ODRAW §2.3.18.5).
+		const box = anchorBox(placeholder, shape === undefined ? 0 : rotationOf(shape))
+		const width = Math.max(1, box.w) * EMU_PER_TWIP
+		const height = Math.max(1, box.h) * EMU_PER_TWIP
+
 		if (shape === undefined) {
 			conversion.report.note("shape")
 
-			return this.placeholderDrawing(width, height, placeholder)
+			return this.placeholderDrawing(width, height, this.placement(placeholder, box, undefined))
 		}
 
-		if (shape.children !== undefined) {
-			conversion.report.note("group")
-
-			// The group drawn as a placeholder; the text its shapes hold (text boxes, WordArt) in text boxes of the
-			// group's size where the group is, so no text is left out.
-			let out = this.placeholderDrawing(width, height, placeholder)
-
-			for (const member of members(shape)) {
-				const text = this.boxText(member)
-
-				if (text === undefined) continue
-
-				const look = shapeLook(member, PRESETS.get(member.shapeType) ?? "rect", true)
-
-				out += anchor(
-					shapeGraphic(width, height, look, text, {}),
-					width,
-					height,
-					this.name("Text Box", complexText(member.properties.get(PID.description))),
-					this.placement(placeholder, shape)
-				)
-			}
-
-			return out
-		}
-
+		const placement = this.placement(placeholder, box, shape)
 		const transform = shapeTransform(shape)
 		const description = complexText(shape.properties.get(PID.description))
+
+		if (shape.children !== undefined) {
+			// Word 2010 writes a .doc's group as a wpg:wgp: its members at their child anchors in its coordinate space.
+			const name = this.name("Group", description)
+			const members = this.members(shape)
+
+			return anchor(groupGraphic(width, height, boxOf(spaceOf(shape)), members, transform), width, height, name, placement)
+		}
+
 		const picture = shape.shapeType === 75 || shape.properties.has(PID.pib) ? shapeBlip(conversion.art, shape) : undefined
 
 		if (picture !== undefined) {
-			const media = conversion.media.add(picture.source, picture.blip)
-			const rel = this.part.add(REL_IMAGE, media.part.slice("word/".length))
 			const name = this.name("Picture", description)
 
 			return anchor(
-				pictureGraphic(rel, width, height, name, crop(shape), transform),
+				pictureGraphic(this.picture(picture), width, height, name, crop(shape), transform),
 				width,
 				height,
 				name,
-				this.placement(placeholder, shape)
+				placement
 			)
 		}
 
-		const preset = PRESETS.get(shape.shapeType)
-		const box = conversion.textBoxes.get(placeholder.spid)
-		const wordArt = box === undefined ? wordArtText(shape) : undefined
+		const drawn = this.drawn(shape, false)
 
-		if (wordArt !== undefined) {
-			// WordArt (gtextUNICODE, MS-ODRAW geometry text): its text in a text box of the shape's size.
-			conversion.report.note("wordArt")
-
-			const look: ShapeLook = { preset: "rect", fill: undefined, line: undefined, lineWidth: 0, textBox: true, insets: [0, 0, 0, 0] }
-
-			return anchor(
-				shapeGraphic(width, height, look, wordArtParagraph(wordArt), transform),
-				width,
-				height,
-				this.name("WordArt", description),
-				this.placement(placeholder, shape)
-			)
-		}
-
-		if (preset === undefined && box === undefined) {
+		if (drawn === undefined) {
 			conversion.report.note(shape.shapeType === 75 ? "picture" : "shape")
 
-			return this.placeholderDrawing(width, height, placeholder)
+			return this.placeholderDrawing(width, height, placement)
 		}
+
+		return anchor(
+			shapeGraphic(width, height, drawn.look, drawn.content, transform),
+			width,
+			height,
+			this.name(drawn.kind, description),
+			placement
+		)
+	}
+
+	private picture(picture: NonNullable<ReturnType<typeof shapeBlip>>): string {
+		const media = this.conversion.media.add(picture.source, picture.blip)
+
+		return this.part.add(REL_IMAGE, media.part.slice("word/".length))
+	}
+
+	// What a shape other than a picture or group draws: its geometry with its text box's story or its WordArt text;
+	// undefined for a shape with neither geometry nor text. `member`: the shape is in a group, so its text box shows here.
+	private drawn(
+		shape: ArtShape,
+		member: boolean
+	): { readonly look: ShapeLook; readonly content: string | undefined; readonly kind: string } | undefined {
+		const conversion = this.conversion
+		const box = conversion.textBoxes.get(shape.spid)
+
+		if (box === undefined) {
+			const wordArt = wordArtText(shape)
+
+			if (wordArt !== undefined) {
+				// WordArt (gtextUNICODE, MS-ODRAW geometry text): its text in a text box of the shape's size.
+				conversion.report.note("wordArt")
+
+				return { look: WORD_ART_LOOK, content: wordArtParagraph(wordArt), kind: "WordArt" }
+			}
+		}
+
+		// A picture frame without a picture has nothing to draw.
+		const geometry = shape.shapeType === 75 ? undefined : shapeGeometry([shape.properties], shape.shapeType)
+
+		if (geometry === undefined && box === undefined) return undefined
+
+		if (geometry !== undefined && geometry.approximations > 0) conversion.report.note("customGeometry", geometry.approximations)
 
 		let content: string | undefined
 
 		if (box !== undefined) {
-			const writer = new StoryWriter(conversion, this.part, box.story.kind, box.story.start, box.story.end)
+			if (member) conversion.shownBoxes.add(shape.spid)
 
-			content = writer.write()
+			content = new StoryWriter(conversion, this.part, box.story.kind, box.story.start, box.story.end).write()
 
 			if (!content.includes("<w:p>") && !content.includes("<w:p/>")) content += "<w:p/>"
 		}
 
-		const look = shapeLook(shape, preset ?? "rect", box !== undefined)
-		const name = this.name(box !== undefined ? "Text Box" : "Shape", description)
-
-		return anchor(shapeGraphic(width, height, look, content, transform), width, height, name, this.placement(placeholder, shape))
+		return {
+			look: shapeLook(shape, geometry?.xml ?? RECT_GEOMETRY, box !== undefined),
+			content,
+			kind: box === undefined ? "Shape" : "Text Box"
+		}
 	}
 
-	// A group member's text, as text box content: its text box story's, or its WordArt text; undefined for none.
-	private boxText(member: ArtShape): string | undefined {
-		const conversion = this.conversion
-		const box = conversion.textBoxes.get(member.spid)
+	// A group's members (MS-ODRAW §2.2.14 OfficeArtSpgrContainer), back to front, each at its child anchor in the
+	// group's coordinate space; subgroups nest (as deep as the reader reads them).
+	private members(group: ArtShape): string {
+		const space = spaceOf(group)
+		let out = ""
 
-		if (box !== undefined) {
-			conversion.shownBoxes.add(member.spid)
+		for (const member of group.children ?? []) {
+			// A member without a child anchor fills its group.
+			const turned = anchorBox(member.childAnchor ?? space, rotationOf(member))
+			const box: Box = { x: turned.x, y: turned.y, width: Math.max(0, turned.w), height: Math.max(0, turned.h) }
+			const transform = shapeTransform(member)
 
-			const content = new StoryWriter(conversion, this.part, box.story.kind, box.story.start, box.story.end).write()
+			if (member.children !== undefined) {
+				out += groupElement(box, boxOf(spaceOf(member)), this.members(member), transform)
+				continue
+			}
 
-			return content.includes("<w:p>") || content.includes("<w:p/>") ? content : `${content}<w:p/>`
+			const description = complexText(member.properties.get(PID.description))
+			const picture = member.shapeType === 75 || member.properties.has(PID.pib) ? shapeBlip(this.conversion.art, member) : undefined
+
+			if (picture !== undefined) {
+				out += pictureElement(this.picture(picture), box, this.name("Picture", description), crop(member), transform)
+				continue
+			}
+
+			const drawn = this.drawn(member, true)
+
+			if (drawn === undefined) {
+				this.conversion.report.note(member.shapeType === 75 ? "picture" : "shape")
+				out += pictureElement(this.placeholderRelationship(), box, this.name("Placeholder", "Not converted"), undefined)
+				continue
+			}
+
+			out += shapeElement(box, drawn.look, drawn.content, transform, this.name(drawn.kind, description))
 		}
 
-		const wordArt = wordArtText(member)
-
-		if (wordArt === undefined) return undefined
-
-		conversion.report.note("wordArt")
-
-		return wordArtParagraph(wordArt)
+		return out
 	}
 
 	private table(table: DocTable): void {
@@ -957,65 +1010,93 @@ function cellPr(cell: DocCell | undefined, span: number, cellWidth: number | und
 	return out
 }
 
-// The blocks of a story lying in [start, end) (headers, notes and comments are ranges of one story).
-function blocksIn(model: DocModel, blocks: readonly DocBlock[], start: number, end: number): readonly DocBlock[] {
-	const first = (block: DocBlock): number => {
-		if (block.kind === "paragraph") return model.paragraphs[block.index]?.start ?? 0
+// The CP a block starts at.
+function blockStart(model: DocModel, block: DocBlock): number {
+	if (block.kind === "paragraph") return model.paragraphs[block.index]?.start ?? 0
 
-		for (const row of block.rows) for (const cell of row.cells) for (const inner of cell) return first(inner)
+	for (const row of block.rows) for (const cell of row.cells) for (const inner of cell) return blockStart(model, inner)
 
-		return block.rows[0]?.mark !== undefined && block.rows[0].mark >= 0 ? (model.paragraphs[block.rows[0].mark]?.start ?? 0) : 0
-	}
-
-	return blocks.filter(block => {
-		const at = first(block)
-
-		return at >= start && at < end
-	})
+	return block.rows[0]?.mark !== undefined && block.rows[0].mark >= 0 ? (model.paragraphs[block.rows[0].mark]?.start ?? 0) : 0
 }
 
-// MSOSPT (§2.4.24) → DrawingML preset geometry for the shapes converted as such.
-const PRESETS: ReadonlyMap<number, string> = new Map([
-	[1, "rect"],
-	[2, "roundRect"],
-	[3, "ellipse"],
-	[4, "diamond"],
-	[5, "triangle"],
-	[6, "rtTriangle"],
-	[7, "parallelogram"],
-	[8, "trapezoid"],
-	[9, "hexagon"],
-	[10, "octagon"],
-	[11, "plus"],
-	[12, "star5"],
-	[13, "rightArrow"],
-	[15, "homePlate"],
-	[16, "cube"],
-	[20, "line"],
-	[22, "can"],
-	[23, "donut"],
-	[32, "straightConnector1"],
-	[66, "leftArrow"],
-	[67, "downArrow"],
-	[68, "upArrow"],
-	[69, "leftRightArrow"],
-	[70, "upDownArrow"],
-	[74, "heart"],
-	[96, "smileyFace"],
-	[109, "flowChartProcess"],
-	[110, "flowChartDecision"],
-	[111, "flowChartInputOutput"],
-	[116, "flowChartTerminator"],
-	[120, "flowChartConnector"],
-	[176, "flowChartAlternateProcess"],
-	[183, "sun"],
-	[184, "moon"],
-	[202, "rect"]
-])
+// The blocks of a story lying in [start, end) (headers, notes and comments are ranges of one story). A story's blocks
+// are in CP order, so the first is found by bisection and only the range's blocks are visited after it.
+export function blocksIn(model: DocModel, blocks: readonly DocBlock[], start: number, end: number): readonly DocBlock[] {
+	const at = (index: number): number => {
+		const block = blocks[index]
+
+		return block === undefined ? Infinity : blockStart(model, block)
+	}
+	let low = 0
+	let high = blocks.length
+
+	while (low < high) {
+		const middle = (low + high) >> 1
+
+		if (at(middle) < start) low = middle + 1
+		else high = middle
+	}
+
+	let stop = low
+
+	while (stop < blocks.length && at(stop) < end) stop++
+
+	return low === 0 && stop === blocks.length ? blocks : blocks.slice(low, stop)
+}
+
+// The coordinate space of a group with neither an FSPGR nor anchored members.
+const DEFAULT_SPACE: ArtRect = { left: 0, top: 0, right: 1, bottom: 1 }
+
+// A group's coordinate space: its FSPGR, else the rectangle its members' child anchors cover.
+function spaceOf(group: ArtShape): ArtRect {
+	if (group.groupRect !== undefined) return group.groupRect
+
+	let left = Infinity
+	let top = Infinity
+	let right = -Infinity
+	let bottom = -Infinity
+
+	for (const member of group.children ?? []) {
+		const rect = member.childAnchor
+
+		if (rect === undefined) continue
+
+		left = Math.min(left, rect.left)
+		top = Math.min(top, rect.top)
+		right = Math.max(right, rect.right)
+		bottom = Math.max(bottom, rect.bottom)
+	}
+
+	return left === Infinity ? DEFAULT_SPACE : { left, top, right, bottom }
+}
+
+function boxOf(rect: ArtRect): Box {
+	return { x: rect.left, y: rect.top, width: Math.max(0, rect.right - rect.left), height: Math.max(0, rect.bottom - rect.top) }
+}
+
+// posh / posv (MS-ODRAW §2.3.4.19, §2.3.4.21): 0 absolute, then left/top, center, right/bottom, inside, outside.
+const ALIGN_H: readonly (string | undefined)[] = [undefined, "left", "center", "right", "inside", "outside"]
+const ALIGN_V: readonly (string | undefined)[] = [undefined, "top", "center", "bottom", "inside", "outside"]
+
+const RECT_GEOMETRY = presetGeometry("rect")
+const WORD_ART_LOOK: ShapeLook = {
+	geometry: RECT_GEOMETRY,
+	fill: undefined,
+	line: undefined,
+	lineWidth: 0,
+	textBox: true,
+	insets: [0, 0, 0, 0]
+}
+
+// Degrees clockwise (FixedPoint 16.16).
+function rotationOf(shape: ArtShape): number {
+	const rotation = shape.properties.get(PID.rotation)?.value
+
+	return rotation === undefined ? 0 : (rotation | 0) / 65536
+}
 
 function shapeTransform(shape: ArtShape): Transform {
-	const rotation = shape.properties.get(PID.rotation)?.value
-	const degrees = rotation === undefined ? 0 : (rotation | 0) / 65536
+	const degrees = rotationOf(shape)
 
 	return {
 		rotation: Math.round((((degrees % 360) + 360) % 360) * 60000),
@@ -1024,17 +1105,18 @@ function shapeTransform(shape: ArtShape): Transform {
 	}
 }
 
-function shapeLook(shape: ArtShape, preset: string, textBox: boolean): ShapeLook {
+function shapeLook(shape: ArtShape, geometry: string, textBox: boolean): ShapeLook {
 	const props = shape.properties
 	// fFilled (bit 4 of the fill booleans) and fLine (bit 3 of the line booleans) default to on.
 	const filled = booleanProperty(props, PID.fillStyleBooleans, 4) ?? true
 	const lined = booleanProperty(props, PID.lineStyleBooleans, 3) ?? true
-	const line = preset === "line" || preset === "straightConnector1"
+	// Lines and connectors (MSOSPT 20, 32–40) have no inside to fill.
+	const line = shape.shapeType === 20 || isConnector(shape.shapeType)
 	const fill =
 		filled && !line ? (artColor(props.get(PID.fillColor)?.value) ?? (props.has(PID.fillColor) ? 0xffffff : 0xffffff)) : undefined
 
 	return {
-		preset,
+		geometry,
 		fill,
 		line: lined ? (artColor(props.get(PID.lineColor)?.value) ?? 0) : undefined,
 		lineWidth: props.get(PID.lineWidth)?.value ?? 9525,

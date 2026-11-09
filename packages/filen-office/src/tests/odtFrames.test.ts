@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { customGeometry, enhancedPath, Evaluator, GeometryError, parseFormula, svgPath } from "../core/odt/geometry"
+import { transformMatrix } from "../core/odf/transform"
+import { xfrmOf } from "../core/odp/read/shapes"
 import { documentXml, translated } from "./odtFixtures"
 import { png } from "./security/generate"
 
@@ -140,5 +142,76 @@ describe("enhanced geometry", () => {
 				false
 			)
 		).toContain("<a:cubicBezTo>")
+	})
+})
+
+// draw:transform (§19.229) applies its steps in order: LibreOffice's "rotate (a) translate (x y)" turns the box about
+// its corner, then places that corner. DrawingML places the unrotated box and turns it about its centre.
+describe("a frame or shape under draw:transform", () => {
+	const QUARTER = "1.5707963267949"
+	const offsets = (xml: string): { readonly x: number; readonly y: number } => ({
+		x: Number(/<wp:positionH relativeFrom="[^"]*"><wp:posOffset>(-?\d+)</u.exec(xml)?.[1]),
+		y: Number(/<wp:positionV relativeFrom="[^"]*"><wp:posOffset>(-?\d+)</u.exec(xml)?.[1])
+	})
+
+	it("is placed as its unrotated box, the same box the ODP reader reads", async () => {
+		const transform = `rotate (${QUARTER}) translate (2cm 5cm)`
+		const expected = xfrmOf({ x: 0, y: 0, w: (4 / 2.54) * 72, h: (2 / 2.54) * 72 }, transformMatrix(transform))
+		const xml = await documentXml({
+			body: `<text:p><draw:custom-shape text:anchor-type="paragraph" svg:width="4cm" svg:height="2cm" draw:transform="${transform}"><draw:enhanced-geometry svg:viewBox="0 0 21600 21600" draw:type="rectangle"/></draw:custom-shape></text:p>`
+		})
+		const { x, y } = offsets(xml)
+
+		expect(expected.rot).toBe(16_200_000)
+		expect(Math.abs(x - expected.x)).toBeLessThanOrEqual(1)
+		expect(Math.abs(y - expected.y)).toBeLessThanOrEqual(1)
+		// The corner at (2cm, 5cm) turned a quarter counter-clockwise: the unrotated 4x2 box starts 1cm left of it
+		// and 3cm above it.
+		expect(Math.abs(x - 360_000)).toBeLessThanOrEqual(1)
+		expect(Math.abs(y - 720_000)).toBeLessThanOrEqual(1)
+		expect(xml).toContain('<a:xfrm rot="16200000">')
+	})
+
+	it("keeps a plain translate as the offset", async () => {
+		const translation = await translated({
+			body: '<text:p><draw:rect text:anchor-type="paragraph" svg:width="4cm" svg:height="2cm" draw:transform="translate (2cm 5cm)"/></text:p>'
+		})
+		const xml = new TextDecoder().decode(translation.parts.get("word/document.xml") as Uint8Array)
+
+		expect(offsets(xml)).toEqual({ x: 720_000, y: 1_800_000 })
+		expect(xml).toContain("<a:xfrm><a:off")
+		expect(translation.origins[0]?.lossy ?? []).not.toContain("shapeApproximated")
+	})
+
+	it("turns a picture too", async () => {
+		const xml = await documentXml({
+			body: `<text:p><draw:frame text:anchor-type="paragraph" svg:width="4cm" svg:height="2cm" draw:transform="rotate (${QUARTER}) translate (2cm 5cm)"><draw:image xlink:href="Pictures/a.png"/></draw:frame></text:p>`,
+			extra: [{ name: "Pictures/a.png", data: png(4, 2) }]
+		})
+
+		expect(xml).toMatch(/<pic:spPr><a:xfrm rot="16200000">/u)
+		expect(Math.abs(offsets(xml).x - 360_000)).toBeLessThanOrEqual(1)
+	})
+
+	it("reads the turn the other way under one draw:mirror", async () => {
+		const xml = await documentXml({
+			body: `<text:p><draw:custom-shape text:anchor-type="paragraph" svg:width="4cm" svg:height="2cm" draw:transform="rotate (${QUARTER}) translate (2cm 5cm)"><draw:enhanced-geometry svg:viewBox="0 0 21600 21600" draw:type="rectangle" draw:mirror-horizontal="true"/></draw:custom-shape></text:p>`
+		})
+
+		expect(xml).toContain('<a:xfrm rot="5400000" flipH="1">')
+	})
+
+	it("folds a mirror into flipV and flags a skew", async () => {
+		const mirrored = await documentXml({
+			body: '<text:p><draw:rect text:anchor-type="paragraph" svg:width="4cm" svg:height="2cm" draw:transform="scale (1 -1) translate (2cm 5cm)"/></text:p>'
+		})
+
+		expect(mirrored).toContain('<a:xfrm flipV="1">')
+
+		const skewed = await translated({
+			body: '<text:p><draw:rect text:anchor-type="paragraph" svg:width="4cm" svg:height="2cm" draw:transform="skewX (0.5) translate (2cm 5cm)"/></text:p>'
+		})
+
+		expect(skewed.origins[0]?.lossy).toContain("shapeApproximated")
 	})
 })

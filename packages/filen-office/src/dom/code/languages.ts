@@ -1,4 +1,4 @@
-import { StreamLanguage, type StreamParser } from "@codemirror/language"
+import { Language, LanguageSupport, StreamLanguage, type StreamParser } from "@codemirror/language"
 import type { Extension } from "@codemirror/state"
 import { Cassandra, PLSQL, StandardSQL, sql } from "@codemirror/lang-sql"
 import { cpp } from "@codemirror/lang-cpp"
@@ -11,7 +11,7 @@ import { jinja } from "@codemirror/lang-jinja"
 import { json } from "@codemirror/lang-json"
 import { less } from "@codemirror/lang-less"
 import { liquid } from "@codemirror/lang-liquid"
-import { markdown } from "@codemirror/lang-markdown"
+import { markdown, markdownLanguage } from "@codemirror/lang-markdown"
 import { php } from "@codemirror/lang-php"
 import { python } from "@codemirror/lang-python"
 import { rust } from "@codemirror/lang-rust"
@@ -107,10 +107,25 @@ import { z80 } from "@codemirror/legacy-modes/mode/z80"
 import { nix } from "@replit/codemirror-lang-nix"
 import { solidity } from "@replit/codemirror-lang-solidity"
 import { svelte } from "@replit/codemirror-lang-svelte"
-import type { CodeLanguageId } from "../../core/code/languages"
+import { type CodeLanguageId, codeLanguageForExtension, isCodeLanguageId } from "../../core/code/languages"
 
 function stream<State>(parser: StreamParser<State>): () => Extension {
 	return () => StreamLanguage.define(parser)
+}
+
+// The grammar nested inside a markdown fence: its info string's first word as a language id or extension.
+// Resolved lazily per fence through the shared cache; markdown itself is not nested.
+function fenceLanguage(info: string): Language | null {
+	const word = (/^\S+/.exec(info)?.[0] ?? "").toLowerCase()
+	const id = isCodeLanguageId(word) ? word : codeLanguageForExtension(word)
+
+	if (id === null || id === "markdown") {
+		return null
+	}
+
+	const extension = codeLanguageSupport(id)
+
+	return extension instanceof LanguageSupport ? extension.language : extension instanceof Language ? extension : null
 }
 
 // One grammar per language id. Every grammar is in the bundle (the apps load no code on demand); each is
@@ -170,7 +185,7 @@ const BUILDERS: Readonly<Record<CodeLanguageId, () => Extension>> = {
 	liquid: () => liquid(),
 	livescript: stream(liveScript),
 	lua: stream(lua),
-	markdown: () => markdown(),
+	markdown: () => markdown({ base: markdownLanguage, codeLanguages: fenceLanguage }),
 	mathematica: stream(mathematica),
 	mbox: stream(mbox),
 	mirc: stream(mirc),

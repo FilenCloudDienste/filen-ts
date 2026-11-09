@@ -1,11 +1,13 @@
-import { Item, RevisionView, type DocxModel, type StoryPart } from "../../core/docx/index"
+import { hasSwitch, parseFieldCode } from "../../core/docx/fields/code"
+import { Item, RevisionView, SOURCE_MAP_INTS, type DocxModel, type StoryPart } from "../../core/docx/index"
 import type { DocxLinkTarget } from "./protocol"
 
-// Hyperlinks of a laid-out paragraph as ranges of its text. Layout reports which paragraph a line comes
-// from, not which items its characters come from, so each link's own text (w:hyperlink content, or a
-// HYPERLINK field's result) is found in the paragraph's text in document order. Text that layout draws
-// differently from what the model holds (list markers, computed fields) only shifts where the search
-// starts; a link whose text is not found is left out rather than placed on the wrong words.
+// Hyperlinks of a laid-out paragraph as ranges of its text: w:hyperlink content, a HYPERLINK field's result
+// and a REF, PAGEREF or NOTEREF \h field's result. A layout that places links records, for the paragraphs
+// holding one, where each item's content landed in the text (linkMapParagraph), and each link covers exactly
+// what its items laid out, generated text (list markers, computed fields) included. Without that map a link
+// is found by its own text, and left out where that text is missing or occurs more than once, never placed
+// on the wrong words.
 
 export interface LinkRange {
 	readonly start: number
@@ -85,10 +87,89 @@ function fieldResult(part: StoryPart, separate: number, end: number, view: Revis
 	return out
 }
 
+const CROSS_REFERENCES: ReadonlySet<string> = new Set(["REF", "PAGEREF", "NOTEREF"])
+
+// REF, PAGEREF or NOTEREF with \h: a link to its bookmark (ECMA-376 §17.16.5.51, §17.16.5.45, §17.16.5.40).
+export function crossReferenceTarget(instruction: string): DocxLinkTarget | undefined {
+	const code = parseFieldCode(instruction)
+
+	if (!CROSS_REFERENCES.has(code.type) || !hasSwitch(code, "h")) return undefined
+
+	const anchor = code.args[0]
+
+	return anchor === undefined || anchor.length === 0 ? undefined : { kind: "internal", anchor, tooltip: undefined }
+}
+
+function fieldTarget(instruction: string): DocxLinkTarget | undefined {
+	return parseHyperlinkField(instruction) ?? crossReferenceTarget(instruction)
+}
+
+// A source's item map (PageDisplayList.sourceMapPool): SOURCE_MAP_INTS per laid-out item in [start, end).
+export interface LinkMap {
+	readonly pool: Int32Array
+	readonly start: number
+	readonly end: number
+}
+
+export function sourceLinkMap(
+	page: { readonly sourceMapPool: Int32Array; readonly sourceMapRanges: Int32Array },
+	source: number
+): LinkMap | undefined {
+	const start = page.sourceMapRanges[source * 2] ?? 0
+	const end = page.sourceMapRanges[source * 2 + 1] ?? 0
+
+	return end > start ? { pool: page.sourceMapPool, start, end } : undefined
+}
+
 interface Candidate {
 	readonly at: number
+	// The items the link spans, [from, to).
+	readonly from: number
+	readonly to: number
 	readonly text: string
 	readonly target: DocxLinkTarget
+}
+
+// Paragraphs (and the paragraphs around them) holding a link, per part and view, built once.
+const linkIndex = new WeakMap<StoryPart, Map<RevisionView, Set<number>>>()
+
+function addParagraphs(part: StoryPart, item: number, out: Set<number>): void {
+	for (let at = item; at >= 0; at = part.parent(at)) if (part.kinds[at] === Item.Paragraph) out.add(at)
+}
+
+function linkParagraphs(part: StoryPart, view: RevisionView): Set<number> {
+	let byView = linkIndex.get(part)
+	let found = byView?.get(view)
+
+	if (found !== undefined) return found
+
+	found = new Set()
+
+	const kinds = part.kinds
+
+	for (let item = 0; item < part.count; item++) if (kinds[item] === Item.Hyperlink) addParagraphs(part, item, found)
+
+	const fields = part.fields
+
+	for (let field = 0; field < fields.count; field++) {
+		const begin = fields.begin[field] ?? -1
+
+		if (begin >= 0 && fieldTarget(part.fieldInstruction(field, view)) !== undefined) addParagraphs(part, begin, found)
+	}
+
+	if (byView === undefined) {
+		byView = new Map()
+		linkIndex.set(part, byView)
+	}
+
+	byView.set(view, found)
+
+	return found
+}
+
+// LayoutOptions.mapParagraph for a layout whose links are placed (paragraphLinks with the source's map).
+export function linkMapParagraph(view: RevisionView): (part: StoryPart, paragraph: number) => boolean {
+	return (part, paragraph) => linkParagraphs(part, view).has(paragraph)
 }
 
 // Fields of a part indexed by the paragraph their begin character sits in, built once per part.
@@ -128,7 +209,43 @@ function fieldsByParagraph(part: StoryPart): Map<number, number[]> {
 	return index
 }
 
-export function paragraphLinks(part: StoryPart, paragraph: number, text: string, view: RevisionView): LinkRange[] {
+// The text range the candidate's items laid out in, from the source's map; undefined when they laid out nothing.
+function mappedRange(map: LinkMap, part: number, candidate: Candidate): { start: number; end: number } | undefined {
+	const pool = map.pool
+	let start = -1
+	let end = -1
+
+	for (let at = map.start; at + SOURCE_MAP_INTS <= map.end; at += SOURCE_MAP_INTS) {
+		const item = pool[at + 1] ?? -1
+
+		if (pool[at] !== part || item < candidate.from || item >= candidate.to) continue
+
+		const from = pool[at + 2] ?? 0
+		const to = pool[at + 3] ?? 0
+
+		if (start < 0 || from < start) start = from
+		if (to > end) end = to
+	}
+
+	return start >= 0 && end > start ? { start, end } : undefined
+}
+
+// Without a map: the link's own text where it occurs exactly once in the paragraph's text.
+function searchedRange(text: string, needle: string): { start: number; end: number } | undefined {
+	if (needle.trim().length === 0) return undefined
+
+	const at = text.indexOf(needle)
+
+	if (at < 0 || text.indexOf(needle, at + 1) >= 0) return undefined
+
+	return { start: at, end: at + needle.length }
+}
+
+// `map`: the source's item map (sourceLinkMap), which places each link on exactly the text its items laid out.
+// Without one a link is placed by its text, and only where that text is unambiguous.
+export function paragraphLinks(part: StoryPart, paragraph: number, text: string, view: RevisionView, map?: LinkMap): LinkRange[] {
+	if (!linkParagraphs(part, view).has(paragraph)) return []
+
 	const candidates: Candidate[] = []
 	const end = part.end(paragraph)
 
@@ -137,26 +254,44 @@ export function paragraphLinks(part: StoryPart, paragraph: number, text: string,
 
 		const target = hyperlinkTarget(part, item)
 
-		if (target !== undefined) candidates.push({ at: item, text: part.paragraphText(item, view), target })
+		if (target !== undefined)
+			candidates.push({
+				at: item,
+				from: item,
+				to: part.end(item),
+				text: map === undefined ? part.paragraphText(item, view) : "",
+				target
+			})
 	}
 
-	for (const field of fieldsByParagraph(part).get(paragraph) ?? []) {
-		if (part.fieldType(field, view) !== "HYPERLINK") continue
+	const fields = part.fields
 
-		const target = parseHyperlinkField(part.fieldInstruction(field, view))
-		const separate = part.fields.separate[field] ?? -1
-		const fieldEnd = part.fields.end[field] ?? -1
+	for (const field of fieldsByParagraph(part).get(paragraph) ?? []) {
+		const instruction = part.fieldInstruction(field, view)
+		const hyperlink = parseHyperlinkField(instruction)
+		const target = hyperlink ?? crossReferenceTarget(instruction)
 
 		if (target === undefined) continue
 
-		const result =
-			part.fields.simple[field] === 1
-				? part.paragraphText(part.fields.begin[field] ?? -1, view)
-				: separate >= 0 && fieldEnd > separate
-					? fieldResult(part, separate, fieldEnd, view)
-					: ""
+		const begin = fields.begin[field] ?? -1
+		const separate = fields.separate[field] ?? -1
+		const fieldEnd = fields.end[field] ?? -1
+		const simple = fields.simple[field] === 1
+		const to = simple ? part.end(begin) : fieldEnd + 1
 
-		candidates.push({ at: part.fields.begin[field] ?? 0, text: result, target })
+		// A cross-reference inside a link (a TOC entry's page number) is that link's, not a second one.
+		if (hyperlink === undefined && candidates.some(other => begin > other.from && begin < other.to)) continue
+
+		const result =
+			map !== undefined
+				? ""
+				: simple
+					? part.paragraphText(begin, view)
+					: separate >= 0 && fieldEnd > separate
+						? fieldResult(part, separate, fieldEnd, view)
+						: ""
+
+		candidates.push({ at: begin, from: begin, to: to > begin ? to : begin + 1, text: result, target })
 	}
 
 	if (candidates.length === 0) return []
@@ -164,19 +299,11 @@ export function paragraphLinks(part: StoryPart, paragraph: number, text: string,
 	candidates.sort((a, b) => a.at - b.at)
 
 	const out: LinkRange[] = []
-	let cursor = 0
 
 	for (const candidate of candidates) {
-		const needle = candidate.text
+		const range = map === undefined ? searchedRange(text, candidate.text) : mappedRange(map, part.index, candidate)
 
-		if (needle.trim().length === 0) continue
-
-		const at = text.indexOf(needle, cursor)
-
-		if (at < 0) continue
-
-		out.push({ start: at, end: at + needle.length, target: candidate.target })
-		cursor = at + needle.length
+		if (range !== undefined) out.push({ start: range.start, end: range.end, target: candidate.target })
 	}
 
 	return out

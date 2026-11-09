@@ -64,11 +64,49 @@ export function pdfLinks(annotations: readonly unknown[], allow?: (url: string) 
 	return links
 }
 
-// The 1-based page a destination points at, or null for one that points nowhere (a broken document).
-export async function resolveDestination(document: PdfDocument, dest: string | readonly unknown[]): Promise<number | null> {
+// Where a destination leads: its 1-based page and the point (PDF user space) to bring to the view's top-left
+// corner. A null coordinate leaves that axis as it is (PDF 32000-1 §12.3.2.2, Table 151); the zoom a
+// destination names is ignored, so the reader's own zoom stays.
+export interface PdfDestination {
+	readonly page: number
+	readonly left: number | null
+	readonly top: number | null
+}
+
+function coordinate(value: unknown): number | null {
+	return typeof value === "number" && Number.isFinite(value) ? value : null
+}
+
+// The view's [left, top] for an explicit destination's fit type (pdf.js gives the type as a { name } object).
+function destinationPoint(explicit: readonly unknown[]): readonly [number | null, number | null] {
+	const mode: unknown = explicit[1]
+	const name = isRecord(mode) && typeof mode["name"] === "string" ? mode["name"] : null
+
+	switch (name) {
+		case "XYZ":
+			return [coordinate(explicit[2]), coordinate(explicit[3])]
+		case "FitH":
+		case "FitBH":
+			return [null, coordinate(explicit[2])]
+		// [page /FitR left bottom right top]
+		case "FitR":
+			return [coordinate(explicit[2]), coordinate(explicit[5])]
+		case "FitV":
+		case "FitBV":
+			return [coordinate(explicit[2]), null]
+		default:
+			return [null, null]
+	}
+}
+
+// Null for a destination that points nowhere (a broken document).
+export async function resolveDestination(document: PdfDocument, dest: string | readonly unknown[]): Promise<PdfDestination | null> {
 	try {
 		const explicit = typeof dest === "string" ? await document.getDestination(dest) : dest
-		const target: unknown = Array.isArray(explicit) ? explicit[0] : undefined
+
+		if (!Array.isArray(explicit)) return null
+
+		const target: unknown = explicit[0]
 
 		if (target === undefined || target === null) return null
 
@@ -76,7 +114,11 @@ export async function resolveDestination(document: PdfDocument, dest: string | r
 		// for remote go-to actions, pdf.js accepts it everywhere).
 		const index = typeof target === "number" ? target : await document.getPageIndex(target)
 
-		return Number.isInteger(index) && index >= 0 && index < document.numPages ? index + 1 : null
+		if (!Number.isInteger(index) || index < 0 || index >= document.numPages) return null
+
+		const [left, top] = destinationPoint(explicit)
+
+		return { page: index + 1, left, top }
 	} catch {
 		return null
 	}

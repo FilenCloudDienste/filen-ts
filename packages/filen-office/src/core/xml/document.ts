@@ -43,7 +43,7 @@ export interface XmlNodeArrays {
 const NO_NODES = new Int32Array(0)
 
 // Above this many attributes, duplicates are found through a set instead of pairwise.
-const PAIRWISE_DUPLICATE_LIMIT = 8
+export const PAIRWISE_DUPLICATE_LIMIT = 8
 
 // Spans are collected here and copied out once per element, rather than grown in a fresh array each time.
 let scratch = new Int32Array(64)

@@ -61,7 +61,7 @@ describe("an ODT paragraph with tracked changes", () => {
 		const xml = await content(again)
 
 		expect(xml).toMatch(
-			/<text:p>ZOne <text:change-start text:change-id="([^"]+)"\/>new <text:change-end text:change-id="\1"\/>two <text:change text:change-id="[^"]+"\/><\/text:p>/u
+			/<text:p>ZOne <text:change-start text:change-id="([^"]+)"\/>new <text:change-end text:change-id="\1"\/>two<text:s\/><text:change text:change-id="[^"]+"\/><\/text:p>/u
 		)
 		expect(records(xml)).toHaveLength(2)
 		expect(new Set(marks(xml))).toEqual(new Set(records(xml)))

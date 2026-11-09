@@ -762,6 +762,20 @@ describe("decorations and transforms", () => {
 		expect(layOut(h, b => b.append("aaa", h.style({ letterSpacing: 2 })))[0]?.width).toBe(36)
 		expect(layOut(h, b => b.append("aaa", h.style({ scaleX: 0.5 })))[0]?.width).toBe(15)
 	})
+
+	it("narrows a condensed original's substitute horizontally only, leaving letter spacing and height", () => {
+		const h = harness()
+		const narrow = testFont(2, "fo-narrow", 1, 0.5)
+		const plain = h.style({})
+		const condensed = h.style({ font: narrow })
+
+		expect(layOut(h, b => b.append("aaa", condensed))[0]?.width).toBe(15)
+		expect(layOut(h, b => b.append("aaa", h.style({ font: narrow, letterSpacing: 2 })))[0]?.width).toBe(15 + 3 * 2)
+		expect(layOut(h, b => b.append("aaa", h.style({ font: narrow, scaleX: 0.5 })))[0]?.width).toBe(7.5)
+		expect(h.styles.spaceWidth[condensed]).toBe((h.styles.spaceWidth[plain] ?? 0) * 0.5)
+		expect(h.styles.ascent[condensed]).toBe(h.styles.ascent[plain])
+		expect(h.styles.descent[condensed]).toBe(h.styles.descent[plain])
+	})
 })
 
 describe("measurement", () => {

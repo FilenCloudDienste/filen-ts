@@ -53,26 +53,32 @@ export const SHEET_PASSWORD_JOB = "protection.check"
 export type SheetPasswordVerdict = "accepted" | "default" | "wrong" | "aborted" | "failed"
 
 // The buffers of every typed array in a message (each owns its whole buffer: the protocol's rule), to transfer.
-export function transferables(value: unknown, into: Set<ArrayBuffer> = new Set(), depth = 0): ArrayBuffer[] {
-	if (depth > 8 || typeof value !== "object" || value === null) return [...into]
+export function transferables(value: unknown): ArrayBuffer[] {
+	const into = new Set<ArrayBuffer>()
+
+	collect(value, into, 0)
+
+	return [...into]
+}
+
+function collect(value: unknown, into: Set<ArrayBuffer>, depth: number): void {
+	if (depth > 8 || typeof value !== "object" || value === null) return
 
 	if (ArrayBuffer.isView(value)) {
 		const buffer = value.buffer
 
 		if (buffer instanceof ArrayBuffer && buffer.byteLength === value.byteLength) into.add(buffer)
 
-		return [...into]
+		return
 	}
 
 	if (Array.isArray(value)) {
-		for (const item of value) if (typeof item === "object" && item !== null) transferables(item, into, depth + 1)
+		for (const item of value) if (typeof item === "object" && item !== null) collect(item, into, depth + 1)
 
-		return [...into]
+		return
 	}
 
-	if (value instanceof Set || value instanceof Map) return [...into]
+	if (value instanceof Set || value instanceof Map) return
 
-	for (const item of Object.values(value)) if (typeof item === "object" && item !== null) transferables(item, into, depth + 1)
-
-	return [...into]
+	for (const item of Object.values(value)) if (typeof item === "object" && item !== null) collect(item, into, depth + 1)
 }

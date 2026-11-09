@@ -808,6 +808,16 @@ export interface PartChange {
 	readonly crc32?: number
 }
 
+// Content types whose bytes are compressed already: deflating them costs CPU and grows them. SVG, BMP, TIFF, EMF
+// and WMF are not among them; they deflate well.
+const PRECOMPRESSED_CONTENT_TYPE = /^(?:image\/(?:png|jpeg|gif|webp)|audio\/|video\/)/iu
+
+// Whether a new part typed `contentType` is worth deflating (PartChange.compress); stored entries are valid OPC
+// (ECMA-376 Part 2 annex C).
+export function deflatesWell(contentType: string): boolean {
+	return !PRECOMPRESSED_CONTENT_TYPE.test(contentType)
+}
+
 export interface ZipChanges {
 	readonly replace?: readonly PartChange[]
 	readonly remove?: readonly string[]

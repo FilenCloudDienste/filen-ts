@@ -1,4 +1,4 @@
-import { parseLength, parsePercent, type OdfElement, type OdfStyleSheet } from "../odf/index"
+import { parseLength, parsePercent, type OdfElement, type OdfPageLayout, type OdfStyleSheet } from "../odf/index"
 import type { OdtLossyReason } from "./types"
 import { eighths, esc, twips } from "./wml"
 
@@ -478,6 +478,20 @@ function paragraphSide(side: Side, resolved: Attributes): string {
 	return `<w:${side} w:val="none" w:sz="0" w:space="${space(padding)}"${shadow ? ' w:shadow="1"' : ""}${apart ? ' w:frame="1"' : ""}/>`
 }
 
+// The inline direction a style:writing-mode value sets (Part 3 §20.404): true right to left, false left to right
+// (vertical modes included), undefined for "page" and others, which take the superordinate object's.
+export function modeRtl(mode: string | undefined): boolean | undefined {
+	if (mode === undefined) return undefined
+	if (mode.startsWith("rl")) return true
+
+	return mode.startsWith("lr") || mode.startsWith("tb") ? false : undefined
+}
+
+// Whether a page layout's text runs right to left: what a paragraph's "page" writing mode follows (§20.404.3).
+export function layoutRtl(layout: OdfPageLayout | undefined): boolean {
+	return modeRtl(layout?.properties.attributes.get("style:writing-mode")) === true
+}
+
 export interface ParagraphOptions {
 	// TabsRelativeToIndent (settings.xml): tab positions count from the left margin.
 	readonly tabsRelativeToIndent: boolean
@@ -493,14 +507,23 @@ export interface ParagraphOptions {
 	readonly fontSize: number
 	// Indents of the list level the paragraph is in, written when its own do not win.
 	readonly listIndent?: { readonly left: number; readonly firstLine: number }
+	// The tab stops the paragraph style gives (its nearest style that sets them), and the left margin its w:style
+	// placed them from: with no stops of its own, a paragraph whose margin in effect differs moves them.
+	readonly inheritedTabs?: { readonly stops: OdfElement; readonly marginLeft: number } | undefined
 	// fo:hyphenate of the same style's own text properties, where ODF has it: WordprocessingML has it per
 	// paragraph (w:suppressAutoHyphens).
 	readonly hyphenate?: string | undefined
+	// The direction a "page" writing mode (or none) takes: the page's, or a table cell's or frame's that sets one.
+	readonly pageRtl?: boolean
+	// w:bidi to write when the properties set no writing mode: where what the paragraph inherits differs from
+	// the direction its styles give.
+	readonly bidi?: boolean | undefined
 }
 
 const LEADERS: Readonly<Record<string, string>> = { ".": "dot", "-": "hyphen", _: "underscore", "·": "middleDot" }
 
-function tabs(stops: OdfElement | undefined, options: ParagraphOptions): string {
+// `cleared`: the left margin the stops were placed from by a style, whose positions are cleared where they move.
+function tabs(stops: OdfElement | undefined, options: ParagraphOptions, cleared?: number): string {
 	if (stops === undefined) return ""
 
 	let out = ""
@@ -524,6 +547,9 @@ function tabs(stops: OdfElement | undefined, options: ParagraphOptions): string 
 							? "underscore"
 							: undefined
 		const at = twips(position + (options.tabsRelativeToIndent ? options.marginLeft : 0))
+		const from = cleared === undefined ? at : twips(position + cleared)
+
+		if (from !== at) out += `<w:tab w:val="clear" w:pos="${from}"/>`
 
 		out += `<w:tab w:val="${alignment}"${leader === undefined ? "" : ` w:leader="${leader}"`} w:pos="${at}"/>`
 	}
@@ -586,7 +612,11 @@ export function paragraphProperties(
 
 	const stops = children.find(child => child.name === "style:tab-stops")
 
+	const inherited = options.inheritedTabs
+
 	if (stops !== undefined) tail += tabs(stops, options)
+	else if (inherited !== undefined && options.tabsRelativeToIndent && inherited.marginLeft !== options.marginLeft)
+		tail += tabs(inherited.stops, options, inherited.marginLeft)
 
 	// On paragraph properties fo:hyphenate is no ODF attribute; earlier saves of this writer put it there.
 	const hyphenate = options.hyphenate ?? own.get("fo:hyphenate")
@@ -594,8 +624,9 @@ export function paragraphProperties(
 	if (hyphenate !== undefined) tail += onOff("suppressAutoHyphens", hyphenate !== "true")
 
 	const mode = own.get("style:writing-mode")
+	const rtl = mode === undefined ? options.bidi : (modeRtl(mode) ?? options.pageRtl === true)
 
-	if (mode !== undefined) tail += onOff("bidi", mode.startsWith("rl"))
+	if (rtl !== undefined) tail += onOff("bidi", rtl)
 
 	// LibreOffice reads a style's space above and below as one setting: one given without the other makes the other 0,
 	// not the parent's (measured).
@@ -650,23 +681,9 @@ export function paragraphProperties(
 	const align = own.get("fo:text-align")
 
 	if (align !== undefined) {
-		const rtl = (resolved.get("style:writing-mode") ?? "").startsWith("rl")
-		const jc =
-			align === "center"
-				? "center"
-				: align === "justify"
-					? "both"
-					: align === "end"
-						? rtl
-							? "left"
-							: "right"
-						: align === "right"
-							? "right"
-							: align === "start"
-								? rtl
-									? "right"
-									: "left"
-								: "left"
+		// Word reads jc left and right by the paragraph's direction, as its start and end (a w:bidi paragraph's
+		// "left" sits at the right), as LibreOffice reads fo:text-align left and right: start and end map to them.
+		const jc = align === "center" ? "center" : align === "justify" ? "both" : align === "end" || align === "right" ? "right" : "left"
 
 		tail += `<w:jc w:val="${jc}"/>`
 	}

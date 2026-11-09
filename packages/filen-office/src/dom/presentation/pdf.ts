@@ -925,6 +925,8 @@ export class PresentationPdf {
 			fonts: this.fonts,
 			doc: prepared.doc,
 			requests: prepared.requests,
+			// The text styles carry no language of their own.
+			langs: [],
 			media: prepared.doc.media,
 			seen: this.seen,
 			heading: 0,

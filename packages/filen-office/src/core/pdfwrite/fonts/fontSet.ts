@@ -782,10 +782,13 @@ function resolveScripts(cps: Uint32Array): Uint8Array {
 }
 
 // Noto families for a script, the CJK ones by language: Japanese kana and kanji in JP, Hangul in KR,
-// traditional Chinese in TC, everything else Han in SC.
-function fallbackFamilies(code: string, language: string | undefined, cp: number): FallbackFamily[] {
+// traditional Chinese in TC, everything else Han in SC. Then the symbol and math faces for code points in
+// their blocks, whatever script the neighbouring text resolved them to.
+function fallbackFamilies(code: string, language: string | undefined, cp: number): readonly FallbackFamily[] {
+	const symbols = symbolFamilies(cp)
 	const lang = (language ?? "").toLowerCase()
 	let preferred: string | undefined
+	let families: FallbackFamily[]
 
 	if (CJK.has(code) || (code === "Zyyy" && isCjkSymbol(cp))) {
 		if (code === "Hang" || lang.startsWith("ko")) preferred = "noto-sans-kr"
@@ -795,10 +798,57 @@ function fallbackFamilies(code: string, language: string | undefined, cp: number
 
 		const order = [preferred, "noto-sans-sc", "noto-sans-jp", "noto-sans-tc", "noto-sans-kr"]
 
-		return [...new Set(order)].map(id => FALLBACK_FAMILIES.find(family => family.id === id)).filter(family => family !== undefined)
+		families = [...new Set(order)].map(id => FALLBACK_FAMILIES.find(family => family.id === id)).filter(family => family !== undefined)
+	} else {
+		families = FALLBACK_FAMILIES.filter(family => family.scripts.includes(code))
 	}
 
-	return FALLBACK_FAMILIES.filter(family => family.scripts.includes(code))
+	if (symbols.length === 0) return families
+	if (families.length === 0) return symbols
+
+	return [...families, ...symbols]
+}
+
+// The symbol (Zsym) and math (Zmth) fallbacks: Word draws these blocks from Wingdings, Segoe UI Symbol or
+// Cambria Math, which the bundled text faces stand in for without the glyphs. Both are tried, the one that
+// covers more of the block first.
+const SYMBOL_FAMILIES = FALLBACK_FAMILIES.filter(family => family.scripts.includes("Zsym"))
+const MATH_FAMILIES = FALLBACK_FAMILIES.filter(family => family.scripts.includes("Zmth"))
+const SYMBOLS_FIRST: readonly FallbackFamily[] = [...SYMBOL_FAMILIES, ...MATH_FAMILIES]
+const MATH_FIRST: readonly FallbackFamily[] = [...MATH_FAMILIES, ...SYMBOL_FAMILIES]
+const NO_FAMILIES: readonly FallbackFamily[] = []
+
+function symbolFamilies(cp: number): readonly FallbackFamily[] {
+	if (cp < 0x2190) return NO_FAMILIES
+	// Arrows, Mathematical Operators, Miscellaneous Technical.
+	if (cp <= 0x23ff) return MATH_FIRST
+	// Control Pictures, Optical Character Recognition.
+	if (cp <= 0x245f) return SYMBOLS_FIRST
+	// Enclosed Alphanumerics, Box Drawing and Block Elements: the text faces' own.
+	if (cp < 0x25a0) return NO_FAMILIES
+	// Geometric Shapes, Miscellaneous Symbols, Dingbats.
+	if (cp <= 0x27bf) return SYMBOLS_FIRST
+	// Miscellaneous Mathematical Symbols-A, Supplemental Arrows-A.
+	if (cp <= 0x27ff) return MATH_FIRST
+	// Braille Patterns.
+	if (cp <= 0x28ff) return SYMBOLS_FIRST
+	// Supplemental Arrows-B, Miscellaneous Mathematical Symbols-B, Supplemental Mathematical Operators.
+	if (cp <= 0x2aff) return MATH_FIRST
+	// Miscellaneous Symbols and Arrows.
+	if (cp <= 0x2bff) return SYMBOLS_FIRST
+	// Mathematical Alphanumeric Symbols.
+	if (cp >= 0x1d400 && cp <= 0x1d7ff) return MATH_FIRST
+	// Mahjong, Domino and Playing Cards; Ornamental Dingbats; Geometric Shapes Extended and Supplemental
+	// Arrows-C; Symbols for Legacy Computing.
+	if (
+		(cp >= 0x1f000 && cp <= 0x1f0ff) ||
+		(cp >= 0x1f650 && cp <= 0x1f67f) ||
+		(cp >= 0x1f780 && cp <= 0x1f8ff) ||
+		(cp >= 0x1fb00 && cp <= 0x1fbff)
+	)
+		return SYMBOLS_FIRST
+
+	return NO_FAMILIES
 }
 
 function isCjkSymbol(cp: number): boolean {

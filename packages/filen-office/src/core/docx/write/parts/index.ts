@@ -42,7 +42,8 @@ export interface SaveParts {
 	// not paragraph by paragraph. Content types and relationships parts are the save's own.
 	replace(name: string, bytes: PartBytes): void
 	// A part the package does not have, typed `contentType` (an Override, unless a Default already types it).
-	add(name: string, bytes: PartBytes, contentType: string): void
+	// Deflated unless `compress` says otherwise or the content type is compressed already (deflatesWell).
+	add(name: string, bytes: PartBytes, contentType: string, options?: { readonly compress?: boolean }): void
 	// A Default content type for files with `extension` (media); an extension typed otherwise is refused.
 	addDefault(extension: string, contentType: string): void
 }

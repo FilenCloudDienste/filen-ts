@@ -34,6 +34,7 @@ export {
 	type ZipOpenOptions
 } from "./zipReader"
 export {
+	deflatesWell,
 	planZip,
 	writeZip,
 	type PartChange,

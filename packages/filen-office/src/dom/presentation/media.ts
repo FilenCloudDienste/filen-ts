@@ -128,7 +128,9 @@ const CONTAINER_TYPES: Readonly<Record<MediaContainer, readonly [string, string]
 	aiff: ["audio/aiff", "audio/aiff"],
 	flac: ["audio/flac", "audio/flac"],
 	midi: ["audio/midi", "audio/midi"],
-	amr: ["audio/amr", "audio/amr"]
+	amr: ["audio/amr", "audio/amr"],
+	au: ["audio/basic", "audio/basic"],
+	caf: ["audio/x-caf", "audio/x-caf"]
 }
 
 function isMediaType(type: string | undefined): type is string {

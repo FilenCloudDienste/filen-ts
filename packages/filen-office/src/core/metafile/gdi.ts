@@ -2,6 +2,7 @@ import { ItemFlag, type DashPreset, type Rgba, type Stroke } from "../drawingml/
 import { dibBits, dibImage, monoTile, NO_ADJUST, OPAQUE, type Dib, type DibTransparency, type PixelAdjust } from "./dib"
 import { MAX_OBJECTS, MAX_REGION_RECTS, MAX_SAVE_DEPTH, MAX_TEXT_CHARS, MetafileLimit } from "./limits"
 import { combineClips, intersectClips, offsetClip, pathClip, rectClip, rectsClip, type ClipNode } from "./clip"
+import { combineRects, normalizeRects, translateRects } from "./region"
 import { PathBuilder, finiteMatrix, mul, scaleOf, transformX, transformY, type EmbeddedImage, type Matrix, type Output } from "./output"
 import { DEFAULT_FONT, displayFace, drawnCodePoint, emHeight, pieceAdvance, type MetafileFont } from "./text"
 
@@ -1128,10 +1129,44 @@ export class Gdi {
 	}
 
 	// Rectangles in output space filled with a brush (FillRgn, PaintRgn).
-	fillRects(rects: readonly number[], brush: BrushObject): void {
+	fillRects(rects: ArrayLike<number>, brush: BrushObject): void {
 		if (this.suppress || rects.length === 0) return
 
 		const saved = this.dc.brush
+		const builder = this.outputRectPath(rects)
+
+		this.dc.brush = brush
+		this.out.path(builder, this.fill(), -1, false, this.dc.clip)
+		this.dc.brush = saved
+	}
+
+	// InvertRgn: rectangles in output space, white differenced with the destination.
+	invertRects(rects: ArrayLike<number>): void {
+		if (this.suppress || rects.length === 0) return
+
+		this.out.path(this.outputRectPath(rects), this.out.solid(WHITE), -1, false, this.dc.clip, ItemFlag.BLEND_DIFFERENCE)
+	}
+
+	// FrameRgn: rectangles in output space minus their erosion by `width` across and `height` down (logical
+	// units), the region shifted each way and intersected, filled with the brush.
+	frameRects(rects: ArrayLike<number>, width: number, height: number, brush: BrushObject): void {
+		if (this.suppress || rects.length === 0) return
+
+		const m = this.matrix()
+		const w = Math.abs(width) * Math.hypot(m[0] ?? 0, m[1] ?? 0)
+		const h = Math.abs(height) * Math.hypot(m[2] ?? 0, m[3] ?? 0)
+		const charge = this.out.env.charge
+		const region = normalizeRects(rects, charge)
+		let inner = combineRects(region, translateRects(region, -w, 0, charge), "and", charge)
+
+		inner = combineRects(inner, translateRects(region, w, 0, charge), "and", charge)
+		inner = combineRects(inner, translateRects(region, 0, -h, charge), "and", charge)
+		inner = combineRects(inner, translateRects(region, 0, h, charge), "and", charge)
+
+		this.fillRects(combineRects(region, inner, "diff", charge), brush)
+	}
+
+	private outputRectPath(rects: ArrayLike<number>): PathBuilder {
 		const builder = this.scratch
 
 		builder.clear()
@@ -1139,9 +1174,7 @@ export class Gdi {
 
 		for (let k = 0; k + 3 < rects.length; k += 4) builder.rect(rects[k] ?? 0, rects[k + 1] ?? 0, rects[k + 2] ?? 0, rects[k + 3] ?? 0)
 
-		this.dc.brush = brush
-		this.out.path(builder, this.fill(), -1, false, this.dc.clip)
-		this.dc.brush = saved
+		return builder
 	}
 
 	// --- Path bracket ---

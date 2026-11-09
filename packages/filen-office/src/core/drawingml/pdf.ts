@@ -1028,12 +1028,26 @@ class DrawingPainter {
 
 		const measure = (value: string): number =>
 			(fonts.shape(value, 0, value.length, request, { level: text.rtl ? 1 : 0, flags: 0, bidi: true }).width * size) / 1000
-		const width = clamp(text.width, 0, MAX_COORD, 0)
+		let width = clamp(text.width, 0, MAX_COORD, 0)
 		const height = clamp(text.height, 0, MAX_COORD, 0)
 		const lineHeight = clamp(text.lineHeight, 0.01, MAX_COORD, size * 1.2)
 		const lines = layoutBlock(source, width, height, lineHeight, text.wrap, text.lineLimit, text.trimming, measure)
 
 		if (lines.length === 0) return
+
+		let stretch = 1
+
+		if (text.stretch === true && width > 0) {
+			let widest = 0
+
+			for (const line of lines) widest = Math.max(widest, measure(line))
+
+			if (widest > 0) {
+				// Laid out at the natural width, then scaled on x to the rectangle's.
+				stretch = width / widest
+				width = widest
+			}
+		}
 
 		const total = lines.length * lineHeight
 		const top =
@@ -1054,6 +1068,7 @@ class DrawingPainter {
 
 		page.saveState()
 
+		if (stretch !== 1) page.concat([stretch, 0, 0, 1, 0, 0])
 		if (text.clip && width > 0 && height > 0) page.rect(0, 0, width, height).clip()
 
 		for (let k = 0; k < lines.length; k++) {

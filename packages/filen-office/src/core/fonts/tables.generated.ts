@@ -287,6 +287,7 @@ export const LINE_METRICS: ReadonlyMap<string, LineMetricsEntry> = new Map<strin
 			metrics: verticalMetrics(1000, 903, -337, 0, 903, -337, 0, 903, 337, false)
 		}
 	],
+	["arial narrow", { basis: "substitute" }],
 	["consolas", { basis: "substitute" }],
 	["palatino linotype", { basis: "substitute" }],
 	["univers", { basis: "substitute" }],

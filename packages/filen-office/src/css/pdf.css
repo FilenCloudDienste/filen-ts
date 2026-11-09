@@ -9,8 +9,8 @@
    Nor trimmed: pdf.js splits the layer contract between JS and CSS. --min-font-size, --text-scale-factor and
    --min-font-size-inv exist only here, and without them every span's font-size and transform are invalid while the
    layer still renders visible, selectable, wrongly sized spans. PdfPages supplies --total-scale-factor and
-   --scale-round-x/-y on the layer (pdfTextLayerVars). `.endOfContent` and the forced-colors `--hcm-*` references are
-   inert leftovers of the copy. */
+   --scale-round-x/-y on the layer (pdfTextLayerVars) and the `.endOfContent` / `.selecting` selection aid. The
+   forced-colors `--hcm-*` references are inert leftovers of the copy. */
 
 .fo-pdf-page {
 	position: relative;

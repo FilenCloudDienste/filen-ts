@@ -8,13 +8,13 @@ export type ConversionLossKind =
 	| PptLossKind
 	// A gradient, pattern or picture fill written in the nearest form the target holds.
 	| "fill"
-	// A dashed line or a line end the target has no form for.
+	// A dash pattern or a compound line the target has no form for.
 	| "line"
 	// An outline the target has no preset for, drawn as its nearest.
 	| "geometry"
 	// A paragraph's outline level the target holds only on a bulleted paragraph, written without it.
 	| "outlineLevel"
-	// Text written in a nearer form: vertical text, line-breaking rules, spacing or bullet size.
+	// Text written in a nearer form: vertical text, line-breaking rules, spacing, bullet size or a multi-character bullet.
 	| "text"
 	// A list numbering the target has no form for (Hindi vowels, Arabic abjad…), written as its nearest.
 	| "numbering"

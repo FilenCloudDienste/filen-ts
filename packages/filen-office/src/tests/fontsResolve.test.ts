@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs"
 import { describe, expect, it } from "vitest"
 import {
+	ARIAL_NARROW_WIDTH_SCALE,
 	FontError,
 	FontManager,
 	LINE_METRICS,
@@ -178,6 +179,22 @@ describe("substitution", () => {
 		// No installed italic: the regular face is slanted, never a substitute mixed in.
 		expect(italic).toMatchObject({ family: alias("l1"), italic: true })
 		expect(host.localCalls).toEqual(["Aptos", "Aptos Bold", "Aptos Italic"])
+	})
+
+	it("prefers an installed Arial Narrow and otherwise narrows Arimo horizontally only", async () => {
+		const plain = new FontManager(new FakeHost(), new FakeAssets())
+
+		expect(await resolved(plain, request("Arial Narrow"))).toMatchObject({
+			family: alias("arimo"),
+			source: "bundled",
+			scale: 1,
+			widthScale: ARIAL_NARROW_WIDTH_SCALE
+		})
+		expect(await resolved(plain, request("Arial"))).toMatchObject({ family: alias("arimo"), widthScale: 1 })
+
+		const installed = new FontManager(new FakeHost(["Arial Narrow"]), new FakeAssets())
+
+		expect(await resolved(installed, request("Arial Narrow"))).toMatchObject({ source: "local", widthScale: 1 })
 	})
 
 	it("never consults installed fonts for families with a substitute", async () => {

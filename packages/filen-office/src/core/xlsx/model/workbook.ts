@@ -2,7 +2,7 @@ import { OpcError, ZipError } from "../../opc/errors"
 import type { ContentTypes } from "../../opc/contentTypes"
 import type { OpcPackage } from "../../opc/package"
 import type { NumFmtLocale } from "../../sheet/numfmt/locale"
-import type { SheetId } from "../../sheet/protocol"
+import type { SheetDocumentProperties, SheetId } from "../../sheet/protocol"
 import { sliceClock, type SliceClock, type Slicing } from "../../slicing"
 import { XmlError } from "../../xml/index"
 import type { XlsxParts } from "../package/parts"
@@ -65,6 +65,8 @@ export interface XlsxWorkbookInit {
 	readonly signatures: number
 	// The workbook's own title (docProps/core.xml, or an OpenDocument spreadsheet's meta.xml).
 	readonly title?: string
+	// Its author, subject and keywords (docProps/core.xml).
+	readonly properties?: SheetDocumentProperties
 }
 
 export class XlsxWorkbook implements XlsxWorkbookModel {
@@ -94,6 +96,7 @@ export class XlsxWorkbook implements XlsxWorkbookModel {
 	readonly signatures: number
 	// The workbook's own title (docProps/core.xml, or an OpenDocument spreadsheet's meta.xml dc:title).
 	readonly title: string | undefined
+	readonly properties: SheetDocumentProperties | undefined
 	private readonly loads = new Map<SheetId, Promise<XlsxSheetModel>>()
 	// Why a sheet could not be read: asked for again, it fails at once rather than being inflated and parsed again.
 	private readonly failures = new Map<SheetId, XlsxReadError>()
@@ -127,6 +130,7 @@ export class XlsxWorkbook implements XlsxWorkbookModel {
 		this.macros = init.macros
 		this.signatures = init.signatures
 		this.title = init.title
+		this.properties = init.properties
 		this.nextId = init.sheets.reduce((highest, sheet) => Math.max(highest, sheet.id + 1), 0)
 		this.budget = new XlsxReadBudget(init.limits, init.workbookSections.length)
 	}

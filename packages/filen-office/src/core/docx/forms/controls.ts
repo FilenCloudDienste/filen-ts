@@ -1,4 +1,5 @@
 import type { Mark, Node } from "prosemirror-model"
+import { nextCluster } from "../../text/index"
 import { NodeKind } from "../../xml/index"
 import type { ElementData } from "../edit/copies"
 import { Ns } from "../model/namespaces"
@@ -1128,88 +1129,14 @@ export function typableField(field: LegacyField): boolean {
 // The date picture of a date field without w:format (Word's en-US short date).
 const DEFAULT_FIELD_DATE = "M/d/yyyy"
 
-// One grapheme cluster where Intl.Segmenter is missing (Hermes): UAX #29 extended clusters without the Hangul
-// jamo and Prepend rules. CR LF, a regional-indicator pair, or a code point with its marks, joiners, emoji
-// modifiers and tags, emoji ZWJ sequences and Indic conjuncts (a virama, marks, then a letter). Scanned code point
-// by code point: one pass however long the run of marks (alternatives of a pattern that overlap backtrack).
-const PAIR = /\r\n|\p{RI}{2}/uy
-const MARK = /\p{M}/uy
-const LETTER = /\p{L}/uy
-const EXTENDS = /[\p{Emoji_Modifier}\u200C\u{E0020}-\u{E007F}]/uy
-const PICTOGRAPHIC = /\p{Extended_Pictographic}/uy
-const VIRAMAS: ReadonlySet<number> = new Set([0x094d, 0x09cd, 0x0acd, 0x0b4d, 0x0c4d, 0x0d4d])
-
-function at(pattern: RegExp, text: string, index: number): boolean {
-	pattern.lastIndex = index
-
-	return pattern.test(text)
-}
-
-// The end of the cluster starting at `start` (< text.length).
-function clusterEnd(text: string, start: number): number {
-	if (at(PAIR, text, start)) return PAIR.lastIndex
-
-	let end = start + ((text.codePointAt(start) ?? 0) > 0xffff ? 2 : 1)
-	// After a virama and marks only: a letter joins the cluster.
-	let conjunct = false
-
-	while (end < text.length) {
-		const code = text.codePointAt(end) ?? 0
-		const size = code > 0xffff ? 2 : 1
-
-		if (at(MARK, text, end)) {
-			conjunct ||= VIRAMAS.has(code)
-		} else if (conjunct && at(LETTER, text, end)) {
-			conjunct = false
-		} else if (code === 0x200d) {
-			conjunct = false
-
-			if (end + 1 < text.length && at(PICTOGRAPHIC, text, end + 1)) {
-				end = PICTOGRAPHIC.lastIndex
-
-				continue
-			}
-		} else if (at(EXTENDS, text, end)) {
-			conjunct = false
-		} else {
-			break
-		}
-
-		end += size
-	}
-
-	return end
-}
-
-// null: the engine has no Intl.Segmenter.
-let graphemes: Intl.Segmenter | null | undefined
-
-// The first `count` user-perceived characters of `text` (w:maxLength counts characters, not UTF-16 units).
+// The first `count` user-perceived characters of `text` (w:maxLength counts characters, not UTF-16 units): the
+// layout's grapheme clusters, the same with or without Intl.Segmenter.
 function firstCharacters(text: string, count: number): string {
-	if (graphemes === undefined) {
-		const Segmenter = (Intl as { Segmenter?: typeof Intl.Segmenter }).Segmenter
+	let end = 0
 
-		graphemes = Segmenter === undefined ? null : new Segmenter(undefined, { granularity: "grapheme" })
-	}
+	for (let taken = 0; taken < count && end < text.length; taken++) end = nextCluster(text, end, text.length)
 
-	if (graphemes === null) {
-		let end = 0
-
-		for (let taken = 0; taken < count && end < text.length; taken++) end = clusterEnd(text, end)
-
-		return text.slice(0, end)
-	}
-
-	let out = ""
-	let taken = 0
-
-	for (const { segment } of graphemes.segment(text)) {
-		if (taken++ === count) break
-
-		out += segment
-	}
-
-	return out
+	return text.slice(0, end)
 }
 
 // A number picture (w:format of a number field, a Word numeric picture: 0 and # digits, a "," grouping digits,

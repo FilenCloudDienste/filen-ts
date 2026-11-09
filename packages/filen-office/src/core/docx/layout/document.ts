@@ -56,6 +56,8 @@ export interface LayoutOptions {
 	readonly estimatedPages?: number
 	// Record where each item's content lands in its paragraph's text (PageDisplayList.sourceMapPool).
 	readonly recordMaps?: boolean
+	// Without recordMaps, the paragraphs whose maps are recorded anyway (where links are placed from them).
+	readonly mapParagraph?: (part: StoryPart, paragraph: number) => boolean
 	// Unsaved edits to lay out in place of their source (read whenever layout restarts).
 	readonly edits?: LayoutEdits
 	// The time (epoch ms) DATE and TIME fields show, as Word shows them as of opening or printing (default: when
@@ -3566,6 +3568,7 @@ export function layoutDocument(
 			compat: layoutCompat(model.settings),
 			tuning,
 			recordMaps: options.recordMaps ?? false,
+			...(options.mapParagraph === undefined ? {} : { mapParagraph: options.mapParagraph }),
 			now: date,
 			...(options.edits === undefined ? {} : { edits: options.edits })
 		})

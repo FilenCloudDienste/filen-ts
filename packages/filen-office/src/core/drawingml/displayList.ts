@@ -442,6 +442,8 @@ export type DrawingText =
 			readonly ascent: number
 			readonly rtl: boolean
 			readonly fill?: number
+			// Glyphs stretched horizontally so the widest line spans `width` (VML WordArt fitshape).
+			readonly stretch?: boolean
 	  }
 
 // a:outerShdw (only outer shadows are drawn).

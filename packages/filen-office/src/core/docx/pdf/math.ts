@@ -5,6 +5,11 @@ import { isTokenTag, type MathElement, type MathNode } from "../../math/index"
 
 const MAX_LENGTH = 4096
 
+// A large operator (∑, ∏, ∫), the base an n-ary's limits sit above and below.
+function isLimitBase(node: MathNode | undefined): boolean {
+	return node !== undefined && typeof node !== "string" && node.tag === "mo" && node.attributes?.largeop === true
+}
+
 export function mathText(tree: MathElement): string {
 	const out: string[] = []
 	let length = 0
@@ -68,14 +73,38 @@ export function mathText(tree: MathElement): string {
 
 				return
 			case "mroot":
+				// Linear format: the degree, then the radicand.
 				out.push("√(")
+				part(1)
+				out.push("&")
 				part(0)
 				out.push(")")
 
 				return
-			default:
-				for (const child of children) visit(child, depth + 1)
+			case "munder":
+			case "mover":
+			case "munderover":
+				// Only an n-ary operator's limits read as scripts; accents, bars and group characters stay as written.
+				if (!isLimitBase(children[0]) || node.attributes?.accent === true || node.attributes?.accentunder === true) break
+
+				part(0)
+
+				if (node.tag !== "mover") {
+					out.push("_(")
+					part(1)
+					out.push(")")
+				}
+
+				if (node.tag !== "munder") {
+					out.push("^(")
+					part(node.tag === "mover" ? 1 : 2)
+					out.push(")")
+				}
+
+				return
 		}
+
+		for (const child of children) visit(child, depth + 1)
 	}
 
 	visit(tree, 0)

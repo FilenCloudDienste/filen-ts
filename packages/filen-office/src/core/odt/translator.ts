@@ -3,6 +3,7 @@ import {
 	canonicalAttributes,
 	elementName,
 	parseLength,
+	type OdfDataStyle,
 	type OdfPackage,
 	type OdfStyleResolver,
 	type OdfStyleSheet,
@@ -12,7 +13,7 @@ import { MarkupFlow, paragraph, type Flow, type ParagraphBlock } from "./flow"
 import { Frames } from "./frames"
 import { listIndent, levelGeometry, Lists } from "./lists"
 import { Pages } from "./pages"
-import { paragraphProperties, runProperties, type Attributes, type PropsSink } from "./props"
+import { modeRtl, paragraphProperties, runProperties, type Attributes, type PropsSink } from "./props"
 import { StyleMapper } from "./styles"
 import { translateTable } from "./tables"
 import type { OdtLossyReason } from "./types"
@@ -47,6 +48,8 @@ interface ChangeRecord {
 	readonly date: string
 	// For a deletion: the deleted text as runs (w:delText).
 	deleted: string
+	// For a deletion: it holds one paragraph at most and nothing else, which `deleted` shows whole.
+	readonly whole: boolean
 }
 
 // Elements that carry nothing to show or are read elsewhere.
@@ -229,7 +232,7 @@ class Runs {
 
 		return insertion === undefined
 			? run
-			: `<w:ins w:id="${insertion.id}" w:author="${esc(insertion.author)}" w:date="${esc(insertion.date)}">${run}</w:ins>`
+			: `<w:ins w:id="${this.translator.id()}" w:author="${esc(insertion.author)}" w:date="${esc(insertion.date)}">${run}</w:ins>`
 	}
 }
 
@@ -260,8 +263,10 @@ export class Translator implements PropsSink {
 	private depth = 0
 	private readonly bookmarkIds = new Map<string, number>()
 	private readonly changes = new Map<string, ChangeRecord>()
-	private readonly openAnnotations = new Map<string, number>()
-	insertion: { readonly id: number; readonly author: string; readonly date: string } | undefined = undefined
+	// Comment ranges open where the walk is (office:annotation name to comment id), of the story being translated.
+	private openAnnotations = new Map<string, number>()
+	// The tracked insertion open where the walk is: each run and paragraph mark it covers gets a w:ins of its own id.
+	insertion: { readonly author: string; readonly date: string } | undefined = undefined
 	deleting = false
 
 	// Lossy reasons of the top-level block being translated, and across the document.
@@ -274,6 +279,9 @@ export class Translator implements PropsSink {
 	breakAfter = false
 	// The available width of the story being translated (points), for relative table widths.
 	readonly widths: number[] = []
+	// The direction a paragraph's "page" writing mode takes when a header or footer, table cell or frame sets it
+	// (true right to left); undefined: the current section's page.
+	direction: boolean | undefined = undefined
 
 	constructor(odf: OdfPackage, sheet: OdfStyleSheet, resolver: OdfStyleResolver, settings: TranslatorSettings) {
 		this.odf = odf
@@ -385,6 +393,29 @@ export class Translator implements PropsSink {
 		}
 	}
 
+	// The blocks of a story of its own (a cell, note body, text box, header or footer): comment ranges it opens end in
+	// it, as ranges of the body end in the body.
+	storyBlocks(container: number, flow: Flow): void {
+		const outer = this.openAnnotations
+
+		this.openAnnotations = new Map()
+		this.blocks(container, flow)
+		this.closeOpenAnnotations(flow)
+		this.openAnnotations = outer
+	}
+
+	// Comment ranges no office:annotation-end closed: ended after the content of the story's last paragraph.
+	closeOpenAnnotations(flow: Flow): void {
+		if (this.openAnnotations.size === 0) return
+
+		const runs = new Runs(this)
+
+		for (const id of this.openAnnotations.values()) this.closeAnnotation(id, runs)
+
+		this.openAnnotations.clear()
+		flow.appendToLast(runs.result())
+	}
+
 	// One block element, its translation added to `flow`.
 	block(node: number, flow: Flow, list?: ListContext): void {
 		this.enter()
@@ -464,7 +495,29 @@ export class Translator implements PropsSink {
 				// Frames anchored to the page sit in the body: the next paragraph carries them.
 				this.pendingAnchors.push(this.frames.translate(node, "page"))
 				break
-			case "text:change":
+			case "text:change": {
+				// A deletion between blocks (Part 3 §5.5.8.4): the deleted paragraph shown deleted, its mark too
+				// (ECMA-376 Part 1 §17.13.5.15), so rejecting it brings the paragraph back.
+				const record = this.changes.get(this.attributes(node).get("text:change-id") ?? "")
+
+				// What the paragraph cannot show (more paragraphs, a table) is left out.
+				if (record?.kind === "deletion" && !record.whole) this.lossy("trackedChange")
+
+				if (record?.kind === "deletion" && record.deleted !== "") {
+					const author = esc(record.author)
+					const date = esc(record.date)
+
+					flow.add(
+						paragraph(
+							"",
+							`<w:del w:id="${this.id()}" w:author="${author}" w:date="${date}"/>`,
+							`<w:del w:id="${this.id()}" w:author="${author}" w:date="${date}">${record.deleted}</w:del>`
+						)
+					)
+				}
+
+				break
+			}
 			case "text:change-start":
 			case "text:change-end":
 				this.inlineChange(name, this.attributes(node))
@@ -569,7 +622,19 @@ export class Translator implements PropsSink {
 	private *sectionSteps(node: number, flow: Flow, list: ListContext | undefined): Generator<void> {
 		const attributes = this.attributes(node)
 
-		if (attributes.get("text:display") === "none" || attributes.get("text:display") === "condition") return
+		const display = attributes.get("text:display")
+
+		if (display === "none") return
+
+		if (display === "condition") {
+			// Hidden while its condition is true (Part 3 §5.4): only a constant one is known; one that is not stays hidden,
+			// flagged.
+			const hidden = constantCondition(attributes.get("text:condition"))
+
+			if (hidden === undefined) this.lossy("sectionProperties")
+			if (hidden !== false) return
+		}
+
 		if (attributes.get("text:protected") === "true") this.lossy("sectionProperties")
 
 		const style = this.sheet.style("section", attributes.get("text:style-name") ?? "", this.scope)
@@ -629,6 +694,9 @@ export class Translator implements PropsSink {
 		// Numbering: the list around the paragraph, else a heading's outline numbering, else its style's list.
 		let numPr = ""
 		let indent: { left: number; firstLine: number } | undefined
+		// Where tab stops count from (TabsRelativeToIndent): a label-alignment list level's indent where it applies
+		// (SwTextNode::GetLeftMarginForTabCalculation), else the paragraph's own left margin.
+		let tabLeft = parseLength((style.ownIndent ? style.paragraph : style.resolvedParagraph).get("fo:margin-left")) ?? 0
 		const listStyleName = this.resolver.inherited("paragraph", styleName, this.scope, "style:list-style-name")
 
 		if (list !== undefined && list.instance !== undefined) {
@@ -637,8 +705,10 @@ export class Translator implements PropsSink {
 			const geometry = levelGeometry(levelStyle)
 			const paragraphLeft = parseLength(style.resolvedParagraph.get("fo:margin-left")) ?? 0
 
+			if (geometry.mode === "label-alignment" && !style.ownIndent) tabLeft = geometry.marginLeft
+
 			if (!list.labelled) {
-				numPr = `<w:numPr><w:ilvl w:val="${ilvl}"/><w:numId w:val="${list.instance.num}"/></w:numPr>`
+				numPr = this.lists.numPr(list.instance, ilvl)
 				list.labelled = true
 
 				if (geometry.mode === "label-width-and-position") indent = listIndent(geometry, paragraphLeft)
@@ -658,21 +728,37 @@ export class Translator implements PropsSink {
 					this.lists.restart(instance, Math.min(level, 9) - 1, Number.isInteger(start) ? start : 1)
 				}
 
-				numPr = `<w:numPr><w:ilvl w:val="${Math.min(level, 9) - 1}"/><w:numId w:val="${instance.num}"/></w:numPr>`
+				numPr = this.lists.numPr(instance, Math.min(level, 9) - 1)
+
+				const geometry = levelGeometry(this.lists.level(instance, Math.min(level, 10)))
+
+				if (geometry.mode === "label-alignment" && !style.ownIndent) tabLeft = geometry.marginLeft
 			}
 		}
 
+		const pageRtl = this.direction ?? this.pages.rtl
+		const inheritedMode = style.resolvedParagraph.get("style:writing-mode")
+		// A paragraph taking its page's direction where its styles were translated with the first page style's.
+		const bidi =
+			!style.paragraph.has("style:writing-mode") &&
+			(inheritedMode === undefined || modeRtl(inheritedMode) === undefined) &&
+			pageRtl !== this.styles.pageRtl
+				? pageRtl
+				: undefined
 		const props = paragraphProperties(
 			style.paragraph,
 			style.children,
 			style.resolvedParagraph,
 			{
 				tabsRelativeToIndent: this.settings.tabsRelativeToIndent,
-				marginLeft: parseLength((style.ownIndent ? style.paragraph : style.resolvedParagraph).get("fo:margin-left")) ?? 0,
+				marginLeft: tabLeft,
+				inheritedTabs: style.inheritedTabs,
 				indents: style.ownIndent,
 				ownIndents: true,
 				fontSize: style.fontSize,
 				hyphenate: style.text.get("fo:hyphenate"),
+				pageRtl,
+				bidi,
 				...(indent === undefined ? {} : { listIndent: indent })
 			},
 			this
@@ -698,14 +784,21 @@ export class Translator implements PropsSink {
 
 		this.inline(node, runs, base, undefined, { trimLeading: true })
 
-		// Ranges still open end with the paragraph that started them.
-		for (const id of this.openAnnotations.values()) this.closeAnnotation(id, runs)
-
-		this.openAnnotations.clear()
-
+		// Comment ranges still open run on to their office:annotation-end (or the end of the story, storyBlocks).
 		const markRPr = this.styles.runProperties(`mark\u0000${base.styleKey}`, undefined, style.text, style.fontSize, this)
+		const insertion = this.insertion
 
-		flow.add(paragraph(pPr, markRPr, runs.result()))
+		// A paragraph ending inside a tracked insertion has its mark inserted too (ECMA-376 Part 1 §17.13.5.16): rejecting
+		// the insertion joins it with the next.
+		flow.add(
+			paragraph(
+				pPr,
+				insertion === undefined
+					? markRPr
+					: `<w:ins w:id="${this.id()}" w:author="${esc(insertion.author)}" w:date="${esc(insertion.date)}"/>${markRPr}`,
+				runs.result()
+			)
+		)
 	}
 
 	// --- Inline content ---
@@ -732,13 +825,19 @@ export class Translator implements PropsSink {
 		state: InlineState
 	): void {
 		const document = this.document
+		// Built once per span level: every text node, space, tab and break under it has the same properties.
+		let cached: string | undefined
 		const rPr = (): string => {
+			if (cached !== undefined) return cached
+
 			const merged =
 				span === undefined || span.own.size === 0
 					? base.text
 					: new Map([...base.text, ...StyleMapper.relativeSize(span.own, base.fontSize)])
 
-			return this.styles.runProperties(`${base.styleKey}\u0000${span?.key ?? ""}`, span?.styleId, merged, base.fontSize, this)
+			cached = this.styles.runProperties(`${base.styleKey}\u0000${span?.key ?? ""}`, span?.styleId, merged, base.fontSize, this)
+
+			return cached
 		}
 
 		for (let child = document.firstChild(node); child >= 0; child = document.nextSibling(child)) {
@@ -897,10 +996,13 @@ export class Translator implements PropsSink {
 				case "text:note-ref": {
 					// A cross-reference: its shown text as the result of a field (§7.7.5 to §7.7.8), which keeps it whole
 					// for the writer to copy; what it refers to is the source's.
-					const target = this.attributes(child).get("text:ref-name") ?? ""
-					const instruction = name === "text:note-ref" ? "NOTEREF" : "REF"
+					const attributes = this.attributes(child)
+					const reference = referenceField(name, attributes.get("text:ref-name") ?? "", attributes.get("text:reference-format"))
 
-					runs.addRaw(`<w:fldSimple w:instr=" ${instruction} ${esc(target.replace(/[\s"\\]/gu, "_"))} \\h ">`)
+					// What an update could not find (a sequence or note names no bookmark) or not compute keeps its result.
+					if (reference.locked) this.lossy("fieldAsText")
+
+					runs.addRaw(`<w:fldSimple w:instr="${esc(reference.instruction)}"${reference.locked ? ' w:fldLock="1"' : ""}>`)
 					this.inline(child, runs, base, span, state)
 					runs.addRaw("</w:fldSimple>")
 					break
@@ -922,6 +1024,23 @@ export class Translator implements PropsSink {
 						runs.addRaw("</w:fldSimple>")
 
 						break
+					}
+
+					if (name === "text:date" || name === "text:time") {
+						const attributes = this.attributes(child)
+						const code = dateCode(name, attributes.get("text:fixed"), attributes.has(`${name}-adjust`))
+
+						if (code !== undefined) {
+							// A date or time that is not fixed shows the current one (Part 3 §19.817), as DATE and TIME do
+							// (§17.16.5.14, §17.16.5.70), in the data style's form; the result is the one saved.
+							const picture = datePicture(this.sheet.dataStyle(attributes.get("style:data-style-name") ?? "", this.scope))
+
+							runs.addRaw(`<w:fldSimple w:instr="${esc(` ${code} ${picture === undefined ? "" : `\\@ "${picture}" `}`)}">`)
+							this.inline(child, runs, base, span, state)
+							runs.addRaw("</w:fldSimple>")
+
+							break
+						}
 					}
 
 					if (PASS_THROUGH_INLINE.has(name) && name !== "text:meta" && name !== "text:ruby-base") {
@@ -1025,7 +1144,7 @@ export class Translator implements PropsSink {
 
 		const flow = new MarkupFlow()
 
-		if (body >= 0) this.blocks(body, flow)
+		if (body >= 0) this.storyBlocks(body, flow)
 
 		const first = flow.blocks.find((block): block is ParagraphBlock => block.kind === "p")
 		const reference = `<w:r><w:rPr>${style}</w:rPr>${custom ? `<w:t>${escText(label)}</w:t>` : `<w:${tag}Ref/>`}</w:r><w:r><w:t xml:space="preserve"> </w:t></w:r>`
@@ -1043,6 +1162,9 @@ export class Translator implements PropsSink {
 		let date = ""
 		let initials = ""
 		const flow = new MarkupFlow()
+		const outer = this.openAnnotations
+
+		this.openAnnotations = new Map()
 
 		for (let child = this.document.firstChildElement(node); child >= 0; child = this.document.nextSiblingElement(child)) {
 			const name = this.name(child)
@@ -1055,13 +1177,16 @@ export class Translator implements PropsSink {
 
 		if (flow.blocks.length === 0) flow.add(paragraph("", "", ""))
 
+		this.closeOpenAnnotations(flow)
+		this.openAnnotations = outer
+
 		this.comments.add(
 			`<w:comment w:id="${id}" w:author="${esc(author)}"${date === "" ? "" : ` w:date="${esc(wmlDate(date))}"`}${initials === "" ? "" : ` w:initials="${esc(initials)}"`}>${flow.xml()}</w:comment>`
 		)
 
 		const name = attributes.get("office:name")
 
-		// A point comment, or the start of a range office:annotation-end closes (by the end of the paragraph).
+		// A point comment, or the start of a range office:annotation-end closes (or the end of the story).
 		runs.addRaw(`<w:commentRangeStart w:id="${id}"/>`)
 
 		if (name !== undefined) this.openAnnotations.set(name, id)
@@ -1093,6 +1218,7 @@ export class Translator implements PropsSink {
 				let date = ""
 				let deleted = ""
 				let paragraphs = 0
+				let whole = true
 
 				for (let child = this.document.firstChildElement(change); child >= 0; child = this.document.nextSiblingElement(child)) {
 					const name = this.name(child)
@@ -1109,6 +1235,7 @@ export class Translator implements PropsSink {
 						deleted += this.deletedRuns(child)
 					} else {
 						this.lossy("trackedChange")
+						whole = false
 					}
 				}
 
@@ -1118,7 +1245,8 @@ export class Translator implements PropsSink {
 					kind: kind === "text:insertion" ? "insertion" : kind === "text:deletion" ? "deletion" : "format",
 					author,
 					date,
-					deleted
+					deleted,
+					whole: whole && paragraphs <= 1
 				})
 			}
 		}
@@ -1166,24 +1294,145 @@ export class Translator implements PropsSink {
 				)
 			}
 		} else if (name === "text:change-start") {
-			if (record.kind === "insertion") this.insertion = { id: this.id(), author: record.author, date: record.date }
+			if (record.kind === "insertion") this.insertion = { author: record.author, date: record.date }
 		} else if (record.kind === "insertion") {
 			this.insertion = undefined
 		}
 	}
 
 	// A story translated on its own (a text box, a cell): its blocks' markup, ending with a paragraph.
-	story(container: number, width: number): string {
+	// `mode`: the container's style:writing-mode, which its paragraphs' "page" mode takes when it sets a direction.
+	story(container: number, width: number, mode?: string): string {
 		const flow = new MarkupFlow()
+		const direction = this.direction
 
+		this.direction = modeRtl(mode) ?? direction
 		this.widths.push(width)
-		this.blocks(container, flow)
+		this.storyBlocks(container, flow)
 		this.widths.pop()
+		this.direction = direction
 
 		if (!flow.endsWithParagraph) flow.add(paragraph("", "", ""))
 
 		return flow.xml()
 	}
+}
+
+// What a cross-reference's text:reference-format (Part 3 §19.866) shows, as REF switches (ECMA-376 Part 1
+// §17.16.5.51): the referenced text, above or below, the list number in context, without context and in full. A page
+// number is PAGEREF (§17.16.5.43); a chapter, caption, category or value has no field.
+const REFERENCE_SWITCHES: ReadonlyMap<string, string> = new Map([
+	["text", ""],
+	["page", ""],
+	["direction", " \\p"],
+	["number", " \\r"],
+	["number-no-superior", " \\n"],
+	["number-all-superior", " \\w"]
+])
+
+// The field type a cross-reference element becomes (the ODT writer pairs fields with their sources by it).
+export function referenceCode(name: string, format: string | undefined): string {
+	if (format === "page") return "PAGEREF"
+
+	return name === "text:note-ref" ? "NOTEREF" : "REF"
+}
+
+// A cross-reference (§7.7.5 to §7.7.8) as a field naming the bookmark or reference mark by its own name. Locked
+// where an update would not show what LibreOffice does: a sequence or note is no bookmark, and some formats have no
+// field.
+export function referenceField(
+	name: string,
+	target: string,
+	format: string | undefined
+): { readonly instruction: string; readonly locked: boolean } {
+	const switches = REFERENCE_SWITCHES.get(format ?? "text")
+	const locked = name === "text:sequence-ref" || name === "text:note-ref" || switches === undefined
+
+	return { instruction: ` ${referenceCode(name, format)} ${fieldArgument(target)}${switches ?? ""} \\h `, locked }
+}
+
+// A field argument as written in an instruction: quoted, a quote or backslash escaped, where it has white space or
+// those (§17.16.1).
+function fieldArgument(value: string): string {
+	return value !== "" && !/[\s"\\]/u.test(value) ? value : `"${value.replace(/["\\]/gu, "\\$&")}"`
+}
+
+// A text:condition that is a constant (after its formula namespace prefix, "ooow:"): true, false, or a number (true
+// unless 0); undefined for anything else.
+function constantCondition(condition: string | undefined): boolean | undefined {
+	if (condition === undefined) return undefined
+
+	const formula = condition
+		.replace(/^[A-Za-z][\w.-]*:(?!=)/u, "")
+		.trim()
+		.toLowerCase()
+
+	if (formula === "true") return true
+	if (formula === "false") return false
+
+	const value = formula === "" ? Number.NaN : Number(formula)
+
+	return Number.isFinite(value) ? value !== 0 : undefined
+}
+
+// The field a text:date or text:time becomes: DATE or TIME when it is not fixed (text:fixed, Part 3 §19.817) and not
+// moved off the current date or time (text:date-adjust, text:time-adjust: no field says that); undefined: its saved
+// result (DOCPROPERTY). The ODT writer pairs fields with their sources by it.
+export function dateCode(name: string, fixed: string | undefined, adjusted: boolean): "DATE" | "TIME" | undefined {
+	if (fixed === "true" || adjusted) return undefined
+
+	return name === "text:time" ? "TIME" : "DATE"
+}
+
+// A number:date-style or number:time-style (Part 3 §16.29.11, §16.29.19) as a date-time picture (ECMA-376 Part 1
+// §17.16.4.1); undefined for no style, the language's own format or a part no picture has (eras, quarters, weeks).
+function datePicture(style: OdfDataStyle | undefined): string | undefined {
+	if (style === undefined || (style.kind !== "date" && style.kind !== "time")) return undefined
+	if (style.attributes.get("number:format-source") === "language") return undefined
+
+	const twelveHour = style.parts.some(part => part.name === "number:am-pm")
+	let picture = ""
+
+	for (const part of style.parts) {
+		const long = part.attributes.get("number:style") === "long"
+
+		switch (part.name) {
+			case "number:day":
+				picture += long ? "dd" : "d"
+				break
+			case "number:day-of-week":
+				picture += long ? "dddd" : "ddd"
+				break
+			case "number:month":
+				picture += part.attributes.get("number:textual") === "true" ? (long ? "MMMM" : "MMM") : long ? "MM" : "M"
+				break
+			case "number:year":
+				picture += long ? "yyyy" : "yy"
+				break
+			case "number:hours":
+				picture += twelveHour ? (long ? "hh" : "h") : long ? "HH" : "H"
+				break
+			case "number:minutes":
+				picture += long ? "mm" : "m"
+				break
+			case "number:seconds":
+				picture += long ? "ss" : "s"
+				break
+			case "number:am-pm":
+				picture += "AM/PM"
+				break
+			case "number:text":
+				// Literal text, quoted where a picture would read it (letters); a quote has no form inside one.
+				if (/['"]/u.test(part.text)) return undefined
+
+				picture += /\p{L}/u.test(part.text) ? `'${part.text}'` : part.text
+				break
+			default:
+				return undefined
+		}
+	}
+
+	return picture === "" ? undefined : picture
 }
 
 // A link target after "#": percent-decoded, without LibreOffice's "|outline" style suffixes.

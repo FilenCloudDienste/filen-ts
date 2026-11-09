@@ -3,7 +3,7 @@ import { ByteWriter, writeHex } from "./bytes"
 import { ContentBuilder, type Matrix } from "./content"
 import { PdfWriteError } from "./errors"
 import { orientationMatrix } from "./images"
-import { pdfName, textStringBytes, writeName, type PdfDict, type PdfRef, type PdfValue } from "./objects"
+import { pdfName, textStringBytes, writeName, writeValue, type PdfDict, type PdfRef, type PdfValue } from "./objects"
 import type { PdfGradient, PdfMesh } from "./shading"
 import type { PdfStructOptions } from "./tagged"
 import type { PdfObjectSink, PdfWriter } from "./writer"
@@ -518,8 +518,9 @@ export class PdfPage extends ContentBuilder {
 		this.out.ascii(">>> BDC").newline()
 	}
 
-	// Content of structure element `node` (a new marked-content sequence with its MCID).
-	beginContent(node: number): this {
+	// Content of structure element `node` (a new marked-content sequence with its MCID); `lang` the BCP 47
+	// language of a sequence not in its element's (ISO 32000-1 §14.9.2.2).
+	beginContent(node: number, lang?: string): this {
 		this.live()
 
 		const mcid = this.writer.mark(node, this.index)
@@ -528,7 +529,14 @@ export class PdfPage extends ContentBuilder {
 
 		if (mcid !== undefined) {
 			writeName(this.out, this.writer.structType(node))
-			this.out.ascii(" <</MCID ").int(mcid).ascii(">> BDC").newline()
+			this.out.ascii(" <</MCID ").int(mcid)
+
+			if (lang !== undefined) {
+				this.out.ascii(" /Lang ")
+				writeValue(this.out, lang)
+			}
+
+			this.out.ascii(">> BDC").newline()
 		}
 
 		return this

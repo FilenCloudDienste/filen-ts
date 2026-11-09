@@ -238,5 +238,23 @@ export const FALLBACK_FAMILIES: readonly FallbackFamily[] = [
 		id: "noto-sans-kr",
 		scripts: ["Hang", "Hani", "Hira", "Kana"],
 		faces: [{ file: "noto/noto-sans-kr/NotoSansKR-Regular.ttf.gz", weight: 400, italic: false, bytes: 3017089, ttfBytes: 6224868 }]
+	},
+	{
+		id: "noto-sans-symbols-2",
+		scripts: ["Zsym"],
+		faces: [
+			{
+				file: "noto/noto-sans-symbols-2/NotoSansSymbols2-Regular.ttf.gz",
+				weight: 400,
+				italic: false,
+				bytes: 535467,
+				ttfBytes: 1233128
+			}
+		]
+	},
+	{
+		id: "noto-sans-math",
+		scripts: ["Zmth"],
+		faces: [{ file: "noto/noto-sans-math/NotoSansMath-Regular.ttf.gz", weight: 400, italic: false, bytes: 481428, ttfBytes: 1015396 }]
 	}
 ]

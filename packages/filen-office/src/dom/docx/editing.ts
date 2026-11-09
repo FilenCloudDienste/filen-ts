@@ -1,5 +1,5 @@
 import type { Node } from "prosemirror-model"
-import { RevisionView } from "../../core/docx/index"
+import { RevisionView, type DocxGateReason } from "../../core/docx/index"
 import {
 	DocxEditorSession,
 	openDocxEditContext,
@@ -179,6 +179,8 @@ export interface DocxEditingOptions {
 	// The document was opened from a password-protected file (docxSealer): every save is sealed with its key
 	// after the zip and its Gate 2, and checked, before the bytes are handed out.
 	readonly encryption?: DocxSealer
+	// What makes the document view-only that its package does not say (DocxRtfDocument.gate: a signed ODT).
+	readonly gate?: readonly DocxGateReason[]
 }
 
 // A Gate 1 partly made elsewhere (an RTF document's writer proves in its worker): the body is checked with `first`
@@ -533,7 +535,7 @@ export function inThreadEditingHost(
 
 				if (event.type === "error") reject(new Error(event.message))
 			},
-			options,
+			editing.gate === undefined || editing.gate.length === 0 ? options : { ...options, gate: editing.gate },
 			{
 				prepare(model) {
 					edits = new DocumentEdits(model, view)
@@ -555,7 +557,8 @@ export function inThreadEditingHost(
 				resolver: open.resolver,
 				...(editing.clock === undefined ? {} : { clock: editing.clock }),
 				...(editing.writeUnlocked === true ? { writeUnlocked: true } : {}),
-				...(editing.protectionUnlocked === true ? { protectionUnlocked: true } : {})
+				...(editing.protectionUnlocked === true ? { protectionUnlocked: true } : {}),
+				...(editing.gate === undefined ? {} : { gate: editing.gate })
 			})
 
 			// The name as it is now (setAuthor may have changed it since the host was made).

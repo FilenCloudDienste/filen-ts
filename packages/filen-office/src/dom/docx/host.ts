@@ -1,4 +1,5 @@
 import { bytesSource, type ByteSource } from "../../core/opc/index"
+import type { DocxGateReason } from "../../core/docx/package"
 import type { OfficeKeyTransfer } from "../encryption/webCrypto"
 import { DocxEngine, type DocxEngineServices } from "./engine"
 import type { DocxAnnotations } from "./annotations"
@@ -228,6 +229,8 @@ export function serveDocxWorker(scope: DocxWorkerScope, services: (options: Docx
 					typeof message.doc === "number"
 						? (protection.plaintext(message.doc) ?? legacy.package(message.doc) ?? rtf.package(message.doc))
 						: undefined
+				// A held translation's source may be view-only where the package does not say so (a signed ODT).
+				const gate = typeof message.doc === "number" ? rtf.gate(message.doc) : undefined
 
 				if (typeof message.doc === "number" && held === undefined) {
 					post({ t: "event", s: id, event: { type: "error", reason: "failed", message: "The document is no longer unlocked" } })
@@ -254,7 +257,7 @@ export function serveDocxWorker(scope: DocxWorkerScope, services: (options: Docx
 								},
 						services(message.options),
 						(event, transfer) => post({ t: "event", s: id, event }, transfer),
-						message.options
+						gate === undefined || gate.length === 0 ? message.options : { ...message.options, gate }
 					),
 					reads: new Map(),
 					nextRead: 1
@@ -1320,6 +1323,7 @@ function openRtf(
 						host: (held, listener, openOptions = {}) => openSession(held, listener, openOptions, id),
 						bytes: heldSource(answer.size),
 						untranslated: answer.untranslated,
+						gate: answer.gate,
 						async take() {
 							const reply = await call(callId => ({ t: "take", s: id, id: callId }))
 
@@ -1409,7 +1413,8 @@ function openRtf(
 
 // A host that runs the engine on the calling thread, yielding between slices. `services` is called per
 // document (a fresh font manager scope and measurer state per document is the engine's own business).
-export function inThreadDocxHost(services: (options: DocxOpenOptions) => DocxEngineServices): DocxHost {
+// `gate`: what makes the documents opened view-only that their packages do not say (DocxEngineOptions.gate).
+export function inThreadDocxHost(services: (options: DocxOpenOptions) => DocxEngineServices, gate?: readonly DocxGateReason[]): DocxHost {
 	return (source, listener, options = {}) => {
 		let closed = false
 		const engine = new DocxEngine(
@@ -1418,7 +1423,7 @@ export function inThreadDocxHost(services: (options: DocxOpenOptions) => DocxEng
 			event => {
 				if (!closed) listener(event)
 			},
-			options
+			gate === undefined || gate.length === 0 ? options : { ...options, gate }
 		)
 
 		void engine.run()

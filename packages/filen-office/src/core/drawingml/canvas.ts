@@ -1468,12 +1468,31 @@ class CanvasDrawingPainter<I extends CanvasSized> {
 	}
 
 	// A text's paint instead of its colour (in the item's local box), or the run's colour.
-	private textStyle(run: TextRun, fill: number | undefined, f: number): unknown {
+	// `stretch`: the x scale the text is drawn under, which a linear gradient is mapped back out of so it lies
+	// over the item's box as it would unstretched.
+	private textStyle(run: TextRun, fill: number | undefined, f: number, stretch: number = 1): unknown {
 		const paintIndex = index(fill)
 		const paint = paintIndex < 0 ? undefined : this.data.paints[paintIndex]
 
 		if (paint !== undefined && paint !== null) {
-			const style = this.styleOf(paintIndex, paint, this.box(f), 0)
+			const box = this.box(f)
+
+			if (stretch !== 1 && paint.kind === "linear" && box[2] > 0 && box[3] > 0 && stopCount(paint.stops) > 0) {
+				// Gradient value at p is (p - p0)·d / |d|²; under x scale s that is (u - p0')·d' / |d|² with
+				// p0' = (x0 / s, y0) and d' = (s dx, dy), so the end is p0' + d' |d|² / |d'|².
+				const [x0, y0, x1, y1] = linearGradientLine(paint.angle, paint.scaled, box[0], box[1], box[2], box[3])
+				const dx = x1 - x0
+				const dy = y1 - y0
+				const sdx = dx * stretch
+				const k = (dx * dx + dy * dy) / (sdx * sdx + dy * dy)
+				const gradient = this.ctx.createLinearGradient(x0 / stretch, y0, x0 / stretch + sdx * k, y0 + dy * k)
+
+				this.stops(gradient, paint.stops, 0, 1, 0)
+
+				return gradient
+			}
+
+			const style = this.styleOf(paintIndex, paint, box, 0)
 
 			if (style !== undefined) return style
 
@@ -1602,7 +1621,7 @@ class CanvasDrawingPainter<I extends CanvasSized> {
 		ctx.textAlign = "left"
 		ctx.direction = text.rtl === true ? "rtl" : "ltr"
 
-		const width = clamp(text.width, 0, MAX_COORD, 0)
+		let width = clamp(text.width, 0, MAX_COORD, 0)
 		const height = clamp(text.height, 0, MAX_COORD, 0)
 		const lineHeight = clamp(text.lineHeight, 0.01, MAX_COORD, size * 1.2)
 		const trimming = typeof text.trimming === "string" ? text.trimming : "none"
@@ -1619,6 +1638,21 @@ class CanvasDrawingPainter<I extends CanvasSized> {
 
 		if (lines.length === 0) return
 
+		let stretch = 1
+
+		if (text.stretch === true && width > 0) {
+			let widest = 0
+
+			for (const line of lines) widest = Math.max(widest, ctx.measureText(line).width)
+
+			if (widest > 0) {
+				// Laid out at the natural width, then scaled on x to the rectangle's.
+				stretch = width / widest
+				width = widest
+				this.place(times(this.local, [stretch, 0, 0, 1, 0, 0]))
+			}
+		}
+
 		const total = lines.length * lineHeight
 		const top =
 			height <= 0
@@ -1633,7 +1667,7 @@ class CanvasDrawingPainter<I extends CanvasSized> {
 						? height - total
 						: 0
 		const ascent = clamp(text.ascent, 0, 3, 0.9) * size
-		const style = this.textStyle(run, text.fill, f)
+		const style = this.textStyle(run, text.fill, f, stretch)
 
 		if (text.clip === true && width > 0 && height > 0) {
 			ctx.beginPath()

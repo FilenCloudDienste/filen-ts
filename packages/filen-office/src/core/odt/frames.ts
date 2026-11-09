@@ -3,6 +3,7 @@ import { parseLength, parsePercent, type OdfProperties } from "../odf/index"
 import { customGeometry, enhancedPath, Evaluator, GeometryError, pointsPath, svgPath, type SubPath } from "./geometry"
 import type { Translator } from "./translator"
 import { presetOfOdfType } from "../odf/presetShapes"
+import { decompose, transformMatrix } from "../odf/transform"
 import { emu, esc } from "./wml"
 
 // Frames and shapes (Part 3 §10) as DrawingML in w:drawing: images as pictures, text boxes and shapes as
@@ -30,7 +31,9 @@ interface Placement {
 	readonly name: string
 	readonly description: string
 	readonly zIndex: number
+	// Clockwise degrees about the centre, in [0, 360); flipV: mirrored by draw:transform (flipped before the turn).
 	readonly rotation: number
+	readonly flipV: boolean
 	// How far the drawn outline reaches past the extent (half a stroke), for wrapping.
 	readonly reach?: number
 }
@@ -134,25 +137,44 @@ export class Frames {
 		}
 	}
 
-	private placement(node: number, attributes: Map<string, string>, context: "paragraph" | "page"): Placement {
+	// `contentMinHeight`: a text box's fo:min-height, which an auto-height frame grows to.
+	private placement(node: number, attributes: Map<string, string>, context: "paragraph" | "page", contentMinHeight?: number): Placement {
 		const translator = this.translator
 		const graphic = translator.resolver.resolve("graphic", attributes.get("draw:style-name"), translator.scope).properties("graphic")
 		const anchorType = attributes.get("text:anchor-type") ?? (context === "page" ? "page" : "paragraph")
 		const height = parseLength(attributes.get("svg:height"))
 		const minHeight = parseLength(attributes.get("fo:min-height"))
 		const transform = attributes.get("draw:transform")
-		let rotation = 0
 		let x = parseLength(attributes.get("svg:x")) ?? 0
 		let y = parseLength(attributes.get("svg:y")) ?? 0
+		let width = Math.max(0, parseLength(attributes.get("svg:width")) ?? parseLength(attributes.get("fo:min-width")) ?? 0)
+		let boxHeight = height === undefined ? Math.max(0, minHeight ?? 0, contentMinHeight ?? 0) : Math.max(0, height)
+		let rotation = 0
+		let flipV = false
+		const matrix = transform === undefined ? undefined : transformMatrix(transform)
 
-		if (transform !== undefined) {
-			const rotate = /rotate\s*\(\s*(-?[\d.eE+-]+)\s*\)/.exec(transform)
-			const translate = /translate\s*\(\s*([^\s,)]+)[\s,]+([^\s,)]+)\s*\)/.exec(transform)
+		// The box under draw:transform as DrawingML's unrotated box turned about its centre (posOffset places the
+		// unrotated extent).
+		if (matrix !== undefined) {
+			const parts = decompose({ x, y, w: width, h: boxHeight }, matrix)
 
-			if (rotate !== null) rotation = (-Number(rotate[1]) * 180) / Math.PI
-			if (translate !== null) {
-				x = parseLength(translate[1]) ?? x
-				y = parseLength(translate[2]) ?? y
+			if (
+				Number.isFinite(parts.x) &&
+				Number.isFinite(parts.y) &&
+				Number.isFinite(parts.w) &&
+				Number.isFinite(parts.h) &&
+				Number.isFinite(parts.degrees)
+			) {
+				if (!parts.exact) translator.lossy("shapeApproximated")
+
+				x = parts.x
+				y = parts.y
+				width = parts.w
+				boxHeight = parts.h
+				rotation = parts.degrees
+				flipV = parts.mirrored
+			} else {
+				translator.lossy("shapeApproximated")
 			}
 		}
 
@@ -175,14 +197,15 @@ export class Frames {
 			anchorType,
 			x,
 			y,
-			width: Math.max(0, parseLength(attributes.get("svg:width")) ?? parseLength(attributes.get("fo:min-width")) ?? 0),
-			height: Math.max(0, height ?? minHeight ?? 0),
+			width,
+			height: boxHeight,
 			autoHeight: height === undefined,
 			graphic,
 			name: attributes.get("draw:name") ?? "",
 			description,
 			zIndex: Number(attributes.get("draw:z-index") ?? "0") || 0,
-			rotation: Number.isFinite(rotation) ? rotation : 0
+			rotation,
+			flipV
 		}
 	}
 
@@ -374,7 +397,6 @@ export class Frames {
 		const translator = this.translator
 		const document = translator.document
 		const attributes = translator.attributes(node)
-		const placement = this.placement(node, attributes, context)
 		let textBox = -1
 		let image: string | undefined
 		let object: string | undefined
@@ -405,18 +427,14 @@ export class Frames {
 			translator.objectKinds.set(object, (translator.objectKinds.get(object) ?? 0) + 1)
 		}
 
-		if (textBox >= 0) {
-			const boxAttributes = translator.attributes(textBox)
+		const boxAttributes = textBox >= 0 ? translator.attributes(textBox) : undefined
+		// Before the transform places it: a taller box turns about another centre.
+		const placement = this.placement(node, attributes, context, parseLength(boxAttributes?.get("fo:min-height")))
 
+		if (boxAttributes !== undefined) {
 			if (boxAttributes.has("draw:chain-next-name")) translator.lossy("chainedTextBox")
 
-			const minHeight = parseLength(boxAttributes.get("fo:min-height"))
-			const box =
-				minHeight !== undefined && placement.autoHeight
-					? { ...placement, height: Math.max(placement.height, minHeight) }
-					: placement
-
-			return this.drawing(box, this.shapeGraphic(box, '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom>', textBox, true))
+			return this.drawing(placement, this.shapeGraphic(placement, '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom>', textBox, true))
 		}
 
 		if (image !== undefined) return this.drawing(placement, this.picture(placement, image))
@@ -446,7 +464,8 @@ export class Frames {
 		const rId = translator.relationship("image", part, false)
 		const mirror = properties.get("style:mirror") ?? "none"
 		const flipH = mirror.includes("horizontal") ? ' flipH="1"' : ""
-		const flipV = mirror.includes("vertical") ? ' flipV="1"' : ""
+		const flipV = mirror.includes("vertical") !== placement.flipV ? ' flipV="1"' : ""
+		const rot = rotationOf(placement)
 
 		if (
 			cropped(properties.get("fo:clip")) ||
@@ -464,7 +483,7 @@ export class Frames {
 
 		const id = translator.id()
 
-		return `<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic><pic:nvPicPr><pic:cNvPr id="${id}" name="${esc(placement.name || `Image ${id}`)}"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="${rId}"${alpha === "" ? "/>" : `>${alpha}</a:blip>`}<a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm${flipH}${flipV}><a:off x="0" y="0"/><a:ext cx="${emu(placement.width)}" cy="${emu(placement.height)}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom>${this.line(placement.graphic)}</pic:spPr></pic:pic></a:graphicData></a:graphic>`
+		return `<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic><pic:nvPicPr><pic:cNvPr id="${id}" name="${esc(placement.name || `Image ${id}`)}"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="${rId}"${alpha === "" ? "/>" : `>${alpha}</a:blip>`}<a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm${rot}${flipH}${flipV}><a:off x="0" y="0"/><a:ext cx="${emu(placement.width)}" cy="${emu(placement.height)}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom>${this.line(placement.graphic)}</pic:spPr></pic:pic></a:graphicData></a:graphic>`
 	}
 
 	// A wps:wsp: geometry, fill and line from the graphic style, text from `textNode`'s blocks.
@@ -481,9 +500,7 @@ export class Frames {
 		const properties = placement.graphic.attributes
 		const id = translator.id()
 		const transform =
-			(placement.rotation === 0 ? "" : ` rot="${Math.round(placement.rotation * 60000)}"`) +
-			(flips?.h === true ? ' flipH="1"' : "") +
-			(flips?.v === true ? ' flipV="1"' : "")
+			rotationOf(placement) + (flips?.h === true ? ' flipH="1"' : "") + ((flips?.v === true) !== placement.flipV ? ' flipV="1"' : "")
 		const fill =
 			look === "placeholder"
 				? '<a:solidFill><a:srgbClr val="F2F2F2"/></a:solidFill>'
@@ -517,7 +534,7 @@ export class Frames {
 			let markup: string
 
 			try {
-				markup = translator.story(textNode, inner)
+				markup = translator.story(textNode, inner, properties.get("style:writing-mode"))
 			} finally {
 				this.members = members
 			}
@@ -721,6 +738,10 @@ export class Frames {
 				translator.lossy("shapeApproximated")
 		}
 
+		// LibreOffice mirrors a custom shape (draw:mirror-*) after its draw:transform turns it, DrawingML before:
+		// under one mirror the turn reads the other way.
+		if (mirrorX !== mirrorY && placement.rotation !== 0) placement = { ...placement, rotation: 360 - placement.rotation }
+
 		// Text inside the shape (text:p, text:list children).
 		const hasText = (() => {
 			for (let child = document.firstChildElement(node); child >= 0; child = document.nextSiblingElement(child)) {
@@ -738,7 +759,7 @@ export class Frames {
 			const drawn =
 				hasText || placement.rotation !== 0 || placement.anchorType === "as-char"
 					? undefined
-					: drawnBounds(paths, viewBox, placement, mirrorX, mirrorY)
+					: drawnBounds(paths, viewBox, placement, mirrorX, mirrorY !== placement.flipV)
 
 			if (drawn !== undefined) {
 				placement = { ...placement, ...drawn.placement }
@@ -758,6 +779,13 @@ export class Frames {
 }
 
 const ADJUSTMENTS = ["draw:luminance", "draw:contrast", "draw:red", "draw:green", "draw:blue"]
+
+// An a:xfrm's rot attribute (60000ths of a degree, clockwise), empty when unturned.
+function rotationOf(placement: Placement): string {
+	const rot = Math.round(placement.rotation * 60_000) % 21_600_000
+
+	return rot === 0 ? "" : ` rot="${rot}"`
+}
 
 // Whether fo:clip crops: rect(top, right, bottom, left) with any side not zero (LibreOffice writes a zero
 // rectangle on every picture). A value that does not parse counts as a crop.

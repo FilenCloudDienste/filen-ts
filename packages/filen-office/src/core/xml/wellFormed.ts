@@ -1,4 +1,4 @@
-import { NodeKind, type XmlDocument } from "./document"
+import { NodeKind, PAIRWISE_DUPLICATE_LIMIT, type XmlDocument } from "./document"
 import { decodeCharacterData } from "./entities"
 import { XmlError } from "./errors"
 import { Namespaces, XML_NAMESPACE, XMLNS_NAMESPACE } from "./namespaces"
@@ -241,6 +241,8 @@ function* wellFormed(document: XmlDocument, due: () => boolean, scanned?: Namesp
 	// Expanded names of one element's prefixed attributes, reused across elements.
 	const uris: string[] = []
 	const locals: string[] = []
+	// Past PAIRWISE_DUPLICATE_LIMIT prefixed attributes, the same expanded names keyed "uri\0local".
+	const expanded = new Set<string>()
 
 	assertDeclarations(namespaces)
 
@@ -272,6 +274,10 @@ function* wellFormed(document: XmlDocument, due: () => boolean, scanned?: Namesp
 			uris.length = 0
 			locals.length = 0
 
+			let hashed = false
+
+			if (expanded.size > 0) expanded.clear()
+
 			for (let k = 0; k < spans.length; k += 4) {
 				const nameStart = spans[k] ?? 0
 				const valueStart = spans[k + 2] ?? 0
@@ -287,6 +293,16 @@ function* wellFormed(document: XmlDocument, due: () => boolean, scanned?: Namesp
 
 				if (uri === undefined) throw new XmlError("unboundPrefix", `Prefix ${name.prefix} is not declared`, nameStart)
 
+				if (hashed) {
+					const key = `${uri}\u0000${name.local}`
+
+					if (expanded.has(key)) throw new XmlError("invalidAttribute", "Duplicate attribute by namespace", nameStart)
+
+					expanded.add(key)
+
+					continue
+				}
+
 				for (let other = 0; other < uris.length; other++) {
 					if (uris[other] === uri && locals[other] === name.local) {
 						throw new XmlError("invalidAttribute", "Duplicate attribute by namespace", nameStart)
@@ -295,6 +311,12 @@ function* wellFormed(document: XmlDocument, due: () => boolean, scanned?: Namesp
 
 				uris.push(uri)
 				locals.push(name.local)
+
+				if (uris.length > PAIRWISE_DUPLICATE_LIMIT) {
+					hashed = true
+
+					for (let other = 0; other < uris.length; other++) expanded.add(`${uris[other] ?? ""}\u0000${locals[other] ?? ""}`)
+				}
 			}
 		} else if (kind === NodeKind.Text) {
 			let reference = false

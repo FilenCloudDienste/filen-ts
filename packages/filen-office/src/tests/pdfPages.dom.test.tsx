@@ -2,7 +2,14 @@
 import { act } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import type { PdfPage, PdfRenderParams, PdfViewport } from "../dom/pdf/index"
+import {
+	PDF_PAGE_EVICT_MARGIN_PX,
+	PDF_PAGE_RENDER_MARGIN_PX,
+	PDF_ZOOM_RENDER_DELAY_MS,
+	type PdfPage,
+	type PdfRenderParams,
+	type PdfViewport
+} from "../dom/pdf/index"
 import {
 	paintMatches,
 	PdfPages,
@@ -68,13 +75,22 @@ function fakePage(text: readonly string[], annotations: unknown[] = [], tall = 1
 	}
 }
 
+// Every text layer built, and every update() given to one.
+const textLayers: FakeTextLayer[] = []
+
 class FakeTextLayer {
 	readonly textDivs: HTMLElement[] = []
 	readonly textContentItemsStr: string[] = []
+	readonly updates: PdfViewport[] = []
 	private readonly params: PdfTextLayerParams
 
 	constructor(params: PdfTextLayerParams) {
 		this.params = params
+		textLayers.push(this)
+	}
+
+	update({ viewport }: { viewport: PdfViewport }): void {
+		this.updates.push(viewport)
 	}
 
 	render(): Promise<void> {
@@ -186,6 +202,7 @@ const latest: { document: PdfDocumentHandle | null; viewer: PdfViewer | null } =
 beforeEach(() => {
 	observers.length = 0
 	scrolled.length = 0
+	textLayers.length = 0
 	vi.stubGlobal("IntersectionObserver", FakeIntersectionObserver)
 	vi.spyOn(Element.prototype, "scrollIntoView").mockImplementation(function (this: Element) {
 		scrolled.push(this)
@@ -215,7 +232,8 @@ function Viewer({ pdfjs, document: pdf }: { pdfjs: PdfJsDom; document: PdfDomDoc
 			pdfjs={pdfjs}
 			{...viewer.pages}
 			pageLabel={(page, total) => `Page ${String(page)} of ${String(total)}`}
-			classNames={{ textLayer: "text-layer", link: "link" }}
+			classNames={{ textLayer: "text-layer", link: "link", canvas: painted => (painted ? "painted" : "blank") }}
+			placeholder={<i className="placeholder" />}
 		/>
 	)
 }
@@ -259,7 +277,8 @@ function pageElement(page: number): HTMLElement {
 }
 
 function observer(kind: "render" | "evict"): Observer {
-	const found = observers.find(entry => Array.isArray(entry.options?.threshold) === (kind === "render"))
+	const margin = `${String(kind === "render" ? PDF_PAGE_RENDER_MARGIN_PX : PDF_PAGE_EVICT_MARGIN_PX)}px 0px`
+	const found = observers.find(entry => entry.options?.rootMargin === margin)
 
 	if (found === undefined) throw new Error(`no ${kind} observer`)
 
@@ -389,6 +408,66 @@ describe("PdfPages", () => {
 		expect(scrolled).toEqual([pageElement(3), pageElement(3)])
 	})
 
+	it("puts a destination's point at the view's top at the current zoom and turn, and a newer navigation wins", async () => {
+		const target = fakePage([], [], 200)
+
+		// pdf.js's mapping for a 100 × 200 page at 0° and 90°.
+		target.getViewport.mockImplementation(({ scale, rotation }) => ({
+			...viewport(scale, rotation ?? 0, 200),
+			convertToViewportPoint: (x: number, y: number) => (rotation === 90 ? [y * scale, x * scale] : [x * scale, (200 - y) * scale])
+		}))
+
+		const first = fakePage([], [{ subtype: "Link", rect: [0, 0, 10, 10], dest: [{ page: 2 }, { name: "XYZ" }, 20, 150, null] }])
+		const { pdfjs, opened } = fakePdfJs([first, target])
+
+		await mount(pdfjs, opened)
+		await show(1)
+
+		const scroller = host.firstElementChild as HTMLElement
+		const scrollTo = vi.fn()
+		const room = { width: 1000 }
+
+		scroller.scrollTo = scrollTo as typeof scroller.scrollTo
+		Object.defineProperty(scroller, "scrollTop", { configurable: true, get: () => 40 })
+		Object.defineProperty(scroller, "clientWidth", { configurable: true, get: () => room.width })
+		vi.spyOn(scroller, "getBoundingClientRect").mockReturnValue({ top: 100, left: 0, width: 1000, height: 600 } as DOMRect)
+		vi.spyOn(pageElement(2), "getBoundingClientRect").mockReturnValue({ top: 500, left: 30, width: 150, height: 300 } as DOMRect)
+
+		act(() => {
+			pageElement(1)
+				.querySelector("a")
+				?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }))
+		})
+		await settle()
+		// The page's top in the scroller (500 - 100 + 40) plus the point's depth ((200 - 150) × 1.5); the page is
+		// narrower than the view, so it stays across where it is.
+		expect(scrollTo).toHaveBeenLastCalledWith({ top: 515, behavior: "auto" })
+		expect(scrolled).not.toContain(pageElement(2))
+
+		act(() => {
+			latest.viewer?.dispatch({ type: "rotate.clockwise" })
+		})
+		await settle()
+		room.width = 100
+		act(() => {
+			latest.viewer?.dispatch({ type: "page.goto", page: 2, left: 20, top: 150 })
+		})
+		await settle()
+		expect(target.getViewport).toHaveBeenLastCalledWith({ scale: 1.5, rotation: 90 })
+		// Turned: the PDF left is the depth (20 × 1.5), the top runs across (150 × 1.5) on a page wider than the view.
+		expect(scrollTo).toHaveBeenLastCalledWith({ top: 470, left: 255, behavior: expect.any(String) as unknown })
+
+		const calls = scrollTo.mock.calls.length
+
+		act(() => {
+			latest.viewer?.dispatch({ type: "page.goto", page: 2, top: 150 })
+			latest.viewer?.dispatch({ type: "page.goto", page: 1 })
+		})
+		await settle()
+		expect(scrollTo).toHaveBeenCalledTimes(calls)
+		expect(scrolled.at(-1)).toBe(pageElement(1))
+	})
+
 	it("zooms with Ctrl and the wheel, and leaves a plain wheel to scroll", async () => {
 		const { pdfjs, opened } = fakePdfJs([fakePage([])])
 
@@ -419,6 +498,8 @@ describe("PdfPages", () => {
 
 		await mount(pdfjs, opened)
 		await show(1)
+		// Read once it nears the view.
+		await show(2)
 		expect(pageElement(1).style.width).toBe("150px")
 		expect(pageElement(1).style.height).toBe("300px")
 
@@ -523,6 +604,189 @@ describe("PdfPages", () => {
 			latest.viewer?.dispatch({ type: "page.first" })
 		})
 		expect(scrolled.at(-1)).toBe(pageElement(1))
+	})
+})
+
+async function pastZoomDelay(): Promise<void> {
+	await act(() => new Promise(resolve => setTimeout(resolve, PDF_ZOOM_RENDER_DELAY_MS + 30)))
+	await settle()
+}
+
+function zoomIn(times: number): void {
+	act(() => {
+		for (let step = 0; step < times; step++) latest.viewer?.dispatch({ type: "zoom.in" })
+	})
+}
+
+describe("PdfPages loading and zooming", () => {
+	it("reads only page 1 at open, sizes the unread pages from it, and reads a page once it nears the view", async () => {
+		const pages = Array.from({ length: 50 }, () => fakePage([], [], 200))
+		const { pdfjs, opened, document: pdf } = fakePdfJs(pages)
+		const getPage = vi.spyOn(pdf, "getPage")
+
+		await mount(pdfjs, opened)
+
+		expect(new Set(getPage.mock.calls.map(([page]) => page))).toEqual(new Set([1]))
+		// Page 1 at 150 %, turned with the view.
+		expect(pageElement(30).style.width).toBe("150px")
+		expect(pageElement(30).style.height).toBe("300px")
+
+		await show(30)
+		expect(getPage).toHaveBeenCalledWith(30)
+		expect(pages[29]?.render).toHaveBeenCalledTimes(1)
+		expect(new Set(getPage.mock.calls.map(([page]) => page))).toEqual(new Set([1, 30]))
+	})
+
+	it("names the page taking the most of the view, not a page inside the observers' margin", async () => {
+		const scroll = { top: 0 }
+		const rect = (top: number, height: number): DOMRect =>
+			({ left: 0, top, width: 400, height, right: 400, bottom: top + height, x: 0, y: top }) as DOMRect
+
+		vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => setTimeout(() => callback(0), 0))
+		vi.stubGlobal("cancelAnimationFrame", (frame: number) => {
+			clearTimeout(frame)
+		})
+		// Pages stack 16 px apart below a 16 px gap in a 300 px tall view.
+		vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (this: Element) {
+			const page = Number((this as HTMLElement).dataset["page"] ?? 0)
+
+			if (page === 0) return rect(0, 300)
+
+			let top = 16 - scroll.top
+
+			for (let previous = 1; previous < page; previous++) top += parseFloat(pageElement(previous).style.height) + 16
+
+			return rect(top, parseFloat((this as HTMLElement).style.height))
+		})
+
+		const { pdfjs, opened } = fakePdfJs(Array.from({ length: 10 }, () => fakePage([])))
+
+		await mount(pdfjs, opened)
+
+		// 150 px pages: page 5 fills the view's top, page 6 its lower part; pages 1-4 sit above, pages 3 and 4
+		// within the render margin, which reports them wholly intersecting.
+		for (let page = 1; page <= 8; page++) fire("render", page, true, 1)
+
+		scroll.top = 4 * 166
+		host.firstElementChild?.dispatchEvent(new Event("scroll"))
+		await settle()
+		expect(latest.viewer?.state.page).toBe(5)
+
+		scroll.top = 4 * 166 + 100
+		host.firstElementChild?.dispatchEvent(new Event("scroll"))
+		await settle()
+		expect(latest.viewer?.state.page).toBe(6)
+	})
+
+	it("keeps a zoomed page's bitmap on screen, stretched, and renders the sharper one once the zoom steps pause", async () => {
+		const drawImage = vi.fn()
+
+		vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({ drawImage } as unknown as CanvasRenderingContext2D)
+
+		const pages = [fakePage(["a"])]
+		const { pdfjs, opened } = fakePdfJs(pages)
+
+		await mount(pdfjs, opened)
+		await show(1)
+
+		const canvas = pageElement(1).querySelector("canvas")
+
+		expect(pages[0]?.render).toHaveBeenCalledTimes(1)
+		expect(canvas?.className).toBe("painted")
+
+		// A pinch's worth of steps: none restarts a render, and the old bitmap stays up at the new size.
+		zoomIn(3)
+
+		const scale = latest.viewer?.state.scale ?? 0
+
+		expect(scale).toBeGreaterThan(1.5)
+		expect(pageElement(1).dataset["rendered"]).toBe("false")
+		expect(canvas?.className).toBe("painted")
+		expect(pageElement(1).querySelector(".placeholder")).toBeNull()
+		expect(canvas?.style.width).toBe(`${String(Math.floor(100 * scale))}px`)
+		expect(canvas?.width).toBe(150)
+		expect(pages[0]?.render).toHaveBeenCalledTimes(1)
+
+		await pastZoomDelay()
+
+		expect(pages[0]?.render).toHaveBeenCalledTimes(2)
+
+		// Rendered offscreen, then copied over and released.
+		const offscreen = pages[0]?.render.mock.calls[1]?.[0].canvas as HTMLCanvasElement
+
+		expect(offscreen).not.toBe(canvas)
+		expect(drawImage).toHaveBeenCalledWith(offscreen, 0, 0)
+		expect(offscreen.width).toBe(0)
+		expect(canvas?.width).toBe(Math.floor(100 * scale))
+		expect(pageElement(1).dataset["rendered"]).toBe("true")
+	})
+
+	it("lays the text layer out again on a zoom or a turn instead of reading the page's text again", async () => {
+		const { pdfjs, opened } = fakePdfJs([fakePage(["alpha ", "beta"])])
+
+		await mount(pdfjs, opened)
+		await show(1)
+		expect(textLayers).toHaveLength(1)
+
+		const spans = Array.from(pageElement(1).querySelectorAll(".text-layer span"))
+
+		zoomIn(2)
+		await pastZoomDelay()
+
+		const scale = latest.viewer?.state.scale
+
+		expect(textLayers).toHaveLength(1)
+		expect(textLayers[0]?.updates.at(-1)?.scale).toBe(scale)
+		// The same spans, so a selection and the find highlights survive.
+		expect(Array.from(pageElement(1).querySelectorAll(".text-layer span"))).toEqual(spans)
+
+		act(() => {
+			latest.viewer?.dispatch({ type: "rotate.clockwise" })
+		})
+		await pastZoomDelay()
+		expect(textLayers).toHaveLength(1)
+		expect(textLayers[0]?.updates.at(-1)?.rotation).toBe(90)
+	})
+
+	it("ends each text layer in pdf.js's endOfContent block, which covers the layer and follows the selection", async () => {
+		const { pdfjs, opened } = fakePdfJs([fakePage(["alpha ", "beta"])])
+
+		await mount(pdfjs, opened)
+		await show(1)
+
+		const layer = pageElement(1).querySelector<HTMLElement>(".text-layer")
+		const end = layer?.lastElementChild as HTMLElement
+		const [first] = Array.from(layer?.querySelectorAll("span") ?? [])
+
+		expect(end.className).toBe("endOfContent")
+
+		layer?.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }))
+		expect(layer?.classList.contains("selecting")).toBe(true)
+
+		// A drag that ends in the first span: the block moves right after it, so the gap past it selects nothing.
+		const changes = vi.fn()
+
+		document.addEventListener("selectionchange", changes)
+
+		// happy-dom sends selectionchange itself, as a browser does.
+		if (first !== undefined) document.getSelection()?.selectAllChildren(first)
+
+		await settle()
+		document.removeEventListener("selectionchange", changes)
+		expect(changes).toHaveBeenCalledTimes(1)
+		expect(layer?.classList.contains("selecting")).toBe(true)
+		expect(end.previousSibling).toBe(first)
+		expect(end.style.userSelect).toBe("text")
+
+		document.dispatchEvent(new Event("pointerup"))
+		expect(layer?.classList.contains("selecting")).toBe(false)
+		expect(layer?.lastElementChild).toBe(end)
+		expect(end.style.userSelect).toBe("")
+
+		// Torn down with the layer.
+		fire("evict", 1, false)
+		await settle()
+		expect(layer?.querySelector(".endOfContent")).toBeNull()
 	})
 })
 
@@ -706,5 +970,183 @@ describe("paintMatches", () => {
 		paintMatches([div], ["xaxax"], Int32Array.from([1, 0, 1, 0, 2, 1, 0, 3, 0, 4]), 0, 2, 1)
 
 		expect(div.innerHTML).toBe('x<span class="highlight appended">a</span>x<span class="highlight selected appended">a</span>x')
+	})
+})
+
+// A laid-out column for the hooks that measure it: the scroller is `width` × `height` at (0, 0); pages stack 16 px
+// apart below a 16 px gap at their styled size, centred across, moved by the scroller's own scroll position.
+function stubLayout(width: number, height: number): { top: number; left: number } {
+	const scroll = { top: 0, left: 0 }
+	const isScroller = (element: Element): boolean => element === host.firstElementChild
+	const rect = (left: number, top: number, w: number, h: number): DOMRect =>
+		({ left, top, width: w, height: h, right: left + w, bottom: top + h, x: left, y: top }) as DOMRect
+
+	vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => setTimeout(() => callback(0), 0))
+	vi.stubGlobal("cancelAnimationFrame", (frame: number) => {
+		clearTimeout(frame)
+	})
+	vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(width)
+	vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(height)
+	vi.spyOn(Element.prototype, "scrollTop", "get").mockImplementation(function (this: Element) {
+		return isScroller(this) ? scroll.top : 0
+	})
+	vi.spyOn(Element.prototype, "scrollTop", "set").mockImplementation(function (this: Element, value: number) {
+		if (isScroller(this)) scroll.top = Math.max(0, value)
+	})
+	vi.spyOn(Element.prototype, "scrollLeft", "get").mockImplementation(function (this: Element) {
+		return isScroller(this) ? scroll.left : 0
+	})
+	vi.spyOn(Element.prototype, "scrollLeft", "set").mockImplementation(function (this: Element, value: number) {
+		if (isScroller(this)) scroll.left = Math.max(0, value)
+	})
+	vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (this: Element) {
+		if (isScroller(this)) return rect(0, 0, width, height)
+
+		const page = Number((this as HTMLElement).dataset["page"] ?? 0)
+		let top = 16 - scroll.top
+
+		for (let previous = 1; previous < page; previous++) top += parseFloat(pageElement(previous).style.height) + 16
+
+		if (page === 0) return rect(0, 0, 0, 0)
+
+		const w = parseFloat((this as HTMLElement).style.width)
+
+		return rect(Math.max(0, (width - w) / 2) - scroll.left, top, w, parseFloat((this as HTMLElement).style.height))
+	})
+
+	return scroll
+}
+
+// The page under a point of the view, and how far down it the point lies.
+function pointAt(viewY: number): { page: number; fy: number } {
+	for (let page = 1; ; page++) {
+		const box = pageElement(page).getBoundingClientRect()
+
+		if (box.bottom > viewY || host.querySelector(`[data-page="${String(page + 1)}"]`) === null) {
+			return { page, fy: (viewY - box.top) / box.height }
+		}
+	}
+}
+
+describe("usePdfViewer zoom anchor", () => {
+	it("keeps the view's centre on a button zoom and the pointer's point on a Ctrl+wheel zoom", async () => {
+		const scroll = stubLayout(400, 300)
+		const { pdfjs, opened } = fakePdfJs([fakePage([], [], 200), fakePage([], [], 200), fakePage([], [], 200)])
+
+		await mount(pdfjs, opened)
+
+		const scroller = host.firstElementChild as HTMLElement
+
+		// Mid-way down page 2 (300 px tall at 100 %).
+		scroll.top = 400
+
+		const centre = pointAt(150)
+
+		act(() => {
+			latest.viewer?.dispatch({ type: "zoom.in" })
+		})
+		expect(latest.viewer?.state.zoom).toBe(125)
+		expect(pointAt(150).page).toBe(centre.page)
+		expect(pointAt(150).fy).toBeCloseTo(centre.fy, 6)
+
+		const pointer = pointAt(40)
+		const wheel = new WheelEvent("wheel", { deltaY: -100, cancelable: true })
+
+		// happy-dom drops a WheelEvent's modifier keys and position from its init.
+		Object.defineProperty(wheel, "ctrlKey", { value: true })
+		Object.defineProperty(wheel, "clientX", { value: 200 })
+		Object.defineProperty(wheel, "clientY", { value: 40 })
+		act(() => {
+			scroller.dispatchEvent(wheel)
+		})
+		expect(latest.viewer?.state.zoom).toBe(135)
+		expect(pointAt(40).page).toBe(pointer.page)
+		expect(pointAt(40).fy).toBeCloseTo(pointer.fy, 6)
+
+		const before = pointAt(150)
+
+		act(() => {
+			latest.viewer?.dispatch({ type: "zoom.set", scale: 3 })
+		})
+		expect(pointAt(150).fy).toBeCloseTo(before.fy, 6)
+		expect(scrolled).toHaveLength(0)
+	})
+})
+
+describe("usePdfViewer opening zoom", () => {
+	it("opens a portrait page fitted to a narrow view's width, shown as a custom percent", async () => {
+		stubLayout(132, 600)
+
+		const { pdfjs, opened } = fakePdfJs([fakePage([], [], 200)])
+
+		await mount(pdfjs, opened)
+		// (132 - 32) / 100
+		expect(latest.viewer?.state.scale).toBe(1)
+		expect(latest.viewer?.state.zoom).toBe(67)
+		expect(latest.viewer?.state.zoomMode).toBe("custom")
+	})
+
+	it("opens a landscape page whole, and at 100 % in a wide view", async () => {
+		stubLayout(232, 82)
+
+		const landscape = fakePdfJs([fakePage([], [], 50)])
+
+		await mount(landscape.pdfjs, landscape.opened)
+		// min((232 - 32) / 100, (82 - 32) / 50)
+		expect(latest.viewer?.state.scale).toBe(1)
+	})
+
+	it("never opens past 100 %", async () => {
+		stubLayout(2000, 2000)
+
+		const { pdfjs, opened } = fakePdfJs([fakePage([], [], 200)])
+
+		await mount(pdfjs, opened)
+		expect(latest.viewer?.state.zoom).toBe(100)
+	})
+})
+
+describe("usePdfViewer page steps", () => {
+	it("steps each Next from the last target while the scroll runs, and from the page in view once it settles", async () => {
+		const scroll = stubLayout(400, 300)
+		const pages = [fakePage([], [], 200), fakePage([], [], 200), fakePage([], [], 200), fakePage([], [], 200)]
+		const { pdfjs, opened } = fakePdfJs(pages)
+
+		await mount(pdfjs, opened)
+
+		const scroller = host.firstElementChild as HTMLElement
+
+		act(() => {
+			latest.viewer?.dispatch({ type: "page.next" })
+			latest.viewer?.dispatch({ type: "page.next" })
+		})
+		expect(scrolled).toEqual([pageElement(2), pageElement(3)])
+
+		// The scroll reaches page 3: the target is met.
+		scroll.top = 632
+		scroller.dispatchEvent(new Event("scroll"))
+		await settle()
+		expect(latest.viewer?.state.page).toBe(3)
+
+		// Scrolled back by keyboard, which reports no pointer or wheel: the page in view counts again.
+		scroll.top = 0
+		scroller.dispatchEvent(new Event("scroll"))
+		await settle()
+		expect(latest.viewer?.state.page).toBe(1)
+		act(() => {
+			latest.viewer?.dispatch({ type: "page.next" })
+		})
+		expect(scrolled.at(-1)).toBe(pageElement(2))
+
+		// The user grabbing the scroller drops the pending target.
+		act(() => {
+			latest.viewer?.dispatch({ type: "page.next" })
+		})
+		expect(scrolled.at(-1)).toBe(pageElement(3))
+		scroller.dispatchEvent(new Event("pointerdown"))
+		act(() => {
+			latest.viewer?.dispatch({ type: "page.next" })
+		})
+		expect(scrolled.at(-1)).toBe(pageElement(2))
 	})
 })

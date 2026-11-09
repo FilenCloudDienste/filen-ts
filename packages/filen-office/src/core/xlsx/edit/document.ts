@@ -39,6 +39,7 @@ import {
 	type SheetAxisLayout,
 	type SheetCell,
 	type SheetCommand,
+	type SheetDocumentProperties,
 	type SheetEncryption,
 	type SheetFileKind,
 	type SheetFileSharing,
@@ -838,6 +839,10 @@ export class XlsxDocument {
 
 	title(): string | undefined {
 		return this.workbook.title
+	}
+
+	properties(): SheetDocumentProperties | undefined {
+		return this.workbook.properties
 	}
 
 	fileSharing(): SheetFileSharing | null {

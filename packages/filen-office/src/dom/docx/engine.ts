@@ -15,6 +15,7 @@ import {
 	layoutDocument,
 	openDocxPackage,
 	gateReasons,
+	withGate,
 	parseNumbering,
 	parseStyles,
 	parseTheme,
@@ -22,6 +23,7 @@ import {
 	vmlAltText,
 	type DocumentLayout,
 	type DocxModel,
+	type DocxGateReason,
 	type DocxOpenFailure,
 	type DocxPackage,
 	type DocxStyles,
@@ -62,7 +64,7 @@ import type { DocxPdfLive } from "./pdfSnapshot"
 import type { DocxAnnotations } from "./annotations"
 import { encryptedPackageVerdict } from "../encryption/sealedPackage"
 import { findMatches, type FindablePage } from "./find"
-import { bookmarkIndex, paragraphLinks, paragraphOf, type LinkRange } from "./links"
+import { bookmarkIndex, linkMapParagraph, paragraphLinks, paragraphOf, sourceLinkMap, type LinkRange } from "./links"
 import {
 	LINK_INTS,
 	type DocxErrorReason,
@@ -102,6 +104,12 @@ export interface DocxEngineServices {
 
 export type DocxEmit = (event: DocxEvent, transfer: readonly ArrayBuffer[]) => void
 
+// Set by the host, never by the page: `gate` is what makes the document view-only that its package does not say
+// (the file a held package was translated from is signed).
+export interface DocxEngineOptions extends DocxOpenOptions {
+	readonly gate?: readonly DocxGateReason[]
+}
+
 // What an editing host (in-thread) gets from the engine once the document is laid out the first time.
 export interface DocxEngineOpen {
 	readonly pkg: DocxPackage
@@ -137,14 +145,14 @@ async function openOdt(
 	slicing: Slicing,
 	services: DocxEngineServices
 ): Promise<
-	| { readonly ok: true; readonly package: DocxPackage }
+	| { readonly ok: true; readonly package: DocxPackage; readonly gate: readonly DocxGateReason[] }
 	| { readonly ok: false; readonly reason: DocxOpenFailure | "malformed" | "failed"; readonly message: string }
 > {
 	if (services.openOdt === undefined) return { ok: false, reason: "failed", message: "This host does not open OpenDocument files" }
 
 	const opened = await services.openOdt(source, { slicing })
 
-	if (opened.ok) return { ok: true, package: opened.package }
+	if (opened.ok) return { ok: true, package: opened.package, gate: opened.gate }
 
 	switch (opened.reason) {
 		case "encrypted":
@@ -273,15 +281,16 @@ export class DocxEngine implements DocxSessionApi {
 	private bookmarks: Map<string, { part: number; item: number }> | undefined = undefined
 	private readonly retain: boolean
 	private readonly format: "docx" | "odt"
+	private gate: readonly DocxGateReason[] | undefined
 	// The zip directory and content types: images are read from them after the model is gone.
 	private pkg: { readonly opc: OpcPackage; readonly contentTypes: ContentTypes } | undefined = undefined
 	private pages: readonly PageDisplayList[] = []
 	private mainPartBytes: number | undefined = undefined
 	// Objects the shipped pages show; prepared before the model is released.
 	private readonly objectIds = new Set<number>()
-	private objectCache: Map<number, DocxObjectData> | undefined = undefined
+	// A viewer's objects, each built once (asked for or prepared by the release) and kept past the model.
+	private objectCache: Map<number, Promise<DocxObjectData>> | undefined = undefined
 	private bookmarkLocations: Map<string, DocxLocation> | undefined = undefined
-	private releasing: Promise<void> | undefined = undefined
 	// Held with the model, for PDF export (pdfSource).
 	private resolver: PropertyResolver | undefined = undefined
 	private store: PropsStore | undefined = undefined
@@ -292,8 +301,9 @@ export class DocxEngine implements DocxSessionApi {
 	private readonly pendingFaces: DocxFontFace[] = []
 	private readonly links: DocxLinkTarget[] = []
 	private readonly linkKeys = new Map<string, number>()
-	// Per part (an edit's overlay part goes with it), by paragraph item.
-	private paragraphLinkCache = new WeakMap<StoryPart, Map<number, readonly LinkRange[]>>()
+	// Per part (an edit's overlay part goes with it), by paragraph item, for the text they were placed in (a
+	// paragraph's text differs per page with its PAGE fields).
+	private paragraphLinkCache = new WeakMap<StoryPart, Map<number, { readonly text: string; readonly ranges: readonly LinkRange[] }>>()
 	private shippedPages = 0
 	private shippedStyles = 0
 	private shippedDecorations = 0
@@ -307,15 +317,17 @@ export class DocxEngine implements DocxSessionApi {
 		source: ByteSource,
 		services: DocxEngineServices,
 		emit: DocxEmit,
-		options: DocxOpenOptions = {},
+		options: DocxEngineOptions = {},
 		editing?: DocxEngineEditing
 	) {
+		this.gate = options.gate
 		this.source = source
 		this.services = services
 		this.emit = emit
 		this.view =
 			options.view === "original" ? RevisionView.Original : options.view === "markup" ? RevisionView.Markup : RevisionView.Final
 		this.retain = options.retain === true || editing !== undefined
+		this.objectCache = this.retain ? undefined : new Map()
 		this.format = options.format ?? "docx"
 		this.editing = editing
 	}
@@ -355,8 +367,8 @@ export class DocxEngine implements DocxSessionApi {
 			sliceMs: this.services.sliceMs ?? 12,
 			now: this.services.now ?? Date.now
 		})
-		const opened =
-			this.format === "odt" ? await openOdt(this.source, slicing, this.services) : await openDocxPackage(this.source, { slicing })
+		const odt = this.format === "odt" ? await openOdt(this.source, slicing, this.services) : undefined
+		const opened = odt ?? (await openDocxPackage(this.source, { slicing }))
 
 		if (this.closed) return
 
@@ -390,6 +402,8 @@ export class DocxEngine implements DocxSessionApi {
 		}
 
 		const pkg = opened.package
+
+		if (odt?.ok === true) this.gate = withGate([...(this.gate ?? [])], odt.gate)
 
 		this.pkg = { opc: pkg.opc, contentTypes: pkg.contentTypes }
 		this.mainPartBytes = pkg.opc.entry(pkg.mainPart)?.uncompressedSize ?? 0
@@ -448,7 +462,7 @@ export class DocxEngine implements DocxSessionApi {
 				type: "opened",
 				info: {
 					variant: pkg.facts.variant,
-					gate: gateReasons(pkg.facts, model, styles, numbering),
+					gate: withGate(gateReasons(pkg.facts, model, styles, numbering), this.gate),
 					estimatedPages: breaks + 1,
 					pageWidth: pageWidth > 0 && Number.isFinite(pageWidth) ? pageWidth : 816,
 					pageHeight: pageHeight > 0 && Number.isFinite(pageHeight) ? pageHeight : 1056,
@@ -483,7 +497,7 @@ export class DocxEngine implements DocxSessionApi {
 			sliceMs: services.sliceMs ?? 12,
 			yield: services.yield,
 			...(services.now === undefined ? {} : { now: services.now }),
-			...(prepared === undefined ? {} : { edits: prepared.edits, recordMaps: true })
+			...(prepared === undefined ? { mapParagraph: linkMapParagraph(this.view) } : { edits: prepared.edits, recordMaps: true })
 		})
 
 		this.layout = layout
@@ -508,10 +522,7 @@ export class DocxEngine implements DocxSessionApi {
 
 		this.ship(true, dirty)
 
-		if (!this.retain) {
-			this.releasing = this.release()
-			await this.releasing
-		}
+		if (!this.retain) await this.release()
 	}
 
 	// Editing: sends pages laid out again (and any new ones); a layout with fewer pages than were sent says
@@ -633,10 +644,15 @@ export class DocxEngine implements DocxSessionApi {
 		return index
 	}
 
-	private sourceLinks(story: number, sourcePart: number, item: number, text: string): readonly LinkRange[] {
+	private sourceLinks(page: PageDisplayList, source: number): readonly LinkRange[] {
 		const model = this.layoutModel ?? this.model
+		const at = source * SOURCE_INTS
+		const story = page.sourceInts[at + SourceInt.STORY] ?? -1
+		const sourcePart = page.sourceParts[source] ?? -1
+		const item = page.sourceInts[at + SourceInt.ITEM] ?? -1
+		const text = page.sourceTexts[source] ?? ""
 
-		if (model === undefined || story < 0 || item < 0) return []
+		if (model === undefined || story < 0 || item < 0) return NO_LINKS
 
 		// The paragraph's own part (an edited one is laid out from its overlay part), else its story's.
 		const partIndex = sourcePart >= 0 ? sourcePart : (model.stories[story]?.part ?? -1)
@@ -651,14 +667,14 @@ export class DocxEngine implements DocxSessionApi {
 			this.paragraphLinkCache.set(part, byItem)
 		}
 
-		let ranges = byItem.get(item)
+		const cached = byItem.get(item)
 
-		if (ranges === undefined) {
-			const found = paragraphLinks(part, item, text, this.view)
+		if (cached !== undefined && cached.text === text) return cached.ranges
 
-			ranges = found.length === 0 ? NO_LINKS : found
-			byItem.set(item, ranges)
-		}
+		const found = paragraphLinks(part, item, text, this.view, sourceLinkMap(page, source))
+		const ranges = found.length === 0 ? NO_LINKS : found
+
+		byItem.set(item, { text, ranges })
 
 		return ranges
 	}
@@ -710,13 +726,7 @@ export class DocxEngine implements DocxSessionApi {
 		const linkInts: number[] = []
 
 		for (let source = 0; source < page.sourceCount; source++) {
-			const at = source * SOURCE_INTS
-			const ranges = this.sourceLinks(
-				page.sourceInts[at + SourceInt.STORY] ?? -1,
-				page.sourceParts[source] ?? -1,
-				page.sourceInts[at + SourceInt.ITEM] ?? -1,
-				page.sourceTexts[source] ?? ""
-			)
+			const ranges = this.sourceLinks(page, source)
 
 			for (const range of ranges) linkInts.push(source, range.start, range.end, this.linkIndex(range.target))
 		}
@@ -875,21 +885,36 @@ export class DocxEngine implements DocxSessionApi {
 	}
 
 	async objects(ids: readonly number[], transfer: ArrayBuffer[] = []): Promise<readonly DocxObjectData[]> {
-		if (this.releasing !== undefined) await this.releasing
-
 		if (this.closed) return []
 
 		const cache = this.objectCache
 		const out: DocxObjectData[] = []
 
 		for (const id of ids) {
-			// Kept objects are cloned by the message, never transferred: the cache still needs them.
-			const kept = cache?.get(id)
+			if (cache === undefined) {
+				out.push(await this.objectData(id, transfer))
 
-			out.push(kept ?? (cache === undefined ? await this.objectData(id, transfer) : { kind: "placeholder", id, reason: "missing" }))
+				continue
+			}
+
+			// Kept objects are cloned by the message, never transferred: the cache still needs them.
+			let kept = cache.get(id)
+
+			if (kept === undefined) {
+				if (this.layout === undefined) {
+					out.push({ kind: "placeholder", id, reason: this.closed ? "closed" : "missing" })
+
+					continue
+				}
+
+				kept = this.objectData(id, [])
+				cache.set(id, kept)
+			}
+
+			out.push(await kept)
 		}
 
-		return out
+		return this.closed ? [] : out
 	}
 
 	async media(partName: string): Promise<DocxMedia | null> {
@@ -946,8 +971,6 @@ export class DocxEngine implements DocxSessionApi {
 	async annotations(): Promise<DocxAnnotations | null> {
 		await this.layout?.done.catch(() => undefined)
 
-		if (this.releasing !== undefined) await this.releasing
-
 		if (this.closed) return null
 
 		if (this.annotationCache === undefined && this.model !== undefined && this.layout?.final === true) {
@@ -991,8 +1014,6 @@ export class DocxEngine implements DocxSessionApi {
 	async locate(anchor: string): Promise<DocxLocation | null> {
 		if (anchor === "_top") return this.closed ? null : { page: 0, y: 0 }
 
-		if (this.releasing !== undefined) await this.releasing
-
 		const kept = this.bookmarkLocations
 
 		if (kept !== undefined) return this.closed ? null : (kept.get(anchor) ?? null)
@@ -1008,27 +1029,47 @@ export class DocxEngine implements DocxSessionApi {
 
 		await layout.done.catch(() => undefined)
 
-		if (this.releasing !== undefined) await this.releasing
-
 		if (this.bookmarkLocations !== undefined) return this.closed ? null : (this.bookmarkLocations.get(anchor) ?? null)
 
 		return this.closed || this.model === undefined ? null : this.bookmarkLocation(this.model, anchor, this.paragraphStarts(this.model))
 	}
 
-	// After the last page: prepares every object and bookmark the pages can ask for, then drops the model,
+	// After the last page: prepares every bookmark and object the pages can ask for, then drops the model,
 	// its XML and the worker's font faces. What remains is the pages (find), the zip directory (images) and
-	// those prepared answers.
+	// those prepared answers. Bookmarks and annotations are ready before the first yield; objects asked for
+	// meanwhile are built on demand into the same cache, so none waits for the rest or is built twice.
 	private async release(): Promise<void> {
 		const model = this.model
+		const cache = this.objectCache
 
-		if (model === undefined) return
+		if (model === undefined || cache === undefined) return
 
-		const cache = new Map<number, DocxObjectData>()
+		const starts = this.paragraphStarts(model)
+		const bookmarks = new Map<string, DocxLocation>()
+
+		this.bookmarks ??= bookmarkIndex(model)
+
+		for (const name of this.bookmarks.keys()) {
+			const location = this.bookmarkLocation(model, name, starts)
+
+			if (location !== null) bookmarks.set(name, location)
+		}
+
+		this.bookmarkLocations = bookmarks
+		this.annotationCache ??= collectAnnotations(model, this.pages, this.view, this.layout?.styles)
+
 		const services = this.services
 		let slice = (services.now ?? Date.now)()
 
 		for (const id of this.objectIds) {
-			cache.set(id, await this.objectData(id, []))
+			let kept = cache.get(id)
+
+			if (kept === undefined) {
+				kept = this.objectData(id, [])
+				cache.set(id, kept)
+			}
+
+			await kept
 
 			if (this.closed) return
 
@@ -1042,21 +1083,6 @@ export class DocxEngine implements DocxSessionApi {
 				slice = (services.now ?? Date.now)()
 			}
 		}
-
-		const starts = this.paragraphStarts(model)
-		const bookmarks = new Map<string, DocxLocation>()
-
-		this.bookmarks ??= bookmarkIndex(model)
-
-		for (const name of this.bookmarks.keys()) {
-			const location = this.bookmarkLocation(model, name, starts)
-
-			if (location !== null) bookmarks.set(name, location)
-		}
-
-		this.objectCache = cache
-		this.bookmarkLocations = bookmarks
-		this.annotationCache ??= collectAnnotations(model, this.pages, this.view, this.layout?.styles)
 
 		// A worker's faces only served measuring; an in-thread engine's are the page's own, drawn until close.
 		if (this.services.replayFonts) {
@@ -1116,6 +1142,7 @@ export class DocxEngine implements DocxSessionApi {
 		const layout = layoutDocument(live.model, live.resolver, live.fonts, services.measurer, {
 			store: live.store,
 			view: RevisionView.Final,
+			mapParagraph: linkMapParagraph(RevisionView.Final),
 			signal: stop,
 			sliceMs: services.sliceMs ?? 12,
 			yield: async () => {

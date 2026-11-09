@@ -221,6 +221,22 @@ describe("PDF export of a document", () => {
 		expect(operators.filter(op => op === pdfjsOps.constructPath).length).toBeGreaterThan(0)
 	})
 
+	it("draws an equation's set and logic operators with real glyphs", async () => {
+		const M = "http://schemas.openxmlformats.org/officeDocument/2006/math"
+		const docx = buildDocx({
+			body: `<w:p><m:oMath xmlns:m="${M}"><m:r><m:t>∀x∈A∃y⊂B⇒x≤y</m:t></m:r></m:oMath></w:p>`
+		})
+		const exported = await exportDocxPdf(docx, services(), pdfAssets, {
+			options: { title: "Equation", deterministic: true },
+			signal: { aborted: false }
+		})
+		const text = await pageText(await openPdf(await bytesOf(exported.blob)), 1)
+
+		expect(exported.report.missing.size).toBe(0)
+
+		for (const char of ["∀", "∈", "∃", "⊂", "⇒"]) expect(text).toContain(char)
+	})
+
 	it("exports the Final view of a document shown with its markup, laid out again apart", async () => {
 		const docx = buildDocx({
 			body:

@@ -1,3 +1,4 @@
+import type { DocxGateReason } from "../../core/docx/package"
 import type { ByteSource } from "../../core/opc/index"
 import type { RtfLockedBlock } from "../../core/rtf/write/proof"
 import type { DocxHost } from "./host"
@@ -42,9 +43,12 @@ export interface DocxRtfDocument {
 	// The viewer's source: { host, bytes }. The host opens the package where it is held; `bytes` gives its size only.
 	readonly host: DocxHost
 	readonly bytes: ByteSource
-	// What the file shows that the package's pages leave out (an RTF's equations, shapes drawn by no picture or text,
-	// objects without their result...), counted: a PDF of the package reports it (DocxPdfExportOptions.untranslated).
+	// What the file shows that the package's pages leave out (an RTF's drawing objects, shapes drawn by no picture,
+	// text or preset geometry, objects without their result...), counted: a PDF of the package reports it (DocxPdfExportOptions.untranslated).
 	readonly untranslated: number
+	// What makes the document view-only that the package does not say (a signed ODT): the editor opens it with
+	// these reasons (DocxEditingOptions.gate), so it is saved only as a new file.
+	readonly gate: readonly DocxGateReason[]
 	// A copy of the package, for the editor.
 	take(): Promise<Uint8Array>
 	// Gate 1 (once, when the document is to be edited): the top-level blocks the RTF writer cannot write.

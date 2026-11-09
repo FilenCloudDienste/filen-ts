@@ -23,15 +23,27 @@ function bodyText(xml: string): string {
 }
 
 describe("templateLocale", () => {
-	it("gives Letter to the United States, Canada, Mexico and the Philippines, A4 elsewhere", () => {
-		for (const tag of ["en-US", "en-CA", "fr-CA", "es-MX", "en-PH", "fil-PH"]) expect(templateLocale(tag).paper).toBe("letter")
-		for (const tag of ["en-GB", "de-DE", "fr", "ja-JP", "es-419", "pt-BR"]) expect(templateLocale(tag).paper).toBe("a4")
+	// CLDR supplementalData paperSize US-Letter: BZ CA CL CO CR GT MX NI PA PE PH PR SV US VE.
+	it("gives Letter to the CLDR US-Letter regions, A4 elsewhere", () => {
+		for (const tag of ["en-US", "en-CA", "fr-CA", "es-MX", "en-PH", "fil-PH", "es-CO", "es-CL", "es-PR", "es-VE", "en-BZ", "es-CR"])
+			expect(templateLocale(tag).paper).toBe("letter")
+		for (const tag of ["en-GB", "de-DE", "fr", "ja-JP", "es-419", "es-ES", "pt-BR", "es-AR"])
+			expect(templateLocale(tag).paper).toBe("a4")
+	})
+
+	it("keeps a script the locale names, so Latin-script Serbian is not written as its Cyrillic default", () => {
+		expect(templateLocale("sr-Latn-RS")).toEqual({ tag: "sr-Latn-RS", paper: "a4" })
+		expect(templateLocale("sr-Cyrl-RS")).toEqual({ tag: "sr-Cyrl-RS", paper: "a4" })
+		expect(templateLocale("uz-Latn")).toEqual({ tag: "uz-Latn-UZ", paper: "a4" })
+		expect(templateLocale("sr")).toEqual({ tag: "sr-RS", paper: "a4" })
+		expect(templateLocale("en-US")).toEqual({ tag: "en-US", paper: "letter" })
 	})
 
 	it("fills in the likely region of a bare language and keeps the language tag w:lang carries", () => {
 		expect(templateLocale("de")).toEqual({ tag: "de-DE", paper: "a4" })
 		expect(templateLocale("en")).toEqual({ tag: "en-US", paper: "letter" })
-		expect(templateLocale("zh-Hant-TW")).toEqual({ tag: "zh-TW", paper: "a4" })
+		expect(templateLocale("zh-TW")).toEqual({ tag: "zh-TW", paper: "a4" })
+		expect(templateLocale("zh-Hant-TW")).toEqual({ tag: "zh-Hant-TW", paper: "a4" })
 	})
 
 	it("falls back to en-US for a tag that is not BCP 47", () => {
@@ -65,9 +77,27 @@ describe("blankDocx", () => {
 		expect(de["word/styles.xml"]).toContain('<w:rFonts w:ascii="Calibri" w:eastAsia="Calibri" w:hAnsi="Calibri" w:cs="Calibri"/>')
 		expect(de["word/styles.xml"]).toContain('<w:sz w:val="22"/><w:szCs w:val="22"/><w:lang w:val="de-DE"/>')
 		expect(us["word/styles.xml"]).toContain('<w:lang w:val="en-US"/>')
+		expect(partsOf(await blankDocx({ locale: "sr-RS" }))["word/styles.xml"]).toContain('<w:lang w:val="sr-RS"/>')
 		expect(de["word/document.xml"]).toContain('<w:pgSz w:w="11906" w:h="16838"/>')
 		expect(us["word/document.xml"]).toContain('<w:pgSz w:w="12240" w:h="15840"/>')
 		expect(de["word/settings.xml"]).toContain('w:name="compatibilityMode" w:uri="http://schemas.microsoft.com/office/word" w:val="15"')
+	})
+
+	// ECMA-376 Part 1 §17.3.2.20: w:val is the Latin language, w:eastAsia the East Asian, w:bidi the complex-script.
+	// Word's localized Normal keeps en-US in w:val and puts a CJK or RTL locale in its own slot.
+	it("puts an East Asian or complex-script language in w:eastAsia or w:bidi, keeping en-US for Latin text", async () => {
+		for (const [locale, lang] of [
+			["ja-JP", '<w:lang w:val="en-US" w:eastAsia="ja-JP"/>'],
+			["zh-CN", '<w:lang w:val="en-US" w:eastAsia="zh-CN"/>'],
+			["zh-TW", '<w:lang w:val="en-US" w:eastAsia="zh-TW"/>'],
+			["ko", '<w:lang w:val="en-US" w:eastAsia="ko-KR"/>'],
+			["ar-SA", '<w:lang w:val="en-US" w:bidi="ar-SA"/>'],
+			["he-IL", '<w:lang w:val="en-US" w:bidi="he-IL"/>'],
+			["fa-IR", '<w:lang w:val="en-US" w:bidi="fa-IR"/>'],
+			["th-TH", '<w:lang w:val="en-US" w:bidi="th-TH"/>'],
+			["hi-IN", '<w:lang w:val="en-US" w:bidi="hi-IN"/>']
+		] as const)
+			expect(partsOf(await blankDocx({ locale }))["word/styles.xml"], locale).toContain(lang)
 	})
 
 	it("opens through the document reader and lays out as one empty page of its paper", async () => {
@@ -134,9 +164,30 @@ describe("blankXlsx", () => {
 		const us = partsOf(await blankXlsx({ locale: "en-US", sheetName: "Sheet1" }))
 		const de = partsOf(await blankXlsx({ locale: "de-DE", sheetName: "Tabelle1" }))
 
-		expect(us["xl/styles.xml"]).toContain('<font><sz val="11"/><name val="Calibri"/><family val="2"/></font>')
+		expect(us["xl/styles.xml"]).toContain(
+			'<fonts count="1"><font><sz val="11"/><color theme="1"/><name val="Calibri"/><family val="2"/><scheme val="minor"/></font></fonts>'
+		)
 		expect(us["xl/worksheets/sheet1.xml"]).toContain('<pageSetup paperSize="1" orientation="portrait"/>')
 		expect(de["xl/worksheets/sheet1.xml"]).toContain('<pageSetup paperSize="9" orientation="portrait"/>')
+	})
+
+	it("links the body font to a theme part, so a theme font change reaches it", async () => {
+		const parts = partsOf(await blankXlsx({ locale: "en-US", sheetName: "Sheet1" }))
+		const theme = parts["xl/theme/theme1.xml"] ?? ""
+
+		expect(theme).toContain('<a:majorFont><a:latin typeface="Calibri Light"/>')
+		expect(theme).toContain('<a:minorFont><a:latin typeface="Calibri"/>')
+		expect(theme).toContain('<a:dk1><a:srgbClr val="000000"/></a:dk1><a:lt1><a:srgbClr val="FFFFFF"/></a:lt1>')
+		expect(parts["xl/_rels/workbook.xml.rels"]).toContain(
+			'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/theme" Target="theme/theme1.xml"'
+		)
+		expect(parts["[Content_Types].xml"]).toContain(
+			'<Override PartName="/xl/theme/theme1.xml" ContentType="application/vnd.openxmlformats-officedocument.theme+xml"/>'
+		)
+
+		const workbook = await openWorkbook(await blankXlsx({ locale: "en-US", sheetName: "Sheet1" }))
+
+		expect(workbook.sheets.map(sheet => sheet.name)).toEqual(["Sheet1"])
 	})
 
 	it("escapes the sheet name and cuts it down to one Excel takes", async () => {

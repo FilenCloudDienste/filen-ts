@@ -22,7 +22,6 @@ import type { GeometryPath } from "../drawingml/geometry/evaluate"
 import { MISSING_IMAGE, imageFormat, imageHandling, type ImageResolver } from "../drawingml/picture"
 import { D, drawingReader, type DrawingReader } from "../drawingml/reader"
 import { addLineEnds } from "../drawingml/shape"
-import { plainParagraph } from "../drawingml/text"
 import { NodeKind, type XmlDocument } from "../xml/index"
 import { parseVmlColor } from "./color"
 import { emitVmlPath, ellipseArc, evaluateFormulas, type CoordinateMap, type VmlSegment } from "./path"
@@ -54,7 +53,7 @@ export interface VmlConversion {
 	readonly placement: VmlPlacement
 	// w:txbxContent nodes of the text boxes, in drawing order.
 	readonly textboxes: number[]
-	// Text indices (list.texts) that are WordArt text paths: their text is stretched to fill the box.
+	// Text indices (list.texts) that are WordArt text paths (block text, stretched to the box with fitshape).
 	readonly textPaths: number[]
 	// Elements left out (groups nested beyond MAX_DEPTH).
 	readonly unsupported: number
@@ -603,7 +602,8 @@ class VmlWalker {
 			if (type === "gradient") {
 				const angle = Number.parseFloat(props.childAttr("fill", "angle") ?? "0") || 0
 
-				return list.paint({ kind: "linear", stops, angle: (((angle - 90) % 360) + 360) % 360, scaled: false })
+				// VML angles turn counter-clockwise, DrawingML's clockwise; VML 0 is DrawingML 270.
+				return list.paint({ kind: "linear", stops, angle: (((270 - angle) % 360) + 360) % 360, scaled: false })
 			}
 
 			const [fx = 0, fy = 0] = parseNumbers(props.childAttr("fill", "focusposition"), [0, 0]).map(value => clamp01(value))
@@ -655,14 +655,15 @@ class VmlWalker {
 			if (values.length >= 2) customDash = Float32Array.from(values.length % 2 === 0 ? values : [...values, ...values])
 		}
 
-		const cap = (props.childAttr("stroke", "endcap") ?? "round").toLowerCase()
+		// VML endcap: flat by default.
+		const cap = (props.childAttr("stroke", "endcap") ?? "flat").toLowerCase()
 		const join = (props.childAttr("stroke", "joinstyle") ?? "round").toLowerCase()
 		const stroke: Stroke = {
 			width: Math.max(0, this.strokeWeight(props)) || 1,
 			paint,
 			dash: preset ?? "solid",
 			customDash,
-			cap: cap === "flat" ? "flat" : cap === "square" ? "square" : "round",
+			cap: cap === "round" ? "round" : cap === "square" ? "square" : "flat",
 			join: join === "bevel" ? "bevel" : join === "miter" ? "miter" : "round",
 			miterLimit: Number.parseFloat(props.childAttr("stroke", "miterlimit") ?? "8") || 8,
 			compound: COMPOUNDS[(props.childAttr("stroke", "linestyle") ?? "single").toLowerCase()] ?? "sng",
@@ -780,22 +781,49 @@ class VmlWalker {
 		const style = parseStyle(props.childAttr("textpath", "style"))
 		const family = (style.get("font-family") ?? "").replace(/^["']+|["']+$/g, "").trim()
 		const weight = (style.get("font-weight") ?? "").toLowerCase()
-		const fill = this.filled(props) ? rgba(this.fillColor(props), this.opacity(props.childAttr("fill", "opacity"))) : rgba(BLACK)
-		const size = lengthPx(style.get("font-size"), 48 * (96 / 72)) * (72 / 96)
-		const paragraph = plainParagraph(
-			text,
-			{
-				size: size > 0 ? size : 36,
-				color: fill,
-				font: family,
-				bold: weight === "bold" || Number.parseInt(weight, 10) >= 600,
-				italic: (style.get("font-style") ?? "").toLowerCase() === "italic"
-			},
-			"ctr"
-		)
-		const body: TextBodyProps = { ...TEXT_PATH_BODY }
+		const filled = this.filled(props)
+		const color = filled ? rgba(this.fillColor(props), this.opacity(props.childAttr("fill", "opacity"))) : rgba(BLACK)
+		// A gradient or picture fill paints the glyphs; a solid one is the run colour.
+		const fill = filled && (props.childAttr("fill", "type") ?? "solid").toLowerCase() !== "solid" ? this.fillPaint(props) : -1
+		// fitshape: the text stretched to the shape's box, each line an em tall (the style's size is ignored).
+		const fit = isTrue(props.childAttr("textpath", "fitshape"), false) && box.w > 0 && box.h > 0
+		let lineCount = 1
+
+		for (let at = text.indexOf("\n"); at >= 0; at = text.indexOf("\n", at + 1)) lineCount++
+
+		const styled = lengthPx(style.get("font-size"), 48 * (96 / 72))
+		const sizePx = fit ? box.h / lineCount : styled > 0 ? styled : 36 * (96 / 72)
 		const list = this.list
-		const index = list.text({ kind: "body", body, paragraphs: [paragraph] })
+		const index = list.text({
+			kind: "block",
+			run: {
+				text,
+				size: sizePx * (72 / 96),
+				bold: weight === "bold" || Number.parseInt(weight, 10) >= 600,
+				italic: (style.get("font-style") ?? "").toLowerCase() === "italic",
+				underline: "none",
+				strike: "noStrike",
+				color,
+				font: family,
+				baseline: 0,
+				caps: "none",
+				spacing: 0,
+				lineBreak: false
+			},
+			width: box.w,
+			height: box.h,
+			align: "middle",
+			lineAlign: "middle",
+			wrap: false,
+			clip: false,
+			lineLimit: false,
+			trimming: "none",
+			lineHeight: fit ? sizePx : sizePx * 1.2,
+			ascent: fit ? FIT_ASCENT : 0.9,
+			rtl: false,
+			...(fill >= 0 && { fill }),
+			...(fit && { stretch: true })
+		})
 
 		this.textPaths.push(index)
 		list.addItem(
@@ -909,20 +937,8 @@ class VmlWalker {
 
 const NO_CROP: Inset = { left: 0, top: 0, right: 0, bottom: 0 }
 
-const TEXT_PATH_BODY: TextBodyProps = {
-	insets: NO_CROP,
-	anchor: "ctr",
-	anchorCenter: false,
-	vertical: "horz",
-	wrap: false,
-	rotation: 0,
-	upright: false,
-	columns: 1,
-	columnSpacing: 0,
-	autofit: "none",
-	fontScale: 1,
-	lineSpacingReduction: 0
-}
+// Baseline of a fitted text path line below its top, as a fraction of the em (the rest holds descenders).
+const FIT_ASCENT = 0.8
 
 function geometryPath(segment: VmlSegment): GeometryPath {
 	return {

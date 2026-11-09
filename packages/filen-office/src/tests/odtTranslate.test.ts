@@ -75,6 +75,30 @@ describe("ODT text and paragraphs", () => {
 		expect(xml).toContain('w:header="1134"')
 	})
 
+	it.each([
+		["header", "footer"],
+		["footer", "header"]
+	] as const)("gives the first page the regular %s when only the %s has a first-page variant", async (plain, firstOnly) => {
+		const translation = await translated({
+			masters: `<style:master-page style:name="Standard"><style:${firstOnly}><text:p>Running ${firstOnly}</text:p></style:${firstOnly}><style:${firstOnly}-first><text:p>Cover ${firstOnly}</text:p></style:${firstOnly}-first><style:${plain}><text:p>Page ${plain}</text:p></style:${plain}></style:master-page>`,
+			body: "<text:p>x</text:p>"
+		})
+		const xml = partText(translation, "word/document.xml")
+		const rels = partText(translation, "word/_rels/document.xml.rels")
+		const target = (tag: string, type: string): string => {
+			const id = new RegExp(`<w:${tag}Reference w:type="${type}" r:id="([^"]+)"`).exec(xml)?.[1] ?? ""
+
+			return new RegExp(`Id="${id}"[^>]*Target="([^"]+)"`).exec(rels)?.[1] ?? ""
+		}
+
+		expect(xml).toContain("<w:titlePg/>")
+		expect(partText(translation, `word/${target(firstOnly, "first")}`)).toContain(`Cover ${firstOnly}`)
+		expect(partText(translation, `word/${target(firstOnly, "default")}`)).toContain(`Running ${firstOnly}`)
+		// titlePg with no first reference would blank this region on page 1 (ECMA-376 Part 1 §17.10.5).
+		expect(target(plain, "first")).toBe(target(plain, "default"))
+		expect(partText(translation, `word/${target(plain, "first")}`)).toContain(`Page ${plain}`)
+	})
+
 	it("turns notes into footnotes and endnotes with their references", async () => {
 		const translation = await translated({
 			body: '<text:p>a<text:note text:note-class="footnote"><text:note-citation>1</text:note-citation><text:note-body><text:p>foot</text:p></text:note-body></text:note>b<text:note text:note-class="endnote"><text:note-citation text:label="*">*</text:note-citation><text:note-body><text:p>end</text:p></text:note-body></text:note></text:p>'

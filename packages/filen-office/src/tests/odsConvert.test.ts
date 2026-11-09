@@ -364,6 +364,7 @@ describe("xlsx to ods", () => {
 
 		expect(await styles("de-DE")).toMatch(/<style:default-style style:family="table-cell">.*fo:language="de" fo:country="DE"/)
 		expect(await styles("fr")).toMatch(/fo:language="fr" fo:country="FR"/)
+		expect(await styles("sr-Latn-RS")).toMatch(/fo:language="sr" fo:script="Latn" fo:country="RS"/)
 		expect(await styles()).toMatch(/fo:language="en" fo:country="US"/)
 	})
 

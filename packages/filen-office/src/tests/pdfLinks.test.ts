@@ -90,14 +90,38 @@ describe("resolveDestination", () => {
 		const getDestination = vi.fn(() => Promise.resolve([ref, { name: "Fit" }]))
 		const getPageIndex = vi.fn(() => Promise.resolve(3))
 
-		await expect(resolveDestination(document({ getDestination, getPageIndex }), "intro")).resolves.toBe(4)
+		await expect(resolveDestination(document({ getDestination, getPageIndex }), "intro")).resolves.toEqual({
+			page: 4,
+			left: null,
+			top: null
+		})
 		expect(getDestination).toHaveBeenCalledWith("intro")
 		expect(getPageIndex).toHaveBeenCalledWith(ref)
 	})
 
 	it("resolves an explicit destination's page reference, or a page index written in its place", async () => {
-		await expect(resolveDestination(document({ getPageIndex: () => Promise.resolve(1) }), [{ num: 3, gen: 0 }])).resolves.toBe(2)
-		await expect(resolveDestination(document({}), [2, { name: "XYZ" }])).resolves.toBe(3)
+		await expect(resolveDestination(document({ getPageIndex: () => Promise.resolve(1) }), [{ num: 3, gen: 0 }])).resolves.toEqual({
+			page: 2,
+			left: null,
+			top: null
+		})
+		await expect(resolveDestination(document({}), [2, { name: "XYZ" }])).resolves.toEqual({ page: 3, left: null, top: null })
+	})
+
+	it("keeps the point each fit type names and leaves an unnamed coordinate unchanged", async () => {
+		const at = (dest: readonly unknown[]) => resolveDestination(document({}), dest)
+
+		await expect(at([0, { name: "XYZ" }, 72, 700, 2])).resolves.toEqual({ page: 1, left: 72, top: 700 })
+		// A null top keeps the vertical position; it is not 0 (the page's bottom).
+		await expect(at([0, { name: "XYZ" }, 36, null, null])).resolves.toEqual({ page: 1, left: 36, top: null })
+		await expect(at([0, { name: "FitH" }, 500])).resolves.toEqual({ page: 1, left: null, top: 500 })
+		await expect(at([0, { name: "FitBH" }, 420])).resolves.toEqual({ page: 1, left: null, top: 420 })
+		// [page /FitR left bottom right top]
+		await expect(at([0, { name: "FitR" }, 10, 20, 300, 400])).resolves.toEqual({ page: 1, left: 10, top: 400 })
+		await expect(at([0, { name: "FitV" }, 50])).resolves.toEqual({ page: 1, left: 50, top: null })
+		await expect(at([0, { name: "Fit" }])).resolves.toEqual({ page: 1, left: null, top: null })
+		await expect(at([0, { name: "FitB" }])).resolves.toEqual({ page: 1, left: null, top: null })
+		await expect(at([0, { name: "XYZ" }, Number.NaN, "700"])).resolves.toEqual({ page: 1, left: null, top: null })
 	})
 
 	it("gives null for a destination that points nowhere", async () => {

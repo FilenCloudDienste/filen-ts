@@ -72,12 +72,12 @@ export function canConvertPresentation(deck: Deck, target: PresentationTarget): 
 
 // The fresh ODP writer's report by loss kind.
 const FRESH_KINDS: readonly (readonly [RegExp, ConversionLossKind])[] = [
-	[/fill$/u, "fill"],
-	[/^(dashed line|line end)$/u, "line"],
+	[/fill$|^gradient |^pattern /u, "fill"],
+	[/^(dashed line$|dash pattern$|compound line )/u, "line"],
 	[/^outline level /u, "outlineLevel"],
 	[/^outline /u, "geometry"],
 	[/^numbering /u, "numbering"],
-	[/^(vertical |line-breaking|spacing|bullet size|run kept|picture bullet)/u, "text"],
+	[/^(vertical |line-breaking|spacing|bullet size|bullet of |run kept|picture bullet)/u, "text"],
 	[/^table style/u, "tableStyle"],
 	[/^chart$/u, "chartDetail"],
 	[/^chart frame/u, "chart"],

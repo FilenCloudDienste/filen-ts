@@ -202,6 +202,9 @@ export class PdfWriter implements PdfObjectSink {
 		{ readonly data: () => PdfImageData | undefined; readonly image: Promise<PdfImage> }[]
 	>()
 	private readonly states = new Map<string, { readonly name: string; readonly ref: PdfRef }>()
+	// Resources whose painting composites (an ExtGState with alpha, a soft mask or a blend mode, an image with an SMask,
+	// a pattern drawing one), by object number: a page using any gets a transparency group.
+	private readonly transparent = new Set<number>()
 	private readonly gradients = new Map<string, Promise<GradientResources>>()
 	// Meshes written so far, by hash of their stream and opacity.
 	private readonly meshes = new Map<
@@ -441,12 +444,22 @@ export class PdfWriter implements PdfObjectSink {
 		for (const key of Object.keys(resources)) if (resources[key] === null) delete resources[key]
 
 		const structParents = this.tagged ? this.struct.pageKey(page.index) : undefined
+		const composites = (map: ReadonlyMap<string, PdfRef>): boolean => {
+			for (const ref of map.values()) if (this.transparent.has(ref.id)) return true
+
+			return false
+		}
 
 		this.object(page.ref, {
 			Type: pdfName("Page"),
 			Parent: this.pagesRef,
 			MediaBox: [0, 0, round(page.width * 0.75), round(page.height * 0.75)],
 			Resources: resources,
+			// §11.4.7: compositing in RGB, not the device's or output intent's space; opaque pages stay as they were.
+			Group:
+				composites(page.extGStates) || composites(page.xobjects) || composites(page.patterns)
+					? { Type: pdfName("Group"), S: pdfName("Transparency"), CS: pdfName("DeviceRGB") }
+					: undefined,
 			Contents: contents,
 			Annots: page.annotations.length === 0 ? undefined : page.annotations,
 			StructParents: structParents,
@@ -485,6 +498,15 @@ export class PdfWriter implements PdfObjectSink {
 		if (entry === undefined) {
 			entry = { name: this.name("GS"), ref: this.allocate() }
 			this.states.set(key, entry)
+
+			if (
+				(options.fillAlpha !== undefined && round(options.fillAlpha) < 1) ||
+				(options.strokeAlpha !== undefined && round(options.strokeAlpha) < 1) ||
+				(options.blend !== undefined && options.blend !== "Normal") ||
+				options.softMask !== undefined
+			)
+				this.transparent.add(entry.ref.id)
+
 			this.object(entry.ref, {
 				Type: pdfName("ExtGState"),
 				ca: options.fillAlpha === undefined ? undefined : round(options.fillAlpha),
@@ -508,6 +530,8 @@ export class PdfWriter implements PdfObjectSink {
 	}): Promise<{ readonly name: string; readonly ref: PdfRef }> {
 		const pattern = { name: this.name("P"), ref: this.allocate() }
 		const fine = (value: number): number => Math.round(value * 1e6) / 1e6
+
+		if (this.transparent.has(cell.image.ref.id)) this.transparent.add(pattern.ref.id)
 
 		await this.stream(
 			pattern.ref,
@@ -767,7 +791,7 @@ export class PdfWriter implements PdfObjectSink {
 
 		transform?.(decoded.rgba)
 
-		return this.writeRgba(ref, name, common, decoded, orientation)
+		return this.writeRgba(ref, name, common, decoded, decoded.oriented === true ? 1 : orientation)
 	}
 
 	// Straight RGBA pixels (a picture the caller decoded or drew itself, such as an SVG's raster) as an image, written
@@ -802,6 +826,7 @@ export class PdfWriter implements PdfObjectSink {
 		let mask: PdfRef | undefined
 
 		if (alpha !== null) {
+			this.transparent.add(ref.id)
 			mask = this.allocate()
 			await this.stream(
 				mask,
@@ -939,12 +964,14 @@ export class PdfWriter implements PdfObjectSink {
 		const author = nonBlank(properties?.author)
 		const subject = nonBlank(properties?.subject)
 		const keywords = nonBlank(properties?.keywords)
+		// One instant for Info and XMP, which must agree (ISO 32000-1 §14.3.2).
+		const created = this.deterministic ? undefined : new Date()
 		const metadata = this.allocate()
 
 		await this.stream(
 			metadata,
 			{ Type: pdfName("Metadata"), Subtype: pdfName("XML") },
-			xmpMetadata({ title, author, subject, keywords, lang: this.options.lang, pdfua: this.tagged && title !== undefined })
+			xmpMetadata({ title, author, subject, keywords, created, lang: this.options.lang, pdfua: this.tagged && title !== undefined })
 		)
 
 		const catalog = this.allocate()
@@ -972,7 +999,7 @@ export class PdfWriter implements PdfObjectSink {
 			Author: author,
 			Subject: subject,
 			Keywords: keywords,
-			CreationDate: this.deterministic ? undefined : pdfDate(new Date())
+			CreationDate: created === undefined ? undefined : pdfDate(created)
 		})
 		await this.flushObjects()
 

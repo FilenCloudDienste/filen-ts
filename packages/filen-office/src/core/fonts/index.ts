@@ -24,6 +24,7 @@ export {
 	DEFAULT_FONT_LIMITS,
 	FontManager,
 	cssFont,
+	glyphWidthScale,
 	type EmbeddedFontFailure,
 	type EmbeddedFontReader,
 	type FaceRegistration,
@@ -49,6 +50,7 @@ export {
 	type SlotContext
 } from "./slots"
 export {
+	ARIAL_NARROW_WIDTH_SCALE,
 	NO_HINTS,
 	SUBSTITUTIONS,
 	UNCALIBRATED_APTOS_DISPLAY_SCALE,

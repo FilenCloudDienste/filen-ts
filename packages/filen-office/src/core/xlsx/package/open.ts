@@ -3,7 +3,7 @@ import { relationshipKind } from "../../docx/package"
 import { parseTheme, SCHEME_SLOTS } from "../../docx/theme/theme"
 import { isEncryptedContainer } from "../../encryption/index"
 import { OpcError, OpcPackage, ZipError, partKey, type ByteSource, type Relationships, type ZipOpenOptions } from "../../opc/index"
-import { coreTitle } from "../../opc/coreTitle"
+import { coreProperties } from "../../opc/coreTitle"
 import type { SheetKind, SheetOpenFailure } from "../../sheet/protocol"
 import { sliceClock, type SliceClock, type Slicing } from "../../slicing"
 import { parseXml, parseXmlSliced, XmlError, type XmlDocument } from "../../xml/index"
@@ -269,7 +269,15 @@ async function open(source: ByteSource, options: XlsxOpenOptions): Promise<XlsxO
 		main.type.startsWith("http://purl.oclc.org/ooxml/") ||
 		workbookRelationships.all.some(relationship => relationship.type.startsWith("http://purl.oclc.org/ooxml/"))
 
-	const title = await coreTitle(opc)
+	const { title, author, subject, keywords } = await coreProperties(opc)
+	const properties =
+		author === undefined && subject === undefined && keywords === undefined
+			? undefined
+			: {
+					...(author === undefined ? {} : { author }),
+					...(subject === undefined ? {} : { subject }),
+					...(keywords === undefined ? {} : { keywords })
+				}
 
 	return {
 		ok: true,
@@ -293,7 +301,8 @@ async function open(source: ByteSource, options: XlsxOpenOptions): Promise<XlsxO
 			limits,
 			macros,
 			signatures: await signatureCount(opc, packageRelationships),
-			...(title === undefined ? {} : { title })
+			...(title === undefined ? {} : { title }),
+			...(properties === undefined ? {} : { properties })
 		})
 	}
 }
