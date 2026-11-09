@@ -443,15 +443,39 @@ describe("numbering in the cascade", () => {
 		'<w:style w:type="paragraph" w:styleId="ListNumber"><w:basedOn w:val="ListBase"/><w:pPr><w:numPr><w:numId w:val="1"/></w:numPr></w:pPr></w:style>' +
 		'<w:style w:type="paragraph" w:styleId="ListNumberOwn"><w:basedOn w:val="ListBase"/><w:pPr><w:numPr><w:numId w:val="1"/></w:numPr><w:ind w:left="100"/></w:pPr></w:style>'
 
-	it("applies a direct list level before the paragraph style (§17.7.2), indents included", () => {
+	it("applies a direct list level before the paragraph style (§17.7.2), but its indent over the style's", () => {
 		const f = fixture(STYLES, "", NUMBERING)
 		const props = f.resolver.paragraph(
 			f.paragraph('<w:pStyle w:val="Indented"/><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr>')
 		).props
 
 		expect(props.numbering).toEqual({ numId: 1, ilvl: 0 })
-		expect(props.indent).toMatchObject({ start: 1440, firstLine: -360 })
+		expect(props.indent).toMatchObject({ start: 720, firstLine: -360 })
 		expect(props.spacing.after).toBe(0)
+		// Direct indent still beats the level's.
+		expect(
+			f.resolver.paragraph(
+				f.paragraph('<w:pStyle w:val="Indented"/><w:numPr><w:ilvl w:val="0"/><w:numId w:val="1"/></w:numPr><w:ind w:left="300"/>')
+			).props.indent
+		).toMatchObject({ start: 300, firstLine: -360 })
+	})
+
+	it("moves a List Paragraph item with its level", () => {
+		const f = fixture(
+			NORMAL +
+				'<w:style w:type="paragraph" w:styleId="ListParagraph"><w:name w:val="List Paragraph"/><w:basedOn w:val="Normal"/><w:pPr><w:ind w:left="720"/><w:contextualSpacing/></w:pPr></w:style>',
+			"",
+			'<w:abstractNum w:abstractNumId="0"><w:lvl w:ilvl="0"><w:numFmt w:val="bullet"/><w:lvlText w:val="•"/><w:pPr><w:ind w:left="720" w:hanging="360"/></w:pPr></w:lvl>' +
+				'<w:lvl w:ilvl="1"><w:numFmt w:val="bullet"/><w:lvlText w:val="o"/><w:pPr><w:ind w:left="1440" w:hanging="360"/></w:pPr></w:lvl></w:abstractNum>' +
+				'<w:num w:numId="1"><w:abstractNumId w:val="0"/></w:num>'
+		)
+		const item = (ilvl: number) =>
+			f.resolver.paragraph(
+				f.paragraph(`<w:pStyle w:val="ListParagraph"/><w:numPr><w:ilvl w:val="${String(ilvl)}"/><w:numId w:val="1"/></w:numPr>`)
+			).props.indent
+
+		expect(item(0)).toMatchObject({ start: 720, firstLine: -360 })
+		expect(item(1)).toMatchObject({ start: 1440, firstLine: -360 })
 	})
 
 	it("lets the paragraph style's indents, inherited ones included, beat the level it numbers through", () => {

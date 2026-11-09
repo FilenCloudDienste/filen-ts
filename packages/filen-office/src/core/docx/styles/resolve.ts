@@ -37,7 +37,7 @@ import type {
 import { HIGHLIGHT_COLORS, applyThemeShade, applyThemeTint } from "../theme/color"
 import type { Theme } from "../theme/theme"
 import { resolveCellMargins } from "./cellMargins"
-import { mergeCell, mergeParagraph, mergeRow, mergeRun, mergeTable, type Mutable } from "./merge"
+import { mergeCell, mergeIndent, mergeParagraph, mergeRow, mergeRun, mergeTable, type Mutable } from "./merge"
 import { DEFAULT_STYLE_SETTINGS, type StyleSettings } from "./settings"
 import { eastAsiaUsesAscii } from "../../fonts/slots"
 import { DocxStyles, type StyleDef } from "./styles"
@@ -622,16 +622,22 @@ export class PropertyResolver {
 		}
 
 		const acc: Mutable<ParagraphProps> = {}
+		// Numbering given directly: the level's indent goes over the paragraph style's.
+		const levelIndent = level !== undefined && direct.numbering?.numId !== undefined
 
-		for (const source of [
-			this.styles.defaultParagraph,
-			tableParagraph,
-			level?.level.paragraph ?? EMPTY_PARAGRAPH,
-			paragraphLevel,
-			direct
-		]) {
-			mergeParagraph(acc, source, true)
+		mergeParagraph(acc, this.styles.defaultParagraph, true)
+		mergeParagraph(acc, tableParagraph, true)
+
+		if (levelIndent && paragraphLevel.indent !== undefined) {
+			const indent: Mutable<IndentProps> = { ...acc.indent }
+
+			mergeIndent(indent, paragraphLevel.indent)
+			acc.indent = indent
 		}
+
+		mergeParagraph(acc, level?.level.paragraph ?? EMPTY_PARAGRAPH, true)
+		mergeParagraph(acc, paragraphLevel, !levelIndent)
+		mergeParagraph(acc, direct, true)
 
 		const defaults = this.styles.defaultRun
 		const runBase: Mutable<RunProps> = {}
