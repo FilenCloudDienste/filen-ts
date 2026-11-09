@@ -194,7 +194,7 @@ export interface ReviewSummaryProps {
 // What a pair's first run would do: why it was held (findings), the dry run's totals and its lists. Used by the
 // review card and by the add-pair dialog's last step.
 export function ReviewSummary({ summary, findings, planId, listsOpen = false }: ReviewSummaryProps) {
-	const { t, i18n } = useTranslation("sync")
+	const { t } = useTranslation("sync")
 	const [showLists, setShowLists] = useState(false)
 
 	return (
@@ -217,7 +217,7 @@ export function ReviewSummary({ summary, findings, planId, listsOpen = false }: 
 					{summary.refused !== null ? <DesktopCallout tone="error">{t(REFUSAL_KEY[summary.refused])}</DesktopCallout> : null}
 					{isLargePlan(summary) ? (
 						<DesktopCallout tone="warning">
-							{t("reviewLarge", { formatted: new Intl.NumberFormat(i18n.language).format(summary.actions) })}
+							{t("reviewLarge", { formatted: new Intl.NumberFormat().format(summary.actions) })}
 						</DesktopCallout>
 					) : null}
 					{planId !== null && planListsWithEntries(summary).length > 0 ? (

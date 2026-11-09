@@ -377,7 +377,6 @@ export function PhotoGrid({ rootUuids, listing }: PhotoGridProps) {
 								rootUuids={rootUuids}
 								columns={columns}
 								cellSize={cellSize}
-								language={language}
 								selectedUuids={selectedUuids}
 								safeActiveIndex={safeActiveIndex}
 								registerRef={registerRef}
@@ -422,7 +421,6 @@ interface PhotoGridRowsProps {
 	rootUuids: readonly string[]
 	columns: number
 	cellSize: number
-	language: string
 	selectedUuids: ReadonlySet<string>
 	safeActiveIndex: number
 	registerRef: PhotoTileProps["registerRef"]
@@ -442,7 +440,6 @@ function PhotoGridRows({
 	rootUuids,
 	columns,
 	cellSize,
-	language,
 	selectedUuids,
 	safeActiveIndex,
 	registerRef,
@@ -509,7 +506,7 @@ function PhotoGridRows({
 							className="flex items-end px-4 pb-2 text-sm font-medium"
 							style={rowStyle}
 						>
-							{formatTimelineMonth(language, row.year, row.month)}
+							{formatTimelineMonth(undefined, row.year, row.month)}
 						</div>
 					)
 				}

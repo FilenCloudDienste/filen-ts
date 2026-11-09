@@ -63,7 +63,7 @@ function useExternalTransfers(): ExternalTransferRow[] {
 // it, the active transfers (the desktop app's sync and mounts ones after the page's own, read-only), then
 // the finished ones.
 export function TransfersScreen() {
-	const { t, i18n } = useTranslation(["transfers", "common"])
+	const { t } = useTranslation(["transfers", "common"])
 	const navigate = useNavigate()
 	const transfers = useTransfersStore(useShallow(state => state.transfers))
 	// Changes when a drive job ends, which takes its row out of the bulk actions.
@@ -134,7 +134,7 @@ export function TransfersScreen() {
 					{showAggregate
 						? [
 								t("transfersScreenActiveCount", { count: activeCount }),
-								percentFormat(i18n.language).format(runningPercentFraction(percent)),
+								percentFormat(undefined).format(runningPercentFraction(percent)),
 								formatBytesPerSecond(speed)
 							].join(" · ")
 						: null}

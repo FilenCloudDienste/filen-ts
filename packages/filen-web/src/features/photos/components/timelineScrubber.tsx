@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState, type PointerEvent } from "react"
-import { useTranslation } from "react-i18next"
 import { KEEP_SELECTION_PROPS } from "@/features/drive/lib/clickAway.logic"
 import { cn } from "@filen/shared"
 import { formatTimelineMonthName, timelineHeaderAt, timelineYearMarks, type PhotosTimeline } from "@/features/photos/lib/timeline"
@@ -17,7 +16,6 @@ const SCROLL_PILL_LINGER_MS = 900
 // month there. A press or drag jumps. Mouse and pen only; keyboard users keep the grid's own keys and
 // the scroll container's Page Up/Down, and touch keeps native scrolling.
 export function TimelineScrubber({ timeline, scrollElement }: { timeline: PhotosTimeline; scrollElement: HTMLDivElement }) {
-	const { i18n } = useTranslation()
 	const railRef = useRef<HTMLDivElement>(null)
 	const [railHeight, setRailHeight] = useState(0)
 	const [scrollTop, setScrollTop] = useState(scrollElement.scrollTop)
@@ -189,7 +187,7 @@ export function TimelineScrubber({ timeline, scrollElement }: { timeline: Photos
 					)}
 					style={{ top: pillY }}
 				>
-					<span className="font-semibold">{formatTimelineMonthName(i18n.language, pillHeader.month)}</span>
+					<span className="font-semibold">{formatTimelineMonthName(undefined, pillHeader.month)}</span>
 					<span className="text-muted-foreground tabular-nums">{pillHeader.year}</span>
 				</div>
 			) : null}

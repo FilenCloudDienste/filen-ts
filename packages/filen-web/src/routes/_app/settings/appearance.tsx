@@ -5,6 +5,7 @@ import { ThemeRow } from "@/features/settings/components/appearance/themeRow"
 import { StartScreenRow } from "@/features/settings/components/appearance/startScreenRow"
 import { RailOrderRow } from "@/features/settings/components/appearance/railOrderRow"
 import { DriveMemoryRows } from "@/features/settings/components/appearance/driveMemoryRows"
+import { LanguageRow } from "@/features/settings/components/appearance/languageRow"
 import { SettingsGroup, SettingsPage } from "@/features/settings/components/settingsLayout"
 import { routeHead } from "@/lib/head/routeHead"
 import { i18n } from "@/lib/i18n"
@@ -24,6 +25,7 @@ function AppearancePage() {
 		>
 			<SettingsGroup title={t("settingsGroupGeneral")}>
 				<ThemeRow />
+				<LanguageRow />
 				<StartScreenRow />
 			</SettingsGroup>
 			<SettingsGroup

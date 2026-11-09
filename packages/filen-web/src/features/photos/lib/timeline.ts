@@ -240,10 +240,10 @@ export function timelineYearMarks(timeline: PhotosTimeline): TimelineYearMark[] 
 	return marks
 }
 
-const monthFormats = new Map<string, Intl.DateTimeFormat>()
+const monthFormats = new Map<string | undefined, Intl.DateTimeFormat>()
 
-// "July 2023" in the UI language.
-export function formatTimelineMonth(locale: string, year: number, month: number): string {
+// "July 2023"; `locale` undefined = the browser's region, which dates follow.
+export function formatTimelineMonth(locale: string | undefined, year: number, month: number): string {
 	let format = monthFormats.get(locale)
 
 	if (format === undefined) {
@@ -254,10 +254,11 @@ export function formatTimelineMonth(locale: string, year: number, month: number)
 	return format.format(new Date(year, month, 1))
 }
 
-const monthNameFormats = new Map<string, Intl.DateTimeFormat>()
+const monthNameFormats = new Map<string | undefined, Intl.DateTimeFormat>()
 
 // "July" in the UI language, for the scrubber's pill, which sets the year apart.
-export function formatTimelineMonthName(locale: string, month: number): string {
+// `locale` undefined = the browser's region, which dates follow.
+export function formatTimelineMonthName(locale: string | undefined, month: number): string {
 	let format = monthNameFormats.get(locale)
 
 	if (format === undefined) {

@@ -30,10 +30,10 @@ export interface RunningDetails {
 // rows). Live figures keep their decimals (formatBytesFixed), so a tick never changes their length, and
 // the speed goes last: it changes length all the time and there it has nothing to push.
 export function useRunningDetails(): (figures: RunningFigures) => RunningDetails {
-	const { t, i18n } = useTranslation("transfers")
+	const { t } = useTranslation("transfers")
 
 	return ({ transferred, size, percent, etaSeconds, bytesPerSecond }) => {
-		const percentText = size > 0 ? percentFormat(i18n.language).format(runningPercentFraction(percent)) : null
+		const percentText = size > 0 ? percentFormat(undefined).format(runningPercentFraction(percent)) : null
 		const timeLeft = etaSeconds === null ? null : t("transfersRowTimeLeft", { eta: formatSecondsToMediaClock(etaSeconds) })
 		const speed = bytesPerSecond === null || bytesPerSecond <= 0 ? null : formatBytesPerSecond(bytesPerSecond)
 

@@ -1,5 +1,5 @@
 import "@/polyfills"
-import "@/lib/i18n" // side-effect: initialize i18next before any component calls useTranslation
+import { i18n } from "@/lib/i18n" // side-effect: initialize i18next before any component calls useTranslation
 
 import { StrictMode } from "react"
 import { createRoot } from "react-dom/client"
@@ -14,6 +14,9 @@ import { NotFoundScreen } from "@/features/shell/components/notFoundScreen"
 import { useReminderStore } from "@/features/shell/store/useReminderStore"
 import { connectFileKindVerdictStorage } from "@/features/drive/lib/fileKindVerdictStorage"
 import "@/features/assistant/loop/register" // side-effect: registers the on-device assistant with its UI
+import { startLanguage } from "@/lib/i18n/language"
+import { syncDesktopShellStrings } from "@/lib/i18n/desktopShell"
+import { refreshDocumentTitle } from "@/lib/head/refreshTitle"
 
 // notFoundMode "root" (the default is "fuzzy") keeps every unknown URL on ONE full-page 404 instead of
 // rendering it inside whichever ancestor layout happened to match, and makes the root match the
@@ -31,6 +34,13 @@ const router = createRouter({ routeTree, defaultNotFoundComponent: NotFoundScree
 // ready. Runs exactly once (module code is not double-invoked, unlike StrictMode effects).
 advanceBootSplash("bundle")
 void bootSdk()
+
+// Fetched alongside the SDK boot; the first render waits for it briefly (English if it is late).
+const languageReady = startLanguage()
+
+i18n.on("languageChanged", () => {
+	void refreshDocumentTitle(router)
+})
 
 // Each first screen dismisses the splash itself; this only stops one that never does (a router error
 // page) from staying hidden under it. The bundle is a single chunk, so after boot settles the first screen
@@ -82,8 +92,12 @@ if (!rootElement) {
 	throw new Error("Root element not found")
 }
 
-createRoot(rootElement).render(
-	<StrictMode>
-		<RouterProvider router={router} />
-	</StrictMode>
-)
+void languageReady.then(() => {
+	// After the language settles, so the desktop shell is not relabelled in English first.
+	syncDesktopShellStrings()
+	createRoot(rootElement).render(
+		<StrictMode>
+			<RouterProvider router={router} />
+		</StrictMode>
+	)
+})

@@ -283,6 +283,8 @@ export default defineConfig({
 	// pixels, never DOM values: the password input always renders masked.
 	use: {
 		baseURL: BASE_URL,
+		// The specs read English copy; the app follows the browser's languages once catalogs ship.
+		locale: "en-US",
 		trace: process.env["CI"]
 			? { mode: "retain-on-failure", snapshots: { dom: false, aria: true, screen: false }, screenshots: false, sources: true }
 			: "off",

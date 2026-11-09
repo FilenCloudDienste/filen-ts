@@ -29,15 +29,13 @@ const COUNT_CLASS = "ml-auto shrink-0 pl-2 text-xs text-muted-foreground tabular
 
 // A count on the right of a row: the number for the eye, its long form for a screen reader.
 function RowCount({ count, label }: { count: number; label: string }) {
-	const { i18n } = useTranslation()
-
 	return (
 		<>
 			<span
 				aria-hidden="true"
 				className={COUNT_CLASS}
 			>
-				{count.toLocaleString(i18n.language)}
+				{count.toLocaleString()}
 			</span>
 			<span className="sr-only">{label}</span>
 		</>

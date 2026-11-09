@@ -1,63 +1,52 @@
 // i18n translation pipeline — fills the target-language catalogs (src/locales/<lang>.json)
-// from the English source catalogs (src/locales/en/*.ts) via the Anthropic Messages API.
+// from the English source catalogs (src/locales/en/**/*.ts) via the Anthropic Messages API.
+// scripts/README.md describes the modes, the files it writes and the order of the first run.
 //
 // The English source is split across real i18next namespaces — the list lives in
 // `@/lib/i18n/catalog` (EN_NAMESPACES), and each namespace file exports its own `as const` object.
 // Every target-language catalog nests translations under the same namespace keys, e.g.
 // `{ "common": {...}, "errors": {...} }`.
 //
-// Run with: pnpm run translate-i18n          (DELTA mode — only changed English keys)
-//           pnpm run translate-i18n --full   (FULL mode — every key for every language)
-//           pnpm run translate-i18n de       (restrict to specific languages)
+// Run with: pnpm run translate-i18n                  (DELTA mode — only changed English keys)
+//           pnpm run translate-i18n --full           (FULL mode — every key for every language)
+//           pnpm run translate-i18n de,fr            (restrict to specific languages)
+//           pnpm run translate-i18n --snapshot-only  (write the snapshot and manifest, translate nothing)
 //           No `--` separator: pnpm forwards it to the script as a literal argument.
 //
-// Modes:
-//   DELTA (default) — compare the English catalog against the committed snapshot
-//                     (src/locales/.en-snapshot.json) to find added/modified/removed keys, then
-//                     translate only the added/modified ones and delete the removed ones from every
-//                     target catalog. Content-based, so a changed value is caught regardless of git
-//                     history (no dependence on commit topology, force-pushes, or squash merges).
-//                     Plus a safety net: any key present in `en` but missing from a target catalog is
-//                     treated as added (covers a brand-new empty stub or a previously-failed run).
-//                     After a successful run the snapshot is rewritten to the current English catalog.
-//   FULL (--full)   — translate every English key for every target language (ignores the snapshot).
-//
-// DRY_RUN=1 — skip the Anthropic API entirely; stub each translation as "<lang>:<english>"
-//             (e.g. "de:Cancel"). Lets the catalog-read / delta / file-write logic be exercised
-//             with zero token spend. The stub is OBVIOUS in code (see translateDryRun below).
+// DRY_RUN=1 — skip the Anthropic API entirely; stub each translation as "<lang>:<english>".
 //
 // Reads ANTHROPIC_API_KEY from the environment — never hardcoded, never logged.
 
 import Anthropic from "@anthropic-ai/sdk"
-import { readFileSync, writeFileSync, readdirSync, existsSync } from "node:fs"
+import { readFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
-import { dirname, join } from "node:path"
+import { dirname, join, relative } from "node:path"
 import {
-	buildOutputSchema,
+	applyRemovals,
 	buildSystemPrompt,
-	computePluralBases,
-	cldrCategories,
+	computeDelta,
+	coveredKeyCount,
+	coversEveryLanguage,
+	englishSource,
+	keysToTranslate,
+	LANGUAGE_NAMES,
 	parseCliArgs,
-	parseTranslatedBatch,
-	PLURAL_SUFFIXES,
+	readJsonObject,
 	sortRecord,
-	splitPluralKey,
+	translateBatch,
+	translateDryRun,
 	translateSubset,
-	type CliArgs
+	writeJsonFile,
+	type Catalog,
+	type CreateMessage,
+	type Delta
 } from "@filen/shared/tooling/i18n"
-
+import { SUPPORTED_LANGUAGES, type TargetLanguage } from "@filen/shared/languages"
 import { EN_NAMESPACES, EN_CATALOGS, type EnNamespace } from "@/lib/i18n/catalog"
 
-// NOTE: do NOT import from `@/lib/i18n` here — its index module runs
-// `i18n.use(initReactI18next).init(...)` as an import-time side effect the moment it's loaded,
-// which this script has no reason to trigger. `@/lib/i18n/catalog` is the sanctioned import: it is
-// side-effect free and owns the namespace list both the app and this pipeline read, so a namespace
-// added there is translated without touching this file.
-//
-// TARGET_LANGUAGES/LANGUAGE_NAMES live in this script rather than a shared module (unlike
-// mobile's `@/locales/languages`): nothing else in the app consumes the target-language list yet.
-// LANGUAGE_NAMES is typed `Record<TargetLanguage, string>`, so adding a language to
-// TARGET_LANGUAGES without a matching name is a compile error.
+// NOTE: do NOT import from `@/lib/i18n` here — its index module initialises i18next as an import-time
+// side effect. `@/lib/i18n/catalog` is side-effect free and owns the namespace list both the app and
+// this pipeline read, so a namespace added there is translated without touching this file.
 
 // ---------------------------------------------------------------------------
 // Paths & constants
@@ -69,44 +58,32 @@ const PACKAGE_DIR = join(SCRIPT_DIR, "..")
 const EN_SOURCE_DIR = join(PACKAGE_DIR, "src", "locales", "en")
 const LOCALES_DIR = join(PACKAGE_DIR, "src", "locales")
 // Baseline for the DELTA diff: the English catalog as of the last translation (namespace -> key ->
-// value). Lives alongside the language catalogs but is never loaded as one (not a TARGET_LANGUAGE;
-// a dotfile).
+// value). A dotfile, so the runtime's catalog glob never serves it.
 const EN_SNAPSHOT_PATH = join(LOCALES_DIR, ".en-snapshot.json")
+// How many English keys each catalog holds; the runtime offers a language only when it is nearly complete.
+const MANIFEST_PATH = join(LOCALES_DIR, ".catalogs.json")
 
-// ---------------------------------------------------------------------------
-// Target languages
-// ---------------------------------------------------------------------------
+// Every supported language but English, the source.
+const TARGET_LANGUAGES: readonly TargetLanguage[] = SUPPORTED_LANGUAGES.filter((lang): lang is TargetLanguage => lang !== "en")
 
-// Single source of truth for which languages this pipeline currently translates into. "de" only
-// while app copy is still stabilizing; expanding towards mobile's full language set later is a
-// one-line addition here — LANGUAGE_NAMES below forces a matching entry for every language added.
-export const TARGET_LANGUAGES = ["de"] as const
+// Namespaces whose keys are translated one sub-file at a time, each with only its own file as context: preview
+// spreads ~60 editor sub-catalogs, together far larger than any one request needs.
+const SPLIT_BY_FILE: ReadonlySet<EnNamespace> = new Set(["preview"])
 
-type TargetLanguage = (typeof TARGET_LANGUAGES)[number]
-
-// English names of the target languages, used only to tell the model what to translate into.
-const LANGUAGE_NAMES: Record<TargetLanguage, string> = {
-	de: "German"
+// English text a namespace spreads from outside src/locales/en, keyed by its import specifier.
+const EXTERNAL_SOURCES: Readonly<Record<string, string>> = {
+	"@filen/shared/desktopShellStrings": fileURLToPath(import.meta.resolve("@filen/shared/desktopShellStrings"))
 }
-
-// ---------------------------------------------------------------------------
-// English source catalog (real i18next namespaces)
-// ---------------------------------------------------------------------------
 
 const NAMESPACES = EN_NAMESPACES
 
 type Namespace = EnNamespace
 
-// One flat key→value map per namespace; every value is a string (plural keys are separate
-// `_one`/`_other` entries). Unlike mobile's single merged `en` barrel, keys only need to be unique
-// WITHIN a namespace — this mirrors the app's real i18next config (keySeparator/nsSeparator ON,
-// real namespaces), so the delta/plural/translation machinery below is scoped per namespace.
-const EN_CATALOG: Record<Namespace, Record<string, string>> = EN_CATALOGS
+type NestedCatalog = Record<Namespace, Catalog>
 
-// Every per-namespace record below is built from NAMESPACES, so adding a namespace to the catalog
-// module is the only edit a new namespace needs. Object.fromEntries erases the key union, so the
-// result is re-typed once, here — NAMESPACES lists every key of the catalog object Namespace is derived
-// from, so every key is present by construction.
+const EN_CATALOG: NestedCatalog = EN_CATALOGS
+
+// Object.fromEntries erases the key union; NAMESPACES lists every key of the catalog object, so every key is present.
 function perNamespace<T>(make: (ns: Namespace) => T): Record<Namespace, T> {
 	return Object.fromEntries(NAMESPACES.map(ns => [ns, make(ns)])) as Record<Namespace, T>
 }
@@ -114,50 +91,110 @@ function perNamespace<T>(make: (ns: Namespace) => T): Record<Namespace, T> {
 const DRY_RUN = process.env["DRY_RUN"] === "1"
 
 // ---------------------------------------------------------------------------
-// English source files as translator context (JSDoc-rich)
+// Translation units: which keys share one prompt context
 // ---------------------------------------------------------------------------
 
-// Concatenate the raw `src/locales/en/**/*.ts` files as text (a namespace may spread sub-catalogs kept
-// in a subdirectory). Their JSDoc comments describe what each key means and where it's used —
-// invaluable context for the translator, and a stable prefix that prompt caching reuses across
-// every target language.
-function readEnglishSourceFiles(): string {
-	const files = readdirSync(EN_SOURCE_DIR, { recursive: true, encoding: "utf8" })
-		.filter(name => name.endsWith(".ts"))
-		.sort()
+interface Unit {
+	ns: Namespace
+	label: string
+	// Source files sent as context, besides common.ts.
+	files: readonly string[]
+	keys: readonly string[]
+}
 
-	const parts: string[] = []
+const IMPORT_PATTERN = /^import\s+\{([^}]*)\}\s+from\s+"([^"]+)"/gm
 
-	for (const name of files) {
-		const contents = readFileSync(join(EN_SOURCE_DIR, name), "utf8")
+// The English files a namespace file spreads in, with the export names it imports from each.
+function spreadSources(file: string): { path: string; names: string[] }[] {
+	const sources: { path: string; names: string[] }[] = []
 
-		parts.push(`// ===== src/locales/en/${name} =====\n${contents}`)
+	for (const match of readFileSync(file, "utf8").matchAll(IMPORT_PATTERN)) {
+		const specifier = match[2] ?? ""
+		const names = (match[1] ?? "")
+			.split(",")
+			.map(name => name.trim())
+			.filter(name => name.length > 0 && !name.startsWith("type "))
+		const path = specifier.startsWith("@/locales/en/")
+			? join(EN_SOURCE_DIR, `${specifier.slice("@/locales/en/".length)}.ts`)
+			: EXTERNAL_SOURCES[specifier]
+
+		if (path !== undefined && names.length > 0) {
+			sources.push({ path, names })
+		}
 	}
 
-	return parts.join("\n\n")
+	return sources
+}
+
+async function unitsOf(ns: Namespace): Promise<Unit[]> {
+	const namespaceFile = join(EN_SOURCE_DIR, `${ns}.ts`)
+	const sources = spreadSources(namespaceFile)
+	const allKeys = Object.keys(EN_CATALOG[ns])
+
+	if (!SPLIT_BY_FILE.has(ns)) {
+		return [{ ns, label: ns, files: [namespaceFile, ...sources.map(source => source.path)], keys: allKeys }]
+	}
+
+	const owned = new Set<string>()
+	const units: Unit[] = []
+
+	for (const source of sources) {
+		const module = (await import(source.path)) as Record<string, unknown>
+		const keys: string[] = []
+
+		for (const name of source.names) {
+			const value = module[name]
+
+			if (typeof value === "object" && value !== null) {
+				keys.push(...Object.keys(value))
+			}
+		}
+
+		for (const key of keys) {
+			owned.add(key)
+		}
+
+		units.push({ ns, label: `${ns}/${relative(EN_SOURCE_DIR, source.path)}`, files: [source.path], keys })
+	}
+
+	const own = allKeys.filter(key => !owned.has(key))
+
+	if (own.length > 0) {
+		units.unshift({ ns, label: ns, files: [namespaceFile], keys: own })
+	}
+
+	return units
+}
+
+// The JSDoc-rich English files of a unit plus common.ts, whose shared terms every namespace reuses.
+function unitContext(unit: Unit): string {
+	const commonFile = join(EN_SOURCE_DIR, "common.ts")
+	const files = unit.files.includes(commonFile) ? unit.files : [commonFile, ...unit.files]
+
+	return files.map(file => `// ===== ${relative(PACKAGE_DIR, file)} =====\n${readFileSync(file, "utf8")}`).join("\n\n")
+}
+
+function pick(record: Catalog, keys: readonly string[]): Catalog {
+	const out: Catalog = {}
+
+	for (const key of keys) {
+		const value = record[key]
+
+		if (value !== undefined) {
+			out[key] = value
+		}
+	}
+
+	return out
 }
 
 // ---------------------------------------------------------------------------
-// Delta computation (English catalog vs. committed snapshot), scoped per namespace
+// Catalog files
 // ---------------------------------------------------------------------------
 
-interface NamespaceDelta {
-	// Keys whose English value was added or changed → (re)translate for every target.
-	upsert: Record<string, string>
-	// Keys removed from English → delete from every target catalog.
-	removed: readonly string[]
-}
-
-type Delta = Record<Namespace, NamespaceDelta>
-
-function emptyDelta(): Delta {
-	return perNamespace(() => ({ upsert: {}, removed: [] }))
-}
-
-// Shared shape check for one namespace's slice of a parsed catalog/snapshot JSON file: absent →
-// empty catalog (forward-compatible with a namespace added after the file was written), present
-// but not a plain object → throw (a corrupt file fails loudly instead of silently losing data).
-function readNamespaceRecord(record: Record<string, unknown>, ns: Namespace, fileLabel: string): Record<string, string> {
+// One namespace's slice of a nested catalog file: absent → empty (a namespace added after the file was written),
+// anything but a plain object → throw.
+function namespaceRecord(record: Record<string, unknown>, ns: Namespace, label: string): Catalog {
 	const value = record[ns]
 
 	if (value === undefined) {
@@ -165,328 +202,75 @@ function readNamespaceRecord(record: Record<string, unknown>, ns: Namespace, fil
 	}
 
 	if (typeof value !== "object" || value === null || Array.isArray(value)) {
-		throw new Error(`${fileLabel} namespace "${ns}" is not a JSON object`)
+		throw new Error(`${label} namespace "${ns}" is not a JSON object`)
 	}
 
-	return value as Record<string, string>
+	return value as Catalog
 }
 
-// Read a JSON file holding a plain object. Returns null when absent or blank; throws on any other
-// shape so a corrupt file fails loudly instead of silently losing data.
-function readJsonObject(path: string, label: string): Record<string, unknown> | null {
-	if (!existsSync(path)) {
-		return null
-	}
+function readNested(path: string, label: string): NestedCatalog | null {
+	const record = readJsonObject(path, label)
 
-	const raw = readFileSync(path, "utf8").trim()
-
-	if (raw.length === 0) {
-		return null
-	}
-
-	const parsed: unknown = JSON.parse(raw)
-
-	if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-		throw new Error(`${label} is not a JSON object`)
-	}
-
-	return parsed as Record<string, unknown>
+	return record === null ? null : perNamespace(ns => namespaceRecord(record, ns, label))
 }
 
-// Read the English snapshot (the DELTA baseline) — the catalog as of the last translation, nested
-// by namespace like the target catalogs. Returns null when absent (first run / not yet seeded) so
-// the caller re-baselines instead of retranslating everything; throws on a malformed file so a
-// corrupt baseline fails loudly rather than silently re-translating the whole catalog.
-function readSnapshot(): Record<Namespace, Record<string, string>> | null {
-	const record = readJsonObject(EN_SNAPSHOT_PATH, ".en-snapshot.json")
-
-	if (record === null) {
-		return null
-	}
-
-	return perNamespace(ns => readNamespaceRecord(record, ns, ".en-snapshot.json"))
+function writeNested(path: string, catalog: NestedCatalog): void {
+	writeJsonFile(
+		path,
+		perNamespace(ns => sortRecord(catalog[ns]))
+	)
 }
 
-// DELTA = the current English catalog diffed against the snapshot baseline, per namespace. A key
-// whose value changed (or a brand-new key absent from the snapshot) is an upsert; a key in the
-// snapshot but no longer in English is a removal. Purely content-based — a modified value is
-// caught no matter which commit it landed in. With no snapshot yet, assume the catalogs are in
-// sync (empty delta); the per-language missing-key fallback in keysToTranslate still fills any
-// genuinely-absent key.
-function computeDelta(): Delta {
-	const snapshot = readSnapshot()
-
-	if (snapshot === null) {
-		return emptyDelta()
-	}
-
-	return perNamespace(ns => computeNamespaceDelta(snapshot[ns], EN_CATALOG[ns]))
+function languagePath(lang: TargetLanguage): string {
+	return join(LOCALES_DIR, `${lang}.json`)
 }
 
-function computeNamespaceDelta(baseline: Record<string, string>, catalog: Record<string, string>): NamespaceDelta {
-	const upsert: Record<string, string> = {}
-	const removed: string[] = []
+// How many current English keys each catalog on disk holds.
+function writeManifest(catalogs: ReadonlyMap<TargetLanguage, NestedCatalog>): void {
+	const languages: Partial<Record<TargetLanguage, number>> = {}
 
-	for (const [key, value] of Object.entries(catalog)) {
-		if (baseline[key] !== value) {
-			upsert[key] = value
+	for (const lang of TARGET_LANGUAGES) {
+		const catalog = catalogs.get(lang) ?? readNested(languagePath(lang), `Catalog ${lang}.json`)
+
+		if (catalog !== null) {
+			languages[lang] = NAMESPACES.reduce((sum, ns) => sum + coveredKeyCount(EN_CATALOG[ns], catalog[ns]), 0)
 		}
 	}
 
-	for (const key of Object.keys(baseline)) {
-		if (!(key in catalog)) {
-			removed.push(key)
-		}
-	}
-
-	return { upsert, removed }
-}
-
-// ---------------------------------------------------------------------------
-// Per-language merge planning
-// ---------------------------------------------------------------------------
-
-function readTargetCatalog(lang: TargetLanguage): Record<Namespace, Record<string, string>> {
-	const fileLabel = `Catalog ${lang}.json`
-	const record = readJsonObject(join(LOCALES_DIR, `${lang}.json`), fileLabel)
-
-	return perNamespace(ns => (record === null ? {} : readNamespaceRecord(record, ns, fileLabel)))
-}
-
-// Plural groups are scoped to their own namespace, never merged across namespaces.
-const ENGLISH_PLURAL_BASES: Record<Namespace, ReadonlyMap<string, ReadonlySet<string>>> = perNamespace(ns =>
-	computePluralBases(EN_CATALOG[ns])
-)
-
-function pluralBaseOf(ns: Namespace, key: string): string | null {
-	const split = splitPluralKey(key)
-
-	if (split === null) {
-		return null
-	}
-
-	return ENGLISH_PLURAL_BASES[ns].has(split.base) ? split.base : null
-}
-
-// Every (key -> English source text) entry a target language needs for one plural base, within one
-// namespace: the union of the categories English defines and the categories the language requires.
-// Categories English lacks (`_few` / `_many`) use the English `_other` text as the translation
-// template.
-function pluralGroupSources(ns: Namespace, base: string, lang: TargetLanguage): Record<string, string> {
-	const catalog = EN_CATALOG[ns]
-	const englishCategories = ENGLISH_PLURAL_BASES[ns].get(base) ?? new Set<string>()
-	const categories = new Set<string>([...englishCategories, ...cldrCategories(lang)])
-	const template = catalog[`${base}_other`] ?? catalog[`${base}_one`]
-	const out: Record<string, string> = {}
-
-	for (const category of categories) {
-		const source = catalog[`${base}_${category}`] ?? template
-
-		if (source !== undefined) {
-			out[`${base}_${category}`] = source
-		}
-	}
-
-	return out
-}
-
-// The subset of English keys (key -> source text) this language needs translated for one namespace,
-// given the mode and its existing catalog. FULL = the whole namespace with plural groups expanded to
-// the language's full CLDR set. DELTA = changed English keys + non-plural keys missing from the
-// target + the CLDR plural categories missing from the target. A *changed* English plural
-// retranslates its whole group (the wording shifted); a merely *incomplete* group only fills the
-// missing categories, so human-reviewed `_one` / `_other` forms are never clobbered.
-function keysToTranslate(
-	ns: Namespace,
-	args: CliArgs<TargetLanguage>,
-	delta: NamespaceDelta,
-	existing: Record<string, string>,
-	lang: TargetLanguage
-): Record<string, string> {
-	const catalog = EN_CATALOG[ns]
-	const result: Record<string, string> = {}
-
-	if (args.full) {
-		const fullGroups = new Set<string>()
-
-		for (const [key, value] of Object.entries(catalog)) {
-			const base = pluralBaseOf(ns, key)
-
-			if (base === null) {
-				result[key] = value
-			} else {
-				fullGroups.add(base)
-			}
-		}
-
-		for (const base of fullGroups) {
-			Object.assign(result, pluralGroupSources(ns, base, lang))
-		}
-
-		return result
-	}
-
-	// English-source changes: a changed plural variant flags its whole group for retranslation.
-	const changedGroups = new Set<string>()
-
-	for (const [key, value] of Object.entries(delta.upsert)) {
-		const base = pluralBaseOf(ns, key)
-
-		if (base === null) {
-			result[key] = value
-		} else {
-			changedGroups.add(base)
-		}
-	}
-
-	// Non-plural English keys missing from the target (new stub / failed prior run).
-	for (const [key, value] of Object.entries(catalog)) {
-		if (pluralBaseOf(ns, key) !== null) {
-			continue
-		}
-
-		if (!(key in existing)) {
-			result[key] = value
-		}
-	}
-
-	// Plural groups: retranslate the whole group if its English wording changed, otherwise fill only
-	// the CLDR categories the target is missing (this is what supplies `_few` / `_many`).
-	for (const base of ENGLISH_PLURAL_BASES[ns].keys()) {
-		const sources = pluralGroupSources(ns, base, lang)
-
-		if (changedGroups.has(base)) {
-			Object.assign(result, sources)
-
-			continue
-		}
-
-		for (const [key, value] of Object.entries(sources)) {
-			if (!(key in existing)) {
-				result[key] = value
-			}
-		}
-	}
-
-	return result
-}
-
-// ---------------------------------------------------------------------------
-// Translation — Anthropic Messages API (with prompt caching) or DRY_RUN stub
-// ---------------------------------------------------------------------------
-
-// DRY_RUN stub: prefix every English value with the lang code. Obvious, deterministic, free.
-function translateDryRun(lang: TargetLanguage, subset: Record<string, string>): Record<string, string> {
-	const result: Record<string, string> = {}
-
-	for (const [key, value] of Object.entries(subset)) {
-		result[key] = `${lang}:${value}`
-	}
-
-	return result
-}
-
-async function translateBatch(args: {
-	client: Anthropic
-	lang: TargetLanguage
-	batch: Record<string, string>
-	systemPrompt: string
-}): Promise<Record<string, string>> {
-	const { client, lang, batch, systemPrompt } = args
-	const languageName = LANGUAGE_NAMES[lang]
-
-	// Stable, cached system prefix (instructions + full English source) is reused across every batch
-	// and every target language — the first call writes the cache, the rest read it. The varying part
-	// (the batch subset + the target language name) lives in the per-language user message.
-	// Thinking is always on for this model and counts against max_tokens; "default" fallbacks route a
-	// refused request to another model inside the same call.
-	const response = await client.beta.messages.create({
-		model: MODEL,
-		max_tokens: 16000,
-		betas: ["server-side-fallback-2026-07-01"],
-		fallbacks: "default",
-		system: [
-			{
-				type: "text",
-				text: systemPrompt,
-				cache_control: {
-					type: "ephemeral"
-				}
-			}
-		],
-		output_config: {
-			effort: "high",
-			format: {
-				type: "json_schema",
-				schema: buildOutputSchema(Object.keys(batch))
-			}
-		},
-		messages: [
-			{
-				role: "user",
-				content: [
-					{
-						type: "text",
-						text: [
-							`Translate these English UI strings to ${languageName}.`,
-							"Return ONLY the JSON map of the same keys to their translated values.",
-							"",
-							JSON.stringify(batch, null, 2)
-						].join("\n")
-					}
-				]
-			}
-		]
-	})
-
-	if (response.stop_reason === "refusal" || response.stop_reason === "max_tokens") {
-		throw new Error(`Translation for ${lang} stopped early (${response.stop_reason})`)
-	}
-
-	const block = response.content.find(part => part.type === "text")
-
-	if (block?.type !== "text") {
-		throw new Error(`No text content returned for ${lang}`)
-	}
-
-	return parseTranslatedBatch(block.text)
-}
-
-// ---------------------------------------------------------------------------
-// Catalog write (sorted keys + trailing newline for stable diffs)
-// ---------------------------------------------------------------------------
-
-function writeSortedJson(path: string, byNamespace: Record<Namespace, Record<string, string>>): void {
-	const sorted: Record<Namespace, Record<string, string>> = perNamespace(ns => sortRecord(byNamespace[ns]))
-
-	writeFileSync(path, `${JSON.stringify(sorted, null, "\t")}\n`, "utf8")
-}
-
-function writeCatalog(lang: TargetLanguage, catalog: Record<Namespace, Record<string, string>>): void {
-	writeSortedJson(join(LOCALES_DIR, `${lang}.json`), catalog)
-}
-
-// Rewrite the snapshot to the current English catalog (sorted + trailing newline, like the target
-// catalogs, and nested by namespace the same way) so the next DELTA diffs against this state. Written
-// into the same PR as the translations, so the baseline only advances once that PR is merged — an
-// unmerged run keeps re-detecting the same delta.
-function writeSnapshot(): void {
-	writeSortedJson(EN_SNAPSHOT_PATH, EN_CATALOG)
+	writeJsonFile(MANIFEST_PATH, { languages })
 }
 
 // ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 
+function countKeys(catalog: NestedCatalog): number {
+	return NAMESPACES.reduce((sum, ns) => sum + Object.keys(catalog[ns]).length, 0)
+}
+
 async function main(): Promise<void> {
-	const args = parseCliArgs(process.argv.slice(2), TARGET_LANGUAGES)
-	const delta = args.full ? emptyDelta() : computeDelta()
-	const englishSource = readEnglishSourceFiles()
-	const systemPrompt = buildSystemPrompt(englishSource, "web")
-	const englishKeyCount = NAMESPACES.reduce((sum, ns) => sum + Object.keys(EN_CATALOG[ns]).length, 0)
+	const argv = process.argv.slice(2)
+	const snapshotOnly = argv.includes("--snapshot-only")
+	const args = parseCliArgs(
+		argv.filter(arg => arg !== "--snapshot-only"),
+		TARGET_LANGUAGES
+	)
+
+	if (snapshotOnly) {
+		writeNested(EN_SNAPSHOT_PATH, EN_CATALOG)
+		writeManifest(new Map())
+		console.log("[translate-i18n] wrote the snapshot and the manifest; nothing translated")
+
+		return
+	}
+
+	const snapshot = args.full ? null : readNested(EN_SNAPSHOT_PATH, ".en-snapshot.json")
+	const delta: Record<Namespace, Delta> = perNamespace(ns =>
+		args.full ? { upsert: {}, removed: [] } : computeDelta(snapshot?.[ns] ?? null, EN_CATALOG[ns])
+	)
 
 	console.log(`[translate-i18n] mode=${args.full ? "FULL" : "DELTA"} dryRun=${String(DRY_RUN)}`)
-	console.log(`[translate-i18n] english catalog: ${String(englishKeyCount)} keys across ${String(NAMESPACES.length)} namespaces`)
+	console.log(`[translate-i18n] english catalog: ${String(countKeys(EN_CATALOG))} keys across ${String(NAMESPACES.length)} namespaces`)
 	console.log(`[translate-i18n] target languages: ${args.languages.join(", ")}`)
 
 	if (!args.full) {
@@ -496,7 +280,7 @@ async function main(): Promise<void> {
 		console.log(`[translate-i18n] delta: ${String(upsertCount)} added/changed, ${String(removedCount)} removed`)
 	}
 
-	let client: Anthropic | null = null
+	let createMessage: CreateMessage | null = null
 
 	if (!DRY_RUN) {
 		const apiKey = process.env["ANTHROPIC_API_KEY"]
@@ -507,69 +291,88 @@ async function main(): Promise<void> {
 
 		// The SDK reads ANTHROPIC_API_KEY from the environment itself; constructing without
 		// passing the value keeps it out of any logged constructor args.
-		client = new Anthropic()
+		const client = new Anthropic()
+
+		createMessage = request => client.beta.messages.create(request)
 	}
 
+	// Every requested language held in memory (about 0.5 MB each), so each namespace can be written as a checkpoint.
+	const catalogs = new Map<TargetLanguage, NestedCatalog>()
+
 	for (const lang of args.languages) {
-		const existing = readTargetCatalog(lang)
-		const merged: Record<Namespace, Record<string, string>> = perNamespace(ns => ({ ...existing[ns] }))
+		const existing = readNested(languagePath(lang), `Catalog ${lang}.json`)
 
-		for (const ns of NAMESPACES) {
-			// Apply removals first so a key removed AND re-added in the same delta nets to the new value.
-			// A removed plural variant drops every CLDR-category sibling — including target-only `_few` /
-			// `_many` that never appear in the English diff.
-			for (const key of delta[ns].removed) {
-				Reflect.deleteProperty(merged[ns], key)
+		catalogs.set(
+			lang,
+			perNamespace(ns => ({ ...(existing?.[ns] ?? {}) }))
+		)
+	}
 
-				const split = splitPluralKey(key)
+	// Namespace outer, language inner: every language of a unit sends the same cached system prompt, so one cache
+	// write serves all of them.
+	for (const ns of NAMESPACES) {
+		for (const catalog of catalogs.values()) {
+			applyRemovals(catalog[ns], delta[ns].removed)
+		}
 
-				if (split !== null) {
-					for (const suffix of PLURAL_SUFFIXES) {
-						Reflect.deleteProperty(merged[ns], `${split.base}_${suffix}`)
-					}
+		for (const unit of await unitsOf(ns)) {
+			const source = englishSource(pick(EN_CATALOG[ns], unit.keys))
+			const unitDelta: Delta = { upsert: pick(delta[ns].upsert, unit.keys), removed: [] }
+			const system = [buildSystemPrompt(unitContext(unit), "web", true)]
+
+			for (const [lang, catalog] of catalogs) {
+				const subset = keysToTranslate({ source, full: args.full, delta: unitDelta, existing: catalog[ns], lang })
+				const subsetKeyCount = Object.keys(subset).length
+
+				if (subsetKeyCount === 0) {
+					continue
 				}
-			}
 
-			const subset = keysToTranslate(ns, args, delta[ns], existing[ns], lang)
-			const subsetKeyCount = Object.keys(subset).length
+				console.log(`[translate-i18n] ${lang}/${unit.label}: translating ${String(subsetKeyCount)} keys`)
 
-			if (subsetKeyCount > 0) {
-				console.log(`[translate-i18n] ${lang}/${ns}: translating ${String(subsetKeyCount)} keys`)
-
-				// Branch on `client`'s own nullability (never DRY_RUN directly) so TypeScript can prove
-				// non-null in the translateSubset branch without a type assertion — client is null if
-				// and only if DRY_RUN is true, by construction above.
+				const send = createMessage
 				const translated =
-					client === null
+					send === null
 						? translateDryRun(lang, subset)
 						: await translateSubset({
-								label: `${lang}/${ns}`,
+								label: `${lang}/${unit.label}`,
 								subset,
 								translateBatch: batch =>
 									translateBatch({
-										client,
+										createMessage: send,
+										model: MODEL,
+										system,
 										lang,
-										batch,
-										systemPrompt
+										languageName: LANGUAGE_NAMES[lang],
+										batch
 									})
 							})
 
-				Object.assign(merged[ns], translated)
-			} else {
-				console.log(`[translate-i18n] ${lang}/${ns}: nothing to translate`)
+				Object.assign(catalog[ns], translated)
 			}
 		}
 
-		writeCatalog(lang, merged)
+		// Checkpoint: a later failure keeps every namespace already paid for.
+		for (const [lang, catalog] of catalogs) {
+			writeNested(languagePath(lang), catalog)
+		}
 
-		const writtenCount = NAMESPACES.reduce((sum, ns) => sum + Object.keys(merged[ns]).length, 0)
-
-		console.log(`[translate-i18n] ${lang}: wrote ${String(writtenCount)} keys`)
+		writeManifest(catalogs)
+		console.log(`[translate-i18n] ${ns}: written for ${String(catalogs.size)} languages`)
 	}
 
-	// Advance the baseline only after every language succeeded — a mid-run throw leaves the old
-	// snapshot in place, so a re-run re-detects the same delta and retries.
-	writeSnapshot()
+	for (const [lang, catalog] of catalogs) {
+		console.log(`[translate-i18n] ${lang}: ${String(countKeys(catalog))} keys`)
+	}
+
+	// Advance the baseline only after every namespace succeeded, and only when the run covered every language, or the
+	// ones left out would never see the changed keys again. Written into the same PR as the translations, so the
+	// baseline only advances once that PR is merged.
+	if (coversEveryLanguage(args.languages, TARGET_LANGUAGES)) {
+		writeNested(EN_SNAPSHOT_PATH, EN_CATALOG)
+	} else {
+		console.log("[translate-i18n] snapshot not advanced: the run covered only some languages")
+	}
 
 	console.log("[translate-i18n] done")
 }

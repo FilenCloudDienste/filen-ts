@@ -17,16 +17,15 @@ export interface StepText {
 	live: string | null
 }
 
-const figureFormats = new Map<string, Intl.NumberFormat>()
+const figureFormats = new Map<number, Intl.NumberFormat>()
 
-// Seconds and counts, grouped and with the decimal mark of the locale.
-function figureFormat(locale: string, fractionDigits: 0 | 1): Intl.NumberFormat {
-	const key = `${locale}|${String(fractionDigits)}`
-	let format = figureFormats.get(key)
+// Seconds and counts, grouped and with the decimal mark of the browser's region, which numbers follow.
+function figureFormat(fractionDigits: 0 | 1): Intl.NumberFormat {
+	let format = figureFormats.get(fractionDigits)
 
 	if (format === undefined) {
-		format = new Intl.NumberFormat(locale, { minimumFractionDigits: fractionDigits, maximumFractionDigits: fractionDigits })
-		figureFormats.set(key, format)
+		format = new Intl.NumberFormat(undefined, { minimumFractionDigits: fractionDigits, maximumFractionDigits: fractionDigits })
+		figureFormats.set(fractionDigits, format)
 	}
 
 	return format
@@ -34,19 +33,19 @@ function figureFormat(locale: string, fractionDigits: 0 | 1): Intl.NumberFormat 
 
 // "4.2 s"; a running step counts whole seconds.
 export function useDurationText(): (ms: number, live: boolean) => string {
-	const { t, i18n } = useTranslation("assistant")
+	const { t } = useTranslation("assistant")
 
 	return (ms, live) => {
 		const { seconds, fractionDigits } = durationFigure(ms, live)
 
-		return t("assistantDurationSeconds", { seconds: figureFormat(i18n.language, fractionDigits).format(seconds) })
+		return t("assistantDurationSeconds", { seconds: figureFormat(fractionDigits).format(seconds) })
 	}
 }
 
 // A step's wording, also what the live region reads. A subject is plain text from the runtime (sanitized,
 // shortened) and only ever interpolated into a text node.
 export function useStepText(): (step: TranscriptStep) => StepText {
-	const { t, i18n } = useTranslation("assistant")
+	const { t } = useTranslation("assistant")
 
 	const count = (tool: string, resultCount: number, more: boolean): string => {
 		switch (stepCountNoun(tool)) {
@@ -112,7 +111,7 @@ export function useStepText(): (step: TranscriptStep) => StepText {
 					// The engine's candidates for one word of the query, before the call narrows them to the results.
 					live:
 						step.status === "active" && step.found !== undefined
-							? t("assistantStepCandidates", { count: step.found, figure: figureFormat(i18n.language, 0).format(step.found) })
+							? t("assistantStepCandidates", { count: step.found, figure: figureFormat(0).format(step.found) })
 							: null
 				}
 			}

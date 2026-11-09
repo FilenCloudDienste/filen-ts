@@ -128,7 +128,7 @@ export function MovieDetail({
 	onBack: () => void
 	onEdit: () => void
 }) {
-	const { t, i18n } = useTranslation("videos")
+	const { t } = useTranslation("videos")
 	const navigate = useNavigate()
 	const headingId = useId()
 	const extrasId = useId()
@@ -335,9 +335,7 @@ export function MovieDetail({
 							>
 								{slots.endsAtMs.state === "ready"
 									? t("videosHomeEndsAt", {
-											time: new Intl.DateTimeFormat(i18n.language, { timeStyle: "short" }).format(
-												slots.endsAtMs.value
-											)
+											time: new Intl.DateTimeFormat(undefined, { timeStyle: "short" }).format(slots.endsAtMs.value)
 										})
 									: null}
 							</SlotFade>

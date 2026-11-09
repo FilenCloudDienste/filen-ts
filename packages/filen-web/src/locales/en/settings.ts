@@ -1,3 +1,10 @@
+import { settingsStorage } from "@/locales/en/settings/storage"
+import { settingsAnnouncements } from "@/locales/en/settings/announcements"
+import { settingsLanguage } from "@/locales/en/settings/language"
+import { settingsAccountFixes } from "@/locales/en/settings/accountFixes"
+import { settingsBilling } from "@/locales/en/settings/billing"
+import { settingsDesktopPrefs } from "@/locales/en/settings/desktopPrefs"
+import { settingsMigration } from "@/locales/en/settings/migration"
 // English source catalog — "settings" namespace: the settings sidebar (Account / Security /
 // Appearance / Events / Billing sections) plus the Account and Appearance section content. The
 // "auth" namespace keeps the Security section's own copy (forms, dialogs, row titles it already had);
@@ -337,5 +344,12 @@ export const settings = {
 	/** Licenses dialog — back button returning from one package's notice to the full list */
 	settingsNoticesBack: "Back to all packages",
 	/** Licenses dialog — shown for a package that shipped no license file; its SPDX id and repository are listed instead of another package's copyright */
-	settingsNoticesNoLicenseText: "This package did not ship a license file. Its license and repository are listed above."
+	settingsNoticesNoLicenseText: "This package did not ship a license file. Its license and repository are listed above.",
+	...settingsStorage,
+	...settingsAnnouncements,
+	...settingsLanguage,
+	...settingsAccountFixes,
+	...settingsBilling,
+	...settingsDesktopPrefs,
+	...settingsMigration
 } as const

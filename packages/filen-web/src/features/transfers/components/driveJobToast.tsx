@@ -43,7 +43,7 @@ export interface DriveJobToastProps {
 // Everything shown is read live from the job's store entry, so the toast element itself never needs
 // replacing to update.
 export function DriveJobToast({ jobId, onHeightChange, onDismiss, onRetried, onShowDirectory }: DriveJobToastProps) {
-	const { t, i18n } = useTranslation("transfers")
+	const { t } = useTranslation("transfers")
 	const job = useDriveJobsStore(state => state.jobs[jobId])
 	// The row's flag flips on click; the job's own flags follow once the SDK reports the pause.
 	const rowPaused = useTransfersStore(state => transferById(state.transfers, jobId)?.paused ?? false)
@@ -61,7 +61,7 @@ export function DriveJobToast({ jobId, onHeightChange, onDismiss, onRetried, onS
 
 	const model = jobCardModel(job, { slotHeldWhilePaused })
 	const { actions, rate } = model
-	const percentLabel = model.percent === null ? null : percentFormat(i18n.language).format(model.percent / 100)
+	const percentLabel = model.percent === null ? null : percentFormat(undefined).format(model.percent / 100)
 	const bytesLine = [
 		model.bytes === null
 			? null

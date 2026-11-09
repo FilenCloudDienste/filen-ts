@@ -161,9 +161,10 @@ export function runningPercentFraction(percent: number): number {
 	return Math.floor(percent + 1e-9) / 100
 }
 
-const percentFormats = new Map<string, Intl.NumberFormat>()
+const percentFormats = new Map<string | undefined, Intl.NumberFormat>()
 
-export function percentFormat(locale: string): Intl.NumberFormat {
+// `locale` undefined = the browser's region, which numbers follow.
+export function percentFormat(locale: string | undefined): Intl.NumberFormat {
 	let format = percentFormats.get(locale)
 
 	if (format === undefined) {

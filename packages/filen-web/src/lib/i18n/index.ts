@@ -51,12 +51,10 @@ export type MountsKey = NamespaceKey<"mounts">
 // @/workers/sdk.worker's pre-flight) ships `Intl.PluralRules` natively. No polyfill import here,
 // by design.
 //
-// `resources`/`react.useSuspense`: resources are the EN namespaces only, straight from
-// `@/lib/i18n/catalog` — no other language ships yet (multi-language catalogs +
-// `SUPPORTED_LANGUAGES` land with the auto-translate pipeline's real script, see
-// .github/workflows/i18n-web.yml). Suspense-throw i18n
-// is OFF: it interacts poorly with the React Compiler and complicates the boot gate; revisit only
-// if lazy locale loading lands later.
+// `resources`/`react.useSuspense`: English is the only bundled language and is registered here, synchronously, so
+// module-level `i18n.t` callers and the first render always resolve. Every other language is a static JSON file
+// that @/lib/i18n/language fetches and registers before it switches the language (startLanguage, the picker).
+// Suspense-throw i18n is OFF: it interacts poorly with the React Compiler and complicates the boot gate.
 void i18n.use(initReactI18next).init({
 	resources: { en: EN_CATALOGS },
 	lng: "en",
@@ -68,6 +66,13 @@ void i18n.use(initReactI18next).init({
 	},
 	react: {
 		useSuspense: false
+	}
+})
+
+// Screen readers, hyphenation and spellcheck read the page language.
+i18n.on("languageChanged", language => {
+	if (typeof document !== "undefined") {
+		document.documentElement.lang = language
 	}
 })
 

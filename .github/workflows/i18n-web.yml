@@ -3,13 +3,13 @@ name: i18n translate (web)
 # filen-web's counterpart of i18n-translate.yml (filen-mobile); the job itself is shared via
 # i18n-translate-reusable.yml.
 #
-# TRIGGER: workflow_dispatch ONLY for now. Mobile's push
-# trigger — `paths: ['packages/filen-mobile/src/locales/en/**']` — deliberately watches only the
-# EN source (target-language JSON catalogs + the snapshot are workflow OUTPUTS, not triggers, or
-# every run would fire on its own commit). The filen-web equivalent
-# (`packages/filen-web/src/locales/en/**`) plus the full 27-language target set (mobile parity)
-# stay disabled until the translation pipeline is fully wired and shell/auth keys have
-# stabilized — until then this is manual-dispatch-only scaffolding.
+# TRIGGER: workflow_dispatch ONLY for now; the script translates into every language of
+# @filen/shared/languages. Until the target catalogs exist, any run (a "delta" one too) translates
+# every key for every language, so the push trigger stays off until the first full run (run locally,
+# see packages/filen-web/scripts/README.md) has merged with its snapshot. Then add, like mobile:
+#   push: { branches: [main], paths: ['packages/filen-web/src/locales/en/**'] }
+# (target catalogs and the snapshot are workflow OUTPUTS, not triggers, or every run would fire on
+# its own commit).
 on:
   workflow_dispatch:
     inputs:
@@ -30,9 +30,10 @@ permissions:
 # github.ref }}`. Concurrency groups are repo-global (not scoped per workflow file), so reusing
 # mobile's exact group name would let a web dispatch cancel an in-flight MOBILE translation run
 # (or vice versa) purely by sharing a ref.
+# Queued, never cancelled: a cancelled run throws away translations already paid for.
 concurrency:
   group: i18n-translate-web-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   translate:

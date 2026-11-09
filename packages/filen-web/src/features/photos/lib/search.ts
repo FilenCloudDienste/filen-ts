@@ -136,7 +136,8 @@ export interface PhotosQueryToken {
 	day?: number
 }
 
-// Normalized month name -> 0-11, in the UI language plus English, long and short forms.
+// Normalized month name -> 0-11, long and short forms, in the UI language, the browser's region (the timeline shows
+// its month names) and English.
 export type MonthNameTable = ReadonlyMap<string, number>
 
 const monthTables = new Map<string, MonthNameTable>()
@@ -150,7 +151,7 @@ export function monthNameTable(locale: string): MonthNameTable {
 
 	const table = new Map<string, number>()
 
-	for (const tableLocale of locale === "en" ? ["en"] : [locale, "en"]) {
+	for (const tableLocale of new Set([locale, new Intl.DateTimeFormat().resolvedOptions().locale, "en"])) {
 		for (const style of ["long", "short"] as const) {
 			let format: Intl.DateTimeFormat
 

@@ -43,7 +43,7 @@ function useStoredProbe(uuid: string | null): ProbeRecord | null {
 // The home's static hero: one title per session on a dark rounded card under the header, its backdrop behind a
 // scrim, the title, what is known of it, Play or Resume, and More info (the title's page). No rotation, no trailer.
 export function HomeHero({ hero, now, onShown }: { hero: HeroModel; now: number; onShown: (titleId: string) => void }) {
-	const { t, i18n } = useTranslation("videos")
+	const { t } = useTranslation("videos")
 	const navigate = useNavigate()
 	const headingId = useId()
 	const [element, setElement] = useState<HTMLElement | null>(null)
@@ -93,7 +93,7 @@ export function HomeHero({ hero, now, onShown }: { hero: HeroModel; now: number;
 	}
 
 	if (duration !== null && duration > resumeSec) {
-		const endsAt = new Intl.DateTimeFormat(i18n.language, { timeStyle: "short" }).format(now + (duration - resumeSec) * 1000)
+		const endsAt = new Intl.DateTimeFormat(undefined, { timeStyle: "short" }).format(now + (duration - resumeSec) * 1000)
 
 		meta.push(t("videosHomeEndsAt", { time: endsAt }))
 	}
