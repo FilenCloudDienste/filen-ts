@@ -1,4 +1,5 @@
 import { type, type Type } from "arktype"
+import type { NoteType } from "@filen/sdk-rs"
 import { kvGetJson, kvSetJson } from "@/lib/storage/adapter"
 import { kvPreference } from "@/lib/storage/preference"
 import { splitterKeyValue, type SplitterKeyBounds } from "@/lib/useSeparatorValue.logic"
@@ -80,3 +81,20 @@ export async function setHideCompletedChecklist(noteUuid: string, hide: boolean)
 
 	await kvSetJson(HIDE_COMPLETED_CHECKLIST_KV_KEY, { ...record, [noteUuid]: hide })
 }
+
+// The type a new note gets (Appearance → Notes). The SDK always creates a text note, so any other default costs
+// one retype right after the create.
+export const NOTE_TYPES = ["text", "rich", "checklist", "md", "code"] as const satisfies readonly NoteType[]
+
+export const DEFAULT_NOTE_TYPE: NoteType = "text"
+
+const noteTypeSchema: Type<NoteType> = type.enumerated(...NOTE_TYPES)
+
+export const { get: getDefaultNoteType, set: setDefaultNoteType } = kvPreference({
+	key: "notes.defaultType.v1",
+	schema: noteTypeSchema,
+	fallback: DEFAULT_NOTE_TYPE
+})
+
+// Shared by the Appearance select and createNote, so a create reads the held value instead of the store.
+export const DEFAULT_NOTE_TYPE_QUERY_KEY = ["notes", "defaultType"] as const
