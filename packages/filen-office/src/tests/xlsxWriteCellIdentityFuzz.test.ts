@@ -102,9 +102,8 @@ describe("cell identity through edits", () => {
 					}
 				} else {
 					const axis = random() < 0.5 ? "rows" : "cols"
-					const kind = random() < 0.5 ? "axis.insert" : "axis.delete"
-
-					command = { type: kind, sheet, axis, at, count }
+					command =
+						random() < 0.5 ? { type: "axis.insert", sheet, axis, at, count } : { type: "axis.delete", sheet, axis, at, count }
 				}
 
 				const result = await session.command(command)
@@ -113,7 +112,7 @@ describe("cell identity through edits", () => {
 					`${JSON.stringify(command, (_, value) => (value instanceof Uint32Array || value instanceof Uint16Array ? [...value] : value))} ${result.ok ? "ok" : result.refusal.reason}`
 				)
 
-				if (!result.ok || (command.type !== "axis.insert" && command.type !== "axis.delete")) continue
+				if (!result.ok || (command.type !== "axis.insert" && command.type !== "axis.delete") || !("at" in command)) continue
 
 				const rowsAxis = command.axis === "rows"
 

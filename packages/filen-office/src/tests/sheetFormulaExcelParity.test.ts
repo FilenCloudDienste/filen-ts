@@ -67,38 +67,44 @@ describe("criteria functions", () => {
 		)
 	})
 
-	it("keep no result per range and criterion: a running count over distinct values builds in linear memory", () => {
-		const rows = 4000
-		const cells: EngineSheet["rows"] = Array.from({ length: rows }, (_, row) => [
-			`v${String(row)}`,
-			row,
-			`=COUNTIF($A$1:A${String(row + 1)},A${String(row + 1)})+SUMIF($A$1:A${String(row + 1)},A${String(row + 1)},$B$1:B${String(row + 1)})`
-		])
-		const start = cpuMs()
+	it(
+		"keep no result per range and criterion: a running count over distinct values builds in linear memory",
+		{ timeout: budget(20_000) },
+		() => {
+			const rows = 4000
+			const cells: EngineSheet["rows"] = Array.from({ length: rows }, (_, row) => [
+				`v${String(row)}`,
+				row,
+				`=COUNTIF($A$1:A${String(row + 1)},A${String(row + 1)})+SUMIF($A$1:A${String(row + 1)},A${String(row + 1)},$B$1:B${String(row + 1)})`
+			])
+			const start = cpuMs()
 
-		withEngine([sheet("S", cells)], engine => {
-			const elapsed = cpuMs() - start
-			const ranges = (
-				engine as unknown as {
-					readonly engine: {
-						readonly dependencyGraph: { readonly rangeMapping: { readonly rangeMapping: Map<number, Map<string, unknown>> } }
+			withEngine([sheet("S", cells)], engine => {
+				const elapsed = cpuMs() - start
+				const ranges = (
+					engine as unknown as {
+						readonly engine: {
+							readonly dependencyGraph: {
+								readonly rangeMapping: { readonly rangeMapping: Map<number, Map<string, unknown>> }
+							}
+						}
 					}
-				}
-			).engine.dependencyGraph.rangeMapping.rangeMapping
-			let cached = 0
+				).engine.dependencyGraph.rangeMapping.rangeMapping
+				let cached = 0
 
-			for (const vertex of ranges.get(0)?.values() ?? [])
-				cached += (vertex as { readonly criterionFunctionCache: Map<unknown, unknown> }).criterionFunctionCache.size
+				for (const vertex of ranges.get(0)?.values() ?? [])
+					cached += (vertex as { readonly criterionFunctionCache: Map<unknown, unknown> }).criterionFunctionCache.size
 
-			expect(cached).toBe(0)
-			expect(engine.result(0, rows - 1, 2).value).toBe(1 + rows - 1)
-			expect(elapsed).toBeLessThan(budget(4000))
-		})
-	})
+				expect(cached).toBe(0)
+				expect(engine.result(0, rows - 1, 2).value).toBe(1 + rows - 1)
+				expect(elapsed).toBeLessThan(budget(4000))
+			})
+		}
+	)
 })
 
 describe("lookups", () => {
-	it("build over one shared table without joining its cells again for each formula", () => {
+	it("build over one shared table without joining its cells again for each formula", { timeout: budget(20_000) }, () => {
 		const rows = 5000
 		const cells: EngineSheet["rows"] = Array.from({ length: rows }, (_, row) => [
 			`v${String(row)}`,

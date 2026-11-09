@@ -1,6 +1,6 @@
 import type { SheetBorderLine, SheetPatternType, SheetRenderStyle } from "../protocol"
 import { builtinFormatCode } from "../numfmt/builtins"
-import { numFmt } from "../numfmt/format"
+import { numFmt, SYSTEM_DATE_TIME, SYSTEM_SHORT_DATE } from "../numfmt/format"
 import { NUMFMT_EN_US, type NumFmtLocale } from "../numfmt/locale"
 import type { NumFmt } from "../numfmt/parse"
 import type {
@@ -30,6 +30,9 @@ export type SheetStyleSource = Pick<
 export interface SheetStylesOptions {
 	// The language of the built-in formats whose code depends on it (NumFmtLocale.builtins).
 	readonly locale?: NumFmtLocale
+	// Built-in 14 and 22 show the system short date (numFmt), as Excel shows them. Off for sources whose date styles
+	// name their own pattern (OpenDocument).
+	readonly systemDates?: boolean
 }
 
 type Building = { -readonly [K in keyof SheetRenderStyle]: SheetRenderStyle[K] }
@@ -44,11 +47,14 @@ export class SheetStyles {
 	private readonly locale: NumFmtLocale
 	private readonly renderStyles: (SheetRenderStyle | undefined)[] = []
 	private readonly codes: (string | undefined)[] = []
+	private readonly formats: (NumFmt | undefined)[] = []
+	private readonly systemDates: boolean
 
 	constructor(source: SheetStyleSource, theme: XlsxTheme | null, options: SheetStylesOptions = {}) {
 		this.source = source
 		this.theme = theme
 		this.locale = options.locale ?? NUMFMT_EN_US
+		this.systemDates = options.systemDates ?? true
 		this.palette = workbookPalette(source.indexedColors)
 	}
 
@@ -119,8 +125,21 @@ export class SheetStyles {
 		return code
 	}
 
+	// The compiled format a cell shows through: built-in 14 and 22 show the system short date (formatNumberInto
+	// takes it from the locale); the code stays the table's.
 	numFmt(index: number): NumFmt {
-		return numFmt(this.numFmtCode(index))
+		const key = this.key(index)
+		let format = this.formats[key]
+
+		if (format === undefined) {
+			const id = this.xf(key).numFmtId
+			const own = !this.systemDates || this.source.numFmts.has(id) || this.locale.builtins[id] !== undefined
+
+			format = !own && id === 14 ? SYSTEM_SHORT_DATE : !own && id === 22 ? SYSTEM_DATE_TIME : numFmt(this.numFmtCode(key))
+			this.formats[key] = format
+		}
+
+		return format
 	}
 
 	// A colour of this workbook as 0xRRGGBB (theme and tint applied), or -1.

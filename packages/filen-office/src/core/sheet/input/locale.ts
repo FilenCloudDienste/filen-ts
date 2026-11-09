@@ -728,9 +728,15 @@ export function formulaTextDate(text: string, locale: SheetLocale, currentYear: 
 	return second.length <= 2 && validDate(year, month, day, leap1900) ? { year, month, day } : null
 }
 
-// The format a date typed in the locale implies: its order with four-digit years (Excel's short date for the
-// locale, which the file stores as a custom code).
+// The format a date typed in the locale implies: Excel's short date for the locale. Where the session shows built-in
+// 14 in the locale's short date (SheetLocale.numFmt), that id; else its order with four-digit years as a code of its
+// own.
 export function localizedDateFormat(locale: SheetLocale): string {
+	return locale.numFmt === undefined ? orderedDateFormat(locale) : "m/d/yyyy"
+}
+
+// The locale's order with four-digit years, as a code.
+export function orderedDateFormat(locale: SheetLocale): string {
 	switch (locale.dateOrder) {
 		case "dmy":
 			return "dd/mm/yyyy"

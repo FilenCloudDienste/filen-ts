@@ -8,6 +8,8 @@ export {
 	numFmt,
 	NumFmtOutput,
 	showsPercent,
+	SYSTEM_DATE_TIME,
+	SYSTEM_SHORT_DATE,
 	type NumFmtOptions,
 	type NumFmtResult
 } from "./format"

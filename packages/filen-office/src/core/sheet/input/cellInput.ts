@@ -1,6 +1,6 @@
 import type { SheetLocale } from "../protocol"
 import { wellFormedFormula } from "../refs/formulaRefs"
-import { delocalizeFormula, entryNumber, formulaTextDate, localizedDateFormat, type LocalizedDate } from "./locale"
+import { delocalizeFormula, entryNumber, formulaTextDate, localizedDateFormat, orderedDateFormat, type LocalizedDate } from "./locale"
 
 // What a typed entry becomes, the way spreadsheets read it: a leading "=" starts a formula, a leading "'"
 // keeps the rest as text whatever it looks like, and otherwise numbers, times, TRUE/FALSE and dates are recognised,
@@ -216,7 +216,10 @@ function localizedDateTime(text: string, locale: SheetLocale, year: number | und
 
 	if (clock === null || day === null) return null
 
-	return { type: "value", value: utcDate(day.date, clock.seconds), impliedFormat: `${day.format} ${clock.format}` }
+	// The short date takes built-in 22 (the system's short date and h:mm); with another time, its order as a code.
+	const date = day.format === "m/d/yyyy" && clock.format !== "h:mm" ? orderedDateFormat(locale) : day.format
+
+	return { type: "value", value: utcDate(day.date, clock.seconds), impliedFormat: `${date} ${clock.format}` }
 }
 
 // A value typed in the app's locale (en-US's included: its dates are month first).

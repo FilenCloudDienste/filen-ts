@@ -56,6 +56,15 @@
 	cursor: row-resize;
 }
 
+/* The selection's border, grabbed to move its cells; with Ctrl (Option) held, to copy them. */
+.fo-sheet[data-cursor="move"] .fo-sheet-scroller {
+	cursor: move;
+}
+
+.fo-sheet[data-cursor="copy"] .fo-sheet-scroller {
+	cursor: copy;
+}
+
 .fo-sheet-extent {
 	position: relative;
 	overflow: hidden;

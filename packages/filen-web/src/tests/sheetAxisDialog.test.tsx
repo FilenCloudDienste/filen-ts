@@ -17,9 +17,9 @@ afterEach(() => {
 
 const RANGE = { startRow: 1, startCol: 2, endRow: 3, endCol: 4 }
 
-function open(kind: SheetAxisDialogKind): ReturnType<typeof vi.fn<(command: SheetCommand) => void>> {
+function open(kind: SheetAxisDialogKind, ranges = [RANGE]): ReturnType<typeof vi.fn<(command: SheetCommand) => void>> {
 	const run = vi.fn<(command: SheetCommand) => void>()
-	const grid = { sheet: 7, selection: { active: { row: 1, col: 2 }, ranges: [RANGE] } } as unknown as SheetGridState
+	const grid = { sheet: 7, selection: { active: { row: 1, col: 2 }, ranges } } as unknown as SheetGridState
 
 	render(
 		<SheetAxisDialog
@@ -107,6 +107,23 @@ describe("the Insert and Delete dialogs", () => {
 		fireEvent.click(screen.getByRole("button", { name: preview.previewSheetDeleteDialogTitle }))
 
 		expect(rows).toHaveBeenLastCalledWith({ type: "axis.delete", sheet: 7, axis: "rows", at: 1, count: 3 })
+	})
+
+	it("deletes the entire rows of every selected range in one command", () => {
+		const run = open("delete", [RANGE, { startRow: 6, startCol: 0, endRow: 7, endCol: 0 }])
+
+		fireEvent.click(screen.getByRole("radio", { name: preview.previewSheetDialogEntireRow }))
+		fireEvent.click(screen.getByRole("button", { name: preview.previewSheetDeleteDialogTitle }))
+
+		expect(run).toHaveBeenLastCalledWith({
+			type: "axis.delete",
+			sheet: 7,
+			axis: "rows",
+			spans: [
+				{ at: 1, count: 3 },
+				{ at: 6, count: 2 }
+			]
+		})
 	})
 
 	it("keeps each dialog's own choice: one made in Insert never opens Delete", () => {

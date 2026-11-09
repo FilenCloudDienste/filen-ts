@@ -3,7 +3,9 @@ export {
 	FormulaEngine,
 	HeldResult,
 	UNPARSEABLE,
+	type CircularCell,
 	type EngineCell,
+	type EngineIteration,
 	type EngineName,
 	type EngineSheet,
 	type RecalculatedCell

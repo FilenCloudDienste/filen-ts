@@ -109,6 +109,7 @@ export {
 export { parseTsv, pastedCells, pastedInputs, type GridClip, type PastedBlock } from "./clipboard/tsv"
 export { MAX_HTML_COPY_CELLS } from "./clipboard/html"
 export type { FillMode, SeriesOptions, SeriesRequest } from "./fill/series"
+export type { SheetMoveCommand } from "./move/plan"
 export { gridMove, isTypedCharacter, type GridBounds } from "./grid/navigation"
 export { newSheetName, type CellEntry } from "./grid/gridEdits"
 export { canEncodeWindows1252, csvCellView, parseCsvFile, serializeCsv, type CsvFormat } from "./csv/csvView"
@@ -133,6 +134,8 @@ export {
 	NUMFMT_EN_US,
 	NumFmtOutput,
 	PERCENT_STYLE,
+	SYSTEM_DATE_TIME,
+	SYSTEM_SHORT_DATE,
 	type NumFmt,
 	type NumFmtCategory,
 	type NumFmtLocale,

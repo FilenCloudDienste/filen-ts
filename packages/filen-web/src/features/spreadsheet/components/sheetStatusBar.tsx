@@ -2,7 +2,7 @@ import { useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
 import type { SheetQueryRequest, SheetSelectionStats, SheetSessionApi } from "@filen/office/core/sheet"
 import type { SheetGridState } from "@filen/office/react/sheet"
-import { LatestQuery, singleCell, statusSummary } from "@/features/spreadsheet/components/sheetStatusBar.logic"
+import { circularStatus, LatestQuery, singleCell, statusSummary } from "@/features/spreadsheet/components/sheetStatusBar.logic"
 
 type StatsRequest = SheetQueryRequest<"selectionStats">
 
@@ -41,9 +41,16 @@ export function SheetStatusBar({ grid, session, cellless }: { grid: SheetGridSta
 	}, [query, asked, sheet, ranges, version, engine])
 
 	const summary = asked ? statusSummary(stats) : null
+	const circular = circularStatus(grid.circular, sheet)
 
 	return (
 		<div className="flex h-6 shrink-0 items-center justify-end gap-4 border-t border-border bg-muted/40 px-3 text-xs text-muted-foreground tabular-nums">
+			{/* Excel's status bar names a circular reference at its left, apart from the summary. */}
+			{circular === null ? null : (
+				<span className="mr-auto">
+					{circular === "" ? t("previewSheetCircularStatusElsewhere") : t("previewSheetCircularStatus", { cell: circular })}
+				</span>
+			)}
 			{summary === null ? null : (
 				<>
 					{summary.average === null ? null : <span>{t("previewSheetStatusAverage", { value: summary.average })}</span>}

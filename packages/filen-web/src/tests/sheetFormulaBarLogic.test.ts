@@ -7,11 +7,13 @@ import { sheetLocaleOf } from "@/features/spreadsheet/formulaBar/sheetLocale"
 
 describe("the locale entries are typed in", () => {
 	it("comes from the browser's formatting locale, ; between arguments where , is the point", () => {
-		expect(sheetLocaleOf("en-US")).toEqual({ decimal: ".", group: ",", argument: ",", dateOrder: "mdy", currencies: ["$"] })
-		expect(sheetLocaleOf("en-GB")).toEqual({ decimal: ".", group: ",", argument: ",", dateOrder: "dmy", currencies: ["£"] })
-		expect(sheetLocaleOf("de-DE")).toEqual({ decimal: ",", group: ".", argument: ";", dateOrder: "dmy", currencies: ["€"] })
+		const numFmt = expect.any(Object) as unknown
+
+		expect(sheetLocaleOf("en-US")).toEqual({ decimal: ".", group: ",", argument: ",", dateOrder: "mdy", currencies: ["$"], numFmt })
+		expect(sheetLocaleOf("en-GB")).toEqual({ decimal: ".", group: ",", argument: ",", dateOrder: "dmy", currencies: ["£"], numFmt })
+		expect(sheetLocaleOf("de-DE")).toEqual({ decimal: ",", group: ".", argument: ";", dateOrder: "dmy", currencies: ["€"], numFmt })
 		expect(sheetLocaleOf("ja-JP").dateOrder).toBe("ymd")
-		expect(sheetLocaleOf("not a tag")).toEqual({ decimal: ".", group: ",", argument: ",", dateOrder: "mdy" })
+		expect(sheetLocaleOf("not a tag")).toEqual({ decimal: ".", group: ",", argument: ",", dateOrder: "mdy", numFmt })
 	})
 
 	it("reads text with the region's currency symbol as a number", () => {

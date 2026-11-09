@@ -28,6 +28,20 @@ import {
 } from "../../core/sheet/protocol"
 import type { FillDirection } from "../../core/sheet/fill/fill"
 import { autofitSizes } from "./autofit"
+import {
+	BORDER_SLOP,
+	cellSpot,
+	draggable,
+	dragKeys,
+	dropAt,
+	dropRange,
+	moveCommand,
+	onBorder,
+	sameDrop,
+	type CellSpot,
+	type DragDrop
+} from "./cellDrag"
+import type { SheetMoveCommand } from "../../core/sheet/move/plan"
 import { isImeKeydown } from "./ime"
 import {
 	APP_SHORTCUTS,
@@ -53,7 +67,16 @@ import { fillDownTo, fillHandleShown, fillLeft, fillTarget, sameRange } from "./
 import { canEditSnapshot, celllessSheet, type GridResizeDraft, type SheetGridModel, type SheetGridSizes } from "./model"
 import { keyMove, stepFrom } from "./navigation"
 import { GridRenderer, type GridHit } from "./renderer"
-import { addSelection, axisSelection, cellSelection, extendSelection, wholeAxis, type GridPoint, type GridSelection } from "./selection"
+import {
+	addSelection,
+	axisMove,
+	axisSelection,
+	cellSelection,
+	extendSelection,
+	wholeAxis,
+	type GridPoint,
+	type GridSelection
+} from "./selection"
 import { entryInput, entryText } from "./tiles"
 import {
 	DOUBLE_TAP_MS,
@@ -125,6 +148,10 @@ export interface SheetGridProps {
 	readonly onShortcut?: (shortcut: SheetShortcut) => boolean
 	// Command is the primary modifier, as on a Mac (detected from the platform when absent).
 	readonly mac?: boolean
+	// A drag of the selection's border dropped over cells holding data (cellDrag.ts): the app asks Excel's "There's
+	// already data here. Do you want to replace it?" and calls `replace` on OK. Without it the refusal goes to the
+	// model's refusal handler.
+	readonly onConfirmReplace?: (replace: () => void) => void
 	// A double-click (or double-tap) on a cell: true takes it, else the cell's entry opens.
 	readonly onCellActivate?: (point: GridPoint) => boolean
 	// Change it when the app's theme changes: the canvas reads the --fo-sheet-* variables again.
@@ -172,6 +199,22 @@ interface Press extends TouchPress {
 	timer: ReturnType<typeof setTimeout> | null
 	// The long press fired: the release is no tap.
 	held: boolean
+	// After the long press, a move drags the selection (cellDrag.ts) from this cell.
+	grab: GridPoint | null
+}
+
+// A drag of the selection by its border (cellDrag.ts): the block, the cell it was grabbed by, the cell and spot the
+// pointer was last on, the keys last read, and where the block would land.
+interface CellDrag {
+	readonly pointerId: number
+	readonly source: SheetRange
+	readonly grab: GridPoint
+	at: GridPoint
+	cell: SheetRange
+	spot: CellSpot | null
+	copy: boolean
+	insert: boolean
+	drop: DragDrop
 }
 
 // A touch handle being dragged: the range it started from.
@@ -180,6 +223,9 @@ interface HandleDrag {
 	readonly range: SheetRange
 	at: GridPoint
 }
+
+// An insert's spot before the pointer has crossed a cell: the gridline above it.
+const NO_SPOT: CellSpot = { edge: "top", below: false, after: false }
 
 // How near a header edge a pointer resizes, in pixels.
 const EDGE_SLOP = 4
@@ -352,6 +398,7 @@ export function SheetGrid({
 	onEditorKey,
 	onShortcut,
 	mac,
+	onConfirmReplace,
 	onCellActivate,
 	themeKey,
 	sizes,
@@ -381,6 +428,9 @@ export function SheetGrid({
 	const tipRef = useRef<HTMLDivElement>(null)
 	const handleRef = useRef<HTMLDivElement>(null)
 	const fillRef = useRef<FillDrag | null>(null)
+	const cellDragRef = useRef<CellDrag | null>(null)
+	// While a held finger may drag the selection: the browser must not pan it (a touchmove listener only then).
+	const panGuardRef = useRef<(() => void) | null>(null)
 	const dragRef = useRef<Drag | null>(null)
 	const resizeRef = useRef<Resize | null>(null)
 	const pressRef = useRef<Press | null>(null)
@@ -531,6 +581,8 @@ export function SheetGrid({
 
 			if (press?.timer !== null && press?.timer !== undefined) clearTimeout(press.timer)
 			if (menuTimerRef.current !== null) clearTimeout(menuTimerRef.current)
+
+			panGuardRef.current?.()
 		},
 		[]
 	)
@@ -760,6 +812,177 @@ export function SheetGrid({
 		grid.choose(dragStartHandle(grid.getSnapshot().selection, drag.range, point, merges()))
 	}
 
+	// --- Dragging the selection by its border (cellDrag.ts) ---
+
+	function setCursor(cursor: string): void {
+		const root = rootRef.current
+
+		if (root !== null && root.dataset["cursor"] !== cursor) root.dataset["cursor"] = cursor
+	}
+
+	// The range a drag of the border would take: one range of a sheet whose cells can change while no entry is open; none
+	// on a protected sheet, where Excel turns drag-and-drop off.
+	function dragSource(): SheetRange | null {
+		const snapshot = grid.getSnapshot()
+
+		if (snapshot.editing !== null || grid.cellless() || !grid.canChange() || (snapshot.layout?.protection ?? null) !== null) return null
+
+		return draggable(snapshot.selection.ranges)
+	}
+
+	// The range whose border the pointer is on, or null.
+	function borderUnder(clientX: number, clientY: number): SheetRange | null {
+		const source = dragSource()
+		const local = source === null ? null : renderer.local(clientX, clientY)
+
+		if (source === null || local === null) return null
+
+		return onBorder(renderer.laidRects(source), renderer.layoutX(local.x), local.y, BORDER_SLOP) ? source : null
+	}
+
+	function cellOf(point: GridPoint): SheetRange {
+		return (
+			cellSelection(point, merges()).ranges[0] ?? { startRow: point.row, startCol: point.col, endRow: point.row, endCol: point.col }
+		)
+	}
+
+	// Where the block would land now, shown (nothing where it would change nothing).
+	function previewCellDrag(drag: CellDrag): void {
+		drag.drop = dropAt(drag.source, drag.grab, drag.at, drag.insert ? (drag.spot ?? NO_SPOT) : null, drag.cell)
+		renderer.setMovePreview(
+			sameDrop(drag.source, drag.drop, drag.copy) ? null : { range: dropRange(drag.source, drag.drop.to), insert: drag.drop.insert }
+		)
+		setCursor(drag.copy ? "copy" : "move")
+	}
+
+	function startCellDrag(pointerId: number, source: SheetRange, at: GridPoint, keys: { copy: boolean; insert: boolean }): void {
+		// The cell grabbed is the block's own: a pointer just outside its outline grabs the cell inside it.
+		const grab = {
+			row: Math.max(source.startRow, Math.min(source.endRow, at.row)),
+			col: Math.max(source.startCol, Math.min(source.endCol, at.col))
+		}
+		const drag: CellDrag = {
+			pointerId,
+			source,
+			grab,
+			at: grab,
+			cell: cellOf(grab),
+			spot: null,
+			copy: keys.copy,
+			insert: keys.insert,
+			drop: { to: { row: source.startRow, col: source.startCol }, insert: null }
+		}
+
+		cellDragRef.current = drag
+		previewCellDrag(drag)
+	}
+
+	function moveCellDrag(drag: CellDrag, clientX: number, clientY: number, keys: { copy: boolean; insert: boolean }): void {
+		const hit = renderer.hit(clientX, clientY, 0)
+
+		drag.copy = keys.copy
+		drag.insert = keys.insert
+
+		if (hit?.kind === "cell") {
+			const point = { row: hit.row, col: hit.col }
+			const box = renderer.laidCellBox(point)
+			const local = renderer.local(clientX, clientY)
+
+			drag.at = point
+			drag.cell = cellOf(point)
+
+			if (box !== null && local !== null) drag.spot = cellSpot(box, renderer.layoutX(local.x), local.y)
+		} else if (hit?.kind === "colHeader") {
+			drag.at = { row: drag.at.row, col: hit.col }
+			drag.cell = cellOf(drag.at)
+		} else if (hit?.kind === "rowHeader") {
+			drag.at = { row: hit.row, col: drag.at.col }
+			drag.cell = cellOf(drag.at)
+		}
+
+		previewCellDrag(drag)
+	}
+
+	function releasePanGuard(): void {
+		panGuardRef.current?.()
+		panGuardRef.current = null
+	}
+
+	// Sends an edit, once the session was told the user set out to edit.
+	function edit(run: () => Promise<unknown> | null): void {
+		if (!grid.canChange()) return
+
+		void grid.intent()
+
+		const sent = run()
+
+		if (sent !== null) settled(sent)
+	}
+
+	// A move over data asks first (the app's question), and goes again with `replace` once agreed.
+	function sendMove(command: SheetMoveCommand): void {
+		edit(() =>
+			grid.command(command, false).then(result => {
+				if (result.ok) return
+
+				if (result.refusal.reason === "occupied" && onConfirmReplace !== undefined) {
+					onConfirmReplace(() => edit(() => grid.command({ ...command, replace: true })))
+
+					return
+				}
+
+				grid.refuse(result.refusal, command)
+			})
+		)
+	}
+
+	// `commit`: the keys as the pointer let go (null: cancelled).
+	function endCellDrag(commit: { copy: boolean; insert: boolean } | null): void {
+		const drag = cellDragRef.current
+
+		cellDragRef.current = null
+		stopAutoscroll()
+		releasePanGuard()
+		renderer.setMovePreview(null)
+		setCursor("")
+
+		if (drag === null || commit === null) return
+
+		const drop = dropAt(drag.source, drag.grab, drag.at, commit.insert ? (drag.spot ?? NO_SPOT) : null, drag.cell)
+
+		if (sameDrop(drag.source, drop, commit.copy)) return
+
+		const { sheet, selection: current } = grid.getSnapshot()
+
+		sendMove(moveCommand(sheet, drag.source, drop, commit.copy, current.active))
+	}
+
+	// The keys pressed or let go while dragging change what the drop does, as Excel's pointer shows.
+	function cellDragKeys(event: KeyboardEvent<HTMLDivElement>): boolean {
+		const drag = cellDragRef.current
+
+		if (drag === null) return false
+
+		event.preventDefault()
+		event.stopPropagation()
+
+		if (event.type === "keydown" && event.key === "Escape") {
+			endCellDrag(null)
+
+			return true
+		}
+
+		const keys = dragKeys(event, onMac)
+
+		if (keys.copy !== drag.copy || keys.insert !== drag.insert) {
+			drag.copy = keys.copy
+			drag.insert = keys.insert
+			previewCellDrag(drag)
+		}
+
+		return true
+	}
+
 	// While a selection drag is past the grid's edge, scroll towards it and extend to the cell at the edge.
 	function autoscroll(x: number, y: number): void {
 		const view = renderer.currentView()
@@ -791,8 +1014,9 @@ export function SheetGrid({
 			const now = renderer.currentView()
 
 			const handleDrag = handleDragRef.current
+			const cellDrag = cellDragRef.current
 
-			if (state === null || (drag === null && fill === null && handleDrag === null) || now === null) return
+			if (state === null || (drag === null && fill === null && handleDrag === null && cellDrag === null) || now === null) return
 
 			const ddx = state.x < left ? state.x - left : state.x > now.width ? state.x - now.width : 0
 			const ddy = state.y < top ? state.y - top : state.y > now.height ? state.y - now.height : 0
@@ -808,6 +1032,11 @@ export function SheetGrid({
 				if (drag !== null) extendDrag(drag, row, col)
 				else if (fill !== null) moveFill(fill, { row: row ?? fill.at.row, col: col ?? fill.at.col })
 				else if (handleDrag !== null) moveStartHandle(handleDrag, { row: row ?? handleDrag.at.row, col: col ?? handleDrag.at.col })
+				else if (cellDrag !== null && (row !== null || col !== null)) {
+					cellDrag.at = { row: row ?? cellDrag.at.row, col: col ?? cellDrag.at.col }
+					cellDrag.cell = cellOf(cellDrag.at)
+					previewCellDrag(cellDrag)
+				}
 			}
 
 			state.frame = requestAnimationFrame(tick)
@@ -888,6 +1117,8 @@ export function SheetGrid({
 		if (press?.timer !== null && press?.timer !== undefined) clearTimeout(press.timer)
 
 		pressRef.current = null
+
+		if (cellDragRef.current === null) releasePanGuard()
 	}
 
 	// A press that is no finger's: the touch mode and its menu end.
@@ -948,6 +1179,22 @@ export function SheetGrid({
 		focusGrid()
 		touched()
 		onTouchMenu?.(true)
+
+		// Held on the selection, the finger now drags it (cellDrag.ts): the browser is kept from panning until it lifts.
+		const source = hit.kind === "cell" ? dragSource() : null
+		const scroller = scrollerRef.current
+
+		if (hit.kind === "cell" && source !== null && scroller !== null && inRange(source, hit.row, hit.col)) {
+			press.grab = { row: hit.row, col: hit.col }
+
+			const block = (event: TouchEvent): void => {
+				if (event.cancelable) event.preventDefault()
+			}
+
+			releasePanGuard()
+			scroller.addEventListener("touchmove", block, { passive: false })
+			panGuardRef.current = () => scroller.removeEventListener("touchmove", block)
+		}
 	}
 
 	function touchDown(event: PointerEvent<HTMLDivElement>): void {
@@ -962,7 +1209,8 @@ export function SheetGrid({
 				y: event.clientY,
 				time: event.timeStamp,
 				timer: null,
-				held: false
+				held: false,
+				grab: null
 			}
 
 			return
@@ -975,7 +1223,8 @@ export function SheetGrid({
 			y: event.clientY,
 			time: event.timeStamp,
 			timer: null,
-			held: false
+			held: false,
+			grab: null
 		}
 
 		press.timer = setTimeout(() => longPress(press), LONG_PRESS_MS)
@@ -1139,6 +1388,18 @@ export function SheetGrid({
 			return
 		}
 
+		// A press on the selection's border drags it (cellDrag.ts), whatever the keys: they say what the drop does.
+		const border = hit.kind === "cell" ? borderUnder(event.clientX, event.clientY) : null
+
+		if (hit.kind === "cell" && border !== null) {
+			event.preventDefault()
+			focusGrid()
+			startCellDrag(event.pointerId, border, { row: hit.row, col: hit.col }, dragKeys(event, onMac))
+			event.currentTarget.setPointerCapture(event.pointerId)
+
+			return
+		}
+
 		const { sheet: shownSheet, editing: open } = grid.getSnapshot()
 
 		focusGrid()
@@ -1163,11 +1424,39 @@ export function SheetGrid({
 	function handlePointerMove(event: PointerEvent<HTMLDivElement>): void {
 		const press = pressRef.current
 
-		// A finger that moves pans: no long press.
+		// A finger that moves pans: no long press. One that moves after its long press on the selection drags it.
 		if (press !== null && press.pointerId === event.pointerId && !stillPressed(press, event.clientX, event.clientY)) {
 			if (press.timer !== null) clearTimeout(press.timer)
 
 			press.timer = null
+
+			const source = press.grab === null || cellDragRef.current !== null ? null : dragSource()
+
+			if (source !== null && press.grab !== null) {
+				onTouchMenu?.(false)
+				startCellDrag(event.pointerId, source, press.grab, { copy: false, insert: false })
+				event.currentTarget.setPointerCapture(event.pointerId)
+			}
+
+			press.grab = null
+		}
+
+		const cellDrag = cellDragRef.current
+
+		if (cellDrag !== null && cellDrag.pointerId === event.pointerId) {
+			const local = renderer.local(event.clientX, event.clientY)
+
+			if (local !== null) autoscroll(renderer.layoutX(local.x), local.y)
+
+			// A finger has no keys: it moves.
+			moveCellDrag(
+				cellDrag,
+				event.clientX,
+				event.clientY,
+				event.pointerType === "touch" ? { copy: false, insert: false } : dragKeys(event, onMac)
+			)
+
+			return
 		}
 
 		const resize = resizeRef.current
@@ -1198,7 +1487,7 @@ export function SheetGrid({
 			if (event.pointerType !== "touch" && event.buttons === 0) {
 				const hit = renderer.hit(event.clientX, event.clientY, EDGE_SLOP)
 
-				hoverCursor(hit)
+				hoverCursor(hit, event.clientX, event.clientY)
 				hover(event, hit)
 			}
 
@@ -1218,16 +1507,16 @@ export function SheetGrid({
 		else if (hit.kind === "rowHeader" && drag.kind !== "cols") extendDrag(drag, hit.row, null)
 	}
 
-	function hoverCursor(hit: GridHit | null): void {
-		const root = rootRef.current
-		const cursor =
+	function hoverCursor(hit: GridHit | null, clientX: number, clientY: number): void {
+		setCursor(
 			hit?.kind === "colHeader" && hit.edge !== null && canResize()
 				? "col-resize"
 				: hit?.kind === "rowHeader" && hit.edge !== null && canResize()
 					? "row-resize"
-					: ""
-
-		if (root !== null && root.dataset["cursor"] !== cursor) root.dataset["cursor"] = cursor
+					: hit?.kind === "cell" && borderUnder(clientX, clientY) !== null
+						? "move"
+						: ""
+		)
 	}
 
 	function handlePointerUp(event: PointerEvent<HTMLDivElement>): void {
@@ -1244,6 +1533,15 @@ export function SheetGrid({
 		if (taken !== null && taken.pointerId === event.pointerId) {
 			takenRef.current = null
 			taken.drag.end(true)
+
+			return
+		}
+
+		// The keys as the pointer lets go decide, as in Excel (let go of Ctrl first, and the block moves).
+		if (cellDragRef.current?.pointerId === event.pointerId) {
+			if (pressRef.current?.pointerId === event.pointerId) endPress()
+
+			endCellDrag(event.pointerType === "touch" ? { copy: false, insert: false } : dragKeys(event, onMac))
 
 			return
 		}
@@ -1274,6 +1572,7 @@ export function SheetGrid({
 		}
 
 		if (resizeRef.current?.pointerId === event.pointerId) endResize(null)
+		if (cellDragRef.current?.pointerId === event.pointerId) endCellDrag(null)
 		if (pressRef.current?.pointerId === event.pointerId) endPress()
 		if (dragRef.current?.pointerId === event.pointerId) {
 			dragRef.current = null
@@ -1337,17 +1636,6 @@ export function SheetGrid({
 
 		void grid.intent()
 		settled(grid.command(command))
-	}
-
-	// Sends an edit, once the session was told the user set out to edit.
-	function edit(run: () => Promise<unknown> | null): void {
-		if (!grid.canChange()) return
-
-		void grid.intent()
-
-		const sent = run()
-
-		if (sent !== null) settled(sent)
 	}
 
 	// --- Filling from the handle (fill.ts) ---
@@ -1563,20 +1851,21 @@ export function SheetGrid({
 
 	// Rows or columns inserted or deleted when whole ones are selected; cells alone are the app's (a dialog asks how,
 	// as the app was handed the shortcut first). The key is taken either way: the page never zooms on it.
+	// Several ranges: each one's (Ctrl+click), in one step; whole rows with whole columns are refused, as Excel does.
 	function insertOrDelete(type: "axis.insert" | "axis.delete"): void {
 		const { sheet, selection: current } = grid.getSnapshot()
-		const range = current.ranges[0]
 		const axis = wholeAxis(current)
 
-		if (range === undefined || axis === null) return
+		if (axis === null) return
 
-		edit(() =>
-			grid.command(
-				axis === "rows"
-					? { type, sheet, axis: "rows", at: range.startRow, count: range.endRow - range.startRow + 1 }
-					: { type, sheet, axis: "cols", at: range.startCol, count: range.endCol - range.startCol + 1 }
-			)
-		)
+		if (axis === "mixed") {
+			if (grid.canChange())
+				grid.refuse({ reason: "multipleSelection", detail: "mixed" }, axisMove(type, sheet, "rows", current.ranges))
+
+			return
+		}
+
+		edit(() => grid.command(axisMove(type, sheet, axis, current.ranges)))
 	}
 
 	// A shortcut the grid performs itself: false for the app's.
@@ -1717,6 +2006,7 @@ export function SheetGrid({
 
 		// A key is no finger's: a selection it makes shows no touch handle, and the menu goes.
 		if (touchModeRef.current || menuTimerRef.current !== null) leaveTouch()
+		if (cellDragKeys(event)) return
 		if (onKey?.(event) === true) return
 
 		if (resizeRef.current !== null || fillRef.current !== null) {
@@ -2115,6 +2405,9 @@ export function SheetGrid({
 				onPointerLeave={handlePointerLeave}
 				onDoubleClick={handleDoubleClick}
 				onKeyDown={handleKeyDown}
+				onKeyUp={event => {
+					if (event.target === event.currentTarget) cellDragKeys(event)
+				}}
 			>
 				<div
 					ref={extentRef}

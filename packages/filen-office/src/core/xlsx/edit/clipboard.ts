@@ -79,6 +79,18 @@ export async function copyCells(
 	// A sheet an edit took away while the request was on its way has nothing to copy.
 	if (document.workbook.sheet(sheet) === undefined) return { clip: document.nextClip++, text: "" }
 
+	const clip = await clipOf(document, sheet, range, cut, document.nextClip++)
+
+	document.clip = clip
+
+	return { clip: clip.id, text: clip.grid.tsv }
+}
+
+// The record a copy of `range` makes (its text, entries, formats and markup), held nowhere: a copy keeps it as the
+// session's latest, a drag of the cells (cells.move) pastes it at once and leaves the clipboard's alone.
+export async function clipOf(document: XlsxDocument, sheet: SheetId, range: SheetRange, cut: boolean, id: number): Promise<XlsxClip> {
+	const rows = range.endRow - range.startRow + 1
+	const cols = range.endCol - range.startCol + 1
 	const model = await document.ready(sheet)
 	const store = model.store as SheetStore
 	const lines: string[][] = Array.from({ length: rows }, () => new Array<string>(cols).fill(""))
@@ -121,9 +133,8 @@ export async function copyCells(
 
 	const text = lines.map(line => line.join("\t")).join("\r\n")
 	const entry = document.workbook.sheet(sheet)
-	const id = document.nextClip++
 
-	document.clip = {
+	return {
 		id,
 		sheet,
 		grid: { tsv: text, sheet: entry?.name ?? "", range, cut, inputs },
@@ -131,8 +142,6 @@ export async function copyCells(
 		sources,
 		values
 	}
-
-	return { clip: id, text }
 }
 
 // --- A cut's move ---
@@ -468,7 +477,23 @@ export async function pasteCells(
 	area?: SheetRange
 ): Promise<SheetHandled> {
 	// The session's own copy, while the sheet it came from is there (a cut whose sheet went is a cut no more).
-	const held = ownClip(document, clipId, text)
+	return pasteClip(document, sheet, at, text, ownClip(document, clipId, text), changes, slicing, values, area, true)
+}
+
+// A paste of `held` (a clip, or null for text alone). `latest`: `held` is the session's latest copy, which a pasted
+// cut then names where its cells went; a drag's own clip (cells.move) is held nowhere.
+export async function pasteClip(
+	document: XlsxDocument,
+	sheet: SheetId,
+	at: { readonly row: number; readonly col: number },
+	text: string,
+	held: XlsxClip | null,
+	changes: SheetChangeSink,
+	slicing: Slicing | undefined,
+	values: boolean,
+	area: SheetRange | undefined,
+	latest: boolean
+): Promise<SheetHandled> {
 	const grid = held === null ? null : values ? valuesGrid(held) : held.grid
 	// What the paste carries beyond entries: none for values.
 	const own = values ? null : held
@@ -525,7 +550,7 @@ export async function pasteCells(
 	)
 
 	if (handled === null || "refused" in handled) return handled
-	if (cut !== null && block.clip !== null) document.clip = { ...cut, sheet, grid: block.clip }
+	if (latest && cut !== null && block.clip !== null) document.clip = { ...cut, sheet, grid: block.clip }
 
 	changes.select(sheet, { activeRow: at.row, activeCol: at.col, ranges: [range] })
 

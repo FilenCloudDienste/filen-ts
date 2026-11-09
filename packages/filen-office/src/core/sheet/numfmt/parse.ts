@@ -132,6 +132,15 @@ const NAMED_COLORS: Readonly<Record<string, number>> = {
 // The system long date and time locale ids (Excel writes [$-F800] or [$-x-sysdate], [$-F400] or [$-x-systime]).
 export const LCID_SYSTEM_DATE = 0xf800
 export const LCID_SYSTEM_TIME = 0xf400
+// Built-in 14 and 22 as SheetStyles hands them out: the system short date (and time). Past 16 bits, so no code can
+// name them.
+export const LCID_SYSTEM_SHORT_DATE = 0x10000
+export const LCID_SYSTEM_DATE_TIME = 0x10001
+
+// A locale id the system's patterns stand for.
+export function systemLcid(lcid: number): boolean {
+	return lcid === LCID_SYSTEM_DATE || lcid === LCID_SYSTEM_TIME || lcid === LCID_SYSTEM_SHORT_DATE || lcid === LCID_SYSTEM_DATE_TIME
+}
 
 // Thai date letters (the th-TH built-ins): day, month, year, hour, minute, second.
 const THAI_DATE: Readonly<Record<string, TokKind>> = {

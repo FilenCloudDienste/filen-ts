@@ -111,6 +111,8 @@ export function refusalKey(refusal: SheetRefusal, kind: SheetFileKind): PreviewK
 			return "previewSheetStyleLimit"
 		case "unsupported":
 			return "previewSheetUnsupported"
+		case "multipleSelection":
+			return refusal.detail === "mixed" ? "previewSheetMultipleSelections" : "previewSheetOverlappingSelections"
 		case "mergeLosesValues":
 			return "previewSheetMergeLosesValues"
 		case "notesUnavailable":
@@ -129,6 +131,8 @@ export function refusalKey(refusal: SheetRefusal, kind: SheetFileKind): PreviewK
 			return "previewSheetObjectLocked"
 		case "chartUnsupported":
 			return "previewSheetChartUnsupported"
+		case "occupied":
+			return "previewSheetMoveReplaceBody"
 	}
 }
 

@@ -1,6 +1,12 @@
 // "preview" namespace, spreadsheet viewer — filling cells (the grid menu's Fill submenu and the
-// Series dialog). Spread into preview.ts; same catalog rules.
+// Series dialog) and moving them by dragging the selection's border. Spread into preview.ts; same catalog rules.
 export const previewSheetClipboard = {
+	/** Confirmation dialog — title, when cells dragged by the selection's border are dropped over cells holding data */
+	previewSheetMoveReplaceTitle: "Replace cells?",
+	/** Confirmation dialog — body (Excel's wording): dropping the dragged cells there replaces what the cells hold */
+	previewSheetMoveReplaceBody: "There's already data here. Do you want to replace it?",
+	/** Confirmation dialog — confirm button: replaces the cells' data with the dragged cells */
+	previewSheetMoveReplaceConfirm: "OK",
 	/** Spreadsheet grid menu — submenu that fills the selection from its first cells */
 	previewSheetFill: "Fill",
 	/** Fill submenu — copies the selection's first row into the rest of it (Ctrl+D) */

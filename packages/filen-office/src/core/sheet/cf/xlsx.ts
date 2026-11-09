@@ -2,7 +2,7 @@ import { CellFlag, TILE_COLS, TILE_ROWS, type SheetBorderLine, type SheetId, typ
 import { defineSheetFeature, type SheetReadContext, type SheetTileBuilder } from "../registry"
 import { runSliced, sliceClock, type Slicing } from "../../slicing"
 import { formatNumberInto, formatTextInto, numFmt, NumFmtOutput, type NumFmtOptions } from "../numfmt/format"
-import { NUMFMT_EN_US } from "../numfmt/locale"
+import type { NumFmt } from "../numfmt/parse"
 import { isPlainGeneral } from "../numfmt/general"
 import { SYSTEM_FOREGROUND } from "../style/palette"
 import type { SheetStore } from "../../xlsx/model/store"
@@ -74,12 +74,12 @@ export function conditionalFormats(context: SheetReadContext<XlsxDocument>, shee
 }
 
 function formatOptions(document: XlsxDocument): NumFmtOptions {
-	const locale = document.settings.locale
+	const locale = document.numFmtLocale
 
 	return {
 		date1904: document.date1904,
 		palette: document.styles.palette,
-		...(locale !== undefined && { locale: { ...NUMFMT_EN_US, decimal: locale.decimal, group: locale.group } })
+		...(locale !== undefined && { locale })
 	}
 }
 
@@ -226,7 +226,10 @@ class TileLook {
 		const found = tile.find(row, col)
 		const code = look.numFmt ?? this.document.styles.numFmtCode(xf)
 		// The value through its format: only a rule's format or font colour needs it (a [Red] stays over the latter).
-		const shown = look.numFmt !== null || look.font?.color !== undefined ? this.shown(code, value) : null
+		const shown =
+			look.numFmt !== null || look.font?.color !== undefined
+				? this.shown(look.numFmt === null ? this.document.styles.numFmt(xf) : numFmt(look.numFmt), value)
+				: null
 		const fill = look.fill === null ? "" : look.fill.kind === "solid" ? String(look.fill.rgb) : `d${String(idOf(look.fill.fill))}`
 		const key = `${found >= 0 ? `s${String(tile.style(found))}` : `x${String(xf)}`}|${String(xf)}|${String(idOf(look.font))}|${fill}|${String(idOf(look.top))},${String(idOf(look.bottom))},${String(idOf(look.left))},${String(idOf(look.right))}|${String(shown?.color ?? -1)}|${look.numFmt === null ? 0 : 1}`
 		const entry = found >= 0 ? found : tile.entry(row, col)
@@ -342,12 +345,10 @@ class TileLook {
 		}
 	}
 
-	// A value through a format code: its text and colour (null for a value no format changes: blank, logicals,
+	// A value through a format: its text and colour (null for a value no format changes: blank, logicals,
 	// errors).
-	private shown(code: string, value: Scalar): { text: string; color: number } | null {
+	private shown(format: NumFmt, value: Scalar): { text: string; color: number } | null {
 		if (value === null || typeof value === "boolean" || value instanceof FormulaError) return null
-
-		const format = numFmt(code)
 
 		if (typeof value === "number") formatNumberInto(format, value, this.out, this.options)
 		else formatTextInto(format, value, this.out, this.options)

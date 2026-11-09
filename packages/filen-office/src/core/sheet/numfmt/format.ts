@@ -2,7 +2,19 @@ import { DEFAULT_PALETTE } from "../style/palette"
 import { MAX_SERIAL_1900, MAX_SERIAL_1904, serialDate, type DateBase, type DateParts } from "./date"
 import { decompose, fractionDigits, integerDigits, roundDigits, type Digits } from "./decimal"
 import { NUMFMT_EN_US, type NumFmtLocale } from "./locale"
-import { LCID_SYSTEM_DATE, LCID_SYSTEM_TIME, SectionKind, Tok, parseNumFmt, type NumFmt, type NumFmtSection, type Token } from "./parse"
+import {
+	LCID_SYSTEM_DATE,
+	LCID_SYSTEM_DATE_TIME,
+	LCID_SYSTEM_SHORT_DATE,
+	LCID_SYSTEM_TIME,
+	SectionKind,
+	Tok,
+	parseNumFmt,
+	systemLcid,
+	type NumFmt,
+	type NumFmtSection,
+	type Token
+} from "./parse"
 
 export interface NumFmtOptions {
 	// The workbook's date system (workbookPr date1904; ISO_1900 for a Strict workbook's 1900 date base).
@@ -47,6 +59,44 @@ export function numFmt(code: string): NumFmt {
 	}
 
 	return compiled
+}
+
+// Built-in 14 and 22 (ECMA-376 Part 1 §18.8.30) as Excel shows them: in the system's short date ("Date formats that
+// begin with an asterisk (*) respond to changes in regional date and time settings", support.microsoft.com "Format
+// numbers as dates or times"). Their code stays the table's, which is what files keep.
+function systemFormat(code: string, lcid: number): NumFmt {
+	const format = parseNumFmt(code)
+	const [first, ...rest] = format.sections
+
+	return first === undefined ? format : { ...format, sections: [{ ...first, lcid }, ...rest] }
+}
+
+export const SYSTEM_SHORT_DATE: NumFmt = systemFormat("m/d/yyyy", LCID_SYSTEM_SHORT_DATE)
+export const SYSTEM_DATE_TIME: NumFmt = systemFormat("m/d/yyyy h:mm", LCID_SYSTEM_DATE_TIME)
+
+// The sections a locale's system patterns compile to, for the last locale asked (sessions hold one).
+let systemLocale: NumFmtLocale | null = null
+const systemSections: (NumFmtSection | null | undefined)[] = []
+
+function systemSection(lcid: number, locale: NumFmtLocale): NumFmtSection | null {
+	if (systemLocale !== locale) {
+		systemLocale = locale
+		systemSections.length = 0
+	}
+
+	const slot = lcid === LCID_SYSTEM_DATE ? 0 : lcid === LCID_SYSTEM_TIME ? 1 : lcid === LCID_SYSTEM_SHORT_DATE ? 2 : 3
+	let section = systemSections[slot]
+
+	if (section === undefined) {
+		const code =
+			slot === 0 ? locale.longDate : slot === 1 ? locale.longTime : slot === 2 ? locale.shortDate : `${locale.shortDate} h:mm`
+		const first = parseNumFmt(code).sections[0]
+
+		section = first !== undefined && first.kind === SectionKind.DATE ? first : null
+		systemSections[slot] = section
+	}
+
+	return section
 }
 
 const digitsScratch: Digits = { digits: "", point: 0 }
@@ -528,8 +578,7 @@ function scientific(value: number, decimals: number): string {
 // --- Dates and times ---
 
 function localeOf(section: NumFmtSection, options: NumFmtOptions, locale: NumFmtLocale): NumFmtLocale {
-	if (section.lcid < 0 || section.lcid === LCID_SYSTEM_DATE || section.lcid === LCID_SYSTEM_TIME || options.localeFor === undefined)
-		return locale
+	if (section.lcid < 0 || systemLcid(section.lcid) || options.localeFor === undefined) return locale
 
 	return options.localeFor(section.lcid) ?? locale
 }
@@ -717,11 +766,7 @@ export function formatNumberInto(format: NumFmt, value: number, out: NumFmtOutpu
 
 	out.color = sectionColor(section, options)
 
-	if (section.kind === SectionKind.DATE && (section.lcid === LCID_SYSTEM_DATE || section.lcid === LCID_SYSTEM_TIME)) {
-		const system = numFmt(section.lcid === LCID_SYSTEM_DATE ? locale.longDate : locale.longTime).sections[0]
-
-		if (system !== undefined && system.kind === SectionKind.DATE) section = system
-	}
+	if (section.kind === SectionKind.DATE && systemLcid(section.lcid)) section = systemSection(section.lcid, locale) ?? section
 
 	const minus = pickedMinus
 	const separators = options.lcidSeparators === true ? localeOf(section, options, locale) : locale

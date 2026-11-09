@@ -1,7 +1,7 @@
 import { useId, useState } from "react"
 import { useTranslation } from "react-i18next"
 import type { SheetCommand, SheetRange } from "@filen/office/core/sheet"
-import type { SheetGridState } from "@filen/office/react/sheet"
+import { axisMove, type SheetGridState } from "@filen/office/react/sheet"
 import { FormDialog } from "@/components/dialogs/formDialog"
 import { Label } from "@/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
@@ -31,18 +31,19 @@ const CHOICES: Readonly<Record<SheetAxisDialogKind, readonly { readonly value: S
 
 const VALUES: readonly SheetAxisChoice[] = ["cellsRows", "cellsCols", "rows", "cols"]
 
-function axisDialogCommand(kind: SheetAxisDialogKind, choice: SheetAxisChoice, sheet: number, range: SheetRange): SheetCommand {
+// Entire rows (columns): every range's, in one step, as Excel takes a selection of several.
+function axisDialogCommand(
+	kind: SheetAxisDialogKind,
+	choice: SheetAxisChoice,
+	sheet: number,
+	range: SheetRange,
+	ranges: readonly SheetRange[]
+): SheetCommand {
 	if (choice === "cellsRows" || choice === "cellsCols") {
 		return { type: "cells.shift", sheet, range, edit: kind, axis: choice === "cellsRows" ? "rows" : "cols" }
 	}
 
-	return {
-		type: kind === "insert" ? "axis.insert" : "axis.delete",
-		sheet,
-		axis: choice,
-		at: choice === "rows" ? range.startRow : range.startCol,
-		count: choice === "rows" ? range.endRow - range.startRow + 1 : range.endCol - range.startCol + 1
-	}
+	return axisMove(kind === "insert" ? "axis.insert" : "axis.delete", sheet, choice, ranges)
 }
 
 // Excel's Insert and Delete dialogs (Ctrl+Shift+Plus, Ctrl+Minus on cells): the selection's cells inserted or deleted,
@@ -87,7 +88,7 @@ export function SheetAxisDialog({
 				event.preventDefault()
 
 				if (kind !== null && range !== undefined) {
-					run(axisDialogCommand(kind, choice, grid.sheet, range))
+					run(axisDialogCommand(kind, choice, grid.sheet, range, grid.selection.ranges))
 				}
 
 				onClose()

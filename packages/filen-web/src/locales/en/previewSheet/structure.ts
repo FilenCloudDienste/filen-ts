@@ -181,5 +181,9 @@ export const previewSheetStructure = {
 	/** Password to modify prompt — while the password is checked */
 	previewSheetModifyPasswordChecking: "Checking…",
 	/** Spreadsheet formula bar — the workbook's password to modify cannot be checked here */
-	previewSheetModifyPasswordUnsupported: "This workbook's password to edit can't be checked here. You can view it."
+	previewSheetModifyPasswordUnsupported: "This workbook's password to edit can't be checked here. You can view it.",
+	/** Spreadsheet error — rows or columns inserted or deleted on selected ranges that overlap one another */
+	previewSheetOverlappingSelections: "That command can't be used on overlapping selections.",
+	/** Spreadsheet error — rows or columns inserted or deleted on a selection of whole rows together with whole columns */
+	previewSheetMultipleSelections: "That command can't be used on multiple selections."
 }

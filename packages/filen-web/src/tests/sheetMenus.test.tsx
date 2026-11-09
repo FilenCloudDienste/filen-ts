@@ -105,6 +105,52 @@ describe("the grid menu's structure items", () => {
 		})
 	})
 
+	it("deletes the rows of every selected range at once, and inserts above each", async () => {
+		const model = await openGrid(await workbook([{ name: "One", rows: [["a"], ["b"], ["c"], ["d"], ["e"]] }]), "xlsx")
+		const run = vi.fn<(command: SheetCommand) => void>()
+		const view = render(
+			<GridHarness model={model}>
+				{grid => (
+					<SheetGridMenu
+						grid={grid}
+						canEdit
+						run={run}
+					>
+						<div />
+					</SheetGridMenu>
+				)}
+			</GridHarness>
+		)
+		const row = (at: number): SheetRange => ({ startRow: at, startCol: 0, endRow: at, endCol: SHEET_MAX_COLS - 1 })
+
+		act(() => {
+			model.select({ active: { row: 3, col: 0 }, anchor: { row: 3, col: 0 }, focus: { row: 3, col: 0 }, ranges: [row(1), row(3)] })
+		})
+		openMenu(view.container)
+		fireEvent.click(await screen.findByText(/^(Delete 2 rows|previewSpreadsheetDeleteRows)$/))
+		expect(run).toHaveBeenLastCalledWith({
+			type: "axis.delete",
+			sheet: model.getSnapshot().sheet,
+			axis: "rows",
+			spans: [
+				{ at: 1, count: 1 },
+				{ at: 3, count: 1 }
+			]
+		})
+
+		openMenu(view.container)
+		fireEvent.click(await screen.findByText(/^(Insert 2 rows above|previewSpreadsheetInsertRowsAbove)$/))
+		expect(run).toHaveBeenLastCalledWith({
+			type: "axis.insert",
+			sheet: model.getSnapshot().sheet,
+			axis: "rows",
+			spans: [
+				{ at: 1, count: 1 },
+				{ at: 3, count: 1 }
+			]
+		})
+	})
+
 	it("offers no unhide where no hidden row is in or next to the selection", async () => {
 		const model = await openGrid(await workbook([{ name: "One", rows: [["a"], ["b"]] }]), "xlsx")
 		const view = render(

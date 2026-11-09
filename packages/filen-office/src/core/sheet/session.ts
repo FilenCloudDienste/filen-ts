@@ -128,6 +128,8 @@ export interface SheetSessionDocument {
 	checkEdit?(touched: ReadonlyMap<SheetId, readonly SheetRange[]>, command: SheetCommand): SheetRefusal | null
 	// The edit checkEdit refused was undone: whatever it recorded of its own goes with it.
 	editUndone?(): void
+	// The circular references, when they changed since last asked (null otherwise): asked after each change.
+	circularReferences?(): { readonly cells: readonly SheetCell[]; readonly introduced: boolean } | null
 }
 
 declare module "./protocol" {
@@ -997,6 +999,8 @@ export class SheetSession<D extends SheetSessionDocument> implements SheetSessio
 
 		const styles = this.styles.take()
 
+		this.circles()
+
 		return {
 			state: this.state(),
 			patches,
@@ -1063,6 +1067,15 @@ export class SheetSession<D extends SheetSessionDocument> implements SheetSessio
 		}
 
 		if (collector.any) this.onEvent({ type: "change", change: this.change(collector) })
+		else this.circles()
+	}
+
+	// What the circular references are now, when that changed.
+	private circles(): void {
+		const circular = this.document.circularReferences?.()
+
+		if (circular !== null && circular !== undefined)
+			this.onEvent({ type: "circularReferences", cells: circular.cells, introduced: circular.introduced })
 	}
 
 	// --- SheetSessionApi ---

@@ -53,10 +53,12 @@ import {
 import { selectionSpans } from "@/features/spreadsheet/menus/structure.logic"
 import { structureShortcut } from "@/features/spreadsheet/menus/structureShortcuts"
 import { useMergeCommands } from "@/features/spreadsheet/menus/useMergeCommands"
+import { useMoveReplace } from "@/features/spreadsheet/components/moveReplaceDialog"
 import { SheetModifyPassword } from "@/features/spreadsheet/menus/modifyPassword"
 import { SheetTabs } from "@/features/spreadsheet/tabs/sheetTabs"
 import { insertSheetBefore } from "@/features/spreadsheet/tabs/sheetTabs.logic"
 import { SheetStatusBar } from "@/features/spreadsheet/components/sheetStatusBar"
+import { CircularWarning } from "@/features/spreadsheet/components/circularWarning"
 import type { SheetHandle } from "@/features/spreadsheet/hooks/useSheetSession"
 import { isTextSheetKind } from "@/features/spreadsheet/lib/sheetHosts"
 import { isLegacySheetKind } from "@/features/spreadsheet/lib/sheetKind"
@@ -179,6 +181,7 @@ export function SheetBody({
 	const [xlsxAsked, setXlsxAsked] = useState(false)
 	const [axisAsked, setAxisAsked] = useState<SheetAxisDialogKind | null>(null)
 	const [xlsxSaving, setXlsxSaving] = useState(false)
+	const [circularWarned, setCircularWarned] = useState(false)
 	const text = isTextSheetKind(kind)
 	const mayEdit = editable && !unnamed && !renamed && !neverEditable
 	const canEdit = mayEdit && grid.writability.state !== "viewOnly" && grid.failed === null
@@ -201,6 +204,11 @@ export function SheetBody({
 					log.warn("preview", "spreadsheet feature unavailable", event.feature, event.message)
 				}
 
+				// A circle an edit made: Excel's warning, once for it.
+				if (event.type === "circularReferences" && event.introduced) {
+					setCircularWarned(true)
+				}
+
 				model.handleEvent(event)
 			}),
 		[handle, model]
@@ -219,6 +227,7 @@ export function SheetBody({
 
 	const merges = useMergeCommands(grid)
 	const askMerge = merges.ask
+	const moveReplace = useMoveReplace()
 
 	useEffect(() => {
 		model.setRefusalHandler((refusal, command) => {
@@ -802,6 +811,7 @@ export function SheetBody({
 								describeCell={(cell, value) => (value === "" ? cell : t("previewSheetActiveCell", { cell, text: value }))}
 								describeSelection={range => t("previewSheetRangeSelected", { range })}
 								onTouchMenu={touch.onTouchMenu}
+								onConfirmReplace={moveReplace.ask}
 								onShortcut={handleShortcut}
 								onEditorKey={formula.editorKey}
 								extensions={gridExtensions(extensions)}
@@ -826,6 +836,7 @@ export function SheetBody({
 				<Fragment key={extension.id}>{extension.dialogs}</Fragment>
 			))}
 			{merges.dialog}
+			{moveReplace.dialog}
 			<SheetAxisDialog
 				kind={axisAsked}
 				grid={grid}
@@ -850,6 +861,13 @@ export function SheetBody({
 				grid={grid}
 				session={handle.session}
 				cellless={cellless}
+			/>
+			<CircularWarning
+				open={circularWarned}
+				gridRef={gridRef}
+				onClose={() => {
+					setCircularWarned(false)
+				}}
 			/>
 			{onSaveAsXlsx === undefined ? null : (
 				<ConfirmDialog

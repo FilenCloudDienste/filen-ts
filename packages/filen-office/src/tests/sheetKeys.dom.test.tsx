@@ -400,6 +400,50 @@ describe("grid shortcuts", () => {
 		expect(await text(model, 0, 0)).toBe("1")
 	})
 
+	it("deletes every selected run of whole rows with Ctrl+Minus, undone in one step", async () => {
+		const { model, scroller } = await mount()
+		const row = (at: number) => ({ startRow: at, startCol: 0, endRow: at, endCol: SHEET_MAX_COLS - 1 })
+
+		act(() =>
+			model.select({
+				active: { row: 2, col: 0 },
+				anchor: { row: 2, col: 0 },
+				focus: { row: 2, col: SHEET_MAX_COLS - 1 },
+				ranges: [row(0), row(2)]
+			})
+		)
+		key(scroller, { key: "-", code: "Minus", ctrlKey: true })
+		await settle()
+		expect([await text(model, 0, 0), await text(model, 2, 0)]).toEqual(["2", "10"])
+
+		key(scroller, { key: "z", code: "KeyZ", ctrlKey: true })
+		await settle()
+		expect([await text(model, 0, 0), await text(model, 2, 0), await text(model, 4, 0)]).toEqual(["1", "3", "10"])
+	})
+
+	it("refuses Ctrl+Minus on whole rows selected with whole columns, as Excel's multiple selections", async () => {
+		const { model, scroller } = await mount()
+		const refused: string[] = []
+
+		model.setRefusalHandler(refusal => refused.push(`${refusal.reason}:${refusal.detail ?? ""}`))
+		act(() =>
+			model.select({
+				active: { row: 0, col: 1 },
+				anchor: { row: 0, col: 1 },
+				focus: { row: SHEET_MAX_ROWS - 1, col: 1 },
+				ranges: [
+					{ startRow: 0, startCol: 0, endRow: 0, endCol: SHEET_MAX_COLS - 1 },
+					{ startRow: 0, startCol: 1, endRow: SHEET_MAX_ROWS - 1, endCol: 1 }
+				]
+			})
+		)
+		key(scroller, { key: "-", code: "Minus", ctrlKey: true })
+		await settle()
+		expect(refused).toEqual(["multipleSelection:mixed"])
+		expect(await text(model, 0, 0)).toBe("1")
+		expect(model.getSnapshot().state.canUndo).toBe(false)
+	})
+
 	it("shows formulas in their cells with Ctrl+`, and results again with a second press", async () => {
 		const { model, scroller, handle } = await mount({ sheets: [{ name: "One", body: sheetBody([[2, { f: "A1*3", v: 6 }]]) }] })
 		const cells = canvases.get(scroller.parentElement?.querySelector("canvas") as HTMLCanvasElement) as RecordingCanvas

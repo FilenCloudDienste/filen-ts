@@ -147,7 +147,10 @@ for (let op = 1; op <= OPS; op++) {
 			patch: rand() < 0.5 ? { bold: rand() < 0.5 } : { fill: int(0xffffff) }
 		})
 	} else if (roll < 0.89) {
-		await run({ type: rand() < 0.5 ? "axis.insert" : "axis.delete", sheet, axis: "rows", at: spot.row, count: 1 + int(2) })
+		const insert = rand() < 0.5
+		const move = { sheet, axis: "rows", at: spot.row, count: 1 + int(2) } as const
+
+		await run(insert ? { type: "axis.insert", ...move } : { type: "axis.delete", ...move })
 	} else if (roll < 0.91) {
 		await run({ type: "axis.resize", sheet, axis: "cols", indices: Uint32Array.of(spot.col), sizes: Float32Array.of(40 + int(200)) })
 	} else if (roll < 0.94) {

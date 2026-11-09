@@ -1,7 +1,7 @@
 import { Fragment, useState, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { AxisFlag, resetTargets, type LayerKey, type SheetAxis, type SheetAxisLayout, type SheetCommand } from "@filen/office/core/sheet"
-import { axisEntry, celllessSheet, wholeAxis, type SheetGridState } from "@filen/office/react/sheet"
+import { axisEntry, axisMove, celllessSheet, wholeAxis, type SheetGridState } from "@filen/office/react/sheet"
 import {
 	ContextMenu,
 	ContextMenuContent,
@@ -174,21 +174,15 @@ export function SheetGridMenu({
 								</>
 							) : null}
 							{STRUCTURE_ITEMS.map(item => {
-								const rows = item.axis === "rows"
-								const count = rows ? range.endRow - range.startRow + 1 : range.endCol - range.startCol + 1
-								const start = rows ? range.startRow : range.startCol
+								// Every range's rows (columns), each inserted at or deleted on its own.
+								const move = axisMove(item.type, sheet, item.axis, selection.ranges, item.after)
+								const count = "spans" in move ? move.spans.reduce((sum, span) => sum + span.count, 0) : move.count
 
 								return (
 									<Fragment key={item.key}>
 										<ContextMenuItem
 											onClick={() => {
-												run({
-													type: item.type,
-													sheet,
-													axis: item.axis,
-													at: item.after ? start + count : start,
-													count
-												})
+												run(move)
 											}}
 										>
 											{t(item.key, { count })}

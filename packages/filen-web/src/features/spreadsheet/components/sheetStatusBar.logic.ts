@@ -1,4 +1,16 @@
-import type { SheetRange, SheetSelectionStats } from "@filen/office/core/sheet"
+import { cellName, type SheetCell, type SheetId, type SheetRange, type SheetSelectionStats } from "@filen/office/core/sheet"
+
+// What Excel's status bar says of circular references ("Remove or allow a circular reference"): the first cell of the
+// sheet shown that is on one ("B1"), "" when only other sheets have one, null when none has.
+export function circularStatus(circular: readonly SheetCell[], sheet: SheetId): string | null {
+	if (circular.length === 0) {
+		return null
+	}
+
+	const own = circular.find(cell => cell.sheet === sheet)
+
+	return own === undefined ? "" : cellName(own.row, own.col)
+}
 
 // The status bar's summary (Excel's "View summary data on the status bar"): nothing for one cell or for fewer than
 // two that hold something; Count of those that do, and Average and Sum when they hold numbers and no error.

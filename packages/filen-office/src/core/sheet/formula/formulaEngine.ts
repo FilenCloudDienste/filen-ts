@@ -39,6 +39,7 @@ import { installErrorValues } from "./errorValues"
 import { installExactSearch } from "./exactSearch"
 import { installSharedRanges } from "./sharedRanges"
 import { installWholeRanges, WholeRanges, withWholeRanges } from "./wholeRanges"
+import { installCircles, withCircles, type CircleHost, type Iteration } from "./iteration"
 
 // HyperFormula over a workbook, for recalculating what an edit changes. Built only once the workbook has a
 // formula to care about, and kept in step with the workbook from then on (cells, inserted and deleted rows
@@ -120,8 +121,25 @@ export interface EngineName {
 	scope?: number
 }
 
-// A circular reference. Excel, not iterating, shows 0 for it; iterating, the result it stored.
+// A circular reference the engine's functions find (INDIRECT reading its own cell). Excel, not iterating, shows 0 for
+// it; iterating, the result it stored. Circles in what formulas name are calculated as Excel does (iteration.ts).
 export const CYCLE = "#CYCLE!"
+
+// The workbook's iterative calculation (calcPr iterate): circles are iterated. `recalculateOnLoad`: the build
+// iterates them too, where Excel recalculates on open (calcPr fullCalcOnLoad); otherwise they keep the file's results.
+export interface EngineIteration extends Iteration {
+	readonly recalculateOnLoad?: boolean
+}
+
+// A formula cell on a circular reference, by grid sheet index.
+export interface CircularCell {
+	readonly sheet: number
+	readonly row: number
+	readonly col: number
+}
+
+// Excel's own bound on Maximum Iterations.
+const MAX_ITERATIONS = 32_767
 
 // Excel's own error texts, which the files store and the grid shows.
 const ERROR_TEXT: Readonly<Partial<Record<ErrorType, string>>> = {
@@ -296,6 +314,7 @@ function registerHeld(): void {
 	installErrorValues(LICENSE_KEY)
 	installIndirect(LICENSE_KEY)
 	installLiftTracking()
+	installCircles(LICENSE_KEY)
 	registered = true
 }
 
@@ -652,6 +671,18 @@ export class FormulaEngine {
 	// INDIRECT calculates again at the next recalculation.
 	private sheetsChanged = false
 	private depth = 0
+	// The workbook's iterative calculation; null: circles show 0 and are reported (circularCells).
+	private readonly iteration: EngineIteration | null
+	// The formula vertices on circles the engine calculated (iteration.ts), and those held at their stored results
+	// because they were on one (failure): what circularCells reports, not iterating.
+	private readonly cycled = new Set<object>()
+	private readonly heldCircles = new Set<object>()
+	// Counts each change to the circular cells; whether a circle was met that was not one before (circularChange).
+	private circleVersion = 0
+	private introduced = false
+	// While the engine is built: the value a circle's formula starts from (the file's result, the old engine's).
+	private seeds: ((address: SimpleCellAddress) => unknown) | null = null
+	private readonly circles: CircleHost
 	private readonly indirect: IndirectHost = {
 		name: (name, own) => {
 			const sheet = this.building === null ? this.sheetIndex(own) : (this.building[own] ?? -1)
@@ -732,7 +763,7 @@ export class FormulaEngine {
 	// spill over. `shownFormula`: a cell's formula (by grid sheet index) as the formula bar shows it, "=" first, or
 	// null for a cell without one, which FORMULATEXT gives; it is #N/A everywhere without it (the engine's text is
 	// its own rewrite of the user's). `calcA1`: the workbook came from an .ods file, whose INDIRECT also reads
-	// LibreOffice's Calc A1 text (Sheet.A1).
+	// LibreOffice's Calc A1 text (Sheet.A1). `iteration`: the workbook's iterative calculation, none without it.
 	constructor(
 		sheets: readonly EngineSheet[],
 		names: readonly EngineName[],
@@ -742,8 +773,18 @@ export class FormulaEngine {
 		locale?: SheetLocale,
 		blocking?: (sheet: number, range: SpillRange) => boolean,
 		shownFormula?: (sheet: number, row: number, col: number) => string | null,
-		calcA1 = false
+		calcA1 = false,
+		iteration: EngineIteration | null = null
 	) {
+		this.iteration =
+			iteration === null
+				? null
+				: {
+						count: Number.isFinite(iteration.count) ? Math.min(MAX_ITERATIONS, Math.max(0, Math.trunc(iteration.count))) : 100,
+						delta: Number.isFinite(iteration.delta) && iteration.delta >= 0 ? iteration.delta : 0.001,
+						recalculateOnLoad: iteration.recalculateOnLoad === true
+					}
+		this.circles = this.circleHost()
 		this.calcA1 = calcA1
 		this.held = held
 		this.rows = rows
@@ -830,6 +871,26 @@ export class FormulaEngine {
 				if (cell.spill !== undefined) this.ownSpill({ sheet: id, row: cell.row, col: cell.col }, cell.spill)
 		})
 
+		// A circle's formulas start from the results the file stored (read only once the build meets a circle).
+		let stored: Map<string, RawCellContent> | null = null
+
+		this.seeds = address => {
+			stored ??= new Map(
+				sheets.flatMap((sheet, index) =>
+					sheet.formulas.flatMap(cell =>
+						cell.fallback === undefined
+							? []
+							: [[`${String(index)},${String(cell.row)},${String(cell.col)}`, cell.fallback] as const]
+					)
+				)
+			)
+
+			const sheet = this.building === null ? this.sheetIndex(address.sheet) : (this.building[address.sheet] ?? -1)
+			const value = stored.get(`${String(sheet)},${String(address.row)},${String(address.col)}`)
+
+			return value === undefined ? undefined : heldInterpreterValue(value)
+		}
+
 		// While the first build calculates, the engine's sheet ids are the record's key order.
 		this.building = order.map(name => sheets.findIndex(sheet => sheet.name === name))
 		this.engine = build()
@@ -868,6 +929,8 @@ export class FormulaEngine {
 		})
 
 		if (failing.length >= REBUILD_FAILING) {
+			const circled = failing.flatMap(({ cell }) => (this.circled(cell.address) ? [cell.address] : []))
+
 			for (const { cell, held } of failing) {
 				const row = contents[order[cell.address.sheet] ?? ""]?.[cell.address.row]
 
@@ -877,13 +940,17 @@ export class FormulaEngine {
 			}
 
 			this.engine.destroy()
+			this.cycled.clear()
 			this.engine = build()
+
+			for (const address of circled) this.heldCircle(address)
 
 			const failed = new Set(failing.map(({ cell }) => cell))
 
 			pending = pending.filter(cell => !failed.has(cell))
 		}
 
+		this.seeds = null
 		this.settle(pending, new Map())
 		this.followDynamic(new Map(), true)
 		this.snapshotSpills()
@@ -1090,9 +1157,11 @@ export class FormulaEngine {
 		if (this.depth++ === 0) this.runs++
 
 		try {
-			return withSpill(this.spillHost, () =>
-				withIndirect(this.indirect, () =>
-					withWholeRanges(this.whole, () => (this.rows === undefined ? work() : withRowState(this.rowState, work)))
+			return withCircles(this.circles, () =>
+				withSpill(this.spillHost, () =>
+					withIndirect(this.indirect, () =>
+						withWholeRanges(this.whole, () => (this.rows === undefined ? work() : withRowState(this.rowState, work)))
+					)
 				)
 			)
 		} finally {
@@ -1440,6 +1509,134 @@ export class FormulaEngine {
 		]
 	}
 
+	private circleHost(): CircleHost {
+		const iteration = this.iteration
+		const cycled = this.cycled
+		const seeding = (): CircleHost["seed"] => (this.inBuild ? this.seeds : null)
+
+		return {
+			iteration,
+			get seed() {
+				return seeding()
+			},
+			recalculateSeeded: iteration?.recalculateOnLoad === true,
+			cycled,
+			found: vertices => {
+				// Iterating, Excel reports no circle.
+				if (iteration !== null) return
+
+				let added = false
+
+				for (const vertex of vertices) {
+					if (cycled.has(vertex)) continue
+
+					cycled.add(vertex)
+					added = true
+				}
+
+				if (added) {
+					this.introduced = true
+					this.circleVersion++
+				}
+			},
+			left: () => {
+				this.circleVersion++
+			}
+		}
+	}
+
+	// The vertex of a formula cell (engine sheet id), if it has one.
+	private vertexAt(address: SimpleCellAddress): object | undefined {
+		const vertex: unknown = this.engine.dependencyGraph.addressMapping.getCell(address)
+
+		return typeof vertex === "object" && vertex !== null ? vertex : undefined
+	}
+
+	// Whether a formula cell (engine sheet id) is on a circle: one in what formulas name, or its own cell read through
+	// INDIRECT.
+	private circled(address: SimpleCellAddress): boolean {
+		if (this.cycled.size > 0) {
+			const vertex = this.vertexAt(address)
+
+			if (vertex !== undefined && this.cycled.has(vertex)) return true
+		}
+
+		const value = this.engine.getCellValue(address)
+
+		return (
+			value instanceof DetailedCellError &&
+			value.type === ErrorType.CYCLE &&
+			value.address === this.engine.simpleCellAddressToString(address, -1)
+		)
+	}
+
+	// A cell held at its stored result because it was on a circle: still reported as one, not iterating.
+	private heldCircle(address: SimpleCellAddress): void {
+		if (this.iteration !== null) return
+
+		const vertex = this.vertexAt(address)
+
+		if (vertex === undefined || this.heldCircles.has(vertex)) return
+
+		this.heldCircles.add(vertex)
+		this.introduced = true
+		this.circleVersion++
+	}
+
+	// Every formula cell on a circular reference, by grid sheet index; none while iterating, as Excel reports none.
+	// Cells written over or deleted since are let go.
+	private circleCells(): CircularCell[] {
+		const cells: CircularCell[] = []
+
+		if (this.iteration !== null || (this.cycled.size === 0 && this.heldCircles.size === 0)) return cells
+
+		const service = this.engine.lazilyTransformingAstService
+
+		for (const set of [this.cycled, this.heldCircles]) {
+			for (const vertex of set) {
+				const address = (vertex as { getAddress(service: unknown): SimpleCellAddress }).getAddress(service)
+				const sheet = this.sheetIndex(address.sheet)
+
+				if (sheet < 0 || this.vertexAt(address) !== vertex) {
+					set.delete(vertex)
+					this.circleVersion++
+
+					continue
+				}
+
+				cells.push({ sheet, row: address.row, col: address.col })
+			}
+		}
+
+		return cells
+	}
+
+	// Changes to the circular cells since `version` (circularChange's last): the first of each sheet, by row then
+	// column, as Excel's status bar names one ("Circular References: B1"), and whether a circle was met that was not
+	// one before (Excel's warning shows once for it); null when nothing changed. A cell written over leaves its circle
+	// without the engine calculating it again: while there are circles, they are looked over at each call.
+	circularChange(version: number): { readonly version: number; readonly cells: CircularCell[]; readonly introduced: boolean } | null {
+		if (version === this.circleVersion && !this.introduced && this.cycled.size === 0 && this.heldCircles.size === 0) return null
+
+		const all = this.circleCells()
+
+		if (version === this.circleVersion && !this.introduced) return null
+
+		const first = new Map<number, CircularCell>()
+
+		for (const cell of all) {
+			const known = first.get(cell.sheet)
+
+			if (known === undefined || cell.row < known.row || (cell.row === known.row && cell.col < known.col)) first.set(cell.sheet, cell)
+		}
+
+		const introduced = this.introduced && first.size > 0
+
+		this.introduced = false
+
+		return { version: this.circleVersion, cells: [...first.values()].sort((a, b) => a.sheet - b.sheet), introduced }
+	}
+
 	// A held result as the formula the engine is given.
 	private holding(held: HeldResult): string {
 		const id = this.heldValues.length
@@ -1478,6 +1675,15 @@ export class FormulaEngine {
 		const value = this.cellValue(this.engine, cell.address)
 		const fallback = cell.fallback
 
+		// Not iterating, a formula on a circle the engine draws from what formulas name keeps its stored result: the
+		// engine draws one from every cell a range names (INDEX(A1:C1,1,1) in B1) where Excel's calculation may never
+		// meet one. Held, the circle is gone.
+		if (fallback !== undefined && this.held !== undefined && this.iteration === null && this.cycled.size > 0) {
+			const vertex = this.vertexAt(cell.address)
+
+			if (vertex !== undefined && this.cycled.has(vertex)) return new HeldResult(fallback)
+		}
+
 		if (!(value instanceof DetailedCellError) || fallback === undefined) {
 			return null
 		}
@@ -1498,9 +1704,7 @@ export class FormulaEngine {
 			return value.address === undefined && !this.spills.has(changeKey(cell.address)) ? new HeldResult(fallback) : null
 		}
 
-		// An unknown function or name in this very formula, not one it inherits; or a circle it is part of, which the
-		// engine draws from every cell a range names (INDEX(A1:C1,1,1) in B1) where Excel's calculation may never
-		// meet one. Held, the circle is gone.
+		// An unknown function or name in this very formula, not one it inherits; or its own cell read through INDIRECT.
 		return (value.type === ErrorType.NAME || (value.type === ErrorType.CYCLE && this.held !== undefined)) &&
 			value.address === this.engine.simpleCellAddressToString(cell.address, -1)
 			? new HeldResult(fallback)
@@ -1533,6 +1737,8 @@ export class FormulaEngine {
 				return
 			}
 
+			const circled = this.iteration === null ? failing.flatMap(({ cell }) => (this.circled(cell.address) ? [cell.address] : [])) : []
+
 			this.collect(
 				this.run(() =>
 					this.batched(() => {
@@ -1543,6 +1749,8 @@ export class FormulaEngine {
 				),
 				changes
 			)
+
+			for (const address of circled) this.heldCircle(address)
 
 			for (const { cell } of failing) {
 				const key = changeKey(cell.address)
@@ -1855,15 +2063,18 @@ export class FormulaEngine {
 				const reason = this.held === undefined ? null : read
 
 				// A formula reading its own cell is a circle: held at its stored result now, rather than found by the
-				// engine and held after it calculated everything reading it (a second recalculation).
+				// engine and held after it calculated everything reading it (a second recalculation). Iterating, it is
+				// calculated.
 				if (
 					reason === null &&
 					this.held !== undefined &&
+					this.iteration === null &&
 					cell.fallback !== undefined &&
 					readsItself(given, sheet, cell.row, cell.col, this.sheetNames)
 				) {
 					this.engine.setCellContents(address, this.holding(new HeldResult(cell.fallback)))
 					this.heldBy(address)
+					this.heldCircle(address)
 
 					continue
 				}
@@ -2255,6 +2466,26 @@ export class FormulaEngine {
 			return scope === undefined || scope < 0 ? global : { ...global, scope }
 		})
 
+		// The circles the old engine had: what the build finds again is no new one; what it held for being on one is
+		// held still.
+		const service = old.lazilyTransformingAstService
+		const heldAt = [...this.heldCircles].map(vertex =>
+			(vertex as { getAddress(service: unknown): SimpleCellAddress }).getAddress(service)
+		)
+		const circular = new Set(this.circleCells().map(cell => `${String(cell.sheet)},${String(cell.row)},${String(cell.col)}`))
+		const introduced = this.introduced
+
+		this.cycled.clear()
+		this.heldCircles.clear()
+		// A circle's formulas go on from the old engine's values; the written ones start anew.
+		this.seeds = address => {
+			const id = this.sheetIds[this.building?.[address.sheet] ?? -1]
+			const was = id === undefined ? undefined : before.get(changeKey({ sheet: id, row: address.row, col: address.col }))?.value
+			const value = rawValue(was)
+
+			return value === undefined ? undefined : heldInterpreterValue(value)
+		}
+
 		old.destroy()
 		// What INDIRECT read was the old engine's (its sheet ids); the build records it again.
 		this.indirectReads.clear()
@@ -2288,6 +2519,10 @@ export class FormulaEngine {
 
 		for (const address of holds) this.heldBy(remap(address))
 
+		this.seeds = null
+
+		for (const address of heldAt) this.heldCircle(remap(address))
+
 		const changes = new Map<string, RecalculatedCell>()
 		const report = (address: SimpleCellAddress, was: unknown, always: boolean): void => {
 			const value: unknown = this.cellValue(this.engine, address)
@@ -2316,6 +2551,9 @@ export class FormulaEngine {
 			if (cells !== undefined && next !== undefined) this.totals.set(next, cells)
 		})
 		spliceAll(this.sheetIds, 0, this.sheetIds.length, ids)
+
+		this.introduced =
+			introduced || this.circleCells().some(cell => !circular.has(`${String(cell.sheet)},${String(cell.row)},${String(cell.col)}`))
 
 		for (const cell of cells)
 			this.noteTotal(ids[sheet] ?? 0, cell.row, cell.col, cell.content instanceof HeldResult ? null : cell.content)

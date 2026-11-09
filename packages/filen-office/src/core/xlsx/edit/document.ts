@@ -23,6 +23,7 @@ import {
 	serialDate,
 	type DateParts,
 	type NumFmt,
+	type NumFmtLocale,
 	type NumFmtOptions
 } from "../../sheet/numfmt/index"
 import { dateSerial, ISO_1900, type DateBase } from "../../sheet/numfmt/date"
@@ -494,6 +495,7 @@ export class XlsxDocument {
 	readonly failed = new Map<SheetId, XlsxReadError>()
 	private readonly interner: RenderStyleInterner
 	private numFmtOptions: NumFmtOptions
+	private shownLocale: NumFmtLocale | undefined
 	private readonly out = new NumFmtOutput()
 	private readonly shown: Shown = { text: "", input: null, flags: 0, color: -1, repeatOffset: -1, repeatChar: "" }
 	// Rich strings' runs by string, cell format and number format colour.
@@ -516,11 +518,12 @@ export class XlsxDocument {
 		this.encryption = options.encryption
 		this.writeUnlocked = options.writeUnlocked === true
 		this.writer = options.writer
-		this.ownSettings = options.settings ?? {}
+		this.ownSettings = this.entrySettings(options.settings ?? {})
+		this.shownLocale = options.settings?.locale?.numFmt
 		this.interner = interner
 		// A workbook without a styles part implies Excel's defaults: they come first, before any format an edit adds.
 		seedImpliedStyles(workbook.styles)
-		this.styles = new SheetStyles(workbook.styles, workbook.theme)
+		this.styles = new SheetStyles(workbook.styles, workbook.theme, { systemDates: workbook.format !== "ods" })
 		this.numFmtOptions = this.formatOptions()
 	}
 
@@ -534,7 +537,9 @@ export class XlsxDocument {
 		const before = this.ownSettings.locale
 		const after = settings.locale
 
-		this.ownSettings = settings
+		// The same locale handed back (settings merged into these) keeps the patterns entrySettings left out.
+		if (after !== before) this.shownLocale = after?.numFmt
+		this.ownSettings = this.entrySettings(settings)
 		this.numFmtOptions = this.formatOptions()
 
 		if (
@@ -546,14 +551,33 @@ export class XlsxDocument {
 			this.dropEngine()
 	}
 
-	// The app's locale gives the separators; month and day names stay en-US until the app injects a NumFmtLocale.
+	// An OpenDocument date style names its own pattern (SheetStyles shows no system short date there), so a date typed
+	// in the locale's order keeps that order as its code: entries there read without the locale's patterns.
+	private entrySettings(settings: SheetSessionSettings): SheetSessionSettings {
+		const locale = settings.locale
+
+		if (this.workbook.format !== "ods" || locale?.numFmt === undefined) return settings
+
+		const { decimal, group, argument, dateOrder, currencies } = locale
+
+		return { ...settings, locale: { decimal, group, argument, dateOrder, ...(currencies !== undefined && { currencies }) } }
+	}
+
+	// What numbers and dates show in: the app's NumFmtLocale, else en-US's with the locale's separators. Built once
+	// per settings change; formatting a cell only reads it.
+	get numFmtLocale(): NumFmtLocale | undefined {
+		return this.numFmtOptions.locale
+	}
+
 	private formatOptions(): NumFmtOptions {
 		const locale = this.ownSettings.locale
+		const shown =
+			this.shownLocale ?? (locale === undefined ? undefined : { ...NUMFMT_EN_US, decimal: locale.decimal, group: locale.group })
 
 		return {
 			date1904: this.dateBase,
 			palette: this.styles.palette,
-			...(locale !== undefined && { locale: { ...NUMFMT_EN_US, decimal: locale.decimal, group: locale.group } }),
+			...(shown !== undefined && { locale: shown }),
 			...(this.workbook.localeFor !== undefined && { localeFor: this.workbook.localeFor, lcidSeparators: true }),
 			...(this.workbook.standardPrecision !== undefined && { standardPrecision: this.workbook.standardPrecision })
 		}
@@ -2338,7 +2362,7 @@ export class XlsxDocument {
 		// its recalculation of volatile formulas), and what reads them: shown over what the file stores.
 		const fullCalc = this.workbook.calc.fullCalcOnLoad
 		const xlsx = this.workbook.format !== "ods"
-		const again: { sheet: number; row: number; col: number }[] = []
+		const again: { sheet: number; row: number; col: number; volatile: boolean }[] = []
 		const sheets: EngineSheet[] = entries.map((entry, index) => {
 			const model = entry.model as XlsxSheetModel
 			const store = model.store as SheetStore
@@ -2369,14 +2393,13 @@ export class XlsxDocument {
 							if (cell.fallback !== undefined || cell.content instanceof HeldResult || cell.spill !== undefined)
 								formulas.push(cell)
 							if (block.kinds[k] === CellKind.EMPTY) missing.push({ sheet: index, row, col })
-							else if (
-								!(cell.content instanceof HeldResult) &&
-								cell.spill === undefined &&
-								(fullCalc ||
+							else if (!(cell.content instanceof HeldResult) && cell.spill === undefined) {
+								const volatile =
 									model.recalculate?.has(cellKeyOf(row, col)) === true ||
-									(xlsx && this.volatileAt(store.formulas, formula, row, col, shared)))
-							)
-								again.push({ sheet: index, row, col })
+									(xlsx && this.volatileAt(store.formulas, formula, row, col, shared))
+
+								if (fullCalc || volatile) again.push({ sheet: index, row, col, volatile })
+							}
 						}
 					}
 
@@ -2403,7 +2426,10 @@ export class XlsxDocument {
 			this.ownSettings.locale,
 			(index, range) => this.spillBlocked(sheetAt(index), range),
 			(index, row, col) => this.formulaInput(sheetAt(index), row, col),
-			this.workbook.format === "ods"
+			this.workbook.format === "ods",
+			this.workbook.calc.iterate
+				? { count: this.workbook.calc.iterateCount, delta: this.workbook.calc.iterateDelta, recalculateOnLoad: fullCalc }
+				: null
 		)
 
 		this.engine = engine
@@ -2423,11 +2449,14 @@ export class XlsxDocument {
 		}
 
 		if (again.length > 0) {
-			for (const cell of again) this.showAgain(engine, cell.sheet, cell.row, cell.col, changes)
+			for (const cell of again) this.showAgain(engine, cell.sheet, cell.row, cell.col, changes, false, cell.volatile)
 
-			// Under fullCalcOnLoad every formula is in already.
-			if (!fullCalc)
-				for (const cell of engine.dependents(again)) this.showAgain(engine, cell.sheet, cell.row, cell.col, changes, true)
+			// What reads a volatile result gives another each open too (under fullCalcOnLoad it is in already, but shown
+			// only where it differs).
+			const volatile = fullCalc ? again.filter(cell => cell.volatile) : again
+
+			if (volatile.length > 0)
+				for (const cell of engine.dependents(volatile)) this.showAgain(engine, cell.sheet, cell.row, cell.col, changes, true, true)
 		}
 
 		return engine
@@ -2452,14 +2481,17 @@ export class XlsxDocument {
 
 	// A formula cell (engine sheet index) whose stored result is calculated again on open: the engine's result shown
 	// in its place where it differs (not a circle or a result the engine cannot give, which keep the file's).
-	// `reading`: a cell reading one, which may be no formula the engine calculates.
+	// `reading`: a cell reading one, which may be no formula the engine calculates. `volatile`: a result that differs
+	// at each calculation (a volatile call's, or what reads one), shown as recalculated even where it equals the file's:
+	// another open calculates it again, so the file's is no result this session kept.
 	private showAgain(
 		engine: FormulaEngine,
 		index: number,
 		row: number,
 		col: number,
 		changes: SheetChangeSink | undefined,
-		reading = false
+		reading = false,
+		volatile = false
 	): void {
 		const sheet = this.engineSheets[index]
 		const model = sheet === undefined ? null : this.model(sheet)
@@ -2484,7 +2516,7 @@ export class XlsxDocument {
 		}
 
 		const result = { sheet: index, row, col, ...engine.result(index, row, col) }
-		const shows = result.value !== CYCLE && !FormulaEngine.unsupported(result.value) && !this.holdsResult(sheet, result)
+		const shows = result.value !== CYCLE && !FormulaEngine.unsupported(result.value) && (volatile || !this.holdsResult(sheet, result))
 		const results = this.shownResults.get(sheet)
 		const key = cellKeyOf(row, col)
 
@@ -2510,6 +2542,52 @@ export class XlsxDocument {
 		this.engine?.destroy()
 		this.engine = null
 		this.engineSheets = []
+		this.circleEngine = null
+	}
+
+	// The engine circularChange last answered, its version then, whether one ever did, and the cells last reported.
+	private circleEngine: FormulaEngine | null = null
+	private circleVersion = 0
+	private circleAsked = false
+	private circleCells: readonly SheetCell[] = []
+
+	// The workbook's circular references (FormulaEngine.circularChange), when they changed since last asked: the first
+	// cell of each sheet on one, and whether a circle was made that was not one before. Without an engine nothing is
+	// calculated, so nothing changed; one built again finds the circles that were there, and none of them is new.
+	circularReferences(): { readonly cells: readonly SheetCell[]; readonly introduced: boolean } | null {
+		const engine = this.engine
+
+		if (engine === null) return null
+
+		const rebuilt = engine !== this.circleEngine && this.circleAsked
+
+		if (engine !== this.circleEngine) {
+			this.circleEngine = engine
+			this.circleVersion = 0
+			this.circleAsked = true
+		}
+
+		const change = engine.circularChange(this.circleVersion)
+
+		if (change === null) return null
+
+		this.circleVersion = change.version
+
+		const cells = change.cells.flatMap(cell => {
+			const sheet = this.engineSheets[cell.sheet]
+
+			return sheet === undefined ? [] : [{ sheet, row: cell.row, col: cell.col }]
+		})
+		const known = (cell: SheetCell): boolean =>
+			this.circleCells.some(entry => entry.sheet === cell.sheet && entry.row === cell.row && entry.col === cell.col)
+		const same = cells.length === this.circleCells.length && cells.every(known)
+		const introduced = change.introduced && !(rebuilt && cells.every(known))
+
+		if (same && !introduced) return null
+
+		this.circleCells = cells
+
+		return { cells, introduced }
 	}
 
 	// Whether a hidden row is hidden by a filter (in the body of a filter that filters something): set by the filter

@@ -7,10 +7,12 @@ import type { SheetRange, SheetSelectionStats } from "@filen/office/core/sheet"
 import type { SheetGridModel } from "@filen/office/react/sheet"
 import { openGrid, workbook } from "@/tests/sheetMenusFixtures"
 import { GridHarness } from "@/tests/sheetMenusHarness"
-import { LatestQuery, singleCell, statusSummary } from "@/features/spreadsheet/components/sheetStatusBar.logic"
+import { circularStatus, LatestQuery, singleCell, statusSummary } from "@/features/spreadsheet/components/sheetStatusBar.logic"
 
 vi.mock("react-i18next", () => ({
-	useTranslation: () => ({ t: (key: string, options?: { value?: unknown }) => `${key}=${String(options?.value)}` })
+	useTranslation: () => ({
+		t: (key: string, options?: { value?: unknown; cell?: unknown }) => `${key}=${String(options?.value ?? options?.cell)}`
+	})
 }))
 
 const { SheetStatusBar } = await import("@/features/spreadsheet/components/sheetStatusBar")
@@ -138,5 +140,69 @@ describe("the status bar", () => {
 
 		select(model, { startRow: 0, startCol: 0, endRow: 0, endCol: 0 })
 		expect(container.textContent).toBe("")
+	})
+})
+
+describe("the status bar's circular references", () => {
+	beforeEach(() => {
+		vi.stubGlobal("crypto", webcrypto)
+	})
+
+	it("names the sheet's own circular cell, says only that there are some on another sheet, and nothing without", () => {
+		expect(circularStatus([], 1)).toBeNull()
+		expect(circularStatus([{ sheet: 2, row: 0, col: 0 }], 1)).toBe("")
+		expect(
+			circularStatus(
+				[
+					{ sheet: 2, row: 0, col: 0 },
+					{ sheet: 1, row: 3, col: 27 }
+				],
+				1
+			)
+		).toBe("AB4")
+	})
+
+	it("shows Circular References with the cell an edit made circular, until the circle is gone", async () => {
+		const model = await openGrid(await workbook([{ name: "One", rows: [[1, null]] }]), "xlsx")
+		const sheet = model.getSnapshot().sheet
+
+		render(
+			<GridHarness model={model}>
+				{grid => (
+					<SheetStatusBar
+						grid={grid}
+						session={model.session}
+						cellless={false}
+					/>
+				)}
+			</GridHarness>
+		)
+
+		await act(async () => {
+			await model.session.command({
+				type: "cells.set",
+				sheet,
+				cells: { rows: Uint32Array.of(0), cols: Uint16Array.of(1), inputs: ["=B1+A1"] }
+			})
+		})
+		await waitFor(() => {
+			expect(screen.getByText("previewSheetCircularStatus=B1")).toBeTruthy()
+		})
+
+		act(() => {
+			model.handleEvent({ type: "circularReferences", cells: [{ sheet: sheet + 1, row: 0, col: 0 }], introduced: false })
+		})
+		expect(screen.getByText("previewSheetCircularStatusElsewhere=undefined")).toBeTruthy()
+
+		await act(async () => {
+			await model.session.command({
+				type: "cells.set",
+				sheet,
+				cells: { rows: Uint32Array.of(0), cols: Uint16Array.of(1), inputs: ["=A1"] }
+			})
+		})
+		await waitFor(() => {
+			expect(screen.queryByText(/previewSheetCircular/)).toBeNull()
+		})
 	})
 })

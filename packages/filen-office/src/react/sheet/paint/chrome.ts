@@ -24,6 +24,9 @@ export interface ChromeScene {
 	readonly guide: { readonly axis: "rows" | "cols"; readonly at: number } | null
 	// A fill-handle drag: the range it would fill, outlined dashed.
 	readonly fill?: SheetRange | null
+	// A drag of the selection's border (cellDrag.ts): where the block would land, outlined thick, or with `insert` the
+	// gridline it would be inserted at, a bar along the block's edge (Excel's I-beam).
+	readonly move?: { readonly range: SheetRange; readonly insert: "rows" | "cols" | null } | null
 	// The latest copy or cut on the sheet shown: a moving border round it, its dashes `offset` px along.
 	readonly clip?: { readonly range: SheetRange; readonly offset: number } | null
 	// The sheet is shown right to left (SheetLayout.rightToLeft): positions are laid out left to right and mirrored.
@@ -205,6 +208,8 @@ export function paintChrome(canvas: GridCanvas, scene: ChromeScene): void {
 		dashedRing(canvas, view, scene.fill, [3, 2])
 	}
 
+	if (scene.move !== undefined && scene.move !== null) drawMove(canvas, scene, scene.move)
+
 	if (scene.overSelection !== undefined) {
 		scene.overSelection()
 		layOut(canvas, scene)
@@ -254,6 +259,47 @@ function dashedRing(canvas: GridCanvas, view: GridView, range: SheetRange, dash:
 	}
 
 	canvas.setLineDash([])
+}
+
+// The line over the halo, as the selection's, so it shows on any fill.
+function drawMove(
+	canvas: GridCanvas,
+	scene: ChromeScene,
+	move: { readonly range: SheetRange; readonly insert: "rows" | "cols" | null }
+): void {
+	const rects = rangeRects(scene.view, move.range)
+
+	if (move.insert === null) {
+		canvas.fillStyle = scene.theme.selectionHalo
+
+		for (const rect of rects) ring(canvas, rect, 0, 4)
+
+		canvas.fillStyle = scene.theme.selectionLine
+
+		for (const rect of rects) ring(canvas, rect, 0, 3)
+
+		return
+	}
+
+	// The bar sits on the block's leading gridline: the pieces of the range (across frozen panes) that start there.
+	const rows = move.insert === "rows"
+	const lead = rects.reduce((least, rect) => Math.min(least, rows ? rect.y : rect.x), Number.POSITIVE_INFINITY)
+	const bars = rects
+		.filter(rect => (rows ? rect.y : rect.x) === lead)
+		.map(rect =>
+			rows
+				? { x: rect.x - 1, y: rect.y - 3, width: rect.width + 1, height: 5 }
+				: { x: rect.x - 3, y: rect.y - 1, width: 5, height: rect.height + 1 }
+		)
+
+	canvas.fillStyle = scene.theme.selectionHalo
+
+	for (const bar of bars) canvas.fillRect(bar.x, bar.y, bar.width, bar.height)
+
+	canvas.fillStyle = scene.theme.selectionLine
+
+	for (const bar of bars)
+		canvas.fillRect(bar.x + (rows ? 0 : 1), bar.y + (rows ? 1 : 0), bar.width - (rows ? 0 : 2), bar.height - (rows ? 2 : 0))
 }
 
 // A ring `width` wide, `inset` inside the rectangle's edges (its left and top gridlines included), so it never

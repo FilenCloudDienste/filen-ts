@@ -11,7 +11,9 @@ export interface NumFmtLocale {
 	readonly daysShort: readonly string[]
 	readonly am: string
 	readonly pm: string
-	// The system long date and time ([$-F800], [$-F400]) as format codes.
+	// The system short date (built-in 14, and 22 before " h:mm"), long date and time ([$-F800], [$-F400]) as format
+	// codes. The file keeps the code it has; only what shows follows these.
+	readonly shortDate: string
 	readonly longDate: string
 	readonly longTime: string
 	// Built-in ids whose code depends on the language (currency 5-8 and 41-44, the East Asian and Thai ids 27-36
@@ -29,6 +31,7 @@ export const NUMFMT_EN_US: NumFmtLocale = {
 	daysShort: ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"],
 	am: "AM",
 	pm: "PM",
+	shortDate: "m/d/yyyy",
 	longDate: "dddd, mmmm d, yyyy",
 	longTime: "h:mm:ss AM/PM",
 	builtins: {

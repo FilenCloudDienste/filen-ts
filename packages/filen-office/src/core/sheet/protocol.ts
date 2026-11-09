@@ -1,5 +1,6 @@
 import type { ByteSource } from "../opc/io"
 import type { Slicing } from "../slicing"
+import type { NumFmtLocale } from "./numfmt/locale"
 
 // The spreadsheet engine as a renderer and an app call it, whether it runs in a worker (web) or on the calling
 // thread (mobile, under Hermes). Every message is plain data: numbers, strings, plain objects and typed arrays.
@@ -511,8 +512,8 @@ export interface SheetCommandMap {
 	"cells.set": { readonly sheet: SheetId; readonly cells: SheetCellInputs }
 	"cells.clear": { readonly sheet: SheetId; readonly ranges: readonly SheetRange[]; readonly what: "contents" | "formats" | "all" }
 	"format.apply": { readonly sheet: SheetId; readonly ranges: readonly SheetRange[]; readonly patch: SheetFormatPatch }
-	"axis.insert": { readonly sheet: SheetId; readonly axis: SheetAxis; readonly at: number; readonly count: number }
-	"axis.delete": { readonly sheet: SheetId; readonly axis: SheetAxis; readonly at: number; readonly count: number }
+	"axis.insert": SheetAxisMove
+	"axis.delete": SheetAxisMove
 	// Pixel sizes at 100 %; NaN takes an index back to the default size.
 	"axis.resize": { readonly sheet: SheetId; readonly axis: SheetAxis; readonly indices: Uint32Array; readonly sizes: Float32Array }
 	// At `index` in the sheet order (default: after the last); a name the session proposes when absent.
@@ -545,6 +546,19 @@ export interface SheetCommandMap {
 		readonly keys: readonly { readonly index: number; readonly descending: boolean }[]
 	}
 }
+
+// `count` rows (columns) from `at`.
+export interface SheetAxisSpan {
+	readonly at: number
+	readonly count: number
+}
+
+// Rows or columns inserted or deleted: one span, or several at once (a selection of several ranges), as Excel does
+// them: an insert puts each span's count before it, a delete takes every span; spans are where they are before the
+// edit, in any order, and none may overlap another (refused: multipleSelection, "overlapping"). One undo step.
+export type SheetAxisMove = { readonly sheet: SheetId; readonly axis: SheetAxis } & (
+	{ readonly at: number; readonly count: number } | { readonly spans: readonly SheetAxisSpan[] }
+)
 
 // Columnar cell entries: rows[i], cols[i], inputs[i].
 export interface SheetCellInputs {
@@ -717,6 +731,10 @@ export interface SheetRefusalReasons {
 	styleLimit: true
 	// The file format cannot hold the result.
 	unsupported: true
+	// The selection's ranges cannot be taken together (Excel's "Cannot use that command on overlapping selections",
+	// detail "overlapping"; "That command cannot be used on multiple selections", detail "mixed": whole rows with
+	// whole columns).
+	multipleSelection: true
 }
 
 export type SheetRefusalReason = keyof SheetRefusalReasons & string
@@ -781,6 +799,11 @@ export type SheetEvent =
 	// A feature could not read what it shows on a sheet (a damaged part beside the sheet's own): it shows nothing there
 	// and refuses its commands on that sheet; the file's parts are saved as they were.
 	| { readonly type: "featureUnavailable"; readonly sheet: SheetId; readonly feature: string; readonly message: string }
+	// The workbook's circular references changed (none while it calculates iteratively, as Excel reports none): the
+	// first formula cell on one of each sheet that has one, by row then column (Excel's status bar names the active
+	// sheet's: "Circular References: B1"); empty once none is left. `introduced`: an edit, or the engine's build,
+	// made a circle that was not one before, which Excel warns of once.
+	| { readonly type: "circularReferences"; readonly cells: readonly SheetCell[]; readonly introduced: boolean }
 	// The session cannot go on (its worker died, or the active sheet is damaged past the preview it opened on): every
 	// call rejects from now on.
 	| { readonly type: "failed"; readonly message: string }
@@ -805,6 +828,11 @@ export interface SheetLocale {
 	// The currency symbols text reads as a number with ("$4.00"+1, "5 €"*1). Without them, "$" where "." is the
 	// decimal point.
 	readonly currencies?: readonly string[]
+	// What numbers and dates show in, as the system's regional settings in Excel: the short date of built-in 14 and
+	// 22, the long date and time of [$-F800] and [$-F400], month and day names, AM and PM, the separators. With it a
+	// date typed in the locale's order takes built-in 14 (22 with h:mm after it). Without it, en-US's with `decimal`
+	// and `group`. Codes in files are never changed.
+	readonly numFmt?: NumFmtLocale
 }
 
 export interface SheetSessionSettings {

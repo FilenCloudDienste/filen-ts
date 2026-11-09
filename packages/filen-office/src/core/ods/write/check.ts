@@ -293,8 +293,9 @@ function unheldRefusal(
 	const keptReferences: SheetRefusal = { reason: "unsupported", detail: "keptReferences" }
 	const type = command?.type
 
-	// Cells shifted within a band of rows or columns: nothing outside the model is moved so.
-	if (type === "cells.shift") return keptReferences
+	// Cells shifted within a band of rows or columns, or dragged (a cut or copy whose clip is the drag's own, an
+	// insert): nothing outside the model is moved so.
+	if (type === "cells.shift" || type === "cells.move") return keptReferences
 
 	if (type === "sheet.duplicate") {
 		const table = source.tables.find(candidate => candidate.id === command?.sheet)

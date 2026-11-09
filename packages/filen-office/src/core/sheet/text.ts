@@ -39,6 +39,8 @@ import { textFindFeature } from "./find/text"
 import { textNavigateFeature } from "./navigate/text"
 import { textSelectionStatsFeature } from "./stats/text"
 import { textShiftFeature } from "./shift/text"
+import { textMoveFeature } from "./move/text"
+import { axisMoveOrder, moveAxisSpans } from "./axisSpans"
 import { textSortFeature } from "./sort/text"
 import { defineSheetFeature, sheetRegistry, type SheetChangeSink, type SheetFeature, type SheetHandled } from "./registry"
 import { RenderStyleTable, SheetSession, sessionFeature, type SheetEntrySink, type SheetSessionDocument } from "./session"
@@ -690,11 +692,17 @@ export const textFeature = defineSheetFeature<TextSheetDocument>({
 		},
 		"axis.insert": {
 			info: { write: true },
-			run: (context, command) => moveTexts(context.doc, command.axis, "insert", command.at, command.count, context.changes)
+			run: (context, command) =>
+				moveAxisSpans(axisMoveOrder(command), context.changes, span =>
+					moveTexts(context.doc, command.axis, "insert", span.at, span.count, context.changes)
+				)
 		},
 		"axis.delete": {
 			info: { write: true },
-			run: (context, command) => moveTexts(context.doc, command.axis, "delete", command.at, command.count, context.changes)
+			run: (context, command) =>
+				moveAxisSpans(axisMoveOrder(command), context.changes, span =>
+					moveTexts(context.doc, command.axis, "delete", span.at, span.count, context.changes)
+				)
 		},
 		// Sizes of a text file live beside it (the app's size layer), formats and sheets nowhere.
 		"axis.resize": { info: { write: true }, run: () => unsupported },
@@ -786,6 +794,7 @@ export async function openTextSession(
 					textFillFeature,
 					textAutoCompleteFeature,
 					textShiftFeature,
+					textMoveFeature,
 					textSortFeature,
 					textClipboardHtmlFeature,
 					...features,

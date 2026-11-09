@@ -7,8 +7,10 @@ import {
 	tileKeyRow,
 	tileKeySheet,
 	type SheetAxis,
+	type SheetCell,
 	type SheetChange,
 	type SheetCommand,
+	type SheetCommandOf,
 	type SheetCommandResult,
 	type SheetDocState,
 	type SheetEvent,
@@ -28,7 +30,7 @@ import {
 import { createGridAxis, type GridAxis } from "./axis"
 import { checkEntry, type SheetEntryHook } from "./layers"
 import { RowFitter, type TextMeasure } from "./rowFit"
-import { cellSelection, fromSelectionState, mergeRanges, singleCell, type GridPoint, type GridSelection } from "./selection"
+import { axisMove, cellSelection, fromSelectionState, mergeRanges, singleCell, type GridPoint, type GridSelection } from "./selection"
 import { TileCache, entryInput, entryOf, entryText, regionHoldsTile, type GridEntry } from "./tiles"
 
 // What a grid knows of an open session, outside React: the sheet list, layouts, render styles and the tiles in
@@ -82,6 +84,9 @@ export interface SheetGridSnapshot {
 	readonly state: SheetDocState
 	readonly writability: SheetWritability
 	readonly engine: GridEngineState
+	// The first cell on a circular reference of each sheet that has one ("circularReferences" events): what the status
+	// bar names.
+	readonly circular: readonly SheetCell[]
 	readonly selection: GridSelection
 	readonly editing: GridEditing | null
 	readonly active: GridActiveCell
@@ -141,9 +146,18 @@ export interface SheetGridSizes {
 	follow(sheet: SheetId, shift: SheetGridShift): void
 }
 
+// The shifts of one step, in the order the session made them (an undo follows them back last first).
 interface SheetShiftStep {
 	readonly sheet: SheetId
-	readonly shift: SheetGridShift
+	readonly shifts: readonly Omit<SheetGridShift, "revert">[]
+}
+
+// The size layer's shifts of an axis.insert or axis.delete: its spans the last first, as the session moves them.
+function shiftStep(command: SheetCommandOf<"axis.insert"> | SheetCommandOf<"axis.delete">): SheetShiftStep {
+	const type = command.type === "axis.insert" ? "insert" : "delete"
+	const spans = "spans" in command ? [...command.spans].sort((a, b) => b.at - a.at) : [command]
+
+	return { sheet: command.sheet, shifts: spans.map(span => ({ type, axis: command.axis, at: span.at, count: span.count })) }
 }
 
 const TEXT_KINDS: ReadonlySet<SheetFileKind> = new Set(["csv", "tsv", "tab"])
@@ -306,6 +320,7 @@ export class SheetGridModel {
 			state: info.state,
 			writability: info.writability,
 			engine: "none",
+			circular: [],
 			selection,
 			editing: null,
 			active: NO_ACTIVE,
@@ -919,6 +934,12 @@ export class SheetGridModel {
 			this.onRefusal?.({ reason: "protectedSheet" }, command())
 	}
 
+	// A command the grid refuses before the session sees it (one a selection cannot express), told as the session's
+	// refusal would be.
+	refuse(refusal: SheetRefusal, command: SheetCommand): void {
+		this.onRefusal?.(refusal, command)
+	}
+
 	// Commands that change the file but not a cell's content (resizing) are allowed.
 	canChange(): boolean {
 		const { writability, failed, readOnly } = this.snapshot
@@ -1212,19 +1233,7 @@ export class SheetGridModel {
 
 		// A step the session can undo: the size layer's shift is kept beside it.
 		if (result.ok && result.change.state.version > before) {
-			const step: SheetShiftStep | null =
-				command.type === "axis.insert" || command.type === "axis.delete"
-					? {
-							sheet: command.sheet,
-							shift: {
-								type: command.type === "axis.insert" ? "insert" : "delete",
-								axis: command.axis,
-								at: command.at,
-								count: command.count,
-								revert: false
-							}
-						}
-					: null
+			const step: SheetShiftStep | null = command.type === "axis.insert" || command.type === "axis.delete" ? shiftStep(command) : null
 
 			this.shifts.undo.push(step)
 			this.shifts.redo = []
@@ -1248,8 +1257,12 @@ export class SheetGridModel {
 		const sheet = this.snapshot.sheet
 		let next: SheetCommand
 
+		// Several spans: the selection's own, as many as it has.
 		if (last.type === "axis.insert" || last.type === "axis.delete")
-			next = { ...last, sheet, at: last.axis === "rows" ? range.startRow : range.startCol }
+			next =
+				"spans" in last
+					? axisMove(last.type, sheet, last.axis, selection.ranges)
+					: { ...last, sheet, at: last.axis === "rows" ? range.startRow : range.startCol }
 		else next = { ...last, sheet, ranges: selection.ranges } as SheetCommand
 
 		return this.command(next)
@@ -1294,7 +1307,11 @@ export class SheetGridModel {
 	private follow(step: SheetShiftStep | null, revert: boolean): void {
 		const layer = this.sizeLayer
 
-		if (step !== null && layer !== null && this.keepsSizes()) layer.follow(step.sheet, { ...step.shift, revert })
+		if (step === null || layer === null || !this.keepsSizes()) return
+
+		const shifts = revert ? [...step.shifts].reverse() : step.shifts
+
+		for (const shift of shifts) layer.follow(step.sheet, { ...shift, revert })
 	}
 
 	// `moves`: the selection moves counted when the command was sent.
@@ -1326,6 +1343,9 @@ export class SheetGridModel {
 				break
 			case "engine":
 				this.update({ engine: event.state })
+				break
+			case "circularReferences":
+				this.update({ circular: event.cells })
 				break
 			case "failed":
 				this.inFlight.clear()

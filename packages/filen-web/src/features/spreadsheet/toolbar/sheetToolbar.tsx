@@ -58,6 +58,7 @@ import type {
 	SheetRenderStyle
 } from "@filen/office/core/sheet"
 import {
+	axisMove,
 	cellsEditable,
 	entryText,
 	isMacPlatform,
@@ -476,21 +477,14 @@ export function SheetToolbar({ grid, disabled, formats, onFormat, actions, viewO
 		}
 	}
 
-	// Whole rows or columns at the selection (Insert ▸ Insert sheet rows, Delete ▸ Delete sheet columns).
+	// Whole rows or columns at the selection (Insert ▸ Insert sheet rows, Delete ▸ Delete sheet columns): every
+	// range's, in one step.
 	function axis(type: "axis.insert" | "axis.delete", which: SheetAxis): void {
 		if (range === undefined) {
 			return
 		}
 
-		const rows = which === "rows"
-
-		command({
-			type,
-			sheet: grid.sheet,
-			axis: which,
-			at: rows ? range.startRow : range.startCol,
-			count: rows ? range.endRow - range.startRow + 1 : range.endCol - range.startCol + 1
-		})
+		command(axisMove(type, grid.sheet, which, grid.selection.ranges))
 	}
 
 	function zoomTo(next: number | null): void {

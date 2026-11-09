@@ -1,8 +1,9 @@
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import { bytesSource } from "../core/opc/index"
 import { CellFlag } from "../core/sheet/protocol"
 import { RenderStyleTable } from "../core/sheet/session"
 import { XlsxDocument } from "../core/xlsx/edit/document"
+import { cellKeyOf } from "../core/xlsx/edit/history"
 import { openXlsx } from "../core/xlsx/read/index"
 import { cells, firstTile, openFixture, savedBytes, tileTexts } from "./sheetSessionFixtures"
 import { budget, cpuMs } from "./timing"
@@ -41,6 +42,51 @@ describe("results calculated again on open", () => {
 		document.buildEngine()
 		expect(texts(document, ROW)).toEqual(["5", "10", "5", "99"])
 		document.dropEngine()
+	})
+
+	// A volatile result that happens to equal the stored one (RANDBETWEEN drawing the cached number) is still one this
+	// open calculated: another open calculates it again, so what the file stores is no result the session kept.
+	it("marks a volatile result and what reads it as recalculated where they equal the stored results", async () => {
+		const recalculated = (document: XlsxDocument, row: number, col: number): boolean =>
+			document.shownResults.get(document.activeSheet())?.get(cellKeyOf(row, col))?.recalculated === true
+		const document = await opened(
+			'<sheetData><row r="1"><c r="A1"><f>OFFSET(C1,0,0)</f><v>5</v></c><c r="B1"><f>A1*2</f><v>10</v></c>' +
+				'<c r="C1"><v>5</v></c><c r="D1"><f>C1+1</f><v>6</v></c></row></sheetData>'
+		)
+
+		document.buildEngine()
+		expect(texts(document, ROW)).toEqual(["5", "10", "5", "6"])
+		expect([recalculated(document, 0, 0), recalculated(document, 0, 1), recalculated(document, 0, 3)]).toEqual([true, true, false])
+		document.dropEngine()
+
+		// Under fullCalcOnLoad every formula is calculated, but a result the file holds is shown again only where it
+		// is volatile or reads one (one entry per formula cell otherwise).
+		const full = await opened(
+			'<sheetData><row r="1"><c r="A1"><f>OFFSET(C1,0,0)</f><v>5</v></c><c r="B1"><f>A1*2</f><v>10</v></c>' +
+				'<c r="C1"><v>5</v></c><c r="D1"><f>C1+1</f><v>6</v></c></row></sheetData>',
+			'<calcPr calcId="0" fullCalcOnLoad="1"/>'
+		)
+
+		full.buildEngine()
+		expect(texts(full, ROW)).toEqual(["5", "10", "5", "6"])
+		expect([recalculated(full, 0, 0), recalculated(full, 0, 1), recalculated(full, 0, 3)]).toEqual([true, true, false])
+		full.dropEngine()
+
+		// RANDBETWEEN drawing the stored 37.
+		const random = vi.spyOn(Math, "random").mockReturnValue(0.365)
+
+		try {
+			const drawn = await opened(
+				'<sheetData><row r="1"><c r="A1"><f ca="1">RANDBETWEEN(1,100)</f><v>37</v></c><c r="B1"><f ca="1">A1*2</f><v>74</v></c></row></sheetData>'
+			)
+
+			drawn.buildEngine()
+			expect(texts(drawn, ROW.slice(0, 2))).toEqual(["37", "74"])
+			expect([recalculated(drawn, 0, 0), recalculated(drawn, 0, 1)]).toEqual([true, true])
+			drawn.dropEngine()
+		} finally {
+			random.mockRestore()
+		}
 	})
 
 	it("needs no engine to view a workbook whose results are all stored and none volatile", async () => {

@@ -201,6 +201,11 @@ describe("view-only and refusal messages", () => {
 		// A sort over merged cells of different sizes says so, as Excel does.
 		expect(refusalKey({ reason: "merged", detail: "mergeSize" }, "xlsx")).toBe("previewSheetSortMergeSize")
 		expect(preview).toHaveProperty("previewSheetSortMergeSize")
+		// Excel's two refusals of a selection of several ranges.
+		expect(refusalKey({ reason: "multipleSelection", detail: "overlapping" }, "xlsx")).toBe("previewSheetOverlappingSelections")
+		expect(refusalKey({ reason: "multipleSelection", detail: "mixed" }, "xlsx")).toBe("previewSheetMultipleSelections")
+		expect(preview).toHaveProperty("previewSheetOverlappingSelections")
+		expect(preview).toHaveProperty("previewSheetMultipleSelections")
 	})
 })
 

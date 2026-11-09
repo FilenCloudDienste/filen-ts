@@ -13,6 +13,7 @@ import {
 	NO_EXTENSIONS,
 	paintLayers,
 	paintScene,
+	rangeRects,
 	sameParts,
 	type GridExtensionParts,
 	type GridRect
@@ -164,6 +165,8 @@ export class GridRenderer {
 	private guide: { axis: "rows" | "cols"; index: number } | null = null
 	// What a fill-handle drag would fill (or keep, dragged back inside the selection).
 	private fill: SheetRange | null = null
+	// Where a drag of the selection's border would put the block (cellDrag.ts).
+	private move: { range: SheetRange; insert: "rows" | "cols" | null } | null = null
 	// The extensions' layers and decorators (layers.ts), and who hears of each frame (overlays re-placing).
 	private parts: GridExtensionParts = NO_EXTENSIONS
 	private inset: ((flags: number) => number) | undefined = undefined
@@ -335,6 +338,11 @@ export class GridRenderer {
 
 	setFillPreview(range: SheetRange | null): void {
 		this.fill = range
+		this.schedule()
+	}
+
+	setMovePreview(move: { range: SheetRange; insert: "rows" | "cols" | null } | null): void {
+		this.move = move
 		this.schedule()
 	}
 
@@ -620,6 +628,7 @@ export class GridRenderer {
 			this.chromeScene = {
 				overSelection: scene === null ? undefined : () => paintLayers(chrome, scene, parts.chromeLayers),
 				fill: this.fill,
+				move: this.move,
 				clip: clipRange === null ? null : { range: clipRange, offset: this.clipOffset() },
 				view,
 				theme,
@@ -906,6 +915,16 @@ export class GridRenderer {
 		const box = { x: cols.from, y: rows.from, width: cols.to - cols.from, height: rows.to - rows.from }
 
 		return this.mirrored() ? { ...box, x: view.width - box.x - box.width } : box
+	}
+
+	// A range's on-screen pieces (one per pane), laid out as the grid is (unmirrored, as layoutX gives a pointer).
+	laidRects(range: SheetRange): GridRect[] {
+		return this.view === null ? [] : rangeRects(this.view, range)
+	}
+
+	// A cell's (or its merge's) box laid out as the grid is, or null when it is not on screen.
+	laidCellBox(point: GridPoint): GridRect | null {
+		return this.view === null ? null : this.cellBox(this.view, point)
 	}
 
 	// A cell's (or its merge's) box on screen, or null when it is not on screen.

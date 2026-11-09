@@ -77,6 +77,7 @@ export { GridRenderer, type GridElements, type GridHit } from "./renderer"
 export { MAX_SCROLL_PX, domExtent, toDom, toVirtual } from "./scroll"
 export {
 	addSelection,
+	axisMove,
 	axisSelection,
 	cellSelection,
 	extendSelection,

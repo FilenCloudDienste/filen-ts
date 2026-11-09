@@ -14,6 +14,7 @@ import { sortFeature } from "../xlsx/edit/sort"
 import { addSheet, moveAxis, renameSheet } from "../xlsx/edit/structure-basic"
 import { STRUCTURE_FEATURES } from "../xlsx/edit/structure-features"
 import type { SheetEvent, SheetOpenFailure, SheetOpened, SheetSessionOptions } from "./protocol"
+import { axisMoveOrder, moveAxisSpans } from "./axisSpans"
 import { conditionalFormattingFeature } from "./cf/xlsx"
 import { xlsxClipboardHtmlFeature } from "./clipboard/xlsx"
 import { dataValidationFeature } from "./dv/xlsx"
@@ -82,12 +83,16 @@ export const axisFeature = defineSheetFeature<XlsxDocument>({
 		"axis.insert": {
 			info: { write: true },
 			run: (context, command) =>
-				moveAxis(context.doc, command.sheet, command.axis, "insert", command.at, command.count, context.changes, context.slicing)
+				moveAxisSpans(axisMoveOrder(command), context.changes, span =>
+					moveAxis(context.doc, command.sheet, command.axis, "insert", span.at, span.count, context.changes, context.slicing)
+				)
 		},
 		"axis.delete": {
 			info: { write: true },
 			run: (context, command) =>
-				moveAxis(context.doc, command.sheet, command.axis, "delete", command.at, command.count, context.changes, context.slicing)
+				moveAxisSpans(axisMoveOrder(command), context.changes, span =>
+					moveAxis(context.doc, command.sheet, command.axis, "delete", span.at, span.count, context.changes, context.slicing)
+				)
 		},
 		"axis.resize": {
 			info: { write: true },

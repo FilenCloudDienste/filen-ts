@@ -1,5 +1,13 @@
 import { expandToMerges } from "../../core/sheet/refs/cellRef"
-import { SHEET_MAX_COLS, SHEET_MAX_ROWS, type SheetRange, type SheetSelectionState } from "../../core/sheet/protocol"
+import {
+	SHEET_MAX_COLS,
+	SHEET_MAX_ROWS,
+	type SheetAxis,
+	type SheetCommandOf,
+	type SheetId,
+	type SheetRange,
+	type SheetSelectionState
+} from "../../core/sheet/protocol"
 
 // A sheet's selection as Excel keeps it: one or more ranges (Ctrl adds one), the active cell inside the last, and
 // the last range's anchor and moving end (Shift extends from the anchor, the active cell staying put).
@@ -76,16 +84,49 @@ export function singleCell(selection: GridSelection): boolean {
 	return selection.ranges.length === 1 && selection.anchor.row === selection.focus.row && selection.anchor.col === selection.focus.col
 }
 
-// The axis whose whole lines the selection is (one range of whole rows or of whole columns), or null for cells.
-export function wholeAxis(selection: GridSelection): "rows" | "cols" | null {
-	const range = selection.ranges[0]
-
-	if (range === undefined || selection.ranges.length !== 1) return null
-
+function rangeAxis(range: SheetRange): "rows" | "cols" | null {
 	const rows = range.startCol === 0 && range.endCol >= SHEET_MAX_COLS - 1
 	const cols = range.startRow === 0 && range.endRow >= SHEET_MAX_ROWS - 1
 
 	return rows === cols ? null : rows ? "rows" : "cols"
+}
+
+// The axis whose whole lines every range of the selection is (whole rows, or whole columns); "mixed" when some ranges
+// are whole rows and the others whole columns (Excel inserts and deletes neither); null when one is cells.
+export function wholeAxis(selection: GridSelection): "rows" | "cols" | "mixed" | null {
+	let axis: "rows" | "cols" | "mixed" | null = null
+
+	for (const range of selection.ranges) {
+		const own = rangeAxis(range)
+
+		if (own === null) return null
+
+		axis = axis === null || axis === own ? own : "mixed"
+	}
+
+	return axis
+}
+
+// Rows (columns) inserted or deleted at every range of a selection, as Excel's Insert Sheet Rows and Delete Sheet
+// Rows: each range's own, an insert before it (`after`: after it). Spans overlapping one another are the session's to
+// refuse. One range: one span.
+export function axisMove(
+	type: "axis.insert" | "axis.delete",
+	sheet: SheetId,
+	axis: SheetAxis,
+	ranges: readonly SheetRange[],
+	after = false
+): SheetCommandOf<"axis.insert"> | SheetCommandOf<"axis.delete"> {
+	const spans = ranges.map(range => {
+		const start = axis === "rows" ? range.startRow : range.startCol
+		const count = (axis === "rows" ? range.endRow : range.endCol) - start + 1
+
+		return { at: after ? start + count : start, count }
+	})
+	const only = spans.length === 1 ? spans[0] : undefined
+	const move = only !== undefined ? { sheet, axis, ...only } : { sheet, axis, spans }
+
+	return type === "axis.insert" ? { type, ...move } : { type, ...move }
 }
 
 export function toSelectionState(selection: GridSelection): SheetSelectionState {
