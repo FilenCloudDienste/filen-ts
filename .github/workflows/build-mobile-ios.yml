@@ -34,7 +34,7 @@ jobs:
         working-directory: packages/filen-mobile
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
       # Only the mobile submodules: the desktop's copies would only add clone time here.
       - name: Check out the mobile submodules
@@ -71,12 +71,12 @@ jobs:
           printf 'EXPO_PUBLIC_SECURE_STORE_UNSECURE_FALLBACK_ENCRYPTION_KEY=%s\n' "${EXPO_PUBLIC_SECURE_STORE_UNSECURE_FALLBACK_ENCRYPTION_KEY}" > .env
 
       - name: Set up Xcode
-        uses: maxim-lobanov/setup-xcode@v1
+        uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1
         with:
           xcode-version: '26.5'
 
       - name: Set up distribution certificate
-        uses: apple-actions/import-codesign-certs@v6
+        uses: apple-actions/import-codesign-certs@fe74d46e82474f87e1ba79832ad28a4013d0e33a # v6
         with:
           create-keychain: true
           keychain-password: ${{ secrets.APPLE_KEYCHAIN_PASSWORD }}
@@ -84,7 +84,7 @@ jobs:
           p12-password: ${{ secrets.APPLE_DISTRIBUTION_CERT_PASS }}
 
       - name: Set up development certificate
-        uses: apple-actions/import-codesign-certs@v6
+        uses: apple-actions/import-codesign-certs@fe74d46e82474f87e1ba79832ad28a4013d0e33a # v6
         with:
           create-keychain: false
           keychain-password: ${{ secrets.APPLE_KEYCHAIN_PASSWORD }}
@@ -101,16 +101,16 @@ jobs:
           chmod 600 ~/.appstoreconnect/private_keys/AuthKey_$APP_STORE_CONNECT_API_KEY_ID.p8
 
       - name: Set up pnpm
-        uses: pnpm/action-setup@v6
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6
 
       - name: Set up Node
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: 24
           cache: pnpm
 
       - name: Set up Rust
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
           toolchain: nightly-2026-02-20
           components: rust-src
@@ -218,21 +218,21 @@ jobs:
           # if this step already deleted it.
 
       - name: Upload iOS archive
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: ios-archive-${{ github.run_number }}
           path: ${{ runner.temp }}/Filen.xcarchive
           retention-days: 90
 
       - name: Upload iOS IPA
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: ios-ipa-${{ github.run_number }}
           path: ${{ runner.temp }}/*.ipa
           retention-days: 90
 
       - name: Upload to TestFlight
-        uses: apple-actions/upload-testflight-build@v5
+        uses: apple-actions/upload-testflight-build@665328adbecbc3ad929d3da710696d928b8a7ba9 # v5
         with:
           app-path: ${{ runner.temp }}/Filen.ipa
           issuer-id: ${{ secrets.APP_STORE_CONNECT_API_KEY_ISSUER_ID }}

@@ -221,11 +221,11 @@ jobs:
       test-matrix: ${{ steps.plan.outputs.test-matrix }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           sparse-checkout: packages/filen-desktop
       - name: Set up Node
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: 24
           # No pnpm in this job; the root packageManager field would otherwise turn on a pnpm cache.
@@ -298,11 +298,11 @@ jobs:
         working-directory: packages/filen-desktop
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - name: Set up pnpm
         uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
       - name: Set up Node
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: 24
           cache: pnpm
@@ -311,7 +311,7 @@ jobs:
           ELECTRON_SKIP_BINARY_DOWNLOAD: 1
         run: pnpm install --frozen-lockfile --filter "@filen/desktop..." --ignore-scripts
       - name: Restore the cached test session
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ${{ runner.temp }}/e2e-cache/test.sealed
           key: desktop-e2e-session-v1-test-${{ github.run_id }}-${{ github.run_attempt }}
@@ -328,7 +328,7 @@ jobs:
         run: node scripts/ci/e2eCloud.ts session --slot test
       - name: Cache the new test session
         if: steps.test.outputs.minted == 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ${{ runner.temp }}/e2e-cache/test.sealed
           key: desktop-e2e-session-v1-test-${{ github.run_id }}-${{ github.run_attempt }}
@@ -345,7 +345,7 @@ jobs:
           E2E_SIGN_IN_PINS: ${{ needs.plan.outputs.pins }}
         run: node scripts/ci/e2eCloud.ts pins
       - name: Restore the cached quota session
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ${{ runner.temp }}/e2e-cache/quota.sealed
           key: desktop-e2e-session-v1-quota-${{ github.run_id }}-${{ github.run_attempt }}
@@ -363,7 +363,7 @@ jobs:
         run: node scripts/ci/e2eCloud.ts session --slot quota
       - name: Cache the new quota session
         if: steps.quota.outputs.minted == 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ${{ runner.temp }}/e2e-cache/quota.sealed
           key: desktop-e2e-session-v1-quota-${{ github.run_id }}-${{ github.run_attempt }}
@@ -379,7 +379,7 @@ jobs:
           FILEN_DESKTOP_E2E_SESSION_DIR: ${{ runner.temp }}/e2e-session
         run: node scripts/ci/e2eCloud.ts fixtures ${{ inputs.scale_reseed && '--reseed' || '' }}
       - name: Hand the sealed sessions on
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: desktop-e2e-session
           path: ${{ runner.temp }}/e2e-session
@@ -399,11 +399,11 @@ jobs:
         working-directory: packages/filen-desktop
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - name: Set up pnpm
         uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
       - name: Set up Node
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: 24
           cache: pnpm
@@ -414,7 +414,7 @@ jobs:
       # The sealed sessions as files (never an environment variable or a job output, which are printed with a step's
       # settings); the harness masks them on reading.
       - name: Download the sealed session
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: desktop-e2e-session
           path: ${{ runner.temp }}/e2e-session
@@ -428,7 +428,7 @@ jobs:
         run: node scripts/ci/e2eCloud.ts selftest --artifacts e2e-artifacts
       - name: Upload the self-test evidence
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: desktop-e2e-cloud-${{ github.run_attempt }}
           path: packages/filen-desktop/e2e-artifacts
@@ -446,11 +446,11 @@ jobs:
         working-directory: packages/filen-web
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - name: Set up pnpm
         uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
       - name: Set up Node
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: 24
           cache: pnpm
@@ -458,7 +458,7 @@ jobs:
         working-directory: packages/filen-spellcheck
         run: rustup toolchain install
       - name: Cache Cargo
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
             ~/.cargo/registry/index
@@ -468,7 +468,7 @@ jobs:
           key: cargo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('packages/filen-spellcheck/rust-toolchain.toml', 'packages/filen-spellcheck/crate/Cargo.lock') }}
           restore-keys: cargo-${{ runner.os }}-${{ runner.arch }}-
       - name: Cache spellcheck dictionaries
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: packages/filen-spellcheck/.dictionaries
           key: spellcheck-dictionaries-${{ hashFiles('packages/filen-spellcheck/dictionaries/manifest.json') }}
@@ -479,7 +479,7 @@ jobs:
           VITE_BUILD_ID: ${{ github.sha }}
         run: pnpm run build
       - name: Upload web build
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: web-dist
           path: packages/filen-web/dist
@@ -510,7 +510,7 @@ jobs:
       AZURE_SIGNING_PROFILE: ${{ matrix.sign && 'filen-signing' || '' }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       # The File Provider extension's sources: only the desktop's two submodules, not the mobile ones.
       - name: Check out the File Provider submodules
         if: matrix.os == 'mac'
@@ -534,7 +534,7 @@ jobs:
       # Same key as the release's mac job, so a release's e2e run reuses its build.
       - name: Cache Cargo
         if: matrix.os == 'mac'
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           # Third-party crates only: filen-rs's own crates rebuild anyway (a fresh checkout is newer than their
           # fingerprints), and target/macos is regenerated on every build.
@@ -553,14 +553,14 @@ jobs:
       - name: Set up pnpm
         uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
       - name: Set up Node
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: 24
           cache: pnpm
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --filter @filen/desktop...
       - name: Download web build
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: web-dist
           path: packages/filen-web/dist
@@ -627,7 +627,7 @@ jobs:
           pnpm run dist -- "${targets[@]}" "-c.extraMetadata.version=${PREV_VERSION}" -c.directories.output=release-prev
       - name: Upload N
         if: ${{ !inputs.candidate-from-run }}
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: desktop-${{ matrix.os }}
           path: |
@@ -643,7 +643,7 @@ jobs:
           compression-level: 0
       - name: Upload N-1
         if: needs.plan.outputs.spike == '' || needs.plan.outputs.spike == 'offline'
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: e2e-prev-${{ matrix.os }}
           path: |
@@ -685,11 +685,11 @@ jobs:
       # The update scenarios at install depth need Node built-ins only; deep entries and spikes also install the
       # package's dependencies (playwright-core, the sdk-rs addon, rclone's pinned download).
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           sparse-checkout: ${{ !matrix.spike && !matrix.deep && 'packages/filen-desktop' || '' }}
       - name: Set up Node
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: 24
           package-manager-cache: false
@@ -704,18 +704,18 @@ jobs:
         run: pnpm install --frozen-lockfile --filter "@filen/desktop..." --ignore-scripts
       - name: Download the sealed session
         if: matrix.deepPrevious || matrix.deepLegacy || matrix.deepOlder
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: desktop-e2e-session
           path: ${{ runner.temp }}/e2e-session
       - name: Download N
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: desktop-${{ matrix.os }}
           path: packages/filen-desktop/release
       - name: Download N-1
         if: ${{ !matrix.spike || matrix.deepPrevious }}
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: e2e-prev-${{ matrix.os }}
           path: packages/filen-desktop/release-prev
@@ -859,7 +859,7 @@ jobs:
       # The harness redacts the account's credentials and every secret it holds from everything it writes there.
       - name: Upload evidence
         if: ${{ always() && (matrix.spike || matrix.deep) }}
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: desktop-e2e-${{ matrix.spike && format('spike-{0}', matrix.spike) || 'deep' }}-${{ matrix.platform }}-${{ matrix.arch }}-${{ matrix.format }}${{ matrix.lane && format('-{0}', matrix.lane) || '' }}-${{ github.run_attempt }}
           path: packages/filen-desktop/e2e-artifacts
@@ -882,11 +882,11 @@ jobs:
         working-directory: packages/filen-desktop
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - name: Set up pnpm
         uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
       - name: Set up Node
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: 24
           cache: pnpm
@@ -895,7 +895,7 @@ jobs:
           ELECTRON_SKIP_BINARY_DOWNLOAD: 1
         run: pnpm install --frozen-lockfile --filter "@filen/desktop..." --ignore-scripts
       - name: Download the sealed session
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: desktop-e2e-session
           path: ${{ runner.temp }}/e2e-session

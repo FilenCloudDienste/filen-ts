@@ -67,11 +67,11 @@ jobs:
       DOTNET_NOLOGO: '1'
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - name: Set up pnpm
-        uses: pnpm/action-setup@v6
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6
       - name: Set up Node
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: 24
           cache: pnpm
@@ -79,7 +79,7 @@ jobs:
         working-directory: packages/filen-office
         run: pnpm install --frozen-lockfile --filter @filen/office...
       - name: Cache the corpus
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: packages/filen-office/.corpus
           key: office-corpus-${{ hashFiles('packages/filen-office/corpus/manifest.json') }}
@@ -87,7 +87,7 @@ jobs:
           # removes what is gone.
           restore-keys: office-corpus-
       - name: Cache the Unicode data
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: packages/filen-office/node_modules/.cache/filen-office-unicode
           key: office-unicode-${{ hashFiles('packages/filen-office/src/scripts/unicodeTables.ts') }}
@@ -111,7 +111,7 @@ jobs:
       - name: Install xmllint and qpdf
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libxml2-utils qpdf
       - name: Cache the WordprocessingML schemas
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: packages/filen-office/node_modules/.cache/filen-office-wml
           key: office-wml-${{ hashFiles('packages/filen-office/src/scripts/wmlOrder.ts') }}
@@ -121,7 +121,7 @@ jobs:
       # ECMA-376 Part 2 (relationships, content types, core properties) and the Dublin Core schemas core
       # properties import, for the schema oracle (src/tests/oracles/xsd.ts).
       - name: Cache the OPC schemas
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: packages/filen-office/node_modules/.cache/filen-office-opc
           key: office-opc-${{ hashFiles('packages/filen-office/src/tests/oracles/xsd.ts') }}
@@ -131,7 +131,7 @@ jobs:
       # The Open XML SDK validator (tools/openxml-validate, net10.0), for every suite that checks an OOXML save
       # against it; the NuGet packages are cached on the locked restore.
       - name: Set up .NET
-        uses: actions/setup-dotnet@v5
+        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
         with:
           dotnet-version: 10.0.x
           cache: true
@@ -181,11 +181,11 @@ jobs:
       FILEN_PERF_BUDGET_SCALE: '3'
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - name: Set up pnpm
-        uses: pnpm/action-setup@v6
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6
       - name: Set up Node
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: 24
           cache: pnpm
@@ -193,13 +193,13 @@ jobs:
         working-directory: packages/filen-office
         run: pnpm install --frozen-lockfile --filter @filen/office...
       - name: Set up Java
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:
           distribution: 'temurin'
           java-version: 17
       - name: Restore veraPDF
         id: verapdf-cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ${{ runner.temp }}/verapdf.zip
           key: verapdf-${{ env.VERAPDF_VERSION }}
@@ -211,7 +211,7 @@ jobs:
           echo "${VERAPDF_SHA256}  $RUNNER_TEMP/verapdf.zip" | sha256sum -c -
       - name: Save veraPDF
         if: steps.verapdf-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ${{ runner.temp }}/verapdf.zip
           key: verapdf-${{ env.VERAPDF_VERSION }}
@@ -243,7 +243,7 @@ jobs:
           echo "$version"
           case "$version" in *"${VERAPDF_VERSION}"*) ;; *) echo "::error::expected veraPDF ${VERAPDF_VERSION}"; exit 1 ;; esac
       - name: Restore the corpus
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: packages/filen-office/.corpus
           key: office-corpus-${{ hashFiles('packages/filen-office/corpus/manifest.json') }}
@@ -274,11 +274,11 @@ jobs:
       FILEN_PERF_BUDGET_SCALE: '3'
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - name: Set up pnpm
-        uses: pnpm/action-setup@v6
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6
       - name: Set up Node
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: 24
           cache: pnpm
@@ -287,7 +287,7 @@ jobs:
         run: pnpm install --frozen-lockfile --filter @filen/office...
       # The job above has just saved (or restored) it; the fetch only verifies it.
       - name: Restore the corpus
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: packages/filen-office/.corpus
           key: office-corpus-${{ hashFiles('packages/filen-office/corpus/manifest.json') }}
@@ -312,7 +312,7 @@ jobs:
         run: pnpm exec vitest run --reporter=verbose src/tests/fuzz/damage.fuzz.test.ts
       - name: Upload the fuzz results
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: office-fuzz-${{ github.run_number }}
           path: ${{ github.workspace }}/office-fuzz.jsonl
@@ -342,11 +342,11 @@ jobs:
       FILEN_PERF_BUDGET_SCALE: '3'
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - name: Set up pnpm
-        uses: pnpm/action-setup@v6
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6
       - name: Set up Node
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: 24
           cache: pnpm
@@ -356,7 +356,7 @@ jobs:
       # Restored and saved apart, so a failing test run still keeps the download.
       - name: Restore LibreOffice
         id: libreoffice-cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ${{ runner.temp }}/libreoffice.tar.gz
           key: libreoffice-deb-${{ env.LIBREOFFICE_VERSION }}
@@ -368,7 +368,7 @@ jobs:
           echo "${LIBREOFFICE_SHA256}  $RUNNER_TEMP/libreoffice.tar.gz" | sha256sum -c -
       - name: Save LibreOffice
         if: steps.libreoffice-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ${{ runner.temp }}/libreoffice.tar.gz
           key: libreoffice-deb-${{ env.LIBREOFFICE_VERSION }}
@@ -391,7 +391,7 @@ jobs:
           echo "$version"
           case "$version" in "LibreOffice ${LIBREOFFICE_VERSION} "*) ;; *) echo "::error::expected LibreOffice ${LIBREOFFICE_VERSION}"; exit 1 ;; esac
       - name: Restore the corpus
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: packages/filen-office/.corpus
           key: office-corpus-${{ hashFiles('packages/filen-office/corpus/manifest.json') }}
@@ -409,7 +409,7 @@ jobs:
         run: pnpm exec vitest run --reporter=verbose src/tests/docxInteropLibreOffice.test.ts
       - name: Upload the reports
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: office-interop-${{ github.run_number }}
           path: ${{ github.workspace }}/office-interop/report-*.json
@@ -436,11 +436,11 @@ jobs:
       FILEN_PERF_BUDGET_SCALE: '3'
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - name: Set up pnpm
-        uses: pnpm/action-setup@v6
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6
       - name: Set up Node
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: 24
           cache: pnpm
@@ -448,7 +448,7 @@ jobs:
         working-directory: packages/filen-office
         run: pnpm install --frozen-lockfile --filter @filen/office...
       - name: Restore the corpus
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: packages/filen-office/.corpus
           key: office-corpus-${{ hashFiles('packages/filen-office/corpus/manifest.json') }}
@@ -496,11 +496,11 @@ jobs:
       FILEN_PERF_BUDGET_SCALE: '3'
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - name: Set up pnpm
-        uses: pnpm/action-setup@v6
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6
       - name: Set up Node
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: 24
           cache: pnpm
@@ -508,7 +508,7 @@ jobs:
         working-directory: packages/filen-office
         run: pnpm install --frozen-lockfile --filter @filen/office...
       - name: Restore the corpus
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: packages/filen-office/.corpus
           key: office-corpus-${{ hashFiles('packages/filen-office/corpus/manifest.json') }}
@@ -524,7 +524,7 @@ jobs:
         run: pnpm exec vitest run --reporter=verbose src/tests/sheetOracleCached.test.ts
       - name: Upload the recalculation report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: office-recalc-${{ github.run_number }}
           path: ${{ github.workspace }}/office-recalc.json
@@ -547,7 +547,7 @@ jobs:
         run: pnpm exec vitest run --reporter=verbose src/tests/sheetFuzz.test.ts -t "long run"
       - name: Upload the sheet fuzz results
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: office-sheet-fuzz-${{ github.run_number }}
           path: ${{ github.workspace }}/office-sheet-fuzz.jsonl
@@ -580,11 +580,11 @@ jobs:
       FILEN_PERF_BUDGET_SCALE: '3'
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - name: Set up pnpm
-        uses: pnpm/action-setup@v6
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6
       - name: Set up Node
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: 24
           cache: pnpm
@@ -592,13 +592,13 @@ jobs:
         working-directory: packages/filen-office
         run: pnpm install --frozen-lockfile --filter @filen/office...
       - name: Set up Java
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:
           distribution: 'temurin'
           java-version: 17
       - name: Restore odfvalidator
         id: odfvalidator-cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ${{ github.workspace }}/odfvalidator.jar
           key: odfvalidator-${{ env.ODFVALIDATOR_VERSION }}
@@ -610,14 +610,14 @@ jobs:
           echo "${ODFVALIDATOR_SHA256}  $FILEN_OFFICE_ODFVALIDATOR" | sha256sum -c -
       - name: Save odfvalidator
         if: steps.odfvalidator-cache.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ${{ github.workspace }}/odfvalidator.jar
           key: odfvalidator-${{ env.ODFVALIDATOR_VERSION }}
       - name: Verify odfvalidator
         run: echo "${ODFVALIDATOR_SHA256}  $FILEN_OFFICE_ODFVALIDATOR" | sha256sum -c -
       - name: Set up .NET
-        uses: actions/setup-dotnet@v5
+        uses: actions/setup-dotnet@26b0ec14cb23fa6904739307f278c14f94c95bf1 # v5
         with:
           dotnet-version: 10.0.x
           cache: true
@@ -629,7 +629,7 @@ jobs:
           dotnet build -c Release --no-restore
           test -f "$FILEN_OFFICE_OOXML_VALIDATOR" || { echo "::error::no validator at $FILEN_OFFICE_OOXML_VALIDATOR"; exit 1; }
       - name: Restore the corpus
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: packages/filen-office/.corpus
           key: office-corpus-${{ hashFiles('packages/filen-office/corpus/manifest.json') }}

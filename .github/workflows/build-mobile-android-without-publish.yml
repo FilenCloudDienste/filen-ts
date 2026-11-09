@@ -38,7 +38,7 @@ jobs:
         working-directory: packages/filen-mobile
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
       # Only the mobile submodules: the desktop's copies would only add clone time here.
       - name: Check out the mobile submodules
@@ -57,22 +57,22 @@ jobs:
           printf 'EXPO_PUBLIC_SECURE_STORE_UNSECURE_FALLBACK_ENCRYPTION_KEY=%s\n' "${EXPO_PUBLIC_SECURE_STORE_UNSECURE_FALLBACK_ENCRYPTION_KEY}" > .env
 
       - name: Set up pnpm
-        uses: pnpm/action-setup@v6
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6
 
       - name: Set up Node
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
         with:
           node-version: 24
           cache: pnpm
 
       - name: Set up Java
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
         with:
           distribution: 'temurin'
           java-version: 17
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v4
+        uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4
         with:
           # The action defaults to 'tools platform-tools', and the obsolete `tools` package is gone
           # from Google's repository: sdkmanager exits 1 on it and takes the whole job with it.
@@ -81,7 +81,7 @@ jobs:
           packages: 'platform-tools'
 
       - name: Set up Rust
-        uses: dtolnay/rust-toolchain@master
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
           toolchain: nightly-2026-02-20
           components: rust-src
@@ -93,7 +93,7 @@ jobs:
         run: brew install meson ninja nasm
 
       - name: Install cargo-ndk
-        uses: taiki-e/cache-cargo-install-action@v2
+        uses: taiki-e/cache-cargo-install-action@7447f04c51f2ba27ca35e7f1e28fab848c5b3ba7 # v2
         with:
           # cargo-ndk 4.x required: filen-rs heif-decoder/build.rs reads ANDROID_ABI (d454f4d); 3.5.4 set CARGO_NDK_ANDROID_TARGET (reverses bbqsrc/cargo-ndk#181)
           tool: cargo-ndk@4.1.2
