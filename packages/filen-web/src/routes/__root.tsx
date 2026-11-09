@@ -24,6 +24,7 @@ import { DownloadAsPasswordDialog } from "@/features/drive/components/downloadAs
 import { DotFilenGuardDialog } from "@/features/drive/components/dotFilenConfirmDialog"
 import { JobReportDialog } from "@/features/transfers/components/jobReportDialog"
 import { allowNextUnload } from "@/lib/unloadGuard"
+import { onCachesClearedElsewhere } from "@/features/settings/lib/cacheReload"
 import { guardStrayDrops } from "@/lib/dropGuard"
 import { titleMeta } from "@/lib/head/routeHead"
 import { SignOutOverlay } from "@/features/shell/components/signOutOverlay"
@@ -76,6 +77,9 @@ function BootGate() {
 				})
 		})
 	}, [])
+
+	// Caches another tab cleared that this one still holds in memory: reload when nothing holds the tab, ask otherwise.
+	useEffect(() => onCachesClearedElsewhere(), [])
 
 	// A missing cross-origin-isolation, or unavailable OPFS storage, is a distinct, actionable
 	// capability-gate failure with its own dedicated page (not the generic boot-error screen).

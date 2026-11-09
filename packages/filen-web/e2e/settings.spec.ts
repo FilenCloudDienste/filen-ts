@@ -13,7 +13,7 @@ test.describe("settings", () => {
 	test("the settings sidebar renders every section and Account is the index-redirect landing section", async ({ page }) => {
 		await gotoSettings(page)
 
-		for (const label of ["Account", "Security", "Appearance", "Keyboard", "Events", "Billing", "Advanced"]) {
+		for (const label of ["Account", "Security", "Appearance", "Keyboard", "Events", "Billing", "Storage", "Advanced"]) {
 			await expect(page.getByRole("link", { name: label, exact: true })).toBeVisible()
 		}
 
@@ -180,7 +180,7 @@ test.describe("settings", () => {
 		// of what this test is asserting.
 		const consoleErrors = trackConsoleErrors(page)
 
-		const sections = ["Account", "Security", "Appearance", "Events", "Billing", "Advanced"]
+		const sections = ["Account", "Security", "Appearance", "Events", "Billing", "Storage", "Advanced"]
 
 		for (const label of sections) {
 			await openSettingsSection(page, label)

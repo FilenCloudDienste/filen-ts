@@ -22,7 +22,7 @@ import {
 	type AssistantBackend,
 	type RuntimeRecommendation
 } from "@/features/assistant/runtime/deviceCheck"
-import { deleteModelDirectory, deleteModels, inspectModel, otherModels } from "@/features/assistant/runtime/modelStore"
+import { MODEL_LOCK, deleteModelDirectory, deleteModels, inspectModel, otherModels } from "@/features/assistant/runtime/modelStore"
 import { autoStartIntent, readDownloadIntent, writeDownloadIntent } from "@/features/assistant/runtime/downloadIntent"
 import type { ModelDownloadProgress } from "@/features/assistant/runtime/download"
 import { ENGINE_CRASHED, type GenerationUpdate } from "@/features/assistant/runtime/engineMessages"
@@ -42,7 +42,7 @@ export const ASSISTANT_CONTEXT_TOKENS = 8192
 // is sized to all three: one that overflows clears idle slots and loses what they cached (~32 KiB a token).
 export const ENGINE_CONTEXT_TOKENS = ASSISTANT_CONTEXT_TOKENS + ROUTER_CONTEXT_TOKENS + QUARANTINE_CONTEXT_TOKENS
 
-const LOCK = "filen-assistant-model"
+const LOCK = MODEL_LOCK
 
 // Unused this long, the model leaves memory, panel open or not. It holds ~4 GB of RAM/VRAM while a reload
 // costs ~4-6 s: 10 min keeps it through a working session's follow-ups, where 5 min would reload between

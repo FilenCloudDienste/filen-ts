@@ -162,7 +162,7 @@ export async function kvKeys(prefix: string): Promise<string[]> {
 // A leader tab still on an older build has no kvDeletePrefix: its db worker rejects the unknown Comlink
 // method with a TypeError, and leader forwarding keeps the error's name. Tabs run different builds only
 // while an update waits for the user to confirm it.
-function isMissingStorageMethod(e: unknown): boolean {
+export function isMissingStorageMethod(e: unknown): boolean {
 	return e instanceof Error && e.name === "TypeError"
 }
 
@@ -191,6 +191,37 @@ export async function kvDeletePrefix(prefix: string): Promise<void> {
 		const keys = await api.kvKeys(prefix)
 
 		await Promise.all(keys.map(key => api.kvDelete(key)))
+	}
+}
+
+// Bytes per prefix, in the order given, in one round trip; null from a leader on an older build without it.
+export async function kvPrefixBytes(prefixes: readonly string[]): Promise<number[] | null> {
+	const { api } = await storage()
+
+	try {
+		return await api.kvPrefixBytes([...prefixes])
+	} catch (e) {
+		if (isMissingStorageMethod(e)) {
+			return null
+		}
+
+		throw e
+	}
+}
+
+// Frees what deleted rows left in the database file (db.worker.ts vacuum); resolves the bytes freed, 0 when there was
+// too little to free or the leader is on an older build. Never part of a sign-out wipe.
+export async function vacuumDatabase(): Promise<number> {
+	const { api } = await storage()
+
+	try {
+		return await api.vacuum()
+	} catch (e) {
+		if (isMissingStorageMethod(e)) {
+			return 0
+		}
+
+		throw e
 	}
 }
 

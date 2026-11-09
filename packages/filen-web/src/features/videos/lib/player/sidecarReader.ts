@@ -4,6 +4,7 @@ import { sdkApi } from "@/lib/sdk/client"
 import { runOp } from "@/lib/actions/outcome"
 import { kvGetJson, kvSetJson } from "@/lib/storage/adapter"
 import { log } from "@/lib/log"
+import { SUBTITLE_ENCODING_KV_PREFIX } from "@/features/videos/lib/cacheKeys.logic"
 import { videoLibrary } from "@/features/videos/lib/index"
 import { parseFormatOf, type PlayerSubtitleTrack } from "@/features/videos/lib/player/subtitles.logic"
 import type { VideoFileRef } from "@/workers/videoIndex/view.logic"
@@ -12,7 +13,6 @@ import type { VideoFileRef } from "@/workers/videoIndex/view.logic"
 // few results are kept, so switching back and forth on an item costs nothing while a long binge holds no more than
 // the last items' files. A subtitle file's encoding chosen by hand is remembered per file on this device.
 
-const ENCODING_KV_PREFIX = "videos.v1.subenc."
 const MAX_EDL_BYTES = 256 * 1024
 // Subtitle files whose bytes are kept (the item's, one back), decoded stores kept, and parsed .edl files kept.
 export const MAX_KEPT_SUBTITLE_FILES = 2
@@ -50,7 +50,7 @@ export type SubtitleLoad =
 	{ status: "ok"; cues: CueStore; encoding: string; confident: boolean } | { status: "tooLarge" | "unreadable" | "unavailable" }
 
 function encodingKey(uuid: string): string {
-	return `${ENCODING_KV_PREFIX}${uuid}`
+	return `${SUBTITLE_ENCODING_KV_PREFIX}${uuid}`
 }
 
 export function readSubtitleEncoding(uuid: string): Promise<string | null> {

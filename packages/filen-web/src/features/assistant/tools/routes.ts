@@ -28,6 +28,7 @@ const ROUTE_PATHS: readonly (readonly [AssistantRouteName, string])[] = [
 	["settings_keyboard", "/settings/keyboard"],
 	["settings_events", "/settings/events"],
 	["settings_billing", "/settings/billing"],
+	["settings_storage", "/settings/storage"],
 	["settings_advanced", "/settings/advanced"],
 	["settings", "/settings"]
 ]
@@ -120,6 +121,9 @@ async function navigateRaw(router: RegisteredRouter, route: AssistantRouteName):
 			break
 		case "settings_billing":
 			await router.navigate({ to: "/settings/billing" })
+			break
+		case "settings_storage":
+			await router.navigate({ to: "/settings/storage" })
 			break
 		case "settings_advanced":
 			await router.navigate({ to: "/settings/advanced" })

@@ -5,13 +5,13 @@ import { runOp } from "@/lib/actions/outcome"
 import { log } from "@/lib/log"
 import { kvDelete, kvEntriesJson, kvGetJson, kvKeys, kvSetJson } from "@/lib/storage/adapter"
 import { RecordStore } from "@/features/videos/lib/recordStore.logic"
+import { NFO_KV_PREFIX } from "@/features/videos/lib/cacheKeys.logic"
 import { videoLibrary } from "@/features/videos/lib/index"
 import type { VideoFileRef } from "@/workers/videoIndex/view.logic"
 
 // The `.nfo` beside a title or episode, read on the detail page only: one download per file, the few fields the
 // page shows kept in kv by the file's uuid (a content change rotates it), so it is never read twice.
 
-export const NFO_KV_PREFIX = "videos.v1.nfo."
 const NFO_MAX_RECORDS = 5_000
 // An NFO is a few KiB; the parser reads 256 KiB at most, and a larger file isn't downloaded at all.
 export const NFO_MAX_BYTES = MAX_NFO_CHARS

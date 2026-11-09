@@ -48,6 +48,7 @@ import { Route as AppSettingsDesktopRouteImport } from './routes/_app/settings/d
 import { Route as AppSettingsEventsRouteImport } from './routes/_app/settings/events'
 import { Route as AppSettingsKeyboardRouteImport } from './routes/_app/settings/keyboard'
 import { Route as AppSettingsSecurityRouteImport } from './routes/_app/settings/security'
+import { Route as AppSettingsStorageRouteImport } from './routes/_app/settings/storage'
 import { Route as AppSharedInSplatRouteImport } from './routes/_app/shared-in.$'
 import { Route as AppSharedOutSplatRouteImport } from './routes/_app/shared-out.$'
 import { Route as AppSyncIndexRouteImport } from './routes/_app/sync.index'
@@ -255,6 +256,11 @@ const AppSettingsSecurityRoute = AppSettingsSecurityRouteImport.update({
   path: '/security',
   getParentRoute: () => AppSettingsRouteRoute,
 } as any)
+const AppSettingsStorageRoute = AppSettingsStorageRouteImport.update({
+  id: '/storage',
+  path: '/storage',
+  getParentRoute: () => AppSettingsRouteRoute,
+} as any)
 const AppSharedInSplatRoute = AppSharedInSplatRouteImport.update({
   id: '/shared-in/$',
   path: '/shared-in/$',
@@ -351,6 +357,7 @@ export interface FileRoutesByFullPath {
   '/settings/events': typeof AppSettingsEventsRoute
   '/settings/keyboard': typeof AppSettingsKeyboardRoute
   '/settings/security': typeof AppSettingsSecurityRoute
+  '/settings/storage': typeof AppSettingsStorageRoute
   '/shared-in/$': typeof AppSharedInSplatRoute
   '/shared-out/$': typeof AppSharedOutSplatRoute
   '/sync/$pairId': typeof AppSyncPairIdRoute
@@ -397,6 +404,7 @@ export interface FileRoutesByTo {
   '/settings/events': typeof AppSettingsEventsRoute
   '/settings/keyboard': typeof AppSettingsKeyboardRoute
   '/settings/security': typeof AppSettingsSecurityRoute
+  '/settings/storage': typeof AppSettingsStorageRoute
   '/shared-in/$': typeof AppSharedInSplatRoute
   '/shared-out/$': typeof AppSharedOutSplatRoute
   '/sync/$pairId': typeof AppSyncPairIdRoute
@@ -451,6 +459,7 @@ export interface FileRoutesById {
   '/_app/settings/events': typeof AppSettingsEventsRoute
   '/_app/settings/keyboard': typeof AppSettingsKeyboardRoute
   '/_app/settings/security': typeof AppSettingsSecurityRoute
+  '/_app/settings/storage': typeof AppSettingsStorageRoute
   '/_app/shared-in/$': typeof AppSharedInSplatRoute
   '/_app/shared-out/$': typeof AppSharedOutSplatRoute
   '/_app/sync/$pairId': typeof AppSyncPairIdRoute
@@ -505,6 +514,7 @@ export interface FileRouteTypes {
     | '/settings/events'
     | '/settings/keyboard'
     | '/settings/security'
+    | '/settings/storage'
     | '/shared-in/$'
     | '/shared-out/$'
     | '/sync/$pairId'
@@ -551,6 +561,7 @@ export interface FileRouteTypes {
     | '/settings/events'
     | '/settings/keyboard'
     | '/settings/security'
+    | '/settings/storage'
     | '/shared-in/$'
     | '/shared-out/$'
     | '/sync/$pairId'
@@ -604,6 +615,7 @@ export interface FileRouteTypes {
     | '/_app/settings/events'
     | '/_app/settings/keyboard'
     | '/_app/settings/security'
+    | '/_app/settings/storage'
     | '/_app/shared-in/$'
     | '/_app/shared-out/$'
     | '/_app/sync/$pairId'
@@ -909,6 +921,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppSettingsSecurityRouteImport
       parentRoute: typeof AppSettingsRouteRoute
     }
+    '/_app/settings/storage': {
+      id: '/_app/settings/storage'
+      path: '/storage'
+      fullPath: '/settings/storage'
+      preLoaderRoute: typeof AppSettingsStorageRouteImport
+      parentRoute: typeof AppSettingsRouteRoute
+    }
     '/_app/shared-in/$': {
       id: '/_app/shared-in/$'
       path: '/shared-in/$'
@@ -1005,6 +1024,7 @@ interface AppSettingsRouteRouteChildren {
   AppSettingsEventsRoute: typeof AppSettingsEventsRoute
   AppSettingsKeyboardRoute: typeof AppSettingsKeyboardRoute
   AppSettingsSecurityRoute: typeof AppSettingsSecurityRoute
+  AppSettingsStorageRoute: typeof AppSettingsStorageRoute
   AppSettingsIndexRoute: typeof AppSettingsIndexRoute
 }
 
@@ -1017,6 +1037,7 @@ const AppSettingsRouteRouteChildren: AppSettingsRouteRouteChildren = {
   AppSettingsEventsRoute: AppSettingsEventsRoute,
   AppSettingsKeyboardRoute: AppSettingsKeyboardRoute,
   AppSettingsSecurityRoute: AppSettingsSecurityRoute,
+  AppSettingsStorageRoute: AppSettingsStorageRoute,
   AppSettingsIndexRoute: AppSettingsIndexRoute,
 }
 

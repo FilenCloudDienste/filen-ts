@@ -35,7 +35,7 @@ import { REGISTER_CHECK_QUERY_KEY } from "@/features/auth/queries/registerCheck"
 // row on read — deliberately a single constant so the two can never drift apart. Bump on ANY
 // change to the persisted shape (mobile's client.ts:13 flags this as the easy-to-forget step).
 // Rows of a retired version are deleted by the next boot's restore (kvStorage.entries).
-const PERSIST_FAMILY = "rq."
+export const PERSIST_FAMILY = "rq."
 export const PERSIST_PREFIX = `${PERSIST_FAMILY}v3`
 
 // ON-DISK expiry: a persisted row whose `state.dataUpdatedAt` is older than this is dropped (and

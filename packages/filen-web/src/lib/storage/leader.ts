@@ -70,8 +70,15 @@ const STORAGE_METHODS = [
 	"kvEntriesPage",
 	"kvDeletePrefix",
 	"kvDeleteIfAt",
+	"kvPrefixBytes",
+	"vacuum",
 	"wipe"
 ] as const satisfies readonly (keyof StorageApi)[]
+
+const RPC_TIMEOUT_MS = 5000
+
+// A full VACUUM holds the db worker for as long as the database takes to rebuild, which can be well past the default.
+const RPC_TIMEOUT_OVERRIDES: Partial<Record<keyof StorageApi, number>> = { vacuum: 600_000 }
 
 // Spin up this tab's own db worker, open OPFS, and start serving the RPC channel — the work a tab does
 // the moment it holds the lock, whether it was the FIRST leader or a promoted follower. Returns the
@@ -314,7 +321,7 @@ async function followerHandle(signal: AbortSignal): Promise<StorageHandle> {
 					if (pending.delete(id)) {
 						reject(new Error(`db rpc timeout: ${method}`))
 					}
-				}, 5000)
+				}, RPC_TIMEOUT_OVERRIDES[method] ?? RPC_TIMEOUT_MS)
 			})
 
 	const api = Object.fromEntries(STORAGE_METHODS.map(m => [m, call(m)])) as unknown as StorageApi

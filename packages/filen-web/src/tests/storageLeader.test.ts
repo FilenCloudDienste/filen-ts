@@ -5,7 +5,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 vi.mock("@/workers/db.worker.ts?worker", () => ({ default: vi.fn() }))
 vi.mock("comlink", () => ({
-	wrap: () => ({ open: () => Promise.resolve(), kvGet: () => Promise.resolve("from-leader") })
+	wrap: () => ({
+		open: () => Promise.resolve(),
+		kvGet: () => Promise.resolve("from-leader"),
+		kvPrefixBytes: (prefixes: string[]) => Promise.resolve(prefixes.map(prefix => prefix.length)),
+		// A full VACUUM on a large database, well past the default RPC timeout.
+		vacuum: () =>
+			new Promise(resolve => {
+				setTimeout(() => {
+					resolve(4096)
+				}, 30_000)
+			}),
+		kvKeys: () => new Promise(() => undefined)
+	})
 }))
 
 type LockCallback = (lock: { name: string } | null) => unknown
@@ -295,5 +307,41 @@ describe("storageHasPeers", () => {
 			["follower", false],
 			["leader", true]
 		])
+	})
+})
+
+describe("follower RPC", () => {
+	async function follower() {
+		await (await openTab()).acquireStorage()
+
+		const acquired = (await openTab()).acquireStorage()
+
+		await vi.advanceTimersByTimeAsync(0)
+
+		return (await acquired).api
+	}
+
+	it("reaches kvPrefixBytes on the leader", async () => {
+		const api = await follower()
+
+		await expect(api.kvPrefixBytes(["rq.", "audio.v1.tags."])).resolves.toEqual([3, 14])
+	})
+
+	it("waits out a vacuum that runs past the default timeout", async () => {
+		const api = await follower()
+		const vacuumed = api.vacuum()
+
+		await vi.advanceTimersByTimeAsync(30_000)
+
+		await expect(vacuumed).resolves.toBe(4096)
+	})
+
+	it("still times out other calls after 5s", async () => {
+		const api = await follower()
+		const keys = api.kvKeys("").catch((e: unknown) => e)
+
+		await vi.advanceTimersByTimeAsync(5000)
+
+		expect(await keys).toEqual(new Error("db rpc timeout: kvKeys"))
 	})
 })

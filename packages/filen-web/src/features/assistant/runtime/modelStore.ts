@@ -1,4 +1,4 @@
-import { isNotFoundError, opfsDirectory } from "@/lib/storage/opfs"
+import { directoryBytes, isNotFoundError, opfsDirectory } from "@/lib/storage/opfs"
 import type { AssistantModelManifest } from "@/features/assistant/runtime/manifest"
 
 // The downloaded models live in OPFS under models/<manifest id>/, apart from every account's data: they hold
@@ -7,6 +7,9 @@ import type { AssistantModelManifest } from "@/features/assistant/runtime/manife
 // shard is trusted on its size and that record and is never re-read in full just to be listed.
 
 export const MODELS_DIRECTORY = "models"
+
+// Held by the tab that downloads or runs the model, and by anything else that removes model files.
+export const MODEL_LOCK = "filen-assistant-model"
 
 export const VERIFIED_FILE = "verified.json"
 
@@ -82,16 +85,6 @@ export async function inspectModel(manifest: AssistantModelManifest): Promise<Mo
 	}
 }
 
-async function directorySize(directory: FileSystemDirectoryHandle): Promise<number> {
-	let bytes = 0
-
-	for await (const entry of directory.values()) {
-		bytes += entry.kind === "file" ? (await entry.getFile()).size : await directorySize(entry)
-	}
-
-	return bytes
-}
-
 // The models other than `id` on disk (one a newer build downloaded, or the one an update replaced), and the
 // bytes they take. Sizes only; reads no file content. Which of the two they are, only the client can tell.
 export async function otherModels(id: string): Promise<{ present: boolean; bytes: number }> {
@@ -113,7 +106,7 @@ export async function otherModels(id: string): Promise<{ present: boolean; bytes
 	for await (const [name, entry] of models.entries()) {
 		if (name !== id) {
 			present = true
-			bytes += entry.kind === "file" ? (await entry.getFile()).size : await directorySize(entry)
+			bytes += entry.kind === "file" ? (await entry.getFile()).size : await directoryBytes(entry)
 		}
 	}
 

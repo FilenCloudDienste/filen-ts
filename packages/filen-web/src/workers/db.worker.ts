@@ -10,6 +10,7 @@ import { log } from "@/lib/log"
 // `Database` class) structurally satisfies this — the only members this worker calls.
 interface Db {
 	exec(opts: { sql: string; bind?: readonly SqlValue[]; callback?: (row: SqlValue[]) => void }): unknown
+	prepare(sql: string): { step(): boolean; finalize(): unknown }
 	close(): void
 }
 
@@ -166,9 +167,100 @@ function prefixRange(prefix: string, from: string | null = null): { where: strin
 	return { where: lower, bind: [start] }
 }
 
+// Below this much free space in the file a VACUUM gains too little to be worth its run.
+const VACUUM_MIN_FREE_BYTES = 1_048_576
+
+function pragmaNumber(connection: Db, name: string): number {
+	let out = 0
+
+	connection.exec({
+		sql: `PRAGMA ${name}`,
+		callback: row => {
+			const value = row[0]
+
+			if (typeof value === "number" || typeof value === "bigint") {
+				out = Number(value)
+			}
+		}
+	})
+
+	return out
+}
+
+interface DbStats {
+	// The database file's size, and the part of it free pages take (what a vacuum gives back).
+	fileBytes: number
+	freeBytes: number
+}
+
+function dbStats(): DbStats {
+	const connection = requireDb()
+	const pageSize = pragmaNumber(connection, "page_size")
+
+	return {
+		fileBytes: pragmaNumber(connection, "page_count") * pageSize,
+		freeBytes: pragmaNumber(connection, "freelist_count") * pageSize
+	}
+}
+
+// Gives the free pages a large delete left back to the file system; resolves the bytes freed. A database still in
+// the default auto_vacuum mode is rebuilt once by a full VACUUM, which also switches it to INCREMENTAL, so every
+// later call is a cheap incremental_vacuum instead. A full VACUUM keeps its temporary copy in memory (the build
+// stores temp data there) and briefly needs about the database's size again on disk for the journal; a quota error
+// then surfaces to the caller.
+function vacuum(): number {
+	const connection = requireDb()
+	const before = dbStats()
+
+	if (before.freeBytes < VACUUM_MIN_FREE_BYTES) {
+		return 0
+	}
+
+	// 2 is INCREMENTAL.
+	if (pragmaNumber(connection, "auto_vacuum") === 2) {
+		// Each step of this pragma frees one page, and exec steps a statement without result columns only once.
+		const statement = connection.prepare("PRAGMA incremental_vacuum")
+
+		try {
+			while (statement.step()) {
+				// stepping is the work
+			}
+		} finally {
+			statement.finalize()
+		}
+	} else {
+		connection.exec({ sql: "PRAGMA auto_vacuum=INCREMENTAL" })
+		connection.exec({ sql: "VACUUM" })
+	}
+
+	return Math.max(0, before.fileBytes - dbStats().fileBytes)
+}
+
 const api = {
 	open,
 	wipe,
+	vacuum,
+	// Bytes the rows under each prefix take, key and value: octet_length counts UTF-8 bytes, where length() would count
+	// characters. Logical bytes, not pages. One statement per prefix.
+	kvPrefixBytes: (prefixes: string[]): number[] =>
+		prefixes.map(prefix => {
+			const { where, bind } = prefixRange(prefix)
+			let bytes = 0
+
+			requireDb().exec({
+				sql: `SELECT COALESCE(SUM(octet_length(key) + octet_length(value)), 0) FROM kv WHERE ${where}`,
+				bind,
+				callback: row => {
+					const value = row[0]
+
+					if (typeof value === "number" || typeof value === "bigint") {
+						bytes = Number(value)
+					}
+				}
+			})
+
+			return bytes
+		}),
 	kvGet: (key: string): string | null => {
 		let out: string | null = null
 

@@ -74,3 +74,54 @@ export interface OpfsBlobStore {
 	// removed is dropped instead of re-creating it, and no read, delete or sweep creates it.
 	recreateWhenRemoved?: boolean
 }
+
+// How many entries of one directory are sized at once: enough to overlap the getFile round trips, few enough to
+// keep the File objects alive at a time negligible.
+const SIZE_BATCH = 64
+
+// An entry removed while the walk runs (an eviction sweep, a wipe) counts as nothing.
+function zeroIfGone(e: unknown): number {
+	if (isNotFoundError(e)) {
+		return 0
+	}
+
+	throw e
+}
+
+// Bytes of every file under `directory`, summed as it walks: no entry list is kept, nothing is read and nothing is
+// created. An aborted signal stops the walk with its reason.
+export async function directoryBytes(directory: FileSystemDirectoryHandle, signal?: AbortSignal): Promise<number> {
+	let bytes = 0
+	let batch: Promise<number>[] = []
+
+	for await (const entry of directory.values()) {
+		signal?.throwIfAborted()
+		batch.push(
+			entry.kind === "file" ? entry.getFile().then(file => file.size, zeroIfGone) : directoryBytes(entry, signal).catch(zeroIfGone)
+		)
+
+		if (batch.length >= SIZE_BATCH) {
+			bytes += (await Promise.all(batch)).reduce((sum, size) => sum + size, 0)
+			batch = []
+		}
+	}
+
+	return bytes + (await Promise.all(batch)).reduce((sum, size) => sum + size, 0)
+}
+
+// directoryBytes of the tree at `segments`, 0 when it does not exist. Never creates it.
+export async function opfsTreeBytes(segments: readonly string[], signal?: AbortSignal): Promise<number> {
+	let directory: FileSystemDirectoryHandle
+
+	try {
+		directory = await opfsDirectory(segments, false)
+	} catch (e) {
+		if (isNotFoundError(e)) {
+			return 0
+		}
+
+		throw e
+	}
+
+	return directoryBytes(directory, signal)
+}

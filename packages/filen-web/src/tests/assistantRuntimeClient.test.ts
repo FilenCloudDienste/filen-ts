@@ -120,6 +120,7 @@ vi.mock("@/features/assistant/runtime/deviceCheck", () => ({
 }))
 
 vi.mock("@/features/assistant/runtime/modelStore", () => ({
+	MODEL_LOCK: "filen-assistant-model",
 	inspectModel: () => {
 		const next = inspections.shift() ?? { presentBytes: 0, verifiedBytes: 0, complete: false }
 

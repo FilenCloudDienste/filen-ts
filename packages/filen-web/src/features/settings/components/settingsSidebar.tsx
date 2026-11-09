@@ -9,7 +9,8 @@ import {
 	HistoryIcon,
 	CreditCardIcon,
 	SlidersHorizontalIcon,
-	MonitorIcon
+	MonitorIcon,
+	DatabaseIcon
 } from "lucide-react"
 import { SidebarPanel } from "@/features/shell/components/sidebarPanel"
 import { SIDEBAR_NAV_ITEM_CLASS } from "@/features/shell/lib/sidebarNavItem"
@@ -24,6 +25,7 @@ type SettingsRoute =
 	| "/settings/keyboard"
 	| "/settings/events"
 	| "/settings/billing"
+	| "/settings/storage"
 	| "/settings/advanced"
 	| "/settings/desktop"
 
@@ -36,6 +38,7 @@ interface SettingsSidebarItem {
 		| "settingsSectionKeyboard"
 		| "settingsSectionEvents"
 		| "settingsSectionBilling"
+		| "settingsSectionStorage"
 		| "settingsSectionAdvanced"
 		| "settingsSectionDesktop"
 	icon: IconType
@@ -44,7 +47,7 @@ interface SettingsSidebarItem {
 
 // Account first (the index redirect's landing section — see routes/_app/settings/index.tsx),
 // Security second (the already-shipped page, unchanged), then Appearance/Keyboard/Events/Billing/
-// Advanced, and Desktop in the desktop app only.
+// Storage/Advanced, and Desktop in the desktop app only.
 const SETTINGS_ITEMS: SettingsSidebarItem[] = [
 	{ id: "account", labelKey: "settingsSectionAccount", icon: UserIcon, to: "/settings/account" },
 	{ id: "security", labelKey: "settingsSectionSecurity", icon: ShieldIcon, to: "/settings/security" },
@@ -52,6 +55,7 @@ const SETTINGS_ITEMS: SettingsSidebarItem[] = [
 	{ id: "keyboard", labelKey: "settingsSectionKeyboard", icon: KeyboardIcon, to: "/settings/keyboard" },
 	{ id: "events", labelKey: "settingsSectionEvents", icon: HistoryIcon, to: "/settings/events" },
 	{ id: "billing", labelKey: "settingsSectionBilling", icon: CreditCardIcon, to: "/settings/billing" },
+	{ id: "storage", labelKey: "settingsSectionStorage", icon: DatabaseIcon, to: "/settings/storage" },
 	{ id: "advanced", labelKey: "settingsSectionAdvanced", icon: SlidersHorizontalIcon, to: "/settings/advanced" },
 	...(desktopBridge() === undefined
 		? []

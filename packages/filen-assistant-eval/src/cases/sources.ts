@@ -605,6 +605,26 @@ export const SOURCES_CASES: EvalCase[] = [
 			}
 		]
 	},
+	{
+		id: "sources-settings-storage-en",
+		category: "sources",
+		lang: "en",
+		prompt: "Open the storage settings where I can clear the app's caches",
+		routes: ["navigation"],
+		calls: [
+			{
+				tool: "open_route",
+				args: {
+					route: "settings_storage"
+				}
+			}
+		],
+		state: [
+			{
+				screen: "settings_storage"
+			}
+		]
+	},
 	// Opening one of the drive's own lists or another section opens its screen, the trash and the sharing lists
 	// also from their own groups.
 	{
