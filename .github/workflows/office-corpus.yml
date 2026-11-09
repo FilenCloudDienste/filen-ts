@@ -20,6 +20,8 @@ on:
     paths:
       - 'packages/filen-office/**'
       - 'packages/filen-shared/**'
+      - 'packages/filen-web/src/features/spreadsheet/**'
+      - 'packages/filen-web/src/tests/spreadsheetXlsConvertCorpus.test.ts'
       - 'pnpm-lock.yaml'
       - 'pnpm-workspace.yaml'
       - 'patches/**'
@@ -30,6 +32,8 @@ on:
     paths:
       - 'packages/filen-office/**'
       - 'packages/filen-shared/**'
+      - 'packages/filen-web/src/features/spreadsheet/**'
+      - 'packages/filen-web/src/tests/spreadsheetXlsConvertCorpus.test.ts'
       - 'pnpm-lock.yaml'
       - 'pnpm-workspace.yaml'
       - 'patches/**'
@@ -45,7 +49,8 @@ jobs:
       group: filen-office-corpus-${{ github.ref }}-${{ matrix.shard }}
       cancel-in-progress: true
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # The Open XML SDK suites add to each shard what the other suites take.
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -55,6 +60,11 @@ jobs:
       # The tests' time bounds are set on developer machines; these runners' CPUs are slower. A complexity
       # regression still exceeds the scaled bounds.
       FILEN_PERF_BUDGET_SCALE: '3'
+      # Where tools/openxml-validate/Directory.Build.props puts the Release build.
+      FILEN_OFFICE_OOXML_VALIDATOR: ${{ github.workspace }}/packages/filen-office/node_modules/.cache/filen-office-openxml/bin/OpenXmlValidate/release/OpenXmlValidate.dll
+      FILEN_OFFICE_DOTNET: dotnet
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      DOTNET_NOLOGO: '1'
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -96,9 +106,10 @@ jobs:
       - name: Fetch the Unicode data
         working-directory: packages/filen-office
         run: pnpm exec tsx src/scripts/unicodeTables.ts && git diff --exit-code -- src
-      # xmllint and the pinned ECMA-376 schemas, for the schema validation of written WordprocessingML.
-      - name: Install xmllint
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libxml2-utils
+      # xmllint and the pinned ECMA-376 schemas, for the schema validation of written WordprocessingML; qpdf for
+      # `qpdf --check` of the PDFs src/tests/pdfExportCorpus.test.ts exports.
+      - name: Install xmllint and qpdf
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libxml2-utils qpdf
       - name: Cache the WordprocessingML schemas
         uses: actions/cache@v4
         with:
@@ -117,12 +128,37 @@ jobs:
       - name: Fetch the OPC schemas
         working-directory: packages/filen-office
         run: pnpm exec tsx src/tests/oracles/xsd.ts --fetch
+      # The Open XML SDK validator (tools/openxml-validate, net10.0), for every suite that checks an OOXML save
+      # against it; the NuGet packages are cached on the locked restore.
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+          cache: true
+          cache-dependency-path: packages/filen-office/tools/openxml-validate/packages.lock.json
+      - name: Build the Open XML SDK validator
+        working-directory: packages/filen-office/tools/openxml-validate
+        run: |
+          dotnet restore --locked-mode
+          dotnet build -c Release --no-restore
+          test -f "$FILEN_OFFICE_OOXML_VALIDATOR" || { echo "::error::no validator at $FILEN_OFFICE_OOXML_VALIDATOR"; exit 1; }
       - name: Test
         working-directory: packages/filen-office
         env:
           FILEN_OFFICE_CORPUS: ${{ github.workspace }}/packages/filen-office/.corpus
           FILEN_OFFICE_UNICODE_FULL: '1'
         run: pnpm test --shard=${{ matrix.shard }}/4
+      # The web app's .xls/.xlt path (hucre's reader through the workbook worker's opener) over the same corpus.
+      - name: Install the web app's dependencies
+        if: ${{ !cancelled() && matrix.shard == 1 }}
+        working-directory: packages/filen-web
+        run: pnpm install --frozen-lockfile --filter @filen/web...
+      - name: Test the web app's .xls conversion
+        if: ${{ !cancelled() && matrix.shard == 1 }}
+        working-directory: packages/filen-web
+        env:
+          FILEN_OFFICE_CORPUS: ${{ github.workspace }}/packages/filen-office/.corpus
+        run: pnpm exec vitest run src/tests/spreadsheetXlsConvertCorpus.test.ts
 
   # Nightly and on demand: the paged-editing fuzz (edited layout = fresh layout of the saved file) and the writer
   # damage fuzz (Gate 2 against an independent reader) over the cached corpus, one new seed per run. Findings
@@ -283,3 +319,240 @@ jobs:
           name: office-interop-${{ github.run_number }}
           path: ${{ github.workspace }}/office-interop/report-*.json
           retention-days: 14
+
+  # Nightly and on demand: the fuzzers of the other formats with seeds of this run instead of their fixed ones (the
+  # RTF, compound file and xlsx readers, the ODT writer, the presentation session). Each takes its own range, derived
+  # from FILEN_OFFICE_FUZZ_SEED; the job summary lists every seed for a local replay.
+  fuzz-office-formats:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    needs: test-office-corpus
+    concurrency:
+      group: filen-office-fuzz-formats-${{ github.ref }}
+      cancel-in-progress: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      FILEN_OFFICE_CORPUS: ${{ github.workspace }}/packages/filen-office/.corpus
+      FILEN_OFFICE_FUZZ_SEED: ${{ inputs.fuzz-seed || github.run_number }}
+      # Runs per ODT file and seeds per deck: four and two times what pnpm test runs.
+      FILEN_OFFICE_ODT_FUZZ_RUNS: '12'
+      FUZZ_SEEDS: '6'
+      # Slower runners, as in test-office-corpus.
+      FILEN_PERF_BUDGET_SCALE: '3'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install dependencies
+        working-directory: packages/filen-office
+        run: pnpm install --frozen-lockfile --filter @filen/office...
+      - name: Restore the corpus
+        uses: actions/cache/restore@v4
+        with:
+          path: packages/filen-office/.corpus
+          key: office-corpus-${{ hashFiles('packages/filen-office/corpus/manifest.json') }}
+          restore-keys: office-corpus-
+      - name: Fetch the corpus
+        working-directory: packages/filen-office
+        run: pnpm run corpus:fetch
+      # The ranges start millions apart; the ODT and deck seeds step by their count per run, so no two runs share one.
+      - name: Pick the seeds
+        run: |
+          {
+            echo "FILEN_OFFICE_RTF_FUZZ_SEED=$(( 1000000 + FILEN_OFFICE_FUZZ_SEED ))"
+            echo "FILEN_OFFICE_CFB_FUZZ_SEED=$(( 2000000 + FILEN_OFFICE_FUZZ_SEED ))"
+            echo "FILEN_OFFICE_XLSX_FUZZ_SEED=$(( 3000000 + FILEN_OFFICE_FUZZ_SEED ))"
+            echo "FILEN_OFFICE_ODT_FUZZ_FROM=$(( FILEN_OFFICE_FUZZ_SEED * FILEN_OFFICE_ODT_FUZZ_RUNS ))"
+            echo "FUZZ_FROM=$(( FILEN_OFFICE_FUZZ_SEED * FUZZ_SEEDS + 1 ))"
+          } | tee -a "$GITHUB_ENV" "$GITHUB_STEP_SUMMARY"
+      - name: Reader fuzz
+        working-directory: packages/filen-office
+        run: pnpm exec vitest run --reporter=verbose src/tests/rtfFuzz.test.ts src/tests/cfbFuzz.test.ts src/tests/xlsxReadFuzz.test.ts
+      - name: ODT writer fuzz
+        if: ${{ !cancelled() }}
+        working-directory: packages/filen-office
+        run: pnpm exec vitest run --reporter=verbose src/tests/odtWriterFuzz.test.ts
+      - name: Presentation session fuzz
+        if: ${{ !cancelled() }}
+        working-directory: packages/filen-office
+        run: pnpm exec vitest run --reporter=verbose src/tests/presentationSessionFuzz.test.ts
+
+  # Nightly and on demand, for the spreadsheet engine over the cached corpus: the full recalculation against the
+  # results Excel stored (sheetOracleCached.test.ts, its 0.995 gate), and the long sheet fuzz run, one new sequence
+  # per workbook and run, in one mode a night (src/tests/fuzz/sheet).
+  sheet-office-corpus:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    needs: test-office-corpus
+    concurrency:
+      group: filen-office-sheet-${{ github.ref }}
+      cancel-in-progress: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      FILEN_OFFICE_CORPUS: ${{ github.workspace }}/packages/filen-office/.corpus
+      FILEN_OFFICE_FUZZ_SEED: ${{ inputs.fuzz-seed || github.run_number }}
+      # Slower runners, as in test-office-corpus.
+      FILEN_PERF_BUDGET_SCALE: '3'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install dependencies
+        working-directory: packages/filen-office
+        run: pnpm install --frozen-lockfile --filter @filen/office...
+      - name: Restore the corpus
+        uses: actions/cache/restore@v4
+        with:
+          path: packages/filen-office/.corpus
+          key: office-corpus-${{ hashFiles('packages/filen-office/corpus/manifest.json') }}
+          restore-keys: office-corpus-
+      - name: Fetch the corpus
+        working-directory: packages/filen-office
+        run: pnpm run corpus:fetch
+      - name: Recalculate against Excel's cached results
+        working-directory: packages/filen-office
+        env:
+          FILEN_OFFICE_SHEET_RECALC: '1'
+          FILEN_OFFICE_SHEET_RECALC_OUT: ${{ github.workspace }}/office-recalc.json
+        run: pnpm exec vitest run --reporter=verbose src/tests/sheetOracleCached.test.ts
+      - name: Upload the recalculation report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: office-recalc-${{ github.run_number }}
+          path: ${{ github.workspace }}/office-recalc.json
+          if-no-files-found: ignore
+          retention-days: 14
+      # One sequence per workbook (a requested count below the workbooks' rounds up to one each); the seed's range
+      # is apart from the format fuzzers'.
+      - name: Pick the seed and mode
+        run: |
+          {
+            echo "FILEN_OFFICE_SHEET_FUZZ_SEED=$(( 5000000 + FILEN_OFFICE_FUZZ_SEED ))"
+            echo "FILEN_OFFICE_SHEET_FUZZ_MODES=$(echo sync race | cut -d' ' -f$(( FILEN_OFFICE_FUZZ_SEED % 2 + 1 )))"
+          } | tee -a "$GITHUB_ENV" "$GITHUB_STEP_SUMMARY"
+      - name: Sheet fuzz, long run
+        if: ${{ !cancelled() }}
+        working-directory: packages/filen-office
+        env:
+          FILEN_OFFICE_SHEET_FUZZ: '1'
+          FILEN_OFFICE_SHEET_FUZZ_OUT: ${{ github.workspace }}/office-sheet-fuzz.jsonl
+        run: pnpm exec vitest run --reporter=verbose src/tests/sheetFuzz.test.ts -t "long run"
+      - name: Upload the sheet fuzz results
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: office-sheet-fuzz-${{ github.run_number }}
+          path: ${{ github.workspace }}/office-sheet-fuzz.jsonl
+          if-no-files-found: ignore
+          retention-days: 14
+
+  # Nightly and on demand: every ODF save and conversion against the ODF Toolkit's odfvalidator (ODF 1.3) and,
+  # where a suite also writes OOXML, the Open XML SDK validator. Each oracle adds no error its source lacks.
+  odf-office-corpus:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    needs: test-office-corpus
+    concurrency:
+      group: filen-office-odf-${{ github.ref }}
+      cancel-in-progress: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      FILEN_OFFICE_CORPUS: ${{ github.workspace }}/packages/filen-office/.corpus
+      # From Maven Central (org.odftoolkit:odfvalidator, the jar with its dependencies).
+      ODFVALIDATOR_VERSION: 0.13.0
+      ODFVALIDATOR_SHA256: 5684feec5cbdcd5783998978c096ac9ccea53a454e2d6ae803ce482d2336d1dc
+      FILEN_OFFICE_ODFVALIDATOR: ${{ github.workspace }}/odfvalidator.jar
+      FILEN_OFFICE_OOXML_VALIDATOR: ${{ github.workspace }}/packages/filen-office/node_modules/.cache/filen-office-openxml/bin/OpenXmlValidate/release/OpenXmlValidate.dll
+      FILEN_OFFICE_DOTNET: dotnet
+      DOTNET_CLI_TELEMETRY_OPTOUT: '1'
+      DOTNET_NOLOGO: '1'
+      # The corpus conversions of odsConvertCorpus.test.ts.
+      FILEN_OFFICE_CONVERT_CORPUS: '1'
+      # Slower runners, as in test-office-corpus.
+      FILEN_PERF_BUDGET_SCALE: '3'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v6
+      - name: Set up Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install dependencies
+        working-directory: packages/filen-office
+        run: pnpm install --frozen-lockfile --filter @filen/office...
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: 17
+      - name: Restore odfvalidator
+        id: odfvalidator-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ github.workspace }}/odfvalidator.jar
+          key: odfvalidator-${{ env.ODFVALIDATOR_VERSION }}
+      - name: Download odfvalidator
+        if: steps.odfvalidator-cache.outputs.cache-hit != 'true'
+        run: |
+          curl -fsSL --retry 3 -o "$FILEN_OFFICE_ODFVALIDATOR" \
+            "https://repo1.maven.org/maven2/org/odftoolkit/odfvalidator/${ODFVALIDATOR_VERSION}/odfvalidator-${ODFVALIDATOR_VERSION}-jar-with-dependencies.jar"
+          echo "${ODFVALIDATOR_SHA256}  $FILEN_OFFICE_ODFVALIDATOR" | sha256sum -c -
+      - name: Save odfvalidator
+        if: steps.odfvalidator-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ github.workspace }}/odfvalidator.jar
+          key: odfvalidator-${{ env.ODFVALIDATOR_VERSION }}
+      - name: Verify odfvalidator
+        run: echo "${ODFVALIDATOR_SHA256}  $FILEN_OFFICE_ODFVALIDATOR" | sha256sum -c -
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+          cache: true
+          cache-dependency-path: packages/filen-office/tools/openxml-validate/packages.lock.json
+      - name: Build the Open XML SDK validator
+        working-directory: packages/filen-office/tools/openxml-validate
+        run: |
+          dotnet restore --locked-mode
+          dotnet build -c Release --no-restore
+          test -f "$FILEN_OFFICE_OOXML_VALIDATOR" || { echo "::error::no validator at $FILEN_OFFICE_OOXML_VALIDATOR"; exit 1; }
+      - name: Restore the corpus
+        uses: actions/cache/restore@v4
+        with:
+          path: packages/filen-office/.corpus
+          key: office-corpus-${{ hashFiles('packages/filen-office/corpus/manifest.json') }}
+          restore-keys: office-corpus-
+      - name: Fetch the corpus
+        working-directory: packages/filen-office
+        run: pnpm run corpus:fetch
+      - name: Text saves and conversions
+        working-directory: packages/filen-office
+        run: pnpm exec vitest run --reporter=verbose src/tests/odtWriterSchema.test.ts src/tests/convertTextCorpus.test.ts
+      - name: Spreadsheet saves and conversions
+        if: ${{ !cancelled() }}
+        working-directory: packages/filen-office
+        run: pnpm exec vitest run --reporter=verbose src/tests/odsSaveOracle.test.ts src/tests/odsConvertCorpus.test.ts
+      - name: Presentation saves
+        if: ${{ !cancelled() }}
+        working-directory: packages/filen-office
+        run: >-
+          pnpm exec vitest run --reporter=verbose src/tests/presentationShowOracle.test.ts
+          src/tests/presentationTransitionsOracle.test.ts src/tests/animPresetMatrix.test.ts
+          src/tests/presentationMediaTiming.test.ts
