@@ -4,8 +4,8 @@ import {
 	personalToFormState,
 	formStateToUpdateInfo,
 	isPersonalFormDirty,
-	keepBlankFields,
 	mergePersonalUpdate,
+	personalFormIssue,
 	PERSONAL_FIELD_ORDER
 } from "@/features/settings/components/account/personalInfoCard.logic"
 
@@ -123,21 +123,29 @@ describe("isPersonalFormDirty", () => {
 	})
 })
 
-// A field sent blank is left as it was on the server.
+// The server overwrites the whole record on every save: a field sent blank is cleared.
 describe("mergePersonalUpdate", () => {
-	it("keeps what was sent blank and takes what was sent", () => {
+	it("takes what was sent and clears what was sent blank", () => {
 		const prev: Personal = { ...emptyPersonal(), firstName: "Old", city: "Old City" }
 		const sent = { ...emptyPersonal(), firstName: "Ada" }
 
-		expect(mergePersonalUpdate(prev, sent)).toEqual({ ...emptyPersonal(), firstName: "Ada", city: "Old City" })
+		expect(mergePersonalUpdate(prev, sent)).toEqual({ ...emptyPersonal(), firstName: "Ada" })
 	})
 })
 
-describe("keepBlankFields", () => {
-	it("shows a blank field as the value it kept and leaves the rest as typed", () => {
-		const form = { ...personalToFormState(emptyPersonal()), firstName: " Ada ", city: "  " }
-		const kept: Personal = { ...emptyPersonal(), city: "Old City" }
+describe("personalFormIssue", () => {
+	it("accepts a listed or unset country", () => {
+		expect(personalFormIssue(personalToFormState({ ...emptyPersonal(), country: "Germany" }))).toBeNull()
+		expect(personalFormIssue(personalToFormState(emptyPersonal()))).toBeNull()
+	})
 
-		expect(keepBlankFields(form, kept)).toEqual({ ...form, city: "Old City" })
+	it("flags a stored country the server would refuse", () => {
+		expect(personalFormIssue(personalToFormState({ ...emptyPersonal(), country: "DE" }))).toBe("countryOffList")
+	})
+
+	it("flags a VAT ID without a country, whitespace counting as empty", () => {
+		expect(personalFormIssue({ ...personalToFormState(emptyPersonal()), vatId: "DE123" })).toBe("vatIdNeedsCountry")
+		expect(personalFormIssue({ ...personalToFormState(emptyPersonal()), vatId: "DE123", country: "Germany" })).toBeNull()
+		expect(personalFormIssue({ ...personalToFormState(emptyPersonal()), vatId: "  " })).toBeNull()
 	})
 })

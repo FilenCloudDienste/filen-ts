@@ -3,9 +3,7 @@ import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { isValidEmail } from "@filen/shared"
 import { sdkApi } from "@/lib/sdk/client"
-import { persistSession, clearSession } from "@/lib/sdk/session"
 import { errorLabel } from "@/lib/i18n/errorLabel"
-import { runChangeEmailAttempt } from "@/features/settings/components/account/changeEmail.logic"
 import { useIsOnline } from "@/lib/useIsOnline"
 import type { AccountQuerySuccess } from "@/queries/account"
 import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
@@ -19,11 +17,9 @@ interface ChangeEmailRowProps {
 	accountQuery: AccountQuerySuccess
 }
 
-// New + confirm + password in a dialog, same shape as ChangePasswordRow. Submit runs
-// runChangeEmailAttempt (changeEmail.logic.ts), which mirrors that row's fingerprint re-sync law: it
-// re-reads and re-persists the live client's session blob before this component does anything else
-// with the result. SESSION-INVALIDATING (changes the login identity the harvested e2e session
-// authenticates as) — never live-exercised in e2e, unit/render only.
+// New + confirm + password in a dialog, same shape as ChangePasswordRow. The server only records a
+// pending change and mails a confirmation link: email, login and session stay as they are until that
+// link is clicked outside this app, so nothing here is re-read or re-persisted.
 function ChangeEmailRow({ accountQuery }: ChangeEmailRowProps) {
 	const { t } = useTranslation(["settings", "common"])
 	const isOnline = useIsOnline()
@@ -55,37 +51,26 @@ function ChangeEmailRow({ accountQuery }: ChangeEmailRowProps) {
 			return
 		}
 
+		const email = newEmail.trim()
+
 		setPending(true)
 
-		try {
-			const outcome = await runChangeEmailAttempt(
-				{
-					changeEmail: params => sdkApi.changeEmail(params.password, params.newEmail),
-					toStringified: () => sdkApi.toStringified(),
-					persist: persistSession,
-					clearSession
-				},
-				{ password, newEmail: newEmail.trim() }
-			)
+		const outcome = await sdkApi.changeEmail(password, email).then(
+			() => ({ ok: true as const }),
+			(err: unknown) => ({ ok: false as const, err })
+		)
 
-			switch (outcome.status) {
-				case "success":
-					if (!outcome.persisted) {
-						toast.warning(t("settingsChangeEmailPersistFailed"))
-					}
-					toast.success(t("settingsChangeEmailSuccess"))
-					close()
-					void accountQuery.refetch()
-					break
-				case "error":
-					toast.error(errorLabel(outcome.dto))
-					break
-			}
-		} catch (e) {
-			toast.error(errorLabel(e))
-		} finally {
-			setPending(false)
+		setPending(false)
+
+		if (!outcome.ok) {
+			toast.error(errorLabel(outcome.err))
+
+			return
 		}
+
+		// It asks the user to act in their mailbox, so it stays up longer than a plain confirmation.
+		toast.success(t("settingsChangeEmailSuccess", { email }), { duration: 10_000 })
+		close()
 	}
 
 	return (

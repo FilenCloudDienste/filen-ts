@@ -7,7 +7,7 @@ import { persistSession, clearSession } from "@/lib/sdk/session"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { runChangePasswordAttempt } from "@/features/settings/components/security/changePassword.logic"
 import { useIsOnline } from "@/lib/useIsOnline"
-import { markAccountStale } from "@/queries/account"
+import { accountQueryUpdate, markAccountStale } from "@/queries/account"
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Button } from "@/components/ui/button"
 import { StrengthMeter } from "@/features/auth/components/strengthMeter"
@@ -72,6 +72,9 @@ function ChangePasswordRow() {
 					// Stale, not read now: the API can transiently report Unauthenticated right after a
 					// password change (a known SDK-side race), and a failed read here would put the whole
 					// page in its error state. The next focus or mount reads whatever the change touched.
+					// The server also resets the export flag (keys must be exported again after every password
+					// change), so the reminders come back without waiting for that read.
+					accountQueryUpdate(prev => ({ ...prev, didExportMasterKeys: false }), { readNow: false })
 					markAccountStale()
 					break
 				case "error":

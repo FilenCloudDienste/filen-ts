@@ -160,6 +160,10 @@ function TwoFactorRow({ accountQuery }: TwoFactorRowProps) {
 		try {
 			await sdkApi.disable2FA(code)
 			setDisableCodeOpen(false)
+			toast.success(t("settings:settingsTwoFactorDisabledSuccess"))
+			// The row flips at once; the read is still needed, since disabling issues a new setup key that
+			// only getUserInfo returns.
+			accountQueryUpdate(prev => ({ ...prev, twoFactorEnabled: false, twoFactorKey: undefined }), { readNow: false })
 			void accountQuery.refetch()
 		} catch (e) {
 			toast.error(errorLabel(e))

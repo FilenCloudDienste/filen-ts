@@ -21,7 +21,9 @@ vi.mock("@/lib/sdk/client", () => ({
 
 vi.mock("@/queries/client", async () => ({ queryClient: (await import("@/tests/testQueryClient")).createTestQueryClient() }))
 
-vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
+const { toastSuccess } = vi.hoisted(() => ({ toastSuccess: vi.fn() }))
+
+vi.mock("sonner", () => ({ toast: { success: toastSuccess, error: vi.fn() } }))
 vi.mock("@/features/settings/lib/downloadTextFile", () => ({ downloadTextFile: vi.fn() }))
 
 import "@/lib/i18n"
@@ -312,6 +314,31 @@ describe("account writes patch instead of reading back", () => {
 		expect(reads()).toBe(1)
 	})
 
+	it("refuses a nickname the server would reject, with an inline error and Save off, and no request", async () => {
+		renderRow(NicknameRow)
+		await drain()
+
+		fireEvent.change(screen.getByLabelText(EN_SETTINGS.settingsNicknameTitle), { target: { value: "jane.doe" } })
+
+		expect(screen.getByText(EN_SETTINGS.settingsNicknameInvalidError)).toBeDefined()
+		expect(screen.getByRole("button", { name: EN_SETTINGS.settingsNicknameSave })).toHaveProperty("disabled", true)
+
+		fireEvent.change(screen.getByLabelText(EN_SETTINGS.settingsNicknameTitle), { target: { value: "jane doe" } })
+
+		expect(screen.queryByText(EN_SETTINGS.settingsNicknameInvalidError)).toBeNull()
+		expect(screen.getByRole("button", { name: EN_SETTINGS.settingsNicknameSave })).toHaveProperty("disabled", false)
+		expect(setNickname).not.toHaveBeenCalled()
+	})
+
+	// A stored nickname may predate the rule: no red text before the field is edited.
+	it("shows no error for an untouched stored nickname that breaks the rule", async () => {
+		getUserInfo.mockImplementation(() => Promise.resolve({ ...ACCOUNT, nickName: "x" }))
+		renderRow(NicknameRow)
+		await drain()
+
+		expect(screen.queryByText(EN_SETTINGS.settingsNicknameInvalidError)).toBeNull()
+	})
+
 	it("a failed nickname save leaves the account untouched", async () => {
 		setNickname.mockRejectedValue({ species: "plain", message: "boom", label: "boom" })
 		renderRow(NicknameRow)
@@ -325,8 +352,8 @@ describe("account writes patch instead of reading back", () => {
 		expect(reads()).toBe(1)
 	})
 
-	// The server keeps a field sent blank, so the cache and the reopened form both keep "Old City".
-	it("saving personal info patches only the fields it sent and shows a blank one as the value it kept", async () => {
+	// The server replaces the whole record, so a field saved blank is cleared in the cache and the form.
+	it("saving personal info patches the record it sent, a blank field cleared, without a read", async () => {
 		renderRow(PersonalInfoRow)
 		await drain()
 
@@ -338,15 +365,45 @@ describe("account writes patch instead of reading back", () => {
 		await drain()
 
 		expect(updatePersonalInfo).toHaveBeenCalledExactlyOnceWith({ ...EMPTY_PERSONAL, firstName: "Ada" })
-		expect(cached()?.personal).toEqual({ ...EMPTY_PERSONAL, firstName: "Ada", city: "Old City" })
+		expect(cached()?.personal).toEqual({ ...EMPTY_PERSONAL, firstName: "Ada" })
 		await waitFor(() => {
 			expect(screen.queryByRole("dialog")).toBeNull()
 		})
 
 		fireEvent.click(screen.getByRole("button", { name: EN_SETTINGS.settingsPersonalEditAction }))
 		const reopened = await screen.findByRole("dialog")
-		expect(within(reopened).getByLabelText<HTMLInputElement>(EN_SETTINGS.settingsPersonalCity).value).toBe("Old City")
+		expect(within(reopened).getByLabelText<HTMLInputElement>(EN_SETTINGS.settingsPersonalCity).value).toBe("")
+		expect(within(reopened).getByLabelText<HTMLInputElement>(EN_SETTINGS.settingsPersonalFirstName).value).toBe("Ada")
 		expect(within(reopened).getByRole("button", { name: EN_SETTINGS.settingsPersonalSave })).toHaveProperty("disabled", true)
+		expect(reads()).toBe(1)
+	})
+
+	it("keeps Save off with an inline error while a VAT ID has no country", async () => {
+		renderRow(PersonalInfoRow)
+		await drain()
+
+		fireEvent.click(screen.getByRole("button", { name: EN_SETTINGS.settingsPersonalEditAction }))
+		const dialog = await screen.findByRole("dialog")
+		fireEvent.change(within(dialog).getByLabelText(EN_SETTINGS.settingsPersonalVatId), { target: { value: "DE123" } })
+
+		expect(within(dialog).getByText(EN_SETTINGS.settingsPersonalVatIdNeedsCountryError)).toBeDefined()
+		expect(within(dialog).getByRole("button", { name: EN_SETTINGS.settingsPersonalSave })).toHaveProperty("disabled", true)
+	})
+
+	// The server stores its own normalized VAT ID: the save marks the account stale instead of trusting the sent one.
+	it("saving a VAT ID marks the account stale without reading it now", async () => {
+		getUserInfo.mockImplementation(() => Promise.resolve({ ...ACCOUNT, personal: { ...EMPTY_PERSONAL, country: "Germany" } }))
+		renderRow(PersonalInfoRow)
+		await drain()
+
+		fireEvent.click(screen.getByRole("button", { name: EN_SETTINGS.settingsPersonalEditAction }))
+		const dialog = await screen.findByRole("dialog")
+		fireEvent.change(within(dialog).getByLabelText(EN_SETTINGS.settingsPersonalVatId), { target: { value: "de 123" } })
+		fireEvent.click(within(dialog).getByRole("button", { name: EN_SETTINGS.settingsPersonalSave }))
+		await drain()
+
+		expect(updatePersonalInfo).toHaveBeenCalledExactlyOnceWith({ ...EMPTY_PERSONAL, country: "Germany", vatId: "de 123" })
+		expect(queryClient.getQueryState(ACCOUNT_QUERY_KEY)?.isInvalidated).toBe(true)
 		expect(reads()).toBe(1)
 	})
 
@@ -406,6 +463,7 @@ describe("account writes patch instead of reading back", () => {
 
 		expect(exportMasterKeys).toHaveBeenCalledOnce()
 		expect(cached()?.didExportMasterKeys).toBe(true)
+		expect(toastSuccess).toHaveBeenCalledWith(EN_SETTINGS.settingsMasterKeysExportedSuccess)
 		expect(reads()).toBe(1)
 	})
 })

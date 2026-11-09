@@ -55,9 +55,36 @@ export function useAccountQuery(): UseQueryResult<UserInfo> {
 	return useQuery({
 		queryKey: ACCOUNT_QUERY_KEY,
 		queryFn: fetchAccount,
-		staleTime: () => (readThisSession ? ACCOUNT_STALE_TIME : 0),
+		staleTime: accountStaleTime,
 		refetchOnReconnect: "always"
 	})
+}
+
+function accountStaleTime(): number {
+	return readThisSession ? ACCOUNT_STALE_TIME : 0
+}
+
+// One derived value of the held account, for always-mounted surfaces: the account is patched once per
+// uploaded file, and a subscriber re-renders only when its selected value changes. `select` must be a
+// module-level function so its identity is stable.
+export function useAccountSelect<T>(select: (info: UserInfo) => T): T | undefined {
+	return useQuery({
+		queryKey: ACCOUNT_QUERY_KEY,
+		queryFn: fetchAccount,
+		staleTime: accountStaleTime,
+		refetchOnReconnect: "always",
+		select
+	}).data
+}
+
+function selectMasterKeysNotExported(info: UserInfo): boolean {
+	return !info.didExportMasterKeys
+}
+
+// True only once the account is loaded and says the master keys were never exported (or a password
+// change reset that), never while it is still unknown.
+export function useMasterKeysNotExported(): boolean {
+	return useAccountSelect(selectMasterKeysNotExported) === true
 }
 
 // Counts this tab's writes to the cached account, patches and stale marks alike.

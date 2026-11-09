@@ -1,10 +1,12 @@
 import type { Personal, UserPersonalUpdateInfo } from "@filen/sdk-rs"
+import { isValidCountry } from "@filen/shared"
 
 // Pure form <-> wasm-shape mapping, split out of the component (react-refresh requires a component
 // file to export components only) so it is unit-testable without a DOM. `Personal` and
 // `UserPersonalUpdateInfo` share the same 9 optional-string fields — this is the one place that
-// bridges the "" empty-input default a plain text field needs and the `undefined` wasm sends as
-// "leave unchanged": a blank field keeps its current value, as on mobile, since nothing can clear one.
+// bridges the "" empty-input default a plain text field needs and the `undefined` wasm sends. The
+// server overwrites all nine fields on every save and stores `undefined` as unset, so a blank field
+// clears its value.
 export type PersonalFormState = Record<keyof UserPersonalUpdateInfo, string>
 
 export const PERSONAL_FIELD_ORDER: (keyof UserPersonalUpdateInfo)[] = [
@@ -45,8 +47,8 @@ export function isPersonalFormDirty(form: PersonalFormState, initial: PersonalFo
 	return PERSONAL_FIELD_ORDER.some(key => form[key] !== initial[key])
 }
 
-// Trims every field and folds a blank result to `undefined` (never an empty string), which the server
-// takes as "keep the current value".
+// Trims every field and folds a blank result to `undefined`, which clears it. Never an empty string:
+// the server rejects "" for every field.
 export function formStateToUpdateInfo(form: PersonalFormState): UserPersonalUpdateInfo {
 	return {
 		firstName: form.firstName.trim() || undefined,
@@ -61,30 +63,32 @@ export function formStateToUpdateInfo(form: PersonalFormState): UserPersonalUpda
 	}
 }
 
-// The record as the server holds it after a save: what was sent, over what it kept.
+// The record as the server holds it after a save: the whole record is replaced, blanks included.
 export function mergePersonalUpdate(prev: Personal, sent: UserPersonalUpdateInfo): Personal {
 	const next = { ...prev }
 
 	for (const key of PERSONAL_FIELD_ORDER) {
-		const value = sent[key]
-
-		if (value !== undefined) {
-			next[key] = value
-		}
+		next[key] = sent[key]
 	}
 
 	return next
 }
 
-// The form after a save: a field left blank shows the value it kept.
-export function keepBlankFields(form: PersonalFormState, kept: Personal): PersonalFormState {
-	const next = { ...form }
+export type PersonalFormIssue = "countryOffList" | "vatIdNeedsCountry"
 
-	for (const key of PERSONAL_FIELD_ORDER) {
-		if (form[key].trim() === "") {
-			next[key] = kept[key] ?? ""
-		}
+// Saves the server would refuse or mangle: an off-list country is rejected outright, and a VAT ID is
+// checked against the stored country even while the form clears it. A stored off-list value is still
+// shown (never silently cleared), so the user sees why Save is off.
+export function personalFormIssue(form: PersonalFormState): PersonalFormIssue | null {
+	const country = form.country.trim()
+
+	if (!isValidCountry(country)) {
+		return "countryOffList"
 	}
 
-	return next
+	if (form.vatId.trim() !== "" && country === "") {
+		return "vatIdNeedsCountry"
+	}
+
+	return null
 }

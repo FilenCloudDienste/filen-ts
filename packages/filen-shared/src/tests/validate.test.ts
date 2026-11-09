@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { isValidEmail, isPasswordStrongEnough, ratePasswordStrength } from "@filen/shared"
+import { isValidEmail, isValidNickname, isPasswordStrongEnough, ratePasswordStrength } from "@filen/shared"
 
 describe("isValidEmail", () => {
 	it("accepts a standard email address", () => {
@@ -65,5 +65,31 @@ describe("isPasswordStrongEnough", () => {
 
 	it("accepts the best-tier password", () => {
 		expect(isPasswordStrongEnough(ratePasswordStrength("Abcdefghijk!@#$%"))).toBe(true)
+	})
+})
+
+describe("isValidNickname", () => {
+	it("accepts 3-32 letters, digits, spaces, _ and -", () => {
+		expect(isValidNickname("abc")).toBe(true)
+		expect(isValidNickname("Jane Doe_42-x")).toBe(true)
+		expect(isValidNickname("a".repeat(32))).toBe(true)
+	})
+
+	it("accepts empty and whitespace-only, which clear the nickname", () => {
+		expect(isValidNickname("")).toBe(true)
+		expect(isValidNickname("   ")).toBe(true)
+	})
+
+	it("judges the trimmed value, as the server does", () => {
+		expect(isValidNickname("  abc  ")).toBe(true)
+		expect(isValidNickname(" ab ")).toBe(false)
+	})
+
+	it("rejects too short, too long and other characters", () => {
+		expect(isValidNickname("ab")).toBe(false)
+		expect(isValidNickname("a".repeat(33))).toBe(false)
+		expect(isValidNickname("jane.doe")).toBe(false)
+		expect(isValidNickname("jäne")).toBe(false)
+		expect(isValidNickname("<b>jane</b>")).toBe(false)
 	})
 })

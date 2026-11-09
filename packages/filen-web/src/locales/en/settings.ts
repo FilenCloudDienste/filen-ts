@@ -66,11 +66,9 @@ export const settings = {
 	settingsChangeEmailPassword: "Password",
 	settingsChangeEmailInvalid: "Enter a valid email address.",
 	settingsChangeEmailMismatch: "The email addresses don't match.",
-	/** Change-email dialog — success toast; the account query is refetched afterward so the displayed email updates */
-	settingsChangeEmailSuccess: "Your email address has been changed. Please sign in again.",
-	/** Change-email dialog — mirrors "auth:changePasswordPersistFailed": the mutation succeeded server-side but the local session could not be re-saved */
-	settingsChangeEmailPersistFailed:
-		"Your email address was changed, but the new session could not be saved on this device. Please sign in again.",
+	/** Change-email dialog — success toast; {{email}} is the new address the confirmation link was sent to. Nothing changes until the user clicks that link */
+	settingsChangeEmailSuccess:
+		"We have sent a confirmation email to {{email}} if it can be used. Please click the link in the email to confirm your new email address. Make sure to also check your spam folder.",
 
 	// ── Account: nickname ────────────────────────────────────────────────────
 	settingsNicknameTitle: "Nickname",

@@ -6,17 +6,17 @@ import { sdkApi } from "@/lib/sdk/client"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import type { SettingsKey } from "@/lib/i18n"
 import { useIsOnline } from "@/lib/useIsOnline"
-import { accountQueryUpdate, type AccountQuerySuccess } from "@/queries/account"
+import { accountQueryUpdate, markAccountStale, type AccountQuerySuccess } from "@/queries/account"
 import {
 	personalToFormState,
 	formStateToUpdateInfo,
 	isPersonalFormDirty,
-	keepBlankFields,
 	mergePersonalUpdate,
+	personalFormIssue,
 	PERSONAL_FIELD_ORDER,
 	type PersonalFormState
 } from "@/features/settings/components/account/personalInfoCard.logic"
-import { Field, FieldGroup, FieldLabel } from "@/components/ui/field"
+import { Field, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -43,8 +43,8 @@ const FIELD_LABEL_KEYS: Record<keyof PersonalFormState, SettingsKey> = {
 // state is FROZEN at mount from the account query's `personal` snapshot (the same editor invariant this
 // app's other freeze-on-mount forms use) — a background refetch from another row's save
 // (avatar/nickname/email) must never clobber in-progress edits here. `initial` captures that SAME
-// frozen snapshot a second time (the dirty-gate's baseline) and is advanced to the just-saved `form` on
-// a successful save, its blank fields showing the values they kept — never re-derived from a refetch,
+// frozen snapshot a second time (the dirty-gate's baseline) and is advanced to the just-saved, trimmed
+// values on a successful save (a blank field is cleared on the server) — never re-derived from a refetch,
 // which would violate the freeze invariant above. Dismissing the dialog puts the form back to
 // `initial`, so an abandoned edit never reappears as if it were saved.
 function PersonalInfoRow({ accountQuery }: PersonalInfoRowProps) {
@@ -55,30 +55,48 @@ function PersonalInfoRow({ accountQuery }: PersonalInfoRowProps) {
 	const [form, setForm] = useState<PersonalFormState>(initial)
 	const [pending, setPending] = useState(false)
 	const dirty = isPersonalFormDirty(form, initial)
+	const issue = personalFormIssue(form)
+	const canSubmit = dirty && issue === null && isOnline
 	const countries = countryOptions(form.country)
 
 	async function handleSubmit(e: SubmitEvent): Promise<void> {
 		e.preventDefault()
 
-		if (!dirty || !isOnline) {
+		if (!canSubmit) {
 			return
 		}
 
+		const sent = formStateToUpdateInfo(form)
+
 		setPending(true)
-		try {
-			const sent = formStateToUpdateInfo(form)
-			await sdkApi.updatePersonalInfo(sent)
-			toast.success(t("settingsPersonalSuccess"))
-			// A blank field is sent as "leave unchanged", so it shows, and stays cached, as the value it kept.
-			const saved = keepBlankFields(form, accountQuery.data.personal)
-			setInitial(saved)
-			setForm(saved)
-			setOpen(false)
-			accountQueryUpdate(prev => ({ ...prev, personal: mergePersonalUpdate(prev.personal, sent) }))
-		} catch (e) {
-			toast.error(errorLabel(e))
-		} finally {
-			setPending(false)
+
+		const outcome = await sdkApi.updatePersonalInfo(sent).then(
+			() => ({ ok: true as const }),
+			(err: unknown) => ({ ok: false as const, err })
+		)
+
+		setPending(false)
+
+		if (!outcome.ok) {
+			// The dialog stays open with the edits, e.g. when the VAT ID check service is down.
+			toast.error(errorLabel(outcome.err))
+
+			return
+		}
+
+		toast.success(t("settingsPersonalSuccess"))
+
+		const personal = mergePersonalUpdate(accountQuery.data.personal, sent)
+		const saved = personalToFormState(personal)
+
+		setInitial(saved)
+		setForm(saved)
+		setOpen(false)
+		accountQueryUpdate(prev => ({ ...prev, personal: mergePersonalUpdate(prev.personal, sent) }))
+
+		// The server stores its own normalized form of a VAT ID; the next background read picks it up.
+		if (sent.vatId !== undefined) {
+			markAccountStale()
 		}
 	}
 
@@ -104,7 +122,7 @@ function PersonalInfoRow({ accountQuery }: PersonalInfoRowProps) {
 				description={t("settingsPersonalDescription")}
 				submitLabel={t("settingsPersonalSave")}
 				cancelLabel={t("common:cancel")}
-				canSubmit={dirty && isOnline}
+				canSubmit={canSubmit}
 				submitTitle={!isOnline ? t("common:offlineActionDisabled") : undefined}
 				wide
 				onOpenChange={next => {
@@ -138,6 +156,8 @@ function PersonalInfoRow({ accountQuery }: PersonalInfoRowProps) {
 									<SelectTrigger
 										id="personal-country"
 										className="w-full"
+										aria-invalid={issue !== null}
+										aria-describedby={issue !== null ? "personal-country-error" : undefined}
 									>
 										<SelectValue />
 									</SelectTrigger>
@@ -155,6 +175,15 @@ function PersonalInfoRow({ accountQuery }: PersonalInfoRowProps) {
 										</SelectGroup>
 									</SelectContent>
 								</Select>
+								{issue !== null && (
+									<FieldError id="personal-country-error">
+										{t(
+											issue === "countryOffList"
+												? "settingsPersonalCountryOffListError"
+												: "settingsPersonalVatIdNeedsCountryError"
+										)}
+									</FieldError>
+								)}
 							</Field>
 						) : (
 							<Field key={key}>

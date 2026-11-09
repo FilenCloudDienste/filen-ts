@@ -33,6 +33,7 @@ function ExportMasterKeysRow({ accountQuery }: ExportMasterKeysRowProps) {
 			const masterKeys = await sdkApi.exportMasterKeys()
 			downloadTextFile(buildMasterKeysFilename(email, Date.now()), masterKeys)
 			setConfirmOpen(false)
+			toast.success(t("settings:settingsMasterKeysExportedSuccess"))
 			accountQueryUpdate(prev => ({ ...prev, didExportMasterKeys: true }))
 		} catch (e) {
 			toast.error(errorLabel(e))
@@ -44,7 +45,7 @@ function ExportMasterKeysRow({ accountQuery }: ExportMasterKeysRowProps) {
 	return (
 		<SettingsRow
 			label={t("settings:settingsMasterKeysRowTitle")}
-			description={t("exportMasterKeysDescription")}
+			description={didExportMasterKeys ? t("exportMasterKeysDescription") : t("settings:settingsMasterKeysNotExportedWarning")}
 		>
 			{!didExportMasterKeys && <Badge variant="destructive">{t("exportMasterKeysNotBackedUp")}</Badge>}
 			<Button

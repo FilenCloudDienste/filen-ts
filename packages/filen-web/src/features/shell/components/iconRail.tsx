@@ -30,7 +30,8 @@ import { useHasUnsyncedWork } from "@/features/shell/hooks/useUnsyncedWork"
 import { logoutConfirmBodyKey } from "@/features/shell/hooks/useUnsyncedWork.logic"
 import { useChatsUnreadCount } from "@/features/chats/hooks/useChatsUnreadCount"
 import { useContactRequestsQuery } from "@/features/contacts/queries/contacts"
-import { useAccountQuery } from "@/queries/account"
+import { useAccountQuery, useMasterKeysNotExported } from "@/queries/account"
+import { RailStatusDot, RailTooltipDetail } from "@/features/shell/components/railProgressBar"
 import { useHasActiveTransfers } from "@/features/transfers/store/useTransfersStore"
 import { Logo } from "@/features/shell/components/logo"
 import { useRailReorder } from "@/features/shell/hooks/useRailReorder"
@@ -112,10 +113,11 @@ function HelpEntry() {
 }
 
 function AccountMenu() {
-	const { t } = useTranslation(["common", "auth"])
+	const { t } = useTranslation(["common", "auth", "settings"])
 	const navigate = useNavigate()
 	const { toggleTheme } = useTheme()
 	const accountQuery = useAccountQuery()
+	const keysNotExported = accountQuery.data?.didExportMasterKeys === false
 	const hasUnsyncedWork = useHasUnsyncedWork()
 	const hasActiveTransfers = useHasActiveTransfers()
 	const [confirmOpen, setConfirmOpen] = useState(false)
@@ -179,16 +181,18 @@ function AccountMenu() {
 					</DropdownMenuGroup>
 					<DropdownMenuSeparator />
 					<DropdownMenuGroup>
-						{/* Settings moved off the rail into the account menu (rail footer is now collapse + avatar
-						    only). */}
+						{/* Settings is also a rail entry; this keeps it next to the account it belongs to. While the
+						    master keys are not exported it leads to Security and says why, not by colour alone. */}
 						<DropdownMenuItem
 							onClick={() => {
-								void navigate({ to: "/settings/account" })
+								void navigate({ to: keysNotExported ? "/settings/security" : "/settings/account" })
 							}}
 						>
 							<SettingsIcon />
 							{t("settings")}
-							<span className="ml-auto">
+							{keysNotExported && <span className="sr-only">{`, ${t("settings:settingsMasterKeysNotExportedStatus")}`}</span>}
+							<span className="ml-auto flex items-center gap-2">
+								{keysNotExported && <RailStatusDot dot="attention" />}
 								<Kbd action="app.openSettings" />
 							</span>
 						</DropdownMenuItem>
@@ -452,17 +456,42 @@ function ChatsEntry({ active, reordering }: RailEntryProps) {
 	)
 }
 
+// While the master keys are not exported the entry carries a dot, says so in its name and tooltip, and
+// opens Security, where they are exported.
 function SettingsEntry({ active, reordering }: RailEntryProps) {
-	const { t } = useTranslation()
+	const { t } = useTranslation(["common", "settings"])
+	const keysNotExported = useMasterKeysNotExported()
+	const label = t("settings")
+
+	if (!keysNotExported) {
+		return (
+			<RailLink
+				active={active}
+				reordering={reordering}
+				label={label}
+				icon={SettingsIcon}
+				linkOptions={{ to: "/settings/account" }}
+			/>
+		)
+	}
+
+	const status = t("settings:settingsMasterKeysNotExportedStatus")
 
 	return (
 		<RailLink
 			active={active}
 			reordering={reordering}
-			label={t("settings")}
+			label={label}
+			ariaLabel={t("railGroupWithStatus", { group: label, status })}
 			icon={SettingsIcon}
-			linkOptions={{ to: "/settings/account" }}
-		/>
+			linkOptions={{ to: "/settings/security" }}
+			tooltipExtra={<RailTooltipDetail>{status}</RailTooltipDetail>}
+		>
+			<RailStatusDot
+				dot="attention"
+				className="absolute top-1 right-1 ring-2 ring-canvas"
+			/>
+		</RailLink>
 	)
 }
 
