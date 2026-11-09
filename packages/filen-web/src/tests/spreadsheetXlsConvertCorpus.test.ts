@@ -2,7 +2,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs"
 import { join, resolve } from "node:path"
 import { describe, expect, it } from "vitest"
 import { bytesSource } from "@filen/office/core/opc"
-import type { SheetOpenResult } from "@filen/office/core/sheet"
+import type { SheetOpened, SheetOpenResult } from "@filen/office/core/sheet"
 import { workbookOpener } from "@filen/office/dom/sheet"
 import { budget } from "@filen/shared/tooling/testBudget"
 import { xlsToXlsx } from "@/features/spreadsheet/lib/xlsConvert"
@@ -11,7 +11,8 @@ import { sheetWorkbookOpener } from "@/features/spreadsheet/workers/sheetWorkboo
 // Every Excel 97–2003 workbook and template of the real-world corpus (packages/filen-office/corpus/manifest.json)
 // through the workbook worker's opener, as a user opens it: Excel's default password tried, then converted to .xlsx
 // and opened view-only. Each opens with named sheets and cells, or is refused with a typed reason, within a bound on
-// time. FILEN_OFFICE_CORPUS when set, else the cache `pnpm run corpus:fetch` fills; skipped while it is absent.
+// time; a workbook whose password the manifest publishes asks for it, says a wrong one was wrong, and opens with it.
+// FILEN_OFFICE_CORPUS when set, else the cache `pnpm run corpus:fetch` fills; skipped while it is absent.
 
 const CORPUS = (() => {
 	const configured = process.env["FILEN_OFFICE_CORPUS"]
@@ -33,6 +34,15 @@ function familyFiles(family: "xls" | "xlt"): string[] {
 }
 
 const FILES = [...familyFiles("xls"), ...familyFiles("xlt")]
+
+// The published fixture passwords of the encrypted workbooks (XOR and CryptoAPI RC4).
+const PASSWORDS = new Map(
+	(
+		JSON.parse(readFileSync(join(__dirname, "..", "..", "..", "filen-office", "corpus", "manifest.json"), "utf8")) as {
+			files: { path: string; password?: string }[]
+		}
+	).files.flatMap(file => (file.password === undefined ? [] : [[file.path, file.password] as const]))
+)
 
 // The files that do not open, and how each is turned away.
 const REFUSED: Readonly<Record<string, Exclude<SheetOpenResult["kind"], "opened"> | `failed:${string}`>> = {
@@ -69,6 +79,21 @@ function open(path: string, opener = sheetWorkbookOpener()): Promise<SheetOpenRe
 	)
 }
 
+// Unlocks a workbook that asks for its published password, after a wrong one is turned away with the prompt kept.
+async function unlocked(path: string, result: SheetOpenResult): Promise<SheetOpened> {
+	const password = PASSWORDS.get(path)
+
+	if (result.kind !== "needsPassword" || password === undefined) throw new Error(`${path}: ${JSON.stringify(result)}`)
+
+	expect(await result.locked.unlock("not the password")).toEqual({ ok: false, reason: "wrongPassword" })
+
+	const outcome = await result.locked.unlock(password)
+
+	if (!outcome.ok) throw new Error(`${path}: ${outcome.reason}`)
+
+	return outcome
+}
+
 describe.skipIf(FILES.length === 0)("the .xls and .xlt corpus through the workbook opener", () => {
 	it("covers both families", () => {
 		expect(FILES.some(path => path.startsWith("xls/"))).toBe(true)
@@ -79,6 +104,7 @@ describe.skipIf(FILES.length === 0)("the .xls and .xlt corpus through the workbo
 		const start = performance.now()
 		const result = await open(path)
 		const elapsed = performance.now() - start
+		let opened: SheetOpened | undefined
 
 		try {
 			expect(elapsed).toBeLessThan(budget(PER_FILE_MS))
@@ -91,18 +117,18 @@ describe.skipIf(FILES.length === 0)("the .xls and .xlt corpus through the workbo
 				return
 			}
 
-			if (result.kind !== "opened") throw new Error(`${path}: ${JSON.stringify(result)}`)
+			opened = result.kind === "opened" ? result : await unlocked(path, result)
 
-			const sheets = result.info.sheets
+			const sheets = opened.info.sheets
 
 			expect(sheets.length).toBeGreaterThan(0)
 			expect(sheets.every(sheet => sheet.name !== "")).toBe(true)
-			expect(result.info.writability).toEqual({ state: "viewOnly", reason: "legacyFormat" })
+			expect(opened.info.writability).toEqual({ state: "viewOnly", reason: "legacyFormat" })
 
 			let cells = false
 
 			for (const sheet of sheets) {
-				const layout = await result.session.layout(sheet.id)
+				const layout = await opened.session.layout(sheet.id)
 
 				if (layout.rowCount > 0 && layout.colCount > 0) {
 					cells = true
@@ -113,7 +139,7 @@ describe.skipIf(FILES.length === 0)("the .xls and .xlt corpus through the workbo
 
 			expect(cells).toBe(!EMPTY.has(path))
 		} finally {
-			if (result.kind === "opened") result.session.close()
+			opened?.session.close()
 			if (result.kind === "needsPassword") result.locked.dispose()
 		}
 	})

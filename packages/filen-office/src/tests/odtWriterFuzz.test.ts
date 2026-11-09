@@ -4,6 +4,7 @@ import { strFromU8 } from "fflate"
 import { describe, expect, it } from "vitest"
 import type { DocxEditorSession } from "@filen/office/core/docx/edit"
 import { bytesSource } from "@filen/office/core/opc"
+import { OdfPackage } from "../core/odf/index"
 import { translateOdt } from "../core/odt/index"
 import { OdtWriteRefusal, writeOdt } from "../core/odt/write/writer"
 import { CORPUS_DIR } from "./corpusDir"
@@ -20,6 +21,7 @@ import { editOdt, odtEditsOf } from "./odtWriteFixtures"
 // it, checked here independently of the writer's own proof (every paragraph's text in order, and how many tables and
 // rows), or is refused with a reason: no proof failure goes unreported. FILEN_OFFICE_ODT_FUZZ_RUNS sets the seeds
 // per file (default 3), FILEN_OFFICE_ODT_FUZZ_FROM the first (default 0); corpus files are added where the corpus exists.
+// A sampled corpus package the reader refuses (encrypted, or not a package) is left out; any other refusal fails.
 
 const RUNS = Number(process.env["FILEN_OFFICE_ODT_FUZZ_RUNS"] ?? 3)
 const FROM = Number(process.env["FILEN_OFFICE_ODT_FUZZ_FROM"] ?? 0)
@@ -102,8 +104,17 @@ describe("ODT writer fuzz", () => {
 
 		const outcomes = { saved: 0, refused: 0, steps: 0 }
 		const reasons = new Map<string, number>()
+		const unopened = new Map<string, string>()
 
 		for (const file of files) {
+			const pkg = await OdfPackage.open(bytesSource(file.bytes), { kinds: ["text"] })
+
+			if (!pkg.ok) {
+				unopened.set(file.name, pkg.reason)
+
+				continue
+			}
+
 			for (let run = FROM; run < FROM + RUNS; run++) {
 				const rand = rng(0x0d7 + run * 7919 + file.bytes.length)
 				const editing = await editOdt(file.bytes)
@@ -154,8 +165,11 @@ describe("ODT writer fuzz", () => {
 			}
 		}
 
-		console.log("odt fuzz", outcomes, Object.fromEntries([...reasons].sort((a, b) => b[1] - a[1]).slice(0, 25)))
+		console.log("odt fuzz", outcomes, Object.fromEntries([...reasons].sort((a, b) => b[1] - a[1]).slice(0, 25)), {
+			unopened: Object.fromEntries(unopened)
+		})
 
+		expect([...unopened.values()].filter(reason => reason !== "encrypted" && reason !== "invalidPackage")).toEqual([])
 		expect(outcomes.saved).toBeGreaterThan(0)
 	})
 })

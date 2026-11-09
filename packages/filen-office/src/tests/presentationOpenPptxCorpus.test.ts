@@ -154,7 +154,7 @@ describe.skipIf(files.length === 0)("pptx corpus through the session", () => {
 			// Every OOXML presentation opens and renders (the encrypted ones with their passwords).
 			expect(refusals).toEqual([])
 			expect(outcomes.size).toBe(files.length)
-			expect(files.length).toBe(205)
+			expect(files.length).toBe(206)
 
 			// First slides draw their text through the session's layout (126 first slides hold text of their own; layout and
 			// master text adds more), with the faces it registered sent to the page.

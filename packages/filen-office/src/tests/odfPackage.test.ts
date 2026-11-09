@@ -271,10 +271,13 @@ describe.skipIf(!existsSync(ODT) || !existsSync(ODS))("ODF corpus packages", () 
 			}
 		}
 
+		// ODF 1.3 Part 2 §4.8: encrypted packages (Blowfish CFB and AES-256-CBC) are refused as encrypted.
 		expect(Object.fromEntries(reasons)).toEqual({
 			"lo__password.ods": "encrypted",
-			"odftk__testInvalidPkg2.odt": "invalidPackage"
+			"lo__passwordOld.ods": "encrypted",
+			"odftk__testInvalidPkg2.odt": "invalidPackage",
+			"tika__testODTEncrypted.odt": "encrypted"
 		})
-		expect(opened).toBe(144)
+		expect(opened).toBe(146)
 	})
 })
