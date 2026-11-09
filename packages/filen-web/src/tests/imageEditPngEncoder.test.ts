@@ -62,6 +62,22 @@ function pattern(width: number, height: number): Uint8Array<ArrayBuffer> {
 	return data
 }
 
+// Index of the first differing byte, -1 when equal. toEqual walks a typed array element by element through its
+// deep-equality machinery: over a megapixel that alone takes seconds on CI runners.
+function firstMismatch(a: Uint8Array, b: Uint8Array): number {
+	if (a.length !== b.length) {
+		return Math.min(a.length, b.length)
+	}
+
+	for (let i = 0; i < a.length; i++) {
+		if (a[i] !== b[i]) {
+			return i
+		}
+	}
+
+	return -1
+}
+
 async function roundTrip(width: number, height: number, hasAlpha: boolean): Promise<void> {
 	const rgba = pattern(width, height)
 	const png = await encodePng(rgba, width, height, hasAlpha)
@@ -90,7 +106,7 @@ async function roundTrip(width: number, height: number, hasAlpha: boolean): Prom
 	const samples = unfilter(inflateSync(chunks[1]?.data ?? new Uint8Array()), width, height, channels)
 
 	if (hasAlpha) {
-		expect(samples).toEqual(rgba)
+		expect(firstMismatch(samples, rgba)).toBe(-1)
 
 		return
 	}
@@ -101,7 +117,7 @@ async function roundTrip(width: number, height: number, hasAlpha: boolean): Prom
 		rgb.set(rgba.subarray(p * 4, p * 4 + 3), p * 3)
 	}
 
-	expect(samples).toEqual(rgb)
+	expect(firstMismatch(samples, rgb)).toBe(-1)
 }
 
 describe("encodePng", () => {
