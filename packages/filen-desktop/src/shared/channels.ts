@@ -23,6 +23,8 @@ export const CHANNELS = {
 	menuAction: "app:menu-action",
 	updateReady: "app:update-ready",
 	installUpdate: "app:install-update",
+	browserCacheSize: "app:browser-cache-size",
+	clearBrowserCache: "app:clear-browser-cache",
 	lockStatus: "lock:status",
 	lockChanged: "lock:changed",
 	lockUnlock: "lock:unlock",

@@ -93,6 +93,7 @@ import { type HostProxy, PROXY_RESOLVE_WAIT_MS, resolveHostProxy } from "./proxy
 import { registerAppProtocol, registerDevProxy } from "./serve.ts"
 import { redact } from "./redact.ts"
 import { registerSessionRecoveryIpc, sessionDiscarder, type VaultDependent } from "./sessionRecovery.ts"
+import { registerBrowserCacheIpc, sessionBrowserCache } from "./browserCache.ts"
 import { createSignOut, deleteProfileStorage, type ProfileOutcome, removeTree, wipeProfileBeforeReady } from "./signOut.ts"
 import { parseSessionBlob } from "@filen/shared/session"
 import {
@@ -1756,6 +1757,12 @@ if (!instanceLock.held) {
 	registerMountsIpc(ipcMain, mountsService, url => isTrustedSender(url, APP_ORIGIN))
 	registerFileProviderIpc(ipcMain, fileProvider, url => isTrustedSender(url, APP_ORIGIN))
 	registerSessionRecoveryIpc(ipcMain, discardUnreadableSession, url => isTrustedSender(url, APP_ORIGIN))
+	// The session exists only after ready, which every page call comes after.
+	registerBrowserCacheIpc(
+		ipcMain,
+		sessionBrowserCache(() => session.defaultSession),
+		url => isTrustedSender(url, APP_ORIGIN)
+	)
 
 	handle(CHANNELS.logsExport, async payload => {
 		const webLog = webLogSchema(payload)

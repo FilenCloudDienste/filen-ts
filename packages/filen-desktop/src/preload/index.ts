@@ -253,7 +253,9 @@ const bridge: DesktopBridge = {
 		},
 		installUpdate: () => {
 			ipcRenderer.send(CHANNELS.installUpdate)
-		}
+		},
+		browserCacheSize: () => ipcRenderer.invoke(CHANNELS.browserCacheSize) as Promise<number>,
+		clearBrowserCache: () => ipcRenderer.invoke(CHANNELS.clearBrowserCache) as Promise<void>
 	},
 	lock: {
 		status: () => ipcRenderer.invoke(CHANNELS.lockStatus) as Promise<DesktopLockStatus>,

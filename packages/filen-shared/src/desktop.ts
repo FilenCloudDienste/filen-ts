@@ -84,6 +84,9 @@ export interface DesktopApp {
 	// Quits and installs the downloaded update, then relaunches. Without one, nothing happens. A quit the page's unload
 	// guard cancels installs on the next quit instead.
 	installUpdate(): void
+	// The window's HTTP cache on disk, in bytes, and clearing it (with the compiled-code cache). Never site storage.
+	browserCacheSize(): Promise<number>
+	clearBrowserCache(): Promise<void>
 }
 
 // The app lock. Main keeps the PIN (a salted slow hash in userData, encrypted like the session; never the PIN itself), the locked state and the

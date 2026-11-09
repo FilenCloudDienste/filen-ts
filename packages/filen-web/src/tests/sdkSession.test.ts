@@ -297,7 +297,9 @@ describe("desktop vault", () => {
 				setShellStrings: () => undefined,
 				onMenuAction: () => () => undefined,
 				onUpdateReady: () => () => undefined,
-				installUpdate: () => undefined
+				installUpdate: () => undefined,
+				browserCacheSize: () => Promise.reject(new Error("unused")),
+				clearBrowserCache: () => Promise.reject(new Error("unused"))
 			},
 			lock: {
 				status: () => Promise.reject(new Error("unused")),
