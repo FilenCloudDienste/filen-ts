@@ -152,7 +152,7 @@ describe("PDF links on pdf.js", () => {
 			links.flatMap(link => (link.kind === "internal" ? [resolveDestination(document, link.dest)] : []))
 		)
 
-		expect(targets).toEqual([3, 2])
+		expect(targets.map(target => target?.page)).toEqual([3, 2])
 		await opening.destroy()
 	})
 })

@@ -15,10 +15,10 @@ export const previewDocxLegacy = {
 	previewDocxLegacyShapes_one: "{{count}} drawing shape, shown as a placeholder",
 	/** Docx viewer — as previewDocxLegacyShapes_one, for several */
 	previewDocxLegacyShapes_other: "{{count}} drawing shapes, shown as placeholders",
-	/** Docx viewer — not-converted list item: groups of shapes shown as placeholder boxes, with the text their shapes hold in text boxes */
-	previewDocxLegacyGroups_one: "{{count}} group of shapes, shown as a placeholder with its text",
-	/** Docx viewer — as previewDocxLegacyGroups_one, for several */
-	previewDocxLegacyGroups_other: "{{count}} groups of shapes, shown as placeholders with their text",
+	/** Docx viewer — not-converted list item: curved parts of freeform drawing shapes drawn as straight lines */
+	previewDocxLegacyGeometry_one: "{{count}} curved shape outline, drawn with straight lines",
+	/** Docx viewer — as previewDocxLegacyGeometry_one, for several */
+	previewDocxLegacyGeometry_other: "{{count}} curved shape outlines, drawn with straight lines",
 	/** Docx viewer — not-converted list item: WordArt (decorative text, e.g. a "DRAFT" watermark) shown as plain text in a box */
 	previewDocxLegacyWordArt_one: "{{count}} WordArt item, shown as plain text",
 	/** Docx viewer — as previewDocxLegacyWordArt_one, for several */

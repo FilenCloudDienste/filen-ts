@@ -1,4 +1,4 @@
-import type { SheetFileKind, SheetRange, SheetSummary } from "@filen/office/core/sheet"
+import type { SheetDocumentProperties, SheetFileKind, SheetRange, SheetSummary } from "@filen/office/core/sheet"
 import { COMMON_PAPER_SIZES, paperPoints, type SheetPageSetup, type SheetPrintPatch } from "@filen/office/core/sheet/print"
 import type { PrintChart, PrintSheetRequest, SheetPdfRequest } from "@filen/office/react/sheet/print"
 import type { PreviewKey } from "@/lib/i18n"
@@ -191,20 +191,33 @@ export function headerValues(name: string, now: Date = new Date()): { date: stri
 }
 
 // The file a sheet's PDF is made of: its name (for headers and footers), its title (the workbook's own, else the
-// file's name without its extension, as a document's PDF is titled) and the language.
+// file's name without its extension, as a document's PDF is titled), its author, subject and keywords when it names
+// any, and the language.
+export interface SheetPdfFile {
+	readonly name: string
+	readonly title: string
+	readonly properties?: SheetDocumentProperties
+	readonly lang: string
+}
+
 export function pdfFile(
 	name: string,
-	workbook: { readonly title?: string },
+	workbook: { readonly title?: string; readonly properties?: SheetDocumentProperties },
 	lang: string
-): { readonly name: string; readonly title: string; readonly lang: string } {
-	return { name, title: workbook.title ?? fileStem(name), lang }
+): SheetPdfFile {
+	return {
+		name,
+		title: workbook.title ?? fileStem(name),
+		...(workbook.properties === undefined ? {} : { properties: workbook.properties }),
+		lang
+	}
 }
 
 // A print as the PDF export takes it: the print's sheets and ranges, the header and footer values, the document's
 // title (pdfFile) and language, and what the grid shows of the workbook.
 export function pdfRequest(
 	sheets: readonly PrintSheetRequest[],
-	file: { readonly name: string; readonly title: string; readonly lang: string },
+	file: SheetPdfFile,
 	workbook: {
 		readonly kind: SheetFileKind
 		readonly sheets: readonly SheetSummary[]
@@ -217,6 +230,7 @@ export function pdfRequest(
 		sheets,
 		values: headerValues(file.name, now),
 		title: file.title,
+		...(file.properties === undefined ? {} : { properties: file.properties }),
 		lang: file.lang,
 		kind: workbook.kind,
 		summaries: workbook.sheets,

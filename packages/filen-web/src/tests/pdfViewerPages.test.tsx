@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import "@/lib/i18n"
 import { registerAllActions } from "@/lib/keymap/actions"
+import { isTextEditingTarget } from "@/features/preview/components/previewOverlay.logic"
 import { linkedFileItem } from "@/tests/fixtures/sdk"
 import { createTestQueryClient, queryClientWrapper } from "@/tests/testQueryClient"
 
@@ -138,12 +139,33 @@ function pageElement(n: number): Element {
 	return element
 }
 
-// Brings a page into both margins, as the view would on scrolling to it.
-function show(n: number, ratio = 1): void {
-	act(() => {
+function box(top: number, height: number): DOMRect {
+	return { x: 0, y: top, left: 0, top, right: 100, bottom: top + height, width: 100, height, toJSON: () => ({}) }
+}
+
+// Scrolls a page into view, as the view would: jsdom lays nothing out, so the pages are stacked around page `n`
+// (it fills a 100px view) for the viewer's page-in-view measure, which runs a frame after the scroll, and page `n`
+// enters both observer margins.
+async function show(n: number): Promise<void> {
+	const scroller = pageElement(n).closest("[tabindex]")
+
+	if (scroller === null) {
+		throw new Error("no scroller")
+	}
+
+	Object.defineProperty(scroller, "getBoundingClientRect", { configurable: true, value: () => box(0, 100) })
+
+	for (const page of [1, 2, 3]) {
+		Object.defineProperty(pageElement(page), "getBoundingClientRect", { configurable: true, value: () => box((page - n) * 100, 100) })
+	}
+
+	await act(async () => {
+		scroller.dispatchEvent(new Event("scroll"))
+		await new Promise(resolve => requestAnimationFrame(resolve))
+
 		for (const observed of observers) {
 			observed.callback(
-				[{ target: pageElement(n), isIntersecting: true, intersectionRatio: ratio } as unknown as IntersectionObserverEntry],
+				[{ target: pageElement(n), isIntersecting: true, intersectionRatio: 1 } as unknown as IntersectionObserverEntry],
 				{} as IntersectionObserver
 			)
 		}
@@ -180,11 +202,12 @@ async function mount(): Promise<void> {
 		{ wrapper: queryClientWrapper(createTestQueryClient()) }
 	)
 
+	// Page 1 sizes the pages not read yet; a page is read only once it nears the view.
 	await waitFor(() => {
-		for (const n of [1, 2, 3]) {
-			expect(pages.get(n)?.getViewport).toHaveBeenCalled()
-		}
+		expect(pages.get(1)?.getViewport).toHaveBeenCalled()
 	})
+	expect(pages.get(2)?.getViewport).not.toHaveBeenCalled()
+	expect(pages.get(3)?.getViewport).not.toHaveBeenCalled()
 }
 
 describe("PdfViewer", () => {
@@ -194,7 +217,7 @@ describe("PdfViewer", () => {
 		expect(screen.getByLabelText("doc.pdf — Page 2 of 3")).toBeTruthy()
 		expect(screen.getByText("Page 1 of 3")).toBeTruthy()
 
-		show(2)
+		await show(2)
 
 		expect(await screen.findByText("Page 2 of 3")).toBeTruthy()
 	})
@@ -205,7 +228,7 @@ describe("PdfViewer", () => {
 			getAnnotations: vi.fn(() => Promise.resolve([{ subtype: "Link", url: "https://example.com/x", rect: [0, 0, 10, 10] }]))
 		})
 		await mount()
-		show(1)
+		await show(1)
 
 		const link = await screen.findByRole("link", { name: "https://example.com/x" })
 		const click = new MouseEvent("click", { bubbles: true, cancelable: true })
@@ -220,7 +243,7 @@ describe("PdfViewer", () => {
 		pages.set(1, fakePage(["alpha beta"]))
 		pages.set(3, fakePage(["beta"]))
 		await mount()
-		show(1)
+		await show(1)
 
 		fireEvent.click(screen.getByRole("button", { name: "Find in document" }))
 		fireEvent.change(await screen.findByRole("searchbox", { name: "Find" }), { target: { value: "beta" } })
@@ -256,11 +279,23 @@ describe("PdfViewer", () => {
 		fireEvent.keyDown(field, { key: "Escape" })
 		expect((field as HTMLInputElement).value).toBe("1")
 
-		show(2)
+		await show(2)
 		fireEvent.click(await screen.findByRole("button", { name: "Last page" }))
 		expect(scrolled.at(-1)).toBe(pageElement(3))
 		fireEvent.click(screen.getByRole("button", { name: "First page" }))
 		expect(scrolled.at(-1)).toBe(pageElement(1))
+	})
+
+	// jsdom lays nothing out: the column must size to its widest page (w-max) so a page zoomed wider than the view
+	// scrolls into reach on both sides, instead of being centred past the scroller's left edge.
+	it("sizes the page column to its widest page so an overflowing page stays reachable", async () => {
+		await mount()
+
+		const column = pageElement(1).parentElement
+
+		expect(column?.classList.contains("w-max")).toBe(true)
+		expect(column?.classList.contains("min-w-full")).toBe(true)
+		expect(column?.classList.contains("items-center")).toBe(true)
 	})
 
 	it("turns the pages from the Rotate group", async () => {
@@ -326,6 +361,19 @@ describe("PdfViewer", () => {
 		expect(document.activeElement).toBe(screen.getByRole("button", { name: "File" }))
 		fireEvent.keyDown(screen.getByRole("button", { name: "File" }), { key: "F6" })
 		expect(document.activeElement).toBe(scroller)
+	})
+
+	it("leaves Left/Right inside the pages to the document instead of the preview's file pager", async () => {
+		await mount()
+
+		const page = document.querySelector<HTMLElement>(".fo-pdf-page")
+		const scroller = page?.closest<HTMLElement>("[tabindex]")
+
+		// The overlay steps to another file on Left/Right unless the target is a text field or a preview surface;
+		// in the pages the keys scroll a zoomed page sideways.
+		expect(isTextEditingTarget(scroller ?? null)).toBe(true)
+		expect(isTextEditingTarget(page ?? null)).toBe(true)
+		expect(isTextEditingTarget(scroller?.parentElement?.parentElement ?? null)).toBe(false)
 	})
 
 	it("goes to the command bar with F6 pressed outside the viewer", async () => {

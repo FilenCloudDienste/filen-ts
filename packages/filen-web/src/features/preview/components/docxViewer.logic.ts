@@ -135,7 +135,7 @@ export function legacyRefusalKey(refusal: DocxLegacyRefusal): DocxErrorKey {
 // their count).
 export type NotConvertedKey =
 	| "previewDocxLegacyShapes"
-	| "previewDocxLegacyGroups"
+	| "previewDocxLegacyGeometry"
 	| "previewDocxLegacyWordArt"
 	| "previewDocxLegacyObjects"
 	| "previewDocxLegacyPictures"
@@ -150,8 +150,8 @@ export function notConvertedKey(kind: DocNotConvertedKind): NotConvertedKey {
 	switch (kind) {
 		case "shape":
 			return "previewDocxLegacyShapes"
-		case "group":
-			return "previewDocxLegacyGroups"
+		case "customGeometry":
+			return "previewDocxLegacyGeometry"
 		case "wordArt":
 			return "previewDocxLegacyWordArt"
 		case "embeddedObject":

@@ -833,7 +833,7 @@ function pdfFaceTerms(family: Record<string, unknown>): string[] {
 	]
 }
 
-/** The Noto families PDF export falls back to for scripts the bundled families lack. */
+/** The Noto families PDF export falls back to for scripts, symbols and math operators the bundled families lack. */
 function officeFallbackFontNotices(fonts: ReturnType<typeof officeFontRecords>): Collected[] {
 	const fallbacks = requireJson(OFFICE_FONTS_MANIFEST)["fallbacks"]
 
@@ -865,7 +865,7 @@ function officeFallbackFontNotices(fonts: ReturnType<typeof officeFontRecords>):
 				repository: source,
 				terms: [
 					[
-						`The ${name} typeface, ${source}, embedded as glyph subsets in PDF files the app exports when their text is in a script the bundled typefaces lack.`,
+						`The ${name} typeface, ${source}, embedded as glyph subsets in PDF files the app exports when their text has a script, symbols or math operators the bundled typefaces lack.`,
 						`Bundled by @filen/office (${OFFICE_REPO_DIR}/assets/fonts in the filen-ts repository, ${FILEN_TS_REPOSITORY}) and served with the app as ${records.map(face => stringField(face, "file", OFFICE_FONTS_MANIFEST)).join(", ")}, fetched only when needed.`,
 						...conversions
 					].join(" "),

@@ -88,9 +88,9 @@ function OutlineMenu({
 							className="whitespace-normal"
 							onClick={() => {
 								if (dest !== null) {
-									void resolveDestination(document, dest).then(page => {
-										if (page !== null) {
-											dispatch({ type: "page.goto", page })
+									void resolveDestination(document, dest).then(to => {
+										if (to !== null) {
+											dispatch({ type: "page.goto", page: to.page, left: to.left, top: to.top })
 										}
 									})
 								}

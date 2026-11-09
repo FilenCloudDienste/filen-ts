@@ -58,6 +58,8 @@ export interface DocxEditingBackend {
 	readonly convertEdited?: ConvertEdited
 	// What the file shows that the package edited leaves out (an RTF's equations), for the PDF's report.
 	readonly untranslated?: number
+	// What makes the document view-only that the package edited does not say (a signed ODT): saved as a new file only.
+	readonly gate?: DocxEditingOptions["gate"]
 }
 
 // `writeUnlocked`: the document's password to modify was given (docxWriteProtection.tsx). `encryption`: it was
@@ -68,7 +70,8 @@ export function docxEditingHost(writeUnlocked = false, encryption?: DocxSealer, 
 		proof: backend?.proof ?? writerProof,
 		writer: backend?.writer ?? { prepare: prepareDocxSave, zipper },
 		writeUnlocked,
-		...(encryption === undefined ? {} : { encryption })
+		...(encryption === undefined ? {} : { encryption }),
+		...(backend?.gate === undefined || backend.gate.length === 0 ? {} : { gate: backend.gate })
 	})
 }
 

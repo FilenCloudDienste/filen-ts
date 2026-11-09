@@ -12,6 +12,11 @@ describe("detectImportNoteType — extension-based, widened to accept text/markd
 		expect(detectImportNoteType("shopping.txt")).toBe("text")
 	})
 
+	it("maps .text to text, not a code note", () => {
+		expect(detectImportNoteType("shopping.text")).toBe("text")
+		expect(importAcceptAttribute()).toContain(".text")
+	})
+
 	it("maps .md and .markdown to md", () => {
 		expect(detectImportNoteType("notes.md")).toBe("md")
 		expect(detectImportNoteType("notes.markdown")).toBe("md")

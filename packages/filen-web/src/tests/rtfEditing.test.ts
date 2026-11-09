@@ -61,8 +61,15 @@ async function body(rtf: Uint8Array): Promise<string> {
 }
 
 describe("RTF editing backend", () => {
-	it("carries what the file shows that its package leaves out (an equation), for the editor's PDF to report", async () => {
+	it("carries what the file shows that its package leaves out (a drawing object), for the editor's PDF to report", async () => {
 		const plain = await editing(RTF)
+		const drawing = await editing(
+			latin1(
+				"{\\rtf1\\ansi\\deff0{\\fonttbl{\\f0 Times New Roman;}}\\pard\\plain Before" +
+					"{\\*\\do\\dobxcolumn\\dobypara\\dodhgt8192\\dprect\\dpx0\\dpy0\\dpxsize100\\dpysize100}\\par\n}"
+			)
+		)
+		// An equation is in the package, as Office Math: nothing to report.
 		const math = await editing(
 			latin1(
 				"{\\rtf1\\ansi\\deff0{\\fonttbl{\\f0 Times New Roman;}}\\pard\\plain Before\\par\n" +
@@ -71,7 +78,8 @@ describe("RTF editing backend", () => {
 		)
 
 		expect(rtfEditingBackend(plain.document, plain.document.prove()).untranslated).toBe(0)
-		expect(rtfEditingBackend(math.document, math.document.prove()).untranslated).toBe(1)
+		expect(rtfEditingBackend(drawing.document, drawing.document.prove()).untranslated).toBe(1)
+		expect(rtfEditingBackend(math.document, math.document.prove()).untranslated).toBe(0)
 	})
 
 	it("saves an untouched document as its own bytes", async () => {

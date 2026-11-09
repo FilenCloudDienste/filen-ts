@@ -44,8 +44,10 @@ const PDFJS: PdfJsDom = { getDocument, GlobalWorkerOptions, PDFDataRangeTranspor
 // needs nothing more.
 const OPTIONS: PdfDocumentOptions = { worker: { kind: "script", src: new URL("pdfjs-dist/build/pdf.worker.mjs", import.meta.url).href } }
 
+// The column grows to its widest page (w-max) and at least fills the view (min-w-full), so narrower pages stay
+// centred while a page zoomed wider than the view overflows to the right only, keeping its left side scrollable.
 const CLASS_NAMES = {
-	column: "flex flex-col items-center gap-4 py-4",
+	column: "flex w-max min-w-full flex-col items-center gap-4 py-4",
 	page: "flex shrink-0 items-center justify-center bg-white shadow-sm",
 	canvas: (rendered: boolean) => (rendered ? "block max-w-full" : "invisible"),
 	link: "rounded-xs focus-ring-row"
@@ -195,24 +197,30 @@ function PdfReader({ document, alt, size }: { document: PdfDomDocument; alt: str
 					setProperties(true)
 				}}
 			/>
-			{/* External links open in a new tab once their domain is trusted. */}
-			<PdfPages
-				pdfjs={PDFJS}
-				{...viewer.pages}
-				className="min-h-0 flex-1 overflow-y-auto outline-none"
-				classNames={CLASS_NAMES}
-				pageLabel={(page, total) => `${alt} — ${t("previewPdfPageIndicator", { current: page, total })}`}
-				placeholder={
-					<LoadingState
-						size="sm"
-						className="absolute inset-0 text-inherit"
-					/>
-				}
-				allowLink={isSafeAbsoluteHref}
-				tabIndex={-1}
-				onClick={linkGate.onClick}
-				onAuxClick={linkGate.onAuxClick}
-			/>
+			{/* A preview surface: arrow keys in the pages scroll the document (sideways on a zoomed page) instead of
+			paging to another file. External links open in a new tab once their domain is trusted. */}
+			<div
+				data-preview-surface=""
+				className="flex min-h-0 flex-1 flex-col"
+			>
+				<PdfPages
+					pdfjs={PDFJS}
+					{...viewer.pages}
+					className="min-h-0 flex-1 overflow-y-auto outline-none [overflow-anchor:none]"
+					classNames={CLASS_NAMES}
+					pageLabel={(page, total) => `${alt} — ${t("previewPdfPageIndicator", { current: page, total })}`}
+					placeholder={
+						<LoadingState
+							size="sm"
+							className="absolute inset-0 text-inherit"
+						/>
+					}
+					allowLink={isSafeAbsoluteHref}
+					tabIndex={-1}
+					onClick={linkGate.onClick}
+					onAuxClick={linkGate.onAuxClick}
+				/>
+			</div>
 			{linkGate.dialog}
 			<PdfPropertiesDialog
 				open={properties}

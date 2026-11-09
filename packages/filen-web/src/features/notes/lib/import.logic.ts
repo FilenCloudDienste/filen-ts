@@ -9,10 +9,10 @@ import { sanitizeRichTextHtml } from "@/features/notes/lib/sanitizeRichText"
 // No File/FileReader here (kept DOM-I/O-free and unit-testable); the impure shell lives in import.ts.
 
 // Extensions the widened import recognizes, checked BEFORE the generic code-extension fallback below:
-// txt -> text, md/markdown -> md, html/htm/html5 -> rich. These three overlap with entries
+// txt/text -> text, md/markdown -> md, html/htm/html5 -> rich. These overlap with entries
 // codeMirrorSupportedExtensions() also recognizes (md and html both have a CodeMirror grammar), so the
 // order here is load-bearing — an imported "notes.md" must become an md note, never a "code" note.
-const TEXT_EXTENSIONS = new Set(["txt"])
+const TEXT_EXTENSIONS = new Set(["txt", "text"])
 const MARKDOWN_EXTENSIONS = new Set(["md", "markdown"])
 const RICH_EXTENSIONS = new Set(["html", "htm", "html5"])
 
