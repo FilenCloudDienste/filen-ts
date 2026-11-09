@@ -14,7 +14,16 @@ import { useTranslation } from "react-i18next"
 import { useLatestRef } from "@/lib/useLatestRef"
 import { useBlocker, type ShouldBlockFn } from "@tanstack/react-router"
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog"
-import { XIcon, ChevronLeftIcon, ChevronRightIcon, DownloadIcon, SaveIcon, MoreHorizontalIcon } from "lucide-react"
+import {
+	XIcon,
+	ChevronLeftIcon,
+	ChevronRightIcon,
+	ChevronDownIcon,
+	DownloadIcon,
+	SaveIcon,
+	MoreHorizontalIcon,
+	PencilIcon
+} from "lucide-react"
 import { toast } from "sonner"
 import { asDirectoryOrFile, driveItemMime, isLinkedEmbedItem, type DriveItem } from "@/features/drive/lib/item"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
@@ -28,20 +37,35 @@ import {
 import { recordContentVerdict } from "@/features/drive/lib/contentVerdicts"
 import { startDownloads } from "@/features/drive/lib/download"
 import {
+	canEditImage,
 	canSaveCopyBeside,
+	imageSaveTimes,
 	isEditable,
 	isTextCategory,
 	isUnresolvableParentError,
 	presentationSaveRefusalKey,
 	runPreviewSave,
 	SaveRefusedError,
+	type ImageSaveEdits,
 	type PresentationSaveEdits,
-	type PresentationSaveSource
+	type PresentationSaveSource,
+	type PreviewSaveDeps
 } from "@/features/drive/lib/previewSave.logic"
 import { currentRootUuid, renameItem, trashItems, deleteItemsPermanently } from "@/features/drive/lib/actions"
 import { followClipboardItem } from "@/features/drive/lib/clipboardSync"
 import { unshareItems } from "@/features/drive/lib/share/actions"
-import { driveListingQueryUpdate } from "@/features/drive/queries/drive"
+import { driveListingQueryUpdate, normalizeParentUuid } from "@/features/drive/queries/drive"
+import { editedCopyName } from "@/features/drive/lib/copyName"
+import { warmUploadThumbnail } from "@/features/drive/lib/thumbGenerators"
+import { splicePhotoSave } from "@/features/photos/queries/photos"
+import { recordOwnSave } from "@/features/preview/lib/ownSaves"
+import { ImageEditor } from "@/features/preview/imageEdit/components/imageEditor"
+import { enterImageEdit, takenNames, type ImageEditState } from "@/features/preview/imageEdit/editSession"
+import { ORIENTATION_REWRITE_UNAVAILABLE } from "@/features/preview/imageEdit/orientationRewrite"
+import { inPlaceFormatByName } from "@/features/preview/imageEdit/lib/targets"
+import type { ImageEditorCommands, ImageExportSource, SaveTarget } from "@/features/preview/imageEdit/types"
+import type { ActionOutcome } from "@/lib/actions/outcome"
+import type { ErrorDTO } from "@/lib/sdk/errors"
 import { DRIVE_DELETE_PERMANENTLY, DRIVE_TRASH, DRIVE_UNSHARE, driveActivity } from "@/features/drive/lib/activity"
 import { runBulkActivity, type BulkActivitySpec } from "@/lib/activity/activity"
 import { type ActivityKeys } from "@/lib/activity/activity.logic"
@@ -52,7 +76,7 @@ import { log } from "@/lib/log"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { holdUnload } from "@/lib/unloadGuard"
 import { SplitTitle } from "@/features/preview/components/splitTitle"
-import { driveItemName } from "@filen/shared"
+import { cn, driveItemName } from "@filen/shared"
 import { ImageViewer, RawImageViewer } from "@/features/preview/components/imageViewer"
 import type { FileVerdict } from "@filen/shared"
 import { MediaViewer } from "@/features/preview/components/mediaViewer"
@@ -92,7 +116,7 @@ import { clearVideoPlaybackStates } from "@/features/preview/lib/videoContinuity
 import { clearPreviewCache, loadPreviewBytes } from "@/features/preview/lib/previewCache"
 import { usePreviewCacheScope } from "@/features/preview/lib/accessMode"
 import { spreadsheetSaveFormat } from "@/features/spreadsheet/lib/fileKind"
-import { usePreviewRemoteChanges } from "@/features/preview/hooks/usePreviewRemoteChanges"
+import { usePreviewRemoteChanges, type PreviewEdits } from "@/features/preview/hooks/usePreviewRemoteChanges"
 import { RemoteChangeDialog } from "@/features/preview/components/remoteChangeDialog"
 import { DriveDropdownMenuContent } from "@/features/drive/components/itemMenu"
 import { type ItemActionDialogKind, type ItemActionId } from "@/features/drive/components/itemMenu.logic"
@@ -104,7 +128,7 @@ import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
 import { Kbd } from "@/lib/keymap/kbd"
 import { Spinner } from "@/components/ui/spinner"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
-import { DropdownMenu, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { isAnyMenuOpen } from "@/lib/keymap/dialogGuard"
 
 // Module scope, not an inline arrow: useBlocker's registration effect lists shouldBlockFn in its own
@@ -238,11 +262,20 @@ export function PreviewOverlay({
 	const docxRef = useRef<DocxSaveSource | null>(null)
 	// The presentation editor's: a save its worker streams to the upload over a port (the deck is never whole here).
 	const presentationRef = useRef<PresentationSaveSource | null>(null)
+	// The image viewer's <img>, whose decoded pixels the image editor starts from; and the open image editor's export
+	// (what a save writes) and commands (the header's Revert).
+	const imageRef = useRef<HTMLImageElement | null>(null)
+	const imageSaveRef = useRef<ImageExportSource | null>(null)
+	const imageCommandsRef = useRef<ImageEditorCommands | null>(null)
 	const cacheScope = usePreviewCacheScope()
 
-	// The open editor's unsaved edits: encoded, or for a deck (never held here as bytes, it may be gigabytes) a save its
-	// session streams to an upload.
-	async function readEdits(): Promise<Uint8Array | PresentationSaveEdits | null> {
+	// The open editor's unsaved edits: encoded, for a deck (never held here as bytes, it may be gigabytes) a save its
+	// session streams to an upload, or an edited image's export.
+	async function readEdits(): Promise<PreviewEdits | null> {
+		if (editing !== null) {
+			return await readImageEdits(editing, imageSaveRef.current, editable)
+		}
+
 		const edits = await readSaveEdits(false)
 
 		return edits === null ? null : "kind" in edits ? edits : edits.bytes
@@ -351,6 +384,37 @@ export function PreviewOverlay({
 		lockedReadOnly?.forUuid !== rawDriveItem.data.uuid
 	// Read-only only because a rename changed the format the open edits would be saved in.
 	const renamedReadOnly = driveItem !== undefined && pin?.editable === true && saveFormat(driveItem) !== pin.format
+	// The image editor's session, for the slot and the version it opened on: another file on screen (a newer version
+	// loaded, the slot gone) leaves edit mode, and the effect below ends the session.
+	const [editState, setEditState] = useState<ImageEditState | null>(null)
+	const editing =
+		editState !== null && rawDriveItem?.data.uuid === editState.frozenUuid && driveItem?.data.uuid === editState.uuid ? editState : null
+
+	if (editState !== null && editing === null) {
+		setEditState(null)
+	}
+
+	// Opening the editor (sniffing, the worker's probe, the source's decode) is under way.
+	const [enteringEdit, setEnteringEdit] = useState(false)
+	const enterAbortRef = useRef<AbortController | null>(null)
+	// The slot shows an image the editor can open (saved in place, or as a copy for a format it cannot write).
+	const imageEditable = driveItem !== undefined && !asText && pin?.category === "image" && canEditImage(driveItem, variant)
+	// The header's Save: a new version where the format is written in place and the slot may be, else the copy.
+	const imagePrimaryTarget: SaveTarget | null =
+		editing === null ? null : editing.targets.primary.kind === "inPlace" && editable ? editing.targets.primary : copyTargetOf(editing)
+
+	// Leaving edit mode, or the overlay, ends the session: the render worker's idle teardown starts then.
+	useEffect(() => {
+		if (editState === null) {
+			return
+		}
+
+		const state = editState
+
+		return () => {
+			state.release()
+		}
+	}, [editState])
 
 	// `ownSave`: `item` is what this overlay's own save of the slot made.
 	function commitSaved(frozenUuid: string, item: DriveItem, ownSave?: boolean): void {
@@ -382,6 +446,73 @@ export function PreviewOverlay({
 	// Newer versions of the pager's files saved elsewhere, and a trash, delete or move of the file on
 	// screen while it holds unsaved edits: shown in place, or asked about (RemoteChangeDialog below).
 	const remote = usePreviewRemoteChanges({ variant, items, index, savedRef, commitSaved, contentRef, readEdits, onItemRemoved })
+
+	// Opens the image on screen in the editor, or says why it cannot. Not while anything else is under way or asked.
+	function startImageEdit(): void {
+		const item = driveItem
+		const raw = rawDriveItem
+
+		if (
+			!imageEditable ||
+			item === undefined ||
+			raw === undefined ||
+			editing !== null ||
+			enteringEdit ||
+			saving ||
+			remote.prompt !== null ||
+			pendingIntent !== null ||
+			menuDialogKind !== null
+		) {
+			return
+		}
+
+		const controller = new AbortController()
+		const slot = `${raw.data.uuid}/${item.data.uuid}`
+
+		enterAbortRef.current?.abort()
+		enterAbortRef.current = controller
+		setEnteringEdit(true)
+
+		void enterImageEdit({ item, frozenUuid: raw.data.uuid, cacheScope, image: imageRef.current, signal: controller.signal }).then(
+			outcome => {
+				if (enterAbortRef.current === controller) {
+					enterAbortRef.current = null
+				}
+
+				// Gone, or another file on screen by now: the session is never shown, so it ends here.
+				if (!mountedRef.current || currentSlotRef.current !== slot) {
+					if (outcome.status === "ready") {
+						outcome.state.release()
+					}
+
+					if (mountedRef.current) {
+						setEnteringEdit(false)
+					}
+
+					return
+				}
+
+				setEnteringEdit(false)
+
+				if (outcome.status === "refused") {
+					toast.error(t(outcome.messageKey))
+				} else if (outcome.status === "ready") {
+					setEditState(outcome.state)
+				}
+			}
+		)
+	}
+
+	// Edits are dropped by the caller's choice (or there were none).
+	function exitImageEdit(): void {
+		setEditState(null)
+		dropPreviewBuffer(contentRef)
+	}
+
+	// The header's Cancel, Escape and Back in edit mode: asks first over unsaved edits.
+	function requestExitImageEdit(): void {
+		requestOrRun("exitEdit", exitImageEdit)
+	}
 
 	// Header item-menu action handlers — every one below only ever runs against `driveItem`/`rawDriveItem`
 	// at the CURRENT slot (the menu is only ever mounted for it, see the header JSX). Rename/favorite
@@ -657,6 +788,18 @@ export function PreviewOverlay({
 		dropPreviewBuffer(contentRef)
 	}, [slotKey])
 
+	// The slot and version on screen, for work that settles later (opening the editor, a copy's Open).
+	const currentSlotRef = useLatestRef(
+		rawDriveItem === undefined || driveItem === undefined ? null : `${rawDriveItem.data.uuid}/${driveItem.data.uuid}`
+	)
+
+	// Opening the editor for a file no longer on screen stops.
+	useEffect(() => {
+		return () => {
+			enterAbortRef.current?.abort()
+		}
+	}, [slotKey])
+
 	useEffect(() => {
 		return () => {
 			usePreviewUnsavedGuardStore.getState().clear()
@@ -668,6 +811,13 @@ export function PreviewOverlay({
 	// route) while the preview stayed up. Registered before the unsaved-changes blocker below so a Back
 	// raises only the close path's own prompt. The close runs through a ref so the blocker registers once.
 	const requestCloseRef = useLatestRef(() => {
+		// In edit mode Back leaves edit mode instead, as the header's Cancel does.
+		if (editing !== null) {
+			requestExitImageEdit()
+
+			return
+		}
+
 		requestOrRun("close", onClose)
 	})
 	const closeOnBack = useCallback<ShouldBlockFn>(
@@ -751,6 +901,11 @@ export function PreviewOverlay({
 	// True when a save started; false when one could not start now (nothing to save, one in flight, a dialog
 	// open...), which an idle autosave tries again later.
 	function performSave(auto = false): boolean {
+		// In edit mode a save is the image's own, never an autosave.
+		if (editing !== null) {
+			return !auto && imagePrimaryTarget !== null && saveImage(imagePrimaryTarget)
+		}
+
 		// Locals, not the outer `driveItem`/`rawDriveItem` directly — this closure runs asynchronously, well
 		// after this render's narrowing; re-binding here gives the guard below its own, freshly-narrowable copy.
 		const targetItem = driveItem
@@ -866,6 +1021,142 @@ export function PreviewOverlay({
 
 		// Last, so a version saved elsewhere after this one is judged against it.
 		remote.saveSettled(outcome.item)
+	}
+
+	// The image editor's saves, with performSave's guards: a new version of the file (in place) or a copy beside it.
+	// Nothing to save until the image was edited.
+	function saveImage(target: SaveTarget): boolean {
+		const state = editing
+		const targetItem = driveItem
+		const targetRawItem = rawDriveItem
+
+		if (
+			state === null ||
+			targetItem === undefined ||
+			targetRawItem === undefined ||
+			!dirty ||
+			saving ||
+			(target.kind === "inPlace" && !editable) ||
+			remote.prompt !== null ||
+			unsavedPromptOpen(pendingIntent, blocker.status === "blocked", logoutRequest !== null) ||
+			menuDialogKind !== null
+		) {
+			return false
+		}
+
+		setSaving(true)
+		remote.saveStarted()
+
+		if (target.kind === "inPlace") {
+			void saveImageInPlace(state, targetItem, targetRawItem, target)
+		} else {
+			void saveImageCopy(targetItem, targetRawItem, target)
+		}
+
+		return true
+	}
+
+	// A new version of the file: shown in the slot as any save is, edit mode left once it landed. A failure keeps the
+	// editor and its edits for another try (or a copy, where the file turned out unwritable).
+	async function saveImageInPlace(
+		state: ImageEditState,
+		targetItem: DriveItem,
+		targetRawItem: DriveItem,
+		target: Extract<SaveTarget, { kind: "inPlace" }>
+	): Promise<void> {
+		const written = await writeImageInPlace(targetItem, target, imageSaveRef.current).catch((e: unknown) => {
+			log.error("preview", "saving the edited image failed", e)
+
+			return null
+		})
+
+		if (written === null) {
+			setSaving(false)
+			remote.saveSettled(null)
+			toast.error(t("previewSaveFailed"))
+
+			return
+		}
+
+		const outcome = written.outcome
+
+		if (outcome.status === "error") {
+			setSaving(false)
+			remote.saveSettled(null)
+			toast.error(errorLabel(outcome.dto))
+
+			if (isUnresolvableParentError(outcome.dto)) {
+				setLockedReadOnly({ forUuid: targetRawItem.data.uuid })
+				toast.warning(t("previewReadOnlyAfterSaveFailure"))
+			}
+
+			return
+		}
+
+		// A slot shown from its held bytes reopens on the saved version from memory; a streamed one streams it.
+		if (state.buffered && written.blob !== null) {
+			await seedSavedImage(cacheScope, outcome.item.data.uuid, written.blob)
+		}
+
+		setSaving(false)
+		commitSaved(targetRawItem.data.uuid, outcome.item, true)
+		followClipboardItem(outcome.item, targetItem.data.uuid)
+		splicePhotoSave(targetItem.data.uuid, outcome.item, "replace")
+		exitImageEdit()
+		remote.saveSettled(outcome.item)
+	}
+
+	// A copy beside the file: never shown in the slot nor followed by the clipboard (the file itself is unchanged);
+	// its toast offers to open it.
+	async function saveImageCopy(
+		targetItem: DriveItem,
+		targetRawItem: DriveItem,
+		target: Extract<SaveTarget, { kind: "copy" }>
+	): Promise<void> {
+		const written = await writeImageCopy(targetItem, target, imageSaveRef.current, number =>
+			number <= 1 ? t("previewImageSaveCopySuffix") : t("previewImageSaveCopySuffixNumbered", { number })
+		).catch((e: unknown) => {
+			log.error("preview", "saving the edited image as a copy failed", e)
+
+			return null
+		})
+
+		setSaving(false)
+
+		if (written === null) {
+			remote.saveSettled(null)
+			toast.error(t("previewSaveFailed"))
+
+			return
+		}
+
+		if (written.outcome.status === "error") {
+			remote.saveSettled(null)
+			toast.error(errorLabel(written.outcome.dto))
+
+			return
+		}
+
+		const copy = written.outcome.item
+		const frozenUuid = targetRawItem.data.uuid
+		const slot = `${frozenUuid}/${targetItem.data.uuid}`
+
+		recordOwnSave(copy.data.uuid)
+		splicePhotoSave(targetItem.data.uuid, copy, "beside")
+		// Left before the newer versions held through the save are judged: nothing unsaved is asked about.
+		exitImageEdit()
+		remote.saveSettled(null)
+		toast.success(t("previewImageSaveSavedAsCopy", { name: written.name }), {
+			action: {
+				label: t("previewImageSaveOpenCopyAction"),
+				onClick: () => {
+					// Only into the slot it was saved from, still on screen, with nothing unsaved there.
+					if (mountedRef.current && currentSlotRef.current === slot) {
+						openSavedCopyRef.current(frozenUuid, copy)
+					}
+				}
+			}
+		})
 	}
 
 	// A deck's save: the session streams the package to the upload over a port while it reads the old file; once the
@@ -985,6 +1276,13 @@ export function PreviewOverlay({
 	// Idle autosave (the Word document editor's, the spreadsheet editor's) runs the same save, with its guards, as it
 	// stands now.
 	const performSaveRef = useLatestRef(performSave)
+	// A saved copy's Open, as things stand when it is clicked: not over edits or a save.
+	const openSavedCopyRef = useLatestRef((frozenUuid: string, copy: DriveItem) => {
+		if (editing === null && !dirty && !saving) {
+			commitSaved(frozenUuid, copy)
+		}
+	})
+	const startImageEditRef = useLatestRef(startImageEdit)
 	// A save asked for while one was in flight (a second Mod+S, an autosave meeting one), and whether only autosaves
 	// asked: run once that one settles and the file is still dirty, so no request is dropped with the deck left dirty.
 	const saveAgainRef = useRef<boolean | null>(null)
@@ -1021,8 +1319,26 @@ export function PreviewOverlay({
 			performSave()
 		},
 		IN_EDITORS_AND_FIELDS,
-		[editable, dirty, saving, driveItem, rawDriveItem, remote.prompt, pendingIntent, blocker.status, logoutRequest, menuDialogKind]
+		[
+			editable,
+			dirty,
+			saving,
+			driveItem,
+			rawDriveItem,
+			remote.prompt,
+			pendingIntent,
+			blocker.status,
+			logoutRequest,
+			menuDialogKind,
+			editing,
+			imagePrimaryTarget
+		]
 	)
+
+	// A no-op unless the slot shows an image the editor opens (startImageEdit's guards).
+	useAction("preview.editImage", () => {
+		startImageEditRef.current()
+	})
 
 	// Routes a close/prev/next intent through the unsaved-changes prompt whenever the buffer is dirty;
 	// runs it immediately otherwise. Every dismissal route (Escape, backdrop, the X button — all three
@@ -1095,6 +1411,14 @@ export function PreviewOverlay({
 			return
 		}
 
+		// In edit mode (no close button, the header's Cancel instead) Escape leaves edit mode, not the preview.
+		if (!next && editing !== null) {
+			details.cancel()
+			requestExitImageEdit()
+
+			return
+		}
+
 		if (!next) {
 			requestOrRun("close", onClose)
 		}
@@ -1134,6 +1458,11 @@ export function PreviewOverlay({
 	// BEFORE that internal stopPropagation — this is that handler, mirroring moveTargetDialog.tsx's own
 	// local onKeyDown for the identical in-dialog-focus-trap reason.
 	function handleKeyDown(event: KeyboardEvent<HTMLDivElement>): void {
+		// The image editor takes its own keys; nothing pages away from it.
+		if (editing !== null) {
+			return
+		}
+
 		// A focused media scrubber wins over the pager — native seek expectation (see isMediaTarget
 		// above). A focused CodeMirror surface wins too — its own arrow bindings move the cursor/
 		// selection and never stopPropagation, so without this a Left/Right meant for the caret would
@@ -1211,6 +1540,8 @@ export function PreviewOverlay({
 			onStep(1)
 		} else if (actions.intent === "replace") {
 			pendingReplaceRef.current?.()
+		} else if (actions.intent === "exitEdit") {
+			exitImageEdit()
 		}
 
 		pendingReplaceRef.current = null
@@ -1241,118 +1572,226 @@ export function PreviewOverlay({
 					ref={popupRef}
 					onBlur={handlePopupBlur}
 					onKeyDown={handleKeyDown}
-					className="fixed inset-0 z-50 flex flex-col bg-background duration-100 outline-none data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0"
+					className={cn(
+						"fixed inset-0 z-50 flex flex-col bg-background duration-100 outline-none data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0",
+						// Edit mode is a darkroom in either app theme, its header included (see ImageEditor).
+						editing !== null && "dark bg-canvas text-foreground scheme-dark"
+					)}
 				>
 					{/* Window chrome on desktop: below the Windows/Linux controls band, clear of the macOS lights. */}
 					<header className="flex h-[calc(3.5rem+var(--window-inset-top))] shrink-0 items-center gap-1 px-4 pt-(--window-inset-top) pl-[max(1rem,var(--window-inset-left))] app-region-chrome">
-						<PreviewName name={name} />
-						{editable && dirty ? (
-							<TooltipIconButton
-								label={t("previewSaveAction")}
-								disabled={saving}
-								shortcut={<Kbd action="preview.save" />}
-								onClick={() => {
-									performSave()
-								}}
-							>
-								{saving ? <Spinner className="size-4" /> : <SaveIcon />}
-							</TooltipIconButton>
-						) : null}
-						<Button
-							variant="ghost"
-							size="icon-sm"
-							disabled={index <= 0 || saving}
-							aria-label={t("previewPreviousAction")}
-							onClick={() => {
-								requestOrRun("prev", () => {
-									onStep(-1)
-								})
-							}}
-						>
-							<ChevronLeftIcon />
-						</Button>
-						<Button
-							variant="ghost"
-							size="icon-sm"
-							disabled={index >= items.length - 1 || saving}
-							aria-label={t("previewNextAction")}
-							onClick={() => {
-								requestOrRun("next", () => {
-									onStep(1)
-								})
-							}}
-						>
-							<ChevronRightIcon />
-						</Button>
-						{download !== null ? (
-							<Button
-								variant="ghost"
-								size="icon-sm"
-								disabled={!isOnline}
-								aria-label={t("previewDownloadAction")}
-								title={!isOnline ? t("common:offlineActionDisabled") : undefined}
-								onClick={download}
-							>
-								<DownloadIcon />
-							</Button>
-						) : null}
-						{/* Never for a chat/note embed's fabricated linked-file item (isLinkedEmbedItem). Same
+						{editing !== null && imagePrimaryTarget !== null ? (
+							<>
+								{/* Equal-growing sides keep the name centred over the picture. */}
+								<div className="flex flex-1 basis-0 items-center">
+									<Button
+										variant="ghost"
+										size="sm"
+										disabled={saving}
+										onClick={requestExitImageEdit}
+									>
+										{t("previewImageSaveCancelAction")}
+									</Button>
+								</div>
+								{/* Named for assistive tech only at phone width, where the actions need the whole row. */}
+								<DialogPrimitive.Title className="flex min-w-0 shrink justify-center px-2 font-heading text-sm font-medium max-sm:sr-only">
+									<SplitTitle
+										text={name}
+										tailLength={16}
+									/>
+								</DialogPrimitive.Title>
+								<div className="flex flex-1 basis-0 items-center justify-end gap-1">
+									<Button
+										variant="ghost"
+										size="sm"
+										disabled={!dirty || saving}
+										onClick={() => {
+											imageCommandsRef.current?.revert()
+										}}
+									>
+										{t("previewImageSaveRevertAction")}
+									</Button>
+									{/* A copy is the other way to save where the primary writes in place; a copy-only format has just the one. */}
+									<div className="flex items-center">
+										<Button
+											size="sm"
+											disabled={!dirty || saving}
+											className={cn(imagePrimaryTarget.kind === "inPlace" && "rounded-r-none")}
+											onClick={() => {
+												saveImage(imagePrimaryTarget)
+											}}
+										>
+											{saving ? <Spinner data-icon="inline-start" /> : null}
+											{t(imageSaveLabelKey(imagePrimaryTarget))}
+										</Button>
+										{imagePrimaryTarget.kind === "inPlace" ? (
+											<DropdownMenu>
+												<DropdownMenuTrigger
+													render={
+														<Button
+															size="icon-sm"
+															disabled={!dirty || saving}
+															aria-label={t("previewImageSaveMoreAction")}
+															className="rounded-l-none border-l-primary-foreground/20"
+														/>
+													}
+												>
+													<ChevronDownIcon />
+												</DropdownMenuTrigger>
+												{/* Portaled outside the darkroom subtree: dark on its own. */}
+												<DropdownMenuContent
+													align="end"
+													className="dark scheme-dark"
+												>
+													<DropdownMenuItem
+														onClick={() => {
+															saveImage(copyTargetOf(editing))
+														}}
+													>
+														{t("previewImageSaveAsCopyAction")}
+													</DropdownMenuItem>
+												</DropdownMenuContent>
+											</DropdownMenu>
+										) : null}
+									</div>
+								</div>
+							</>
+						) : (
+							<>
+								<PreviewName name={name} />
+
+								{imageEditable ? (
+									<TooltipIconButton
+										label={t("previewImageSaveEditAction")}
+										disabled={enteringEdit || saving}
+										shortcut={<Kbd action="preview.editImage" />}
+										onClick={startImageEdit}
+									>
+										{enteringEdit ? <Spinner className="size-4" /> : <PencilIcon />}
+									</TooltipIconButton>
+								) : null}
+								{editable && dirty ? (
+									<TooltipIconButton
+										label={t("previewSaveAction")}
+										disabled={saving}
+										shortcut={<Kbd action="preview.save" />}
+										onClick={() => {
+											performSave()
+										}}
+									>
+										{saving ? <Spinner className="size-4" /> : <SaveIcon />}
+									</TooltipIconButton>
+								) : null}
+								<Button
+									variant="ghost"
+									size="icon-sm"
+									disabled={index <= 0 || saving}
+									aria-label={t("previewPreviousAction")}
+									onClick={() => {
+										requestOrRun("prev", () => {
+											onStep(-1)
+										})
+									}}
+								>
+									<ChevronLeftIcon />
+								</Button>
+								<Button
+									variant="ghost"
+									size="icon-sm"
+									disabled={index >= items.length - 1 || saving}
+									aria-label={t("previewNextAction")}
+									onClick={() => {
+										requestOrRun("next", () => {
+											onStep(1)
+										})
+									}}
+								>
+									<ChevronRightIcon />
+								</Button>
+								{download !== null ? (
+									<Button
+										variant="ghost"
+										size="icon-sm"
+										disabled={!isOnline}
+										aria-label={t("previewDownloadAction")}
+										title={!isOnline ? t("common:offlineActionDisabled") : undefined}
+										onClick={download}
+									>
+										<DownloadIcon />
+									</Button>
+								) : null}
+								{/* Never for a chat/note embed's fabricated linked-file item (isLinkedEmbedItem). Same
 						descriptor list + dropdown renderer the tile/row faces' own ⋯ trigger uses (itemMenu.tsx),
 						just with "download" hidden (the button above already covers it) and the two extra
 						"direct"-outcome hooks wired into this overlay's own per-slot `saved` override / pager
 						housekeeping — see previewMenuHiddenActionIds and the handleMenu* functions above. */}
-						{!isLinkedEmbedItem(driveItem) ? (
-							<DropdownMenu>
-								<DropdownMenuTrigger
+								{!isLinkedEmbedItem(driveItem) ? (
+									<DropdownMenu>
+										<DropdownMenuTrigger
+											render={
+												<Button
+													variant="ghost"
+													size="icon-sm"
+													aria-label={t("drive:driveItemMenuTrigger")}
+												>
+													<MoreHorizontalIcon />
+												</Button>
+											}
+										/>
+										<DriveDropdownMenuContent
+											item={driveItem}
+											variant={variant}
+											onItemAction={kind => {
+												// The move and version-restore dialogs report no outcome, so their echo, whenever it
+												// comes, takes the mark; a mark left by a cancelled dialog only quiets a later
+												// notice of the same kind.
+												if (kind === "move" || kind === "versions") {
+													remote.expectOwnChange(driveItem.data.uuid, kind === "move" ? "move" : "restore")
+												}
+
+												setMenuDialogKind(kind)
+											}}
+											onFavoriteToggled={handleMenuFavoriteToggled}
+											onRestored={handleMenuRestored}
+											hiddenActionIds={previewMenuHiddenActionIds(
+												hiddenMenuActionIds,
+												previewDownloadable(downloadable, variant)
+											)}
+											compressParentNaming={compressParentNaming}
+										/>
+									</DropdownMenu>
+								) : null}
+								<DialogPrimitive.Close
 									render={
 										<Button
 											variant="ghost"
 											size="icon-sm"
-											aria-label={t("drive:driveItemMenuTrigger")}
-										>
-											<MoreHorizontalIcon />
-										</Button>
+											aria-label={t("common:close")}
+										/>
 									}
-								/>
-								<DriveDropdownMenuContent
-									item={driveItem}
-									variant={variant}
-									onItemAction={kind => {
-										// The move and version-restore dialogs report no outcome, so their echo, whenever it
-										// comes, takes the mark; a mark left by a cancelled dialog only quiets a later
-										// notice of the same kind.
-										if (kind === "move" || kind === "versions") {
-											remote.expectOwnChange(driveItem.data.uuid, kind === "move" ? "move" : "restore")
-										}
-
-										setMenuDialogKind(kind)
-									}}
-									onFavoriteToggled={handleMenuFavoriteToggled}
-									onRestored={handleMenuRestored}
-									hiddenActionIds={previewMenuHiddenActionIds(
-										hiddenMenuActionIds,
-										previewDownloadable(downloadable, variant)
-									)}
-									compressParentNaming={compressParentNaming}
-								/>
-							</DropdownMenu>
-						) : null}
-						<DialogPrimitive.Close
-							render={
-								<Button
-									variant="ghost"
-									size="icon-sm"
-									aria-label={t("common:close")}
-								/>
-							}
-						>
-							<XIcon />
-						</DialogPrimitive.Close>
+								>
+									<XIcon />
+								</DialogPrimitive.Close>
+							</>
+						)}
 					</header>
 					<div className="min-h-0 flex-1">
 						<ArchiveListingScope>
 							{/* Mid-run (a held arrow key) the slots stepped through show only their header. */}
-							{!slotSettled ? (
+							{editing !== null ? (
+								<PreviewErrorBoundary key={`edit:${editing.uuid}`}>
+									<ImageEditor
+										source={editing.source}
+										info={editing.info}
+										locked={saving}
+										onDirtyChange={setPreviewDirty}
+										saveRef={imageSaveRef}
+										commandsRef={imageCommandsRef}
+										session={editing.session}
+										capabilities={editing.capabilities}
+									/>
+								</PreviewErrorBoundary>
+							) : !slotSettled ? (
 								<PreviewLoading />
 							) : (
 								<PreviewErrorBoundary key={slotKey}>
@@ -1380,6 +1819,7 @@ export function PreviewOverlay({
 															spreadsheetRef={spreadsheetRef}
 															docxRef={docxRef}
 															presentationRef={presentationRef}
+															imageRef={imageRef}
 															onSave={() => performSaveRef.current()}
 															onAutosave={() => performSaveRef.current(true)}
 															canSaveCopy={canSaveCopyBeside(driveItem, variant)}
@@ -1453,7 +1893,7 @@ export function PreviewOverlay({
 							onLoadTheirs={remote.loadTheirs}
 							// Without a save source (a read-only viewer) there is nothing to write: not offered.
 							onSaveMineAsNew={
-								editable
+								editable || editing !== null
 									? () => {
 											void remote.saveMineAsNewFile()
 										}
@@ -1466,6 +1906,176 @@ export function PreviewOverlay({
 			</DialogPrimitive.Portal>
 		</DialogPrimitive.Root>
 	)
+}
+
+// The edited image as a copy in the format saveTargets chose for one.
+function copyTargetOf(state: ImageEditState): Extract<SaveTarget, { kind: "copy" }> {
+	const copy = state.targets.copy
+
+	if (copy.kind === "copy") {
+		return copy
+	}
+
+	return state.info.hasAlpha
+		? { kind: "copy", mime: "image/png", extension: "png" }
+		: { kind: "copy", mime: "image/jpeg", extension: "jpg" }
+}
+
+function imageSaveLabelKey(
+	target: SaveTarget
+): "previewImageSaveSaveAction" | "previewImageSaveAsPngCopyAction" | "previewImageSaveAsJpegCopyAction" {
+	if (target.kind === "inPlace") {
+		return "previewImageSaveSaveAction"
+	}
+
+	return target.mime === "image/png" ? "previewImageSaveAsPngCopyAction" : "previewImageSaveAsJpegCopyAction"
+}
+
+// An edited image's upload: its Blob streamed by the SDK worker (the drive's thumbnail then made from that Blob, no
+// download), or the original streamed back with a new Exif Orientation.
+function imageSaveDeps(): PreviewSaveDeps {
+	return {
+		uploadFileBytes: (parentUuid, data, name, mime, options) => sdkApi.uploadFileBytes(parentUuid, data, name, mime, options),
+		uploadFileBlob: (parentUuid, blob, name, mime, options) =>
+			sdkApi.uploadFileFromBlob(parentUuid, blob, name, mime, options).then(file => {
+				warmUploadThumbnail(file, new File([blob], name, { type: blob.type }))
+
+				return file
+			}),
+		rewriteOrientation: (file, orientation, parentUuid, name, mime, options) =>
+			sdkApi.rewriteJpegOrientation(file, orientation, parentUuid, name, mime, options),
+		patchListing: driveListingQueryUpdate,
+		rootUuid: currentRootUuid()
+	}
+}
+
+type ImageExport = Awaited<ReturnType<ImageExportSource>>
+
+async function exportImage(source: ImageExportSource | null, target: SaveTarget): Promise<ImageExport | null> {
+	if (source === null) {
+		return null
+	}
+
+	return await source(target).catch((e: unknown) => {
+		log.error("preview", "exporting the edited image failed", e)
+
+		return null
+	})
+}
+
+function rewriteUnavailable(dto: ErrorDTO): boolean {
+	return dto.species === "plain" && dto.message.startsWith(ORIENTATION_REWRITE_UNAVAILABLE)
+}
+
+// A new version of the file in its own format: the export, or for a JPEG only turned or flipped its Orientation
+// rewritten in the file itself, re-encoded after all when that cannot be done. `blob`: what was uploaded, if a Blob.
+// Null when there was nothing to upload (the export failed).
+async function writeImageInPlace(
+	item: DriveItem,
+	target: Extract<SaveTarget, { kind: "inPlace" }>,
+	source: ImageExportSource | null
+): Promise<{ outcome: ActionOutcome<DriveItem>; blob: Blob | null } | null> {
+	const exported = await exportImage(source, target)
+
+	if (exported === null) {
+		return null
+	}
+
+	const times = imageSaveTimes(item, Date.now())
+	const deps = imageSaveDeps()
+
+	if (exported.geometryOnly !== null) {
+		const rewritten = await runPreviewSave(deps, {
+			item,
+			content: { orientation: exported.geometryOnly.orientation },
+			times,
+			mime: target.mime
+		})
+
+		if (rewritten.status === "success" || !rewriteUnavailable(rewritten.dto)) {
+			return { outcome: rewritten, blob: null }
+		}
+
+		// The same JPEG encode a copy gets, uploaded in place.
+		const reencoded = (await exportImage(source, { kind: "copy", mime: "image/jpeg", extension: "jpg" }))?.blob ?? null
+
+		if (reencoded === null) {
+			return null
+		}
+
+		return { outcome: await runPreviewSave(deps, { item, content: { blob: reencoded }, times, mime: target.mime }), blob: reencoded }
+	}
+
+	const blob = exported.blob
+
+	if (blob === null) {
+		return null
+	}
+
+	return { outcome: await runPreviewSave(deps, { item, content: { blob }, times, mime: target.mime }), blob }
+}
+
+// A copy beside the file, named "photo (edited).jpg" (or the first such name free) from one read of the directory's
+// names, and typed by the SDK from that name.
+async function writeImageCopy(
+	item: DriveItem,
+	target: Extract<SaveTarget, { kind: "copy" }>,
+	source: ImageExportSource | null,
+	suffix: (number: number) => string
+): Promise<{ outcome: ActionOutcome<DriveItem>; name: string } | null> {
+	const blob = (await exportImage(source, target))?.blob ?? null
+	const base = asDirectoryOrFile(item)
+
+	if (blob === null || base.type !== "file") {
+		return null
+	}
+	const rootUuid = currentRootUuid()
+	const taken = await takenNames(normalizeParentUuid(base.data.parent, rootUuid))
+	const name = editedCopyName(driveItemName(base), target.extension, suffix, taken)
+	const outcome = await runPreviewSave(imageSaveDeps(), {
+		item,
+		content: { blob },
+		asNewFile: name,
+		mime: "",
+		times: imageSaveTimes(item, Date.now())
+	})
+
+	return { outcome, name }
+}
+
+// The edited image for the remote-change dialog's "save mine as new": as the header's Save would write it, or
+// re-encoded where that is the lossless rewrite of the file itself (a new file has no file to rewrite).
+async function readImageEdits(state: ImageEditState, source: ImageExportSource | null, inPlace: boolean): Promise<ImageSaveEdits | null> {
+	const target = inPlace && state.targets.primary.kind === "inPlace" ? state.targets.primary : copyTargetOf(state)
+	const exported = await exportImage(source, target)
+
+	if (exported === null) {
+		return null
+	}
+
+	if (exported.blob !== null) {
+		return {
+			kind: "blob",
+			blob: exported.blob,
+			extension: target.kind === "copy" && target.mime !== state.info.mime ? target.extension : null
+		}
+	}
+
+	const copy = copyTargetOf(state)
+	const encoded = (await exportImage(source, copy))?.blob ?? null
+
+	if (encoded === null) {
+		return null
+	}
+
+	return { kind: "blob", blob: encoded, extension: copy.mime !== state.info.mime ? copy.extension : null }
+}
+
+// Keeps a saved image's bytes for the preview of the version it made, read from the Blob that was uploaded.
+async function seedSavedImage(cacheScope: string | null, uuid: string, blob: Blob): Promise<void> {
+	await loadPreviewBytes(cacheScope, uuid, blob.size, async () => new Uint8Array(await blob.arrayBuffer())).catch((e: unknown) => {
+		log.warn("preview", "keeping the saved image's bytes failed", e)
+	})
 }
 
 // Middle-ish ellipsis for a long filename: the head truncates with a CSS ellipsis while the tail
@@ -1514,6 +2124,11 @@ function saveFormat(item: DriveItem): string {
 
 	if (category === "docx") {
 		return `docx:${extensionOf(driveItemName(item))}`
+	}
+
+	// An image saves in place in the format its name says (a rename to another leaves the editor saving copies only).
+	if (category === "image") {
+		return `image:${inPlaceFormatByName(driveItemName(item)) ?? ""}`
 	}
 
 	// A deck saves as the package it opened as (a template stays a template, a show a show).
@@ -1578,6 +2193,8 @@ interface PreviewBodyProps {
 	docxRef: RefObject<DocxSaveSource | null>
 	// The presentation editor's save source (its session streams each save to the upload).
 	presentationRef: RefObject<PresentationSaveSource | null>
+	// The image viewer's shown <img> (the image editor starts from its pixels).
+	imageRef: RefObject<HTMLImageElement | null>
 	// A save the user asked for in the viewer (a deck's File ▸ Save); true when one started.
 	onSave: () => boolean
 	// Idle autosave asks the overlay to save; true when a save started.
@@ -1615,6 +2232,7 @@ function PreviewBody({
 	spreadsheetRef,
 	docxRef,
 	presentationRef,
+	imageRef,
 	onSave,
 	onAutosave,
 	onOpenFile,
@@ -1645,6 +2263,7 @@ function PreviewBody({
 				<ImageViewer
 					item={item}
 					alt={alt}
+					imageRef={imageRef}
 				/>
 			)
 		case "video":

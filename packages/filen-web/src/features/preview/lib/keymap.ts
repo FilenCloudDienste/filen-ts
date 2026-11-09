@@ -13,6 +13,8 @@ import type { ActionDef } from "@/lib/keymap/registry"
 // Firefox keeps Ctrl+Shift+P for a private window.
 export const PREVIEW_ACTIONS: readonly ActionDef[] = [
 	{ id: "preview.save", defaultCombo: "mod+s", scope: "editor", descriptionKey: "preview:previewSaveAction" },
+	// The image on screen into editing mode; outside a text field, as a bare letter.
+	{ id: "preview.editImage", defaultCombo: "e", scope: "editor", descriptionKey: "preview:previewImageSaveEditShortcut" },
 	{ id: "editor.find", defaultCombo: "mod+f", scope: "editor", descriptionKey: "preview:previewEditorFind" },
 	{ id: "editor.replace", defaultCombo: "mod+alt+f", scope: "editor", descriptionKey: "preview:previewEditorReplace" },
 	{ id: "editor.bold", defaultCombo: "mod+b", scope: "editor", descriptionKey: "preview:previewEditorBold" },
@@ -20,5 +22,8 @@ export const PREVIEW_ACTIONS: readonly ActionDef[] = [
 	{ id: "editor.strikethrough", defaultCombo: "mod+shift+x", scope: "editor", descriptionKey: "preview:previewEditorStrikethrough" },
 	{ id: "editor.code", defaultCombo: "mod+e", scope: "editor", descriptionKey: "preview:previewEditorCode" },
 	{ id: "editor.link", defaultCombo: "mod+k", scope: "editor", descriptionKey: "preview:previewEditorLink" },
-	{ id: "editor.togglePreview", defaultCombo: "mod+shift+v", scope: "editor", descriptionKey: "preview:previewEditorTogglePreview" }
+	{ id: "editor.togglePreview", defaultCombo: "mod+shift+v", scope: "editor", descriptionKey: "preview:previewEditorTogglePreview" },
+	// The image editor matches these on its own keydown and in its layer (imageEditor.tsx).
+	{ id: "preview.imageUndo", defaultCombo: "mod+z", scope: "editor", descriptionKey: "preview:previewImageEditKeyUndo" },
+	{ id: "preview.imageRedo", defaultCombo: "mod+y,mod+shift+z", scope: "editor", descriptionKey: "preview:previewImageEditKeyRedo" }
 ]

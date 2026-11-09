@@ -71,7 +71,11 @@ function giveBack(heic: PooledWorker): void {
 	freeWorkers.push(heic)
 }
 
-async function transferToWorker(take: () => Uint8Array, signal: AbortSignal | undefined): Promise<Blob> {
+async function onWorker<T>(
+	take: () => Uint8Array,
+	signal: AbortSignal | undefined,
+	run: (remote: Comlink.Remote<HeicWorkerApi>, bytes: Uint8Array) => Promise<T>
+): Promise<T> {
 	const heic = await takeWorker()
 
 	try {
@@ -79,10 +83,14 @@ async function transferToWorker(take: () => Uint8Array, signal: AbortSignal | un
 
 		const bytes = take()
 
-		return await heic.use(({ remote }) => remote.transform(Comlink.transfer(bytes, [bytes.buffer])))
+		return await heic.use(({ remote }) => run(remote, Comlink.transfer(bytes, [bytes.buffer])))
 	} finally {
 		giveBack(heic)
 	}
+}
+
+async function transferToWorker(take: () => Uint8Array, signal: AbortSignal | undefined): Promise<Blob> {
+	return await onWorker(take, signal, (remote, bytes) => remote.transform(bytes))
 }
 
 // The one entry point for both HEIC callers — decode + JPEG re-encode run off the main thread in the
@@ -108,6 +116,19 @@ export async function transformHeicBytes(bytes: Uint8Array, signal?: AbortSignal
 // detached), sparing a second full copy of the file.
 export async function transformHeicBytesOwned(bytes: Uint8Array): Promise<Blob> {
 	return await transferToWorker(() => bytes, undefined)
+}
+
+// The image editor's HEIC source: full-resolution RGBA (transferred back) and whether it has alpha. A private copy of
+// `bytes` crosses, as for transformHeicBytes: the preview's cache keeps its own.
+export async function decodeHeicRgba(
+	bytes: Uint8Array,
+	signal?: AbortSignal
+): Promise<{ width: number; height: number; data: Uint8ClampedArray<ArrayBuffer>; hasAlpha: boolean }> {
+	return await onWorker(
+		() => bytes.slice(),
+		signal,
+		(remote, copy) => remote.decodeRgba(copy)
+	)
 }
 
 // Logout: nothing of the previous session's photos should outlive it in a worker's heap.

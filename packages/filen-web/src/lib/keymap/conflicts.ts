@@ -81,6 +81,12 @@ export const RESOLVED_COLLISIONS: readonly (readonly [string, string])[] = [
 	["presentation.show.end", "photos.clearSelection"],
 	["presentation.show.end", "chats.clearSelection"],
 	["presentation.show.end", "notes.clearSelection"],
+	// The image editor and the presentation editor are both bodies of the preview overlay, which shows one file at a
+	// time, so their undo and redo are never mounted together.
+	["preview.imageUndo", "presentation.undo"],
+	["preview.imageRedo", "presentation.redo"],
+	// E opens the image on screen in the editor and does nothing over a deck; the running show takes it on its stage.
+	["preview.editImage", "presentation.show.eraseAll"],
 	// Backspace goes back a slide only in the running show, whose stage and presenter view stop every key they take.
 	["presentation.show.previous", "drive.trash"],
 	["presentation.show.previous", "photos.trash"],

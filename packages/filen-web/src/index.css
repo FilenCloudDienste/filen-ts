@@ -148,6 +148,7 @@
     --color-chat-link: var(--chat-link);
     --color-warning: var(--warning);
     --color-warning-foreground: var(--warning-foreground);
+    --color-edit-modified: var(--edit-modified);
     --radius-sm: calc(var(--radius) * 0.6);
     --radius-md: calc(var(--radius) * 0.8);
     --radius-lg: var(--radius);
@@ -218,6 +219,9 @@
     /* Thin overlay scrollbar thumb, tuned per theme (index.css base layer below). */
     --scrollbar-thumb: oklch(0 0 0 / 15%);
     --scrollbar-thumb-hover: oklch(0 0 0 / 28%);
+    /* Image editor: marks a setting moved off its neutral value (a slider's fill, its value, its section's dot).
+       The editor always runs under .dark, so one shade serves both app themes. */
+    --edit-modified: oklch(0.82 0.15 75);
 }
 
 .dark {

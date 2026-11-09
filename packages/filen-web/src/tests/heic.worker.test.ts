@@ -19,13 +19,13 @@ import type { HeicWorkerApi } from "@/features/preview/workers/heic.worker"
 // leaking into the next.
 async function exposeOverChannel(deps: HeicTransformDeps): Promise<{ remote: Comlink.Remote<HeicWorkerApi>; close: () => void }> {
 	vi.resetModules()
-	const { runHeicTransform } = await import("@/features/preview/lib/heicCodec")
+	const { runHeicDecodeRgba, runHeicTransform } = await import("@/features/preview/lib/heicCodec")
 
 	const { port1, port2 } = new MessageChannel()
 	port1.start()
 	port2.start()
 
-	const api: HeicWorkerApi = { transform: bytes => runHeicTransform(bytes, deps) }
+	const api: HeicWorkerApi = { transform: bytes => runHeicTransform(bytes, deps), decodeRgba: bytes => runHeicDecodeRgba(bytes, deps) }
 
 	Comlink.expose(api, port1)
 

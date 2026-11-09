@@ -7,7 +7,8 @@ import { isMediaStreamAvailable } from "@/features/preview/lib/previewStream"
 import { streamFailureAction } from "@/features/drive/lib/preview.logic"
 import { usePreviewBytes } from "@/features/preview/hooks/usePreviewBytes"
 import { usePreviewStreamUrl } from "@/features/preview/hooks/usePreviewStreamUrl"
-import { usePreviewAccessMode, usePreviewByteSource } from "@/features/preview/lib/accessMode"
+import { usePreviewAccessMode, usePreviewByteSource, usePreviewCacheScope } from "@/features/preview/lib/accessMode"
+import { getPreviewBytes } from "@/features/preview/lib/previewCache"
 import { useObjectUrl } from "@/lib/useObjectUrl"
 import { PreviewErrorState, PreviewGate, PreviewLoading } from "@/features/preview/components/previewErrorState"
 
@@ -125,8 +126,11 @@ export function StreamablePreview({ item, render }: { item: DriveItem; render: R
 	// a byte source (an archive's entry), which is no file the worker could read.
 	const accessMode = usePreviewAccessMode()
 	const byteSource = usePreviewByteSource()
+	const cacheScope = usePreviewCacheScope()
 	const streamable = contentType !== null && isMediaStreamAvailable() && accessMode === "authed" && byteSource === null
-	const [useBuffered, setUseBuffered] = useState(!streamable)
+	// Bytes already held (a revisited buffered slot, an edited image just saved) show from memory: streaming them
+	// would download the file again.
+	const [useBuffered, setUseBuffered] = useState(() => !streamable || getPreviewBytes(cacheScope, item.data.uuid) !== undefined)
 
 	if (!useBuffered && contentType !== null) {
 		return (

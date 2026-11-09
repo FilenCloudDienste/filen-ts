@@ -26,6 +26,8 @@ export interface DecodedHeicImage {
 interface HeicImage {
 	get_width: () => number
 	get_height: () => number
+	// Absent from some libheif builds; then the image is taken as opaque.
+	has_alpha_channel?: () => boolean
 	display: (target: DecodedHeicImage, callback: (result: unknown) => void) => void
 	free: () => void
 }
@@ -77,7 +79,7 @@ async function getSharedDecoder(getDecoder: HeicTransformDeps["getDecoder"]): Pr
 // Orientation is already applied: libheif bakes the container's own EXIF/orientation transform into the
 // decoded pixels, so nothing downstream ever re-rotates. Only the first top-level image is read — a
 // burst/Live Photo container decodes multiple, but this is a single still preview, not a burst viewer.
-async function decodeHeic(bytes: Uint8Array, lib: HeicDecoderModule): Promise<DecodedHeicImage> {
+async function decodeHeic(bytes: Uint8Array, lib: HeicDecoderModule): Promise<DecodedHeicImage & { hasAlpha: boolean }> {
 	const decoder = new lib.HeifDecoder()
 	// decode() can allocate its heif_context before it throws, so both the call and the empty-result
 	// check right after need to stay inside this try — otherwise an undecodable file's context never
@@ -101,6 +103,7 @@ async function decodeHeic(bytes: Uint8Array, lib: HeicDecoderModule): Promise<De
 		}
 
 		const target = { width, height, data: new Uint8ClampedArray(width * height * 4) }
+		const hasAlpha = image.has_alpha_channel?.() === true
 
 		await new Promise<void>((resolve, reject) => {
 			image.display(target, result => {
@@ -114,7 +117,7 @@ async function decodeHeic(bytes: Uint8Array, lib: HeicDecoderModule): Promise<De
 			})
 		})
 
-		return target
+		return { ...target, hasAlpha }
 	} finally {
 		for (const image of images) {
 			image.free()
@@ -190,5 +193,20 @@ export async function runHeicTransform(bytes: Uint8Array, deps: HeicTransformDep
 		log.error("heic-decode", e)
 
 		throw new Error("heic transform failed", { cause: e })
+	}
+}
+
+// The editor's source: the full-resolution RGBA (orientation applied, as above) and whether the image carries an
+// alpha channel, which decides the copy's format. Never the preview's JPEG, which is lossy and drops alpha.
+export async function runHeicDecodeRgba(
+	bytes: Uint8Array,
+	deps: Pick<HeicTransformDeps, "getDecoder">
+): Promise<DecodedHeicImage & { hasAlpha: boolean }> {
+	try {
+		return await decodeHeic(bytes, await getSharedDecoder(deps.getDecoder))
+	} catch (e) {
+		log.error("heic-decode", e)
+
+		throw new Error("heic decode failed", { cause: e })
 	}
 }

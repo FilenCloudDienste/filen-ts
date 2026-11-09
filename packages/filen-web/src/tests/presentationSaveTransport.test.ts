@@ -335,13 +335,7 @@ describe("presentation save on the page", () => {
 		)
 
 		expect(outcome).toMatchObject({ status: "success", item: { data: { uuid: testUuid("saved") } } })
-		expect(uploadFileFromPort).toHaveBeenCalledWith(
-			testUuid("parent"),
-			port2,
-			"deck.pptx",
-			expect.stringContaining("presentation"),
-			undefined
-		)
+		expect(uploadFileFromPort).toHaveBeenCalledWith(testUuid("parent"), port2, "deck.pptx", expect.stringContaining("presentation"), {})
 		expect(patchListing).toHaveBeenCalledOnce()
 	})
 

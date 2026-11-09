@@ -192,6 +192,8 @@ const PHOTOS_INVALIDATING_EVENT_TYPES: ReadonlySet<DriveSocketEvent["inner"]["ty
 function photosEventScope(inner: DriveSocketEvent["inner"]): PhotosEventScope | null {
 	switch (inner.type) {
 		case "fileNew":
+			return { dirs: [inner.file.parent], item: inner.file.uuid, arrived: true }
+
 		case "fileRestore":
 			return { dirs: [inner.file.parent], item: inner.file.uuid }
 

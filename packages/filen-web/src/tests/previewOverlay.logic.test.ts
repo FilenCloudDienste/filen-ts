@@ -242,6 +242,8 @@ describe("resolveUnsavedConfirm", () => {
 		expect(resolveUnsavedConfirm("close", false, false).intent).toBe("close")
 		expect(resolveUnsavedConfirm("prev", false, false).intent).toBe("prev")
 		expect(resolveUnsavedConfirm("next", false, false).intent).toBe("next")
+		expect(resolveUnsavedConfirm("exitEdit", false, false).intent).toBe("exitEdit")
+		expect(resolveUnsavedConfirm("exitEdit", false, true).intent).toBeNull()
 	})
 
 	it("returns all-false/null when nothing is live", () => {

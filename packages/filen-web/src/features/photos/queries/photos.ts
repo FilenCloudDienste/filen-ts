@@ -20,6 +20,7 @@ import { createListenerSet } from "@/lib/listenerSet"
 import { mergePhotosByCaptureDesc, sortPhotosByCaptureDesc, type PhotoItem } from "@/features/photos/lib/captureSort"
 import { outermostOfRoots, useDirectoryRootChains } from "@/lib/directoryRoots"
 import { photoFolderPaths } from "@/features/photos/lib/search"
+import { isOwnSave } from "@/features/preview/lib/ownSaves"
 
 // Owns the photos query-key namespace (["photos", …], per client.ts's [domain, entity, params?]
 // taxonomy) — separate from ["drive", "listing", …] because a local mutation (favorite/trash/rename)
@@ -416,6 +417,8 @@ export function patchPhotosFavorite(item: DriveItem): void {
 export interface PhotosEventScope {
 	dirs: readonly string[]
 	item: string
+	// The item arrived (a new file): an own save the preview already spliced in needs nothing (splicePhotoSave).
+	arrived?: boolean
 }
 
 // Refetches the whole recursive walk rather than splice-patching the event's single item in: a photo
@@ -448,6 +451,11 @@ export function invalidatePhotosListing(scope: PhotosEventScope | null): void {
 		if (query.state.fetchStatus !== "idle") {
 			invalidate()
 
+			continue
+		}
+
+		// The echo of this tab's own save, already in the listing: the row it would bring is the one there.
+		if (scope?.arrived === true && photos?.some(photo => photo.data.uuid === scope.item) === true && isOwnSave(scope.item)) {
 			continue
 		}
 
@@ -496,6 +504,32 @@ export function invalidatePhotosListing(scope: PhotosEventScope | null): void {
 				invalidate()
 			}
 		}, invalidate)
+	}
+}
+
+// This tab's own save of a listed photo, spliced in where the photo it came from is listed: a new version takes the
+// old row's place, an edited copy goes beside it (both keep its capture time). Its echo then finds the row in place
+// and walks nothing (invalidatePhotosListing), and the old version's own echo finds nothing to drop.
+export function splicePhotoSave(previousUuid: string, item: DriveItem, placement: "replace" | "beside"): void {
+	if (item.type !== "file" || !isPhotoCandidate(item)) {
+		return
+	}
+
+	const saved = item
+
+	for (const query of cachedQueriesWithPrefix(PHOTOS_LISTING_KEY_PREFIX)) {
+		const rootUuid = query.queryKey[2]
+		const listing = query.state.data as PhotosListing | undefined
+
+		if (typeof rootUuid !== "string" || listing?.photos.some(photo => photo.data.uuid === previousUuid) !== true) {
+			continue
+		}
+
+		photosListingQueryUpdate(rootUuid, prev =>
+			prev
+				.filter(photo => photo.data.uuid !== saved.data.uuid)
+				.flatMap(photo => (photo.data.uuid !== previousUuid ? [photo] : placement === "replace" ? [saved] : [photo, saved]))
+		)
 	}
 }
 

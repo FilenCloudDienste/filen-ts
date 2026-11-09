@@ -8,11 +8,14 @@ import { extensionOf, previewType, type PreviewCategory } from "@/features/drive
 import { type DriveVariant } from "@/features/drive/lib/preferences"
 import { isEditableSpreadsheetExtension } from "@/features/spreadsheet/lib/fileKind"
 import { isEditablePresentationExtension } from "@/features/presentation/lib/fileKind"
+import { inPlaceFormatByName } from "@/features/preview/imageEdit/lib/targets"
+import type { Orientation } from "@/features/preview/imageEdit/types"
+import { captureTimestamp } from "@/features/photos/lib/captureSort"
 import { runOp, type ActionOutcome } from "@/lib/actions/outcome"
 import type { PreviewKey } from "@/lib/i18n"
 import { asErrorDTO, plainErrorDTO, PARENT_NOT_FOUND_PREFIX, type ErrorDTO } from "@/lib/sdk/errors"
 
-// Editable-preview eligibility gate (mobile parity): only a decryptable text/code/markdown file, spreadsheet or Word document
+// Editable-preview eligibility gate (mobile parity): only a decryptable text/code/markdown file, spreadsheet, Word document, deck or image
 // inside the navigable "drive" variant — never trash/recents/favorites/sharedIn/sharedOut (no
 // writable parent context, or a variant this app never lets a write reach), never an undecryptable
 // row (nothing to encode a diff against). Markdown is edited through the viewer's own source mode,
@@ -80,7 +83,29 @@ export function isEditable(item: DriveItem, variant: DriveVariant): boolean {
 		return isEditablePresentationExtension(extensionOf(driveItemName(base)))
 	}
 
+	// An image saves in place only in a format its name says the editor writes; by name alone, as a rename's
+	// re-check must agree with the slot's pin without a probe. Other images edit into a copy (canEditImage).
+	if (category === "image") {
+		return inPlaceFormatByName(driveItemName(base)) !== null
+	}
+
 	return isTextCategory(category)
+}
+
+// Whether the preview offers the image editor: any decodable still in the user's own drive, saved in place or, for
+// a format the editor cannot write, as a copy beside it. Never an SVG (markup, not pixels) or a camera RAW.
+export function canEditImage(item: DriveItem, variant: DriveVariant): boolean {
+	if (variant !== "drive") {
+		return false
+	}
+
+	const base = asDirectoryOrFile(item)
+
+	if (base.type !== "file" || base.data.undecryptable || previewType(item) !== "image") {
+		return false
+	}
+
+	return extensionOf(driveItemName(base)) !== "svg" && base.data.decryptedMeta?.mime !== "image/svg+xml"
 }
 
 // Whether the preview is text an editor holds as a string (a line diff can compare two versions of it).
@@ -94,10 +119,35 @@ export function isTextCategory(category: PreviewCategory): boolean {
 // global fan-out variant: a save never changes the item's parent, so exactly one listing can ever gain
 // or lose a row from it — the single-parent patch is the one that can never leak a phantom row into an
 // unrelated, already-cached listing (see upsertDriveItem's own unconditional-append behavior).
+// The new file's times, and that the image's own Exif dates must not replace them.
+export interface UploadTimes {
+	created?: bigint
+	modified?: bigint
+	noExifOverride?: boolean
+}
+
 export interface PreviewSaveDeps {
-	uploadFileBytes: (parentUuid: string | null, data: Uint8Array, name: string, mime: string) => Promise<SdkFile>
+	uploadFileBytes: (parentUuid: string | null, data: Uint8Array, name: string, mime: string, options: UploadTimes) => Promise<SdkFile>
 	// A save streamed over a port (a presentation's: the worker writes, the SDK worker uploads as it reads).
-	uploadFileFromPort?: (parentUuid: string | null, port: MessagePort, name: string, mime: string, size?: number) => Promise<SdkFile>
+	uploadFileFromPort?: (
+		parentUuid: string | null,
+		port: MessagePort,
+		name: string,
+		mime: string,
+		options: UploadTimes & { size?: number }
+	) => Promise<SdkFile>
+	// A Blob the SDK worker streams itself (an edited image): the Blob crosses by reference, its bytes are never copied here.
+	uploadFileBlob?: (parentUuid: string | null, blob: Blob, name: string, mime: string, options: UploadTimes) => Promise<SdkFile>
+	// A JPEG only turned or flipped: `file` streamed back with its Exif Orientation rewritten (sdk.worker.ts's
+	// rewriteJpegOrientation), never re-encoded.
+	rewriteOrientation?: (
+		file: SdkFile,
+		orientation: Orientation,
+		parentUuid: string | null,
+		name: string,
+		mime: string,
+		options: UploadTimes
+	) => Promise<SdkFile>
 	// `writeNow`: the listing reaches disk at once, not after its patches pause (a reload right after a save
 	// would otherwise restore the row naming the version it replaced).
 	patchListing: (parentUuid: string | null, updater: (items: DriveItem[]) => DriveItem[], options: { readonly writeNow: boolean }) => void
@@ -125,14 +175,28 @@ function dropUuid(items: DriveItem[], uuid: string): DriveItem[] {
 // `asNewFile` writes the buffer beside the file under that name instead (a copy of unsaved edits the
 // file itself moved on from, or of a file deleted meanwhile), leaving the file's own row alone. The name
 // must be free: the same upload onto a taken name would make a new version of that file.
-// What a save uploads: text, bytes, or a port a worker writes the file to (never held whole on the page).
-export type PreviewSaveContent = string | Uint8Array | { readonly port: MessagePort; readonly size?: number }
+// What a save uploads: text, bytes, a port a worker writes the file to (never held whole on the page), a Blob, or the
+// file itself with a new Exif Orientation.
+export type PreviewSaveContent =
+	| string
+	| Uint8Array
+	| { readonly port: MessagePort; readonly size?: number }
+	| { readonly blob: Blob }
+	| { readonly orientation: Orientation }
 
+// `times`: the new file's (an edited image keeps the original's creation time; its Exif never overrides them).
+// `mime`: instead of the file's own, "" letting the SDK take it from the name (a copy in another format).
 export async function runPreviewSave(
 	deps: PreviewSaveDeps,
-	args: { item: DriveItem; content: PreviewSaveContent; asNewFile?: string }
+	args: {
+		item: DriveItem
+		content: PreviewSaveContent
+		asNewFile?: string
+		times?: { created?: bigint; modified?: bigint }
+		mime?: string
+	}
 ): Promise<ActionOutcome<DriveItem>> {
-	const { item, content, asNewFile } = args
+	const { item, content, asNewFile, times } = args
 	const base = asDirectoryOrFile(item)
 
 	if (base.type !== "file") {
@@ -142,7 +206,8 @@ export async function runPreviewSave(
 	}
 
 	const name = asNewFile ?? driveItemName(base)
-	const mime = base.data.decryptedMeta?.mime ?? ""
+	const mime = args.mime ?? base.data.decryptedMeta?.mime ?? ""
+	const options: UploadTimes = times === undefined ? {} : { ...times, noExifOverride: true }
 	// Root-sentinel collapse inlined rather than importing normalizeParentUuid (queries/drive.ts): the
 	// .logic.ts split keeps this file framework-free (no queryClient import anywhere in it, direct or
 	// transitive) — the one-line uuid compare isn't worth crossing that boundary for.
@@ -150,7 +215,7 @@ export async function runPreviewSave(
 
 	let uploaded: SdkFile
 	try {
-		uploaded = await runOp(upload(deps, targetParent, content, name, mime))
+		uploaded = await runOp(upload(deps, base.data, targetParent, content, name, mime, options))
 	} catch (e) {
 		return { status: "error", dto: asErrorDTO(e) }
 	}
@@ -167,11 +232,31 @@ export async function runPreviewSave(
 	return { status: "success", item: newItem }
 }
 
-function upload(deps: PreviewSaveDeps, parent: string | null, content: PreviewSaveContent, name: string, mime: string): Promise<SdkFile> {
+function upload(
+	deps: PreviewSaveDeps,
+	file: SdkFile,
+	parent: string | null,
+	content: PreviewSaveContent,
+	name: string,
+	mime: string,
+	options: UploadTimes
+): Promise<SdkFile> {
 	if (typeof content === "string" || content instanceof Uint8Array) {
 		const bytes = typeof content === "string" ? new TextEncoder().encode(content) : content
 
-		return deps.uploadFileBytes(parent, Comlink.transfer(bytes, [bytes.buffer]), name, mime)
+		return deps.uploadFileBytes(parent, Comlink.transfer(bytes, [bytes.buffer]), name, mime, options)
+	}
+
+	if ("blob" in content) {
+		return deps.uploadFileBlob === undefined
+			? Promise.reject(new Error("runPreviewSave: no blob upload"))
+			: deps.uploadFileBlob(parent, content.blob, name, mime, options)
+	}
+
+	if ("orientation" in content) {
+		return deps.rewriteOrientation === undefined
+			? Promise.reject(new Error("runPreviewSave: no orientation rewrite"))
+			: deps.rewriteOrientation(file, content.orientation, parent, name, mime, options)
 	}
 
 	if (deps.uploadFileFromPort === undefined) {
@@ -180,7 +265,32 @@ function upload(deps: PreviewSaveDeps, parent: string | null, content: PreviewSa
 		return Promise.reject(new Error("runPreviewSave: no port upload"))
 	}
 
-	return deps.uploadFileFromPort(parent, Comlink.transfer(content.port, [content.port]), name, mime, content.size)
+	return deps.uploadFileFromPort(parent, Comlink.transfer(content.port, [content.port]), name, mime, {
+		...options,
+		...(content.size === undefined ? {} : { size: content.size })
+	})
+}
+
+// An edited image as the remote-change dialog's "save mine as new" writes it. `extension`: the format it was written in
+// when that is not the original's (a copy-only format), so the new file is named for it; null keeps the name's.
+export interface ImageSaveEdits {
+	readonly kind: "blob"
+	readonly blob: Blob
+	readonly extension: string | null
+}
+
+// The times an edited image is saved with, as a new version or a copy: created stays the original's (its own, else
+// the capture time the Photos timeline sorts it by), modified is now.
+export function imageSaveTimes(item: DriveItem, now: number): { created: bigint; modified: bigint } {
+	const modified = BigInt(Math.floor(now))
+
+	if (item.type !== "file") {
+		const base = asDirectoryOrFile(item)
+
+		return { created: base.type === "file" ? (base.data.decryptedMeta?.created ?? base.data.timestamp) : modified, modified }
+	}
+
+	return { created: item.data.decryptedMeta?.created ?? BigInt(Math.floor(captureTimestamp(item))), modified }
 }
 
 // A presentation save as the overlay drives it (the editor's presentationRef makes one per save): the session writes

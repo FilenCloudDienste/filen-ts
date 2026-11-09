@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from "vitest"
 import type { File as SdkFile } from "@filen/sdk-rs"
 import {
+	canEditImage,
 	canSaveCopyBeside,
+	imageSaveTimes,
 	isEditable,
 	isUnresolvableParentError,
 	runPreviewSave,
@@ -98,8 +100,20 @@ describe("isEditable", () => {
 		expect(isEditable(fileItem({ meta: decodedMeta("notes.txt") }), "trash")).toBe(false)
 	})
 
-	it("is false for a non-text/code category (e.g. an image)", () => {
-		expect(isEditable(fileItem({ meta: decodedMeta("photo.png") }), "drive")).toBe(false)
+	it("is false for a category with no editor (e.g. a PDF)", () => {
+		expect(isEditable(fileItem({ meta: decodedMeta("paper.pdf") }), "drive")).toBe(false)
+	})
+
+	it("is true for an image the editor writes in place, by its name alone", () => {
+		for (const name of ["photo.png", "photo.jpg", "photo.JPEG", "scan.jfif", "art.webp"]) {
+			expect(isEditable(fileItem({ meta: decodedMeta(name) }), "drive"), name).toBe(true)
+		}
+
+		for (const name of ["photo.heic", "anim.gif", "icon.ico", "pic.avif", "old.bmp", "logo.svg"]) {
+			expect(isEditable(fileItem({ meta: decodedMeta(name) }), "drive"), name).toBe(false)
+		}
+
+		expect(isEditable(fileItem({ meta: decodedMeta("photo.png") }), "trash")).toBe(false)
 	})
 
 	it("is true for a spreadsheet, but a legacy .xls only opens to be looked at", () => {
@@ -212,6 +226,51 @@ function makeHarness() {
 	return { deps, uploadFileBytes, patchListing }
 }
 
+describe("canEditImage", () => {
+	it("offers the editor for any decodable still in the drive, copy-only formats included", () => {
+		for (const name of ["photo.jpg", "photo.png", "photo.heic", "anim.gif", "pic.avif", "old.bmp", "icon.ico", "art.webp"]) {
+			expect(canEditImage(fileItem({ meta: byMime(name, "") }), "drive"), name).toBe(true)
+		}
+	})
+
+	it("never for an SVG, a camera RAW, a non-image, outside the drive or an undecryptable row", () => {
+		expect(canEditImage(fileItem({ meta: byMime("logo.svg", "image/svg+xml") }), "drive")).toBe(false)
+		expect(canEditImage(fileItem({ meta: byMime("shot.nef", "image/x-nikon-nef") }), "drive")).toBe(false)
+		expect(canEditImage(fileItem({ meta: decodedMeta("notes.txt") }), "drive")).toBe(false)
+		expect(canEditImage(fileItem({ meta: decodedMeta("photo.jpg") }), "sharedIn")).toBe(false)
+		expect(canEditImage(fileItem({ meta: { type: "encrypted", data: "cipher" } }), "drive")).toBe(false)
+	})
+})
+
+describe("imageSaveTimes", () => {
+	it("keeps the original's own creation time and stamps modified now", () => {
+		const item = fileItem({
+			meta: {
+				type: "decoded",
+				data: {
+					name: "a.jpg",
+					mime: "image/jpeg",
+					created: 1_600_000_000_000n,
+					modified: 1_650_000_000_000n,
+					size: 1n,
+					key: "k",
+					version: 2
+				}
+			}
+		})
+
+		expect(imageSaveTimes(item, 1_800_000_000_000.7)).toEqual({ created: 1_600_000_000_000n, modified: 1_800_000_000_000n })
+	})
+
+	it("falls back to the capture time the Photos timeline sorts by when the file has none", () => {
+		const item = fileItem({ timestamp: 1_700_000_000_000n, meta: byMime("a.jpg", "image/jpeg") })
+		const { created } = imageSaveTimes(item, 1_800_000_000_000)
+
+		expect(created).toBeLessThanOrEqual(1_700_000_000_000n)
+		expect(created).toBeGreaterThan(0n)
+	})
+})
+
 describe("runPreviewSave (injected deps, no worker or query client)", () => {
 	it("encodes the content, uploads it, and returns the narrowed new item on success", async () => {
 		const h = makeHarness()
@@ -240,7 +299,7 @@ describe("runPreviewSave (injected deps, no worker or query client)", () => {
 
 		await runPreviewSave(h.deps, { item, content: "x" })
 
-		expect(h.uploadFileBytes).toHaveBeenCalledWith(null, expect.any(Uint8Array), "notes.txt", "text/plain")
+		expect(h.uploadFileBytes).toHaveBeenCalledWith(null, expect.any(Uint8Array), "notes.txt", "text/plain", {})
 		expect(h.patchListing).toHaveBeenCalledWith(null, expect.any(Function), { writeNow: true })
 	})
 
@@ -293,6 +352,62 @@ describe("runPreviewSave (injected deps, no worker or query client)", () => {
 
 		expect(outcome).toEqual({ status: "error", dto })
 		expect(h.patchListing).not.toHaveBeenCalled()
+	})
+
+	it("streams a Blob through uploadFileBlob with the given times, the Exif override off, and the mime given", async () => {
+		const uploadFileBlob = vi.fn<NonNullable<PreviewSaveDeps["uploadFileBlob"]>>(() =>
+			Promise.resolve(mockFile({ uuid: testUuid("copy") }))
+		)
+		const patchListing = vi.fn<PreviewSaveDeps["patchListing"]>()
+		const blob = new Blob([new Uint8Array([1, 2, 3])], { type: "image/jpeg" })
+		const item = fileItem({ uuid: testUuid("old"), meta: byMime("photo.heic", "image/heic") })
+
+		const outcome = await runPreviewSave(
+			{ uploadFileBytes: vi.fn(), uploadFileBlob, patchListing, rootUuid: ROOT_UUID },
+			{ item, content: { blob }, asNewFile: "photo (edited).jpg", mime: "", times: { created: 5n, modified: 9n } }
+		)
+
+		expect(outcome.status).toBe("success")
+		expect(uploadFileBlob).toHaveBeenCalledWith(OTHER_PARENT_UUID, blob, "photo (edited).jpg", "", {
+			created: 5n,
+			modified: 9n,
+			noExifOverride: true
+		})
+
+		// A copy joins the listing beside the original.
+		const updater = patchListing.mock.calls[0]?.[1]
+		expect(updater?.([item]).map(row => row.data.uuid)).toEqual([testUuid("old"), testUuid("copy")])
+	})
+
+	it("hands an Orientation-only save to the rewrite with the file itself", async () => {
+		const rewriteOrientation = vi.fn<NonNullable<PreviewSaveDeps["rewriteOrientation"]>>(() =>
+			Promise.resolve(mockFile({ uuid: testUuid("turned") }))
+		)
+		const item = fileItem({ uuid: testUuid("old"), meta: byMime("photo.jpg", "image/jpeg") })
+
+		const outcome = await runPreviewSave(
+			{ uploadFileBytes: vi.fn(), rewriteOrientation, patchListing: vi.fn(), rootUuid: ROOT_UUID },
+			{ item, content: { orientation: 6 }, times: { created: 1n, modified: 2n }, mime: "image/jpeg" }
+		)
+
+		expect(outcome).toMatchObject({ status: "success", item: { data: { uuid: testUuid("turned") } } })
+		expect(rewriteOrientation).toHaveBeenCalledWith(
+			expect.objectContaining({ uuid: testUuid("old") }),
+			6,
+			OTHER_PARENT_UUID,
+			"photo.jpg",
+			"image/jpeg",
+			{ created: 1n, modified: 2n, noExifOverride: true }
+		)
+	})
+
+	it("fails a Blob save without a Blob upload", async () => {
+		const outcome = await runPreviewSave(
+			{ uploadFileBytes: vi.fn(), patchListing: vi.fn(), rootUuid: ROOT_UUID },
+			{ item: fileItem(), content: { blob: new Blob([]) } }
+		)
+
+		expect(outcome.status).toBe("error")
 	})
 
 	it("surfaces a parent-not-found worker throw (unresolvable parent) as a plain error outcome", async () => {

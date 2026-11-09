@@ -33,6 +33,8 @@ import { previewPptxMedia } from "@/locales/en/previewPptx/media"
 import { previewPptxMediaTiming } from "@/locales/en/previewPptx/mediaTiming"
 import { previewPptxShow } from "@/locales/en/previewPptx/show"
 import { previewPptxExport } from "@/locales/en/previewPptx/export"
+import { previewImageEditor } from "@/locales/en/previewImage/editor"
+import { previewImageSave } from "@/locales/en/previewImage/save"
 import { previewPptxPresenter } from "@/locales/en/previewPptx/presenter"
 import { previewPptxInk } from "@/locales/en/previewPptx/ink"
 import { previewPptxSmartArt } from "@/locales/en/previewPptx/smartart"
@@ -792,5 +794,7 @@ export const preview = {
 	...previewSheetFormats,
 	...previewSheetObjects,
 	...previewSheetCharts,
-	...previewSheetRibbon
+	...previewSheetRibbon,
+	...previewImageEditor,
+	...previewImageSave
 } as const

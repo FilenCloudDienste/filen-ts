@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react"
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from "react"
 import { useTranslation } from "react-i18next"
 import type { DriveItem } from "@/features/drive/lib/item"
 import { needsImageTransform } from "@/features/drive/lib/preview.logic"
@@ -18,6 +18,9 @@ import { type Size, type ZoomTransform, wheelZoom, dragPan, doubleClickZoom } fr
 export interface ImageViewerProps {
 	item: DriveItem
 	alt: string
+	// Holds the shown <img> while it is mounted, for the image editor to take its decoded pixels instead of fetching
+	// the file again. Not set for HEIC/HEIF (the editor decodes those itself).
+	imageRef?: RefObject<HTMLImageElement | null> | undefined
 }
 
 // <img> from an already-resolved URL (streamed, blob or thumbnail). Fit-to-screen via object-contain, plus
@@ -27,12 +30,14 @@ export interface ImageViewerProps {
 function ZoomableImage({
 	url,
 	alt,
-	onError
+	onError,
+	imageRef
 }: {
 	url: string
 	alt: string
 	// Unset on a blob URL, which has nowhere further to fall back to (see RenderPreviewUrl).
 	onError?: (() => void) | undefined
+	imageRef?: RefObject<HTMLImageElement | null> | undefined
 }) {
 	const [transform, setTransform] = useState<ZoomTransform>({ scale: 1, x: 0, y: 0 })
 	const [natural, setNatural] = useState<Size | null>(null)
@@ -119,7 +124,13 @@ function ZoomableImage({
 			className="flex size-full items-center justify-center overflow-hidden"
 		>
 			<img
-				ref={setImage}
+				ref={element => {
+					setImage(element)
+
+					if (imageRef !== undefined) {
+						imageRef.current = element
+					}
+				}}
 				src={url}
 				alt={alt}
 				draggable={false}
@@ -336,7 +347,7 @@ export function RawImageViewer({ item, alt }: ImageViewerProps) {
 // Top-level dispatch, hook-free so needsImageTransform can short-circuit before StreamablePreview's own
 // useState runs — HEIC/HEIF never reach the streamed branch at all (mediaType.ts independently
 // excludes them too, defense-in-depth), every other image extension is unaffected.
-export function ImageViewer({ item, alt }: ImageViewerProps) {
+export function ImageViewer({ item, alt, imageRef }: ImageViewerProps) {
 	if (needsImageTransform(item)) {
 		return (
 			<TransformedImage
@@ -354,6 +365,7 @@ export function ImageViewer({ item, alt }: ImageViewerProps) {
 					url={url}
 					alt={alt}
 					onError={onError}
+					imageRef={imageRef}
 				/>
 			)}
 		/>

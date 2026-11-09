@@ -1,7 +1,7 @@
 /// <reference lib="webworker" />
 import * as Comlink from "comlink"
 import { Semaphore } from "@filen/shared"
-import { runHeicTransform, productionDeps } from "@/features/preview/lib/heicCodec"
+import { runHeicDecodeRgba, runHeicTransform, productionDeps, type DecodedHeicImage } from "@/features/preview/lib/heicCodec"
 
 // Thin glue only — heicCodec.ts owns every real step (decode, orientation, freeing WASM handles, JPEG
 // encode, error normalization). One of heicTransform.ts's two pooled workers, each spun up lazily;
@@ -19,6 +19,18 @@ const api = {
 
 		try {
 			return await runHeicTransform(bytes, productionDeps)
+		} finally {
+			transformLock.release()
+		}
+	},
+	// The RGBA frame goes back transferred, never cloned.
+	decodeRgba: async (bytes: Uint8Array): Promise<DecodedHeicImage & { hasAlpha: boolean }> => {
+		await transformLock.acquire()
+
+		try {
+			const decoded = await runHeicDecodeRgba(bytes, productionDeps)
+
+			return Comlink.transfer(decoded, [decoded.data.buffer])
 		} finally {
 			transformLock.release()
 		}

@@ -5,7 +5,13 @@ import { toast } from "sonner"
 import { conflictCopyName, decideRevision, driveItemName } from "@filen/shared"
 import { asDirectoryOrFile, narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
-import { runPreviewSave, type PresentationSaveEdits, type PreviewSaveContent } from "@/features/drive/lib/previewSave.logic"
+import {
+	imageSaveTimes,
+	runPreviewSave,
+	type ImageSaveEdits,
+	type PresentationSaveEdits,
+	type PreviewSaveContent
+} from "@/features/drive/lib/previewSave.logic"
 import { currentRootUuid } from "@/features/drive/lib/actions"
 import {
 	cachedListing,
@@ -29,6 +35,9 @@ import type { ErrorDTO } from "@/lib/sdk/errors"
 import { log } from "@/lib/log"
 import { i18n } from "@/lib/i18n"
 
+// What "save mine as new" writes: text or a document's bytes, a deck's streamed save, or an edited image.
+export type PreviewEdits = Uint8Array | PresentationSaveEdits | ImageSaveEdits
+
 // The overlay's own changes to the file on screen, whose echoes are not changes made elsewhere.
 export type OwnChangeKind = "remove" | "move" | "restore"
 
@@ -47,8 +56,8 @@ interface UsePreviewRemoteChangesParams {
 	savedRef: RefObject<ReadonlyMap<string, DriveItem>>
 	commitSaved: (frozenUuid: string, item: DriveItem) => void
 	contentRef: RefObject<(() => string) | null>
-	// The unsaved edits as they stand: encoded, or a deck's save its session streams to an upload.
-	readEdits: () => Promise<Uint8Array | PresentationSaveEdits | null>
+	// The unsaved edits as they stand: encoded, a deck's save its session streams to an upload, or an edited image.
+	readEdits: () => Promise<PreviewEdits | null>
 	onItemRemoved: (frozenUuid: string) => void
 }
 
@@ -438,7 +447,7 @@ function handleEvent(ctx: RemoteChangeContext, event: PreviewReconcileEvent): vo
 async function writeAsNewFile(
 	asked: RemoteChangePrompt,
 	item: DriveItem,
-	readEdits: () => Promise<Uint8Array | PresentationSaveEdits | null>,
+	readEdits: () => Promise<PreviewEdits | null>,
 	t: TFunction<"preview">
 ): Promise<{ item: DriveItem; name: string; bytes: Uint8Array | null } | null> {
 	const content = await readEdits()
@@ -446,7 +455,7 @@ async function writeAsNewFile(
 
 	// Not offered without a save source; never silent if it gets here anyway.
 	if (content === null || base.type !== "file") {
-		if (content !== null && "kind" in content) {
+		if (content !== null && "kind" in content && content.kind === "port") {
 			content.port.close()
 		}
 
@@ -456,17 +465,25 @@ async function writeAsNewFile(
 	}
 
 	const bytes = asked.kind === "deleted" && !("kind" in content) ? content.slice() : null
+	// An image written in another format than the original's is named for it, and typed by that name.
+	const extension = "kind" in content && content.kind === "blob" ? content.extension : null
 
 	const rootUuid = currentRootUuid()
 	const parent = normalizeParentUuid(base.data.parent, rootUuid)
-	const original = driveItemName(base)
+	const original = extension === null ? driveItemName(base) : withExtension(driveItemName(base), extension)
 	const taken = (name: string) => sdkApi.nameExistsInDirectory(parent, name)
 	const name =
 		asked.kind === "deleted" && !(await taken(original))
 			? original
 			: await conflictCopyName(original, new Date(), args => t("previewConflictCopyName", args), taken)
-	const outcome =
-		"kind" in content ? await uploadDeckCopy(item, content, name, rootUuid) : await uploadCopy(item, content, name, rootUuid)
+	const outcome = !("kind" in content)
+		? await uploadCopy(item, content, name, rootUuid)
+		: content.kind === "port"
+			? await uploadDeckCopy(item, content, name, rootUuid)
+			: await uploadCopy(item, { blob: content.blob }, name, rootUuid, {
+					times: imageSaveTimes(item, Date.now()),
+					...(extension === null ? {} : { mime: "" })
+				})
 
 	if (outcome.status === "error") {
 		if (outcome.dto !== null) {
@@ -481,18 +498,35 @@ async function writeAsNewFile(
 	return { item: outcome.item, name, bytes }
 }
 
+// "photo.heic" → "photo.jpg".
+function withExtension(name: string, extension: string): string {
+	const dot = name.lastIndexOf(".")
+
+	return `${dot > 0 ? name.slice(0, dot) : name}.${extension}`
+}
+
 type CopyOutcome = { status: "success"; item: DriveItem } | { status: "error"; dto: ErrorDTO | null }
 
-async function uploadCopy(item: DriveItem, content: PreviewSaveContent, name: string, rootUuid: string): Promise<CopyOutcome> {
+// `extra`: an edited image's times, and "" as its mime when its format is not the original's.
+async function uploadCopy(
+	item: DriveItem,
+	content: PreviewSaveContent,
+	name: string,
+	rootUuid: string,
+	extra?: { times?: { created: bigint; modified: bigint }; mime?: string }
+): Promise<CopyOutcome> {
 	return await runPreviewSave(
 		{
-			uploadFileBytes: (...args) => sdkApi.uploadFileBytes(...args),
-			uploadFileFromPort: (parentUuid, port, fileName, mime, size) =>
-				sdkApi.uploadFileFromPort(parentUuid, fileName, mime, port, size),
+			uploadFileBytes: (parentUuid, data, fileName, mime, options) =>
+				sdkApi.uploadFileBytes(parentUuid, data, fileName, mime, options),
+			uploadFileFromPort: (parentUuid, port, fileName, mime, options) =>
+				sdkApi.uploadFileFromPort(parentUuid, fileName, mime, port, options),
+			uploadFileBlob: (parentUuid, blob, fileName, mime, options) =>
+				sdkApi.uploadFileFromBlob(parentUuid, blob, fileName, mime, options),
 			patchListing: driveListingQueryUpdate,
 			rootUuid
 		},
-		{ item, content, asNewFile: name }
+		{ item, content, asNewFile: name, ...extra }
 	)
 }
 

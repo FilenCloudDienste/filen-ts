@@ -157,6 +157,13 @@ import { EarlyCancels } from "@/workers/earlyCancels"
 import { exposeRangePort } from "@/lib/media/rangePort"
 import { crc32, savePortReader } from "@filen/office/dom/presentation/savePort"
 import { savePortStream } from "@/lib/media/savePortStream"
+import {
+	ORIENTATION_HEAD_MAX,
+	ORIENTATION_REWRITE_UNAVAILABLE,
+	orientationRewriteStream
+} from "@/features/preview/imageEdit/orientationRewrite"
+import { rewriteOrientationHead } from "@/features/preview/imageEdit/lib/jpegMeta"
+import type { Orientation } from "@/features/preview/imageEdit/types"
 import { WalkCoordinator } from "@/workers/walkCoordinator"
 import { noteFoundDir, resolveParentDir as resolveParentDirFrom } from "@/workers/parentDir"
 import { VideoIndexEngine, type IndexRootConfig } from "@/workers/videoIndex/engine"
@@ -937,6 +944,53 @@ function narrowOwnedWalk({ dirs, files }: { dirs: NonRootDirTagged[]; files: Nor
 	return { dirs: normalDirs, files: files.filter(file => isPhotoCandidate(narrowItem(file))) }
 }
 
+// What a save's upload takes beyond its bytes: a deadline and a cancel token (see uploadFileBytes), and the new
+// file's times.
+export interface UploadOptions {
+	deadlineMs?: number
+	abortToken?: string
+	created?: bigint
+	modified?: bigint
+	noExifOverride?: boolean
+}
+
+function uploadTimes(options: UploadOptions | undefined): { created?: bigint; modified?: bigint; noExifOverride?: boolean } {
+	return {
+		...(options?.created === undefined ? {} : { created: options.created }),
+		...(options?.modified === undefined ? {} : { modified: options.modified }),
+		...(options?.noExifOverride === undefined ? {} : { noExifOverride: options.noExifOverride })
+	}
+}
+
+// One upload's abort: its own, the deadline's, and the cancel token's (registered until release()).
+function uploadControl(options: UploadOptions | undefined): {
+	signal: AbortSignal
+	aborted: () => boolean
+	abort: () => void
+	release: () => void
+} {
+	const controller = new AbortController()
+	const token = options?.abortToken
+	const signals = options?.deadlineMs === undefined ? [controller.signal] : [controller.signal, AbortSignal.timeout(options.deadlineMs)]
+
+	if (token !== undefined) {
+		registerPreviewAbort(token, controller)
+	}
+
+	return {
+		signal: signals.length === 1 ? controller.signal : AbortSignal.any(signals),
+		aborted: () => controller.signal.aborted,
+		abort: () => {
+			controller.abort()
+		},
+		release: () => {
+			if (token !== undefined && previewAborts.get(token) === controller) {
+				previewAborts.delete(token)
+			}
+		}
+	}
+}
+
 // Cache-first parent resolve shared by createDirectory/moveDirectory/moveFile: `null` maps to
 // client.root() (the only "parent" a create/move can target that isn't itself a real Dir); any other
 // uuid goes through resolveParentDir, so concurrent ops into a cold parent share one lookup. Throws when the uuid can't be resolved at all — every caller treats a
@@ -1517,38 +1571,24 @@ const api = {
 	// Comlink.expose proxy below, surfaced to the caller as a read-only outcome — mobile parity).
 	// Files are never cached in features/drive/lib/cache.ts (directories only — see deleteFilePermanently
 	// above), so there is nothing to evict on the old, now-stale uuid the backend rotates in.
-	// `control` bounds a background save: `deadlineMs` aborts it once that long has passed (the SDK's own lock
-	// wait is otherwise days), and `abortToken` registers it so cancelPreviewDownload(token) aborts it.
-	async uploadFileBytes(
-		parentUuid: string | null,
-		data: Uint8Array,
-		name: string,
-		mime: string,
-		control?: { deadlineMs?: number; abortToken?: string }
-	): Promise<File> {
+	// `options` bounds a background save: `deadlineMs` aborts it once that long has passed (the SDK's own lock
+	// wait is otherwise days), and `abortToken` registers it so cancelPreviewDownload(token) aborts it. Its times are
+	// the new file's (`noExifOverride`: the file's own Exif dates do not replace them).
+	async uploadFileBytes(parentUuid: string | null, data: Uint8Array, name: string, mime: string, options?: UploadOptions): Promise<File> {
 		const c = requireClient()
 		const parent = await resolveNormalDirParent(c, parentUuid)
-		const params = { parent, name, ...(mime ? { mime } : {}) }
+		const params = { parent, name, ...(mime ? { mime } : {}), ...uploadTimes(options) }
 
-		if (control === undefined) {
+		if (options?.deadlineMs === undefined && options?.abortToken === undefined) {
 			return c.uploadFile(data, params)
 		}
 
-		const controller = new AbortController()
-		const signals =
-			control.deadlineMs === undefined ? [controller.signal] : [controller.signal, AbortSignal.timeout(control.deadlineMs)]
-		const token = control.abortToken
-
-		if (token !== undefined) {
-			registerPreviewAbort(token, controller)
-		}
+		const control = uploadControl(options)
 
 		try {
-			return await c.uploadFile(data, { ...params, managedFuture: { abortSignal: AbortSignal.any(signals) } })
+			return await c.uploadFile(data, { ...params, managedFuture: { abortSignal: control.signal } })
 		} finally {
-			if (token !== undefined) {
-				previewAborts.delete(token)
-			}
+			control.release()
 		}
 	},
 	// A save streamed from the presentation worker over `port` (@filen/office's save port): the upload pulls 1 MiB
@@ -1556,24 +1596,17 @@ const api = {
 	// requests, so no transferable stream crosses (an engine this app supports has none) and memory stays a few chunks
 	// on each side. Only the writer's end makes the file: its abort, a stalled port or a failed upload rejects with no
 	// new version, and the writer is told whether the file was made (it holds the deck's reads of the old file until
-	// then). `size` when the writer knows it up front. `control` as uploadFileBytes's.
+	// then). `options.size` when the writer knows it up front; the rest as uploadFileBytes's.
 	async uploadFileFromPort(
 		parentUuid: string | null,
 		name: string,
 		mime: string,
 		port: MessagePort,
-		size?: number,
-		control?: { deadlineMs?: number; abortToken?: string }
+		options?: UploadOptions & { size?: number }
 	): Promise<File> {
 		const reader = savePortReader(port)
-		const controller = new AbortController()
-		const token = control?.abortToken
-		const signals =
-			control?.deadlineMs === undefined ? [controller.signal] : [controller.signal, AbortSignal.timeout(control.deadlineMs)]
-
-		if (token !== undefined) {
-			registerPreviewAbort(token, controller)
-		}
+		const control = uploadControl(options)
+		const size = options?.size
 
 		try {
 			const c = requireClient()
@@ -1584,20 +1617,105 @@ const api = {
 				reader: savePortStream(reader),
 				knownSize: size !== undefined && size > 0 ? size : undefined,
 				...(mime ? { mime } : {}),
-				managedFuture: { abortSignal: AbortSignal.any(signals) }
+				...uploadTimes(options),
+				managedFuture: { abortSignal: control.signal }
 			})
 
 			reader.settled(true)
 
 			return file
 		} catch (e) {
-			reader.abort(controller.signal.aborted ? "cancelled" : "upload")
+			reader.abort(control.aborted() ? "cancelled" : "upload")
 
 			throw e
 		} finally {
-			if (token !== undefined && previewAborts.get(token) === controller) {
-				previewAborts.delete(token)
+			control.release()
+		}
+	},
+	// A file the page holds as a Blob (an edited image): the Blob crosses by reference and its stream is read here,
+	// so its bytes are never copied into a buffer on either side. Options as uploadFileBytes's.
+	async uploadFileFromBlob(parentUuid: string | null, blob: Blob, name: string, mime: string, options?: UploadOptions): Promise<File> {
+		const c = requireClient()
+		const control = uploadControl(options)
+
+		try {
+			const parent = await resolveNormalDirParent(c, parentUuid)
+
+			return await c.uploadFileFromReader({
+				parent,
+				name,
+				reader: blob.stream(),
+				// An empty file's known size of 0 would make the SDK read into an empty buffer (see uploadFile).
+				knownSize: blob.size > 0 ? blob.size : undefined,
+				...(mime ? { mime } : {}),
+				...uploadTimes(options),
+				managedFuture: { abortSignal: control.signal }
+			})
+		} finally {
+			control.release()
+		}
+	},
+	// A JPEG turned or flipped without re-encoding: `file` streams from its download into the upload of `name` in
+	// the directory, with only its head (up to the first scan, at most ORIENTATION_HEAD_MAX) held and its Exif
+	// Orientation rewritten. Never holds the file whole. Rejects with ORIENTATION_REWRITE_UNAVAILABLE, having made no
+	// file, when the head cannot be rewritten, so the caller re-encodes. Options as uploadFileBytes's.
+	async rewriteJpegOrientation(
+		file: AnyFile,
+		orientation: Orientation,
+		parentUuid: string | null,
+		name: string,
+		mime: string,
+		options?: UploadOptions
+	): Promise<File> {
+		const c = requireClient()
+		const control = uploadControl(options)
+		const rewrite = orientationRewriteStream(head => rewriteOrientationHead(head, orientation)?.head ?? null, ORIENTATION_HEAD_MAX)
+
+		try {
+			const parent = await resolveNormalDirParent(c, parentUuid)
+			const upload = c.uploadFileFromReader({
+				parent,
+				name,
+				reader: asByteStream(rewrite.readable),
+				knownSize: undefined,
+				...(mime ? { mime } : {}),
+				...uploadTimes(options),
+				managedFuture: { abortSignal: control.signal }
+			})
+			// The download writes through a sink of its own, so the stream's end reaches the upload whether or not the
+			// SDK closes the writer it was given.
+			const forward = rewrite.writable.getWriter()
+			let ended = false
+			const end = async (): Promise<void> => {
+				if (!ended) {
+					ended = true
+					await forward.close()
+				}
 			}
+			const download = c
+				.downloadFileToWriter({
+					file,
+					writer: new WritableStream<Uint8Array>({
+						write: chunk => forward.write(chunk),
+						close: end,
+						abort: reason => forward.abort(reason)
+					}),
+					managedFuture: { abortSignal: control.signal }
+				})
+				.then(end)
+
+			// Either side failing ends the other, which would otherwise wait on a stream nobody reads or writes.
+			const [uploaded] = await Promise.all([upload, download]).catch((e: unknown) => {
+				control.abort()
+				void upload.catch(() => undefined)
+				void download.catch(() => undefined)
+
+				throw rewrite.refused() ? new Error(ORIENTATION_REWRITE_UNAVAILABLE, { cause: e }) : e
+			})
+
+			return uploaded
+		} finally {
+			control.release()
 		}
 	},
 	// Whether `name` is taken in the directory. uploadFileBytes onto a taken file name makes a new
@@ -1988,6 +2106,21 @@ const api = {
 		} finally {
 			previewAborts.delete(previewToken)
 			previewProgress.delete(previewToken)
+		}
+	},
+	// Bytes [start, end) of a file for a preview's own look at it (an image's header before editing), transferred
+	// back like downloadFileBytes and cancelled through the same token.
+	async readFileBytesRange(file: AnyFile, start: number, end: number, previewToken: string): Promise<Uint8Array> {
+		const c = requireClient()
+		const controller = new AbortController()
+		registerPreviewAbort(previewToken, controller)
+		try {
+			const bytes = await readFileRange(c, file, start, end, controller.signal)
+			return Comlink.transfer(bytes, [bytes.buffer])
+		} finally {
+			if (previewAborts.get(previewToken) === controller) {
+				previewAborts.delete(previewToken)
+			}
 		}
 	},
 	// Aborts an in-flight preview download by its token, or the one about to register under it; a no-op
