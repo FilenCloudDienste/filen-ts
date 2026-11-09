@@ -1,4 +1,4 @@
-import { appendAll } from "../arrays"
+import { appendAll, minOf } from "../arrays"
 import type { OdfElement } from "../odf/tree"
 import { parseColor } from "../odf/units"
 import { parseRelationships, type Relationship } from "../opc/relationships"
@@ -444,15 +444,19 @@ function* validationsSection(
 		if (validation === undefined) continue
 
 		const condition = validation.attributes.get("table:condition")
-		const origin = rects[0]
+		// SpreadsheetML's formulas are for the top-left cell of the rectangle around the ranges.
 		const rule: ValidationRule | string =
 			condition === undefined
 				? { type: "none", operator: "between", formula1: null, formula2: null }
 				: validationRule(
 						condition,
-						origin === undefined
+						rects.length === 0
 							? undefined
-							: baseShift(validation.attributes.get("table:base-cell-address"), origin[0], origin[1])
+							: baseShift(
+									validation.attributes.get("table:base-cell-address"),
+									minOf(rects.map(rect => rect[0])),
+									minOf(rects.map(rect => rect[1]))
+								)
 					)
 
 		if (typeof rule === "string") {
@@ -741,14 +745,19 @@ export function conditionalSections(formats: readonly OdfElement[], tableName: s
 
 			const sqref = target.parts.map(part => withoutSheet(part).replaceAll("$", "")).join(" ")
 			const rules: string[] = []
-			const first = sqref.split(" ")[0]?.split(":")[0] ?? "A1"
-			// Its top-left cell (a whole column's or row's starts at row 1 or column A).
-			const corner = /^([A-Z]{0,3})(\d*)$/.exec(first)
-			const originRow = Math.max(0, Number(corner?.[2] || "1") - 1)
+			// The top-left cell of the rectangle around the ranges, which SpreadsheetML's formulas are for (a whole column
+			// starts at row 1, a whole row at column A).
+			const corners = sqref.split(" ").map(item => /^([A-Z]{0,3})(\d*)$/.exec(item.split(":")[0] ?? ""))
+			const originRow = Math.max(0, minOf(corners.map(corner => Number(corner?.[2] || "1") - 1)))
 			const originCol = Math.max(
 				0,
-				[...(corner?.[1] || "A")].reduce((index, letter) => index * 26 + letter.charCodeAt(0) - 64, 0) - 1
+				minOf(
+					corners.map(
+						corner => [...(corner?.[1] || "A")].reduce((index, letter) => index * 26 + letter.charCodeAt(0) - 64, 0) - 1
+					)
+				)
 			)
+			const first = cellRef(originRow, originCol)
 
 			for (const rule of format.children) {
 				const shift =

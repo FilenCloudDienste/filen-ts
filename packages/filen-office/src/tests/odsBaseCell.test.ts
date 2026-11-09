@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { strFromU8 } from "fflate"
+import { strFromU8, unzipSync } from "fflate"
 import { bytesSource } from "../core/opc/index"
 import { convertSheet } from "../core/ods/convert/index"
 import { translateExpression } from "../core/ods/formula/toXlsx"
@@ -102,6 +102,59 @@ describe("an .ods condition's base cell", () => {
 
 		expect(sections).toMatch(/sqref="B2:B4"><cfRule type="expression"[^>]*><formula>C2&gt;B2<\/formula>/)
 		expect(sections).toMatch(/<formula1>D3&gt;\$A\$1<\/formula1>/)
+	})
+
+	it("writes a range list's formulas for the top-left around its ranges, whichever range is listed first", async () => {
+		const source = buildWorkbook({
+			sheets: [
+				{
+					name: "S",
+					body:
+						'<sheetData><row r="2"><c r="B2"><v>1</v></c></row></sheetData>' +
+						'<conditionalFormatting sqref="C5 B2:B3"><cfRule type="expression" dxfId="0" priority="1"><formula>B2&gt;0</formula></cfRule></conditionalFormatting>' +
+						'<dataValidations count="1"><dataValidation type="custom" allowBlank="1" sqref="D9 B4:B5 C3"><formula1>OR(ISBLANK(B3),ISTEXT(B3))</formula1></dataValidation></dataValidations>'
+				}
+			]
+		})
+		const result = await convertSheet(source, "xlsx", "ods")
+
+		if (!result.ok) throw new Error(`${result.reason}: ${result.message}`)
+
+		const content = strFromU8(unzipSync(result.bytes)["content.xml"] ?? new Uint8Array())
+
+		expect(content).toMatch(/calcext:value="formula-is\(\[\.B2\]>0\)" calcext:base-cell-address="S\.B2"/)
+		expect(content).toMatch(
+			/table:condition="of:is-true-formula\(OR\(ISBLANK\(\[\.B3\]\);ISTEXT\(\[\.B3\]\)\)\)"[^>]*table:base-cell-address="S\.B3"/
+		)
+
+		const opened = await openOds(bytesSource(result.bytes))
+
+		if (!opened.ok) throw new Error(`${opened.reason}: ${opened.message}`)
+
+		const sections = (opened.workbook.sheets[0]?.model?.sections ?? [])
+			.map(section => (section.bytes === null ? "" : strFromU8(section.bytes)))
+			.join("")
+
+		expect(sections).toMatch(/<formula>B2&gt;0<\/formula>/)
+		expect(sections).toMatch(/<formula1>OR\(ISBLANK\(B3\),ISTEXT\(B3\)\)<\/formula1>/)
+	})
+
+	it("reads a range list's formulas for the top-left around its ranges, not its first range's", async () => {
+		const rows =
+			'<table:table-row><table:table-cell/><table:table-cell table:content-validation-name="v1"/></table:table-row>' +
+			'<table:table-row><table:table-cell table:content-validation-name="v1"/><table:table-cell/></table:table-row>'
+		const read = await open(validation("of:is-true-formula([.A1]&gt;1)", "S.A1") + table("S", rows))
+
+		expect(read.sections).toContain("<formula1>A1&gt;1</formula1>")
+
+		const shown = await open(
+			table("S", rows).replace(
+				"</table:table>",
+				'<calcext:conditional-formats><calcext:conditional-format calcext:target-range-address="S.B1 S.A2"><calcext:condition calcext:apply-style-name="Bad" calcext:value="formula-is([.A1]&gt;0)" calcext:base-cell-address="S.A1"/></calcext:conditional-format></calcext:conditional-formats></table:table>'
+			)
+		)
+
+		expect(shown.sections).toContain("<formula>A1&gt;0</formula>")
 	})
 
 	it("moves whole columns and rows only along their own axis", () => {

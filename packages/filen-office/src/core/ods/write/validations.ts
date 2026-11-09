@@ -1,3 +1,4 @@
+import { minOf } from "../../arrays"
 import type { SheetRange } from "../../sheet/protocol"
 import type { XlsxSheetModel, XlsxWorkbookModel } from "../../xlsx/model/types"
 import { parseRangeRef } from "../../xlsx/write/text"
@@ -172,11 +173,15 @@ function column(index: number): string {
 	return text
 }
 
-// A table:content-validation for a rule on `sheet`, its formulas relative to its first range's first cell.
+// A table:content-validation for a rule on `sheet`. Its formulas are SpreadsheetML's, written for the top-left cell of
+// the rectangle around its ranges (not its first range's, which a range list need not list first): that cell is the
+// base cell (§19.584).
 function element(rule: Rule, name: string, sheet: string): string {
-	const first = rule.ranges[0]
 	const quoted = /^[A-Za-z_][A-Za-z0-9_]*$/.test(sheet) ? sheet : `'${sheet.replaceAll("'", "''")}'`
-	const base = first === undefined ? undefined : `${quoted}.${column(first.startCol)}${first.startRow + 1}`
+	const base =
+		rule.ranges.length === 0
+			? undefined
+			: `${quoted}.${column(minOf(rule.ranges.map(range => range.startCol)))}${minOf(rule.ranges.map(range => range.startRow)) + 1}`
 	const test = condition(rule)
 	const attributes = rule.attributes
 	const list = (attributes.get("type") ?? "") === "list"

@@ -1,3 +1,4 @@
+import { minOf } from "../../arrays"
 import type { SheetStyles } from "../../sheet/style/resolve"
 import type { XlsxColor, XlsxDxf, XlsxStyleTable } from "../../xlsx/model/types"
 import { parseRangeRef } from "../../xlsx/write/text"
@@ -293,9 +294,7 @@ export function sheetConditions(sections: readonly string[], sheet: string, styl
 
 			return range === null || range === undefined ? [] : [range]
 		})
-		const first = ranges[0]
-
-		if (first === undefined) {
+		if (ranges.length === 0) {
 			lost += children(document, root, "cfRule").length
 
 			continue
@@ -308,7 +307,8 @@ export function sheetConditions(sections: readonly string[], sheet: string, styl
 					`${name}.${column(range.startCol)}${range.startRow + 1}${range.startRow === range.endRow && range.startCol === range.endCol ? "" : `:${name}.${column(range.endCol)}${range.endRow + 1}`}`
 			)
 			.join(" ")
-		const base = `${name}.${column(first.startCol)}${first.startRow + 1}`
+		// SpreadsheetML's formulas are for the top-left cell of the rectangle around the ranges: the base cell.
+		const base = `${name}.${column(minOf(ranges.map(range => range.startCol)))}${minOf(ranges.map(range => range.startRow)) + 1}`
 		const rules = children(document, root, "cfRule").sort(
 			(a, b) => Number(document.attribute(a, "priority") ?? "0") - Number(document.attribute(b, "priority") ?? "0")
 		)

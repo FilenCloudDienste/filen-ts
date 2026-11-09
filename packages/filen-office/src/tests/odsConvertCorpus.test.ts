@@ -11,7 +11,9 @@ import { exportShown, sheetOffices, sheetProfile, type ShownWorkbook } from "./o
 
 // Every corpus workbook converted (xlsx family → .ods, .ods → .xlsx), each output checked. Opt-in
 // (FILEN_OFFICE_CONVERT_CORPUS=1), and each oracle where it is named:
-// - FILEN_OFFICE_ODFVALIDATOR=<odfvalidator jar>: no .ods output has an error;
+// - FILEN_OFFICE_ODFVALIDATOR=<odfvalidator jar>: no .ods output has an error as an extended document (-e; ODF 1.3
+//   Part 3 §2.2.2, foreign elements and attributes §3.17), which it is: LibreOffice's calcext/loext markup, declared
+//   and placed where LibreOffice writes it (the default, -c, refuses any foreign markup, LibreOffice's own files' too);
 // - FILEN_OFFICE_JING=<jing jar> and FILEN_OFFICE_ODF_RNG=<OpenDocument-v1.3-schema.rng>: every part of every .ods
 //   output is valid ODF 1.3;
 // - FILEN_OFFICE_OOXML_VALIDATOR (oracles/openXmlSdk.ts): no .xlsx output has an error;
@@ -116,7 +118,7 @@ describe.skipIf(!RUN || !existsSync(CORPUS_DIR))("conversions of the corpus work
 		const errors: string[] = []
 
 		for (let start = 0; start < files.length; start += 50) {
-			const run = spawnSync("java", ["-jar", ODF_VALIDATOR, ...files.slice(start, start + 50)], {
+			const run = spawnSync("java", ["-jar", ODF_VALIDATOR, "-e", ...files.slice(start, start + 50)], {
 				encoding: "utf8",
 				maxBuffer: 1 << 28
 			})
