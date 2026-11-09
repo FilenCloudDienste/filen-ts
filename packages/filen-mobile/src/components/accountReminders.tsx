@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react"
 import { useTranslation } from "react-i18next"
 import { usePathname } from "expo-router"
 import { router } from "@/lib/router"
-import { run } from "@filen/shared"
+import { isStorageOverLimit, run } from "@filen/shared"
 import useAccountQuery from "@/queries/useAccount.query"
 import useAppStore from "@/stores/useApp.store"
 import prompts from "@/lib/prompts"
@@ -78,7 +78,7 @@ const AccountReminders = () => {
 				return
 			}
 
-			if (data.storageUsed > data.maxStorage) {
+			if (isStorageOverLimit(data)) {
 				await prompts.info({
 					title: t("storage_exceeded_title"),
 					message: t("storage_exceeded_message"),

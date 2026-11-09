@@ -90,6 +90,7 @@ export const {
 	errorMessage,
 	validateUuid,
 	isValidNickname,
+	isStorageOverLimit,
 	CODE_FILE_EXTENSIONS,
 	resolveFileKind,
 	verdictChangesKind,
