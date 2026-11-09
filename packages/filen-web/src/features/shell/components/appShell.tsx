@@ -18,6 +18,7 @@ import { VideosSidebar } from "@/features/videos/components/videosSidebar"
 import { SyncSidebar } from "@/features/sync/components/syncSidebar"
 import { MountsSidebar } from "@/features/mounts/components/mountsSidebar"
 import { AccountReminders } from "@/features/shell/components/accountReminders"
+import { AnnouncementStrip } from "@/features/shell/components/announcementStrip"
 import { SyncHost } from "@/features/notes/components/syncHost"
 import { ChatsSyncHost } from "@/features/chats/components/syncHost"
 import { SocketHost } from "@/features/shell/components/socketHost"
@@ -130,6 +131,8 @@ export function AppShell() {
 			<AssistantNavigationBridge />
 			{IS_DESKTOP ? <DesktopHost /> : null}
 			<div className="h-[env(titlebar-area-height,0px)] shrink-0 app-region-drag" />
+			{/* Maintenance notice or service announcement from the remote config; nothing when there is neither. */}
+			<AnnouncementStrip />
 			{/* A sibling of the row, never its wrapper (see sidebarDrawer.tsx); the panel goes to exactly one
 			    of the two slots. */}
 			<SidebarDrawer
