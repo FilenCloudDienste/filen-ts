@@ -579,8 +579,9 @@ export function DocxEditView({
 	const [paneRow, setPaneRow] = useState<HTMLDivElement | null>(null)
 	const miniRef = useRef<HTMLDivElement | null>(null)
 	const contextMenuRef = useRef<HTMLDivElement | null>(null)
-	// The press in the document was the mouse's primary button: its release may show the Mini toolbar.
-	const mousePressRef = useRef(false)
+	// The story being edited as the mouse's primary button pressed on the pages (null for any other press): its
+	// release may show the Mini toolbar.
+	const mousePressRef = useRef<number | null>(null)
 	// The context menu closed for a press on the Mini toolbar, which keeps it (and the focus it took).
 	const keepMiniRef = useRef(false)
 
@@ -1575,13 +1576,14 @@ export function DocxEditView({
 	}
 
 	// After a mouse selection, read in the next frame (Mobile view's selection follows the browser's own): above the
-	// line its moving end is on, at the pointer.
-	const showMiniForSelection = (x: number, y: number): void => {
+	// line its moving end is on, at the pointer. Not after a double click that moved to another story (a header
+	// opened, the body gone back to): Word shows none for it, and it would cover the header's chip.
+	const showMiniForSelection = (x: number, y: number, story: number): void => {
 		requestAnimationFrame(() => {
 			const handle = handleRef.current
 			const current = editor?.selection()
 
-			if (handle === null || current === undefined || current.empty || current.node) {
+			if (handle === null || current === undefined || current.empty || current.node || editor?.activeStory !== story) {
 				return
 			}
 
@@ -1757,7 +1759,15 @@ export function DocxEditView({
 						}}
 						onPointerDownCapture={event => {
 							setTouch(event.pointerType === "touch" || event.pointerType === "pen")
-							mousePressRef.current = event.pointerType === "mouse" && event.button === 0 && !inReview(event.target)
+							// A press in a popup portaled from here (a balloon's menu) is not one on the pages.
+							mousePressRef.current =
+								event.pointerType === "mouse" &&
+								event.button === 0 &&
+								event.target instanceof Node &&
+								event.currentTarget.contains(event.target) &&
+								!inReview(event.target)
+									? (editor?.activeStory ?? null)
+									: null
 
 							// Ctrl+Click (Cmd+Click on a Mac) follows a link, placing no caret; a plain click edits it (Word's).
 							if (
@@ -1795,17 +1805,17 @@ export function DocxEditView({
 							// A selection made with the mouse (dragged, a word or paragraph clicked, Shift+click) shows the Mini
 							// toolbar; one the keyboard makes never does.
 							if (
-								mousePressRef.current &&
+								mousePressRef.current !== null &&
 								event.pointerType === "mouse" &&
 								event.button === 0 &&
 								painter === "off" &&
 								press === null &&
 								editable
 							) {
-								showMiniForSelection(event.clientX, event.clientY)
+								showMiniForSelection(event.clientX, event.clientY, mousePressRef.current)
 							}
 
-							mousePressRef.current = false
+							mousePressRef.current = null
 						}}
 						// Touch gets the touch menu (below), not this menu's long press.
 						onTouchStartCapture={event => {

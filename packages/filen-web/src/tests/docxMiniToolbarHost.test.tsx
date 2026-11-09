@@ -85,12 +85,13 @@ const { DocxEditView } = await import("@/features/preview/components/docxEditor"
 
 registerAllActions()
 
-const BYTES = new Uint8Array(readFileSync(join(process.cwd(), "../filen-office/src/tests/fixtures/01-plain.docx")))
+const fixture = (name: string): Uint8Array => new Uint8Array(readFileSync(join(process.cwd(), "../filen-office/src/tests/fixtures", name)))
+const BYTES = fixture("01-plain.docx")
 
-async function openEditor(): Promise<PagedEditor> {
+async function openEditor(bytes: Uint8Array = BYTES): Promise<PagedEditor> {
 	render(
 		<DocxEditView
-			bytes={BYTES}
+			bytes={bytes}
 			alt="report.docx"
 			writable
 			renamed={false}
@@ -201,6 +202,31 @@ describe("The Word editor's Mini toolbar", () => {
 		fireEvent.pointerUp(page, { pointerType: "mouse", button: 0, isPrimary: true })
 		await nextFrame()
 		expect(miniToolbar()).toBeNull()
+	})
+
+	it("does not appear for the double click that opens a header", async () => {
+		const editor = await openEditor(fixture("03-header-footer-footnotes.docx"))
+		const page = screen.getByRole("textbox", { name: "report.docx" })
+		const header = editor.session.context.model.stories.findIndex(story => story.kind === "header")
+
+		expect(header).toBeGreaterThanOrEqual(0)
+		fireEvent.pointerDown(page, { pointerType: "mouse", button: 0, isPrimary: true, clientX: 200, clientY: 100 })
+		// The press opens the header and selects a word of it, as the double click does.
+		act(() => {
+			expect(editor.enterStory(header, 0)).toBe(true)
+		})
+		selectStart(editor)
+		expect(editor.selection().empty).toBe(false)
+		fireEvent.pointerUp(page, { pointerType: "mouse", button: 0, isPrimary: true, clientX: 200, clientY: 100 })
+		await nextFrame()
+		expect(miniToolbar()).toBeNull()
+
+		// A selection made in the header once it is open shows it.
+		fireEvent.pointerDown(page, { pointerType: "mouse", button: 0, isPrimary: true, clientX: 200, clientY: 100 })
+		selectStart(editor)
+		fireEvent.pointerUp(page, { pointerType: "mouse", button: 0, isPrimary: true, clientX: 240, clientY: 100 })
+		await nextFrame()
+		expect(miniToolbar()).not.toBeNull()
 	})
 
 	it("does not appear for a touch selection", async () => {

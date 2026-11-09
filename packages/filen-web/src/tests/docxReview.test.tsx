@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { TextSelection } from "prosemirror-state"
 import { docxComments, type PagedEditor } from "@filen/office/core/docx/paged"
 import { reviewView } from "@/features/preview/components/docxReview.logic"
 import type { FontExtents, TextMeasurer } from "@filen/office/core/text"
@@ -287,6 +288,37 @@ describe("comments in the margin", () => {
 		await waitFor(() => {
 			expect(balloons()).toHaveLength(1)
 		})
+	})
+
+	it("shows no Mini toolbar for a press in a balloon's menu, with text selected in the document", async () => {
+		const editor = await openEditor()
+
+		await waitFor(() => {
+			expect(balloons()).toHaveLength(2)
+		})
+		act(() => {
+			editor.dispatch(editor.state.tr.setSelection(TextSelection.create(editor.state.doc, 2, 5)))
+		})
+		expect(editor.selection().empty).toBe(false)
+
+		const balloon = firstOf(balloons())
+
+		fireEvent.click(firstOf(await within(balloon).findAllByRole("button", { name: "Comment actions" })))
+
+		const resolve = await screen.findByRole("menuitem", { name: "Resolve" })
+
+		fireEvent.pointerDown(resolve, { pointerType: "mouse", button: 0, isPrimary: true })
+		fireEvent.pointerUp(resolve, { pointerType: "mouse", button: 0, isPrimary: true })
+		fireEvent.click(resolve)
+		await act(
+			() =>
+				new Promise<void>(resolve => {
+					requestAnimationFrame(() => {
+						resolve()
+					})
+				})
+		)
+		expect(screen.queryByRole("toolbar", { name: "Mini toolbar", hidden: true })).toBeNull()
 	})
 
 	it("offers no reply, edit or delete while the document is view-only", async () => {
