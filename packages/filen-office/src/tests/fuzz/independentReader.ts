@@ -960,6 +960,161 @@ export function relationshipsOf(bytes: Uint8Array | undefined): Map<string, Rela
 	return out
 }
 
+const O = "urn:schemas-microsoft-com:office:office"
+
+// Values of the relationships-namespace attributes of a part, and of VML's o:relid.
+function relationshipIdsUsed(bytes: Uint8Array): Set<string> {
+	const out = new Set<string>()
+	const root = parseXml(bytes).root
+
+	if (root === undefined) return out
+
+	for (const element of [root, ...descendants(root)])
+		for (const attribute of element.attributes)
+			if (attribute.ns === R || (attribute.ns === O && attribute.local === "relid")) out.add(attribute.value)
+
+	return out
+}
+
+// The part a relationships part belongs to ("" for the package's).
+function relationshipsOwner(entry: string): string | undefined {
+	const match = /^(.*?)_rels\/([^/]*)\.rels$/.exec(entry)
+
+	return match === null ? undefined : `${match[1] ?? ""}${match[2] ?? ""}`
+}
+
+// The entry an internal relationship of `owner` targets, lower-cased (part names compare case-insensitively).
+function targetEntry(owner: string, target: string): string {
+	const path = target.startsWith("/") ? target.slice(1) : owner.replace(/[^/]*$/, "") + target
+	const segments: string[] = []
+
+	for (const segment of path.split("/")) {
+		if (segment === "..") segments.pop()
+		else if (segment !== "." && segment !== "") segments.push(segment)
+	}
+
+	const joined = segments.join("/")
+
+	try {
+		return decodeURIComponent(joined).toLowerCase()
+	} catch {
+		return joined.toLowerCase()
+	}
+}
+
+// A package's entry names and their data.
+export interface PackageView {
+	readonly names: readonly string[]
+	read(name: string): Uint8Array | undefined
+}
+
+// Ids `part` of `view` uses: in its markup (relationshipIdsUsed), and through the SmartArt data parts its
+// relationships point at, which name their drawing's relationship of `part` by dsp:dataModelExt relId.
+export function partRelationshipIdsUsed(view: PackageView, part: string): Set<string> {
+	const bytes = view.read(part)
+	const out = bytes === undefined ? new Set<string>() : relationshipIdsUsed(bytes)
+
+	for (const relationship of relationshipsOf(view.read(part.replace(/([^/]+)$/, "_rels/$1.rels"))).values()) {
+		if (relationship.external || !relationship.type.endsWith("/diagramData")) continue
+
+		const key = targetEntry(part, relationship.target)
+		const name = view.names.find(entry => entry.toLowerCase() === key)
+		const root = name === undefined ? undefined : parseXml(view.read(name) ?? new Uint8Array()).root
+
+		if (root === undefined) continue
+
+		for (const element of descendants(root)) {
+			const id = element.local === "dataModelExt" ? attribute(element, "relId") : null
+
+			if (id !== null) out.add(id)
+		}
+	}
+
+	return out
+}
+
+interface Inbound {
+	readonly owner: string
+	readonly rels: string
+	readonly id: string
+}
+
+// The source entries a save may leave out: parts every source relationship to which the save dropped once
+// nothing in its part used it (Word drops such relationships and the parts only they point at), and the
+// relationships parts of parts left out that way, transitively. A part no source relationship targets, or one a
+// relationship of the output still targets, is never among them.
+export function droppedParts(source: PackageView, output: PackageView): Set<string> {
+	const outputNames = new Set(output.names)
+	const inbound = new Map<string, Inbound[]>()
+	const outputTargets = new Set<string>()
+	// The ids of the output's relationships parts.
+	const outputIds = new Map<string, Set<string>>()
+	const edges = (view: PackageView, onEdge: (entry: string, edge: Inbound) => void): void => {
+		for (const rels of view.names) {
+			const owner = relationshipsOwner(rels)
+
+			if (owner === undefined) continue
+
+			const relationships = relationshipsOf(view.read(rels))
+
+			if (view === output) outputIds.set(rels, new Set(relationships.keys()))
+
+			for (const [id, relationship] of relationships)
+				if (!relationship.external) onEdge(targetEntry(owner, relationship.target), { owner, rels, id })
+		}
+	}
+
+	edges(source, (entry, edge) => {
+		const list = inbound.get(entry)
+
+		if (list === undefined) inbound.set(entry, [edge])
+		else list.push(edge)
+	})
+	edges(output, entry => outputTargets.add(entry))
+
+	const lost = source.names.filter(name => !outputNames.has(name))
+	const allowed = new Set<string>()
+	const usedIds = new Map<string, Set<string>>()
+	const used = (view: PackageView, part: string): Set<string> => {
+		const key = `${view === source ? "s" : "o"}:${part}`
+		let ids = usedIds.get(key)
+
+		if (ids === undefined) {
+			ids = partRelationshipIdsUsed(view, part)
+			usedIds.set(key, ids)
+		}
+
+		return ids
+	}
+	// Whether the save dropped `edge` once nothing in its part used it, or left out the part it belongs to.
+	const unused = (edge: Inbound): boolean => {
+		if (allowed.has(edge.owner)) return true
+		if (!outputNames.has(edge.owner) || outputIds.get(edge.rels)?.has(edge.id) === true) return false
+
+		return used(source, edge.owner).has(edge.id) && !used(output, edge.owner).has(edge.id)
+	}
+
+	for (let grown = true; grown;) {
+		grown = false
+
+		for (const entry of lost) {
+			if (allowed.has(entry)) continue
+
+			const owner = relationshipsOwner(entry)
+			const key = entry.toLowerCase()
+			const to = inbound.get(key) ?? []
+			const left = owner === undefined ? to.length > 0 && !outputTargets.has(key) && to.every(unused) : allowed.has(owner)
+
+			if (left) {
+				allowed.add(entry)
+				grown = true
+			}
+		}
+	}
+
+	return allowed
+}
+
 // Numbering instances, and problems: duplicate instances, instances of missing abstracts, abstracts after instances.
 export function numberingOf(bytes: Uint8Array | undefined): { ids: Set<string>; problems: string[] } {
 	const ids = new Set<string>()

@@ -17,6 +17,7 @@ import {
 } from "@filen/office/core/docx"
 import {
 	DocxEditorSession,
+	NO_SOURCE,
 	docxSchema,
 	openDocxEditContext,
 	survivorsOf,
@@ -24,6 +25,7 @@ import {
 	type DocxEditContext,
 	type DocxEditorCommand,
 	type MarkerList,
+	type MarkerNodeAttrs,
 	type NewStoryKind,
 	type DocxEditorOptions
 } from "@filen/office/core/docx/edit"
@@ -434,12 +436,45 @@ function toggleValue(mark: { readonly attrs: Readonly<Record<string, unknown>> }
 const FILE_MARKER_NAMES: Readonly<Record<string, string>> = { permissionStart: "permStart", permissionEnd: "permEnd" }
 
 const MARKERS =
-	/<w:(bookmarkStart|bookmarkEnd|commentRangeStart|commentRangeEnd|commentReference|permStart|permEnd|moveFromRangeStart|moveToRangeStart)\b[^>]*?w:id="([^"]*)"/g
+	/<w:(bookmarkStart|bookmarkEnd|commentRangeStart|commentRangeEnd|commentReference|permStart|permEnd|moveFromRangeStart|moveToRangeStart)\b([^>]*)>/g
+const MARKER_ID = /\bw:id="([^"]*)"/
+const MARKER_NAME = /\bw:name="([^"]*)"/
+const MOVE_STARTS: ReadonlySet<string> = new Set(["moveFromRangeStart", "moveToRangeStart"])
 
-// Range markers and comment references in written bytes, keyed "<element name>:<w:id>", added to `out`.
-export function markerCounts(bytes: Uint8Array, out = new Map<string, number>()): Map<string, number> {
+// The key of a marker of the file element `kind`: "<kind>:<w:id>", or "<kind>:name:<w:name>" for a new move range
+// start (the save writes one with a w:id of its own, a revision id, and keeps its name).
+function markerKey(kind: string, id: string, newMove: string | null): string {
+	return newMove === null ? `${kind}:${id}` : `${kind}:name:${newMove}`
+}
+
+// The move range starts of written bytes, as "<kind>:<w:id>:<w:name>".
+export function moveStarts(bytes: Uint8Array): Set<string> {
+	const out = new Set<string>()
+
 	for (const match of new TextDecoder().decode(bytes).matchAll(MARKERS)) {
-		const key = `${match[1]}:${match[2]}`
+		const attributes = match[2] ?? ""
+
+		if (MOVE_STARTS.has(match[1] ?? ""))
+			out.add(`${match[1] ?? ""}:${MARKER_ID.exec(attributes)?.[1] ?? ""}:${MARKER_NAME.exec(attributes)?.[1] ?? ""}`)
+	}
+
+	return out
+}
+
+// Range markers and comment references in written bytes, keyed by markerKey, added to `out`. With
+// `sourceMoves` (moveStarts of the source), the bytes are a save's: a move range start not among them is new.
+export function markerCounts(bytes: Uint8Array, out = new Map<string, number>(), sourceMoves?: ReadonlySet<string>): Map<string, number> {
+	for (const match of new TextDecoder().decode(bytes).matchAll(MARKERS)) {
+		const kind = match[1] ?? ""
+		const attributes = match[2] ?? ""
+		const id = MARKER_ID.exec(attributes)?.[1]
+
+		if (id === undefined) continue
+
+		const name = MARKER_NAME.exec(attributes)?.[1] ?? ""
+		const newMove =
+			sourceMoves !== undefined && MOVE_STARTS.has(kind) && name !== "" && !sourceMoves.has(`${kind}:${id}:${name}`) ? name : null
+		const key = markerKey(kind, id, newMove)
 
 		out.set(key, (out.get(key) ?? 0) + 1)
 	}
@@ -466,7 +501,7 @@ const BYTE_COPIES: ReadonlySet<NodeType> = new Set([
 ])
 
 // Range markers and comment references a session's story is written with (inline, in block and story lists,
-// in atoms and locked blocks kept as bytes), keyed "<file element name>:<w:id>" as the damage fuzz counts a
+// in atoms and locked blocks kept as bytes), keyed by markerKey as the damage fuzz counts a
 // written file's. `textBoxes` false leaves out those in the text boxes of drawings kept as bytes.
 export function editorMarkers(session: DocxEditorSession, textBoxes = true): Map<string, number> {
 	const out = new Map<string, number>()
@@ -477,7 +512,10 @@ export function editorMarkers(session: DocxEditorSession, textBoxes = true): Map
 		for (const marker of list as MarkerList) {
 			if (marker.id === null) continue
 
-			const key = `${FILE_MARKER_NAMES[marker.kind] ?? marker.kind}:${marker.id}`
+			const kind = FILE_MARKER_NAMES[marker.kind] ?? marker.kind
+			const name = (marker as Partial<MarkerNodeAttrs>).name
+			const newMove = marker.src === NO_SOURCE && MOVE_STARTS.has(kind) && typeof name === "string" && name !== "" ? name : null
+			const key = markerKey(kind, marker.id, newMove)
 
 			out.set(key, (out.get(key) ?? 0) + 1)
 		}

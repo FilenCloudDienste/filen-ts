@@ -15,6 +15,7 @@ import {
 	isSaveRefusal,
 	isSuspended,
 	markerCounts,
+	moveStarts,
 	withoutTextBoxes,
 	memoisedProof,
 	openEditable,
@@ -286,6 +287,8 @@ interface SourceFacts {
 	readonly markers: Map<string, number>
 	// The markers outside text boxes.
 	readonly keptMarkers: Map<string, number>
+	// The move range starts of the main part (harness.moveStarts).
+	readonly moves: Set<string>
 	// Ids Word wants unique (w14:paraId, w:sdt's w:id, wp:docPr's id) that repeat in the main part, and how often.
 	readonly repeatedIds: Map<string, number>
 	readonly parts: Map<string, { numbering: Set<string>; problems: string[]; styles: Set<string> | undefined; styleProblems: string[] }>
@@ -313,6 +316,10 @@ function read(entries: Map<string, Reader.ZipEntry>, name: string): Uint8Array |
 	const entry = entries.get(name)
 
 	return entry === undefined ? undefined : Reader.entryData(entry)
+}
+
+function packageOf(entries: Map<string, Reader.ZipEntry>): Reader.PackageView {
+	return { names: [...entries.keys()], read: name => read(entries, name) }
 }
 
 function relationshipsName(part: string): string {
@@ -376,23 +383,11 @@ function sourceFacts(input: Uint8Array, mainPart: string): SourceFacts {
 			: Reader.violations(Reader.parseXml(document), { numIds: parts.numbering, styleIds: parts.styles, relationships }).counts,
 		markers: big ? new Map() : markerCounts(document),
 		keptMarkers: big ? new Map() : markerCounts(withoutTextBoxes(document)),
+		moves: big ? new Set() : moveStarts(document),
 		repeatedIds: big ? new Map() : Reader.repeatedIds(document),
 		parts: new Map([[main, parts]]),
 		schemaErrors: undefined
 	}
-}
-
-// Values of the relationships-namespace attributes of a part.
-function relationshipIdsUsed(bytes: Uint8Array): Set<string> {
-	const out = new Set<string>()
-	const root = Reader.parseXml(bytes).root
-
-	if (root === undefined) return out
-
-	for (const element of [root, ...Reader.descendants(root)])
-		for (const attribute of element.attributes) if (attribute.ns === Reader.R) out.add(attribute.value)
-
-	return out
 }
 
 interface Damage {
@@ -427,12 +422,15 @@ async function verifySaved(
 	const output = Reader.zipEntries(saved.bytes)
 	const changed = new Set(saved.changedParts.map(part => part.replace(/^\//, "")))
 
-	// Untouched entries keep their raw bytes.
+	// Untouched entries keep their raw bytes; an entry goes only with the last relationship to it (droppedParts).
+	const left = Reader.droppedParts(packageOf(source.entries), packageOf(output))
+
 	for (const [entry, before] of source.entries) {
 		const after = output.get(entry)
 
-		if (after === undefined) damage.finding("entryLost", { entry, log })
-		else if (!changed.has(entry) && !Reader.sameRaw(before, after)) damage.finding("untouchedChanged", { entry, log })
+		if (after === undefined) {
+			if (!left.has(entry)) damage.finding("entryLost", { entry, log })
+		} else if (!changed.has(entry) && !Reader.sameRaw(before, after)) damage.finding("untouchedChanged", { entry, log })
 	}
 
 	for (const entry of output.keys()) if (!source.entries.has(entry) && !changed.has(entry)) damage.finding("unexpectedEntry", { entry })
@@ -496,12 +494,14 @@ async function verifySaved(
 	for (const id of relationshipsOut.keys())
 		if (id.endsWith("#DUP") && !source.relationships.has(id)) damage.finding("relsDuplicateId", { id })
 
-	// An external hyperlink relationship goes when the save no longer uses one the source used (Word drops them).
+	// A relationship goes when the save no longer uses one the source used (Word drops a relationship nothing uses:
+	// a link, picture, chart or embedded object an edit took out); one the source never used stays.
 	let used: { before: Set<string>; after: Set<string> } | undefined
-	const dropped = (id: string, relationship: Reader.Relationship): boolean => {
-		if (!relationship.external || !relationship.type.endsWith("/hyperlink")) return false
-
-		used ??= { before: relationshipIdsUsed(source.document), after: relationshipIdsUsed(document) }
+	const dropped = (id: string): boolean => {
+		used ??= {
+			before: Reader.partRelationshipIdsUsed(packageOf(source.entries), main),
+			after: Reader.partRelationshipIdsUsed(packageOf(output), main)
+		}
 
 		return used.before.has(id) && !used.after.has(id)
 	}
@@ -509,7 +509,7 @@ async function verifySaved(
 	for (const [id, relationship] of source.relationships) {
 		const after = relationshipsOut.get(id)
 
-		if (after === undefined ? !dropped(id, relationship) : after.target !== relationship.target || after.type !== relationship.type)
+		if (after === undefined ? !dropped(id) : after.target !== relationship.target || after.type !== relationship.type)
 			damage.finding("relChanged", { id })
 	}
 
@@ -560,7 +560,7 @@ async function verifySaved(
 	// box edited in a session of its own is written from it (its fallback copy too), and deleting its drawing
 	// takes them out.
 	const outside = withoutTextBoxes(document)
-	const markers = markerCounts(selftest ? withoutMarker(outside) : outside)
+	const markers = markerCounts(selftest ? withoutMarker(outside) : outside, new Map(), source.moves)
 	const held = source.document.length > BIG ? source.keptMarkers : editorMarkers(session, false)
 	const expected = new Map([...held].filter(([key]) => MARKER_KINDS.has(key.slice(0, key.indexOf(":")))))
 
