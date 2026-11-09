@@ -27,13 +27,13 @@ describe("closeAction", () => {
 
 describe("keepsRendererAlive", () => {
 	it("lets an idle page go", () => {
-		expect(keepsRendererAlive({ unloadHolds: 0, audioPlaying: false, notifications: false })).toBe(false)
+		expect(keepsRendererAlive({ unloadHolds: 0, audioPlaying: false, socketNotifications: false })).toBe(false)
 	})
 
 	it.each([
-		{ unloadHolds: 2, audioPlaying: false, notifications: false },
-		{ unloadHolds: 0, audioPlaying: true, notifications: false },
-		{ unloadHolds: 0, audioPlaying: false, notifications: true }
+		{ unloadHolds: 2, audioPlaying: false, socketNotifications: false },
+		{ unloadHolds: 0, audioPlaying: true, socketNotifications: false },
+		{ unloadHolds: 0, audioPlaying: false, socketNotifications: true }
 	])("keeps %o", state => {
 		expect(keepsRendererAlive(state)).toBe(true)
 	})

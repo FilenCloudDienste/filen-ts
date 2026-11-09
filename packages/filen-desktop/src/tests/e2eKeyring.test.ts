@@ -185,7 +185,7 @@ describe("chain K's synthetic 3.x profile", () => {
 		expect(session.ok && session.userId).toBe(Number(seed.client.userId))
 		expect(session.ok && isSessionBlob(session.blob)).toBe(true)
 		expect(legacyPin(writes)).toBe(seed.pin)
-		expect(legacyPrefs(writes, null)).toEqual({ minimizeToTray: true, startMinimized: true })
+		expect(legacyPrefs(writes, null)).toEqual({ minimizeToTray: true, startMinimized: true, lockAfterSeconds: seed.lockTimeout })
 
 		const stash = legacyStash(writes, Number(seed.client.userId))
 		const other = String(seed.otherUserId)

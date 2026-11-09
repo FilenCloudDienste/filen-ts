@@ -1,5 +1,5 @@
 import { type } from "arktype"
-import { desktopPinSchema } from "@filen/shared/desktopLock"
+import { DESKTOP_LOCK_AFTER_SECONDS, type DesktopLockAfterSeconds, desktopPinSchema } from "@filen/shared/desktopLock"
 import { sessionEnvelopeSchema } from "@filen/shared/session"
 import { convertLegacySession, LEGACY_SESSION_KEYS, LEGACY_USER_ID, type LegacySessionFailure } from "@filen/shared/legacySession"
 import { SESSION_BLOB_MAX_LENGTH } from "../shared/channels.ts"
@@ -17,7 +17,10 @@ export const LEGACY_KEYS = {
 	lockPin: "lockPin",
 	lockTimeout: "lockTimeout",
 	minimizeToTray: "minimizeToTrayEnabled",
-	startMinimized: "startMinimizedEnabled"
+	startMinimized: "startMinimizedEnabled",
+	chatNotifications: "chatNotificationsEnabled",
+	contactNotifications: "contactNotificationsEnabled",
+	notificationSound: "notificationSoundEnabled"
 } as const
 
 type LegacyKey = (typeof LEGACY_KEYS)[keyof typeof LEGACY_KEYS]
@@ -147,6 +150,25 @@ const legacyOptionsSchema = type({ "minimizeToTray?": "boolean", "startMinimized
 export interface LegacyPrefs {
 	minimizeToTray?: boolean
 	startMinimized?: boolean
+	lockAfterSeconds?: DesktopLockAfterSeconds
+	chatNotifications?: boolean
+	contactNotifications?: boolean
+	notificationSound?: boolean
+}
+
+// The old inactivity timeout as the nearest choice offered now that is not longer, so the lock never gets weaker:
+// 1 ("immediately") becomes 1 minute, 15 minutes 10. 7200 is taken as the 3 hours the old settings showed for it.
+// 0 (no lock) or nothing stored keeps the default.
+export function legacyLockAfter(timeout: unknown): DesktopLockAfterSeconds | undefined {
+	if (typeof timeout !== "number" || !(timeout > 0)) {
+		return undefined
+	}
+
+	if (timeout === 7200) {
+		return 10800
+	}
+
+	return DESKTOP_LOCK_AFTER_SECONDS.findLast(choice => choice > 0 && choice <= timeout) ?? 60
 }
 
 // Each setting comes from where the old client acted on it. The old web's localStorage set minimizeToTray in main on
@@ -171,6 +193,21 @@ export function legacyPrefs(snapshot: LegacySnapshot, optionsFile: string | null
 
 	if (startMinimized !== undefined) {
 		prefs.startMinimized = startMinimized
+	}
+
+	const lockAfterSeconds = legacyLockAfter(parseJson(snapshot[LEGACY_KEYS.lockTimeout]))
+
+	if (lockAfterSeconds !== undefined) {
+		prefs.lockAfterSeconds = lockAfterSeconds
+	}
+
+	// Only what the old client stored: one never touched keeps the new default (the old defaults were off).
+	for (const key of ["chatNotifications", "contactNotifications", "notificationSound"] as const) {
+		const value = stored(LEGACY_KEYS[key])
+
+		if (value !== undefined) {
+			prefs[key] = value
+		}
 	}
 
 	return prefs

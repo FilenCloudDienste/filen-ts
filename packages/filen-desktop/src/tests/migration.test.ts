@@ -340,7 +340,7 @@ describe("createMigration", () => {
 		expect(deps.vault.set).toHaveBeenCalledTimes(1)
 		expect(JSON.parse(deps.vault.set.mock.calls[0]?.[0] ?? "")).toMatchObject({ userId: "$bigint:123456n", authInfo: "master-key" })
 		expect(deps.lock.set).toHaveBeenCalledWith("4321")
-		expect(deps.prefs.set).toHaveBeenCalledWith({ minimizeToTray: true, startMinimized: true })
+		expect(deps.prefs.set).toHaveBeenCalledWith({ minimizeToTray: true, startMinimized: true, lockAfterSeconds: 600 })
 		expect(JSON.parse(deps.writeStash.mock.calls[0]?.[0] ?? "")).toMatchObject({ userId: 123456 })
 		expect(deps.wipeLegacy).not.toHaveBeenCalled()
 		expect(deps.removeRcloneConfig).toHaveBeenCalledTimes(1)
@@ -667,7 +667,7 @@ describe("createMigration", () => {
 		const first = setup({ vault: { status: "unreadable" } })
 
 		await expect(first.migration.start()).resolves.toEqual({ pinImported: false })
-		expect(first.deps.prefs.set).toHaveBeenCalledWith({ minimizeToTray: true, startMinimized: true })
+		expect(first.deps.prefs.set).toHaveBeenCalledWith({ minimizeToTray: true, startMinimized: true, lockAfterSeconds: 600 })
 		expect(first.deps.vault.set).not.toHaveBeenCalled()
 		expect(first.deps.writeStash).not.toHaveBeenCalled()
 		expect(first.deps.lock.set).not.toHaveBeenCalled()
@@ -806,7 +806,12 @@ describe("createMigration", () => {
 
 		await migration.start()
 
-		expect(deps.prefs.set).toHaveBeenCalledWith({ minimizeToTray: true, startMinimized: true, launchAtLogin: true })
+		expect(deps.prefs.set).toHaveBeenCalledWith({
+			minimizeToTray: true,
+			startMinimized: true,
+			lockAfterSeconds: 600,
+			launchAtLogin: true
+		})
 		expect(deps.applyLaunchAtLogin).toHaveBeenCalledWith(true)
 		expect(stored()).toMatchObject({ stage: "imported" })
 	})

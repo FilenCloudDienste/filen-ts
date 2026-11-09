@@ -20,6 +20,7 @@ import {
 	shell,
 	Tray,
 	utilityProcess,
+	type WebContents,
 	type WebFrameMain
 } from "electron"
 import { existsSync, readFileSync } from "node:fs"
@@ -40,7 +41,7 @@ import type {
 import { desktopPinSchema } from "@filen/shared/desktopLock"
 import { CHANNELS } from "../shared/channels.ts"
 import type { NativeAggregate } from "../shared/nativeProtocol.ts"
-import { type AppLock, hiddenLockDue, LOCK_AFTER_HIDDEN_MS, loadAppLock } from "./appLock.ts"
+import { type AppLock, inactivityLock, loadAppLock } from "./appLock.ts"
 import { atomicFile, codedError, errorCode } from "./atomicFile.ts"
 import { autostartFile, setAutostart } from "./autostart.ts"
 import { BADGE_DOT_SIZE, badgeDotBitmap } from "./badge.ts"
@@ -843,7 +844,7 @@ function showWindow(): void {
 	}
 
 	// Before anything shows again, so a window hidden through a sleep never shows its page unlocked.
-	lockIfHiddenTooLong()
+	lockInactivity.check()
 
 	if (mainWindow === null) {
 		createWindow()
@@ -905,8 +906,14 @@ function scheduleIdleDestroy(): void {
 	idleTimer = undefined
 
 	const window = mainWindow
-	const idle = () =>
-		!window?.isVisible() && !keepsRendererAlive({ unloadHolds, audioPlaying, notifications: currentPrefs().notifications })
+	const idle = () => {
+		const { chatNotifications, contactNotifications } = currentPrefs()
+
+		return (
+			!window?.isVisible() &&
+			!keepsRendererAlive({ unloadHolds, audioPlaying, socketNotifications: chatNotifications || contactNotifications })
+		)
+	}
 
 	if (window === null || !idle()) {
 		return
@@ -927,6 +934,7 @@ function lockChanged(): void {
 		mainWindow?.webContents.send(CHANNELS.lockChanged, appLock.status())
 	}
 
+	lockInactivity.rearm()
 	applyMenu()
 	applyTrayMenu()
 }
@@ -938,31 +946,43 @@ function lockNow(): void {
 	}
 }
 
-let lockTimer: NodeJS.Timeout | undefined
-// When the window went out of sight (hidden, minimized or destroyed while hidden); null while it is visible.
-let hiddenAt: number | null = null
+// Pointer movement does not count: a pointer drifting across the window must not keep the app unlocked, and it is by
+// far the noisiest input.
+const PASSIVE_INPUT = new Set<string>(["mouseMove", "mouseEnter", "mouseLeave", "pointerMove", "pointerRawUpdate"])
 
-// A window hidden (or minimized) for a while locks, whether or not its page is still alive by then. The timer covers
-// an awake machine; it stops while the machine sleeps, so every way back (showing, resume, screen unlock) also
-// compares the clock.
-function windowHidden(): void {
-	hiddenAt ??= Date.now()
-	clearTimeout(lockTimer)
-	lockTimer = setTimeout(lockNow, Math.max(0, hiddenAt + LOCK_AFTER_HIDDEN_MS - Date.now()))
-}
-
-function windowShown(): void {
-	lockIfHiddenTooLong()
-	hiddenAt = null
-	clearTimeout(lockTimer)
-	lockTimer = undefined
-}
-
-function lockIfHiddenTooLong(): void {
-	if (hiddenLockDue(hiddenAt, Date.now())) {
-		lockNow()
+function onInputEvent(_event: unknown, input: { type: string }): void {
+	if (!PASSIVE_INPUT.has(input.type)) {
+		lockInactivity.activity()
 	}
 }
+
+// The contents the input listener is on; only while the lock can come, so without a PIN, while locked or under
+// Never no input reaches JS at all.
+let inputContents: WebContents | null = null
+
+function listenForInput(listen: boolean): void {
+	const contents = listen ? (mainWindow?.webContents ?? null) : null
+
+	if (contents === inputContents) {
+		return
+	}
+
+	if (inputContents !== null && !inputContents.isDestroyed()) {
+		inputContents.off("input-event", onInputEvent)
+	}
+
+	inputContents = contents
+	contents?.on("input-event", onInputEvent)
+}
+
+// "Lock after": no input in Filen's window for the chosen time, hidden time included. Never (0) still locks at launch,
+// on Lock now and on the OS screen lock.
+const lockInactivity = inactivityLock({
+	lockAfterSeconds: () => currentPrefs().lockAfterSeconds,
+	armed: canLock,
+	lock: lockNow,
+	listen: listenForInput
+})
 
 function hideWindow(window: BrowserWindow): void {
 	// Hiding a fullscreen window leaves an empty fullscreen Space behind on macOS.
@@ -1126,25 +1146,26 @@ function createWindow(): void {
 		}
 	})
 
-	window.on("hide", () => {
-		scheduleIdleDestroy()
-		windowHidden()
-	})
+	window.on("hide", scheduleIdleDestroy)
 	window.on("show", () => {
 		scheduleIdleDestroy()
-		windowShown()
+		lockInactivity.check()
 	})
-	window.on("minimize", windowHidden)
-	window.on("restore", windowShown)
+	window.on("restore", () => {
+		lockInactivity.check()
+	})
 
 	window.on("closed", () => {
 		if (mainWindow === window) {
 			mainWindow = null
 			resetPageState()
+			lockInactivity.rearm()
 		}
 	})
 
 	mainWindow = window
+	// The input listener moves to the new contents.
+	lockInactivity.rearm()
 	void window.loadURL(`${APP_ORIGIN}/`)
 }
 
@@ -1221,13 +1242,15 @@ function openSyncPair(pairId: string): void {
 	}
 }
 
-// Only while the user is elsewhere and wants notifications.
+// Sync and mount alerts, only while the user is elsewhere and wants them.
 function notify(body: string, onClick: () => void): void {
-	if (!currentPrefs().notifications || BrowserWindow.getFocusedWindow() !== null || !Notification.isSupported()) {
+	const { syncNotifications, notificationSound } = currentPrefs()
+
+	if (!syncNotifications || BrowserWindow.getFocusedWindow() !== null || !Notification.isSupported()) {
 		return
 	}
 
-	notification = new Notification({ title: "Filen", body })
+	notification = new Notification({ title: "Filen", body, silent: !notificationSound })
 	notification.on("click", () => {
 		notification = null
 		showWindow()
@@ -1574,9 +1597,14 @@ if (!instanceLock.held) {
 			await applyLaunchAtLogin(patch.launchAtLogin)
 		}
 
+		const previous = store.get().lockAfterSeconds
 		const next = await store.set(patch)
 
 		scheduleIdleDestroy()
+
+		if (next.lockAfterSeconds !== previous) {
+			lockInactivity.rearm()
+		}
 
 		return next
 	})
@@ -1829,14 +1857,14 @@ if (!instanceLock.held) {
 				isPermissionAllowed(permission, requestingOrigin, APP_ORIGIN)
 			)
 
-			// A sleep stops the hidden-window timer; the screen lock is a moment to lock too.
-			powerMonitor.on("resume", lockIfHiddenTooLong)
+			// A sleep stops the inactivity timer; the screen lock is a moment to lock too, under Never as well.
+			powerMonitor.on("resume", lockInactivity.check)
 			// The network comes back after a sleep: the sync engine's socket reconnects now instead of waiting out its
 			// backoff. The page's `online` events reach it through CHANNELS.networkOnline.
 			powerMonitor.on("resume", () => {
 				nativeSupervisor.reconnectSocket()
 			})
-			powerMonitor.on("unlock-screen", lockIfHiddenTooLong)
+			powerMonitor.on("unlock-screen", lockInactivity.check)
 			powerMonitor.on("lock-screen", lockNow)
 
 			// Without its headers the web app cannot run (no cross-origin isolation, no CSP), so a missing file is fatal.
@@ -1868,6 +1896,9 @@ if (!instanceLock.held) {
 			if ((await migration.start()).pinImported) {
 				lockNow()
 			}
+
+			// The migration may have stored a lock-after choice, past the prefs handler.
+			lockInactivity.rearm()
 
 			started = true
 			nativeSupervisor.ensure("launch")

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { AtomicFile } from "../main/atomicFile.ts"
 import {
 	BACKOFF_BASE_MS,
@@ -7,9 +7,9 @@ import {
 	failedAttempt,
 	FREE_ATTEMPTS,
 	hashPin,
-	hiddenLockDue,
+	inactivityLock,
+	inactivityLockDue,
 	loadAppLock,
-	LOCK_AFTER_HIDDEN_MS,
 	normalizeAttempts,
 	parseLockRecord,
 	PIN_HASH_PARAMS,
@@ -56,17 +56,152 @@ function fakeCipher(): VaultCipher & { failDecrypt: boolean } {
 	return cipher
 }
 
-describe("hiddenLockDue", () => {
-	it("locks a window out of sight long enough, by the clock", () => {
-		expect(hiddenLockDue(null, LOCK_AFTER_HIDDEN_MS * 10)).toBe(false)
-		expect(hiddenLockDue(1000, 1000 + LOCK_AFTER_HIDDEN_MS - 1)).toBe(false)
-		expect(hiddenLockDue(1000, 1000 + LOCK_AFTER_HIDDEN_MS)).toBe(true)
+describe("inactivityLockDue", () => {
+	it("locks after the chosen time without input, by the clock", () => {
+		expect(inactivityLockDue(1000, 1000 + 300_000 - 1, 300)).toBe(false)
+		expect(inactivityLockDue(1000, 1000 + 300_000, 300)).toBe(true)
 		// A night asleep: the timer never fired, the clock moved on.
-		expect(hiddenLockDue(1000, 1000 + 8 * 60 * 60 * 1000)).toBe(true)
+		expect(inactivityLockDue(1000, 1000 + 8 * 60 * 60 * 1000, 300)).toBe(true)
+	})
+
+	it("never locks under Never", () => {
+		expect(inactivityLockDue(0, Number.MAX_SAFE_INTEGER, 0)).toBe(false)
 	})
 
 	it("waits after a clock set back", () => {
-		expect(hiddenLockDue(LOCK_AFTER_HIDDEN_MS, 0)).toBe(false)
+		expect(inactivityLockDue(300_000, 0, 60)).toBe(false)
+	})
+})
+
+describe("inactivityLock", () => {
+	beforeEach(() => {
+		vi.useFakeTimers({ now: 1_000_000 })
+	})
+
+	afterEach(() => {
+		vi.useRealTimers()
+	})
+
+	function harness(initial: { seconds: number; armed: boolean }) {
+		const state = { ...initial, locks: 0, listening: [] as boolean[] }
+		const controller = inactivityLock({
+			lockAfterSeconds: () => state.seconds,
+			armed: () => state.armed,
+			lock: () => {
+				state.locks++
+				state.armed = false
+				controller.rearm()
+			},
+			listen: listening => {
+				state.listening.push(listening)
+			}
+		})
+
+		return { state, controller }
+	}
+
+	it("locks once the time passes without input", () => {
+		const { state, controller } = harness({ seconds: 60, armed: true })
+
+		controller.rearm()
+		expect(state.listening.at(-1)).toBe(true)
+		vi.advanceTimersByTime(59_999)
+		expect(state.locks).toBe(0)
+		vi.advanceTimersByTime(1)
+		expect(state.locks).toBe(1)
+		// Locked: input is no longer wanted and no timer is left.
+		expect(state.listening.at(-1)).toBe(false)
+		expect(vi.getTimerCount()).toBe(0)
+	})
+
+	it("pushes the lock back by input with a single timer", () => {
+		const { state, controller } = harness({ seconds: 60, armed: true })
+
+		controller.rearm()
+
+		for (let i = 0; i < 100; i++) {
+			vi.advanceTimersByTime(30_000)
+			controller.activity()
+		}
+
+		expect(state.locks).toBe(0)
+		expect(vi.getTimerCount()).toBe(1)
+		vi.advanceTimersByTime(60_000)
+		expect(state.locks).toBe(1)
+	})
+
+	it("neither listens nor runs a timer without a PIN, while locked or under Never", () => {
+		const unarmed = harness({ seconds: 60, armed: false })
+
+		unarmed.controller.rearm()
+		expect(unarmed.state.listening).toEqual([false])
+		expect(vi.getTimerCount()).toBe(0)
+
+		const never = harness({ seconds: 0, armed: true })
+
+		never.controller.rearm()
+		never.controller.check()
+		vi.advanceTimersByTime(365 * 24 * 60 * 60 * 1000)
+		expect(never.state.listening).toEqual([false])
+		expect(never.state.locks).toBe(0)
+		expect(vi.getTimerCount()).toBe(0)
+	})
+
+	it("starts counting when it starts listening, so an old stamp never locks at once", () => {
+		const { state, controller } = harness({ seconds: 0, armed: true })
+
+		controller.rearm()
+		vi.advanceTimersByTime(60 * 60 * 1000)
+		// Never → 1 minute an hour after the last stamp.
+		state.seconds = 60
+		controller.rearm()
+		expect(state.locks).toBe(0)
+		vi.advanceTimersByTime(60_000)
+		expect(state.locks).toBe(1)
+	})
+
+	it("counts the remaining time on a shorter choice", () => {
+		const { state, controller } = harness({ seconds: 3600, armed: true })
+
+		controller.rearm()
+		vi.advanceTimersByTime(4 * 60_000)
+		state.seconds = 300
+		controller.rearm()
+		vi.advanceTimersByTime(60_000 - 1)
+		expect(state.locks).toBe(0)
+		vi.advanceTimersByTime(1)
+		expect(state.locks).toBe(1)
+	})
+
+	it("locks on the way back when the clock moved on while the timer slept", () => {
+		const { state, controller } = harness({ seconds: 300, armed: true })
+
+		controller.rearm()
+		// A sleep: wall clock forward, the timer not fired.
+		vi.setSystemTime(Date.now() + 2 * 60 * 60 * 1000)
+		controller.check()
+		expect(state.locks).toBe(1)
+	})
+
+	it("does not lock on the way back before the time is up", () => {
+		const { state, controller } = harness({ seconds: 300, armed: true })
+
+		controller.rearm()
+		vi.advanceTimersByTime(60_000)
+		controller.check()
+		expect(state.locks).toBe(0)
+	})
+
+	it("re-counts from now after the clock was set back", () => {
+		const { state, controller } = harness({ seconds: 60, armed: true })
+
+		controller.rearm()
+		vi.setSystemTime(Date.now() - 24 * 60 * 60 * 1000)
+		vi.advanceTimersByTime(60_000)
+		// The first wakeup finds the stamp in the future and restarts the period from the new clock.
+		expect(state.locks).toBe(0)
+		vi.advanceTimersByTime(60_000)
+		expect(state.locks).toBe(1)
 	})
 })
 

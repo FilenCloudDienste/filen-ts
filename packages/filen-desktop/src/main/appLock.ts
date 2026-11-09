@@ -17,13 +17,91 @@ export const FREE_ATTEMPTS = 5
 export const BACKOFF_BASE_MS = 30 * 1000
 export const BACKOFF_MAX_MS = 60 * 60 * 1000
 
-// How long the window may stay hidden (or minimized) before the app locks itself.
-export const LOCK_AFTER_HIDDEN_MS = 5 * 60 * 1000
+// Whether `lockAfterSeconds` (0: never) without input have passed since `lastActivity`. By the clock, so time asleep
+// counts; a clock set back counts as not yet.
+export function inactivityLockDue(lastActivity: number, now: number, lockAfterSeconds: number): boolean {
+	return lockAfterSeconds > 0 && now - lastActivity >= lockAfterSeconds * 1000
+}
 
-// Whether a window out of sight since `hiddenAt` (null: in sight) has been so long enough to lock. By the clock, so time
-// asleep counts; a clock set back counts as not yet.
-export function hiddenLockDue(hiddenAt: number | null, now: number): boolean {
-	return hiddenAt !== null && now - hiddenAt >= LOCK_AFTER_HIDDEN_MS
+export interface InactivityLockDeps {
+	lockAfterSeconds(): number
+	// A PIN is set and the app is unlocked.
+	armed(): boolean
+	lock(): void
+	// Input is wanted (true) or not (false); called on every rearm, so it also picks up a recreated window.
+	listen(listening: boolean): void
+	now?: () => number
+}
+
+export interface InactivityLock {
+	// Input in a window: only a stamp, never a timer.
+	activity: () => void
+	// Locks when the time is up. Every way back (show, restore, resume, screen unlock) asks, since a sleeping machine
+	// stops the timer.
+	check: () => void
+	// After anything that changes whether or when it can lock: the pref, the lock state, the PIN, a window.
+	rearm: () => void
+}
+
+// One timer while a lock can come (a PIN, unlocked, not Never), none otherwise. It fires when the window would expire
+// from the last stamp; if input moved the stamp meanwhile it re-arms for the rest, so it wakes at most once per period
+// however much input there is. Hidden time has no input, so it counts. Starting to listen (launch unlock, a new PIN,
+// leaving Never) counts as activity, so an old stamp never locks at once.
+export function inactivityLock(deps: InactivityLockDeps): InactivityLock {
+	const now = deps.now ?? Date.now
+	let lastActivity = now()
+	let listening = false
+	let timer: NodeJS.Timeout | undefined
+
+	function arm(at: number): void {
+		clearTimeout(timer)
+		timer = undefined
+
+		if (!listening) {
+			return
+		}
+
+		// A clock set back: the stamp would lie in the future and the lock never come.
+		if (lastActivity > at) {
+			lastActivity = at
+		}
+
+		const remaining = lastActivity + deps.lockAfterSeconds() * 1000 - at
+
+		if (remaining <= 0) {
+			deps.lock()
+
+			return
+		}
+
+		timer = setTimeout(() => {
+			timer = undefined
+			arm(now())
+		}, remaining)
+	}
+
+	return {
+		activity: () => {
+			lastActivity = now()
+		},
+		check: () => {
+			if (deps.armed() && inactivityLockDue(lastActivity, now(), deps.lockAfterSeconds())) {
+				deps.lock()
+			}
+		},
+		rearm: () => {
+			const next = deps.armed() && deps.lockAfterSeconds() > 0
+			const at = now()
+
+			if (next && !listening) {
+				lastActivity = at
+			}
+
+			listening = next
+			deps.listen(next)
+			arm(at)
+		}
+	}
 }
 
 export interface PinHash {

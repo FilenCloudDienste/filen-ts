@@ -58,7 +58,7 @@ export const desktop = {
 	settingsLockPin: "PIN lock",
 	/** Settings > Desktop — PIN row description */
 	settingsLockPinDescription:
-		"Ask for a PIN when Filen opens and after its window has been hidden for a few minutes. Background sync and drives keep running while Filen is locked.",
+		"Ask for a PIN when Filen opens and after it hasn't been used for a while. Background sync and drives keep running while Filen is locked.",
 	/** Settings > Desktop — PIN row description while a PIN kept in the system's keychain or keyring cannot be read */
 	settingsLockPinWaiting:
 		"Your PIN is kept in this computer's keychain or keyring, which Filen can't use right now. Unlock it and restart Filen to use your PIN. A new PIN can't be set until then.",

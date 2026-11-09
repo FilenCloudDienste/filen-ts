@@ -1,6 +1,7 @@
 // The contract between the Filen web app and the desktop shell's preload, exposed as `window.desktop`.
 // Types only: the browser build pays nothing for it, and an absent `window.desktop` means a plain browser.
 
+import type { DesktopLockAfterSeconds } from "./desktopLock"
 import type { DesktopShellStringsPayload } from "./desktopShellStrings"
 
 export type DesktopPlatform = "darwin" | "win32" | "linux"
@@ -44,13 +45,19 @@ export interface DesktopSessionVault {
 	onRevoked(callback: () => void): () => void
 }
 
-// Shell preferences, kept by main in userData. `launchAtLogin` starts the app hidden; `notifications` also keeps the
-// hidden window's page alive, since it owns the chat socket the notifications come from.
+// Shell preferences, kept by main in userData. `launchAtLogin` starts the app hidden. `chatNotifications` or
+// `contactNotifications` also keeps the hidden window's page alive, since it owns the socket those come from;
+// `syncNotifications` covers main's own sync and mount alerts. `notificationSound` lets both play the OS sound.
+// `lockAfterSeconds` applies only while a PIN is set.
 export interface DesktopPrefs {
 	minimizeToTray: boolean
 	startMinimized: boolean
 	launchAtLogin: boolean
-	notifications: boolean
+	lockAfterSeconds: DesktopLockAfterSeconds
+	chatNotifications: boolean
+	contactNotifications: boolean
+	syncNotifications: boolean
+	notificationSound: boolean
 }
 
 export interface DesktopPrefsStore {

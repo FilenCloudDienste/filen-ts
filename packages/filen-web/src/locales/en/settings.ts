@@ -310,12 +310,8 @@ export const settings = {
 	/** Desktop settings — toggle: closing the window keeps the app running in the system tray (Windows and Linux) */
 	settingsDesktopMinimizeToTray: "Keep running in the tray",
 	settingsDesktopMinimizeToTrayDescription: "Closing the window keeps Filen running in the tray instead of quitting.",
-	/** Desktop settings — group title over the notification row */
+	/** Desktop settings — group title over the notification rows */
 	settingsDesktopNotificationsTitle: "Notifications",
-	/** Desktop settings — toggle: OS notifications for new chat messages and contact requests */
-	settingsDesktopNotifications: "Chat notifications",
-	settingsDesktopNotificationsDescription:
-		"Notify you of new messages and contact requests while Filen is in the background. Filen stays loaded in the background to receive them.",
 	/** Desktop settings — toast when a desktop setting could not be saved */
 	settingsDesktopSaveFailed: "Couldn't save this setting",
 	/** Desktop settings — About group row label next to the installed app version */

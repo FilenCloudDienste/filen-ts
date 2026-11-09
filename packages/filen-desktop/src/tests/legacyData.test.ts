@@ -4,6 +4,7 @@ import { sessionEnvelopeSchema } from "@filen/shared/session"
 import {
 	effectiveConfig,
 	LEGACY_KEYS,
+	legacyLockAfter,
 	legacyPin,
 	legacyPrefs,
 	legacySession,
@@ -227,6 +228,42 @@ describe("legacyPrefs", () => {
 		})
 		expect(legacyPrefs(snapshot(), "{")).toEqual({})
 		expect(legacyPrefs(snapshot(), JSON.stringify({ minimizeToTray: "yes" }))).toEqual({})
+	})
+
+	it("imports the lock timeout and only the notification flags the old client stored", () => {
+		expect(
+			legacyPrefs(
+				snapshot({
+					[LEGACY_KEYS.lockTimeout]: 600,
+					[LEGACY_KEYS.chatNotifications]: false,
+					[LEGACY_KEYS.contactNotifications]: true,
+					[LEGACY_KEYS.notificationSound]: false
+				}),
+				null
+			)
+		).toEqual({ lockAfterSeconds: 600, chatNotifications: false, contactNotifications: true, notificationSound: false })
+		// Never touched in the old client: the new defaults apply.
+		expect(legacyPrefs(snapshot({ [LEGACY_KEYS.contactNotifications]: "yes" }), null)).toEqual({})
+	})
+})
+
+describe("legacyLockAfter", () => {
+	it.each([
+		[60, 60],
+		[300, 300],
+		[86400, 86400],
+		// Labelled "3 hours" in the old settings.
+		[7200, 10800],
+		// "Immediately" and 15 minutes: the nearest shorter choice, never a weaker lock.
+		[1, 60],
+		[900, 600],
+		[100000, 86400]
+	])("%s → %s", (timeout, expected) => {
+		expect(legacyLockAfter(timeout)).toBe(expected)
+	})
+
+	it.each([0, -5, undefined, "300", Number.NaN])("keeps the default for %s", timeout => {
+		expect(legacyLockAfter(timeout)).toBeUndefined()
 	})
 })
 

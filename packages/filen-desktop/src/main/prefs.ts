@@ -1,5 +1,6 @@
 import { type } from "arktype"
 import type { DesktopPrefs } from "@filen/shared/desktop"
+import { DEFAULT_DESKTOP_LOCK_AFTER_SECONDS, DESKTOP_LOCK_AFTER_SECONDS } from "@filen/shared/desktopLock"
 import { type AtomicFile, errorCode } from "./atomicFile.ts"
 import { serialQueue } from "../shared/serial.ts"
 
@@ -7,25 +8,32 @@ export const DEFAULT_PREFS: DesktopPrefs = {
 	minimizeToTray: false,
 	startMinimized: false,
 	launchAtLogin: false,
-	notifications: true
+	lockAfterSeconds: DEFAULT_DESKTOP_LOCK_AFTER_SECONDS,
+	chatNotifications: true,
+	contactNotifications: true,
+	syncNotifications: true,
+	// Silent unless the user opts in: notifications carry no sound by default.
+	notificationSound: false
 }
 
-const prefFields = {
+// What the renderer may send: known fields only, each optional.
+export const prefsPatchSchema = type({
 	"minimizeToTray?": "boolean",
 	"startMinimized?": "boolean",
 	"launchAtLogin?": "boolean",
-	"notifications?": "boolean"
-} as const
-
-// Every field is optional, so a pref added later reads as its default from an older file; unknown keys are dropped.
-const storedPrefsSchema = type({ ...prefFields, "+": "delete" })
-
-// What the renderer may send: known fields only.
-export const prefsPatchSchema = type({ ...prefFields, "+": "reject" })
+	"lockAfterSeconds?": type.enumerated(...DESKTOP_LOCK_AFTER_SECONDS),
+	"chatNotifications?": "boolean",
+	"contactNotifications?": "boolean",
+	"syncNotifications?": "boolean",
+	"notificationSound?": "boolean",
+	"+": "reject"
+})
 
 export type PrefsPatch = typeof prefsPatchSchema.infer
 
-// A missing, unparsable or invalid file is the defaults.
+// A missing or unparsable file is the defaults. Each field is checked on its own, so a pref added later reads as its
+// default from an older file, and one invalid value (an edited file, a choice no longer offered) resets only itself;
+// unknown keys are dropped.
 export function parsePrefs(data: string | null): DesktopPrefs {
 	if (data === null) {
 		return DEFAULT_PREFS
@@ -39,9 +47,21 @@ export function parsePrefs(data: string | null): DesktopPrefs {
 		return DEFAULT_PREFS
 	}
 
-	const stored = storedPrefsSchema(json)
+	if (typeof json !== "object" || json === null || Array.isArray(json)) {
+		return DEFAULT_PREFS
+	}
 
-	return stored instanceof type.errors ? DEFAULT_PREFS : { ...DEFAULT_PREFS, ...stored }
+	const prefs = { ...DEFAULT_PREFS }
+
+	for (const [key, value] of Object.entries(json as Record<string, unknown>)) {
+		const field = prefsPatchSchema({ [key]: value })
+
+		if (!(field instanceof type.errors)) {
+			Object.assign(prefs, field)
+		}
+	}
+
+	return prefs
 }
 
 export interface PrefsStore {

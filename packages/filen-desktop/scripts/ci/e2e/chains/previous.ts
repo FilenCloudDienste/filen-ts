@@ -111,7 +111,8 @@ export function gap5Checks(platform: Platform, offlineSpike: boolean): Gap5Check
 const DRIVE_SETTLE_MS = 30_000
 const CONVERGE_TIMEOUT_MS = 8 * 60 * 1000
 const DOMAIN_TIMEOUT_MS = 60_000
-const PREFS: DesktopPrefs = { minimizeToTray: false, startMinimized: false, launchAtLogin: false, notifications: false }
+// Only prefs N-1 and N both name: N-1's schema refuses keys it does not know, and N drops ones it no longer has.
+const PREFS: Partial<DesktopPrefs> = { minimizeToTray: false, startMinimized: false, launchAtLogin: false }
 
 interface PairState {
 	name: string

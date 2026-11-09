@@ -20,12 +20,15 @@ import { i18n } from "@/lib/i18n"
 // One prompt however often main reports the same download (each page load hears it again).
 const UPDATE_TOAST_ID = "desktop-update"
 
-// OS notifications only while the user is elsewhere, only with the pref on, and never while the app is locked (they
-// would show message text the lock hides). A tag replaces the previous
-// notification for the same chat instead of stacking a burst.
-function notify(content: NotificationContent, tag: string, open: () => void): void {
+// OS notifications only while the user is elsewhere, only with that kind's pref on, and never while the app is locked
+// (they would show message text the lock hides). A tag replaces the previous notification for the same chat instead of
+// stacking a burst; the sound is the OS default one, when wanted.
+function notify(kind: "chat" | "contact", content: NotificationContent, tag: string, open: () => void): void {
+	const prefs = useDesktopPrefs.getState().prefs
+
 	if (
-		useDesktopPrefs.getState().prefs?.notifications !== true ||
+		prefs === null ||
+		!(kind === "chat" ? prefs.chatNotifications : prefs.contactNotifications) ||
 		document.hasFocus() ||
 		Notification.permission !== "granted" ||
 		isDesktopLocked()
@@ -33,7 +36,7 @@ function notify(content: NotificationContent, tag: string, open: () => void): vo
 		return
 	}
 
-	const notification = new Notification(content.title, { body: content.body, tag })
+	const notification = new Notification(content.title, { body: content.body, tag, silent: !prefs.notificationSound })
 
 	notification.onclick = () => {
 		desktopBridge()?.showWindow()
@@ -123,7 +126,7 @@ export function DesktopHost(): null {
 			)
 
 			if (content !== null) {
-				notify(content, message.chat, () => {
+				notify("chat", content, message.chat, () => {
 					void navigate({ to: "/chats/$uuid", params: { uuid: message.chat } })
 				})
 			}
@@ -131,6 +134,7 @@ export function DesktopHost(): null {
 
 		const unregisterContact = registerSocketHandler("contact", event => {
 			notify(
+				"contact",
 				{
 					title: t("contacts:contactsRequestNotificationTitle"),
 					body: contactDisplayName({ email: event.inner.senderEmail, nickName: event.inner.senderNickName })

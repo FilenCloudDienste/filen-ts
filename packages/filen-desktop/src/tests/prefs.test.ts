@@ -23,28 +23,65 @@ function memoryFile(initial: string | null): AtomicFile & { data: string | null 
 }
 
 describe("parsePrefs", () => {
-	it("falls back to the defaults for a missing, unparsable or invalid file", () => {
+	it("falls back to the defaults for a missing, unparsable or non-object file", () => {
 		expect(parsePrefs(null)).toEqual(DEFAULT_PREFS)
 		expect(parsePrefs("{")).toEqual(DEFAULT_PREFS)
 		expect(parsePrefs("[]")).toEqual(DEFAULT_PREFS)
-		expect(parsePrefs(JSON.stringify({ minimizeToTray: "yes" }))).toEqual(DEFAULT_PREFS)
+		expect(parsePrefs("null")).toEqual(DEFAULT_PREFS)
+		expect(parsePrefs("3")).toEqual(DEFAULT_PREFS)
+	})
+
+	it("resets only an invalid field to its default", () => {
+		expect(parsePrefs(JSON.stringify({ minimizeToTray: "yes", startMinimized: true }))).toEqual({
+			...DEFAULT_PREFS,
+			startMinimized: true
+		})
+		expect(parsePrefs(JSON.stringify({ lockAfterSeconds: 7200, launchAtLogin: true }))).toEqual({
+			...DEFAULT_PREFS,
+			launchAtLogin: true
+		})
+		expect(parsePrefs(JSON.stringify({ lockAfterSeconds: 3600 }))).toEqual({ ...DEFAULT_PREFS, lockAfterSeconds: 3600 })
+	})
+
+	it("drops the pre-split notifications key", () => {
+		const prefs = parsePrefs(JSON.stringify({ notifications: false }))
+
+		expect(prefs).toEqual(DEFAULT_PREFS)
+		expect(prefs).not.toHaveProperty("notifications")
 	})
 
 	it("fills missing fields with their defaults and drops unknown ones", () => {
 		expect(parsePrefs(JSON.stringify({ minimizeToTray: true, legacy: 1 }))).toEqual({ ...DEFAULT_PREFS, minimizeToTray: true })
 	})
 
-	it("defaults to notifications on and everything else off", () => {
-		expect(DEFAULT_PREFS).toEqual({ minimizeToTray: false, startMinimized: false, launchAtLogin: false, notifications: true })
+	it("defaults to notifications and their sound on, a 5 minute lock and everything else off", () => {
+		expect(DEFAULT_PREFS).toEqual({
+			minimizeToTray: false,
+			startMinimized: false,
+			launchAtLogin: false,
+			lockAfterSeconds: 300,
+			chatNotifications: true,
+			contactNotifications: true,
+			syncNotifications: true,
+			notificationSound: false
+		})
 	})
 })
 
 describe("prefsPatchSchema", () => {
-	it("takes known boolean fields only", () => {
-		expect(prefsPatchSchema({ notifications: false })).toEqual({ notifications: false })
-		expect(prefsPatchSchema({ notifications: "false" })).toBeInstanceOf(type.errors)
+	it("takes known fields with valid values only", () => {
+		expect(prefsPatchSchema({ chatNotifications: false })).toEqual({ chatNotifications: false })
+		expect(prefsPatchSchema({ chatNotifications: "false" })).toBeInstanceOf(type.errors)
+		expect(prefsPatchSchema({ notifications: false })).toBeInstanceOf(type.errors)
 		expect(prefsPatchSchema({ other: true })).toBeInstanceOf(type.errors)
 		expect(prefsPatchSchema(null)).toBeInstanceOf(type.errors)
+	})
+
+	it("takes only the offered lock-after choices", () => {
+		expect(prefsPatchSchema({ lockAfterSeconds: 0 })).toEqual({ lockAfterSeconds: 0 })
+		expect(prefsPatchSchema({ lockAfterSeconds: 86400 })).toEqual({ lockAfterSeconds: 86400 })
+		expect(prefsPatchSchema({ lockAfterSeconds: 7200 })).toBeInstanceOf(type.errors)
+		expect(prefsPatchSchema({ lockAfterSeconds: "300" })).toBeInstanceOf(type.errors)
 	})
 })
 
@@ -70,7 +107,7 @@ describe("loadPrefs", () => {
 		const file = memoryFile(null)
 		const store = await loadPrefs({ ...file, write: () => Promise.reject(new Error("ENOSPC")) }, vi.fn())
 
-		await expect(store.set({ notifications: false })).rejects.toThrow("ENOSPC")
+		await expect(store.set({ chatNotifications: false })).rejects.toThrow("ENOSPC")
 		expect(store.get()).toEqual(DEFAULT_PREFS)
 	})
 

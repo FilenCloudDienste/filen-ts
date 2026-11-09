@@ -22,12 +22,13 @@ export interface RendererKeepAlive {
 	// lib/unloadGuard.ts holds: transfers, unsaved editors and the like.
 	unloadHolds: number
 	audioPlaying: boolean
-	// The page owns the chat socket the notifications come from.
-	notifications: boolean
+	// Chat or contact notifications are on: the page owns the socket they come from. Main raises sync and mount
+	// alerts itself, so those never count.
+	socketNotifications: boolean
 }
 
-export function keepsRendererAlive({ unloadHolds, audioPlaying, notifications }: RendererKeepAlive): boolean {
-	return unloadHolds > 0 || audioPlaying || notifications
+export function keepsRendererAlive({ unloadHolds, audioPlaying, socketNotifications }: RendererKeepAlive): boolean {
+	return unloadHolds > 0 || audioPlaying || socketNotifications
 }
 
 // No window at startup: launched at login, or the user asked to start minimized.

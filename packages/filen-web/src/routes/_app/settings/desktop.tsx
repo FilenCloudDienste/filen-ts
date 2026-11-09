@@ -27,7 +27,8 @@ export const Route = createFileRoute("/_app/settings/desktop")({
 	component: DesktopPage
 })
 
-type PrefKey = keyof DesktopPrefs
+// The prefs a switch sets (lockAfterSeconds has its own select in the app lock group).
+type PrefKey = { [K in keyof DesktopPrefs]: DesktopPrefs[K] extends boolean ? K : never }[keyof DesktopPrefs]
 
 function DesktopPage() {
 	const { t } = useTranslation(["settings", "desktop"])
@@ -101,7 +102,14 @@ function DesktopPage() {
 				</SettingsGroup>
 			)}
 			<SettingsGroup title={t("settingsDesktopNotificationsTitle")}>
-				{toggleRow("notifications", t("settingsDesktopNotifications"), t("settingsDesktopNotificationsDescription"))}
+				{toggleRow("chatNotifications", t("settingsDesktopChatNotifications"), t("settingsDesktopChatNotificationsDescription"))}
+				{toggleRow(
+					"contactNotifications",
+					t("settingsDesktopContactNotifications"),
+					t("settingsDesktopContactNotificationsDescription")
+				)}
+				{toggleRow("syncNotifications", t("settingsDesktopSyncNotifications"), t("settingsDesktopSyncNotificationsDescription"))}
+				{toggleRow("notificationSound", t("settingsDesktopNotificationSound"), t("settingsDesktopNotificationSoundDescription"))}
 			</SettingsGroup>
 			<AppLockSettings />
 			<SettingsGroup title={t("desktop:settingsLogsTitle")}>

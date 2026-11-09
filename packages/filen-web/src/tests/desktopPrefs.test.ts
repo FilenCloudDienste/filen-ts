@@ -1,7 +1,16 @@
 import { describe, expect, it, vi } from "vitest"
 import type { DesktopPrefs } from "@filen/shared/desktop"
 
-const PREFS: DesktopPrefs = { minimizeToTray: false, startMinimized: false, launchAtLogin: false, notifications: true }
+const PREFS: DesktopPrefs = {
+	minimizeToTray: false,
+	startMinimized: false,
+	launchAtLogin: false,
+	lockAfterSeconds: 300,
+	chatNotifications: true,
+	contactNotifications: true,
+	syncNotifications: true,
+	notificationSound: true
+}
 
 const prefs = vi.hoisted(() => ({ get: vi.fn(), set: vi.fn() }))
 
@@ -23,9 +32,9 @@ describe("desktop prefs mirror", () => {
 	})
 
 	it("mirrors what the shell stored, and keeps the prefs when it refuses", async () => {
-		prefs.set.mockResolvedValueOnce({ ...PREFS, notifications: false })
-		await setDesktopPref({ notifications: false })
-		expect(useDesktopPrefs.getState().prefs?.notifications).toBe(false)
+		prefs.set.mockResolvedValueOnce({ ...PREFS, chatNotifications: false, lockAfterSeconds: 3600 })
+		await setDesktopPref({ chatNotifications: false, lockAfterSeconds: 3600 })
+		expect(useDesktopPrefs.getState().prefs).toMatchObject({ chatNotifications: false, lockAfterSeconds: 3600 })
 
 		prefs.set.mockRejectedValueOnce(new Error("invalid prefs"))
 		await expect(setDesktopPref({ startMinimized: true })).rejects.toThrow("invalid prefs")
