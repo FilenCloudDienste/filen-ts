@@ -99,6 +99,19 @@ describe("circular references, not iterating", () => {
 })
 
 describe("iterative calculation", () => {
+	// A cell whose formula does not parse is in the graph too, with its raw text and no address: a whole
+	// calculation meeting a circle walks past it.
+	it("calculates a workbook with a circle and a formula that does not parse", () => {
+		const engine = engineOf([["=A1+1", "=1+", "=A1*2"]], { iteration: ITERATE })
+
+		try {
+			expect(value(engine, 0, 0)).toBe(100)
+			expect(value(engine, 0, 2)).toBe(200)
+		} finally {
+			engine.destroy()
+		}
+	})
+
 	it("iterates a formula reading its own cell iterateCount times", () => {
 		const engine = engineOf([[null]], { iteration: ITERATE })
 

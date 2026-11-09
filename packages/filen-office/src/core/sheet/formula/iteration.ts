@@ -87,8 +87,10 @@ const queued: Vertex[] = []
 let queuedBy: Evaluator | null = null
 let queuedChanges: ContentChanges | null = null
 
+// getAddress, not getFormula: a cell whose formula did not parse (ParsingErrorVertex) has getFormula too, returning
+// its raw text, and has neither an address nor a value to compute.
 function isFormula(vertex: Vertex): vertex is FormulaVertex {
-	return typeof (vertex as Partial<FormulaVertex>).getFormula === "function"
+	return typeof (vertex as Partial<FormulaVertex>).getAddress === "function"
 }
 
 function isRange(vertex: Vertex): vertex is RangeVertex {
