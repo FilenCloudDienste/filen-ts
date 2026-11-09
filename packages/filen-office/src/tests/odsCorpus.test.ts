@@ -19,6 +19,10 @@ const FILES = existsSync(DIR)
 			.filter(name => name.endsWith(".ods"))
 			.sort()
 	: []
+// The encrypted files, in name order.
+const ENCRYPTED = ["lo__password.ods", "lo__passwordOld.ods"]
+// A LibreOffice sheet whose table style writes right to left.
+const RTL = "lo__tdf137081_RTL_page_anchored.ods"
 // Large files are left to the performance bench: the engine over their tens of thousands of formulas takes long here.
 const ENGINE_LIMIT = 4 * 1024 * 1024
 // Files whose cached results differ from what the engine calculates, and why.
@@ -29,7 +33,7 @@ const ACCEPTED: Readonly<Record<string, string>> = {
 }
 
 describe.skipIf(FILES.length === 0)("ODS corpus", () => {
-	it("opens every file but the encrypted one, which is refused with its reason", { timeout: 600_000 }, async () => {
+	it("opens every file but the encrypted ones, which are refused with their reason", { timeout: 600_000 }, async () => {
 		const failures: string[] = []
 
 		for (const name of FILES) {
@@ -38,7 +42,16 @@ describe.skipIf(FILES.length === 0)("ODS corpus", () => {
 			if (!result.ok) failures.push(`${name}: ${result.reason}`)
 		}
 
-		expect(failures).toEqual(["lo__password.ods: encrypted"])
+		// AES-256-CBC (ODF 1.2+) and the legacy Blowfish CFB of OpenOffice.org 1.x-3.x packages alike.
+		expect(failures).toEqual(ENCRYPTED.filter(name => FILES.includes(name)).map(name => `${name}: encrypted`))
+	})
+
+	it.skipIf(!FILES.includes(RTL))("opens a right-to-left sheet (style:writing-mode rl-tb) mirrored", async () => {
+		const result = await openOds(bytesSource(new Uint8Array(readFileSync(join(DIR, RTL)))))
+
+		if (!result.ok) throw new Error(result.reason)
+
+		expect(result.workbook.sheets.map(sheet => sheet.model?.view.rightToLeft)).toEqual([true])
 	})
 
 	it(

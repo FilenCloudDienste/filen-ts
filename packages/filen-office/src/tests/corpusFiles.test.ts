@@ -10,7 +10,9 @@ import { CORPUS_DIR } from "./corpusDir"
 
 const COMMITTED = join(import.meta.dirname, "..", "..", "corpus")
 const manifest = JSON.parse(readFileSync(join(COMMITTED, "manifest.json"), "utf8")) as CorpusManifest
-const catalogue = JSON.parse(readFileSync(join(COMMITTED, "catalogue.json"), "utf8")) as { files: { path: string; container?: string }[] }
+const catalogue = JSON.parse(readFileSync(join(COMMITTED, "catalogue.json"), "utf8")) as {
+	files: { path: string; container?: string; producer?: string }[]
+}
 const containers = new Map(catalogue.files.map(entry => [entry.path, entry.container]))
 const byFamily = Map.groupBy(manifest.files, file => familyOf(file.path))
 // A directory `pnpm run corpus:fetch` populated: it writes manifest.json (the legacy location has MANIFEST.json).
@@ -51,6 +53,11 @@ describe("corpus manifest", () => {
 
 		expect(problems).toEqual([])
 		expect(catalogue.files.length).toBe(manifest.files.length)
+	})
+
+	// A package without docProps/app.xml says nothing of its producer; LibreOffice fixtures are not Google exports.
+	it("names no producer it guessed from a missing app.xml", () => {
+		expect(catalogue.files.filter(entry => entry.producer === "google-docs?").map(entry => entry.path)).toEqual([])
 	})
 })
 

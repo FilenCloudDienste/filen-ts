@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto"
 import { readFileSync, writeFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
 import { parseArgs } from "node:util"
@@ -5,10 +6,12 @@ import { parseArgs } from "node:util"
 // Generates corpus/manifest.json, corpus/catalogue.json and corpus/README.md from the full manifest the corpus
 // was assembled with. Only what fetching, verifying and attributing the files needs is committed; the files
 // themselves never are (see fetchCorpus.ts). --drop instead rewrites the committed three without some files (one
-// whose pinned bytes no source serves any more).
+// whose pinned bytes no source serves any more); --add rewrites them with more files of the known sources, each
+// read from a local download of its pinned URL (a JSON array of CorpusAddition).
 //
 //   pnpm run corpus:manifest [--from <MANIFEST.json>]
 //   pnpm run corpus:manifest --drop <path>[,<path>...]
+//   pnpm run corpus:manifest --add <additions.json>
 
 const OUT = fileURLToPath(new URL("../../corpus/", import.meta.url))
 const DEFAULT_FROM = fileURLToPath(new URL("../../../filen-web/docs/office/corpus/MANIFEST.json", import.meta.url))
@@ -45,9 +48,11 @@ interface SourceManifest {
 export const FAMILIES = {
 	docx: ["docx", "docm", "dotx", "dotm"],
 	xlsx: ["xlsx", "xlsm", "xltx", "xltm"],
+	// Excel binary workbooks: no engine reads them, the xlsx open path refuses them as unsupported.
+	xlsb: ["xlsb"],
 	csv: ["csv", "tsv", "tab"],
 	pptx: ["pptx", "pptm", "ppsx", "ppsm", "potx", "potm"],
-	odt: ["odt"],
+	odt: ["odt", "ott"],
 	ods: ["ods"],
 	odp: ["odp", "otp"],
 	rtf: ["rtf"],
@@ -64,6 +69,7 @@ export type CorpusFamily = keyof typeof FAMILIES
 export const CONTAINERS: Record<CorpusFamily, string> = {
 	docx: "zip",
 	xlsx: "zip",
+	xlsb: "zip",
 	csv: "text",
 	pptx: "zip",
 	odt: "zip",
@@ -218,33 +224,122 @@ function readme(manifest: CorpusManifest): string {
 	].join("\n")
 }
 
-function writeAll(manifest: CorpusManifest, catalogue: readonly unknown[]): void {
+// The producer a catalogue entry names. A package without docProps/app.xml says nothing of its producer: the
+// assembler's "google-docs?" guess for one marked LibreOffice fixtures as Google exports.
+export function catalogueProducer(producer: unknown): unknown {
+	return producer === "google-docs?" ? "unknown" : producer
+}
+
+function writeAll(manifest: CorpusManifest, catalogue: readonly Record<string, unknown>[]): void {
+	const entries = catalogue.map(entry =>
+		entry["producer"] === undefined ? entry : { ...entry, producer: catalogueProducer(entry["producer"]) }
+	)
+
 	writeFileSync(
 		`${OUT}manifest.json`,
 		rows({ version: manifest.version, generated: manifest.generated, sources: manifest.sources }, "files", manifest.files)
 	)
-	writeFileSync(`${OUT}catalogue.json`, rows({ generated: manifest.generated }, "files", catalogue))
+	writeFileSync(`${OUT}catalogue.json`, rows({ generated: manifest.generated }, "files", entries))
 	writeFileSync(`${OUT}README.md`, readme(manifest))
 }
 
+function readCommitted(): { manifest: CorpusManifest; catalogue: Record<string, unknown>[] } {
+	return {
+		manifest: JSON.parse(readFileSync(`${OUT}manifest.json`, "utf8")) as CorpusManifest,
+		catalogue: (JSON.parse(readFileSync(`${OUT}catalogue.json`, "utf8")) as { files: Record<string, unknown>[] }).files
+	}
+}
+
+const byPath = (a: { path: string }, b: { path: string }): number => (a.path < b.path ? -1 : 1)
+
+// Most files first, then by id.
+function sortSources(sources: readonly CorpusSource[], files: readonly CorpusFile[]): CorpusSource[] {
+	return [...sources].sort((a, b) => fileCount(files, b.id) - fileCount(files, a.id) || (a.id < b.id ? -1 : 1))
+}
+
+// One file to add with --add: its manifest path, its local download of `url`, and its catalogue details.
+export interface CorpusAddition {
+	path: string
+	file: string
+	source: string
+	url: string
+	password?: string
+	modifyPassword?: string
+	catalogue?: Record<string, unknown>
+}
+
+function add(from: string): void {
+	const { manifest, catalogue } = readCommitted()
+	const additions = JSON.parse(readFileSync(from, "utf8")) as CorpusAddition[]
+	const sources = new Map(manifest.sources.map(source => [source.id, source]))
+	const paths = new Set(manifest.files.map(file => file.path))
+	const hashes = new Map(manifest.files.map(file => [file.sha256, file.path]))
+	const files = [...manifest.files]
+	const entries = [...catalogue]
+
+	for (const addition of additions) {
+		const source = sources.get(addition.source)
+
+		if (source === undefined) throw new Error(`${addition.path}: unknown source ${addition.source}`)
+		if (familyOf(addition.path) === undefined) throw new Error(`${addition.path}: no corpus family for this extension`)
+		if (paths.has(addition.path)) throw new Error(`${addition.path}: already in the manifest`)
+		if (!addition.url.startsWith("https://")) throw new Error(`${addition.path}: not an https URL: ${addition.url}`)
+		// A repository source's files are raw files at its one pinned commit.
+		if (source.commit !== undefined && !addition.url.includes(`/${source.commit}/`)) {
+			throw new Error(`${addition.path}: not at ${source.id}'s pinned commit: ${addition.url}`)
+		}
+
+		const bytes = readFileSync(addition.file)
+		const sha256 = createHash("sha256").update(bytes).digest("hex")
+		const duplicate = hashes.get(sha256)
+
+		if (duplicate !== undefined) throw new Error(`${addition.path}: the same bytes as ${duplicate}`)
+
+		paths.add(addition.path)
+		hashes.set(sha256, addition.path)
+		files.push({
+			path: addition.path,
+			size: bytes.length,
+			sha256,
+			source: source.id,
+			licence: source.licence,
+			url: addition.url,
+			...(addition.password !== undefined && { password: addition.password }),
+			...(addition.modifyPassword !== undefined && { modifyPassword: addition.modifyPassword })
+		})
+		entries.push({ path: addition.path, ...(compact(addition.catalogue ?? {}) as Record<string, unknown>) })
+	}
+
+	files.sort(byPath)
+	entries.sort((a, b) => byPath(a as { path: string }, b as { path: string }))
+	writeAll({ ...manifest, sources: sortSources(manifest.sources, files), files }, entries)
+}
+
 function drop(paths: ReadonlySet<string>): void {
-	const manifest = JSON.parse(readFileSync(`${OUT}manifest.json`, "utf8")) as CorpusManifest
-	const catalogue = JSON.parse(readFileSync(`${OUT}catalogue.json`, "utf8")) as { files: { path: string }[] }
+	const { manifest, catalogue } = readCommitted()
 	const unknown = [...paths].filter(path => !manifest.files.some(file => file.path === path))
 
 	if (unknown.length > 0) throw new Error(`not in the manifest: ${unknown.join(", ")}`)
 
 	writeAll(
 		{ ...manifest, files: manifest.files.filter(file => !paths.has(file.path)) },
-		catalogue.files.filter(entry => !paths.has(entry.path))
+		catalogue.filter(entry => typeof entry["path"] !== "string" || !paths.has(entry["path"]))
 	)
 }
 
 function main(): void {
-	const { values } = parseArgs({ options: { from: { type: "string", default: DEFAULT_FROM }, drop: { type: "string" } } })
+	const { values } = parseArgs({
+		options: { from: { type: "string", default: DEFAULT_FROM }, drop: { type: "string" }, add: { type: "string" } }
+	})
 
 	if (values.drop !== undefined) {
 		drop(new Set(values.drop.split(",").map(path => path.trim())))
+
+		return
+	}
+
+	if (values.add !== undefined) {
+		add(values.add)
 
 		return
 	}
@@ -305,7 +400,7 @@ function main(): void {
 	const manifest: CorpusManifest = {
 		version: 1,
 		generated: source.generated,
-		sources: [...sources.values()].sort((a, b) => fileCount(files, b.id) - fileCount(files, a.id) || (a.id < b.id ? -1 : 1)),
+		sources: sortSources([...sources.values()], files),
 		files
 	}
 

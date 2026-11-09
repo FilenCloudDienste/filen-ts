@@ -1,9 +1,12 @@
 import { createHash } from "node:crypto"
+import { existsSync, readFileSync } from "node:fs"
+import { join } from "node:path"
 import { describe, expect, it } from "vitest"
 import { CfbFile } from "@filen/office/core/cfb"
 import { bytesSource } from "@filen/office/core/opc"
 import type { DocDecryption } from "../core/doc/decrypt"
 import { decryptXlsWorkbook, xlsEncryption } from "../core/xls/decrypt"
+import { CORPUS_DIR } from "./corpusDir"
 import {
 	encryptedXlsStream,
 	xlsFile,
@@ -121,5 +124,87 @@ describe("encrypted Excel 97–2003 workbooks", () => {
 		if (encryption.kind !== "encrypted") throw new Error(encryption.kind)
 
 		expect((await decryptXlsWorkbook(file, encryption, decryption("p"))).kind).toBe("damaged")
+	})
+})
+
+// Records of a decrypted Workbook stream: the numbers of its NUMBER, RK and MULRK cells, and its SST record's body.
+function workbookFacts(workbook: Uint8Array): { cells: number; sum: number; sst: string } {
+	const view = new DataView(workbook.buffer, workbook.byteOffset, workbook.byteLength)
+	const rk = (value: number): number => {
+		const scratch = new DataView(new ArrayBuffer(8))
+
+		scratch.setUint32(4, value & 0xfffffffc, true)
+
+		const number = (value & 2) !== 0 ? value >> 2 : scratch.getFloat64(0, true)
+
+		return (value & 1) !== 0 ? number / 100 : number
+	}
+	let cells = 0
+	let sum = 0
+	let sst = ""
+
+	for (let at = 0; at + 4 <= workbook.length;) {
+		const id = view.getUint16(at, true)
+		const size = view.getUint16(at + 2, true)
+		const body = at + 4
+
+		if (id === 0x00bd) {
+			for (let k = 0; k < (size - 6) / 6; k++) {
+				cells++
+				sum += rk(view.getUint32(body + 6 + k * 6, true))
+			}
+		} else if (id === 0x027e) {
+			cells++
+			sum += rk(view.getUint32(body + 6, true))
+		} else if (id === 0x0203) {
+			cells++
+			sum += view.getFloat64(body + 6, true)
+		} else if (id === 0x00fc && sst === "") {
+			sst = createHash("sha256")
+				.update(workbook.subarray(body, body + size))
+				.digest("hex")
+		}
+
+		at = body + size
+	}
+
+	return { cells, sum, sst }
+}
+
+// Office's own encrypted workbooks from msoffcrypto-tool's fixtures, each with what the unencrypted copy Excel saved
+// beside it (tests/outputs/*_plain.xls) holds: its cells' count and sum and its SST record. XOR obfuscation
+// ([MS-OFFCRYPTO] §2.3.6) and RC4 CryptoAPI (§2.3.5) as Excel writes them, not as our own encryptor does.
+const OFFICE_ENCRYPTED: readonly (readonly [file: string, password: string, scheme: string, facts: ReturnType<typeof workbookFacts>])[] = [
+	[
+		"xls/mso__xor_password_123456789012345.xls",
+		"123456789012345",
+		"xor",
+		{ cells: 10920, sum: 2298660, sst: "af5570f5a1810b7af78caf4bc70a660f0df51e42baf91d4de5b2328de0e83dfc" }
+	],
+	[
+		"xls/mso__rc4cryptoapi_password.xls",
+		"Password1234_",
+		"cryptoApiRc4",
+		{ cells: 0, sum: 0, sst: "d21bcbe8ad20ba58ec87f68b0c8fb2ef8e6afd3a35cce73a2dd2944090cb0582" }
+	]
+]
+const PRESENT = OFFICE_ENCRYPTED.filter(([file]) => existsSync(join(CORPUS_DIR, file)))
+
+describe.skipIf(PRESENT.length === 0)("Excel-encrypted workbooks of the corpus", () => {
+	it.each(PRESENT)("decrypts %s to what Excel saved unencrypted", async (file, password, scheme, facts) => {
+		const bytes = new Uint8Array(readFileSync(join(CORPUS_DIR, file)))
+		const encryption = await xlsEncryption(bytes)
+
+		if (encryption.kind !== "encrypted") throw new Error(encryption.kind)
+
+		expect(encryption.scheme).toBe(scheme)
+
+		const result = await decryptXlsWorkbook(bytes, encryption, decryption(password))
+
+		if (result.kind !== "decrypted") throw new Error(result.kind)
+
+		expect(workbookFacts(await workbookOf(result.file))).toEqual(facts)
+		// Not the password plus a character: XOR obfuscation keys on the first 15 characters only, as Excel does.
+		expect((await decryptXlsWorkbook(bytes, encryption, decryption("not the password"))).kind).toBe("wrongPassword")
 	})
 })

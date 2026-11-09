@@ -466,6 +466,95 @@ describe("ODP transition markup", () => {
 		expect(readOdpTransition(new Map(), plusIn)?.kind).toBe("plus")
 	})
 
+	// Every combination of a preset's schema option values.
+	function optionCombinations(entry: (typeof TRANSITION_PRESETS)[number]): Transition["options"][] {
+		let out: Record<string, string | boolean>[] = [{}]
+
+		for (const spec of entry.options) {
+			const values: readonly (string | boolean)[] = spec.kind === "boolean" ? [false, true] : spec.values
+
+			out = out.flatMap(options => values.map(value => ({ ...options, [spec.name]: value })))
+		}
+
+		return out
+	}
+
+	// A transition as written to ODP (the page style's properties and the timing root's par filter) and read back.
+	function writtenAndRead(transition: Transition): Transition | undefined {
+		const changes = styleChanges()
+
+		odpTransitionStyle(changes, transition)
+
+		const page = new Map<string, string>()
+
+		for (const [name, value] of changes.attributes.get("drawing-page") ?? []) {
+			if (typeof value === "string") page.set(name, value)
+		}
+
+		const par = odpTransitionPar(transition, "id1")
+		const element = par === undefined ? undefined : /<anim:transitionFilter\b([^>]*)\/>/u.exec(par)?.[1]
+		const filter =
+			element === undefined
+				? undefined
+				: new Map([...element.matchAll(/\s([\w:-]+)="([^"]*)"/gu)].map(([, name, value]) => [name ?? "", value ?? ""] as const))
+
+		return readOdpTransition(page, filter)
+	}
+
+	function semanticOptions(transition: Pick<Transition, "kind" | "namespace" | "options">): Record<string, string | boolean | undefined> {
+		const entry = TRANSITION_PRESETS.find(each => each.kind === transition.kind && each.namespace === transition.namespace)
+
+		return Object.fromEntries((entry?.options ?? []).map(spec => [spec.name, transitionOption(transition, spec.name)]))
+	}
+
+	it("reads every option of every ECMA transition back from the page style and par it is written with", () => {
+		let checked = 0
+
+		for (const entry of TRANSITION_PRESETS.filter(each => each.namespace === "p")) {
+			for (const options of optionCombinations(entry)) {
+				const transition: Transition = { ...presetTransition(entry), options }
+				const label = `${entry.kind} ${JSON.stringify(options)}`
+				const read = writtenAndRead(transition)
+
+				checked++
+
+				// An instant cut has no SMIL transition and advances on click: no transition at all.
+				if (entry.kind === "cut" && options["thruBlk"] !== true) {
+					expect(read, label).toBeUndefined()
+
+					continue
+				}
+
+				expect({ kind: read?.kind, namespace: read?.namespace }, label).toEqual({ kind: entry.kind, namespace: "p" })
+				expect(read === undefined ? undefined : semanticOptions(read), label).toEqual(semanticOptions(transition))
+			}
+		}
+
+		expect(checked).toBeGreaterThan(50)
+	})
+
+	it("reads the p14 and p15 kinds LibreOffice draws back from the page style and par they are written with", () => {
+		const cases: readonly (readonly [string, Transition["namespace"], Transition["options"]])[] = [
+			["vortex", "p14", {}],
+			["ripple", "p14", {}],
+			["honeycomb", "p14", {}],
+			["glitter", "p14", {}],
+			["prism", "p14", {}],
+			["prism", "p14", { isInverted: true }],
+			["flash", "p14", {}],
+			["fallOver", "p15", {}]
+		]
+
+		for (const [kind, namespace, options] of cases) {
+			const transition: Transition = { kind, namespace, options, durationMs: 2000, advance: { onClick: true } }
+			const read = writtenAndRead(transition)
+			const label = `${kind} ${JSON.stringify(options)}`
+
+			expect({ kind: read?.kind, namespace: read?.namespace }, label).toEqual({ kind, namespace })
+			expect(read === undefined ? undefined : semanticOptions(read), label).toEqual(semanticOptions(transition))
+		}
+	})
+
 	it("keeps the authored kind once an ODP deck's transition is written", () => {
 		for (const [kind, options] of ROUND_TRIP) {
 			const written = odpWrittenTransition({ kind, namespace: "p", options, advance: { onClick: true } })

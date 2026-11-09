@@ -48,6 +48,7 @@ function load(path: string): Uint8Array {
 
 const REFUSED: Readonly<Record<string, TextRefusalReason>> = {
 	"odt/odftk__testInvalidPkg2.odt": "corrupt",
+	"odt/tika__testODTEncrypted.odt": "encrypted",
 	"docx/lo__Encrypted_LO_Standard_abc.docx": "encrypted",
 	"docx/lo__Encrypted_MSO2007_abc.docx": "encrypted",
 	"docx/lo__Encrypted_MSO2010_abc.docx": "encrypted",

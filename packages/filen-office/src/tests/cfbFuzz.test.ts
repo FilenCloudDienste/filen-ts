@@ -211,14 +211,14 @@ describe("compound file reader under mutation", () => {
 		for (let k = 0; k < MUTANTS; k++) {
 			const outcome = await exercise(mutate(random.pick(sources), random), random)
 
-			if (outcome.untyped !== undefined) untyped.push(`#${k}: ${outcome.untyped}`)
+			if (outcome.untyped !== undefined) untyped.push(`#${k} (seed ${SEED}): ${outcome.untyped}`)
 			if (outcome.read) readSome++
 
 			slowest = Math.max(slowest, outcome.ms)
 		}
 
 		expect(untyped).toEqual([])
-		expect(slowest).toBeLessThan(budget(BOUND_MS))
+		expect(slowest, `seed ${SEED}`).toBeLessThan(budget(BOUND_MS))
 		// The mutants still reach the stream reader, not only the header checks.
 		expect(readSome).toBeGreaterThan(MUTANTS / 10)
 	})

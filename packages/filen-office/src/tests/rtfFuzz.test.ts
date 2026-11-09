@@ -212,9 +212,9 @@ describe("RTF reader fuzzing", () => {
 
 			const elapsed = performance.now() - started
 
-			expect(failure, `mutant ${k} of seed ${seedIndex}`).toBeUndefined()
+			expect(failure, `mutant ${k} of source ${seedIndex} (seed ${SEED})`).toBeUndefined()
 
-			if (elapsed > budget(BOUND_MS)) slow.push(`mutant ${k} of seed ${seedIndex}: ${Math.round(elapsed)} ms`)
+			if (elapsed > budget(BOUND_MS)) slow.push(`mutant ${k} of source ${seedIndex} (seed ${SEED}): ${Math.round(elapsed)} ms`)
 		}
 
 		expect(slow).toEqual([])

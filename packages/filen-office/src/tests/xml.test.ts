@@ -555,4 +555,22 @@ describe("linear time on hostile shapes", () => {
 			})
 		).toBeLessThan(budget(5000))
 	})
+
+	it("checks 100,000 prefixed attributes for namespace duplicates in linear time", () => {
+		const bytes = encoder.encode(`<r xmlns:p="u"${Array.from({ length: 100_000 }, (_, k) => ` p:a${k}="v"`).join("")}/>`)
+
+		// A pairwise expanded-name scan took over ten seconds here.
+		expect(
+			time(() => {
+				assertWellFormed(parseXml(bytes))
+			})
+		).toBeLessThan(budget(2000))
+	})
+
+	it("detects a namespace duplicate past the pairwise limit", () => {
+		const many = Array.from({ length: 20 }, (_, k) => ` p:a${k}="v"`).join("")
+
+		expect(() => assertWellFormed(parse(`<r xmlns:p="u" xmlns:q="u"${many} q:a20="w"/>`))).not.toThrow()
+		expect(codeOf(() => assertWellFormed(parse(`<r xmlns:p="u" xmlns:q="u"${many} q:a7="w"/>`)))).toBe("invalidAttribute")
+	})
 })

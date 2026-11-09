@@ -275,7 +275,7 @@ describe("xlsx reader fuzz", () => {
 
 			slowest = Math.max(slowest, elapsed)
 			outcomes.set(outcome, (outcomes.get(outcome) ?? 0) + 1)
-			expect(elapsed, `mutant ${n}`).toBeLessThan(budget(BOUND_MS))
+			expect(elapsed, `mutant ${n} (seed ${SEED})`).toBeLessThan(budget(BOUND_MS))
 		}
 
 		console.log(

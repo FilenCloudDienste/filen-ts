@@ -528,12 +528,94 @@ describe("docx drawing commands", () => {
 		await sameLayout(editor, after.bytes)
 	})
 
-	it("deletes the selected drawing", async () => {
-		const { editor, pkg, context } = await pagedEditor(INLINE)
+	it("deletes the selected drawing, and with it the part only it used; undone, all of it is written again", async () => {
+		// The picture's part with its own Override: Word writes neither once nothing uses the part.
+		const { editor, pkg, context } = await pagedEditor(
+			buildDocx({
+				body: p("Before") + `<w:p>${inlinePicture(1905000, 952500)}</w:p>` + p("After"),
+				relationships: [{ id: "rIdImg", type: "image", target: "media/a.png" }],
+				parts: [{ name: "word/media/a.png", contentType: "image/png", data: png(200, 100) }]
+			})
+		)
 
 		select(editor)
 		expect(await run(editor, { type: "drawing.delete" })).toBe(true)
-		expect((await saved(editor, pkg, context)).drawings).toHaveLength(0)
+
+		const after = await saved(editor, pkg, context)
+
+		expect(after.drawings).toHaveLength(0)
+		expect(await partText(after.bytes, "word/media/a.png")).toBeUndefined()
+		expect(await partText(after.bytes, "word/_rels/document.xml.rels")).not.toContain('Id="rIdImg"')
+		expect(await partText(after.bytes, "[Content_Types].xml")).not.toContain('PartName="/word/media/a.png"')
+		expect(await partText(after.bytes, "word/document.xml")).toContain("After")
+
+		expect(await run(editor, { type: "history.undo" })).toBe(true)
+
+		const undone = await saved(editor, pkg, context)
+		const reopened = await openBytes(undone.bytes)
+		const ref = reopened.model.mediaRef(undone.drawings[0]?.part ?? -1, undone.drawings[0]?.embedId ?? "")
+
+		expect(undone.drawings).toHaveLength(1)
+		expect(await partText(undone.bytes, "word/_rels/document.xml.rels")).toContain('Id="rIdImg"')
+		expect(await partText(undone.bytes, "[Content_Types].xml")).toContain('PartName="/word/media/a.png"')
+		expect(ref).toMatchObject({ partName: "word/media/a.png", contentType: "image/png" })
+		expect(await reopened.model.media(ref as NonNullable<typeof ref>)).toEqual(png(200, 100))
+	})
+
+	it("keeps a picture part another story still uses when one use of it is deleted", async () => {
+		const logo = (rel: string): string =>
+			`<w:p><w:r><w:t xml:space="preserve">Logo </w:t></w:r>${inlinePicture(914400, 457200, 3, rel)}</w:p>`
+		const shared = (): Uint8Array =>
+			buildDocx({
+				body:
+					p("Body") +
+					logo("rIdImg") +
+					'<w:sectPr><w:headerReference w:type="default" r:id="rIdH"/><w:pgSz w:w="12240" w:h="15840"/>' +
+					'<w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440" w:header="720" w:footer="720" w:gutter="0"/></w:sectPr>',
+				headers: { rIdH: logo("rIdLogo") },
+				relationships: [{ id: "rIdImg", type: "image", target: "media/a.png" }],
+				parts: [
+					{ name: "word/media/a.png", contentType: "image/png", data: png(96, 48) },
+					{
+						name: "word/_rels/header1.xml.rels",
+						data: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rIdLogo" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/a.png"/></Relationships>'
+					}
+				]
+			})
+		const kept = async (bytes: Uint8Array): Promise<void> => {
+			expect(await partText(bytes, "word/media/a.png")).toBeDefined()
+			expect(await partText(bytes, "[Content_Types].xml")).toContain('PartName="/word/media/a.png"')
+		}
+
+		// The body's use deleted: its relationship goes, the header's and the part stay.
+		const body = await pagedEditor(shared())
+
+		select(body.editor)
+		expect(await run(body.editor, { type: "drawing.delete" })).toBe(true)
+
+		const withoutBody = (await saved(body.editor, body.pkg, body.context)).bytes
+
+		await kept(withoutBody)
+		expect(await partText(withoutBody, "word/_rels/document.xml.rels")).not.toContain('Id="rIdImg"')
+		expect(await partText(withoutBody, "word/_rels/header1.xml.rels")).toContain('Id="rIdLogo"')
+		expect(await partText(withoutBody, "word/header1.xml")).toContain('r:embed="rIdLogo"')
+		body.editor.dispose()
+
+		// The header's use deleted: the body's relationship and the part stay.
+		const header = await pagedEditor(shared())
+
+		await settleAll(header.editor)
+		expect(editHeader(header.editor, "header", 0)).toBe(true)
+		select(header.editor)
+		expect(await run(header.editor, { type: "drawing.delete" })).toBe(true)
+
+		const withoutHeader = (await saved(header.editor, header.pkg, header.context)).bytes
+
+		await kept(withoutHeader)
+		expect(await partText(withoutHeader, "word/_rels/document.xml.rels")).toContain('Id="rIdImg"')
+		expect(await partText(withoutHeader, "word/document.xml")).toContain('r:embed="rIdImg"')
+		expect(await partText(withoutHeader, "word/header1.xml")).not.toContain("rIdLogo")
+		header.editor.dispose()
 	})
 })
 

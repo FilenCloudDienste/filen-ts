@@ -62,10 +62,12 @@ async function matches(path: string, password: string): Promise<boolean> {
 }
 
 // The encrypted .xls files in the corpus and their passwords: the default password to open ("VelvetSweatshop", a
-// write-protected workbook) or the one Apache Tika names the file for.
+// write-protected workbook), the one Apache Tika names the file for, or msoffcrypto-tool's fixture password.
 const CORPUS: readonly (readonly [file: string, password: string])[] = [
 	["xls/govuk__2163172.xls", "VelvetSweatshop"],
 	["xls/govuk__phase-ii-ner-benchmarking.xls", "VelvetSweatshop"],
+	["xls/mso__rc4cryptoapi_password.xls", "Password1234_"],
+	["xls/mso__xor_password_123456789012345.xls", "123456789012345"],
 	["xls/tika__testEXCEL_protected_passtika.xls", "tika"]
 ]
 
@@ -75,9 +77,10 @@ const EXTRA = (process.env["FILEN_OFFICE_XLS_ORACLE_FILES"] ?? "")
 	.map(entry => [entry.slice(0, entry.lastIndexOf("=")), entry.slice(entry.lastIndexOf("=") + 1)] as const)
 
 describe.skipIf(python === undefined)("encrypted .xls against msoffcrypto-tool", () => {
-	const corpus = existsSync(join(CORPUS_DIR, "xls"))
+	// `corpus:fetch --family` may not have fetched every file yet.
+	const present = CORPUS.filter(([file]) => existsSync(join(CORPUS_DIR, file)))
 
-	it.skipIf(!corpus).each(CORPUS)("decrypts %s as msoffcrypto does", async (file, password) => {
+	it.skipIf(present.length === 0).each(present)("decrypts %s as msoffcrypto does", async (file, password) => {
 		expect(await matches(join(CORPUS_DIR, file), password)).toBe(true)
 	})
 

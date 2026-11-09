@@ -1,10 +1,9 @@
 import { bytesSource } from "../core/opc/index"
 import type { PdfSecurityKey } from "../core/pdfwrite/crypto"
-import type { SlideRef } from "../core/presentation/model"
+import { PresentationError, type Format, type SlideRef } from "../core/presentation/model"
 import type { HandoutsPerPage, SlideExport } from "../core/presentation/pages"
-import { SERVICES, type CallContext, type EngineSession } from "../dom/presentation/engine"
+import { OPENERS, SERVICES, type CallContext, type EngineSession } from "../dom/presentation/engine"
 import { layerKinds, serveJobsPort, type JobsPortEnd } from "../dom/presentation/engine/jobs"
-import { openPptxCapability } from "../dom/presentation/engine/open/pptx"
 import { presentationTextServices, renderSlideFor } from "../dom/presentation/engine/view"
 import { jobSessionOver } from "../dom/presentation/jobsWorker"
 import { pdfJob } from "../dom/presentation/jobs/pdf"
@@ -37,16 +36,17 @@ export function installTestRealm(): void {
 	})
 }
 
-export async function openDeck(bytes: Uint8Array, password?: string): Promise<CallContext> {
-	const options = { format: "pptx" as const, fileName: "deck.pptx" }
-	const outcome = await openPptxCapability.open({
+// A refused or failed open throws a PresentationError carrying the opener's reason.
+export async function openDeck(bytes: Uint8Array, password?: string, format: Format = "pptx"): Promise<CallContext> {
+	const options = { format, fileName: `deck.${format}` }
+	const outcome = await OPENERS[format].open({
 		source: bytesSource(bytes),
 		sourceKind: "bytes",
 		options,
 		...(password === undefined ? {} : { password })
 	})
 
-	if (outcome.kind !== "opened") throw new Error(outcome.kind === "refused" ? outcome.reason : outcome.kind)
+	if (outcome.kind !== "opened") throw new PresentationError(outcome.kind === "refused" ? outcome.reason : outcome.kind)
 
 	const closers: (() => void)[] = []
 	const session: EngineSession = {
@@ -128,7 +128,7 @@ export function jobSession(context: CallContext): { readonly session: JobSession
 }
 
 // The deck's slides (or `refs`) as a PDF, slides one per page or handouts, made by the PDF job itself (as the jobs
-// worker runs it) over the session's port; deterministic unless encrypted.
+// worker runs it) over the session's port; deterministic unless encrypted. A refusal throws a PresentationError.
 export async function deckPdf(
 	context: CallContext,
 	options: ExportOptions = {}
@@ -173,7 +173,8 @@ export async function deckPdf(
 			}
 		)
 
-		if (outcome.kind !== "done") throw new Error(`the PDF job refused: ${outcome.reason} ${outcome.detail ?? ""}`)
+		if (outcome.kind !== "done")
+			throw new PresentationError(outcome.reason, `the PDF job refused: ${outcome.reason} ${outcome.detail ?? ""}`)
 
 		return { bytes: joined(chunks, size), outcome }
 	} finally {

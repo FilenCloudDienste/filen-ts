@@ -2,7 +2,7 @@
 import { act, createRef, useEffect } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { SHEET_MAX_ROWS } from "../core/sheet/protocol"
+import { SHEET_MAX_COLS, SHEET_MAX_ROWS } from "../core/sheet/protocol"
 import { inThreadSheetHost } from "../dom/sheet/host"
 import {
 	DEFAULT_THEME,
@@ -353,6 +353,45 @@ describe("SheetGrid", () => {
 		pointer(scroller, "pointerup", { ...cellCenter(handle, 3, 3), pointerType: "touch", pointerId: 3 })
 
 		expect(model.getSnapshot().selection.active).toEqual({ row: 3, col: 3 })
+	})
+
+	it("selects a header's whole column or row on a right-click, unless one selected already holds it", async () => {
+		const { scroller, model, handle } = await mount()
+		const view = handle.renderer.currentView()
+
+		if (view === null) throw new Error("no view")
+
+		const colHeader = { clientX: cellCenter(handle, 0, 2).clientX, clientY: view.rows.header / 2, button: 2 }
+		const rowHeader = { clientX: view.cols.header / 2, clientY: cellCenter(handle, 3, 0).clientY, button: 2 }
+		const column = { startRow: 0, startCol: 2, endRow: SHEET_MAX_ROWS - 1, endCol: 2 }
+
+		// A cell of the column selected is not enough.
+		pointer(scroller, "pointerdown", cellCenter(handle, 1, 2))
+		pointer(scroller, "pointerup", cellCenter(handle, 1, 2))
+		pointer(scroller, "pointerdown", colHeader)
+		pointer(scroller, "pointerup", colHeader)
+
+		expect(model.getSnapshot().selection.ranges).toEqual([column])
+
+		pointer(scroller, "pointerdown", rowHeader)
+		pointer(scroller, "pointerup", rowHeader)
+
+		expect(model.getSnapshot().selection.ranges).toEqual([{ startRow: 3, startCol: 0, endRow: 3, endCol: SHEET_MAX_COLS - 1 }])
+
+		// Inside a selection that holds the whole column, on a cell of it or its header, the selection stays.
+		const leftColHeader = { clientX: colHeader.clientX, clientY: colHeader.clientY }
+
+		pointer(scroller, "pointerdown", leftColHeader)
+		pointer(scroller, "pointerup", leftColHeader)
+		pointer(scroller, "pointerdown", { ...cellCenter(handle, 5, 2), button: 2 })
+		pointer(scroller, "pointerup", cellCenter(handle, 5, 2))
+
+		expect(model.getSnapshot().selection.ranges).toEqual([column])
+
+		pointer(scroller, "pointerdown", colHeader)
+		pointer(scroller, "pointerup", colHeader)
+
+		expect(model.getSnapshot().selection.ranges).toEqual([column])
 	})
 
 	it("resizes a column by dragging its header edge and fits it to its content on a double-click", async () => {

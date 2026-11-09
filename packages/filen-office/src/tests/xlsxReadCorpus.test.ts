@@ -273,3 +273,14 @@ describe.skipIf(FILES.length === 0)("xlsx reader against the plain reader over t
 		expect(tally.files).toBeGreaterThan(0)
 	})
 })
+
+// Excel binary workbooks (MS-XLSB), often renamed .xlsx: the open path refuses them as unsupported, never as damaged.
+const BINARY = manifest.files.filter(file => file.path.startsWith("xlsb/")).filter(file => existsSync(join(CORPUS_DIR, file.path)))
+
+describe.skipIf(BINARY.length === 0)("xlsx reader over the corpus's binary workbooks", () => {
+	it.each(BINARY.map(file => file.path))("refuses %s as unsupported", async path => {
+		const opened = await openXlsx(bytesSource(new Uint8Array(readFileSync(join(CORPUS_DIR, path)))))
+
+		expect(opened.ok ? "opened" : opened.reason).toBe("unsupported")
+	})
+})

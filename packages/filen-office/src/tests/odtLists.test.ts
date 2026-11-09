@@ -124,6 +124,45 @@ describe("ODT lists", () => {
 		expect(labels).toEqual(["1.", "2.", "1.", "2.", "1.", "c)", "d)", "2.", "c)", "d)"])
 	})
 
+	it("labels separate, continued, restarted and interrupted lists as LibreOffice does", async () => {
+		const BULLETS =
+			'<text:list-style style:name="L2"><text:list-level-style-bullet text:level="1" text:bullet-char="•"/></text:list-style>'
+		const item = (text: string, start = ""): string => `<text:list-item${start}><text:p>${text}</text:p></text:list-item>`
+		const labels = async (body: string): Promise<(string | undefined)[]> => {
+			const translation = await translated({ styles: `${LIST}${BULLETS}`, body })
+			const counters = new NumberingCounters(parseNumbering(xml(partText(translation, "word/numbering.xml")), new PropsStore()))
+
+			return [...partText(translation, "word/document.xml").matchAll(/<w:ilvl w:val="(\d+)"\/><w:numId w:val="(\d+)"\/>/g)].map(
+				match => counters.next(Number(match[2]), Number(match[1]))?.text
+			)
+		}
+
+		// Two separate lists each count from 1.
+		expect(
+			await labels(
+				`<text:list text:style-name="L1">${item("a")}${item("b")}</text:list><text:list text:style-name="L1">${item("c")}</text:list>`
+			)
+		).toEqual(["1.", "2.", "1."])
+		// text:continue-list continues past a separate list; text:start-value restarts the count.
+		expect(
+			await labels(
+				`<text:list text:style-name="L1" xml:id="first">${item("a")}</text:list><text:list text:style-name="L1">${item("b")}</text:list><text:list text:style-name="L1" text:continue-list="first">${item("c")}${item("d", ' text:start-value="7"')}${item("e")}</text:list>`
+			)
+		).toEqual(["1.", "1.", "2.", "7.", "8."])
+		// text:continue-numbering continues the list just before.
+		expect(
+			await labels(
+				`<text:list text:style-name="L1">${item("a")}${item("b")}</text:list><text:list text:style-name="L1" text:continue-numbering="true">${item("c")}</text:list>`
+			)
+		).toEqual(["1.", "2.", "3."])
+		// A bullet list between them breaks the continuation: c starts again at 1.
+		expect(
+			await labels(
+				`<text:list text:style-name="L1">${item("a")}${item("b")}</text:list><text:list text:style-name="L2">${item("x")}</text:list><text:list text:style-name="L1" text:continue-numbering="true">${item("c")}</text:list>`
+			)
+		).toEqual(["1.", "2.", "•", "1."])
+	})
+
 	it("keeps a new list's restarts of levels not numbered yet when an item restarts a deeper level", async () => {
 		const TWO =
 			'<text:list-style style:name="L4"><text:list-level-style-number text:level="1" style:num-format="1" style:num-suffix="."/><text:list-level-style-number text:level="2" style:num-format="a" style:num-suffix=")"/></text:list-style>'

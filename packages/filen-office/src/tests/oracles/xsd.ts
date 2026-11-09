@@ -12,7 +12,7 @@ import { decodeUtf8, Namespaces, NodeKind, parseXml } from "@filen/office/core/x
 import { applyMarkupCompatibility, NotWellFormed } from "./mc"
 
 // Schema oracle for written packages: xmllint against the ECMA-376 Transitional schemas (Part 4: WordprocessingML,
-// SpreadsheetML, DrawingML, VML, math, shared types, document properties) and the Open Packaging Conventions schemas (Part 2:
+// SpreadsheetML, PresentationML, DrawingML, VML, math, shared types, document properties) and the Open Packaging Conventions schemas (Part 2:
 // relationships, content types, core properties, with the Dublin Core schemas core properties import). Markup
 // Compatibility (Part 3) is applied first (mc.ts), so extension markup no longer hides the errors after it. xmllint
 // streams (--stream): a 130 MB part validates in a few MB of memory.
@@ -52,6 +52,7 @@ const IMPORTS: readonly (readonly [string, string])[] = [
 	["http://schemas.openxmlformats.org/wordprocessingml/2006/main", "wml.xsd"],
 	["http://schemas.openxmlformats.org/drawingml/2006/main", "dml-main.xsd"],
 	["http://schemas.openxmlformats.org/spreadsheetml/2006/main", "sml.xsd"],
+	["http://schemas.openxmlformats.org/presentationml/2006/main", "pml.xsd"],
 	["http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing", "dml-wordprocessingDrawing.xsd"],
 	["http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing", "dml-spreadsheetDrawing.xsd"],
 	["http://schemas.openxmlformats.org/drawingml/2006/picture", "dml-picture.xsd"],
@@ -64,6 +65,7 @@ const IMPORTS: readonly (readonly [string, string])[] = [
 	["urn:schemas-microsoft-com:office:office", "vml-officeDrawing.xsd"],
 	["urn:schemas-microsoft-com:office:word", "vml-wordprocessingDrawing.xsd"],
 	["urn:schemas-microsoft-com:office:excel", "vml-spreadsheetDrawing.xsd"],
+	["urn:schemas-microsoft-com:office:powerpoint", "vml-presentationDrawing.xsd"],
 	["http://schemas.openxmlformats.org/officeDocument/2006/extended-properties", "shared-documentPropertiesExtended.xsd"],
 	["http://schemas.openxmlformats.org/officeDocument/2006/custom-properties", "shared-documentPropertiesCustom.xsd"],
 	["http://schemas.openxmlformats.org/officeDocument/2006/customXml", "shared-customXmlDataProperties.xsd"],
@@ -84,7 +86,7 @@ const XML_SCHEMA =
 const EXTENSIONS = /\{http:\/\/schemas\.microsoft\.com\/|\{http:\/\/schemas\.openxmlformats\.org\/markup-compatibility\//
 
 // "opc": relationships, content types and core properties (Part 2 schemas).
-export type SchemaFamily = "wml" | "sml" | "dml" | "opc" | "props"
+export type SchemaFamily = "wml" | "sml" | "pml" | "dml" | "opc" | "props"
 
 // The ECMA WordprocessingML parts. Word's own parts under the same prefix (people, commentsExtended, commentsIds,
 // commentsExtensible) have Microsoft roots no ECMA schema declares: the Open XML SDK validator covers them.
@@ -132,6 +134,28 @@ const SML_KINDS = new Set([
 ])
 const SML_PREFIX = "application/vnd.openxmlformats-officedocument.spreadsheetml."
 const SML_MACRO_MAIN = /^application\/vnd\.ms-excel\.(sheet|template)\.macroEnabled\.main\+xml$/
+// The ECMA PresentationML parts (ECMA-376 Part 1 §13.3 and §19). PowerPoint's own parts under the same prefix (modern
+// comments and their authors) have Microsoft roots no ECMA schema declares: the Open XML SDK validator covers them.
+const PML_KINDS = new Set([
+	"presentation.main",
+	"slideshow.main",
+	"template.main",
+	"slide",
+	"slideLayout",
+	"slideMaster",
+	"notesSlide",
+	"notesMaster",
+	"handoutMaster",
+	"comments",
+	"commentAuthors",
+	"presProps",
+	"viewProps",
+	"tableStyles",
+	"tags",
+	"slideUpdateInfo"
+])
+const PML_PREFIX = "application/vnd.openxmlformats-officedocument.presentationml."
+const PML_MACRO_MAIN = /^application\/vnd\.ms-powerpoint\.(presentation|slideshow|template|addin)\.macroEnabled\.main\+xml$/
 const DML_TYPES = new Set([
 	"application/vnd.openxmlformats-officedocument.drawing+xml",
 	"application/vnd.openxmlformats-officedocument.drawingml.chart+xml",
@@ -160,11 +184,15 @@ export function schemaFamily(part: string, contentType: string | undefined): Sch
 	if (DML_TYPES.has(contentType)) return "dml"
 	if (MACRO_MAIN.test(contentType)) return "wml"
 	if (SML_MACRO_MAIN.test(contentType)) return "sml"
+	if (PML_MACRO_MAIN.test(contentType)) return "pml"
 	if (contentType.startsWith(SML_PREFIX) && contentType.endsWith("+xml")) {
 		return SML_KINDS.has(contentType.slice(SML_PREFIX.length, -4)) ? "sml" : undefined
 	}
 	if (contentType.startsWith(WML_PREFIX) && contentType.endsWith("+xml")) {
 		return WML_KINDS.has(contentType.slice(WML_PREFIX.length, -4)) ? "wml" : undefined
+	}
+	if (contentType.startsWith(PML_PREFIX) && contentType.endsWith("+xml")) {
+		return PML_KINDS.has(contentType.slice(PML_PREFIX.length, -4)) ? "pml" : undefined
 	}
 
 	return undefined

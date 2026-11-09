@@ -388,6 +388,60 @@ describe("the canvas layer's keys", () => {
 		expect(ops).toMatchObject([{ kind: "duplicate", shapes: [2], dx: 50 * EMU, dy: 0 }])
 	})
 
+	it("Escape during a marquee hides it and keeps the release from selecting", async () => {
+		mount([{ xfrm: box(100, 100, 200, 100) }])
+
+		const marquee = (): SVGRectElement | null => layer().querySelector("rect")
+
+		pointer("pointerdown", 50, 50)
+		pointer("pointermove", 600, 300)
+		await vi.waitFor(() => {
+			expect(marquee()?.style.display).toBe("")
+		})
+
+		const event = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Escape", code: "Escape" })
+
+		act(() => {
+			layer().dispatchEvent(event)
+		})
+		expect(event.defaultPrevented).toBe(true)
+		expect(marquee()?.style.display).toBe("none")
+		pointer("pointermove", 650, 320)
+		pointer("pointerup", 650, 320)
+		await settle()
+		expect(marquee()?.style.display).toBe("none")
+		expect(selection.getSnapshot().ids).toEqual([])
+		expect(ops).toEqual([])
+	})
+
+	it("Escape during a move drag puts the shape back and the release sends no op", async () => {
+		mount([{ xfrm: box(100, 100, 200, 100) }])
+		click(150, 150)
+
+		const [, outline] = paths()
+		const painted = (): string | undefined => host.querySelector<HTMLElement>("[data-fo-layer='0']")?.style.transform
+
+		pointer("pointerdown", 150, 150)
+		pointer("pointermove", 230, 190)
+		await vi.waitFor(() => {
+			expect(painted()).not.toBe("")
+		})
+
+		const event = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Escape", code: "Escape" })
+
+		act(() => {
+			layer().dispatchEvent(event)
+		})
+		expect(event.defaultPrevented).toBe(true)
+		expect(painted()).toBe("")
+		expect(paths()[0]).toBe("")
+		expect(paths()[1]).toBe(outline)
+		pointer("pointerup", 250, 200)
+		await settle()
+		expect(ops).toEqual([])
+		expect(selection.getSnapshot().ids).toEqual([2])
+	})
+
 	it("Alt+Right turns the selection 15° clockwise, Alt+Left back; a shape locked against turning stays", async () => {
 		mount([{ xfrm: box(100, 100, 200, 100) }, { xfrm: box(400, 100, 200, 100), locks: { noRot: true } }])
 		act(() => {

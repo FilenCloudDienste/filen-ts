@@ -3,10 +3,8 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { afterAll, describe, expect, it } from "vitest"
-import type { SheetSessionApi, SheetWorkbookInfo } from "../core/sheet/protocol"
-import { exportSheetPdf, type SheetPdfRequest } from "../react/sheet/print/pdfExport"
-import type { PrintSheetRequest } from "../react/sheet/print/printLayout"
-import { nodeFontAssets, pdfBytes } from "./sheetPdfFixtures"
+import { exportSheetPdf } from "../react/sheet/print/pdfExport"
+import { nodeFontAssets, pdfBytes, workbookRequest } from "./sheetPdfFixtures"
 import { openFixture } from "./sheetSessionFixtures"
 
 // A sample of the xlsx corpus (charts, pictures, headers and footers, links, right to left, a 1,105-page sheet) printed
@@ -47,41 +45,6 @@ from pypdf import PdfReader
 r = PdfReader(sys.argv[2])
 print(json.dumps({"pages": len(r.pages), "text": r.pages[0].extract_text(), "outline": [o.title for o in r.outline]}))
 `
-
-// Every visible worksheet with its own settings, as the print dialog's "Entire workbook" prints it.
-async function workbookRequest(session: SheetSessionApi, info: SheetWorkbookInfo, file: string): Promise<SheetPdfRequest> {
-	const sheets: PrintSheetRequest[] = []
-
-	for (const sheet of info.sheets) {
-		if (sheet.state !== "visible" || sheet.kind !== "worksheet") continue
-
-		const settings = await session.query("print.settings", { sheet: sheet.id })
-
-		if (settings === null) continue
-
-		sheets.push({
-			sheet: sheet.id,
-			name: sheet.name,
-			setup: settings.setup,
-			used: settings.used,
-			ranges: settings.setup.printArea ?? (settings.used === null ? [] : [settings.used])
-		})
-	}
-
-	for (const request of sheets) await session.layout(request.sheet)
-	for (let k = 0; k < 30; k++) await new Promise(resolve => setTimeout(resolve, 0))
-
-	return {
-		sheets,
-		values: { date: "1/2/2026", time: "10:00", file, path: "" },
-		title: file,
-		lang: "en",
-		kind: info.kind,
-		summaries: info.sheets,
-		date1904: info.date1904,
-		showFormulas: false
-	}
-}
 
 const available = TOOLS !== "" && existsSync(QPDF) && existsSync(VERAPDF) && existsSync(new URL(SAMPLE[0] ?? "", CORPUS))
 

@@ -5,7 +5,7 @@ import { slideRef, type SlideNode } from "../core/presentation/model"
 import { odpSourceReading } from "../core/odp/write/session"
 import { odpWriteSource } from "../core/odp/write/source"
 import { odpBytes, plainText } from "./odpFixtures"
-import { changes, entriesOf, odpDeck, openOdpDeck, saveDeck, shapeNamed, slideAt, text, type OpenedOdp } from "./odpWriteFixtures"
+import { ODP_DECK, changes, entriesOf, odpDeck, openOdpDeck, saveDeck, shapeNamed, slideAt, text, type OpenedOdp } from "./odpWriteFixtures"
 
 // Slide structure ops through the slide and shape families (the edit session's ODP source reading), saved.
 
@@ -79,6 +79,55 @@ describe("ODP writer: slides", () => {
 		expect(reopened.deck.slides).toHaveLength(4)
 		expect(plainText(shapeNamed(slideAt(reopened, 1), "Title2"))).toBe("Second page to the end")
 		expect(plainText(shapeNamed(slideAt(reopened, 3), "Title"))).toBe("Hello bold world")
+	})
+
+	it("duplicates a page whose transition par and click trigger name the copy's own IDs, keeping its sound", async () => {
+		const timed =
+			'<draw:page draw:name="Timed" draw:master-page-name="M" xml:id="pid1" draw:id="pid1">' +
+			'<draw:custom-shape draw:name="Trigger" draw:style-name="gr1" svg:x="3cm" svg:y="6cm" svg:width="4cm" svg:height="2cm" xml:id="id2" draw:id="id2"><draw:enhanced-geometry svg:viewBox="0 0 21600 21600" draw:type="ellipse"/></draw:custom-shape>' +
+			'<anim:par presentation:node-type="timing-root">' +
+			'<anim:par smil:begin="pid1.begin"><anim:transitionFilter smil:dur="1.6s" smil:type="fade" smil:subtype="crossfade"/><anim:audio xlink:href="Media/chime.wav"/></anim:par>' +
+			'<anim:seq presentation:node-type="interactive-sequence"><anim:par smil:begin="id2.click+0.5s"><anim:par smil:begin="0s">' +
+			'<anim:par smil:begin="0s" smil:fill="hold" presentation:node-type="on-click" presentation:preset-class="exit" presentation:preset-id="ooo-exit-dissolve">' +
+			'<anim:set smil:begin="0.499s" smil:dur="0.001s" smil:fill="hold" smil:targetElement="id2" smil:attributeName="visibility" smil:to="hidden"/>' +
+			"</anim:par></anim:par></anim:par></anim:seq></anim:par>" +
+			"</draw:page>"
+		const settings = ODP_DECK.body.indexOf("<presentation:settings")
+		const opened = await openOdpDeck(
+			odpBytes({
+				...ODP_DECK,
+				body: ODP_DECK.body.slice(0, settings) + timed + ODP_DECK.body.slice(settings),
+				extra: [{ name: "Media/chime.wav", data: new Uint8Array([82, 73, 70, 70, 1, 2, 3]), mediaType: "audio/wav" }]
+			})
+		)
+		const apply = applier(opened)
+
+		apply({ family: "slide", kind: "duplicate", slide: slideAt(opened, 3).ref })
+
+		const saved = await saveDeck(opened, changes("slideList"))
+
+		expect(saved.outcome.kind === "refused" ? saved.outcome : "written").toBe("written")
+
+		const content = text((await entriesOf(saved.bytes)).get("content.xml"))
+		const pages = [...content.matchAll(/<draw:page [^>]*>.*?<\/draw:page>/gsu)].map(match => match[0])
+
+		expect(pageNames(content)).toEqual(["Intro", "Middle", "End", "Timed", "Timed (2)"])
+		expect(pages[3]).toBe(timed)
+		expect(pages[4]).toContain('<anim:par smil:begin="pid1_2.begin">')
+		expect(pages[4]).toContain('<anim:par smil:begin="id2_2.click+0.5s">')
+		expect(pages[4]).toContain('smil:targetElement="id2_2"')
+		expect(pages[4]).not.toMatch(/"(?:pid1|id2)\./u)
+
+		const reopened = await openOdpDeck(saved.bytes)
+
+		for (const at of [3, 4]) {
+			const page = slideAt(reopened, at)
+			const trigger = shapeNamed(page, "Trigger").id
+
+			expect(page.transition?.durationMs).toBe(1600)
+			expect(page.transition?.sound).toMatchObject({ kind: "embedded", part: "/Media/chime.wav" })
+			expect(JSON.stringify(page.timing)).toContain(`"evt":"onClick","delay":500,"tgtEl":{"kind":"shape","shape":${String(trigger)}}`)
+		}
 	})
 
 	it("adds a slide on a layout with its placeholders written where the layout puts them", async () => {

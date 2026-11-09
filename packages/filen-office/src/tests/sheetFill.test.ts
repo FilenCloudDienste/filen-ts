@@ -8,6 +8,8 @@ import {
 	type SheetCommandResult,
 	type SheetSessionApi
 } from "../core/sheet/protocol"
+import { createGridAxis } from "../react/sheet/axis"
+import { fillDownTo, fillHandleShown, fillLeft, fillTarget } from "../react/sheet/fill"
 import { firstTile, savedBytes, tileEntry } from "./sheetSessionFixtures"
 import { openKeys, sheetBody } from "./sheetKeysFixtures"
 
@@ -259,4 +261,75 @@ describe("fill.entry (Ctrl+Enter)", () => {
 
 		expect(most !== null && most !== "tooLarge" && most.rows.length).toBe(SHEET_MAX_EDIT_CELLS)
 	})
+})
+
+describe("the fill handle", () => {
+	const range = (startRow: number, startCol: number, endRow: number, endCol: number) => ({ startRow, startCol, endRow, endCol })
+
+	it("shows for one range that is neither whole rows nor whole columns", () => {
+		expect(fillHandleShown([range(1, 1, 3, 2)])).toEqual(range(1, 1, 3, 2))
+		expect(fillHandleShown([range(0, 0, 0, 0), range(2, 2, 2, 2)])).toBeNull()
+		expect(fillHandleShown([])).toBeNull()
+		expect(fillHandleShown([range(0, 2, SHEET_MAX_ROWS - 1, 2)])).toBeNull()
+		expect(fillHandleShown([range(4, 0, 4, SHEET_MAX_COLS - 1)])).toBeNull()
+		// Down to the last row but not from the first is not a whole column.
+		expect(fillHandleShown([range(1, 2, SHEET_MAX_ROWS - 1, 2)])).toEqual(range(1, 2, SHEET_MAX_ROWS - 1, 2))
+	})
+
+	it("fills the way the pointer went furthest past the source", () => {
+		const source = range(2, 2, 3, 3)
+
+		expect(fillTarget(source, { row: 9, col: 5 })).toEqual(range(2, 2, 9, 3))
+		expect(fillTarget(source, { row: 4, col: 8 })).toEqual(range(2, 2, 3, 8))
+		expect(fillTarget(source, { row: 0, col: 2 })).toEqual(range(0, 2, 3, 3))
+		expect(fillTarget(source, { row: 3, col: 0 })).toEqual(range(2, 0, 3, 3))
+		// A tie goes to the rows.
+		expect(fillTarget(source, { row: 5, col: 5 })).toEqual(range(2, 2, 5, 3))
+	})
+
+	it("cuts the source back to the pointer dragged inside it, and clears the cells it leaves", () => {
+		const source = range(0, 0, 4, 2)
+		const up = fillTarget(source, { row: 1, col: 2 })
+		const leftward = fillTarget(source, { row: 4, col: 0 })
+
+		expect(up).toEqual(range(0, 0, 1, 2))
+		expect(fillLeft(source, up)).toEqual(range(2, 0, 4, 2))
+		expect(leftward).toEqual(range(0, 0, 4, 0))
+		expect(fillLeft(source, leftward)).toEqual(range(0, 1, 4, 2))
+		expect(fillTarget(source, { row: 4, col: 2 })).toEqual(source)
+		expect(fillLeft(source, source)).toBeNull()
+		expect(fillLeft(source, range(0, 0, 9, 2))).toBeNull()
+	})
+})
+
+describe("fill handle double-click", () => {
+	async function downTo(text: string, source: { startRow: number; startCol: number; endRow: number; endCol: number }) {
+		const { session, info } = await openKeys(text)
+		const sheet = info.sheets[0]?.id ?? 0
+		const layout = await session.layout(sheet)
+
+		return fillDownTo(session, sheet, source, createGridAxis(layout.rows, layout.rowCount, 1))
+	}
+
+	it("fills down to the end of the run in the column to the left, not to the block after it", async () => {
+		expect(await downTo("a,x\nb,\nc,\nd,\n,\ne,\nf,\n", at(0, 1))).toBe(3)
+	})
+
+	it("stops at a lone filled cell below the selection, not the next block past the blank cells under it", async () => {
+		expect(await downTo("a,x\nb,\n,\n,\nc,\nd,\n", at(0, 1))).toBe(1)
+	})
+
+	it("takes the column to the right when the one to the left is empty or there is none", async () => {
+		expect(await downTo("x,a\n,b\n,c\n", at(0, 0))).toBe(2)
+		expect(await downTo(",x,a\n,,b\n,,c\n,,d\n", at(0, 1))).toBe(3)
+	})
+
+	it("fills nowhere when both neighbours are empty below the selection, or at the last row", async () => {
+		expect(await downTo("a,x,b\n,,\nc,,d\n", at(0, 1))).toBeNull()
+		expect(await downTo("a,x\n", { startRow: SHEET_MAX_ROWS - 1, startCol: 1, endRow: SHEET_MAX_ROWS - 1, endCol: 1 })).toBeNull()
+	})
+
+	function at(row: number, col: number) {
+		return { startRow: row, startCol: col, endRow: row, endCol: col }
+	}
 })

@@ -1,7 +1,9 @@
-import { mkdirSync, writeFileSync } from "node:fs"
+import { spawnSync } from "node:child_process"
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { TextSelection } from "prosemirror-state"
-import { describe, expect, it } from "vitest"
+import { afterAll, describe, expect, it } from "vitest"
 import type { DocxEditorCommand } from "@filen/office/core/docx/edit"
 import { odtBytes } from "./odtFixtures"
 import { decodeUtf8 } from "@filen/office/core/xml"
@@ -11,9 +13,11 @@ import { paragraphs } from "./rtfWriteFixtures"
 
 // What the ODT writer generates, on an ODF 1.3 document with nothing foreign in it: every scripted edit and a new
 // table, saved. FILEN_OFFICE_ODT_WRITE_SCHEMA_OUT names a directory the saves go to, for jing against the OASIS ODF 1.3
-// RELAX NG schema and the ODF validator (0 errors each). Opt-in.
+// RELAX NG schema. FILEN_OFFICE_ODFVALIDATOR=<odfvalidator jar> checks every save against ODF 1.3 here (0 errors
+// each), in a scratch directory when no _OUT is given. Opt-in.
 
 const OUT = process.env["FILEN_OFFICE_ODT_WRITE_SCHEMA_OUT"] || undefined
+const ODF_VALIDATOR = process.env["FILEN_OFFICE_ODFVALIDATOR"] ?? ""
 
 const SOURCE = odtBytes({
 	automatic:
@@ -28,10 +32,14 @@ const SOURCE = odtBytes({
 		"<text:p>Last paragraph</text:p>"
 })
 
-describe.skipIf(OUT === undefined)("ODT writer output against the ODF 1.3 schema", () => {
-	it("writes each edit", { timeout: 120_000 }, async () => {
-		const out = OUT as string
+describe.skipIf(OUT === undefined && ODF_VALIDATOR === "")("ODT writer output against the ODF 1.3 schema", () => {
+	const out = OUT ?? mkdtempSync(join(tmpdir(), "filen-office-odt-schema-"))
 
+	afterAll(() => {
+		if (OUT === undefined) rmSync(out, { recursive: true, force: true })
+	})
+
+	it("writes each edit", { timeout: 120_000 }, async () => {
 		mkdirSync(out, { recursive: true })
 
 		const all = await editOdt(SOURCE)
@@ -130,5 +138,18 @@ describe.skipIf(OUT === undefined)("ODT writer output against the ODF 1.3 schema
 		table.session.dispatch(table.session.state.tr.setSelection(TextSelection.create(table.session.state.doc, last.pos + 1)))
 		expect(await table.editor.execute({ type: "table.insert", rows: 2, cols: 3 } as DocxEditorCommand)).toBe(true)
 		writeFileSync(join(out, "new-table.odt"), (await saveOdt(table)).bytes)
+	})
+
+	it.skipIf(ODF_VALIDATOR === "")("writes saves odfvalidator finds no ODF 1.3 error in", { timeout: 120_000 }, () => {
+		const saves = readdirSync(out)
+			.filter(name => name.endsWith(".odt"))
+			.map(name => join(out, name))
+		expect(existsSync(ODF_VALIDATOR), ODF_VALIDATOR).toBe(true)
+
+		const run = spawnSync("java", ["-jar", ODF_VALIDATOR, "-1.3", ...saves], { encoding: "utf8", maxBuffer: 1 << 26 })
+
+		expect(run.error).toBeUndefined()
+		expect(saves.length).toBe(6)
+		expect(`${run.stdout}\n${run.stderr}`.split("\n").filter(line => /:\s+(?:Error|Fatal):/u.test(line))).toEqual([])
 	})
 })

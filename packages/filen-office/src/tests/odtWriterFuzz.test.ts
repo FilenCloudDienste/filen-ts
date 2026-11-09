@@ -19,9 +19,10 @@ import { editOdt, odtEditsOf } from "./odtWriteFixtures"
 // tables, undo) on ODF text documents, each saved through the ODT writer. A save either reads back as the edit made
 // it, checked here independently of the writer's own proof (every paragraph's text in order, and how many tables and
 // rows), or is refused with a reason: no proof failure goes unreported. FILEN_OFFICE_ODT_FUZZ_RUNS sets the seeds
-// per file (default 3); corpus files are added where the corpus exists.
+// per file (default 3), FILEN_OFFICE_ODT_FUZZ_FROM the first (default 0); corpus files are added where the corpus exists.
 
 const RUNS = Number(process.env["FILEN_OFFICE_ODT_FUZZ_RUNS"] ?? 3)
+const FROM = Number(process.env["FILEN_OFFICE_ODT_FUZZ_FROM"] ?? 0)
 const STEPS = 12
 const OPS: readonly EditOp[] = [...baseOps, ...formattingOps, ...tableOps].filter(op => op.harness === "paged")
 
@@ -103,7 +104,7 @@ describe("ODT writer fuzz", () => {
 		const reasons = new Map<string, number>()
 
 		for (const file of files) {
-			for (let run = 0; run < RUNS; run++) {
+			for (let run = FROM; run < FROM + RUNS; run++) {
 				const rand = rng(0x0d7 + run * 7919 + file.bytes.length)
 				const editing = await editOdt(file.bytes)
 
@@ -131,7 +132,7 @@ describe("ODT writer fuzz", () => {
 					const written = await writeOdt(editing.source, edits)
 					const read = await translateOdt(bytesSource(written.bytes))
 
-					expect(read.ok, file.name).toBe(true)
+					expect(read.ok, `${file.name} run ${run}`).toBe(true)
 
 					if (!read.ok) continue
 

@@ -9,6 +9,9 @@ import { layOutOdt } from "./odtFixtures"
 // The licensed ODT corpus against LibreOffice 7.5's own rendering (fixtures/odt/libreoffice-pages.json: its
 // PDF export's page count per file, a file it cannot load left out).
 const DIRECTORY = join(CORPUS_DIR, "odt")
+const TEMPLATES = join(CORPUS_DIR, "ott")
+// An AES-256-CBC encrypted text document from Apache Tika's fixtures.
+const ENCRYPTED = "tika__testODTEncrypted.odt"
 const REFERENCE = JSON.parse(readFileSync(new URL("./fixtures/odt/libreoffice-pages.json", import.meta.url), "utf8")) as {
 	readonly pages: Readonly<Record<string, number>>
 }
@@ -17,6 +20,12 @@ describe.skipIf(!existsSync(DIRECTORY))("the ODT corpus", () => {
 	const files = existsSync(DIRECTORY)
 		? readdirSync(DIRECTORY)
 				.filter(name => name.endsWith(".odt"))
+				.sort()
+		: []
+	// Text templates (.ott) open as text documents.
+	const templates = existsSync(TEMPLATES)
+		? readdirSync(TEMPLATES)
+				.filter(name => name.endsWith(".ott"))
 				.sort()
 		: []
 
@@ -32,6 +41,25 @@ describe.skipIf(!existsSync(DIRECTORY))("the ODT corpus", () => {
 
 		expect(opened).toBeGreaterThanOrEqual(Object.keys(REFERENCE.pages).length)
 	}, 120_000)
+
+	// ODF 1.3 Part 2 §4.8: an encrypted package is refused as encrypted, not as damaged.
+	it.skipIf(!files.includes(ENCRYPTED))("refuses an encrypted package as encrypted", async () => {
+		const result = await translateOdt(bytesSource(new Uint8Array(readFileSync(join(DIRECTORY, ENCRYPTED)))))
+
+		expect(result.ok ? "opened" : result.reason).toBe("encrypted")
+	})
+
+	it.skipIf(templates.length === 0)("opens every text template", async () => {
+		const failures: string[] = []
+
+		for (const name of templates) {
+			const result = await translateOdt(bytesSource(new Uint8Array(readFileSync(join(TEMPLATES, name)))))
+
+			if (!result.ok) failures.push(`${name}: ${result.reason}`)
+		}
+
+		expect(failures).toEqual([])
+	})
 
 	it("lays out within one page of LibreOffice on at least 85 % of the files", async () => {
 		let within = 0
