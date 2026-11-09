@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest"
-import { partText, translated } from "./odtFixtures"
+import { convertText } from "../core/convert/text/index"
+import { bytesSource, ZipArchive } from "../core/opc/index"
+import { decodeUtf8 } from "../core/xml/index"
+import { odtBytes, partText, translated } from "./odtFixtures"
 
 const BODY = '<text:p text:style-name="Hyphenated">Hyphenation</text:p><text:p>Whole</text:p>'
 
@@ -39,5 +42,30 @@ describe("OpenDocument hyphenation translated", () => {
 
 		expect(settings).toContain('<w:autoHyphenation/><w:hyphenationZone w:val="0"/>')
 		expect(settings).toContain('w:val="2 2 5"')
+	})
+
+	// w:compatSetting's w:name is an enumeration (ISO/IEC 29500-1 §17.15.3.4): a .docx written for other readers
+	// keeps Word's own hyphenation settings and leaves out the ODF character counts.
+	it("leaves the ODF character counts out of a converted .docx and keeps automatic hyphenation", async () => {
+		const converted = await convertText(
+			odtBytes({
+				styles: '<style:default-style style:family="paragraph"><style:text-properties fo:hyphenate="true"/></style:default-style>',
+				body: BODY
+			}),
+			"odt",
+			"docx"
+		)
+
+		if (!converted.ok) throw new Error("not converted")
+
+		const archive = await ZipArchive.open(bytesSource(converted.bytes))
+		const entry = archive.get("word/settings.xml")
+
+		if (entry === undefined) throw new Error("no settings")
+
+		const settings = decodeUtf8(await archive.read(entry))
+
+		expect(settings).toContain("<w:autoHyphenation/>")
+		expect(settings).not.toContain("hyphenation-chars")
 	})
 })

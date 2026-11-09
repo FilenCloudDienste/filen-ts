@@ -15,6 +15,8 @@ import type { LossyCounts } from "./report"
 //   paragraphs whose borders agree, and w:frame is Word's frame effect on a line);
 // - so is its line-gap setting (lines measured as LibreOffice measures them), unreported: no content goes, and a
 //   .docx's lines are laid out by its reader's own rules;
+// - so is its hyphenation-chars setting (ODF's minimum characters before and after a break and word length),
+//   unreported: w:autoHyphenation stays, and a .docx's breaks are its reader's patterns and rules;
 // - border spacing in whole points (the translation keeps padding to the twip; ST_PointMeasure holds whole points);
 // - property children in schema order (CT_RPr, CT_PPr, CT_ParaRPr: Part 4 wml.xsd);
 // - font family lists (ODF svg:font-family) as their first family: ST_String of w:rFonts is at most 31 characters;
@@ -444,6 +446,8 @@ const OBJECT_LINES = /<w:compatSetting w:name="object-line-height" w:uri="[^"]*"
 const INLINE = encodeUtf8("<wp:inline")
 // Lines measured as LibreOffice measures them; every translation carries it and a .docx's lines are its reader's.
 const LINE_GAP = /<w:compatSetting w:name="line-gap" w:uri="[^"]*" w:val="[a-z]+"\/>/u
+// ODF's hyphenation character counts; WordprocessingML has no setting for them.
+const HYPHENATION = /<w:compatSetting w:name="hyphenation-chars" w:uri="[^"]*" w:val="[\d ]+"\/>/u
 const PADDING = /<w:compatSetting w:name="paragraph-padding" w:uri="[^"]*" w:val="borders"\/>/u
 
 function includes(bytes: Uint8Array, needle: Uint8Array): boolean {
@@ -555,7 +559,7 @@ export function standaloneParts(parts: Map<string, Uint8Array>, lossy: LossyCoun
 			if ([...parts].some(([name, bytes]) => STORY.test(name) && includes(bytes, INLINE))) lossy.add("objectLineHeight")
 		}
 
-		text = text.replace(LINE_GAP, "")
+		text = text.replace(LINE_GAP, "").replace(HYPHENATION, "")
 
 		if (PADDING.test(text)) {
 			text = text.replace(PADDING, "")
