@@ -2826,6 +2826,13 @@ packages:
     cpu: [x64]
     os: [darwin]
 
+  '@filen/sdk-rs-linux-arm64-gnu@0.5.25':
+    resolution: {integrity: sha512-WXo7zQlG2MBr/pCGiMjiVpAmCqXDwtPs9A3yKXn5wII81yB7BbwbOfHD6EwBLyPiweGZ5luJdcYOnL3OP45xhA==}
+    engines: {node: '>=23'}
+    cpu: [arm64]
+    os: [linux]
+    libc: [glibc]
+
   '@filen/sdk-rs-linux-x64-gnu@0.5.25':
     resolution: {integrity: sha512-l4G47/pNMZTp9p91DEMVIkZ2Qv8aWOTRRVmjKD7B2rV4Qdaipt9A0ZSE5w5OMeJjCITb74Jaq4xOcQSa+Ci4Zw==}
     engines: {node: '>=23'}
@@ -12998,6 +13005,9 @@ snapshots:
   '@filen/sdk-rs-darwin-x64@0.5.25':
     optional: true
 
+  '@filen/sdk-rs-linux-arm64-gnu@0.5.25':
+    optional: true
+
   '@filen/sdk-rs-linux-x64-gnu@0.5.25':
     optional: true
 
@@ -13013,6 +13023,7 @@ snapshots:
     optionalDependencies:
       '@filen/sdk-rs-darwin-arm64': 0.5.25
       '@filen/sdk-rs-darwin-x64': 0.5.25
+      '@filen/sdk-rs-linux-arm64-gnu': 0.5.25
       '@filen/sdk-rs-linux-x64-gnu': 0.5.25
       '@filen/sdk-rs-win32-arm64-msvc': 0.5.25
       '@filen/sdk-rs-win32-x64-msvc': 0.5.25
