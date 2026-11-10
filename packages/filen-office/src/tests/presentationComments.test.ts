@@ -193,6 +193,26 @@ describe("presentation comments", () => {
 		])
 	})
 
+	it("writes a new author with the user's own initials when given", async () => {
+		const s = await driveSession(buildPptx(editDeckOptions()), "pptx")
+		const slide = s.session.deck.slides[1] as SlideRef
+
+		const op: CommentOp = {
+			family: "comment",
+			kind: "add",
+			slide,
+			comment: { id: ROOT, author: AUTHOR_NEW, text: "Hi", created: "2026-10-28T08:00:00.000Z" },
+			authorName: "Cy Doe",
+			authorInitials: "CYD"
+		}
+
+		expect((await s.command(op)).ok).toBe(true)
+
+		const parts = await partsAfter((await s.save()).bytes)
+
+		expect(text(parts.get("ppt/authors.xml"))).toContain('name="Cy Doe" initials="CYD"')
+	})
+
 	it("adds a modern comment to a deck with none: its Comment part, the Author part, the slide's commentRel; it reads back equal", async () => {
 		const original = buildPptx(editDeckOptions())
 		const s = await driveSession(original, "pptx")

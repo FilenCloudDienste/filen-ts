@@ -2,7 +2,7 @@ import { escapeAttribute } from "../xml/entities"
 import { fontMarkup } from "../xlsx/write/records"
 import { IMPLIED_FONT } from "../xlsx/write/styles"
 import { textSheetName } from "../xlsx/convert/text"
-import { templateLocale } from "./locale"
+import { templateLocale, type TemplatePaper } from "./locale"
 import { FILEN_THEME } from "./themes/model"
 import { CONTENT_TYPE, themeXml } from "./themes/pptx"
 import { zipParts } from "./zip"
@@ -75,10 +75,12 @@ export interface BlankXlsxOptions {
 	// The first sheet's name in the user's language ("Sheet1" in English). A name Excel would refuse is cut
 	// down the way a text file's name is (no \ / ? * [ ] :, at most 31 characters), "Sheet1" when nothing is left.
 	readonly sheetName: string
+	// The user's paper, in place of the one the locale's region uses.
+	readonly paper?: TemplatePaper | undefined
 }
 
 export function blankXlsx(options: BlankXlsxOptions): Promise<Uint8Array> {
-	const { paper } = templateLocale(options.locale)
+	const { paper } = templateLocale(options.locale, options.paper)
 
 	return zipParts([
 		["[Content_Types].xml", CONTENT_TYPES],

@@ -46,6 +46,11 @@ describe("templateLocale", () => {
 		expect(templateLocale("zh-Hant-TW")).toEqual({ tag: "zh-Hant-TW", paper: "a4" })
 	})
 
+	it("takes a chosen paper in place of the region's", () => {
+		expect(templateLocale("en-US", "a4")).toEqual({ tag: "en-US", paper: "a4" })
+		expect(templateLocale("de-DE", "letter")).toEqual({ tag: "de-DE", paper: "letter" })
+	})
+
 	it("falls back to en-US for a tag that is not BCP 47", () => {
 		expect(templateLocale("not a locale")).toEqual({ tag: "en-US", paper: "letter" })
 		expect(templateLocale("")).toEqual({ tag: "en-US", paper: "letter" })
@@ -98,6 +103,18 @@ describe("blankDocx", () => {
 			["hi-IN", '<w:lang w:val="en-US" w:bidi="hi-IN"/>']
 		] as const)
 			expect(partsOf(await blankDocx({ locale }))["word/styles.xml"], locale).toContain(lang)
+	})
+
+	it("is made on a chosen paper, whatever the region", async () => {
+		expect(partsOf(await blankDocx({ locale: "de-DE", paper: "letter" }))["word/document.xml"]).toContain(
+			'<w:pgSz w:w="12240" w:h="15840"/>'
+		)
+		expect(partsOf(await blankDocx({ locale: "en-US", paper: "a4" }))["word/document.xml"]).toContain(
+			'<w:pgSz w:w="11906" w:h="16838"/>'
+		)
+		expect(partsOf(await blankXlsx({ locale: "en-US", sheetName: "Sheet1", paper: "a4" }))["xl/worksheets/sheet1.xml"]).toContain(
+			'<pageSetup paperSize="9"'
+		)
 	})
 
 	it("opens through the document reader and lays out as one empty page of its paper", async () => {

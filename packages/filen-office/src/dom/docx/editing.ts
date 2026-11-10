@@ -131,8 +131,9 @@ export interface DocxEditingHost {
 	// Body blocks the proof locked as the document opened (0 before then, or without a proof).
 	proofLocked(): number
 	// The document author name for comments and tracked changes (the app asked the user; never filled in for
-	// them); undefined clears it. Holds for the document from now on, also before it opened.
-	setAuthor(name: string | undefined): void
+	// them); undefined clears it. `initials`: what comments record for it (w:initials), the user's own; derived
+	// from the name when undefined. Holds for the document from now on, also before it opened.
+	setAuthor(name: string | undefined, initials?: string): void
 	// Shows tracked changes another way (DocxOpenOptions.view), laid out again in place: no reopen. False
 	// before the editor opened or when the document already shows that view.
 	setView(view: "final" | "markup" | "original"): boolean
@@ -394,6 +395,7 @@ export function inThreadEditingHost(
 	let saveInput: DocxSaveInput | undefined
 	let proofLocked = 0
 	let author = editing.author
+	let initials: string | undefined
 	let current: PagedEditor | undefined
 	// Set once the editor is open: how saves slice their work here, and the zipper.
 	let writing: { readonly slicing: Slicing; readonly zipper: DocxZipper } | undefined
@@ -563,7 +565,7 @@ export function inThreadEditingHost(
 
 			// The name as it is now (setAuthor may have changed it since the host was made).
 			context.identity.author = author
-			context.identity.initials = author === undefined ? undefined : authorInitials(author)
+			context.identity.initials = author === undefined ? undefined : (initials ?? authorInitials(author))
 
 			if (closed || edits === undefined) return
 
@@ -697,14 +699,15 @@ export function inThreadEditingHost(
 		save,
 		prepare: sessions => held(() => prepare(sessions, false)),
 		proofLocked: () => proofLocked,
-		setAuthor(name) {
+		setAuthor(name, chosen) {
 			author = name
+			initials = chosen
 
 			if (current !== undefined) {
 				const identity = current.body.session.context.identity
 
 				identity.author = name
-				identity.initials = name === undefined ? undefined : authorInitials(name)
+				identity.initials = name === undefined ? undefined : (chosen ?? authorInitials(name))
 
 				for (const session of current.sessions) session.invalidate()
 			}

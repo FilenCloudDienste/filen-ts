@@ -1615,7 +1615,11 @@ describe("docx tracked changes: recording details", () => {
 		const opened = editing.host(bytesSource(buildDocx({ body: p("one") })), () => undefined)
 		const editor = await editing.editor
 
+		// Comments carry the user's own initials when given, else the name's.
+		editing.setAuthor("Ann Lee", "AXL")
+		expect(editor.body.session.context.identity.initials).toBe("AXL")
 		editing.setAuthor("Ann")
+		expect(editor.body.session.context.identity.initials).toBe("A")
 		editor.execute({ type: "review.track", on: true })
 		editor.setComposition({ from: 2, to: 3 })
 		editor.dispatch(editor.state.tr.insertText("か", 2).setMeta("composition", 1))

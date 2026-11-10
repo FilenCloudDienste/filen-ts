@@ -1,7 +1,7 @@
 import { escapeAttribute } from "../xml/entities"
 import { textSheetName } from "../xlsx/convert/text"
 import { FONT_FACES, FO, odfPackage, OFFICE, pageLayout, STYLE, SVG, TABLE, textProperties } from "./odf"
-import { templateLocale } from "./locale"
+import { templateLocale, type TemplatePaper } from "./locale"
 import { zipParts } from "./zip"
 
 // A blank OpenDocument spreadsheet (ODF 1.3): one empty sheet under the caller's (localized) name, Calibri 11 pt in
@@ -39,8 +39,12 @@ export interface BlankOdsOptions {
 	// The first sheet's name in the user's language ("Sheet1" in English), cut down to one Excel also takes (no
 	// \ / ? * [ ] :, at most 31 characters; "Sheet1" when nothing is left), so the sheet converts to .xlsx as named.
 	readonly sheetName: string
+	// The user's paper, in place of the one the locale's region uses.
+	readonly paper?: TemplatePaper | undefined
 }
 
 export function blankOds(options: BlankOdsOptions): Promise<Uint8Array> {
-	return zipParts(odfPackage(MEDIA_TYPE, content(textSheetName(options.sheetName)), styles(templateLocale(options.locale))))
+	return zipParts(
+		odfPackage(MEDIA_TYPE, content(textSheetName(options.sheetName)), styles(templateLocale(options.locale, options.paper)))
+	)
 }

@@ -96,7 +96,8 @@ export function tagParts(tag: string): TagParts {
 		: { language: locale.language, script: locale.script, region: locale.region }
 }
 
-export function templateLocale(tag: string): TemplateLocale {
+// `paper`: the user's choice, in place of the region's.
+export function templateLocale(tag: string, paper?: TemplatePaper): TemplateLocale {
 	const locale = canonical(tag) ?? canonical(FALLBACK_TAG)
 	const language = locale?.language ?? "en"
 	// The script only from the tag itself: maximize() fills one in for every language.
@@ -106,6 +107,6 @@ export function templateLocale(tag: string): TemplateLocale {
 
 	return {
 		tag: /^[A-Za-z0-9-]+$/.test(shown) ? shown : FALLBACK_TAG,
-		paper: region !== undefined && LETTER_REGIONS.has(region) ? "letter" : "a4"
+		paper: paper ?? (region !== undefined && LETTER_REGIONS.has(region) ? "letter" : "a4")
 	}
 }

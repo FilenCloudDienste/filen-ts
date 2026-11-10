@@ -1,4 +1,4 @@
-import { languageSlots, templateLocale } from "./locale"
+import { languageSlots, templateLocale, type TemplatePaper } from "./locale"
 import { zipParts } from "./zip"
 
 // A blank WordprocessingML document: one empty paragraph in Calibri 11 pt, the paper of the user's region
@@ -92,10 +92,12 @@ function styles(tag: string): string {
 export interface BlankDocxOptions {
 	// The user's locale (BCP 47): the paper and the default language.
 	readonly locale: string
+	// The user's paper, in place of the one the locale's region uses.
+	readonly paper?: TemplatePaper | undefined
 }
 
 export function blankDocx(options: BlankDocxOptions): Promise<Uint8Array> {
-	const { tag, paper } = templateLocale(options.locale)
+	const { tag, paper } = templateLocale(options.locale, options.paper)
 
 	return zipParts([
 		["[Content_Types].xml", CONTENT_TYPES],

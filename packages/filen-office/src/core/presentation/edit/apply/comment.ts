@@ -69,7 +69,8 @@ function authorFor(
 	format: CommentFormat,
 	model: CommentModel,
 	name: string | undefined,
-	authors: Author[]
+	authors: Author[],
+	chosenInitials: string | undefined
 ): { readonly id: string; readonly legacyId?: number } | Refused {
 	if (format === "odf") {
 		const own = name ?? model.author
@@ -85,7 +86,7 @@ function authorFor(
 	if (known !== undefined) return { id: known.id, ...(known.legacyId === undefined ? {} : { legacyId: known.legacyId }) }
 	if (name === undefined || name.trim() === "") return refused("malformed", "a comment without an author")
 
-	const initials = initialsOf(name)
+	const initials = chosenInitials ?? initialsOf(name)
 
 	if (legacy) {
 		let next = 0
@@ -152,7 +153,7 @@ function add(deck: Deck, op: AddOp, node: SlideNode, held: SlideComments): Apply
 	if ((format === "odf") !== (deck.format === "odp")) return refused("unsupported", `${format} comments in a ${deck.format} deck`)
 
 	const authors = [...deck.authors]
-	const author = authorFor(format, op.comment, op.authorName, authors)
+	const author = authorFor(format, op.comment, op.authorName, authors, op.authorInitials)
 
 	if ("kind" in author) return author
 

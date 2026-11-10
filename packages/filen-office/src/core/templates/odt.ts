@@ -1,5 +1,5 @@
 import { FONT_FACES, FO, odfPackage, OFFICE, pageLayout, STYLE, SVG, TEXT, textProperties } from "./odf"
-import { templateLocale } from "./locale"
+import { templateLocale, type TemplatePaper } from "./locale"
 import { zipParts } from "./zip"
 
 // A blank OpenDocument text document (ODF 1.3): one empty paragraph in Calibri 11 pt, the paper of the user's region
@@ -27,8 +27,10 @@ function styles(locale: ReturnType<typeof templateLocale>): string {
 export interface BlankOdtOptions {
 	// The user's locale (BCP 47): the paper and the default language.
 	readonly locale: string
+	// The user's paper, in place of the one the locale's region uses.
+	readonly paper?: TemplatePaper | undefined
 }
 
 export function blankOdt(options: BlankOdtOptions): Promise<Uint8Array> {
-	return zipParts(odfPackage(MEDIA_TYPE, CONTENT, styles(templateLocale(options.locale))))
+	return zipParts(odfPackage(MEDIA_TYPE, CONTENT, styles(templateLocale(options.locale, options.paper))))
 }
