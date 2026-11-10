@@ -6,8 +6,9 @@ import { type ActionDescriptor } from "@/lib/actionDescriptor"
 import type { NotesKey } from "@/lib/i18n"
 
 // Dialog kinds a note-menu entry can dispatch to the surface-level dialog host (useNoteDialogHost) —
-// mirrors drive's ItemActionDialogKind split (itemMenu.logic.ts).
-export type NoteActionDialogKind = "rename" | "delete" | "leave" | "createTag" | "participants" | "history"
+// mirrors drive's ItemActionDialogKind split (itemMenu.logic.ts). "trash" is the keyboard's alone: Delete on the note
+// on screen, with no row focused, asks first (the menu's Trash, on a row the user picked, does not).
+export type NoteActionDialogKind = "rename" | "delete" | "leave" | "trash" | "createTag" | "participants" | "history"
 
 // Tag-row dialog kinds — disjoint from NoteActionDialogKind so the dialog host's active-dialog union
 // discriminates on `kind` alone (a tag dialog carries a NoteTag, not a Note).

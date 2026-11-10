@@ -11,6 +11,7 @@ import { createTagForNote, type CreatedTag } from "@/features/notes/lib/createTa
 import { trashNotes, deleteNotesPermanently, leaveNotes } from "@/features/notes/lib/bulk"
 import { NOTES_DELETE_PERMANENTLY, NOTES_LEAVE, NOTES_TRASH, notesActivity } from "@/features/notes/lib/activity"
 import { errorLabel } from "@/lib/i18n/errorLabel"
+import { runNoteDirectAction } from "@/features/notes/lib/noteDirectAction"
 import { type NoteActionDialogKind, type NoteTagDialogKind } from "@/features/notes/components/noteMenu.logic"
 import { type NoteBulkDialogActionKind } from "@/features/notes/components/notesBulkActionBar.logic"
 import { ParticipantsDialog } from "@/features/notes/components/participantsDialog"
@@ -228,6 +229,28 @@ export function useNoteDialogHost(): NoteDialogHost {
 						}}
 						onConfirm={() => {
 							void handleLeaveConfirm(activeDialog.note)
+						}}
+					/>
+				)
+			// The open note's Trash from the keyboard, confirmed; on confirm it runs exactly what the menu's Trash runs.
+			case "trash":
+				return (
+					<ConfirmDialog
+						open
+						pending={dialogPending}
+						title={t("notesTrashSelectedConfirmTitle")}
+						body={t("notesTrashSelectedConfirmBody", { count: 1 })}
+						confirmLabel={t("noteActionTrash")}
+						cancelLabel={t("common:cancel")}
+						destructive
+						onOpenChange={open => {
+							if (!open) {
+								closeActiveDialog()
+							}
+						}}
+						onConfirm={() => {
+							closeActiveDialog()
+							void runNoteDirectAction(activeDialog.note, "trash", t, undefined)
 						}}
 					/>
 				)

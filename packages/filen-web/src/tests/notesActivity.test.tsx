@@ -285,3 +285,56 @@ describe("bulk confirm dialogs", () => {
 		expect(toast).not.toHaveBeenCalled()
 	})
 })
+
+// Delete on the open note, with no row focused, asks first; confirmed, it runs the menu's own Trash.
+describe("open note trash confirm", () => {
+	function Host({ target }: { target: Note }): ReactNode {
+		const host = useNoteDialogHost()
+
+		return createElement(
+			"div",
+			null,
+			createElement(
+				"button",
+				{
+					type: "button",
+					onClick: () => {
+						host.openNoteDialog("trash", target)
+					}
+				},
+				"open"
+			),
+			host.renderActiveDialog()
+		)
+	}
+
+	it("trashes nothing until confirmed, then trashes the note as its menu does", async () => {
+		actions.trashNote.mockResolvedValue({ status: "success", item: { ...note, trash: true } })
+		render(createElement(Host, { target: note }))
+
+		fireEvent.click(screen.getByText("open"))
+
+		expect(screen.getByRole("alertdialog")).toBeDefined()
+		expect(screen.getByText("Are you sure you want to move this note to the trash? You can restore it later.")).toBeDefined()
+		expect(actions.trashNote).not.toHaveBeenCalled()
+
+		fireEvent.click(screen.getByRole("button", { name: "Trash" }))
+
+		expect(screen.queryByRole("alertdialog")).toBeNull()
+		expect(toast.mock.lastCall?.[0]).toBe("Moving Groceries to trash")
+
+		await vi.waitFor(() => {
+			expect(actions.trashNote).toHaveBeenCalledExactlyOnceWith(note)
+		})
+	})
+
+	it("trashes nothing when cancelled", () => {
+		render(createElement(Host, { target: note }))
+
+		fireEvent.click(screen.getByText("open"))
+		fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
+
+		expect(screen.queryByRole("alertdialog")).toBeNull()
+		expect(actions.trashNote).not.toHaveBeenCalled()
+	})
+})

@@ -497,9 +497,21 @@ export function NotesSidebar() {
 		return true
 	}
 
+	// The open note's Trash, behind a confirmation: offered by the same gate as its menu's Trash. True when it asked.
+	function confirmOpenNoteTrash(note: Note | undefined): boolean {
+		if (note === undefined || availableNoteAction(note, "trash", currentUserId, isOnline, isNoteInflight(note.uuid)) === undefined) {
+			return false
+		}
+
+		dialogHost.openNoteDialog("trash", note)
+
+		return true
+	}
+
 	// Def in features/notes/lib/keymap.ts. A selection (shown only with the panel in sight) is confirmed and trashed
-	// as the bulk bar does, when it offers Trash at all (canBulkTrashNotes, its own gate); with none, the focused or
-	// open note is trashed as its menu's Trash does. preventDefault only once it acts: Backspace still has a "go back"
+	// as the bulk bar does, when it offers Trash at all (canBulkTrashNotes, its own gate); with none, the focused note
+	// is trashed as its menu's Trash does, and the open note (no row focused: the key was pressed in the page at large)
+	// only once confirmed, through the same menu gate. preventDefault only once it acts: Backspace still has a "go back"
 	// default in some engines.
 	useAction(
 		"notes.trash",
@@ -515,7 +527,9 @@ export function NotesSidebar() {
 				return
 			}
 
-			if (runNoteKey(keyTargetNote(keyboardEvent), "trash")) {
+			const rowUuid = rowNoteUuid(keyboardEvent.target)
+
+			if (rowUuid !== undefined ? runNoteKey(noteWithUuid(rowUuid), "trash") : confirmOpenNoteTrash(noteWithUuid(selectedUuid))) {
 				keyboardEvent.preventDefault()
 			}
 		},
