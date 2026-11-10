@@ -85,6 +85,29 @@ export function NewMenu({
 		[disabled]
 	)
 
+	// The pickers open from inside the keydown, the user gesture a file input's click needs.
+	useAction(
+		"drive.upload",
+		() => {
+			if (!disabled) {
+				upload.pickFiles()
+			}
+		},
+		{ ...OUTSIDE_OVERLAYS, enabled: shortcut !== false },
+		[disabled, upload.pickFiles]
+	)
+
+	useAction(
+		"drive.uploadDirectory",
+		() => {
+			if (!disabled) {
+				upload.pickDirectory()
+			}
+		},
+		{ ...OUTSIDE_OVERLAYS, enabled: shortcut !== false },
+		[disabled, upload.pickDirectory]
+	)
+
 	return (
 		<>
 			{upload.host}

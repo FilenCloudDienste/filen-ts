@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from "react"
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from "react"
 import { createPortal } from "react-dom"
 import { useTranslation } from "react-i18next"
 import { useNavigate } from "@tanstack/react-router"
@@ -27,7 +27,8 @@ import { dotFilenFilterAppliesTo, hiddenFilterAppliesTo } from "@/features/drive
 import { isDotFilenSystemDir } from "@/lib/dotFilen"
 import { isRootDotFilenItem } from "@/features/drive/lib/dotFilenGuard"
 import { DRIVE_SORT_PARTS, type DriveSortBy } from "@/features/drive/lib/sort"
-import { resolveDriveNavigationTarget, splatToUuids } from "@/features/drive/lib/navigate"
+import { driveRouteIdFor, resolveDriveNavigationTarget, splatToUuids } from "@/features/drive/lib/navigate"
+import { listboxKeyTargetIsInteractive, openOptionContextMenu } from "@/features/drive/lib/listbox"
 import { isDirectoryItem, type DriveItem } from "@/features/drive/lib/item"
 import { previewableSiblings } from "@/features/drive/lib/preview.logic"
 import { aggregateDriveSelectionFlags, selectableForSelectAll } from "@/features/drive/lib/selectionFlags"
@@ -47,8 +48,15 @@ import { GRID_INSET, ROW_HEIGHT, TILE_ROW_HEIGHT, TILE_WIDTH } from "@/features/
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { OUTSIDE_OVERLAYS, useAction } from "@/lib/keymap/useAction"
 import { useBlockedUsers } from "@/features/contacts/hooks/useBlockedUsers"
-import { canOpenItem, driveItemActions } from "@/features/drive/components/itemMenu.logic"
-import { driveBulkActions, isBulkDownloadEnabled } from "@/features/drive/components/bulkActionBar.logic"
+import { applyOfflineGate, canOpenItem, driveItemActions, type ItemActionId } from "@/features/drive/components/itemMenu.logic"
+import {
+	driveBulkActions,
+	driveDeleteKeyTarget,
+	isBulkActionOfflineDisabled,
+	isBulkDownloadEnabled,
+	runBulkFavorite,
+	type BulkActionDescriptor
+} from "@/features/drive/components/bulkActionBar.logic"
 import {
 	filterDriveItemsByLocalSearch,
 	filterSharedInByBlocked,
@@ -603,29 +611,172 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 		[sortedItems, safeActiveIndex, variant, isOnline]
 	)
 
+	// The selection's bulk actions, computed when a key asks rather than on every render.
+	function selectionActions(): BulkActionDescriptor[] {
+		return reconciledSelectedItems.length === 0 ? [] : driveBulkActions(variant, aggregateDriveSelectionFlags(reconciledSelectedItems))
+	}
+
+	// Whether the bulk bar would offer `id` for the selection, and enable it.
+	function selectionOffers(id: BulkActionDescriptor["id"]): boolean {
+		return !isBulkActionOfflineDisabled(id, isOnline) && selectionActions().some(descriptor => descriptor.id === id)
+	}
+
+	// Whether the item menu of the item under the cursor offers `id`, enabled: a key never opens what the menu would not.
+	function cursorItemOffers(item: DriveItem | undefined, id: ItemActionId): item is DriveItem {
+		return (
+			item !== undefined &&
+			applyOfflineGate(driveItemActions(item, variant), isOnline).some(
+				descriptor => descriptor.id === id && descriptor.enabled !== false
+			)
+		)
+	}
+
 	// Registered above at module scope. preventDefault whenever the listing takes the key, guarded case or
-	// not — Backspace's "navigate back" in the engines that still have it. Guards: empty selection, and
-	// every surface the bulk bar offers no Trash on: trash itself (permanent delete stays menu-only +
-	// explicitly confirmed, never a bare keypress) and Shared with me (items someone else owns).
+	// not — Backspace's "navigate back" in the engines that still have it. What it does is what takes the
+	// selection out of this listing (driveDeleteKeyTarget): trash, stop a share, disable a link. Nothing in
+	// the trash itself, where deleting forever has its own confirmed key.
 	useAction(
 		"drive.trash",
 		keyboardEvent => {
 			keyboardEvent.preventDefault()
 
-			if (
-				reconciledSelectedItems.length === 0 ||
-				!isOnline ||
-				!driveBulkActions(variant, aggregateDriveSelectionFlags(reconciledSelectedItems)).some(
-					descriptor => descriptor.id === "trash"
-				)
-			) {
+			if (!isOnline) {
 				return
 			}
 
-			handleBulkDialogAction("trash")
+			const target = driveDeleteKeyTarget(selectionActions())
+
+			if (target !== null) {
+				handleBulkDialogAction(target)
+			}
 		},
 		OUTSIDE_OVERLAYS,
 		[reconciledSelectedItems, variant, isOnline]
+	)
+
+	// The trash's two dispositions, each confirmed by its dialog. preventDefault only when they act.
+	useAction(
+		"drive.restore",
+		keyboardEvent => {
+			if (selectionOffers("restoreSelected")) {
+				keyboardEvent.preventDefault()
+				handleBulkDialogAction("restoreSelected")
+			}
+		},
+		OUTSIDE_OVERLAYS,
+		[reconciledSelectedItems, variant, isOnline]
+	)
+
+	useAction(
+		"drive.deletePermanently",
+		keyboardEvent => {
+			if (selectionOffers("delete")) {
+				keyboardEvent.preventDefault()
+				handleBulkDialogAction("delete")
+			}
+		},
+		OUTSIDE_OVERLAYS,
+		[reconciledSelectedItems, variant, isOnline]
+	)
+
+	// Favorite and Move act on the selection, where and as the bulk bar does.
+	useAction(
+		"drive.toggleFavorite",
+		keyboardEvent => {
+			if (selectionOffers("favorite")) {
+				keyboardEvent.preventDefault()
+				void runBulkFavorite(reconciledSelectedItems)
+			}
+		},
+		OUTSIDE_OVERLAYS,
+		[reconciledSelectedItems, variant, isOnline]
+	)
+
+	useAction(
+		"drive.move",
+		keyboardEvent => {
+			if (selectionOffers("move")) {
+				keyboardEvent.preventDefault()
+				handleBulkDialogAction("move")
+			}
+		},
+		OUTSIDE_OVERLAYS,
+		[reconciledSelectedItems, variant, isOnline]
+	)
+
+	// The item under the cursor, as Rename.
+	useAction(
+		"drive.info",
+		keyboardEvent => {
+			const item = sortedItems[safeActiveIndex]
+
+			if (cursorItemOffers(item, "info")) {
+				keyboardEvent.preventDefault()
+				handleItemAction("info", item)
+			}
+		},
+		OUTSIDE_OVERLAYS,
+		[sortedItems, safeActiveIndex, variant, isOnline]
+	)
+
+	// The directory holding this one, with the one just left selected, as Finder and Explorer do. The flat listings
+	// (recents, favorites, trash, links) and a root have no parent to go to.
+	useAction(
+		"drive.goUp",
+		keyboardEvent => {
+			const current = pathUuids.at(-1)
+
+			if (current === undefined) {
+				return
+			}
+
+			keyboardEvent.preventDefault()
+
+			const parentSplat = pathUuids.slice(0, -1).join("/")
+
+			useDriveStore.getState().requestReveal({ uuid: current, splat: parentSplat })
+			void navigate({ to: driveRouteIdFor(variant), params: { _splat: parentSplat } })
+		},
+		OUTSIDE_OVERLAYS,
+		[splat, variant, navigate]
+	)
+
+	// Scoped to the listbox: Enter opens the focused row, and is every other control's own key. A row's ⋯ trigger owns
+	// its keys, its native click opening its menu.
+	const openRef = useAction(
+		"drive.open",
+		keyboardEvent => {
+			if (listboxKeyTargetIsInteractive(keyboardEvent.target)) {
+				return
+			}
+
+			keyboardEvent.preventDefault()
+			handleOpen(safeActiveIndex)
+		},
+		OUTSIDE_OVERLAYS,
+		[handleOpen, safeActiveIndex]
+	)
+
+	// The focused row's own menu, selection-aware like a right-click on it; the only way to it on a Mac keyboard.
+	const itemMenuRef = useAction(
+		"drive.openItemMenu",
+		keyboardEvent => {
+			if (openOptionContextMenu(keyboardEvent.target)) {
+				keyboardEvent.preventDefault()
+			}
+		},
+		OUTSIDE_OVERLAYS
+	)
+
+	// The listbox element is the scroll container and where the scoped actions listen. Stable, or every render of the
+	// listing would detach and re-attach all three.
+	const listboxRef = useCallback(
+		(element: HTMLDivElement | null) => {
+			setScrollElement(element)
+			openRef(element)
+			itemMenuRef(element)
+		},
+		[setScrollElement, openRef, itemMenuRef]
 	)
 
 	// Registered above at module scope. preventDefault whenever the listing takes the key — mod+s's
@@ -757,7 +908,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 					) : null}
 					{withBackgroundMenu(
 						<div
-							ref={setScrollElement}
+							ref={listboxRef}
 							role="listbox"
 							aria-multiselectable="true"
 							aria-label={t("driveListLabel")}

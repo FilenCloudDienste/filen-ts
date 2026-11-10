@@ -1,5 +1,7 @@
-import { type ItemActionId } from "@/features/drive/components/itemMenu.logic"
-import { type BulkActionDescriptor } from "@/features/drive/components/bulkActionBar.logic"
+import { applyOfflineGate, driveItemActions, type ItemActionId } from "@/features/drive/components/itemMenu.logic"
+import { driveBulkActions, type BulkActionDescriptor } from "@/features/drive/components/bulkActionBar.logic"
+import { type DriveSelectionFlags } from "@/features/drive/lib/selectionFlags"
+import { type PhotoItem } from "@/features/photos/lib/captureSort"
 import { type ParentNaming } from "@/features/drive/lib/archiveTargets"
 import { cachedDirectoryName, driveNamesQueryKey } from "@/features/drive/queries/drive"
 import { photosListingQueryKey, type PhotosListing } from "@/features/photos/queries/photos"
@@ -14,6 +16,21 @@ export const PHOTOS_HIDDEN_ACTION_IDS: ReadonlySet<ItemActionId> = new Set(["mov
 
 // The selection bar's counterpart (bulkActionBar.tsx), for the same reasons.
 export const PHOTOS_HIDDEN_BULK_ACTION_IDS: ReadonlySet<BulkActionDescriptor["id"]> = new Set(["move", "extract"])
+
+// What the selection bar offers for a photos selection, and so what the grid's keys may run on it. A photos selection
+// is always owned, decryptable, non-shared-root files, so the drive variant yields exactly the photos set once the
+// hidden ids are dropped.
+export function photosBulkActions(flags: DriveSelectionFlags): BulkActionDescriptor[] {
+	return driveBulkActions("drive", flags).filter(descriptor => !PHOTOS_HIDDEN_BULK_ACTION_IDS.has(descriptor.id))
+}
+
+// Whether a photo's own menu offers `id`, enabled while `isOnline` says so: a key never opens what the menu would not.
+export function photoItemOffers(item: PhotoItem, id: ItemActionId, isOnline: boolean): boolean {
+	return (
+		!PHOTOS_HIDDEN_ACTION_IDS.has(id) &&
+		applyOfflineGate(driveItemActions(item, "drive"), isOnline).some(descriptor => descriptor.id === id && descriptor.enabled !== false)
+	)
+}
 
 // A compress's directory names from what Photos already holds, read only when a default name or
 // destination is made: the listing's path of each directory holding a photo (its last segment), then

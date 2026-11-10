@@ -80,7 +80,6 @@ function keyEvent(key: string, options: { shiftKey?: boolean; from?: KeyOrigin }
 function renderNav(items: PhotoItem[] = ITEMS) {
 	const scrollToIndex = vi.fn()
 	const virtualizer = { scrollToIndex } as unknown as Virtualizer<HTMLDivElement, Element>
-	const onOpen = vi.fn()
 	// The anchor lives in photoGrid.tsx (shared with photosPointerSelect), so it is threaded in and out
 	// here exactly as the component does it.
 	const anchor = { uuid: null as string | null }
@@ -101,13 +100,12 @@ function renderNav(items: PhotoItem[] = ITEMS) {
 				),
 				virtualizer,
 				anchorUuid: anchor.uuid,
-				setAnchorUuid,
-				onOpen
+				setAnchorUuid
 			}),
 		{ initialProps: { items } }
 	)
 
-	return { ...rendered, scrollToIndex, onOpen, anchor, setAnchorUuid }
+	return { ...rendered, scrollToIndex, anchor, setAnchorUuid }
 }
 
 function selectedUuids(): string[] {
@@ -232,21 +230,49 @@ describe("usePhotosGridNav — selection", () => {
 		expect(selectedUuids()).toEqual([])
 	})
 
-	it("Enter opens the cursor tile", () => {
-		const { result, onOpen } = renderNav()
+	// Enter is photos.open's, a registered action, and Shift+PageUp/PageDown the month jumps'.
+	it("leaves Enter and Shift+PageUp/PageDown to their registered actions", () => {
+		const { result, scrollToIndex } = renderNav()
+		const preventDefault = vi.fn()
 
 		act(() => {
-			result.current.handleKeyDown(keyEvent("ArrowDown"))
-		})
-		act(() => {
-			result.current.handleKeyDown(keyEvent("Enter"))
+			result.current.handleKeyDown({ ...keyEvent("Enter"), preventDefault })
+			result.current.handleKeyDown({ ...keyEvent("PageDown", { shiftKey: true }), preventDefault })
+			result.current.handleKeyDown({ ...keyEvent("PageUp", { shiftKey: true }), preventDefault })
 		})
 
-		expect(onOpen).toHaveBeenCalledExactlyOnceWith(COLUMNS)
+		expect(preventDefault).not.toHaveBeenCalled()
+		expect(scrollToIndex).not.toHaveBeenCalled()
+		expect(result.current.safeActiveIndex).toBe(0)
+	})
+
+	it("PageDown moves a screenful down the timeline", () => {
+		const { result } = renderNav()
+
+		Object.defineProperty(dom.listbox, "clientHeight", { value: 210 })
+
+		act(() => {
+			result.current.handleKeyDown(keyEvent("PageDown"))
+		})
+
+		// Header 40 + gap 2, then 102 per tile row: 210px down from the first row's top is the third row.
+		expect(result.current.safeActiveIndex).toBe(2 * COLUMNS)
+	})
+
+	it("moveTo moves the cursor and the anchor, scrolled to and focused", () => {
+		const { result, scrollToIndex, anchor } = renderNav()
+
+		act(() => {
+			result.current.moveTo(COLUMNS + 1)
+		})
+
+		expect(result.current.safeActiveIndex).toBe(COLUMNS + 1)
+		expect(anchor.uuid).toBe(ITEMS[COLUMNS + 1]?.data.uuid)
+		expect(scrollToIndex).toHaveBeenLastCalledWith(2, { align: "auto" })
 	})
 
 	it("leaves a key that originated on the tile's own ⋯ trigger to that button", () => {
-		const { result, onOpen, scrollToIndex, setAnchorUuid } = renderNav()
+		const { result, scrollToIndex, setAnchorUuid } = renderNav()
 		const preventDefault = vi.fn()
 
 		act(() => {
@@ -255,7 +281,6 @@ describe("usePhotosGridNav — selection", () => {
 			}
 		})
 
-		expect(onOpen).not.toHaveBeenCalled()
 		expect(scrollToIndex).not.toHaveBeenCalled()
 		expect(setAnchorUuid).not.toHaveBeenCalled()
 		expect(selectedUuids()).toEqual([])
@@ -267,7 +292,7 @@ describe("usePhotosGridNav — selection", () => {
 	// Base UI turns a menu item's Enter/Space into its click without stopping the keydown, which React
 	// then bubbles through the portal into the grid: a Rename or Info entry must not also open the viewer.
 	it("leaves Enter and Space from a tile's portaled menu item to the menu", () => {
-		const { result, onOpen, setAnchorUuid } = renderNav()
+		const { result, setAnchorUuid } = renderNav()
 
 		act(() => {
 			result.current.handleKeyDown(keyEvent("ArrowRight"))
@@ -278,7 +303,6 @@ describe("usePhotosGridNav — selection", () => {
 			result.current.handleKeyDown(keyEvent(" ", { from: "menuItem" }))
 		})
 
-		expect(onOpen).not.toHaveBeenCalled()
 		expect(selectedUuids()).toEqual([])
 		expect(setAnchorUuid).not.toHaveBeenCalled()
 		expect(result.current.safeActiveIndex).toBe(1)

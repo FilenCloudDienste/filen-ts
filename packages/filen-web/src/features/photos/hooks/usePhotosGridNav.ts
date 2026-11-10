@@ -14,7 +14,6 @@ interface UsePhotosGridNavParams {
 	virtualizer: Pick<Virtualizer<HTMLDivElement, Element>, "scrollToIndex">
 	anchorUuid: string | null
 	setAnchorUuid: (uuid: string | null) => void
-	onOpen: (index: number) => void
 }
 
 export interface PhotosGridNav {
@@ -25,22 +24,17 @@ export interface PhotosGridNav {
 	setActive: (index: number) => void
 	// Cursor AND anchor — what a marquee drag-end moves, mirroring drive's own setCursor.
 	setCursor: (index: number) => void
+	// Cursor and anchor, scrolled to and focused — what a keyboard jump (a month) moves.
+	moveTo: (index: number) => void
 	resetCursor: () => void
 }
 
-// Roving-tabindex keyboard operability for the photos grid: the cursor, arrow/Home/End movement over
-// the month timeline, Space toggle, Enter open and Shift+Arrow range extension. Purpose-built and grid-only — photos has
+// Roving-tabindex keyboard operability for the photos grid: the cursor, arrow/Home/End/PageUp/PageDown movement
+// over the month timeline, Space toggle and Shift+Arrow range extension. Purpose-built and grid-only — photos has
 // no list mode, no nested navigation, no drag-and-drop ancestry guard and no per-variant reset, so
-// this is deliberately not a port of useDriveListboxNav. Select-all/clear-selection are NOT handled
-// here — they are registered keymap commands (photoGrid.tsx).
-export function usePhotosGridNav({
-	items,
-	timeline,
-	virtualizer,
-	anchorUuid,
-	setAnchorUuid,
-	onOpen
-}: UsePhotosGridNavParams): PhotosGridNav {
+// this is deliberately not a port of useDriveListboxNav. Open, select-all, clear-selection and the month jumps
+// (Shift+PageUp/PageDown) are NOT handled here — they are registered keymap commands (photoGrid.tsx).
+export function usePhotosGridNav({ items, timeline, virtualizer, anchorUuid, setAnchorUuid }: UsePhotosGridNavParams): PhotosGridNav {
 	// Tracked by item identity (uuid), not position — a positional index alone drifts under a
 	// background refetch that reorders the grid, silently retargeting Enter onto the wrong photo.
 	const [activeUuid, setActiveUuid] = useState<string | null>(null)
@@ -69,21 +63,21 @@ export function usePhotosGridNav({
 
 	function handleKeyDown(event: KeyboardEvent<HTMLDivElement>): void {
 		// A tile's menus are portaled out of the grid but stay its React descendants, so a menu item's
-		// Enter bubbles here too; and the tile's ⋯ trigger owns its own Enter/Space (see
+		// key bubbles here too; and the tile's ⋯ trigger owns its own Space (see
 		// listboxKeyTargetIsInteractive). Neither is the grid's.
 		if (!(event.target instanceof Node) || !event.currentTarget.contains(event.target) || listboxKeyTargetIsInteractive(event.target)) {
 			return
 		}
 
-		// Ctrl, Cmd or Alt make the key some shortcut's; Shift extends a range with an arrow, and toggles or
-		// opens nothing.
-		if (hasCommandModifier(event)) {
+		// Ctrl, Cmd or Alt make the key some shortcut's; Shift extends a range with an arrow, toggles nothing, and with
+		// PageUp/PageDown is the month jump's.
+		if (hasCommandModifier(event) || (event.shiftKey && (event.key === "PageUp" || event.key === "PageDown"))) {
 			return
 		}
 
-		const action = photosGridKeyAction(event.key, safeActiveIndex, items.length, timeline)
+		const action = photosGridKeyAction(event.key, safeActiveIndex, items.length, timeline, event.currentTarget.clientHeight)
 
-		if (action.kind === "none" || ((action.kind === "toggle" || action.kind === "open") && event.shiftKey)) {
+		if (action.kind === "none" || (action.kind === "toggle" && event.shiftKey)) {
 			return
 		}
 
@@ -96,12 +90,6 @@ export function usePhotosGridNav({
 				usePhotosStore.getState().toggleSelectedItem(item)
 				setAnchorUuid(item.data.uuid)
 			}
-
-			return
-		}
-
-		if (action.kind === "open") {
-			onOpen(safeActiveIndex)
 
 			return
 		}
@@ -126,10 +114,14 @@ export function usePhotosGridNav({
 		setAnchorUuid(uuid)
 	}
 
+	function moveTo(index: number): void {
+		setAnchorUuid(items[moveActive(index)]?.data.uuid ?? null)
+	}
+
 	function resetCursor(): void {
 		setActiveUuid(null)
 		setActiveFallback(0)
 	}
 
-	return { safeActiveIndex, handleKeyDown, registerRef, setActive, setCursor, resetCursor }
+	return { safeActiveIndex, handleKeyDown, registerRef, setActive, setCursor, moveTo, resetCursor }
 }

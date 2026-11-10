@@ -141,6 +141,22 @@ export function driveBulkActions(variant: DriveVariant, flags: DriveSelectionFla
 	return descriptors
 }
 
+export type DriveDeleteKeyTarget = Extract<BulkActionDescriptor["id"], "unshare" | "disableLink" | "trash">
+
+// What the Delete key (drive.trash) does to a selection the bar offers `descriptors` for: what takes the items out of
+// the listing on screen. A share's root rows stop being shared (both shared views: trashing an item someone shared,
+// or one's own from Shared by me, is not what removing it from there means), a Links row's link is disabled, and
+// anything else goes to the trash. Nothing in the trash itself: deleting forever has its own, confirmed, key.
+export function driveDeleteKeyTarget(descriptors: readonly BulkActionDescriptor[]): DriveDeleteKeyTarget | null {
+	for (const id of ["unshare", "disableLink", "trash"] as const) {
+		if (descriptors.some(descriptor => descriptor.id === id)) {
+			return id
+		}
+	}
+
+	return null
+}
+
 // Download's ENABLED state (distinct from its PRESENCE in driveBulkActions above) — mirrored in
 // itemMenu.logic.ts and the drive keymap: enabled iff the selection is non-empty. The service-worker
 // zip path removed the isFsaAvailable() requirement a dir/multi selection used to need — every

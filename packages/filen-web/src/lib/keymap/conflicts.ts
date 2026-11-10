@@ -144,7 +144,19 @@ export const RESOLVED_COLLISIONS: readonly (readonly [string, string])[] = [
 	["desktop.zoomIn", "presentation.text.subscript"],
 	["desktop.zoomOut", "preview.pdfZoomOut"],
 	["desktop.zoomOut", "presentation.zoomOut"],
-	["desktop.zoomReset", "preview.pdfZoomReset"]
+	["desktop.zoomReset", "preview.pdfZoomReset"],
+	// The listings' own keys under the preview overlay. Open and the item menu listen on the listbox alone, the others
+	// stand down while a dialog is open, which the preview is; the slide list, the running show and the editors take
+	// their keys in the preview only. Photos' Mod+S is drive's.
+	["photos.download", "preview.save"],
+	["drive.open", "presentation.show.next"],
+	["photos.open", "presentation.show.next"],
+	["drive.open", "presentation.moveSlideDown"],
+	["photos.open", "presentation.moveSlideDown"],
+	["drive.goUp", "presentation.moveSlideUp"],
+	["drive.info", "editor.italic"],
+	["photos.info", "editor.italic"],
+	["photos.densityIncrease", "presentation.show.togglePointer"]
 ]
 
 export function scopesCanCollide(a: ActionScope, b: ActionScope): boolean {

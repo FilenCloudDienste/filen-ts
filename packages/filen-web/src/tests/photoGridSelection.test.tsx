@@ -22,7 +22,7 @@ function names(items: readonly NamedItem[]): string {
 // The bulk bar portals into the shell's bar slot, which this file renders no shell for.
 vi.mock("@/features/shell/lib/windowBarSlot", () => ({ useWindowBarSlot: () => document.body }))
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
-vi.mock("@/lib/keymap/useAction", () => ({ useAction: vi.fn(), OUTSIDE_OVERLAYS: {} }))
+vi.mock("@/lib/keymap/useAction", () => ({ useAction: vi.fn(() => () => undefined), OUTSIDE_OVERLAYS: {} }))
 vi.mock("@/lib/useIsOnline", () => ({ useIsOnline: () => true }))
 vi.mock("@/features/photos/queries/preferences", () => ({ usePhotosGridDensityQuery: () => ({ data: undefined, refetch: vi.fn() }) }))
 vi.mock("@/features/drive/hooks/useMarqueeSelection", () => ({

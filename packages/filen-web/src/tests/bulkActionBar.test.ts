@@ -60,6 +60,7 @@ import "@/lib/i18n"
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
 import {
 	driveBulkActions,
+	driveDeleteKeyTarget,
 	isBulkActionOfflineDisabled,
 	isBulkDownloadEnabled,
 	runBulkDescriptor,
@@ -621,5 +622,36 @@ describe("runBulkDescriptor", () => {
 
 		expect(onDialogAction).toHaveBeenCalledExactlyOnceWith("trash")
 		expect(startDownloadsMock).not.toHaveBeenCalled()
+	})
+})
+
+// The Delete key takes the selection out of the listing on screen, the way that listing removes things.
+describe("driveDeleteKeyTarget", () => {
+	function target(variant: DriveVariant, selection: DriveSelectionFlags) {
+		return driveDeleteKeyTarget(driveBulkActions(variant, selection))
+	}
+
+	it("trashes in the owned listings", () => {
+		for (const variant of ["drive", "recents", "favorites"] as const) {
+			expect(target(variant, flags()), variant).toBe("trash")
+		}
+	})
+
+	it("stops a share at either shared root, and trashes inside Shared by me", () => {
+		expect(target("sharedIn", flags({ everySharedRoot: true }))).toBe("unshare")
+		expect(target("sharedOut", flags({ everySharedRoot: true }))).toBe("unshare")
+		expect(target("sharedOut", flags({ everySharedRoot: false }))).toBe("trash")
+	})
+
+	it("does nothing inside Shared with me, where nothing is the caller's to trash", () => {
+		expect(target("sharedIn", flags({ everySharedRoot: false }))).toBeNull()
+	})
+
+	it("disables the link in Links", () => {
+		expect(target("links", flags())).toBe("disableLink")
+	})
+
+	it("does nothing in the trash, where deleting forever has its own key", () => {
+		expect(target("trash", flags())).toBeNull()
 	})
 })

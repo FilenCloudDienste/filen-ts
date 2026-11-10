@@ -1,6 +1,5 @@
 import { useTranslation } from "react-i18next"
 import {
-	driveBulkActions,
 	isBulkActionOfflineDisabled,
 	isBulkDownloadEnabled,
 	type BulkActionDescriptor,
@@ -8,12 +7,10 @@ import {
 } from "@/features/drive/components/bulkActionBar.logic"
 import { aggregateDriveSelectionFlags } from "@/features/drive/lib/selectionFlags"
 import { startDownloads } from "@/features/drive/lib/download"
-import { setFavoritedPhotos } from "@/features/photos/lib/actions"
-import { driveActivity, favoriteKeys } from "@/features/drive/lib/activity"
-import { runBulkActivity } from "@/lib/activity/activity"
-import { prunePhotoSelection, usePhotosStore } from "@/features/photos/store/usePhotosStore"
+import { runPhotosBulkFavorite } from "@/features/photos/lib/bulkFavorite"
+import { usePhotosStore } from "@/features/photos/store/usePhotosStore"
 import { type PhotoItem } from "@/features/photos/lib/captureSort"
-import { PHOTOS_HIDDEN_BULK_ACTION_IDS, photosParentNaming } from "@/features/photos/lib/itemActions"
+import { photosBulkActions, photosParentNaming } from "@/features/photos/lib/itemActions"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { DROPDOWN_TREE_MENU_FAMILY } from "@/features/drive/components/directoryTreeSubmenu"
 import { CompressMenuEntries } from "@/features/drive/components/archiveSubmenus"
@@ -28,6 +25,9 @@ export interface PhotosBulkActionBarProps {
 // Descriptors with a registered keyboard shortcut surface it in their tooltip alongside the label —
 // mirrors drive's own bulk bar.
 const KEYMAP_ACTION_FOR: Partial<Record<BulkActionDescriptor["id"], string>> = {
+	favorite: "photos.toggleFavorite",
+	download: "photos.download",
+	share: "photos.share",
 	trash: "photos.trash"
 }
 
@@ -37,22 +37,7 @@ export function PhotosBulkActionBar({ rootUuids, selectedItems, onDialogAction }
 	const { t } = useTranslation(["drive", "photos", "common"])
 	const isOnline = useIsOnline()
 	const flags = aggregateDriveSelectionFlags(selectedItems)
-	// A photos selection is always owned, decryptable, non-shared-root files, so the drive variant yields
-	// exactly the photos set once the hidden ids are dropped (PHOTOS_HIDDEN_BULK_ACTION_IDS).
-	const descriptors = driveBulkActions("drive", flags).filter(descriptor => !PHOTOS_HIDDEN_BULK_ACTION_IDS.has(descriptor.id))
-
-	async function handleBulkFavorite(): Promise<void> {
-		const favorited = !flags.includesFavorited
-
-		await runBulkActivity(
-			driveActivity(
-				selectedItems,
-				favoriteKeys(favorited),
-				(targets, onSettled) => setFavoritedPhotos(rootUuids, targets, favorited, onSettled),
-				{ prune: prunePhotoSelection }
-			)
-		)
-	}
+	const descriptors = photosBulkActions(flags)
 
 	// download is checked first — startDownloads' FSA save picker needs this click's own live user
 	// gesture (mirrors drive's identical ordering rationale), so nothing here may yield ahead of it.
@@ -63,7 +48,7 @@ export function PhotosBulkActionBar({ rootUuids, selectedItems, onDialogAction }
 		}
 
 		if (descriptor.run === "direct") {
-			void handleBulkFavorite()
+			void runPhotosBulkFavorite(rootUuids, selectedItems)
 			return
 		}
 

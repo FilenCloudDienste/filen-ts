@@ -5,6 +5,7 @@ import {
 	isToggleModifier,
 	listboxKeyTarget,
 	listboxKeyTargetIsInteractive,
+	listboxPageStep,
 	listboxRangeItems,
 	resolveCursorIndex,
 	touchTapIntent
@@ -15,6 +16,7 @@ import { type DriveVariant, type DriveViewMode } from "@/features/drive/lib/pref
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
 import { hasCommandModifier, isActivationKey } from "@/lib/rowKeys"
 import { type DriveVirtualizer } from "@/features/drive/hooks/useDriveVirtualizer"
+import { ROW_HEIGHT, TILE_ROW_HEIGHT } from "@/features/drive/lib/gridLayout"
 
 interface UseDriveListboxNavParams {
 	items: DriveItem[]
@@ -40,9 +42,9 @@ export interface DriveListboxNav {
 }
 
 // ARIA listbox roving-cursor navigation on top of the virtualizer: owns the cursor (activeIndex) and
-// range anchor, plain-Arrow/Home/End movement, Space toggle, Shift+Arrow range extension, and pointer
-// selection. Select-all/clear-selection are NOT handled here — they're registered keymap commands (see
-// the drive.* action defs in features/drive/lib/keymap.ts).
+// range anchor, plain-Arrow/Home/End/PageUp/PageDown movement, Space toggle, Shift+Arrow range extension, and
+// pointer selection. Open, select-all and clear-selection are NOT handled here — they're registered keymap
+// commands (see the drive.* action defs in features/drive/lib/keymap.ts).
 export function useDriveListboxNav({
 	items,
 	viewMode,
@@ -217,8 +219,8 @@ export function useDriveListboxNav({
 	// one firing owner; keeping a second hand-rolled check here would double-fire on every keypress.
 	function handleKeyDown(event: KeyboardEvent<HTMLDivElement>) {
 		// A row's ⋯ menu is portaled out of the listbox but stays its React descendant, so its key
-		// presses bubble here too — Enter on a menu item would also open the item under the cursor. The
-		// ⋯ trigger itself owns its Enter/Space (see listboxKeyTargetIsInteractive).
+		// presses bubble here too — Space or an arrow on a menu item would also act on the listbox. The
+		// ⋯ trigger itself owns its Space (see listboxKeyTargetIsInteractive).
 		if (!(event.target instanceof Node) || !event.currentTarget.contains(event.target) || listboxKeyTargetIsInteractive(event.target)) {
 			return
 		}
@@ -227,8 +229,8 @@ export function useDriveListboxNav({
 			return
 		}
 
-		// Space toggles and Enter opens only unmodified: a chord with either is some shortcut's (Shift+Enter,
-		// Mod+Enter), and Shift+Space would otherwise toggle as a range is being extended.
+		// Space toggles only unmodified: a chord with it is some shortcut's, and Shift+Space would otherwise toggle as a
+		// range is being extended. Enter is drive.open's, a registered action.
 		if (event.key === " " && isActivationKey(event)) {
 			event.preventDefault()
 
@@ -242,17 +244,20 @@ export function useDriveListboxNav({
 			return
 		}
 
-		if (event.key === "Enter" && isActivationKey(event)) {
-			event.preventDefault()
-			onOpen(safeActiveIndex)
-
-			return
-		}
-
-		// Shift extends a range; with Ctrl, Cmd or Alt the arrow is some shortcut's, not the cursor's.
+		// Shift extends a range; with Ctrl, Cmd or Alt the arrow is some shortcut's, not the cursor's. A page is the
+		// rows the listbox shows, read when the key lands.
+		const grid = viewMode === "grid"
+		const perRow = grid ? columns : 1
 		const target = hasCommandModifier(event)
 			? null
-			: listboxKeyTarget(event.key, safeActiveIndex, items.length, viewMode === "grid" ? columns : 1, viewMode === "grid")
+			: listboxKeyTarget(
+					event.key,
+					safeActiveIndex,
+					items.length,
+					perRow,
+					grid,
+					listboxPageStep(event.currentTarget.clientHeight, grid ? TILE_ROW_HEIGHT : ROW_HEIGHT, perRow)
+				)
 
 		if (target === null) {
 			return

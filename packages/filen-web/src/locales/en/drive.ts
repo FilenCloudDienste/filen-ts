@@ -313,6 +313,18 @@ export const drive = {
 	driveCommandCut: "Cut",
 	/** Keymap registry — description for the drive.paste command: copies or moves the copied/cut items into the directory on screen */
 	driveCommandPaste: "Paste",
+	/** Keymap registry — description for the drive.goUp command: opens the directory holding the one on screen */
+	driveCommandGoUp: "Open the parent directory",
+	/** Keymap registry — description for the drive.openItemMenu command: opens the focused item's action menu, as a right-click does */
+	driveCommandOpenItemMenu: "Show item actions",
+	/** Keymap registry — description for the drive.toggleFavorite command: favorites the selection, or unfavorites it when it already is */
+	driveCommandToggleFavorite: "Favorite or unfavorite",
+	/** Keymap registry — where the drive.trash command does something else: it stops sharing in the shared views and disables the public link in Links */
+	driveCommandTrashHint: "Stops sharing in shared views and disables the link in Links",
+	/** Keymap registry — where a command works: on the item that has keyboard focus in a file list */
+	driveCommandHintFocusedItem: "With an item focused in the list",
+	/** Keymap registry — where a command works: in the Trash listing */
+	driveCommandHintTrash: "In the trash",
 
 	// ── Item action menu ─────────────────────────────────────────────────────
 	/** Item menu — accessible label for the ⋯ button opening the per-item action menu */

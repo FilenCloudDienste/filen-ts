@@ -143,6 +143,76 @@ function firstRowEndingAfter(timeline: PhotosTimeline, y: number): number {
 	return low
 }
 
+// PageUp and PageDown move a screenful of content, `viewportHeight`, in the same column: onto the tile row found there
+// (the one under a month header found there), onto that row's last tile when it is shorter. Within a screenful of
+// either end the cursor lands on the first or last item; a screenful too short to leave the row moves one row, as
+// an arrow does.
+export function timelinePageTarget(
+	key: "PageUp" | "PageDown",
+	activeIndex: number,
+	itemCount: number,
+	timeline: PhotosTimeline,
+	viewportHeight: number
+): number | null {
+	const arrow = key === "PageDown" ? "ArrowDown" : "ArrowUp"
+	const rowIndex = timeline.rowOfItem[activeIndex]
+	const row = rowIndex === undefined ? undefined : timeline.rows[rowIndex]
+
+	if (rowIndex === undefined || row?.kind !== "tiles") {
+		return timelineKeyTarget(arrow, activeIndex, itemCount, timeline)
+	}
+
+	const y = (timeline.rowStarts[rowIndex] ?? 0) + (key === "PageDown" ? viewportHeight : -viewportHeight)
+
+	if (y < 0) {
+		return 0
+	}
+
+	if (y >= timeline.totalSize) {
+		return itemCount - 1
+	}
+
+	const landed = firstRowEndingAfter(timeline, y)
+	const landedRow = timeline.rows[landed]
+	const target = landedRow?.kind === "tiles" ? landedRow : nextTileRow(timeline, landed, 1)
+
+	if (target === null) {
+		return itemCount - 1
+	}
+
+	if (key === "PageDown" ? target.start <= row.start : target.start >= row.start) {
+		return timelineKeyTarget(arrow, activeIndex, itemCount, timeline)
+	}
+
+	return Math.min(target.start + (activeIndex - row.start), target.end - 1)
+}
+
+// The first item of the month after (`step` 1) or before (-1) the cursor's, or null past the last or first month.
+// Going back, the first header passed is the cursor's own month's.
+export function timelineMonthTarget(activeIndex: number, timeline: PhotosTimeline, step: 1 | -1): number | null {
+	const rowIndex = timeline.rowOfItem[activeIndex]
+
+	if (rowIndex === undefined) {
+		return null
+	}
+
+	let headersLeft = step === 1 ? 1 : 2
+
+	for (let index = rowIndex + step; index >= 0 && index < timeline.rows.length; index += step) {
+		if (timeline.rows[index]?.kind !== "header") {
+			continue
+		}
+
+		headersLeft -= 1
+
+		if (headersLeft === 0) {
+			return nextTileRow(timeline, index, 1)?.start ?? null
+		}
+	}
+
+	return null
+}
+
 // One cell's width across `columns` cells separated by `gap`: the grid's layout and the hit-tests below
 // must agree on it.
 export function gridCellWidth(contentWidth: number, columns: number, gap: number): number {

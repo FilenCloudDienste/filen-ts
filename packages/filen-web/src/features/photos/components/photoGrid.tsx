@@ -7,8 +7,13 @@ import { useVirtualizer, type Virtualizer } from "@tanstack/react-virtual"
 import { OUTSIDE_OVERLAYS, useAction } from "@/lib/keymap/useAction"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { useElementSize } from "@/lib/useElementSize"
-import { selectableForSelectAll } from "@/features/drive/lib/selectionFlags"
+import { aggregateDriveSelectionFlags, selectableForSelectAll } from "@/features/drive/lib/selectionFlags"
 import { reconcileSelectedItems } from "@/features/drive/components/directoryListing.logic"
+import { isBulkActionOfflineDisabled, type BulkActionDescriptor } from "@/features/drive/components/bulkActionBar.logic"
+import { listboxKeyTargetIsInteractive, openOptionContextMenu } from "@/features/drive/lib/listbox"
+import { startDownloads } from "@/features/drive/lib/download"
+import { runPhotosBulkFavorite } from "@/features/photos/lib/bulkFavorite"
+import { photoItemOffers, photosBulkActions } from "@/features/photos/lib/itemActions"
 import { canCopyToClipboard, shouldHandleClipboardShortcut } from "@/features/drive/lib/clipboard.logic"
 import { clipboardShortcutContext, copyToClipboard } from "@/features/drive/lib/clipboard"
 import { KEEP_SELECTION_PROPS } from "@/features/drive/lib/clickAway.logic"
@@ -22,6 +27,7 @@ import {
 	gridCellWidth,
 	timelineIndexAtPoint,
 	timelineMarqueeIndices,
+	timelineMonthTarget,
 	timelineRowSize,
 	type PhotosTimeline
 } from "@/features/photos/lib/timeline"
@@ -129,7 +135,7 @@ export function PhotoGrid({ rootUuids, listing }: PhotoGridProps) {
 	// For ThumbnailRankContext: changes only with the timeline, and reads the visible rows when a slot frees.
 	const rankThumbnail = (index: number) => rowRank(timeline.rowOfItem[index] ?? 0, virtualizerRef.current?.range ?? null)
 
-	const { safeActiveIndex, handleKeyDown, registerRef, setActive, setCursor, resetCursor } = usePhotosGridNav({
+	const { safeActiveIndex, handleKeyDown, registerRef, setActive, setCursor, moveTo, resetCursor } = usePhotosGridNav({
 		items,
 		timeline,
 		virtualizer: {
@@ -138,8 +144,7 @@ export function PhotoGrid({ rootUuids, listing }: PhotoGridProps) {
 			}
 		},
 		anchorUuid,
-		setAnchorUuid,
-		onOpen: handleOpenAt
+		setAnchorUuid
 	})
 
 	// A touch long-press, or a touch tap in selection mode: a Ctrl/Cmd+click's toggle.
@@ -262,6 +267,83 @@ export function PhotoGrid({ rootUuids, listing }: PhotoGridProps) {
 		[selectedItems]
 	)
 
+	// Whether the selection bar offers `id` for the selection, enabled: the keys below act where and as the bar does.
+	function selectionOffers(id: BulkActionDescriptor["id"]): boolean {
+		return (
+			selectedItems.length > 0 &&
+			!isBulkActionOfflineDisabled(id, isOnline) &&
+			photosBulkActions(aggregateDriveSelectionFlags(selectedItems)).some(descriptor => descriptor.id === id)
+		)
+	}
+
+	// Drive's mod+s: preventDefault whatever happens, or the browser saves the page. Synchronous, so the save picker
+	// keeps this keydown's user gesture.
+	useAction(
+		"photos.download",
+		keyboardEvent => {
+			keyboardEvent.preventDefault()
+
+			if (selectionOffers("download")) {
+				void startDownloads(selectedItems)
+			}
+		},
+		OUTSIDE_OVERLAYS,
+		[selectedItems, isOnline]
+	)
+
+	useAction(
+		"photos.toggleFavorite",
+		keyboardEvent => {
+			if (selectionOffers("favorite")) {
+				keyboardEvent.preventDefault()
+				void runPhotosBulkFavorite(rootUuids, selectedItems)
+			}
+		},
+		OUTSIDE_OVERLAYS,
+		[rootUuids, selectedItems, isOnline]
+	)
+
+	useAction(
+		"photos.share",
+		keyboardEvent => {
+			if (selectionOffers("share")) {
+				keyboardEvent.preventDefault()
+				handleBulkDialogAction("share")
+			}
+		},
+		OUTSIDE_OVERLAYS,
+		[selectedItems, isOnline]
+	)
+
+	// Rename and Info act on the photo under the cursor, as drive's do.
+	useAction(
+		"photos.rename",
+		keyboardEvent => {
+			const item = items[safeActiveIndex]
+
+			if (item !== undefined && photoItemOffers(item, "rename", isOnline)) {
+				keyboardEvent.preventDefault()
+				handleItemAction("rename", item)
+			}
+		},
+		OUTSIDE_OVERLAYS,
+		[items, safeActiveIndex, isOnline]
+	)
+
+	useAction(
+		"photos.info",
+		keyboardEvent => {
+			const item = items[safeActiveIndex]
+
+			if (item !== undefined && photoItemOffers(item, "info", isOnline)) {
+				keyboardEvent.preventDefault()
+				handleItemAction("info", item)
+			}
+		},
+		OUTSIDE_OVERLAYS,
+		[items, safeActiveIndex, isOnline]
+	)
+
 	// A changed search or filter shows a different set: the selection, anchor, cursor and scroll position
 	// of the old one go. A selection hidden by a filter would otherwise ride along into a bulk trash.
 	function updateFilter(update: (prev: PhotosFilter) => PhotosFilter): void {
@@ -271,6 +353,112 @@ export function PhotoGrid({ rootUuids, listing }: PhotoGridProps) {
 		resetCursor()
 		scrollElement?.scrollTo({ top: 0 })
 	}
+
+	// The filter chips' keys. A kind's chip shows only while the photos hold more than one kind, and one the photos
+	// hold, so its key does only what clicking it could.
+	useAction(
+		"photos.favoritesFilter",
+		() => {
+			updateFilter(prev => ({ ...prev, favoritesOnly: !prev.favoritesOnly }))
+		},
+		OUTSIDE_OVERLAYS,
+		[scrollElement]
+	)
+
+	function pickKind(next: PhotosKindFilter): void {
+		if (kinds.size > 1 && (next === "all" || kinds.has(next))) {
+			updateFilter(prev => ({ ...prev, kind: next }))
+		}
+	}
+
+	useAction(
+		"photos.filterAll",
+		() => {
+			pickKind("all")
+		},
+		OUTSIDE_OVERLAYS,
+		[kinds, scrollElement]
+	)
+
+	useAction(
+		"photos.filterImages",
+		() => {
+			pickKind("image")
+		},
+		OUTSIDE_OVERLAYS,
+		[kinds, scrollElement]
+	)
+
+	useAction(
+		"photos.filterVideos",
+		() => {
+			pickKind("video")
+		},
+		OUTSIDE_OVERLAYS,
+		[kinds, scrollElement]
+	)
+
+	useAction(
+		"photos.filterRaw",
+		() => {
+			pickKind("rawImage")
+		},
+		OUTSIDE_OVERLAYS,
+		[kinds, scrollElement]
+	)
+
+	// Scoped to the grid: they act on the focused tile. A tile's ⋯ trigger owns its keys, its native click opening
+	// its menu.
+	const openRef = useAction(
+		"photos.open",
+		keyboardEvent => {
+			if (listboxKeyTargetIsInteractive(keyboardEvent.target)) {
+				return
+			}
+
+			keyboardEvent.preventDefault()
+			handleOpenAt(safeActiveIndex)
+		},
+		OUTSIDE_OVERLAYS,
+		[items, safeActiveIndex]
+	)
+
+	const itemMenuRef = useAction(
+		"photos.openItemMenu",
+		keyboardEvent => {
+			if (openOptionContextMenu(keyboardEvent.target)) {
+				keyboardEvent.preventDefault()
+			}
+		},
+		OUTSIDE_OVERLAYS
+	)
+
+	function jumpMonth(keyboardEvent: KeyboardEvent, step: 1 | -1): void {
+		const target = timelineMonthTarget(safeActiveIndex, timeline, step)
+
+		if (target !== null) {
+			keyboardEvent.preventDefault()
+			moveTo(target)
+		}
+	}
+
+	const previousMonthRef = useAction(
+		"photos.previousMonth",
+		keyboardEvent => {
+			jumpMonth(keyboardEvent, -1)
+		},
+		OUTSIDE_OVERLAYS,
+		[items, safeActiveIndex, timeline]
+	)
+
+	const nextMonthRef = useAction(
+		"photos.nextMonth",
+		keyboardEvent => {
+			jumpMonth(keyboardEvent, 1)
+		},
+		OUTSIDE_OVERLAYS,
+		[items, safeActiveIndex, timeline]
+	)
 
 	return (
 		<div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
@@ -349,7 +537,14 @@ export function PhotoGrid({ rootUuids, listing }: PhotoGridProps) {
 			) : (
 				<div className="flex min-h-0 flex-1">
 					<div
-						ref={setScrollElement}
+						// The scroll container, and where the grid-scoped actions listen.
+						ref={element => {
+							setScrollElement(element)
+							openRef(element)
+							itemMenuRef(element)
+							previousMonthRef(element)
+							nextMonthRef(element)
+						}}
 						role="listbox"
 						aria-multiselectable="true"
 						aria-label={t("photos:photosGridLabel")}

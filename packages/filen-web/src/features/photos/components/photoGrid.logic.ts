@@ -1,7 +1,7 @@
 import { isSelectionGesture, listboxRangeItems, touchTapIntent, type ClickModifiers } from "@/features/drive/lib/listbox"
 import { type DriveItem } from "@/features/drive/lib/item"
 import type { PhotoItem } from "@/features/photos/lib/captureSort"
-import { timelineKeyTarget, type PhotosTimeline } from "@/features/photos/lib/timeline"
+import { timelineKeyTarget, timelinePageTarget, type PhotosTimeline } from "@/features/photos/lib/timeline"
 
 export interface TileClickIntent {
 	kind: "open" | "select" | "toggle"
@@ -59,12 +59,19 @@ export function photosRangeSelection(items: readonly PhotoItem[], anchorUuid: st
 	return listboxRangeItems(items, resolvedAnchor, index)
 }
 
-export type PhotosGridKeyAction = { kind: "move"; target: number } | { kind: "toggle" } | { kind: "open" } | { kind: "none" }
+export type PhotosGridKeyAction = { kind: "move"; target: number } | { kind: "toggle" } | { kind: "none" }
 
-// The photos grid's key semantics: Space toggles the cursor item's selection, Enter opens the viewer,
-// arrows/Home/End move the cursor over the month timeline (timelineKeyTarget). Select-all/clear-selection
-// are NOT here — they stay registered keymap commands (photoGrid.tsx).
-export function photosGridKeyAction(key: string, activeIndex: number, itemCount: number, timeline: PhotosTimeline): PhotosGridKeyAction {
+// The photos grid's key semantics: Space toggles the cursor item's selection, arrows/Home/End move the cursor over
+// the month timeline (timelineKeyTarget) and PageUp/PageDown by a screenful of it, `viewportHeight` tall
+// (timelinePageTarget). Open, select-all and clear-selection are NOT here — they stay registered keymap commands
+// (photoGrid.tsx).
+export function photosGridKeyAction(
+	key: string,
+	activeIndex: number,
+	itemCount: number,
+	timeline: PhotosTimeline,
+	viewportHeight: number
+): PhotosGridKeyAction {
 	if (itemCount === 0) {
 		return { kind: "none" }
 	}
@@ -73,11 +80,10 @@ export function photosGridKeyAction(key: string, activeIndex: number, itemCount:
 		return { kind: "toggle" }
 	}
 
-	if (key === "Enter") {
-		return { kind: "open" }
-	}
-
-	const target = timelineKeyTarget(key, activeIndex, itemCount, timeline)
+	const target =
+		key === "PageUp" || key === "PageDown"
+			? timelinePageTarget(key, activeIndex, itemCount, timeline, viewportHeight)
+			: timelineKeyTarget(key, activeIndex, itemCount, timeline)
 
 	return target === null ? { kind: "none" } : { kind: "move", target }
 }

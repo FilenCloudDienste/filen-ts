@@ -5,11 +5,13 @@ import { aggregateDriveSelectionFlags } from "@/features/drive/lib/selectionFlag
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
 import {
 	driveBulkActions,
+	driveDeleteKeyTarget,
 	isBulkActionOfflineDisabled,
 	isBulkDownloadEnabled,
 	runBulkDescriptor,
 	type BulkActionDescriptor,
-	type BulkDialogActionKind
+	type BulkDialogActionKind,
+	type DriveDeleteKeyTarget
 } from "@/features/drive/components/bulkActionBar.logic"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { DROPDOWN_TREE_MENU_FAMILY } from "@/features/drive/components/directoryTreeSubmenu"
@@ -23,10 +25,18 @@ export interface BulkActionBarProps {
 	onDialogAction: (kind: BulkDialogActionKind) => void
 }
 
-// Descriptors with a registered keyboard shortcut surface it in their tooltip alongside the label.
+// Descriptors with a registered keyboard shortcut surface it in their tooltip alongside the label. The Delete key's
+// (drive.trash) goes on whichever of them it runs here (driveDeleteKeyTarget).
 const KEYMAP_ACTION_FOR: Partial<Record<BulkActionDescriptor["id"], string>> = {
-	trash: "drive.trash",
-	download: "drive.download"
+	favorite: "drive.toggleFavorite",
+	move: "drive.move",
+	download: "drive.download",
+	restoreSelected: "drive.restore",
+	delete: "drive.deletePermanently"
+}
+
+function kbdActionFor(id: BulkActionDescriptor["id"], deleteKeyTarget: DriveDeleteKeyTarget | null): string | undefined {
+	return id === deleteKeyTarget ? "drive.trash" : KEYMAP_ACTION_FOR[id]
 }
 
 // Bottom-anchored floating selection bar (directoryListing.tsx overlays it on the listing container
@@ -36,6 +46,7 @@ export function BulkActionBar({ variant, selectedItems, onDialogAction }: BulkAc
 	const isOnline = useIsOnline()
 	const flags = aggregateDriveSelectionFlags(selectedItems)
 	const descriptors = driveBulkActions(variant, flags)
+	const deleteKeyTarget = driveDeleteKeyTarget(descriptors)
 
 	return (
 		<SelectionActionBar
@@ -112,7 +123,7 @@ export function BulkActionBar({ variant, selectedItems, onDialogAction }: BulkAc
 						destructive={descriptor.destructive}
 						disabled={disabled}
 						disabledReason={disabledReason}
-						kbdAction={KEYMAP_ACTION_FOR[descriptor.id]}
+						kbdAction={kbdActionFor(descriptor.id, deleteKeyTarget)}
 						onClick={() => {
 							runBulkDescriptor(descriptor, selectedItems, onDialogAction)
 						}}

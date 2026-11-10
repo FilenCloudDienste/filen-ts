@@ -5,6 +5,7 @@ import { ImagesIcon } from "lucide-react"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { log } from "@/lib/log"
 import { useIsOnline } from "@/lib/useIsOnline"
+import { OUTSIDE_OVERLAYS, useAction } from "@/lib/keymap/useAction"
 import { useDirectoryNamesQuery } from "@/features/drive/queries/drive"
 import { useAccountQuery } from "@/queries/account"
 import { usePhotosTimeline } from "@/features/photos/queries/photos"
@@ -76,6 +77,18 @@ export function PhotosScreen() {
 	function closeDialog(): void {
 		setDialog(null)
 	}
+
+	// The header's Directories button, there whenever a directory is part of Photos.
+	useAction(
+		"photos.manageDirectories",
+		() => {
+			if (roots.length > 0) {
+				setDialog("directories")
+			}
+		},
+		OUTSIDE_OVERLAYS,
+		[roots.length]
+	)
 
 	const dialogs =
 		dialog === "directories" ? (

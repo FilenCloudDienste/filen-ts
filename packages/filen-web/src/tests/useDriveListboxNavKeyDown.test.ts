@@ -54,16 +54,37 @@ beforeEach(() => {
 })
 
 describe("useDriveListboxNav — key presses", () => {
-	it("Enter inside the listbox opens the item under the cursor", () => {
+	// Enter is drive.open's, a registered action the listing scopes to this listbox.
+	it("leaves Enter inside the listbox to drive.open", () => {
 		const { result, onOpen } = renderNav()
+		const listbox = document.createElement("div")
+		const row = listbox.appendChild(document.createElement("div"))
+		const preventDefault = vi.fn()
+
+		act(() => {
+			result.current.handleKeyDown({ ...keyDown("Enter", listbox, row), preventDefault })
+		})
+
+		expect(onOpen).not.toHaveBeenCalled()
+		expect(preventDefault).not.toHaveBeenCalled()
+	})
+
+	it("PageDown and PageUp move the cursor by a screenful, at least a row", () => {
+		const { result } = renderNav()
 		const listbox = document.createElement("div")
 		const row = listbox.appendChild(document.createElement("div"))
 
 		act(() => {
-			result.current.handleKeyDown(keyDown("Enter", listbox, row))
+			result.current.handleKeyDown(keyDown("PageDown", listbox, row))
 		})
 
-		expect(onOpen).toHaveBeenCalledExactlyOnceWith(0)
+		expect(result.current.safeActiveIndex).toBe(1)
+
+		act(() => {
+			result.current.handleKeyDown(keyDown("PageUp", listbox, row))
+		})
+
+		expect(result.current.safeActiveIndex).toBe(0)
 	})
 
 	// A row's ⋯ menu is portaled out of the listbox yet still bubbles through it in the React tree.

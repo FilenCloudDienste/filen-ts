@@ -7,6 +7,7 @@ import {
 	isToggleModifier,
 	listboxKeyTarget,
 	listboxKeyTargetIsInteractive,
+	listboxPageStep,
 	listboxRangeItems,
 	resolveCursorIndex,
 	selectionAwareLinkClick,
@@ -130,6 +131,23 @@ describe("listboxKeyTarget", () => {
 	it("returns out-of-range targets raw — clamping is the caller's job", () => {
 		expect(listboxKeyTarget("ArrowDown", 9, 10, 4, true)).toBe(13)
 		expect(listboxKeyTarget("ArrowUp", 0, 10, 4, true)).toBe(-4)
+	})
+
+	it("moves PageDown/PageUp by the page a caller gives, raw", () => {
+		expect(listboxKeyTarget("PageDown", 3, 100, 4, true, 12)).toBe(15)
+		expect(listboxKeyTarget("PageUp", 3, 100, 4, true, 12)).toBe(-9)
+	})
+})
+
+describe("listboxPageStep", () => {
+	it("is the whole rows a viewport shows, times the items per row", () => {
+		expect(listboxPageStep(400, 40, 1)).toBe(10)
+		expect(listboxPageStep(500, 244, 5)).toBe(10)
+	})
+
+	it("is at least one row, for a viewport shorter than a row or not laid out yet", () => {
+		expect(listboxPageStep(30, 40, 1)).toBe(1)
+		expect(listboxPageStep(0, 244, 4)).toBe(4)
 	})
 })
 

@@ -54,14 +54,30 @@ export function resolveCursorIndex(targetUuid: string | null, uuids: readonly st
 // move on. `step` is how far a vertical arrow jumps (1 in a single-column list, `columns` in a grid);
 // `horizontal` enables Left/Right, which a single-column list has no axis for. The result is raw —
 // callers clamp it through moveActive/clampListboxIndex. One definition of the table, shared by the
-// drive listbox and the photos grid.
-export function listboxKeyTarget(key: string, activeIndex: number, itemCount: number, step: number, horizontal: boolean): number | null {
+// drive listbox and the photos grid. `pageStep`, how many items a screenful holds, enables PageUp and
+// PageDown; a caller that cannot say leaves them to the browser.
+export function listboxKeyTarget(
+	key: string,
+	activeIndex: number,
+	itemCount: number,
+	step: number,
+	horizontal: boolean,
+	pageStep?: number
+): number | null {
 	if (key === "ArrowDown") {
 		return activeIndex + step
 	}
 
 	if (key === "ArrowUp") {
 		return activeIndex - step
+	}
+
+	if (pageStep !== undefined && key === "PageDown") {
+		return activeIndex + pageStep
+	}
+
+	if (pageStep !== undefined && key === "PageUp") {
+		return activeIndex - pageStep
 	}
 
 	if (key === "ArrowRight" && horizontal) {
@@ -92,6 +108,38 @@ const INTERACTIVE_KEY_TARGET_SELECTOR = "button, a, input, select, textarea"
 // opens on. Shared by the drive listbox and the photos grid.
 export function listboxKeyTargetIsInteractive(target: EventTarget | null): boolean {
 	return hasClosest(target) && target.closest(INTERACTIVE_KEY_TARGET_SELECTOR) !== null
+}
+
+// How many items a screenful of `viewportHeight` holds, `rowHeight` tall rows of `perRow` items: what PageUp and
+// PageDown move by. Never less than one row, so a short viewport still moves.
+export function listboxPageStep(viewportHeight: number, rowHeight: number, perRow: number): number {
+	return Math.max(1, Math.floor(viewportHeight / rowHeight)) * perRow
+}
+
+// Opens the item menu of the option holding `target`, the keyboard twin of right-clicking it: the context menu the
+// row or tile is the trigger of, placed over the option's leading edge, where Shift+F10 on Windows places it. False
+// when `target` is in no option.
+export function openOptionContextMenu(target: EventTarget | null): boolean {
+	const option = hasClosest(target) ? target.closest('[role="option"]') : null
+
+	if (option === null) {
+		return false
+	}
+
+	const rect = option.getBoundingClientRect()
+	const inset = Math.min(rect.width, rect.height) / 2
+
+	option.dispatchEvent(
+		new MouseEvent("contextmenu", {
+			bubbles: true,
+			cancelable: true,
+			button: 2,
+			clientX: rect.left + inset,
+			clientY: rect.top + rect.height / 2
+		})
+	)
+
+	return true
 }
 
 // A plain click on the item that already IS the whole selection deselects it. Only the first click of a

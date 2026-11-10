@@ -104,6 +104,26 @@ export const photos = {
 	photosFilterRaw: "RAW",
 	/** Filter chip — favorited items only; combines with the kind chips */
 	photosFilterFavorites: "Favorites",
+
+	// ── Keymap commands ────────────────────────────────────────────────────────────
+	/** Keymap registry — description for the photos.favoritesFilter command: turns the Favorites filter chip on or off */
+	photosCommandFavoritesFilter: "Show only favorites",
+	/** Keymap registry — description for the photos.filterAll command: picks the All filter chip */
+	photosCommandFilterAll: "Show all media",
+	/** Keymap registry — description for the photos.filterImages command: picks the Photos filter chip */
+	photosCommandFilterImages: "Show only photos",
+	/** Keymap registry — description for the photos.filterVideos command: picks the Videos filter chip */
+	photosCommandFilterVideos: "Show only videos",
+	/** Keymap registry — description for the photos.filterRaw command: picks the RAW filter chip */
+	photosCommandFilterRaw: "Show only RAW photos",
+	/** Keymap registry — description for the photos.previousMonth command: moves the grid cursor to the first item of the month before */
+	photosCommandPreviousMonth: "Previous month",
+	/** Keymap registry — description for the photos.nextMonth command: moves the grid cursor to the first item of the month after */
+	photosCommandNextMonth: "Next month",
+	/** Keymap registry — description for the photos.manageDirectories command: opens the Directories dialog */
+	photosCommandManageDirectories: "Manage photo directories",
+	/** Keymap registry — where a command works: with a tile focused in the photos grid */
+	photosCommandHintGrid: "In the photos grid",
 	/** How many items match the search and filters (singular) */
 	photosResultCount_one: "{{count}} result",
 	/** How many items match the search and filters (plural) */

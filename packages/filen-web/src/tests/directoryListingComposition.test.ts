@@ -27,7 +27,7 @@ const {
 	navigate: vi.fn(),
 	useDriveDirectorySizes: vi.fn(),
 	EmptyState: vi.fn((_props: { action?: ReactNode }) => null),
-	useAction: vi.fn(),
+	useAction: vi.fn<(...args: unknown[]) => () => void>(() => () => undefined),
 	handleBulkDialogAction: vi.fn(),
 	// Every items array the listing hands its virtualizer, in render order.
 	virtualizerItems: [] as unknown[],
@@ -635,18 +635,80 @@ describe("DirectoryListing — Delete/Backspace trash shortcut", () => {
 		expect(handleBulkDialogAction).toHaveBeenCalledWith("trash")
 	})
 
-	it("does nothing in Shared with me or in the trash, where the bulk bar offers no Trash", () => {
-		for (const variant of ["sharedIn", "trash"] as const) {
-			const shared = narrowItem(mockSharedFile("FromFriend", OK_ROLE))
-			const { select } = renderListing({ variant, items: [shared] })
+	// What takes a share out of Shared with me is leaving it, never trashing someone else's item.
+	it("stops the share for a shared root in Shared with me", () => {
+		const shared = narrowItem(mockSharedFile("FromFriend", OK_ROLE))
+		const { select } = renderListing({ variant: "sharedIn", items: [shared] })
 
-			select([shared])
-			pressTrash()
+		select([shared])
+		pressTrash()
 
-			expect(handleBulkDialogAction).not.toHaveBeenCalled()
+		expect(handleBulkDialogAction).toHaveBeenCalledExactlyOnceWith("unshare")
+	})
 
-			cleanup()
-		}
+	it("does nothing in the trash, where deleting forever has its own key", () => {
+		const trashed = narrowItem(mockFile("old.pdf"))
+		const { select } = renderListing({ variant: "trash", items: [trashed] })
+
+		select([trashed])
+		pressTrash()
+
+		expect(handleBulkDialogAction).not.toHaveBeenCalled()
+	})
+})
+
+// The list keys act on the selection where, and only where, the bulk bar offers the same action.
+describe("DirectoryListing — selection keys", () => {
+	function press(id: string): void {
+		const registration = useAction.mock.calls.findLast(call => call[0] === id)
+		const handler = registration?.[1] as ((event: { preventDefault: () => void }) => void) | undefined
+
+		act(() => {
+			handler?.({ preventDefault: vi.fn() })
+		})
+	}
+
+	it("restores and deletes forever in the trash, each through its confirm", () => {
+		const trashed = narrowItem(mockFile("old.pdf"))
+		const { select } = renderListing({ variant: "trash", items: [trashed] })
+
+		select([trashed])
+		press("drive.restore")
+		press("drive.deletePermanently")
+
+		expect(handleBulkDialogAction.mock.calls).toEqual([["restoreSelected"], ["delete"]])
+	})
+
+	it("neither restores nor deletes forever outside the trash", () => {
+		const documents = narrowItem(mockDir("Documents"))
+		const { select } = renderListing({ variant: "drive", items: [documents] })
+
+		select([documents])
+		press("drive.restore")
+		press("drive.deletePermanently")
+
+		expect(handleBulkDialogAction).not.toHaveBeenCalled()
+	})
+
+	it("moves owned items, and never someone else's", () => {
+		const documents = narrowItem(mockDir("Documents"))
+		const { select } = renderListing({ variant: "drive", items: [documents] })
+
+		select([documents])
+		press("drive.move")
+
+		expect(handleBulkDialogAction).toHaveBeenCalledExactlyOnceWith("move")
+
+		cleanup()
+		handleBulkDialogAction.mockClear()
+
+		const shared = narrowItem(mockSharedFile("FromFriend", OK_ROLE))
+		const sharedIn = renderListing({ variant: "sharedIn", items: [shared] })
+
+		sharedIn.select([shared])
+		press("drive.move")
+
+		expect(handleBulkDialogAction).not.toHaveBeenCalled()
 	})
 })
 
