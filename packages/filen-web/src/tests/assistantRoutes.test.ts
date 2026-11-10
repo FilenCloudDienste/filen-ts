@@ -10,4 +10,8 @@ describe("assistant routes", () => {
 		expect(screenOfPath("/settings/advanced")).toBe("settings_advanced")
 		expect(screenOfPath("/settings/account")).toBe("settings_account")
 	})
+
+	it("opens and reports the Office page as settings_office", () => {
+		expect(screenOfPath("/settings/office")).toBe("settings_office")
+	})
 })

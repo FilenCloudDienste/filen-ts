@@ -1,5 +1,18 @@
+// @vitest-environment jsdom
+
 import { beforeEach, describe, expect, it, vi } from "vitest"
-import { OFFICE_SETTINGS_FILE_NAME, parseOfficeSettings, serializeOfficeSettings, setAuthorName, emptyOfficeSettings } from "@filen/shared"
+import { act, renderHook } from "@testing-library/react"
+import {
+	OFFICE_SETTINGS_FILE_NAME,
+	officeAuthorName,
+	officeAutosave,
+	officeSetting,
+	setOfficeSetting,
+	parseOfficeSettings,
+	serializeOfficeSettings,
+	setAuthorName,
+	emptyOfficeSettings
+} from "@filen/shared"
 import { driveFile } from "@/tests/support/videoDrive"
 
 const OFFICE = "00000000-0000-4000-8000-0000000000f2"
@@ -48,12 +61,22 @@ vi.mock("@/lib/sdk/client", () => ({
 	}
 }))
 
-const { ensureAuthorName, officeSettings, saveOfficeAutosave } = await import("@/features/office/lib/officeSettings")
+const {
+	ensureAuthorName,
+	officeSettings,
+	useOfficeSettings,
+	saveOfficeAutosave,
+	saveOfficeSetting,
+	loadOfficeSettings,
+	loadedOfficeSetting,
+	resetOfficeSettings
+} = await import("@/features/office/lib/officeSettings")
+const { regionalLanguage, loadedRegionalLanguage } = await import("@/features/office/lib/regionalFormat")
 const { listDotFilenDirectory: listOfficeDirectory } = await import("@/lib/dotFilenDirectory")
 
 describe("office settings", () => {
 	beforeEach(() => {
-		officeSettings.reset()
+		resetOfficeSettings()
 		drive.text = undefined
 		drive.uploads = []
 		drive.counter = 0
@@ -68,7 +91,7 @@ describe("office settings", () => {
 		await vi.waitFor(() => {
 			expect(drive.uploads).toHaveLength(1)
 		})
-		expect(parseOfficeSettings(drive.uploads[0] ?? "").authorName?.value).toBe("Jane Doe")
+		expect(officeAuthorName(parseOfficeSettings(drive.uploads[0] ?? ""))).toBe("Jane Doe")
 	})
 
 	it("shares one question between concurrent callers and asks again after a refusal", async () => {
@@ -131,10 +154,42 @@ describe("office settings", () => {
 
 	it("keeps autosave on by default and syncs a change", async () => {
 		await officeSettings.load()
-		expect(officeSettings.value().autosave).toBeUndefined()
+		expect(officeSettings.value().registers.has("autosave")).toBe(false)
 
 		await saveOfficeAutosave(false)
-		expect(parseOfficeSettings(drive.uploads.at(-1) ?? "").autosave?.value).toBe(false)
+		expect(officeAutosave(parseOfficeSettings(drive.uploads.at(-1) ?? ""))).toBe(false)
+	})
+
+	it("syncs the other settings, and hands the regional format to the spreadsheets", async () => {
+		drive.text = serializeOfficeSettings(setOfficeSetting(emptyOfficeSettings(), "regionalFormat", "de-CH", 5))
+
+		expect(await loadedRegionalLanguage()).toBe("de-CH")
+		expect(await loadedOfficeSetting("paperSize")).toBeNull()
+
+		await saveOfficeSetting("paperSize", "letter")
+		await saveOfficeSetting("regionalFormat", null)
+
+		const stored = parseOfficeSettings(drive.uploads.at(-1) ?? "")
+
+		expect(officeSetting(stored, "paperSize")).toBe("letter")
+		expect(officeSetting(stored, "regionalFormat")).toBeNull()
+		// Not chosen: the browser's.
+		expect(regionalLanguage()).not.toBe("de-CH")
+
+		// Signed out: nothing of the account's choice stays.
+		await saveOfficeSetting("regionalFormat", "fr-FR")
+		resetOfficeSettings()
+		expect(regionalLanguage()).not.toBe("fr-FR")
+	})
+
+	it("is settled after a read that failed, so spelling goes ahead on the defaults", async () => {
+		vi.spyOn(officeSettings, "load").mockRejectedValueOnce(new Error("offline"))
+
+		const { result } = renderHook(() => useOfficeSettings())
+
+		expect(result.current.settled).toBe(false)
+		await act(() => loadOfficeSettings())
+		expect(result.current).toMatchObject({ loaded: false, settled: true, spellCheck: true })
 	})
 
 	it("lists the directory once for every file read from it at the same time (a reconnect)", async () => {

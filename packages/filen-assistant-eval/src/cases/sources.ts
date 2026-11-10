@@ -546,6 +546,26 @@ export const SOURCES_CASES: EvalCase[] = [
 		]
 	},
 	{
+		id: "sources-settings-office-en",
+		category: "sources",
+		lang: "en",
+		prompt: "Where do I turn off spell check for my documents?",
+		routes: ["navigation"],
+		calls: [
+			{
+				tool: "open_route",
+				args: {
+					route: "settings_office"
+				}
+			}
+		],
+		state: [
+			{
+				screen: "settings_office"
+			}
+		]
+	},
+	{
 		id: "sources-settings-billing-de",
 		category: "sources",
 		lang: "de",

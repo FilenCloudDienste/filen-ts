@@ -52,8 +52,6 @@ import { CONTROL_INSERT_VARIANTS } from "@/features/preview/components/docxComma
 import { SECTION_BREAK_VARIANTS } from "@/features/preview/components/docxCommandLabels/sections"
 import { ROTATE_VARIANTS, WRAP_VARIANTS } from "@/features/preview/components/docxCommandLabels/drawings"
 
-export { AUTOSAVE_IDLE_MS } from "@/features/office/lib/officeAutosave"
-
 // The package's commands by feature: each feature labels its own in docxCommandLabels/<feature>.ts and fills
 // its toolbar slot. An id the package lacks fails `satisfies`, a package id missing here the test's type check.
 export const DOCX_COMMAND_CATALOGUE = {

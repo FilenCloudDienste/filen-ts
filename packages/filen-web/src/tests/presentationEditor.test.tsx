@@ -191,6 +191,7 @@ vi.mock("@/features/presentation/lib/presentationEngine", () => ({
 }))
 
 const { PresentationViewer } = await import("@/features/presentation/components/presentationViewer")
+const { DEFAULT_OFFICE_VIEW_SETTINGS, setOfficeViewSettings } = await import("@/features/office/lib/officeViewSettings")
 
 registerAllActions()
 
@@ -320,6 +321,7 @@ afterEach(() => {
 	engine.saves = []
 	engine.answer = { ok: true, revision: 1, dirty: true }
 	settings.autosave = true
+	setOfficeViewSettings(DEFAULT_OFFICE_VIEW_SETTINGS)
 	typing.pending = false
 	typing.commands = []
 	typing.editorProps = []
@@ -344,6 +346,15 @@ describe("presentation editor ribbon", () => {
 		).toEqual(["Undo", "Clipboard", "Slides"])
 		expect(screen.getByRole("button", { name: "File" })).toBeTruthy()
 		expect(screen.getByRole("button", { name: "Present" })).toBeTruthy()
+	})
+
+	it("opens without the slide thumbnails or notes when this device's settings say so", async () => {
+		// As read on this device during boot.
+		setOfficeViewSettings({ slideRail: false, notesPane: false })
+		await openEditor()
+
+		expect(screen.queryByRole("listbox", { name: "Slides" })).toBeNull()
+		expect(screen.queryByRole("textbox", { name: "Speaker notes" })).toBeNull()
 	})
 
 	it("shows a deck that can only be viewed with the reduced tabs, its reasons, and no save", async () => {

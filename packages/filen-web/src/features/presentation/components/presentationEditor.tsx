@@ -1,4 +1,5 @@
 import { startTransition, useEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent, type ReactNode } from "react"
+import { officeViewSettings } from "@/features/office/lib/officeViewSettings"
 import { useTranslation } from "react-i18next"
 import type { TFunction } from "i18next"
 import { toast } from "sonner"
@@ -443,10 +444,11 @@ export function PresentationEditor({ store, document: deck, alt, item, variant, 
 	const textBindings = usePresentationTextBindings()
 	const downloads = usePreviewDownloadable()
 	const overrides = useOverrides()
-	const [railOpen, setRailOpen] = useState(true)
+	// The device's choice (Settings, Office) as the deck opens; the View tab changes them after.
+	const [railOpen, setRailOpen] = useState(() => officeViewSettings().slideRail)
 	// The media play controls' layer, above the selection layer.
 	const [mediaControls, setMediaControls] = useState<HTMLDivElement | null>(null)
-	const [notesOpen, setNotesOpen] = useState(true)
+	const [notesOpen, setNotesOpen] = useState(() => officeViewSettings().notesPane)
 	const [selectedTab, setSelectedTab] = useState<string>("home")
 	const [sectionDialog, setSectionDialog] = useState<"add" | "rename" | null>(null)
 	// The shapes selected on the slide in view (the canvas, the ribbon and the keys share it), one per open deck.

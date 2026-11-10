@@ -28,6 +28,9 @@ import {
 } from "@/features/settings/lib/transferConfig"
 import { SDK_THUMBNAIL_DECODES } from "@/features/drive/lib/thumbnails.logic"
 import { getArchivePreferences, buildArchiveClientConfig, DEFAULT_ARCHIVE_PREFERENCES } from "@/features/settings/lib/archiveConfig"
+import { loadOfficeViewSettings } from "@/features/office/lib/officeViewSettings"
+import { loadRibbonCollapsed } from "@/features/office/lib/ribbonSettings"
+import { loadDocxFormattingMarks } from "@/features/preview/lib/docxFormattingMarks"
 
 // Settled when bootSdk() finishes — on success OR failure, and never rejected. Auth-sensitive route
 // guards await this before reading hasClient(): the boot kick runs before the router mounts, but
@@ -160,6 +163,10 @@ export async function retrySessionResume(discard: boolean): Promise<boolean> {
 // Drives the worker boot, reflecting each phase into the boot store. There is no separate network
 // probe: the first real SDK call (session resume, login) exercises the async runtime, and a runtime
 // failure in the steps below lands in the catch as an "async-runtime" boot error.
+function preloadDevicePreferences(): Promise<void> {
+	return Promise.all([loadOfficeViewSettings(), loadRibbonCollapsed(), loadDocxFormattingMarks()]).then(() => undefined)
+}
+
 export async function bootSdk(): Promise<void> {
 	const { setBooting, setError } = useBootStore.getState()
 	setBooting()
@@ -209,6 +216,9 @@ export async function bootSdk(): Promise<void> {
 		if (readSignOutPending()) {
 			await finishPendingSignOut()
 		}
+		// This device's editor view settings, read before anything renders (lib/storage/preloadedPreference.ts): a
+		// document opens with them from its first render. Alongside the client config below; never fails boot.
+		const devicePreferences = preloadDevicePreferences()
 		// Apply the persisted Advanced-settings transfer preset and archive codec memory BEFORE the
 		// worker ever builds a client: the wasm surface only accepts concurrency/fileIoMemoryBudget/
 		// rateLimitPerSec/archiveCodecMemBudget at UnauthClient construction time (no live setter — see sdk.worker.ts's
@@ -240,6 +250,7 @@ export async function bootSdk(): Promise<void> {
 				injected = false
 			}
 		}
+		await devicePreferences
 		if (await resumeAndOpen(injected)) {
 			log.info("boot", `ready (${String(result.threads)} threads)`)
 		}

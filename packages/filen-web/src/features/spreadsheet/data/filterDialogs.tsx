@@ -18,7 +18,8 @@ import {
 	type FilterKind
 } from "@/features/spreadsheet/data/sortFilter.logic"
 import { setSortFilterOpen, type SortFilterOpen } from "@/features/spreadsheet/data/sortFilterState"
-import { browserLanguage, sheetLocaleOf } from "@/features/spreadsheet/formulaBar/sheetLocale"
+import { sheetLocaleOf } from "@/features/spreadsheet/formulaBar/sheetLocale"
+import { regionalLanguage } from "@/features/office/lib/regionalFormat"
 
 // The autofilter's condition dialogs: Excel's Custom AutoFilter (one or two conditions, both or either, with * and
 // ? wildcards for text and date fields for dates) and its Top 10 AutoFilter (the largest or smallest items or
@@ -47,7 +48,7 @@ export function FilterConditionDialog({
 	const { t } = useTranslation(["preview", "common"])
 	const id = useId()
 	// Numbers are typed as in the cells: in the locale the session reads entries in.
-	const [locale] = useState(() => sheetLocaleOf(browserLanguage()))
+	const [locale] = useState(() => sheetLocaleOf(regionalLanguage()))
 	const kept = dialogConditions(open.criteria, open.kind, date1904, locale)
 	const [first, setFirst] = useState<DialogCondition>(kept?.conditions[0] ?? { operator: open.first, value: "" })
 	const [second, setSecond] = useState<DialogCondition | null>(

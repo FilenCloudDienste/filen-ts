@@ -2,7 +2,7 @@ import { AUTOSAVE_IDLE_MS } from "@/features/office/lib/officeAutosave"
 
 // When a deck autosaves. A save of a range-backed deck downloads every part it copies and uploads the whole package,
 // so a one-shape edit of a 1.5 GiB deck moves about 3 GiB: autosave is tiered by the package's size. Up to 32 MiB a
-// deck autosaves like the other editors (after 30 s idle); up to 256 MiB it waits at least five minutes between
+// deck autosaves like the other editors (after the user's idle pause, 30 s by default); up to 256 MiB it waits at least five minutes between
 // stored saves, and saves only once 1 KiB of net changes piled up or the oldest unsaved change is five minutes old;
 // above that, and for an encrypted deck over 64 MiB (sealing holds the package in memory twice), only a save the user
 // asks for stores it.
@@ -30,7 +30,9 @@ export type AutosaveTier =
 	// Manual save only; `reason` is the notice the editor shows.
 	| { readonly kind: "off"; readonly reason: "large" | "encrypted" }
 
-export function autosaveTier(packageBytes: number, encrypted: boolean): AutosaveTier {
+// `idleMs`: the user's pause before an autosave (Settings, Office), for a deck small enough to save like the other
+// editors; the larger tiers keep theirs.
+export function autosaveTier(packageBytes: number, encrypted: boolean, idleMs: number = AUTOSAVE_IDLE_MS): AutosaveTier {
 	if (encrypted && packageBytes > AUTOSAVE_ENCRYPTED_BYTES) {
 		return { kind: "off", reason: "encrypted" }
 	}
@@ -49,7 +51,7 @@ export function autosaveTier(packageBytes: number, encrypted: boolean): Autosave
 		}
 	}
 
-	return { kind: "idle", idleMs: AUTOSAVE_IDLE_MS, minIntervalMs: AUTOSAVE_IDLE_MS }
+	return { kind: "idle", idleMs, minIntervalMs: idleMs }
 }
 
 // The editor's state as the policy reads it (times in ms on one clock).

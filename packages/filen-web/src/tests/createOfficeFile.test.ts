@@ -80,6 +80,12 @@ describe("officeFileBytes", () => {
 		expect(await part(bytes, "word/document.xml")).toContain('<w:pgSz w:w="11906" w:h="16838"/>')
 	})
 
+	it("builds a blank document on the paper the user chose, whatever the region", async () => {
+		const bytes = await officeFileBytes("docx", { locale: "de-DE", sheetName: "Sheet1", paper: "letter" })
+
+		expect(await part(bytes, "word/document.xml")).toContain('<w:pgSz w:w="12240" w:h="15840"/>')
+	})
+
 	it("builds a blank workbook whose sheet has the localized name", async () => {
 		const bytes = await officeFileBytes("xlsx", { locale: "en-US", sheetName: "Tabelle1" })
 

@@ -11,7 +11,8 @@ import type {
 } from "@filen/office/core/sheet"
 import WorkbookWorker from "@/features/spreadsheet/workers/sheetWorkbook.worker.ts?worker"
 import TextWorker from "@/features/spreadsheet/workers/sheetText.worker.ts?worker"
-import { browserLanguage, sheetLocaleOf } from "@/features/spreadsheet/formulaBar/sheetLocale"
+import { sheetLocaleOf } from "@/features/spreadsheet/formulaBar/sheetLocale"
+import { loadedRegionalLanguage } from "@/features/office/lib/regionalFormat"
 import { recoverIfNewerBuild } from "@/lib/appUpdate"
 
 // A worker keeps its code and the heap its largest file grew, so it is terminated once nothing is open in it for
@@ -179,9 +180,14 @@ export function isTextSheetKind(kind: SheetFileKind): boolean {
 }
 
 // Opens a file in the worker for its kind: a text file never loads the workbook worker's code. The bytes are
-// transferred: pass a copy of anything still held elsewhere. A text file opens in the browser's locale, whose list
-// separator settles a CSV's separator where the file leaves it open, as the grid then shows it.
-export function openSheet(bytes: Uint8Array, options: SheetOpenOptions, onEvent: (event: SheetEvent) => void): Promise<SheetOpenResult> {
+// transferred: pass a copy of anything still held elsewhere. A text file opens in the regional format (Settings,
+// Office; the browser's by default), whose list separator settles a CSV's separator where the file leaves it open, as
+// the grid then shows it.
+export async function openSheet(
+	bytes: Uint8Array,
+	options: SheetOpenOptions,
+	onEvent: (event: SheetEvent) => void
+): Promise<SheetOpenResult> {
 	if (!isTextSheetKind(options.kind)) {
 		return openWorkbook(bytes, options, onEvent)
 	}
@@ -189,7 +195,7 @@ export function openSheet(bytes: Uint8Array, options: SheetOpenOptions, onEvent:
 	return openText(
 		bytes,
 		options.settings?.locale === undefined
-			? { ...options, settings: { ...options.settings, locale: sheetLocaleOf(browserLanguage()) } }
+			? { ...options, settings: { ...options.settings, locale: sheetLocaleOf(await loadedRegionalLanguage()) } }
 			: options,
 		onEvent
 	)

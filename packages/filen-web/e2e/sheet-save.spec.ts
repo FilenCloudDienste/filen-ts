@@ -273,11 +273,11 @@ test("a password-protected workbook's saves store only its sealed package, and i
 	expect(cellCanary.leaks.filter(leak => !leak.startsWith("console"))).toEqual([])
 })
 
-test("the documents settings hold the autosave switch", async ({ page }) => {
-	await bootTo(page, "/settings/advanced")
+test("the Office settings hold the autosave switch", async ({ page }) => {
+	await bootTo(page, "/settings/office")
 
 	// Read only: the setting is the account's, shared with every other test.
-	await expect(page.getByText(settings.settingsAdvancedDocumentsDescription, { exact: true })).toBeVisible({
+	await expect(page.getByText(settings.settingsOfficeGeneralDescription, { exact: true })).toBeVisible({
 		timeout: LAZY_VIEWER_TIMEOUT_MS
 	})
 	await expect(page.getByRole("switch", { name: "Save automatically" })).toBeVisible()

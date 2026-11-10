@@ -12,7 +12,12 @@ import {
 	sameOfficeSettings,
 	serializeOfficeSettings,
 	setAuthorName,
-	setOfficeAutosave
+	setOfficeAutosave,
+	OFFICE_SETTINGS_DEFAULTS,
+	normalizeAuthorInitials,
+	officeSetting,
+	officeSettingsValues,
+	setOfficeSetting
 } from "@filen/shared"
 
 describe("office settings", () => {
@@ -42,10 +47,13 @@ describe("office settings", () => {
 		expect(officeAutosave(doc)).toBe(false)
 	})
 
-	it("drops invalid settings and refuses a newer format", () => {
-		const doc = parseOfficeSettings(JSON.stringify({ v: 1, authorName: { value: 5, at: 1 }, autosave: { value: true, at: "x" } }))
+	it("drops fields that are not registers, reads unreadable values as the default and refuses a newer format", () => {
+		const doc = parseOfficeSettings(JSON.stringify({ v: 1, authorName: { value: 5, at: 1 }, autosave: { value: true, at: "x" }, x: 3 }))
 
-		expect(doc).toEqual(emptyOfficeSettings())
+		expect(officeAuthorName(doc)).toBeNull()
+		expect(officeAutosave(doc)).toBe(DEFAULT_OFFICE_AUTOSAVE)
+		// The unreadable name is kept for the app that wrote it; the rest are not registers.
+		expect(serializeOfficeSettings(doc)).toBe(JSON.stringify({ v: 1, authorName: { value: 5, at: 1 } }))
 		expect(parseOfficeSettings("[]")).toEqual(emptyOfficeSettings())
 		expect(() => parseOfficeSettings(JSON.stringify({ v: 2 }))).toThrow(OfficeSettingsVersionError)
 		expect(() => parseOfficeSettings("{")).toThrow(SyntaxError)
@@ -75,12 +83,79 @@ describe("office settings", () => {
 
 		const behind = setAuthorName(doc, "Joan", 10)
 
-		expect(behind.authorName?.at).toBe(1001)
+		expect(behind.registers.get("authorName")?.at).toBe(1001)
 		expect(officeAuthorName(mergeOfficeSettings(doc, behind))).toBe("Joan")
 
 		const autosave = setOfficeAutosave(doc, true, 5)
 
-		expect(autosave.autosave).toEqual({ value: true, at: 5 })
+		expect(autosave.registers.get("autosave")).toEqual({ value: true, at: 5 })
 		expect(setOfficeAutosave(autosave, true, 50)).toBe(autosave)
+	})
+
+	it("reads every setting's default from an empty document", () => {
+		expect(officeSettingsValues(emptyOfficeSettings())).toEqual(OFFICE_SETTINGS_DEFAULTS)
+		expect(OFFICE_SETTINGS_DEFAULTS.autosaveDelayMs).toBe(30_000)
+		expect(OFFICE_SETTINGS_DEFAULTS.spellCheck).toBe(true)
+	})
+
+	it("sets each setting only to a value it takes", () => {
+		let doc = emptyOfficeSettings()
+
+		doc = setOfficeSetting(doc, "autosaveDelayMs", 60_000, 1)
+		doc = setOfficeSetting(doc, "proofingLanguage", "de-CH", 2)
+		doc = setOfficeSetting(doc, "regionalFormat", "en-GB", 3)
+		doc = setOfficeSetting(doc, "paperSize", "letter", 4)
+		doc = setOfficeSetting(doc, "authorInitials", " J D ", 5)
+		doc = setOfficeSetting(doc, "flagRepeatedWords", false, 6)
+
+		expect(officeSettingsValues(doc)).toMatchObject({
+			autosaveDelayMs: 60_000,
+			proofingLanguage: "de-CH",
+			regionalFormat: "en-GB",
+			paperSize: "letter",
+			authorInitials: "JD",
+			flagRepeatedWords: false
+		})
+		expect(setOfficeSetting(doc, "autosaveDelayMs", 12_345 as 15_000, 7)).toBe(doc)
+		expect(setOfficeSetting(doc, "proofingLanguage", "not a tag", 7)).toBe(doc)
+		expect(setOfficeSetting(doc, "authorName", null, 7)).toBe(doc)
+
+		// Null is "not chosen": the initials come from the name again, the languages from the browser.
+		const cleared = setOfficeSetting(setOfficeSetting(doc, "authorInitials", null, 8), "regionalFormat", null, 9)
+
+		expect(officeSetting(cleared, "authorInitials")).toBeNull()
+		expect(officeSetting(cleared, "regionalFormat")).toBeNull()
+		expect(parseOfficeSettings(serializeOfficeSettings(cleared))).toEqual(cleared)
+	})
+
+	it("normalises initials and refuses empty, overlong or control-character ones", () => {
+		expect(normalizeAuthorInitials(" a b ")).toBe("ab")
+		expect(normalizeAuthorInitials("")).toBeUndefined()
+		expect(normalizeAuthorInitials("x".repeat(10))).toBeUndefined()
+		expect(normalizeAuthorInitials("a\u0000")).toBeUndefined()
+	})
+
+	it("keeps settings a newer app wrote through a save and a merge", () => {
+		const text = JSON.stringify({
+			v: 1,
+			autosave: { value: false, at: 10 },
+			autosaveDelayMs: { value: 600_000, at: 11 },
+			zoom: { value: { kind: "fit" }, at: 12 }
+		})
+		const doc = parseOfficeSettings(text)
+
+		// The delay this version has no option for reads as the default, and is written back unchanged.
+		expect(officeSetting(doc, "autosaveDelayMs")).toBe(30_000)
+		expect(serializeOfficeSettings(doc)).toBe(text)
+
+		const changed = setOfficeAutosave(doc, true, 20)
+		const merged = mergeOfficeSettings(changed, emptyOfficeSettings())
+
+		expect(JSON.parse(serializeOfficeSettings(merged))).toEqual({
+			v: 1,
+			autosave: { value: true, at: 20 },
+			autosaveDelayMs: { value: 600_000, at: 11 },
+			zoom: { value: { kind: "fit" }, at: 12 }
+		})
 	})
 })

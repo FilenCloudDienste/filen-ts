@@ -7,7 +7,14 @@ import type { PagedEditor } from "@filen/office/core/docx/paged"
 import type { DocxDocument } from "@filen/office/react/docx"
 import type { DocxEditorHandle, DocxReflowProps } from "@filen/office/react/docx/editor"
 import { slotCommands } from "@/features/preview/components/docxEditor.logic"
-import { INITIAL_REFLOW, reflowChosen, reflowCommands, reflowForWidth, useReflowMode } from "@/features/preview/components/docxReflow.logic"
+import {
+	INITIAL_REFLOW,
+	initialReflow,
+	reflowChosen,
+	reflowCommands,
+	reflowForWidth,
+	useReflowMode
+} from "@/features/preview/components/docxReflow.logic"
 import "@/lib/i18n"
 
 // Mobile view: on by itself below 600 px of editor width, following width crossings until the user chooses;
@@ -61,8 +68,24 @@ describe("Mobile view mode", () => {
 		expect(reflowChosen(state, true).reflow).toBe(true)
 	})
 
+	it("opens as the device's setting chose, whatever the width", () => {
+		expect(initialReflow("auto")).toBe(INITIAL_REFLOW)
+
+		const pages = renderHook(({ width }: { width: number }) => useReflowMode(width, "pages"), { initialProps: { width: 0 } })
+
+		pages.rerender({ width: 400 })
+		expect(pages.result.current.reflow).toBe(false)
+
+		const mobile = renderHook(({ width }: { width: number }) => useReflowMode(width, "reflow"), { initialProps: { width: 0 } })
+
+		mobile.rerender({ width: 1200 })
+		expect(mobile.result.current.reflow).toBe(true)
+	})
+
 	it("starts wide in pages and switches as the width crosses, until set", () => {
-		const { result, rerender } = renderHook(({ width }: { width: number }) => useReflowMode(width), { initialProps: { width: 0 } })
+		const { result, rerender } = renderHook(({ width }: { width: number }) => useReflowMode(width, "auto"), {
+			initialProps: { width: 0 }
+		})
 
 		expect(result.current.reflow).toBe(false)
 

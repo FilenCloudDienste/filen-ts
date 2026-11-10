@@ -5,6 +5,7 @@ import { settingsAccountFixes } from "@/locales/en/settings/accountFixes"
 import { settingsBilling } from "@/locales/en/settings/billing"
 import { settingsDesktopPrefs } from "@/locales/en/settings/desktopPrefs"
 import { settingsMigration } from "@/locales/en/settings/migration"
+import { settingsOffice } from "@/locales/en/settings/office"
 // English source catalog — "settings" namespace: the settings sidebar (Account / Security /
 // Appearance / Events / Billing sections) plus the Account and Appearance section content. The
 // "auth" namespace keeps the Security section's own copy (forms, dialogs, row titles it already had);
@@ -251,24 +252,7 @@ export const settings = {
 	/** Appended to the row description while the saved value awaits the next load; {{size}} is a whole number of mebibytes */
 	settingsAdvancedArchiveMemoryInEffect: "In effect now: {{size}} MiB.",
 
-	// ── Advanced: documents ──────────────────────────────────────────────────
-	/** Advanced settings — group title for document editing settings */
-	settingsAdvancedDocumentsTitle: "Documents",
-	/** Advanced settings — documents group description */
-	settingsAdvancedDocumentsDescription: "Editing Word documents and spreadsheets, synced across your devices",
-	/** Advanced settings — row label: the name comments and tracked changes in documents are signed with */
-	settingsDocumentsAuthorName: "Author name",
-	/** Advanced settings — author name row description */
-	settingsDocumentsAuthorNameDescription: "Shown on your comments and tracked changes.",
-	/** Advanced settings — author name row value while none was given */
-	settingsDocumentsAuthorNameUnset: "Not set",
-	/** Advanced settings — button opening the author name dialog */
-	settingsDocumentsAuthorNameEdit: "Change",
-	/** Advanced settings — row label: save document edits automatically */
-	settingsDocumentsAutosave: "Save automatically",
-	/** Advanced settings — autosave row description */
-	settingsDocumentsAutosaveDescription: "Saves a new version about 30 seconds after you stop typing.",
-	/** Settings — toast when a locally stored setting (Advanced rows, document settings, rail order) could not be saved */
+	/** Settings — toast when a setting (Advanced rows, Office settings, rail order) could not be saved */
 	settingsDocumentsSaveFailed: "The setting couldn't be saved. Try again.",
 
 	// ── Advanced: uploads ────────────────────────────────────────────────────
@@ -344,5 +328,6 @@ export const settings = {
 	...settingsAccountFixes,
 	...settingsBilling,
 	...settingsDesktopPrefs,
-	...settingsMigration
+	...settingsMigration,
+	...settingsOffice
 } as const

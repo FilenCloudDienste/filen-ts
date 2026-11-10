@@ -41,6 +41,7 @@ import { SheetEventRelay } from "@/features/spreadsheet/lib/sheetEvents"
 import { withWorkbookDigit } from "@/features/spreadsheet/lib/sheetDigitWidth"
 import { isLegacySheetKind, sheetKindOf } from "@/features/spreadsheet/lib/sheetKind"
 import { browserLanguage, sheetLocaleOf } from "@/features/spreadsheet/formulaBar/sheetLocale"
+import { loadedRegionalLanguage } from "@/features/office/lib/regionalFormat"
 import { formOf, pdfFile, pdfRequest, printRequests } from "@/features/spreadsheet/print/print.logic"
 import { sheetSettings } from "@/features/spreadsheet/print/printSettings"
 import { makeSheetPdf, sheetPdfMessages } from "@/features/spreadsheet/save/sheetPdf"
@@ -534,7 +535,7 @@ async function printWorkbook(
 		const { info } = await withWorkbookDigit(opened, events)
 
 		// The locale the viewer's grid has its session show numbers and dates in (useSheetFormula.tsx).
-		session.configure({ locale: sheetLocaleOf(browserLanguage()) })
+		session.configure({ locale: sheetLocaleOf(await loadedRegionalLanguage()) })
 		const sheet = info.sheets.find(entry => entry.id === info.activeSheet)
 		const active = sheet === undefined ? null : await sheetSettings({ session, layout: () => null }, kind, sheet)
 

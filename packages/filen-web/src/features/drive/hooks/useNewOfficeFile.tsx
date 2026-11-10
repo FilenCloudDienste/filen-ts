@@ -16,6 +16,7 @@ import { notifyIfNameIsHidden } from "@/features/drive/lib/hiddenNameNotice"
 import { cachedListing, driveListingQueryUpdate, isDriveListingCurrent } from "@/features/drive/queries/drive"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { browserLanguage } from "@/features/spreadsheet/formulaBar/sheetLocale"
+import { loadedOfficeSetting } from "@/features/office/lib/officeSettings"
 import { sdkApi } from "@/lib/sdk/client"
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { errorLabel } from "@/lib/i18n/errorLabel"
@@ -82,9 +83,11 @@ export function useNewOfficeFile({ parentUuid, openPreview, hiddenNotice }: UseN
 
 		setPending(true)
 
+		const paper = (await loadedOfficeSetting("paperSize")) ?? undefined
 		const outcome: CreateFileOutcome = await officeFileBytes(shownKind, {
 			locale: browserLanguage(),
-			sheetName: t("driveNewXlsxSheetName")
+			sheetName: t("driveNewXlsxSheetName"),
+			paper
 		}).then(
 			bytes =>
 				runCreateFile(

@@ -7,7 +7,7 @@ import { useLatestRef } from "@/lib/useLatestRef"
 
 // When a deck autosaves (lib/autosavePolicy.ts decides from the package's size): the editor reports its history's
 // revision and dirtiness and how its saves ended; this hook keeps the times the policy reads and asks the overlay to
-// save when one is due, while the user's autosave setting (Settings, documents) is on, once that setting was read.
+// save when one is due, while the user's autosave setting (Settings, Office) is on, once that setting was read.
 // Offline it waits. A save that could not start now (one in flight, a dialog open) is tried again a moment later.
 
 // A save that could not start is asked for again after this long.

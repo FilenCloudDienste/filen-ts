@@ -766,6 +766,7 @@ export const openRoute = defineTool({
 			"settings_security",
 			"settings_appearance",
 			"settings_keyboard",
+			"settings_office",
 			"settings_events",
 			"settings_plans",
 			"settings_billing",

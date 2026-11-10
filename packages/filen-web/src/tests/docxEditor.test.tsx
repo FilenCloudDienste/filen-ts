@@ -12,6 +12,7 @@ import { docxBookmarkStart, type PagedEditor } from "@filen/office/core/docx/pag
 import type { FontExtents, TextMeasurer } from "@filen/office/core/text"
 import type { DocxEditingHost } from "@filen/office/dom/docx/editing"
 import { i18n } from "@/lib/i18n"
+import { officeSettingsView } from "@/tests/support/officeSettingsView"
 import { registerAllActions } from "@/lib/keymap/actions"
 import { isMacPlatform } from "@/lib/keymap/kbd.logic"
 
@@ -19,9 +20,21 @@ import { isMacPlatform } from "@/lib/keymap/kbd.logic"
 // toolbar's commands, dirty reporting, find, the overlay's save source and idle autosave. Text is measured by
 // a stand-in (no fonts or canvas here).
 
+interface TestSettings {
+	authorName: string | null
+	autosave: boolean
+	loaded: boolean
+	spellCheck?: boolean
+}
+
+// A declaration, so vi.hoisted (moved above everything) can call it.
+function initialSettings(): TestSettings {
+	return { authorName: null, autosave: true, loaded: true }
+}
+
 const hooks = vi.hoisted(() => ({
 	hosts: [] as DocxEditingHost[],
-	settings: { authorName: null as string | null, autosave: true, loaded: true },
+	settings: initialSettings(),
 	// What the context menu's Paste reads.
 	clipboard: null as { html?: string; text?: string } | null,
 	// The one word spelling flags (none when unset).
@@ -95,15 +108,10 @@ vi.mock("@/features/spellcheck/lib/spellcheck", () => ({
 vi.mock("@/features/office/lib/officeSettings", () => ({
 	loadOfficeSettings: () => Promise.resolve(),
 	saveOfficeAutosave: () => Promise.resolve(),
-	useOfficeSettings: () => hooks.settings
+	// The idle autosave waits 200 ms here.
+	useOfficeSettings: () => officeSettingsView({ autosaveDelayMs: 200, ...hooks.settings })
 }))
 vi.mock("sonner", () => ({ toast: toasts }))
-vi.mock("@/features/preview/components/docxEditor.logic", async () => ({
-	...(await vi.importActual<typeof import("@/features/preview/components/docxEditor.logic")>(
-		"@/features/preview/components/docxEditor.logic"
-	)),
-	AUTOSAVE_IDLE_MS: 200
-}))
 vi.mock("@/lib/useIsOnline", () => ({ useIsOnline: () => true }))
 // Followed links' domains are trusted here (no confirmation).
 vi.mock("@/lib/trustedLinks/trustedDomainsQuery", () => ({ useTrustedDomainsQuery: () => ({ data: new Set(["example.com"]) }) }))
@@ -934,6 +942,22 @@ describe("DocxEditView", () => {
 		fireEvent.contextMenu(screen.getByRole("textbox", { name: "report.docx" }))
 		expect(await screen.findByRole("menuitem", { name: "Ignore all" })).toBeTruthy()
 		expect(editor.snapshot().context.story.kind).toBe("header")
+	})
+
+	it("checks no spelling while the user turned it off", async () => {
+		hooks.misspelled = "qzxv"
+		hooks.settings = { authorName: null, autosave: true, loaded: true, spellCheck: false }
+
+		const { editor } = await openEditor()
+
+		act(() => {
+			editor.dispatch(editor.state.tr.insertText("qzxv ", 1))
+		})
+		selectWord(editor, "qzxv")
+		await act(() => new Promise(resolve => setTimeout(resolve, 600)))
+		fireEvent.contextMenu(screen.getByRole("textbox", { name: "report.docx" }))
+		expect(await screen.findByRole("menuitem", { name: "Paste" })).toBeTruthy()
+		expect(screen.queryByRole("menuitem", { name: "Ignore all" })).toBeNull()
 	})
 
 	it("opens a hyperlink from the context menu: a web link in a new tab, a bookmark's at its place", async () => {

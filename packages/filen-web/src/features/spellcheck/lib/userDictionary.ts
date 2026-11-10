@@ -73,6 +73,11 @@ export class UserDictionaryStore {
 		})
 	}
 
+	// Whether this session read the file (or found none).
+	get isLoaded(): boolean {
+		return this.file.isLoaded
+	}
+
 	// Reads the file when this session has not, or another session changed it since.
 	load(): Promise<void> {
 		return this.file.load()

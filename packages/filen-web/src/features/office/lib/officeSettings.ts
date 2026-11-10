@@ -7,13 +7,16 @@ import {
 	mergeOfficeSettings,
 	normalizeAuthorName,
 	officeAuthorName,
-	officeAutosave,
+	officeSetting,
+	officeSettingsValues,
 	parseOfficeSettings,
 	sameOfficeSettings,
 	serializeOfficeSettings,
 	setAuthorName,
-	setOfficeAutosave,
-	type OfficeSettingsDoc
+	setOfficeSetting,
+	type OfficeSettingKey,
+	type OfficeSettingsDoc,
+	type OfficeSettingsValues
 } from "@filen/shared"
 import { sdkApi } from "@/lib/sdk/client"
 import { runOp } from "@/lib/actions/outcome"
@@ -22,14 +25,16 @@ import { registerSocketHandler } from "@/lib/sdk/socket"
 import { onDotFilenSubdirForgotten } from "@/lib/dotFilen"
 import { OFFICE_DIR_NAME, officeDirectory } from "@/features/office/lib/officeDirectory"
 import { SYNCED_FILE_UPLOAD_DEADLINE_MS, SyncedDotFilenFile, type SyncedFileCodec } from "@/lib/syncedDotFilenFile"
+import { setRegionalFormat, setRegionalFormatLoader } from "@/features/office/lib/regionalFormat"
+import { createListenerSet } from "@/lib/listenerSet"
 
-// The user's document-editing settings (the author name comments and tracked changes carry, autosave), synced
-// end-to-end encrypted as `.filen/office/settings.v1.json` beside the spelling dictionary
-// (lib/syncedDotFilenFile.ts). Read when an editor or the settings page first needs them.
+// The user's document-editing settings (the author comments and tracked changes carry, autosave, proofing, the
+// regional format and paper), synced end-to-end encrypted as `.filen/office/settings.v1.json` beside the spelling
+// dictionary (lib/syncedDotFilenFile.ts). Read when an editor or the settings page first needs them.
 
 const CODEC: SyncedFileCodec<OfficeSettingsDoc> = {
 	fileName: OFFICE_SETTINGS_FILE_NAME,
-	// Two short settings; anything this large is not the format.
+	// A dozen short settings; anything this large is not the format.
 	maxBytes: 64 * 1024,
 	scope: "office",
 	empty: emptyOfficeSettings,
@@ -51,44 +56,85 @@ export const officeSettings = /* @__PURE__ */ new SyncedDotFilenFile<OfficeSetti
 				})
 			)
 	},
-	CODEC
+	CODEC,
+	// The spreadsheet code reads the regional format without importing this store.
+	doc => {
+		setRegionalFormat(officeSetting(doc, "regionalFormat"))
+	}
 )
 
-export interface OfficeSettingsView {
-	// Null until the user gave one (never filled in from the account).
-	authorName: string | null
-	autosave: boolean
+export interface OfficeSettingsView extends OfficeSettingsValues {
 	// The file was read this session: an unset author name really is unset.
 	loaded: boolean
+	// The first read ended, read or not (offline): what waits for the settings (spelling) goes ahead on what is held.
+	settled: boolean
 }
 
-let cached: { doc: OfficeSettingsDoc; loaded: boolean; view: OfficeSettingsView } | null = null
+let settled = false
+const settledListeners = createListenerSet("office")
+let cached: { doc: OfficeSettingsDoc; loaded: boolean; settled: boolean; view: OfficeSettingsView } | null = null
 
 function view(): OfficeSettingsView {
 	const doc = officeSettings.value()
 	const loaded = officeSettings.isLoaded
 
-	if (cached?.doc !== doc || cached.loaded !== loaded) {
-		cached = { doc, loaded, view: { authorName: officeAuthorName(doc), autosave: officeAutosave(doc), loaded } }
+	if (cached?.doc !== doc || cached.loaded !== loaded || cached.settled !== settled) {
+		cached = { doc, loaded, settled, view: { ...officeSettingsValues(doc), loaded, settled: settled || loaded } }
 	}
 
 	return cached.view
 }
 
 function subscribe(listener: () => void): () => void {
-	return officeSettings.subscribe(listener)
+	const off = officeSettings.subscribe(listener)
+	const offSettled = settledListeners.subscribe(listener)
+
+	return () => {
+		off()
+		offSettled()
+	}
 }
 
 // Starts reading the file (once per session, again after another session saved it); failures are logged and
 // the defaults stay in effect.
 export function loadOfficeSettings(): Promise<void> {
-	return officeSettings.load().catch((error: unknown) => {
-		log.warn("office", "office settings not loaded", { error })
-	})
+	return officeSettings
+		.load()
+		.catch((error: unknown) => {
+			log.warn("office", "office settings not loaded", { error })
+		})
+		.finally(() => {
+			if (!settled) {
+				settled = true
+				settledListeners.emit()
+			}
+		})
+}
+
+// A file opening in the regional format waits for the first read only; a later one (after another session saved)
+// reaches the open spreadsheets as it lands (regionalFormat.ts).
+setRegionalFormatLoader(() => (settled ? Promise.resolve() : loadOfficeSettings()))
+
+// A setting as read once the file was (or could not be) read: for work that runs once, not a view that follows it.
+export async function loadedOfficeSetting<K extends OfficeSettingKey>(key: K): Promise<OfficeSettingsValues[K]> {
+	await loadOfficeSettings()
+
+	return officeSetting(officeSettings.value(), key)
+}
+
+// Sign-out: nothing of the account stays, and the next one's settings are waited for again.
+export function resetOfficeSettings(): void {
+	settled = false
+	officeSettings.reset()
 }
 
 export function useOfficeSettings(): OfficeSettingsView {
 	return useSyncExternalStore(subscribe, view, view)
+}
+
+// Shown at once; resolves once stored (rejects when the upload failed: the change waits for the next save).
+export function saveOfficeSetting<K extends OfficeSettingKey>(key: K, value: OfficeSettingsValues[K]): Promise<void> {
+	return officeSettings.change(doc => setOfficeSetting(doc, key, value, Date.now()))
 }
 
 export function saveAuthorName(name: string): Promise<void> {
@@ -96,7 +142,7 @@ export function saveAuthorName(name: string): Promise<void> {
 }
 
 export function saveOfficeAutosave(autosave: boolean): Promise<void> {
-	return officeSettings.change(doc => setOfficeAutosave(doc, autosave, Date.now()))
+	return saveOfficeSetting("autosave", autosave)
 }
 
 let asking: Promise<string | null> | null = null

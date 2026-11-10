@@ -1,6 +1,7 @@
-// Idle autosave, shared by the document editors (the Word document editor, the spreadsheet editor): this long
-// after the last edit while there are unsaved changes, one version per pause.
-export const AUTOSAVE_IDLE_MS = 30_000
+import { DEFAULT_OFFICE_AUTOSAVE_DELAY_MS } from "@filen/shared"
+
+// Idle autosave's pause after the last edit before the user chose one (Settings, Office: Autosave delay).
+export const AUTOSAVE_IDLE_MS = DEFAULT_OFFICE_AUTOSAVE_DELAY_MS
 
 // E2E builds: the sessionStorage key ("off") a read-only test lane sets so no editor autosaves there.
 const E2E_AUTOSAVE_KEY = "filen-e2e-docx-autosave"

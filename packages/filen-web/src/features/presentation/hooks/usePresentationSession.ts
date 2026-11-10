@@ -1,4 +1,5 @@
 import { createContext, use, useEffect, useState, type RefObject } from "react"
+import { useOfficeSettings } from "@/features/office/lib/officeSettings"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import * as Comlink from "comlink"
@@ -264,7 +265,8 @@ export function usePresentationSession({
 		}
 	})
 
-	const tier = autosaveTier(info?.packageBytes ?? 0, info?.protection.encrypted ?? false)
+	const autosaveDelayMs = useOfficeSettings().autosaveDelayMs
+	const tier = autosaveTier(info?.packageBytes ?? 0, info?.protection.encrypted ?? false, autosaveDelayMs)
 	const autosave = usePresentationAutosave({
 		tier,
 		revision: deck.revision,

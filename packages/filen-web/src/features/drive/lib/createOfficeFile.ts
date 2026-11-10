@@ -1,5 +1,6 @@
 import * as Comlink from "comlink"
 import { extensionOf } from "@/features/drive/lib/preview.logic"
+import type { TemplatePaper } from "@filen/office/core/templates"
 import type { OfficeTemplateApi } from "@/features/drive/lib/officeTemplates"
 import OfficeTemplateWorker from "@/features/drive/workers/officeTemplate.worker.ts?worker"
 import { recoverIfNewerBuild } from "@/lib/appUpdate"
@@ -53,6 +54,8 @@ export function freeOfficeFileName(base: string, kind: NewOfficeKind, taken: Rea
 export interface OfficeTemplateLocale {
 	// BCP 47: the paper (Letter in the US, Canada, Mexico and the Philippines, else A4) and a document's language.
 	locale: string
+	// The user's paper (Settings, Office) in place of the locale's; a presentation has none.
+	paper?: TemplatePaper | undefined
 	// A workbook's first sheet, in the user's language.
 	sheetName: string
 }

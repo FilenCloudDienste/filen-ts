@@ -7,7 +7,6 @@ import { UploadsRow } from "@/features/settings/components/advanced/uploadsRow"
 import { LogsBlock } from "@/features/settings/components/advanced/logsBlock"
 import { AboutRows } from "@/features/settings/components/advanced/aboutRows"
 import { ThirdPartyNoticesRow } from "@/features/settings/components/advanced/thirdPartyNoticesRow"
-import { DocumentsRows } from "@/features/settings/components/advanced/documentsRows"
 import { DotFilenRow } from "@/features/settings/components/advanced/dotFilenRow"
 import { StorageCaches } from "@/features/settings/components/storage/storageCaches"
 import { SettingsGroup, SettingsPage } from "@/features/settings/components/settingsLayout"
@@ -38,12 +37,6 @@ function AdvancedPage() {
 				description={t("settingsAdvancedArchiveDescription")}
 			>
 				<ArchiveMemoryRow />
-			</SettingsGroup>
-			<SettingsGroup
-				title={t("settingsAdvancedDocumentsTitle")}
-				description={t("settingsAdvancedDocumentsDescription")}
-			>
-				<DocumentsRows />
 			</SettingsGroup>
 			<SettingsGroup
 				title={t("settingsAdvancedUploadsTitle")}

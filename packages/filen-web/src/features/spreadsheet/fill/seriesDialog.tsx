@@ -17,7 +17,8 @@ import {
 	seriesTrendOffered,
 	type SeriesForm
 } from "@/features/spreadsheet/fill/seriesDialog.logic"
-import { browserLanguage, sheetLocaleOf } from "@/features/spreadsheet/formulaBar/sheetLocale"
+import { sheetLocaleOf } from "@/features/spreadsheet/formulaBar/sheetLocale"
+import { useRegionalLanguage } from "@/features/office/lib/regionalFormat"
 
 const ORIENTATIONS: readonly { readonly value: SeriesForm["orientation"]; readonly key: PreviewKey }[] = [
 	{ value: "rows", key: "previewSheetSeriesRows" },
@@ -117,7 +118,7 @@ export function SheetSeriesDialog({
 		onClose()
 	}
 	// The locale the session reads entries in (useSheetFormula configures it from the same language).
-	const locale = sheetLocaleOf(browserLanguage())
+	const locale = sheetLocaleOf(useRegionalLanguage())
 	const stepInvalid = form !== null && seriesStep(form.step, locale) === null
 	const stopInvalid = form !== null && !seriesStopValid(form.stop, locale)
 	const command = form === null || range === undefined ? null : seriesCommand(form, grid.sheet, range, locale)

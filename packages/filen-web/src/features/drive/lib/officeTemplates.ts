@@ -5,16 +5,16 @@ import type { NewOfficeKind, OfficeTemplateLocale } from "@/features/drive/lib/c
 // The blank files New ▸ Office makes, built in officeTemplate.worker.ts: the templates (a presentation's theme,
 // master and layouts among them) stay out of the main bundle. Imported by that worker only.
 
-export function officeTemplateBytes(kind: NewOfficeKind, { locale, sheetName }: OfficeTemplateLocale): Promise<Uint8Array> {
+export function officeTemplateBytes(kind: NewOfficeKind, { locale, sheetName, paper }: OfficeTemplateLocale): Promise<Uint8Array> {
 	switch (kind) {
 		case "docx":
-			return blankDocx({ locale })
+			return blankDocx({ locale, paper })
 		case "xlsx":
-			return blankXlsx({ locale, sheetName })
+			return blankXlsx({ locale, sheetName, paper })
 		case "odt":
-			return blankOdt({ locale })
+			return blankOdt({ locale, paper })
 		case "ods":
-			return blankOds({ locale, sheetName })
+			return blankOds({ locale, sheetName, paper })
 		case "pptx":
 			return blankPptx({ locale })
 		case "odp":

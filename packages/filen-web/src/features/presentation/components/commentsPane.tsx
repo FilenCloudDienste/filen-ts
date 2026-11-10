@@ -60,7 +60,15 @@ function useCommentAuthor() {
 		/>
 	)
 
-	return { author: settings.authorName, ask, dialog }
+	return { author: settings.authorName, initials: settings.authorInitials, ask, dialog }
+}
+
+// A new comment or reply carries the user's own initials (Settings, Office) when given; the deck derives them
+// from the name otherwise.
+function withInitials(op: DeckOp, initials: string | null): DeckOp {
+	return initials !== null && op.family === "comment" && (op.kind === "add" || op.kind === "reply")
+		? { ...op, authorInitials: initials }
+		: op
 }
 
 interface Thread {
@@ -689,7 +697,7 @@ export function PresentationCommentsPane({
 			if (name === null) return false
 
 			// A refusal is told by the editor (one toast) and changes nothing.
-			return (await editor.command(make(name))).ok
+			return (await editor.command(withInitials(make(name), author.initials))).ok
 		}
 	}
 

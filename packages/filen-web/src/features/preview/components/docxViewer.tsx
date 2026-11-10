@@ -4,7 +4,6 @@ import { toast } from "sonner"
 import { isCompoundFile } from "@filen/office/core/cfb"
 import { bytesSource, type ByteSource } from "@filen/office/core/opc"
 import {
-	DEFAULT_MARKUP_MODE,
 	markupInfo,
 	type DocxEncryptionRefusal,
 	type DocxHost,
@@ -72,6 +71,7 @@ import { useEditorLayerKeys } from "@/lib/keymap/editorLayerKeys"
 import { IN_EDITORS, useAction } from "@/lib/keymap/useAction"
 import { isSafeAbsoluteHref } from "@/lib/safeUrl"
 import { log } from "@/lib/log"
+import { officeViewSettings } from "@/features/office/lib/officeViewSettings"
 import { useElementSize } from "@/lib/useElementSize"
 import { useLatestRef } from "@/lib/useLatestRef"
 
@@ -802,15 +802,17 @@ function DocxDocumentView({
 	const pdfExport = useDocxPdfExport(pdf ?? null)
 	// A retry, or a markup mode laid out differently, opens the same content again under a fresh source (a new
 	// document on the shared worker).
+	// Opened in the device's markup (Settings, Office).
+	const [openedWith] = useState(() => officeViewSettings().markup)
 	const [opened, setOpened] = useState<Opened>(() => ({
 		content,
-		mode: DEFAULT_MARKUP_MODE,
-		source: sourceFor(content, DEFAULT_MARKUP_MODE, format)
+		mode: openedWith,
+		source: sourceFor(content, openedWith, format)
 	}))
 	let current = opened
 
 	if (opened.content !== content) {
-		current = { content, mode: DEFAULT_MARKUP_MODE, source: sourceFor(content, DEFAULT_MARKUP_MODE, format) }
+		current = { content, mode: openedWith, source: sourceFor(content, openedWith, format) }
 		setOpened(current)
 	}
 

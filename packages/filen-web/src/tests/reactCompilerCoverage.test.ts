@@ -228,7 +228,12 @@ describe("React Compiler coverage", () => {
 			["src/features/preview/components/docxTouchSelection.tsx", "DocxTouchSelection"],
 			["src/features/preview/components/docxAuthorGate.tsx", "useDocxAuthorGate"],
 			["src/features/preview/components/docxReflow.logic.ts", "useReflowMode"],
-			["src/features/settings/components/advanced/documentsRows.tsx", "DocumentsRows"]
+			["src/features/settings/components/office/generalRows.tsx", "OfficeGeneralRows"],
+			["src/features/settings/components/office/proofingRows.tsx", "OfficeProofingRows"],
+			["src/features/settings/components/office/dictionaryDialog.tsx", "DictionaryDialog"],
+			["src/features/settings/components/office/regionalRows.tsx", "OfficeRegionalRows"],
+			["src/features/settings/components/office/deviceRows.tsx", "OfficeWordRows"],
+			["src/features/settings/components/office/deviceRows.tsx", "OfficeLayoutRows"]
 		] as const) {
 			const events = compile(file)
 

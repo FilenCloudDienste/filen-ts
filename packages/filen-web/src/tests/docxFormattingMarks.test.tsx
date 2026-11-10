@@ -5,8 +5,8 @@ import { act, cleanup, fireEvent, renderHook, screen, waitFor, within } from "@t
 import { registerAllActions } from "@/lib/keymap/actions"
 import { renderRibbon } from "@/tests/docxRibbonHarness"
 
-// Word's Show/Hide ¶: one choice kept on this device for every document (read once an editor mounts, a change made
-// before it arrives winning), and its toggle button at the end of Home's Paragraph group.
+// Word's Show/Hide ¶: one choice kept on this device for every document (read during boot), and its toggle button at
+// the end of Home's Paragraph group.
 
 const { stored } = vi.hoisted(() => ({ stored: new Map<string, unknown>([["preview.docxFormattingMarks.v1", true]]) }))
 
@@ -21,7 +21,8 @@ vi.mock("@/lib/storage/adapter", () => ({
 	kvDelete: () => Promise.resolve()
 }))
 
-const { setDocxFormattingMarks, useDocxFormattingMarks } = await import("@/features/preview/lib/docxFormattingMarks")
+const { loadDocxFormattingMarks, setDocxFormattingMarks, useDocxFormattingMarks } =
+	await import("@/features/preview/lib/docxFormattingMarks")
 
 registerAllActions()
 
@@ -30,13 +31,12 @@ afterEach(() => {
 })
 
 describe("formatting marks setting", () => {
-	it("starts hidden, reads the stored choice once, and stores a change", async () => {
+	it("starts hidden, holds the stored choice once boot read it, and stores a change", async () => {
 		const { result } = renderHook(() => useDocxFormattingMarks())
 
 		expect(result.current).toBe(false)
-		await waitFor(() => {
-			expect(result.current).toBe(true)
-		})
+		await act(() => loadDocxFormattingMarks())
+		expect(result.current).toBe(true)
 
 		act(() => {
 			setDocxFormattingMarks(false)

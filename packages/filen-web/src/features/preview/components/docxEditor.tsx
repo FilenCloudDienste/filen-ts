@@ -29,15 +29,7 @@ import { docxLinkAt, hostCommandForKey, type DocxLinkAt, type PagedEditor } from
 import type { SpellingIssue, SpellingMark } from "@filen/office/core/docx/spelling"
 import { DocxSpelling } from "@filen/office/core/docx/spelling"
 import { DocxSaveError } from "@filen/office/core/docx/write"
-import {
-	DEFAULT_MARKUP_MODE,
-	clampZoom,
-	fitWidthZoom,
-	markupInfo,
-	stepZoom,
-	type DocxMarkupMode,
-	type DocxUnlockedDocument
-} from "@filen/office/dom/docx"
+import { clampZoom, fitWidthZoom, markupInfo, stepZoom, type DocxMarkupMode, type DocxUnlockedDocument } from "@filen/office/dom/docx"
 import type { DocxEditingHost, DocxSealer } from "@filen/office/dom/docx/editing"
 import type { DocxSaveNotice } from "@filen/office/dom/docx/save"
 import { useDocxDocument, type DocxSource } from "@filen/office/react/docx"
@@ -67,7 +59,6 @@ import {
 	type DocxTakenSession
 } from "@/features/preview/lib/docxEditing"
 import {
-	AUTOSAVE_IDLE_MS,
 	editorMarkupView,
 	featureEditable,
 	editorMarks,
@@ -142,6 +133,8 @@ import { DocxTouchSelection } from "@/features/preview/components/docxTouchSelec
 import { SaveRefusedError } from "@/features/drive/lib/previewSave.logic"
 import { defaultSpellingLanguage, documentSpellingChecker } from "@/features/spellcheck/lib/spellcheck"
 import { loadOfficeSettings, saveOfficeAutosave, useOfficeSettings } from "@/features/office/lib/officeSettings"
+import { officeViewSettings } from "@/features/office/lib/officeViewSettings"
+import { createListenerSet } from "@/lib/listenerSet"
 import { E2E_AUTOSAVE_OFF } from "@/features/office/lib/officeAutosave"
 import { LoadingState } from "@/components/loadingState"
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from "@/components/ui/context-menu"
@@ -225,7 +218,6 @@ function openEditing(
 interface Ready {
 	opened: Opened
 	editor: PagedEditor
-	spelling: DocxSpelling
 	// The style picker's styles (protection may lock some) and the colour pickers' theme colours.
 	styles: readonly DocxParagraphStyle[]
 	theme: readonly (readonly DocxSwatch[])[]
@@ -267,6 +259,27 @@ function inReview(target: EventTarget | null): boolean {
 
 function noSpelling(): readonly SpellingMark[] {
 	return NO_SPELLING
+}
+
+// The spellings made for the open editor, by story: the body's, and a header's, footer's or note's as it is first
+// entered. Held outside React state, so the effect that makes them sets none.
+interface Spellings {
+	readonly editor: PagedEditor
+	readonly stories: ReadonlyMap<number, DocxSpelling>
+}
+
+function createSpellingsStore() {
+	let held: Spellings | null = null
+	const listeners = createListenerSet("docx")
+
+	return {
+		get: (): Spellings | null => held,
+		set: (next: Spellings | null): void => {
+			held = next
+			listeners.emit()
+		},
+		subscribe: (listener: () => void): (() => void) => listeners.subscribe(listener)
+	}
 }
 
 const NO_FONTS: readonly DocxFontChoice[] = []
@@ -495,8 +508,10 @@ export function DocxEditView({
 	backend
 }: DocxEditViewProps) {
 	const { t } = useTranslation("preview")
-	const [markupMode, setMarkupMode] = useState<DocxMarkupMode>(DEFAULT_MARKUP_MODE)
-	const [opened, setOpened] = useState(() => openEditing(bytes, DEFAULT_MARKUP_MODE, false, encryption, backend))
+	// The device's choice of markup and view (Settings, Office) as the document opens; the menus change them after.
+	const [openedWith] = useState(officeViewSettings)
+	const [markupMode, setMarkupMode] = useState<DocxMarkupMode>(openedWith.markup)
+	const [opened, setOpened] = useState(() => openEditing(bytes, openedWith.markup, false, encryption, backend))
 	const document = useDocxDocument(opened.source)
 	const [ready, setReady] = useState<Ready | null>(null)
 	const current = ready?.opened === opened ? ready : null
@@ -554,7 +569,7 @@ export function DocxEditView({
 	// The last press on the pages was a touch: selections get handles and the touch menu.
 	const [touch, setTouch] = useState(false)
 	// The reflowed view (Mobile view) in place of the pages.
-	const { reflow, setReflow } = useReflowMode(width)
+	const { reflow, setReflow } = useReflowMode(width, openedWith.docxView)
 	const surface: DocxSurface = reflow ? "reflow" : "pages"
 	// A command's input asked of the component that takes it (a comment's text, an equation), until it is done.
 	const [inputRequest, setInputRequest] = useState<DocxInputRequest | null>(null)
@@ -651,51 +666,58 @@ export function DocxEditView({
 	const liveFile: LiveFile | undefined =
 		encryptedFile === undefined ? (target, signal) => editedFile(opened.editing, target, signal, backend?.convertEdited) : undefined
 	const activeStory = editor?.activeStory
-	const bodyActive = editor !== undefined && activeStory === editor.body.session.story.story.index
-	// The spelling of the story being edited: the body's, or a header's, footer's or note's once made for it.
-	const [storySpelling, setStorySpelling] = useState<{ editor: PagedEditor; story: number; spelling: DocxSpelling } | null>(null)
-	const spelling = bodyActive
-		? current?.spelling
-		: storySpelling !== null && storySpelling.editor === editor && storySpelling.story === activeStory
-			? storySpelling.spelling
-			: undefined
+	// Spelling as the user's proofing settings (Settings, Office) have it, once they were read: with it off, no
+	// dictionary loads.
+	const spellingOn = settings.settled && settings.spellCheck
+	const proofingLanguage = settings.proofingLanguage ?? defaultSpellingLanguage()
+	const { ignoreUppercase, ignoreWordsWithNumbers, ignoreAddresses, flagRepeatedWords } = settings
+	const [spellings] = useState(createSpellingsStore)
+	const made = useSyncExternalStore(spellings.subscribe, spellings.get, spellings.get)
+	// The spelling of the story being edited.
+	const spelling = made !== null && made.editor === editor && activeStory !== undefined ? made.stories.get(activeStory) : undefined
 
-	// Each story's spelling made as it is first entered, kept (proofed once) until the editor closes.
+	// The body's spelling once the editor is open, each other story's as it is first entered, kept (proofed once)
+	// until the editor closes or the proofing settings change.
 	useEffect(() => {
-		if (editor === undefined) {
+		if (editor === undefined || !spellingOn) {
 			return
 		}
 
-		const made = new Map<number, DocxSpelling>()
+		const options = {
+			defaultLanguage: proofingLanguage,
+			ignoreUppercase,
+			ignoreWordsWithNumbers,
+			ignoreAddresses,
+			flagRepeated: flagRepeatedWords
+		}
+		const stories = new Map<number, DocxSpelling>([
+			[editor.body.session.story.story.index, new DocxSpelling(editor.body.session, documentSpellingChecker, options)]
+		])
+
+		spellings.set({ editor, stories })
+
 		const unsubscribe = editor.subscribe(event => {
-			if (event.type !== "story" || event.story === editor.body.session.story.story.index) {
+			if (event.type !== "story" || stories.has(event.story)) {
 				return
 			}
 
-			let story = made.get(event.story)
+			const session = editor.storySession(event.story)
 
-			if (story === undefined) {
-				const session = editor.storySession(event.story)
-
-				if (session === undefined) {
-					return
-				}
-
-				story = new DocxSpelling(session, documentSpellingChecker, { defaultLanguage: defaultSpellingLanguage() })
-				made.set(event.story, story)
+			if (session !== undefined) {
+				stories.set(event.story, new DocxSpelling(session, documentSpellingChecker, options))
+				spellings.set({ editor, stories: new Map(stories) })
 			}
-
-			setStorySpelling({ editor, story: event.story, spelling: story })
 		})
 
 		return () => {
 			unsubscribe()
+			spellings.set(null)
 
-			for (const story of made.values()) {
+			for (const story of stories.values()) {
 				story.dispose()
 			}
 		}
-	}, [editor])
+	}, [editor, spellingOn, proofingLanguage, ignoreUppercase, ignoreWordsWithNumbers, ignoreAddresses, flagRepeatedWords, spellings])
 
 	const spellingMarks = useSyncExternalStore(
 		spelling === undefined ? subscribeNothing : listener => spelling.subscribe(listener),
@@ -760,10 +782,9 @@ export function DocxEditView({
 	// Read by the first wheel step from "fit" only: later steps build on the previous step's zoom.
 	const fitZoomRef = useLatestRef(fitZoom)
 
-	// The editor and its spelling once the document is open for editing (proved block by block meanwhile).
+	// The editor once the document is open for editing (proved block by block meanwhile).
 	useEffect(() => {
 		let live = true
-		let created: DocxSpelling | undefined
 
 		opened.editing.editor.then(
 			openedEditor => {
@@ -771,17 +792,12 @@ export function DocxEditView({
 					return
 				}
 
-				created = new DocxSpelling(openedEditor.body.session, documentSpellingChecker, {
-					defaultLanguage: defaultSpellingLanguage()
-				})
-
 				const context = openedEditor.body.session.context
 
 				openedRef.current?.()
 				setReady({
 					opened,
 					editor: openedEditor,
-					spelling: created,
 					styles: offeredParagraphStyles(context),
 					theme: themeSwatches(theme => context.resolver.theme?.themeColor(theme)),
 					writeProtection: writeProtectionOf(context)
@@ -809,7 +825,6 @@ export function DocxEditView({
 
 		return () => {
 			live = false
-			created?.dispose()
 		}
 	}, [opened, t, openedRef])
 
@@ -830,10 +845,13 @@ export function DocxEditView({
 		}
 	}, [reflow, editor])
 
-	// Comments and tracked changes carry the user's own author name (none until given).
+	// Comments and tracked changes carry the user's own author name (none until given), comments its initials (the
+	// user's own, else the name's).
+	const authorInitials = settings.authorInitials ?? undefined
+
 	useEffect(() => {
-		opened.editing.setAuthor(settings.authorName ?? undefined)
-	}, [opened, settings.authorName])
+		opened.editing.setAuthor(settings.authorName ?? undefined, authorInitials)
+	}, [opened, settings.authorName, authorInitials])
 
 	useEffect(() => {
 		onDirtyChange(dirty)
@@ -918,12 +936,23 @@ export function DocxEditView({
 			} else {
 				setAutosaveRetry(retry => retry + 1)
 			}
-		}, AUTOSAVE_IDLE_MS)
+		}, settings.autosaveDelayMs)
 
 		return () => {
 			clearTimeout(timer)
 		}
-	}, [settings.loaded, settings.autosave, autosaveHeld, dirty, readOnly, online, doc, autosaveRetry, onAutosaveRef])
+	}, [
+		settings.loaded,
+		settings.autosave,
+		settings.autosaveDelayMs,
+		autosaveHeld,
+		dirty,
+		readOnly,
+		online,
+		doc,
+		autosaveRetry,
+		onAutosaveRef
+	])
 
 	// Ctrl/Cmd+wheel zooms (a native non-passive listener, as in the viewer); a plain wheel scrolls.
 	useEffect(() => {
@@ -1106,7 +1135,7 @@ export function DocxEditView({
 
 	const runRef = useLatestRef((command: DocxEditorCommand, author?: string): void => {
 		if (author !== undefined) {
-			opened.editing.setAuthor(author)
+			opened.editing.setAuthor(author, authorInitials)
 		}
 
 		// Commands that change nothing (find the next change, field codes) run while read-only too.
@@ -1208,7 +1237,7 @@ export function DocxEditView({
 
 						if (setting?.edit === "trackedChanges") {
 							withAuthor(author => {
-								opened.editing.setAuthor(author)
+								opened.editing.setAuthor(author, authorInitials)
 								apply()
 							})
 						} else {

@@ -126,7 +126,7 @@ vi.mock("@/features/preview/lib/heicTransform", () => ({ releaseHeicWorker, tran
 vi.mock("@/features/preview/imageEdit/renderClient", () => ({ releaseImageEditWorker }))
 vi.mock("@/queries/client", () => ({ queryClient: { cancelQueries: vi.fn(), clear: vi.fn() } }))
 vi.mock("sonner", () => ({ toast: { warning: toastWarning } }))
-vi.mock("@/features/office/lib/officeSettings", () => ({ officeSettings: { reset: officeSettingsReset } }))
+vi.mock("@/features/office/lib/officeSettings", () => ({ resetOfficeSettings: officeSettingsReset }))
 vi.mock("@/features/mounts/lib/mountsStore", () => ({ confirmMountsSignOut }))
 
 import { kvClear } from "@/lib/storage/adapter"

@@ -27,7 +27,8 @@ import { FormulaAssist } from "@/features/spreadsheet/formulaBar/formulaAssist"
 import { REFERENCE_COLORS, referenceColors } from "@/features/spreadsheet/formulaBar/referenceColors"
 import { referenceLayer } from "@/features/spreadsheet/formulaBar/referenceLayer"
 import { ReferenceText } from "@/features/spreadsheet/formulaBar/referenceText"
-import { browserLanguage, sheetLocaleOf } from "@/features/spreadsheet/formulaBar/sheetLocale"
+import { sheetLocaleOf } from "@/features/spreadsheet/formulaBar/sheetLocale"
+import { useRegionalLanguage } from "@/features/office/lib/regionalFormat"
 import { useEntryAutoComplete } from "@/features/spreadsheet/formulaBar/autoComplete"
 
 // Typing a formula, in the cell or the formula bar (Excel's formula UX): its references outlined on the cells in
@@ -105,7 +106,8 @@ export function useSheetFormula({
 }): SheetFormulaExtension {
 	const { theme } = useTheme()
 	const colors = referenceColors(resolveTheme(theme) === "dark")
-	const [locale] = useState(() => sheetLocaleOf(browserLanguage()))
+	// One object per language (cached), so the session is configured again only when the regional format changes.
+	const locale = sheetLocaleOf(useRegionalLanguage())
 	const [caret, setCaret] = useState<FormulaCaret>({ editor: null, caret: 0 })
 	// The suggestion list's choice, and the word it was dismissed for (Escape).
 	const [choice, setChoice] = useState(0)
@@ -121,7 +123,7 @@ export function useSheetFormula({
 	// A text entry completes from the column's entries (formulaBar/autoComplete.ts).
 	useEntryAutoComplete({ model, session: handle.session, canEdit, editing })
 
-	// The session reads entries in the browser's locale and shows inputs in it.
+	// The session reads entries in the regional format (Settings, Office; the browser's by default) and shows inputs in it.
 	useEffect(() => {
 		handle.session.configure({ locale })
 	}, [handle, locale])

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react"
-import { AUTOSAVE_IDLE_MS, E2E_AUTOSAVE_OFF } from "@/features/office/lib/officeAutosave"
+import { E2E_AUTOSAVE_OFF } from "@/features/office/lib/officeAutosave"
 import { loadOfficeSettings, useOfficeSettings } from "@/features/office/lib/officeSettings"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { useLatestRef } from "@/lib/useLatestRef"
@@ -17,8 +17,8 @@ export interface SheetAutosaveInput {
 	onAutosave: (() => boolean) | undefined
 }
 
-// Idle autosave, as the Word document editor's: a pause of AUTOSAVE_IDLE_MS after the last edit saves once, while
-// the user's setting (Settings, documents) says so, once that setting was read (never on the default before). A
+// Idle autosave, as the Word document editor's: a pause of the user's autosave delay after the last edit saves once,
+// while the user's setting (Settings, Office) says so, once that setting was read (never on the default before). A
 // version a save started for is not tried again (a failed save waits for the next edit); one whose save could not
 // start (a save in flight, a dialog open) is tried after the next pause. Offline, or with a cell entry open, it
 // waits.
@@ -57,10 +57,22 @@ export function useSheetAutosave({ version, dirty, editing, canSave, onAutosave 
 			} else {
 				setRetry(count => count + 1)
 			}
-		}, AUTOSAVE_IDLE_MS)
+		}, settings.autosaveDelayMs)
 
 		return () => {
 			clearTimeout(timer)
 		}
-	}, [wanted, settings.loaded, settings.autosave, dirty, editing, canSave, online, version, retry, onAutosaveRef])
+	}, [
+		wanted,
+		settings.loaded,
+		settings.autosave,
+		settings.autosaveDelayMs,
+		dirty,
+		editing,
+		canSave,
+		online,
+		version,
+		retry,
+		onAutosaveRef
+	])
 }

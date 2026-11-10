@@ -47,6 +47,7 @@ import { Route as AppSettingsBillingRouteImport } from './routes/_app/settings/b
 import { Route as AppSettingsDesktopRouteImport } from './routes/_app/settings/desktop'
 import { Route as AppSettingsEventsRouteImport } from './routes/_app/settings/events'
 import { Route as AppSettingsKeyboardRouteImport } from './routes/_app/settings/keyboard'
+import { Route as AppSettingsOfficeRouteImport } from './routes/_app/settings/office'
 import { Route as AppSettingsPlansRouteImport } from './routes/_app/settings/plans'
 import { Route as AppSettingsSecurityRouteImport } from './routes/_app/settings/security'
 import { Route as AppSettingsStorageRouteImport } from './routes/_app/settings/storage'
@@ -252,6 +253,11 @@ const AppSettingsKeyboardRoute = AppSettingsKeyboardRouteImport.update({
   path: '/keyboard',
   getParentRoute: () => AppSettingsRouteRoute,
 } as any)
+const AppSettingsOfficeRoute = AppSettingsOfficeRouteImport.update({
+  id: '/office',
+  path: '/office',
+  getParentRoute: () => AppSettingsRouteRoute,
+} as any)
 const AppSettingsPlansRoute = AppSettingsPlansRouteImport.update({
   id: '/plans',
   path: '/plans',
@@ -362,6 +368,7 @@ export interface FileRoutesByFullPath {
   '/settings/desktop': typeof AppSettingsDesktopRoute
   '/settings/events': typeof AppSettingsEventsRoute
   '/settings/keyboard': typeof AppSettingsKeyboardRoute
+  '/settings/office': typeof AppSettingsOfficeRoute
   '/settings/plans': typeof AppSettingsPlansRoute
   '/settings/security': typeof AppSettingsSecurityRoute
   '/settings/storage': typeof AppSettingsStorageRoute
@@ -410,6 +417,7 @@ export interface FileRoutesByTo {
   '/settings/desktop': typeof AppSettingsDesktopRoute
   '/settings/events': typeof AppSettingsEventsRoute
   '/settings/keyboard': typeof AppSettingsKeyboardRoute
+  '/settings/office': typeof AppSettingsOfficeRoute
   '/settings/plans': typeof AppSettingsPlansRoute
   '/settings/security': typeof AppSettingsSecurityRoute
   '/settings/storage': typeof AppSettingsStorageRoute
@@ -466,6 +474,7 @@ export interface FileRoutesById {
   '/_app/settings/desktop': typeof AppSettingsDesktopRoute
   '/_app/settings/events': typeof AppSettingsEventsRoute
   '/_app/settings/keyboard': typeof AppSettingsKeyboardRoute
+  '/_app/settings/office': typeof AppSettingsOfficeRoute
   '/_app/settings/plans': typeof AppSettingsPlansRoute
   '/_app/settings/security': typeof AppSettingsSecurityRoute
   '/_app/settings/storage': typeof AppSettingsStorageRoute
@@ -522,6 +531,7 @@ export interface FileRouteTypes {
     | '/settings/desktop'
     | '/settings/events'
     | '/settings/keyboard'
+    | '/settings/office'
     | '/settings/plans'
     | '/settings/security'
     | '/settings/storage'
@@ -570,6 +580,7 @@ export interface FileRouteTypes {
     | '/settings/desktop'
     | '/settings/events'
     | '/settings/keyboard'
+    | '/settings/office'
     | '/settings/plans'
     | '/settings/security'
     | '/settings/storage'
@@ -625,6 +636,7 @@ export interface FileRouteTypes {
     | '/_app/settings/desktop'
     | '/_app/settings/events'
     | '/_app/settings/keyboard'
+    | '/_app/settings/office'
     | '/_app/settings/plans'
     | '/_app/settings/security'
     | '/_app/settings/storage'
@@ -926,6 +938,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppSettingsKeyboardRouteImport
       parentRoute: typeof AppSettingsRouteRoute
     }
+    '/_app/settings/office': {
+      id: '/_app/settings/office'
+      path: '/office'
+      fullPath: '/settings/office'
+      preLoaderRoute: typeof AppSettingsOfficeRouteImport
+      parentRoute: typeof AppSettingsRouteRoute
+    }
     '/_app/settings/plans': {
       id: '/_app/settings/plans'
       path: '/plans'
@@ -1042,6 +1061,7 @@ interface AppSettingsRouteRouteChildren {
   AppSettingsDesktopRoute: typeof AppSettingsDesktopRoute
   AppSettingsEventsRoute: typeof AppSettingsEventsRoute
   AppSettingsKeyboardRoute: typeof AppSettingsKeyboardRoute
+  AppSettingsOfficeRoute: typeof AppSettingsOfficeRoute
   AppSettingsPlansRoute: typeof AppSettingsPlansRoute
   AppSettingsSecurityRoute: typeof AppSettingsSecurityRoute
   AppSettingsStorageRoute: typeof AppSettingsStorageRoute
@@ -1056,6 +1076,7 @@ const AppSettingsRouteRouteChildren: AppSettingsRouteRouteChildren = {
   AppSettingsDesktopRoute: AppSettingsDesktopRoute,
   AppSettingsEventsRoute: AppSettingsEventsRoute,
   AppSettingsKeyboardRoute: AppSettingsKeyboardRoute,
+  AppSettingsOfficeRoute: AppSettingsOfficeRoute,
   AppSettingsPlansRoute: AppSettingsPlansRoute,
   AppSettingsSecurityRoute: AppSettingsSecurityRoute,
   AppSettingsStorageRoute: AppSettingsStorageRoute,

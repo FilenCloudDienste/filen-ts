@@ -1,5 +1,6 @@
 import { useState } from "react"
 import type { DocxEditorCommandType } from "@filen/office/core/docx/edit"
+import type { DocxOpenView } from "@/features/office/lib/officeViewSettings"
 
 // Mobile view shows by itself in an editor area narrower than this (px), as Word's mobile apps reflow a
 // document on a phone.
@@ -34,6 +35,11 @@ export interface ReflowState {
 
 export const INITIAL_REFLOW: ReflowState = { reflow: false, chosen: false, narrow: null }
 
+// The state a document opens in: the width decides ("auto"), or the device's setting already chose.
+export function initialReflow(view: DocxOpenView): ReflowState {
+	return view === "auto" ? INITIAL_REFLOW : { reflow: view === "reflow", chosen: true, narrow: null }
+}
+
 // The state once the editor area is `width` px wide: Mobile view follows the width only when it crosses
 // REFLOW_MAX_WIDTH (the first measure counts as one), and never once the user chose.
 export function reflowForWidth(state: ReflowState, width: number): ReflowState {
@@ -55,9 +61,10 @@ export function reflowChosen(state: ReflowState, reflow: boolean): ReflowState {
 	return state.chosen && state.reflow === reflow ? state : { reflow, chosen: true, narrow: state.narrow }
 }
 
-// Whether the editor shows Mobile view, for an editor box `width` px wide (0 until measured).
-export function useReflowMode(width: number): DocxReflowMode {
-	const [state, setState] = useState<ReflowState>(INITIAL_REFLOW)
+// Whether the editor shows Mobile view, for an editor box `width` px wide (0 until measured), opened as `view`
+// says (Settings, Office: "Open documents in").
+export function useReflowMode(width: number, view: DocxOpenView): DocxReflowMode {
+	const [state, setState] = useState<ReflowState>(() => initialReflow(view))
 	const next = reflowForWidth(state, width)
 
 	// A width crossing applies during render (no frame of the other view in between).

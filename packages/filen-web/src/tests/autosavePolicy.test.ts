@@ -24,6 +24,11 @@ describe("presentation autosave tiers", () => {
 		expect(AUTOSAVE_SMALL_BYTES).toBe(32 * MiB)
 	})
 
+	it("waits the user's pause in the idle tier only", () => {
+		expect(autosaveTier(1, false, 15_000)).toEqual({ kind: "idle", idleMs: 15_000, minIntervalMs: 15_000 })
+		expect(autosaveTier(AUTOSAVE_SMALL_BYTES + 1, false, 15_000)).toMatchObject({ kind: "throttled", idleMs: AUTOSAVE_IDLE_MS })
+	})
+
 	it("throttles above 32 MiB up to and including 256 MiB", () => {
 		for (const size of [AUTOSAVE_SMALL_BYTES + 1, AUTOSAVE_LARGE_BYTES]) {
 			expect(autosaveTier(size, false)).toEqual({
