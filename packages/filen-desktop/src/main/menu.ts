@@ -16,7 +16,9 @@ const ACTION_LABELS: Record<DesktopMenuAction, DesktopShellStringKey> = {
 	"desktop.close": "shellMenuClose",
 	"audio.playPause": "shellPlay",
 	"audio.next": "shellNextTrack",
-	"audio.previous": "shellPreviousTrack"
+	"audio.previous": "shellPreviousTrack",
+	"audio.shuffle": "shellShuffle",
+	"audio.loop": "shellRepeat"
 }
 
 export const MENU_ACTIONS = new Set(Object.keys(ACTION_LABELS)) as ReadonlySet<DesktopMenuAction>
@@ -103,10 +105,16 @@ export function toAccelerator(combo: string): string | undefined {
 // Close's combo until the page reports one (its default), so Cmd+W closes the window before the page has loaded too.
 const CLOSE_DEFAULT = "mod+w"
 
-export const TRANSPORT_ACTIONS: ReadonlySet<DesktopMenuAction> = new Set(["audio.playPause", "audio.next", "audio.previous"])
+export const TRANSPORT_ACTIONS: ReadonlySet<DesktopMenuAction> = new Set([
+	"audio.playPause",
+	"audio.next",
+	"audio.previous",
+	"audio.shuffle",
+	"audio.loop"
+])
 
-// The audio player's transport while something is queued: play or pause, then the track skips. The Controls menu and
-// the tray offer these.
+// The audio player's transport while something is queued: play or pause, the track skips, then shuffle and repeat.
+// The Controls menu and the tray offer these.
 export function transportItems(transport: DesktopMediaTransport): { action: DesktopMenuAction; label: string }[] {
 	if (transport === "none") {
 		return []
@@ -115,7 +123,9 @@ export function transportItems(transport: DesktopMediaTransport): { action: Desk
 	return [
 		{ action: "audio.playPause", label: shellText(transport === "playing" ? "shellPause" : "shellPlay") },
 		{ action: "audio.next", label: shellText("shellNextTrack") },
-		{ action: "audio.previous", label: shellText("shellPreviousTrack") }
+		{ action: "audio.previous", label: shellText("shellPreviousTrack") },
+		{ action: "audio.shuffle", label: shellText("shellShuffle") },
+		{ action: "audio.loop", label: shellText("shellRepeat") }
 	]
 }
 

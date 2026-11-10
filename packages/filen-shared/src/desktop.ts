@@ -79,6 +79,8 @@ export type DesktopMenuAction =
 	| "audio.playPause"
 	| "audio.next"
 	| "audio.previous"
+	| "audio.shuffle"
+	| "audio.loop"
 
 // The audio player's state as the menu and the tray offer its transport: nothing queued, or a queue paused or playing.
 export type DesktopMediaTransport = "none" | "paused" | "playing"
