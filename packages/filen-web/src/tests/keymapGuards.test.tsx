@@ -257,6 +257,14 @@ describe("the preview overlay's keys", () => {
 		expect(previewOverlayKey(key("m", { ctrlKey: true, code: "KeyM" }), rebound, false)).toBe("preview.move")
 	})
 
+	it("ships favorite unassigned, and takes it once bound", () => {
+		expect(off["preview.favorite"]).toBe("")
+		expect(previewOverlayKey(key("f"), off, false)).toBeUndefined()
+		expect(previewOverlayKey(key("b", { ctrlKey: true, code: "KeyB" }), { ...off, "preview.favorite": "mod+b" }, false)).toBe(
+			"preview.favorite"
+		)
+	})
+
 	// A key reaches only what the file's own menu offers, enabled.
 	it("opens an item-menu dialog only where the menu offers that entry", () => {
 		const rename = { id: "rename", run: "dialog", dialogKind: "rename" } as const

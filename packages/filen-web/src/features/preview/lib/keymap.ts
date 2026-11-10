@@ -85,6 +85,7 @@ export type PreviewOverlayAction =
 	| "preview.share"
 	| "preview.trash"
 	| "preview.openMenu"
+	| "preview.favorite"
 
 function overlayAction(
 	id: PreviewOverlayAction,
@@ -116,7 +117,10 @@ export const PREVIEW_OVERLAY_ACTIONS: readonly Def<PreviewOverlayAction>[] = [
 	overlayAction("preview.info", "alt+enter", "preview:previewKeyInfo", [{ on: { mac: true }, combo: "mod+i" }]),
 	overlayAction("preview.share", "", "preview:previewKeyShare"),
 	overlayAction("preview.trash", "delete", "preview:previewKeyTrash", [{ on: { mac: true }, combo: "mod+backspace" }]),
-	overlayAction("preview.openMenu", "shift+f10", "preview:previewKeyOpenMenu")
+	overlayAction("preview.openMenu", "shift+f10", "preview:previewKeyOpenMenu"),
+	// No key every app agrees on, and F (the photos grid's) is the viewers' full screen here: unassigned, so it can be
+	// bound.
+	overlayAction("preview.favorite", "", "preview:previewKeyFavorite")
 ]
 
 // The image viewer's zoom, as the PDF viewer's (the browser's zoom keys by character first, browserZoom.ts), 1 for the

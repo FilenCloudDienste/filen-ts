@@ -5,13 +5,13 @@ import { driveItemName } from "@filen/shared"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
 import { type ParentNaming } from "@/features/drive/lib/archiveTargets"
-import { toggleFavorite, restoreItems } from "@/features/drive/lib/actions"
+import { restoreItems } from "@/features/drive/lib/actions"
+import { toggleItemFavorite } from "@/features/drive/lib/favorite"
 import { defaultRevealDeps, runOpenContainingDirectory } from "@/features/drive/lib/reveal"
 import { copyItemLink } from "@/features/drive/lib/copyLink"
-import { DRIVE_RESTORE, driveActivity, favoriteKeys } from "@/features/drive/lib/activity"
-import { runBulkActivity, runOutcomeActivity } from "@/lib/activity/activity"
+import { DRIVE_RESTORE, driveActivity } from "@/features/drive/lib/activity"
+import { runBulkActivity } from "@/lib/activity/activity"
 import { startDownloads } from "@/features/drive/lib/download"
-import { useDriveStore } from "@/features/drive/store/useDriveStore"
 import { useIsOnline } from "@/lib/useIsOnline"
 import {
 	applyOfflineGate,
@@ -112,29 +112,7 @@ function ItemMenuEntries({
 		}
 
 		if (descriptor.id === "favorite") {
-			await runOutcomeActivity(item, {
-				keys: favoriteKeys(!item.data.favorited),
-				name: driveItemName,
-				run: async target => {
-					const outcome = await toggleFavorite(target)
-
-					if (outcome.status === "error") {
-						return outcome
-					}
-
-					// Unfavoriting while the favorites listing is open drops the row from that listing (cache
-					// patch in actions.ts) — mirrors the restore/trash cleanup below so its uuid doesn't linger
-					// in the selection store as a ghost "N selected" count. Favoriting-ON and any non-favorites
-					// variant leave the item visible, so selection is left untouched in both of those cases.
-					if (variant === "favorites" && !outcome.item.data.favorited) {
-						useDriveStore.getState().removeFromSelection([outcome.item.data.uuid])
-					}
-
-					onFavoriteToggled?.(outcome.item)
-
-					return outcome
-				}
-			})
+			await toggleItemFavorite(item, variant, onFavoriteToggled)
 
 			return
 		}

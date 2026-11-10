@@ -27,6 +27,8 @@ export const previewKeysShortcuts = {
 	previewKeyShare: "Share the file",
 	/** Shortcuts list — the preview's key moving the file to the trash */
 	previewKeyTrash: "Move the file to the trash",
+	/** Shortcuts list — the preview's key adding the file to favorites, or removing it */
+	previewKeyFavorite: "Favorite or unfavorite the file",
 	/** Shortcuts list — the preview's key opening the file's menu (the ⋯ button) */
 	previewKeyOpenMenu: "Open the file's menu",
 

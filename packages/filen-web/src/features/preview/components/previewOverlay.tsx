@@ -130,6 +130,7 @@ import { spreadsheetSaveFormat } from "@/features/spreadsheet/lib/fileKind"
 import { usePreviewRemoteChanges, type PreviewEdits } from "@/features/preview/hooks/usePreviewRemoteChanges"
 import { RemoteChangeDialog } from "@/features/preview/components/remoteChangeDialog"
 import { DriveDropdownMenuContent } from "@/features/drive/components/itemMenu"
+import { toggleItemFavorite } from "@/features/drive/lib/favorite"
 import {
 	applyOfflineGate,
 	driveItemActions,
@@ -1649,10 +1650,18 @@ export function PreviewOverlay({
 
 		const descriptors = applyOfflineGate(driveItemActions(driveItem, variant), isOnline)
 		const hidden = previewMenuHiddenActionIds(hiddenMenuActionIds, previewDownloadable(downloadable, variant))
-		const kind = itemKeyDialog(
-			action,
-			descriptors.filter(descriptor => !hidden.has(descriptor.id))
-		)
+		const offered = descriptors.filter(descriptor => !hidden.has(descriptor.id))
+
+		// Favorite runs in place, as the menu's own entry, where the menu offers it enabled.
+		if (action === "preview.favorite") {
+			if (offered.some(descriptor => descriptor.id === "favorite" && descriptor.enabled !== false)) {
+				void toggleItemFavorite(driveItem, variant, handleMenuFavoriteToggled)
+			}
+
+			return
+		}
+
+		const kind = itemKeyDialog(action, offered)
 
 		if (kind === null) {
 			return
