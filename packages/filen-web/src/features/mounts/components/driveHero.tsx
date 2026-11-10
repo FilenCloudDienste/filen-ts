@@ -12,6 +12,7 @@ import { FUSE_PROVIDER_KEY, ROLE_STATE_TONE, roleStateKey } from "@/features/mou
 import type { DriveControls } from "@/features/mounts/hooks/useDriveControls"
 import { RoleHero } from "@/features/mounts/components/roleHero"
 import { RoleStatusDot } from "@/features/mounts/components/roleStatus"
+import { OUTSIDE_OVERLAYS, useAction } from "@/lib/keymap/useAction"
 
 const WINDOWS = desktopPlatform() === "win32"
 
@@ -36,8 +37,22 @@ export function DriveSwitch({ controls }: { controls: DriveControls }) {
 // overview its title links to the drive's page.
 export function DriveHero({ controls, overview }: { controls: DriveControls; overview: boolean }) {
 	const { t } = useTranslation("mounts")
-	const { drive, fuse } = controls
+	const { drive, fuse, busy, cannotMount, setDrive } = controls
 	const cache = useMountsStore(state => state.overview?.cache ?? null)
+
+	// Def in features/mounts/lib/keymap.ts: the switch, on the drive's own page, under the switch's own gate.
+	useAction(
+		"mounts.toggleRole",
+		event => {
+			event.preventDefault()
+
+			if (!busy && !(cannotMount && !drive.enabled)) {
+				setDrive({ enabled: !drive.enabled })
+			}
+		},
+		{ ...OUTSIDE_OVERLAYS, enabled: !overview },
+		[busy, cannotMount, drive.enabled, setDrive]
+	)
 	const stateLabel = t(roleStateKey("drive", drive.state))
 	// What mounts it, once mounted.
 	const provider = fuse?.state === "ready" && drive.state === "running" ? t(FUSE_PROVIDER_KEY[fuse.provider]) : null

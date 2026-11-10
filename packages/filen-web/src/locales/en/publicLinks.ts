@@ -100,5 +100,16 @@ export const publicLinks = {
 	/** Directory view — item + size summary, singular */
 	itemSummary_one: "{{count}} item · {{size}}",
 	/** Directory view — item + size summary, plural */
-	itemSummary_other: "{{count}} items · {{size}}"
+	itemSummary_other: "{{count}} items · {{size}}",
+	// Keyboard shortcuts (Settings → Keyboard and the ? dialog)
+	/** Keyboard shortcut — downloads the shared file, or the shared directory on screen as a ZIP */
+	linkCommandDownload: "Download",
+	/** Keyboard shortcut — copies what the link shares into the visitor's own Cloud Drive */
+	linkCommandSaveToDrive: "Save to Cloud Drive",
+	/** Keyboard shortcut — returns from a file opened inside a shared directory to the directory */
+	linkCommandBack: "Back to directory",
+	/** Keyboard shortcut — goes up one level inside a shared directory */
+	linkCommandUp: "Go up one level",
+	/** Keyboard shortcut — focuses the shared directory's filter box */
+	linkCommandFilter: "Filter items"
 } as const

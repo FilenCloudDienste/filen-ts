@@ -119,6 +119,10 @@ const { resetTrackTags } = await import("@/features/audio/store/useTrackTagsStor
 const { stringifyEnvelope } = await import("@filen/shared/session")
 const { trackTagsKey } = await import("@/features/audio/lib/trackTags.logic")
 const { reorderPlaylistFileAction } = await import("@/features/audio/lib/playlists")
+const { registerAllActions } = await import("@/lib/keymap/actions")
+
+// The screen and the pane bind the playlists keys.
+registerAllActions()
 
 function seedTags(
 	uuid: string,

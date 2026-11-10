@@ -3,9 +3,7 @@ import type { Chat } from "@filen/sdk-rs"
 import { aggregateChatSelectionFlags } from "@/features/chats/lib/selectionFlags"
 import { chatMessagesQueryGet } from "@/features/chats/queries/chatMessages"
 import type { BlockedUsers } from "@filen/shared"
-import { markChatsRead, setChatsMuted } from "@/features/chats/lib/bulk"
-import { CHATS_MARK_READ, chatsActivity, setMutedKeys } from "@/features/chats/lib/activity"
-import { runBulkActivity } from "@/lib/activity/activity"
+import { runMarkChatsRead, runSetChatsMuted } from "@/features/chats/lib/directActions"
 import { useChatsSelectionStore } from "@/features/chats/store/useChatsSelectionStore"
 import {
 	chatBulkActions,
@@ -41,16 +39,11 @@ export function ChatsBulkActionBar({ selectedChats, currentUserId, blocked, onDi
 	function runDescriptor(descriptor: Extract<ChatBulkActionDescriptor, { run: "direct" }>): void {
 		switch (descriptor.id) {
 			case "markRead":
-				void runBulkActivity(chatsActivity(selectedChats, CHATS_MARK_READ, markChatsRead))
+				runMarkChatsRead(selectedChats)
 				return
-			case "mute": {
-				const mute = !flags.includesMuted
-
-				void runBulkActivity(
-					chatsActivity(selectedChats, setMutedKeys(mute), (targets, onSettled) => setChatsMuted(targets, mute, onSettled))
-				)
+			case "mute":
+				runSetChatsMuted(selectedChats, !flags.includesMuted)
 				return
-			}
 		}
 	}
 

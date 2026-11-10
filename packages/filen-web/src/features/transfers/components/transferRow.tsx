@@ -56,6 +56,8 @@ export interface TransferRowProps {
 	onRequestCancel: (transfer: Transfer) => void
 	// Opens the directory `item` landed in, with it selected. Navigation is the screen's.
 	onShowInDirectory: (item: DriveItem) => void
+	// The list's one tab stop: arrows move it between rows, and the row's own keys act on it (screens/transfers.tsx).
+	tabStop: boolean
 }
 
 const RING_RADIUS = 18
@@ -217,7 +219,7 @@ const ROW_ACTION_CLASS = "text-muted-foreground hover:text-foreground"
 // what happened, "Uploaded · 6 MiB", or in red why it failed. Active rows pause/resume and cancel (the
 // screen confirms the cancel, see onRequestCancel); finished rows can open where the item landed and
 // be removed from the list, which touches nothing but the list.
-export function TransferRow({ transfer, onRequestCancel, onShowInDirectory }: TransferRowProps) {
+export function TransferRow({ transfer, onRequestCancel, onShowInDirectory, tabStop }: TransferRowProps) {
 	const { t } = useTranslation("transfers")
 	const progress = transferProgress(transfer)
 	const active = isActiveTransfer(transfer.status)
@@ -306,7 +308,9 @@ export function TransferRow({ transfer, onRequestCancel, onShowInDirectory }: Tr
 	return (
 		<li
 			aria-label={transfer.name}
-			className={TRANSFER_ROW_CLASS}
+			data-transfer-id={transfer.id}
+			tabIndex={tabStop ? 0 : -1}
+			className={cn(TRANSFER_ROW_CLASS, "focus-ring-row outline-none")}
 		>
 			<TransferGlyph
 				transfer={transfer}

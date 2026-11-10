@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useEffect, useState, type RefObject } from "react"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { CornerUpLeftIcon, ClockIcon, AlertCircleIcon, BanIcon } from "lucide-react"
@@ -12,7 +12,7 @@ import { deleteMessage } from "@/features/chats/lib/messageActions"
 import { showsSenderName } from "@/features/chats/components/thread/thread.logic"
 import { MessageContextMenuContent } from "@/features/chats/components/thread/messageMenu"
 import { MessageActionBar } from "@/features/chats/components/thread/messageActionBar"
-import { useMessageActions } from "@/features/chats/components/thread/useMessageActions"
+import { useMessageActions, type MessageActionsHandle } from "@/features/chats/components/thread/useMessageActions"
 import { MessageContent } from "@/features/chats/components/thread/messageContent"
 import { MessageEmbeds } from "@/features/chats/components/thread/messageEmbeds"
 import { linksFromSegments, embedCandidatesForLinks } from "@/features/chats/lib/embeds.logic"
@@ -103,6 +103,10 @@ export interface MessageRowProps {
 	currentUserId: bigint | undefined
 	// From the thread's single enabled read (messageThread.tsx).
 	blocked: BlockedUsers
+	// The thread's roving message: its focus target is the thread's one Tab stop among the messages.
+	active: boolean
+	// Set on the active row only: where it publishes its actions for the thread's keyboard commands.
+	actionsRef: RefObject<MessageActionsHandle | null> | null
 }
 
 // One message as a bubble: own messages right-aligned in the brand colour, everyone else's left-aligned on
@@ -112,7 +116,7 @@ export interface MessageRowProps {
 // cache), so the special body states here are undecryptable (message === undefined → placeholder) and a
 // blocked sender's tap-to-reveal tombstone. The bubble column carries its own right-click menu; the delete
 // confirm dialog is owned HERE (not the menu content) so it survives past the menu's own close.
-export function MessageRow({ chat, message, runStart, runEnd, group, currentUserId, blocked }: MessageRowProps) {
+export function MessageRow({ chat, message, runStart, runEnd, group, currentUserId, blocked, active, actionsRef }: MessageRowProps) {
 	const { t } = useTranslation(["chats", "common"])
 	const undecryptable = message.message === undefined
 	const own = isOwnMessage(message, currentUserId)
@@ -166,6 +170,22 @@ export function MessageRow({ chat, message, runStart, runEnd, group, currentUser
 		onRequestDelete: requestDelete
 	})
 
+	// The active row hands the thread its action model for the message keys (keymap.ts chats.message.*), so the keys
+	// and the menus share one set of gates. A hidden blocked message offers none, as its menu does.
+	useEffect(() => {
+		if (actionsRef === null || showTombstone) {
+			return
+		}
+
+		actionsRef.current = actions
+
+		return () => {
+			if (actionsRef.current === actions) {
+				actionsRef.current = null
+			}
+		}
+	})
+
 	const rowClassName = cn("flex w-full items-end gap-2 px-4", runStart ? "pt-2.5" : "pt-0.5", own && "justify-end")
 
 	// Placed after every hook above (including the two useStates) — an earlier return would change hook
@@ -179,6 +199,8 @@ export function MessageRow({ chat, message, runStart, runEnd, group, currentUser
 				{avatarColumn ? <div className="w-7 shrink-0" /> : null}
 				<button
 					type="button"
+					data-message-focus=""
+					tabIndex={active ? 0 : -1}
 					onClick={() => {
 						useRevealedBlockedMessages.getState().reveal(message.uuid)
 					}}
@@ -212,7 +234,16 @@ export function MessageRow({ chat, message, runStart, runEnd, group, currentUser
 				<ContextMenu>
 					<ContextMenuTrigger
 						render={
-							<div className={cn("group relative flex max-w-[70%] min-w-0 flex-col", own ? "items-end" : "items-start")}>
+							// The message's keyboard focus target: ↑/↓ move between messages, and the message keys act on
+							// the focused one (messageThread.tsx). One roving Tab stop for the whole thread.
+							<div
+								data-message-focus=""
+								tabIndex={active ? 0 : -1}
+								className={cn(
+									"group relative flex max-w-[70%] min-w-0 flex-col rounded-[18px] focus-ring outline-none",
+									own ? "items-end" : "items-start"
+								)}
+							>
 								{showsSenderName(runStart, own, group) ? (
 									<span className="max-w-full truncate px-3 pb-0.5 text-xs text-muted-foreground">{name}</span>
 								) : null}

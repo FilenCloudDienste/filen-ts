@@ -36,7 +36,21 @@ export const CO_MOUNTABLE: readonly (readonly [ActionScope, ActionScope])[] = [
 	["editor", "drive"],
 	["editor", "photos"],
 	["editor", "chats"],
-	["editor", "notes"]
+	["editor", "notes"],
+	// Playlists, transfers, sync, mounts and settings are routes of the app shell, under the audio player bar.
+	["global", "playlists"],
+	["global", "transfers"],
+	["global", "sync"],
+	["global", "mounts"],
+	["global", "settings"],
+	["audio", "playlists"],
+	["audio", "transfers"],
+	["audio", "sync"],
+	["audio", "mounts"],
+	["audio", "settings"],
+	// A public link's page sits outside the app shell (no audio player) and shows a file's preview inline.
+	["global", "publicLinks"],
+	["editor", "publicLinks"]
 ]
 
 // Collisions that already exist in the shipped defaults and are resolved by an explicit runtime
@@ -159,7 +173,46 @@ export const RESOLVED_COLLISIONS: readonly (readonly [string, string])[] = [
 	["photos.densityIncrease", "presentation.show.togglePointer"],
 	["drive.openContainingDirectory", "presentation.text.lineBreak"],
 	["drive.refresh", "presentation.show.start"],
-	["drive.refresh", "presentation.text.alignRight"]
+	["drive.refresh", "presentation.text.alignRight"],
+	// The notes route never mounts the preview overlay, so the image editor's and the presentation's keys never run there.
+	["notes.duplicate", "presentation.duplicateSlide"],
+	["notes.archive", "preview.editImage"],
+	["notes.archive", "presentation.show.eraseAll"],
+	["notes.pin", "presentation.show.previous"],
+	// The notes search ignores editable content; a note's editor binds its own find inside CodeMirror alone.
+	["notes.search", "editor.find"],
+	// Escape cancels a reply or edit in the message field only; clearing the conversation selection ignores fields.
+	["chats.clearSelection", "chats.composer.cancel"],
+	// Delete acts in the conversation list for conversations and on a focused message for messages: both ref-scoped.
+	["chats.deleteSelected", "chats.message.delete"],
+	// The chat list, thread and message field stand down under the preview dialog its embeds open, and the running
+	// show and the presentation editor take these keys on their own stage, slide or text body first.
+	["chats.newChat", "presentation.show.next"],
+	["chats.composer.send", "presentation.show.next"],
+	["chats.composer.editLast", "presentation.show.previous"],
+	["chats.composer.cancel", "presentation.show.end"],
+	["chats.composer.newline", "presentation.text.lineBreak"],
+	["chats.composer.inlineCode", "presentation.text.alignCenter"],
+	["chats.composer.inlineCode", "presentation.show.eraser"],
+	["chats.deleteSelected", "presentation.deleteSlide"],
+	["chats.deleteSelected", "presentation.show.previous"],
+	["chats.message.delete", "presentation.deleteSlide"],
+	["chats.message.delete", "presentation.show.previous"],
+	["chats.message.edit", "presentation.show.eraseAll"],
+	["chats.jumpToLatest", "presentation.show.last"],
+	["chats.jumpToOldest", "presentation.show.first"],
+	["chats.nextUnread", "presentation.text.moveParagraphDown"],
+	["chats.previousUnread", "presentation.text.moveParagraphUp"],
+	// The editors' own find and inline code act in the code and Markdown editors, which never take focus in the chat
+	// page; the chat search ignores editable content and the composer matches Mod+E in its own field.
+	["chats.search", "editor.find"],
+	["chats.composer.inlineCode", "editor.code"],
+	// E edits the focused message in the thread; it opens an image in the editor only inside the preview dialog.
+	["chats.message.edit", "preview.editImage"],
+	// A shared link's inline preview is read-only and never mounts the preview overlay, where alone preview.save binds.
+	["links.download", "preview.save"],
+	// A slideshow run from a shared link's inline preview stops every key its stage takes, Escape included.
+	["links.back", "presentation.show.end"]
 ]
 
 export function scopesCanCollide(a: ActionScope, b: ActionScope): boolean {

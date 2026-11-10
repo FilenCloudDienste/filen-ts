@@ -1,4 +1,4 @@
-import { useState, type MouseEvent, type ReactNode } from "react"
+import { useRef, useState, type MouseEvent, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { useNavigate } from "@tanstack/react-router"
 import { SearchIcon, UsersIcon } from "lucide-react"
@@ -13,6 +13,7 @@ import { OUTSIDE_OVERLAYS, useAction } from "@/lib/keymap/useAction"
 import {
 	buildContactSections,
 	filterContactSections,
+	CONTACTS_SECTION_FILTERS,
 	CONTACTS_SECTION_HEADER_KEY,
 	type ContactSection,
 	type ContactsSectionFilter
@@ -38,7 +39,7 @@ import {
 	CONTACTS_REMOVE,
 	CONTACTS_UNBLOCK
 } from "@/features/contacts/lib/activity"
-import { resolveSelectedContacts, type ContactSectionKey } from "@/features/contacts/lib/selection"
+import { contactCommandTargets, resolveSelectedContacts, type ContactSectionKey } from "@/features/contacts/lib/selection"
 import { useContactsListSelection } from "@/features/contacts/hooks/useContactsListSelection"
 import { useInFlightKeys } from "@/features/contacts/hooks/useInFlightKeys"
 import {
@@ -90,6 +91,7 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 	// `t("common:offlineActionDisabled")` at each of the 6 call sites below.
 	const offlineTitle = !isOnline ? t("common:offlineActionDisabled") : undefined
 	const [search, setSearch] = useState("")
+	const searchRef = useRef<HTMLInputElement | null>(null)
 	const selection = useContactsListSelection({ resetKey: section })
 	const { activeDialog, setActiveDialog, dialogPending, closeActiveDialog, runDialogOutcome, runBulkDialogActivity } =
 		useDialogHost<ActiveContactDialog>()
@@ -147,6 +149,131 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 		},
 		OUTSIDE_OVERLAYS,
 		[selection]
+	)
+
+	// Defs in features/contacts/lib/keymap.ts. Every one stands down under an open dialog or menu (OUTSIDE_OVERLAYS),
+	// and the row commands are gated like the row controls they stand for: offline (and an accept already in flight)
+	// does nothing.
+	useAction(
+		"contacts.selectAll",
+		event => {
+			event.preventDefault()
+			selection.selectAll(sections.map(entry => ({ key: entry.key, uuids: entry.items.map(item => item.uuid) })))
+		},
+		OUTSIDE_OVERLAYS,
+		[sections, selection]
+	)
+
+	useAction(
+		"contacts.search",
+		event => {
+			event.preventDefault()
+			searchRef.current?.focus()
+		},
+		OUTSIDE_OVERLAYS
+	)
+
+	useAction(
+		"contacts.message",
+		event => {
+			const [contact, ...rest] = contactCommandTargets(
+				"contacts",
+				selected.total,
+				selection.focusedRow(),
+				contactsData,
+				selected.contacts
+			)
+
+			if (contact === undefined || rest.length > 0 || !isOnline) {
+				return
+			}
+
+			event.preventDefault()
+			void handleMessage(contact)
+		},
+		OUTSIDE_OVERLAYS,
+		[selected, contactsData, isOnline, selection]
+	)
+
+	// preventDefault: Backspace still has a "go back" default in some engines.
+	useAction(
+		"contacts.remove",
+		event => {
+			event.preventDefault()
+
+			const items = contactCommandTargets("contacts", selected.total, selection.focusedRow(), contactsData, selected.contacts)
+
+			if (items.length > 0 && isOnline) {
+				setActiveDialog({ kind: "remove", bulk: items.length > 1, items })
+			}
+		},
+		OUTSIDE_OVERLAYS,
+		[selected, contactsData, isOnline, selection]
+	)
+
+	useAction(
+		"contacts.block",
+		() => {
+			const items = contactCommandTargets("contacts", selected.total, selection.focusedRow(), contactsData, selected.contacts)
+
+			if (items.length > 0 && isOnline) {
+				setActiveDialog({ kind: "block", bulk: items.length > 1, items })
+			}
+		},
+		OUTSIDE_OVERLAYS,
+		[selected, contactsData, isOnline, selection]
+	)
+
+	useAction(
+		"contacts.accept",
+		() => {
+			const items = contactCommandTargets("requests", selected.total, selection.focusedRow(), incomingData, selected.requests)
+
+			if (items.length > 0 && isOnline) {
+				handleAccept(items)
+			}
+		},
+		OUTSIDE_OVERLAYS,
+		[selected, incomingData, isOnline, selection]
+	)
+
+	useAction(
+		"contacts.deny",
+		() => {
+			const items = contactCommandTargets("requests", selected.total, selection.focusedRow(), incomingData, selected.requests)
+
+			if (items.length > 0 && isOnline) {
+				setActiveDialog({ kind: "deny", bulk: items.length > 1, items })
+			}
+		},
+		OUTSIDE_OVERLAYS,
+		[selected, incomingData, isOnline, selection]
+	)
+
+	function showSection(step: 1 | -1): void {
+		const next = CONTACTS_SECTION_FILTERS[CONTACTS_SECTION_FILTERS.indexOf(section) + step]
+
+		if (next !== undefined) {
+			void navigate({ to: "/contacts", search: { section: next } })
+		}
+	}
+
+	useAction(
+		"contacts.nextSection",
+		() => {
+			showSection(1)
+		},
+		OUTSIDE_OVERLAYS,
+		[section]
+	)
+
+	useAction(
+		"contacts.previousSection",
+		() => {
+			showSection(-1)
+		},
+		OUTSIDE_OVERLAYS,
+		[section]
 	)
 
 	// No confirm (mirrors mobile): one request from its row or several from the bar, as an activity. Its
@@ -529,7 +656,7 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 					<h1 className="truncate text-sm font-medium">
 						{section === "all" ? t("common:moduleContacts") : t(CONTACTS_SECTION_HEADER_KEY[section])}
 					</h1>
-					<AddContactDialog />
+					<AddContactDialog shortcut />
 				</div>
 			</header>
 			<div className="shrink-0 px-4 pb-4">
@@ -539,6 +666,7 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 						className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
 					/>
 					<Input
+						ref={searchRef}
 						type="search"
 						aria-label={t("contactsSearchPlaceholder")}
 						placeholder={t("contactsSearchPlaceholder")}

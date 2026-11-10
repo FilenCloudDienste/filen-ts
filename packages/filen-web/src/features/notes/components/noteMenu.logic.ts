@@ -167,6 +167,24 @@ export function applyNoteOfflineGate(actions: NoteActionDescriptor[], isOnline: 
 	return actions.map(action => (OFFLINE_GATED_IDS.has(action.id) ? { ...action, enabled: false } : action))
 }
 
+// The menu entry a keyboard shortcut runs on `note`, or undefined when the menu would not offer it or would show it
+// disabled (offline, or the note's own edits still queued): one gate for the menu and its shortcuts.
+export function availableNoteAction(
+	note: Note,
+	id: NoteActionId,
+	currentUserId: bigint | undefined,
+	isOnline: boolean,
+	inflight: boolean
+): NoteActionDescriptor | undefined {
+	if (inflight) {
+		return undefined
+	}
+
+	const descriptor = applyNoteOfflineGate(noteMenuActions(note, currentUserId), isOnline).find(action => action.id === id)
+
+	return descriptor?.enabled === false ? undefined : descriptor
+}
+
 // Tag-row context-menu descriptors (the sidebar tags view's own small menu) — same pure-builder shape
 // as noteMenuActions so the entry list + favorite-label flip stay unit-testable without rendering.
 export type TagActionDescriptor =

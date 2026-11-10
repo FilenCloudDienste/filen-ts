@@ -51,6 +51,10 @@ import { SettingsSidebar } from "@/features/settings/components/settingsSidebar"
 import { useWithdrawalNotice } from "@/features/settings/hooks/useWithdrawalNotice"
 import { Route as BillingRoute } from "@/routes/_app/settings/billing"
 import { Route as PlansRoute } from "@/routes/_app/settings/plans"
+import { registerAllActions } from "@/lib/keymap/actions"
+
+// The sidebar binds the section keys.
+registerAllActions()
 
 function info(overrides: Partial<UserInfo> = {}): UserInfo {
 	return {
@@ -202,6 +206,7 @@ describe("Settings sidebar entries", () => {
 		desktopBridge.mockReturnValue({})
 		vi.resetModules()
 
+		;(await import("@/lib/keymap/actions")).registerAllActions()
 		const fresh = await import("@/features/settings/components/settingsSidebar")
 
 		render(createElement(fresh.SettingsSidebar))

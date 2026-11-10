@@ -59,6 +59,19 @@ function EventsPage() {
 
 					void navigate({ to: "/settings/events", search: {}, replace: true, resetScroll: false })
 				}}
+				onReplaceEvent={uuid => {
+					// The entry this page pushed now shows the new event: closing still goes back over it.
+					if (event !== undefined && pushedRef.current === event) {
+						pushedRef.current = uuid
+					}
+
+					void navigate({
+						to: "/settings/events",
+						search: uuid === null ? {} : { event: uuid },
+						replace: true,
+						resetScroll: false
+					})
+				}}
 			/>
 		</>
 	)

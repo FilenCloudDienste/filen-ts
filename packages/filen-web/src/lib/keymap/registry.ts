@@ -27,7 +27,22 @@ export { keymapOverridesSchema, keymapRecordSchema, type KeymapRecord } from "@/
 // switch) gives every consumer one source of truth for what a shortcut does (the shortcuts list on both the `?`
 // dialog and Settings → Keyboard), a user-remappable combo, and a live indicator (`<Kbd action>`) that always shows
 // the combo actually in effect. This file stays feature-agnostic: it holds no concrete action, only the mechanism.
-export type ActionScope = "global" | "drive" | "editor" | "notes" | "chats" | "audio" | "photos" | "contacts" | "videos"
+export type ActionScope =
+	| "global"
+	| "drive"
+	| "editor"
+	| "notes"
+	| "chats"
+	| "audio"
+	| "photos"
+	| "contacts"
+	| "videos"
+	| "playlists"
+	| "transfers"
+	| "sync"
+	| "mounts"
+	| "publicLinks"
+	| "settings"
 
 // A finer group inside a scope, for the shortcuts list only (conflicts read the scope): the editor's surfaces.
 export type ShortcutSection =

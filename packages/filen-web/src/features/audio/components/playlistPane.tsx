@@ -29,6 +29,14 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { DropdownMenu, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Empty, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription } from "@/components/ui/empty"
 import { observeElementOffsetFromAttach } from "@/lib/virtualScroll"
+import { ignoredUnderOverlays, OUTSIDE_OVERLAYS, useAction } from "@/lib/keymap/useAction"
+import { TRACK_ROW_ATTRIBUTE, trackMoveTarget, trackUuidOf } from "@/features/audio/lib/playlistKeys.logic"
+import type { Options } from "react-hotkeys-hook"
+
+// The track moves fire only with focus in a track row, and stand down under any dialog or menu.
+const TRACK_ROW_KEYS: Options = {
+	ignoreEventWhen: event => ignoredUnderOverlays(event) || trackUuidOf(event.target) === null
+}
 
 // Fixed row height (a 36px cover plus the cell padding), so the virtualizer never has to measure a row.
 const TRACK_ROW_HEIGHT = 48
@@ -39,6 +47,30 @@ const TRACK_COLUMN_COUNT = 6
 
 // A track moved by drag, in the words its activity toast uses (locales/en/audio.ts, "Activity toasts").
 const PLAYLIST_TRACK_MOVE = activityKeys("audio:playlistTrackMove")
+
+// Moves a track onto another's place, by drag or by key. The row only moves once the save lands, so the wait shows as
+// an activity; resolves once it has.
+function moveTrack(playlist: Playlist, movedUuid: string, targetUuid: string): Promise<unknown> {
+	const moved = playlist.files.find(entry => entry.uuid === movedUuid)
+
+	if (moved === undefined || movedUuid === targetUuid) {
+		return Promise.resolve()
+	}
+
+	return runBulkActivity({
+		items: [moved],
+		keys: PLAYLIST_TRACK_MOVE,
+		name: entry => trackDisplayTitle(getTrackTags(entry.uuid), entry.name),
+		run: (entries, onSettled) =>
+			runBulk(
+				entries,
+				async entry => {
+					await reorderPlaylistFileAction(playlist, entry.uuid, targetUuid)
+				},
+				onSettled
+			)
+	})
+}
 
 // The selected playlist, inline in the /playlists main pane: a hero (artwork, name as the page's h1,
 // meta, Play/Shuffle/Add tracks/⋯) over its track table. Play-from-row keeps mobile #49 semantics
@@ -56,6 +88,18 @@ export function PlaylistPane({ playlist }: { playlist: Playlist }) {
 	// One primitive for the whole table, so only a track change re-renders it (never playback progress).
 	const currentTrackUuid = useAudioStore(state => state.queue[state.currentIndex]?.uuid ?? null)
 	const heroCoverUrl = useKnownCoverUrl(playlist.files[0])
+
+	// Def in features/audio/lib/playlistKeymap.ts: the Add tracks button's, under its gate.
+	useAction(
+		"playlists.addTracks",
+		() => {
+			if (isOnline) {
+				setAddOpen(true)
+			}
+		},
+		OUTSIDE_OVERLAYS,
+		[isOnline]
+	)
 	const hasTracks = playlist.files.length > 0
 	const totalSize = playlist.files.reduce((sum, file) => sum + file.size, 0)
 
@@ -234,7 +278,69 @@ function TrackTableBody({
 }) {
 	const [removingUuid, setRemovingUuid] = useState<string | null>(null)
 	const [dragOverIndex, setDragOverIndex] = useState<number | null>(null)
-	const tbodyRef = useRef<HTMLTableSectionElement>(null)
+	const tbodyRef = useRef<HTMLTableSectionElement | null>(null)
+
+	// Defs in features/audio/lib/playlistKeymap.ts: the keyboard's drag, on the track whose row holds focus. Scoped to
+	// this table and stopped here, so nothing bound to the same keys further up runs as well.
+	function handleMoveKey(event: KeyboardEvent, step: -1 | 1): void {
+		event.preventDefault()
+		event.stopPropagation()
+
+		const uuid = trackUuidOf(event.target)
+		const target = uuid === null ? null : trackMoveTarget(playlist, uuid, step)
+
+		if (disabled || uuid === null || target === null) {
+			return
+		}
+
+		void moveTrack(playlist, uuid, target).then(() => {
+			// A reorder can take focus with the row React moved; give it back once the move has rendered.
+			requestAnimationFrame(() => {
+				if (document.activeElement === null || document.activeElement === document.body) {
+					tbodyRef.current?.querySelector<HTMLElement>(`tr[${TRACK_ROW_ATTRIBUTE}="${CSS.escape(uuid)}"] button`)?.focus()
+				}
+			})
+		})
+	}
+
+	const moveUpRef = useAction(
+		"playlists.moveTrackUp",
+		event => {
+			handleMoveKey(event, -1)
+		},
+		TRACK_ROW_KEYS,
+		[playlist, disabled]
+	)
+	const moveDownRef = useAction(
+		"playlists.moveTrackDown",
+		event => {
+			handleMoveKey(event, 1)
+		},
+		TRACK_ROW_KEYS,
+		[playlist, disabled]
+	)
+	// One ref for the body: the layout measure below reads it, and both moves listen on it.
+	const setTbody = useCallback(
+		(element: HTMLTableSectionElement | null) => {
+			tbodyRef.current = element
+
+			const releaseUp = moveUpRef(element)
+			const releaseDown = moveDownRef(element)
+
+			return () => {
+				tbodyRef.current = null
+
+				if (typeof releaseUp === "function") {
+					releaseUp()
+				}
+
+				if (typeof releaseDown === "function") {
+					releaseDown()
+				}
+			}
+		},
+		[moveUpRef, moveDownRef]
+	)
 	// Where the first row sits within the scrolled content (hero plus table head), so the virtualizer
 	// measures rows from there. Re-measured when the hero reflows (a wrapping name, a narrow window).
 	const [rowsOffset, setRowsOffset] = useState(0)
@@ -287,7 +393,7 @@ function TrackTableBody({
 	}, [scrollElement, headerElement])
 
 	return (
-		<tbody ref={tbodyRef}>
+		<tbody ref={setTbody}>
 			{paddingTop > 0 ? (
 				<tr aria-hidden="true">
 					<td
@@ -373,27 +479,8 @@ function TrackRow({ playlist, file, index, playing, dragOver, removing, disabled
 		setRemovingUuid(null)
 	}
 
-	// The row only moves once the save lands, so the wait shows as an activity.
 	function handleReorder(movedUuid: string): void {
-		const moved = playlist.files.find(entry => entry.uuid === movedUuid)
-
-		if (moved === undefined || movedUuid === file.uuid) {
-			return
-		}
-
-		void runBulkActivity({
-			items: [moved],
-			keys: PLAYLIST_TRACK_MOVE,
-			name: entry => trackDisplayTitle(getTrackTags(entry.uuid), entry.name),
-			run: (entries, onSettled) =>
-				runBulk(
-					entries,
-					async entry => {
-						await reorderPlaylistFileAction(playlist, entry.uuid, file.uuid)
-					},
-					onSettled
-				)
-		})
+		void moveTrack(playlist, movedUuid, file.uuid)
 	}
 
 	function handleDragLeave(): void {
@@ -434,6 +521,7 @@ function TrackRow({ playlist, file, index, playing, dragOver, removing, disabled
 	return (
 		<tr
 			aria-rowindex={index + 2}
+			data-track-uuid={file.uuid}
 			draggable={!disabled}
 			onDragStart={handleDragStart}
 			onDragEnd={handleDragLeave}

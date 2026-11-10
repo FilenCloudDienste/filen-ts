@@ -62,6 +62,10 @@ import { linkForBrowsing } from "@/features/publicLinks/lib/password.logic"
 import { DirectoryLinkView } from "@/features/publicLinks/components/directoryLinkView"
 import { FileLinkView } from "@/features/publicLinks/components/fileLinkView"
 import { mockLinkedFile } from "@/tests/fixtures/sdk"
+import { registerAllActions } from "@/lib/keymap/actions"
+
+// The link's views bind the shared link's keys.
+registerAllActions()
 
 type Uuid = `${string}-${string}-${string}-${string}-${string}`
 

@@ -235,5 +235,23 @@ export const contacts = {
 	/** Activity toast — unblocking contacts partly failed; {{count}} succeeded, {{failed}} failed */
 	contactsUnblockPartial_one: "Unblocked {{count}} contact, {{failed}} failed",
 	/** Activity toast — unblocking contacts partly failed; {{count}} succeeded, {{failed}} failed */
-	contactsUnblockPartial_other: "Unblocked {{count}} contacts, {{failed}} failed"
+	contactsUnblockPartial_other: "Unblocked {{count}} contacts, {{failed}} failed",
+	/** Keymap — selects every row the page shows (search-filtered) */
+	contactsCommandSelectAll: "Select all",
+	/** Keymap — opens a 1:1 conversation with the focused (or the one selected) contact */
+	contactsCommandMessage: "Message contact",
+	/** Keymap — removes the selected (or focused) contacts, after a confirmation */
+	contactsCommandRemove: "Remove contacts",
+	/** Keymap — blocks the selected (or focused) contacts, after a confirmation */
+	contactsCommandBlock: "Block contacts",
+	/** Keymap — accepts the selected (or focused) incoming contact requests */
+	contactsCommandAccept: "Accept contact requests",
+	/** Keymap — denies the selected (or focused) incoming contact requests, after a confirmation */
+	contactsCommandDeny: "Deny contact requests",
+	/** Keymap — shows the next section of the contacts page (All, Requests, Pending, Contacts, Blocked) */
+	contactsCommandNextSection: "Next section",
+	/** Keymap — shows the previous section of the contacts page */
+	contactsCommandPreviousSection: "Previous section",
+	/** Keyboard shortcuts — where a shortcut works: on the selected rows, or the focused row when none is selected */
+	contactsKeyHintFocused: "On the selected or focused rows"
 } as const

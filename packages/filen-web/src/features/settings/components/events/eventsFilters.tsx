@@ -1,4 +1,6 @@
+import { useRef } from "react"
 import { useTranslation } from "react-i18next"
+import { OUTSIDE_OVERLAYS, useAction } from "@/lib/keymap/useAction"
 import { EVENT_CATEGORIES } from "@/features/settings/lib/eventModel"
 import type { EventsCategoryFilter, EventsFilter } from "@/features/settings/components/events/eventsList.logic"
 import type { EventsKey } from "@/lib/i18n"
@@ -19,9 +21,29 @@ const CATEGORY_FILTERS = ["all", ...EVENT_CATEGORIES] as const satisfies readonl
 // Category chips and the search box, both over the loaded events only.
 export function EventsFilters({ filter, onChange }: { filter: EventsFilter; onChange: (filter: EventsFilter) => void }) {
 	const { t } = useTranslation("events")
+	const rootRef = useRef<HTMLDivElement>(null)
+
+	// Def in features/settings/lib/keymap.ts: Mod+F searches the events, in place of the browser's find; the page
+	// under a dialog or menu stands down.
+	useAction(
+		"settings.search",
+		event => {
+			const input = rootRef.current?.querySelector("input")
+
+			if (input) {
+				event.preventDefault()
+				input.focus()
+				input.select()
+			}
+		},
+		OUTSIDE_OVERLAYS
+	)
 
 	return (
-		<div className="flex shrink-0 flex-col gap-2">
+		<div
+			ref={rootRef}
+			className="flex shrink-0 flex-col gap-2"
+		>
 			<ListFilterInput
 				value={filter.query}
 				onChange={query => {

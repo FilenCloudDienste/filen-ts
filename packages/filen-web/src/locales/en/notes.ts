@@ -353,7 +353,39 @@ export const notes = {
 	/** Keymap — description for the Cmd/Ctrl+A action that selects every currently-visible note */
 	notesCommandSelectAll: "Select all notes",
 	/** Keymap — description for the Delete/Backspace action that bulk-trashes the selected notes */
-	notesCommandTrash: "Trash selected notes",
+	notesCommandTrash: "Move notes to trash",
+	/** Keymap — description for the action that renames the note focused in the list, or the note on screen */
+	notesCommandRename: "Rename note",
+	/** Keymap — description for the action that duplicates the note focused in the list, or the note on screen */
+	notesCommandDuplicate: "Duplicate note",
+	/** Keymap — description for the action that permanently deletes the selected notes, or the focused or open note, when in the trash */
+	notesCommandDeletePermanently: "Delete notes permanently",
+	/** Keymap — description for the action that restores a note from the trash or the archive */
+	notesCommandRestore: "Restore note",
+	/** Keymap — description for the action that archives the note focused in the list */
+	notesCommandArchive: "Archive note",
+	/** Keymap — description for the action that pins or unpins the note focused in the list */
+	notesCommandPin: "Pin or unpin note",
+	/** Keymap — description for the action that adds the focused note to favorites or removes it */
+	notesCommandFavorite: "Favorite or unfavorite note",
+	/** Keymap — description for the action that moves focus to the notes sidebar's search field */
+	notesCommandSearch: "Search notes",
+	/** Keymap — description for the action that opens the file picker to import a note */
+	notesCommandImport: "Import note",
+	/** Keymap — description for the action that opens the new-tag dialog */
+	notesCommandNewTag: "New tag",
+	/** Keymap — description for the action that exports the focused or open note to a file */
+	notesCommandExport: "Export note",
+	/** Keymap — description for the action that opens the focused or open note's version history */
+	notesCommandHistory: "Show note history",
+	/** Keymap — description for the action that opens the focused or open note's participants dialog */
+	notesCommandParticipants: "Manage note participants",
+	/** Keymap — description for the action that exports every note as a zip */
+	notesCommandExportAll: "Export all notes",
+	/** Keymap — description for the action that switches the notes sidebar between its notes and tags views */
+	notesCommandToggleView: "Switch between notes and tags",
+	/** Keymap — where a notes shortcut works: only while a note's row in the sidebar list has keyboard focus */
+	notesHintFocusedRow: "With a note focused in the list",
 	/** Bulk trash confirm dialog — title; the confirm button reuses noteActionTrash */
 	notesTrashSelectedConfirmTitle: "Move to trash?",
 	/** Bulk trash confirm dialog — body; singular */

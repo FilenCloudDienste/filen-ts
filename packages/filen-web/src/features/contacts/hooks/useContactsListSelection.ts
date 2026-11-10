@@ -3,7 +3,9 @@ import { clampListboxIndex, isToggleModifier, listboxKeyTarget, resolveCursorInd
 import { hasCommandModifier, isActivationKey } from "@/lib/rowKeys"
 import {
 	EMPTY_CONTACT_SELECTION_STATE,
+	isContactSectionKey,
 	nextContactSelection,
+	selectAllContactSections,
 	removeFromContactSelection,
 	type ContactSectionKey,
 	type ContactSelection,
@@ -38,6 +40,10 @@ export interface ContactsListSelection {
 	handleKeyDown: (section: ContactSectionKey, uuids: readonly string[], event: KeyboardEvent<HTMLDivElement>) => void
 	clearSelection: () => void
 	pruneSelection: (section: ContactSectionKey, uuids: string[]) => void
+	// Selects every row given, section by section (the keyboard's select all).
+	selectAll: (sections: readonly { key: ContactSectionKey; uuids: readonly string[] }[]) => void
+	// The row holding keyboard focus (the row or one of its controls), or null.
+	focusedRow: () => { section: ContactSectionKey; uuid: string } | null
 }
 
 const EMPTY_CURSORS: Record<ContactSectionKey, string | null> = {
@@ -49,6 +55,13 @@ const EMPTY_CURSORS: Record<ContactSectionKey, string | null> = {
 
 function rowKey(section: ContactSectionKey, uuid: string): string {
 	return `${section}:${uuid}`
+}
+
+function parseRowKey(key: string): { section: ContactSectionKey; uuid: string } | null {
+	const separator = key.indexOf(":")
+	const section = key.slice(0, separator)
+
+	return isContactSectionKey(section) ? { section, uuid: key.slice(separator + 1) } : null
 }
 
 // The contacts-page counterpart of useNotesListSelection, extended with drive's roving cursor: each
@@ -186,6 +199,27 @@ export function useContactsListSelection({ resetKey }: UseContactsListSelectionP
 		setState(prev => ({ ...prev, selection: removeFromContactSelection(prev.selection, section, uuids) }))
 	}
 
+	function selectAll(sections: readonly { key: ContactSectionKey; uuids: readonly string[] }[]): void {
+		setState(prev => ({ selection: selectAllContactSections(sections), anchor: prev.anchor }))
+	}
+
+	// Read at the key press from the rows already registered: no focus tracking state, no re-render.
+	function focusedRow(): { section: ContactSectionKey; uuid: string } | null {
+		const focused = document.activeElement
+
+		if (focused === null) {
+			return null
+		}
+
+		for (const [key, element] of rowRefs.current) {
+			if (element.contains(focused)) {
+				return parseRowKey(key)
+			}
+		}
+
+		return null
+	}
+
 	return {
 		selection: state.selection,
 		activeIndexFor,
@@ -194,6 +228,8 @@ export function useContactsListSelection({ resetKey }: UseContactsListSelectionP
 		toggleAt,
 		handleKeyDown,
 		clearSelection,
-		pruneSelection
+		pruneSelection,
+		selectAll,
+		focusedRow
 	}
 }

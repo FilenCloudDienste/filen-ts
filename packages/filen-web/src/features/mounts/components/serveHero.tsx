@@ -18,6 +18,7 @@ import { RoleHero } from "@/features/mounts/components/roleHero"
 import { RoleStatusDot } from "@/features/mounts/components/roleStatus"
 import { CredentialRows } from "@/features/mounts/components/serveCredentials"
 import type { ServeCredentialsState } from "@/features/mounts/hooks/useServeCredentials"
+import { OUTSIDE_OVERLAYS, useAction } from "@/lib/keymap/useAction"
 
 // A server's on/off switch, wherever it shows: always useServeControls' path.
 export function ServeSwitch({ controls }: { controls: ServeControls }) {
@@ -38,8 +39,22 @@ export function ServeSwitch({ controls }: { controls: ServeControls }) {
 // credentials with show and copy (none for nfs).
 export function ServeHero({ controls, credentials }: { controls: ServeControls; credentials: ServeCredentialsState | null }) {
 	const { t } = useTranslation("mounts")
-	const { serve } = controls
+	const { serve, busy, available, setEnabled } = controls
 	const url = serve.url
+
+	// Def in features/mounts/lib/keymap.ts: the switch, on the server's own page, under the switch's own gate.
+	useAction(
+		"mounts.toggleRole",
+		event => {
+			event.preventDefault()
+
+			if (!busy && (available || serve.enabled)) {
+				setEnabled(!serve.enabled)
+			}
+		},
+		OUTSIDE_OVERLAYS,
+		[busy, available, serve.enabled, setEnabled]
+	)
 
 	return (
 		<RoleHero

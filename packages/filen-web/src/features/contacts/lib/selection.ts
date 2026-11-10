@@ -77,6 +77,46 @@ export function resolveSelectedContacts(records: ContactRecords, selection: Cont
 	return { requests, pending, contacts, blocked, total: requests.length + pending.length + contacts.length + blocked.length }
 }
 
+const SECTION_KEYS: ReadonlySet<string> = new Set<ContactSectionKey>(["requests", "pending", "contacts", "blocked"])
+
+export function isContactSectionKey(value: string): value is ContactSectionKey {
+	return SECTION_KEYS.has(value)
+}
+
+// Every given row selected, section by section; sections not given end up empty.
+export function selectAllContactSections(sections: readonly { key: ContactSectionKey; uuids: readonly string[] }[]): ContactSelection {
+	const selection: Record<ContactSectionKey, ReadonlySet<string>> = { ...EMPTY_CONTACT_SELECTION }
+
+	for (const section of sections) {
+		selection[section.key] = new Set(section.uuids)
+	}
+
+	return selection
+}
+
+// What a row command acts on in one section: that section's selected rows, else the focused row when it is in that
+// section and nothing at all is selected (a selection elsewhere is not overridden by focus).
+export function contactCommandTargets<T extends { uuid: string }>(
+	section: ContactSectionKey,
+	// How many rows are selected across every section.
+	selectedTotal: number,
+	focused: { section: ContactSectionKey; uuid: string } | null,
+	items: readonly T[],
+	sectionSelected: readonly T[]
+): T[] {
+	if (sectionSelected.length > 0) {
+		return [...sectionSelected]
+	}
+
+	if (selectedTotal > 0 || focused?.section !== section) {
+		return []
+	}
+
+	const item = items.find(entry => entry.uuid === focused.uuid)
+
+	return item === undefined ? [] : [item]
+}
+
 function onlySection(section: ContactSectionKey, uuids: readonly string[]): ContactSelection {
 	return { ...EMPTY_CONTACT_SELECTION, [section]: new Set(uuids) }
 }

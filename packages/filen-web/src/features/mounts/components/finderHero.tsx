@@ -24,6 +24,7 @@ import {
 import { FINDER_ROLE } from "@/features/mounts/lib/mountsRoles"
 import { RoleHero } from "@/features/mounts/components/roleHero"
 import { RoleStatusDot } from "@/features/mounts/components/roleStatus"
+import { OUTSIDE_OVERLAYS, useAction } from "@/lib/keymap/useAction"
 
 // Filen in Finder at a glance: its state and switch, and Open in Finder while it shows there. In the overview its title
 // links to its page; on the page the title is its state, over what it does.
@@ -32,6 +33,20 @@ export function FinderHero({ overview }: { overview: boolean }) {
 	const { status, enabled, locked } = useFileProviderStatus()
 	const tone = FILE_PROVIDER_STATUS_TONE[status]
 	const statusLabel = t(FILE_PROVIDER_STATUS_KEY[status])
+
+	// Def in features/mounts/lib/keymap.ts: the switch, on its own page, under the switch's own gate.
+	useAction(
+		"mounts.toggleRole",
+		event => {
+			event.preventDefault()
+
+			if (!locked) {
+				void setFileProviderEnabled(!enabled)
+			}
+		},
+		{ ...OUTSIDE_OVERLAYS, enabled: !overview },
+		[locked, enabled]
+	)
 
 	return (
 		<RoleHero

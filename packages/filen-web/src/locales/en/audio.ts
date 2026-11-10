@@ -173,5 +173,29 @@ export const audio = {
 	/** Activity toast — moving a track within a playlist by drag partly failed; {{count}} succeeded, {{failed}} failed */
 	playlistTrackMovePartial_one: "Moved {{count}} track, {{failed}} failed",
 	/** Activity toast — moving a track within a playlist by drag partly failed; {{count}} succeeded, {{failed}} failed */
-	playlistTrackMovePartial_other: "Moved {{count}} tracks, {{failed}} failed"
+	playlistTrackMovePartial_other: "Moved {{count}} tracks, {{failed}} failed",
+
+	// Keyboard shortcuts (Settings → Keyboard, Playlists group)
+	/** Keyboard shortcut action — renames the playlist the focused sidebar row names, else the one on screen */
+	playlistsCommandRename: "Rename playlist",
+	/** Keyboard shortcut action — deletes the playlist the focused sidebar row names, else the one on screen (asks first) */
+	playlistsCommandDelete: "Delete playlist",
+	/** Keyboard shortcut action — plays the playlist the focused sidebar row names, else the one on screen, from its first track */
+	playlistsCommandPlay: "Play playlist",
+	/** Keyboard shortcut action — plays the playlist the focused sidebar row names, else the one on screen, in random order */
+	playlistsCommandShuffle: "Shuffle play playlist",
+	/** Keyboard shortcut action — moves the focused track one place up in the playlist */
+	playlistsCommandMoveTrackUp: "Move track up",
+	/** Keyboard shortcut action — moves the focused track one place down in the playlist */
+	playlistsCommandMoveTrackDown: "Move track down",
+	/** Keyboard shortcut action — in the Add tracks dialog, selects every audio file listed in the current directory */
+	playlistsCommandPickerSelectAll: "Select all listed tracks",
+	/** Keyboard shortcut action — in the Add tracks dialog, moves the cursor into the filter box */
+	playlistsCommandPickerFilter: "Filter tracks",
+	/** Keyboard shortcut action — in the Add tracks dialog, adds the selected tracks to the playlist */
+	playlistsCommandPickerConfirm: "Add selected tracks",
+	/** Keyboard shortcuts — where the track-move shortcuts work */
+	playlistsHintTrackRow: "On a focused track",
+	/** Keyboard shortcuts — where the Add tracks dialog's shortcuts work */
+	playlistsHintPicker: "In the Add tracks dialog"
 } as const

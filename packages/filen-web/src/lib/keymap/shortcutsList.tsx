@@ -30,6 +30,8 @@ import {
 import { ShortcutRow } from "@/lib/keymap/shortcutRow"
 import { ShortcutsRows, type VirtualRow } from "@/lib/keymap/shortcutsRows"
 import { SpecialKeyDialog } from "@/lib/keymap/specialKeyDialog"
+import { useAction } from "@/lib/keymap/useAction"
+import { ignoredOutsideLayer, LAYER_FIELD_TAGS } from "@/features/settings/lib/layerKeys"
 
 const IS_MAC = isMacPlatform()
 
@@ -71,7 +73,20 @@ export function ShortcutsList({ variant }: { variant: "page" | "dialog" }) {
 	const [folded, setFolded] = useState<ReadonlySet<string>>(() => new Set())
 	const [specialFor, setSpecialFor] = useState<string | null>(null)
 	const searchRef = useRef<HTMLInputElement>(null)
+	const rootRef = useRef<HTMLDivElement>(null)
 	const compact = variant === "dialog"
+
+	// Def in features/settings/lib/keymap.ts: the list's own search, in whichever layer it is shown (the page, or the
+	// `?` dialog over it), and from the search box itself, where Mod+F would otherwise open the browser's find.
+	useAction(
+		"settings.search",
+		event => {
+			event.preventDefault()
+			searchRef.current?.focus()
+			searchRef.current?.select()
+		},
+		{ ignoreEventWhen: event => ignoredOutsideLayer(event, rootRef.current), enableOnFormTags: LAYER_FIELD_TAGS }
+	)
 
 	// The session is the only source of truth for what records here: one claimed by another list reads as "not
 	// recording here".
@@ -302,6 +317,7 @@ export function ShortcutsList({ variant }: { variant: "page" | "dialog" }) {
 
 	return (
 		<div
+			ref={rootRef}
 			className="flex min-h-0 flex-1 flex-col gap-3"
 			onKeyDownCapture={handleKeyDownCapture}
 		>

@@ -1,5 +1,6 @@
 import type { ChatMessage, ChatMessagePartial, ChatParticipant } from "@filen/sdk-rs"
 import { contactDisplayName } from "@filen/shared"
+import { matchesCombo, type ChordEvent } from "@filen/shared/keymap"
 import { matchesContactSearch } from "@/features/contacts/components/contactsList.logic"
 import { isOwnMessage } from "@/features/chats/lib/sender"
 
@@ -68,6 +69,46 @@ export function enterIntent(event: {
 	}
 
 	return event.shiftKey ? "newline" : "send"
+}
+
+// The message field's own commands (keymap.ts chats.composer.*), as their live combos.
+export interface ComposerKeys {
+	send: string
+	newline: string
+	editLast: string
+	cancel: string
+	inlineCode: string
+	attach: string
+	attachFromDrive: string
+}
+
+export type ComposerKeyIntent = keyof ComposerKeys
+
+const COMPOSER_KEY_ORDER: readonly ComposerKeyIntent[] = [
+	"send",
+	"newline",
+	"cancel",
+	"editLast",
+	"inlineCode",
+	"attach",
+	"attachFromDrive"
+]
+
+// The command a keydown in the message field runs, or null. Chords match exactly (the shared matcher), so
+// Ctrl/Cmd/Alt+Enter is no send unless bound to one; the first binding listed wins when two share a key.
+export function composerKeyIntent(event: ChordEvent, keys: ComposerKeys, mac: boolean): ComposerKeyIntent | null {
+	for (const intent of COMPOSER_KEY_ORDER) {
+		if (matchesCombo(event, keys[intent], mac)) {
+			return intent
+		}
+	}
+
+	return null
+}
+
+// Shift+Enter alone: the field inserts the line break itself, with the browser's own undo.
+export function isNativeLineBreak(event: { key: string; shiftKey: boolean; ctrlKey: boolean; metaKey: boolean; altKey: boolean }): boolean {
+	return event.key === "Enter" && event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey
 }
 
 // ArrowUp in an EMPTY composer edits the last own message (old-web affordance; mobile has no equivalent

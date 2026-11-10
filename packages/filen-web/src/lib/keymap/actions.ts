@@ -21,6 +21,12 @@ import { PREVIEW_ACTIONS } from "@/features/preview/lib/keymap"
 import { AUDIO_ACTIONS } from "@/features/audio/lib/keymap"
 import { VIDEOS_ACTIONS } from "@/features/videos/lib/keymap"
 import { PRESENTATION_ACTIONS } from "@/features/presentation/lib/keymap"
+import { PLAYLISTS_ACTIONS } from "@/features/audio/lib/playlistKeymap"
+import { TRANSFERS_ACTIONS } from "@/features/transfers/lib/keymap"
+import { SYNC_ACTIONS } from "@/features/sync/lib/keymap"
+import { MOUNTS_ACTIONS } from "@/features/mounts/lib/keymap"
+import { PUBLIC_LINKS_ACTIONS } from "@/features/publicLinks/lib/keymap"
+import { SETTINGS_ACTIONS } from "@/features/settings/lib/keymap"
 
 // The app's complete action set, assembled eagerly from each feature's data-only keymap module, so the
 // shortcuts catalog never depends on which feature components have mounted. The defs are plain objects
@@ -35,7 +41,13 @@ export const ALL_ACTIONS: readonly ActionDef[] = [
 	...VIDEOS_ACTIONS,
 	...PREVIEW_ACTIONS,
 	...PRESENTATION_ACTIONS,
-	...AUDIO_ACTIONS
+	...AUDIO_ACTIONS,
+	...PLAYLISTS_ACTIONS,
+	...TRANSFERS_ACTIONS,
+	...SYNC_ACTIONS,
+	...MOUNTS_ACTIONS,
+	...PUBLIC_LINKS_ACTIONS,
+	...SETTINGS_ACTIONS
 ]
 
 let registered = false

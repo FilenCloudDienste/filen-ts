@@ -14,7 +14,9 @@ import { stopRowPropagation } from "@/lib/domEvents"
 // the bubble column's group-hover / focus-within (that column owns the `group` class); at rest it is
 // opacity-0 and pointer-events-none so it never intercepts clicks on the rows around it. No new action
 // wiring — this is a presentation of the existing model, not a new one. NO reactions feature (the app has
-// no reaction backend on any platform); the first slot surfaces Reply as the primary action instead.
+// no reaction backend on any platform); the first slot surfaces Reply as the primary action instead. A pointer
+// affordance: its buttons take no Tab stop, as the thread's one is the focused message, whose keys and Shift+F10 menu
+// reach the same actions (messageThread.tsx).
 export function MessageActionBar({ descriptors, runAction }: MessageActionsHandle) {
 	const { t } = useTranslation(["chats", "common"])
 
@@ -35,6 +37,7 @@ export function MessageActionBar({ descriptors, runAction }: MessageActionsHandl
 					key={descriptor.id}
 					variant="ghost"
 					size="icon-xs"
+					tabIndex={-1}
 					disabled={descriptor.enabled === false}
 					aria-label={t(descriptor.labelKey)}
 					title={descriptor.enabled === false ? t("common:offlineActionDisabled") : t(descriptor.labelKey)}
@@ -52,6 +55,7 @@ export function MessageActionBar({ descriptors, runAction }: MessageActionsHandl
 						<Button
 							variant="ghost"
 							size="icon-xs"
+							tabIndex={-1}
 							aria-label={t("chatMessageMoreActions")}
 							onClick={stopRowPropagation}
 						>

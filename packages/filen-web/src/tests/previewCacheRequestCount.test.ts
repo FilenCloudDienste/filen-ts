@@ -54,6 +54,10 @@ const { ImageViewer } = await import("@/features/preview/components/imageViewer"
 const { FileHero } = await import("@/features/publicLinks/components/fileHero")
 const { startAnonFileDownload } = await import("@/features/publicLinks/lib/download")
 const { narrowToAnyFile } = await import("@/features/drive/lib/download")
+const { registerAllActions } = await import("@/lib/keymap/actions")
+
+// The shared link's file hero binds its download shortcut through the registry.
+registerAllActions()
 
 function makeItem(uuid: LinkedFile["uuid"], name: string, size: number): DriveItem {
 	return linkedFileItem(name, { uuid, size: BigInt(size) })

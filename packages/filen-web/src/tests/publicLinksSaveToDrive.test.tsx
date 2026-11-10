@@ -31,6 +31,10 @@ import { driveListingQueryKey } from "@/features/drive/queries/drive"
 import { narrowItem } from "@/features/drive/lib/item"
 import { useLinkSaveable } from "@/features/publicLinks/queries/publicLink"
 import { SaveToDriveButton } from "@/features/publicLinks/components/saveToDrive"
+import { registerAllActions } from "@/lib/keymap/actions"
+
+// The button binds Save to Cloud Drive's key.
+registerAllActions()
 
 const FILE_UUID = "f1000000-0000-0000-0000-000000000000" as UuidStr
 

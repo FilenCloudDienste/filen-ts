@@ -1,4 +1,5 @@
-import { useRef, useState, type ReactNode } from "react"
+import { useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react"
+import { isImeKeydown } from "@filen/shared/keymap"
 import { selectedNoteUuidFromPath } from "@/features/notes/lib/route"
 import { useTranslation } from "react-i18next"
 import { useNavigate, useRouterState } from "@tanstack/react-router"
@@ -40,6 +41,7 @@ import {
 	sidebarRowKey,
 	selectableNotesFromRows,
 	selectableRowIndexByKey,
+	notesRowKeyTarget,
 	type NotesSidebarRow,
 	type NotesGroupIcon
 } from "@/features/notes/components/notesSidebar.logic"
@@ -56,6 +58,12 @@ import { useNoteSearchBodies } from "@/features/notes/hooks/useNoteSearchBodies"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { useNowMinute } from "@/lib/useNowMinute"
 import { OUTSIDE_OVERLAYS, useAction } from "@/lib/keymap/useAction"
+import { ON_FOCUSED_ROW, rowNoteUuid } from "@/features/notes/lib/rowKeys"
+import { hasCommandModifier } from "@/lib/rowKeys"
+import { isNoteInflight } from "@/features/notes/store/useNotesInflight"
+import { runNoteDirectAction } from "@/features/notes/lib/noteDirectAction"
+import { availableNoteAction, type NoteActionId } from "@/features/notes/components/noteMenu.logic"
+import { canBulkDeleteNotes } from "@/features/notes/components/notesBulkActionBar.logic"
 import type { ListPointerSelection } from "@/lib/useListPointerSelection"
 import { useIsSidebarPanelVisible } from "@/features/shell/lib/sidebarPanelVisibility"
 import { ResizableSidebarPanel } from "@/features/shell/components/sidebarPanel"
@@ -150,6 +158,7 @@ export function TagGroupRow({
 		<button
 			type="button"
 			aria-expanded={row.expanded}
+			data-notes-row=""
 			aria-label={t(row.expanded ? "notesTagCollapse" : "notesTagExpand", { name })}
 			onClick={onToggle}
 			className="group flex w-full items-center gap-1.5 rounded-xl px-2.5 py-2 text-left focus-ring transition-colors outline-none app-region-no-drag hover:bg-sidebar-accent/60"
@@ -292,6 +301,8 @@ export function NotesSidebar() {
 	const [expandedTags, setExpandedTags] = useState<ReadonlySet<string>>(() => new Set())
 	const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(null)
 	const importInputRef = useRef<HTMLInputElement | null>(null)
+	// The header holding the filter field notes.search focuses (ListFilterInput takes no ref).
+	const sidebarHeaderRef = useRef<HTMLDivElement | null>(null)
 
 	// This filter is applied BEFORE either view builds its rows, so a blocked note's uuid is simply absent
 	// from every downstream derivation (rows, selectableNotes, the live-selection re-derivation below) —
@@ -427,11 +438,11 @@ export function NotesSidebar() {
 	// Targets `selectableNotes` (already search-filtered) minus undecryptable ones — mirrors
 	// drive.selectAll exactly.
 	//
-	// The three selection actions below are additionally OFF while the panel is out of sight (drawer
-	// closed below the layout breakpoint): every trace of a selection — rows, count, bulk bar — lives
-	// inside this panel, so firing them there would swallow the browser's own select-all and leave an
-	// invisible selection a later Delete could act on. notes.newNote stays live: it navigates, so its
-	// result is visible wherever it is triggered from.
+	// The selection actions below are additionally OFF while the panel is out of sight (drawer closed
+	// below the layout breakpoint), and the trash keys ignore the selection then: every trace of a
+	// selection — rows, count, bulk bar — lives inside this panel, so firing them there would swallow the
+	// browser's own select-all and leave an invisible selection a later Delete could act on.
+	// notes.newNote stays live: it navigates, so its result is visible wherever it is triggered from.
 	useAction(
 		"notes.selectAll",
 		event => {
@@ -452,27 +463,193 @@ export function NotesSidebar() {
 		{ ...OUTSIDE_OVERLAYS, enabled: panelVisible }
 	)
 
-	// Def in features/notes/lib/keymap.ts. preventDefault: Backspace still has a "go back" default in some
-	// engines. One selected note or more, as drive's own trash key, and only when Trash is offered for that
-	// selection at all (canBulkTrashNotes — the bulk bar's identical descriptor gate) under the same
-	// connectivity flag it is disabled by.
+	// A scan, once per keypress: the uuid comes from the DOM or the URL, not typed as a note uuid.
+	function noteWithUuid(uuid: string): Note | undefined {
+		return allNotes.find(note => note.uuid === uuid)
+	}
+
+	// The note a per-note shortcut acts on: the one whose row the key was pressed in, else the note on screen.
+	function keyTargetNote(event: KeyboardEvent): Note | undefined {
+		return noteWithUuid(rowNoteUuid(event.target) ?? selectedUuid)
+	}
+
+	// Runs what the note's own menu would for `id`, through the menu's gate (offered for this note, online, its edits
+	// not still queued). True when it ran, so the caller cancels the key's default only then.
+	function runNoteKey(note: Note | undefined, id: NoteActionId): boolean {
+		if (note === undefined) {
+			return false
+		}
+
+		const descriptor = availableNoteAction(note, id, currentUserId, isOnline, isNoteInflight(note.uuid))
+
+		if (descriptor === undefined || descriptor.run === "submenu") {
+			return false
+		}
+
+		if (descriptor.run === "dialog") {
+			dialogHost.openNoteDialog(descriptor.dialogKind, note)
+		} else {
+			void runNoteDirectAction(note, descriptor.id, t, duplicated => {
+				void openNote(duplicated)
+			})
+		}
+
+		return true
+	}
+
+	// Def in features/notes/lib/keymap.ts. A selection (shown only with the panel in sight) is confirmed and trashed
+	// as the bulk bar does, when it offers Trash at all (canBulkTrashNotes, its own gate); with none, the focused or
+	// open note is trashed as its menu's Trash does. preventDefault only once it acts: Backspace still has a "go back"
+	// default in some engines.
 	useAction(
 		"notes.trash",
 		keyboardEvent => {
+			if (panelVisible && liveSelectedNotes.length > 0) {
+				if (!isOnline || !canBulkTrashNotes(aggregateNoteSelectionFlags(liveSelectedNotes, currentUserId, isNoteUndecryptable))) {
+					return
+				}
+
+				keyboardEvent.preventDefault()
+				dialogHost.openBulkDialog("trashSelected", liveSelectedNotes)
+
+				return
+			}
+
+			if (runNoteKey(keyTargetNote(keyboardEvent), "trash")) {
+				keyboardEvent.preventDefault()
+			}
+		},
+		OUTSIDE_OVERLAYS,
+		[isOnline, liveSelectedNotes, currentUserId, panelVisible, selectedUuid, allNotes]
+	)
+
+	// Def in features/notes/lib/keymap.ts. As notes.trash, for the selection's or the note's Delete permanently: both
+	// confirm first.
+	useAction(
+		"notes.deletePermanently",
+		keyboardEvent => {
+			if (panelVisible && liveSelectedNotes.length > 0) {
+				if (!isOnline || !canBulkDeleteNotes(aggregateNoteSelectionFlags(liveSelectedNotes, currentUserId, isNoteUndecryptable))) {
+					return
+				}
+
+				keyboardEvent.preventDefault()
+				dialogHost.openBulkDialog("deleteSelected", liveSelectedNotes)
+
+				return
+			}
+
+			if (runNoteKey(keyTargetNote(keyboardEvent), "deletePermanently")) {
+				keyboardEvent.preventDefault()
+			}
+		},
+		OUTSIDE_OVERLAYS,
+		[isOnline, liveSelectedNotes, currentUserId, panelVisible, selectedUuid, allNotes]
+	)
+
+	// The focused or open note's menu entry `id`, as a key handler.
+	function onNoteKey(id: NoteActionId): (keyboardEvent: KeyboardEvent) => void {
+		return keyboardEvent => {
+			if (runNoteKey(keyTargetNote(keyboardEvent), id)) {
+				keyboardEvent.preventDefault()
+			}
+		}
+	}
+
+	// The focused row's menu entry `id` (its single keys).
+	function onRowKey(id: NoteActionId): (keyboardEvent: KeyboardEvent) => void {
+		return keyboardEvent => {
+			runNoteKey(noteWithUuid(rowNoteUuid(keyboardEvent.target) ?? ""), id)
+		}
+	}
+
+	const noteKeyDeps = [isOnline, currentUserId, selectedUuid, allNotes]
+
+	// Defs in features/notes/lib/keymap.ts: the focused or open note's menu entries, through its menu's gate.
+	useAction("notes.rename", onNoteKey("rename"), OUTSIDE_OVERLAYS, noteKeyDeps)
+	useAction("notes.duplicate", onNoteKey("duplicate"), OUTSIDE_OVERLAYS, noteKeyDeps)
+	useAction("notes.restore", onNoteKey("restore"), OUTSIDE_OVERLAYS, noteKeyDeps)
+	useAction("notes.export", onNoteKey("export"), OUTSIDE_OVERLAYS, noteKeyDeps)
+	useAction("notes.history", onNoteKey("history"), OUTSIDE_OVERLAYS, noteKeyDeps)
+	useAction("notes.participants", onNoteKey("participants"), OUTSIDE_OVERLAYS, noteKeyDeps)
+
+	// Single keys, on the focused row only: useAction cancels a matched printable key's default itself, and
+	// ON_FOCUSED_ROW stands down before that anywhere else.
+	useAction("notes.archive", onRowKey("archive"), { ...ON_FOCUSED_ROW, enabled: panelVisible }, noteKeyDeps)
+	useAction("notes.pin", onRowKey("pin"), { ...ON_FOCUSED_ROW, enabled: panelVisible }, noteKeyDeps)
+	useAction("notes.favorite", onRowKey("favorite"), { ...ON_FOCUSED_ROW, enabled: panelVisible }, noteKeyDeps)
+
+	// Def in features/notes/lib/keymap.ts. Into the sidebar's filter, in sight only; outside the editors, whose
+	// find keeps the key (useAction skips editable targets).
+	useAction(
+		"notes.search",
+		keyboardEvent => {
+			const field = sidebarHeaderRef.current?.querySelector<HTMLInputElement>('input[type="search"]')
+
+			if (field === undefined || field === null) {
+				return
+			}
+
 			keyboardEvent.preventDefault()
+			field.focus()
+			field.select()
+		},
+		{ ...OUTSIDE_OVERLAYS, enabled: panelVisible }
+	)
 
-			if (!isOnline || liveSelectedNotes.length === 0) {
+	// Defs in features/notes/lib/keymap.ts: the sidebar's "..." menu entries, under the same gates as its items.
+	useAction(
+		"notes.import",
+		keyboardEvent => {
+			const input = importInputRef.current
+
+			if (!isOnline || input === null) {
 				return
 			}
 
-			if (!canBulkTrashNotes(aggregateNoteSelectionFlags(liveSelectedNotes, currentUserId, isNoteUndecryptable))) {
+			keyboardEvent.preventDefault()
+			input.click()
+		},
+		OUTSIDE_OVERLAYS,
+		[isOnline]
+	)
+
+	useAction(
+		"notes.newTag",
+		keyboardEvent => {
+			if (!isOnline) {
 				return
 			}
 
-			dialogHost.openBulkDialog("trashSelected", liveSelectedNotes)
+			keyboardEvent.preventDefault()
+			dialogHost.openCreateTagDialog()
+		},
+		OUTSIDE_OVERLAYS,
+		[isOnline]
+	)
+
+	useAction(
+		"notes.exportAll",
+		keyboardEvent => {
+			if (notesQuery.isPending || allNotes.length === 0) {
+				return
+			}
+
+			keyboardEvent.preventDefault()
+			void handleExportAll()
+		},
+		OUTSIDE_OVERLAYS,
+		[notesQuery.isPending, allNotes]
+	)
+
+	useAction(
+		"notes.toggleView",
+		keyboardEvent => {
+			keyboardEvent.preventDefault()
+			void handleViewModeChange(viewMode === "notes" ? "tags" : "notes")
 		},
 		{ ...OUTSIDE_OVERLAYS, enabled: panelVisible },
-		[isOnline, liveSelectedNotes, currentUserId]
+		[viewMode]
 	)
 
 	const activeQuery = viewMode === "notes" ? notesQuery : tagsQuery
@@ -544,7 +721,10 @@ export function NotesSidebar() {
 			module="notes"
 			resizeLabel={t("notesSidebarResize")}
 		>
-			<div className="flex flex-col gap-2 p-3">
+			<div
+				ref={sidebarHeaderRef}
+				className="flex flex-col gap-2 p-3"
+			>
 				<div className="flex items-center justify-between gap-2">
 					<h2 className="truncate px-1 text-[15px] font-semibold">{t("notesSidebarTitle")}</h2>
 					<div className="flex items-center gap-0.5">
@@ -778,19 +958,78 @@ function NotesSidebarList({
 		}
 	})
 
+	// The focus stop (note link, tag button) of the row at `index`, once the virtualizer has it mounted.
+	function rowStop(list: Element, index: number): HTMLElement | null {
+		return list.querySelector<HTMLElement>(`li[data-index="${String(index)}"] [data-notes-row]`)
+	}
+
+	// A row scrolled in from outside the window mounts on a later frame; a few are plenty.
+	function focusRow(list: Element, index: number, framesLeft: number): void {
+		const stop = rowStop(list, index)
+
+		if (stop !== null) {
+			stop.focus()
+		} else if (framesLeft > 0) {
+			requestAnimationFrame(() => {
+				focusRow(list, index, framesLeft - 1)
+			})
+		}
+	}
+
+	// Arrow keys, Home and End move between rows and Left/Right fold tags (notesRowKeyTarget), from a row's own
+	// focus stop only: its ⋯ trigger owns its keys. A chord is some shortcut's, and Shift is left to the page.
+	function handleKeyDown(event: ReactKeyboardEvent<HTMLUListElement>): void {
+		if (event.defaultPrevented || event.shiftKey || hasCommandModifier(event) || isImeKeydown(event.nativeEvent)) {
+			return
+		}
+
+		if (!(event.target instanceof HTMLElement) || !event.target.hasAttribute("data-notes-row")) {
+			return
+		}
+
+		const from = Number(event.target.closest<HTMLElement>("li[data-index]")?.dataset["index"] ?? "-1")
+		const result = notesRowKeyTarget(rows, from, event.key)
+
+		if (result === null) {
+			return
+		}
+
+		event.preventDefault()
+
+		if (result.kind === "toggleTag") {
+			const row = rows[from]
+
+			if (row?.kind === "tag") {
+				onToggleTag(row.tag.uuid)
+			}
+
+			return
+		}
+
+		const list = event.currentTarget
+
+		if (rowStop(list, result.index) === null) {
+			virtualizer.scrollToIndex(result.index)
+		}
+
+		focusRow(list, result.index, 3)
+	}
+
 	if (fallback !== null) {
 		return fallback
 	}
 
 	return (
-		// A plain list, deliberately neither tree nor listbox: both patterns owe a roving-tabindex/
-		// arrow-key focus model this sidebar does not implement, and one flat virtualizer cannot nest
+		// A plain list, deliberately neither tree nor listbox: both patterns owe a single-Tab-stop roving
+		// focus model (every row link here stays its own Tab stop; the arrow keys above are a shortcut
+		// between them, not that model), and one flat virtualizer cannot nest
 		// DOM levels anyway — so the grouping stays where it honestly is, in the flat row order, with
 		// each tag row's own aria-expanded as the only disclosure claim (same shape as the drive
 		// sidebar's disclosure list). Positions are threaded per item because virtualization mounts
 		// only a window: the DOM child count here is never the real total.
 		<ul
 			aria-label={label}
+			onKeyDown={handleKeyDown}
 			className="relative w-full"
 			style={{ height: virtualizer.getTotalSize() }}
 		>

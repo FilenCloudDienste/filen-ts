@@ -6,6 +6,7 @@ import { isValidEmail } from "@filen/shared"
 import { sendContactRequest } from "@/features/contacts/lib/actions"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { useIsOnline } from "@/lib/useIsOnline"
+import { OUTSIDE_OVERLAYS, useAction } from "@/lib/keymap/useAction"
 import { Button } from "@/components/ui/button"
 import { InputDialog } from "@/components/dialogs/inputDialog"
 
@@ -14,13 +15,23 @@ import { InputDialog } from "@/components/dialogs/inputDialog"
 // contactsList.tsx's per-row confirm-dialog host). The dialog itself IS the confirm — sending a
 // request needs no separate ConfirmDialog, matching every other "type a value, submit" flow. The empty
 // state mounts a second, primary-styled instance as its call to action.
-export function AddContactDialog({ variant: variantProp }: { variant?: "outline" | "default" }) {
+// `shortcut`: this instance also opens on contacts.add (keymap.ts). Only the header's sets it, so the key never opens two.
+export function AddContactDialog({ variant: variantProp, shortcut }: { variant?: "outline" | "default"; shortcut?: boolean }) {
 	// Not a destructuring default, which the React Compiler cannot lower.
 	const variant = variantProp ?? "outline"
 	const { t } = useTranslation(["contacts", "common"])
 	const isOnline = useIsOnline()
 	const [open, setOpen] = useState(false)
 	const [pending, setPending] = useState(false)
+
+	// Gated on the connectivity flag the button is disabled by.
+	useAction(
+		"contacts.add",
+		() => {
+			setOpen(true)
+		},
+		{ ...OUTSIDE_OVERLAYS, enabled: shortcut === true && isOnline }
+	)
 
 	async function handleSubmit(email: string): Promise<void> {
 		setPending(true)

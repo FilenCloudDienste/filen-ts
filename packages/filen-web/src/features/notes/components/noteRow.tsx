@@ -100,6 +100,8 @@ export function NoteRow({
 				render={
 					<div
 						{...press.handlers}
+						// Which note a key pressed in this row is for (the notes shortcuts' target).
+						data-note-uuid={note.uuid}
 						className={cn(
 							"group flex w-full items-start gap-2.5 rounded-xl px-2.5 py-2 transition-colors app-region-no-drag",
 							nested && "pl-8",
@@ -114,6 +116,8 @@ export function NoteRow({
 							// rows do the same). The multi-selection is a separate fact with no honest ARIA on a
 							// plain list item — it shows as the ring below, plus the bulk bar's own selected count.
 							aria-current={selected ? "page" : undefined}
+							// The row's stop for the list's arrow keys (notesSidebar.tsx).
+							data-notes-row=""
 							onClick={selectionAwareLinkClick((event: MouseEvent<HTMLAnchorElement>) =>
 								onPointerSelect(event, press.pointerType(event))
 							)}

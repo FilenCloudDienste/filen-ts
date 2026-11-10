@@ -120,6 +120,8 @@ function PlaylistLinkRow({ playlist, selected }: { playlist: Playlist; selected:
 	// shows the last opened or first playlist, which no Link's own search matches.
 	return (
 		<li
+			// The playlist keyboard commands act on the row holding focus (playlistKeys.logic.ts's PLAYLIST_ROW_ATTRIBUTE).
+			data-playlist-uuid={playlist.uuid}
 			className={cn(
 				"group flex items-center gap-1 rounded-xl pr-1 transition-colors app-region-no-drag",
 				selected

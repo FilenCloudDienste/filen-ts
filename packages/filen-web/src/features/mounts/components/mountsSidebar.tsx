@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next"
-import { Link } from "@tanstack/react-router"
+import { Link, useRouter } from "@tanstack/react-router"
 import { LayoutGridIcon } from "lucide-react"
 import { useShallow } from "zustand/shallow"
 import type { DesktopMountsRole } from "@filen/shared/desktop"
@@ -12,6 +12,9 @@ import { rememberLastOpened } from "@/features/shell/lib/lastOpened"
 import { hostBanner } from "@/features/desktop/lib/hostBanner.logic"
 import { DesktopCallout } from "@/features/desktop/components/desktopCallout"
 import { FINDER_ROLE, offeredProtocols, primaryRoles, PROTOCOL_LABEL_KEY } from "@/features/mounts/lib/mountsRoles"
+import { mountsPageOf, mountsPages } from "@/features/mounts/lib/mountsPages.logic"
+import { OUTSIDE_OVERLAYS, useAction } from "@/lib/keymap/useAction"
+import { steppedItem } from "@/features/settings/lib/stepped.logic"
 import { MOUNTS_OFFER } from "@/features/mounts/lib/mountsOffer"
 import { useFileProviderStatus } from "@/features/mounts/lib/fileProviderStore"
 import { FILE_PROVIDER_STATUS_KEY, FILE_PROVIDER_STATUS_TONE } from "@/features/mounts/lib/fileProviderStatus.logic"
@@ -25,6 +28,9 @@ import { RoleStatusDot } from "@/features/mounts/components/roleStatus"
 const PROTOCOLS = offeredProtocols(desktopPlatform())
 const PRIMARY_ROLES = primaryRoles(MOUNTS_OFFER.finder)
 const WINDOWS = desktopPlatform() === "win32"
+
+// The sidebar's pages in order, for the previous/next keys.
+const PAGES = mountsPages(MOUNTS_OFFER)
 
 const ROLE_ROW_CLASS = cn(SIDEBAR_NAV_ITEM_CLASS, "h-auto min-h-8 py-1.5")
 
@@ -120,6 +126,41 @@ function FinderRow() {
 // drive, then one row per protocol server this platform offers. Choosing the overview is remembered like a role, so the rail reopens it.
 export function MountsSidebar() {
 	const { t } = useTranslation(["mounts", "common"])
+	const router = useRouter()
+
+	// The location is read at the key press, not subscribed: nothing here renders it.
+	function step(direction: 1 | -1): void {
+		const page = steppedItem(PAGES, mountsPageOf(router.state.location.pathname, PAGES), direction)
+
+		if (page === MOUNTS_OVERVIEW) {
+			rememberLastOpened("mounts", MOUNTS_OVERVIEW)
+			void router.navigate({ to: "/mounts" })
+		} else if (page !== null) {
+			void router.navigate({ to: "/mounts/$role", params: { role: page } })
+		}
+	}
+
+	// Defs in features/mounts/lib/keymap.ts: Alt+↑/↓ walk the pages below in order. The page under a dialog or menu
+	// stands down, and a text field keeps its own keys.
+	useAction(
+		"mounts.previousRole",
+		event => {
+			event.preventDefault()
+			step(-1)
+		},
+		OUTSIDE_OVERLAYS,
+		[]
+	)
+
+	useAction(
+		"mounts.nextRole",
+		event => {
+			event.preventDefault()
+			step(1)
+		},
+		OUTSIDE_OVERLAYS,
+		[]
+	)
 
 	return (
 		<ResizableSidebarPanel

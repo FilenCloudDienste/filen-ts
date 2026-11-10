@@ -73,7 +73,16 @@ export function noteIsEditing(state: NotesInflightStore, uuid: string): boolean 
 // subscriber re-renders only on the has/has-not EDGE, never on every keystroke that grows the entry
 // list.
 export function useNoteInflight(uuid: string): boolean {
-	return useNotesInflightStore(state => (state.inflightContent[uuid] ?? []).length > 0)
+	return useNotesInflightStore(state => isInflightIn(state, uuid))
+}
+
+function isInflightIn(state: NotesInflightStore, uuid: string): boolean {
+	return (state.inflightContent[uuid] ?? []).length > 0
+}
+
+// The same answer read once, for a keyboard shortcut deciding at keypress time.
+export function isNoteInflight(uuid: string): boolean {
+	return isInflightIn(useNotesInflightStore.getState(), uuid)
 }
 
 // Reactive form of the editing test above. Boolean-collapsed like useNoteInflight, so a subscriber

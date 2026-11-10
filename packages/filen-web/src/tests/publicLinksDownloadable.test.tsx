@@ -28,7 +28,7 @@ vi.mock("@tanstack/react-router", () => ({
 	useNavigate: () => vi.fn(),
 	useRouterState: () => "/chats"
 }))
-vi.mock("@/lib/keymap/useAction", () => ({ useAction: vi.fn(), IN_EDITORS: {}, IN_EDITORS_AND_FIELDS: {} }))
+vi.mock("@/lib/keymap/useAction", () => ({ useAction: vi.fn(), IN_EDITORS: {}, IN_EDITORS_AND_FIELDS: {}, OUTSIDE_OVERLAYS: {} }))
 vi.mock("@/lib/useIsOnline", () => ({ useIsOnline: () => true }))
 // The player's engine is not under test here, only the element it renders.
 vi.mock("@/features/preview/hooks/usePreviewVideo", () => ({ usePreviewVideo: () => ({ controller: null, snapshot: null }) }))

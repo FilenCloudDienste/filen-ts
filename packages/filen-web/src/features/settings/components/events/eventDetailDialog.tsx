@@ -25,6 +25,9 @@ import { EventDetailSectionView, EventHeroTile, RawEventView } from "@/features/
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
+import { useAction } from "@/lib/keymap/useAction"
+import type { Options } from "react-hotkeys-hook"
+import { ignoredOutsideLayer } from "@/features/settings/lib/layerKeys"
 
 export interface EventDetailDialogProps {
 	eventUuid: string | null
@@ -33,6 +36,8 @@ export interface EventDetailDialogProps {
 	// The list's first page is still loading: a deep-linked event waits for it before being read alone.
 	waitForList: boolean
 	onClose: () => void
+	// Shows the event before (-1) or after (1) this one in the list, when there is one.
+	onStep: (direction: 1 | -1) => void
 }
 
 interface Shown {
@@ -44,15 +49,41 @@ const FULL_DATE_TIME = new Intl.DateTimeFormat(undefined, { dateStyle: "full", t
 const RELATIVE_CUTOFF_MS = RELATIVE_TIME_CUTOFF_DAYS * 24 * 60 * 60 * 1000
 
 // Open while `eventUuid` is set. The event last shown stays rendered through the exit animation.
-export function EventDetailDialog({ eventUuid, entry, waitForList, onClose }: EventDetailDialogProps) {
+export function EventDetailDialog({ eventUuid, entry, waitForList, onClose, onStep }: EventDetailDialogProps) {
 	const [shown, setShown] = useState<Shown | null>(eventUuid === null ? null : { uuid: eventUuid, entry })
 	const scrollRef = useRef<HTMLDivElement>(null)
+	const popupRef = useRef<HTMLDivElement>(null)
 
 	if (eventUuid !== null && (shown?.uuid !== eventUuid || shown.entry !== entry)) {
 		setShown({ uuid: eventUuid, entry })
 	}
 
 	const view = eventUuid === null ? shown : { uuid: eventUuid, entry }
+	const stepOptions: Options = {
+		ignoreEventWhen: event => ignoredOutsideLayer(event, popupRef.current),
+		enabled: eventUuid !== null
+	}
+
+	// Defs in features/settings/lib/keymap.ts: ← and → page through the listed events from inside this dialog only.
+	useAction(
+		"settings.previousEvent",
+		event => {
+			event.preventDefault()
+			onStep(-1)
+		},
+		stepOptions,
+		[onStep]
+	)
+
+	useAction(
+		"settings.nextEvent",
+		event => {
+			event.preventDefault()
+			onStep(1)
+		},
+		stepOptions,
+		[onStep]
+	)
 
 	return (
 		<Dialog
@@ -69,6 +100,7 @@ export function EventDetailDialog({ eventUuid, entry, waitForList, onClose }: Ev
 			}}
 		>
 			<DialogContent
+				ref={popupRef}
 				className="flex max-h-[calc(100dvh-2rem)] flex-col sm:max-w-lg"
 				initialFocus={scrollRef}
 			>
@@ -226,6 +258,41 @@ function EventDetailContent({
 	const timeKnown = entryTimeKnown(entry)
 	const when = timeKnown ? FULL_DATE_TIME.format(timestamp) : t("eventsUnknownTime")
 	const relative = timeKnown && now - timestamp < RELATIVE_CUTOFF_MS ? formatRelativeTime(timestamp, tCommon, now) : null
+	const keyOptions: Options = { ignoreEventWhen: event => ignoredOutsideLayer(event, scrollRef.current) }
+
+	function copyDetails(): void {
+		void copyText(eventDetailText(description.title, when, view), t("eventsCopied"))
+	}
+
+	// Defs in features/settings/lib/keymap.ts, in this dialog only. Mod+C copies the details only with no text
+	// selected, which it leaves to the browser's own copy.
+	useAction(
+		"settings.copyEvent",
+		event => {
+			if (window.getSelection()?.isCollapsed === false) {
+				return
+			}
+
+			event.preventDefault()
+			copyDetails()
+		},
+		keyOptions,
+		[description, when, view]
+	)
+
+	useAction(
+		"settings.showEventInDrive",
+		event => {
+			if (lookupRef === undefined) {
+				return
+			}
+
+			event.preventDefault()
+			void actions.showInDrive()
+		},
+		keyOptions,
+		[lookupRef, actions]
+	)
 
 	return (
 		<>
@@ -294,9 +361,7 @@ function EventDetailContent({
 			<DialogFooter>
 				<Button
 					variant="outline"
-					onClick={() => {
-						void copyText(eventDetailText(description.title, when, view), t("eventsCopied"))
-					}}
+					onClick={copyDetails}
 				>
 					<CopyIcon data-icon="inline-start" />
 					{t("eventsActionCopyDetails")}

@@ -15,7 +15,11 @@ export const SHORTCUT_NAMESPACES = [
 	"audio",
 	"preview",
 	"contacts",
-	"videos"
+	"videos",
+	"transfers",
+	"sync",
+	"mounts",
+	"publicLinks"
 ] as const satisfies readonly EnNamespace[]
 
 // Display order of the scope groups. A plain array, so a scope missing from it makes its whole group vanish from BOTH
@@ -29,7 +33,13 @@ export const SHORTCUT_SCOPE_ORDER: readonly ActionScope[] = [
 	"chats",
 	"contacts",
 	"editor",
-	"audio"
+	"audio",
+	"playlists",
+	"transfers",
+	"sync",
+	"mounts",
+	"publicLinks",
+	"settings"
 ]
 
 // Reuses the existing module labels rather than minting duplicates; only the three scopes with no module of their own
@@ -43,7 +53,13 @@ export const SHORTCUT_SCOPE_LABEL_KEYS: Record<ActionScope, CommonKey> = {
 	chats: "moduleChats",
 	contacts: "moduleContacts",
 	editor: "shortcutsScopeEditor",
-	audio: "shortcutsScopeAudio"
+	audio: "shortcutsScopeAudio",
+	playlists: "modulePlaylists",
+	transfers: "moduleTransfers",
+	sync: "moduleSync",
+	mounts: "moduleMounts",
+	publicLinks: "shortcutsScopePublicLinks",
+	settings: "settings"
 }
 
 // The editor's sub-groups in the order a user meets them, after the actions every editor shares.

@@ -20,6 +20,10 @@ const { useTransfersStore } = await import("@/features/transfers/store/useTransf
 const { useDriveJobsStore } = await import("@/features/transfers/store/useDriveJobsStore")
 const { createCopyJob } = await import("@/features/drive/lib/copy.logic")
 const { TransfersScreen } = await import("@/features/transfers/screens/transfers")
+const { registerAllActions } = await import("@/lib/keymap/actions")
+
+// The screen binds the transfers keys.
+registerAllActions()
 
 function transfer(overrides: Partial<Transfer> = {}): Transfer {
 	return {

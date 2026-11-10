@@ -242,5 +242,23 @@ export const settingsKeyboard = {
 	/** Shortcut name (desktop app) — turns full screen on or off */
 	keyboardActionFullScreen: "Full screen",
 	/** Shortcut name (desktop app) — quits the app */
-	keyboardActionQuit: "Quit Filen"
+	keyboardActionQuit: "Quit Filen",
+	/** Keyboard shortcut — opens the settings section above the open one in the sidebar */
+	keyboardActionPreviousSection: "Previous settings section",
+	/** Keyboard shortcut — opens the settings section below the open one in the sidebar */
+	keyboardActionNextSection: "Next settings section",
+	/** Keyboard shortcut — focuses the search box of the Events page or of the keyboard shortcuts list */
+	keyboardActionSearch: "Search",
+	/** Shortcuts list — where the shortcut works: on the Events page and in the keyboard shortcuts list */
+	keyboardHintSettingsSearch: "In Events and in the keyboard shortcuts",
+	/** Keyboard shortcut — shows the next newer event in the event details dialog */
+	keyboardActionPreviousEvent: "Previous event",
+	/** Keyboard shortcut — shows the next older event in the event details dialog */
+	keyboardActionNextEvent: "Next event",
+	/** Keyboard shortcut — copies the event's details, when no text is selected */
+	keyboardActionCopyEvent: "Copy event details",
+	/** Keyboard shortcut — shows the event's file or directory in Cloud Drive */
+	keyboardActionShowEventInDrive: "Show event item in Cloud Drive",
+	/** Shortcuts list — where the shortcut works: in an event's details */
+	keyboardHintEventDetails: "In an event's details"
 } as const

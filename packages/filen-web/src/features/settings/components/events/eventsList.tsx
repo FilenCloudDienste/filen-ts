@@ -26,6 +26,7 @@ import {
 	isFillCapped,
 	newDeviceBadgeKeys,
 	startOfToday,
+	steppedEventEntry,
 	type EventsFilter
 } from "@/features/settings/components/events/eventsList.logic"
 import { EventsTimeline, type EventsNearEndReason } from "@/features/settings/components/events/eventsTimeline"
@@ -60,9 +61,11 @@ export interface EventsListProps {
 	eventUuid: string | null
 	onOpenEvent: (uuid: string) => void
 	onCloseEvent: () => void
+	// Shows another event in the open dialog in place of this one (null: one that names no uuid, opened from here).
+	onReplaceEvent: (uuid: string | null) => void
 }
 
-export function EventsList({ eventUuid, onOpenEvent, onCloseEvent }: EventsListProps) {
+export function EventsList({ eventUuid, onOpenEvent, onCloseEvent, onReplaceEvent }: EventsListProps) {
 	const { t } = useTranslation(["events", "common"])
 	const isOnline = useIsOnline()
 	const now = useNowMinute()
@@ -139,6 +142,30 @@ export function EventsList({ eventUuid, onOpenEvent, onCloseEvent }: EventsListP
 		}
 	}
 
+	// The open event's neighbour among the events the list shows (its search and category applied), newer first.
+	function stepEvent(direction: 1 | -1): void {
+		const target = steppedEventEntry(rows, unlinkedEntry ?? linkedEntry, direction)
+
+		if (target === null) {
+			return
+		}
+
+		const uuid = eventEntryUuid(target)
+
+		if (uuid === undefined) {
+			if (unlinkedEntry === null) {
+				onReplaceEvent(null)
+			}
+
+			setUnlinkedEntry(target)
+
+			return
+		}
+
+		setUnlinkedEntry(null)
+		onReplaceEvent(uuid)
+	}
+
 	// A changed search or category shows a different set, read from its top.
 	function updateFilter(next: EventsFilter): void {
 		setFilter(next)
@@ -173,6 +200,7 @@ export function EventsList({ eventUuid, onOpenEvent, onCloseEvent }: EventsListP
 					onCloseEvent()
 				}
 			}}
+			onStep={stepEvent}
 		/>
 	)
 

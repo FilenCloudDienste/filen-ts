@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { formatBytes } from "@filen/shared"
 import { ChevronRightIcon, DownloadIcon, SearchIcon, ArrowDownAZIcon, ArrowUpAZIcon } from "lucide-react"
@@ -35,6 +35,7 @@ import { LoadingState } from "@/components/loadingState"
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { DownloadTooLargeNote, PublicLinkError } from "@/features/publicLinks/components/publicLinkStates"
 import { cn } from "@filen/shared"
+import { OUTSIDE_OVERLAYS, useAction } from "@/lib/keymap/useAction"
 
 type ZipUiState =
 	| { status: "idle" }
@@ -58,6 +59,7 @@ export function DirectoryBrowser({ info, link }: { info: DirPublicInfo; link: Di
 	const [filter, setFilter] = useState("")
 	const [sort, setSort] = useState(DEFAULT_PUBLIC_SORT)
 	const [zip, setZip] = useState<ZipUiState>({ status: "idle" })
+	const filterRef = useRef<HTMLInputElement>(null)
 
 	const current = stack[stack.length - 1] ?? rootCrumb(info)
 	// Asked once for the whole link: its subdirectories and files belong to whoever owns its root. A link
@@ -117,6 +119,54 @@ export function DirectoryBrowser({ info, link }: { info: DirPublicInfo; link: Di
 			)
 		})
 	}
+
+	// Defs in features/publicLinks/lib/keymap.ts. Every one stands down under a dialog or menu and in a text field.
+	// Escape and Alt+↑ leave an opened file for its directory, Alt+↑ goes up a level from there; / and Mod+S act on
+	// the directory on screen (the opened file takes its own Mod+S).
+	useAction(
+		"links.back",
+		() => {
+			setSelected(null)
+		},
+		{ ...OUTSIDE_OVERLAYS, enabled: selected !== null }
+	)
+
+	useAction(
+		"links.up",
+		event => {
+			event.preventDefault()
+
+			if (selected !== null) {
+				setSelected(null)
+			} else if (stack.length > 1) {
+				jumpTo(stack.length - 2)
+			}
+		},
+		OUTSIDE_OVERLAYS,
+		[selected, stack.length]
+	)
+
+	useAction(
+		"links.filter",
+		event => {
+			event.preventDefault()
+			filterRef.current?.focus()
+		},
+		{ ...OUTSIDE_OVERLAYS, enabled: selected === null }
+	)
+
+	useAction(
+		"links.download",
+		event => {
+			event.preventDefault()
+
+			if (zip.status !== "running") {
+				handleZip()
+			}
+		},
+		{ ...OUTSIDE_OVERLAYS, enabled: selected === null && link.enableDownload },
+		[zip.status, current, link]
+	)
 
 	// A tapped child file takes over the whole surface (it carries its own back bar); the browse chrome
 	// returns when it is dismissed.
@@ -201,6 +251,8 @@ export function DirectoryBrowser({ info, link }: { info: DirPublicInfo; link: Di
 				<div className="relative min-w-40 flex-1">
 					<SearchIcon className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
 					<Input
+						ref={filterRef}
+						aria-label={t("filterPlaceholder")}
 						value={filter}
 						onChange={event => {
 							setFilter(event.target.value)

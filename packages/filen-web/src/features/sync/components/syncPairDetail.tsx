@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
-import { Link } from "@tanstack/react-router"
+import { Link, useNavigate } from "@tanstack/react-router"
 import { PauseIcon, PlayIcon, RefreshCwIcon } from "lucide-react"
 import type { DesktopSyncPair, DesktopSyncPlan, DesktopSyncReview } from "@filen/shared/desktop"
 import { log } from "@/lib/log"
@@ -20,6 +20,7 @@ import { ActivityTab } from "@/features/sync/components/activityTab"
 import { IssuesTab } from "@/features/sync/components/issuesTab"
 import { IgnoredTab } from "@/features/sync/components/ignoredTab"
 import { SettingsTab } from "@/features/sync/components/settingsTab"
+import { OUTSIDE_OVERLAYS, useAction } from "@/lib/keymap/useAction"
 
 const TABS: readonly { tab: SyncTab; key: "tabActivity" | "tabIssues" | "tabIgnored" | "tabSettings" }[] = [
 	{ tab: "activity", key: "tabActivity" },
@@ -65,10 +66,6 @@ function ReviewPanel({ pair, review }: { pair: Pick<DesktopSyncPair, "id" | "nam
 		}
 	}, [])
 
-	if (hidden) {
-		return null
-	}
-
 	async function loadPlan(): Promise<void> {
 		setBusy("plan")
 
@@ -86,6 +83,24 @@ function ReviewPanel({ pair, review }: { pair: Pick<DesktopSyncPair, "id" | "nam
 		setBusy("start")
 		await runSyncAction(() => syncApi().startPair(pair.id))
 		setBusy(null)
+	}
+
+	// Def in features/sync/lib/keymap.ts: the card's Start, under the same gate, while the card shows.
+	useAction(
+		"sync.startReview",
+		event => {
+			event.preventDefault()
+
+			if (busy === null) {
+				void start()
+			}
+		},
+		{ ...OUTSIDE_OVERLAYS, enabled: !hidden },
+		[busy, pair.id]
+	)
+
+	if (hidden) {
+		return null
 	}
 
 	const copy = REVIEW_COPY[review.reason]
@@ -197,8 +212,13 @@ function PairTabs({ pairId, tab, issues }: { pairId: string; tab: SyncTab; issue
 export function SyncPairDetail({ pair, tab }: { pair: DesktopSyncPair; tab: SyncTab }) {
 	const { t } = useTranslation("sync")
 	const issues = issueTotal(pair.issues)
+	const navigate = useNavigate()
 	const [toggling, setToggling] = useState(false)
 	const [refreshing, setRefreshing] = useState(false)
+	const [removing, setRemoving] = useState(false)
+	// One gate per control, shared by its button and its key.
+	const pauseDisabled = toggling || pair.phase === "preparing" || pair.phase === "waitingForRoot" || pair.phase === "unsupported"
+	const syncNowDisabled = refreshing || pair.paused || pair.phase === "syncing" || pair.phase === "preparing"
 
 	async function togglePause(): Promise<void> {
 		setToggling(true)
@@ -212,6 +232,81 @@ export function SyncPairDetail({ pair, tab }: { pair: DesktopSyncPair; tab: Sync
 		setRefreshing(false)
 	}
 
+	// Defs in features/sync/lib/keymap.ts. Each stands down under a dialog or menu and in a text field; the buttons'
+	// own gates apply.
+	useAction(
+		"sync.togglePause",
+		event => {
+			event.preventDefault()
+
+			if (!pauseDisabled) {
+				void togglePause()
+			}
+		},
+		OUTSIDE_OVERLAYS,
+		[pauseDisabled, pair.paused, pair.id]
+	)
+
+	useAction(
+		"sync.syncNow",
+		event => {
+			event.preventDefault()
+
+			if (!syncNowDisabled) {
+				void syncNow()
+			}
+		},
+		OUTSIDE_OVERLAYS,
+		[syncNowDisabled, pair.id]
+	)
+
+	// Asks first, as the Settings tab's Remove does.
+	useAction(
+		"sync.removePair",
+		event => {
+			event.preventDefault()
+			setRemoving(true)
+		},
+		OUTSIDE_OVERLAYS
+	)
+
+	function showTab(next: SyncTab): void {
+		void navigate({ to: "/sync/$pairId", params: { pairId: pair.id }, search: { tab: next }, replace: true })
+	}
+
+	useAction(
+		"sync.tabActivity",
+		() => {
+			showTab("activity")
+		},
+		OUTSIDE_OVERLAYS,
+		[pair.id]
+	)
+	useAction(
+		"sync.tabIssues",
+		() => {
+			showTab("issues")
+		},
+		OUTSIDE_OVERLAYS,
+		[pair.id]
+	)
+	useAction(
+		"sync.tabIgnored",
+		() => {
+			showTab("ignored")
+		},
+		OUTSIDE_OVERLAYS,
+		[pair.id]
+	)
+	useAction(
+		"sync.tabSettings",
+		() => {
+			showTab("settings")
+		},
+		OUTSIDE_OVERLAYS,
+		[pair.id]
+	)
+
 	return (
 		<>
 			<header className="flex h-14 shrink-0 items-center gap-3 border-b border-border/50 px-4 app-region-chrome">
@@ -219,7 +314,7 @@ export function SyncPairDetail({ pair, tab }: { pair: DesktopSyncPair; tab: Sync
 				<div className="flex shrink-0 items-center gap-1">
 					<TooltipIconButton
 						label={pair.paused ? t("detailResume") : t("detailPause")}
-						disabled={toggling || pair.phase === "preparing" || pair.phase === "waitingForRoot" || pair.phase === "unsupported"}
+						disabled={pauseDisabled}
 						onClick={() => {
 							void togglePause()
 						}}
@@ -228,7 +323,7 @@ export function SyncPairDetail({ pair, tab }: { pair: DesktopSyncPair; tab: Sync
 					</TooltipIconButton>
 					<TooltipIconButton
 						label={t("detailSyncNow")}
-						disabled={refreshing || pair.paused || pair.phase === "syncing" || pair.phase === "preparing"}
+						disabled={syncNowDisabled}
 						onClick={() => {
 							void syncNow()
 						}}
@@ -283,6 +378,15 @@ export function SyncPairDetail({ pair, tab }: { pair: DesktopSyncPair; tab: Sync
 					</div>
 				)}
 			</div>
+			{removing ? (
+				<RemovePairDialog
+					pairId={pair.id}
+					name={pair.name}
+					onClose={() => {
+						setRemoving(false)
+					}}
+				/>
+			) : null}
 		</>
 	)
 }

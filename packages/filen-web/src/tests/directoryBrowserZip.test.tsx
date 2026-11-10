@@ -27,6 +27,10 @@ vi.mock("@/features/publicLinks/components/fileHero", () => ({ FileHero: () => n
 vi.mock("@/features/publicLinks/components/saveToDrive", () => ({ SaveToDriveButton: () => null }))
 
 import { DirectoryBrowser } from "@/features/publicLinks/components/directoryBrowser"
+import { registerAllActions } from "@/lib/keymap/actions"
+
+// The browser binds the shared link's keys.
+registerAllActions()
 
 const ROOT_UUID = "d1000000-0000-0000-0000-000000000000"
 const LISTING = {

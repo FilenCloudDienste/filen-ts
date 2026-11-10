@@ -18,6 +18,11 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { LIST_DIALOG_CLASS } from "@/components/dialogs/listDialog"
+import { useAction } from "@/lib/keymap/useAction"
+import type { Options } from "react-hotkeys-hook"
+
+// Add selected fires from the filter box as well as from the rows.
+const PICKER_CONFIRM_KEYS: Options = { enableOnFormTags: ["option", "input"] }
 
 export interface AddPlaylistTracksDialogProps {
 	playlist: Playlist
@@ -139,12 +144,66 @@ export function AddPlaylistTracksDialog({ playlist, onClose }: AddPlaylistTracks
 		onClose()
 	}
 
+	// Defs in features/audio/lib/playlistKeymap.ts, scoped to this dialog. Select all takes every track listed here
+	// that can still be added; the filter box keeps its own Mod+A.
+	const selectAllRef = useAction(
+		"playlists.pickerSelectAll",
+		event => {
+			event.preventDefault()
+			setSelected(prev => {
+				const next = new Map(prev)
+
+				for (const item of filtered) {
+					if (item.type === "file" && !item.data.undecryptable && !existingUuids.has(item.data.uuid)) {
+						next.set(item.data.uuid, item)
+					}
+				}
+
+				return next
+			})
+		},
+		undefined,
+		[filtered, existingUuids]
+	)
+	const filterRef = useAction("playlists.pickerFilter", event => {
+		if (event.currentTarget instanceof Element) {
+			event.preventDefault()
+			event.currentTarget.querySelector<HTMLInputElement>('input[type="search"]')?.focus()
+		}
+	})
+	// From the filter box too, where a user who just narrowed the list is.
+	const confirmRef = useAction(
+		"playlists.pickerConfirm",
+		event => {
+			event.preventDefault()
+
+			if (!pending) {
+				void handleAdd()
+			}
+		},
+		PICKER_CONFIRM_KEYS,
+		[pending, selected]
+	)
+
+	function setPopup(element: HTMLDivElement | null) {
+		const releases = [selectAllRef(element), filterRef(element), confirmRef(element)]
+
+		return () => {
+			for (const release of releases) {
+				if (typeof release === "function") {
+					release()
+				}
+			}
+		}
+	}
+
 	return (
 		<Dialog
 			open
 			onOpenChange={handleOpenChange}
 		>
 			<DialogContent
+				ref={setPopup}
 				closeButtonDisabled={pending}
 				className={LIST_DIALOG_CLASS}
 			>

@@ -118,6 +118,10 @@ import { FileHero } from "@/features/publicLinks/components/fileHero"
 import { DirectoryBrowser } from "@/features/publicLinks/components/directoryBrowser"
 import { PublicLinkView } from "@/features/publicLinks/components/publicLinkView"
 import { linkedFileItem, mockLinkedFile } from "@/tests/fixtures/sdk"
+import { registerAllActions } from "@/lib/keymap/actions"
+
+// The link's views bind the shared link's keys.
+registerAllActions()
 
 const ARCHIVE_UUID = "f3000000-0000-0000-0000-000000000001" as UuidStr
 const DESTINATION: JobDestination = { uuid: "d3000000-0000-0000-0000-000000000001", name: "Docs" }

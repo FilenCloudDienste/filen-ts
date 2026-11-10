@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next"
-import { useRouterState } from "@tanstack/react-router"
+import { useNavigate, useRouterState } from "@tanstack/react-router"
 import { FolderSyncIcon, PlusIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { LoadingState } from "@/components/loadingState"
@@ -10,6 +10,8 @@ import { openAddPair, syncApi, useSyncHost, useSyncImportNote, useSyncPairIds } 
 import { hostBanner } from "@/features/desktop/lib/hostBanner.logic"
 import { SyncPairRow } from "@/features/sync/components/syncPairRow"
 import { DesktopCallout } from "@/features/desktop/components/desktopCallout"
+import { OUTSIDE_OVERLAYS, useAction } from "@/lib/keymap/useAction"
+import { steppedItem } from "@/features/settings/lib/stepped.logic"
 
 const PAIR_PATH = /^\/sync\/([^/]+)/
 
@@ -86,6 +88,39 @@ export function SyncSidebar() {
 	const { t } = useTranslation(["sync", "common"])
 	const pairIds = useSyncPairIds()
 	const selectedId = useRouterState({ select: state => PAIR_PATH.exec(state.location.pathname)?.[1] ?? null })
+	const navigate = useNavigate()
+
+	function step(direction: 1 | -1): void {
+		const pairId = pairIds === null ? null : steppedItem(pairIds, selectedId, direction)
+
+		if (pairId !== null) {
+			void navigate({ to: "/sync/$pairId", params: { pairId } })
+		}
+	}
+
+	// Defs in features/sync/lib/keymap.ts. The page under a dialog or menu stands down, a text field keeps its own
+	// keys, and the add-pair dialog the key opens is the button's.
+	useAction("sync.addPair", openAddPair, OUTSIDE_OVERLAYS)
+
+	useAction(
+		"sync.previousPair",
+		event => {
+			event.preventDefault()
+			step(-1)
+		},
+		OUTSIDE_OVERLAYS,
+		[pairIds, selectedId]
+	)
+
+	useAction(
+		"sync.nextPair",
+		event => {
+			event.preventDefault()
+			step(1)
+		},
+		OUTSIDE_OVERLAYS,
+		[pairIds, selectedId]
+	)
 
 	return (
 		<ResizableSidebarPanel

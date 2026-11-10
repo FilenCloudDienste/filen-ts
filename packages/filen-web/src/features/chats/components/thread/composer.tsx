@@ -5,7 +5,9 @@ import { useNavigate } from "@tanstack/react-router"
 import { ArrowUpIcon, PlusIcon, UploadIcon, HardDriveIcon, SparklesIcon } from "lucide-react"
 import type { Chat, ChatMessage, ChatParticipant } from "@filen/sdk-rs"
 import { cn, isProAccount } from "@filen/shared"
-import { isImeKeydown } from "@filen/shared/keymap"
+import { isImeKeydown, isMacPlatform } from "@filen/shared/keymap"
+import { useComboFor } from "@/lib/keymap/registry"
+import { insertLineBreak, wrapInlineCode } from "@/features/chats/lib/keyboard.logic"
 import { noop } from "@/lib/utils"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { enqueueChatMessage } from "@/features/chats/lib/sync"
@@ -19,7 +21,8 @@ import {
 	isOverLimit,
 	remainingChars,
 	shouldShowCounter,
-	enterIntent,
+	composerKeyIntent,
+	isNativeLineBreak,
 	shouldEditLastOnArrowUp,
 	buildReplyPartial,
 	appendAttachmentUrl,
@@ -30,6 +33,7 @@ import {
 	applyEmoji,
 	lastEditableOwnMessage,
 	NEW_MODE,
+	type ComposerKeys,
 	type TriggerQuery
 } from "@/features/chats/lib/composer.logic"
 import { searchEmoji, type EmojiSuggestion } from "@/features/chats/lib/emoji"
@@ -61,6 +65,7 @@ const MAX_TEXTAREA_HEIGHT = 200
 // Autocomplete popovers cap at this many rows (mobile caps emoji at 10).
 const MENTION_LIMIT = 12
 const EMOJI_LIMIT = 8
+const IS_MAC = isMacPlatform()
 
 // The composer — replaces the earlier disabled strip. EVERY send goes through the durable outbox (enqueueChatMessage),
 // never sdkApi.sendChatMessage directly, so a send survives a window close / lost connection. Edits are
@@ -101,6 +106,16 @@ export function Composer({
 	const setDraft = useChatComposerStore(state => state.setDraft)
 	const setMode = useChatComposerStore(state => state.setMode)
 	const reset = useChatComposerStore(state => state.reset)
+	// The message field's keys, live (Settings → Keyboard), matched by its own keydown below.
+	const keys: ComposerKeys = {
+		send: useComboFor("chats.composer.send"),
+		newline: useComboFor("chats.composer.newline"),
+		editLast: useComboFor("chats.composer.editLast"),
+		cancel: useComboFor("chats.composer.cancel"),
+		inlineCode: useComboFor("chats.composer.inlineCode"),
+		attach: useComboFor("chats.composer.attach"),
+		attachFromDrive: useComboFor("chats.composer.attachFromDrive")
+	}
 
 	const textareaRef = useRef<HTMLTextAreaElement | null>(null)
 	const fileInputRef = useRef<HTMLInputElement | null>(null)
@@ -114,8 +129,9 @@ export function Composer({
 	// Escape closes an open popover WITHOUT touching the draft; cleared on the next keystroke so a fresh
 	// token re-opens it.
 	const [manualClose, setManualClose] = useState(false)
-	// Caret to restore after a store-driven value change (mention/emoji insert) lands in the DOM.
-	const pendingCaretRef = useRef<number | null>(null)
+	// Selection to restore after a store-driven value change (mention/emoji insert, a line break, inline code) lands in
+	// the DOM.
+	const pendingSelectionRef = useRef<{ start: number; end: number } | null>(null)
 	const sendingRef = useRef(false)
 	// Hold the live chat so the typing "stopped" cleanup keys on chatUuid only — the chat prop's identity
 	// changes on every conversation-list cache patch (a socket update mints a new object), which must NOT
@@ -215,18 +231,18 @@ export function Composer({
 		setCaret(end)
 	}, [chatUuid, entry.focusNonce])
 
-	// After a mention/emoji insert rewrote the value through the store, restore the intended caret.
+	// After an insert rewrote the value through the store, restore the intended selection.
 	useLayoutEffect(() => {
 		const el = textareaRef.current
-		const pending = pendingCaretRef.current
+		const pending = pendingSelectionRef.current
 
 		if (el === null || pending === null) {
 			return
 		}
 
-		pendingCaretRef.current = null
-		el.setSelectionRange(pending, pending)
-		setCaret(pending)
+		pendingSelectionRef.current = null
+		el.setSelectionRange(pending.start, pending.end)
+		setCaret(pending.end)
 	}, [draft])
 
 	function syncCaret(): void {
@@ -262,7 +278,7 @@ export function Composer({
 	}
 
 	function applyReplacement(next: { value: string; caret: number }): void {
-		pendingCaretRef.current = next.caret
+		pendingSelectionRef.current = { start: next.caret, end: next.caret }
 		setManualClose(false)
 		setDraft(chatUuid, next.value)
 	}
@@ -485,7 +501,7 @@ export function Composer({
 			}
 		}
 
-		const intent = enterIntent(event)
+		const intent = composerKeyIntent(event.nativeEvent, keys, IS_MAC)
 
 		if (intent === "send") {
 			event.preventDefault()
@@ -494,22 +510,72 @@ export function Composer({
 			return
 		}
 
-		if (event.key === "Escape" && mode.kind !== "new") {
+		// Shift+Enter is the field's own line break (and keeps the browser's undo); any other binding inserts one.
+		if (intent === "newline") {
+			if (!isNativeLineBreak(event)) {
+				event.preventDefault()
+				insertNewline(event.currentTarget)
+			}
+
+			return
+		}
+
+		if (intent === "cancel" && mode.kind !== "new") {
 			event.preventDefault()
 			cancelMode()
 
 			return
 		}
 
-		// ArrowUp in an empty composer edits the last own message (old-web affordance).
-		if (event.key === "ArrowUp" && shouldEditLastOnArrowUp(draft)) {
+		// In an empty composer, edits the last own message (old-web affordance).
+		if (intent === "editLast" && shouldEditLastOnArrowUp(draft)) {
 			const last = lastEditableOwnMessage(messages, sender?.id, nonConfirmedUuids)
 
 			if (last !== undefined) {
 				event.preventDefault()
 				beginMessageEdit(chatUuid, last)
 			}
+
+			return
 		}
+
+		if (intent === "inlineCode") {
+			event.preventDefault()
+			wrapSelectionInCode(event.currentTarget)
+
+			return
+		}
+
+		if (intent === "attach") {
+			event.preventDefault()
+
+			// The menu trigger's own gate; a free account learns why from the menu itself.
+			if (isPro && !isAttachDisabled(uploadingCount, isOnline, isPro)) {
+				fileInputRef.current?.click()
+			}
+
+			return
+		}
+
+		if (intent === "attachFromDrive") {
+			event.preventDefault()
+
+			if (isPro && !isAttachDisabled(uploadingCount, isOnline, isPro)) {
+				setAttachDriveOpen(true)
+			}
+		}
+	}
+
+	function insertNewline(field: HTMLTextAreaElement): void {
+		applyReplacement(insertLineBreak(draft, field.selectionStart, field.selectionEnd))
+	}
+
+	function wrapSelectionInCode(field: HTMLTextAreaElement): void {
+		const next = wrapInlineCode(draft, field.selectionStart, field.selectionEnd)
+
+		pendingSelectionRef.current = { start: next.selectionStart, end: next.selectionEnd }
+		setManualClose(false)
+		setDraft(chatUuid, next.value)
 	}
 
 	return (

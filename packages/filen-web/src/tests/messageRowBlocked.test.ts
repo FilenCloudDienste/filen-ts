@@ -64,7 +64,9 @@ function renderRow(overrides: Partial<ChatMessage> = {}, blockedUsers: BlockedUs
 			// A group chat, so an unhidden row shows its sender's name and avatar.
 			group: true,
 			currentUserId: 1n,
-			blocked: blockedUsers
+			blocked: blockedUsers,
+			active: false,
+			actionsRef: null
 		}),
 		{ wrapper }
 	)

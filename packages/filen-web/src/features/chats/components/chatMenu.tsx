@@ -1,9 +1,7 @@
 import { createElement, Fragment } from "react"
 import { useTranslation } from "react-i18next"
 import type { Chat } from "@filen/sdk-rs"
-import { runOutcomeActivity } from "@/lib/activity/activity"
-import { setChatMuted, markChatRead } from "@/features/chats/lib/actions"
-import { CHATS_MARK_READ, chatActivityName, setMutedKeys } from "@/features/chats/lib/activity"
+import { runMarkChatRead, runSetChatMuted } from "@/features/chats/lib/directActions"
 import { chatHasUnread } from "@/features/chats/lib/unread.logic"
 import { chatMessagesQueryGet } from "@/features/chats/queries/chatMessages"
 import type { BlockedUsers } from "@filen/shared"
@@ -51,18 +49,11 @@ function ChatMenuEntries({ chat, currentUserId, blocked, onAction, family }: Cha
 	function runDirect(descriptor: Extract<ChatActionDescriptor, { run: "direct" }>): void {
 		switch (descriptor.id) {
 			case "markRead":
-				void runOutcomeActivity(chat, { keys: CHATS_MARK_READ, name: chatActivityName, run: markChatRead })
+				runMarkChatRead(chat)
 				return
-			case "mute": {
-				const mute = !chat.muted
-
-				void runOutcomeActivity(chat, {
-					keys: setMutedKeys(mute),
-					name: chatActivityName,
-					run: target => setChatMuted(target, mute)
-				})
+			case "mute":
+				runSetChatMuted(chat, !chat.muted)
 				return
-			}
 		}
 	}
 

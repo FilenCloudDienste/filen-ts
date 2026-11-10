@@ -182,6 +182,40 @@ export const chats = {
 	// ── Multi-select / bulk actions ────────────────────────────────────────────
 	/** Keymap — mod+a: selects every currently-visible conversation */
 	chatsCommandSelectAll: "Select all conversations",
+	/** Keymap — opens the conversation below the open one in the list */
+	chatsCommandNextChat: "Next conversation",
+	/** Keymap — opens the conversation above the open one in the list */
+	chatsCommandPreviousChat: "Previous conversation",
+	/** Keymap — opens the next conversation below the open one that has unread messages */
+	chatsCommandNextUnread: "Next unread conversation",
+	/** Keymap — opens the previous conversation above the open one that has unread messages */
+	chatsCommandPreviousUnread: "Previous unread conversation",
+	/** Keymap — mutes the open (or selected) conversation, or unmutes it when muted */
+	chatsCommandToggleMute: "Mute or unmute conversation",
+	/** Keymap — deletes the selected (or open) conversations you own, or leaves the ones you don't */
+	chatsCommandDeleteOrLeave: "Delete or leave conversations",
+	/** Keymap — scrolls the thread to the newest message, or moves focus to it from a focused message */
+	chatsCommandJumpToLatest: "Jump to newest message",
+	/** Keymap — scrolls the thread to the oldest loaded message, or moves focus to it from a focused message */
+	chatsCommandJumpToOldest: "Jump to oldest message",
+	/** Keymap — inserts a line break in the message being written instead of sending it */
+	chatsCommandNewline: "New line",
+	/** Keymap — loads your last sent message into the message field to edit it */
+	chatsCommandEditLast: "Edit your last message",
+	/** Keymap — stops replying to or editing a message */
+	chatsCommandCancelMode: "Cancel reply or edit",
+	/** Keymap — wraps the selected text in the message field as inline code (backticks) */
+	chatsCommandInlineCode: "Inline code",
+	/** Keyboard shortcuts — where a shortcut works: with focus in the conversation list */
+	chatsKeyHintList: "In the conversation list",
+	/** Keyboard shortcuts — where a shortcut works: with focus in the message list of a conversation */
+	chatsKeyHintThread: "In the message list",
+	/** Keyboard shortcuts — where a shortcut works: while typing a message */
+	chatsKeyHintComposer: "In the message field",
+	/** Keyboard shortcuts — where a shortcut works: in the message field while it is empty */
+	chatsKeyHintComposerEmpty: "In an empty message field",
+	/** Keyboard shortcuts — where a shortcut works: on the message that has keyboard focus (move between messages with the arrow keys) */
+	chatsKeyHintMessage: "On the focused message",
 	/** Bulk delete confirm — heading */
 	chatsDeleteSelectedConfirmTitle: "Delete conversations?",
 	/** Bulk delete confirm — body copy */

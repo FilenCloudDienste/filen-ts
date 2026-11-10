@@ -1,6 +1,6 @@
 import type { ComponentType } from "react"
 import { useTranslation } from "react-i18next"
-import { Link } from "@tanstack/react-router"
+import { Link, useRouter } from "@tanstack/react-router"
 import {
 	UserIcon,
 	ShieldIcon,
@@ -18,6 +18,8 @@ import { SIDEBAR_NAV_ITEM_CLASS } from "@/features/shell/lib/sidebarNavItem"
 import { desktopBridge } from "@/lib/desktop"
 import { useMasterKeysNotExported } from "@/queries/account"
 import { RailStatusDot } from "@/features/shell/components/railProgressBar"
+import { OUTSIDE_OVERLAYS, useAction } from "@/lib/keymap/useAction"
+import { steppedItem } from "@/features/settings/lib/stepped.logic"
 
 type IconType = ComponentType<{ className?: string }>
 
@@ -71,6 +73,15 @@ const SETTINGS_ITEMS: SettingsSidebarItem[] = [
 		: [{ id: "desktop", labelKey: "settingsSectionDesktop", icon: MonitorIcon, to: "/settings/desktop" } as const])
 ]
 
+const SETTINGS_ROUTES: readonly SettingsRoute[] = SETTINGS_ITEMS.map(item => item.to)
+
+// The section `step` places from the one at `pathname` in sidebar order (steppedItem).
+function steppedSettingsRoute(pathname: string, step: 1 | -1): SettingsRoute | null {
+	const current = SETTINGS_ROUTES.find(route => pathname === route || pathname.startsWith(`${route}/`)) ?? null
+
+	return steppedItem(SETTINGS_ROUTES, current, step)
+}
+
 // The shell's settings contextual sidebar: a flat list of section nav links, same w-52
 // rounded-xl borderless panel geometry as the other three module sidebars. TanStack stamps
 // `data-status="active"` on the matching Link automatically — no manual pathname comparison needed
@@ -79,6 +90,36 @@ export function SettingsSidebar() {
 	const { t } = useTranslation(["settings", "common"])
 	// A selector over the held account: no request, and a re-render only when the answer flips.
 	const keysNotExported = useMasterKeysNotExported()
+	const router = useRouter()
+
+	// The location is read at the key press, not subscribed: nothing here renders it.
+	function step(direction: 1 | -1): void {
+		const to = steppedSettingsRoute(router.state.location.pathname, direction)
+
+		if (to !== null) {
+			void router.navigate({ to })
+		}
+	}
+
+	// Defs in features/settings/lib/keymap.ts. Alt+↑/↓ walk the sections below; the page under a dialog or menu keeps
+	// its place. Not in a text field, whose Alt+↑/↓ move the caret.
+	useAction(
+		"settings.previousSection",
+		event => {
+			event.preventDefault()
+			step(-1)
+		},
+		OUTSIDE_OVERLAYS
+	)
+
+	useAction(
+		"settings.nextSection",
+		event => {
+			event.preventDefault()
+			step(1)
+		},
+		OUTSIDE_OVERLAYS
+	)
 
 	return (
 		<SidebarPanel>

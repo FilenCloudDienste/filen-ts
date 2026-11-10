@@ -88,6 +88,10 @@ import { ContactPickerDialog } from "@/features/drive/components/contactPickerDi
 import { VersionsDialog } from "@/features/drive/components/versionsDialog"
 import { narrowItem } from "@/features/drive/lib/item"
 import { type FileItem } from "@/features/drive/lib/actions"
+import { registerAllActions } from "@/lib/keymap/actions"
+
+// The contacts dialog binds its shortcut through the registry.
+registerAllActions()
 
 const OFFLINE_TITLE = "Unavailable while offline"
 

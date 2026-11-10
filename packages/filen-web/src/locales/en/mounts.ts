@@ -459,5 +459,12 @@ export const mounts = {
 	/** Problem — inside a sync pair */
 	problemInsidePair: "It's inside a synced directory.",
 	/** Problem — contains a sync pair */
-	problemContainsPair: "It contains a synced directory."
+	problemContainsPair: "It contains a synced directory.",
+	// Keyboard shortcuts (Settings → Keyboard and the ? dialog)
+	/** Keyboard shortcut — opens the Mounts page above the open one in the sidebar */
+	mountsCommandPreviousRole: "Previous mount",
+	/** Keyboard shortcut — opens the Mounts page below the open one in the sidebar */
+	mountsCommandNextRole: "Next mount",
+	/** Keyboard shortcut — turns the open Mounts page's drive or server on or off */
+	mountsCommandToggleRole: "Turn mount on or off"
 } as const

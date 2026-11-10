@@ -1,4 +1,12 @@
-import { useState } from "react"
+import {
+	useCallback,
+	useLayoutEffect,
+	useRef,
+	useState,
+	type FocusEvent as ReactFocusEvent,
+	type KeyboardEvent as ReactKeyboardEvent
+} from "react"
+import type { Options } from "react-hotkeys-hook"
 import { useTranslation } from "react-i18next"
 import { useShallow } from "zustand/shallow"
 import { useNavigate } from "@tanstack/react-router"
@@ -13,7 +21,7 @@ import {
 	useTransfersStore,
 	type Transfer
 } from "@/features/transfers/store/useTransfersStore"
-import { useDriveJobsStore } from "@/features/transfers/store/useDriveJobsStore"
+import { getDriveJob, useDriveJobsStore } from "@/features/transfers/store/useDriveJobsStore"
 import { pruneSettledDriveJobs } from "@/features/drive/lib/driveJobs"
 import {
 	buildTransfersDisplayList,
@@ -25,7 +33,18 @@ import {
 	resumableTransferIds,
 	shouldShowTransfersAggregate
 } from "@/features/transfers/screens/transfers.logic"
-import { cancelTransfer, cancelTransfers, cancelUploadRuns, setTransfersPaused } from "@/features/transfers/lib/control"
+import { cancelTransfer, cancelTransfers, cancelUploadRuns, setTransferPaused, setTransfersPaused } from "@/features/transfers/lib/control"
+import {
+	focusedTransferId,
+	landedRevealItem,
+	TRANSFER_ROW_ATTRIBUTE,
+	transferRowCommands,
+	type TransferRowCommand
+} from "@/features/transfers/lib/rowKeys.logic"
+import { showJobToast } from "@/features/transfers/lib/jobToast"
+import { clampListboxIndex, listboxKeyTarget, resolveCursorIndex } from "@/features/drive/lib/listbox"
+import { hasCommandModifier } from "@/lib/rowKeys"
+import { ignoredUnderOverlays, OUTSIDE_OVERLAYS, useAction } from "@/lib/keymap/useAction"
 import { TransferRow } from "@/features/transfers/components/transferRow"
 import { ExternalTransferRowView } from "@/features/transfers/components/externalTransferRow"
 import {
@@ -122,6 +141,51 @@ export function TransfersScreen() {
 		setTransfersPaused(resumable, false)
 	}
 
+	function handleClearFinished(): void {
+		// .getState() idiom — the exact store call, outside render (mirrors directoryListing.tsx's own convention for
+		// every store mutation triggered from an event handler).
+		useTransfersStore.getState().clearFinished()
+		pruneSettledDriveJobs()
+	}
+
+	// Defs in features/transfers/lib/keymap.ts: the header buttons' commands, under their gates, standing down under any
+	// dialog or menu. Pause or resume all pauses while anything runs, and resumes once nothing does.
+	useAction(
+		"transfers.togglePauseAll",
+		() => {
+			if (pausable.length > 0) {
+				handlePauseAll()
+			} else if (resumable.length > 0) {
+				handleResumeAll()
+			}
+		},
+		OUTSIDE_OVERLAYS,
+		[pausable, resumable]
+	)
+
+	useAction(
+		"transfers.cancelAll",
+		event => {
+			if (cancellable.length > 0) {
+				event.preventDefault()
+				setCancelAllConfirmOpen(true)
+			}
+		},
+		OUTSIDE_OVERLAYS,
+		[cancellable]
+	)
+
+	useAction(
+		"transfers.clearFinished",
+		() => {
+			if (clearable) {
+				handleClearFinished()
+			}
+		},
+		OUTSIDE_OVERLAYS,
+		[clearable]
+	)
+
 	return (
 		<>
 			{/* One row at every width: below sm the summary goes and the buttons shed their labels, each
@@ -169,12 +233,7 @@ export function TransfersScreen() {
 						className="ml-1"
 						aria-label={t("transfersClearFinished")}
 						disabled={!clearable}
-						onClick={() => {
-							// .getState() idiom — the exact store call, outside render (mirrors directoryListing.tsx's
-							// own convention for every store mutation triggered from an event handler).
-							useTransfersStore.getState().clearFinished()
-							pruneSettledDriveJobs()
-						}}
+						onClick={handleClearFinished}
 					>
 						<BrushCleaningIcon aria-hidden="true" />
 						<span className="hidden sm:inline">{t("transfersClearFinished")}</span>
@@ -259,6 +318,12 @@ function withHint(body: string, hint: string | null): string {
 	return hint === null ? body : `${body} ${hint}`
 }
 
+// A row's keys fire only with the row itself focused (its buttons keep their own Space and Enter), and stand down under
+// any dialog or menu.
+const ROW_KEYS: Options = {
+	ignoreEventWhen: event => ignoredUnderOverlays(event) || focusedTransferId(event.target) === null
+}
+
 // Laid-out heights the virtualizer counts in: a section heading, and a row plus the gap after it. A row
 // is one line of fixed-size content, so this stays exact.
 const SECTION_HEADING_HEIGHT = 36
@@ -310,9 +375,184 @@ function TransfersList({
 	const first = virtualItems[0]?.index ?? 0
 	const last = virtualItems.at(-1)?.index ?? -1
 
+	// The page's own rows in order across both sections, each with its index in the virtualizer's run. The desktop app's
+	// sync and mounts rows are read-only and take no part in the cursor.
+	const rowIds: string[] = []
+	const rowRunIndex: number[] = []
+
+	for (const [sectionIndex, section] of sections.entries()) {
+		const rowsStart = (headings[sectionIndex] ?? 0) + 1
+
+		for (const [index, transfer] of section.own.entries()) {
+			rowIds.push(transfer.id)
+			rowRunIndex.push(rowsStart + index)
+		}
+	}
+
+	// Roving cursor: the one row in the Tab order, tracked by id so a row settling (and moving to the finished
+	// section) keeps it, and by its last index for when that row is removed.
+	const [cursorId, setCursorId] = useState<string | null>(null)
+	const cursorIndexRef = useRef(0)
+	const cursorIndex = resolveCursorIndex(cursorId, rowIds, cursorIndexRef.current)
+	const tabStopId = rowIds[cursorIndex]
+	// A row the cursor moved to that the virtualizer has yet to mount, focused once it has.
+	const pendingFocusRef = useRef<string | null>(null)
+
+	function focusPending(): void {
+		const id = pendingFocusRef.current
+
+		if (id === null || scrollElement === null) {
+			return
+		}
+
+		const row = scrollElement.querySelector<HTMLElement>(`[${TRANSFER_ROW_ATTRIBUTE}="${CSS.escape(id)}"]`)
+
+		if (row !== null) {
+			pendingFocusRef.current = null
+			row.focus()
+		}
+	}
+
+	useLayoutEffect(focusPending)
+
+	function moveCursorTo(index: number): void {
+		const id = rowIds[index]
+
+		if (id === undefined) {
+			return
+		}
+
+		cursorIndexRef.current = index
+		setCursorId(id)
+		pendingFocusRef.current = id
+		virtualizer.scrollToIndex(rowRunIndex[index] ?? 0)
+		focusPending()
+	}
+
+	function handleKeyDown(event: ReactKeyboardEvent<HTMLDivElement>): void {
+		if (focusedTransferId(event.target) === null || hasCommandModifier(event) || event.shiftKey) {
+			return
+		}
+
+		const target = listboxKeyTarget(event.key, cursorIndex, rowIds.length, 1, false)
+
+		if (target === null) {
+			return
+		}
+
+		event.preventDefault()
+		moveCursorTo(clampListboxIndex(target, rowIds.length))
+	}
+
+	// A click or Tab onto a row makes it the cursor.
+	function handleFocus(event: ReactFocusEvent<HTMLDivElement>): void {
+		const id = focusedTransferId(event.target)
+		const index = id === null ? -1 : rowIds.indexOf(id)
+
+		if (id !== null && index !== -1) {
+			cursorIndexRef.current = index
+			setCursorId(id)
+		}
+	}
+
+	// The focused row and what its keys may do now, read from the stores at the key press.
+	function focusedRow(event: KeyboardEvent): { transfer: Transfer; commands: ReadonlySet<TransferRowCommand> } | null {
+		const id = focusedTransferId(event.target)
+		const transfer = id === null ? undefined : transferById(useTransfersStore.getState().transfers, id)
+
+		return transfer === undefined ? null : { transfer, commands: transferRowCommands(transfer, getDriveJob(transfer.id)) }
+	}
+
+	// Defs in features/transfers/lib/keymap.ts: the focused row's buttons, under the gates they show under.
+	const pauseRef = useAction(
+		"transfers.rowPause",
+		event => {
+			const row = focusedRow(event)
+
+			if (row?.commands.has("pause") === true) {
+				setTransferPaused(row.transfer.id, !row.transfer.paused)
+			}
+		},
+		ROW_KEYS
+	)
+	const cancelRef = useAction(
+		"transfers.rowCancel",
+		event => {
+			const row = focusedRow(event)
+
+			if (row === null) {
+				return
+			}
+
+			event.preventDefault()
+
+			if (row.commands.has("cancel")) {
+				onRequestCancel(row.transfer)
+			} else if (row.commands.has("remove")) {
+				// Focus stays in the list: on the next row, or the previous one at the end.
+				const index = rowIds.indexOf(row.transfer.id)
+				const neighbour = rowIds[index + 1] ?? rowIds[index - 1]
+
+				pendingFocusRef.current = neighbour ?? null
+				cursorIndexRef.current = index
+				setCursorId(neighbour ?? null)
+				useTransfersStore.getState().remove(row.transfer.id)
+				pruneSettledDriveJobs()
+			}
+		},
+		ROW_KEYS,
+		[rowIds, onRequestCancel]
+	)
+	const revealRef = useAction(
+		"transfers.rowShowInDirectory",
+		event => {
+			const row = focusedRow(event)
+			const item = row?.commands.has("reveal") === true ? landedRevealItem(row.transfer, getDriveJob(row.transfer.id)) : null
+
+			if (item !== null) {
+				event.preventDefault()
+				onShowInDirectory(item)
+			}
+		},
+		ROW_KEYS,
+		[onShowInDirectory]
+	)
+	const detailsRef = useAction(
+		"transfers.rowDetails",
+		event => {
+			const row = focusedRow(event)
+
+			if (row?.commands.has("details") === true) {
+				showJobToast(row.transfer.id)
+			}
+		},
+		ROW_KEYS
+	)
+	// One ref for the scroller: the virtualizer reads it, and the row keys listen on it.
+	const setScroller = useCallback(
+		(element: HTMLDivElement | null) => {
+			setScrollElement(element)
+
+			const releases = [pauseRef(element), cancelRef(element), revealRef(element), detailsRef(element)]
+
+			return () => {
+				setScrollElement(null)
+
+				for (const release of releases) {
+					if (typeof release === "function") {
+						release()
+					}
+				}
+			}
+		},
+		[pauseRef, cancelRef, revealRef, detailsRef]
+	)
+
 	return (
 		<div
-			ref={setScrollElement}
+			ref={setScroller}
+			onKeyDown={handleKeyDown}
+			onFocus={handleFocus}
 			className="flex-1 overflow-y-auto px-2 pb-4"
 		>
 			{sections.map((section, sectionIndex) => {
@@ -341,6 +581,7 @@ function TransfersList({
 									// Only an active row renders its Cancel button (TransferRow's active branch).
 									onRequestCancel={onRequestCancel}
 									onShowInDirectory={onShowInDirectory}
+									tabStop={transfer.id === tabStopId}
 								/>
 							))}
 							{section.external.slice(Math.max(0, from - ownCount), Math.max(0, to - ownCount)).map(row => (

@@ -722,5 +722,32 @@ export const sync = {
 	/** Add — create the pair */
 	addCreate: "Add pair",
 	/** Toast — the pair started */
-	addStarted: "Sync started"
+	addStarted: "Sync started",
+	// Keyboard shortcuts (Settings → Keyboard and the ? dialog)
+	/** Keyboard shortcut — opens the add-pair dialog */
+	syncCommandAddPair: "Add sync pair",
+	/** Keyboard shortcut — opens the pair above the open one in the sidebar */
+	syncCommandPreviousPair: "Previous sync pair",
+	/** Keyboard shortcut — opens the pair below the open one in the sidebar */
+	syncCommandNextPair: "Next sync pair",
+	/** Keyboard shortcut — pauses the open pair, or resumes it when paused */
+	syncCommandTogglePause: "Pause or resume sync pair",
+	/** Keyboard shortcut — runs the open pair's sync right away */
+	syncCommandSyncNow: "Sync pair now",
+	/** Keyboard shortcut — asks to remove the open pair */
+	syncCommandRemovePair: "Remove sync pair",
+	/** Keyboard shortcut — starts a pair kept paused for review */
+	syncCommandStartReview: "Start reviewed sync pair",
+	/** Keyboard shortcut — saves the ignore rules being edited */
+	syncCommandSaveIgnoreRules: "Save ignore rules",
+	/** Keyboard shortcuts list — where the shortcut works: in the ignore rules editor */
+	syncCommandHintIgnoreEditor: "In the ignore rules editor",
+	/** Keyboard shortcut — shows the open pair's Activity tab */
+	syncCommandTabActivity: "Show sync activity",
+	/** Keyboard shortcut — shows the open pair's Issues tab */
+	syncCommandTabIssues: "Show sync issues",
+	/** Keyboard shortcut — shows the open pair's Ignored tab */
+	syncCommandTabIgnored: "Show ignored items",
+	/** Keyboard shortcut — shows the open pair's Settings tab */
+	syncCommandTabSettings: "Show sync pair settings"
 } as const

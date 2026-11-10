@@ -1,6 +1,7 @@
-import { useEffect, useState, type ReactNode } from "react"
+import { useEffect, useRef, useState, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
-import { useRouterState } from "@tanstack/react-router"
+import { useNavigate, useRouterState } from "@tanstack/react-router"
+import type { Options } from "react-hotkeys-hook"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import { useShallow } from "zustand/shallow"
 import { SearchIcon, MessagesSquareIcon, PlusIcon } from "lucide-react"
@@ -15,12 +16,17 @@ import {
 	staleChatSelectionUuids
 } from "@/features/chats/components/chatsSidebar.logic"
 import { useBlockedUsers } from "@/features/contacts/hooks/useBlockedUsers"
-import { selectableChatsForSelectAll } from "@/features/chats/lib/selectionFlags"
+import { aggregateChatSelectionFlags, selectableChatsForSelectAll } from "@/features/chats/lib/selectionFlags"
+import { chatHasUnread } from "@/features/chats/lib/unread.logic"
+import { chatMessagesQueryGet } from "@/features/chats/queries/chatMessages"
+import { adjacentChatUuid, adjacentUnreadChatUuid, chatCommandTargets } from "@/features/chats/lib/keyboard.logic"
+import { runMarkChatRead, runMarkChatsRead, runSetChatMuted, runSetChatsMuted } from "@/features/chats/lib/directActions"
 import { useChatsSelectionStore } from "@/features/chats/store/useChatsSelectionStore"
 import { useChatsListSelection } from "@/features/chats/hooks/useChatsListSelection"
 import { ChatRow } from "@/features/chats/components/chatRow"
 import { ChatsBulkActionBar } from "@/features/chats/components/chatsBulkActionBar"
-import { type ChatActionDialogKind } from "@/features/chats/components/chatMenu.logic"
+import { applyOfflineGate, chatMenuActions, type ChatActionDialogKind, type ChatActionId } from "@/features/chats/components/chatMenu.logic"
+import { chatBulkActions, isChatBulkActionOfflineDisabled } from "@/features/chats/components/chatsBulkActionBar.logic"
 import { useChatDialogHost } from "@/features/chats/hooks/useChatDialogHost"
 import { useIsSidebarPanelVisible } from "@/features/shell/lib/sidebarPanelVisibility"
 import { ResizableSidebarPanel } from "@/features/shell/components/sidebarPanel"
@@ -34,6 +40,9 @@ import { SidebarNotice } from "@/components/sidebarNotice"
 import { BULK_BAR_MIN_SELECTION } from "@/components/selectionActionBar"
 import { observeElementOffsetFromAttach } from "@/lib/virtualScroll"
 
+// Next/previous conversation also work in the message field (Slack's Alt+↑/↓): a chord the textarea has no use for.
+const IN_COMPOSER: Options = { ...OUTSIDE_OVERLAYS, enableOnFormTags: ["option", "textarea"] }
+
 // Fixed row height — the single virtualizer needs no measureElement pass (the name line and the two-line
 // preview clamp are pinned to a known height), same as notesSidebar's constant-height rows.
 const CHAT_ROW_HEIGHT = 72
@@ -46,6 +55,7 @@ export function ChatsSidebar() {
 	const { t } = useTranslation(["chats", "common"])
 	const isOnline = useIsOnline()
 	const panelVisible = useIsSidebarPanelVisible()
+	const navigate = useNavigate()
 	const pathname = useRouterState({ select: state => state.location.pathname })
 	const selectedUuid = selectedChatUuidFromPath(pathname)
 
@@ -60,6 +70,7 @@ export function ChatsSidebar() {
 
 	const [search, setSearch] = useState("")
 	const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(null)
+	const headerRef = useRef<HTMLDivElement | null>(null)
 
 	const allChats = chatsQuery.data ?? []
 	// A 1:1 whose sole other participant is blocked drops out of the list entirely (mobile parity); the
@@ -140,6 +151,186 @@ export function ChatsSidebar() {
 		{ ...OUTSIDE_OVERLAYS, enabled: panelVisible }
 	)
 
+	// One conversation through its menu's own gates (chatMenuActions plus the offline gate), several through the bulk
+	// bar's, so a key never does what the menu or the bar would refuse. Delete falls back to Leave, as the menu swaps
+	// them by ownership.
+	//
+	// The targets: the selection, only while the panel showing it is in sight, else the open conversation (from the full
+	// list: a 1:1 with a blocked participant is open by URL but not listed). Resolved at the key press, so no render
+	// hands the query's chats to a call between this component's hooks.
+	function runChatCommand(ids: readonly ChatActionId[]): void {
+		const chats = chatCommandTargets(
+			panelVisible ? liveSelectedChats : [],
+			allChats.find(chat => chat.uuid === selectedUuid)
+		)
+		const single = chats[0]
+
+		if (single === undefined) {
+			return
+		}
+
+		if (chats.length === 1) {
+			const unread = chatHasUnread(single, currentUserId, blocked, chatMessagesQueryGet)
+			const descriptor = applyOfflineGate(chatMenuActions(single, currentUserId, unread), isOnline).find(
+				entry => ids.includes(entry.id) && entry.enabled !== false
+			)
+
+			if (descriptor === undefined) {
+				return
+			}
+
+			if (descriptor.run === "dialog") {
+				dialogHost.openChatDialog(descriptor.dialogKind, single)
+			} else if (descriptor.id === "markRead") {
+				runMarkChatRead(single)
+			} else {
+				runSetChatMuted(single, !single.muted)
+			}
+
+			return
+		}
+
+		const targets = [...chats]
+		const flags = aggregateChatSelectionFlags(targets, currentUserId, blocked, chatMessagesQueryGet)
+		const descriptor = chatBulkActions(flags).find(
+			entry => ids.includes(entry.id) && !isChatBulkActionOfflineDisabled(entry.id, isOnline)
+		)
+
+		if (descriptor === undefined) {
+			return
+		}
+
+		if (descriptor.run === "dialog") {
+			dialogHost.openBulkDialog(descriptor.dialogKind, targets)
+		} else if (descriptor.id === "markRead") {
+			runMarkChatsRead(targets)
+		} else {
+			runSetChatsMuted(targets, !flags.includesMuted)
+		}
+	}
+
+	function openAdjacent(uuid: string | null): void {
+		if (uuid !== null) {
+			void navigate({ to: "/chats/$uuid", params: { uuid } })
+		}
+	}
+
+	function hasUnread(chat: Chat): boolean {
+		return chatHasUnread(chat, currentUserId, blocked, chatMessagesQueryGet)
+	}
+
+	// Defs in features/chats/lib/keymap.ts. New chat is gated on the connectivity flag its button is disabled by.
+	useAction(
+		"chats.newChat",
+		() => {
+			if (isOnline) {
+				dialogHost.openCreateChatDialog()
+			}
+		},
+		OUTSIDE_OVERLAYS,
+		[isOnline]
+	)
+
+	// The box lives in this panel, so the key is off while the panel is out of sight and the browser's find keeps it.
+	useAction(
+		"chats.search",
+		event => {
+			event.preventDefault()
+			headerRef.current?.querySelector("input")?.focus()
+		},
+		{ ...OUTSIDE_OVERLAYS, enabled: panelVisible }
+	)
+
+	useAction(
+		"chats.nextChat",
+		event => {
+			event.preventDefault()
+			openAdjacent(adjacentChatUuid(rows, selectedUuid, 1))
+		},
+		IN_COMPOSER,
+		[rows, selectedUuid]
+	)
+
+	useAction(
+		"chats.previousChat",
+		event => {
+			event.preventDefault()
+			openAdjacent(adjacentChatUuid(rows, selectedUuid, -1))
+		},
+		IN_COMPOSER,
+		[rows, selectedUuid]
+	)
+
+	// Unread is derived on the key press only, never per render.
+	useAction(
+		"chats.nextUnread",
+		event => {
+			event.preventDefault()
+			openAdjacent(adjacentUnreadChatUuid(rows, selectedUuid, 1, hasUnread))
+		},
+		IN_COMPOSER,
+		[rows, selectedUuid, currentUserId, blocked]
+	)
+
+	useAction(
+		"chats.previousUnread",
+		event => {
+			event.preventDefault()
+			openAdjacent(adjacentUnreadChatUuid(rows, selectedUuid, -1, hasUnread))
+		},
+		IN_COMPOSER,
+		[rows, selectedUuid, currentUserId, blocked]
+	)
+
+	useAction(
+		"chats.rename",
+		event => {
+			event.preventDefault()
+			runChatCommand(["rename"])
+		},
+		OUTSIDE_OVERLAYS,
+		[liveSelectedChats, allChats, selectedUuid, panelVisible, isOnline, currentUserId, blocked]
+	)
+
+	useAction(
+		"chats.participants",
+		() => {
+			runChatCommand(["participants"])
+		},
+		OUTSIDE_OVERLAYS,
+		[liveSelectedChats, allChats, selectedUuid, panelVisible, isOnline, currentUserId, blocked]
+	)
+
+	useAction(
+		"chats.markRead",
+		() => {
+			runChatCommand(["markRead"])
+		},
+		OUTSIDE_OVERLAYS,
+		[liveSelectedChats, allChats, selectedUuid, panelVisible, isOnline, currentUserId, blocked]
+	)
+
+	useAction(
+		"chats.mute",
+		() => {
+			runChatCommand(["mute"])
+		},
+		OUTSIDE_OVERLAYS,
+		[liveSelectedChats, allChats, selectedUuid, panelVisible, isOnline, currentUserId, blocked]
+	)
+
+	// Scoped to the conversation list, like select all: in the thread, Delete is the focused message's. preventDefault:
+	// Backspace still has a "go back" default in some engines.
+	const deleteRef = useAction(
+		"chats.deleteSelected",
+		event => {
+			event.preventDefault()
+			runChatCommand(["delete", "leave"])
+		},
+		{ ...OUTSIDE_OVERLAYS, enabled: panelVisible },
+		[liveSelectedChats, allChats, selectedUuid, panelVisible, isOnline, currentUserId, blocked]
+	)
+
 	// Null while listing; ChatsVirtualList renders the rows then.
 	function renderFallback(): ReactNode {
 		if (chatsQuery.isPending) {
@@ -180,7 +371,10 @@ export function ChatsSidebar() {
 			module="chats"
 			resizeLabel={t("chatsSidebarResize")}
 		>
-			<div className="flex flex-col gap-2 p-3">
+			<div
+				ref={headerRef}
+				className="flex flex-col gap-2 p-3"
+			>
 				<div className="flex items-center justify-between gap-2">
 					<h2 className="truncate px-1 text-[15px] font-semibold">{t("chatsSidebarTitle")}</h2>
 					<Button
@@ -208,7 +402,15 @@ export function ChatsSidebar() {
 			</div>
 
 			<div
-				ref={selectAllRef}
+				ref={element => {
+					const releaseSelectAll = selectAllRef(element)
+					const releaseDelete = deleteRef(element)
+
+					return () => {
+						releaseSelectAll?.()
+						releaseDelete?.()
+					}
+				}}
 				className="relative flex min-h-0 flex-1 flex-col"
 			>
 				<div

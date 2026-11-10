@@ -19,6 +19,7 @@ import { PublicPreview } from "@/features/publicLinks/components/publicPreview"
 import { SaveToDriveButton } from "@/features/publicLinks/components/saveToDrive"
 import { PublicArchiveActions, PublicArchiveBrowser } from "@/features/publicLinks/components/publicArchive"
 import { DownloadTooLargeNote } from "@/features/publicLinks/components/publicLinkStates"
+import { OUTSIDE_OVERLAYS, useAction } from "@/lib/keymap/useAction"
 
 type DownloadUiState =
 	| { status: "idle" }
@@ -97,6 +98,20 @@ export function FileHero({
 			}
 		})
 	}
+
+	// Def in features/publicLinks/lib/keymap.ts: Download, under the buttons' gate, in place of the browser's Save Page.
+	useAction(
+		"links.download",
+		event => {
+			event.preventDefault()
+
+			if (download.status !== "running") {
+				handleDownload()
+			}
+		},
+		{ ...OUTSIDE_OVERLAYS, enabled: downloadEnabled },
+		[download.status, item, name, size, linkScope]
+	)
 
 	const downloadButton = downloadEnabled ? (
 		<Button

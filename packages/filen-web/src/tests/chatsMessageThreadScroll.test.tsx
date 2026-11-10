@@ -37,8 +37,12 @@ vi.mock("@/features/chats/components/thread/composer", () => ({
 }))
 vi.mock("@/features/chats/components/thread/typingIndicator", () => ({ TypingIndicator: () => null }))
 vi.mock("@/features/chats/components/thread/messageRow", () => ({
-	MessageRow: ({ message }: { message: ChatMessage }) =>
-		createElement("button", { type: "button", "data-testid": "message" }, message.message)
+	MessageRow: ({ message, active }: { message: ChatMessage; active: boolean }) =>
+		createElement(
+			"button",
+			{ type: "button", "data-testid": "message", "data-message-focus": "", tabIndex: active ? 0 : -1 },
+			message.message
+		)
 }))
 vi.mock("@/features/chats/components/chatMenu", () => ({ ChatDropdownMenuContent: () => null }))
 vi.mock("@/features/chats/hooks/useChatDialogHost", () => ({
@@ -49,9 +53,13 @@ vi.mock("sonner", () => ({ toast: { error: toastError } }))
 vi.mock("@/lib/i18n/errorLabel", () => ({ errorLabel: () => "Could not mark as read" }))
 
 import "@/lib/i18n"
+import { registerAllActions } from "@/lib/keymap/actions"
 import { MessageThread } from "@/features/chats/components/thread/messageThread"
 import { RUN_CONTINUATION_ROW_ESTIMATE } from "@/features/chats/components/thread/thread.logic"
 import { testUuid } from "@/tests/support/uuid"
+
+// The thread binds Home, End and the message keys through the registry.
+registerAllActions()
 
 const CLIENT_HEIGHT = 300
 // A run's bubbles measure at their estimate, as they do in a browser.
@@ -412,11 +420,46 @@ describe("MessageThread — keyboard", () => {
 		render(createElement(MessageThread, { chat: a }))
 		const el = scrollContainer()
 
-		expect(fireEvent.keyDown(el, { key: "Home" })).toBe(false)
+		expect(fireEvent.keyDown(el, { key: "Home", code: "Home" })).toBe(false)
 		expect(el.scrollTop).toBe(-geometry.scrollHeight)
 
-		expect(fireEvent.keyDown(el, { key: "End" })).toBe(false)
+		expect(fireEvent.keyDown(el, { key: "End", code: "End" })).toBe(false)
 		expect(el.scrollTop).toBe(0)
+	})
+
+	it("makes the newest message the thread's one Tab stop, and moves focus between messages with ↑/↓, Home and End", () => {
+		const a = chat("a")
+		messagesByChat.set(a.uuid, [message("a", "m1", 100n), message("a", "m2", 200n), message("a", "m3", 300n)])
+		loadOlderChatMessages.mockReturnValue(new Promise<ChatMessage[]>(() => undefined))
+
+		render(createElement(MessageThread, { chat: a }))
+		const [oldest, middle, newest] = screen.getAllByTestId("message")
+
+		if (oldest === undefined || middle === undefined || newest === undefined) {
+			throw new Error("messages not rendered")
+		}
+
+		expect(newest.tabIndex).toBe(0)
+		expect(oldest.tabIndex).toBe(-1)
+
+		act(() => {
+			newest.focus()
+		})
+		act(() => {
+			fireEvent.keyDown(newest, { key: "ArrowUp", code: "ArrowUp" })
+		})
+		expect(document.activeElement).toBe(middle)
+		expect(middle.tabIndex).toBe(0)
+
+		act(() => {
+			fireEvent.keyDown(middle, { key: "Home", code: "Home" })
+		})
+		expect(document.activeElement).toBe(oldest)
+
+		act(() => {
+			fireEvent.keyDown(oldest, { key: "End", code: "End" })
+		})
+		expect(document.activeElement).toBe(newest)
 	})
 
 	it("leaves modified Home and End to the browser", () => {
@@ -426,8 +469,8 @@ describe("MessageThread — keyboard", () => {
 		render(createElement(MessageThread, { chat: a }))
 		const el = scrollContainer()
 
-		expect(fireEvent.keyDown(el, { key: "Home", shiftKey: true })).toBe(true)
-		expect(fireEvent.keyDown(el, { key: "Home", ctrlKey: true })).toBe(true)
+		expect(fireEvent.keyDown(el, { key: "Home", code: "Home", shiftKey: true })).toBe(true)
+		expect(fireEvent.keyDown(el, { key: "Home", code: "Home", ctrlKey: true })).toBe(true)
 		expect(el.scrollTop).toBe(0)
 	})
 

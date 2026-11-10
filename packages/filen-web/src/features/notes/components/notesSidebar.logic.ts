@@ -342,3 +342,54 @@ export function selectableRowIndexByKey(rows: readonly NotesSidebarRow[]): Map<s
 
 	return indexByKey
 }
+
+// What an arrow key, Home or End does on the row at `from` of the sidebar list: move focus to another row (headers
+// are labels, never stops), or expand or collapse the tag row it is on. Right expands a collapsed tag, Left collapses
+// an expanded one and, on a note inside a tag, goes up to that tag. null: the key does nothing there.
+export type NotesRowKeyResult = { kind: "focus"; index: number } | { kind: "toggleTag" } | null
+
+export function notesRowKeyTarget(rows: readonly NotesSidebarRow[], from: number, key: string): NotesRowKeyResult {
+	const row = rows[from]
+
+	switch (key) {
+		case "ArrowDown":
+			return focusResult(stopFrom(rows, from + 1, 1))
+		case "ArrowUp":
+			return focusResult(stopFrom(rows, from - 1, -1))
+		case "Home":
+			return focusResult(stopFrom(rows, 0, 1))
+		case "End":
+			return focusResult(stopFrom(rows, rows.length - 1, -1))
+		case "ArrowRight":
+			return row?.kind === "tag" && !row.expanded ? { kind: "toggleTag" } : null
+		case "ArrowLeft": {
+			if (row?.kind === "tag") {
+				return row.expanded ? { kind: "toggleTag" } : null
+			}
+
+			for (let index = from - 1; index >= 0; index--) {
+				if (rows[index]?.kind === "tag") {
+					return { kind: "focus", index }
+				}
+			}
+
+			return null
+		}
+		default:
+			return null
+	}
+}
+
+function stopFrom(rows: readonly NotesSidebarRow[], start: number, step: 1 | -1): number {
+	for (let index = start; index >= 0 && index < rows.length; index += step) {
+		if (rows[index]?.kind !== "header") {
+			return index
+		}
+	}
+
+	return -1
+}
+
+function focusResult(index: number): NotesRowKeyResult {
+	return index === -1 ? null : { kind: "focus", index }
+}

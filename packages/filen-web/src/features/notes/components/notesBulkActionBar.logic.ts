@@ -106,6 +106,11 @@ export function canBulkTrashNotes(flags: NoteSelectionFlags): boolean {
 	return noteBulkActionAvailability(flags).trash
 }
 
+// The same gate for the bar's Delete permanently button and the notes.deletePermanently shortcut.
+export function canBulkDeleteNotes(flags: NoteSelectionFlags): boolean {
+	return noteBulkActionAvailability(flags).delete
+}
+
 // Bulk ids whose dispatch is an unconditional SDK write. Export is left enabled (cache-first, and the
 // zip is built client-side); the descriptor list itself is unchanged, only its rendered enabled state.
 const OFFLINE_GATED_BULK_IDS: ReadonlySet<NoteBulkActionDescriptor["id"]> = new Set<NoteBulkActionDescriptor["id"]>([

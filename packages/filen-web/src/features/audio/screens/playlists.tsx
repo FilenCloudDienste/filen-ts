@@ -8,6 +8,9 @@ import { rememberLastOpened } from "@/features/shell/lib/lastOpened"
 import { openPlaylistDialog } from "@/features/audio/store/usePlaylistDialogStore"
 import { PlaylistPane } from "@/features/audio/components/playlistPane"
 import { PlaylistDialogsHost } from "@/features/audio/components/playlistDialogsHost"
+import { playlistForKeyTarget } from "@/features/audio/lib/playlistKeys.logic"
+import { startPlaylist, startShuffledPlaylist } from "@/features/audio/lib/playlistPlayback"
+import { OUTSIDE_OVERLAYS, useAction } from "@/lib/keymap/useAction"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { Button } from "@/components/ui/button"
@@ -25,6 +28,75 @@ export function PlaylistsScreen({ selectedUuid }: { selectedUuid: string | undef
 	const selection = usePlaylistSelection(selectedUuid)
 	const playlist = resolveSelectedPlaylist(playlistsQuery.data ?? [], selection.uuid)
 	const shownUuid = selection.deciding ? undefined : playlist?.uuid
+	const entries = playlistsQuery.data ?? []
+	const shown = selection.deciding ? null : playlist
+
+	// Defs in features/audio/lib/playlistKeymap.ts. The page's commands stand down under any dialog or menu, and take the
+	// buttons' and the ⋯ menu's gates: a write needs a connection, playing needs a track.
+	useAction(
+		"playlists.newPlaylist",
+		() => {
+			if (isOnline) {
+				openPlaylistDialog({ kind: "create" })
+			}
+		},
+		OUTSIDE_OVERLAYS,
+		[isOnline]
+	)
+
+	useAction(
+		"playlists.rename",
+		event => {
+			const target = playlistForKeyTarget(entries, shown, event.target)
+
+			if (isOnline && target !== null) {
+				event.preventDefault()
+				openPlaylistDialog({ kind: "rename", playlist: target })
+			}
+		},
+		OUTSIDE_OVERLAYS,
+		[isOnline, entries, shown]
+	)
+
+	useAction(
+		"playlists.delete",
+		event => {
+			const target = playlistForKeyTarget(entries, shown, event.target)
+
+			if (isOnline && target !== null) {
+				event.preventDefault()
+				openPlaylistDialog({ kind: "delete", playlist: target })
+			}
+		},
+		OUTSIDE_OVERLAYS,
+		[isOnline, entries, shown]
+	)
+
+	useAction(
+		"playlists.play",
+		event => {
+			const target = playlistForKeyTarget(entries, shown, event.target)
+
+			if (target !== null && target.files.length > 0) {
+				startPlaylist(target, 0)
+			}
+		},
+		OUTSIDE_OVERLAYS,
+		[entries, shown]
+	)
+
+	useAction(
+		"playlists.shuffle",
+		event => {
+			const target = playlistForKeyTarget(entries, shown, event.target)
+
+			if (target !== null && target.files.length > 0) {
+				startShuffledPlaylist(target)
+			}
+		},
+		OUTSIDE_OVERLAYS,
+		[entries, shown]
+	)
 
 	useEffect(() => {
 		if (shownUuid !== undefined) {

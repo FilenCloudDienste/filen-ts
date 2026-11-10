@@ -9,8 +9,10 @@ import {
 	type FocusEvent,
 	type KeyboardEvent,
 	type ReactNode,
-	type Ref
+	type Ref,
+	type RefObject
 } from "react"
+import type { Options } from "react-hotkeys-hook"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { defaultRangeExtractor, elementScroll, useVirtualizer, type Range, type VirtualizerOptions } from "@tanstack/react-virtual"
@@ -47,6 +49,10 @@ import { markChatRead } from "@/features/chats/lib/actions"
 import { chatLastFocus } from "@/features/chats/lib/unread.logic"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { MessageRow } from "@/features/chats/components/thread/messageRow"
+import type { MessageActionsHandle } from "@/features/chats/components/thread/useMessageActions"
+import type { MessageActionId } from "@/features/chats/components/thread/messageMenu.logic"
+import { adjacentMessageIndex, edgeMessageIndex, MESSAGE_FOCUS_SELECTOR } from "@/features/chats/lib/keyboard.logic"
+import { ignoredUnderOverlays, useAction } from "@/lib/keymap/useAction"
 import { ChatDropdownMenuContent } from "@/features/chats/components/chatMenu"
 import { useChatDialogHost } from "@/features/chats/hooks/useChatDialogHost"
 import { useAccountQuery } from "@/queries/account"
@@ -145,13 +151,17 @@ function ThreadRowContent({
 	chat,
 	group,
 	currentUserId,
-	blocked
+	blocked,
+	active,
+	actionsRef
 }: {
 	row: ThreadRow
 	chat: Chat
 	group: boolean
 	currentUserId: bigint | undefined
 	blocked: BlockedUsers
+	active: boolean
+	actionsRef: RefObject<MessageActionsHandle | null> | null
 }) {
 	if (row.kind === "time") {
 		return <TimeHeader timestamp={row.timestamp} />
@@ -170,9 +180,30 @@ function ThreadRowContent({
 			group={group}
 			currentUserId={currentUserId}
 			blocked={blocked}
+			active={active}
+			actionsRef={actionsRef}
 		/>
 	)
 }
+
+// The thread's message keys (keymap.ts chats.message.*) act on the focused message only: its focus target is the
+// key's own target, and no dialog or menu is open over it.
+const ON_FOCUSED_MESSAGE: Options = {
+	ignoreEventWhen: event =>
+		ignoredUnderOverlays(event) || !(event.target instanceof Element) || !event.target.matches(MESSAGE_FOCUS_SELECTOR)
+}
+
+// Home and End act anywhere in the thread (the scroller or a message in it), never in the message field below it.
+function inThread(target: EventTarget | null): boolean {
+	return target instanceof Element && target.closest("[data-chat-thread]") !== null
+}
+
+const IN_THREAD: Options = {
+	ignoreEventWhen: event => ignoredUnderOverlays(event) || !inThread(event.target)
+}
+
+// Focusing a row the virtualizer has only just been asked to mount can take a frame or two (scroll, then measure).
+const FOCUS_ATTEMPTS = 3
 
 // Floating scroll-to-bottom pill — appears once the user has scrolled up AND at least one message has
 // landed below the viewport since (thread.logic.ts's nextScrollAffordanceState). Click scrolls to bottom;
@@ -210,6 +241,9 @@ interface ThreadListProps {
 	// Ascending, as composed for the composer; `rows` is the same list bottom-up.
 	messages: readonly ChatMessage[]
 	rows: readonly ThreadRow[]
+	// The message rows' keys, and the newest one's (the roving focus's default), derived with the rows.
+	messageKeys: ReadonlySet<string>
+	newestMessageKey: string | null
 	isPending: boolean
 	isError: boolean
 	currentUserId: bigint | undefined
@@ -226,8 +260,26 @@ interface ThreadListProps {
 // shrinks the viewport from the top. The virtualizer runs on that same bottom-origin axis with rows
 // bottom-up, so as the reader scrolls into history new rows measure in above the viewport and need no
 // compensation. Rows are still emitted oldest-first so DOM, focus and reading order match the screen.
-function ThreadList({ ref, chat, group, labelledBy, messages, rows, isPending, isError, currentUserId, blocked }: ThreadListProps) {
+function ThreadList({
+	ref,
+	chat,
+	group,
+	labelledBy,
+	messages,
+	rows,
+	messageKeys,
+	newestMessageKey,
+	isPending,
+	isError,
+	currentUserId,
+	blocked
+}: ThreadListProps) {
 	const { t } = useTranslation("chats")
+	// The roving message: the last one focused while it is still in the thread, else the newest.
+	const [focusKey, setFocusKey] = useState<string | null>(null)
+	const activeKey = focusKey !== null && messageKeys.has(focusKey) ? focusKey : newestMessageKey
+	// The active row's action model, published by the row itself (messageRow.tsx).
+	const activeActionsRef = useRef<MessageActionsHandle | null>(null)
 	const scrollRef = useRef<HTMLDivElement | null>(null)
 	const [loadingOlder, setLoadingOlder] = useState(false)
 	const hasMoreRef = useRef(true)
@@ -396,27 +448,76 @@ function ThreadList({ ref, chat, group, labelledBy, messages, rows, isPending, i
 		el.scrollTop = 0
 	}
 
-	// Home and End jump instead of animating: rows measuring in during the browser's animated scroll change
-	// the scroller's size, which cancels it part way in Chromium. Keys from a portaled menu or dialog opened
-	// by a row bubble here through React, but are not the thread's.
+	// Focuses the message at `index`, scrolling it in first when the virtualizer has not mounted it.
+	function focusMessageAt(index: number): void {
+		const key = rows[index]?.key
+
+		if (key === undefined) {
+			return
+		}
+
+		setFocusKey(key)
+
+		let attempts = 0
+
+		const attempt = (): void => {
+			const target = scrollRef.current?.querySelector<HTMLElement>(`[data-index="${String(index)}"] ${MESSAGE_FOCUS_SELECTOR}`)
+
+			if (target !== null && target !== undefined) {
+				target.focus()
+
+				return
+			}
+
+			attempts++
+
+			if (attempts === 1) {
+				virtualizer.scrollToIndex(index, { align: "auto" })
+			}
+
+			if (attempts < FOCUS_ATTEMPTS) {
+				requestAnimationFrame(attempt)
+			}
+		}
+
+		attempt()
+	}
+
+	// ↑/↓ on a focused message move to the next message, the list's own cursor keys (drive's listbox convention: not
+	// remappable commands). Keys from a portaled menu or dialog opened by a row bubble here through React, but are not
+	// the thread's.
 	function handleKeyDown(event: KeyboardEvent<HTMLDivElement>): void {
-		const el = event.currentTarget
+		const target = event.target
 
 		if (
-			(event.key !== "Home" && event.key !== "End") ||
+			(event.key !== "ArrowUp" && event.key !== "ArrowDown") ||
 			event.defaultPrevented ||
 			event.altKey ||
 			event.ctrlKey ||
 			event.metaKey ||
 			event.shiftKey ||
-			!(event.target instanceof Node) ||
-			!el.contains(event.target)
+			!(target instanceof HTMLElement) ||
+			!event.currentTarget.contains(target) ||
+			!target.matches(MESSAGE_FOCUS_SELECTOR)
 		) {
 			return
 		}
 
+		const row = target.closest<HTMLElement>("[data-index]")
+		const index = row === null ? -1 : Number(row.dataset["index"])
+
+		if (index === -1) {
+			return
+		}
+
 		event.preventDefault()
-		el.scrollTop = event.key === "End" ? 0 : 0 - el.scrollHeight
+
+		// Rows are bottom-up: older is a higher index.
+		const next = adjacentMessageIndex(rows, index, event.key === "ArrowUp" ? 1 : -1)
+
+		if (next !== -1) {
+			focusMessageAt(next)
+		}
 	}
 
 	function handleFocus(event: FocusEvent<HTMLDivElement>): void {
@@ -432,7 +533,149 @@ function ThreadList({ ref, chat, group, labelledBy, messages, rows, isPending, i
 		const key = rows[index]?.key
 
 		focusedRowRef.current = key === undefined ? null : { key, index }
+
+		if (key !== undefined && messageKeys.has(key)) {
+			setFocusKey(key)
+		}
 	}
+
+	// Home and End jump instead of animating: rows measuring in during the browser's animated scroll change the
+	// scroller's size, which cancels it part way in Chromium. From a focused message, they move focus to the newest or
+	// oldest loaded one.
+	function jumpTo(newest: boolean, event: globalThis.KeyboardEvent): void {
+		const el = scrollRef.current
+
+		if (el === null) {
+			return
+		}
+
+		event.preventDefault()
+
+		if (event.target instanceof Element && event.target.matches(MESSAGE_FOCUS_SELECTOR)) {
+			const index = edgeMessageIndex(rows, newest)
+
+			if (index !== -1) {
+				focusMessageAt(index)
+			}
+
+			return
+		}
+
+		el.scrollTop = newest ? 0 : 0 - el.scrollHeight
+	}
+
+	// Defs in features/chats/lib/keymap.ts.
+	useAction(
+		"chats.jumpToLatest",
+		event => {
+			jumpTo(true, event)
+		},
+		IN_THREAD,
+		[rows]
+	)
+
+	useAction(
+		"chats.jumpToOldest",
+		event => {
+			jumpTo(false, event)
+		},
+		IN_THREAD,
+		[rows]
+	)
+
+	// Runs one of the focused message's actions through its own action model, so a key is gated exactly like the menu
+	// entry: absent or offline-disabled means nothing happens.
+	function runMessageAction(id: MessageActionId, event: globalThis.KeyboardEvent): void {
+		const actions = activeActionsRef.current
+		const descriptor = actions?.descriptors.find(entry => entry.id === id && entry.enabled !== false)
+
+		if (actions === null || descriptor === undefined) {
+			return
+		}
+
+		event.preventDefault()
+		actions.runAction(descriptor)
+	}
+
+	useAction(
+		"chats.message.reply",
+		event => {
+			runMessageAction("reply", event)
+		},
+		ON_FOCUSED_MESSAGE
+	)
+
+	useAction(
+		"chats.message.edit",
+		event => {
+			runMessageAction("edit", event)
+		},
+		ON_FOCUSED_MESSAGE
+	)
+
+	// A text selection keeps the browser's own copy.
+	useAction(
+		"chats.message.copy",
+		event => {
+			if (document.getSelection()?.isCollapsed === false) {
+				return
+			}
+
+			runMessageAction("copy", event)
+		},
+		ON_FOCUSED_MESSAGE
+	)
+
+	useAction(
+		"chats.message.delete",
+		event => {
+			runMessageAction("delete", event)
+		},
+		ON_FOCUSED_MESSAGE
+	)
+
+	useAction(
+		"chats.message.retry",
+		event => {
+			runMessageAction("retry", event)
+		},
+		ON_FOCUSED_MESSAGE
+	)
+
+	useAction(
+		"chats.message.remove",
+		event => {
+			runMessageAction("remove", event)
+		},
+		ON_FOCUSED_MESSAGE
+	)
+
+	// Opens the message's menu where the bubble is, as the context-menu key does. preventDefault first: on Windows and
+	// Linux the browser would otherwise open its own on Shift+F10 too.
+	useAction(
+		"chats.message.menu",
+		event => {
+			const target = event.target
+
+			if (!(target instanceof HTMLElement) || activeActionsRef.current === null) {
+				return
+			}
+
+			event.preventDefault()
+
+			const rect = target.getBoundingClientRect()
+
+			target.dispatchEvent(
+				new MouseEvent("contextmenu", {
+					bubbles: true,
+					cancelable: true,
+					clientX: rect.left + rect.width / 2,
+					clientY: rect.top + rect.height / 2
+				})
+			)
+		},
+		ON_FOCUSED_MESSAGE
+	)
 
 	async function loadOlder(): Promise<void> {
 		if (loadingOlder || !hasMoreRef.current) {
@@ -528,6 +771,7 @@ function ThreadList({ ref, chat, group, labelledBy, messages, rows, isPending, i
 		return (
 			<div
 				ref={scrollRef}
+				data-chat-thread=""
 				role="region"
 				aria-labelledby={labelledBy}
 				tabIndex={0}
@@ -575,6 +819,8 @@ function ThreadList({ ref, chat, group, labelledBy, messages, rows, isPending, i
 										group={group}
 										currentUserId={currentUserId}
 										blocked={blocked}
+										active={row.key === activeKey}
+										actionsRef={row.key === activeKey ? activeActionsRef : null}
 									/>
 								</div>
 							)
@@ -669,6 +915,16 @@ export function MessageThread({ chat }: { chat: Chat }) {
 	const rows = toBottomUpRows(
 		buildThreadRows(messages, currentUserId !== undefined ? { lastFocus: chatLastFocus(chat), currentUserId, blocked } : undefined)
 	)
+	const messageKeys = new Set<string>()
+
+	for (const row of rows) {
+		if (row.kind === "message") {
+			messageKeys.add(row.key)
+		}
+	}
+
+	const newestMessageIndex = edgeMessageIndex(rows, true)
+	const newestMessageKey = newestMessageIndex === -1 ? null : (rows[newestMessageIndex]?.key ?? null)
 
 	// Revealed blocked messages reset per conversation, so re-entering one re-hides them.
 	useEffect(() => {
@@ -741,6 +997,8 @@ export function MessageThread({ chat }: { chat: Chat }) {
 				labelledBy={titleId}
 				messages={messages}
 				rows={rows}
+				messageKeys={messageKeys}
+				newestMessageKey={newestMessageKey}
 				isPending={messagesQuery.isPending}
 				isError={messagesQuery.isError}
 				currentUserId={currentUserId}

@@ -61,7 +61,9 @@ function renderRow(overrides: { runStart?: boolean; runEnd?: boolean; group?: bo
 			runEnd: overrides.runEnd ?? true,
 			group: overrides.group ?? false,
 			currentUserId: overrides.currentUserId ?? 1n,
-			blocked: deriveBlockedUsers([])
+			blocked: deriveBlockedUsers([]),
+			active: false,
+			actionsRef: null
 		})
 	)
 }

@@ -11,6 +11,7 @@ import { SettingsBlock, SettingsGroup } from "@/features/settings/components/set
 import { useSyncRead } from "@/features/sync/hooks/useSyncRead"
 import { syncApi } from "@/features/sync/lib/syncStore"
 import { syncErrorLabel } from "@/features/sync/lib/syncActions"
+import { IN_EDITORS_AND_FIELDS, useAction } from "@/lib/keymap/useAction"
 
 // One box metric for the textarea and the backdrop behind it, so the highlighted line sits exactly under its text.
 const EDITOR_TEXT_CLASS = "px-3 py-2 font-mono text-sm leading-5 whitespace-pre"
@@ -51,8 +52,28 @@ function RulesEditor({ initialText, onSaved }: { initialText: string; onSaved: (
 		}
 	}
 
+	const unchanged = text === initialText
+
+	// Def in features/sync/lib/keymap.ts: Mod+S saves while focus is in this editor (its text box included, where the
+	// browser would otherwise save the page), under the Save button's own gate.
+	const saveKeyRef = useAction(
+		"sync.saveIgnoreRules",
+		event => {
+			event.preventDefault()
+
+			if (!saving && !unchanged) {
+				void save()
+			}
+		},
+		IN_EDITORS_AND_FIELDS,
+		[saving, unchanged, text]
+	)
+
 	return (
-		<SettingsBlock className="flex flex-col gap-3">
+		<SettingsBlock
+			ref={saveKeyRef}
+			className="flex flex-col gap-3"
+		>
 			<div className={cn("relative h-48 overflow-hidden", FIELD_CONTROL_CLASS, error !== null && "border-destructive")}>
 				<div
 					ref={backdropRef}
@@ -106,7 +127,7 @@ function RulesEditor({ initialText, onSaved }: { initialText: string; onSaved: (
 					</p>
 				)}
 				<Button
-					disabled={saving || text === initialText}
+					disabled={saving || unchanged}
 					onClick={() => {
 						void save()
 					}}

@@ -7,6 +7,7 @@ import { MoveTargetDialog } from "@/features/drive/components/moveTargetDialog"
 import { startLinkedCopyWithCard } from "@/features/transfers/lib/copyToast"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { Button } from "@/components/ui/button"
+import { OUTSIDE_OVERLAYS, useAction } from "@/lib/keymap/useAction"
 
 export interface SaveToDriveButtonProps {
 	// The linked file, or a linked directory with its link (password state included), as the SDK copies it.
@@ -27,6 +28,21 @@ export function SaveToDriveButton({ item, name, glyph, compact: compactProp }: S
 	const isOnline = useIsOnline()
 	const [open, setOpen] = useState(false)
 	const Icon = ACTION_DEFS.copy.icon
+
+	// Def in features/publicLinks/lib/keymap.ts: the button, under its own gate. Only one of these shows at a time (the
+	// directory on screen, or the file opened from it).
+	useAction(
+		"links.saveToDrive",
+		event => {
+			event.preventDefault()
+
+			if (isOnline) {
+				setOpen(true)
+			}
+		},
+		OUTSIDE_OVERLAYS,
+		[isOnline]
+	)
 
 	return (
 		<>

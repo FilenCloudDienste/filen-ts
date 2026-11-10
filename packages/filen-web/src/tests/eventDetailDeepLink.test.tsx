@@ -22,6 +22,10 @@ vi.mock("@/lib/useIsOnline", () => ({ useIsOnline: () => online.value }))
 import { queryClient } from "@/queries/client"
 import { EventDetailDialog } from "@/features/settings/components/events/eventDetailDialog"
 import { testUuid } from "@/tests/support/uuid"
+import { registerAllActions } from "@/lib/keymap/actions"
+
+// The dialog binds the event keys.
+registerAllActions()
 
 const UUID = testUuid("evt")
 
@@ -33,6 +37,7 @@ function renderDeepLink(waitForList = false) {
 				entry={null}
 				waitForList={wait}
 				onClose={() => undefined}
+				onStep={() => undefined}
 			/>
 		</QueryClientProvider>
 	)

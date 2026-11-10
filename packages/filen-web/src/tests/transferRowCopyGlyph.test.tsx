@@ -39,6 +39,7 @@ function renderRow(name: string, glyph: CopyJobGlyph | null): HTMLElement {
 			transfer={copyRow(name)}
 			onRequestCancel={vi.fn()}
 			onShowInDirectory={vi.fn()}
+			tabStop={false}
 		/>
 	)
 
@@ -104,6 +105,7 @@ describe("TransferRow — a stopped copy moving its copies to the trash", () => 
 				transfer={{ ...copyRow("3 items"), status: "copying", bytesTransferred: 4 }}
 				onRequestCancel={vi.fn()}
 				onShowInDirectory={vi.fn()}
+				tabStop={false}
 			/>
 		)
 
@@ -133,6 +135,7 @@ describe("TransferRow — a stopped copy moving its copies to the trash", () => 
 				transfer={{ ...copyRow("3 items"), status: "copying", bytesTransferred: 4 }}
 				onRequestCancel={vi.fn()}
 				onShowInDirectory={vi.fn()}
+				tabStop={false}
 			/>
 		)
 
@@ -161,6 +164,7 @@ describe("TransferRow — archive jobs", () => {
 				transfer={archiveRow("compress")}
 				onRequestCancel={vi.fn()}
 				onShowInDirectory={vi.fn()}
+				tabStop={false}
 			/>
 		).container
 
@@ -174,6 +178,7 @@ describe("TransferRow — archive jobs", () => {
 				transfer={archiveRow("extract")}
 				onRequestCancel={vi.fn()}
 				onShowInDirectory={vi.fn()}
+				tabStop={false}
 			/>
 		).container
 
@@ -189,6 +194,7 @@ describe("TransferRow — archive jobs", () => {
 				transfer={archiveRow("extract", { size: 100 })}
 				onRequestCancel={vi.fn()}
 				onShowInDirectory={vi.fn()}
+				tabStop={false}
 			/>
 		)
 
@@ -206,6 +212,7 @@ describe("TransferRow — archive jobs", () => {
 				transfer={archiveRow("compress")}
 				onRequestCancel={vi.fn()}
 				onShowInDirectory={vi.fn()}
+				tabStop={false}
 			/>
 		)
 
@@ -219,6 +226,7 @@ describe("TransferRow — archive jobs", () => {
 				transfer={archiveRow("extract")}
 				onRequestCancel={vi.fn()}
 				onShowInDirectory={vi.fn()}
+				tabStop={false}
 			/>
 		)
 
@@ -232,6 +240,7 @@ describe("TransferRow — archive jobs", () => {
 				transfer={copyRow("photos")}
 				onRequestCancel={vi.fn()}
 				onShowInDirectory={vi.fn()}
+				tabStop={false}
 			/>
 		)
 
@@ -248,6 +257,7 @@ describe("TransferRow — archive jobs", () => {
 				transfer={archiveRow("compress", { status: "done" })}
 				onRequestCancel={vi.fn()}
 				onShowInDirectory={onShowInDirectory}
+				tabStop={false}
 			/>
 		)
 		fireEvent.click(screen.getByRole("button", { name: transfers.transfersRowShowInDirectory }))

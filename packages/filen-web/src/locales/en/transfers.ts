@@ -473,5 +473,21 @@ export const transfers = {
 
 	// ── Zip download (startZipDownload) ───────────────────────────────────────
 	/** Suggested filename for a zip download of a multi-item selection (no single item to name it after) — a save-dialog/transfer-row filename, not a sentence; keep the .zip extension */
-	transfersZipDownloadDefaultName: "Filen.zip"
+	transfersZipDownloadDefaultName: "Filen.zip",
+
+	// ── Keyboard shortcuts (Settings → Keyboard, Transfers group) ─────────────
+	/** Keyboard shortcut action — pauses every running transfer on the page, or resumes them all when none is running */
+	transfersCommandTogglePauseAll: "Pause or resume all",
+	/** Keyboard shortcut action — cancels every active transfer (asks first) */
+	transfersCommandCancelAll: "Cancel all transfers",
+	/** Keyboard shortcut action — pauses or resumes the focused transfer */
+	transfersCommandRowPause: "Pause or resume transfer",
+	/** Keyboard shortcut action — cancels the focused active transfer (asks first), or removes a finished one from the list */
+	transfersCommandRowCancel: "Cancel or remove transfer",
+	/** Keyboard shortcut action — opens the directory the focused finished transfer landed in */
+	transfersCommandRowShowInDirectory: "Show transfer in directory",
+	/** Keyboard shortcut action — shows the details of the focused copy, compress or extract job */
+	transfersCommandRowDetails: "Show transfer details",
+	/** Keyboard shortcuts — where the per-transfer shortcuts work */
+	transfersHintRow: "On a focused transfer"
 } as const

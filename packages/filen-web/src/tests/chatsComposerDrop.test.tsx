@@ -36,6 +36,10 @@ import "@/lib/i18n"
 import { Composer } from "@/features/chats/components/thread/composer"
 import { beginMessageEdit } from "@/features/chats/lib/composerEdit"
 import { useChatComposerStore } from "@/features/chats/store/useChatComposer"
+import { registerAllActions } from "@/lib/keymap/actions"
+
+// The composer reads its keys from the registry.
+registerAllActions()
 
 const CHAT: Chat = {
 	uuid: "chat-0000-0000-0000-000000000000",

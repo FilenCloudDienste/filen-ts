@@ -1,43 +1,22 @@
 import { createElement, Fragment } from "react"
 import { useTranslation } from "react-i18next"
-import { toast } from "sonner"
 import { PlusIcon } from "lucide-react"
 import type { Note, NoteTag, NoteType } from "@filen/sdk-rs"
-import { errorLabel } from "@/lib/i18n/errorLabel"
-import { copyText } from "@/lib/copyText"
-import type { VoidActionOutcome } from "@/lib/actions/outcome"
 import { runOutcomeActivity } from "@/lib/activity/activity"
-import type { ActivityKeys, ActivityValues } from "@/lib/activity/activity.logic"
-import {
-	togglePinned,
-	toggleFavorited,
-	duplicateNote,
-	archiveNote,
-	restoreNote,
-	trashNote,
-	setNoteType,
-	resolveNoteContent,
-	createNote
-} from "@/features/notes/lib/actions"
-import { exportNote } from "@/features/notes/lib/export"
+import { setNoteType, createNote } from "@/features/notes/lib/actions"
 import { tagDisplayName } from "@/features/notes/lib/sort"
 import { addTagToNote, removeTagFromNote, setNoteTagFavorited } from "@/features/notes/lib/tags"
 import {
-	NOTES_ARCHIVE,
 	NOTES_CHANGE_TYPE,
-	NOTES_DUPLICATE,
 	NOTES_FAVORITE,
-	NOTES_PIN,
-	NOTES_RESTORE,
 	NOTES_TAG,
-	NOTES_TRASH,
 	NOTES_UNFAVORITE,
-	NOTES_UNPIN,
 	NOTES_UNTAG,
 	createFailedAs,
 	noteActivityName,
 	runNoteCreateActivity
 } from "@/features/notes/lib/activity"
+import { runNoteActivity, runNoteDirectAction } from "@/features/notes/lib/noteDirectAction"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { useNoteInflight } from "@/features/notes/store/useNotesInflight"
 import {
@@ -103,22 +82,6 @@ interface MenuFamily {
 // (archive/restore/trash/leave) and before the trashed-variant's own deletePermanently.
 const SEPARATOR_BEFORE = new Set<NoteActionId>(["archive", "restore", "trash", "leave", "deletePermanently"])
 
-// Direct server writes, each run as an activity in its own words. Keyed off the note as the menu saw it:
-// a pin or favorite says which way it flips.
-const ACTIVITY_ACTIONS: Partial<
-	Record<NoteActionId, { keys: (note: Note) => ActivityKeys; run: (note: Note) => Promise<VoidActionOutcome> }>
-> = {
-	pin: { keys: note => (note.pinned ? NOTES_UNPIN : NOTES_PIN), run: togglePinned },
-	favorite: { keys: note => (note.favorite ? NOTES_UNFAVORITE : NOTES_FAVORITE), run: toggleFavorited },
-	archive: { keys: () => NOTES_ARCHIVE, run: archiveNote },
-	restore: { keys: () => NOTES_RESTORE, run: restoreNote },
-	trash: { keys: () => NOTES_TRASH, run: trashNote }
-}
-
-function runNoteActivity(note: Note, keys: ActivityKeys, run: (note: Note) => Promise<VoidActionOutcome>, values?: ActivityValues): void {
-	void runOutcomeActivity(note, { keys, name: noteActivityName, run, ...(values !== undefined ? { values } : {}) })
-}
-
 // Shared per-note action list, rendered by BOTH the sidebar row's right-click menu and the editor
 // header's ⋯ trigger (see NoteContextMenuContent/NoteDropdownMenuContent below) — one descriptor list
 // (noteMenuActions), one mapping from descriptor to menu row, mirrors drive's ItemMenuEntries exactly.
@@ -142,53 +105,7 @@ function NoteMenuEntries({
 	const { Item, Separator, Sub, SubTrigger, SubContent, CheckboxItem } = family
 
 	async function runDirect(descriptor: Extract<NoteActionDescriptor, { run: "direct" }>): Promise<void> {
-		const activity = ACTIVITY_ACTIONS[descriptor.id]
-
-		if (activity) {
-			runNoteActivity(note, activity.keys(note), activity.run)
-			return
-		}
-
-		switch (descriptor.id) {
-			case "duplicate": {
-				runNoteActivity(note, NOTES_DUPLICATE, async target => {
-					const outcome = await duplicateNote(target)
-
-					if (outcome.status === "success") {
-						onDuplicated?.(outcome.item)
-					}
-
-					return outcome
-				})
-				return
-			}
-			// A file save, not a server write: only a failure toasts.
-			case "export": {
-				const outcome = await exportNote(note)
-
-				if (outcome.status === "error") {
-					toast.error(errorLabel(outcome.dto))
-				}
-
-				return
-			}
-			case "copyId": {
-				await copyText(note.uuid, t("noteCopyIdToast"))
-
-				return
-			}
-			case "copyContent": {
-				try {
-					const content = await resolveNoteContent(note)
-					await navigator.clipboard.writeText(content)
-					toast.success(t("noteCopyContentToast"))
-				} catch (e) {
-					toast.error(errorLabel(e))
-				}
-
-				return
-			}
-		}
+		await runNoteDirectAction(note, descriptor.id, t, onDuplicated)
 	}
 
 	function handleTagToggle(tag: NoteTag, nextChecked: boolean): void {

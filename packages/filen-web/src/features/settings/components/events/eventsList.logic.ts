@@ -213,6 +213,30 @@ export function eventEntryUuid(entry: EventEntry): string | undefined {
 	return entry.type === "ok" ? entry.event.uuid : entry.raw.uuid
 }
 
+// The event `direction` rows from `current` among the listed events (day headers skipped), or null when `current` is
+// not listed or has no neighbour that way.
+export function steppedEventEntry(rows: readonly EventListRow[], current: EventEntry | null, direction: 1 | -1): EventEntry | null {
+	if (current === null) {
+		return null
+	}
+
+	const index = rows.findIndex(row => row.type === "event" && row.entry.key === current.key)
+
+	if (index === -1) {
+		return null
+	}
+
+	for (let i = index + direction; i >= 0 && i < rows.length; i += direction) {
+		const row = rows[i]
+
+		if (row?.type === "event") {
+			return row.entry
+		}
+	}
+
+	return null
+}
+
 export function findEventEntry(entries: readonly EventEntry[], uuid: string | null): EventEntry | null {
 	if (uuid === null) {
 		return null
