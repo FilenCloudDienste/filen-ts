@@ -325,6 +325,34 @@ export const drive = {
 	driveCommandHintFocusedItem: "With an item focused in the list",
 	/** Keymap registry — where a command works: in the Trash listing */
 	driveCommandHintTrash: "In the trash",
+	/** Keymap registry — where a command works: on a search result focused in the list */
+	driveCommandHintSearchHit: "With a search result focused",
+	/** Keymap registry — where a command works: on the selected items, through the selection bar's menu of that name */
+	driveCommandHintSelection: "On the selection",
+	/** Keymap registry — description for the drive.invertSelection command: selects every unselected item and deselects the rest */
+	driveCommandInvertSelection: "Invert selection",
+	/** Keymap registry — description for the drive.focusListing command: moves keyboard focus to the file list's current item */
+	driveCommandFocusListing: "Focus the file list",
+	/** Keymap registry — description for the drive.copyTo command: copies the selection into a directory picked in a dialog */
+	driveCommandCopyTo: "Copy to",
+	/** Keymap registry — description for the drive.downloadAs command: opens the menu of formats the selection exports to */
+	driveCommandDownloadAs: "Download as",
+	/** Keymap registry — description for the drive.cycleSort command: switches the listing to the next sort order */
+	driveCommandCycleSort: "Next sort order",
+	/** Keymap registry — description for the drive.refresh command: reloads the listing on screen */
+	driveCommandRefresh: "Refresh",
+	/** Keymap registry — description for the drive.newDocx command */
+	driveCommandNewDocx: "New document (.docx)",
+	/** Keymap registry — description for the drive.newXlsx command */
+	driveCommandNewXlsx: "New spreadsheet (.xlsx)",
+	/** Keymap registry — description for the drive.newPptx command */
+	driveCommandNewPptx: "New presentation (.pptx)",
+	/** Keymap registry — description for the drive.newOdt command */
+	driveCommandNewOdt: "New document (.odt)",
+	/** Keymap registry — description for the drive.newOds command */
+	driveCommandNewOds: "New spreadsheet (.ods)",
+	/** Keymap registry — description for the drive.newOdp command */
+	driveCommandNewOdp: "New presentation (.odp)",
 
 	// ── Item action menu ─────────────────────────────────────────────────────
 	/** Item menu — accessible label for the ⋯ button opening the per-item action menu */

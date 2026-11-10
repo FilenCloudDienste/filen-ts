@@ -690,6 +690,29 @@ describe("DirectoryListing — selection keys", () => {
 		expect(handleBulkDialogAction).not.toHaveBeenCalled()
 	})
 
+	it("copies anywhere the selection can be read, and shares only what is the caller's", () => {
+		const shared = narrowItem(mockSharedFile("FromFriend", OK_ROLE))
+		const sharedIn = renderListing({ variant: "sharedIn", items: [shared] })
+
+		sharedIn.select([shared])
+		press("drive.copyTo")
+		press("drive.share")
+
+		expect(handleBulkDialogAction.mock.calls).toEqual([["copy"]])
+
+		cleanup()
+		handleBulkDialogAction.mockClear()
+
+		const documents = narrowItem(mockDir("Documents"))
+		const drive = renderListing({ variant: "drive", items: [documents] })
+
+		drive.select([documents])
+		press("drive.copyTo")
+		press("drive.share")
+
+		expect(handleBulkDialogAction.mock.calls).toEqual([["copy"], ["share"]])
+	})
+
 	it("moves owned items, and never someone else's", () => {
 		const documents = narrowItem(mockDir("Documents"))
 		const { select } = renderListing({ variant: "drive", items: [documents] })

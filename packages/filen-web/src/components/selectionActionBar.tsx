@@ -1,4 +1,5 @@
-import { createElement, type ReactNode } from "react"
+import { createElement, useState, type ReactNode } from "react"
+import { OUTSIDE_OVERLAYS, useAction } from "@/lib/keymap/useAction"
 import { useTranslation } from "react-i18next"
 import { XIcon, type LucideIcon } from "lucide-react"
 import { Kbd } from "@/lib/keymap/kbd"
@@ -72,16 +73,45 @@ export function BulkActionButton(props: {
 	)
 }
 
-// A BulkActionButton that opens a menu of its `children` (dropdown-family entries) instead of acting.
+// The key that opens a BulkActionMenuButton's menu, mounted only while the button has one and is enabled.
+function MenuShortcut(props: { action: string; onPress: () => void }) {
+	useAction(
+		props.action,
+		keyboardEvent => {
+			keyboardEvent.preventDefault()
+			props.onPress()
+		},
+		OUTSIDE_OVERLAYS
+	)
+
+	return null
+}
+
+// A BulkActionButton that opens a menu of its `children` (dropdown-family entries) instead of acting. `kbdAction`
+// opens it from the keyboard too, while it is enabled and nothing else is open, and shows in its tooltip.
 export function BulkActionMenuButton(props: {
 	icon: LucideIcon
 	label: string
 	disabled?: boolean | undefined
 	disabledReason?: string | undefined
+	kbdAction?: string | undefined
 	children: ReactNode
 }) {
+	const [open, setOpen] = useState(false)
+
 	return (
-		<DropdownMenu>
+		<DropdownMenu
+			open={open}
+			onOpenChange={setOpen}
+		>
+			{props.kbdAction === undefined || props.disabled === true ? null : (
+				<MenuShortcut
+					action={props.kbdAction}
+					onPress={() => {
+						setOpen(true)
+					}}
+				/>
+			)}
 			<Tooltip>
 				<TooltipTrigger
 					render={
@@ -100,7 +130,10 @@ export function BulkActionMenuButton(props: {
 						/>
 					}
 				/>
-				<TooltipContent>{props.disabledReason ?? props.label}</TooltipContent>
+				<TooltipContent>
+					{props.disabledReason ?? props.label}
+					{props.kbdAction === undefined ? null : <Kbd action={props.kbdAction} />}
+				</TooltipContent>
 			</Tooltip>
 			<DropdownMenuContent align="end">{props.children}</DropdownMenuContent>
 		</DropdownMenu>

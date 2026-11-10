@@ -30,7 +30,12 @@ export interface BulkActionBarProps {
 const KEYMAP_ACTION_FOR: Partial<Record<BulkActionDescriptor["id"], string>> = {
 	favorite: "drive.toggleFavorite",
 	move: "drive.move",
+	copy: "drive.copyTo",
+	compress: "drive.compress",
+	extract: "drive.extract",
+	share: "drive.share",
 	download: "drive.download",
+	downloadAs: "drive.downloadAs",
 	restoreSelected: "drive.restore",
 	delete: "drive.deletePermanently"
 }
@@ -74,6 +79,7 @@ export function BulkActionBar({ variant, selectedItems, onDialogAction }: BulkAc
 							label={t(descriptor.labelKey)}
 							disabled={disabled}
 							disabledReason={disabledReason}
+							kbdAction={KEYMAP_ACTION_FOR[descriptor.id]}
 						>
 							<DownloadAsEntries
 								family={DROPDOWN_TREE_MENU_FAMILY}
@@ -91,6 +97,7 @@ export function BulkActionBar({ variant, selectedItems, onDialogAction }: BulkAc
 							label={t(descriptor.labelKey)}
 							disabled={disabled}
 							disabledReason={disabledReason}
+							kbdAction={KEYMAP_ACTION_FOR[descriptor.id]}
 						>
 							{descriptor.id === "compress" ? (
 								<CompressMenuEntries

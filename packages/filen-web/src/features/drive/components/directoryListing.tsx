@@ -26,7 +26,9 @@ import {
 import { dotFilenFilterAppliesTo, hiddenFilterAppliesTo } from "@/features/drive/lib/hiddenItems"
 import { isDotFilenSystemDir } from "@/lib/dotFilen"
 import { isRootDotFilenItem } from "@/features/drive/lib/dotFilenGuard"
-import { DRIVE_SORT_PARTS, type DriveSortBy } from "@/features/drive/lib/sort"
+import { DRIVE_SORT_PARTS, nextSortOrder, type DriveSortBy } from "@/features/drive/lib/sort"
+import { copyItemLink } from "@/features/drive/lib/copyLink"
+import { defaultRevealDeps, runOpenContainingDirectory } from "@/features/drive/lib/reveal"
 import { driveRouteIdFor, resolveDriveNavigationTarget, splatToUuids } from "@/features/drive/lib/navigate"
 import { listboxKeyTargetIsInteractive, openOptionContextMenu } from "@/features/drive/lib/listbox"
 import { isDirectoryItem, type DriveItem } from "@/features/drive/lib/item"
@@ -48,14 +50,21 @@ import { GRID_INSET, ROW_HEIGHT, TILE_ROW_HEIGHT, TILE_WIDTH } from "@/features/
 import { asErrorDTO } from "@/lib/sdk/errors"
 import { OUTSIDE_OVERLAYS, useAction } from "@/lib/keymap/useAction"
 import { useBlockedUsers } from "@/features/contacts/hooks/useBlockedUsers"
-import { applyOfflineGate, canOpenItem, driveItemActions, type ItemActionId } from "@/features/drive/components/itemMenu.logic"
+import {
+	applyOfflineGate,
+	canOpenItem,
+	driveItemActions,
+	type ItemActionDialogKind,
+	type ItemActionId
+} from "@/features/drive/components/itemMenu.logic"
 import {
 	driveBulkActions,
 	driveDeleteKeyTarget,
 	isBulkActionOfflineDisabled,
 	isBulkDownloadEnabled,
 	runBulkFavorite,
-	type BulkActionDescriptor
+	type BulkActionDescriptor,
+	type BulkDialogActionKind
 } from "@/features/drive/components/bulkActionBar.logic"
 import {
 	filterDriveItemsByLocalSearch,
@@ -413,7 +422,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 		openPreview
 	})
 
-	const { safeActiveIndex, handleKeyDown, handlePointerSelect, setCursor } = useDriveListboxNav({
+	const { safeActiveIndex, handleKeyDown, handlePointerSelect, setCursor, focusCursor } = useDriveListboxNav({
 		items: sortedItems,
 		viewMode: effectiveViewMode,
 		columns,
@@ -622,14 +631,103 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 	}
 
 	// Whether the item menu of the item under the cursor offers `id`, enabled: a key never opens what the menu would not.
+	// The row's menu has Open (and Open as text in its place) and, for a search hit, Open containing directory.
 	function cursorItemOffers(item: DriveItem | undefined, id: ItemActionId): item is DriveItem {
 		return (
 			item !== undefined &&
-			applyOfflineGate(driveItemActions(item, variant), isOnline).some(
+			applyOfflineGate(driveItemActions(item, variant, { open: true, searchHit: isSearchHitRow(item) }), isOnline).some(
 				descriptor => descriptor.id === id && descriptor.enabled !== false
 			)
 		)
 	}
+
+	// A search hit whose parent is not the directory on screen, as its row tells it (useDriveItemCell's searchHit).
+	function isSearchHitRow(item: DriveItem): boolean {
+		return search.active && (search.parentPaths.get(item.data.uuid)?.length ?? 0) > 0
+	}
+
+	// An item-menu entry that acts on the cursor item through its own dialog, where the menu offers it.
+	function runCursorDialog(keyboardEvent: KeyboardEvent, itemAction: ItemActionId & ItemActionDialogKind): void {
+		const item = sortedItems[safeActiveIndex]
+
+		if (cursorItemOffers(item, itemAction)) {
+			keyboardEvent.preventDefault()
+			handleItemAction(itemAction, item)
+		}
+	}
+
+	// A selection-bar entry that opens a dialog over the whole selection, where the bar offers it.
+	function runSelectionDialog(keyboardEvent: KeyboardEvent, bulkAction: BulkActionDescriptor["id"] & BulkDialogActionKind): void {
+		if (selectionOffers(bulkAction)) {
+			keyboardEvent.preventDefault()
+			handleBulkDialogAction(bulkAction)
+		}
+	}
+
+	const cursorDeps = [sortedItems, safeActiveIndex, variant, isOnline, search.active, search.parentPaths]
+	const selectionDeps = [reconciledSelectedItems, variant, isOnline]
+
+	useAction(
+		"drive.versions",
+		keyboardEvent => {
+			runCursorDialog(keyboardEvent, "versions")
+		},
+		OUTSIDE_OVERLAYS,
+		cursorDeps
+	)
+
+	useAction(
+		"drive.color",
+		keyboardEvent => {
+			runCursorDialog(keyboardEvent, "color")
+		},
+		OUTSIDE_OVERLAYS,
+		cursorDeps
+	)
+
+	useAction(
+		"drive.openAsText",
+		keyboardEvent => {
+			runCursorDialog(keyboardEvent, "openAsText")
+		},
+		OUTSIDE_OVERLAYS,
+		cursorDeps
+	)
+
+	useAction(
+		"drive.copyTo",
+		keyboardEvent => {
+			runSelectionDialog(keyboardEvent, "copy")
+		},
+		OUTSIDE_OVERLAYS,
+		selectionDeps
+	)
+
+	useAction(
+		"drive.share",
+		keyboardEvent => {
+			runSelectionDialog(keyboardEvent, "share")
+		},
+		OUTSIDE_OVERLAYS,
+		selectionDeps
+	)
+
+	// The public link's URL to the clipboard, as the row menu's Copy link does.
+	useAction(
+		"drive.copyLink",
+		keyboardEvent => {
+			const item = sortedItems[safeActiveIndex]
+
+			if (cursorItemOffers(item, "copyLink")) {
+				keyboardEvent.preventDefault()
+				void copyItemLink(item, t("driveLinkUrlCopiedToast"), () => {
+					handleItemAction("link", item)
+				})
+			}
+		},
+		OUTSIDE_OVERLAYS,
+		cursorDeps
+	)
 
 	// Registered above at module scope. preventDefault whenever the listing takes the key, guarded case or
 	// not — Backspace's "navigate back" in the engines that still have it. What it does is what takes the
@@ -768,15 +866,36 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 		OUTSIDE_OVERLAYS
 	)
 
+	// A focused search hit's own directory, the hit selected there. Scoped like Open: Shift+Enter is every other
+	// control's own key.
+	const containingDirectoryRef = useAction(
+		"drive.openContainingDirectory",
+		keyboardEvent => {
+			const item = sortedItems[safeActiveIndex]
+
+			if (listboxKeyTargetIsInteractive(keyboardEvent.target) || !cursorItemOffers(item, "openContainingDirectory")) {
+				return
+			}
+
+			keyboardEvent.preventDefault()
+			void runOpenContainingDirectory(defaultRevealDeps, item, target => {
+				void navigate(target)
+			})
+		},
+		OUTSIDE_OVERLAYS,
+		cursorDeps
+	)
+
 	// The listbox element is the scroll container and where the scoped actions listen. Stable, or every render of the
-	// listing would detach and re-attach all three.
+	// listing would detach and re-attach all of them.
 	const listboxRef = useCallback(
 		(element: HTMLDivElement | null) => {
 			setScrollElement(element)
 			openRef(element)
 			itemMenuRef(element)
+			containingDirectoryRef(element)
 		},
-		[setScrollElement, openRef, itemMenuRef]
+		[setScrollElement, openRef, itemMenuRef, containingDirectoryRef]
 	)
 
 	// Registered above at module scope. preventDefault whenever the listing takes the key — mod+s's
@@ -818,6 +937,123 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 		selectedItems: reconciledSelectedItems,
 		isOnline
 	})
+
+	// The upload menus' Clear clipboard, where they offer it.
+	useAction(
+		"drive.clearClipboard",
+		keyboardEvent => {
+			if (paste.clearable) {
+				keyboardEvent.preventDefault()
+				paste.clear()
+			}
+		},
+		OUTSIDE_OVERLAYS,
+		[paste.clearable, paste.clear]
+	)
+
+	// Select-all's complement, under select-all's own rules: never over a still-converging search, never an
+	// undecryptable row.
+	useAction(
+		"drive.invertSelection",
+		keyboardEvent => {
+			keyboardEvent.preventDefault()
+
+			if (search.active && isSearchConverging(search.status)) {
+				return
+			}
+
+			useDriveStore
+				.getState()
+				.setSelectedItems(selectableForSelectAll(sortedItems).filter(item => !selectedRowKeys.has(driveRowKey(item))))
+		},
+		OUTSIDE_OVERLAYS,
+		[sortedItems, selectedRowKeys, search.active, search.status]
+	)
+
+	// Keyboard focus back on the cursor row (from the search box, a toolbar control, anywhere on the page).
+	useAction(
+		"drive.focusListing",
+		keyboardEvent => {
+			if (sortedItems.length > 0) {
+				keyboardEvent.preventDefault()
+				focusCursor()
+			}
+		},
+		OUTSIDE_OVERLAYS,
+		[sortedItems, safeActiveIndex]
+	)
+
+	// The trash toolbar's Empty trash, behind its own confirm.
+	useAction(
+		"drive.emptyTrash",
+		keyboardEvent => {
+			if (isOnline && isEmptyTrashTriggerVisible(variant, visibleItems.length)) {
+				keyboardEvent.preventDefault()
+				handleEmptyTrash()
+			}
+		},
+		OUTSIDE_OVERLAYS,
+		[isOnline, variant, visibleItems.length]
+	)
+
+	// The Display menu's view and hidden-items choices, and the sort menu's orders in turn.
+	useAction(
+		"drive.listView",
+		keyboardEvent => {
+			keyboardEvent.preventDefault()
+			void applyViewModeChange("list")
+		},
+		OUTSIDE_OVERLAYS,
+		[applyViewModeChange]
+	)
+
+	useAction(
+		"drive.gridView",
+		keyboardEvent => {
+			keyboardEvent.preventDefault()
+			void applyViewModeChange("grid")
+		},
+		OUTSIDE_OVERLAYS,
+		[applyViewModeChange]
+	)
+
+	useAction(
+		"drive.toggleHiddenItems",
+		keyboardEvent => {
+			if (hiddenFilterApplies) {
+				keyboardEvent.preventDefault()
+				void applyHideHiddenItemsChange(!hiddenPref)
+			}
+		},
+		OUTSIDE_OVERLAYS,
+		[hiddenFilterApplies, hiddenPref]
+	)
+
+	useAction(
+		"drive.cycleSort",
+		keyboardEvent => {
+			if (isSortableVariant(variant) && listingReady) {
+				keyboardEvent.preventDefault()
+				void applySortChange(nextSortOrder(effectiveSort))
+			}
+		},
+		OUTSIDE_OVERLAYS,
+		[variant, listingReady, effectiveSort, applySortChange]
+	)
+
+	// The desktop app's reload keys reload the listing on screen, never the app.
+	useAction(
+		"drive.refresh",
+		keyboardEvent => {
+			keyboardEvent.preventDefault()
+
+			if (isOnline) {
+				void listingQuery.refetch()
+			}
+		},
+		OUTSIDE_OVERLAYS,
+		[isOnline, listingQuery.refetch]
+	)
 
 	const isSearchTruncated = search.active && search.total > BigInt(resolvedCount)
 	const searchFooterVisible = search.active && (search.status === "background" || isSearchTruncated)
@@ -1113,6 +1349,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 				<SearchInput
 					action="drive.search"
 					label={t("driveSearch")}
+					onFocusList={focusCursor}
 					value={variant === "drive" ? search.input : localFilter}
 					onChange={variant === "drive" ? search.setInput : setLocalFilter}
 					onClear={

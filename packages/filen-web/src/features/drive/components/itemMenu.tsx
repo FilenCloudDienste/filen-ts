@@ -1,16 +1,13 @@
 import { createElement, Fragment } from "react"
 import { useTranslation } from "react-i18next"
 import { useNavigate } from "@tanstack/react-router"
-import { toast } from "sonner"
 import { driveItemName } from "@filen/shared"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
 import { type ParentNaming } from "@/features/drive/lib/archiveTargets"
 import { toggleFavorite, restoreItems } from "@/features/drive/lib/actions"
 import { defaultRevealDeps, runOpenContainingDirectory } from "@/features/drive/lib/reveal"
-import { driveItemLinkStatusQueryKey, fetchDriveItemLinkStatus, type DriveItemLinkStatus } from "@/features/drive/queries/drive"
-import { queryClient } from "@/queries/client"
-import { errorLabel } from "@/lib/i18n/errorLabel"
+import { copyItemLink } from "@/features/drive/lib/copyLink"
 import { DRIVE_RESTORE, driveActivity, favoriteKeys } from "@/features/drive/lib/activity"
 import { runBulkActivity, runOutcomeActivity } from "@/lib/activity/activity"
 import { startDownloads } from "@/features/drive/lib/download"
@@ -20,7 +17,6 @@ import {
 	applyOfflineGate,
 	canWriteIntoItem,
 	driveItemActions,
-	resolveCopyLinkAction,
 	separatorBefore,
 	type ItemActionDescriptor,
 	type ItemActionDialogKind,
@@ -167,41 +163,11 @@ function ItemMenuEntries({
 
 	// Copy-link's own dispatch — intercepted here, BEFORE the run==="dialog" branch below, since its
 	// real behavior (copy straight to the clipboard when a link already exists) depends on data this
-	// synchronous click handler doesn't have yet. `staleTime: "static"` reuses the link dialog's own
-	// cache entry (same query key) rather than always re-fetching — opening the dialog moments earlier for
-	// this same item already primed it. A free-tier account can never have an existing link (public
-	// links are premium-only), so `status` naturally resolves null there too — no separate premium
-	// check needed, it degrades to `onItemAction("link", item)` exactly like an item with no link at
-	// all, which is where the dialog's own subscription gate lives (see linkDialog.tsx).
+	// synchronous click handler doesn't have yet (copyItemLink, shared with drive.copyLink).
 	async function runCopyLink(): Promise<void> {
-		let status: DriveItemLinkStatus | null
-
-		// `query` rethrows the fetch's error, which this fire-and-forget click would otherwise leave as a
-		// silent unhandled rejection.
-		try {
-			status = await queryClient.query({
-				queryKey: driveItemLinkStatusQueryKey(item.data.uuid),
-				queryFn: () => fetchDriveItemLinkStatus(item),
-				staleTime: "static"
-			})
-		} catch (e) {
-			toast.error(errorLabel(e))
-			return
-		}
-
-		const outcome = await resolveCopyLinkAction(item, status, url => navigator.clipboard.writeText(url))
-
-		if (outcome.action === "copied") {
-			toast.success(t("driveLinkUrlCopiedToast"))
-			return
-		}
-
-		if (outcome.action === "clipboardError") {
-			toast.error(errorLabel(outcome.error))
-			return
-		}
-
-		onItemAction("link", item)
+		await copyItemLink(item, t("driveLinkUrlCopiedToast"), () => {
+			onItemAction("link", item)
+		})
 	}
 
 	return (

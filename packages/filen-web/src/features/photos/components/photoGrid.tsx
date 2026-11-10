@@ -473,6 +473,11 @@ export function PhotoGrid({ rootUuids, listing }: PhotoGridProps) {
 					onClear={() => {
 						updateFilter(prev => ({ ...prev, query: "" }))
 					}}
+					onFocusList={() => {
+						if (items.length > 0) {
+							moveTo(safeActiveIndex)
+						}
+					}}
 				/>
 				<div
 					role="group"

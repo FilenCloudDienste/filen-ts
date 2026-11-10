@@ -39,6 +39,8 @@ export interface DriveListboxNav {
 	// Moves the roving cursor + range anchor to `index` without scrolling/focusing — mirrors what a
 	// plain click does (setActive + setAnchor), used by the marquee to land the cursor at drag end.
 	setCursor: (index: number) => void
+	// Scrolls to and focuses the cursor item, keyboard focus coming back to the listbox.
+	focusCursor: () => void
 }
 
 // ARIA listbox roving-cursor navigation on top of the virtualizer: owns the cursor (activeIndex) and
@@ -285,5 +287,11 @@ export function useDriveListboxNav({
 		setAnchorKey(key)
 	}
 
-	return { safeActiveIndex, handleKeyDown, handlePointerSelect, setCursor }
+	function focusCursor() {
+		if (items.length > 0) {
+			moveActive(safeActiveIndex)
+		}
+	}
+
+	return { safeActiveIndex, handleKeyDown, handlePointerSelect, setCursor, focusCursor }
 }

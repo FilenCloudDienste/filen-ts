@@ -4,6 +4,7 @@ import { SearchIcon, XIcon } from "lucide-react"
 import { isImeKeydown } from "@filen/shared/keymap"
 import { OUTSIDE_OVERLAYS, useAction } from "@/lib/keymap/useAction"
 import { Kbd } from "@/lib/keymap/kbd"
+import { hasCommandModifier } from "@/lib/rowKeys"
 import { KEEP_SELECTION_PROPS } from "@/features/drive/lib/clickAway.logic"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -16,9 +17,11 @@ export interface SearchInputProps {
 	value: string
 	onChange: (value: string) => void
 	onClear: () => void
+	// ArrowDown in the box: the list it filters takes focus, on its cursor item.
+	onFocusList?: (() => void) | undefined
 }
 
-export function SearchInput({ action, label, value, onChange, onClear }: SearchInputProps) {
+export function SearchInput({ action, label, value, onChange, onClear, onFocusList }: SearchInputProps) {
 	const { t } = useTranslation("drive")
 	const inputRef = useRef<HTMLInputElement>(null)
 
@@ -63,6 +66,19 @@ export function SearchInput({ action, label, value, onChange, onClear }: SearchI
 					if (event.key === "Escape" && !isImeKeydown(event.nativeEvent)) {
 						event.preventDefault()
 						onClear()
+					}
+
+					// A one-line box has nowhere for ArrowDown to go, so it goes to the results, as a search field
+					// over a list does.
+					if (
+						onFocusList !== undefined &&
+						event.key === "ArrowDown" &&
+						!event.shiftKey &&
+						!hasCommandModifier(event) &&
+						!isImeKeydown(event.nativeEvent)
+					) {
+						event.preventDefault()
+						onFocusList()
 					}
 				}}
 				// The engine's own cancel glyph would sit beside the clear button below.

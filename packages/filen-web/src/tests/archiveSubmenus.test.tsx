@@ -42,6 +42,11 @@ import { BulkActionBar } from "@/features/drive/components/bulkActionBar"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { testUuid } from "@/tests/support/uuid"
 import { mockSharedFile } from "@/tests/fixtures/sdk"
+import { registerAllActions } from "@/lib/keymap/actions"
+
+// The selection bar's menu buttons bind their keys (drive.compress, drive.extract, drive.downloadAs), as the app's
+// boot registers them.
+registerAllActions()
 
 function archive(name: string, label = name): DriveItem {
 	return narrowItem({

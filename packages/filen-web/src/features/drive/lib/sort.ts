@@ -46,6 +46,11 @@ export const DRIVE_SORT_FROM_PARTS: Record<DriveSortField, Record<DriveSortDirec
 	lastModified: { asc: "lastModifiedAsc", desc: "lastModifiedDesc" }
 }
 
+// The order after `current` in the sort menu's own order, wrapping round: what drive.cycleSort steps through.
+export function nextSortOrder(current: DriveSortBy): DriveSortBy {
+	return DRIVE_SORT_BY[(DRIVE_SORT_BY.indexOf(current) + 1) % DRIVE_SORT_BY.length] ?? "nameAsc"
+}
+
 // A list column header click: another column starts ascending, the sorted one flips to descending, and a
 // descending one clears (null) back to the default order.
 export function nextColumnSort(current: DriveSortBy, field: DriveSortField): DriveSortBy | null {

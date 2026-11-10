@@ -156,7 +156,10 @@ export const RESOLVED_COLLISIONS: readonly (readonly [string, string])[] = [
 	["drive.goUp", "presentation.moveSlideUp"],
 	["drive.info", "editor.italic"],
 	["photos.info", "editor.italic"],
-	["photos.densityIncrease", "presentation.show.togglePointer"]
+	["photos.densityIncrease", "presentation.show.togglePointer"],
+	["drive.openContainingDirectory", "presentation.text.lineBreak"],
+	["drive.refresh", "presentation.show.start"],
+	["drive.refresh", "presentation.text.alignRight"]
 ]
 
 export function scopesCanCollide(a: ActionScope, b: ActionScope): boolean {

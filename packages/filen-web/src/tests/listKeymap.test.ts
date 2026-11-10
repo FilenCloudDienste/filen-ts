@@ -68,7 +68,12 @@ describe("drive and photos list actions — defaults", () => {
 		["photos.favoritesFilter", "shift+f", "shift+f"],
 		["photos.download", "mod+s", "mod+s"],
 		["photos.densityIncrease", "equal", "equal"],
-		["photos.densityDecrease", "minus", "minus"]
+		["photos.densityDecrease", "minus", "minus"],
+		["drive.copyTo", "shift+m", "shift+m"],
+		["drive.newTextFile", "shift+n", "shift+n"],
+		["drive.downloadAs", "mod+shift+s", "mod+shift+s"],
+		["drive.copyLink", "mod+alt+c", "mod+alt+c"],
+		["drive.openContainingDirectory", "shift+enter", "shift+enter"]
 	])("%s is %s on a Mac and %s elsewhere", async (id, mac, other) => {
 		const { defaultComboOn } = await freshRegistry()
 
@@ -83,13 +88,54 @@ describe("drive and photos list actions — defaults", () => {
 		"photos.filterImages",
 		"photos.filterVideos",
 		"photos.filterRaw",
-		"photos.manageDirectories"
+		"photos.manageDirectories",
+		"drive.invertSelection",
+		"drive.focusListing",
+		"drive.openAsText",
+		"drive.newDocx",
+		"drive.newXlsx",
+		"drive.newPptx",
+		"drive.newOdt",
+		"drive.newOds",
+		"drive.newOdp",
+		"drive.versions",
+		"drive.color",
+		"drive.share",
+		"drive.clearClipboard",
+		"drive.compress",
+		"drive.extract",
+		"drive.emptyTrash",
+		"drive.listView",
+		"drive.gridView",
+		"drive.cycleSort",
+		"drive.toggleHiddenItems"
 	])("%s ships unbound and resolves to no combo", async id => {
 		const { registerAction, comboFor } = await freshRegistry()
 
 		registerAction(def(id))
 
 		expect(comboFor(id)).toBe("")
+	})
+
+	// The browser's own reload keys reload the app; only the desktop app has them free.
+	it("binds Refresh in the desktop app alone", async () => {
+		const { defaultComboOn } = await freshRegistry()
+		const refresh = def("drive.refresh")
+
+		expect(defaultComboOn(refresh, MAC)).toBe("")
+		expect(defaultComboOn(refresh, OTHER)).toBe("")
+		expect(defaultComboOn(refresh, { mac: true, desktop: true })).toBe("mod+r")
+		expect(defaultComboOn(refresh, { mac: false, desktop: true })).toBe("f5")
+	})
+})
+
+describe("nextSortOrder", () => {
+	it("steps through the sort menu's orders, wrapping round", async () => {
+		const { DRIVE_SORT_BY, nextSortOrder } = await import("@/features/drive/lib/sort")
+
+		expect(nextSortOrder("nameAsc")).toBe("nameDesc")
+		expect(nextSortOrder(DRIVE_SORT_BY[DRIVE_SORT_BY.length - 1] ?? "nameAsc")).toBe(DRIVE_SORT_BY[0])
+		expect(new Set(DRIVE_SORT_BY.map(nextSortOrder)).size).toBe(DRIVE_SORT_BY.length)
 	})
 })
 

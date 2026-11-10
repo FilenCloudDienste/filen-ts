@@ -4,6 +4,7 @@ import { PlusIcon } from "lucide-react"
 import { OUTSIDE_OVERLAYS, useAction } from "@/lib/keymap/useAction"
 import { isEmptySpaceTarget } from "@/features/drive/lib/clickAway.logic"
 import { type DriveItem } from "@/features/drive/lib/item"
+import { type NewOfficeKind } from "@/features/drive/lib/createOfficeFile"
 import { useUploadMenuActions } from "@/features/drive/hooks/useUploadMenuActions"
 import { NewDirectoryDialog } from "@/features/drive/components/newDirectory"
 import { DestinationEntries, type DestinationActions } from "@/features/drive/components/destinationMenu"
@@ -46,6 +47,18 @@ function pasteEntries(paste: DrivePasteAction | undefined) {
 				paste: { enabled: paste.enabled, run: paste.run, shortcut: true },
 				clear: { enabled: paste.clearable, run: paste.clear }
 			}
+}
+
+// One blank office file's key: its name dialog, as the New menu's entry opens it.
+function useNewOfficeShortcut(id: string, kind: NewOfficeKind, enabled: boolean, newOffice: (kind: NewOfficeKind) => void): void {
+	useAction(
+		id,
+		() => {
+			newOffice(kind)
+		},
+		{ ...OUTSIDE_OVERLAYS, enabled },
+		[newOffice]
+	)
 }
 
 // The toolbar's one entry point for creating and uploading into the directory on screen.
@@ -107,6 +120,24 @@ export function NewMenu({
 		{ ...OUTSIDE_OVERLAYS, enabled: shortcut !== false },
 		[disabled, upload.pickDirectory]
 	)
+
+	useAction(
+		"drive.newTextFile",
+		() => {
+			if (!disabled) {
+				upload.newTextFile()
+			}
+		},
+		{ ...OUTSIDE_OVERLAYS, enabled: shortcut !== false },
+		[disabled, upload.newTextFile]
+	)
+
+	useNewOfficeShortcut("drive.newDocx", "docx", !disabled && shortcut !== false, upload.newOffice)
+	useNewOfficeShortcut("drive.newXlsx", "xlsx", !disabled && shortcut !== false, upload.newOffice)
+	useNewOfficeShortcut("drive.newPptx", "pptx", !disabled && shortcut !== false, upload.newOffice)
+	useNewOfficeShortcut("drive.newOdt", "odt", !disabled && shortcut !== false, upload.newOffice)
+	useNewOfficeShortcut("drive.newOds", "ods", !disabled && shortcut !== false, upload.newOffice)
+	useNewOfficeShortcut("drive.newOdp", "odp", !disabled && shortcut !== false, upload.newOffice)
 
 	return (
 		<>
