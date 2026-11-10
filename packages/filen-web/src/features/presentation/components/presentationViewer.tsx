@@ -39,7 +39,16 @@ import { TextViewer } from "@/features/preview/components/textViewer"
 import { usePreviewBytes } from "@/features/preview/hooks/usePreviewBytes"
 import { usePreviewAccessMode, usePreviewByteSource, usePreviewDownload, usePreviewDownloadable } from "@/features/preview/lib/accessMode"
 import { DeckNotes } from "@/features/presentation/components/deckChrome"
-import { actionLabel, DEFAULT_SLIDE_SIZE, onPageKey } from "@/features/presentation/components/deckChrome.logic"
+import { actionLabel, DEFAULT_SLIDE_SIZE, isTextField, onPageKey } from "@/features/presentation/components/deckChrome.logic"
+import { presentationEditorKey } from "@/features/presentation/lib/keymap/editor"
+import {
+	presentationWheelZoom,
+	presentationZoom,
+	type PresentationZoom,
+	type PresentationZoomChange
+} from "@/features/presentation/lib/zoom"
+import { useBindings } from "@/lib/keymap/registry"
+import { useLatestRef } from "@/lib/useLatestRef"
 import { useDeckPresentation } from "@/features/presentation/hooks/useDeckPresentation"
 import { PresentationEditor } from "@/features/presentation/components/presentationEditor"
 import type { PresentationEditing } from "@/features/presentation/hooks/usePresentationSession"
@@ -93,6 +102,18 @@ interface DeckPlace {
 
 // Slides rendered first around the one shown.
 const OPEN_WINDOW = 3
+
+type ViewerKeyEvent = Parameters<typeof presentationEditorKey>[0] & {
+	readonly target: EventTarget | null
+	readonly defaultPrevented: boolean
+	preventDefault(): void
+}
+
+const ZOOM_CHANGE_OF: Readonly<Partial<Record<string, PresentationZoomChange>>> = {
+	"presentation.zoomIn": "in",
+	"presentation.zoomOut": "out",
+	"presentation.zoomFit": "fit"
+}
 
 export function PresentationViewer({ item, alt, variant, editing, canSaveCopy, onOpenFile }: PresentationViewerProps) {
 	useLeaveViewerFullScreen()
@@ -551,6 +572,48 @@ function DeckSurface({
 	const show = useDeckPresentation({ store, deck, index, go, focusSlide: canvasRef })
 	// SlideView's fit: the media frames over the slide are placed in screen px.
 	const [scale, setScale] = useState(1)
+	// Fit to the window, or a zoom (the editor's keys and Ctrl/Cmd+wheel); never saved.
+	const [zoomMode, setZoomMode] = useState<PresentationZoom>("fit")
+	// Read by the zoom's steps, which build on the zoom shown.
+	const scaleRef = useLatestRef(scale)
+	const combos = useBindings()
+	// The editor's zoom keys (presentation.zoomIn, zoomOut, zoomFit) on the slide shown; true when the key was one.
+	const zoomKey = (event: ViewerKeyEvent): boolean => {
+		if (event.defaultPrevented || show.showing || count === 0 || isTextField(event.target)) return false
+
+		const change = ZOOM_CHANGE_OF[presentationEditorKey(event, combos) ?? ""]
+
+		if (change === undefined) return false
+
+		event.preventDefault()
+		setZoomMode(previous => presentationZoom(previous, scaleRef.current, change))
+
+		return true
+	}
+
+	// Ctrl/Cmd+wheel (a trackpad pinch) zooms the slide, as in the editor; a plain wheel scrolls. A native non-passive
+	// listener, so the browser's own page zoom stays out.
+	useEffect(() => {
+		const canvas = canvasRef.current
+
+		if (canvas === null) return undefined
+
+		const onWheel = (event: WheelEvent): void => {
+			if (!event.ctrlKey && !event.metaKey) return
+
+			event.preventDefault()
+
+			const { deltaY } = event
+
+			setZoomMode(previous => presentationWheelZoom(previous, scaleRef.current, deltaY))
+		}
+
+		canvas.addEventListener("wheel", onWheel, { passive: false })
+
+		return () => {
+			canvas.removeEventListener("wheel", onWheel)
+		}
+	}, [scaleRef])
 
 	const groups: RibbonGroup[] = [
 		{
@@ -650,7 +713,7 @@ function DeckSurface({
 	// The show's keys and F6 pressed elsewhere in the viewer's layer (focus left on the preview overlay itself after a
 	// click, as Safari and macOS Firefox do). Paging stays the slide's own.
 	useEditorLayerKeys(rootRef, (event, root) => {
-		if (!show.onKey(event)) onCommandBarF6(event, root, focusSlide)
+		if (!show.onKey(event) && !zoomKey(event)) onCommandBarF6(event, root, focusSlide)
 	})
 
 	return (
@@ -663,7 +726,7 @@ function DeckSurface({
 				onRibbonEscape(event, event.currentTarget, focusSlide, "capture")
 			}}
 			onKeyDown={event => {
-				if (show.onKey(event)) return
+				if (show.onKey(event) || zoomKey(event)) return
 
 				if (onRibbonEscape(event, event.currentTarget, focusSlide, "bubble")) return
 
@@ -738,6 +801,7 @@ function DeckSurface({
 								mode="view"
 								actions={show.actions}
 								className="size-full"
+								{...(zoomMode === "fit" ? {} : { zoom: zoomMode })}
 								onScale={setScale}
 								overlay={
 									<PresentationMediaFrames

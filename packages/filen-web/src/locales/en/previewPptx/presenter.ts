@@ -90,5 +90,9 @@ export const previewPptxPresenter = {
 	/** Presentation shortcuts — start the slideshow from the first slide */
 	previewPptxShortcutShowStart: "Start slide show from the beginning",
 	/** Presentation shortcuts — start the slideshow from the current slide */
-	previewPptxShortcutShowStartCurrent: "Start slide show from the current slide"
+	previewPptxShortcutShowStartCurrent: "Start slide show from the current slide",
+	/** Presentation shortcuts — turn the highlighter on or off in a slideshow */
+	previewPptxShortcutShowHighlighter: "Slide show: highlighter",
+	/** Presentation shortcuts — start the slideshow in the presenter view, from the current slide */
+	previewPptxShortcutShowPresenterView: "Start slide show in Presenter View"
 }

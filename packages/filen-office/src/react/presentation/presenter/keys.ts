@@ -27,6 +27,8 @@ export type ShowKeyCommand =
 	| "eraseAll"
 	| "start"
 	| "startCurrent"
+	| "highlighter"
+	| "presenterView"
 
 export type ShowKeyBindings = Readonly<Record<ShowKeyCommand, string>>
 
@@ -52,7 +54,10 @@ export const DEFAULT_SHOW_BINDINGS: ShowKeyBindings = {
 	// In the editor: from the first slide, from the current one. In the show a clicker's F5 does nothing (and never
 	// reloads the page).
 	start: "f5",
-	startCurrent: "shift+f5"
+	startCurrent: "shift+f5",
+	highlighter: "mod+i",
+	// In the editor: the presenter view, from the current slide.
+	presenterView: "alt+f5"
 }
 
 export interface ShowKeyEvent {
@@ -129,7 +134,9 @@ export interface ShowKeysOptions {
 	readonly slide?: () => Parameters<InkStore["clear"]>[0] | undefined
 	// Slides in the deck (End without a controller that knows its last slide).
 	readonly count?: () => number
-	readonly bindings?: ShowKeyBindings
+	// The keys in effect (DEFAULT_SHOW_BINDINGS for a host without a keymap of its own): only these run a command, so a
+	// key moved off one no longer does.
+	readonly bindings: ShowKeyBindings
 	readonly apple: boolean
 	// The audience stage's pointer (show/pointer.ts changePointer).
 	readonly pointer?: (change: PointerChange) => void
@@ -197,6 +204,9 @@ export function createShowKeys(options: ShowKeysOptions): ShowKeys {
 			case "eraser":
 				ink?.setTool(ink.getSnapshot().tool === "eraser" ? "none" : "eraser")
 				return
+			case "highlighter":
+				ink?.setTool(ink.getSnapshot().tool === "highlighter" ? "none" : "highlighter")
+				return
 			case "arrow":
 				ink?.setTool("none")
 				options.pointer?.("automatic")
@@ -216,6 +226,7 @@ export function createShowKeys(options: ShowKeysOptions): ShowKeys {
 			}
 			case "start":
 			case "startCurrent":
+			case "presenterView":
 		}
 	}
 
@@ -249,7 +260,7 @@ export function createShowKeys(options: ShowKeysOptions): ShowKeys {
 
 			typed = ""
 
-			const command = showKeyCommand(event, options.bindings ?? DEFAULT_SHOW_BINDINGS, options.apple)
+			const command = showKeyCommand(event, options.bindings, options.apple)
 
 			if (command === undefined) return false
 

@@ -64,6 +64,7 @@ describe("entering a shape's text", () => {
 					editable
 					bindings={{
 						selectAll: "mod+a",
+						duplicate: "mod+d",
 						group: "mod+g",
 						ungroup: "mod+shift+u",
 						bringToFront: "",

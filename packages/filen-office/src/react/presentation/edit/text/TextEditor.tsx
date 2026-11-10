@@ -342,6 +342,11 @@ export function PresentationTextEditor({
 					return run(moveParagraphs(command === "moveParagraphDown" ? 1 : -1)) || true
 				case "nextPlaceholder":
 					return navigate(placeholderNavigation(latest.current.render, latest.current.shape)) || true
+				case "undo":
+				case "redo":
+					void controller.step(command)
+
+					return true
 				default:
 					return true
 			}
@@ -392,23 +397,7 @@ export function PresentationTextEditor({
 				return controller.run(horizontalMove(rtl ? (-direction as 1 | -1) : direction, word ? "word" : "char", event.shiftKey))
 			}
 
-			if (mod && !event.altKey) {
-				const lower = key.toLowerCase()
-
-				if (lower === "z") {
-					void controller.step(event.shiftKey ? "redo" : "undo")
-
-					return true
-				}
-
-				if (lower === "y" && !apple) {
-					void controller.step("redo")
-
-					return true
-				}
-
-				if (lower === "a" && !event.shiftKey) return run(selectAllText) || true
-			}
+			if (mod && !event.altKey && !event.shiftKey && key.toLowerCase() === "a") return run(selectAllText) || true
 
 			if (mod) return false
 
@@ -491,6 +480,14 @@ export function PresentationTextEditor({
 				},
 				handleDOMEvents: {
 					beforeinput: (_view, event) => {
+						// The browser's own undo and redo (a key the body's undo and redo were moved off): never the view's DOM.
+						// The history is the worker's, stepped by the keys bound to it.
+						if (event.inputType === "historyUndo" || event.inputType === "historyRedo") {
+							event.preventDefault()
+
+							return true
+						}
+
 						const tr = inputTransaction(view, controller.state, event)
 
 						if (tr === undefined) return false

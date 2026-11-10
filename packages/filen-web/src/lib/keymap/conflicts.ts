@@ -446,7 +446,12 @@ export const RESOLVED_COLLISIONS: readonly (readonly [string, string])[] = [
 	["sheet.goTo", "presentation.show.start"],
 	["sheet.replace", "presentation.show.hidePointer"],
 	["sheet.print", "presentation.print"],
-	["sheet.print", "presentation.show.pen"]
+	["sheet.print", "presentation.show.pen"],
+	// Mod+D duplicates the objects selected on the slide, whose canvas takes it first and stops it, and the slides in
+	// the slide list, whose own keydown takes it there (PowerPoint's both).
+	["presentation.objects.duplicate", "presentation.duplicateSlide"],
+	// The running show takes Mod+I for its highlighter on its stage and stops it there; italic acts in the editors.
+	["presentation.show.highlighter", "editor.italic"]
 ]
 
 export function scopesCanCollide(a: ActionScope, b: ActionScope): boolean {

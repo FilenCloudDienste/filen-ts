@@ -196,7 +196,7 @@ describe("presentation text editor view", () => {
 			"llo"
 		])
 
-		key(sink, { key: "z", ctrlKey: true })
+		key(sink, { key: "z", code: "KeyZ", ctrlKey: true })
 		await flushAll()
 		await flushAll()
 

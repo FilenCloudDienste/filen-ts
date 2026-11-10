@@ -6,7 +6,7 @@ import { DrawingList } from "../core/drawingml/index"
 import { slideRef, type ShowSettings } from "../core/presentation/model"
 import { drawingData } from "../core/presentation/render/slide"
 import type { SlideRender } from "../dom/presentation/protocol"
-import { isContextMenuKey } from "../react/presentation/presenter/keys"
+import { DEFAULT_SHOW_BINDINGS, isContextMenuKey } from "../react/presentation/presenter/keys"
 import { SlideShow } from "../react/presentation/show/player"
 import type { SlidePainter } from "../react/presentation/SlideView"
 
@@ -71,6 +71,7 @@ async function mount(
 			<SlideShow
 				slides={slides}
 				customShows={[]}
+				bindings={DEFAULT_SHOW_BINDINGS}
 				renders={renders}
 				size={SIZE}
 				painter={painter}

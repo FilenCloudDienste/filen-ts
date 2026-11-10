@@ -97,7 +97,7 @@ describe("show keys", () => {
 		const calls: string[] = []
 		const controller = { ...spyController(), nextHidden: () => calls.push("nextHidden") }
 		const ink = createInkStore()
-		const keys = createShowKeys({ controller: () => controller, ink, apple: false })
+		const keys = createShowKeys({ controller: () => controller, ink, apple: false, bindings: DEFAULT_SHOW_BINDINGS })
 
 		expect(showKeyCommand(key("KeyE", { ctrlKey: true }), DEFAULT_SHOW_BINDINGS, false)).toBe("eraser")
 		expect(showKeyCommand(key("KeyE", { metaKey: true }), DEFAULT_SHOW_BINDINGS, true)).toBe("eraser")
@@ -105,12 +105,19 @@ describe("show keys", () => {
 		expect(ink.getSnapshot().tool).toBe("eraser")
 		keys.onKeyDown(key("KeyE", { ctrlKey: true }))
 		expect(ink.getSnapshot().tool).toBe("none")
+		keys.onKeyDown(key("KeyI", { ctrlKey: true }))
+		expect(ink.getSnapshot().tool).toBe("highlighter")
+		keys.onKeyDown(key("KeyI", { ctrlKey: true }))
+		expect(ink.getSnapshot().tool).toBe("none")
+		// Alt+F5 is the editor's presenter view; in the show it is taken and does nothing.
+		expect(keys.onKeyDown(key("F5", { altKey: true }))).toBe(true)
+		expect(ink.getSnapshot().tool).toBe("none")
 		keys.onKeyDown(key("KeyH"))
 		expect(calls).toEqual(["nextHidden"])
 		expect(controller.calls).toEqual([])
 		// A player without the step takes H and does nothing.
 		const plain = spyController()
-		const fallback = createShowKeys({ controller: () => plain, apple: false })
+		const fallback = createShowKeys({ controller: () => plain, apple: false, bindings: DEFAULT_SHOW_BINDINGS })
 
 		expect(fallback.onKeyDown(key("KeyH"))).toBe(true)
 		expect(plain.calls).toEqual([])
@@ -126,7 +133,7 @@ describe("show keys", () => {
 
 	it("drives the controller, goes to a typed slide number on Enter and stops the key there", () => {
 		const controller = spyController()
-		const keys = createShowKeys({ controller: () => controller, apple: false })
+		const keys = createShowKeys({ controller: () => controller, apple: false, bindings: DEFAULT_SHOW_BINDINGS })
 		const right = key("ArrowRight")
 
 		expect(keys.onKeyDown(right)).toBe(true)
@@ -148,14 +155,14 @@ describe("show keys", () => {
 	it("Home and End use the controller's first and last when it has them", () => {
 		const calls: string[] = []
 		const controller = { ...spyController(), first: () => calls.push("first"), last: () => calls.push("last") }
-		const keys = createShowKeys({ controller: () => controller, apple: false })
+		const keys = createShowKeys({ controller: () => controller, apple: false, bindings: DEFAULT_SHOW_BINDINGS })
 
 		keys.onKeyDown(key("Home"))
 		keys.onKeyDown(key("End"))
 		expect(calls).toEqual(["first", "last"])
 
 		const plain = spyController()
-		const fallback = createShowKeys({ controller: () => plain, count: () => 7, apple: false })
+		const fallback = createShowKeys({ controller: () => plain, count: () => 7, apple: false, bindings: DEFAULT_SHOW_BINDINGS })
 
 		fallback.onKeyDown(key("Home"))
 		fallback.onKeyDown(key("End"))
@@ -166,7 +173,13 @@ describe("show keys", () => {
 		const controller = spyController()
 		const ink = createInkStore()
 		const slide = slideRef(5)
-		const keys = createShowKeys({ controller: () => controller, ink, slide: () => slide, apple: false })
+		const keys = createShowKeys({
+			controller: () => controller,
+			ink,
+			slide: () => slide,
+			apple: false,
+			bindings: DEFAULT_SHOW_BINDINGS
+		})
 
 		keys.onKeyDown(key("KeyP", { ctrlKey: true }))
 		expect(ink.getSnapshot().tool).toBe("pen")
@@ -189,7 +202,7 @@ describe("show keys", () => {
 
 	it("takes a clicker's F5 without doing anything and ignores a held toggle", () => {
 		const controller = spyController()
-		const keys = createShowKeys({ controller: () => controller, apple: false })
+		const keys = createShowKeys({ controller: () => controller, apple: false, bindings: DEFAULT_SHOW_BINDINGS })
 		const f5 = key("F5")
 
 		expect(keys.onKeyDown(f5)).toBe(true)
@@ -206,8 +219,8 @@ describe("show keys", () => {
 		const pointer = (change: string): void => {
 			changes.push(change)
 		}
-		const keys = createShowKeys({ controller: () => undefined, ink, apple: false, pointer })
-		const mac = createShowKeys({ controller: () => undefined, ink, apple: true, pointer })
+		const keys = createShowKeys({ controller: () => undefined, ink, apple: false, bindings: DEFAULT_SHOW_BINDINGS, pointer })
+		const mac = createShowKeys({ controller: () => undefined, ink, apple: true, bindings: DEFAULT_SHOW_BINDINGS, pointer })
 
 		const hide = key("KeyH", { ctrlKey: true })
 
@@ -226,7 +239,7 @@ describe("show keys", () => {
 
 		// A typed slide number is unaffected.
 		const controller = spyController()
-		const numbered = createShowKeys({ controller: () => controller, apple: false, pointer })
+		const numbered = createShowKeys({ controller: () => controller, apple: false, bindings: DEFAULT_SHOW_BINDINGS, pointer })
 
 		numbered.onKeyDown(key("Digit3"))
 		numbered.onKeyDown(key("Enter"))

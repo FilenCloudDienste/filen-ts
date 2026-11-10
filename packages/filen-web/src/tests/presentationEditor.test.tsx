@@ -443,6 +443,23 @@ describe("presentation editor slide show keys", () => {
 	})
 })
 
+describe("presentation editor presenter view key", () => {
+	it("opens the presenter view with Alt+F5 and runs the show under it", async () => {
+		await openEditor()
+
+		const open = vi.spyOn(window, "open").mockReturnValue(null)
+		const key = new KeyboardEvent("keydown", { key: "F5", code: "F5", altKey: true, bubbles: true, cancelable: true })
+
+		act(() => {
+			rail().dispatchEvent(key)
+		})
+		expect(key.defaultPrevented).toBe(true)
+		expect(open).toHaveBeenCalled()
+		expect(await screen.findByRole("region", { name: "Slide show" })).toBeTruthy()
+		open.mockRestore()
+	})
+})
+
 describe("presentation editor slide show key repeat", () => {
 	// A held F5's repeats are the browser's reload: taken, and they start nothing.
 	it("keeps a repeated F5 from reloading the page, and starts no show on it", async () => {

@@ -247,6 +247,37 @@ describe("presentation viewer session", () => {
 	})
 })
 
+describe("presentation viewer zoom keys", () => {
+	it("takes the editor's zoom keys on the slide, so the browser never zooms the page in their place", async () => {
+		render(
+			<PresentationViewer
+				item={deckItem()}
+				alt="deck.pptx"
+			/>
+		)
+		await waitFor(() => {
+			expect(engine.opens).toHaveLength(1)
+		})
+		await emit(opened)
+
+		const region = screen.getByRole("region", { name: "deck.pptx" })
+		const press = (init: KeyboardEventInit): boolean => {
+			const event = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, ...init })
+
+			act(() => {
+				region.dispatchEvent(event)
+			})
+
+			return event.defaultPrevented
+		}
+
+		expect(press({ key: "=", code: "Equal", ctrlKey: true })).toBe(true)
+		expect(press({ key: "-", code: "Minus", ctrlKey: true })).toBe(true)
+		expect(press({ key: "o", code: "KeyO", ctrlKey: true, altKey: true })).toBe(true)
+		expect(press({ key: "k", code: "KeyK", ctrlKey: true })).toBe(false)
+	})
+})
+
 describe("presentation refused actions", () => {
 	it("says so for a moment when a refused action is clicked", async () => {
 		render(

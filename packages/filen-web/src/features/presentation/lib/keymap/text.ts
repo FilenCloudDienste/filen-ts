@@ -1,5 +1,6 @@
 import type { TextKeyBindings, TextKeyCommand } from "@filen/office/react/presentation"
 import { PREVIEW_ACTIONS } from "@/features/preview/lib/keymap"
+import { PRESENTATION_EDITOR_ACTIONS } from "@/features/presentation/lib/keymap/editor"
 import { CURRENT_PLATFORM, defaultComboOn, useBindings, type ActionDef } from "@/lib/keymap/registry"
 
 // Text editing keys of the presentation editor that a user may rebind, PowerPoint's. Bold, italic, link, find and
@@ -7,7 +8,8 @@ import { CURRENT_PLATFORM, defaultComboOn, useBindings, type ActionDef } from "@
 // editor.replace), so one binding serves every editor. Center (Mod+E) shares its default with editor.code: the two
 // never run together (the code and Markdown editors never mount inside a presentation, and a body being edited takes
 // only the keys pressed in it), which lib/keymap/conflicts.ts lists once these actions are registered. The keys
-// PowerPoint fixes (Enter, Backspace, Delete, arrows, Escape, Mod+Z/Y) are the text editor's own.
+// PowerPoint fixes (Enter, Backspace, Delete, arrows, Escape) are the text editor's own; undo and redo there are
+// the editor's presentation.undo and presentation.redo.
 export type PresentationTextAction =
 	| "presentation.text.underline"
 	| "presentation.text.subscript"
@@ -96,11 +98,14 @@ const ACTION_OF: Readonly<Record<TextKeyCommand, string>> = {
 	demote: "presentation.text.demote",
 	moveParagraphUp: "presentation.text.moveParagraphUp",
 	moveParagraphDown: "presentation.text.moveParagraphDown",
-	nextPlaceholder: "presentation.text.nextPlaceholder"
+	nextPlaceholder: "presentation.text.nextPlaceholder",
+	// The editor's own undo and redo: one binding steps the history on the slide and in a body being edited.
+	undo: "presentation.undo",
+	redo: "presentation.redo"
 }
 
 const DEFINITIONS: ReadonlyMap<string, ActionDef> = new Map(
-	[...PRESENTATION_TEXT_ACTIONS, ...PREVIEW_ACTIONS].map(action => [action.id, action] as const)
+	[...PRESENTATION_TEXT_ACTIONS, ...PRESENTATION_EDITOR_ACTIONS, ...PREVIEW_ACTIONS].map(action => [action.id, action] as const)
 )
 
 // The text editor's keys from the combos in effect by action id (useBindings; each action's own default on this
@@ -118,7 +123,19 @@ export function presentationTextBindings(combos: Readonly<Record<string, string>
 	return bindings as TextKeyBindings
 }
 
+// One bindings object per keymap record: the store swaps the record only when the user edits a binding, so the text
+// editor gets the same object between renders and its combo parse cache keeps hitting.
+const BY_BINDINGS = new WeakMap<Readonly<Record<string, string>>, TextKeyBindings>()
+
 // The bindings for the mounted text editor, following the user's changes as they make them.
 export function usePresentationTextBindings(): TextKeyBindings {
-	return presentationTextBindings(useBindings())
+	const combos = useBindings()
+	let bindings = BY_BINDINGS.get(combos)
+
+	if (bindings === undefined) {
+		bindings = presentationTextBindings(combos)
+		BY_BINDINGS.set(combos, bindings)
+	}
+
+	return bindings
 }

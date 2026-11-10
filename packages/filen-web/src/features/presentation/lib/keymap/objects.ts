@@ -1,10 +1,13 @@
 import type { ObjectKeyBindings } from "@filen/office/react/presentation"
 import { useBindings, type ActionDef } from "@/lib/keymap/registry"
 
-// Object commands of the presentation editor's slide canvas that a user may rebind: select all, group, ungroup and
-// the stacking order (PowerPoint's keys). The editing keys PowerPoint fixes (arrows nudge, Delete, Tab, Enter,
-// Escape) are the canvas's own. The ids end in the canvas's command names (ObjectCommand), so the bindings the
-// canvas matches are read from this list.
+// Object commands of the presentation editor's slide canvas that a user may rebind: select all, duplicate, group,
+// ungroup and the stacking order (PowerPoint's keys). The editing keys PowerPoint fixes (arrows nudge, Delete, Tab,
+// Enter, Escape) are the canvas's own. The ids end in the canvas's command names (ObjectCommand), so the bindings the
+// canvas matches are read from this list. Duplicate is Mod+D on the slide; in the slide list Mod+D duplicates slides
+// (presentation.duplicateSlide), each taking it only where focus is. Bring forward and send backward also take the
+// Selection Pane's Mod+Shift+F and Mod+Shift+B (PowerPoint's keys there), and the pane follows these bindings, so
+// one binding moves objects on the slide and in the pane.
 export const PRESENTATION_OBJECT_ACTIONS: readonly ActionDef[] = [
 	{
 		id: "presentation.objects.selectAll",
@@ -13,6 +16,14 @@ export const PRESENTATION_OBJECT_ACTIONS: readonly ActionDef[] = [
 		section: "presentationObjects",
 		hintKey: "settings:keyboardHintSlideShapes",
 		descriptionKey: "preview:previewPptxShortcutSelectAll"
+	},
+	{
+		id: "presentation.objects.duplicate",
+		defaultCombo: "mod+d",
+		scope: "editor",
+		section: "presentationObjects",
+		hintKey: "settings:keyboardHintSlideShapes",
+		descriptionKey: "preview:previewPptxShortcutDuplicateObjects"
 	},
 	{
 		id: "presentation.objects.group",
@@ -48,7 +59,7 @@ export const PRESENTATION_OBJECT_ACTIONS: readonly ActionDef[] = [
 	},
 	{
 		id: "presentation.objects.bringForward",
-		defaultCombo: "mod+bracketright",
+		defaultCombo: "mod+bracketright,mod+shift+f",
 		scope: "editor",
 		section: "presentationObjects",
 		hintKey: "settings:keyboardHintSlideShapes",
@@ -56,7 +67,7 @@ export const PRESENTATION_OBJECT_ACTIONS: readonly ActionDef[] = [
 	},
 	{
 		id: "presentation.objects.sendBackward",
-		defaultCombo: "mod+bracketleft",
+		defaultCombo: "mod+bracketleft,mod+shift+b",
 		scope: "editor",
 		section: "presentationObjects",
 		hintKey: "settings:keyboardHintSlideShapes",

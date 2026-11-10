@@ -49,7 +49,10 @@ async function labels(action: string): Promise<(string | null)[][]> {
 describe("<Kbd>", () => {
 	it("names each key by the layout's character, one group per alternative", async () => {
 		expect(await labels("presentation.text.shrinkFont")).toEqual([["Ctrl", "Shift", ","]])
-		expect(await labels("presentation.objects.sendBackward")).toEqual([["Ctrl", "Ü"]])
+		expect(await labels("presentation.objects.sendBackward")).toEqual([
+			["Ctrl", "Ü"],
+			["Ctrl", "Shift", "B"]
+		])
 		expect(await labels("drive.trash")).toEqual([["Del"], ["⌫"]])
 		expect(await labels("presentation.zoomIn")).toEqual([
 			["Ctrl", "´"],

@@ -12,6 +12,7 @@ import type { BitmapLike, PresentationSessionApi, ShowLayer, SlideRender } from 
 import { layerParents, showLayerIndex } from "../dom/presentation/engine/show"
 import type { ShowController } from "../react/presentation/show/controller"
 import { SlideShow } from "../react/presentation/show/player"
+import { DEFAULT_SHOW_BINDINGS } from "../react/presentation/presenter/keys"
 import type { SlidePainter } from "../react/presentation/SlideView"
 
 // The player hands a slide's own transition (the worker's `authored`, beside the fallback it draws in 2D) to the
@@ -175,6 +176,7 @@ async function mount(
 			<SlideShow
 				slides={slides}
 				customShows={[]}
+				bindings={DEFAULT_SHOW_BINDINGS}
 				renders={renders}
 				size={SIZE}
 				painter={painter}

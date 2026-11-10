@@ -15,6 +15,8 @@ import { PresentationEditorContext, type PresentationEditorScope } from "@/featu
 import { presentationEditorKey } from "@/features/presentation/lib/keymap/editor"
 import { createSelectionPane, stableOutline, type SelectionPaneStore } from "@/features/presentation/lib/selectionPane"
 import { previewPptxArrange } from "@/locales/en/previewPptx/arrange"
+import { clearUserCombo, setUserCombo } from "@/lib/keymap/registry"
+import { registerAllActions } from "@/lib/keymap/actions"
 import "@/lib/i18n"
 
 // The Selection Pane: the slide's objects front-most first with groups' members under them, read once per render of
@@ -29,6 +31,8 @@ vi.mock("@/lib/storage/adapter", () => ({
 	kvSetJson: () => Promise.resolve(),
 	kvDelete: () => Promise.resolve()
 }))
+
+registerAllActions()
 
 const ref = slideRef(256)
 const INFO = { format: "pptx", slides: [{ ref, hidden: false }], size: { cx: 9144000, cy: 5143500 }, editable: true } as unknown as OpenInfo
@@ -270,14 +274,33 @@ describe("the Selection Pane", () => {
 		fireEvent.keyDown(row("Box B, hidden"), { key: "ArrowDown" })
 		fireEvent.keyDown(row("Box A"), { key: " " })
 		expect(m.selection.getSnapshot().ids).toEqual([3])
-		fireEvent.keyDown(row("Box A"), { key: "s", ctrlKey: true, shiftKey: true })
-		fireEvent.keyDown(row("Box A"), { key: "F", ctrlKey: true, shiftKey: true })
+		fireEvent.keyDown(row("Box A"), { key: "s", code: "KeyS", ctrlKey: true, shiftKey: true })
+		fireEvent.keyDown(row("Box A"), { key: "F", code: "KeyF", ctrlKey: true, shiftKey: true })
+		// The slide's own bring forward key restacks here too.
+		fireEvent.keyDown(row("Box A"), { key: "]", code: "BracketRight", ctrlKey: true })
 		expect(ops).toEqual([
 			{ family: "shape", kind: "setHidden", slide: ref, shapes: [3], hidden: true },
+			{ family: "shape", kind: "zOrder", slide: ref, shapes: [3], to: "forward" },
 			{ family: "shape", kind: "zOrder", slide: ref, shapes: [3], to: "forward" }
 		])
 		fireEvent.keyDown(row("Box A"), { key: "Escape" })
 		expect(m.left.count).toBe(1)
+	})
+
+	it("restacks on the keys the user moved the object actions to, and no longer on the old ones", async () => {
+		const m = mount()
+
+		await screen.findByRole("tree")
+		act(() => {
+			m.selection.set([3])
+		})
+		await act(() => setUserCombo("presentation.objects.bringForward", "alt+shift+f"))
+		fireEvent.keyDown(row("Box A"), { key: "F", code: "KeyF", ctrlKey: true, shiftKey: true })
+		fireEvent.keyDown(row("Box A"), { key: "]", code: "BracketRight", ctrlKey: true })
+		expect(ops).toEqual([])
+		fireEvent.keyDown(row("Box A"), { key: "F", code: "KeyF", altKey: true, shiftKey: true })
+		expect(ops).toEqual([{ family: "shape", kind: "zOrder", slide: ref, shapes: [3], to: "forward" }])
+		await act(() => clearUserCombo("presentation.objects.bringForward"))
 	})
 
 	it("the arrows are offered while the chosen objects can move that way", async () => {

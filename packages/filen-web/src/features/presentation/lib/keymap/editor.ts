@@ -6,7 +6,7 @@ import { isMacPlatform } from "@/lib/keymap/kbd.logic"
 // The presentation editor's own commands: slides (new, duplicate, delete, move) and undo/redo, PowerPoint's keys.
 // New slide is Ctrl+M on every platform, as in PowerPoint for the web (Cmd+M minimizes the window on a Mac).
 // Duplicate slide is Mod+Shift+D anywhere and Mod+D in the slide list; on the slide canvas Mod+D duplicates the
-// selected objects (the canvas takes it before the editor).
+// selected objects (presentation.objects.duplicate: the canvas takes it before the editor).
 // They act where the editor has focus (its rail and slide), so the editor matches them on its own keydown (the
 // spreadsheet grid's precedent) against the combo in effect: the default here, or the user's once the shortcuts
 // catalog lists them. Save is the overlay's preview.save (Mod+S). Zoom in is Mod with the key a US layout types "="

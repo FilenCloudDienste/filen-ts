@@ -23,6 +23,7 @@ import {
 } from "@/features/presentation/components/ribbon/animations"
 import type { PresentationRibbonEditor } from "@/features/presentation/components/ribbon/tabs"
 import { customPathLabel } from "@/features/presentation/components/ribbon/motionPaths"
+import { usePresentationShowBindings } from "@/features/presentation/lib/keymap/show"
 
 // The Animation Pane beside the slide: the slide's effects in play order (the click sequence, then each trigger's),
 // each with its click number, its effect and object, and a bar on the slide's timeline; choosing effects here makes
@@ -630,6 +631,8 @@ function driveStage(controller: ShowController, request: AnimationPreviewRequest
 function PreviewStage({ editor, request }: { editor: PresentationRibbonEditor; request: AnimationPreviewRequest }) {
 	const { t } = useTranslation("preview")
 	const render = editor.render
+	// The show's keys in effect (Escape ends the preview; an arrow plays on), so a key moved off them does nothing here.
+	const bindings = usePresentationShowBindings()
 	// Where focus was, back there when the preview goes (the stage takes it while it plays).
 	const [before] = useState(() => (typeof document === "undefined" ? null : document.activeElement))
 
@@ -657,6 +660,7 @@ function PreviewStage({ editor, request }: { editor: PresentationRibbonEditor; r
 				ref={attach}
 				slides={slides.map(each => ({ ref: each.ref, hidden: false }))}
 				customShows={[]}
+				bindings={bindings}
 				renders={new Map(slides.map(each => [each.ref, each]))}
 				size={editor.info.size}
 				painter={paintSlide}

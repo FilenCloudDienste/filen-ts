@@ -12,6 +12,7 @@ import type { BitmapLike, LayerPlan, PresentationSessionApi, ShowLayer, SlideLay
 import { layerParents, showLayerIndex } from "../dom/presentation/engine/show"
 import type { ShowController, ShowEvent } from "../react/presentation/show/controller"
 import { SlideShow } from "../react/presentation/show/player"
+import { DEFAULT_SHOW_BINDINGS } from "../react/presentation/presenter/keys"
 import type { ShowMediaControl, ShowMediaMount } from "../react/presentation/show/stage"
 import { TimingBuilder } from "./animFixtures"
 import { codeOf } from "./showKeyFixtures"
@@ -200,6 +201,7 @@ async function mount(
 			<SlideShow
 				slides={slides}
 				customShows={[]}
+				bindings={DEFAULT_SHOW_BINDINGS}
 				renders={renders}
 				size={SIZE}
 				painter={(_render, context) => ({ root: context.document.createElement("div"), release: () => undefined })}

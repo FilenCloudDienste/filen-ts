@@ -38,6 +38,7 @@ const box = (x: number, y: number, cx: number, cy: number, extra: Partial<Xfrm> 
 })
 const BINDINGS: ObjectKeyBindings = {
 	selectAll: "mod+a",
+	duplicate: "mod+d",
 	group: "mod+g",
 	ungroup: "mod+shift+u",
 	bringToFront: "mod+shift+]",

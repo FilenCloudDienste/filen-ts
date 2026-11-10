@@ -176,6 +176,8 @@ export const previewPptxArrange = {
 
 	/** Keyboard shortcuts — presentation editor: select every object on the slide */
 	previewPptxShortcutSelectAll: "Select all objects on the slide",
+	/** Keyboard shortcuts — presentation editor: copies the selected objects on the slide */
+	previewPptxShortcutDuplicateObjects: "Duplicate the selected objects",
 	/** Keyboard shortcuts — presentation editor */
 	previewPptxShortcutGroup: "Group the selected objects",
 	/** Keyboard shortcuts — presentation editor */
@@ -209,9 +211,12 @@ export const previewPptxArrange = {
 	previewPptxSelectionHideAll: "Hide All",
 	/** Selection Pane — accessible name of the list of the slide's objects */
 	previewPptxSelectionList: "Objects on this slide",
-	/** Selection Pane — accessible description of the list: its keyboard commands */
-	previewPptxSelectionKeys:
-		"Front-most object first. Arrow keys move between objects, Left and Right collapse and expand groups. Space selects, Ctrl+Space adds to the selection. F2 renames, Ctrl+Shift+S shows or hides, Ctrl+Shift+F and Ctrl+Shift+B bring forward and send backward. Escape returns to the slide.",
+	/** Selection Pane — accessible description of the list: its keyboard commands. {{forward}} and {{backward}} are the user's keys for bring forward and send backward (e.g. "Ctrl+] / Ctrl+Shift+F") */
+	previewPptxSelectionKeysOrder:
+		"Front-most object first. Arrow keys move between objects, Left and Right collapse and expand groups. Space selects, Ctrl+Space adds to the selection. F2 renames, Ctrl+Shift+S shows or hides, {{forward}} brings forward and {{backward}} sends backward. Escape returns to the slide.",
+	/** Selection Pane — accessible description of the list: its keyboard commands, when bring forward or send backward has no key */
+	previewPptxSelectionKeysNoOrder:
+		"Front-most object first. Arrow keys move between objects, Left and Right collapse and expand groups. Space selects, Ctrl+Space adds to the selection. F2 renames, Ctrl+Shift+S shows or hides. Escape returns to the slide.",
 	/** Selection Pane — the slide has no objects to list */
 	previewPptxSelectionEmpty: "There are no objects on this slide.",
 	/** Selection Pane — shown while the slide's objects are being read */

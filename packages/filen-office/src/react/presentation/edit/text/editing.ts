@@ -132,7 +132,7 @@ export function createTextEditing(): TextEditing {
 			// Any other shortcut goes on to the page (Mod+S saves, Mod+Z undoes). The holding goes on: what is typed after
 			// it is still the body's, unless the shortcut moves focus (Mod+F to the find field: the focusin listener sees
 			// that and drops what was held, and the editor leaves focus there).
-			if (command === undefined || command === "link") return
+			if (command === undefined || command === "link" || command === "undo" || command === "redo") return
 
 			event.preventDefault()
 			event.stopImmediatePropagation()

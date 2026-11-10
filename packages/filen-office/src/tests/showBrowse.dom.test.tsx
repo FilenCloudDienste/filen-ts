@@ -8,6 +8,7 @@ import { slideRef, type ShowSettings } from "../core/presentation/model"
 import { drawingData } from "../core/presentation/render/slide"
 import type { SlideRender } from "../dom/presentation/protocol"
 import { SlideShow, type ShowBarState } from "../react/presentation/show/player"
+import { DEFAULT_SHOW_BINDINGS } from "../react/presentation/presenter/keys"
 import { showOptionsOf } from "../react/presentation/show/timeline"
 import { WHEEL_QUIET_MS, WheelSteps } from "../react/presentation/show/wheel"
 import type { SlidePainter } from "../react/presentation/SlideView"
@@ -80,6 +81,7 @@ async function mount(browse: boolean): Promise<Mounted> {
 			<SlideShow
 				slides={slides}
 				customShows={[]}
+				bindings={DEFAULT_SHOW_BINDINGS}
 				renders={renders}
 				size={SIZE}
 				painter={painter}

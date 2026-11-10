@@ -10,7 +10,6 @@ import {
 	changePointer,
 	createShowKeys,
 	createShowSwipe,
-	DEFAULT_SHOW_BINDINGS,
 	INK_PEN_COLOR,
 	InkLayer,
 	ShowMirrorLink,
@@ -95,13 +94,14 @@ const PRESENTER_Z = 2147483600
 class PresenterLive {
 	controller: ShowController | undefined
 	position: PresenterPosition = PRESENTER_START
-	bindings: ShowKeyBindings = DEFAULT_SHOW_BINDINGS
+	bindings: ShowKeyBindings
 	deck: PresentationDocument
 	// The presenter's current slide: the stage copied live from whichever controller drives the show.
 	readonly mirror = new ShowMirrorLink()
 
-	constructor(deck: PresentationDocument) {
+	constructor(deck: PresentationDocument, bindings: ShowKeyBindings) {
 		this.deck = deck
+		this.bindings = bindings
 	}
 
 	update(deck: PresentationDocument, bindings: ShowKeyBindings): void {
@@ -163,7 +163,7 @@ export function usePresenter({ deck, editable, fullscreen, fullscreenActive, ret
 	const bindings = usePresentationShowBindings()
 	// What the keys, swipes and show events read outside render: the player's controller, where the show is, the
 	// bindings and the deck in effect.
-	const [live] = useState(() => new PresenterLive(deck))
+	const [live] = useState(() => new PresenterLive(deck, bindings))
 	const [placement] = useState(() => createScreenPlacement(window))
 	const [portal] = useState(() =>
 		createPresenterPortal({

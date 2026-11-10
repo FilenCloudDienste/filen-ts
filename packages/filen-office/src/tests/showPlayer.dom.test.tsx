@@ -239,7 +239,7 @@ async function mount(
 				{...(extra.overlay === undefined ? {} : { overlay: extra.overlay })}
 				{...(extra.media === undefined ? {} : { media: extra.media })}
 				{...(extra.keepPointer === true ? { autoHidePointer: false } : {})}
-				{...(extra.bindings === undefined ? {} : { bindings: extra.bindings })}
+				bindings={extra.bindings ?? DEFAULT_SHOW_BINDINGS}
 				onSlide={onSlide}
 				onEnd={onEnd}
 				label="Slide show"

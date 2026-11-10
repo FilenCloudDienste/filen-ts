@@ -18,7 +18,11 @@ import {
 	type OutlineShape,
 	type ZOrder
 } from "@filen/office/core/presentation"
-import { createShapeSelection, useShapeSelection, type ShapeSelectionState } from "@filen/office/react/presentation"
+import { createShapeSelection, useShapeSelection, type ObjectKeyBindings, type ShapeSelectionState } from "@filen/office/react/presentation"
+import { chordText } from "@/lib/keymap/keyText"
+import { isMacPlatform } from "@/lib/keymap/kbd.logic"
+import { matchesCombo, parseCombo } from "@filen/shared/keymap"
+import { usePresentationObjectBindings } from "@/features/presentation/lib/keymap/objects"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { RibbonButton } from "@/features/office/components/ribbon/ribbonControls"
@@ -60,6 +64,16 @@ function outlineName(t: TFunction<"preview">, shape: OutlineShape): string {
 	return t("previewPptxSelectionUnnamed", { kind, id: shape.id })
 }
 
+const IS_MAC = isMacPlatform()
+
+// The object actions whose keys restack the objects chosen in the pane, as they do the ones selected on the slide.
+const Z_ORDER_KEYS: readonly (readonly [keyof ObjectKeyBindings, ZOrder])[] = [
+	["bringToFront", "front"],
+	["sendToBack", "back"],
+	["bringForward", "forward"],
+	["sendBackward", "backward"]
+]
+
 const DRAG_TYPE = "application/x-filen-outline"
 const ROW_PX = 28
 const INDENT_PX = 16
@@ -70,6 +84,23 @@ interface Extra {
 	// still `with`.
 	readonly ids: readonly number[]
 	readonly with: ShapeSelectionState
+}
+
+// A command's keys as text ("Ctrl+] / Ctrl+Shift+F"; "" when it has none).
+function keysText(combo: string): string {
+	return parseCombo(combo)
+		.map(chord => chordText(chord))
+		.join(" / ")
+}
+
+// The list's keyboard help, with the stacking keys in effect (left out when either is unbound).
+function selectionKeysHelp(t: TFunction<"preview">, bindings: ObjectKeyBindings): string {
+	const forward = keysText(bindings.bringForward)
+	const backward = keysText(bindings.sendBackward)
+
+	return forward === "" || backward === ""
+		? t("previewPptxSelectionKeysNoOrder")
+		: t("previewPptxSelectionKeysOrder", { forward, backward })
 }
 
 function rowElement(target: EventTarget | null): HTMLElement | null {
@@ -91,6 +122,7 @@ export function SelectionPane({
 	onLeave: () => void
 }) {
 	const { t } = useTranslation("preview")
+	const objectBindings = usePresentationObjectBindings()
 	const pane = useSelectionPane(store)
 	const selectionStore = editor?.selection ?? NO_SELECTION
 	const selection = useShapeSelection(selectionStore)
@@ -254,18 +286,19 @@ export function SelectionPane({
 			action()
 		}
 
-		if (mod && event.shiftKey && !event.altKey) {
-			const key = event.key.toLowerCase()
+		// The stacking order on the object actions' keys (Mod+Shift+F and Mod+Shift+B among them, PowerPoint's here).
+		const to = Z_ORDER_KEYS.find(([command]) => matchesCombo(event, objectBindings[command], IS_MAC))?.[1]
 
-			if (key === "f")
-				run(() => {
-					move("forward")
-				})
-			else if (key === "b")
-				run(() => {
-					move("backward")
-				})
-			else if (key === "s")
+		if (to !== undefined) {
+			run(() => {
+				move(to)
+			})
+
+			return
+		}
+
+		if (mod && event.shiftKey && !event.altKey) {
+			if (event.code === "KeyS")
 				run(() => {
 					toggleHidden(row)
 				})
@@ -459,7 +492,7 @@ export function SelectionPane({
 				id={keysId}
 				className="sr-only"
 			>
-				{t("previewPptxSelectionKeys")}
+				{selectionKeysHelp(t, objectBindings)}
 			</p>
 			<p
 				className="sr-only"

@@ -818,7 +818,7 @@ export function ShapeEditLayer({
 		}
 	}
 
-	const objectCommand = (name: ObjectCommand | "duplicate"): boolean => {
+	const objectCommand = (name: ObjectCommand): boolean => {
 		if (slide === undefined) return false
 
 		const ids = placed.map(shape => shape.id)
@@ -919,10 +919,6 @@ export function ShapeEditLayer({
 		switch (action.kind) {
 			case "command":
 				if (objectCommand(action.command)) event.preventDefault()
-
-				return
-			case "duplicate":
-				if (objectCommand("duplicate")) event.preventDefault()
 
 				return
 			case "escape":

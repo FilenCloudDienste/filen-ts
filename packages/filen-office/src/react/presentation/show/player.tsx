@@ -62,9 +62,9 @@ export interface SlideShowProps {
 	// Called first for every key, and for every pointer down, up and cancel on the stage; true: consumed (a consumed
 	// pointer up also keeps the click after it from advancing).
 	readonly onKey?: (event: KeyboardEvent<HTMLDivElement>) => boolean
-	// The show's keys (presenter/keys.ts DEFAULT_SHOW_BINDINGS when absent), for the keys onKey leaves to the player:
-	// a host that rebinds them passes them here too, so the old key no longer runs the command.
-	readonly bindings?: ShowKeyBindings
+	// The show's keys, for the keys onKey leaves to the player (presenter/keys.ts DEFAULT_SHOW_BINDINGS for a host
+	// without a keymap of its own): only these run a command, so a key moved off one no longer does.
+	readonly bindings: ShowKeyBindings
 	readonly onPointer?: (event: PointerEvent<HTMLDivElement>) => boolean
 	// The show's shortcut menu (PowerPoint's right click, Shift+F10 or the Menu key), at client px; the stage is where
 	// focus goes back when it closes. The browser's own menu never shows over the show; a kiosk has no menu.

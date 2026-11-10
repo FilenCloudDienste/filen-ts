@@ -46,6 +46,7 @@ function renderOf(layers: readonly SlideLayer[], slide = ref): SlideRender {
 
 const BINDINGS: ObjectKeyBindings = {
 	selectAll: "mod+a",
+	duplicate: "mod+d",
 	group: "mod+g",
 	ungroup: "mod+shift+g",
 	bringToFront: "mod+shift+]",
@@ -337,11 +338,24 @@ describe("presentation canvas keys", () => {
 	})
 
 	it("Mod+D duplicates the selected objects (Ctrl+D, Cmd+D on a Mac), not the slide", () => {
-		expect(objectKeyAction(key("KeyD", "d", { ctrlKey: true }), BINDINGS, false)).toEqual({ kind: "duplicate" })
-		expect(objectKeyAction(key("KeyD", "d", { metaKey: true }), BINDINGS, true)).toEqual({ kind: "duplicate" })
+		const duplicate = { kind: "command", command: "duplicate" }
+
+		expect(objectKeyAction(key("KeyD", "d", { ctrlKey: true }), BINDINGS, false)).toEqual(duplicate)
+		expect(objectKeyAction(key("KeyD", "d", { metaKey: true }), BINDINGS, true)).toEqual(duplicate)
 		expect(objectKeyAction(key("KeyD", "d", { ctrlKey: true }), BINDINGS, true)).toBeUndefined()
 		// Mod+Shift+D is the slide's (the editor's), not the canvas's.
 		expect(objectKeyAction(key("KeyD", "D", { ctrlKey: true, shiftKey: true }), BINDINGS, false)).toBeUndefined()
+	})
+
+	it("duplicates on the key the user moved it to, and no longer on Mod+D", () => {
+		const moved = { ...BINDINGS, duplicate: "mod+alt+d" }
+
+		expect(objectKeyAction(key("KeyD", "d", { ctrlKey: true }), moved, false)).toBeUndefined()
+		expect(objectKeyAction(key("KeyD", "d", { ctrlKey: true, altKey: true }), moved, false)).toEqual({
+			kind: "command",
+			command: "duplicate"
+		})
+		expect(objectKeyAction(key("KeyD", "d", { ctrlKey: true }), { ...BINDINGS, duplicate: "" }, false)).toBeUndefined()
 	})
 
 	it("Alt+Left/Right turn 15°; on a Mac Cmd+arrows nudge and Shift+arrows resize", () => {

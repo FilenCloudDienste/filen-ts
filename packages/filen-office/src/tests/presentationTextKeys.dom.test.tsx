@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { act } from "react"
 import { createRoot } from "react-dom/client"
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { rgba } from "../core/drawingml/index"
 import type { DeckOp } from "../core/presentation/edit/ops"
 import { slideRef, type ShapeRef, type TextBody } from "../core/presentation/model"
@@ -126,6 +126,27 @@ describe("presentation text editor keys and painting", () => {
 
 		key(sink, { key: "U", code: "KeyU", ctrlKey: true, shiftKey: true })
 		expect(controller?.format().run.u).toBe("sng")
+
+		await act(async () => {
+			root.unmount()
+		})
+	})
+
+	it("steps the history on the undo and redo keys in effect, not on a key moved off them", async () => {
+		const { editing, root, sink } = await mount({ ...DEFAULT_TEXT_BINDINGS, undo: "mod+alt+z" })
+		const controller = editing.active
+
+		if (controller === undefined) throw new Error("no body open")
+
+		const step = vi.spyOn(controller, "step").mockResolvedValue({ ok: true } as Awaited<ReturnType<typeof controller.step>>)
+
+		key(sink, { key: "z", code: "KeyZ", ctrlKey: true })
+		expect(step).not.toHaveBeenCalled()
+
+		key(sink, { key: "z", code: "KeyZ", ctrlKey: true, altKey: true })
+		key(sink, { key: "Z", code: "KeyZ", ctrlKey: true, shiftKey: true })
+		key(sink, { key: "y", code: "KeyY", ctrlKey: true })
+		expect(step.mock.calls).toEqual([["undo"], ["redo"], ["redo"]])
 
 		await act(async () => {
 			root.unmount()

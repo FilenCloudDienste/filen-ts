@@ -280,7 +280,7 @@ describe("presentation Arrange tab", () => {
 		const bindings = presentationObjectBindings()
 
 		expect(Object.keys(bindings).sort()).toEqual(
-			["bringForward", "bringToFront", "group", "selectAll", "sendBackward", "sendToBack", "ungroup"].sort()
+			["bringForward", "bringToFront", "duplicate", "group", "selectAll", "sendBackward", "sendToBack", "ungroup"].sort()
 		)
 		expect(PRESENTATION_OBJECT_ACTIONS.map(action => action.id.replace("presentation.objects.", "")).sort()).toEqual(
 			Object.keys(bindings).sort()

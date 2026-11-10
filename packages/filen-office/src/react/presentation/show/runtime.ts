@@ -24,7 +24,7 @@ import {
 	type PresentationActionPolicy,
 	type PresentationJump
 } from "../links"
-import { DEFAULT_SHOW_BINDINGS, showKeyCommand, type ShowKeyBindings } from "../presenter/keys"
+import { showKeyCommand, type ShowKeyBindings } from "../presenter/keys"
 import type { PaintedSlide, SlidePainter } from "../SlideView"
 import type { ShowController, ShowEvent, ShowEventType, ShowFrom, ShowMirror, ShowScreen, ShowStart } from "./controller"
 import { layerBoxes, layerIndices, layerPlanOf, layerTree } from "./layers"
@@ -64,8 +64,8 @@ export interface PlayerProps {
 	readonly media: ShowMediaMount | undefined
 	readonly onSlide: ((index: number) => void) | undefined
 	readonly onEnd: () => void
-	// The show's keys (the defaults when absent): a key moved off a command no longer runs it.
-	readonly bindings: ShowKeyBindings | undefined
+	// The show's keys: only these run a command, so a key moved off one no longer does.
+	readonly bindings: ShowKeyBindings
 	readonly labels: {
 		readonly action: (action: Action, layer: SlideLayer) => string
 		readonly trigger: (layer: SlideLayer) => string
@@ -691,7 +691,7 @@ export class ShowPlayer implements ShowController {
 				metaKey: event.metaKey === true,
 				shiftKey: event.shiftKey === true
 			},
-			this.props.bindings ?? DEFAULT_SHOW_BINDINGS,
+			this.props.bindings,
 			isMacPlatform()
 		)
 
