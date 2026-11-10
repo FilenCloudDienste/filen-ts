@@ -34,10 +34,14 @@ const ZOOM_ACTIONS: Readonly<Record<DesktopZoomStep, ActionDef>> = {
 	reset: shellAction("desktop.zoomReset")
 }
 
-// A zoom key a document viewer took (the PDF viewer and the presentation editor zoom themselves) is cancelled by then.
-function zoomKeyIgnored(event: Parameters<typeof shouldIgnoreEvent>[0] & Pick<KeyboardEvent, "defaultPrevented">): boolean {
+// A key a document took is cancelled by then: the PDF viewer, the Word editor and the presentation editor zoom
+// themselves, the spreadsheet runs Excel's Mod+Alt+L (Reapply).
+function keyTakenOrIgnored(event: Parameters<typeof shouldIgnoreEvent>[0] & Pick<KeyboardEvent, "defaultPrevented">): boolean {
 	return event.defaultPrevented || shouldIgnoreEvent(event)
 }
+
+// Lock works wherever focus is, but for a key a document took.
+const LOCK_KEYS: Options = { ...WINDOW_KEYS, ignoreEventWhen: keyTakenOrIgnored }
 
 // Desktop.close: the open dialog or menu closes as on Escape (a file preview, asking first about unsaved changes),
 // the window when none is open.
@@ -63,7 +67,7 @@ function useZoomAction(step: DesktopZoomStep, userBound: boolean): void {
 		() => {
 			zoom(step)
 		},
-		{ ...WINDOW_KEYS, enabled: userBound, ignoreEventWhen: zoomKeyIgnored },
+		{ ...WINDOW_KEYS, enabled: userBound, ignoreEventWhen: keyTakenOrIgnored },
 		[userBound]
 	)
 }
@@ -80,7 +84,7 @@ function useZoomCharacters(combos: Readonly<Record<string, string>>): void {
 		const onKeyDown = (event: KeyboardEvent) => {
 			const step = browserZoomKey(event, false)
 
-			if (step === undefined || zoomKeyIgnored(event)) {
+			if (step === undefined || keyTakenOrIgnored(event)) {
 				return
 			}
 
@@ -98,10 +102,11 @@ function useZoomCharacters(combos: Readonly<Record<string, string>>): void {
 			zoom(step)
 		}
 
-		document.addEventListener("keydown", onKeyDown)
+		// On the window, after the document's listeners: a document's own zoom keys (the Word editor's) run first.
+		window.addEventListener("keydown", onKeyDown)
 
 		return () => {
-			document.removeEventListener("keydown", onKeyDown)
+			window.removeEventListener("keydown", onKeyDown)
 		}
 	}, [combos])
 }
@@ -113,7 +118,7 @@ export function DesktopWindowKeys(): null {
 	const router = useRouter()
 	const combos = useBindings()
 
-	useAction("app.lock", () => bridge?.lock.lock(), WINDOW_KEYS)
+	useAction("app.lock", () => bridge?.lock.lock(), LOCK_KEYS)
 	useAction("desktop.close", closeTopLayer, WINDOW_KEYS)
 	useAction(
 		"desktop.back",

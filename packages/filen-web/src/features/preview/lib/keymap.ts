@@ -109,7 +109,8 @@ export const PREVIEW_OVERLAY_ACTIONS: readonly Def<PreviewOverlayAction>[] = [
 	overlayAction("preview.next", "arrowright", "preview:previewKeyNext"),
 	overlayAction("preview.first", "home", "preview:previewKeyFirst"),
 	overlayAction("preview.last", "end", "preview:previewKeyLast"),
-	overlayAction("preview.close", "escape", "preview:previewKeyClose", [{ on: { mac: false, desktop: true }, combo: "escape,mod+w" }]),
+	// The desktop app's Mod+W is desktop.close, which closes the open dialog (the preview) first.
+	overlayAction("preview.close", "escape", "preview:previewKeyClose"),
 	overlayAction("preview.download", "mod+s", "preview:previewKeyDownload"),
 	overlayAction("preview.rename", "f2", "preview:previewKeyRename"),
 	overlayAction("preview.move", "", "preview:previewKeyMove"),

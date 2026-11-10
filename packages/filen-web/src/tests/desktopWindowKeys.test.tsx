@@ -93,6 +93,32 @@ describe("the desktop app's window keys", () => {
 		expect(desktop.bridge.window.zoom).not.toHaveBeenCalled()
 	})
 
+	// The Word editor's zoom keys listen on the document, as every registered action's.
+	it("leaves a zoom key a document listener took", () => {
+		const docZoom = (event: KeyboardEvent) => {
+			event.preventDefault()
+		}
+
+		document.addEventListener("keydown", docZoom)
+		press(GERMAN_PLUS)
+		document.removeEventListener("keydown", docZoom)
+
+		expect(desktop.bridge.window.zoom).not.toHaveBeenCalled()
+	})
+
+	// Excel's Mod+Alt+L (Reapply) in the spreadsheet.
+	it("leaves the lock key a document took", () => {
+		const grid = document.createElement("div")
+
+		document.body.append(grid)
+		grid.addEventListener("keydown", event => {
+			event.preventDefault()
+		})
+		press({ key: "l", code: "KeyL", ctrlKey: true, altKey: true }, grid)
+
+		expect(desktop.bridge.lock.lock).not.toHaveBeenCalled()
+	})
+
 	it("zooms on exactly the keys a user bound instead, and not at all once turned off", async () => {
 		await act(() => setUserCombo("desktop.zoomIn", "mod+shift+u"))
 		press(GERMAN_PLUS)

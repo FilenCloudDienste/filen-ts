@@ -45,6 +45,12 @@ describe("AUDIO_ACTIONS — static contract", () => {
 		expect(AUDIO_ACTIONS.find(def => def.id === "audio.playPause")?.defaultCombo).toBe("mod+alt+p")
 	})
 
+	// Alt+Shift+↑/↓ are the chats' unread keys and a playlist's track moves.
+	it("leave the volume keys unassigned", () => {
+		expect(AUDIO_ACTIONS.find(def => def.id === "audio.volumeUp")?.defaultCombo).toBe("")
+		expect(AUDIO_ACTIONS.find(def => def.id === "audio.volumeDown")?.defaultCombo).toBe("")
+	})
+
 	it("have unique ids under the audio namespace", () => {
 		const ids = AUDIO_ACTIONS.map(def => def.id)
 
