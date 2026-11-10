@@ -32,6 +32,7 @@ import { type } from "arktype"
 import path from "node:path"
 import type {
 	DesktopLogsExport,
+	DesktopMediaTransport,
 	DesktopMenuAction,
 	DesktopMountsRole,
 	DesktopPlatform,
@@ -63,7 +64,7 @@ import {
 } from "./lifecycle.ts"
 import { READ_SCRIPT, WIPE_SCRIPT } from "./legacyData.ts"
 import { deleteLegacyStores, LEGACY_SCHEME, legacyProfileExists, runInLegacyOrigin } from "./legacyOrigin.ts"
-import { isMenuAction, type MenuShortcuts, menuTemplate } from "./menu.ts"
+import { isDevToolsKey, isMenuAction, type MenuShortcuts, menuTemplate, TRANSPORT_ACTIONS, transportItems, zoomLevelAfter } from "./menu.ts"
 import { applyShellStrings, loadShellStrings, shellPlural, shellText } from "./shellStrings.ts"
 import {
 	createMigration,
@@ -127,6 +128,8 @@ import { drawsOwnBorder, initialColors, titleBarColorsSchema, windowOptions } fr
 // Payloads from the renderer are untrusted input.
 const countSchema = type("0 <= number.integer < 1000000")
 const audioPlayingSchema = type("boolean")
+const mediaTransportSchema = type("'none' | 'paused' | 'playing'")
+const zoomStepSchema = type("'in' | 'out' | 'reset'")
 const menuShortcutsSchema = type({ "[string]": "string <= 64" })
 const pinChangeSchema = type([desktopPinSchema, desktopPinSchema.or("null")])
 // The page's own log ring holds a few hundred lines; this only stops an unbounded payload.
@@ -825,6 +828,7 @@ let showRequested = false
 // What the current page reported; a new page starts from nothing.
 let unloadHolds = 0
 let audioPlaying = false
+let mediaTransport: DesktopMediaTransport = "none"
 // The page listens for menu actions; until then clicked ones wait here.
 let menuReady = false
 let pendingMenuActions: DesktopMenuAction[] = []
@@ -833,7 +837,19 @@ function resetPageState(): void {
 	unloadHolds = 0
 	audioPlaying = false
 	menuReady = false
+	setMediaTransport("none")
 	scheduleIdleDestroy()
+}
+
+// The Controls menu and the tray offer the transport only while the page has something queued.
+function setMediaTransport(state: DesktopMediaTransport): void {
+	if (state === mediaTransport) {
+		return
+	}
+
+	mediaTransport = state
+	applyMenu()
+	applyTrayMenu()
 }
 
 function showWindow(): void {
@@ -1044,6 +1060,17 @@ function createWindow(): void {
 
 	trackWindowState(window)
 
+	// Development builds only: Windows and Linux have no View menu to hold the dev tools item. The page's own keys
+	// (zoom, full screen, close) are the web keymap's, so they stay rebindable and a viewer can take them first.
+	if (!app.isPackaged && PLATFORM !== "darwin") {
+		window.webContents.on("before-input-event", (event, input) => {
+			if (isDevToolsKey(input)) {
+				event.preventDefault()
+				window.webContents.toggleDevTools()
+			}
+		})
+	}
+
 	// Kept: the contents are gone by the time "destroyed" fires.
 	const contentsId = window.webContents.id
 
@@ -1187,6 +1214,36 @@ function runMenuAction(action: DesktopMenuAction): void {
 	showWindow()
 }
 
+// The audio transport from the tray or the Controls menu acts on the page that has the queue, without bringing the
+// window up; with no page listening there is nothing queued to act on.
+function runTransportAction(action: DesktopMenuAction): void {
+	if (mainWindow !== null && menuReady && !isLocked()) {
+		mainWindow.webContents.send(CHANNELS.menuAction, action)
+	}
+}
+
+// File > Close: another of the app's windows closes itself; the page closes its open dialog first (a file preview),
+// or the window when none is open. While it is locked or not listening, the window closes right away.
+function closeFocusedWindow(): void {
+	const focused = BrowserWindow.getFocusedWindow()
+
+	if (focused !== null && focused !== mainWindow) {
+		focused.close()
+
+		return
+	}
+
+	if (mainWindow === null) {
+		return
+	}
+
+	if (menuReady && !isLocked()) {
+		mainWindow.webContents.send(CHANNELS.menuAction, "desktop.close")
+	} else {
+		mainWindow.close()
+	}
+}
+
 let menuShortcuts: MenuShortcuts = {}
 
 // Windows and Linux have no menu bar (and no default menu's accelerators); macOS gets the full one (D18).
@@ -1197,8 +1254,16 @@ function applyMenu(): void {
 					menuTemplate({
 						shortcuts: menuShortcuts,
 						devTools: !app.isPackaged,
-						onAction: runMenuAction,
+						transport: mediaTransport,
+						onAction: action => {
+							if (TRANSPORT_ACTIONS.has(action)) {
+								runTransportAction(action)
+							} else {
+								runMenuAction(action)
+							}
+						},
 						onLock: canLock() ? lockNow : null,
+						onClose: closeFocusedWindow,
 						onWebsite: () => {
 							void shell.openExternal("https://filen.io")
 						}
@@ -1331,6 +1396,13 @@ function applyTrayMenu(): void {
 						}
 					]),
 			...(trayLines.length === 0 ? [] : [{ type: "separator" as const }]),
+			...transportItems(mediaTransport).map(({ action, label }) => ({
+				label,
+				click: () => {
+					runTransportAction(action)
+				}
+			})),
+			...(mediaTransport === "none" ? [] : [{ type: "separator" as const }]),
 			{ label: shellText("shellOpen"), click: showWindow },
 			...(canLock() ? [{ label: shellText("shellLock"), click: lockNow }] : []),
 			{ type: "separator" },
@@ -1652,6 +1724,44 @@ if (!instanceLock.held) {
 
 		audioPlaying = playing
 		scheduleIdleDestroy()
+	})
+
+	ipcMain.on(CHANNELS.setMediaTransport, (event, payload: unknown) => {
+		const state = mediaTransportSchema(payload)
+
+		if (isTrusted(event.senderFrame) && !(state instanceof type.errors) && mainWindow?.webContents === event.sender) {
+			setMediaTransport(state)
+		}
+	})
+
+	ipcMain.on(CHANNELS.quit, event => {
+		if (isTrusted(event.senderFrame)) {
+			app.quit()
+		}
+	})
+
+	ipcMain.on(CHANNELS.windowZoom, (event, payload: unknown) => {
+		const step = zoomStepSchema(payload)
+
+		if (isTrusted(event.senderFrame) && !(step instanceof type.errors)) {
+			event.sender.setZoomLevel(zoomLevelAfter(event.sender.getZoomLevel(), step))
+		}
+	})
+
+	ipcMain.on(CHANNELS.windowToggleFullScreen, event => {
+		const window = BrowserWindow.fromWebContents(event.sender)
+
+		if (isTrusted(event.senderFrame) && window !== null) {
+			window.setFullScreen(!window.isFullScreen())
+		}
+	})
+
+	ipcMain.on(CHANNELS.windowClose, event => {
+		const window = BrowserWindow.fromWebContents(event.sender)
+
+		if (isTrusted(event.senderFrame) && window !== null) {
+			window.close()
+		}
 	})
 
 	ipcMain.on(CHANNELS.setShellStrings, (event, payload: unknown) => {

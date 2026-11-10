@@ -97,7 +97,19 @@ export const DESKTOP_SHELL_STRINGS = {
 	/** Directory chooser title when adding a sync pair. */
 	shellChooseSyncDirectory: "Choose a directory to sync",
 	/** Directory chooser title when picking where the network drive is mounted. */
-	shellChooseMountPoint: "Choose where to mount the network drive"
+	shellChooseMountPoint: "Choose where to mount the network drive",
+	/** macOS File menu item that closes the open dialog (a file preview), or the window when none is open. */
+	shellMenuClose: "Close",
+	/** macOS menu bar menu holding the audio player's transport (play, pause, next, previous). */
+	shellMenuControls: "Controls",
+	/** Controls menu and tray menu item that starts or resumes the audio player. */
+	shellPlay: "Play",
+	/** Controls menu and tray menu item that pauses the audio player. */
+	shellPause: "Pause",
+	/** Controls menu and tray menu item that skips to the next track. */
+	shellNextTrack: "Next Track",
+	/** Controls menu and tray menu item that goes back to the previous track. */
+	shellPreviousTrack: "Previous Track"
 } as const
 
 export type DesktopShellStringKey = keyof typeof DESKTOP_SHELL_STRINGS

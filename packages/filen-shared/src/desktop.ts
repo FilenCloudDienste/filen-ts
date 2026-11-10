@@ -68,7 +68,23 @@ export interface DesktopPrefsStore {
 
 // The web keymap actions the macOS menu offers. Main shows each with the combo the web reports and sends the id back
 // when the item is clicked; the web stays the only key dispatcher.
-export type DesktopMenuAction = "app.openSettings" | "app.openShortcuts" | "app.toggleTheme" | "app.toggleAssistant" | "app.openTransfers"
+export type DesktopMenuAction =
+	| "app.openSettings"
+	| "app.openShortcuts"
+	| "app.toggleTheme"
+	| "app.toggleAssistant"
+	| "app.openTransfers"
+	| "app.lock"
+	| "desktop.close"
+	| "audio.playPause"
+	| "audio.next"
+	| "audio.previous"
+
+// The audio player's state as the menu and the tray offer its transport: nothing queued, or a queue paused or playing.
+export type DesktopMediaTransport = "none" | "paused" | "playing"
+
+// What the window's zoom keys do: one step in or out, or back to 100%.
+export type DesktopZoomStep = "in" | "out" | "reset"
 
 export interface DesktopApp {
 	readonly version: string
@@ -78,6 +94,8 @@ export interface DesktopApp {
 	// and holds make quitting ask first.
 	setUnloadHolds(count: number): void
 	setAudioPlaying(playing: boolean): void
+	// The audio player's transport, for the macOS Controls menu and the tray.
+	setMediaTransport(state: DesktopMediaTransport): void
 	// The combo in effect per action ("" when unassigned), in the web keymap's notation.
 	setMenuShortcuts(combos: Partial<Record<DesktopMenuAction, string>>): void
 	// The shell's own text (menu, tray, main's notifications and dialogs) in the UI language; main keeps the last one
@@ -91,9 +109,19 @@ export interface DesktopApp {
 	// Quits and installs the downloaded update, then relaunches. Without one, nothing happens. A quit the page's unload
 	// guard cancels installs on the next quit instead.
 	installUpdate(): void
+	// Quits the app, through the same unload guard as the tray's Quit.
+	quit(): void
 	// The window's HTTP cache on disk, in bytes, and clearing it (with the compiled-code cache). Never site storage.
 	browserCacheSize(): Promise<number>
 	clearBrowserCache(): Promise<void>
+}
+
+// The window's own keys, which a desktop app has and a browser tab leaves to the browser: zoom, full screen, close.
+export interface DesktopWindowControls {
+	zoom(step: DesktopZoomStep): void
+	toggleFullScreen(): void
+	// Closes the window as its close button does (minimize to tray applies).
+	close(): void
 }
 
 // The app lock. Main keeps the PIN (a salted slow hash in userData, encrypted like the session; never the PIN itself), the locked state and the
@@ -151,6 +179,7 @@ export interface DesktopBridge {
 	readonly sync: DesktopSync
 	readonly mounts: DesktopMounts
 	readonly fileProvider: DesktopFileProvider
+	readonly window: DesktopWindowControls
 	setTitleBarColors(colors: TitleBarColors): void
 	// Calls back with the current state right away when it is known, then on every change. Returns the unsubscribe.
 	onWindowState(callback: (state: WindowState) => void): () => void

@@ -49,7 +49,15 @@ describe("shell strings", () => {
 		)
 		expect(strings.shellPlural("shellSignOutUploadingDetail", 3)).toBe("3 Dateien fehlen noch.")
 
-		const appMenu = menu.menuTemplate({ shortcuts: {}, devTools: false, onAction: vi.fn(), onLock: null, onWebsite: vi.fn() })[0]
+		const appMenu = menu.menuTemplate({
+			shortcuts: {},
+			devTools: false,
+			transport: "none",
+			onAction: vi.fn(),
+			onLock: null,
+			onClose: vi.fn(),
+			onWebsite: vi.fn()
+		})[0]
 
 		expect(JSON.stringify(appMenu)).toContain("Einstellungen…")
 	})

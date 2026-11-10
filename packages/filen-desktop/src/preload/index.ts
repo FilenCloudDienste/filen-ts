@@ -223,6 +223,9 @@ const bridge: DesktopBridge = {
 		setAudioPlaying: playing => {
 			ipcRenderer.send(CHANNELS.setAudioPlaying, playing)
 		},
+		setMediaTransport: state => {
+			ipcRenderer.send(CHANNELS.setMediaTransport, state)
+		},
 		setMenuShortcuts: combos => {
 			ipcRenderer.send(CHANNELS.setMenuShortcuts, combos)
 		},
@@ -253,6 +256,9 @@ const bridge: DesktopBridge = {
 		},
 		installUpdate: () => {
 			ipcRenderer.send(CHANNELS.installUpdate)
+		},
+		quit: () => {
+			ipcRenderer.send(CHANNELS.quit)
 		},
 		browserCacheSize: () => ipcRenderer.invoke(CHANNELS.browserCacheSize) as Promise<number>,
 		clearBrowserCache: () => ipcRenderer.invoke(CHANNELS.clearBrowserCache) as Promise<void>
@@ -405,6 +411,17 @@ const bridge: DesktopBridge = {
 		disable: () => fileProviderInvoke("disable"),
 		reveal: () => fileProviderInvoke("reveal"),
 		openSettings: () => fileProviderInvoke("openSettings")
+	},
+	window: {
+		zoom: step => {
+			ipcRenderer.send(CHANNELS.windowZoom, step)
+		},
+		toggleFullScreen: () => {
+			ipcRenderer.send(CHANNELS.windowToggleFullScreen)
+		},
+		close: () => {
+			ipcRenderer.send(CHANNELS.windowClose)
+		}
 	},
 	setTitleBarColors: colors => {
 		ipcRenderer.send(CHANNELS.setTitleBarColors, colors)

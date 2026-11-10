@@ -1,6 +1,6 @@
 import type { MenuItemConstructorOptions } from "electron"
 import { describe, expect, it, vi } from "vitest"
-import { isMenuAction, menuTemplate, toAccelerator } from "../main/menu.ts"
+import { isDevToolsKey, isMenuAction, type MenuOptions, menuTemplate, toAccelerator, transportItems, zoomLevelAfter } from "../main/menu.ts"
 
 describe("toAccelerator", () => {
 	it.each([
@@ -43,57 +43,147 @@ function items(template: MenuItemConstructorOptions[]): MenuItemConstructorOptio
 	return template.flatMap(item => [item, ...(Array.isArray(item.submenu) ? items(item.submenu) : [])])
 }
 
+function template(options: Partial<MenuOptions> = {}): MenuItemConstructorOptions[] {
+	return menuTemplate({
+		shortcuts: {},
+		devTools: false,
+		transport: "none",
+		onAction: vi.fn(),
+		onLock: null,
+		onClose: vi.fn(),
+		onWebsite: vi.fn(),
+		...options
+	})
+}
+
+function find(menu: MenuItemConstructorOptions[], label: string): MenuItemConstructorOptions | undefined {
+	return items(menu).find(item => item.label === label)
+}
+
 describe("menuTemplate", () => {
 	const onAction = vi.fn()
-	const template = menuTemplate({
-		shortcuts: { "app.openSettings": "mod+comma", "app.toggleTheme": "" },
-		devTools: false,
-		onAction,
-		onLock: null,
-		onWebsite: vi.fn()
-	})
+	const standard = template({ shortcuts: { "app.openSettings": "mod+comma", "app.toggleTheme": "" }, onAction })
 
-	it("has the standard macOS menus", () => {
-		expect(template.map(item => item.role)).toEqual(["appMenu", "fileMenu", "editMenu", "viewMenu", "windowMenu", "help"])
+	it("has the standard macOS menus, and Controls after View", () => {
+		expect(standard.map(item => item.role ?? item.label)).toEqual([
+			"appMenu",
+			"fileMenu",
+			"editMenu",
+			"viewMenu",
+			"Controls",
+			"windowMenu",
+			"help"
+		])
 	})
 
 	it("displays the web's combos without registering them", () => {
-		const settings = items(template).find(item => item.label === "Settings…")
-
-		expect(settings).toMatchObject({ accelerator: "CmdOrCtrl+,", registerAccelerator: false })
-		expect(items(template).find(item => item.label === "Toggle Theme")?.accelerator).toBeUndefined()
+		expect(find(standard, "Settings…")).toMatchObject({ accelerator: "CmdOrCtrl+,", registerAccelerator: false })
+		expect(find(standard, "Toggle Theme")?.accelerator).toBeUndefined()
 	})
 
 	it("sends the action id on click", () => {
-		const settings = items(template).find(item => item.label === "Settings…")
-
-		;(settings?.click as () => void)()
+		;(find(standard, "Settings…")?.click as () => void)()
 		expect(onAction).toHaveBeenCalledWith("app.openSettings")
 	})
 
 	it("never registers an accelerator for a web action", () => {
-		expect(items(template).filter(item => item.accelerator !== undefined && item.registerAccelerator !== false)).toEqual([])
+		expect(
+			items(standard).filter(item => item.accelerator !== undefined && item.role === undefined && item.registerAccelerator !== false)
+		).toEqual([])
 	})
 
 	it("offers the dev tools only when asked", () => {
-		expect(items(template).some(item => item.role === "toggleDevTools")).toBe(false)
-		expect(
-			items(menuTemplate({ shortcuts: {}, devTools: true, onAction, onLock: null, onWebsite: vi.fn() })).some(
-				item => item.role === "toggleDevTools"
-			)
-		).toBe(true)
+		expect(items(standard).some(item => item.role === "toggleDevTools")).toBe(false)
+		expect(items(template({ devTools: true })).some(item => item.role === "toggleDevTools")).toBe(true)
 	})
 
-	it("offers Lock only when given a handler", () => {
+	it("offers Lock only when given a handler, with the page's combo", () => {
 		const onLock = vi.fn()
 
-		expect(items(template).some(item => item.label === "Lock Filen")).toBe(false)
+		expect(find(standard, "Lock Filen")).toBeUndefined()
 
-		const lock = items(menuTemplate({ shortcuts: {}, devTools: false, onAction, onLock, onWebsite: vi.fn() })).find(
-			item => item.label === "Lock Filen"
-		)
+		const lock = find(template({ shortcuts: { "app.lock": "mod+alt+l" }, onLock }), "Lock Filen")
 
+		expect(lock).toMatchObject({ accelerator: "CmdOrCtrl+Alt+L", registerAccelerator: false })
 		;(lock?.click as () => void)()
 		expect(onLock).toHaveBeenCalled()
+	})
+
+	it("closes through main with the page's combo, Cmd+W until the page reports one", () => {
+		const onClose = vi.fn()
+		const close = find(template({ onClose }), "Close")
+
+		expect(close).toMatchObject({ accelerator: "CmdOrCtrl+W", registerAccelerator: false })
+		;(close?.click as () => void)()
+		expect(onClose).toHaveBeenCalled()
+		expect(find(template({ shortcuts: { "desktop.close": "" } }), "Close")?.accelerator).toBeUndefined()
+		expect(find(template({ shortcuts: { "desktop.close": "mod+shift+w" } }), "Close")?.accelerator).toBe("CmdOrCtrl+Shift+W")
+	})
+
+	it("zooms the window with the View menu's roles, Cmd+= included", () => {
+		const roles = items(standard).filter(item => item.role === "zoomIn" || item.role === "zoomOut" || item.role === "resetZoom")
+
+		expect(roles.map(item => item.role)).toEqual(["resetZoom", "zoomIn", "zoomIn", "zoomOut"])
+		expect(roles[2]).toMatchObject({ accelerator: "CommandOrControl+=", visible: false })
+	})
+
+	it("disables the Controls menu while nothing is queued", () => {
+		const controls = standard.find(item => item.label === "Controls")?.submenu as MenuItemConstructorOptions[]
+
+		expect(controls.map(item => [item.label, item.enabled])).toEqual([
+			["Play", false],
+			["Next Track", false],
+			["Previous Track", false]
+		])
+	})
+
+	it("offers Pause while audio plays and sends the transport actions", () => {
+		const onTransport = vi.fn()
+		const playing = template({ transport: "playing", shortcuts: { "audio.next": "mod+shift+arrowright" }, onAction: onTransport })
+
+		expect(find(playing, "Pause")?.enabled).toBe(true)
+		expect(find(playing, "Next Track")?.accelerator).toBe("CmdOrCtrl+Shift+Right")
+		;(find(playing, "Pause")?.click as () => void)()
+		expect(onTransport).toHaveBeenCalledWith("audio.playPause")
+	})
+})
+
+describe("transportItems", () => {
+	it("offers nothing without a queue", () => {
+		expect(transportItems("none")).toEqual([])
+	})
+
+	it("plays a paused queue and pauses a playing one", () => {
+		expect(transportItems("paused").map(item => item.label)).toEqual(["Play", "Next Track", "Previous Track"])
+		expect(transportItems("playing")[0]).toEqual({ action: "audio.playPause", label: "Pause" })
+	})
+})
+
+describe("isDevToolsKey", () => {
+	const key = { type: "keyDown", key: "", code: "", control: false, shift: false, alt: false, meta: false }
+
+	it("takes F12 and Ctrl+Shift+I", () => {
+		expect(isDevToolsKey({ ...key, key: "F12", code: "F12" })).toBe(true)
+		expect(isDevToolsKey({ ...key, key: "I", code: "KeyI", control: true, shift: true })).toBe(true)
+	})
+
+	it("leaves other keys and key-ups alone", () => {
+		expect(isDevToolsKey({ ...key, type: "keyUp", key: "F12", code: "F12" })).toBe(false)
+		expect(isDevToolsKey({ ...key, key: "F12", code: "F12", control: true })).toBe(false)
+		expect(isDevToolsKey({ ...key, key: "i", code: "KeyI", control: true })).toBe(false)
+		expect(isDevToolsKey({ ...key, key: "I", code: "KeyI", control: true, shift: true, alt: true })).toBe(false)
+	})
+})
+
+describe("zoomLevelAfter", () => {
+	it("steps half a level and resets to 100%", () => {
+		expect(zoomLevelAfter(0, "in")).toBe(0.5)
+		expect(zoomLevelAfter(0.5, "out")).toBe(0)
+		expect(zoomLevelAfter(3, "reset")).toBe(0)
+	})
+
+	it("stays within Chromium's zoom range", () => {
+		expect(zoomLevelAfter(8.5, "in")).toBe(8.5)
+		expect(zoomLevelAfter(-7.5, "out")).toBe(-7.5)
 	})
 })
