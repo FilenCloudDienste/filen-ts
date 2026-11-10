@@ -133,7 +133,9 @@ describe("menuTemplate", () => {
 		expect(controls.map(item => [item.label, item.enabled])).toEqual([
 			["Play", false],
 			["Next Track", false],
-			["Previous Track", false]
+			["Previous Track", false],
+			["Shuffle", false],
+			["Repeat", false]
 		])
 	})
 
