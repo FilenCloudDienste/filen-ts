@@ -55,13 +55,13 @@ describe("chords of one action", () => {
 
 		beginRecording("list", "drive.rename", null)
 
-		expect(await commitRecordedChord("list", "f6", WEB)).toBe("saved")
-		expect(comboFor("drive.rename")).toBe("f2,f6")
+		expect(await commitRecordedChord("list", "f8", WEB)).toBe("saved")
+		expect(comboFor("drive.rename")).toBe("f2,f8")
 
 		beginRecording("list", "drive.rename", 0)
 		await commitRecordedChord("list", "f7", WEB)
 
-		expect(comboFor("drive.rename")).toBe("f7,f6")
+		expect(comboFor("drive.rename")).toBe("f7,f8")
 	})
 
 	it("removing the last combination turns the action off rather than restoring its default", async () => {
@@ -144,13 +144,13 @@ describe("reserved keys", () => {
 	it("saves a key a browser keeps on the web, with a note", async () => {
 		const { beginRecording, commitRecordedChord, currentRecordingProblem, comboFor } = await fresh()
 
-		beginRecording("list", "app.openSettings", null)
+		beginRecording("list", "app.openTransfers", null)
 
 		expect(await commitRecordedChord("list", "mod+t", WEB)).toBe("saved")
-		expect(comboFor("app.openSettings")).toBe("mod+t")
+		expect(comboFor("app.openTransfers")).toBe("mod+t")
 		expect(currentRecordingProblem()).toEqual({
 			kind: "reserved",
-			actionId: "app.openSettings",
+			actionId: "app.openTransfers",
 			chord: "mod+t",
 			owner: "browser",
 			blocked: false

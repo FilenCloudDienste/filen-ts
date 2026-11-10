@@ -29,6 +29,12 @@ import { guardStrayDrops } from "@/lib/dropGuard"
 import { titleMeta } from "@/lib/head/routeHead"
 import { SignOutOverlay } from "@/features/shell/components/signOutOverlay"
 import { DesktopLockGate } from "@/features/desktop/components/desktopLock"
+import { DesktopWindowKeys } from "@/features/desktop/components/desktopWindowKeys"
+import { ShortcutsHost } from "@/lib/keymap/shortcutsHost"
+import { desktopBridge } from "@/lib/desktop"
+
+// The bridge never appears or disappears mid-session.
+const IS_DESKTOP = desktopBridge() !== undefined
 
 export const Route = createRootRoute({
 	component: RootLayout,
@@ -136,6 +142,8 @@ function RootLayout() {
 					    <title> ahead of index.html's static one, which stays as the pre-hydration fallback.
 					    Outside BootGate so the title is also correct during boot and on the capability screens. */}
 					<HeadContent />
+					{/* The desktop app's window keys (close, zoom, lock), the lock screen included. Renders nothing. */}
+					{IS_DESKTOP ? <DesktopWindowKeys /> : null}
 					{/* The desktop app lock: nothing below mounts before the first unlock, and a later lock covers it. */}
 					<DesktopLockGate>
 						<BootGate />
@@ -149,6 +157,8 @@ function RootLayout() {
 						    Top positions are no alternative — they intercepted the header buttons and the
 						    listing's first rows. */}
 						<Toaster />
+						{/* The keyboard shortcuts dialog, for the app, the sign-in pages and public links alike. */}
+						<ShortcutsHost />
 						{/* Asked from a drive job's progress toast or its transfers row, so they live beside the toasts. */}
 						<DriveJobCancelDialog />
 						<ExtractPasswordDialog />

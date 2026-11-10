@@ -1,4 +1,5 @@
 import {
+	availableOn,
 	CURRENT_PLATFORM,
 	registerAction,
 	resolveAction,
@@ -65,7 +66,7 @@ export interface ShortcutCatalog {
 
 // Every action on a platform with its binding, grouped, and the conflicts between them.
 export function shortcutCatalog(record: KeymapRecord, platform: KeymapPlatform): ShortcutCatalog {
-	const actions = ALL_ACTIONS.map(def => resolveAction(def, record.overrides, platform))
+	const actions = ALL_ACTIONS.filter(def => availableOn(def, platform)).map(def => resolveAction(def, record.overrides, platform))
 
 	return {
 		actions,

@@ -60,3 +60,6 @@ export const SIDEBAR_LABEL_KEY: Record<SidebarKind, CommonKey> = {
 	mounts: "moduleMounts",
 	drive: "moduleDrive"
 }
+
+// The open sidebar drawer is a dialog; the shell's sidebar key finds it by this id to close it from inside.
+export const SIDEBAR_DRAWER_ID = "shell-sidebar-drawer"

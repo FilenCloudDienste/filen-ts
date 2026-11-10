@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactElement, type ReactNode } from "react"
+import { useEffect, useState, type DependencyList, type ReactElement, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { Link, useNavigate, useRouterState, type RegisteredRouter, type ValidateLinkOptions } from "@tanstack/react-router"
 import {
@@ -70,7 +70,7 @@ import {
 	DropdownMenuTrigger
 } from "@/components/ui/dropdown-menu"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
-import { ShortcutsDialog } from "@/lib/keymap/shortcutsDialog"
+import { openShortcutsDialog } from "@/lib/keymap/shortcutsDialogStore"
 import { OUTSIDE_OVERLAYS, useAction } from "@/lib/keymap/useAction"
 import { Kbd } from "@/lib/keymap/kbd"
 
@@ -98,23 +98,29 @@ function AccountMenu() {
 	const keysNotExported = accountQuery.data?.didExportMasterKeys === false
 	const hasUnsyncedWork = useHasUnsyncedWork()
 	const hasActiveTransfers = useHasActiveTransfers()
+	const [menuOpen, setMenuOpen] = useState(false)
 	const [confirmOpen, setConfirmOpen] = useState(false)
-	const [shortcutsOpen, setShortcutsOpen] = useState(false)
 	const [pending, setPending] = useState(false)
 	const [withdrawOpen, setWithdrawOpen] = useState(false)
 	// Withdrawal lives with web billing, never in the desktop app.
 	const { now, notice: withdrawal } = useWithdrawalNotice(IS_DESKTOP ? NO_SUBS : (accountQuery.data?.subs ?? NO_SUBS))
 	const withdrawUntil = withdrawal?.until
 
-	// Same guard as the rail's route-nav actions (useNavigateAction): an open dialog or menu owns the
-	// keyboard, so the overlay never stacks on top of one.
+	function confirmSignOut(): void {
+		// Anything still queued has until the confirm is answered to reach the server; past that the wipe destroys it.
+		flushOutboxes()
+		setConfirmOpen(true)
+	}
+
+	// Same guard as the rail's route-nav actions (useNavigateAction): an open dialog or menu owns the keyboard.
 	useAction(
-		"app.openShortcuts",
+		"app.openAccountMenu",
 		() => {
-			setShortcutsOpen(true)
+			setMenuOpen(true)
 		},
 		OUTSIDE_OVERLAYS
 	)
+	useAction("app.signOut", confirmSignOut, OUTSIDE_OVERLAYS)
 
 	async function handleSignOut(): Promise<void> {
 		setPending(true)
@@ -134,7 +140,10 @@ function AccountMenu() {
 
 	return (
 		<>
-			<DropdownMenu>
+			<DropdownMenu
+				open={menuOpen}
+				onOpenChange={setMenuOpen}
+			>
 				<DropdownMenuTrigger
 					render={
 						<Button
@@ -222,11 +231,7 @@ function AccountMenu() {
 								<Kbd action="app.openTransfers" />
 							</span>
 						</DropdownMenuItem>
-						<DropdownMenuItem
-							onClick={() => {
-								setShortcutsOpen(true)
-							}}
-						>
+						<DropdownMenuItem onClick={openShortcutsDialog}>
 							<KeyboardIcon />
 							{t("shortcutsTitle")}
 							<span className="ml-auto">
@@ -245,15 +250,13 @@ function AccountMenu() {
 					<DropdownMenuSeparator />
 					<DropdownMenuItem
 						variant="destructive"
-						onClick={() => {
-							// Anything still queued has until the confirm is answered to reach the server;
-							// past that the wipe destroys it.
-							flushOutboxes()
-							setConfirmOpen(true)
-						}}
+						onClick={confirmSignOut}
 					>
 						<LogOutIcon />
 						{t("signOut")}
+						<span className="ml-auto">
+							<Kbd action="app.signOut" />
+						</span>
 					</DropdownMenuItem>
 				</DropdownMenuContent>
 			</DropdownMenu>
@@ -269,10 +272,6 @@ function AccountMenu() {
 				onConfirm={() => {
 					void handleSignOut()
 				}}
-			/>
-			<ShortcutsDialog
-				open={shortcutsOpen}
-				onOpenChange={setShortcutsOpen}
 			/>
 			{IS_DESKTOP || accountQuery.data === undefined ? null : (
 				<WithdrawalDialog
@@ -527,24 +526,55 @@ const RAIL_ENTRIES: Record<RailEntryId, (props: RailEntryProps) => ReactElement>
 	settings: SettingsEntry
 }
 
-// Registered at module scope (default unassigned) — this only wires the LIVE combo, which starts as ""
-// (react-hotkeys-hook's parser treats it as "never matches") and works the instant a user rebinds it,
-// with no further code change. Stands down under any open dialog or menu (OUTSIDE_OVERLAYS) so a
-// rebound combo can't navigate away out from under it.
-function useNavigateAction(
-	id: string,
-	to: "/settings/account" | "/settings/security" | "/transfers" | "/playlists" | "/photos" | "/videos"
-): void {
+type Navigate = ReturnType<typeof useNavigate>
+
+// This only wires the LIVE combo of a registered action, often unassigned (matching no key until a user binds it).
+// Stands down under any open dialog or menu (OUTSIDE_OVERLAYS) so a combo can't navigate away out from under it.
+function useNavigateAction(id: string, go: (navigate: Navigate) => Promise<void>, deps: DependencyList = []): void {
 	const navigate = useNavigate()
 
 	useAction(
 		id,
 		() => {
-			void navigate({ to })
+			void go(navigate)
 		},
 		OUTSIDE_OVERLAYS,
-		[navigate, to]
+		[navigate, ...deps]
 	)
+}
+
+// Each module and drive destination the rail and the drive sidebar link to, where they link to it. The desktop app's
+// sync and mounts exist there only.
+const ROUTE_ACTIONS: readonly { id: string; go: (navigate: Navigate) => Promise<void> }[] = [
+	{ id: "app.openDrive", go: navigate => navigate({ to: "/drive/$", params: { _splat: "" } }) },
+	{ id: "app.openNotes", go: navigate => navigate({ to: "/notes" }) },
+	{ id: "app.openChats", go: navigate => navigate({ to: "/chats" }) },
+	{
+		id: "app.openContacts",
+		go: navigate => navigate({ to: "/contacts", search: { section: DEFAULT_CONTACTS_SECTION_FILTER } })
+	},
+	{ id: "app.openTransfers", go: navigate => navigate({ to: "/transfers" }) },
+	{ id: "app.openPhotos", go: navigate => navigate({ to: "/photos" }) },
+	{ id: "app.openVideos", go: navigate => navigate({ to: "/videos" }) },
+	{ id: "app.openPlaylists", go: navigate => navigate({ to: "/playlists" }) },
+	{ id: "app.openRecents", go: navigate => navigate({ to: "/recents" }) },
+	{ id: "app.openFavorites", go: navigate => navigate({ to: "/favorites" }) },
+	{ id: "app.openSharedIn", go: navigate => navigate({ to: "/shared-in/$", params: { _splat: "" } }) },
+	{ id: "app.openSharedOut", go: navigate => navigate({ to: "/shared-out/$", params: { _splat: "" } }) },
+	{ id: "app.openLinks", go: navigate => navigate({ to: "/links" }) },
+	{ id: "app.openTrash", go: navigate => navigate({ to: "/trash" }) },
+	...(IS_DESKTOP
+		? [
+				{ id: "app.openSync", go: (navigate: Navigate) => navigate({ to: "/sync" }) },
+				{ id: "app.openMounts", go: (navigate: Navigate) => navigate({ to: "/mounts" }) }
+			]
+		: [])
+]
+
+function RouteAction({ id, go }: (typeof ROUTE_ACTIONS)[number]): null {
+	useNavigateAction(id, go)
+
+	return null
 }
 
 // Whether the element's content is taller than its box. The box is sized to its content until it is capped, so
@@ -585,15 +615,14 @@ export function IconRail() {
 
 	const keysNotExported = useMasterKeysNotExported()
 
-	useNavigateAction("app.openSettings", settingsRoute(keysNotExported))
-	useNavigateAction("app.openTransfers", "/transfers")
-	useNavigateAction("app.openPlaylists", "/playlists")
-	useNavigateAction("app.openPhotos", "/photos")
-	useNavigateAction("app.openVideos", "/videos")
+	const settingsTarget = settingsRoute(keysNotExported)
+
+	useNavigateAction("app.openSettings", navigate => navigate({ to: settingsTarget }), [settingsTarget])
 
 	return (
 		<nav
 			aria-label={t("appName")}
+			data-shell-pane="rail"
 			// Drag region (Electron plumbing): a plain browser ignores -webkit-app-region entirely, so
 			// this is inert weight everywhere else. Every interactive descendant below opts back out
 			// with app-region-no-drag so it stays clickable. On a short viewport the entry list below scrolls,
@@ -606,6 +635,12 @@ export function IconRail() {
 				RAIL_HOLDS_TRAFFIC_LIGHTS ? "w-16 pt-6.5 pb-1.5" : "w-12 py-1.5"
 			)}
 		>
+			{ROUTE_ACTIONS.map(action => (
+				<RouteAction
+					key={action.id}
+					{...action}
+				/>
+			))}
 			<Link
 				to="/drive/$"
 				params={{ _splat: "" }}

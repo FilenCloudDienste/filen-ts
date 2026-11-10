@@ -77,8 +77,9 @@ const TABLES: readonly ReservedTable[] = [
 		on: { mac: false },
 		combos: ["alt+tab", "alt+shift+tab", "alt+f4", "alt+space", "ctrl+alt+delete", "ctrl+shift+escape"]
 	},
-	// The macOS desktop app's window menu roles.
-	{ owner: "appMenu", on: { mac: true, desktop: true }, combos: ["mod+w", "mod+ctrl+f"] }
+	// The macOS desktop app's window menu roles. Close (Cmd+W) is the page's own desktop.close, whose binding the menu
+	// shows; the zoom keys go to the menu only when the page leaves them alone.
+	{ owner: "appMenu", on: { mac: true, desktop: true }, combos: ["mod+ctrl+f"] }
 ]
 
 function applies(table: ReservedTable, platform: KeymapPlatform): boolean {

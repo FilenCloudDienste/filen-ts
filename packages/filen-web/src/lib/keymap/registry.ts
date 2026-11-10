@@ -63,6 +63,8 @@ export interface ActionDef {
 	hintKey?: ShortcutDescriptionKey
 	// Its character keys stay on with single-key shortcuts off: a running slideshow's keys are a clicker's.
 	keepsCharacterKeys?: boolean
+	// Where the action exists at all (the desktop app's window keys): elsewhere the shortcuts list leaves it out.
+	only?: Partial<KeymapPlatform>
 }
 
 // An ActionDef plus its binding on this platform, for the shortcuts list and the conflict check.
@@ -84,6 +86,15 @@ export function defaultComboOn(def: ActionDef, platform: KeymapPlatform): string
 	)
 
 	return variant?.combo ?? def.defaultCombo
+}
+
+export function availableOn(def: ActionDef, platform: KeymapPlatform): boolean {
+	const only = def.only
+
+	return (
+		only === undefined ||
+		((only.mac === undefined || only.mac === platform.mac) && (only.desktop === undefined || only.desktop === platform.desktop))
+	)
 }
 
 // The combo the user set (unbound as ""), or the platform's default.

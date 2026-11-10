@@ -1,4 +1,5 @@
-import { Toaster as Sonner, type ToasterProps } from "sonner"
+import { toast, Toaster as Sonner, type ToasterProps } from "sonner"
+import { useAction } from "@/lib/keymap/useAction"
 import { useTranslation } from "react-i18next"
 import { TOAST_ICONS } from "@/components/ui/toastIcons"
 import { useTheme } from "@/providers/themeProvider"
@@ -10,6 +11,20 @@ import {
 	toastBottomOffset,
 	toastRightOffset
 } from "@/lib/toastClearance.logic"
+
+// Sonner moves focus to its list on its own hotkey, which would bypass the keymap (rebinding, single-key and field
+// guards). Its hotkey is set to a code no keyboard sends, and `app.focusNotifications` sends that code, so Sonner does
+// what it does on its key (expand the stack, focus the list, and give focus back when it leaves).
+const FOCUS_CODE = "FilenFocusNotifications"
+const SONNER_HOTKEY = [FOCUS_CODE]
+
+function focusNotifications(): void {
+	document.dispatchEvent(new KeyboardEvent("keydown", { code: FOCUS_CODE }))
+}
+
+function dismissNotifications(): void {
+	toast.dismiss()
+}
 
 // Registry default reads the theme from `next-themes`; this app owns its theme provider, so the
 // import is repointed and `next-themes` is not a dependency. `theme` is "dark" | "light" | "system",
@@ -23,9 +38,15 @@ const Toaster = ({ ...props }: ToasterProps) => {
 	const clearance = useToastClearance()
 	const sideClearance = useToastSideClearance()
 
+	useAction("app.focusNotifications", focusNotifications)
+	useAction("app.dismissNotifications", dismissNotifications)
+
 	return (
 		<Sonner
 			theme={theme}
+			hotkey={SONNER_HOTKEY}
+			// Sonner's own name appends its hotkey, which here is no key at all.
+			customAriaLabel={t("toastRegion")}
 			className="toaster group"
 			icons={TOAST_ICONS}
 			style={

@@ -12,6 +12,7 @@ import type { TypedChatSocketEvent } from "@/features/chats/lib/socketHandlers"
 import { chatMessageNotification, type NotificationContent } from "@/features/desktop/lib/notifications"
 import { loadDesktopPrefs, useDesktopPrefs } from "@/features/desktop/lib/prefs"
 import { isDesktopLocked } from "@/features/desktop/lib/lock"
+import { reportMediaTransport } from "@/features/desktop/lib/mediaTransport"
 import { performLogout } from "@/features/shell/lib/performLogout"
 import { loadSync } from "@/features/sync/lib/syncStore"
 import { loadMounts } from "@/features/mounts/lib/mountsStore"
@@ -60,6 +61,9 @@ export function DesktopHost(): null {
 			void Notification.requestPermission()
 		}
 	}, [])
+
+	// The macOS Controls menu and the tray offer the audio player's transport while it has a queue.
+	useEffect(reportMediaTransport, [])
 
 	// The shell removed a session the server rejected while syncing with it: a forced sign-out, like the
 	// socket's after a password change (an unsaved preview may delay it, never veto it). Sync and mounts follow the

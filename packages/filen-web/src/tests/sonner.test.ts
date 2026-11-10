@@ -8,10 +8,12 @@ import "@/lib/i18n"
 
 // Prop-capturing stub for sonner's own Toaster: the assertions are about what this app's wrapper
 // hands down (the close affordance, its localized label, the offsets), not about sonner's rendering.
-const { capturedProps, clearance, sideClearance } = vi.hoisted(() => ({
+const { capturedProps, clearance, sideClearance, actions, dismiss } = vi.hoisted(() => ({
 	capturedProps: [] as ToasterProps[],
 	clearance: { value: 0 },
-	sideClearance: { value: 0 }
+	sideClearance: { value: 0 },
+	actions: new Map<string, () => void>(),
+	dismiss: vi.fn()
 }))
 
 vi.mock("sonner", () => ({
@@ -19,6 +21,14 @@ vi.mock("sonner", () => ({
 		capturedProps.push(props)
 
 		return null
+	},
+	toast: { dismiss }
+}))
+
+// The keymap's own guards are useAction's (keymapGuards.test.tsx); here only which handler each action runs.
+vi.mock("@/lib/keymap/useAction", () => ({
+	useAction: (id: string, handler: () => void) => {
+		actions.set(id, handler)
 	}
 }))
 
@@ -117,5 +127,32 @@ describe("ui/sonner Toaster", () => {
 			bottom: "calc(24px + env(safe-area-inset-bottom, 0px))"
 		})
 		expect(mobileOffset).toEqual({ bottom: "calc(16px + env(safe-area-inset-bottom, 0px))" })
+	})
+
+	it("opens the notifications on app.focusNotifications, not on a key of its own", () => {
+		render(createElement(Toaster))
+
+		const { hotkey, customAriaLabel } = lastProps()
+		const seen: KeyboardEvent[] = []
+		const listener = (event: KeyboardEvent) => {
+			seen.push(event)
+		}
+
+		document.addEventListener("keydown", listener)
+		actions.get("app.focusNotifications")?.()
+		document.removeEventListener("keydown", listener)
+
+		// Sonner opens its list on a keydown whose code is every hotkey entry: the one the action sends, and no key's.
+		expect(hotkey?.length).toBe(1)
+		expect(hotkey?.[0]).not.toMatch(/^(Key|Digit|Alt|Control|Shift|Meta)/)
+		expect(seen.map(event => event.code)).toEqual(hotkey)
+		expect(customAriaLabel).toBe("Notifications")
+	})
+
+	it("dismisses every notification on app.dismissNotifications", () => {
+		render(createElement(Toaster))
+		actions.get("app.dismissNotifications")?.()
+
+		expect(dismiss).toHaveBeenCalledWith()
 	})
 })

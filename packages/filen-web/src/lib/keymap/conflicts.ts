@@ -127,7 +127,24 @@ export const RESOLVED_COLLISIONS: readonly (readonly [string, string])[] = [
 	["presentation.text.promote", "presentation.objects.sendBackward"],
 	["presentation.text.demote", "presentation.objects.bringForward"],
 	["presentation.text.promote", "preview.pdfRotateCcw"],
-	["presentation.text.demote", "preview.pdfRotateCw"]
+	["presentation.text.demote", "preview.pdfRotateCw"],
+	// The shell's sidebar toggle and the desktop app's back and forward stand down while a dialog is open, and the PDF
+	// viewer and the presentation editor are bodies of the preview dialog.
+	["app.toggleSidebar", "preview.pdfToggleFit"],
+	["desktop.back", "preview.pdfRotateCcw"],
+	["desktop.back", "presentation.objects.sendBackward"],
+	["desktop.back", "presentation.text.promote"],
+	["desktop.forward", "preview.pdfRotateCw"],
+	["desktop.forward", "presentation.objects.bringForward"],
+	["desktop.forward", "presentation.text.demote"],
+	// The desktop app's window zoom takes only the zoom keys a document viewer left alone: the PDF viewer and the
+	// presentation editor zoom themselves on these keys and cancel them, as subscript does in a slide's text.
+	["desktop.zoomIn", "preview.pdfZoomIn"],
+	["desktop.zoomIn", "presentation.zoomIn"],
+	["desktop.zoomIn", "presentation.text.subscript"],
+	["desktop.zoomOut", "preview.pdfZoomOut"],
+	["desktop.zoomOut", "presentation.zoomOut"],
+	["desktop.zoomReset", "preview.pdfZoomReset"]
 ]
 
 export function scopesCanCollide(a: ActionScope, b: ActionScope): boolean {

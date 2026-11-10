@@ -2,9 +2,14 @@ import { useEffect, useState, type ComponentType } from "react"
 import { useTranslation } from "react-i18next"
 import { Outlet, useRouter, useRouterState } from "@tanstack/react-router"
 import { IconRail } from "@/features/shell/components/iconRail"
+import type { Options } from "react-hotkeys-hook"
+import { cn } from "@filen/shared"
 import { SidebarDrawer } from "@/features/shell/components/sidebarDrawer"
+import { cyclePane, PANE_ATTRIBUTE } from "@/features/shell/lib/paneCycle"
+import { IN_EDITORS_AND_FIELDS, OUTSIDE_OVERLAYS, shouldIgnoreEvent, useAction } from "@/lib/keymap/useAction"
+import { isOverlayOpenBesides } from "@/lib/keymap/dialogGuard"
 import { useIsNarrowViewport } from "@/features/shell/hooks/useIsNarrowViewport"
-import { resolveSidebarKind, SIDEBAR_LABEL_KEY, type SidebarKind } from "@/features/shell/lib/appShell.logic"
+import { resolveSidebarKind, SIDEBAR_DRAWER_ID, SIDEBAR_LABEL_KEY, type SidebarKind } from "@/features/shell/lib/appShell.logic"
 import { subscribeToLayoutBreakpoint } from "@/features/shell/lib/breakpoints"
 import { SidebarPanelVisibilityProvider } from "@/features/shell/lib/sidebarPanelVisibility"
 import { WindowBarSlotContext } from "@/features/shell/lib/windowBarSlot"
@@ -45,6 +50,15 @@ const SIDEBAR_PANEL: Record<SidebarKind, ComponentType> = {
 // The bridge never appears or disappears mid-session.
 const IS_DESKTOP = desktopBridge() !== undefined
 
+// An open dialog or menu owns the keyboard, except the narrow drawer the sidebar is shown in, which its own key closes.
+function sidebarKeyIgnored(event: Parameters<typeof shouldIgnoreEvent>[0]): boolean {
+	return shouldIgnoreEvent(event) || isOverlayOpenBesides(document.getElementById(SIDEBAR_DRAWER_ID))
+}
+
+// F6 moves focus out of a field or an editor too, as in every desktop app; an open dialog keeps it. The browser's own
+// F6 (its address bar) gives way.
+const PANE_KEYS: Options = { ...IN_EDITORS_AND_FIELDS, ...OUTSIDE_OVERLAYS, preventDefault: true }
+
 // Padded canvas holding the shell zones: a bare icon rail sitting directly on the canvas, then floating
 // rounded panels — the contextual module sidebar, the content card and, when open, the assistant panel on
 // the right. Nothing touches a viewport edge; zones separate through the canvas gaps, each panel outlined by
@@ -72,6 +86,8 @@ export function AppShell() {
 	const Panel = SIDEBAR_PANEL[sidebarKind]
 	const narrow = useIsNarrowViewport()
 	const [sidebarOpen, setSidebarOpen] = useState(false)
+	// At desktop widths `app.toggleSidebar` hides the panel; it stays mounted (search text, selection, scroll).
+	const [sidebarHidden, setSidebarHidden] = useState(false)
 	const assistantPanelOpen = useAssistantStore(state => state.panelOpen)
 	const assistantDrawerOpen = useAssistantStore(state => state.drawerOpen)
 	const [windowBarSlot, setWindowBarSlot] = useState<HTMLDivElement | null>(null)
@@ -82,9 +98,44 @@ export function AppShell() {
 	// so the panels themselves cannot tell whether anyone can see them — this is the shell's answer to
 	// that, and it is what keeps a hidden panel's document-level shortcuts from acting on it.
 	const sidebar = (
-		<SidebarPanelVisibilityProvider visible={!narrow || sidebarOpen}>
+		<SidebarPanelVisibilityProvider visible={narrow ? sidebarOpen : !sidebarHidden}>
 			<Panel />
 		</SidebarPanelVisibilityProvider>
+	)
+
+	// The drawer below the breakpoint, the inline panel above it. Focus inside a panel being hidden moves on to the
+	// content first, so it is never left on nothing.
+	useAction(
+		"app.toggleSidebar",
+		() => {
+			if (narrow) {
+				setSidebarOpen(open => !open)
+
+				return
+			}
+
+			if (!sidebarHidden && document.activeElement?.closest(`[${PANE_ATTRIBUTE}="sidebar"]`)) {
+				cyclePane(1)
+			}
+
+			setSidebarHidden(!sidebarHidden)
+		},
+		{ ignoreEventWhen: sidebarKeyIgnored },
+		[narrow, sidebarHidden]
+	)
+	useAction(
+		"app.nextPane",
+		() => {
+			cyclePane(1)
+		},
+		PANE_KEYS
+	)
+	useAction(
+		"app.previousPane",
+		() => {
+			cyclePane(-1)
+		},
+		PANE_KEYS
 	)
 
 	// The drawers must survive neither a navigation (one would cover the result it just navigated to,
@@ -152,14 +203,27 @@ export function AppShell() {
 					{/* Positioning context for the sidebar's drag handle, which sits absolutely in the gap-2
 					    after the panel (see sidebarResizeHandle.tsx) — an in-flow handle would add a second
 					    gap and make the sidebar-to-main spacing wider than the row's padding. */}
-					{narrow ? null : <div className="relative flex shrink-0">{sidebar}</div>}
-					<main className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-shell-border bg-card shadow-sm app-region-pane">
+					{narrow ? null : (
+						<div
+							data-shell-pane="sidebar"
+							className={cn("relative flex shrink-0", sidebarHidden && "hidden")}
+						>
+							{sidebar}
+						</div>
+					)}
+					<main
+						data-shell-pane="main"
+						className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-shell-border bg-card shadow-sm app-region-pane"
+					>
 						<Outlet />
 					</main>
 					{/* The assistant panel mirrors the sidebar slot on the right: the wrapper positions its
 					    leading-edge drag handle in the gap before it. Below the breakpoint it lives in its drawer. */}
 					{narrow || !assistantPanelOpen ? null : (
-						<div className="relative flex shrink-0">
+						<div
+							data-shell-pane="assistant"
+							className="relative flex shrink-0"
+						>
 							<AssistantSidePanel />
 						</div>
 					)}

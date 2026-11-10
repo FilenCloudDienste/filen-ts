@@ -36,6 +36,8 @@ export const common = {
 	loading: "Loading",
 	/** Toast primitive — screen-reader label on the dismiss button every toast carries */
 	toastDismiss: "Dismiss notification",
+	/** Toast primitive — screen-reader name of the region in the corner that holds the notifications */
+	toastRegion: "Notifications",
 	/** Activity toast (lib/activity) — accessible name of the bar showing how far a running action is */
 	activityProgress: "Progress",
 	/** Activity toast — how many items of a running bulk action have finished; {{settled}} of {{total}} */

@@ -126,6 +126,28 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 		},
 		OUTSIDE_OVERLAYS
 	)
+	// A choice rather than a flip, so a key always lands on the same theme; unassigned until a user binds them.
+	useAction(
+		"app.themeLight",
+		() => {
+			setTheme("light")
+		},
+		OUTSIDE_OVERLAYS
+	)
+	useAction(
+		"app.themeDark",
+		() => {
+			setTheme("dark")
+		},
+		OUTSIDE_OVERLAYS
+	)
+	useAction(
+		"app.themeSystem",
+		() => {
+			setTheme("system")
+		},
+		OUTSIDE_OVERLAYS
+	)
 
 	React.useEffect(() => {
 		const handleStorageChange = (event: StorageEvent) => {

@@ -38,11 +38,16 @@ describe("desktop menu actions", () => {
 
 		expect(desktop.bridge.app.onMenuAction).toHaveBeenCalledOnce()
 		expect(desktop.bridge.app.setMenuShortcuts).toHaveBeenCalledWith({
-			"app.openSettings": "",
+			"app.openSettings": "mod+comma",
 			"app.openShortcuts": "shift+slash",
 			"app.toggleTheme": "d",
 			"app.toggleAssistant": "",
-			"app.openTransfers": ""
+			"app.openTransfers": "",
+			"app.lock": "mod+alt+l",
+			"desktop.close": "mod+w",
+			"audio.playPause": "mod+alt+p",
+			"audio.next": "mod+shift+arrowright",
+			"audio.previous": "mod+shift+arrowleft"
 		})
 	})
 
@@ -92,5 +97,20 @@ describe("desktop menu actions", () => {
 
 		expect(handler).not.toHaveBeenCalled()
 		vi.useRealTimers()
+	})
+
+	it("holds every click that arrives before its handler, not only the last", () => {
+		const settings = vi.fn()
+		const shortcuts = vi.fn()
+
+		click("app.openSettings")
+		click("app.openShortcuts")
+		renderHook(() => {
+			useMenuAction("app.openSettings", settings)
+			useMenuAction("app.openShortcuts", shortcuts)
+		})
+
+		expect(settings).toHaveBeenCalledOnce()
+		expect(shortcuts).toHaveBeenCalledOnce()
 	})
 })

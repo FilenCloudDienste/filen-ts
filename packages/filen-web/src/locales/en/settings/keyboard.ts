@@ -204,5 +204,43 @@ export const settingsKeyboard = {
 	/** Shortcuts list — where the shortcut works: while music plays or is paused */
 	keyboardHintAudio: "While the audio player has a queue",
 	/** Shortcuts list — where the shortcut works: also from the macOS menu bar of the desktop app */
-	keyboardHintAppMenu: "Also in the menu bar"
+	keyboardHintAppMenu: "Also in the menu bar",
+
+	// ── App and window actions ───────────────────────────────────────────────
+	/** Shortcut name — shows or hides the module sidebar next to the icon rail */
+	keyboardActionToggleSidebar: "Show or hide the sidebar",
+	/** Shortcut name — moves keyboard focus to the next area of the window (icon rail, sidebar, content, assistant) */
+	keyboardActionNextPane: "Go to the next area",
+	/** Shortcut name — moves keyboard focus to the previous area of the window */
+	keyboardActionPreviousPane: "Go to the previous area",
+	/** Shortcut name — moves keyboard focus to the notifications in the corner of the window */
+	keyboardActionFocusNotifications: "Go to notifications",
+	/** Shortcut name — closes every notification on screen */
+	keyboardActionDismissNotifications: "Dismiss all notifications",
+	/** Shortcut name — switches to the light theme */
+	keyboardActionThemeLight: "Use the light theme",
+	/** Shortcut name — switches to the dark theme */
+	keyboardActionThemeDark: "Use the dark theme",
+	/** Shortcut name — makes the theme follow the system's light or dark setting */
+	keyboardActionThemeSystem: "Use the system theme",
+	/** Shortcut name — opens the account menu at the bottom of the icon rail */
+	keyboardActionAccountMenu: "Open the account menu",
+	/** Shortcut name (desktop app) — locks the app behind its PIN right away */
+	keyboardActionLock: "Lock Filen",
+	/** Shortcut name (desktop app) — closes the open dialog, such as a file preview, or the window when none is open */
+	keyboardActionClose: "Close the dialog or window",
+	/** Shortcut name (desktop app) — goes back to the previous page */
+	keyboardActionBack: "Back",
+	/** Shortcut name (desktop app) — goes forward again after going back */
+	keyboardActionForward: "Forward",
+	/** Shortcut name (desktop app) — makes everything in the window larger */
+	keyboardActionZoomIn: "Zoom in",
+	/** Shortcut name (desktop app) — makes everything in the window smaller */
+	keyboardActionZoomOut: "Zoom out",
+	/** Shortcut name (desktop app) — puts the window's zoom back to 100% */
+	keyboardActionZoomReset: "Actual size",
+	/** Shortcut name (desktop app) — turns full screen on or off */
+	keyboardActionFullScreen: "Full screen",
+	/** Shortcut name (desktop app) — quits the app */
+	keyboardActionQuit: "Quit Filen"
 } as const

@@ -89,7 +89,9 @@ describe("reserved keys", () => {
 		expect(reservedOwner(chord("ctrl+space"), WEB)).toBeUndefined()
 		expect(reservedOwner(chord("alt+f4"), DESKTOP)).toBe("system")
 		expect(reservedOwner(chord("meta+e"), WEB)).toBe("system")
-		expect(reservedOwner(chord("mod+w"), MAC_DESKTOP)).toBe("appMenu")
+		expect(reservedOwner(chord("mod+ctrl+f"), MAC_DESKTOP)).toBe("appMenu")
+		// Close is the page's own desktop.close.
+		expect(reservedOwner(chord("mod+w"), MAC_DESKTOP)).toBeUndefined()
 		expect(reservedOwner(chord("mod+k"), WEB)).toBeUndefined()
 	})
 

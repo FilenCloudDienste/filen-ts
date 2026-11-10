@@ -4,6 +4,7 @@ import { PanelLeftIcon } from "lucide-react"
 import { Drawer as DrawerPrimitive } from "@base-ui/react/drawer"
 import { cn } from "@filen/shared"
 import { SCRIM_CLASS } from "@/components/ui/surface"
+import { SIDEBAR_DRAWER_ID } from "@/features/shell/lib/appShell.logic"
 
 // Below the layout breakpoint the module sidebar moves out of the shell row into this drawer — the
 // SAME element, mounted once (see appShell.tsx: never both, or the notes/chats sidebars' virtualizers,
@@ -56,6 +57,7 @@ export function SidebarDrawer({
 					{/* aria-label rather than a Drawer.Title: each panel already renders its own <h2>, and the
 					    popup merges consumer props last so this wins as the accessible name. */}
 					<DrawerPrimitive.Popup
+						id={SIDEBAR_DRAWER_ID}
 						aria-label={label}
 						className="m-2 flex max-w-[85vw] duration-100 outline-none data-open:animate-in data-open:slide-in-from-left data-closed:animate-out data-closed:slide-out-to-left"
 					>

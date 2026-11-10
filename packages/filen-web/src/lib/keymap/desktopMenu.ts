@@ -6,15 +6,21 @@ import { desktopBridge } from "@/lib/desktop"
 import { keyboardLayout, subscribeKeyboardLayout } from "@/lib/keymap/layout"
 import { comboFor, subscribeBindings } from "@/lib/keymap/registry"
 
-// The macOS desktop menu (D18) offers a few keymap actions. Main shows each with the combo in effect here and
-// sends the id back on click; the action then runs the same handler its keys run, so this page stays the only
-// key dispatcher. Exhaustive over the shell's union, so a menu action without a keymap entry fails to compile.
+// The macOS desktop menu (D18) offers a few keymap actions, and the tray of every desktop app the audio transport.
+// Main shows each with the combo in effect here and sends the id back on click; the action then runs the same handler
+// its keys run, so this page stays the only key dispatcher. Exhaustive over the shell's union, so a menu action
+// without a keymap entry fails to compile.
 const MENU_ACTIONS = Object.keys({
 	"app.openSettings": true,
 	"app.openShortcuts": true,
 	"app.toggleTheme": true,
 	"app.toggleAssistant": true,
-	"app.openTransfers": true
+	"app.openTransfers": true,
+	"app.lock": true,
+	"desktop.close": true,
+	"audio.playPause": true,
+	"audio.next": true,
+	"audio.previous": true
 } satisfies Record<DesktopMenuAction, true>) as DesktopMenuAction[]
 
 // A click can arrive before the component owning its handler mounts (the menu opened the window, the shell
@@ -22,14 +28,16 @@ const MENU_ACTIONS = Object.keys({
 const PENDING_TTL_MS = 15_000
 
 const bridge = desktopBridge()
+const IN_MENU_BAR = bridge?.platform === "darwin"
 const handlers = new Map<string, () => void>()
-let pending: { action: DesktopMenuAction; at: number } | null = null
+// Main delivers every click made while the page loaded, so several can wait at once.
+let pending: { action: DesktopMenuAction; at: number }[] = []
 let subscribed = false
 
 // Whether this app's menu bar offers an action (the macOS desktop app only): what useMenuAction returns, and what the
 // shortcuts list says on the action's row.
 export function inAppMenu(id: string): boolean {
-	return bridge?.platform === "darwin" && isMenuAction(id)
+	return IN_MENU_BAR && isMenuAction(id)
 }
 
 function isMenuAction(id: string): id is DesktopMenuAction {
@@ -48,7 +56,7 @@ function dispatch(action: DesktopMenuAction): void {
 	const handler = handlers.get(action)
 
 	if (handler === undefined) {
-		pending = { action, at: Date.now() }
+		pending = [...pending.filter(entry => entry.action !== action), { action, at: Date.now() }]
 
 		return
 	}
@@ -65,7 +73,8 @@ export function cancelMenuRepeat(event: KeyboardEvent): void {
 	}
 }
 
-// Subscribing is what tells main the page takes menu actions, so it waits for the first handler.
+// Subscribing is what tells main the page takes menu actions, so it waits for the first handler. Only macOS has a
+// menu bar showing the combos.
 function subscribe(): void {
 	if (subscribed || bridge === undefined) {
 		return
@@ -73,22 +82,25 @@ function subscribe(): void {
 
 	subscribed = true
 	bridge.app.onMenuAction(dispatch)
-	pushShortcuts()
-	subscribeBindings(pushShortcuts)
-	subscribeKeyboardLayout(pushShortcuts)
-	document.addEventListener("keydown", cancelMenuRepeat)
+
+	if (IN_MENU_BAR) {
+		pushShortcuts()
+		subscribeBindings(pushShortcuts)
+		subscribeKeyboardLayout(pushShortcuts)
+		document.addEventListener("keydown", cancelMenuRepeat)
+	}
 }
 
 function registerMenuHandler(action: DesktopMenuAction, handler: () => void): () => void {
 	handlers.set(action, handler)
 	subscribe()
 
-	if (pending?.action === action) {
-		const { at } = pending
+	const held = pending.find(entry => entry.action === action)
 
-		pending = null
+	if (held !== undefined) {
+		pending = pending.filter(entry => entry !== held)
 
-		if (Date.now() - at <= PENDING_TTL_MS) {
+		if (Date.now() - held.at <= PENDING_TTL_MS) {
 			handler()
 		}
 	}
@@ -101,7 +113,7 @@ function registerMenuHandler(action: DesktopMenuAction, handler: () => void): ()
 }
 
 // A click passes the guard the action's keys pass (an open dialog or menu), so the two never disagree.
-function useMenuActionOnMac(id: string, handler: HotkeyCallback, guard?: (event: KeyboardEvent) => boolean): boolean {
+function useMenuActionOnDesktop(id: string, handler: HotkeyCallback, guard?: (event: KeyboardEvent) => boolean): boolean {
 	const owned = inAppMenu(id)
 
 	useEffect(() => {
@@ -125,7 +137,8 @@ function noMenu(): boolean {
 	return false
 }
 
-// Whether the menu offers the action, after wiring its clicks to `handler`. Only the macOS shell has a menu; everywhere
-// else this is a no-op hook. The choice is fixed for the page's life, so every render calls the same hooks.
+// Whether the menu bar offers the action, after wiring its clicks (and the tray's) to `handler`. Only the macOS shell
+// has a menu bar, every desktop app a tray; in a browser this is a no-op hook. The choice is fixed for the page's
+// life, so every render calls the same hooks.
 export const useMenuAction: (id: string, handler: HotkeyCallback, guard?: (event: KeyboardEvent) => boolean) => boolean =
-	bridge?.platform === "darwin" ? useMenuActionOnMac : noMenu
+	bridge === undefined ? noMenu : useMenuActionOnDesktop
