@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
-import { SUBTITLE_ENCODINGS, decidePlayback, languageName, type ProbeAudio, type VideoProbe } from "@filen/shared/videos"
+import { SUBTITLE_ENCODINGS, decidePlayback, type ProbeAudio, type VideoProbe } from "@filen/shared/videos"
 import { Button } from "@/components/ui/button"
 import { TracksPopover, type TrackOption } from "@/components/media/video/tracksPopover"
 import { playbackCapabilities } from "@/lib/media/playback/capabilities"
 import { streamFacts, toLadderProbe } from "@/lib/media/playback/capabilities.logic"
 import type { PlayerSubtitleTrack, SubtitleChoice } from "@/features/videos/lib/player/subtitles.logic"
-import { channelLabel } from "@/features/videos/lib/player/trackLabels.logic"
+import { audioTrackName, subtitleTrackName } from "@/features/videos/lib/player/trackLabels.logic"
 import type { VideoFileRef } from "@/workers/videoIndex/view.logic"
 
 // The Videos player's audio and subtitle choices in the tracks popover: labels from the probe and the sidecar
@@ -101,29 +101,12 @@ export function PlayerTracks({
 	const { t } = useTranslation("videos")
 	const transcoded = useTranscodedTracks(probe, file?.size ?? 0, open)
 
-	function trackLanguage(lang: string | null): string | null {
-		return languageName(lang)
-	}
-
 	function subtitleName(track: PlayerSubtitleTrack): string {
-		const parts = [trackLanguage(track.lang) ?? t("subtitleUnknownLanguage")]
-
-		if (track.forced) {
-			parts.push(t("subtitleForced"))
-		}
-
-		if (track.hi) {
-			parts.push(t("subtitleSdh"))
-		}
-
-		return parts.join(" · ")
+		return subtitleTrackName(track, t)
 	}
 
 	function audioOption(track: ProbeAudio, index: number): TrackOption {
-		const channels = channelLabel(track.ch, key => t(key))
-		const name = [trackLanguage(track.lang) ?? t("playerTrackNumber", { number: index + 1 }), channels]
-			.filter(part => part !== null)
-			.join(" ")
+		const name = audioTrackName(track, index, t)
 		const details = [
 			track.commentary ? t("playerAudioCommentary") : null,
 			track.name,

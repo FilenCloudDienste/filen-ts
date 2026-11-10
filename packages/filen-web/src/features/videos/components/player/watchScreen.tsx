@@ -68,6 +68,7 @@ import {
 import { EpisodesPanel } from "@/features/videos/components/player/episodesPanel"
 import { UpNextCard } from "@/features/videos/components/player/upNextCard"
 import { PlayerTracks } from "@/features/videos/components/player/playerTracks"
+import { audioTrackNotice, subtitleTrackNotice } from "@/features/videos/lib/player/trackLabels.logic"
 import { useUpNextStill } from "@/features/videos/components/player/useTitleStill"
 import type { VideoTitleDetail } from "@/workers/videoIndex/view.logic"
 import type { VideosKey } from "@/lib/i18n"
@@ -190,7 +191,9 @@ export function WatchScreen({ titleId, search }: { titleId: string; search: Watc
 	const [choiceState, setChoiceState] = useState<ItemSubtitleChoice>(() => initialSubtitleChoice(search))
 	const [encodings, setEncodings] = useState<ReadonlyMap<string, string | null>>(new Map())
 	const [loadedCues, setLoadedCues] = useState<LoadedCues | null>(null)
-	const [subtitleNotice, setSubtitleNotice] = useState<string | null>(null)
+	// The notice over the picture (the subtitle delay, a track the keys switched to, a sidecar that would not load). A new
+	// object per notice, so the same text shown again (a second track of the same name) starts its time over.
+	const [subtitleNotice, setSubtitleNotice] = useState<{ readonly text: string } | null>(null)
 	const [delayOverride, setDelayOverride] = useState<{ key: string; seconds: number } | null>(null)
 	const [panel, setPanel] = useState<Panel>(null)
 	const [tracksOpen, setTracksOpen] = useState(false)
@@ -556,15 +559,15 @@ export function WatchScreen({ titleId, search }: { titleId: string; search: Watc
 				setLoadedCues({ key: cuesKey, store: result.cues, encoding: result.encoding })
 			} else {
 				setLoadedCues({ key: cuesKey, store: null, encoding: null })
-				setSubtitleNotice(
-					t(
+				setSubtitleNotice({
+					text: t(
 						result.status === "tooLarge"
 							? "subtitleTooLarge"
 							: result.status === "unreadable"
 								? "subtitleUnreadable"
 								: "subtitleUnavailable"
 					)
-				)
+				})
 			}
 		})()
 
@@ -783,6 +786,7 @@ export function WatchScreen({ titleId, search }: { titleId: string; search: Watc
 				if (subtitle !== null) {
 					lastShown.current = subtitle
 					chooseSubtitle({ kind: "off" })
+					setSubtitleNotice({ text: subtitleTrackNotice(null, t) })
 
 					return true
 				}
@@ -794,6 +798,7 @@ export function WatchScreen({ titleId, search }: { titleId: string; search: Watc
 				}
 
 				chooseSubtitle({ kind: "track", id: restored.id })
+				setSubtitleNotice({ text: subtitleTrackNotice(restored, t) })
 
 				return true
 			}
@@ -813,20 +818,25 @@ export function WatchScreen({ titleId, search }: { titleId: string; search: Watc
 					}
 
 					chooseSubtitle({ kind: "off" })
+					setSubtitleNotice({ text: subtitleTrackNotice(null, t) })
 				} else {
 					chooseSubtitle({ kind: "track", id: following.id })
+					setSubtitleNotice({ text: subtitleTrackNotice(following, t) })
 				}
 
 				return true
 			}
 			case "cycleAudio": {
-				const count = probe?.audio.length ?? 0
+				const tracks = probe?.audio ?? []
+				const index = (snap.audioIndex + 1) % Math.max(tracks.length, 1)
+				const track = tracks[index]
 
-				if (count < 2) {
+				if (tracks.length < 2 || track === undefined) {
 					return false
 				}
 
-				void controller.selectAudio((snap.audioIndex + 1) % count)
+				void controller.selectAudio(index)
+				setSubtitleNotice({ text: audioTrackNotice(track, index, t) })
 
 				return true
 			}
@@ -858,12 +868,12 @@ export function WatchScreen({ titleId, search }: { titleId: string; search: Watc
 				return true
 			case "subtitleDelay":
 				changeDelay(delay + action.seconds)
-				setSubtitleNotice(t("subtitleDelayNotice", { delay: formatSubtitleDelay(delay + action.seconds) }))
+				setSubtitleNotice({ text: t("subtitleDelayNotice", { delay: formatSubtitleDelay(delay + action.seconds) }) })
 
 				return true
 			case "resetSubtitleDelay":
 				changeDelay(0)
-				setSubtitleNotice(t("subtitleDelayNotice", { delay: formatSubtitleDelay(0) }))
+				setSubtitleNotice({ text: t("subtitleDelayNotice", { delay: formatSubtitleDelay(0) }) })
 
 				return true
 			case "confirm":
@@ -946,7 +956,7 @@ export function WatchScreen({ titleId, search }: { titleId: string; search: Watc
 	) : snap.playback?.status === "reconnecting" ? (
 		<StageNotice>{t("playerReconnecting")}</StageNotice>
 	) : subtitleNotice !== null ? (
-		<StageNotice className="pr-3">{subtitleNotice}</StageNotice>
+		<StageNotice className="pr-3">{subtitleNotice.text}</StageNotice>
 	) : cuesLoading ? (
 		<StageNotice className="pr-3">{t("subtitleLoading")}</StageNotice>
 	) : resumePill && snap.resumedAt !== null && card === null ? (

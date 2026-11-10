@@ -616,6 +616,12 @@ export const videos = {
 	subtitleDelayReset: "Reset",
 	/** Player notice after G or H; {{delay}} like "+0.3 s" */
 	subtitleDelayNotice: "Subtitle delay {{delay}}",
+	/** Player notice after the audio track key; {{track}} is the track as the tracks menu names it, like "English 5.1" */
+	playerAudioTrackNotice: "Audio: {{track}}",
+	/** Player notice after the subtitle keys turn subtitles on or cycle them; {{track}} is the track as the tracks menu names it, like "German · Forced" */
+	playerSubtitleTrackNotice: "Subtitles: {{track}}",
+	/** Player notice after the subtitle keys turn subtitles off */
+	playerSubtitlesOffNotice: "Subtitles off",
 
 	// ── Skip and Up Next ───────────────────────────────────────────────────────
 	/** Skip button over the picture, per segment kind */
