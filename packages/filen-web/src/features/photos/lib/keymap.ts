@@ -3,6 +3,7 @@ import type { ActionDef } from "@/lib/keymap/registry"
 // The photos grid's commands. Where the wording is drive's they describe themselves with the drive namespace's own
 // command copy, rather than a second string to keep in sync. Same combos as drive's, safe because the two routes are
 // mutually exclusive. Open, the item menu and the month jumps act on the focused tile, so they are scoped to the grid.
+// No default is a bare printable key, Shift+letter included: in the grid those are type-ahead's (useListboxTypeAhead).
 export const PHOTOS_ACTIONS: readonly ActionDef[] = [
 	{ id: "photos.selectAll", defaultCombo: "mod+a", scope: "photos", descriptionKey: "drive:driveCommandSelectAll" },
 	{ id: "photos.clearSelection", defaultCombo: "escape", scope: "photos", descriptionKey: "common:clearSelection" },
@@ -44,21 +45,22 @@ export const PHOTOS_ACTIONS: readonly ActionDef[] = [
 		scope: "photos",
 		descriptionKey: "drive:driveActionInfo"
 	},
-	{ id: "photos.toggleFavorite", defaultCombo: "f", scope: "photos", descriptionKey: "drive:driveCommandToggleFavorite" },
+	// No default, as drive's and the preview's.
+	{ id: "photos.toggleFavorite", defaultCombo: "", scope: "photos", descriptionKey: "drive:driveCommandToggleFavorite" },
 	// Puts the selection on the drive clipboard, to be pasted into a Cloud Drive directory.
 	{ id: "photos.copy", defaultCombo: "mod+c", scope: "photos", descriptionKey: "drive:driveCommandCopy" },
 	{ id: "photos.download", defaultCombo: "mod+s", scope: "photos", descriptionKey: "drive:driveCommandDownload" },
 	{ id: "photos.share", defaultCombo: "", scope: "photos", descriptionKey: "drive:driveActionShare" },
 	{ id: "photos.trash", defaultCombo: "delete,backspace", scope: "photos", descriptionKey: "drive:driveCommandTrash" },
 	{ id: "photos.search", defaultCombo: "mod+f", scope: "photos", descriptionKey: "drive:driveCommandSearch" },
-	{ id: "photos.favoritesFilter", defaultCombo: "shift+f", scope: "photos", descriptionKey: "photos:photosCommandFavoritesFilter" },
+	{ id: "photos.favoritesFilter", defaultCombo: "", scope: "photos", descriptionKey: "photos:photosCommandFavoritesFilter" },
 	// No default: a bare digit is the media players' seek key, and Mod+digit is the browser's tab switch.
 	{ id: "photos.filterAll", defaultCombo: "", scope: "photos", descriptionKey: "photos:photosCommandFilterAll" },
 	{ id: "photos.filterImages", defaultCombo: "", scope: "photos", descriptionKey: "photos:photosCommandFilterImages" },
 	{ id: "photos.filterVideos", defaultCombo: "", scope: "photos", descriptionKey: "photos:photosCommandFilterVideos" },
 	{ id: "photos.filterRaw", defaultCombo: "", scope: "photos", descriptionKey: "photos:photosCommandFilterRaw" },
-	// Bare = and -, not Mod+= and Mod+-, which zoom the page.
-	{ id: "photos.densityIncrease", defaultCombo: "equal", scope: "photos", descriptionKey: "photos:photosDensityIncrease" },
-	{ id: "photos.densityDecrease", defaultCombo: "minus", scope: "photos", descriptionKey: "photos:photosDensityDecrease" },
+	// No default: Photos' Mod+= and Mod+- zoom the page in a browser and the window in the desktop app.
+	{ id: "photos.densityIncrease", defaultCombo: "", scope: "photos", descriptionKey: "photos:photosDensityIncrease" },
+	{ id: "photos.densityDecrease", defaultCombo: "", scope: "photos", descriptionKey: "photos:photosDensityDecrease" },
 	{ id: "photos.manageDirectories", defaultCombo: "", scope: "photos", descriptionKey: "photos:photosCommandManageDirectories" }
 ]

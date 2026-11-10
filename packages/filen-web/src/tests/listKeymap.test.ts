@@ -51,12 +51,9 @@ describe("drive and photos list actions — defaults", () => {
 		["drive.open", "enter,mod+arrowdown", "enter"],
 		["drive.goUp", "mod+arrowup", "alt+arrowup"],
 		["drive.openItemMenu", "shift+f10", "shift+f10"],
-		["drive.upload", "u", "u"],
-		["drive.uploadDirectory", "shift+u", "shift+u"],
 		["drive.info", "mod+i", "alt+enter"],
-		["drive.toggleFavorite", "s", "s"],
-		["drive.move", "m", "m"],
-		["drive.restore", "r", "r"],
+		["drive.restore", "mod+backspace", ""],
+		["drive.toggleHiddenItems", "mod+shift+period", "mod+shift+period"],
 		["drive.deletePermanently", "mod+alt+backspace", "shift+delete"],
 		["photos.open", "enter,mod+arrowdown", "enter"],
 		["photos.openItemMenu", "shift+f10", "shift+f10"],
@@ -64,13 +61,7 @@ describe("drive and photos list actions — defaults", () => {
 		["photos.nextMonth", "shift+pagedown", "shift+pagedown"],
 		["photos.rename", "f2", "f2"],
 		["photos.info", "mod+i", "alt+enter"],
-		["photos.toggleFavorite", "f", "f"],
-		["photos.favoritesFilter", "shift+f", "shift+f"],
 		["photos.download", "mod+s", "mod+s"],
-		["photos.densityIncrease", "equal", "equal"],
-		["photos.densityDecrease", "minus", "minus"],
-		["drive.copyTo", "shift+m", "shift+m"],
-		["drive.newTextFile", "shift+n", "shift+n"],
 		["drive.downloadAs", "mod+shift+s", "mod+shift+s"],
 		["drive.copyLink", "mod+alt+c", "mod+alt+c"],
 		["drive.openContainingDirectory", "shift+enter", "shift+enter"]
@@ -108,7 +99,17 @@ describe("drive and photos list actions — defaults", () => {
 		"drive.listView",
 		"drive.gridView",
 		"drive.cycleSort",
-		"drive.toggleHiddenItems"
+		"drive.upload",
+		"drive.uploadDirectory",
+		"drive.newTextFile",
+		"drive.toggleFavorite",
+		"drive.move",
+		"drive.copyTo",
+		"drive.toggleView",
+		"photos.toggleFavorite",
+		"photos.favoritesFilter",
+		"photos.densityIncrease",
+		"photos.densityDecrease"
 	])("%s ships unbound and resolves to no combo", async id => {
 		const { registerAction, comboFor } = await freshRegistry()
 
@@ -116,6 +117,49 @@ describe("drive and photos list actions — defaults", () => {
 
 		expect(comboFor(id)).toBe("")
 	})
+
+	// Finder's and Explorer's New Folder key opens a private window in a browser.
+	it("binds New directory in the desktop app alone", async () => {
+		const { defaultComboOn } = await freshRegistry()
+		const newDirectory = def("drive.newDirectory")
+
+		expect(defaultComboOn(newDirectory, MAC)).toBe("")
+		expect(defaultComboOn(newDirectory, OTHER)).toBe("")
+		expect(defaultComboOn(newDirectory, { mac: true, desktop: true })).toBe("mod+shift+n")
+		expect(defaultComboOn(newDirectory, { mac: false, desktop: true })).toBe("mod+shift+n")
+	})
+
+	// Type-ahead owns every printable key in the listing and the grid, Shift+letter included.
+	it.each([MAC, OTHER, { mac: true, desktop: true }, { mac: false, desktop: true }])(
+		"ships no bare printable key (mac $mac, desktop $desktop)",
+		async platform => {
+			const { defaultComboOn } = await freshRegistry()
+			const { parseCombo } = await import("@filen/shared/keymap")
+
+			for (const action of DEFS) {
+				for (const chord of parseCombo(defaultComboOn(action, platform))) {
+					const printable =
+						chord.key.length === 1 ||
+						[
+							"equal",
+							"minus",
+							"period",
+							"comma",
+							"slash",
+							"semicolon",
+							"quote",
+							"backquote",
+							"bracketleft",
+							"bracketright",
+							"backslash",
+							"space"
+						].includes(chord.key)
+
+					expect(printable && !chord.mod && !chord.ctrl && !chord.meta && !chord.alt, `${action.id} ${chord.key}`).toBe(false)
+				}
+			}
+		}
+	)
 
 	// The browser's own reload keys reload the app; only the desktop app has them free.
 	it("binds Refresh in the desktop app alone", async () => {

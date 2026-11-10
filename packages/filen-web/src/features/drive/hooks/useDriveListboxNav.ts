@@ -17,6 +17,7 @@ import { useDriveStore } from "@/features/drive/store/useDriveStore"
 import { hasCommandModifier, isActivationKey } from "@/lib/rowKeys"
 import { type DriveVirtualizer } from "@/features/drive/hooks/useDriveVirtualizer"
 import { ROW_HEIGHT, TILE_ROW_HEIGHT } from "@/features/drive/lib/gridLayout"
+import { useListboxTypeAhead } from "@/features/drive/hooks/useListboxTypeAhead"
 
 interface UseDriveListboxNavParams {
 	items: DriveItem[]
@@ -44,8 +45,8 @@ export interface DriveListboxNav {
 }
 
 // ARIA listbox roving-cursor navigation on top of the virtualizer: owns the cursor (activeIndex) and
-// range anchor, plain-Arrow/Home/End/PageUp/PageDown movement, Space toggle, Shift+Arrow range extension, and
-// pointer selection. Open, select-all and clear-selection are NOT handled here — they're registered keymap
+// range anchor, plain-Arrow/Home/End/PageUp/PageDown movement, type-ahead, Space toggle, Shift+Arrow range extension,
+// and pointer selection. Open, select-all and clear-selection are NOT handled here — they're registered keymap
 // commands (see the drive.* action defs in features/drive/lib/keymap.ts).
 export function useDriveListboxNav({
 	items,
@@ -75,6 +76,7 @@ export function useDriveListboxNav({
 	const [activeFallback, setActiveFallback] = useState(0)
 	const [anchorFallback, setAnchorFallback] = useState(0)
 	const pendingReveal = useDriveStore(state => state.pendingReveal)
+	const typeAhead = useListboxTypeAhead()
 
 	const keys = items.map(driveRowKey)
 	const safeActiveIndex = clampListboxIndex(resolveCursorIndex(activeKey, keys, activeFallback), items.length)
@@ -228,6 +230,20 @@ export function useDriveListboxNav({
 		}
 
 		if (items.length === 0) {
+			return
+		}
+
+		// A printable key jumps to the next name starting with what was typed, the cursor and anchor moving as with a
+		// plain arrow. Ahead of Space, which continues a prefix being typed.
+		const typed = typeAhead(event, items, safeActiveIndex)
+
+		if (typed !== null) {
+			if (typed !== -1) {
+				const nextItem = items[moveActive(typed)]
+
+				setAnchorKey(nextItem ? driveRowKey(nextItem) : null)
+			}
+
 			return
 		}
 

@@ -49,7 +49,7 @@ export const OUTSIDE_OVERLAYS: Options = { ignoreEventWhen: ignoredUnderOverlays
 // directoryListing.tsx's moveActive/registerRef) — without this override every drive.* command
 // would silently never fire while a row actually has focus, which is the normal, expected state
 // during keyboard-driven listbox use, not an edge case.
-// A matched bare printable key (N for New directory, or any action a user rebinds to a letter) would
+// A matched bare printable key (an action a user rebinds to a letter, or a bare-key default such as notes.newNote) would
 // otherwise type itself: a handler that opens an autofocused field commits in React's sync lane, still
 // inside this keydown, so the browser's default text input lands in the new field. Only consulted for a
 // matched, non-ignored combo whose target is not a text field, so it never swallows real typing.

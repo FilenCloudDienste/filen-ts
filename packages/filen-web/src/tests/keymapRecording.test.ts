@@ -93,14 +93,14 @@ describe("conflicts", () => {
 
 		expect(await commitRecordedChord("list", "n", WEB)).toBe("conflict")
 		expect(isRecordingCombo()).toBe(false)
-		// N is New directory here, the next page in a PDF and the next slide in a slideshow over the listing.
+		// N is the next page in a PDF and the next slide in a slideshow over the listing.
 		expect(currentRecordingProblem()).toMatchObject({
 			kind: "conflict",
 			actionId: "drive.rename",
 			combo: "n",
 			chord: "n",
 			replaced: "f2",
-			conflictIds: ["drive.newDirectory", "preview.pdfNextPage", "presentation.show.next"]
+			conflictIds: ["preview.pdfNextPage", "presentation.show.next"]
 		})
 		expect(comboFor("drive.rename")).toBe("f2")
 	})
@@ -113,7 +113,7 @@ describe("conflicts", () => {
 		await resolveRecordingConflict("reassign", WEB)
 
 		expect(comboFor("drive.rename")).toBe("f2,n")
-		expect(comboFor("drive.newDirectory")).toBe("")
+		expect(comboFor("preview.pdfNextPage")).toBe("")
 		expect(comboFor("presentation.show.next")).toBe("arrowright,arrowdown,pagedown,space,enter")
 		expect(currentRecordingProblem()).toBeNull()
 	})
@@ -122,11 +122,11 @@ describe("conflicts", () => {
 		const { beginRecording, commitRecordedChord, resolveRecordingConflict, comboFor } = await fresh()
 
 		beginRecording("list", "drive.rename", 0)
-		await commitRecordedChord("list", "v", WEB)
+		await commitRecordedChord("list", "shift+delete", WEB)
 		await resolveRecordingConflict("swap", WEB)
 
-		expect(comboFor("drive.rename")).toBe("v")
-		expect(comboFor("drive.toggleView")).toBe("f2")
+		expect(comboFor("drive.rename")).toBe("shift+delete")
+		expect(comboFor("drive.deletePermanently")).toBe("f2")
 	})
 
 	it("Reassign also removes a key from an action with several", async () => {

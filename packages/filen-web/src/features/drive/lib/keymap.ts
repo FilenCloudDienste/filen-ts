@@ -14,6 +14,9 @@ function onMac(combo: string): readonly PlatformDefault[] {
 // they act on the focused row, and Enter and Shift+F10 belong to whatever else has focus. Arrow, Home,
 // End, PageUp, PageDown and Space cursor movement stays listbox-local: continuous, per-row navigation.
 //
+// No default here is a bare printable key, Shift+letter included: in the listing those are type-ahead's
+// (useListboxTypeAhead), which jumps to the next item whose name starts with what was typed.
+//
 // `drive.download`'s mod+s reads as "save to disk", the FSA picker's own verb. It is shared with
 // `preview.save` deliberately — the two CAN co-mount (the preview overlay is hosted by the drive
 // dialog host) and the listing's handler no-ops whenever a dialog is open.
@@ -55,18 +58,26 @@ export const DRIVE_ACTIONS: readonly ActionDef[] = [
 		hintKey: "drive:driveCommandHintSearchHit"
 	},
 	{ id: "drive.openAsText", defaultCombo: "", scope: "drive", descriptionKey: "drive:driveActionOpenAsText" },
-	{ id: "drive.newDirectory", defaultCombo: "n", scope: "drive", descriptionKey: "drive:driveCommandNewDirectory" },
-	{ id: "drive.newTextFile", defaultCombo: "shift+n", scope: "drive", descriptionKey: "drive:driveNewTextFile" },
-	// No default: Mod+Shift+N is the browser's, and no app has a key per office format.
+	// Finder's and Explorer's Mod+Shift+N, in the desktop app only: in a browser it opens a private window.
+	{
+		id: "drive.newDirectory",
+		defaultCombo: "",
+		platformDefaults: [{ on: { desktop: true }, combo: "mod+shift+n" }],
+		scope: "drive",
+		descriptionKey: "drive:driveCommandNewDirectory"
+	},
+	// No default: no file manager has a key for a new text file, and no app has a key per office format.
+	{ id: "drive.newTextFile", defaultCombo: "", scope: "drive", descriptionKey: "drive:driveNewTextFile" },
 	{ id: "drive.newDocx", defaultCombo: "", scope: "drive", descriptionKey: "drive:driveCommandNewDocx" },
 	{ id: "drive.newXlsx", defaultCombo: "", scope: "drive", descriptionKey: "drive:driveCommandNewXlsx" },
 	{ id: "drive.newPptx", defaultCombo: "", scope: "drive", descriptionKey: "drive:driveCommandNewPptx" },
 	{ id: "drive.newOdt", defaultCombo: "", scope: "drive", descriptionKey: "drive:driveCommandNewOdt" },
 	{ id: "drive.newOds", defaultCombo: "", scope: "drive", descriptionKey: "drive:driveCommandNewOds" },
 	{ id: "drive.newOdp", defaultCombo: "", scope: "drive", descriptionKey: "drive:driveCommandNewOdp" },
-	// The file picker opens inside the keydown, the user gesture it needs.
-	{ id: "drive.upload", defaultCombo: "u", scope: "drive", descriptionKey: "drive:driveUploadFiles" },
-	{ id: "drive.uploadDirectory", defaultCombo: "shift+u", scope: "drive", descriptionKey: "drive:driveUploadDirectory" },
+	// The file picker opens inside the keydown, the user gesture it needs. No default: no file manager or cloud drive
+	// has a modified key for an upload, and Mod+U and Mod+O are the browser's view-source and open-file.
+	{ id: "drive.upload", defaultCombo: "", scope: "drive", descriptionKey: "drive:driveUploadFiles" },
+	{ id: "drive.uploadDirectory", defaultCombo: "", scope: "drive", descriptionKey: "drive:driveUploadDirectory" },
 	{ id: "drive.rename", defaultCombo: "f2", scope: "drive", descriptionKey: "drive:driveCommandRename" },
 	{
 		id: "drive.info",
@@ -77,7 +88,8 @@ export const DRIVE_ACTIONS: readonly ActionDef[] = [
 	},
 	{ id: "drive.versions", defaultCombo: "", scope: "drive", descriptionKey: "drive:driveActionVersions" },
 	{ id: "drive.color", defaultCombo: "", scope: "drive", descriptionKey: "drive:driveActionColor" },
-	{ id: "drive.toggleFavorite", defaultCombo: "s", scope: "drive", descriptionKey: "drive:driveCommandToggleFavorite" },
+	// No default, as the preview's own favorite key: no file manager has one.
+	{ id: "drive.toggleFavorite", defaultCombo: "", scope: "drive", descriptionKey: "drive:driveCommandToggleFavorite" },
 	// The public link's URL straight to the clipboard, or the link dialog when there is none yet. Not Mod+Shift+C, the
 	// browser's element picker.
 	{ id: "drive.copyLink", defaultCombo: "mod+alt+c", scope: "drive", descriptionKey: "drive:driveActionCopyLink" },
@@ -88,8 +100,9 @@ export const DRIVE_ACTIONS: readonly ActionDef[] = [
 	{ id: "drive.cut", defaultCombo: "mod+x", scope: "drive", descriptionKey: "drive:driveCommandCut" },
 	{ id: "drive.paste", defaultCombo: "mod+v", scope: "drive", descriptionKey: "drive:driveCommandPaste" },
 	{ id: "drive.clearClipboard", defaultCombo: "", scope: "drive", descriptionKey: "drive:driveClipboardClear" },
-	{ id: "drive.move", defaultCombo: "m", scope: "drive", descriptionKey: "drive:driveActionMove" },
-	{ id: "drive.copyTo", defaultCombo: "shift+m", scope: "drive", descriptionKey: "drive:driveCommandCopyTo" },
+	// No default: a file manager moves and copies with its clipboard (drive.cut/copy/paste), not a picker.
+	{ id: "drive.move", defaultCombo: "", scope: "drive", descriptionKey: "drive:driveActionMove" },
+	{ id: "drive.copyTo", defaultCombo: "", scope: "drive", descriptionKey: "drive:driveCommandCopyTo" },
 	// Compress, Extract and Download as open the selection bar's menus of the same name.
 	{
 		id: "drive.compress",
@@ -122,9 +135,11 @@ export const DRIVE_ACTIONS: readonly ActionDef[] = [
 		descriptionKey: "drive:driveCommandTrash",
 		hintKey: "drive:driveCommandTrashHint"
 	},
+	// Finder's Put Back on a Mac; Explorer's Recycle Bin has no key.
 	{
 		id: "drive.restore",
-		defaultCombo: "r",
+		defaultCombo: "",
+		platformDefaults: onMac("mod+backspace"),
 		scope: "drive",
 		descriptionKey: "drive:driveActionRestore",
 		hintKey: "drive:driveCommandHintTrash"
@@ -147,13 +162,13 @@ export const DRIVE_ACTIONS: readonly ActionDef[] = [
 	// Old-web parity: mod+f intercepts the browser's own find-in-page only while a drive listing is
 	// mounted (the handler's preventDefault).
 	{ id: "drive.search", defaultCombo: "mod+f", scope: "drive", descriptionKey: "drive:driveCommandSearch" },
-	{ id: "drive.toggleView", defaultCombo: "v", scope: "drive", descriptionKey: "drive:driveCommandToggleView" },
-	// No default: Mod+1 and Mod+2 switch browser tabs, and the desktop app's Mod+digits go to the modules.
+	// No default: Finder's Mod+1 and Mod+2 switch browser tabs, and the desktop app's Mod+digits go to the modules.
+	{ id: "drive.toggleView", defaultCombo: "", scope: "drive", descriptionKey: "drive:driveCommandToggleView" },
 	{ id: "drive.listView", defaultCombo: "", scope: "drive", descriptionKey: "drive:driveViewList" },
 	{ id: "drive.gridView", defaultCombo: "", scope: "drive", descriptionKey: "drive:driveViewGrid" },
 	{ id: "drive.cycleSort", defaultCombo: "", scope: "drive", descriptionKey: "drive:driveCommandCycleSort" },
-	// No default: Finder's Mod+Shift+. is kept for the assistant toggle.
-	{ id: "drive.toggleHiddenItems", defaultCombo: "", scope: "drive", descriptionKey: "drive:driveShowHiddenItems" },
+	// Finder's Mod+Shift+. on every platform.
+	{ id: "drive.toggleHiddenItems", defaultCombo: "mod+shift+period", scope: "drive", descriptionKey: "drive:driveShowHiddenItems" },
 	// The browser's own reload keys reload the whole app, so only the desktop app, which has none, binds them.
 	{
 		id: "drive.refresh",

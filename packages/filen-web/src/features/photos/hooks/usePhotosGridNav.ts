@@ -1,6 +1,7 @@
 import { useState, type KeyboardEvent } from "react"
 import { type Virtualizer } from "@tanstack/react-virtual"
 import { useRovingItemRefs } from "@/features/drive/hooks/useRovingItemRefs"
+import { useListboxTypeAhead } from "@/features/drive/hooks/useListboxTypeAhead"
 import { clampListboxIndex, listboxKeyTargetIsInteractive, resolveCursorIndex } from "@/features/drive/lib/listbox"
 import { photosGridKeyAction, photosRangeSelection } from "@/features/photos/components/photoGrid.logic"
 import { type PhotoItem } from "@/features/photos/lib/captureSort"
@@ -30,7 +31,7 @@ export interface PhotosGridNav {
 }
 
 // Roving-tabindex keyboard operability for the photos grid: the cursor, arrow/Home/End/PageUp/PageDown movement
-// over the month timeline, Space toggle and Shift+Arrow range extension. Purpose-built and grid-only — photos has
+// over the month timeline, type-ahead over the photos' names, Space toggle and Shift+Arrow range extension. Purpose-built and grid-only — photos has
 // no list mode, no nested navigation, no drag-and-drop ancestry guard and no per-variant reset, so
 // this is deliberately not a port of useDriveListboxNav. Open, select-all, clear-selection and the month jumps
 // (Shift+PageUp/PageDown) are NOT handled here — they are registered keymap commands (photoGrid.tsx).
@@ -43,6 +44,7 @@ export function usePhotosGridNav({ items, timeline, virtualizer, anchorUuid, set
 	// effect), never in an effect body.
 	const [activeFallback, setActiveFallback] = useState(0)
 	const { registerRef, focusItem } = useRovingItemRefs()
+	const typeAhead = useListboxTypeAhead()
 
 	const uuids = items.map(item => item.data.uuid)
 	const safeActiveIndex = clampListboxIndex(resolveCursorIndex(activeUuid, uuids, activeFallback), items.length)
@@ -66,6 +68,17 @@ export function usePhotosGridNav({ items, timeline, virtualizer, anchorUuid, set
 		// key bubbles here too; and the tile's ⋯ trigger owns its own Space (see
 		// listboxKeyTargetIsInteractive). Neither is the grid's.
 		if (!(event.target instanceof Node) || !event.currentTarget.contains(event.target) || listboxKeyTargetIsInteractive(event.target)) {
+			return
+		}
+
+		// A printable key jumps to the next photo whose name starts with what was typed (drive's own type-ahead).
+		const typed = typeAhead(event, items, safeActiveIndex)
+
+		if (typed !== null) {
+			if (typed !== -1) {
+				moveTo(typed)
+			}
+
 			return
 		}
 

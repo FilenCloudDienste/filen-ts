@@ -1,6 +1,7 @@
 // Roving-tabindex cursor math for the drive listbox — kept as pure functions so the surrounding
 // component only ever wires DOM events to arithmetic, never re-derives it inline.
 
+import { isImeKeydown } from "@filen/shared/keymap"
 import { hasClosest } from "@/lib/domTarget"
 
 // Clamps a cursor into [0, length-1]. Callers must not invoke this against an empty list (the
@@ -97,6 +98,118 @@ export function listboxKeyTarget(
 	}
 
 	return null
+}
+
+// Type-ahead, the WAI-ARIA listbox's and every file manager's: printable keys typed within TYPE_AHEAD_RESET_MS of
+// each other build one prefix, and the cursor jumps to the next item whose name starts with it. Shared by the drive
+// listbox and the photos grid (useListboxTypeAhead), which is why neither binds a bare printable key as a shortcut.
+export const TYPE_AHEAD_RESET_MS = 1000
+
+// What type-ahead reads of a keydown.
+export interface TypeAheadKeyEvent {
+	readonly key: string
+	readonly ctrlKey: boolean
+	readonly metaKey: boolean
+	readonly altKey: boolean
+	readonly isComposing?: boolean
+	readonly keyCode?: number
+	readonly target: EventTarget | null
+}
+
+// Whether a prefix typed `at` is still being added to `now`.
+export function typeAheadBuffering(text: string, at: number, now: number): boolean {
+	return text.length > 0 && now - at < TYPE_AHEAD_RESET_MS
+}
+
+function isEditableTarget(target: EventTarget | null): boolean {
+	return typeof target === "object" && target !== null && "isContentEditable" in target && target.isContentEditable === true
+}
+
+// The character a keydown adds to the prefix, or null when it is not type-ahead's: a named key, a chord with Ctrl,
+// Cmd or Alt (Shift only picks the character), a key an input method is composing with, or one typed into an
+// editable. Space continues a prefix ("my file") but never starts one: alone it toggles the cursor's item.
+export function typeAheadCharacter(event: TypeAheadKeyEvent, buffering: boolean): string | null {
+	const { key } = event
+
+	// One character, or one astral character's surrogate pair; a named key ("Enter", "F2") is longer.
+	const printable = key.length === 1 || (key.length === 2 && key.charCodeAt(0) >= 0xd800 && key.charCodeAt(0) <= 0xdbff)
+
+	if (
+		!printable ||
+		event.ctrlKey ||
+		event.metaKey ||
+		event.altKey ||
+		(key === " " && !buffering) ||
+		isImeKeydown(event) ||
+		isEditableTarget(event.target)
+	) {
+		return null
+	}
+
+	return key
+}
+
+// Case- and accent-insensitive, in the user's locale: "e" finds "École".
+const TYPE_AHEAD_COLLATOR = new Intl.Collator(undefined, { sensitivity: "base", usage: "search" })
+
+// Combining diacritical marks, which a name stored decomposed (NFD, as macOS writes them) carries after its base
+// letter. The collator ignores accents anyway, so both sides skip them.
+function isCombiningMark(code: number): boolean {
+	return code >= 0x300 && code <= 0x36f
+}
+
+// Whether `name` starts with `prefix`, compared a character at a time so no substring is built per item.
+export function startsWithTypeAhead(name: string, prefix: string): boolean {
+	let at = 0
+
+	for (let p = 0; p < prefix.length; p++) {
+		const code = prefix.charCodeAt(p)
+
+		if (isCombiningMark(code)) {
+			continue
+		}
+
+		while (at < name.length && isCombiningMark(name.charCodeAt(at))) {
+			at++
+		}
+
+		if (at >= name.length) {
+			return false
+		}
+
+		if (name.charCodeAt(at) !== code && TYPE_AHEAD_COLLATOR.compare(name.charAt(at), prefix.charAt(p)) !== 0) {
+			return false
+		}
+
+		at++
+	}
+
+	return true
+}
+
+// The index type-ahead moves the cursor to, or -1 when no name starts with `prefix`. A prefix just started (`fresh`)
+// looks from the item after the cursor on, so typing its character again later steps through the items it starts; a
+// prefix being added to looks from the cursor itself, which keeps its place while it still matches. Wraps past the end.
+export function typeAheadIndex<T>(
+	items: readonly T[],
+	nameOf: (item: T) => string,
+	activeIndex: number,
+	prefix: string,
+	fresh: boolean
+): number {
+	const count = items.length
+	const start = fresh ? activeIndex + 1 : activeIndex
+
+	for (let offset = 0; offset < count; offset++) {
+		const index = (start + offset) % count
+		const item = items[index]
+
+		if (item !== undefined && startsWithTypeAhead(nameOf(item), prefix)) {
+			return index
+		}
+	}
+
+	return -1
 }
 
 // Controls inside an option that own their own keys: the row or tile's ⋯ menu trigger, which carries
