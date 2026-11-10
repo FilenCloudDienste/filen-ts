@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import "@/tests/support/officeKeys"
 import { afterEach, describe, expect, it } from "vitest"
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import "@/lib/i18n"

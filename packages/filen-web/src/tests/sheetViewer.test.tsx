@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import "@/tests/support/officeKeys"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { createRef } from "react"
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"

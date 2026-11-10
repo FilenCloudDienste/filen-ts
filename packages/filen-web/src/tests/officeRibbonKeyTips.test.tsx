@@ -27,6 +27,7 @@ vi.mock("@/lib/storage/adapter", () => ({
 
 const { OfficeRibbon } = await import("@/features/office/components/ribbon/officeRibbon")
 const { setRibbonCollapsed } = await import("@/features/office/lib/ribbonSettings")
+await import("@/tests/support/officeKeys")
 
 const TABS = [
 	{ id: "home", label: "Home" },

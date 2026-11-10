@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 
+import "@/tests/support/officeKeys"
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { useCallback, useState } from "react"

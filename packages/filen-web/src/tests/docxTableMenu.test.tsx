@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 
+import "@/tests/support/officeKeys"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { DOCX_EDITOR_COMMANDS, NO_REVIEW, NO_VALUES, type DocxEditorSnapshot, type DocxTableContext } from "@filen/office/core/docx/edit"

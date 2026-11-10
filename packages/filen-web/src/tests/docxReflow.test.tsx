@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 
+import "@/tests/support/officeKeys"
 import { createRef } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { act, cleanup, render, renderHook, screen } from "@testing-library/react"

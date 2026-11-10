@@ -9,7 +9,7 @@ import "@/lib/i18n"
 
 // The office editors' ribbon on its own: tabs over one row of the selected tab's groups, the row one Tab stop that the
 // arrow keys move through, groups collapsing into dropdowns and then the overflow menu as the row narrows, and Show
-// tabs only (the chevron, Ctrl+F1) remembered on this device.
+// tabs only (the chevron, office.toggleRibbon) remembered on this device.
 
 const size = vi.hoisted(() => ({ width: 2000 }))
 const stored = vi.hoisted(() => ({ values: new Map<string, unknown>() }))
@@ -28,6 +28,8 @@ vi.mock("@/lib/storage/adapter", () => ({
 const { OfficeCommandBar, OfficeRibbon } = await import("@/features/office/components/ribbon/officeRibbon")
 const { onCommandBarF6 } = await import("@/features/office/components/ribbon/ribbonFocus")
 const { setRibbonCollapsed } = await import("@/features/office/lib/ribbonSettings")
+const { clearUserCombo, setUserCombo } = await import("@/lib/keymap/registry")
+await import("@/tests/support/officeKeys")
 
 const TABS = [
 	{ id: "home", label: "Home" },
@@ -288,11 +290,23 @@ describe("OfficeRibbon", () => {
 			expect(screen.queryByRole("toolbar", { name: "Commands" })).toBeNull()
 		})
 
-		fireEvent.keyDown(window, { key: "F1", ctrlKey: true })
+		fireEvent.keyDown(document, { key: "F1", code: "F1", ctrlKey: true })
 		expect(await screen.findByRole("toolbar", { name: "Commands" })).toBeTruthy()
 		expect(screen.getByRole("button", { name: "Show tabs only" }).getAttribute("aria-pressed")).toBe("false")
-		fireEvent.keyDown(window, { key: "F1", ctrlKey: true })
+		fireEvent.keyDown(document, { key: "F1", code: "F1", ctrlKey: true })
 		expect(screen.getByRole("button", { name: "Always show the ribbon" }).getAttribute("aria-pressed")).toBe("true")
+	})
+
+	it("follows a rebound ribbon key, the old one no longer toggling", async () => {
+		renderRibbon()
+		await act(() => setUserCombo("office.toggleRibbon", "mod+shift+f1"))
+
+		fireEvent.keyDown(document, { key: "F1", code: "F1", ctrlKey: true })
+		expect(screen.getByRole("button", { name: "Show tabs only" }).getAttribute("aria-pressed")).toBe("false")
+		fireEvent.keyDown(document, { key: "F1", code: "F1", ctrlKey: true, shiftKey: true })
+		expect(screen.getByRole("button", { name: "Always show the ribbon" }).getAttribute("aria-pressed")).toBe("true")
+
+		await act(() => clearUserCombo("office.toggleRibbon"))
 	})
 })
 
@@ -352,7 +366,7 @@ describe("OfficeCommandBar", () => {
 				.map(group => group.getAttribute("aria-label"))
 		).toEqual(["Pages", "Zoom"])
 
-		fireEvent.keyDown(window, { key: "F1", ctrlKey: true })
+		fireEvent.keyDown(document, { key: "F1", code: "F1", ctrlKey: true })
 		expect(screen.getByRole("toolbar", { name: "Commands" })).toBeTruthy()
 	})
 

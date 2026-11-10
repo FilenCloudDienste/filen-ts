@@ -7,9 +7,9 @@ export const previewOfficeRibbon = {
 	previewOfficeRibbonCommands: "Commands",
 	/** Office editors — ribbon button opening the command groups the row has no room for */
 	previewOfficeRibbonMore: "More commands",
-	/** Office editors — ribbon button hiding the commands below the tabs until a tab is clicked (also Ctrl+F1) */
+	/** Office editors — ribbon button hiding the commands below the tabs until a tab is clicked (also by keyboard) */
 	previewOfficeRibbonCollapse: "Show tabs only",
-	/** Office editors — ribbon button showing the commands below the tabs again (also Ctrl+F1) */
+	/** Office editors — ribbon button showing the commands below the tabs again (also by keyboard) */
 	previewOfficeRibbonExpand: "Always show the ribbon",
 	/** Office editors — ribbon tab: the everyday formatting and editing commands */
 	previewOfficeRibbonTabHome: "Home",

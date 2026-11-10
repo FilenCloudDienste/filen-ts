@@ -1,4 +1,3 @@
-import { isImeKeydown } from "@filen/shared/keymap"
 import {
 	useEffect,
 	useEffectEvent,
@@ -32,13 +31,14 @@ import {
 	tabKeyTips
 } from "@/features/office/components/ribbon/ribbonKeyTips"
 import { desktopPlatform } from "@/lib/desktop"
-import { KbdKeys } from "@/lib/keymap/kbd"
+import { Kbd } from "@/lib/keymap/kbd"
+import { IN_EDITORS_AND_FIELDS, useAction } from "@/lib/keymap/useAction"
 import { useElementSize } from "@/lib/useElementSize"
 
 // The office editors' ribbon, as Office for the web's simplified (single-line) ribbon: a row of tabs (the File menu
 // first, contextual tabs after the rest while their object is selected, status badges and the collapse switch at the
 // end) over one row of the selected tab's command groups. Groups the row has no room for collapse into a dropdown
-// each, then move into its overflow menu (ribbonFit). "Show tabs only" (the chevron, Ctrl+F1) hides the command row
+// each, then move into its overflow menu (ribbonFit). "Show tabs only" (the chevron, office.toggleRibbon) hides the command row
 // until a tab is clicked. Only the selected tab's groups are rendered. KeyTips (RibbonKeyTips) drive it from the keyboard.
 //
 // The document viewers' command bar (OfficeCommandBar) is that command row on its own, with no tab row: the File menu
@@ -661,6 +661,8 @@ function RibbonKeyTips({
 	)
 }
 
+const RIBBON_KEYS = { ...IN_EDITORS_AND_FIELDS, preventDefault: true }
+
 const MODIFIERS = new Set(["Alt", "AltGraph", "Control", "Meta", "Shift", "OS", "CapsLock"])
 
 // The layer opens over the ribbon's own layer only: not from a dialog over it, nor while the ribbon is hidden or inert.
@@ -714,22 +716,16 @@ export function OfficeRibbon(props: OfficeRibbonProps) {
 		}
 	}, [tabList])
 
-	// Ctrl+F1 anywhere in the editor shows or hides the command row, as in Office.
-	useEffect(() => {
-		const onKey = (event: KeyboardEvent): void => {
-			if (event.key === "F1" && event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey && !isImeKeydown(event)) {
-				event.preventDefault()
-				setPeek(false)
-				setRibbonCollapsed(!collapsed)
-			}
-		}
-
-		window.addEventListener("keydown", onKey)
-
-		return () => {
-			window.removeEventListener("keydown", onKey)
-		}
-	}, [collapsed, setPeek])
+	// Anywhere in the editor, its fields included, the key shows or hides the command row, as Ctrl+F1 does in Office.
+	useAction(
+		"office.toggleRibbon",
+		() => {
+			setPeek(false)
+			setRibbonCollapsed(!collapsed)
+		},
+		RIBBON_KEYS,
+		[collapsed, setPeek]
+	)
 
 	const row = (
 		<Tabs.Panel
@@ -840,7 +836,7 @@ export function OfficeRibbon(props: OfficeRibbonProps) {
 					/>
 					<TooltipContent>
 						{collapsed ? t("previewOfficeRibbonExpand") : t("previewOfficeRibbonCollapse")}
-						<KbdKeys keys={["Ctrl", "F1"]} />
+						<Kbd action="office.toggleRibbon" />
 					</TooltipContent>
 				</Tooltip>
 			</div>

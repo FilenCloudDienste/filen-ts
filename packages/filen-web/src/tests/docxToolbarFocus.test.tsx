@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import "@/tests/support/officeKeys"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react"
 import type { DocxEditToolbarProps } from "@/features/preview/components/docxEditToolbar"

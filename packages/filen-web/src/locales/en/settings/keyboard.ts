@@ -268,5 +268,7 @@ export const settingsKeyboard = {
 	/** Shortcuts list — where the shortcut works: in the image viewer while the image is zoomed in */
 	keyboardHintImageZoomed: "In the image viewer, zoomed in",
 	/** Shortcuts list — where the shortcut works: in a document's find field */
-	keyboardHintFindField: "In the find field"
+	keyboardHintFindField: "In the find field",
+	/** Shortcut name — in the Word, spreadsheet and presentation editors, hides the ribbon's commands below its tabs or shows them again */
+	keyboardActionToggleRibbon: "Show tabs only or the whole ribbon"
 } as const
