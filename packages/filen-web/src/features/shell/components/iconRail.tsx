@@ -46,7 +46,7 @@ import {
 	type RailEntryId
 } from "@/features/shell/lib/railOrder.logic"
 import { saveRailOrder, useRailOrderQuery } from "@/features/shell/queries/railOrder"
-import { SidebarDrawerTrigger } from "@/features/shell/components/sidebarDrawer"
+import { SidebarDrawerTrigger, SidebarRevealButton } from "@/features/shell/components/sidebarDrawer"
 import { AssistantToggle } from "@/features/assistant/components/assistantToggle"
 import { RailGroup } from "@/features/shell/components/railGroup"
 import { TransfersRing } from "@/features/shell/components/transfersRing"
@@ -645,8 +645,10 @@ export function IconRail() {
 			</Link>
 
 			{/* Narrow viewports only (md:hidden): opens the drawer holding the current module's sidebar.
-			    Sits with the section entries it reaches, below the brand. */}
+			    Sits with the section entries it reaches, below the brand. Above the breakpoint the same slot shows
+			    the sidebar again while app.toggleSidebar has hidden it. */}
 			<SidebarDrawerTrigger className={railItemClass(false)} />
+			<SidebarRevealButton className={railItemClass(false)} />
 
 			{/* The section links, in the user's order. Drag one to move it (or Alt+Arrow on a focused one):
 			    it lifts and follows the pointer while the others slide to open its landing slot.

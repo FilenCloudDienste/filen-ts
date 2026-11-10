@@ -32,6 +32,7 @@ import { getArchivePreferences, buildArchiveClientConfig, DEFAULT_ARCHIVE_PREFER
 import { loadOfficeViewSettings } from "@/features/office/lib/officeViewSettings"
 import { loadRibbonCollapsed } from "@/features/office/lib/ribbonSettings"
 import { loadDocxFormattingMarks } from "@/features/preview/lib/docxFormattingMarks"
+import { loadSidebarHidden } from "@/features/shell/lib/sidebarHidden"
 
 // Settled when bootSdk() finishes — on success OR failure, and never rejected. Auth-sensitive route
 // guards await this before reading hasClient(): the boot kick runs before the router mounts, but
@@ -166,7 +167,9 @@ export async function retrySessionResume(discard: boolean): Promise<boolean> {
 // probe: the first real SDK call (session resume, login) exercises the async runtime, and a runtime
 // failure in the steps below lands in the catch as an "async-runtime" boot error.
 function preloadDevicePreferences(): Promise<void> {
-	return Promise.all([loadOfficeViewSettings(), loadRibbonCollapsed(), loadDocxFormattingMarks()]).then(() => undefined)
+	return Promise.all([loadOfficeViewSettings(), loadRibbonCollapsed(), loadDocxFormattingMarks(), loadSidebarHidden()]).then(
+		() => undefined
+	)
 }
 
 export async function bootSdk(): Promise<void> {
@@ -218,7 +221,7 @@ export async function bootSdk(): Promise<void> {
 		if (readSignOutPending()) {
 			await finishPendingSignOut()
 		}
-		// This device's editor view settings, read before anything renders (lib/storage/preloadedPreference.ts): a
+		// This device's view settings (the editors', the shell's hidden sidebar), read before anything renders (lib/storage/preloadedPreference.ts): a
 		// document opens with them from its first render. Alongside the client config below; never fails boot.
 		const devicePreferences = preloadDevicePreferences()
 		// Apply the persisted Advanced-settings transfer preset and archive codec memory BEFORE the

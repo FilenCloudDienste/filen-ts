@@ -41,6 +41,17 @@ function entryPoint(pane: Element): HTMLElement | null {
 		: firstTabbable(pane)
 }
 
+// Moves focus into the area named `name` (where it was left there, else its first stop). Returns whether focus moved:
+// not when the area is off screen or holds nothing to focus.
+export function focusPane(name: string): boolean {
+	const pane = document.querySelector(`[${PANE_ATTRIBUTE}="${name}"]`)
+	const destination = pane !== null && onScreen(pane) ? entryPoint(pane) : null
+
+	destination?.focus()
+
+	return destination !== null
+}
+
 // The areas after (or before) the one holding focus, nearest first, wrapping round to it; from outside every area,
 // all of them from the first (or the last).
 export function panesFrom<T extends Element>(panes: readonly T[], active: Element | null, direction: 1 | -1): T[] {

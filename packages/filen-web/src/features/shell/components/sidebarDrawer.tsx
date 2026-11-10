@@ -1,10 +1,15 @@
 import { type ReactNode } from "react"
+import { flushSync } from "react-dom"
 import { useTranslation } from "react-i18next"
 import { PanelLeftIcon } from "lucide-react"
 import { Drawer as DrawerPrimitive } from "@base-ui/react/drawer"
 import { cn } from "@filen/shared"
 import { SCRIM_CLASS } from "@/components/ui/surface"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { SIDEBAR_DRAWER_ID } from "@/features/shell/lib/appShell.logic"
+import { setSidebarHidden, useSidebarHidden } from "@/features/shell/lib/sidebarHidden"
+import { focusPane } from "@/features/shell/lib/paneCycle"
+import { Kbd } from "@/lib/keymap/kbd"
 
 // Below the layout breakpoint the module sidebar moves out of the shell row into this drawer — the
 // SAME element, mounted once (see appShell.tsx: never both, or the notes/chats sidebars' virtualizers,
@@ -88,5 +93,43 @@ export function SidebarDrawerTrigger({ className }: { className?: string }) {
 				</button>
 			}
 		/>
+	)
+}
+
+// The same "Open navigation" slot above the breakpoint, while app.toggleSidebar has hidden the sidebar there: it shows
+// the sidebar again and moves focus into it (the button itself goes with the click). `max-md:hidden` leaves the narrow
+// layout to the drawer's trigger.
+export function SidebarRevealButton({ className }: { className?: string }) {
+	const { t } = useTranslation("common")
+	const hidden = useSidebarHidden()
+
+	if (!hidden) {
+		return null
+	}
+
+	return (
+		<Tooltip>
+			<TooltipTrigger
+				render={
+					<button
+						type="button"
+						aria-label={t("openNavigation")}
+						className={cn(className, "max-md:hidden")}
+						onClick={() => {
+							flushSync(() => {
+								setSidebarHidden(false)
+							})
+							focusPane("sidebar")
+						}}
+					>
+						<PanelLeftIcon />
+					</button>
+				}
+			/>
+			<TooltipContent side="right">
+				{t("openNavigation")}
+				<Kbd action="app.toggleSidebar" />
+			</TooltipContent>
+		</Tooltip>
 	)
 }

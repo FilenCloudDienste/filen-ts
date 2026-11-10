@@ -12,6 +12,7 @@ import { useIsNarrowViewport } from "@/features/shell/hooks/useIsNarrowViewport"
 import { resolveSidebarKind, SIDEBAR_DRAWER_ID, SIDEBAR_LABEL_KEY, type SidebarKind } from "@/features/shell/lib/appShell.logic"
 import { subscribeToLayoutBreakpoint } from "@/features/shell/lib/breakpoints"
 import { SidebarPanelVisibilityProvider } from "@/features/shell/lib/sidebarPanelVisibility"
+import { setSidebarHidden, useSidebarHidden } from "@/features/shell/lib/sidebarHidden"
 import { WindowBarSlotContext } from "@/features/shell/lib/windowBarSlot"
 import { DriveSidebar } from "@/features/shell/components/driveSidebar"
 import { NotesSidebar } from "@/features/notes/components/notesSidebar"
@@ -86,8 +87,9 @@ export function AppShell() {
 	const Panel = SIDEBAR_PANEL[sidebarKind]
 	const narrow = useIsNarrowViewport()
 	const [sidebarOpen, setSidebarOpen] = useState(false)
-	// At desktop widths `app.toggleSidebar` hides the panel; it stays mounted (search text, selection, scroll).
-	const [sidebarHidden, setSidebarHidden] = useState(false)
+	// At desktop widths `app.toggleSidebar` hides the panel; it stays mounted (search text, selection, scroll). Kept on
+	// this device and read at boot (sidebarHidden.ts), so the row is laid out as it was left from the first render.
+	const sidebarHidden = useSidebarHidden()
 	const assistantPanelOpen = useAssistantStore(state => state.panelOpen)
 	const assistantDrawerOpen = useAssistantStore(state => state.drawerOpen)
 	const [windowBarSlot, setWindowBarSlot] = useState<HTMLDivElement | null>(null)
