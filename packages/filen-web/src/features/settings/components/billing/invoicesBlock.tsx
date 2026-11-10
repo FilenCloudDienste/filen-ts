@@ -45,13 +45,17 @@ function InvoicesBlock({ accountQuery }: InvoicesBlockProps) {
 			rows={accountQuery.data.subsInvoices}
 			rowKey={invoice => invoice.id}
 			columns={[
-				{ header: t("settingsBillingColumnPlan"), cell: invoice => invoice.planName },
-				{ header: t("settingsBillingColumnGateway"), className: "capitalize", cell: invoice => invoice.gateway },
+				{ header: t("settingsBillingColumnPlan"), className: "font-medium", cell: invoice => invoice.planName },
+				{
+					header: t("settingsBillingColumnGateway"),
+					className: "capitalize text-muted-foreground",
+					cell: invoice => invoice.gateway
+				},
 				{ header: t("settingsBillingColumnCost"), className: "tabular-nums", cell: invoice => formatBillingCost(invoice.planCost) },
-				{ header: t("settingsBillingColumnDate"), className: "tabular-nums", cell: invoiceDate },
+				{ header: t("settingsBillingColumnDate"), className: "tabular-nums text-muted-foreground", cell: invoiceDate },
 				{
 					header: t("settingsBillingColumnDownload"),
-					className: "text-right",
+					className: "text-end",
 					cell: invoice => (
 						<Button
 							type="button"

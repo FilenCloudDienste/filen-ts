@@ -14,32 +14,30 @@ export const settingsBilling = {
 	settingsBillingTabStarter: "Starter",
 	/** Plans view — tab listing one-time (lifetime) plans */
 	settingsBillingTabLifetime: "Lifetime",
-	/** Plan card — the plan's name followed by its billing term, e.g. "Pro I (Monthly)"; {{name}} is the plan name, {{term}} one of the term words below */
-	settingsBillingPlanNameWithTerm: "{{name}} ({{term}})",
-	/** Plan card — billing term word inside the plan title: billed every month */
-	settingsBillingTermMonthly: "Monthly",
-	/** Plan card — billing term word inside the plan title: billed every year */
-	settingsBillingTermAnnually: "Annually",
-	/** Plan card — billing term word inside the plan title: paid once, never renews */
-	settingsBillingTermLifetime: "Lifetime",
-	/** Plan card — line under the price of a monthly plan */
-	settingsBillingPricePerMonth: "per month",
-	/** Plan card — line under the price of an annual plan */
-	settingsBillingPricePerYear: "per year",
-	/** Plan card — line under the price of a lifetime plan, paid once */
-	settingsBillingPriceOnce: "one-time payment",
+	/** Plan card and Billing subscriptions — short suffix right after a price, read as "per month", e.g. "€3.99 /month"; annual plans show their monthly equivalent with it */
+	settingsBillingPricePerMonth: "/month",
+	/** Billing subscriptions — short suffix right after the price of an annual subscription, read as "per year", e.g. "€39.99 /year" */
+	settingsBillingPricePerYear: "/year",
+	/** Plan card and Billing subscriptions — short word right after the price of a lifetime plan, paid once and never renewed, e.g. "€399 one-time" */
+	settingsBillingPriceOnce: "one-time",
+	/** Plan card — line under the monthly equivalent of an annual plan; {{price}} is the formatted amount charged once a year */
+	settingsBillingBilledYearly: "{{price}} billed yearly",
+	/** Plan card badge and Annually tab hint — how much less a year costs than paying monthly; {{percent}} is a whole number */
+	settingsBillingSavePercent: "Save {{percent}}%",
+	/** Annually tab hint — the largest saving among annual plans when they differ; {{percent}} is a whole number */
+	settingsBillingSaveUpToPercent: "Save up to {{percent}}%",
 	/** Plan card — screen-reader text for the struck-through regular price during a sale; {{price}} is the formatted amount */
 	settingsBillingRegularPrice: "Regular price {{price}}",
 	/** Plan card — sale badge with the discount; {{percent}} is a whole number */
 	settingsBillingDiscount: "−{{percent}}%",
 	/** Plan card — badge on lifetime plans and plans on sale */
 	settingsBillingLimited: "Limited availability",
-	/** Plan card — badge on the plan most people choose */
-	settingsBillingPopular: "Popular",
-	/** Plan card — badge on a plan the account already holds a live subscription for */
+	/** Plan card — badge on the plan most people choose, which is shown raised */
+	settingsBillingPopular: "Most popular",
+	/** Plan card — disabled button, in place of Buy, on a plan the account already holds a live subscription for */
 	settingsBillingCurrentPlanBadge: "Current plan",
-	/** Plan card — storage included in the plan; {{storage}} is a formatted size like "2 TB" */
-	settingsBillingPlanStorage: "{{storage}} storage",
+	/** Plan card — storage included in the plan; {{storage}} is a formatted size like "2 TB", shown large; keep the <size> tags around it */
+	settingsBillingPlanStorage: "<size>{{storage}}</size> storage",
 	/** Plan card — feature line */
 	settingsBillingFeatureBandwidth: "Unlimited bandwidth",
 	/** Plan card — feature line */

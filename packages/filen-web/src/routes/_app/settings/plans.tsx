@@ -28,6 +28,7 @@ function PlansPage() {
 		<AccountGate
 			icon={GemIcon}
 			title={t("settingsSectionPlans")}
+			wide
 		>
 			{accountQuery => (
 				<PlansView

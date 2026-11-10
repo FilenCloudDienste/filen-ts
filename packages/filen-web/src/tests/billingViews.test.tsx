@@ -137,11 +137,13 @@ describe("PlansView", () => {
 	it("shows Monthly and Annually tabs, hides Lifetime while lifetime sales are off, and opens on Monthly", () => {
 		renderPlans()
 
-		const tabs = screen.getAllByRole("tab").map(tab => tab.textContent)
+		const tabs = screen.getAllByRole("tab")
 
-		expect(tabs).toEqual([EN.settingsBillingTabMonthly, EN.settingsBillingTabAnnually])
+		expect(tabs.map(tab => tab.textContent)).toEqual([EN.settingsBillingTabMonthly, `${EN.settingsBillingTabAnnually}Save 17%`])
+		// Pro II annually (20) against twelve months of Pro I (2) at the same storage.
+		expect(screen.getByRole("tab", { name: EN.settingsBillingTabAnnually, description: "Save 17%" })).toBeDefined()
 		expect(screen.getByRole("tab", { name: EN.settingsBillingTabMonthly }).getAttribute("aria-selected")).toBe("true")
-		expect(screen.getByText("Pro I (Monthly)")).toBeDefined()
+		expect(screen.getByRole("heading", { level: 2, name: "Pro I" })).toBeDefined()
 	})
 
 	it("shows the Lifetime tab when enabled", () => {

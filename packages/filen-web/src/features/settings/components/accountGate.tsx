@@ -14,10 +14,12 @@ import { EmptyMessage } from "@/components/emptyMessage"
 export function AccountGate({
 	icon: Icon,
 	title,
+	wide,
 	children
 }: {
 	icon: ComponentProps<typeof SettingsPage>["icon"]
 	title: string
+	wide?: boolean
 	children: (accountQuery: AccountQuerySuccess) => ReactNode
 }) {
 	const { t } = useTranslation(["settings", "common"])
@@ -27,6 +29,7 @@ export function AccountGate({
 		<SettingsPage
 			icon={Icon}
 			title={title}
+			wide={wide}
 		>
 			{accountQuery.data !== undefined ? (
 				children(accountQuery)

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest"
 import type { Pricing, PricingPlan } from "@/features/settings/lib/remoteConfig"
-import { currentPlanIds, groupPlans, initialPlanTab, purchasesEnabled } from "@/features/settings/lib/plans"
+import { currentPlanIds, groupPlans, initialPlanTab, planTermOf, purchasesEnabled, tabSavings } from "@/features/settings/lib/plans"
 
 function plan(overrides: Partial<PricingPlan>): PricingPlan {
 	return { termType: 2, id: 1, name: "Pro I", cost: 2, sale: 0, storage: 1e12, popular: false, term: "monthly", ...overrides }
@@ -71,6 +71,78 @@ describe("groupPlans", () => {
 		expect(cards.get(2)).toMatchObject({ limited: false, methods: ["stripe", "paypal"] })
 		expect(cards.get(75)).toMatchObject({ limited: true, methods: ["stripe", "paypal", "crypto"] })
 		expect(cards.get(4)).toMatchObject({ limited: true, methods: ["stripe", "paypal", "crypto"] })
+	})
+
+	it("compares an annual plan with twelve months of the monthly plan of the same storage, at the prices charged now", () => {
+		const plans = [
+			plan({ id: 1, cost: 1.99, storage: 2e11 }),
+			plan({ id: 2, cost: 8.99, sale: 6.99, storage: 2e12 }),
+			plan({ id: 3, termType: 3, term: "annually", cost: 19.99, storage: 2e11 }),
+			plan({ id: 4, termType: 3, term: "annually", cost: 89.99, sale: 69.99, storage: 2e12 }),
+			plan({ id: 5, termType: 3, term: "annually", cost: 99, storage: 5e12 })
+		]
+		const savings = (groups: ReturnType<typeof groupPlans>) =>
+			new Map(groups.flatMap(group => group.cards.map(card => [card.plan.id, card.annualSavingsPercent] as const)))
+
+		expect(savings(groupPlans(pricing(plans)))).toEqual(
+			new Map([
+				[1, undefined],
+				[2, undefined],
+				[3, 16],
+				[4, 17],
+				[5, undefined]
+			])
+		)
+		expect(savings(groupPlans(pricing(plans, { saleEnabled: true }))).get(4)).toBe(17)
+	})
+})
+
+describe("tabSavings", () => {
+	function annualCards(plans: PricingPlan[]) {
+		return groupPlans(pricing(plans)).find(group => group.tab === "annually")?.cards ?? []
+	}
+
+	it("names the shared saving, or the largest as up to when annual plans differ or some have no monthly match", () => {
+		const monthly = [plan({ id: 1, cost: 10, storage: 1 }), plan({ id: 2, cost: 20, storage: 2 })]
+
+		expect(
+			tabSavings(
+				annualCards([
+					...monthly,
+					plan({ id: 3, termType: 3, term: "annually", cost: 100, storage: 1 }),
+					plan({ id: 4, termType: 3, term: "annually", cost: 200, storage: 2 })
+				])
+			)
+		).toEqual({ percent: 17, upTo: false })
+		expect(
+			tabSavings(
+				annualCards([
+					...monthly,
+					plan({ id: 3, termType: 3, term: "annually", cost: 100, storage: 1 }),
+					plan({ id: 4, termType: 3, term: "annually", cost: 120, storage: 2 })
+				])
+			)
+		).toEqual({ percent: 50, upTo: true })
+		expect(
+			tabSavings(
+				annualCards([
+					...monthly,
+					plan({ id: 3, termType: 3, term: "annually", cost: 100, storage: 1 }),
+					plan({ id: 4, termType: 3, term: "annually", cost: 100, storage: 9 })
+				])
+			)
+		).toEqual({ percent: 17, upTo: true })
+		expect(tabSavings(annualCards([plan({ id: 3, termType: 3, term: "annually", cost: 100, storage: 9 })]))).toBeUndefined()
+	})
+})
+
+describe("planTermOf", () => {
+	it("reads a subscription's term from the pricing held, undefined for a plan no longer offered", () => {
+		const held = pricing([plan({ id: 36, termType: 3, term: "annually" })])
+
+		expect(planTermOf(held, 36n)).toBe("annually")
+		expect(planTermOf(held, 99n)).toBeUndefined()
+		expect(planTermOf(null, 36n)).toBeUndefined()
 	})
 })
 

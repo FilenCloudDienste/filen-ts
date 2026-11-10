@@ -24,12 +24,14 @@ function SettingsPageHeader({ icon: Icon, title }: SettingsPageHeaderProps) {
 }
 
 interface SettingsPageProps extends SettingsPageHeaderProps {
+	// A page laying out cards side by side (Plans) takes a wider column.
+	wide?: boolean | undefined
 	children: ReactNode
 }
 
 // Header plus the one scroll container. The column is flex-1 so a page-level loading or error state
 // centers in the viewport instead of hugging the top.
-function SettingsPage({ icon, title, children }: SettingsPageProps) {
+function SettingsPage({ icon, title, wide, children }: SettingsPageProps) {
 	return (
 		<>
 			<SettingsPageHeader
@@ -37,7 +39,7 @@ function SettingsPage({ icon, title, children }: SettingsPageProps) {
 				title={title}
 			/>
 			<div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 pt-2 pb-12 sm:px-6">
-				<div className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-8">{children}</div>
+				<div className={cn("mx-auto flex w-full max-w-3xl flex-1 flex-col gap-8", wide === true && "max-w-6xl")}>{children}</div>
 			</div>
 		</>
 	)

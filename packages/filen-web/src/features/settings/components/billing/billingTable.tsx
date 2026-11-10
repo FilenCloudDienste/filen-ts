@@ -1,4 +1,5 @@
 import type { ComponentType, ReactNode } from "react"
+import { cn } from "@filen/shared"
 import { SettingsBlock } from "@/features/settings/components/settingsLayout"
 import { EmptyMessage } from "@/components/emptyMessage"
 
@@ -29,14 +30,16 @@ function SettingsTableBlock<T>({ rows, rowKey, columns, empty }: SettingsTableBl
 					description={empty.description}
 				/>
 			) : (
-				<div className="overflow-x-auto">
-					<table className="w-full text-left text-sm">
-						<thead>
+				// The same bordered surface as a subscription item, so the two blocks read as one family.
+				<div className="overflow-x-auto rounded-2xl border border-border/60">
+					<table className="w-full text-start text-sm">
+						<thead className="bg-muted/40">
 							<tr className="text-xs text-muted-foreground">
 								{columns.map(column => (
 									<th
 										key={column.header}
-										className="pb-2 font-medium"
+										scope="col"
+										className={cn("px-4 py-2.5 font-medium whitespace-nowrap", column.className)}
 									>
 										{column.header}
 									</th>
@@ -52,7 +55,7 @@ function SettingsTableBlock<T>({ rows, rowKey, columns, empty }: SettingsTableBl
 									{columns.map(column => (
 										<td
 											key={column.header}
-											className={column.className === undefined ? "py-2" : `py-2 ${column.className}`}
+											className={cn("px-4 py-2.5", column.className)}
 										>
 											{column.cell(row)}
 										</td>
