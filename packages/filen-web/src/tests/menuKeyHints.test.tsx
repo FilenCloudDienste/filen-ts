@@ -156,7 +156,9 @@ describe("the item menus' key hints", () => {
 
 	it("gives the trash its own keys, and no Delete hint where Delete does something else (a link is disabled)", () => {
 		openItemMenu("trash")
-		expect(keysOf("Restore")).toBe("R")
+		// Restore has a key only on a Mac (Put Back's): off one its slot is empty.
+		expect(keysOf("Restore")).toBe("")
+		expect(keysOf("Delete permanently")).toBe("Shift Del")
 		cleanup()
 
 		openItemMenu("links")
