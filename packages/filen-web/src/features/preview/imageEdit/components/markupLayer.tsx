@@ -1,3 +1,4 @@
+import { isImeKeydown } from "@filen/shared/keymap"
 import { useRef, useState, type PointerEvent as ReactPointerEvent } from "react"
 import { useTranslation } from "react-i18next"
 import type { MarkupColor, MarkupItem } from "@/features/preview/imageEdit/types"
@@ -381,6 +382,11 @@ export function MarkupLayer(props: {
 						finishEditing(true)
 					}}
 					onKeyDown={event => {
+						// An input method's Enter commits its text and its Escape cancels it.
+						if (isImeKeydown(event.nativeEvent)) {
+							return
+						}
+
 						if (event.key === "Enter") {
 							event.preventDefault()
 							finishEditing(true)

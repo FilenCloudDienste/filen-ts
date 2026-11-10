@@ -1,8 +1,7 @@
 import { useState, type ReactElement, type SyntheticEvent } from "react"
 import { useTranslation } from "react-i18next"
 import { PlusIcon } from "lucide-react"
-import { useAction } from "@/lib/keymap/useAction"
-import { isAnyDialogOpen } from "@/lib/keymap/dialogGuard"
+import { OUTSIDE_OVERLAYS, useAction } from "@/lib/keymap/useAction"
 import { isEmptySpaceTarget } from "@/features/drive/lib/clickAway.logic"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { useUploadMenuActions } from "@/features/drive/hooks/useUploadMenuActions"
@@ -73,16 +72,16 @@ export function NewMenu({
 		}
 	}
 
-	// Guards on `disabled` and an open dialog itself, since a keyboard command's live handler must stay a plain
-	// hook call. A copy without the shortcut attaches no listener at all.
+	// Guards on `disabled` itself, since a keyboard command's live handler must stay a plain hook call, and
+	// stands down under an open dialog or menu. A copy without the shortcut attaches no listener at all.
 	useAction(
 		"drive.newDirectory",
 		() => {
-			if (!disabled && !isAnyDialogOpen()) {
+			if (!disabled) {
 				setNewDirectoryOpen(true)
 			}
 		},
-		{ enabled: shortcut !== false },
+		{ ...OUTSIDE_OVERLAYS, enabled: shortcut !== false },
 		[disabled]
 	)
 

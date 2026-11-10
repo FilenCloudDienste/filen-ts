@@ -53,11 +53,28 @@ function message(uuid: string, senderId: number, body: string | undefined, sentT
 }
 
 describe("enterIntent", () => {
+	const press = (key: string, modifiers: Partial<{ shiftKey: boolean; ctrlKey: boolean; metaKey: boolean; altKey: boolean }> = {}) => ({
+		key,
+		shiftKey: false,
+		ctrlKey: false,
+		metaKey: false,
+		altKey: false,
+		...modifiers
+	})
+
 	it("Enter sends, Shift+Enter is a newline, other keys are null", () => {
-		expect(enterIntent({ key: "Enter", shiftKey: false })).toBe("send")
-		expect(enterIntent({ key: "Enter", shiftKey: true })).toBe("newline")
-		expect(enterIntent({ key: "a", shiftKey: false })).toBeNull()
-		expect(enterIntent({ key: "ArrowUp", shiftKey: false })).toBeNull()
+		expect(enterIntent(press("Enter"))).toBe("send")
+		expect(enterIntent(press("Enter", { shiftKey: true }))).toBe("newline")
+		expect(enterIntent(press("a"))).toBeNull()
+		expect(enterIntent(press("ArrowUp"))).toBeNull()
+	})
+
+	// A chord with Enter is some shortcut's: it neither sends nor is taken from whoever owns it.
+	it("never sends on Ctrl, Cmd or Alt with Enter", () => {
+		for (const modifier of ["ctrlKey", "metaKey", "altKey"] as const) {
+			expect(enterIntent(press("Enter", { [modifier]: true }))).toBeNull()
+			expect(enterIntent(press("Enter", { [modifier]: true, shiftKey: true }))).toBeNull()
+		}
 	})
 })
 

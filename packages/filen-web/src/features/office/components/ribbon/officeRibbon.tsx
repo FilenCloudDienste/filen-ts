@@ -1,3 +1,4 @@
+import { isImeKeydown } from "@filen/shared/keymap"
 import {
 	useEffect,
 	useEffectEvent,
@@ -716,7 +717,7 @@ export function OfficeRibbon(props: OfficeRibbonProps) {
 	// Ctrl+F1 anywhere in the editor shows or hides the command row, as in Office.
 	useEffect(() => {
 		const onKey = (event: KeyboardEvent): void => {
-			if (event.key === "F1" && event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey) {
+			if (event.key === "F1" && event.ctrlKey && !event.altKey && !event.metaKey && !event.shiftKey && !isImeKeydown(event)) {
 				event.preventDefault()
 				setPeek(false)
 				setRibbonCollapsed(!collapsed)

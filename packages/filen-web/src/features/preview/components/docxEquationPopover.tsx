@@ -14,7 +14,10 @@ import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Switch } from "@/components/ui/switch"
 import { useInputForm } from "@/features/preview/components/docxEditor.logic"
+import { isImeKeydown, isMacPlatform, matchesCombo } from "@filen/shared/keymap"
 import type { DocxObjectControlProps } from "@/features/preview/components/docxFormControls"
+
+const IS_MAC = isMacPlatform()
 
 // Equations as LaTeX in a popover at the equation: a new one typed at the caret (inline, or on a line of its own),
 // one of the document opened by a press on it (or Edit equation) to change it (with changes tracked, recorded
@@ -318,8 +321,11 @@ export function DocxEquationPopover(props: DocxObjectControlProps) {
 			execute({ type: "equation.edit", latex })
 		}
 	}
+	// Mod+Enter inserts, as in the comment fields; an input method's keys are its own.
 	const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>): void => {
-		if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+		if (isImeKeydown(event.nativeEvent)) return
+
+		if (matchesCombo(event, "mod+enter", IS_MAC)) {
 			event.preventDefault()
 			submit()
 		} else if (event.key === "Escape") {

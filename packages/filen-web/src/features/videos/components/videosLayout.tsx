@@ -1,8 +1,7 @@
 import { useEffect } from "react"
 import { Outlet, useNavigate, useRouterState } from "@tanstack/react-router"
 import { log } from "@/lib/log"
-import { useAction } from "@/lib/keymap/useAction"
-import { isAnyDialogOpen } from "@/lib/keymap/dialogGuard"
+import { OUTSIDE_OVERLAYS, useAction } from "@/lib/keymap/useAction"
 import { pathIsUnder } from "@/features/shell/lib/appShell.logic"
 import { useVideoLibrary } from "@/features/videos/queries/library"
 import { watchState } from "@/features/videos/lib/watchState"
@@ -31,14 +30,14 @@ export function VideosLayout() {
 	useAction(
 		"videos.openSearch",
 		event => {
-			if (isAnyDialogOpen() || !hasLibrary || overPlayer) {
+			if (!hasLibrary || overPlayer) {
 				return
 			}
 
 			event.preventDefault()
 			void navigate({ to: "/videos/search" })
 		},
-		undefined,
+		OUTSIDE_OVERLAYS,
 		[hasLibrary, overPlayer, navigate]
 	)
 

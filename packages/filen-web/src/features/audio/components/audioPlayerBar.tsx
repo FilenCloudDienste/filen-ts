@@ -2,13 +2,15 @@ import { useState } from "react"
 import { useTranslation } from "react-i18next"
 import { Play, Pause, SkipForward, SkipBack, ListMusic, Music } from "lucide-react"
 import { useShallow } from "zustand/shallow"
-import { audioEngine } from "@/features/audio/lib/audioEngine"
+import { audioEngine, audioMediaSession } from "@/features/audio/lib/audioEngine"
+import { transportKeyIgnored } from "@/features/audio/lib/transportKeys"
 import { useAudioStore, useAudioNowPlaying, useAudioError } from "@/features/audio/store/useAudioStore"
 import { playbackErrorLabel } from "@/features/audio/lib/formatFailureNotice"
 import { MEDIA_FORMAT_UNSUPPORTED } from "@/lib/media/mediaFailure"
 import { NowPlayingPanel } from "@/features/audio/components/nowPlayingPanel"
 import { ShuffleToggleButton, LoopToggleButton, TOGGLE_ON_CLASS } from "@/features/audio/components/queueToggles"
 import { useAction } from "@/lib/keymap/useAction"
+import type { Options } from "react-hotkeys-hook"
 import { Button } from "@/components/ui/button"
 import { MediaScrubber } from "@/components/media/mediaScrubber"
 import { VolumeControl } from "@/components/media/volumeControl"
@@ -17,6 +19,10 @@ import { Spinner } from "@/components/ui/spinner"
 import { toastObstructionRef } from "@/lib/toastClearance"
 import { formatSecondsToMediaClock } from "@filen/shared"
 import { SplitTitle } from "@/features/preview/components/splitTitle"
+
+const TRANSPORT_KEYS: Options = {
+	ignoreEventWhen: event => transportKeyIgnored(event, audioMediaSession)
+}
 
 // The persistent audio player, docked at the bottom of the authed shell (rendered once by AppShell,
 // which never mounts on public-link routes — so this surface is inherently authed-only). It renders
@@ -33,17 +39,29 @@ export function AudioPlayerBar() {
 	const lastErrorTrack = useAudioStore(state => state.lastErrorTrack)
 	const [queueOpen, setQueueOpen] = useState(false)
 
-	// Transport keyboard shortcuts — bound whenever the bar is mounted (i.e. whenever a queue exists).
-	// Fired against the engine directly; a no-op when there is nothing to do.
-	useAction("audio.playPause", () => {
-		audioEngine.toggle()
-	})
-	useAction("audio.next", () => {
-		void audioEngine.skipNext()
-	})
-	useAction("audio.previous", () => {
-		void audioEngine.skipPrevious()
-	})
+	// Transport keyboard shortcuts — bound whenever the bar is mounted (the shell mounts it always; with no
+	// queue the engine has nothing to do). Fired against the engine directly.
+	useAction(
+		"audio.playPause",
+		() => {
+			audioEngine.toggle()
+		},
+		TRANSPORT_KEYS
+	)
+	useAction(
+		"audio.next",
+		() => {
+			void audioEngine.skipNext()
+		},
+		TRANSPORT_KEYS
+	)
+	useAction(
+		"audio.previous",
+		() => {
+			void audioEngine.skipPrevious()
+		},
+		TRANSPORT_KEYS
+	)
 
 	// No queue → no bar. Placed AFTER the hooks so hook order stays stable across renders (the shell
 	// mounts this component unconditionally).

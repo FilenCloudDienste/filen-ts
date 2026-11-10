@@ -14,7 +14,7 @@ import { EMU_PER_PX } from "../../../core/drawingml/index"
 import type { Action, CustomShow, ShowSettings, SlideRef } from "../../../core/presentation/model"
 import type { PresentationSessionApi, SlideLayer, SlideRender } from "../../../dom/presentation/protocol"
 import type { PresentationActionActivator, PresentationActionPolicy } from "../links"
-import { isContextMenuKey } from "../presenter/keys"
+import { isContextMenuKey, pressesControl, type ShowKeyBindings } from "../presenter/keys"
 import type { SlidePainter } from "../SlideView"
 import type { ShowController, ShowFrom, ShowScreen } from "./controller"
 import { autoHidePointer } from "./pointer"
@@ -62,6 +62,9 @@ export interface SlideShowProps {
 	// Called first for every key, and for every pointer down, up and cancel on the stage; true: consumed (a consumed
 	// pointer up also keeps the click after it from advancing).
 	readonly onKey?: (event: KeyboardEvent<HTMLDivElement>) => boolean
+	// The show's keys (presenter/keys.ts DEFAULT_SHOW_BINDINGS when absent), for the keys onKey leaves to the player:
+	// a host that rebinds them passes them here too, so the old key no longer runs the command.
+	readonly bindings?: ShowKeyBindings
 	readonly onPointer?: (event: PointerEvent<HTMLDivElement>) => boolean
 	// The show's shortcut menu (PowerPoint's right click, Shift+F10 or the Menu key), at client px; the stage is where
 	// focus goes back when it closes. The browser's own menu never shows over the show; a kiosk has no menu.
@@ -96,6 +99,7 @@ function playerProps(props: SlideShowProps): PlayerProps {
 		media: props.media,
 		onSlide: props.onSlide,
 		onEnd: props.onEnd,
+		bindings: props.bindings,
 		labels: {
 			action: (action, layer) =>
 				props.actionLabel?.(action, layer) ?? layer.alt ?? (action.kind === "url" ? action.href : String(layer.shape.id)),
@@ -107,12 +111,6 @@ function playerProps(props: SlideShowProps): PlayerProps {
 
 // How long after a menu key the browser's contextmenu for it may come.
 const KEY_ECHO_MS = 1000
-
-function isControl(target: EventTarget): boolean {
-	const element = target as Partial<Element>
-
-	return typeof element.closest === "function" && element.closest("button, a[href], input, select, textarea, [role='button']") !== null
-}
 
 function onBar(target: EventTarget): boolean {
 	const element = target as Partial<Element>
@@ -241,7 +239,7 @@ export function SlideShow(props: SlideShowProps) {
 		if (browse && portaled(event)) return
 
 		// Enter and Space press a focused control over the slide (the ink tools), not the show's next.
-		if ((event.key === "Enter" || event.key === " ") && event.target !== event.currentTarget && isControl(event.target)) return
+		if (pressesControl(event)) return
 
 		if (isContextMenuKey(event)) {
 			const stage = event.currentTarget

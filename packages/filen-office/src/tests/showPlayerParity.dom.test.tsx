@@ -14,6 +14,7 @@ import type { ShowController, ShowEvent } from "../react/presentation/show/contr
 import { SlideShow } from "../react/presentation/show/player"
 import type { ShowMediaControl, ShowMediaMount } from "../react/presentation/show/stage"
 import { TimingBuilder } from "./animFixtures"
+import { codeOf } from "./showKeyFixtures"
 
 // The player against PowerPoint's slide show: the black end screen after the last slide, a slide whose "On Mouse
 // Click" is off, media that play across slides, the media keys, and a kiosk that restarts untouched.
@@ -237,7 +238,7 @@ async function mount(
 				?.closest<HTMLElement>(".fo-show-layer") ?? null,
 		key: (key, init = {}) => {
 			act(() => {
-				stage.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, ...init }))
+				stage.dispatchEvent(new KeyboardEvent("keydown", { key, code: codeOf(key), bubbles: true, ...init }))
 			})
 		}
 	}

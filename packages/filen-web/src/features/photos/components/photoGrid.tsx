@@ -4,8 +4,7 @@ import { useTranslation } from "react-i18next"
 import { SearchXIcon } from "lucide-react"
 import { useShallow } from "zustand/shallow"
 import { useVirtualizer, type Virtualizer } from "@tanstack/react-virtual"
-import { useAction } from "@/lib/keymap/useAction"
-import { isAnyDialogOpen } from "@/lib/keymap/dialogGuard"
+import { OUTSIDE_OVERLAYS, useAction } from "@/lib/keymap/useAction"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { useElementSize } from "@/lib/useElementSize"
 import { selectableForSelectAll } from "@/features/drive/lib/selectionFlags"
@@ -99,7 +98,7 @@ export function PhotoGrid({ rootUuids, listing }: PhotoGridProps) {
 	const cellSize = containerWidth > 0 ? gridCellWidth(containerWidth, columns, GRID_GAP) : tileSize
 	const timeline = buildPhotosTimeline(filtered.entries, columns, cellSize, GRID_GAP)
 
-	const { isDialogOpen, handleItemAction, handleBulkDialogAction, openPreview, renderActiveDialog } = usePhotosDialogHost({
+	const { handleItemAction, handleBulkDialogAction, openPreview, renderActiveDialog } = usePhotosDialogHost({
 		rootUuids,
 		selectedItems
 	})
@@ -202,51 +201,44 @@ export function PhotoGrid({ rootUuids, listing }: PhotoGridProps) {
 		usePhotosStore.getState().clearSelectedItems()
 	})
 
+	// The selection actions stand down under any open dialog or menu (OUTSIDE_OVERLAYS), a tile's menu
+	// included; the key keeps its default for that layer.
 	useAction(
 		"photos.selectAll",
 		keyboardEvent => {
-			if (isAnyDialogOpen()) {
-				return
-			}
-
 			keyboardEvent.preventDefault()
 			// selectableForSelectAll's undecryptable filter is a no-op here (isPhotoItem's own
 			// precondition already excludes undecryptable rows) — reused for the same defense-in-depth
 			// reason the drive listing keeps it rather than assuming the invariant holds forever.
 			usePhotosStore.getState().setSelectedItems(selectableForSelectAll(items) as PhotoItem[])
 		},
-		undefined,
+		OUTSIDE_OVERLAYS,
 		[items]
 	)
 
 	useAction(
 		"photos.clearSelection",
 		() => {
-			if (isDialogOpen) {
-				return
-			}
-
 			usePhotosStore.getState().clearSelectedItems()
 		},
-		undefined,
-		[isDialogOpen]
+		OUTSIDE_OVERLAYS
 	)
 
-	// Gated on the same threshold that mounts the bulk bar and on the same offline rule its Trash button
-	// uses (bulkActionBar.tsx) — a trash has nothing to reach without a connection. preventDefault:
+	// One selected photo or more, as drive's own trash key; under the offline rule the bulk bar's Trash
+	// button uses (bulkActionBar.tsx) — a trash has nothing to reach without a connection. preventDefault:
 	// Backspace still has a "go back" default in some engines.
 	useAction(
 		"photos.trash",
 		keyboardEvent => {
 			keyboardEvent.preventDefault()
 
-			if (isAnyDialogOpen() || !isOnline || selectedItems.length < BULK_BAR_MIN_SELECTION) {
+			if (!isOnline || selectedItems.length === 0) {
 				return
 			}
 
 			handleBulkDialogAction("trash")
 		},
-		undefined,
+		OUTSIDE_OVERLAYS,
 		[isOnline, selectedItems]
 	)
 

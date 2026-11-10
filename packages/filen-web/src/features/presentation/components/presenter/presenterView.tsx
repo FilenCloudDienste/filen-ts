@@ -22,6 +22,7 @@ import {
 	InkLayer,
 	NotesText,
 	paintSlide,
+	pressesControl,
 	ShowMirrorView,
 	SlideView,
 	type InkStore,
@@ -265,7 +266,8 @@ export function PresenterView({
 			tabIndex={-1}
 			className="flex h-full min-h-0 flex-col bg-background text-foreground outline-none"
 			onKeyDown={event => {
-				onKeyDown(event)
+				// Enter and Space press the view's own buttons, never the show's next slide.
+				if (!pressesControl(event)) onKeyDown(event)
 
 				// The editor under the show takes no key while it runs (React carries portal events to it).
 				if (event.key !== "Tab") event.stopPropagation()

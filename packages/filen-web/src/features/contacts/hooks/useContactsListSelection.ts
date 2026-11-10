@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type MouseEvent } from "react"
 import { clampListboxIndex, isToggleModifier, listboxKeyTarget, resolveCursorIndex, touchTapIntent } from "@/features/drive/lib/listbox"
-import { isActivationKey } from "@/lib/rowKeys"
+import { hasCommandModifier, isActivationKey } from "@/lib/rowKeys"
 import {
 	EMPTY_CONTACT_SELECTION_STATE,
 	nextContactSelection,
@@ -136,7 +136,7 @@ export function useContactsListSelection({ resetKey }: UseContactsListSelectionP
 
 		const activeIndex = activeIndexFor(section, uuids)
 
-		if (isActivationKey(event.key)) {
+		if (isActivationKey(event)) {
 			event.preventDefault()
 			setState(prev => nextContactSelection(prev, { section, uuids, index: activeIndex, shift: false, toggle: true }))
 
@@ -149,7 +149,8 @@ export function useContactsListSelection({ resetKey }: UseContactsListSelectionP
 			return
 		}
 
-		const target = listboxKeyTarget(event.key, activeIndex, uuids.length, 1, false)
+		// A chord with Ctrl, Cmd or Alt is some shortcut's, not the cursor's.
+		const target = hasCommandModifier(event) ? null : listboxKeyTarget(event.key, activeIndex, uuids.length, 1, false)
 
 		if (target === null) {
 			return

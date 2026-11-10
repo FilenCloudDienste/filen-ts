@@ -18,6 +18,7 @@ import { ShowMenu, type ShowMenuAt } from "@/features/presentation/components/sl
 import { actionLabel, DEFAULT_SLIDE_SIZE } from "@/features/presentation/components/deckChrome.logic"
 import { useShowMediaMount } from "@/features/presentation/hooks/useMediaInsert"
 import { useChosenShowOptions } from "@/features/presentation/components/slideshow/showSettings"
+import { usePresentationShowBindings } from "@/features/presentation/lib/keymap/show"
 import type { PreviewKey } from "@/lib/i18n"
 
 // The deck's slide show as the viewer and the editor run it: the player over the deck's session and renders, with
@@ -72,6 +73,8 @@ export function DeckSlideShow({
 }: DeckSlideShowProps) {
 	const { t } = useTranslation("preview")
 	const chosen = useChosenShowOptions(store)
+	// The keys onKey leaves to the player run only as the user bound them, never the defaults.
+	const bindings = usePresentationShowBindings()
 	const media = useShowMediaMount(presentationActions(policy), store)
 	const [note, setNote] = useState<{ readonly key: PreviewKey; readonly at: number } | undefined>(undefined)
 	const [menu, setMenu] = useState<ShowMenuAt | undefined>(undefined)
@@ -143,6 +146,7 @@ export function DeckSlideShow({
 				renders={deck.renders}
 				size={deck.info?.size ?? DEFAULT_SLIDE_SIZE}
 				painter={paintSlide}
+				bindings={bindings}
 				{...(deck.session === undefined ? {} : { session: deck.session })}
 				{...(chosen === undefined ? (deck.info?.show === undefined ? {} : { settings: deck.info.show }) : { options: chosen })}
 				{...(from === undefined ? {} : { from })}

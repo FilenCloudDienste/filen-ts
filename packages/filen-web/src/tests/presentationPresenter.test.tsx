@@ -352,6 +352,38 @@ describe("presenter view", () => {
 		expect(session?.ink.strokes(slideRef(12))).toHaveLength(0)
 	})
 
+	// Enter and Space on the view's own buttons press them; the show takes neither as its next.
+	it("leaves Enter and Space on its own buttons to the buttons", () => {
+		vi.spyOn(window, "open").mockReturnValue(null)
+
+		const { controller, calls, emit } = testController()
+		let session: PresenterSession | undefined
+
+		render(
+			<Host
+				deck={deckOf()}
+				onSession={value => {
+					session = value
+				}}
+			/>
+		)
+		act(() => {
+			session?.openPresenter()
+			session?.attach(controller)
+			emit({ type: "slide", index: 0, slide: slideRef(10), step: 0, steps: 0 })
+		})
+
+		const previous = screen.getByRole("button", { name: "Previous" })
+
+		fireEvent.keyDown(previous, { key: "Enter", code: "Enter" })
+		fireEvent.keyDown(previous, { key: " ", code: "Space" })
+		expect(calls).toEqual([])
+
+		// On the view itself they are the show's.
+		fireEvent.keyDown(screen.getByRole("region", { name: "Presenter view" }), { key: "Enter", code: "Enter" })
+		expect(calls).toEqual(["next"])
+	})
+
 	it("keeps a key pressed in the presenter view from the page under it", () => {
 		vi.spyOn(window, "open").mockReturnValue(null)
 

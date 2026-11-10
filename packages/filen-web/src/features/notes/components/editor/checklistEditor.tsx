@@ -2,7 +2,7 @@ import { useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { CheckIcon } from "lucide-react"
 import { type Checklist, cn, addChecklistLine, removeChecklistItem, patchChecklistItem, parseChecklistOrBlank } from "@filen/shared"
-import { isImeKeydown } from "@/lib/ime"
+import { isImeKeydown } from "@filen/shared/keymap"
 import type { NoteEditorController } from "@/features/notes/hooks/useNoteEditor"
 import { serializeChecklist, visibleChecklistRows } from "@/features/notes/components/editor/checklistEditor.logic"
 

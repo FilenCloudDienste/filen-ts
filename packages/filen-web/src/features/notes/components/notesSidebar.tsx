@@ -55,7 +55,7 @@ import { useNoteDialogHost } from "@/features/notes/hooks/useNoteDialogHost"
 import { useNoteSearchBodies } from "@/features/notes/hooks/useNoteSearchBodies"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { useNowMinute } from "@/lib/useNowMinute"
-import { useAction } from "@/lib/keymap/useAction"
+import { OUTSIDE_OVERLAYS, useAction } from "@/lib/keymap/useAction"
 import type { ListPointerSelection } from "@/lib/useListPointerSelection"
 import { useIsSidebarPanelVisible } from "@/features/shell/lib/sidebarPanelVisibility"
 import { ResizableSidebarPanel } from "@/features/shell/components/sidebarPanel"
@@ -406,25 +406,25 @@ export function NotesSidebar() {
 		await tagsSortByQuery.refetch()
 	}
 
-	// Def in features/notes/lib/keymap.ts; guards on dialogHost.isDialogOpen so "n" never fires a second
-	// create while a note dialog (rename/delete/leave/createTag) is already open, and on the same
-	// connectivity flag the button is disabled by so the two can never disagree — drive.newDirectory
-	// guards its own hotkey identically.
+	// Def in features/notes/lib/keymap.ts. Every notes action stands down under any open dialog or menu
+	// (OUTSIDE_OVERLAYS): a note dialog (rename/delete/leave/createTag), History or Participants, or a
+	// row's menu, whose own Escape closes it without also clearing the selection. A new note is also
+	// gated on the same connectivity flag the button is disabled by, so the two can never disagree —
+	// drive.newDirectory guards its own hotkey identically.
 	useAction(
 		"notes.newNote",
 		() => {
-			if (!dialogHost.isDialogOpen && isOnline) {
+			if (isOnline) {
 				void handleNewNote()
 			}
 		},
-		undefined,
-		[dialogHost.isDialogOpen, isOnline]
+		OUTSIDE_OVERLAYS,
+		[isOnline]
 	)
 
 	// Def in features/notes/lib/keymap.ts. Browser default for mod+a is "select all page text" — must
 	// preventDefault or the native selection would visibly compete with the note-row selection.
-	// Guarded on dialogHost.isDialogOpen so a background Cmd+A can't select notes behind an open
-	// dialog. Targets `selectableNotes` (already search-filtered) minus undecryptable ones — mirrors
+	// Targets `selectableNotes` (already search-filtered) minus undecryptable ones — mirrors
 	// drive.selectAll exactly.
 	//
 	// The three selection actions below are additionally OFF while the panel is out of sight (drawer
@@ -435,44 +435,33 @@ export function NotesSidebar() {
 	useAction(
 		"notes.selectAll",
 		event => {
-			if (dialogHost.isDialogOpen) {
-				return
-			}
-
 			event.preventDefault()
 			useNotesSelectionStore.getState().setSelectedNotes(selectableNotesForSelectAll(selectableNotes))
 		},
-		{ enabled: panelVisible },
-		[dialogHost.isDialogOpen, selectableNotes]
+		{ ...OUTSIDE_OVERLAYS, enabled: panelVisible },
+		[selectableNotes]
 	)
 
 	// Def in features/notes/lib/keymap.ts. No preventDefault — bare Escape has no disruptive browser
-	// default. Guarded on dialogHost.isDialogOpen so Escape closes the dialog (its own onOpenChange
-	// handling) without also clearing the background selection.
+	// default.
 	useAction(
 		"notes.clearSelection",
 		() => {
-			if (dialogHost.isDialogOpen) {
-				return
-			}
-
 			useNotesSelectionStore.getState().clearSelectedNotes()
 		},
-		{ enabled: panelVisible },
-		[dialogHost.isDialogOpen]
+		{ ...OUTSIDE_OVERLAYS, enabled: panelVisible }
 	)
 
 	// Def in features/notes/lib/keymap.ts. preventDefault: Backspace still has a "go back" default in some
-	// engines. Fires only in the state the bulk bar is actually showing (2+ selected) and only when the
-	// bar would offer Trash at all (canBulkTrashNotes — the identical descriptor gate) under the same
-	// connectivity flag it is disabled by, so the shortcut can never trash something the UI is not
-	// simultaneously offering to trash.
+	// engines. One selected note or more, as drive's own trash key, and only when Trash is offered for that
+	// selection at all (canBulkTrashNotes — the bulk bar's identical descriptor gate) under the same
+	// connectivity flag it is disabled by.
 	useAction(
 		"notes.trash",
 		keyboardEvent => {
 			keyboardEvent.preventDefault()
 
-			if (dialogHost.isDialogOpen || !isOnline || liveSelectedNotes.length < BULK_BAR_MIN_SELECTION) {
+			if (!isOnline || liveSelectedNotes.length === 0) {
 				return
 			}
 
@@ -482,8 +471,8 @@ export function NotesSidebar() {
 
 			dialogHost.openBulkDialog("trashSelected", liveSelectedNotes)
 		},
-		{ enabled: panelVisible },
-		[dialogHost.isDialogOpen, isOnline, liveSelectedNotes, currentUserId]
+		{ ...OUTSIDE_OVERLAYS, enabled: panelVisible },
+		[isOnline, liveSelectedNotes, currentUserId]
 	)
 
 	const activeQuery = viewMode === "notes" ? notesQuery : tagsQuery

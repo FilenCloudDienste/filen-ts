@@ -109,7 +109,8 @@ import {
 	slotPinSource,
 	unsavedPromptOpen,
 	type PreviewDismissIntent,
-	menuOpening
+	menuOpening,
+	pagerStep
 } from "@/features/preview/components/previewOverlay.logic"
 import { dropPreviewBuffer, setPreviewDirty, usePreviewUnsavedGuardStore } from "@/features/preview/store/usePreviewUnsavedGuard"
 import { clearVideoPlaybackStates } from "@/features/preview/lib/videoContinuity"
@@ -1452,11 +1453,11 @@ export function PreviewOverlay({
 	// Base UI's DialogPopup calls event.stopPropagation() for every composite key (Arrow*/Home/End) in
 	// its own onKeyDown (dialog/popup/DialogPopup.js + internals/composite/composite.js's
 	// COMPOSITE_KEYS, verified against the installed package) before it can bubble to the document-level
-	// keymap listener useAction/react-hotkeys-hook registers — so ArrowLeft/ArrowRight can never reach a
-	// global drive.previewPrev/drive.previewNext action while the dialog holds focus. Merged onKeyDown
-	// props run right-to-left (merge-props.js), so a handler passed directly on Popup (below) still runs
-	// BEFORE that internal stopPropagation — this is that handler, mirroring moveTargetDialog.tsx's own
-	// local onKeyDown for the identical in-dialog-focus-trap reason.
+	// keymap listener useAction/react-hotkeys-hook registers — so the pager's ArrowLeft/ArrowRight cannot
+	// be a registered action while the dialog holds focus. Merged onKeyDown props run right-to-left
+	// (merge-props.js), so a handler passed directly on Popup (below) still runs BEFORE that internal
+	// stopPropagation — this is that handler, mirroring moveTargetDialog.tsx's own local onKeyDown for the
+	// identical in-dialog-focus-trap reason.
 	function handleKeyDown(event: KeyboardEvent<HTMLDivElement>): void {
 		// The image editor takes its own keys; nothing pages away from it.
 		if (editing !== null) {
@@ -1484,23 +1485,16 @@ export function PreviewOverlay({
 			return
 		}
 
-		// Ctrl, Alt or Cmd with an arrow is what has focus's (a word or line jump, an editor's own command, the
-		// browser's), never a step to another file.
-		if (event.altKey || event.ctrlKey || event.metaKey) {
+		const step = pagerStep(event)
+
+		if (step === null) {
 			return
 		}
 
-		if (event.key === "ArrowLeft") {
-			event.preventDefault()
-			requestOrRun("prev", () => {
-				onStep(-1)
-			})
-		} else if (event.key === "ArrowRight") {
-			event.preventDefault()
-			requestOrRun("next", () => {
-				onStep(1)
-			})
-		}
+		event.preventDefault()
+		requestOrRun(step === -1 ? "prev" : "next", () => {
+			onStep(step)
+		})
 	}
 
 	function handleUnsavedConfirm(): void {

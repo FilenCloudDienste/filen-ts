@@ -2,6 +2,7 @@ export {
 	createShowKeys,
 	DEFAULT_SHOW_BINDINGS,
 	isContextMenuKey,
+	pressesControl,
 	showKeyCommand,
 	type ShowKeyBindings,
 	type ShowKeyCommand,

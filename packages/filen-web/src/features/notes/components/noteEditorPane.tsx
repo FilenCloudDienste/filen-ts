@@ -17,7 +17,7 @@ import { useNotesRemoteEditStore } from "@/features/notes/store/useNoteRemoteEdi
 import { sync } from "@/features/notes/lib/sync"
 import { useHideCompletedChecklistQuery } from "@/features/notes/queries/preferences"
 import { setHideCompletedChecklist } from "@/features/notes/lib/preferences"
-import { IN_EDITORS, useAction } from "@/lib/keymap/useAction"
+import { IN_EDITORS_AND_FIELDS, OUTSIDE_OVERLAYS, useAction } from "@/lib/keymap/useAction"
 import { useAccountQuery } from "@/queries/account"
 import { Separator } from "@/components/ui/separator"
 import { Spinner } from "@/components/ui/spinner"
@@ -53,6 +53,8 @@ function leaveNoteEditor(uuid: string): void {
 }
 
 const COMPOSITION_ESCAPE_WINDOW_MS = 100
+
+const SAVE_NOW_OPTIONS = { ...IN_EDITORS_AND_FIELDS, ...OUTSIDE_OVERLAYS }
 
 export function NoteEditorPane({ note, loading }: NoteEditorPaneProps) {
 	// ["notes", "common"] so the header can reach the shared cannot-decrypt label; notes stays the
@@ -91,24 +93,22 @@ export function NoteEditorPane({ note, loading }: NoteEditorPaneProps) {
 		}
 	}, [openNoteUuid])
 
-	// Registered before the early return (hook order). Dialog-guarded like every other action: a Cmd+S
-	// with a note-action dialog open returns before preventDefault so the browser default runs, never
-	// flushing behind the modal. The remote-edit dialog too: the push would decide it for the user.
+	// Registered before the early return (hook order). In the editor and in a note's own fields (a checklist
+	// item), where the browser would open "Save page as" otherwise. Stands down under any open dialog or menu,
+	// before preventDefault, so the key stays that layer's and never flushes behind the modal. The
+	// remote-edit dialog too: the push would decide it for the user.
 	useAction(
 		"notes.saveNow",
 		keyboardEvent => {
-			if (
-				dialogHost.isDialogOpen ||
-				(note !== undefined && useNotesRemoteEditStore.getState().remoteEdited[note.uuid] !== undefined)
-			) {
+			if (note !== undefined && useNotesRemoteEditStore.getState().remoteEdited[note.uuid] !== undefined) {
 				return
 			}
 
 			keyboardEvent.preventDefault()
 			sync.executeNow()
 		},
-		IN_EDITORS,
-		[dialogHost.isDialogOpen, note?.uuid]
+		SAVE_NOW_OPTIONS,
+		[note?.uuid]
 	)
 
 	if (note === undefined) {

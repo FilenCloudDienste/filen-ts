@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { act, createRef } from "react"
+import { act } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { slideRef, type SlideRef } from "../core/presentation/model"
@@ -8,8 +8,6 @@ import { presentationActions } from "../react/presentation/links"
 import { NotesPanel } from "../react/presentation/notes/NotesPanel"
 import { SlideRail } from "../react/presentation/rail/SlideRail"
 import { railKeyTarget, railRange, revealOffset } from "../react/presentation/rail/window"
-import type { ShowController } from "../react/presentation/show/controller"
-import { showSequence, StaticShow } from "../react/presentation/show/static"
 import { SlideView, type SlidePainter } from "../react/presentation/SlideView"
 import {
 	createPresentationStore,
@@ -660,172 +658,5 @@ describe("presentation viewer components", () => {
 		expect(navigate).not.toHaveBeenCalled()
 		act(() => hotspot?.dispatchEvent(new MouseEvent("click", { bubbles: true, ctrlKey: true, metaKey: true, button: 0 })))
 		expect(navigate).toHaveBeenCalledTimes(1)
-	})
-
-	it("steps a static show over visible slides and ends on Escape without letting it through", () => {
-		const slides = slideList(4, index => index === 1)
-		const renders = new Map(slides.map(slide => [slide.ref, plainRender(slide.ref)]))
-		const onEnd = vi.fn()
-		const onSlide = vi.fn()
-		const outer = vi.fn()
-		const controller = createRef<ShowController>()
-
-		document.body.addEventListener("keydown", outer)
-		act(() =>
-			root.render(
-				<StaticShow
-					slides={slides}
-					customShows={[]}
-					renders={renders}
-					size={SIZE}
-					painter={painter}
-					onSlide={onSlide}
-					onEnd={onEnd}
-					label="Slide show"
-					slideLabel={(index, count) => `Slide ${String(index + 1)} of ${String(count)}`}
-					ref={controller}
-				/>
-			)
-		)
-
-		const stage = host.querySelector<HTMLElement>(".fo-show-stage")
-		const key = (k: string): void => {
-			act(() => {
-				stage?.dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true }))
-			})
-		}
-
-		expect(onSlide).toHaveBeenLastCalledWith(0)
-		key("ArrowRight")
-		// The hidden slide 2 is skipped.
-		expect(onSlide).toHaveBeenLastCalledWith(2)
-		key("b")
-		expect(stage?.dataset["foScreen"]).toBe("black")
-		key("b")
-		expect(stage?.dataset["foScreen"]).toBe("slide")
-		key("2")
-		key("Enter")
-		// A jump may show a hidden slide.
-		expect(onSlide).toHaveBeenLastCalledWith(1)
-		key("ArrowRight")
-		expect(onSlide).toHaveBeenLastCalledWith(2)
-		key("ArrowLeft")
-		expect(onSlide).toHaveBeenLastCalledWith(0)
-		key("Escape")
-		expect(onEnd).toHaveBeenCalledTimes(1)
-		expect(outer).not.toHaveBeenCalled()
-		document.body.removeEventListener("keydown", outer)
-	})
-
-	it("hides a static show's pointer on Ctrl+H, toggles it on A and returns it to automatic on Ctrl+A", () => {
-		const slides = slideList(2)
-		const renders = new Map(slides.map(slide => [slide.ref, plainRender(slide.ref)]))
-		const onSlide = vi.fn()
-
-		act(() =>
-			root.render(
-				<StaticShow
-					slides={slides}
-					customShows={[]}
-					renders={renders}
-					size={SIZE}
-					painter={painter}
-					onSlide={onSlide}
-					onEnd={() => undefined}
-					label="Slide show"
-					slideLabel={(index, count) => `Slide ${String(index + 1)} of ${String(count)}`}
-				/>
-			)
-		)
-
-		const stage = host.querySelector<HTMLElement>(".fo-show-stage")
-		const press = (code: string, key: string, ctrlKey = false): KeyboardEvent => {
-			const event = new KeyboardEvent("keydown", { code, key, ctrlKey, bubbles: true, cancelable: true })
-
-			act(() => {
-				stage?.dispatchEvent(event)
-			})
-
-			return event
-		}
-
-		expect(press("KeyH", "h", true).defaultPrevented).toBe(true)
-		expect(stage?.getAttribute("data-fo-pointer")).toBe("hidden")
-		stage?.dispatchEvent(new PointerEvent("pointermove", { pointerType: "mouse", bubbles: true }))
-		expect(stage?.getAttribute("data-fo-pointer")).toBe("hidden")
-		press("KeyA", "a")
-		expect(stage?.hasAttribute("data-fo-pointer")).toBe(false)
-		press("KeyA", "a")
-		expect(stage?.getAttribute("data-fo-pointer")).toBe("hidden")
-		press("KeyA", "a", true)
-		expect(stage?.hasAttribute("data-fo-pointer")).toBe(false)
-		expect(onSlide).toHaveBeenLastCalledWith(0)
-	})
-
-	it("names a static show's stage only by the page's label and announces each slide politely", () => {
-		const slides = slideList(2)
-		const renders = new Map(slides.map(slide => [slide.ref, plainRender(slide.ref)]))
-
-		act(() =>
-			root.render(
-				<StaticShow
-					slides={slides}
-					customShows={[]}
-					renders={renders}
-					size={SIZE}
-					painter={painter}
-					onEnd={() => undefined}
-					label="Slide show"
-					slideLabel={(index, count) => `Slide ${String(index + 1)} of ${String(count)}`}
-				/>
-			)
-		)
-
-		const stage = host.querySelector<HTMLElement>(".fo-show-stage")
-		const live = stage?.querySelector<HTMLElement>("[aria-live]")
-
-		expect(stage?.getAttribute("role")).toBe("region")
-		expect(stage?.getAttribute("aria-label")).toBe("Slide show")
-		expect(stage?.hasAttribute("aria-roledescription")).toBe(false)
-		expect(live?.getAttribute("aria-live")).toBe("polite")
-		expect(live?.textContent).toBe("Slide 1 of 2")
-		act(() => {
-			stage?.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }))
-		})
-		expect(live?.textContent).toBe("Slide 2 of 2")
-	})
-
-	it("runs a custom show and returns after it when asked", () => {
-		const slides = slideList(5)
-		const renders = new Map<SlideRef, SlideRender>()
-		const onSlide = vi.fn()
-		const controller = createRef<ShowController>()
-
-		act(() =>
-			root.render(
-				<StaticShow
-					slides={slides}
-					customShows={[{ id: 7, name: "Short", slides: [slideRef(14), slideRef(12)] }]}
-					renders={renders}
-					size={SIZE}
-					painter={painter}
-					onSlide={onSlide}
-					onEnd={vi.fn()}
-					label="Show"
-					slideLabel={index => String(index)}
-					ref={controller}
-					policy={{ link: { allow: () => true, open: vi.fn() } }}
-				/>
-			)
-		)
-
-		expect(showSequence(slides, { id: 7, name: "Short", slides: [slideRef(14), slideRef(99), slideRef(12)] })).toEqual([4, 2])
-
-		act(() => controller.current?.next())
-		expect(onSlide).toHaveBeenLastCalledWith(1)
-		act(() => void controller.current?.start({ customShow: 7 }))
-		expect(onSlide).toHaveBeenLastCalledWith(4)
-		act(() => controller.current?.next())
-		expect(onSlide).toHaveBeenLastCalledWith(2)
 	})
 })

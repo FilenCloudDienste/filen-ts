@@ -1,7 +1,13 @@
 import { describe, expect, it, vi } from "vitest"
 import { slideRef } from "../core/presentation/model"
 import { createInkStore } from "../react/presentation/ink/store"
-import { createShowKeys, DEFAULT_SHOW_BINDINGS, showKeyCommand, type ShowKeyEvent } from "../react/presentation/presenter/keys"
+import {
+	createShowKeys,
+	DEFAULT_SHOW_BINDINGS,
+	pressesControl,
+	showKeyCommand,
+	type ShowKeyEvent
+} from "../react/presentation/presenter/keys"
 import { createShowSwipe } from "../react/presentation/presenter/swipe"
 import { formatElapsed, pauseTimer, resetTimer, resumeTimer, startShowTimer, timerElapsed } from "../react/presentation/presenter/timer"
 import { unavailableShowController, type ShowController } from "../react/presentation/show/controller"
@@ -301,5 +307,29 @@ describe("show timer", () => {
 		expect(timerElapsed(timer, 10_500)).toBe(500)
 		expect(formatElapsed(65_000)).toBe("1:05")
 		expect(formatElapsed(3_725_000)).toBe("1:02:05")
+	})
+})
+
+// Enter and Space on a control of the show's own press it, never the show's next slide.
+describe("pressesControl", () => {
+	const stage = { closest: () => null }
+	const button = { closest: (selector: string) => (selector.includes("button") ? {} : null) }
+
+	it("is Enter or Space on a control below the stage", () => {
+		expect(
+			pressesControl({ key: "Enter", target: button as unknown as EventTarget, currentTarget: stage as unknown as EventTarget })
+		).toBe(true)
+		expect(pressesControl({ key: " ", target: button as unknown as EventTarget, currentTarget: stage as unknown as EventTarget })).toBe(
+			true
+		)
+	})
+
+	it("is neither another key, nor a key on the stage itself", () => {
+		expect(pressesControl({ key: "n", target: button as unknown as EventTarget, currentTarget: stage as unknown as EventTarget })).toBe(
+			false
+		)
+		expect(
+			pressesControl({ key: "Enter", target: stage as unknown as EventTarget, currentTarget: stage as unknown as EventTarget })
+		).toBe(false)
 	})
 })

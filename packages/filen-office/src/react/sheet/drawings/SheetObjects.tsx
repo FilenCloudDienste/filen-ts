@@ -1,3 +1,4 @@
+import { isImeKeydown } from "@filen/shared/keymap"
 import {
 	useEffect,
 	useRef,
@@ -527,6 +528,9 @@ export function SheetObjects(props: SheetObjectsProps) {
 	}
 
 	const key = (event: KeyboardEvent<HTMLElement>, object: SheetDrawingObject): void => {
+		// An input method's keys are its own.
+		if (isImeKeydown(event.nativeEvent)) return
+
 		const axes = grid.axes(sheet)
 		const step = event.altKey ? 1 : 10
 		const moves: Readonly<Record<string, readonly [number, number]>> = {

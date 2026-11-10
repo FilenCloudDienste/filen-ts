@@ -1,3 +1,4 @@
+import { isImeKeydown } from "@filen/shared/keymap"
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type RefObject, type SubmitEvent } from "react"
 import { useTranslation } from "react-i18next"
 import { CheckIcon, PlusIcon, XIcon } from "lucide-react"
@@ -389,7 +390,7 @@ function ItemsEditor({
 							setTyped(event.target.value)
 						}}
 						onKeyDown={event => {
-							if (event.key === "Enter") {
+							if (event.key === "Enter" && !isImeKeydown(event.nativeEvent)) {
 								event.preventDefault()
 								add()
 							}

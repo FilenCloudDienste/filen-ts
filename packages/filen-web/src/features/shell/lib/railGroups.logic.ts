@@ -57,3 +57,9 @@ export function bubbleRailDot(dots: readonly RailDot[]): RailDot {
 
 	return dots.includes("busy") ? "busy" : null
 }
+
+// Where Settings opens, from the rail, the account menu and its shortcut alike: Security while the master keys are
+// not exported, where they are exported.
+export function settingsRoute(keysNotExported: boolean): "/settings/account" | "/settings/security" {
+	return keysNotExported ? "/settings/security" : "/settings/account"
+}

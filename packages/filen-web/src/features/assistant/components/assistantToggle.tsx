@@ -6,7 +6,6 @@ import { cn } from "@filen/shared"
 import { i18n, type AssistantKey } from "@/lib/i18n"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useAction } from "@/lib/keymap/useAction"
-import { isAnyDialogOpen } from "@/lib/keymap/dialogGuard"
 import { Kbd } from "@/lib/keymap/kbd"
 import { useIsNarrowViewport } from "@/features/shell/hooks/useIsNarrowViewport"
 import { isNarrowViewport } from "@/features/shell/lib/breakpoints"
@@ -20,7 +19,12 @@ import {
 import { awaitingConfirmation, type TranscriptState } from "@/features/assistant/store/transcript"
 import { downloadingPercent } from "@/features/assistant/components/assistant.logic"
 import { useResumeInterruptedDownload } from "@/features/assistant/components/assistantDownloadResume"
-import { ASSISTANT_PANEL_ID, ASSISTANT_TOGGLE_ID, moveFocusOutOfAssistant } from "@/features/assistant/components/assistantFocus"
+import {
+	ASSISTANT_PANEL_ID,
+	ASSISTANT_TOGGLE_ID,
+	assistantKeyIgnored,
+	moveFocusOutOfAssistant
+} from "@/features/assistant/components/assistantFocus"
 
 // The rail is mounted for the whole authed session, so the persisted open state loads once, here.
 void hydrateAssistantPanelOpen()
@@ -129,17 +133,14 @@ export function AssistantToggle({ itemClass }: { itemClass: (active: boolean) =>
 		toggleAssistant(narrow)
 	}
 
-	// Like the rail's route-nav actions, an open dialog owns the keyboard.
+	// Like the rail's route-nav actions, an open dialog or menu owns the keyboard, except the narrow drawer the
+	// assistant itself is shown in, which its own key closes.
 	useAction(
 		"app.toggleAssistant",
 		() => {
-			if (isAnyDialogOpen()) {
-				return
-			}
-
 			toggle()
 		},
-		undefined,
+		{ ignoreEventWhen: assistantKeyIgnored },
 		[narrow, visible]
 	)
 

@@ -313,6 +313,30 @@ describe("saving on the spreadsheet viewer", () => {
 		expect(screen.queryByRole("dialog", { name: preview.previewSheetPrint })).toBeNull()
 	})
 
+	// The preview's Save owns Mod+S wherever it is bound: rebound elsewhere, the grid still keeps Save Page As away.
+	it("keeps the browser's Save Page As away on Mod+S in the grid, with no save bound to it", async () => {
+		hooks.bytes = await budget()
+
+		render(
+			<SheetViewer
+				item={file("b.xlsx")}
+				documentKey="k-save-key"
+				alt="b.xlsx"
+				editable
+				saveRef={{ current: null }}
+			/>
+		)
+
+		await screen.findByRole("textbox", { name: preview.previewSpreadsheetCellContents })
+
+		const shortcut = new KeyboardEvent("keydown", { key: "s", code: "KeyS", ctrlKey: true, bubbles: true, cancelable: true })
+
+		act(() => {
+			screen.getByRole("grid").dispatchEvent(shortcut)
+		})
+		expect(shortcut.defaultPrevented).toBe(true)
+	})
+
 	it("keeps a password-protected workbook's cells sealed: no CSV is offered", async () => {
 		hooks.bytes = await encryptedWorkbook("default")
 

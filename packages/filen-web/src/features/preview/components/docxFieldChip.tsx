@@ -1,3 +1,4 @@
+import { isImeKeydown } from "@filen/shared/keymap"
 import { useEffect, useRef } from "react"
 import { useTranslation } from "react-i18next"
 import { ArrowRightIcon, ChevronDownIcon, RefreshCwIcon } from "lucide-react"
@@ -75,7 +76,7 @@ export function DocxFieldChip({ editor, snapshot, container, readOnly, execute, 
 			}
 		}
 		const onKey = (event: KeyboardEvent): void => {
-			if (event.key === "Escape") {
+			if (event.key === "Escape" && !isImeKeydown(event)) {
 				onPressDone()
 			}
 		}

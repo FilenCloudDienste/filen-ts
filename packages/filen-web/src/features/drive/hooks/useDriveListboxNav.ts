@@ -13,6 +13,7 @@ import { type DriveItem } from "@/features/drive/lib/item"
 import { driveRowKey } from "@/features/drive/lib/rowKey"
 import { type DriveVariant, type DriveViewMode } from "@/features/drive/lib/preferences"
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
+import { hasCommandModifier, isActivationKey } from "@/lib/rowKeys"
 import { type DriveVirtualizer } from "@/features/drive/hooks/useDriveVirtualizer"
 
 interface UseDriveListboxNavParams {
@@ -226,7 +227,9 @@ export function useDriveListboxNav({
 			return
 		}
 
-		if (event.key === " ") {
+		// Space toggles and Enter opens only unmodified: a chord with either is some shortcut's (Shift+Enter,
+		// Mod+Enter), and Shift+Space would otherwise toggle as a range is being extended.
+		if (event.key === " " && isActivationKey(event)) {
 			event.preventDefault()
 
 			const item = items[safeActiveIndex]
@@ -239,14 +242,17 @@ export function useDriveListboxNav({
 			return
 		}
 
-		if (event.key === "Enter") {
+		if (event.key === "Enter" && isActivationKey(event)) {
 			event.preventDefault()
 			onOpen(safeActiveIndex)
 
 			return
 		}
 
-		const target = listboxKeyTarget(event.key, safeActiveIndex, items.length, viewMode === "grid" ? columns : 1, viewMode === "grid")
+		// Shift extends a range; with Ctrl, Cmd or Alt the arrow is some shortcut's, not the cursor's.
+		const target = hasCommandModifier(event)
+			? null
+			: listboxKeyTarget(event.key, safeActiveIndex, items.length, viewMode === "grid" ? columns : 1, viewMode === "grid")
 
 		if (target === null) {
 			return

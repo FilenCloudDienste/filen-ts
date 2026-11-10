@@ -57,7 +57,7 @@ vi.mock("@/lib/useIsOnline", () => ({ useIsOnline }))
 vi.mock("@/features/drive/hooks/useDriveSearch", () => ({ useDriveSearch: () => searchState.current }))
 // Document-level keymap registration needs the app's hotkeys provider; the listing's shortcut bodies are
 // not this file's subject.
-vi.mock("@/lib/keymap/useAction", () => ({ useAction }))
+vi.mock("@/lib/keymap/useAction", () => ({ useAction, OUTSIDE_OVERLAYS: {} }))
 vi.mock("@/features/audio/lib/audioEngine", () => ({ audioEngine: { enqueueAndPlay: vi.fn() } }))
 vi.mock("@/features/drive/hooks/useDriveDirectorySizes", () => ({ useDriveDirectorySizes }))
 vi.mock("@/features/drive/hooks/useMarqueeSelection", () => ({

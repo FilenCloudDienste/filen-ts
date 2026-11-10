@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { isTypedCharacter } from "@filen/office/core/sheet"
-import { isImeKeydown } from "@/lib/ime"
+import { isImeKeydown } from "@filen/shared/keymap"
 
 describe("typing into the grid", () => {
 	const typed = (key: string, extra: Partial<{ ctrlKey: boolean; metaKey: boolean; altKey: boolean }> = {}) =>

@@ -59,7 +59,7 @@ import { usePhoneWidth } from "@/features/office/components/ribbon/phoneMedia"
 import { FullScreenButton, PageControls, ZoomControls } from "@/features/preview/components/commandBarControls"
 import { BAR_BUTTON, pageControlsWidth, ZOOM_CONTROLS_WIDTH } from "@/features/preview/components/commandBar.logic"
 import { useAction } from "@/lib/keymap/useAction"
-import { isImeKeydown } from "@/lib/ime"
+import { isImeKeydown } from "@filen/shared/keymap"
 
 // The DOCX viewer's command bar (OfficeCommandBar), as the PDF viewer's: File, then Pages (first, previous, the page
 // number field, next, last), Zoom (out, the zoom menu with its steps and fit to width, in), the markup menu (a
@@ -324,6 +324,8 @@ export function DocxFindField({
 	const [replaceOpen, setReplaceOpen] = useState(replaceOpenProp === true)
 	const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
 	const inputRef = useRef<HTMLInputElement | null>(null)
+	const replaceRef = useRef<HTMLInputElement | null>(null)
+	const focusReplace = useRef(false)
 	const searched = text === find.query
 	const current = find.count === 0 ? 0 : find.active + 1
 	const counts = { current, total: find.count }
@@ -337,6 +339,26 @@ export function DocxFindField({
 			inputRef.current?.select()
 		},
 		{ enableOnFormTags: ["input"] }
+	)
+	// The replace key in the field shows the replace field and moves there, where the document can be changed.
+	const replaceFromFind = useAction(
+		"editor.replace",
+		keyboardEvent => {
+			if (replace === undefined) {
+				return
+			}
+
+			keyboardEvent.preventDefault()
+
+			if (replaceRef.current === null) {
+				focusReplace.current = true
+				setReplaceOpen(true)
+			} else {
+				replaceRef.current.focus()
+			}
+		},
+		{ enableOnFormTags: ["input"] },
+		[replace]
 	)
 
 	useEffect(() => {
@@ -395,6 +417,7 @@ export function DocxFindField({
 					ref={element => {
 						inputRef.current = element
 						findAgain(element)
+						replaceFromFind(element)
 					}}
 					type="search"
 					aria-label={t("previewDocxFindPlaceholder")}
@@ -497,6 +520,15 @@ export function DocxFindField({
 			{replace === undefined || !replaceOpen ? null : (
 				<div className="flex min-w-0 items-center gap-1 max-sm:flex-1 max-sm:basis-[calc(100%-2rem)]">
 					<input
+						ref={element => {
+							replaceRef.current = element
+
+							// Shown by the replace key: focus follows it there.
+							if (element !== null && focusReplace.current) {
+								focusReplace.current = false
+								element.focus()
+							}
+						}}
 						type="text"
 						aria-label={t("previewDocxReplacePlaceholder")}
 						placeholder={t("previewDocxReplacePlaceholder")}

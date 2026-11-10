@@ -1,4 +1,4 @@
-import { matchesChord, parseCombo, type Chord } from "@filen/shared/keymap"
+import { matchesChord, parseCombo, type Chord, type ChordEvent } from "@filen/shared/keymap"
 import type { ShowController } from "../show/controller"
 import type { InkStore } from "../ink/store"
 import type { PointerChange } from "../show/pointer"
@@ -88,10 +88,25 @@ function chordsOf(bindings: ShowKeyBindings): readonly (readonly [ShowKeyCommand
 }
 
 // The rebindable command `event` is, if any; `apple`: Mod is Cmd (else Ctrl).
-export function showKeyCommand(event: ShowKeyEvent, bindings: ShowKeyBindings, apple: boolean): ShowKeyCommand | undefined {
+export function showKeyCommand(event: ChordEvent, bindings: ShowKeyBindings, apple: boolean): ShowKeyCommand | undefined {
 	for (const [command, chord] of chordsOf(bindings)) if (matchesChord(event, chord, apple)) return command
 
 	return undefined
+}
+
+// Enter or Space pressed on a control of the show's own (an ink tool, a presenter view button, a field) below where the
+// keys are handled: the control's click, never the show's next slide.
+export function pressesControl(event: {
+	readonly key: string
+	readonly target: EventTarget
+	readonly currentTarget: EventTarget
+}): boolean {
+	if ((event.key !== "Enter" && event.key !== " ") || event.target === event.currentTarget) return false
+
+	// Read structurally: these keys also build without the DOM's types.
+	const element = event.target as { readonly closest?: (selectors: string) => unknown }
+
+	return typeof element.closest === "function" && element.closest("button, a[href], input, select, textarea, [role='button']") !== null
 }
 
 // Shift+F10 or the Menu key (PowerPoint's "Open a context menu"), on Windows and the Mac alike. Not rebindable.

@@ -9,8 +9,7 @@ import { errorLabel } from "@/lib/i18n/errorLabel"
 import { useDialogHost } from "@/lib/useDialogHost"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { blockingQueryError } from "@/queries/blockingError"
-import { useAction } from "@/lib/keymap/useAction"
-import { isAnyDialogOpen } from "@/lib/keymap/dialogGuard"
+import { OUTSIDE_OVERLAYS, useAction } from "@/lib/keymap/useAction"
 import {
 	buildContactSections,
 	filterContactSections,
@@ -138,19 +137,15 @@ export function ContactsList({ section }: { section: ContactsSectionFilter }) {
 	}
 
 	// Def in features/contacts/lib/keymap.ts. No preventDefault — bare Escape has no disruptive browser default.
-	// Guarded through the shared DOM-level dialog signal rather than this host's own isDialogOpen:
+	// Guarded through the shared DOM-level dialog and menu signal rather than this host's own isDialogOpen:
 	// AddContactDialog owns its own open state outside the host, and Escape must close whichever dialog
-	// is up without also clearing the selection behind it.
+	// or menu is up without also clearing the selection behind it.
 	useAction(
 		"contacts.clearSelection",
 		() => {
-			if (isAnyDialogOpen()) {
-				return
-			}
-
 			selection.clearSelection()
 		},
-		undefined,
+		OUTSIDE_OVERLAYS,
 		[selection]
 	)
 

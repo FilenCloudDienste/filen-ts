@@ -1,8 +1,8 @@
 import { useRef } from "react"
 import { useTranslation } from "react-i18next"
 import { SearchIcon, XIcon } from "lucide-react"
-import { useAction } from "@/lib/keymap/useAction"
-import { isAnyDialogOpen } from "@/lib/keymap/dialogGuard"
+import { isImeKeydown } from "@filen/shared/keymap"
+import { OUTSIDE_OVERLAYS, useAction } from "@/lib/keymap/useAction"
 import { Kbd } from "@/lib/keymap/kbd"
 import { KEEP_SELECTION_PROPS } from "@/features/drive/lib/clickAway.logic"
 import { Input } from "@/components/ui/input"
@@ -22,20 +22,18 @@ export function SearchInput({ action, label, value, onChange, onClear }: SearchI
 	const { t } = useTranslation("drive")
 	const inputRef = useRef<HTMLInputElement>(null)
 
-	// Registered above at module scope. preventDefault unconditionally — every browser intercepts
-	// mod+f for its own find-in-page, which must never fire while a listing has this mounted;
-	// the focus steal itself stands down while a dialog is open.
-	useAction(action, keyboardEvent => {
-		keyboardEvent.preventDefault()
-
-		// Any open dialog, the preview overlay, the startup reminders and the narrow-viewport sidebar
-		// drawer included: focus would land on this input behind that surface's focus trap.
-		if (isAnyDialogOpen()) {
-			return
-		}
-
-		inputRef.current?.focus()
-	})
+	// Registered above at module scope. Every browser intercepts mod+f for its own find-in-page, which the
+	// listing takes over. Stands down under any open dialog or menu (the preview overlay, the startup
+	// reminders and the narrow-viewport sidebar drawer included): focus would land on this input behind that
+	// surface's focus trap, and the key stays that layer's.
+	useAction(
+		action,
+		keyboardEvent => {
+			keyboardEvent.preventDefault()
+			inputRef.current?.focus()
+		},
+		OUTSIDE_OVERLAYS
+	)
 
 	return (
 		// min-w-0: the input's own intrinsic width is this wrapper's flex floor otherwise, and the controls
@@ -61,7 +59,8 @@ export function SearchInput({ action, label, value, onChange, onClear }: SearchI
 				onKeyDown={event => {
 					// Input-local, not a registered action — the listbox's own Escape (drive.clearSelection)
 					// must stay untouched; this only ever fires while the search box itself has focus.
-					if (event.key === "Escape") {
+					// An input method's Escape cancels its composition, not the search.
+					if (event.key === "Escape" && !isImeKeydown(event.nativeEvent)) {
 						event.preventDefault()
 						onClear()
 					}

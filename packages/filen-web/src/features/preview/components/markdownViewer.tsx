@@ -12,6 +12,7 @@ import { useLeaveViewerFullScreen } from "@/features/preview/components/commandB
 import { onCommandBarF6, onRibbonEscape } from "@/features/office/components/ribbon/ribbonFocus"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { useEditorLayerKeys } from "@/lib/keymap/editorLayerKeys"
+import { keyForEditor } from "@/lib/keymap/dialogGuard"
 import { IN_EDITORS, useAction } from "@/lib/keymap/useAction"
 import { PreviewErrorState, PreviewLoading } from "@/features/preview/components/previewErrorState"
 
@@ -51,10 +52,17 @@ export function MarkdownViewer({ item, alt, editable, onDirtyChange, contentRef,
 
 	// Locked while dirty, like the command bar's switch (see above). The key is swallowed even then:
 	// left to the browser, Ctrl+Shift+V pastes the clipboard over the selection, which is not what
-	// pressing the toggle asks for. Works with the cursor in the editor too.
+	// pressing the toggle asks for. Works with the cursor in the editor too, but only in the viewer's own
+	// layer: a dialog over it, or a native field, keeps the key.
 	useAction(
 		"editor.togglePreview",
 		keyboardEvent => {
+			const root = containerRef.current
+
+			if (root === null || !keyForEditor(root, keyboardEvent.target)) {
+				return
+			}
+
 			keyboardEvent.preventDefault()
 
 			if (dirty) {

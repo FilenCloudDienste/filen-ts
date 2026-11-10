@@ -35,4 +35,29 @@ describe("the Markdown viewer", () => {
 		fireEvent.keyDown(document.body, { key: "F6" })
 		expect(document.activeElement?.closest("[data-office-ribbon]")).not.toBeNull()
 	})
+
+	// The toggle is the viewer's layer's: a dialog over it keeps Ctrl+Shift+V, default included.
+	it("leaves the preview toggle's key to a dialog over the viewer", async () => {
+		render(
+			<MarkdownViewer
+				item={{ uuid: "md", name: "notes.md" } as unknown as DriveItem}
+				alt="notes.md"
+			/>,
+			{ wrapper: queryClientWrapper(createTestQueryClient()) }
+		)
+		await screen.findByRole("document")
+
+		const dialog = document.createElement("div")
+		const button = document.createElement("button")
+
+		dialog.setAttribute("role", "dialog")
+		dialog.setAttribute("data-open", "")
+		dialog.append(button)
+		document.body.append(dialog)
+		button.focus()
+
+		expect(fireEvent.keyDown(button, { key: "v", code: "KeyV", ctrlKey: true, shiftKey: true })).toBe(true)
+		// Still the rendered view.
+		expect(screen.getByRole("document")).toBeTruthy()
+	})
 })

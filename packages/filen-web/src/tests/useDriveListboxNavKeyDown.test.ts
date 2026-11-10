@@ -100,4 +100,29 @@ describe("useDriveListboxNav — key presses", () => {
 		expect(useDriveStore.getState().selectedItems).toEqual([])
 		expect(preventDefault).not.toHaveBeenCalled()
 	})
+
+	// A chord with Enter, Space or an arrow is some shortcut's (Shift+Enter, Mod+Enter, Alt+ArrowUp): the listbox
+	// neither opens, toggles nor moves on it, and leaves its default alone.
+	it("is modifier-exact on Enter, Space and the arrows", () => {
+		const { result, onOpen } = renderNav()
+		const listbox = document.createElement("div")
+		const row = listbox.appendChild(document.createElement("div"))
+		const preventDefault = vi.fn()
+
+		act(() => {
+			for (const modifier of ["shiftKey", "ctrlKey", "metaKey", "altKey"] as const) {
+				for (const key of ["Enter", " "]) {
+					result.current.handleKeyDown({ ...keyDown(key, listbox, row), [modifier]: true, preventDefault })
+				}
+			}
+
+			for (const modifier of ["ctrlKey", "metaKey", "altKey"] as const) {
+				result.current.handleKeyDown({ ...keyDown("ArrowDown", listbox, row), [modifier]: true, preventDefault })
+			}
+		})
+
+		expect(onOpen).not.toHaveBeenCalled()
+		expect(useDriveStore.getState().selectedItems).toEqual([])
+		expect(preventDefault).not.toHaveBeenCalled()
+	})
 })

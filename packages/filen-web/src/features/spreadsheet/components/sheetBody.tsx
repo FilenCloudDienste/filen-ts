@@ -531,10 +531,11 @@ export function SheetBody({
 
 				return true
 			}
-			// Not taken here: the key goes on to the preview's own Save (preview.save, Mod+S), the one save path, which
-			// commits an open entry first and keeps the browser's Save Page As away whether or not there is a save.
+			// Taken only to keep the browser's Save Page As away, even with preview.save moved to another key: the key
+			// still reaches the preview's own Save (the one save path, which commits an open entry first) wherever it is
+			// bound to it.
 			case "save":
-				return false
+				return true
 			// Hide and unhide rows and columns (Ctrl+9, Ctrl+0, Ctrl+Shift+9, Ctrl+Shift+0); a text file has none.
 			default:
 				return structureShortcut(grid, shortcut, cellsWritable && !text)

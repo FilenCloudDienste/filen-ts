@@ -1,3 +1,6 @@
+import { isOverlayOpenBesides } from "@/lib/keymap/dialogGuard"
+import { shouldIgnoreEvent } from "@/lib/keymap/useAction"
+
 // The panel is mounted at most once (inline at desktop widths, or in the narrow-screen drawer), so fixed
 // ids are unique and let the shell, the rail toggle and the drawer find each other without threading refs.
 export const ASSISTANT_PANEL_ID = "assistant-panel"
@@ -28,4 +31,10 @@ export function moveFocusOutOfAssistant(): void {
 	}
 
 	document.getElementById(ASSISTANT_TOGGLE_ID)?.focus()
+}
+
+// app.toggleAssistant's guard: an open dialog or menu owns the keyboard, but the narrow drawer the panel is shown in
+// is a dialog too, and its own key closes it.
+export function assistantKeyIgnored(event: Parameters<typeof shouldIgnoreEvent>[0]): boolean {
+	return shouldIgnoreEvent(event) || isOverlayOpenBesides(document.getElementById(ASSISTANT_PANEL_ID))
 }

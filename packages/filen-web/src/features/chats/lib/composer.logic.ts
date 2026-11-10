@@ -54,9 +54,16 @@ export function appendAttachmentUrl(draft: string, url: string): string {
 	return trimmedEnd.length === 0 ? url : `${trimmedEnd} ${url}`
 }
 
-// Enter sends, Shift+Enter inserts a newline (the browser default). null when it isn't the Enter key.
-export function enterIntent(event: { key: string; shiftKey: boolean }): "send" | "newline" | null {
-	if (event.key !== "Enter") {
+// Enter sends, Shift+Enter inserts a newline (the browser default). null for any other key or chord: Ctrl, Cmd
+// or Alt with Enter is some shortcut's, never a send.
+export function enterIntent(event: {
+	key: string
+	shiftKey: boolean
+	ctrlKey: boolean
+	metaKey: boolean
+	altKey: boolean
+}): "send" | "newline" | null {
+	if (event.key !== "Enter" || event.ctrlKey || event.metaKey || event.altKey) {
 		return null
 	}
 

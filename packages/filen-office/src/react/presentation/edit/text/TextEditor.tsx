@@ -1,3 +1,4 @@
+import { isImeKeydown } from "@filen/shared/keymap"
 import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import { Slice } from "prosemirror-model"
 import { TextSelection, type Transaction } from "prosemirror-state"
@@ -483,7 +484,7 @@ export function PresentationTextEditor({
 					controller.dispatch(tr, isTyping(tr))
 				},
 				handleKeyDown: (_view, event) => {
-					if (event.isComposing || event.keyCode === 229) return false
+					if (isImeKeydown(event)) return false
 					if (event.key !== "ArrowUp" && event.key !== "ArrowDown") controller.goalX = undefined
 
 					return keymap(event)

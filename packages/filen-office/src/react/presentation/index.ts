@@ -41,7 +41,6 @@ export {
 export { SlideRail, type SlideRailProps } from "./rail/SlideRail"
 export { NotesPanel, type NotesPanelProps } from "./notes/NotesPanel"
 export { NotesText } from "./notes/NotesText"
-export { StaticShow, type StaticShowProps } from "./show/static"
 export { paintEditorSlide, paintSlide } from "./paint/slide"
 export {
 	boundsOf,

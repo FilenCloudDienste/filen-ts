@@ -8,7 +8,7 @@ import { cellsEditable, celllessSheet, type SheetGridHandle, type SheetGridModel
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@filen/shared"
-import { isImeKeydown } from "@/lib/ime"
+import { isImeKeydown } from "@filen/shared/keymap"
 import {
 	nameBoxNames,
 	nameBoxSelection,

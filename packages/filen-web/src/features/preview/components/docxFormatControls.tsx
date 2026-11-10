@@ -75,7 +75,7 @@ import { FIELD_CONTROL_CLASS } from "@/components/ui/surface"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
 import { i18n } from "@/lib/i18n"
-import { isImeKeydown } from "@/lib/ime"
+import { isImeKeydown } from "@filen/shared/keymap"
 
 // The ribbon's Font group (font and size pickers, growing and shrinking the size, highlight and text colours, a
 // formatting menu: double strikethrough, caps, character spacing, clear all) and its Formatting group (the base toggles

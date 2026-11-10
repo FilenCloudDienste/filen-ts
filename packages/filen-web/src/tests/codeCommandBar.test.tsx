@@ -206,6 +206,19 @@ describe("the text and code command bar", () => {
 		expect(await screen.findByRole("toolbar", { name: "Commands" })).toBeTruthy()
 	})
 
+	// Focus on the bar, not in the editor: the editor's own keymap never sees the key, the page's binding does.
+	it("opens find and replace for the replace key pressed on the command bar", async () => {
+		mount("let cat = 1")
+
+		const command = document.querySelector<HTMLElement>("[data-office-ribbon] button")
+
+		if (command === null) throw new Error("no command")
+
+		command.focus()
+		expect(fireEvent.keyDown(command, { key: "f", code: "KeyF", ctrlKey: true, altKey: true })).toBe(false)
+		expect(await screen.findByRole("textbox", { name: "Replace with" })).toBeTruthy()
+	})
+
 	it("opens the bar's find for the next-match keys and go to line for its key", async () => {
 		const view = mount("a\nb\nc")
 

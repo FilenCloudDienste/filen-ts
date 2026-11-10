@@ -44,9 +44,8 @@ import {
 } from "@/features/drive/queries/drive"
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
 import { GRID_INSET, ROW_HEIGHT, TILE_ROW_HEIGHT, TILE_WIDTH } from "@/features/drive/lib/gridLayout"
-import { isAnyDialogOpen, isAnyMenuOpen } from "@/lib/keymap/dialogGuard"
 import { asErrorDTO } from "@/lib/sdk/errors"
-import { useAction } from "@/lib/keymap/useAction"
+import { OUTSIDE_OVERLAYS, useAction } from "@/lib/keymap/useAction"
 import { useBlockedUsers } from "@/features/contacts/hooks/useBlockedUsers"
 import { canOpenItem, driveItemActions } from "@/features/drive/components/itemMenu.logic"
 import { driveBulkActions, isBulkDownloadEnabled } from "@/features/drive/components/bulkActionBar.logic"
@@ -346,12 +345,11 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 	// Shared by me receiver's row being selected never highlights another receiver's.
 	const selectedRowKeys = useMemo(() => new Set(selectedItems.map(driveRowKey)), [selectedItems])
 
-	const { isDialogOpen, handleItemAction, handleBulkDialogAction, handleEmptyTrash, openPreview, renderActiveDialog } =
-		useDriveDialogHost({
-			variant,
-			selectedItems: reconciledSelectedItems,
-			hiddenNoticeApplies: hideHidden
-		})
+	const { handleItemAction, handleBulkDialogAction, handleEmptyTrash, openPreview, renderActiveDialog } = useDriveDialogHost({
+		variant,
+		selectedItems: reconciledSelectedItems,
+		hiddenNoticeApplies: hideHidden
+	})
 
 	// What the empty-space menu and every directory row's New submenu create or upload into. Only offline
 	// disables its pickers: the current directory may not be writable while its rows are (a sharedOut
@@ -537,10 +535,12 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 		await hiddenPrefQuery.refetch()
 	}
 
+	// Every action below stands down under any open dialog or menu (OUTSIDE_OVERLAYS): that layer owns the
+	// keyboard, and the key keeps its default for it, as the guard runs before any preventDefault. A row's
+	// ⋯ menu counts, so nothing here acts on the listing from under it.
+	//
 	// Registered above at module scope. Browser default for mod+a is "select all page text" — must
 	// preventDefault or the native selection would visibly compete with the drive-item selection.
-	// Stands down while a dialog is open so a background Cmd+A can't select items behind it — returns
-	// before preventDefault, so the browser default runs instead in that case.
 	// Withheld (preventDefault still runs, so the browser default stays suppressed either way)
 	// while the cache-backed search is still converging (warming/searching-empty/background) — only
 	// offered once the result set has settled, so the user can't "select all" a partial/still-growing
@@ -548,10 +548,6 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 	useAction(
 		"drive.selectAll",
 		keyboardEvent => {
-			if (isAnyDialogOpen()) {
-				return
-			}
-
 			keyboardEvent.preventDefault()
 
 			if (search.active && isSearchConverging(search.status)) {
@@ -564,40 +560,28 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 			// only (selectableForSelectAll).
 			useDriveStore.getState().setSelectedItems(selectableForSelectAll(sortedItems))
 		},
-		undefined,
+		OUTSIDE_OVERLAYS,
 		[sortedItems, search.active, search.status]
 	)
 
 	// Registered above at module scope. No preventDefault — bare Escape has no disruptive browser
-	// default, matching the hand-rolled handler this replaced. Guarded on isDialogOpen so Escape closes
-	// the dialog (its own onOpenChange handling) without also clearing the background selection, and on
-	// an open menu for the same reason — a bulk context menu whose selection vanishes mid-open swaps its
-	// content component underneath Base UI and is then stuck open.
+	// default. A dialog or menu takes Escape itself; a bulk context menu whose selection vanished
+	// mid-open would swap its content component underneath Base UI and then stay stuck open.
 	useAction(
 		"drive.clearSelection",
 		() => {
-			if (isDialogOpen || isAnyMenuOpen()) {
-				return
-			}
-
 			useDriveStore.getState().clearSelectedItems()
 		},
-		undefined,
-		[isDialogOpen]
+		OUTSIDE_OVERLAYS
 	)
 
-	// Registered above at module scope. Net-new shortcut — no listbox handling to reconcile. Guarded
-	// so it can't flip the background view mode while a dialog is open.
+	// Registered above at module scope.
 	useAction(
 		"drive.toggleView",
 		() => {
-			if (isAnyDialogOpen()) {
-				return
-			}
-
 			void applyViewModeChange(effectiveViewMode === "list" ? "grid" : "list")
 		},
-		undefined,
+		OUTSIDE_OVERLAYS,
 		[effectiveViewMode, applyViewModeChange]
 	)
 
@@ -607,10 +591,6 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 	useAction(
 		"drive.rename",
 		() => {
-			if (isAnyDialogOpen()) {
-				return
-			}
-
 			const item = sortedItems[safeActiveIndex]
 
 			if (!isOnline || !item || !driveItemActions(item, variant).some(descriptor => descriptor.id === "rename")) {
@@ -619,15 +599,14 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 
 			handleItemAction("rename", item)
 		},
-		undefined,
+		OUTSIDE_OVERLAYS,
 		[sortedItems, safeActiveIndex, variant, isOnline]
 	)
 
-	// Registered above at module scope. preventDefault unconditionally — Backspace's browser default
-	// (navigate back) must never fire while this listing has focus, guarded case or not. Guards: empty
-	// selection, a dialog already open, and every surface the
-	// bulk bar offers no Trash on: trash itself (permanent delete stays menu-only + explicitly confirmed,
-	// never a bare keypress) and Shared with me (items someone else owns).
+	// Registered above at module scope. preventDefault whenever the listing takes the key, guarded case or
+	// not — Backspace's "navigate back" in the engines that still have it. Guards: empty selection, and
+	// every surface the bulk bar offers no Trash on: trash itself (permanent delete stays menu-only +
+	// explicitly confirmed, never a bare keypress) and Shared with me (items someone else owns).
 	useAction(
 		"drive.trash",
 		keyboardEvent => {
@@ -635,7 +614,6 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 
 			if (
 				reconciledSelectedItems.length === 0 ||
-				isAnyDialogOpen() ||
 				!isOnline ||
 				!driveBulkActions(variant, aggregateDriveSelectionFlags(reconciledSelectedItems)).some(
 					descriptor => descriptor.id === "trash"
@@ -646,26 +624,25 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 
 			handleBulkDialogAction("trash")
 		},
-		undefined,
+		OUTSIDE_OVERLAYS,
 		[reconciledSelectedItems, variant, isOnline]
 	)
 
-	// Registered above at module scope. preventDefault unconditionally — mod+s's browser default
-	// (Save Page As) must never fire while this listing has focus. Guards mirror drive.trash's own
-	// (an open dialog, the trash variant — download isn't offered there, matching item-menu/bulk-bar's
-	// own trash exclusion) plus isBulkDownloadEnabled (bulkActionBar.logic.ts) — the single unifying
-	// ENABLED gate every download entry point shares, empty selection included (false for []), plus
-	// offline — a download has nothing to fetch from without a connection. Also inert
-	// when the selection includes an undecryptable item — its meta is ciphertext with no content key,
-	// so it can never decrypt (mirrors item-menu/bulk-bar's own undecryptable exclusion) — void, not
-	// awaited, so the FSA save picker inside startDownloads keeps this keydown's own live user gesture.
+	// Registered above at module scope. preventDefault whenever the listing takes the key — mod+s's
+	// browser default (Save Page As) must never fire over it. Guards: the trash variant (download isn't
+	// offered there, matching item-menu/bulk-bar's own trash exclusion) plus isBulkDownloadEnabled
+	// (bulkActionBar.logic.ts) — the single unifying ENABLED gate every download entry point shares, empty
+	// selection included (false for []), plus offline — a download has nothing to fetch from without a
+	// connection. Also inert when the selection includes an undecryptable item — its meta is ciphertext
+	// with no content key, so it can never decrypt (mirrors item-menu/bulk-bar's own undecryptable
+	// exclusion) — void, not awaited, so the FSA save picker inside startDownloads keeps this keydown's
+	// own live user gesture.
 	useAction(
 		"drive.download",
 		keyboardEvent => {
 			keyboardEvent.preventDefault()
 
 			if (
-				isAnyDialogOpen() ||
 				variant === "trash" ||
 				!isOnline ||
 				!isBulkDownloadEnabled(reconciledSelectedItems) ||
@@ -676,7 +653,7 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 
 			void startDownloads(reconciledSelectedItems)
 		},
-		undefined,
+		OUTSIDE_OVERLAYS,
 		[reconciledSelectedItems, variant, isOnline]
 	)
 

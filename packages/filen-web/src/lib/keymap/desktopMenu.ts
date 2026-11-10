@@ -1,11 +1,10 @@
 import { useEffect } from "react"
 import type { HotkeyCallback } from "react-hotkeys-hook"
 import type { DesktopMenuAction } from "@filen/shared/desktop"
-import { comboForLayout } from "@filen/shared/keymap"
+import { comboForLayout, matchesCombo } from "@filen/shared/keymap"
 import { desktopBridge } from "@/lib/desktop"
 import { keyboardLayout, subscribeKeyboardLayout } from "@/lib/keymap/layout"
 import { comboFor, subscribeOverrides } from "@/lib/keymap/registry"
-import { noop } from "@/lib/utils"
 
 // The macOS desktop menu (D18) offers a few keymap actions. Main shows each with the combo in effect here and
 // sends the id back on click; the action then runs the same handler its keys run, so this page stays the only
@@ -26,6 +25,12 @@ const bridge = desktopBridge()
 const handlers = new Map<string, () => void>()
 let pending: { action: DesktopMenuAction; at: number } | null = null
 let subscribed = false
+
+// Whether this app's menu bar offers an action (the macOS desktop app only): what useMenuAction returns, and what the
+// shortcuts list says on the action's row.
+export function inAppMenu(id: string): boolean {
+	return bridge?.platform === "darwin" && isMenuAction(id)
+}
 
 function isMenuAction(id: string): id is DesktopMenuAction {
 	return (MENU_ACTIONS as string[]).includes(id)
@@ -51,6 +56,15 @@ function dispatch(action: DesktopMenuAction): void {
 	handler()
 }
 
+// macOS gives the menu only a key the page left unhandled. The page runs a menu action's keys once, and cancels
+// their default so the menu does not run it again (useAction); it never runs them on autorepeat, so neither may the
+// menu. In a text field the page leaves them alone and the menu runs them, once.
+export function cancelMenuRepeat(event: KeyboardEvent): void {
+	if (event.repeat && !event.defaultPrevented && MENU_ACTIONS.some(action => matchesCombo(event, comboFor(action), true))) {
+		event.preventDefault()
+	}
+}
+
 // Subscribing is what tells main the page takes menu actions, so it waits for the first handler.
 function subscribe(): void {
 	if (subscribed || bridge === undefined) {
@@ -62,6 +76,7 @@ function subscribe(): void {
 	pushShortcuts()
 	subscribeOverrides(pushShortcuts)
 	subscribeKeyboardLayout(pushShortcuts)
+	document.addEventListener("keydown", cancelMenuRepeat)
 }
 
 function registerMenuHandler(action: DesktopMenuAction, handler: () => void): () => void {
@@ -85,18 +100,32 @@ function registerMenuHandler(action: DesktopMenuAction, handler: () => void): ()
 	}
 }
 
-function useMenuActionOnMac(id: string, handler: HotkeyCallback): void {
+// A click passes the guard the action's keys pass (an open dialog or menu), so the two never disagree.
+function useMenuActionOnMac(id: string, handler: HotkeyCallback, guard?: (event: KeyboardEvent) => boolean): boolean {
+	const owned = inAppMenu(id)
+
 	useEffect(() => {
 		if (!isMenuAction(id)) {
 			return
 		}
 
 		return registerMenuHandler(id, () => {
-			handler(new KeyboardEvent("keydown"), { hotkey: comboFor(id) })
+			const event = new KeyboardEvent("keydown")
+
+			if (guard?.(event) !== true) {
+				handler(event, { hotkey: comboFor(id) })
+			}
 		})
-	}, [id, handler])
+	}, [id, handler, guard])
+
+	return owned
 }
 
-// Only the macOS shell has a menu; everywhere else this is a no-op hook. The choice is fixed for the page's
-// life, so every render calls the same hooks.
-export const useMenuAction: (id: string, handler: HotkeyCallback) => void = bridge?.platform === "darwin" ? useMenuActionOnMac : noop
+function noMenu(): boolean {
+	return false
+}
+
+// Whether the menu offers the action, after wiring its clicks to `handler`. Only the macOS shell has a menu; everywhere
+// else this is a no-op hook. The choice is fixed for the page's life, so every render calls the same hooks.
+export const useMenuAction: (id: string, handler: HotkeyCallback, guard?: (event: KeyboardEvent) => boolean) => boolean =
+	bridge?.platform === "darwin" ? useMenuActionOnMac : noMenu

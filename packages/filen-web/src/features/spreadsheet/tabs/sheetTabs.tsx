@@ -1,3 +1,4 @@
+import { isImeKeydown } from "@filen/shared/keymap"
 import { useEffect, useState, type ComponentType, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { CheckIcon, MoreHorizontalIcon, PlusIcon } from "lucide-react"
@@ -343,6 +344,11 @@ export function SheetTabs({ grid, canEdit, run }: { grid: SheetGridState; canEdi
 				aria-label={t("previewSpreadsheetSheets")}
 				className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto"
 				onKeyDown={event => {
+					// A rename field's input method keeps its keys.
+					if (isImeKeydown(event.nativeEvent)) {
+						return
+					}
+
 					if (event.key === "F2" && structure) {
 						event.preventDefault()
 						setRenaming(shown[activeIndex]?.id ?? null)

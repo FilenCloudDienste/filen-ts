@@ -1,3 +1,4 @@
+import { isImeKeydown } from "@filen/shared/keymap"
 import { useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
 import type { DocxEditorCommand } from "@filen/office/core/docx/edit"
@@ -97,7 +98,7 @@ export function DocxTableBorderDrag({ editor, press, onPressDone, container, zoo
 			}
 		}
 		const key = (event: KeyboardEvent): void => {
-			if (event.key === "Escape") {
+			if (event.key === "Escape" && !isImeKeydown(event)) {
 				event.preventDefault()
 				event.stopPropagation()
 				finish(null)

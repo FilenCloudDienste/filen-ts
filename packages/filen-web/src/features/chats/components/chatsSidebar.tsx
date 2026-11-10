@@ -25,7 +25,7 @@ import { useChatDialogHost } from "@/features/chats/hooks/useChatDialogHost"
 import { useIsSidebarPanelVisible } from "@/features/shell/lib/sidebarPanelVisibility"
 import { ResizableSidebarPanel } from "@/features/shell/components/sidebarPanel"
 import { useIsOnline } from "@/lib/useIsOnline"
-import { useAction } from "@/lib/keymap/useAction"
+import { OUTSIDE_OVERLAYS, useAction } from "@/lib/keymap/useAction"
 import type { ListPointerSelection } from "@/lib/useListPointerSelection"
 import { Button } from "@/components/ui/button"
 import { LoadingState } from "@/components/loadingState"
@@ -113,40 +113,31 @@ export function ChatsSidebar() {
 	}, [visibleChatUuidsSignature])
 
 	// Def in features/chats/lib/keymap.ts. Browser default for mod+a is "select all page text" — must
-	// preventDefault or the native selection would visibly compete with the row selection. Guarded on
-	// dialogHost.isDialogOpen so a background Cmd+A can't select conversations behind an open dialog.
-	// Targets `rows` (already search-filtered) minus undecryptable ones — mirrors drive.selectAll/
-	// notes.selectAll exactly. Both actions below are additionally OFF while the panel is out of sight
-	// (drawer closed below the layout breakpoint): rows, count and bulk bar all live inside this panel, so
-	// firing them there would swallow the browser's own select-all and leave an invisible selection behind.
-	useAction(
+	// preventDefault or the native selection would visibly compete with the row selection. Scoped to the
+	// conversation list (the returned ref): in the thread, Mod+A is the page's own text select-all. Stands
+	// down under any open dialog or menu (OUTSIDE_OVERLAYS). Targets `rows` (already search-filtered) minus
+	// undecryptable ones — mirrors drive.selectAll/notes.selectAll exactly. Both actions below are
+	// additionally OFF while the panel is out of sight (drawer closed below the layout breakpoint): rows,
+	// count and bulk bar all live inside this panel, so firing them there would swallow the browser's own
+	// select-all and leave an invisible selection behind.
+	const selectAllRef = useAction(
 		"chats.selectAll",
 		event => {
-			if (dialogHost.isDialogOpen) {
-				return
-			}
-
 			event.preventDefault()
 			useChatsSelectionStore.getState().setSelectedChats(selectableChatsForSelectAll(rows))
 		},
-		{ enabled: panelVisible },
-		[dialogHost.isDialogOpen, rows]
+		{ ...OUTSIDE_OVERLAYS, enabled: panelVisible },
+		[rows]
 	)
 
 	// Def in features/chats/lib/keymap.ts. No preventDefault — bare Escape has no disruptive browser
-	// default. Guarded on dialogHost.isDialogOpen so Escape closes the dialog (its own onOpenChange
-	// handling) without also clearing the background selection.
+	// default. Stands down under an open dialog or menu, whose own Escape closes it.
 	useAction(
 		"chats.clearSelection",
 		() => {
-			if (dialogHost.isDialogOpen) {
-				return
-			}
-
 			useChatsSelectionStore.getState().clearSelectedChats()
 		},
-		{ enabled: panelVisible },
-		[dialogHost.isDialogOpen]
+		{ ...OUTSIDE_OVERLAYS, enabled: panelVisible }
 	)
 
 	// Null while listing; ChatsVirtualList renders the rows then.
@@ -216,7 +207,10 @@ export function ChatsSidebar() {
 				/>
 			</div>
 
-			<div className="relative flex min-h-0 flex-1 flex-col">
+			<div
+				ref={selectAllRef}
+				className="relative flex min-h-0 flex-1 flex-col"
+			>
 				<div
 					ref={setScrollElement}
 					className="flex flex-1 flex-col overflow-y-auto px-1.5 pb-3 app-region-pane"

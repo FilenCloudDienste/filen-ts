@@ -1,7 +1,6 @@
 export { autofitSizes, MAX_FIT_INDICES } from "./autofit"
 export { axisEntry, createGridAxis, shownIndex, type AxisOverrides, type GridAxis } from "./axis"
 export { DEFAULT_DIGIT_PX } from "../../core/sheet/sizes/sizes"
-export { isImeKeydown } from "./ime"
 export {
 	gridPanes,
 	rangeRects,

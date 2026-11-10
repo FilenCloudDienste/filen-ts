@@ -197,6 +197,29 @@ describe("grid shortcuts", () => {
 		expect(model.getSnapshot().selection.ranges).toEqual([{ startRow: 2, startCol: 0, endRow: 4, endCol: 0 }])
 	})
 
+	// The page's own keys listen on the document (an audio player's Ctrl+Shift+Arrow skip): a move is the grid's alone.
+	it("keeps a move's key from the page around the grid", async () => {
+		const { scroller } = await mount()
+		const page = vi.fn()
+
+		document.addEventListener("keydown", page)
+		key(scroller, { key: "ArrowRight", code: "ArrowRight", ctrlKey: true, shiftKey: true })
+		document.removeEventListener("keydown", page)
+
+		expect(page).not.toHaveBeenCalled()
+	})
+
+	// Safari sends an input method's confirming Enter with keyCode 229: an entry for the composition, never a move.
+	it("opens an entry for an input method's key that reads as a shortcut, and runs none", async () => {
+		const { model, scroller } = await mount()
+
+		key(scroller, { key: "Enter", code: "Enter", keyCode: 229 })
+		await settle()
+
+		expect(model.getSnapshot().selection.active).toEqual({ row: 0, col: 0 })
+		expect(document.querySelector<HTMLTextAreaElement>("textarea.fo-sheet-editor")?.value).toBe("")
+	})
+
 	it("selects the data region with Ctrl+A, then the whole sheet", async () => {
 		const { model, scroller } = await mount()
 

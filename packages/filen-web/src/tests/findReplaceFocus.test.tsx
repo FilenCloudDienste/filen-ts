@@ -17,7 +17,7 @@ afterEach(() => {
 	cleanup()
 })
 
-function Bar({ matches }: { matches: number }) {
+function Bar({ matches, replaceOpen }: { matches: number; replaceOpen?: boolean }) {
 	const [count, setCount] = useState(matches)
 	const find: DocxFindControls = {
 		query: "old",
@@ -44,7 +44,7 @@ function Bar({ matches }: { matches: number }) {
 			find={find}
 			focus={0}
 			onClosed={() => undefined}
-			replaceOpen
+			replaceOpen={replaceOpen ?? true}
 		/>
 	)
 }
@@ -70,5 +70,27 @@ describe("the find bar after a replace", () => {
 		fireEvent.click(replace)
 
 		expect(document.activeElement).toBe(screen.getByRole("searchbox", { name: "Find" }))
+	})
+})
+
+// editor.replace (Mod+Alt+F) in the find field shows the replace field and moves there, as the ribbon's Replace does.
+describe("the replace key in the find field", () => {
+	it("opens the replace field and focuses it", () => {
+		render(
+			<Bar
+				matches={2}
+				replaceOpen={false}
+			/>
+		)
+
+		const field = screen.getByRole("searchbox", { name: "Find" })
+
+		field.focus()
+		expect(screen.queryByRole("textbox", { name: "Replace with" })).toBeNull()
+
+		const accepted = fireEvent.keyDown(field, { key: "f", code: "KeyF", ctrlKey: true, altKey: true })
+
+		expect(accepted).toBe(false)
+		expect(document.activeElement).toBe(screen.getByRole("textbox", { name: "Replace with" }))
 	})
 })

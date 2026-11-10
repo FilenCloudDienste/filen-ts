@@ -24,6 +24,7 @@ import {
 	type PresentationActionPolicy,
 	type PresentationJump
 } from "../links"
+import { DEFAULT_SHOW_BINDINGS, showKeyCommand, type ShowKeyBindings } from "../presenter/keys"
 import type { PaintedSlide, SlidePainter } from "../SlideView"
 import type { ShowController, ShowEvent, ShowEventType, ShowFrom, ShowMirror, ShowScreen, ShowStart } from "./controller"
 import { layerBoxes, layerIndices, layerPlanOf, layerTree } from "./layers"
@@ -63,6 +64,8 @@ export interface PlayerProps {
 	readonly media: ShowMediaMount | undefined
 	readonly onSlide: ((index: number) => void) | undefined
 	readonly onEnd: () => void
+	// The show's keys (the defaults when absent): a key moved off a command no longer runs it.
+	readonly bindings: ShowKeyBindings | undefined
 	readonly labels: {
 		readonly action: (action: Action, layer: SlideLayer) => string
 		readonly trigger: (layer: SlideLayer) => string
@@ -248,8 +251,6 @@ const REDRAW_RATIO = 1.25
 export const SHOW_HELD_BYTES = 256 * 1024 * 1024
 // A transition also ends on a timer this long after its duration: animation frames never run in a hidden tab.
 const TRANSITION_GRACE_MS = 100
-const NEXT_KEYS = new Set(["ArrowRight", "ArrowDown", "PageDown", " ", "Enter", "n", "N"])
-const PREV_KEYS = new Set(["ArrowLeft", "ArrowUp", "PageUp", "Backspace", "p", "P"])
 // Media carried past their slide at once (the oldest stops first).
 const MAX_CARRIED = 4
 // PowerPoint's media keys: Alt+Up/Down volume, Alt+Shift+PageDown/PageUp 3 s, Alt+Shift+Right/Left 0.25 s.
@@ -670,20 +671,59 @@ export class ShowPlayer implements ShowController {
 			return "handled"
 		}
 
-		if (key === "Escape") this.end()
-		// The show's own keys are unmodified (Shift only for a letter's capital).
-		else if (event.altKey === true || event.ctrlKey === true || event.metaKey === true) return "ignored"
-		else if (/^[0-9]$/u.test(key)) return "typed"
-		else if (key === "Enter" && event.typed !== "") this.goto(Number(event.typed) - 1)
-		else if (NEXT_KEYS.has(key)) this.next()
-		else if (PREV_KEYS.has(key)) this.prev()
-		else if (key === "Home") this.first()
-		else if (key === "End") this.last()
-		else if (key === "b" || key === "B" || key === ".") this.black()
-		else if (key === "w" || key === "W" || key === ",") this.white()
-		else return "ignored"
+		const modified = event.altKey === true || event.ctrlKey === true || event.metaKey === true
 
-		return "handled"
+		// A slide number typed and then Enter goes to that slide.
+		if (!modified && /^[0-9]$/u.test(key)) return "typed"
+
+		if (!modified && key === "Enter" && event.typed !== "") {
+			this.goto(Number(event.typed) - 1)
+
+			return "handled"
+		}
+
+		const command = showKeyCommand(
+			{
+				key,
+				code: event.code ?? "",
+				altKey: event.altKey === true,
+				ctrlKey: event.ctrlKey === true,
+				metaKey: event.metaKey === true,
+				shiftKey: event.shiftKey === true
+			},
+			this.props.bindings ?? DEFAULT_SHOW_BINDINGS,
+			isMacPlatform()
+		)
+
+		// Only the commands the player itself runs; the ink and pointer are the host's (presenter/keys.ts).
+		switch (command) {
+			case "next":
+				this.next()
+				return "handled"
+			case "previous":
+				this.prev()
+				return "handled"
+			case "first":
+				this.first()
+				return "handled"
+			case "last":
+				this.last()
+				return "handled"
+			case "nextHidden":
+				this.nextHidden()
+				return "handled"
+			case "black":
+				this.black()
+				return "handled"
+			case "white":
+				this.white()
+				return "handled"
+			case "end":
+				this.end()
+				return "handled"
+			default:
+				return "ignored"
+		}
 	}
 
 	// A plain click on the stage (not on a target): the next step, except in a kiosk. With the slide's "On Mouse Click"

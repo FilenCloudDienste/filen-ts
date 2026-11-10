@@ -6,6 +6,7 @@ import { photosGridKeyAction, photosRangeSelection } from "@/features/photos/com
 import { type PhotoItem } from "@/features/photos/lib/captureSort"
 import { type PhotosTimeline } from "@/features/photos/lib/timeline"
 import { usePhotosStore } from "@/features/photos/store/usePhotosStore"
+import { hasCommandModifier } from "@/lib/rowKeys"
 
 interface UsePhotosGridNavParams {
 	items: PhotoItem[]
@@ -74,9 +75,15 @@ export function usePhotosGridNav({
 			return
 		}
 
+		// Ctrl, Cmd or Alt make the key some shortcut's; Shift extends a range with an arrow, and toggles or
+		// opens nothing.
+		if (hasCommandModifier(event)) {
+			return
+		}
+
 		const action = photosGridKeyAction(event.key, safeActiveIndex, items.length, timeline)
 
-		if (action.kind === "none") {
+		if (action.kind === "none" || ((action.kind === "toggle" || action.kind === "open") && event.shiftKey)) {
 			return
 		}
 

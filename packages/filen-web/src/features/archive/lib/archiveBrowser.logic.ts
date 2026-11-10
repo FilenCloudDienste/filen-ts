@@ -2,6 +2,7 @@ import type { ArchiveFormat } from "@filen/sdk-rs"
 import type { ErrorDTO } from "@/lib/sdk/errors"
 import { ENTRY_FLAG, ENTRY_KIND, type SkipReason } from "@/lib/sdk/archiveListing"
 import type { PreviewKey } from "@/lib/i18n"
+import { isMacPlatform } from "@filen/shared/keymap"
 import { listboxKeyTarget } from "@/features/drive/lib/listbox"
 import type { EntryStore } from "@/features/archive/lib/entryStore"
 import type { ListingPhase, ListingSnapshot, ListSummary } from "@/features/archive/lib/listingSession"
@@ -29,6 +30,8 @@ export const ARCHIVE_PROGRESS_DELAY_MS = 400
 export const ARCHIVE_SEARCH_DEBOUNCE_MS = 150
 // Breadcrumb levels shown below the root; any above them fold into "…".
 export const ARCHIVE_VISIBLE_CRUMBS = 3
+
+const IS_MAC = isMacPlatform()
 
 export type CursorMove = "up" | "down" | "home" | "end" | "pageUp" | "pageDown"
 
@@ -60,37 +63,42 @@ const MOVES: Readonly<Record<string, CursorMove>> = {
 }
 
 // What a key pressed on the list does; null leaves it to the overlay. ArrowLeft/ArrowRight are never
-// taken (they page the overlay), nor is Escape without a selection (it closes the overlay).
-export function browserKeyAction(event: KeyInput, hasSelection: boolean): BrowserKeyAction | null {
-	const mod = event.metaKey || event.ctrlKey
+// taken (they page the overlay), nor is Escape without a selection (it closes the overlay). Every key is
+// modifier-exact: Mod is the platform's own (Cmd on a Mac, Ctrl elsewhere), and a chord the table does
+// not name is some other shortcut's.
+export function browserKeyAction(event: KeyInput, hasSelection: boolean, mac = IS_MAC): BrowserKeyAction | null {
+	const command = event.ctrlKey || event.metaKey || event.altKey
+	const plain = !command && !event.shiftKey
+	const mod = (mac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey) && !event.altKey && !event.shiftKey
 
-	if (event.key === "ArrowUp" && event.altKey) {
+	if (event.key === "ArrowUp" && event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
 		return { type: "parent" }
 	}
 
 	const move = MOVES[event.key]
 
 	if (move !== undefined) {
-		return mod || event.altKey ? null : { type: "move", move, extend: event.shiftKey }
+		return command ? null : { type: "move", move, extend: event.shiftKey }
 	}
 
 	switch (event.key) {
 		case "Enter":
-			return mod ? null : { type: "open" }
+			return plain ? { type: "open" } : null
 		case "Backspace":
-			return mod ? null : { type: "parent" }
+			return plain ? { type: "parent" } : null
 		case " ":
-			return mod ? null : { type: "toggle" }
+			return plain ? { type: "toggle" } : null
 		case "Escape":
-			return hasSelection ? { type: "clear" } : null
+			return plain && hasSelection ? { type: "clear" } : null
+		// Shift types "/" on some layouts.
 		case "/":
-			return mod ? null : { type: "focusSearch" }
+			return command ? null : { type: "focusSearch" }
 		case "a":
 		case "A":
-			return mod && !event.shiftKey && !event.altKey ? { type: "selectAll" } : null
+			return mod ? { type: "selectAll" } : null
 		case "f":
 		case "F":
-			return mod && !event.shiftKey && !event.altKey ? { type: "focusSearch" } : null
+			return mod ? { type: "focusSearch" } : null
 		default:
 			return null
 	}

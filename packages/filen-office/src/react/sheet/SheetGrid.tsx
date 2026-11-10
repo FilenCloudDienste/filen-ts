@@ -42,7 +42,7 @@ import {
 	type DragDrop
 } from "./cellDrag"
 import type { SheetMoveCommand } from "../../core/sheet/move/plan"
-import { isImeKeydown } from "./ime"
+import { isImeKeydown } from "@filen/shared/keymap"
 import {
 	APP_SHORTCUTS,
 	EDITOR_SHORTCUTS,
@@ -2029,6 +2029,17 @@ export function SheetGrid({
 			return
 		}
 
+		// An input method's key, or a dead key, is no shortcut: an empty entry opens and takes focus before the key's
+		// default runs, so what it composes lands in the entry. A chartsheet has no cell to enter.
+		if (isImeKeydown(event.nativeEvent) || event.key === "Dead") {
+			if (!cellless)
+				flushSync(() => {
+					grid.startEditing("", "enter")
+				})
+
+			return
+		}
+
 		const shortcut = shortcutOf(event, onMac)
 
 		// A chartsheet's keys move to nothing, enter nothing and select nothing; Ctrl+Y redoes, never repeats on cells.
@@ -2081,8 +2092,11 @@ export function SheetGrid({
 			const tabOrigin = grid.tabOrigin()
 			const move = keyMove(event, currentSelection, axes, current, grid.merges(current), renderer.pageRows(), tabOrigin)
 
+			// A move is the grid's alone: Mod+Shift+Arrow selects to the edge, and must not also reach the page's own keys
+			// (the audio player's skip).
 			if (move !== null) {
 				event.preventDefault()
+				event.stopPropagation()
 
 				if (move.kind === "navigate") {
 					navigate(move.direction, move.extend)
@@ -2136,16 +2150,6 @@ export function SheetGrid({
 		if (event.key === "Backspace") {
 			event.preventDefault()
 			grid.startEditing("", "enter")
-
-			return
-		}
-
-		// An input method's key, or a dead key: an empty entry opens and takes focus before the key's default runs,
-		// so what it composes lands in the entry.
-		if (isImeKeydown(event.nativeEvent) || event.key === "Dead") {
-			flushSync(() => {
-				grid.startEditing("", "enter")
-			})
 
 			return
 		}

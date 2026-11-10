@@ -17,7 +17,7 @@ const { uploadFileBytes, nameTakenInDirectory, driveListingQueryUpdate, cachedLi
 )
 
 // The New menu's New directory shortcut; registering it needs the drive keymap, which this file never loads.
-vi.mock("@/lib/keymap/useAction", () => ({ useAction: vi.fn() }))
+vi.mock("@/lib/keymap/useAction", () => ({ useAction: vi.fn(), OUTSIDE_OVERLAYS: {} }))
 vi.mock("@/lib/sdk/client", () => ({ sdkApi: { uploadFileBytes } }))
 vi.mock("@/features/drive/lib/nameTaken", () => ({ nameTakenInDirectory }))
 vi.mock("@/features/drive/queries/drive", async importOriginal => ({

@@ -6,7 +6,7 @@ import { createElement } from "react"
 
 // The Paste entry's shortcut badge, reduced to its action id (the registry isn't loaded here).
 // The New menu's New directory shortcut; registering it needs the drive keymap, which this file never loads.
-vi.mock("@/lib/keymap/useAction", () => ({ useAction: vi.fn() }))
+vi.mock("@/lib/keymap/useAction", () => ({ useAction: vi.fn(), OUTSIDE_OVERLAYS: {} }))
 vi.mock("@/lib/keymap/kbd", async () => {
 	const { createElement: element } = await import("react")
 	return { Kbd: ({ action }: { action: string }) => element("span", null, ` ${action}`) }

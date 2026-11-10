@@ -1,3 +1,4 @@
+import { isImeKeydown } from "@filen/shared/keymap"
 import { useState, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import {
@@ -134,6 +135,10 @@ export function PageControls({
 					}}
 					onBlur={commit}
 					onKeyDown={event => {
+						if (isImeKeydown(event.nativeEvent)) {
+							return
+						}
+
 						if (event.key === "Enter") {
 							event.preventDefault()
 							commit()

@@ -1,7 +1,7 @@
 import { pathIsUnder } from "@/features/shell/lib/appShell.logic"
 import { activeRailChild } from "@/features/shell/lib/railGroups.logic"
 
-// The icon rail's reorderable links, groups included. The logo above them and the transfers/help/account
+// The icon rail's reorderable links, groups included. The logo above them and the transfers/assistant/account
 // footer below stay put.
 export const RAIL_ENTRY_IDS = ["drive", "media", "notes", "chats", "contacts", "computer", "settings"] as const
 

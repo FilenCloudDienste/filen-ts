@@ -56,25 +56,34 @@ export function CodeSurface({ file, tag, alt, editable, locked, onDirtyChange, c
 	const download = usePreviewDownload()
 	const rootRef = useRef<HTMLDivElement | null>(null)
 
-	// Find with focus on the bar or beside the editor; in the editor its own keymap answered already.
+	// Find and replace with focus on the bar or beside the editor; in the editor its own keymap answered
+	// already. Replace opens the find bar alone where the file is read-only, as the editor's own key does.
+	const onFindKey = (keyboardEvent: KeyboardEvent, replace: boolean): void => {
+		const root = rootRef.current
+
+		if (root === null || keyboardEvent.defaultPrevented || !keyForEditor(root, keyboardEvent.target)) {
+			return
+		}
+
+		keyboardEvent.preventDefault()
+		chrome.find.open(replace && editable)
+	}
+
 	useAction(
 		"editor.find",
 		keyboardEvent => {
-			const root = rootRef.current
-
-			if (root === null || keyboardEvent.defaultPrevented) {
-				return
-			}
-
-			if (!keyForEditor(root, keyboardEvent.target)) {
-				return
-			}
-
-			keyboardEvent.preventDefault()
-			chrome.find.open(false)
+			onFindKey(keyboardEvent, false)
 		},
 		IN_EDITORS,
 		[chrome]
+	)
+	useAction(
+		"editor.replace",
+		keyboardEvent => {
+			onFindKey(keyboardEvent, true)
+		},
+		IN_EDITORS,
+		[chrome, editable]
 	)
 
 	useEffect(() => {

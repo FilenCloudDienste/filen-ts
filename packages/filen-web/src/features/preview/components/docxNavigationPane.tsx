@@ -1,3 +1,4 @@
+import { isImeKeydown } from "@filen/shared/keymap"
 import { useEffect, useRef, useState, useSyncExternalStore, type DragEvent, type RefObject } from "react"
 import { useTranslation } from "react-i18next"
 import { useVirtualizer } from "@tanstack/react-virtual"
@@ -193,6 +194,11 @@ export function DocxNavigationPane(props: DocxNavigationPaneProps) {
 							}
 						}}
 						onKeyDown={event => {
+							// An input method's Enter commits its text and its Escape cancels it.
+							if (isImeKeydown(event.nativeEvent)) {
+								return
+							}
+
 							if (event.key === "Enter") {
 								event.preventDefault()
 								find.step(event.shiftKey ? -1 : 1)

@@ -1,8 +1,7 @@
 /* eslint-disable react-refresh/only-export-components */
 import * as React from "react"
 import { DEFAULT_THEME_SETTING, isThemeSetting, type ThemeSetting } from "@filen/shared"
-import { useAction } from "@/lib/keymap/useAction"
-import { isAnyDialogOpen } from "@/lib/keymap/dialogGuard"
+import { OUTSIDE_OVERLAYS, useAction } from "@/lib/keymap/useAction"
 import { syncTitleBarColors } from "@/lib/desktop"
 
 export type Theme = ThemeSetting
@@ -29,6 +28,15 @@ function getSystemTheme(): ResolvedTheme {
 
 export function resolveTheme(theme: Theme): ResolvedTheme {
 	return theme === "system" ? getSystemTheme() : theme
+}
+
+// The other look than the one shown. When that is the system's own, the setting goes back to following the system,
+// so toggling twice returns to where it started.
+export function toggledTheme(current: Theme, system: ResolvedTheme): Theme {
+	const shown = current === "system" ? system : current
+	const next = shown === "dark" ? "light" : "dark"
+
+	return next === system ? "system" : next
 }
 
 function disableTransitionsTemporarily() {
@@ -74,7 +82,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 
 	const toggleTheme = () => {
 		setThemeState(currentTheme => {
-			const nextTheme = resolveTheme(currentTheme) === "dark" ? "light" : "dark"
+			const nextTheme = toggledTheme(currentTheme, getSystemTheme())
 
 			localStorage.setItem(STORAGE_KEY, nextTheme)
 			return nextTheme
@@ -109,15 +117,15 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 	// overlay's rendered-markdown or read-only-CodeMirror panes: neither is a form tag, and neither
 	// sets `contenteditable`), so this provider — mounted above the whole app, outside the drive
 	// feature's own isDialogOpen chain (directoryListing.tsx/useDriveDialogHost.tsx) — additionally
-	// guards on isAnyDialogOpen(), the shared Base UI signal (see dialogGuard.ts) that catches the
-	// preview overlay the same way it catches every other modal dialog.
-	useAction("app.toggleTheme", () => {
-		if (isAnyDialogOpen()) {
-			return
-		}
-
-		toggleTheme()
-	})
+	// stands down under any open dialog or menu (OUTSIDE_OVERLAYS, the shared Base UI signal in
+	// dialogGuard.ts), which catches the preview overlay the same way it catches every other dialog.
+	useAction(
+		"app.toggleTheme",
+		() => {
+			toggleTheme()
+		},
+		OUTSIDE_OVERLAYS
+	)
 
 	React.useEffect(() => {
 		const handleStorageChange = (event: StorageEvent) => {

@@ -9,9 +9,11 @@ import { createElement, type ReactNode } from "react"
 import type { Note } from "@filen/sdk-rs"
 import type { NoteEditorController } from "@/features/notes/hooks/useNoteEditor"
 
-const { renderedPreviews, actions } = vi.hoisted(() => ({
+const { renderedPreviews, actions, actionOptions, overlayGuard } = vi.hoisted(() => ({
 	renderedPreviews: [] as string[],
-	actions: new Map<string, (event: KeyboardEvent) => void>()
+	actions: new Map<string, (event: KeyboardEvent) => void>(),
+	actionOptions: new Map<string, unknown>(),
+	overlayGuard: () => true
 }))
 
 vi.mock("@/features/preview/components/codeMirrorSource", () => ({
@@ -38,9 +40,11 @@ vi.mock("@/features/notes/components/markdownSplitPane", () => ({
 }))
 
 vi.mock("@/lib/keymap/useAction", () => ({
-	IN_EDITORS: {},
-	useAction: (id: string, handler: (event: KeyboardEvent) => void) => {
+	IN_EDITORS: { enableOnContentEditable: true },
+	OUTSIDE_OVERLAYS: { ignoreEventWhen: overlayGuard },
+	useAction: (id: string, handler: (event: KeyboardEvent) => void, options?: unknown) => {
 		actions.set(id, handler)
+		actionOptions.set(id, options)
 	}
 }))
 
@@ -130,5 +134,12 @@ describe("NoteMarkdownEditor — preview", () => {
 		togglePreview()
 
 		expect(screen.getByRole("status").textContent).toBe("# hidden edit")
+	})
+})
+
+// A dialog or menu over the note keeps the key (Ctrl+Shift+V pastes there): the guard runs before any preventDefault.
+describe("NoteMarkdownEditor — preview key", () => {
+	it("works in the editor and stands down under an open dialog or menu", () => {
+		expect(actionOptions.get("editor.togglePreview")).toEqual({ enableOnContentEditable: true, ignoreEventWhen: overlayGuard })
 	})
 })

@@ -12,6 +12,7 @@ import { useTranslation } from "react-i18next"
 import { preview } from "@/locales/en/preview"
 import { CheckIcon, MessageSquareTextIcon, MoreHorizontalIcon, XIcon } from "lucide-react"
 import { cn } from "@filen/shared"
+import { isImeKeydown, isMacPlatform, matchesCombo } from "@filen/shared/keymap"
 import type { DocxEditorCommand } from "@filen/office/core/docx/edit"
 import type { DocxCommentThread, DocxComment as LiveComment, EditAnnotationRevision, PagedEditor } from "@filen/office/core/docx/paged"
 import { markupInfo, revisionColor, type DocxMarkupMode } from "@filen/office/dom/docx"
@@ -38,6 +39,8 @@ import { Button } from "@/components/ui/button"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { useLatestRef } from "@/lib/useLatestRef"
+
+const IS_MAC = isMacPlatform()
 
 // Takes comment.add input requests (a new comment composed at the selection).
 export interface DocxReviewLayerProps extends DocxInputChannelProps {
@@ -96,9 +99,14 @@ function commentDate(comment: LiveComment): string {
 	return reviewDate(comment.dateUtc ?? comment.date)
 }
 
-// Ctrl/Cmd+Enter submits a comment field, Escape cancels it.
+// Mod+Enter (Cmd on a Mac, Ctrl elsewhere) submits a comment field, Escape cancels it; neither while an input method
+// composes, whose Enter commits its text and whose Escape cancels it.
 function fieldKeys(event: KeyboardEvent<HTMLTextAreaElement>, submit: () => void, cancel: () => void): void {
-	if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+	if (isImeKeydown(event.nativeEvent)) {
+		return
+	}
+
+	if (matchesCombo(event, "mod+enter", IS_MAC)) {
 		event.preventDefault()
 		submit()
 	} else if (event.key === "Escape") {

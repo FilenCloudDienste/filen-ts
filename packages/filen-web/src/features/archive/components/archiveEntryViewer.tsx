@@ -1,3 +1,4 @@
+import { isImeKeydown } from "@filen/shared/keymap"
 import { useState, type KeyboardEvent } from "react"
 import { useTranslation } from "react-i18next"
 import { ArrowLeftIcon, DownloadIcon } from "lucide-react"
@@ -81,6 +82,7 @@ export function ArchiveEntryViewer({
 		if (
 			event.key !== "Escape" ||
 			event.defaultPrevented ||
+			isImeKeydown(event.nativeEvent) ||
 			!(event.target instanceof Node) ||
 			!event.currentTarget.contains(event.target)
 		) {

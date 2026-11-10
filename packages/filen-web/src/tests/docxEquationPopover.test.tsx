@@ -235,7 +235,12 @@ describe("DocxEquationPopover", () => {
 		const first = renderPopover(editing, { press: pressOn(pos) })
 
 		fireEvent.change(field(), { target: { value: "x^3" } })
-		fireEvent.keyDown(field(), { key: "Enter", metaKey: true })
+		// Mod is the platform's own and the chord exact; an input method's Enter is its own.
+		fireEvent.keyDown(field(), { key: "Enter", code: "Enter", metaKey: true })
+		fireEvent.keyDown(field(), { key: "Enter", code: "Enter", ctrlKey: true, shiftKey: true })
+		fireEvent.keyDown(field(), { key: "Enter", code: "Enter", ctrlKey: true, isComposing: true })
+		expect(first.execute).not.toHaveBeenCalled()
+		fireEvent.keyDown(field(), { key: "Enter", code: "Enter", ctrlKey: true })
 		expect(first.execute).toHaveBeenCalledWith({ type: "equation.edit", latex: "x^3" })
 
 		cleanup()

@@ -78,12 +78,32 @@ describe("browserKeyAction", () => {
 		expect(browserKeyAction(key(" "), false)).toEqual({ type: "toggle" })
 		expect(browserKeyAction(key("Backspace"), false)).toEqual({ type: "parent" })
 		expect(browserKeyAction(key("ArrowUp", { altKey: true }), false)).toEqual({ type: "parent" })
-		expect(browserKeyAction(key("a", { metaKey: true }), false)).toEqual({ type: "selectAll" })
-		expect(browserKeyAction(key("a", { ctrlKey: true }), false)).toEqual({ type: "selectAll" })
+		expect(browserKeyAction(key("a", { metaKey: true }), false, true)).toEqual({ type: "selectAll" })
+		expect(browserKeyAction(key("a", { ctrlKey: true }), false, false)).toEqual({ type: "selectAll" })
 		expect(browserKeyAction(key("a"), false)).toBeNull()
-		expect(browserKeyAction(key("f", { ctrlKey: true }), false)).toEqual({ type: "focusSearch" })
+		expect(browserKeyAction(key("f", { ctrlKey: true }), false, false)).toEqual({ type: "focusSearch" })
 		expect(browserKeyAction(key("/"), false)).toEqual({ type: "focusSearch" })
 		expect(browserKeyAction(key("Tab"), false)).toBeNull()
+	})
+
+	// Mod is the platform's own: Ctrl+A on a Mac and Cmd+A elsewhere are some other shortcut's.
+	it("selects all and finds on the platform's Mod only", () => {
+		expect(browserKeyAction(key("a", { ctrlKey: true }), false, true)).toBeNull()
+		expect(browserKeyAction(key("a", { metaKey: true }), false, false)).toBeNull()
+		expect(browserKeyAction(key("f", { ctrlKey: true }), false, true)).toBeNull()
+		expect(browserKeyAction(key("a", { ctrlKey: true, shiftKey: true }), false, false)).toBeNull()
+	})
+
+	// A chord with Enter, Space, Backspace or Escape is some shortcut's, never the list's.
+	it("takes Enter, Space, Backspace and Escape unmodified only", () => {
+		for (const modifier of ["shiftKey", "ctrlKey", "metaKey", "altKey"] as const) {
+			expect(browserKeyAction(key("Enter", { [modifier]: true }), false)).toBeNull()
+			expect(browserKeyAction(key(" ", { [modifier]: true }), false)).toBeNull()
+			expect(browserKeyAction(key("Backspace", { [modifier]: true }), false)).toBeNull()
+			expect(browserKeyAction(key("Escape", { [modifier]: true }), true)).toBeNull()
+		}
+
+		expect(browserKeyAction(key("ArrowUp", { altKey: true, shiftKey: true }), false)).toBeNull()
 	})
 })
 

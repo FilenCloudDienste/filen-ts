@@ -392,15 +392,17 @@ export function useDeckPresentation({
 			return true
 		}
 
-		if (count === 0 || event.repeat) return false
+		if (count === 0) return false
 
 		const command = showKeyCommand(event, bindings, isMacPlatform())
 
 		if (command !== "start" && command !== "startCurrent") return false
 
+		// A held F5 starts the show once and never reloads the page on its repeats.
 		event.preventDefault()
 		event.stopPropagation()
-		startShowFrom(command === "start" ? undefined : { index })
+
+		if (!event.repeat) startShowFrom(command === "start" ? undefined : { index })
 
 		return true
 	}

@@ -9,7 +9,7 @@ import { mediaSessionOwners } from "@/lib/media/mediaSessionOwner"
 
 // The audio engine's share of the page's Media Session: the bottom of the owner stack. A video player taking
 // the session over pauses the engine; when it lets go the engine's metadata and handlers come back.
-const audioMediaSession = mediaSessionOwners.create("audio", {
+export const audioMediaSession = mediaSessionOwners.create("audio", {
 	onPreempt: () => {
 		audioEngine.pause()
 	}

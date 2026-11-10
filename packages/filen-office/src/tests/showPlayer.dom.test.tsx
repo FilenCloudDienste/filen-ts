@@ -13,12 +13,14 @@ import { layerParents, showLayerIndex } from "../dom/presentation/engine/show"
 import type { PresentationActionPolicy } from "../react/presentation/links"
 import type { ShowController, ShowEvent } from "../react/presentation/show/controller"
 import { layerTree } from "../react/presentation/show/layers"
+import { DEFAULT_SHOW_BINDINGS, type ShowKeyBindings } from "../react/presentation/presenter/keys"
 import { SlideShow } from "../react/presentation/show/player"
 import { POINTER_IDLE_MS } from "../react/presentation/show/pointer"
 import { buildStageSlide, type ShowMediaMount } from "../react/presentation/show/stage"
 import { SlideView, type SlidePainter } from "../react/presentation/SlideView"
 import { TimingBuilder } from "./animFixtures"
 import { budget, cpuMs } from "./timing"
+import { codeOf } from "./showKeyFixtures"
 
 // Every timeline sample the player takes.
 const sampling = vi.hoisted(() => ({ count: 0 }))
@@ -214,6 +216,7 @@ async function mount(
 		media?: ShowMediaMount
 		// The pointer's idle timer off, for counting the player's own timers.
 		keepPointer?: true
+		bindings?: ShowKeyBindings
 	} = {}
 ): Promise<Mounted> {
 	const { api, plans } = session(specs, extra.background)
@@ -236,6 +239,7 @@ async function mount(
 				{...(extra.overlay === undefined ? {} : { overlay: extra.overlay })}
 				{...(extra.media === undefined ? {} : { media: extra.media })}
 				{...(extra.keepPointer === true ? { autoHidePointer: false } : {})}
+				{...(extra.bindings === undefined ? {} : { bindings: extra.bindings })}
 				onSlide={onSlide}
 				onEnd={onEnd}
 				label="Slide show"
@@ -264,7 +268,7 @@ async function mount(
 		stage,
 		key: key => {
 			act(() => {
-				stage.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }))
+				stage.dispatchEvent(new KeyboardEvent("keydown", { key, code: codeOf(key), bubbles: true }))
 			})
 		},
 		layerOf: (slide, index) => {
@@ -601,7 +605,7 @@ describe("SlideShow", () => {
 		expect(jump?.isConnected).toBe(false)
 		expect(document.activeElement).toBe(show.stage)
 		act(() => {
-			document.activeElement?.dispatchEvent(new KeyboardEvent("keydown", { key: "n", bubbles: true }))
+			document.activeElement?.dispatchEvent(new KeyboardEvent("keydown", { key: "n", code: "KeyN", bubbles: true }))
 		})
 		await settle(1000)
 		expect(show.onSlide).toHaveBeenLastCalledWith(3)
@@ -769,10 +773,31 @@ describe("SlideView in the editor", () => {
 
 		act(() => button?.click())
 		// Enter on the focused control presses it; the show does not take it as next.
-		act(() => button?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })))
+		act(() => button?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", code: "Enter", bubbles: true })))
 		await settle()
 		expect(tool).toHaveBeenCalledTimes(1)
 		expect(show.onSlide).toHaveBeenLastCalledWith(0)
+	})
+
+	// A user's rebind moves the command: the old key no longer runs it, on the stage as in the presenter view.
+	it("runs the show's commands on the keys bound to them, and no longer on a key moved off", async () => {
+		const show = await mount(new Map(), { bindings: { ...DEFAULT_SHOW_BINDINGS, next: "arrowright", end: "q" } })
+
+		show.key("n")
+		await settle()
+		expect(show.onSlide).toHaveBeenLastCalledWith(0)
+
+		show.key("Escape")
+		await settle()
+		expect(show.onEnd).not.toHaveBeenCalled()
+
+		show.key("ArrowRight")
+		await settle(1000)
+		expect(show.onSlide).toHaveBeenLastCalledWith(1)
+
+		show.key("q")
+		await settle()
+		expect(show.onEnd).toHaveBeenCalledTimes(1)
 	})
 
 	it("keeps every key inside the stage, also those the show does not use", async () => {

@@ -1,3 +1,4 @@
+import { isImeKeydown } from "@filen/shared/keymap"
 import { useEffect, useId, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { useNavigate } from "@tanstack/react-router"
@@ -353,7 +354,12 @@ export function AddPairDialog({ onClose }: { onClose: () => void }) {
 								setFields(previous => ({ ...previous, name }))
 							}}
 							onKeyDown={event => {
-								if (event.key === "Enter" && canAdvance("name", form) && busy === null) {
+								if (
+									event.key === "Enter" &&
+									!isImeKeydown(event.nativeEvent) &&
+									canAdvance("name", form) &&
+									busy === null
+								) {
 									event.preventDefault()
 									void create()
 								}

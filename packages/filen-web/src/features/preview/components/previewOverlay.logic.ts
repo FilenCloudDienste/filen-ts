@@ -41,6 +41,23 @@ export function isTextEditingTarget(target: EventTarget | null): boolean {
 	return hasClosest(target) && target.closest(`.cm-editor, input, textarea, ${PREVIEW_SURFACE}`) !== null
 }
 
+// The file the overlay's own ArrowLeft/ArrowRight step to, or null when the key is not the pager's. A key something
+// inside took already (a ribbon's or a toolbar's roving focus cancels it without stopping it) is not, nor one with
+// Ctrl, Alt or Cmd: that is what has focus's (a word or line jump, an editor's own command, the browser's).
+export function pagerStep(event: {
+	readonly key: string
+	readonly defaultPrevented: boolean
+	readonly altKey: boolean
+	readonly ctrlKey: boolean
+	readonly metaKey: boolean
+}): -1 | 1 | null {
+	if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) {
+		return null
+	}
+
+	return event.key === "ArrowLeft" ? -1 : event.key === "ArrowRight" ? 1 : null
+}
+
 // What close/prev/next resolve to once an unsaved-changes prompt is answered — the SAME confirm dialog
 // serves all three trigger points (Escape/backdrop/X, the two pager buttons, and the in-dialog arrow
 // keys), so this is the only state needed to remember which of them was actually requested. "replace":

@@ -35,7 +35,7 @@ vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
 vi.mock("sonner", () => ({ toast }))
 // useDialogHost closes on navigation, so it reads the current href off the router.
 vi.mock("@tanstack/react-router", () => ({ useNavigate: () => vi.fn(), useRouterState: () => "/contacts" }))
-vi.mock("@/lib/keymap/useAction", () => ({ useAction: vi.fn() }))
+vi.mock("@/lib/keymap/useAction", () => ({ useAction: vi.fn(), OUTSIDE_OVERLAYS: {} }))
 vi.mock("@/lib/useIsOnline", () => ({ useIsOnline: () => true }))
 
 // The selection hook has its own test file; here it is a stand-in so a multi-row selection can be set up

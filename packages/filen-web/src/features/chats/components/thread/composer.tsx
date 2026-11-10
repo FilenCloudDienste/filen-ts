@@ -5,6 +5,7 @@ import { useNavigate } from "@tanstack/react-router"
 import { ArrowUpIcon, PlusIcon, UploadIcon, HardDriveIcon, SparklesIcon } from "lucide-react"
 import type { Chat, ChatMessage, ChatParticipant } from "@filen/sdk-rs"
 import { cn, isProAccount } from "@filen/shared"
+import { isImeKeydown } from "@filen/shared/keymap"
 import { noop } from "@/lib/utils"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { enqueueChatMessage } from "@/features/chats/lib/sync"
@@ -449,6 +450,11 @@ export function Composer({
 	}
 
 	function onKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>): void {
+		// A key an input method composes with is the composition's: its Enter commits the text, never sends it.
+		if (isImeKeydown(event.nativeEvent)) {
+			return
+		}
+
 		if (suggestCount > 0) {
 			if (event.key === "ArrowDown") {
 				event.preventDefault()

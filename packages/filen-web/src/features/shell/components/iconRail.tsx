@@ -51,6 +51,7 @@ import { AssistantToggle } from "@/features/assistant/components/assistantToggle
 import { RailGroup } from "@/features/shell/components/railGroup"
 import { TransfersRing } from "@/features/shell/components/transfersRing"
 import { railItemClass } from "@/features/shell/lib/railItem"
+import { settingsRoute } from "@/features/shell/lib/railGroups.logic"
 import { useSyncAggregate } from "@/features/sync/lib/syncStore"
 import { useMountsAggregate } from "@/features/mounts/lib/mountsStore"
 import { useTheme } from "@/providers/themeProvider"
@@ -70,8 +71,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 import { ShortcutsDialog } from "@/lib/keymap/shortcutsDialog"
-import { useAction } from "@/lib/keymap/useAction"
-import { isAnyDialogOpen } from "@/lib/keymap/dialogGuard"
+import { OUTSIDE_OVERLAYS, useAction } from "@/lib/keymap/useAction"
 import { Kbd } from "@/lib/keymap/kbd"
 
 // macOS desktop: the rail holds the native traffic lights.
@@ -106,15 +106,15 @@ function AccountMenu() {
 	const { now, notice: withdrawal } = useWithdrawalNotice(IS_DESKTOP ? NO_SUBS : (accountQuery.data?.subs ?? NO_SUBS))
 	const withdrawUntil = withdrawal?.until
 
-	// Same guard as the rail's route-nav actions (useNavigateAction): an open dialog owns the
+	// Same guard as the rail's route-nav actions (useNavigateAction): an open dialog or menu owns the
 	// keyboard, so the overlay never stacks on top of one.
-	useAction("app.openShortcuts", () => {
-		if (isAnyDialogOpen()) {
-			return
-		}
-
-		setShortcutsOpen(true)
-	})
+	useAction(
+		"app.openShortcuts",
+		() => {
+			setShortcutsOpen(true)
+		},
+		OUTSIDE_OVERLAYS
+	)
 
 	async function handleSignOut(): Promise<void> {
 		setPending(true)
@@ -198,7 +198,7 @@ function AccountMenu() {
 						    master keys are not exported it leads to Security and says why, not by colour alone. */}
 						<DropdownMenuItem
 							onClick={() => {
-								void navigate({ to: keysNotExported ? "/settings/security" : "/settings/account" })
+								void navigate({ to: settingsRoute(keysNotExported) })
 							}}
 						>
 							<SettingsIcon />
@@ -492,7 +492,7 @@ function SettingsEntry({ active, reordering }: RailEntryProps) {
 				reordering={reordering}
 				label={label}
 				icon={SettingsIcon}
-				linkOptions={{ to: "/settings/account" }}
+				linkOptions={{ to: settingsRoute(false) }}
 			/>
 		)
 	}
@@ -506,7 +506,7 @@ function SettingsEntry({ active, reordering }: RailEntryProps) {
 			label={label}
 			ariaLabel={t("railGroupWithStatus", { group: label, status })}
 			icon={SettingsIcon}
-			linkOptions={{ to: "/settings/security" }}
+			linkOptions={{ to: settingsRoute(true) }}
 			tooltipExtra={<RailTooltipDetail>{status}</RailTooltipDetail>}
 		>
 			<RailStatusDot
@@ -529,22 +529,20 @@ const RAIL_ENTRIES: Record<RailEntryId, (props: RailEntryProps) => ReactElement>
 
 // Registered at module scope (default unassigned) — this only wires the LIVE combo, which starts as ""
 // (react-hotkeys-hook's parser treats it as "never matches") and works the instant a user rebinds it,
-// with no further code change. Guarded on isAnyDialogOpen() (dialogGuard.ts, the same shared Base UI
-// signal themeProvider.tsx uses — this rail is mounted outside the drive feature's own isDialogOpen
-// chain too) so a rebound combo can't navigate away out from under an open dialog/preview.
-function useNavigateAction(id: string, to: "/settings/account" | "/transfers" | "/playlists" | "/photos" | "/videos"): void {
+// with no further code change. Stands down under any open dialog or menu (OUTSIDE_OVERLAYS) so a
+// rebound combo can't navigate away out from under it.
+function useNavigateAction(
+	id: string,
+	to: "/settings/account" | "/settings/security" | "/transfers" | "/playlists" | "/photos" | "/videos"
+): void {
 	const navigate = useNavigate()
 
 	useAction(
 		id,
 		() => {
-			if (isAnyDialogOpen()) {
-				return
-			}
-
 			void navigate({ to })
 		},
-		undefined,
+		OUTSIDE_OVERLAYS,
 		[navigate, to]
 	)
 }
@@ -585,7 +583,9 @@ export function IconRail() {
 	const [entryList, setEntryList] = useState<HTMLDivElement | null>(null)
 	const entriesScroll = useOverflowsY(entryList, order.length)
 
-	useNavigateAction("app.openSettings", "/settings/account")
+	const keysNotExported = useMasterKeysNotExported()
+
+	useNavigateAction("app.openSettings", settingsRoute(keysNotExported))
 	useNavigateAction("app.openTransfers", "/transfers")
 	useNavigateAction("app.openPlaylists", "/playlists")
 	useNavigateAction("app.openPhotos", "/photos")

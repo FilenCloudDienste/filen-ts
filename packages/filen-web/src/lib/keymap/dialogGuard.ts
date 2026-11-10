@@ -50,6 +50,18 @@ export function isAnyOverlayOpen(): boolean {
 	return document.querySelector(OPEN_OVERLAY_SELECTOR) !== null
 }
 
+// Whether a dialog or menu is open other than the one holding `node`: a drawer's own toggle may close it, but not
+// from under a confirm the drawer opened.
+export function isOverlayOpenBesides(node: Element | null): boolean {
+	for (const overlay of document.querySelectorAll(OPEN_OVERLAY_SELECTOR)) {
+		if (node === null || !overlay.contains(node)) {
+			return true
+		}
+	}
+
+	return false
+}
+
 // Whether a key pressed with focus on `target` is for the editor at `root`: pressed in the editor, or anywhere else in
 // the layer the editor is shown in (the preview overlay, which Safari and macOS Firefox leave focused after a click),
 // but never in a native field outside the editor, which owns the key, nor in a dialog over the editor.

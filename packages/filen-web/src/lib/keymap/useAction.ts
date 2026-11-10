@@ -1,8 +1,9 @@
 import type { DependencyList, RefCallback } from "react"
 import { useHotkeys, type HotkeyCallback, type Options } from "react-hotkeys-hook"
 import { isRecordingCombo, useComboFor } from "@/lib/keymap/registry"
-import { typedWithAltGraph, type ChordEvent } from "@filen/shared/keymap"
+import { isImeKeydown, typedWithAltGraph, type ChordEvent } from "@filen/shared/keymap"
 import { useMenuAction } from "@/lib/keymap/desktopMenu"
+import { isAnyOverlayOpen } from "@/lib/keymap/dialogGuard"
 import { isMacPlatform } from "@/lib/keymap/kbd.logic"
 
 const IS_MAC = isMacPlatform()
@@ -12,10 +13,22 @@ const IS_MAC = isMacPlatform()
 // react-hotkeys-hook's `(e: KeyboardEvent) => boolean` by contravariance. A character typed with AltGr
 // is text: the library rejects AltGr only for chords without Ctrl, Alt or Mod, so a Ctrl+Alt chord would
 // otherwise fire while typing "@" or "ó" on Windows (@filen/shared/keymap applies the same rule to every
-// other matcher).
-export function shouldIgnoreEvent(event: Pick<KeyboardEvent, "repeat"> & Pick<ChordEvent, "key" | "getModifierState">): boolean {
-	return event.repeat || isRecordingCombo() || typedWithAltGraph(event, IS_MAC)
+// other matcher). A key an input method is composing with is the composition's, in an editor too.
+export function shouldIgnoreEvent(
+	event: Pick<KeyboardEvent, "repeat"> & Parameters<typeof isImeKeydown>[0] & Pick<ChordEvent, "key" | "getModifierState">
+): boolean {
+	return event.repeat || isImeKeydown(event) || isRecordingCombo() || typedWithAltGraph(event, IS_MAC)
 }
+
+// shouldIgnoreEvent, and any open dialog or menu: that layer owns the keyboard.
+export function ignoredUnderOverlays(event: Parameters<typeof shouldIgnoreEvent>[0]): boolean {
+	return shouldIgnoreEvent(event) || isAnyOverlayOpen()
+}
+
+// For an action of the page under every dialog and menu (a listing, the shell): it stands down while one is open, and
+// the key keeps its default for that layer, as ignoreEventWhen runs before preventDefault. Not for an editor's actions,
+// which run in the preview dialog: those check their own layer (dialogGuard.ts keyForEditor).
+export const OUTSIDE_OVERLAYS: Options = { ignoreEventWhen: ignoredUnderOverlays }
 
 // Holding a key down re-fires the native `keydown` event with `repeat: true` on every OS-level
 // autorepeat tick — without this, a held combo would spam the action's handler instead of firing
@@ -90,9 +103,13 @@ export function useAction(
 	deps: DependencyList = []
 ): RefCallback<HTMLElement | null> {
 	const combo = useComboFor(id)
+	const merged: Options = { ...DEFAULT_OPTIONS, ...options }
 
-	// The macOS desktop menu runs the same handler.
-	useMenuAction(id, handler)
+	// The macOS desktop menu runs the same handler, behind the same guard. A key the page runs is cancelled, or macOS
+	// would hand it to the menu as well (desktopMenu.ts cancelMenuRepeat).
+	if (useMenuAction(id, handler, merged.ignoreEventWhen)) {
+		merged.preventDefault = true
+	}
 
-	return useHotkeys<HTMLElement>(combo, handler, { ...DEFAULT_OPTIONS, ...options }, [combo, ...deps])
+	return useHotkeys<HTMLElement>(combo, handler, merged, [combo, ...deps])
 }

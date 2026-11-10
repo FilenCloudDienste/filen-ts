@@ -1,3 +1,4 @@
+import { isImeKeydown } from "@filen/shared/keymap"
 import { useEffect } from "react"
 import { useTranslation } from "react-i18next"
 import { CaptionsIcon, CropIcon, RotateCwIcon, Trash2Icon, WrapTextIcon } from "lucide-react"
@@ -85,7 +86,7 @@ export function DocxPictureCrop(props: DocxToolbarSlotProps) {
 				return
 			}
 
-			if (event.key === "Escape" || event.key === "Enter") {
+			if ((event.key === "Escape" || event.key === "Enter") && !isImeKeydown(event)) {
 				event.preventDefault()
 				event.stopPropagation()
 				setDrawingCrop(execute, null)

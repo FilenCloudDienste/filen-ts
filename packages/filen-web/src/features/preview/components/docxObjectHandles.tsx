@@ -1,3 +1,4 @@
+import { isImeKeydown } from "@filen/shared/keymap"
 import { useEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react"
 import type { DocxDrawingContext, DocxEditorCommand } from "@filen/office/core/docx/edit"
 import { hitObject, type PagedEditor } from "@filen/office/core/docx/paged"
@@ -87,7 +88,7 @@ function follow(
 		}
 	}
 	const key = (event: KeyboardEvent): void => {
-		if (event.key === "Escape") {
+		if (event.key === "Escape" && !isImeKeydown(event)) {
 			event.preventDefault()
 			event.stopPropagation()
 			finish(undefined)

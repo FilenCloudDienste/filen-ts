@@ -1,5 +1,5 @@
 import { startTransition, useEffect, useRef, useState } from "react"
-import { IN_EDITORS, useAction } from "@/lib/keymap/useAction"
+import { IN_EDITORS, OUTSIDE_OVERLAYS, useAction } from "@/lib/keymap/useAction"
 import { CodeMirrorSource } from "@/features/preview/components/codeMirrorSource"
 import { MarkdownRenderer } from "@/features/preview/components/markdownRenderer"
 import { MarkdownSplitPane } from "@/features/notes/components/markdownSplitPane"
@@ -8,6 +8,9 @@ import type { Note } from "@filen/sdk-rs"
 
 // A pause in typing before the preview catches up.
 const PREVIEW_DEBOUNCE_MS = 200
+
+// In the editor too; never under a dialog or menu, which keeps the key.
+const TOGGLE_PREVIEW_OPTIONS = { ...IN_EDITORS, ...OUTSIDE_OVERLAYS }
 
 // Writable md note editor: the SAME resizable split as the reader, editable on the left. The right
 // pane renders from the LIVE EDITOR value (not the content query), so the preview follows the user's
@@ -39,7 +42,7 @@ export function NoteMarkdownEditor({ note, controller }: { note: Note; controlle
 			setPreviewValue(latestValueRef.current)
 			setPreviewHidden(prev => !prev)
 		},
-		IN_EDITORS
+		TOGGLE_PREVIEW_OPTIONS
 	)
 
 	function handleChange(value: string): void {
