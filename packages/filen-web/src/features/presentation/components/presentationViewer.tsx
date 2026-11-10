@@ -51,7 +51,8 @@ import { useBindings } from "@/lib/keymap/registry"
 import { useLatestRef } from "@/lib/useLatestRef"
 import { useDeckPresentation } from "@/features/presentation/hooks/useDeckPresentation"
 import { PresentationEditor } from "@/features/presentation/components/presentationEditor"
-import type { PresentationEditing } from "@/features/presentation/hooks/usePresentationSession"
+import type { PresentationEditing, PresentationZoomView } from "@/features/presentation/hooks/usePresentationSession"
+import { PresentationZoomStrip } from "@/features/presentation/components/ribbon/view"
 import { PresentationNotesPane } from "@/features/presentation/components/notesPane"
 import { PresentationSlideRail } from "@/features/presentation/components/slideRail"
 import { LegacyPresentationBar, type LegacySaveCopy } from "@/features/presentation/components/legacyView"
@@ -577,6 +578,11 @@ function DeckSurface({
 	// Read by the zoom's steps, which build on the zoom shown.
 	const scaleRef = useLatestRef(scale)
 	const combos = useBindings()
+	// A step, a fit or a zoom on the slide shown: the editor's keys and the command bar's zoom (the wheel steps its own).
+	const zoomBy = (change: PresentationZoomChange): void => {
+		setZoomMode(previous => presentationZoom(previous, scaleRef.current, change))
+	}
+	const zoom: PresentationZoomView = { scale, fit: zoomMode === "fit", set: zoomBy }
 	// The editor's zoom keys (presentation.zoomIn, zoomOut, zoomFit) on the slide shown; true when the key was one.
 	const zoomKey = (event: ViewerKeyEvent): boolean => {
 		if (event.defaultPrevented || show.showing || count === 0 || isTextField(event.target)) return false
@@ -586,7 +592,7 @@ function DeckSurface({
 		if (change === undefined) return false
 
 		event.preventDefault()
-		setZoomMode(previous => presentationZoom(previous, scaleRef.current, change))
+		zoomBy(change)
 
 		return true
 	}
@@ -763,6 +769,7 @@ function DeckSurface({
 					)
 				}
 				groups={groups}
+				status={count === 0 || show.showing ? null : <PresentationZoomStrip zoom={zoom} />}
 			/>
 			<LegacyPresentationBar
 				format={deck.info?.format}

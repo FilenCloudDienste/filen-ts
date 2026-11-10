@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { act, cleanup, fireEvent, render as renderUi, screen, waitFor } from "@testing-library/react"
+import { act, cleanup, fireEvent, render as renderUi, screen, waitFor, within } from "@testing-library/react"
 import type { ReactElement } from "react"
 import { createTestQueryClient, queryClientWrapper } from "@/tests/testQueryClient"
 import type { PresentationEvent, PresentationOpenOptions, PresentationSessionApi, SourceSpec } from "@filen/office/dom/presentation"
@@ -275,6 +275,46 @@ describe("presentation viewer zoom keys", () => {
 		expect(press({ key: "-", code: "Minus", ctrlKey: true })).toBe(true)
 		expect(press({ key: "o", code: "KeyO", ctrlKey: true, altKey: true })).toBe(true)
 		expect(press({ key: "k", code: "KeyK", ctrlKey: true })).toBe(false)
+	})
+})
+
+describe("presentation viewer zoom strip", () => {
+	it("offers out, the zoom menu, in and Fit at the command bar's end, its steps waiting for the slide's size", async () => {
+		render(
+			<PresentationViewer
+				item={deckItem()}
+				alt="deck.pptx"
+			/>
+		)
+		await waitFor(() => {
+			expect(engine.opens).toHaveLength(1)
+		})
+		await emit(opened)
+
+		const strip = screen.getByRole("group", { name: "Zoom" })
+		const fit = within(strip).getByRole("button", { name: "Fit to Window" })
+
+		expect(within(strip).getByRole("button", { name: /^Zoom level/u })).toBeDefined()
+		expect(fit.getAttribute("aria-pressed")).toBe("true")
+		expect(fit.textContent).toBe("Fit")
+		// The test DOM lays no slide out, so there is no zoom yet to step from.
+		expect(within(strip).getByRole("button", { name: "Zoom in" }).hasAttribute("disabled")).toBe(true)
+		expect(within(strip).getByRole("button", { name: "Zoom out" }).hasAttribute("disabled")).toBe(true)
+	})
+
+	it("is left out of a deck with no slides", async () => {
+		render(
+			<PresentationViewer
+				item={deckItem()}
+				alt="deck.pptx"
+			/>
+		)
+		await waitFor(() => {
+			expect(engine.opens).toHaveLength(1)
+		})
+		await emit({ ...opened, info: { ...opened.info, slides: [] } })
+
+		expect(screen.queryByRole("group", { name: "Zoom" })).toBeNull()
 	})
 })
 

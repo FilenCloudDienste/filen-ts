@@ -82,6 +82,8 @@ export const previewPptxRibbon = {
 	previewPptxRibbonPresent: "Present",
 	/** Presentation editor — View tab ▸ Zoom: fits the whole slide in the window again (PowerPoint's Fit to Window) */
 	previewPptxRibbonFitToWindow: "Fit to Window",
+	/** Presentation viewer — short text of the command bar's zoom button that fits the whole slide in the window again; its tooltip is "Fit to Window" */
+	previewPptxZoomFitShort: "Fit",
 	/** Shortcuts list — zooms the slide in, in the presentation editor */
 	previewPptxEditorKeyZoomIn: "Zoom in (presentations)",
 	/** Shortcuts list — zooms the slide out, in the presentation editor */
