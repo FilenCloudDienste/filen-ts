@@ -8,7 +8,13 @@ describe("toAccelerator", () => {
 		["ctrl+alt+arrowup", "Ctrl+Alt+Up"],
 		["mod+comma", "CmdOrCtrl+,"],
 		["f5", "F5"],
-		["Mod+K", "CmdOrCtrl+K"]
+		["Mod+K", "CmdOrCtrl+K"],
+		["mod+bracketleft", "CmdOrCtrl+["],
+		["mod+add", "CmdOrCtrl+numadd"],
+		// Older spellings: a key by its character, a "," where a key belongs.
+		["mod+=", "CmdOrCtrl+="],
+		["mod+shift+,", "CmdOrCtrl+Shift+,"],
+		["shift+mod+k,mod+j", "CmdOrCtrl+Shift+K"]
 	])("%s → %s", (combo, accelerator) => {
 		expect(toAccelerator(combo)).toBe(accelerator)
 	})

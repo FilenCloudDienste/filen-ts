@@ -1,6 +1,7 @@
 import type { MenuItemConstructorOptions } from "electron"
 import type { DesktopMenuAction } from "@filen/shared/desktop"
 import type { DesktopShellStringKey } from "@filen/shared/desktopShellStrings"
+import { canonicalKey, chordModifiers, parseCombo, usCharacterOf, type ModifierToken } from "@filen/shared/keymap"
 import { shellText } from "./shellStrings.ts"
 
 export type MenuShortcuts = Partial<Record<DesktopMenuAction, string>>
@@ -19,85 +20,79 @@ export function isMenuAction(value: string): value is DesktopMenuAction {
 	return (MENU_ACTIONS as ReadonlySet<string>).has(value)
 }
 
-// Web keymap tokens (react-hotkeys-hook's vocabulary, lowercased) that differ from Electron's accelerator names.
-const KEY_NAMES: Record<string, string> = {
+// Electron's names for a chord's modifiers and for the keys that are no character (@filen/shared/keymap's tokens).
+const MODIFIER_NAMES: Record<ModifierToken, string> = {
 	mod: "CmdOrCtrl",
 	meta: "Command",
 	ctrl: "Ctrl",
-	control: "Ctrl",
 	alt: "Alt",
-	option: "Alt",
-	shift: "Shift",
-	slash: "/",
-	backslash: "\\",
-	comma: ",",
-	period: ".",
-	minus: "-",
-	equal: "=",
-	semicolon: ";",
-	quote: "'",
-	backquote: "`",
-	bracketleft: "[",
-	bracketright: "]",
+	shift: "Shift"
+}
+
+const KEY_NAMES: Record<string, string> = {
 	escape: "Esc",
-	esc: "Esc",
 	enter: "Enter",
-	return: "Enter",
 	space: "Space",
 	tab: "Tab",
 	backspace: "Backspace",
 	delete: "Delete",
+	insert: "Insert",
 	home: "Home",
 	end: "End",
 	pageup: "PageUp",
 	pagedown: "PageDown",
 	arrowup: "Up",
-	up: "Up",
 	arrowdown: "Down",
-	down: "Down",
 	arrowleft: "Left",
-	left: "Left",
 	arrowright: "Right",
-	right: "Right"
+	add: "numadd",
+	subtract: "numsub",
+	multiply: "nummult",
+	divide: "numdiv",
+	decimal: "numdec"
 }
 
 // A combo's Cmd/Ctrl/Alt modifiers, the keys that keep it from typing or editing text.
-const COMMAND_MODIFIERS = new Set(["CmdOrCtrl", "Command", "Ctrl", "Alt"])
+const COMMAND_MODIFIERS = new Set<ModifierToken>(["mod", "meta", "ctrl", "alt"])
+
+// Electron's name for a key: its own name, a function key's, or the US character a writing-system key types (the
+// renderer has already renamed keys for the user's layout, keymap's comboForLayout). A key no US character names
+// (the ISO key) has none.
+function keyName(key: string): string | undefined {
+	const named = KEY_NAMES[key]
+
+	if (named !== undefined) {
+		return named
+	}
+
+	if (/^f([1-9]|1[0-9]|2[0-4])$/.test(key)) {
+		return key.toUpperCase()
+	}
+
+	const character = usCharacterOf(key)
+
+	return character !== undefined && canonicalKey(character) === key ? character.toUpperCase() : undefined
+}
 
 // The menu accelerator for a web combo: its first alternative, or none when it is unassigned or uses a key Electron
 // cannot name. macOS runs a menu's key equivalents itself whatever has focus (registerAccelerator only applies on
 // Windows and Linux), so a combo that a text field would take as typing, "d" or Shift+/ or Delete, gets none and
 // stays the page's alone; a function key needs no modifier.
 export function toAccelerator(combo: string): string | undefined {
-	const keys = (combo.split(",")[0] ?? "")
-		.toLowerCase()
-		.split("+")
-		.map(key => key.trim())
-		.filter(key => key.length > 0)
+	const [chord] = parseCombo(combo)
+	const key = chord === undefined ? undefined : keyName(chord.key)
 
-	if (keys.length === 0) {
+	if (chord === undefined || key === undefined) {
 		return undefined
 	}
 
-	const names: string[] = []
+	const modifiers = chordModifiers(chord)
 
-	for (const key of keys) {
-		const name = KEY_NAMES[key] ?? (/^([a-z0-9]|f([1-9]|1[0-9]|2[0-4]))$/.test(key) ? key.toUpperCase() : undefined)
-
-		if (name === undefined) {
-			return undefined
-		}
-
-		names.push(name)
-	}
-
-	const key = names.at(-1) ?? ""
-
-	if (!/^F\d+$/.test(key) && !names.some(name => COMMAND_MODIFIERS.has(name))) {
+	if (!/^F\d+$/.test(key) && !modifiers.some(modifier => COMMAND_MODIFIERS.has(modifier))) {
 		return undefined
 	}
 
-	return names.join("+")
+	return [...modifiers.map(modifier => MODIFIER_NAMES[modifier]), key].join("+")
 }
 
 export interface MenuOptions {
