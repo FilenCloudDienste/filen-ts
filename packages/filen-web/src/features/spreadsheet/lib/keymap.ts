@@ -111,6 +111,11 @@ const DESCRIPTIONS: Readonly<Record<SheetActionShortcut, ActionDef["descriptionK
 	newSheet: "preview:previewSheetShortcutNewSheet",
 	renameSheet: "preview:previewSheetShortcutRenameSheet",
 	deleteSheet: "preview:previewSheetShortcutDeleteSheet",
+	duplicateSheet: "preview:previewSheetShortcutDuplicateSheet",
+	moveSheetLeft: "preview:previewSheetShortcutMoveSheetLeft",
+	moveSheetRight: "preview:previewSheetShortcutMoveSheetRight",
+	hideSheet: "preview:previewSheetShortcutHideSheet",
+	unhideSheet: "preview:previewSheetShortcutUnhideSheet",
 	protectSheet: "preview:previewSheetShortcutProtectSheet"
 }
 

@@ -197,6 +197,16 @@ export const previewSheetShortcuts = {
 	previewSheetShortcutRenameSheet: "Rename sheet",
 	/** Keyboard shortcut (spreadsheet) — deletes the active sheet */
 	previewSheetShortcutDeleteSheet: "Delete sheet",
+	/** Keyboard shortcut (spreadsheet) — adds a copy of the active sheet after it */
+	previewSheetShortcutDuplicateSheet: "Duplicate sheet",
+	/** Keyboard shortcut (spreadsheet) — moves the active sheet's tab one place to the left */
+	previewSheetShortcutMoveSheetLeft: "Move sheet left",
+	/** Keyboard shortcut (spreadsheet) — moves the active sheet's tab one place to the right */
+	previewSheetShortcutMoveSheetRight: "Move sheet right",
+	/** Keyboard shortcut (spreadsheet) — hides the active sheet's tab */
+	previewSheetShortcutHideSheet: "Hide sheet",
+	/** Keyboard shortcut (spreadsheet) — opens the dialog that picks a hidden sheet to show again */
+	previewSheetShortcutUnhideSheet: "Unhide sheet",
 	/** Keyboard shortcut (spreadsheet) — protects the active sheet, or unprotects it */
 	previewSheetShortcutProtectSheet: "Protect or unprotect sheet"
 }

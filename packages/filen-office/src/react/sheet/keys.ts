@@ -99,6 +99,11 @@ const APP_ACTIONS = [
 	"newSheet",
 	"renameSheet",
 	"deleteSheet",
+	"duplicateSheet",
+	"moveSheetLeft",
+	"moveSheetRight",
+	"hideSheet",
+	"unhideSheet",
 	"protectSheet",
 	"autoSum",
 	"borderOutline",
@@ -266,6 +271,12 @@ export const SHEET_SHORTCUTS: readonly ShortcutEntry[] = [
 	entry("newSheet", "shift+f11"),
 	entry("renameSheet", ""),
 	entry("deleteSheet", ""),
+	// The tab menu's Duplicate, Move left and right, Hide and Unhide: Excel has no keys for them.
+	entry("duplicateSheet", ""),
+	entry("moveSheetLeft", ""),
+	entry("moveSheetRight", ""),
+	entry("hideSheet", ""),
+	entry("unhideSheet", ""),
 	entry("protectSheet", "")
 ]
 

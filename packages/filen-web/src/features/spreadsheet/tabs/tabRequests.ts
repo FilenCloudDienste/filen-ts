@@ -2,10 +2,12 @@ import { useEffect } from "react"
 import type { SheetGridModel } from "@filen/office/react/sheet"
 import { useLatestRef } from "@/lib/useLatestRef"
 
-// What the ribbon asks of the sheet tabs for the sheet on show (Cells ▸ Format ▸ Rename sheet, Delete ▸ Delete sheet,
-// Review ▸ Protect): the tabs own those dialogs and the protection prompts.
+// What the ribbon and the keyboard ask of the sheet tabs for the sheet on show (Cells ▸ Format ▸ Rename sheet, Delete ▸
+// Delete sheet, Review ▸ Protect, and the tab menu's Duplicate, Move, Hide and Unhide): the tabs own those dialogs, the
+// protection prompts and the menu's own gating.
 
-export type SheetTabRequest = "rename" | "delete" | "protectSheet" | "protectWorkbook"
+export type SheetTabRequest =
+	"rename" | "delete" | "duplicate" | "moveLeft" | "moveRight" | "hide" | "unhide" | "protectSheet" | "protectWorkbook"
 
 const listeners = new WeakMap<SheetGridModel, Set<(request: SheetTabRequest) => void>>()
 

@@ -117,30 +117,6 @@ export function SheetTabs({ grid, canEdit, run }: { grid: SheetGridState; canEdi
 	})
 	const lockedTitle = locked ? t("previewSheetStructureProtected") : undefined
 
-	// The ribbon's sheet commands, for the sheet on show, as its tab's menu runs them.
-	useSheetTabRequests(model, request => {
-		const sheetProtected = (model.layout(grid.sheet)?.protection ?? null) !== null
-
-		switch (request) {
-			case "rename":
-				if (structure) setRenaming(grid.sheet)
-				break
-			case "delete":
-				if (structure && shown.length > 1) setDeleting(grid.sheet)
-				break
-			case "protectSheet":
-				if (!canEdit) break
-				if (sheetProtected) protection.unprotect({ sheet: grid.sheet })
-				else protection.protect({ sheet: grid.sheet })
-				break
-			case "protectWorkbook":
-				if (!canEdit) break
-				if (locked) protection.unprotect("workbook")
-				else protection.protect("workbook")
-				break
-		}
-	})
-
 	// A formula being typed stays open on its sheet to point at the chosen one's cells; any other entry is committed.
 	function select(sheet: SheetId): void {
 		if (sheet !== grid.sheet) {
@@ -165,6 +141,24 @@ export function SheetTabs({ grid, canEdit, run }: { grid: SheetGridState; canEdi
 		})
 	}
 
+	function duplicate(sheet: SheetId): void {
+		addAndShow({ type: "sheet.duplicate", sheet })
+	}
+
+	// One place left or right among the tabs; nothing at either end.
+	function moveBy(sheet: SheetId, direction: -1 | 1): void {
+		const to = moveTarget(sheets, sheet, direction)
+
+		if (to !== null) {
+			run({ type: "sheet.move", sheet, to })
+		}
+	}
+
+	function startUnhide(): void {
+		setUnhideChoice(hidden[0]?.id ?? null)
+		setUnhiding(true)
+	}
+
 	function hide(sheet: SheetId): void {
 		const next = nextShown(sheets, sheet)
 
@@ -178,6 +172,45 @@ export function SheetTabs({ grid, canEdit, run }: { grid: SheetGridState; canEdi
 
 		run({ type: "sheet.state", sheet, state: "hidden" })
 	}
+
+	// The ribbon's and the keyboard's sheet commands, for the sheet on show, as its tab's menu runs them and behind its gating.
+	useSheetTabRequests(model, request => {
+		const sheetProtected = (model.layout(grid.sheet)?.protection ?? null) !== null
+
+		switch (request) {
+			case "rename":
+				if (structure) setRenaming(grid.sheet)
+				break
+			case "delete":
+				if (structure && shown.length > 1) setDeleting(grid.sheet)
+				break
+			case "duplicate":
+				if (structure) duplicate(grid.sheet)
+				break
+			case "moveLeft":
+				if (structure) moveBy(grid.sheet, -1)
+				break
+			case "moveRight":
+				if (structure) moveBy(grid.sheet, 1)
+				break
+			case "hide":
+				if (structure && shown.length > 1) hide(grid.sheet)
+				break
+			case "unhide":
+				if (structure && hidden.length > 0) startUnhide()
+				break
+			case "protectSheet":
+				if (!canEdit) break
+				if (sheetProtected) protection.unprotect({ sheet: grid.sheet })
+				else protection.protect({ sheet: grid.sheet })
+				break
+			case "protectWorkbook":
+				if (!canEdit) break
+				if (locked) protection.unprotect("workbook")
+				else protection.protect("workbook")
+				break
+		}
+	})
 
 	function items(summary: SheetSummary, parts: MenuParts): ReactNode {
 		const { Item, Separator, Sub, SubTrigger, SubContent } = parts
@@ -201,7 +234,7 @@ export function SheetTabs({ grid, canEdit, run }: { grid: SheetGridState; canEdi
 					disabled={!structure}
 					{...(lockedTitle !== undefined && { title: lockedTitle })}
 					onClick={() => {
-						addAndShow({ type: "sheet.duplicate", sheet })
+						duplicate(sheet)
 					}}
 				>
 					{t("previewSheetDuplicate")}
@@ -228,9 +261,7 @@ export function SheetTabs({ grid, canEdit, run }: { grid: SheetGridState; canEdi
 				<Item
 					disabled={!structure || left === null}
 					onClick={() => {
-						if (left !== null) {
-							run({ type: "sheet.move", sheet, to: left })
-						}
+						moveBy(sheet, -1)
 					}}
 				>
 					{t("previewSheetMoveLeft")}
@@ -238,9 +269,7 @@ export function SheetTabs({ grid, canEdit, run }: { grid: SheetGridState; canEdi
 				<Item
 					disabled={!structure || right === null}
 					onClick={() => {
-						if (right !== null) {
-							run({ type: "sheet.move", sheet, to: right })
-						}
+						moveBy(sheet, 1)
 					}}
 				>
 					{t("previewSheetMoveRight")}
@@ -255,10 +284,7 @@ export function SheetTabs({ grid, canEdit, run }: { grid: SheetGridState; canEdi
 				</Item>
 				<Item
 					disabled={!structure || hidden.length === 0}
-					onClick={() => {
-						setUnhideChoice(hidden[0]?.id ?? null)
-						setUnhiding(true)
-					}}
+					onClick={startUnhide}
 				>
 					{t("previewSheetUnhide")}
 				</Item>

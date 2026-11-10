@@ -17,6 +17,7 @@ vi.mock("sonner", () => ({ toast: { error: (message: string) => toasts.push(mess
 
 const { SheetTabs } = await import("@/features/spreadsheet/tabs/sheetTabs")
 const { insertSheetBefore } = await import("@/features/spreadsheet/tabs/sheetTabs.logic")
+const { requestSheetTab } = await import("@/features/spreadsheet/tabs/tabRequests")
 
 async function opened(): Promise<SheetGridModel> {
 	return await openGrid(
@@ -246,6 +247,97 @@ describe("the sheet tabs' menu", () => {
 			expect(insert?.getAttribute("aria-disabled") ?? insert?.hasAttribute("data-disabled")).toBeTruthy()
 		})
 		expect(await screen.findByText(label("previewSheetUnprotectWorkbook"))).toBeTruthy()
+	})
+})
+
+// The sheet.* keys for the tab menu's Duplicate, Move, Hide and Unhide ask the tabs for them (sheetBody.tsx), which run
+// what the menu runs, for the sheet on show, behind the menu's own gating.
+describe("the keyboard's tab requests", () => {
+	beforeEach(() => {
+		toasts.length = 0
+		vi.stubGlobal("crypto", webcrypto)
+	})
+
+	function request(model: SheetGridModel, kind: Parameters<typeof requestSheetTab>[1]): void {
+		act(() => {
+			requestSheetTab(model, kind)
+		})
+	}
+
+	function active(model: SheetGridModel): string | undefined {
+		const snapshot = model.getSnapshot()
+
+		return snapshot.sheets.find(sheet => sheet.id === snapshot.sheet)?.name
+	}
+
+	it("moves the sheet on show right and back left, and not past the first tab", async () => {
+		const model = await opened()
+
+		show(model)
+		request(model, "moveLeft")
+		request(model, "moveRight")
+		await waitFor(() => {
+			expect(names(model)).toEqual(["Two", "One", "Three"])
+		})
+
+		request(model, "moveLeft")
+		await waitFor(() => {
+			expect(names(model)).toEqual(["One", "Two", "Three"])
+		})
+	})
+
+	it("duplicates the sheet on show and shows the copy", async () => {
+		const model = await opened()
+
+		show(model)
+		request(model, "duplicate")
+		await waitFor(() => {
+			expect(names(model)).toHaveLength(4)
+		})
+		expect(["One", "Two", "Three"]).not.toContain(active(model))
+	})
+
+	it("hides the sheet on show, showing the next, and asks which hidden sheet to show again", async () => {
+		const model = await opened()
+
+		show(model)
+		request(model, "hide")
+		await waitFor(() => {
+			expect(names(model)).toEqual(["Two", "Three"])
+		})
+		expect(active(model)).toBe("Two")
+
+		request(model, "unhide")
+		fireEvent.click(await screen.findByRole("radio", { name: "One" }))
+		fireEvent.click(screen.getByRole("button", { name: label("previewSheetUnhideAction") }))
+		await waitFor(() => {
+			expect(names(model)).toEqual(["One", "Two", "Three"])
+		})
+	})
+
+	it("does nothing while the workbook's structure is protected", async () => {
+		const model = await opened()
+
+		show(model)
+		request(model, "protectWorkbook")
+		fireEvent.click(await screen.findByRole("button", { name: label("previewSheetProtectAction") }))
+		await waitFor(async () => {
+			const state = await model.session.query("commandState", { sheet: model.getSnapshot().sheet, ranges: [], types: ["sheet.add"] })
+
+			expect(state.reasons[0]).toBe("protectedWorkbook")
+		})
+		await act(async () => {
+			await new Promise(resolve => setTimeout(resolve, 50))
+		})
+
+		request(model, "duplicate")
+		request(model, "moveRight")
+		request(model, "hide")
+		await act(async () => {
+			await new Promise(resolve => setTimeout(resolve, 50))
+		})
+
+		expect(names(model)).toEqual(["One", "Two", "Three"])
 	})
 })
 

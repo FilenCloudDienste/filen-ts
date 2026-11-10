@@ -115,9 +115,17 @@ const LAYER_SHORTCUTS: ReadonlySet<SheetShortcut> = new Set<SheetShortcut>([
 const MAC = isMacPlatform()
 
 // The sheet tabs' commands the keyboard asks for (sheetTabs.tsx takes them).
-const TAB_REQUESTS: Readonly<Record<"renameSheet" | "deleteSheet" | "protectSheet", SheetTabRequest>> = {
+type TabShortcut =
+	"renameSheet" | "deleteSheet" | "duplicateSheet" | "moveSheetLeft" | "moveSheetRight" | "hideSheet" | "unhideSheet" | "protectSheet"
+
+const TAB_REQUESTS: Readonly<Record<TabShortcut, SheetTabRequest>> = {
 	renameSheet: "rename",
 	deleteSheet: "delete",
+	duplicateSheet: "duplicate",
+	moveSheetLeft: "moveLeft",
+	moveSheetRight: "moveRight",
+	hideSheet: "hide",
+	unhideSheet: "unhide",
 	protectSheet: "protectSheet"
 }
 
@@ -696,6 +704,11 @@ export function SheetBody({
 				return true
 			case "renameSheet":
 			case "deleteSheet":
+			case "duplicateSheet":
+			case "moveSheetLeft":
+			case "moveSheetRight":
+			case "hideSheet":
+			case "unhideSheet":
 			case "protectSheet":
 				if (canEdit && !text) {
 					requestSheetTab(model, TAB_REQUESTS[shortcut])
