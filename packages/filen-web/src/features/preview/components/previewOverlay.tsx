@@ -1906,18 +1906,28 @@ export function PreviewOverlay({
 						housekeeping — see previewMenuHiddenActionIds and the handleMenu* functions above. */}
 								{!isLinkedEmbedItem(driveItem) ? (
 									<DropdownMenu>
-										<DropdownMenuTrigger
-											render={
-												<Button
-													ref={menuTriggerRef}
-													variant="ghost"
-													size="icon-sm"
-													aria-label={t("drive:driveItemMenuTrigger")}
-												>
-													<MoreHorizontalIcon />
-												</Button>
-											}
-										/>
+										<Tooltip>
+											<TooltipTrigger
+												render={
+													<DropdownMenuTrigger
+														render={
+															<Button
+																ref={menuTriggerRef}
+																variant="ghost"
+																size="icon-sm"
+																aria-label={t("drive:driveItemMenuTrigger")}
+															>
+																<MoreHorizontalIcon />
+															</Button>
+														}
+													/>
+												}
+											/>
+											<TooltipContent>
+												{t("drive:driveItemMenuTrigger")}
+												<Kbd action="preview.openMenu" />
+											</TooltipContent>
+										</Tooltip>
 										<DriveDropdownMenuContent
 											item={driveItem}
 											variant={variant}
