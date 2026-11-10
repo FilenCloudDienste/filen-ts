@@ -315,7 +315,8 @@ export function DocxFindField({
 	onClosed: () => void
 	// Opened as "Find and replace": the replace field shows from the start.
 	replaceOpen?: boolean
-	// The action whose key moves to the replace field: editor.replace, or the Word editor's own (docx.replace).
+	// The action whose key opens the editor's replace, which moves to the replace field: editor.replace, or the Word
+	// editor's and the spreadsheet's own (docx.replace, sheet.replace).
 	replaceAction?: string
 }) {
 	const { t } = useTranslation("preview")

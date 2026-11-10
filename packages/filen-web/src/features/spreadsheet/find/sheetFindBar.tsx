@@ -94,6 +94,7 @@ function OpenFindBar({
 				find={find}
 				focus={focus}
 				replaceOpen={mode === "replace"}
+				replaceAction="sheet.replace"
 				onClosed={() => undefined}
 			/>
 			<DropdownMenu>

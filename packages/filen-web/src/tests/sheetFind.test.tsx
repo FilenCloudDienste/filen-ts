@@ -373,6 +373,18 @@ describe("the spreadsheet find bar", () => {
 		})
 	})
 
+	it("shows the replace field on the sheet's replace key pressed in the find field", async () => {
+		const grid = await openViewer()
+
+		fireEvent.keyDown(grid, { key: "f", code: "KeyF", ctrlKey: true })
+
+		const field = await screen.findByRole("searchbox", { name: preview.previewDocxFindPlaceholder })
+
+		expect(screen.queryByRole("textbox", { name: preview.previewDocxReplacePlaceholder })).toBeNull()
+		fireEvent.keyDown(field, { key: "h", code: "KeyH", ctrlKey: true })
+		expect(await screen.findByRole("textbox", { name: preview.previewDocxReplacePlaceholder })).toBeTruthy()
+	})
+
 	it("looks in formulas only while replacing, as Excel's Replace does", async () => {
 		const grid = await openViewer()
 
