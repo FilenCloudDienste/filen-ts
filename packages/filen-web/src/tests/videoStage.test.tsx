@@ -109,23 +109,59 @@ describe("VideoStage", () => {
 
 	it("leaves Escape inside a popup to the popup, and takes it on the stage", () => {
 		const onAction = vi.fn((_action: VideoKeyAction) => false)
+		const onBack = vi.fn()
 
 		render(
 			createElement(
 				VideoStage,
 				props({
 					onAction,
+					onBack,
 					trailing: (): ReactNode =>
 						createElement("div", { "data-stage-popup": "" }, createElement("button", { type: "button" }, "inside"))
 				})
 			)
 		)
 
-		fireEvent.keyDown(screen.getByRole("button", { name: "inside" }), { key: "Escape" })
+		fireEvent.keyDown(screen.getByRole("button", { name: "inside" }), { key: "Escape", code: "Escape" })
 		expect(onAction).not.toHaveBeenCalled()
+		expect(onBack).not.toHaveBeenCalled()
 
-		fireEvent.keyDown(stageRoot(), { key: "Escape" })
+		// Nothing of the caller's is open over the picture: Escape leaves the player.
+		fireEvent.keyDown(stageRoot(), { key: "Escape", code: "Escape" })
 		expect(onAction).toHaveBeenCalledWith({ type: "dismiss" })
+		expect(onBack).toHaveBeenCalledTimes(1)
+	})
+
+	it("closes the caller's panel on Escape before the player", () => {
+		const onBack = vi.fn()
+
+		render(createElement(VideoStage, props({ onAction: action => action.type === "dismiss", onBack })))
+
+		fireEvent.keyDown(stageRoot(), { key: "Escape", code: "Escape" })
+		expect(onBack).not.toHaveBeenCalled()
+	})
+
+	it("fires a toggle once for a held key, and leaves a key a text field types", () => {
+		const onAction = vi.fn((_action: VideoKeyAction) => true)
+
+		render(
+			createElement(
+				VideoStage,
+				props({
+					onAction,
+					trailing: (): ReactNode => createElement("input", { "aria-label": "field" })
+				})
+			)
+		)
+
+		fireEvent.keyDown(stageRoot(), { key: "c", code: "KeyC" })
+		fireEvent.keyDown(stageRoot(), { key: "c", code: "KeyC", repeat: true })
+		expect(onAction).toHaveBeenCalledTimes(1)
+		expect(onAction).toHaveBeenCalledWith({ type: "toggleSubtitles" })
+
+		fireEvent.keyDown(screen.getByRole("textbox", { name: "field" }), { key: "c", code: "KeyC" })
+		expect(onAction).toHaveBeenCalledTimes(1)
 	})
 
 	it("drops a pending coalesced seek when the element is emptied (the next item)", () => {
@@ -142,8 +178,8 @@ describe("VideoStage", () => {
 		})
 		element.currentTime = 100
 
-		fireEvent.keyDown(stageRoot(), { key: "l" })
-		fireEvent.keyDown(stageRoot(), { key: "l" })
+		fireEvent.keyDown(stageRoot(), { key: "l", code: "KeyL" })
+		fireEvent.keyDown(stageRoot(), { key: "l", code: "KeyL" })
 
 		const afterFirst = element.currentTime
 

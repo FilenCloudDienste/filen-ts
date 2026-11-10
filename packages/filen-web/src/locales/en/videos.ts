@@ -348,6 +348,14 @@ export const videos = {
 	videosSearchCommand: "Search the library view",
 	/** Shortcut description — opens Videos search */
 	videosOpenSearchCommand: "Open Videos search",
+	/** Keyboard shortcuts — where a video card's keys work */
+	videosCardKeyHint: "On a video in the library",
+	/** Keyboard shortcuts — play or resume the focused video */
+	videosCardKeyPlay: "Play",
+	/** Keyboard shortcuts — mark the focused video watched, or unwatched when it is */
+	videosCardKeyWatched: "Mark watched or unwatched",
+	/** Keyboard shortcuts — hide the focused video from Continue watching */
+	videosCardKeyHide: "Hide",
 
 	// ── Player ─────────────────────────────────────────────────────────────────
 	/** Player — the page title while the player is open */
@@ -425,26 +433,53 @@ export const videos = {
 		"Casting isn't available for your private library. Files are decrypted only on this device. Use screen mirroring, HDMI or a browser on the TV.",
 	/** Player — keyboard shortcuts button and sheet */
 	playerShortcuts: "Keyboard shortcuts",
-	/** Shortcuts sheet — title */
-	playerShortcutsTitle: "Keyboard shortcuts",
-	/** Shortcuts sheet rows */
+	/** Keyboard shortcuts — where a media key works: in any player */
+	mediaHintPlayer: "In a video or audio player",
+	/** Keyboard shortcuts — where a media key works: in a video player */
+	mediaHintVideo: "In a video player",
+	/** Keyboard shortcuts — where a media key works: in the Videos player only */
+	mediaHintVideosPlayer: "In the Videos player",
+	/** Keyboard shortcuts — media keys */
 	playerKeyPlayPause: "Play or pause",
 	playerKeyBack: "Back 10 seconds",
 	playerKeyForward: "Forward 10 seconds",
-	playerKeyVolume: "Volume up or down",
+	mediaKeyBackLong: "Back 1 minute",
+	mediaKeyForwardLong: "Forward 1 minute",
+	mediaKeyStart: "Go to the start",
+	mediaKeyEnd: "Go to the end",
+	mediaKeyJumpZero: "Jump to 0%",
+	mediaKeyJumpTen: "Jump to 10%",
+	mediaKeyJumpTwenty: "Jump to 20%",
+	mediaKeyJumpThirty: "Jump to 30%",
+	mediaKeyJumpForty: "Jump to 40%",
+	mediaKeyJumpFifty: "Jump to 50%",
+	mediaKeyJumpSixty: "Jump to 60%",
+	mediaKeyJumpSeventy: "Jump to 70%",
+	mediaKeyJumpEighty: "Jump to 80%",
+	mediaKeyJumpNinety: "Jump to 90%",
+	mediaKeyVolumeUp: "Volume up",
+	mediaKeyVolumeDown: "Volume down",
 	playerKeyMute: "Mute",
+	mediaKeySlower: "Slower",
+	mediaKeyFaster: "Faster",
+	mediaKeyNormalSpeed: "Normal speed",
+	mediaKeyFrameBack: "Frame back (paused)",
+	mediaKeyFrameForward: "Frame forward (paused)",
 	playerKeyFullscreen: "Fullscreen",
-	playerKeySubtitles: "Subtitles on or off",
-	playerKeySubtitleDelay: "Subtitles earlier or later",
-	playerKeySkip: "Skip intro or credits",
-	playerKeyNextPrevious: "Next or previous episode",
-	playerKeyPercent: "Jump to 0–90%",
-	playerKeyStartEnd: "Start or end",
-	playerKeyChapters: "Previous or next chapter",
-	playerKeyFrame: "Frame back or forward (paused)",
-	playerKeySpeed: "Slower or faster",
 	playerKeyPictureInPicture: "Picture in picture",
-	playerKeyShortcuts: "These shortcuts",
+	mediaKeyPrevious: "Previous episode or track",
+	mediaKeyNext: "Next episode or track",
+	mediaKeyChapterPrevious: "Previous chapter",
+	mediaKeyChapterNext: "Next chapter",
+	playerKeySkip: "Skip intro or credits",
+	playerKeySubtitles: "Subtitles on or off",
+	mediaKeySubtitleTrack: "Next subtitle track",
+	mediaKeySubtitleEarlier: "Subtitles earlier",
+	mediaKeySubtitleLater: "Subtitles later",
+	mediaKeySubtitleDelayReset: "Reset subtitle timing",
+	mediaKeyAudioTrack: "Next audio track",
+	mediaKeyEpisodes: "Show or hide episodes",
+	mediaKeyClose: "Close the panel, then the player",
 	/** Player — a stall longer than 15 seconds */
 	playerStillLoading: "Still loading…",
 	/** Player — retries after a long stall or a failure */

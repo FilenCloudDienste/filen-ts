@@ -2,12 +2,13 @@ import { useEffect, useRef, useState } from "react"
 import { mediaSessionOwners, type MediaSessionOwner } from "@/lib/media/mediaSessionOwner"
 import { pauseMedia } from "@filen/shared/heldPause"
 import { playMedia, seekMedia } from "@/lib/media/useMediaState"
+import { MEDIA_SEEK_STEP_SECONDS } from "@/lib/media/mediaKeys.logic"
 
 // The video stage's share of the Media Session: taken from the audio engine (which pauses) for as long as the
 // stage is open, given back on close. Position state is published on discrete events only (play, pause,
 // seek, rate, a new item), never per timeupdate: the OS extrapolates from the rate.
 
-const SEEK_NUDGE_SECONDS = 10
+const SEEK_NUDGE_SECONDS = MEDIA_SEEK_STEP_SECONDS
 
 export interface StageMediaInfo {
 	title: string
@@ -97,6 +98,11 @@ export function useStageMediaSession(params: {
 			playMedia(element)
 		})
 		owner.setActionHandler("pause", () => {
+			touched()
+			pauseMedia(element)
+		})
+		// The OS's Stop halts the picture where it is, as Pause.
+		owner.setActionHandler("stop", () => {
 			touched()
 			pauseMedia(element)
 		})

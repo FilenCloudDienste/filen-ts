@@ -1,66 +1,86 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { chapterTarget, frameDuration, stepPlaybackRate, videoKeyAction, type VideoKeyInput } from "@/lib/media/videoKeys.logic"
+import { chapterTarget, frameDuration, STAGE_MEDIA_ACTIONS, stepPlaybackRate, videoKeyAction } from "@/lib/media/videoKeys.logic"
+import { mediaKeyAction } from "@/lib/media/mediaKeys.logic"
+import { MEDIA_ACTIONS } from "@/lib/media/keymap"
+import type { PlayerKeyTarget } from "@/lib/media/playerKeys.logic"
 import { SEEK_COALESCE_MS, SeekCoalescer } from "@/lib/media/seekCoalescer.logic"
 
-function key(input: Partial<VideoKeyInput> & { key: string }) {
-	return videoKeyAction({ target: "surface", modified: false, shift: false, ...input })
+// The stage's action for a keydown on its defaults: the physical key (code), the character, Shift.
+function key(code: string, character: string, shift = false, target: PlayerKeyTarget = "surface") {
+	const media = mediaKeyAction(
+		{ code, key: character, ctrlKey: false, metaKey: false, shiftKey: shift, altKey: false },
+		target,
+		STAGE_MEDIA_ACTIONS,
+		{},
+		false
+	)
+
+	return media === null ? null : videoKeyAction(media)
 }
 
-describe("videoKeyAction", () => {
+describe("the Videos player's keys", () => {
 	it("maps the player's keys on the picture", () => {
-		expect(key({ key: " " })).toEqual({ type: "togglePlay" })
-		expect(key({ key: "k" })).toEqual({ type: "togglePlay" })
-		expect(key({ key: "K" })).toEqual({ type: "togglePlay" })
-		expect(key({ key: "Enter" })).toEqual({ type: "confirm" })
-		expect(key({ key: "ArrowLeft" })).toEqual({ type: "seekBy", seconds: -10 })
-		expect(key({ key: "j" })).toEqual({ type: "seekBy", seconds: -10 })
-		expect(key({ key: "ArrowRight" })).toEqual({ type: "seekBy", seconds: 10 })
-		expect(key({ key: "l" })).toEqual({ type: "seekBy", seconds: 10 })
-		expect(key({ key: "ArrowUp" })).toEqual({ type: "volumeBy", delta: 0.05 })
-		expect(key({ key: "ArrowDown" })).toEqual({ type: "volumeBy", delta: -0.05 })
-		expect(key({ key: "m" })).toEqual({ type: "toggleMute" })
-		expect(key({ key: "f" })).toEqual({ type: "toggleFullscreen" })
-		expect(key({ key: "c" })).toEqual({ type: "toggleSubtitles" })
-		expect(key({ key: "s" })).toEqual({ type: "skip" })
-		expect(key({ key: "i" })).toEqual({ type: "togglePictureInPicture" })
-		expect(key({ key: "g" })).toEqual({ type: "subtitleDelay", seconds: -0.1 })
-		expect(key({ key: "h" })).toEqual({ type: "subtitleDelay", seconds: 0.1 })
-		expect(key({ key: "Home" })).toEqual({ type: "seekToStart" })
-		expect(key({ key: "End" })).toEqual({ type: "seekToEnd" })
-		expect(key({ key: "PageDown" })).toEqual({ type: "chapter", direction: 1 })
-		expect(key({ key: "PageUp" })).toEqual({ type: "chapter", direction: -1 })
-		expect(key({ key: "," })).toEqual({ type: "frameStep", direction: -1 })
-		expect(key({ key: "." })).toEqual({ type: "frameStep", direction: 1 })
-		expect(key({ key: "Escape" })).toEqual({ type: "dismiss" })
+		expect(key("Space", " ")).toEqual({ type: "togglePlay" })
+		expect(key("KeyK", "k")).toEqual({ type: "togglePlay" })
+		expect(key("ArrowLeft", "ArrowLeft")).toEqual({ type: "seekBy", seconds: -10 })
+		expect(key("KeyJ", "j")).toEqual({ type: "seekBy", seconds: -10 })
+		expect(key("ArrowRight", "ArrowRight")).toEqual({ type: "seekBy", seconds: 10 })
+		expect(key("KeyL", "l")).toEqual({ type: "seekBy", seconds: 10 })
+		expect(key("ArrowLeft", "ArrowLeft", true)).toEqual({ type: "seekBy", seconds: -60 })
+		expect(key("ArrowRight", "ArrowRight", true)).toEqual({ type: "seekBy", seconds: 60 })
+		expect(key("ArrowUp", "ArrowUp")).toEqual({ type: "volumeBy", delta: 0.05 })
+		expect(key("ArrowDown", "ArrowDown")).toEqual({ type: "volumeBy", delta: -0.05 })
+		expect(key("KeyM", "m")).toEqual({ type: "toggleMute" })
+		expect(key("KeyF", "f")).toEqual({ type: "toggleFullscreen" })
+		expect(key("KeyC", "c")).toEqual({ type: "toggleSubtitles" })
+		expect(key("KeyC", "C", true)).toEqual({ type: "cycleSubtitles" })
+		expect(key("KeyA", "a")).toEqual({ type: "cycleAudio" })
+		expect(key("KeyE", "e")).toEqual({ type: "episodes" })
+		expect(key("KeyS", "s")).toEqual({ type: "skip" })
+		expect(key("KeyI", "i")).toEqual({ type: "togglePictureInPicture" })
+		expect(key("KeyG", "g")).toEqual({ type: "subtitleDelay", seconds: -0.1 })
+		expect(key("KeyH", "h")).toEqual({ type: "subtitleDelay", seconds: 0.1 })
+		expect(key("Home", "Home")).toEqual({ type: "seekToStart" })
+		expect(key("End", "End")).toEqual({ type: "seekToEnd" })
+		expect(key("PageDown", "PageDown")).toEqual({ type: "chapter", direction: 1 })
+		expect(key("PageUp", "PageUp")).toEqual({ type: "chapter", direction: -1 })
+		expect(key("Comma", ",")).toEqual({ type: "frameStep", direction: -1 })
+		expect(key("Period", ".")).toEqual({ type: "frameStep", direction: 1 })
+		expect(key("Equal", "=")).toEqual({ type: "normalRate" })
+		expect(key("Escape", "Escape")).toEqual({ type: "dismiss" })
+		expect(key("Backspace", "Backspace")).toBeNull()
 	})
 
-	it("maps digits to tenths of the file", () => {
-		expect(key({ key: "0" })).toEqual({ type: "seekToFraction", fraction: 0 })
-		expect(key({ key: "5" })).toEqual({ type: "seekToFraction", fraction: 0.5 })
-		expect(key({ key: "9" })).toEqual({ type: "seekToFraction", fraction: 0.9 })
+	it("maps the number keys to tenths of the file", () => {
+		expect(key("Digit0", "0")).toEqual({ type: "seekToFraction", fraction: 0 })
+		expect(key("Digit5", "5")).toEqual({ type: "seekToFraction", fraction: 0.5 })
+		expect(key("Numpad9", "9")).toEqual({ type: "seekToFraction", fraction: 0.9 })
 	})
 
-	it("takes Shift combinations but leaves Ctrl, Cmd and Alt chords alone", () => {
-		expect(key({ key: "N", shift: true })).toEqual({ type: "next" })
-		expect(key({ key: "P", shift: true })).toEqual({ type: "previous" })
-		expect(key({ key: "<", shift: true })).toEqual({ type: "rate", direction: -1 })
-		expect(key({ key: ">", shift: true })).toEqual({ type: "rate", direction: 1 })
-		expect(key({ key: "?", shift: true })).toEqual({ type: "shortcuts" })
-		expect(key({ key: "K", shift: true })).toBeNull()
-		expect(key({ key: "k", modified: true })).toBeNull()
-		expect(key({ key: "ArrowRight", modified: true })).toBeNull()
+	it("takes its Shift combinations", () => {
+		expect(key("KeyN", "N", true)).toEqual({ type: "next" })
+		expect(key("KeyP", "P", true)).toEqual({ type: "previous" })
+		expect(key("Comma", "<", true)).toEqual({ type: "rate", direction: -1 })
+		expect(key("Period", ">", true)).toEqual({ type: "rate", direction: 1 })
+		expect(key("KeyK", "K", true)).toBeNull()
 	})
 
 	it("leaves a slider its arrows, a button its Space and Enter, and menus and fields everything", () => {
-		expect(key({ key: "ArrowLeft", target: "slider" })).toBeNull()
-		expect(key({ key: "Home", target: "slider" })).toBeNull()
-		expect(key({ key: "PageUp", target: "slider" })).toBeNull()
-		expect(key({ key: "m", target: "slider" })).toEqual({ type: "toggleMute" })
-		expect(key({ key: " ", target: "button" })).toBeNull()
-		expect(key({ key: "Enter", target: "button" })).toBeNull()
-		expect(key({ key: "k", target: "button" })).toEqual({ type: "togglePlay" })
-		expect(key({ key: "k", target: "menu" })).toBeNull()
-		expect(key({ key: "k", target: "field" })).toBeNull()
+		expect(key("ArrowLeft", "ArrowLeft", false, "slider")).toBeNull()
+		expect(key("Home", "Home", false, "slider")).toBeNull()
+		expect(key("PageUp", "PageUp", false, "slider")).toBeNull()
+		expect(key("KeyM", "m", false, "slider")).toEqual({ type: "toggleMute" })
+		expect(key("Space", " ", false, "button")).toBeNull()
+		expect(key("KeyK", "k", false, "button")).toEqual({ type: "togglePlay" })
+		expect(key("KeyK", "k", false, "menu")).toBeNull()
+		expect(key("KeyK", "k", false, "field")).toBeNull()
+	})
+
+	it("acts on every media key it takes, and takes every one", () => {
+		for (const def of MEDIA_ACTIONS) {
+			expect(STAGE_MEDIA_ACTIONS, def.id).toContain(def.id)
+			expect(videoKeyAction(def.id), def.id).not.toBeNull()
+		}
 	})
 })
 

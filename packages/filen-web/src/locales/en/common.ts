@@ -186,6 +186,8 @@ export const common = {
 	shortcutsScopeAudio: "Audio player",
 	/** Keyboard shortcuts — group heading for shortcuts that work on a shared link's page (a file or directory someone shared publicly) */
 	shortcutsScopePublicLinks: "Shared links",
+	/** Keyboard shortcuts — group heading for the keys of the video and audio players, while one has focus */
+	shortcutsScopeMedia: "Media",
 	/** Keyboard shortcuts — shown instead of a key badge for a shortcut with no combo assigned */
 	shortcutsUnbound: "Not set",
 	/** Keyboard shortcuts — prompt shown on the row while its new combo is being recorded */

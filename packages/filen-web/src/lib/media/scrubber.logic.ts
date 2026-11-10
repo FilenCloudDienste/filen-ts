@@ -1,9 +1,6 @@
 // Pure math behind the media scrubber: pointer position to time, keyboard steps, buffered ranges.
 
-// Arrow keys move the playhead this far, the way every player seeks.
-export const SEEK_STEP_SECONDS = 5
-
-// PageUp/PageDown move a tenth of the file, never less than one arrow step.
+// PageUp/PageDown move a tenth of the file, never less than one arrow step (MEDIA_SEEK_STEP_SECONDS, passed in).
 const PAGE_FRACTION = 0.1
 
 function clampTime(seconds: number, duration: number): number {

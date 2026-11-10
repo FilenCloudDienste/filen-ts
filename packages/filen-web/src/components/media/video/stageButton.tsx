@@ -2,13 +2,13 @@ import type { ComponentProps, ReactNode } from "react"
 import { Tooltip as TooltipPrimitive } from "@base-ui/react/tooltip"
 import { cn } from "@filen/shared"
 import { Button } from "@/components/ui/button"
-import { Kbd } from "@/components/ui/kbd"
+import { Kbd } from "@/lib/keymap/kbd"
 import { useVideoStageContainer } from "@/components/media/video/stageContext"
 
 type ButtonProps = ComponentProps<typeof Button>
 
-// A tooltip that portals into the video stage (so it shows in fullscreen too).
-export function StageTooltip({ label, shortcut, children }: { label: string; shortcut?: string | undefined; children: ReactNode }) {
+// A tooltip that portals into the video stage (so it shows in fullscreen too), with the keys of `action` in effect.
+export function StageTooltip({ label, action, children }: { label: string; action?: string | undefined; children: ReactNode }) {
 	const container = useVideoStageContainer()
 
 	return (
@@ -22,7 +22,11 @@ export function StageTooltip({ label, shortcut, children }: { label: string; sho
 				>
 					<TooltipPrimitive.Popup className="dark inline-flex w-fit items-center gap-1.5 rounded-xl bg-neutral-950/90 px-2.5 py-1 text-xs text-foreground ring-1 ring-white/15 data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0">
 						{label}
-						{shortcut === undefined ? null : <Kbd className="bg-white/10 text-foreground/80">{shortcut}</Kbd>}
+						{action === undefined ? null : (
+							<span className="[&_kbd]:bg-white/10 [&_kbd]:text-foreground/80">
+								<Kbd action={action} />
+							</span>
+						)}
 					</TooltipPrimitive.Popup>
 				</TooltipPrimitive.Positioner>
 			</TooltipPrimitive.Portal>
@@ -30,10 +34,10 @@ export function StageTooltip({ label, shortcut, children }: { label: string; sho
 	)
 }
 
-// The player's icon button: ghost, labelled, with its shortcut in the tooltip.
+// The player's icon button: ghost, labelled, with its action's keys in the tooltip.
 export function StageIconButton(props: {
 	label: string
-	shortcut?: string | undefined
+	action?: string | undefined
 	onClick?: ButtonProps["onClick"]
 	pressed?: boolean | undefined
 	disabled?: boolean | undefined
@@ -44,7 +48,7 @@ export function StageIconButton(props: {
 	return (
 		<StageTooltip
 			label={props.label}
-			shortcut={props.shortcut}
+			action={props.action}
 		>
 			<Button
 				variant="ghost"

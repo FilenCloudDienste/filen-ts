@@ -50,7 +50,14 @@ export const CO_MOUNTABLE: readonly (readonly [ActionScope, ActionScope])[] = [
 	["audio", "settings"],
 	// A public link's page sits outside the app shell (no audio player) and shows a file's preview inline.
 	["global", "publicLinks"],
-	["editor", "publicLinks"]
+	["editor", "publicLinks"],
+	// The players' keys act only with focus inside a player (the Videos player, the preview's video player, the audio
+	// bar's controls), which takes them and stops them there: no listing's handler sees them, and the Videos screens sit
+	// inert under the Videos player. They share a layer with the shell's keys, the audio transport and the preview
+	// overlay's (the preview player is one of its bodies).
+	["global", "media"],
+	["audio", "media"],
+	["media", "editor"]
 ]
 
 // Collisions that already exist in the shipped defaults and are resolved by an explicit runtime
@@ -212,7 +219,34 @@ export const RESOLVED_COLLISIONS: readonly (readonly [string, string])[] = [
 	// A shared link's inline preview is read-only and never mounts the preview overlay, where alone preview.save binds.
 	["links.download", "preview.save"],
 	// A slideshow run from a shared link's inline preview stops every key its stage takes, Escape included.
-	["links.back", "presentation.show.end"]
+	["links.back", "presentation.show.end"],
+	// The players' keys act only with focus inside a player, which takes them and stops them there: the Videos player,
+	// a modal layer that leaves the app behind it inert (Escape closes it, as every dialog); the preview's video player,
+	// one body of the preview overlay, which never shows it with a slideshow or an image; the audio bar's own controls.
+	// A running slideshow takes its keys on its own stage, which no player shares.
+	["media.close", "presentation.show.end"],
+	["media.episodes", "preview.editImage"],
+	["media.episodes", "presentation.show.eraseAll"],
+	["media.frameForward", "presentation.show.black"],
+	["media.frameBack", "presentation.show.white"],
+	["media.toStart", "presentation.show.first"],
+	["media.toEnd", "presentation.show.last"],
+	["media.chapterNext", "presentation.show.next"],
+	["media.playPause", "presentation.show.next"],
+	["media.seekForward", "presentation.show.next"],
+	["media.volumeDown", "presentation.show.next"],
+	["media.subtitleLater", "presentation.show.nextHidden"],
+	["media.chapterPrevious", "presentation.show.previous"],
+	["media.seekBack", "presentation.show.previous"],
+	["media.volumeUp", "presentation.show.previous"],
+	["media.audioTrack", "presentation.show.togglePointer"],
+	["media.normalSpeed", "presentation.show.togglePointer"],
+	// Off a Mac, the audio transport's Alt+Shift arrows are the outline keys of a slide body being edited: an editable
+	// text element, where the transport never fires.
+	["audio.seekBack", "presentation.text.promote"],
+	["audio.seekForward", "presentation.text.demote"],
+	["audio.volumeUp", "presentation.text.moveParagraphUp"],
+	["audio.volumeDown", "presentation.text.moveParagraphDown"]
 ]
 
 export function scopesCanCollide(a: ActionScope, b: ActionScope): boolean {

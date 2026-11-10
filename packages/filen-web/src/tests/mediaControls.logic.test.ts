@@ -1,6 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { parseBufferedRanges, percentOf, ratioAt, scrubberKeyTarget, SEEK_STEP_SECONDS, timeAtRatio } from "@/lib/media/scrubber.logic"
-import { playerKeyAction, playerKeyTarget, VOLUME_STEP, type PlayerKeyInput } from "@/lib/media/playerKeys.logic"
+import { parseBufferedRanges, percentOf, ratioAt, scrubberKeyTarget, timeAtRatio } from "@/lib/media/scrubber.logic"
+import { playerKeyTarget, type PlayerKeyTarget } from "@/lib/media/playerKeys.logic"
+import { MEDIA_JUMP_ACTIONS, type MediaAction } from "@/lib/media/keymap"
+import {
+	jumpFraction,
+	MEDIA_SEEK_STEP_SECONDS as SEEK_STEP_SECONDS,
+	mediaKeyAction,
+	mediaKeyRepeats,
+	type MediaKeyEvent
+} from "@/lib/media/mediaKeys.logic"
 import { CONTROLS_IDLE_MS, controlsVisible, IdleTimer, type ControlsVisibility } from "@/lib/media/autoHide.logic"
 
 describe("scrubber math", () => {
@@ -34,16 +42,16 @@ describe("scrubberKeyTarget", () => {
 	const duration = 200
 
 	it("steps the arrows by the seek step, both axes", () => {
-		expect(scrubberKeyTarget("ArrowRight", 50, duration, SEEK_STEP_SECONDS)).toBe(55)
-		expect(scrubberKeyTarget("ArrowUp", 50, duration, SEEK_STEP_SECONDS)).toBe(55)
-		expect(scrubberKeyTarget("ArrowLeft", 50, duration, SEEK_STEP_SECONDS)).toBe(45)
-		expect(scrubberKeyTarget("ArrowDown", 50, duration, SEEK_STEP_SECONDS)).toBe(45)
+		expect(scrubberKeyTarget("ArrowRight", 50, duration, SEEK_STEP_SECONDS)).toBe(60)
+		expect(scrubberKeyTarget("ArrowUp", 50, duration, SEEK_STEP_SECONDS)).toBe(60)
+		expect(scrubberKeyTarget("ArrowLeft", 50, duration, SEEK_STEP_SECONDS)).toBe(40)
+		expect(scrubberKeyTarget("ArrowDown", 50, duration, SEEK_STEP_SECONDS)).toBe(40)
 	})
 
 	it("pages a tenth of the file, never less than a step", () => {
 		expect(scrubberKeyTarget("PageUp", 50, duration, SEEK_STEP_SECONDS)).toBe(70)
 		expect(scrubberKeyTarget("PageDown", 50, duration, SEEK_STEP_SECONDS)).toBe(30)
-		expect(scrubberKeyTarget("PageUp", 0, 20, SEEK_STEP_SECONDS)).toBe(5)
+		expect(scrubberKeyTarget("PageUp", 0, 20, SEEK_STEP_SECONDS)).toBe(10)
 	})
 
 	it("jumps to either end and never past one", () => {
@@ -77,47 +85,74 @@ describe("parseBufferedRanges", () => {
 	})
 })
 
-describe("playerKeyAction", () => {
-	function action(overrides: Partial<PlayerKeyInput>) {
-		return playerKeyAction({ key: " ", target: "surface", modified: false, fullscreen: true, ...overrides })
+// A keydown as the matchers read it: its physical key (code) and the character it typed (key).
+function keydown(code: string, key: string, modifiers: Partial<Pick<MediaKeyEvent, "ctrlKey" | "metaKey" | "shiftKey" | "altKey">> = {}) {
+	return { code, key, ctrlKey: false, metaKey: false, shiftKey: false, altKey: false, ...modifiers }
+}
+
+describe("mediaKeyAction", () => {
+	const actions: readonly MediaAction[] = [
+		"media.playPause",
+		"media.seekBack",
+		"media.seekForward",
+		"media.volumeUp",
+		"media.mute",
+		"media.jump.fifty"
+	]
+
+	function action(event: MediaKeyEvent, target: PlayerKeyTarget = "surface", combos: Readonly<Record<string, string>> = {}) {
+		return mediaKeyAction(event, target, actions, combos, false)
 	}
 
-	it("plays and pauses on Space and K", () => {
-		expect(action({ key: " " })).toEqual({ type: "togglePlay" })
-		expect(action({ key: "k" })).toEqual({ type: "togglePlay" })
-		expect(action({ key: "K" })).toEqual({ type: "togglePlay" })
+	it("matches the defaults by physical key", () => {
+		expect(action(keydown("Space", " "))).toBe("media.playPause")
+		expect(action(keydown("KeyK", "k"))).toBe("media.playPause")
+		expect(action(keydown("ArrowLeft", "ArrowLeft"))).toBe("media.seekBack")
+		expect(action(keydown("KeyL", "l"))).toBe("media.seekForward")
+		expect(action(keydown("ArrowUp", "ArrowUp"))).toBe("media.volumeUp")
+		expect(action(keydown("KeyM", "m"))).toBe("media.mute")
+		expect(action(keydown("Digit5", "5"))).toBe("media.jump.fifty")
+		// The physical key, whatever it types: a French keyboard's ; key types "," yet is not Comma.
+		expect(action(keydown("KeyM", ","))).toBe("media.mute")
 	})
 
-	it("seeks on the side arrows and steps the volume on the others", () => {
-		expect(action({ key: "ArrowRight" })).toEqual({ type: "seekBy", seconds: 5 })
-		expect(action({ key: "ArrowLeft" })).toEqual({ type: "seekBy", seconds: -5 })
-		expect(action({ key: "ArrowUp" })).toEqual({ type: "volumeBy", delta: VOLUME_STEP })
-		expect(action({ key: "ArrowDown" })).toEqual({ type: "volumeBy", delta: -VOLUME_STEP })
+	it("follows a rebound action and drops its default", () => {
+		const combos = { "media.mute": "u", "media.playPause": "none" }
+
+		expect(action(keydown("KeyU", "u"), "surface", combos)).toBe("media.mute")
+		expect(action(keydown("KeyM", "m"), "surface", combos)).toBeNull()
+		expect(action(keydown("Space", " "), "surface", combos)).toBeNull()
 	})
 
-	it("mutes on M and fullscreens on F, but only where the player can", () => {
-		expect(action({ key: "m" })).toEqual({ type: "toggleMute" })
-		expect(action({ key: "f" })).toEqual({ type: "toggleFullscreen" })
-		expect(action({ key: "f", fullscreen: false })).toBeNull()
+	it("matches modifiers exactly and leaves actions the player does not take", () => {
+		expect(action(keydown("KeyK", "k", { ctrlKey: true }))).toBeNull()
+		expect(action(keydown("ArrowLeft", "ArrowLeft", { shiftKey: true }))).toBeNull()
+		expect(action(keydown("KeyF", "f"))).toBeNull()
 	})
 
-	it("leaves a focused button its own Space, and a slider its own arrows", () => {
-		expect(action({ key: " ", target: "button" })).toBeNull()
-		expect(action({ key: "ArrowRight", target: "button" })).toEqual({ type: "seekBy", seconds: 5 })
-		expect(action({ key: "ArrowRight", target: "slider" })).toBeNull()
-		expect(action({ key: "ArrowUp", target: "slider" })).toBeNull()
-		expect(action({ key: " ", target: "slider" })).toEqual({ type: "togglePlay" })
+	it("leaves a slider its arrows, a button its Space and menus and fields everything", () => {
+		expect(action(keydown("ArrowRight", "ArrowRight"), "slider")).toBeNull()
+		expect(action(keydown("KeyM", "m"), "slider")).toBe("media.mute")
+		expect(action(keydown("Space", " "), "button")).toBeNull()
+		expect(action(keydown("ArrowRight", "ArrowRight"), "button")).toBe("media.seekForward")
+		expect(action(keydown("KeyK", "k"), "menu")).toBeNull()
+		expect(action(keydown("KeyM", "m"), "field")).toBeNull()
 	})
 
-	it("leaves chords, menus and text fields entirely alone", () => {
-		expect(action({ key: "k", modified: true })).toBeNull()
-		expect(action({ key: "ArrowRight", target: "menu" })).toBeNull()
-		expect(action({ key: "m", target: "field" })).toBeNull()
+	it("leaves a key an input method is composing with", () => {
+		expect(action({ ...keydown("KeyK", "Process"), isComposing: true })).toBeNull()
 	})
 
-	it("ignores keys it has no action for", () => {
-		expect(action({ key: "Escape" })).toBeNull()
-		expect(action({ key: "Tab" })).toBeNull()
+	it("repeats seeks and volume steps only", () => {
+		expect(mediaKeyRepeats("media.seekBack")).toBe(true)
+		expect(mediaKeyRepeats("media.volumeUp")).toBe(true)
+		expect(mediaKeyRepeats("media.playPause")).toBe(false)
+		expect(mediaKeyRepeats("media.mute")).toBe(false)
+	})
+
+	it("jumps the number keys to tenths of the file", () => {
+		expect(MEDIA_JUMP_ACTIONS.map(jumpFraction)).toEqual([0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9])
+		expect(jumpFraction("media.mute")).toBeNull()
 	})
 })
 

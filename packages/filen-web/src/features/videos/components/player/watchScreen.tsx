@@ -797,6 +797,47 @@ export function WatchScreen({ titleId, search }: { titleId: string; search: Watc
 
 				return true
 			}
+			case "cycleSubtitles": {
+				const usable = subtitleTracks.filter(track => track.unavailable === null)
+
+				if (usable.length === 0) {
+					return false
+				}
+
+				const at = subtitle === null ? -1 : usable.findIndex(track => track.id === subtitle.id)
+				const following = usable[at + 1]
+
+				if (following === undefined) {
+					if (subtitle !== null) {
+						lastShown.current = subtitle
+					}
+
+					chooseSubtitle({ kind: "off" })
+				} else {
+					chooseSubtitle({ kind: "track", id: following.id })
+				}
+
+				return true
+			}
+			case "cycleAudio": {
+				const count = probe?.audio.length ?? 0
+
+				if (count < 2) {
+					return false
+				}
+
+				void controller.selectAudio((snap.audioIndex + 1) % count)
+
+				return true
+			}
+			case "episodes":
+				if (episodes.length < 2 || target === null) {
+					return false
+				}
+
+				setPanel(current => (current === "episodes" ? null : "episodes"))
+
+				return true
 			case "skip":
 				return skip()
 			case "next":
@@ -818,6 +859,11 @@ export function WatchScreen({ titleId, search }: { titleId: string; search: Watc
 			case "subtitleDelay":
 				changeDelay(delay + action.seconds)
 				setSubtitleNotice(t("subtitleDelayNotice", { delay: formatSubtitleDelay(delay + action.seconds) }))
+
+				return true
+			case "resetSubtitleDelay":
+				changeDelay(0)
+				setSubtitleNotice(t("subtitleDelayNotice", { delay: formatSubtitleDelay(0) }))
 
 				return true
 			case "confirm":
@@ -1121,7 +1167,7 @@ export function WatchScreen({ titleId, search }: { titleId: string; search: Watc
 				items.push({
 					id: "delay",
 					label: t("subtitleDelayTitle"),
-					shortcut: "G / H",
+					shortcuts: ["media.subtitleEarlier", "media.subtitleLater"],
 					onSelect: () => {
 						setPanel("delay")
 					}

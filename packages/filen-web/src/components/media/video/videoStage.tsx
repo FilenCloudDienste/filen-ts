@@ -23,9 +23,21 @@ import { IdleTimer } from "@/lib/media/autoHide.logic"
 import { isVideoNativeFullscreen, toggleVideoFullscreen, useIsFullscreen, videoFullscreenSupported } from "@/lib/media/fullscreen"
 import { stepMediaVolume, toggleMediaMuted, warmMediaVolume } from "@/lib/media/mediaVolume"
 import { playerKeyTarget } from "@/lib/media/playerKeys.logic"
+import { MEDIA_SEEK_STEP_SECONDS, mediaKeyAction, mediaKeyRepeats, playerOwnsKey } from "@/lib/media/mediaKeys.logic"
+import type { MediaAction } from "@/lib/media/keymap"
+import { isImeKeydown, matchesCombo } from "@filen/shared/keymap"
+import { isRecordingCombo, useBindings } from "@/lib/keymap/registry"
+import { isMacPlatform } from "@/lib/keymap/kbd.logic"
 import { SeekCoalescer } from "@/lib/media/seekCoalescer.logic"
 import { cancelHeldPause, pauseMedia } from "@filen/shared/heldPause"
-import { chapterTarget, frameDuration, stepPlaybackRate, videoKeyAction, type VideoKeyAction } from "@/lib/media/videoKeys.logic"
+import {
+	chapterTarget,
+	frameDuration,
+	STAGE_MEDIA_ACTIONS,
+	stepPlaybackRate,
+	videoKeyAction,
+	type VideoKeyAction
+} from "@/lib/media/videoKeys.logic"
 import { useHoldReadsWhilePlaying } from "@/lib/media/useHoldReadsWhilePlaying"
 import { seekMedia, setPlaybackRate, toggleMediaPlayback, useMediaPictureInPicture, useSyncedMediaVolume } from "@/lib/media/useMediaState"
 import { useIsNarrowViewport } from "@/features/shell/hooks/useIsNarrowViewport"
@@ -100,6 +112,8 @@ export interface VideoStageProps {
 	onInteraction?: () => void
 }
 
+const IS_MAC = isMacPlatform()
+
 function pictureInPictureSupported(): boolean {
 	return typeof document !== "undefined" && "pictureInPictureEnabled" in document && document.pictureInPictureEnabled
 }
@@ -131,6 +145,7 @@ export function VideoStage(props: VideoStageProps) {
 	const lastPointerType = useRef("mouse")
 	const videoRef = useRef<HTMLVideoElement | null>(null)
 	const phone = useIsNarrowViewport()
+	const combos = useBindings()
 	const fullscreen = useIsFullscreen(container)
 	const pictureInPicture = useMediaPictureInPicture(video)
 	const { onVideo, onControlsVisibleChange, onAction, onInteraction } = props
@@ -395,6 +410,13 @@ export function VideoStage(props: VideoStageProps) {
 			return true
 		}
 
+		// Nothing is open over the picture: the key leaves the player, whatever it shows.
+		if (action.type === "dismiss") {
+			props.onBack()
+
+			return true
+		}
+
 		if (video === null) {
 			return false
 		}
@@ -449,6 +471,10 @@ export function VideoStage(props: VideoStageProps) {
 				setPlaybackRate(video, stepPlaybackRate(video.playbackRate, action.direction))
 
 				return true
+			case "normalRate":
+				setPlaybackRate(video, 1)
+
+				return true
 			case "togglePictureInPicture":
 				if (pictureInPictureSupported()) {
 					togglePictureInPicture(video)
@@ -478,14 +504,21 @@ export function VideoStage(props: VideoStageProps) {
 			return
 		}
 
-		const action = videoKeyAction({
-			key: event.key,
-			target: playerKeyTarget(event.target),
-			modified: event.ctrlKey || event.metaKey || event.altKey,
-			shift: event.shiftKey
-		})
+		const action = stageKeyAction(event)
 
-		if (action === null || !runAction(action)) {
+		if (action === null) {
+			return
+		}
+
+		// A held key's repeats stay the player's even when they do nothing: a toggle fires once.
+		if (event.repeat && (action.media === null || !mediaKeyRepeats(action.media))) {
+			event.preventDefault()
+			event.stopPropagation()
+
+			return
+		}
+
+		if (!runAction(action.action)) {
 			return
 		}
 
@@ -493,9 +526,36 @@ export function VideoStage(props: VideoStageProps) {
 		event.stopPropagation()
 		onInteraction?.()
 
-		if (action.type !== "dismiss") {
+		if (action.action.type !== "dismiss") {
 			idleTimer.poke()
 		}
+	}
+
+	// The stage's action for a key: a media key (the combos in effect), Enter for the shown card's primary action, or
+	// the app's shortcuts key, which opens the shortcuts list over the picture.
+	function stageKeyAction(event: KeyboardEvent<HTMLDivElement>): { action: VideoKeyAction; media: MediaAction | null } | null {
+		if (isRecordingCombo()) {
+			return null
+		}
+
+		const target = playerKeyTarget(event.target)
+		const media = mediaKeyAction(event, target, STAGE_MEDIA_ACTIONS, combos, IS_MAC)
+
+		if (media !== null) {
+			const action = videoKeyAction(media)
+
+			return action === null ? null : { action, media }
+		}
+
+		if (!playerOwnsKey(event.key, target) || isImeKeydown(event)) {
+			return null
+		}
+
+		if (event.key === "Enter" && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey) {
+			return { action: { type: "confirm" }, media: null }
+		}
+
+		return matchesCombo(event, combos["app.openShortcuts"] ?? "", IS_MAC) ? { action: { type: "shortcuts" }, media: null } : null
 	}
 
 	function handleSurfacePointerUp(event: PointerEvent<HTMLDivElement>): void {
@@ -520,7 +580,7 @@ export function VideoStage(props: VideoStageProps) {
 
 		if (previous !== null && now - previous.at < DOUBLE_TAP_MS && previous.zone === zone && zone !== 0) {
 			lastTap.current = null
-			seekBy(zone * 10)
+			seekBy(zone * MEDIA_SEEK_STEP_SECONDS)
 			setRipple({ side: zone, at: now })
 			idleTimer.poke()
 			onInteraction?.()
@@ -663,7 +723,7 @@ export function VideoStage(props: VideoStageProps) {
 							<h1 className="min-w-0 flex-1 truncate text-sm font-medium text-white sm:text-base">{props.title}</h1>
 							<StageIconButton
 								label={t("playerShortcuts")}
-								shortcut="?"
+								action="app.openShortcuts"
 								onClick={() => {
 									setShortcutsOpen(true)
 								}}
@@ -713,7 +773,7 @@ export function VideoStage(props: VideoStageProps) {
 											shown={visible}
 											label={t("playerSeekBack")}
 											onClick={() => {
-												seekBy(-10)
+												seekBy(-MEDIA_SEEK_STEP_SECONDS)
 												onInteraction?.()
 											}}
 										>
@@ -740,7 +800,7 @@ export function VideoStage(props: VideoStageProps) {
 											shown={visible}
 											label={t("playerSeekForward")}
 											onClick={() => {
-												seekBy(10)
+												seekBy(MEDIA_SEEK_STEP_SECONDS)
 												onInteraction?.()
 											}}
 										>
@@ -780,7 +840,7 @@ export function VideoStage(props: VideoStageProps) {
 									<div className="flex items-center gap-0.5 sm:gap-1">
 										<StageIconButton
 											label={playLabel}
-											shortcut="K"
+											action="media.playPause"
 											onClick={() => {
 												if (video !== null) {
 													toggleMediaPlayback(video)
@@ -797,18 +857,18 @@ export function VideoStage(props: VideoStageProps) {
 											<>
 												<StageIconButton
 													label={t("playerSeekBack")}
-													shortcut="J"
+													action="media.seekBack"
 													onClick={() => {
-														seekBy(-10)
+														seekBy(-MEDIA_SEEK_STEP_SECONDS)
 													}}
 												>
 													<RotateCcwIcon className="size-5" />
 												</StageIconButton>
 												<StageIconButton
 													label={t("playerSeekForward")}
-													shortcut="L"
+													action="media.seekForward"
 													onClick={() => {
-														seekBy(10)
+														seekBy(MEDIA_SEEK_STEP_SECONDS)
 													}}
 												>
 													<RotateCwIcon className="size-5" />
@@ -823,7 +883,7 @@ export function VideoStage(props: VideoStageProps) {
 										{!phone && props.hasPrevious ? (
 											<StageIconButton
 												label={props.previousLabel ?? t("playerPrevious")}
-												shortcut="⇧P"
+												action="media.previous"
 												onClick={props.onPrevious}
 											>
 												<SkipBackIcon className="size-5 fill-current" />
@@ -832,7 +892,7 @@ export function VideoStage(props: VideoStageProps) {
 										{!phone && props.hasNext ? (
 											<StageIconButton
 												label={props.nextLabel ?? t("playerNext")}
-												shortcut="⇧N"
+												action="media.next"
 												onClick={props.onNext}
 											>
 												<SkipForwardIcon className="size-5 fill-current" />
@@ -842,7 +902,7 @@ export function VideoStage(props: VideoStageProps) {
 										{!phone && pictureInPictureSupported() ? (
 											<StageIconButton
 												label={pictureInPicture ? t("playerExitPictureInPicture") : t("playerPictureInPicture")}
-												shortcut="I"
+												action="media.pictureInPicture"
 												pressed={pictureInPicture}
 												onClick={() => {
 													if (video !== null) {
@@ -856,7 +916,7 @@ export function VideoStage(props: VideoStageProps) {
 										{videoFullscreenSupported(video) ? (
 											<StageIconButton
 												label={fullscreen || nativeFullscreen ? t("playerExitFullscreen") : t("playerFullscreen")}
-												shortcut="F"
+												action="media.fullscreen"
 												onClick={toggleFullscreenNow}
 											>
 												{fullscreen ? <MinimizeIcon className="size-5" /> : <MaximizeIcon className="size-5" />}

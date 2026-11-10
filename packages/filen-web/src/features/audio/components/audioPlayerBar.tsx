@@ -1,15 +1,22 @@
-import { useState } from "react"
+import { useState, type KeyboardEvent } from "react"
 import { useTranslation } from "react-i18next"
 import { Play, Pause, SkipForward, SkipBack, ListMusic, Music } from "lucide-react"
 import { useShallow } from "zustand/shallow"
 import { audioEngine, audioMediaSession } from "@/features/audio/lib/audioEngine"
 import { transportKeyIgnored } from "@/features/audio/lib/transportKeys"
+import { AUDIO_BAR_MEDIA_ACTIONS, audioSeekTarget, runAudioMediaAction } from "@/features/audio/lib/barKeys"
+import { nextLoopMode } from "@/features/audio/components/audioTransport.logic"
 import { useAudioStore, useAudioNowPlaying, useAudioError } from "@/features/audio/store/useAudioStore"
 import { playbackErrorLabel } from "@/features/audio/lib/formatFailureNotice"
 import { MEDIA_FORMAT_UNSUPPORTED } from "@/lib/media/mediaFailure"
 import { NowPlayingPanel } from "@/features/audio/components/nowPlayingPanel"
 import { ShuffleToggleButton, LoopToggleButton, TOGGLE_ON_CLASS } from "@/features/audio/components/queueToggles"
 import { useAction } from "@/lib/keymap/useAction"
+import { isRecordingCombo, useBindings } from "@/lib/keymap/registry"
+import { isMacPlatform } from "@/lib/keymap/kbd.logic"
+import { MEDIA_SEEK_STEP_SECONDS, MEDIA_VOLUME_STEP, mediaKeyAction, mediaKeyRepeats } from "@/lib/media/mediaKeys.logic"
+import { playerKeyTarget } from "@/lib/media/playerKeys.logic"
+import { stepMediaVolume, toggleMediaMuted } from "@/lib/media/mediaVolume"
 import type { Options } from "react-hotkeys-hook"
 import { Button } from "@/components/ui/button"
 import { MediaScrubber } from "@/components/media/mediaScrubber"
@@ -20,8 +27,24 @@ import { toastObstructionRef } from "@/lib/toastClearance"
 import { formatSecondsToMediaClock } from "@filen/shared"
 import { SplitTitle } from "@/features/preview/components/splitTitle"
 
+const IS_MAC = isMacPlatform()
+
+// With no queue there is nothing to play, seek or turn up: the keys stay the page's.
 const TRANSPORT_KEYS: Options = {
-	ignoreEventWhen: event => transportKeyIgnored(event, audioMediaSession)
+	ignoreEventWhen: event => transportKeyIgnored(event, audioMediaSession) || useAudioStore.getState().queue.length === 0
+}
+
+// The playhead and the track's length, in seconds, read when a key fires.
+function audioPosition(): { position: number; duration: number } {
+	const { positionMs, durationMs } = useAudioStore.getState()
+
+	return { position: positionMs / 1000, duration: durationMs / 1000 }
+}
+
+function seekAudioBy(seconds: number): void {
+	const { position, duration } = audioPosition()
+
+	audioEngine.seek(audioSeekTarget(position + seconds, duration))
 }
 
 // The persistent audio player, docked at the bottom of the authed shell (rendered once by AppShell,
@@ -38,9 +61,10 @@ export function AudioPlayerBar() {
 	const lastError = useAudioError()
 	const lastErrorTrack = useAudioStore(state => state.lastErrorTrack)
 	const [queueOpen, setQueueOpen] = useState(false)
+	const combos = useBindings()
 
-	// Transport keyboard shortcuts — bound whenever the bar is mounted (the shell mounts it always; with no
-	// queue the engine has nothing to do). Fired against the engine directly.
+	// Transport keyboard shortcuts — bound whenever the bar is mounted (the shell mounts it always), and standing down
+	// while there is no queue. Fired against the engine directly.
 	useAction(
 		"audio.playPause",
 		() => {
@@ -62,6 +86,82 @@ export function AudioPlayerBar() {
 		},
 		TRANSPORT_KEYS
 	)
+	useAction(
+		"audio.seekBack",
+		() => {
+			seekAudioBy(-MEDIA_SEEK_STEP_SECONDS)
+		},
+		TRANSPORT_KEYS
+	)
+	useAction(
+		"audio.seekForward",
+		() => {
+			seekAudioBy(MEDIA_SEEK_STEP_SECONDS)
+		},
+		TRANSPORT_KEYS
+	)
+	useAction(
+		"audio.volumeUp",
+		() => {
+			stepMediaVolume(MEDIA_VOLUME_STEP)
+		},
+		TRANSPORT_KEYS
+	)
+	useAction(
+		"audio.volumeDown",
+		() => {
+			stepMediaVolume(-MEDIA_VOLUME_STEP)
+		},
+		TRANSPORT_KEYS
+	)
+	useAction("audio.mute", toggleMediaMuted, TRANSPORT_KEYS)
+	useAction(
+		"audio.shuffle",
+		() => {
+			audioEngine.setShuffleEnabled(!useAudioStore.getState().shuffleEnabled)
+		},
+		TRANSPORT_KEYS
+	)
+	useAction(
+		"audio.loop",
+		() => {
+			audioEngine.setLoopMode(nextLoopMode(useAudioStore.getState().loopMode))
+		},
+		TRANSPORT_KEYS
+	)
+	useAction(
+		"audio.toggleQueue",
+		() => {
+			setQueueOpen(open => !open)
+		},
+		TRANSPORT_KEYS
+	)
+
+	// The players' media keys, while focus is in the bar (its buttons; its sliders keep their arrows). A key pressed in
+	// the queue popover, which React bubbles here from its portal, stays the popover's.
+	function handleKeyDown(event: KeyboardEvent<HTMLElement>): void {
+		if (
+			event.defaultPrevented ||
+			isRecordingCombo() ||
+			!(event.target instanceof Node) ||
+			!event.currentTarget.contains(event.target)
+		) {
+			return
+		}
+
+		const action = mediaKeyAction(event, playerKeyTarget(event.target), AUDIO_BAR_MEDIA_ACTIONS, combos, IS_MAC)
+
+		if (action === null) {
+			return
+		}
+
+		event.preventDefault()
+		event.stopPropagation()
+
+		if (!event.repeat || mediaKeyRepeats(action)) {
+			runAudioMediaAction(action, audioEngine, audioPosition())
+		}
+	}
 
 	// No queue → no bar. Placed AFTER the hooks so hook order stays stable across renders (the shell
 	// mounts this component unconditionally).
@@ -77,6 +177,7 @@ export function AudioPlayerBar() {
 			ref={toastObstructionRef}
 			aria-label={t("playerLabel")}
 			className="flex flex-col gap-1 border-t border-shell-border bg-card px-3 py-2 text-foreground"
+			onKeyDown={handleKeyDown}
 		>
 			{lastError !== null ? (
 				<div

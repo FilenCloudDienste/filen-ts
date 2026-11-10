@@ -1,6 +1,5 @@
 import { useDeferredValue, useEffect, useId, useMemo, useState, type KeyboardEvent } from "react"
 import { useTranslation } from "react-i18next"
-import { useRouter } from "@tanstack/react-router"
 import { SearchIcon, SearchXIcon } from "lucide-react"
 import { useElementSize } from "@/lib/useElementSize"
 import { SearchInput } from "@/features/drive/components/searchInput"
@@ -13,9 +12,13 @@ import { CardObserver } from "@/features/videos/lib/cardObserver"
 import type { VideoCardModel } from "@/features/videos/lib/homeRows.logic"
 import { SEARCH_DEBOUNCE_MS, type SearchGroupKind } from "@/features/videos/lib/search.logic"
 import { gridKeyAction } from "@/features/videos/lib/videoGrid.logic"
+import { cardCommand, cardCommandAction } from "@/features/videos/lib/cardKeys"
+import { isRecordingCombo, useBindings } from "@/lib/keymap/registry"
+import { isMacPlatform } from "@/lib/keymap/kbd.logic"
 import { VideoCard, type VideoCardAction } from "@/features/videos/components/videoCard"
 import { EmptyMessage } from "@/components/emptyMessage"
 
+const IS_MAC = isMacPlatform()
 const GAP = 16
 const POSTER_MIN = 132
 const LANDSCAPE_MIN = 220
@@ -39,7 +42,7 @@ interface ResultGroupProps {
 function ResultGroup({ group, cards, width, observer, onAction }: ResultGroupProps) {
 	const { t } = useTranslation("videos")
 	const headingId = useId()
-	const router = useRouter()
+	const combos = useBindings()
 	const [active, setActive] = useState(0)
 	const cardFocus = useCardFocus<number>()
 	const landscape = group.kind === "episodes" || group.kind === "other"
@@ -49,42 +52,37 @@ function ResultGroup({ group, cards, width, observer, onAction }: ResultGroupPro
 	function handleKeyDown(event: KeyboardEvent<HTMLDivElement>): void {
 		const target = event.target
 
-		if (
-			!(target instanceof HTMLAnchorElement) ||
-			!target.hasAttribute("data-video-card") ||
-			event.altKey ||
-			event.ctrlKey ||
-			event.metaKey
-		) {
+		if (!(target instanceof HTMLAnchorElement) || !target.hasAttribute("data-video-card") || isRecordingCombo()) {
 			return
 		}
 
+		const command = cardCommand(event, combos, IS_MAC)
+
+		if (command !== null) {
+			event.preventDefault()
+
+			const card = cards[activeIndex]
+			const action = card === undefined || event.repeat ? null : cardCommandAction(command, card)
+
+			if (card !== undefined && action !== null) {
+				onAction(action, card)
+			}
+
+			return
+		}
+
+		if (event.altKey || event.ctrlKey || event.metaKey) {
+			return
+		}
+
+		// Two rows a page: a group shows only its first few results.
 		const action = gridKeyAction({ key: event.key, index: activeIndex, count: cards.length, columns, pageRows: 2 })
 
 		if (action.kind === "none" || action.kind === "open") {
 			return
 		}
 
-		if (action.kind === "back") {
-			if (router.history.canGoBack()) {
-				event.preventDefault()
-				router.history.back()
-			}
-
-			return
-		}
-
 		event.preventDefault()
-
-		if (action.kind === "play") {
-			const card = cards[activeIndex]
-
-			if (card !== undefined) {
-				onAction("play", card)
-			}
-
-			return
-		}
 
 		setActive(action.index)
 		cardFocus.focus(action.index, { scroll: true })

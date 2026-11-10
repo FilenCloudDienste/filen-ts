@@ -182,7 +182,7 @@ describe("bindMediaSessionActions — feature detection", () => {
 
 		const boundActions = setActionHandler.mock.calls.map(call => call[0] as string)
 
-		expect(boundActions).toEqual(["play", "pause", "previoustrack", "nexttrack", "seekto", "seekbackward", "seekforward"])
+		expect(boundActions).toEqual(["play", "pause", "stop", "previoustrack", "nexttrack", "seekto", "seekbackward", "seekforward"])
 	})
 
 	it("is a no-op when unsupported and swallows a per-action NotSupportedError", () => {

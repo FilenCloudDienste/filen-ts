@@ -43,6 +43,7 @@ export type ActionScope =
 	| "mounts"
 	| "publicLinks"
 	| "settings"
+	| "media"
 
 // A finer group inside a scope, for the shortcuts list only (conflicts read the scope): the editor's surfaces.
 export type ShortcutSection =

@@ -42,7 +42,8 @@ const ALL_SCOPES: readonly ActionScope[] = [
 	"sync",
 	"mounts",
 	"publicLinks",
-	"settings"
+	"settings",
+	"media"
 ]
 
 describe("groupShortcuts", () => {

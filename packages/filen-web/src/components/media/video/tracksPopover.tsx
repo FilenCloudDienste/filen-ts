@@ -166,7 +166,7 @@ export function TracksPopover({
 		>
 			<StageTooltip
 				label={label}
-				shortcut="C"
+				action="media.subtitles"
 			>
 				<PopoverPrimitive.Trigger
 					render={

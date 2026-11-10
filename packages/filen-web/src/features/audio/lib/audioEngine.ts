@@ -6,6 +6,7 @@ import { notifyFormatFailure } from "@/features/audio/lib/formatFailureNotice"
 import { hydrateAudioPrefs, useAudioStore } from "@/features/audio/store/useAudioStore"
 import { warmMediaVolume } from "@/lib/media/mediaVolume"
 import { mediaSessionOwners } from "@/lib/media/mediaSessionOwner"
+import { audioSeekTarget } from "@/features/audio/lib/barKeys"
 
 // The audio engine's share of the page's Media Session: the bottom of the owner stack. A video player taking
 // the session over pauses the engine; when it lets go the engine's metadata and handlers come back.
@@ -55,8 +56,9 @@ bindMediaSessionActions(
 		skipPrevious: () => {
 			void audioEngine.skipPrevious()
 		},
+		// Inside the track: a forward nudge near its end lands on the end, not past it.
 		seek: seconds => {
-			audioEngine.seek(seconds)
+			audioEngine.seek(audioSeekTarget(seconds, useAudioStore.getState().durationMs / 1000))
 		}
 	},
 	() => useAudioStore.getState().positionMs / 1000,

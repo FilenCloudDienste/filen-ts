@@ -70,6 +70,22 @@ export const audio = {
 	commandNext: "Next track",
 	/** Skip to previous track via keyboard */
 	commandPrevious: "Previous track",
+	/** Seek the playing track back via keyboard */
+	commandSeekBack: "Back 10 seconds",
+	/** Seek the playing track forward via keyboard */
+	commandSeekForward: "Forward 10 seconds",
+	/** Raise the volume via keyboard */
+	commandVolumeUp: "Volume up",
+	/** Lower the volume via keyboard */
+	commandVolumeDown: "Volume down",
+	/** Mute or unmute via keyboard */
+	commandMute: "Mute or unmute",
+	/** Turn shuffle on or off via keyboard */
+	commandShuffle: "Shuffle on or off",
+	/** Switch the repeat mode (off, all, one) via keyboard */
+	commandLoop: "Change repeat mode",
+	/** Show or hide the play queue via keyboard */
+	commandToggleQueue: "Show or hide the queue",
 
 	// ── Playlists ────────────────────────────────────────────────────────────
 	/** New-playlist control in the playlists sidebar header (its accessible name) */

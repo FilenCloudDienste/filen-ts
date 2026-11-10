@@ -3,7 +3,8 @@ import { useTranslation } from "react-i18next"
 import { cn, formatSecondsToMediaClock } from "@filen/shared"
 import { SliderVisual } from "@/components/media/sliderVisual"
 import { GLASS_SURFACE_CLASS } from "@/components/ui/surface"
-import { parseBufferedRanges, percentOf, ratioAt, scrubberKeyTarget, SEEK_STEP_SECONDS, timeAtRatio } from "@/lib/media/scrubber.logic"
+import { MEDIA_SEEK_STEP_SECONDS } from "@/lib/media/mediaKeys.logic"
+import { parseBufferedRanges, percentOf, ratioAt, scrubberKeyTarget, timeAtRatio } from "@/lib/media/scrubber.logic"
 import { seekMedia, useMediaBuffered, useMediaCurrentTime, useMediaDuration } from "@/lib/media/useMediaState"
 
 interface MediaScrubberProps {
@@ -83,7 +84,7 @@ export function MediaScrubber({ value, duration, label, onSeek, buffered, onScru
 	}
 
 	function handleKeyDown(event: KeyboardEvent<HTMLInputElement>): void {
-		const target = scrubberKeyTarget(event.key, shown, duration, SEEK_STEP_SECONDS)
+		const target = scrubberKeyTarget(event.key, shown, duration, MEDIA_SEEK_STEP_SECONDS)
 
 		if (target === null) {
 			return

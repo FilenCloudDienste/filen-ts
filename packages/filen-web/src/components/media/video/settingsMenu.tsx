@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react"
+import { useState } from "react"
 import { useTranslation } from "react-i18next"
 import { SettingsIcon } from "lucide-react"
 import { cn } from "@filen/shared"
@@ -17,6 +17,7 @@ import {
 import { PLAYBACK_RATES } from "@/lib/media/videoKeys.logic"
 import { setPlaybackRate, useMediaPlaybackRate } from "@/lib/media/useMediaState"
 import { StageTooltip } from "@/components/media/video/stageButton"
+import { Kbd } from "@/lib/keymap/kbd"
 import { STAGE_POPUP_TONE_CLASS, useStagePopupOpen, useVideoStageContainer } from "@/components/media/video/stageContext"
 
 // The gear: playback speed, then whatever the caller adds (subtitle style and delay; on a phone also the
@@ -25,7 +26,8 @@ import { STAGE_POPUP_TONE_CLASS, useStagePopupOpen, useVideoStageContainer } fro
 export interface SettingsMenuItem {
 	id: string
 	label: string
-	shortcut?: string
+	// The actions whose keys in effect the item shows.
+	shortcuts?: readonly string[]
 	disabled?: boolean
 	onSelect: () => void
 }
@@ -101,7 +103,7 @@ export function StageSettingsMenu({
 						onClick={item.onSelect}
 					>
 						<span className="flex-1">{item.label}</span>
-						{item.shortcut === undefined ? null : <ShortcutHint>{item.shortcut}</ShortcutHint>}
+						{item.shortcuts === undefined ? null : <ShortcutHint actions={item.shortcuts} />}
 					</DropdownMenuItem>
 				))}
 			</DropdownMenuContent>
@@ -109,6 +111,15 @@ export function StageSettingsMenu({
 	)
 }
 
-function ShortcutHint({ children }: { children: ReactNode }) {
-	return <span className="text-xs text-muted-foreground">{children}</span>
+function ShortcutHint({ actions }: { actions: readonly string[] }) {
+	return (
+		<span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+			{actions.map(action => (
+				<Kbd
+					key={action}
+					action={action}
+				/>
+			))}
+		</span>
+	)
 }

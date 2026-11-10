@@ -102,7 +102,7 @@ function readWholeSecond(media: HTMLMediaElement): number {
 }
 
 // 0 until known: a live stream or an unloaded element reports Infinity or NaN.
-function mediaDuration(media: HTMLMediaElement): number {
+export function mediaDuration(media: HTMLMediaElement): number {
 	return Number.isFinite(media.duration) && media.duration > 0 ? media.duration : 0
 }
 

@@ -1,7 +1,7 @@
 import { startTransition, useDeferredValue, useEffect, useId, useLayoutEffect, useMemo, useState, type KeyboardEvent } from "react"
 import { useTranslation } from "react-i18next"
 import type { TFunction } from "i18next"
-import { Link, useRouter } from "@tanstack/react-router"
+import { Link } from "@tanstack/react-router"
 import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react"
 import { cn } from "@filen/shared"
 import { useElementSize } from "@/lib/useElementSize"
@@ -11,6 +11,9 @@ import { useWatchStateLoaded } from "@/features/videos/hooks/useWatchStateLoaded
 import { useCatalogHomeQuery } from "@/features/videos/queries/catalog"
 import { useVideoCardActions } from "@/features/videos/hooks/useVideoCardActions"
 import { useCardFocus } from "@/features/videos/hooks/useCardFocus"
+import { cardCommand, cardCommandAction } from "@/features/videos/lib/cardKeys"
+import { isRecordingCombo, useBindings } from "@/lib/keymap/registry"
+import { isMacPlatform } from "@/lib/keymap/kbd.logic"
 import { useHistoryEntryKey } from "@/features/videos/hooks/useHistoryEntryKey"
 import { recallScroll, rememberScroll } from "@/features/videos/lib/scrollMemory"
 import { CardObserver } from "@/features/videos/lib/cardObserver"
@@ -34,6 +37,8 @@ const ROW_INSET = 16
 // Caption under a card: the title and up to two lines.
 const CAPTION_HEIGHT = 58
 const ROW_HEADER_HEIGHT = 28
+
+const IS_MAC = isMacPlatform()
 
 // One hero per session: kept while it stays in the library.
 let sessionHeroId: string | null = null
@@ -345,10 +350,10 @@ function useRowCursor() {
 // the cursor stays mounted. The page's and each row's scroll position come back with Back.
 export function VideosHomeRows({ roots, scrollElement }: { roots: readonly VideoLibraryRootView[]; scrollElement: HTMLElement | null }) {
 	const { t } = useTranslation("videos")
-	const router = useRouter()
 	const { rows, hero, ready: rowsReady, now } = useHomeRows(roots)
 	const names = useVideoRootNames(roots)
 	const onAction = useVideoCardActions()
+	const combos = useBindings()
 	const historyKey = useHistoryEntryKey()
 	const [container, setContainer] = useState<HTMLDivElement | null>(null)
 	const { width } = useElementSize(container)
@@ -414,43 +419,37 @@ export function VideosHomeRows({ roots, scrollElement }: { roots: readonly Video
 	function handleKeyDown(event: KeyboardEvent<HTMLDivElement>): void {
 		const target = event.target
 
-		if (
-			!(target instanceof HTMLAnchorElement) ||
-			!target.hasAttribute("data-video-card") ||
-			event.altKey ||
-			event.ctrlKey ||
-			event.metaKey
-		) {
+		if (!(target instanceof HTMLAnchorElement) || !target.hasAttribute("data-video-card") || isRecordingCombo()) {
 			return
 		}
 
 		const row = rows.findIndex(candidate => candidate.id === cursor.row)
+		const command = cardCommand(event, combos, IS_MAC)
+
+		if (command !== null) {
+			event.preventDefault()
+
+			const card = rows[row]?.cards[cursor.column]
+			const action = card === undefined || event.repeat ? null : cardCommandAction(command, card)
+
+			if (card !== undefined && action !== null) {
+				onAction(action, card)
+			}
+
+			return
+		}
+
+		if (event.altKey || event.ctrlKey || event.metaKey) {
+			return
+		}
+
 		const action = rowsKeyAction({ key: event.key, row, column: cursor.column, rowLengths })
 
 		if (action.kind === "none" || action.kind === "open") {
 			return
 		}
 
-		if (action.kind === "back") {
-			if (router.history.canGoBack()) {
-				event.preventDefault()
-				router.history.back()
-			}
-
-			return
-		}
-
 		event.preventDefault()
-
-		if (action.kind === "play") {
-			const card = rows[row]?.cards[cursor.column]
-
-			if (card !== undefined) {
-				onAction("play", card)
-			}
-
-			return
-		}
 
 		const next = rows[action.row]
 

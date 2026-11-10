@@ -1,6 +1,7 @@
 import type { ElementSample, QueueTrack } from "@/features/audio/store/audioQueue"
 import { THUMB_MAX_DIM } from "@/features/drive/lib/thumbnails.logic"
 import { trackDisplayTitle } from "@/features/audio/lib/trackTags.logic"
+import { MEDIA_SEEK_STEP_SECONDS } from "@/lib/media/mediaKeys.logic"
 
 // The Media Session bridge — wires OS media keys / lock-screen controls (navigator.mediaSession) to the
 // audio engine, both directions, entirely feature-detected so Safari/Firefox gaps degrade to no-ops.
@@ -56,9 +57,8 @@ export interface MediaSessionActionInfo {
 	seekOffset?: number
 }
 
-// Default jump for seekbackward/seekforward when the OS supplies no explicit offset — the widely-used
-// 10-second nudge.
-const SEEK_NUDGE_SECONDS = 10
+// Default jump for seekbackward/seekforward when the OS supplies no explicit offset: the players' one seek step.
+const SEEK_NUDGE_SECONDS = MEDIA_SEEK_STEP_SECONDS
 
 // The pure OS-action → target dispatch table. Returned as ordered [action, handler] pairs so the binder
 // can install each and a test can assert the mapping without touching navigator. seekto/seekbackward/
@@ -79,6 +79,13 @@ export function buildMediaSessionActionHandlers(
 		],
 		[
 			"pause",
+			() => {
+				target.pause()
+			}
+		],
+		// The OS's Stop (a headset's, a lock screen's): playback halts where it is, as Pause.
+		[
+			"stop",
 			() => {
 				target.pause()
 			}

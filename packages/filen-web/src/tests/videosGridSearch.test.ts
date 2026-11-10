@@ -129,8 +129,10 @@ describe("gridKeyAction", () => {
 		expect(at("PageUp", 9)).toEqual({ kind: "move", index: 1 })
 		expect(at("Home", 5)).toEqual({ kind: "move", index: 0 })
 		expect(at("End", 0)).toEqual({ kind: "move", index: 9 })
-		expect(at("P", 0)).toEqual({ kind: "play" })
-		expect(at("Escape", 4)).toEqual({ kind: "back" })
+		expect(at("Enter", 4)).toEqual({ kind: "open" })
+		// The card commands are registered actions (cardKeys.ts); Escape never leaves the page.
+		expect(at("P", 0)).toEqual({ kind: "none" })
+		expect(at("Escape", 4)).toEqual({ kind: "none" })
 		expect(gridKeyAction({ key: "ArrowRight", index: 0, count: 0, columns: 4, pageRows: 1 })).toEqual({ kind: "none" })
 	})
 })

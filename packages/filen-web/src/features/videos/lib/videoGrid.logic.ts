@@ -244,10 +244,11 @@ export function gridView({ titles, ...input }: GridInput & { titles: readonly Vi
 
 // ── Keyboard ─────────────────────────────────────────────────────────────────
 
-export type GridKeyAction = { kind: "none" } | { kind: "move"; index: number } | { kind: "open" } | { kind: "play" } | { kind: "back" }
+export type GridKeyAction = { kind: "none" } | { kind: "move"; index: number } | { kind: "open" }
 
 // Roving focus over a grid of `count` cards in `columns` columns: arrows, Home/End, PageUp/Down by `pageRows` rows,
-// Enter opens and Space or P plays the focused card, Esc goes back.
+// Enter opens the focused card. The card commands (play, mark watched) are registered actions (cardKeys.ts). Escape
+// is not a listing's: it never leaves the page, as nowhere else in the app.
 export function gridKeyAction({
 	key,
 	index,
@@ -261,10 +262,6 @@ export function gridKeyAction({
 	columns: number
 	pageRows: number
 }): GridKeyAction {
-	if (key === "Escape") {
-		return { kind: "back" }
-	}
-
 	if (count === 0) {
 		return { kind: "none" }
 	}
@@ -292,20 +289,15 @@ export function gridKeyAction({
 			return clamp(index + page)
 		case "Enter":
 			return { kind: "open" }
-		case " ":
-		case "p":
-		case "P":
-			return { kind: "play" }
 		default:
 			return { kind: "none" }
 	}
 }
 
-export type RowsKeyAction =
-	{ kind: "none" } | { kind: "move"; row: number; column: number } | { kind: "open" } | { kind: "play" } | { kind: "back" }
+export type RowsKeyAction = { kind: "none" } | { kind: "move"; row: number; column: number } | { kind: "open" }
 
 // Roving focus over the home rows: Left/Right within a row, Up/Down to the neighbouring row keeping the column
-// (clamped to its length), Home/End to a row's ends, Esc back.
+// (clamped to its length), Home/End to a row's ends.
 export function rowsKeyAction({
 	key,
 	row,
@@ -317,10 +309,6 @@ export function rowsKeyAction({
 	column: number
 	rowLengths: readonly number[]
 }): RowsKeyAction {
-	if (key === "Escape") {
-		return { kind: "back" }
-	}
-
 	const length = rowLengths[row] ?? 0
 
 	if (length === 0) {
@@ -350,10 +338,6 @@ export function rowsKeyAction({
 			return at(row, length - 1)
 		case "Enter":
 			return { kind: "open" }
-		case " ":
-		case "p":
-		case "P":
-			return { kind: "play" }
 		default:
 			return { kind: "none" }
 	}

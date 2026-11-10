@@ -1,29 +1,27 @@
 import type { ActionDef } from "@/lib/keymap/registry"
 
-// The audio module's in-page transport shortcuts. Every combo is a modifier chord ON PURPOSE: the preview overlay owns
-// BARE ArrowLeft/Right/Space (its own in-dialog paging + media scrubbers) and text editors own the bare caret keys, so
-// a modifier chord can never collide with either — and useAction additionally doesn't fire inside form fields. Play
-// and pause is Mod+Alt+P: Firefox keeps Mod+Shift+P for a private window.
+// The audio player bar's app-wide transport. While focus is inside the bar, it also takes the players' media keys
+// (lib/media/keymap.ts). Every combo here is a modifier chord ON PURPOSE: they work from anywhere (not in text
+// fields), where the preview overlay owns bare ArrowLeft/Right/Space (its paging and its players) and text editors own
+// the bare caret keys. Play and pause is Mod+Alt+P: Firefox keeps Mod+Shift+P for a
+// private window. Seek and volume are Alt+Shift with the arrows, beside next and previous's Mod+Shift.
+const AUDIO_HINT = "settings:keyboardHintAudio"
+
+function transport(id: string, defaultCombo: string, descriptionKey: ActionDef["descriptionKey"]): ActionDef {
+	return { id, defaultCombo, scope: "audio", descriptionKey, hintKey: AUDIO_HINT }
+}
+
 export const AUDIO_ACTIONS: readonly ActionDef[] = [
-	{
-		id: "audio.playPause",
-		defaultCombo: "mod+alt+p",
-		scope: "audio",
-		descriptionKey: "audio:commandPlayPause",
-		hintKey: "settings:keyboardHintAudio"
-	},
-	{
-		id: "audio.next",
-		defaultCombo: "mod+shift+arrowright",
-		scope: "audio",
-		descriptionKey: "audio:commandNext",
-		hintKey: "settings:keyboardHintAudio"
-	},
-	{
-		id: "audio.previous",
-		defaultCombo: "mod+shift+arrowleft",
-		scope: "audio",
-		descriptionKey: "audio:commandPrevious",
-		hintKey: "settings:keyboardHintAudio"
-	}
+	transport("audio.playPause", "mod+alt+p", "audio:commandPlayPause"),
+	transport("audio.next", "mod+shift+arrowright", "audio:commandNext"),
+	transport("audio.previous", "mod+shift+arrowleft", "audio:commandPrevious"),
+	transport("audio.seekBack", "alt+shift+arrowleft", "audio:commandSeekBack"),
+	transport("audio.seekForward", "alt+shift+arrowright", "audio:commandSeekForward"),
+	transport("audio.volumeUp", "alt+shift+arrowup", "audio:commandVolumeUp"),
+	transport("audio.volumeDown", "alt+shift+arrowdown", "audio:commandVolumeDown"),
+	transport("audio.mute", "alt+shift+m", "audio:commandMute"),
+	transport("audio.shuffle", "alt+shift+s", "audio:commandShuffle"),
+	transport("audio.loop", "alt+shift+r", "audio:commandLoop"),
+	// No free chord: unassigned, so it can be bound.
+	transport("audio.toggleQueue", "", "audio:commandToggleQueue")
 ]

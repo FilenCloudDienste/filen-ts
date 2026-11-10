@@ -23,6 +23,9 @@ import { columnsForWidth } from "@/features/drive/lib/gridLayout"
 import { DEFAULT_DENSITY_INDEX, tileSizeForDensity } from "@/features/photos/lib/gridDensity"
 import { useVideoCardActions } from "@/features/videos/hooks/useVideoCardActions"
 import { useCardFocus } from "@/features/videos/hooks/useCardFocus"
+import { cardCommand, cardCommandAction } from "@/features/videos/lib/cardKeys"
+import { isRecordingCombo, useBindings } from "@/lib/keymap/registry"
+import { isMacPlatform } from "@/lib/keymap/kbd.logic"
 import { useHistoryEntryKey } from "@/features/videos/hooks/useHistoryEntryKey"
 import { recallScroll, rememberScroll } from "@/features/videos/lib/scrollMemory"
 import { CardObserver } from "@/features/videos/lib/cardObserver"
@@ -263,6 +266,8 @@ export interface VideoGridProps {
 // A library view: the Photos-style toolbar (search, sort, watch chips, resolution and directory, count, a coverage
 // hint for sorts and filters only a probe can answer) over a virtualized grid of cards. Sort and filters are
 // remembered per view.
+const IS_MAC = isMacPlatform()
+
 export function VideoGrid({ source, name, rootNames }: VideoGridProps) {
 	const { t } = useTranslation("videos")
 	const prefsQuery = useGridPrefsQuery(source)
@@ -282,6 +287,7 @@ export function VideoGrid({ source, name, rootNames }: VideoGridProps) {
 	const total = head?.total ?? 0
 	const shape: CardShape = head?.shape ?? (source.kind === "other" ? "landscape" : "poster")
 	const onAction = useVideoCardActions()
+	const combos = useBindings()
 	const [scrollElement, setScrollElement] = useState<HTMLDivElement | null>(null)
 	const { width } = useElementSize(scrollElement)
 	const [activeState, setActiveIndex] = useState(0)
@@ -331,16 +337,52 @@ export function VideoGrid({ source, name, rootNames }: VideoGridProps) {
 		scrollElement?.scrollTo({ top: 0 })
 	}
 
+	// The cursor's card may not be on screen yet (its page on the way): `act` runs on it once it is, unless the cursor
+	// moved on meanwhile.
+	function actOnCursor(act: (card: VideoCardModel) => void): void {
+		const move = moves.current
+		const run = (card: VideoCardModel | undefined): void => {
+			if (card !== undefined && move === moves.current) {
+				act(card)
+			}
+		}
+		const cached = cachedGridCard(gridQuery, activeIndex)
+
+		if (cached !== undefined) {
+			run(cached)
+		} else {
+			fetchGridCard(gridQuery, activeIndex).then(run, (e: unknown) => {
+				log.warn("videos.grid", "loading the card under the cursor failed", e)
+			})
+		}
+	}
+
 	function handleKeyDown(event: KeyboardEvent<HTMLDivElement>): void {
 		const target = event.target
 
-		if (
-			!(target instanceof HTMLAnchorElement) ||
-			!target.hasAttribute("data-video-card") ||
-			event.altKey ||
-			event.ctrlKey ||
-			event.metaKey
-		) {
+		if (!(target instanceof HTMLAnchorElement) || !target.hasAttribute("data-video-card") || isRecordingCombo()) {
+			return
+		}
+
+		const command = cardCommand(event, combos, IS_MAC)
+
+		if (command !== null) {
+			event.preventDefault()
+
+			if (!event.repeat) {
+				actOnCursor(card => {
+					const action = cardCommandAction(command, card)
+
+					if (action !== null) {
+						onAction(action, card)
+					}
+				})
+			}
+
+			return
+		}
+
+		if (event.altKey || event.ctrlKey || event.metaKey) {
 			return
 		}
 
@@ -357,40 +399,12 @@ export function VideoGrid({ source, name, rootNames }: VideoGridProps) {
 			return
 		}
 
-		if (action.kind === "back") {
-			if (router.history.canGoBack()) {
-				event.preventDefault()
-				router.history.back()
-			}
-
-			return
-		}
-
 		event.preventDefault()
 
-		if (action.kind === "open" || action.kind === "play") {
-			// The cursor's card may not be on screen yet (its page on the way): act on it once it is.
-			const move = moves.current
-			const act = (card: VideoCardModel | undefined): void => {
-				if (card === undefined || move !== moves.current) {
-					return
-				}
-
-				if (action.kind === "play") {
-					onAction("play", card)
-				} else {
-					void router.navigate({ to: "/videos/title/$uuid", params: { uuid: card.title.id } })
-				}
-			}
-			const cached = cachedGridCard(gridQuery, activeIndex)
-
-			if (cached !== undefined) {
-				act(cached)
-			} else {
-				fetchGridCard(gridQuery, activeIndex).then(act, (e: unknown) => {
-					log.warn("videos.grid", "loading the card under the cursor failed", e)
-				})
-			}
+		if (action.kind === "open") {
+			actOnCursor(card => {
+				void router.navigate({ to: "/videos/title/$uuid", params: { uuid: card.title.id } })
+			})
 
 			return
 		}

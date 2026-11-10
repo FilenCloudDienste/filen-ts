@@ -293,10 +293,10 @@ describe("rowsKeyAction", () => {
 		expect(rowsKeyAction({ key: "Home", row: 3, column: 3, rowLengths: lengths })).toEqual({ kind: "move", row: 3, column: 0 })
 	})
 
-	it("plays on Space and P, leaves Enter to the link", () => {
-		expect(rowsKeyAction({ key: " ", row: 0, column: 0, rowLengths: lengths })).toEqual({ kind: "play" })
-		expect(rowsKeyAction({ key: "p", row: 0, column: 0, rowLengths: lengths })).toEqual({ kind: "play" })
+	it("leaves Enter to the link, the card commands to the registry and Escape to the page", () => {
 		expect(rowsKeyAction({ key: "Enter", row: 0, column: 0, rowLengths: lengths })).toEqual({ kind: "open" })
-		expect(rowsKeyAction({ key: "Escape", row: 0, column: 0, rowLengths: lengths })).toEqual({ kind: "back" })
+		expect(rowsKeyAction({ key: " ", row: 0, column: 0, rowLengths: lengths })).toEqual({ kind: "none" })
+		expect(rowsKeyAction({ key: "p", row: 0, column: 0, rowLengths: lengths })).toEqual({ kind: "none" })
+		expect(rowsKeyAction({ key: "Escape", row: 0, column: 0, rowLengths: lengths })).toEqual({ kind: "none" })
 	})
 })

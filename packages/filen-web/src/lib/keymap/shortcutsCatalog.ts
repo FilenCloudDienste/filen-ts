@@ -34,6 +34,7 @@ export const SHORTCUT_SCOPE_ORDER: readonly ActionScope[] = [
 	"contacts",
 	"editor",
 	"audio",
+	"media",
 	"playlists",
 	"transfers",
 	"sync",
@@ -59,7 +60,8 @@ export const SHORTCUT_SCOPE_LABEL_KEYS: Record<ActionScope, CommonKey> = {
 	sync: "moduleSync",
 	mounts: "moduleMounts",
 	publicLinks: "shortcutsScopePublicLinks",
-	settings: "settings"
+	settings: "settings",
+	media: "shortcutsScopeMedia"
 }
 
 // The editor's sub-groups in the order a user meets them, after the actions every editor shares.

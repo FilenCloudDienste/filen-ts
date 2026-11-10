@@ -4,7 +4,7 @@ import { Volume1Icon, Volume2Icon, VolumeXIcon } from "lucide-react"
 import { cn } from "@filen/shared"
 import { Button } from "@/components/ui/button"
 import { SliderVisual } from "@/components/media/sliderVisual"
-import { VOLUME_STEP } from "@/lib/media/playerKeys.logic"
+import { MEDIA_VOLUME_STEP } from "@/lib/media/mediaKeys.logic"
 import { setMediaVolume, toggleMediaMuted, useMediaVolumeStore, warmMediaVolume } from "@/lib/media/mediaVolume"
 
 // Mute toggle plus level slider over the shared media volume, so every player shows and sets the same
@@ -36,7 +36,7 @@ export function VolumeControl({ className, sliderClassName }: { className?: stri
 					type="range"
 					min={0}
 					max={1}
-					step={VOLUME_STEP}
+					step={MEDIA_VOLUME_STEP}
 					value={level}
 					aria-label={t("volume")}
 					aria-valuetext={t("common:mediaVolumePercent", { percent: Math.round(level * 100) })}

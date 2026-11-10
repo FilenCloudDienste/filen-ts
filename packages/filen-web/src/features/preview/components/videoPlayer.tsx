@@ -20,6 +20,7 @@ import { MEDIA_GLASS_SURFACE_CLASS, MEDIA_GLASS_TONE_CLASS } from "@/components/
 import { CONTROLS_IDLE_MS, controlsVisible, IdleTimer } from "@/lib/media/autoHide.logic"
 import { fullscreenSupported, toggleFullscreen, useIsFullscreen } from "@/lib/media/fullscreen"
 import { handlePlayerKeyDown } from "@/lib/media/playerKeyboard"
+import { useBindings } from "@/lib/keymap/registry"
 import {
 	mediaValue,
 	playMedia,
@@ -122,6 +123,7 @@ export function VideoPlayer({
 	const [menuOpen, setMenuOpen] = useState(false)
 	const [scrubbing, setScrubbing] = useState(false)
 	const [idleTimer] = useState(() => new IdleTimer(setPointerActive, CONTROLS_IDLE_MS))
+	const combos = useBindings()
 	// A tap on the picture while the controls are hidden only brings them back; it does not also pause.
 	const tapRevealsControls = useRef(false)
 	const fullscreen = useIsFullscreen(container)
@@ -219,7 +221,7 @@ export function VideoPlayer({
 						}
 					}}
 					onKeyDown={event => {
-						if (handlePlayerKeyDown(event, video, container)) {
+						if (handlePlayerKeyDown(event, video, container, combos)) {
 							idleTimer.poke()
 						}
 					}}

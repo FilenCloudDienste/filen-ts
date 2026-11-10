@@ -57,7 +57,8 @@ type ListRow =
 // matcher both listen on `document` and the matcher's listeners are registered first, so a recording can only be
 // made safe by suppressing every action for its duration (useAction.ts). The `useId()` token keeps that correct when
 // two lists are mounted at once — the dialog can open on top of this page.
-export function ShortcutsList({ variant }: { variant: "page" | "dialog" }) {
+// `initialText` starts the list searched (a player opens it on its own group).
+export function ShortcutsList({ variant, initialText }: { variant: "page" | "dialog"; initialText?: string }) {
 	const { t } = useTranslation([...SHORTCUT_NAMESPACES])
 	const { t: settingsT } = useTranslation("settings")
 	const owner = useId()
@@ -67,7 +68,7 @@ export function ShortcutsList({ variant }: { variant: "page" | "dialog" }) {
 	const problem = useRecordingProblem()
 	const layout = useKeyboardLayout()
 	const [keys, { start, stop, isRecording }] = useRecordHotkeys(false, RECORDER_BLACKLIST)
-	const [text, setText] = useState("")
+	const [text, setText] = useState(initialText ?? "")
 	const [keyQuery, setKeyQuery] = useState<string | null>(null)
 	const [filter, setFilter] = useState<ShortcutFilter>("all")
 	const [folded, setFolded] = useState<ReadonlySet<string>>(() => new Set())

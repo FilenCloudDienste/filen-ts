@@ -35,12 +35,9 @@ describe("AUDIO_ACTIONS — static contract", () => {
 		}
 	})
 
-	it("use modifier chords that never collide with bare Arrow/Space or editor caret keys", () => {
+	it("use modifier chords that never collide with bare Arrow/Space or editor caret keys, or none", () => {
 		for (const def of AUDIO_ACTIONS) {
-			expect(def.defaultCombo).toMatch(/^mod\+(shift|alt)\+/)
-			expect(def.defaultCombo).not.toBe("space")
-			expect(def.defaultCombo).not.toBe("arrowleft")
-			expect(def.defaultCombo).not.toBe("arrowright")
+			expect(def.defaultCombo, def.id).toMatch(/^$|^mod\+(shift|alt)\+|^alt\+shift\+/)
 		}
 	})
 
@@ -70,6 +67,21 @@ describe("AUDIO_ACTIONS — registration", () => {
 		for (const def of AUDIO_ACTIONS) {
 			expect(comboFor(def.id)).toBe(def.defaultCombo)
 		}
+	})
+
+	it("follow an override", async () => {
+		const { registerAction, comboFor, setUserCombo, unbindAction } = await freshRegistry()
+
+		for (const def of AUDIO_ACTIONS) {
+			registerAction(def)
+		}
+
+		await setUserCombo("audio.mute", "alt+shift+u")
+		await unbindAction("audio.shuffle")
+
+		expect(comboFor("audio.mute")).toBe("alt+shift+u")
+		expect(comboFor("audio.shuffle")).toBe("")
+		expect(comboFor("audio.seekBack")).toBe("alt+shift+arrowleft")
 	})
 
 	it("reject a duplicate registration (id already taken)", async () => {

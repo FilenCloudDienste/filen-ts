@@ -1,11 +1,9 @@
-import type { PlayerKeyTarget } from "@/lib/media/playerKeys.logic"
+import { MEDIA_JUMP_ACTIONS, type MediaAction } from "@/lib/media/keymap"
+import { jumpFraction, MEDIA_LONG_SEEK_STEP_SECONDS, MEDIA_SEEK_STEP_SECONDS, MEDIA_VOLUME_STEP } from "@/lib/media/mediaKeys.logic"
 
-// The full-screen video player's keyboard. Single keys and Shift combinations are the player's; chords with
-// Ctrl, Cmd or Alt stay the browser's and the app's. A slider keeps its own arrows, Home/End and Page keys,
-// a button its own Space/Enter, a menu or field everything.
+// The Videos player's keyboard: every media key (lib/media/keymap.ts) as the stage acts on it, plus Enter for the
+// shown card's primary action and the app's shortcuts key for the shortcuts list.
 
-export const VIDEO_SEEK_STEP_SECONDS = 10
-export const VIDEO_VOLUME_STEP = 0.05
 export const SUBTITLE_DELAY_STEP_SECONDS = 0.1
 export const PLAYBACK_RATES = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2] as const
 
@@ -21,116 +19,97 @@ export type VideoKeyAction =
 	| { type: "toggleMute" }
 	| { type: "toggleFullscreen" }
 	| { type: "toggleSubtitles" }
+	// The next subtitle track, after the last one off.
+	| { type: "cycleSubtitles" }
+	| { type: "cycleAudio" }
+	| { type: "episodes" }
 	| { type: "skip" }
 	| { type: "next" }
 	| { type: "previous" }
 	| { type: "rate"; direction: 1 | -1 }
+	| { type: "normalRate" }
 	| { type: "subtitleDelay"; seconds: number }
+	| { type: "resetSubtitleDelay" }
 	| { type: "togglePictureInPicture" }
 	| { type: "shortcuts" }
+	// What is open over the picture first (a panel, Up Next), then the player itself.
 	| { type: "dismiss" }
 	// Enter: the shown card's primary action (Play now, Skip), else play/pause.
 	| { type: "confirm" }
 
-export interface VideoKeyInput {
-	key: string
-	target: PlayerKeyTarget
-	// Ctrl, Cmd or Alt held.
-	modified: boolean
-	shift: boolean
+// Every media key the stage takes, in match order.
+export const STAGE_MEDIA_ACTIONS: readonly MediaAction[] = [
+	"media.playPause",
+	"media.seekBack",
+	"media.seekForward",
+	"media.seekBackLong",
+	"media.seekForwardLong",
+	"media.toStart",
+	"media.toEnd",
+	...MEDIA_JUMP_ACTIONS,
+	"media.volumeUp",
+	"media.volumeDown",
+	"media.mute",
+	"media.slower",
+	"media.faster",
+	"media.normalSpeed",
+	"media.frameBack",
+	"media.frameForward",
+	"media.fullscreen",
+	"media.pictureInPicture",
+	"media.previous",
+	"media.next",
+	"media.chapterPrevious",
+	"media.chapterNext",
+	"media.skip",
+	"media.subtitles",
+	"media.subtitleTrack",
+	"media.subtitleEarlier",
+	"media.subtitleLater",
+	"media.subtitleDelayReset",
+	"media.audioTrack",
+	"media.episodes",
+	"media.close"
+]
+
+const STAGE_ACTIONS: Partial<Record<MediaAction, VideoKeyAction>> = {
+	"media.playPause": { type: "togglePlay" },
+	"media.seekBack": { type: "seekBy", seconds: -MEDIA_SEEK_STEP_SECONDS },
+	"media.seekForward": { type: "seekBy", seconds: MEDIA_SEEK_STEP_SECONDS },
+	"media.seekBackLong": { type: "seekBy", seconds: -MEDIA_LONG_SEEK_STEP_SECONDS },
+	"media.seekForwardLong": { type: "seekBy", seconds: MEDIA_LONG_SEEK_STEP_SECONDS },
+	"media.toStart": { type: "seekToStart" },
+	"media.toEnd": { type: "seekToEnd" },
+	"media.volumeUp": { type: "volumeBy", delta: MEDIA_VOLUME_STEP },
+	"media.volumeDown": { type: "volumeBy", delta: -MEDIA_VOLUME_STEP },
+	"media.mute": { type: "toggleMute" },
+	"media.slower": { type: "rate", direction: -1 },
+	"media.faster": { type: "rate", direction: 1 },
+	"media.normalSpeed": { type: "normalRate" },
+	"media.frameBack": { type: "frameStep", direction: -1 },
+	"media.frameForward": { type: "frameStep", direction: 1 },
+	"media.fullscreen": { type: "toggleFullscreen" },
+	"media.pictureInPicture": { type: "togglePictureInPicture" },
+	"media.previous": { type: "previous" },
+	"media.next": { type: "next" },
+	"media.chapterPrevious": { type: "chapter", direction: -1 },
+	"media.chapterNext": { type: "chapter", direction: 1 },
+	"media.skip": { type: "skip" },
+	"media.subtitles": { type: "toggleSubtitles" },
+	"media.subtitleTrack": { type: "cycleSubtitles" },
+	"media.subtitleEarlier": { type: "subtitleDelay", seconds: -SUBTITLE_DELAY_STEP_SECONDS },
+	"media.subtitleLater": { type: "subtitleDelay", seconds: SUBTITLE_DELAY_STEP_SECONDS },
+	"media.subtitleDelayReset": { type: "resetSubtitleDelay" },
+	"media.audioTrack": { type: "cycleAudio" },
+	"media.episodes": { type: "episodes" },
+	"media.close": { type: "dismiss" }
 }
 
-const SLIDER_KEYS: ReadonlySet<string> = new Set(["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown"])
+// What a media key does in the stage; null for one it does not take.
+export function videoKeyAction(action: MediaAction): VideoKeyAction | null {
+	const fraction = jumpFraction(action)
 
-export function videoKeyAction({ key, target, modified, shift }: VideoKeyInput): VideoKeyAction | null {
-	if (modified || target === "menu" || target === "field") {
-		return null
-	}
-
-	if (target === "slider" && SLIDER_KEYS.has(key)) {
-		return null
-	}
-
-	if ((key === " " || key === "Enter") && target === "button") {
-		return null
-	}
-
-	// Shifted punctuation arrives as its own character on most layouts ("<", ">", "?"); letters as capitals.
-	switch (key) {
-		case "<":
-			return { type: "rate", direction: -1 }
-		case ">":
-			return { type: "rate", direction: 1 }
-		case "?":
-			return { type: "shortcuts" }
-		case "Escape":
-			return { type: "dismiss" }
-		default:
-			break
-	}
-
-	const lower = key.length === 1 ? key.toLowerCase() : key
-
-	if (shift) {
-		switch (lower) {
-			case "n":
-				return { type: "next" }
-			case "p":
-				return { type: "previous" }
-			default:
-				return null
-		}
-	}
-
-	if (lower.length === 1 && lower >= "0" && lower <= "9") {
-		return { type: "seekToFraction", fraction: Number(lower) / 10 }
-	}
-
-	switch (lower) {
-		case " ":
-		case "k":
-			return { type: "togglePlay" }
-		case "Enter":
-			return { type: "confirm" }
-		case "ArrowLeft":
-		case "j":
-			return { type: "seekBy", seconds: -VIDEO_SEEK_STEP_SECONDS }
-		case "ArrowRight":
-		case "l":
-			return { type: "seekBy", seconds: VIDEO_SEEK_STEP_SECONDS }
-		case "ArrowUp":
-			return { type: "volumeBy", delta: VIDEO_VOLUME_STEP }
-		case "ArrowDown":
-			return { type: "volumeBy", delta: -VIDEO_VOLUME_STEP }
-		case "Home":
-			return { type: "seekToStart" }
-		case "End":
-			return { type: "seekToEnd" }
-		case "PageUp":
-			return { type: "chapter", direction: -1 }
-		case "PageDown":
-			return { type: "chapter", direction: 1 }
-		case ",":
-			return { type: "frameStep", direction: -1 }
-		case ".":
-			return { type: "frameStep", direction: 1 }
-		case "m":
-			return { type: "toggleMute" }
-		case "f":
-			return { type: "toggleFullscreen" }
-		case "c":
-			return { type: "toggleSubtitles" }
-		case "s":
-			return { type: "skip" }
-		case "g":
-			return { type: "subtitleDelay", seconds: -SUBTITLE_DELAY_STEP_SECONDS }
-		case "h":
-			return { type: "subtitleDelay", seconds: SUBTITLE_DELAY_STEP_SECONDS }
-		case "i":
-			return { type: "togglePictureInPicture" }
-		default:
-			return null
-	}
+	return fraction === null ? (STAGE_ACTIONS[action] ?? null) : { type: "seekToFraction", fraction }
 }
 
 // The next playback rate up or down the list, from wherever the current one sits.
