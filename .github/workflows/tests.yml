@@ -47,6 +47,10 @@ on:
       - 'package.json'
       - '.github/workflows/tests.yml'
 
+env:
+  # apt-get gives up on a stalled mirror after 30 s and retries, instead of waiting out the job's timeout.
+  APT_NET: -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30
+
 jobs:
   changes:
     # The nightly run, and a dispatch naming e2e specs or a project, are the e2e suite alone: skipping this skips
@@ -613,9 +617,10 @@ jobs:
       # Firefox on Linux advances a playing media element's clock only against a live audio sink, and the
       # runner has no sound server: playback reports playing with its position stuck at 0.
       - name: Start a null audio sink
+        timeout-minutes: 10
         if: matrix.browser == 'all' || matrix.browser == 'firefox'
         run: |
-          sudo apt-get install -y --no-install-recommends pulseaudio
+          sudo apt-get ${APT_NET} install -y --no-install-recommends pulseaudio
           pulseaudio --start --exit-idle-time=-1
           pactl load-module module-null-sink sink_name=e2e
           pactl set-default-sink e2e

@@ -31,6 +31,8 @@ concurrency:
   cancel-in-progress: false
 
 env:
+  # apt-get gives up on a stalled mirror after 30 s and retries, instead of waiting out the job's timeout.
+  APT_NET: -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30
   # Must equal the publish url in packages/filen-desktop/electron-builder.ts; scripts/checkPackage.ts enforces it.
   DESKTOP_FEED_URL: https://cdn.filen.io/@filen/desktop/release/latest/
 
@@ -363,7 +365,8 @@ jobs:
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       # electron-builder's rpm target shells out to rpmbuild.
       - name: Install rpm
-        run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends rpm
+        timeout-minutes: 10
+        run: sudo apt-get ${APT_NET} update && sudo apt-get ${APT_NET} install --yes --no-install-recommends rpm
       - name: Set up pnpm
         uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
       - name: Set up Node

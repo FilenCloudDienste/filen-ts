@@ -40,6 +40,10 @@ on:
       - 'package.json'
       - '.github/workflows/office-corpus.yml'
 
+env:
+  # apt-get gives up on a stalled mirror after 30 s and retries, instead of waiting out the job's timeout.
+  APT_NET: -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30
+
 jobs:
   # Vitest's --shard splits the test files by a hash of their path, so the shards together run every file once.
   # Each runner keeps Vitest's default pool (CPUs - 1 workers), so a timing test shares its machine as it did
@@ -109,7 +113,8 @@ jobs:
       # xmllint and the pinned ECMA-376 schemas, for the schema validation of written WordprocessingML; qpdf for
       # `qpdf --check` of the PDFs src/tests/pdfExportCorpus.test.ts exports.
       - name: Install xmllint and qpdf
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libxml2-utils qpdf
+        timeout-minutes: 10
+        run: sudo apt-get ${APT_NET} update && sudo apt-get ${APT_NET} install -y --no-install-recommends libxml2-utils qpdf
       - name: Cache the WordprocessingML schemas
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
@@ -375,11 +380,12 @@ jobs:
       # Writer and Math (without Math, Writer drops every OMML equation on import) with what they need. The
       # packages declare no system dependencies: the apt line holds the libraries their ELF files link.
       - name: Install LibreOffice
+        timeout-minutes: 10
         run: |
           tarball="$RUNNER_TEMP/libreoffice.tar.gz"
           echo "${LIBREOFFICE_SHA256}  ${tarball}" | sha256sum -c -
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libx11-6 libx11-xcb1 libxext6 libxinerama1 libcairo2 \
+          sudo apt-get ${APT_NET} update
+          sudo apt-get ${APT_NET} install -y --no-install-recommends libx11-6 libx11-xcb1 libxext6 libxinerama1 libcairo2 \
             libcups2t64 libdbus-1-3 libfontconfig1 libfreetype6 libglib2.0-0t64 libnss3 libavahi-client3 libgssapi-krb5-2
           mkdir "$RUNNER_TEMP/libreoffice"
           tar -xzf "$tarball" -C "$RUNNER_TEMP/libreoffice" --strip-components=2 --wildcards '*/DEBS/*.deb'

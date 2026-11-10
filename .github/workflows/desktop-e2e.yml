@@ -199,6 +199,10 @@ concurrency:
   group: desktop-e2e-${{ github.workflow != 'Desktop E2E' && 'release' || github.event_name == 'schedule' && 'nightly' || format('dispatch-{0}', github.run_id) }}
   cancel-in-progress: false
 
+env:
+  # apt-get gives up on a stalled mirror after 30 s and retries, instead of waiting out the job's timeout.
+  APT_NET: -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30
+
 jobs:
   plan:
     runs-on: ubuntu-latest
@@ -548,8 +552,9 @@ jobs:
           key: fp-cargo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('packages/filen-desktop/filen-rs/rust-toolchain.toml') }}-${{ steps.submodules.outputs.filen-rs }}
           restore-keys: fp-cargo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('packages/filen-desktop/filen-rs/rust-toolchain.toml') }}-
       - name: Install rpm
+        timeout-minutes: 10
         if: matrix.os == 'linux'
-        run: sudo apt-get update && sudo apt-get install --yes --no-install-recommends rpm
+        run: sudo apt-get ${APT_NET} update && sudo apt-get ${APT_NET} install --yes --no-install-recommends rpm
       - name: Set up pnpm
         uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
       - name: Set up Node
@@ -720,15 +725,16 @@ jobs:
           name: e2e-prev-${{ matrix.os }}
           path: packages/filen-desktop/release-prev
       - name: Prepare the Linux desktop
+        timeout-minutes: 10
         if: matrix.os == 'linux' && matrix.format != 'rpm'
         env:
           # Deep: a secret service for the session vault, the X tools that drive and record the folder chooser, FUSE
           # for the drive, gdb for a crash's core dump.
           DEEP_PACKAGES: ${{ matrix.deep && 'gnome-keyring libsecret-tools dbus-daemon xdotool x11-apps fuse3 gdb' || '' }}
         run: |
-          sudo apt-get update
+          sudo apt-get ${APT_NET} update
           # shellcheck disable=SC2086
-          sudo apt-get install --yes --no-install-recommends xvfb ${DEEP_PACKAGES}
+          sudo apt-get ${APT_NET} install --yes --no-install-recommends xvfb ${DEEP_PACKAGES}
           # electron-updater asks for root through the first of these it finds, and none can prompt without a desktop
           # session. Hidden, it falls back to sudo (passwordless here) and still takes its non-root install path.
           for prompt in gksudo kdesudo pkexec beesu; do
@@ -839,8 +845,9 @@ jobs:
       # Chain K starts its own D-Bus sessions and talks to them with dbus-send. After chain L, whose 3.0.53 download it
       # reuses where the two share a job (matrix.lane); it signs nothing in, so it gets no secret.
       - name: Prepare the keyring chain
+        timeout-minutes: 10
         if: ${{ !cancelled() && matrix.keyring }}
-        run: sudo apt-get install --yes --no-install-recommends dbus-bin dbus-daemon gnome-keyring libsecret-tools
+        run: sudo apt-get ${APT_NET} install --yes --no-install-recommends dbus-bin dbus-daemon gnome-keyring libsecret-tools
       - name: Keyring chain K, no sign-in
         if: ${{ !cancelled() && matrix.keyring }}
         timeout-minutes: 45
