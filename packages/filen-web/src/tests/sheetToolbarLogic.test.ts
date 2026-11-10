@@ -13,7 +13,7 @@ import {
 	indentPatch,
 	rotationPatch,
 	zoomStep,
-	sheetShortcutKeys,
+	fontStep,
 	ORIENTATIONS
 } from "@/features/spreadsheet/toolbar/toolbar.logic"
 import { preview } from "@/locales/en/preview"
@@ -116,14 +116,15 @@ describe("spreadsheet toolbar", () => {
 		expect(zoomStep(25, -1)).toBe(25)
 	})
 
-	it("names a grid shortcut's keys as the platform shows them", () => {
-		expect(sheetShortcutKeys("bold", false)).toEqual(["Ctrl", "B"])
-		expect(sheetShortcutKeys("bold", true)).toEqual(["⌘", "B"])
-		expect(sheetShortcutKeys("filter", false)).toEqual(["Ctrl", "Shift", "L"])
-		expect(sheetShortcutKeys("insertCells", false)).toEqual(["Ctrl", "Shift", "="])
-		expect(sheetShortcutKeys("showFormulas", true)).toEqual(["⌃", "`"])
-		expect(sheetShortcutKeys("note", false)).toEqual(["Shift", "F2"])
-		expect(sheetShortcutKeys("formatCells", false)).toEqual(["Ctrl", "1"])
+	it("steps the font size through the list, as Excel's Increase and Decrease Font Size do", () => {
+		expect(fontStep(11, 1)).toBe(12)
+		expect(fontStep(11, -1)).toBe(10)
+		// A size between steps goes to the next one either way.
+		expect(fontStep(13, 1)).toBe(14)
+		expect(fontStep(13, -1)).toBe(12)
+		// Nothing past the ends.
+		expect(fontStep(72, 1)).toBeNull()
+		expect(fontStep(8, -1)).toBeNull()
 	})
 
 	it("clears an alignment back to the default rather than writing it", () => {

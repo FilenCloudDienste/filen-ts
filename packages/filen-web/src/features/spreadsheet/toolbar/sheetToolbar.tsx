@@ -83,7 +83,7 @@ import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
 import { keepFocus } from "@/features/office/lib/officeControls"
 import { OfficeRibbon, type RibbonGroup, type RibbonTab } from "@/features/office/components/ribbon/officeRibbon"
 import { RibbonButton, RibbonMenuTrigger } from "@/features/office/components/ribbon/ribbonControls"
-import { KbdKeys } from "@/lib/keymap/kbd"
+import { Kbd, KbdKeys } from "@/lib/keymap/kbd"
 import { CHART_TYPES } from "@/features/spreadsheet/charts/chartPanel.logic"
 import { requestChart } from "@/features/spreadsheet/charts/chartRequests"
 import type { SheetRibbonCommands } from "@/features/spreadsheet/components/sheetExtension"
@@ -112,16 +112,23 @@ import {
 	activeFormat,
 	alignPatch,
 	decimalsPatch,
+	fontStep,
 	indentPatch,
 	rotationPatch,
 	sampleOf,
-	sheetShortcutKeys,
 	themeSwatchRows,
 	valignPatch,
 	zoomStep,
 	type ActiveFormat
 } from "@/features/spreadsheet/toolbar/toolbar.logic"
+import { registerRibbonKeys } from "@/features/spreadsheet/toolbar/ribbonKeys"
+import { sheetActionId, type SheetActionShortcut } from "@/features/spreadsheet/lib/keymap"
 import type { PreviewKey } from "@/lib/i18n"
+import { useBindings } from "@/lib/keymap/registry"
+import { useLatestRef } from "@/lib/useLatestRef"
+
+// The alignment shortcuts' alignments.
+const ALIGN_KEYS = { alignLeft: "left", alignCenter: "center", alignRight: "right" } as const
 
 // The spreadsheet editor's ribbon (officeRibbon.tsx), as Excel for the web's simplified ribbon: File, Home (undo,
 // clipboard, font, alignment, number, cells, editing), Insert, Data, Review, View, and the contextual Chart and Picture
@@ -214,7 +221,7 @@ const TOGGLES: readonly {
 	readonly key: "bold" | "italic" | "underline" | "strike"
 	readonly icon: LucideIcon
 	readonly label: PreviewKey
-	readonly shortcut: SheetShortcut
+	readonly shortcut: SheetActionShortcut
 }[] = [
 	{ key: "bold", icon: BoldIcon, label: "previewSpreadsheetBold", shortcut: "bold" },
 	{ key: "italic", icon: ItalicIcon, label: "previewSpreadsheetItalic", shortcut: "italic" },
@@ -406,6 +413,7 @@ export function SheetToolbar({ grid, disabled, formats, onFormat, actions, viewO
 	const { t } = useTranslation("preview")
 	const model: SheetGridModel = grid.model
 	const [mac] = useState(isMacPlatform)
+	const bindings = useBindings()
 	const wanted = formats && !disabled
 	const cell = useActiveCell(grid, wanted)
 	const choices = useFormatChoices(model, formats)
@@ -437,10 +445,12 @@ export function SheetToolbar({ grid, disabled, formats, onFormat, actions, viewO
 	const tab = tabs.some(entry => entry.id === selected) ? selected : "home"
 	const range = grid.selection.ranges[grid.selection.ranges.length - 1]
 	const percent = zoom ?? (grid.layout === null ? 100 : Math.round(model.scale(grid.layout) * 100))
-	const keys = (shortcut: SheetShortcut): ReactNode => {
-		const shown = sheetShortcutKeys(shortcut, mac)
+	// A command's keys as the user has them bound; none when it has no keys.
+	const keys = (shortcut: SheetActionShortcut): ReactNode => {
+		const id = sheetActionId(shortcut)
+		const combo: string | undefined = bindings[id]
 
-		return shown === null ? undefined : <KbdKeys keys={shown} />
+		return combo === undefined || combo === "" ? undefined : <Kbd action={id} />
 	}
 	const sheetProtected = (grid.layout?.protection ?? null) !== null
 	const filtered = clearTarget(grid.layout, grid.selection.active.row, grid.selection.active.col) !== null
@@ -498,12 +508,74 @@ export function SheetToolbar({ grid, disabled, formats, onFormat, actions, viewO
 		}
 	}
 
+	// A keyboard shortcut of the ribbon's buttons, run as the button runs it (and not while the button is off).
+	function ribbonKey(shortcut: SheetShortcut): boolean {
+		switch (shortcut) {
+			case "zoomIn":
+			case "zoomOut":
+				zoomTo(zoomStep(percent, shortcut === "zoomIn" ? 1 : -1))
+
+				return true
+			case "zoomReset":
+				zoomTo(100)
+
+				return true
+			default:
+				break
+		}
+
+		if (!formats) {
+			return false
+		}
+
+		switch (shortcut) {
+			case "wrap":
+				if (!off) onFormat({ wrap: !active.wrap })
+
+				return true
+			case "alignLeft":
+			case "alignCenter":
+			case "alignRight": {
+				const align = ALIGN_KEYS[shortcut]
+
+				// The button pressed again takes the cells back to General, as Excel's alignment buttons do.
+				if (!off) onFormat(alignPatch(active.align === align ? "general" : align))
+
+				return true
+			}
+			case "indentIncrease":
+			case "indentDecrease":
+				if (!off) indent(shortcut === "indentIncrease" ? 1 : -1)
+
+				return true
+			case "decimalsIncrease":
+			case "decimalsDecrease":
+				if (!off) decimals(shortcut === "decimalsIncrease" ? 1 : -1)
+
+				return true
+			case "fontGrow":
+			case "fontShrink": {
+				const size = off ? null : fontStep(active.size, shortcut === "fontGrow" ? 1 : -1)
+
+				if (size !== null) onFormat({ size })
+
+				return true
+			}
+			default:
+				return false
+		}
+	}
+
+	const ribbonKeyRef = useLatestRef(ribbonKey)
+
+	useEffect(() => registerRibbonKeys(model, shortcut => ribbonKeyRef.current(shortcut)), [model, ribbonKeyRef])
+
 	const history = [
 		<TooltipIconButton
 			key="undo"
 			label={t("previewSpreadsheetUndo")}
 			disabled={disabled || !grid.state.canUndo}
-			shortcut={<KbdKeys keys={[mac ? "⌘" : "Ctrl", "Z"]} />}
+			shortcut={keys("undo")}
 			onMouseDown={keepFocus}
 			onClick={() => {
 				void model.undo()
@@ -515,7 +587,7 @@ export function SheetToolbar({ grid, disabled, formats, onFormat, actions, viewO
 			key="redo"
 			label={t("previewSpreadsheetRedo")}
 			disabled={disabled || !grid.state.canRedo}
-			shortcut={<KbdKeys keys={[mac ? "⌘" : "Ctrl", "Y"]} />}
+			shortcut={keys("redo")}
 			onMouseDown={keepFocus}
 			onClick={() => {
 				void model.redo()
@@ -602,6 +674,7 @@ export function SheetToolbar({ grid, disabled, formats, onFormat, actions, viewO
 			<>
 				<RibbonButton
 					label={t("previewSheetRibbonZoomOut")}
+					shortcut={keys("zoomOut")}
 					icon={<ZoomOutIcon />}
 					disabled={percent <= 25}
 					onClick={() => {
@@ -610,6 +683,7 @@ export function SheetToolbar({ grid, disabled, formats, onFormat, actions, viewO
 				/>
 				<RibbonButton
 					label={t("previewSheetRibbonZoomIn")}
+					shortcut={keys("zoomIn")}
 					icon={<ZoomInIcon />}
 					disabled={percent >= 400}
 					onClick={() => {
@@ -618,6 +692,7 @@ export function SheetToolbar({ grid, disabled, formats, onFormat, actions, viewO
 				/>
 				<RibbonButton
 					label={t("previewSheetRibbonZoom100")}
+					shortcut={keys("zoomReset")}
 					icon={<span className="text-[0.625rem] font-semibold">100</span>}
 					onClick={() => {
 						zoomTo(100)
@@ -762,6 +837,7 @@ export function SheetToolbar({ grid, disabled, formats, onFormat, actions, viewO
 								/>
 								<TooltipIconButton
 									label={t("previewSheetFormatWrap")}
+									shortcut={keys("wrap")}
 									disabled={off}
 									pressed={active?.wrap === true}
 									onMouseDown={keepFocus}
@@ -777,6 +853,7 @@ export function SheetToolbar({ grid, disabled, formats, onFormat, actions, viewO
 								/>
 								<TooltipIconButton
 									label={t("previewSheetRibbonIndentDecrease")}
+									shortcut={keys("indentDecrease")}
 									disabled={off || active.indent === 0}
 									onMouseDown={keepFocus}
 									onClick={() => {
@@ -787,6 +864,7 @@ export function SheetToolbar({ grid, disabled, formats, onFormat, actions, viewO
 								</TooltipIconButton>
 								<TooltipIconButton
 									label={t("previewSheetRibbonIndentIncrease")}
+									shortcut={keys("indentIncrease")}
 									disabled={off}
 									onMouseDown={keepFocus}
 									onClick={() => {
@@ -862,6 +940,7 @@ export function SheetToolbar({ grid, disabled, formats, onFormat, actions, viewO
 								</TooltipIconButton>
 								<TooltipIconButton
 									label={t("previewSheetDecreaseDecimal")}
+									shortcut={keys("decimalsDecrease")}
 									disabled={off}
 									onMouseDown={keepFocus}
 									onClick={() => {
@@ -872,6 +951,7 @@ export function SheetToolbar({ grid, disabled, formats, onFormat, actions, viewO
 								</TooltipIconButton>
 								<TooltipIconButton
 									label={t("previewSheetIncreaseDecimal")}
+									shortcut={keys("decimalsIncrease")}
 									disabled={off}
 									onMouseDown={keepFocus}
 									onClick={() => {
@@ -1239,6 +1319,7 @@ export function SheetToolbar({ grid, disabled, formats, onFormat, actions, viewO
 						<>
 							<RibbonButton
 								label={t("previewSheetCommentNew")}
+								shortcut={keys("newComment")}
 								icon={<MessageSquarePlusIcon />}
 								text={t("previewSheetCommentNew")}
 								disabled={commands.newComment === undefined}
@@ -1270,6 +1351,7 @@ export function SheetToolbar({ grid, disabled, formats, onFormat, actions, viewO
 					<>
 						<RibbonButton
 							label={t("previewSheetSortAscending")}
+							shortcut={keys("sortAscending")}
 							icon={<ArrowDownAZIcon />}
 							disabled={noCells}
 							onClick={() => {
@@ -1278,6 +1360,7 @@ export function SheetToolbar({ grid, disabled, formats, onFormat, actions, viewO
 						/>
 						<RibbonButton
 							label={t("previewSheetSortDescending")}
+							shortcut={keys("sortDescending")}
 							icon={<ArrowDownZAIcon />}
 							disabled={noCells}
 							onClick={() => {
@@ -1307,6 +1390,7 @@ export function SheetToolbar({ grid, disabled, formats, onFormat, actions, viewO
 								/>
 								<RibbonButton
 									label={t("previewSheetFilterClearAll")}
+									shortcut={keys("clearFilters")}
 									icon={<FilterXIcon />}
 									disabled={noCells || !filtered}
 									onClick={() => {
@@ -1315,6 +1399,7 @@ export function SheetToolbar({ grid, disabled, formats, onFormat, actions, viewO
 								/>
 								<RibbonButton
 									label={t("previewSheetFilterReapply")}
+									shortcut={keys("reapplyFilter")}
 									icon={<RefreshCwIcon />}
 									disabled={noCells || !filtered}
 									onClick={() => {
@@ -1338,6 +1423,7 @@ export function SheetToolbar({ grid, disabled, formats, onFormat, actions, viewO
 					content: (
 						<RibbonButton
 							label={t("previewSheetDataValidation")}
+							shortcut={keys("dataValidation")}
 							icon={<ListChecksIcon />}
 							text={t("previewSheetDataValidation")}
 							disabled={commands.dataValidation === undefined}
@@ -1362,6 +1448,7 @@ export function SheetToolbar({ grid, disabled, formats, onFormat, actions, viewO
 					content: (
 						<RibbonButton
 							label={t("previewSheetCommentNew")}
+							shortcut={keys("newComment")}
 							icon={<MessageSquarePlusIcon />}
 							text={t("previewSheetCommentNew")}
 							disabled={commands.newComment === undefined}

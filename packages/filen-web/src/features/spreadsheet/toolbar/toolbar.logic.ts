@@ -18,7 +18,6 @@ import {
 	type SheetRgb,
 	type SheetVerticalAlign
 } from "@filen/office/core/sheet"
-import { SHEET_SHORTCUTS, type SheetShortcut } from "@filen/office/react/sheet"
 import { STANDARD_SWATCHES, type DocxSwatch } from "@/features/office/lib/officeControls"
 import type { PreviewKey } from "@/lib/i18n"
 
@@ -432,40 +431,10 @@ export function zoomStep(percent: number, direction: 1 | -1): number {
 	return ZOOM_STEPS.findLast(step => step < percent) ?? ZOOM_STEPS[0] ?? percent
 }
 
-// --- Shortcuts ---
+// --- Font ---
 
-// Keys a chord names by position (KeyboardEvent.code), as printed on a US keyboard.
-const CODE_KEYS: Readonly<Record<string, string>> = {
-	Equal: "=",
-	Minus: "-",
-	Backquote: "`",
-	Semicolon: ";",
-	Quote: "'",
-	Period: ".",
-	NumpadAdd: "+",
-	NumpadSubtract: "-",
-	NumpadMultiply: "*"
-}
-
-// A grid shortcut's first chord (react/sheet/keys.ts) as the keys a tooltip shows; null for one without a chord.
-export function sheetShortcutKeys(action: SheetShortcut, mac: boolean): string[] | null {
-	const entry = SHEET_SHORTCUTS.find(candidate => candidate.action === action)
-	const chord = (mac ? entry?.mac : entry?.windows)?.[0]
-
-	if (chord === undefined) {
-		return null
-	}
-
-	const keys: string[] = []
-
-	if (chord.control === true) keys.push(mac ? "⌃" : "Ctrl")
-	if (chord.primary === true) keys.push(mac ? "⌘" : "Ctrl")
-	if (chord.alt === true) keys.push(mac ? "⌥" : "Alt")
-	if (chord.shift === true) keys.push(mac ? "⇧" : "Shift")
-
-	const key = chord.key ?? (chord.code === undefined ? "" : (CODE_KEYS[chord.code] ?? chord.code.replace(/^(Key|Digit)/u, "")))
-
-	keys.push(key === " " ? "Space" : key.length === 1 ? key.toUpperCase() : key)
-
-	return keys
+// Increase (1) or Decrease (-1) Font Size: the next size of the list above or below `size`; null past its ends, as
+// Excel's buttons stop.
+export function fontStep(size: number, direction: 1 | -1): number | null {
+	return (direction > 0 ? FONT_SIZES.find(step => step > size) : FONT_SIZES.findLast(step => step < size)) ?? null
 }

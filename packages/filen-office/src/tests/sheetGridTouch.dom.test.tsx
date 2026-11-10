@@ -671,7 +671,7 @@ describe("SheetGrid on a chartsheet", () => {
 		expect(fillHandle.hidden).toBe(true)
 
 		// The workbook's keys still work: Ctrl+Page Up goes back to the worksheet.
-		key(scroller, { key: "PageUp", ctrlKey: true })
+		key(scroller, { key: "PageUp", code: "PageUp", ctrlKey: true })
 		await settle()
 
 		expect(model.cellless()).toBe(false)

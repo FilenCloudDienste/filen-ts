@@ -29,7 +29,7 @@ import {
 	sourceOf,
 	type PictureRegion
 } from "./canvasPicture"
-import { layoutKey } from "../keys"
+import { isMacPlatform, shortcutOf, type SheetKeyBindings } from "../keys"
 import { FittedPictures, fittedSize, wantsFit } from "./fitted"
 import { anchorBox, anchorOf, draggedBox, nearView, placeOnScreen, type Handle, type SheetBox } from "./geometry"
 
@@ -72,6 +72,10 @@ export interface SheetObjectsProps {
 	readonly renderGraphic?: (object: SheetDrawingObject, width: number, height: number, scale: number) => ReactNode | undefined
 	// The accessible name of an object (its alternative text, else a description of it).
 	readonly label: (object: SheetDrawingObject) => string
+	// The grid's shortcut keys (SheetGrid's bindings): undo and redo act on them here too.
+	readonly bindings?: SheetKeyBindings
+	// Command is the primary modifier, as on a Mac (detected from the platform when absent).
+	readonly mac?: boolean
 }
 
 const HANDLES: readonly Handle[] = ["nw", "n", "ne", "e", "se", "s", "sw", "w"]
@@ -92,6 +96,8 @@ const CANVAS_VIEWS = 4
 // How much larger (in device pixels) the view must grow than when pictures went to SVG before they try canvases again:
 // enough that a picture at the budget's edge does not flip back and forth as the view changes a little.
 const SVG_RETRY_GROWTH = 1.25
+
+const MAC = isMacPlatform()
 
 type CanvasKind = "opaque" | "canvas" | "none"
 
@@ -540,6 +546,7 @@ export function SheetObjects(props: SheetObjectsProps) {
 			ArrowDown: [0, step]
 		}
 		const move = moves[event.key]
+		const shortcut = shortcutOf(event, props.mac ?? MAC, props.bindings)
 
 		if ((event.key === "Enter" || event.key === "F2") && !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey) {
 			props.onActivate?.(object)
@@ -583,9 +590,9 @@ export function SheetObjects(props: SheetObjectsProps) {
 				props.onSelect(null)
 				handle.current?.focus()
 			}
-		} else if ((event.ctrlKey || event.metaKey) && (layoutKey(event).toLowerCase() === "z" || layoutKey(event).toLowerCase() === "y")) {
-			// Undo and redo, as from the grid, which also reads another script's letters by their Latin key.
-			void (layoutKey(event).toLowerCase() === "y" || event.shiftKey ? grid.redo() : grid.undo())
+		} else if (shortcut === "undo" || shortcut === "redo" || shortcut === "redoOrRepeat") {
+			// Undo and redo on the keys the grid has them on.
+			void (shortcut === "undo" ? grid.undo() : grid.redo())
 		} else if (event.key.length !== 1 || event.ctrlKey || event.metaKey || event.altKey) {
 			return
 		}

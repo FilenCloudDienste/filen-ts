@@ -109,10 +109,30 @@ export function useSheetSortFilter({ grid, gridRef, handle, canEdit, text, run }
 	}
 
 	function shortcut(key: SheetShortcut): boolean {
-		if (key === "filter") {
-			if (usable) void toggleFilter(model).then(oneRange)
+		switch (key) {
+			case "filter":
+				if (usable) void toggleFilter(model).then(oneRange)
 
-			return true
+				return true
+			case "sortAscending":
+			case "sortDescending":
+				if (canEdit) void quickSort(model, key === "sortDescending").then(oneRange)
+
+				return true
+			// The filters of the active cell's data, as the ribbon's Clear and Reapply act.
+			case "clearFilters":
+			case "reapplyFilter": {
+				const snapshot = model.getSnapshot()
+
+				if (usable && clearTarget(snapshot.layout, snapshot.selection.active.row, snapshot.selection.active.col) !== null) {
+					if (key === "clearFilters") clearFilters(model)
+					else reapplyFilters(model)
+				}
+
+				return true
+			}
+			default:
+				break
 		}
 
 		// Alt+Down on a filter header opens its menu; elsewhere another drop-down may take it.

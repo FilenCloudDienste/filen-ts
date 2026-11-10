@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { formatValue, NUMFMT_EN_US, SYSTEM_DATE_TIME, SYSTEM_SHORT_DATE, type NumFmtLocale } from "@filen/office/core/sheet"
 import { numFmtLocaleOf } from "@/features/spreadsheet/formulaBar/numFmtLocale"
-import { sheetLocaleOf } from "@/features/spreadsheet/formulaBar/sheetLocale"
+import { sheetLocaleOf, sheetShortcutFormats } from "@/features/spreadsheet/formulaBar/sheetLocale"
 
 // 2023-03-15 18:00 (a Wednesday).
 const EVENING = 45000.75
@@ -59,5 +59,28 @@ describe("the sheet locale", () => {
 
 		expect(locale.numFmt).toMatchObject({ decimal: ",", group: ".", shortDate: 'd"."m"."yyyy' })
 		expect(sheetLocaleOf("de-DE")).toBe(locale)
+	})
+})
+
+describe("the format shortcuts' locale formats", () => {
+	it("gives en-US Excel's own currency, and the day, short month and two-digit year", () => {
+		const formats = sheetShortcutFormats("en-US")
+
+		expect(formats.formatCurrency).toBe('"$"#,##0.00_);("$"#,##0.00)')
+		expect(formatValue(EVENING, formats.formatDate ?? "", { locale: NUMFMT_EN_US }).text).toBe("Mar 15, 23")
+		expect(formatValue(EVENING, formats.formatTime ?? "", { locale: NUMFMT_EN_US }).text).toBe("6:00 PM")
+		expect(sheetShortcutFormats("en-US")).toBe(formats)
+	})
+
+	it("follows the locale's currency, symbol place and negative, and its date and time", () => {
+		const locale = sheetLocaleOf("de-DE").numFmt ?? NUMFMT_EN_US
+		const formats = sheetShortcutFormats("de-DE")
+
+		expect(formats.formatCurrency).toBe('#,##0.00" €";-#,##0.00" €"')
+		expect(formatValue(-1234.5, formats.formatCurrency ?? "", { locale }).text).toBe("-1.234,50 €")
+		expect(formatValue(EVENING, formats.formatDate ?? "", { locale }).text).toBe("15. März 23")
+		expect(formatValue(EVENING, formats.formatTime ?? "", { locale }).text).toBe("18:00")
+		// A currency without decimals keeps none.
+		expect(sheetShortcutFormats("ja-JP").formatCurrency).not.toContain(".0")
 	})
 })

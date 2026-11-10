@@ -81,6 +81,7 @@
 		"./react/sheet/print": "./src/react/sheet/print/index.ts",
 		"./react/sheet/drawings": "./src/react/sheet/drawings/index.ts",
 		"./react/sheet/charts": "./src/react/sheet/charts/index.ts",
+		"./react/sheet/keys": "./src/react/sheet/keys.ts",
 		"./dom/pdf": "./src/dom/pdf/index.ts",
 		"./react/pdf": "./src/react/pdf/index.ts",
 		"./core/code": "./src/core/code/index.ts",

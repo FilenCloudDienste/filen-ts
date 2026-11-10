@@ -45,13 +45,12 @@ import type { SheetMoveCommand } from "../../core/sheet/move/plan"
 import { isImeKeydown } from "@filen/shared/keymap"
 import {
 	APP_SHORTCUTS,
-	EDITOR_SHORTCUTS,
 	SHORTCUT_FORMATS,
 	dateEntry,
 	isMacPlatform,
-	layoutKey,
 	shortcutOf,
 	timeEntry,
+	type SheetKeyBindings,
 	type SheetShortcut
 } from "./keys"
 import {
@@ -146,6 +145,11 @@ export interface SheetGridProps {
 	// Sees every keyboard shortcut (keys.ts) first: true takes it. The ones only an app can do (Find, Save, dialogs)
 	// do nothing unless it takes them.
 	readonly onShortcut?: (shortcut: SheetShortcut) => boolean
+	// The shortcuts' keys over the table's (a user's bindings, keys.ts); the same object while they stay the same.
+	readonly bindings?: SheetKeyBindings
+	// The number formats the format shortcuts apply over the table's en-US ones (SHORTCUT_FORMATS): the locale's
+	// currency, date and time.
+	readonly numberFormats?: Readonly<Partial<Record<SheetShortcut, string>>>
 	// Command is the primary modifier, as on a Mac (detected from the platform when absent).
 	readonly mac?: boolean
 	// A drag of the selection's border dropped over cells holding data (cellDrag.ts): the app asks Excel's "There's
@@ -248,9 +252,25 @@ const FORMAT_SHORTCUTS: ReadonlySet<SheetShortcut> = new Set<SheetShortcut>([
 	"formatNumber"
 ])
 
+const FILL_DIRECTIONS: Readonly<Record<"fillDown" | "fillRight" | "fillUp" | "fillLeft", FillDirection>> = {
+	fillDown: "down",
+	fillRight: "right",
+	fillUp: "up",
+	fillLeft: "left"
+}
+
 // The shortcuts a chartsheet (no cells) keeps: the workbook's, not a cell's.
 const CELLLESS_SHORTCUTS: ReadonlySet<SheetShortcut> = new Set<SheetShortcut>([
+	"undo",
+	"redo",
 	"save",
+	"saveAs",
+	"exportPdf",
+	"zoomIn",
+	"zoomOut",
+	"zoomReset",
+	"renameSheet",
+	"deleteSheet",
 	"print",
 	"newSheet",
 	"nextSheet",
@@ -397,6 +417,8 @@ export function SheetGrid({
 	onKey,
 	onEditorKey,
 	onShortcut,
+	bindings,
+	numberFormats,
 	mac,
 	onConfirmReplace,
 	onCellActivate,
@@ -1874,7 +1896,7 @@ export function SheetGrid({
 		const merges_ = merges()
 		const range = current.ranges[current.ranges.length - 1] as SheetRange
 		const earlier = current.ranges.length > 1 ? { ...current, ranges: current.ranges.slice(0, -1) } : null
-		const numFmt = SHORTCUT_FORMATS[shortcut]
+		const numFmt = numberFormats?.[shortcut] ?? SHORTCUT_FORMATS[shortcut]
 		// A text file holds no formats.
 		const formats = !TEXT_KINDS.has(grid.kind)
 
@@ -1887,9 +1909,19 @@ export function SheetGrid({
 		}
 
 		switch (shortcut) {
+			// Nothing to undo while the workbook takes no change: the key keeps its default.
+			case "undo":
+			case "redo":
+				if (!grid.canChange()) return false
+
+				settled(shortcut === "undo" ? grid.undo() : grid.redo())
+
+				return true
 			case "fillDown":
-			case "fillRight": {
-				const direction: FillDirection = shortcut === "fillDown" ? "down" : "right"
+			case "fillRight":
+			case "fillUp":
+			case "fillLeft": {
+				const direction: FillDirection = FILL_DIRECTIONS[shortcut]
 
 				edit(() => grid.command({ type: "fill.copy", sheet, ranges: current.ranges, direction }))
 
@@ -2040,7 +2072,7 @@ export function SheetGrid({
 			return
 		}
 
-		const shortcut = shortcutOf(event, onMac)
+		const shortcut = shortcutOf(event, onMac, bindings)
 
 		// A chartsheet's keys move to nothing, enter nothing and select nothing; Ctrl+Y redoes, never repeats on cells.
 		if (cellless && shortcut === "redoOrRepeat") {
@@ -2066,19 +2098,6 @@ export function SheetGrid({
 
 		if (!cellless && frozenHome(event)) {
 			event.preventDefault()
-
-			return
-		}
-
-		const mod = event.ctrlKey || event.metaKey
-		const key = layoutKey(event).toLowerCase()
-
-		if (mod && !event.altKey && (key === "z" || key === "y")) {
-			if (grid.canChange()) {
-				event.preventDefault()
-
-				settled(key === "z" && !event.shiftKey ? grid.undo() : grid.redo())
-			}
 
 			return
 		}
@@ -2139,7 +2158,10 @@ export function SheetGrid({
 		}
 
 		// A Mac keyboard's delete key sends Backspace: Excel for Mac clears the selection on it.
-		if (event.key === "Delete" || (event.key === "Backspace" && onMac && !mod && !event.altKey && !event.shiftKey)) {
+		if (
+			event.key === "Delete" ||
+			(event.key === "Backspace" && onMac && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey)
+		) {
 			event.preventDefault()
 			clearContents()
 
@@ -2171,11 +2193,18 @@ export function SheetGrid({
 		if (onEditorKey?.(event) === true || isImeKeydown(event.nativeEvent)) return
 
 		const { sheet: shownSheet, editing: open } = grid.getSnapshot()
-		const shortcut = shortcutOf(event, onMac)
+		const shortcut = shortcutOf(event, onMac, bindings)
 
 		// Go To (F5, Ctrl+G) is the grid's, not the browser's: F5 would reload the page under the entry.
 		if (shortcut === "goTo") {
 			event.preventDefault()
+
+			return
+		}
+
+		// Save is the app's, which commits the entry first; taken, the browser's Save Page As stays away from the entry.
+		if (shortcut === "save") {
+			if (onShortcut?.(shortcut) === true) event.preventDefault()
 
 			return
 		}
@@ -2210,7 +2239,7 @@ export function SheetGrid({
 
 		const mergeList = grid.merges(current)
 
-		if (shortcut !== null && EDITOR_SHORTCUTS.has(shortcut)) {
+		if (shortcut === "insertDate" || shortcut === "insertTime") {
 			// Today's date or the time, typed at the caret.
 			event.preventDefault()
 
@@ -2372,7 +2401,7 @@ export function SheetGrid({
 			editorKey: event => handleEditorKey(event),
 			renderer
 		}),
-		[grid, renderer, onEditorKey, onMac]
+		[grid, renderer, onEditorKey, onShortcut, bindings, numberFormats, onMac]
 	)
 
 	return (

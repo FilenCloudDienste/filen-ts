@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { SHEET_MAX_COLS, SHEET_MAX_ROWS, type SheetEvent } from "../core/sheet/protocol"
 import { inThreadSheetHost } from "../dom/sheet/host"
 import { SheetGrid, SheetGridModel, type SheetGridHandle } from "../react/sheet/index"
-import type { SheetShortcut } from "../react/sheet/keys"
+import type { SheetKeyBindings, SheetShortcut } from "../react/sheet/keys"
 import { RecordingCanvas } from "./sheetGridCanvas"
 import { sheetBody } from "./sheetKeysFixtures"
 import { IMMEDIATE, buildFixture, firstTile, tileEntry } from "./sheetSessionFixtures"
@@ -66,7 +66,7 @@ const BOOK = {
 
 async function mount(
 	fixture: Parameters<typeof buildFixture>[0] | string = BOOK,
-	options: { readonly mac?: boolean; readonly take?: readonly SheetShortcut[] } = {}
+	options: { readonly mac?: boolean; readonly take?: readonly SheetShortcut[]; readonly bindings?: SheetKeyBindings } = {}
 ): Promise<Mounted> {
 	const host = inThreadSheetHost()
 	// Events before the model exists wait for it, as an app hands them over from the open on.
@@ -101,6 +101,7 @@ async function mount(
 				label="Sheet"
 				editorLabel="Cell entry"
 				mac={options.mac ?? false}
+				{...(options.bindings !== undefined && { bindings: options.bindings })}
 				onShortcut={shortcut => {
 					shortcuts.push(shortcut)
 
@@ -502,6 +503,65 @@ describe("grid shortcuts", () => {
 
 		expect(key(left.scroller, { key: "s", code: "KeyS", ctrlKey: true }).defaultPrevented).toBe(false)
 		expect(left.shortcuts).toContain("save")
+	})
+
+	it("acts on the keys a user bound, and no more on the ones moved away", async () => {
+		const { model, scroller, shortcuts } = await mount(BOOK, {
+			bindings: { fillDown: "", bold: "mod+alt+b", save: "mod+e" },
+			take: ["save"]
+		})
+
+		act(() =>
+			model.select({
+				active: { row: 0, col: 0 },
+				anchor: { row: 0, col: 0 },
+				focus: { row: 1, col: 0 },
+				ranges: [{ startRow: 0, startCol: 0, endRow: 1, endCol: 0 }]
+			})
+		)
+		key(scroller, { key: "d", code: "KeyD", ctrlKey: true })
+		await settle()
+		expect(await text(model, 1, 0)).toBe("2")
+
+		const bold = key(scroller, { key: "b", code: "KeyB", ctrlKey: true, altKey: true })
+
+		await settle()
+		expect(bold.defaultPrevented).toBe(true)
+		expect(model.getSnapshot().state.canUndo).toBe(true)
+		expect(key(scroller, { key: "e", code: "KeyE", ctrlKey: true }).defaultPrevented).toBe(true)
+		expect(shortcuts).toEqual(["bold", "save"])
+	})
+
+	it("hands the app its save from an entry being typed, on the default key and on a rebound one", async () => {
+		for (const bindings of [undefined, { save: "mod+shift+e" }]) {
+			const { scroller, shortcuts } = await mount(BOOK, { take: ["save"], ...(bindings !== undefined && { bindings }) })
+
+			key(scroller, { key: "F2", code: "F2" })
+
+			const editor = document.querySelector<HTMLTextAreaElement>("textarea.fo-sheet-editor") as HTMLTextAreaElement
+			const saved = key(
+				editor,
+				bindings === undefined
+					? { key: "s", code: "KeyS", ctrlKey: true }
+					: { key: "E", code: "KeyE", ctrlKey: true, shiftKey: true }
+			)
+
+			expect(saved.defaultPrevented).toBe(true)
+			expect(shortcuts).toEqual(["save"])
+
+			for (const root of roots.splice(0)) act(() => root.unmount())
+			document.body.innerHTML = ""
+		}
+	})
+
+	it("leaves the save key's default in an entry when the app does not take it", async () => {
+		const { scroller } = await mount(BOOK)
+
+		key(scroller, { key: "F2", code: "F2" })
+
+		const editor = document.querySelector<HTMLTextAreaElement>("textarea.fo-sheet-editor") as HTMLTextAreaElement
+
+		expect(key(editor, { key: "s", code: "KeyS", ctrlKey: true }).defaultPrevented).toBe(false)
 	})
 
 	it("goes to the first cell under frozen panes with Ctrl+Home", async () => {

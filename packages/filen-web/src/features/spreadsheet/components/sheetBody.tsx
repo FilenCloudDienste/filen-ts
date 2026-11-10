@@ -71,7 +71,15 @@ import { SheetFileMenu } from "@/features/spreadsheet/save/sheetFileMenu"
 import { useSheetPdfExport } from "@/features/spreadsheet/save/useSheetPdfExport"
 import { formOf, pdfFile, pdfRequest, printRequests } from "@/features/spreadsheet/print/print.logic"
 import { sheetSettings } from "@/features/spreadsheet/print/printSettings"
-import { browserLanguage } from "@/features/spreadsheet/formulaBar/sheetLocale"
+import { browserLanguage, sheetShortcutFormats } from "@/features/spreadsheet/formulaBar/sheetLocale"
+import { sheetBindings } from "@/features/spreadsheet/lib/keymap"
+import { freezeEnabled, freezeTo } from "@/features/spreadsheet/menus/structureCommands"
+import { requestChart } from "@/features/spreadsheet/charts/chartRequests"
+import { requestImage } from "@/features/spreadsheet/objects/insertRequests"
+import { objectsEditable } from "@/features/spreadsheet/objects/objects.logic"
+import { requestSheetTab, type SheetTabRequest } from "@/features/spreadsheet/tabs/tabRequests"
+import { runRibbonKey } from "@/features/spreadsheet/toolbar/ribbonKeys"
+import { useBindings } from "@/lib/keymap/registry"
 import { usePreviewDownloadable } from "@/features/preview/lib/accessMode"
 import { useSheetAutosave } from "@/features/spreadsheet/save/useSheetAutosave"
 import { useSheetFill } from "@/features/spreadsheet/fill/useSheetFill"
@@ -95,9 +103,23 @@ const LAYER_SHORTCUTS: ReadonlySet<SheetShortcut> = new Set<SheetShortcut>([
 	"findPrevious",
 	"print",
 	"newSheet",
-	"goTo"
+	"goTo",
+	"save",
+	"saveAs",
+	"exportCsv",
+	"exportPdf",
+	"zoomIn",
+	"zoomOut",
+	"zoomReset"
 ])
 const MAC = isMacPlatform()
+
+// The sheet tabs' commands the keyboard asks for (sheetTabs.tsx takes them).
+const TAB_REQUESTS: Readonly<Record<"renameSheet" | "deleteSheet" | "protectSheet", SheetTabRequest>> = {
+	renameSheet: "rename",
+	deleteSheet: "delete",
+	protectSheet: "protectSheet"
+}
 
 export interface SheetBodyProps {
 	handle: SheetHandle
@@ -152,6 +174,10 @@ export function SheetBody({
 }: SheetBodyProps) {
 	const { t } = useTranslation(["preview", "common"])
 	const downloadable = usePreviewDownloadable()
+	// The grid's keys as the user has them bound (Settings → Keyboard), one object per change.
+	const bindings = sheetBindings(useBindings())
+	// The format shortcuts' currency, date and time in the browser's locale, as Excel follows the system's.
+	const numberFormats = sheetShortcutFormats(browserLanguage())
 	const [model] = useState(() => createSheetGrid(handle))
 	const grid = useSheetGrid(model)
 	const { theme } = useTheme()
@@ -415,7 +441,8 @@ export function SheetBody({
 		canEdit,
 		text,
 		renderChart: charts.renderChart,
-		onEditObject: charts.onEditObject
+		onEditObject: charts.onEditObject,
+		bindings
 	})
 	// Features' parts of the view (sheetExtension.ts), in this order: their grid layers, overlays, menu groups,
 	// dialogs and shortcuts (the first to take a pointer press or a shortcut has it). The touch menu is the last
@@ -431,6 +458,42 @@ export function SheetBody({
 		{ id: "touch", overlay: touch.overlay },
 		print.extension
 	]
+
+	// Home ▸ Cells ▸ Format ▸ AutoFit: the selection's rows or columns as the grid measures them, as a header's double
+	// click fits them.
+	function autofit(axis: SheetAxis): void {
+		const renderer = gridRef.current?.renderer
+		const measurer = renderer?.measurerFor() ?? null
+
+		if (renderer === undefined || measurer === null || !model.canResize()) {
+			return
+		}
+
+		const sheet = grid.sheet
+		const indices: number[] = []
+
+		for (const span of selectionSpans(grid.selection.ranges, axis)) {
+			for (let index = span.start; index <= span.end && indices.length < MAX_FIT_INDICES; index++) {
+				indices.push(index)
+			}
+		}
+
+		void autofitSizes(model, sheet, axis, indices, measurer, renderer.themeFont()).then(
+			fitted => {
+				if (fitted.indices.length > 0) {
+					model.resize(sheet, axis, fitted.indices, fitted.sizes).catch(() => undefined)
+				}
+			},
+			() => undefined
+		)
+	}
+
+	// The clipboard into the selection: its values only (Paste Values), or as it is.
+	function pasteClipboard(values: boolean): void {
+		void clipboard.paste(values).then(result => {
+			sayClipboardRefusal(result, "V", t)
+		})
+	}
 
 	// The grid's shortcuts only this view can do (react/sheet/keys.ts): Find and Replace (Mod+F, Mod+H, Shift+F4),
 	// a new sheet (Shift+F11) and the insert and delete dialogs for cells; the features' own first. The rest the grid
@@ -531,44 +594,119 @@ export function SheetBody({
 
 				return true
 			}
-			// Taken only to keep the browser's Save Page As away, even with preview.save moved to another key: the key
-			// still reaches the preview's own Save (the one save path, which commits an open entry first) wherever it is
-			// bound to it.
+			// preview.save's keys and Mod+S (lib/keymap.ts sheetBindings), in the cells and in an entry: taken only to keep
+			// the browser's Save Page As away, the key reaching the preview's own Save (the one save path, which commits an
+			// open entry first) wherever it is bound to it.
 			case "save":
 				return true
-			// Hide and unhide rows and columns (Ctrl+9, Ctrl+0, Ctrl+Shift+9, Ctrl+Shift+0); a text file has none.
-			default:
-				return structureShortcut(grid, shortcut, cellsWritable && !text)
-		}
-	}
-
-	// Home ▸ Cells ▸ Format ▸ AutoFit: the selection's rows or columns as the grid measures them, as a header's double
-	// click fits them.
-	function autofit(axis: SheetAxis): void {
-		const renderer = gridRef.current?.renderer
-		const measurer = renderer?.measurerFor() ?? null
-
-		if (renderer === undefined || measurer === null || !model.canResize()) {
-			return
-		}
-
-		const sheet = grid.sheet
-		const indices: number[] = []
-
-		for (const span of selectionSpans(grid.selection.ranges, axis)) {
-			for (let index = span.start; index <= span.end && indices.length < MAX_FIT_INDICES; index++) {
-				indices.push(index)
-			}
-		}
-
-		void autofitSizes(model, sheet, axis, indices, measurer, renderer.themeFont()).then(
-			fitted => {
-				if (fitted.indices.length > 0) {
-					model.resize(sheet, axis, fitted.indices, fitted.sizes).catch(() => undefined)
+			case "saveAs":
+				if (onSaveAsXlsx === undefined) {
+					return false
 				}
-			},
-			() => undefined
-		)
+
+				setXlsxAsked(true)
+
+				return true
+			case "exportCsv":
+				downloadCsv?.()
+
+				return downloadCsv !== undefined
+			case "exportPdf":
+				downloadPdf?.()
+
+				return downloadPdf !== undefined
+			case "pasteValues":
+				pasteClipboard(true)
+
+				return true
+			case "clearFormats":
+			case "clearAll":
+				if (cellsWritable && !text) {
+					run({
+						type: "cells.clear",
+						sheet: grid.sheet,
+						ranges: grid.selection.ranges,
+						what: shortcut === "clearAll" ? "all" : "formats"
+					})
+				}
+
+				return true
+			case "mergeCenter":
+			case "unmerge":
+				if (cellsWritable && !text) {
+					if (shortcut === "mergeCenter") {
+						merges.merge("center")
+					} else {
+						merges.unmerge()
+					}
+				}
+
+				return true
+			case "autofitRows":
+			case "autofitColumns":
+				autofit(shortcut === "autofitRows" ? "rows" : "cols")
+
+				return true
+			// Excel's Freeze Panes: at the active cell, or unfrozen when the sheet has panes.
+			case "freezePanes": {
+				const target = (grid.layout?.pane ?? null) === null ? "panes" : "none"
+
+				if (cellsWritable && !text && freezeEnabled(grid, target)) {
+					freezeTo(grid, target)
+				}
+
+				return true
+			}
+			case "newComment":
+			case "fillSeries":
+			case "dataValidation":
+				ribbonCommands(extensions)[shortcut]?.()
+
+				return true
+			case "toggleNote":
+			case "deleteNote": {
+				const note = ribbonCommands(extensions).note
+
+				if (note?.exists === true) {
+					if (shortcut === "toggleNote") {
+						note.toggle()
+					} else {
+						note.remove()
+					}
+				}
+
+				return true
+			}
+			case "altText":
+				ribbonCommands(extensions).object?.altText?.()
+
+				return true
+			// Excel's Alt+F1: a column chart of the selection.
+			case "insertChart":
+				if (cellsWritable && !text) {
+					requestChart(model, "column")
+				}
+
+				return true
+			case "insertPicture":
+				if (cellsWritable && !text && objectsEditable(grid.layout)) {
+					requestImage(model, "file")
+				}
+
+				return true
+			case "renameSheet":
+			case "deleteSheet":
+			case "protectSheet":
+				if (canEdit && !text) {
+					requestSheetTab(model, TAB_REQUESTS[shortcut])
+				}
+
+				return true
+			// Hide and unhide rows and columns (Ctrl+9, Ctrl+0, Ctrl+Shift+9, Ctrl+Shift+0); a text file has none. Then the
+			// ribbon's own (wrap, alignment, indent, decimals, font size, zoom).
+			default:
+				return structureShortcut(grid, shortcut, cellsWritable && !text) || runRibbonKey(model, shortcut)
+		}
 	}
 
 	const focusCells = (): void => {
@@ -589,7 +727,7 @@ export function SheetBody({
 			return
 		}
 
-		const shortcut = shortcutOf(event, MAC)
+		const shortcut = shortcutOf(event, MAC, bindings)
 
 		if (shortcut !== null && LAYER_SHORTCUTS.has(shortcut) && handleShortcut(shortcut)) event.preventDefault()
 	})
@@ -600,11 +738,7 @@ export function SheetBody({
 				sayClipboardRefusal(result, cut ? "X" : "C", t)
 			})
 		},
-		paste: values => {
-			void clipboard.paste(values).then(result => {
-				sayClipboardRefusal(result, "V", t)
-			})
-		},
+		paste: pasteClipboard,
 		shortcut: shortcut => {
 			handleShortcut(shortcut)
 		},
@@ -657,6 +791,14 @@ export function SheetBody({
 			}}
 			onKeyDown={event => {
 				if (onRibbonEscape(event, event.currentTarget, focusCells, "bubble")) {
+					return
+				}
+
+				// The save keys in the view's own fields (the name box, the find bar, a dialog's): the browser's Save Page As
+				// stays away there too, and preview.save's listener still saves wherever it is bound.
+				if (!event.defaultPrevented && shortcutOf(event, MAC, bindings) === "save") {
+					event.preventDefault()
+
 					return
 				}
 
@@ -814,6 +956,8 @@ export function SheetBody({
 								onTouchMenu={touch.onTouchMenu}
 								onConfirmReplace={moveReplace.ask}
 								onShortcut={handleShortcut}
+								bindings={bindings}
+								numberFormats={numberFormats}
 								onEditorKey={formula.editorKey}
 								extensions={gridExtensions(extensions)}
 							>

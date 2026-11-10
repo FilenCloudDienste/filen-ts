@@ -98,6 +98,20 @@ function codeOf(format: Intl.DateTimeFormat, names: Names): string {
 	return code
 }
 
+// The date and time Excel's format shortcuts apply (Ctrl+Shift+# and Ctrl+Shift+@: "d-mmm-yy" and "h:mm AM/PM" in
+// en-US), in the locale's order and words: the day, the short month and a two-digit year; the hour and minute.
+// Null for an unknown language tag.
+export function shortcutDateTimeCodes(language: string, names: Names): { readonly date: string; readonly time: string } | null {
+	try {
+		return {
+			date: codeOf(formatter(language, { day: "numeric", month: "short", year: "2-digit" }), names),
+			time: codeOf(formatter(language, { hour: "numeric", minute: "2-digit" }), names)
+		}
+	} catch {
+		return null
+	}
+}
+
 // The short date is the locale's numeric date (CLDR yMd), the long date its full date and the time its medium time,
 // as Intl writes them.
 export function numFmtLocaleOf(language: string, decimal: string, group: string): NumFmtLocale {

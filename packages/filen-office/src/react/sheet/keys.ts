@@ -1,13 +1,19 @@
+import { matchesChord, parseCombo, tokenOfCode, type Chord, type ChordEvent } from "@filen/shared/keymap"
+
 // The grid's keyboard shortcuts, from Excel's "Keyboard shortcuts in Excel" (support.microsoft.com), with the keys
 // Excel for Mac uses. Moves within the grid (arrows, Home, End, Page Up and Down, Tab and Enter, with Shift and
 // Ctrl) are navigation.ts's; this table holds the rest. A shortcut is an action: the grid performs its own (fills,
 // selections, entries, formats it can apply), and hands the app the ones only the app can (Find, Save, dialogs),
-// so each app wires what it offers.
+// so each app wires what it offers. Some ship without keys (the ribbon's commands): a user may bind them.
 
-export type SheetShortcut =
-	// Done by the grid.
+// Done by the grid.
+type GridShortcut =
+	| "undo"
+	| "redo"
 	| "fillDown"
 	| "fillRight"
+	| "fillUp"
+	| "fillLeft"
 	| "repeat"
 	| "redoOrRepeat"
 	| "insertDate"
@@ -39,48 +45,61 @@ export type SheetShortcut =
 	| "formatDate"
 	| "formatTime"
 	| "formatNumber"
-	// The app's.
-	| "find"
-	| "findNext"
-	| "findPrevious"
-	| "replace"
-	| "goTo"
-	| "save"
-	| "print"
-	| "formatCells"
-	| "filter"
-	| "openDropdown"
-	| "hyperlink"
-	| "note"
-	| "newSheet"
-	| "autoSum"
-	| "borderOutline"
-	| "borderNone"
-	| "hideRows"
-	| "hideColumns"
-	| "unhideRows"
-	| "unhideColumns"
-	| "selectObject"
-	| "nextPane"
-	| "previousPane"
-	| "contextMenu"
 
-// The shortcuts the grid cannot perform itself: without an app that takes them, they do nothing (and the browser's
-// own use of the keys stays).
-export const APP_SHORTCUTS: ReadonlySet<SheetShortcut> = new Set<SheetShortcut>([
+// The app's.
+const APP_ACTIONS = [
 	"find",
 	"findNext",
 	"findPrevious",
 	"replace",
 	"goTo",
 	"save",
+	"saveAs",
 	"print",
+	"exportCsv",
+	"exportPdf",
+	"pasteValues",
 	"formatCells",
+	"fontGrow",
+	"fontShrink",
+	"wrap",
+	"alignLeft",
+	"alignCenter",
+	"alignRight",
+	"indentDecrease",
+	"indentIncrease",
+	"decimalsIncrease",
+	"decimalsDecrease",
+	"mergeCenter",
+	"unmerge",
+	"clearFormats",
+	"clearAll",
+	"autofitRows",
+	"autofitColumns",
+	"zoomIn",
+	"zoomOut",
+	"zoomReset",
+	"freezePanes",
 	"filter",
+	"reapplyFilter",
+	"clearFilters",
+	"sortAscending",
+	"sortDescending",
+	"dataValidation",
 	"openDropdown",
 	"hyperlink",
 	"note",
+	"toggleNote",
+	"deleteNote",
+	"newComment",
+	"insertChart",
+	"insertPicture",
+	"altText",
+	"fillSeries",
 	"newSheet",
+	"renameSheet",
+	"deleteSheet",
+	"protectSheet",
 	"autoSum",
 	"borderOutline",
 	"borderNone",
@@ -92,355 +111,218 @@ export const APP_SHORTCUTS: ReadonlySet<SheetShortcut> = new Set<SheetShortcut>(
 	"nextPane",
 	"previousPane",
 	"contextMenu"
-])
+] as const
 
-// A key with its modifiers. `primary` is Ctrl on Windows and Command on a Mac; `control` is the Control key itself
-// (on Windows the same key as `primary`). A letter is matched by the character it types (whatever the layout), or by
-// its position where the layout types no Latin letter there (Cyrillic, Greek), as Excel reads it; a digit or symbol
-// key by its position (`code`), since Shift changes what it types.
-export interface KeyChord {
-	readonly key?: string
-	readonly code?: string
-	readonly primary?: boolean
-	readonly control?: boolean
-	readonly shift?: boolean
-	readonly alt?: boolean
-	// A character some layouts type with Shift ("=" is Shift+0 on a German one): Shift held or not.
-	readonly anyShift?: boolean
-}
+export type SheetShortcut = GridShortcut | (typeof APP_ACTIONS)[number]
 
+// The shortcuts the grid cannot perform itself: without an app that takes them, they do nothing (and the browser's
+// own use of the keys stays).
+export const APP_SHORTCUTS: ReadonlySet<SheetShortcut> = new Set<SheetShortcut>(APP_ACTIONS)
+
+// A shortcut's keys: a combo of @filen/shared/keymap's token model (physical keys, alternatives joined by ","), off a
+// Mac and on one; "" for one shipped without keys. `mod` is Ctrl on Windows and Command on a Mac; `ctrl` is the
+// Control key itself (on Windows the same key as `mod`). Keys are matched by position, as every other matcher of the
+// app's keymap matches them, so a binding a user records fires on the key they pressed, and a character typed with
+// AltGr (Windows reports it as Ctrl+Alt) is never a shortcut.
 export interface ShortcutEntry {
 	readonly action: SheetShortcut
-	readonly windows: readonly KeyChord[]
-	readonly mac: readonly KeyChord[]
+	readonly windows: string
+	readonly mac: string
 }
 
-// Where the shortcut is used: on the grid, or also in the cell editor while an entry is typed.
-export const EDITOR_SHORTCUTS: ReadonlySet<SheetShortcut> = new Set<SheetShortcut>(["insertDate", "insertTime"])
+// The combos in effect, by action, over the table's (a user's bindings): an action left out keeps its default, ""
+// turns one off. Hand in the same object while nothing changes: the lookup built from it is kept with it.
+export type SheetKeyBindings = Readonly<Partial<Record<SheetShortcut, string>>>
 
+function entry(action: SheetShortcut, windows: string, mac: string = windows): ShortcutEntry {
+	return { action, windows, mac }
+}
+
+// In the order a key shared by two actions resolves: the first wins.
 export const SHEET_SHORTCUTS: readonly ShortcutEntry[] = [
 	// Editing and filling.
-	{
-		action: "fillDown",
-		windows: [{ key: "d", primary: true }],
-		mac: [
-			{ key: "d", primary: true },
-			{ key: "d", control: true }
-		]
-	},
-	{
-		action: "fillRight",
-		windows: [{ key: "r", primary: true }],
-		mac: [
-			{ key: "r", primary: true },
-			{ key: "r", control: true }
-		]
-	},
-	{ action: "repeat", windows: [{ key: "F4" }], mac: [{ key: "F4" }] },
-	{ action: "redoOrRepeat", windows: [{ key: "y", primary: true }], mac: [{ key: "y", primary: true }] },
-	{ action: "insertDate", windows: [{ code: "Semicolon", primary: true }], mac: [{ code: "Semicolon", control: true }] },
-	{
-		action: "insertTime",
-		windows: [{ code: "Semicolon", primary: true, shift: true }],
-		mac: [{ code: "Semicolon", primary: true }]
-	},
-	{ action: "formulaFromAbove", windows: [{ code: "Quote", primary: true }], mac: [{ code: "Quote", control: true }] },
-	{
-		action: "valueFromAbove",
-		windows: [{ code: "Quote", primary: true, shift: true }],
-		mac: [{ code: "Quote", control: true, shift: true }]
-	},
-	{ action: "showFormulas", windows: [{ code: "Backquote", primary: true }], mac: [{ code: "Backquote", control: true }] },
-	{
-		action: "insertCells",
-		windows: [
-			{ code: "Equal", primary: true, shift: true },
-			{ code: "NumpadAdd", primary: true }
-		],
-		mac: [
-			{ code: "Equal", primary: true, shift: true },
-			{ code: "Equal", control: true, shift: true }
-		]
-	},
-	{
-		action: "deleteCells",
-		windows: [
-			{ code: "Minus", primary: true },
-			{ code: "NumpadSubtract", primary: true }
-		],
-		mac: [
-			{ code: "Minus", primary: true },
-			{ code: "Minus", control: true }
-		]
-	},
+	entry("undo", "mod+z"),
+	entry("redo", "mod+shift+z"),
+	entry("fillDown", "mod+d", "mod+d,ctrl+d"),
+	entry("fillRight", "mod+r", "mod+r,ctrl+r"),
+	entry("fillUp", ""),
+	entry("fillLeft", ""),
+	entry("fillSeries", ""),
+	entry("repeat", "f4"),
+	entry("redoOrRepeat", "mod+y"),
+	entry("insertDate", "mod+semicolon", "ctrl+semicolon"),
+	entry("insertTime", "mod+shift+semicolon", "mod+semicolon"),
+	entry("formulaFromAbove", "mod+quote", "ctrl+quote"),
+	entry("valueFromAbove", "mod+shift+quote", "ctrl+shift+quote"),
+	entry("showFormulas", "mod+backquote", "ctrl+backquote"),
+	entry("insertCells", "mod+shift+equal,mod+add", "mod+shift+equal,ctrl+shift+equal"),
+	entry("deleteCells", "mod+minus,mod+subtract", "mod+minus,ctrl+minus"),
+	// Excel's Paste Values.
+	entry("pasteValues", "mod+shift+v"),
+	entry("clearFormats", ""),
+	entry("clearAll", ""),
 	// Selecting.
-	{ action: "selectColumns", windows: [{ key: " ", primary: true }], mac: [{ key: " ", control: true }] },
-	{ action: "selectRows", windows: [{ key: " ", shift: true }], mac: [{ key: " ", shift: true }] },
-	{
-		action: "selectAll",
-		windows: [
-			{ key: "a", primary: true },
-			{ key: " ", primary: true, shift: true }
-		],
-		mac: [{ key: "a", primary: true }]
-	},
-	{
-		action: "selectRegion",
-		windows: [
-			{ code: "Digit8", primary: true, shift: true },
-			{ code: "NumpadMultiply", primary: true }
-		],
-		mac: [
-			{ code: "Digit8", primary: true, shift: true },
-			{ code: "Digit8", control: true, shift: true }
-		]
-	},
-	{ action: "collapseSelection", windows: [{ key: "Backspace", shift: true }], mac: [{ key: "Backspace", shift: true }] },
-	{ action: "nextCorner", windows: [{ code: "Period", primary: true }], mac: [{ code: "Period", control: true }] },
-	{ action: "revealActive", windows: [{ key: "Backspace", primary: true }], mac: [{ key: "Backspace", primary: true }] },
+	entry("selectColumns", "mod+space", "ctrl+space"),
+	entry("selectRows", "shift+space"),
+	entry("selectAll", "mod+a,mod+shift+space", "mod+a"),
+	entry("selectRegion", "mod+shift+8,mod+multiply", "mod+shift+8,ctrl+shift+8"),
+	entry("collapseSelection", "shift+backspace"),
+	entry("nextCorner", "mod+period", "ctrl+period"),
+	entry("revealActive", "mod+backspace"),
 	// Moving.
-	{ action: "screenRight", windows: [{ key: "PageDown", alt: true }], mac: [{ key: "PageDown", alt: true }] },
-	{ action: "screenLeft", windows: [{ key: "PageUp", alt: true }], mac: [{ key: "PageUp", alt: true }] },
+	entry("screenRight", "alt+pagedown"),
+	entry("screenLeft", "alt+pageup"),
 	// Ctrl+Alt+Page Down and Up: Excel for the web's, as Chrome keeps Ctrl+Page Down and Up for its tabs.
-	{
-		action: "nextSheet",
-		windows: [
-			{ key: "PageDown", primary: true },
-			{ key: "PageDown", primary: true, alt: true }
-		],
-		mac: [
-			{ key: "PageDown", control: true },
-			{ key: "PageDown", control: true, alt: true },
-			{ key: "ArrowRight", alt: true }
-		]
-	},
-	{
-		action: "previousSheet",
-		windows: [
-			{ key: "PageUp", primary: true },
-			{ key: "PageUp", primary: true, alt: true }
-		],
-		mac: [
-			{ key: "PageUp", control: true },
-			{ key: "PageUp", control: true, alt: true },
-			{ key: "ArrowLeft", alt: true }
-		]
-	},
+	entry("nextSheet", "mod+pagedown,mod+alt+pagedown", "ctrl+pagedown,ctrl+alt+pagedown,alt+arrowright"),
+	entry("previousSheet", "mod+pageup,mod+alt+pageup", "ctrl+pageup,ctrl+alt+pageup,alt+arrowleft"),
 	// Formatting.
-	{
-		action: "bold",
-		windows: [
-			{ key: "b", primary: true },
-			{ code: "Digit2", primary: true }
-		],
-		mac: [{ key: "b", primary: true }]
-	},
-	{
-		action: "italic",
-		windows: [
-			{ key: "i", primary: true },
-			{ code: "Digit3", primary: true }
-		],
-		mac: [{ key: "i", primary: true }]
-	},
-	{
-		action: "underline",
-		windows: [
-			{ key: "u", primary: true },
-			{ code: "Digit4", primary: true }
-		],
-		mac: [{ key: "u", primary: true }]
-	},
-	{ action: "strikethrough", windows: [{ code: "Digit5", primary: true }], mac: [{ key: "x", primary: true, shift: true }] },
-	{
-		action: "formatGeneral",
-		windows: [{ code: "Backquote", primary: true, shift: true }],
-		mac: [{ code: "Backquote", control: true, shift: true }]
-	},
-	{
-		action: "formatCurrency",
-		windows: [{ code: "Digit4", primary: true, shift: true }],
-		mac: [{ code: "Digit4", control: true, shift: true }]
-	},
-	{
-		action: "formatPercent",
-		windows: [{ code: "Digit5", primary: true, shift: true }],
-		mac: [{ code: "Digit5", control: true, shift: true }]
-	},
-	{
-		action: "formatScientific",
-		windows: [{ code: "Digit6", primary: true, shift: true }],
-		mac: [{ code: "Digit6", control: true, shift: true }]
-	},
-	{
-		action: "formatDate",
-		windows: [{ code: "Digit3", primary: true, shift: true }],
-		mac: [{ code: "Digit3", control: true, shift: true }]
-	},
-	{
-		action: "formatTime",
-		windows: [{ code: "Digit2", primary: true, shift: true }],
-		mac: [{ code: "Digit2", control: true, shift: true }]
-	},
-	{
-		action: "formatNumber",
-		windows: [{ code: "Digit1", primary: true, shift: true }],
-		mac: [{ code: "Digit1", control: true, shift: true }]
-	},
-	{ action: "formatCells", windows: [{ code: "Digit1", primary: true }], mac: [{ code: "Digit1", primary: true }] },
-	{
-		action: "borderOutline",
-		windows: [{ code: "Digit7", primary: true, shift: true }],
-		mac: [{ code: "Digit0", primary: true, alt: true }]
-	},
-	{
-		action: "borderNone",
-		windows: [{ code: "Minus", primary: true, shift: true }],
-		mac: [{ code: "Minus", primary: true, alt: true }]
-	},
-	{ action: "hideRows", windows: [{ code: "Digit9", primary: true }], mac: [{ code: "Digit9", control: true }] },
-	{ action: "hideColumns", windows: [{ code: "Digit0", primary: true }], mac: [{ code: "Digit0", control: true }] },
-	{
-		action: "unhideRows",
-		windows: [{ code: "Digit9", primary: true, shift: true }],
-		mac: [{ code: "Digit9", control: true, shift: true }]
-	},
-	{
-		action: "unhideColumns",
-		windows: [{ code: "Digit0", primary: true, shift: true }],
-		mac: [{ code: "Digit0", control: true, shift: true }]
-	},
+	entry("bold", "mod+b,mod+2", "mod+b"),
+	entry("italic", "mod+i,mod+3", "mod+i"),
+	entry("underline", "mod+u,mod+4", "mod+u"),
+	entry("strikethrough", "mod+5", "mod+shift+x"),
+	// Excel's Increase and Decrease Font Size (Ctrl+Shift+> and Ctrl+Shift+<).
+	entry("fontGrow", "mod+shift+period"),
+	entry("fontShrink", "mod+shift+comma"),
+	entry("formatGeneral", "mod+shift+backquote", "ctrl+shift+backquote"),
+	entry("formatCurrency", "mod+shift+4", "ctrl+shift+4"),
+	entry("formatPercent", "mod+shift+5", "ctrl+shift+5"),
+	entry("formatScientific", "mod+shift+6", "ctrl+shift+6"),
+	entry("formatDate", "mod+shift+3", "ctrl+shift+3"),
+	entry("formatTime", "mod+shift+2", "ctrl+shift+2"),
+	entry("formatNumber", "mod+shift+1", "ctrl+shift+1"),
+	entry("formatCells", "mod+1"),
+	entry("borderOutline", "mod+shift+7", "mod+alt+0"),
+	entry("borderNone", "mod+shift+minus", "mod+alt+minus"),
+	entry("wrap", ""),
+	entry("alignLeft", ""),
+	entry("alignCenter", ""),
+	entry("alignRight", ""),
+	entry("indentDecrease", ""),
+	entry("indentIncrease", ""),
+	entry("decimalsIncrease", ""),
+	entry("decimalsDecrease", ""),
+	entry("mergeCenter", ""),
+	entry("unmerge", ""),
+	// Rows and columns.
+	entry("hideRows", "mod+9", "ctrl+9"),
+	entry("hideColumns", "mod+0", "ctrl+0"),
+	entry("unhideRows", "mod+shift+9", "ctrl+shift+9"),
+	entry("unhideColumns", "mod+shift+0", "ctrl+shift+0"),
+	entry("autofitRows", ""),
+	entry("autofitColumns", ""),
 	// The sheet's floating objects: the first in view, then Tab cycles them ("Keyboard shortcuts in Excel": Ctrl+Alt+5,
-	// then Tab). By the "5" it types, not its position: where Ctrl+Alt is AltGr and types another character there
-	// (AZERTY's "["), the key stays that character's. Excel for Mac documents none; Control+Option+5 types nothing.
-	{ action: "selectObject", windows: [{ key: "5", primary: true, alt: true }], mac: [{ code: "Digit5", control: true, alt: true }] },
+	// then Tab). Excel for Mac documents none; Control+Option+5 types nothing.
+	entry("selectObject", "mod+alt+5", "ctrl+alt+5"),
 	// The panes beside the sheet (F6: "switches between the worksheet, ribbon, task pane"; Shift+F6 the other way) and
 	// the context menu at the active cell (Shift+F10), on Windows and the Mac alike.
-	{ action: "nextPane", windows: [{ key: "F6" }], mac: [{ key: "F6" }] },
-	{ action: "previousPane", windows: [{ key: "F6", shift: true }], mac: [{ key: "F6", shift: true }] },
-	{ action: "contextMenu", windows: [{ key: "F10", shift: true }], mac: [{ key: "F10", shift: true }] },
-	// The app's.
-	// Shift+F3, Shift+F4 and Ctrl+Shift+F4 are Excel for the web's.
-	{
-		action: "find",
-		windows: [
-			{ key: "f", primary: true },
-			{ key: "F5", shift: true },
-			{ key: "F3", shift: true }
-		],
-		mac: [
-			{ key: "f", primary: true },
-			{ key: "f", control: true },
-			{ key: "F5", shift: true },
-			{ key: "F3", shift: true }
-		]
-	},
-	{ action: "findNext", windows: [{ key: "F4", shift: true }], mac: [{ key: "F4", shift: true }] },
-	{ action: "findPrevious", windows: [{ key: "F4", primary: true, shift: true }], mac: [{ key: "F4", primary: true, shift: true }] },
-	{
-		action: "replace",
-		windows: [{ key: "h", primary: true }],
-		mac: [
-			{ key: "h", control: true },
-			{ key: "h", primary: true, shift: true }
-		]
-	},
+	entry("nextPane", "f6"),
+	entry("previousPane", "shift+f6"),
+	entry("contextMenu", "shift+f10"),
+	// Finding. Shift+F3, Shift+F4 and Ctrl+Shift+F4 are Excel for the web's.
+	entry("find", "mod+f,shift+f5,shift+f3", "mod+f,ctrl+f,shift+f5,shift+f3"),
+	entry("findNext", "shift+f4"),
+	entry("findPrevious", "mod+shift+f4"),
+	// Command+H hides the app on a Mac.
+	entry("replace", "mod+h", "ctrl+h,mod+shift+h"),
 	// "Ctrl+G: Displays the Go To dialog box. F5 also displays this dialog box"; Control+G on a Mac, whose Command+G
 	// stays the browser's Find Next. Plain F5 only: Shift+F5 is Find, Ctrl+F5 the browser's.
-	{
-		action: "goTo",
-		windows: [{ key: "g", primary: true }, { key: "F5" }],
-		mac: [{ key: "g", control: true }, { key: "F5" }]
-	},
-	{ action: "save", windows: [{ key: "s", primary: true }], mac: [{ key: "s", primary: true }] },
-	{ action: "print", windows: [{ key: "p", primary: true }], mac: [{ key: "p", primary: true }] },
-	{
-		action: "filter",
-		windows: [{ key: "l", primary: true, shift: true }],
-		mac: [{ key: "f", primary: true, shift: true }]
-	},
+	entry("goTo", "mod+g,f5", "ctrl+g,f5"),
+	// The file.
+	entry("save", "mod+s"),
+	entry("saveAs", "mod+shift+s"),
+	entry("print", "mod+p"),
+	entry("exportCsv", ""),
+	entry("exportPdf", ""),
+	// The view: the app's zoom over the sheet's, Mod+Alt with the zoom keys; Control+Option on a Mac, whose
+	// Command+Option+0 and Command+Option+Minus are the borders'.
+	entry("zoomIn", "mod+alt+equal", "ctrl+alt+equal"),
+	entry("zoomOut", "mod+alt+minus", "ctrl+alt+minus"),
+	entry("zoomReset", "mod+alt+0", "ctrl+alt+0"),
+	entry("freezePanes", ""),
+	// Data.
+	entry("filter", "mod+shift+l", "mod+shift+f"),
+	entry("reapplyFilter", "mod+alt+l"),
+	entry("clearFilters", ""),
+	entry("sortAscending", ""),
+	entry("sortDescending", ""),
+	entry("dataValidation", ""),
 	// Opens the selected drop-down: an autofilter's menu, a validation list (Option+Down on a Mac).
-	{ action: "openDropdown", windows: [{ key: "ArrowDown", alt: true }], mac: [{ key: "ArrowDown", alt: true }] },
-	{ action: "hyperlink", windows: [{ key: "k", primary: true }], mac: [{ key: "k", primary: true }] },
-	{ action: "note", windows: [{ key: "F2", shift: true }], mac: [{ key: "F2", shift: true }] },
-	{ action: "newSheet", windows: [{ key: "F11", shift: true }], mac: [{ key: "F11", shift: true }] },
-	// "AutoSum formula: Alt+Equal sign": the "=" the layout types, wherever it sits. On a Mac "Insert the AutoSum
-	// formula: Command+Shift+T", which browsers keep for reopening a tab: Option+= (the Windows keys; Option changes
-	// the character there, so by the key's position) first.
-	{
-		action: "autoSum",
-		windows: [{ key: "=", alt: true, anyShift: true }],
-		mac: [
-			{ code: "Equal", alt: true },
-			{ key: "t", primary: true, shift: true }
-		]
-	}
+	entry("openDropdown", "alt+arrowdown"),
+	// Inserting and reviewing.
+	entry("hyperlink", "mod+k"),
+	entry("note", "shift+f2"),
+	entry("toggleNote", ""),
+	entry("deleteNote", ""),
+	// Excel's New Threaded Comment.
+	entry("newComment", "mod+alt+m"),
+	// Excel's chart of the selection on the sheet.
+	entry("insertChart", "alt+f1"),
+	entry("insertPicture", ""),
+	entry("altText", ""),
+	// "AutoSum formula: Alt+Equal sign". On a Mac "Insert the AutoSum formula: Command+Shift+T", which browsers keep
+	// for reopening a tab: Option+= (the Windows keys) first.
+	entry("autoSum", "alt+equal", "alt+equal,mod+shift+t"),
+	// The workbook's sheets.
+	entry("newSheet", "shift+f11"),
+	entry("renameSheet", ""),
+	entry("deleteSheet", ""),
+	entry("protectSheet", "")
 ]
 
-export interface ShortcutKey {
-	readonly key: string
-	readonly code: string
-	readonly ctrlKey: boolean
-	readonly metaKey: boolean
-	readonly shiftKey: boolean
-	readonly altKey: boolean
+// A keydown as the shortcuts read it.
+export type ShortcutKey = ChordEvent
+
+// The actions bound to each key token, in table order, with their chords.
+type Lookup = ReadonlyMap<string, readonly (readonly [SheetShortcut, Chord])[]>
+
+function buildLookup(mac: boolean, bindings: SheetKeyBindings | undefined): Lookup {
+	const byKey = new Map<string, (readonly [SheetShortcut, Chord])[]>()
+
+	for (const { action, windows, mac: onMac } of SHEET_SHORTCUTS) {
+		for (const chord of parseCombo(bindings?.[action] ?? (mac ? onMac : windows))) {
+			const list = byKey.get(chord.key)
+
+			if (list === undefined) byKey.set(chord.key, [[action, chord]])
+			else list.push([action, chord])
+		}
+	}
+
+	return byKey
 }
 
-const LETTER_CODE = /^Key([A-Z])$/
+// One lookup per platform for the table's own keys, and per bindings object for a user's: a keydown allocates nothing.
+const defaultLookups = new Map<boolean, Lookup>()
+const boundLookups = new WeakMap<SheetKeyBindings, Map<boolean, Lookup>>()
 
-// The key a press names: its character, or the Latin letter of its position when it types another script's.
-export function layoutKey(event: Pick<ShortcutKey, "key" | "code">): string {
-	const letter = event.key.length === 1 && event.key.charCodeAt(0) > 0x7f ? LETTER_CODE.exec(event.code) : null
+function lookup(mac: boolean, bindings: SheetKeyBindings | undefined): Lookup {
+	let cache = defaultLookups
 
-	return letter === null ? event.key : (letter[1] ?? "").toLowerCase()
-}
+	if (bindings !== undefined) {
+		const bound = boundLookups.get(bindings)
 
-function matches(chord: KeyChord, event: ShortcutKey, key: string, mac: boolean): boolean {
-	if (chord.code !== undefined ? chord.code !== event.code : chord.key?.toLowerCase() !== key) return false
-	if ((chord.anyShift !== true && (chord.shift === true) !== event.shiftKey) || (chord.alt === true) !== event.altKey) return false
+		if (bound === undefined) {
+			cache = new Map()
+			boundLookups.set(bindings, cache)
+		} else cache = bound
+	}
 
-	if (mac) return (chord.primary === true) === event.metaKey && (chord.control === true) === event.ctrlKey
-
-	return (chord.primary === true || chord.control === true) === event.ctrlKey && !event.metaKey
-}
-
-// Built once per platform: chords by key and by code.
-const lookups = new Map<boolean, { readonly byKey: Map<string, ShortcutEntry[]>; readonly byCode: Map<string, ShortcutEntry[]> }>()
-
-function lookup(mac: boolean): { readonly byKey: Map<string, ShortcutEntry[]>; readonly byCode: Map<string, ShortcutEntry[]> } {
-	let found = lookups.get(mac)
+	let found = cache.get(mac)
 
 	if (found === undefined) {
-		const byKey = new Map<string, ShortcutEntry[]>()
-		const byCode = new Map<string, ShortcutEntry[]>()
-
-		for (const entry of SHEET_SHORTCUTS) {
-			for (const chord of mac ? entry.mac : entry.windows) {
-				const map = chord.code !== undefined ? byCode : byKey
-				const name = chord.code ?? chord.key?.toLowerCase() ?? ""
-				const list = map.get(name) ?? []
-
-				if (!list.includes(entry)) list.push(entry)
-
-				map.set(name, list)
-			}
-		}
-
-		found = { byKey, byCode }
-		lookups.set(mac, found)
+		found = buildLookup(mac, bindings)
+		cache.set(mac, found)
 	}
 
 	return found
 }
 
-// The shortcut a key press is, or null.
-export function shortcutOf(event: ShortcutKey, mac: boolean): SheetShortcut | null {
-	const { byKey, byCode } = lookup(mac)
-	const key = layoutKey(event).toLowerCase()
-	const candidates = [...(byCode.get(event.code) ?? []), ...(byKey.get(key) ?? [])]
+// The shortcut a key press is, or null: the first in the table whose keys it is.
+export function shortcutOf(event: ShortcutKey, mac: boolean, bindings?: SheetKeyBindings): SheetShortcut | null {
+	const candidates = lookup(mac, bindings).get(tokenOfCode(event.code))
 
-	for (const entry of candidates)
-		for (const chord of mac ? entry.mac : entry.windows) if (matches(chord, event, key, mac)) return entry.action
+	if (candidates === undefined) return null
+
+	for (const [action, chord] of candidates) if (matchesChord(event, chord, mac)) return action
 
 	return null
 }
@@ -449,10 +331,11 @@ export function shortcutOf(event: ShortcutKey, mac: boolean): SheetShortcut | nu
 // agree on which key is Mod.
 export { isMacPlatform } from "@filen/shared/keymap"
 
-// The number formats Excel's shortcuts apply ("Keyboard shortcuts in Excel", Format cells): General, Currency with
-// two decimals and negatives in parentheses, Percentage without decimals, Scientific with two decimals, the date
-// with day, month and year, the time with hour, minute and AM or PM, and Number with two decimals, a thousands
-// separator and a minus sign for negatives.
+// The number formats Excel's shortcuts apply ("Keyboard shortcuts in Excel", Format cells), as en-US has them: General,
+// Currency with two decimals and negatives in parentheses, Percentage without decimals, Scientific with two decimals,
+// the date with day, month and year, the time with hour, minute and AM or PM, and Number with two decimals, a
+// thousands separator and a minus sign for negatives. An app hands the grid its locale's currency, date and time
+// (SheetGrid's numberFormats), as Excel follows the system's.
 export const SHORTCUT_FORMATS: Readonly<Partial<Record<SheetShortcut, string>>> = {
 	formatGeneral: "General",
 	formatCurrency: '"$"#,##0.00_);("$"#,##0.00)',

@@ -167,7 +167,7 @@ describe("data validation in the viewer", () => {
 		await waitFor(() => {
 			expect(document.querySelectorAll("[data-sheet-validation-button]")).toHaveLength(1)
 		})
-		fireEvent.keyDown(grid, { key: "ArrowDown", altKey: true })
+		fireEvent.keyDown(grid, { key: "ArrowDown", code: "ArrowDown", altKey: true })
 
 		const list = await screen.findByRole("listbox", {}, { timeout: 2000 })
 

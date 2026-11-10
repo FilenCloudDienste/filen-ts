@@ -400,7 +400,53 @@ export const RESOLVED_COLLISIONS: readonly (readonly [string, string])[] = [
 	["docx.downloadPdf", "presentation.show.pen"],
 	["docx.zoomIn", "presentation.zoomIn"],
 	["docx.zoomIn", "presentation.text.subscript"],
-	["docx.zoomOut", "presentation.zoomOut"]
+	["docx.zoomOut", "presentation.zoomOut"],
+	// The spreadsheet grid matches its keys on its own keydown, in the sheet alone (its cells, its cell editor, and its
+	// layer for the workbook's own: find, print, go to). The sheet is a body of the preview overlay, which shows one file
+	// at a time, so the PDF viewer's, the image editor's, the presentation editor's and the running show's keys never
+	// mount with it; the code and Markdown editors' (editor.*) bind inside CodeMirror, which no sheet holds, and the Word
+	// viewer's find acts in its own layer; the listings under the overlay (drive, photos, chats) stand down while a
+	// dialog is open, and the notes route never mounts the overlay.
+	["sheet.selectAll", "drive.selectAll"],
+	["sheet.selectAll", "photos.selectAll"],
+	["sheet.selectAll", "chats.selectAll"],
+	["sheet.selectAll", "notes.selectAll"],
+	["sheet.selectAll", "presentation.selectAllSlides"],
+	["sheet.selectAll", "presentation.objects.selectAll"],
+	["sheet.selectAll", "presentation.show.arrow"],
+	["sheet.find", "drive.search"],
+	["sheet.find", "photos.search"],
+	["sheet.find", "editor.find"],
+	["sheet.find", "presentation.show.startCurrent"],
+	["sheet.bold", "editor.bold"],
+	["sheet.italic", "editor.italic"],
+	["sheet.strikethrough", "editor.strikethrough"],
+	["sheet.hyperlink", "editor.link"],
+	["sheet.pasteValues", "editor.togglePreview"],
+	["sheet.pasteValues", "presentation.pasteFormat"],
+	["sheet.undo", "preview.imageUndo"],
+	["sheet.undo", "presentation.undo"],
+	["sheet.redo", "preview.imageRedo"],
+	["sheet.redo", "presentation.redo"],
+	["sheet.redoOrRepeat", "preview.imageRedo"],
+	["sheet.redoOrRepeat", "presentation.redo"],
+	["sheet.insertCells", "preview.pdfZoomIn"],
+	["sheet.insertCells", "presentation.zoomIn"],
+	["sheet.insertCells", "presentation.text.superscript"],
+	["sheet.deleteCells", "preview.pdfZoomOut"],
+	["sheet.deleteCells", "presentation.zoomOut"],
+	["sheet.hideColumns", "preview.pdfZoomReset"],
+	["sheet.fillDown", "presentation.duplicateSlide"],
+	["sheet.fillRight", "presentation.text.alignRight"],
+	["sheet.underline", "presentation.text.underline"],
+	["sheet.fontGrow", "presentation.text.growFont"],
+	["sheet.fontShrink", "presentation.text.shrinkFont"],
+	["sheet.selectColumns", "presentation.text.clearFormatting"],
+	["sheet.goTo", "presentation.objects.group"],
+	["sheet.goTo", "presentation.show.start"],
+	["sheet.replace", "presentation.show.hidePointer"],
+	["sheet.print", "presentation.print"],
+	["sheet.print", "presentation.show.pen"]
 ]
 
 export function scopesCanCollide(a: ActionScope, b: ActionScope): boolean {

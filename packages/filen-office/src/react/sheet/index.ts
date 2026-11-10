@@ -63,9 +63,10 @@ export {
 export {
 	APP_SHORTCUTS,
 	SHEET_SHORTCUTS,
+	SHORTCUT_FORMATS,
 	isMacPlatform,
 	shortcutOf,
-	type KeyChord,
+	type SheetKeyBindings,
 	type SheetShortcut,
 	type ShortcutEntry,
 	type ShortcutKey

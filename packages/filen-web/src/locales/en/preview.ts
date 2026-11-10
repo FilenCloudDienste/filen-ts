@@ -64,6 +64,7 @@ import { previewSheetObjects } from "@/locales/en/previewSheet/objects"
 import { previewSheetCharts } from "@/locales/en/previewSheet/charts"
 import { previewSheetRibbon } from "@/locales/en/previewSheet/ribbon"
 import { previewKeysShortcuts } from "@/locales/en/previewKeys/shortcuts"
+import { previewSheetShortcuts } from "@/locales/en/previewSheet/shortcuts"
 
 export const preview = {
 	// ── Header ───────────────────────────────────────────────────────────────
@@ -810,6 +811,7 @@ export const preview = {
 	...previewSheetObjects,
 	...previewSheetCharts,
 	...previewSheetRibbon,
+	...previewSheetShortcuts,
 	...previewImageEditor,
 	...previewImageSave,
 	...previewKeysShortcuts

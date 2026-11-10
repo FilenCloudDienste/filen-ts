@@ -8,6 +8,7 @@ import type {
 	SheetGridHandle,
 	SheetGridModel,
 	SheetGridState,
+	SheetKeyBindings,
 	SheetShortcut
 } from "@filen/office/react/sheet"
 import { SheetObjects, objectAt, objectInView, type SheetDrawingObject, type SheetObjectSource } from "@filen/office/react/sheet/drawings"
@@ -45,6 +46,8 @@ export interface SheetObjectsOptions {
 	renderChart?: ((object: SheetDrawingObject, width: number, height: number, scale: number) => ReactNode) | undefined
 	// A chart frame double-clicked: its editor opens.
 	onEditObject?: ((object: SheetDrawingObject) => void) | undefined
+	// The grid's keys as the user has them bound: undo and redo act on them with an object selected too.
+	bindings?: SheetKeyBindings | undefined
 }
 
 interface TakeDeps {
@@ -121,7 +124,8 @@ export function useSheetObjects({
 	canEdit,
 	text,
 	renderChart,
-	onEditObject
+	onEditObject,
+	bindings
 }: SheetObjectsOptions): SheetBodyExtension {
 	const { t } = useTranslation(["preview", "common"])
 	const model = grid.model
@@ -312,6 +316,7 @@ export function useSheetObjects({
 						}
 					}}
 					{...(renderChart === undefined ? {} : { renderGraphic: renderChart })}
+					{...(bindings === undefined ? {} : { bindings })}
 					label={object => objectLabel(object, key => t(key))}
 				/>
 			),
