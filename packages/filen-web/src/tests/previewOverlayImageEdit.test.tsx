@@ -113,6 +113,7 @@ import { registerAllActions } from "@/lib/keymap/actions"
 import { usePreviewUnsavedGuardStore } from "@/features/preview/store/usePreviewUnsavedGuard"
 import { narrowItem } from "@/features/drive/lib/item"
 import { PreviewOverlay } from "@/features/preview/components/previewOverlay"
+import { withCode } from "@/tests/support/keys"
 
 registerAllActions()
 
@@ -263,7 +264,7 @@ describe("PreviewOverlay — image editing", () => {
 			await new Promise(resolve => setTimeout(resolve, 0))
 		})
 
-		fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" })
+		fireEvent.keyDown(document.activeElement ?? document.body, withCode({ key: "Escape" }))
 
 		expect(onClose).toHaveBeenCalledTimes(1)
 	})

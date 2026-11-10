@@ -97,6 +97,8 @@ export const settingsKeyboard = {
 	keyboardSectionWord: "Word",
 	/** Shortcuts list — sub-group of the Editor group: spreadsheets */
 	keyboardSectionSheet: "Spreadsheet",
+	/** Shortcuts list — sub-group of the Editor group: browsing the files inside an archive (ZIP, 7-Zip, tarball) */
+	keyboardSectionArchive: "Archive browser",
 	/** Shortcuts list — button resetting every shortcut of one group; {{group}} is the group's name */
 	keyboardResetGroup: "Reset {{group}}",
 
@@ -260,5 +262,11 @@ export const settingsKeyboard = {
 	/** Keyboard shortcut — shows the event's file or directory in Cloud Drive */
 	keyboardActionShowEventInDrive: "Show event item in Cloud Drive",
 	/** Shortcuts list — where the shortcut works: in an event's details */
-	keyboardHintEventDetails: "In an event's details"
+	keyboardHintEventDetails: "In an event's details",
+	/** Shortcuts list — where the shortcut works: in the full-screen file preview */
+	keyboardHintPreview: "In the file preview",
+	/** Shortcuts list — where the shortcut works: in the image viewer while the image is zoomed in */
+	keyboardHintImageZoomed: "In the image viewer, zoomed in",
+	/** Shortcuts list — where the shortcut works: in a document's find field */
+	keyboardHintFindField: "In the find field"
 } as const

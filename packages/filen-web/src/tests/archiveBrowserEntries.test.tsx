@@ -60,6 +60,7 @@ import { PreviewDownloadableProvider } from "@/features/preview/lib/accessMode"
 import { clearPreviewCache } from "@/features/preview/lib/previewCache"
 import { isTextEditingTarget } from "@/features/preview/components/previewOverlay.logic"
 import { storeOf, TEST_ARCHIVE, type EntrySpec } from "@/tests/support/archiveEntries"
+import { withCode } from "@/tests/support/keys"
 
 const SUMMARY: ListSummary = {
 	format: { type: "sevenZ" },
@@ -165,7 +166,7 @@ function row(name: string): HTMLElement {
 
 function press(key: string): void {
 	act(() => {
-		fireEvent.keyDown(list(), { key })
+		fireEvent.keyDown(list(), withCode({ key }))
 	})
 }
 
@@ -205,7 +206,7 @@ describe("an archive entry on its own", () => {
 		expect(document.activeElement).toBe(back)
 
 		act(() => {
-			fireEvent.keyDown(back, { key: "Escape" })
+			fireEvent.keyDown(back, withCode({ key: "Escape" }))
 		})
 
 		expect(screen.getByRole("listbox")).toBeTruthy()
@@ -348,9 +349,9 @@ describe("an archive entry on its own", () => {
 		const body = await screen.findByText("markdown: hi!")
 		const viewer = viewerRoot(body)
 
-		fireEvent.keyDown(viewer, { key: "ArrowRight" })
-		fireEvent.keyDown(body, { key: "ArrowLeft" })
-		fireEvent.keyDown(screen.getByRole("button", { name: "Back to the archive" }), { key: "ArrowRight" })
+		fireEvent.keyDown(viewer, withCode({ key: "ArrowRight" }))
+		fireEvent.keyDown(body, withCode({ key: "ArrowLeft" }))
+		fireEvent.keyDown(screen.getByRole("button", { name: "Back to the archive" }), withCode({ key: "ArrowRight" }))
 
 		expect(overlayStep).not.toHaveBeenCalled()
 	})
@@ -373,7 +374,7 @@ describe("an archive entry on its own", () => {
 		expect(document.activeElement).toBe(viewer)
 
 		act(() => {
-			fireEvent.keyDown(viewer, { key: "Escape" })
+			fireEvent.keyDown(viewer, withCode({ key: "Escape" }))
 		})
 
 		expect(screen.getByRole("listbox")).toBeTruthy()

@@ -39,6 +39,11 @@ export function Kbd({ action }: KbdProps) {
 	const chords = parseCombo(useComboFor(action))
 	const layout = useKeyboardLayout()
 
+	// An unbound action shows nothing, not an empty chip that still takes its gap in a tooltip.
+	if (chords.length === 0) {
+		return null
+	}
+
 	return (
 		<span className="inline-flex items-center gap-1">
 			{chords.map((chord, alternativeIndex) => (

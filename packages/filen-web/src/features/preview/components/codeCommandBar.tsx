@@ -1,4 +1,4 @@
-import { useSyncExternalStore, type ReactNode, type RefObject } from "react"
+import { useSyncExternalStore, type RefObject } from "react"
 import { useTranslation } from "react-i18next"
 import {
 	BoldIcon,
@@ -46,13 +46,11 @@ import { usePhoneWidth } from "@/features/office/components/ribbon/phoneMedia"
 import { CommandFileMenu, FullScreenButton } from "@/features/preview/components/commandBarControls"
 import { BAR_BUTTON, BAR_MENU } from "@/features/preview/components/commandBar.logic"
 import { DocxFindField } from "@/features/preview/components/docxToolbar"
-import { shortcutKeys } from "@/features/preview/components/docxEditor.logic"
 import { CODE_INDENTS, type CodeChrome, type CodeIndent } from "@/features/preview/lib/codeChrome"
 import { CODE_FONT_SIZES, setCodeViewSettings, type CodeViewSettings } from "@/features/preview/lib/codeViewSettings"
 import type { TextFileFormat } from "@/features/preview/lib/textFile"
 import { fullscreenSupported } from "@/lib/media/fullscreen"
-import { Kbd, KbdKeys } from "@/lib/keymap/kbd"
-import { isMacPlatform } from "@/lib/keymap/kbd.logic"
+import { Kbd } from "@/lib/keymap/kbd"
 
 // The text and code viewers' command bar (OfficeCommandBar), and the markdown viewer's in both its views: File
 // (Download), then the markdown view switch, Undo and Redo, Find (find, replace, go to line), Code (toggle comment,
@@ -62,21 +60,10 @@ import { isMacPlatform } from "@/lib/keymap/kbd.logic"
 // (find opening, the dirty edge, a setting); a keystroke reaches only the position and the undo and redo buttons,
 // each reading the editor's status store (codeChrome.ts).
 
-const APPLE = isMacPlatform()
-
 // Every bundled grammar, by name, for the language menu.
 const LANGUAGES: readonly CodeLanguageId[] = Object.keys(CODE_LANGUAGES)
 	.filter(isCodeLanguageId)
 	.sort((a, b) => CODE_LANGUAGES[a].name.localeCompare(CODE_LANGUAGES[b].name))
-
-function keys(combo: string): ReactNode {
-	return <KbdKeys keys={shortcutKeys(combo, APPLE)} />
-}
-
-// CodeMirror's fold keys are Ctrl+Alt on every platform.
-function foldKeys(bracket: string): ReactNode {
-	return <KbdKeys keys={APPLE ? ["⌃", "⌥", bracket] : ["Ctrl", "Alt", bracket]} />
-}
 
 function HistoryButton({ chrome, redo: isRedo }: { chrome: CodeChrome; redo: boolean }) {
 	const { t } = useTranslation("preview")
@@ -88,7 +75,7 @@ function HistoryButton({ chrome, redo: isRedo }: { chrome: CodeChrome; redo: boo
 			label={t(isRedo ? "previewCommandBarRedo" : "previewCommandBarUndo")}
 			icon={isRedo ? <Redo2Icon /> : <Undo2Icon />}
 			disabled={!enabled}
-			shortcut={keys(isRedo ? (APPLE ? "mod+shift+z" : "mod+y") : "mod+z")}
+			shortcut={<Kbd action={isRedo ? "editor.redo" : "editor.undo"} />}
 			onClick={() => {
 				chrome.run(isRedo ? redo : undo)
 			}}
@@ -348,7 +335,7 @@ export function CodeCommandBar({
 				<RibbonButton
 					label={t("previewCommandBarGoToLine")}
 					icon={<TextCursorInputIcon />}
-					shortcut={keys("mod+alt+g")}
+					shortcut={<Kbd action="editor.goToLine" />}
 					onClick={onGoToLine}
 				/>
 			</>
@@ -370,20 +357,20 @@ export function CodeCommandBar({
 							label={t("previewCommandBarToggleComment")}
 							icon={<MessageSquareCodeIcon />}
 							disabled={locked}
-							shortcut={keys("mod+/")}
+							shortcut={<Kbd action="editor.toggleComment" />}
 							onClick={run(toggleComment)}
 						/>
 					) : null}
 					<RibbonButton
 						label={t("previewCommandBarFoldAll")}
 						icon={<FoldVerticalIcon />}
-						shortcut={foldKeys("[")}
+						shortcut={<Kbd action="editor.foldAll" />}
 						onClick={run(foldAll)}
 					/>
 					<RibbonButton
 						label={t("previewCommandBarUnfoldAll")}
 						icon={<UnfoldVerticalIcon />}
-						shortcut={foldKeys("]")}
+						shortcut={<Kbd action="editor.unfoldAll" />}
 						onClick={run(unfoldAll)}
 					/>
 				</>
@@ -404,6 +391,7 @@ export function CodeCommandBar({
 					label={t("previewCommandBarViewChanges")}
 					icon={<FileDiffIcon />}
 					disabled={!dirty}
+					shortcut={<Kbd action="editor.viewChanges" />}
 					onClick={onViewChanges}
 				/>
 			)
@@ -473,6 +461,7 @@ export function CodeCommandBar({
 					label={t("previewCommandBarWrap")}
 					icon={<WrapTextIcon />}
 					pressed={settings.wrap}
+					shortcut={<Kbd action="editor.toggleWordWrap" />}
 					onClick={() => {
 						setCodeViewSettings({ wrap: !settings.wrap })
 					}}
@@ -481,6 +470,7 @@ export function CodeCommandBar({
 					label={t("previewCommandBarLineNumbers")}
 					icon={<ListOrderedIcon />}
 					pressed={settings.lineNumbers}
+					shortcut={<Kbd action="editor.toggleLineNumbers" />}
 					onClick={() => {
 						setCodeViewSettings({ lineNumbers: !settings.lineNumbers })
 					}}

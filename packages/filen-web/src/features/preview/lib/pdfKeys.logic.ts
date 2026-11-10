@@ -28,12 +28,37 @@ export function pdfViewerKey(
 	return PDF_VIEWER_ACTIONS.find(def => matchesCombo(event, combos[def.id] ?? def.defaultCombo, mac))?.id
 }
 
-// The command an action runs in `state`, or null when it cannot run (zoom at its limit): the key is still the
-// viewer's, so the browser does not zoom the page in its place.
-export function pdfViewerKeyCommand(action: PdfViewerAction, state: PdfViewerState): PdfViewerCommand | null {
+// The actions the viewer's host runs, not its document: the page field, full screen, the properties dialog.
+export type PdfHostAction = "preview.pdfGoToPage" | "preview.pdfFullScreen" | "preview.pdfProperties"
+
+export function isPdfHostAction(action: PdfViewerAction): action is PdfHostAction {
+	return action === "preview.pdfGoToPage" || action === "preview.pdfFullScreen" || action === "preview.pdfProperties"
+}
+
+// The command an action runs in `state`, or null when it cannot run (zoom at its limit, the last page): the key is
+// still the viewer's, so the browser does not zoom or scroll the page in its place.
+export function pdfViewerKeyCommand(action: Exclude<PdfViewerAction, PdfHostAction>, state: PdfViewerState): PdfViewerCommand | null {
 	let command: PdfViewerCommand
 
 	switch (action) {
+		case "preview.pdfNextPage":
+			command = { type: "page.next" }
+			break
+		case "preview.pdfPreviousPage":
+			command = { type: "page.previous" }
+			break
+		case "preview.pdfFirstPage":
+			command = { type: "page.first" }
+			break
+		case "preview.pdfLastPage":
+			command = { type: "page.last" }
+			break
+		case "preview.pdfFitWidth":
+			command = { type: "zoom.fitWidth" }
+			break
+		case "preview.pdfFitPage":
+			command = { type: "zoom.fitPage" }
+			break
 		case "preview.pdfZoomIn":
 			command = { type: "zoom.in" }
 			break

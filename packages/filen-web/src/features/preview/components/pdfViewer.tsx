@@ -13,7 +13,7 @@ import {
 import { type DriveItem } from "@/features/drive/lib/item"
 import { usePreviewBytes } from "@/features/preview/hooks/usePreviewBytes"
 import { PdfCommandBar, PdfPropertiesDialog } from "@/features/preview/components/pdfCommandBar"
-import { useLeaveViewerFullScreen } from "@/features/preview/components/commandBar.logic"
+import { toggleViewerFullScreen, useLeaveViewerFullScreen } from "@/features/preview/components/commandBar.logic"
 import { onCommandBarF6, onRibbonEscape } from "@/features/office/components/ribbon/ribbonFocus"
 import { usePreviewDownload } from "@/features/preview/lib/accessMode"
 import { useTrustedLinkGate } from "@/lib/trustedLinks/useTrustedLinkGate"
@@ -21,8 +21,11 @@ import { isSafeAbsoluteHref } from "@/lib/safeUrl"
 import { keyForEditor } from "@/lib/keymap/dialogGuard"
 import { useEditorLayerKeys } from "@/lib/keymap/editorLayerKeys"
 import { IN_EDITORS, useAction } from "@/lib/keymap/useAction"
-import { useBindings } from "@/lib/keymap/registry"
-import { pdfViewerKey, pdfViewerKeyCommand } from "@/features/preview/lib/pdfKeys.logic"
+import { isRecordingCombo, useBindings } from "@/lib/keymap/registry"
+import { isPdfHostAction, pdfViewerKey, pdfViewerKeyCommand, type PdfHostAction } from "@/features/preview/lib/pdfKeys.logic"
+import { isImeKeydown } from "@filen/shared/keymap"
+import { fullscreenSupported } from "@/lib/media/fullscreen"
+import { log } from "@/lib/log"
 import { LoadingState } from "@/components/loadingState"
 import { Button } from "@/components/ui/button"
 import { InputDialog } from "@/components/dialogs/inputDialog"
@@ -163,16 +166,76 @@ function PdfReader({ document, alt, size }: { document: PdfDomDocument; alt: str
 		[state.find.open, dispatch]
 	)
 
+	// The next and previous match, from anywhere in the layer but the find field (which steps on its own, DocxFindField);
+	// with nothing searched yet they open the find field.
+	const onFindStepKey = (keyboardEvent: KeyboardEvent, direction: 1 | -1): void => {
+		const root = rootRef.current
+
+		if (root === null || keyboardEvent.defaultPrevented || !keyForEditor(root, keyboardEvent.target)) {
+			return
+		}
+
+		keyboardEvent.preventDefault()
+
+		if (!state.find.open || state.find.query.length === 0) {
+			if (state.find.open) {
+				setFindFocus(focus => focus + 1)
+			} else {
+				dispatch({ type: "find.open" })
+			}
+		} else if (state.find.count > 0) {
+			dispatch({ type: direction > 0 ? "find.next" : "find.previous" })
+		}
+	}
+
+	useAction(
+		"editor.findNext",
+		keyboardEvent => {
+			onFindStepKey(keyboardEvent, 1)
+		},
+		IN_EDITORS,
+		[state.find, dispatch]
+	)
+	useAction(
+		"editor.findPrevious",
+		keyboardEvent => {
+			onFindStepKey(keyboardEvent, -1)
+		},
+		IN_EDITORS,
+		[state.find, dispatch]
+	)
+
 	const focusPages = (): void => {
 		viewer.pages.scrollerRef.current?.focus()
 	}
 
 	const overrides = useBindings()
+	const pageInputRef = useRef<HTMLInputElement | null>(null)
 
-	// Zoom, fit and rotate keys for the layer the document is shown in, never a dialog over it. A key the viewer takes
-	// is always kept from the browser, even at a zoom limit, so its page zoom never scales the app instead.
+	const runHostAction = (action: PdfHostAction): void => {
+		switch (action) {
+			case "preview.pdfGoToPage":
+				pageInputRef.current?.focus()
+				break
+			case "preview.pdfFullScreen":
+				if (fullscreenSupported()) {
+					toggleViewerFullScreen().catch((error: unknown) => {
+						log.warn("preview", "full screen refused", { error })
+					})
+				}
+
+				break
+			case "preview.pdfProperties":
+				setProperties(true)
+				break
+		}
+	}
+
+	// Zoom, fit, rotate and page keys for the layer the document is shown in, never a dialog over it. A key the viewer
+	// takes is always kept from the browser, even at a zoom limit or the last page, so its page zoom never scales the
+	// app instead.
 	const onViewerKey = (event: KeyboardEvent, root: HTMLElement): boolean => {
-		if (event.defaultPrevented || !keyForEditor(root, event.target)) {
+		if (event.defaultPrevented || isImeKeydown(event) || isRecordingCombo() || !keyForEditor(root, event.target)) {
 			return false
 		}
 
@@ -183,6 +246,14 @@ function PdfReader({ document, alt, size }: { document: PdfDomDocument; alt: str
 		}
 
 		event.preventDefault()
+
+		if (isPdfHostAction(action)) {
+			if (!event.repeat) {
+				runHostAction(action)
+			}
+
+			return true
+		}
 
 		const command = pdfViewerKeyCommand(action, state)
 
@@ -230,6 +301,7 @@ function PdfReader({ document, alt, size }: { document: PdfDomDocument; alt: str
 				onProperties={() => {
 					setProperties(true)
 				}}
+				pageInputRef={pageInputRef}
 			/>
 			{/* A preview surface: arrow keys in the pages scroll the document (sideways on a zoomed page) instead of
 			paging to another file. External links open in a new tab once their domain is trusted. */}

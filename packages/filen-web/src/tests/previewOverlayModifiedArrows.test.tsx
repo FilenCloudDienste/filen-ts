@@ -29,6 +29,7 @@ import "@/lib/i18n"
 import { registerAllActions } from "@/lib/keymap/actions"
 import { narrowItem } from "@/features/drive/lib/item"
 import { PreviewOverlay } from "@/features/preview/components/previewOverlay"
+import { withCode } from "@/tests/support/keys"
 
 registerAllActions()
 
@@ -80,12 +81,12 @@ describe("PreviewOverlay arrow keys", () => {
 		const cell = await screen.findByRole("button", { name: "cell" })
 
 		for (const modifier of ["ctrlKey", "altKey", "metaKey"] as const) {
-			fireEvent.keyDown(cell, { key: "ArrowRight", [modifier]: true })
-			fireEvent.keyDown(cell, { key: "ArrowLeft", [modifier]: true })
+			fireEvent.keyDown(cell, withCode({ key: "ArrowRight", [modifier]: true }))
+			fireEvent.keyDown(cell, withCode({ key: "ArrowLeft", [modifier]: true }))
 		}
 
 		expect(onStep).not.toHaveBeenCalled()
-		fireEvent.keyDown(cell, { key: "ArrowRight" })
+		fireEvent.keyDown(cell, withCode({ key: "ArrowRight" }))
 		expect(onStep).toHaveBeenCalledExactlyOnceWith(1)
 	})
 })

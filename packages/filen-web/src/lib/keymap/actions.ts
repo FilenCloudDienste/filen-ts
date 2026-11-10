@@ -28,6 +28,7 @@ import { MOUNTS_ACTIONS } from "@/features/mounts/lib/keymap"
 import { PUBLIC_LINKS_ACTIONS } from "@/features/publicLinks/lib/keymap"
 import { SETTINGS_ACTIONS } from "@/features/settings/lib/keymap"
 import { MEDIA_ACTIONS } from "@/lib/media/keymap"
+import { ARCHIVE_ACTIONS } from "@/features/archive/lib/keymap"
 
 // The app's complete action set, assembled eagerly from each feature's data-only keymap module, so the
 // shortcuts catalog never depends on which feature components have mounted. The defs are plain objects
@@ -49,7 +50,8 @@ export const ALL_ACTIONS: readonly ActionDef[] = [
 	...MOUNTS_ACTIONS,
 	...PUBLIC_LINKS_ACTIONS,
 	...SETTINGS_ACTIONS,
-	...MEDIA_ACTIONS
+	...MEDIA_ACTIONS,
+	...ARCHIVE_ACTIONS
 ]
 
 let registered = false

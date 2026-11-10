@@ -1,6 +1,6 @@
 import { autocompletion, closeBrackets, closeBracketsKeymap, completionKeymap } from "@codemirror/autocomplete"
-import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands"
-import { bracketMatching, defaultHighlightStyle, foldGutter, foldKeymap, indentOnInput, syntaxHighlighting } from "@codemirror/language"
+import { defaultKeymap, history, historyKeymap, indentWithTab, redo, toggleComment, undo } from "@codemirror/commands"
+import { bracketMatching, defaultHighlightStyle, foldGutter, indentOnInput, syntaxHighlighting } from "@codemirror/language"
 import { lintKeymap } from "@codemirror/lint"
 import { highlightSelectionMatches } from "@codemirror/search"
 import { EditorState, type Extension } from "@codemirror/state"
@@ -13,7 +13,8 @@ import {
 	highlightSpecialChars,
 	keymap,
 	lineNumbers,
-	rectangularSelection
+	rectangularSelection,
+	type KeyBinding
 } from "@codemirror/view"
 
 export interface CodeEditorSetupOptions {
@@ -24,8 +25,19 @@ export interface CodeEditorSetupOptions {
 // The line-number gutter, one value so a Compartment holding it compares equal.
 export const codeLineNumbers: Extension = lineNumbers()
 
-// CodeMirror's basic setup, without the search keymap: its Mod-f would shadow a rebound find (an app binds
-// search through codeKeymap instead). Tab indents, as in every code editor here.
+// CodeMirror's keys an app binds itself through codeKeymap, on keys its user can change: undo and redo, toggle comment
+// and the fold keys. Left in, they would keep firing on CodeMirror's keys after a rebind.
+const APP_BOUND_COMMANDS: ReadonlySet<unknown> = new Set([undo, redo, toggleComment])
+const EDITOR_KEYMAP: readonly KeyBinding[] = [
+	...closeBracketsKeymap,
+	...defaultKeymap.filter(binding => !APP_BOUND_COMMANDS.has(binding.run)),
+	...historyKeymap.filter(binding => !APP_BOUND_COMMANDS.has(binding.run)),
+	...completionKeymap,
+	...lintKeymap
+]
+
+// CodeMirror's basic setup, without the search keymap (its Mod-f would shadow a rebound find), the fold keys and the
+// commands above: an app binds those through codeKeymap instead. Tab indents, as in every code editor here.
 export function codeEditorSetup(options?: CodeEditorSetupOptions): Extension {
 	return [
 		options?.lineNumbers === false ? [] : codeLineNumbers,
@@ -44,7 +56,7 @@ export function codeEditorSetup(options?: CodeEditorSetupOptions): Extension {
 		rectangularSelection(),
 		highlightActiveLine(),
 		highlightSelectionMatches(),
-		keymap.of([...closeBracketsKeymap, ...defaultKeymap, ...historyKeymap, ...foldKeymap, ...completionKeymap, ...lintKeymap]),
+		keymap.of(EDITOR_KEYMAP),
 		keymap.of([indentWithTab])
 	]
 }

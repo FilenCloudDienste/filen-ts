@@ -176,11 +176,7 @@ export class CodeChrome {
 		const step =
 			(direction: 1 | -1): Command =>
 			() => {
-				if (this.find.get().query.length > 0) {
-					this.find.step(direction)
-				} else {
-					this.find.open(false)
-				}
+				this.findStep(direction)
 
 				return true
 			}
@@ -191,11 +187,25 @@ export class CodeChrome {
 			findNext: step(1),
 			findPrevious: step(-1),
 			goToLine: () => {
-				this.goToLineRequest?.()
+				this.requestGoToLine()
 
 				return true
 			}
 		}
+	}
+
+	// The next or previous match; the find bar opens while nothing is searched.
+	findStep(direction: 1 | -1): void {
+		if (this.find.get().query.length > 0) {
+			this.find.step(direction)
+		} else {
+			this.find.open(false)
+		}
+	}
+
+	// The bar's go to line dialog.
+	requestGoToLine(): void {
+		this.goToLineRequest?.()
 	}
 
 	readonly subscribe = (listener: () => void): (() => void) => {

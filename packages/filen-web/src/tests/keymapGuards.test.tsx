@@ -18,7 +18,8 @@ const { transportKeyIgnored } = await import("@/features/audio/lib/transportKeys
 const { MediaSessionOwners } = await import("@/lib/media/mediaSessionOwner")
 const { toggledTheme } = await import("@/providers/themeProvider")
 const { settingsRoute } = await import("@/features/shell/lib/railGroups.logic")
-const { pagerStep } = await import("@/features/preview/components/previewOverlay.logic")
+const { itemKeyDialog, pagerDelta, pagerIntent, previewOverlayKey } = await import("@/features/preview/components/previewOverlay.logic")
+const { PREVIEW_OVERLAY_ACTIONS } = await import("@/features/preview/lib/keymap")
 
 function press(init: KeyboardEventInit, target: EventTarget = document.body): KeyboardEvent {
 	const event = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, ...init })
@@ -184,27 +185,86 @@ describe("settingsRoute", () => {
 	})
 })
 
-describe("the preview pager's keys", () => {
-	const key = (name: string, init: Partial<{ defaultPrevented: boolean; altKey: boolean; ctrlKey: boolean; metaKey: boolean }> = {}) => ({
+describe("the preview overlay's keys", () => {
+	const key = (
+		name: string,
+		init: Partial<{
+			defaultPrevented: boolean
+			altKey: boolean
+			ctrlKey: boolean
+			metaKey: boolean
+			shiftKey: boolean
+			code: string
+		}> = {}
+	) => ({
 		key: name,
+		code: name,
 		defaultPrevented: false,
 		altKey: false,
 		ctrlKey: false,
 		metaKey: false,
+		shiftKey: false,
 		...init
 	})
+	const defaults = (mac: boolean): Record<string, string> =>
+		Object.fromEntries(
+			PREVIEW_OVERLAY_ACTIONS.map(def => [
+				def.id,
+				def.platformDefaults?.find(({ on }) => on.mac === mac && on.desktop === undefined)?.combo ?? def.defaultCombo
+			])
+		)
+	const off = defaults(false)
 
-	it("steps on plain ArrowLeft and ArrowRight", () => {
-		expect(pagerStep(key("ArrowLeft"))).toBe(-1)
-		expect(pagerStep(key("ArrowRight"))).toBe(1)
-		expect(pagerStep(key("ArrowUp"))).toBeNull()
+	it("steps on plain ArrowLeft and ArrowRight, and to the ends on Home and End", () => {
+		expect(previewOverlayKey(key("ArrowLeft"), off, false)).toBe("preview.prev")
+		expect(previewOverlayKey(key("ArrowRight"), off, false)).toBe("preview.next")
+		expect(previewOverlayKey(key("Home"), off, false)).toBe("preview.first")
+		expect(previewOverlayKey(key("End"), off, false)).toBe("preview.last")
+		expect(previewOverlayKey(key("ArrowUp"), off, false)).toBeUndefined()
+		expect(pagerDelta("preview.prev", 2, 5)).toBe(-1)
+		expect(pagerDelta("preview.first", 3, 5)).toBe(-3)
+		expect(pagerDelta("preview.last", 1, 5)).toBe(3)
+		// At an end, or for a key that does not page, nothing moves.
+		expect(pagerDelta("preview.next", 4, 5)).toBeNull()
+		expect(pagerDelta("preview.first", 0, 5)).toBeNull()
+		expect(pagerDelta("preview.rename", 1, 5)).toBeNull()
+		expect(pagerIntent("preview.last")).toBe("last")
 	})
 
 	// A ribbon's roving focus cancels the arrow without stopping it: the file must not change under it.
 	it("never steps on a key something inside already took, nor on a chord", () => {
-		expect(pagerStep(key("ArrowRight", { defaultPrevented: true }))).toBeNull()
-		expect(pagerStep(key("ArrowLeft", { ctrlKey: true }))).toBeNull()
-		expect(pagerStep(key("ArrowLeft", { altKey: true }))).toBeNull()
-		expect(pagerStep(key("ArrowLeft", { metaKey: true }))).toBeNull()
+		expect(previewOverlayKey(key("ArrowRight", { defaultPrevented: true }), off, false)).toBeUndefined()
+		expect(previewOverlayKey(key("ArrowLeft", { ctrlKey: true }), off, false)).toBeUndefined()
+		expect(previewOverlayKey(key("ArrowLeft", { altKey: true }), off, false)).toBeUndefined()
+		expect(previewOverlayKey(key("ArrowLeft", { metaKey: true }), off, false)).toBeUndefined()
+	})
+
+	it("takes the item menu's keys, per platform, and follows the user's bindings", () => {
+		const mac = defaults(true)
+
+		expect(previewOverlayKey(key("F2"), off, false)).toBe("preview.rename")
+		expect(previewOverlayKey(key("Delete"), off, false)).toBe("preview.trash")
+		expect(previewOverlayKey(key("Backspace", { metaKey: true }), mac, true)).toBe("preview.trash")
+		expect(previewOverlayKey(key("Enter", { altKey: true }), off, false)).toBe("preview.info")
+		expect(previewOverlayKey(key("i", { metaKey: true, code: "KeyI" }), mac, true)).toBe("preview.info")
+		expect(previewOverlayKey(key("F10", { shiftKey: true }), off, false)).toBe("preview.openMenu")
+		expect(previewOverlayKey(key("Escape"), off, false)).toBe("preview.close")
+
+		const rebound = { ...off, "preview.next": "pagedown", "preview.move": "mod+m" }
+
+		expect(previewOverlayKey(key("ArrowRight"), rebound, false)).toBeUndefined()
+		expect(previewOverlayKey(key("PageDown"), rebound, false)).toBe("preview.next")
+		expect(previewOverlayKey(key("m", { ctrlKey: true, code: "KeyM" }), rebound, false)).toBe("preview.move")
+	})
+
+	// A key reaches only what the file's own menu offers, enabled.
+	it("opens an item-menu dialog only where the menu offers that entry", () => {
+		const rename = { id: "rename", run: "dialog", dialogKind: "rename" } as const
+		const trash = { id: "trash", run: "dialog", dialogKind: "trash", enabled: false } as const
+
+		expect(itemKeyDialog("preview.rename", [rename])).toBe("rename")
+		expect(itemKeyDialog("preview.trash", [rename, trash])).toBeNull()
+		expect(itemKeyDialog("preview.info", [rename])).toBeNull()
+		expect(itemKeyDialog("preview.close", [rename])).toBeNull()
 	})
 })

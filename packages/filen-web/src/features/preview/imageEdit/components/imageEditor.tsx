@@ -47,11 +47,12 @@ import {
 	normalisedRatio,
 	rotateLeft
 } from "@/features/preview/imageEdit/components/editorGeometry"
-import { matchesCombo } from "@filen/shared/keymap"
+import { isImeKeydown } from "@filen/shared/keymap"
 import { isMacPlatform } from "@/lib/keymap/kbd.logic"
 import { Kbd } from "@/lib/keymap/kbd"
-import { useComboFor } from "@/lib/keymap/registry"
+import { isRecordingCombo, useBindings } from "@/lib/keymap/registry"
 import { useEditorLayerKeys } from "@/lib/keymap/editorLayerKeys"
+import { imageEditorKey, type EditorImageAction } from "@/features/preview/imageEdit/lib/keys"
 import { useLatestRef } from "@/lib/useLatestRef"
 import { log } from "@/lib/log"
 
@@ -73,6 +74,20 @@ export interface ImageEditorProps {
 
 // Filter thumbnails, square, in CSS px.
 const FILTER_THUMBNAIL_SIZE = 96
+
+// Every slider, for the reset adjustments key.
+const IDENTITY_ADJUSTMENTS: Adjustments = identityRecipe().adjustments
+const ADJUSTMENT_KEYS: readonly (keyof Adjustments)[] = Object.keys(IDENTITY_ADJUSTMENTS).filter(
+	(key): key is keyof Adjustments => key in IDENTITY_ADJUSTMENTS
+)
+
+const MARKUP_TOOL_OF: Readonly<Record<Extract<EditorImageAction, `preview.imageTool${string}`>, MarkupTool>> = {
+	"preview.imageToolPen": "pen",
+	"preview.imageToolHighlighter": "highlighter",
+	"preview.imageToolArrow": "arrow",
+	"preview.imageToolText": "text",
+	"preview.imageToolEraser": "eraser"
+}
 
 // A key in a text field is the field's own (its undo, its typing); a slider thumb's range input is not one.
 function isTextField(target: EventTarget | null): boolean {
@@ -112,8 +127,9 @@ export function ImageEditor(props: ImageEditorProps) {
 	// The crop a run of straightening started from, so straightening back gives it back whole.
 	const straightenBase = useRef<Crop | null>(null)
 	const dirtyRef = useRef(false)
-	const undoCombo = useComboFor("preview.imageUndo")
-	const redoCombo = useComboFor("preview.imageRedo")
+	const bindings = useBindings()
+	// The physical key holding the original on screen (the compare key), null while none does.
+	const compareCode = useRef<string | null>(null)
 
 	const recipe = snapshot.recipe
 	const geometry = recipe.geometry
@@ -223,23 +239,126 @@ export function ImageEditor(props: ImageEditorProps) {
 		commit({ ...current, adjustments }, undefined)
 	}
 
-	const handleKey = (event: KeyboardEvent | ReactKeyboardEvent): void => {
-		if (props.locked || event.defaultPrevented || isTextField(event.target)) {
-			return
-		}
+	const changeTab = (next: EditTab): void => {
+		// The text field commits on blur as focus leaves it; its item must not stay hidden.
+		setEditingText(null)
+		setTab(next)
+	}
 
-		const mac = isMacPlatform()
+	const runKey = (action: EditorImageAction): void => {
+		switch (action) {
+			case "preview.imageUndo":
+				undo()
+				break
+			case "preview.imageRedo":
+				redo()
+				break
+			case "preview.imageRevert":
+				if (!isIdentity(history.current)) {
+					revert()
+				}
 
-		if (matchesCombo(event, undoCombo, mac)) {
-			event.preventDefault()
-			undo()
-		} else if (matchesCombo(event, redoCombo, mac)) {
-			event.preventDefault()
-			redo()
+				break
+			case "preview.imageCompare":
+				if (loaded !== null) {
+					setCompare(true)
+				}
+
+				break
+			case "preview.imageTabAdjust":
+				changeTab("adjust")
+				break
+			case "preview.imageTabCrop":
+				changeTab("crop")
+				break
+			case "preview.imageTabFilters":
+				changeTab("filters")
+				break
+			case "preview.imageTabMarkup":
+				changeTab("markup")
+				break
+			case "preview.imageRotateLeft":
+				handleTurn(rotateLeft(history.current.geometry))
+				break
+			case "preview.imageRotateRight":
+				// Three quarter turns left are one right.
+				handleTurn(rotateLeft(rotateLeft(rotateLeft(history.current.geometry))))
+				break
+			case "preview.imageFlipHorizontal":
+				handleTurn(flip(history.current.geometry, "horizontal"))
+				break
+			case "preview.imageFlipVertical":
+				handleTurn(flip(history.current.geometry, "vertical"))
+				break
+			case "preview.imageResetAdjustments":
+				handleResetAdjustments(ADJUSTMENT_KEYS)
+				break
+			case "preview.imageResetGeometry":
+				commitGeometry(identityRecipe().geometry)
+				break
+			case "preview.imageToolPen":
+			case "preview.imageToolHighlighter":
+			case "preview.imageToolArrow":
+			case "preview.imageToolText":
+			case "preview.imageToolEraser":
+				setTool(MARKUP_TOOL_OF[action])
+				changeTab("markup")
+				break
 		}
 	}
 
+	// The editor's keys, here and elsewhere in its layer (the overlay's header), but never in a text field, which keeps
+	// its own undo and typing. Holding the compare key shows the original until it is let go (compareCode).
+	const handleKey = (event: KeyboardEvent | ReactKeyboardEvent): void => {
+		if (props.locked || event.defaultPrevented || isTextField(event.target) || isImeKeydown(event) || isRecordingCombo()) {
+			return
+		}
+
+		const action = imageEditorKey(event, bindings, isMacPlatform())
+
+		if (action === undefined) {
+			return
+		}
+
+		event.preventDefault()
+
+		// Undo and redo step on while held, as everywhere; the rest act once per press.
+		if (event.repeat && action !== "preview.imageUndo" && action !== "preview.imageRedo") {
+			return
+		}
+
+		if (action === "preview.imageCompare") {
+			compareCode.current = event.code
+		}
+
+		runKey(action)
+	}
+
 	useEditorLayerKeys(rootRef, handleKey)
+
+	// The compare key let go, wherever focus went meanwhile; or the window losing focus, which sends no key up.
+	useEffect(() => {
+		const release = (event: KeyboardEvent): void => {
+			if (compareCode.current !== null && event.code === compareCode.current) {
+				compareCode.current = null
+				setCompare(false)
+			}
+		}
+		const blur = (): void => {
+			if (compareCode.current !== null) {
+				compareCode.current = null
+				setCompare(false)
+			}
+		}
+
+		document.addEventListener("keyup", release)
+		window.addEventListener("blur", blur)
+
+		return () => {
+			document.removeEventListener("keyup", release)
+			window.removeEventListener("blur", blur)
+		}
+	}, [])
 
 	const display = displayRecipe(recipe, tab === "crop", editingText)
 	const displaySize = outputSize(display, sourceSize)
@@ -555,7 +674,10 @@ export function ImageEditor(props: ImageEditorProps) {
 								</Button>
 							}
 						/>
-						<TooltipContent>{t("previewImageEditCompare")}</TooltipContent>
+						<TooltipContent>
+							{t("previewImageEditCompare")}
+							<Kbd action="preview.imageCompare" />
+						</TooltipContent>
 					</Tooltip>
 				</div>
 			</div>
@@ -577,11 +699,7 @@ export function ImageEditor(props: ImageEditorProps) {
 					tool={tool}
 					color={color}
 					width={width}
-					onTab={next => {
-						// The text field commits on blur as focus leaves it; its item must not stay hidden.
-						setEditingText(null)
-						setTab(next)
-					}}
+					onTab={changeTab}
 					onAdjust={handleAdjust}
 					onResetAdjustments={handleResetAdjustments}
 					onStraighten={handleStraighten}

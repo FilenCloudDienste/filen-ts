@@ -1,4 +1,8 @@
-import { isImeKeydown } from "@filen/shared/keymap"
+import { isImeKeydown, matchesCombo } from "@filen/shared/keymap"
+import { isRecordingCombo, useBindings } from "@/lib/keymap/registry"
+import { isMacPlatform } from "@/lib/keymap/kbd.logic"
+import { bindingOf } from "@/lib/keymap/bindingOf"
+import { ARCHIVE_ACTIONS } from "@/features/archive/lib/keymap"
 import { useState, type KeyboardEvent } from "react"
 import { useTranslation } from "react-i18next"
 import { ArrowLeftIcon, DownloadIcon } from "lucide-react"
@@ -12,6 +16,10 @@ import { isArchivePasswordError, loadEntryBytes, type EntryRequest } from "@/fea
 import { ArchiveWaiting } from "@/features/archive/components/archiveStatus"
 import { ArchivePasswordGate } from "@/features/archive/components/archivePasswordPrompt"
 import { Button } from "@/components/ui/button"
+
+const IS_MAC = isMacPlatform()
+const BACK = ARCHIVE_ACTIONS.find(def => def.id === "archive.back")
+const DOWNLOAD = ARCHIVE_ACTIONS.find(def => def.id === "archive.download")
 
 export interface ViewedEntry {
 	request: EntryRequest
@@ -45,6 +53,7 @@ export function ArchiveEntryViewer({
 }: ArchiveEntryViewerProps) {
 	const { t } = useTranslation(["preview", "common"])
 	const isOnline = useIsOnline()
+	const bindings = useBindings()
 	const [password, setPassword] = useState(listingPassword)
 	const [ask, setAsk] = useState<{ wrong: boolean } | null>(entry.encrypted && listingPassword === undefined ? { wrong: false } : null)
 	// Remounts the viewer, so a new password loads again.
@@ -76,21 +85,41 @@ export function ArchiveEntryViewer({
 			}
 		)
 
-	// Escape goes back to the list unless something inside took it already (a find panel); keys from a
-	// dialog portaled out of this subtree are not this one's.
+	// The back key (Escape, Alt+Left) goes back to the list and Mod+S saves the entry, unless something inside took the
+	// key already (a find panel's Escape); keys from a dialog portaled out of this subtree are not this one's. Back is
+	// not taken in a text field, where Alt+Left moves the caret (Escape still leaves). Both are stopped here, so the
+	// overlay's own close and download never see them.
 	function handleKeyDown(event: KeyboardEvent<HTMLDivElement>): void {
 		if (
-			event.key !== "Escape" ||
 			event.defaultPrevented ||
 			isImeKeydown(event.nativeEvent) ||
+			isRecordingCombo() ||
 			!(event.target instanceof Node) ||
 			!event.currentTarget.contains(event.target)
 		) {
 			return
 		}
 
+		const back = BACK !== undefined && matchesCombo(event, bindingOf(bindings, BACK, IS_MAC), IS_MAC)
+		const save = !back && DOWNLOAD !== undefined && matchesCombo(event, bindingOf(bindings, DOWNLOAD, IS_MAC), IS_MAC)
+		const inField = event.target instanceof Element && event.target.matches("input, textarea")
+
+		if ((!back && !save) || (back && inField && event.key !== "Escape")) {
+			return
+		}
+
 		event.preventDefault()
-		onBack()
+		event.stopPropagation()
+
+		if (event.repeat) {
+			return
+		}
+
+		if (back) {
+			onBack()
+		} else if (isOnline) {
+			onDownload?.()
+		}
 	}
 
 	// A surface of its own (data-preview-surface): the overlay leaves its keys alone, so Left/Right stay off

@@ -2,7 +2,14 @@ import type { ArchiveFormat } from "@filen/sdk-rs"
 import type { ErrorDTO } from "@/lib/sdk/errors"
 import { ENTRY_FLAG, ENTRY_KIND, type SkipReason } from "@/lib/sdk/archiveListing"
 import type { PreviewKey } from "@/lib/i18n"
-import { isMacPlatform } from "@filen/shared/keymap"
+import { isMacPlatform, matchesCombo, type ChordEvent } from "@filen/shared/keymap"
+import { ARCHIVE_ACTIONS, type ArchiveAction } from "@/features/archive/lib/keymap"
+import { PREVIEW_ACTIONS } from "@/features/preview/lib/keymap"
+import { DRIVE_ACTIONS } from "@/features/drive/lib/keymap"
+import { bindingOf } from "@/lib/keymap/bindingOf"
+import type { ActionDef } from "@/lib/keymap/registry"
+import type { ArchiveSource } from "@/features/archive/lib/archiveSource"
+import type { ExtractTarget } from "@/features/archive/lib/extractSelection"
 import { listboxKeyTarget } from "@/features/drive/lib/listbox"
 import type { EntryStore } from "@/features/archive/lib/entryStore"
 import type { ListingPhase, ListingSnapshot, ListSummary } from "@/features/archive/lib/listingSession"
@@ -44,14 +51,37 @@ export type BrowserKeyAction =
 	| { type: "selectAll" }
 	| { type: "clear" }
 	| { type: "focusSearch" }
+	// The cursor's file.
+	| { type: "download" }
+	| { type: "openMenu" }
+	| { type: "extractSelected" }
+	| { type: "extractAll" }
 
-export interface KeyInput {
-	key: string
-	shiftKey: boolean
-	altKey: boolean
-	metaKey: boolean
-	ctrlKey: boolean
-}
+export type KeyInput = ChordEvent
+
+// The registered keys in the order they are tried, with what each does: the browser's own (lib/keymap.ts), and the
+// app's find and select all, which act on the archive here.
+const KEY_IDS: readonly (readonly [id: ArchiveAction | "editor.find" | "drive.selectAll", action: BrowserKeyAction])[] = [
+	["archive.open", { type: "open" }],
+	["archive.parent", { type: "parent" }],
+	["archive.toggle", { type: "toggle" }],
+	["archive.clearSelection", { type: "clear" }],
+	["archive.search", { type: "focusSearch" }],
+	["editor.find", { type: "focusSearch" }],
+	["drive.selectAll", { type: "selectAll" }],
+	["archive.download", { type: "download" }],
+	["archive.openMenu", { type: "openMenu" }],
+	["archive.extractSelected", { type: "extractSelected" }],
+	["archive.extractAll", { type: "extractAll" }]
+]
+
+const DEFS: ReadonlyMap<string, ActionDef> = new Map([...ARCHIVE_ACTIONS, ...PREVIEW_ACTIONS, ...DRIVE_ACTIONS].map(def => [def.id, def]))
+
+const KEY_ACTIONS: readonly (readonly [def: ActionDef, action: BrowserKeyAction])[] = KEY_IDS.flatMap(([id, action]) => {
+	const def = DEFS.get(id)
+
+	return def === undefined ? [] : [[def, action] as const]
+})
 
 const MOVES: Readonly<Record<string, CursorMove>> = {
 	ArrowUp: "up",
@@ -62,46 +92,35 @@ const MOVES: Readonly<Record<string, CursorMove>> = {
 	PageDown: "pageDown"
 }
 
-// What a key pressed on the list does; null leaves it to the overlay. ArrowLeft/ArrowRight are never
-// taken (they page the overlay), nor is Escape without a selection (it closes the overlay). Every key is
-// modifier-exact: Mod is the platform's own (Cmd on a Mac, Ctrl elsewhere), and a chord the table does
-// not name is some other shortcut's.
-export function browserKeyAction(event: KeyInput, hasSelection: boolean, mac = IS_MAC): BrowserKeyAction | null {
-	const command = event.ctrlKey || event.metaKey || event.altKey
-	const plain = !command && !event.shiftKey
-	const mod = (mac ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey) && !event.altKey && !event.shiftKey
+// Where an extract lands without asking: next to an own archive, in a new directory of `folderName` (null for a single
+// compressed file, which lands beside it). Null for an archive the user does not own, where they pick a destination.
+export function defaultExtractTarget(source: Pick<ArchiveSource, "ownParent">, folderName: string | null): ExtractTarget | null {
+	if (source.ownParent === undefined) {
+		return null
+	}
 
-	if (event.key === "ArrowUp" && event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
-		return { type: "parent" }
+	return folderName === null ? { type: "beside" } : { type: "besideNewFolder" }
+}
+
+// What a key pressed on the list does under `combos` (the combos in effect by id, useBindings); null leaves it to the
+// overlay. Escape without a selection is never taken (it closes the overlay). The registered keys match as every
+// shortcut does (@filen/shared/keymap); the cursor's moves are the list's own, unmodified but for Shift, which extends
+// the selection. ArrowLeft/ArrowRight are not among them: they page the overlay.
+export function browserKeyAction(
+	event: KeyInput,
+	hasSelection: boolean,
+	combos: Readonly<Record<string, string>>,
+	mac = IS_MAC
+): BrowserKeyAction | null {
+	for (const [def, action] of KEY_ACTIONS) {
+		if ((action.type !== "clear" || hasSelection) && matchesCombo(event, bindingOf(combos, def, mac), mac)) {
+			return action
+		}
 	}
 
 	const move = MOVES[event.key]
 
-	if (move !== undefined) {
-		return command ? null : { type: "move", move, extend: event.shiftKey }
-	}
-
-	switch (event.key) {
-		case "Enter":
-			return plain ? { type: "open" } : null
-		case "Backspace":
-			return plain ? { type: "parent" } : null
-		case " ":
-			return plain ? { type: "toggle" } : null
-		case "Escape":
-			return plain && hasSelection ? { type: "clear" } : null
-		// Shift types "/" on some layouts.
-		case "/":
-			return command ? null : { type: "focusSearch" }
-		case "a":
-		case "A":
-			return mod ? { type: "selectAll" } : null
-		case "f":
-		case "F":
-			return mod ? { type: "focusSearch" } : null
-		default:
-			return null
-	}
+	return move === undefined || event.ctrlKey || event.metaKey || event.altKey ? null : { type: "move", move, extend: event.shiftKey }
 }
 
 const LIST_KEYS = { up: "ArrowUp", down: "ArrowDown", home: "Home", end: "End" } as const satisfies Record<

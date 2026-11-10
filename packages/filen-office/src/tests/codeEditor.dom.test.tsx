@@ -239,6 +239,24 @@ describe("code editor extensions", () => {
 		view.destroy()
 	})
 
+	// Undo, redo, comment, folding, the next match and go to line are the app's to bind on its user's keys: CodeMirror's
+	// own keys for them would keep firing after a rebind.
+	it("leaves the keys an app binds itself out of the setup and the search keymap", () => {
+		const view = new EditorView({ doc: "x", extensions: [codeEditorSetup(), codeKeymap([])], parent: container })
+		const press = (init: KeyboardEventInit) => runScopeHandlers(view, new KeyboardEvent("keydown", init), CODE_EDITOR_SCOPE)
+
+		expect(press({ key: "z", ctrlKey: true })).toBe(false)
+		expect(press({ key: "y", ctrlKey: true })).toBe(false)
+		expect(press({ key: "/", ctrlKey: true })).toBe(false)
+		expect(press({ key: "[", ctrlKey: true, altKey: true })).toBe(false)
+		expect(press({ key: "F3" })).toBe(false)
+		expect(press({ key: "g", ctrlKey: true })).toBe(false)
+		expect(press({ key: "g", ctrlKey: true, altKey: true })).toBe(false)
+		// The rest of CodeMirror's keys stay: Mod-d selects the next occurrence.
+		expect(press({ key: "d", ctrlKey: true })).toBe(true)
+		view.destroy()
+	})
+
 	it("mounts a side-by-side or a unified comparison and removes it again", () => {
 		for (const sideBySide of [true, false]) {
 			const destroy = mountCodeCompare({

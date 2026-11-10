@@ -74,7 +74,8 @@ export const SHORTCUT_SECTION_ORDER: readonly ShortcutSection[] = [
 	"presentation",
 	"presentationObjects",
 	"presentationText",
-	"slideshow"
+	"slideshow",
+	"archive"
 ]
 
 export const SHORTCUT_SECTION_LABEL_KEYS: Record<ShortcutSection, SettingsKey> = {
@@ -86,7 +87,8 @@ export const SHORTCUT_SECTION_LABEL_KEYS: Record<ShortcutSection, SettingsKey> =
 	presentationText: "keyboardSectionPresentationText",
 	slideshow: "keyboardSectionSlideshow",
 	word: "keyboardSectionWord",
-	sheet: "keyboardSectionSheet"
+	sheet: "keyboardSectionSheet",
+	archive: "keyboardSectionArchive"
 }
 
 export interface ShortcutGroup {

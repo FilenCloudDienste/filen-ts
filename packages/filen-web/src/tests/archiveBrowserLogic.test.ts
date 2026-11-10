@@ -28,9 +28,32 @@ import {
 	type KeyInput
 } from "@/features/archive/lib/archiveBrowser.logic"
 import { storeOf, TEST_ARCHIVE } from "@/tests/support/archiveEntries"
+import { ARCHIVE_ACTIONS } from "@/features/archive/lib/keymap"
+import { PREVIEW_ACTIONS } from "@/features/preview/lib/keymap"
+import { DRIVE_ACTIONS } from "@/features/drive/lib/keymap"
 
-function key(name: string, mods: Partial<Omit<KeyInput, "key">> = {}): KeyInput {
-	return { key: name, shiftKey: false, altKey: false, metaKey: false, ctrlKey: false, ...mods }
+// The KeyboardEvent.code of a US key, by its key.
+const CODES: Readonly<Record<string, string>> = { " ": "Space", "/": "Slash", a: "KeyA", f: "KeyF", s: "KeyS", "[": "BracketLeft" }
+
+function key(name: string, mods: Partial<Omit<KeyInput, "key" | "code">> = {}): KeyInput {
+	return { key: name, code: CODES[name] ?? name, shiftKey: false, altKey: false, metaKey: false, ctrlKey: false, ...mods }
+}
+
+// The shipped bindings the browser reads, on a Mac or elsewhere: its own and the app's find and select all.
+function defaults(mac: boolean): Record<string, string> {
+	const combos: Record<string, string> = {}
+
+	for (const def of [...ARCHIVE_ACTIONS, ...PREVIEW_ACTIONS, ...DRIVE_ACTIONS]) {
+		const variant = def.platformDefaults?.find(({ on }) => (on.mac === undefined || on.mac === mac) && on.desktop !== true)
+
+		combos[def.id] = variant?.combo ?? def.defaultCombo
+	}
+
+	return combos
+}
+
+function act(event: KeyInput, hasSelection: boolean, mac = false, combos: Readonly<Record<string, string>> = defaults(mac)) {
+	return browserKeyAction(event, hasSelection, combos, mac)
 }
 
 function error(kind: string): ErrorDTO {
@@ -51,59 +74,88 @@ const SUMMARY: ListSummary = {
 
 describe("browserKeyAction", () => {
 	it("moves the cursor on the vertical keys, extending with shift", () => {
-		expect(browserKeyAction(key("ArrowDown"), false)).toEqual({ type: "move", move: "down", extend: false })
-		expect(browserKeyAction(key("ArrowUp", { shiftKey: true }), false)).toEqual({ type: "move", move: "up", extend: true })
-		expect(browserKeyAction(key("Home"), false)).toEqual({ type: "move", move: "home", extend: false })
-		expect(browserKeyAction(key("End", { shiftKey: true }), false)).toEqual({ type: "move", move: "end", extend: true })
-		expect(browserKeyAction(key("PageDown"), false)).toEqual({ type: "move", move: "pageDown", extend: false })
-		expect(browserKeyAction(key("PageUp"), false)).toEqual({ type: "move", move: "pageUp", extend: false })
-		expect(browserKeyAction(key("ArrowDown", { ctrlKey: true }), false)).toBeNull()
+		expect(act(key("ArrowDown"), false)).toEqual({ type: "move", move: "down", extend: false })
+		expect(act(key("ArrowUp", { shiftKey: true }), false)).toEqual({ type: "move", move: "up", extend: true })
+		expect(act(key("Home"), false)).toEqual({ type: "move", move: "home", extend: false })
+		expect(act(key("End", { shiftKey: true }), false)).toEqual({ type: "move", move: "end", extend: true })
+		expect(act(key("PageDown"), false)).toEqual({ type: "move", move: "pageDown", extend: false })
+		expect(act(key("PageUp"), false)).toEqual({ type: "move", move: "pageUp", extend: false })
+		expect(act(key("ArrowDown", { ctrlKey: true }), false)).toBeNull()
 	})
 
 	it("never takes Left/Right, which page the overlay", () => {
 		for (const name of ["ArrowLeft", "ArrowRight"]) {
-			expect(browserKeyAction(key(name), true)).toBeNull()
-			expect(browserKeyAction(key(name, { shiftKey: true }), true)).toBeNull()
-			expect(browserKeyAction(key(name, { altKey: true }), true)).toBeNull()
+			expect(act(key(name), true)).toBeNull()
+			expect(act(key(name, { shiftKey: true }), true)).toBeNull()
+			expect(act(key(name, { altKey: true }), true)).toBeNull()
 		}
 	})
 
 	it("takes Escape only while something is selected", () => {
-		expect(browserKeyAction(key("Escape"), true)).toEqual({ type: "clear" })
-		expect(browserKeyAction(key("Escape"), false)).toBeNull()
+		expect(act(key("Escape"), true)).toEqual({ type: "clear" })
+		expect(act(key("Escape"), false)).toBeNull()
 	})
 
 	it("opens, toggles, goes up, selects all and focuses the search", () => {
-		expect(browserKeyAction(key("Enter"), false)).toEqual({ type: "open" })
-		expect(browserKeyAction(key(" "), false)).toEqual({ type: "toggle" })
-		expect(browserKeyAction(key("Backspace"), false)).toEqual({ type: "parent" })
-		expect(browserKeyAction(key("ArrowUp", { altKey: true }), false)).toEqual({ type: "parent" })
-		expect(browserKeyAction(key("a", { metaKey: true }), false, true)).toEqual({ type: "selectAll" })
-		expect(browserKeyAction(key("a", { ctrlKey: true }), false, false)).toEqual({ type: "selectAll" })
-		expect(browserKeyAction(key("a"), false)).toBeNull()
-		expect(browserKeyAction(key("f", { ctrlKey: true }), false, false)).toEqual({ type: "focusSearch" })
-		expect(browserKeyAction(key("/"), false)).toEqual({ type: "focusSearch" })
-		expect(browserKeyAction(key("Tab"), false)).toBeNull()
+		expect(act(key("Enter"), false)).toEqual({ type: "open" })
+		expect(act(key(" "), false)).toEqual({ type: "toggle" })
+		expect(act(key("Backspace"), false)).toEqual({ type: "parent" })
+		expect(act(key("ArrowUp", { altKey: true }), false)).toEqual({ type: "parent" })
+		expect(act(key("a", { metaKey: true }), false, true)).toEqual({ type: "selectAll" })
+		expect(act(key("a", { ctrlKey: true }), false, false)).toEqual({ type: "selectAll" })
+		expect(act(key("a"), false)).toBeNull()
+		expect(act(key("f", { ctrlKey: true }), false, false)).toEqual({ type: "focusSearch" })
+		expect(act(key("/"), false)).toEqual({ type: "focusSearch" })
+		expect(act(key("Tab"), false)).toBeNull()
+	})
+
+	it("opens and goes up with Cmd+Down and Cmd+Up on a Mac, as Finder does", () => {
+		expect(act(key("ArrowDown", { metaKey: true }), false, true)).toEqual({ type: "open" })
+		expect(act(key("ArrowUp", { metaKey: true }), false, true)).toEqual({ type: "parent" })
+		expect(act(key("ArrowDown", { ctrlKey: true }), false, false)).toBeNull()
+	})
+
+	it("saves the cursor's file and opens its menu; extracts only once bound", () => {
+		expect(act(key("s", { ctrlKey: true }), false)).toEqual({ type: "download" })
+		expect(act(key("F10", { shiftKey: true }), false)).toEqual({ type: "openMenu" })
+		expect(act(key("e", { ctrlKey: true }), true)).toBeNull()
+
+		const bound = { ...defaults(false), "archive.extractSelected": "mod+e", "archive.extractAll": "mod+shift+e" }
+
+		expect(act({ ...key("e", { ctrlKey: true }), code: "KeyE" }, true, false, bound)).toEqual({ type: "extractSelected" })
+		expect(act({ ...key("E", { ctrlKey: true, shiftKey: true }), code: "KeyE" }, true, false, bound)).toEqual({ type: "extractAll" })
+	})
+
+	// The app's find and select all act on the archive, on whatever keys the user gave them; a key moved off a default
+	// leaves it.
+	it("follows the user's bindings, the app's find and select all included", () => {
+		const combos = { ...defaults(false), "drive.selectAll": "mod+shift+a", "editor.find": "f3", "archive.parent": "alt+arrowup" }
+
+		expect(act(key("a", { ctrlKey: true }), false, false, combos)).toBeNull()
+		expect(act({ ...key("A", { ctrlKey: true, shiftKey: true }), code: "KeyA" }, false, false, combos)).toEqual({ type: "selectAll" })
+		expect(act(key("F3"), false, false, combos)).toEqual({ type: "focusSearch" })
+		expect(act(key("Backspace"), false, false, combos)).toBeNull()
+		expect(act(key("Enter"), false, false, { ...combos, "archive.open": "none" })).toBeNull()
 	})
 
 	// Mod is the platform's own: Ctrl+A on a Mac and Cmd+A elsewhere are some other shortcut's.
 	it("selects all and finds on the platform's Mod only", () => {
-		expect(browserKeyAction(key("a", { ctrlKey: true }), false, true)).toBeNull()
-		expect(browserKeyAction(key("a", { metaKey: true }), false, false)).toBeNull()
-		expect(browserKeyAction(key("f", { ctrlKey: true }), false, true)).toBeNull()
-		expect(browserKeyAction(key("a", { ctrlKey: true, shiftKey: true }), false, false)).toBeNull()
+		expect(act(key("a", { ctrlKey: true }), false, true)).toBeNull()
+		expect(act(key("a", { metaKey: true }), false, false)).toBeNull()
+		expect(act(key("f", { ctrlKey: true }), false, true)).toBeNull()
+		expect(act(key("a", { ctrlKey: true, shiftKey: true }), false, false)).toBeNull()
 	})
 
 	// A chord with Enter, Space, Backspace or Escape is some shortcut's, never the list's.
 	it("takes Enter, Space, Backspace and Escape unmodified only", () => {
 		for (const modifier of ["shiftKey", "ctrlKey", "metaKey", "altKey"] as const) {
-			expect(browserKeyAction(key("Enter", { [modifier]: true }), false)).toBeNull()
-			expect(browserKeyAction(key(" ", { [modifier]: true }), false)).toBeNull()
-			expect(browserKeyAction(key("Backspace", { [modifier]: true }), false)).toBeNull()
-			expect(browserKeyAction(key("Escape", { [modifier]: true }), true)).toBeNull()
+			expect(act(key("Enter", { [modifier]: true }), false)).toBeNull()
+			expect(act(key(" ", { [modifier]: true }), false)).toBeNull()
+			expect(act(key("Backspace", { [modifier]: true }), false)).toBeNull()
+			expect(act(key("Escape", { [modifier]: true }), true)).toBeNull()
 		}
 
-		expect(browserKeyAction(key("ArrowUp", { altKey: true, shiftKey: true }), false)).toBeNull()
+		expect(act(key("ArrowUp", { altKey: true, shiftKey: true }), false)).toBeNull()
 	})
 })
 

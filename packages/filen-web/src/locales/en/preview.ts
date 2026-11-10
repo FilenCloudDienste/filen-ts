@@ -63,6 +63,7 @@ import { previewSheetFormats } from "@/locales/en/previewSheet/formats"
 import { previewSheetObjects } from "@/locales/en/previewSheet/objects"
 import { previewSheetCharts } from "@/locales/en/previewSheet/charts"
 import { previewSheetRibbon } from "@/locales/en/previewSheet/ribbon"
+import { previewKeysShortcuts } from "@/locales/en/previewKeys/shortcuts"
 
 export const preview = {
 	// ── Header ───────────────────────────────────────────────────────────────
@@ -810,5 +811,6 @@ export const preview = {
 	...previewSheetCharts,
 	...previewSheetRibbon,
 	...previewImageEditor,
-	...previewImageSave
+	...previewImageSave,
+	...previewKeysShortcuts
 } as const

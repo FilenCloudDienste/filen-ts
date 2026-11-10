@@ -201,7 +201,7 @@ export function removePreviewDialogItem<D extends PreviewDialogFields>(prev: D |
 }
 
 // Steps the open preview by one sibling, without wrapping.
-export function stepPreviewDialog<D extends PreviewDialogFields>(prev: D | null, delta: 1 | -1): D | null {
+export function stepPreviewDialog<D extends PreviewDialogFields>(prev: D | null, delta: number): D | null {
 	if (prev?.kind !== "preview" || prev.index === undefined) {
 		return prev
 	}

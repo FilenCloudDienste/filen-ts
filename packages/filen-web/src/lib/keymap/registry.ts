@@ -47,7 +47,16 @@ export type ActionScope =
 
 // A finer group inside a scope, for the shortcuts list only (conflicts read the scope): the editor's surfaces.
 export type ShortcutSection =
-	"viewer" | "imageEditor" | "code" | "presentation" | "presentationObjects" | "presentationText" | "slideshow" | "word" | "sheet"
+	| "viewer"
+	| "imageEditor"
+	| "code"
+	| "presentation"
+	| "presentationObjects"
+	| "presentationText"
+	| "slideshow"
+	| "word"
+	| "sheet"
+	| "archive"
 
 type ShortcutNamespace = (typeof SHORTCUT_NAMESPACES)[number]
 

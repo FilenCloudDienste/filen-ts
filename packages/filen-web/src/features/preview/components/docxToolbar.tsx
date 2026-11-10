@@ -60,6 +60,7 @@ import { FullScreenButton, PageControls, ZoomControls } from "@/features/preview
 import { BAR_BUTTON, pageControlsWidth, ZOOM_CONTROLS_WIDTH } from "@/features/preview/components/commandBar.logic"
 import { useAction } from "@/lib/keymap/useAction"
 import { isImeKeydown } from "@filen/shared/keymap"
+import type { Options } from "react-hotkeys-hook"
 
 // The DOCX viewer's command bar (OfficeCommandBar), as the PDF viewer's: File, then Pages (first, previous, the page
 // number field, next, last), Zoom (out, the zoom menu with its steps and fit to width, in), the markup menu (a
@@ -69,6 +70,8 @@ import { isImeKeydown } from "@filen/shared/keymap"
 
 // Typing waits this long before the document is searched (each search runs over every page).
 const FIND_DEBOUNCE_MS = 150
+// The find field's own keys answer in its inputs too.
+const FIELD_KEYS: Options = { enableOnFormTags: ["input"] }
 const FIELD_CLASS =
 	"h-7 w-40 min-w-0 rounded-xl bg-muted/60 pr-2 pl-7 text-xs leading-5 outline-none placeholder:text-muted-foreground focus-visible:ring-[3px] focus-visible:ring-ring/30 disabled:opacity-50 max-sm:w-full [&::-webkit-search-cancel-button]:appearance-none"
 
@@ -388,17 +391,93 @@ export function DocxFindField({
 		onClosed()
 	}
 
+	// The next or previous match; what is typed is searched first when it has not been yet.
+	const step = (direction: 1 | -1): void => {
+		if (!searched) {
+			search(text, find.caseSensitive, find.wholeWord)
+		} else {
+			find.step(direction)
+		}
+	}
+
+	const replaceAll = (): void => {
+		if (replace === undefined || !replaceOpen || replace.disabled || find.count === 0 || !searched) {
+			return
+		}
+
+		// No match is left, and Replace all disables itself: focus goes to the find field.
+		inputRef.current?.focus()
+		replace.all(replacement)
+	}
+
+	// The field's own keys, anywhere in it (the find and replace inputs, its buttons): the next and previous match, the
+	// match toggles and Replace all. Ahead of the inputs' own Enter (onFieldKeyDown leaves a key taken here alone).
+	const findNextKey = useAction(
+		"editor.findNext",
+		keyboardEvent => {
+			keyboardEvent.preventDefault()
+			step(1)
+		},
+		FIELD_KEYS,
+		[searched, text, find]
+	)
+	const findPreviousKey = useAction(
+		"editor.findPrevious",
+		keyboardEvent => {
+			keyboardEvent.preventDefault()
+			step(-1)
+		},
+		FIELD_KEYS,
+		[searched, text, find]
+	)
+	const matchCaseKey = useAction(
+		"editor.findMatchCase",
+		keyboardEvent => {
+			keyboardEvent.preventDefault()
+			search(text, !find.caseSensitive, find.wholeWord)
+		},
+		FIELD_KEYS,
+		[text, find]
+	)
+	const wholeWordKey = useAction(
+		"editor.findWholeWord",
+		keyboardEvent => {
+			if (find.wholeWord === undefined) {
+				return
+			}
+
+			keyboardEvent.preventDefault()
+			search(text, find.caseSensitive, !find.wholeWord)
+		},
+		FIELD_KEYS,
+		[text, find]
+	)
+	const replaceAllKey = useAction(
+		"editor.replaceAll",
+		keyboardEvent => {
+			if (replace === undefined || !replaceOpen) {
+				return
+			}
+
+			keyboardEvent.preventDefault()
+			replaceAll()
+		},
+		FIELD_KEYS,
+		[replace, replaceOpen, replacement, find, searched]
+	)
+
 	// Keys an input method is composing with are its own (Enter confirms the composition); Escape is taken
-	// here, as the preview overlay closes on an Escape nothing inside took.
+	// here, as the preview overlay closes on an Escape nothing inside took. Enter with Shift steps back; with any other
+	// modifier it is some shortcut's.
 	const onFieldKeyDown = (event: KeyboardEvent<HTMLInputElement>, enter: (shift: boolean) => void): void => {
-		if (isImeKeydown(event.nativeEvent)) {
+		if (event.defaultPrevented || isImeKeydown(event.nativeEvent)) {
 			return
 		}
 
 		if (event.key === "Escape") {
 			event.preventDefault()
 			close()
-		} else if (event.key === "Enter") {
+		} else if (event.key === "Enter" && !event.ctrlKey && !event.metaKey && !event.altKey) {
 			event.preventDefault()
 			enter(event.shiftKey)
 		}
@@ -407,7 +486,16 @@ export function DocxFindField({
 	// One row, in reading order; on a phone the replace field and its buttons wrap onto a second row, with Close last
 	// after them, so neither field is squeezed and the order seen is the order tabbed.
 	return (
-		<div className="flex min-w-0 flex-wrap items-center gap-1">
+		<div
+			ref={element => {
+				findNextKey(element)
+				findPreviousKey(element)
+				matchCaseKey(element)
+				wholeWordKey(element)
+				replaceAllKey(element)
+			}}
+			className="flex min-w-0 flex-wrap items-center gap-1"
+		>
 			<div className="relative min-w-0 max-sm:flex-1">
 				<SearchIcon
 					aria-hidden="true"
@@ -440,11 +528,7 @@ export function DocxFindField({
 					}}
 					onKeyDown={event => {
 						onFieldKeyDown(event, shift => {
-							if (!searched) {
-								search(text, find.caseSensitive, find.wholeWord)
-							} else {
-								find.step(shift ? -1 : 1)
-							}
+							step(shift ? -1 : 1)
 						})
 					}}
 				/>
@@ -467,6 +551,7 @@ export function DocxFindField({
 			</span>
 			<TooltipIconButton
 				label={t("previewDocxFindPrevious")}
+				shortcut={<Kbd action="editor.findPrevious" />}
 				disabled={find.count === 0}
 				onClick={() => {
 					find.step(-1)
@@ -476,6 +561,7 @@ export function DocxFindField({
 			</TooltipIconButton>
 			<TooltipIconButton
 				label={t("previewDocxFindNext")}
+				shortcut={<Kbd action="editor.findNext" />}
 				disabled={find.count === 0}
 				onClick={() => {
 					find.step(1)
@@ -485,6 +571,7 @@ export function DocxFindField({
 			</TooltipIconButton>
 			<TooltipIconButton
 				label={t("previewDocxFindMatchCase")}
+				shortcut={<Kbd action="editor.findMatchCase" />}
 				pressed={find.caseSensitive}
 				className={find.caseSensitive ? "bg-accent text-foreground" : undefined}
 				onClick={() => {
@@ -496,6 +583,7 @@ export function DocxFindField({
 			{find.wholeWord === undefined ? null : (
 				<TooltipIconButton
 					label={t("previewDocxFindWholeWords")}
+					shortcut={<Kbd action="editor.findWholeWord" />}
 					pressed={find.wholeWord}
 					className={find.wholeWord ? "bg-accent text-foreground" : undefined}
 					onClick={() => {
@@ -560,12 +648,9 @@ export function DocxFindField({
 					</TooltipIconButton>
 					<TooltipIconButton
 						label={t("previewDocxReplaceAll")}
+						shortcut={<Kbd action="editor.replaceAll" />}
 						disabled={replace.disabled || find.count === 0 || !searched}
-						onClick={() => {
-							// No match is left, and this button disables itself: focus goes to the find field.
-							inputRef.current?.focus()
-							replace.all(replacement)
-						}}
+						onClick={replaceAll}
 					>
 						<ReplaceAllIcon />
 					</TooltipIconButton>

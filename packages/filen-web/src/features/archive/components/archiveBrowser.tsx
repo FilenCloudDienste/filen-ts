@@ -29,6 +29,7 @@ import {
 	canExtractSelection,
 	crumbTrail,
 	cursorTarget,
+	defaultExtractTarget,
 	directoryRows,
 	dirOfPath,
 	dirSelectable,
@@ -38,6 +39,7 @@ import {
 	positionIndex,
 	readsWholeArchive,
 	refsView,
+	rowElementId,
 	rowRange,
 	selectionTotalsOf,
 	splitCrumbs,
@@ -264,67 +266,6 @@ export function ArchiveSourceBrowser({ source, deps, extractable }: ArchiveSourc
 		}
 	}
 
-	function handleKeyAction(action: BrowserKeyAction, pageSize: number): number | null {
-		const cursorIndex = cursorIndexNow()
-
-		switch (action.type) {
-			case "move": {
-				const next = cursorTarget(action.move, Math.max(cursorIndex, 0), rows.count, pageSize)
-
-				if (next === null) {
-					return null
-				}
-
-				const position = { ref: rows.at(next), index: next }
-
-				if (action.extend) {
-					const anchorIndex = anchorIndexNow()
-
-					select(rangeSelection(anchorIndex < 0 ? next : anchorIndex, next))
-				}
-
-				placeCursor(position, !action.extend)
-
-				return next
-			}
-			case "open": {
-				if (cursorIndex < 0) {
-					return null
-				}
-
-				const ref = rows.at(cursorIndex)
-
-				if (isDirRef(ref)) {
-					navigate(dirOfRef(ref), null)
-				} else if (!entries.activate({ store, slot: ref })) {
-					toggleAt(cursorIndex)
-				}
-
-				return null
-			}
-			case "toggle":
-				toggleAt(cursorIndex)
-
-				return null
-			case "parent":
-				goParent()
-
-				return null
-			case "selectAll":
-				select(searchRefs === null ? selectAll(store, dir) : setMany(store, selection, searchRefs, true))
-
-				return null
-			case "clear":
-				select(EMPTY_SELECTION)
-
-				return null
-			case "focusSearch":
-				searchBoxRef.current?.querySelector("input")?.focus()
-
-				return null
-		}
-	}
-
 	// In search mode only the matches change: the rest of the selection stays.
 	function handleHeaderCheck(): void {
 		const on = headerCheck(snapshot, selection, dir, searchRefs) === "on"
@@ -466,6 +407,104 @@ export function ArchiveSourceBrowser({ source, deps, extractable }: ArchiveSourc
 	function extractFromCommon(ask: LinkTargetsAsk): void {
 		setLinkAsk(null)
 		proceed({ target: ask.target, resolved: resolveAt(selection, ask.common), baseDir: ask.common })
+	}
+
+	function handleKeyAction(action: BrowserKeyAction, pageSize: number): number | null {
+		const cursorIndex = cursorIndexNow()
+
+		switch (action.type) {
+			case "move": {
+				const next = cursorTarget(action.move, Math.max(cursorIndex, 0), rows.count, pageSize)
+
+				if (next === null) {
+					return null
+				}
+
+				const position = { ref: rows.at(next), index: next }
+
+				if (action.extend) {
+					const anchorIndex = anchorIndexNow()
+
+					select(rangeSelection(anchorIndex < 0 ? next : anchorIndex, next))
+				}
+
+				placeCursor(position, !action.extend)
+
+				return next
+			}
+			case "open": {
+				if (cursorIndex < 0) {
+					return null
+				}
+
+				const ref = rows.at(cursorIndex)
+
+				if (isDirRef(ref)) {
+					navigate(dirOfRef(ref), null)
+				} else if (!entries.activate({ store, slot: ref })) {
+					toggleAt(cursorIndex)
+				}
+
+				return null
+			}
+			case "toggle":
+				toggleAt(cursorIndex)
+
+				return null
+			case "parent":
+				goParent()
+
+				return null
+			case "selectAll":
+				select(searchRefs === null ? selectAll(store, dir) : setMany(store, selection, searchRefs, true))
+
+				return null
+			case "clear":
+				select(EMPTY_SELECTION)
+
+				return null
+			case "focusSearch":
+				searchBoxRef.current?.querySelector("input")?.focus()
+
+				return null
+			case "download":
+			case "openMenu": {
+				const ref = cursorIndex < 0 ? null : rows.at(cursorIndex)
+
+				if (ref === null || isDirRef(ref)) {
+					return null
+				}
+
+				if (action.type === "download") {
+					if (entries.offers({ store, slot: ref }).download) {
+						entries.request({ store, slot: ref }, "download")
+					}
+				} else {
+					// The row's own ⋯ trigger, so the menu is the one a click opens; a row without one has no menu.
+					document.getElementById(rowElementId(listId, ref))?.querySelector<HTMLElement>("[aria-haspopup]")?.click()
+				}
+
+				return null
+			}
+			case "extractSelected": {
+				const target = defaultExtractTarget(source, single ? null : baseFolderName)
+
+				if (target !== null && !extractOff && canExtractSelection(phase, store.entryCount) && totals.entries > 0) {
+					extractSelected(target)
+				}
+
+				return null
+			}
+			case "extractAll": {
+				const target = defaultExtractTarget(source, single ? null : (info?.defaultName ?? source.name))
+
+				if (target !== null && !extractOff) {
+					extractAll(target)
+				}
+
+				return null
+			}
+		}
 	}
 
 	// The password is checked by relisting; the waiting extract starts once it is accepted, or asks again.

@@ -5,6 +5,7 @@ import type { ExtractTarget } from "@/features/archive/lib/extractSelection"
 import type { SelectionTotals } from "@/features/archive/lib/selection"
 import { ArchiveExtractMenu } from "@/features/archive/components/archiveExtractMenu"
 import { Button } from "@/components/ui/button"
+import { defaultExtractTarget } from "@/features/archive/lib/archiveBrowser.logic"
 
 export interface ArchiveFooterProps {
 	source: ArchiveSource
@@ -37,8 +38,7 @@ export function ArchiveFooter({
 	onExtractAll
 }: ArchiveFooterProps) {
 	const { t } = useTranslation("preview")
-	const allDefault: ExtractTarget | null =
-		source.ownParent === undefined ? null : allFolderName === null ? { type: "beside" } : { type: "besideNewFolder" }
+	const allDefault: ExtractTarget | null = defaultExtractTarget(source, allFolderName)
 	const summary =
 		totals.files > 0
 			? t("previewArchiveSelectedFiles", { count: totals.files, size: formatBytes(totals.bytes) })

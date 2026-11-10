@@ -14,6 +14,11 @@ import { PreviewErrorState, PreviewGate, PreviewLoading } from "@/features/previ
 import { StreamablePreview } from "@/features/preview/components/streamablePreview"
 import { useReleaseOnUnmount } from "@/lib/media/useReleaseOnUnmount"
 import { type Size, type ZoomTransform, wheelZoom, dragPan, doubleClickZoom } from "@/features/preview/components/imageViewer.logic"
+import { imageKeyTransform, imageViewerKey } from "@/features/preview/lib/imageViewerKeys.logic"
+import { keyForEditor } from "@/lib/keymap/dialogGuard"
+import { isRecordingCombo, useBindings } from "@/lib/keymap/registry"
+import { useLatestRef } from "@/lib/useLatestRef"
+import { isImeKeydown } from "@filen/shared/keymap"
 
 export interface ImageViewerProps {
 	item: DriveItem
@@ -83,6 +88,49 @@ function ZoomableImage({
 
 	// Stepping past a streamed image before it has loaded stops its download.
 	useReleaseOnUnmount(image)
+
+	const bindings = useBindings()
+	const zoomed = transform.scale > 1
+	const onViewerKey = useLatestRef((event: KeyboardEvent): void => {
+		const container = containerRef.current
+
+		if (
+			container === null ||
+			event.defaultPrevented ||
+			isImeKeydown(event) ||
+			isRecordingCombo() ||
+			!keyForEditor(container, event.target)
+		) {
+			return
+		}
+
+		const action = imageViewerKey(event, bindings, zoomed)
+
+		if (action === undefined) {
+			return
+		}
+
+		// Kept from the browser (its page zoom) and from the pager under it, even at a zoom limit.
+		event.preventDefault()
+
+		const rect = container.getBoundingClientRect()
+
+		setTransform(prev => imageKeyTransform(action, prev, { width: rect.width, height: rect.height }, natural))
+	})
+
+	// The viewer's keys for its layer (the preview overlay, which keeps focus while an image shows), ahead of the
+	// overlay's own pager: captured at the document, before the overlay's handler sees the arrows.
+	useEffect(() => {
+		const listener = (event: KeyboardEvent): void => {
+			onViewerKey.current(event)
+		}
+
+		document.addEventListener("keydown", listener, true)
+
+		return () => {
+			document.removeEventListener("keydown", listener, true)
+		}
+	}, [onViewerKey])
 
 	function handlePointerDown(event: ReactPointerEvent<HTMLImageElement>): void {
 		if (transform.scale <= 1) {

@@ -2,7 +2,10 @@
 // other viewer's own *.logic.ts sibling, e.g. docxViewer.logic.ts) so it is unit-testable under this
 // project's DOM-free vitest environment (vitest.config.ts: environment "node", no jsdom/happy-dom).
 
-import { type ItemActionId } from "@/features/drive/components/itemMenu.logic"
+import { matchesCombo, type ChordEvent } from "@filen/shared/keymap"
+import { type ItemActionDescriptor, type ItemActionDialogKind, type ItemActionId } from "@/features/drive/components/itemMenu.logic"
+import { PREVIEW_OVERLAY_ACTIONS, type PreviewOverlayAction } from "@/features/preview/lib/keymap"
+import { bindingOf } from "@/lib/keymap/bindingOf"
 import { hasClosest } from "@/lib/domTarget"
 import type { DriveVariant } from "@/features/drive/lib/preferences"
 
@@ -41,29 +44,98 @@ export function isTextEditingTarget(target: EventTarget | null): boolean {
 	return hasClosest(target) && target.closest(`.cm-editor, input, textarea, ${PREVIEW_SURFACE}`) !== null
 }
 
-// The file the overlay's own ArrowLeft/ArrowRight step to, or null when the key is not the pager's. A key something
-// inside took already (a ribbon's or a toolbar's roving focus cancels it without stopping it) is not, nor one with
-// Ctrl, Alt or Cmd: that is what has focus's (a word or line jump, an editor's own command, the browser's).
-export function pagerStep(event: {
-	readonly key: string
-	readonly defaultPrevented: boolean
-	readonly altKey: boolean
-	readonly ctrlKey: boolean
-	readonly metaKey: boolean
-}): -1 | 1 | null {
-	if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) {
+// A field that takes typing (a slider's range input does not): a key there is the field's.
+export function isTypingTarget(target: EventTarget | null): boolean {
+	return (
+		hasClosest(target) && target.closest("input:not([type=range]), textarea, [contenteditable]:not([contenteditable=false])") !== null
+	)
+}
+
+// The overlay action a keydown is under `combos` (the combos in effect by id, useBindings), or undefined. A key
+// something inside took already (a ribbon's or a toolbar's roving focus cancels it without stopping it) is not one.
+export function previewOverlayKey(
+	event: ChordEvent & { readonly defaultPrevented: boolean },
+	combos: Readonly<Record<string, string>>,
+	mac: boolean
+): PreviewOverlayAction | undefined {
+	if (event.defaultPrevented) {
+		return undefined
+	}
+
+	return PREVIEW_OVERLAY_ACTIONS.find(def => matchesCombo(event, bindingOf(combos, def, mac), mac))?.id
+}
+
+// How far the pager steps for an action, from `index` of `count` files: one either way, or to an end. Null for an
+// action that does not page, or one that would not move.
+export function pagerDelta(action: PreviewOverlayAction, index: number, count: number): number | null {
+	let delta: number
+
+	switch (action) {
+		case "preview.prev":
+			delta = -1
+			break
+		case "preview.next":
+			delta = 1
+			break
+		case "preview.first":
+			delta = -index
+			break
+		case "preview.last":
+			delta = count - 1 - index
+			break
+		default:
+			return null
+	}
+
+	return delta === 0 || index + delta < 0 || index + delta >= count ? null : delta
+}
+
+// The intent a pager action asks the unsaved-changes prompt about.
+export function pagerIntent(action: PreviewOverlayAction): PreviewDismissIntent {
+	switch (action) {
+		case "preview.prev":
+			return "prev"
+		case "preview.first":
+			return "first"
+		case "preview.last":
+			return "last"
+		default:
+			return "next"
+	}
+}
+
+// The item-menu entries the overlay's keys open (each a dialog of the menu's own), by action.
+const ITEM_KEY_ACTIONS: Readonly<Partial<Record<PreviewOverlayAction, ItemActionId>>> = {
+	"preview.rename": "rename",
+	"preview.move": "move",
+	"preview.versions": "versions",
+	"preview.info": "info",
+	"preview.share": "share",
+	"preview.trash": "trash"
+}
+
+// The dialog an item-menu key opens, where the file's menu offers that entry enabled (`descriptors`, as the menu lists
+// them); null otherwise, so a key never reaches past what the menu itself allows.
+export type ItemKeyEntry = Pick<ItemActionDescriptor, "id" | "enabled"> &
+	({ readonly run: "direct" } | { readonly run: "dialog"; readonly dialogKind: ItemActionDialogKind })
+
+export function itemKeyDialog(action: PreviewOverlayAction, descriptors: readonly ItemKeyEntry[]): ItemActionDialogKind | null {
+	const id = ITEM_KEY_ACTIONS[action]
+	const descriptor = id === undefined ? undefined : descriptors.find(entry => entry.id === id)
+
+	if (descriptor === undefined || descriptor.enabled === false || descriptor.run !== "dialog") {
 		return null
 	}
 
-	return event.key === "ArrowLeft" ? -1 : event.key === "ArrowRight" ? 1 : null
+	return descriptor.dialogKind
 }
 
 // What close/prev/next resolve to once an unsaved-changes prompt is answered — the SAME confirm dialog
 // serves all three trigger points (Escape/backdrop/X, the two pager buttons, and the in-dialog arrow
-// keys), so this is the only state needed to remember which of them was actually requested. "replace":
-// another file opens in the slot (File ▸ New presentation; the overlay keeps which one). "exitEdit": the image
-// editor is left (its Cancel, Escape or Back), back to the image as it is saved.
-export type PreviewDismissIntent = "close" | "prev" | "next" | "replace" | "exitEdit"
+// keys), so this is the only state needed to remember which of them was actually requested. "first" and "last": the
+// pager's Home and End keys. "replace": another file opens in the slot (File ▸ New presentation; the overlay keeps which
+// one). "exitEdit": the image editor is left (its Cancel, Escape or Back), back to the image as it is saved.
+export type PreviewDismissIntent = "close" | "prev" | "next" | "first" | "last" | "replace" | "exitEdit"
 
 // Only a navigation that leaves this route ever unmounts the overlay (and with it the dirty buffer):
 // a same-route param change — a deeper /drive/$ splat — re-renders the listing in place with the

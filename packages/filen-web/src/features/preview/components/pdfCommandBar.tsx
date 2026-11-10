@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties } from "react"
+import { useEffect, useState, type CSSProperties, type RefObject } from "react"
 import { useTranslation } from "react-i18next"
 import { BookOpenIcon, ListTreeIcon, MaximizeIcon, RotateCcwIcon, RotateCwIcon, SearchIcon, ZoomInIcon } from "lucide-react"
 import { formatBytes } from "@filen/shared"
@@ -116,6 +116,8 @@ export interface PdfCommandBarProps {
 	// The host's download, null where the file may not be saved.
 	onDownload: (() => void) | null
 	onProperties: () => void
+	// The page field, for the Go to Page key.
+	pageInputRef: RefObject<HTMLInputElement | null>
 }
 
 export function PdfCommandBar({
@@ -126,7 +128,8 @@ export function PdfCommandBar({
 	findFocus,
 	onFindClosed,
 	onDownload,
-	onProperties
+	onProperties,
+	pageInputRef
 }: PdfCommandBarProps) {
 	const { t } = useTranslation("preview")
 	const phone = usePhoneWidth()
@@ -154,6 +157,7 @@ export function PdfCommandBar({
 					onNext={command({ type: "page.next" })}
 					onFirst={command({ type: "page.first" })}
 					onLast={command({ type: "page.last" })}
+					inputRef={pageInputRef}
 				/>
 			)
 		},

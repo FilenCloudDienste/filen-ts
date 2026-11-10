@@ -320,7 +320,7 @@ export function previewableSiblings(items: DriveItem[]): DriveItem[] {
 // uuid lookup rather than a plain index+delta so a caller holding only the current item's identity can
 // still step correctly even if its position within `siblings` shifted. An unresolvable uuid steps from
 // the start of the list.
-export function stepPreviewIndex(currentUuid: string, siblings: DriveItem[], delta: 1 | -1): number {
+export function stepPreviewIndex(currentUuid: string, siblings: DriveItem[], delta: number): number {
 	const currentIndex = siblings.findIndex(sibling => sibling.data.uuid === currentUuid)
 
 	return clampListboxIndex((currentIndex === -1 ? 0 : currentIndex) + delta, siblings.length)

@@ -16,6 +16,8 @@ import { cn } from "@filen/shared"
 import { ENTRY_FLAG, skipReasonOf } from "@/lib/sdk/archiveListing"
 import { observeElementOffsetFromAttach } from "@/lib/virtualScroll"
 import { useLatestRef } from "@/lib/useLatestRef"
+import { isRecordingCombo, useBindings } from "@/lib/keymap/registry"
+import { isImeKeydown } from "@filen/shared/keymap"
 import { LIST_MODIFIED_COLUMN_CLASS, LIST_SIZE_COLUMN_CLASS } from "@/features/drive/lib/listingCells"
 import {
 	ARCHIVE_LIST_OVERSCAN,
@@ -110,6 +112,7 @@ export function ArchiveEntryList({
 	const store = snapshot.store
 	const getItemKey = useCallback((index: number) => rows.at(index), [rows])
 	const cursorIndex = useMemo(() => positionIndex(rows, cursor), [rows, cursor])
+	const bindings = useBindings()
 	const handlePointer = useCallback(
 		(index: number, ref: RowRef, event: MouseEvent<HTMLDivElement>) => {
 			handlers.current.onPointer(index, ref, event)
@@ -170,11 +173,11 @@ export function ArchiveEntryList({
 	}, [rows.count, scrollElement])
 
 	function handleKeyDown(event: KeyboardEvent<HTMLDivElement>): void {
-		if (event.target !== event.currentTarget) {
+		if (event.target !== event.currentTarget || isImeKeydown(event.nativeEvent) || isRecordingCombo()) {
 			return
 		}
 
-		const action = browserKeyAction(event, selection.rules.size > 0)
+		const action = browserKeyAction(event, selection.rules.size > 0, bindings)
 
 		if (action === null) {
 			return
@@ -182,6 +185,11 @@ export function ArchiveEntryList({
 
 		event.preventDefault()
 		event.stopPropagation()
+
+		// Held, only the cursor moves on.
+		if (event.repeat && action.type !== "move") {
+			return
+		}
 
 		const pageSize = Math.floor(event.currentTarget.clientHeight / ARCHIVE_ROW_HEIGHT)
 		const next = onKeyAction(action, pageSize)

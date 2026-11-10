@@ -17,8 +17,10 @@ export const openReplacePanel: Command = view => {
 
 export { openSearchPanel }
 
-// CodeMirror's own search bindings but Mod-f, which an app binds to its own (rebindable) find.
-const SEARCH_BINDINGS: readonly KeyBinding[] = searchKeymap.filter(binding => binding.key !== "Mod-f")
+// CodeMirror's own search bindings but find, the next and previous match and go to line (Mod-f, F3, Mod-g, Mod-Alt-g),
+// which an app binds to its own, rebindable keys.
+const APP_BOUND_KEYS: ReadonlySet<string | undefined> = new Set(["Mod-f", "F3", "Mod-g", "Mod-Alt-g"])
+const SEARCH_BINDINGS: readonly KeyBinding[] = searchKeymap.filter(binding => !APP_BOUND_KEYS.has(binding.key))
 
 // Bindings as CodeMirror key names, or as a test of the keydown (an app's own matcher: CodeMirror matches names by
 // character, an app may match by physical key); a scope limits one to those parts of the editor.

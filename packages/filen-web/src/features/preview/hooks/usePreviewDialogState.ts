@@ -17,7 +17,7 @@ export function keepPreviewOpenOnNavigate(dialog: { kind: string }): boolean {
 
 export interface PreviewDialogState {
 	// PreviewOverlay's onStep: the header's prev/next buttons and its own in-dialog arrow keys.
-	stepPreview: (delta: 1 | -1) => void
+	stepPreview: (delta: number) => void
 	// PreviewOverlay's onItemRemoved, after its item menu trashed, deleted or restored the previewed item.
 	removeCurrentPreviewItem: (frozenUuid: string) => void
 }
@@ -35,7 +35,7 @@ export function usePreviewDialogState<D extends PreviewDialogFields>(
 		})
 	}, [setActiveDialog])
 
-	function stepPreview(delta: 1 | -1): void {
+	function stepPreview(delta: number): void {
 		setActiveDialog(prev => stepPreviewDialog(prev, delta))
 	}
 

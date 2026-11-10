@@ -57,6 +57,7 @@ import { ArchiveExtractMenu } from "@/features/archive/components/archiveExtract
 import { createEntryStore } from "@/features/archive/lib/entryStore"
 import { ENTRY_FLAG } from "@/lib/sdk/archiveListing"
 import { packEntries, storeOf, TEST_ARCHIVE, type EntrySpec } from "@/tests/support/archiveEntries"
+import { withCode } from "@/tests/support/keys"
 
 const TAR_INFO: ArchiveNameInfo = { format: { type: "tar", codec: undefined }, defaultName: "photos" }
 
@@ -150,7 +151,7 @@ function list(): HTMLElement {
 
 function press(key: string, init: Partial<KeyboardEventInit> = {}): void {
 	act(() => {
-		fireEvent.keyDown(list(), { key, ...init })
+		fireEvent.keyDown(list(), withCode({ key, ...init }))
 	})
 }
 

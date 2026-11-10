@@ -42,6 +42,7 @@ import { PreviewDownloadableProvider } from "@/features/preview/lib/accessMode"
 import { useDriveJobsStore } from "@/features/transfers/store/useDriveJobsStore"
 import { extractJob } from "@/tests/support/archiveJobFixtures"
 import { storeOf, TEST_ARCHIVE } from "@/tests/support/archiveEntries"
+import { withCode } from "@/tests/support/keys"
 
 const SUMMARY: ListSummary = {
 	format: { type: "zip" },
@@ -178,7 +179,7 @@ function press(key: string, init: Partial<KeyboardEventInit> = {}): boolean {
 	let notPrevented = true
 
 	act(() => {
-		notPrevented = fireEvent.keyDown(list(), { key, ...init })
+		notPrevented = fireEvent.keyDown(list(), withCode({ key, ...init }))
 	})
 
 	return notPrevented

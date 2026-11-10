@@ -1,5 +1,5 @@
 import { isImeKeydown } from "@filen/shared/keymap"
-import { useState, type ReactNode } from "react"
+import { useState, type ReactNode, type Ref } from "react"
 import { useTranslation } from "react-i18next"
 import {
 	ChevronDownIcon,
@@ -73,7 +73,8 @@ export function PageControls({
 	onPrevious,
 	onNext,
 	onFirst,
-	onLast
+	onLast,
+	inputRef
 }: {
 	page: number
 	total: number
@@ -85,6 +86,8 @@ export function PageControls({
 	onNext: () => void
 	onFirst: () => void
 	onLast: () => void
+	// The page field, for a viewer's Go to Page key.
+	inputRef?: Ref<HTMLInputElement> | undefined
 }) {
 	const { t } = useTranslation("preview")
 	// What is typed, while it differs from the page in view.
@@ -122,6 +125,7 @@ export function PageControls({
 			/>
 			<span className="flex shrink-0 items-center gap-1 px-0.5 text-xs whitespace-nowrap text-muted-foreground tabular-nums">
 				<input
+					ref={inputRef}
 					type="text"
 					inputMode="numeric"
 					aria-label={t("previewCommandBarPageNumber")}

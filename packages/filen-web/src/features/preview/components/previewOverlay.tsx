@@ -110,8 +110,18 @@ import {
 	unsavedPromptOpen,
 	type PreviewDismissIntent,
 	menuOpening,
-	pagerStep
+	isTypingTarget,
+	itemKeyDialog,
+	pagerDelta,
+	pagerIntent,
+	previewOverlayKey
 } from "@/features/preview/components/previewOverlay.logic"
+import { IMAGE_EDITOR_ACTIONS, PREVIEW_OVERLAY_ACTIONS, type PreviewOverlayAction } from "@/features/preview/lib/keymap"
+import { imageOverlayKey } from "@/features/preview/imageEdit/lib/keys"
+import { isImeKeydown, matchesCombo } from "@filen/shared/keymap"
+import { isRecordingCombo, useBindings, type ActionDef } from "@/lib/keymap/registry"
+import { bindingOf } from "@/lib/keymap/bindingOf"
+import { isMacPlatform } from "@/lib/keymap/kbd.logic"
 import { dropPreviewBuffer, setPreviewDirty, usePreviewUnsavedGuardStore } from "@/features/preview/store/usePreviewUnsavedGuard"
 import { clearVideoPlaybackStates } from "@/features/preview/lib/videoContinuity"
 import { clearPreviewCache, loadPreviewBytes } from "@/features/preview/lib/previewCache"
@@ -120,7 +130,12 @@ import { spreadsheetSaveFormat } from "@/features/spreadsheet/lib/fileKind"
 import { usePreviewRemoteChanges, type PreviewEdits } from "@/features/preview/hooks/usePreviewRemoteChanges"
 import { RemoteChangeDialog } from "@/features/preview/components/remoteChangeDialog"
 import { DriveDropdownMenuContent } from "@/features/drive/components/itemMenu"
-import { type ItemActionDialogKind, type ItemActionId } from "@/features/drive/components/itemMenu.logic"
+import {
+	applyOfflineGate,
+	driveItemActions,
+	type ItemActionDialogKind,
+	type ItemActionId
+} from "@/features/drive/components/itemMenu.logic"
 import { type ParentNaming } from "@/features/drive/lib/archiveTargets"
 import { MoveTargetDialog } from "@/features/drive/components/moveTargetDialog"
 import { ItemDialog, RenameItemDialog, TrashConfirmDialog } from "@/features/drive/components/itemDialogs"
@@ -130,7 +145,12 @@ import { Kbd } from "@/lib/keymap/kbd"
 import { Spinner } from "@/components/ui/spinner"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import { isAnyMenuOpen } from "@/lib/keymap/dialogGuard"
+import { dialogLayerOf, isAnyMenuOpen } from "@/lib/keymap/dialogGuard"
+
+const IS_MAC = isMacPlatform()
+// The two actions an Escape the dialog dismisses on may be: closing, and leaving the image editor.
+const CLOSE: ActionDef | undefined = PREVIEW_OVERLAY_ACTIONS.find(def => def.id === "preview.close")
+const IMAGE_CANCEL: ActionDef | undefined = IMAGE_EDITOR_ACTIONS.find(def => def.id === "preview.imageCancel")
 
 // Module scope, not an inline arrow: useBlocker's registration effect lists shouldBlockFn in its own
 // deps, so a per-render identity would unregister/re-register the history blocker on every render.
@@ -142,7 +162,7 @@ export interface PreviewOverlayProps {
 	// pager's whole candidate list, not just the opened item.
 	items: DriveItem[]
 	index: number
-	onStep: (delta: 1 | -1) => void
+	onStep: (delta: number) => void
 	onClose: () => void
 	// Trash/delete-permanently/restore-from-trash on the CURRENTLY VIEWED item, run from the header's own
 	// item menu below — the host owns the frozen pager list, so it (not this component) drops the slot
@@ -1341,6 +1361,44 @@ export function PreviewOverlay({
 		startImageEditRef.current()
 	})
 
+	// The overlay's own keys (handleKeyDown) and its menu's ⋯ trigger, which Shift+F10 opens.
+	const bindings = useBindings()
+	const menuTriggerRef = useRef<HTMLButtonElement | null>(null)
+
+	// Mod+S downloads a file that cannot be edited, as the listings' key does; an editable one (and the image editor) is
+	// preview.save's. Taken in this layer only, never under a dialog over it, and always kept from the browser's Save
+	// Page As, as the save is.
+	useAction(
+		"preview.download",
+		keyboardEvent => {
+			const target = keyboardEvent.target
+			const layer = target instanceof Element ? dialogLayerOf(target) : null
+
+			if (layer !== null && layer !== popupRef.current) {
+				return
+			}
+
+			keyboardEvent.preventDefault()
+
+			if (
+				editable ||
+				editing !== null ||
+				keyboardEvent.repeat ||
+				!isOnline ||
+				isAnyMenuOpen() ||
+				driveItem === undefined ||
+				!previewDownloadable(downloadable, variant)
+			) {
+				return
+			}
+
+			// As the header's Download.
+			void startDownloads([driveItem])
+		},
+		IN_EDITORS_AND_FIELDS,
+		[editable, editing, isOnline, driveItem, downloadable, variant]
+	)
+
 	// Routes a close/prev/next intent through the unsaved-changes prompt whenever the buffer is dirty;
 	// runs it immediately otherwise. Every dismissal route (Escape, backdrop, the X button — all three
 	// fold into Base UI's own onOpenChange(false)), both pager buttons, and the in-dialog arrow keys
@@ -1412,10 +1470,30 @@ export function PreviewOverlay({
 			return
 		}
 
+		// Escape closes only while it is the close key (preview.close), or in edit mode the image editor's leave key; the
+		// user may have moved either off it. The close button and the backdrop are no keys.
+		const escape = !next && details.reason === "escape-key"
+		const event = details.event
+		const pressed = (def: ActionDef | undefined): boolean =>
+			def !== undefined &&
+			event instanceof KeyboardEvent &&
+			!event.repeat &&
+			!isRecordingCombo() &&
+			matchesCombo(event, bindingOf(bindings, def, IS_MAC), IS_MAC)
+
 		// In edit mode (no close button, the header's Cancel instead) Escape leaves edit mode, not the preview.
 		if (!next && editing !== null) {
 			details.cancel()
-			requestExitImageEdit()
+
+			if (!escape || pressed(IMAGE_CANCEL)) {
+				requestExitImageEdit()
+			}
+
+			return
+		}
+
+		if (escape && !pressed(CLOSE)) {
+			details.cancel()
 
 			return
 		}
@@ -1459,8 +1537,54 @@ export function PreviewOverlay({
 	// stopPropagation — this is that handler, mirroring moveTargetDialog.tsx's own local onKeyDown for the
 	// identical in-dialog-focus-trap reason.
 	function handleKeyDown(event: KeyboardEvent<HTMLDivElement>): void {
-		// The image editor takes its own keys; nothing pages away from it.
+		const native = event.nativeEvent
+
+		if (event.defaultPrevented || isImeKeydown(native) || isRecordingCombo()) {
+			return
+		}
+
+		// An open menu wins, and this one is not a preference — it is a correctness guard. Menu.Portal
+		// renders inside this Popup's REACT subtree, so a key pressed in the menu reaches this handler by
+		// React propagation wherever the portal put the DOM node, and Base UI only stops a composite key
+		// when it actually moves the highlight (ArrowRight moves nothing in a vertical menu). Paging here
+		// would leave the menu open while the slot beneath it changes, and this menu is built for the
+		// CURRENT slot — so the next click would act on a file the user never opened it for.
+		// directoryListing.tsx guards its own clear-selection action off the same signal. A key in a dialog
+		// over the preview (one portaled from inside it, a rename say) is that dialog's.
+		const target = event.target
+		const layer = target instanceof Element ? dialogLayerOf(target) : null
+
+		if (isAnyMenuOpen() || (layer !== null && layer !== popupRef.current)) {
+			return
+		}
+
+		// The image editor takes its own keys; its save as copy and cancel are the header's, here. Escape leaves it
+		// through the dialog's own dismissal (handleOpenChange).
 		if (editing !== null) {
+			const action = isTypingTarget(target) ? undefined : imageOverlayKey(native, bindings, IS_MAC)
+
+			if (action === undefined || (action === "preview.imageCancel" && event.key === "Escape")) {
+				return
+			}
+
+			event.preventDefault()
+
+			if (event.repeat) {
+				return
+			}
+
+			if (action === "preview.imageSaveCopy") {
+				saveImage(copyTargetOf(editing))
+			} else {
+				requestExitImageEdit()
+			}
+
+			return
+		}
+
+		const action = previewOverlayKey(native, bindings, IS_MAC)
+
+		if (action === undefined) {
 			return
 		}
 
@@ -1469,32 +1593,77 @@ export function PreviewOverlay({
 		// selection and never stopPropagation, so without this a Left/Right meant for the caret would
 		// also page the overlay (or pop the unsaved-changes prompt on every press) — see
 		// previewOverlay.logic.ts's own isTextEditingTarget for why this checks read-only CodeMirror
-		// too, not just the editable case.
-		if (isMediaTarget(event.target) || isTextEditingTarget(event.target)) {
+		// too, not just the editable case. The same holds for every key here (Delete, F2) but a close on
+		// Ctrl or Cmd, which nothing that edits takes (the desktop app's Ctrl+W).
+		if ((isMediaTarget(target) || isTextEditingTarget(target)) && !(action === "preview.close" && (event.ctrlKey || event.metaKey))) {
 			return
 		}
 
-		// An open menu wins too, and this one is not a preference — it is a correctness guard. Menu.Portal
-		// renders inside this Popup's REACT subtree, so a key pressed in the menu reaches this handler by
-		// React propagation wherever the portal put the DOM node, and Base UI only stops a composite key
-		// when it actually moves the highlight (ArrowRight moves nothing in a vertical menu). Paging here
-		// would leave the menu open while the slot beneath it changes, and this menu is built for the
-		// CURRENT slot — so the next click would act on a file the user never opened it for.
-		// directoryListing.tsx guards its own clear-selection action off the same signal.
-		if (isAnyMenuOpen()) {
-			return
-		}
-
-		const step = pagerStep(event)
-
-		if (step === null) {
+		// Escape closes through the dialog's own dismissal (handleOpenChange), which knows about the layers over it.
+		if (action === "preview.close" && event.key === "Escape") {
 			return
 		}
 
 		event.preventDefault()
-		requestOrRun(step === -1 ? "prev" : "next", () => {
-			onStep(step)
-		})
+
+		const delta = pagerDelta(action, index, items.length)
+
+		if (delta !== null) {
+			requestOrRun(pagerIntent(action), () => {
+				onStep(delta)
+			})
+
+			return
+		}
+
+		// Held, only the pager steps on.
+		if (event.repeat) {
+			return
+		}
+
+		runOverlayKey(action)
+	}
+
+	// The overlay's keys past the pager: close, and the header's menu and its entries.
+	function runOverlayKey(action: PreviewOverlayAction): void {
+		if (driveItem === undefined) {
+			return
+		}
+
+		if (action === "preview.close") {
+			requestOrRun("close", onClose)
+
+			return
+		}
+
+		// A chat's or a note's linked file has no menu (isLinkedEmbedItem), so no menu keys either.
+		if (isLinkedEmbedItem(driveItem) || saving || menuDialogKind !== null) {
+			return
+		}
+
+		if (action === "preview.openMenu") {
+			menuTriggerRef.current?.click()
+
+			return
+		}
+
+		const descriptors = applyOfflineGate(driveItemActions(driveItem, variant), isOnline)
+		const hidden = previewMenuHiddenActionIds(hiddenMenuActionIds, previewDownloadable(downloadable, variant))
+		const kind = itemKeyDialog(
+			action,
+			descriptors.filter(descriptor => !hidden.has(descriptor.id))
+		)
+
+		if (kind === null) {
+			return
+		}
+
+		// As the menu's own entries (onItemAction below).
+		if (kind === "move" || kind === "versions") {
+			remote.expectOwnChange(driveItem.data.uuid, kind === "move" ? "move" : "restore")
+		}
+
+		setMenuDialogKind(kind)
 	}
 
 	function handleUnsavedConfirm(): void {
@@ -1532,6 +1701,11 @@ export function PreviewOverlay({
 			onStep(-1)
 		} else if (actions.intent === "next") {
 			onStep(1)
+		} else if (actions.intent === "first") {
+			// Clamped to the ends by the host's step (stepPreviewIndex).
+			onStep(-items.length)
+		} else if (actions.intent === "last") {
+			onStep(items.length)
 		} else if (actions.intent === "replace") {
 			pendingReplaceRef.current?.()
 		} else if (actions.intent === "exitEdit") {
@@ -1727,6 +1901,7 @@ export function PreviewOverlay({
 										<DropdownMenuTrigger
 											render={
 												<Button
+													ref={menuTriggerRef}
 													variant="ghost"
 													size="icon-sm"
 													aria-label={t("drive:driveItemMenuTrigger")}

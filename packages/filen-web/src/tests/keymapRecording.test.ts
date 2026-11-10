@@ -93,14 +93,14 @@ describe("conflicts", () => {
 
 		expect(await commitRecordedChord("list", "n", WEB)).toBe("conflict")
 		expect(isRecordingCombo()).toBe(false)
-		// N is New directory here, and the next slide in a slideshow over the listing.
+		// N is New directory here, the next page in a PDF and the next slide in a slideshow over the listing.
 		expect(currentRecordingProblem()).toMatchObject({
 			kind: "conflict",
 			actionId: "drive.rename",
 			combo: "n",
 			chord: "n",
 			replaced: "f2",
-			conflictIds: ["drive.newDirectory", "presentation.show.next"]
+			conflictIds: ["drive.newDirectory", "preview.pdfNextPage", "presentation.show.next"]
 		})
 		expect(comboFor("drive.rename")).toBe("f2")
 	})

@@ -6,7 +6,10 @@ import { CodeCommandBar, type MarkdownBar } from "@/features/preview/components/
 import { RemoteCompare } from "@/features/preview/components/remoteCompare"
 import { onCommandBarF6, onRibbonEscape } from "@/features/office/components/ribbon/ribbonFocus"
 import { CodeChrome, detectIndent, type CodeIndent } from "@/features/preview/lib/codeChrome"
-import { useCodeViewSettings } from "@/features/preview/lib/codeViewSettings"
+import { setCodeViewSettings, useCodeViewSettings } from "@/features/preview/lib/codeViewSettings"
+import { codeViewKey, codeViewSettingsChange } from "@/features/preview/lib/codeViewKeys.logic"
+import { isRecordingCombo, useBindings } from "@/lib/keymap/registry"
+import { isImeKeydown } from "@filen/shared/keymap"
 import { usePreviewDownload } from "@/features/preview/lib/accessMode"
 import type { TextFile } from "@/features/preview/lib/textFile"
 import { keyForEditor } from "@/lib/keymap/dialogGuard"
@@ -86,6 +89,49 @@ export function CodeSurface({ file, tag, alt, editable, locked, onDirtyChange, c
 		[chrome, editable]
 	)
 
+	// The next and previous match and go to line, likewise; the find field steps on its own (DocxFindField).
+	const onEditorCommandKey = (keyboardEvent: KeyboardEvent, run: () => void): void => {
+		const root = rootRef.current
+
+		if (root === null || keyboardEvent.defaultPrevented || !keyForEditor(root, keyboardEvent.target)) {
+			return
+		}
+
+		keyboardEvent.preventDefault()
+		run()
+	}
+
+	useAction(
+		"editor.findNext",
+		keyboardEvent => {
+			onEditorCommandKey(keyboardEvent, () => {
+				chrome.findStep(1)
+			})
+		},
+		IN_EDITORS,
+		[chrome]
+	)
+	useAction(
+		"editor.findPrevious",
+		keyboardEvent => {
+			onEditorCommandKey(keyboardEvent, () => {
+				chrome.findStep(-1)
+			})
+		},
+		IN_EDITORS,
+		[chrome]
+	)
+	useAction(
+		"editor.goToLine",
+		keyboardEvent => {
+			onEditorCommandKey(keyboardEvent, () => {
+				chrome.requestGoToLine()
+			})
+		},
+		IN_EDITORS,
+		[chrome]
+	)
+
 	useEffect(() => {
 		return () => {
 			chrome.dispose()
@@ -120,10 +166,49 @@ export function CodeSurface({ file, tag, alt, editable, locked, onDirtyChange, c
 		chrome.focus()
 	}
 
-	// F6 pressed elsewhere in the viewer's layer (focus left on the preview overlay itself after a click, as Safari and
-	// macOS Firefox do).
+	const bindings = useBindings()
+
+	// The view keys (wrap, line numbers, font size, View changes) for a key pressed in the viewer's layer, the editor
+	// included (CodeMirror leaves them be), but never in a text field, which keeps its own.
+	const onCodeViewKey = (event: KeyboardEvent, root: HTMLElement): boolean => {
+		if (
+			event.defaultPrevented ||
+			isImeKeydown(event) ||
+			isRecordingCombo() ||
+			(event.target instanceof Element && event.target.matches("input, textarea")) ||
+			!keyForEditor(root, event.target)
+		) {
+			return false
+		}
+
+		const action = codeViewKey(event, bindings)
+
+		if (action === undefined) {
+			return false
+		}
+
+		event.preventDefault()
+
+		const change = codeViewSettingsChange(action, settings)
+
+		if (change !== null) {
+			// Held, the size keys step on; a toggle flips once.
+			if (!event.repeat || action.startsWith("editor.fontSize")) {
+				setCodeViewSettings(change)
+			}
+		} else if (!event.repeat && editable && dirty) {
+			setChanges(chrome.text())
+		}
+
+		return true
+	}
+
+	// F6 and the view keys pressed elsewhere in the viewer's layer (focus left on the preview overlay itself after a
+	// click, as Safari and macOS Firefox do).
 	useEditorLayerKeys(rootRef, (event, root) => {
-		onCommandBarF6(event, root, focusEditor)
+		if (!onCodeViewKey(event, root)) {
+			onCommandBarF6(event, root, focusEditor)
+		}
 	})
 
 	return (
@@ -134,6 +219,10 @@ export function CodeSurface({ file, tag, alt, editable, locked, onDirtyChange, c
 				onRibbonEscape(event, event.currentTarget, focusEditor, "capture")
 			}}
 			onKeyDown={event => {
+				if (onCodeViewKey(event.nativeEvent, event.currentTarget)) {
+					return
+				}
+
 				if (!onRibbonEscape(event, event.currentTarget, focusEditor, "bubble"))
 					onCommandBarF6(event, event.currentTarget, focusEditor)
 			}}
