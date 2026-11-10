@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { defaultComboOn } from "@/lib/keymap/registry"
+import { availableOn, defaultComboOn } from "@/lib/keymap/registry"
 import { SYNC_ACTIONS } from "@/features/sync/lib/keymap"
 
 const MAC = { mac: true, desktop: true }
@@ -18,6 +18,15 @@ function def(id: string) {
 describe("SYNC_ACTIONS", () => {
 	it("are all sync-scoped", () => {
 		for (const action of SYNC_ACTIONS) expect(action.scope, action.id).toBe("sync")
+	})
+
+	it("exist in the desktop app only", () => {
+		for (const action of SYNC_ACTIONS) {
+			expect(availableOn(action, OTHER), action.id).toBe(true)
+			expect(availableOn(action, MAC), action.id).toBe(true)
+			expect(availableOn(action, { mac: false, desktop: false }), action.id).toBe(false)
+			expect(availableOn(action, { mac: true, desktop: false }), action.id).toBe(false)
+		}
 	})
 
 	it("ships the add, stepping, review and save defaults", () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { defaultComboOn } from "@/lib/keymap/registry"
+import { availableOn, defaultComboOn } from "@/lib/keymap/registry"
 import { MOUNTS_ACTIONS } from "@/features/mounts/lib/keymap"
 import { mountsPageOf, mountsPages } from "@/features/mounts/lib/mountsPages.logic"
 
@@ -12,6 +12,13 @@ describe("MOUNTS_ACTIONS", () => {
 		expect(combos).toEqual({ "mounts.previousRole": "alt+arrowup", "mounts.nextRole": "alt+arrowdown", "mounts.toggleRole": "" })
 
 		for (const action of MOUNTS_ACTIONS) expect(action.scope, action.id).toBe("mounts")
+	})
+
+	it("exist in the desktop app only", () => {
+		for (const action of MOUNTS_ACTIONS) {
+			expect(availableOn(action, PLATFORM), action.id).toBe(true)
+			expect(availableOn(action, { mac: false, desktop: false }), action.id).toBe(false)
+		}
 	})
 })
 

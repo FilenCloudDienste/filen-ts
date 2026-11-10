@@ -3,7 +3,9 @@ import type { ActionDef } from "@/lib/keymap/registry"
 // The Sync section's keys (desktop app). Pause/resume and Sync now ship unset: Mod+R is the page's reload, and no
 // other chord says either. The tabs ship unset too: Mod+1…4 belong to the browser's tabs and to module navigation.
 // Remove is Delete, plus Cmd+Backspace on a Mac (Finder's), whose laptop keyboards have no Delete key.
-export const SYNC_ACTIONS: readonly ActionDef[] = [
+const DESKTOP = { desktop: true } as const
+
+const DEFS: readonly ActionDef[] = [
 	{ id: "sync.addPair", defaultCombo: "n", scope: "sync", descriptionKey: "sync:syncCommandAddPair" },
 	{ id: "sync.previousPair", defaultCombo: "alt+arrowup", scope: "sync", descriptionKey: "sync:syncCommandPreviousPair" },
 	{ id: "sync.nextPair", defaultCombo: "alt+arrowdown", scope: "sync", descriptionKey: "sync:syncCommandNextPair" },
@@ -29,3 +31,6 @@ export const SYNC_ACTIONS: readonly ActionDef[] = [
 	{ id: "sync.tabIgnored", defaultCombo: "", scope: "sync", descriptionKey: "sync:syncCommandTabIgnored" },
 	{ id: "sync.tabSettings", defaultCombo: "", scope: "sync", descriptionKey: "sync:syncCommandTabSettings" }
 ]
+
+// Sync exists in the desktop app only, so a browser's shortcuts list leaves these out.
+export const SYNC_ACTIONS: readonly ActionDef[] = DEFS.map(def => ({ ...def, only: DESKTOP }))
