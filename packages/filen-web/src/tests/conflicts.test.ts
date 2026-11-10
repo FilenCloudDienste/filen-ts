@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest"
 import type { ActionScope, ResolvedAction } from "@/lib/keymap/registry"
-import { conflictingActions, scopesCanCollide } from "@/lib/keymap/conflicts"
+import { comboWithout, conflictingActions, conflictsByAction, reassignChanges, scopesCanCollide, swapChanges } from "@/lib/keymap/conflicts"
 
-function action(id: string, scope: ActionScope, combo: string): ResolvedAction {
-	return { id, scope, combo, defaultCombo: combo, descriptionKey: "common:toggleTheme" }
+function action(id: string, scope: ActionScope, combo: string, overridden = false): ResolvedAction {
+	return { id, scope, combo, defaultCombo: combo, platformDefault: combo, overridden, descriptionKey: "common:toggleTheme" }
 }
 
 function ids(actions: readonly ResolvedAction[]): string[] {
@@ -161,5 +161,67 @@ describe("conflictingActions", () => {
 		const actions = [action("notes.selectAll", "notes", "mod+a"), action("drive.selectAll", "drive", "mod+a")]
 
 		expect(ids(conflictingActions(actions, "mod+a", "app.unknown"))).toEqual(["notes.selectAll", "drive.selectAll"])
+	})
+})
+
+describe("conflictsByAction", () => {
+	it("lists every action sharing a keystroke with each other one, both ways", () => {
+		const conflicts = conflictsByAction(
+			[
+				action("drive.a", "drive", "mod+k", true),
+				action("drive.b", "drive", "mod+k,f2", true),
+				action("app.c", "global", "f2", true)
+			],
+			false
+		)
+
+		expect(ids(conflicts.get("drive.a") ?? [])).toEqual(["drive.b"])
+		expect(ids(conflicts.get("drive.b") ?? []).sort()).toEqual(["app.c", "drive.a"])
+		expect(ids(conflicts.get("app.c") ?? [])).toEqual(["drive.b"])
+	})
+
+	it("skips scopes that never co-mount", () => {
+		expect(conflictsByAction([action("drive.a", "drive", "n", true), action("notes.b", "notes", "n", true)], false).size).toBe(0)
+	})
+
+	it("skips a shipped, guarded pair until the user rebinds either side", () => {
+		const shipped = [action("drive.download", "drive", "mod+s"), action("preview.save", "editor", "mod+s")]
+
+		expect(conflictsByAction(shipped, false).size).toBe(0)
+		expect(
+			conflictsByAction([shipped[0] ?? action("x", "drive", ""), action("preview.save", "editor", "mod+s", true)], false).size
+		).toBe(2)
+	})
+
+	it("compares per platform: mod is Ctrl off a Mac", () => {
+		const actions = [action("drive.a", "drive", "mod+k", true), action("drive.b", "drive", "ctrl+k", true)]
+
+		expect(conflictsByAction(actions, false).size).toBe(2)
+		expect(conflictsByAction(actions, true).size).toBe(0)
+	})
+})
+
+describe("reassign and swap", () => {
+	const actions = [action("drive.a", "drive", "f2"), action("drive.b", "drive", "mod+k,delete"), action("drive.c", "drive", "mod+k")]
+
+	it("comboWithout drops the chords on that keystroke, leaving the unbound marker when nothing is left", () => {
+		expect(comboWithout("mod+k,delete", "ctrl+k", false)).toBe("delete")
+		expect(comboWithout("mod+k", "mod+k", false)).toBe("none")
+	})
+
+	it("reassign takes the chord off every action holding it", () => {
+		expect(reassignChanges(actions, "drive.a", "mod+k", "mod+k", false)).toEqual({
+			"drive.a": "mod+k",
+			"drive.b": "delete",
+			"drive.c": "none"
+		})
+	})
+
+	it("swap hands the other action the chord this one gave up", () => {
+		expect(swapChanges(actions, "drive.a", "mod+k", "mod+k", "f2", "drive.c", false)).toEqual({ "drive.a": "mod+k", "drive.c": "f2" })
+		expect(swapChanges(actions, "drive.a", "delete", "delete", "f2", "drive.b", false)).toEqual({
+			"drive.a": "delete",
+			"drive.b": "mod+k,f2"
+		})
 	})
 })

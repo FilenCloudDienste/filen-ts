@@ -1,143 +1,172 @@
-import { type } from "arktype"
-import { normalizeCombo } from "@filen/shared/keymap"
+import { normalizeCombo, UNBOUND_COMBO, withoutCharacterChords } from "@filen/shared/keymap"
 import { create } from "zustand"
-import { kvGetJson, kvSetJson } from "@/lib/storage/adapter"
-import { kvLoadOnce } from "@/lib/storage/kvBestEffort"
-import { withoutKey } from "@/lib/utils"
+import { desktopBridge } from "@/lib/desktop"
+import { log } from "@/lib/log"
 import type { NamespaceKey } from "@/lib/i18n"
+import { isMacPlatform } from "@/lib/keymap/kbd.logic"
+import type { ReservedOwner } from "@/lib/keymap/reserved"
 import type { SHORTCUT_NAMESPACES } from "@/lib/keymap/shortcutsCatalog"
+import {
+	DEFAULT_RECORD,
+	deleteRecord,
+	keymapAccountKey,
+	KEYMAP_UNCLAIMED_KEY,
+	LEGACY_OVERRIDES_KEY,
+	onRecordPosted,
+	postRecord,
+	readLegacyOverrides,
+	readRecord,
+	writeRecord,
+	type KeymapRecord
+} from "@/lib/keymap/storage"
 
-// Keyboard-first from day one — every keyboard-controllable action in the app registers
-// here instead of wiring its own `window.addEventListener("keydown", …)`. A Map-backed registry
-// of ActionDefs (defaults) plus a small persisted-override layer (kv key below) gives every
-// consumer three things for free: one source of truth for "what does this shortcut do" (read by
-// the shortcuts catalog — lib/keymap/actions.ts, rendered by lib/keymap/shortcutsList.tsx on both
-// the `?` dialog and Settings → Keyboard), a user-remappable combo (`setUserCombo` /
-// `clearUserCombo`), and a live indicator (`<Kbd action>`) that always reflects the combo actually
-// in effect. This file stays feature-agnostic: it holds no concrete action, only the mechanism.
+export { keymapOverridesSchema, keymapRecordSchema, type KeymapRecord } from "@/lib/keymap/storage"
+
+// Keyboard-first from day one — every keyboard-controllable action in the app registers here instead of wiring its
+// own keydown listener. A Map of ActionDefs (defaults) plus one persisted record (the user's combos and the single-key
+// switch) gives every consumer one source of truth for what a shortcut does (the shortcuts list on both the `?`
+// dialog and Settings → Keyboard), a user-remappable combo, and a live indicator (`<Kbd action>`) that always shows
+// the combo actually in effect. This file stays feature-agnostic: it holds no concrete action, only the mechanism.
 export type ActionScope = "global" | "drive" | "editor" | "notes" | "chats" | "audio" | "photos" | "contacts" | "videos"
+
+// A finer group inside a scope, for the shortcuts list only (conflicts read the scope): the editor's surfaces.
+export type ShortcutSection =
+	"viewer" | "imageEditor" | "code" | "presentation" | "presentationObjects" | "presentationText" | "slideshow" | "word" | "sheet"
 
 type ShortcutNamespace = (typeof SHORTCUT_NAMESPACES)[number]
 
-// The namespace has to travel with the key: the shortcuts UI resolves these against several
-// catalogs at once, and an unprefixed key would only ever resolve in the first one. Both halves are
-// compile-checked — the namespace exists, and the key exists IN that namespace.
+// The namespace has to travel with the key: the shortcuts UI resolves these against several catalogs at once. Both
+// halves are compile-checked — the namespace exists, and the key exists IN that namespace.
 export type ShortcutDescriptionKey = { [N in ShortcutNamespace]: `${N}:${NamespaceKey<N>}` }[ShortcutNamespace]
+
+export interface KeymapPlatform {
+	// Mod is Cmd.
+	readonly mac: boolean
+	// The desktop app, where the browser's own keys are free.
+	readonly desktop: boolean
+}
+
+// A default for some platforms only; the first whose every given field matches wins over `defaultCombo`.
+export interface PlatformDefault {
+	readonly on: Partial<KeymapPlatform>
+	readonly combo: string
+}
 
 export interface ActionDef {
 	id: string
 	defaultCombo: string
+	platformDefaults?: readonly PlatformDefault[]
 	scope: ActionScope
+	section?: ShortcutSection
 	descriptionKey: ShortcutDescriptionKey
+	// Where the action works, when its name does not say ("While a slideshow runs").
+	hintKey?: ShortcutDescriptionKey
+	// Its character keys stay on with single-key shortcuts off: a running slideshow's keys are a clicker's.
+	keepsCharacterKeys?: boolean
 }
 
-// An ActionDef plus the combo actually in effect for it (default or user override).
+// An ActionDef plus its binding on this platform, for the shortcuts list and the conflict check.
 export interface ResolvedAction extends ActionDef {
+	// The combo the user configured or the default, character keys included; "" when unbound.
 	combo: string
+	// The platform's default.
+	platformDefault: string
+	overridden: boolean
 }
 
-const OVERRIDES_KV_KEY = "keymap.v1.overrides"
+const desktop = desktopBridge()
 
-// Every persisted value must be a non-empty combo string. "string > 0" is arktype's LENGTH
-// constraint on a length-boundable operand, not a numeric comparison on `string` itself —
-// verified against the installed 2.2.2 package's own parser (arktype/out/parser/shift/operator/
-// bounds.js: `getBoundKinds` routes a `string`/`array` root to minLength/maxLength/exactLength;
-// only a bare `number` root takes the numeric min/max branch). The record's key side is left
-// unconstrained (`"[string]"`, the documented index-signature form — arktype's own docs don't
-// show a constrained-key variant) since object keys are always strings anyway; a malformed VALUE
-// at any key fails validation for the whole object, so `kvGetJson` drops the entire blob and
-// every action's default wins — corrupt data can never partially-brick the keymap.
-export const keymapOverridesSchema = type({ "[string]": "string > 0" })
+export const CURRENT_PLATFORM: KeymapPlatform = { mac: isMacPlatform(), desktop: desktop !== undefined }
+
+export function defaultComboOn(def: ActionDef, platform: KeymapPlatform): string {
+	const variant = def.platformDefaults?.find(
+		({ on }) => (on.mac === undefined || on.mac === platform.mac) && (on.desktop === undefined || on.desktop === platform.desktop)
+	)
+
+	return variant?.combo ?? def.defaultCombo
+}
+
+// The combo the user set (unbound as ""), or the platform's default.
+export function configuredCombo(def: ActionDef, overrides: Readonly<Record<string, string>>, platform: KeymapPlatform): string {
+	const override = overrides[def.id]
+
+	if (override === undefined) {
+		return defaultComboOn(def, platform)
+	}
+
+	return override === UNBOUND_COMBO ? "" : override
+}
+
+// The combo that fires: the configured one, less its character keys while those are switched off.
+export function effectiveCombo(def: ActionDef, record: KeymapRecord, platform: KeymapPlatform): string {
+	const combo = configuredCombo(def, record.overrides, platform)
+
+	return record.characterKeys || def.keepsCharacterKeys === true ? combo : withoutCharacterChords(combo)
+}
+
+export function resolveAction(def: ActionDef, overrides: Readonly<Record<string, string>>, platform: KeymapPlatform): ResolvedAction {
+	return {
+		...def,
+		combo: configuredCombo(def, overrides, platform),
+		platformDefault: defaultComboOn(def, platform),
+		overridden: overrides[def.id] !== undefined
+	}
+}
 
 const actions = new Map<string, ActionDef>()
+// Bumped on each registration, so a bindings map computed before one is never served after it.
+let registrations = 0
 
-// The in-flight combo recording: which surface instance owns it and which action it is rebinding.
-// See beginRecording below for why the session carries an owner rather than being a bare boolean.
+// The in-flight recording: which surface instance owns it, which action it rebinds (null: the list's key search), and
+// which of its combo's chords it replaces (null: it adds one).
 export interface RecordingSession {
 	owner: string
-	actionId: string
+	actionId: string | null
+	slot: number | null
 }
 
-// Why the last recording attempt was refused. Outlives the session (the recorder stops the moment a
-// full chord lands) so the surface can say which action already holds the combo.
-export interface RecordingRejection {
-	actionId: string
-	conflictKey: ShortcutDescriptionKey
-}
+// What stopped or followed the last recording, shown under its row until that action's binding changes.
+export type RecordingProblem =
+	| {
+			kind: "conflict"
+			actionId: string
+			// The action's whole combo with the recorded chord in place.
+			combo: string
+			chord: string
+			// The chord it replaced, for a swap.
+			replaced: string | null
+			conflictIds: readonly string[]
+	  }
+	| { kind: "reserved"; actionId: string; chord: string; owner: ReservedOwner; blocked: boolean }
 
 interface KeymapState {
-	overrides: Record<string, string>
+	record: KeymapRecord
 	recordingSession: RecordingSession | null
-	recordingRejection: RecordingRejection | null
-	setOverrides: (overrides: Record<string, string>) => void
-	setOverride: (id: string, combo: string) => void
-	clearOverride: (id: string) => void
-	setRecordingSession: (session: RecordingSession | null) => void
-	setRecordingRejection: (rejection: RecordingRejection | null) => void
+	recordingProblem: RecordingProblem | null
 }
 
-// A rejection is only true of the binding it was computed against, so any change to that binding
-// retires it.
-function withoutRejectionFor(state: KeymapState, id: string): RecordingRejection | null {
-	return state.recordingRejection?.actionId === id ? null : state.recordingRejection
-}
+// Internal reactivity primitive only: nothing outside this file touches the store, so swapping the mechanism never
+// ripples to `useAction`/`<Kbd>`.
+const useKeymapStore = create<KeymapState>(() => ({ record: DEFAULT_RECORD, recordingSession: null, recordingProblem: null }))
 
-// Internal reactivity primitive only — nothing outside this file touches the store directly (see
-// `useComboFor` below), so swapping the mechanism later never ripples to `useAction`/`<Kbd>`.
-// zustand is already a project dependency and convention (@/stores/boot.ts); it gives every
-// consumer of `useComboFor` a free re-render the moment an override loads from kv or is set at
-// runtime, without each of them hand-rolling a subscribe/listener.
-const useKeymapStore = create<KeymapState>(set => ({
-	overrides: {},
-	recordingSession: null,
-	recordingRejection: null,
-	setOverrides: overrides => {
-		set({ overrides })
-	},
-	setOverride: (id, combo) => {
-		set(state => ({ overrides: { ...state.overrides, [id]: combo }, recordingRejection: withoutRejectionFor(state, id) }))
-	},
-	clearOverride: id => {
-		// keymapOverridesSchema rejects "", so an override can only be REMOVED (back to the default), never
-		// blanked.
-		set(state => ({
-			overrides: withoutKey(state.overrides, id),
-			recordingRejection: withoutRejectionFor(state, id)
-		}))
-	},
-	setRecordingSession: session => {
-		set({ recordingSession: session })
-	},
-	setRecordingRejection: rejection => {
-		set({ recordingRejection: rejection })
-	}
-}))
+function applyRecord(record: KeymapRecord): void {
+	const state = useKeymapStore.getState()
+	const problem = state.recordingProblem
+	// A problem is only true of the binding it was computed against.
+	const retired = problem !== null && state.record.overrides[problem.actionId] !== record.overrides[problem.actionId]
 
-// Narrow subscribed read of the override layer, for consumers that resolve many actions at once
-// (lib/keymap/actions.ts's useActionCatalog). Keeps the store itself module-private.
-export function useOverrides(): Record<string, string> {
-	return useKeymapStore(state => state.overrides)
-}
-
-// Plain change feed of the override layer, for a non-React consumer (the desktop menu's combos,
-// lib/keymap/desktopMenu.ts).
-export function subscribeOverrides(listener: () => void): () => void {
-	return useKeymapStore.subscribe((state, previous) => {
-		if (state.overrides !== previous.overrides) {
-			listener()
-		}
-	})
+	useKeymapStore.setState({ record, recordingProblem: retired ? null : problem })
 }
 
 // Stored combos in the canonical token spelling (@filen/shared/keymap): older records may spell a key by its
-// character ("mod+=", "mod+shift+,"), which react-hotkeys-hook cannot match and whose "," it splits on. Rewritten on
-// every load rather than in storage: the next write persists the canonical form. A combo that holds no chord at all
-// matches nothing, so it is dropped and the action falls back to its default.
-export function migrateOverrides(overrides: Record<string, string>): Record<string, string> {
+// character ("mod+=", "mod+shift+,"). Rewritten on load rather than in storage: the next write persists the canonical
+// form. A combo that holds no chord at all matches nothing, so it is dropped and the action falls back to its default;
+// the unbound marker is kept.
+export function migrateOverrides(overrides: Readonly<Record<string, string>>): Record<string, string> {
 	const migrated: Record<string, string> = {}
 
 	for (const [id, combo] of Object.entries(overrides)) {
-		const canonical = normalizeCombo(combo)
+		const canonical = combo === UNBOUND_COMBO ? combo : normalizeCombo(combo)
 
 		if (canonical.length > 0) {
 			migrated[id] = canonical
@@ -147,25 +176,136 @@ export function migrateOverrides(overrides: Record<string, string>): Record<stri
 	return migrated
 }
 
-// The kv read fires at most once per module lifetime, kicked off by the first `registerAction` call
-// (import order between this module and its first feature consumer is otherwise unspecified). A
-// storage-layer failure must never take keyboard shortcuts down with it, so defaults keep working
-// either way — only a successfully-loaded, schema-valid record ever overrides them.
-const ensureOverridesLoaded = kvLoadOnce(
-	OVERRIDES_KV_KEY,
-	keymapOverridesSchema,
-	loaded => {
-		useKeymapStore.getState().setOverrides(migrateOverrides(loaded))
-	},
-	"keymap",
-	"keymap overrides"
-)
+function migrateRecord(record: KeymapRecord): KeymapRecord {
+	return { overrides: migrateOverrides(record.overrides), characterKeys: record.characterKeys }
+}
 
-// Test-only synchronization point today (also handy for a future boot gate that wants to know
-// the keymap has settled). Production callers never need to await this — `comboFor`/`useComboFor`
-// are correct from the very first render (defaults) and update live once this resolves.
+// The record this tab reads and writes: the signed-in account's, or the unclaimed one before an account is known.
+let activeKey = KEYMAP_UNCLAIMED_KEY
+let account: string | null = null
+
+// Every load, account switch and write runs in order on this chain, so a slow read can never land on top of a newer
+// write, and each write merges onto the freshest stored record.
+let chain: Promise<void> = Promise.resolve()
+
+function enqueue(step: () => Promise<void>): Promise<void> {
+	const run = chain.then(step)
+
+	chain = run.catch((error: unknown) => {
+		log.warn("keymap", "keymap update failed", error)
+	})
+
+	return run
+}
+
+// A storage failure must never take keyboard shortcuts down: the read is best effort and the defaults keep working.
+async function readQuiet(key: string): Promise<KeymapRecord | null> {
+	try {
+		const record = await readRecord(key)
+
+		return record === null ? null : migrateRecord(record)
+	} catch (error) {
+		log.warn("keymap", "failed to read the keymap", error)
+
+		return null
+	}
+}
+
+let loadStarted = false
+
+// The first load, kicked off by the first registration, and the other tabs' changes from then on.
+function ensureLoaded(): void {
+	if (loadStarted) {
+		return
+	}
+
+	loadStarted = true
+
+	onRecordPosted((key, record) => {
+		if (key === activeKey) {
+			applyRecord(migrateRecord(record))
+		}
+	})
+
+	void enqueue(async () => {
+		const record = await readQuiet(activeKey)
+
+		if (record !== null) {
+			applyRecord(record)
+		}
+	})
+}
+
+// Resolves once every load and write queued so far has landed. Production callers never need to await this —
+// `comboFor`/`useComboFor` are correct from the first render (defaults) and update live.
 export function keymapOverridesLoaded(): Promise<void> {
-	return ensureOverridesLoaded()
+	ensureLoaded()
+
+	return chain
+}
+
+// The signed-in account (its user id), whose record this tab uses from now on. Its first sign-in on this device adopts
+// the unclaimed record, or the previous format's, if there is one.
+export function bindKeymapAccount(userId: string): Promise<void> {
+	if (account === userId) {
+		return chain
+	}
+
+	account = userId
+	ensureLoaded()
+
+	return enqueue(async () => {
+		const key = keymapAccountKey(userId)
+
+		activeKey = key
+
+		let record = await readQuiet(key)
+
+		if (record === null) {
+			const unclaimed = await readQuiet(KEYMAP_UNCLAIMED_KEY)
+			const legacy = unclaimed === null ? await readLegacyQuiet() : null
+			const adopted = unclaimed ?? (legacy === null ? null : { overrides: legacy, characterKeys: true })
+
+			if (adopted !== null) {
+				record = adopted
+				await writeRecord(key, adopted)
+				await Promise.allSettled([deleteRecord(KEYMAP_UNCLAIMED_KEY), deleteRecord(LEGACY_OVERRIDES_KEY)])
+			}
+		}
+
+		applyRecord(record ?? DEFAULT_RECORD)
+	})
+}
+
+async function readLegacyQuiet(): Promise<Record<string, string> | null> {
+	try {
+		const legacy = await readLegacyOverrides()
+
+		return legacy === null ? null : migrateOverrides(legacy)
+	} catch {
+		return null
+	}
+}
+
+// One write: the change applied to the freshest stored record (another tab's change included), then stored, applied
+// here and posted to the other tabs.
+function mutate(update: (record: KeymapRecord) => KeymapRecord): Promise<void> {
+	ensureLoaded()
+
+	return enqueue(async () => {
+		const key = activeKey
+		const stored = await readQuiet(key)
+		const next = update(stored ?? useKeymapStore.getState().record)
+
+		applyRecord(next)
+		postRecord(key, next)
+
+		try {
+			await writeRecord(key, next)
+		} catch (error) {
+			log.warn("keymap", "failed to persist the keymap", error)
+		}
+	})
 }
 
 export function registerAction(def: ActionDef): void {
@@ -174,153 +314,214 @@ export function registerAction(def: ActionDef): void {
 	}
 
 	actions.set(def.id, def)
-	void ensureOverridesLoaded()
+	registrations++
+	ensureLoaded()
 }
 
-// Shared by the plain snapshot read (`comboFor`) and the reactive hook (`useComboFor`) below —
-// kept as a private helper closed over `actions` rather than duplicated, since the two callers
-// only differ in HOW they read `overrides` (a `.getState()` snapshot vs. a subscribed selector),
-// never in the precedence rule itself.
-function resolveCombo(overrides: Record<string, string>, id: string): string {
-	const override = overrides[id]
-	if (override !== undefined) {
-		return override
-	}
-
+function definition(id: string): ActionDef {
 	const def = actions.get(id)
-	if (!def) {
+
+	if (def === undefined) {
 		throw new Error(`keymap: comboFor: unknown action "${id}"`)
 	}
 
-	return def.defaultCombo
+	return def
+}
+
+export function registeredAction(id: string): ActionDef | undefined {
+	return actions.get(id)
 }
 
 export function comboFor(id: string): string {
-	return resolveCombo(useKeymapStore.getState().overrides, id)
+	return effectiveCombo(definition(id), useKeymapStore.getState().record, CURRENT_PLATFORM)
 }
 
-// Every override lives in ONE persisted record, but a write only ever owns a single action's entry.
-// Re-reading that record and merging just this entry onto it is what keeps a second tab's rebind (made
-// after this tab's one-shot load) alive — persisting this tab's own snapshot wholesale would silently
-// drop it. Falls back to the in-memory record when nothing readable is stored, so a dropped/corrupt blob
-// still gets rewritten from what the app is actually using.
-async function persistOverride(id: string, combo: string | null): Promise<void> {
-	const persisted = await kvGetJson(OVERRIDES_KV_KEY, keymapOverridesSchema)
-	const merged = Object.fromEntries(
-		Object.entries(persisted === null ? useKeymapStore.getState().overrides : migrateOverrides(persisted)).filter(([key]) => key !== id)
-	)
+// Reactive read for `useAction`/`<Kbd>`. The combo is computed INSIDE the zustand selector, so the value this hook
+// returns IS the subscribed hook's own return value: the React Compiler treats hook returns as always fresh, but would
+// memoize a plain function reading module state (browser-verified once: an override never reached such a read).
+export function useComboFor(id: string): string {
+	return useKeymapStore(state => effectiveCombo(definition(id), state.record, CURRENT_PLATFORM))
+}
 
-	if (combo !== null) {
-		merged[id] = combo
+const bindingsCache = new WeakMap<KeymapRecord, { registrations: number; bindings: Readonly<Record<string, string>> }>()
+
+// The combo in effect for every registered action, one object per record: a matcher handed it keeps its parse cache
+// hits between renders, and it is rebuilt only when the user changes a binding.
+export function bindingsOf(record: KeymapRecord): Readonly<Record<string, string>> {
+	const cached = bindingsCache.get(record)
+
+	if (cached?.registrations === registrations) {
+		return cached.bindings
 	}
 
-	await kvSetJson(OVERRIDES_KV_KEY, merged)
+	const bindings: Record<string, string> = {}
+
+	for (const def of actions.values()) {
+		bindings[def.id] = effectiveCombo(def, record, CURRENT_PLATFORM)
+	}
+
+	bindingsCache.set(record, { registrations, bindings })
+
+	return bindings
 }
 
-// Drops a user override so the action resolves to its default again ("reset to default" in the
-// shortcuts UI). Loads first for the same reason setUserCombo does.
-export async function clearUserCombo(id: string): Promise<void> {
-	await ensureOverridesLoaded()
-	useKeymapStore.getState().clearOverride(id)
-	await persistOverride(id, null)
+// Subscribed: every action's combo in effect, for a surface that matches many at once (the presentation editor, the
+// PDF viewer).
+export function useBindings(): Readonly<Record<string, string>> {
+	return useKeymapStore(state => bindingsOf(state.record))
 }
 
-export async function setUserCombo(id: string, combo: string): Promise<void> {
-	// Await the persisted-overrides load FIRST: without it a late load would land on top of the override
-	// just set here and revert it in the UI.
-	await ensureOverridesLoaded()
+export function useKeymapRecord(): KeymapRecord {
+	return useKeymapStore(state => state.record)
+}
+
+export function currentKeymapRecord(): KeymapRecord {
+	return useKeymapStore.getState().record
+}
+
+export function useOverrides(): Readonly<Record<string, string>> {
+	return useKeymapStore(state => state.record.overrides)
+}
+
+export function useCharacterKeys(): boolean {
+	return useKeymapStore(state => state.record.characterKeys)
+}
+
+// Plain change feed of the bindings, for a non-React consumer (the desktop menu's combos).
+export function subscribeBindings(listener: () => void): () => void {
+	return useKeymapStore.subscribe((state, previous) => {
+		if (state.record !== previous.record) {
+			listener()
+		}
+	})
+}
+
+// An override as stored: the canonical spelling, or nothing when it equals the platform's default (the action then
+// counts as unchanged and follows its default if that ever moves).
+function storedOverride(id: string, combo: string): string | null {
+	const def = actions.get(id)
+	const platformDefault = def === undefined ? undefined : defaultComboOn(def, CURRENT_PLATFORM)
+
+	if (combo === UNBOUND_COMBO) {
+		return platformDefault === "" ? null : UNBOUND_COMBO
+	}
 
 	const canonical = normalizeCombo(combo)
 
-	// keymapOverridesSchema rejects "", and one such value would drop the whole stored record on the next load.
 	if (canonical.length === 0) {
-		throw new Error(`keymap: setUserCombo: "${combo}" is no combo`)
+		throw new Error(`keymap: "${combo}" is no combo`)
 	}
 
-	useKeymapStore.getState().setOverride(id, canonical)
-	await persistOverride(id, canonical)
+	return canonical === platformDefault ? null : canonical
 }
 
-// Reactive read for `useAction`/`<Kbd>`. The combo is computed INSIDE the zustand selector (not
-// via a separate call out to the plain `comboFor` after subscribing to a narrower slice) so the
-// value this hook returns IS the subscribed hook's own return value — React Compiler treats hook
-// return values as always-fresh, but it doesn't know a plain, non-"use"-prefixed function like
-// `comboFor` secretly reads mutable module state. An earlier version of this hook subscribed via
-// `useKeymapStore(state => state.overrides[id])` and then called the plain `comboFor(id)`
-// separately — browser-verified (live override, Chrome DevTools) that the compiler memoized that
-// second call keyed on `id` alone and never re-ran it once a runtime override landed, silently
-// serving the pre-override combo. Folding the resolution into the selector itself, so its return
-// value IS what the hook returns, sidesteps that hazard.
-export function useComboFor(id: string): string {
-	return useKeymapStore(state => resolveCombo(state.overrides, id))
+// Several bindings in one write: a combo (UNBOUND_COMBO turns the action off) or null for the default; and the
+// single-key switch, when given (an import). Rejects, writing nothing, when a combo holds no chord.
+export async function updateOverrides(changes: Readonly<Record<string, string | null>>, characterKeys?: boolean): Promise<void> {
+	const resolved = Object.entries(changes).map(([id, combo]) => [id, combo === null ? null : storedOverride(id, combo)] as const)
+
+	await mutate(record => {
+		const overrides = new Map(Object.entries(record.overrides))
+
+		for (const [id, combo] of resolved) {
+			if (combo === null) {
+				overrides.delete(id)
+			} else {
+				overrides.set(id, combo)
+			}
+		}
+
+		return { overrides: Object.fromEntries(overrides), characterKeys: characterKeys ?? record.characterKeys }
+	})
 }
 
-// A combo recording is a single app-wide session: while one is in flight every keypress is data, not
-// a command. The recorder (react-hotkeys-hook's useRecordHotkeys) and useHotkeys both listen on
-// `document`, and useHotkeys' listeners are registered first, so the recorder cannot out-order or
-// out-propagate them — suppression has to happen inside useHotkeys' own opt-out, which reads
-// `isRecordingCombo()` synchronously at event time (see useAction.ts).
+export function setUserCombo(id: string, combo: string): Promise<void> {
+	return updateOverrides({ [id]: combo })
+}
+
+// Drops a user override, so the action resolves to its default again.
+export function clearUserCombo(id: string): Promise<void> {
+	return updateOverrides({ [id]: null })
+}
+
+// "Turn off": stored as a marker every matcher reads as no key at all.
+export function unbindAction(id: string): Promise<void> {
+	return updateOverrides({ [id]: UNBOUND_COMBO })
+}
+
+// Every override back to its default, or only those of `ids` (one group). One write either way.
+export function resetOverrides(ids?: readonly string[]): Promise<void> {
+	const only = ids === undefined ? null : new Set(ids)
+
+	return mutate(record => ({
+		...record,
+		overrides: only === null ? {} : Object.fromEntries(Object.entries(record.overrides).filter(([id]) => !only.has(id)))
+	}))
+}
+
+export function setCharacterKeys(enabled: boolean): Promise<void> {
+	return mutate(record => ({ ...record, characterKeys: enabled }))
+}
+
+// A combo recording is a single app-wide session: while one is in flight every keypress is data, not a command. The
+// recorder and useHotkeys both listen on `document`, and useHotkeys' listeners are registered first, so suppression
+// has to happen inside useHotkeys' own opt-out, which reads `isRecordingCombo()` at event time (useAction.ts).
 //
-// The session lives here, not in the surface that renders it, for two reasons: only its owner can end
-// it, so a second shortcuts list (the dialog can open on top of the settings page) can never clear a
-// session it did not start nor strand one it did; and the whole lifecycle — including why an attempt
-// was refused — is then one piece of state with one owner, testable without a DOM.
-export function beginRecording(owner: string, actionId: string): void {
-	useKeymapStore.getState().setRecordingSession({ owner, actionId })
-	useKeymapStore.getState().setRecordingRejection(null)
+// The session lives here, not in the surface that renders it: only its owner can end it, so a second shortcuts list
+// (the dialog can open on top of the settings page) can never clear a session it did not start nor strand one it did.
+export function beginRecording(owner: string, actionId: string | null, slot: number | null = null): void {
+	useKeymapStore.setState({ recordingSession: { owner, actionId, slot }, recordingProblem: null })
 }
 
-// No-op unless `owner` currently holds the session — a displaced list's unmount cleanup must not end
-// a session it never started (that would leave a live recorder AND live hotkeys).
+// No-op unless `owner` currently holds the session — a displaced list's unmount cleanup must not end a session it
+// never started (that would leave a live recorder AND live hotkeys).
 export function endRecording(owner: string): void {
+	if (useKeymapStore.getState().recordingSession?.owner === owner) {
+		useKeymapStore.setState({ recordingSession: null })
+	}
+}
+
+// Ends the owner's session and keeps why its chord was not simply saved, for the row to show.
+export function reportRecordingProblem(owner: string, problem: RecordingProblem): void {
 	if (useKeymapStore.getState().recordingSession?.owner !== owner) {
 		return
 	}
 
-	useKeymapStore.getState().setRecordingSession(null)
+	useKeymapStore.setState({ recordingSession: null, recordingProblem: problem })
 }
 
-// Ends the owner's session and records why the combo was refused, so the surface can name the action
-// already holding it. Same owner check as endRecording.
-export function rejectRecording(owner: string, conflictKey: ShortcutDescriptionKey): void {
-	const session = useKeymapStore.getState().recordingSession
-
-	if (session?.owner !== owner) {
-		return
-	}
-
-	useKeymapStore.getState().setRecordingRejection({ actionId: session.actionId, conflictKey })
-	useKeymapStore.getState().setRecordingSession(null)
+// A note after a save (a key the browser may keep), shown until the binding changes again.
+export function noteRecordingProblem(problem: RecordingProblem): void {
+	useKeymapStore.setState({ recordingProblem: problem })
 }
 
-// Unconditional; a newly mounted shortcuts list calls this so it can never inherit someone else's
-// in-flight recording — nor a rejection from an attempt made before it existed, which would otherwise
-// render as a live "already used by" error under a row the user has not touched this time around.
+export function dismissRecordingProblem(): void {
+	useKeymapStore.setState({ recordingProblem: null })
+}
+
+// Unconditional; a newly mounted shortcuts list calls this so it can never inherit someone else's in-flight recording,
+// nor a problem from an attempt made before it existed.
 export function clearRecording(): void {
-	useKeymapStore.getState().setRecordingSession(null)
-	useKeymapStore.getState().setRecordingRejection(null)
+	useKeymapStore.setState({ recordingSession: null, recordingProblem: null })
 }
 
-// Plain snapshot reads, the same split `comboFor`/`useComboFor` already draws. The predicate is what
-// useAction consults inside a DOM event handler: no subscription, so it re-renders nothing and has
-// none of the React-Compiler staleness hazard `useComboFor` above documents.
+// Plain snapshot reads; the predicate is what useAction consults inside a DOM event handler.
 export function currentRecording(): RecordingSession | null {
 	return useKeymapStore.getState().recordingSession
 }
 
-export function currentRecordingRejection(): RecordingRejection | null {
-	return useKeymapStore.getState().recordingRejection
+export function currentRecordingProblem(): RecordingProblem | null {
+	return useKeymapStore.getState().recordingProblem
 }
 
 export function isRecordingCombo(): boolean {
 	return currentRecording() !== null
 }
 
-// Subscribed counterparts, for the surface that has to re-render when it gains or loses the session.
 export function useRecordingSession(): RecordingSession | null {
 	return useKeymapStore(state => state.recordingSession)
 }
 
-export function useRecordingRejection(): RecordingRejection | null {
-	return useKeymapStore(state => state.recordingRejection)
+export function useRecordingProblem(): RecordingProblem | null {
+	return useKeymapStore(state => state.recordingProblem)
 }

@@ -12,16 +12,25 @@ import type { ActionDef } from "@/lib/keymap/registry"
 // CodeMirror/Quill keys, which the tables do not model. Bare letters are free, but one stray keypress
 // reflowing the whole content column is not a default worth shipping.
 //
+// `app.openSettings` is Cmd+, in the macOS desktop app, as in every Mac app; a Mac browser keeps Cmd+, for its own
+// settings, so the web leaves it unassigned there too.
+//
 // `app.openShortcuts` matches by `event.code`, so on a non-US layout the physical slash key is not
 // `?`. Accepted — the account-menu entry and Settings → Keyboard are the layout-independent paths,
 // and a user on such a layout can rebind it there.
 export const APP_ACTIONS: readonly ActionDef[] = [
-	{ id: "app.toggleTheme", defaultCombo: "d", scope: "global", descriptionKey: "common:toggleTheme" },
 	{ id: "app.openShortcuts", defaultCombo: "shift+slash", scope: "global", descriptionKey: "common:shortcutsTitle" },
-	{ id: "app.openSettings", defaultCombo: "", scope: "global", descriptionKey: "common:settings" },
+	{
+		id: "app.openSettings",
+		defaultCombo: "",
+		platformDefaults: [{ on: { mac: true, desktop: true }, combo: "mod+comma" }],
+		scope: "global",
+		descriptionKey: "common:settings"
+	},
 	{ id: "app.openTransfers", defaultCombo: "", scope: "global", descriptionKey: "common:moduleTransfers" },
-	{ id: "app.openPlaylists", defaultCombo: "", scope: "global", descriptionKey: "common:modulePlaylists" },
 	{ id: "app.openPhotos", defaultCombo: "", scope: "global", descriptionKey: "common:modulePhotos" },
 	{ id: "app.openVideos", defaultCombo: "", scope: "global", descriptionKey: "common:moduleVideos" },
-	{ id: "app.toggleAssistant", defaultCombo: "", scope: "global", descriptionKey: "common:toggleAssistant" }
+	{ id: "app.openPlaylists", defaultCombo: "", scope: "global", descriptionKey: "common:modulePlaylists" },
+	{ id: "app.toggleAssistant", defaultCombo: "", scope: "global", descriptionKey: "common:toggleAssistant" },
+	{ id: "app.toggleTheme", defaultCombo: "d", scope: "global", descriptionKey: "common:toggleTheme" }
 ]

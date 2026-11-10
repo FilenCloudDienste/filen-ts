@@ -37,7 +37,7 @@ import { usePresentationEditor } from "@/features/presentation/hooks/usePresenta
 import { presentationShortcutKeys } from "@/features/presentation/lib/keymap/editor"
 import { Kbd, KbdKeys } from "@/lib/keymap/kbd"
 import { useKeyboardLayout } from "@/lib/keymap/layout"
-import { useOverrides } from "@/lib/keymap/registry"
+import { useBindings } from "@/lib/keymap/registry"
 
 // The presentation editor's own ribbon controls (the Home, Insert and View group files list them): Undo and Redo,
 // New slide with its layout menu, Layout, Section, Reset, Duplicate, Delete and Hide, and the panes. Each reads the
@@ -46,7 +46,7 @@ import { useOverrides } from "@/lib/keymap/registry"
 export function UndoControls() {
 	const { t } = useTranslation("preview")
 	const scope = usePresentationEditor()
-	const overrides = useOverrides()
+	const overrides = useBindings()
 	const keyLayout = useKeyboardLayout()
 
 	if (scope === undefined) return null
@@ -135,7 +135,7 @@ function LayoutItems({
 export function NewSlideControl() {
 	const { t } = useTranslation("preview")
 	const scope = usePresentationEditor()
-	const overrides = useOverrides()
+	const overrides = useBindings()
 	const keyLayout = useKeyboardLayout()
 
 	if (scope === undefined) return null
@@ -291,7 +291,7 @@ export function SectionMenu() {
 export function SlideButtons() {
 	const { t } = useTranslation("preview")
 	const scope = usePresentationEditor()
-	const overrides = useOverrides()
+	const overrides = useBindings()
 	const keyLayout = useKeyboardLayout()
 
 	if (scope === undefined) return null

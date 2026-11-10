@@ -35,13 +35,17 @@ describe("AUDIO_ACTIONS — static contract", () => {
 		}
 	})
 
-	it("use mod+shift chords that never collide with bare Arrow/Space or editor caret keys", () => {
+	it("use modifier chords that never collide with bare Arrow/Space or editor caret keys", () => {
 		for (const def of AUDIO_ACTIONS) {
-			expect(def.defaultCombo.startsWith("mod+shift+")).toBe(true)
+			expect(def.defaultCombo).toMatch(/^mod\+(shift|alt)\+/)
 			expect(def.defaultCombo).not.toBe("space")
 			expect(def.defaultCombo).not.toBe("arrowleft")
 			expect(def.defaultCombo).not.toBe("arrowright")
 		}
+	})
+
+	it("keep play and pause off Firefox's private-window key", () => {
+		expect(AUDIO_ACTIONS.find(def => def.id === "audio.playPause")?.defaultCombo).toBe("mod+alt+p")
 	})
 
 	it("have unique ids under the audio namespace", () => {

@@ -4,5 +4,11 @@ import type { ActionDef } from "@/lib/keymap/registry"
 // browser's own print (the app's chrome, or a copy where downloads are disallowed) never runs from the keyboard; the
 // running show takes Mod+P for its pen first and stops it there.
 export const PRESENTATION_PRINT_ACTIONS: readonly ActionDef[] = [
-	{ id: "presentation.print", defaultCombo: "mod+p", scope: "editor", descriptionKey: "preview:previewPptxKeyPrint" }
+	{
+		id: "presentation.print",
+		defaultCombo: "mod+p",
+		scope: "editor",
+		section: "presentation",
+		descriptionKey: "preview:previewPptxKeyPrint"
+	}
 ]

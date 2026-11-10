@@ -1,7 +1,6 @@
 import type { TextKeyBindings, TextKeyCommand } from "@filen/office/react/presentation"
 import { PREVIEW_ACTIONS } from "@/features/preview/lib/keymap"
-import { isMacPlatform } from "@/lib/keymap/kbd.logic"
-import { useOverrides, type ActionDef } from "@/lib/keymap/registry"
+import { CURRENT_PLATFORM, defaultComboOn, useBindings, type ActionDef } from "@/lib/keymap/registry"
 
 // Text editing keys of the presentation editor that a user may rebind, PowerPoint's. Bold, italic, link, find and
 // replace are the document editors' own actions (editor.bold, editor.italic, editor.link, editor.find,
@@ -32,103 +31,46 @@ export type PresentationTextAction =
 // Promote, demote, moving paragraphs and the next placeholder are PowerPoint's own per platform: Alt+Shift+arrows and
 // Ctrl+Enter on Windows, Cmd+[ and Cmd+] on a Mac (Option+Shift+arrows select by word there), as the text editor's
 // own defaults (DEFAULT_TEXT_BINDINGS, APPLE_TEXT_BINDINGS; a type-only import keeps the editor out of the keymap).
-type ParagraphKeys = Pick<TextKeyBindings, "promote" | "demote" | "moveParagraphUp" | "moveParagraphDown" | "nextPlaceholder">
+// Clear formatting is Ctrl+Space, PowerPoint's, except on a Mac, where Ctrl+Space switches the input source:
+// Cmd+Shift+Space there.
+const ON_MAC = { mac: true } as const
 
-const MAC_PARAGRAPH: ParagraphKeys = {
-	promote: "mod+bracketleft",
-	demote: "mod+bracketright",
-	moveParagraphUp: "",
-	moveParagraphDown: "",
-	nextPlaceholder: ""
+function textAction(
+	id: PresentationTextAction,
+	defaultCombo: string,
+	descriptionKey: ActionDef["descriptionKey"],
+	mac?: string
+): ActionDef & { readonly id: PresentationTextAction } {
+	return {
+		id,
+		defaultCombo,
+		...(mac === undefined ? {} : { platformDefaults: [{ on: ON_MAC, combo: mac }] }),
+		scope: "editor",
+		section: "presentationText",
+		descriptionKey,
+		hintKey: "settings:keyboardHintSlideText"
+	}
 }
-const OTHER_PARAGRAPH: ParagraphKeys = {
-	promote: "alt+shift+arrowleft",
-	demote: "alt+shift+arrowright",
-	moveParagraphUp: "alt+shift+arrowup",
-	moveParagraphDown: "alt+shift+arrowdown",
-	nextPlaceholder: "mod+enter"
-}
-const PARAGRAPH = isMacPlatform() ? MAC_PARAGRAPH : OTHER_PARAGRAPH
 
 export const PRESENTATION_TEXT_ACTIONS: readonly (ActionDef & { readonly id: PresentationTextAction })[] = [
-	{ id: "presentation.text.underline", defaultCombo: "mod+u", scope: "editor", descriptionKey: "preview:previewPptxShortcutUnderline" },
-	{
-		id: "presentation.text.subscript",
-		defaultCombo: "mod+ctrl+equal",
-		scope: "editor",
-		descriptionKey: "preview:previewPptxShortcutSubscript"
-	},
-	{
-		id: "presentation.text.superscript",
-		defaultCombo: "mod+ctrl+shift+equal",
-		scope: "editor",
-		descriptionKey: "preview:previewPptxShortcutSuperscript"
-	},
-	{
-		id: "presentation.text.clearFormatting",
-		defaultCombo: "ctrl+space",
-		scope: "editor",
-		descriptionKey: "preview:previewPptxShortcutClearFormatting"
-	},
-	{
-		id: "presentation.text.growFont",
-		defaultCombo: "mod+shift+period",
-		scope: "editor",
-		descriptionKey: "preview:previewPptxShortcutGrowFont"
-	},
-	{
-		id: "presentation.text.shrinkFont",
-		defaultCombo: "mod+shift+comma",
-		scope: "editor",
-		descriptionKey: "preview:previewPptxShortcutShrinkFont"
-	},
-	{ id: "presentation.text.alignLeft", defaultCombo: "mod+l", scope: "editor", descriptionKey: "preview:previewPptxShortcutAlignLeft" },
-	{
-		id: "presentation.text.alignCenter",
-		defaultCombo: "mod+e",
-		scope: "editor",
-		descriptionKey: "preview:previewPptxShortcutAlignCenter"
-	},
-	{ id: "presentation.text.alignRight", defaultCombo: "mod+r", scope: "editor", descriptionKey: "preview:previewPptxShortcutAlignRight" },
-	{ id: "presentation.text.justify", defaultCombo: "mod+j", scope: "editor", descriptionKey: "preview:previewPptxShortcutJustify" },
-	{
-		id: "presentation.text.lineBreak",
-		defaultCombo: "shift+enter",
-		scope: "editor",
-		descriptionKey: "preview:previewPptxShortcutLineBreak"
-	},
-	{ id: "presentation.text.levelDown", defaultCombo: "tab", scope: "editor", descriptionKey: "preview:previewPptxShortcutLevelDown" },
-	{ id: "presentation.text.levelUp", defaultCombo: "shift+tab", scope: "editor", descriptionKey: "preview:previewPptxShortcutLevelUp" },
-	{
-		id: "presentation.text.promote",
-		defaultCombo: PARAGRAPH.promote,
-		scope: "editor",
-		descriptionKey: "preview:previewPptxShortcutPromote"
-	},
-	{
-		id: "presentation.text.demote",
-		defaultCombo: PARAGRAPH.demote,
-		scope: "editor",
-		descriptionKey: "preview:previewPptxShortcutDemote"
-	},
-	{
-		id: "presentation.text.moveParagraphUp",
-		defaultCombo: PARAGRAPH.moveParagraphUp,
-		scope: "editor",
-		descriptionKey: "preview:previewPptxShortcutMoveParagraphUp"
-	},
-	{
-		id: "presentation.text.moveParagraphDown",
-		defaultCombo: PARAGRAPH.moveParagraphDown,
-		scope: "editor",
-		descriptionKey: "preview:previewPptxShortcutMoveParagraphDown"
-	},
-	{
-		id: "presentation.text.nextPlaceholder",
-		defaultCombo: PARAGRAPH.nextPlaceholder,
-		scope: "editor",
-		descriptionKey: "preview:previewPptxShortcutNextPlaceholder"
-	}
+	textAction("presentation.text.underline", "mod+u", "preview:previewPptxShortcutUnderline"),
+	textAction("presentation.text.subscript", "mod+ctrl+equal", "preview:previewPptxShortcutSubscript"),
+	textAction("presentation.text.superscript", "mod+ctrl+shift+equal", "preview:previewPptxShortcutSuperscript"),
+	textAction("presentation.text.clearFormatting", "ctrl+space", "preview:previewPptxShortcutClearFormatting", "mod+shift+space"),
+	textAction("presentation.text.growFont", "mod+shift+period", "preview:previewPptxShortcutGrowFont"),
+	textAction("presentation.text.shrinkFont", "mod+shift+comma", "preview:previewPptxShortcutShrinkFont"),
+	textAction("presentation.text.alignLeft", "mod+l", "preview:previewPptxShortcutAlignLeft"),
+	textAction("presentation.text.alignCenter", "mod+e", "preview:previewPptxShortcutAlignCenter"),
+	textAction("presentation.text.alignRight", "mod+r", "preview:previewPptxShortcutAlignRight"),
+	textAction("presentation.text.justify", "mod+j", "preview:previewPptxShortcutJustify"),
+	textAction("presentation.text.lineBreak", "shift+enter", "preview:previewPptxShortcutLineBreak"),
+	textAction("presentation.text.levelDown", "tab", "preview:previewPptxShortcutLevelDown"),
+	textAction("presentation.text.levelUp", "shift+tab", "preview:previewPptxShortcutLevelUp"),
+	textAction("presentation.text.promote", "alt+shift+arrowleft", "preview:previewPptxShortcutPromote", "mod+bracketleft"),
+	textAction("presentation.text.demote", "alt+shift+arrowright", "preview:previewPptxShortcutDemote", "mod+bracketright"),
+	textAction("presentation.text.moveParagraphUp", "alt+shift+arrowup", "preview:previewPptxShortcutMoveParagraphUp", ""),
+	textAction("presentation.text.moveParagraphDown", "alt+shift+arrowdown", "preview:previewPptxShortcutMoveParagraphDown", ""),
+	textAction("presentation.text.nextPlaceholder", "mod+enter", "preview:previewPptxShortcutNextPlaceholder", "")
 ]
 
 // The action each of the text editor's rebindable keys runs: this list's, and the document editors' bold, italic and
@@ -157,24 +99,26 @@ const ACTION_OF: Readonly<Record<TextKeyCommand, string>> = {
 	nextPlaceholder: "presentation.text.nextPlaceholder"
 }
 
-const DEFAULTS: ReadonlyMap<string, string> = new Map(
-	[...PRESENTATION_TEXT_ACTIONS, ...PREVIEW_ACTIONS].map(action => [action.id, action.defaultCombo] as const)
+const DEFINITIONS: ReadonlyMap<string, ActionDef> = new Map(
+	[...PRESENTATION_TEXT_ACTIONS, ...PREVIEW_ACTIONS].map(action => [action.id, action] as const)
 )
 
-// The text editor's keys with the user's overrides applied (each action's own default otherwise).
-export function presentationTextBindings(overrides: Readonly<Record<string, string>>): TextKeyBindings {
+// The text editor's keys from the combos in effect by action id (useBindings; each action's own default on this
+// platform where one is missing).
+export function presentationTextBindings(combos: Readonly<Record<string, string>>): TextKeyBindings {
 	const bindings: Partial<Record<TextKeyCommand, string>> = {}
 
 	for (const command of Object.keys(ACTION_OF) as TextKeyCommand[]) {
 		const id = ACTION_OF[command]
+		const def = DEFINITIONS.get(id)
 
-		bindings[command] = overrides[id] ?? DEFAULTS.get(id) ?? ""
+		bindings[command] = combos[id] ?? (def === undefined ? "" : defaultComboOn(def, CURRENT_PLATFORM))
 	}
 
 	return bindings as TextKeyBindings
 }
 
-// The bindings for the mounted text editor, following overrides as the user changes them.
+// The bindings for the mounted text editor, following the user's changes as they make them.
 export function usePresentationTextBindings(): TextKeyBindings {
-	return presentationTextBindings(useOverrides())
+	return presentationTextBindings(useBindings())
 }

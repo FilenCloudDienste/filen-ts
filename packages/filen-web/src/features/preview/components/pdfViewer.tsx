@@ -21,7 +21,7 @@ import { isSafeAbsoluteHref } from "@/lib/safeUrl"
 import { keyForEditor } from "@/lib/keymap/dialogGuard"
 import { useEditorLayerKeys } from "@/lib/keymap/editorLayerKeys"
 import { IN_EDITORS, useAction } from "@/lib/keymap/useAction"
-import { useOverrides } from "@/lib/keymap/registry"
+import { useBindings } from "@/lib/keymap/registry"
 import { pdfViewerKey, pdfViewerKeyCommand } from "@/features/preview/lib/pdfKeys.logic"
 import { LoadingState } from "@/components/loadingState"
 import { Button } from "@/components/ui/button"
@@ -167,7 +167,7 @@ function PdfReader({ document, alt, size }: { document: PdfDomDocument; alt: str
 		viewer.pages.scrollerRef.current?.focus()
 	}
 
-	const overrides = useOverrides()
+	const overrides = useBindings()
 
 	// Zoom, fit and rotate keys for the layer the document is shown in, never a dialog over it. A key the viewer takes
 	// is always kept from the browser, even at a zoom limit, so its page zoom never scales the app instead.

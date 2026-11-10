@@ -39,7 +39,13 @@ vi.mock("@/lib/sdk/client", () => ({
 	sdkApi: { boot: () => Promise.resolve({ ok: true, threads: 2 }), setClientConfig: () => Promise.resolve() },
 	threadCount: () => 2
 }))
-vi.mock("@/lib/storage/adapter", () => ({ storage: () => Promise.resolve({}), kvGetJson: () => Promise.resolve(null), kvClear }))
+vi.mock("@/lib/storage/adapter", () => ({
+	storage: () => Promise.resolve({}),
+	kvGetJson: () => Promise.resolve(null),
+	kvSetJson: () => Promise.resolve(),
+	kvEntriesJson: () => Promise.resolve([]),
+	kvClear
+}))
 vi.mock("@/lib/storage/capability", () => ({ isOpfsApiAvailable: () => true }))
 vi.mock("@/lib/sdk/session", () => ({
 	clearSessionOutsideKv: () => Promise.resolve(),

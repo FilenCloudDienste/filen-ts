@@ -21,10 +21,11 @@ describe("pdfViewerKey", () => {
 		expect(pdfViewerKey(key({ key: "+", code: "NumpadAdd", ctrlKey: true }), {}, false)).toBe("preview.pdfZoomIn")
 		expect(pdfViewerKey(key({ key: "+", code: "BracketRight", ctrlKey: true }), {}, false)).toBe("preview.pdfZoomIn")
 		expect(pdfViewerKey(key({ key: "-", code: "Slash", ctrlKey: true }), {}, false)).toBe("preview.pdfZoomOut")
-		// A key the user bound keeps its action.
+		// A key the user bound keeps its action; zoom turned off leaves the key to the browser.
 		expect(
-			pdfViewerKey(key({ key: "+", code: "BracketRight", ctrlKey: true }), { "preview.pdfRotateCw": "mod+bracketright" }, false)
-		).toBe("preview.pdfRotateCw")
+			pdfViewerKey(key({ key: "+", code: "BracketRight", ctrlKey: true }), { "preview.pdfZoomReset": "mod+bracketright" }, false)
+		).toBe("preview.pdfZoomReset")
+		expect(pdfViewerKey(key({ key: "+", code: "BracketRight", ctrlKey: true }), { "preview.pdfZoomIn": "" }, false)).toBeUndefined()
 		expect(pdfViewerKey(key({ key: "=", code: "Equal", metaKey: true }), {}, true)).toBe("preview.pdfZoomIn")
 	})
 

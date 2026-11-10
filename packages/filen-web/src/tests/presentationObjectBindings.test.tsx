@@ -6,6 +6,7 @@ import type { ObjectKeyBindings } from "@filen/office/react/presentation"
 import { PresentationShapeLayer } from "@/features/presentation/components/ribbon/arrange"
 import type { PresentationRibbonEditor } from "@/features/presentation/components/ribbon/tabs"
 import { clearUserCombo, setUserCombo } from "@/lib/keymap/registry"
+import { registerAllActions } from "@/lib/keymap/actions"
 import "@/lib/i18n"
 
 // The slide canvas matches its object commands against the keymap as the user has it: a rebinding saved in the
@@ -18,6 +19,8 @@ vi.mock("@/lib/storage/adapter", () => ({
 }))
 
 const seen: ObjectKeyBindings[] = []
+
+registerAllActions()
 
 vi.mock("@filen/office/react/presentation", async importOriginal => ({
 	...(await importOriginal<typeof import("@filen/office/react/presentation")>()),

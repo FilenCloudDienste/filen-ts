@@ -7,9 +7,9 @@ interface ShortcutsDialogProps {
 	onOpenChange: (open: boolean) => void
 }
 
-// The overlay half of the shortcuts surface, opened by `app.openShortcuts` or the account menu. It
-// renders the same <ShortcutsList /> as Settings → Keyboard — one component, one data path, so the
-// two can never disagree about what a shortcut is bound to.
+// The overlay half of the shortcuts surface, opened by `app.openShortcuts` or the account menu. It renders the same
+// <ShortcutsList /> as Settings → Keyboard, compact — one component, one data path, so the two can never disagree
+// about what a shortcut is bound to. A fixed height: the list is a virtualized scroll area that fills it.
 export function ShortcutsDialog({ open, onOpenChange }: ShortcutsDialogProps) {
 	const { t } = useTranslation("common")
 
@@ -18,12 +18,12 @@ export function ShortcutsDialog({ open, onOpenChange }: ShortcutsDialogProps) {
 			open={open}
 			onOpenChange={onOpenChange}
 		>
-			<DialogContent className="max-h-[80svh] overflow-y-auto sm:max-w-lg">
+			<DialogContent className="flex h-[min(85svh,48rem)] flex-col gap-4 sm:max-w-2xl">
 				<DialogHeader>
 					<DialogTitle>{t("shortcutsTitle")}</DialogTitle>
 					<DialogDescription>{t("shortcutsDescription")}</DialogDescription>
 				</DialogHeader>
-				<ShortcutsList />
+				<ShortcutsList variant="dialog" />
 			</DialogContent>
 		</Dialog>
 	)

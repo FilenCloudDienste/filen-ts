@@ -5,6 +5,7 @@ import { clearSessionOutsideKv, discardUnreadableSession, persistSession, resume
 import { parseEnvelope } from "@filen/shared/session"
 import { takeSeededSession } from "@/e2e-hooks/sessionSeed"
 import { kvClear, storage } from "@/lib/storage/adapter"
+import { keepKeymapsAcrossWipe } from "@/lib/keymap/storage"
 import { readSignOutPending, writeSignOutPending } from "@/lib/signOutPending"
 import { runLegacyWebMigration, wipeLegacyWebOnSignOut } from "@/lib/legacyWebMigration"
 import { withSessionCheckHeld } from "@/lib/sdk/sessionHealth"
@@ -55,7 +56,8 @@ async function finishPendingSignOut(): Promise<void> {
 	wipePendingWatch(() => localStorage)
 
 	const outcomes = await Promise.allSettled([
-		kvClear(),
+		// The accounts' keyboard shortcuts survive, as in the sign-out itself.
+		keepKeymapsAcrossWipe(kvClear),
 		clearSessionOutsideKv(),
 		wipeImageCaches(),
 		wipeSwClient(),

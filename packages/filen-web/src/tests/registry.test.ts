@@ -1,15 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { type } from "arktype"
 
-// registry.ts is a Map-backed singleton (registered actions + a one-shot overrides load) —
-// `vi.resetModules()` + a dynamic re-import before every test gives each test its own fresh
-// instance instead of fighting shared state (duplicate-id / comboFor / setUserCombo would
-// otherwise collide on the same in-memory Map across `it()` blocks). The mock boundary is
-// `@/lib/storage/adapter` itself — registry.ts's only two calls into storage — mirroring how
-// src/queries/persist.test.ts mocks the same module at the functions its own subject actually
-// calls, rather than reaching one layer deeper into `@/lib/storage/leader` like adapter.test.ts
-// does (that layer is irrelevant here; kvGetJson/kvSetJson's own envelope+schema contract is
-// already covered by adapter.test.ts, not re-tested through this mock).
+// registry.ts is a module singleton (registered actions, one loaded record, a write chain) — `vi.resetModules()` + a
+// dynamic re-import before every test gives each test its own instance. The mock boundary is `@/lib/storage/adapter`,
+// the kv calls lib/keymap/storage.ts makes; adapter.test.ts covers their own envelope and schema contract.
 const { kvStore, mockState } = vi.hoisted(() => ({
 	kvStore: new Map<string, unknown>(),
 	mockState: { rejectNextGet: null as Error | null }
@@ -28,13 +22,23 @@ vi.mock("@/lib/storage/adapter", () => ({
 	kvSetJson: (key: string, value: unknown) => {
 		kvStore.set(key, value)
 		return Promise.resolve()
-	}
+	},
+	kvDelete: (key: string) => {
+		kvStore.delete(key)
+		return Promise.resolve()
+	},
+	kvEntriesJson: (prefix: string) => Promise.resolve([...kvStore.entries()].filter(([key]) => key.startsWith(prefix)))
 }))
 
-const OVERRIDES_KEY = "keymap.v1.overrides"
+const UNCLAIMED = "keymap.v2.unclaimed"
+const LEGACY = "keymap.v1.overrides"
 
 function actionDef(id: string, defaultCombo = "k") {
 	return { id, defaultCombo, scope: "global" as const, descriptionKey: "common:toggleTheme" as const }
+}
+
+function record(overrides: Record<string, string>, characterKeys = true) {
+	return { overrides, characterKeys }
 }
 
 async function freshRegistry() {
@@ -59,205 +63,103 @@ beforeEach(() => {
 })
 
 describe("keymap registry", () => {
-	it("comboFor returns an action's default combo once registered", async () => {
+	it("comboFor returns an action's default combo once registered, before the load resolves", async () => {
 		const { registerAction, comboFor } = await freshRegistry()
 
+		kvStore.set(UNCLAIMED, record({ "app.test": "shift+k" }))
 		registerAction(actionDef("app.test"))
 
 		expect(comboFor("app.test")).toBe("k")
 	})
 
-	it("bindings work immediately with defaults, before the async overrides load resolves", async () => {
+	it("throws for an unregistered action id and for a duplicate registration", async () => {
 		const { registerAction, comboFor } = await freshRegistry()
 
 		registerAction(actionDef("app.test"))
-
-		// deliberately not awaiting keymapOverridesLoaded() — this is the synchronous, pre-load state.
-		expect(comboFor("app.test")).toBe("k")
-	})
-
-	it("throws for an unregistered action id", async () => {
-		const { comboFor } = await freshRegistry()
 
 		expect(() => comboFor("app.unknown")).toThrow(/unknown action/)
-	})
-
-	it("throws when the same action id is registered twice", async () => {
-		const { registerAction } = await freshRegistry()
-		const def = actionDef("app.test")
-
-		registerAction(def)
-
 		expect(() => {
-			registerAction(def)
+			registerAction(actionDef("app.test"))
 		}).toThrow(/already registered/)
 	})
 
-	it("comboFor prefers a runtime user override over the default combo", async () => {
-		const { registerAction, comboFor, setUserCombo, keymapOverridesLoaded } = await freshRegistry()
-
-		registerAction(actionDef("app.test"))
-		await keymapOverridesLoaded()
-		await setUserCombo("app.test", "shift+k")
-
-		expect(comboFor("app.test")).toBe("shift+k")
-	})
-
-	it("setUserCombo persists the full overrides record at the versioned kv key", async () => {
-		const { registerAction, setUserCombo, keymapOverridesLoaded } = await freshRegistry()
-
-		registerAction(actionDef("app.test"))
-		await keymapOverridesLoaded()
-		await setUserCombo("app.test", "shift+k")
-
-		expect(kvStore.get(OVERRIDES_KEY)).toEqual({ "app.test": "shift+k" })
-	})
-
-	it("setUserCombo merges onto a persisted override even when called before the load is awaited", async () => {
-		// The race the load-first guard closes: a stored override plus a remap issued before anyone has
-		// awaited the load. setUserCombo must load-then-merge, so BOTH entries survive in the persisted
-		// record — not just the freshly-set one clobbering the stored one.
-		kvStore.set(OVERRIDES_KEY, { "app.existing": "ctrl+e" })
-
-		const { registerAction, setUserCombo } = await freshRegistry()
-
-		registerAction(actionDef("app.existing"))
-		registerAction(actionDef("app.other"))
-
-		// deliberately NOT awaiting keymapOverridesLoaded() first — setUserCombo owns that ordering now.
-		await setUserCombo("app.other", "shift+o")
-
-		expect(kvStore.get(OVERRIDES_KEY)).toEqual({ "app.existing": "ctrl+e", "app.other": "shift+o" })
-	})
-
-	it("merges onto an override another tab persisted AFTER this one loaded", async () => {
-		// Two tabs live since boot: both loaded the record, then the other one rebound something. This
-		// tab's store never saw that entry, so persisting its own snapshot wholesale would silently drop
-		// it — the write has to re-read and merge just the entry it owns.
-		const { registerAction, setUserCombo, keymapOverridesLoaded } = await freshRegistry()
-
-		registerAction(actionDef("app.mine"))
-		registerAction(actionDef("app.theirs"))
-		await keymapOverridesLoaded()
-
-		kvStore.set(OVERRIDES_KEY, { "app.theirs": "ctrl+t" })
-		await setUserCombo("app.mine", "shift+m")
-
-		expect(kvStore.get(OVERRIDES_KEY)).toEqual({ "app.theirs": "ctrl+t", "app.mine": "shift+m" })
-	})
-
-	it("clearUserCombo drops only its own entry from what another tab persisted", async () => {
-		const { registerAction, setUserCombo, clearUserCombo, keymapOverridesLoaded } = await freshRegistry()
-
-		registerAction(actionDef("app.mine"))
-		registerAction(actionDef("app.theirs"))
-		await keymapOverridesLoaded()
-		await setUserCombo("app.mine", "shift+m")
-
-		kvStore.set(OVERRIDES_KEY, { "app.mine": "shift+m", "app.theirs": "ctrl+t" })
-		await clearUserCombo("app.mine")
-
-		expect(kvStore.get(OVERRIDES_KEY)).toEqual({ "app.theirs": "ctrl+t" })
-	})
-
-	it("applies a valid persisted override on load, ahead of the default combo", async () => {
-		kvStore.set(OVERRIDES_KEY, { "app.test": "ctrl+k" })
-
+	it("applies a stored record on load", async () => {
 		const { registerAction, comboFor, keymapOverridesLoaded } = await freshRegistry()
 
+		kvStore.set(UNCLAIMED, record({ "app.test": "ctrl+k" }))
 		registerAction(actionDef("app.test"))
 		await keymapOverridesLoaded()
 
 		expect(comboFor("app.test")).toBe("ctrl+k")
 	})
 
-	it("migrates an older record's character spellings to the token model on load and keeps them working", async () => {
-		kvStore.set(OVERRIDES_KEY, {
-			"app.shrink": "mod+shift+,",
-			"app.pointer": "a,=",
-			"app.zoom": "mod+plus",
-			"app.recorded": "mod+bracketleft",
-			"app.broken": "g>d"
-		})
+	it("migrates an older record's character spellings to the token model on load and keeps the unbound marker", async () => {
+		const { registerAction, comboFor, keymapOverridesLoaded } = await freshRegistry()
 
-		const { registerAction, comboFor, keymapOverridesLoaded, setUserCombo } = await freshRegistry()
+		kvStore.set(UNCLAIMED, record({ "app.shrink": "mod+shift+,", "app.zoom": "mod+=", "app.broken": "a>b", "app.off": "none" }))
 
-		for (const id of ["app.shrink", "app.pointer", "app.zoom", "app.recorded", "app.broken", "app.other"]) registerAction(actionDef(id))
+		for (const id of ["app.shrink", "app.zoom", "app.broken", "app.off"]) registerAction(actionDef(id))
+
 		await keymapOverridesLoaded()
 
 		expect(comboFor("app.shrink")).toBe("mod+shift+comma")
-		expect(comboFor("app.pointer")).toBe("a,equal")
 		expect(comboFor("app.zoom")).toBe("mod+equal")
-		expect(comboFor("app.recorded")).toBe("mod+bracketleft")
-		// A combo with no chord matches nothing: the default takes over.
 		expect(comboFor("app.broken")).toBe("k")
-
-		// The next write persists the canonical record.
-		await setUserCombo("app.other", "shift+.")
-
-		expect(kvStore.get(OVERRIDES_KEY)).toEqual({
-			"app.shrink": "mod+shift+comma",
-			"app.pointer": "a,equal",
-			"app.zoom": "mod+equal",
-			"app.recorded": "mod+bracketleft",
-			"app.other": "shift+period"
-		})
+		expect(comboFor("app.off")).toBe("")
 	})
 
-	it("setUserCombo refuses a string that holds no combo, so the stored record stays loadable", async () => {
-		const { registerAction, setUserCombo, keymapOverridesLoaded } = await freshRegistry()
+	it("drops an invalid stored record and a rejected read without breaking: defaults win", async () => {
+		const { registerAction, comboFor, keymapOverridesLoaded } = await freshRegistry()
 
+		mockState.rejectNextGet = new Error("opfs gone")
 		registerAction(actionDef("app.test"))
 		await keymapOverridesLoaded()
+
+		expect(comboFor("app.test")).toBe("k")
+	})
+
+	it("setUserCombo stores the canonical combo in one record with the single-key switch", async () => {
+		const { registerAction, comboFor, setUserCombo } = await freshRegistry()
+
+		registerAction(actionDef("app.test"))
+		await setUserCombo("app.test", "shift+.")
+
+		expect(comboFor("app.test")).toBe("shift+period")
+		expect(kvStore.get(UNCLAIMED)).toEqual(record({ "app.test": "shift+period" }))
+	})
+
+	it("stores nothing for a combo equal to the default, so the action reads as unchanged", async () => {
+		const { registerAction, setUserCombo } = await freshRegistry()
+
+		registerAction(actionDef("app.test"))
+		await setUserCombo("app.test", "shift+k")
+		await setUserCombo("app.test", "k")
+
+		expect(kvStore.get(UNCLAIMED)).toEqual(record({}))
+	})
+
+	it("refuses a string that holds no combo, writing nothing", async () => {
+		const { registerAction, setUserCombo } = await freshRegistry()
+
+		registerAction(actionDef("app.test"))
 
 		await expect(setUserCombo("app.test", "a>b")).rejects.toThrow(/no combo/)
-		expect(kvStore.get(OVERRIDES_KEY)).toBeUndefined()
+		expect(kvStore.has(UNCLAIMED)).toBe(false)
 	})
 
-	it("drops a missing/invalid persisted overrides value without throwing; defaults win", async () => {
-		// kvGetJson's own documented contract (adapter.test.ts) collapses BOTH "no value at this
-		// key yet" and "schema-invalid/corrupt value" to a plain `null` — this mock returns exactly
-		// that (nothing seeded at OVERRIDES_KEY), so this test exercises the registry's half of that
-		// contract: a null load result must never throw and must never touch the default combo.
-		const { registerAction, comboFor, keymapOverridesLoaded } = await freshRegistry()
+	it("merges a write onto what another tab stored after this one loaded", async () => {
+		const { registerAction, setUserCombo, keymapOverridesLoaded } = await freshRegistry()
 
-		registerAction(actionDef("app.test"))
+		registerAction(actionDef("app.mine"))
+		registerAction(actionDef("app.theirs"))
 		await keymapOverridesLoaded()
+		kvStore.set(UNCLAIMED, record({ "app.theirs": "shift+t" }))
+		await setUserCombo("app.mine", "shift+m")
 
-		expect(comboFor("app.test")).toBe("k")
+		expect(kvStore.get(UNCLAIMED)).toEqual(record({ "app.theirs": "shift+t", "app.mine": "shift+m" }))
 	})
 
-	it("a rejected kv read never breaks the keymap; defaults still win", async () => {
-		mockState.rejectNextGet = new Error("storage unavailable")
-
-		const { registerAction, comboFor, keymapOverridesLoaded } = await freshRegistry()
-		registerAction(actionDef("app.test"))
-
-		await expect(keymapOverridesLoaded()).resolves.toBeUndefined()
-		expect(comboFor("app.test")).toBe("k")
-	})
-
-	it("keymapOverridesSchema accepts a record of non-empty combo strings", async () => {
-		const { keymapOverridesSchema } = await freshRegistry()
-
-		expect(keymapOverridesSchema({ "app.test": "shift+d" })).toEqual({ "app.test": "shift+d" })
-	})
-
-	it('keymapOverridesSchema rejects an empty-string combo (the "string > 0" length constraint)', async () => {
-		const { keymapOverridesSchema } = await freshRegistry()
-
-		expect(keymapOverridesSchema({ "app.test": "" })).toBeInstanceOf(type.errors)
-	})
-
-	it("keymapOverridesSchema rejects a non-string combo value", async () => {
-		const { keymapOverridesSchema } = await freshRegistry()
-
-		expect(keymapOverridesSchema({ "app.test": 123 })).toBeInstanceOf(type.errors)
-	})
-})
-
-describe("keymap registry — clearUserCombo", () => {
-	it("drops only the target override and leaves the action resolving to its default", async () => {
+	it("clearUserCombo drops only its own entry", async () => {
 		const { registerAction, comboFor, setUserCombo, clearUserCombo } = await freshRegistry()
 
 		registerAction(actionDef("app.test"))
@@ -268,156 +170,305 @@ describe("keymap registry — clearUserCombo", () => {
 
 		expect(comboFor("app.test")).toBe("k")
 		expect(comboFor("app.other")).toBe("shift+o")
+		expect(kvStore.get(UNCLAIMED)).toEqual(record({ "app.other": "shift+o" }))
 	})
 
-	it("persists the remaining overrides at the versioned kv key", async () => {
-		const { registerAction, setUserCombo, clearUserCombo } = await freshRegistry()
+	it("keymapOverridesSchema accepts non-empty combo strings only", async () => {
+		const { keymapOverridesSchema } = await freshRegistry()
 
-		registerAction(actionDef("app.test"))
-		registerAction(actionDef("app.other"))
-		await setUserCombo("app.test", "shift+k")
-		await setUserCombo("app.other", "shift+o")
-		await clearUserCombo("app.test")
-
-		expect(kvStore.get(OVERRIDES_KEY)).toEqual({ "app.other": "shift+o" })
-	})
-
-	it("is a no-op for an id with no override", async () => {
-		const { registerAction, comboFor, setUserCombo, clearUserCombo } = await freshRegistry()
-
-		registerAction(actionDef("app.test"))
-		await setUserCombo("app.test", "shift+k")
-		await clearUserCombo("app.unbound")
-
-		expect(comboFor("app.test")).toBe("shift+k")
-		expect(kvStore.get(OVERRIDES_KEY)).toEqual({ "app.test": "shift+k" })
+		expect(keymapOverridesSchema({ "app.test": "shift+d" })).toEqual({ "app.test": "shift+d" })
+		expect(keymapOverridesSchema({ "app.test": "" })).toBeInstanceOf(type.errors)
+		expect(keymapOverridesSchema({ "app.test": 123 })).toBeInstanceOf(type.errors)
 	})
 })
 
-// Invariant R: at most ONE combo recording exists app-wide, identified by its owner token, and only
-// its owner can end it. Two <ShortcutsList> instances can be mounted at once (the shortcuts dialog
-// opens on top of Settings → Keyboard), so a shared boolean would let the second one's unmount clear
-// a session the first started — a live recorder AND live hotkeys, exactly what the session prevents.
+describe("keymap registry — turning an action off", () => {
+	it("stores the unbound marker, which every reader resolves to no key", async () => {
+		const { registerAction, comboFor, bindingsOf, currentKeymapRecord, unbindAction } = await freshRegistry()
+		const { parseCombo, matchesCombo, UNBOUND_COMBO } = await import("@filen/shared/keymap")
+
+		registerAction(actionDef("app.test", "d"))
+		await unbindAction("app.test")
+
+		expect(kvStore.get(UNCLAIMED)).toEqual(record({ "app.test": UNBOUND_COMBO }))
+		expect(comboFor("app.test")).toBe("")
+		expect(bindingsOf(currentKeymapRecord())["app.test"]).toBe("")
+		// A matcher handed the raw stored value (the office editors, CodeMirror, the desktop menu) sees no key either.
+		expect(parseCombo(UNBOUND_COMBO)).toEqual([])
+		expect(
+			matchesCombo({ code: "KeyN", key: "n", ctrlKey: false, metaKey: false, shiftKey: false, altKey: false }, UNBOUND_COMBO, false)
+		).toBe(false)
+	})
+
+	it("stores nothing when the action ships unassigned, and reset brings a turned-off action back", async () => {
+		const { registerAction, comboFor, unbindAction, clearUserCombo } = await freshRegistry()
+
+		registerAction(actionDef("app.unset", ""))
+		registerAction(actionDef("app.test", "d"))
+		await unbindAction("app.unset")
+		await unbindAction("app.test")
+		await clearUserCombo("app.test")
+
+		expect(kvStore.get(UNCLAIMED)).toEqual(record({}))
+		expect(comboFor("app.test")).toBe("d")
+	})
+})
+
+describe("keymap registry — single-key shortcuts", () => {
+	it("drops character keys from the combos in effect while switched off, keeping modifier chords and named keys", async () => {
+		const { registerAction, comboFor, setCharacterKeys } = await freshRegistry()
+
+		registerAction(actionDef("app.theme", "d"))
+		registerAction(actionDef("app.help", "shift+slash"))
+		registerAction(actionDef("app.trash", "delete,backspace,t"))
+		registerAction(actionDef("app.save", "mod+s"))
+		await setCharacterKeys(false)
+
+		expect(comboFor("app.theme")).toBe("")
+		expect(comboFor("app.help")).toBe("")
+		expect(comboFor("app.trash")).toBe("delete,backspace")
+		expect(comboFor("app.save")).toBe("mod+s")
+		expect(kvStore.get(UNCLAIMED)).toEqual(record({}, false))
+
+		await setCharacterKeys(true)
+
+		expect(comboFor("app.theme")).toBe("d")
+	})
+
+	it("keeps an exempt action's character keys (the running slideshow)", async () => {
+		const { registerAction, comboFor, setCharacterKeys } = await freshRegistry()
+
+		registerAction({ ...actionDef("app.next", "n,arrowright"), keepsCharacterKeys: true })
+		await setCharacterKeys(false)
+
+		expect(comboFor("app.next")).toBe("n,arrowright")
+	})
+})
+
+describe("keymap registry — reset", () => {
+	it("resets every override, or one group's, in a single write", async () => {
+		const { registerAction, comboFor, updateOverrides, resetOverrides } = await freshRegistry()
+
+		for (const id of ["app.a", "app.b", "app.c"]) registerAction(actionDef(id))
+
+		await updateOverrides({ "app.a": "shift+a", "app.b": "shift+b", "app.c": "shift+c" })
+		await resetOverrides(["app.a", "app.b"])
+
+		expect(comboFor("app.a")).toBe("k")
+		expect(comboFor("app.c")).toBe("shift+c")
+
+		await resetOverrides()
+
+		expect(kvStore.get(UNCLAIMED)).toEqual(record({}))
+	})
+
+	it("keeps the single-key switch through a reset", async () => {
+		const { registerAction, setCharacterKeys, setUserCombo, resetOverrides } = await freshRegistry()
+
+		registerAction(actionDef("app.a"))
+		await setCharacterKeys(false)
+		await setUserCombo("app.a", "shift+a")
+		await resetOverrides()
+
+		expect(kvStore.get(UNCLAIMED)).toEqual(record({}, false))
+	})
+})
+
+describe("keymap registry — per-platform defaults", () => {
+	const def = {
+		...actionDef("app.settings", ""),
+		platformDefaults: [
+			{ on: { mac: true, desktop: true }, combo: "mod+comma" },
+			{ on: { desktop: true }, combo: "ctrl+comma" }
+		]
+	}
+
+	it("picks the first matching default, else the base one", async () => {
+		const { defaultComboOn } = await freshRegistry()
+
+		expect(defaultComboOn(def, { mac: true, desktop: true })).toBe("mod+comma")
+		expect(defaultComboOn(def, { mac: false, desktop: true })).toBe("ctrl+comma")
+		expect(defaultComboOn(def, { mac: true, desktop: false })).toBe("")
+		expect(defaultComboOn(def, { mac: false, desktop: false })).toBe("")
+	})
+
+	it("resolves the configured and the effective combo per platform", async () => {
+		const { configuredCombo, effectiveCombo } = await freshRegistry()
+
+		expect(configuredCombo(def, {}, { mac: true, desktop: true })).toBe("mod+comma")
+		expect(configuredCombo(def, { "app.settings": "none" }, { mac: true, desktop: true })).toBe("")
+		expect(effectiveCombo(def, record({ "app.settings": "s,mod+s" }, false), { mac: false, desktop: false })).toBe("mod+s")
+	})
+})
+
+describe("keymap registry — accounts", () => {
+	it("reads and writes the signed-in account's own record", async () => {
+		const { registerAction, comboFor, bindKeymapAccount, setUserCombo } = await freshRegistry()
+
+		kvStore.set("keymap.v2.account.42", record({ "app.test": "shift+x" }))
+		registerAction(actionDef("app.test"))
+		await bindKeymapAccount("42")
+
+		expect(comboFor("app.test")).toBe("shift+x")
+
+		await setUserCombo("app.test", "shift+y")
+
+		expect(kvStore.get("keymap.v2.account.42")).toEqual(record({ "app.test": "shift+y" }))
+		expect(kvStore.has(UNCLAIMED)).toBe(false)
+	})
+
+	it("adopts the unclaimed record on an account's first sign-in, then removes it", async () => {
+		const { registerAction, comboFor, bindKeymapAccount } = await freshRegistry()
+
+		kvStore.set(UNCLAIMED, record({ "app.test": "shift+u" }, false))
+		registerAction(actionDef("app.test"))
+		await bindKeymapAccount("7")
+
+		expect(comboFor("app.test")).toBe("")
+		expect(kvStore.get("keymap.v2.account.7")).toEqual(record({ "app.test": "shift+u" }, false))
+		expect(kvStore.has(UNCLAIMED)).toBe(false)
+	})
+
+	it("adopts the previous format's overrides", async () => {
+		const { registerAction, comboFor, bindKeymapAccount } = await freshRegistry()
+
+		kvStore.set(LEGACY, { "app.test": "mod+=" })
+		registerAction(actionDef("app.test"))
+		await bindKeymapAccount("7")
+
+		expect(comboFor("app.test")).toBe("mod+equal")
+		expect(kvStore.has(LEGACY)).toBe(false)
+	})
+
+	it("gives a second account on this browser the defaults, not the first one's keys", async () => {
+		const { registerAction, comboFor, bindKeymapAccount } = await freshRegistry()
+
+		kvStore.set("keymap.v2.account.1", record({ "app.test": "shift+one" }))
+		registerAction(actionDef("app.test"))
+		await bindKeymapAccount("2")
+
+		expect(comboFor("app.test")).toBe("k")
+	})
+
+	it("keeps every account's record across the sign-out wipe and nothing else", async () => {
+		const { keepKeymapsAcrossWipe } = await import("@/lib/keymap/storage")
+
+		kvStore.set("keymap.v2.account.1", record({ "app.test": "shift+a" }))
+		kvStore.set("keymap.v2.account.2", record({}, false))
+		kvStore.set(UNCLAIMED, record({ "app.test": "shift+u" }))
+		kvStore.set("session", "secret")
+
+		await keepKeymapsAcrossWipe(() => {
+			kvStore.clear()
+
+			return Promise.resolve()
+		})
+
+		expect([...kvStore.keys()].sort()).toEqual(["keymap.v2.account.1", "keymap.v2.account.2"])
+		expect(kvStore.get("keymap.v2.account.1")).toEqual(record({ "app.test": "shift+a" }))
+	})
+})
+
+describe("keymap registry — other tabs", () => {
+	it("applies a change another tab makes to the same record, without a kv read", async () => {
+		const first = await freshRegistry()
+
+		first.registerAction(actionDef("app.test"))
+		await first.keymapOverridesLoaded()
+
+		const second = await freshRegistry()
+
+		second.registerAction(actionDef("app.test"))
+		await second.keymapOverridesLoaded()
+		await first.setUserCombo("app.test", "shift+t")
+
+		await vi.waitFor(() => {
+			expect(second.comboFor("app.test")).toBe("shift+t")
+		})
+	})
+
+	it("ignores a change to another account's record", async () => {
+		const first = await freshRegistry()
+
+		first.registerAction(actionDef("app.test"))
+		await first.bindKeymapAccount("1")
+
+		const second = await freshRegistry()
+
+		second.registerAction(actionDef("app.test"))
+		await second.bindKeymapAccount("2")
+		await first.setUserCombo("app.test", "shift+t")
+		// One round trip of the channel: a later post from the same tab arrives after the first.
+		await first.setUserCombo("app.test", "shift+u")
+		await new Promise(resolve => setTimeout(resolve, 20))
+
+		expect(second.comboFor("app.test")).toBe("k")
+	})
+})
+
+// The registry owns the recording session's whole lifecycle so the shortcuts surface holds none: two lists can be
+// mounted at once (the dialog over Settings → Keyboard), and only the owner may end a session.
 describe("keymap registry — combo recording session", () => {
-	it("starts with no session", async () => {
-		const { isRecordingCombo } = await freshRegistry()
+	it("starts with no session and carries the action, the slot and the owner", async () => {
+		const { beginRecording, currentRecording, isRecordingCombo } = await freshRegistry()
 
 		expect(isRecordingCombo()).toBe(false)
+
+		beginRecording("a", "app.test", 1)
+
+		expect(currentRecording()).toEqual({ owner: "a", actionId: "app.test", slot: 1 })
 	})
 
-	it("carries the action being rebound, so the surface holds no session state of its own", async () => {
-		const { beginRecording, currentRecording } = await freshRegistry()
-
-		beginRecording("a", "app.test")
-
-		expect(currentRecording()).toEqual({ owner: "a", actionId: "app.test" })
-	})
-
-	it("beginRecording claims the session", async () => {
-		const { beginRecording, isRecordingCombo } = await freshRegistry()
-
-		beginRecording("a", "app.test")
-
-		expect(isRecordingCombo()).toBe(true)
-	})
-
-	it("endRecording from a non-owner is a no-op", async () => {
+	it("endRecording from a non-owner is a no-op, from the owner ends it", async () => {
 		const { beginRecording, endRecording, isRecordingCombo } = await freshRegistry()
 
 		beginRecording("a", "app.test")
 		endRecording("b")
 
 		expect(isRecordingCombo()).toBe(true)
-	})
 
-	it("endRecording from the owner ends the session", async () => {
-		const { beginRecording, endRecording, isRecordingCombo } = await freshRegistry()
-
-		beginRecording("a", "app.test")
 		endRecording("a")
 
 		expect(isRecordingCombo()).toBe(false)
 	})
 
-	it("a second beginRecording displaces the owner, leaving exactly one session", async () => {
-		const { beginRecording, endRecording, isRecordingCombo } = await freshRegistry()
+	it("a problem report from the owner ends the session and keeps the problem; from another owner changes nothing", async () => {
+		const { beginRecording, reportRecordingProblem, currentRecordingProblem, isRecordingCombo } = await freshRegistry()
+		const problem = { kind: "reserved", actionId: "app.test", chord: "mod+w", owner: "browser", blocked: false } as const
 
 		beginRecording("a", "app.test")
-		beginRecording("b", "app.other")
-		endRecording("a")
+		reportRecordingProblem("b", problem)
 
-		expect(isRecordingCombo()).toBe(true)
+		expect(currentRecordingProblem()).toBeNull()
 
-		endRecording("b")
+		reportRecordingProblem("a", problem)
 
 		expect(isRecordingCombo()).toBe(false)
+		expect(currentRecordingProblem()).toEqual(problem)
 	})
 
-	it("clearRecording ends a session owned by anyone", async () => {
-		const { beginRecording, clearRecording, isRecordingCombo } = await freshRegistry()
-
-		beginRecording("a", "app.test")
-		clearRecording()
-
-		expect(isRecordingCombo()).toBe(false)
-	})
-
-	it("clearRecording retires a rejection too, so a freshly mounted surface shows no stale error", async () => {
-		const { beginRecording, rejectRecording, clearRecording, currentRecordingRejection } = await freshRegistry()
-
-		beginRecording("a", "app.test")
-		rejectRecording("a", "common:toggleTheme")
-		clearRecording()
-
-		expect(currentRecordingRejection()).toBeNull()
-	})
-
-	it("rejectRecording ends the owner's session and records which action holds the combo", async () => {
-		const { beginRecording, rejectRecording, isRecordingCombo, currentRecordingRejection } = await freshRegistry()
-
-		beginRecording("a", "app.test")
-		rejectRecording("a", "common:toggleTheme")
-
-		expect(isRecordingCombo()).toBe(false)
-		expect(currentRecordingRejection()).toEqual({ actionId: "app.test", conflictKey: "common:toggleTheme" })
-	})
-
-	it("rejectRecording from a non-owner changes nothing", async () => {
-		const { beginRecording, rejectRecording, isRecordingCombo, currentRecordingRejection } = await freshRegistry()
-
-		beginRecording("a", "app.test")
-		rejectRecording("b", "common:toggleTheme")
-
-		expect(isRecordingCombo()).toBe(true)
-		expect(currentRecordingRejection()).toBeNull()
-	})
-
-	it("retires a rejection once the rebound action's combo changes", async () => {
-		const { registerAction, beginRecording, rejectRecording, setUserCombo, clearUserCombo, currentRecordingRejection } =
+	it("retires a problem once its action's binding changes, and on a new recording or clearRecording", async () => {
+		const { registerAction, beginRecording, reportRecordingProblem, setUserCombo, currentRecordingProblem, clearRecording } =
 			await freshRegistry()
+		const problem = { kind: "reserved", actionId: "app.test", chord: "mod+w", owner: "browser", blocked: true } as const
 
 		registerAction(actionDef("app.test"))
 		beginRecording("a", "app.test")
-		rejectRecording("a", "common:toggleTheme")
+		reportRecordingProblem("a", problem)
 		await setUserCombo("app.test", "shift+k")
 
-		expect(currentRecordingRejection()).toBeNull()
+		expect(currentRecordingProblem()).toBeNull()
 
 		beginRecording("a", "app.test")
-		rejectRecording("a", "common:toggleTheme")
-		await clearUserCombo("app.test")
-
-		expect(currentRecordingRejection()).toBeNull()
-	})
-
-	it("starting a new recording clears a pending rejection", async () => {
-		const { beginRecording, rejectRecording, currentRecordingRejection } = await freshRegistry()
-
+		reportRecordingProblem("a", problem)
 		beginRecording("a", "app.test")
-		rejectRecording("a", "common:toggleTheme")
-		beginRecording("a", "app.other")
 
-		expect(currentRecordingRejection()).toBeNull()
+		expect(currentRecordingProblem()).toBeNull()
+
+		reportRecordingProblem("a", problem)
+		clearRecording()
+
+		expect(currentRecordingProblem()).toBeNull()
 	})
 })
 

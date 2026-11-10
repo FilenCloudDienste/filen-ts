@@ -13,18 +13,21 @@ export type PdfViewerAction =
 	| "preview.pdfRotateCw"
 	| "preview.pdfRotateCcw"
 
+function pdfAction(
+	id: PdfViewerAction,
+	defaultCombo: string,
+	descriptionKey: ActionDef["descriptionKey"]
+): ActionDef & { readonly id: PdfViewerAction } {
+	return { id, defaultCombo, scope: "editor", section: "viewer", descriptionKey, hintKey: "settings:keyboardHintPdf" }
+}
+
 export const PDF_VIEWER_ACTIONS: readonly (ActionDef & { readonly id: PdfViewerAction })[] = [
-	{
-		id: "preview.pdfZoomIn",
-		defaultCombo: "mod+equal,mod+shift+equal,mod+add",
-		scope: "editor",
-		descriptionKey: "preview:previewPdfKeyZoomIn"
-	},
-	{ id: "preview.pdfZoomOut", defaultCombo: "mod+minus,mod+subtract", scope: "editor", descriptionKey: "preview:previewPdfKeyZoomOut" },
-	{ id: "preview.pdfZoomReset", defaultCombo: "mod+0", scope: "editor", descriptionKey: "preview:previewPdfKeyZoomReset" },
-	{ id: "preview.pdfToggleFit", defaultCombo: "mod+backslash", scope: "editor", descriptionKey: "preview:previewPdfKeyToggleFit" },
-	{ id: "preview.pdfRotateCw", defaultCombo: "mod+bracketright", scope: "editor", descriptionKey: "preview:previewPdfKeyRotateCw" },
-	{ id: "preview.pdfRotateCcw", defaultCombo: "mod+bracketleft", scope: "editor", descriptionKey: "preview:previewPdfKeyRotateCcw" }
+	pdfAction("preview.pdfZoomIn", "mod+equal,mod+shift+equal,mod+add", "preview:previewPdfKeyZoomIn"),
+	pdfAction("preview.pdfZoomOut", "mod+minus,mod+subtract", "preview:previewPdfKeyZoomOut"),
+	pdfAction("preview.pdfZoomReset", "mod+0", "preview:previewPdfKeyZoomReset"),
+	pdfAction("preview.pdfToggleFit", "mod+backslash", "preview:previewPdfKeyToggleFit"),
+	pdfAction("preview.pdfRotateCw", "mod+bracketright", "preview:previewPdfKeyRotateCw"),
+	pdfAction("preview.pdfRotateCcw", "mod+bracketleft", "preview:previewPdfKeyRotateCcw")
 ]
 
 // The text editors' commands — the file editor in the preview overlay and the note editors share them
@@ -40,18 +43,58 @@ export const PDF_VIEWER_ACTIONS: readonly (ActionDef & { readonly id: PdfViewerA
 // Firefox keeps Ctrl+Shift+P for a private window.
 export const PREVIEW_ACTIONS: readonly ActionDef[] = [
 	{ id: "preview.save", defaultCombo: "mod+s", scope: "editor", descriptionKey: "preview:previewSaveAction" },
-	// The image on screen into editing mode; outside a text field, as a bare letter.
-	{ id: "preview.editImage", defaultCombo: "e", scope: "editor", descriptionKey: "preview:previewImageSaveEditShortcut" },
 	{ id: "editor.find", defaultCombo: "mod+f", scope: "editor", descriptionKey: "preview:previewEditorFind" },
 	{ id: "editor.replace", defaultCombo: "mod+alt+f", scope: "editor", descriptionKey: "preview:previewEditorReplace" },
 	{ id: "editor.bold", defaultCombo: "mod+b", scope: "editor", descriptionKey: "preview:previewEditorBold" },
 	{ id: "editor.italic", defaultCombo: "mod+i", scope: "editor", descriptionKey: "preview:previewEditorItalic" },
-	{ id: "editor.strikethrough", defaultCombo: "mod+shift+x", scope: "editor", descriptionKey: "preview:previewEditorStrikethrough" },
-	{ id: "editor.code", defaultCombo: "mod+e", scope: "editor", descriptionKey: "preview:previewEditorCode" },
 	{ id: "editor.link", defaultCombo: "mod+k", scope: "editor", descriptionKey: "preview:previewEditorLink" },
-	{ id: "editor.togglePreview", defaultCombo: "mod+shift+v", scope: "editor", descriptionKey: "preview:previewEditorTogglePreview" },
+	{
+		id: "editor.strikethrough",
+		defaultCombo: "mod+shift+x",
+		scope: "editor",
+		section: "code",
+		descriptionKey: "preview:previewEditorStrikethrough",
+		hintKey: "settings:keyboardHintMarkdown"
+	},
+	{
+		id: "editor.code",
+		defaultCombo: "mod+e",
+		scope: "editor",
+		section: "code",
+		descriptionKey: "preview:previewEditorCode",
+		hintKey: "settings:keyboardHintMarkdown"
+	},
+	{
+		id: "editor.togglePreview",
+		defaultCombo: "mod+shift+v",
+		scope: "editor",
+		section: "code",
+		descriptionKey: "preview:previewEditorTogglePreview",
+		hintKey: "settings:keyboardHintMarkdown"
+	},
+	// The image on screen into editing mode; outside a text field, as a bare letter.
+	{
+		id: "preview.editImage",
+		defaultCombo: "e",
+		scope: "editor",
+		section: "viewer",
+		descriptionKey: "preview:previewImageSaveEditShortcut",
+		hintKey: "settings:keyboardHintImage"
+	},
+	...PDF_VIEWER_ACTIONS,
 	// The image editor matches these on its own keydown and in its layer (imageEditor.tsx).
-	{ id: "preview.imageUndo", defaultCombo: "mod+z", scope: "editor", descriptionKey: "preview:previewImageEditKeyUndo" },
-	{ id: "preview.imageRedo", defaultCombo: "mod+y,mod+shift+z", scope: "editor", descriptionKey: "preview:previewImageEditKeyRedo" },
-	...PDF_VIEWER_ACTIONS
+	{
+		id: "preview.imageUndo",
+		defaultCombo: "mod+z",
+		scope: "editor",
+		section: "imageEditor",
+		descriptionKey: "preview:previewImageEditKeyUndo"
+	},
+	{
+		id: "preview.imageRedo",
+		defaultCombo: "mod+y,mod+shift+z",
+		scope: "editor",
+		section: "imageEditor",
+		descriptionKey: "preview:previewImageEditKeyRedo"
+	}
 ]

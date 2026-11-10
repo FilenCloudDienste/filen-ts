@@ -14,17 +14,17 @@ import type { ActionDef } from "@/lib/keymap/registry"
 export const DRIVE_ACTIONS: readonly ActionDef[] = [
 	{ id: "drive.selectAll", defaultCombo: "mod+a", scope: "drive", descriptionKey: "drive:driveCommandSelectAll" },
 	{ id: "drive.clearSelection", defaultCombo: "escape", scope: "drive", descriptionKey: "common:clearSelection" },
-	{ id: "drive.toggleView", defaultCombo: "v", scope: "drive", descriptionKey: "drive:driveCommandToggleView" },
-	{ id: "drive.rename", defaultCombo: "f2", scope: "drive", descriptionKey: "drive:driveCommandRename" },
-	{ id: "drive.trash", defaultCombo: "delete,backspace", scope: "drive", descriptionKey: "drive:driveCommandTrash" },
-	{ id: "drive.download", defaultCombo: "mod+s", scope: "drive", descriptionKey: "drive:driveCommandDownload" },
 	{ id: "drive.newDirectory", defaultCombo: "n", scope: "drive", descriptionKey: "drive:driveCommandNewDirectory" },
-	// Old-web parity: mod+f intercepts the browser's own find-in-page only while a drive listing is
-	// mounted (the handler's preventDefault).
-	{ id: "drive.search", defaultCombo: "mod+f", scope: "drive", descriptionKey: "drive:driveCommandSearch" },
+	{ id: "drive.rename", defaultCombo: "f2", scope: "drive", descriptionKey: "drive:driveCommandRename" },
 	// Drive's own clipboard (clipboard.ts). The handlers stand down in text fields and over a text
 	// selection, and only preventDefault when they act, so text copy/paste keeps working everywhere.
 	{ id: "drive.copy", defaultCombo: "mod+c", scope: "drive", descriptionKey: "drive:driveCommandCopy" },
 	{ id: "drive.cut", defaultCombo: "mod+x", scope: "drive", descriptionKey: "drive:driveCommandCut" },
-	{ id: "drive.paste", defaultCombo: "mod+v", scope: "drive", descriptionKey: "drive:driveCommandPaste" }
+	{ id: "drive.paste", defaultCombo: "mod+v", scope: "drive", descriptionKey: "drive:driveCommandPaste" },
+	{ id: "drive.download", defaultCombo: "mod+s", scope: "drive", descriptionKey: "drive:driveCommandDownload" },
+	{ id: "drive.trash", defaultCombo: "delete,backspace", scope: "drive", descriptionKey: "drive:driveCommandTrash" },
+	// Old-web parity: mod+f intercepts the browser's own find-in-page only while a drive listing is
+	// mounted (the handler's preventDefault).
+	{ id: "drive.search", defaultCombo: "mod+f", scope: "drive", descriptionKey: "drive:driveCommandSearch" },
+	{ id: "drive.toggleView", defaultCombo: "v", scope: "drive", descriptionKey: "drive:driveCommandToggleView" }
 ]

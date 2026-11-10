@@ -9,7 +9,7 @@ import { isDark, pressUntilTheme } from "./helpers/theme"
 // app's live hotkeys (both listen on `document`, so nothing short of a real page settles it).
 //
 // Read-only and net-zero by construction: the one rebind attempted is a CONFLICTING combo, which is
-// refused and therefore persists nothing — there is no "reset to default" cleanup step to forget.
+// held back and then cancelled, so it persists nothing — there is no "reset to default" cleanup step to forget.
 test.describe("keyboard shortcuts", () => {
 	// Pin the color scheme so the "system" default resolves deterministically to light.
 	test.use({ colorScheme: "light" })
@@ -39,8 +39,13 @@ test.describe("keyboard shortcuts", () => {
 		}).toPass({ timeout: 30_000 })
 
 		// Photos has never been visited in this session, so its actions only exist because the defs are
-		// static data rather than side effects of the route chunk — the direct regression test.
+		// static data rather than side effects of the route chunk — the direct regression test. The list is
+		// virtualized, so a group further down is reached through the search, which matches group names too.
+		const search = dialog.getByRole("searchbox", { name: "Search shortcuts by name" })
+
+		await search.fill("photos")
 		await expect(dialog.getByRole("heading", { name: /^photos$/i })).toBeVisible()
+		await search.fill("")
 		await expect(dialog.getByRole("heading", { name: /^cloud drive$/i })).toBeVisible()
 		// A description key from a non-"common" namespace ("drive:driveCommandSelectAll") resolves.
 		await expect(dialog.locator('li[data-action-id="drive.selectAll"]')).toContainText("Select all")
@@ -60,26 +65,29 @@ test.describe("keyboard shortcuts", () => {
 	test("Settings -> Keyboard renders the same catalog", async ({ page }) => {
 		await gotoKeyboardSettings(page)
 
-		await expect(page.getByRole("heading", { name: /^photos$/i })).toBeVisible()
 		await expect(page.getByRole("heading", { name: /^cloud drive$/i })).toBeVisible()
+		await page.getByRole("searchbox", { name: "Search shortcuts by name" }).fill("photos")
+		await expect(page.getByRole("heading", { name: /^photos$/i })).toBeVisible()
+		await page.getByRole("searchbox", { name: "Search shortcuts by name" }).fill("")
 		await expect(settingsRow(page)).toContainText("Not set")
 	})
 
-	test("recording suppresses every live hotkey and refuses a combo another action already holds", async ({ page }) => {
+	test("recording suppresses every live hotkey and holds back a combo another action already holds", async ({ page }) => {
 		await gotoKeyboardSettings(page)
 
 		await expect.poll(() => isDark(page)).toBe(false)
 
 		const row = settingsRow(page)
 
-		await row.getByRole("button", { name: "Change shortcut" }).click()
+		await row.getByRole("button", { name: "Add shortcut" }).click()
 		await expect(row).toContainText("Press the keys you want to use")
 
 		// "d" is app.toggleTheme's live combo. While recording it must be captured as DATA — the theme
-		// must not flip — and then refused, because both actions are global and would fire together.
+		// must not flip — and then held back, because both actions are global and would fire together.
 		await page.keyboard.press("d")
 
-		await expect(row).toContainText("Already used by")
+		await expect(row).toContainText("is already used by")
+		await row.getByRole("button", { name: "Cancel" }).click()
 		await expect.poll(() => isDark(page)).toBe(false)
 		await expect(row).toContainText("Not set")
 		// The hooks arrive on a fire-and-forget dynamic import, independently of the shell's own
@@ -93,15 +101,14 @@ test.describe("keyboard shortcuts", () => {
 
 		const row = settingsRow(page)
 
-		await row.getByRole("button", { name: "Change shortcut" }).click()
+		await row.getByRole("button", { name: "Add shortcut" }).click()
 		await expect(row).toContainText("Press the keys you want to use")
 
 		await page.keyboard.press("Escape")
 
 		await expect(row).toContainText("Not set")
-		// The toggle is one persistent button, so focus never leaves the list and the capture handler
-		// sees Escape before anything else can act on it.
-		await expect(row.getByRole("button", { name: "Change shortcut" })).toBeVisible()
+		// Focus never leaves the list, so the capture handler sees Escape before anything else can act on it.
+		await expect(row.getByRole("button", { name: "Add shortcut" })).toBeVisible()
 		expect(new URL(page.url()).pathname).toBe("/settings/keyboard")
 	})
 
@@ -110,7 +117,7 @@ test.describe("keyboard shortcuts", () => {
 
 		const row = settingsRow(page)
 
-		await row.getByRole("button", { name: "Change shortcut" }).click()
+		await row.getByRole("button", { name: "Add shortcut" }).click()
 		await expect(row).toContainText("Press the keys you want to use")
 
 		// The dialog's own list claims the surface on mount, which ends the page's recording rather than

@@ -97,7 +97,7 @@ import { usePresentationTextBindings } from "@/features/presentation/lib/keymap/
 import { DocxFindField } from "@/features/preview/components/docxToolbar"
 import { keyForEditor } from "@/lib/keymap/dialogGuard"
 import { useEditorLayerKeys } from "@/lib/keymap/editorLayerKeys"
-import { useOverrides } from "@/lib/keymap/registry"
+import { useBindings } from "@/lib/keymap/registry"
 import { IN_EDITORS, useAction } from "@/lib/keymap/useAction"
 import type { PreviewKey } from "@/lib/i18n"
 import { PresentationMotionPaths } from "@/features/presentation/components/ribbon/motionPaths"
@@ -443,7 +443,7 @@ export function PresentationEditor({ store, document: deck, alt, item, variant, 
 	// The body's keys, with the user's overrides.
 	const textBindings = usePresentationTextBindings()
 	const downloads = usePreviewDownloadable()
-	const overrides = useOverrides()
+	const overrides = useBindings()
 	// The device's choice (Settings, Office) as the deck opens; the View tab changes them after.
 	const [railOpen, setRailOpen] = useState(() => officeViewSettings().slideRail)
 	// The media play controls' layer, above the selection layer.

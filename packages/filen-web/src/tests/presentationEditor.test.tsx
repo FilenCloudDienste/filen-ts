@@ -70,7 +70,7 @@ const { sdk, engine, settings, toasts, typing } = vi.hoisted(() => ({
 
 vi.mock("@/lib/keymap/registry", async importOriginal => ({
 	...(await importOriginal<typeof import("@/lib/keymap/registry")>()),
-	useOverrides: () => typing.overrides
+	useBindings: () => typing.overrides
 }))
 vi.mock("comlink", () => ({ transfer: (value: unknown) => value }))
 vi.mock("sonner", () => ({ toast: toasts }))
@@ -440,6 +440,21 @@ describe("presentation editor slide show keys", () => {
 
 		fireEvent.keyDown(rail(), { key: "F5", code: "F5", shiftKey: true })
 		expect(await screen.findByRole("region", { name: "Slide show" })).toBeTruthy()
+	})
+})
+
+describe("presentation editor slide show key repeat", () => {
+	// A held F5's repeats are the browser's reload: taken, and they start nothing.
+	it("keeps a repeated F5 from reloading the page, and starts no show on it", async () => {
+		await openEditor()
+
+		const held = new KeyboardEvent("keydown", { key: "F5", code: "F5", repeat: true, bubbles: true, cancelable: true })
+
+		act(() => {
+			rail().dispatchEvent(held)
+		})
+		expect(held.defaultPrevented).toBe(true)
+		expect(screen.queryByRole("region", { name: "Slide show" })).toBeNull()
 	})
 })
 

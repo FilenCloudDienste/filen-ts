@@ -363,6 +363,21 @@ describe("React Compiler coverage", () => {
 		expect(unguardedCalls(code, fnName, derivations)).toEqual([])
 	})
 
+	// useVirtualizer opts its host out, so it lives in shortcutsRows.tsx; the list, its rows and the key chips compile,
+	// so a keystroke in the search field re-filters without rebuilding the catalog or re-rendering unchanged rows.
+	it.each([
+		["src/lib/keymap/shortcutsList.tsx", "ShortcutsList"],
+		["src/lib/keymap/shortcutRow.tsx", "ShortcutRow"],
+		["src/lib/keymap/kbd.tsx", "ChordKeys"],
+		["src/lib/keymap/specialKeyDialog.tsx", "SpecialKeyDialog"],
+		["src/features/settings/components/keyboard/keyboardActions.tsx", "KeyboardActions"]
+	])("compiles %s", (file, fnName) => {
+		const events = compile(file)
+
+		expect(events.filter(event => event.kind !== "CompileSuccess")).toEqual([])
+		expect(events.some(event => event.kind === "CompileSuccess" && event.fnName === fnName && (event.memoSlots ?? 0) > 0)).toBe(true)
+	})
+
 	// useVirtualizer opts its host out, so it lives in eventsTimeline.tsx; a scroll render must not reach the
 	// list, and a keystroke or minute tick must not rebuild the describer or the rows.
 	it("compiles EventsList, leaving only EventsTimeline to the virtualizer", () => {

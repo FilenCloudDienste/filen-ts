@@ -19,8 +19,10 @@ describe("toAccelerator", () => {
 		expect(toAccelerator(combo)).toBe(accelerator)
 	})
 
-	it("shows nothing for an unassigned combo or a key Electron cannot name", () => {
+	it("shows nothing for an unassigned or turned-off combo, or a key Electron cannot name", () => {
 		expect(toAccelerator("")).toBeUndefined()
+		// The marker a user's "Turn off" stores (@filen/shared/keymap UNBOUND_COMBO).
+		expect(toAccelerator("none")).toBeUndefined()
 		expect(toAccelerator("mod+intlbackslash")).toBeUndefined()
 	})
 

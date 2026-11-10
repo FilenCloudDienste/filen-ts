@@ -175,7 +175,7 @@ export const common = {
 	/** Keyboard shortcuts surface — title of both the overlay and the settings card, and the account-menu entry that opens it */
 	shortcutsTitle: "Keyboard shortcuts",
 	/** Keyboard shortcuts surface — description under the title */
-	shortcutsDescription: "Every keyboard shortcut in Filen, grouped by where it applies. Select a shortcut to change it.",
+	shortcutsDescription: "Every keyboard shortcut in Filen, grouped by where it applies. Select keys to change them, or + to add more.",
 	/** Keyboard shortcuts — group heading for shortcuts that work on every screen */
 	shortcutsScopeGlobal: "Everywhere",
 	/** Keyboard shortcuts — group heading for shortcuts that work while editing a file */
@@ -184,14 +184,10 @@ export const common = {
 	shortcutsScopeAudio: "Audio player",
 	/** Keyboard shortcuts — shown instead of a key badge for a shortcut with no combo assigned */
 	shortcutsUnbound: "Not set",
-	/** Keyboard shortcuts — button that starts recording a new combo for a shortcut */
-	shortcutsChange: "Change shortcut",
 	/** Keyboard shortcuts — prompt shown on the row while its new combo is being recorded */
 	shortcutsRecording: "Press the keys you want to use",
 	/** Keyboard shortcuts — button that drops a user's override and restores the built-in combo */
 	shortcutsResetToDefault: "Reset to default",
-	/** Keyboard shortcuts — rejection message when the recorded combo already belongs to another shortcut */
-	shortcutsConflict: 'Already used by "{{action}}"',
 	/** Chat and note participants dialogs — title (list mode) */
 	participantsDialogTitle: "Participants",
 	/** Participants dialogs — owner-only button that opens the add-participants picker */

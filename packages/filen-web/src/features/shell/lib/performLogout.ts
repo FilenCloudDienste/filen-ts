@@ -11,6 +11,7 @@ import { wipeSwClient } from "@/features/drive/lib/saveDownload"
 import { wipeLegacyWebOnSignOut } from "@/lib/legacyWebMigration"
 import { clearSession, broadcastAuth } from "@/lib/sdk/session"
 import { kvClear } from "@/lib/storage/adapter"
+import { keepKeymapsAcrossWipe } from "@/lib/keymap/storage"
 import { wipeImageCaches } from "@/features/shell/lib/wipeImageCaches"
 import { resetVideoSession } from "@/features/videos/lib/session"
 import { resetDriveKeyframes } from "@/features/drive/lib/thumbGenerators"
@@ -179,8 +180,9 @@ export async function performLogout(options?: PerformLogoutOptions): Promise<boo
 		},
 		sdkLogout: () => sdkApi.logout(),
 		clearSession,
-		// A conversation write already past its checks, in any tab, lands before the wipe, never after it.
-		kvClear: () => withHistoryWritesHeld(kvClear),
+		// A conversation write already past its checks, in any tab, lands before the wipe, never after it. Each
+		// account's keyboard shortcuts survive it (keyed by account, so the next account never inherits them).
+		kvClear: () => withHistoryWritesHeld(() => keepKeymapsAcrossWipe(kvClear)),
 		wipeThumbnails: wipeImageCaches,
 		wipeServiceWorker: wipeSwClient,
 		wipeLegacyWeb: wipeLegacyWebOnSignOut,

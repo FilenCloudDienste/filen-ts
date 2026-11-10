@@ -1,6 +1,14 @@
-import { combosOverlap } from "@filen/shared/keymap"
+import { chordIdentity, combosOverlap, formatChord, parseCombo, UNBOUND_COMBO } from "@filen/shared/keymap"
 import { isMacPlatform } from "@/lib/keymap/kbd.logic"
-import type { ActionScope, ResolvedAction } from "@/lib/keymap/registry"
+import type { ActionScope } from "@/lib/keymap/registry"
+
+// What the conflict check reads of an action: where it lives and what it is bound to ("" when unbound).
+export interface BoundAction {
+	readonly id: string
+	readonly scope: ActionScope
+	readonly combo: string
+	readonly overridden?: boolean
+}
 
 // Which scopes can have handlers mounted at the same time, as CROSS-scope pairs (a scope always
 // co-mounts with itself — see scopesCanCollide). `global` (themeProvider, above the auth gate) and
@@ -40,9 +48,9 @@ export const CO_MOUNTABLE: readonly (readonly [ActionScope, ActionScope])[] = [
 // layer, so focus decides which one runs. `notes.saveNow` and `preview.save` share mod+s only at scope
 // level: the preview overlay never mounts on the notes route, so the two never run together.
 //
-// The ONLY consumer is the defaults-level invariant test. `conflictingActions` deliberately does not
-// consult it: honoring it in the rebind UI would let a user create a SECOND, unguarded mod+s binding
-// and have it silently accepted.
+// `conflictingActions` deliberately does not consult it: honoring it in the rebind UI would let a user create a
+// SECOND, unguarded mod+s binding and have it silently accepted. The list's conflict marker does, for pairs still on
+// their defaults only (conflictsByAction).
 export const RESOLVED_COLLISIONS: readonly (readonly [string, string])[] = [
 	["drive.download", "preview.save"],
 	["drive.search", "editor.find"],
@@ -145,12 +153,12 @@ export function scopesCanCollide(a: ActionScope, b: ActionScope): boolean {
 // The rebound action's scope comes from `actions` itself. When `excludeId` names no action in the
 // list there is no scope to compare against, so every combo match is reported — a caller that cannot
 // say where the binding lives gets the conservative answer, never a false all-clear.
-export function conflictingActions(
-	actions: readonly ResolvedAction[],
+export function conflictingActions<T extends BoundAction>(
+	actions: readonly T[],
 	combo: string,
 	excludeId: string,
 	mac: boolean = isMacPlatform()
-): readonly ResolvedAction[] {
+): readonly T[] {
 	if (combo.length === 0) {
 		return []
 	}
@@ -164,4 +172,102 @@ export function conflictingActions(
 			(subject === undefined || scopesCanCollide(subject.scope, action.scope)) &&
 			combosOverlap(action.combo, combo, mac)
 	)
+}
+
+function isResolvedPair(a: BoundAction, b: BoundAction): boolean {
+	return (
+		a.overridden !== true &&
+		b.overridden !== true &&
+		RESOLVED_COLLISIONS.some(([first, second]) => (first === a.id && second === b.id) || (first === b.id && second === a.id))
+	)
+}
+
+// Every action that shares a keystroke with another one that can be mounted with it, and those others, for the list's
+// conflict marker and filter. A shipped pair whose runtime guard keeps them apart (RESOLVED_COLLISIONS) counts only
+// once the user has rebound either side. Indexed by keystroke, so it is linear in the bindings, not quadratic.
+export function conflictsByAction<T extends BoundAction>(actions: readonly T[], mac: boolean): ReadonlyMap<string, readonly T[]> {
+	const byKeystroke = new Map<string, T[]>()
+
+	for (const action of actions) {
+		for (const identity of new Set(parseCombo(action.combo).map(chord => chordIdentity(chord, mac)))) {
+			const holders = byKeystroke.get(identity)
+
+			if (holders === undefined) {
+				byKeystroke.set(identity, [action])
+			} else {
+				holders.push(action)
+			}
+		}
+	}
+
+	const conflicts = new Map<string, T[]>()
+
+	for (const holders of byKeystroke.values()) {
+		if (holders.length < 2) {
+			continue
+		}
+
+		for (const action of holders) {
+			for (const other of holders) {
+				if (other === action || !scopesCanCollide(action.scope, other.scope) || isResolvedPair(action, other)) {
+					continue
+				}
+
+				const list = conflicts.get(action.id)
+
+				if (list === undefined) {
+					conflicts.set(action.id, [other])
+				} else if (!list.includes(other)) {
+					list.push(other)
+				}
+			}
+		}
+	}
+
+	return conflicts
+}
+
+// A combo without its chords that share a keystroke with `chord`; unbound when nothing is left.
+export function comboWithout(combo: string, chord: string, mac: boolean): string {
+	const kept = parseCombo(combo).filter(own => !combosOverlap(formatChord(own), chord, mac))
+
+	return kept.length === 0 ? UNBOUND_COMBO : kept.map(formatChord).join(",")
+}
+
+// "Reassign": `id` takes `combo`, and every action that conflicts with its new chord gives that chord up.
+export function reassignChanges(
+	actions: readonly BoundAction[],
+	id: string,
+	combo: string,
+	chord: string,
+	mac: boolean
+): Record<string, string> {
+	const changes: Record<string, string> = { [id]: combo }
+
+	for (const other of conflictingActions(actions, chord, id, mac)) {
+		changes[other.id] = comboWithout(other.combo, chord, mac)
+	}
+
+	return changes
+}
+
+// "Swap": `id` takes `combo`, and the one conflicting action takes the chord `id` gave up in place of the shared one.
+export function swapChanges(
+	actions: readonly BoundAction[],
+	id: string,
+	combo: string,
+	chord: string,
+	replaced: string,
+	otherId: string,
+	mac: boolean
+): Record<string, string> {
+	const other = actions.find(action => action.id === otherId)
+
+	if (other === undefined) {
+		return { [id]: combo }
+	}
+
+	const chords = parseCombo(other.combo).map(own => (combosOverlap(formatChord(own), chord, mac) ? replaced : formatChord(own)))
+
+	return { [id]: combo, [otherId]: [...new Set(chords)].join(",") }
 }

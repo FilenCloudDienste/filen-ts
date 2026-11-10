@@ -27,7 +27,7 @@ vi.mock("@/lib/keymap/registry", () => ({
 	isRecordingCombo: () => false,
 	useComboFor: (id: string) => (id === "app.toggleTheme" ? THEME_COMBO : ""),
 	comboFor: (id: string) => (id === "app.toggleTheme" ? THEME_COMBO : ""),
-	subscribeOverrides: () => () => undefined
+	subscribeBindings: () => () => undefined
 }))
 vi.mock("@/lib/keymap/layout", () => ({ keyboardLayout: () => null, subscribeKeyboardLayout: () => () => undefined }))
 

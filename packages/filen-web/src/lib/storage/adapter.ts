@@ -274,8 +274,8 @@ async function resetDatabase(api: StorageHandle["api"]): Promise<boolean> {
 	}
 }
 
-// Wipes every kv row — query-persist rows and keymap overrides included, the full local wipe
-// logout needs. The first pass resets the database files, which leaves none of the deleted plaintext
+// Wipes every kv row — query-persist rows included, the full local wipe logout needs (sign-out puts the accounts'
+// keyboard shortcuts back after it: lib/keymap/storage.ts keepKeymapsAcrossWipe). The first pass resets the database files, which leaves none of the deleted plaintext
 // on disk; the second is one prefix delete (an empty prefix covers every key): a single statement and a
 // single follower RPC, rather than an enumeration plus one autocommit delete per row.
 export async function kvClear(): Promise<void> {

@@ -1,5 +1,5 @@
 import type { ShowKeyBindings, ShowKeyCommand } from "@filen/office/react/presentation"
-import { useOverrides, type ActionDef } from "@/lib/keymap/registry"
+import { useBindings, type ActionDef } from "@/lib/keymap/registry"
 
 // The slideshow's keys a user may rebind, PowerPoint's (and a presentation clicker's: PageDown, PageUp, B, F5,
 // Escape). The show takes them while it runs, on the audience stage and in the presenter view, and stops each one
@@ -36,23 +36,29 @@ function actionId(command: ShowKeyCommand): PresentationShowAction {
 	return `presentation.show.${command as string}` as PresentationShowAction
 }
 
+// The running show keeps its letter keys with single-key shortcuts off: they are a clicker's and PowerPoint's, and act
+// only on the show's own stage. Starting the show is the editor's.
 export const PRESENTATION_SHOW_ACTIONS: readonly (ActionDef & { readonly id: PresentationShowAction })[] = COMMANDS.map(command => ({
 	id: actionId(command),
 	defaultCombo: DEFAULTS[command].combo,
 	scope: "editor",
-	descriptionKey: DEFAULTS[command].description
+	section: "slideshow",
+	descriptionKey: DEFAULTS[command].description,
+	hintKey:
+		command === "start" || command === "startCurrent" ? "settings:keyboardHintPresentationEditor" : "settings:keyboardHintSlideshow",
+	keepsCharacterKeys: true
 }))
 
-// The show's keys with the user's overrides applied (each action's default otherwise).
-export function presentationShowBindings(overrides: Readonly<Record<string, string>>): ShowKeyBindings {
+// The show's keys from the combos in effect by action id (each action's default where one is missing).
+export function presentationShowBindings(combos: Readonly<Record<string, string>>): ShowKeyBindings {
 	const bindings: Partial<Record<ShowKeyCommand, string>> = {}
 
-	for (const command of COMMANDS) bindings[command] = overrides[actionId(command)] ?? DEFAULTS[command].combo
+	for (const command of COMMANDS) bindings[command] = combos[actionId(command)] ?? DEFAULTS[command].combo
 
 	return bindings as ShowKeyBindings
 }
 
-// The bindings for the running show, following overrides as the user changes them.
+// The bindings for the running show, following the user's changes as they make them.
 export function usePresentationShowBindings(): ShowKeyBindings {
-	return presentationShowBindings(useOverrides())
+	return presentationShowBindings(useBindings())
 }

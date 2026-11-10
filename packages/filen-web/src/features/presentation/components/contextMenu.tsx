@@ -55,7 +55,7 @@ import { presentationShortcutKeys } from "@/features/presentation/lib/keymap/edi
 import type { ClipboardScope } from "@/features/presentation/lib/presentationClipboard"
 import { isMacPlatform } from "@/lib/keymap/kbd.logic"
 import { useKeyboardLayout } from "@/lib/keymap/layout"
-import { useOverrides } from "@/lib/keymap/registry"
+import { useBindings } from "@/lib/keymap/registry"
 
 // The slide list's context menu (right click, or a long press on touch): the slide commands on the selection, as in
 // PowerPoint's slide pane: Cut, Copy, Paste, New, Duplicate, Delete, Layout, Reset, Hide, Move (the way touch moves slides) and the
@@ -147,7 +147,7 @@ function ClipboardItems({ at, cuts }: { at: ClipboardScope; cuts: boolean }) {
 export function SlideListContextMenu({ children }: { children: ReactNode }) {
 	const { t } = useTranslation("preview")
 	const scope = usePresentationEditor()
-	const overrides = useOverrides()
+	const overrides = useBindings()
 	const keyLayout = useKeyboardLayout()
 
 	if (scope?.editor.editable !== true) return children

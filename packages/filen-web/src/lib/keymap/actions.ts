@@ -1,4 +1,15 @@
-import { registerAction, useOverrides, type ActionDef, type ResolvedAction } from "@/lib/keymap/registry"
+import {
+	CURRENT_PLATFORM,
+	registerAction,
+	resolveAction,
+	useKeymapRecord,
+	type ActionDef,
+	type KeymapPlatform,
+	type KeymapRecord,
+	type ResolvedAction
+} from "@/lib/keymap/registry"
+import { conflictsByAction } from "@/lib/keymap/conflicts"
+import { groupShortcuts, type ShortcutGroup } from "@/lib/keymap/shortcutsCatalog"
 import { APP_ACTIONS } from "@/features/shell/lib/keymap"
 import { DRIVE_ACTIONS } from "@/features/drive/lib/keymap"
 import { NOTES_ACTIONS } from "@/features/notes/lib/keymap"
@@ -44,13 +55,41 @@ export function registerAllActions(): void {
 	}
 }
 
-// Every registered action with its live combo. Resolved from ALL_ACTIONS — a module const that is
-// fully populated at module-evaluation time and never mutated — and from the hook's own subscribed
-// `overrides`, so memoizing on `overrides` (which the React Compiler will do) is exactly correct.
-// This is the shape useComboFor's browser-verified staleness note demands: no plain function reading
-// a mutable Map behind the compiler's back.
-export function useActionCatalog(): readonly ResolvedAction[] {
-	const overrides = useOverrides()
+export interface ShortcutCatalog {
+	actions: readonly ResolvedAction[]
+	groups: readonly ShortcutGroup[]
+	// Each action sharing a keystroke with others that can be mounted with it, and those others.
+	conflicts: ReadonlyMap<string, readonly ResolvedAction[]>
+	byId: ReadonlyMap<string, ResolvedAction>
+}
 
-	return ALL_ACTIONS.map(def => ({ ...def, combo: overrides[def.id] ?? def.defaultCombo }))
+// Every action on a platform with its binding, grouped, and the conflicts between them.
+export function shortcutCatalog(record: KeymapRecord, platform: KeymapPlatform): ShortcutCatalog {
+	const actions = ALL_ACTIONS.map(def => resolveAction(def, record.overrides, platform))
+
+	return {
+		actions,
+		groups: groupShortcuts(actions),
+		conflicts: conflictsByAction(actions, platform.mac),
+		byId: new Map(actions.map(action => [action.id, action]))
+	}
+}
+
+// One catalog per record: it is rebuilt only when a binding changes, never per keystroke in the search field.
+const catalogs = new WeakMap<KeymapRecord, ShortcutCatalog>()
+
+export function currentCatalog(record: KeymapRecord): ShortcutCatalog {
+	let catalog = catalogs.get(record)
+
+	if (catalog === undefined) {
+		catalog = shortcutCatalog(record, CURRENT_PLATFORM)
+		catalogs.set(record, catalog)
+	}
+
+	return catalog
+}
+
+// Subscribed: the catalog under the live record.
+export function useShortcutCatalog(): ShortcutCatalog {
+	return currentCatalog(useKeymapRecord())
 }

@@ -58,8 +58,8 @@ export async function runLogout(deps: LogoutDeps): Promise<void> {
 	// The wipes touch separate stores, so they run side by side and sign-out waits only as long as
 	// the slowest, the thumbnail cache, whose deletion grows with its file count.
 	const wiped = await Promise.all([
-		// Session row first, then every remaining kv row — query-persist rows and keymap overrides
-		// included: logout is a full local wipe by design, matching the confirm dialog's copy.
+		// Session row first, then every remaining kv row — query-persist rows included: logout is a full local wipe by
+		// design. The one exception is each account's keyboard shortcuts, kept by the caller's kvClear.
 		(async () => {
 			const session = await phase("clear-session", deps.clearSession)
 			const rows = await phase("kv-clear", deps.kvClear)

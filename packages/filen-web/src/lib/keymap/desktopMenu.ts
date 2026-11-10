@@ -4,7 +4,7 @@ import type { DesktopMenuAction } from "@filen/shared/desktop"
 import { comboForLayout, matchesCombo } from "@filen/shared/keymap"
 import { desktopBridge } from "@/lib/desktop"
 import { keyboardLayout, subscribeKeyboardLayout } from "@/lib/keymap/layout"
-import { comboFor, subscribeOverrides } from "@/lib/keymap/registry"
+import { comboFor, subscribeBindings } from "@/lib/keymap/registry"
 
 // The macOS desktop menu (D18) offers a few keymap actions. Main shows each with the combo in effect here and
 // sends the id back on click; the action then runs the same handler its keys run, so this page stays the only
@@ -74,7 +74,7 @@ function subscribe(): void {
 	subscribed = true
 	bridge.app.onMenuAction(dispatch)
 	pushShortcuts()
-	subscribeOverrides(pushShortcuts)
+	subscribeBindings(pushShortcuts)
 	subscribeKeyboardLayout(pushShortcuts)
 	document.addEventListener("keydown", cancelMenuRepeat)
 }

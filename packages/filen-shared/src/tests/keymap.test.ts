@@ -4,12 +4,15 @@ import {
 	chordLabels,
 	comboForLayout,
 	combosOverlap,
+	isCharacterChord,
 	isMacPlatform,
 	keyLabel,
 	matchesCombo,
 	normalizeCombo,
 	parseCombo,
 	tokenOfCode,
+	UNBOUND_COMBO,
+	withoutCharacterChords,
 	type ChordEvent,
 	type KeyboardLayout
 } from "@filen/shared/keymap"
@@ -217,11 +220,20 @@ describe("keyLabel", () => {
 		expect(keyLabel("q", false, layout({ KeyQ: "Dead" }))).toBe("Q")
 	})
 
-	it("labels a whole chord, modifiers first", () => {
+	it("labels a whole chord, modifiers first, in Apple's order on a Mac", () => {
 		const [chord] = parseCombo("shift+mod+,")
+		const [all] = parseCombo("mod+ctrl+alt+shift+k")
 
-		expect(chord && chordLabels(chord, true)).toEqual(["⌘", "⇧", ","])
-		expect(chord && chordLabels(chord, false, FRENCH)).toEqual(["Ctrl", "Shift", ";"])
+		expect(chord && chordLabels(chord, true)).toEqual(["⇧", "⌘", ","])
+		expect(chord && chordLabels(chord, false, FRENCH, false)).toEqual(["Ctrl", "Shift", ";"])
+		expect(all && chordLabels(all, true)).toEqual(["⌃", "⌥", "⇧", "⌘", "K"])
+		expect(all && chordLabels(all, false, null, false)).toEqual(["Ctrl", "Ctrl", "Alt", "Shift", "K"])
+	})
+
+	it("names the Windows key Super on Linux", () => {
+		expect(keyLabel("meta", false, null, true)).toBe("Super")
+		expect(keyLabel("meta", false, null, false)).toBe("Win")
+		expect(keyLabel("meta", true, null, true)).toBe("⌘")
 	})
 })
 
@@ -279,5 +291,40 @@ describe("round trip", () => {
 			expect(chord && chordLabels(chord, false, GERMAN).at(-1), code).toBe(germanLabel)
 			expect(normalizeCombo(recorded), code).toBe(recorded)
 		}
+	})
+})
+
+describe("the unbound marker", () => {
+	it("parses to no chord, so no matcher fires and normalizing drops it", () => {
+		expect(parseCombo(UNBOUND_COMBO)).toEqual([])
+		expect(normalizeCombo(UNBOUND_COMBO)).toBe("")
+		expect(matchesCombo(press("KeyN", "n"), UNBOUND_COMBO, false)).toBe(false)
+		expect(combosOverlap(UNBOUND_COMBO, "n", false)).toBe(false)
+	})
+})
+
+describe("character key shortcuts", () => {
+	it("are writing-system, space and numpad keys with no modifier but Shift", () => {
+		const character = (combo: string): boolean => parseCombo(combo).every(isCharacterChord)
+
+		expect(character("d")).toBe(true)
+		expect(character("shift+slash")).toBe(true)
+		expect(character("space")).toBe(true)
+		expect(character("add")).toBe(true)
+		expect(character("1")).toBe(true)
+		expect(character("mod+d")).toBe(false)
+		expect(character("alt+d")).toBe(false)
+		expect(character("escape")).toBe(false)
+		expect(character("delete")).toBe(false)
+		expect(character("f2")).toBe(false)
+		expect(character("arrowleft")).toBe(false)
+	})
+
+	it("withoutCharacterChords keeps the rest of a combo, and the combo itself when it has none", () => {
+		expect(withoutCharacterChords("delete,backspace,t")).toBe("delete,backspace")
+		expect(withoutCharacterChords("d")).toBe("")
+		const combo = "mod+s"
+
+		expect(withoutCharacterChords(combo)).toBe(combo)
 	})
 })

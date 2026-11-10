@@ -19,7 +19,8 @@ Object.defineProperty(navigator, "userAgent", { value: "Mozilla/5.0 (Windows NT 
 Object.defineProperty(navigator, "keyboard", { value: { getLayoutMap: () => Promise.resolve(GERMAN) }, configurable: true })
 
 vi.mock("@/lib/storage/adapter", () => ({
-	kvGetJson: () => Promise.resolve({ "presentation.text.growFont": "mod+shift+.", "editor.find": "mod+y" }),
+	kvGetJson: () =>
+		Promise.resolve({ overrides: { "presentation.text.growFont": "mod+shift+.", "editor.find": "mod+y" }, characterKeys: true }),
 	kvSetJson: () => Promise.resolve()
 }))
 

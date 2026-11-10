@@ -10,6 +10,8 @@ import { routeTree } from "@/routeTree.gen"
 import { bootSdk, whenBootReady } from "@/lib/sdk/boot"
 import { advanceBootSplash, dismissBootSplash } from "@/lib/bootSplash"
 import { registerAllActions } from "@/lib/keymap/actions"
+import { followKeymapAccount } from "@/lib/keymap/account"
+import { queryClient } from "@/queries/client"
 import { NotFoundScreen } from "@/features/shell/components/notFoundScreen"
 import { useReminderStore } from "@/features/shell/store/useReminderStore"
 import { connectFileKindVerdictStorage } from "@/features/drive/lib/fileKindVerdictStorage"
@@ -66,6 +68,8 @@ void whenBootReady().then(() => {
 // Every keyboard action, registered before the first render — the defs are static data, so `comboFor`
 // and `<Kbd>` are correct from the very first paint.
 registerAllActions()
+// The signed-in account's own shortcuts, once the app knows who that is.
+followKeymapAccount(queryClient)
 
 // Type-level router registration — makes `Link`/`redirect`/`navigate` paths across the app fully typed
 // against this route tree.

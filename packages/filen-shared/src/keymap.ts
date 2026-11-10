@@ -40,8 +40,15 @@ export interface KeyboardLayout {
 	get(code: string): string | undefined
 }
 
-// Storage and display order of a chord's modifiers.
+// Storage order of a chord's modifiers, and their display order off a Mac.
 export const MODIFIER_ORDER: readonly ModifierToken[] = ["mod", "meta", "ctrl", "alt", "shift"]
+
+// Apple's display order: Control, Option, Shift, Command (Apple HIG, Keyboards).
+const MAC_DISPLAY_ORDER: readonly ModifierToken[] = ["ctrl", "alt", "shift", "mod", "meta"]
+
+// A stored binding that turns an action off. It parses to no chord, so every matcher that reads a combo through this
+// model (the app's, the office editors', CodeMirror's, the desktop menu's) treats it as unbound.
+export const UNBOUND_COMBO = "none"
 
 const MODIFIER_ALIASES: ReadonlyMap<string, ModifierToken> = new Map([
 	["mod", "mod"],
@@ -99,6 +106,7 @@ const KEY_ALIASES: ReadonlyMap<string, string> = new Map([
 const NAMED_LABELS: ReadonlyMap<string, readonly [mac: string, other: string]> = new Map([
 	["mod", ["⌘", "Ctrl"]],
 	["meta", ["⌘", "Win"]],
+	["superMeta", ["⌘", "Super"]],
 	["ctrl", ["⌃", "Ctrl"]],
 	["alt", ["⌥", "Alt"]],
 	["shift", ["⇧", "Shift"]],
@@ -230,7 +238,7 @@ export function parseCombo(combo: string): readonly Chord[] {
 	if (chords === undefined) {
 		const out: Chord[] = []
 
-		if (!combo.includes(">")) {
+		if (combo !== UNBOUND_COMBO && !combo.includes(">")) {
 			for (const parts of splitCombo(combo)) {
 				const chord = chordOf(parts)
 
@@ -247,6 +255,38 @@ export function parseCombo(combo: string): readonly Chord[] {
 
 export function chordModifiers(chord: Chord): ModifierToken[] {
 	return MODIFIER_ORDER.filter(modifier => chord[modifier])
+}
+
+// A chord's modifiers in the order a platform shows them.
+export function displayModifiers(chord: Chord, mac: boolean): ModifierToken[] {
+	return (mac ? MAC_DISPLAY_ORDER : MODIFIER_ORDER).filter(modifier => chord[modifier])
+}
+
+// The numpad's character keys, which type as the writing-system keys do.
+const NUMPAD_CHARACTERS: ReadonlySet<string> = new Set(["add", "subtract", "multiply", "divide", "decimal"])
+
+// Whether a chord is a character key shortcut (WCAG 2.1.4): a key that types a character, with no modifier but Shift.
+// Shift+/ ("?") is one; Escape, Delete, the arrows and the F-keys are not.
+export function isCharacterChord(chord: Chord): boolean {
+	return (
+		!chord.mod &&
+		!chord.meta &&
+		!chord.ctrl &&
+		!chord.alt &&
+		(codeOfToken(chord.key) !== undefined || chord.key === "space" || NUMPAD_CHARACTERS.has(chord.key))
+	)
+}
+
+// A combo without its character key shortcuts.
+export function withoutCharacterChords(combo: string): string {
+	const chords = parseCombo(combo)
+
+	return chords.some(isCharacterChord)
+		? chords
+				.filter(chord => !isCharacterChord(chord))
+				.map(formatChord)
+				.join(",")
+		: combo
 }
 
 export function formatChord(chord: Chord): string {
@@ -327,9 +367,9 @@ function layoutCharacter(token: string, layout: KeyboardLayout | null | undefine
 }
 
 // How a key is shown: a modifier's or named key's symbol, the character `layout` puts on a writing-system key (the
-// US one without a layout), a function key's name ("F5").
-export function keyLabel(token: string, mac: boolean, layout?: KeyboardLayout | null): string {
-	const named = NAMED_LABELS.get(token)
+// US one without a layout), a function key's name ("F5"). Linux calls the Windows key Super.
+export function keyLabel(token: string, mac: boolean, layout?: KeyboardLayout | null, linux: boolean = isLinuxPlatform()): string {
+	const named = NAMED_LABELS.get(token === "meta" && linux ? "superMeta" : token)
 
 	if (named !== undefined) return mac ? named[0] : named[1]
 
@@ -345,9 +385,9 @@ export function keyLabel(token: string, mac: boolean, layout?: KeyboardLayout | 
 	return token.charAt(0).toUpperCase() + token.slice(1)
 }
 
-// A chord as the keys a user presses, modifiers first.
-export function chordLabels(chord: Chord, mac: boolean, layout?: KeyboardLayout | null): string[] {
-	return [...chordModifiers(chord), chord.key].map(token => keyLabel(token, mac, layout))
+// A chord as the keys a user presses, modifiers first in the platform's order.
+export function chordLabels(chord: Chord, mac: boolean, layout?: KeyboardLayout | null, linux: boolean = isLinuxPlatform()): string[] {
+	return [...displayModifiers(chord, mac), chord.key].map(token => keyLabel(token, mac, layout, linux))
 }
 
 // A combo with each key renamed to the US key that types the character `layout` puts on it, for a matcher that
@@ -380,6 +420,13 @@ export function isMacPlatform(): boolean {
 	const agent = (globalThis as { readonly navigator?: { readonly userAgent?: string } }).navigator?.userAgent ?? ""
 
 	return /mac/i.test(agent) && !/iphone|ipad|ipod/i.test(agent)
+}
+
+// Whether the page runs on desktop Linux, whose Windows key is named Super.
+export function isLinuxPlatform(): boolean {
+	const agent = (globalThis as { readonly navigator?: { readonly userAgent?: string } }).navigator?.userAgent ?? ""
+
+	return /linux|x11/i.test(agent) && !/android|cros/i.test(agent)
 }
 
 // A keydown that belongs to an input method rather than to the page: during a composition, or (Safari) the one
