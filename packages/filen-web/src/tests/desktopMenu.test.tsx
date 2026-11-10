@@ -47,7 +47,9 @@ describe("desktop menu actions", () => {
 			"desktop.close": "mod+w",
 			"audio.playPause": "mod+alt+p",
 			"audio.next": "mod+shift+arrowright",
-			"audio.previous": "mod+shift+arrowleft"
+			"audio.previous": "mod+shift+arrowleft",
+			"audio.shuffle": "alt+shift+s",
+			"audio.loop": "alt+shift+r"
 		})
 	})
 
