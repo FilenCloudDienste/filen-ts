@@ -36,7 +36,6 @@ import {
 } from "lucide-react"
 import {
 	parseDocxEditorCommand,
-	shortcutHint,
 	type DocxEditorCommand,
 	type DocxEditorCommandInfo,
 	type DocxEditorSnapshot,
@@ -44,7 +43,6 @@ import {
 	type DocxParagraphStyle,
 	type LockReason
 } from "@filen/office/core/docx/edit"
-import { commandShortcut } from "@filen/office/core/docx/paged"
 import { canZoomIn, canZoomOut, type DocxMarkupMode } from "@filen/office/dom/docx"
 import { cn } from "@filen/shared"
 import {
@@ -102,7 +100,9 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
 import { Kbd, KbdKeys } from "@/lib/keymap/kbd"
-import { desktopBridge } from "@/lib/desktop"
+import { useBindings } from "@/lib/keymap/registry"
+import { ariaKeyShortcuts } from "@/lib/keymap/keyText"
+import { DOCX_KEY_ACTIONS, lineSpacingAction } from "@/features/preview/lib/docxKeymap"
 
 // The Word document editor's ribbon (officeRibbon.tsx), as Word for the web's simplified ribbon: File, Home
 // (undo, clipboard, font, paragraph, styles, editing), Insert, Layout, References, Review, View, and the contextual
@@ -128,8 +128,13 @@ const ICONS: Readonly<Record<string, LucideIcon>> = {
 	redo: Redo2Icon
 }
 
-// In a browser, keys the browser keeps for itself are not advertised (the desktop app delivers them).
-const BROWSER = desktopBridge() === undefined
+// An action's key as a hint, the one in effect (Settings → Keyboard); none while it is unbound, as a browser leaves the
+// keys it keeps for itself (the desktop app's line spacing).
+function useActionKey(action: string | undefined): ReactNode {
+	const combos = useBindings()
+
+	return action === undefined || (combos[action] ?? "") === "" ? undefined : <Kbd action={action} />
+}
 const HISTORY = rowCommands("history")
 const FORMAT = rowCommands("format")
 const ALIGN = rowCommands("align")
@@ -238,20 +243,18 @@ function CommandButton({
 	command,
 	active,
 	disabled,
-	apple,
 	execute
 }: {
 	command: DocxToolbarCommand
 	active: boolean
 	disabled: boolean
-	apple: boolean
 	execute: (command: DocxEditorCommand) => void
 }) {
 	const { t } = useTranslation("preview")
 	const { info, label } = command
 	const Icon = ICONS[info.icon ?? ""] ?? BoldIcon
 	const toggle = info.group === "format" && info.type !== "format.clear"
-	const shortcut = shortcutHint(info, apple, BROWSER)
+	const shortcut = useActionKey(DOCX_KEY_ACTIONS.get(info.type))
 
 	return (
 		<TooltipIconButton
@@ -259,7 +262,7 @@ function CommandButton({
 			disabled={disabled}
 			pressed={toggle || info.group === "align" || info.type === "list.bullet" || info.type === "list.numbered" ? active : undefined}
 			className={cn(active && "bg-accent text-foreground")}
-			shortcut={shortcut === undefined ? undefined : <KbdKeys keys={shortcutKeys(shortcut, apple)} />}
+			shortcut={shortcut}
 			onMouseDown={keepFocus}
 			onClick={() => {
 				run(info, execute)
@@ -277,17 +280,15 @@ function FormattingMarksButton({
 	command,
 	pressed,
 	disabled,
-	apple,
 	execute
 }: {
 	command: DocxToolbarCommand
 	pressed: boolean
 	disabled: boolean
-	apple: boolean
 	execute: (command: DocxEditorCommand) => void
 }) {
 	const { t } = useTranslation("preview")
-	const shortcut = shortcutHint(command.info, apple, BROWSER)
+	const shortcut = useActionKey(DOCX_KEY_ACTIONS.get(command.info.type))
 
 	return (
 		<TooltipIconButton
@@ -295,7 +296,7 @@ function FormattingMarksButton({
 			disabled={disabled}
 			pressed={pressed}
 			className={cn(pressed && "bg-accent text-foreground")}
-			shortcut={shortcut === undefined ? undefined : <KbdKeys keys={shortcutKeys(shortcut, apple)} />}
+			shortcut={shortcut}
 			onMouseDown={keepFocus}
 			onClick={() => {
 				execute({ type: "view.formattingMarks" })
@@ -472,16 +473,40 @@ function ClipboardControls({
 	)
 }
 
-// Line spacing ▾: Word's multiples, with the keys of those that have one (in the desktop app).
+// One of Line spacing ▾'s multiples, with its key where it has one (Word's are the desktop app's by default).
+function LineSpacingItem({ spacing }: { spacing: number }) {
+	const { t } = useTranslation("preview")
+	const shortcut = useActionKey(lineSpacingAction(spacing))
+
+	return (
+		<DropdownMenuRadioItem
+			value={String(spacing)}
+			closeOnClick
+		>
+			{t("previewDocxLineSpacingValue", {
+				value: spacing / 240,
+				formatParams: { value: { minimumFractionDigits: 1 } }
+			})}
+			{shortcut === undefined ? null : (
+				<span
+					className="ml-auto pl-4"
+					aria-hidden
+				>
+					{shortcut}
+				</span>
+			)}
+		</DropdownMenuRadioItem>
+	)
+}
+
+// Line spacing ▾: Word's multiples, with the keys of those that have one.
 function LineSpacingMenu({
 	value,
 	disabled,
-	apple,
 	execute
 }: {
 	value: number | null
 	disabled: boolean
-	apple: boolean
 	execute: (command: DocxEditorCommand) => void
 }) {
 	const { t } = useTranslation("preview")
@@ -505,30 +530,12 @@ function LineSpacingMenu({
 						focus.ran()
 					}}
 				>
-					{LINE_SPACINGS.map(spacing => {
-						const shortcut = commandShortcut({ type: "paragraph.lineSpacing", rule: "auto", value: spacing }, apple, !BROWSER)
-
-						return (
-							<DropdownMenuRadioItem
-								key={spacing}
-								value={String(spacing)}
-								closeOnClick
-							>
-								{t("previewDocxLineSpacingValue", {
-									value: spacing / 240,
-									formatParams: { value: { minimumFractionDigits: 1 } }
-								})}
-								{shortcut === undefined ? null : (
-									<span
-										className="ml-auto pl-4"
-										aria-hidden
-									>
-										<KbdKeys keys={shortcutKeys(shortcut, apple)} />
-									</span>
-								)}
-							</DropdownMenuRadioItem>
-						)
-					})}
+					{LINE_SPACINGS.map(spacing => (
+						<LineSpacingItem
+							key={spacing}
+							spacing={spacing}
+						/>
+					))}
 				</DropdownMenuRadioGroup>
 			</DropdownMenuContent>
 		</DropdownMenu>
@@ -537,18 +544,12 @@ function LineSpacingMenu({
 
 // Find ▾: find (the Navigation pane's search, as Word's Find; the find bar without the pane), Word's Advanced Find
 // (the find bar), or find and replace.
-// Word's Find and Replace is Ctrl+H, Control+H on a Mac (findForKey); shown as a hint, kept out of the item's name.
-function FindMenu({
-	onFindOpen,
-	onSearch,
-	apple
-}: {
-	onFindOpen: (replace: boolean) => void
-	onSearch: (() => void) | undefined
-	apple: boolean
-}) {
+// Find and Replace's key (Word's Ctrl+H, Control+H on a Mac, by default) is shown as a hint, kept out of the item's
+// name.
+function FindMenu({ onFindOpen, onSearch }: { onFindOpen: (replace: boolean) => void; onSearch: (() => void) | undefined }) {
 	const { t } = useTranslation("preview")
-	const replaceCombo = apple ? "ctrl+h" : "mod+h"
+	const replaceKey = useActionKey("docx.replace")
+	const replaceCombo = useBindings()["docx.replace"] ?? ""
 
 	return (
 		<DropdownMenu>
@@ -579,18 +580,20 @@ function FindMenu({
 					</DropdownMenuItem>
 				)}
 				<DropdownMenuItem
-					aria-keyshortcuts="Control+H"
+					{...(replaceCombo === "" ? {} : { "aria-keyshortcuts": ariaKeyShortcuts(replaceCombo) })}
 					onClick={() => {
 						onFindOpen(true)
 					}}
 				>
 					{t("previewDocxFindReplaceAction")}
-					<span
-						className="ml-auto pl-4"
-						aria-hidden
-					>
-						<KbdKeys keys={shortcutKeys(replaceCombo, apple)} />
-					</span>
+					{replaceKey === undefined ? null : (
+						<span
+							className="ml-auto pl-4"
+							aria-hidden
+						>
+							{replaceKey}
+						</span>
+					)}
 				</DropdownMenuItem>
 			</DropdownMenuContent>
 		</DropdownMenu>
@@ -718,7 +721,6 @@ export function DocxEditToolbar(props: DocxEditToolbarProps) {
 			command={command}
 			active={snapshot !== undefined && commandActive(snapshot, command.info.type)}
 			disabled={commandDisabled(command.info, snapshot, readOnly)}
-			apple={apple}
 			execute={execute}
 		/>
 	)
@@ -727,7 +729,6 @@ export function DocxEditToolbar(props: DocxEditToolbarProps) {
 		<LineSpacingMenu
 			value={lineSpacing?.rule === "auto" ? lineSpacing.value : null}
 			disabled={commandOff("paragraph.lineSpacing")}
-			apple={apple}
 			execute={execute}
 		/>
 	) : null
@@ -838,7 +839,6 @@ export function DocxEditToolbar(props: DocxEditToolbarProps) {
 									command={FORMATTING_MARKS}
 									pressed={props.formattingMarks}
 									disabled={snapshot?.enabled["view.formattingMarks"] !== true}
-									apple={apple}
 									execute={execute}
 								/>
 							)}
@@ -873,7 +873,6 @@ export function DocxEditToolbar(props: DocxEditToolbarProps) {
 						<FindMenu
 							onFindOpen={props.onFindOpen}
 							onSearch={props.navigation?.onSearch}
-							apple={apple}
 						/>
 					)
 				}
@@ -1149,6 +1148,7 @@ export function DocxEditToolbar(props: DocxEditToolbarProps) {
 								focus={find.focus}
 								onClosed={props.onFindClosed}
 								replaceOpen={find.replace}
+								replaceAction="docx.replace"
 							/>
 						</div>
 					) : undefined

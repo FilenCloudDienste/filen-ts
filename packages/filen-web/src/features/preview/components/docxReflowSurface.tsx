@@ -1,6 +1,6 @@
 import type { RefObject } from "react"
 import { useTranslation } from "react-i18next"
-import type { PagedEditor } from "@filen/office/core/docx/paged"
+import type { DocxKeyBindings, PagedEditor } from "@filen/office/core/docx/paged"
 import type { DocxDocument } from "@filen/office/react/docx"
 import {
 	DocxReflow,
@@ -22,6 +22,8 @@ export interface DocxReflowSurfaceProps {
 	readOnly: boolean
 	apple: boolean
 	desktop: boolean
+	// The Word keys in effect (the keymap's).
+	keyBindings: DocxKeyBindings
 	marks: readonly DocxEditorMark[]
 	// The words formatting marks label breaks with.
 	markLabels?: DocxMarkLabels
@@ -54,6 +56,7 @@ export function DocxReflowSurface({ handleRef, interactions, ...props }: DocxRef
 			readOnly={props.readOnly}
 			apple={props.apple}
 			desktop={props.desktop}
+			keyBindings={props.keyBindings}
 			marks={props.marks}
 			{...(props.markLabels === undefined ? {} : { markLabels: props.markLabels })}
 			onFind={props.onFind}

@@ -55,13 +55,14 @@ export interface DocxCommandInfo<T extends string = string> {
 	readonly labelKey: string
 	// A neutral icon id an app maps to its own icon set; absent for commands without one.
 	readonly icon?: string
-	// Platform-neutral shortcut ("mod" = Cmd on Apple platforms, Ctrl elsewhere; "ctrl" = Control on every
-	// platform); only on commands without arguments unless `hostShortcut`. Read through shortcutFor.
+	// Word's platform-neutral shortcut, the default of the command's key (DOCX_KEYS; "mod" = Cmd on Apple platforms,
+	// Ctrl elsewhere; "ctrl" = Control on every platform; keys are @filen/shared/keymap's physical key tokens); only on
+	// commands without arguments unless `hostShortcut`. Read through shortcutFor.
 	readonly shortcut?: string
 	// The shortcut on Apple platforms where Word for Mac's differs from `shortcut`.
 	readonly appleShortcut?: string
-	// The host runs the shortcut (it gives the arguments, asks for the author or the input first):
-	// commandForKey leaves it to hostCommandForKey.
+	// The host runs the command's key (it gives the arguments, asks for the author or the input first): docxKeyFor
+	// reports it as the host's.
 	readonly hostShortcut?: true
 	// Further keys that run the command on every platform; never shown.
 	readonly alsoShortcuts?: readonly string[]
@@ -209,7 +210,8 @@ export function shortcutFor(entry: DocxShortcutEntry, apple: boolean): string | 
 }
 
 // Keys a browser keeps for itself (Chromium never delivers them to a page; on macOS the app menu takes the
-// rest): bound all the same (a desktop shell delivers them), never advertised on a browser host.
+// rest), as canonical chords: a key's default in a browser leaves them out (docxKeyDefault), a desktop shell
+// delivers them.
 const BROWSER_RESERVED: ReadonlySet<string> = new Set(["mod+n", "mod+shift+n", "mod+t", "mod+shift+t", "mod+w", "mod+shift+w"])
 // Cmd+digit selects a browser tab (the Window menu's).
 const APPLE_BROWSER_RESERVED: ReadonlySet<string> = new Set(["mod+q", "mod+h", "mod+m", "mod+8"])
@@ -218,13 +220,6 @@ export function browserReservedShortcut(shortcut: string, apple: boolean): boole
 	const combo = shortcut.toLowerCase()
 
 	return BROWSER_RESERVED.has(combo) || (apple && APPLE_BROWSER_RESERVED.has(combo))
-}
-
-// The shortcut to show for an entry: none for a key the browser takes when `browser` (not a desktop shell).
-export function shortcutHint(entry: DocxShortcutEntry, apple: boolean, browser: boolean): string | undefined {
-	const shortcut = shortcutFor(entry, apple)
-
-	return shortcut === undefined || (browser && browserReservedShortcut(shortcut, apple)) ? undefined : shortcut
 }
 
 // ---- base commands ---------------------------------------------------------------------------------------
@@ -290,14 +285,23 @@ export const BASE_COMMANDS: readonly DocxCommandInfo<BaseCommand["type"]>[] = [
 	{ type: "format.bold", labelKey: "docx.format.bold", icon: "bold", shortcut: "mod+b", group: "format", ...story },
 	{ type: "format.italic", labelKey: "docx.format.italic", icon: "italic", shortcut: "mod+i", group: "format", ...story },
 	{ type: "format.underline", labelKey: "docx.format.underline", icon: "underline", shortcut: "mod+u", group: "format", ...story },
-	{ type: "format.strike", labelKey: "docx.format.strike", icon: "strikethrough", group: "format", ...story },
-	// Ctrl+Space; Control+Space on a Mac (Cmd+Space is Spotlight's).
+	// Not Word's (it has none): Google Docs' and the Markdown editors'.
+	{
+		type: "format.strike",
+		labelKey: "docx.format.strike",
+		icon: "strikethrough",
+		shortcut: "mod+shift+x",
+		group: "format",
+		...story
+	},
+	// Ctrl+Space; on a Mac, where Cmd+Space is Spotlight's and Control+Space (Word for Mac's) switches the input
+	// source, Cmd+Shift+Space, as the presentation editor's.
 	{
 		type: "format.clear",
 		labelKey: "docx.format.clear",
 		icon: "clear-formatting",
 		shortcut: "mod+space",
-		appleShortcut: "ctrl+space",
+		appleShortcut: "mod+shift+space",
 		group: "format",
 		...story
 	},

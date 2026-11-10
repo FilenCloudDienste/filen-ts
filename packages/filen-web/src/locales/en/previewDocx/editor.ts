@@ -264,5 +264,63 @@ export const previewDocxEditor = {
 	/** Docx editor, Word Count dialog — button closing it */
 	previewDocxWordCountClose: "Close",
 	/** Docx editor — Review tab ribbon group: spelling and word count (Word's "Proofing") */
-	previewDocxRibbonProofing: "Proofing"
+	previewDocxRibbonProofing: "Proofing",
+
+	// ── Keyboard shortcuts list (Settings → Keyboard, Word group) ───────────
+	/** Shortcuts list, Word — key that gives the paragraphs Word's Normal style */
+	previewDocxKeyStyleNormal: "Normal style",
+	/** Shortcuts list, Word — key that gives the paragraphs the Heading 1 style */
+	previewDocxKeyHeading1: "Heading 1 style",
+	/** Shortcuts list, Word — key that gives the paragraphs the Heading 2 style */
+	previewDocxKeyHeading2: "Heading 2 style",
+	/** Shortcuts list, Word — key that gives the paragraphs the Heading 3 style */
+	previewDocxKeyHeading3: "Heading 3 style",
+	/** Shortcuts list, Word — key for single line spacing */
+	previewDocxKeyLineSpacing1: "Single line spacing",
+	/** Shortcuts list, Word — key for double line spacing */
+	previewDocxKeyLineSpacing2: "Double line spacing",
+	/** Shortcuts list, Word — key for 1.5 line spacing */
+	previewDocxKeyLineSpacing15: "1.5 line spacing",
+	/** Shortcuts list, Word — key that takes back a hanging indent (Word's Unhang) */
+	previewDocxKeyUnhang: "Reduce hanging indent",
+	/** Shortcuts list, Word — key that inserts a DATE field */
+	previewDocxKeyDateField: "Insert the date",
+	/** Shortcuts list, Word — key that inserts a TIME field */
+	previewDocxKeyTimeField: "Insert the time",
+	/** Shortcuts list, Word — key that inserts a PAGE field */
+	previewDocxKeyPageNumber: "Insert page number",
+	/** Shortcuts list, Word — key that inserts a page break */
+	previewDocxKeyPageBreak: "Insert page break",
+	/** Shortcuts list, Word — key that inserts a section break starting on the next page */
+	previewDocxKeySectionBreak: "Insert section break (next page)",
+	/** Shortcuts list, Word — key that inserts a footnote */
+	previewDocxKeyFootnote: "Insert footnote",
+	/** Shortcuts list, Word — key that inserts an endnote */
+	previewDocxKeyEndnote: "Insert endnote",
+	/** Shortcuts list, Word — key that opens the Insert table dialog */
+	previewDocxKeyTable: "Insert table",
+	/** Shortcuts list, Word — key that opens the symbol picker */
+	previewDocxKeySymbol: "Insert symbol",
+	/** Shortcuts list, Word — key that updates the tables of contents */
+	previewDocxKeyUpdateToc: "Update table of contents",
+	/** Shortcuts list, Word — key that copies the selection's formatting (Word's Copy Formatting) */
+	previewDocxKeyCopyFormatting: "Copy formatting",
+	/** Shortcuts list, Word — key that opens Go To (go to a page) */
+	previewDocxKeyGoTo: "Go to page",
+	/** Shortcuts list, Word — key that repeats the last action (Word's Repeat) */
+	previewDocxKeyRepeat: "Repeat the last action",
+	/** Shortcuts list, Word — zoom in key, in the editor and the viewer */
+	previewDocxKeyZoomIn: "Zoom in (Word)",
+	/** Shortcuts list, Word — zoom out key, in the editor and the viewer */
+	previewDocxKeyZoomOut: "Zoom out (Word)",
+	/** Shortcuts list, Word — key that sets the zoom to 100 % */
+	previewDocxKeyZoomReset: "Actual size (Word)",
+	/** Shortcuts list, Word — key that opens the Word Count dialog */
+	previewDocxKeyWordCount: "Word count",
+	/** Shortcuts list, Word — key that shows or hides the Navigation pane */
+	previewDocxKeyNavigationPane: "Show or hide the navigation pane",
+	/** Shortcuts list, Word — key that switches between the pages and the mobile view */
+	previewDocxKeyMobileView: "Switch mobile view on or off",
+	/** Shortcuts list, Word — key that downloads the document as a PDF */
+	previewDocxKeyDownloadPdf: "Download as PDF"
 } as const

@@ -10,8 +10,9 @@ import {
 	type PageDisplayList
 } from "@filen/office/core/docx"
 import { saveDocx } from "@filen/office/core/docx/write"
-import { commandInfo, shortcutFor, shortcutHint } from "../core/docx/edit/index"
-import { commandForKey, type KeyLike } from "../core/docx/paged/keys"
+import { commandInfo, shortcutFor } from "../core/docx/edit/index"
+import type { KeyLike } from "../core/docx/paged/keys"
+import { commandForKey } from "./docxKeyHelpers"
 import { buildDocx, p } from "./docxSynthetic"
 import { layOut, pageLines } from "./layoutFixtures"
 import { pagedEditor } from "./pagedFixtures"
@@ -148,14 +149,13 @@ describe("Show/Hide ¶ keys", () => {
 		if (info === undefined) throw new Error("view.formattingMarks")
 
 		expect(commandForKey(key("*", "Digit8", { ctrlKey: true, shiftKey: true }), false)).toEqual({ type: "view.formattingMarks" })
-		expect(commandForKey(key("8", "Digit8", { metaKey: true }), true)).toEqual({ type: "view.formattingMarks" })
-		expect(commandForKey(key("*", "Digit8", { metaKey: true, shiftKey: true }), true)).toBeUndefined()
+		expect(commandForKey(key("8", "Digit8", { metaKey: true }), true, true)).toEqual({ type: "view.formattingMarks" })
+		expect(commandForKey(key("*", "Digit8", { metaKey: true, shiftKey: true }), true, true)).toBeUndefined()
 		expect(commandForKey(key("8", "Digit8", { ctrlKey: true }), false)).toBeUndefined()
 		expect(shortcutFor(info, false)).toBe("mod+shift+8")
 		expect(shortcutFor(info, true)).toBe("mod+8")
-		// Cmd+8 selects a tab in a Mac browser: advertised only in the desktop app.
-		expect(shortcutHint(info, true, true)).toBeUndefined()
-		expect(shortcutHint(info, true, false)).toBe("mod+8")
-		expect(shortcutHint(info, false, true)).toBe("mod+shift+8")
+		// Cmd+8 selects a tab in a Mac browser: Cmd+Shift+8 there.
+		expect(commandForKey(key("8", "Digit8", { metaKey: true }), true)).toBeUndefined()
+		expect(commandForKey(key("*", "Digit8", { metaKey: true, shiftKey: true }), true)).toEqual({ type: "view.formattingMarks" })
 	})
 })

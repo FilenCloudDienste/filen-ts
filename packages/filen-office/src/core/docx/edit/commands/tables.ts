@@ -46,6 +46,8 @@ export const TABLE_COMMANDS: readonly DocxCommandInfo<TableCommand["type"]>[] = 
 		type: "table.insert",
 		labelKey: "docx.table.insert",
 		icon: "table-insert",
+		// No key of Word's; one a user binds opens the host's size dialog.
+		hostShortcut: true,
 		write: true,
 		scope: "story",
 		group: "table",

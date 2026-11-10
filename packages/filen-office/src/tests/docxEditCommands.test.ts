@@ -8,10 +8,10 @@ import {
 	DOCX_PARAGRAPH_STYLE_MENU,
 	parseDocxEditorCommand,
 	DocxEditorSession,
-	shortcutFor,
 	type DocxEditorCommand
 } from "@filen/office/core/docx/edit"
-import { DOCX_KEY_BINDINGS, commandForKey, hostCommandForKey, matchesShortcut, type KeyLike } from "../core/docx/paged/keys"
+import { chordIdentity, codeOfToken, parseCombo, usCharacterOf, type Chord } from "@filen/shared/keymap"
+import { DOCX_KEYS, docxKeyBindings, docxKeyDefault, docxKeyFor, type KeyLike } from "../core/docx/paged/keys"
 import { NUMBERING_PART, RICH, STYLES_PART, sessionOf } from "./docxEditFixtures"
 import { p } from "./docxSynthetic"
 
@@ -477,180 +477,70 @@ describe("docx editor commands", () => {
 	})
 })
 
-// A key event for `shortcut` on a US layout: the character the key gives (shifted where Shift is held) and its
-// physical code.
-const SHIFTED: Readonly<Record<string, string>> = {
-	"1": "!",
-	"2": "@",
-	"3": "#",
-	"4": "$",
-	"5": "%",
-	"6": "^",
-	"7": "&",
-	"8": "*",
-	"9": "(",
-	"0": ")",
-	"=": "+",
-	"-": "_",
-	".": ">",
-	",": "<",
-	"[": "{",
-	"]": "}"
-}
-
-const CODES: Readonly<Record<string, string>> = {
-	"=": "Equal",
-	"-": "Minus",
-	".": "Period",
-	",": "Comma",
-	"[": "BracketLeft",
-	"]": "BracketRight",
-	space: "Space",
-	enter: "Enter"
-}
-
-function eventFor(shortcut: string, apple: boolean): KeyLike {
-	const parts = shortcut.split("+")
-	const last = parts[parts.length - 1] ?? ""
-	const name = last.toLowerCase()
-	const shift = parts.includes("shift")
-	const mod = parts.includes("mod")
-	const ctrl = parts.includes("ctrl")
-	const code = /^[a-z]$/.test(name) ? `Key${name.toUpperCase()}` : /^[0-9]$/.test(name) ? `Digit${name}` : (CODES[name] ?? last)
-	const key =
-		name === "space"
-			? " "
-			: name === "enter"
-				? "Enter"
-				: /^f[0-9]+$/.test(name)
-					? last
-					: shift
-						? (SHIFTED[name] ?? name.toUpperCase())
-						: name
+// A key event for a chord: its physical code, and the character a US layout gives for it.
+function eventFor(chord: Chord, apple: boolean): KeyLike {
+	const token = chord.key
+	const code =
+		codeOfToken(token) ??
+		(token === "space" ? "Space" : token === "enter" ? "Enter" : /^f[0-9]+$/.test(token) ? token.toUpperCase() : token)
 
 	return {
-		key,
+		key: token === "space" ? " " : (usCharacterOf(token) ?? code),
 		code,
-		metaKey: apple && mod,
-		ctrlKey: apple ? ctrl : mod || ctrl,
-		shiftKey: shift,
-		altKey: parts.includes("alt")
+		metaKey: chord.meta || (apple && chord.mod),
+		ctrlKey: chord.ctrl || (!apple && chord.mod),
+		shiftKey: chord.shift,
+		altKey: chord.alt
 	}
 }
 
-describe("docx shortcut matching", () => {
-	const b = (mods: Partial<KeyLike> = {}): KeyLike => ({
-		key: "b",
-		code: "KeyB",
-		ctrlKey: false,
-		metaKey: false,
-		shiftKey: false,
-		altKey: false,
-		...mods
-	})
-
-	it("reads mod as Cmd on Apple platforms and Ctrl elsewhere, the other modifier held refusing it", () => {
-		expect(matchesShortcut(b({ metaKey: true }), "mod+b", true)).toBe(true)
-		expect(matchesShortcut(b({ ctrlKey: true }), "mod+b", true)).toBe(false)
-		expect(matchesShortcut(b({ metaKey: true, ctrlKey: true }), "mod+b", true)).toBe(false)
-		expect(matchesShortcut(b({ ctrlKey: true }), "mod+b", false)).toBe(true)
-		expect(matchesShortcut(b({ metaKey: true }), "mod+b", false)).toBe(false)
-		expect(matchesShortcut(b({ ctrlKey: true, metaKey: true }), "mod+b", false)).toBe(false)
-		expect(matchesShortcut(b(), "mod+b", false)).toBe(false)
-		// ctrl is Control on every platform.
-		expect(matchesShortcut(b({ ctrlKey: true }), "ctrl+b", true)).toBe(true)
-		expect(matchesShortcut(b({ metaKey: true }), "ctrl+b", true)).toBe(false)
-	})
-
-	it("matches Shift and Alt exactly", () => {
-		for (const apple of [false, true]) {
-			const mod = apple ? { metaKey: true } : { ctrlKey: true }
-
-			expect(matchesShortcut(b({ ...mod, shiftKey: true }), "mod+b", apple)).toBe(false)
-			expect(matchesShortcut(b({ ...mod, altKey: true }), "mod+b", apple)).toBe(false)
-			expect(matchesShortcut(b({ ...mod }), "mod+shift+b", apple)).toBe(false)
-			expect(matchesShortcut(b({ ...mod }), "mod+alt+b", apple)).toBe(false)
-			expect(matchesShortcut(b({ ...mod, key: "B", shiftKey: true }), "mod+shift+b", apple)).toBe(true)
-		}
-	})
-
-	it("falls back to the physical key for shifted digits, Option-composed letters and Space", () => {
-		expect(matchesShortcut(b({ key: "*", code: "Digit8", ctrlKey: true, shiftKey: true }), "mod+shift+8", false)).toBe(true)
-		expect(matchesShortcut(b({ key: "*", code: "Digit8", metaKey: true, shiftKey: true }), "mod+shift+8", true)).toBe(true)
-		expect(matchesShortcut(b({ key: "*", code: "Digit7", ctrlKey: true, shiftKey: true }), "mod+shift+8", false)).toBe(false)
-		expect(matchesShortcut(b({ key: "å", code: "KeyA", metaKey: true, altKey: true }), "mod+alt+a", true)).toBe(true)
-		expect(matchesShortcut(b({ key: "å", code: "KeyB", metaKey: true, altKey: true }), "mod+alt+a", true)).toBe(false)
-		expect(matchesShortcut(b({ key: " ", code: "", ctrlKey: true }), "mod+space", false)).toBe(true)
-		expect(matchesShortcut(b({ key: " ", code: "Space", ctrlKey: true }), "mod+space", false)).toBe(true)
-		expect(matchesShortcut(b({ key: "x", code: "KeyX", ctrlKey: true }), "mod+space", false)).toBe(false)
-	})
-})
+const PLATFORMS = [
+	{ apple: false, desktop: false },
+	{ apple: true, desktop: false },
+	{ apple: false, desktop: true },
+	{ apple: true, desktop: true }
+] as const
 
 describe("docx command keys", () => {
-	it("runs every command's own shortcut, and its other shortcuts, on both platforms", () => {
-		for (const apple of [false, true]) {
-			for (const command of DOCX_EDITOR_COMMANDS) {
-				if (command.type === "style.set") continue
+	it.each(PLATFORMS)("runs every key's default, no chord twice (apple $apple, desktop $desktop)", ({ apple, desktop }) => {
+		const bindings = docxKeyBindings(apple, desktop)
+		const seen = new Map<string, string>()
 
-				for (const shortcut of [shortcutFor(command, apple), ...(command.alsoShortcuts ?? [])]) {
-					if (shortcut === undefined) continue
+		for (const entry of DOCX_KEYS) {
+			for (const chord of parseCombo(bindings[entry.id] ?? "")) {
+				const identity = chordIdentity(chord, apple)
 
-					const event = eventFor(shortcut, apple)
-
-					if (command.hostShortcut === true) {
-						expect([apple, shortcut, hostCommandForKey(event, apple)]).toEqual([apple, shortcut, command.type])
-						expect([apple, shortcut, commandForKey(event, apple)]).toEqual([apple, shortcut, undefined])
-					} else {
-						expect([apple, shortcut, commandForKey(event, apple, true)]).toEqual([apple, shortcut, { type: command.type }])
-					}
-				}
+				expect(seen.get(identity), `${entry.id} ${identity}`).toBeUndefined()
+				seen.set(identity, entry.id)
+				expect([entry.id, docxKeyFor(eventFor(chord, apple), bindings, apple)]).toEqual([entry.id, entry.run])
 			}
 		}
 	})
 
-	it("sets each style-menu style by its shortcut, never a bare style.set", () => {
-		let bound = 0
+	it("gives every command with a shortcut of Word's a key, and the style menu's styles theirs, never a bare style.set", () => {
+		const ids = new Set(DOCX_KEYS.map(entry => entry.id))
 
-		for (const apple of [false, true]) {
-			for (const entry of DOCX_PARAGRAPH_STYLE_MENU) {
-				if (entry.shortcut === undefined) continue
-
-				bound++
-				expect([apple, entry.shortcut, commandForKey(eventFor(entry.shortcut, apple), apple)]).toEqual([
-					apple,
-					entry.shortcut,
-					{ type: "style.set", style: entry.style }
-				])
-			}
+		for (const command of DOCX_EDITOR_COMMANDS) {
+			if (command.shortcut !== undefined) expect(ids.has(command.type), command.type).toBe(true)
 		}
 
-		expect(bound).toBeGreaterThan(0)
+		for (const entry of DOCX_PARAGRAPH_STYLE_MENU) {
+			if (entry.shortcut !== undefined) expect(ids.has(`style.${entry.style}`), entry.style).toBe(true)
+		}
 
-		for (const apple of [false, true]) {
-			for (const command of DOCX_EDITOR_COMMANDS) {
-				for (const shortcut of [shortcutFor(command, apple), ...(command.alsoShortcuts ?? [])]) {
-					if (shortcut === undefined) continue
-
-					const found = commandForKey(eventFor(shortcut, apple), apple, true)
-
-					expect(found?.type === "style.set" && !("style" in found)).toBe(false)
-				}
-			}
+		for (const entry of DOCX_KEYS) {
+			expect(entry.run.kind === "command" && entry.run.command.type === "style.set" && !("style" in entry.run.command)).toBe(false)
 		}
 	})
 
-	it("runs the argument bindings with their arguments, desktop-only ones only in the desktop app", () => {
-		for (const apple of [false, true]) {
-			for (const binding of DOCX_KEY_BINDINGS) {
-				const shortcut = shortcutFor(binding, apple)
+	it("runs the argument keys with their arguments, desktop-only ones only in the desktop app", () => {
+		const spacing = DOCX_KEYS.find(entry => entry.id === "paragraph.lineSpacing2")
+		const date = DOCX_KEYS.find(entry => entry.id === "insert.dateField")
 
-				if (shortcut === undefined) continue
-
-				const event = eventFor(shortcut, apple)
-
-				expect(commandForKey(event, apple, true)).toEqual(binding.command)
-				expect(commandForKey(event, apple, false)).toEqual(binding.desktop === true ? undefined : binding.command)
-			}
-		}
+		expect(spacing?.run).toEqual({ kind: "command", command: { type: "paragraph.lineSpacing", rule: "auto", value: 480 } })
+		expect(spacing === undefined ? undefined : docxKeyDefault(spacing, false, false)).toBe("")
+		expect(spacing === undefined ? undefined : docxKeyDefault(spacing, true, true)).toBe("mod+2")
+		expect(date === undefined ? undefined : docxKeyDefault(date, false, false)).toBe("alt+shift+d")
+		expect(date === undefined ? undefined : docxKeyDefault(date, true, false)).toBe("ctrl+shift+d")
 	})
 })

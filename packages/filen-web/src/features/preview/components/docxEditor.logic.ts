@@ -1453,8 +1453,9 @@ export function controlLockedKey(locked: NonNullable<DocxControlContext["locked"
 	}
 }
 
-// What a key the host runs (hostCommandForKey) does where it can: Track Changes toggles from the review state (the
-// author gate asks for a name to turn it on, never to turn it off); New Comment opens the new comment's input.
+// What a key the host runs (docxKeyFor's "host") does where it can: Track Changes toggles from the review state (the
+// author gate asks for a name to turn it on, never to turn it off); New Comment, Link, Equation, Table, Symbol and Page
+// Setup open their input, as their toolbar items do.
 export type DocxHostKeyAction =
 	{ readonly kind: "execute"; readonly command: DocxEditorCommand } | { readonly kind: "input"; readonly type: DocxEditorCommandType }
 
@@ -1469,6 +1470,11 @@ export function hostKeyAction(
 		case "review.track":
 			return { kind: "execute", command: { type, on: !snapshot.review.tracking } }
 		case "comment.add":
+		case "link.set":
+		case "equation.insert":
+		case "table.insert":
+		case "insert.symbol":
+		case "page.setup":
 			return { kind: "input", type }
 		default:
 			return null

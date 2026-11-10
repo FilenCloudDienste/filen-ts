@@ -96,7 +96,16 @@ export const SECTION_COMMANDS: readonly DocxCommandInfo<SectionCommand["type"]>[
 	{ type: "header.remove", labelKey: "docx.header.remove", icon: "header-remove", group: "header", context: "header", ...document },
 	{ type: "footer.remove", labelKey: "docx.footer.remove", icon: "footer-remove", group: "header", context: "header", ...document },
 	{ type: "section.deleteBreak", labelKey: "docx.section.deleteBreak", icon: "section-break-delete", group: "section", ...document },
-	{ type: "page.setup", labelKey: "docx.page.setup", icon: "page-setup", group: "section", input: "pageSetup", ...document }
+	// No key of Word's; one a user binds opens the host's dialog.
+	{
+		type: "page.setup",
+		labelKey: "docx.page.setup",
+		icon: "page-setup",
+		hostShortcut: true,
+		group: "section",
+		input: "pageSetup",
+		...document
+	}
 ]
 
 const BREAKS = new Set<string>(["nextPage", "continuous", "evenPage", "oddPage"])

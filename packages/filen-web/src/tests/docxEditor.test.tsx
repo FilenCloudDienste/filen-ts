@@ -14,6 +14,7 @@ import type { DocxEditingHost } from "@filen/office/dom/docx/editing"
 import { i18n } from "@/lib/i18n"
 import { officeSettingsView } from "@/tests/support/officeSettingsView"
 import { registerAllActions } from "@/lib/keymap/actions"
+import { clearUserCombo, setUserCombo } from "@/lib/keymap/registry"
 import { isMacPlatform } from "@/lib/keymap/kbd.logic"
 
 // The DOCX editor's web side on a real document: the in-thread editing host with the writer's proof, the
@@ -574,6 +575,47 @@ describe("DocxEditView", () => {
 		fireEvent.click(screen.getByRole("tab", { name: "View" }))
 		expect((await screen.findByRole("button", { name: "Mobile view" })).getAttribute("aria-pressed")).toBe("false")
 		expect(screen.getByRole("textbox", { name: "report.docx" })).toBeTruthy()
+	})
+
+	it("takes Word's keys as the user bound them: the new key in the document, the default no longer", async () => {
+		await openEditor()
+
+		const area = screen.getByRole("textbox", { name: "report.docx" })
+		const mod = isMacPlatform() ? { metaKey: true } : { ctrlKey: true }
+
+		await act(() => setUserCombo("docx.replace", "f3"))
+
+		try {
+			// The default (Ctrl+H, Cmd+Shift+H on a Mac) is free again; F3 opens Find and Replace.
+			fireEvent.keyDown(area, { key: "H", code: "KeyH", ...mod, shiftKey: isMacPlatform() })
+			expect(screen.queryByRole("textbox", { name: "Replace with" })).toBeNull()
+			fireEvent.keyDown(area, { key: "F3", code: "F3" })
+			expect(await screen.findByRole("textbox", { name: "Replace with" })).toBeTruthy()
+		} finally {
+			await act(() => clearUserCombo("docx.replace"))
+		}
+	})
+
+	it("zooms the pages with Mod+= and Mod+-, and back to 100% with Mod+0, keeping the browser's zoom out", async () => {
+		await openEditor()
+
+		const area = screen.getByRole("textbox", { name: "report.docx" })
+		const mod = isMacPlatform() ? { metaKey: true } : { ctrlKey: true }
+		const shown = (): string[] => screen.getAllByText(/^\d+%$/u).map(element => element.textContent)
+
+		expect(fireEvent.keyDown(area, { key: "0", code: "Digit0", ...mod })).toBe(false)
+		await waitFor(() => {
+			expect(shown()).toContain("100%")
+		})
+		expect(fireEvent.keyDown(area, { key: "=", code: "Equal", ...mod })).toBe(false)
+		await waitFor(() => {
+			expect(shown()).toContain("110%")
+		})
+		fireEvent.keyDown(area, { key: "-", code: "Minus", ...mod })
+		fireEvent.keyDown(area, { key: "-", code: "Minus", ...mod })
+		await waitFor(() => {
+			expect(shown()).toContain("90%")
+		})
 	})
 
 	it("gives the document focus with Escape on a ribbon control, keeping the key from closing the preview", async () => {

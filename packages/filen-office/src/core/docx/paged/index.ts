@@ -40,21 +40,20 @@ export {
 	type PagedSelection
 } from "./editor"
 export {
-	DOCX_KEY_BINDINGS,
+	DOCX_KEYS,
 	besideNode,
-	bindingShortcut,
-	commandForKey,
-	commandShortcut,
-	findForKey,
-	hostCommandForKey,
-	isRepeatKey,
+	docxKeyBindings,
+	docxKeyDefault,
+	docxKeyFor,
 	joinBackward,
 	joinForward,
 	lineBreak,
-	matchesShortcut,
 	selectAll,
 	splitParagraph,
-	type DocxKeyBinding,
+	type DocxAppKey,
+	type DocxKey,
+	type DocxKeyBindings,
+	type DocxKeyRun,
 	type KeyLike
 } from "./keys"
 export { tableBorderOf, type DocxTableBorder } from "../edit/tables/hits"

@@ -122,18 +122,25 @@ export type FormattingCommand =
 
 const story = { write: true, scope: "story" } as const
 
-// Word's shortcuts. Shifted punctuation is named by its unshifted key ("mod+shift+." is Ctrl+Shift+>), which
-// matchesShortcut compares by physical key.
+// Word's shortcuts, in @filen/shared/keymap's physical key tokens: shifted punctuation is named by its key
+// ("mod+shift+period" is Ctrl+Shift+>).
 export const FORMATTING_COMMANDS: readonly DocxCommandInfo<FormattingCommand["type"]>[] = [
 	{
 		type: "format.superscript",
 		labelKey: "docx.format.superscript",
 		icon: "superscript",
-		shortcut: "mod+shift+=",
+		shortcut: "mod+shift+equal",
 		group: "format",
 		...story
 	},
-	{ type: "format.subscript", labelKey: "docx.format.subscript", icon: "subscript", shortcut: "mod+shift+-", group: "format", ...story },
+	{
+		type: "format.subscript",
+		labelKey: "docx.format.subscript",
+		icon: "subscript",
+		shortcut: "mod+shift+minus",
+		group: "format",
+		...story
+	},
 	{ type: "format.doubleStrike", labelKey: "docx.format.doubleStrike", icon: "double-strikethrough", group: "format", ...story },
 	{ type: "format.smallCaps", labelKey: "docx.format.smallCaps", icon: "small-caps", shortcut: "mod+shift+k", group: "format", ...story },
 	{ type: "format.allCaps", labelKey: "docx.format.allCaps", icon: "all-caps", shortcut: "mod+shift+a", group: "format", ...story },
@@ -149,10 +156,17 @@ export const FORMATTING_COMMANDS: readonly DocxCommandInfo<FormattingCommand["ty
 	{ type: "format.clearAll", labelKey: "docx.format.clearAll", icon: "clear-all-formatting", group: "format", ...story },
 	{ type: "font.family", labelKey: "docx.font.family", icon: "font-family", group: "font", input: "font", ...story },
 	{ type: "font.size", labelKey: "docx.font.size", icon: "font-size", group: "font", input: "size", ...story },
-	{ type: "font.grow", labelKey: "docx.font.grow", icon: "font-grow", shortcut: "mod+shift+.", group: "font", ...story },
-	{ type: "font.shrink", labelKey: "docx.font.shrink", icon: "font-shrink", shortcut: "mod+shift+,", group: "font", ...story },
-	{ type: "font.growPoint", labelKey: "docx.font.growPoint", icon: "font-grow", shortcut: "mod+]", group: "font", ...story },
-	{ type: "font.shrinkPoint", labelKey: "docx.font.shrinkPoint", icon: "font-shrink", shortcut: "mod+[", group: "font", ...story },
+	{ type: "font.grow", labelKey: "docx.font.grow", icon: "font-grow", shortcut: "mod+shift+period", group: "font", ...story },
+	{ type: "font.shrink", labelKey: "docx.font.shrink", icon: "font-shrink", shortcut: "mod+shift+comma", group: "font", ...story },
+	{ type: "font.growPoint", labelKey: "docx.font.growPoint", icon: "font-grow", shortcut: "mod+bracketright", group: "font", ...story },
+	{
+		type: "font.shrinkPoint",
+		labelKey: "docx.font.shrinkPoint",
+		icon: "font-shrink",
+		shortcut: "mod+bracketleft",
+		group: "font",
+		...story
+	},
 	{ type: "font.spacing", labelKey: "docx.font.spacing", icon: "character-spacing", group: "font", ...story },
 	{ type: "color.text", labelKey: "docx.color.text", icon: "text-color", group: "color", input: "color", ...story },
 	{ type: "color.highlight", labelKey: "docx.color.highlight", icon: "highlight", group: "color", input: "highlight", ...story },
@@ -161,9 +175,25 @@ export const FORMATTING_COMMANDS: readonly DocxCommandInfo<FormattingCommand["ty
 	{ type: "paragraph.indent", labelKey: "docx.paragraph.indent", icon: "indent", group: "paragraph", ...story },
 	{ type: "paragraph.hangingIndent", labelKey: "docx.paragraph.hangingIndent", icon: "indent", group: "paragraph", ...story },
 	// The painter's formatting is the editor's (it outlives story switches): document commands. Copying it
-	// changes nothing; applying it does.
-	{ type: "format.copy", labelKey: "docx.format.copy", icon: "format-painter", group: "painter", write: false, scope: "document" },
-	{ type: "format.paste", labelKey: "docx.format.paste", icon: "format-painter", group: "painter", write: true, scope: "document" }
+	// changes nothing; applying it does. Word's Copy and Paste Formatting keys.
+	{
+		type: "format.copy",
+		labelKey: "docx.format.copy",
+		icon: "format-painter",
+		shortcut: "mod+shift+c",
+		group: "painter",
+		write: false,
+		scope: "document"
+	},
+	{
+		type: "format.paste",
+		labelKey: "docx.format.paste",
+		icon: "format-painter",
+		shortcut: "mod+shift+v",
+		group: "painter",
+		write: true,
+		scope: "document"
+	}
 ]
 
 const HIGHLIGHTS = new Set<string>(DOCX_HIGHLIGHT_COLORS)

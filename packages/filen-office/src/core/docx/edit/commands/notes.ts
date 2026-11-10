@@ -51,8 +51,23 @@ export type NoteCommand =
 const document = { scope: "document", group: "note", context: "note" } as const
 
 export const NOTE_COMMANDS: readonly DocxCommandInfo<NoteCommand["type"]>[] = [
-	{ type: "note.insertFootnote", labelKey: "docx.note.insertFootnote", icon: "footnote", write: true, ...document },
-	{ type: "note.insertEndnote", labelKey: "docx.note.insertEndnote", icon: "endnote", write: true, ...document },
+	// Word's Ctrl+Alt+F and Ctrl+Alt+D (Cmd+Option+F and D on a Mac).
+	{
+		type: "note.insertFootnote",
+		labelKey: "docx.note.insertFootnote",
+		icon: "footnote",
+		shortcut: "mod+alt+f",
+		write: true,
+		...document
+	},
+	{
+		type: "note.insertEndnote",
+		labelKey: "docx.note.insertEndnote",
+		icon: "endnote",
+		shortcut: "mod+alt+d",
+		write: true,
+		...document
+	},
 	{ type: "note.goto", labelKey: "docx.note.goto", icon: "note-goto", write: false, ...document },
 	{ type: "note.delete", labelKey: "docx.note.delete", icon: "note-delete", write: true, ...document },
 	{ type: "note.convert", labelKey: "docx.note.convert", icon: "note-convert", write: true, ...document },

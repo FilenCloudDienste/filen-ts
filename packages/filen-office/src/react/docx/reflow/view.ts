@@ -10,14 +10,14 @@ import { equationView } from "../../../core/docx/layout/objects"
 import { modelAuthors } from "../../../core/docx/layout/styles"
 import type { OmmlRevisionView } from "../../../core/math/index"
 import {
-	commandForKey,
-	findForKey,
-	isRepeatKey,
+	docxKeyBindings,
+	docxKeyFor,
 	joinBackward,
 	joinForward,
 	lineBreak,
 	selectAll,
 	splitParagraph,
+	type DocxKeyBindings,
 	type HitResult,
 	type PagedEditor
 } from "../../../core/docx/paged/index"
@@ -92,8 +92,11 @@ export interface ReflowViewOptions {
 	readonly describedBy?: string | undefined
 	readonly readOnly: boolean
 	readonly apple: boolean
-	// In the desktop app: the shortcuts the browser owns are the editor's (DocxKeyBinding).
+	// In the desktop app: the shortcuts the browser owns are the editor's (DocxKey.desktop). Read for the default
+	// keys only.
 	readonly desktop?: boolean
+	// The Word keys in effect (DOCX_KEYS' ids); Word's on this platform without them.
+	readonly keyBindings?: DocxKeyBindings | undefined
 	readonly onFind: ((replace: boolean) => void) | undefined
 	// Sorted by `from`, in the body.
 	readonly marks: readonly DocxEditorMark[]
@@ -848,28 +851,27 @@ class StoryView {
 		return this.shortcutKey(event, readOnly)
 	}
 
-	// The app's find, Repeat and the editor commands' shortcuts; read-only only what changes nothing (the view:
-	// Alt+F9), as the host runs it.
+	// The app's find (Go To too: no pages here), Repeat and the editor commands' keys; read-only only what changes
+	// nothing (the view: Alt+F9), as the host runs it. The host's own keys go on to the host.
 	private shortcutKey(event: KeyboardEvent, readOnly: boolean): boolean {
 		const host = this.host
 		const editor = host.editor
-		const apple = host.apple
-		const find = findForKey(event, apple)
+		const run = docxKeyFor(event, host.keyBindings, host.apple)
 
-		if (find !== undefined) {
-			host.find(find === "replace")
+		if (run === undefined || run.kind === "host") return false
+
+		if (run.kind === "app") {
+			if (run.key === "repeat") return !readOnly && editor.repeat()
+
+			host.find(run.key === "replace")
 
 			return host.canFind
 		}
 
-		if (!readOnly && isRepeatKey(event, apple)) return editor.repeat()
-
-		const command = commandForKey(event, apple, host.desktop)
-
-		if (command === undefined || (readOnly && isWriteCommand(command.type))) return false
+		if (readOnly && isWriteCommand(run.command.type)) return false
 
 		host.enter(this)
-		void editor.execute(command)
+		void editor.execute(run.command)
 
 		return true
 	}
@@ -1132,8 +1134,8 @@ export class ReflowView implements ReflowNodeHost {
 		return this.options.apple
 	}
 
-	get desktop(): boolean {
-		return this.options.desktop === true
+	get keyBindings(): DocxKeyBindings {
+		return this.options.keyBindings ?? docxKeyBindings(this.options.apple, this.options.desktop === true)
 	}
 
 	get readOnlyOption(): boolean {

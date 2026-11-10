@@ -20,7 +20,18 @@ export type InsertCommand =
 	| { readonly type: "insert.symbol"; readonly text: string }
 
 export const INSERT_COMMANDS: readonly DocxCommandInfo<InsertCommand["type"]>[] = [
-	{ type: "link.set", labelKey: "docx.link.set", icon: "link", group: "link", write: true, scope: "story", input: "link" },
+	// Word's Ctrl+K (Cmd+K): the host asks for the link.
+	{
+		type: "link.set",
+		labelKey: "docx.link.set",
+		icon: "link",
+		shortcut: "mod+k",
+		hostShortcut: true,
+		group: "link",
+		write: true,
+		scope: "story",
+		input: "link"
+	},
 	{ type: "link.remove", labelKey: "docx.link.remove", icon: "unlink", group: "link", write: true, scope: "story" },
 	{
 		type: "insert.pageBreak",
@@ -44,6 +55,8 @@ export const INSERT_COMMANDS: readonly DocxCommandInfo<InsertCommand["type"]>[] 
 		type: "insert.symbol",
 		labelKey: "docx.insert.symbol",
 		icon: "symbol",
+		// No key of Word's; one a user binds opens the host's picker.
+		hostShortcut: true,
 		group: "insert",
 		write: true,
 		scope: "story",

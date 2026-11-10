@@ -10,7 +10,7 @@ import {
 	type Ref
 } from "react"
 import { Region } from "../../core/docx/layout/index"
-import type { HitResult, ObjectHit, ObjectHitKind, PagedEditor } from "../../core/docx/paged/index"
+import type { DocxKeyBindings, HitResult, ObjectHit, ObjectHitKind, PagedEditor } from "../../core/docx/paged/index"
 import { EditSink } from "./edit/sink"
 import { EditSurface, type DocxEditorMark } from "./edit/surface"
 import { DOCX_MARK_LABELS, type DocxMarkLabels } from "./paint/marks"
@@ -101,8 +101,12 @@ export interface DocxEditorProps {
 	readonly readOnly?: boolean
 	// Cmd as the shortcut modifier (Apple platforms).
 	readonly apple?: boolean
-	// In the desktop app: the shortcuts the browser owns are the editor's (Word's line spacing).
+	// In the desktop app: the shortcuts the browser owns are the editor's (Word's line spacing). Read for the default
+	// keys only.
 	readonly desktop?: boolean
+	// The Word keys in effect, by DOCX_KEYS id (a host's keymap), read at each key press; Word's on this platform
+	// without them.
+	readonly keyBindings?: DocxKeyBindings
 	// Find requested (Mod+F), or Find and Replace (Ctrl+H): the app's own find.
 	readonly onFind?: (replace: boolean) => void
 	// Go To requested (Ctrl+G); without it the key finds.
@@ -476,6 +480,7 @@ export function DocxEditor(props: DocxEditorProps) {
 	const pageMoveRef = useRef(pageMove)
 	const onFindRef = useRef(props.onFind)
 	const onGoToRef = useRef(props.onGoTo)
+	const keyBindingsRef = useRef(props.keyBindings)
 	const onPageRef = useRef(props.onPage)
 	const scrollToCaretRef = useRef(scrollToCaret)
 
@@ -556,6 +561,7 @@ export function DocxEditor(props: DocxEditorProps) {
 			readOnly: readOnlyRef.current,
 			apple: props.apple === true,
 			desktop: props.desktop === true,
+			keyBindings: () => keyBindingsRef.current,
 			...(props.window === undefined ? {} : { window: props.window }),
 			caretClientRect: () => caretClientRectRef.current(),
 			pageMove: (dir, extend) => pageMoveRef.current(dir, extend),
@@ -603,6 +609,7 @@ export function DocxEditor(props: DocxEditorProps) {
 		pageMoveRef.current = pageMove
 		onFindRef.current = props.onFind
 		onGoToRef.current = props.onGoTo
+		keyBindingsRef.current = props.keyBindings
 		onPageRef.current = props.onPage
 		scrollToCaretRef.current = scrollToCaret
 	})

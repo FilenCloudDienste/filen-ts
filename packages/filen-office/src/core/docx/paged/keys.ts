@@ -1,22 +1,14 @@
 import { AllSelection, NodeSelection, TextSelection, type EditorState, type Transaction } from "prosemirror-state"
 import type { Node } from "prosemirror-model"
 import { canJoin } from "prosemirror-transform"
-import {
-	DATE_FIELD_CODE,
-	DOCX_EDITOR_COMMANDS,
-	DOCX_PARAGRAPH_STYLE_MENU,
-	RUN_FORMATTING,
-	TIME_FIELD_CODE,
-	docxSchema,
-	shortcutFor,
-	type DocxEditorCommand,
-	type DocxEditorCommandType,
-	type DocxShortcutEntry
-} from "../edit/index"
+import { RUN_FORMATTING, docxSchema } from "../edit/index"
 import { AttrChanges } from "../edit/attrs"
 import { caretMarks, type FormatResolver } from "../edit/formats"
 import type { IndentAttrs } from "../edit/schema"
 import { revisionHidden, type RevisionView } from "../model/kinds"
+
+// The rebindable shortcuts and their matcher live with the command table (no engine), for a host's keymap.
+export * from "../edit/keys"
 
 // The structural keys an input view handles itself (the browser's own editing would change its hidden DOM
 // in ways ProseMirror cannot read back as DOCX): Enter splits the paragraph, Shift+Enter breaks the line,
@@ -244,159 +236,4 @@ export function besideNode(state: EditorState, dir: 1 | -1): Transaction | null 
 	const found = TextSelection.findFrom(state.doc.resolve(pos), dir, true)
 
 	return found === null ? null : state.tr.setSelection(found)
-}
-
-// The parts of a key event shortcuts look at.
-export interface KeyLike {
-	readonly key: string
-	readonly code?: string
-	readonly ctrlKey: boolean
-	readonly metaKey: boolean
-	readonly shiftKey: boolean
-	readonly altKey: boolean
-	readonly getModifierState?: (key: string) => boolean
-}
-
-// Whether `event` is `shortcut` ("mod+shift+z": "mod" is Cmd on Apple platforms, Ctrl elsewhere; "ctrl" is
-// Ctrl on every platform). Shortcuts follow the character the layout gives (Ctrl+C on Dvorak copies); the
-// physical key counts only where the layout gives no Latin letter or digit: shifted digits and punctuation,
-// non-Latin layouts, Option-composed characters. A character AltGr gives (Ctrl+Alt on Windows) is text.
-export function matchesShortcut(event: KeyLike, shortcut: string, apple: boolean): boolean {
-	const parts = shortcut.toLowerCase().split("+")
-	const key = parts[parts.length - 1] ?? ""
-	const mod = parts.includes("mod")
-	const ctrl = parts.includes("ctrl")
-	const shift = parts.includes("shift")
-	const alt = parts.includes("alt")
-
-	if (event.metaKey !== (apple && mod) || event.ctrlKey !== (apple ? ctrl : mod || ctrl)) return false
-	if (event.shiftKey !== shift || event.altKey !== alt) return false
-	if (event.getModifierState?.("AltGraph") === true) return false
-
-	const pressed = event.key.toLowerCase()
-	const latin = /^[a-z0-9]$/.test(pressed)
-
-	if (!apple && event.ctrlKey && event.altKey && !latin && [...event.key].length === 1) return false
-	if (key === "space") return pressed === " " || event.code === "Space"
-	if (pressed === key || latin) return pressed === key
-
-	const code = /^[0-9]$/.test(key) ? `Digit${key}` : /^[a-z]$/.test(key) ? `Key${key.toUpperCase()}` : PUNCTUATION_CODES.get(key)
-
-	return code !== undefined && event.code === code
-}
-
-const PUNCTUATION_CODES: ReadonlyMap<string, string> = new Map([
-	[".", "Period"],
-	[",", "Comma"],
-	["=", "Equal"],
-	["-", "Minus"],
-	["[", "BracketLeft"],
-	["]", "BracketRight"]
-])
-
-// Word's Repeat (F4) off Apple platforms (there F4 is not Repeat).
-export function isRepeatKey(event: KeyLike, apple: boolean): boolean {
-	return !apple && matchesShortcut(event, "F4", false)
-}
-
-// The app's find `event` opens, if any: Mod+F finds; Word's Ctrl+G is Go To (Cmd+Option+G on a Mac, where Cmd+G
-// finds); Ctrl+H is Find and Replace, on a Mac Control+H or Cmd+Shift+H (Cmd+H hides the app).
-export function findForKey(event: KeyLike, apple: boolean): "find" | "replace" | "goTo" | undefined {
-	if (!event.ctrlKey && !event.metaKey) return undefined
-	if (matchesShortcut(event, apple ? "mod+alt+g" : "mod+g", apple)) return "goTo"
-	if (matchesShortcut(event, "mod+f", apple) || (apple && matchesShortcut(event, "mod+g", apple))) return "find"
-
-	return (
-		apple
-			? matchesShortcut(event, "ctrl+h", true) || matchesShortcut(event, "mod+shift+h", true)
-			: matchesShortcut(event, "mod+h", false)
-	)
-		? "replace"
-		: undefined
-}
-
-// Word's shortcuts for commands with arguments (argument-free ones are on the command's info). `desktop`: only
-// in the desktop app, where the browser does not own the keys (Ctrl/Cmd+digit switches tabs).
-export interface DocxKeyBinding extends DocxShortcutEntry {
-	readonly shortcut: string
-	readonly desktop?: boolean
-	readonly command: DocxEditorCommand
-}
-
-export const DOCX_KEY_BINDINGS: readonly DocxKeyBinding[] = [
-	{ shortcut: "mod+1", desktop: true, command: { type: "paragraph.lineSpacing", rule: "auto", value: 240 } },
-	{ shortcut: "mod+2", desktop: true, command: { type: "paragraph.lineSpacing", rule: "auto", value: 480 } },
-	{ shortcut: "mod+5", desktop: true, command: { type: "paragraph.lineSpacing", rule: "auto", value: 360 } },
-	// Hanging Indent and Unhang, Word for Mac's too (Mod+T opens a browser tab).
-	{ shortcut: "mod+t", desktop: true, command: { type: "paragraph.hangingIndent", direction: 1 } },
-	{ shortcut: "mod+shift+t", desktop: true, command: { type: "paragraph.hangingIndent", direction: -1 } },
-	// DATE and TIME fields: Alt+Shift+D and T, Word for Mac's Control+Shift+D and T (Option+Shift types a character).
-	{ shortcut: "alt+shift+d", appleShortcut: "ctrl+shift+d", command: { type: "insert.field", instruction: DATE_FIELD_CODE } },
-	{ shortcut: "alt+shift+t", appleShortcut: "ctrl+shift+t", command: { type: "insert.field", instruction: TIME_FIELD_CODE } }
-]
-
-// The shortcut of the binding that runs `command` exactly (a toolbar item's tooltip), if any on this platform.
-export function commandShortcut(command: DocxEditorCommand, apple: boolean, desktop: boolean): string | undefined {
-	for (const binding of DOCX_KEY_BINDINGS) {
-		if (sameCommand(binding.command, command)) return bindingShortcut(binding, apple, desktop)
-	}
-
-	return undefined
-}
-
-function sameCommand(a: DocxEditorCommand, b: DocxEditorCommand): boolean {
-	if (a.type !== b.type) return false
-
-	const left: [string, unknown][] = Object.entries(a)
-	const right = new Map<string, unknown>(Object.entries(b))
-
-	return left.length === right.size && left.every(([key, value]) => right.get(key) === value)
-}
-
-// The shortcut `binding` has on this platform, if any.
-export function bindingShortcut(binding: DocxKeyBinding, apple: boolean, desktop: boolean): string | undefined {
-	return binding.desktop === true && !desktop ? undefined : shortcutFor(binding, apple)
-}
-
-// The editor command `event` is the shortcut of, if any. `desktop`: in the desktop app (see DocxKeyBinding).
-export function commandForKey(event: KeyLike, apple: boolean, desktop = false): DocxEditorCommand | undefined {
-	for (const command of DOCX_EDITOR_COMMANDS) {
-		if (command.type === "style.set" || command.hostShortcut === true) continue
-
-		const shortcut = shortcutFor(command, apple)
-
-		if (
-			(shortcut !== undefined && matchesShortcut(event, shortcut, apple)) ||
-			command.alsoShortcuts?.some(also => matchesShortcut(event, also, apple)) === true
-		) {
-			return { type: command.type } as DocxEditorCommand
-		}
-	}
-
-	for (const binding of DOCX_KEY_BINDINGS) {
-		const shortcut = bindingShortcut(binding, apple, desktop)
-
-		if (shortcut !== undefined && matchesShortcut(event, shortcut, apple)) return binding.command
-	}
-
-	for (const entry of DOCX_PARAGRAPH_STYLE_MENU) {
-		if (entry.shortcut !== undefined && matchesShortcut(event, entry.shortcut, apple)) return { type: "style.set", style: entry.style }
-	}
-
-	return undefined
-}
-
-// The command whose shortcut the host runs (see DocxCommandInfo.hostShortcut) `event` is, if any.
-export function hostCommandForKey(event: KeyLike, apple: boolean): DocxEditorCommandType | undefined {
-	if (!event.ctrlKey && !event.metaKey) return undefined
-
-	for (const command of DOCX_EDITOR_COMMANDS) {
-		if (command.hostShortcut !== true) continue
-
-		const shortcut = shortcutFor(command, apple)
-
-		if (shortcut !== undefined && matchesShortcut(event, shortcut, apple)) return command.type
-	}
-
-	return undefined
 }

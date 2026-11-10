@@ -63,6 +63,7 @@
 		"./core/docx/edit": "./src/core/docx/edit/index.ts",
 		"./core/docx/write": "./src/core/docx/write/index.ts",
 		"./core/docx/paged": "./src/core/docx/paged/index.ts",
+		"./core/docx/keys": "./src/core/docx/edit/keys.ts",
 		"./core/docx/spelling": "./src/core/docx/spelling/index.ts",
 		"./dom/docx/editing": "./src/dom/docx/editing.ts",
 		"./dom/docx/save": "./src/dom/docx/save.ts",

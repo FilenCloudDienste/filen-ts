@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest"
 import type { DocxEditorCommandType } from "../core/docx/edit/index"
-import { commandForKey, findForKey, matchesShortcut, type KeyLike } from "../core/docx/paged/keys"
+import { DOCX_KEYS, docxKeyBindings, docxKeyDefault, docxKeyFor, type KeyLike } from "../core/docx/paged/keys"
+import { appKeyFor, commandForKey } from "./docxKeyHelpers"
 
-// Shortcut matching on QWERTY, AZERTY and Dvorak, on Apple (Cmd) and other (Ctrl) platforms: the character
-// the layout gives wins; the physical key counts only where the layout gives no Latin letter or digit.
+// Word's keys are physical keys (@filen/shared/keymap), as every other binding in the app: on AZERTY, QWERTZ and
+// Dvorak a key fires where its US letter sits, on Apple (Cmd) and other (Ctrl) platforms.
 
 type Mods = Partial<Omit<KeyLike, "key" | "code">>
 
@@ -18,87 +19,25 @@ function withMod(apple: boolean, mods: Mods = {}): Mods {
 
 const PLATFORMS = [false, true] as const
 
-describe("matchesShortcut across layouts", () => {
-	// [layout, event.key, event.code, extra modifiers, shortcut, matches]
-	const cases: readonly [string, string, string, Mods, string, boolean][] = [
-		["QWERTY", "b", "KeyB", {}, "mod+b", true],
-		["QWERTY", "B", "KeyB", { shiftKey: true }, "mod+b", false],
-		["QWERTY", "B", "KeyB", { shiftKey: true }, "mod+shift+b", true],
-		["QWERTY", "1", "Digit1", {}, "mod+1", true],
-		["QWERTY", ">", "Period", { shiftKey: true }, "mod+shift+.", true],
-		["QWERTY", "_", "Minus", { shiftKey: true }, "mod+shift+-", true],
-		["QWERTY", "]", "BracketRight", {}, "mod+]", true],
-		["QWERTY", " ", "Space", {}, "mod+space", true],
-		// AZERTY: A and Q, Z and W swap; the unshifted digit row gives punctuation.
-		["AZERTY", "a", "KeyQ", {}, "mod+a", true],
-		["AZERTY", "a", "KeyQ", {}, "mod+q", false],
-		["AZERTY", "q", "KeyA", {}, "mod+q", true],
-		["AZERTY", "q", "KeyA", {}, "mod+a", false],
-		["AZERTY", "z", "KeyW", {}, "mod+z", true],
-		["AZERTY", "z", "KeyW", {}, "mod+w", false],
-		["AZERTY", "&", "Digit1", {}, "mod+1", true],
-		["AZERTY", "1", "Digit1", { shiftKey: true }, "mod+shift+1", true],
-		["AZERTY", "1", "Digit1", { shiftKey: true }, "mod+shift+&", false],
-		// Dvorak: X sits on QWERTY's B, B on N, C on I, I on G.
-		["Dvorak", "x", "KeyB", {}, "mod+b", false],
-		["Dvorak", "x", "KeyB", {}, "mod+x", true],
-		["Dvorak", "b", "KeyN", {}, "mod+b", true],
-		["Dvorak", "b", "KeyN", {}, "mod+n", false],
-		["Dvorak", "c", "KeyI", {}, "mod+i", false],
-		["Dvorak", "i", "KeyG", {}, "mod+i", true],
-		["Dvorak", "1", "Digit1", {}, "mod+1", true],
-		// Non-Latin layout: the physical key.
-		["Russian", "и", "KeyB", {}, "mod+b", true]
-	]
-
-	for (const apple of PLATFORMS) {
-		it.each(cases)(`%s %j on %j with %j as %s: %s (apple ${String(apple)})`, (_layout, pressed, code, mods, shortcut, matches) => {
-			expect(matchesShortcut(key(pressed, code, withMod(apple, mods)), shortcut, apple)).toBe(matches)
-		})
-	}
-
-	it("takes Cmd for mod on Apple platforms and Ctrl elsewhere, never both", () => {
-		expect(matchesShortcut(key("b", "KeyB", { ctrlKey: true }), "mod+b", true)).toBe(false)
-		expect(matchesShortcut(key("b", "KeyB", { metaKey: true }), "mod+b", false)).toBe(false)
-		expect(matchesShortcut(key("b", "KeyB", { ctrlKey: true, metaKey: true }), "mod+b", true)).toBe(false)
-		expect(matchesShortcut(key("b", "KeyB"), "mod+b", false)).toBe(false)
-		// "ctrl" is Control on every platform.
-		expect(matchesShortcut(key(" ", "Space", { ctrlKey: true }), "ctrl+space", true)).toBe(true)
-		expect(matchesShortcut(key(" ", "Space", { metaKey: true }), "ctrl+space", true)).toBe(false)
-	})
-
-	it("reads an Option-composed character on a Mac by its physical key, and an AltGr character elsewhere as text", () => {
-		expect(matchesShortcut(key("©", "KeyG", { metaKey: true, altKey: true }), "mod+alt+g", true)).toBe(true)
-		expect(matchesShortcut(key("&", "Digit1", { metaKey: true, altKey: true }), "mod+alt+1", true)).toBe(true)
-		// AZERTY on Windows: Ctrl+Alt is AltGr, so a non-Latin character it gives is typing.
-		expect(matchesShortcut(key("&", "Digit1", { ctrlKey: true, altKey: true }), "mod+alt+1", false)).toBe(false)
-		expect(matchesShortcut(key("1", "Digit1", { ctrlKey: true, altKey: true }), "mod+alt+1", false)).toBe(true)
-		expect(
-			matchesShortcut(
-				{ ...key("1", "Digit1", { ctrlKey: true, altKey: true }), getModifierState: name => name === "AltGraph" },
-				"mod+alt+1",
-				false
-			)
-		).toBe(false)
-	})
-})
-
-describe("commandForKey across layouts", () => {
+describe("docxKeyFor across layouts", () => {
 	// [layout, event.key, event.code, extra modifiers, command]
 	const cases: readonly [string, string, string, Mods, DocxEditorCommandType | undefined][] = [
 		["QWERTY", "b", "KeyB", {}, "format.bold"],
 		["QWERTY", "i", "KeyI", {}, "format.italic"],
 		["QWERTY", "z", "KeyZ", {}, "history.undo"],
 		["QWERTY", "Z", "KeyZ", { shiftKey: true }, "history.redo"],
-		["AZERTY", "z", "KeyW", {}, "history.undo"],
-		["AZERTY", "w", "KeyZ", {}, undefined],
-		["AZERTY", "q", "KeyA", { shiftKey: true }, undefined],
-		["AZERTY", "A", "KeyQ", { shiftKey: true }, "format.allCaps"],
-		["Dvorak", "x", "KeyB", {}, undefined],
-		["Dvorak", "b", "KeyN", {}, "format.bold"],
-		["Dvorak", "i", "KeyG", {}, "format.italic"],
-		["Dvorak", "c", "KeyI", {}, undefined],
-		["Dvorak", "u", "KeyF", {}, "format.underline"]
+		["QWERTY", ">", "Period", { shiftKey: true }, "font.grow"],
+		["QWERTY", "]", "BracketRight", {}, "font.growPoint"],
+		// AZERTY: the key printed Z is QWERTY's W.
+		["AZERTY", "z", "KeyW", {}, undefined],
+		["AZERTY", "w", "KeyZ", {}, "history.undo"],
+		["AZERTY", "A", "KeyQ", { shiftKey: true }, undefined],
+		["AZERTY", "Q", "KeyA", { shiftKey: true }, "format.allCaps"],
+		// Dvorak: X sits on QWERTY's B.
+		["Dvorak", "x", "KeyB", {}, "format.bold"],
+		["Dvorak", "b", "KeyN", {}, undefined],
+		// A non-Latin layout: the physical key.
+		["Russian", "и", "KeyB", {}, "format.bold"]
 	]
 
 	for (const apple of PLATFORMS) {
@@ -106,39 +45,103 @@ describe("commandForKey across layouts", () => {
 			expect(commandForKey(key(pressed, code, withMod(apple, mods)), apple)?.type).toBe(type)
 		})
 	}
+
+	it("takes Cmd for mod on Apple platforms and Ctrl elsewhere, never both", () => {
+		expect(commandForKey(key("b", "KeyB", { ctrlKey: true }), true)).toBeUndefined()
+		expect(commandForKey(key("b", "KeyB", { metaKey: true }), false)).toBeUndefined()
+		expect(commandForKey(key("b", "KeyB", { ctrlKey: true, metaKey: true }), true)).toBeUndefined()
+		expect(commandForKey(key("b", "KeyB"), false)).toBeUndefined()
+	})
+
+	it("reads an Option-composed character on a Mac by its key, and an AltGr character elsewhere as text", () => {
+		expect(commandForKey(key("¡", "Digit1", { metaKey: true, altKey: true }), true)).toEqual({ type: "style.set", style: "heading1" })
+		expect(commandForKey(key("1", "Digit1", { ctrlKey: true, altKey: true }), false)).toEqual({ type: "style.set", style: "heading1" })
+		expect(
+			commandForKey(
+				{ ...key("¹", "Digit1", { ctrlKey: true, altKey: true }), getModifierState: (name: string) => name === "AltGraph" },
+				false
+			)
+		).toBeUndefined()
+	})
 })
 
-describe("findForKey", () => {
+describe("the app's keys", () => {
 	it("opens Word's Find, Go To and Replace off Apple platforms", () => {
-		expect(findForKey(key("f", "KeyF", { ctrlKey: true }), false)).toBe("find")
-		expect(findForKey(key("g", "KeyG", { ctrlKey: true }), false)).toBe("goTo")
-		expect(findForKey(key("h", "KeyH", { ctrlKey: true }), false)).toBe("replace")
-		expect(findForKey(key("H", "KeyH", { ctrlKey: true, shiftKey: true }), false)).toBeUndefined()
-		expect(findForKey(key("f", "KeyF", { metaKey: true }), false)).toBeUndefined()
-		expect(findForKey(key("f", "KeyF"), false)).toBeUndefined()
+		expect(appKeyFor(key("f", "KeyF", { ctrlKey: true }), false)).toBe("find")
+		expect(appKeyFor(key("g", "KeyG", { ctrlKey: true }), false)).toBe("goTo")
+		expect(appKeyFor(key("h", "KeyH", { ctrlKey: true }), false)).toBe("replace")
+		expect(appKeyFor(key("H", "KeyH", { ctrlKey: true, shiftKey: true }), false)).toBeUndefined()
+		expect(appKeyFor(key("f", "KeyF", { metaKey: true }), false)).toBeUndefined()
+		expect(appKeyFor(key("f", "KeyF"), false)).toBeUndefined()
 	})
 
 	it("opens Word for Mac's: Cmd+F and Cmd+G find, Cmd+Option+G goes to, Control+H or Cmd+Shift+H replaces", () => {
-		expect(findForKey(key("f", "KeyF", { metaKey: true }), true)).toBe("find")
-		expect(findForKey(key("g", "KeyG", { metaKey: true }), true)).toBe("find")
-		expect(findForKey(key("©", "KeyG", { metaKey: true, altKey: true }), true)).toBe("goTo")
-		expect(findForKey(key("h", "KeyH", { ctrlKey: true }), true)).toBe("replace")
-		expect(findForKey(key("H", "KeyH", { metaKey: true, shiftKey: true }), true)).toBe("replace")
+		expect(appKeyFor(key("f", "KeyF", { metaKey: true }), true)).toBe("find")
+		expect(appKeyFor(key("g", "KeyG", { metaKey: true }), true)).toBe("find")
+		expect(appKeyFor(key("©", "KeyG", { metaKey: true, altKey: true }), true)).toBe("goTo")
+		expect(appKeyFor(key("h", "KeyH", { ctrlKey: true }), true)).toBe("replace")
+		expect(appKeyFor(key("H", "KeyH", { metaKey: true, shiftKey: true }), true)).toBe("replace")
 		// Cmd+H hides the app; Control+F is not Find on a Mac.
-		expect(findForKey(key("h", "KeyH", { metaKey: true }), true)).toBeUndefined()
-		expect(findForKey(key("f", "KeyF", { ctrlKey: true }), true)).toBeUndefined()
+		expect(appKeyFor(key("h", "KeyH", { metaKey: true }), true)).toBeUndefined()
+		expect(appKeyFor(key("f", "KeyF", { ctrlKey: true }), true)).toBeUndefined()
 	})
 
-	it("follows the character the layout gives", () => {
-		for (const apple of PLATFORMS) {
-			// Dvorak: F on QWERTY's Y, H on J; QWERTY's F gives U.
-			expect(findForKey(key("f", "KeyY", withMod(apple)), apple)).toBe("find")
-			expect(findForKey(key("u", "KeyF", withMod(apple)), apple)).toBeUndefined()
-			// Russian: the physical key.
-			expect(findForKey(key("а", "KeyF", withMod(apple)), apple)).toBe("find")
-		}
+	it("takes Repeat on F4 off Apple platforms only", () => {
+		expect(appKeyFor(key("F4", "F4"), false)).toBe("repeat")
+		expect(appKeyFor(key("F4", "F4"), true)).toBeUndefined()
+	})
+})
 
-		expect(findForKey(key("h", "KeyJ", { ctrlKey: true }), false)).toBe("replace")
-		expect(findForKey(key("g", "KeyU", { ctrlKey: true }), false)).toBe("goTo")
+describe("a host's bindings", () => {
+	it("fire the keys the host gives and no longer the default ones", () => {
+		const bindings = { ...docxKeyBindings(false, false), "format.bold": "mod+shift+b", find: "f3,mod+e" }
+
+		expect(docxKeyFor(key("B", "KeyB", { ctrlKey: true, shiftKey: true }), bindings, false)).toEqual({
+			kind: "command",
+			command: { type: "format.bold" }
+		})
+		expect(docxKeyFor(key("b", "KeyB", { ctrlKey: true }), bindings, false)).toBeUndefined()
+		expect(docxKeyFor(key("F3", "F3"), bindings, false)).toEqual({ kind: "app", key: "find" })
+		expect(docxKeyFor(key("e", "KeyE", { ctrlKey: true }), bindings, false)).toEqual({ kind: "app", key: "find" })
+		expect(docxKeyFor(key("f", "KeyF", { ctrlKey: true }), bindings, false)).toBeUndefined()
+	})
+
+	it("leave a key unbound that they omit or bind to nothing", () => {
+		expect(docxKeyFor(key("b", "KeyB", { ctrlKey: true }), {}, false)).toBeUndefined()
+		expect(docxKeyFor(key("b", "KeyB", { ctrlKey: true }), { "format.bold": "" }, false)).toBeUndefined()
+		expect(docxKeyFor(key("b", "KeyB", { ctrlKey: true }), { "format.bold": "none" }, false)).toBeUndefined()
+	})
+})
+
+describe("docxKeyDefault", () => {
+	const byId = new Map(DOCX_KEYS.map(entry => [entry.id, entry]))
+	const defaultOf = (id: string, apple: boolean, desktop: boolean): string | undefined => {
+		const entry = byId.get(id)
+
+		return entry === undefined ? undefined : docxKeyDefault(entry, apple, desktop)
+	}
+
+	it("ships every key once, in the canonical token spelling", () => {
+		expect(new Set(DOCX_KEYS.map(entry => entry.id)).size).toBe(DOCX_KEYS.length)
+		expect(defaultOf("font.grow", false, false)).toBe("mod+shift+period")
+		expect(defaultOf("history.redo", false, false)).toBe("mod+y,mod+shift+z")
+		expect(defaultOf("field.unlink", false, false)).toBe("mod+shift+f9")
+	})
+
+	it("leaves out in a browser what the browser keeps, with a browser's key in its place where there is one", () => {
+		expect(defaultOf("style.normal", false, true)).toBe("mod+shift+n")
+		expect(defaultOf("style.normal", false, false)).toBe("mod+alt+0")
+		expect(defaultOf("view.formattingMarks", true, true)).toBe("mod+8")
+		expect(defaultOf("view.formattingMarks", true, false)).toBe("mod+shift+8")
+		expect(defaultOf("paragraph.hangingIndent", false, true)).toBe("mod+t")
+		expect(defaultOf("paragraph.hangingIndent", false, false)).toBe("")
+		expect(defaultOf("format.paste", false, true)).toBe("mod+shift+v")
+		expect(defaultOf("format.paste", false, false)).toBe("")
+	})
+
+	it("registers Word's keyless commands unbound", () => {
+		for (const id of ["review.acceptAll", "comment.next", "toc.update", "insert.sectionBreak", "table.insert", "page.setup"]) {
+			expect(defaultOf(id, false, true), id).toBe("")
+		}
 	})
 })

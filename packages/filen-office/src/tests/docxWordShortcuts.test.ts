@@ -2,7 +2,8 @@ import type { Node } from "prosemirror-model"
 import { TextSelection } from "prosemirror-state"
 import { describe, expect, it } from "vitest"
 import { docxSchema, type DocxEditorCommand, type DocxEditorSession } from "@filen/office/core/docx/edit"
-import { commandForKey, isRepeatKey, type KeyLike } from "../core/docx/paged/keys"
+import type { KeyLike } from "../core/docx/paged/keys"
+import { appKeyFor, commandForKey } from "./docxKeyHelpers"
 import { firstCaseMode } from "../core/docx/edit/changeCase"
 import { sessionOf } from "./docxEditFixtures"
 import { buildDocx, p } from "./docxSynthetic"
@@ -10,7 +11,7 @@ import { pagedEditor } from "./pagedFixtures"
 
 const marks = docxSchema.marks
 
-function key(init: Partial<KeyLike> & { key: string }): KeyLike {
+function key(init: Partial<KeyLike> & { key: string; code: string }): KeyLike {
 	return { ctrlKey: false, metaKey: false, shiftKey: false, altKey: false, ...init }
 }
 
@@ -58,9 +59,9 @@ describe("Word's character shortcuts", () => {
 	})
 
 	it("binds Repeat to F4 off Apple platforms only", () => {
-		expect(isRepeatKey(key({ key: "F4", code: "F4" }), false)).toBe(true)
-		expect(isRepeatKey(key({ key: "F4", code: "F4" }), true)).toBe(false)
-		expect(isRepeatKey(key({ key: "F4", code: "F4", altKey: true }), false)).toBe(false)
+		expect(appKeyFor(key({ key: "F4", code: "F4" }), false)).toBe("repeat")
+		expect(appKeyFor(key({ key: "F4", code: "F4" }), true)).toBeUndefined()
+		expect(appKeyFor(key({ key: "F4", code: "F4", altKey: true }), false)).toBeUndefined()
 	})
 })
 

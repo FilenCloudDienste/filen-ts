@@ -23,7 +23,6 @@ export {
 	PARAGRAPH_STYLE_NAMES,
 	browserReservedShortcut,
 	shortcutFor,
-	shortcutHint,
 	type BaseCommand,
 	type DocxAlignment,
 	type DocxCommandContext,

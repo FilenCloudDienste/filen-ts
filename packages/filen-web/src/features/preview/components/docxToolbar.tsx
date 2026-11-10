@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from "react"
+import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode, type Ref } from "react"
 import { useTranslation } from "react-i18next"
 import {
 	BookOpenIcon,
@@ -93,6 +93,8 @@ export interface DocxToolbarProps {
 	onFindClosed: () => void
 	// The File menu (Download as), first on the left; absent when it offers nothing.
 	fileMenu?: ReactNode
+	// The page number field, which Go To focuses.
+	pageInputRef?: Ref<HTMLInputElement>
 }
 
 export function ViewOnlyBadge({ reasons }: { reasons: readonly DocxViewOnlyReason[] }) {
@@ -304,7 +306,8 @@ export function DocxFindField({
 	find,
 	focus,
 	onClosed,
-	replaceOpen: replaceOpenProp
+	replaceOpen: replaceOpenProp,
+	replaceAction
 }: {
 	find: DocxFindControls
 	// Bumped to focus the find field (and select its text) again while it is open.
@@ -312,6 +315,8 @@ export function DocxFindField({
 	onClosed: () => void
 	// Opened as "Find and replace": the replace field shows from the start.
 	replaceOpen?: boolean
+	// The action whose key moves to the replace field: editor.replace, or the Word editor's own (docx.replace).
+	replaceAction?: string
 }) {
 	const { t } = useTranslation("preview")
 	const [text, setText] = useState(find.query)
@@ -345,7 +350,7 @@ export function DocxFindField({
 	)
 	// The replace key in the field shows the replace field and moves there, where the document can be changed.
 	const replaceFromFind = useAction(
-		"editor.replace",
+		replaceAction ?? "editor.replace",
 		keyboardEvent => {
 			if (replace === undefined) {
 				return
@@ -679,7 +684,8 @@ export function DocxToolbar({
 	legacy,
 	findFocus,
 	onFindClosed,
-	fileMenu
+	fileMenu,
+	pageInputRef
 }: DocxToolbarProps) {
 	const { t } = useTranslation("preview")
 	const phone = usePhoneWidth()
@@ -714,6 +720,7 @@ export function DocxToolbar({
 					onLast={() => {
 						dispatch({ type: "page.goto", page: Math.max(0, state.pageCount - 1) })
 					}}
+					inputRef={pageInputRef}
 				/>
 			)
 		},

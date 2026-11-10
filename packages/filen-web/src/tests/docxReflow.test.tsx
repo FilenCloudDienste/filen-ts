@@ -32,6 +32,8 @@ vi.mock("@filen/office/react/docx/editor", async () => ({
 }))
 
 const { DocxReflowSurface } = await import("@/features/preview/components/docxReflowSurface")
+// Any bindings object: the surface hands it on as it is.
+const KEY_BINDINGS = { find: "mod+f" }
 
 afterEach(() => {
 	cleanup()
@@ -138,6 +140,7 @@ describe("Mobile view surface", () => {
 				readOnly
 				apple
 				desktop
+				keyBindings={KEY_BINDINGS}
 				marks={marks}
 				onFind={onFind}
 				interactions={{ commentMarker }}
@@ -156,6 +159,7 @@ describe("Mobile view surface", () => {
 			readOnly: true,
 			apple: true,
 			desktop: true,
+			keyBindings: KEY_BINDINGS,
 			marks,
 			onFind
 		})

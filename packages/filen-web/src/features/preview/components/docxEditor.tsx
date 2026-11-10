@@ -25,13 +25,23 @@ import {
 	type StorySearch,
 	writeProtectionOf
 } from "@filen/office/core/docx/edit"
-import { docxLinkAt, hostCommandForKey, type DocxLinkAt, type PagedEditor } from "@filen/office/core/docx/paged"
+import { docxKeyFor, docxLinkAt, type DocxLinkAt, type PagedEditor } from "@filen/office/core/docx/paged"
 import type { SpellingIssue, SpellingMark } from "@filen/office/core/docx/spelling"
 import { DocxSpelling } from "@filen/office/core/docx/spelling"
 import { DocxSaveError } from "@filen/office/core/docx/write"
-import { clampZoom, fitWidthZoom, markupInfo, stepZoom, type DocxMarkupMode, type DocxUnlockedDocument } from "@filen/office/dom/docx"
+import {
+	canZoomIn,
+	canZoomOut,
+	clampZoom,
+	fitWidthZoom,
+	markupInfo,
+	stepZoom,
+	type DocxMarkupMode,
+	type DocxUnlockedDocument
+} from "@filen/office/dom/docx"
 import type { DocxEditingHost, DocxSealer } from "@filen/office/dom/docx/editing"
 import type { DocxSaveNotice } from "@filen/office/dom/docx/save"
+import { isImeKeydown } from "@filen/shared/keymap"
 import { useDocxDocument, type DocxSource } from "@filen/office/react/docx"
 import {
 	DocxEditor,
@@ -48,6 +58,7 @@ import "@filen/office/css/docx-objects.css"
 import "@filen/office/css/docx-reflow.css"
 import { DOCX_FONT_URLS } from "@/features/preview/lib/docxEngine"
 import { readEditorClipboard, writeEditorClipboard } from "@/features/preview/lib/docxClipboard"
+import { useDocxKeyBindings } from "@/features/preview/lib/docxKeymap"
 import { FormatSaveError } from "@/features/preview/lib/rtfEditing"
 import {
 	assertSealedUpload,
@@ -624,6 +635,8 @@ export function DocxEditView({
 		executeRef.current(command)
 	})
 	const settings = useOfficeSettings()
+	// The Word keys in effect, as the user bound them (Settings → Keyboard).
+	const keyBindings = useDocxKeyBindings()
 	const { withAuthor, dialog: authorDialog } = useDocxAuthorGate({ authorName: settings.authorName, editor, execute })
 	// Each mounted page's overlay element and what it was made from (overlays, below).
 	const [overlayElements] = useState(() => new Map<number, OverlayElement>())
@@ -1071,13 +1084,14 @@ export function DocxEditView({
 
 	const links = useDocxLinkFollow(editor, handleRef, focusEditor)
 
-	// Word's keys the host runs (Track Changes, New Comment), never pressed in a field (the find box, a comment's)
-	// nor in a dialog over the editor (portalled: its keys bubble here through React).
+	// Word's keys the host runs (Track Changes, New Comment, the commands asking for input first), never pressed in a
+	// field (the find box, a comment's) nor in a dialog over the editor (portalled: its keys bubble here through React).
 	const onHostKey = (event: KeyboardEvent, root: Element): boolean => {
 		const target = event.target
 
 		if (
 			event.defaultPrevented ||
+			isImeKeydown(event) ||
 			!keyForEditor(root, target) ||
 			inReview(target) ||
 			(target instanceof Element && target.matches("input, textarea, select"))
@@ -1085,15 +1099,15 @@ export function DocxEditView({
 			return false
 		}
 
-		const type = hostCommandForKey(event, APPLE)
+		const run = docxKeyFor(event, keyBindings, APPLE)
 
-		if (type === undefined) {
+		if (run?.kind !== "host") {
 			return false
 		}
 
 		event.preventDefault()
 
-		const action = hostKeyAction(type, editor?.snapshot(), readOnly)
+		const action = hostKeyAction(run.type, editor?.snapshot(), readOnly)
 
 		if (action?.kind === "execute") {
 			execute(action.command)
@@ -1332,34 +1346,127 @@ export function DocxEditView({
 		}
 	}
 
-	// Find opens for keys pressed in the layer the document is shown in, never for one over it; the editor's
-	// own input takes Mod+F and Ctrl+H itself (onFind below).
-	const onFindKey = (keyboardEvent: KeyboardEvent, replace: boolean): void => {
+	// The editor's own keys pressed in the layer the document is shown in, outside its input (the ribbon, the status
+	// bar), and the keys only the host runs; never for one over it. The editor's input takes its keys itself (onFind
+	// below) and stops them; preventDefault only once the key is taken.
+	const layerKey = (keyboardEvent: KeyboardEvent): boolean => {
 		const root = rootRef.current
 
 		if (root === null || keyboardEvent.defaultPrevented || !keyForEditor(root, keyboardEvent.target)) {
-			return
+			return false
 		}
 
 		keyboardEvent.preventDefault()
-		openFind(replace)
+
+		return true
 	}
 
 	useAction(
 		"editor.find",
 		keyboardEvent => {
-			onFindKey(keyboardEvent, false)
+			if (layerKey(keyboardEvent)) {
+				openFind(false)
+			}
 		},
 		IN_EDITORS,
 		[]
 	)
 	useAction(
-		"editor.replace",
+		"docx.replace",
 		keyboardEvent => {
-			onFindKey(keyboardEvent, true)
+			if (layerKey(keyboardEvent)) {
+				openFind(true)
+			}
 		},
 		IN_EDITORS,
 		[]
+	)
+	// Mobile view has no pages: Go To finds there, as its input does.
+	useAction(
+		"docx.goTo",
+		keyboardEvent => {
+			if (layerKey(keyboardEvent)) {
+				if (reflow) {
+					openFind(false)
+				} else {
+					openGoTo()
+				}
+			}
+		},
+		IN_EDITORS,
+		[reflow]
+	)
+	// Zoom, as the toolbar's, on the pages only (Mobile view fits its width).
+	useAction(
+		"docx.zoomIn",
+		keyboardEvent => {
+			if (!reflow && canZoomIn(zoom) && layerKey(keyboardEvent)) {
+				setZoomMode(stepZoom(zoom, 1))
+			}
+		},
+		IN_EDITORS,
+		[reflow, zoom]
+	)
+	useAction(
+		"docx.zoomOut",
+		keyboardEvent => {
+			if (!reflow && canZoomOut(zoom) && layerKey(keyboardEvent)) {
+				setZoomMode(stepZoom(zoom, -1))
+			}
+		},
+		IN_EDITORS,
+		[reflow, zoom]
+	)
+	useAction(
+		"docx.zoomReset",
+		keyboardEvent => {
+			if (!reflow && layerKey(keyboardEvent)) {
+				setZoomMode(clampZoom(1))
+			}
+		},
+		IN_EDITORS,
+		[reflow]
+	)
+	useAction(
+		"docx.wordCount",
+		keyboardEvent => {
+			if (wordStore !== undefined && layerKey(keyboardEvent)) {
+				openWordCount()
+			}
+		},
+		IN_EDITORS,
+		[wordStore]
+	)
+	useAction(
+		"docx.navigationPane",
+		keyboardEvent => {
+			if (layerKey(keyboardEvent)) {
+				setNavigationOpen(!navigation.open)
+			}
+		},
+		IN_EDITORS,
+		[navigation.open]
+	)
+	useAction(
+		"docx.mobileView",
+		keyboardEvent => {
+			if (layerKey(keyboardEvent)) {
+				setReflow(!reflow)
+			}
+		},
+		IN_EDITORS,
+		[reflow, setReflow]
+	)
+	// Mod+P: the document as a PDF, the editor's print (the browser's would print the app).
+	useAction(
+		"docx.downloadPdf",
+		keyboardEvent => {
+			if (pdf.onDownloadPdf !== undefined && layerKey(keyboardEvent)) {
+				pdf.onDownloadPdf()
+			}
+		},
+		IN_EDITORS,
+		[pdf.onDownloadPdf]
 	)
 
 	// Pictures pasted, dropped or picked (Insert menu) go in through this.
@@ -1934,6 +2041,7 @@ export function DocxEditView({
 								readOnly={readOnly}
 								apple={APPLE}
 								desktop={DESKTOP}
+								keyBindings={keyBindings}
 								marks={marks}
 								markLabels={markLabels}
 								onFind={openFind}
@@ -1953,6 +2061,7 @@ export function DocxEditView({
 									readOnly={readOnly}
 									apple={APPLE}
 									desktop={DESKTOP}
+									keyBindings={keyBindings}
 									onFind={openFind}
 									onGoTo={openGoTo}
 									onPage={pages.setPage}

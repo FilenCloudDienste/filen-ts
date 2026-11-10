@@ -10,7 +10,6 @@ export {
 	isWriteCommand,
 	parseDocxEditorCommand,
 	shortcutFor,
-	shortcutHint,
 	type BaseCommand,
 	type DocxAlignment,
 	type DocxCommandContext,

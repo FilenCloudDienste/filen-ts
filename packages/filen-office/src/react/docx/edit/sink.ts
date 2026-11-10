@@ -4,14 +4,15 @@ import { EditorView, type NodeView, type NodeViewConstructor } from "prosemirror
 import { docxSchema, isWriteCommand } from "../../../core/docx/edit/index"
 import {
 	besideNode,
-	commandForKey,
-	findForKey,
-	isRepeatKey,
+	docxKeyBindings,
+	docxKeyFor,
 	joinBackward,
 	joinForward,
 	lineBreak,
 	selectAll,
 	splitParagraph,
+	type DocxKeyBindings,
+	type DocxKeyRun,
 	type PagedEditor
 } from "../../../core/docx/paged/index"
 import { drawingName } from "../../../core/docx/objects/edit"
@@ -78,8 +79,11 @@ export interface EditSinkOptions {
 	readonly readOnly?: boolean
 	// Cmd (Apple platforms) or Ctrl as the shortcut modifier.
 	readonly apple?: boolean
-	// In the desktop app: the shortcuts the browser owns are the editor's (DocxKeyBinding).
+	// In the desktop app: the shortcuts the browser owns are the editor's (DocxKey.desktop). Read for the default
+	// keys only.
 	readonly desktop?: boolean
+	// The Word keys in effect (DOCX_KEYS' ids), read at each key press; Word's on this platform without it.
+	readonly keyBindings?: () => DocxKeyBindings | undefined
 	// Top-level blocks held on each side of the selection's ends (default 20).
 	readonly window?: number
 	// The painted caret on screen (client px) and the width of its column, or undefined when it is not drawn.
@@ -877,33 +881,48 @@ export class EditSink {
 			if (key === "a") return this.run(selectAll(state))
 		}
 
-		const find = findForKey(event, apple)
+		return this.runKey(docxKeyFor(event, this.keyBindings(), apple), readOnly)
+	}
 
-		if (find === "goTo" && this.options.onGoTo !== undefined) {
-			this.options.onGoTo()
+	private keyBindings(): DocxKeyBindings {
+		return this.options.keyBindings?.() ?? docxKeyBindings(this.options.apple === true, this.options.desktop === true)
+	}
 
-			return true
+	// A Word key's work; the host's own keys (DocxKeyRun "host") go on to the host.
+	private runKey(run: DocxKeyRun | undefined, readOnly: boolean): boolean {
+		if (run === undefined || run.kind === "host") return false
+
+		const editor = this.editor
+
+		if (run.kind === "app") {
+			switch (run.key) {
+				case "goTo":
+					if (this.options.onGoTo !== undefined) {
+						this.options.onGoTo()
+
+						return true
+					}
+
+					this.options.onFind?.(false)
+
+					return this.options.onFind !== undefined
+				case "find":
+				case "replace":
+					this.options.onFind?.(run.key === "replace")
+
+					return this.options.onFind !== undefined
+				case "repeat":
+					return !readOnly && editor.repeat()
+			}
 		}
-
-		if (find !== undefined) {
-			this.options.onFind?.(find === "replace")
-
-			return this.options.onFind !== undefined
-		}
-
-		if (!readOnly && isRepeatKey(event, apple)) return editor.repeat()
-
-		const command = commandForKey(event, apple, this.options.desktop === true)
 
 		// Read-only: only what changes nothing (the view: Alt+F9), as the host runs it.
-		if (command !== undefined && !(readOnly && isWriteCommand(command.type))) {
-			// Undo and redo follow the order across stories; story commands go to the story being edited.
-			void editor.execute(command)
+		if (readOnly && isWriteCommand(run.command.type)) return false
 
-			return true
-		}
+		// Undo and redo follow the order across stories; story commands go to the story being edited.
+		void editor.execute(run.command)
 
-		return false
+		return true
 	}
 }
 

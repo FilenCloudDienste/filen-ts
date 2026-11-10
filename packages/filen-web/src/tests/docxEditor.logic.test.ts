@@ -63,7 +63,7 @@ import {
 } from "@/features/preview/components/docxEditor.logic"
 import { viewOnlyReasonKey, viewOnlyReasons } from "@/features/preview/components/docxViewer.logic"
 import { commandNeedsAuthor } from "@/features/preview/components/docxAuthorGate.logic"
-import { hostCommandForKey, type KeyLike } from "@filen/office/core/docx/paged"
+import { docxKeyBindings, docxKeyFor, type KeyLike } from "@filen/office/core/docx/keys"
 import { preview as en } from "@/locales/en/preview"
 
 const VALUES = NO_VALUES
@@ -784,6 +784,12 @@ describe("find across stories", () => {
 })
 
 describe("docx editor Word review keys", () => {
+	// The command a key the host runs is for, under Word's default keys in a browser.
+	const hostCommandForKey = (event: KeyLike, apple: boolean) => {
+		const run = docxKeyFor(event, docxKeyBindings(apple, false), apple)
+
+		return run?.kind === "host" ? run.type : undefined
+	}
 	const press = (key: string, code: string, mods: Partial<KeyLike>): KeyLike => ({
 		key,
 		code,
@@ -833,5 +839,18 @@ describe("docx editor Word review keys", () => {
 		expect(hostKeyAction(windows, snapshot(), true)).toBeNull()
 		expect(hostKeyAction(windows, snapshot({ enabled: { ...snapshot().enabled, "comment.add": false } }), false)).toBeNull()
 		expect(hostKeyAction(windows, undefined, false)).toBeNull()
+	})
+
+	it("opens the input of Link (Mod+K), Equation (Alt+=, Control+= on a Mac) and the Insert dialogs", () => {
+		expect(hostCommandForKey(press("k", "KeyK", { ctrlKey: true }), false)).toBe("link.set")
+		expect(hostCommandForKey(press("=", "Equal", { altKey: true }), false)).toBe("equation.insert")
+		expect(hostCommandForKey(press("=", "Equal", { ctrlKey: true }), true)).toBe("equation.insert")
+
+		for (const type of ["link.set", "equation.insert", "table.insert", "insert.symbol", "page.setup"] as const) {
+			const enabled = { ...snapshot().enabled, [type]: true }
+
+			expect(hostKeyAction(type, snapshot({ enabled }), false)).toEqual({ kind: "input", type })
+			expect(hostKeyAction(type, snapshot({ enabled }), true)).toBeNull()
+		}
 	})
 })

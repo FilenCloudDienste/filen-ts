@@ -1200,15 +1200,15 @@ describe("EditSink", () => {
 			const count = editor.state.doc.childCount
 
 			caretAt(editor, paragraphPos(editor, 2) + 3)
-			expect(key(sink.view.dom, { key: "Enter", ctrlKey: !apple, metaKey: apple }).defaultPrevented).toBe(true)
+			expect(key(sink.view.dom, { key: "Enter", code: "Enter", ctrlKey: !apple, metaKey: apple }).defaultPrevented).toBe(true)
 			expect(breaks(editor, "page")).toBe(1)
 			expect(editor.state.doc.childCount).toBe(count + 1)
 
 			// Mod+Shift+Enter and Mod+Alt+Enter are no command.
 			const doc = editor.state.doc
 
-			key(sink.view.dom, { key: "Enter", ctrlKey: !apple, metaKey: apple, shiftKey: true })
-			key(sink.view.dom, { key: "Enter", ctrlKey: !apple, metaKey: apple, altKey: true })
+			key(sink.view.dom, { key: "Enter", code: "Enter", ctrlKey: !apple, metaKey: apple, shiftKey: true })
+			key(sink.view.dom, { key: "Enter", code: "Enter", ctrlKey: !apple, metaKey: apple, altKey: true })
 			expect(editor.state.doc).toBe(doc)
 
 			key(sink.view.dom, { key: "Enter", shiftKey: true })
@@ -1258,6 +1258,29 @@ describe("EditSink", () => {
 
 		expect(key(sink.view.dom, { key: "g", code: "KeyG", ctrlKey: true }).defaultPrevented).toBe(true)
 		expect(onFind).toHaveBeenLastCalledWith(false)
+		sink.destroy()
+	})
+
+	it("reads the host's key bindings at each key press, leaving the host's own keys to it", async () => {
+		const { editor } = await pagedEditor(LONG)
+		const onFind = vi.fn()
+		let bindings: Readonly<Record<string, string>> = { find: "f3", replace: "mod+h", "link.set": "mod+k" }
+		const sink = new EditSink(editor, host, {
+			label: "Document",
+			caretClientRect: () => undefined,
+			onFind,
+			keyBindings: () => bindings
+		})
+
+		expect(key(sink.view.dom, { key: "f", code: "KeyF", ctrlKey: true }).defaultPrevented).toBe(false)
+		expect(key(sink.view.dom, { key: "F3", code: "F3" }).defaultPrevented).toBe(true)
+		expect(onFind).toHaveBeenLastCalledWith(false)
+		// A host's key (it asks for the link first) goes on to the host.
+		expect(key(sink.view.dom, { key: "k", code: "KeyK", ctrlKey: true }).defaultPrevented).toBe(false)
+
+		bindings = { ...bindings, replace: "" }
+		expect(key(sink.view.dom, { key: "h", code: "KeyH", ctrlKey: true }).defaultPrevented).toBe(false)
+		expect(onFind).toHaveBeenCalledTimes(1)
 		sink.destroy()
 	})
 

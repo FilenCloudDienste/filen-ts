@@ -1,5 +1,5 @@
 import { useEffect, useImperativeHandle, useLayoutEffect, useRef, type ReactNode, type Ref } from "react"
-import type { PagedEditor } from "../../../core/docx/paged/index"
+import type { DocxKeyBindings, PagedEditor } from "../../../core/docx/paged/index"
 import type { DocxEditorHandle, DocxEditorInteractions } from "../DocxEditor"
 import type { DocxEditorMark } from "../edit/surface"
 import type { DocxMarkLabels } from "../paint/marks"
@@ -23,8 +23,11 @@ export interface DocxReflowProps {
 	readonly readOnly?: boolean
 	// Cmd as the shortcut modifier (Apple platforms).
 	readonly apple?: boolean
-	// In the desktop app: the shortcuts the browser owns are the editor's (Word's line spacing).
+	// In the desktop app: the shortcuts the browser owns are the editor's (Word's line spacing). Read for the default
+	// keys only.
 	readonly desktop?: boolean
+	// The Word keys in effect, by DOCX_KEYS id (a host's keymap); Word's on this platform without them.
+	readonly keyBindings?: DocxKeyBindings
 	// Find requested (Mod+F), or Find and Replace (Ctrl+H): the app's own find.
 	readonly onFind?: (replace: boolean) => void
 	// Ranges to mark (spelling, search results).
@@ -51,6 +54,7 @@ export function DocxReflow(props: DocxReflowProps): ReactNode {
 		readOnly: props.readOnly === true,
 		apple: props.apple === true,
 		desktop: props.desktop === true,
+		keyBindings: props.keyBindings,
 		onFind: props.onFind,
 		marks: props.marks ?? EMPTY_MARKS,
 		interactions: props.interactions,

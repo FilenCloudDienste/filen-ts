@@ -2,7 +2,8 @@ import type { Node } from "prosemirror-model"
 import { TextSelection } from "prosemirror-state"
 import { describe, expect, it } from "vitest"
 import type { DocxEditorSession } from "@filen/office/core/docx/edit"
-import { commandForKey, joinBackward, splitParagraph, type KeyLike } from "../core/docx/paged/keys"
+import { joinBackward, splitParagraph, type KeyLike } from "../core/docx/paged/keys"
+import { commandForKey } from "./docxKeyHelpers"
 import { NUMBERING_PART, STYLES_PART, sessionOf } from "./docxEditFixtures"
 import { p } from "./docxSynthetic"
 
@@ -198,29 +199,28 @@ describe("docx Backspace", () => {
 })
 
 describe("docx shortcuts", () => {
-	it("follow the character the layout gives", () => {
+	it("follow the physical key, whatever the layout gives", () => {
 		// Dvorak: C is where QWERTY has I, X where it has B.
-		expect(commandForKey(key("c", "KeyI", { ctrlKey: true }), false)).toBeUndefined()
-		expect(commandForKey(key("x", "KeyB", { ctrlKey: true }), false)).toBeUndefined()
-		expect(commandForKey(key("i", "KeyC", { ctrlKey: true }), false)).toEqual({ type: "format.italic" })
+		expect(commandForKey(key("c", "KeyI", { ctrlKey: true }), false)).toEqual({ type: "format.italic" })
+		expect(commandForKey(key("x", "KeyB", { ctrlKey: true }), false)).toEqual({ type: "format.bold" })
+		expect(commandForKey(key("i", "KeyC", { ctrlKey: true }), false)).toBeUndefined()
 		// Cyrillic: the physical key.
 		expect(commandForKey(key("и", "KeyB", { ctrlKey: true }), false)).toEqual({ type: "format.bold" })
-		// macOS Option+B composes a character: the physical key.
+		// macOS Option+B composes a character: Cmd+Option+B is no key of Word's.
 		expect(commandForKey(key("∫", "KeyB", { metaKey: true, altKey: true }), true)).toBeUndefined()
 		expect(commandForKey(key("∫", "KeyB", { metaKey: true }), true)).toEqual({ type: "format.bold" })
-		// AZERTY: the digit row gives "&" unshifted; a shifted digit is the digit.
+		// AZERTY: the digit row gives "&" unshifted; the key is the digit's.
 		expect(commandForKey(key("&", "Digit1", { metaKey: true, altKey: true }), true)).toEqual({ type: "style.set", style: "heading1" })
 		expect(commandForKey(key("7", "Digit7", { ctrlKey: true, shiftKey: true }), false)).toEqual({ type: "list.numbered" })
 		expect(commandForKey(key("1", "Digit1", { metaKey: true, altKey: true }), true)).toEqual({ type: "style.set", style: "heading1" })
 	})
 
 	it("leave characters AltGr gives to typing", () => {
-		const altGr = { ctrlKey: true, altKey: true }
+		const altGr = { ctrlKey: true, altKey: true, getModifierState: (name: string) => name === "AltGraph" }
 
 		expect(commandForKey(key("²", "Digit2", altGr), false)).toBeUndefined()
 		expect(commandForKey(key("³", "Digit3", altGr), false)).toBeUndefined()
-		expect(commandForKey({ ...key("2", "Digit2", altGr), getModifierState: name => name === "AltGraph" }, false)).toBeUndefined()
-		expect(commandForKey(key("2", "Digit2", altGr), false)).toEqual({ type: "style.set", style: "heading2" })
+		expect(commandForKey(key("2", "Digit2", { ctrlKey: true, altKey: true }), false)).toEqual({ type: "style.set", style: "heading2" })
 	})
 
 	it("redo with Mod+Y on every platform", () => {

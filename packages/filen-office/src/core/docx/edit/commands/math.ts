@@ -14,6 +14,10 @@ export const MATH_COMMANDS: readonly DocxCommandInfo<MathCommand["type"]>[] = [
 		type: "equation.insert",
 		labelKey: "docx.equation.insert",
 		icon: "equation",
+		// Word's Alt+= (Control+= in Word for Mac, where Option+= types a character): the host asks for the equation.
+		shortcut: "alt+equal",
+		appleShortcut: "ctrl+equal",
+		hostShortcut: true,
 		write: true,
 		scope: "story",
 		group: "equation",

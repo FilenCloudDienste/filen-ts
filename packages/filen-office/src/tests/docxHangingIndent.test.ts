@@ -1,7 +1,8 @@
 import { TextSelection } from "prosemirror-state"
 import { describe, expect, it } from "vitest"
 import { parseDocxEditorCommand, type DocxEditorSession } from "@filen/office/core/docx/edit"
-import { DOCX_KEY_BINDINGS, commandForKey, commandShortcut, type KeyLike } from "../core/docx/paged/keys"
+import type { KeyLike } from "../core/docx/paged/keys"
+import { commandForKey } from "./docxKeyHelpers"
 import { sessionOf } from "./docxEditFixtures"
 import { p } from "./docxSynthetic"
 
@@ -73,28 +74,5 @@ describe("hanging indent (Ctrl+T, Ctrl+Shift+T)", () => {
 
 		// Word for Mac's Control+Shift+T stays the TIME field.
 		expect(commandForKey(key("T", "KeyT", { ctrlKey: true, shiftKey: true }), true, true)?.type).toBe("insert.field")
-	})
-})
-
-describe("argument bindings' shortcuts", () => {
-	it("gives Word's line spacing keys to the menu items they run, in the desktop app", () => {
-		const spacing = (value: number) => ({ type: "paragraph.lineSpacing", rule: "auto", value }) as const
-
-		expect(commandShortcut(spacing(240), false, true)).toBe("mod+1")
-		expect(commandShortcut(spacing(480), true, true)).toBe("mod+2")
-		expect(commandShortcut(spacing(360), false, true)).toBe("mod+5")
-		expect(commandShortcut(spacing(276), false, true)).toBeUndefined()
-		expect(commandShortcut(spacing(240), false, false)).toBeUndefined()
-		expect(commandShortcut({ type: "paragraph.lineSpacing", rule: "exact", value: 240 }, false, true)).toBeUndefined()
-	})
-
-	it("finds every binding's own shortcut", () => {
-		for (const binding of DOCX_KEY_BINDINGS) {
-			for (const apple of [false, true]) {
-				expect(commandShortcut(binding.command, apple, true)).toBe(
-					apple ? (binding.appleShortcut ?? binding.shortcut) : binding.shortcut
-				)
-			}
-		}
 	})
 })

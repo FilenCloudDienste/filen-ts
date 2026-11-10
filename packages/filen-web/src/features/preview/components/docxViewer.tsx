@@ -1022,6 +1022,61 @@ function DocxPageList({
 		[state.find.open, dispatch]
 	)
 
+	// The Word editor's zoom and Go To keys, in the same layer; preventDefault only once the key is taken.
+	const pageInputRef = useRef<HTMLInputElement | null>(null)
+	const layerKey = (keyboardEvent: KeyboardEvent): boolean => {
+		const root = rootRef.current
+
+		if (root === null || !keyForEditor(root, keyboardEvent.target)) {
+			return false
+		}
+
+		keyboardEvent.preventDefault()
+
+		return true
+	}
+
+	useAction(
+		"docx.zoomIn",
+		keyboardEvent => {
+			if (layerKey(keyboardEvent)) {
+				dispatch({ type: "zoom.in" })
+			}
+		},
+		IN_EDITORS,
+		[dispatch]
+	)
+	useAction(
+		"docx.zoomOut",
+		keyboardEvent => {
+			if (layerKey(keyboardEvent)) {
+				dispatch({ type: "zoom.out" })
+			}
+		},
+		IN_EDITORS,
+		[dispatch]
+	)
+	useAction(
+		"docx.zoomReset",
+		keyboardEvent => {
+			if (layerKey(keyboardEvent)) {
+				dispatch({ type: "zoom.set", zoom: 1 })
+			}
+		},
+		IN_EDITORS,
+		[dispatch]
+	)
+	// Go To: the page number field, where a number and Enter go to that page.
+	useAction(
+		"docx.goTo",
+		keyboardEvent => {
+			if (pageInputRef.current !== null && layerKey(keyboardEvent)) {
+				pageInputRef.current.focus()
+			}
+		},
+		IN_EDITORS
+	)
+
 	const focusPages = (): void => {
 		wrapper?.querySelector<HTMLElement>(".fo-docx-pages")?.focus()
 	}
@@ -1065,6 +1120,7 @@ function DocxPageList({
 				onFindClosed={() => {
 					wrapper?.querySelector<HTMLElement>(".fo-docx-pages")?.focus()
 				}}
+				pageInputRef={pageInputRef}
 			/>
 			<div
 				ref={setWrapper}

@@ -91,7 +91,15 @@ function paragraphPos(editor: PagedEditor, index: number): number {
 }
 
 function key(view: EditorView, name: string, init: KeyboardEventInit = {}): void {
-	view.dom.dispatchEvent(new KeyboardEvent("keydown", { key: name, bubbles: true, cancelable: true, ...init }))
+	view.dom.dispatchEvent(
+		new KeyboardEvent("keydown", {
+			key: name,
+			code: name.length === 1 ? `Key${name.toUpperCase()}` : name,
+			bubbles: true,
+			cancelable: true,
+			...init
+		})
+	)
 }
 
 describe("node views", () => {
@@ -1717,7 +1725,7 @@ describe("DocxReflow", () => {
 
 		const view = scroller?.querySelector<HTMLElement>(".fo-docx-reflow-doc")
 
-		view?.dispatchEvent(new KeyboardEvent("keydown", { key: "f", ctrlKey: true, bubbles: true, cancelable: true }))
+		view?.dispatchEvent(new KeyboardEvent("keydown", { key: "f", code: "KeyF", ctrlKey: true, bubbles: true, cancelable: true }))
 
 		expect(onFind).toHaveBeenCalledTimes(1)
 	})
