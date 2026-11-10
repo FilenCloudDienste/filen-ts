@@ -80,6 +80,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
+import { MenuShortcut } from "@/components/ui/menuShortcut"
 import { keepFocus } from "@/features/office/lib/officeControls"
 import { OfficeRibbon, type RibbonGroup, type RibbonTab } from "@/features/office/components/ribbon/officeRibbon"
 import { RibbonButton, RibbonMenuTrigger } from "@/features/office/components/ribbon/ribbonControls"
@@ -282,6 +283,8 @@ interface MenuEntry {
 	readonly disabled?: boolean | undefined
 	readonly icon?: ReactNode
 	readonly checked?: boolean | undefined
+	// Its keys at the item's end (Kbd, KbdKeys).
+	readonly shortcut?: ReactNode
 }
 
 function CommandMenu({
@@ -323,6 +326,7 @@ function CommandMenu({
 						>
 							{entry.icon}
 							{entry.label}
+							{entry.shortcut === undefined ? null : <MenuShortcut>{entry.shortcut}</MenuShortcut>}
 						</DropdownMenuItem>
 					) : (
 						<DropdownMenuCheckboxItem
@@ -334,6 +338,7 @@ function CommandMenu({
 						>
 							{entry.icon}
 							{entry.label}
+							{entry.shortcut === undefined ? null : <MenuShortcut>{entry.shortcut}</MenuShortcut>}
 						</DropdownMenuCheckboxItem>
 					)
 				)}
@@ -596,22 +601,25 @@ export function SheetToolbar({ grid, disabled, formats, onFormat, actions, viewO
 			<Redo2Icon />
 		</TooltipIconButton>
 	]
+	const pasteKeys = <KbdKeys keys={[mac ? "⌘" : "Ctrl", "V"]} />
 	const clipboard = (
 		<>
 			<CommandMenu
 				label={t("previewSheetTouchPaste")}
 				icon={<ClipboardPasteIcon />}
 				disabled={noCells}
-				shortcut={<KbdKeys keys={[mac ? "⌘" : "Ctrl", "V"]} />}
+				shortcut={pasteKeys}
 				entries={[
 					{
 						label: t("previewSheetTouchPaste"),
+						shortcut: pasteKeys,
 						run: () => {
 							actions.paste(false)
 						}
 					},
 					{
 						label: t("previewSheetRibbonPasteValues"),
+						shortcut: keys("pasteValues"),
 						run: () => {
 							actions.paste(true)
 						}
@@ -650,12 +658,14 @@ export function SheetToolbar({ grid, disabled, formats, onFormat, actions, viewO
 			entries={[
 				{
 					label: t("previewSheetRibbonFind"),
+					shortcut: keys("find"),
 					run: () => {
 						openSheetFind(model, "find")
 					}
 				},
 				{
 					label: t("previewSheetRibbonReplace"),
+					shortcut: keys("replace"),
 					disabled: disabled,
 					run: () => {
 						openSheetFind(model, "replace")

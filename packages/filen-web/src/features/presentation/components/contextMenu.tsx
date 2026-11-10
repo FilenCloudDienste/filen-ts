@@ -54,6 +54,7 @@ import { usePresentationEditor } from "@/features/presentation/hooks/usePresenta
 import { presentationShortcutKeys } from "@/features/presentation/lib/keymap/editor"
 import type { ClipboardScope } from "@/features/presentation/lib/presentationClipboard"
 import { isMacPlatform } from "@/lib/keymap/kbd.logic"
+import { MenuShortcut } from "@/components/ui/menuShortcut"
 import { useKeyboardLayout } from "@/lib/keymap/layout"
 import { useBindings } from "@/lib/keymap/registry"
 
@@ -66,7 +67,7 @@ const MAC = isMacPlatform()
 
 // Plain text at the item's end, as shadcn's menu shortcut: a key chip on the glass menu over a slide is too faint.
 function Shortcut({ keys }: { keys: readonly string[] }) {
-	return <span className="ml-auto pl-4 text-xs tracking-widest text-muted-foreground">{keys.join(MAC ? "" : "+")}</span>
+	return <MenuShortcut className="text-xs tracking-widest text-muted-foreground">{keys.join(MAC ? "" : "+")}</MenuShortcut>
 }
 
 function LayoutSubItems({

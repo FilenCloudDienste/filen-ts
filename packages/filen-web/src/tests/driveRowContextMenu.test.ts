@@ -183,8 +183,17 @@ describe("New submenu", () => {
 		)
 	}
 
+	// The entries' labels without the listing's key hints.
 	function labels(): string[] {
-		return screen.getAllByRole("menuitem").map(entry => entry.textContent.trim())
+		return screen.getAllByRole("menuitem").map(entry => {
+			const label = entry.cloneNode(true) as HTMLElement
+
+			for (const hint of label.querySelectorAll("[data-slot=menu-shortcut]")) {
+				hint.remove()
+			}
+
+			return label.textContent.trim()
+		})
 	}
 
 	it("sits under Open, beside Paste, on a directory row, and points each entry at that directory", async () => {
@@ -258,7 +267,7 @@ describe("Move submenu", () => {
 		const move = await openMove()
 		expect(move.getAttribute("aria-haspopup")).toBe("menu")
 
-		fireEvent.click(screen.getByRole("menuitem", { name: "Choose destination…" }))
+		fireEvent.click(screen.getByRole("menuitem", { name: /^Choose destination…\s*drive\.move$/ }))
 		expect(onItemAction).toHaveBeenCalledExactlyOnceWith("move", item)
 	})
 
@@ -277,7 +286,7 @@ describe("Move submenu", () => {
 		const move = await openMove()
 		expect(move.getAttribute("aria-haspopup")).toBe("menu")
 
-		fireEvent.click(screen.getByRole("menuitem", { name: "Choose destination…" }))
+		fireEvent.click(screen.getByRole("menuitem", { name: /^Choose destination…\s*drive\.move$/ }))
 		expect(onBulkAction).toHaveBeenCalledExactlyOnceWith("move")
 	})
 

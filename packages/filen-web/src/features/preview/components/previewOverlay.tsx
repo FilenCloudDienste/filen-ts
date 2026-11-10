@@ -114,7 +114,8 @@ import {
 	itemKeyDialog,
 	pagerDelta,
 	pagerIntent,
-	previewOverlayKey
+	previewOverlayKey,
+	PREVIEW_ITEM_SHORTCUTS
 } from "@/features/preview/components/previewOverlay.logic"
 import { IMAGE_EDITOR_ACTIONS, PREVIEW_OVERLAY_ACTIONS, type PreviewOverlayAction } from "@/features/preview/lib/keymap"
 import { imageOverlayKey } from "@/features/preview/imageEdit/lib/keys"
@@ -142,6 +143,7 @@ import { MoveTargetDialog } from "@/features/drive/components/moveTargetDialog"
 import { ItemDialog, RenameItemDialog, TrashConfirmDialog } from "@/features/drive/components/itemDialogs"
 import { Button } from "@/components/ui/button"
 import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { Kbd } from "@/lib/keymap/kbd"
 import { Spinner } from "@/components/ui/spinner"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
@@ -1862,11 +1864,10 @@ export function PreviewOverlay({
 										{saving ? <Spinner className="size-4" /> : <SaveIcon />}
 									</TooltipIconButton>
 								) : null}
-								<Button
-									variant="ghost"
-									size="icon-sm"
+								<TooltipIconButton
+									label={t("previewPreviousAction")}
 									disabled={index <= 0 || saving}
-									aria-label={t("previewPreviousAction")}
+									shortcut={<Kbd action="preview.prev" />}
 									onClick={() => {
 										requestOrRun("prev", () => {
 											onStep(-1)
@@ -1874,12 +1875,11 @@ export function PreviewOverlay({
 									}}
 								>
 									<ChevronLeftIcon />
-								</Button>
-								<Button
-									variant="ghost"
-									size="icon-sm"
+								</TooltipIconButton>
+								<TooltipIconButton
+									label={t("previewNextAction")}
 									disabled={index >= items.length - 1 || saving}
-									aria-label={t("previewNextAction")}
+									shortcut={<Kbd action="preview.next" />}
 									onClick={() => {
 										requestOrRun("next", () => {
 											onStep(1)
@@ -1887,18 +1887,17 @@ export function PreviewOverlay({
 									}}
 								>
 									<ChevronRightIcon />
-								</Button>
+								</TooltipIconButton>
 								{download !== null ? (
-									<Button
-										variant="ghost"
-										size="icon-sm"
+									<TooltipIconButton
+										label={t("previewDownloadAction")}
 										disabled={!isOnline}
-										aria-label={t("previewDownloadAction")}
 										title={!isOnline ? t("common:offlineActionDisabled") : undefined}
+										shortcut={<Kbd action="preview.download" />}
 										onClick={download}
 									>
 										<DownloadIcon />
-									</Button>
+									</TooltipIconButton>
 								) : null}
 								{/* Never for a chat/note embed's fabricated linked-file item (isLinkedEmbedItem). Same
 						descriptor list + dropdown renderer the tile/row faces' own ⋯ trigger uses (itemMenu.tsx),
@@ -1939,20 +1938,31 @@ export function PreviewOverlay({
 												previewDownloadable(downloadable, variant)
 											)}
 											compressParentNaming={compressParentNaming}
+											shortcuts={PREVIEW_ITEM_SHORTCUTS}
 										/>
 									</DropdownMenu>
 								) : null}
-								<DialogPrimitive.Close
-									render={
-										<Button
-											variant="ghost"
-											size="icon-sm"
-											aria-label={t("common:close")}
-										/>
-									}
-								>
-									<XIcon />
-								</DialogPrimitive.Close>
+								<Tooltip>
+									<TooltipTrigger
+										render={
+											<DialogPrimitive.Close
+												render={
+													<Button
+														variant="ghost"
+														size="icon-sm"
+														aria-label={t("common:close")}
+													/>
+												}
+											>
+												<XIcon />
+											</DialogPrimitive.Close>
+										}
+									/>
+									<TooltipContent>
+										{t("common:close")}
+										<Kbd action="preview.close" />
+									</TooltipContent>
+								</Tooltip>
 							</>
 						)}
 					</header>

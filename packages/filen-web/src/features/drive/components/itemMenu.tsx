@@ -17,11 +17,15 @@ import {
 	applyOfflineGate,
 	canWriteIntoItem,
 	driveItemActions,
+	itemMenuShortcut,
 	separatorBefore,
 	type ItemActionDescriptor,
 	type ItemActionDialogKind,
-	type ItemActionId
+	type ItemActionId,
+	type ItemMenuShortcuts
 } from "@/features/drive/components/itemMenu.logic"
+import { driveBulkActions, driveDeleteKeyTarget } from "@/features/drive/components/bulkActionBar.logic"
+import { aggregateDriveSelectionFlags } from "@/features/drive/lib/selectionFlags"
 import {
 	CONTEXT_TREE_MENU_FAMILY,
 	DROPDOWN_TREE_MENU_FAMILY,
@@ -33,6 +37,7 @@ import { DownloadAsSubmenu } from "@/features/drive/components/downloadAsSubmenu
 import { DirectoryDestinationEntries, type DestinationActions } from "@/features/drive/components/destinationMenu"
 import { ContextMenuContent } from "@/components/ui/context-menu"
 import { DropdownMenuContent } from "@/components/ui/dropdown-menu"
+import { MenuKbd } from "@/lib/keymap/kbdHints"
 
 export interface ItemMenuContentProps {
 	item: DriveItem
@@ -60,6 +65,9 @@ export interface ItemMenuContentProps {
 	// The surface's create/upload host. Present, a directory the variant can write into gets a New
 	// submenu and Paste right under Open; the preview overlay omits it.
 	destination?: ItemDestination | undefined
+	// The keys the surface's keymap runs each entry with, shown at the entries' ends; none where the surface has no keys
+	// of its own for its items (the sidebar tree).
+	shortcuts?: ItemMenuShortcuts | undefined
 }
 
 export interface ItemDestination {
@@ -89,6 +97,7 @@ function ItemMenuEntries({
 	searchHit,
 	onOpen,
 	destination,
+	shortcuts,
 	family
 }: ItemMenuContentProps & { family: DirectoryTreeMenuFamily }) {
 	const { t } = useTranslation(["drive", "common"])
@@ -100,6 +109,9 @@ function ItemMenuEntries({
 	).filter(descriptor => !hiddenActionIds?.has(descriptor.id))
 	const { Item, Separator } = family
 	const writableDestination = destination !== undefined && canWriteIntoItem(item, variant) ? destination : undefined
+	// What the surface's Delete runs on this item, as on a selection of it (only worked out where Delete has a hint).
+	const deleteTarget =
+		shortcuts?.deleteKey === undefined ? null : driveDeleteKeyTarget(driveBulkActions(variant, aggregateDriveSelectionFlags([item])))
 
 	async function runDirect(descriptor: Extract<ItemActionDescriptor, { run: "direct" }>): Promise<void> {
 		// Checked FIRST, before any `await` below — startDownloads' FSA save picker needs this
@@ -163,6 +175,8 @@ function ItemMenuEntries({
 							onChooseDestination={mode => {
 								onItemAction(mode, item)
 							}}
+							clipboardShortcut={descriptor.id === "copy" ? shortcuts?.copyToClipboard : undefined}
+							destinationShortcut={itemMenuShortcut(shortcuts, descriptor.id, deleteTarget)}
 						/>
 					) : descriptor.id === "compress" ? (
 						<CompressSubmenu
@@ -224,6 +238,7 @@ function ItemMenuEntries({
 						>
 							{createElement(descriptor.icon, { "aria-hidden": true })}
 							{t(descriptor.labelKey)}
+							<MenuKbd action={itemMenuShortcut(shortcuts, descriptor.id, deleteTarget)} />
 						</Item>
 					)}
 					{descriptor.id === "open" && writableDestination !== undefined ? (
@@ -252,7 +267,8 @@ export function DriveContextMenuContent({
 	compressParentNaming,
 	searchHit,
 	onOpen,
-	destination
+	destination,
+	shortcuts
 }: ItemMenuContentProps) {
 	return (
 		<ContextMenuContent>
@@ -267,6 +283,7 @@ export function DriveContextMenuContent({
 				searchHit={searchHit}
 				onOpen={onOpen}
 				destination={destination}
+				shortcuts={shortcuts}
 				family={CONTEXT_TREE_MENU_FAMILY}
 			/>
 		</ContextMenuContent>
@@ -285,7 +302,8 @@ export function DriveDropdownMenuContent({
 	compressParentNaming,
 	searchHit,
 	onOpen,
-	destination
+	destination,
+	shortcuts
 }: ItemMenuContentProps) {
 	return (
 		<DropdownMenuContent align="end">
@@ -300,6 +318,7 @@ export function DriveDropdownMenuContent({
 				searchHit={searchHit}
 				onOpen={onOpen}
 				destination={destination}
+				shortcuts={shortcuts}
 				family={DROPDOWN_TREE_MENU_FAMILY}
 			/>
 		</DropdownMenuContent>

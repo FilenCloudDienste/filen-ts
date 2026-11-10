@@ -10,8 +10,7 @@ import type { LegacySaveCopy } from "@/features/presentation/components/legacyVi
 import { saveOfficeAutosave, useOfficeSettings } from "@/features/office/lib/officeSettings"
 import { usePresentationEditor, type PresentationTextFlush } from "@/features/presentation/hooks/usePresentationSession"
 import { usePreviewDownload } from "@/features/preview/lib/accessMode"
-import { KbdKeys } from "@/lib/keymap/kbd"
-import { isMacPlatform } from "@/lib/keymap/kbd.logic"
+import { MenuKbd } from "@/lib/keymap/kbdHints"
 import { useIsOnline } from "@/lib/useIsOnline"
 
 // What the presentation File menu's entry files are given (the menu, presentationFileMenu.tsx, lists them in order).
@@ -35,9 +34,7 @@ export interface PresentationFileMenuEntryProps {
 	readonly context: PresentationFileMenuContext
 }
 
-const SAVE_KEYS = [isMacPlatform() ? "⌘" : "Ctrl", "S"]
-
-// Save (the overlay's save, Mod+S) and Download (the file as the drive has it).
+// Save (the overlay's save, preview.save's keys) and Download (the file as the drive has it).
 export function PresentationSaveEntries({ context }: PresentationFileMenuEntryProps): ReactNode {
 	const { t } = useTranslation("preview")
 	const scope = usePresentationEditor()
@@ -58,9 +55,7 @@ export function PresentationSaveEntries({ context }: PresentationFileMenuEntryPr
 				>
 					<SaveIcon />
 					{t("previewPptxEditorSave")}
-					<span className="ml-auto pl-4">
-						<KbdKeys keys={SAVE_KEYS} />
-					</span>
+					<MenuKbd action="preview.save" />
 				</DropdownMenuItem>
 			)}
 			{download === null || !context.downloads ? null : (

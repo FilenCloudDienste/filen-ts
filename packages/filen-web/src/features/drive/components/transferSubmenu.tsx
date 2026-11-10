@@ -3,7 +3,7 @@ import { ClipboardCopyIcon, FolderSearchIcon, ScissorsIcon } from "lucide-react"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { ACTION_DEFS } from "@/features/drive/lib/actionDefs"
 import { copyToClipboard, cutToClipboard } from "@/features/drive/lib/clipboard"
-import { Kbd } from "@/lib/keymap/kbd"
+import { MenuKbd } from "@/lib/keymap/kbdHints"
 import { performMove } from "@/features/drive/lib/dnd"
 import { cachedDirectoryName, cachedListing } from "@/features/drive/queries/drive"
 import { useIsOnline } from "@/lib/useIsOnline"
@@ -25,6 +25,10 @@ export interface TransferSubmenuProps {
 	items: DriveItem[]
 	// Opens the full destination picker (moveTargetDialog.tsx) in this mode on the same items.
 	onChooseDestination: (mode: TransferMode) => void
+	// The actions whose keys the clipboard entry (the drive listing's cut or copy otherwise) and the destination picker
+	// show, where the surface's keys run them.
+	clipboardShortcut?: string | undefined
+	destinationShortcut?: string | undefined
 }
 
 // The picked directory's name for the move's activity and the copy's card, from the listing its level
@@ -69,7 +73,14 @@ function readDriveListing(uuid: string | null): DriveItem[] | undefined {
 // "Move" or "Copy" as a submenu: the clipboard entry (for a later paste), the destination picker, then
 // the Cloud Drive tree for moving or copying in one pick. The tree greys out exactly what the dialog
 // would; unlike a move, a copy may land in the source's own directory (the copy gets a free name there).
-export function TransferSubmenu({ mode, family, items, onChooseDestination }: TransferSubmenuProps) {
+export function TransferSubmenu({
+	mode,
+	family,
+	items,
+	onChooseDestination,
+	clipboardShortcut,
+	destinationShortcut
+}: TransferSubmenuProps) {
 	const { t } = useTranslation(["drive", "common"])
 	// Offline the submenu still opens for its clipboard entry; only the destinations need the network.
 	const isOnline = useIsOnline()
@@ -91,9 +102,7 @@ export function TransferSubmenu({ mode, family, items, onChooseDestination }: Tr
 					>
 						<config.ClipboardIcon aria-hidden="true" />
 						{t(config.clipboardLabelKey)}
-						<span className="ml-auto pl-4">
-							<Kbd action={config.kbdAction} />
-						</span>
+						<MenuKbd action={clipboardShortcut ?? config.kbdAction} />
 					</Item>
 					<Item
 						disabled={!isOnline}
@@ -104,6 +113,7 @@ export function TransferSubmenu({ mode, family, items, onChooseDestination }: Tr
 					>
 						<FolderSearchIcon aria-hidden="true" />
 						{t("driveMoveChooseDestination")}
+						<MenuKbd action={destinationShortcut} />
 					</Item>
 				</>
 			}

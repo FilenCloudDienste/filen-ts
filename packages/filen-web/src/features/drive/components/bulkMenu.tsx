@@ -6,6 +6,8 @@ import { aggregateDriveSelectionFlags } from "@/features/drive/lib/selectionFlag
 import { useIsOnline } from "@/lib/useIsOnline"
 import {
 	driveBulkActions,
+	driveBulkKbdAction,
+	driveDeleteKeyTarget,
 	isBulkActionOfflineDisabled,
 	runBulkDescriptor,
 	type BulkDialogActionKind
@@ -15,7 +17,8 @@ import { TransferSubmenu } from "@/features/drive/components/transferSubmenu"
 import { BulkExtractSubmenu, CompressSubmenu } from "@/features/drive/components/archiveSubmenus"
 import { DownloadAsSubmenu } from "@/features/drive/components/downloadAsSubmenu"
 import { DriveContextMenuContent, type ItemDestination } from "@/features/drive/components/itemMenu"
-import { type ItemActionDialogKind } from "@/features/drive/components/itemMenu.logic"
+import { DRIVE_ITEM_SHORTCUTS, type ItemActionDialogKind } from "@/features/drive/components/itemMenu.logic"
+import { MenuKbd } from "@/lib/keymap/kbdHints"
 import { ContextMenuContent, ContextMenuItem } from "@/components/ui/context-menu"
 
 export interface DriveBulkMenuProps {
@@ -35,6 +38,7 @@ export function DriveBulkContextMenuContent({ variant, selectedItems, onBulkActi
 	const { t } = useTranslation(["drive", "common"])
 	const isOnline = useIsOnline()
 	const descriptors = driveBulkActions(variant, aggregateDriveSelectionFlags(selectedItems))
+	const deleteKeyTarget = driveDeleteKeyTarget(descriptors)
 
 	return (
 		<ContextMenuContent>
@@ -51,6 +55,7 @@ export function DriveBulkContextMenuContent({ variant, selectedItems, onBulkActi
 							family={CONTEXT_TREE_MENU_FAMILY}
 							items={selectedItems}
 							onChooseDestination={onBulkAction}
+							destinationShortcut={driveBulkKbdAction(descriptor.id, deleteKeyTarget)}
 						/>
 					)
 				}
@@ -108,6 +113,7 @@ export function DriveBulkContextMenuContent({ variant, selectedItems, onBulkActi
 					>
 						{createElement(descriptor.icon, { "aria-hidden": true })}
 						{t(descriptor.labelKey)}
+						<MenuKbd action={driveBulkKbdAction(descriptor.id, deleteKeyTarget)} />
 					</ContextMenuItem>
 				)
 			})}
@@ -151,6 +157,7 @@ export function DriveCellContextMenuContent({
 			searchHit={searchHit}
 			onOpen={onOpen}
 			destination={destination}
+			shortcuts={DRIVE_ITEM_SHORTCUTS}
 		/>
 	)
 }

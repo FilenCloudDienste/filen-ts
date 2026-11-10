@@ -211,12 +211,12 @@ export const previewPptxArrange = {
 	previewPptxSelectionHideAll: "Hide All",
 	/** Selection Pane — accessible name of the list of the slide's objects */
 	previewPptxSelectionList: "Objects on this slide",
-	/** Selection Pane — accessible description of the list: its keyboard commands. {{forward}} and {{backward}} are the user's keys for bring forward and send backward (e.g. "Ctrl+] / Ctrl+Shift+F") */
+	/** Selection Pane — accessible description of the list: its keyboard commands. {{add}} and {{visibility}} are the keys that add to the selection and show or hide (e.g. "Ctrl+Space", "⌘⇧S"); {{forward}} and {{backward}} the user's keys for bring forward and send backward (e.g. "Ctrl+] / Ctrl+Shift+F") */
 	previewPptxSelectionKeysOrder:
-		"Front-most object first. Arrow keys move between objects, Left and Right collapse and expand groups. Space selects, Ctrl+Space adds to the selection. F2 renames, Ctrl+Shift+S shows or hides, {{forward}} brings forward and {{backward}} sends backward. Escape returns to the slide.",
-	/** Selection Pane — accessible description of the list: its keyboard commands, when bring forward or send backward has no key */
+		"Front-most object first. Arrow keys move between objects, Left and Right collapse and expand groups. Space selects, {{add}} adds to the selection. F2 renames, {{visibility}} shows or hides, {{forward}} brings forward and {{backward}} sends backward. Escape returns to the slide.",
+	/** Selection Pane — accessible description of the list: its keyboard commands, when bring forward or send backward has no key. {{add}} and {{visibility}} are the keys that add to the selection and show or hide (e.g. "Ctrl+Space", "⌘⇧S") */
 	previewPptxSelectionKeysNoOrder:
-		"Front-most object first. Arrow keys move between objects, Left and Right collapse and expand groups. Space selects, Ctrl+Space adds to the selection. F2 renames, Ctrl+Shift+S shows or hides. Escape returns to the slide.",
+		"Front-most object first. Arrow keys move between objects, Left and Right collapse and expand groups. Space selects, {{add}} adds to the selection. F2 renames, {{visibility}} shows or hides. Escape returns to the slide.",
 	/** Selection Pane — the slide has no objects to list */
 	previewPptxSelectionEmpty: "There are no objects on this slide.",
 	/** Selection Pane — shown while the slide's objects are being read */

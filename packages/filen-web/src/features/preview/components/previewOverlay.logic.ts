@@ -3,7 +3,12 @@
 // project's DOM-free vitest environment (vitest.config.ts: environment "node", no jsdom/happy-dom).
 
 import { matchesCombo, type ChordEvent } from "@filen/shared/keymap"
-import { type ItemActionDescriptor, type ItemActionDialogKind, type ItemActionId } from "@/features/drive/components/itemMenu.logic"
+import {
+	type ItemActionDescriptor,
+	type ItemActionDialogKind,
+	type ItemActionId,
+	type ItemMenuShortcuts
+} from "@/features/drive/components/itemMenu.logic"
 import { PREVIEW_OVERLAY_ACTIONS, type PreviewOverlayAction } from "@/features/preview/lib/keymap"
 import { bindingOf } from "@/lib/keymap/bindingOf"
 import { hasClosest } from "@/lib/domTarget"
@@ -112,6 +117,15 @@ const ITEM_KEY_ACTIONS: Readonly<Partial<Record<PreviewOverlayAction, ItemAction
 	"preview.info": "info",
 	"preview.share": "share",
 	"preview.trash": "trash"
+}
+
+// The overlay's keys on its file's ⋯ menu entries: the ones above, and favorite (a direct entry, run by the overlay).
+export const PREVIEW_ITEM_SHORTCUTS: ItemMenuShortcuts = {
+	entries: {
+		...Object.fromEntries(Object.entries(ITEM_KEY_ACTIONS).map(([action, id]) => [id, action])),
+		favorite: "preview.favorite",
+		download: "preview.download"
+	}
 }
 
 // The dialog an item-menu key opens, where the file's menu offers that entry enabled (`descriptors`, as the menu lists

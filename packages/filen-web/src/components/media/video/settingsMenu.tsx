@@ -18,6 +18,7 @@ import { PLAYBACK_RATES } from "@/lib/media/videoKeys.logic"
 import { setPlaybackRate, useMediaPlaybackRate } from "@/lib/media/useMediaState"
 import { StageTooltip } from "@/components/media/video/stageButton"
 import { Kbd } from "@/lib/keymap/kbd"
+import { MenuShortcut } from "@/components/ui/menuShortcut"
 import { STAGE_POPUP_TONE_CLASS, useStagePopupOpen, useVideoStageContainer } from "@/components/media/video/stageContext"
 
 // The gear: playback speed, then whatever the caller adds (subtitle style and delay; on a phone also the
@@ -102,24 +103,18 @@ export function StageSettingsMenu({
 						disabled={item.disabled}
 						onClick={item.onSelect}
 					>
-						<span className="flex-1">{item.label}</span>
-						{item.shortcuts === undefined ? null : <ShortcutHint actions={item.shortcuts} />}
+						{item.label}
+						<MenuShortcut className="gap-1">
+							{item.shortcuts?.map(action => (
+								<Kbd
+									key={action}
+									action={action}
+								/>
+							))}
+						</MenuShortcut>
 					</DropdownMenuItem>
 				))}
 			</DropdownMenuContent>
 		</DropdownMenu>
-	)
-}
-
-function ShortcutHint({ actions }: { actions: readonly string[] }) {
-	return (
-		<span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-			{actions.map(action => (
-				<Kbd
-					key={action}
-					action={action}
-				/>
-			))}
-		</span>
 	)
 }

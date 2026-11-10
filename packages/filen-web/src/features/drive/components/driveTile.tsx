@@ -2,6 +2,7 @@ import { useTranslation } from "react-i18next"
 import { CheckIcon, PlayIcon, StarIcon } from "lucide-react"
 import { ItemThumbnail } from "@/features/drive/components/itemThumbnail"
 import { DriveDropdownMenuContent } from "@/features/drive/components/itemMenu"
+import { DRIVE_ITEM_SHORTCUTS } from "@/features/drive/components/itemMenu.logic"
 import { DriveCellContextMenuContent } from "@/features/drive/components/bulkMenu"
 import { showVideoBadge } from "@/features/drive/components/driveTile.logic"
 import { useFileKindVerdict } from "@/features/drive/hooks/useFileKindVerdict"
@@ -156,6 +157,7 @@ export function DriveTile({
 									searchHit={searchHit}
 									onOpen={open}
 									destination={destination}
+									shortcuts={DRIVE_ITEM_SHORTCUTS}
 								/>
 							</DropdownMenu>
 						</div>

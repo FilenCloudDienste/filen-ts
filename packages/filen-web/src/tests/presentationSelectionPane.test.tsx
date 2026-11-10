@@ -149,6 +149,21 @@ describe("the Selection Pane", () => {
 		expect(screen.getByRole("heading", { name: "Selection" })).toBeDefined()
 	})
 
+	it("describes its keys in this platform's spelling, the stacking ones as bound", async () => {
+		mount()
+
+		await waitFor(() => {
+			expect(names().length).toBeGreaterThan(0)
+		})
+
+		const help = document.getElementById(tree().getAttribute("aria-describedby") ?? "")?.textContent ?? ""
+
+		// Off a Mac, Mod is Ctrl; nothing is left hardcoded for a Mac's Command.
+		expect(help).toContain("Space selects, Ctrl+Space adds to the selection.")
+		expect(help).toContain("F2 renames, Ctrl+Shift+S shows or hides")
+		expect(help).not.toContain("{{")
+	})
+
 	it("is asked again only for a new render of the slide, and not at all while closed", async () => {
 		const m = mount()
 

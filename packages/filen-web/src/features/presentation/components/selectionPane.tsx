@@ -93,14 +93,21 @@ function keysText(combo: string): string {
 		.join(" / ")
 }
 
-// The list's keyboard help, with the stacking keys in effect (left out when either is unbound).
+// The pane's own keys (Mod: Ctrl, or Cmd on a Mac), as the list's keydown reads them.
+const ADD_KEYS = "mod+space"
+const VISIBILITY_KEYS = "mod+shift+s"
+
+// The list's keyboard help, in this platform's glyphs, with the stacking keys in effect (left out when either is
+// unbound).
 function selectionKeysHelp(t: TFunction<"preview">, bindings: ObjectKeyBindings): string {
 	const forward = keysText(bindings.bringForward)
 	const backward = keysText(bindings.sendBackward)
+	const add = keysText(ADD_KEYS)
+	const visibility = keysText(VISIBILITY_KEYS)
 
 	return forward === "" || backward === ""
-		? t("previewPptxSelectionKeysNoOrder")
-		: t("previewPptxSelectionKeysOrder", { forward, backward })
+		? t("previewPptxSelectionKeysNoOrder", { add, visibility })
+		: t("previewPptxSelectionKeysOrder", { add, visibility, forward, backward })
 }
 
 function rowElement(target: EventTarget | null): HTMLElement | null {

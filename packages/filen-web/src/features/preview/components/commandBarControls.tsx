@@ -27,6 +27,7 @@ import { useCommandMenuFocus } from "@/features/preview/components/docxInsert.lo
 import { keepFocus } from "@/features/office/lib/officeControls"
 import { fullscreenSupported, useIsFullscreen } from "@/lib/media/fullscreen"
 import { log } from "@/lib/log"
+import { MenuKbd } from "@/lib/keymap/kbdHints"
 
 // The controls the document viewers' command bars share (OfficeCommandBar): the File menu's button, page
 // navigation with a page number field, zoom with its menu of steps and fits, and full screen.
@@ -173,6 +174,9 @@ export function PageControls({
 	)
 }
 
+// The action whose keys each fit of a zoom menu shows, where the viewer binds one.
+export type FitShortcuts = Readonly<Partial<Record<ZoomFit, string>>>
+
 // − / the zoom menu (steps, then the fits a viewer offers) / +.
 export function ZoomControls({
 	percent,
@@ -186,7 +190,8 @@ export function ZoomControls({
 	onPercent,
 	onFit,
 	inShortcut,
-	outShortcut
+	outShortcut,
+	fitShortcuts
 }: {
 	percent: number
 	presets: readonly number[]
@@ -202,6 +207,8 @@ export function ZoomControls({
 	// The zoom keys, in the buttons' tooltips.
 	inShortcut?: ReactNode
 	outShortcut?: ReactNode
+	// The fits' actions, whose keys the menu's fit entries show.
+	fitShortcuts?: FitShortcuts | undefined
 }) {
 	const { t } = useTranslation("preview")
 
@@ -225,6 +232,7 @@ export function ZoomControls({
 					presets={presets}
 					fits={fits}
 					mode={mode}
+					fitShortcuts={fitShortcuts}
 					onPercent={onPercent}
 					onFit={onFit}
 				/>
@@ -248,7 +256,8 @@ export function StatusZoomMenu({
 	fits,
 	mode,
 	onPercent,
-	onFit
+	onFit,
+	fitShortcuts
 }: {
 	percent: number
 	presets: readonly number[]
@@ -256,6 +265,7 @@ export function StatusZoomMenu({
 	mode: ZoomFit | "custom"
 	onPercent: (percent: number) => void
 	onFit: (fit: ZoomFit) => void
+	fitShortcuts?: FitShortcuts | undefined
 }) {
 	const { t } = useTranslation("preview")
 	const focus = useCommandMenuFocus()
@@ -280,6 +290,7 @@ export function StatusZoomMenu({
 				presets={presets}
 				fits={fits}
 				mode={mode}
+				fitShortcuts={fitShortcuts}
 				finalFocus={focus.finalFocus}
 				onPercent={next => {
 					focus.kept()
@@ -303,7 +314,8 @@ export function ZoomMenuContent({
 	mode,
 	onPercent,
 	onFit,
-	finalFocus
+	finalFocus,
+	fitShortcuts
 }: {
 	percent: number
 	presets: readonly number[]
@@ -312,6 +324,7 @@ export function ZoomMenuContent({
 	onPercent: (percent: number) => void
 	onFit: (fit: ZoomFit) => void
 	finalFocus?: () => HTMLElement | boolean
+	fitShortcuts?: FitShortcuts | undefined
 }) {
 	const { t } = useTranslation("preview")
 	const value = mode === "custom" ? String(percent) : mode
@@ -350,6 +363,7 @@ export function ZoomMenuContent({
 						closeOnClick
 					>
 						{t(fit === "fitWidth" ? "previewDocxFitWidth" : "previewCommandBarFitPage")}
+						<MenuKbd action={fitShortcuts?.[fit]} />
 					</DropdownMenuRadioItem>
 				))}
 			</DropdownMenuRadioGroup>

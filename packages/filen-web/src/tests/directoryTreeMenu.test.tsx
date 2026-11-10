@@ -172,6 +172,20 @@ function menuEntries(): string[] {
 	return screen.getAllByRole("menuitem").map(entry => entry.textContent.trim())
 }
 
+// An entry's label without its key hint (a listing row's menu shows the listing's keys; the tree has none of its own
+// but Paste's).
+function menuLabels(): string[] {
+	return screen.getAllByRole("menuitem").map(entry => {
+		const label = entry.cloneNode(true) as HTMLElement
+
+		for (const hint of label.querySelectorAll("[data-slot=menu-shortcut]")) {
+			hint.remove()
+		}
+
+		return label.textContent.trim()
+	})
+}
+
 function entry(name: string): HTMLElement {
 	const match = screen.getAllByRole("menuitem").find(item => item.textContent.trim().startsWith(name))
 
@@ -248,7 +262,7 @@ describe("sidebar tree menu", () => {
 			})
 		)
 		await openMenuOn(screen.getByRole("option"))
-		const rowEntries = menuEntries()
+		const rowEntries = menuLabels()
 		cleanup()
 
 		renderTree()

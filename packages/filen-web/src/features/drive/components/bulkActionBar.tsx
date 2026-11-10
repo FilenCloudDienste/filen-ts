@@ -5,13 +5,12 @@ import { aggregateDriveSelectionFlags } from "@/features/drive/lib/selectionFlag
 import { useDriveStore } from "@/features/drive/store/useDriveStore"
 import {
 	driveBulkActions,
+	driveBulkKbdAction,
 	driveDeleteKeyTarget,
 	isBulkActionOfflineDisabled,
 	isBulkDownloadEnabled,
 	runBulkDescriptor,
-	type BulkActionDescriptor,
-	type BulkDialogActionKind,
-	type DriveDeleteKeyTarget
+	type BulkDialogActionKind
 } from "@/features/drive/components/bulkActionBar.logic"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { DROPDOWN_TREE_MENU_FAMILY } from "@/features/drive/components/directoryTreeSubmenu"
@@ -23,25 +22,6 @@ export interface BulkActionBarProps {
 	variant: DriveVariant
 	selectedItems: DriveItem[]
 	onDialogAction: (kind: BulkDialogActionKind) => void
-}
-
-// Descriptors with a registered keyboard shortcut surface it in their tooltip alongside the label. The Delete key's
-// (drive.trash) goes on whichever of them it runs here (driveDeleteKeyTarget).
-const KEYMAP_ACTION_FOR: Partial<Record<BulkActionDescriptor["id"], string>> = {
-	favorite: "drive.toggleFavorite",
-	move: "drive.move",
-	copy: "drive.copyTo",
-	compress: "drive.compress",
-	extract: "drive.extract",
-	share: "drive.share",
-	download: "drive.download",
-	downloadAs: "drive.downloadAs",
-	restoreSelected: "drive.restore",
-	delete: "drive.deletePermanently"
-}
-
-function kbdActionFor(id: BulkActionDescriptor["id"], deleteKeyTarget: DriveDeleteKeyTarget | null): string | undefined {
-	return id === deleteKeyTarget ? "drive.trash" : KEYMAP_ACTION_FOR[id]
 }
 
 // Bottom-anchored floating selection bar (directoryListing.tsx overlays it on the listing container
@@ -79,7 +59,7 @@ export function BulkActionBar({ variant, selectedItems, onDialogAction }: BulkAc
 							label={t(descriptor.labelKey)}
 							disabled={disabled}
 							disabledReason={disabledReason}
-							kbdAction={KEYMAP_ACTION_FOR[descriptor.id]}
+							kbdAction={driveBulkKbdAction(descriptor.id, deleteKeyTarget)}
 						>
 							<DownloadAsEntries
 								family={DROPDOWN_TREE_MENU_FAMILY}
@@ -97,7 +77,7 @@ export function BulkActionBar({ variant, selectedItems, onDialogAction }: BulkAc
 							label={t(descriptor.labelKey)}
 							disabled={disabled}
 							disabledReason={disabledReason}
-							kbdAction={KEYMAP_ACTION_FOR[descriptor.id]}
+							kbdAction={driveBulkKbdAction(descriptor.id, deleteKeyTarget)}
 						>
 							{descriptor.id === "compress" ? (
 								<CompressMenuEntries
@@ -130,7 +110,7 @@ export function BulkActionBar({ variant, selectedItems, onDialogAction }: BulkAc
 						destructive={descriptor.destructive}
 						disabled={disabled}
 						disabledReason={disabledReason}
-						kbdAction={kbdActionFor(descriptor.id, deleteKeyTarget)}
+						kbdAction={driveBulkKbdAction(descriptor.id, deleteKeyTarget)}
 						onClick={() => {
 							runBulkDescriptor(descriptor, selectedItems, onDialogAction)
 						}}

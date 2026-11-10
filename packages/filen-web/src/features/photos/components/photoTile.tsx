@@ -7,7 +7,7 @@ import { useFileKindVerdict } from "@/features/drive/hooks/useFileKindVerdict"
 import { ItemThumbnail } from "@/features/drive/components/itemThumbnail"
 import { DriveContextMenuContent, DriveDropdownMenuContent } from "@/features/drive/components/itemMenu"
 import { patchPhoto } from "@/features/photos/lib/actions"
-import { PHOTOS_HIDDEN_ACTION_IDS, photosParentNaming } from "@/features/photos/lib/itemActions"
+import { PHOTOS_HIDDEN_ACTION_IDS, PHOTOS_ITEM_SHORTCUTS, photosParentNaming } from "@/features/photos/lib/itemActions"
 import { type PhotoItem } from "@/features/photos/lib/captureSort"
 import { driveItemName } from "@filen/shared"
 import { ContextMenu, ContextMenuTrigger } from "@/components/ui/context-menu"
@@ -133,6 +133,7 @@ export function PhotoTile({
 									item={item}
 									variant="drive"
 									hiddenActionIds={PHOTOS_HIDDEN_ACTION_IDS}
+									shortcuts={PHOTOS_ITEM_SHORTCUTS}
 									compressParentNaming={compressParentNaming}
 									onItemAction={kind => {
 										onItemAction(kind, item)
@@ -150,6 +151,7 @@ export function PhotoTile({
 				item={item}
 				variant="drive"
 				hiddenActionIds={PHOTOS_HIDDEN_ACTION_IDS}
+				shortcuts={PHOTOS_ITEM_SHORTCUTS}
 				compressParentNaming={compressParentNaming}
 				onItemAction={kind => {
 					onItemAction(kind, item)

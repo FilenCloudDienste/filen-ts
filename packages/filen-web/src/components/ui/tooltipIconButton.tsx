@@ -14,6 +14,8 @@ export function TooltipIconButton(props: {
 	pressed?: boolean | undefined
 	variant?: ButtonProps["variant"]
 	className?: string | undefined
+	// Why a disabled button is (the tooltip never opens over one).
+	title?: string | undefined
 	shortcut?: ReactNode
 	children: ReactNode
 }) {
@@ -28,6 +30,7 @@ export function TooltipIconButton(props: {
 						aria-pressed={props.pressed}
 						disabled={props.disabled}
 						className={props.className}
+						title={props.title}
 						onMouseDown={props.onMouseDown}
 						onClick={props.onClick}
 					>

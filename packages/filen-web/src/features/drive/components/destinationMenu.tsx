@@ -17,7 +17,7 @@ import { useDirectoryPaste } from "@/features/drive/hooks/useDirectoryPaste"
 import { type DirectoryTreeMenuFamily } from "@/features/drive/components/directoryTreeSubmenu"
 import { type NewOfficeKind } from "@/features/drive/lib/createOfficeFile"
 import { useIsOnline } from "@/lib/useIsOnline"
-import { Kbd } from "@/lib/keymap/kbd"
+import { MenuKbd } from "@/lib/keymap/kbdHints"
 
 // What can be put into a directory. newDirectory is absent where a surface has its own New directory
 // control beside the menu (the toolbar's Upload menu).
@@ -199,11 +199,7 @@ export function DestinationPasteItem({ family, paste }: { family: DirectoryTreeM
 		>
 			<ClipboardPasteIcon aria-hidden="true" />
 			{t("driveClipboardPaste")}
-			{paste.shortcut ? (
-				<span className="ml-auto pl-4">
-					<Kbd action="drive.paste" />
-				</span>
-			) : null}
+			<MenuKbd action={paste.shortcut ? "drive.paste" : undefined} />
 		</Item>
 	)
 }

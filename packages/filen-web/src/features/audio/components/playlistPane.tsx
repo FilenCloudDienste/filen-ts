@@ -24,6 +24,7 @@ import { errorLabel } from "@/lib/i18n/errorLabel"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { cn } from "@filen/shared"
 import { Button } from "@/components/ui/button"
+import { KeyTooltip } from "@/lib/keymap/kbdHints"
 import { Spinner } from "@/components/ui/spinner"
 import { Skeleton } from "@/components/ui/skeleton"
 import { DropdownMenu, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
@@ -133,35 +134,50 @@ export function PlaylistPane({ playlist }: { playlist: Playlist }) {
 						<PlaylistUpdated updated={playlist.updated} />
 					</p>
 					<div className="mt-3 flex flex-wrap items-center gap-2">
-						<Button
-							disabled={!hasTracks}
-							onClick={() => {
-								startPlaylist(playlist, 0)
-							}}
+						<KeyTooltip
+							action="playlists.play"
+							label={t("play")}
 						>
-							<PlayIcon />
-							{t("play")}
-						</Button>
-						<Button
-							variant="outline"
-							disabled={!hasTracks}
-							onClick={() => {
-								startShuffledPlaylist(playlist)
-							}}
+							<Button
+								disabled={!hasTracks}
+								onClick={() => {
+									startPlaylist(playlist, 0)
+								}}
+							>
+								<PlayIcon />
+								{t("play")}
+							</Button>
+						</KeyTooltip>
+						<KeyTooltip
+							action="playlists.shuffle"
+							label={t("shufflePlay")}
 						>
-							<ShuffleIcon />
-							{t("shufflePlay")}
-						</Button>
-						<Button
-							variant="outline"
-							disabled={!isOnline}
-							onClick={() => {
-								setAddOpen(true)
-							}}
+							<Button
+								variant="outline"
+								disabled={!hasTracks}
+								onClick={() => {
+									startShuffledPlaylist(playlist)
+								}}
+							>
+								<ShuffleIcon />
+								{t("shufflePlay")}
+							</Button>
+						</KeyTooltip>
+						<KeyTooltip
+							action="playlists.addTracks"
+							label={t("addTracks")}
 						>
-							<PlusIcon />
-							{t("addTracks")}
-						</Button>
+							<Button
+								variant="outline"
+								disabled={!isOnline}
+								onClick={() => {
+									setAddOpen(true)
+								}}
+							>
+								<PlusIcon />
+								{t("addTracks")}
+							</Button>
+						</KeyTooltip>
 						<DropdownMenu>
 							<DropdownMenuTrigger
 								render={

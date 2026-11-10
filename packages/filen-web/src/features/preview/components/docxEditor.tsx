@@ -149,6 +149,7 @@ import { createListenerSet } from "@/lib/listenerSet"
 import { E2E_AUTOSAVE_OFF } from "@/features/office/lib/officeAutosave"
 import { LoadingState } from "@/components/loadingState"
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuSeparator, ContextMenuTrigger } from "@/components/ui/context-menu"
+import { MenuShortcut } from "@/components/ui/menuShortcut"
 import { desktopBridge } from "@/lib/desktop"
 import { keyForEditor } from "@/lib/keymap/dialogGuard"
 import { useEditorLayerKeys } from "@/lib/keymap/editorLayerKeys"
@@ -2236,9 +2237,9 @@ export function DocxEditView({
 									}}
 								>
 									{t("previewDocxOpenLink")}
-									<span className="ml-auto pl-4 text-xs text-muted-foreground">
+									<MenuShortcut className="text-xs text-muted-foreground">
 										{t("previewDocxOpenLinkClick", { modifier: APPLE ? "⌘" : "Ctrl" })}
-									</span>
+									</MenuShortcut>
 								</ContextMenuItem>
 								<ContextMenuSeparator />
 							</>

@@ -163,7 +163,7 @@ function commands(): HTMLElement {
 	return screen.getByRole("toolbar", { name: "Commands" })
 }
 
-async function pick(menu: string, item: string, role = "menuitem"): Promise<void> {
+async function pick(menu: string, item: string | RegExp, role = "menuitem"): Promise<void> {
 	fireEvent.click(within(commands()).getByRole("button", { name: menu }))
 	fireEvent.click(await screen.findByRole(role, { name: item }))
 }
@@ -199,9 +199,10 @@ describe("spreadsheet ribbon", () => {
 	it("pastes, pastes values, cuts and copies through the view's clipboard", async () => {
 		const { actions } = await mounted()
 
-		await pick("Paste", "Paste values")
+		await pick("Paste", /^Paste values/)
 		expect(actions.paste).toHaveBeenLastCalledWith(true)
-		await pick("Paste", "Paste")
+		// The entries show their keys at their ends.
+		await pick("Paste", /^Paste Ctrl\s*V$/)
 		expect(actions.paste).toHaveBeenLastCalledWith(false)
 		fireEvent.click(screen.getByRole("button", { name: "Cut" }))
 		expect(actions.copy).toHaveBeenLastCalledWith(true)

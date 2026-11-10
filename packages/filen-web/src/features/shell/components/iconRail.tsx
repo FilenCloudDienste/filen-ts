@@ -73,6 +73,8 @@ import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 import { openShortcutsDialog } from "@/lib/keymap/shortcutsDialogStore"
 import { OUTSIDE_OVERLAYS, useAction } from "@/lib/keymap/useAction"
 import { Kbd } from "@/lib/keymap/kbd"
+import { MenuKbd } from "@/lib/keymap/kbdHints"
+import { MenuShortcut } from "@/components/ui/menuShortcut"
 
 // macOS desktop: the rail holds the native traffic lights.
 const RAIL_HOLDS_TRAFFIC_LIGHTS = desktopPlatform() === "darwin"
@@ -213,10 +215,10 @@ function AccountMenu() {
 							<SettingsIcon />
 							{t("settings")}
 							{keysNotExported && <span className="sr-only">{`, ${t("settings:settingsMasterKeysNotExportedStatus")}`}</span>}
-							<span className="ml-auto flex items-center gap-2">
+							<MenuShortcut className="gap-2">
 								{keysNotExported && <RailStatusDot dot="attention" />}
 								<Kbd action="app.openSettings" />
-							</span>
+							</MenuShortcut>
 						</DropdownMenuItem>
 						{/* The rail shows its transfers ring only while there are transfers; this keeps the screen
 						    one click away when there are none. */}
@@ -227,24 +229,18 @@ function AccountMenu() {
 						>
 							<ArrowDownUpIcon />
 							{t("moduleTransfers")}
-							<span className="ml-auto">
-								<Kbd action="app.openTransfers" />
-							</span>
+							<MenuKbd action="app.openTransfers" />
 						</DropdownMenuItem>
 						<DropdownMenuItem onClick={openShortcutsDialog}>
 							<KeyboardIcon />
 							{t("shortcutsTitle")}
-							<span className="ml-auto">
-								<Kbd action="app.openShortcuts" />
-							</span>
+							<MenuKbd action="app.openShortcuts" />
 						</DropdownMenuItem>
 						<DropdownMenuItem onClick={toggleTheme}>
 							<SunIcon className="dark:hidden" />
 							<MoonIcon className="hidden dark:block" />
 							{t("toggleTheme")}
-							<span className="ml-auto">
-								<Kbd action="app.toggleTheme" />
-							</span>
+							<MenuKbd action="app.toggleTheme" />
 						</DropdownMenuItem>
 					</DropdownMenuGroup>
 					<DropdownMenuSeparator />
@@ -254,9 +250,7 @@ function AccountMenu() {
 					>
 						<LogOutIcon />
 						{t("signOut")}
-						<span className="ml-auto">
-							<Kbd action="app.signOut" />
-						</span>
+						<MenuKbd action="app.signOut" />
 					</DropdownMenuItem>
 				</DropdownMenuContent>
 			</DropdownMenu>

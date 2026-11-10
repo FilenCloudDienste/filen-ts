@@ -102,6 +102,7 @@ import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
 import { Kbd, KbdKeys } from "@/lib/keymap/kbd"
 import { useBindings } from "@/lib/keymap/registry"
 import { ariaKeyShortcuts } from "@/lib/keymap/keyText"
+import { MenuShortcut } from "@/components/ui/menuShortcut"
 import { DOCX_KEY_ACTIONS, lineSpacingAction } from "@/features/preview/lib/docxKeymap"
 
 // The Word document editor's ribbon (officeRibbon.tsx), as Word for the web's simplified ribbon: File, Home
@@ -487,14 +488,7 @@ function LineSpacingItem({ spacing }: { spacing: number }) {
 				value: spacing / 240,
 				formatParams: { value: { minimumFractionDigits: 1 } }
 			})}
-			{shortcut === undefined ? null : (
-				<span
-					className="ml-auto pl-4"
-					aria-hidden
-				>
-					{shortcut}
-				</span>
-			)}
+			{shortcut === undefined ? null : <MenuShortcut aria-hidden>{shortcut}</MenuShortcut>}
 		</DropdownMenuRadioItem>
 	)
 }
@@ -586,14 +580,7 @@ function FindMenu({ onFindOpen, onSearch }: { onFindOpen: (replace: boolean) => 
 					}}
 				>
 					{t("previewDocxFindReplaceAction")}
-					{replaceKey === undefined ? null : (
-						<span
-							className="ml-auto pl-4"
-							aria-hidden
-						>
-							{replaceKey}
-						</span>
-					)}
+					{replaceKey === undefined ? null : <MenuShortcut aria-hidden>{replaceKey}</MenuShortcut>}
 				</DropdownMenuItem>
 			</DropdownMenuContent>
 		</DropdownMenu>

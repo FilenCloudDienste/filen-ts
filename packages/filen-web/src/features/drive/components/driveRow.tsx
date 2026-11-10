@@ -3,6 +3,7 @@ import { StarIcon } from "lucide-react"
 import { ItemThumbnail } from "@/features/drive/components/itemThumbnail"
 import { formatItemSize, formatModifiedDate } from "@/features/drive/lib/format"
 import { DriveDropdownMenuContent } from "@/features/drive/components/itemMenu"
+import { DRIVE_ITEM_SHORTCUTS } from "@/features/drive/components/itemMenu.logic"
 import { DriveCellContextMenuContent } from "@/features/drive/components/bulkMenu"
 import { useDriveItemCell, type DriveItemCellProps } from "@/features/drive/hooks/useDriveItemCell"
 import { dropHighlightClass } from "@/features/drive/hooks/useDriveDropTarget"
@@ -156,6 +157,7 @@ export function DriveRow({
 								searchHit={searchHit}
 								onOpen={open}
 								destination={destination}
+								shortcuts={DRIVE_ITEM_SHORTCUTS}
 							/>
 						</DropdownMenu>
 					</div>

@@ -1,4 +1,4 @@
-import { applyOfflineGate, driveItemActions, type ItemActionId } from "@/features/drive/components/itemMenu.logic"
+import { applyOfflineGate, driveItemActions, type ItemActionId, type ItemMenuShortcuts } from "@/features/drive/components/itemMenu.logic"
 import { driveBulkActions, type BulkActionDescriptor } from "@/features/drive/components/bulkActionBar.logic"
 import { type DriveSelectionFlags } from "@/features/drive/lib/selectionFlags"
 import { type PhotoItem } from "@/features/photos/lib/captureSort"
@@ -13,6 +13,20 @@ import { queryClient } from "@/queries/client"
 // both only read the photos, and what they make lands in the Cloud Drive tree. Extract never applies: a
 // photos listing holds only images and videos.
 export const PHOTOS_HIDDEN_ACTION_IDS: ReadonlySet<ItemActionId> = new Set(["move", "extract"])
+
+// The grid's keys (photos/lib/keymap.ts), as a photo's menus show them: drive's entries under the photos grid's own
+// actions.
+export const PHOTOS_ITEM_SHORTCUTS: ItemMenuShortcuts = {
+	entries: {
+		rename: "photos.rename",
+		favorite: "photos.toggleFavorite",
+		info: "photos.info",
+		download: "photos.download",
+		share: "photos.share",
+		trash: "photos.trash"
+	},
+	copyToClipboard: "photos.copy"
+}
 
 // The selection bar's counterpart (bulkActionBar.tsx), for the same reasons.
 export const PHOTOS_HIDDEN_BULK_ACTION_IDS: ReadonlySet<BulkActionDescriptor["id"]> = new Set(["move", "extract"])

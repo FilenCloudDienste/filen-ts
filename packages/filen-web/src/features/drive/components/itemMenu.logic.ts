@@ -57,6 +57,52 @@ export type ItemActionId =
 	| "restore"
 	| "deletePermanently"
 
+// The keymap actions a surface's own keys run on the item a menu opened for (the drive listing's, the photos grid's,
+// the preview overlay's), so each entry shows the key that does what it does. Move and Copy name their destination
+// pickers' (the submenu entry the key opens); `copyToClipboard` Copy's clipboard entry where the surface binds its own.
+// `deleteKey`: the listing's Delete, shown on whichever removal it runs on this item (driveDeleteKeyTarget).
+export interface ItemMenuShortcuts {
+	readonly entries: Readonly<Partial<Record<ItemActionId, string>>>
+	readonly copyToClipboard?: string
+	readonly deleteKey?: string
+}
+
+// The drive listing's keys (features/drive/lib/keymap.ts), as its rows' and tiles' menus show them.
+export const DRIVE_ITEM_SHORTCUTS: ItemMenuShortcuts = {
+	entries: {
+		open: "drive.open",
+		openAsText: "drive.openAsText",
+		rename: "drive.rename",
+		move: "drive.move",
+		copy: "drive.copyTo",
+		favorite: "drive.toggleFavorite",
+		color: "drive.color",
+		versions: "drive.versions",
+		info: "drive.info",
+		openContainingDirectory: "drive.openContainingDirectory",
+		download: "drive.download",
+		copyLink: "drive.copyLink",
+		share: "drive.share",
+		restore: "drive.restore",
+		deletePermanently: "drive.deletePermanently"
+	},
+	deleteKey: "drive.trash"
+}
+
+// The action whose keys an entry shows, if any: its own, else the Delete key's where `deleteTarget` (what Delete runs
+// on this item) is this entry.
+export function itemMenuShortcut(
+	shortcuts: ItemMenuShortcuts | undefined,
+	id: ItemActionId,
+	deleteTarget: string | null
+): string | undefined {
+	if (shortcuts === undefined) {
+		return undefined
+	}
+
+	return shortcuts.entries[id] ?? (id === deleteTarget ? shortcuts.deleteKey : undefined)
+}
+
 // `enabled`: present-but-disabled (never absent) once set to false — omitted (default enabled) for
 // every descriptor that has no reason to ever disable itself. Today only "download" uses it: a dead
 // click is worse than a disabled control (see downloadDescriptor below).

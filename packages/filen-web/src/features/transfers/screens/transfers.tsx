@@ -61,6 +61,8 @@ import { defaultRevealDeps, runOpenContainingDirectory } from "@/features/drive/
 import type { DriveItem } from "@/features/drive/lib/item"
 import { Button } from "@/components/ui/button"
 import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
+import { Kbd } from "@/lib/keymap/kbd"
+import { KeyTooltip } from "@/lib/keymap/kbdHints"
 import { Empty, EmptyHeader, EmptyMedia, EmptyTitle, EmptyDescription } from "@/components/ui/empty"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 import { observeElementOffsetFromAttach } from "@/lib/virtualScroll"
@@ -207,6 +209,7 @@ export function TransfersScreen() {
 					<TooltipIconButton
 						label={t("transfersScreenPauseAll")}
 						disabled={pausable.length === 0}
+						shortcut={<Kbd action="transfers.togglePauseAll" />}
 						onClick={handlePauseAll}
 					>
 						<PauseIcon />
@@ -214,6 +217,7 @@ export function TransfersScreen() {
 					<TooltipIconButton
 						label={t("transfersScreenResumeAll")}
 						disabled={resumable.length === 0}
+						shortcut={<Kbd action="transfers.togglePauseAll" />}
 						onClick={handleResumeAll}
 					>
 						<PlayIcon />
@@ -221,23 +225,29 @@ export function TransfersScreen() {
 					<TooltipIconButton
 						label={t("transfersScreenCancelAll")}
 						disabled={cancellable.length === 0}
+						shortcut={<Kbd action="transfers.cancelAll" />}
 						onClick={() => {
 							setCancelAllConfirmOpen(true)
 						}}
 					>
 						<XIcon />
 					</TooltipIconButton>
-					<Button
-						variant="outline"
-						size="sm"
-						className="ml-1"
-						aria-label={t("transfersClearFinished")}
-						disabled={!clearable}
-						onClick={handleClearFinished}
+					<KeyTooltip
+						action="transfers.clearFinished"
+						label={t("transfersClearFinished")}
 					>
-						<BrushCleaningIcon aria-hidden="true" />
-						<span className="hidden sm:inline">{t("transfersClearFinished")}</span>
-					</Button>
+						<Button
+							variant="outline"
+							size="sm"
+							className="ml-1"
+							aria-label={t("transfersClearFinished")}
+							disabled={!clearable}
+							onClick={handleClearFinished}
+						>
+							<BrushCleaningIcon aria-hidden="true" />
+							<span className="hidden sm:inline">{t("transfersClearFinished")}</span>
+						</Button>
+					</KeyTooltip>
 				</div>
 			</header>
 			<div className="flex min-h-0 flex-1 flex-col overflow-hidden">

@@ -157,6 +157,26 @@ export function driveDeleteKeyTarget(descriptors: readonly BulkActionDescriptor[
 	return null
 }
 
+// The bulk entries' keys (the drive listing's, features/drive/lib/keymap.ts), shown in the selection bar's tooltips and
+// the bulk context menu. Move and Copy name their destination pickers'. The Delete key's (drive.trash) goes on whichever
+// entry it runs here (driveDeleteKeyTarget).
+const BULK_KEYMAP_ACTIONS: Readonly<Partial<Record<BulkActionDescriptor["id"], string>>> = {
+	favorite: "drive.toggleFavorite",
+	move: "drive.move",
+	copy: "drive.copyTo",
+	compress: "drive.compress",
+	extract: "drive.extract",
+	share: "drive.share",
+	download: "drive.download",
+	downloadAs: "drive.downloadAs",
+	restoreSelected: "drive.restore",
+	delete: "drive.deletePermanently"
+}
+
+export function driveBulkKbdAction(id: BulkActionDescriptor["id"], deleteKeyTarget: DriveDeleteKeyTarget | null): string | undefined {
+	return id === deleteKeyTarget ? "drive.trash" : BULK_KEYMAP_ACTIONS[id]
+}
+
 // Download's ENABLED state (distinct from its PRESENCE in driveBulkActions above) — mirrored in
 // itemMenu.logic.ts and the drive keymap: enabled iff the selection is non-empty. The service-worker
 // zip path removed the isFsaAvailable() requirement a dir/multi selection used to need — every

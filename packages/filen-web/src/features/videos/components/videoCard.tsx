@@ -12,6 +12,7 @@ import type { VideoCardModel } from "@/features/videos/lib/homeRows.logic"
 import { cardHeading, cardLabel, episodeCode, neutralTone, sublineText } from "@/features/videos/lib/videoCard.logic"
 import { qualityLabel } from "@/features/videos/lib/videoGrid.logic"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import { MenuKbd } from "@/lib/keymap/kbdHints"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 
@@ -311,6 +312,7 @@ export function VideoCard({ card, width, nearObserver, active, registerRef, onFo
 						>
 							<PlayIcon />
 							{card.resumeSec > 0 ? t("videosCardResume") : t("videosCardPlay")}
+							<MenuKbd action="videos.play" />
 						</DropdownMenuItem>
 					)}
 					{card.unsupported ? null : card.badge?.kind === "watched" ? (
@@ -320,6 +322,7 @@ export function VideoCard({ card, width, nearObserver, active, registerRef, onFo
 							}}
 						>
 							{t("videosCardMarkUnwatched")}
+							<MenuKbd action="videos.toggleWatched" />
 						</DropdownMenuItem>
 					) : (
 						<DropdownMenuItem
@@ -329,6 +332,7 @@ export function VideoCard({ card, width, nearObserver, active, registerRef, onFo
 						>
 							<CheckIcon />
 							{t("videosCardMarkWatched")}
+							<MenuKbd action="videos.toggleWatched" />
 						</DropdownMenuItem>
 					)}
 					{card.hideable ? (
@@ -338,6 +342,7 @@ export function VideoCard({ card, width, nearObserver, active, registerRef, onFo
 							}}
 						>
 							{t("videosCardHide")}
+							<MenuKbd action="videos.hide" />
 						</DropdownMenuItem>
 					) : null}
 				</DropdownMenuContent>

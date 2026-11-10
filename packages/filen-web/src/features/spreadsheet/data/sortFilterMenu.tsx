@@ -13,6 +13,7 @@ import {
 	DropdownMenuTrigger
 } from "@/components/ui/dropdown-menu"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { MenuShortcut } from "@/components/ui/menuShortcut"
 import { clearFilters, openCustomSort, quickSort, reapplyFilters, toggleFilter } from "@/features/spreadsheet/data/sortCommands"
 import { clearTarget } from "@/features/spreadsheet/data/sortFilter.logic"
 import { isTextSheetKind } from "@/features/spreadsheet/lib/sheetHosts"
@@ -92,7 +93,7 @@ export function SortFilterMenu({ grid, disabled }: { grid: SheetGridState; disab
 						>
 							<FilterIcon />
 							{t("previewSheetFilter")}
-							<span className="ml-auto pl-4 text-xs text-muted-foreground">{mac ? "⇧⌘F" : "Ctrl+Shift+L"}</span>
+							<MenuShortcut className="text-xs text-muted-foreground">{mac ? "⇧⌘F" : "Ctrl+Shift+L"}</MenuShortcut>
 						</DropdownMenuCheckboxItem>
 						<DropdownMenuItem
 							disabled={!filtered}

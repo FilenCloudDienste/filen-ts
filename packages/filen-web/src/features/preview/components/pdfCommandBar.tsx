@@ -17,7 +17,13 @@ import type { PdfDomDocument } from "@filen/office/react/pdf"
 import { OfficeCommandBar, type RibbonGroup } from "@/features/office/components/ribbon/officeRibbon"
 import { RibbonButton, RibbonMenuTrigger } from "@/features/office/components/ribbon/ribbonControls"
 import { usePhoneWidth } from "@/features/office/components/ribbon/phoneMedia"
-import { CommandFileMenu, FullScreenButton, PageControls, ZoomControls } from "@/features/preview/components/commandBarControls"
+import {
+	CommandFileMenu,
+	FullScreenButton,
+	PageControls,
+	ZoomControls,
+	type FitShortcuts
+} from "@/features/preview/components/commandBarControls"
 import { BAR_BUTTON, BAR_MENU, pageControlsWidth, ZOOM_CONTROLS_WIDTH } from "@/features/preview/components/commandBar.logic"
 import { DocxFindField } from "@/features/preview/components/docxToolbar"
 import type { DocxFindControls } from "@/features/preview/components/docxViewer.logic"
@@ -120,6 +126,9 @@ export interface PdfCommandBarProps {
 	pageInputRef: RefObject<HTMLInputElement | null>
 }
 
+// The fit keys the zoom menu's fit entries show.
+const PDF_FIT_SHORTCUTS: FitShortcuts = { fitWidth: "preview.pdfFitWidth", fitPage: "preview.pdfFitPage" }
+
 export function PdfCommandBar({
 	state,
 	dispatch,
@@ -179,6 +188,7 @@ export function PdfCommandBar({
 					onOut={command({ type: "zoom.out" })}
 					inShortcut={<Kbd action="preview.pdfZoomIn" />}
 					outShortcut={<Kbd action="preview.pdfZoomOut" />}
+					fitShortcuts={PDF_FIT_SHORTCUTS}
 					onPercent={percent => {
 						dispatch({ type: "zoom.set", scale: pdfPercentScale(percent) })
 					}}
