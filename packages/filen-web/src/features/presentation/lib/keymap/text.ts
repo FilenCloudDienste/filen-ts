@@ -34,12 +34,18 @@ export type PresentationTextAction =
 // own defaults (DEFAULT_TEXT_BINDINGS, APPLE_TEXT_BINDINGS; a type-only import keeps the editor out of the keymap).
 type ParagraphKeys = Pick<TextKeyBindings, "promote" | "demote" | "moveParagraphUp" | "moveParagraphDown" | "nextPlaceholder">
 
-const MAC_PARAGRAPH: ParagraphKeys = { promote: "mod+[", demote: "mod+]", moveParagraphUp: "", moveParagraphDown: "", nextPlaceholder: "" }
+const MAC_PARAGRAPH: ParagraphKeys = {
+	promote: "mod+bracketleft",
+	demote: "mod+bracketright",
+	moveParagraphUp: "",
+	moveParagraphDown: "",
+	nextPlaceholder: ""
+}
 const OTHER_PARAGRAPH: ParagraphKeys = {
-	promote: "alt+shift+left",
-	demote: "alt+shift+right",
-	moveParagraphUp: "alt+shift+up",
-	moveParagraphDown: "alt+shift+down",
+	promote: "alt+shift+arrowleft",
+	demote: "alt+shift+arrowright",
+	moveParagraphUp: "alt+shift+arrowup",
+	moveParagraphDown: "alt+shift+arrowdown",
 	nextPlaceholder: "mod+enter"
 }
 const PARAGRAPH = isMacPlatform() ? MAC_PARAGRAPH : OTHER_PARAGRAPH
@@ -48,13 +54,13 @@ export const PRESENTATION_TEXT_ACTIONS: readonly (ActionDef & { readonly id: Pre
 	{ id: "presentation.text.underline", defaultCombo: "mod+u", scope: "editor", descriptionKey: "preview:previewPptxShortcutUnderline" },
 	{
 		id: "presentation.text.subscript",
-		defaultCombo: "mod+ctrl+=",
+		defaultCombo: "mod+ctrl+equal",
 		scope: "editor",
 		descriptionKey: "preview:previewPptxShortcutSubscript"
 	},
 	{
 		id: "presentation.text.superscript",
-		defaultCombo: "mod+ctrl+shift+=",
+		defaultCombo: "mod+ctrl+shift+equal",
 		scope: "editor",
 		descriptionKey: "preview:previewPptxShortcutSuperscript"
 	},
@@ -66,13 +72,13 @@ export const PRESENTATION_TEXT_ACTIONS: readonly (ActionDef & { readonly id: Pre
 	},
 	{
 		id: "presentation.text.growFont",
-		defaultCombo: "mod+shift+.",
+		defaultCombo: "mod+shift+period",
 		scope: "editor",
 		descriptionKey: "preview:previewPptxShortcutGrowFont"
 	},
 	{
 		id: "presentation.text.shrinkFont",
-		defaultCombo: "mod+shift+,",
+		defaultCombo: "mod+shift+comma",
 		scope: "editor",
 		descriptionKey: "preview:previewPptxShortcutShrinkFont"
 	},

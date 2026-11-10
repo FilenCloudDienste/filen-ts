@@ -24,7 +24,7 @@ const DEFAULTS: Readonly<Record<ShowKeyCommand, { readonly combo: string; readon
 	eraser: { combo: "mod+e", description: "preview:previewPptxShortcutShowEraser" },
 	arrow: { combo: "mod+a", description: "preview:previewPptxShortcutShowArrow" },
 	hidePointer: { combo: "ctrl+h", description: "preview:previewPptxShortcutShowHidePointer" },
-	togglePointer: { combo: "a,=", description: "preview:previewPptxShortcutShowTogglePointer" },
+	togglePointer: { combo: "a,equal", description: "preview:previewPptxShortcutShowTogglePointer" },
 	eraseAll: { combo: "e", description: "preview:previewPptxShortcutShowEraseAll" },
 	start: { combo: "f5", description: "preview:previewPptxShortcutShowStart" },
 	startCurrent: { combo: "shift+f5", description: "preview:previewPptxShortcutShowStartCurrent" }

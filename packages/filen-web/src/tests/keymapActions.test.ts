@@ -14,13 +14,37 @@ vi.mock("@/lib/storage/adapter", () => ({
 }))
 
 const { ALL_ACTIONS } = await import("@/lib/keymap/actions")
-const { conflictingActions, RESOLVED_COLLISIONS } = await import("@/lib/keymap/conflicts")
+const { RESOLVED_COLLISIONS } = await import("@/lib/keymap/conflicts")
 const { SHORTCUT_SCOPE_LABEL_KEYS } = await import("@/lib/keymap/shortcutsCatalog")
+const { normalizeCombo } = await import("@filen/shared/keymap")
 
-const RESOLVED = ALL_ACTIONS.map(def => ({ ...def, combo: def.defaultCombo }))
+const PLATFORMS = [
+	{ name: "a Mac", mac: true, userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0)" },
+	{ name: "Windows", mac: false, userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" }
+] as const
+
+// The action set as a platform registers it: some defaults are per platform (the Mac's paragraph keys), read once at
+// module load, so each platform gets its own module graph under its own user agent.
+async function actionsOn(userAgent: string) {
+	vi.resetModules()
+	vi.stubGlobal("navigator", { userAgent })
+
+	const actions = await import("@/lib/keymap/actions")
+	const conflicts = await import("@/lib/keymap/conflicts")
+
+	return { actions: actions.ALL_ACTIONS, conflictingActions: conflicts.conflictingActions }
+}
 
 function isAllowlisted(a: string, b: string): boolean {
 	return RESOLVED_COLLISIONS.some(([first, second]) => (first === a && second === b) || (first === b && second === a))
+}
+
+// The colliding pairs among the defaults on one platform, each once, as "a × b".
+async function collisionsOn(userAgent: string, mac: boolean): Promise<string[]> {
+	const { actions, conflictingActions } = await actionsOn(userAgent)
+	const resolved = actions.map(def => ({ ...def, combo: def.defaultCombo }))
+
+	return actions.flatMap(def => conflictingActions(resolved, def.defaultCombo, def.id, mac).map(other => `${def.id} × ${other.id}`))
 }
 
 // These assert on the REAL action set, not a fixture — with the defs exported as data there is no
@@ -39,21 +63,31 @@ describe("ALL_ACTIONS", () => {
 		}
 	})
 
-	it("has no unguarded collision between two co-mountable actions on the same combo", () => {
-		const unguarded = ALL_ACTIONS.flatMap(def =>
-			conflictingActions(RESOLVED, def.defaultCombo, def.id)
-				.filter(other => !isAllowlisted(def.id, other.id))
-				.map(other => `${def.id} × ${other.id} (${def.defaultCombo})`)
-		)
+	it.each(PLATFORMS)("ships every default in the canonical token spelling on $name", async ({ userAgent }) => {
+		const { actions } = await actionsOn(userAgent)
+
+		for (const def of actions) {
+			expect(normalizeCombo(def.defaultCombo), def.id).toBe(def.defaultCombo)
+		}
+	})
+
+	it.each(PLATFORMS)("has no unguarded collision between two co-mountable actions on $name", async ({ userAgent, mac }) => {
+		const unguarded = (await collisionsOn(userAgent, mac)).filter(pair => {
+			const [a = "", b = ""] = pair.split(" × ")
+
+			return !isAllowlisted(a, b)
+		})
 
 		expect(unguarded).toEqual([])
 	})
 
-	it("pins each allowlisted collision to a pair that really does collide", () => {
+	it("pins each allowlisted collision to a pair that really does collide on some platform", async () => {
+		const collisions = new Set<string>()
+
+		for (const { userAgent, mac } of PLATFORMS) for (const pair of await collisionsOn(userAgent, mac)) collisions.add(pair)
+
 		for (const [first, second] of RESOLVED_COLLISIONS) {
-			expect(conflictingActions(RESOLVED, RESOLVED.find(def => def.id === first)?.combo ?? "", first).map(def => def.id)).toContain(
-				second
-			)
+			expect(collisions.has(`${first} × ${second}`), `${first} × ${second}`).toBe(true)
 		}
 	})
 

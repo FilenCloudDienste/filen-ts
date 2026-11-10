@@ -6,6 +6,6 @@ import type { ActionDef } from "@/lib/keymap/registry"
 // additionally doesn't fire inside form fields, so a note/chat editor is doubly safe.
 export const AUDIO_ACTIONS: readonly ActionDef[] = [
 	{ id: "audio.playPause", defaultCombo: "mod+shift+p", scope: "audio", descriptionKey: "audio:commandPlayPause" },
-	{ id: "audio.next", defaultCombo: "mod+shift+right", scope: "audio", descriptionKey: "audio:commandNext" },
-	{ id: "audio.previous", defaultCombo: "mod+shift+left", scope: "audio", descriptionKey: "audio:commandPrevious" }
+	{ id: "audio.next", defaultCombo: "mod+shift+arrowright", scope: "audio", descriptionKey: "audio:commandNext" },
+	{ id: "audio.previous", defaultCombo: "mod+shift+arrowleft", scope: "audio", descriptionKey: "audio:commandPrevious" }
 ]

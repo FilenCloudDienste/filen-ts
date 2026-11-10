@@ -438,19 +438,19 @@ describe("presentation editor slide list", () => {
 
 		const list = rail()
 
-		fireEvent.keyDown(list, { key: "ArrowDown", shiftKey: true })
-		fireEvent.keyDown(list, { key: "Delete" })
+		fireEvent.keyDown(list, { key: "ArrowDown", code: "ArrowDown", shiftKey: true })
+		fireEvent.keyDown(list, { key: "Delete", code: "Delete" })
 		await waitFor(() => {
 			expect(engine.commands.at(-1)).toEqual({ family: "slide", kind: "delete", slides: [1, 2] })
 		})
 
 		fireEvent.click(screen.getByRole("option", { name: "Slide 3 of 3" }))
-		fireEvent.keyDown(list, { key: "ArrowUp", ctrlKey: true })
+		fireEvent.keyDown(list, { key: "ArrowUp", code: "ArrowUp", ctrlKey: true })
 		await waitFor(() => {
 			expect(engine.commands.at(-1)).toEqual({ family: "slide", kind: "move", slides: [3], to: 1 })
 		})
 
-		fireEvent.keyDown(list, { key: "d", ctrlKey: true })
+		fireEvent.keyDown(list, { key: "d", code: "KeyD", ctrlKey: true })
 		await waitFor(() => {
 			expect(engine.commands.at(-1)).toEqual({ family: "slide", kind: "duplicate", slide: 3, at: 3 })
 		})
@@ -458,13 +458,13 @@ describe("presentation editor slide list", () => {
 		// Ctrl+Shift+D, PowerPoint's Duplicate Slide wherever the focus is.
 		const count = engine.commands.length
 
-		fireEvent.keyDown(list, { key: "D", ctrlKey: true, shiftKey: true })
+		fireEvent.keyDown(list, { key: "D", code: "KeyD", ctrlKey: true, shiftKey: true })
 		await waitFor(() => {
 			expect(engine.commands.length).toBe(count + 1)
 		})
 		expect(engine.commands.at(-1)).toMatchObject({ family: "slide", kind: "duplicate" })
 
-		fireEvent.keyDown(list, { key: "m", ctrlKey: true })
+		fireEvent.keyDown(list, { key: "m", code: "KeyM", ctrlKey: true })
 		await waitFor(() => {
 			expect(engine.commands.at(-1)).toMatchObject({ family: "slide", kind: "add" })
 		})

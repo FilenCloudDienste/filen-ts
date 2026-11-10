@@ -1,3 +1,4 @@
+import { isMacPlatform } from "@filen/shared/keymap"
 import { useLayoutEffect, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode, type Ref } from "react"
 import { EMU_PER_PX } from "../../core/drawingml/index"
 import type { Action } from "../../core/presentation/model"
@@ -48,10 +49,7 @@ export interface SlideViewProps {
 
 // Mod: Cmd on Apple platforms, Ctrl elsewhere.
 function modifierOf(event: { readonly metaKey: boolean; readonly ctrlKey: boolean }): boolean {
-	const platform: unknown = Reflect.get(Reflect.get(globalThis, "navigator") ?? {}, "platform")
-	const apple = typeof platform === "string" && /Mac|iPhone|iPad/u.test(platform)
-
-	return apple ? event.metaKey : event.ctrlKey
+	return isMacPlatform() ? event.metaKey : event.ctrlKey
 }
 
 // The layer box on the slide: the drawing's extent under the layer matrix (CSS matrix()).

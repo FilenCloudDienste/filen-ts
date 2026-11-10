@@ -171,6 +171,49 @@ describe("keymap registry", () => {
 		expect(comboFor("app.test")).toBe("ctrl+k")
 	})
 
+	it("migrates an older record's character spellings to the token model on load and keeps them working", async () => {
+		kvStore.set(OVERRIDES_KEY, {
+			"app.shrink": "mod+shift+,",
+			"app.pointer": "a,=",
+			"app.zoom": "mod+plus",
+			"app.recorded": "mod+bracketleft",
+			"app.broken": "g>d"
+		})
+
+		const { registerAction, comboFor, keymapOverridesLoaded, setUserCombo } = await freshRegistry()
+
+		for (const id of ["app.shrink", "app.pointer", "app.zoom", "app.recorded", "app.broken", "app.other"]) registerAction(actionDef(id))
+		await keymapOverridesLoaded()
+
+		expect(comboFor("app.shrink")).toBe("mod+shift+comma")
+		expect(comboFor("app.pointer")).toBe("a,equal")
+		expect(comboFor("app.zoom")).toBe("mod+equal")
+		expect(comboFor("app.recorded")).toBe("mod+bracketleft")
+		// A combo with no chord matches nothing: the default takes over.
+		expect(comboFor("app.broken")).toBe("k")
+
+		// The next write persists the canonical record.
+		await setUserCombo("app.other", "shift+.")
+
+		expect(kvStore.get(OVERRIDES_KEY)).toEqual({
+			"app.shrink": "mod+shift+comma",
+			"app.pointer": "a,equal",
+			"app.zoom": "mod+equal",
+			"app.recorded": "mod+bracketleft",
+			"app.other": "shift+period"
+		})
+	})
+
+	it("setUserCombo refuses a string that holds no combo, so the stored record stays loadable", async () => {
+		const { registerAction, setUserCombo, keymapOverridesLoaded } = await freshRegistry()
+
+		registerAction(actionDef("app.test"))
+		await keymapOverridesLoaded()
+
+		await expect(setUserCombo("app.test", "a>b")).rejects.toThrow(/no combo/)
+		expect(kvStore.get(OVERRIDES_KEY)).toBeUndefined()
+	})
+
 	it("drops a missing/invalid persisted overrides value without throwing; defaults win", async () => {
 		// kvGetJson's own documented contract (adapter.test.ts) collapses BOTH "no value at this
 		// key yet" and "schema-invalid/corrupt value" to a plain `null` — this mock returns exactly
@@ -384,13 +427,13 @@ describe("useAction — shouldIgnoreEvent", () => {
 	it("lets a normal keypress through", async () => {
 		const { shouldIgnoreEvent } = await freshKeymap()
 
-		expect(shouldIgnoreEvent({ repeat: false })).toBe(false)
+		expect(shouldIgnoreEvent({ repeat: false, key: "a" })).toBe(false)
 	})
 
 	it("ignores an OS autorepeat tick", async () => {
 		const { shouldIgnoreEvent } = await freshKeymap()
 
-		expect(shouldIgnoreEvent({ repeat: true })).toBe(true)
+		expect(shouldIgnoreEvent({ repeat: true, key: "a" })).toBe(true)
 	})
 
 	it("ignores every keypress while any owner is recording a combo", async () => {
@@ -398,10 +441,19 @@ describe("useAction — shouldIgnoreEvent", () => {
 
 		beginRecording("a", "app.test")
 
-		expect(shouldIgnoreEvent({ repeat: false })).toBe(true)
+		expect(shouldIgnoreEvent({ repeat: false, key: "a" })).toBe(true)
 
 		endRecording("a")
 
-		expect(shouldIgnoreEvent({ repeat: false })).toBe(false)
+		expect(shouldIgnoreEvent({ repeat: false, key: "a" })).toBe(false)
+	})
+
+	it("ignores a character typed with AltGr", async () => {
+		const { shouldIgnoreEvent } = await freshKeymap()
+		const altGraph = (name: string): boolean => name === "AltGraph"
+
+		expect(shouldIgnoreEvent({ repeat: false, key: "ó", getModifierState: altGraph })).toBe(true)
+		expect(shouldIgnoreEvent({ repeat: false, key: "@", getModifierState: altGraph })).toBe(true)
+		expect(shouldIgnoreEvent({ repeat: false, key: "o", getModifierState: altGraph })).toBe(false)
 	})
 })

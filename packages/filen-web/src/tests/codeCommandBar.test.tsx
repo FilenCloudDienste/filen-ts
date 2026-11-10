@@ -113,7 +113,10 @@ function press(view: EditorView, key: string, modifiers?: { ctrlKey?: boolean; s
 	let handled = false
 
 	act(() => {
-		handled = runScopeHandlers(view, new KeyboardEvent("keydown", { key, ...modifiers }), "editor")
+		// A letter's physical key: the app's own bindings match by code.
+		const code = /^[a-z]$/iu.test(key) ? `Key${key.toUpperCase()}` : key
+
+		handled = runScopeHandlers(view, new KeyboardEvent("keydown", { key, code, ...modifiers }), "editor")
 	})
 
 	return handled

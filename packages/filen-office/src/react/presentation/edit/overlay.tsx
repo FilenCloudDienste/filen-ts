@@ -1,3 +1,4 @@
+import { isMacPlatform } from "@filen/shared/keymap"
 import { useId, useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react"
 import { EMU_PER_PX } from "../../../core/drawingml/reader"
 import { canZOrder, zOrderOp } from "../../../core/presentation/edit/commands/arrange"
@@ -178,11 +179,8 @@ function outermostOf(render: SlideRender | undefined, shape: SlideShape): SlideS
 	return at
 }
 
-function isApple(): boolean {
-	const platform: unknown = Reflect.get(Reflect.get(globalThis, "navigator") ?? {}, "platform")
-
-	return typeof platform === "string" && /Mac|iPhone|iPad/u.test(platform)
-}
+// The app's one Mac test (Mod is Cmd), shared with its keymap so the canvas and the app agree.
+const isApple = isMacPlatform
 
 function cssMatrix(matrix: readonly number[]): string {
 	return `matrix(${matrix.map(value => String(Math.round((Number.isFinite(value) ? value : 0) * 10000) / 10000)).join(",")})`

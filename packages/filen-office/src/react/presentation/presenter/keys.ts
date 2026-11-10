@@ -1,13 +1,13 @@
+import { matchesChord, parseCombo, type Chord } from "@filen/shared/keymap"
 import type { ShowController } from "../show/controller"
 import type { InkStore } from "../ink/store"
 import type { PointerChange } from "../show/pointer"
 
 // The slideshow's keys, PowerPoint's: they drive the show's controller and the ink, from the audience stage and the
 // presenter view alike, and from presentation clickers (which send PageDown, PageUp, B, F5 and Escape). The commands
-// a user may rebind come as combos in the app keymap's syntax, alternatives comma-separated ("arrowright,n"), so the
-// show and the shortcuts list agree. A slide number typed and then Enter goes to that slide; Escape puts a pen down
-// before it ends the show. Period and comma are named ("period", "comma", the recorder's tokens): a literal comma
-// separates alternatives.
+// a user may rebind come as combos in the app keymap's syntax, alternatives comma-separated ("arrowright,n", keys
+// matched by physical key: @filen/shared/keymap), so the show and the shortcuts list agree. A slide number typed and
+// then Enter goes to that slide; Escape puts a pen down before it ends the show.
 
 export type ShowKeyCommand =
 	| "next"
@@ -47,7 +47,7 @@ export const DEFAULT_SHOW_BINDINGS: ShowKeyBindings = {
 	arrow: "mod+a",
 	// Ctrl even on a Mac, where the system takes Cmd+H.
 	hidePointer: "ctrl+h",
-	togglePointer: "a,=",
+	togglePointer: "a,equal",
 	eraseAll: "e",
 	// In the editor: from the first slide, from the current one. In the show a clicker's F5 does nothing (and never
 	// reloads the page).
@@ -63,99 +63,12 @@ export interface ShowKeyEvent {
 	readonly metaKey: boolean
 	readonly altKey: boolean
 	readonly repeat?: boolean
+	getModifierState?(key: string): boolean
 	preventDefault(): void
 	stopPropagation(): void
 }
 
-interface Chord {
-	readonly mod: boolean
-	readonly ctrl: boolean
-	readonly meta: boolean
-	readonly shift: boolean
-	readonly alt: boolean
-	readonly codes: readonly string[]
-}
-
-const NAMED: Readonly<Record<string, readonly string[]>> = {
-	arrowright: ["ArrowRight"],
-	right: ["ArrowRight"],
-	arrowleft: ["ArrowLeft"],
-	left: ["ArrowLeft"],
-	arrowup: ["ArrowUp"],
-	up: ["ArrowUp"],
-	arrowdown: ["ArrowDown"],
-	down: ["ArrowDown"],
-	pageup: ["PageUp"],
-	pagedown: ["PageDown"],
-	home: ["Home"],
-	end: ["End"],
-	space: ["Space"],
-	enter: ["Enter", "NumpadEnter"],
-	return: ["Enter", "NumpadEnter"],
-	escape: ["Escape"],
-	esc: ["Escape"],
-	backspace: ["Backspace"],
-	delete: ["Delete"],
-	tab: ["Tab"],
-	".": ["Period"],
-	period: ["Period"],
-	comma: ["Comma"],
-	"/": ["Slash"],
-	"-": ["Minus"],
-	"=": ["Equal"]
-}
-
-function codesOf(key: string): readonly string[] {
-	const named = NAMED[key]
-
-	if (named !== undefined) return named
-	if (/^[a-z]$/u.test(key)) return [`Key${key.toUpperCase()}`]
-	if (/^[0-9]$/u.test(key)) return [`Digit${key}`, `Numpad${key}`]
-	if (/^f([1-9]|1[0-9]|2[0-4])$/u.test(key)) return [key.toUpperCase()]
-
-	// Any other key as the recorder spells it: its code lowercased ("semicolon", "bracketleft").
-	return [key]
-}
-
-// The chords of a combo (alternatives comma-separated, modifiers and one key joined by "+"); a sequence or an
-// empty alternative is no chord.
-export function parseShowCombo(combo: string): Chord[] {
-	const out: Chord[] = []
-
-	for (const alternative of combo.toLowerCase().split(",")) {
-		if (alternative.includes(">")) continue
-
-		const parts = alternative.split("+").map(part => part.trim())
-		const key = parts.pop()
-
-		if (key === undefined || key === "") continue
-
-		const has = (name: string): boolean => parts.includes(name)
-
-		out.push({
-			mod: has("mod"),
-			ctrl: has("ctrl") || has("control"),
-			meta: has("meta") || has("cmd") || has("command"),
-			shift: has("shift"),
-			alt: has("alt") || has("option"),
-			codes: codesOf(key)
-		})
-	}
-
-	return out
-}
-
-// `code`: the event's code lowercased, for keys bound by their recorded token.
-function matches(event: ShowKeyEvent, code: string, chord: Chord, apple: boolean): boolean {
-	return (
-		(chord.codes.includes(event.code) || chord.codes.includes(code)) &&
-		event.ctrlKey === (chord.ctrl || (chord.mod && !apple)) &&
-		event.metaKey === (chord.meta || (chord.mod && apple)) &&
-		event.shiftKey === chord.shift &&
-		event.altKey === chord.alt
-	)
-}
-
+// Parsed once per bindings object.
 const parsed = new WeakMap<ShowKeyBindings, readonly (readonly [ShowKeyCommand, Chord])[]>()
 
 function chordsOf(bindings: ShowKeyBindings): readonly (readonly [ShowKeyCommand, Chord])[] {
@@ -165,7 +78,7 @@ function chordsOf(bindings: ShowKeyBindings): readonly (readonly [ShowKeyCommand
 		const list: (readonly [ShowKeyCommand, Chord])[] = []
 
 		for (const command of Object.keys(bindings) as ShowKeyCommand[])
-			for (const chord of parseShowCombo(bindings[command])) list.push([command, chord])
+			for (const chord of parseCombo(bindings[command])) list.push([command, chord])
 
 		out = list
 		parsed.set(bindings, out)
@@ -176,9 +89,7 @@ function chordsOf(bindings: ShowKeyBindings): readonly (readonly [ShowKeyCommand
 
 // The rebindable command `event` is, if any; `apple`: Mod is Cmd (else Ctrl).
 export function showKeyCommand(event: ShowKeyEvent, bindings: ShowKeyBindings, apple: boolean): ShowKeyCommand | undefined {
-	const code = event.code.toLowerCase()
-
-	for (const [command, chord] of chordsOf(bindings)) if (matches(event, code, chord, apple)) return command
+	for (const [command, chord] of chordsOf(bindings)) if (matchesChord(event, chord, apple)) return command
 
 	return undefined
 }

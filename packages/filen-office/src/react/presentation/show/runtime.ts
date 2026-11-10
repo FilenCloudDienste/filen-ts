@@ -1,3 +1,4 @@
+import { isMacPlatform } from "@filen/shared/keymap"
 import type {
 	CompiledTimegraph,
 	LayerState,
@@ -365,10 +366,7 @@ type Listeners = {
 }
 
 function modifierOf(event: { readonly metaKey: boolean; readonly ctrlKey: boolean }): boolean {
-	const platform: unknown = Reflect.get(Reflect.get(globalThis, "navigator") ?? {}, "platform")
-	const apple = typeof platform === "string" && /Mac|iPhone|iPad/u.test(platform)
-
-	return apple ? event.metaKey : event.ctrlKey
+	return isMacPlatform() ? event.metaKey : event.ctrlKey
 }
 
 function stepOf(instance: TimegraphInstance): number {

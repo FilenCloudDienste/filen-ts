@@ -47,7 +47,7 @@ import {
 	normalisedRatio,
 	rotateLeft
 } from "@/features/preview/imageEdit/components/editorGeometry"
-import { matchesCombo } from "@/features/presentation/lib/keymap/editor"
+import { matchesCombo } from "@filen/shared/keymap"
 import { isMacPlatform } from "@/lib/keymap/kbd.logic"
 import { Kbd } from "@/lib/keymap/kbd"
 import { useComboFor } from "@/lib/keymap/registry"

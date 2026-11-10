@@ -1,18 +1,31 @@
 import { isPdfCommandEnabled, PDF_BASE_SCALE, type PdfViewerCommand, type PdfViewerState } from "@filen/office/dom/pdf"
-import { matchesCombo } from "@/features/presentation/lib/keymap/editor"
+import { matchesCombo, type ChordEvent } from "@filen/shared/keymap"
 import { PDF_VIEWER_ACTIONS, type PdfViewerAction } from "@/features/preview/lib/keymap"
+import { browserZoomKey, matchesOverride, type BrowserZoomKey } from "@/lib/keymap/browserZoom"
 import { isMacPlatform } from "@/lib/keymap/kbd.logic"
 
-type KeyEvent = Parameters<typeof matchesCombo>[0]
+const ZOOM_ACTIONS: Readonly<Record<BrowserZoomKey, PdfViewerAction>> = {
+	in: "preview.pdfZoomIn",
+	out: "preview.pdfZoomOut",
+	reset: "preview.pdfZoomReset"
+}
 
-// The PDF viewer action a keydown is, under `overrides` (the user's combos by action id). Matched by the key's
-// character, as the browser's own page zoom is, so the layout that puts "+" elsewhere still zooms the document.
+// The PDF viewer action a keydown is, under `overrides` (the user's combos by action id), by physical key as every
+// shortcut is matched (@filen/shared/keymap). The browser's own zoom keys, read by character, zoom the document ahead
+// of the default bindings, so no layout zooms the page in its place or hits another default there (a German keyboard's
+// "+" is the US "]", rotate); a key the user bound to an action stays that action.
 export function pdfViewerKey(
-	event: KeyEvent,
+	event: ChordEvent,
 	overrides: Readonly<Record<string, string>>,
 	mac: boolean = isMacPlatform()
 ): PdfViewerAction | undefined {
-	return PDF_VIEWER_ACTIONS.find(action => matchesCombo(event, overrides[action.id] ?? action.defaultCombo, mac))?.id
+	const zoom = browserZoomKey(event, mac)
+
+	if (zoom !== undefined) {
+		return PDF_VIEWER_ACTIONS.find(def => matchesOverride(event, overrides[def.id], mac))?.id ?? ZOOM_ACTIONS[zoom]
+	}
+
+	return PDF_VIEWER_ACTIONS.find(def => matchesCombo(event, overrides[def.id] ?? def.defaultCombo, mac))?.id
 }
 
 // The command an action runs in `state`, or null when it cannot run (zoom at its limit): the key is still the

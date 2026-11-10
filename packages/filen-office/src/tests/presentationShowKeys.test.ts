@@ -1,13 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
 import { slideRef } from "../core/presentation/model"
 import { createInkStore } from "../react/presentation/ink/store"
-import {
-	createShowKeys,
-	DEFAULT_SHOW_BINDINGS,
-	parseShowCombo,
-	showKeyCommand,
-	type ShowKeyEvent
-} from "../react/presentation/presenter/keys"
+import { createShowKeys, DEFAULT_SHOW_BINDINGS, showKeyCommand, type ShowKeyEvent } from "../react/presentation/presenter/keys"
 import { createShowSwipe } from "../react/presentation/presenter/swipe"
 import { formatElapsed, pauseTimer, resetTimer, resumeTimer, startShowTimer, timerElapsed } from "../react/presentation/presenter/timer"
 import { unavailableShowController, type ShowController } from "../react/presentation/show/controller"
@@ -82,8 +76,10 @@ describe("show keys", () => {
 		expect(command("Backspace")).toBe("previous")
 		expect(command("Period", { key: "." })).toBe("black")
 		expect(command("Comma", { key: "," })).toBe("white")
-		// The recorder's tokens for those keys.
-		expect(parseShowCombo("period,comma").map(chord => chord.codes)).toEqual([["Period"], ["Comma"]])
+		// The recorder's tokens for those keys, and the characters older combos spelled them with.
+		expect(showKeyCommand(key("Period"), { ...DEFAULT_SHOW_BINDINGS, black: "period" }, false)).toBe("black")
+		expect(showKeyCommand(key("Comma"), { ...DEFAULT_SHOW_BINDINGS, white: "," }, false)).toBe("white")
+		expect(showKeyCommand(key("Equal", { key: "=" }), { ...DEFAULT_SHOW_BINDINGS, togglePointer: "a,=" }, false)).toBe("togglePointer")
 	})
 
 	it("matches a recorded key the named table does not list by its code", () => {
@@ -114,9 +110,12 @@ describe("show keys", () => {
 		expect(plain.calls).toEqual([])
 	})
 
-	it("parses alternatives and skips sequences", () => {
-		expect(parseShowCombo("mod+shift+x,n").map(chord => chord.codes)).toEqual([["KeyX"], ["KeyN"]])
-		expect(parseShowCombo("g>i")).toEqual([])
+	it("matches every alternative and skips sequences", () => {
+		const bindings = { ...DEFAULT_SHOW_BINDINGS, laser: "mod+shift+x,n", pen: "g>i" }
+
+		expect(showKeyCommand(key("KeyX", { ctrlKey: true, shiftKey: true }), bindings, false)).toBe("laser")
+		expect(showKeyCommand(key("KeyN"), { ...bindings, next: "" }, false)).toBe("laser")
+		expect(showKeyCommand(key("KeyG"), bindings, false)).toBeUndefined()
 	})
 
 	it("drives the controller, goes to a typed slide number on Enter and stops the key there", () => {

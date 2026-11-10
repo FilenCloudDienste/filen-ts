@@ -24,7 +24,7 @@ describe("presentation paragraph key defaults", () => {
 		const bindings = await bindingsOn("Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
 
 		for (const command of COMMANDS) expect(bindings[command], command).toBe(DEFAULT_TEXT_BINDINGS[command])
-		expect(bindings.promote).toBe("alt+shift+left")
+		expect(bindings.promote).toBe("alt+shift+arrowleft")
 		expect(bindings.nextPlaceholder).toBe("mod+enter")
 	})
 
@@ -32,7 +32,7 @@ describe("presentation paragraph key defaults", () => {
 		const bindings = await bindingsOn("Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0)")
 
 		for (const command of COMMANDS) expect(bindings[command], command).toBe(APPLE_TEXT_BINDINGS[command])
-		expect(bindings.demote).toBe("mod+]")
+		expect(bindings.demote).toBe("mod+bracketright")
 		expect(bindings.moveParagraphUp).toBe("")
 	})
 

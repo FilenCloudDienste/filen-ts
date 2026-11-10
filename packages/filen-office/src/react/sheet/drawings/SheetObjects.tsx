@@ -28,6 +28,7 @@ import {
 	sourceOf,
 	type PictureRegion
 } from "./canvasPicture"
+import { layoutKey } from "../keys"
 import { FittedPictures, fittedSize, wantsFit } from "./fitted"
 import { anchorBox, anchorOf, draggedBox, nearView, placeOnScreen, type Handle, type SheetBox } from "./geometry"
 
@@ -578,9 +579,9 @@ export function SheetObjects(props: SheetObjectsProps) {
 				props.onSelect(null)
 				handle.current?.focus()
 			}
-		} else if ((event.ctrlKey || event.metaKey) && (event.key.toLowerCase() === "z" || event.key.toLowerCase() === "y")) {
-			// Undo and redo, as from the grid.
-			void (event.key.toLowerCase() === "y" || event.shiftKey ? grid.redo() : grid.undo())
+		} else if ((event.ctrlKey || event.metaKey) && (layoutKey(event).toLowerCase() === "z" || layoutKey(event).toLowerCase() === "y")) {
+			// Undo and redo, as from the grid, which also reads another script's letters by their Latin key.
+			void (layoutKey(event).toLowerCase() === "y" || event.shiftKey ? grid.redo() : grid.undo())
 		} else if (event.key.length !== 1 || event.ctrlKey || event.metaKey || event.altKey) {
 			return
 		}

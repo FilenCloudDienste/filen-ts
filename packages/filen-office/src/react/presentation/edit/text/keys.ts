@@ -8,10 +8,12 @@ import {
 	type TextCommand,
 	type TextDefaults
 } from "../../../../core/presentation/edit/commands/text"
-import { matchesCombo, parseCombo, type KeyLike } from "../keyboard"
+import { matchesChord, parseCombo, type Chord } from "@filen/shared/keymap"
+import type { KeyLike } from "../keyboard"
 
-// The keys of a body being edited that a user may rebind, as combos in the app keymap's syntax ("mod+shift+."), so
-// the body and the shortcuts list agree. The keys PowerPoint fixes (Enter, Backspace, Delete, arrows, Home, End,
+// The keys of a body being edited that a user may rebind, as combos in the app keymap's syntax
+// (@filen/shared/keymap: "mod+shift+period", alternatives comma-separated, keys matched by physical key), so the body
+// and the shortcuts list agree. The keys PowerPoint fixes (Enter, Backspace, Delete, arrows, Home, End,
 // Escape, Mod+A, Mod+Z, Mod+Y) are the editor's own. `link` asks the host for the link dialog; `nextPlaceholder` asks
 // it to open the next placeholder (or a new slide). An empty combo is unbound.
 
@@ -47,11 +49,11 @@ export const DEFAULT_TEXT_BINDINGS: TextKeyBindings = {
 	bold: "mod+b",
 	italic: "mod+i",
 	underline: "mod+u",
-	subscript: "mod+ctrl+=",
-	superscript: "mod+ctrl+shift+=",
+	subscript: "mod+ctrl+equal",
+	superscript: "mod+ctrl+shift+equal",
 	clearFormatting: "ctrl+space",
-	growFont: "mod+shift+.",
-	shrinkFont: "mod+shift+,",
+	growFont: "mod+shift+period",
+	shrinkFont: "mod+shift+comma",
 	alignLeft: "mod+l",
 	alignCenter: "mod+e",
 	alignRight: "mod+r",
@@ -60,10 +62,10 @@ export const DEFAULT_TEXT_BINDINGS: TextKeyBindings = {
 	levelDown: "tab",
 	levelUp: "shift+tab",
 	link: "mod+k",
-	promote: "alt+shift+left",
-	demote: "alt+shift+right",
-	moveParagraphUp: "alt+shift+up",
-	moveParagraphDown: "alt+shift+down",
+	promote: "alt+shift+arrowleft",
+	demote: "alt+shift+arrowright",
+	moveParagraphUp: "alt+shift+arrowup",
+	moveParagraphDown: "alt+shift+arrowdown",
 	nextPlaceholder: "mod+enter"
 }
 
@@ -71,8 +73,8 @@ export const DEFAULT_TEXT_BINDINGS: TextKeyBindings = {
 // (Option+Shift+arrows select by word there).
 export const APPLE_TEXT_BINDINGS: TextKeyBindings = {
 	...DEFAULT_TEXT_BINDINGS,
-	promote: "mod+[",
-	demote: "mod+]",
+	promote: "mod+bracketleft",
+	demote: "mod+bracketright",
 	moveParagraphUp: "",
 	moveParagraphDown: "",
 	nextPlaceholder: ""
@@ -82,22 +84,19 @@ export function defaultTextBindings(apple: boolean): TextKeyBindings {
 	return apple ? APPLE_TEXT_BINDINGS : DEFAULT_TEXT_BINDINGS
 }
 
-type Parsed = readonly (readonly [TextKeyCommand, NonNullable<ReturnType<typeof parseCombo>>])[]
+type Parsed = readonly (readonly [TextKeyCommand, Chord])[]
 
-// Parsed once per bindings object.
+// Parsed once per bindings object, every alternative of a combo.
 const parsed = new WeakMap<TextKeyBindings, Parsed>()
 
 function combosOf(bindings: TextKeyBindings): Parsed {
 	let out = parsed.get(bindings)
 
 	if (out === undefined) {
-		const list: (readonly [TextKeyCommand, NonNullable<ReturnType<typeof parseCombo>>])[] = []
+		const list: (readonly [TextKeyCommand, Chord])[] = []
 
-		for (const command of Object.keys(bindings) as TextKeyCommand[]) {
-			const combo = parseCombo(bindings[command])
-
-			if (combo !== undefined) list.push([command, combo])
-		}
+		for (const command of Object.keys(bindings) as TextKeyCommand[])
+			for (const chord of parseCombo(bindings[command])) list.push([command, chord])
 
 		out = list
 		parsed.set(bindings, out)
@@ -108,7 +107,7 @@ function combosOf(bindings: TextKeyBindings): Parsed {
 
 // The rebindable command `event` is, if any; `apple`: Mod is Cmd (else Ctrl).
 export function textKeyCommand(event: KeyLike, bindings: TextKeyBindings, apple: boolean): TextKeyCommand | undefined {
-	for (const [command, combo] of combosOf(bindings)) if (matchesCombo(event, combo, apple)) return command
+	for (const [command, chord] of combosOf(bindings)) if (matchesChord(event, chord, apple)) return command
 
 	return undefined
 }

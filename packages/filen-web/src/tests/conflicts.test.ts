@@ -108,6 +108,28 @@ describe("conflictingActions", () => {
 		expect(ids(conflictingActions(actions, "mod+shift+arrowright", "drive.rename"))).toEqual(["audio.next"])
 	})
 
+	it("reports one key across its spellings: a character, a recorded token, an older escaped comma", () => {
+		const actions = [
+			action("preview.zoomOut", "editor", "mod+-"),
+			action("preview.shrink", "editor", "mod+shift+,"),
+			action("preview.pointer", "editor", "a,="),
+			action("drive.rename", "drive", "f2")
+		]
+
+		expect(ids(conflictingActions(actions, "mod+minus", "drive.rename", false))).toEqual(["preview.zoomOut"])
+		expect(ids(conflictingActions(actions, "shift+mod+comma", "drive.rename", false))).toEqual(["preview.shrink"])
+		expect(ids(conflictingActions(actions, "equal", "drive.rename", false))).toEqual(["preview.pointer"])
+	})
+
+	it("compares keystrokes on the given platform: Mod is Ctrl off a Mac, Cmd on one", () => {
+		const actions = [action("preview.zoomIn", "editor", "mod+equal"), action("preview.subscript", "editor", "")]
+
+		expect(ids(conflictingActions(actions, "mod+ctrl+=", "preview.subscript", false))).toEqual(["preview.zoomIn"])
+		expect(ids(conflictingActions(actions, "mod+ctrl+=", "preview.subscript", true))).toEqual([])
+		expect(ids(conflictingActions(actions, "ctrl+equal", "preview.subscript", false))).toEqual(["preview.zoomIn"])
+		expect(ids(conflictingActions(actions, "meta+equal", "preview.subscript", true))).toEqual(["preview.zoomIn"])
+	})
+
 	it("never reports the action being rebound against itself", () => {
 		const actions = [action("drive.selectAll", "drive", "mod+a")]
 

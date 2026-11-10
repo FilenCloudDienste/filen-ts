@@ -54,6 +54,7 @@ import { usePresentationEditor } from "@/features/presentation/hooks/usePresenta
 import { presentationShortcutKeys } from "@/features/presentation/lib/keymap/editor"
 import type { ClipboardScope } from "@/features/presentation/lib/presentationClipboard"
 import { isMacPlatform } from "@/lib/keymap/kbd.logic"
+import { useKeyboardLayout } from "@/lib/keymap/layout"
 import { useOverrides } from "@/lib/keymap/registry"
 
 // The slide list's context menu (right click, or a long press on touch): the slide commands on the selection, as in
@@ -147,6 +148,7 @@ export function SlideListContextMenu({ children }: { children: ReactNode }) {
 	const { t } = useTranslation("preview")
 	const scope = usePresentationEditor()
 	const overrides = useOverrides()
+	const keyLayout = useKeyboardLayout()
 
 	if (scope?.editor.editable !== true) return children
 
@@ -187,7 +189,7 @@ export function SlideListContextMenu({ children }: { children: ReactNode }) {
 				>
 					<PlusIcon />
 					{t("previewPptxEditorMenuNewSlide")}
-					<Shortcut keys={presentationShortcutKeys("presentation.newSlide", overrides)} />
+					<Shortcut keys={presentationShortcutKeys("presentation.newSlide", overrides, keyLayout)} />
 				</ContextMenuItem>
 				<ContextMenuItem
 					disabled={!any}
@@ -195,7 +197,7 @@ export function SlideListContextMenu({ children }: { children: ReactNode }) {
 				>
 					<CopyPlusIcon />
 					{t("previewPptxEditorMenuDuplicate")}
-					<Shortcut keys={presentationShortcutKeys("presentation.duplicateSlide", overrides)} />
+					<Shortcut keys={presentationShortcutKeys("presentation.duplicateSlide", overrides, keyLayout)} />
 				</ContextMenuItem>
 				<ContextMenuItem
 					disabled={!any}
@@ -203,7 +205,7 @@ export function SlideListContextMenu({ children }: { children: ReactNode }) {
 				>
 					<Trash2Icon />
 					{t("previewPptxEditorMenuDelete")}
-					<Shortcut keys={presentationShortcutKeys("presentation.deleteSlide", overrides)} />
+					<Shortcut keys={presentationShortcutKeys("presentation.deleteSlide", overrides, keyLayout)} />
 				</ContextMenuItem>
 				<ContextMenuSeparator />
 				<ContextMenuSub>
@@ -247,7 +249,7 @@ export function SlideListContextMenu({ children }: { children: ReactNode }) {
 							}}
 						>
 							{t("previewPptxEditorMenuMoveFirst")}
-							<Shortcut keys={presentationShortcutKeys("presentation.moveSlideFirst", overrides)} />
+							<Shortcut keys={presentationShortcutKeys("presentation.moveSlideFirst", overrides, keyLayout)} />
 						</ContextMenuItem>
 						<ContextMenuItem
 							disabled={firstSelected <= 0}
@@ -256,7 +258,7 @@ export function SlideListContextMenu({ children }: { children: ReactNode }) {
 							}}
 						>
 							{t("previewPptxEditorMenuMoveUp")}
-							<Shortcut keys={presentationShortcutKeys("presentation.moveSlideUp", overrides)} />
+							<Shortcut keys={presentationShortcutKeys("presentation.moveSlideUp", overrides, keyLayout)} />
 						</ContextMenuItem>
 						<ContextMenuItem
 							disabled={lastSelected >= count - 1}
@@ -265,7 +267,7 @@ export function SlideListContextMenu({ children }: { children: ReactNode }) {
 							}}
 						>
 							{t("previewPptxEditorMenuMoveDown")}
-							<Shortcut keys={presentationShortcutKeys("presentation.moveSlideDown", overrides)} />
+							<Shortcut keys={presentationShortcutKeys("presentation.moveSlideDown", overrides, keyLayout)} />
 						</ContextMenuItem>
 						<ContextMenuItem
 							disabled={lastSelected >= count - 1}
@@ -274,7 +276,7 @@ export function SlideListContextMenu({ children }: { children: ReactNode }) {
 							}}
 						>
 							{t("previewPptxEditorMenuMoveLast")}
-							<Shortcut keys={presentationShortcutKeys("presentation.moveSlideLast", overrides)} />
+							<Shortcut keys={presentationShortcutKeys("presentation.moveSlideLast", overrides, keyLayout)} />
 						</ContextMenuItem>
 					</ContextMenuSubContent>
 				</ContextMenuSub>

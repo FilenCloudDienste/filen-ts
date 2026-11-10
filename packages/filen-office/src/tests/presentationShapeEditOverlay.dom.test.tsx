@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { isMacPlatform } from "@filen/shared/keymap"
 import { act } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -34,7 +35,8 @@ const BINDINGS: ObjectKeyBindings = {
 	bringForward: "mod+]",
 	sendBackward: "mod+["
 }
-const APPLE = /Mac|iPhone|iPad/u.test(String(Reflect.get(globalThis.navigator, "platform")))
+// The app keymap's own Mac test, which the canvas reads.
+const APPLE = isMacPlatform()
 const MOD = APPLE ? { metaKey: true } : { ctrlKey: true }
 
 interface Shape {
@@ -233,7 +235,7 @@ describe("the canvas layer's pointer", () => {
 	})
 
 	it("Control+click on a Mac is the secondary click, not an additive press", () => {
-		vi.spyOn(navigator, "platform", "get").mockReturnValue("MacIntel")
+		vi.spyOn(navigator, "userAgent", "get").mockReturnValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0)")
 		mount([{ xfrm: box(100, 100, 200, 100) }, { xfrm: box(400, 100, 100, 100) }])
 		click(150, 150)
 		click(450, 150, { ctrlKey: true, pointerType: "mouse" })

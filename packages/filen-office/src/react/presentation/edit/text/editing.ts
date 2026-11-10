@@ -1,3 +1,4 @@
+import { isMacPlatform } from "@filen/shared/keymap"
 import { useSyncExternalStore } from "react"
 import { EditorState } from "prosemirror-state"
 import { oneStep } from "../../../../core/presentation/edit/commands/batch"
@@ -57,9 +58,9 @@ export type TypedAhead =
 	| { readonly kind: "backspace" }
 	| { readonly kind: "command"; readonly command: TextKeyCommand }
 
-// Whether the platform's command key is Meta (Apple's).
+// Whether the platform's command key is Meta (Apple's): the app's one Mac test, shared with its keymap.
 export function applePlatform(): boolean {
-	return /Mac|iPhone|iPad/u.test(String(Reflect.get(Reflect.get(globalThis, "navigator") ?? {}, "platform") ?? ""))
+	return isMacPlatform()
 }
 
 // Whether a key goes to a field of its own (an input, a text area, an editable element), not to the body opening.

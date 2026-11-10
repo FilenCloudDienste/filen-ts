@@ -6,13 +6,17 @@ import {
 	codeKeymap,
 	codeLanguageSupport,
 	openReplacePanel,
-	openSearchPanel
+	openSearchPanel,
+	type CodeBinding
 } from "@filen/office/dom/code"
 import { isCodeLanguageId } from "@filen/office/core/code"
 import { insertLink, MARKDOWN_MARKERS, toggleInlineMarker, toggleItalic } from "@filen/office/core/markdown"
+import { isMacPlatform } from "@/lib/keymap/kbd.logic"
 import { useComboFor } from "@/lib/keymap/registry"
-import { codeMirrorKeys } from "@/features/preview/lib/editorKeys.logic"
+import { editorKeyMatcher } from "@/features/preview/lib/editorKeys.logic"
 import "@/features/preview/lib/codeMirrorTheme.css"
+
+const IS_MAC = isMacPlatform()
 
 // The language, theme and keymap plumbing every CodeMirror surface shares: the editor/reader
 // (codeMirrorSource.tsx) and the remote-change comparison (remoteCompare.tsx). The theme is the package's
@@ -46,11 +50,18 @@ export function useEditorKeymap(markdown: boolean, commands?: EditorKeymapComman
 	const strikethrough = useComboFor("editor.strikethrough")
 	const code = useComboFor("editor.code")
 	const link = useComboFor("editor.link")
-	const bindings: { keys: readonly string[]; run: Command; scope: string }[] = [
-		// Find and replace also answer with focus in the search panel's own fields.
-		{ keys: codeMirrorKeys(find), run: commands?.find ?? openSearchPanel, scope: CODE_SEARCH_SCOPE },
-		{ keys: codeMirrorKeys(replace), run: commands?.replace ?? openReplacePanel, scope: CODE_SEARCH_SCOPE }
-	]
+	const bindings: CodeBinding[] = []
+	const bind = (combo: string, run: Command, scope: string): void => {
+		const matches = editorKeyMatcher(combo, IS_MAC)
+
+		if (matches !== undefined) {
+			bindings.push({ keys: [], matches, run, scope })
+		}
+	}
+
+	// Find and replace also answer with focus in the search panel's own fields.
+	bind(find, commands?.find ?? openSearchPanel, CODE_SEARCH_SCOPE)
+	bind(replace, commands?.replace ?? openReplacePanel, CODE_SEARCH_SCOPE)
 
 	// Ahead of CodeMirror's own keys for these, which open its panels.
 	if (commands !== undefined) {
@@ -62,13 +73,11 @@ export function useEditorKeymap(markdown: boolean, commands?: EditorKeymapComman
 	}
 
 	if (markdown) {
-		bindings.push(
-			{ keys: codeMirrorKeys(bold), run: toggleInlineMarker(MARKDOWN_MARKERS.bold), scope: CODE_EDITOR_SCOPE },
-			{ keys: codeMirrorKeys(italic), run: toggleItalic, scope: CODE_EDITOR_SCOPE },
-			{ keys: codeMirrorKeys(strikethrough), run: toggleInlineMarker(MARKDOWN_MARKERS.strikethrough), scope: CODE_EDITOR_SCOPE },
-			{ keys: codeMirrorKeys(code), run: toggleInlineMarker(MARKDOWN_MARKERS.code), scope: CODE_EDITOR_SCOPE },
-			{ keys: codeMirrorKeys(link), run: insertLink, scope: CODE_EDITOR_SCOPE }
-		)
+		bind(bold, toggleInlineMarker(MARKDOWN_MARKERS.bold), CODE_EDITOR_SCOPE)
+		bind(italic, toggleItalic, CODE_EDITOR_SCOPE)
+		bind(strikethrough, toggleInlineMarker(MARKDOWN_MARKERS.strikethrough), CODE_EDITOR_SCOPE)
+		bind(code, toggleInlineMarker(MARKDOWN_MARKERS.code), CODE_EDITOR_SCOPE)
+		bind(link, insertLink, CODE_EDITOR_SCOPE)
 	}
 
 	return codeKeymap(bindings)

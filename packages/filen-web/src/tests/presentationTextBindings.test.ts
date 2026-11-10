@@ -19,8 +19,8 @@ describe("presentation text key bindings", () => {
 	it("default to the text editor's own PowerPoint keys, subscript, superscript and clear formatting included", () => {
 		const bindings = presentationTextBindings({})
 
-		expect(bindings.subscript).toBe("mod+ctrl+=")
-		expect(bindings.superscript).toBe("mod+ctrl+shift+=")
+		expect(bindings.subscript).toBe("mod+ctrl+equal")
+		expect(bindings.superscript).toBe("mod+ctrl+shift+equal")
 		expect(bindings.clearFormatting).toBe("ctrl+space")
 
 		for (const command of ["subscript", "superscript", "clearFormatting"] as const) {

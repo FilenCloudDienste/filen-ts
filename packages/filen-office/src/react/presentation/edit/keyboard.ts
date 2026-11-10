@@ -1,3 +1,4 @@
+import { matchesChord, parseCombo, type Chord, type ChordEvent } from "@filen/shared/keymap"
 import type { NudgeDirection } from "../../../core/presentation/edit/commands/shape"
 import type { ZOrder } from "../../../core/presentation/edit/ops"
 
@@ -5,8 +6,8 @@ import type { ZOrder } from "../../../core/presentation/edit/ops"
 // Mac Cmd+arrows too, and Shift+arrows resize; elsewhere Shift+arrows nudge further), Alt+Left/Right turn 15°, Mod+D
 // duplicates the objects (the slide's Mod+D is the slide list's), Delete/Backspace, Tab/Shift+Tab to the
 // next/previous shape, Enter into the text, Escape. The commands a user may rebind (select all, group, ungroup,
-// z-order) come as combos from the app's keymap, in react-hotkeys-hook's syntax ("mod+shift+g"), so the canvas and
-// the shortcuts list agree.
+// z-order) come as combos from the app's keymap (@filen/shared/keymap: "mod+shift+g", alternatives comma-separated,
+// keys matched by physical key), so the canvas and the shortcuts list agree.
 
 export type ObjectCommand = "selectAll" | "group" | "ungroup" | "bringToFront" | "sendToBack" | "bringForward" | "sendBackward"
 
@@ -42,123 +43,26 @@ export type ObjectKeyAction =
 	// A character typed on the selection: it goes into the shape's text (PowerPoint's "select the shape, then type").
 	| { readonly kind: "type"; readonly text: string }
 
-export interface KeyLike {
-	readonly key: string
-	readonly code: string
-	readonly shiftKey: boolean
-	readonly ctrlKey: boolean
-	readonly metaKey: boolean
-	readonly altKey: boolean
+export interface KeyLike extends ChordEvent {
 	// An input method's key (its composition's): never typed as is.
 	readonly isComposing?: boolean
 }
 
-interface Combo {
-	readonly mod: boolean
-	readonly ctrl: boolean
-	readonly meta: boolean
-	readonly shift: boolean
-	readonly alt: boolean
-	// KeyboardEvent.code of the key (layout-independent, so Shift+] is still BracketRight).
-	readonly code: string
-}
-
-const NAMED_CODES: Readonly<Record<string, string>> = {
-	"[": "BracketLeft",
-	"]": "BracketRight",
-	"-": "Minus",
-	"=": "Equal",
-	",": "Comma",
-	".": "Period",
-	"/": "Slash",
-	";": "Semicolon",
-	"'": "Quote",
-	"`": "Backquote",
-	"\\": "Backslash",
-	space: "Space",
-	enter: "Enter",
-	tab: "Tab",
-	escape: "Escape",
-	esc: "Escape",
-	delete: "Delete",
-	backspace: "Backspace",
-	up: "ArrowUp",
-	down: "ArrowDown",
-	left: "ArrowLeft",
-	right: "ArrowRight",
-	arrowup: "ArrowUp",
-	arrowdown: "ArrowDown",
-	arrowleft: "ArrowLeft",
-	arrowright: "ArrowRight"
-}
-
-function codeOf(key: string): string {
-	const named = NAMED_CODES[key]
-
-	if (named !== undefined) return named
-	if (/^[a-z]$/u.test(key)) return `Key${key.toUpperCase()}`
-	if (/^[0-9]$/u.test(key)) return `Digit${key}`
-	if (/^f([1-9]|1[0-9]|2[0-4])$/u.test(key)) return key.toUpperCase()
-
-	return key
-}
-
-// One combo of react-hotkeys-hook's syntax (modifiers and one key joined by "+"); undefined for a sequence or an
-// empty one.
-export function parseCombo(combo: string): Combo | undefined {
-	const parts = combo
-		.toLowerCase()
-		.split("+")
-		.map(part => part.trim())
-	const key = parts.pop()
-
-	if (key === undefined || key === "" || combo.includes(">")) return undefined
-
-	const has = (name: string): boolean => parts.includes(name)
-
-	return {
-		mod: has("mod"),
-		ctrl: has("ctrl") || has("control"),
-		meta: has("meta") || has("cmd") || has("command"),
-		shift: has("shift"),
-		alt: has("alt") || has("option"),
-		code: codeOf(key)
-	}
-}
-
-// Whether `event` is `combo`; `apple`: Mod is Cmd (else Ctrl).
-export function matchesCombo(event: KeyLike, combo: Combo, apple: boolean): boolean {
-	const ctrl = combo.ctrl || (combo.mod && !apple)
-	const meta = combo.meta || (combo.mod && apple)
-
-	return (
-		event.code === combo.code &&
-		event.ctrlKey === ctrl &&
-		event.metaKey === meta &&
-		event.shiftKey === combo.shift &&
-		event.altKey === combo.alt
-	)
-}
-
-const DUPLICATE: Combo = { mod: true, ctrl: false, meta: false, shift: false, alt: false, code: "KeyD" }
+const DUPLICATE: Chord = { mod: true, meta: false, ctrl: false, alt: false, shift: false, key: "d" }
 
 const ARROWS: Readonly<Record<string, NudgeDirection>> = { ArrowLeft: "left", ArrowRight: "right", ArrowUp: "up", ArrowDown: "down" }
 
-// Parsed once per bindings object.
-const parsed = new WeakMap<ObjectKeyBindings, readonly (readonly [ObjectCommand, Combo])[]>()
+// Parsed once per bindings object, every alternative of a combo.
+const parsed = new WeakMap<ObjectKeyBindings, readonly (readonly [ObjectCommand, Chord])[]>()
 
-function combosOf(bindings: ObjectKeyBindings): readonly (readonly [ObjectCommand, Combo])[] {
+function combosOf(bindings: ObjectKeyBindings): readonly (readonly [ObjectCommand, Chord])[] {
 	const known = parsed.get(bindings)
 
 	if (known !== undefined) return known
 
-	const out: (readonly [ObjectCommand, Combo])[] = []
+	const out: (readonly [ObjectCommand, Chord])[] = []
 
-	for (const command of OBJECT_COMMANDS) {
-		const combo = parseCombo(bindings[command])
-
-		if (combo !== undefined) out.push([command, combo])
-	}
+	for (const command of OBJECT_COMMANDS) for (const chord of parseCombo(bindings[command])) out.push([command, chord])
 
 	parsed.set(bindings, out)
 
@@ -183,9 +87,9 @@ function arrowAction(event: KeyLike, direction: NudgeDirection, apple: boolean):
 
 // What a key press on the canvas does; undefined: not the canvas's (it goes on to the editor and the app).
 export function objectKeyAction(event: KeyLike, bindings: ObjectKeyBindings, apple: boolean): ObjectKeyAction | undefined {
-	for (const [command, combo] of combosOf(bindings)) if (matchesCombo(event, combo, apple)) return { kind: "command", command }
+	for (const [command, chord] of combosOf(bindings)) if (matchesChord(event, chord, apple)) return { kind: "command", command }
 
-	if (matchesCombo(event, DUPLICATE, apple)) return { kind: "duplicate" }
+	if (matchesChord(event, DUPLICATE, apple)) return { kind: "duplicate" }
 
 	const modified = event.ctrlKey || event.metaKey || event.altKey
 	const direction = ARROWS[event.code] ?? ARROWS[event.key]

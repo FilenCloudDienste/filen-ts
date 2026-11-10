@@ -445,13 +445,9 @@ export function shortcutOf(event: ShortcutKey, mac: boolean): SheetShortcut | nu
 	return null
 }
 
-// Whether the page runs on a Mac (Command is the primary modifier), read from the user agent as an app's own
-// keymap reads it (react-hotkeys-hook), so the grid and the app agree on which key is Mod. An iPhone or iPad is not.
-export function isMacPlatform(): boolean {
-	const agent = (globalThis as { readonly navigator?: { readonly userAgent?: string } }).navigator?.userAgent ?? ""
-
-	return /mac/i.test(agent) && !/iphone|ipad|ipod/i.test(agent)
-}
+// Whether the page runs on a Mac (Command is the primary modifier): the app keymap's own test, so the grid and the app
+// agree on which key is Mod.
+export { isMacPlatform } from "@filen/shared/keymap"
 
 // The number formats Excel's shortcuts apply ("Keyboard shortcuts in Excel", Format cells): General, Currency with
 // two decimals and negatives in parentheses, Percentage without decimals, Scientific with two decimals, the date

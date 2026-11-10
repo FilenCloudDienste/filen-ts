@@ -1,5 +1,7 @@
+import { chordLabels, matchesCombo, parseCombo, type ChordEvent, type KeyboardLayout } from "@filen/shared/keymap"
 import type { ActionDef } from "@/lib/keymap/registry"
-import { comboAlternatives, isMacPlatform } from "@/lib/keymap/kbd.logic"
+import { browserZoomKey, matchesOverride } from "@/lib/keymap/browserZoom"
+import { isMacPlatform } from "@/lib/keymap/kbd.logic"
 
 // The presentation editor's own commands: slides (new, duplicate, delete, move) and undo/redo, PowerPoint's keys.
 // New slide is Ctrl+M on every platform, as in PowerPoint for the web (Cmd+M minimizes the window on a Mac).
@@ -7,8 +9,10 @@ import { comboAlternatives, isMacPlatform } from "@/lib/keymap/kbd.logic"
 // selected objects (the canvas takes it before the editor).
 // They act where the editor has focus (its rail and slide), so the editor matches them on its own keydown (the
 // spreadsheet grid's precedent) against the combo in effect: the default here, or the user's once the shortcuts
-// catalog lists them. Save is the overlay's preview.save (Mod+S). Zoom in is Ctrl+Plus wherever the layout puts "+"
-// (US: Ctrl+= or Ctrl+Shift+=, the numpad's, a German keyboard's own key); Zoom to fit is Ctrl+Alt+O.
+// catalog lists them. Save is the overlay's preview.save (Mod+S). Zoom in is Mod with the key a US layout types "="
+// and "+" on (Shift or not) or the numpad's +, zoom out Mod with "-" or the numpad's -: keys are physical
+// (@filen/shared/keymap); the browser's own zoom keys, by character, zoom the slide too (lib/keymap/browserZoom.ts).
+// Zoom to fit is Mod+Alt+O.
 export type PresentationEditorAction =
 	| "presentation.newSlide"
 	| "presentation.duplicateSlide"
@@ -65,11 +69,16 @@ export const PRESENTATION_EDITOR_ACTIONS: readonly (ActionDef & { readonly id: P
 	{ id: "presentation.selectAllSlides", defaultCombo: "mod+a", scope: "editor", descriptionKey: "preview:previewPptxEditorKeySelectAll" },
 	{
 		id: "presentation.zoomIn",
-		defaultCombo: "mod+plus,mod+=,mod+shift+plus",
+		defaultCombo: "mod+equal,mod+shift+equal,mod+add",
 		scope: "editor",
 		descriptionKey: "preview:previewPptxEditorKeyZoomIn"
 	},
-	{ id: "presentation.zoomOut", defaultCombo: "mod+-", scope: "editor", descriptionKey: "preview:previewPptxEditorKeyZoomOut" },
+	{
+		id: "presentation.zoomOut",
+		defaultCombo: "mod+minus,mod+subtract",
+		scope: "editor",
+		descriptionKey: "preview:previewPptxEditorKeyZoomOut"
+	},
 	{ id: "presentation.zoomFit", defaultCombo: "mod+alt+o", scope: "editor", descriptionKey: "preview:previewPptxEditorKeyZoomFit" },
 	// PowerPoint's Alt+F10 (Home ▸ Arrange ▸ Selection Pane).
 	{
@@ -94,102 +103,35 @@ export const PRESENTATION_EDITOR_ACTIONS: readonly (ActionDef & { readonly id: P
 	}
 ]
 
-const MODIFIERS = new Set(["mod", "ctrl", "control", "meta", "cmd", "command", "shift", "alt", "option"])
-
-// Key names a combo cannot spell as the character ("+" separates a chord's keys).
-const KEY_TOKENS: Readonly<Record<string, string>> = { "+": "plus" }
-
-// The key a chord names: its character, else (with Alt, which turns a Mac's letters and digits into other
-// characters, Option+O into "ø") the physical key's letter or digit.
-function eventKey(event: { readonly key: string; readonly code?: string; readonly altKey: boolean }): string {
-	const key = event.key.toLowerCase()
-
-	if (event.altKey && !/^[a-z0-9]$/u.test(key) && event.code !== undefined) {
-		const physical = /^(?:Key([A-Z])|Digit([0-9]))$/u.exec(event.code)
-		const name = physical?.[1] ?? physical?.[2]
-
-		if (name !== undefined) return name.toLowerCase()
-	}
-
-	return KEY_TOKENS[key] ?? key
-}
-
-// Whether `event` is one chord of `combo` ("mod+shift+arrowup", alternatives comma-separated): the same modifiers
-// exactly, and the key by its name.
-export function matchesCombo(
-	event: {
-		readonly key: string
-		readonly code?: string
-		readonly ctrlKey: boolean
-		readonly metaKey: boolean
-		readonly shiftKey: boolean
-		readonly altKey: boolean
-	},
-	combo: string,
-	mac: boolean
-): boolean {
-	const key = eventKey(event)
-
-	return comboAlternatives(combo).some(tokens => {
-		const keys = tokens.filter(token => !MODIFIERS.has(token))
-		const has = (...names: string[]): boolean => tokens.some(token => names.includes(token))
-		const mod = has("mod")
-		const ctrl = has("ctrl", "control") || (mod && !mac)
-		const meta = has("meta", "cmd", "command") || (mod && mac)
-
-		return (
-			keys.length === 1 &&
-			keys[0] === key &&
-			event.ctrlKey === ctrl &&
-			event.metaKey === meta &&
-			event.shiftKey === has("shift") &&
-			event.altKey === has("alt", "option")
-		)
-	})
-}
-
-// The editor action a keydown is, under `overrides` (the user's combos by action id).
+// The editor action a keydown is, under `overrides` (the user's combos by action id). The browser's own zoom keys,
+// read by character, zoom the slide ahead of the default bindings, so no layout zooms the page in its place; a key the
+// user bound to an action stays that action.
 export function presentationEditorKey(
-	event: {
-		readonly key: string
-		readonly code?: string
-		readonly ctrlKey: boolean
-		readonly metaKey: boolean
-		readonly shiftKey: boolean
-		readonly altKey: boolean
-	},
+	event: ChordEvent,
 	overrides: Readonly<Record<string, string>>,
 	mac: boolean = isMacPlatform()
 ): PresentationEditorAction | undefined {
-	const def = PRESENTATION_EDITOR_ACTIONS.find(action => matchesCombo(event, overrides[action.id] ?? action.defaultCombo, mac))
+	const zoom = browserZoomKey(event, mac)
 
-	return def?.id
+	if (zoom === "in" || zoom === "out") {
+		return (
+			PRESENTATION_EDITOR_ACTIONS.find(action => matchesOverride(event, overrides[action.id], mac))?.id ??
+			(zoom === "in" ? "presentation.zoomIn" : "presentation.zoomOut")
+		)
+	}
+
+	return PRESENTATION_EDITOR_ACTIONS.find(action => matchesCombo(event, overrides[action.id] ?? action.defaultCombo, mac))?.id
 }
 
-const KEY_NAMES: Readonly<Record<string, readonly [mac: string, other: string]>> = {
-	mod: ["⌘", "Ctrl"],
-	ctrl: ["⌃", "Ctrl"],
-	shift: ["⇧", "Shift"],
-	alt: ["⌥", "Alt"],
-	arrowup: ["↑", "↑"],
-	arrowdown: ["↓", "↓"],
-	delete: ["Del", "Del"],
-	backspace: ["⌫", "Backspace"],
-	plus: ["+", "+"]
-}
-
-// The keys of an action's first combo as a tooltip shows them (KbdKeys).
+// The keys of an action's first combo as a tooltip shows them (KbdKeys), labelled for `layout` when it is known.
 export function presentationShortcutKeys(
 	id: PresentationEditorAction,
 	overrides: Readonly<Record<string, string>>,
+	layout: KeyboardLayout | null = null,
 	mac: boolean = isMacPlatform()
 ): string[] {
 	const def = PRESENTATION_EDITOR_ACTIONS.find(action => action.id === id)
-	const first = comboAlternatives(overrides[id] ?? def?.defaultCombo ?? "")[0] ?? []
+	const [first] = parseCombo(overrides[id] ?? def?.defaultCombo ?? "")
 
-	return first.map(token => {
-		const names = KEY_NAMES[token]
-
-		return names === undefined ? token.toUpperCase() : mac ? names[0] : names[1]
-	})
+	return first === undefined ? [] : chordLabels(first, mac, layout)
 }

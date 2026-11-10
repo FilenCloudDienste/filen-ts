@@ -1,7 +1,9 @@
 import { useEffect } from "react"
 import type { HotkeyCallback } from "react-hotkeys-hook"
 import type { DesktopMenuAction } from "@filen/shared/desktop"
+import { comboForLayout } from "@filen/shared/keymap"
 import { desktopBridge } from "@/lib/desktop"
+import { keyboardLayout, subscribeKeyboardLayout } from "@/lib/keymap/layout"
 import { comboFor, subscribeOverrides } from "@/lib/keymap/registry"
 import { noop } from "@/lib/utils"
 
@@ -29,8 +31,12 @@ function isMenuAction(id: string): id is DesktopMenuAction {
 	return (MENU_ACTIONS as string[]).includes(id)
 }
 
+// macOS matches a menu's key equivalents by character, the page matches keys by physical key: each combo goes to main
+// renamed for the user's layout, so the menu fires on the key the page does (a German Z is the page's "y").
 function pushShortcuts(): void {
-	bridge?.app.setMenuShortcuts(Object.fromEntries(MENU_ACTIONS.map(action => [action, comboFor(action)])))
+	const layout = keyboardLayout()
+
+	bridge?.app.setMenuShortcuts(Object.fromEntries(MENU_ACTIONS.map(action => [action, comboForLayout(comboFor(action), layout)])))
 }
 
 function dispatch(action: DesktopMenuAction): void {
@@ -55,6 +61,7 @@ function subscribe(): void {
 	bridge.app.onMenuAction(dispatch)
 	pushShortcuts()
 	subscribeOverrides(pushShortcuts)
+	subscribeKeyboardLayout(pushShortcuts)
 }
 
 function registerMenuHandler(action: DesktopMenuAction, handler: () => void): () => void {

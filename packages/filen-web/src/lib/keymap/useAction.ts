@@ -1,13 +1,20 @@
 import type { DependencyList, RefCallback } from "react"
 import { useHotkeys, type HotkeyCallback, type Options } from "react-hotkeys-hook"
 import { isRecordingCombo, useComboFor } from "@/lib/keymap/registry"
+import { typedWithAltGraph, type ChordEvent } from "@filen/shared/keymap"
 import { useMenuAction } from "@/lib/keymap/desktopMenu"
+import { isMacPlatform } from "@/lib/keymap/kbd.logic"
+
+const IS_MAC = isMacPlatform()
 
 // The single predicate every registered action's key handling is gated on. Exported so it can be
-// unit-tested directly; the narrow parameter type is all `event.repeat` needs and keeps it
-// assignable to react-hotkeys-hook's `(e: KeyboardEvent) => boolean` by contravariance.
-export function shouldIgnoreEvent(event: Pick<KeyboardEvent, "repeat">): boolean {
-	return event.repeat || isRecordingCombo()
+// unit-tested directly; the narrow parameter type is all it reads and keeps it assignable to
+// react-hotkeys-hook's `(e: KeyboardEvent) => boolean` by contravariance. A character typed with AltGr
+// is text: the library rejects AltGr only for chords without Ctrl, Alt or Mod, so a Ctrl+Alt chord would
+// otherwise fire while typing "@" or "ó" on Windows (@filen/shared/keymap applies the same rule to every
+// other matcher).
+export function shouldIgnoreEvent(event: Pick<KeyboardEvent, "repeat"> & Pick<ChordEvent, "key" | "getModifierState">): boolean {
+	return event.repeat || isRecordingCombo() || typedWithAltGraph(event, IS_MAC)
 }
 
 // Holding a key down re-fires the native `keydown` event with `repeat: true` on every OS-level

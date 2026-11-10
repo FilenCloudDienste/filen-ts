@@ -21,25 +21,25 @@ export const PRESENTATION_OBJECT_ACTIONS: readonly ActionDef[] = [
 	},
 	{
 		id: "presentation.objects.bringToFront",
-		defaultCombo: "mod+shift+]",
+		defaultCombo: "mod+shift+bracketright",
 		scope: "editor",
 		descriptionKey: "preview:previewPptxShortcutBringToFront"
 	},
 	{
 		id: "presentation.objects.sendToBack",
-		defaultCombo: "mod+shift+[",
+		defaultCombo: "mod+shift+bracketleft",
 		scope: "editor",
 		descriptionKey: "preview:previewPptxShortcutSendToBack"
 	},
 	{
 		id: "presentation.objects.bringForward",
-		defaultCombo: "mod+]",
+		defaultCombo: "mod+bracketright",
 		scope: "editor",
 		descriptionKey: "preview:previewPptxShortcutBringForward"
 	},
 	{
 		id: "presentation.objects.sendBackward",
-		defaultCombo: "mod+[",
+		defaultCombo: "mod+bracketleft",
 		scope: "editor",
 		descriptionKey: "preview:previewPptxShortcutSendBackward"
 	}

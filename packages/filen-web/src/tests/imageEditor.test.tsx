@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import { isMacPlatform } from "@filen/shared/keymap"
 import { createRef } from "react"
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
@@ -220,10 +221,18 @@ describe("ImageEditor", () => {
 			throw new Error("no root")
 		}
 
-		const mac = navigator.platform.toLowerCase().includes("mac")
+		// The app keymap's own Mac test, which its matchers read.
+		const mac = isMacPlatform()
 
 		// One of the two modifiers is the platform's Mod; the other must be absent.
-		const undoEvent = new KeyboardEvent("keydown", { key: "z", ctrlKey: !mac, metaKey: mac, bubbles: true, cancelable: true })
+		const undoEvent = new KeyboardEvent("keydown", {
+			key: "z",
+			code: "KeyZ",
+			ctrlKey: !mac,
+			metaKey: mac,
+			bubbles: true,
+			cancelable: true
+		})
 
 		act(() => {
 			root.dispatchEvent(undoEvent)
@@ -234,6 +243,7 @@ describe("ImageEditor", () => {
 
 		const redoEvent = new KeyboardEvent("keydown", {
 			key: "Z",
+			code: "KeyZ",
 			shiftKey: true,
 			ctrlKey: !mac,
 			metaKey: mac,

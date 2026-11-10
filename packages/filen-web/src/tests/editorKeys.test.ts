@@ -1,61 +1,45 @@
 import { describe, expect, it } from "vitest"
-import { codeMirrorKeys } from "@/features/preview/lib/editorKeys.logic"
+import { editorKeyMatcher } from "@/features/preview/lib/editorKeys.logic"
 
-describe("codeMirrorKeys", () => {
-	it("maps the app's combos to CodeMirror's notation, alternatives and all", () => {
-		expect(codeMirrorKeys("mod+shift+x")).toEqual(["Mod-Shift-x"])
-		expect(codeMirrorKeys("mod+alt+f")).toEqual(["Mod-Alt-f"])
-		expect(codeMirrorKeys("delete,backspace")).toEqual(["Delete", "Backspace"])
-		expect(codeMirrorKeys("ctrl+slash")).toEqual(["Ctrl-/"])
-		expect(codeMirrorKeys("")).toEqual([])
+// The editor shortcuts as CodeMirror tests the keydown: by physical key, as every other surface matches them.
+
+// The fields a matcher reads; CodeMirror hands it a real KeyboardEvent.
+function press(code: string, key: string, modifiers: { ctrlKey?: boolean; metaKey?: boolean; shiftKey?: boolean; altKey?: boolean } = {}) {
+	const event = {
+		code,
+		key,
+		ctrlKey: modifiers.ctrlKey ?? false,
+		metaKey: modifiers.metaKey ?? false,
+		shiftKey: modifiers.shiftKey ?? false,
+		altKey: modifiers.altKey ?? false,
+		getModifierState: () => false
+	}
+
+	return event as unknown as KeyboardEvent
+}
+
+describe("editorKeyMatcher", () => {
+	it("binds nothing for an unbound combo", () => {
+		expect(editorKeyMatcher("", false)).toBeUndefined()
 	})
 
-	it("maps the recorder's event.code tokens to KeyboardEvent.key names", () => {
-		const tokens = [
-			["arrowup", "ArrowUp"],
-			["arrowdown", "ArrowDown"],
-			["arrowleft", "ArrowLeft"],
-			["arrowright", "ArrowRight"],
-			["pageup", "PageUp"],
-			["pagedown", "PageDown"],
-			["home", "Home"],
-			["end", "End"],
-			["bracketleft", "["],
-			["bracketright", "]"],
-			["minus", "-"],
-			["equal", "="],
-			["semicolon", ";"],
-			["quote", "'"],
-			["backquote", "`"],
-			["backslash", "\\"],
-			["comma", ","],
-			["period", "."],
-			["slash", "/"],
-			["space", "Space"],
-			["enter", "Enter"],
-			["escape", "Escape"],
-			["tab", "Tab"],
-			["backspace", "Backspace"],
-			["delete", "Delete"],
-			["f1", "F1"],
-			["f12", "F12"],
-			["1", "1"],
-			["a", "a"]
-		] as const
+	it("matches the combo's keys by code, Mod per platform, every alternative", () => {
+		const find = editorKeyMatcher("mod+f", false)
+		const findMac = editorKeyMatcher("mod+f", true)
+		const either = editorKeyMatcher("mod+shift+x,mod+alt+f", false)
 
-		for (const [token, key] of tokens) {
-			expect(codeMirrorKeys(`mod+${token}`), token).toEqual([`Mod-${key}`])
-		}
+		expect(find?.(press("KeyF", "f", { ctrlKey: true }))).toBe(true)
+		expect(find?.(press("KeyF", "f", { metaKey: true }))).toBe(false)
+		expect(findMac?.(press("KeyF", "f", { metaKey: true }))).toBe(true)
+		expect(either?.(press("KeyX", "X", { ctrlKey: true, shiftKey: true }))).toBe(true)
+		expect(either?.(press("KeyF", "f", { ctrlKey: true, altKey: true }))).toBe(true)
 	})
 
-	it("maps react-hotkeys-hook's aliases and the numpad operators", () => {
-		expect(codeMirrorKeys("esc,return,up,shift+down,mod+add,mod+subtract")).toEqual([
-			"Escape",
-			"Enter",
-			"ArrowUp",
-			"Shift-ArrowDown",
-			"Mod-+",
-			"Mod--"
-		])
+	it("fires a recorded punctuation or Space key, which CodeMirror's names would miss on other layouts", () => {
+		expect(editorKeyMatcher("mod+bracketleft", false)?.(press("BracketLeft", "ü", { ctrlKey: true }))).toBe(true)
+		expect(editorKeyMatcher("ctrl+space", true)?.(press("Space", " ", { ctrlKey: true }))).toBe(true)
+		expect(editorKeyMatcher("mod+shift+comma", false)?.(press("Comma", ";", { ctrlKey: true, shiftKey: true }))).toBe(true)
+		// The French key printed A is KeyQ: a binding on "a" stays on KeyA, whatever it types.
+		expect(editorKeyMatcher("mod+a", false)?.(press("KeyQ", "a", { ctrlKey: true }))).toBe(false)
 	})
 })

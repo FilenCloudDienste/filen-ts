@@ -36,6 +36,7 @@ import { layoutLabel, layoutsByMaster } from "@/features/presentation/components
 import { usePresentationEditor } from "@/features/presentation/hooks/usePresentationSession"
 import { presentationShortcutKeys } from "@/features/presentation/lib/keymap/editor"
 import { Kbd, KbdKeys } from "@/lib/keymap/kbd"
+import { useKeyboardLayout } from "@/lib/keymap/layout"
 import { useOverrides } from "@/lib/keymap/registry"
 
 // The presentation editor's own ribbon controls (the Home, Insert and View group files list them): Undo and Redo,
@@ -46,6 +47,7 @@ export function UndoControls() {
 	const { t } = useTranslation("preview")
 	const scope = usePresentationEditor()
 	const overrides = useOverrides()
+	const keyLayout = useKeyboardLayout()
 
 	if (scope === undefined) return null
 
@@ -56,7 +58,7 @@ export function UndoControls() {
 			<TooltipIconButton
 				label={t("previewPptxRibbonUndo")}
 				disabled={!editor.canUndo}
-				shortcut={<KbdKeys keys={presentationShortcutKeys("presentation.undo", overrides)} />}
+				shortcut={<KbdKeys keys={presentationShortcutKeys("presentation.undo", overrides, keyLayout)} />}
 				onMouseDown={keepFocus}
 				onClick={editor.undo}
 			>
@@ -65,7 +67,7 @@ export function UndoControls() {
 			<TooltipIconButton
 				label={t("previewPptxRibbonRedo")}
 				disabled={!editor.canRedo}
-				shortcut={<KbdKeys keys={presentationShortcutKeys("presentation.redo", overrides)} />}
+				shortcut={<KbdKeys keys={presentationShortcutKeys("presentation.redo", overrides, keyLayout)} />}
 				onMouseDown={keepFocus}
 				onClick={editor.redo}
 			>
@@ -134,6 +136,7 @@ export function NewSlideControl() {
 	const { t } = useTranslation("preview")
 	const scope = usePresentationEditor()
 	const overrides = useOverrides()
+	const keyLayout = useKeyboardLayout()
 
 	if (scope === undefined) return null
 
@@ -147,7 +150,7 @@ export function NewSlideControl() {
 				icon={<PlusIcon />}
 				text={t("previewPptxRibbonNewSlide")}
 				disabled={disabled}
-				shortcut={<KbdKeys keys={presentationShortcutKeys("presentation.newSlide", overrides)} />}
+				shortcut={<KbdKeys keys={presentationShortcutKeys("presentation.newSlide", overrides, keyLayout)} />}
 				onClick={() => {
 					editor.slides.add()
 				}}
@@ -289,6 +292,7 @@ export function SlideButtons() {
 	const { t } = useTranslation("preview")
 	const scope = usePresentationEditor()
 	const overrides = useOverrides()
+	const keyLayout = useKeyboardLayout()
 
 	if (scope === undefined) return null
 
@@ -309,7 +313,7 @@ export function SlideButtons() {
 			<TooltipIconButton
 				label={t("previewPptxRibbonDuplicate")}
 				disabled={none}
-				shortcut={<KbdKeys keys={presentationShortcutKeys("presentation.duplicateSlide", overrides)} />}
+				shortcut={<KbdKeys keys={presentationShortcutKeys("presentation.duplicateSlide", overrides, keyLayout)} />}
 				onMouseDown={keepFocus}
 				onClick={editor.slides.duplicate}
 			>
@@ -318,7 +322,7 @@ export function SlideButtons() {
 			<TooltipIconButton
 				label={t("previewPptxRibbonDelete")}
 				disabled={none}
-				shortcut={<KbdKeys keys={presentationShortcutKeys("presentation.deleteSlide", overrides)} />}
+				shortcut={<KbdKeys keys={presentationShortcutKeys("presentation.deleteSlide", overrides, keyLayout)} />}
 				onMouseDown={keepFocus}
 				onClick={editor.slides.remove}
 			>

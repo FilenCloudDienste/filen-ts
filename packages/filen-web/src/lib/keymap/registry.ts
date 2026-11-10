@@ -1,4 +1,5 @@
 import { type } from "arktype"
+import { normalizeCombo } from "@filen/shared/keymap"
 import { create } from "zustand"
 import { kvGetJson, kvSetJson } from "@/lib/storage/adapter"
 import { kvLoadOnce } from "@/lib/storage/kvBestEffort"
@@ -128,6 +129,24 @@ export function subscribeOverrides(listener: () => void): () => void {
 	})
 }
 
+// Stored combos in the canonical token spelling (@filen/shared/keymap): older records may spell a key by its
+// character ("mod+=", "mod+shift+,"), which react-hotkeys-hook cannot match and whose "," it splits on. Rewritten on
+// every load rather than in storage: the next write persists the canonical form. A combo that holds no chord at all
+// matches nothing, so it is dropped and the action falls back to its default.
+export function migrateOverrides(overrides: Record<string, string>): Record<string, string> {
+	const migrated: Record<string, string> = {}
+
+	for (const [id, combo] of Object.entries(overrides)) {
+		const canonical = normalizeCombo(combo)
+
+		if (canonical.length > 0) {
+			migrated[id] = canonical
+		}
+	}
+
+	return migrated
+}
+
 // The kv read fires at most once per module lifetime, kicked off by the first `registerAction` call
 // (import order between this module and its first feature consumer is otherwise unspecified). A
 // storage-layer failure must never take keyboard shortcuts down with it, so defaults keep working
@@ -136,7 +155,7 @@ const ensureOverridesLoaded = kvLoadOnce(
 	OVERRIDES_KV_KEY,
 	keymapOverridesSchema,
 	loaded => {
-		useKeymapStore.getState().setOverrides(loaded)
+		useKeymapStore.getState().setOverrides(migrateOverrides(loaded))
 	},
 	"keymap",
 	"keymap overrides"
@@ -187,7 +206,9 @@ export function comboFor(id: string): string {
 // still gets rewritten from what the app is actually using.
 async function persistOverride(id: string, combo: string | null): Promise<void> {
 	const persisted = await kvGetJson(OVERRIDES_KV_KEY, keymapOverridesSchema)
-	const merged = Object.fromEntries(Object.entries(persisted ?? useKeymapStore.getState().overrides).filter(([key]) => key !== id))
+	const merged = Object.fromEntries(
+		Object.entries(persisted === null ? useKeymapStore.getState().overrides : migrateOverrides(persisted)).filter(([key]) => key !== id)
+	)
 
 	if (combo !== null) {
 		merged[id] = combo
@@ -208,8 +229,16 @@ export async function setUserCombo(id: string, combo: string): Promise<void> {
 	// Await the persisted-overrides load FIRST: without it a late load would land on top of the override
 	// just set here and revert it in the UI.
 	await ensureOverridesLoaded()
-	useKeymapStore.getState().setOverride(id, combo)
-	await persistOverride(id, combo)
+
+	const canonical = normalizeCombo(combo)
+
+	// keymapOverridesSchema rejects "", and one such value would drop the whole stored record on the next load.
+	if (canonical.length === 0) {
+		throw new Error(`keymap: setUserCombo: "${combo}" is no combo`)
+	}
+
+	useKeymapStore.getState().setOverride(id, canonical)
+	await persistOverride(id, canonical)
 }
 
 // Reactive read for `useAction`/`<Kbd>`. The combo is computed INSIDE the zustand selector (not

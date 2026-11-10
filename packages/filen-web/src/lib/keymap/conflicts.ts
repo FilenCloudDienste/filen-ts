@@ -1,4 +1,5 @@
-import { comboAlternatives } from "@/lib/keymap/kbd.logic"
+import { combosOverlap } from "@filen/shared/keymap"
+import { isMacPlatform } from "@/lib/keymap/kbd.logic"
 import type { ActionScope, ResolvedAction } from "@/lib/keymap/registry"
 
 // Which scopes can have handlers mounted at the same time, as CROSS-scope pairs (a scope always
@@ -103,7 +104,22 @@ export const RESOLVED_COLLISIONS: readonly (readonly [string, string])[] = [
 	["preview.pdfZoomIn", "presentation.zoomIn"],
 	["preview.pdfZoomOut", "presentation.zoomOut"],
 	["preview.pdfRotateCw", "presentation.objects.bringForward"],
-	["preview.pdfRotateCcw", "presentation.objects.sendBackward"]
+	["preview.pdfRotateCcw", "presentation.objects.sendBackward"],
+	// Off a Mac, subscript's Mod+Ctrl+= and superscript's Mod+Ctrl+Shift+= are Ctrl+= and Ctrl+Shift+=, zoom in's keys
+	// (PowerPoint's, both). Subscript and superscript act in a body being edited and on shapes selected on the slide,
+	// which take the key first and stop it; zoom acts only outside text, on the editor's own keydown. The PDF viewer
+	// never shows with a presentation.
+	["presentation.text.subscript", "presentation.zoomIn"],
+	["presentation.text.superscript", "presentation.zoomIn"],
+	["presentation.text.subscript", "preview.pdfZoomIn"],
+	["presentation.text.superscript", "preview.pdfZoomIn"],
+	// On a Mac, promote and demote are Cmd+[ and Cmd+] (PowerPoint for Mac's), the keys of the object order and the PDF
+	// rotation. They act in a body being edited only, which takes the key first; the object order acts on shapes
+	// selected on the slide, the rotation in the PDF viewer, which never shows with a presentation.
+	["presentation.text.promote", "presentation.objects.sendBackward"],
+	["presentation.text.demote", "presentation.objects.bringForward"],
+	["presentation.text.promote", "preview.pdfRotateCcw"],
+	["presentation.text.demote", "preview.pdfRotateCw"]
 ]
 
 export function scopesCanCollide(a: ActionScope, b: ActionScope): boolean {
@@ -116,25 +132,12 @@ export function scopesCanCollide(a: ActionScope, b: ActionScope): boolean {
 	return CO_MOUNTABLE.some(([first, second]) => (first === a && second === b) || (first === b && second === a))
 }
 
-// Order-insensitive equality over two already-normalized token arrays: "shift+mod+a" and
-// "mod+shift+a" are the same chord.
-function sameChord(a: readonly string[], b: readonly string[]): boolean {
-	return a.length === b.length && a.every(key => b.includes(key))
-}
-
-function sharesAnAlternative(a: string, b: string): boolean {
-	const left = comboAlternatives(a)
-	const right = comboAlternatives(b)
-
-	return left.some(chord => right.some(other => sameChord(chord, other)))
-}
-
 // Every action whose live combo would fire in the same context as `combo`, excluding `excludeId`
 // (the action being rebound — re-recording a row with its own current combo is not a conflict).
 //
-// Matching is per ALTERNATIVE, not string equality: react-hotkeys-hook splits a combo on "," into
-// alternatives, so drive.trash's "delete,backspace" fires on either key and a plain `===` would
-// report no conflict when a user records bare Delete for a second drive action.
+// Matching is per ALTERNATIVE and per KEYSTROKE, not string equality (@filen/shared/keymap's combosOverlap):
+// drive.trash's "delete,backspace" fires on either key, "mod+-" and "mod+minus" are one key, and off a Mac
+// "mod+ctrl+equal" is the same Ctrl+= as "mod+equal". `mac` picks the platform whose keystrokes are compared.
 //
 // An empty combo is unbound, not "bound to nothing in particular": it matches no key at all, so it
 // never conflicts in either direction.
@@ -142,7 +145,12 @@ function sharesAnAlternative(a: string, b: string): boolean {
 // The rebound action's scope comes from `actions` itself. When `excludeId` names no action in the
 // list there is no scope to compare against, so every combo match is reported — a caller that cannot
 // say where the binding lives gets the conservative answer, never a false all-clear.
-export function conflictingActions(actions: readonly ResolvedAction[], combo: string, excludeId: string): readonly ResolvedAction[] {
+export function conflictingActions(
+	actions: readonly ResolvedAction[],
+	combo: string,
+	excludeId: string,
+	mac: boolean = isMacPlatform()
+): readonly ResolvedAction[] {
 	if (combo.length === 0) {
 		return []
 	}
@@ -154,6 +162,6 @@ export function conflictingActions(actions: readonly ResolvedAction[], combo: st
 			action.id !== excludeId &&
 			action.combo.length > 0 &&
 			(subject === undefined || scopesCanCollide(subject.scope, action.scope)) &&
-			sharesAnAlternative(action.combo, combo)
+			combosOverlap(action.combo, combo, mac)
 	)
 }

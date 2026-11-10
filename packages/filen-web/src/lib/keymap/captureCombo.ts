@@ -1,17 +1,16 @@
-// Modifier tokens in react-hotkeys-hook's own vocabulary, in the order a combo string writes them.
-// `meta` survives the fold only off mac (where it is the Windows/Super key, a distinct modifier from
-// the primary one) — dropping it would silently save a weaker binding than the one recorded.
-const MODIFIER_ORDER = ["mod", "meta", "ctrl", "alt", "shift"] as const
+import { canonicalKey, formatChord } from "@filen/shared/keymap"
 
 const MODIFIERS = new Set<string>(["shift", "alt", "ctrl", "control", "meta", "mod"])
 
-// Turns a raw recorded key set (react-hotkeys-hook's useRecordHotkeys already emits its own token
-// vocabulary — "meta", "shift", "s", "slash", …) into a storable combo string, or null while the
-// user is still only holding modifiers.
+// Turns a raw recorded key set (react-hotkeys-hook's useRecordHotkeys emits event.code tokens, the vocabulary of
+// @filen/shared/keymap — "meta", "shift", "s", "slash", …) into a storable combo string in that model's canonical
+// spelling, or null while the user is still only holding modifiers.
 //
 // The platform-primary modifier folds to `mod`, the portable token every shipped default uses, so a
 // binding recorded on one OS keeps working on another. A REAL ctrl chord on a mac is preserved as
-// `ctrl` — there it is a distinct key from Command, not a spelling of it.
+// `ctrl` — there it is a distinct key from Command, not a spelling of it. `meta` survives the fold only
+// off mac (where it is the Windows/Super key, a distinct modifier from the primary one) — dropping it
+// would silently save a weaker binding than the one recorded.
 //
 // `isMac` is a parameter rather than a call to isMacPlatform(): the fold has to match what
 // react-hotkeys-hook itself resolves `mod` to, and passing it in keeps this function testable
@@ -25,7 +24,7 @@ export function normalizeRecordedCombo(keys: Iterable<string>, isMac: boolean): 
 		const token = raw.toLowerCase()
 
 		if (!MODIFIERS.has(token)) {
-			key = token
+			key = canonicalKey(token)
 			continue
 		}
 
@@ -36,13 +35,14 @@ export function normalizeRecordedCombo(keys: Iterable<string>, isMac: boolean): 
 		return null
 	}
 
-	const modifiers = new Set(present)
-
-	if (modifiers.delete(primary)) {
-		modifiers.add("mod")
-	}
-
-	return [...MODIFIER_ORDER.filter(modifier => modifiers.has(modifier)), key].join("+")
+	return formatChord({
+		mod: present.has(primary) || present.has("mod"),
+		meta: primary !== "meta" && present.has("meta"),
+		ctrl: primary !== "ctrl" && present.has("ctrl"),
+		alt: present.has("alt"),
+		shift: present.has("shift"),
+		key
+	})
 }
 
 // Escape is the recorder's cancel key, never a recordable binding.
@@ -76,5 +76,5 @@ export function recordingOutcome(keys: Iterable<string>, isRecording: boolean, i
 		return PENDING
 	}
 
-	return combo.split("+").includes(CANCEL_KEY) ? CANCEL : { kind: "commit", combo }
+	return combo.split("+").at(-1) === CANCEL_KEY ? CANCEL : { kind: "commit", combo }
 }

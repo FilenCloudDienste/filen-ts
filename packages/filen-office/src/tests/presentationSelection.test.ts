@@ -4,7 +4,8 @@ import { slideRef, type Xfrm } from "../core/presentation/model"
 import type { LayerRole, SlideLayer, SlideRender } from "../core/presentation/output"
 import { SnapTargets, snapThreshold } from "../react/presentation/edit/guides"
 import { ShapeDrag, boxPoint, handleAt, handleCursor, multiply, previewMatrix, rotatePoint } from "../react/presentation/edit/handles"
-import { cycleTarget, objectKeyAction, parseCombo, type KeyLike, type ObjectKeyBindings } from "../react/presentation/edit/keyboard"
+import { cycleTarget, objectKeyAction, type KeyLike, type ObjectKeyBindings } from "../react/presentation/edit/keyboard"
+import { APPLE_TEXT_BINDINGS, DEFAULT_TEXT_BINDINGS, textKeyCommand } from "../react/presentation/edit/text/keys"
 import {
 	boundsOf,
 	createShapeSelection,
@@ -295,10 +296,36 @@ describe("presentation drag", () => {
 })
 
 describe("presentation canvas keys", () => {
-	it("parses react-hotkeys-hook combos and matches them by key code, Mod as Cmd on Apple and Ctrl elsewhere", () => {
-		expect(parseCombo("mod+shift+]")).toEqual({ mod: true, ctrl: false, meta: false, shift: true, alt: false, code: "BracketRight" })
-		expect(parseCombo("a>b")).toBeUndefined()
+	it("matches the recorder's punctuation tokens and every alternative of a combo", () => {
+		const recorded: ObjectKeyBindings = { ...BINDINGS, bringForward: "mod+bracketright,mod+period", sendBackward: "mod+bracketleft" }
 
+		expect(objectKeyAction(key("BracketRight", "]", { ctrlKey: true }), recorded, false)).toEqual({
+			kind: "command",
+			command: "bringForward"
+		})
+		expect(objectKeyAction(key("Period", ".", { ctrlKey: true }), recorded, false)).toEqual({
+			kind: "command",
+			command: "bringForward"
+		})
+		expect(objectKeyAction(key("BracketLeft", "[", { metaKey: true }), recorded, true)).toEqual({
+			kind: "command",
+			command: "sendBackward"
+		})
+		// The text body's: shrink font's default names the comma key, a recorded growFont the bracket.
+		const text = { ...DEFAULT_TEXT_BINDINGS, growFont: "mod+bracketright" }
+
+		expect(textKeyCommand(key("Comma", "<", { ctrlKey: true, shiftKey: true }), text, false)).toBe("shrinkFont")
+		expect(textKeyCommand(key("BracketRight", "]", { ctrlKey: true }), text, false)).toBe("growFont")
+		expect(textKeyCommand(key("Equal", "=", { ctrlKey: true }), text, false)).toBe("subscript")
+		expect(textKeyCommand(key("Equal", "=", { ctrlKey: true, metaKey: true }), APPLE_TEXT_BINDINGS, true)).toBe("subscript")
+		expect(textKeyCommand(key("BracketLeft", "[", { metaKey: true }), APPLE_TEXT_BINDINGS, true)).toBe("promote")
+		// AltGr typing "ó" (Ctrl+Alt+O on Windows) is no shortcut.
+		const altGraph = { ...key("KeyO", "ó", { ctrlKey: true, altKey: true }), getModifierState: (name: string) => name === "AltGraph" }
+
+		expect(textKeyCommand(altGraph, { ...DEFAULT_TEXT_BINDINGS, bold: "mod+alt+o" }, false)).toBeUndefined()
+	})
+
+	it("matches the keymap's combos by key code, Mod as Cmd on Apple and Ctrl elsewhere", () => {
 		// Shift+] types "}", but the code is still BracketRight.
 		expect(objectKeyAction(key("BracketRight", "}", { metaKey: true, shiftKey: true }), BINDINGS, true)).toEqual({
 			kind: "command",
