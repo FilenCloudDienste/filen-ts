@@ -16,7 +16,6 @@ import {
 	KeyboardIcon,
 	LogOutIcon,
 	UserIcon,
-	CircleHelpIcon,
 	FolderSyncIcon,
 	HardDriveIcon,
 	ImagePlayIcon,
@@ -87,33 +86,6 @@ interface RailEntryProps {
 	reordering: boolean
 	// A group marks the child it is in.
 	pathname: string
-}
-
-// Help destination ships later (the real support URL is a pending product decision) — rendered inert
-// like the pending module entries below, so the rail slot and its affordance already exist.
-function HelpEntry() {
-	const { t } = useTranslation()
-
-	return (
-		<Tooltip>
-			<TooltipTrigger
-				render={
-					<button
-						type="button"
-						aria-disabled="true"
-						aria-label={t("help")}
-						className={cn(railItemClass(false), "text-muted-foreground/70")}
-					>
-						<CircleHelpIcon />
-					</button>
-				}
-			/>
-			<TooltipContent side="right">
-				{t("help")}
-				<span className="text-background/60">· {t("comingSoon")}</span>
-			</TooltipContent>
-		</Tooltip>
-	)
 }
 
 const NO_SUBS: UserAccountSubs[] = []
@@ -690,7 +662,6 @@ export function IconRail() {
 			<div className="mt-auto flex w-full flex-col items-center gap-1.5">
 				<TransfersRing active={pathname === "/transfers"} />
 				<AssistantToggle itemClass={railItemClass} />
-				<HelpEntry />
 				<AccountMenu />
 			</div>
 		</nav>

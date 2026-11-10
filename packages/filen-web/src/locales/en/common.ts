@@ -61,8 +61,6 @@ export const common = {
 		"Filen could not open its storage on this device. Reload, or quit and restart Filen; contact support if the problem continues.",
 	/** Theme toggle — icon rail button tooltip/accessible label and the keymap action description shown in shortcut UI */
 	toggleTheme: "Toggle theme",
-	/** Icon rail — tooltip suffix on modules and items that are not available yet */
-	comingSoon: "Coming soon",
 	/** Assistant toggle — icon rail button tooltip/accessible label and the keymap action description shown in shortcut UI */
 	toggleAssistant: "Assistant",
 	// Rail modules
@@ -113,8 +111,6 @@ export const common = {
 	storage: "Storage",
 	/** Drive sidebar storage meter caption, settings profile header, storage breakdown and current-plan rows; {{used}} and {{total}} are pre-formatted byte sizes (e.g. "1.2 GB of 100 GB used") */
 	storageUsage: "{{used}} of {{total}} used",
-	/** Icon rail — help entry tooltip/accessible label (its destination ships later) */
-	help: "Help",
 	/** Drive sidebar — heading of the bottom usage block (above the storage meter) */
 	usage: "Usage",
 	// Sharing and public-link destinations: drive sidebar items, their routes' titles and the drive
