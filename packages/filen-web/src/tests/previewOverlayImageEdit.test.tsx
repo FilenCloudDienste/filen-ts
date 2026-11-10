@@ -239,6 +239,35 @@ describe("PreviewOverlay — image editing", () => {
 		expect(usePreviewUnsavedGuardStore.getState().dirty).toBe(false)
 	})
 
+	it("closes on the first Escape after opening, no tooltip taking it", async () => {
+		const onClose = vi.fn()
+
+		render(
+			createElement(PreviewOverlay, {
+				variant: "drive" as const,
+				items: [image("photo.png", "image/png")],
+				index: 0,
+				onStep: vi.fn(),
+				onClose,
+				onItemRemoved: vi.fn()
+			})
+		)
+
+		await screen.findByRole("button", { name: "Edit" })
+		const dialog = screen.getByRole("dialog")
+
+		await waitFor(() => {
+			expect(dialog.contains(document.activeElement)).toBe(true)
+		})
+		await act(async () => {
+			await new Promise(resolve => setTimeout(resolve, 0))
+		})
+
+		fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" })
+
+		expect(onClose).toHaveBeenCalledTimes(1)
+	})
+
 	it("offers no Edit for an image outside the drive", async () => {
 		render(
 			createElement(PreviewOverlay, {

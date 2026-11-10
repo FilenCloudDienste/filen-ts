@@ -184,9 +184,6 @@ test("photos: root pick over a mixed upload, media-only grid, viewer pager + in-
 
 		await page.keyboard.press("Enter")
 		await expect(overlay).toBeVisible({ timeout: 30_000 })
-		// Escape once focus has moved into the overlay: pressed in the frame it first draws, the key can arrive
-		// before the dialog listens for it.
-		await expect.poll(() => page.evaluate(() => document.activeElement?.closest('[role="dialog"]') !== null)).toBe(true)
 		await page.keyboard.press("Escape")
 		await expect(overlay).toHaveCount(0)
 

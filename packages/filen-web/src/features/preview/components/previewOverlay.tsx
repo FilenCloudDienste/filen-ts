@@ -1568,8 +1568,11 @@ export function PreviewOverlay({
 		>
 			<DialogPrimitive.Portal>
 				<DialogPrimitive.Backdrop className="fixed inset-0 z-50 bg-background duration-100 data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0" />
+				{/* The popup, not its first tabbable: that is the header's Edit on an image, whose tooltip opens on
+				    keyboard focus and takes the first Escape. */}
 				<DialogPrimitive.Popup
 					ref={popupRef}
+					initialFocus={popupRef}
 					onBlur={handlePopupBlur}
 					onKeyDown={handleKeyDown}
 					className={cn(
