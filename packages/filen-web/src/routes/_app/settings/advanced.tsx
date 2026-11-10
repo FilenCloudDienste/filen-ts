@@ -9,6 +9,7 @@ import { AboutRows } from "@/features/settings/components/advanced/aboutRows"
 import { ThirdPartyNoticesRow } from "@/features/settings/components/advanced/thirdPartyNoticesRow"
 import { DocumentsRows } from "@/features/settings/components/advanced/documentsRows"
 import { DotFilenRow } from "@/features/settings/components/advanced/dotFilenRow"
+import { StorageCaches } from "@/features/settings/components/storage/storageCaches"
 import { SettingsGroup, SettingsPage } from "@/features/settings/components/settingsLayout"
 import { routeHead } from "@/lib/head/routeHead"
 import { i18n } from "@/lib/i18n"
@@ -56,6 +57,7 @@ function AdvancedPage() {
 			>
 				<DotFilenRow />
 			</SettingsGroup>
+			<StorageCaches />
 			<SettingsGroup
 				title={t("settingsLogsTitle")}
 				description={t("settingsLogsDescription", { count: 500 })}

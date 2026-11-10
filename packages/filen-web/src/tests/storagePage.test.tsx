@@ -8,7 +8,7 @@ import type { DesktopMountsOverview } from "@filen/shared/desktop"
 import { formatBytes } from "@filen/shared"
 import "@/lib/i18n"
 
-// The Storage page over spies for every store it measures and clears; the measure and clear logic itself is real.
+// Advanced's local data and caches group over spies for every store it measures and clears; the measure and clear logic itself is real.
 
 const mocks = vi.hoisted(() => ({
 	kvPrefixBytes: vi.fn<(prefixes: readonly string[]) => Promise<number[] | null>>(),
@@ -77,6 +77,23 @@ function row(label: string): HTMLElement {
 	return element
 }
 
+// The group header's figure, once measured.
+async function findTotal(label = "Used by Filen in this browser"): Promise<string> {
+	const heading = screen.getByRole("heading", { name: "Local data and caches" })
+	const header = heading.parentElement
+
+	if (header === null) {
+		throw new Error("no group header")
+	}
+
+	await waitFor(() => {
+		expect(header.querySelector("[data-slot=skeleton]")).toBeNull()
+	})
+	expect(within(header).getByText(`${label}:`, { exact: false })).toBeTruthy()
+
+	return header.textContent
+}
+
 beforeEach(() => {
 	mocks.kvPrefixBytes.mockReset().mockImplementation(prefixes => Promise.resolve(prefixes.map(() => 1000)))
 	mocks.kvDeletePrefix.mockReset().mockResolvedValue(undefined)
@@ -99,17 +116,19 @@ afterEach(() => {
 	vi.unstubAllGlobals()
 })
 
-describe("Storage page", () => {
+describe("Local data and caches", () => {
 	it("shows placeholders while sizes are measured", () => {
 		mocks.opfsTreeBytes.mockReturnValue(new Promise(() => undefined))
 		renderPage()
 
-		expect(screen.getByText("Used by Filen in this browser")).toBeTruthy()
+		expect(screen.getByRole("heading", { name: "Local data and caches" })).toBeTruthy()
+		expect(screen.getByText("Used by Filen in this browser:", { exact: false })).toBeTruthy()
+		expect(screen.queryByText("Other", { selector: "p" })).toBeNull()
 		expect(within(row("Thumbnails")).getByRole<HTMLButtonElement>("button", { name: "Clear: Thumbnails" }).disabled).toBe(true)
 		expect(document.querySelectorAll("[data-slot=skeleton]").length).toBeGreaterThan(0)
 	})
 
-	it("shows each row's size, the total and Other, and no model row without a model", async () => {
+	it("shows each row's size, the total beside the title and Other, and no model row without a model", async () => {
 		renderPage()
 
 		await waitFor(() => {
@@ -118,12 +137,9 @@ describe("Storage page", () => {
 		expect(within(row("Videos library")).getByText(formatBytes(1_500_000 + 5 * 1000))).toBeTruthy()
 		expect(within(row("Music metadata")).getByText(formatBytes(1000))).toBeTruthy()
 		expect(within(row("Cached lists and content")).getByText(formatBytes(1000))).toBeTruthy()
-		expect(screen.getByText(formatBytes(10_000_000))).toBeTruthy()
-
-		const legend = screen.getByRole("list", { name: "Storage by cache" })
-
-		expect(within(legend).getByText("Other")).toBeTruthy()
-		expect(within(legend).getByText(formatBytes(10_000_000 - 3_000_000 - 1_505_000 - 2000))).toBeTruthy()
+		expect(await findTotal()).toContain(formatBytes(10_000_000))
+		expect(within(row("Other")).getByText(formatBytes(10_000_000 - 3_000_000 - 1_505_000 - 2000))).toBeTruthy()
+		expect(within(row("Other")).queryByRole("button")).toBeNull()
 		expect(screen.queryByText("AI model", { selector: "p" })).toBeNull()
 		expect(screen.queryByText("Browser cache", { selector: "p" })).toBeNull()
 		expect(screen.queryByText("Network drive cache", { selector: "p" })).toBeNull()
@@ -258,12 +274,11 @@ describe("Storage page", () => {
 		})
 		renderPage()
 
-		expect(screen.getByText("Used by Filen on this device")).toBeTruthy()
 		await waitFor(() => {
 			expect(within(row("Browser cache")).getByText(formatBytes(4_000_000))).toBeTruthy()
 		})
 		expect(within(row("Network drive cache")).getByText(formatBytes(7_000_000))).toBeTruthy()
-		expect(await screen.findByText(formatBytes(10_000_000 + 4_000_000 + 7_000_000))).toBeTruthy()
+		expect(await findTotal("Used by Filen on this device")).toContain(formatBytes(10_000_000 + 4_000_000 + 7_000_000))
 
 		act(() => {
 			useMountsStore.setState({ overview: { host: { state: "off" }, cache: { usedBytes: 0 } } as unknown as DesktopMountsOverview })

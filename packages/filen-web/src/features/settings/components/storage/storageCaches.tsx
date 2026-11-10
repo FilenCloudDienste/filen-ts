@@ -6,7 +6,6 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Spinner } from "@/components/ui/spinner"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 import { SettingsBlock, SettingsGroup, SettingsRow } from "@/features/settings/components/settingsLayout"
-import { StorageUsageBar } from "@/features/settings/components/storage/storageUsageBar"
 import {
 	useCacheSizes,
 	useNetworkDriveCacheBytes,
@@ -49,6 +48,9 @@ const ROW_BODY_KEY = {
 
 type Target = CacheRow | "all"
 
+// One width for every row's action slot (Clear, Remove, or none for Other), so the sizes before it share a column.
+const ACTION_SLOT_CLASS = "flex min-w-24 justify-end"
+
 interface RowSizeTextProps {
 	size: RowSize
 }
@@ -75,6 +77,21 @@ function RowSizeText({ size }: RowSizeTextProps) {
 	return <span className="text-sm text-muted-foreground tabular-nums">{formatBytes(size)}</span>
 }
 
+interface TotalTextProps {
+	label: string
+	total: number | undefined
+}
+
+// The group's total, beside its title; the label is for screen readers, the title line already says what it counts.
+function TotalText({ label, total }: TotalTextProps) {
+	return (
+		<span className="flex shrink-0 items-center text-xs font-medium text-muted-foreground tabular-nums">
+			<span className="sr-only">{`${label}: `}</span>
+			{total === undefined ? <Skeleton className="h-3.5 w-14" /> : formatBytes(total)}
+		</span>
+	)
+}
+
 function run(target: Target, clearAll: readonly ClearableRow[]): Promise<ClearEnd> {
 	if (target === "all") {
 		return runClearAll(clearAll)
@@ -87,8 +104,8 @@ function run(target: Target, clearAll: readonly ClearableRow[]): Promise<ClearEn
 	return runRowClear(target)
 }
 
-// The local caches with their sizes, each clearable on its own, and Clear all. Sizes are measured while this is
-// mounted only.
+// The local caches as one settings group: the total in its header, each cache with its size and its own clear, the
+// unnamed rest as Other, then Clear all. Sizes are measured while this is mounted only.
 function StorageCaches() {
 	const { t } = useTranslation(["settings", "common"])
 	const desktop = desktopBridge() !== undefined
@@ -158,16 +175,15 @@ function StorageCaches() {
 
 	return (
 		<>
-			<SettingsGroup>
-				<StorageUsageBar
-					label={desktop ? t("storageTotalDevice") : t("storageTotalBrowser")}
-					total={usage.total}
-					segments={usage.segments}
-				/>
-			</SettingsGroup>
 			<SettingsGroup
 				title={t("storageGroupCaches")}
 				description={t("storageGroupCachesDescription")}
+				aside={
+					<TotalText
+						label={desktop ? t("storageTotalDevice") : t("storageTotalBrowser")}
+						total={usage.total}
+					/>
+				}
 			>
 				{visibleRows.map(row => {
 					const size = sizes[row]
@@ -181,20 +197,34 @@ function StorageCaches() {
 							description={t(ROW_DESCRIPTION_KEY[row])}
 						>
 							<RowSizeText size={size} />
-							<Button
-								variant="outline"
-								aria-label={`${action}: ${label}`}
-								disabled={running !== null || typeof size !== "number" || size === 0}
-								onClick={() => {
-									setConfirm(row)
-								}}
-							>
-								{running === row ? <Spinner data-icon="inline-start" /> : null}
-								{action}
-							</Button>
+							<div className={ACTION_SLOT_CLASS}>
+								<Button
+									variant="outline"
+									aria-label={`${action}: ${label}`}
+									disabled={running !== null || typeof size !== "number" || size === 0}
+									onClick={() => {
+										setConfirm(row)
+									}}
+								>
+									{running === row ? <Spinner data-icon="inline-start" /> : null}
+									{action}
+								</Button>
+							</div>
 						</SettingsRow>
 					)
 				})}
+				{usage.other !== undefined && usage.other > 0 ? (
+					<SettingsRow
+						label={t("storageOther")}
+						description={t("storageOtherDescription")}
+					>
+						<RowSizeText size={usage.other} />
+						<div
+							aria-hidden="true"
+							className={ACTION_SLOT_CLASS}
+						/>
+					</SettingsRow>
+				) : null}
 				<SettingsBlock className="flex justify-end">
 					<Button
 						variant="outline"

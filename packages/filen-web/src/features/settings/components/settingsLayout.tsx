@@ -58,6 +58,8 @@ function SettingsPanel({ className, ...props }: ComponentProps<"div">) {
 interface SettingsGroupProps {
 	title?: string
 	description?: ReactNode
+	// Trailing the title on its line, e.g. a figure for the whole group; the heading's name stays the plain title.
+	aside?: ReactNode
 	variant?: "default" | "danger"
 	children: ReactNode
 }
@@ -67,7 +69,7 @@ interface SettingsGroupProps {
 // wrapper div) would draw a divider of its own.
 // No destructuring defaults in these primitives: the React Compiler bails on a component whose props
 // pattern carries one.
-function SettingsGroup({ title, description, variant, children }: SettingsGroupProps) {
+function SettingsGroup({ title, description, aside, variant, children }: SettingsGroupProps) {
 	return (
 		<section
 			data-slot="settings-group"
@@ -76,14 +78,17 @@ function SettingsGroup({ title, description, variant, children }: SettingsGroupP
 			{title !== undefined || description !== undefined ? (
 				<div className="flex flex-col gap-1 px-5">
 					{title !== undefined && (
-						<h2
-							className={cn(
-								"text-xs font-medium tracking-wider uppercase",
-								variant === "danger" ? "text-destructive" : "text-muted-foreground"
-							)}
-						>
-							{title}
-						</h2>
+						<div className="flex items-center justify-between gap-4">
+							<h2
+								className={cn(
+									"text-xs font-medium tracking-wider uppercase",
+									variant === "danger" ? "text-destructive" : "text-muted-foreground"
+								)}
+							>
+								{title}
+							</h2>
+							{aside}
+						</div>
 					)}
 					{description !== undefined && <p className="text-sm text-muted-foreground">{description}</p>}
 				</div>

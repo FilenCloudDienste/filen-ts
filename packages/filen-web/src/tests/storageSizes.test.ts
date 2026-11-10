@@ -102,26 +102,18 @@ describe("storageUsage", () => {
 			origin: 1000
 		})
 
-		expect(usage.total).toBe(1075)
-		expect(usage.segments).toEqual([
-			{ id: "thumbnails", bytes: 300 },
-			{ id: "queryCache", bytes: 100 },
-			{ id: "browserCache", bytes: 50 },
-			{ id: "networkDrive", bytes: 25 },
-			{ id: "other", bytes: 600 }
-		])
+		expect(usage).toEqual({ total: 1075, other: 600 })
 	})
 
 	it("floors Other at 0 when the browser's figure lags behind a clear", () => {
 		const usage = storageUsage({ rows: [["thumbnails", 500]], origin: 200 })
 
-		expect(usage.total).toBe(500)
-		expect(usage.segments).toEqual([{ id: "thumbnails", bytes: 500 }])
+		expect(usage).toEqual({ total: 500, other: 0 })
 	})
 
 	it("has no total until every figure is in", () => {
-		expect(storageUsage({ rows: [["thumbnails", 1]], origin: undefined }).total).toBeUndefined()
-		expect(storageUsage({ rows: [["thumbnails", undefined]], origin: 10 }).total).toBeUndefined()
-		expect(storageUsage({ rows: [["thumbnails", 4]], origin: null }).total).toBe(4)
+		expect(storageUsage({ rows: [["thumbnails", 1]], origin: undefined })).toEqual({ total: undefined, other: undefined })
+		expect(storageUsage({ rows: [["thumbnails", undefined]], origin: 10 })).toEqual({ total: undefined, other: undefined })
+		expect(storageUsage({ rows: [["thumbnails", 4]], origin: null })).toEqual({ total: 4, other: 0 })
 	})
 })

@@ -30,8 +30,9 @@ const ROUTE_PATHS: readonly (readonly [AssistantRouteName, string])[] = [
 	["settings_events", "/settings/events"],
 	["settings_plans", "/settings/plans"],
 	["settings_billing", "/settings/billing"],
-	["settings_storage", "/settings/storage"],
 	["settings_advanced", "/settings/advanced"],
+	// The local caches live on Advanced now; after settings_advanced so that page reports itself.
+	["settings_storage", "/settings/advanced"],
 	["settings", "/settings"]
 ]
 
@@ -131,8 +132,6 @@ async function navigateRaw(router: RegisteredRouter, route: AssistantRouteName):
 			await router.navigate({ to: "/settings/billing" })
 			break
 		case "settings_storage":
-			await router.navigate({ to: "/settings/storage" })
-			break
 		case "settings_advanced":
 			await router.navigate({ to: "/settings/advanced" })
 			break

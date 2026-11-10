@@ -10,7 +10,6 @@ import {
 	CreditCardIcon,
 	SlidersHorizontalIcon,
 	MonitorIcon,
-	DatabaseIcon,
 	GemIcon
 } from "lucide-react"
 import { SidebarPanel } from "@/features/shell/components/sidebarPanel"
@@ -29,7 +28,6 @@ type SettingsRoute =
 	| "/settings/events"
 	| "/settings/plans"
 	| "/settings/billing"
-	| "/settings/storage"
 	| "/settings/advanced"
 	| "/settings/desktop"
 
@@ -43,7 +41,6 @@ interface SettingsSidebarItem {
 		| "settingsSectionEvents"
 		| "settingsSectionPlans"
 		| "settingsSectionBilling"
-		| "settingsSectionStorage"
 		| "settingsSectionAdvanced"
 		| "settingsSectionDesktop"
 	icon: IconType
@@ -52,7 +49,7 @@ interface SettingsSidebarItem {
 
 // Account first (the index redirect's landing section — see routes/_app/settings/index.tsx),
 // Security second (the already-shipped page, unchanged), then Appearance/Keyboard/Events/Plans (web only)/Billing/
-// Storage/Advanced, and Desktop in the desktop app only.
+// Advanced, and Desktop in the desktop app only.
 const SETTINGS_ITEMS: SettingsSidebarItem[] = [
 	{ id: "account", labelKey: "settingsSectionAccount", icon: UserIcon, to: "/settings/account" },
 	{ id: "security", labelKey: "settingsSectionSecurity", icon: ShieldIcon, to: "/settings/security" },
@@ -64,7 +61,6 @@ const SETTINGS_ITEMS: SettingsSidebarItem[] = [
 		? [{ id: "plans", labelKey: "settingsSectionPlans", icon: GemIcon, to: "/settings/plans" } as const]
 		: []),
 	{ id: "billing", labelKey: "settingsSectionBilling", icon: CreditCardIcon, to: "/settings/billing" },
-	{ id: "storage", labelKey: "settingsSectionStorage", icon: DatabaseIcon, to: "/settings/storage" },
 	{ id: "advanced", labelKey: "settingsSectionAdvanced", icon: SlidersHorizontalIcon, to: "/settings/advanced" },
 	...(desktopBridge() === undefined
 		? []

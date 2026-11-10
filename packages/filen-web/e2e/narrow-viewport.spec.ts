@@ -50,7 +50,7 @@ test.describe("narrow viewport", () => {
 	test("every settings section is reachable, and picking one closes the drawer", async ({ page }) => {
 		await gotoSettings(page)
 
-		const sections = ["Account", "Security", "Appearance", "Events", "Plans", "Billing", "Storage", "Advanced"]
+		const sections = ["Account", "Security", "Appearance", "Events", "Plans", "Billing", "Advanced"]
 
 		// The positive control the hidden-loop below needs: every one of those links is equally "hidden"
 		// on a settings shell that never rendered at all, so the loop would pass vacuously. This trigger
