@@ -116,6 +116,18 @@ export const transfers = {
 	transfersRowFailedItems_other: "{{count}} failed",
 	/** Transfer row and archive job card — button opening the directory a finished upload, copy, archive or extracted directory landed in, with the item selected */
 	transfersRowShowInDirectory: "Show in directory",
+	/** Transfer row of a finished download the desktop app saved to the computer — button opening the downloaded file or directory with the computer's default app */
+	transfersOpenDownload: "Open",
+	/** Transfer row of the desktop app — why a transfer stopped: the app's background process that runs transfers quit (a crash or a restart) */
+	transfersNativeInterrupted: "Stopped because the desktop app's background process quit.",
+	/** Transfer row of the desktop app — why a transfer failed or a finished download could not be shown or opened: the local file or directory is gone */
+	transfersNativeLocalMissing: "The file or directory no longer exists.",
+	/** Transfer row of the desktop app — why a transfer failed: the computer does not let Filen read or write the local file or directory */
+	transfersNativeLocalDenied: "Filen isn't allowed to read or write there.",
+	/** Transfer row of the desktop app — why a download failed: the computer's disk has no space left */
+	transfersNativeLocalFull: "The disk is full.",
+	/** Transfer row of the desktop app — why a transfer failed: another program holds the local file open */
+	transfersNativeLocalInUse: "Another app is using this file.",
 	/** Transfer row — status label when a file failed to upload; the row also surfaces the failing outcome's own error label */
 	transfersStatusError: "Failed",
 	/** Transfer row — status label for a copy that finished with some of its items failed; the rest were copied */

@@ -96,6 +96,16 @@ export function finishedStatusLabelKey(status: Transfer["status"], direction: Tr
 	}
 }
 
+// A finished download the desktop app saved, which it can show in its directory and open.
+export function offersNativeReveal(transfer: Transfer): boolean {
+	return (
+		transfer.native === true &&
+		transfer.revealable === true &&
+		transfer.direction === "download" &&
+		(transfer.status === "done" || transfer.status === "completedWithErrors")
+	)
+}
+
 // The label on a drive job row's button reopening its progress card.
 export function jobDetailsLabelKey(
 	kind: DriveJobKind

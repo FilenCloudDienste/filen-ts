@@ -14,6 +14,10 @@ vi.mock("@/lib/sdk/client", () => ({
 }))
 vi.mock("@/features/drive/lib/saveDownload", () => ({ cancelSwDownload }))
 
+const { desktopTransfers } = vi.hoisted(() => ({ desktopTransfers: { cancel: vi.fn(), setPaused: vi.fn() } }))
+
+vi.mock("@/lib/desktop", () => ({ desktopBridge: () => ({ transfers: desktopTransfers }) }))
+
 import {
 	cancelUploadRuns,
 	cancelActiveTransfers,
@@ -461,5 +465,55 @@ describe("a directory upload's row", () => {
 		setTransferPaused("run", false)
 
 		expect(sdkResume).toHaveBeenCalledExactlyOnceWith("run")
+	})
+})
+
+describe("native transfers", () => {
+	it("cancel and pause of native rows call the bridge once with every id; web rows still go to sdkApi", () => {
+		useTransfersStore.setState({
+			transfers: [
+				makeTransfer({ id: "n1", direction: "download", status: "downloading", native: true }),
+				makeTransfer({ id: "n2", direction: "upload", status: "uploading", native: true }),
+				makeTransfer({ id: "w1", direction: "upload", status: "uploading" })
+			]
+		})
+
+		cancelTransfers(["n1", "n2", "w1"])
+		setTransfersPaused(["n1", "n2", "w1"], true)
+
+		expect(desktopTransfers.cancel.mock.calls).toEqual([[["n1", "n2"]]])
+		expect(desktopTransfers.setPaused.mock.calls).toEqual([[["n1", "n2"], true]])
+		expect(sdkCancel.mock.calls).toEqual([["w1"]])
+		expect(sdkPause.mock.calls).toEqual([["w1"]])
+		expect(useTransfersStore.getState().transfers.every(transfer => transfer.paused)).toBe(true)
+	})
+
+	it("cancel all covers native rows and leaves native runs to the host", () => {
+		const ref = { id: "run", parentUuid: null, directoryName: "Photos", native: true as const }
+
+		useTransfersStore.setState({
+			transfers: [makeTransfer({ id: "run", status: "uploading", native: true, batch: ref })],
+			uploadBatches: {
+				run: {
+					ref,
+					running: true,
+					cancelled: false,
+					scanning: true,
+					files: 0,
+					bytes: 0,
+					settledFiles: 0,
+					transferred: 0,
+					failedBytes: 0,
+					failed: 0
+				}
+			}
+		})
+
+		cancelActiveTransfers()
+
+		expect(desktopTransfers.cancel.mock.calls).toEqual([[["run"]]])
+		expect(useTransfersStore.getState().uploadBatches["run"]?.cancelled).toBe(false)
+		expect(useTransfersStore.getState().transfers).toHaveLength(1)
+		expect(sdkCancel).not.toHaveBeenCalled()
 	})
 })

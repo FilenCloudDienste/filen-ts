@@ -70,6 +70,24 @@ describe("TransfersUnloadGuard", () => {
 		expect(unloadIsBlocked()).toBe(false)
 	})
 
+	it("native transfers do not hold the unload guard", () => {
+		render(<TransfersUnloadGuard />)
+
+		act(() => {
+			useTransfersStore.setState({
+				transfers: [transfer({ native: true }), transfer({ id: "t2", direction: "download", status: "downloading", native: true })]
+			})
+		})
+
+		expect(unloadIsBlocked()).toBe(false)
+
+		act(() => {
+			useTransfersStore.setState({ transfers: [transfer({ native: true }), transfer({ id: "t2" })] })
+		})
+
+		expect(unloadIsBlocked()).toBe(true)
+	})
+
 	it("stops listening when unmounted", () => {
 		useTransfersStore.setState({ transfers: [transfer()] })
 

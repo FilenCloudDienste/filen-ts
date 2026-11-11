@@ -16,6 +16,7 @@ import { reportMediaTransport } from "@/features/desktop/lib/mediaTransport"
 import { performLogout } from "@/features/shell/lib/performLogout"
 import { loadSync } from "@/features/sync/lib/syncStore"
 import { loadMounts } from "@/features/mounts/lib/mountsStore"
+import { startNativeTransfersFeed } from "@/features/transfers/lib/nativeTransfers"
 import { i18n } from "@/lib/i18n"
 
 // One prompt however often main reports the same download (each page load hears it again).
@@ -64,6 +65,9 @@ export function DesktopHost(): null {
 
 	// The macOS Controls menu and the tray offer the audio player's transport while it has a queue.
 	useEffect(reportMediaTransport, [])
+
+	// Uploads and downloads the desktop app's native host runs, in the transfers store for this page's whole life.
+	useEffect(startNativeTransfersFeed, [])
 
 	// The shell removed a session the server rejected while syncing with it: a forced sign-out, like the
 	// socket's after a password change (an unsaved preview may delay it, never veto it). Sync and mounts follow the

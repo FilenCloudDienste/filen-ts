@@ -6,6 +6,7 @@ import {
 	CheckIcon,
 	CopyIcon,
 	DownloadIcon,
+	ExternalLinkIcon,
 	FolderSearchIcon,
 	PackageOpenIcon,
 	PanelBottomOpenIcon,
@@ -16,6 +17,8 @@ import {
 	XIcon,
 	type LucideIcon
 } from "lucide-react"
+import { toast } from "sonner"
+import type { DesktopTransferResult } from "@filen/shared/desktop"
 import { formatBytes, formatBytesFixed, isJobRunning, isWaitingForArchiveSlot, cn } from "@filen/shared"
 import {
 	isActiveTransfer,
@@ -29,8 +32,11 @@ import {
 	transferProgress,
 	activeStatusLabelKey,
 	finishedStatusLabelKey,
-	jobDetailsLabelKey
+	jobDetailsLabelKey,
+	offersNativeReveal
 } from "@/features/transfers/components/transferRow.logic"
+import { errorDtoOf } from "@/features/transfers/lib/nativeTransfers.logic"
+import { desktopBridge } from "@/lib/desktop"
 import { setTransferPaused } from "@/features/transfers/lib/control"
 import { showJobToast } from "@/features/transfers/lib/jobToast"
 import { pruneSettledDriveJobs } from "@/features/drive/lib/driveJobs"
@@ -214,6 +220,21 @@ export const TRANSFER_ROW_CLASS = "flex items-center gap-3 rounded-xl px-3 py-2 
 
 const ROW_ACTION_CLASS = "text-muted-foreground hover:text-foreground"
 
+// Show or open a download the desktop app saved; a failure (the file moved or was deleted) says why.
+function revealNative(action: "reveal" | "open", id: string): void {
+	const transfers = desktopBridge()?.transfers
+
+	if (transfers === undefined) {
+		return
+	}
+
+	void (action === "reveal" ? transfers.reveal(id) : transfers.open(id)).then((result: DesktopTransferResult<null>) => {
+		if (!result.ok) {
+			toast.error(errorLabel(errorDtoOf(result.error)))
+		}
+	})
+}
+
 // One transfer: the glyph, the item's name over a single line of details, and its controls. An active
 // row reads "312 MiB of 842 MiB · 37% · 4.2 MB/s · 2:05 left" (or "Paused · …"); a finished one says
 // what happened, "Uploaded · 6 MiB", or in red why it failed. Active rows pause/resume and cancel (the
@@ -344,6 +365,28 @@ export function TransferRow({ transfer, onRequestCancel, onShowInDirectory, tabS
 				) : null}
 				{!active ? (
 					<>
+						{offersNativeReveal(transfer) ? (
+							<>
+								<TooltipIconButton
+									label={t("transfersRowShowInDirectory")}
+									className={ROW_ACTION_CLASS}
+									onClick={() => {
+										revealNative("reveal", transfer.id)
+									}}
+								>
+									<FolderSearchIcon />
+								</TooltipIconButton>
+								<TooltipIconButton
+									label={t("transfersOpenDownload")}
+									className={ROW_ACTION_CLASS}
+									onClick={() => {
+										revealNative("open", transfer.id)
+									}}
+								>
+									<ExternalLinkIcon />
+								</TooltipIconButton>
+							</>
+						) : null}
 						{revealItem !== undefined ? (
 							<TooltipIconButton
 								label={t("transfersRowShowInDirectory")}

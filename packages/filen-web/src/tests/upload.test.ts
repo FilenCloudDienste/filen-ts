@@ -54,6 +54,7 @@ vi.mock("@/features/drive/lib/heicUpload", async importOriginal => {
 })
 
 import {
+	landUpload,
 	runUpload,
 	startUploads,
 	defaultUploadDeps,
@@ -830,5 +831,19 @@ describe("defaultUploadDeps.warmThumbnail", () => {
 describe("defaultUploadDeps.patchCreated", () => {
 	it("queues the landed file with the other listing creates", () => {
 		expect(defaultUploadDeps.patchCreated).toBe(queueListingCreate)
+	})
+})
+
+describe("landUpload", () => {
+	it("without a browser File lands the upload and warms no thumbnail", () => {
+		const deps = { patchCreated: vi.fn(), markAccountStale: vi.fn(), addStorageUsed: vi.fn(), warmThumbnail: vi.fn() }
+		const uploaded = mockSdkFile({ size: 7n })
+
+		landUpload(deps, testUuid("parent"), uploaded)
+
+		expect(deps.patchCreated).toHaveBeenCalledWith(testUuid("parent"), narrowItem(uploaded))
+		expect(deps.markAccountStale).toHaveBeenCalledOnce()
+		expect(deps.addStorageUsed).toHaveBeenCalledWith(7n)
+		expect(deps.warmThumbnail).not.toHaveBeenCalled()
 	})
 })

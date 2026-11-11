@@ -4,6 +4,7 @@ import { useShallow } from "zustand/shallow"
 import type { ErrorDTO } from "@/lib/sdk/errors"
 import type { DriveItem } from "@/features/drive/lib/item"
 import { clampedRatio, type DriveJobKind } from "@filen/shared"
+import type { DesktopTransferProgress } from "@filen/shared/desktop"
 import { withoutKey } from "@/lib/utils"
 
 // A row's direction: an upload, a download, or one whole drive job (copy, compress, extract).
@@ -60,6 +61,11 @@ export interface Transfer {
 	batch?: UploadBatchRef
 	// A finished directory run's failed items, kept on its row: the run itself can be dismissed first.
 	failedItems?: number
+	// The desktop app's native host runs it (features/transfers/lib/nativeTransfers.ts): cancel and pause go to the
+	// desktop bridge, and closing the page does not stop it.
+	native?: true
+	// A native download the desktop app can show in its directory and open once it finished.
+	revealable?: true
 }
 
 // One drive upload run as the listing it targets shows it: a plain pick or drop of files, or one
@@ -70,6 +76,8 @@ export interface UploadBatchRef {
 	// The directory whose listing shows the run, null for the root however the upload named it.
 	parentUuid: string | null
 	directoryName?: string
+	// The desktop app's native host runs it: no walk of the page's to cancel, its rows end through the host's events.
+	native?: true
 }
 
 // A run's running totals, kept here rather than summed from its transfers: finished rows are capped and
@@ -139,6 +147,8 @@ export interface TransfersIndex {
 	positions: Map<string, number>
 	activeCount: number
 	activeJobs: number
+	// Active rows the desktop app's native host runs, which outlive the page.
+	nativeActive: number
 	// Over the active rows of known size: a zip still walking its tree has no share of the whole.
 	activeSize: number
 	activeTransferred: number
@@ -208,6 +218,10 @@ function accountTotals(index: TransfersIndex, transfer: Transfer, sign: 1 | -1):
 			index.activeJobs += sign
 		}
 
+		if (transfer.native === true) {
+			index.nativeActive += sign
+		}
+
 		if (transfer.size > 0) {
 			index.activeSize += sign * transfer.size
 			index.activeTransferred += sign * transfer.bytesTransferred
@@ -222,6 +236,7 @@ function buildIndex(transfers: readonly Transfer[]): TransfersIndex {
 		positions: new Map(),
 		activeCount: 0,
 		activeJobs: 0,
+		nativeActive: 0,
 		activeSize: 0,
 		activeTransferred: 0,
 		failedCount: 0,
@@ -437,6 +452,13 @@ export function hasActiveTransfers(transfers: readonly Transfer[]): boolean {
 	return transfersIndexOf(transfers).activeCount > 0
 }
 
+// Active transfers this page runs itself, which closing or reloading it would stop.
+export function hasActivePageTransfers(transfers: readonly Transfer[]): boolean {
+	const index = transfersIndexOf(transfers)
+
+	return index.activeCount - index.nativeActive > 0
+}
+
 export function hasActiveDriveJobs(transfers: readonly Transfer[]): boolean {
 	return transfersIndexOf(transfers).activeJobs > 0
 }
@@ -536,6 +558,28 @@ export interface RunFileFailure {
 	parentUuid: string | null
 }
 
+// One event of the desktop app's native transfers (nativeTransfers.ts), applied in one update: rows main no longer lists
+// dropped, runs started (a directory run with its row), rows added, figures and pause flags moved, one row settled
+// (`item`: what a landed upload made), and runs ended.
+export interface NativeTransfersChange {
+	drop?: ReadonlySet<string>
+	// `transferred`: what a run's rows already moved (a snapshot's).
+	runs?: readonly {
+		ref: UploadBatchRef
+		totals: UploadBatchTotals
+		scanning: boolean
+		startedAt: number
+		paused: boolean
+		transferred?: number
+	}[]
+	add?: readonly Transfer[]
+	progress?: readonly DesktopTransferProgress[]
+	// Row id → paused.
+	paused?: ReadonlyMap<string, boolean>
+	settle?: { id: string; status: TerminalStatus; error?: ErrorDTO; item?: DriveItem }
+	end?: readonly string[]
+}
+
 export interface TransfersStore {
 	transfers: Transfer[]
 	// Rolling-window input for computeTransfersSpeed — store-owned since setProgress is the only
@@ -596,6 +640,10 @@ export interface TransfersStore {
 	// Drops every finished (non-active) row; active transfers are left untouched. Backs the
 	// transfers panel's "clear finished" control.
 	clearFinished: () => void
+	// One progress event of the desktop app's native host, in one update: each row's bytes and size, and a directory
+	// run's totals from its files (its scan is over once they are known).
+	applyNativeProgress: (updates: readonly DesktopTransferProgress[]) => void
+	applyNativeChange: (change: NativeTransfersChange) => void
 	// Drops every sample that has left the window (useSpeedSampleAging's tick). Writes nothing when
 	// nothing aged out.
 	pruneSpeedSamples: () => void
@@ -724,6 +772,416 @@ function syncRunRow(draft: RowsDraft, batch: UploadBatch): void {
 	}
 }
 
+// The store's data, which the state functions below take and return part of: the same object when nothing changed,
+// so the store notifies nobody.
+type TransfersData = Pick<TransfersStore, "transfers" | "speedSamples" | "rowSpeedSamples" | "uploadBatches" | "batchSpeedSamples">
+
+function settleState(state: TransfersData, id: string, status: TerminalStatus, error?: ErrorDTO): Partial<TransfersData> {
+	const draft = new RowsDraft(state.transfers)
+	const position = draft.position(id)
+	const target = draft.rows[position]
+
+	if (target === undefined) {
+		return state
+	}
+
+	draft.replace(position, error === undefined ? { ...target, status } : { ...target, status, error })
+
+	// Only the first settle of an active row counts toward its run.
+	const batchId = isActiveTransfer(target.status) ? target.batch?.id : undefined
+	const uploadBatches =
+		batchId === undefined
+			? state.uploadBatches
+			: withBatch(state.uploadBatches, batchId, batch => settledBatch(batch, target, status, error))
+
+	// "cancelled" never joins history — every caller removes the row immediately after settling it
+	// (runDownload/runZipDownload/runUpload's own Cancelled branch) — so it must never count toward
+	// the finished cap either, or that transient row can evict an OLDER, still-legitimate finished
+	// row an instant before it is itself removed.
+	const evicted = status === "cancelled" ? [] : draft.capFinished()
+
+	return {
+		...draft.result(),
+		rowSpeedSamples: withoutKeys(state.rowSpeedSamples, [id, ...evicted]),
+		uploadBatches
+	}
+}
+
+function setItemState(state: TransfersData, id: string, item: DriveItem, name?: string): Partial<TransfersData> {
+	const draft = new RowsDraft(state.transfers)
+	const position = draft.position(id)
+	const target = draft.rows[position]
+
+	if (target === undefined) {
+		return state
+	}
+
+	draft.replace(position, name === undefined ? { ...target, item } : { ...target, item, name })
+
+	return draft.result()
+}
+
+function removeManyState(state: TransfersData, ids: ReadonlySet<string>): Partial<TransfersData> {
+	const draft = new RowsDraft(state.transfers)
+
+	if (ids.size === 1) {
+		for (const id of ids) {
+			const position = draft.position(id)
+
+			if (position !== -1) {
+				draft.removeAt(position)
+			}
+		}
+	} else {
+		draft.filter(transfer => !ids.has(transfer.id))
+	}
+
+	return { ...draft.result(), rowSpeedSamples: withoutKeys(state.rowSpeedSamples, ids) }
+}
+
+function setPausedManyState(state: TransfersData, ids: ReadonlySet<string>, paused: boolean): Partial<TransfersData> {
+	const draft = new RowsDraft(state.transfers)
+
+	for (const id of ids) {
+		const position = draft.position(id)
+		const transfer = draft.rows[position]
+
+		if (transfer !== undefined && transfer.paused !== paused) {
+			draft.replace(position, { ...transfer, paused })
+		}
+	}
+
+	return draft.changed ? draft.result() : state
+}
+
+// `row`: a directory run's row fields beyond the defaults (a native run's start time and pause flag).
+function startUploadBatchState(
+	state: TransfersData,
+	ref: UploadBatchRef,
+	totals: UploadBatchTotals,
+	scanning: boolean,
+	row?: Pick<Transfer, "startedAt" | "paused">
+): Partial<TransfersData> {
+	const prev = state.uploadBatches[ref.id]
+	const batch: UploadBatch = {
+		...(prev ?? { ref, running: true, cancelled: false, settledFiles: 0, transferred: 0, failedBytes: 0, failed: 0 }),
+		files: totals.files,
+		bytes: totals.bytes
+	}
+
+	if (scanning) {
+		batch.scanning = true
+	} else {
+		delete batch.scanning
+	}
+
+	const uploadBatches = { ...state.uploadBatches, [ref.id]: batch }
+
+	if (ref.directoryName === undefined) {
+		return { uploadBatches }
+	}
+
+	const draft = new RowsDraft(state.transfers)
+
+	// A run cancelled while it was walked lost its row for good.
+	if (draft.position(ref.id) === -1 && !batch.cancelled) {
+		draft.append({
+			id: ref.id,
+			direction: "upload",
+			name: ref.directoryName,
+			size: batch.bytes,
+			bytesTransferred: 0,
+			status: "uploading",
+			paused: row?.paused ?? false,
+			parentUuid: ref.parentUuid,
+			startedAt: row?.startedAt ?? Date.now(),
+			batch: ref,
+			...(ref.native === true ? { native: true as const } : {})
+		})
+	} else {
+		syncRunRow(draft, batch)
+	}
+
+	return { uploadBatches, ...draft.result() }
+}
+
+function endUploadBatchState(state: TransfersData, id: string): Partial<TransfersData> {
+	const batch = state.uploadBatches[id]
+
+	if (batch === undefined) {
+		return state
+	}
+
+	const directoryRun = batch.ref.directoryName !== undefined
+	// A plain run's failures stay as its own failed rows; a directory run's only as the run.
+	const uploadBatches =
+		directoryRun && batch.failed > 0 && !batch.cancelled
+			? { ...state.uploadBatches, [id]: { ...batch, running: false } }
+			: withoutKey(state.uploadBatches, id)
+
+	if (!directoryRun) {
+		return { uploadBatches }
+	}
+
+	// The run's row settles with it; a cancelled one leaves no history, as no cancelled transfer does.
+	const draft = new RowsDraft(state.transfers)
+	const position = draft.position(id)
+	const row = draft.rows[position]
+	let evicted: string[] = []
+
+	if (row !== undefined && batch.cancelled) {
+		draft.removeAt(position)
+	} else if (row !== undefined && isActiveTransfer(row.status)) {
+		const size = batch.bytes - batch.failedBytes
+		const failed = batch.failed > 0
+
+		draft.replace(position, {
+			...row,
+			size,
+			bytesTransferred: failed ? batch.transferred : size,
+			status: failed ? "completedWithErrors" : "done",
+			...(failed ? { failedItems: batch.failed } : {}),
+			...(batch.error === undefined ? {} : { error: batch.error })
+		})
+
+		evicted = draft.capFinished()
+	}
+
+	return { uploadBatches, ...draft.result(), rowSpeedSamples: withoutKeys(state.rowSpeedSamples, [id, ...evicted]) }
+}
+
+// A native directory run's totals from the host's figures: `bytes` moved of `size`, and its files once known (its scan
+// is over then).
+function nativeRunTotals(batch: UploadBatch, update: DesktopTransferProgress): UploadBatch {
+	const next: UploadBatch = { ...batch, bytes: update.size, transferred: update.bytes }
+
+	if (update.files !== null) {
+		next.files = update.files.total
+		next.settledFiles = update.files.done + update.files.failed
+		next.failed = update.files.failed
+		next.failedBytes = update.files.failedBytes
+		delete next.scanning
+	}
+
+	return next
+}
+
+function applyNativeProgressState(state: TransfersData, updates: readonly DesktopTransferProgress[]): Partial<TransfersData> {
+	const draft = new RowsDraft(state.transfers)
+	const now = Date.now()
+	let rowSpeedSamples: Record<string, SpeedSample[]> | undefined
+	let uploadBatches: Record<string, UploadBatch> | undefined
+	let batchSpeedSamples: Record<string, SpeedSample[]> | undefined
+	let moved = 0
+	let reported = false
+
+	function sampleBatch(batchId: string, batchMoved: number): void {
+		batchSpeedSamples ??= { ...state.batchSpeedSamples }
+		batchSpeedSamples[batchId] = appendSample(
+			batchSpeedSamples[batchId],
+			now,
+			(batchSpeedSamples[batchId]?.at(-1)?.totalBytes ?? 0) + batchMoved
+		)
+	}
+
+	for (const update of updates) {
+		const position = draft.position(update.id)
+		const target = draft.rows[position]
+
+		// A late tick can land after its transfer settled or was removed.
+		if (target === undefined || !isActiveTransfer(target.status)) {
+			continue
+		}
+
+		const batchId = target.batch?.id
+		const batch = batchId === undefined ? undefined : (uploadBatches ?? state.uploadBatches)[batchId]
+
+		reported = true
+		rowSpeedSamples ??= { ...state.rowSpeedSamples }
+
+		if (batch !== undefined && batchId !== undefined && isDirectoryRunRow(target)) {
+			const next = nativeRunTotals(batch, update)
+			const runMoved = Math.max(0, next.transferred - batch.transferred)
+
+			uploadBatches ??= { ...state.uploadBatches }
+			uploadBatches[batchId] = next
+			syncRunRow(draft, next)
+			moved += runMoved
+			sampleBatch(batchId, runMoved)
+			rowSpeedSamples[batchId] = appendSample(rowSpeedSamples[batchId], now, next.transferred)
+
+			continue
+		}
+
+		const rowMoved = Math.max(0, update.bytes - target.bytesTransferred)
+
+		moved += rowMoved
+		rowSpeedSamples[update.id] = appendSample(rowSpeedSamples[update.id], now, update.bytes)
+
+		if (target.bytesTransferred !== update.bytes || target.size !== update.size) {
+			draft.replace(position, { ...target, size: update.size, bytesTransferred: update.bytes })
+		}
+
+		if (batch !== undefined && batchId !== undefined) {
+			uploadBatches ??= { ...state.uploadBatches }
+			uploadBatches[batchId] = {
+				...batch,
+				bytes: batch.bytes + update.size - target.size,
+				transferred: batch.transferred + update.bytes - target.bytesTransferred
+			}
+			sampleBatch(batchId, rowMoved)
+		}
+	}
+
+	if (!reported) {
+		return state
+	}
+
+	return {
+		speedSamples: appendSample(state.speedSamples, now, (state.speedSamples.at(-1)?.totalBytes ?? 0) + moved),
+		...draft.result(),
+		...(rowSpeedSamples === undefined ? {} : { rowSpeedSamples }),
+		...(uploadBatches === undefined ? {} : { uploadBatches }),
+		...(batchSpeedSamples === undefined ? {} : { batchSpeedSamples })
+	}
+}
+
+// A native directory run's row ends with its run: a cancel removes both; a failed transfer keeps its run (the listing
+// shows the failure) and reads as failed; one that finished with errors counts what the host skipped as failed.
+function settleNativeRunState(
+	state: TransfersData,
+	id: string,
+	status: TerminalStatus,
+	error: ErrorDTO | undefined
+): Partial<TransfersData> {
+	const batch = state.uploadBatches[id]
+
+	if (batch === undefined) {
+		return state
+	}
+
+	if (status === "cancelled") {
+		return endUploadBatchState({ ...state, uploadBatches: { ...state.uploadBatches, [id]: { ...batch, cancelled: true } } }, id)
+	}
+
+	const failed = status === "done" ? batch.failed : Math.max(batch.failed, 1, batch.files - batch.settledFiles)
+	const ended = endUploadBatchState(
+		{
+			...state,
+			uploadBatches: {
+				...state.uploadBatches,
+				[id]: { ...batch, failed, ...(batch.error === undefined && error !== undefined ? { error } : {}) }
+			}
+		},
+		id
+	)
+
+	if (status !== "error") {
+		return ended
+	}
+
+	const rows = ended.transfers ?? state.transfers
+	const draft = new RowsDraft(rows)
+	const position = draft.position(id)
+	const row = draft.rows[position]
+
+	if (row === undefined) {
+		return ended
+	}
+
+	const failure: Transfer = { ...row, status: "error", ...(error === undefined ? {} : { error }) }
+
+	delete failure.failedItems
+	draft.replace(position, failure)
+
+	return { ...ended, ...draft.result() }
+}
+
+function applyNativeChangeState(state: TransfersData, change: NativeTransfersChange): TransfersData {
+	let next = state
+
+	function apply(partial: Partial<TransfersData>): void {
+		if (partial !== next) {
+			next = { ...next, ...partial }
+		}
+	}
+
+	if (change.drop !== undefined && change.drop.size > 0) {
+		const dropped = change.drop
+		const runs = Object.keys(next.uploadBatches).filter(id => dropped.has(id))
+
+		// A file of a run leaves its run's totals, as a cancelled one does.
+		for (const id of dropped) {
+			const row = transferById(next.transfers, id)
+
+			if (row?.batch !== undefined && !isDirectoryRunRow(row)) {
+				apply(settleState(next, id, "cancelled"))
+			}
+		}
+
+		apply(removeManyState(next, dropped))
+		apply({ uploadBatches: withoutKeys(next.uploadBatches, runs), batchSpeedSamples: withoutKeys(next.batchSpeedSamples, runs) })
+	}
+
+	for (const run of change.runs ?? []) {
+		apply(startUploadBatchState(next, run.ref, run.totals, run.scanning, { startedAt: run.startedAt, paused: run.paused }))
+
+		const moved = run.transferred ?? 0
+
+		if (moved > 0) {
+			apply({ uploadBatches: withBatch(next.uploadBatches, run.ref.id, batch => ({ ...batch, transferred: moved })) })
+		}
+	}
+
+	if (change.add !== undefined && change.add.length > 0) {
+		const draft = new RowsDraft(next.transfers)
+
+		for (const transfer of change.add) {
+			draft.append(transfer)
+		}
+
+		apply(draft.result())
+	}
+
+	if (change.progress !== undefined && change.progress.length > 0) {
+		apply(applyNativeProgressState(next, change.progress))
+	}
+
+	if (change.paused !== undefined && change.paused.size > 0) {
+		const flags = change.paused
+
+		for (const paused of [true, false]) {
+			apply(setPausedManyState(next, new Set([...flags].flatMap(([id, flag]) => (flag === paused ? [id] : []))), paused))
+		}
+	}
+
+	const settled = change.settle
+
+	if (settled !== undefined) {
+		const row = transferById(next.transfers, settled.id)
+
+		if (row !== undefined && isDirectoryRunRow(row)) {
+			apply(settleNativeRunState(next, settled.id, settled.status, settled.error))
+		} else {
+			apply(settleState(next, settled.id, settled.status, settled.error))
+
+			if (settled.status === "cancelled") {
+				apply(removeManyState(next, new Set([settled.id])))
+			}
+		}
+
+		if (settled.item !== undefined) {
+			apply(setItemState(next, settled.id, settled.item))
+		}
+	}
+
+	for (const id of change.end ?? []) {
+		apply(endUploadBatchState(next, id))
+	}
+
+	return next
+}
+
 // The files of directory runs on their way, which have no row: what each moved, and its run. Not state, as
 // nothing renders them; every change to one lands on its run in the same update.
 const runFiles = new Map<string, { batchId: string; size: number; bytesTransferred: number; startedAt: number }>()
@@ -769,20 +1227,7 @@ export const useTransfersStore = create<TransfersStore>((set, get) => ({
 		get().setPausedMany(new Set([id]), paused)
 	},
 	setPausedMany: (ids, paused) => {
-		set(state => {
-			const draft = new RowsDraft(state.transfers)
-
-			for (const id of ids) {
-				const position = draft.position(id)
-				const transfer = draft.rows[position]
-
-				if (transfer !== undefined && transfer.paused !== paused) {
-					draft.replace(position, { ...transfer, paused })
-				}
-			}
-
-			return draft.changed ? draft.result() : state
-		})
+		set(state => setPausedManyState(state, ids, paused))
 	},
 	setWaitingForSlot: (id, waiting) => {
 		set(state => {
@@ -940,117 +1385,19 @@ export const useTransfersStore = create<TransfersStore>((set, get) => ({
 		})
 	},
 	settle: (id, status, error) => {
-		set(state => {
-			const draft = new RowsDraft(state.transfers)
-			const position = draft.position(id)
-			const target = draft.rows[position]
-
-			if (target === undefined) {
-				return state
-			}
-
-			draft.replace(position, error === undefined ? { ...target, status } : { ...target, status, error })
-
-			// Only the first settle of an active row counts toward its run.
-			const batchId = isActiveTransfer(target.status) ? target.batch?.id : undefined
-			const uploadBatches =
-				batchId === undefined
-					? state.uploadBatches
-					: withBatch(state.uploadBatches, batchId, batch => settledBatch(batch, target, status, error))
-
-			// "cancelled" never joins history — every caller removes the row immediately after settling it
-			// (runDownload/runZipDownload/runUpload's own Cancelled branch) — so it must never count toward
-			// the finished cap either, or that transient row can evict an OLDER, still-legitimate finished
-			// row an instant before it is itself removed.
-			const evicted = status === "cancelled" ? [] : draft.capFinished()
-
-			return {
-				...draft.result(),
-				rowSpeedSamples: withoutKeys(state.rowSpeedSamples, [id, ...evicted]),
-				uploadBatches
-			}
-		})
+		set(state => settleState(state, id, status, error))
 	},
 	setItem: (id, item, name) => {
-		set(state => {
-			const draft = new RowsDraft(state.transfers)
-			const position = draft.position(id)
-			const target = draft.rows[position]
-
-			if (target === undefined) {
-				return state
-			}
-
-			draft.replace(position, name === undefined ? { ...target, item } : { ...target, item, name })
-
-			return draft.result()
-		})
+		set(state => setItemState(state, id, item, name))
 	},
 	remove: id => {
 		get().removeMany(new Set([id]))
 	},
 	removeMany: ids => {
-		set(state => {
-			const draft = new RowsDraft(state.transfers)
-
-			if (ids.size === 1) {
-				for (const id of ids) {
-					const position = draft.position(id)
-
-					if (position !== -1) {
-						draft.removeAt(position)
-					}
-				}
-			} else {
-				draft.filter(transfer => !ids.has(transfer.id))
-			}
-
-			return { ...draft.result(), rowSpeedSamples: withoutKeys(state.rowSpeedSamples, ids) }
-		})
+		set(state => removeManyState(state, ids))
 	},
 	startUploadBatch: (ref, totals = { files: 0, bytes: 0 }, options) => {
-		set(state => {
-			const prev = state.uploadBatches[ref.id]
-			const batch: UploadBatch = {
-				...(prev ?? { ref, running: true, cancelled: false, settledFiles: 0, transferred: 0, failedBytes: 0, failed: 0 }),
-				files: totals.files,
-				bytes: totals.bytes
-			}
-
-			if (options?.scanning === true) {
-				batch.scanning = true
-			} else {
-				delete batch.scanning
-			}
-
-			const uploadBatches = { ...state.uploadBatches, [ref.id]: batch }
-
-			if (ref.directoryName === undefined) {
-				return { uploadBatches }
-			}
-
-			const draft = new RowsDraft(state.transfers)
-
-			// A run cancelled while it was walked lost its row for good.
-			if (draft.position(ref.id) === -1 && !batch.cancelled) {
-				draft.append({
-					id: ref.id,
-					direction: "upload",
-					name: ref.directoryName,
-					size: batch.bytes,
-					bytesTransferred: 0,
-					status: "uploading",
-					paused: false,
-					parentUuid: ref.parentUuid,
-					startedAt: Date.now(),
-					batch: ref
-				})
-			} else {
-				syncRunRow(draft, batch)
-			}
-
-			return { uploadBatches, ...draft.result() }
-		})
+		set(state => startUploadBatchState(state, ref, totals, options?.scanning === true))
 	},
 	updateUploadBatchScans: found => {
 		set(state => {
@@ -1126,50 +1473,7 @@ export const useTransfersStore = create<TransfersStore>((set, get) => ({
 		})
 	},
 	endUploadBatch: id => {
-		set(state => {
-			const batch = state.uploadBatches[id]
-
-			if (batch === undefined) {
-				return state
-			}
-
-			const directoryRun = batch.ref.directoryName !== undefined
-			// A plain run's failures stay as its own failed rows; a directory run's only as the run.
-			const uploadBatches =
-				directoryRun && batch.failed > 0 && !batch.cancelled
-					? { ...state.uploadBatches, [id]: { ...batch, running: false } }
-					: withoutKey(state.uploadBatches, id)
-
-			if (!directoryRun) {
-				return { uploadBatches }
-			}
-
-			// The run's row settles with it; a cancelled one leaves no history, as no cancelled transfer does.
-			const draft = new RowsDraft(state.transfers)
-			const position = draft.position(id)
-			const row = draft.rows[position]
-			let evicted: string[] = []
-
-			if (row !== undefined && batch.cancelled) {
-				draft.removeAt(position)
-			} else if (row !== undefined && isActiveTransfer(row.status)) {
-				const size = batch.bytes - batch.failedBytes
-				const failed = batch.failed > 0
-
-				draft.replace(position, {
-					...row,
-					size,
-					bytesTransferred: failed ? batch.transferred : size,
-					status: failed ? "completedWithErrors" : "done",
-					...(failed ? { failedItems: batch.failed } : {}),
-					...(batch.error === undefined ? {} : { error: batch.error })
-				})
-
-				evicted = draft.capFinished()
-			}
-
-			return { uploadBatches, ...draft.result(), rowSpeedSamples: withoutKeys(state.rowSpeedSamples, [id, ...evicted]) }
-		})
+		set(state => endUploadBatchState(state, id))
 	},
 	removeUploadBatches: ids => {
 		set(state => ({
@@ -1289,6 +1593,12 @@ export const useTransfersStore = create<TransfersStore>((set, get) => ({
 			}
 		})
 	},
+	applyNativeProgress: updates => {
+		set(state => applyNativeProgressState(state, updates))
+	},
+	applyNativeChange: change => {
+		set(state => applyNativeChangeState(state, change))
+	},
 	clearFinished: () => {
 		set(state => {
 			const draft = new RowsDraft(state.transfers)
@@ -1375,4 +1685,9 @@ export function useTransfersAggregate(): { activeCount: number; percent: number;
 // Boolean-collapsed, so a progress tick re-renders a subscriber only on the has/has-not edge.
 export function useHasActiveTransfers(): boolean {
 	return useTransfersStore(state => hasActiveTransfers(state.transfers))
+}
+
+// As useHasActiveTransfers, without the desktop app's native transfers, which outlive the page.
+export function useHasActivePageTransfers(): boolean {
+	return useTransfersStore(state => hasActivePageTransfers(state.transfers))
 }

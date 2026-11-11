@@ -162,7 +162,7 @@ export async function runUpload(
 
 	deps.store.settle(id, "done")
 	deps.store.setItem(id, narrowItem(uploaded))
-	landUpload(deps, parentUuid, file, uploaded)
+	landUpload(deps, parentUuid, uploaded, file)
 
 	return { status: "success" }
 }
@@ -226,19 +226,29 @@ async function runRunFileUpload(
 	}
 
 	deps.store.settleRunFile(id, "done")
-	landUpload(deps, parentUuid, file, uploaded)
+	landUpload(deps, parentUuid, uploaded, file)
 
 	return { status: "success" }
 }
 
-function landUpload(deps: RunUploadDeps, parentUuid: string | null, file: File, uploaded: SdkFile): void {
+// What a landed file changes: its listing, the account's storage used, and (with the browser File still in hand) its
+// thumbnail. The desktop app's native uploads have no File (nativeTransfers.ts).
+export function landUpload(
+	deps: Pick<RunUploadDeps, "patchCreated" | "markAccountStale" | "addStorageUsed" | "warmThumbnail">,
+	parentUuid: string | null,
+	uploaded: SdkFile,
+	file?: File
+): void {
 	// BEFORE the listing patch, and that ordering is the whole point: patching the row in makes its
 	// tile ask for a thumbnail on the very next commit, so the warm has to have claimed the uuid by
 	// then or the tile starts downloading the file this upload just sent. Sequenced after the upload
 	// itself resolved (never overlapped with it) — both read the same browser File, and while
 	// Blob.stream() does hand out a fresh reader per call, there is no reason to have the SDK read the
 	// same local file twice at once.
-	deps.warmThumbnail?.(uploaded, file)
+	if (file !== undefined) {
+		deps.warmThumbnail?.(uploaded, file)
+	}
+
 	deps.patchCreated(parentUuid, narrowItem(uploaded))
 	deps.markAccountStale?.()
 	deps.addStorageUsed?.(uploaded.size)
@@ -385,12 +395,12 @@ export function discardUploadRuns(ids: ReadonlySet<string>): void {
 }
 
 // A new run into `parentUuid`. Keyed to the listing that shows it, which names the root null: a drop on
-// the sidebar's root names it by uuid.
-export function newUploadBatchRef(parentUuid: string | null, directoryName?: string): UploadBatchRef {
+// the sidebar's root names it by uuid. `id`: a native run's own (nativeTransfers.ts).
+export function newUploadBatchRef(parentUuid: string | null, directoryName?: string, id: string = crypto.randomUUID()): UploadBatchRef {
 	const listingParentUuid = normalizeParentUuid(parentUuid, accountQueryGet()?.rootDirUuid ?? "")
 
 	return {
-		id: crypto.randomUUID(),
+		id,
 		parentUuid: listingParentUuid,
 		...(directoryName !== undefined ? { directoryName } : {})
 	}

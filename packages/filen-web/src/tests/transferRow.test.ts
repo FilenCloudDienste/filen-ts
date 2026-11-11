@@ -8,7 +8,8 @@ import {
 	transferIconKey,
 	steadyEtaSeconds,
 	transferRate,
-	runningPercentFraction
+	runningPercentFraction,
+	offersNativeReveal
 } from "@/features/transfers/components/transferRow.logic"
 
 function transfer(overrides: Partial<Transfer> = {}): Transfer {
@@ -196,5 +197,18 @@ describe("steadyEtaSeconds", () => {
 		expect(steadyEtaSeconds(64)).toBe(65)
 		expect(steadyEtaSeconds(601)).toBe(630)
 		expect(steadyEtaSeconds(3_601)).toBe(3_660)
+	})
+})
+
+describe("offersNativeReveal", () => {
+	it("only revealable finished downloads offer Show in directory and Open", () => {
+		const download = { direction: "download" as const, native: true as const, revealable: true as const }
+
+		expect(offersNativeReveal(transfer({ ...download, status: "done" }))).toBe(true)
+		expect(offersNativeReveal(transfer({ ...download, status: "completedWithErrors" }))).toBe(true)
+		expect(offersNativeReveal(transfer({ ...download, status: "downloading" }))).toBe(false)
+		expect(offersNativeReveal(transfer({ ...download, status: "error" }))).toBe(false)
+		expect(offersNativeReveal(transfer({ direction: "download", native: true, status: "done" }))).toBe(false)
+		expect(offersNativeReveal(transfer({ direction: "download", status: "done" }))).toBe(false)
 	})
 })

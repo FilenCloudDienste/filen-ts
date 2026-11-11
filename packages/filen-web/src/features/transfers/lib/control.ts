@@ -1,5 +1,6 @@
 import { isJobRunning } from "@filen/shared"
 import { sdkApi } from "@/lib/sdk/client"
+import { desktopBridge } from "@/lib/desktop"
 import { cancelSwDownload } from "@/features/drive/lib/saveDownload"
 import {
 	isActiveTransfer,
@@ -64,17 +65,25 @@ export function requestJobCancel(jobId: string, mode: JobStopMode): void {
 // worker-side abort. The in-flight runUpload/runDownload catch does the actual store settle+remove once
 // the worker call rejects with "Cancelled"; this only triggers that rejection. A directory upload's row
 // stops its whole run: marked first, so none of its files starts, then its files in flight abort through the
-// run's one stop (sdk.worker.ts's uploadFile).
+// run's one stop (sdk.worker.ts's uploadFile). The desktop app's native transfers stop in its host, all in one call;
+// their rows end through its events.
 export function cancelTransfers(ids: readonly string[]): void {
 	const { transfers, cancelUploadBatches } = useTransfersStore.getState()
 	const runs = new Set<string>()
+	const native: string[] = []
 
 	for (const id of ids) {
 		const transfer = activeIn(transfers, id)
 
-		if (transfer !== undefined && isDirectoryRunRow(transfer)) {
+		if (transfer?.native === true) {
+			native.push(id)
+		} else if (transfer !== undefined && isDirectoryRunRow(transfer)) {
 			runs.add(id)
 		}
+	}
+
+	if (native.length > 0) {
+		desktopBridge()?.transfers.cancel(native)
 	}
 
 	if (runs.size > 0) {
@@ -84,7 +93,7 @@ export function cancelTransfers(ids: readonly string[]): void {
 	for (const id of ids) {
 		const transfer = activeIn(transfers, id)
 
-		if (transfer === undefined) {
+		if (transfer === undefined || transfer.native === true) {
 			continue
 		}
 
@@ -117,13 +126,16 @@ export function cancelActiveTransfers(): void {
 
 // Stops every running upload run from starting anything more: a directory upload's files that are still
 // waiting on their directory (or on a HEIC conversion) are not transfers yet, so cancelling the transfers
-// alone would let them start afterwards. For Cancel all and sign-out, never for one row's Cancel.
+// alone would let them start afterwards. For Cancel all and sign-out, never for one row's Cancel. A native run is the
+// desktop app host's, which its row's cancel stops.
 export function cancelUploadRuns(): void {
 	const { uploadBatches, cancelUploadBatches } = useTransfersStore.getState()
 	const running = new Set<string>()
 
 	for (const id in uploadBatches) {
-		if (uploadBatches[id]?.running === true) {
+		const batch = uploadBatches[id]
+
+		if (batch?.running === true && batch.ref.native !== true) {
 			running.add(id)
 		}
 	}
@@ -140,6 +152,7 @@ export function cancelUploadRuns(): void {
 export function setTransfersPaused(ids: readonly string[], paused: boolean): void {
 	const { transfers } = useTransfersStore.getState()
 	const eligible = new Set<string>()
+	const native: string[] = []
 
 	for (const id of ids) {
 		const transfer = activeIn(transfers, id)
@@ -148,8 +161,17 @@ export function setTransfersPaused(ids: readonly string[], paused: boolean): voi
 			continue
 		}
 
-		void (paused ? sdkApi.pauseTransfer(id) : sdkApi.resumeTransfer(id))
+		if (transfer.native === true) {
+			native.push(id)
+		} else {
+			void (paused ? sdkApi.pauseTransfer(id) : sdkApi.resumeTransfer(id))
+		}
+
 		eligible.add(id)
+	}
+
+	if (native.length > 0) {
+		desktopBridge()?.transfers.setPaused(native, paused)
 	}
 
 	// Nothing eligible leaves the store untouched, so its subscribers hear nothing.
