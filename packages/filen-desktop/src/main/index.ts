@@ -250,14 +250,15 @@ const signOutFlow = createSignOut({
 		fileProvider: userId => fileProvider.signedOut(userId),
 		mounts: userId => mountsService.signOut(userId),
 		stopHost: async () => {
-			// Before the host stops: its rows end cancelled, never interrupted.
-			transfersService.signedOut()
-
+			// Before the host stops: its rows end cancelled, never interrupted. Their staging files go once it has
+			// stopped writing them.
+			const discardStaging = transfersService.signedOut()
 			const stopped = nativeSupervisor.signedOut()
 
 			syncService.signedOut()
 			mountsService.signedOut()
 			await stopped
+			await discardStaging()
 		},
 		forget: (userId, parts) => {
 			if (parts.includes("sync")) {

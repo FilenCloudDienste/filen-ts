@@ -108,8 +108,9 @@ export interface TransfersService {
 	chooseDownloadDirectory(): Promise<DesktopDownloadDirectoryChoice>
 	nativeEvent(message: Extract<FromNative, { t: "transfers" }>, userId: string): void
 	hostChanged(state: DesktopSyncHostState, generation: number): void
-	// No host call: the host's own shutdown aborts what it runs.
-	signedOut(): void
+	// No host call: the host's own shutdown aborts what it runs. Ends every row now; the returned call removes their
+	// staging files, once the host has stopped writing them.
+	signedOut(): () => Promise<void>
 	// Running transfers plus held listings (of `userId` when given): the host stays up while this is above 0.
 	active(userId?: string): number
 }
@@ -176,8 +177,17 @@ function localPlatformOf(platform: NodeJS.Platform): LocalPlatform {
 	return platform === "win32" || platform === "darwin" ? platform : "linux"
 }
 
-// The uuid of a file ref, for the SDK temp's name; null when the value does not name one.
+const UUID_KEY = '{"uuid":"'
+
+// The uuid of a file ref, for the SDK temp's name; null when the value does not name one. A wasm File serializes its
+// uuid first, read without parsing the value; any other order is parsed.
 function fileUuidOf(ref: DesktopSdkRef): string | null {
+	if (ref.value.startsWith(UUID_KEY) && ref.value.charAt(UUID_KEY.length + 36) === '"') {
+		const uuid = ref.value.slice(UUID_KEY.length, UUID_KEY.length + 36)
+
+		return UUID.test(uuid) ? uuid : null
+	}
+
 	try {
 		const value: unknown = JSON.parse(ref.value)
 		const uuid = typeof value === "object" && value !== null && "uuid" in value ? value.uuid : undefined
@@ -227,6 +237,8 @@ export function createTransfersService(deps: TransfersServiceDeps): TransfersSer
 	const reserved = new Set<string>()
 	const pages = new Map<number, Page>()
 	let hostRunning = false
+	// Bumped by each sign-out: a start begun before one must not reach the host.
+	let signOuts = 0
 	let lastDir: string | null = null
 	let listingTimer: NodeJS.Timeout | undefined
 
@@ -254,13 +266,31 @@ export function createTransfersService(deps: TransfersServiceDeps): TransfersSer
 
 		reserved.add(key)
 
-		if (await fs.exists(candidate)) {
+		let exists: boolean
+
+		try {
+			exists = await fs.exists(candidate)
+		} catch (error) {
+			reserved.delete(key)
+
+			throw error
+		}
+
+		if (exists) {
 			reserved.delete(key)
 
 			return true
 		}
 
 		return false
+	}
+
+	function release(planned: readonly PlannedRow[]): void {
+		for (const { row } of planned) {
+			if (row.reservation !== null) {
+				reserved.delete(row.reservation)
+			}
+		}
 	}
 
 	function forget(row: Row): void {
@@ -301,18 +331,26 @@ export function createTransfersService(deps: TransfersServiceDeps): TransfersSer
 		} satisfies DesktopTransferEvent
 	}
 
-	// Rows that end without the host: their staging files are removed here.
-	function settleLocally(ended: readonly Row[], outcome: DesktopTransferOutcome, error?: DesktopTransferError): void {
-		if (ended.length === 0) {
-			return
+	function discard(ids: readonly string[]): Promise<void> {
+		return ids.length === 0
+			? Promise.resolve()
+			: journal.discard(ids).catch((caught: unknown) => {
+					log.warn(`transfers: staging not discarded: ${caught instanceof Error ? caught.message : String(caught)}`)
+				})
+	}
+
+	// Rows that end without the host; returns their ids.
+	function endLocally(ended: readonly Row[], outcome: DesktopTransferOutcome, error?: DesktopTransferError): string[] {
+		if (ended.length > 0) {
+			push(ended.map(row => settle(row, outcome, error)))
 		}
 
-		const ids = ended.map(row => row.transfer.id)
+		return ended.map(row => row.transfer.id)
+	}
 
-		push(ended.map(row => settle(row, outcome, error)))
-		journal.discard(ids).catch((caught: unknown) => {
-			log.warn(`transfers: staging not discarded: ${caught instanceof Error ? caught.message : String(caught)}`)
-		})
+	// Rows that end without the host: their staging files are removed here.
+	function settleLocally(ended: readonly Row[], outcome: DesktopTransferOutcome, error?: DesktopTransferError): void {
+		void discard(endLocally(ended, outcome, error))
 	}
 
 	function activeOf(userId?: string): number {
@@ -432,8 +470,15 @@ export function createTransfersService(deps: TransfersServiceDeps): TransfersSer
 	}
 
 	// Records the rows, journals their staging, shows them, then hands them to the host in one call (more only past the
-	// protocol's size). A failed call ends its rows here.
-	async function begin(userId: string, planned: readonly PlannedRow[]): Promise<DesktopTransferResult<string[]>> {
+	// protocol's size). All or nothing: a failed call ends its rows and the later ones here and cancels the rows earlier
+	// calls started (the host settles those). `epoch`: the sign-out count when the action began.
+	async function begin(userId: string, planned: readonly PlannedRow[], epoch: number): Promise<DesktopTransferResult<string[]>> {
+		if (epoch !== signOuts) {
+			release(planned)
+
+			return UNAUTHENTICATED
+		}
+
 		for (const { row } of planned) {
 			rows.set(row.transfer.id, row)
 		}
@@ -442,8 +487,14 @@ export function createTransfersService(deps: TransfersServiceDeps): TransfersSer
 		push([{ t: "added", transfers: planned.map(item => ({ ...item.row.transfer })) }])
 
 		let failure: DesktopTransferError | null = null
+		const acked: Row[] = []
 
 		for (const batch of batches(planned.map(item => item.spec))) {
+			// A sign-out ended every row.
+			if (epoch !== signOuts) {
+				return UNAUTHENTICATED
+			}
+
 			const ids = batch.map(spec => spec.id)
 
 			if (failure !== null) {
@@ -474,6 +525,14 @@ export function createTransfersService(deps: TransfersServiceDeps): TransfersSer
 
 				settleLocally(own, "error", failure)
 
+				const started = acked.filter(row => rows.get(row.transfer.id) === row && !row.cancelled)
+
+				for (const row of started) {
+					row.cancelled = true
+				}
+
+				sendIfRunning("transfersCancel", byUser(started))
+
 				continue
 			}
 
@@ -483,6 +542,7 @@ export function createTransfersService(deps: TransfersServiceDeps): TransfersSer
 
 			for (const row of own) {
 				row.generation = generation
+				acked.push(row)
 
 				if (row.cancelled) {
 					cancelled.push(row)
@@ -626,6 +686,7 @@ export function createTransfersService(deps: TransfersServiceDeps): TransfersSer
 			return UNAUTHENTICATED
 		}
 
+		const epoch = signOuts
 		const group = randomUUID()
 		const stats = await Promise.all(request.paths.map(target => fs.stat(target)))
 		const planned: PlannedRow[] = []
@@ -672,7 +733,7 @@ export function createTransfersService(deps: TransfersServiceDeps): TransfersSer
 			return { ok: true, value: { status: "started", ids: [], skipped } }
 		}
 
-		const result = await begin(user.userId, planned)
+		const result = await begin(user.userId, planned, epoch)
 
 		return result.ok ? { ok: true, value: { status: "started", ids: result.value, skipped } } : result
 	}
@@ -691,6 +752,7 @@ export function createTransfersService(deps: TransfersServiceDeps): TransfersSer
 				return UNAUTHENTICATED
 			}
 
+			const epoch = signOuts
 			const destination =
 				request.destination.kind === "prefs"
 					? await resolvePrefs(request.items, request.destination.ask === true)
@@ -713,11 +775,17 @@ export function createTransfersService(deps: TransfersServiceDeps): TransfersSer
 			}
 			const planned: PlannedRow[] = []
 
-			for (const item of request.items) {
-				planned.push(await planDownload(item, destination, common))
+			try {
+				for (const item of request.items) {
+					planned.push(await planDownload(item, destination, common))
+				}
+			} catch (error) {
+				release(planned)
+
+				throw error
 			}
 
-			const result = await begin(user.userId, planned)
+			const result = await begin(user.userId, planned, epoch)
 
 			return result.ok ? { ok: true, value: { status: "started", ids: result.value } } : result
 		},
@@ -790,7 +858,7 @@ export function createTransfersService(deps: TransfersServiceDeps): TransfersSer
 				return { ok: true, value: { status: "started", ids: [] } }
 			}
 
-			const result = await begin(listing.userId, planned)
+			const result = await begin(listing.userId, planned, signOuts)
 
 			return result.ok ? { ok: true, value: { status: "started", ids: result.value } } : result
 		},
@@ -967,11 +1035,15 @@ export function createTransfersService(deps: TransfersServiceDeps): TransfersSer
 		signedOut: () => {
 			const all = [...rows.values()]
 
+			signOuts++
 			listings.clear()
 			armListings()
 			finished.clear()
 			lastDir = null
-			settleLocally(all, "cancelled")
+
+			const ids = endLocally(all, "cancelled")
+
+			return () => discard(ids)
 		},
 		active: activeOf
 	}

@@ -488,14 +488,185 @@ describe("transfers service: downloads", () => {
 
 		supervisor.callTransfers.mockClear()
 		service.subscribe(page, true)
-		service.signedOut()
+
+		const discardStaging = service.signedOut()
 
 		expect(sent.at(-1)).toEqual([{ t: "settled", id, outcome: "cancelled" }])
 		expect(watch.onSettled).toHaveBeenCalledWith({ id, outcome: "cancelled", path: at(FIXED, "a.txt") })
+		// The host may still write there until it has stopped.
+		expect(journal.discard).not.toHaveBeenCalled()
+		await discardStaging()
 		expect(journal.discard).toHaveBeenCalledWith([id])
 		expect(supervisor.callTransfers).not.toHaveBeenCalled()
 		expect(supervisor.callTransfersIfRunning).not.toHaveBeenCalled()
 		expect(service.active()).toBe(0)
+	})
+
+	it("sign-out during a pending start ends its rows cancelled once and discards staging after the host stopped", async () => {
+		const { service, answers, page, sent, journal } = setup({ downloadDirectory: FIXED })
+		const reply = Promise.withResolvers<unknown>()
+
+		answers.transfersStart = () => reply.promise
+		service.subscribe(page, true)
+
+		const starting = service.startDownload({ items: [fileItem()], destination: { kind: "prefs" }, origin: "page" })
+
+		await vi.waitFor(() => {
+			expect(service.active()).toBe(1)
+		})
+
+		const [id] = service.list().map(row => row.id)
+		const discardStaging = service.signedOut()
+
+		reply.resolve({ ok: true, value: null })
+		await starting
+		expect(journal.discard).not.toHaveBeenCalled()
+		await discardStaging()
+
+		expect(journal.discard).toHaveBeenCalledWith([id])
+		expect(sent.flat().filter(event => event.t === "settled")).toEqual([{ t: "settled", id, outcome: "cancelled" }])
+		expect(service.active()).toBe(0)
+	})
+
+	it("a start still asking for its destination when sign-out lands starts nothing", async () => {
+		const { service, dialogs, supervisor, journal } = setup()
+		const saved = Promise.withResolvers<string | null>()
+
+		dialogs.save.mockReturnValue(saved.promise)
+
+		const starting = service.startDownload({ items: [fileItem()], destination: { kind: "prefs" }, origin: "page" })
+
+		await vi.waitFor(() => {
+			expect(dialogs.save).toHaveBeenCalled()
+		})
+		service.signedOut()
+		saved.resolve(at(PICKED, "a.txt"))
+
+		expect(await starting).toEqual({ ok: false, error: { code: "unauthenticated" } })
+		expect(supervisor.callTransfers).not.toHaveBeenCalled()
+		expect(journal.add).not.toHaveBeenCalled()
+		expect(service.active()).toBe(0)
+	})
+
+	it("a session restart (running to starting) interrupts the old generation's rows", async () => {
+		const { service } = setup({ downloadDirectory: FIXED })
+
+		service.hostChanged({ state: "running" }, 1)
+		await service.startDownload({ items: [fileItem()], destination: { kind: "prefs" }, origin: "page" })
+		service.hostChanged({ state: "starting" }, 1)
+
+		expect(service.active()).toBe(0)
+	})
+
+	it("a host crash while transfersStart is pending leaves the rows to the start's own result", async () => {
+		const { service, answers, page, sent } = setup({ downloadDirectory: FIXED })
+		const reply = Promise.withResolvers<unknown>()
+
+		answers.transfersStart = () => reply.promise
+		service.hostChanged({ state: "running" }, 1)
+		service.subscribe(page, true)
+
+		const starting = service.startDownload({ items: [fileItem()], destination: { kind: "prefs" }, origin: "page" })
+
+		await vi.waitFor(() => {
+			expect(service.active()).toBe(1)
+		})
+		service.hostChanged({ state: "restarting", retryAt: 5 }, 1)
+		expect(service.active()).toBe(1)
+		reply.resolve({ ok: false, error: { code: "hostUnavailable" } })
+
+		expect(await starting).toEqual({ ok: false, error: { code: "hostUnavailable" } })
+		expect(sent.flat().filter(event => event.t === "settled")).toEqual([
+			{ t: "settled", id: expect.stringMatching(UUID) as string, outcome: "error", error: { code: "hostUnavailable" } }
+		])
+	})
+
+	it("settles a row once: a duplicate settle in one message and a host settle after a local one are dropped", async () => {
+		const { service, page, sent, host, journal } = setup({ downloadDirectory: FIXED })
+		const [a = "", b = ""] = started(
+			await service.startDownload({ items: [fileItem(), fileItem("b.txt")], destination: { kind: "prefs" }, origin: "page" })
+		)
+
+		service.hostChanged({ state: "running" }, 1)
+		service.subscribe(page, true)
+		host([
+			{ k: "settled", id: a, outcome: "done" },
+			{ k: "settled", id: a, outcome: "error", error: { code: "unknown" } }
+		])
+		service.hostChanged({ state: "off" }, 1)
+		host([{ k: "settled", id: b, outcome: "done" }])
+
+		expect(sent.flat().filter(event => event.t === "settled")).toEqual([
+			{ t: "settled", id: a, outcome: "done" },
+			{ t: "settled", id: b, outcome: "error", error: { code: "interrupted" } }
+		])
+		expect(journal.remove).toHaveBeenCalledTimes(1)
+	})
+
+	it("two downloads started at once into one directory keep both", async () => {
+		const { service, specs } = setup({ downloadDirectory: FIXED })
+
+		await Promise.all([
+			service.startDownload({ items: [fileItem()], destination: { kind: "prefs" }, origin: "page" }),
+			service.startDownload({ items: [fileItem()], destination: { kind: "prefs" }, origin: "page" })
+		])
+
+		expect(
+			specs()
+				.map(spec => spec.path)
+				.sort()
+		).toEqual([at(FIXED, "a (1).txt"), at(FIXED, "a.txt")])
+	})
+
+	it("a reload re-subscribes for a fresh snapshot and two windows each get every round once", async () => {
+		const { service, page, sent, host } = setup({ downloadDirectory: FIXED })
+		const other = { id: 8, send: vi.fn() }
+
+		service.subscribe(page, true)
+
+		const [id = ""] = started(await service.startDownload({ items: [fileItem()], destination: { kind: "prefs" }, origin: "page" }))
+
+		host([{ k: "progress", id, size: 10, bytes: 4, files: null }])
+		service.subscribe(page, true)
+		service.subscribe(other, true)
+		host([{ k: "progress", id, size: 10, bytes: 8, files: null }])
+
+		expect(sent.at(-2)).toEqual([{ t: "snapshot", transfers: [expect.objectContaining({ id, bytes: 4 }) as unknown] }])
+		expect(sent.at(-1)).toEqual([{ t: "progress", updates: [{ id, size: 10, bytes: 8, files: null }] }])
+		expect(sent.filter(events => events[0]?.t === "progress")).toHaveLength(2)
+		expect(other.send).toHaveBeenCalledTimes(2)
+	})
+
+	it("a planning failure releases every name the action reserved", async () => {
+		const { service, fs, specs } = setup({ downloadDirectory: FIXED })
+
+		fs.exists.mockImplementation((target: string) =>
+			target === at(FIXED, "b.txt") ? Promise.reject(new Error("EIO")) : Promise.resolve(false)
+		)
+
+		await expect(
+			service.startDownload({ items: [fileItem(), fileItem("b.txt")], destination: { kind: "prefs" }, origin: "page" })
+		).rejects.toThrow("EIO")
+		expect(service.active()).toBe(0)
+
+		fs.exists.mockResolvedValue(false)
+		await service.startDownload({ items: [fileItem(), fileItem("b.txt")], destination: { kind: "prefs" }, origin: "page" })
+
+		expect(specs().map(spec => spec.path)).toEqual([at(FIXED, "a.txt"), at(FIXED, "b.txt")])
+	})
+
+	it("reads the SDK temp's uuid wherever the File's uuid key sits", async () => {
+		const { service, journal } = setup({ downloadDirectory: FIXED })
+		const { uuid, ...rest } = wasmFile(FILE_UUID, 10n)
+		const item: NativeDownloadItem = {
+			kind: "file",
+			ref: { variant: "AnyFile.File", value: stringifyEnvelope({ ...rest, uuid }) },
+			name: "a.txt",
+			size: 10
+		}
+		const [id] = started(await service.startDownload({ items: [item], destination: { kind: "prefs" }, origin: "page" }))
+
+		expect(journal.add).toHaveBeenCalledWith([{ id, dir: FIXED, names: [`${id ?? ""}.filendl`, `${FILE_UUID}.filendl`], tree: false }])
 	})
 
 	it("cancel and pause never start the host", async () => {
@@ -839,6 +1010,41 @@ describe("transfers service: reveal, open, uploads, directory pref", () => {
 				.flatMap(call => call.specs)
 				.map(spec => spec.id)
 		).toEqual(ids)
+	})
+
+	it("a failed later batch cancels the acked rows of earlier batches and ends the rest", async () => {
+		const { service, disk, answers, supervisor, startCalls, host, page, sent } = setup()
+		const parent = { uuid: PARENT_UUID, ref: { variant: "AnyNormalDir.Dir" as const, value: "x".repeat(8000) } }
+		const paths = Array.from({ length: 2500 }, (_, n) => path.resolve("up", `${String(n)}.txt`))
+		let calls = 0
+
+		for (const file of paths) {
+			disk.set(file, "file")
+		}
+
+		answers.transfersStart = () =>
+			Promise.resolve(++calls === 1 ? { ok: true, value: null } : { ok: false, error: { code: "unknown" } })
+		service.subscribe(page, true)
+
+		const result = await service.startUpload({ paths, parent, origin: "page" })
+
+		expect(result).toEqual({ ok: false, error: { code: "unknown" } })
+
+		const all = sent.flat().flatMap(event => (event.t === "added" ? event.transfers.map(row => row.id) : []))
+		const acked = startCalls()[0]?.specs.map(spec => spec.id) ?? []
+
+		expect(startCalls().length).toBeGreaterThan(1)
+		expect(supervisor.callTransfersIfRunning).toHaveBeenCalledWith("transfersCancel", { ids: acked }, "1")
+		expect(
+			sent
+				.flat()
+				.filter(event => event.t === "settled")
+				.map(event => (event.t === "settled" ? event.id : ""))
+		).toEqual(all.slice(acked.length))
+		expect(service.active()).toBe(acked.length)
+
+		host(acked.map(id => ({ k: "settled", id, outcome: "cancelled" })))
+		expect(service.active()).toBe(0)
 	})
 
 	it("pickUpload opens a native dialog and uploads its paths", async () => {

@@ -30,8 +30,9 @@ function treeFs(nodes: Record<string, Node>) {
 
 			return Promise.resolve()
 		},
+		// Like fs.readdir: a link to a directory is followed.
 		readdir: at => {
-			if (tree.get(at) !== "dir") {
+			if (tree.get(at) !== "dir" && tree.get(at) !== "link") {
 				return Promise.reject(enoent(at))
 			}
 
@@ -123,6 +124,31 @@ describe("staging journal", () => {
 			path.join(root, "away"),
 			path.join(root, "away", `${ID2}.filendl`)
 		])
+	})
+
+	it("sweep never walks a tree root that is now a link", async () => {
+		const root = at("Projects")
+		const { journal, tree } = setup(
+			{
+				[root]: "link",
+				[path.join(root, `${FILE_UUID}.filendl`)]: "file"
+			},
+			[{ id: ID, dir: root, names: [], tree: true }]
+		)
+
+		await journal.sweep()
+
+		expect([...tree.keys()]).toEqual([root, path.join(root, `${FILE_UUID}.filendl`)])
+	})
+
+	it("discard never removes a name that is not a uuid staging name", async () => {
+		const { journal, tree, fs } = setup({ [DIR]: "dir", [at("notes.filendl")]: "file", [at("a.txt")]: "file" })
+
+		journal.add([{ id: ID, dir: DIR, names: ["notes.filendl", "a.txt"], tree: false }])
+		await journal.discard([ID])
+
+		expect(fs.unlink).not.toHaveBeenCalled()
+		expect([...tree.keys()]).toEqual([DIR, at("notes.filendl"), at("a.txt")])
 	})
 
 	it("an unreadable journal is dropped", async () => {

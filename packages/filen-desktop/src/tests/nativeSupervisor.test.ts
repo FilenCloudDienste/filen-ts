@@ -651,6 +651,29 @@ describe("createNativeSupervisor", () => {
 		expect(supervisor.generation()).toBe(2)
 	})
 
+	it("the state that ends a run is reported while generation still names that run (transfers interrupt wiring)", async () => {
+		const { supervisor, last, deps } = harness()
+		const seen: [DesktopSyncHostState["state"], number][] = []
+		const onState = deps.onState
+
+		deps.onState = state => {
+			onState(state)
+			seen.push([state.state, supervisor.generation()])
+		}
+		supervisor.ensure("launch")
+		await settle()
+		ready(last())
+		last().crash()
+		await settle(BACKOFF_BASE_MS)
+		ready(last())
+
+		expect(seen.filter(([state]) => state === "running" || state === "restarting")).toEqual([
+			["running", 1],
+			["restarting", 1],
+			["running", 2]
+		])
+	})
+
 	it("writes the host's output redacted", async () => {
 		const { supervisor, deps, last } = harness()
 

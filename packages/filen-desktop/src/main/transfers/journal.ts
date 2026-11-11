@@ -112,8 +112,23 @@ export function createStagingJournal(deps: {
 		}
 	}
 
-	// Depth first with an explicit stack; directories are entered only as readdir reports them (never a link).
+	// Depth first with an explicit stack; directories are entered only as readdir reports them (never a link), the root
+	// only when it lstats as a directory.
 	async function sweepTree(root: string): Promise<boolean> {
+		try {
+			if (!(await fs.lstat(root)).isDirectory()) {
+				return true
+			}
+		} catch (error) {
+			if (missing(error)) {
+				return true
+			}
+
+			log.warn(`transfers: ${root} not swept: ${errorCode(error)}`)
+
+			return false
+		}
+
 		const stack = [root]
 		let clean = true
 
