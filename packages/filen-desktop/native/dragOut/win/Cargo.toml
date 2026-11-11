@@ -1,0 +1,43 @@
+# filen-drag.node: drive items dragged out of the window become virtual files for Explorer (IDataObject +
+# IDataObjectAsyncCapability on an addon-owned MTA thread). Windows only; the pure modules (descriptor, slot) build
+# and test on any host.
+[package]
+name = "filen-drag"
+version = "0.0.0"
+edition = "2024"
+rust-version = "1.98"
+license = "AGPL-3.0-only"
+repository = "https://github.com/FilenCloudDienste/filen-ts"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[target.'cfg(windows)'.dependencies]
+napi = { version = "=3.12.6", default-features = false, features = ["napi9", "dyn-symbols"] }
+napi-derive = "=3.6.12"
+windows-core = "=0.62.2"
+windows = { version = "=0.62.2", features = [
+	"Win32_Foundation",
+	"Win32_Graphics_Gdi",
+	"Win32_Storage_FileSystem",
+	"Win32_System_Com",
+	"Win32_System_Com_Marshal",
+	"Win32_System_Com_StructuredStorage",
+	"Win32_System_DataExchange",
+	"Win32_System_Memory",
+	"Win32_System_Ole",
+	"Win32_System_SystemServices",
+	"Win32_System_Threading",
+	"Win32_UI_Shell",
+	"Win32_UI_Shell_Common",
+	"Win32_UI_WindowsAndMessaging",
+] }
+
+[build-dependencies]
+napi-build = "=2.4.3"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

@@ -1,0 +1,6 @@
+# The addon's toolchain (the spellchecker's stable pin); rustup installs what is missing.
+[toolchain]
+channel = "1.98.0"
+profile = "minimal"
+components = ["rustfmt", "clippy"]
+targets = ["x86_64-pc-windows-msvc", "aarch64-pc-windows-msvc"]

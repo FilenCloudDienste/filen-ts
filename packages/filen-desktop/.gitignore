@@ -7,3 +7,4 @@ build/rclone/manifest.json
 build/deps/
 build/fileProvider/
 build/linux/
+native/dragOut/win/target/
