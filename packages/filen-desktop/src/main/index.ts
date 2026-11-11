@@ -53,6 +53,7 @@ import { createFileLog } from "./fileLog.ts"
 import { createDragOutAddon, type DragOutAddonMac } from "./dragOut/addon.ts"
 import { createDragOutAddonWin } from "./dragOut/addonWin.ts"
 import { registerDragOutIpc } from "./dragOut/ipc.ts"
+import { createQuitAfterDrag } from "./dragOut/quit.ts"
 import { createDragOutService, type DragOutNative } from "./dragOut/service.ts"
 import { DragSessions } from "./dragOut/session.ts"
 import { createDragTemp } from "./dragOut/temp.ts"
@@ -735,7 +736,13 @@ const dragOut = createDragOutService<NativeImage>({
 	log: { warn }
 })
 // Before-quit waits for a native drag to return (Linux's nested loop and macOS's drag tracking run IPC and the tray).
-let quitAfterDrag = false
+const quitAfterDrag = createQuitAfterDrag({
+	running: () => dragOut.nativeDragRunning(),
+	idle: () => dragOut.idle(),
+	quit: () => {
+		app.quit()
+	}
+})
 
 // Where neither a sync pair nor the network drive may be.
 function reservedDirectories() {
@@ -1334,6 +1341,7 @@ function createWindow(): void {
 			event.preventDefault()
 		} else {
 			quitting = false
+			quitAfterDrag.reset()
 		}
 	})
 
@@ -1726,16 +1734,9 @@ if (!instanceLock.held) {
 	// Native transfers hold no page unload guard: main asks itself. Quit never waits for them; will-quit stops the host,
 	// which aborts them. A running OS drag defers the quit (and the prompt) until it ends.
 	app.on("before-quit", event => {
-		if (dragOut.nativeDragRunning()) {
+		if (quitAfterDrag.defer()) {
 			event.preventDefault()
-
-			if (!quitAfterDrag) {
-				quitAfterDrag = true
-				info("quit: waiting for the drag out to end")
-				void dragOut.idle().then(() => {
-					app.quit()
-				})
-			}
+			info("quit: waiting for the drag out to end")
 
 			return
 		}
