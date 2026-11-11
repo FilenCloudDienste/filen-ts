@@ -1480,7 +1480,7 @@ describe("date filters and insights", () => {
 })
 
 describe("drive lists, sharing, contacts and transfers", () => {
-	const annaRole = { type: "sharer", email: "anna@example.com", id: 2 } as const
+	const annaRole = { type: "sharer", email: "anna@example.com", id: 2n } as const
 
 	function sharedRoot(uuid: string, name: string, role: SharedRootDir["sharingRole"]): SharedRootDir {
 		return {
@@ -1513,7 +1513,7 @@ describe("drive lists, sharing, contacts and transfers", () => {
 		sdk.listSharedInRoot.mockResolvedValue({
 			dirs: [
 				sharedRoot(taxes, "Taxes 2025", annaRole),
-				sharedRoot(testUuid("evil"), "Evil", { type: "sharer", email: "mallory@example.com", id: 3 })
+				sharedRoot(testUuid("evil"), "Evil", { type: "sharer", email: "mallory@example.com", id: 3n })
 			],
 			files: []
 		})
@@ -1605,8 +1605,8 @@ describe("drive lists, sharing, contacts and transfers", () => {
 		)
 		sdk.listSharedOutRoot.mockResolvedValue({
 			dirs: [
-				sharedRoot(docsRaw.uuid, "Docs", { type: "receiver", email: "anna@example.com", id: 2 }),
-				sharedRoot(docsRaw.uuid, "Docs", { type: "receiver", email: "bob@example.com", id: 4 })
+				sharedRoot(docsRaw.uuid, "Docs", { type: "receiver", email: "anna@example.com", id: 2n }),
+				sharedRoot(docsRaw.uuid, "Docs", { type: "receiver", email: "bob@example.com", id: 4n })
 			],
 			files: []
 		})

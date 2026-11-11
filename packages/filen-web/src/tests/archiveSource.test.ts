@@ -13,7 +13,7 @@ import { testUuid } from "@/tests/support/uuid"
 
 const ROOT = testUuid("root")
 const PARENT = testUuid("parent")
-const ROLE = { type: "receiver", email: "a@example.com", id: 1 } as const
+const ROLE = { type: "receiver", email: "a@example.com", id: 1n } as const
 
 function rawFile(name: string, parent: ParentUuid): File {
 	return {

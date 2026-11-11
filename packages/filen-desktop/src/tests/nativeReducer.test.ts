@@ -8,7 +8,7 @@ import {
 	reduceWatchStatus,
 	type PairRuntime
 } from "../native/reducer.ts"
-import { fakeSdk, pairInfo, passEvent, report } from "./nativeFakes.ts"
+import { DIVERGED, fakeSdk, pairInfo, passEvent, report } from "./nativeFakes.ts"
 
 beforeEach(() => {
 	vi.useFakeTimers()
@@ -133,7 +133,7 @@ describe("reduceEvents", () => {
 		runtime.setPairs([pairInfo()])
 		runtime.events([
 			passEvent({ tag: "PassStarted", inner: { mode: fakeSdk.SyncMode.TwoWay } }),
-			passEvent({ tag: "Conflict", inner: { relPath: "a.txt" } })
+			passEvent({ tag: "Conflict", inner: { relPath: "a.txt", reason: DIVERGED } })
 		])
 		await vi.advanceTimersByTimeAsync(FEED_INTERVAL_MS)
 

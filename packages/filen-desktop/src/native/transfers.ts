@@ -1,5 +1,5 @@
 import path from "node:path"
-import type { FilenSdkError } from "@filen/sdk-rs"
+import type * as Napi from "@filen/sdk-rs"
 import type { DesktopSdkRef, DesktopTransferError, DesktopTransferFiles, DesktopTransferOutcome } from "@filen/shared/desktop"
 import { SdkShapeError, ubrnOf, wasmOf } from "@filen/shared/sdkShapes"
 import { parseEnvelope, stringifyEnvelope } from "@filen/shared/session"
@@ -24,90 +24,11 @@ import { classifyTransfer, isCancelled, TransferCommitError, type TransferErrorS
 // pause); the SDK caps concurrency client-wide (open files, request limiter), so each transfer is one call and there
 // is no queue here. Progress is coalesced into one host message per round; nothing is timed while idle.
 
-// The napi transfer surface the registry uses, as the addon's typings (node/index.d.ts) declare it, checked against a
-// local build by nativeTransfersAddon.test.ts. Declared here, the one place, until the installed @filen/sdk-rs ships
-// it; SDK items stay `unknown`: sdkShapes builds and checks them.
-export interface TransferClient {
-	root(): { uuid: string }
-	createDir(parent: unknown, name: string): Promise<unknown>
-	uploadFile(
-		params: {
-			parent: unknown
-			name?: string | undefined
-			created?: bigint | undefined
-			modified?: bigint | undefined
-			mime?: string | undefined
-			noExif: boolean
-			noExifOverride: boolean
-		},
-		filePath: string,
-		callback: { onUpdate(uploadedBytes: bigint): void } | undefined,
-		managedFuture: ManagedFuture
-	): Promise<unknown>
-	downloadFileToPath(
-		file: unknown,
-		filePath: string,
-		callback: { onUpdate(downloadedBytes: bigint): void } | undefined,
-		managedFuture: ManagedFuture
-	): Promise<void>
-	uploadDirRecursively(dirPath: string, callback: DirUploadCallback, target: unknown, managedFuture: ManagedFuture): Promise<void>
-	downloadDirRecursively(dirPath: string, callback: DirDownloadCallback, target: unknown, managedFuture: ManagedFuture): Promise<void>
-	// No managed future: only asyncOpts_ aborts a listing.
-	listDirRecursiveWithPaths(
-		dir: unknown,
-		listDirProgressCallback: { onProgress(bytesDownloaded: bigint, totalBytes: bigint | undefined): void } | undefined,
-		scanErrorCallback: { onErrors(errors: FilenSdkError[]): void }
-	): Promise<{ dirs: { path: string; dir: unknown }[]; files: { path: string; file: unknown }[] }>
-}
+// The napi transfer surface the registry uses. SDK items reach it from sdkShapes, which builds each one for its
+// variant and checks every field; the registry reads only the facts it needs off them (fileFacts).
+export type TransferClient = Pick<Napi.JsClient, (typeof TRANSFER_METHODS)[number]>
 
-// Both keys required (napi reads them as given); a signal of another class rejects Conversion.
-export interface ManagedFuture {
-	abortSignal: ManagedAbortSignalLike | undefined
-	pauseSignal: PauseSignalLike | undefined
-}
-
-export interface ManagedAbortSignalLike {
-	aborted(): boolean
-}
-
-export interface PauseSignalLike {
-	isPaused(): boolean
-	pause(): void
-	resume(): void
-}
-
-export interface ManagedAbortControllerLike {
-	abort(): void
-	signal(): ManagedAbortSignalLike
-}
-
-// Byte counts are deltas since the previous call; an unknown total is undefined.
-export interface DirUploadCallback {
-	onScanProgress(knownDirs: bigint, knownFiles: bigint, knownBytes: bigint): void
-	onScanErrors(errors: FilenSdkError[]): void
-	onScanComplete(totalDirs: bigint, totalFiles: bigint, totalBytes: bigint): void
-	onUploadUpdate(uploadedDirs: unknown[], uploadedFiles: unknown[], uploadedBytes: bigint): void
-	onUploadErrors(errors: { path: string; error: FilenSdkError }[]): void
-}
-
-export interface DirDownloadCallback {
-	onQueryDownloadProgress(knownBytes: bigint, totalBytes: bigint | undefined): void
-	onScanProgress(knownDirs: bigint, knownFiles: bigint, knownBytes: bigint): void
-	onScanErrors(errors: FilenSdkError[]): void
-	onScanComplete(totalDirs: bigint, totalFiles: bigint, totalBytes: bigint): void
-	onDownloadUpdate(
-		downloadedDirs: { path: string; dir: unknown }[],
-		downloadedFiles: { path: string; file: unknown }[],
-		downloadedBytes: bigint
-	): void
-	// `item` is a NonRootItem.
-	onDownloadErrors(errors: { path: string; error: FilenSdkError; item: unknown }[]): void
-}
-
-export interface TransferSdk extends TransferErrorSdk {
-	PauseSignal: new () => PauseSignalLike
-	ManagedAbortController: new () => ManagedAbortControllerLike
-}
+export interface TransferSdk extends TransferErrorSdk, Pick<typeof Napi, "PauseSignal" | "ManagedAbortController"> {}
 
 export interface TransferRegistry {
 	start(specs: readonly NativeTransferSpec[]): void
@@ -133,7 +54,7 @@ const TRANSFER_METHODS = [
 	"uploadDirRecursively",
 	"downloadDirRecursively",
 	"listDirRecursiveWithPaths"
-] as const satisfies readonly (keyof TransferClient)[]
+] as const satisfies readonly (keyof Napi.JsClient)[]
 
 function hasFunctions(value: object, names: readonly string[]): boolean {
 	return names.every(name => typeof (value as Record<string, unknown>)[name] === "function")
@@ -154,9 +75,9 @@ const LOGGED_ERRORS = 20
 interface Entry {
 	readonly id: string
 	readonly spec: NativeTransferSpec
-	readonly controller: ManagedAbortControllerLike
-	readonly pause: PauseSignalLike
-	readonly future: ManagedFuture
+	readonly controller: Napi.ManagedAbortController
+	readonly pause: Napi.PauseSignal
+	readonly future: Napi.ManagedFuture
 	size: number
 	bytes: number
 	// Directory transfers: counts only, never the items.
@@ -175,7 +96,7 @@ interface Entry {
 }
 
 interface Listing {
-	files: unknown[]
+	files: Napi.File[]
 	usedAt: number
 }
 
@@ -214,6 +135,23 @@ function fileFacts(file: unknown): { uuid: string; size: number; mtimeMs: number
 		size: count(record["size"]),
 		mtimeMs: typeof modified === "bigint" && modified >= 0n ? Number(modified) : null
 	}
+}
+
+// sdkShapes builds the napi value of the ref's variant and checks every field, so the value is that variant's enum.
+function fileOf(ref: DesktopSdkRef): Napi.AnyFile {
+	if (!ref.variant.startsWith("AnyFile.")) {
+		throw new SdkShapeError("file: expected an AnyFile")
+	}
+
+	return ubrnOf(ref.variant, parseEnvelope(ref.value)) as Napi.AnyFile
+}
+
+function dirWithContextOf(ref: DesktopSdkRef): Napi.AnyDirWithContext {
+	if (!ref.variant.startsWith("AnyDirWithContext.")) {
+		throw new SdkShapeError("directory: expected an AnyDirWithContext")
+	}
+
+	return ubrnOf(ref.variant, parseEnvelope(ref.value)) as Napi.AnyDirWithContext
 }
 
 // A sentinel for a transfer cancelled before its SDK call started.
@@ -423,7 +361,7 @@ export function createTransferRegistry(
 		}
 	}
 
-	async function downloadTo(entry: Entry, file: unknown, target: string, conflict: "replace" | "keepBoth"): Promise<string> {
+	async function downloadTo(entry: Entry, file: Napi.AnyFile, target: string, conflict: "replace" | "keepBoth"): Promise<string> {
 		const staging = stagingPathOf(target, entry.id)
 
 		try {
@@ -449,12 +387,12 @@ export function createTransferRegistry(
 		}
 	}
 
-	function parentOf(ref: DesktopSdkRef): unknown {
+	function parentOf(ref: DesktopSdkRef): Napi.AnyNormalDir {
 		switch (ref.variant) {
 			case "AnyNormalDir.Root":
 				return { tag: "Root", inner: [client.root()] }
 			case "AnyNormalDir.Dir":
-				return ubrnOf(ref.variant, parseEnvelope(ref.value))
+				return ubrnOf(ref.variant, parseEnvelope(ref.value)) as Napi.AnyNormalDir
 			default:
 				throw new SdkShapeError("parent: expected an AnyNormalDir")
 		}
@@ -509,7 +447,7 @@ export function createTransferRegistry(
 
 		switch (spec.t) {
 			case "downloadFile": {
-				const file = ubrnOf(spec.file.variant, parseEnvelope(spec.file.value))
+				const file = fileOf(spec.file)
 				const facts = fileFacts(innerOf(file))
 
 				resize(entry, facts.size)
@@ -537,7 +475,7 @@ export function createTransferRegistry(
 				}
 			}
 			case "downloadDirectory": {
-				const target = ubrnOf(spec.dir.variant, parseEnvelope(spec.dir.value))
+				const target = dirWithContextOf(spec.dir)
 				const files = directoryFiles(entry)
 
 				ensureRunning(entry)
@@ -766,16 +704,14 @@ export function createTransferRegistry(
 		},
 		listTree: async ({ listingId, items, maxEntries }) => {
 			const tree: NativeTreeEntry[] = []
-			const files: unknown[] = []
+			const files: Napi.File[] = []
 
 			pendingListings.add(listingId)
 
 			try {
 				for (const [source, item] of items.entries()) {
-					const value = ubrnOf(item.ref.variant, parseEnvelope(item.ref.value))
-
 					if (item.ref.variant.startsWith("AnyFile.")) {
-						const facts = fileFacts(innerOf(value))
+						const facts = fileFacts(innerOf(fileOf(item.ref)))
 
 						tree.push({
 							segments: [item.name],
@@ -786,7 +722,7 @@ export function createTransferRegistry(
 							source
 						})
 					} else {
-						const listed = await client.listDirRecursiveWithPaths(value, undefined, {
+						const listed = await client.listDirRecursiveWithPaths(dirWithContextOf(item.ref), undefined, {
 							onErrors: errors => {
 								log.warn(`listing ${item.name}: ${String(errors.length)} entries not listed`)
 							}

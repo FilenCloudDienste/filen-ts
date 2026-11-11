@@ -6,7 +6,7 @@ import { createHostEngine } from "../native/ops.ts"
 import { createPlanRegistry } from "../native/plans.ts"
 import { createRuntimeFeed } from "../native/reducer.ts"
 import type { FromNative } from "../shared/nativeProtocol.ts"
-import { action, fakeEngine, fakePlan, fakeSdk, pairInfo, passEvent, REMOTE_ROOT, report, sdkError } from "./nativeFakes.ts"
+import { action, DIVERGED, fakeEngine, fakePlan, fakeSdk, pairInfo, passEvent, REMOTE_ROOT, report, sdkError } from "./nativeFakes.ts"
 
 beforeEach(() => {
 	vi.useFakeTimers()
@@ -401,8 +401,8 @@ describe("native ops", () => {
 		// A pass reports the held conflict again plus a new one; the engine holds two, not three.
 		engine.listConflicts.mockResolvedValue({ conflicts: [], total: 2n })
 		feed.events([
-			passEvent({ tag: "Conflict", inner: { relPath: "docs/notes.txt" } }),
-			passEvent({ tag: "Conflict", inner: { relPath: "b.txt" } }),
+			passEvent({ tag: "Conflict", inner: { relPath: "docs/notes.txt", reason: DIVERGED } }),
+			passEvent({ tag: "Conflict", inner: { relPath: "b.txt", reason: DIVERGED } }),
 			passEvent({ tag: "PassCompleted", inner: { report: report({ conflictsTotal: 2n }) } })
 		])
 		await host.passEnded(1n, report({ conflictsTotal: 2n }))

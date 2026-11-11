@@ -5,7 +5,8 @@ import { parseEnvelope, stringifyEnvelope } from "@filen/shared/session"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { FEED_INTERVAL_MS } from "../native/reducer.ts"
 import { classifyTransfer, TransferCommitError } from "../native/transferErrors.ts"
-import { createTransferRegistry, type DirDownloadCallback, type DirUploadCallback, type ManagedFuture } from "../native/transfers.ts"
+import type { Dir, DirWithPath, File, FileWithPath, JsDirDownloadCallback, JsDirUploadCallback, ManagedFuture } from "@filen/sdk-rs"
+import { createTransferRegistry } from "../native/transfers.ts"
 import {
 	type FromNative,
 	LISTING_TTL_MS,
@@ -60,11 +61,11 @@ function innerOf(value: unknown): unknown {
 }
 
 // What napi returns for these items.
-const ubrnFile = (uuid = FILE_UUID, size = 100_000n) => innerOf(ubrnOf("AnyFile.File", wasmFile(uuid, size)))
-const ubrnDir = (uuid = NEW_DIR_UUID) => innerOf(ubrnOf("AnyNormalDir.Dir", wasmDir(uuid, "Photos")))
+const ubrnFile = (uuid = FILE_UUID, size = 100_000n) => innerOf(ubrnOf("AnyFile.File", wasmFile(uuid, size))) as File
+const ubrnDir = (uuid = NEW_DIR_UUID) => innerOf(ubrnOf("AnyNormalDir.Dir", wasmDir(uuid, "Photos"))) as Dir
 // A directory download's FileWithPath and DirWithPath.
-const fileAt = (filePath: string) => ({ path: filePath, file: ubrnFile() })
-const dirAt = (dirPath: string) => ({ path: dirPath, dir: { tag: "Normal", inner: [ubrnDir()] } })
+const fileAt = (filePath: string): FileWithPath => ({ path: filePath, file: ubrnFile() })
+const dirAt = (dirPath: string): DirWithPath => ({ path: dirPath, dir: { tag: "Normal", inner: [ubrnDir()] } })
 
 function downloadFile(
 	id = ID,
@@ -291,7 +292,7 @@ describe("transfer registry", () => {
 		await flush()
 
 		const upload = client.last("uploadDirRecursively")
-		const callback = upload.args[1] as DirUploadCallback
+		const callback = upload.args[1] as JsDirUploadCallback
 
 		callback.onScanComplete(1n, 3n, 300n)
 		callback.onUploadUpdate([], [ubrnFile(), ubrnFile()], 200n)
@@ -316,7 +317,7 @@ describe("transfer registry", () => {
 		await flush()
 
 		const download = client.last("downloadDirRecursively")
-		const callback = download.args[1] as DirDownloadCallback
+		const callback = download.args[1] as JsDirDownloadCallback
 
 		expect(state.dirs.has(at("Projects"))).toBe(true)
 		expect(download.args[0]).toBe(at("Projects"))
@@ -742,7 +743,7 @@ describe("transfer registry", () => {
 
 		const download = client.last("downloadDirRecursively")
 
-		;(download.args[1] as DirDownloadCallback).onDownloadUpdate([dirAt("sub")], [fileAt("sub/x.txt")], 1n)
+		;(download.args[1] as JsDirDownloadCallback).onDownloadUpdate([dirAt("sub")], [fileAt("sub/x.txt")], 1n)
 		download.resolve()
 		await round()
 
@@ -766,7 +767,7 @@ describe("transfer registry", () => {
 		await flush()
 
 		const download = client.last("downloadDirRecursively")
-		const update = (download.args[1] as DirDownloadCallback).onDownloadUpdate
+		const update = (download.args[1] as JsDirDownloadCallback).onDownloadUpdate
 
 		update([], [fileAt("a")], 1n)
 		update([dirAt("d")], [fileAt("b")], 1n)

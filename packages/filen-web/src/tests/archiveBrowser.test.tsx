@@ -451,7 +451,7 @@ describe("ArchiveSourceBrowser states", () => {
 				type: "decoded",
 				data: { name: "photos.zip", mime: "application/zip", modified: 0n, size: 100n, key: "k", version: 2 }
 			},
-			sharingRole: { type: "receiver", email: "a@example.com", id: 1 }
+			sharingRole: { type: "receiver", email: "a@example.com", id: 1n }
 		})
 
 		mockListViewport()

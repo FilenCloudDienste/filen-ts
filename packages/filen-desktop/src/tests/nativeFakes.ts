@@ -1,8 +1,22 @@
 import { vi } from "vitest"
 import type {
+	AnyDirWithContext,
+	ConflictReason,
+	AnyFile,
+	AnyNormalDir,
+	Dir,
+	DirsAndFilesWithPaths,
+	File,
 	FilenSdkError,
+	JsDirDownloadCallback,
+	JsDirUploadCallback,
+	JsFileDownloadCallback,
+	JsFileUploadCallback,
 	JsRcloneDaemon,
 	JsSyncPlan,
+	ManagedFuture,
+	DirContentDownloadErrorCallback,
+	FileBuilderParamsOptionalName,
 	PlannedAction,
 	RcloneExit,
 	RcloneRefusal,
@@ -16,7 +30,7 @@ import type {
 	SyncRefusal
 } from "@filen/sdk-rs"
 import type { NativeSdk, SyncEngine } from "../native/addon.ts"
-import type { ManagedFuture, TransferClient, TransferSdk } from "../native/transfers.ts"
+import type { TransferClient, TransferSdk } from "../native/transfers.ts"
 
 // The addon's values the host reads, with the napi enums' numbers.
 class FakeInner {
@@ -94,6 +108,9 @@ export const fakeSdk = {
 	defaultSyncIgnorePatterns: () => [".DS_Store"],
 	init: () => undefined
 } as unknown as NativeSdk
+
+// ConflictReason.Diverged: the addon owns the enum's values.
+export const DIVERGED: ConflictReason = 0
 
 // What an SDK call throws.
 export function sdkError(kind: number, message = "", refusal?: SyncRefusal): Error {
@@ -392,31 +409,46 @@ export class FakeTransferClient implements TransferClient {
 		})
 	}
 
-	createDir(parent: unknown, name: string): Promise<unknown> {
+	createDir(parent: AnyNormalDir, name: string): Promise<Dir> {
 		return this.#call("createDir", [parent, name])
 	}
 
-	uploadFile(params: unknown, filePath: string, callback: unknown, managedFuture: ManagedFuture): Promise<unknown> {
+	uploadFile(
+		params: FileBuilderParamsOptionalName,
+		filePath: string,
+		callback: JsFileUploadCallback | undefined,
+		managedFuture: ManagedFuture
+	): Promise<File> {
 		return this.#call("uploadFile", [params, filePath, callback, managedFuture])
 	}
 
-	downloadFileToPath(file: unknown, filePath: string, callback: unknown, managedFuture: ManagedFuture): Promise<void> {
+	downloadFileToPath(
+		file: AnyFile,
+		filePath: string,
+		callback: JsFileDownloadCallback | undefined,
+		managedFuture: ManagedFuture
+	): Promise<void> {
 		return this.#call("downloadFileToPath", [file, filePath, callback, managedFuture])
 	}
 
-	uploadDirRecursively(dirPath: string, callback: unknown, target: unknown, managedFuture: ManagedFuture): Promise<void> {
+	uploadDirRecursively(dirPath: string, callback: JsDirUploadCallback, target: Dir, managedFuture: ManagedFuture): Promise<void> {
 		return this.#call("uploadDirRecursively", [dirPath, callback, target, managedFuture])
 	}
 
-	downloadDirRecursively(dirPath: string, callback: unknown, target: unknown, managedFuture: ManagedFuture): Promise<void> {
+	downloadDirRecursively(
+		dirPath: string,
+		callback: JsDirDownloadCallback,
+		target: AnyDirWithContext,
+		managedFuture: ManagedFuture
+	): Promise<void> {
 		return this.#call("downloadDirRecursively", [dirPath, callback, target, managedFuture])
 	}
 
 	listDirRecursiveWithPaths(
-		dir: unknown,
+		dir: AnyDirWithContext,
 		progress: undefined,
-		errors: unknown
-	): Promise<{ dirs: { path: string; dir: unknown }[]; files: { path: string; file: unknown }[] }> {
+		errors: DirContentDownloadErrorCallback
+	): Promise<DirsAndFilesWithPaths> {
 		return this.#call("listDirRecursiveWithPaths", [dir, progress, errors])
 	}
 

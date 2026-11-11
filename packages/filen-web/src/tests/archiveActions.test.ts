@@ -90,7 +90,7 @@ function sharedRootFile(name: string): DriveItem {
 		chunks: 1n,
 		timestamp: 0n,
 		meta: { type: "decoded", data: { name, mime: "application/zip", modified: 0n, size: 100n, key: "k", version: 2 } },
-		sharingRole: { type: "receiver", email: "a@example.com", id: 1 },
+		sharingRole: { type: "receiver", email: "a@example.com", id: 1n },
 		sharedTag: true,
 		canMakeThumbnail: false
 	}

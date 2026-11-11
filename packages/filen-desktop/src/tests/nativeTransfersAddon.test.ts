@@ -5,18 +5,20 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises"
 import { createRequire } from "node:module"
 import { tmpdir } from "node:os"
 import path from "node:path"
+import type { AnyDirWithContext, AnyFile, AnyNormalDir, ManagedFuture } from "@filen/sdk-rs"
 import type { DesktopSdkVariant } from "@filen/shared/desktop"
 import { ubrnOf } from "@filen/shared/sdkShapes"
 import { parseEnvelope } from "@filen/shared/session"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { builtAddon, installedAddon, sdkPackageDir } from "../../scripts/stageNapi.ts"
 import { isCancelled } from "../native/transferErrors.ts"
-import { type ManagedFuture, type TransferClient, type TransferSdk, transferBindings } from "../native/transfers.ts"
+import { type TransferClient, type TransferSdk, transferBindings } from "../native/transfers.ts"
 
 // The transfer adapter against the real napi addon: FILEN_DESKTOP_NAPI_DIR (a filen-rs `build:napi` output) when
-// set, else the installed platform package; skipped while that addon lacks the transfer exports. Offline: the client
-// is built from a stringified config with dummy values, and every transfer runs on an already aborted
-// ManagedAbortController, which rejects Cancelled before any request, but only after the arguments converted.
+// set, else the installed platform package, which must carry the transfer exports; a local build without them is
+// skipped. Offline: the client is built from a stringified config with dummy values, and every transfer runs on an
+// already aborted ManagedAbortController, which rejects Cancelled before any request, but only after the arguments
+// converted.
 
 const arch = process.arch === "arm64" || process.arch === "x64" ? process.arch : null
 const napiDir = process.env["FILEN_DESKTOP_NAPI_DIR"]
@@ -52,7 +54,7 @@ function load(): { addon: Addon; client: object } | { skipped: string } {
 	const addon = createRequire(import.meta.url)(addonFile) as Addon
 	const client = addon.UnauthJsClient.fromConfig({}).fromStringified(stringifiedClient())
 
-	return transferBindings(addon, client) === null ? { skipped: `${addonFile} lacks the transfer exports` } : { addon, client }
+	return fromDir && transferBindings(addon, client) === null ? { skipped: `${addonFile} lacks the transfer exports` } : { addon, client }
 }
 
 const loaded = load()
@@ -248,7 +250,7 @@ describe.skipIf(skipped !== null)(`the napi transfer surface${skipped === null ?
 		onDownloadErrors: () => undefined
 	}
 
-	function upload(parent: unknown): Promise<string> {
+	function upload(parent: AnyNormalDir): Promise<string> {
 		return outcome(() =>
 			transfers.uploadFile(
 				{ parent, name: undefined, created: undefined, modified: undefined, mime: undefined, noExif: false, noExifOverride: false },
@@ -314,7 +316,7 @@ describe.skipIf(skipped !== null)(`the napi transfer surface${skipped === null ?
 
 	it("accepts every converted file", async () => {
 		for (const [name, variant] of Object.entries(FILES)) {
-			const file = ubrnOf(variant, wasmFixture(name))
+			const file = ubrnOf(variant, wasmFixture(name)) as AnyFile
 
 			expect([
 				name,
@@ -327,7 +329,7 @@ describe.skipIf(skipped !== null)(`the napi transfer surface${skipped === null ?
 
 	it("accepts every converted directory as a download target and a normal one as an upload parent and target", async () => {
 		for (const [name, variant] of Object.entries(CONTEXT_DIRS)) {
-			const dir = ubrnOf(variant, wasmFixture(name))
+			const dir = ubrnOf(variant, wasmFixture(name)) as AnyDirWithContext
 
 			expect([
 				name,
@@ -337,8 +339,8 @@ describe.skipIf(skipped !== null)(`the napi transfer surface${skipped === null ?
 
 		for (const name of NORMAL_DIRS) {
 			const wasm = wasmFixture(name)
-			const context = ubrnOf("AnyDirWithContext.Normal.Dir", wasm)
-			const parent = ubrnOf("AnyNormalDir.Dir", wasm) as { inner: [unknown] }
+			const context = ubrnOf("AnyDirWithContext.Normal.Dir", wasm) as AnyDirWithContext
+			const parent = ubrnOf("AnyNormalDir.Dir", wasm) as Extract<AnyNormalDir, { tag: "Dir" }>
 
 			expect([
 				name,
@@ -366,17 +368,17 @@ describe.skipIf(skipped !== null)(`the napi transfer surface${skipped === null ?
 	})
 
 	it("takes a uuid-only Root as the root and as any other upload parent", async () => {
-		const root = ubrnOf("AnyNormalDir.Root", { uuid: ROOT_UUID }) as { inner: [unknown] }
+		const root = ubrnOf("AnyNormalDir.Root", { uuid: ROOT_UUID }) as AnyNormalDir
 
 		expect(transfers.root()).toEqual(root.inner[0])
 		expect(await upload(root)).toBe("cancelled")
-		expect(await upload(ubrnOf("AnyNormalDir.Root", wasmFixture("root")))).toBe("cancelled")
+		expect(await upload(ubrnOf("AnyNormalDir.Root", wasmFixture("root")) as AnyNormalDir)).toBe("cancelled")
 		expect(
 			await outcome(() =>
 				transfers.downloadDirRecursively(
 					directory,
 					dirCallback,
-					ubrnOf("AnyDirWithContext.Normal.Root", { uuid: ROOT_UUID }),
+					ubrnOf("AnyDirWithContext.Normal.Root", { uuid: ROOT_UUID }) as AnyDirWithContext,
 					aborted()
 				)
 			)
@@ -384,9 +386,9 @@ describe.skipIf(skipped !== null)(`the napi transfer surface${skipped === null ?
 	})
 
 	it("refuses a file missing a field before it is cancelled", async () => {
-		const file = ubrnOf("AnyFile.File", wasmFixture("file")) as { inner: [Record<string, unknown>] }
+		const file = ubrnOf("AnyFile.File", wasmFixture("file")) as AnyFile
 
-		delete file.inner[0]["region"]
+		delete (file.inner[0] as unknown as Record<string, unknown>)["region"]
 
 		expect(await outcome(() => transfers.downloadFileToPath(file, path.join(directory, "missing"), undefined, aborted()))).toMatch(
 			/^refused: .*region/
