@@ -1,4 +1,5 @@
 import { type } from "arktype"
+import path from "node:path"
 import { describe, expect, it, vi } from "vitest"
 import type { AtomicFile } from "../main/atomicFile.ts"
 import { DEFAULT_PREFS, loadPrefs, parsePrefs, prefsPatchSchema } from "../main/prefs.ts"
@@ -54,6 +55,21 @@ describe("parsePrefs", () => {
 		expect(parsePrefs(JSON.stringify({ minimizeToTray: true, legacy: 1 }))).toEqual({ ...DEFAULT_PREFS, minimizeToTray: true })
 	})
 
+	it("reads a stored download directory", () => {
+		const directory = path.resolve("Downloads")
+
+		expect(parsePrefs(JSON.stringify({ downloadDirectory: directory }))).toEqual({ ...DEFAULT_PREFS, downloadDirectory: directory })
+	})
+
+	it("a relative or NUL path in the file reads as null", () => {
+		expect(parsePrefs(JSON.stringify({ downloadDirectory: "Downloads" })).downloadDirectory).toBeNull()
+		expect(parsePrefs(JSON.stringify({ downloadDirectory: "/a\u0000b" })).downloadDirectory).toBeNull()
+		expect(parsePrefs(JSON.stringify({ downloadDirectory: 3, startMinimized: true }))).toEqual({
+			...DEFAULT_PREFS,
+			startMinimized: true
+		})
+	})
+
 	it("defaults to notifications and their sound on, a 5 minute lock and everything else off", () => {
 		expect(DEFAULT_PREFS).toEqual({
 			minimizeToTray: false,
@@ -78,6 +94,14 @@ describe("prefsPatchSchema", () => {
 		expect(prefsPatchSchema(null)).toBeInstanceOf(type.errors)
 	})
 
+	it("the page cannot set a path", () => {
+		expect(prefsPatchSchema({ downloadDirectory: "/Users/a/Downloads" })).toBeInstanceOf(type.errors)
+	})
+
+	it("the page can set null", () => {
+		expect(prefsPatchSchema({ downloadDirectory: null })).toEqual({ downloadDirectory: null })
+	})
+
 	it("takes only the offered lock-after choices", () => {
 		expect(prefsPatchSchema({ lockAfterSeconds: 0 })).toEqual({ lockAfterSeconds: 0 })
 		expect(prefsPatchSchema({ lockAfterSeconds: 86400 })).toEqual({ lockAfterSeconds: 86400 })
@@ -94,6 +118,18 @@ describe("loadPrefs", () => {
 		expect(store.get().startMinimized).toBe(true)
 		await expect(store.set({ minimizeToTray: true })).resolves.toEqual({ ...DEFAULT_PREFS, startMinimized: true, minimizeToTray: true })
 		expect(JSON.parse(file.data ?? "")).toEqual(store.get())
+	})
+
+	it("setDownloadDirectory stores an absolute path", async () => {
+		const file = memoryFile(null)
+		const store = await loadPrefs(file, vi.fn())
+		const directory = path.resolve("downloads")
+
+		await expect(store.setDownloadDirectory(directory)).resolves.toEqual({ ...DEFAULT_PREFS, downloadDirectory: directory })
+		expect(JSON.parse(file.data ?? "")).toEqual(store.get())
+		await expect(store.setDownloadDirectory("relative")).rejects.toThrow("invalid download directory")
+		expect(store.get().downloadDirectory).toBe(directory)
+		await expect(store.setDownloadDirectory(null)).resolves.toEqual(DEFAULT_PREFS)
 	})
 
 	it("uses the defaults when the file cannot be read", async () => {

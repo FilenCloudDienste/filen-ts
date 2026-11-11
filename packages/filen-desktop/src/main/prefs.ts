@@ -2,6 +2,7 @@ import { type } from "arktype"
 import type { DesktopPrefs } from "@filen/shared/desktop"
 import { DEFAULT_DESKTOP_LOCK_AFTER_SECONDS, DESKTOP_LOCK_AFTER_SECONDS } from "@filen/shared/desktopLock"
 import { type AtomicFile, errorCode } from "./atomicFile.ts"
+import { absolutePathSchema } from "../shared/nativeProtocol.ts"
 import { serialQueue } from "../shared/serial.ts"
 
 export const DEFAULT_PREFS: DesktopPrefs = {
@@ -17,7 +18,8 @@ export const DEFAULT_PREFS: DesktopPrefs = {
 	downloadDirectory: null
 }
 
-// What the renderer may send: known fields only, each optional.
+// What the renderer may send: known fields only, each optional. It may reset the download directory to "ask", never
+// set a path: only main's own directory picker does (`setDownloadDirectory`).
 export const prefsPatchSchema = type({
 	"minimizeToTray?": "boolean",
 	"startMinimized?": "boolean",
@@ -27,10 +29,17 @@ export const prefsPatchSchema = type({
 	"contactNotifications?": "boolean",
 	"syncNotifications?": "boolean",
 	"notificationSound?": "boolean",
+	"downloadDirectory?": "null",
 	"+": "reject"
 })
 
 export type PrefsPatch = typeof prefsPatchSchema.infer
+
+// What the file may hold: the page's fields plus a stored download directory.
+const storedPrefsSchema = prefsPatchSchema.omit("downloadDirectory").merge({
+	"downloadDirectory?": absolutePathSchema.or("null"),
+	"+": "reject"
+})
 
 // A missing or unparsable file is the defaults. Each field is checked on its own, so a pref added later reads as its
 // default from an older file, and one invalid value (an edited file, a choice no longer offered) resets only itself;
@@ -55,7 +64,7 @@ export function parsePrefs(data: string | null): DesktopPrefs {
 	const prefs = { ...DEFAULT_PREFS }
 
 	for (const [key, value] of Object.entries(json as Record<string, unknown>)) {
-		const field = prefsPatchSchema({ [key]: value })
+		const field = storedPrefsSchema({ [key]: value })
 
 		if (!(field instanceof type.errors)) {
 			Object.assign(prefs, field)
@@ -68,6 +77,8 @@ export function parsePrefs(data: string | null): DesktopPrefs {
 export interface PrefsStore {
 	get(): DesktopPrefs
 	set(patch: PrefsPatch): Promise<DesktopPrefs>
+	// An absolute path chosen in main's directory picker, or null to ask every time.
+	setDownloadDirectory(path: string | null): Promise<DesktopPrefs>
 }
 
 // Read once at startup and served from memory. Writes run one at a time (they share the file's temp sibling); a failed
@@ -82,16 +93,26 @@ export async function loadPrefs(file: AtomicFile, warn: (message: string) => voi
 		warn(`prefs unreadable, using defaults: ${errorCode(error)}`)
 	}
 
+	function apply(patch: Partial<DesktopPrefs>): Promise<DesktopPrefs> {
+		return serial(async () => {
+			const next = { ...current, ...patch }
+
+			await file.write(Buffer.from(JSON.stringify(next)))
+			current = next
+
+			return next
+		})
+	}
+
 	return {
 		get: () => current,
-		set: patch =>
-			serial(async () => {
-				const next = { ...current, ...patch }
+		set: apply,
+		setDownloadDirectory: downloadDirectory => {
+			if (downloadDirectory !== null && !absolutePathSchema.allows(downloadDirectory)) {
+				return Promise.reject(new Error("invalid download directory"))
+			}
 
-				await file.write(Buffer.from(JSON.stringify(next)))
-				current = next
-
-				return next
-			})
+			return apply({ downloadDirectory })
+		}
 	}
 }

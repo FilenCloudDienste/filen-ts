@@ -1,5 +1,5 @@
 import { create } from "zustand"
-import type { DesktopPrefs } from "@filen/shared/desktop"
+import type { DesktopPrefs, DesktopPrefsPatch } from "@filen/shared/desktop"
 import { desktopBridge } from "@/lib/desktop"
 import { log } from "@/lib/log"
 
@@ -30,7 +30,7 @@ export function loadDesktopPrefs(): Promise<void> {
 }
 
 // Rejects when main refuses or cannot store the change; the mirror then keeps the prefs in effect.
-export async function setDesktopPref(patch: Partial<DesktopPrefs>): Promise<void> {
+export async function setDesktopPref(patch: DesktopPrefsPatch): Promise<void> {
 	const bridge = desktopBridge()
 
 	if (bridge === undefined) {

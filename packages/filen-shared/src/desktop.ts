@@ -62,10 +62,13 @@ export interface DesktopPrefs {
 	downloadDirectory: string | null
 }
 
+// What the page may change: any pref, except that the download directory can only go back to null (ask every time).
+export type DesktopPrefsPatch = Partial<Omit<DesktopPrefs, "downloadDirectory">> & { downloadDirectory?: null }
+
 export interface DesktopPrefsStore {
 	get(): Promise<DesktopPrefs>
 	// Resolves with the prefs now in effect.
-	set(patch: Partial<DesktopPrefs>): Promise<DesktopPrefs>
+	set(patch: DesktopPrefsPatch): Promise<DesktopPrefs>
 }
 
 // The web keymap actions the macOS menu offers. Main shows each with the combo the web reports and sends the id back
