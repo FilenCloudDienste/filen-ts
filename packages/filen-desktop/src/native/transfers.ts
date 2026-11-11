@@ -1,4 +1,5 @@
 import path from "node:path"
+import type { FilenSdkError } from "@filen/sdk-rs"
 import type { DesktopSdkRef, DesktopTransferError, DesktopTransferFiles, DesktopTransferOutcome } from "@filen/shared/desktop"
 import { SdkShapeError, ubrnOf, wasmOf } from "@filen/shared/sdkShapes"
 import { parseEnvelope, stringifyEnvelope } from "@filen/shared/session"
@@ -23,13 +24,22 @@ import { classifyTransfer, isCancelled, TransferCommitError, type TransferErrorS
 // pause); the SDK caps concurrency client-wide (open files, request limiter), so each transfer is one call and there
 // is no queue here. Progress is coalesced into one host message per round; nothing is timed while idle.
 
-// The napi calls the registry uses, with ubrn's signatures. The one place their names live: the installed typings
-// lack them until the SDK release that adds them.
+// The napi transfer surface the registry uses, as the addon's typings (node/index.d.ts) declare it, checked against a
+// local build by nativeTransfersAddon.test.ts. Declared here, the one place, until the installed @filen/sdk-rs ships
+// it; SDK items stay `unknown`: sdkShapes builds and checks them.
 export interface TransferClient {
 	root(): { uuid: string }
 	createDir(parent: unknown, name: string): Promise<unknown>
 	uploadFile(
-		params: unknown,
+		params: {
+			parent: unknown
+			name?: string | undefined
+			created?: bigint | undefined
+			modified?: bigint | undefined
+			mime?: string | undefined
+			noExif: boolean
+			noExifOverride: boolean
+		},
 		filePath: string,
 		callback: { onUpdate(uploadedBytes: bigint): void } | undefined,
 		managedFuture: ManagedFuture
@@ -42,45 +52,56 @@ export interface TransferClient {
 	): Promise<void>
 	uploadDirRecursively(dirPath: string, callback: DirUploadCallback, target: unknown, managedFuture: ManagedFuture): Promise<void>
 	downloadDirRecursively(dirPath: string, callback: DirDownloadCallback, target: unknown, managedFuture: ManagedFuture): Promise<void>
+	// No managed future: only asyncOpts_ aborts a listing.
 	listDirRecursiveWithPaths(
 		dir: unknown,
-		progress: undefined,
-		errors: { onErrors(errors: unknown[]): void }
+		listDirProgressCallback: { onProgress(bytesDownloaded: bigint, totalBytes: bigint | undefined): void } | undefined,
+		scanErrorCallback: { onErrors(errors: FilenSdkError[]): void }
 	): Promise<{ dirs: { path: string; dir: unknown }[]; files: { path: string; file: unknown }[] }>
 }
 
-// Both keys required: napi reads them as given.
+// Both keys required (napi reads them as given); a signal of another class rejects Conversion.
 export interface ManagedFuture {
-	abortSignal: unknown
-	pauseSignal: unknown
+	abortSignal: ManagedAbortSignalLike | undefined
+	pauseSignal: PauseSignalLike | undefined
+}
+
+export interface ManagedAbortSignalLike {
+	aborted(): boolean
 }
 
 export interface PauseSignalLike {
+	isPaused(): boolean
 	pause(): void
 	resume(): void
 }
 
 export interface ManagedAbortControllerLike {
 	abort(): void
-	signal(): unknown
+	signal(): ManagedAbortSignalLike
 }
 
-// Byte counts are deltas since the previous call.
+// Byte counts are deltas since the previous call; an unknown total is undefined.
 export interface DirUploadCallback {
 	onScanProgress(knownDirs: bigint, knownFiles: bigint, knownBytes: bigint): void
-	onScanErrors(errors: unknown[]): void
+	onScanErrors(errors: FilenSdkError[]): void
 	onScanComplete(totalDirs: bigint, totalFiles: bigint, totalBytes: bigint): void
 	onUploadUpdate(uploadedDirs: unknown[], uploadedFiles: unknown[], uploadedBytes: bigint): void
-	onUploadErrors(errors: { path: string; error: unknown }[]): void
+	onUploadErrors(errors: { path: string; error: FilenSdkError }[]): void
 }
 
 export interface DirDownloadCallback {
 	onQueryDownloadProgress(knownBytes: bigint, totalBytes: bigint | undefined): void
 	onScanProgress(knownDirs: bigint, knownFiles: bigint, knownBytes: bigint): void
-	onScanErrors(errors: unknown[]): void
+	onScanErrors(errors: FilenSdkError[]): void
 	onScanComplete(totalDirs: bigint, totalFiles: bigint, totalBytes: bigint): void
-	onDownloadUpdate(downloadedDirs: { path: string }[], downloadedFiles: { path: string }[], downloadedBytes: bigint): void
-	onDownloadErrors(errors: { path: string; error: unknown; item: unknown }[]): void
+	onDownloadUpdate(
+		downloadedDirs: { path: string; dir: unknown }[],
+		downloadedFiles: { path: string; file: unknown }[],
+		downloadedBytes: bigint
+	): void
+	// `item` is a NonRootItem.
+	onDownloadErrors(errors: { path: string; error: FilenSdkError; item: unknown }[]): void
 }
 
 export interface TransferSdk extends TransferErrorSdk {

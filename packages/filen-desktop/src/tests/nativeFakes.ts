@@ -1,5 +1,6 @@
 import { vi } from "vitest"
 import type {
+	FilenSdkError,
 	JsRcloneDaemon,
 	JsSyncPlan,
 	PlannedAction,
@@ -97,6 +98,11 @@ export const fakeSdk = {
 // What an SDK call throws.
 export function sdkError(kind: number, message = "", refusal?: SyncRefusal): Error {
 	return new FakeThrown(new FakeInner(kind, message, refusal))
+}
+
+// What a transfer callback hands over: the FilenSdkError itself, not thrown.
+export function sdkErrorValue(kind: number, message = ""): FilenSdkError {
+	return new FakeInner(kind, message, undefined) as unknown as FilenSdkError
 }
 
 // What the SDK's rclone module throws when it refuses.

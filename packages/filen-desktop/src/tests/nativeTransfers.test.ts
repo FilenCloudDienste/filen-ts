@@ -22,6 +22,7 @@ import {
 	fakeTransferSdk,
 	REMOTE_ROOT,
 	sdkError,
+	sdkErrorValue,
 	wasmDir,
 	wasmFile
 } from "./nativeFakes.ts"
@@ -61,6 +62,9 @@ function innerOf(value: unknown): unknown {
 // What napi returns for these items.
 const ubrnFile = (uuid = FILE_UUID, size = 100_000n) => innerOf(ubrnOf("AnyFile.File", wasmFile(uuid, size)))
 const ubrnDir = (uuid = NEW_DIR_UUID) => innerOf(ubrnOf("AnyNormalDir.Dir", wasmDir(uuid, "Photos")))
+// A directory download's FileWithPath and DirWithPath.
+const fileAt = (filePath: string) => ({ path: filePath, file: ubrnFile() })
+const dirAt = (dirPath: string) => ({ path: dirPath, dir: { tag: "Normal", inner: [ubrnDir()] } })
 
 function downloadFile(
 	id = ID,
@@ -291,7 +295,7 @@ describe("transfer registry", () => {
 
 		callback.onScanComplete(1n, 3n, 300n)
 		callback.onUploadUpdate([], [ubrnFile(), ubrnFile()], 200n)
-		callback.onUploadErrors([{ path: path.resolve("Photos", "c.jpg"), error: sdkError(fakeSdk.ErrorKind.Io) }])
+		callback.onUploadErrors([{ path: path.resolve("Photos", "c.jpg"), error: sdkErrorValue(fakeSdk.ErrorKind.Io) }])
 		upload.resolve()
 		await round()
 
@@ -318,7 +322,7 @@ describe("transfer registry", () => {
 		expect(download.args[0]).toBe(at("Projects"))
 		expect(download.args[2]).toEqual(ubrnOf("AnyDirWithContext.Normal.Dir", wasmDir(DIR_UUID, "Projects")))
 		callback.onScanComplete(0n, 3n, 30n)
-		callback.onDownloadUpdate([], [{ path: "a" }, { path: "b" }], 20n)
+		callback.onDownloadUpdate([], [fileAt("a"), fileAt("b")], 20n)
 		download.resolve()
 		await round()
 
@@ -738,7 +742,7 @@ describe("transfer registry", () => {
 
 		const download = client.last("downloadDirRecursively")
 
-		;(download.args[1] as DirDownloadCallback).onDownloadUpdate([{ path: "sub" }], [{ path: "sub/x.txt" }], 1n)
+		;(download.args[1] as DirDownloadCallback).onDownloadUpdate([dirAt("sub")], [fileAt("sub/x.txt")], 1n)
 		download.resolve()
 		await round()
 
@@ -764,9 +768,9 @@ describe("transfer registry", () => {
 		const download = client.last("downloadDirRecursively")
 		const update = (download.args[1] as DirDownloadCallback).onDownloadUpdate
 
-		update([], [{ path: "a" }], 1n)
-		update([{ path: "d" }], [{ path: "b" }], 1n)
-		update([], [{ path: "c" }], 1n)
+		update([], [fileAt("a")], 1n)
+		update([dirAt("d")], [fileAt("b")], 1n)
+		update([], [fileAt("c")], 1n)
 		download.resolve()
 		await round()
 
