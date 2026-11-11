@@ -440,6 +440,15 @@ describe("transfers", () => {
 		expect(start([...fits, SPECS.uploadFile])).toBe(false)
 	})
 
+	it("rejects listing items whose SDK values sum past 16 MiB", () => {
+		const item = { ref: { ...DIR_REF, value: "x".repeat(8192) }, name: "d" }
+		const list = (items: unknown[]) => accepts(toNativeSchema, call("transfersListTree", { ...TRANSFER_ARGS.transfersListTree, items }))
+		const fits = Array.from({ length: 2048 }, () => item)
+
+		expect(list(fits)).toBe(true)
+		expect(list([...fits, { ...item, ref: DIR_REF }])).toBe(false)
+	})
+
 	it("rejects an unknown SDK variant", () => {
 		expect(spec("downloadFile", { file: { ...FILE_REF, variant: "AnyFile.Folder" } })).toBe(false)
 		expect(spec("uploadFile", { parent: { ...DIR_REF, extra: 1 } })).toBe(false)

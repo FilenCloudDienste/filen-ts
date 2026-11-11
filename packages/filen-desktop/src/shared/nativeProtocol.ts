@@ -665,11 +665,11 @@ function sdkLength(spec: NativeTransferSpec): number {
 }
 
 // One call's SDK values together, from the lengths already checked: no second walk.
-function sdkValuesFit(specs: NativeTransferSpec[]): boolean {
+function sdkValuesFit<T>(items: readonly T[], length: (item: T) => number): boolean {
 	let total = 0
 
-	for (const spec of specs) {
-		total += sdkLength(spec)
+	for (const item of items) {
+		total += length(item)
 	}
 
 	return total <= TRANSFER_SDK_MAX_LENGTH
@@ -694,7 +694,7 @@ export type NativeTreeEntry = typeof treeEntrySchema.infer
 export const TRANSFER_OPS = {
 	transfersStart: {
 		args: type({ specs: transferSpecSchema.array().moreThanLength(0).atMostLength(10_000), "+": "reject" }).narrow(
-			(args, ctx) => sdkValuesFit(args.specs) || ctx.mustBe("SDK values of at most 16 MiB together")
+			(args, ctx) => sdkValuesFit(args.specs, sdkLength) || ctx.mustBe("SDK values of at most 16 MiB together")
 		),
 		result: done
 	},
@@ -706,7 +706,9 @@ export const TRANSFER_OPS = {
 			items: type({ ref: sdkRefSchema, name: "0 < string <= 1024", "+": "reject" }).array().moreThanLength(0).atMostLength(10_000),
 			maxEntries: "1 <= number.integer <= 10000",
 			"+": "reject"
-		}),
+		}).narrow(
+			(args, ctx) => sdkValuesFit(args.items, item => item.ref.value.length) || ctx.mustBe("SDK values of at most 16 MiB together")
+		),
 		result: type({ entries: treeEntrySchema.array().atMostLength(10_000), "+": "reject" }).or({ tooMany: countSchema, "+": "reject" })
 	},
 	transfersReleaseTree: { args: type({ listingId: listingIdSchema, "+": "reject" }), result: done }
