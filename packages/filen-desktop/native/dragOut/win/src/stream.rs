@@ -311,6 +311,7 @@ mod tests {
     use crate::OperationResult;
     use crate::data_object::testing::{Fixture, file};
     use crate::slot::lock;
+    use crate::testing::bounded;
 
     #[allow(clippy::cast_sign_loss)]
     const ISTREAM: u32 = windows::Win32::System::Com::TYMED_ISTREAM.0 as u32;
@@ -366,140 +367,154 @@ mod tests {
 
     #[test]
     fn a_completed_slot_reads_back_its_bytes_then_s_false() {
-        let temp = TempFile::new("read", b"hello world");
-        let fixture = Fixture::new(vec![file("a.txt", 11)]);
-        let stream = stream(&fixture, 0);
+        bounded(|| {
+            let temp = TempFile::new("read", b"hello world");
+            let fixture = Fixture::new(vec![file("a.txt", 11)]);
+            let stream = stream(&fixture, 0);
 
-        assert!(
-            fixture
-                .registry
-                .complete(fixture.last_ticket(), temp.0.clone())
-        );
-        assert_eq!(read(&stream, 5), (S_OK, b"hello".to_vec()));
-        assert_eq!(read(&stream, 10), (S_FALSE, b" world".to_vec()));
-        assert_eq!(read(&stream, 10), (S_FALSE, Vec::new()));
+            assert!(
+                fixture
+                    .registry
+                    .complete(fixture.last_ticket(), temp.0.clone())
+            );
+            assert_eq!(read(&stream, 5), (S_OK, b"hello".to_vec()));
+            assert_eq!(read(&stream, 10), (S_FALSE, b" world".to_vec()));
+            assert_eq!(read(&stream, 10), (S_FALSE, Vec::new()));
+        });
     }
 
     #[test]
     fn seek_and_clone_keep_independent_positions() {
-        let temp = TempFile::new("seek", b"0123456789");
-        let fixture = Fixture::new(vec![file("a", 10)]);
-        let stream = stream(&fixture, 0);
-        assert!(
-            fixture
-                .registry
-                .complete(fixture.last_ticket(), temp.0.clone())
-        );
+        bounded(|| {
+            let temp = TempFile::new("seek", b"0123456789");
+            let fixture = Fixture::new(vec![file("a", 10)]);
+            let stream = stream(&fixture, 0);
+            assert!(
+                fixture
+                    .registry
+                    .complete(fixture.last_ticket(), temp.0.clone())
+            );
 
-        let mut at = 0u64;
-        // SAFETY: in-process calls on live streams.
-        unsafe { stream.Seek(4, STREAM_SEEK_SET, Some(&raw mut at)) }.expect("seek");
-        assert_eq!(at, 4);
-        // SAFETY: as above.
-        let clone = unsafe { stream.Clone() }.expect("clone");
-        assert_eq!(read(&stream, 2), (S_OK, b"45".to_vec()));
-        assert_eq!(read(&clone, 3), (S_OK, b"456".to_vec()));
-        // SAFETY: as above.
-        unsafe { clone.Seek(-1, STREAM_SEEK_CUR, None) }.expect("seek");
-        assert_eq!(read(&clone, 1), (S_OK, b"6".to_vec()));
-        assert_eq!(read(&stream, 1), (S_OK, b"6".to_vec()));
-        // SAFETY: as above.
-        assert!(unsafe { stream.Seek(11, STREAM_SEEK_SET, None) }.is_err());
+            let mut at = 0u64;
+            // SAFETY: in-process calls on live streams.
+            unsafe { stream.Seek(4, STREAM_SEEK_SET, Some(&raw mut at)) }.expect("seek");
+            assert_eq!(at, 4);
+            // SAFETY: as above.
+            let clone = unsafe { stream.Clone() }.expect("clone");
+            assert_eq!(read(&stream, 2), (S_OK, b"45".to_vec()));
+            assert_eq!(read(&clone, 3), (S_OK, b"456".to_vec()));
+            // SAFETY: as above.
+            unsafe { clone.Seek(-1, STREAM_SEEK_CUR, None) }.expect("seek");
+            assert_eq!(read(&clone, 1), (S_OK, b"6".to_vec()));
+            assert_eq!(read(&stream, 1), (S_OK, b"6".to_vec()));
+            // SAFETY: as above.
+            assert!(unsafe { stream.Seek(11, STREAM_SEEK_SET, None) }.is_err());
 
-        let mut stat = STATSTG::default();
-        // SAFETY: as above; the name is freed with CoTaskMemFree.
-        unsafe { stream.Stat(&raw mut stat, STATFLAG_DEFAULT) }.expect("stat");
-        assert_eq!(stat.cbSize, 10);
-        // SAFETY: Stat returned a NUL-terminated name.
-        assert_eq!(unsafe { stat.pwcsName.to_string() }.expect("name"), "a");
-        // SAFETY: the caller owns the name.
-        unsafe { CoTaskMemFree(Some(stat.pwcsName.0.cast())) };
+            let mut stat = STATSTG::default();
+            // SAFETY: as above; the name is freed with CoTaskMemFree.
+            unsafe { stream.Stat(&raw mut stat, STATFLAG_DEFAULT) }.expect("stat");
+            assert_eq!(stat.cbSize, 10);
+            // SAFETY: Stat returned a NUL-terminated name.
+            assert_eq!(unsafe { stat.pwcsName.to_string() }.expect("name"), "a");
+            // SAFETY: the caller owns the name.
+            unsafe { CoTaskMemFree(Some(stat.pwcsName.0.cast())) };
+        });
     }
 
     #[test]
     fn end_operation_abort_unblocks_a_waiting_read_with_read_fault() {
-        let fixture = Fixture::new(vec![file("a", 4)]);
-        let stream = stream(&fixture, 0);
-        let session = fixture.session.clone();
-        let ender = thread::spawn(move || {
-            thread::sleep(Duration::from_millis(100));
-            session.end(OperationResult::Aborted);
-        });
+        bounded(|| {
+            let fixture = Fixture::new(vec![file("a", 4)]);
+            let stream = stream(&fixture, 0);
+            let session = fixture.session.clone();
+            let ender = thread::spawn(move || {
+                thread::sleep(Duration::from_millis(100));
+                session.end(OperationResult::Aborted);
+            });
 
-        let started = Instant::now();
-        assert_eq!(read(&stream, 4).0, STG_E_READFAULT);
-        assert!(started.elapsed() < Duration::from_secs(5));
-        ender.join().expect("join");
-        assert_eq!(
-            lock(&fixture.recorded.ended).as_slice(),
-            &[OperationResult::Aborted]
-        );
+            let started = Instant::now();
+            assert_eq!(read(&stream, 4).0, STG_E_READFAULT);
+            assert!(started.elapsed() < Duration::from_secs(5));
+            ender.join().expect("join");
+            assert_eq!(
+                lock(&fixture.recorded.ended).as_slice(),
+                &[OperationResult::Aborted]
+            );
+        });
     }
 
     #[test]
     fn a_waiting_read_notices_abort_within_one_wait() {
-        let fixture = Fixture::new(vec![file("a", 4)]);
-        let stream = stream(&fixture, 0);
-        let registry = fixture.registry;
-        let aborter = thread::spawn(move || {
-            thread::sleep(Duration::from_millis(100));
-            registry.abort_all();
-        });
+        bounded(|| {
+            let fixture = Fixture::new(vec![file("a", 4)]);
+            let stream = stream(&fixture, 0);
+            let registry = fixture.registry;
+            let aborter = thread::spawn(move || {
+                thread::sleep(Duration::from_millis(100));
+                registry.abort_all();
+            });
 
-        let started = Instant::now();
-        assert_eq!(read(&stream, 4).0, STG_E_READFAULT);
-        assert!(started.elapsed() < super::WAIT_STEP * 4);
-        aborter.join().expect("join");
+            let started = Instant::now();
+            assert_eq!(read(&stream, 4).0, STG_E_READFAULT);
+            assert!(started.elapsed() < super::WAIT_STEP * 4);
+            aborter.join().expect("join");
+        });
     }
 
     #[test]
     fn a_failed_ticket_fails_its_reads() {
-        let fixture = Fixture::new(vec![file("a", 4)]);
-        let stream = stream(&fixture, 0);
+        bounded(|| {
+            let fixture = Fixture::new(vec![file("a", 4)]);
+            let stream = stream(&fixture, 0);
 
-        assert!(fixture.registry.fail(fixture.last_ticket()));
-        assert_eq!(read(&stream, 4).0, STG_E_READFAULT);
+            assert!(fixture.registry.fail(fixture.last_ticket()));
+            assert_eq!(read(&stream, 4).0, STG_E_READFAULT);
+        });
     }
 
     #[test]
     fn a_temp_file_of_another_size_fails() {
-        let temp = TempFile::new("short", b"abc");
-        let fixture = Fixture::new(vec![file("a", 4)]);
-        let stream = stream(&fixture, 0);
+        bounded(|| {
+            let temp = TempFile::new("short", b"abc");
+            let fixture = Fixture::new(vec![file("a", 4)]);
+            let stream = stream(&fixture, 0);
 
-        assert!(
-            fixture
-                .registry
-                .complete(fixture.last_ticket(), temp.0.clone())
-        );
-        assert_eq!(read(&stream, 4).0, STG_E_READFAULT);
+            assert!(
+                fixture
+                    .registry
+                    .complete(fixture.last_ticket(), temp.0.clone())
+            );
+            assert_eq!(read(&stream, 4).0, STG_E_READFAULT);
+        });
     }
 
     #[test]
     fn the_temp_file_is_deleted_on_release() {
-        let temp = TempFile::new("release", b"bytes");
-        let fixture = Fixture::new(vec![file("a", 5), file("b", 5)]);
-        let first = stream(&fixture, 0);
-        let first_ticket = fixture.last_ticket();
-        let second = stream(&fixture, 1);
-        let second_ticket = fixture.last_ticket();
+        bounded(|| {
+            let temp = TempFile::new("release", b"bytes");
+            let fixture = Fixture::new(vec![file("a", 5), file("b", 5)]);
+            let first = stream(&fixture, 0);
+            let first_ticket = fixture.last_ticket();
+            let second = stream(&fixture, 1);
+            let second_ticket = fixture.last_ticket();
 
-        // Two tickets answered with one path share the open file.
-        assert!(fixture.registry.complete(first_ticket, temp.0.clone()));
-        assert!(fixture.registry.complete(second_ticket, temp.0.clone()));
-        assert_eq!(read(&first, 5).1, b"bytes");
-        // SAFETY: an in-process call on a live stream.
-        let clone = unsafe { first.Clone() }.expect("clone");
-        drop(first);
-        assert_eq!(read(&clone, 1).0, S_FALSE);
-        assert_eq!(read(&second, 5).1, b"bytes");
-        drop(second);
-        assert!(temp.0.exists(), "a clone still reads it");
-        drop(clone);
+            // Two tickets answered with one path share the open file.
+            assert!(fixture.registry.complete(first_ticket, temp.0.clone()));
+            assert!(fixture.registry.complete(second_ticket, temp.0.clone()));
+            assert_eq!(read(&first, 5).1, b"bytes");
+            // SAFETY: an in-process call on a live stream.
+            let clone = unsafe { first.Clone() }.expect("clone");
+            drop(first);
+            assert_eq!(read(&clone, 1).0, S_FALSE);
+            assert_eq!(read(&second, 5).1, b"bytes");
+            drop(second);
+            assert!(temp.0.exists(), "a clone still reads it");
+            drop(clone);
 
-        assert!(!temp.0.exists());
-        let released = lock(&fixture.recorded.released).clone();
-        assert_eq!(released, vec![second_ticket, first_ticket]);
-        assert!(!fixture.registry.complete(first_ticket, temp.0.clone()));
+            assert!(!temp.0.exists());
+            let released = lock(&fixture.recorded.released).clone();
+            assert_eq!(released, vec![second_ticket, first_ticket]);
+            assert!(!fixture.registry.complete(first_ticket, temp.0.clone()));
+        });
     }
 }

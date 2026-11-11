@@ -138,6 +138,40 @@ pub fn window_handle(bytes: &[u8]) -> Option<u64> {
 }
 
 #[cfg(test)]
+pub(crate) mod testing {
+    use std::sync::mpsc::{self, RecvTimeoutError};
+    use std::thread;
+    use std::time::Duration;
+
+    /// How long a test may run before it counts as hung.
+    const TEST_TIMEOUT: Duration = Duration::from_secs(30);
+
+    /// Runs a test body on its own thread and fails the test once it runs past [`TEST_TIMEOUT`], so a hang fails that
+    /// test instead of stalling the run. A body that blocks forever is left behind; the process ends with the run.
+    pub(crate) fn bounded(body: impl FnOnce() + Send + 'static) {
+        let name = thread::current().name().unwrap_or("test").to_owned();
+        let (done, finished) = mpsc::channel::<()>();
+        let runner = thread::Builder::new()
+            .name(name.clone())
+            .spawn(move || {
+                body();
+                let _ = done.send(());
+            })
+            .expect("spawn the test thread");
+
+        // A panicking body drops `done` without sending: Disconnected, and the join below re-raises its panic.
+        assert!(
+            finished.recv_timeout(TEST_TIMEOUT) != Err(RecvTimeoutError::Timeout),
+            "{name} still running after {TEST_TIMEOUT:?}"
+        );
+
+        if let Err(panic) = runner.join() {
+            std::panic::resume_unwind(panic);
+        }
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::{
         DragOutcome, DragReturn, MAX_IMAGE_SIDE, OperationResult, image_fits, window_handle,

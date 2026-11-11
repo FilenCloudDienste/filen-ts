@@ -280,6 +280,7 @@ pub fn seek(position: u64, size: u64, origin: Origin, offset: i64) -> Option<u64
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testing::bounded;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::thread;
     use std::time::Instant;
@@ -292,92 +293,104 @@ mod tests {
 
     #[test]
     fn a_completed_slot_hands_out_its_path_to_every_wait() {
-        let registry = Registry::new();
-        let session = registry.session();
-        let (ticket, slot) = registry.open(session).expect("open");
+        bounded(|| {
+            let registry = Registry::new();
+            let session = registry.session();
+            let (ticket, slot) = registry.open(session).expect("open");
 
-        assert!(registry.complete(ticket, PathBuf::from("C:\\t\\a")));
-        assert_eq!(slot.wait(STEP, never), Ok(PathBuf::from("C:\\t\\a")));
-        assert_eq!(slot.wait(STEP, never), Ok(PathBuf::from("C:\\t\\a")));
-        assert!(!registry.complete(ticket, PathBuf::from("C:\\t\\b")));
-        assert!(!registry.fail(ticket));
+            assert!(registry.complete(ticket, PathBuf::from("C:\\t\\a")));
+            assert_eq!(slot.wait(STEP, never), Ok(PathBuf::from("C:\\t\\a")));
+            assert_eq!(slot.wait(STEP, never), Ok(PathBuf::from("C:\\t\\a")));
+            assert!(!registry.complete(ticket, PathBuf::from("C:\\t\\b")));
+            assert!(!registry.fail(ticket));
+        });
     }
 
     #[test]
     fn complete_wakes_a_waiting_read() {
-        let registry = Arc::new(Registry::new());
-        let (ticket, slot) = registry.open(registry.session()).expect("open");
-        let waiter = thread::spawn(move || slot.wait(Duration::from_secs(10), never));
-        thread::sleep(STEP);
+        bounded(|| {
+            let registry = Arc::new(Registry::new());
+            let (ticket, slot) = registry.open(registry.session()).expect("open");
+            let waiter = thread::spawn(move || slot.wait(Duration::from_secs(10), never));
+            thread::sleep(STEP);
 
-        let started = Instant::now();
-        assert!(registry.complete(ticket, PathBuf::from("a")));
-        assert_eq!(waiter.join().expect("join"), Ok(PathBuf::from("a")));
-        assert!(started.elapsed() < Duration::from_secs(5));
+            let started = Instant::now();
+            assert!(registry.complete(ticket, PathBuf::from("a")));
+            assert_eq!(waiter.join().expect("join"), Ok(PathBuf::from("a")));
+            assert!(started.elapsed() < Duration::from_secs(5));
+        });
     }
 
     #[test]
     fn a_failed_slot_fails_its_reads() {
-        let registry = Registry::new();
-        let (ticket, slot) = registry.open(registry.session()).expect("open");
+        bounded(|| {
+            let registry = Registry::new();
+            let (ticket, slot) = registry.open(registry.session()).expect("open");
 
-        assert!(registry.fail(ticket));
-        assert_eq!(slot.wait(STEP, never), Err(WaitError::Failed));
-        assert!(!registry.complete(ticket, PathBuf::from("a")));
+            assert!(registry.fail(ticket));
+            assert_eq!(slot.wait(STEP, never), Err(WaitError::Failed));
+            assert!(!registry.complete(ticket, PathBuf::from("a")));
+        });
     }
 
     #[test]
     fn a_waiting_read_notices_cancellation_within_one_wait() {
-        let registry = Registry::new();
-        let (_, slot) = registry.open(registry.session()).expect("open");
-        let cancelled = Arc::new(AtomicBool::new(false));
-        let flag = cancelled.clone();
-        let waiter = thread::spawn(move || {
-            let started = Instant::now();
-            let result = slot.wait(STEP, || flag.load(Ordering::SeqCst));
-            (result, started.elapsed())
-        });
-        thread::sleep(STEP * 3);
+        bounded(|| {
+            let registry = Registry::new();
+            let (_, slot) = registry.open(registry.session()).expect("open");
+            let cancelled = Arc::new(AtomicBool::new(false));
+            let flag = cancelled.clone();
+            let waiter = thread::spawn(move || {
+                let started = Instant::now();
+                let result = slot.wait(STEP, || flag.load(Ordering::SeqCst));
+                (result, started.elapsed())
+            });
+            thread::sleep(STEP * 3);
 
-        // Nothing wakes the slot: the bounded wait finds the flag on its own.
-        let flipped = Instant::now();
-        cancelled.store(true, Ordering::SeqCst);
-        let (result, _) = waiter.join().expect("join");
-        assert_eq!(result, Err(WaitError::Cancelled));
-        assert!(flipped.elapsed() < STEP * 10);
+            // Nothing wakes the slot: the bounded wait finds the flag on its own.
+            let flipped = Instant::now();
+            cancelled.store(true, Ordering::SeqCst);
+            let (result, _) = waiter.join().expect("join");
+            assert_eq!(result, Err(WaitError::Cancelled));
+            assert!(flipped.elapsed() < STEP * 10);
+        });
     }
 
     #[test]
     fn a_cancelled_call_does_not_wait_at_all() {
-        let registry = Registry::new();
-        let (_, slot) = registry.open(registry.session()).expect("open");
+        bounded(|| {
+            let registry = Registry::new();
+            let (_, slot) = registry.open(registry.session()).expect("open");
 
-        assert_eq!(
-            slot.wait(Duration::from_secs(60), || true),
-            Err(WaitError::Cancelled)
-        );
+            assert_eq!(
+                slot.wait(Duration::from_secs(60), || true),
+                Err(WaitError::Cancelled)
+            );
+        });
     }
 
     #[test]
     fn end_operation_abort_unblocks_a_waiting_read() {
-        let registry = Arc::new(Registry::new());
-        let ended = registry.session();
-        let other = registry.session();
-        let (_, waiting) = registry.open(ended).expect("open");
-        let (ready_ticket, ready) = registry.open(ended).expect("open");
-        let (other_ticket, untouched) = registry.open(other).expect("open");
-        assert!(registry.complete(ready_ticket, PathBuf::from("a")));
-        let waiter = thread::spawn(move || waiting.wait(Duration::from_secs(10), never));
-        thread::sleep(STEP);
+        bounded(|| {
+            let registry = Arc::new(Registry::new());
+            let ended = registry.session();
+            let other = registry.session();
+            let (_, waiting) = registry.open(ended).expect("open");
+            let (ready_ticket, ready) = registry.open(ended).expect("open");
+            let (other_ticket, untouched) = registry.open(other).expect("open");
+            assert!(registry.complete(ready_ticket, PathBuf::from("a")));
+            let waiter = thread::spawn(move || waiting.wait(Duration::from_secs(10), never));
+            thread::sleep(STEP);
 
-        let started = Instant::now();
-        registry.abort_session(ended);
-        assert_eq!(waiter.join().expect("join"), Err(WaitError::Aborted));
-        assert!(started.elapsed() < Duration::from_secs(5));
-        assert_eq!(ready.wait(STEP, never), Err(WaitError::Aborted));
+            let started = Instant::now();
+            registry.abort_session(ended);
+            assert_eq!(waiter.join().expect("join"), Err(WaitError::Aborted));
+            assert!(started.elapsed() < Duration::from_secs(5));
+            assert_eq!(ready.wait(STEP, never), Err(WaitError::Aborted));
 
-        assert!(registry.complete(other_ticket, PathBuf::from("b")));
-        assert_eq!(untouched.wait(STEP, never), Ok(PathBuf::from("b")));
+            assert!(registry.complete(other_ticket, PathBuf::from("b")));
+            assert_eq!(untouched.wait(STEP, never), Ok(PathBuf::from("b")));
+        });
     }
 
     #[test]
@@ -396,37 +409,41 @@ mod tests {
 
     #[test]
     fn a_ticket_opened_while_its_session_ends_never_stays_waiting() {
-        let registry = Arc::new(Registry::new());
+        bounded(|| {
+            let registry = Arc::new(Registry::new());
 
-        for _ in 0..200 {
-            let session = registry.session();
-            let opener = {
-                let registry = registry.clone();
-                thread::spawn(move || registry.open(session))
-            };
-            registry.abort_session(session);
+            for _ in 0..200 {
+                let session = registry.session();
+                let opener = {
+                    let registry = registry.clone();
+                    thread::spawn(move || registry.open(session))
+                };
+                registry.abort_session(session);
 
-            // Either refused, or opened before the end and aborted with it.
-            if let Some((_, slot)) = opener.join().expect("join") {
-                assert_eq!(slot.wait(STEP, never), Err(WaitError::Aborted));
+                // Either refused, or opened before the end and aborted with it.
+                if let Some((_, slot)) = opener.join().expect("join") {
+                    assert_eq!(slot.wait(STEP, never), Err(WaitError::Aborted));
+                }
+                assert!(registry.open(session).is_none());
+                registry.forget_session(session);
             }
-            assert!(registry.open(session).is_none());
-            registry.forget_session(session);
-        }
+        });
     }
 
     #[test]
     fn abort_all_fails_every_ticket_and_opens_no_new_one() {
-        let registry = Registry::new();
-        let (_, first) = registry.open(registry.session()).expect("open");
-        let (_, second) = registry.open(registry.session()).expect("open");
+        bounded(|| {
+            let registry = Registry::new();
+            let (_, first) = registry.open(registry.session()).expect("open");
+            let (_, second) = registry.open(registry.session()).expect("open");
 
-        assert!(!registry.aborted());
-        registry.abort_all();
-        assert!(registry.aborted());
-        assert_eq!(first.wait(STEP, never), Err(WaitError::Aborted));
-        assert_eq!(second.wait(STEP, never), Err(WaitError::Aborted));
-        assert!(registry.open(registry.session()).is_none());
+            assert!(!registry.aborted());
+            registry.abort_all();
+            assert!(registry.aborted());
+            assert_eq!(first.wait(STEP, never), Err(WaitError::Aborted));
+            assert_eq!(second.wait(STEP, never), Err(WaitError::Aborted));
+            assert!(registry.open(registry.session()).is_none());
+        });
     }
 
     #[test]

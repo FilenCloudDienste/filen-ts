@@ -650,6 +650,7 @@ mod tests {
     };
     use crate::descriptor::{self, DESCRIPTOR_SIZE, Entry};
     use crate::slot::lock;
+    use crate::testing::bounded;
     use crate::{OperationResult, mta};
 
     fn get(
@@ -737,177 +738,189 @@ mod tests {
 
     #[test]
     fn descriptor_round_trips_through_get_data() {
-        let entries = vec![file("a.txt", 5), file("b.txt", 6)];
-        let want = descriptor::build(&entries).expect("descriptor");
-        let fixture = Fixture::new(entries);
-        let session = fixture.session.clone();
-        // Through the addon's MTA and a proxy, as DoDragDrop gets it.
-        let proxy = mta::marshal(move || super::DataObject::new(session).into()).expect("marshal");
-        let cf =
-            clipboard_format(windows::Win32::UI::Shell::CFSTR_FILEDESCRIPTORW).expect("format");
+        bounded(|| {
+            let entries = vec![file("a.txt", 5), file("b.txt", 6)];
+            let want = descriptor::build(&entries).expect("descriptor");
+            let fixture = Fixture::new(entries);
+            let session = fixture.session.clone();
+            // Through the addon's MTA and a proxy, as DoDragDrop gets it.
+            let proxy =
+                mta::marshal(move || super::DataObject::new(session).into()).expect("marshal");
+            let cf =
+                clipboard_format(windows::Win32::UI::Shell::CFSTR_FILEDESCRIPTORW).expect("format");
 
-        assert_eq!(
-            take_hglobal(get(&proxy, cf, -1, HGLOBAL_TYMED).expect("descriptor")),
-            want
-        );
-        assert_eq!(
-            take_hglobal(get(&fixture.object, cf, -1, HGLOBAL_TYMED).expect("descriptor")),
-            want
-        );
+            assert_eq!(
+                take_hglobal(get(&proxy, cf, -1, HGLOBAL_TYMED).expect("descriptor")),
+                want
+            );
+            assert_eq!(
+                take_hglobal(get(&fixture.object, cf, -1, HGLOBAL_TYMED).expect("descriptor")),
+                want
+            );
+        });
     }
 
     #[test]
     fn set_data_round_trips_private_formats() {
-        let fixture = Fixture::new(vec![file("a", 1)]);
-        let object = &fixture.object;
-        let private_name = HSTRING::from("FilenDragTest");
-        let streamed_name = HSTRING::from("FilenDragTestStream");
-        let private = clipboard_format(PCWSTR(private_name.as_ptr())).expect("format");
-        let streamed = clipboard_format(PCWSTR(streamed_name.as_ptr())).expect("format");
+        bounded(|| {
+            let fixture = Fixture::new(vec![file("a", 1)]);
+            let object = &fixture.object;
+            let private_name = HSTRING::from("FilenDragTest");
+            let streamed_name = HSTRING::from("FilenDragTestStream");
+            let private = clipboard_format(PCWSTR(private_name.as_ptr())).expect("format");
+            let streamed = clipboard_format(PCWSTR(streamed_name.as_ptr())).expect("format");
 
-        // An HGLOBAL handed over (fRelease): the object frees it.
-        let format = format_of(private, DVASPECT_CONTENT.0, -1, HGLOBAL_TYMED);
-        let medium = hglobal_medium(&[1, 2, 3]).expect("medium");
-        // SAFETY: a live object; with fRelease it owns the medium afterwards.
-        unsafe { object.SetData(&raw const format, &raw const medium, true) }.expect("SetData");
-        assert_eq!(
-            take_hglobal(get(object, private, -1, HGLOBAL_TYMED).expect("stored")),
-            vec![1, 2, 3]
-        );
-        // SAFETY: a live object.
-        assert_eq!(unsafe { object.QueryGetData(&raw const format) }, S_OK);
+            // An HGLOBAL handed over (fRelease): the object frees it.
+            let format = format_of(private, DVASPECT_CONTENT.0, -1, HGLOBAL_TYMED);
+            let medium = hglobal_medium(&[1, 2, 3]).expect("medium");
+            // SAFETY: a live object; with fRelease it owns the medium afterwards.
+            unsafe { object.SetData(&raw const format, &raw const medium, true) }.expect("SetData");
+            assert_eq!(
+                take_hglobal(get(object, private, -1, HGLOBAL_TYMED).expect("stored")),
+                vec![1, 2, 3]
+            );
+            // SAFETY: a live object.
+            assert_eq!(unsafe { object.QueryGetData(&raw const format) }, S_OK);
 
-        // A stream lent (no fRelease): copied, handed out as a new stream.
-        // SAFETY: copies the bytes.
-        let stream = unsafe { SHCreateMemStream(Some(&[7, 8])) }.expect("stream");
-        let format = format_of(streamed, DVASPECT_CONTENT.0, -1, ISTREAM_TYMED);
-        let mut lent = STGMEDIUM {
-            tymed: ISTREAM_TYMED,
-            u: STGMEDIUM_0 {
-                pstm: ManuallyDrop::new(Some(stream)),
-            },
-            pUnkForRelease: ManuallyDrop::new(None),
-        };
-        // SAFETY: a live object; without fRelease the medium stays ours.
-        unsafe { object.SetData(&raw const format, &raw const lent, false) }.expect("SetData");
-        // SAFETY: still ours: releases the stream once.
-        unsafe { ReleaseStgMedium(&raw mut lent) };
-        let mut handed = get(object, streamed, -1, ISTREAM_TYMED).expect("stored");
-        // SAFETY: tymed says pstm is set.
-        let copy: &IStream = unsafe { handed.u.pstm.as_ref() }.expect("stream");
-        assert_eq!(stream_bytes(copy).expect("bytes"), vec![7, 8]);
-        // SAFETY: the medium was handed to the test.
-        unsafe { ReleaseStgMedium(&raw mut handed) };
+            // A stream lent (no fRelease): copied, handed out as a new stream.
+            // SAFETY: copies the bytes.
+            let stream = unsafe { SHCreateMemStream(Some(&[7, 8])) }.expect("stream");
+            let format = format_of(streamed, DVASPECT_CONTENT.0, -1, ISTREAM_TYMED);
+            let mut lent = STGMEDIUM {
+                tymed: ISTREAM_TYMED,
+                u: STGMEDIUM_0 {
+                    pstm: ManuallyDrop::new(Some(stream)),
+                },
+                pUnkForRelease: ManuallyDrop::new(None),
+            };
+            // SAFETY: a live object; without fRelease the medium stays ours.
+            unsafe { object.SetData(&raw const format, &raw const lent, false) }.expect("SetData");
+            // SAFETY: still ours: releases the stream once.
+            unsafe { ReleaseStgMedium(&raw mut lent) };
+            let mut handed = get(object, streamed, -1, ISTREAM_TYMED).expect("stored");
+            // SAFETY: tymed says pstm is set.
+            let copy: &IStream = unsafe { handed.u.pstm.as_ref() }.expect("stream");
+            assert_eq!(stream_bytes(copy).expect("bytes"), vec![7, 8]);
+            // SAFETY: the medium was handed to the test.
+            unsafe { ReleaseStgMedium(&raw mut handed) };
 
-        // Both are enumerated after ours.
-        // SAFETY: a live object.
-        let formats = unsafe { object.EnumFormatEtc(DATADIR_GET_U32) }.expect("enum");
-        let mut listed = [format_of(0, 0, 0, 0); 8];
-        let mut count = 0u32;
-        // SAFETY: room for 8 entries.
-        let _ = unsafe { formats.Next(&mut listed, Some(&raw mut count)) };
-        let listed: Vec<u16> = listed[..count as usize]
-            .iter()
-            .map(|f| f.cfFormat)
-            .collect();
-        assert_eq!(listed.len(), 4);
-        assert_eq!(&listed[2..], &[private, streamed]);
+            // Both are enumerated after ours.
+            // SAFETY: a live object.
+            let formats = unsafe { object.EnumFormatEtc(DATADIR_GET_U32) }.expect("enum");
+            let mut listed = [format_of(0, 0, 0, 0); 8];
+            let mut count = 0u32;
+            // SAFETY: room for 8 entries.
+            let _ = unsafe { formats.Next(&mut listed, Some(&raw mut count)) };
+            let listed: Vec<u16> = listed[..count as usize]
+                .iter()
+                .map(|f| f.cfFormat)
+                .collect();
+            assert_eq!(listed.len(), 4);
+            assert_eq!(&listed[2..], &[private, streamed]);
+        });
     }
 
     #[test]
     fn ours_cannot_be_overwritten() {
-        let fixture = Fixture::new(vec![file("a", 1)]);
-        let cf =
-            clipboard_format(windows::Win32::UI::Shell::CFSTR_FILEDESCRIPTORW).expect("format");
-        let format = format_of(cf, DVASPECT_CONTENT.0, -1, HGLOBAL_TYMED);
-        let medium = hglobal_medium(&[0]).expect("medium");
-        let mut medium = medium;
+        bounded(|| {
+            let fixture = Fixture::new(vec![file("a", 1)]);
+            let cf =
+                clipboard_format(windows::Win32::UI::Shell::CFSTR_FILEDESCRIPTORW).expect("format");
+            let format = format_of(cf, DVASPECT_CONTENT.0, -1, HGLOBAL_TYMED);
+            let medium = hglobal_medium(&[0]).expect("medium");
+            let mut medium = medium;
 
-        // SAFETY: a live object; a refused SetData leaves the medium to us.
-        let refused = unsafe {
-            fixture
-                .object
-                .SetData(&raw const format, &raw const medium, true)
-        };
-        assert_eq!(refused.map_err(|error| error.code()), Err(DV_E_FORMATETC));
-        // SAFETY: still ours.
-        unsafe { ReleaseStgMedium(&raw mut medium) };
+            // SAFETY: a live object; a refused SetData leaves the medium to us.
+            let refused = unsafe {
+                fixture
+                    .object
+                    .SetData(&raw const format, &raw const medium, true)
+            };
+            assert_eq!(refused.map_err(|error| error.code()), Err(DV_E_FORMATETC));
+            // SAFETY: still ours.
+            unsafe { ReleaseStgMedium(&raw mut medium) };
+        });
     }
 
     #[test]
     fn file_contents_is_refused_before_start_operation() {
-        let fixture = Fixture::new(vec![
-            Entry {
-                path: "dir".to_owned(),
-                directory: true,
-                size: 0,
-                mtime_ms: None,
-            },
-            file("dir\\a", 3),
-        ]);
-        let cf = clipboard_format(windows::Win32::UI::Shell::CFSTR_FILECONTENTS).expect("format");
-        let code = |lindex| {
-            get(&fixture.object, cf, lindex, ISTREAM_TYMED)
-                .map(|_| ())
-                .map_err(|e| e.code())
-        };
+        bounded(|| {
+            let fixture = Fixture::new(vec![
+                Entry {
+                    path: "dir".to_owned(),
+                    directory: true,
+                    size: 0,
+                    mtime_ms: None,
+                },
+                file("dir\\a", 3),
+            ]);
+            let cf =
+                clipboard_format(windows::Win32::UI::Shell::CFSTR_FILECONTENTS).expect("format");
+            let code = |lindex| {
+                get(&fixture.object, cf, lindex, ISTREAM_TYMED)
+                    .map(|_| ())
+                    .map_err(|e| e.code())
+            };
 
-        assert_eq!(code(1), Err(DV_E_FORMATETC));
-        assert!(lock(&fixture.recorded.contents).is_empty());
+            assert_eq!(code(1), Err(DV_E_FORMATETC));
+            assert!(lock(&fixture.recorded.contents).is_empty());
 
-        fixture.start();
-        assert_eq!(code(0), Err(DV_E_FORMATETC), "a directory has no contents");
-        assert_eq!(code(2), Err(DV_E_LINDEX));
-        assert_eq!(code(-1), Err(DV_E_LINDEX));
-        let mut medium = get(&fixture.object, cf, 1, ISTREAM_TYMED).expect("stream");
-        assert_eq!(medium.tymed, ISTREAM_TYMED);
-        assert_eq!(
-            lock(&fixture.recorded.contents).as_slice(),
-            &[(fixture.last_ticket(), 1)]
-        );
-        // SAFETY: the medium was handed to the test.
-        unsafe { ReleaseStgMedium(&raw mut medium) };
-        assert_eq!(
-            lock(&fixture.recorded.released).as_slice(),
-            &[fixture.last_ticket()]
-        );
+            fixture.start();
+            assert_eq!(code(0), Err(DV_E_FORMATETC), "a directory has no contents");
+            assert_eq!(code(2), Err(DV_E_LINDEX));
+            assert_eq!(code(-1), Err(DV_E_LINDEX));
+            let mut medium = get(&fixture.object, cf, 1, ISTREAM_TYMED).expect("stream");
+            assert_eq!(medium.tymed, ISTREAM_TYMED);
+            // Read before locking: last_ticket takes the same (non-reentrant) lock.
+            let ticket = fixture.last_ticket();
+            assert_eq!(lock(&fixture.recorded.contents).as_slice(), &[(ticket, 1)]);
+            // SAFETY: the medium was handed to the test.
+            unsafe { ReleaseStgMedium(&raw mut medium) };
+            assert_eq!(lock(&fixture.recorded.released).as_slice(), &[ticket]);
+        });
     }
 
     #[test]
     fn end_operation_reports_once_and_refuses_later_contents() {
-        let fixture = Fixture::new(vec![file("a", 3)]);
-        let capability: IDataObjectAsyncCapability =
-            fixture.object.cast().expect("async capability");
-        let cf = clipboard_format(windows::Win32::UI::Shell::CFSTR_FILECONTENTS).expect("format");
+        bounded(|| {
+            let fixture = Fixture::new(vec![file("a", 3)]);
+            let capability: IDataObjectAsyncCapability =
+                fixture.object.cast().expect("async capability");
+            let cf =
+                clipboard_format(windows::Win32::UI::Shell::CFSTR_FILECONTENTS).expect("format");
 
-        fixture.start();
-        assert!(fixture.session.started());
-        // SAFETY: in-process calls on a live object.
-        unsafe { capability.EndOperation(windows::Win32::Foundation::E_ABORT, None, 0) }
-            .expect("EndOperation");
-        // SAFETY: as above.
-        unsafe { capability.EndOperation(S_OK, None, 0) }.expect("EndOperation");
-        assert_eq!(
-            lock(&fixture.recorded.ended).as_slice(),
-            &[OperationResult::Aborted]
-        );
-        // SAFETY: as above.
-        let in_operation = unsafe { capability.InOperation() }.expect("InOperation");
-        assert!(!in_operation.as_bool());
-        assert!(get(&fixture.object, cf, 0, ISTREAM_TYMED).is_err());
-        assert!(
-            fixture.registry.open(fixture.session.id).is_some(),
-            "only this session ended"
-        );
+            fixture.start();
+            assert!(fixture.session.started());
+            // SAFETY: in-process calls on a live object.
+            unsafe { capability.EndOperation(windows::Win32::Foundation::E_ABORT, None, 0) }
+                .expect("EndOperation");
+            // SAFETY: as above.
+            unsafe { capability.EndOperation(S_OK, None, 0) }.expect("EndOperation");
+            assert_eq!(
+                lock(&fixture.recorded.ended).as_slice(),
+                &[OperationResult::Aborted]
+            );
+            // SAFETY: as above.
+            let in_operation = unsafe { capability.InOperation() }.expect("InOperation");
+            assert!(!in_operation.as_bool());
+            assert!(get(&fixture.object, cf, 0, ISTREAM_TYMED).is_err());
+            assert!(fixture.registry.open(fixture.session.id).is_none());
+            assert!(
+                fixture.registry.open(fixture.registry.session()).is_some(),
+                "only this session ended"
+            );
+        });
     }
 
     #[test]
     fn a_session_gone_mid_operation_reports_failed() {
-        let fixture = Fixture::new(vec![file("a", 3)]);
-        let recorded = fixture.recorded.clone();
+        bounded(|| {
+            let fixture = Fixture::new(vec![file("a", 3)]);
+            let recorded = fixture.recorded.clone();
 
-        fixture.start();
-        drop(fixture);
-        assert_eq!(lock(&recorded.ended).as_slice(), &[OperationResult::Failed]);
+            fixture.start();
+            drop(fixture);
+            assert_eq!(lock(&recorded.ended).as_slice(), &[OperationResult::Failed]);
+        });
     }
 }

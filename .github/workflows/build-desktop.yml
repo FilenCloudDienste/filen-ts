@@ -134,4 +134,6 @@ jobs:
           cargo clippy --locked --all-targets --target x86_64-pc-windows-msvc -- -D warnings
           cargo clippy --locked --all-targets --target aarch64-pc-windows-msvc -- -D warnings
       - name: Test
+        # Each COM test fails itself after 30 s (testing::bounded); this bounds the build and the run as a whole.
+        timeout-minutes: 10
         run: cargo test --locked
