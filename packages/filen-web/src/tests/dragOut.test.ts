@@ -24,7 +24,7 @@ vi.mock("@/features/transfers/lib/nativeTransfers.logic", () => ({
 	downloadItemOf: (item: { data: { uuid: string } }) => ({ uuid: item.data.uuid })
 }))
 
-import { dragOutActive, installDragOut } from "@/features/drive/lib/dragOut"
+import { DRAG_OUT_MAX_MS, dragOutActive, installDragOut } from "@/features/drive/lib/dragOut"
 import { isFileDrag } from "@/features/drive/lib/uploadDrop"
 import { onlineManager } from "@tanstack/react-query"
 
@@ -227,8 +227,10 @@ describe("drag-out hand-off", () => {
 
 		press()
 		move(-5, 30)
+		move(30, 30)
 		fake.prepares[0]?.resolve({ id: "d1" })
 		await settle()
+		// Back inside the window: nothing begins.
 		expect(fake.drag.begin).not.toHaveBeenCalled()
 
 		move(-6, 30)
@@ -243,7 +245,32 @@ describe("drag-out hand-off", () => {
 		expect(toast).not.toHaveBeenCalled()
 	})
 
-	it("does not begin while main is still staging the items", async () => {
+	it("a pointer resting outside hands off as soon as the items are prepared", async () => {
+		const fake = install()
+
+		press()
+		move(-5, 30)
+		fake.prepares[0]?.resolve({ id: "d1" })
+		await settle()
+
+		expect(fake.drag.begin).toHaveBeenCalledOnce()
+		expect(pointerDragChip()?.style.display).toBe("none")
+	})
+
+	it("a button released before the items are prepared begins nothing", async () => {
+		const fake = install()
+
+		press()
+		move(-5, 30)
+		move(-6, 30, 0)
+		fake.prepares[0]?.resolve({ id: "d1" })
+		await settle()
+
+		expect(fake.drag.begin).not.toHaveBeenCalled()
+		expect(fake.drag.release).toHaveBeenCalledExactlyOnceWith("d1")
+	})
+
+	it("does not begin while main is still staging the items, and begins once they are ready under a resting pointer", async () => {
 		const fake = install()
 
 		press()
@@ -255,29 +282,44 @@ describe("drag-out hand-off", () => {
 		expect(fake.drag.begin).not.toHaveBeenCalled()
 
 		fake.emit({ id: "d1", state: "ready" })
-		move(-7, 30)
 		expect(fake.drag.begin).toHaveBeenCalledOnce()
+		expect(pointerDragChip()?.style.display).toBe("none")
 	})
 
-	it("notReady with the button held resumes the in-app drag and retries on the next outside move without a timer", async () => {
+	it("notReady with the button held resumes the in-app drag and begins again once ready, without a timer", async () => {
 		const fake = install()
 
 		press()
 		move(-5, 30)
 		fake.prepares[0]?.resolve({ id: "d1" })
 		await settle()
-		move(-6, 30)
+		expect(fake.drag.begin).toHaveBeenCalledOnce()
+		fake.emit({ id: "d1", state: "staging", bytes: 0, total: 10 })
 		fake.begins[0]?.resolve("notReady")
 		await settle()
 
 		expect(pointerDragChip()?.style.display).toBe("")
 		vi.advanceTimersToNextFrame()
 		expect(vi.getTimerCount()).toBe(0)
+		move(-7, 30)
 		expect(fake.drag.begin).toHaveBeenCalledOnce()
 
-		move(-7, 30)
+		fake.emit({ id: "d1", state: "ready" })
 		expect(fake.drag.begin).toHaveBeenCalledTimes(2)
 		expect(fake.drag.prepare).toHaveBeenCalledOnce()
+	})
+
+	it("stops counting a drag-out whose OS drag never settles", async () => {
+		const fake = install()
+
+		press()
+		move(-5, 30)
+		fake.prepares[0]?.resolve({ id: "d1" })
+		await settle()
+		expect(dragOutActive()).toBe(true)
+
+		vi.setSystemTime(DRAG_OUT_MAX_MS + 1)
+		expect(dragOutActive()).toBe(false)
 	})
 
 	it("notReady after release shows Still preparing with Download to…", async () => {
@@ -367,11 +409,12 @@ describe("drag-out hand-off", () => {
 
 		press()
 		move(-5, 30)
+		move(30, 30)
 		fake.prepares[0]?.resolve({ id: "d1" })
 		await settle()
 		hit = element
-		move(30, 30)
-		up(30, 30)
+		move(31, 30)
+		up(31, 30)
 
 		expect(handlers.drop).toHaveBeenCalledOnce()
 		expect(fake.drag.release).toHaveBeenCalledExactlyOnceWith("d1")

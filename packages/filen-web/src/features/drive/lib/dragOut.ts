@@ -10,17 +10,27 @@ import {
 } from "@filen/shared/desktop"
 import { i18n } from "@/lib/i18n"
 import type { DriveItem } from "@/features/drive/lib/item"
-import { cancelPointerDrag, pointerDragChip, resumePointerDrag, setPointerDragHooks } from "@/features/drive/lib/pointerDrag"
+import {
+	cancelPointerDrag,
+	handOffPointerDrag,
+	pointerDragChip,
+	resumePointerDrag,
+	setPointerDragHooks
+} from "@/features/drive/lib/pointerDrag"
 import { startNativeDownloads } from "@/features/transfers/lib/nativeHost"
 import { downloadItemOf } from "@/features/transfers/lib/nativeTransfers.logic"
 
 // The desktop hand-off: a drive drag (pointerDrag.ts) leaving the window becomes an OS drag of those items. An in-app
 // drag asks main for nothing; the first move outside the window prepares the items (main lists directories, Linux
-// stages copies), and the next move outside once they are ready begins the OS drag. The page hears no pointer events
+// stages copies), and once they are ready a drag still held outside the window begins the OS drag. The page hears no pointer events
 // while the OS drag runs; begin settles once it has ended, on every OS.
 
 // OS file drags reaching the page this long after our own drag-out ended are its tail, never an upload.
 const QUIET_AFTER_MS = 1000
+
+// A drag-out counts as active at most this long (past main's own watchdog for an OS drag whose end never came), so an
+// OS drag that never settles cannot keep the page refusing file drops.
+export const DRAG_OUT_MAX_MS = 11 * 60_000
 
 // One toast for every drag-out notice: a later one replaces it.
 const DRAG_OUT_TOAST_ID = "drive.dragOut"
@@ -33,8 +43,11 @@ interface Attempt {
 	items: readonly DriveItem[]
 	chip: HTMLCanvasElement | null
 	engine: Engine
-	// The last move's place: a release there is a drop outside the window.
+	// The last move's place and buttons: a release outside is a drop outside the window.
 	outside: boolean
+	buttons: number
+	// When it started asking main (Date.now()).
+	since: number
 	phase: "idle" | "preparing" | "prepared" | "beginning" | "done"
 	id: string | null
 	image: DesktopDragImage | null
@@ -51,7 +64,15 @@ const staging = new Set<string>()
 // True while a drag-out is being prepared or runs, and for a moment after: the page's own drag coming back over the
 // window is no upload (isFileDrag).
 export function dragOutActive(): boolean {
-	return live.size > 0 || Date.now() < quietUntil
+	const now = Date.now()
+
+	for (const current of live) {
+		if (now - current.since > DRAG_OUT_MAX_MS) {
+			live.delete(current)
+		}
+	}
+
+	return live.size > 0 || now < quietUntil
 }
 
 // Installs the hand-off for the desktop app's page; the returned function removes it.
@@ -62,8 +83,15 @@ export function installDragOut(bridge: Pick<DesktopBridge, "drag">): () => void 
 	const unsubscribe = bridge.drag.onState(state => {
 		if (state.state === "staging") {
 			staging.add(state.id)
-		} else {
-			staging.delete(state.id)
+
+			return
+		}
+
+		staging.delete(state.id)
+
+		// Staged under a resting pointer: begin without waiting for a move.
+		if (attempt?.id === state.id) {
+			tryBegin(attempt)
 		}
 	})
 
@@ -81,10 +109,20 @@ export function installDragOut(bridge: Pick<DesktopBridge, "drag">): () => void 
 }
 
 function onStart(items: readonly DriveItem[]): void {
-	attempt = { items, chip: pointerDragChip(), engine: "held", outside: false, phase: "idle", id: null, image: null }
+	attempt = {
+		items,
+		chip: pointerDragChip(),
+		engine: "held",
+		outside: false,
+		buttons: 0,
+		since: 0,
+		phase: "idle",
+		id: null,
+		image: null
+	}
 }
 
-function onMove(_point: unknown, outside: boolean): "continue" | "handedOff" {
+function onMove(_point: unknown, outside: boolean, buttons: number): "continue" | "handedOff" {
 	const current = attempt
 
 	if (current === null || drag === null) {
@@ -92,24 +130,42 @@ function onMove(_point: unknown, outside: boolean): "continue" | "handedOff" {
 	}
 
 	current.outside = outside
+	current.buttons = buttons
 
-	if (!outside) {
-		return "continue"
-	}
-
-	if (current.phase === "idle") {
+	if (outside && current.phase === "idle") {
 		prepare(current, drag)
 
 		return "continue"
 	}
 
-	if (current.phase !== "prepared" || current.id === null || current.image === null || staging.has(current.id)) {
-		return "continue"
+	return startBegin(current) ? "handedOff" : "continue"
+}
+
+// Begins the OS drag when the items are ready and the drag is still held outside the window; true once begin is issued.
+function startBegin(current: Attempt): boolean {
+	if (
+		drag === null ||
+		current.phase !== "prepared" ||
+		current.engine !== "held" ||
+		!current.outside ||
+		current.buttons === 0 ||
+		current.id === null ||
+		current.image === null ||
+		staging.has(current.id)
+	) {
+		return false
 	}
 
 	begin(current, drag, current.id, current.image)
 
-	return "handedOff"
+	return true
+}
+
+// startBegin outside onMove (prepared, or done staging, under a resting pointer): the engine is told here.
+function tryBegin(current: Attempt): void {
+	if (startBegin(current)) {
+		handOffPointerDrag()
+	}
 }
 
 function onEnd(dropped: boolean, released: boolean): void {
@@ -136,6 +192,7 @@ function prepare(current: Attempt, bridge: DesktopBridge["drag"]): void {
 	}
 
 	current.phase = "preparing"
+	current.since = Date.now()
 	live.add(current)
 
 	const chip = current.chip
@@ -168,6 +225,8 @@ function prepare(current: Attempt, bridge: DesktopBridge["drag"]): void {
 
 		if (current.engine !== "held") {
 			releaseUnbegun(current)
+		} else {
+			tryBegin(current)
 		}
 	})
 }
@@ -195,11 +254,18 @@ function begin(current: Attempt, bridge: DesktopBridge["drag"], id: string, imag
 
 			current.phase = "prepared"
 
-			// Still held: back to the in-app drag, begun again on a later move outside.
+			// Still held: back to the in-app drag, begun again once ready (a move outside or main's ready state).
 			if (current.engine === "held") {
 				resumePointerDrag()
+				tryBegin(current)
 			} else {
 				releaseUnbegun(current)
+			}
+		})
+		.finally(() => {
+			// A handler that threw leaves no attempt counted as running.
+			if (current.phase === "beginning") {
+				finish(current)
 			}
 		})
 }

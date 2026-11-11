@@ -139,6 +139,13 @@ export function resumePointerDrag(): void {
 	scheduleFrame()
 }
 
+// A hand-off begun outside onMove (the items became ready under a resting pointer): as if onMove had said so.
+export function handOffPointerDrag(): void {
+	if (session?.phase === "dragging") {
+		handOff(session)
+	}
+}
+
 // Ends the drag under way without a drop (a refused or finished hand-off).
 export function cancelPointerDrag(): void {
 	end(false, "held")
