@@ -192,6 +192,23 @@ describe("transfers service: downloads", () => {
 		expect(log.warn).toHaveBeenCalledWith(expect.stringContaining(path.resolve("Gone")))
 	})
 
+	it("logs each start with its destination and each settle with its id, code and path", async () => {
+		const { service, log, host } = setup({ downloadDirectory: FIXED })
+		const ids = started(
+			await service.startDownload({ items: [fileItem(), fileItem("b.txt")], destination: { kind: "prefs" }, origin: "page" })
+		)
+
+		expect(log.info).toHaveBeenCalledWith(`transfers: 2 downloads started into ${FIXED}`)
+
+		host([
+			{ k: "settled", id: ids[0] ?? "", outcome: "done" },
+			{ k: "settled", id: ids[1] ?? "", outcome: "error", error: { code: "localFull" } }
+		])
+
+		expect(log.info).toHaveBeenCalledWith(`transfers: ${ids[0] ?? ""} done ${at(FIXED, "a.txt")}`)
+		expect(log.warn).toHaveBeenCalledWith(`transfers: ${ids[1] ?? ""} error: localFull ${at(FIXED, "b.txt")}`)
+	})
+
 	it("asks for a directory for a multi-selection", async () => {
 		const { service, dialogs, specs } = setup()
 
@@ -1045,6 +1062,20 @@ describe("transfers service: reveal, open, uploads, directory pref", () => {
 
 		host(acked.map(id => ({ k: "settled", id, outcome: "cancelled" })))
 		expect(service.active()).toBe(0)
+	})
+
+	it("logs an upload's start and its settle with the local path", async () => {
+		const { service, log, disk, host } = setup()
+		const local = path.resolve("up", "a.txt")
+
+		disk.set(local, "file")
+
+		const ids = started(await service.startUpload({ paths: [local], parent: PARENT, origin: "page" }))
+
+		host([{ k: "settled", id: ids[0] ?? "", outcome: "done" }])
+
+		expect(log.info).toHaveBeenCalledWith(`transfers: 1 upload started into directory ${PARENT_UUID}`)
+		expect(log.info).toHaveBeenCalledWith(`transfers: ${ids[0] ?? ""} done ${local}`)
 	})
 
 	it("more picked paths than one host call takes go in calls of TRANSFER_ITEMS_MAX specs", async () => {

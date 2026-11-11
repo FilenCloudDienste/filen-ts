@@ -143,7 +143,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 interface Row {
 	transfer: DesktopTransfer
 	userId: string
-	// Download target (the host's savedPath once settled); null for uploads.
+	// Download target (the host's savedPath once settled), an upload's local source; null for none. Logged at settle.
 	path: string | null
 	// The host generation that acked the start; null until then.
 	generation: number | null
@@ -309,6 +309,14 @@ export function createTransfersService(deps: TransfersServiceDeps): TransfersSer
 
 		forget(row)
 
+		const line = `transfers: ${id} ${outcome}${error === undefined ? "" : `: ${error.code}`}${target === null ? "" : ` ${target}`}`
+
+		if (outcome === "error") {
+			log.warn(line)
+		} else {
+			log.info(line)
+		}
+
 		if (row.transfer.revealable && target !== null && (outcome === "done" || outcome === "completedWithErrors")) {
 			finished.set(id, target)
 
@@ -472,8 +480,14 @@ export function createTransfersService(deps: TransfersServiceDeps): TransfersSer
 
 	// Records the rows, journals their staging, shows them, then hands them to the host in one call (more only past the
 	// protocol's size). All or nothing: a failed call ends its rows and the later ones here and cancels the rows earlier
-	// calls started (the host settles those). `epoch`: the sign-out count when the action began.
-	async function begin(userId: string, planned: readonly PlannedRow[], epoch: number): Promise<DesktopTransferResult<string[]>> {
+	// calls started (the host settles those). `epoch`: the sign-out count when the action began; `into`: where they go,
+	// for the log.
+	async function begin(
+		userId: string,
+		planned: readonly PlannedRow[],
+		epoch: number,
+		into: string
+	): Promise<DesktopTransferResult<string[]>> {
 		if (epoch !== signOuts) {
 			release(planned)
 
@@ -566,6 +580,10 @@ export function createTransfersService(deps: TransfersServiceDeps): TransfersSer
 
 			return { ok: false, error: failure }
 		}
+
+		const direction = planned[0]?.row.transfer.direction ?? "download"
+
+		log.info(`transfers: ${String(planned.length)} ${direction}${planned.length === 1 ? "" : "s"} started into ${into}`)
 
 		return { ok: true, value: planned.map(item => item.row.transfer.id) }
 	}
@@ -717,7 +735,7 @@ export function createTransfersService(deps: TransfersServiceDeps): TransfersSer
 					size: directory ? 0 : stat.size,
 					revealable: false
 				},
-				{ path: null }
+				{ path: local }
 			)
 			const id = row.transfer.id
 
@@ -734,7 +752,7 @@ export function createTransfersService(deps: TransfersServiceDeps): TransfersSer
 			return { ok: true, value: { status: "started", ids: [], skipped } }
 		}
 
-		const result = await begin(user.userId, planned, epoch)
+		const result = await begin(user.userId, planned, epoch, `directory ${request.parent.uuid}`)
 
 		return result.ok ? { ok: true, value: { status: "started", ids: result.value, skipped } } : result
 	}
@@ -786,7 +804,8 @@ export function createTransfersService(deps: TransfersServiceDeps): TransfersSer
 				throw error
 			}
 
-			const result = await begin(user.userId, planned, epoch)
+			const into = destination.kind === "directory" ? destination.path : path.dirname(destination.path)
+			const result = await begin(user.userId, planned, epoch, into)
 
 			return result.ok ? { ok: true, value: { status: "started", ids: result.value } } : result
 		},
@@ -859,7 +878,7 @@ export function createTransfersService(deps: TransfersServiceDeps): TransfersSer
 				return { ok: true, value: { status: "started", ids: [] } }
 			}
 
-			const result = await begin(listing.userId, planned, signOuts)
+			const result = await begin(listing.userId, planned, signOuts, path.dirname(request.entries[0]?.path ?? ""))
 
 			return result.ok ? { ok: true, value: { status: "started", ids: result.value } } : result
 		},

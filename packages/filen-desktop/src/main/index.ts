@@ -94,6 +94,7 @@ import { isPermissionAllowed } from "./permissions.ts"
 import { DEFAULT_PREFS, loadPrefs, prefsPatchSchema, type PrefsStore } from "./prefs.ts"
 import { type HostProxy, PROXY_RESOLVE_WAIT_MS, resolveHostProxy } from "./proxy.ts"
 import { registerAppProtocol, registerDevProxy } from "./serve.ts"
+import { shouldConfirmQuit } from "./quitConfirm.ts"
 import { redact } from "./redact.ts"
 import { registerSessionRecoveryIpc, sessionDiscarder, type VaultDependent } from "./sessionRecovery.ts"
 import { registerBrowserCacheIpc, sessionBrowserCache } from "./browserCache.ts"
@@ -1081,22 +1082,23 @@ function hideWindow(window: BrowserWindow): void {
 	}
 }
 
-// The page's beforeunload asks to stay only while lib/unloadGuard.ts holds something (transfers, unsaved changes).
-function confirmUnload(window: BrowserWindow, action: string): boolean {
-	if (!window.isVisible()) {
+// The page's beforeunload asks to stay only while lib/unloadGuard.ts holds something (transfers, unsaved changes);
+// main asks the same before quitting while native transfers run (no window when the idle one was destroyed).
+function confirmUnload(window: BrowserWindow | null, action: string): boolean {
+	if (window !== null && !window.isVisible()) {
 		window.show()
 	}
 
-	const choice = dialog.showMessageBoxSync(window, {
-		type: "warning",
+	const options = {
+		type: "warning" as const,
 		buttons: [action, shellText("shellCancel")],
 		defaultId: 1,
 		cancelId: 1,
 		message: shellText("shellBusyTitle"),
 		detail: shellText("shellBusyDetail")
-	})
+	}
 
-	return choice === 0
+	return (window === null ? dialog.showMessageBoxSync(options) : dialog.showMessageBoxSync(window, options)) === 0
 }
 
 let badgeCount = 0
@@ -1607,7 +1609,20 @@ if (!instanceLock.held) {
 			showWindow()
 		}
 	})
-	app.on("before-quit", () => {
+	// Native transfers hold no page unload guard: main asks itself. Quit never waits for them; will-quit stops the host,
+	// which aborts them.
+	app.on("before-quit", event => {
+		if (shouldConfirmQuit({ unloadHolds, nativeTransfers: transfersService.active(), installingUpdate, confirmed: quitting })) {
+			if (!confirmUnload(mainWindow, shellText("shellBusyQuit"))) {
+				event.preventDefault()
+				info("quit: canceled while native transfers run")
+
+				return
+			}
+
+			info("quit: stopping native transfers")
+		}
+
 		if (!quitting) {
 			info("quit: closing windows")
 		}
@@ -1885,7 +1900,7 @@ if (!instanceLock.held) {
 
 		// Asked here, before the installer starts (Windows and Linux launch it before quitting, so the page's own
 		// unload confirm would come too late). A cancel installs nothing; the update still installs on the next quit.
-		if (unloadHolds > 0 && !confirmUnload(window, shellText("shellBusyRestart"))) {
+		if ((unloadHolds > 0 || transfersService.active() > 0) && !confirmUnload(window, shellText("shellBusyRestart"))) {
 			return
 		}
 
