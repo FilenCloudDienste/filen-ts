@@ -1,4 +1,4 @@
-// "settings" namespace — the desktop-only settings (app lock timeout, notification toggles). Spread into settings.ts; same catalog rules (flat, camelCase, keys unique
+// "settings" namespace — the desktop-only settings (app lock timeout, notification toggles, download directory). Spread into settings.ts; same catalog rules (flat, camelCase, keys unique
 // across the namespace's files, no literal '.' or ':').
 export const settingsDesktopPrefs = {
 	// ── Notifications ─────────────────────────────────────────────────────
@@ -17,6 +17,19 @@ export const settingsDesktopPrefs = {
 	/** Desktop settings — toggle: notifications play the operating system's notification sound */
 	settingsDesktopNotificationSound: "Notification sound",
 	settingsDesktopNotificationSoundDescription: "Play your system's notification sound with each notification.",
+
+	// ── Downloads ─────────────────────────────────────────────────────────
+	/** Desktop settings — group title: where downloads are saved */
+	settingsDesktopDownloadsTitle: "Downloads",
+	/** Desktop settings — row label; its value is a directory path or "Ask every time" */
+	settingsDesktopDownloadLocation: "Save downloads to",
+	settingsDesktopDownloadLocationDescription: "Where downloaded files and directories are saved.",
+	/** Desktop settings — the download location's value when none is set, and the button that clears a set one */
+	settingsDesktopDownloadAsk: "Ask every time",
+	/** Desktop settings — button: opens a directory picker for the download location */
+	settingsDesktopDownloadChange: "Change…",
+	/** Toast: the directory picker for the download location failed */
+	settingsDesktopDownloadChooseFailed: "Couldn't change the download directory",
 
 	// ── App lock: lock after ──────────────────────────────────────────────
 	/** Desktop settings, App lock group — select: how long without use before Filen locks itself */

@@ -8,6 +8,7 @@ import { PreferenceToggleRow } from "@/features/settings/components/settingRows"
 import { SettingsGroup, SettingsPage, SettingsRow } from "@/features/settings/components/settingsLayout"
 import { loadDesktopPrefs, setDesktopPref, useDesktopPrefs } from "@/features/desktop/lib/prefs"
 import { AppLockSettings } from "@/features/desktop/components/appLockSettings"
+import { DownloadDirectorySettings } from "@/features/desktop/components/downloadDirectorySettings"
 import { formatLogEntries } from "@/features/settings/lib/logs"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
@@ -112,6 +113,7 @@ function DesktopPage() {
 				{toggleRow("notificationSound", t("settingsDesktopNotificationSound"), t("settingsDesktopNotificationSoundDescription"))}
 			</SettingsGroup>
 			<AppLockSettings />
+			<DownloadDirectorySettings />
 			<SettingsGroup title={t("desktop:settingsLogsTitle")}>
 				<SettingsRow
 					label={t("desktop:settingsLogsExport")}
