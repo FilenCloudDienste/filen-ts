@@ -70,7 +70,7 @@ export function directoryRootOf<F extends { readonly webkitRelativePath: string 
 }
 
 // Main takes TRANSFER_ITEMS_MAX paths per call; more go in calls of that size, one after another, all or nothing as one
-// call is: a failed call cancels what the earlier calls started. `skipped` indexes into all of `paths`.
+// call is: a failed or rejected call cancels what the earlier calls started. `skipped` indexes into all of `paths`.
 export async function uploadInCalls(
 	paths: readonly string[],
 	call: (paths: string[]) => Promise<DesktopTransferResult<DesktopUploadStart>>,
@@ -78,14 +78,25 @@ export async function uploadInCalls(
 ): Promise<DesktopTransferResult<DesktopUploadStart>> {
 	const ids: string[] = []
 	const skipped: number[] = []
+	const cancelStarted = (): void => {
+		for (let first = 0; first < ids.length; first += TRANSFER_ITEMS_MAX) {
+			cancel(ids.slice(first, first + TRANSFER_ITEMS_MAX))
+		}
+	}
 
 	for (let start = 0; start < paths.length; start += TRANSFER_ITEMS_MAX) {
-		const result = await call(paths.slice(start, start + TRANSFER_ITEMS_MAX))
+		let result: DesktopTransferResult<DesktopUploadStart>
+
+		try {
+			result = await call(paths.slice(start, start + TRANSFER_ITEMS_MAX))
+		} catch (error) {
+			cancelStarted()
+
+			throw error
+		}
 
 		if (!result.ok || result.value.status !== "started") {
-			for (let first = 0; first < ids.length; first += TRANSFER_ITEMS_MAX) {
-				cancel(ids.slice(first, first + TRANSFER_ITEMS_MAX))
-			}
+			cancelStarted()
 
 			return result
 		}

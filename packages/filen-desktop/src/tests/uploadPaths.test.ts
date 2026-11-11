@@ -101,4 +101,17 @@ describe("uploadInCalls", () => {
 		expect(call).toHaveBeenCalledTimes(2)
 		expect(cancel).toHaveBeenCalledWith(["a", "b"])
 	})
+
+	it("a rejected call cancels what the earlier calls started and rethrows", async () => {
+		const failure = new Error("invoke failed")
+		const call = vi
+			.fn()
+			.mockResolvedValueOnce(started(["a", "b"]))
+			.mockRejectedValueOnce(failure)
+		const cancel = vi.fn()
+
+		await expect(uploadInCalls(paths, call, cancel)).rejects.toBe(failure)
+		expect(call).toHaveBeenCalledTimes(2)
+		expect(cancel).toHaveBeenCalledWith(["a", "b"])
+	})
 })
