@@ -95,7 +95,7 @@ describe.skipIf(!built)("filen-mac.node", () => {
 			"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
 			"base64"
 		)
-		// A handle the addon must never dereference: every call below fails before it reaches the view.
+		// A handle the addon must never dereference: it is no window's content view, so every call fails before using it.
 		const handle = Buffer.alloc(8)
 
 		handle.writeBigUInt64LE(1n)
@@ -140,8 +140,8 @@ describe.skipIf(!built)("filen-mac.node", () => {
 			expect(() => addon().begin(options({ onWrite: null }))).toThrow(invalid)
 		})
 
-		it("begin without the primary button held throws buttonReleased before it touches the view", () => {
-			expect(() => addon().begin(options())).toThrow(expect.objectContaining({ code: "buttonReleased" }))
+		it("begin with a handle that is no open window's content view throws invalidArgument without touching it", () => {
+			expect(() => addon().begin(options())).toThrow(expect.objectContaining({ code: "invalidArgument" }))
 		})
 
 		it("fulfil, progress and progressAt of an unknown ticket are ignored", () => {

@@ -41,13 +41,16 @@ private enum Argument {
 
 private final class Arguments {
 	let values: [Argument]
+	// Runs instead when the call never reaches JS (the environment shuts down).
+	let undelivered: (@Sendable () -> Void)?
 
-	init(_ values: [Argument]) {
+	init(_ values: [Argument], undelivered: (@Sendable () -> Void)?) {
 		self.values = values
+		self.undelivered = undelivered
 	}
 }
 
-// Runs on the JS thread; env is nil while the function is torn down, when only the arguments are freed.
+// Runs on the JS thread; env is nil while the function is torn down, when the call is undelivered.
 private func invoke(env: napi_env?, function: napi_value?, _: UnsafeMutableRawPointer?, data: UnsafeMutableRawPointer?) {
 	guard let data else {
 		return
@@ -56,6 +59,8 @@ private func invoke(env: napi_env?, function: napi_value?, _: UnsafeMutableRawPo
 	let arguments = Unmanaged<Arguments>.fromOpaque(data).takeRetainedValue()
 
 	guard let env, let function else {
+		arguments.undelivered?()
+
 		return
 	}
 
@@ -83,7 +88,7 @@ private func finalized(env _: napi_env?, data: UnsafeMutableRawPointer?, hint _:
 		return
 	}
 
-	Unmanaged<Callback>.fromOpaque(data).takeRetainedValue().markFinalized()
+	Unmanaged<Callback>.fromOpaque(data).takeRetainedValue().markFinalized()?()
 }
 
 // One JS function callable from any thread. It does not keep Node's event loop alive.
@@ -91,6 +96,7 @@ private final class Callback: @unchecked Sendable {
 	private var tsfn: napi_threadsafe_function?
 	private let lock = NSLock()
 	private var usable = true
+	private var onFinalize: (@Sendable () -> Void)?
 
 	// nil when Node-API refused the function.
 	init?(_ env: napi_env, _ function: napi_value?, name: String) {
@@ -112,16 +118,30 @@ private final class Callback: @unchecked Sendable {
 		napi_unref_threadsafe_function(env, tsfn)
 	}
 
-	fileprivate func markFinalized() {
+	// Returns the hook to run once the lock is let go.
+	fileprivate func markFinalized() -> (@Sendable () -> Void)? {
 		lock.lock()
+		defer { lock.unlock() }
+
+		let hook = onFinalize
+
 		usable = false
 		tsfn = nil
+		onFinalize = nil
+
+		return hook
+	}
+
+	// Runs once the function is finalized: after release, or when the environment shuts down.
+	func whenFinalized(_ hook: @escaping @Sendable () -> Void) {
+		lock.lock()
+		onFinalize = hook
 		lock.unlock()
 	}
 
 	// Anything but napi_ok means JS will not hear of it.
 	@discardableResult
-	func call(_ values: [Argument]) -> napi_status {
+	func call(_ values: [Argument], undelivered: (@Sendable () -> Void)? = nil) -> napi_status {
 		lock.lock()
 		defer { lock.unlock() }
 
@@ -129,7 +149,7 @@ private final class Callback: @unchecked Sendable {
 			return napi_closing
 		}
 
-		let arguments = Unmanaged.passRetained(Arguments(values))
+		let arguments = Unmanaged.passRetained(Arguments(values, undelivered: undelivered))
 		let status = napi_call_threadsafe_function(tsfn, arguments.toOpaque(), napi_tsfn_nonblocking)
 
 		if status != napi_ok {
@@ -176,6 +196,20 @@ private final class DragSession: NSObject, NSFilePromiseProviderDelegate, NSDrag
 		self.onEnded = onEnded
 		settled = Array(repeating: false, count: items)
 		unsettled = items
+		super.init()
+		// Without JS no write is fulfilled: Finder must not wait on them.
+		onWrite.whenFinalized { [weak self] in
+			if let self {
+				tickets.failAll(of: self)
+			}
+		}
+	}
+
+	var hasEnded: Bool {
+		lock.lock()
+		defer { lock.unlock() }
+
+		return ended
 	}
 
 	deinit {
@@ -238,7 +272,9 @@ private final class DragSession: NSObject, NSFilePromiseProviderDelegate, NSDrag
 	}
 
 	func write(_ ticket: Int, _ index: Int, _ path: String) -> napi_status {
-		onWrite.call([.number(Double(ticket)), .number(Double(index)), .string(path)])
+		onWrite.call([.number(Double(ticket)), .number(Double(index)), .string(path)]) {
+			tickets.fulfil(ticket, error: "unavailable")
+		}
 	}
 
 	func cancelled(_ ticket: Int) {
@@ -281,7 +317,10 @@ private final class DragSession: NSObject, NSFilePromiseProviderDelegate, NSDrag
 
 	@MainActor
 	func draggingSession(_: NSDraggingSession, endedAt _: NSPoint, operation: NSDragOperation) {
-		activeDrag = nil
+		if activeDrag?.session === self {
+			activeDrag = nil
+		}
+
 		onEnded.call([.string(operation.contains(.copy) ? "copy" : "none")])
 		lock.lock()
 		ended = true
@@ -311,7 +350,13 @@ private final class PromiseProvider: NSFilePromiseProvider, @unchecked Sendable 
 	}
 }
 
-@MainActor private var activeDrag: DragSession?
+// The drag AppKit tracks; stale once AppKit let go of its dragging session without an end.
+private struct ActiveDrag {
+	let session: DragSession
+	weak var dragging: NSDraggingSession?
+}
+
+@MainActor private var activeDrag: ActiveDrag?
 
 // MARK: Tickets
 
@@ -390,6 +435,11 @@ private final class Tickets: @unchecked Sendable {
 
 		let old = entry.progress
 
+		// Finder cancelled it: a new one would show the bar again, and its cancel is already reported.
+		guard !old.isCancelled else {
+			return
+		}
+
 		old.unpublish()
 		entry.progress = publishedProgress(url, total: old.totalUnitCount, completed: old.completedUnitCount, onCancel: entry.onCancel)
 	}
@@ -407,6 +457,18 @@ private final class Tickets: @unchecked Sendable {
 		}
 
 		progress.completedUnitCount = completed
+	}
+
+	func failAll(of session: DragSession) {
+		lock.lock()
+
+		let owned = open.filter { $0.value.session === session }.map(\.key)
+
+		lock.unlock()
+
+		for ticket in owned {
+			fulfil(ticket, error: "unavailable")
+		}
 	}
 
 	// The first call per ticket completes Finder's write; any later one is ignored.
@@ -551,20 +613,23 @@ private struct DragFailure: Sendable {
 	size: NSSize,
 	callbacks: (onWrite: napi_value?, onCancel: napi_value?, onEnded: napi_value?)
 ) -> DragFailure? {
-	guard activeDrag == nil else {
-		return DragFailure(code: "busy", message: "a drag is running")
+	if let active = activeDrag {
+		guard active.dragging == nil else {
+			return DragFailure(code: "busy", message: "a drag is running")
+		}
+
+		activeDrag = nil
+	}
+
+	// Only an open window's content view is used: a handle of a closed window would point at freed memory.
+	guard let view = contentView(handle) else {
+		return DragFailure(code: "invalidArgument", message: "view is no open window's content view")
 	}
 
 	// The page's drag ended before the call: AppKit would start a drag that no button holds.
 	guard NSEvent.pressedMouseButtons & 1 != 0 else {
 		return DragFailure(code: "buttonReleased", message: "the primary mouse button is not held")
 	}
-
-	guard let pointer = UnsafeMutableRawPointer(bitPattern: handle) else {
-		return DragFailure(code: "internalFailure", message: "the view handle is zero")
-	}
-
-	let view = Unmanaged<NSView>.fromOpaque(pointer).takeUnretainedValue()
 
 	guard let window = view.window else {
 		return DragFailure(code: "internalFailure", message: "the view has no window")
@@ -589,11 +654,17 @@ private struct DragFailure: Sendable {
 		return DragFailure(code: "internalFailure", message: "could not create the drag event")
 	}
 
-	guard
-		let onWrite = Callback(env, callbacks.onWrite, name: "filen-mac-write"),
-		let onCancel = Callback(env, callbacks.onCancel, name: "filen-mac-cancel"),
-		let onEnded = Callback(env, callbacks.onEnded, name: "filen-mac-ended")
-	else {
+	let created = [
+		Callback(env, callbacks.onWrite, name: "filen-mac-write"),
+		Callback(env, callbacks.onCancel, name: "filen-mac-cancel"),
+		Callback(env, callbacks.onEnded, name: "filen-mac-ended")
+	]
+
+	guard let onWrite = created[0], let onCancel = created[1], let onEnded = created[2] else {
+		for callback in created {
+			callback?.release()
+		}
+
 		return DragFailure(code: "internalFailure", message: "could not create a threadsafe function")
 	}
 
@@ -612,14 +683,28 @@ private struct DragFailure: Sendable {
 		return draggingItem
 	}
 
-	activeDrag = session
+	// AppKit declares a session always; one it does not give is a drag that never started.
+	let dragging: NSDraggingSession? = view.beginDraggingSession(with: draggingItems, event: event, source: session)
 
-	let dragging = view.beginDraggingSession(with: draggingItems, event: event, source: session)
+	guard let dragging else {
+		return DragFailure(code: "internalFailure", message: "AppKit started no drag")
+	}
+
+	if !session.hasEnded {
+		activeDrag = ActiveDrag(session: session, dragging: dragging)
+	}
 
 	dragging.animatesToStartingPositionsOnCancelOrFail = true
 	dragging.draggingFormation = .stack
 
 	return nil
+}
+
+// The content view of an open window whose pointer is `handle`, compared without dereferencing it.
+@MainActor private func contentView(_ handle: UInt) -> NSView? {
+	let app: NSApplication? = NSApp
+
+	return app?.windows.lazy.compactMap(\.contentView).first { UInt(bitPattern: Unmanaged.passUnretained($0).toOpaque()) == handle }
 }
 
 // begin({ view, items, image, onWrite, onCancel, onEnded }): starts the drag and returns at once.
