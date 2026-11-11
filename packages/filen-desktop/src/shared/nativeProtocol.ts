@@ -570,7 +570,7 @@ const transferFilesSchema = type({ total: countSchema, done: countSchema, failed
 export const absolutePathSchema = localPathSchema.narrow(value => path.isAbsolute(value))
 
 // A stringifyEnvelope of a wasm-shaped SDK value (a File or Dir is under 2 KiB). It carries file keys: never logged.
-const SDK_VALUE_MAX_LENGTH = 8192
+export const SDK_VALUE_MAX_LENGTH = 8192
 
 const sdkWireSchema = type("string > 0").atMostLength(SDK_VALUE_MAX_LENGTH)
 
@@ -752,7 +752,7 @@ const transferEventSchema = type({
 export type NativeTransferEvent = typeof transferEventSchema.infer
 
 // One host message per feed round.
-const TRANSFER_EVENTS_MAX = 20_000
+export const TRANSFER_EVENTS_MAX = 20_000
 
 export type NativeOpArgs<K extends NativeOp> = (typeof NATIVE_OPS)[K]["args"]["infer"]
 

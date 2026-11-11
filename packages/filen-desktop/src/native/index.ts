@@ -1,4 +1,5 @@
 import { type } from "arktype"
+import { link, mkdir, open, rename, stat, unlink } from "node:fs/promises"
 import {
 	type FromNative,
 	isMountsOp,
@@ -6,13 +7,15 @@ import {
 	type MountsOp,
 	type NativeError,
 	type NativeFatalReason,
+	type NativeCall,
 	type NativeInit,
 	type NativeMountsError,
 	type NativeOpArgs,
 	type NativeOpResult,
 	type SyncOp,
 	type ToNative,
-	toNativeSchema
+	toNativeSchema,
+	type TransfersOp
 } from "../shared/nativeProtocol.ts"
 import type { JsClient } from "@filen/sdk-rs"
 import { loadAddon, type NativeSdk, type SyncEngine } from "./addon.ts"
@@ -26,7 +29,17 @@ import { createMountsHost, type MountsHost, type MountsOpHandlers } from "./moun
 import { createHostEngine, type HostEngine, type OpHandlers, toNativePair } from "./ops.ts"
 import { createPlanRegistry } from "./plans.ts"
 import { createRuntimeFeed, type RuntimeFeed } from "./reducer.ts"
+import { noQuarantine } from "./quarantine.ts"
 import { closeWithin } from "./shutdown.ts"
+import { classifyTransfer } from "./transferErrors.ts"
+import {
+	createTransferRegistry,
+	transferBindings,
+	type TransferOpHandlers,
+	transferOps,
+	type TransferRegistry,
+	type TransferSdk
+} from "./transfers.ts"
 
 // The native host: a utility process that owns the account's one SDK client and sync engine and runs every engine call
 // main asks for. Everything crossing to main is validated there; what comes in is validated here.
@@ -54,6 +67,18 @@ function runMounts<K extends MountsOp>(ops: MountsOpHandlers, op: K, args: Nativ
 	return ops[op](args)
 }
 
+function runTransfers<K extends TransfersOp>(ops: TransferOpHandlers, op: K, args: NativeOpArgs<K>): Promise<NativeOpResult<K>> {
+	return ops[op](args)
+}
+
+type TransfersCall = Extract<NativeCall, { op: TransfersOp }>
+
+function isTransfersCall(message: NativeCall): message is TransfersCall {
+	return isTransfersOp(message.op)
+}
+
+const commitFs = { link, mkdir, open, rename, stat, unlink }
+
 // The id of a call that failed validation, so it still gets its one reply.
 const callIdSchema = type({ t: "'call'", id: "0 <= number.integer <= 9007199254740991" })
 
@@ -67,6 +92,8 @@ export function startHost(port: HostPort, exit: (code: number) => void): void {
 	// The engine open in flight, to the engine it opens: a shutdown waits for it, so an engine that opens late is closed.
 	let opening: Promise<SyncEngine | null> | null = null
 	let mounts: MountsHost | null = null
+	// Set with the client, before the engine opens: transfers need no engine and start no watches.
+	let transfers: { registry: TransferRegistry; ops: TransferOpHandlers; sdk: TransferSdk } | null = null
 	let subscribed = false
 	let mountsSubscribed = false
 	let revoked = false
@@ -147,6 +174,25 @@ export function startHost(port: HostPort, exit: (code: number) => void): void {
 		}
 
 		client = sessionClient
+
+		const bindings = transferBindings(addon, sessionClient)
+
+		if (bindings === null) {
+			log.warn("the addon has no transfer exports: transfers are unavailable")
+		} else {
+			const registry = createTransferRegistry({
+				client: bindings.client,
+				sdk: bindings.sdk,
+				fs: commitFs,
+				quarantine: noQuarantine,
+				platform: process.platform,
+				post,
+				onAuthFailed: authRevoked,
+				log
+			})
+
+			transfers = { registry, ops: transferOps(registry), sdk: bindings.sdk }
+		}
 
 		mounts = createMountsHost({
 			sdk: addon,
@@ -265,6 +311,13 @@ export function startHost(port: HostPort, exit: (code: number) => void): void {
 			post({ t: "reply", id: message.id, ok: false, error })
 		}
 
+		// Transfers run as soon as the client exists, whether or not the engine opened.
+		if (isTransfersCall(message)) {
+			await callTransfers(message)
+
+			return
+		}
+
 		if (phase !== "ready" || host === null || mounts === null || sdk === null) {
 			reply({ code: "hostUnavailable" })
 
@@ -273,13 +326,6 @@ export function startHost(port: HostPort, exit: (code: number) => void): void {
 
 		if (revoked) {
 			reply({ code: "unauthenticated" })
-
-			return
-		}
-
-		// The transfer registry is not here yet: no transfer runs.
-		if (isTransfersOp(message.op)) {
-			reply({ code: "hostUnavailable" })
 
 			return
 		}
@@ -315,6 +361,34 @@ export function startHost(port: HostPort, exit: (code: number) => void): void {
 		}
 	}
 
+	async function callTransfers(message: TransfersCall): Promise<void> {
+		const id = message.id
+
+		if (transfers === null || stopping()) {
+			post({ t: "reply", id, ok: false, error: { code: "hostUnavailable" } })
+
+			return
+		}
+
+		if (revoked) {
+			post({ t: "reply", id, ok: false, error: { code: "unauthenticated" } })
+
+			return
+		}
+
+		try {
+			post({ t: "reply", id, ok: true, value: await runTransfers(transfers.ops, message.op, message.args) })
+		} catch (error) {
+			const failure = classifyTransfer(transfers.sdk, error, process.platform)
+
+			if (failure.code === "unauthenticated") {
+				authRevoked()
+			}
+
+			post({ t: "reply", id, ok: false, error: failure })
+		}
+	}
+
 	async function shutdown(): Promise<void> {
 		if (phase === "stopping") {
 			return
@@ -323,6 +397,7 @@ export function startHost(port: HostPort, exit: (code: number) => void): void {
 		phase = "stopping"
 		console.log("shutting down")
 		abort.abort()
+		transfers?.registry.abortAll()
 		feed?.stop()
 		plans.releaseAll()
 

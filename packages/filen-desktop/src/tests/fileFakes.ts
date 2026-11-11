@@ -65,3 +65,102 @@ export function linuxCipher(key: "keyring" | "fallback"): VaultCipher {
 		}
 	}
 }
+
+function fsError(code: string, at: string): Error {
+	return Object.assign(new Error(`${code}: ${at}`), { code })
+}
+
+type MemoryFsOp = "rename" | "link" | "unlink" | "mkdir" | "open" | "stat"
+
+// A CommitFs over in-memory paths (exact strings, no normalization). `fail` can throw for one op and path before the
+// op runs; `sizes` answers stat.
+export function memoryFs(files: readonly string[] = [], dirs: readonly string[] = []) {
+	const state = {
+		files: new Set(files),
+		dirs: new Set(dirs),
+		sizes: new Map<string, number>(),
+		fail: (_op: MemoryFsOp, _path: string): Error | undefined => undefined
+	}
+	// Runs an op as the real promise API does: a throw becomes a rejection.
+	const settle = <T>(run: () => T): Promise<T> =>
+		new Promise<T>(resolve => {
+			resolve(run())
+		})
+	const taken = (at: string) => state.files.has(at) || state.dirs.has(at)
+	const check = (op: MemoryFsOp, at: string) => {
+		const error = state.fail(op, at)
+
+		if (error !== undefined) {
+			throw error
+		}
+	}
+	const fs = {
+		rename: (from: string, to: string) =>
+			settle(() => {
+				check("rename", to)
+
+				if (!state.files.has(from)) {
+					throw fsError("ENOENT", from)
+				}
+
+				state.files.delete(from)
+				state.files.add(to)
+			}),
+		link: (existing: string, target: string) =>
+			settle(() => {
+				check("link", target)
+
+				if (!state.files.has(existing)) {
+					throw fsError("ENOENT", existing)
+				}
+
+				if (taken(target)) {
+					throw fsError("EEXIST", target)
+				}
+
+				state.files.add(target)
+			}),
+		unlink: (at: string) =>
+			settle(() => {
+				check("unlink", at)
+
+				if (!state.files.delete(at)) {
+					throw fsError("ENOENT", at)
+				}
+			}),
+		mkdir: (at: string) =>
+			settle(() => {
+				check("mkdir", at)
+
+				if (taken(at)) {
+					throw fsError("EEXIST", at)
+				}
+
+				state.dirs.add(at)
+			}),
+		open: (at: string) =>
+			settle(() => {
+				check("open", at)
+
+				if (taken(at)) {
+					throw fsError("EEXIST", at)
+				}
+
+				state.files.add(at)
+
+				return { close: () => Promise.resolve() }
+			}),
+		stat: (at: string) =>
+			settle(() => {
+				check("stat", at)
+
+				if (!taken(at)) {
+					throw fsError("ENOENT", at)
+				}
+
+				return { size: state.sizes.get(at) ?? 0 }
+			})
+	}
+
+	return { fs, state, error: fsError }
+}

@@ -15,6 +15,7 @@ import type {
 	SyncRefusal
 } from "@filen/sdk-rs"
 import type { NativeSdk, SyncEngine } from "../native/addon.ts"
+import type { ManagedFuture, TransferClient, TransferSdk } from "../native/transfers.ts"
 
 // The addon's values the host reads, with the napi enums' numbers.
 class FakeInner {
@@ -67,7 +68,9 @@ export const fakeSdk = {
 		Reqwest: 2,
 		Io: 6,
 		InvalidState: 8,
+		Cancelled: 13,
 		FolderNotFound: 20,
+		MaxStorageReached: 22,
 		StaleState: 28,
 		TlsVerification: 38
 	},
@@ -314,4 +317,146 @@ export function fakeEngine(pairs: SyncPairInfo[] = [pairInfo()]) {
 	}
 
 	return { engine, handle: engine as unknown as SyncEngine, state }
+}
+
+export class FakePauseSignal {
+	#paused = false
+
+	isPaused(): boolean {
+		return this.#paused
+	}
+
+	pause(): void {
+		this.#paused = true
+	}
+
+	resume(): void {
+		this.#paused = false
+	}
+}
+
+export class FakeManagedAbortSignal {
+	#aborted = false
+
+	aborted(): boolean {
+		return this.#aborted
+	}
+
+	markAborted(): void {
+		this.#aborted = true
+	}
+}
+
+export class FakeManagedAbortController {
+	readonly #signal = new FakeManagedAbortSignal()
+
+	abort(): void {
+		this.#signal.markAborted()
+	}
+
+	signal(): FakeManagedAbortSignal {
+		return this.#signal
+	}
+}
+
+export const fakeTransferSdk = {
+	FilenSdkError: fakeSdk.FilenSdkError,
+	ErrorKind: fakeSdk.ErrorKind,
+	PauseSignal: FakePauseSignal,
+	ManagedAbortController: FakeManagedAbortController
+} as unknown as TransferSdk
+
+// One call the fake client received; the test settles it.
+export interface FakeTransferCall {
+	method: keyof TransferClient
+	args: unknown[]
+	resolve(value?: unknown): void
+	reject(error: unknown): void
+}
+
+// The napi transfer calls: each records its arguments (callbacks included) and waits for the test to settle it.
+export class FakeTransferClient implements TransferClient {
+	readonly calls: FakeTransferCall[] = []
+	rootUuid = REMOTE_ROOT
+	readonly root = vi.fn(() => ({ uuid: this.rootUuid }))
+
+	#call<T>(method: keyof TransferClient, args: unknown[]): Promise<T> {
+		return new Promise<T>((resolve, reject) => {
+			this.calls.push({ method, args, resolve: value => resolve(value as T), reject })
+		})
+	}
+
+	createDir(parent: unknown, name: string): Promise<unknown> {
+		return this.#call("createDir", [parent, name])
+	}
+
+	uploadFile(params: unknown, filePath: string, callback: unknown, managedFuture: ManagedFuture): Promise<unknown> {
+		return this.#call("uploadFile", [params, filePath, callback, managedFuture])
+	}
+
+	downloadFileToPath(file: unknown, filePath: string, callback: unknown, managedFuture: ManagedFuture): Promise<void> {
+		return this.#call("downloadFileToPath", [file, filePath, callback, managedFuture])
+	}
+
+	uploadDirRecursively(dirPath: string, callback: unknown, target: unknown, managedFuture: ManagedFuture): Promise<void> {
+		return this.#call("uploadDirRecursively", [dirPath, callback, target, managedFuture])
+	}
+
+	downloadDirRecursively(dirPath: string, callback: unknown, target: unknown, managedFuture: ManagedFuture): Promise<void> {
+		return this.#call("downloadDirRecursively", [dirPath, callback, target, managedFuture])
+	}
+
+	listDirRecursiveWithPaths(
+		dir: unknown,
+		progress: undefined,
+		errors: unknown
+	): Promise<{ dirs: { path: string; dir: unknown }[]; files: { path: string; file: unknown }[] }> {
+		return this.#call("listDirRecursiveWithPaths", [dir, progress, errors])
+	}
+
+	// The calls of one method, oldest first.
+	of(method: keyof TransferClient): FakeTransferCall[] {
+		return this.calls.filter(call => call.method === method)
+	}
+
+	last(method: keyof TransferClient): FakeTransferCall {
+		const call = this.of(method).at(-1)
+
+		if (call === undefined) {
+			throw new Error(`no ${method} call`)
+		}
+
+		return call
+	}
+}
+
+// Wasm-shaped items as the page holds them (sdk-rs.d.ts).
+export function wasmFile(uuid: string, size: bigint, name = "a.txt") {
+	return {
+		uuid,
+		stableUUID: "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d",
+		meta: {
+			type: "decoded",
+			data: { name, mime: "text/plain", created: 1n, modified: 2n, hash: "0".repeat(64), size, key: "dummy-key", version: 2 }
+		},
+		parent: REMOTE_ROOT,
+		size,
+		favorited: false,
+		region: "de-1",
+		bucket: "filen-1",
+		timestamp: 3n,
+		chunks: 1n,
+		canMakeThumbnail: false
+	}
+}
+
+export function wasmDir(uuid: string, name = "dir") {
+	return {
+		uuid,
+		parent: REMOTE_ROOT,
+		color: "default",
+		timestamp: 3n,
+		favorited: false,
+		meta: { type: "decoded", data: { name, created: 1n } }
+	}
 }
