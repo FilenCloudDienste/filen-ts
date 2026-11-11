@@ -568,3 +568,22 @@
 [data-spring-blink="on"] {
     background-color: color-mix(in oklab, var(--primary) 10%, transparent);
 }
+
+/* A drag of drive items (features/drive/lib/pointerDrag.ts): one cursor over the whole page — grabbing
+   for a move, copy for a copy, no-drop where nothing takes the drop — and no text selection while it
+   lasts. Classes on <body>, toggled only when the cursor changes. */
+body.pointer-drag,
+body.pointer-drag * {
+    cursor: grabbing !important;
+    user-select: none !important;
+}
+
+body.pointer-drag-copy,
+body.pointer-drag-copy * {
+    cursor: copy !important;
+}
+
+body.pointer-drag-none,
+body.pointer-drag-none * {
+    cursor: no-drop !important;
+}

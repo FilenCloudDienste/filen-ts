@@ -222,7 +222,10 @@ function DirectoryTreeNode({ child, path, depth, tree }: DirectoryTreeNodeProps)
 				data-tree-path={path.join("/")}
 				data-cut={cut ? "" : undefined}
 				style={{ paddingInlineStart: levelInset(depth) }}
-				{...dragSource}
+				ref={element => {
+					drop.attach(element)
+				}}
+				onPointerDown={dragSource.onPointerDown}
 				{...drop.handlers}
 				className={cn(
 					// Soft-chrome row: rounded tonal hover/active, no divider lines. app-region-no-drag keeps

@@ -1,6 +1,8 @@
 import type { Page } from "@playwright/test"
 import { expect } from "../fixtures"
+import { hitCenterOf } from "./geometry"
 
+// HTML5 drags (the audio playlist's track rows; drive items drag on pointer events, see pointerDrag below).
 // Drives the exact browser event sequence a native HTML5 drag produces: one shared DataTransfer
 // threaded through dragstart → dragenter → dragover → drop → dragend, dispatched on the real
 // row/target elements so React's own onDragStart/onDrop handlers (and the module-level payload they
@@ -100,4 +102,44 @@ export async function html5DragCopy(page: Page, source: DragEndpoint, target: Dr
 	expect(contract.draggable).toBe("true")
 	expect(contract.dropAllowed).toBe(true)
 	expect(contract.dropEffect).toBe("copy")
+}
+
+// Drive items drag on pointer events (features/drive/lib/pointerDrag.ts), so their drags are real mouse
+// drags: press on the source, move past the threshold onto the target, let go. The target must show the
+// drop highlight for the drop's mode before the release (a solid ring for a move, a dashed outline for a
+// copy) — the one sign it will take the drop, asserted so a target that stopped accepting fails here
+// rather than as a missing write later.
+async function pointerDrag(page: Page, source: DragEndpoint, target: DragEndpoint, copy: boolean): Promise<void> {
+	const from = await hitCenterOf(page.locator(source.selector).filter({ hasText: source.text }).first())
+	const targetElement = page.locator(target.selector).filter({ hasText: target.text }).first()
+	const to = await hitCenterOf(targetElement)
+	// The page's own copy modifier: Option on macOS, else Ctrl.
+	const mac = await page.evaluate(() => /mac/i.test(navigator.userAgent) && !/iphone|ipad|ipod/i.test(navigator.userAgent))
+	const modifier = mac ? "Alt" : "Control"
+
+	await page.mouse.move(from.x, from.y)
+	await page.mouse.down()
+	await page.mouse.move(to.x, to.y, { steps: 8 })
+
+	if (copy) {
+		await page.keyboard.down(modifier)
+	}
+
+	try {
+		await expect(targetElement).toHaveClass(copy ? /outline-dashed/ : /ring-primary\/60/)
+	} finally {
+		await page.mouse.up()
+
+		if (copy) {
+			await page.keyboard.up(modifier)
+		}
+	}
+}
+
+export async function pointerDragMove(page: Page, source: DragEndpoint, target: DragEndpoint): Promise<void> {
+	await pointerDrag(page, source, target, false)
+}
+
+export async function pointerDragCopy(page: Page, source: DragEndpoint, target: DragEndpoint): Promise<void> {
+	await pointerDrag(page, source, target, true)
 }

@@ -1151,6 +1151,8 @@ export function DirectoryListing({ variant, splat }: DirectoryListingProps) {
 							tabIndex={-1}
 							onKeyDown={handleKeyDown}
 							onPointerDown={marquee.onPointerDown}
+							// A drag of drive items resting near its edge scrolls the listing (pointerDrag.ts).
+							data-filen-drag-scroll=""
 							className="min-h-0 flex-1 overflow-y-auto"
 							style={effectiveViewMode === "grid" ? GRID_LISTBOX_STYLE : undefined}
 						>

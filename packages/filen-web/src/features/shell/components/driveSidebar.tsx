@@ -78,6 +78,9 @@ function CloudDriveRoot({ label, open, loading, onToggle }: { label: string; ope
 		<div
 			// The root's chain is empty — see directoryTreeMenu.tsx.
 			data-tree-path=""
+			ref={element => {
+				drop.attach(element)
+			}}
 			{...drop.handlers}
 			className={cn(
 				"group flex h-8 items-center gap-1 rounded-xl pr-1 transition-colors app-region-no-drag hover:bg-sidebar-accent/60 data-menu-open:bg-sidebar-accent/60",
@@ -189,7 +192,11 @@ export function DriveSidebar() {
 			<h2 className="shrink-0 truncate px-5.5 pt-4 pb-1.5 text-[15px] font-semibold">{t("driveMyDrive")}</h2>
 			{/* pt-1 keeps the first row's focus ring clear of the scroll area's clipping edge. A stable gutter:
 				    a scrollbar coming and going as levels open would reflow every row. */}
-			<div className="flex min-h-0 flex-1 [scrollbar-gutter:stable] flex-col overflow-y-auto px-3 pt-1 pb-3 app-region-pane">
+			<div
+				// A drag of drive items resting near its edge scrolls the tree (pointerDrag.ts).
+				data-filen-drag-scroll=""
+				className="flex min-h-0 flex-1 [scrollbar-gutter:stable] flex-col overflow-y-auto px-3 pt-1 pb-3 app-region-pane"
+			>
 				{/* A nested disclosure list, deliberately NOT role="tree": the ARIA tree pattern owes a
 					roving-tabindex/arrow-key focus model this sidebar does not implement, and claiming the
 					role without it sends a screen-reader user into an interaction mode whose items never take

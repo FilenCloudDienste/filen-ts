@@ -2,8 +2,7 @@ import { useRef, useState, type DragEvent, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { UploadIcon } from "lucide-react"
 import { cn } from "@filen/shared"
-import { uploadDroppedFiles } from "@/features/drive/lib/uploadDrop"
-import { isInternalDrag } from "@/features/drive/lib/dnd"
+import { isFileDrag, uploadDroppedFiles } from "@/features/drive/lib/uploadDrop"
 import { enterDragDepth, leaveDragDepth } from "@/features/drive/components/uploadDropzone.logic"
 import { useUploadDropTargetStore } from "@/features/drive/store/useUploadDropTargetStore"
 import { cachedDirectoryName } from "@/features/drive/queries/drive"
@@ -41,15 +40,15 @@ export function UploadDropzone({ parentUuid, disabled: disabledProp, children }:
 	const [overStrip, setOverStrip] = useState(false)
 	const stripRef = useRef<HTMLDivElement>(null)
 
-	// An INTERNAL move drag (a row/tile dragged within the drive — see dnd.ts) is never an upload: bow
-	// out entirely so no upload hint overlay shows and no drop starts an upload. The move drop targets
-	// (directory rows, tree, breadcrumb) claim it instead. Returning WITHOUT preventDefault also leaves
-	// the browser rejecting this zone as a drop target for the internal drag, so a stray internal drop
-	// on blank listing space is a harmless no-op rather than an upload.
+	// Only files dragged in from the operating system are an upload. Drive items drag on pointer events
+	// (pointerDrag.ts), never as HTML5 drags, and any other HTML5 drag (selected text, a link) is no
+	// upload either: bow out entirely so no upload hint overlay shows and no drop starts an upload.
+	// Returning WITHOUT preventDefault also leaves the browser rejecting this zone as a drop target for
+	// it, so such a drop on blank listing space is a harmless no-op.
 	// Enters and leaves are counted in the capture phase: a directory inside claims a file drag of its own
 	// (useDriveDropTarget) and stops it from bubbling, yet the overlay stays up over it, naming it.
 	function handleDragEnter(event: DragEvent<HTMLDivElement>): void {
-		if (isInternalDrag(event.dataTransfer)) {
+		if (!isFileDrag(event.dataTransfer)) {
 			return
 		}
 
@@ -63,7 +62,7 @@ export function UploadDropzone({ parentUuid, disabled: disabledProp, children }:
 	}
 
 	function handleDragOver(event: DragEvent<HTMLDivElement>): void {
-		if (isInternalDrag(event.dataTransfer)) {
+		if (!isFileDrag(event.dataTransfer)) {
 			return
 		}
 
@@ -73,7 +72,7 @@ export function UploadDropzone({ parentUuid, disabled: disabledProp, children }:
 	}
 
 	function handleDragLeave(event: DragEvent<HTMLDivElement>): void {
-		if (isInternalDrag(event.dataTransfer)) {
+		if (!isFileDrag(event.dataTransfer)) {
 			return
 		}
 
@@ -85,7 +84,7 @@ export function UploadDropzone({ parentUuid, disabled: disabledProp, children }:
 	}
 
 	function handleDrop(event: DragEvent<HTMLDivElement>): void {
-		if (isInternalDrag(event.dataTransfer)) {
+		if (!isFileDrag(event.dataTransfer)) {
 			return
 		}
 

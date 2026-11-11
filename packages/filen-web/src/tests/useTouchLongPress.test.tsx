@@ -10,12 +10,11 @@ interface ItemProps {
 	onLongPress: () => void
 	onContextMenu?: () => void
 	onClick?: (pointerType: string) => void
-	onDragStart?: () => void
 }
 
 // The real shape every caller has: the hook's handlers on a ContextMenuTrigger's render element, so
 // these cases also prove Base UI merges them to the right of (and so before) the trigger's own.
-function Item({ onLongPress, onContextMenu, onClick, onDragStart }: ItemProps) {
+function Item({ onLongPress, onContextMenu, onClick }: ItemProps) {
 	const press = useTouchLongPress<HTMLDivElement>({
 		onLongPress,
 		...(onContextMenu ? { onContextMenu } : {})
@@ -27,9 +26,7 @@ function Item({ onLongPress, onContextMenu, onClick, onDragStart }: ItemProps) {
 				render={
 					<div
 						data-testid="item"
-						draggable
 						{...press.handlers}
-						onDragStart={onDragStart}
 					>
 						<a
 							href="#target"
@@ -235,28 +232,6 @@ describe("useTouchLongPress", () => {
 		wait(LONG_PRESS_DELAY_MS)
 
 		expect(onLongPress).not.toHaveBeenCalled()
-	})
-
-	it("cancels a native drag a touch press would start, and leaves a mouse drag alone", () => {
-		const onDragStart = vi.fn()
-		render(
-			<Item
-				onLongPress={() => undefined}
-				onDragStart={onDragStart}
-			/>
-		)
-
-		touchDown(item())
-
-		const touchDrag = new window.Event("dragstart", { bubbles: true, cancelable: true })
-
-		item().dispatchEvent(touchDrag)
-		expect(touchDrag.defaultPrevented).toBe(true)
-		expect(onDragStart).not.toHaveBeenCalled()
-
-		pointerDown(item(), "mouse")
-		fireEvent.dragStart(item())
-		expect(onDragStart).toHaveBeenCalledOnce()
 	})
 
 	it("reports the pressing pointer for a click, and none for a keyboard one", () => {

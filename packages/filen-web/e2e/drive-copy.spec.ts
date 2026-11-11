@@ -2,7 +2,7 @@ import type { Locator, Page } from "@playwright/test"
 import { test, expect } from "./fixtures"
 import { compressPreset, escapeRegExp, extractQuick, namePattern, openRowMenu, pickTreeTarget } from "./helpers/archive"
 import { trackCspViolations } from "./helpers/csp"
-import { html5DragCopy } from "./helpers/dnd"
+import { pointerDragCopy } from "./helpers/dnd"
 import { FIXTURE_FILES, enterFixtureDirectory } from "./helpers/fixtures"
 import { boxOf } from "./helpers/geometry"
 import {
@@ -228,7 +228,7 @@ test.describe("drive copy", () => {
 			await expect(listbox.getByRole("option")).toHaveCount(2, { timeout: LIVE_WRITE_TIMEOUT_MS })
 
 			// Onto a directory row: a copy lands there and the source stays.
-			await html5DragCopy(page, { selector: '[role="option"]', text: fileName }, { selector: '[role="option"]', text: subName })
+			await pointerDragCopy(page, { selector: '[role="option"]', text: fileName }, { selector: '[role="option"]', text: subName })
 			await expect(page.getByText(`Copied 1 item → ${subName}`)).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
 			await hideJobCards(page, ["copy"])
 			await expect(listbox.getByRole("option", { name: fileName })).toBeVisible()
@@ -236,7 +236,7 @@ test.describe("drive copy", () => {
 			// From inside the subdirectory back onto its parent's breadcrumb: a second copy there.
 			await descendInto(page, listbox, subName)
 			await expect(listbox.getByRole("option", { name: fileName })).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
-			await html5DragCopy(
+			await pointerDragCopy(
 				page,
 				{ selector: '[role="option"]', text: fileName },
 				{ selector: 'nav[aria-label="Breadcrumb"] a', text: scratchName }

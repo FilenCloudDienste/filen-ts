@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { act, cleanup, createEvent, fireEvent, render, screen } from "@testing-library/react"
+import { act, cleanup, render, screen } from "@testing-library/react"
 import { createElement } from "react"
 import { QueryClient, type UseQueryResult } from "@tanstack/react-query"
 import type { Dir, UuidStr } from "@filen/sdk-rs"
@@ -18,10 +18,11 @@ vi.mock("@/features/transfers/lib/copyToast", () => ({ startCopyWithCard }))
 import "@/lib/i18n"
 import { queryClient } from "@/queries/client"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
-import { INTERNAL_DRAG_TYPE, clearDragPayload, getDragPayload } from "@/features/drive/lib/dnd"
+import { clearDragPayload, getDragPayload } from "@/features/drive/lib/dnd"
 import { driveListingQueryKey, projectTreeChildren, type DirectoryTreeChild } from "@/features/drive/queries/drive"
 import { DirectoryTree, type DirectoryTreeContext } from "@/features/drive/components/directoryTree"
 import { testUuid } from "@/tests/support/uuid"
+import { endDrag, FAKE_FRAMES, FAKE_FRAMES_AND_TIMEOUTS, moveOver, pressOn, releaseOver, stubHitTest } from "@/tests/support/pointerDrag"
 
 function dirItem(label: string, name: string, parent: string): DriveItem {
 	return narrowItem({
@@ -44,48 +45,24 @@ const LISTINGS = new Map<string | null, DriveItem[]>([
 	[testUuid("docs"), [INNER]]
 ])
 
-// One transfer threaded through a whole drag, as the browser does; jsdom has none of its own.
-function dataTransfer() {
-	const types: string[] = []
-
-	return {
-		types,
-		effectAllowed: "none",
-		dropEffect: "none",
-		setData: (type: string) => {
-			types.push(type)
-		},
-		setDragImage: () => undefined
-	}
-}
-
-type Transfer = ReturnType<typeof dataTransfer>
-
-// jsdom has no DragEvent, so the copy modifier is set on the plain event it builds. Off macOS (jsdom's
-// platform) that modifier is Ctrl.
-function drag(
-	type: "dragStart" | "dragEnter" | "dragOver" | "drop" | "dragEnd",
-	element: Element,
-	transfer: Transfer,
-	copy = false
-): Event {
-	const event = createEvent[type](element, { dataTransfer: transfer })
-
-	Object.defineProperty(event, "ctrlKey", { value: copy })
-	Object.defineProperty(event, "altKey", { value: false })
-	fireEvent(element, event)
-
-	return event
+// A node's navigating button: what the pointer presses and rests on.
+function button(name: string): HTMLElement {
+	return screen.getByRole("button", { name })
 }
 
 function row(name: string): Element {
-	const found = screen.getByRole("button", { name }).closest("[data-tree-path]")
+	const found = button(name).closest("[data-tree-path]")
 
 	if (found === null) {
 		throw new Error(`no tree row for "${name}"`)
 	}
 
 	return found
+}
+
+// The drop highlight's tint, a move's and a copy's alike.
+function lit(name: string): boolean {
+	return row(name).classList.contains("bg-primary/10")
 }
 
 function renderTree(onToggle: (uuid: string) => void = () => undefined) {
@@ -101,17 +78,16 @@ function renderTree(onToggle: (uuid: string) => void = () => undefined) {
 	return render(createElement(DirectoryTree, { tree }))
 }
 
-// Starts dragging a node, returning the transfer the rest of the drag rides on.
-function startDrag(name: string): Transfer {
-	const transfer = dataTransfer()
-
-	drag("dragStart", row(name), transfer)
-
-	return transfer
+// Presses a node and moves past the drag threshold, over nothing yet.
+function startDrag(name: string): void {
+	pressOn(button(name))
+	moveOver(null)
 }
 
 beforeEach(() => {
-	// jsdom has no 2D canvas; the drag image is drawn only where there is one.
+	vi.useFakeTimers({ toFake: [...FAKE_FRAMES] })
+	stubHitTest()
+	// jsdom has no 2D canvas; the chip is drawn only where there is one.
 	vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null)
 
 	for (const [uuid, items] of LISTINGS) {
@@ -120,35 +96,30 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+	endDrag()
 	clearDragPayload()
 	cleanup()
 	vi.useRealTimers()
 })
 
 describe("sidebar tree drag and drop", () => {
-	it("drags a node's own directory as an internal drag, and lets go of it on dragend", () => {
+	it("drags a node's own directory, and lets go of it when the drag ends", () => {
 		renderTree()
-		const inner = row("Inner")
+		startDrag("Inner")
 
-		expect(inner.getAttribute("draggable")).toBe("true")
-
-		const transfer = startDrag("Inner")
-
-		expect(transfer.types).toEqual([INTERNAL_DRAG_TYPE])
-		expect(transfer.effectAllowed).toBe("copyMove")
 		expect(getDragPayload()).toEqual([INNER])
 
-		drag("dragEnd", inner, transfer)
+		releaseOver(null)
 		expect(getDragPayload()).toEqual([])
 	})
 
 	it("moves a node onto another on a plain drop", () => {
 		renderTree()
-		const transfer = startDrag("Inner")
-		const photos = row("Photos")
+		startDrag("Inner")
+		moveOver(button("Photos"))
 
-		expect(drag("dragOver", photos, transfer).defaultPrevented).toBe(true)
-		drag("drop", photos, transfer)
+		expect(lit("Photos")).toBe(true)
+		releaseOver(button("Photos"))
 
 		expect(performMove).toHaveBeenCalledExactlyOnceWith([INNER], { uuid: testUuid("photos"), name: "Photos" })
 		expect(startCopyWithCard).not.toHaveBeenCalled()
@@ -156,39 +127,43 @@ describe("sidebar tree drag and drop", () => {
 
 	it("refuses a directory dropped into itself or below it, in either mode", () => {
 		renderTree()
-		const transfer = startDrag("Docs")
+		startDrag("Docs")
 
-		for (const target of [row("Docs"), row("Inner")]) {
-			expect(drag("dragOver", target, transfer).defaultPrevented).toBe(false)
-			expect(drag("dragOver", target, transfer, true).defaultPrevented).toBe(false)
-			drag("drop", target, transfer)
+		for (const name of ["Docs", "Inner"]) {
+			moveOver(button(name))
+			expect(lit(name)).toBe(false)
+			moveOver(button(name), true)
+			expect(lit(name)).toBe(false)
 		}
 
+		releaseOver(button("Inner"))
 		expect(performMove).not.toHaveBeenCalled()
+		expect(startCopyWithCard).not.toHaveBeenCalled()
 	})
 
 	it("copies with the copy modifier held, even back into the node's own parent, where a move is a no-op", () => {
 		renderTree()
-		const transfer = startDrag("Inner")
-		const docs = row("Docs")
+		startDrag("Inner")
 
-		expect(drag("dragOver", docs, transfer).defaultPrevented).toBe(false)
-		expect(drag("dragOver", docs, transfer, true).defaultPrevented).toBe(true)
-		drag("drop", docs, transfer, true)
+		moveOver(button("Docs"))
+		expect(lit("Docs")).toBe(false)
+		moveOver(button("Docs"), true)
+		expect(lit("Docs")).toBe(true)
+		releaseOver(button("Docs"), true)
 
 		expect(startCopyWithCard).toHaveBeenCalledExactlyOnceWith([INNER], { uuid: testUuid("docs"), name: "Docs" })
 		expect(performMove).not.toHaveBeenCalled()
 	})
 
 	it("expands a collapsed node the drag dwells on, and not one it can't drop into", () => {
-		vi.useFakeTimers()
+		vi.useFakeTimers({ toFake: [...FAKE_FRAMES_AND_TIMEOUTS] })
 		const onToggle = vi.fn()
 		renderTree(onToggle)
-		const transfer = startDrag("Docs")
+		startDrag("Docs")
 
 		// Inner sits below the dragged directory: no dwell.
-		drag("dragEnter", row("Inner"), transfer)
-		drag("dragEnter", row("Photos"), transfer)
+		moveOver(button("Inner"))
+		moveOver(button("Photos"))
 
 		act(() => {
 			vi.advanceTimersByTime(699)
@@ -199,6 +174,14 @@ describe("sidebar tree drag and drop", () => {
 			vi.advanceTimersByTime(1)
 		})
 		expect(onToggle).toHaveBeenCalledExactlyOnceWith(testUuid("photos"), null)
+	})
+
+	it("starts no drag from a touch", () => {
+		renderTree()
+		pressOn(button("Inner"), "touch")
+		moveOver(null)
+
+		expect(getDragPayload()).toEqual([])
 	})
 
 	it("carries the node's root-to-node chain for the tree's menu and shortcuts", () => {

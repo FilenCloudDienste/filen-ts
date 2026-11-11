@@ -30,9 +30,10 @@ vi.mock("@/queries/client", async () => {
 import { queryClient } from "@/queries/client"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { driveListingQueryKey } from "@/features/drive/queries/drive"
-import { INTERNAL_DRAG_TYPE, clearDragPayload, setDragPayload } from "@/features/drive/lib/dnd"
+import { clearDragPayload, setDragPayload } from "@/features/drive/lib/dnd"
 import { dropHighlightClass, useDriveDropTarget } from "@/features/drive/hooks/useDriveDropTarget"
 import { LISTING_SPRING, SPRING_LOAD_DELAY_MS } from "@/features/drive/lib/springLoad"
+import { beginDrag, endDrag, FAKE_FRAMES, FAKE_FRAMES_AND_TIMEOUTS, moveOver, releaseOver, stubHitTest } from "@/tests/support/pointerDrag"
 
 const HOME = "home-0000-0000-0000-000000000000"
 
@@ -50,95 +51,100 @@ const REPORT = narrowItem({
 	meta: { type: "decoded", data: { name: "report.txt", mime: "text/plain", modified: 0n, size: 1n, key: "k", version: 2 } }
 } satisfies File)
 
-// jsdom's own DragEvent has no DataTransfer; the hook reads only these fields. The copy modifier off
-// macOS (jsdom's platform) is Ctrl.
-function dragEvent(ctrlKey: boolean) {
-	const preventDefault = vi.fn()
-	const dataTransfer = { types: [INTERNAL_DRAG_TYPE], dropEffect: "none" }
-	const event = { altKey: false, ctrlKey, dataTransfer, preventDefault, stopPropagation: vi.fn() } as unknown as DragEvent<HTMLElement>
+// The element a target registered with the drag engine: what the test points the drag at.
+function mountTarget(attach: (element: Element | null) => void): HTMLElement {
+	const element = document.createElement("div")
 
-	return { event, preventDefault, dataTransfer }
+	document.body.appendChild(element)
+	act(() => {
+		attach(element)
+	})
+
+	return element
 }
 
 function renderTarget(targetUuid: string) {
-	return renderHook(() => useDriveDropTarget({ targetUuid, targetAncestry: [targetUuid], targetName: "Docs" }))
+	const rendered = renderHook(() => useDriveDropTarget({ targetUuid, targetAncestry: [targetUuid], targetName: "Docs" }))
+
+	return { ...rendered, element: mountTarget(rendered.result.current.attach) }
 }
 
 beforeEach(() => {
+	vi.useFakeTimers({ toFake: [...FAKE_FRAMES] })
+	stubHitTest()
 	setDragPayload([REPORT])
 })
 
 afterEach(() => {
+	endDrag()
 	clearDragPayload()
 	cleanup()
+	document.body.replaceChildren()
+	vi.useRealTimers()
 })
 
 describe("useDriveDropTarget", () => {
 	it("moves on a plain drop", () => {
-		const { result } = renderTarget("docs-0000-0000-0000-000000000000")
-		const over = dragEvent(false)
+		const { result, element } = renderTarget("docs-0000-0000-0000-000000000000")
 
-		act(() => {
-			result.current.handlers.onDragOver(over.event)
-		})
+		beginDrag()
+		moveOver(element)
 
-		expect(over.dataTransfer.dropEffect).toBe("move")
+		expect(result.current.isOver).toBe(true)
 		expect(result.current.mode).toBe("move")
 
-		act(() => {
-			result.current.handlers.onDrop(dragEvent(false).event)
-		})
+		releaseOver(element)
 
 		expect(performMove).toHaveBeenCalledExactlyOnceWith([REPORT], { uuid: "docs-0000-0000-0000-000000000000", name: "Docs" })
 		expect(startCopyWithCard).not.toHaveBeenCalled()
+		expect(result.current.isOver).toBe(false)
 	})
 
-	it("copies with the modifier held, showing the copy cursor and outline, and starts the copy's card", () => {
-		const { result } = renderTarget("docs-0000-0000-0000-000000000000")
-		const over = dragEvent(true)
+	it("copies with the modifier held, showing the copy outline, and starts the copy's card", () => {
+		const { result, element } = renderTarget("docs-0000-0000-0000-000000000000")
 
-		act(() => {
-			result.current.handlers.onDragOver(over.event)
-		})
+		beginDrag()
+		moveOver(element, true)
 
-		expect(over.dataTransfer.dropEffect).toBe("copy")
 		expect(result.current.mode).toBe("copy")
 		expect(dropHighlightClass(result.current)).toContain("outline-dashed")
 
-		act(() => {
-			result.current.handlers.onDrop(dragEvent(true).event)
-		})
+		releaseOver(element, true)
 
 		expect(startCopyWithCard).toHaveBeenCalledExactlyOnceWith([REPORT], { uuid: "docs-0000-0000-0000-000000000000", name: "Docs" })
 		expect(performMove).not.toHaveBeenCalled()
 	})
 
 	it("takes a copy onto the payload's own parent, where a move is refused", () => {
-		const { result } = renderTarget(HOME)
-		const moveOver = dragEvent(false)
+		const { result, element } = renderTarget(HOME)
 
-		act(() => {
-			result.current.handlers.onDragOver(moveOver.event)
-		})
-
-		expect(moveOver.preventDefault).not.toHaveBeenCalled()
+		beginDrag()
+		moveOver(element)
 		expect(result.current.isOver).toBe(false)
 
-		const copyOver = dragEvent(true)
-
-		act(() => {
-			result.current.handlers.onDragOver(copyOver.event)
-		})
-
-		expect(copyOver.preventDefault).toHaveBeenCalled()
+		moveOver(element, true)
 		expect(result.current.isOver).toBe(true)
 
 		// Letting go of the modifier over the same target withdraws it again.
-		act(() => {
-			result.current.handlers.onDragOver(dragEvent(false).event)
-		})
+		moveOver(element)
+		expect(result.current.isOver).toBe(false)
+
+		releaseOver(element)
+		expect(performMove).not.toHaveBeenCalled()
+	})
+
+	it("is inert to drive items while disabled", () => {
+		const { result } = renderHook(() =>
+			useDriveDropTarget({ targetUuid: "docs-0000-0000-0000-000000000000", targetAncestry: [], targetName: "Docs", disabled: true })
+		)
+		const element = mountTarget(result.current.attach)
+
+		beginDrag()
+		moveOver(element)
+		releaseOver(element)
 
 		expect(result.current.isOver).toBe(false)
+		expect(performMove).not.toHaveBeenCalled()
 	})
 })
 
@@ -166,8 +172,8 @@ describe("a row on a route cut short", () => {
 		queryClient.setQueryData(driveListingQueryKey({ variant: "drive", uuid: parent?.data.uuid ?? null }), items)
 	}
 
-	function renderChildRow() {
-		return renderHook(() =>
+	function accepts(copy: boolean): boolean {
+		const { result } = renderHook(() =>
 			useDriveDropTarget({
 				targetUuid: CHILD.data.uuid,
 				targetAncestry: [FAV.data.uuid, CHILD.data.uuid],
@@ -175,17 +181,16 @@ describe("a row on a route cut short", () => {
 				targetName: "child"
 			})
 		)
-	}
+		const element = mountTarget(result.current.attach)
 
-	function accepts(copy: boolean): boolean {
-		const { result } = renderChildRow()
-		const over = dragEvent(copy)
+		beginDrag()
+		moveOver(element, copy)
 
-		act(() => {
-			result.current.handlers.onDragOver(over.event)
-		})
+		const over = result.current.isOver
 
-		return over.preventDefault.mock.calls.length > 0
+		endDrag()
+
+		return over
 	}
 
 	beforeEach(() => {
@@ -221,20 +226,15 @@ describe("a row on a route cut short", () => {
 				useDriveDropTarget({ targetUuid: uuid, targetAncestry: [uuid], routeChain: { parent: undefined }, targetName: "here" }),
 			{ initialProps: { uuid: ELSEWHERE.data.uuid } }
 		)
+		const element = mountTarget(result.current.attach)
 
-		function accepted(): boolean {
-			const over = dragEvent(false)
+		beginDrag()
+		moveOver(element)
+		expect(result.current.isOver).toBe(true)
 
-			act(() => {
-				result.current.handlers.onDragOver(over.event)
-			})
-
-			return over.preventDefault.mock.calls.length > 0
-		}
-
-		expect(accepted()).toBe(true)
 		rerender({ uuid: CHILD.data.uuid })
-		expect(accepted()).toBe(false)
+		moveOver(element)
+		expect(result.current.isOver).toBe(false)
 	})
 
 	it("takes an unrelated directory once the chain resolves, and a file without walking it", () => {
@@ -257,18 +257,12 @@ describe("a row on a route cut short", () => {
 describe("spring-loading", () => {
 	const DOCS = "docs-0000-0000-0000-000000000000"
 
-	function springEvent({ copy = false, files = false }: { copy?: boolean; files?: boolean } = {}) {
+	// An OS file drag's event: the browser exposes only the "Files" type until the drop.
+	function fileEvent() {
 		const preventDefault = vi.fn()
 		const currentTarget = document.createElement("div")
-		const dataTransfer = { types: files ? ["Files"] : [INTERNAL_DRAG_TYPE], dropEffect: "none" }
-		const event = {
-			altKey: false,
-			ctrlKey: copy,
-			dataTransfer,
-			currentTarget,
-			preventDefault,
-			stopPropagation: vi.fn()
-		} as unknown as DragEvent<HTMLElement>
+		const dataTransfer = { types: ["Files"], dropEffect: "none" }
+		const event = { dataTransfer, currentTarget, preventDefault, stopPropagation: vi.fn() } as unknown as DragEvent<HTMLElement>
 
 		return { event, preventDefault, dataTransfer }
 	}
@@ -285,23 +279,18 @@ describe("spring-loading", () => {
 			})
 		)
 
-		return { ...rendered, open }
+		return { ...rendered, open, element: mountTarget(rendered.result.current.attach) }
 	}
 
 	beforeEach(() => {
-		vi.useFakeTimers()
-	})
-
-	afterEach(() => {
-		vi.useRealTimers()
+		vi.useFakeTimers({ toFake: [...FAKE_FRAMES_AND_TIMEOUTS] })
 	})
 
 	it("opens the directory once the drag has rested on it for the delay", () => {
-		const { result, open } = renderSpringTarget()
+		const { result, open, element } = renderSpringTarget()
 
-		act(() => {
-			result.current.handlers.onDragEnter(springEvent().event)
-		})
+		beginDrag()
+		moveOver(element)
 		expect(result.current.isOver).toBe(true)
 
 		act(() => {
@@ -315,31 +304,48 @@ describe("spring-loading", () => {
 		expect(open).toHaveBeenCalledOnce()
 	})
 
+	it("keeps its timer while the drag moves about on it", () => {
+		const { open, element } = renderSpringTarget()
+
+		beginDrag()
+		moveOver(element)
+		act(() => {
+			vi.advanceTimersByTime(SPRING_LOAD_DELAY_MS / 2)
+		})
+		moveOver(element)
+		act(() => {
+			vi.advanceTimersByTime(SPRING_LOAD_DELAY_MS / 2)
+		})
+
+		expect(open).toHaveBeenCalledOnce()
+	})
+
 	it("cancels when the drag leaves, drops, or the target unmounts", () => {
 		const leave = renderSpringTarget()
-		const event = springEvent().event
 
+		beginDrag()
+		moveOver(leave.element)
+		moveOver(null)
 		act(() => {
-			leave.result.current.handlers.onDragEnter(event)
-			leave.result.current.handlers.onDragLeave(event)
 			vi.advanceTimersByTime(SPRING_LOAD_DELAY_MS)
 		})
 		expect(leave.open).not.toHaveBeenCalled()
+		endDrag()
 
 		const dropped = renderSpringTarget()
 
+		beginDrag()
+		moveOver(dropped.element)
+		releaseOver(dropped.element)
 		act(() => {
-			dropped.result.current.handlers.onDragEnter(springEvent().event)
-			dropped.result.current.handlers.onDrop(springEvent().event)
 			vi.advanceTimersByTime(SPRING_LOAD_DELAY_MS)
 		})
 		expect(dropped.open).not.toHaveBeenCalled()
 
 		const unmounted = renderSpringTarget()
 
-		act(() => {
-			unmounted.result.current.handlers.onDragEnter(springEvent().event)
-		})
+		beginDrag()
+		moveOver(unmounted.element)
 		unmounted.unmount()
 		act(() => {
 			vi.advanceTimersByTime(SPRING_LOAD_DELAY_MS)
@@ -369,11 +375,13 @@ describe("spring-loading", () => {
 				spring: { timing: LISTING_SPRING, open: self.open }
 			})
 		)
+		const belowElement = mountTarget(below.result.current.attach)
 
+		beginDrag()
+		moveOver(self.element)
+		moveOver(self.element, true)
+		moveOver(belowElement)
 		act(() => {
-			self.result.current.handlers.onDragEnter(springEvent().event)
-			self.result.current.handlers.onDragOver(springEvent({ copy: true }).event)
-			below.result.current.handlers.onDragEnter(springEvent().event)
 			vi.advanceTimersByTime(SPRING_LOAD_DELAY_MS)
 		})
 
@@ -393,21 +401,21 @@ describe("spring-loading", () => {
 				spring: { timing: LISTING_SPRING, open }
 			})
 		)
-		const enter = springEvent()
+		const element = mountTarget(result.current.attach)
 
+		beginDrag()
+		moveOver(element)
 		act(() => {
-			result.current.handlers.onDragEnter(enter.event)
 			vi.advanceTimersByTime(SPRING_LOAD_DELAY_MS)
 		})
 
-		expect(enter.preventDefault).not.toHaveBeenCalled()
 		expect(result.current.isOver).toBe(false)
 		expect(open).toHaveBeenCalledOnce()
 	})
 
 	it("springs and uploads for files from the system where the target takes them, and leaves them alone elsewhere", () => {
 		const taking = renderSpringTarget({ acceptFiles: true })
-		const enter = springEvent({ files: true })
+		const enter = fileEvent()
 
 		act(() => {
 			taking.result.current.handlers.onDragEnter(enter.event)
@@ -420,7 +428,7 @@ describe("spring-loading", () => {
 		})
 		expect(taking.open).toHaveBeenCalledOnce()
 
-		const drop = springEvent({ files: true })
+		const drop = fileEvent()
 
 		act(() => {
 			taking.result.current.handlers.onDrop(drop.event)
@@ -428,7 +436,7 @@ describe("spring-loading", () => {
 		expect(uploadDroppedFiles).toHaveBeenCalledExactlyOnceWith(drop.dataTransfer, DOCS)
 
 		const refusing = renderSpringTarget()
-		const ignored = springEvent({ files: true })
+		const ignored = fileEvent()
 
 		act(() => {
 			refusing.result.current.handlers.onDragEnter(ignored.event)

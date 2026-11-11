@@ -36,9 +36,8 @@ async function recordedBlinks(page: Page): Promise<(string | null)[]> {
 	return page.evaluate(() => (window as unknown as { __springBlinks: (string | null)[] }).__springBlinks)
 }
 
-// A real mouse drag, not a dispatched event sequence (drive-dnd-move.spec.ts): the question here is
-// whether the browser's drag survives the listing it started in being replaced by another, which only a
-// drag the browser itself runs can answer.
+// A real mouse drag, as every drive item drag is (helpers/dnd.ts): the question here is
+// whether the drag survives the listing it started in being replaced by another.
 test.describe("spring-loaded directories", () => {
 	test("a drag resting on a directory blinks it, opens it, and drops inside it", async ({ page }) => {
 		const runId = crypto.randomUUID()

@@ -8,7 +8,7 @@ import {
 	withScratchDirectory,
 	LIVE_WRITE_TIMEOUT_MS
 } from "./helpers/listing"
-import { html5DragMove } from "./helpers/dnd"
+import { pointerDragMove } from "./helpers/dnd"
 
 const ROW_SELECTOR = '[role="option"]'
 const BREADCRUMB_LINK_SELECTOR = 'nav[aria-label="Breadcrumb"] a'
@@ -34,11 +34,11 @@ test.describe("drive drag-to-move", () => {
 			await expect(targetRow).toBeVisible()
 
 			// 1) Drag the file onto the directory — it leaves the scratch listing (only the directory left).
-			// Dispatched ONCE: html5DragMove asserts the target accepted the drop, and an accepted drop always
+			// Dragged ONCE: pointerDragMove asserts the target lit up for the drop, and an accepted drop always
 			// starts the move. The row leaves only once moveItems' write settles on the account-wide lease, so
-			// the wait carries the write budget — a re-dispatch while the first move is still queued behind
+			// the wait carries the write budget — a second drag while the first move is still queued behind
 			// the lease would only queue a second write behind it.
-			await html5DragMove(page, { selector: ROW_SELECTOR, text: fileName }, { selector: ROW_SELECTOR, text: targetDirName })
+			await pointerDragMove(page, { selector: ROW_SELECTOR, text: fileName }, { selector: ROW_SELECTOR, text: targetDirName })
 			await expect(options).toHaveCount(1, { timeout: LIVE_WRITE_TIMEOUT_MS })
 
 			await expect(listbox.getByRole("option", { name: targetDirName })).toBeVisible()
@@ -51,11 +51,15 @@ test.describe("drive drag-to-move", () => {
 			await expect(nestedFileRow).toBeVisible()
 
 			// 3) Drag it back out onto the scratch ancestor in the breadcrumb — it leaves the nested listing.
-			// Dispatched once and waited out at the write budget, as in leg 1.
+			// Dragged once and waited out at the write budget, as in leg 1.
 			const scratchCrumb = breadcrumb(page).getByRole("link", { name: scratchName, exact: true })
 			await expect(scratchCrumb).toBeVisible()
 
-			await html5DragMove(page, { selector: ROW_SELECTOR, text: fileName }, { selector: BREADCRUMB_LINK_SELECTOR, text: scratchName })
+			await pointerDragMove(
+				page,
+				{ selector: ROW_SELECTOR, text: fileName },
+				{ selector: BREADCRUMB_LINK_SELECTOR, text: scratchName }
+			)
 			await expect(nestedFileRow).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
 		})
 	})

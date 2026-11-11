@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { act, cleanup, createEvent, fireEvent, render, screen } from "@testing-library/react"
+import { cleanup, render, screen } from "@testing-library/react"
 import { createElement, type ReactNode } from "react"
 import { QueryClient } from "@tanstack/react-query"
 import type { File, UuidStr } from "@filen/sdk-rs"
@@ -17,8 +17,9 @@ vi.mock("@/features/drive/lib/dnd", async importOriginal => ({
 vi.mock("@/features/transfers/lib/copyToast", () => ({ startCopyWithCard: vi.fn() }))
 
 import { narrowItem } from "@/features/drive/lib/item"
-import { INTERNAL_DRAG_TYPE, clearDragPayload, setDragPayload } from "@/features/drive/lib/dnd"
+import { clearDragPayload, setDragPayload } from "@/features/drive/lib/dnd"
 import { useDriveDropTarget } from "@/features/drive/hooks/useDriveDropTarget"
+import { beginDrag, endDrag, FAKE_FRAMES, moveOver, pressEscape, releaseOver, stubHitTest } from "@/tests/support/pointerDrag"
 
 const DEST = "dest-0000-0000-0000-000000000000"
 const HOME = "home-0000-0000-0000-000000000000"
@@ -47,6 +48,7 @@ function Target({ uuid, ancestry, name, children }: { uuid: string; ancestry: st
 		{
 			"data-testid": name,
 			"data-over": drop.isOver ? "" : undefined,
+			ref: drop.attach,
 			...drop.handlers
 		},
 		children
@@ -65,79 +67,62 @@ function renderListing() {
 	return { background: screen.getByTestId("background"), row: screen.getByTestId("row") }
 }
 
-function fire(type: "dragEnter" | "dragLeave" | "dragOver" | "drop", element: Element): Event {
-	const event = createEvent[type](element, { dataTransfer: { types: [INTERNAL_DRAG_TYPE], dropEffect: "none" } })
-
-	Object.defineProperty(event, "ctrlKey", { value: false })
-	Object.defineProperty(event, "altKey", { value: false })
-	fireEvent(element, event)
-
-	return event
-}
-
 function isOver(element: Element): boolean {
 	return element.hasAttribute("data-over")
 }
 
-// The pointer entering the row from the background, then leaving back into it — the browser fires the
-// new element's enter before the old one's leave.
-function crossRow(background: Element, row: Element): void {
-	fire("dragEnter", row)
-	fire("dragLeave", background)
-	fire("dragEnter", background)
-	fire("dragLeave", row)
-}
-
 beforeEach(() => {
+	vi.useFakeTimers({ toFake: [...FAKE_FRAMES] })
+	stubHitTest()
 	setDragPayload([REPORT])
 })
 
 afterEach(() => {
+	endDrag()
 	clearDragPayload()
 	cleanup()
+	vi.useRealTimers()
 })
 
 describe("an invalid row inside the listing's own drop target", () => {
-	it("leaves the enclosing target's enters and leaves balanced however often it is crossed", () => {
+	it("leaves the enclosing target lit however often the drag crosses it", () => {
 		const { background, row } = renderListing()
 
-		fire("dragEnter", background)
+		beginDrag()
+		moveOver(background)
 
 		for (let crossing = 0; crossing < 5; crossing++) {
-			crossRow(background, row)
+			moveOver(row)
 			expect(isOver(background)).toBe(true)
 			expect(isOver(row)).toBe(false)
+			moveOver(background)
+			expect(isOver(background)).toBe(true)
 		}
 
-		fire("dragLeave", background)
+		moveOver(null)
 		expect(isOver(background)).toBe(false)
 	})
 
 	it("lets a drop on it through to the enclosing target, which then clears", () => {
 		const { background, row } = renderListing()
 
-		fire("dragEnter", background)
-		crossRow(background, row)
-		fire("dragEnter", row)
-		fire("dragLeave", background)
-
-		expect(fire("dragOver", row).defaultPrevented).toBe(true)
-		fire("drop", row)
+		beginDrag()
+		moveOver(row)
+		releaseOver(row)
 
 		expect(performMove).toHaveBeenCalledExactlyOnceWith([REPORT], { uuid: DEST, name: "background" })
 		expect(isOver(background)).toBe(false)
 	})
 
-	it("clears the enclosing target when the drag ends somewhere that never sends it a leave", () => {
+	it("clears the enclosing target when Escape cancels the drag", () => {
 		const { background, row } = renderListing()
 
-		fire("dragEnter", background)
-		crossRow(background, row)
+		beginDrag()
+		moveOver(row)
 		expect(isOver(background)).toBe(true)
 
-		act(() => {
-			window.dispatchEvent(new Event("dragend"))
-		})
+		pressEscape()
 		expect(isOver(background)).toBe(false)
+		expect(performMove).not.toHaveBeenCalled()
 	})
 })

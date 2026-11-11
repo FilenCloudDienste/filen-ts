@@ -67,7 +67,8 @@ function CrumbLink({ variant, routeId, splatValue, targetUuid, targetAncestry, l
 		acceptFiles: canWriteVariant(variant, targetUuid)
 	})
 
-	const linkProps = useLinkProps({ to: routeId, params: { _splat: splatValue } })
+	// The link's own ref, merged with the drag engine's registration.
+	const linkProps = useLinkProps({ to: routeId, params: { _splat: splatValue } }, drop.attach)
 
 	return (
 		<a

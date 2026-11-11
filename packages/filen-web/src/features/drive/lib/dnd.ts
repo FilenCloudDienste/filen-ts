@@ -1,7 +1,8 @@
-import { type DragEvent } from "react"
+import { type PointerEvent } from "react"
 import { driveItemName } from "@filen/shared"
 import { i18n } from "@/lib/i18n"
 import { canDragVariant, assembleDragPayload } from "@/features/drive/lib/dnd.logic"
+import { pressPointerDrag } from "@/features/drive/lib/pointerDrag"
 import { moveItems } from "@/features/drive/lib/actions"
 import { confirmDotFilenOperation, includesRootDotFilen } from "@/features/drive/lib/dotFilenGuard"
 import { type BulkOutcome } from "@/lib/actions/bulk"
@@ -13,16 +14,9 @@ import { reconcileSelectedItems } from "@/features/drive/components/directoryLis
 import { type DriveItem } from "@/features/drive/lib/item"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
 
-// Custom dataTransfer type marking an INTERNAL move drag. The dropzone (external file upload) checks
-// for it to BOW OUT entirely, and every move drop target requires it before treating a drop as a
-// move — the one signal that keeps drag-to-move and drop-to-upload from ever colliding. The value is
-// irrelevant; the presence of the TYPE is the marker (dataTransfer.getData is unreadable mid-drag
-// anyway, so the real payload rides the module ref below, not the transfer).
-export const INTERNAL_DRAG_TYPE = "application/x-filen-move"
-
-// Module-level payload — the live DriveItem[] currently being dragged, kept here for object identity
-// because dataTransfer only carries strings. Mirrors the old web app's module-level dragged-items
-// array. Set on dragstart, read by every drop target's validity check + drop, cleared on dragend.
+// Module-level payload — the live DriveItem[] currently being dragged (pointerDrag.ts), kept as the
+// items themselves for object identity. Mirrors the old web app's module-level dragged-items array. Set
+// when a press becomes a drag, read by every drop target's validity check + drop, cleared when it ends.
 let payload: readonly DriveItem[] = []
 
 export function setDragPayload(items: readonly DriveItem[]): void {
@@ -35,13 +29,6 @@ export function getDragPayload(): readonly DriveItem[] {
 
 export function clearDragPayload(): void {
 	payload = []
-}
-
-// True while a drag carries our internal-move marker. Read during dragenter/over/leave — where only
-// `dataTransfer.types` is exposed, never the data itself — so the upload dropzone can ignore an
-// internal drag and a move target can ignore an external file drag.
-export function isInternalDrag(dataTransfer: DataTransfer | null): boolean {
-	return dataTransfer?.types.includes(INTERNAL_DRAG_TYPE) ?? false
 }
 
 function dragImageLabel(items: readonly DriveItem[]): string {
@@ -64,16 +51,16 @@ function roundRectPath(ctx: CanvasRenderingContext2D, width: number, height: num
 	ctx.closePath()
 }
 
-// A self-contained chip drawn on an off-DOM canvas: a solid dark pill with light text, legible over
-// either theme's page background (it carries its own colors, never inheriting the page's). Single
-// drag shows the item name; a multi drag shows an "{count} items" badge. Attached off-screen only
-// long enough for the browser to snapshot it (setDragImage copies synchronously), then removed.
-function applyDragImage(dataTransfer: DataTransfer, items: readonly DriveItem[]): void {
+// A self-contained chip drawn once per drag on a canvas the drag engine moves with the pointer: a solid
+// dark pill with light text, legible over either theme's page background (it carries its own colors,
+// never inheriting the page's). Single drag shows the item name; a multi drag shows an "{count} items"
+// badge.
+function drawDragChip(items: readonly DriveItem[]): HTMLCanvasElement | null {
 	const canvas = document.createElement("canvas")
 	const ctx = canvas.getContext("2d")
 
 	if (!ctx) {
-		return
+		return null
 	}
 
 	const dpr = window.devicePixelRatio > 0 ? window.devicePixelRatio : 1
@@ -102,10 +89,6 @@ function applyDragImage(dataTransfer: DataTransfer, items: readonly DriveItem[])
 	canvas.height = Math.ceil(height * dpr)
 	canvas.style.width = `${String(width)}px`
 	canvas.style.height = `${String(height)}px`
-	canvas.style.position = "fixed"
-	canvas.style.top = "-1000px"
-	canvas.style.left = "-1000px"
-	canvas.style.pointerEvents = "none"
 
 	ctx.scale(dpr, dpr)
 	ctx.fillStyle = "rgba(24, 24, 27, 0.95)"
@@ -116,105 +99,69 @@ function applyDragImage(dataTransfer: DataTransfer, items: readonly DriveItem[])
 	ctx.textBaseline = "middle"
 	ctx.fillText(text, paddingX, height / 2 + 1)
 
-	document.body.appendChild(canvas)
-	dataTransfer.setDragImage(canvas, paddingX, height / 2)
-	requestAnimationFrame(() => {
-		canvas.remove()
-	})
+	return canvas
 }
 
 export interface DragSourceProps {
-	draggable: true
-	onDragStart: (event: DragEvent<HTMLElement>) => void
-	onDragEnd: () => void
+	onPointerDown: (event: PointerEvent<HTMLElement>) => void
 }
 
-// Drag-source props for a move-capable row/tile, or undefined when the variant can't drag (the row
-// renders non-draggable). The selection is read from the store at dragstart, each item as `current` (the
-// listing's reconciled selection) now has it: a move re-encrypts the passed item's name for the
-// destination's shares and links. Pointer-only affordance — the accessible move route stays the item
-// menu's "Move" action (opens the destination picker); see the row/tile draggable wiring.
+// The press every drive drag source shares: once it becomes a drag (pointerDrag.ts), `resolve` names the
+// items, which ride the payload ref until the drag ends.
+function pressDragSource(event: PointerEvent<HTMLElement>, resolve: () => readonly DriveItem[] | undefined): void {
+	pressPointerDrag(event, {
+		start: () => {
+			const items = resolve()
+
+			if (items !== undefined) {
+				setDragPayload(items)
+			}
+
+			return items
+		},
+		chip: drawDragChip,
+		end: clearDragPayload
+	})
+}
+
+// Drag-source props for a move-capable row/tile, or undefined when the variant can't drag. The selection
+// is read from the store once the press becomes a drag, each item as `current` (the listing's reconciled
+// selection) now has it: a move re-encrypts the passed item's name for the destination's shares and
+// links. Pointer-only affordance (mouse and pen; touch long-presses to select) — the accessible move
+// route stays the item menu's "Move" action (opens the destination picker).
 export function buildDragSourceProps(item: DriveItem, variant: DriveVariant, current: DriveItem[]): DragSourceProps | undefined {
 	if (!canDragVariant(variant)) {
 		return undefined
 	}
 
 	return {
-		draggable: true,
-		onDragStart: event => {
-			const selectedItems = reconcileSelectedItems(useDriveStore.getState().selectedItems, current)
-			const selectedUuids = new Set(selectedItems.map(selected => selected.data.uuid))
-			const dragged = assembleDragPayload(item, selectedUuids, selectedItems)
+		onPointerDown: event => {
+			pressDragSource(event, () => {
+				const selectedItems = reconcileSelectedItems(useDriveStore.getState().selectedItems, current)
+				const selectedUuids = new Set(selectedItems.map(selected => selected.data.uuid))
 
-			// Dragging an unselected item selects just it, so the drag and the visible selection agree.
-			if (!selectedUuids.has(item.data.uuid)) {
-				useDriveStore.getState().setSelectedItems([item])
-			}
+				// Dragging an unselected item selects just it, so the drag and the visible selection agree.
+				if (!selectedUuids.has(item.data.uuid)) {
+					useDriveStore.getState().setSelectedItems([item])
+				}
 
-			startInternalDrag(event, dragged)
-		},
-		onDragEnd: () => {
-			clearDragPayload()
+				return assembleDragPayload(item, selectedUuids, selectedItems)
+			})
 		}
 	}
 }
 
-// A spring-loaded directory (springLoad.ts) navigates mid-drag, unmounting the row the drag started
-// from, and the source's own dragend then never reaches React. The drag still ends in a drop or a
-// dragend the window sees: the payload is let go after that turn's handlers have read it.
-// One listener pair at a time: a drag cancelled where the window never heard it leaves its pair behind
-// until the next drag replaces it.
-let releaseListener: (() => void) | null = null
-
-function stopListeningForDragEnd(): void {
-	if (releaseListener !== null) {
-		window.removeEventListener("drop", releaseListener, true)
-		window.removeEventListener("dragend", releaseListener, true)
-		releaseListener = null
-	}
-}
-
-function releasePayloadAfterDrag(): void {
-	stopListeningForDragEnd()
-
-	releaseListener = () => {
-		stopListeningForDragEnd()
-		setTimeout(clearDragPayload, 0)
-	}
-
-	window.addEventListener("drop", releaseListener, true)
-	window.addEventListener("dragend", releaseListener, true)
-}
-
-// The dragstart every drive drag source shares: the payload ref, the internal marker and the chip.
-function startInternalDrag(event: DragEvent<HTMLElement>, items: readonly DriveItem[]): void {
-	releasePayloadAfterDrag()
-	setDragPayload(items)
-	// Copy too: a drop with the copy modifier held copies (useDriveDropTarget).
-	event.dataTransfer.effectAllowed = "copyMove"
-	event.dataTransfer.setData(INTERNAL_DRAG_TYPE, "1")
-	applyDragImage(event.dataTransfer, items)
-}
-
 // Drag-source props for a sidebar tree node: it drags its own directory alone, leaving the listing's
-// selection alone. The item is resolved at dragstart (a cached listing read); a node whose row isn't
-// cached cancels the drag rather than start one nothing can drop.
+// selection alone. The item is resolved once the press becomes a drag (a cached listing read); a node
+// whose row isn't cached starts no drag, since nothing could drop it.
 export function buildTreeDragSourceProps(resolveItem: () => DriveItem | undefined): DragSourceProps {
 	return {
-		draggable: true,
-		onDragStart: event => {
-			const item = resolveItem()
+		onPointerDown: event => {
+			pressDragSource(event, () => {
+				const item = resolveItem()
 
-			if (item === undefined) {
-				event.preventDefault()
-
-				return
-			}
-
-			startInternalDrag(event, [item])
-		},
-		onDragEnd: () => {
-			clearDragPayload()
+				return item === undefined ? undefined : [item]
+			})
 		}
 	}
 }

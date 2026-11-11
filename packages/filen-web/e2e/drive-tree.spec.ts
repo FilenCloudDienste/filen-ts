@@ -7,7 +7,7 @@ import {
 	LIVE_WRITE_TIMEOUT_MS,
 	expectBreadcrumbAt
 } from "./helpers/listing"
-import { html5DragMove } from "./helpers/dnd"
+import { pointerDragMove } from "./helpers/dnd"
 
 const TREE_ROW_SELECTOR = "[data-tree-path]"
 
@@ -73,10 +73,14 @@ test.describe("sidebar directory tree", () => {
 			const options = listbox.getByRole("option")
 			await expect(options).toHaveCount(2)
 
-			// Dispatched once, as in drive-dnd-move.spec.ts: an accepted drop always starts the move, and the
-			// row leaves only once that write settles on the account-wide lease, where a re-dispatch would
+			// Dragged once, as in drive-dnd-move.spec.ts: an accepted drop always starts the move, and the
+			// row leaves only once that write settles on the account-wide lease, where a second drag would
 			// only queue a second move behind the first.
-			await html5DragMove(page, { selector: TREE_ROW_SELECTOR, text: draggedName }, { selector: TREE_ROW_SELECTOR, text: targetName })
+			await pointerDragMove(
+				page,
+				{ selector: TREE_ROW_SELECTOR, text: draggedName },
+				{ selector: TREE_ROW_SELECTOR, text: targetName }
+			)
 			await expect(options).toHaveCount(1, { timeout: LIVE_WRITE_TIMEOUT_MS })
 
 			await expect(listbox.getByRole("option", { name: targetName })).toBeVisible()

@@ -33,6 +33,9 @@ export function ListingDropSurface({ uuid, ancestry, disabled, children }: Listi
 	return (
 		<div
 			className="relative flex min-h-0 flex-1 flex-col pt-4"
+			ref={element => {
+				drop.attach(element)
+			}}
 			{...drop.handlers}
 		>
 			{children}

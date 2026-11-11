@@ -58,6 +58,7 @@ export function DriveTile({
 					<div
 						ref={el => {
 							registerRef(index, el)
+							drop.attach(el)
 						}}
 						role="option"
 						aria-selected={selected}
@@ -77,8 +78,12 @@ export function DriveTile({
 							cut && "*:not-data-[slot=dropdown-menu-trigger]:opacity-50"
 						)}
 						data-cut={cut ? "" : undefined}
-						{...dragSource}
 						{...press.handlers}
+						// Composed, not spread over each other: touch long-presses (press), a mouse or pen drags.
+						onPointerDown={event => {
+							press.handlers.onPointerDown(event)
+							dragSource?.onPointerDown(event)
+						}}
 						onClick={event => {
 							onPointerSelect(index, event, press.pointerType(event))
 						}}

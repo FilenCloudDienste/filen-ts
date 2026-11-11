@@ -1,4 +1,4 @@
-import { useEffect, useRef, type DragEvent, type MouseEvent, type PointerEvent, type TouchEvent } from "react"
+import { useEffect, useRef, type MouseEvent, type PointerEvent, type TouchEvent } from "react"
 import { clickPointerType } from "@/features/drive/lib/listbox"
 
 // Base UI's ContextMenuTrigger long-press delay and move threshold: the press this replaces on touch.
@@ -32,7 +32,6 @@ export interface TouchLongPressHandlers<E extends HTMLElement> {
 	onTouchStart: (event: TouchEvent<E> & BaseUIPreventable) => void
 	onContextMenu: (event: MouseEvent<E> & BaseUIPreventable) => void
 	onClickCapture: (event: MouseEvent<E>) => void
-	onDragStartCapture: (event: DragEvent<E>) => void
 }
 
 export interface TouchLongPress<E extends HTMLElement> {
@@ -171,13 +170,6 @@ export function useTouchLongPress<E extends HTMLElement>({ onLongPress, onContex
 			firedRef.current = false
 			event.preventDefault()
 			event.stopPropagation()
-		},
-		// A held touch selects; it does not start a native drag of a draggable item as well.
-		onDragStartCapture: event => {
-			if (pointerTypeRef.current === "touch") {
-				event.preventDefault()
-				event.stopPropagation()
-			}
 		}
 	}
 
