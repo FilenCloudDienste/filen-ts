@@ -14,8 +14,8 @@ use std::sync::{Arc, Mutex, Weak};
 
 use windows::Win32::Foundation::{
     DATA_S_SAMEFORMATETC, DV_E_FORMATETC, DV_E_LINDEX, DV_E_TYMED, E_ABORT, E_INVALIDARG,
-    E_NOTIMPL, E_OUTOFMEMORY, E_UNEXPECTED, GENERIC_READ, HGLOBAL, OLE_E_ADVISENOTSUPPORTED, S_OK,
-    STG_E_MEDIUMFULL,
+    E_NOTIMPL, E_OUTOFMEMORY, E_UNEXPECTED, GENERIC_READ, GlobalFree, HGLOBAL,
+    OLE_E_ADVISENOTSUPPORTED, S_OK, STG_E_MEDIUMFULL,
 };
 use windows::Win32::Storage::FileSystem::{
     DELETE, FILE_FLAG_DELETE_ON_CLOSE, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
@@ -151,6 +151,8 @@ impl Drop for Session {
         if self.started() {
             self.end(OperationResult::Failed);
         }
+
+        self.registry.forget_session(self.id);
     }
 }
 
@@ -185,7 +187,10 @@ fn hglobal_medium(bytes: &[u8]) -> windows_core::Result<STGMEDIUM> {
     let pointer = unsafe { GlobalLock(handle) };
 
     if pointer.is_null() {
-        return Err(windows_core::Error::from_thread());
+        let error = windows_core::Error::from_thread();
+        // SAFETY: the block is ours, unlocked and handed to no one; its result is the error already returned.
+        let _ = unsafe { GlobalFree(Some(handle)) };
+        return Err(error);
     }
 
     // SAFETY: the locked block holds at least `bytes.len()` bytes and cannot overlap a Rust slice.
@@ -283,6 +288,7 @@ impl DataObject_Impl {
             return Err(DV_E_FORMATETC.into());
         }
 
+        // Refused once the session ended, also when EndOperation ran since the check above.
         let (ticket, slot) = session.registry.open(session.id).ok_or(E_ABORT)?;
         // Created before JS hears of the ticket, so an immediate answer finds the slot alive.
         let stream = crate::stream::create(session.clone(), ticket, index, slot);

@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex};
 
 use windows::Win32::Foundation::{
     RPC_E_CALL_CANCELED, S_FALSE, S_OK, STG_E_ACCESSDENIED, STG_E_INVALIDFUNCTION,
-    STG_E_INVALIDPOINTER, STG_E_READFAULT,
+    STG_E_INVALIDPOINTER, STG_E_MEDIUMFULL, STG_E_READFAULT,
 };
 use windows::Win32::System::Com::{
     CoTaskMemAlloc, CoTestCancel, ISequentialStream_Impl, IStream, IStream_Impl, LOCKTYPE,
@@ -219,6 +219,11 @@ impl IStream_Impl for Stream_Impl {
 
             if let Err(error) = wrote.ok() {
                 break Err(error);
+            }
+
+            // A target that took less than it was given is full; going on would leave a gap in it.
+            if (done as usize) < count {
+                break Err(STG_E_MEDIUMFULL.into());
             }
         };
 

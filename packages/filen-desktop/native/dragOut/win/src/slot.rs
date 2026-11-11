@@ -2,7 +2,7 @@
 //! file (`complete`), its failure (`fail`) or an abort (`EndOperation`, quit). Waits are bounded: each step re-checks
 //! whether the caller cancelled the COM call, so a blocked `Read` never outlives Explorer's interest in it.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError, Weak};
 use std::time::Duration;
@@ -116,6 +116,8 @@ struct Inner {
     next_session: u64,
     aborted: bool,
     open: BTreeMap<u32, Open>,
+    // Sessions whose operation ended: they open no ticket (forgotten when the session goes).
+    ended: BTreeSet<u64>,
 }
 
 /// Every open ticket of the process, so `complete`/`fail` from JS find their slot and an abort reaches them all.
@@ -139,6 +141,7 @@ impl Registry {
                 next_session: 1,
                 aborted: false,
                 open: BTreeMap::new(),
+                ended: BTreeSet::new(),
             }),
         }
     }
@@ -152,11 +155,12 @@ impl Registry {
         session
     }
 
-    /// A new waiting ticket of `session`; None once [`Registry::abort_all`] ran.
+    /// A new waiting ticket of `session`; None once [`Registry::abort_all`] ran or the session ended. Checked under
+    /// the lock [`Registry::abort_session`] takes, so a ticket opened while the session ends is aborted with it.
     pub fn open(&self, session: u64) -> Option<(u32, Arc<Slot>)> {
         let mut inner = lock(&self.inner);
 
-        if inner.aborted {
+        if inner.aborted || inner.ended.contains(&session) {
             return None;
         }
 
@@ -202,25 +206,45 @@ impl Registry {
         lock(&self.inner).open.remove(&ticket);
     }
 
-    /// The session's operation ended: its tickets fail.
+    /// The session's operation ended: its tickets fail and it opens no new one.
     pub fn abort_session(&self, session: u64) {
-        self.abort_where(|open| open.session == session);
+        self.abort_where(
+            |inner| {
+                inner.ended.insert(session);
+            },
+            |open| open.session == session,
+        );
+    }
+
+    /// The session is gone; its id is never reused.
+    pub fn forget_session(&self, session: u64) {
+        lock(&self.inner).ended.remove(&session);
     }
 
     /// Quit: every ticket fails and no new one opens.
     pub fn abort_all(&self) {
-        lock(&self.inner).aborted = true;
-        self.abort_where(|_| true);
+        self.abort_where(
+            |inner| {
+                inner.aborted = true;
+            },
+            |_| true,
+        );
     }
 
-    // Slots are aborted outside the registry lock, so the two locks are never held together.
-    fn abort_where(&self, matches: impl Fn(&Open) -> bool) {
-        let slots: Vec<Arc<Slot>> = lock(&self.inner)
-            .open
-            .values()
-            .filter(|open| matches(open))
-            .filter_map(|open| open.slot.upgrade())
-            .collect();
+    // `mark` and the collection share one lock, so no ticket opens between them. Slots are aborted outside the
+    // registry lock, so the two locks are never held together.
+    fn abort_where(&self, mark: impl FnOnce(&mut Inner), matches: impl Fn(&Open) -> bool) {
+        let slots: Vec<Arc<Slot>> = {
+            let mut inner = lock(&self.inner);
+
+            mark(&mut inner);
+            inner
+                .open
+                .values()
+                .filter(|open| matches(open))
+                .filter_map(|open| open.slot.upgrade())
+                .collect()
+        };
 
         for slot in slots {
             slot.abort();
@@ -354,7 +378,41 @@ mod tests {
 
         assert!(registry.complete(other_ticket, PathBuf::from("b")));
         assert_eq!(untouched.wait(STEP, never), Ok(PathBuf::from("b")));
+    }
+
+    #[test]
+    fn an_ended_session_opens_no_ticket_until_forgotten() {
+        let registry = Registry::new();
+        let ended = registry.session();
+        let other = registry.session();
+
+        registry.abort_session(ended);
+        assert!(registry.open(ended).is_none());
+        assert!(registry.open(other).is_some());
+
+        registry.forget_session(ended);
         assert!(registry.open(ended).is_some());
+    }
+
+    #[test]
+    fn a_ticket_opened_while_its_session_ends_never_stays_waiting() {
+        let registry = Arc::new(Registry::new());
+
+        for _ in 0..200 {
+            let session = registry.session();
+            let opener = {
+                let registry = registry.clone();
+                thread::spawn(move || registry.open(session))
+            };
+            registry.abort_session(session);
+
+            // Either refused, or opened before the end and aborted with it.
+            if let Some((_, slot)) = opener.join().expect("join") {
+                assert_eq!(slot.wait(STEP, never), Err(WaitError::Aborted));
+            }
+            assert!(registry.open(session).is_none());
+            registry.forget_session(session);
+        }
     }
 
     #[test]

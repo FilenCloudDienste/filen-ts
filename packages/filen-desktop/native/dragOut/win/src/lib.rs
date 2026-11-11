@@ -25,6 +25,7 @@ mod data_object;
 #[cfg(windows)]
 #[allow(unsafe_code)]
 mod mta;
+// No allow needed: napi-derive's expansions are another crate's macro code, which `unsafe_code` does not report.
 #[cfg(all(windows, not(test)))]
 mod napi_api;
 // Test builds leave out napi_api, the only caller of `drag`.
