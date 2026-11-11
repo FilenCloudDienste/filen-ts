@@ -314,7 +314,7 @@ export interface Chain {
 	run(options: Omit<UpdateOptions, "hooks">, hooks: Omit<UpdateHooks, "beforeReset">): Promise<void>
 }
 
-export async function openChain(name: string, options: Omit<UpdateOptions, "hooks">, artifacts: string): Promise<Chain> {
+export async function openChain(name: string, options: Pick<UpdateOptions, "target" | "work" | "arch">, artifacts: string): Promise<Chain> {
 	const { target, work } = options
 
 	const os = osFor(target)

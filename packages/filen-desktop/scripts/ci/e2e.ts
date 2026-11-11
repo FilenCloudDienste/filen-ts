@@ -17,11 +17,13 @@ import { targetFor, type Arch, type Format, type Platform } from "./targets.ts"
 //   keyring    chain K: the 3.x import without, with a locked and with an unlocked keyring, no sign-in (Linux deb;
 //              scripts/ci/e2e/chains/keyring.ts)
 //   spike-keyring-mac  what safeStorage and the import do with a locked keychain (scripts/ci/e2e/spikes/keyringMac.ts)
+//   dragout    chain D: N installed alone, seeded with the run's session, drive items dragged out onto the OS's file
+//              manager with real OS input (scripts/ci/e2e/chains/dragOut.ts)
 //
 // At --depth deep, both also sign in and drive the apps around the update (scripts/ci/e2e/chains/previous.ts and
 // legacy.ts).
 //
-//   node scripts/ci/e2e.ts --scenario <previous|legacy|older|update-kill|keyring|spike-s1|spike-s7|spike-keyring-mac>
+//   node scripts/ci/e2e.ts --scenario <previous|legacy|older|update-kill|keyring|dragout|spike-s1|spike-s7|spike-keyring-mac>
 //       --platform <win|mac|linux> --arch <x64|arm64> --format <nsis|dmg|deb|rpm|AppImage> --next <dir>
 //       --next-version <v> [--prev <dir> --prev-version <v>] [--signed] [--depth <install|deep>] [--artifacts <dir>]
 //
@@ -71,6 +73,7 @@ const scenario = oneOf("scenario", values.scenario, [
 	"older",
 	"update-kill",
 	"keyring",
+	"dragout",
 	"spike-s1",
 	"spike-s7",
 	"spike-keyring-mac"
@@ -149,6 +152,14 @@ async function main(): Promise<void> {
 			const { runKeyring } = await import("./e2e/chains/keyring.ts")
 
 			await runKeyring({ target, nextDir, nextVersion, work, artifacts: path.resolve(values.artifacts) })
+
+			return
+		}
+
+		case "dragout": {
+			const { runDragOut } = await import("./e2e/chains/dragOut.ts")
+
+			await runDragOut({ target, platform, arch, nextDir, nextVersion, signed, work, artifacts: path.resolve(values.artifacts) })
 
 			return
 		}
