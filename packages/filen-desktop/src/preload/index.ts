@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer, webUtils } from "electron"
 import type {
 	DesktopBridge,
+	DesktopDragState,
 	DesktopLockAttempt,
 	DesktopLockStatus,
 	DesktopLogsExport,
@@ -18,6 +19,8 @@ import type {
 } from "@filen/shared/desktop"
 import {
 	CHANNELS,
+	type DragCall,
+	dragChannel,
 	FILE_PROVIDER_ARG,
 	type FileProviderCall,
 	fileProviderChannel,
@@ -31,6 +34,7 @@ import {
 	transfersChannel,
 	VERSION_ARG_PREFIX
 } from "../shared/channels.ts"
+import { createDragStates } from "./dragStates.ts"
 import { directoryRootOf, uploadInCalls, uploadPaths } from "./uploadPaths.ts"
 
 // The sandboxed preload's process object carries the platform and argv but no Node typings.
@@ -203,6 +207,28 @@ ipcRenderer.on(CHANNELS.transfersEvents, (_event, events: DesktopTransferEvent[]
 
 function transfersInvoke(call: TransfersCall, ...args: unknown[]): Promise<never> {
 	return ipcRenderer.invoke(transfersChannel(call), ...args) as Promise<never>
+}
+
+// Main sends drag states while the page listens, each to the page that prepared the id; it replays the live ones on
+// subscribe, and a listener that joins later gets them from here.
+const dragStates = createDragStates()
+const dragListeners = new Set<(state: DesktopDragState) => void>()
+
+ipcRenderer.on(CHANNELS.dragState, (_event, state: DesktopDragState) => {
+	dragStates.push(state)
+
+	for (const listener of dragListeners) {
+		listener(state)
+	}
+})
+
+function dragInvoke(call: DragCall, ...args: unknown[]): Promise<never> {
+	return ipcRenderer.invoke(dragChannel(call), ...args) as Promise<never>
+}
+
+// A view into a larger buffer would send the whole buffer: only the PNG's own bytes cross.
+function ownBytes(bytes: Uint8Array): Uint8Array {
+	return bytes.byteOffset === 0 && bytes.byteLength === bytes.buffer.byteLength ? bytes : bytes.slice()
 }
 
 function pathOf(file: File): string {
@@ -502,12 +528,41 @@ const bridge: DesktopBridge = {
 		open: id => transfersInvoke("open", id),
 		chooseDownloadDirectory: () => transfersInvoke("chooseDownloadDirectory")
 	},
-	// Until main runs drag-out: every prepare is refused and nothing begins.
 	drag: {
-		prepare: () => Promise.resolve({ refused: { reason: "unavailable" } }),
-		begin: () => Promise.resolve("failed"),
-		release: () => undefined,
-		onState: () => () => undefined
+		prepare: request => dragInvoke("prepare", { items: request.items }),
+		begin: request =>
+			dragInvoke("begin", {
+				id: request.id,
+				image: {
+					png: ownBytes(request.image.png),
+					width: request.image.width,
+					height: request.image.height,
+					scale: request.image.scale
+				}
+			}),
+		// Fire and forget: an unbegun id's end arrives as its state.
+		release: id => {
+			dragInvoke("release", id).catch(() => undefined)
+		},
+		onState: callback => {
+			dragListeners.add(callback)
+
+			if (dragListeners.size === 1) {
+				ipcRenderer.send(CHANNELS.dragSubscribe, true)
+			} else {
+				for (const state of dragStates.latest()) {
+					callback(state)
+				}
+			}
+
+			return () => {
+				// Unsubscribed, main sends nothing more: what is held would go stale.
+				if (dragListeners.delete(callback) && dragListeners.size === 0) {
+					dragStates.clear()
+					ipcRenderer.send(CHANNELS.dragSubscribe, false)
+				}
+			}
+		}
 	},
 	window: {
 		zoom: step => {
