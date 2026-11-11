@@ -1,9 +1,9 @@
 import type { NativeArch } from "./nativeArch.ts"
 import { buildSwiftAddon, type SwiftAddon, swiftAddonOutput } from "./swiftAddon.ts"
 
-// Builds the macOS addon (native/mac: quarantine for downloads) to build/native/mac-<arch>/filen-mac.node
-// (scripts/swiftAddon.ts). It runs wherever the app does, so it targets the app's macOS floor (13.0) and uses nothing
-// newer. A no-op on other hosts.
+// Builds the macOS addon (native/mac: quarantine for downloads, drag-out to Finder) to
+// build/native/mac-<arch>/filen-mac.node (scripts/swiftAddon.ts). It runs wherever the app does, so it targets the app's
+// macOS floor (13.0) and uses nothing newer. A no-op on other hosts.
 //
 // `--dev` builds this machine's architecture only, and nothing while the addon is newer than its sources.
 //

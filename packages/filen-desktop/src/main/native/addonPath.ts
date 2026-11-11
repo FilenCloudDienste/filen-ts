@@ -33,7 +33,7 @@ export function addonPath(ctx: AddonPathContext): string | null {
 	return nativeFilePath(ctx, "sdk-rs.node")
 }
 
-// filen-mac.node, the macOS addon (quarantine); null on other systems.
+// filen-mac.node, the macOS addon (quarantine, drag-out); null on other systems.
 export function macAddonPath(ctx: Omit<AddonPathContext, "env">): string | null {
 	return ctx.platform === "darwin" ? nativeFilePath(ctx, "filen-mac.node") : null
 }

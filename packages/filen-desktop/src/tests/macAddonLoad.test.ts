@@ -6,6 +6,7 @@ import { tmpdir } from "node:os"
 import path from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { macAddonOutput } from "../../scripts/buildMacAddon.ts"
+import type { DragOutAddonMac } from "../main/dragOut/addon.ts"
 import { createQuarantine, type MacAddon } from "../native/quarantine.ts"
 
 // The built addon for this machine, loaded for real: run `node scripts/buildMacAddon.ts --dev` first.
@@ -29,7 +30,7 @@ function quarantineOf(file: string): string {
 }
 
 describe.skipIf(!built)("filen-mac.node", () => {
-	const addon = (): MacAddon => createRequire(import.meta.url)(output ?? "") as MacAddon
+	const addon = (): MacAddon & DragOutAddonMac => createRequire(import.meta.url)(output ?? "") as MacAddon & DragOutAddonMac
 
 	it("quarantine marks a temp file and a directory", async () => {
 		const file = path.join(directory, "a.txt")
@@ -88,4 +89,76 @@ describe.skipIf(!built)("filen-mac.node", () => {
 		expect(quarantineOf(files[0] ?? "")).toMatch(QUARANTINE)
 		expect(quarantineOf(files[9_999] ?? "")).toMatch(QUARANTINE)
 	}, 120_000)
+
+	describe("drag-out", () => {
+		const png = Buffer.from(
+			"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==",
+			"base64"
+		)
+		// A handle the addon must never dereference: every call below fails before it reaches the view.
+		const handle = Buffer.alloc(8)
+
+		handle.writeBigUInt64LE(1n)
+
+		function options(overrides: Record<string, unknown> = {}): Parameters<DragOutAddonMac["begin"]>[0] {
+			return {
+				view: handle,
+				items: [{ name: "a.txt", directory: false, contentType: "public.plain-text" }],
+				image: { png, width: 32, height: 32 },
+				onWrite: () => undefined,
+				onCancel: () => undefined,
+				onEnded: () => undefined,
+				...overrides
+			} as Parameters<DragOutAddonMac["begin"]>[0]
+		}
+
+		it("exports begin, progressAt, progress and fulfil", () => {
+			for (const name of ["begin", "progressAt", "progress", "fulfil"] as const) {
+				expect(addon()[name]).toBeTypeOf("function")
+			}
+		})
+
+		it("begin with a 4-byte or an all-zero 8-byte view buffer throws invalidArgument", () => {
+			const invalid = expect.objectContaining({ code: "invalidArgument" })
+
+			expect(() => addon().begin(options({ view: Buffer.alloc(4, 1) }))).toThrow(invalid)
+			expect(() => addon().begin(options({ view: Buffer.alloc(8) }))).toThrow(invalid)
+			expect(() => addon().begin(options({ view: "handle" }))).toThrow(invalid)
+		})
+
+		it("begin refuses names a file system would split, empty item lists and bad images with invalidArgument", () => {
+			const invalid = expect.objectContaining({ code: "invalidArgument" })
+			const item = (name: string) => ({ items: [{ name, directory: false, contentType: null }] })
+
+			for (const name of ["", ".", "..", "a/b", "a\u0000b"]) {
+				expect(() => addon().begin(options(item(name)))).toThrow(invalid)
+			}
+
+			expect(() => addon().begin(options({ items: [] }))).toThrow(invalid)
+			expect(() => addon().begin(options({ image: { png: Buffer.from("not a png"), width: 32, height: 32 } }))).toThrow(invalid)
+			expect(() => addon().begin(options({ image: { png, width: 0, height: 32 } }))).toThrow(invalid)
+			expect(() => addon().begin(options({ onWrite: null }))).toThrow(invalid)
+		})
+
+		it("begin without the primary button held throws buttonReleased before it touches the view", () => {
+			expect(() => addon().begin(options())).toThrow(expect.objectContaining({ code: "buttonReleased" }))
+		})
+
+		it("fulfil, progress and progressAt of an unknown ticket are ignored", () => {
+			expect(addon().fulfil(123_456, null)).toBeUndefined()
+			expect(addon().fulfil(123_456, "cancelled")).toBeUndefined()
+			expect(addon().progress(123_456, 1, 2)).toBeUndefined()
+			expect(addon().progressAt(123_456, path.join(directory, "a.filendl"))).toBeUndefined()
+		})
+
+		it("ticket calls with the wrong argument types throw invalidArgument", () => {
+			const invalid = expect.objectContaining({ code: "invalidArgument" })
+			const untyped = addon() as unknown as Record<string, (...args: unknown[]) => unknown>
+
+			expect(() => untyped["fulfil"]?.("1", null)).toThrow(invalid)
+			expect(() => untyped["fulfil"]?.(1, 2)).toThrow(invalid)
+			expect(() => untyped["progress"]?.(1, -1, 2)).toThrow(invalid)
+			expect(() => untyped["progressAt"]?.(1, "")).toThrow(invalid)
+		})
+	})
 })

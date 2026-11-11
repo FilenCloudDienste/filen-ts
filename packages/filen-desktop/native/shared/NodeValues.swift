@@ -70,6 +70,69 @@ func stringArgument(_ env: napi_env, _ value: napi_value?, maxBytes: Int) -> Str
 	utf8Argument(env, value, maxBytes: maxBytes).map { String(decoding: $0, as: UTF8.self) }
 }
 
+// A number argument; nil for anything else, NaN and the infinities included.
+func numberArgument(_ env: napi_env, _ value: napi_value?) -> Double? {
+	var type = napi_undefined
+	var result = 0.0
+
+	guard napi_typeof(env, value, &type) == napi_ok, type == napi_number, napi_get_value_double(env, value, &result) == napi_ok, result.isFinite else {
+		return nil
+	}
+
+	return result
+}
+
+func booleanArgument(_ env: napi_env, _ value: napi_value?) -> Bool? {
+	var type = napi_undefined
+	var result = false
+
+	guard napi_typeof(env, value, &type) == napi_ok, type == napi_boolean, napi_get_value_bool(env, value, &result) == napi_ok else {
+		return nil
+	}
+
+	return result
+}
+
+func isNullish(_ env: napi_env, _ value: napi_value?) -> Bool {
+	var type = napi_undefined
+
+	return napi_typeof(env, value, &type) == napi_ok && (type == napi_null || type == napi_undefined)
+}
+
+func isFunction(_ env: napi_env, _ value: napi_value?) -> Bool {
+	var type = napi_undefined
+
+	return napi_typeof(env, value, &type) == napi_ok && type == napi_function
+}
+
+// A copy of a Uint8Array (a Buffer included) of at most maxBytes bytes; nil for anything else.
+func bytesArgument(_ env: napi_env, _ value: napi_value?, maxBytes: Int) -> Data? {
+	var isTypedArray = false
+	var type = napi_int8_array
+	var length = 0
+	var bytes: UnsafeMutableRawPointer?
+
+	guard
+		napi_is_typedarray(env, value, &isTypedArray) == napi_ok, isTypedArray,
+		napi_get_typedarray_info(env, value, &type, &length, &bytes, nil, nil) == napi_ok, type == napi_uint8_array, length <= maxBytes
+	else {
+		return nil
+	}
+
+	guard let bytes, length > 0 else {
+		return Data()
+	}
+
+	return Data(bytes: bytes, count: length)
+}
+
+// Throws an Error carrying `code` into JS; the callback then returns nil.
+func throwError(_ env: napi_env, code: String, _ message: String) -> napi_value? {
+	napi_throw_error(env, code, message)
+
+	return nil
+}
+
 // Sets each method on exports; false when Node-API refused one.
 func defineMethods(_ env: napi_env, _ exports: napi_value?, _ methods: [(String, napi_callback)]) -> Bool {
 	for (name, method) in methods {

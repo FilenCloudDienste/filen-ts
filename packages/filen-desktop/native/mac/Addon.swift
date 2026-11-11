@@ -1,8 +1,8 @@
 import Foundation
 import NodeAPI
 
-// The macOS addon filen-mac.node: quarantine for downloads. Arguments are read on the calling JS thread, the work runs
-// off it and settles a promise.
+// The macOS addon filen-mac.node: quarantine for downloads (the work runs off the JS thread and settles a promise) and
+// drag-out to Finder (DragOut.swift). Arguments are read on the calling JS thread.
 
 private let maxPathBytes = 4096
 
@@ -114,9 +114,7 @@ public func registerModule(env: napi_env?, exports: napi_value?) -> napi_value? 
 		return nil
 	}
 
-	let methods: [(String, napi_callback)] = [
-		("quarantine", quarantinePaths)
-	]
+	let methods: [(String, napi_callback)] = [("quarantine", quarantinePaths)] + dragOutMethods
 
 	return defineMethods(env, exports, methods) ? exports : nil
 }
