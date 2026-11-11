@@ -94,7 +94,7 @@ import { isPermissionAllowed } from "./permissions.ts"
 import { DEFAULT_PREFS, loadPrefs, prefsPatchSchema, type PrefsStore } from "./prefs.ts"
 import { type HostProxy, PROXY_RESOLVE_WAIT_MS, resolveHostProxy } from "./proxy.ts"
 import { registerAppProtocol, registerDevProxy } from "./serve.ts"
-import { shouldConfirmQuit } from "./quitConfirm.ts"
+import { createSessionEnd, shouldConfirmQuit, unloadGuardAsks } from "./quitConfirm.ts"
 import { redact } from "./redact.ts"
 import { registerSessionRecoveryIpc, sessionDiscarder, type VaultDependent } from "./sessionRecovery.ts"
 import { registerBrowserCacheIpc, sessionBrowserCache } from "./browserCache.ts"
@@ -857,6 +857,9 @@ function currentPrefs() {
 
 let mainWindow: BrowserWindow | null = null
 let quitting = false
+const sessionEnd = createSessionEnd(source => {
+	info(`quit: the OS session ends (${source}); no confirm`)
+})
 // Set once the update installer is launched: the page's unload confirm was answered for it (or there was nothing to
 // confirm), and a cancel could not stop the installer anyway.
 let installingUpdate = false
@@ -1215,8 +1218,12 @@ function createWindow(): void {
 		}
 	})
 
+	sessionEnd.watchWindow(window)
 	window.webContents.on("will-prevent-unload", event => {
-		if (installingUpdate || confirmUnload(window, shellText(quitting ? "shellBusyQuit" : "shellBusyLeave"))) {
+		if (
+			!unloadGuardAsks({ installingUpdate, sessionEnding: sessionEnd.ending() }) ||
+			confirmUnload(window, shellText(quitting ? "shellBusyQuit" : "shellBusyLeave"))
+		) {
 			event.preventDefault()
 		} else {
 			quitting = false
@@ -1612,7 +1619,15 @@ if (!instanceLock.held) {
 	// Native transfers hold no page unload guard: main asks itself. Quit never waits for them; will-quit stops the host,
 	// which aborts them.
 	app.on("before-quit", event => {
-		if (shouldConfirmQuit({ unloadHolds, nativeTransfers: transfersService.active(), installingUpdate, confirmed: quitting })) {
+		if (
+			shouldConfirmQuit({
+				unloadHolds,
+				nativeTransfers: transfersService.active(),
+				installingUpdate,
+				confirmed: quitting,
+				sessionEnding: sessionEnd.ending()
+			})
+		) {
 			if (!confirmUnload(mainWindow, shellText("shellBusyQuit"))) {
 				event.preventDefault()
 				info("quit: canceled while native transfers run")
@@ -2065,6 +2080,7 @@ if (!instanceLock.held) {
 			})
 			powerMonitor.on("unlock-screen", lockInactivity.check)
 			powerMonitor.on("lock-screen", lockNow)
+			sessionEnd.watchPowerMonitor(powerMonitor)
 
 			// Without its headers the web app cannot run (no cross-origin isolation, no CSP), so a missing file is fatal.
 			if (webDevServer === undefined) {
