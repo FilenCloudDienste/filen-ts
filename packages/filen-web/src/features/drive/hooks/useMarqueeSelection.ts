@@ -3,6 +3,8 @@ import { type DriveViewMode } from "@/features/drive/lib/preferences"
 import { isToggleModifier } from "@/features/drive/lib/listbox"
 import { isScrollbarPress } from "@/features/drive/lib/clickAway.logic"
 import {
+	AUTO_SCROLL_EDGE_PX,
+	AUTO_SCROLL_MAX_SPEED_PX,
 	clampMarqueeRect,
 	marqueeAutoScrollTop,
 	marqueeAutoScrollVelocity,
@@ -18,10 +20,6 @@ import { createListenerSet } from "@/lib/listenerSet"
 import { useLatestRef } from "@/lib/useLatestRef"
 import { exceedsDragThreshold, listenWindowDrag } from "@/lib/windowDrag"
 
-// Windows-Explorer edge auto-scroll: within this many px of the container's top/bottom, the listing
-// scrolls while marqueeing, at up to this many px per frame (ramped by proximity).
-const AUTO_SCROLL_EDGE_PX = 32
-const AUTO_SCROLL_MAX_SPEED_PX = 18
 const EMPTY_KEYS: ReadonlySet<string> = new Set()
 
 // The one thing a marqueeable item has to expose: a stable identity for the additive-union set.

@@ -204,6 +204,12 @@ export function marqueeScrollBounds(
 	return { top, bottom: top + scrollHeight, left, right: left + clientWidth }
 }
 
+// Windows-Explorer edge auto-scroll: within this many px of the container's top/bottom, the listing
+// scrolls while marqueeing or dragging items (pointerDrag.ts), at up to this many px per frame (ramped by
+// proximity).
+export const AUTO_SCROLL_EDGE_PX = 32
+export const AUTO_SCROLL_MAX_SPEED_PX = 18
+
 // One auto-scroll frame's next scrollTop, kept inside the real scroll range: a listing whose content
 // fits never moves, and one that overflows stops at either end.
 export function marqueeAutoScrollTop(scrollTop: number, velocity: number, scrollHeight: number, clientHeight: number): number {
