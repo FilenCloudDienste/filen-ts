@@ -13,7 +13,8 @@ export const DEFAULT_PREFS: DesktopPrefs = {
 	contactNotifications: true,
 	syncNotifications: true,
 	// Silent unless the user opts in: notifications carry no sound by default.
-	notificationSound: false
+	notificationSound: false,
+	downloadDirectory: null
 }
 
 // What the renderer may send: known fields only, each optional.

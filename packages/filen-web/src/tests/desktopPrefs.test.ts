@@ -9,7 +9,8 @@ const PREFS: DesktopPrefs = {
 	chatNotifications: true,
 	contactNotifications: true,
 	syncNotifications: true,
-	notificationSound: true
+	notificationSound: true,
+	downloadDirectory: null
 }
 
 const prefs = vi.hoisted(() => ({ get: vi.fn(), set: vi.fn() }))

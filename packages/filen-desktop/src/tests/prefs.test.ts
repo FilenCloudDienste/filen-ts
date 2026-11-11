@@ -63,7 +63,8 @@ describe("parsePrefs", () => {
 			chatNotifications: true,
 			contactNotifications: true,
 			syncNotifications: true,
-			notificationSound: false
+			notificationSound: false,
+			downloadDirectory: null
 		})
 	})
 })

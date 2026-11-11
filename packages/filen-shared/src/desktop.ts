@@ -48,7 +48,8 @@ export interface DesktopSessionVault {
 // Shell preferences, kept by main in userData. `launchAtLogin` starts the app hidden. `chatNotifications` or
 // `contactNotifications` also keeps the hidden window's page alive, since it owns the socket those come from;
 // `syncNotifications` covers main's own sync and mount alerts. `notificationSound` lets both play the OS sound.
-// `lockAfterSeconds` applies only while a PIN is set.
+// `lockAfterSeconds` applies only while a PIN is set. `downloadDirectory`: where downloads go without asking, null to ask
+// every time; only main's own directory picker sets a path.
 export interface DesktopPrefs {
 	minimizeToTray: boolean
 	startMinimized: boolean
@@ -58,6 +59,7 @@ export interface DesktopPrefs {
 	contactNotifications: boolean
 	syncNotifications: boolean
 	notificationSound: boolean
+	downloadDirectory: string | null
 }
 
 export interface DesktopPrefsStore {
@@ -181,6 +183,7 @@ export interface DesktopBridge {
 	readonly sync: DesktopSync
 	readonly mounts: DesktopMounts
 	readonly fileProvider: DesktopFileProvider
+	readonly transfers: DesktopTransfers
 	readonly window: DesktopWindowControls
 	setTitleBarColors(colors: TitleBarColors): void
 	// Calls back with the current state right away when it is known, then on every change. Returns the unsubscribe.
@@ -897,4 +900,146 @@ export interface DesktopFileProvider {
 	reveal(): Promise<DesktopFileProviderResult<null>>
 	// Opens System Settings where extensions are switched on.
 	openSettings(): Promise<void>
+}
+
+// Drive uploads and downloads the native host runs on real paths. SDK values cross as `stringifyEnvelope` strings
+// (@filen/shared/session, bigint-safe) of the wasm shapes the page holds; main never reads them.
+
+// stringifyEnvelope of a wasm-shaped SDK value; at most 8 KiB (a File or Dir is under 2 KiB).
+export type DesktopSdkWire = string
+
+// The variant the page already knows an item to be, so the host never has to tell untagged wasm unions apart.
+export type DesktopSdkVariant =
+	| "AnyFile.File"
+	| "AnyFile.Shared"
+	| "AnyFile.Linked"
+	| "AnyNormalDir.Dir"
+	| "AnyNormalDir.Root"
+	| "AnyDirWithContext.Normal.Dir"
+	| "AnyDirWithContext.Normal.Root"
+	| "AnyDirWithContext.Shared.Dir"
+	| "AnyDirWithContext.Shared.Root"
+	| "AnyDirWithContext.Linked.Dir"
+	| "AnyDirWithContext.Linked.Root"
+
+export interface DesktopSdkRef {
+	variant: DesktopSdkVariant
+	value: DesktopSdkWire
+}
+
+export type DesktopTransferDirection = "upload" | "download"
+
+export type DesktopTransferKind = "file" | "directory"
+
+// "drag": a drag out of the window started it.
+export type DesktopTransferOrigin = "page" | "drag"
+
+export type DesktopTransferErrorCode =
+	| "hostUnavailable"
+	| "timeout"
+	| "unauthenticated"
+	| "interrupted"
+	| "invalidItem"
+	| "localMissing"
+	| "localDenied"
+	| "localFull"
+	| "localInUse"
+	| "storageFull"
+	| "unknown"
+
+// `kind`: the SDK's error kind; `message`: for the log only.
+export interface DesktopTransferError {
+	code: DesktopTransferErrorCode
+	kind?: string
+	message?: string
+}
+
+export type DesktopTransferResult<T> = { ok: true; value: T } | { ok: false; error: DesktopTransferError }
+
+// A directory transfer's files; `failedBytes`: the size of the failed ones, so progress can still reach its total.
+export interface DesktopTransferFiles {
+	total: number
+	done: number
+	failed: number
+	failedBytes: number
+}
+
+// `group`: the transfers one call started share it. `files`: null for a single file. `startedAt` is epoch ms.
+// `revealable`: a finished download main can show or open (false for drag temp copies and uploads).
+export interface DesktopTransfer {
+	id: string
+	direction: DesktopTransferDirection
+	kind: DesktopTransferKind
+	origin: DesktopTransferOrigin
+	group: string
+	name: string
+	parentUuid: string | null
+	size: number
+	bytes: number
+	files: DesktopTransferFiles | null
+	paused: boolean
+	startedAt: number
+	revealable: boolean
+}
+
+export interface DesktopTransferProgress {
+	id: string
+	size: number
+	bytes: number
+	files: DesktopTransferFiles | null
+}
+
+// "completedWithErrors": a directory transfer that ended with failed or skipped entries.
+export type DesktopTransferOutcome = "done" | "completedWithErrors" | "error" | "cancelled"
+
+// `uploaded`: the File (file upload) or Dir (directory upload) the upload created.
+export type DesktopTransferEvent =
+	| { t: "snapshot"; transfers: DesktopTransfer[] }
+	| { t: "added"; transfers: DesktopTransfer[] }
+	| { t: "progress"; updates: DesktopTransferProgress[] }
+	| { t: "paused"; ids: string[]; paused: boolean }
+	| { t: "settled"; id: string; outcome: DesktopTransferOutcome; error?: DesktopTransferError; uploaded?: DesktopSdkWire }
+
+export interface DesktopDownloadItem {
+	kind: DesktopTransferKind
+	ref: DesktopSdkRef
+	name: string
+	size: number
+}
+
+// `ref`: an AnyNormalDir.Dir or AnyNormalDir.Root.
+export interface DesktopUploadParent {
+	uuid: string
+	ref: DesktopSdkRef
+}
+
+export type DesktopTransferStart = { status: "canceled" } | { status: "started"; ids: string[] }
+
+// `skipped`: indexes of the given Files that have no local path.
+export type DesktopUploadStart = { status: "canceled" } | { status: "started"; ids: string[]; skipped: number[] }
+
+export type DesktopDownloadDirectoryChoice = { status: "canceled" } | { status: "chosen"; path: string }
+
+export interface DesktopTransfers {
+	// To the download directory pref when set, else a save dialog (one file) or a directory picker. `ask`: always the
+	// directory picker ("Download to…").
+	download(items: DesktopDownloadItem[], options?: { ask?: boolean }): Promise<DesktopTransferResult<DesktopTransferStart>>
+	// Files the page holds (drops, web-input picks). A File whose path is a directory uploads as one directory (main
+	// stats it). `asDirectory`: the Files are one webkitdirectory input's contents; the picked directory uploads as one.
+	upload(
+		files: File[],
+		parent: DesktopUploadParent,
+		options?: { asDirectory?: boolean }
+	): Promise<DesktopTransferResult<DesktopUploadStart>>
+	// Main's own open dialog, the picked paths straight to the host.
+	pickUpload(kind: DesktopTransferKind, parent: DesktopUploadParent): Promise<DesktopTransferResult<DesktopTransferStart>>
+	cancel(ids: string[]): void
+	setPaused(ids: string[], paused: boolean): void
+	// Calls back with a snapshot first, then with every change. Returns the unsubscribe.
+	onEvents(callback: (event: DesktopTransferEvent) => void): () => void
+	// Shows or opens a finished, revealable download.
+	reveal(id: string): Promise<DesktopTransferResult<null>>
+	open(id: string): Promise<DesktopTransferResult<null>>
+	// Main's directory picker for the download directory pref; a chosen path is stored before this resolves.
+	chooseDownloadDirectory(): Promise<DesktopDownloadDirectoryChoice>
 }

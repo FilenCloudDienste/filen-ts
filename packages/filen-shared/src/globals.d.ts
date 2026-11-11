@@ -8,3 +8,8 @@ declare function clearTimeout(timeoutId: number): void
 declare class TextEncoder {
 	encode(input?: string): Uint8Array
 }
+
+// A page's File (DOM; React Native's Blob module), named only as a type here.
+interface File {
+	readonly name: string
+}

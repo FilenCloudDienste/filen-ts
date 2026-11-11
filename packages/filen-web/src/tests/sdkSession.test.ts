@@ -316,6 +316,17 @@ describe("desktop vault", () => {
 			sync: unusedSync,
 			mounts: unusedMounts,
 			fileProvider: { supported: false, state: unused, enable: unused, disable: unused, reveal: unused, openSettings: unused },
+			transfers: {
+				download: unused,
+				upload: unused,
+				pickUpload: unused,
+				cancel: () => undefined,
+				setPaused: () => undefined,
+				onEvents: () => () => undefined,
+				reveal: unused,
+				open: unused,
+				chooseDownloadDirectory: unused
+			},
 			window: { zoom: () => undefined, toggleFullScreen: () => undefined, close: () => undefined },
 			setTitleBarColors: () => undefined,
 			onWindowState: () => () => undefined,

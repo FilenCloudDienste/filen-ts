@@ -10,6 +10,7 @@ import type {
 	DesktopPlatform,
 	DesktopSyncActivity,
 	DesktopSyncOverview,
+	DesktopTransferResult,
 	WindowState
 } from "@filen/shared/desktop"
 import {
@@ -180,6 +181,16 @@ function mountsInvoke(call: MountsCall, ...args: unknown[]): Promise<never> {
 
 function fileProviderInvoke(call: FileProviderCall): Promise<never> {
 	return ipcRenderer.invoke(fileProviderChannel(call)) as Promise<never>
+}
+
+// Until main runs transfers, every call reports the host unavailable and nothing is ever sent.
+function transfersUnavailable(): Promise<DesktopTransferResult<never>> {
+	return Promise.resolve({
+		ok: false,
+		error: {
+			code: "hostUnavailable"
+		}
+	})
 }
 
 const bridge: DesktopBridge = {
@@ -411,6 +422,20 @@ const bridge: DesktopBridge = {
 		disable: () => fileProviderInvoke("disable"),
 		reveal: () => fileProviderInvoke("reveal"),
 		openSettings: () => fileProviderInvoke("openSettings")
+	},
+	transfers: {
+		download: transfersUnavailable,
+		upload: transfersUnavailable,
+		pickUpload: transfersUnavailable,
+		cancel: () => undefined,
+		setPaused: () => undefined,
+		onEvents: () => () => undefined,
+		reveal: transfersUnavailable,
+		open: transfersUnavailable,
+		chooseDownloadDirectory: () =>
+			Promise.resolve({
+				status: "canceled"
+			})
 	},
 	window: {
 		zoom: step => {
