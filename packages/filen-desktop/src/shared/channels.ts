@@ -1,4 +1,11 @@
-import type { DesktopFileProvider, DesktopMounts, DesktopSessionRead, DesktopSync, DesktopTransfers } from "@filen/shared/desktop"
+import type {
+	DesktopDrag,
+	DesktopFileProvider,
+	DesktopMounts,
+	DesktopSessionRead,
+	DesktopSync,
+	DesktopTransfers
+} from "@filen/shared/desktop"
 
 // IPC channel names shared by main and the preload; the renderer never sees them.
 export const CHANNELS = {
@@ -47,7 +54,9 @@ export const CHANNELS = {
 	mountsStats: "mounts:stats",
 	transfersSubscribe: "transfers:subscribe",
 	// Payload: DesktopTransferEvent[], what one host round (or one service step) changed, in order.
-	transfersEvents: "transfers:events"
+	transfersEvents: "transfers:events",
+	// Payload: DesktopDragState.
+	dragState: "drag:state"
 } as const
 
 // The sync bridge's requests, each answered on its own channel (syncChannel).
@@ -140,6 +149,15 @@ export const TRANSFER_ITEMS_MAX = 10_000
 
 export function transfersChannel(call: TransfersCall): string {
 	return `transfers:call:${call}`
+}
+
+// The drag-out bridge's requests, each answered on its own channel (dragChannel); `onState` listens on dragState.
+export const DRAG_CALLS = ["prepare", "begin", "release"] as const satisfies readonly (keyof DesktopDrag)[]
+
+export type DragCall = (typeof DRAG_CALLS)[number]
+
+export function dragChannel(call: DragCall): string {
+	return `drag:call:${call}`
 }
 
 // The File Provider bridge's requests, each answered on its own channel (fileProviderChannel).

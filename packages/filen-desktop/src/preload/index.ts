@@ -502,6 +502,13 @@ const bridge: DesktopBridge = {
 		open: id => transfersInvoke("open", id),
 		chooseDownloadDirectory: () => transfersInvoke("chooseDownloadDirectory")
 	},
+	// Until main runs drag-out: every prepare is refused and nothing begins.
+	drag: {
+		prepare: () => Promise.resolve({ refused: { reason: "unavailable" } }),
+		begin: () => Promise.resolve("failed"),
+		release: () => undefined,
+		onState: () => () => undefined
+	},
 	window: {
 		zoom: step => {
 			ipcRenderer.send(CHANNELS.windowZoom, step)

@@ -327,6 +327,7 @@ describe("desktop vault", () => {
 				open: unused,
 				chooseDownloadDirectory: unused
 			},
+			drag: { prepare: unused, begin: unused, release: () => undefined, onState: () => () => undefined },
 			window: { zoom: () => undefined, toggleFullScreen: () => undefined, close: () => undefined },
 			setTitleBarColors: () => undefined,
 			onWindowState: () => () => undefined,

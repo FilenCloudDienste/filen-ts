@@ -187,6 +187,7 @@ export interface DesktopBridge {
 	readonly mounts: DesktopMounts
 	readonly fileProvider: DesktopFileProvider
 	readonly transfers: DesktopTransfers
+	readonly drag: DesktopDrag
 	readonly window: DesktopWindowControls
 	setTitleBarColors(colors: TitleBarColors): void
 	// Calls back with the current state right away when it is known, then on every change. Returns the unsubscribe.
@@ -1045,4 +1046,43 @@ export interface DesktopTransfers {
 	open(id: string): Promise<DesktopTransferResult<null>>
 	// Main's directory picker for the download directory pref; a chosen path is stored before this resolves.
 	chooseDownloadDirectory(): Promise<DesktopDownloadDirectoryChoice>
+}
+
+// The drag image: a PNG of at most 640×160 CSS px, `scale` (at most 3) device pixels per CSS px.
+export interface DesktopDragImage {
+	png: Uint8Array
+	width: number
+	height: number
+	scale: number
+}
+
+// Why a drag-out was refused. "tooLarge"/"tooMany": past a staged copy's 512 MiB / 2,000 entries (Linux) or past
+// Windows' 10,000 descriptors; "pathTooLong": a Windows path past 259 UTF-16 units; "offline": decided by the page's
+// own online state, never sent by main; "unavailable": no addon, no host, or signed out.
+export type DesktopDragRefusal =
+	| { reason: "tooLarge"; bytes: number; limit: number }
+	| { reason: "tooMany"; entries: number; limit: number }
+	| { reason: "pathTooLong"; path: string }
+	| { reason: "offline" }
+	| { reason: "unavailable" }
+
+export type DesktopDragPrepared = { id: string } | { refused: DesktopDragRefusal }
+
+// "ended": the OS drag finished without telling drop from cancel (Linux). "notReady": the items are still being staged.
+export type DesktopDragOutcome = "dropped" | "cancelled" | "ended" | "notReady" | "failed"
+
+export type DesktopDragState =
+	| { id: string; state: "staging"; bytes: number; total: number }
+	| { id: string; state: "ready" }
+	| { id: string; state: "ended"; outcome: DesktopDragOutcome }
+
+// Drive items dragged out of the window onto the OS. The page prepares once the pointer leaves the window, then begins
+// the OS drag with the id; an id answers only the page that prepared it.
+export interface DesktopDrag {
+	prepare(request: { items: DesktopDownloadItem[] }): Promise<DesktopDragPrepared>
+	begin(request: { id: string; image: DesktopDragImage }): Promise<DesktopDragOutcome>
+	// An unbegun id ends with "cancelled"; a begun one is the OS's to end.
+	release(id: string): void
+	// Calls back with the latest state of every live id first, then on every change. Returns the unsubscribe.
+	onState(callback: (state: DesktopDragState) => void): () => void
 }
