@@ -99,7 +99,9 @@ vi.mock("@/features/drive/queries/drive", async importOriginal => ({
 	...(await importOriginal<typeof import("@/features/drive/queries/drive")>()),
 	findCachedListingItem
 }))
-vi.mock("@/queries/account", () => ({ accountQueryGet: () => ({ rootDirUuid: ROOT }) }))
+const account = vi.hoisted(() => ({ loaded: true }))
+
+vi.mock("@/queries/account", () => ({ accountQueryGet: () => (account.loaded ? { rootDirUuid: ROOT } : undefined) }))
 
 import { readFileSync } from "node:fs"
 import { parseEnvelope } from "@filen/shared/session"
@@ -164,6 +166,7 @@ let stopFeed: () => void = () => undefined
 beforeEach(() => {
 	vi.clearAllMocks()
 	convertPreference.on = false
+	account.loaded = true
 	stopFeed()
 	useTransfersStore.setState({ transfers: [], uploadBatches: {}, speedSamples: [], rowSpeedSamples: {}, batchSpeedSamples: {} })
 	stopFeed = startNativeTransfersFeed()
@@ -341,6 +344,51 @@ describe("native transfers feed", () => {
 		expect(toastError).toHaveBeenCalledOnce()
 	})
 
+	it("failed downloads of one group show one toast", () => {
+		applyNativeEvent({
+			t: "added",
+			transfers: [native(), native({ id: testUuid("b"), name: "b.txt" }), native({ id: testUuid("c"), name: "c.txt" })]
+		})
+		applyNativeEvent({ t: "settled", id: testUuid("a"), outcome: "error", error: { code: "localFull" } })
+		applyNativeEvent({ t: "settled", id: testUuid("b"), outcome: "error", error: { code: "localFull" } })
+
+		expect(toastError).not.toHaveBeenCalled()
+
+		applyNativeEvent({ t: "settled", id: testUuid("c"), outcome: "done" })
+
+		expect(toastError).toHaveBeenCalledOnce()
+	})
+
+	it("after the feed restarts, a snapshot's known rows end their group as before", () => {
+		const group = testUuid("g")
+
+		applyNativeEvent({
+			t: "added",
+			transfers: [
+				native({ id: testUuid("f1"), direction: "upload", group, parentUuid: PARENT, revealable: false }),
+				native({ id: testUuid("f2"), direction: "upload", group, parentUuid: PARENT, revealable: false })
+			]
+		})
+		stopFeed()
+		stopFeed = startNativeTransfersFeed()
+		emit({
+			t: "snapshot",
+			transfers: [
+				native({ id: testUuid("f1"), direction: "upload", group, parentUuid: PARENT, revealable: false }),
+				native({ id: testUuid("f2"), direction: "upload", group, parentUuid: PARENT, revealable: false })
+			]
+		} satisfies DesktopTransferEvent)
+		applyNativeEvent({ t: "settled", id: testUuid("f1"), outcome: "done" })
+
+		expect(toastSuccess).not.toHaveBeenCalled()
+
+		applyNativeEvent({ t: "settled", id: testUuid("f2"), outcome: "done" })
+
+		expect(toastSuccess).toHaveBeenCalledOnce()
+		expect(invalidateUploadedDirectorySizes).toHaveBeenCalledWith(PARENT, [])
+		expect(useTransfersStore.getState().uploadBatches).toEqual({})
+	})
+
 	it("a storage refusal reacts once per group", () => {
 		const group = testUuid("g")
 
@@ -464,6 +512,7 @@ describe("native entry points: downloads", () => {
 	it("startNativeDownloads asks the host once and says it started", async () => {
 		const items = [fileDriveItem(), dirDriveItem()]
 
+		bridge.transfers.download.mockResolvedValueOnce({ ok: true, value: { status: "started", ids: ["x", "y"] } })
 		await startNativeDownloads(items, { ask: true })
 
 		expect(bridge.transfers.download).toHaveBeenCalledWith(items.map(downloadItemOf), { ask: true })
@@ -477,7 +526,30 @@ describe("native entry points: downloads", () => {
 		await startNativeDownloads([fileDriveItem()])
 
 		expect(toastTransferStarted).not.toHaveBeenCalled()
-		expect(toastError).toHaveBeenCalledWith("Filen isn't allowed to read or write there.")
+		expect(toastError).toHaveBeenCalledWith("Filen isn't allowed to read or write there.", expect.anything())
+	})
+
+	it("a failed start of several items shows one toast for its rows and the failure", async () => {
+		const group = testUuid("g")
+
+		bridge.transfers.download.mockImplementationOnce(() => {
+			emit({
+				t: "added",
+				transfers: [native({ group }), native({ id: testUuid("b"), name: "b.txt", group })]
+			} satisfies DesktopTransferEvent)
+
+			for (const id of [testUuid("a"), testUuid("b")]) {
+				emit({ t: "settled", id, outcome: "error", error: { code: "hostUnavailable" } } satisfies DesktopTransferEvent)
+			}
+
+			return Promise.resolve({ ok: false, error: { code: "hostUnavailable" } })
+		})
+		await startNativeDownloads([fileDriveItem(), fileDriveItem("b.txt")])
+
+		const toastIds = new Set(toastError.mock.calls.map(([, options]) => (options as { id?: string } | undefined)?.id))
+
+		expect(toastError).toHaveBeenCalled()
+		expect([...toastIds]).toEqual([expect.any(String)])
 	})
 
 	it("public-link, archive-entry and Download as downloads stay on the web path", () => {
@@ -577,6 +649,18 @@ describe("native entry points: uploads", () => {
 
 		expect(bridge.transfers.pickUpload).toHaveBeenCalledWith("directory", expect.objectContaining({ uuid: PARENT }))
 		expect(toastTransferStarted).toHaveBeenCalledWith({ direction: "upload", name: "", count: 2, noun: "items" })
+	})
+
+	it("says why nothing uploads while the account's root directory is unknown", async () => {
+		account.loaded = false
+
+		await pickNativeUpload("file", null)
+		await startNativeUploads([localFile("a.txt")], null)
+		await startNativeUploads([localFile("a.txt")], null, { asDirectory: true })
+
+		expect(bridge.transfers.pickUpload).not.toHaveBeenCalled()
+		expect(bridge.transfers.upload).not.toHaveBeenCalled()
+		expect(toastError).toHaveBeenCalledTimes(3)
 	})
 })
 

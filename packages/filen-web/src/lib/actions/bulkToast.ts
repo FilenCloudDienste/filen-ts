@@ -10,8 +10,9 @@ export interface SummaryKeys {
 }
 
 // One summary toast for independently-run items, so a partial failure surfaces alongside the
-// successes. Nothing ran (all cancelled, or an empty selection): nothing to report.
-export function toastSummary(succeeded: number, failed: number, keys: SummaryKeys): void {
+// successes. Nothing ran (all cancelled, or an empty selection): nothing to report. `failureId`: the
+// toast a partial failure replaces.
+export function toastSummary(succeeded: number, failed: number, keys: SummaryKeys, failureId?: string): void {
 	if (succeeded === 0 && failed === 0) {
 		return
 	}
@@ -21,7 +22,13 @@ export function toastSummary(succeeded: number, failed: number, keys: SummaryKey
 		return
 	}
 
-	toast.error(i18n.t(keys.withFailures, { count: succeeded, failed }))
+	const text = i18n.t(keys.withFailures, { count: succeeded, failed })
+
+	if (failureId === undefined) {
+		toast.error(text)
+	} else {
+		toast.error(text, { id: failureId })
+	}
 }
 
 export function toastBulkSummary(outcome: BulkOutcome<unknown>, keys: SummaryKeys): void {

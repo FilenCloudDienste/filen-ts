@@ -11,6 +11,7 @@ import { parseEnvelope } from "@filen/shared/session"
 import { sumBytes } from "@filen/shared"
 import { desktopBridge } from "@/lib/desktop"
 import { log } from "@/lib/log"
+import { i18n } from "@/lib/i18n"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { toastSummary } from "@/lib/actions/bulkToast"
 import { accountQueryGet } from "@/queries/account"
@@ -32,10 +33,9 @@ import {
 	startUploads
 } from "@/features/drive/lib/upload"
 import { isDirectoryEntry, readEntriesBatch, startDirectoryUpload } from "@/features/drive/lib/uploadDirectory"
-import { toastDownloadFailed } from "@/features/transfers/lib/settle"
 import { toastTransferStarted } from "@/features/transfers/lib/transferStartToast"
 import { errorDtoOf, rowOf, uploadParentOf } from "@/features/transfers/lib/nativeTransfers.logic"
-import { nativeFeedChanged, toastNativeFailure } from "@/features/transfers/lib/nativeHost"
+import { NATIVE_FAILURE_TOAST_ID, nativeFeedChanged, toastNativeFailure } from "@/features/transfers/lib/nativeHost"
 import {
 	isActiveTransfer,
 	transferById,
@@ -95,6 +95,31 @@ function storeRow(id: string): Transfer | undefined {
 	return transferById(useTransfersStore.getState().transfers, id)
 }
 
+// Registers the row in its group, the group first when new.
+function joinGroup(transfer: DesktopTransfer): Group {
+	let group = groups.get(transfer.group)
+
+	if (group === undefined) {
+		group = {
+			direction: transfer.direction,
+			listingParent: newUploadBatchRef(transfer.parentUuid).parentUuid,
+			run: undefined,
+			pending: new Set(),
+			directories: false,
+			succeeded: 0,
+			failed: 0,
+			created: [],
+			storageFull: false
+		}
+		groups.set(transfer.group, group)
+	}
+
+	group.pending.add(transfer.id)
+	groupOf.set(transfer.id, transfer.group)
+
+	return group
+}
+
 // The runs, rows and figures `transfers` add to the store, and their groups registered.
 function planAdded(transfers: readonly DesktopTransfer[]): Pick<NativeTransfersChange, "runs" | "add" | "progress"> {
 	const runs: NonNullable<NativeTransfersChange["runs"]>[number][] = []
@@ -103,25 +128,7 @@ function planAdded(transfers: readonly DesktopTransfer[]): Pick<NativeTransfersC
 	const plain = new Map<string, { group: Group; files: number; bytes: number; transferred: number; startedAt: number }>()
 
 	for (const transfer of transfers) {
-		let group = groups.get(transfer.group)
-
-		if (group === undefined) {
-			group = {
-				direction: transfer.direction,
-				listingParent: newUploadBatchRef(transfer.parentUuid).parentUuid,
-				run: undefined,
-				pending: new Set(),
-				directories: false,
-				succeeded: 0,
-				failed: 0,
-				created: [],
-				storageFull: false
-			}
-			groups.set(transfer.group, group)
-		}
-
-		group.pending.add(transfer.id)
-		groupOf.set(transfer.id, transfer.group)
+		const group = joinGroup(transfer)
 
 		if (transfer.direction === "download") {
 			add.push({ ...rowOf(transfer, undefined), paused: transfer.paused })
@@ -180,9 +187,17 @@ function toastDragStarts(transfers: readonly DesktopTransfer[]): void {
 	}
 }
 
-// The group's end, after the store update: its sizes, storage and summary, as the page's own uploads end.
+// The group's end, after the store update: its sizes, storage and summary, as the page's own uploads end. Downloads
+// say only that some failed.
 function endGroup(group: Group): void {
 	if (group.direction === "download") {
+		if (group.failed > 0) {
+			toast.error(
+				i18n.t("transfers:transfersDownloadSummaryCompleteWithFailures", { count: group.succeeded, failed: group.failed }),
+				{ id: NATIVE_FAILURE_TOAST_ID }
+			)
+		}
+
 		return
 	}
 
@@ -198,7 +213,11 @@ function endGroup(group: Group): void {
 					complete: "transfers:transfersDirectoryUploadSummaryComplete",
 					withFailures: "transfers:transfersDirectoryUploadSummaryCompleteWithFailures"
 				}
-			: { complete: "transfers:transfersUploadSummaryComplete", withFailures: "transfers:transfersUploadSummaryCompleteWithFailures" }
+			: {
+					complete: "transfers:transfersUploadSummaryComplete",
+					withFailures: "transfers:transfersUploadSummaryCompleteWithFailures"
+				},
+		NATIVE_FAILURE_TOAST_ID
 	)
 
 	if (group.storageFull) {
@@ -262,10 +281,25 @@ function applySnapshot(transfers: readonly DesktopTransfer[]): void {
 	const known: DesktopTransfer[] = []
 
 	for (const transfer of transfers) {
-		if (storeRow(transfer.id) === undefined) {
+		const row = storeRow(transfer.id)
+
+		if (row === undefined) {
 			fresh.push(transfer)
-		} else {
-			known.push(transfer)
+
+			continue
+		}
+
+		known.push(transfer)
+
+		// A restarted feed lost its groups; their active rows rejoin them.
+		if (!groupOf.has(transfer.id) && isActiveTransfer(row.status)) {
+			const group = joinGroup(transfer)
+
+			if (transfer.direction === "upload" && transfer.kind === "directory") {
+				group.directories = true
+			} else if (transfer.direction === "upload") {
+				group.run ??= row.batch
+			}
 		}
 	}
 
@@ -343,10 +377,6 @@ function applySettled(event: Extract<DesktopTransferEvent, { t: "settled" }>): v
 		}
 	}
 
-	if (row.direction === "download" && event.outcome === "error") {
-		toastDownloadFailed({})
-	}
-
 	for (const endedGroup of ended) {
 		endGroup(endedGroup)
 	}
@@ -381,18 +411,24 @@ export function applyNativeEvent(event: DesktopTransferEvent): void {
 // path: HEIC files, and picked or dropped directories holding one, while they convert on upload.
 // ---------------------------------------------------------------------------
 
-// The directory uploads land in, null for the root (the account's root directory).
+// The directory uploads land in, null for the root (the account's root directory); null, said, while that is unknown.
 function uploadParent(parentUuid: string | null): DesktopUploadParent | null {
 	const uuid = parentUuid ?? accountQueryGet()?.rootDirUuid
 
-	return uuid === undefined ? null : uploadParentOf(uuid, findCachedListingItem(uuid))
+	if (uuid === undefined) {
+		toastNativeFailure({ code: "invalidItem" })
+
+		return null
+	}
+
+	return uploadParentOf(uuid, findCachedListingItem(uuid))
 }
 
 async function uploadNatively(files: File[], parentUuid: string | null, noun: "files" | "items"): Promise<void> {
 	const bridge = desktopBridge()
-	const parent = uploadParent(parentUuid)
+	const parent = bridge === undefined || files.length === 0 ? null : uploadParent(parentUuid)
 
-	if (bridge === undefined || parent === null || files.length === 0) {
+	if (bridge === undefined || parent === null) {
 		return
 	}
 
@@ -438,9 +474,9 @@ export async function startNativeUploads(files: File[], parentUuid: string | nul
 	}
 
 	const bridge = desktopBridge()
-	const parent = uploadParent(parentUuid)
+	const parent = bridge === undefined || files.length === 0 ? null : uploadParent(parentUuid)
 
-	if (bridge === undefined || parent === null || files.length === 0) {
+	if (bridge === undefined || parent === null) {
 		return
 	}
 
@@ -471,7 +507,7 @@ export async function startNativeUploads(files: File[], parentUuid: string | nul
 // rejects; settles once the dialog closed and the upload started.
 export async function pickNativeUpload(kind: DesktopTransferKind, parentUuid: string | null): Promise<void> {
 	const bridge = desktopBridge()
-	const parent = uploadParent(parentUuid)
+	const parent = bridge === undefined ? null : uploadParent(parentUuid)
 
 	if (bridge === undefined || parent === null) {
 		return

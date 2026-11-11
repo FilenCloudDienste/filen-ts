@@ -22,8 +22,12 @@ export function nativeFeedChanged(running: boolean): void {
 	feedRunning = running
 }
 
+// Native failures share one toast: a start that fails ends the rows it added first (their group's toast), then answers
+// with the failure, which replaces it.
+export const NATIVE_FAILURE_TOAST_ID = "transfers.native.failure"
+
 export function toastNativeFailure(error: DesktopTransferError): void {
-	toast.error(errorLabel(errorDtoOf(error)))
+	toast.error(errorLabel(errorDtoOf(error)), { id: NATIVE_FAILURE_TOAST_ID })
 }
 
 // `ask`: always main's directory picker ("Download to…").
@@ -41,7 +45,7 @@ export async function startNativeDownloads(items: DriveItem[], options?: { ask?:
 		if (!result.ok) {
 			toastNativeFailure(result.error)
 		} else if (result.value.status === "started" && result.value.ids.length > 0) {
-			toastTransferStarted({ direction: "download", name: driveItemName(first), count: items.length, noun: "items" })
+			toastTransferStarted({ direction: "download", name: driveItemName(first), count: result.value.ids.length, noun: "items" })
 		}
 	} catch (e) {
 		toast.error(errorLabel(e))

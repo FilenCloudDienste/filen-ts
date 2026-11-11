@@ -60,6 +60,15 @@ describe("download directory row", () => {
 		render(createElement(DownloadDirectorySettings))
 	}
 
+	it("shows neither a directory nor Ask every time until the prefs loaded", () => {
+		useDesktopPrefs.setState({ prefs: null })
+		render(createElement(DownloadDirectorySettings))
+
+		expect(screen.getByText("Save downloads to")).toBeTruthy()
+		expect(screen.queryByText("Ask every time")).toBeNull()
+		expect(screen.getByRole<HTMLButtonElement>("button", { name: "Change…" }).disabled).toBe(true)
+	})
+
 	it("shows Ask every time by default and no Ask every time button", () => {
 		renderRow(null)
 

@@ -5,6 +5,7 @@ import { SettingsGroup, SettingsRow } from "@/features/settings/components/setti
 import { chooseDownloadDirectory, setDesktopPref, useDesktopPrefs } from "@/features/desktop/lib/prefs"
 import { MiddleEllipsis } from "@/components/middleEllipsis"
 import { Button } from "@/components/ui/button"
+import { Skeleton } from "@/components/ui/skeleton"
 
 // Settings > Desktop: where downloads go without asking. Only main's directory picker sets a path; the page can only
 // clear it. The prefs are loaded by the Desktop page.
@@ -31,7 +32,9 @@ export function DownloadDirectorySettings() {
 				label={t("settingsDesktopDownloadLocation")}
 				description={t("settingsDesktopDownloadLocationDescription")}
 			>
-				{directory === null ? (
+				{!loaded ? (
+					<Skeleton className="h-4 w-32" />
+				) : directory === null ? (
 					<span className="text-sm text-muted-foreground">{t("settingsDesktopDownloadAsk")}</span>
 				) : (
 					<MiddleEllipsis
