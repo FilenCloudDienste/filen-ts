@@ -20,7 +20,8 @@ import type { DragTemp } from "./temp.ts"
 // - promise (macOS): Finder asks for each item at a URL it supplies; nothing is listed or downloaded before.
 // - virtual (Windows): the trees are listed and planned at prepare; Explorer asks for each file's contents.
 // - staged (Linux): the trees are downloaded into a temp directory before the OS drag can begin.
-// A session answers only the webContents that prepared it; one not begun within UNBEGUN_TTL_MS ends.
+// A session answers only the webContents that prepared it; one not begun within UNBEGUN_TTL_MS of the page's last
+// attempt, or within UNBEGUN_MAX_AGE_MS of its prepare, ends.
 
 export interface DragSessionEffects {
 	transfers: Pick<TransfersService, "startDownload" | "startListedDownload" | "listTree" | "releaseTree" | "cancel">
@@ -41,6 +42,12 @@ export type DragPayload =
 // An unbegun session ends this long after its prepare or the page's last begin attempt; a dropped promise drag waits
 // this long for Finder's writes.
 export const UNBEGUN_TTL_MS = 60_000
+
+// However often the page asks (and however long staging takes), an unbegun session ends this long after its prepare.
+export const UNBEGUN_MAX_AGE_MS = 10 * 60_000
+
+// A begun drag whose end the OS never reported is ended "failed" after this long, so the next drag can begin.
+export const NATIVE_DRAG_MAX_MS = 10 * 60_000
 
 // Staged copies on Windows (Explorer copies them at the drop) are deleted this long after the drag; Linux file managers
 // may link them instead, so there they stay until quit.
@@ -80,6 +87,7 @@ interface Session {
 	announced: boolean
 	endedEmitted: boolean
 	closed: boolean
+	preparedAt: number
 	items: readonly DesktopDownloadItem[]
 	listingId: string | null
 	entries: DragEntry[]
@@ -187,18 +195,19 @@ export class DragSessions {
 			return "unknown"
 		}
 
-		// The page is still trying: the session lives on.
-		this.arm(session, UNBEGUN_TTL_MS, () => {
-			this.end(session, "cancelled", "now")
-		})
+		// The page is still trying: the session lives on. Staging runs on its own deadline.
+		if (session.phase !== "staging") {
+			this.armUnbegun(session, UNBEGUN_TTL_MS)
+		}
 
 		return session.phase === "ready" ? "ready" : "notReady"
 	}
 
+	// What the OS drag carries; only a ready session has it.
 	payload(owner: number, id: string): DragPayload | null {
 		const session = this.owned(owner, id)
 
-		if (session === null) {
+		if (session?.phase !== "ready") {
 			return null
 		}
 
@@ -230,9 +239,10 @@ export class DragSessions {
 		}
 
 		session.phase = "begun"
-		session.stopTimer()
-		session.stopTimer = NO_TIMER
 		this.running = id
+		this.arm(session, NATIVE_DRAG_MAX_MS, () => {
+			this.ended(id, "failed")
+		})
 
 		return true
 	}
@@ -379,8 +389,11 @@ export class DragSessions {
 		session.phase = "ended"
 		this.emitEnded(session, outcome)
 
+		// Staged copies a target may have taken (a drop, or Linux's undecided end) stay a while; others go now.
 		if (this.mode === "staged") {
-			this.close(session, this.platform === "win32" ? "later" : "keep")
+			const taken = outcome === "dropped" || outcome === "ended"
+
+			this.close(session, !taken ? "now" : this.platform === "win32" ? "later" : "keep")
 
 			return
 		}
@@ -420,12 +433,13 @@ export class DragSessions {
 		}
 	}
 
-	// Quit: temp removal waits for removeAllSync, once the host stopped writing. Sign-out: removed now.
+	// Every session ends; the temp is the caller's to remove once the host stopped writing it (quit: removeAllSync,
+	// sign-out: removeAll, which also reaches sessions already closed with their temp kept).
 	abortAll(reason: "quit" | "signedOut"): void {
 		this.running = null
 
 		for (const session of [...this.sessions.values()]) {
-			this.end(session, "cancelled", reason === "quit" ? "keep" : "now", reason)
+			this.end(session, "cancelled", "keep", reason)
 		}
 	}
 
@@ -450,6 +464,7 @@ export class DragSessions {
 			announced: false,
 			endedEmitted: false,
 			closed: false,
+			preparedAt: this.effects.now(),
 			items: [...items],
 			listingId: null,
 			entries: [],
@@ -468,9 +483,7 @@ export class DragSessions {
 		}
 
 		this.sessions.set(session.id, session)
-		this.arm(session, UNBEGUN_TTL_MS, () => {
-			this.end(session, "cancelled", "now")
-		})
+		this.armUnbegun(session, UNBEGUN_TTL_MS)
 
 		return session
 	}
@@ -516,6 +529,8 @@ export class DragSessions {
 
 		session.phase = "staging"
 		session.announced = true
+		// Only the hard deadline while staging: the page cannot begin before ready, however long that takes.
+		this.armUnbegun(session, Number.POSITIVE_INFINITY)
 		session.lastEmit = this.effects.now()
 		this.effects.emit({ id: session.id, state: "staging", bytes: 0, total: session.total })
 
@@ -608,6 +623,7 @@ export class DragSessions {
 	private stagedReady(session: Session): void {
 		session.phase = "ready"
 		this.releaseListing(session)
+		this.armUnbegun(session, UNBEGUN_TTL_MS)
 
 		if (session.announced) {
 			this.effects.emit({ id: session.id, state: "ready" })
@@ -820,6 +836,15 @@ export class DragSessions {
 	private arm(session: Session, ms: number, run: () => void): void {
 		session.stopTimer()
 		session.stopTimer = this.effects.setTimer(run, ms)
+	}
+
+	// Ends the unbegun session after `ms`, never later than UNBEGUN_MAX_AGE_MS after its prepare.
+	private armUnbegun(session: Session, ms: number): void {
+		const left = session.preparedAt + UNBEGUN_MAX_AGE_MS - this.effects.now()
+
+		this.arm(session, Math.max(0, Math.min(ms, left)), () => {
+			this.end(session, "cancelled", "now")
+		})
 	}
 
 	private emitEnded(session: Session, outcome: DesktopDragOutcome): void {

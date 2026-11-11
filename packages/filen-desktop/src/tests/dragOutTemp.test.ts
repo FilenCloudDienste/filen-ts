@@ -161,4 +161,50 @@ describe("drag temp", () => {
 		await expect.poll(() => readdir(root)).toEqual([])
 		expect(path.basename(one)).toMatch(/^s-/)
 	})
+
+	it("removeAll removes every session of this run, one deleted later included, and stops its timer", async () => {
+		const cancelled: number[] = []
+		const temp = createDragTemp(
+			deps({
+				setTimer: () => () => {
+					cancelled.push(1)
+				}
+			})
+		)
+		const one = await temp.sessionDir("one")
+		const other = path.join(root, "s-other1")
+
+		await temp.sessionDir("two")
+		await writeFile(path.join(one, "file"), "x")
+		await mkdir(other, { mode: 0o700 })
+		temp.deleteLater("two", 30 * 60_000)
+
+		await temp.removeAll()
+
+		expect(await readdir(root)).toEqual(["s-other1"])
+		expect(cancelled).toEqual([1])
+		// Still usable: the next session gets a new directory.
+		expect(await readdir(path.dirname(await temp.sessionDir("three")))).toHaveLength(2)
+	})
+
+	it("removeAll waits for a session directory still being made", async () => {
+		const temp = createDragTemp(deps())
+		const pending = temp.sessionDir("one")
+
+		await temp.removeAll()
+
+		expect(await readdir(root)).toEqual([])
+		await expect(pending).resolves.toMatch(/s-/)
+	})
+
+	it("after removeAllSync no session directory is made, one in flight included", async () => {
+		const temp = createDragTemp(deps())
+		const pending = temp.sessionDir("one")
+
+		temp.removeAllSync()
+
+		await expect(pending).rejects.toThrow()
+		await expect(temp.sessionDir("two")).rejects.toThrow()
+		expect(await readdir(root).catch(() => [])).toEqual([])
+	})
 })

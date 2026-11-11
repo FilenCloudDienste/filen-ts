@@ -15,7 +15,11 @@ export interface DragTemp {
 	deleteNow(id: string): Promise<void>
 	// At startup: the session directories an earlier run left, older than `olderThanMs`.
 	sweep(olderThanMs: number): Promise<void>
-	// At quit, once nothing writes them: this run's own session directories.
+	// Sign-out, once nothing writes them: this run's session directories, those still being made or deleted later
+	// included. Sessions made afterwards work as before.
+	removeAll(): Promise<void>
+	// At quit, once nothing writes them: this run's own session directories. No session directory is made afterwards;
+	// one whose mkdtemp is still in flight is removed when it lands, or by the next start's sweep if the app exits first.
 	removeAllSync(): void
 }
 
@@ -48,6 +52,7 @@ export function createDragTemp(deps: DragTempDeps): DragTemp {
 	const dirs = new Map<string, Promise<string>>()
 	const made = new Map<string, string>()
 	const timers = new Map<string, () => void>()
+	let stopped = false
 
 	// Ours: a real directory (no symlink) of our uid, open to no one else.
 	function ours(stats: Stats): boolean {
@@ -86,16 +91,7 @@ export function createDragTemp(deps: DragTempDeps): DragTemp {
 		}
 	}
 
-	async function deleteNow(id: string): Promise<void> {
-		timers.get(id)?.()
-		timers.delete(id)
-
-		const pending = dirs.get(id)
-
-		if (pending === undefined) {
-			return
-		}
-
+	async function remove(id: string, pending: Promise<string>): Promise<void> {
 		try {
 			await removeSession(await pending)
 
@@ -109,14 +105,43 @@ export function createDragTemp(deps: DragTempDeps): DragTemp {
 		}
 	}
 
+	async function deleteNow(id: string): Promise<void> {
+		timers.get(id)?.()
+		timers.delete(id)
+
+		const pending = dirs.get(id)
+
+		if (pending !== undefined) {
+			await remove(id, pending)
+		}
+	}
+
+	function stopTimers(): void {
+		for (const cancel of timers.values()) {
+			cancel()
+		}
+
+		timers.clear()
+	}
+
 	return {
 		sessionDir: id => {
+			if (stopped) {
+				return Promise.reject(new Error("drag-out: quitting"))
+			}
+
 			let pending = dirs.get(id)
 
 			if (pending === undefined) {
 				const created = checkedRoot(true)
 					.then(() => mkdtemp(path.join(root, SESSION_PREFIX)))
 					.then(dir => {
+						if (stopped) {
+							rmSync(dir, { recursive: true, force: true })
+
+							throw new Error("drag-out: quitting")
+						}
+
 						if (dirs.get(id) === created) {
 							made.set(id, dir)
 						}
@@ -189,12 +214,13 @@ export function createDragTemp(deps: DragTempDeps): DragTemp {
 				log.warn(`drag-out: temp not swept: ${message(error)}`)
 			}
 		},
+		removeAll: async () => {
+			stopTimers()
+			await Promise.all([...dirs].map(([id, pending]) => remove(id, pending)))
+		},
 		removeAllSync: () => {
-			for (const cancel of timers.values()) {
-				cancel()
-			}
-
-			timers.clear()
+			stopped = true
+			stopTimers()
 
 			for (const dir of made.values()) {
 				try {

@@ -76,6 +76,11 @@ function fakes(options: { tree?: NativeTreeEntry[] | { tooMany: number }; startE
 			return Promise.resolve()
 		},
 		sweep: () => Promise.resolve(),
+		removeAll: () => {
+			calls.push("removeAll")
+
+			return Promise.resolve()
+		},
 		removeAllSync: () => {
 			calls.push("removeAllSync")
 		}
@@ -162,7 +167,21 @@ function fakes(options: { tree?: NativeTreeEntry[] | { tooMany: number }; startE
 		transfer.watch.onSettled({ id: transfer.id, outcome, path: transfer.path })
 	}
 
-	return { effects, calls, started, cancelled, released, listings, states, deleted, directories, advance, settle, timers }
+	return {
+		effects,
+		calls,
+		started,
+		cancelled,
+		released,
+		listings,
+		states,
+		deleted,
+		directories,
+		advance,
+		settle,
+		timers,
+		now: () => clock
+	}
 }
 
 function idOf(prepared: Awaited<ReturnType<DragSessions["prepare"]>>): string {
@@ -325,6 +344,63 @@ describe("drag sessions: staged", () => {
 		}
 	})
 
+	it("staged temp is removed at once when the drag failed or was cancelled", async () => {
+		for (const outcome of ["failed", "cancelled"] as const) {
+			const f = fakes({ tree: [fileEntry(["a"], null)] })
+			const sessions = new DragSessions(f.effects, "linux", "staged")
+			const id = idOf(await sessions.prepare(1, [item("a")]))
+
+			f.settle(f.started[0] as Started, "done")
+			sessions.markBegun(id)
+			sessions.ended(id, outcome)
+
+			expect(f.deleted).toEqual([{ id, later: null }])
+		}
+	})
+
+	it("the unbegun timer waits while staging and starts again once ready", async () => {
+		const f = fakes({ tree: [fileEntry(["a"], null)] })
+		const sessions = new DragSessions(f.effects, "linux", "staged")
+		const id = idOf(await sessions.prepare(1, [item("a")]))
+
+		f.advance(61_000)
+		expect(sessions.beginnable(1, id)).toBe("notReady")
+		f.advance(120_000)
+		expect(f.states.filter(state => state.state === "ended")).toEqual([])
+
+		f.settle(f.started[0] as Started, "done")
+		f.advance(59_999)
+		expect(f.states.filter(state => state.state === "ended")).toEqual([])
+		f.advance(1)
+		expect(f.states.at(-1)).toEqual({ id, state: "ended", outcome: "cancelled" })
+	})
+
+	it("staging that outlasts 10 minutes ends the session", async () => {
+		const f = fakes({ tree: [fileEntry(["a"], null)] })
+		const sessions = new DragSessions(f.effects, "linux", "staged")
+		const id = idOf(await sessions.prepare(1, [item("a")]))
+
+		f.advance(10 * 60_000 - 1)
+		expect(sessions.beginnable(1, id)).toBe("notReady")
+		f.advance(1)
+
+		expect(sessions.beginnable(1, id)).toBe("unknown")
+		expect(f.cancelled).toEqual(["t0"])
+		expect(f.deleted).toEqual([{ id, later: null }])
+	})
+
+	it("payload is there only while the session is ready", async () => {
+		const f = fakes({ tree: [fileEntry(["a"], null)] })
+		const sessions = new DragSessions(f.effects, "linux", "staged")
+		const id = idOf(await sessions.prepare(1, [item("a")]))
+
+		expect(sessions.payload(1, id)).toBeNull()
+		f.settle(f.started[0] as Started, "done")
+		expect(sessions.payload(1, id)).toEqual({ mode: "staged", paths: [path.join(`/temp/s-${id}`, "a")] })
+		sessions.markBegun(id)
+		expect(sessions.payload(1, id)).toBeNull()
+	})
+
 	it("an empty directory alone is ready at once", async () => {
 		const f = fakes({ tree: [dirEntry(["d"])] })
 		const sessions = new DragSessions(f.effects, "linux", "staged")
@@ -347,6 +423,32 @@ describe("drag sessions: ownership and lifetime", () => {
 		f.advance(60_000)
 		expect(sessions.beginnable(1, id)).toBe("unknown")
 		expect(f.states.at(-1)).toEqual({ id, state: "ended", outcome: "cancelled" })
+	})
+
+	it("an unbegun session ends 10 minutes after prepare, however often the page asks", async () => {
+		const f = fakes()
+		const sessions = new DragSessions(f.effects, "darwin", "promise")
+		const id = idOf(await sessions.prepare(1, [item("a")]))
+
+		for (let at = 50_000; at < 10 * 60_000; at += 50_000) {
+			f.advance(50_000)
+			expect(sessions.beginnable(1, id)).toBe("ready")
+		}
+
+		f.advance(10 * 60_000 - f.now())
+		expect(sessions.beginnable(1, id)).toBe("unknown")
+	})
+
+	it("a begun drag the OS never ends is ended failed after 10 minutes", async () => {
+		const f = fakes()
+		const sessions = new DragSessions(f.effects, "darwin", "promise")
+		const id = idOf(await sessions.prepare(1, [item("a")]))
+
+		sessions.markBegun(id)
+		f.advance(10 * 60_000)
+
+		expect(sessions.nativeDragRunning()).toBe(false)
+		expect(f.states.at(-1)).toEqual({ id, state: "ended", outcome: "failed" })
 	})
 
 	it("a begun session does not expire", async () => {
@@ -796,14 +898,16 @@ describe("drag sessions: quit and demand", () => {
 		expect(f.deleted).toEqual([])
 	})
 
-	it("sign-out deletes the temp of the sessions it ends", async () => {
+	it("sign-out ends every session and leaves the temp to the caller, once the host stopped writing it", async () => {
 		const f = fakes({ tree: [fileEntry(["a"], null)] })
 		const sessions = new DragSessions(f.effects, "linux", "staged")
 		const id = idOf(await sessions.prepare(1, [item("a")]))
 
 		sessions.abortAll("signedOut")
 
-		expect(f.deleted).toEqual([{ id, later: null }])
+		expect(f.cancelled).toEqual(["t0"])
+		expect(f.states.at(-1)).toEqual({ id, state: "ended", outcome: "cancelled" })
+		expect(f.deleted).toEqual([])
 	})
 
 	it("live counts sessions with listings or tickets", async () => {
