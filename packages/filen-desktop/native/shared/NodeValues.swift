@@ -85,10 +85,3 @@ func defineMethods(_ env: napi_env, _ exports: napi_value?, _ methods: [(String,
 
 	return true
 }
-
-// Throws a JS Error carrying `code`; the callback then returns nil.
-func throwError(_ env: napi_env, code: String, _ message: String) -> napi_value? {
-	napi_throw_error(env, code, message)
-
-	return nil
-}

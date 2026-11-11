@@ -748,6 +748,41 @@ describe("transfer registry", () => {
 		])
 	})
 
+	it("batches that arrive while a mark is in flight join one next mark, which the transfer waits for", async () => {
+		const { client, registry, quarantine, settled } = setup()
+		let release: () => void = () => undefined
+
+		quarantine.mark.mockImplementationOnce(
+			() =>
+				new Promise<void>(resolve => {
+					release = resolve
+				})
+		)
+		registry.start([{ id: ID2, t: "downloadDirectory", dir: DIR_REF, path: at("Projects") }])
+		await flush()
+
+		const download = client.last("downloadDirRecursively")
+		const update = (download.args[1] as DirDownloadCallback).onDownloadUpdate
+
+		update([], [{ path: "a" }], 1n)
+		update([{ path: "d" }], [{ path: "b" }], 1n)
+		update([], [{ path: "c" }], 1n)
+		download.resolve()
+		await round()
+
+		expect(quarantine.mark).toHaveBeenCalledTimes(1)
+		expect(settled(ID2)).toBeUndefined()
+
+		release()
+		await round()
+
+		expect(quarantine.mark.mock.calls).toEqual([
+			[[at("Projects", "a")], []],
+			[[at("Projects", "b"), at("Projects", "c")], [at("Projects", "d")]]
+		])
+		expect(settled(ID2)).toMatchObject({ outcome: "done" })
+	})
+
 	it("a quarantine failure is logged and the transfer still settles done", async () => {
 		const { client, state, registry, quarantine, warn, settled } = setup()
 

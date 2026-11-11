@@ -147,7 +147,10 @@ interface Entry {
 	// The file is being put under its final name: a cancel from here on no longer stops it.
 	committing: boolean
 	logged: number
+	// The quarantine marks in flight, which the transfer waits for before it settles.
 	marking: Promise<void>
+	// Paths that arrived while a mark was in flight, marked together next; null while none is.
+	unmarked: { files: string[]; directories: string[] } | null
 }
 
 interface Listing {
@@ -325,18 +328,49 @@ export function createTransferRegistry(
 		touch(entry)
 	}
 
-	// Marked before the transfer settles, so nothing can be opened unmarked; a failure only logs.
+	// Marked before the transfer settles, so nothing can be opened unmarked; a failure only logs. Batches that arrive
+	// while a mark is in flight join one next mark, so a slow mark never holds an array per SDK batch.
 	function mark(entry: Entry, files: string[], directories: string[]): void {
-		entry.marking = entry.marking.then(() =>
-			quarantine.mark(files, directories).catch((error: unknown) => {
-				const count = files.length + directories.length
+		if (entry.unmarked !== null) {
+			for (const file of files) {
+				entry.unmarked.files.push(file)
+			}
+
+			for (const directory of directories) {
+				entry.unmarked.directories.push(directory)
+			}
+
+			return
+		}
+
+		entry.marking = drainMarks(entry, files, directories)
+	}
+
+	async function drainMarks(entry: Entry, files: string[], directories: string[]): Promise<void> {
+		let next = { files, directories }
+
+		for (;;) {
+			const unmarked = { files: [] as string[], directories: [] as string[] }
+
+			entry.unmarked = unmarked
+
+			await quarantine.mark(next.files, next.directories).catch((error: unknown) => {
+				const count = next.files.length + next.directories.length
 				const more = count > 1 ? ` and ${String(count - 1)} more` : ""
 
 				log.warn(
-					`quarantine of ${files[0] ?? directories[0] ?? ""}${more} failed: ${error instanceof Error ? error.message : String(error)}`
+					`quarantine of ${next.files[0] ?? next.directories[0] ?? ""}${more} failed: ${error instanceof Error ? error.message : String(error)}`
 				)
 			})
-		)
+
+			if (unmarked.files.length + unmarked.directories.length === 0) {
+				entry.unmarked = null
+
+				return
+			}
+
+			next = unmarked
+		}
 	}
 
 	// A paused call waits on its PauseSignal and would never see the abort.
@@ -681,7 +715,8 @@ export function createTransferRegistry(
 					cancelled: false,
 					committing: false,
 					logged: 0,
-					marking: Promise.resolve()
+					marking: Promise.resolve(),
+					unmarked: null
 				}
 
 				entries.set(spec.id, entry)

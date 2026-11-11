@@ -7,9 +7,9 @@ private func quarantineProperties() -> [String: Any] {
 	[kLSQuarantineAgentNameKey as String: "Filen", kLSQuarantineTypeKey as String: kLSQuarantineTypeOtherDownload as String]
 }
 
-// Marks each path (file or directory) as downloaded. Every path is tried; the result names the first failure and how
-// many more failed, nil when all were marked.
-func quarantine(_ paths: [String]) -> String? {
+// Marks each path (file or directory) as downloaded. Every path is tried; the result names the first failure and counts
+// every failure, nil when all were marked.
+func quarantine(_ paths: [String]) -> (first: String, failures: Int)? {
 	let properties = quarantineProperties()
 	var firstFailure: String?
 	var failures = 0
@@ -30,5 +30,5 @@ func quarantine(_ paths: [String]) -> String? {
 		return nil
 	}
 
-	return failures > 1 ? "\(firstFailure) (and \(failures - 1) more)" : firstFailure
+	return (firstFailure, failures)
 }

@@ -1,9 +1,49 @@
 import Foundation
 import NodeAPI
 
-// The macOS addon filen-mac.node: quarantine for downloads. Every export runs on the calling JS thread.
+// The macOS addon filen-mac.node: quarantine for downloads. Arguments are read on the calling JS thread, the work runs
+// off it and settles a promise.
 
 private let maxPathBytes = 4096
+
+// Marks one call at a time, in call order.
+private let queue = DispatchQueue(label: "io.filen.mac", qos: .utility)
+
+enum Outcome: Settlement {
+	case done
+	// Rejects with an Error carrying `code` and, for quarantineFailed, `failures`: how many paths of the call failed.
+	case failure(code: String, message: String, failures: Int)
+
+	static func internalFailure(_ message: String) -> Outcome {
+		.failure(code: "internalFailure", message: message, failures: 0)
+	}
+
+	static func invalidArgument(_ message: String) -> Outcome {
+		.failure(code: "invalidArgument", message: message, failures: 0)
+	}
+
+	func settle(_ env: napi_env, _ deferred: napi_deferred) {
+		switch self {
+		case .done:
+			var undefined: napi_value?
+
+			napi_get_undefined(env, &undefined)
+			napi_resolve_deferred(env, deferred, undefined)
+		case .failure(let code, let message, let failures):
+			var error: napi_value?
+			var number: napi_value?
+
+			napi_create_error(env, string(env, code), string(env, message), &error)
+
+			if failures > 0 {
+				napi_create_int64(env, Int64(failures), &number)
+				napi_set_named_property(env, error, "failures", number)
+			}
+
+			napi_reject_deferred(env, deferred, error)
+		}
+	}
+}
 
 // The elements of an array argument; nil when it is not an array.
 func arrayElements(_ env: napi_env, _ value: napi_value?) -> [napi_value?]? {
@@ -31,8 +71,8 @@ func arrayElements(_ env: napi_env, _ value: napi_value?) -> [napi_value?]? {
 	return elements
 }
 
-// quarantine(paths: string[]): marks each path as downloaded; throws naming the first path that failed, after trying
-// every one.
+// quarantine(paths: string[]): Promise<void>, marks each path as downloaded; after trying every one, rejects naming the
+// first path that failed and counting the failures.
 private func quarantinePaths(env: napi_env?, info: napi_callback_info?) -> napi_value? {
 	guard let env else {
 		return nil
@@ -42,7 +82,7 @@ private func quarantinePaths(env: napi_env?, info: napi_callback_info?) -> napi_
 	var argv: napi_value?
 
 	guard napi_get_cb_info(env, info, &argc, &argv, nil, nil) == napi_ok, let elements = arrayElements(env, argv) else {
-		return throwError(env, code: "invalidArgument", "expected an array of paths")
+		return rejected(env, Outcome.invalidArgument("expected an array of paths"))
 	}
 
 	var paths: [String] = []
@@ -51,17 +91,21 @@ private func quarantinePaths(env: napi_env?, info: napi_callback_info?) -> napi_
 
 	for element in elements {
 		guard let path = stringArgument(env, element, maxBytes: maxPathBytes) else {
-			return throwError(env, code: "invalidArgument", "each path must be a string of 1 to 4096 UTF-8 bytes")
+			return rejected(env, Outcome.invalidArgument("each path must be a string of 1 to 4096 UTF-8 bytes"))
 		}
 
 		paths.append(path)
 	}
 
-	if let failure = quarantine(paths) {
-		return throwError(env, code: "quarantineFailed", failure)
-	}
+	return start(env, name: "filen-mac", queue: queue) { [paths] (pending: PendingPromise<Outcome>) in
+		guard let failure = quarantine(paths) else {
+			pending.settle(.done)
 
-	return nil
+			return
+		}
+
+		pending.settle(.failure(code: "quarantineFailed", message: failure.first, failures: failure.failures))
+	}
 }
 
 @_cdecl("napi_register_module_v1")
