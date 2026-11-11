@@ -235,16 +235,5 @@ public func registerModule(env: napi_env?, exports: napi_value?) -> napi_value? 
 		("clearAuth", clearAuth)
 	]
 
-	for (name, method) in methods {
-		var function: napi_value?
-
-		guard
-			napi_create_function(env, name, name.utf8.count, method, nil, &function) == napi_ok,
-			napi_set_named_property(env, exports, name, function) == napi_ok
-		else {
-			return nil
-		}
-	}
-
-	return exports
+	return defineMethods(env, exports, methods) ? exports : nil
 }

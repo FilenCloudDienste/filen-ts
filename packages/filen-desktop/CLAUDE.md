@@ -22,6 +22,7 @@ src/native/     the native host: utility process running the sync engine on the 
 src/preload/    the preload exposing `window.desktop`; the contract is `@filen/shared/desktop`
 src/shared/     IPC channel names and the main ↔ native-host protocol
 native/fileProvider/  Swift Node-API addon for the File Provider (built per arch to build/native/mac-<arch>/filen-fp.node)
+native/shared/  Node-API module map and value helpers every Swift addon compiles with (scripts/swiftAddon.ts)
 scripts/        build, dev, staging, packaging, feed and package checks; scripts/ci/ holds the e2e tests (e2e.ts)
 electron-builder.ts   packaging config; everything 3.x clients can observe (appId, names, feed URL) is frozen
 ```

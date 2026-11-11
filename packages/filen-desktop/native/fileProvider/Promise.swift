@@ -70,22 +70,6 @@ enum Outcome: Sendable {
 	}
 }
 
-func string(_ env: napi_env, _ value: String) -> napi_value? {
-	var result: napi_value?
-
-	napi_create_string_utf8(env, value, value.utf8.count, &result)
-
-	return result
-}
-
-func boolean(_ env: napi_env, _ value: Bool) -> napi_value? {
-	var result: napi_value?
-
-	napi_get_boolean(env, value, &result)
-
-	return result
-}
-
 // One outcome on its way to the JS thread.
 private final class Delivery {
 	let deferred: napi_deferred
@@ -208,55 +192,4 @@ func start(_ env: napi_env, _ work: @escaping @Sendable (Pending) -> Void) -> na
 	}
 
 	return promise
-}
-
-// The call's single object argument; nil when it is missing or not an object.
-func objectArgument(_ env: napi_env, _ info: napi_callback_info?) -> napi_value? {
-	var argc = 1
-	var argv: napi_value?
-	var type = napi_undefined
-
-	guard napi_get_cb_info(env, info, &argc, &argv, nil, nil) == napi_ok, napi_typeof(env, argv, &type) == napi_ok, type == napi_object else {
-		return nil
-	}
-
-	return argv
-}
-
-// A property of an object argument; undefined when absent, which no reader accepts.
-func property(_ env: napi_env, _ object: napi_value, _ name: String) -> napi_value? {
-	var value: napi_value?
-
-	return napi_get_named_property(env, object, name, &value) == napi_ok ? value : nil
-}
-
-// A string argument of 1...maxBytes UTF-8 bytes, as raw bytes; nil for anything else.
-func utf8Argument(_ env: napi_env, _ value: napi_value?, maxBytes: Int) -> Data? {
-	var type = napi_undefined
-	var length = 0
-
-	guard
-		napi_typeof(env, value, &type) == napi_ok, type == napi_string,
-		napi_get_value_string_utf8(env, value, nil, 0, &length) == napi_ok, length > 0, length <= maxBytes
-	else {
-		return nil
-	}
-
-	var data = Data(count: length + 1)
-	let status = data.withUnsafeMutableBytes { buffer in
-		napi_get_value_string_utf8(env, value, buffer.baseAddress?.assumingMemoryBound(to: CChar.self), length + 1, &length)
-	}
-
-	guard status == napi_ok else {
-		return nil
-	}
-
-	// Drops the terminating NUL.
-	data.count = length
-
-	return data
-}
-
-func stringArgument(_ env: napi_env, _ value: napi_value?, maxBytes: Int) -> String? {
-	utf8Argument(env, value, maxBytes: maxBytes).map { String(decoding: $0, as: UTF8.self) }
 }
