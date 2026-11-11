@@ -4,7 +4,7 @@ import { createRequire } from "node:module"
 import path from "node:path"
 
 // The sync addon and rclone staged per arch (on macOS with the File Provider and macOS addons built beside them, and the extension
-// built from the submodules unless FILEN_DESKTOP_FP_APPEX is set), the production bundle (which bakes in the Linux
+// built from the submodules unless FILEN_DESKTOP_FP_APPEX is set; on Windows with the drag-out addon), the production bundle (which bakes in the Linux
 // rclone digests), then electron-builder for the host (extra CLI args such as `--mac dir` are passed through).
 // Uploading is the release workflow's job, so nothing is published from here.
 process.env["NODE_ENV"] = "production"
@@ -14,10 +14,12 @@ const { macMinimum } = await import("../electron-builder.ts")
 const { stageNapi } = await import("./stageNapi.ts")
 const { buildFpAddon } = await import("./buildFpAddon.ts")
 const { buildMacAddon } = await import("./buildMacAddon.ts")
+const { buildDragAddon } = await import("./buildDragAddon.ts")
 
 stageNapi({ dev: false })
 buildFpAddon({ dev: false })
 buildMacAddon({ dev: false })
+buildDragAddon({ dev: false })
 
 // Without either, electron-builder's beforePack names both ways to provide the extension.
 if (process.platform === "darwin" && (process.env["FILEN_DESKTOP_FP_APPEX"] ?? "") === "") {

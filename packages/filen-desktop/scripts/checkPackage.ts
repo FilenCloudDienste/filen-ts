@@ -18,6 +18,8 @@ import { MAC_TEAM } from "./signRclone.ts"
 // runtime, a secure timestamp and exactly build/entitlements.rclone.plist. A macOS app also carries the File Provider
 // addon, filen-mac.node and the extension (Contents/PlugIns) built for its arch; with --signed the app and the extension carry the hardened
 // runtime, a secure timestamp and exactly their entitlements (build/entitlements.mac.plist, .fileprovider.plist).
+// A Windows app carries filen-drag.node (drag-out to Explorer) built for its arch, with --signed Authenticode-signed
+// by the publisher.
 // DESKTOP_FEED_URL, when set, must equal the builder config's feed, so a workflow cannot upload somewhere else.
 //
 //   node scripts/checkPackage.ts <mac|win|linux> <x64|arm64>... [--signed]
@@ -275,6 +277,28 @@ for (const arch of archs) {
 			} else if (!listsLegacyExecutableLink(listing.stdout, path.basename(executable))) {
 				failures.push(`${file}: no ${LINUX_INSTALL_DIR}/${LEGACY_EXECUTABLE} link to ${path.basename(executable)}`)
 			}
+		}
+	}
+
+	if (platform === "win") {
+		const dragAddon = path.join(resources, "native", "filen-drag.node")
+
+		if (existsSync(dragAddon)) {
+			const found = nativeArchOf(dragAddon)
+
+			if (found !== arch) {
+				failures.push(`${dragAddon}: built for ${found ?? "an unknown architecture"}, not ${arch}`)
+			}
+
+			if (values.signed) {
+				const { status, subject } = authenticode(dragAddon)
+
+				if (status !== "Valid" || publisher === undefined || !subject.includes(publisher.replace(/ \(.*$/, ""))) {
+					failures.push(`${dragAddon}: Authenticode status ${status}, signed by ${subject || "nobody"}`)
+				}
+			}
+		} else {
+			failures.push(`${app}: ${dragAddon} is missing`)
 		}
 	}
 

@@ -551,6 +551,25 @@ jobs:
             !packages/filen-desktop/filen-rs/target/**/libfilen_*
           key: fp-cargo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('packages/filen-desktop/filen-rs/rust-toolchain.toml') }}-${{ steps.submodules.outputs.filen-rs }}
           restore-keys: fp-cargo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('packages/filen-desktop/filen-rs/rust-toolchain.toml') }}-
+      # The drag-out addon (native/dragOut/win): the toolchain its rust-toolchain.toml pins, with both Windows
+      # targets, since every package run builds x64 and arm64.
+      - name: Set up Rust for the drag-out addon
+        if: matrix.os == 'windows'
+        working-directory: packages/filen-desktop/native/dragOut/win
+        run: |
+          rustup toolchain install
+          rustup target add x86_64-pc-windows-msvc aarch64-pc-windows-msvc
+      - name: Cache the drag-out addon's Cargo
+        if: matrix.os == 'windows'
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            packages/filen-desktop/native/dragOut/win/target
+          key: drag-cargo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('packages/filen-desktop/native/dragOut/win/rust-toolchain.toml', 'packages/filen-desktop/native/dragOut/win/Cargo.lock') }}
+          restore-keys: drag-cargo-${{ runner.os }}-${{ runner.arch }}-
       - name: Install rpm
         timeout-minutes: 10
         if: matrix.os == 'linux'

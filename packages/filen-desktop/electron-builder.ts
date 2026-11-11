@@ -65,7 +65,8 @@ const config: Configuration = {
 	],
 	// A missing extraResources source is skipped silently; an app without its addon cannot sync, one without rclone
 	// cannot mount or serve, a Windows one without WinFsp's installer cannot mount, a macOS one without the File
-	// Provider addon and extension cannot offer Filen in Finder, and one without filen-mac.node cannot quarantine downloads.
+	// Provider addon and extension cannot offer Filen in Finder, one without filen-mac.node cannot quarantine downloads, and
+	// a Windows one without filen-drag.node cannot drag items out to Explorer.
 	beforePack: context => {
 		const os = context.packager.platform.buildConfigurationKey
 		const staged = `${os}-${Arch[context.arch]}`
@@ -79,6 +80,7 @@ const config: Configuration = {
 
 		if (os === "win") {
 			required.push({ file: path.join(packageDir, "build", "deps", "win", "winfsp.msi"), stage: "scripts/stageRclone.ts" })
+			required.push({ file: path.join(packageDir, "build", "native", staged, "filen-drag.node"), stage: "scripts/buildDragAddon.ts" })
 		}
 
 		if (context.packager instanceof LinuxPackager) {

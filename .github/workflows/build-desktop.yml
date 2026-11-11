@@ -1,6 +1,7 @@
 # Packaging smoke test for filen-desktop: builds the web app it serves, bundles the shell and packs an unsigned
 # Linux app directory with electron-builder (no installers, nothing signed or published), then checks what landed
-# in it. Signed installers are release-desktop.yml's job.
+# in it, and checks the Windows drag-out addon's crate (native/dragOut/win) on both Windows architectures. Signed
+# installers are release-desktop.yml's job.
 name: Build desktop
 
 on:
@@ -88,3 +89,49 @@ jobs:
       - name: Check packaged app
         working-directory: packages/filen-desktop
         run: node scripts/checkPackage.ts linux x64
+
+  # The Windows drag-out addon's crate (native/dragOut/win) on both Windows architectures: formatting and clippy for
+  # both targets on x64, the unit tests natively on each.
+  drag-addon:
+    name: drag-addon (${{ matrix.runner }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: windows-latest
+            lint: true
+          - runner: windows-11-arm
+            lint: false
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+        working-directory: packages/filen-desktop/native/dragOut/win
+    steps:
+      - name: Checkout
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Set up Rust
+        run: |
+          rustup toolchain install
+          rustup target add x86_64-pc-windows-msvc aarch64-pc-windows-msvc
+      - name: Cache Cargo
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            packages/filen-desktop/native/dragOut/win/target
+          key: drag-cargo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('packages/filen-desktop/native/dragOut/win/rust-toolchain.toml', 'packages/filen-desktop/native/dragOut/win/Cargo.lock') }}
+          restore-keys: drag-cargo-${{ runner.os }}-${{ runner.arch }}-
+      - name: Format
+        if: matrix.lint
+        run: cargo fmt --check
+      - name: Clippy (x64 and arm64)
+        if: matrix.lint
+        run: |
+          cargo clippy --locked --all-targets --target x86_64-pc-windows-msvc -- -D warnings
+          cargo clippy --locked --all-targets --target aarch64-pc-windows-msvc -- -D warnings
+      - name: Test
+        run: cargo test --locked

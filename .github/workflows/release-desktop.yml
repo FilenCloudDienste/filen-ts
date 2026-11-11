@@ -299,6 +299,23 @@ jobs:
         with:
           name: web-dist
           path: packages/filen-web/dist
+      # The drag-out addon (native/dragOut/win): the toolchain its rust-toolchain.toml pins, with both Windows
+      # targets, since every package run builds x64 and arm64.
+      - name: Set up Rust for the drag-out addon
+        working-directory: packages/filen-desktop/native/dragOut/win
+        run: |
+          rustup toolchain install
+          rustup target add x86_64-pc-windows-msvc aarch64-pc-windows-msvc
+      - name: Cache the drag-out addon's Cargo
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            packages/filen-desktop/native/dragOut/win/target
+          key: drag-cargo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('packages/filen-desktop/native/dragOut/win/rust-toolchain.toml', 'packages/filen-desktop/native/dragOut/win/Cargo.lock') }}
+          restore-keys: drag-cargo-${{ runner.os }}-${{ runner.arch }}-
       # The signer's credentials reach only the step that signs.
       - name: Build and sign
         env:
