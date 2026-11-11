@@ -59,6 +59,15 @@
 # run (unseeded: a warning) and input `scale_reseed` writes anew as a new generation, run alone;
 # and a two-way pair of hostile names, on unless input `names_check` is turned off.
 #
+# Chain D (scenario dragout, scripts/ci/e2e/chains/dragOut.ts) on win-x64, win-arm64, mac-arm64, linux-x64 and
+# linux-arm64: N installed alone and seeded with the handed session (no login), a small drive tree seeded through rclone,
+# then real OS input (Windows SendInput, macOS CoreGraphics events, Linux xdotool under Xvfb) drags its items out of the
+# window onto a file manager (Explorer, Finder, Thunar) on a fresh directory: the dropped bytes are the cloud's, Escape
+# and a release back over the window write and upload nothing, an in-app move still works, the drops carry the
+# download mark, the transfers feed and screen list the drag. While scripts/ci/e2ePlan.ts DEEP_TRIAL lists it, it runs
+# only in a custom deep dispatch naming it in `scenarios` and the entries in `formats` (macOS needs `signed`); nightly
+# and release once DEEP_READY does. Wayland stays a manual release-checklist row.
+#
 # Spikes (by hand only, input `spike`) answer one question each, on one entry per OS, instead of the update scenarios;
 # their findings go to the job summary and an artifact:
 #   s1   are the packaged 3.0.53 and N drivable over --remote-debugging-port (3.0.53 also over --inspect), and does
@@ -108,7 +117,7 @@ on:
         type: string
         default: release
       scenarios:
-        description: Comma-separated subset of previous,legacy,update-kill,keyring (a release runs update-kill always)
+        description: Comma-separated subset of previous,legacy,update-kill,keyring,dragout (a release runs update-kill always)
         type: string
         default: previous,legacy
       formats:
@@ -142,7 +151,7 @@ on:
           - release
         default: custom
       scenarios:
-        description: Comma-separated subset of previous,legacy,older,update-kill,keyring (older is 3.0.47 -> N, by hand only when named; a release runs update-kill always)
+        description: Comma-separated subset of previous,legacy,older,update-kill,keyring,dragout (older is 3.0.47 -> N, by hand only when named; dragout is chain D, in trial with depth deep and its entries in formats; a release runs update-kill always)
         type: string
         default: previous,legacy
       formats:
@@ -727,7 +736,7 @@ jobs:
           ELECTRON_SKIP_BINARY_DOWNLOAD: 1
         run: pnpm install --frozen-lockfile --filter "@filen/desktop..." --ignore-scripts
       - name: Download the sealed session
-        if: matrix.deepPrevious || matrix.deepLegacy || matrix.deepOlder
+        if: matrix.deepPrevious || matrix.deepLegacy || matrix.deepOlder || matrix.dragout
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: desktop-e2e-session
@@ -750,10 +759,12 @@ jobs:
           # Deep: a secret service for the session vault, the X tools that drive and record the folder chooser, FUSE
           # for the drive, gdb for a crash's core dump.
           DEEP_PACKAGES: ${{ matrix.deep && 'gnome-keyring libsecret-tools dbus-daemon xdotool x11-apps fuse3 gdb' || '' }}
+          # Chain D: an X11 file manager that takes the drops.
+          DRAG_PACKAGES: ${{ matrix.dragout && 'thunar' || '' }}
         run: |
           sudo apt-get ${APT_NET} update
           # shellcheck disable=SC2086
-          sudo apt-get ${APT_NET} install --yes --no-install-recommends xvfb ${DEEP_PACKAGES}
+          sudo apt-get ${APT_NET} install --yes --no-install-recommends xvfb ${DEEP_PACKAGES} ${DRAG_PACKAGES}
           # electron-updater asks for root through the first of these it finds, and none can prompt without a desktop
           # session. Hidden, it falls back to sudo (passwordless here) and still takes its non-root install path.
           for prompt in gksudo kdesudo pkexec beesu; do
@@ -873,7 +884,21 @@ jobs:
         env:
           E2E_CHAIN_BUDGET_MINUTES: 40
         run: node scripts/ci/e2e.ts --scenario keyring ${{ env.TEST_ARGS }} --artifacts e2e-artifacts
-      # The account's credentials reach spike s7 only, and only this step (deep entries: the step above).
+      # Chain D: N alone, seeded with the handed session (never a form sign-in), real OS input dragging drive items onto
+      # the OS's file manager (scripts/ci/e2e/chains/dragOut.ts); in the desktop session the deep chains use.
+      - name: Drag-out chain D, seeded
+        if: ${{ !cancelled() && matrix.dragout }}
+        shell: bash
+        timeout-minutes: 45
+        env:
+          FILEN_DESKTOP_E2E_TEST_EMAIL: ${{ secrets.FILEN_DESKTOP_E2E_TEST_EMAIL }}
+          FILEN_DESKTOP_E2E_TEST_PASSWORD: ${{ secrets.FILEN_DESKTOP_E2E_TEST_PASSWORD }}
+          FILEN_DESKTOP_E2E_SESSION_KEY: ${{ secrets.FILEN_DESKTOP_E2E_SESSION_KEY }}
+          FILEN_DESKTOP_E2E_SESSION_DIR: ${{ runner.temp }}/e2e-session
+          E2E_SIGN_IN: seeded
+          E2E_CHAIN_BUDGET_MINUTES: 40
+        run: bash scripts/ci/deepSession.sh --scenario dragout --depth deep ${{ env.TEST_ARGS }} --artifacts e2e-artifacts
+      # The account's credentials reach spike s7 only, and only this step (deep entries: the signed-in and seeded steps above).
       # Bounded so a hang never holds a runner for the job's whole budget.
       - name: Spike ${{ matrix.spike }}
         if: matrix.spike && !matrix.deep

@@ -9,12 +9,14 @@ import { OLDER_SCENARIO, olderFor, runsOlder } from "./olderPlan.ts"
 //   PLATFORMS   comma-separated subset of windows,mac,linux (default all)
 //   PROFILE     release | nightly | custom; empty means nightly for a scheduled run, custom otherwise
 //   SIGNED      true | false: sign every build (release and custom); nightly signs macOS only, never notarized
-//   SCENARIOS   comma-separated subset of previous,legacy,older,update-kill,keyring (default previous,legacy);
+//   SCENARIOS   comma-separated subset of previous,legacy,older,update-kill,keyring,dragout (default previous,legacy);
 //               LEGACY=false drops legacy and older. older (3.0.47 -> N, scripts/ci/olderPlan.ts) runs at release and
 //               one night a week with legacy, by hand only when named. update-kill (N-1's installer killed mid-install,
 //               install depth) runs in every release run and when named; never at night, and not for rpm. keyring
 //               (chain K, no sign-in) runs on linux-x64-deb: in every nightly and release run that is not at install
-//               depth, and in a custom one that names it
+//               depth, and in a custom one that names it. dragout (chain D, drag-out with real OS input, seeded) runs
+//               where DEEP_READY lists it in every nightly and release run that is not at install depth, by hand when
+//               named; where only DEEP_TRIAL lists it, in a custom deep run that names it and the entry in FORMATS
 //   FORMATS     custom only: entries such as win-x64-nsis,linux-x64-deb (default all)
 //   DEPTH       auto | install | deep: auto takes the profile's deep entries, deep those of a release (and any
 //               DEEP_TRIAL entry FORMATS names)
@@ -35,8 +37,8 @@ import { OLDER_SCENARIO, olderFor, runsOlder } from "./olderPlan.ts"
 // whose SDK must take the account's auth version (checked by job `session`).
 //
 // Each entry gets one test job, whose `timeout` is its setup plus every step it can run at that step's timeout
-// (jobMinutes). Where that overruns the six hours a hosted runner allows (JOB_MAX_MINUTES), the entry's 3.0.47 chain and
-// chain K run in a second job (`lane`), listed after every entry's first.
+// (jobMinutes). Where that overruns the six hours a hosted runner allows (JOB_MAX_MINUTES), the entry's 3.0.47 chain,
+// chain K and chain D run in a second job (`lane`), listed after every entry's first.
 //
 //   node scripts/ci/e2ePlan.ts
 
@@ -72,6 +74,8 @@ export interface TestEntry extends Entry {
 	signInOlder: SignIn | ""
 	// Chain K on this entry (no sign-in; it needs the harness, so it makes the entry deep).
 	keyring: boolean
+	// Chain D on this entry (scripts/ci/e2e/chains/dragOut.ts): seeded with the run's session, never a form sign-in.
+	dragout: boolean
 	stagger: number
 	spike: Spike | ""
 	// Scenario update-kill (scripts/ci/e2e/updateKill.ts).
@@ -79,7 +83,7 @@ export interface TestEntry extends Entry {
 	// Chain P also runs the cloud-storage-full check, which signs in once through the form on the quota account.
 	quota: boolean
 	// "" for the entry's job; else the second job of an entry whose chains do not fit one (jobMinutes), named by what
-	// it runs ("older", "keyring" or "older-keyring").
+	// it runs ("older", "keyring", "dragout" or a combination such as "older-keyring").
 	lane: string
 	// The job's timeout-minutes (jobMinutes).
 	timeout: number
@@ -192,7 +196,9 @@ const deepEntries: Record<Profile, readonly string[]> = {
 	custom: ["win-x64-nsis", "mac-arm64-dmg", "linux-x64-deb"]
 }
 // Which deep chains are built so far, per entry; the rest of a deep request runs at install depth, with a notice.
-export type DeepScenarios = Readonly<Record<string, readonly ("previous" | "legacy")[]>>
+// dragout is chain D, which needs no update and runs beside the update scenarios (or alone) on the entries listed.
+export type DeepChain = "previous" | "legacy" | "dragout"
+export type DeepScenarios = Readonly<Record<string, readonly DeepChain[]>>
 
 export interface DeepReadiness {
 	// Deep in every profile that asks for it.
@@ -211,8 +217,14 @@ export const DEEP_READY: DeepScenarios = {
 	"linux-arm64-AppImage": ["previous", "legacy"]
 }
 // Deep chains being brought up: deep only when a custom run names the entry in FORMATS with DEPTH deep, so nightly and
-// release runs stay on what is proven.
-export const DEEP_TRIAL: DeepScenarios = {}
+// release runs stay on what is proven. Chain D moves to DEEP_READY once it has passed on an entry.
+export const DEEP_TRIAL: DeepScenarios = {
+	"win-x64-nsis": ["dragout"],
+	"win-arm64-nsis": ["dragout"],
+	"mac-arm64-dmg": ["dragout"],
+	"linux-x64-deb": ["dragout"],
+	"linux-arm64-deb": ["dragout"]
+}
 // Seconds between the UI sign-ins of parallel deep jobs.
 const STAGGER_SECONDS = 20
 // The session job's slots, each minted at most once a run (scripts/ci/e2e/session.ts SLOTS; this planner runs with no
@@ -234,6 +246,7 @@ export const STEP_MINUTES = {
 	olderInstall: 30,
 	updateKill: 45,
 	keyring: 45,
+	dragout: 45,
 	spike: 20,
 	install: 35
 } as const
@@ -245,7 +258,7 @@ const JOB_MIN_MINUTES = 90
 
 export type JobParts = Pick<
 	TestEntry,
-	"previous" | "legacy" | "deepPrevious" | "deepLegacy" | "older" | "deepOlder" | "keyring" | "updateKill" | "spike"
+	"previous" | "legacy" | "deepPrevious" | "deepLegacy" | "older" | "deepOlder" | "keyring" | "dragout" | "updateKill" | "spike"
 >
 
 // A job's timeout: its setup and every step it can run, each at its timeout.
@@ -255,6 +268,7 @@ export function jobMinutes(parts: JobParts): number {
 		parts.deepLegacy ? STEP_MINUTES.legacyDeep : parts.legacy ? STEP_MINUTES.install : 0,
 		parts.deepOlder ? STEP_MINUTES.olderDeep : parts.older ? STEP_MINUTES.olderInstall : 0,
 		parts.keyring ? STEP_MINUTES.keyring : 0,
+		parts.dragout ? STEP_MINUTES.dragout : 0,
 		parts.updateKill ? STEP_MINUTES.updateKill : 0,
 		parts.spike !== "" && !parts.deepPrevious ? STEP_MINUTES.spike : 0
 	]
@@ -262,15 +276,15 @@ export function jobMinutes(parts: JobParts): number {
 	return Math.max(JOB_MIN_MINUTES, SETUP_MINUTES + steps.reduce((sum, minutes) => sum + minutes, 0))
 }
 
-// An entry's jobs: one, or where its chains overrun JOB_MAX_MINUTES, the 3.0.47 chain and chain K in a second job on a
-// runner of their own (they share nothing with chains P and L but the build).
+// An entry's jobs: one, or where its chains overrun JOB_MAX_MINUTES, the 3.0.47 chain, chain K and chain D in a second
+// job on a runner of their own (they share nothing with chains P and L but the build).
 export function splitJob(parts: JobParts): JobParts[] {
-	if (jobMinutes(parts) <= JOB_MAX_MINUTES || !(parts.older || parts.keyring)) {
+	if (jobMinutes(parts) <= JOB_MAX_MINUTES || !(parts.older || parts.keyring || parts.dragout)) {
 		return [parts]
 	}
 
 	return [
-		{ ...parts, older: false, deepOlder: false, keyring: false },
+		{ ...parts, older: false, deepOlder: false, keyring: false, dragout: false },
 		{
 			...parts,
 			previous: false,
@@ -283,7 +297,9 @@ export function splitJob(parts: JobParts): JobParts[] {
 }
 
 function laneOf(parts: JobParts): string {
-	return [parts.older ? "older" : "", parts.keyring ? "keyring" : ""].filter(part => part !== "").join("-")
+	return [parts.older ? "older" : "", parts.keyring ? "keyring" : "", parts.dragout ? "dragout" : ""]
+		.filter(part => part !== "")
+		.join("-")
 }
 
 const builders: Record<Os, string> = { windows: "windows-latest", mac: "macos-26", linux: "ubuntu-latest" }
@@ -350,10 +366,16 @@ export function plan(input: PlanInput, readiness: DeepReadiness = { ready: DEEP_
 	if (
 		scenarios.length === 0 ||
 		scenarios.some(
-			item => item !== "previous" && item !== "legacy" && item !== OLDER_SCENARIO && item !== "update-kill" && item !== "keyring"
+			item =>
+				item !== "previous" &&
+				item !== "legacy" &&
+				item !== OLDER_SCENARIO &&
+				item !== "update-kill" &&
+				item !== "keyring" &&
+				item !== "dragout"
 		)
 	) {
-		invalid(`SCENARIOS must list some of previous, legacy, older, update-kill, keyring (got "${input.scenarios}")`)
+		invalid(`SCENARIOS must list some of previous, legacy, older, update-kill, keyring, dragout (got "${input.scenarios}")`)
 	}
 
 	const formats = list(input.formats)
@@ -407,17 +429,40 @@ export function plan(input: PlanInput, readiness: DeepReadiness = { ready: DEEP_
 	const older = runsOlder({ profile, scenarios, legacy: input.legacy, spike, day: input.day })
 	const keyring = spike === "" && depth !== "install" && (profile === "custom" ? scenarios.includes("keyring") : true)
 	const keyringOn = (entry: Entry) => keyring && idOf(entry) === KEYRING_ENTRY
+	const trial = profile === "custom" && depth === "deep"
+	// Chain D: asked for at night and at release (where DEEP_READY lists it), by hand when named; never at install depth.
+	const dragout = spike === "" && depth !== "install" && (profile === "custom" ? scenarios.includes("dragout") : true)
+	const dragoutOn = (entry: Entry) => {
+		const id = idOf(entry)
 
-	if (chosen.length === 0 || (spike === "" && !previous && !legacy && !older && !keyring && !chosen.some(killed))) {
+		return (
+			dragout &&
+			(readiness.ready[id]?.includes("dragout") === true ||
+				(trial && formats.includes(id) && readiness.trial[id]?.includes("dragout") === true))
+		)
+	}
+
+	if (chosen.length === 0 || (spike === "" && !previous && !legacy && !older && !keyring && !dragout && !chosen.some(killed))) {
 		invalid("nothing to test")
 	}
 
 	// update-kill alone: only the entries it runs on (not rpm).
-	if (spike === "" && !previous && !legacy && !older && !keyring) {
+	if (spike === "" && !previous && !legacy && !older && !keyring && !dragout) {
 		chosen.splice(0, chosen.length, ...chosen.filter(killed))
 	}
 
-	const trial = profile === "custom" && depth === "deep"
+	// Chain D named by hand on an entry it is only being brought up on.
+	if (profile === "custom" && dragout) {
+		const waiting = chosen
+			.map(idOf)
+			.filter(id => readiness.ready[id]?.includes("dragout") !== true && readiness.trial[id]?.includes("dragout") === true)
+			.filter(id => !(trial && formats.includes(id)))
+
+		if (waiting.length > 0) {
+			notices.push(`Chain D is in trial on ${waiting.join(", ")}: it runs there only with depth deep and the entry named in formats.`)
+		}
+	}
+
 	// A trial entry is wanted wherever it is named: it may be a format no profile runs deep yet.
 	const wantsDeep = (id: string) =>
 		spike === "" &&
@@ -456,11 +501,13 @@ export function plan(input: PlanInput, readiness: DeepReadiness = { ready: DEEP_
 	})
 	// An entry with nothing to run (3.0.47, update-kill or chain K without the update scenarios, elsewhere) gets no job.
 	const running = deepChains.filter(
-		item => spike !== "" || previous || legacy || item.older || killed(item.entry) || keyringOn(item.entry)
+		item => spike !== "" || previous || legacy || item.older || killed(item.entry) || keyringOn(item.entry) || dragoutOn(item.entry)
 	)
 
 	if (running.length === 0) {
-		invalid(`nothing to test: keyring runs on ${KEYRING_ENTRY} only`)
+		invalid(
+			`nothing to test: keyring runs on ${KEYRING_ENTRY} only; dragout runs where DEEP_READY lists it, or with depth deep on the DEEP_TRIAL entries named in formats`
+		)
 	}
 
 	// Per OS, the entries whose chain signs in for real: one 4.x and one 3.0.53, the next entry along for 3.0.53, so the
@@ -491,6 +538,7 @@ export function plan(input: PlanInput, readiness: DeepReadiness = { ready: DEEP_
 			older: olderEntry,
 			deepOlder,
 			keyring: keyringOn(entry),
+			dragout: dragoutOn(entry),
 			updateKill: killed(entry),
 			spike
 		}
@@ -514,7 +562,7 @@ export function plan(input: PlanInput, readiness: DeepReadiness = { ready: DEEP_
 			...entry,
 			signed: sign[entry.os],
 			...job,
-			deep: job.deepPrevious || job.deepLegacy || job.deepOlder || job.keyring,
+			deep: job.deepPrevious || job.deepLegacy || job.deepOlder || job.keyring || job.dragout,
 			signInPrevious,
 			signInLegacy,
 			signInOlder,
@@ -529,8 +577,8 @@ export function plan(input: PlanInput, readiness: DeepReadiness = { ready: DEEP_
 		.filter(os => tests.some(entry => entry.os === os))
 		.map((os): BuildEntry => ({ os, runner: builders[os], sign: sign[os] }))
 
-	// Chain K signs nothing in and reaches no cloud.
-	const session = tests.some(entry => entry.deepPrevious || entry.deepLegacy || entry.deepOlder)
+	// Chain K signs nothing in and reaches no cloud; chain D is seeded with the session and reaches the cloud.
+	const session = tests.some(entry => entry.deepPrevious || entry.deepLegacy || entry.deepOlder || entry.dragout)
 	// Spike s7 signs in through the 4.x form on its own.
 	let logins =
 		(session ? SESSION_SLOTS : 0) +

@@ -120,9 +120,23 @@ describe("desktop e2e workflow chain K", () => {
 		expect(step("Prepare the keyring chain")).toContain("dbus-bin")
 		// A keyring-only entry is deep (the harness) without a session to download.
 		expect(text).toContain(
-			"- name: Download the sealed session\n        if: matrix.deepPrevious || matrix.deepLegacy || matrix.deepOlder\n"
+			"- name: Download the sealed session\n        if: matrix.deepPrevious || matrix.deepLegacy || matrix.deepOlder || matrix.dragout\n"
 		)
 		expect(text).not.toContain("if: matrix.deep\n")
+	})
+
+	it("runs chain D seeded in the deep desktop session, with the session but never a form sign-in", () => {
+		const chain = step("Drag-out chain D, seeded")
+
+		expect(chain).toContain("if: ${{ !cancelled() && matrix.dragout }}")
+		expect(chain).toContain("E2E_SIGN_IN: seeded")
+		expect(chain).not.toContain("E2E_STAGGER_SECONDS")
+		expect(chain).toContain(
+			"run: bash scripts/ci/deepSession.sh --scenario dragout --depth deep ${{ env.TEST_ARGS }} --artifacts e2e-artifacts"
+		)
+		expect(chain).toContain("E2E_CHAIN_BUDGET_MINUTES: 40")
+		expect(step("Prepare the Linux desktop")).toContain("DRAG_PACKAGES: ${{ matrix.dragout && 'thunar' || '' }}")
+		expect(text.match(/description: Comma-separated subset of [a-z,-]*\bdragout\b/g)).toHaveLength(2)
 	})
 
 	it("offers the keyring-mac spike and the keyring scenario by hand", () => {

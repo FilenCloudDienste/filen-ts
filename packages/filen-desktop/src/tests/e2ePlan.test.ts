@@ -212,7 +212,12 @@ describe("e2ePlan depth", () => {
 		expect(deepWith({ ...dispatch, depth: "deep" })).toEqual(["linux-x64-deb@0"])
 		expect(deepWith({ ...dispatch, formats: "win-x64-nsis" })).toEqual([])
 		expect(deepWith({ ...dispatch, platforms: "", profile: "", eventName: "schedule", spike: "" })).toEqual(["linux-x64-deb@0"])
-		expect(DEEP_TRIAL).toEqual({})
+		// Chain D is the only chain being brought up.
+		expect(
+			Object.values(DEEP_TRIAL)
+				.flat()
+				.every(chain => chain === "dragout")
+		).toBe(true)
 
 		// The real tables: a custom deep run naming Windows arm64 runs both chains on its own runner.
 		const arm = plan({ ...dispatch, platforms: "windows", depth: "deep", formats: "win-arm64-nsis" })
@@ -456,6 +461,104 @@ describe("e2ePlan sign-ins", () => {
 	})
 })
 
+describe("e2ePlan chain D (drag-out)", () => {
+	const DRAG_ENTRIES = ["win-x64-nsis", "win-arm64-nsis", "mac-arm64-dmg", "linux-x64-deb", "linux-arm64-deb"]
+	const nightly = { ...dispatch, platforms: "", profile: "", eventName: "schedule", scenarios: "", spike: "" }
+	const promoted = {
+		ready: Object.fromEntries(
+			[...new Set([...Object.keys(DEEP_READY), ...Object.keys(DEEP_TRIAL)])].map(id => [
+				id,
+				[...(DEEP_READY[id] ?? []), ...(DEEP_TRIAL[id] ?? [])]
+			])
+		),
+		trial: {}
+	}
+	const dragIds = (input: PlanInput, readiness = { ready: DEEP_READY, trial: DEEP_TRIAL }) =>
+		plan(input, readiness)
+			.tests.filter(entry => entry.dragout)
+			.map(entry => `${entry.platform}-${entry.arch}-${entry.format}`)
+
+	it("is in trial on the five main formats, and runs there only in a custom deep run naming them", () => {
+		expect(Object.keys(DEEP_TRIAL).filter(id => DEEP_TRIAL[id]?.includes("dragout") === true)).toEqual(DRAG_ENTRIES)
+
+		const named = plan({ ...dispatch, signed: true, scenarios: "dragout", depth: "deep", formats: DRAG_ENTRIES.join(",") })
+
+		expect(named.tests.map(entry => `${entry.platform}-${entry.arch}-${entry.format}`)).toEqual(DRAG_ENTRIES)
+		expect(named.tests.every(entry => entry.dragout && entry.deep && entry.stagger === 0)).toBe(true)
+		expect(
+			named.tests.some(
+				entry => entry.previous || entry.legacy || entry.deepPrevious || entry.deepLegacy || entry.older || entry.keyring
+			)
+		).toBe(false)
+		// Seeded with the run's session: the session job, and no form sign-in.
+		expect(named.session).toBe(true)
+		expect(named.logins).toBe(SESSION_SLOTS)
+		expect(named.tests.every(entry => entry.timeout === jobMinutes(entry))).toBe(true)
+		expect(named.notices).toEqual([])
+
+		// Not deep, or the entry not named: it waits, with a notice; alone that is nothing to test.
+		expect(() => plan({ ...dispatch, signed: true, scenarios: "dragout", formats: "win-x64-nsis" })).toThrow(
+			/dragout runs where DEEP_READY/
+		)
+		expect(() => plan({ ...dispatch, scenarios: "dragout", depth: "install" })).toThrow(/nothing to test/)
+
+		const beside = plan({ ...dispatch, scenarios: "previous,dragout", depth: "deep", formats: "win-x64-nsis,linux-x64-deb" })
+
+		expect(beside.tests.map(entry => [entry.format, entry.deepPrevious, entry.dragout])).toEqual([
+			["nsis", true, true],
+			["deb", true, true]
+		])
+
+		const unnamed = plan({ ...dispatch, scenarios: "previous,dragout", depth: "deep", formats: "linux-x64-deb", platforms: "linux" })
+
+		expect(unnamed.tests.map(entry => entry.dragout)).toEqual([true])
+		expect(plan({ ...dispatch, scenarios: "previous,dragout" }).notices).toContain(
+			"Chain D is in trial on win-x64-nsis, win-arm64-nsis, linux-x64-deb, linux-arm64-deb: it runs there only with depth deep and the entry named in formats."
+		)
+		// Unsigned, macOS drops out as for every scenario.
+		expect(dragIds({ ...dispatch, scenarios: "dragout", depth: "deep", formats: DRAG_ENTRIES.join(",") })).toEqual(
+			DRAG_ENTRIES.filter(id => !id.startsWith("mac"))
+		)
+	})
+
+	it("stays out of nightly and release runs until promoted, then runs there seeded, within the login cap and six hours", () => {
+		expect(dragIds(nightly)).toEqual([])
+		expect(dragIds({ ...dispatch, profile: "release", signed: true })).toEqual([])
+
+		for (const input of [
+			...[0, 1, 2, 3, 4, 5, 6].map(day => ({ ...nightly, day })),
+			{ ...dispatch, profile: "release", signed: true }
+		]) {
+			const before = plan(input)
+			const after = plan(input, promoted)
+
+			expect(dragIds(input, promoted).sort()).toEqual([...DRAG_ENTRIES].sort())
+			expect(after.logins).toBe(before.logins)
+			expect(after.tests.every(entry => entry.timeout <= JOB_MAX_MINUTES && entry.timeout === jobMinutes(entry))).toBe(true)
+		}
+
+		expect(dragIds({ ...dispatch, profile: "release", signed: true, depth: "install" }, promoted)).toEqual([])
+		expect(dragIds({ ...nightly, spike: "s1", profile: "nightly" }, promoted)).toEqual([])
+		// By hand, promoted: named, on the ready entries, at any depth but install.
+		expect(dragIds({ ...dispatch, signed: true, scenarios: "dragout" }, promoted)).toEqual(DRAG_ENTRIES)
+		expect(dragIds(dispatch, promoted)).toEqual([])
+	})
+
+	it("moves to the second job where an entry's chains overrun six hours", () => {
+		const release = plan({ ...dispatch, profile: "release", eventName: "workflow_call", signed: true }, promoted)
+		const second = release.tests.filter(entry => entry.lane !== "")
+
+		expect(second.every(entry => !entry.deepPrevious && !entry.deepLegacy)).toBe(true)
+		expect(second.filter(entry => entry.dragout).map(entry => `${entry.platform}-${entry.arch} ${entry.lane}`)).toEqual([
+			"win-x64 older-dragout",
+			"win-arm64 dragout",
+			"mac-arm64 older-dragout",
+			"linux-x64 older-keyring-dragout",
+			"linux-arm64 dragout"
+		])
+	})
+})
+
 describe("e2ePlan job timeouts", () => {
 	const nightly = { ...dispatch, platforms: "", profile: "", eventName: "schedule", scenarios: "", spike: "" }
 	const release = { ...dispatch, profile: "release", eventName: "workflow_call", signed: true }
@@ -485,6 +588,7 @@ describe("e2ePlan job timeouts", () => {
 		expect(stepTimeout("3.0.47 -> N")).toBe(STEP_MINUTES.olderInstall)
 		expect(stepTimeout("N-1 -> N, installer killed")).toBe(STEP_MINUTES.updateKill)
 		expect(stepTimeout("Keyring chain K, no sign-in")).toBe(STEP_MINUTES.keyring)
+		expect(stepTimeout("Drag-out chain D, seeded")).toBe(STEP_MINUTES.dragout)
 		expect(stepTimeout("Spike ${{ matrix.spike }}")).toBe(STEP_MINUTES.spike)
 		expect(text).toContain("timeout-minutes: ${{ matrix.timeout }}")
 		expect(text).toContain("${{ matrix.lane && format(' {0}', matrix.lane) || '' }}")
@@ -504,11 +608,12 @@ describe("e2ePlan job timeouts", () => {
 						(entry.deepLegacy ? STEP_MINUTES.legacyDeep : 0) +
 						(entry.deepOlder ? STEP_MINUTES.olderDeep : entry.older ? STEP_MINUTES.olderInstall : 0) +
 						(entry.keyring ? STEP_MINUTES.keyring : 0) +
+						(entry.dragout ? STEP_MINUTES.dragout : 0) +
 						(entry.updateKill ? STEP_MINUTES.updateKill : 0)
 				)
 			}
 
-			for (const chain of ["deepPrevious", "deepLegacy", "older", "keyring", "updateKill", "quota"] as const) {
+			for (const chain of ["deepPrevious", "deepLegacy", "older", "keyring", "dragout", "updateKill", "quota"] as const) {
 				const holders = result.tests.filter(entry => entry[chain]).map(idOf)
 
 				expect(new Set(holders).size).toBe(holders.length)
