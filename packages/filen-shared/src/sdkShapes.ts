@@ -542,9 +542,9 @@ const decryptedDirMeta = record({
 const dirMeta = adjacent({
 	decoded: { tag: "Decoded", conv: decryptedDirMeta },
 	decryptedRaw: { tag: "DecryptedRaw", conv: rawBytes },
-	decryptedUTF8: { tag: "DecryptedUtf8", conv: str },
+	decryptedUTF8: { tag: "DecryptedUTF8", conv: str },
 	encrypted: { tag: "Encrypted", conv: str },
-	rSAEncrypted: { tag: "RsaEncrypted", conv: str }
+	rSAEncrypted: { tag: "RSAEncrypted", conv: str }
 })
 
 const decryptedFileMeta = record({
@@ -560,10 +560,10 @@ const decryptedFileMeta = record({
 
 const fileMeta = adjacent({
 	decoded: { tag: "Decoded", conv: decryptedFileMeta },
-	decryptedUTF8: { tag: "DecryptedUtf8", conv: str },
+	decryptedUTF8: { tag: "DecryptedUTF8", conv: str },
 	decryptedRaw: { tag: "DecryptedRaw", conv: rawBytes },
 	encrypted: { tag: "Encrypted", conv: str },
-	rSAEncrypted: { tag: "RsaEncrypted", conv: str }
+	rSAEncrypted: { tag: "RSAEncrypted", conv: str }
 })
 
 const file = record({

@@ -20,7 +20,7 @@
 							"timestamp": "$bigint:1762819200000n",
 							"favorited": false,
 							"meta": {
-								"tag": "DecryptedUtf8",
+								"tag": "DecryptedUTF8",
 								"inner": [
 									"not json"
 								]

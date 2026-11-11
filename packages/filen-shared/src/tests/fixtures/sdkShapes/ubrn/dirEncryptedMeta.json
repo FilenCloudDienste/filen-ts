@@ -15,7 +15,7 @@
 			"timestamp": "$bigint:1762819200000n",
 			"favorited": false,
 			"meta": {
-				"tag": "RsaEncrypted",
+				"tag": "RSAEncrypted",
 				"inner": [
 					"rsa-encrypted-meta"
 				]

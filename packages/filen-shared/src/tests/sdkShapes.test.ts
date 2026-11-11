@@ -82,6 +82,29 @@ describe("sdkShapes", () => {
 			expect(shared.inner[0].sharingRole.inner[0].id).toBe(4242n)
 		})
 
+		it("writes the native tag values of the UTF-8 and RSA metas, both ways", async () => {
+			const file = (await fixture("wasm", "file")) as Record<string, unknown>
+			const dir = (await fixture("wasm", "dir")) as Record<string, unknown>
+			const cases = [
+				["decryptedUTF8", "DecryptedUTF8"],
+				["rSAEncrypted", "RSAEncrypted"]
+			] as const
+
+			for (const [type, tag] of cases) {
+				const meta = { type, data: "opaque" }
+
+				for (const [kind, variant, item] of [
+					["File", "AnyFile.File", file],
+					["Dir", "AnyNormalDir.Dir", dir]
+				] as const) {
+					const ubrn = innerOf(ubrnOf(variant, { ...item, meta })) as { meta: unknown }
+
+					expect(ubrn.meta).toEqual({ tag, inner: ["opaque"] })
+					expect(wasmOf(kind, ubrn)).toEqual({ ...item, meta })
+				}
+			}
+		})
+
 		it("writes the hash and raw metadata as Uint8Array", async () => {
 			const file = ubrnOf("AnyFile.File", await fixture("wasm", "file")) as { inner: [{ meta: { inner: [{ hash: unknown }] } }] }
 			const raw = ubrnOf("AnyNormalDir.Dir", await fixture("wasm", "dirRawMeta")) as { inner: [{ meta: { inner: [unknown] } }] }
