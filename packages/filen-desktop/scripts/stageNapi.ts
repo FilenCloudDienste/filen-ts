@@ -58,11 +58,23 @@ function tripleOf(arch: NativeArch): string {
 	return `${process.platform}-${arch}${ABI[process.platform] ?? ""}`
 }
 
+// @filen/sdk-rs's real directory, which holds the napi typings (node/index.d.ts).
+export function sdkPackageDir(): string {
+	return realpathSync(path.join(packageDir, "node_modules", "@filen", "sdk-rs"))
+}
+
+// The addon for `arch` in a filen-rs `build:napi` output directory, or null.
+export function builtAddon(dir: string, arch: NativeArch): string | null {
+	const candidate = path.resolve(dir, `sdk-rs.${tripleOf(arch)}.node`)
+
+	return existsSync(candidate) ? realpathSync(candidate) : null
+}
+
 // The addon @filen/sdk-rs's platform package installed for this OS and `arch`, or null. The platform packages are its
 // optional dependencies, so they resolve from its own (real) directory; its exports map hides package.json, so the
 // directory is found on disk.
 export function installedAddon(arch: NativeArch): string | null {
-	const fromSdk = createRequire(path.join(realpathSync(path.join(packageDir, "node_modules", "@filen", "sdk-rs")), "package.json"))
+	const fromSdk = createRequire(path.join(sdkPackageDir(), "package.json"))
 	const triple = tripleOf(arch)
 
 	try {
@@ -83,9 +95,7 @@ export function stageNapi(options: { dev: boolean }): void {
 
 	function addonFor(arch: NativeArch): string | null {
 		if (overrideDir !== undefined && overrideDir.length > 0) {
-			const candidate = path.resolve(overrideDir, `sdk-rs.${tripleOf(arch)}.node`)
-
-			return existsSync(candidate) ? realpathSync(candidate) : null
+			return builtAddon(overrideDir, arch)
 		}
 
 		return installedAddon(arch)
