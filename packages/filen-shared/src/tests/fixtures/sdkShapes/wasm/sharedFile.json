@@ -1,0 +1,19 @@
+{
+	"uuid": "4f8e2c1a-3b5d-4e6f-8a9b-0c1d2e3f4a5b",
+	"size": "$bigint:1048577n",
+	"region": "de-1",
+	"bucket": "filen-1",
+	"chunks": "$bigint:2n",
+	"timestamp": "$bigint:1762819200000n",
+	"meta": {
+		"type": "encrypted",
+		"data": "002encrypted-meta"
+	},
+	"sharingRole": {
+		"type": "receiver",
+		"email": "owner@example.com",
+		"id": 4242
+	},
+	"sharedTag": true,
+	"canMakeThumbnail": true
+}

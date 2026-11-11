@@ -1,0 +1,39 @@
+{
+	"tag": "File",
+	"inner": [
+		{
+			"uuid": "4f8e2c1a-3b5d-4e6f-8a9b-0c1d2e3f4a5b",
+			"stableUuid": "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d",
+			"meta": {
+				"tag": "Decoded",
+				"inner": [
+					{
+						"name": "report.pdf",
+						"mime": "application/pdf",
+						"created": "$bigint:1762819195000n",
+						"modified": "$bigint:1762819199000n",
+						"hash": {
+							"$bytes": "0f1e2d3c4b5a69788796a5b4c3d2e1f00f1e2d3c4b5a69788796a5b4c3d2e1f0"
+						},
+						"size": "$bigint:1048577n",
+						"key": "dummy-file-key-0000000000000000000",
+						"version": 2
+					}
+				]
+			},
+			"parent": {
+				"tag": "Uuid",
+				"inner": [
+					"0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d"
+				]
+			},
+			"size": "$bigint:1048577n",
+			"favorited": true,
+			"region": "de-1",
+			"bucket": "filen-1",
+			"timestamp": "$bigint:1762819200000n",
+			"chunks": "$bigint:2n",
+			"canMakeThumbnail": false
+		}
+	]
+}

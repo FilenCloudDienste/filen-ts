@@ -1,0 +1,19 @@
+{
+	"uuid": "4f8e2c1a-3b5d-4e6f-8a9b-0c1d2e3f4a5b",
+	"name": {
+		"Decrypted": "photo.heic"
+	},
+	"mime": {
+		"Encrypted": "002encrypted-mime"
+	},
+	"size": "$bigint:9007199254740993n",
+	"chunks": "$bigint:9n",
+	"region": "de-1",
+	"bucket": "filen-1",
+	"version": 3,
+	"timestamp": "$bigint:1762819200000n",
+	"fileKey": "dummy-file-key-0000000000000000000",
+	"downloadable": true,
+	"linkedTag": true,
+	"canMakeThumbnail": true
+}

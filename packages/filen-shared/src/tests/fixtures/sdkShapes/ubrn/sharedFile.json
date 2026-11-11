@@ -1,0 +1,30 @@
+{
+	"tag": "Shared",
+	"inner": [
+		{
+			"uuid": "4f8e2c1a-3b5d-4e6f-8a9b-0c1d2e3f4a5b",
+			"size": "$bigint:1048577n",
+			"region": "de-1",
+			"bucket": "filen-1",
+			"chunks": "$bigint:2n",
+			"timestamp": "$bigint:1762819200000n",
+			"meta": {
+				"tag": "Encrypted",
+				"inner": [
+					"002encrypted-meta"
+				]
+			},
+			"sharingRole": {
+				"tag": "Receiver",
+				"inner": [
+					{
+						"email": "owner@example.com",
+						"id": "$bigint:4242n"
+					}
+				]
+			},
+			"sharedTag": true,
+			"canMakeThumbnail": true
+		}
+	]
+}

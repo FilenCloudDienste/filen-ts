@@ -28,6 +28,7 @@
 		"./desktop": "./src/desktop.ts",
 		"./desktopLock": "./src/desktopLock.ts",
 		"./localName": "./src/localName.ts",
+		"./sdkShapes": "./src/sdkShapes.ts",
 		"./desktopShellStrings": "./src/desktopShellStrings.ts",
 		"./languages": "./src/languages.ts",
 		"./session": "./src/session.ts",

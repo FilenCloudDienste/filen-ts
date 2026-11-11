@@ -1,0 +1,14 @@
+{
+	"uuid": "6c5d4e3f-2a1b-4c0d-9e8f-7a6b5c4d3e2f",
+	"parent": "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d",
+	"color": "default",
+	"timestamp": "$bigint:1762819200000n",
+	"favorited": false,
+	"meta": {
+		"type": "decoded",
+		"data": {
+			"name": "Projects",
+			"created": "$bigint:1762819191000n"
+		}
+	}
+}

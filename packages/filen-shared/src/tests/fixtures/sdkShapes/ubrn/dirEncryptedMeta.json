@@ -1,0 +1,25 @@
+{
+	"tag": "Dir",
+	"inner": [
+		{
+			"uuid": "6c5d4e3f-2a1b-4c0d-9e8f-7a6b5c4d3e2f",
+			"parent": {
+				"tag": "Uuid",
+				"inner": [
+					"0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d"
+				]
+			},
+			"color": {
+				"tag": "Purple"
+			},
+			"timestamp": "$bigint:1762819200000n",
+			"favorited": false,
+			"meta": {
+				"tag": "RsaEncrypted",
+				"inner": [
+					"rsa-encrypted-meta"
+				]
+			}
+		}
+	]
+}
