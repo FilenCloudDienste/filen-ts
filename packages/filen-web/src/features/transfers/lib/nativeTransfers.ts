@@ -1,20 +1,41 @@
 import type { Dir, File as SdkFile } from "@filen/sdk-rs"
-import type { DesktopTransfer, DesktopTransferEvent, DesktopTransferProgress } from "@filen/shared/desktop"
+import { toast } from "sonner"
+import type {
+	DesktopTransfer,
+	DesktopTransferEvent,
+	DesktopTransferKind,
+	DesktopTransferProgress,
+	DesktopUploadParent
+} from "@filen/shared/desktop"
 import { parseEnvelope } from "@filen/shared/session"
+import { sumBytes } from "@filen/shared"
 import { desktopBridge } from "@/lib/desktop"
 import { log } from "@/lib/log"
+import { errorLabel } from "@/lib/i18n/errorLabel"
 import { toastSummary } from "@/lib/actions/bulkToast"
+import { accountQueryGet } from "@/queries/account"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
+import { findCachedListingItem } from "@/features/drive/queries/drive"
+import {
+	defaultHeicUploadDeps,
+	heicUploadConversionEnabled,
+	isHeicUploadCandidate,
+	isHeicUploadName
+} from "@/features/drive/lib/heicUpload"
+import { ensureUploadQuota } from "@/features/drive/lib/quota"
 import {
 	defaultUploadDeps,
 	invalidateUploadedDirectorySizes,
 	landUpload,
 	newUploadBatchRef,
-	reactToStorageRefusal
+	reactToStorageRefusal,
+	startUploads
 } from "@/features/drive/lib/upload"
+import { isDirectoryEntry, readEntriesBatch, startDirectoryUpload } from "@/features/drive/lib/uploadDirectory"
 import { toastDownloadFailed } from "@/features/transfers/lib/settle"
 import { toastTransferStarted } from "@/features/transfers/lib/transferStartToast"
-import { errorDtoOf, rowOf } from "@/features/transfers/lib/nativeTransfers.logic"
+import { errorDtoOf, rowOf, uploadParentOf } from "@/features/transfers/lib/nativeTransfers.logic"
+import { nativeFeedChanged, toastNativeFailure } from "@/features/transfers/lib/nativeHost"
 import {
 	isActiveTransfer,
 	transferById,
@@ -48,14 +69,10 @@ const groups = new Map<string, Group>()
 const groupOf = new Map<string, string>()
 let unsubscribe: (() => void) | null = null
 
-// On desktop, once the signed-in shell started the feed.
-export function nativeTransfersAvailable(): boolean {
-	return unsubscribe !== null
-}
-
 function stop(): void {
 	unsubscribe?.()
 	unsubscribe = null
+	nativeFeedChanged(false)
 	groups.clear()
 	groupOf.clear()
 }
@@ -69,6 +86,7 @@ export function startNativeTransfersFeed(): () => void {
 	}
 
 	unsubscribe ??= bridge.transfers.onEvents(applyNativeEvent)
+	nativeFeedChanged(true)
 
 	return stop
 }
@@ -355,5 +373,192 @@ export function applyNativeEvent(event: DesktopTransferEvent): void {
 		case "settled":
 			applySettled(event)
 			break
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Entry points: uploads, the upload menu's pickers and drops (downloads: nativeHost.ts). What stays on the page's own
+// path: HEIC files, and picked or dropped directories holding one, while they convert on upload.
+// ---------------------------------------------------------------------------
+
+// The directory uploads land in, null for the root (the account's root directory).
+function uploadParent(parentUuid: string | null): DesktopUploadParent | null {
+	const uuid = parentUuid ?? accountQueryGet()?.rootDirUuid
+
+	return uuid === undefined ? null : uploadParentOf(uuid, findCachedListingItem(uuid))
+}
+
+async function uploadNatively(files: File[], parentUuid: string | null, noun: "files" | "items"): Promise<void> {
+	const bridge = desktopBridge()
+	const parent = uploadParent(parentUuid)
+
+	if (bridge === undefined || parent === null || files.length === 0) {
+		return
+	}
+
+	const convertHeic = await heicUploadConversionEnabled(defaultHeicUploadDeps, files)
+	const web = convertHeic ? files.filter(isHeicUploadCandidate) : []
+	const native = convertHeic ? files.filter(file => !isHeicUploadCandidate(file)) : files
+	const uploads: Promise<void>[] = web.length === 0 ? [] : [startUploads(web, parentUuid)]
+
+	// Plain files keep the page's quota check; a directory's size the host learns only as it reads it.
+	if (native.length > 0 && (await ensureUploadQuota(sumBytes(native.map(file => file.size))))) {
+		try {
+			const result = await bridge.transfers.upload(native, parent)
+
+			if (!result.ok) {
+				toastNativeFailure(result.error)
+			} else if (result.value.status === "started") {
+				// Files without a path the host can read upload from the page.
+				const skipped = result.value.skipped.flatMap(index => native[index] ?? [])
+				const [first] = native
+
+				if (skipped.length > 0) {
+					uploads.push(startUploads(skipped, parentUuid))
+				}
+
+				if (first !== undefined && result.value.ids.length > 0) {
+					toastTransferStarted({ direction: "upload", name: first.name, count: result.value.ids.length, noun })
+				}
+			}
+		} catch (e) {
+			toast.error(errorLabel(e))
+		}
+	}
+
+	await Promise.all(uploads)
+}
+
+// Picked files, or (`asDirectory`) one webkitdirectory input's contents, which upload as one directory.
+export async function startNativeUploads(files: File[], parentUuid: string | null, options?: { asDirectory?: boolean }): Promise<void> {
+	if (options?.asDirectory !== true) {
+		await uploadNatively(files, parentUuid, "files")
+
+		return
+	}
+
+	const bridge = desktopBridge()
+	const parent = uploadParent(parentUuid)
+
+	if (bridge === undefined || parent === null || files.length === 0) {
+		return
+	}
+
+	// A directory holding a HEIC file that converts takes the page's walk, whole.
+	if (await heicUploadConversionEnabled(defaultHeicUploadDeps, files)) {
+		await startDirectoryUpload({ kind: "files", files }, parentUuid)
+
+		return
+	}
+
+	try {
+		const result = await bridge.transfers.upload(files, parent, { asDirectory: true })
+
+		if (!result.ok) {
+			toastNativeFailure(result.error)
+		} else if (result.value.status === "started" && result.value.skipped.length > 0) {
+			// Main could not read the picked directory: the page's walk uploads it.
+			await startDirectoryUpload({ kind: "files", files }, parentUuid)
+		} else if (result.value.status === "started" && result.value.ids.length > 0) {
+			toastTransferStarted({ direction: "upload", name: storeRow(result.value.ids[0] ?? "")?.name ?? "", count: 1, noun: "items" })
+		}
+	} catch (e) {
+		toast.error(errorLabel(e))
+	}
+}
+
+// The upload menu's pickers with HEIC conversion off: main's own open dialog, its paths straight to the host. Never
+// rejects; settles once the dialog closed and the upload started.
+export async function pickNativeUpload(kind: DesktopTransferKind, parentUuid: string | null): Promise<void> {
+	const bridge = desktopBridge()
+	const parent = uploadParent(parentUuid)
+
+	if (bridge === undefined || parent === null) {
+		return
+	}
+
+	try {
+		const result = await bridge.transfers.pickUpload(kind, parent)
+
+		if (!result.ok) {
+			toastNativeFailure(result.error)
+		} else if (result.value.status === "started" && result.value.ids.length > 0) {
+			const ids = result.value.ids
+
+			toastTransferStarted({ direction: "upload", name: storeRow(ids[0] ?? "")?.name ?? "", count: ids.length, noun: "items" })
+		}
+	} catch (e) {
+		toast.error(errorLabel(e))
+	}
+}
+
+// Whether a dropped directory's tree holds a HEIC file, by its entries' names, stopping at the first. One it cannot
+// read counts as holding one: the page's walk then reports what it could not read.
+async function holdsHeic(root: FileSystemDirectoryEntry): Promise<boolean> {
+	const stack = [root]
+
+	try {
+		for (let dir = stack.pop(); dir !== undefined; dir = stack.pop()) {
+			const reader = dir.createReader()
+
+			for (let batch = await readEntriesBatch(reader); batch.length > 0; batch = await readEntriesBatch(reader)) {
+				for (const child of batch) {
+					if (isDirectoryEntry(child)) {
+						stack.push(child)
+					} else if (isHeicUploadName(child.name)) {
+						return true
+					}
+				}
+			}
+		}
+	} catch {
+		return true
+	}
+
+	return false
+}
+
+// A drop: its top-level Files (a directory among them uploads whole, main stats its path) and their entries, read
+// while the drop event held them. With HEIC conversion on, a directory holding a HEIC file takes the page's walk; the
+// rest go to the host by their top-level File (its path, never an entry-walked File's).
+export async function startNativeDrop(files: File[], entries: readonly FileSystemEntry[], parentUuid: string | null): Promise<void> {
+	const directories = entries.filter(isDirectoryEntry)
+
+	if (directories.length === 0 || !(await convertsHeic())) {
+		await uploadNatively(files, parentUuid, "items")
+
+		return
+	}
+
+	const byName = new Map<string, File[]>()
+
+	for (const file of files) {
+		byName.set(file.name, [...(byName.get(file.name) ?? []), file])
+	}
+
+	const walked: FileSystemEntry[] = []
+	const native: File[] = []
+
+	for (const entry of entries) {
+		const file = byName.get(entry.name)?.shift()
+
+		if (isDirectoryEntry(entry) && (await holdsHeic(entry))) {
+			walked.push(entry)
+		} else if (file !== undefined) {
+			native.push(file)
+		}
+	}
+
+	await Promise.all([
+		walked.length === 0 ? undefined : startDirectoryUpload({ kind: "entries", entries: walked }, parentUuid),
+		native.length === 0 ? undefined : uploadNatively(native, parentUuid, "items")
+	])
+}
+
+async function convertsHeic(): Promise<boolean> {
+	try {
+		return await defaultHeicUploadDeps.readPreference()
+	} catch {
+		return false
 	}
 }

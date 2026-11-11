@@ -1,5 +1,7 @@
 import { startUploads } from "@/features/drive/lib/upload"
 import { startDirectoryUpload } from "@/features/drive/lib/uploadDirectory"
+import { nativeTransfersAvailable } from "@/features/transfers/lib/nativeHost"
+import { startNativeDrop } from "@/features/transfers/lib/nativeTransfers"
 
 // Files dragged in from the operating system, as opposed to an internal drive drag (dnd.ts's marker).
 export function isFileDrag(dataTransfer: DataTransfer | null): boolean {
@@ -18,6 +20,14 @@ export function uploadDroppedFiles(dataTransfer: DataTransfer, parentUuid: strin
 		if (entry !== null) {
 			entries.push(entry)
 		}
+	}
+
+	// On desktop the native host uploads from the dropped paths; the drop's Files and entries are read now, while
+	// the event still holds them.
+	if (nativeTransfersAvailable()) {
+		void startNativeDrop(Array.from(dataTransfer.files), entries, parentUuid)
+
+		return
 	}
 
 	if (entries.some(entry => entry.isDirectory)) {

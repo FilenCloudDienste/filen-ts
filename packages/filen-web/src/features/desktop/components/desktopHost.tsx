@@ -17,6 +17,7 @@ import { performLogout } from "@/features/shell/lib/performLogout"
 import { loadSync } from "@/features/sync/lib/syncStore"
 import { loadMounts } from "@/features/mounts/lib/mountsStore"
 import { startNativeTransfersFeed } from "@/features/transfers/lib/nativeTransfers"
+import { useHeicUploadConvertPreferenceQuery } from "@/features/drive/queries/drive"
 import { i18n } from "@/lib/i18n"
 
 // One prompt however often main reports the same download (each page load hears it again).
@@ -53,6 +54,9 @@ function notify(kind: "chat" | "contact", content: NotificationContent, tag: str
 export function DesktopHost(): null {
 	const { t } = useTranslation(["chats", "contacts", "common"])
 	const navigate = useNavigate()
+
+	// Kept loaded: the upload pickers choose between the native dialog and the page's input from it, within the click.
+	useHeicUploadConvertPreferenceQuery()
 
 	useEffect(() => {
 		void loadDesktopPrefs()

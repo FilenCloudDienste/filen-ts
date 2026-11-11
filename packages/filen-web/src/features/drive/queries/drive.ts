@@ -1506,11 +1506,19 @@ export function useViewModePreferencesQuery(): UseQueryResult<DrivePreferences<D
 
 // Same kv-backed-preference-as-a-query convention as the two above — the HEIC/HEIF-to-JPG
 // convert-on-upload toggle (features/drive/lib/heicUpload.ts), surfaced in Advanced settings.
+const HEIC_UPLOAD_CONVERT_PREFERENCE_KEY = ["drive", "heicUploadConvertPreference"] as const
+
 export function useHeicUploadConvertPreferenceQuery(): UseQueryResult<boolean> {
 	return useQuery({
-		queryKey: ["drive", "heicUploadConvertPreference"] as const,
+		queryKey: HEIC_UPLOAD_CONVERT_PREFERENCE_KEY,
 		queryFn: getHeicUploadConvertPreference
 	})
+}
+
+// The toggle as last read, for a picker that must decide inside its click (a storage read would end the user's
+// gesture); undefined until a mounted query read it (the desktop shell keeps one mounted).
+export function heicUploadConvertPreferenceCached(): boolean | undefined {
+	return queryClient.getQueryData<boolean>(HEIC_UPLOAD_CONVERT_PREFERENCE_KEY)
 }
 
 // Same convention again — the hide-dot-prefixed-items display filter, surfaced from the drive

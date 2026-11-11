@@ -23,6 +23,7 @@ import { settleTransferFailure, toastDownloadFailed, type DownloadOutcome } from
 import { startZipDownload } from "@/features/drive/lib/downloadZip"
 import { toastTransferStarted } from "@/features/transfers/lib/transferStartToast"
 import { openProgressChannel } from "@/features/transfers/lib/progressChannel"
+import { nativeTransfersAvailable, startNativeDownloads } from "@/features/transfers/lib/nativeHost"
 
 // Extracts the SDK AnyFile a download op wants from a DriveItem's file arm. A directory item is a
 // contract violation here — startDownloads below routes any directory to the zip path instead — so
@@ -173,6 +174,17 @@ export const defaultDownloadDeps: RunDownloadDeps = {
 	}
 }
 
+function isHeldPreview(items: readonly DriveItem[]): boolean {
+	const [item] = items
+
+	return (
+		items.length === 1 &&
+		item !== undefined &&
+		!isDirectoryItem(item) &&
+		getPreviewBytes(previewCacheScope("authed", undefined), item.data.uuid) !== undefined
+	)
+}
+
 // A directory, or more than one item at all, zips into one archive rather than N separate save
 // dialogs — the SDK does the recursion + zip in one native call, the exact inverse of upload's own
 // JS-orchestrated multi-file fan-out. Only a lone file downloads directly. Exported as the single
@@ -189,8 +201,16 @@ export function needsZip(items: DriveItem[]): boolean {
 // INDISTINGUISHABLE here from a real completed download — both resolve {status:"success"}. Rather
 // than widen that cross-cutting type, this just never claims "downloaded" on success; the transfers
 // row it creates is already the signal that a download started and finished.
+// On desktop the native host downloads to a real directory, never as a zip; a lone file the preview holds whole still
+// saves from those bytes here (nothing crosses to the host).
 export async function startDownloads(items: DriveItem[]): Promise<void> {
 	if (items.length === 0) {
+		return
+	}
+
+	if (nativeTransfersAvailable() && !isHeldPreview(items)) {
+		await startNativeDownloads(items)
+
 		return
 	}
 

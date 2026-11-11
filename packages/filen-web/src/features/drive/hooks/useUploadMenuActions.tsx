@@ -3,12 +3,14 @@ import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 import { startUploads } from "@/features/drive/lib/upload"
 import { startDirectoryUpload } from "@/features/drive/lib/uploadDirectory"
+import { nativeTransfersAvailable } from "@/features/transfers/lib/nativeHost"
+import { pickNativeUpload, startNativeUploads } from "@/features/transfers/lib/nativeTransfers"
 import { normalizeTextFileName, runCreateTextFile } from "@/features/drive/lib/createTextFile"
 import { nameTakenInDirectory } from "@/features/drive/lib/nameTaken"
 import { type NewOfficeKind } from "@/features/drive/lib/createOfficeFile"
 import { useNewOfficeFile } from "@/features/drive/hooks/useNewOfficeFile"
 import { notifyIfNameIsHidden } from "@/features/drive/lib/hiddenNameNotice"
-import { driveListingQueryUpdate } from "@/features/drive/queries/drive"
+import { driveListingQueryUpdate, heicUploadConvertPreferenceCached } from "@/features/drive/queries/drive"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { sdkApi } from "@/lib/sdk/client"
 import { errorLabel } from "@/lib/i18n/errorLabel"
@@ -101,16 +103,34 @@ export function useUploadMenuActions({
 		}
 	}
 
+	// On desktop with HEIC conversion off, the desktop app's own open dialog: the picked paths go straight to its
+	// native host. Otherwise the hidden input, whose click must stay inside the user's gesture, so the preference is
+	// read from what is already loaded.
+	function pick(kind: "file" | "directory", input: HTMLInputElement | null): void {
+		setPickerOpen(true)
+
+		if (nativeTransfersAvailable() && heicUploadConvertPreferenceCached() === false) {
+			void pickNativeUpload(kind, parentUuid).then(settlePicker)
+
+			return
+		}
+
+		input?.click()
+	}
+
+	// On desktop the native host uploads what it can (startNativeUploads routes HEIC files when they convert).
 	function handleFilesChosen(e: ChangeEvent<HTMLInputElement>): void {
 		const files = Array.from(e.target.files ?? [])
-		void startUploads(files, parentUuid)
+		void (nativeTransfersAvailable() ? startNativeUploads(files, parentUuid) : startUploads(files, parentUuid))
 		e.target.value = ""
 		settlePicker()
 	}
 
 	function handleDirectoryChosen(e: ChangeEvent<HTMLInputElement>): void {
 		const files = Array.from(e.target.files ?? [])
-		void startDirectoryUpload({ kind: "files", files }, parentUuid)
+		void (nativeTransfersAvailable()
+			? startNativeUploads(files, parentUuid, { asDirectory: true })
+			: startDirectoryUpload({ kind: "files", files }, parentUuid))
 		e.target.value = ""
 		settlePicker()
 	}
@@ -159,12 +179,10 @@ export function useUploadMenuActions({
 
 	return {
 		pickFiles: () => {
-			setPickerOpen(true)
-			inputRef.current?.click()
+			pick("file", inputRef.current)
 		},
 		pickDirectory: () => {
-			setPickerOpen(true)
-			directoryInputRef.current?.click()
+			pick("directory", directoryInputRef.current)
 		},
 		newTextFile: () => {
 			setTakenTextFileName(null)

@@ -18,7 +18,16 @@ const { bridge, emit } = vi.hoisted(() => {
 					}
 				},
 				cancel: vi.fn(),
-				setPaused: vi.fn()
+				setPaused: vi.fn(),
+				download: vi.fn<(...args: unknown[]) => Promise<unknown>>(() =>
+					Promise.resolve({ ok: true, value: { status: "started", ids: ["x"] } })
+				),
+				upload: vi.fn<(...args: unknown[]) => Promise<unknown>>(() =>
+					Promise.resolve({ ok: true, value: { status: "started", ids: ["x"], skipped: [] } })
+				),
+				pickUpload: vi.fn<(...args: unknown[]) => Promise<unknown>>(() =>
+					Promise.resolve({ ok: true, value: { status: "canceled" } })
+				)
 			}
 		},
 		emit: (event: unknown) => {
@@ -29,15 +38,19 @@ const { bridge, emit } = vi.hoisted(() => {
 
 vi.mock("@/lib/desktop", () => ({ desktopBridge: () => bridge }))
 
-const { landUpload, invalidateUploadedDirectorySizes, reactToStorageRefusal, patchCreated, markAccountStale } = vi.hoisted(() => ({
-	landUpload: vi.fn(),
-	invalidateUploadedDirectorySizes: vi.fn(),
-	reactToStorageRefusal: vi.fn(),
-	patchCreated: vi.fn(),
-	markAccountStale: vi.fn()
-}))
+const { landUpload, invalidateUploadedDirectorySizes, reactToStorageRefusal, patchCreated, markAccountStale, startUploads } = vi.hoisted(
+	() => ({
+		startUploads: vi.fn((_files: File[], _parentUuid: string | null) => Promise.resolve()),
+		landUpload: vi.fn(),
+		invalidateUploadedDirectorySizes: vi.fn(),
+		reactToStorageRefusal: vi.fn(),
+		patchCreated: vi.fn(),
+		markAccountStale: vi.fn()
+	})
+)
 
 vi.mock("@/features/drive/lib/upload", () => ({
+	startUploads,
 	landUpload,
 	invalidateUploadedDirectorySizes,
 	reactToStorageRefusal,
@@ -58,8 +71,50 @@ const { toastSuccess, toastError, toastTransferStarted } = vi.hoisted(() => ({
 vi.mock("sonner", () => ({ toast: { success: toastSuccess, error: toastError } }))
 vi.mock("@/features/transfers/lib/transferStartToast", () => ({ toastTransferStarted }))
 
-import { applyNativeEvent, nativeTransfersAvailable, startNativeTransfersFeed } from "@/features/transfers/lib/nativeTransfers"
-import { errorDtoOf } from "@/features/transfers/lib/nativeTransfers.logic"
+const { startDirectoryUpload, ensureUploadQuota, convertPreference, findCachedListingItem } = vi.hoisted(() => ({
+	startDirectoryUpload: vi.fn((_input: unknown, _parentUuid: string | null) => Promise.resolve()),
+	ensureUploadQuota: vi.fn((_bytes: bigint) => Promise.resolve(true)),
+	convertPreference: { on: false },
+	findCachedListingItem: vi.fn((_uuid: string): unknown => undefined)
+}))
+
+vi.mock("@/features/drive/lib/uploadDirectory", () => ({
+	startDirectoryUpload,
+	isDirectoryEntry: (entry: FileSystemEntry) => entry.isDirectory,
+	readEntriesBatch: (reader: FileSystemDirectoryReader) =>
+		new Promise<FileSystemEntry[]>((resolve, reject) => {
+			reader.readEntries(resolve, reject)
+		})
+}))
+vi.mock("@/features/drive/lib/quota", () => ({ ensureUploadQuota }))
+vi.mock("@/features/drive/lib/heicUpload", async importOriginal => {
+	const actual = await importOriginal<typeof import("@/features/drive/lib/heicUpload")>()
+
+	return {
+		...actual,
+		defaultHeicUploadDeps: { ...actual.defaultHeicUploadDeps, readPreference: () => Promise.resolve(convertPreference.on) }
+	}
+})
+vi.mock("@/features/drive/queries/drive", async importOriginal => ({
+	...(await importOriginal<typeof import("@/features/drive/queries/drive")>()),
+	findCachedListingItem
+}))
+vi.mock("@/queries/account", () => ({ accountQueryGet: () => ({ rootDirUuid: ROOT }) }))
+
+import { readFileSync } from "node:fs"
+import { parseEnvelope } from "@filen/shared/session"
+import { ubrnOf } from "@filen/shared/sdkShapes"
+import {
+	applyNativeEvent,
+	pickNativeUpload,
+	startNativeDrop,
+	startNativeTransfersFeed,
+	startNativeUploads
+} from "@/features/transfers/lib/nativeTransfers"
+import { nativeTransfersAvailable, startNativeDownloads } from "@/features/transfers/lib/nativeHost"
+import { downloadItemOf, errorDtoOf, uploadParentOf } from "@/features/transfers/lib/nativeTransfers.logic"
+import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
+import { mockSharedFile, mockSharedRootDir } from "@/tests/fixtures/sdk"
 import { useTransfersStore } from "@/features/transfers/store/useTransfersStore"
 
 const ROOT = testUuid("root")
@@ -108,6 +163,7 @@ let stopFeed: () => void = () => undefined
 
 beforeEach(() => {
 	vi.clearAllMocks()
+	convertPreference.on = false
 	stopFeed()
 	useTransfersStore.setState({ transfers: [], uploadBatches: {}, speedSamples: [], rowSpeedSamples: {}, batchSpeedSamples: {} })
 	stopFeed = startNativeTransfersFeed()
@@ -364,5 +420,208 @@ describe("errorDtoOf", () => {
 			message: "boom"
 		})
 		expect(errorDtoOf({ code: "storageFull" }).kind).toBe("MaxStorageReached")
+	})
+})
+
+function fileDriveItem(name = "a.txt"): DriveItem {
+	return narrowItem(sdkFile(testUuid(name), 10n))
+}
+
+function dirDriveItem(): DriveItem {
+	return narrowItem({
+		uuid: testUuid("dir"),
+		parent: PARENT,
+		color: "default",
+		timestamp: 3n,
+		favorited: false,
+		meta: { type: "decoded", data: { name: "Photos", created: 1n } }
+	} as never)
+}
+
+function localFile(name: string, size = 4): File {
+	return new File([new Uint8Array(size)], name)
+}
+
+describe("native entry points: downloads", () => {
+	it("sends wire items with their variant, the SDK value only, that the host's converter takes", () => {
+		const items = [fileDriveItem(), dirDriveItem(), narrowItem(mockSharedFile()), narrowItem(mockSharedRootDir())]
+		const wire = items.map(downloadItemOf)
+
+		expect(wire.map(item => [item.kind, item.ref.variant, item.name])).toEqual([
+			["file", "AnyFile.File", "a.txt"],
+			["directory", "AnyDirWithContext.Normal.Dir", "Photos"],
+			["file", "AnyFile.Shared", "shared.pdf"],
+			["directory", "AnyDirWithContext.Shared.Root", "SharedRoot"]
+		])
+
+		for (const item of wire) {
+			expect(() => ubrnOf(item.ref.variant, parseEnvelope(item.ref.value))).not.toThrow()
+		}
+
+		expect(Object.keys(parseEnvelope(wire[0]?.ref.value ?? "") as object)).not.toContain("decryptedMeta")
+	})
+
+	it("startNativeDownloads asks the host once and says it started", async () => {
+		const items = [fileDriveItem(), dirDriveItem()]
+
+		await startNativeDownloads(items, { ask: true })
+
+		expect(bridge.transfers.download).toHaveBeenCalledWith(items.map(downloadItemOf), { ask: true })
+		expect(toastTransferStarted).toHaveBeenCalledWith({ direction: "download", name: "a.txt", count: 2, noun: "items" })
+	})
+
+	it("a canceled dialog says nothing; a failure says why", async () => {
+		bridge.transfers.download.mockResolvedValueOnce({ ok: true, value: { status: "canceled" } })
+		await startNativeDownloads([fileDriveItem()])
+		bridge.transfers.download.mockResolvedValueOnce({ ok: false, error: { code: "localDenied" } })
+		await startNativeDownloads([fileDriveItem()])
+
+		expect(toastTransferStarted).not.toHaveBeenCalled()
+		expect(toastError).toHaveBeenCalledWith("Filen isn't allowed to read or write there.")
+	})
+
+	it("public-link, archive-entry and Download as downloads stay on the web path", () => {
+		for (const file of [
+			"features/publicLinks/lib/download.ts",
+			"features/archive/lib/entryDownload.ts",
+			"features/drive/lib/downloadAs.ts"
+		]) {
+			const source = readFileSync(new URL(`../${file}`, import.meta.url), "utf8")
+
+			expect(source).not.toMatch(/nativeTransfers|startDownloads|desktopBridge/)
+		}
+	})
+})
+
+describe("native entry points: uploads", () => {
+	it("a parent is the held Dir, else a uuid-only Root, and the root is the account's", () => {
+		const held = dirDriveItem()
+
+		const parent = uploadParentOf(held.data.uuid, held)
+
+		expect(parent.ref.variant).toBe("AnyNormalDir.Dir")
+		expect(() => ubrnOf("AnyNormalDir.Dir", parseEnvelope(parent.ref.value))).not.toThrow()
+		expect(uploadParentOf(PARENT, undefined)).toEqual({
+			uuid: PARENT,
+			ref: { variant: "AnyNormalDir.Root", value: stringifyEnvelope({ uuid: PARENT }) }
+		})
+	})
+
+	it("sends HEIC candidates the web path only when conversion is on", async () => {
+		const files = [localFile("a.heic"), localFile("b.txt")]
+
+		await startNativeUploads(files, PARENT)
+
+		expect(bridge.transfers.upload).toHaveBeenLastCalledWith(files, expect.objectContaining({ uuid: PARENT }))
+		expect(startUploads).not.toHaveBeenCalled()
+
+		convertPreference.on = true
+		await startNativeUploads(files, PARENT)
+
+		expect(bridge.transfers.upload).toHaveBeenLastCalledWith([files[1]], expect.objectContaining({ uuid: PARENT }))
+		expect(startUploads).toHaveBeenCalledWith([files[0]], PARENT)
+	})
+
+	it("the root uploads into the account's root directory", async () => {
+		await startNativeUploads([localFile("b.txt")], null)
+
+		expect(bridge.transfers.upload).toHaveBeenCalledWith([expect.any(File)], expect.objectContaining({ uuid: ROOT }))
+	})
+
+	it("plain files keep the quota check", async () => {
+		ensureUploadQuota.mockResolvedValueOnce(false)
+		await startNativeUploads([localFile("b.txt", 7)], PARENT)
+
+		expect(ensureUploadQuota).toHaveBeenCalledWith(7n)
+		expect(bridge.transfers.upload).not.toHaveBeenCalled()
+	})
+
+	it("a picked directory holding a HEIC file uploads via the web walk when conversion is on", async () => {
+		const files = [localFile("a.heic"), localFile("b.txt")]
+
+		convertPreference.on = true
+		await startNativeUploads(files, PARENT, { asDirectory: true })
+
+		expect(startDirectoryUpload).toHaveBeenCalledWith({ kind: "files", files }, PARENT)
+		expect(bridge.transfers.upload).not.toHaveBeenCalled()
+	})
+
+	it("a picked directory without HEIC files uploads natively as one directory", async () => {
+		const files = [localFile("a.txt"), localFile("b.txt")]
+
+		convertPreference.on = true
+		await startNativeUploads(files, PARENT, { asDirectory: true })
+
+		expect(bridge.transfers.upload).toHaveBeenCalledWith(files, expect.objectContaining({ uuid: PARENT }), { asDirectory: true })
+		expect(startDirectoryUpload).not.toHaveBeenCalled()
+		expect(ensureUploadQuota).not.toHaveBeenCalled()
+	})
+
+	it("skipped Files upload via the web path", async () => {
+		const files = [localFile("a.txt"), localFile("b.txt")]
+
+		bridge.transfers.upload.mockResolvedValueOnce({ ok: true, value: { status: "started", ids: ["x"], skipped: [1] } })
+		await startNativeUploads(files, PARENT)
+
+		expect(startUploads).toHaveBeenCalledWith([files[1]], PARENT)
+
+		bridge.transfers.upload.mockResolvedValueOnce({ ok: true, value: { status: "started", ids: [], skipped: [0, 1] } })
+		await startNativeUploads(files, PARENT, { asDirectory: true })
+
+		expect(startDirectoryUpload).toHaveBeenCalledWith({ kind: "files", files }, PARENT)
+	})
+
+	it("pickNativeUpload opens the host's dialog into the parent and says when it started", async () => {
+		bridge.transfers.pickUpload.mockResolvedValueOnce({ ok: true, value: { status: "started", ids: ["x", "y"] } })
+		await pickNativeUpload("directory", PARENT)
+
+		expect(bridge.transfers.pickUpload).toHaveBeenCalledWith("directory", expect.objectContaining({ uuid: PARENT }))
+		expect(toastTransferStarted).toHaveBeenCalledWith({ direction: "upload", name: "", count: 2, noun: "items" })
+	})
+})
+
+// A dropped directory entry whose tree reads as `names` (one level), and that fails the test if walked when `walkable` is false.
+function directoryEntry(name: string, names: string[], walkable = true): FileSystemDirectoryEntry {
+	return {
+		name,
+		isDirectory: true,
+		isFile: false,
+		createReader: () => {
+			if (!walkable) {
+				throw new Error("walked")
+			}
+
+			let read = false
+
+			return {
+				readEntries: (resolve: (entries: FileSystemEntry[]) => void) => {
+					resolve(read ? [] : names.map(child => ({ name: child, isDirectory: false, isFile: true }) as FileSystemEntry))
+					read = true
+				}
+			}
+		}
+	} as unknown as FileSystemDirectoryEntry
+}
+
+describe("native entry points: drops", () => {
+	it("a dropped directory goes to the bridge as its top-level File without walking entries when conversion is off", async () => {
+		const top = localFile("Photos", 0)
+
+		await startNativeDrop([top], [directoryEntry("Photos", [], false)], PARENT)
+
+		expect(bridge.transfers.upload).toHaveBeenCalledWith([top], expect.objectContaining({ uuid: PARENT }))
+		expect(startDirectoryUpload).not.toHaveBeenCalled()
+	})
+
+	it("with conversion on, a dropped directory without HEIC files goes native through its top-level File; one with a HEIC file takes the web walk", async () => {
+		const plain = localFile("Docs", 0)
+		const photos = localFile("Photos", 0)
+		const photosEntry = directoryEntry("Photos", ["a.txt", "b.HEIC"])
+
+		convertPreference.on = true
+		await startNativeDrop([plain, photos], [directoryEntry("Docs", ["a.txt"]), photosEntry], PARENT)
+
+		expect(bridge.transfers.upload).toHaveBeenCalledWith([plain], expect.objectContaining({ uuid: PARENT }))
+		expect(startDirectoryUpload).toHaveBeenCalledWith({ kind: "entries", entries: [photosEntry] }, PARENT)
 	})
 })

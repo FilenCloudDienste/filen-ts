@@ -208,7 +208,7 @@ async function collectFromEntries(
 // FileSystemEntry's isDirectory/isFile are plain booleans, not literal-typed discriminants — TS
 // can't narrow on them by itself, so these two predicates are the cast-free way to get from
 // FileSystemEntry to its Directory/File subtype.
-function isDirectoryEntry(entry: FileSystemEntry): entry is FileSystemDirectoryEntry {
+export function isDirectoryEntry(entry: FileSystemEntry): entry is FileSystemDirectoryEntry {
 	return entry.isDirectory
 }
 
@@ -218,7 +218,7 @@ function isFileEntry(entry: FileSystemEntry): entry is FileSystemFileEntry {
 
 // FileSystemDirectoryReader.readEntries is callback-based AND paginated by spec (a large directory
 // can need more than one call) — read until a call returns an empty batch.
-function readEntriesBatch(reader: FileSystemDirectoryReader): Promise<FileSystemEntry[]> {
+export function readEntriesBatch(reader: FileSystemDirectoryReader): Promise<FileSystemEntry[]> {
 	return new Promise((resolve, reject) => {
 		reader.readEntries(
 			entries => {

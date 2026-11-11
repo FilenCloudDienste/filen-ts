@@ -22,7 +22,12 @@ export const { get: getHeicUploadConvertPreference, set: setHeicUploadConvertPre
 
 // Extension-only — never a picked file's mime, which browsers frequently leave blank or wrong for HEIC/HEIF.
 export function isHeicUploadCandidate(file: File): boolean {
-	return HEIC_EXTENSIONS.has(extensionOf(file.name))
+	return isHeicUploadName(file.name)
+}
+
+// The same rule on a name alone (a dropped directory's entries, read without opening them).
+export function isHeicUploadName(name: string): boolean {
+	return HEIC_EXTENSIONS.has(extensionOf(name))
 }
 
 // Swaps a HEIC/HEIF upload's extension for ".jpg" — mirrors filen-mobile's own rename rule

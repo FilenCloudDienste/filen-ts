@@ -54,6 +54,14 @@ const { startZipDownloadMock } = vi.hoisted(() => ({ startZipDownloadMock: vi.fn
 
 vi.mock("@/features/drive/lib/downloadZip", () => ({ startZipDownload: startZipDownloadMock }))
 
+// On desktop the native host downloads; its own wiring is nativeTransfers.test.ts's.
+const { nativeTransfersAvailable, startNativeDownloads } = vi.hoisted(() => ({
+	nativeTransfersAvailable: vi.fn(() => false),
+	startNativeDownloads: vi.fn((_items: DriveItem[]) => Promise.resolve())
+}))
+
+vi.mock("@/features/transfers/lib/nativeHost", () => ({ nativeTransfersAvailable, startNativeDownloads }))
+
 import {
 	runDownload,
 	narrowToAnyFile,
@@ -648,5 +656,45 @@ describe("needsZip (the zip-gate predicate)", () => {
 
 	it("is false for an empty selection", () => {
 		expect(needsZip([])).toBe(false)
+	})
+})
+
+describe("startDownloads on desktop", () => {
+	afterEach(() => {
+		nativeTransfersAvailable.mockReturnValue(false)
+		clearPreviewCache()
+	})
+
+	it("never zips and hands every item to the native host", async () => {
+		nativeTransfersAvailable.mockReturnValue(true)
+
+		const items = [fileItem(), dirItem()]
+
+		await startDownloads(items)
+
+		expect(startNativeDownloads).toHaveBeenCalledWith(items)
+		expect(startZipDownloadMock).not.toHaveBeenCalled()
+		expect(saveDownloadMock).not.toHaveBeenCalled()
+	})
+
+	it("a single file with held preview bytes keeps the web path", async () => {
+		nativeTransfersAvailable.mockReturnValue(true)
+
+		const item = fileItem()
+
+		await loadPreviewBytes("authed", item.data.uuid, 3, () => Promise.resolve(new Uint8Array([1, 2, 3])))
+		isPickerCancelledMock.mockReturnValue(true)
+		saveDownloadMock.mockRejectedValue(new Error("cancelled"))
+		await startDownloads([item])
+
+		expect(startNativeDownloads).not.toHaveBeenCalled()
+		expect(saveDownloadMock).toHaveBeenCalled()
+	})
+
+	it("in a browser it zips as before", async () => {
+		await startDownloads([fileItem(), fileItem()])
+
+		expect(startNativeDownloads).not.toHaveBeenCalled()
+		expect(startZipDownloadMock).toHaveBeenCalled()
 	})
 })
