@@ -1049,6 +1049,8 @@ export interface DesktopTransfers {
 }
 
 // The drag image: a PNG of at most 640×160 CSS px, `scale` (at most 3) device pixels per CSS px.
+export const DESKTOP_DRAG_IMAGE_LIMITS = { bytes: 2 * 1024 ** 2, width: 640, height: 160, scale: 3 } as const
+
 export interface DesktopDragImage {
 	png: Uint8Array
 	width: number

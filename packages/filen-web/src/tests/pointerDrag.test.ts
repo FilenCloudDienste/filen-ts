@@ -207,7 +207,7 @@ describe("the pointer drag engine", () => {
 		document.body.dispatchEvent(escape)
 		expect(escape.defaultPrevented).toBe(true)
 		expect(onKey).not.toHaveBeenCalled()
-		expect(onEnd).toHaveBeenCalledExactlyOnceWith(false)
+		expect(onEnd).toHaveBeenCalledExactlyOnceWith(false, false)
 		expect(handlers.update).toHaveBeenLastCalledWith(null, element)
 
 		up(30, 30)
@@ -290,6 +290,31 @@ describe("the pointer drag engine", () => {
 		expect(first).toBeGreaterThan(0)
 		frame()
 		expect(scroller.scrollTop).toBeGreaterThan(first)
+	})
+
+	it("tells onEnd whether a release ended the drag", () => {
+		const onEnd = vi.fn()
+		const { element } = target()
+
+		setPointerDragHooks({ onEnd })
+		hit = element
+		press()
+		move(30, 30)
+		up(30, 30)
+		expect(onEnd).toHaveBeenLastCalledWith(true, true)
+
+		hit = null
+		vi.runAllTimers()
+		press()
+		move(30, 30)
+		up(30, 30)
+		expect(onEnd).toHaveBeenLastCalledWith(false, true)
+
+		vi.runAllTimers()
+		press()
+		move(30, 30)
+		move(31, 30, { buttons: 0 })
+		expect(onEnd).toHaveBeenLastCalledWith(false, false)
 	})
 
 	it("hands the drag off when the hooks say so, and resumes it", () => {

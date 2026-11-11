@@ -18,6 +18,7 @@ import { loadSync } from "@/features/sync/lib/syncStore"
 import { loadMounts } from "@/features/mounts/lib/mountsStore"
 import { startNativeTransfersFeed } from "@/features/transfers/lib/nativeTransfers"
 import { useHeicUploadConvertPreferenceQuery } from "@/features/drive/queries/drive"
+import { installDragOut } from "@/features/drive/lib/dragOut"
 import { i18n } from "@/lib/i18n"
 
 // One prompt however often main reports the same download (each page load hears it again).
@@ -72,6 +73,13 @@ export function DesktopHost(): null {
 
 	// Uploads and downloads the desktop app's native host runs, in the transfers store for this page's whole life.
 	useEffect(startNativeTransfersFeed, [])
+
+	// Drive items dragged out of the window become an OS drag of them.
+	useEffect(() => {
+		const bridge = desktopBridge()
+
+		return bridge === undefined ? undefined : installDragOut(bridge)
+	}, [])
 
 	// The shell removed a session the server rejected while syncing with it: a forced sign-out, like the
 	// socket's after a password change (an unsaved preview may delay it, never veto it). Sync and mounts follow the

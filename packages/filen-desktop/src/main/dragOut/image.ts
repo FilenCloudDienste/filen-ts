@@ -1,12 +1,12 @@
-import type { DesktopDragImage } from "@filen/shared/desktop"
+import { DESKTOP_DRAG_IMAGE_LIMITS, type DesktopDragImage } from "@filen/shared/desktop"
 
 // The drag image the page sends: a PNG of its chip, at most 640×160 CSS px at a scale of at most 3. Its pixel size is
 // read from the IHDR chunk before anything decodes it, so a small file cannot unpack into a huge bitmap.
 
-export const DRAG_IMAGE_MAX_BYTES = 2 * 1024 ** 2
-export const DRAG_IMAGE_MAX_WIDTH = 640
-export const DRAG_IMAGE_MAX_HEIGHT = 160
-export const DRAG_IMAGE_MAX_SCALE = 3
+export const DRAG_IMAGE_MAX_BYTES = DESKTOP_DRAG_IMAGE_LIMITS.bytes
+export const DRAG_IMAGE_MAX_WIDTH = DESKTOP_DRAG_IMAGE_LIMITS.width
+export const DRAG_IMAGE_MAX_HEIGHT = DESKTOP_DRAG_IMAGE_LIMITS.height
+export const DRAG_IMAGE_MAX_SCALE = DESKTOP_DRAG_IMAGE_LIMITS.scale
 
 const SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]
 // "IHDR", the first chunk's type, right after the signature and the chunk's length.

@@ -60,7 +60,8 @@ export interface PointerDragHooks {
 	// "handedOff": the page let the OS take the drag (returned as soon as begin was issued); the engine
 	// stops hit-testing and hides the chip; resumePointerDrag() brings it back.
 	onMove?(p: Point, outside: boolean, buttons: number): "continue" | "handedOff"
-	onEnd?(dropped: boolean): void
+	// `released`: the button's release ended it (Escape, a lost focus or an unseen release did not).
+	onEnd?(dropped: boolean, released: boolean): void
 }
 
 // The press fields the engine reads (a React or a DOM pointer event).
@@ -589,5 +590,5 @@ function end(dropped: boolean, button: EndButton): void {
 		swallowHeldRelease()
 	}
 
-	hooks?.onEnd?.(dropped)
+	hooks?.onEnd?.(dropped, button === "release")
 }

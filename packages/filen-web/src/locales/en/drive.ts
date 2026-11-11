@@ -895,5 +895,21 @@ export const drive = {
 	driveDeleteVersionsPartial_one: "Deleted {{count}} version, {{failed}} failed",
 	/** Activity toast — deleting file versions (an item is a version, named by its date) partly failed; {{count}} succeeded, {{failed}} failed */
 	driveDeleteVersionsPartial_other: "Deleted {{count}} versions, {{failed}} failed",
+
+	// ── Drag-out (desktop) ───────────────────────────────────────────────────
+	/** Toast — drive items dragged out of the window are past what a drag can copy (size); its action is driveDragOutDownloadTo */
+	driveDragOutTooLarge: "Too large to drag out. Use Download to… instead.",
+	/** Toast — drive items dragged out of the window are past what a drag can copy (item count); its action is driveDragOutDownloadTo */
+	driveDragOutTooMany: "Too many items to drag out. Use Download to… instead.",
+	/** Toast — a dragged-out item's path would be past Windows' path length limit */
+	driveDragOutPathTooLong: "A path is too long for Windows.",
+	/** Toast — drive items dragged out of the window while offline */
+	driveDragOutOffline: "You're offline.",
+	/** Toast — dragging drive items out of the window failed or the app cannot do it now (signed out, the native part missing) */
+	driveDragOutUnavailable: "Dragging out isn't available right now.",
+	/** Toast — drive items were released outside the window before the app finished preparing them for the drag */
+	driveDragOutPreparing: "Still preparing…",
+	/** Toast action — downloads the dragged items into a directory the user picks instead */
+	driveDragOutDownloadTo: "Download to…",
 	...driveDownloadAs
 } as const
