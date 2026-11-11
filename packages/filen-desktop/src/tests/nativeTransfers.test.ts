@@ -12,7 +12,7 @@ import {
 	LISTING_TTL_MS,
 	type ManagedFuture
 } from "../native/transfers.ts"
-import type { FromNative, NativeTransferEvent, NativeTransferSpec } from "../shared/nativeProtocol.ts"
+import { type FromNative, type NativeTransferEvent, type NativeTransferSpec, TRANSFER_EVENTS_MAX } from "../shared/nativeProtocol.ts"
 import { memoryFs } from "./fileFakes.ts"
 import {
 	FakeManagedAbortSignal,
@@ -384,6 +384,149 @@ describe("transfer registry", () => {
 		expect(state.files.size).toBe(0)
 	})
 
+	it("a cancel landing after the download but before the commit settles cancelled and removes the staging file", async () => {
+		const { client, state, registry, quarantine, settled } = setup()
+
+		registry.start([downloadFile()])
+		await flush()
+		state.files.add(at(`${ID}.filendl`))
+		client.last("downloadFileToPath").resolve()
+		registry.cancel([ID])
+		await round()
+
+		expect(settled()).toEqual({ k: "settled", id: ID, outcome: "cancelled" })
+		expect(state.files.size).toBe(0)
+		expect(quarantine.mark).not.toHaveBeenCalled()
+	})
+
+	it("a cancel landing once the commit started settles done", async () => {
+		const { client, state, registry, settled } = setup()
+
+		registry.start([downloadFile()])
+		await flush()
+		state.files.add(at(`${ID}.filendl`))
+		state.fail = op => {
+			if (op === "link") {
+				registry.cancel([ID])
+			}
+
+			return undefined
+		}
+		client.last("downloadFileToPath").resolve()
+		await round()
+
+		expect(settled()).toEqual({ k: "settled", id: ID, outcome: "done", savedPath: at("a.txt") })
+		expect(state.files).toEqual(new Set([at("a.txt")]))
+	})
+
+	it("cancel while paused resumes before it aborts", async () => {
+		const { client, registry } = setup()
+
+		registry.start([downloadFile()])
+		await flush()
+
+		const future = futureOf(client.last("downloadFileToPath"))
+		const pause = future.pauseSignal as FakePauseSignal
+
+		registry.setPaused([ID], true)
+
+		const resume = vi.spyOn(pause, "resume")
+		const abort = vi.spyOn(future.abortSignal as FakeManagedAbortSignal, "markAborted")
+
+		registry.cancel([ID])
+
+		expect(pause.isPaused()).toBe(false)
+		expect(resume.mock.invocationCallOrder[0]).toBeLessThan(abort.mock.invocationCallOrder[0] ?? 0)
+	})
+
+	it("abortAll resumes paused transfers before it aborts them", async () => {
+		const { client, registry } = setup()
+
+		registry.start([downloadFile()])
+		await flush()
+
+		const pause = futureOf(client.last("downloadFileToPath")).pauseSignal as FakePauseSignal
+
+		registry.setPaused([ID], true)
+		registry.abortAll()
+
+		expect(pause.isPaused()).toBe(false)
+	})
+
+	it("a replace download renames over the target", async () => {
+		const { client, state, registry, settled } = setup()
+
+		state.files.add(at("a.txt"))
+		registry.start([downloadFile(ID, at("a.txt"), "replace")])
+		await flush()
+		state.files.add(at(`${ID}.filendl`))
+		client.last("downloadFileToPath").resolve()
+		await round()
+
+		expect(settled()).toEqual({ k: "settled", id: ID, outcome: "done", savedPath: at("a.txt") })
+		expect(state.files).toEqual(new Set([at("a.txt")]))
+	})
+
+	it("a failed file download removes its staging file", async () => {
+		const { client, state, registry, settled } = setup()
+
+		registry.start([downloadFile()])
+		await flush()
+		state.files.add(at(`${ID}.filendl`))
+		client.last("downloadFileToPath").reject(sdkError(fakeSdk.ErrorKind.Io, "Broken pipe (os error 32)"))
+		await round()
+
+		expect(settled()).toMatchObject({ outcome: "error", error: { code: "unknown", kind: "Io" } })
+		expect(state.files.size).toBe(0)
+	})
+
+	it("a transfer cancelled before its SDK call starts settles cancelled without calling the SDK", async () => {
+		const { client, registry, settled } = setup()
+
+		registry.start([downloadFile()])
+		registry.cancel([ID])
+		await round()
+
+		expect(client.of("downloadFileToPath")).toEqual([])
+		expect(settled()).toEqual({ k: "settled", id: ID, outcome: "cancelled" })
+	})
+
+	it("a download cancelled while it waits behind the same file settles cancelled and never starts", async () => {
+		const { client, state, registry, settled } = setup()
+
+		registry.start([downloadFile(), downloadFile(ID2, at("a.txt"))])
+		await flush()
+		registry.cancel([ID2])
+		state.files.add(at(`${ID}.filendl`))
+		client.last("downloadFileToPath").resolve()
+		await round()
+
+		expect(client.of("downloadFileToPath")).toHaveLength(1)
+		expect(settled()).toMatchObject({ outcome: "done" })
+		expect(settled(ID2)).toEqual({ k: "settled", id: ID2, outcome: "cancelled" })
+	})
+
+	it("a failed or cancelled directory download leaves what it wrote", async () => {
+		const { client, state, registry, settled } = setup()
+
+		registry.start([
+			{ id: ID, t: "downloadDirectory", dir: DIR_REF, path: at("Projects") },
+			{ id: ID2, t: "downloadDirectory", dir: DIR_REF, path: at("Other") }
+		])
+		await flush()
+
+		const [failing, cancelling] = client.of("downloadDirRecursively")
+
+		failing?.reject(sdkError(fakeSdk.ErrorKind.Io, "Broken pipe (os error 32)"))
+		registry.cancel([ID2])
+		cancelling?.reject(sdkError(fakeSdk.ErrorKind.Cancelled))
+		await round()
+
+		expect(settled()).toMatchObject({ outcome: "error" })
+		expect(settled(ID2)).toMatchObject({ outcome: "cancelled" })
+		expect(state.dirs).toEqual(new Set([at("Projects"), at("Other")]))
+	})
+
 	it("two downloads of one file into one directory run one after the other", async () => {
 		const { client, state, registry } = setup()
 
@@ -518,6 +661,73 @@ describe("transfer registry", () => {
 		expect(vi.getTimerCount()).toBe(0)
 	})
 
+	it("abortAll, then calls that resolve, posts nothing", async () => {
+		const { client, state, registry, posts, quarantine } = setup()
+
+		registry.start([
+			downloadFile(),
+			{ id: ID2, t: "uploadDirectory", path: path.resolve("Photos"), parent: PARENT_REF, name: "Photos" }
+		])
+		await flush()
+		registry.abortAll()
+		state.files.add(at(`${ID}.filendl`))
+		client.last("downloadFileToPath").resolve()
+		client.last("createDir").resolve(ubrnDir())
+		await round()
+		await round()
+
+		expect(posts).toEqual([])
+		expect(client.of("uploadDirRecursively")).toEqual([])
+		expect(quarantine.mark).not.toHaveBeenCalled()
+		expect(vi.getTimerCount()).toBe(0)
+	})
+
+	it("reports an unauthenticated failure again after the next start", async () => {
+		const { client, registry, onAuthFailed } = setup()
+
+		registry.start([downloadFile()])
+		await flush()
+		client.last("downloadFileToPath").reject(sdkError(fakeSdk.ErrorKind.Unauthenticated))
+		await round()
+		registry.start([downloadFile(ID2)])
+		await flush()
+		client.last("downloadFileToPath").reject(sdkError(fakeSdk.ErrorKind.Unauthenticated))
+		await round()
+
+		expect(onAuthFailed).toHaveBeenCalledTimes(2)
+	})
+
+	it("splits a round past TRANSFER_EVENTS_MAX events into several posts", async () => {
+		const { registry, posts, events } = setup()
+		const specs = Array.from({ length: TRANSFER_EVENTS_MAX + 1 }, (_, n) =>
+			downloadFile(`${String(n).padStart(8, "0")}-0000-4000-8000-000000000000`, at(String(n), "a.txt"))
+		)
+
+		registry.start(specs)
+		registry.cancel(specs.map(spec => spec.id))
+		await round()
+
+		expect(posts.length).toBeGreaterThan(1)
+		expect(posts.every(message => message.t === "transfers" && message.events.length <= TRANSFER_EVENTS_MAX)).toBe(true)
+		expect(events().filter(event => event.k === "settled")).toHaveLength(TRANSFER_EVENTS_MAX + 1)
+	})
+
+	it("progress while a listing is held posts after one interval, not at the listing's expiry", async () => {
+		const { client, registry, posts } = setup()
+		const listed = registry.listTree({ listingId: LISTING, items: [{ ref: DIR_REF, name: "Projects" }], maxEntries: 100 })
+
+		await flush()
+		client.last("listDirRecursiveWithPaths").resolve({ dirs: [], files: [{ path: "b.txt", file: ubrnFile() }] })
+		await listed
+		registry.start([downloadFile()])
+		await flush()
+		;(client.last("downloadFileToPath").args[2] as { onUpdate(bytes: bigint): void }).onUpdate(10n)
+		await round()
+
+		expect(posts).toEqual([{ t: "transfers", events: [{ k: "progress", id: ID, size: 100_000, bytes: 10, files: null }] }])
+		expect(registry.active()).toBe(2)
+	})
+
 	it("a committed file and each directory batch are marked by quarantine", async () => {
 		const { client, state, registry, quarantine } = setup()
 
@@ -570,6 +780,24 @@ describe("classifyTransfer", () => {
 		expect(io("There is not enough space on the disk. (os error 112)", "win32")).toBe("localFull")
 		expect(classifyTransfer(fakeTransferSdk, Object.assign(new Error("x"), { code: "ENOSPC" })).code).toBe("localFull")
 		expect(classifyTransfer(fakeTransferSdk, new TransferCommitError("localInUse", "in use")).code).toBe("localInUse")
+	})
+
+	it("reads io codes as Win32 error codes on win32 only", () => {
+		const io = (os: number, platform: NodeJS.Platform) =>
+			classifyTransfer(fakeTransferSdk, sdkError(fakeSdk.ErrorKind.Io, `x (os error ${String(os)})`), platform).code
+
+		expect([32, 33, 39, 112, 16].map(os => io(os, "win32"))).toEqual(["localInUse", "localInUse", "localFull", "localFull", "unknown"])
+		expect([32, 33, 39, 112, 16].map(os => io(os, "linux"))).toEqual(["unknown", "unknown", "unknown", "unknown", "localInUse"])
+		expect([32, 33, 39, 112, 16].map(os => io(os, "darwin"))).toEqual(["unknown", "unknown", "unknown", "unknown", "localInUse"])
+		expect([2, 20, 1, 13, 30, 28].map(os => io(os, "darwin"))).toEqual([
+			"localMissing",
+			"localMissing",
+			"localDenied",
+			"localDenied",
+			"localDenied",
+			"localFull"
+		])
+		expect([2, 3, 5].map(os => io(os, "win32"))).toEqual(["localMissing", "localMissing", "localDenied"])
 	})
 
 	it("maps a full account to storageFull and keeps the kind name", () => {

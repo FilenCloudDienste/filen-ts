@@ -25,12 +25,20 @@ describe("commitDownload", () => {
 	it("replace onto a target in use answers localInUse on win32", async () => {
 		const { fs, state, error } = memoryFs([STAGING, at("a.txt")])
 
-		state.fail = op => (op === "rename" ? error("EPERM", at("a.txt")) : undefined)
+		state.fail = op => (op === "rename" ? error("EBUSY", at("a.txt")) : undefined)
 
 		const failure: unknown = await commitDownload(fs, STAGING, at("a.txt"), "replace", "win32").catch((caught: unknown) => caught)
 
 		expect(failure).toBeInstanceOf(TransferCommitError)
 		expect((failure as TransferCommitError).code).toBe("localInUse")
+	})
+
+	it("replace refused with EPERM stays a permission failure", async () => {
+		const { fs, state, error } = memoryFs([STAGING, at("a.txt")])
+
+		state.fail = op => (op === "rename" ? error("EPERM", at("a.txt")) : undefined)
+
+		await expect(commitDownload(fs, STAGING, at("a.txt"), "replace", "win32")).rejects.toMatchObject({ code: "EPERM" })
 		await expect(commitDownload(fs, STAGING, at("a.txt"), "replace", "linux")).rejects.toMatchObject({ code: "EPERM" })
 	})
 
@@ -62,6 +70,18 @@ describe("commitDownload", () => {
 		expect(ops).toEqual(["link a.txt", "open a.txt", "rename a.txt"])
 		expect([...state.files]).toEqual([at("a.txt")])
 	})
+
+	it.each(["EPERM", "ENOTSUP", "EOPNOTSUPP", "EXDEV", "EINVAL", "ENOSYS"])(
+		"keepBoth falls back to a placeholder on %s from link",
+		async code => {
+			const { fs, state, error } = memoryFs([STAGING])
+
+			state.fail = (op, target) => (op === "link" ? error(code, target) : undefined)
+
+			await expect(commitDownload(fs, STAGING, at("a.txt"), "keepBoth", "linux")).resolves.toBe(at("a.txt"))
+			expect([...state.files]).toEqual([at("a.txt")])
+		}
+	)
 
 	it("the placeholder fallback skips a name created between tries", async () => {
 		const { fs, state, error } = memoryFs([STAGING])

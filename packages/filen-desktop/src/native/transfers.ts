@@ -146,6 +146,8 @@ interface Entry {
 	scanTotal: number | null
 	dirty: boolean
 	cancelled: boolean
+	// The file is being put under its final name: a cancel from here on no longer stops it.
+	committing: boolean
 	logged: number
 	marking: Promise<void>
 }
@@ -339,6 +341,13 @@ export function createTransferRegistry(
 		)
 	}
 
+	// A paused call waits on its PauseSignal and would never see the abort.
+	function stop(entry: Entry): void {
+		entry.cancelled = true
+		entry.pause.resume()
+		entry.controller.abort()
+	}
+
 	function ensureRunning(entry: Entry): void {
 		if (entry.cancelled) {
 			throw new Cancelled()
@@ -367,6 +376,9 @@ export function createTransferRegistry(
 		try {
 			ensureRunning(entry)
 			await client.downloadFileToPath(file, staging, { onUpdate: delta => addBytes(entry, delta) }, entry.future)
+			// A cancel that landed after the SDK finished but before the commit still wins.
+			ensureRunning(entry)
+			entry.committing = true
 
 			const final = await commitDownload(fs, staging, target, conflict, platform)
 
@@ -477,6 +489,7 @@ export function createTransferRegistry(
 
 				ensureRunning(entry)
 
+				// What a failed or cancelled download already wrote stays: it is the user's directory now.
 				const created = await makeFreeDirectory(fs, spec.path)
 
 				await client.downloadDirRecursively(
@@ -607,7 +620,7 @@ export function createTransferRegistry(
 			settled = await execute(entry)
 			outcome = completed(entry)
 		} catch (caught) {
-			if (entry.cancelled || caught instanceof Cancelled || isCancelled(sdk, caught)) {
+			if ((entry.cancelled && !entry.committing) || caught instanceof Cancelled || isCancelled(sdk, caught)) {
 				outcome = "cancelled"
 			} else {
 				outcome = "error"
@@ -668,6 +681,7 @@ export function createTransferRegistry(
 					scanTotal: null,
 					dirty: false,
 					cancelled: false,
+					committing: false,
 					logged: 0,
 					marking: Promise.resolve()
 				}
@@ -681,8 +695,7 @@ export function createTransferRegistry(
 				const entry = entries.get(id)
 
 				if (entry !== undefined && !entry.cancelled) {
-					entry.cancelled = true
-					entry.controller.abort()
+					stop(entry)
 				}
 			}
 		},
@@ -791,8 +804,7 @@ export function createTransferRegistry(
 			}
 
 			for (const entry of entries.values()) {
-				entry.cancelled = true
-				entry.controller.abort()
+				stop(entry)
 			}
 
 			listings.clear()

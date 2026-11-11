@@ -36,7 +36,8 @@ function candidate(dir: string, name: string, n: number, kind: "file" | "directo
 }
 
 // The file download's last step: the SDK wrote `staging`; put it at `target` and return where it landed.
-// replace: rename over target (win32 EPERM/EBUSY: another app holds it open → localInUse).
+// replace: rename over target (win32 EBUSY: another app holds it open → localInUse; EPERM stays a permission failure,
+// as a read-only or protected target answers it too).
 // keepBoth: link(staging, free name) until not EEXIST, then unlink(staging), so a file that appeared at the name
 // meanwhile is never replaced; where links are unsupported, an exclusive placeholder (open "wx") reserves the name and
 // the staging file is renamed over it.
@@ -53,7 +54,7 @@ export async function commitDownload(
 		} catch (error) {
 			const code = codeOf(error)
 
-			if (platform === "win32" && (code === "EPERM" || code === "EBUSY")) {
+			if (platform === "win32" && code === "EBUSY") {
 				throw new TransferCommitError("localInUse", `${target} is in use`)
 			}
 
