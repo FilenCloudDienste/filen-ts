@@ -75,7 +75,7 @@ import {
 	type PurgeOutcome,
 	purgeBeforeReady
 } from "./migration.ts"
-import { addonPath } from "./native/addonPath.ts"
+import { addonPath, macAddonPath } from "./native/addonPath.ts"
 import { createCredentialStore, type CredentialStore } from "./mounts/credentials.ts"
 import { type FuseContext, fuseStatus, installWinFsp, linuxFuseGap, runProgram } from "./mounts/fuse.ts"
 import { registerMountsIpc } from "./mounts/ipc.ts"
@@ -495,6 +495,15 @@ const nativeSupervisor = createNativeSupervisor({
 			packaged: app.isPackaged,
 			resourcesPath: process.resourcesPath,
 			env: process.env,
+			appPath: app.getAppPath(),
+			platform: process.platform,
+			arch: process.arch,
+			exists: existsSync
+		}),
+	macAddonPath: () =>
+		macAddonPath({
+			packaged: app.isPackaged,
+			resourcesPath: process.resourcesPath,
 			appPath: app.getAppPath(),
 			platform: process.platform,
 			arch: process.arch,

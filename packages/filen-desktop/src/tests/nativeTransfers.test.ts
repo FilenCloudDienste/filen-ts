@@ -74,7 +74,7 @@ function setup(options: { platform?: NodeJS.Platform } = {}) {
 	const client = new FakeTransferClient()
 	const { fs, state } = memoryFs()
 	const posts: FromNative[] = []
-	const quarantine = { mark: vi.fn((_paths: readonly string[]) => Promise.resolve()) }
+	const quarantine = { mark: vi.fn((_files: readonly string[], _directories: readonly string[]) => Promise.resolve()) }
 	const onAuthFailed = vi.fn()
 	const warn = vi.fn()
 	const registry = createTransferRegistry({
@@ -532,7 +532,10 @@ describe("transfer registry", () => {
 		download.resolve()
 		await round()
 
-		expect(quarantine.mark.mock.calls).toEqual([[[at("Projects", "sub"), at("Projects", "sub", "x.txt")]], [[at("a.txt")]]])
+		expect(quarantine.mark.mock.calls).toEqual([
+			[[at("Projects", "sub", "x.txt")], [at("Projects", "sub")]],
+			[[at("a.txt")], []]
+		])
 	})
 
 	it("a quarantine failure is logged and the transfer still settles done", async () => {
@@ -611,7 +614,8 @@ describe("native host", () => {
 			dir: path.resolve("user"),
 			session: "s",
 			logLevel: "Info",
-			holdRemotes: []
+			holdRemotes: [],
+			macAddonPath: null
 		})
 		await flush()
 		send({ t: "call", id: 1, op: "transfersStart", args: { specs: [downloadFile()] } })

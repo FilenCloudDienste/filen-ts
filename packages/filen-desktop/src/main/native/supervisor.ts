@@ -55,6 +55,8 @@ export interface NativeSupervisorDeps {
 	vault: { get(): Promise<SessionRead>; clear(): Promise<void> }
 	// null: no addon for this build.
 	addonPath(): string | null
+	// filen-mac.node; null off macOS or when the build has none (downloads are then not quarantined).
+	macAddonPath(): string | null
 	// The user's engine directory, created owner-only.
 	dirFor(userId: string): Promise<string>
 	// The remote roots of the user's pairs main holds back, paused before the host starts any watch.
@@ -364,7 +366,7 @@ export function createNativeSupervisor(deps: NativeSupervisorDeps): NativeSuperv
 		proc.on("exit", code => {
 			onExit(child, code)
 		})
-		send(child, { t: "init", addonPath, dir, session: blob, logLevel: "Info", holdRemotes })
+		send(child, { t: "init", addonPath, dir, session: blob, logLevel: "Info", holdRemotes, macAddonPath: deps.macAddonPath() })
 	}
 
 	function pipeLines(stream: NodeJS.ReadableStream | null, write: (message: string) => void): void {

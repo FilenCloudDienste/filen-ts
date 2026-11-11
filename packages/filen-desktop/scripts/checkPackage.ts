@@ -16,7 +16,7 @@ import { MAC_TEAM } from "./signRclone.ts"
 // update's signature, and rclone.exe must carry the publisher's valid Authenticode signature; on macOS the addon and
 // rclone must carry the team's valid signature (the hardened runtime loads nothing else), rclone with the hardened
 // runtime, a secure timestamp and exactly build/entitlements.rclone.plist. A macOS app also carries the File Provider
-// addon and extension (Contents/PlugIns) built for its arch; with --signed the app and the extension carry the hardened
+// addon, filen-mac.node and the extension (Contents/PlugIns) built for its arch; with --signed the app and the extension carry the hardened
 // runtime, a secure timestamp and exactly their entitlements (build/entitlements.mac.plist, .fileprovider.plist).
 // DESKTOP_FEED_URL, when set, must equal the builder config's feed, so a workflow cannot upload somewhere else.
 //
@@ -223,10 +223,11 @@ for (const arch of archs) {
 
 	if (platform === "mac") {
 		const fpAddon = path.join(resources, "native", "filen-fp.node")
+		const macAddon = path.join(resources, "native", "filen-mac.node")
 		const appex = path.join(app, "Contents", "PlugIns", APPEX_NAME)
 		const appexExecutable = path.join(appex, "Contents", "MacOS", "FilenFileProvider")
 
-		for (const file of [fpAddon, appexExecutable]) {
+		for (const file of [fpAddon, macAddon, appexExecutable]) {
 			if (!existsSync(file)) {
 				failures.push(`${app}: ${file} is missing`)
 
@@ -243,6 +244,7 @@ for (const arch of archs) {
 		if (values.signed) {
 			failures.push(...macSignatureProblems(app, path.join("build", "entitlements.mac.plist")))
 			failures.push(...macSignatureProblems(fpAddon))
+			failures.push(...macSignatureProblems(macAddon))
 
 			if (existsSync(appex)) {
 				failures.push(...macSignatureProblems(appex, path.join("build", "entitlements.fileprovider.plist")))

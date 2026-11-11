@@ -56,6 +56,7 @@ A `filen-desktop@<version>` tag matching `package.json`'s version runs [`release
 | `src/preload/`         | The preload exposing `window.desktop`; its contract is `@filen/shared/desktop`                                                   |
 | `src/shared/`          | IPC channel names and the main ↔ native-host protocol                                                                            |
 | `native/fileProvider/` | Swift Node-API addon for the File Provider                                                                                       |
+| `native/mac/`          | Swift Node-API addon for macOS: quarantine for downloads                                                                         |
 | `native/shared/`       | Node-API module map and helpers the Swift addons share                                                                           |
 | `scripts/`             | Build, dev, staging, packaging and update-feed scripts; `scripts/ci/` holds the e2e tests                                        |
 | `electron-builder.ts`  | Packaging config                                                                                                                 |

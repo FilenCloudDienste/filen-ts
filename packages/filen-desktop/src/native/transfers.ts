@@ -326,12 +326,15 @@ export function createTransferRegistry(
 	}
 
 	// Marked before the transfer settles, so nothing can be opened unmarked; a failure only logs.
-	function mark(entry: Entry, paths: string[]): void {
+	function mark(entry: Entry, files: string[], directories: string[]): void {
 		entry.marking = entry.marking.then(() =>
-			quarantine.mark(paths).catch((error: unknown) => {
-				const more = paths.length > 1 ? ` and ${String(paths.length - 1)} more` : ""
+			quarantine.mark(files, directories).catch((error: unknown) => {
+				const count = files.length + directories.length
+				const more = count > 1 ? ` and ${String(count - 1)} more` : ""
 
-				log.warn(`quarantine of ${paths[0] ?? ""}${more} failed: ${error instanceof Error ? error.message : String(error)}`)
+				log.warn(
+					`quarantine of ${files[0] ?? directories[0] ?? ""}${more} failed: ${error instanceof Error ? error.message : String(error)}`
+				)
 			})
 		)
 	}
@@ -367,7 +370,7 @@ export function createTransferRegistry(
 
 			const final = await commitDownload(fs, staging, target, conflict, platform)
 
-			mark(entry, [final])
+			mark(entry, [final], [])
 
 			return final
 		} catch (error) {
@@ -493,18 +496,12 @@ export function createTransferRegistry(
 						onDownloadUpdate: (dirs, downloaded, bytes) => {
 							files.done += downloaded.length
 
-							const paths: string[] = []
-
-							for (const item of dirs) {
-								paths.push(path.join(created, item.path))
-							}
-
-							for (const item of downloaded) {
-								paths.push(path.join(created, item.path))
-							}
-
-							if (paths.length > 0) {
-								mark(entry, paths)
+							if (dirs.length + downloaded.length > 0) {
+								mark(
+									entry,
+									downloaded.map(item => path.join(created, item.path)),
+									dirs.map(item => path.join(created, item.path))
+								)
 							}
 
 							addBytes(entry, bytes)

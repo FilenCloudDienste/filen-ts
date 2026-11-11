@@ -155,7 +155,19 @@ describe("toNativeSchema", () => {
 				dir: "/data/sync-engine/1",
 				session: "{}",
 				logLevel: "Info",
-				holdRemotes: [UUID]
+				holdRemotes: [UUID],
+				macAddonPath: "/app/native/filen-mac.node"
+			})
+		).toBe(true)
+		expect(
+			accepts(toNativeSchema, {
+				t: "init",
+				addonPath: "/app/native/sdk-rs.node",
+				dir: "/data/sync-engine/1",
+				session: "{}",
+				logLevel: "Info",
+				holdRemotes: [],
+				macAddonPath: null
 			})
 		).toBe(true)
 		expect(accepts(toNativeSchema, { t: "subscribe", overview: true, mounts: false })).toBe(true)
@@ -183,13 +195,43 @@ describe("toNativeSchema", () => {
 		expect(accepts(toNativeSchema, call("addPair", { localRoot: "/x", remoteRoot: UUID, mode: "mirror" }))).toBe(false)
 		expect(accepts(toNativeSchema, call("planPage", { planId: "p1", list: "held", offset: 0, limit: 1001 }))).toBe(false)
 		expect(accepts(toNativeSchema, { ...call("pause", { pairId: "1" }), id: 1.5 })).toBe(false)
-		expect(accepts(toNativeSchema, { t: "init", addonPath: "/a", dir: "/d", session: "", logLevel: "Info", holdRemotes: [] })).toBe(
+		expect(
+			accepts(toNativeSchema, {
+				t: "init",
+				addonPath: "/a",
+				dir: "/d",
+				session: "",
+				logLevel: "Info",
+				holdRemotes: [],
+				macAddonPath: null
+			})
+		).toBe(false)
+		expect(
+			accepts(toNativeSchema, {
+				t: "init",
+				addonPath: "/a",
+				dir: "/d",
+				session: "{}",
+				logLevel: "Info",
+				holdRemotes: ["/x"],
+				macAddonPath: null
+			})
+		).toBe(false)
+		expect(accepts(toNativeSchema, { t: "init", addonPath: "/a", dir: "/d", session: "{}", logLevel: "Trace" })).toBe(false)
+		expect(accepts(toNativeSchema, { t: "init", addonPath: "/a", dir: "/d", session: "{}", logLevel: "Info", holdRemotes: [] })).toBe(
 			false
 		)
 		expect(
-			accepts(toNativeSchema, { t: "init", addonPath: "/a", dir: "/d", session: "{}", logLevel: "Info", holdRemotes: ["/x"] })
+			accepts(toNativeSchema, {
+				t: "init",
+				addonPath: "/a",
+				dir: "/d",
+				session: "{}",
+				logLevel: "Info",
+				holdRemotes: [],
+				macAddonPath: ""
+			})
 		).toBe(false)
-		expect(accepts(toNativeSchema, { t: "init", addonPath: "/a", dir: "/d", session: "{}", logLevel: "Trace" })).toBe(false)
 	})
 
 	it("relPath rejects NUL and > 4096", () => {

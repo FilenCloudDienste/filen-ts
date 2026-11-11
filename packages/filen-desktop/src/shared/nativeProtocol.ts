@@ -791,6 +791,8 @@ export interface NativeInit {
 	logLevel: "Info" | "Debug"
 	// The remote roots of the pairs main holds back (preparing or in review): paused before any watch starts.
 	holdRemotes: string[]
+	// filen-mac.node on macOS (it quarantines downloads); null elsewhere and when the build has none.
+	macAddonPath: string | null
 }
 
 export type NativeCall = { [K in NativeOp]: { t: "call"; id: number; op: K; args: NativeOpArgs<K> } }[NativeOp]
@@ -808,6 +810,7 @@ const initSchema = pinned<NativeInit>()(
 		session: type("string > 0").atMostLength(SESSION_BLOB_MAX_LENGTH),
 		logLevel: "'Info' | 'Debug'",
 		holdRemotes: type("string.uuid").array(),
+		macAddonPath: localPathSchema.or("null"),
 		"+": "reject"
 	})
 )

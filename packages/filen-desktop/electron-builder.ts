@@ -64,8 +64,8 @@ const config: Configuration = {
 		{ from: "build/rclone/${os}-${arch}", to: "rclone" }
 	],
 	// A missing extraResources source is skipped silently; an app without its addon cannot sync, one without rclone
-	// cannot mount or serve, a Windows one without WinFsp's installer cannot mount, and a macOS one without the File
-	// Provider addon and extension cannot offer Filen in Finder.
+	// cannot mount or serve, a Windows one without WinFsp's installer cannot mount, a macOS one without the File
+	// Provider addon and extension cannot offer Filen in Finder, and one without filen-mac.node cannot quarantine downloads.
 	beforePack: context => {
 		const os = context.packager.platform.buildConfigurationKey
 		const staged = `${os}-${Arch[context.arch]}`
@@ -87,6 +87,7 @@ const config: Configuration = {
 
 		if (os === "mac") {
 			required.push({ file: path.join(packageDir, "build", "native", staged, "filen-fp.node"), stage: "scripts/buildFpAddon.ts" })
+			required.push({ file: path.join(packageDir, "build", "native", staged, "filen-mac.node"), stage: "scripts/buildMacAddon.ts" })
 			appexSource()
 		}
 

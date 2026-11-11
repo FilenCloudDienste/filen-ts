@@ -1,6 +1,6 @@
 import path from "node:path"
 import { describe, expect, it } from "vitest"
-import { addonPath, type AddonPathContext } from "../main/native/addonPath.ts"
+import { addonPath, type AddonPathContext, macAddonPath } from "../main/native/addonPath.ts"
 
 function context(overrides: Partial<AddonPathContext> = {}): AddonPathContext {
 	return {
@@ -27,5 +27,17 @@ describe("addonPath", () => {
 		expect(addonPath(context({ env: { FILEN_DESKTOP_NAPI: "/rs/sdk-rs.darwin-arm64.node" } }))).toBe("/rs/sdk-rs.darwin-arm64.node")
 		expect(addonPath(context())).toBe(path.join("/repo/packages/filen-desktop", "build", "native", "mac-arm64", "sdk-rs.node"))
 		expect(addonPath(context({ exists: () => false }))).toBeNull()
+	})
+})
+
+describe("macAddonPath", () => {
+	it("is the shipped or staged filen-mac.node on macOS only", () => {
+		expect(macAddonPath(context({ packaged: true }))).toBe(path.join("/App/Contents/Resources", "native", "filen-mac.node"))
+		expect(macAddonPath(context({ arch: "x64" }))).toBe(
+			path.join("/repo/packages/filen-desktop", "build", "native", "mac-x64", "filen-mac.node")
+		)
+		expect(macAddonPath(context({ exists: () => false }))).toBeNull()
+		expect(macAddonPath(context({ platform: "linux", arch: "x64" }))).toBeNull()
+		expect(macAddonPath(context({ platform: "win32", arch: "x64" }))).toBeNull()
 	})
 })

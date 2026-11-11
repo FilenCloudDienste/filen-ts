@@ -1,5 +1,6 @@
 import { type } from "arktype"
-import { link, mkdir, open, rename, stat, unlink } from "node:fs/promises"
+import { link, mkdir, open, rename, stat, unlink, writeFile } from "node:fs/promises"
+import { createRequire } from "node:module"
 import {
 	type FromNative,
 	isMountsOp,
@@ -29,7 +30,7 @@ import { createMountsHost, type MountsHost, type MountsOpHandlers } from "./moun
 import { createHostEngine, type HostEngine, type OpHandlers, toNativePair } from "./ops.ts"
 import { createPlanRegistry } from "./plans.ts"
 import { createRuntimeFeed, type RuntimeFeed } from "./reducer.ts"
-import { noQuarantine } from "./quarantine.ts"
+import { createQuarantine, type MacAddon, type Quarantine } from "./quarantine.ts"
 import { closeWithin } from "./shutdown.ts"
 import { classifyTransfer } from "./transferErrors.ts"
 import {
@@ -81,6 +82,30 @@ const commitFs = { link, mkdir, open, rename, stat, unlink }
 
 // The id of a call that failed validation, so it still gets its one reply.
 const callIdSchema = type({ t: "'call'", id: "0 <= number.integer <= 9007199254740991" })
+
+// Loaded once, with the transfers that use it; a load failure leaves downloads unmarked (logged).
+function quarantineFor(macAddonPath: string | null): Quarantine {
+	let macAddon: MacAddon | null = null
+
+	if (macAddonPath !== null) {
+		try {
+			macAddon = createRequire(import.meta.url)(macAddonPath) as MacAddon
+		} catch (error) {
+			console.error(`filen-mac.node not loaded: ${error instanceof Error ? error.message : String(error)}`)
+		}
+	}
+
+	return createQuarantine({
+		platform: process.platform,
+		macAddon,
+		fs: { writeFile },
+		log: {
+			warn: message => {
+				console.error(message)
+			}
+		}
+	})
+}
 
 export function startHost(port: HostPort, exit: (code: number) => void): void {
 	let phase: "waiting" | "starting" | "ready" | "stopping" = "waiting"
@@ -184,7 +209,7 @@ export function startHost(port: HostPort, exit: (code: number) => void): void {
 				client: bindings.client,
 				sdk: bindings.sdk,
 				fs: commitFs,
-				quarantine: noQuarantine,
+				quarantine: quarantineFor(message.macAddonPath),
 				platform: process.platform,
 				post,
 				onAuthFailed: authRevoked,
