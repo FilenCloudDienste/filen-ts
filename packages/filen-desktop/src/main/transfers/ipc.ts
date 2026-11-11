@@ -12,7 +12,8 @@ const itemSchema = pinned<DesktopDownloadItem>()(
 	type({ kind: kindSchema, ref: sdkRefSchema, name: "0 < string <= 1024", size: countSchema, "+": "reject" })
 )
 
-const itemsSchema = itemSchema
+// Also what a drag-out prepare carries.
+export const downloadItemsSchema = itemSchema
 	.array()
 	.moreThanLength(0)
 	.atMostLength(TRANSFER_ITEMS_MAX)
@@ -25,13 +26,15 @@ const idsSchema = transferIdSchema.array().moreThanLength(0).atMostLength(TRANSF
 const call = checkedCalls<TransfersService>("transfers")
 
 const CALLS: Record<TransfersCall, CheckedCall<TransfersService>> = {
-	download: call(type([itemsSchema]).or([itemsSchema, type({ "ask?": "boolean", "+": "reject" })]), (service, _page, [items, options]) =>
-		service.startDownload({
-			items,
-			destination: options?.ask === true ? { kind: "prefs", ask: true } : { kind: "prefs" },
-			origin: "page",
-			revealable: true
-		})
+	download: call(
+		type([downloadItemsSchema]).or([downloadItemsSchema, type({ "ask?": "boolean", "+": "reject" })]),
+		(service, _page, [items, options]) =>
+			service.startDownload({
+				items,
+				destination: options?.ask === true ? { kind: "prefs", ask: true } : { kind: "prefs" },
+				origin: "page",
+				revealable: true
+			})
 	),
 	upload: call(
 		type([absolutePathSchema.array().moreThanLength(0).atMostLength(TRANSFER_ITEMS_MAX), parentSchema]),

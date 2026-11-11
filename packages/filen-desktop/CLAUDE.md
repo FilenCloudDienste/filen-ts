@@ -18,13 +18,13 @@ The Filen desktop app (4.x): Electron 45 around the filen-web build, plus sync (
 ```
 src/main/       Electron main: window, tray, menu, updater, session vault, app lock, 3.x migration,
                 mounts/ (rclone), fileProvider/ (Filen in Finder), sync/, native/ (supervises the native host),
-                transfers/ (the page's native uploads and downloads: destinations, rows, events, staging journal)
+                transfers/ (the page's native uploads and downloads: destinations, rows, events, staging journal),
+                dragOut/ (drive items dragged onto Finder, Explorer or a Linux file manager; temp copies under userData)
 src/native/     the native host: utility process running the sync engine and transfers on the sdk-rs addon
 src/preload/    the preload exposing `window.desktop`; the contract is `@filen/shared/desktop`
 src/shared/     IPC channel names and the main ↔ native-host protocol
 native/fileProvider/  Swift Node-API addon for the File Provider (built per arch to build/native/mac-<arch>/filen-fp.node)
-native/mac/     Swift addon filen-mac.node (macOS 13+): download quarantine, off the JS thread
-native/shared/  Swift helpers both addons build in (Node-API values, promises)
+native/dragOut/win/   Rust napi-rs addon for Explorer drag-out (crate filen-drag, own toolchain pin; built to filen-drag.node)
 native/mac/     Swift Node-API addon for macOS (quarantine; built per arch to build/native/mac-<arch>/filen-mac.node, macOS 13 floor)
 native/shared/  Node-API module map and value helpers every Swift addon compiles with (scripts/swiftAddon.ts)
 scripts/        build, dev, staging, packaging, feed and package checks; scripts/ci/ holds the e2e tests (e2e.ts)

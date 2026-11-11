@@ -21,6 +21,7 @@ import {
 	shell,
 	Tray,
 	utilityProcess,
+	webContents,
 	type WebContents,
 	type WebFrameMain
 } from "electron"
@@ -49,6 +50,12 @@ import { autostartFile, setAutostart } from "./autostart.ts"
 import { BADGE_DOT_SIZE, badgeDotBitmap } from "./badge.ts"
 import { parseHeaders } from "./headers.ts"
 import { createFileLog } from "./fileLog.ts"
+import { createDragOutAddon, type DragOutAddonMac } from "./dragOut/addon.ts"
+import { createDragOutAddonWin } from "./dragOut/addonWin.ts"
+import { registerDragOutIpc } from "./dragOut/ipc.ts"
+import { createDragOutService, type DragOutNative } from "./dragOut/service.ts"
+import { DragSessions } from "./dragOut/session.ts"
+import { createDragTemp } from "./dragOut/temp.ts"
 import { createFileProviderAddon, type FileProviderAddonContext, fileProviderAddonPath } from "./fileProvider/addon.ts"
 import { registerFileProviderIpc } from "./fileProvider/ipc.ts"
 import { createFileProviderService, runsTranslocated } from "./fileProvider/service.ts"
@@ -254,12 +261,14 @@ const signOutFlow = createSignOut({
 			// Before the host stops: its rows end cancelled, never interrupted. Their staging files go once it has
 			// stopped writing them.
 			const discardStaging = transfersService.signedOut()
+			const discardDragTemp = dragOut.signedOut()
 			const stopped = nativeSupervisor.signedOut()
 
 			syncService.signedOut()
 			mountsService.signedOut()
 			await stopped
 			await discardStaging()
+			await discardDragTemp()
 		},
 		forget: (userId, parts) => {
 			if (parts.includes("sync")) {
@@ -523,6 +532,7 @@ const nativeSupervisor = createNativeSupervisor({
 	demand: userId =>
 		anyDemand([
 			() => transfersService.active(userId) > 0,
+			() => dragOut.live() > 0,
 			async () => (await syncStoreFor(userId)).hasPairs(),
 			async () => (await migrationStash.pending(userId, "sync")) !== undefined,
 			async () => (await mountsStoreFor(userId)).anyEnabled(),
@@ -637,6 +647,95 @@ const transfersService = createTransfersService({
 	now: Date.now,
 	log: { info, warn }
 })
+
+// Drag-out: drive items dragged out of the window onto the OS (src/main/dragOut). Temp copies live under userData,
+// per app identity.
+const dragTemp = createDragTemp({
+	root: path.join(userDataPath, "drag-out"),
+	uid: process.getuid?.() ?? null,
+	now: Date.now,
+	setTimer: (run, ms) => {
+		const timer = setTimeout(run, ms)
+
+		timer.unref()
+
+		return () => {
+			clearTimeout(timer)
+		}
+	},
+	log: { warn }
+})
+
+function dragOutNative(): DragOutNative {
+	const context = {
+		packaged: app.isPackaged,
+		resourcesPath: process.resourcesPath,
+		appPath: app.getAppPath(),
+		platform: process.platform,
+		arch: process.arch,
+		exists: existsSync,
+		load: (file: string): unknown => createRequire(import.meta.url)(file)
+	}
+
+	if (PLATFORM === "darwin") {
+		// Loaded on the first drag out.
+		let addon: DragOutAddonMac | null | undefined
+
+		return { mode: "promise", addon: () => (addon ??= createDragOutAddon({ ...context, warn })) }
+	}
+
+	return PLATFORM === "win32" ? { mode: "virtual", addon: createDragOutAddonWin(context) } : { mode: "staged" }
+}
+
+const dragNative = dragOutNative()
+
+const dragSessions = new DragSessions(
+	{
+		transfers: transfersService,
+		temp: dragTemp,
+		emit: (state, owner) => {
+			dragOut.emit(state, owner)
+		},
+		now: Date.now,
+		setTimer: (run, ms) => {
+			const timer = setTimeout(run, ms)
+
+			return () => {
+				clearTimeout(timer)
+			}
+		}
+	},
+	PLATFORM,
+	dragNative.mode
+)
+
+const dragOut = createDragOutService<NativeImage>({
+	sessions: dragSessions,
+	temp: dragTemp,
+	native: dragNative,
+	user: async () => (await nativeSupervisor.user())?.userId ?? null,
+	windows: {
+		focused: owner => {
+			const contents = webContents.fromId(owner)
+			const window = contents === undefined ? null : BrowserWindow.fromWebContents(contents)
+
+			if (contents === undefined || window === null || !window.isFocused()) {
+				return null
+			}
+
+			return {
+				handle: () => window.getNativeWindowHandle(),
+				startDrag: (files, icon) => {
+					contents.startDrag({ file: files[0] ?? "", files, icon })
+				}
+			}
+		}
+	},
+	decodeIcon: (png, scaleFactor) => nativeImage.createFromBuffer(png, { scaleFactor }),
+	log: { warn }
+})
+// Before-quit waits for a native drag to return (Linux's nested loop and macOS's drag tracking run IPC and the tray).
+let quitAfterDrag = false
 
 // Where neither a sync pair nor the network drive may be.
 function reservedDirectories() {
@@ -1167,6 +1266,13 @@ function createWindow(): void {
 		syncService.pageGone(contentsId)
 		mountsService.pageGone(contentsId)
 		transfersService.pageGone(contentsId)
+		dragOut.pageGone(contentsId)
+	})
+	// Before the old document goes: its unbegun drag sessions (and their downloads) end at once.
+	window.webContents.on("did-start-navigation", details => {
+		if (details.isMainFrame && !details.isSameDocument) {
+			dragOut.pageGone(contentsId)
+		}
 	})
 
 	window.webContents.on("dom-ready", () => {
@@ -1203,6 +1309,7 @@ function createWindow(): void {
 	// whose reload crashed too, is destroyed, and the next show creates a fresh one.
 	window.webContents.on("render-process-gone", (_event, details) => {
 		resetPageState()
+		dragOut.pageGone(contentsId)
 
 		if (details.reason === "clean-exit") {
 			return
@@ -1617,8 +1724,22 @@ if (!instanceLock.held) {
 		}
 	})
 	// Native transfers hold no page unload guard: main asks itself. Quit never waits for them; will-quit stops the host,
-	// which aborts them.
+	// which aborts them. A running OS drag defers the quit (and the prompt) until it ends.
 	app.on("before-quit", event => {
+		if (dragOut.nativeDragRunning()) {
+			event.preventDefault()
+
+			if (!quitAfterDrag) {
+				quitAfterDrag = true
+				info("quit: waiting for the drag out to end")
+				void dragOut.idle().then(() => {
+					app.quit()
+				})
+			}
+
+			return
+		}
+
 		if (
 			shouldConfirmQuit({
 				unloadHolds,
@@ -1646,6 +1767,10 @@ if (!instanceLock.held) {
 	})
 	// After the windows closed (and the page's unload guard agreed): the native host closes its engine first.
 	app.on("will-quit", event => {
+		// The windows closed and the page agreed: drags end (Finder's waiting writes and Explorer's reads fail) before
+		// the host stops; their temp goes once it has.
+		dragOut.quit()
+
 		if (nativeSupervisor.active()) {
 			event.preventDefault()
 			info("quit: stopping the native host")
@@ -1657,6 +1782,7 @@ if (!instanceLock.held) {
 			return
 		}
 
+		dragTemp.removeAllSync()
 		// Electron tears down next; a batched line would never reach the disk.
 		info("quit: shutting down")
 		fileLog.flushSync()
@@ -1997,6 +2123,7 @@ if (!instanceLock.held) {
 	registerSyncIpc(ipcMain, syncService, url => isTrustedSender(url, APP_ORIGIN))
 	registerMountsIpc(ipcMain, mountsService, url => isTrustedSender(url, APP_ORIGIN))
 	registerTransfersIpc(ipcMain, transfersService, url => isTrustedSender(url, APP_ORIGIN))
+	registerDragOutIpc(ipcMain, dragOut, url => isTrustedSender(url, APP_ORIGIN))
 	registerFileProviderIpc(ipcMain, fileProvider, url => isTrustedSender(url, APP_ORIGIN))
 	registerSessionRecoveryIpc(ipcMain, discardUnreadableSession, url => isTrustedSender(url, APP_ORIGIN))
 	// The session exists only after ready, which every page call comes after.
@@ -2117,6 +2244,8 @@ if (!instanceLock.held) {
 
 			// What an unclean exit left of downloads in flight, before a host can start new ones beside it.
 			await transfersJournal.sweep()
+			// What an earlier run's drags left (older than an hour, so another instance's live ones stay).
+			void dragTemp.sweep(3_600_000)
 
 			started = true
 			nativeSupervisor.ensure("launch")

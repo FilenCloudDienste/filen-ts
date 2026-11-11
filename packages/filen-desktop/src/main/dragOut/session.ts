@@ -26,7 +26,8 @@ import type { DragTemp } from "./temp.ts"
 export interface DragSessionEffects {
 	transfers: Pick<TransfersService, "startDownload" | "startListedDownload" | "listTree" | "releaseTree" | "cancel">
 	temp: DragTemp
-	emit(state: DesktopDragState): void
+	// `owner`: the webContents the session answers; only it hears the state.
+	emit(state: DesktopDragState, owner: number): void
 	now(): number
 	setTimer(run: () => void, ms: number): () => void
 }
@@ -98,6 +99,9 @@ interface Session {
 	pending: Set<Download>
 	tickets: Map<number, Ticket>
 	fetches: Map<number, Fetch>
+	// virtual: the entry each open stream reads, and how many streams read each entry.
+	streams: Map<number, number>
+	readers: Map<number, number>
 	// staged
 	files: number
 	filesDone: number
@@ -311,6 +315,14 @@ export class DragSessions {
 			return
 		}
 
+		// Explorer is still extracting: the dropped session lives on.
+		if (session.lingering) {
+			this.linger(session, LISTING_TTL_MS)
+		}
+
+		session.streams.set(ticket, index)
+		session.readers.set(index, (session.readers.get(index) ?? 0) + 1)
+
 		const fetch = session.fetches.get(index) ?? this.fetch(session, index)
 
 		if (fetch.state === "running") {
@@ -371,6 +383,35 @@ export class DragSessions {
 
 		// Finished once the cancelled download settles.
 		this.cancelDownloads(entry.download === null ? [] : [entry.download])
+	}
+
+	// Windows: every stream of `ticket` was released (also one already answered). One still waiting gives up its
+	// file; once no stream reads an entry, its finished copy is forgotten (the addon deleted it with the last reader),
+	// so asking again downloads it again.
+	streamReleased(id: string, ticket: number): void {
+		const session = this.sessions.get(id)
+		const index = session?.streams.get(ticket)
+
+		if (session === undefined || index === undefined) {
+			return
+		}
+
+		session.streams.delete(ticket)
+		this.cancelTicket(id, ticket)
+
+		const readers = (session.readers.get(index) ?? 1) - 1
+
+		if (readers > 0) {
+			session.readers.set(index, readers)
+
+			return
+		}
+
+		session.readers.delete(index)
+
+		if (session.fetches.get(index)?.state !== "running") {
+			session.fetches.delete(index)
+		}
 	}
 
 	// The OS drag finished. Staged: done. Promise: Finder's writes may still come after a drop. Virtual: Explorer
@@ -474,6 +515,8 @@ export class DragSessions {
 			pending: new Set(),
 			tickets: new Map(),
 			fetches: new Map(),
+			streams: new Map(),
+			readers: new Map(),
 			files: 0,
 			filesDone: 0,
 			total: 0,
@@ -491,7 +534,7 @@ export class DragSessions {
 	private announce(session: Session, phase: "ready"): DesktopDragPrepared {
 		session.phase = phase
 		session.announced = true
-		this.effects.emit({ id: session.id, state: "ready" })
+		this.effects.emit({ id: session.id, state: "ready" }, session.owner)
 
 		return { id: session.id }
 	}
@@ -532,7 +575,7 @@ export class DragSessions {
 		// Only the hard deadline while staging: the page cannot begin before ready, however long that takes.
 		this.armUnbegun(session, Number.POSITIVE_INFINITY)
 		session.lastEmit = this.effects.now()
-		this.effects.emit({ id: session.id, state: "staging", bytes: 0, total: session.total })
+		this.effects.emit({ id: session.id, state: "staging", bytes: 0, total: session.total }, session.owner)
 
 		const watch: DownloadWatch = {
 			onProgress: (id, bytes) => {
@@ -551,7 +594,7 @@ export class DragSessions {
 						sum += each.bytes
 					}
 
-					this.effects.emit({ id: session.id, state: "staging", bytes: sum, total: session.total })
+					this.effects.emit({ id: session.id, state: "staging", bytes: sum, total: session.total }, session.owner)
 				}
 			},
 			onSettled: settle => {
@@ -626,7 +669,7 @@ export class DragSessions {
 		this.armUnbegun(session, UNBEGUN_TTL_MS)
 
 		if (session.announced) {
-			this.effects.emit({ id: session.id, state: "ready" })
+			this.effects.emit({ id: session.id, state: "ready" }, session.owner)
 		}
 	}
 
@@ -850,7 +893,7 @@ export class DragSessions {
 	private emitEnded(session: Session, outcome: DesktopDragOutcome): void {
 		if (session.announced && !session.endedEmitted) {
 			session.endedEmitted = true
-			this.effects.emit({ id: session.id, state: "ended", outcome })
+			this.effects.emit({ id: session.id, state: "ended", outcome }, session.owner)
 		}
 	}
 

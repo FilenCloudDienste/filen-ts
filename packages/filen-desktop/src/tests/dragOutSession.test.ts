@@ -836,6 +836,32 @@ describe("drag sessions: virtual", () => {
 		expect(sessions.live()).toBe(0)
 	})
 
+	it("a stream released while it waits gives up its download; a shared copy stays until its last reader goes", async () => {
+		const f = fakes({ tree })
+		const sessions = new DragSessions(f.effects, "win32", "virtual")
+		const id = idOf(await sessions.prepare(1, [item("d", "directory"), item("top")]))
+		const done: (string | null)[] = []
+
+		sessions.markBegun(id)
+		sessions.contents(id, 0, 1, file => done.push(file))
+		await flush()
+		sessions.streamReleased(id, 0)
+
+		expect(done).toEqual([null])
+		expect(f.cancelled).toEqual(["t0"])
+
+		sessions.contents(id, 1, 2, file => done.push(file))
+		sessions.contents(id, 2, 2, file => done.push(file))
+		await flush()
+		f.settle(f.started.find(s => s.index === 0) as Started, "done")
+		sessions.streamReleased(id, 1)
+		sessions.contents(id, 3, 2, file => done.push(file))
+
+		// Still read by ticket 2: answered from the same copy, nothing downloaded again.
+		expect(done.slice(1)).toEqual([path.join(`/temp/s-${id}`, "2"), path.join(`/temp/s-${id}`, "2"), path.join(`/temp/s-${id}`, "2")])
+		expect(f.started.filter(s => s.index === 0)).toHaveLength(1)
+	})
+
 	it("a cancelled drag releases everything at once", async () => {
 		const f = fakes({ tree })
 		const sessions = new DragSessions(f.effects, "win32", "virtual")

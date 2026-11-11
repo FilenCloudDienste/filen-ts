@@ -55,7 +55,8 @@ export const CHANNELS = {
 	transfersSubscribe: "transfers:subscribe",
 	// Payload: DesktopTransferEvent[], what one host round (or one service step) changed, in order.
 	transfersEvents: "transfers:events",
-	// Payload: DesktopDragState.
+	dragSubscribe: "drag:subscribe",
+	// Payload: DesktopDragState, to the page that prepared the id only.
 	dragState: "drag:state"
 } as const
 
