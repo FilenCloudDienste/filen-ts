@@ -140,7 +140,7 @@ export function resumePointerDrag(): void {
 
 // Ends the drag under way without a drop (a refused or finished hand-off).
 export function cancelPointerDrag(): void {
-	end(false)
+	end(false, "held")
 }
 
 // A press on a drag source. Primary mouse or pen button only: touch keeps its long-press selection
@@ -150,7 +150,7 @@ export function pressPointerDrag(event: PointerDragPress, source: PointerDragSou
 		return
 	}
 
-	end(false)
+	end(false, "none")
 
 	const point = { x: event.clientX, y: event.clientY }
 
@@ -178,8 +178,8 @@ export function pressPointerDrag(event: PointerDragPress, source: PointerDragSou
 	listen("contextmenu", onContextMenu)
 }
 
-function listen<K extends keyof WindowEventMap>(type: K, listener: (event: WindowEventMap[K]) => void): void {
-	window.addEventListener(type, listener, true)
+function listen<K extends keyof WindowEventMap>(type: K, listener: (event: WindowEventMap[K]) => void, passive = false): void {
+	window.addEventListener(type, listener, { capture: true, passive })
 	session?.detach.push(() => {
 		window.removeEventListener(type, listener, true)
 	})
@@ -191,13 +191,13 @@ function ownPointer(event: PointerEvent): boolean {
 
 function onContextMenu(): void {
 	if (session?.phase === "pressed") {
-		end(false)
+		end(false, "none")
 	}
 }
 
 function onPointerCancel(event: PointerEvent): void {
 	if (ownPointer(event)) {
-		end(false)
+		end(false, "none")
 	}
 }
 
@@ -210,7 +210,7 @@ function onPointerMove(event: PointerEvent): void {
 
 	// No pointerup reaches the page after an OS drag, or after a release it never saw.
 	if (event.buttons === 0) {
-		end(false)
+		end(false, "none")
 
 		return
 	}
@@ -255,7 +255,7 @@ function begin(current: Session): void {
 
 	// Nothing to drag: the press ends as it began, with no end to tell the source.
 	if (items === undefined) {
-		end(false)
+		end(false, "none")
 
 		return
 	}
@@ -281,6 +281,10 @@ function begin(current: Session): void {
 	listen("keydown", onKey)
 	listen("keyup", onKey)
 	listen("blur", onBlur)
+	// A scroll under a resting pointer (wheel, trackpad, a scrollbar) moves what lies under it. Element
+	// scrolls do not bubble; the capture phase hears them.
+	listen("scroll", scheduleFrame, true)
+	listen("wheel", scheduleFrame, true)
 	hooks?.onStart?.(items)
 }
 
@@ -305,7 +309,7 @@ function onKey(event: KeyboardEvent): void {
 	if (event.type === "keydown" && event.key === "Escape") {
 		event.preventDefault()
 		event.stopPropagation()
-		end(false)
+		end(false, "held")
 
 		return
 	}
@@ -319,7 +323,7 @@ function onKey(event: KeyboardEvent): void {
 // The window's own blur, not an element's (a capture listener on the window hears those too).
 function onBlur(event: FocusEvent): void {
 	if (!(event.target instanceof Node)) {
-		end(false)
+		end(false, "held")
 	}
 }
 
@@ -331,7 +335,7 @@ function onPointerUp(event: PointerEvent): void {
 	}
 
 	if (current.phase !== "dragging") {
-		end(false)
+		end(false, "release")
 
 		return
 	}
@@ -344,7 +348,7 @@ function onPointerUp(event: PointerEvent): void {
 	const handlers = drop === null ? undefined : targets.get(drop)
 
 	handlers?.drop(current.mode)
-	end(handlers !== undefined)
+	end(handlers !== undefined, "release")
 }
 
 function handOff(current: Session): void {
@@ -520,7 +524,42 @@ function swallowNextClick(): void {
 	}, 0)
 }
 
-function end(dropped: boolean): void {
+// How long a drag cancelled under a held button waits for its release (swallowHeldRelease).
+const HELD_RELEASE_WAIT_MS = 30_000
+
+// A drag cancelled with the button still held (Escape, the window losing focus, a hand-off refused):
+// its release still clicks whatever lies under the pointer, which a cancelled HTML5 drag never did. That
+// one release's click is swallowed. Gone at the next press (the release was never seen), the next window
+// blur, or after a wait, so it never outlives the gesture.
+function swallowHeldRelease(): void {
+	const timer = setTimeout(stop, HELD_RELEASE_WAIT_MS)
+	// Listened for from the next turn: a drag ended by the window's own blur is still dispatching it.
+	const blurTimer = setTimeout(() => {
+		window.addEventListener("blur", stop)
+	}, 0)
+
+	function onRelease(): void {
+		stop()
+		swallowNextClick()
+	}
+
+	function stop(): void {
+		clearTimeout(timer)
+		clearTimeout(blurTimer)
+		window.removeEventListener("pointerup", onRelease, true)
+		window.removeEventListener("pointerdown", stop, true)
+		window.removeEventListener("blur", stop)
+	}
+
+	window.addEventListener("pointerup", onRelease, true)
+	window.addEventListener("pointerdown", stop, true)
+}
+
+// How a drag's end left the button: just released (its click follows at once), still held, or neither
+// (already released unseen, or the press never became a drag).
+type EndButton = "release" | "held" | "none"
+
+function end(dropped: boolean, button: EndButton): void {
 	const current = session
 
 	if (current === null) {
@@ -543,6 +582,12 @@ function end(dropped: boolean): void {
 	current.chip?.remove()
 	document.body.classList.remove("pointer-drag")
 	current.source.end()
-	swallowNextClick()
+
+	if (button === "release") {
+		swallowNextClick()
+	} else if (button === "held") {
+		swallowHeldRelease()
+	}
+
 	hooks?.onEnd?.(dropped)
 }

@@ -343,4 +343,64 @@ describe("the pointer drag engine", () => {
 		expect(inner.handlers.update).toHaveBeenLastCalledWith({ over: false, mode: "move", spring: true }, inner.element)
 		expect(outer.handlers.update).toHaveBeenLastCalledWith({ over: true, mode: "move", spring: false }, outer.element)
 	})
+
+	// A cancelled HTML5 drag produced no click on release; the row under the pointer must not select.
+	it.each([
+		["Escape", () => document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }))],
+		["the window losing focus", () => window.dispatchEvent(new Event("blur"))]
+	])("a drag %s cancelled before the release swallows the release's click", (_label, cancel) => {
+		const row = document.createElement("div")
+		const select = vi.fn()
+
+		row.addEventListener("click", select)
+		document.body.appendChild(row)
+		press()
+		move(30, 30)
+		cancel()
+		vi.advanceTimersByTime(1000)
+		row.dispatchEvent(new PointerEvent("pointerup", { pointerId: 1, bubbles: true, clientX: 30, clientY: 30 }))
+		row.click()
+		expect(select).not.toHaveBeenCalled()
+
+		// Only that one click: the next press clicks as ever.
+		vi.runAllTimers()
+		row.click()
+		expect(select).toHaveBeenCalledOnce()
+	})
+
+	it("swallows no later click when the next press comes without a release seen", () => {
+		const row = document.createElement("div")
+		const select = vi.fn()
+
+		row.addEventListener("click", select)
+		document.body.appendChild(row)
+		press()
+		move(30, 30)
+		document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }))
+		row.dispatchEvent(new PointerEvent("pointerdown", { pointerId: 1, bubbles: true }))
+		row.dispatchEvent(new PointerEvent("pointerup", { pointerId: 1, bubbles: true }))
+		row.click()
+
+		expect(select).toHaveBeenCalledOnce()
+	})
+
+	it("scrolling the listing under a stationary pointer updates the target", () => {
+		const scroller = document.createElement("div")
+		const first = target()
+		const second = target()
+
+		scroller.append(first.element, second.element)
+		document.body.appendChild(scroller)
+		hit = first.element
+		press()
+		move(30, 30)
+		frame()
+		expect(first.handlers.update).toHaveBeenLastCalledWith({ over: true, mode: "move", spring: false }, first.element)
+
+		hit = second.element
+		scroller.dispatchEvent(new Event("scroll"))
+		frame()
+		expect(first.handlers.update).toHaveBeenLastCalledWith(null, first.element)
+		expect(second.handlers.update).toHaveBeenLastCalledWith({ over: true, mode: "move", spring: false }, second.element)
+	})
 })

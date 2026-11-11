@@ -400,6 +400,24 @@ describe("React Compiler coverage", () => {
 		).toHaveLength(1)
 	})
 
+	// Every drop target of a drive item drag registers through a ref callback; a ref-like name read in
+	// render makes the compiler skip the component.
+	it("compiles every drive drop target's component", () => {
+		for (const [file, fnName] of [
+			["src/features/drive/components/listingDropSurface.tsx", "ListingDropSurface"],
+			["src/features/drive/components/directoryTree.tsx", "DirectoryTreeNode"],
+			["src/features/drive/components/breadcrumb.tsx", "CrumbLink"],
+			["src/features/shell/components/driveSidebar.tsx", "CloudDriveRoot"]
+		] as const) {
+			const events = compile(file)
+
+			expect(events.filter(event => event.kind === "CompileError" && event.fnName === fnName)).toEqual([])
+			expect(events.some(event => event.kind === "CompileSuccess" && event.fnName === fnName && (event.memoSlots ?? 0) > 0)).toBe(
+				true
+			)
+		}
+	})
+
 	it("compiles DriveSidebar, so non-drive navigations skip the mounted directory tree", () => {
 		const events = compile("src/features/shell/components/driveSidebar.tsx")
 
