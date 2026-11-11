@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from "electron"
+import { contextBridge, ipcRenderer, webUtils } from "electron"
 import type {
 	DesktopBridge,
 	DesktopLockAttempt,
@@ -10,7 +10,10 @@ import type {
 	DesktopPlatform,
 	DesktopSyncActivity,
 	DesktopSyncOverview,
+	DesktopTransferEvent,
 	DesktopTransferResult,
+	DesktopTransfers,
+	DesktopUploadStart,
 	WindowState
 } from "@filen/shared/desktop"
 import {
@@ -24,8 +27,11 @@ import {
 	type SessionRead,
 	type SyncCall,
 	syncChannel,
+	type TransfersCall,
+	transfersChannel,
 	VERSION_ARG_PREFIX
 } from "../shared/channels.ts"
+import { directoryRootOf, uploadPaths } from "./uploadPaths.ts"
 
 // The sandboxed preload's process object carries the platform and argv but no Node typings.
 declare const process: { readonly platform: DesktopPlatform; readonly argv: readonly string[] }
@@ -183,14 +189,54 @@ function fileProviderInvoke(call: FileProviderCall): Promise<never> {
 	return ipcRenderer.invoke(fileProviderChannel(call)) as Promise<never>
 }
 
-// Until main runs transfers, every call reports the host unavailable and nothing is ever sent.
-function transfersUnavailable(): Promise<DesktopTransferResult<never>> {
-	return Promise.resolve({
-		ok: false,
-		error: {
-			code: "hostUnavailable"
+// Main streams transfer events only while the page listens; it answers each subscribe with a snapshot, so a listener
+// that joins later gets one too (the others see it again, a snapshot replaces what they hold).
+const transfersListeners = new Set<(event: DesktopTransferEvent) => void>()
+
+ipcRenderer.on(CHANNELS.transfersEvents, (_event, events: DesktopTransferEvent[]) => {
+	for (const event of events) {
+		for (const listener of transfersListeners) {
+			listener(event)
 		}
-	})
+	}
+})
+
+function transfersInvoke(call: TransfersCall, ...args: unknown[]): Promise<never> {
+	return ipcRenderer.invoke(transfersChannel(call), ...args) as Promise<never>
+}
+
+function pathOf(file: File): string {
+	return webUtils.getPathForFile(file)
+}
+
+// Files reach main as their paths. Main answers `skipped` as indexes into the paths, mapped back to the Files here;
+// `asDirectory` sends one path, the picked directory, which stands for every File.
+const upload: DesktopTransfers["upload"] = async (files, parent, options) => {
+	const { paths, indexes, skipped } =
+		options?.asDirectory === true ? { paths: [directoryRootOf(files, pathOf)], indexes: [], skipped: [] } : uploadPaths(files, pathOf)
+
+	if (paths[0] === null) {
+		return { ok: false, error: { code: "invalidItem" } }
+	}
+
+	if (paths.length === 0) {
+		return { ok: true, value: { status: "started", ids: [], skipped } }
+	}
+
+	const result = (await ipcRenderer.invoke(transfersChannel("upload"), paths, parent)) as DesktopTransferResult<DesktopUploadStart>
+
+	if (!result.ok || result.value.status !== "started") {
+		return result
+	}
+
+	const skippedFiles =
+		options?.asDirectory === true
+			? result.value.skipped.length > 0
+				? files.map((_file, index) => index)
+				: []
+			: [...skipped, ...result.value.skipped.flatMap(index => indexes[index] ?? [])].sort((a, b) => a - b)
+
+	return { ok: true, value: { ...result.value, skipped: skippedFiles } }
 }
 
 const bridge: DesktopBridge = {
@@ -424,18 +470,30 @@ const bridge: DesktopBridge = {
 		openSettings: () => fileProviderInvoke("openSettings")
 	},
 	transfers: {
-		download: transfersUnavailable,
-		upload: transfersUnavailable,
-		pickUpload: transfersUnavailable,
-		cancel: () => undefined,
-		setPaused: () => undefined,
-		onEvents: () => () => undefined,
-		reveal: transfersUnavailable,
-		open: transfersUnavailable,
-		chooseDownloadDirectory: () =>
-			Promise.resolve({
-				status: "canceled"
-			})
+		download: (items, options) =>
+			options === undefined ? transfersInvoke("download", items) : transfersInvoke("download", items, options),
+		upload,
+		pickUpload: (kind, parent) => transfersInvoke("pickUpload", kind, parent),
+		// Fire and forget: the page learns the outcome from the events.
+		cancel: ids => {
+			transfersInvoke("cancel", ids).catch(() => undefined)
+		},
+		setPaused: (ids, paused) => {
+			transfersInvoke("setPaused", ids, paused).catch(() => undefined)
+		},
+		onEvents: callback => {
+			transfersListeners.add(callback)
+			ipcRenderer.send(CHANNELS.transfersSubscribe, true)
+
+			return () => {
+				if (transfersListeners.delete(callback) && transfersListeners.size === 0) {
+					ipcRenderer.send(CHANNELS.transfersSubscribe, false)
+				}
+			}
+		},
+		reveal: id => transfersInvoke("reveal", id),
+		open: id => transfersInvoke("open", id),
+		chooseDownloadDirectory: () => transfersInvoke("chooseDownloadDirectory")
 	},
 	window: {
 		zoom: step => {
