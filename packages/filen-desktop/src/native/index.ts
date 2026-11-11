@@ -2,6 +2,7 @@ import { type } from "arktype"
 import {
 	type FromNative,
 	isMountsOp,
+	isTransfersOp,
 	type MountsOp,
 	type NativeError,
 	type NativeFatalReason,
@@ -272,6 +273,13 @@ export function startHost(port: HostPort, exit: (code: number) => void): void {
 
 		if (revoked) {
 			reply({ code: "unauthenticated" })
+
+			return
+		}
+
+		// The transfer registry is not here yet: no transfer runs.
+		if (isTransfersOp(message.op)) {
+			reply({ code: "hostUnavailable" })
 
 			return
 		}

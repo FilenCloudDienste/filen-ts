@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest"
 import { type } from "arktype"
-import type { DesktopMountsError, DesktopMountsStats, DesktopVfsTuning } from "@filen/shared/desktop"
+import type { DesktopMountsError, DesktopMountsStats, DesktopTransferError, DesktopVfsTuning } from "@filen/shared/desktop"
 import {
 	fromNativeSchema,
+	isTransfersOp,
 	mountsErrorSchema,
 	NATIVE_OPS,
 	type NativeMountsDesired,
@@ -12,6 +13,7 @@ import {
 	opResult,
 	SYNC_TRANSFERS_KEPT,
 	toNativeSchema,
+	transferErrorSchema,
 	vfsTuningSchema
 } from "../shared/nativeProtocol.ts"
 
@@ -90,6 +92,27 @@ const MOUNTS_ARGS = {
 	drainCache: { binary: DESIRED.binary, stateDir: "/data/mounts/1/drain", dir: "/data/rclone-cache/webdav", timeoutMs: 1_800_000 }
 }
 
+const TRANSFER_ID = "6b1e9d2c-4a3f-4e5b-8c7d-0f1a2b3c4d5e"
+const LISTING_ID = "8c2f0e3d-5b4a-4f6c-9d8e-1a2b3c4d5e6f"
+const FILE_REF = { variant: "AnyFile.File", value: '{"uuid":"x"}' }
+const DIR_REF = { variant: "AnyNormalDir.Dir", value: '{"uuid":"y"}' }
+
+const SPECS = {
+	downloadFile: { id: TRANSFER_ID, t: "downloadFile", file: FILE_REF, path: "/Users/u/Downloads/a.txt", conflict: "keepBoth" },
+	downloadDirectory: { id: TRANSFER_ID, t: "downloadDirectory", dir: DIR_REF, path: "/Users/u/Downloads/d" },
+	downloadListed: { id: TRANSFER_ID, t: "downloadListed", listingId: LISTING_ID, index: 3, path: "/tmp/drag/a.txt" },
+	uploadFile: { id: TRANSFER_ID, t: "uploadFile", path: "/Users/u/a.txt", parent: DIR_REF },
+	uploadDirectory: { id: TRANSFER_ID, t: "uploadDirectory", path: "/Users/u/d", parent: DIR_REF, name: "d" }
+}
+
+const TRANSFER_ARGS = {
+	transfersStart: { specs: Object.values(SPECS) },
+	transfersCancel: { ids: [TRANSFER_ID] },
+	transfersPause: { ids: [TRANSFER_ID], paused: true },
+	transfersListTree: { listingId: LISTING_ID, items: [{ ref: DIR_REF, name: "d" }], maxEntries: 2000 },
+	transfersReleaseTree: { listingId: LISTING_ID }
+}
+
 // One valid call per op.
 const ARGS: { [K in NativeOp]: unknown } = {
 	listPairs: {},
@@ -117,7 +140,8 @@ const ARGS: { [K in NativeOp]: unknown } = {
 	userIgnore: {},
 	setUserIgnore: { text: ".*\n!/.filenignore\n" },
 	defaultIgnore: {},
-	...MOUNTS_ARGS
+	...MOUNTS_ARGS,
+	...TRANSFER_ARGS
 }
 
 const call = (op: string, args: unknown) => ({ t: "call", id: 7, op, args })
@@ -359,5 +383,130 @@ describe("mounts", () => {
 		expect(accepts(mountsErrorSchema, error)).toBe(true)
 		expect(accepts(vfsTuningSchema, TUNING)).toBe(true)
 		expect(accepts(opResult("mountsStats"), STATS)).toBe(true)
+	})
+})
+
+describe("transfers", () => {
+	const start = (specs: unknown[]) => accepts(toNativeSchema, call("transfersStart", { specs }))
+	const spec = (kind: keyof typeof SPECS, patch: Record<string, unknown>) => start([{ ...SPECS[kind], ...patch }])
+	const TREE_ENTRY = { segments: ["d", "a.txt"], directory: false, size: 10, mtimeMs: 1762819200000, listIndex: 0, source: 0 }
+
+	it("accepts each transfer spec kind", () => {
+		for (const value of Object.values(SPECS)) {
+			expect(start([value]), value.t).toBe(true)
+		}
+
+		for (const op of Object.keys(TRANSFER_ARGS) as (keyof typeof TRANSFER_ARGS)[]) {
+			expect(isTransfersOp(op), op).toBe(true)
+		}
+
+		expect(isTransfersOp("pause")).toBe(false)
+		expect(isTransfersOp("mountsApply")).toBe(false)
+	})
+
+	it("rejects a relative path, a NUL in a path, an unknown key, a non-uuid id", () => {
+		expect(spec("downloadFile", { path: "Downloads/a.txt" })).toBe(false)
+		expect(spec("uploadDirectory", { path: "./d" })).toBe(false)
+		expect(spec("downloadFile", { path: "/Users/u/a\0.txt" })).toBe(false)
+		expect(spec("uploadFile", { extra: true })).toBe(false)
+		expect(spec("downloadFile", { id: "1" })).toBe(false)
+		expect(spec("downloadListed", { listingId: "l1" })).toBe(false)
+		expect(spec("downloadFile", { conflict: "skip" })).toBe(false)
+		expect(spec("uploadDirectory", { name: "" })).toBe(false)
+		expect(start([])).toBe(false)
+		expect(accepts(toNativeSchema, call("transfersCancel", { ids: [] }))).toBe(false)
+		expect(accepts(toNativeSchema, call("transfersCancel", { ids: ["x"] }))).toBe(false)
+		expect(accepts(toNativeSchema, call("transfersPause", { ids: [TRANSFER_ID] }))).toBe(false)
+	})
+
+	it("rejects more than 10000 specs", () => {
+		const specs = Array.from({ length: 10_000 }, () => SPECS.downloadListed)
+
+		expect(start(specs)).toBe(true)
+		expect(start([...specs, SPECS.downloadListed])).toBe(false)
+	})
+
+	it("rejects an SDK value over 8 KiB", () => {
+		expect(spec("downloadFile", { file: { ...FILE_REF, value: "x".repeat(8192) } })).toBe(true)
+		expect(spec("downloadFile", { file: { ...FILE_REF, value: "x".repeat(8193) } })).toBe(false)
+		expect(spec("downloadFile", { file: { ...FILE_REF, value: "" } })).toBe(false)
+	})
+
+	it("rejects specs whose SDK values sum past 16 MiB", () => {
+		const big = { ...SPECS.downloadFile, file: { ...FILE_REF, value: "x".repeat(8192) } }
+		const fits = Array.from({ length: 2048 }, () => big)
+
+		expect(start(fits)).toBe(true)
+		expect(start([...fits, SPECS.uploadFile])).toBe(false)
+	})
+
+	it("rejects an unknown SDK variant", () => {
+		expect(spec("downloadFile", { file: { ...FILE_REF, variant: "AnyFile.Folder" } })).toBe(false)
+		expect(spec("uploadFile", { parent: { ...DIR_REF, extra: 1 } })).toBe(false)
+	})
+
+	it("opError routes transfer ops to the transfer error schema", () => {
+		expect(accepts(opError("transfersStart"), { code: "localFull", kind: "Io", message: "disk full" })).toBe(true)
+		expect(accepts(opError("transfersStart"), { code: "pairNotFound" })).toBe(false)
+		expect(accepts(opError("transfersStart"), { code: "unknown", kind: "x".repeat(65) })).toBe(false)
+		expect(accepts(opError("pause"), { code: "localFull" })).toBe(false)
+		expect(accepts(opError("mountsApply"), { code: "storageFull" })).toBe(false)
+	})
+
+	it("a transfers reply error parses with the transfer error schema", () => {
+		const error: DesktopTransferError = { code: "storageFull", kind: "StorageFull" }
+
+		expect(accepts(transferErrorSchema, error)).toBe(true)
+		expect(accepts(fromNativeSchema, { t: "reply", id: 1, ok: false, error })).toBe(true)
+		expect(accepts(fromNativeSchema, { t: "reply", id: 1, ok: false, error: { code: "interrupted" } })).toBe(true)
+	})
+
+	it("fromNativeSchema accepts a transfers batch with a progress and a settled event", () => {
+		expect(
+			accepts(fromNativeSchema, {
+				t: "transfers",
+				events: [
+					{ k: "progress", id: TRANSFER_ID, size: 20, bytes: 10, files: { total: 3, done: 1, failed: 0, failedBytes: 0 } },
+					{ k: "progress", id: TRANSFER_ID, size: 20, bytes: 20, files: null },
+					{ k: "settled", id: TRANSFER_ID, outcome: "done", savedPath: "/Users/u/Downloads/a (1).txt" },
+					{ k: "settled", id: TRANSFER_ID, outcome: "done", uploaded: '{"uuid":"x"}' },
+					{ k: "settled", id: TRANSFER_ID, outcome: "error", error: { code: "localDenied" } }
+				]
+			})
+		).toBe(true)
+		expect(accepts(fromNativeSchema, { t: "transfers", events: [] })).toBe(true)
+		expect(
+			accepts(fromNativeSchema, { t: "transfers", events: [{ k: "settled", id: TRANSFER_ID, outcome: "done", savedPath: "a.txt" }] })
+		).toBe(false)
+	})
+
+	it('rejects outcome "paused"', () => {
+		expect(accepts(fromNativeSchema, { t: "transfers", events: [{ k: "settled", id: TRANSFER_ID, outcome: "paused" }] })).toBe(false)
+	})
+
+	it("rejects an uploaded value over 8 KiB", () => {
+		const settled = (uploaded: string) => ({ t: "transfers", events: [{ k: "settled", id: TRANSFER_ID, outcome: "done", uploaded }] })
+
+		expect(accepts(fromNativeSchema, settled("x".repeat(8192)))).toBe(true)
+		expect(accepts(fromNativeSchema, settled("x".repeat(8193)))).toBe(false)
+	})
+
+	it("transfersListTree accepts entries or tooMany and rejects both", () => {
+		const result = opResult("transfersListTree")
+
+		expect(
+			accepts(result, { entries: [TREE_ENTRY, { ...TREE_ENTRY, segments: ["d"], directory: true, mtimeMs: null, listIndex: null }] })
+		).toBe(true)
+		expect(accepts(result, { tooMany: 12_000 })).toBe(true)
+		expect(accepts(result, { entries: [], tooMany: 1 })).toBe(false)
+		expect(accepts(result, { entries: [{ ...TREE_ENTRY, segments: [] }] })).toBe(false)
+		expect(accepts(toNativeSchema, call("transfersListTree", { ...TRANSFER_ARGS.transfersListTree, maxEntries: 10_001 }))).toBe(false)
+		expect(accepts(toNativeSchema, call("transfersListTree", { ...TRANSFER_ARGS.transfersListTree, items: [] }))).toBe(false)
+	})
+
+	it("a tree entry needs listIndex", () => {
+		const { listIndex: _listIndex, ...entry } = TREE_ENTRY
+
+		expect(accepts(opResult("transfersListTree"), { entries: [entry] })).toBe(false)
 	})
 })

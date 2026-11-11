@@ -1,5 +1,11 @@
 import { type, type Type } from "arktype"
-import type { DesktopMountsError, DesktopMountsResult, DesktopSyncError, DesktopSyncResult } from "@filen/shared/desktop"
+import type {
+	DesktopMountsError,
+	DesktopMountsResult,
+	DesktopSyncError,
+	DesktopSyncResult,
+	DesktopTransferError
+} from "@filen/shared/desktop"
 import {
 	type FromNative,
 	type MountsOp,
@@ -14,14 +20,17 @@ import {
 
 export const CALL_TIMEOUT_MS = 120_000
 
+// transfersListTree lists every dragged or downloaded directory recursively, which takes long for a big tree.
+export const LIST_TREE_TIMEOUT_MS = 600_000
+
 export type NativeReply = Extract<FromNative, { t: "reply" }>
 
 export type NativeResult<K extends SyncOp> = DesktopSyncResult<NativeOpResult<K>>
 
 export type NativeMountsResult<K extends MountsOp> = DesktopMountsResult<NativeOpResult<K>>
 
-// Either family's result, before it is narrowed to the op's own.
-type AnyResult = { ok: true; value: unknown } | { ok: false; error: DesktopSyncError | DesktopMountsError }
+// Any family's result, before it is narrowed to the op's own.
+type AnyResult = { ok: true; value: unknown } | { ok: false; error: DesktopSyncError | DesktopMountsError | DesktopTransferError }
 
 export interface NativeRpc {
 	call<K extends SyncOp>(op: K, args: NativeOpArgs<K>, timeoutMs?: number): Promise<NativeResult<K>>

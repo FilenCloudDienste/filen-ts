@@ -1,10 +1,12 @@
 import { type, type Type } from "arktype"
+import path from "node:path"
 import type {
 	DesktopMountsError,
 	DesktopMountsErrorCode,
 	DesktopMountsRole,
 	DesktopMountsRoleState,
 	DesktopMountsStats,
+	DesktopSdkRef,
 	DesktopServeProtocol,
 	DesktopSyncActivity,
 	DesktopSyncActivityKind,
@@ -26,6 +28,7 @@ import type {
 	DesktopSyncStage,
 	DesktopSyncTransfer,
 	DesktopSyncUnsyncable,
+	DesktopTransferError,
 	DesktopVfsTuning
 } from "@filen/shared/desktop"
 import { SESSION_BLOB_MAX_LENGTH } from "./channels.ts"
@@ -555,17 +558,201 @@ export const MOUNTS_OPS = {
 	}
 } as const
 
-export const NATIVE_OPS = { ...SYNC_OPS, ...MOUNTS_OPS } as const
+export const transferIdSchema = type("string.uuid")
+
+export const listingIdSchema = type("string.uuid")
+
+const transferIdsArgs = type({ ids: transferIdSchema.array().moreThanLength(0).atMostLength(10_000), "+": "reject" })
+
+const transferFilesSchema = type({ total: countSchema, done: countSchema, failed: countSchema, failedBytes: countSchema, "+": "reject" })
+
+// An absolute local path on the host's platform.
+export const absolutePathSchema = localPathSchema.narrow(value => path.isAbsolute(value))
+
+// A stringifyEnvelope of a wasm-shaped SDK value (a File or Dir is under 2 KiB). It carries file keys: never logged.
+const SDK_VALUE_MAX_LENGTH = 8192
+
+const sdkWireSchema = type("string > 0").atMostLength(SDK_VALUE_MAX_LENGTH)
+
+export const sdkRefSchema = pinned<DesktopSdkRef>()(
+	type({
+		variant: type.enumerated(
+			"AnyFile.File",
+			"AnyFile.Shared",
+			"AnyFile.Linked",
+			"AnyNormalDir.Dir",
+			"AnyNormalDir.Root",
+			"AnyDirWithContext.Normal.Dir",
+			"AnyDirWithContext.Normal.Root",
+			"AnyDirWithContext.Shared.Dir",
+			"AnyDirWithContext.Shared.Root",
+			"AnyDirWithContext.Linked.Dir",
+			"AnyDirWithContext.Linked.Root"
+		),
+		value: sdkWireSchema,
+		"+": "reject"
+	})
+)
+
+export const transferErrorSchema = pinned<DesktopTransferError>()(
+	type({
+		code: type.enumerated(
+			"hostUnavailable",
+			"timeout",
+			"unauthenticated",
+			"interrupted",
+			"invalidItem",
+			"localMissing",
+			"localDenied",
+			"localFull",
+			"localInUse",
+			"storageFull",
+			"unknown"
+		),
+		"kind?": "string <= 64",
+		"message?": textSchema,
+		"+": "reject"
+	})
+)
+
+const transferConflictSchema = type("'replace' | 'keepBoth'")
+
+// downloadDirectory: the host creates a free name (keep both). downloadListed: a file of a held listing, written over
+// what is there (temp directories only).
+const transferSpecSchema = type({
+	id: transferIdSchema,
+	t: "'downloadFile'",
+	file: sdkRefSchema,
+	path: absolutePathSchema,
+	conflict: transferConflictSchema,
+	"+": "reject"
+})
+	.or({ id: transferIdSchema, t: "'downloadDirectory'", dir: sdkRefSchema, path: absolutePathSchema, "+": "reject" })
+	.or({
+		id: transferIdSchema,
+		t: "'downloadListed'",
+		listingId: listingIdSchema,
+		index: countSchema,
+		path: absolutePathSchema,
+		"+": "reject"
+	})
+	.or({ id: transferIdSchema, t: "'uploadFile'", path: absolutePathSchema, parent: sdkRefSchema, "+": "reject" })
+	.or({
+		id: transferIdSchema,
+		t: "'uploadDirectory'",
+		path: absolutePathSchema,
+		parent: sdkRefSchema,
+		name: "0 < string <= 255",
+		"+": "reject"
+	})
+
+export type NativeTransferSpec = typeof transferSpecSchema.infer
+
+const TRANSFER_SDK_MAX_LENGTH = 16 * 1024 ** 2
+
+function sdkLength(spec: NativeTransferSpec): number {
+	switch (spec.t) {
+		case "downloadFile":
+			return spec.file.value.length
+		case "downloadDirectory":
+			return spec.dir.value.length
+		case "downloadListed":
+			return 0
+		case "uploadFile":
+		case "uploadDirectory":
+			return spec.parent.value.length
+	}
+}
+
+// One call's SDK values together, from the lengths already checked: no second walk.
+function sdkValuesFit(specs: NativeTransferSpec[]): boolean {
+	let total = 0
+
+	for (const spec of specs) {
+		total += sdkLength(spec)
+	}
+
+	return total <= TRANSFER_SDK_MAX_LENGTH
+}
+
+// segments: raw remote names, the dragged item's name first. listIndex: the file's index in the held listing, null
+// for directories and for top-level file items (downloaded by ref). source: the index of the dragged item.
+export const treeEntrySchema = type({
+	segments: "string[] > 0",
+	directory: "boolean",
+	size: countSchema,
+	mtimeMs: countSchema.or("null"),
+	listIndex: countSchema.or("null"),
+	source: countSchema,
+	"+": "reject"
+})
+
+export type NativeTreeEntry = typeof treeEntrySchema.infer
+
+// The calls that run drive transfers on real paths. transfersListTree lists each directory item once
+// (listDirRecursiveWithPaths); the host keeps the files under `listingId` until released, restarted or 30 min unused.
+export const TRANSFER_OPS = {
+	transfersStart: {
+		args: type({ specs: transferSpecSchema.array().moreThanLength(0).atMostLength(10_000), "+": "reject" }).narrow(
+			(args, ctx) => sdkValuesFit(args.specs) || ctx.mustBe("SDK values of at most 16 MiB together")
+		),
+		result: done
+	},
+	transfersCancel: { args: transferIdsArgs, result: done },
+	transfersPause: { args: transferIdsArgs.merge({ paused: "boolean" }), result: done },
+	transfersListTree: {
+		args: type({
+			listingId: listingIdSchema,
+			items: type({ ref: sdkRefSchema, name: "0 < string <= 1024", "+": "reject" }).array().moreThanLength(0).atMostLength(10_000),
+			maxEntries: "1 <= number.integer <= 10000",
+			"+": "reject"
+		}),
+		result: type({ entries: treeEntrySchema.array().atMostLength(10_000), "+": "reject" }).or({ tooMany: countSchema, "+": "reject" })
+	},
+	transfersReleaseTree: { args: type({ listingId: listingIdSchema, "+": "reject" }), result: done }
+} as const
+
+export const NATIVE_OPS = { ...SYNC_OPS, ...MOUNTS_OPS, ...TRANSFER_OPS } as const
 
 export type SyncOp = keyof typeof SYNC_OPS
 
 export type MountsOp = keyof typeof MOUNTS_OPS
+
+export type TransfersOp = keyof typeof TRANSFER_OPS
 
 export type NativeOp = keyof typeof NATIVE_OPS
 
 export function isMountsOp(op: NativeOp): op is MountsOp {
 	return Object.hasOwn(MOUNTS_OPS, op)
 }
+
+export function isTransfersOp(op: NativeOp): op is TransfersOp {
+	return Object.hasOwn(TRANSFER_OPS, op)
+}
+
+const transferEventSchema = type({
+	k: "'progress'",
+	id: transferIdSchema,
+	size: countSchema,
+	bytes: countSchema,
+	files: transferFilesSchema.or("null"),
+	"+": "reject"
+}).or({
+	k: "'settled'",
+	id: transferIdSchema,
+	outcome: "'done' | 'completedWithErrors' | 'error' | 'cancelled'",
+	"error?": transferErrorSchema,
+	// The created File or Dir of an upload, wasm-shaped.
+	"uploaded?": sdkWireSchema,
+	// Where a download landed when the host picked the name.
+	"savedPath?": absolutePathSchema,
+	"+": "reject"
+})
+
+export type NativeTransferEvent = typeof transferEventSchema.infer
+
+// One host message per feed round.
+const TRANSFER_EVENTS_MAX = 20_000
 
 export type NativeOpArgs<K extends NativeOp> = (typeof NATIVE_OPS)[K]["args"]["infer"]
 
@@ -579,9 +766,13 @@ export function opResult<K extends NativeOp>(op: K): (typeof NATIVE_OPS)[K]["res
 	return NATIVE_OPS[op].result
 }
 
-// What a failed call may report: a mounts call its own codes, an engine call the sync ones.
-export function opError(op: NativeOp): Type<DesktopSyncError> | Type<DesktopMountsError> {
-	return isMountsOp(op) ? mountsErrorSchema : nativeErrorSchema
+// What a failed call may report: a mounts or transfers call its own codes, an engine call the sync ones.
+export function opError(op: NativeOp): Type<DesktopSyncError> | Type<DesktopMountsError> | Type<DesktopTransferError> {
+	if (isMountsOp(op)) {
+		return mountsErrorSchema
+	}
+
+	return isTransfersOp(op) ? transferErrorSchema : nativeErrorSchema
 }
 
 const opSchema = type.enumerated(...(Object.keys(NATIVE_OPS) as NativeOp[]))
@@ -641,13 +832,14 @@ export type NativeFatalReason = "addonLoad" | "session" | "baselineInUse" | "ope
 export type FromNative =
 	| { t: "ready"; pairs: NativePair[]; reset: boolean }
 	| { t: "reply"; id: number; ok: true; value: unknown }
-	| { t: "reply"; id: number; ok: false; error: NativeError | NativeMountsError }
+	| { t: "reply"; id: number; ok: false; error: NativeError | NativeMountsError | DesktopTransferError }
 	| { t: "overview"; pairs: NativePairRuntime[] }
 	| { t: "aggregate"; state: NativeAggregate }
 	| { t: "activity"; entries: NativeActivity[] }
 	| { t: "passEnded"; pairId: string }
 	| { t: "mounts"; status: NativeMountsStatus }
 	| { t: "mountsStats"; stats: DesktopMountsStats }
+	| { t: "transfers"; events: NativeTransferEvent[] }
 	| { t: "authRevoked" }
 	| { t: "fatal"; reason: NativeFatalReason }
 	| { t: "stopped" }
@@ -655,13 +847,20 @@ export type FromNative =
 export const fromNativeSchema = pinned<FromNative>()(
 	type({ t: "'ready'", pairs: nativePairSchema.array(), reset: "boolean", "+": "reject" })
 		.or({ t: "'reply'", id: callIdSchema, ok: "true", value: "unknown", "+": "reject" })
-		.or({ t: "'reply'", id: callIdSchema, ok: "false", error: nativeErrorSchema.or(mountsErrorSchema), "+": "reject" })
+		.or({
+			t: "'reply'",
+			id: callIdSchema,
+			ok: "false",
+			error: nativeErrorSchema.or(mountsErrorSchema).or(transferErrorSchema),
+			"+": "reject"
+		})
 		.or({ t: "'overview'", pairs: nativePairRuntimeSchema.array(), "+": "reject" })
 		.or({ t: "'aggregate'", state: "'idle' | 'syncing' | 'attention'", "+": "reject" })
 		.or({ t: "'activity'", entries: nativeActivitySchema.array(), "+": "reject" })
 		.or({ t: "'passEnded'", pairId: pairIdSchema, "+": "reject" })
 		.or({ t: "'mounts'", status: nativeMountsStatusSchema, "+": "reject" })
 		.or({ t: "'mountsStats'", stats: mountsStatsSchema, "+": "reject" })
+		.or({ t: "'transfers'", events: transferEventSchema.array().atMostLength(TRANSFER_EVENTS_MAX), "+": "reject" })
 		.or({ t: "'authRevoked'", "+": "reject" })
 		.or({ t: "'fatal'", reason: "'addonLoad' | 'session' | 'baselineInUse' | 'open'", "+": "reject" })
 		.or({ t: "'stopped'", "+": "reject" })

@@ -42,7 +42,7 @@ export interface SyncUser {
 // What the host reports that the supervisor passes on.
 export type NativeEvent = Extract<
 	FromNative,
-	{ t: "ready" | "overview" | "aggregate" | "activity" | "passEnded" | "mounts" | "mountsStats" }
+	{ t: "ready" | "overview" | "aggregate" | "activity" | "passEnded" | "mounts" | "mountsStats" | "transfers" }
 >
 
 // What a page listens to: the sync runtime, or the mounts stats.
