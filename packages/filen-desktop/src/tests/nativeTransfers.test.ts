@@ -5,14 +5,14 @@ import { parseEnvelope, stringifyEnvelope } from "@filen/shared/session"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { FEED_INTERVAL_MS } from "../native/reducer.ts"
 import { classifyTransfer, TransferCommitError } from "../native/transferErrors.ts"
+import { createTransferRegistry, type DirDownloadCallback, type DirUploadCallback, type ManagedFuture } from "../native/transfers.ts"
 import {
-	createTransferRegistry,
-	type DirDownloadCallback,
-	type DirUploadCallback,
+	type FromNative,
 	LISTING_TTL_MS,
-	type ManagedFuture
-} from "../native/transfers.ts"
-import { type FromNative, type NativeTransferEvent, type NativeTransferSpec, TRANSFER_EVENTS_MAX } from "../shared/nativeProtocol.ts"
+	type NativeTransferEvent,
+	type NativeTransferSpec,
+	TRANSFER_EVENTS_MAX
+} from "../shared/nativeProtocol.ts"
 import { memoryFs } from "./fileFakes.ts"
 import {
 	FakeManagedAbortSignal,

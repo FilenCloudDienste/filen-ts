@@ -648,9 +648,9 @@ const transferSpecSchema = type({
 
 export type NativeTransferSpec = typeof transferSpecSchema.infer
 
-const TRANSFER_SDK_MAX_LENGTH = 16 * 1024 ** 2
+export const TRANSFER_SDK_MAX_LENGTH = 16 * 1024 ** 2
 
-function sdkLength(spec: NativeTransferSpec): number {
+export function specSdkLength(spec: NativeTransferSpec): number {
 	switch (spec.t) {
 		case "downloadFile":
 			return spec.file.value.length
@@ -665,7 +665,7 @@ function sdkLength(spec: NativeTransferSpec): number {
 }
 
 // One call's SDK values together, from the lengths already checked: no second walk.
-function sdkValuesFit<T>(items: readonly T[], length: (item: T) => number): boolean {
+export function sdkValuesFit<T>(items: readonly T[], length: (item: T) => number): boolean {
 	let total = 0
 
 	for (const item of items) {
@@ -689,12 +689,15 @@ export const treeEntrySchema = type({
 
 export type NativeTreeEntry = typeof treeEntrySchema.infer
 
+// A held listing not used for this long is dropped by the host (it holds file keys in memory); main forgets it then too.
+export const LISTING_TTL_MS = 30 * 60_000
+
 // The calls that run drive transfers on real paths. transfersListTree lists each directory item once
 // (listDirRecursiveWithPaths); the host keeps the files under `listingId` until released, restarted or 30 min unused.
 export const TRANSFER_OPS = {
 	transfersStart: {
 		args: type({ specs: transferSpecSchema.array().moreThanLength(0).atMostLength(10_000), "+": "reject" }).narrow(
-			(args, ctx) => sdkValuesFit(args.specs, sdkLength) || ctx.mustBe("SDK values of at most 16 MiB together")
+			(args, ctx) => sdkValuesFit(args.specs, specSdkLength) || ctx.mustBe("SDK values of at most 16 MiB together")
 		),
 		result: done
 	},

@@ -9,6 +9,7 @@ import {
 	type NativeTransferEvent,
 	type NativeTransferSpec,
 	type NativeTreeEntry,
+	LISTING_TTL_MS,
 	SDK_VALUE_MAX_LENGTH,
 	TRANSFER_EVENTS_MAX,
 	type TransfersOp
@@ -125,9 +126,6 @@ export function transferBindings(addon: object, client: object): { sdk: Transfer
 
 	return { sdk: addon as TransferSdk, client: client as TransferClient }
 }
-
-// A listing not used for this long is dropped: it holds file keys in memory.
-export const LISTING_TTL_MS = 30 * 60_000
 
 // Per transfer, the per-item failures named in the log; the rest are only counted.
 const LOGGED_ERRORS = 20

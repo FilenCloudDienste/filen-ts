@@ -10,13 +10,21 @@ import {
 	type NativeOp,
 	type NativeOpArgs,
 	type SyncOp,
-	type ToNative
+	type ToNative,
+	type TransfersOp
 } from "../../shared/nativeProtocol.ts"
 import { errorCode } from "../atomicFile.ts"
 import { redact } from "../redact.ts"
 import { serialQueue } from "../../shared/serial.ts"
 import { createCrashHistory } from "./backoff.ts"
-import { CALL_TIMEOUT_MS, createRpc, type NativeMountsResult, type NativeResult, type NativeRpc } from "./rpc.ts"
+import {
+	CALL_TIMEOUT_MS,
+	createRpc,
+	type NativeMountsResult,
+	type NativeResult,
+	type NativeRpc,
+	type NativeTransfersResult
+} from "./rpc.ts"
 
 // A host nothing needs any more stops after this long, so a page closed and reopened keeps it.
 export const IDLE_STOP_MS = 60_000
@@ -82,6 +90,17 @@ export interface NativeSupervisor {
 	call<K extends SyncOp>(op: K, args: NativeOpArgs<K>, userId?: string): Promise<NativeResult<K>>
 	// The same for rclone. `timeoutMs` for the calls that wait long (draining an old cache).
 	callMounts<K extends MountsOp>(op: K, args: NativeOpArgs<K>, userId?: string, timeoutMs?: number): Promise<NativeMountsResult<K>>
+	// The same for drive transfers.
+	callTransfers<K extends TransfersOp>(
+		op: K,
+		args: NativeOpArgs<K>,
+		userId?: string,
+		timeoutMs?: number
+	): Promise<NativeTransfersResult<K>>
+	// A transfers call to a host that is ready now (cancel, pause, release): never starts, waits for or keeps one.
+	callTransfersIfRunning<K extends TransfersOp>(op: K, args: NativeOpArgs<K>, userId?: string): Promise<NativeTransfersResult<K>>
+	// Counts the host's entries into `running`: what a running host acked belongs to the generation it ran in.
+	generation(): number
 	// A page shows the overview (or the mounts stats): the host streams it and stays up.
 	subscribe(on: boolean, topic?: NativeTopic): void
 	// The network may be back (a wake from sleep, the page going online): a running host's socket cuts a reconnect
@@ -130,6 +149,7 @@ export function createNativeSupervisor(deps: NativeSupervisorDeps): NativeSuperv
 	const serial = serialQueue()
 	const crashes = createCrashHistory()
 	let state: DesktopSyncHostState = { state: "off" }
+	let generation = 0
 	let current: Child | null = null
 	const topics: Record<NativeTopic, boolean> = { overview: false, mounts: false }
 	let subscribed = false
@@ -147,6 +167,10 @@ export function createNativeSupervisor(deps: NativeSupervisorDeps): NativeSuperv
 	function setState(next: DesktopSyncHostState): void {
 		if (JSON.stringify(next) === JSON.stringify(state)) {
 			return
+		}
+
+		if (next.state === "running" && state.state !== "running") {
+			generation++
 		}
 
 		state = next
@@ -598,6 +622,15 @@ export function createNativeSupervisor(deps: NativeSupervisorDeps): NativeSuperv
 		},
 		call: (op, args, userId) => invoke(op, userId, rpc => rpc.call(op, args)),
 		callMounts: (op, args, userId, timeoutMs) => invoke(op, userId, rpc => rpc.callMounts(op, args, timeoutMs)),
+		callTransfers: (op, args, userId, timeoutMs) => invoke(op, userId, rpc => rpc.callTransfers(op, args, timeoutMs)),
+		callTransfersIfRunning: (op, args, userId) => {
+			const child = current
+
+			return child?.ready === true && !child.revoked && (userId === undefined || child.userId === userId)
+				? child.rpc.callTransfers(op, args)
+				: Promise.resolve(UNAVAILABLE)
+		},
+		generation: () => generation,
 		subscribe: (on, topic = "overview") => {
 			if (on === topics[topic]) {
 				return

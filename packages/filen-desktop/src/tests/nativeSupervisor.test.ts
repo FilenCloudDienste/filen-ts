@@ -557,6 +557,100 @@ describe("createNativeSupervisor", () => {
 		expect(forks).toHaveLength(1)
 	})
 
+	it("stays up while transfers run and stops once the last settles and ensure runs", async () => {
+		const { supervisor, deps, last } = harness()
+		let transfers = 1
+
+		deps.demand.mockImplementation(() => Promise.resolve(transfers > 0))
+		supervisor.ensure("launch")
+		await settle()
+		ready(last())
+		await settle(IDLE_STOP_MS * 2)
+		expect(supervisor.state()).toEqual({ state: "running" })
+
+		transfers = 0
+		supervisor.ensure("transfers settled")
+		await settle(IDLE_STOP_MS)
+
+		expect(last().sent.at(-1)).toEqual({ t: "shutdown" })
+		expect(supervisor.state()).toEqual({ state: "off" })
+	})
+
+	it("forwards transfers messages to onMessage", async () => {
+		const { supervisor, deps, last } = harness()
+
+		supervisor.ensure("launch")
+		await settle()
+		ready(last())
+
+		const message = { t: "transfers", events: [] } as const
+
+		last().reply(message)
+
+		expect(deps.onMessage).toHaveBeenLastCalledWith(message, "1")
+	})
+
+	it("a transfers call takes the transfers errors", async () => {
+		const { supervisor, last } = harness()
+
+		supervisor.ensure("launch")
+		await settle()
+		ready(last())
+
+		const result = supervisor.callTransfers("transfersCancel", { ids: [ROOT] })
+
+		await settle()
+		last().reply({ t: "reply", id: last().calls()[0]?.id ?? -1, ok: false, error: { code: "invalidItem" } })
+
+		expect(await result).toEqual({ ok: false, error: { code: "invalidItem" } })
+	})
+
+	it("callTransfersIfRunning never starts the host", async () => {
+		const { supervisor, deps, forks, last } = harness()
+
+		deps.demand.mockResolvedValue(false)
+
+		expect(await supervisor.callTransfersIfRunning("transfersCancel", { ids: [ROOT] })).toEqual({
+			ok: false,
+			error: { code: "hostUnavailable" }
+		})
+		await settle()
+		expect(forks).toEqual([])
+
+		deps.demand.mockResolvedValue(true)
+		supervisor.ensure("launch")
+		await settle()
+		ready(last())
+
+		const result = supervisor.callTransfersIfRunning("transfersCancel", { ids: [ROOT] })
+
+		expect(await supervisor.callTransfersIfRunning("transfersCancel", { ids: [ROOT] }, "2")).toEqual({
+			ok: false,
+			error: { code: "hostUnavailable" }
+		})
+		last().reply({ t: "reply", id: last().calls()[0]?.id ?? -1, ok: true, value: null })
+		expect(await result).toEqual({ ok: true, value: null })
+		expect(last().calls()).toHaveLength(1)
+	})
+
+	it("generation increments on each running entry", async () => {
+		const { supervisor, last } = harness()
+
+		expect(supervisor.generation()).toBe(0)
+		supervisor.ensure("launch")
+		await settle()
+		expect(supervisor.generation()).toBe(0)
+		ready(last())
+		expect(supervisor.generation()).toBe(1)
+		ready(last())
+		expect(supervisor.generation()).toBe(1)
+		last().crash()
+		await settle(BACKOFF_BASE_MS)
+		ready(last())
+
+		expect(supervisor.generation()).toBe(2)
+	})
+
 	it("writes the host's output redacted", async () => {
 		const { supervisor, deps, last } = harness()
 

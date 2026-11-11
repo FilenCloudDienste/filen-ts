@@ -1,4 +1,4 @@
-import type { DesktopFileProvider, DesktopMounts, DesktopSessionRead, DesktopSync } from "@filen/shared/desktop"
+import type { DesktopFileProvider, DesktopMounts, DesktopSessionRead, DesktopSync, DesktopTransfers } from "@filen/shared/desktop"
 
 // IPC channel names shared by main and the preload; the renderer never sees them.
 export const CHANNELS = {
@@ -44,7 +44,10 @@ export const CHANNELS = {
 	syncOpenPair: "sync:open-pair",
 	mountsSubscribe: "mounts:subscribe",
 	mountsOverview: "mounts:overview",
-	mountsStats: "mounts:stats"
+	mountsStats: "mounts:stats",
+	transfersSubscribe: "transfers:subscribe",
+	// Payload: DesktopTransferEvent[], what one host round (or one service step) changed, in order.
+	transfersEvents: "transfers:events"
 } as const
 
 // The sync bridge's requests, each answered on its own channel (syncChannel).
@@ -115,6 +118,25 @@ export type MountsCall = (typeof MOUNTS_CALLS)[number]
 
 export function mountsChannel(call: MountsCall): string {
 	return `mounts:call:${call}`
+}
+
+// The transfers bridge's requests, each answered on its own channel (transfersChannel). The page's Files reach main as
+// paths (`upload` takes absolute paths); `onEvents` is the subscribe channel.
+export const TRANSFERS_CALLS = [
+	"download",
+	"upload",
+	"pickUpload",
+	"cancel",
+	"setPaused",
+	"reveal",
+	"open",
+	"chooseDownloadDirectory"
+] as const satisfies readonly (keyof DesktopTransfers)[]
+
+export type TransfersCall = (typeof TRANSFERS_CALLS)[number]
+
+export function transfersChannel(call: TransfersCall): string {
+	return `transfers:call:${call}`
 }
 
 // The File Provider bridge's requests, each answered on its own channel (fileProviderChannel).

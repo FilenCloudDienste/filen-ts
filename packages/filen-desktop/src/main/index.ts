@@ -12,6 +12,7 @@ import {
 	type OpenDialogOptions,
 	type OpenDialogReturnValue,
 	nativeTheme,
+	type SaveDialogOptions,
 	Notification,
 	powerMonitor,
 	protocol,
@@ -24,7 +25,7 @@ import {
 	type WebFrameMain
 } from "electron"
 import { existsSync, readFileSync } from "node:fs"
-import { mkdir, readdir, rm, writeFile } from "node:fs/promises"
+import { lstat, mkdir, readdir, rm, stat, unlink, writeFile } from "node:fs/promises"
 import { lookup } from "node:dns/promises"
 import { createRequire } from "node:module"
 import os from "node:os"
@@ -122,6 +123,9 @@ import {
 	trayStatusLines,
 	trayTooltip
 } from "./tray.ts"
+import { registerTransfersIpc } from "./transfers/ipc.ts"
+import { createStagingJournal } from "./transfers/journal.ts"
+import { createTransfersService } from "./transfers/service.ts"
 import { startUpdater, testUpdateFeed, type Updater, type UpdaterEngine } from "./updater.ts"
 import { drawsOwnBorder, initialColors, titleBarColorsSchema, windowOptions } from "./window.ts"
 
@@ -246,6 +250,9 @@ const signOutFlow = createSignOut({
 		fileProvider: userId => fileProvider.signedOut(userId),
 		mounts: userId => mountsService.signOut(userId),
 		stopHost: async () => {
+			// Before the host stops: its rows end cancelled, never interrupted.
+			transfersService.signedOut()
+
 			const stopped = nativeSupervisor.signedOut()
 
 			syncService.signedOut()
@@ -513,6 +520,7 @@ const nativeSupervisor = createNativeSupervisor({
 	holdRemotes: async userId => heldRemotes((await syncStoreFor(userId)).get()),
 	demand: userId =>
 		anyDemand([
+			() => transfersService.active(userId) > 0,
 			async () => (await syncStoreFor(userId)).hasPairs(),
 			async () => (await migrationStash.pending(userId, "sync")) !== undefined,
 			async () => (await mountsStoreFor(userId)).anyEnabled(),
@@ -520,6 +528,12 @@ const nativeSupervisor = createNativeSupervisor({
 		]),
 	log: { info, warn },
 	onMessage: (message, userId) => {
+		if (message.t === "transfers") {
+			transfersService.nativeEvent(message, userId)
+
+			return
+		}
+
 		if (message.t === "ready" || message.t === "mounts" || message.t === "mountsStats") {
 			mountsService.nativeEvent(message, userId)
 		}
@@ -546,6 +560,7 @@ const nativeSupervisor = createNativeSupervisor({
 
 		syncService.hostChanged(state)
 		mountsService.hostChanged(state)
+		transfersService.hostChanged(state, nativeSupervisor.generation())
 		applyTray()
 	},
 	onRevoked: userId => {
@@ -574,6 +589,52 @@ async function showOpenDialog(options: OpenDialogOptions): Promise<OpenDialogRet
 		throw error
 	}
 }
+
+async function showSaveDialog(options: SaveDialogOptions): Promise<string | null> {
+	const result = await (mainWindow === null ? dialog.showSaveDialog(options) : dialog.showSaveDialog(mainWindow, options))
+
+	return result.canceled || result.filePath.length === 0 ? null : result.filePath
+}
+
+// The staging files of downloads in flight, swept at startup after an unclean exit.
+const transfersJournal = createStagingJournal({
+	file: atomicFile(path.join(userDataPath, "transfers-staging.json")),
+	fs: { lstat, unlink, readdir: dir => readdir(dir, { withFileTypes: true }) },
+	schedule: run => {
+		setImmediate(run)
+	},
+	log: { warn }
+})
+
+const transfersService = createTransfersService({
+	supervisor: nativeSupervisor,
+	prefs: {
+		get: currentPrefs,
+		setDownloadDirectory: async downloadDirectory => (await prefsLoading).setDownloadDirectory(downloadDirectory)
+	},
+	dialogs: {
+		save: showSaveDialog,
+		open: async options => {
+			const result = await showOpenDialog(options)
+
+			return result.canceled || result.filePaths.length === 0 ? null : result.filePaths
+		}
+	},
+	fs: {
+		stat: target => stat(target).catch(() => null),
+		exists: target =>
+			lstat(target).then(
+				() => true,
+				(error: unknown) => errorCode(error) !== "ENOENT"
+			)
+	},
+	shell: { showItemInFolder: target => shell.showItemInFolder(target), openPath: target => shell.openPath(target) },
+	journal: transfersJournal,
+	downloadsDir: () => app.getPath("downloads"),
+	platform: process.platform,
+	now: Date.now,
+	log: { info, warn }
+})
 
 // Where neither a sync pair nor the network drive may be.
 function reservedDirectories() {
@@ -1094,10 +1155,12 @@ function createWindow(): void {
 	window.webContents.on("did-navigate", () => {
 		syncService.pageGone(contentsId)
 		mountsService.pageGone(contentsId)
+		transfersService.pageGone(contentsId)
 	})
 	window.webContents.on("destroyed", () => {
 		syncService.pageGone(contentsId)
 		mountsService.pageGone(contentsId)
+		transfersService.pageGone(contentsId)
 	})
 
 	window.webContents.on("dom-ready", () => {
@@ -1902,6 +1965,7 @@ if (!instanceLock.held) {
 
 	registerSyncIpc(ipcMain, syncService, url => isTrustedSender(url, APP_ORIGIN))
 	registerMountsIpc(ipcMain, mountsService, url => isTrustedSender(url, APP_ORIGIN))
+	registerTransfersIpc(ipcMain, transfersService, url => isTrustedSender(url, APP_ORIGIN))
 	registerFileProviderIpc(ipcMain, fileProvider, url => isTrustedSender(url, APP_ORIGIN))
 	registerSessionRecoveryIpc(ipcMain, discardUnreadableSession, url => isTrustedSender(url, APP_ORIGIN))
 	// The session exists only after ready, which every page call comes after.
@@ -2018,6 +2082,9 @@ if (!instanceLock.held) {
 
 			// The migration may have stored a lock-after choice, past the prefs handler.
 			lockInactivity.rearm()
+
+			// What an unclean exit left of downloads in flight, before a host can start new ones beside it.
+			await transfersJournal.sweep()
 
 			started = true
 			nativeSupervisor.ensure("launch")

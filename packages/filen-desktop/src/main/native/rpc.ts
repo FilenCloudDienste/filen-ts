@@ -4,7 +4,8 @@ import type {
 	DesktopMountsResult,
 	DesktopSyncError,
 	DesktopSyncResult,
-	DesktopTransferError
+	DesktopTransferError,
+	DesktopTransferResult
 } from "@filen/shared/desktop"
 import {
 	type FromNative,
@@ -15,7 +16,8 @@ import {
 	type NativeOpResult,
 	opError,
 	opResult,
-	type SyncOp
+	type SyncOp,
+	type TransfersOp
 } from "../../shared/nativeProtocol.ts"
 
 export const CALL_TIMEOUT_MS = 120_000
@@ -29,12 +31,15 @@ export type NativeResult<K extends SyncOp> = DesktopSyncResult<NativeOpResult<K>
 
 export type NativeMountsResult<K extends MountsOp> = DesktopMountsResult<NativeOpResult<K>>
 
+export type NativeTransfersResult<K extends TransfersOp> = DesktopTransferResult<NativeOpResult<K>>
+
 // Any family's result, before it is narrowed to the op's own.
 type AnyResult = { ok: true; value: unknown } | { ok: false; error: DesktopSyncError | DesktopMountsError | DesktopTransferError }
 
 export interface NativeRpc {
 	call<K extends SyncOp>(op: K, args: NativeOpArgs<K>, timeoutMs?: number): Promise<NativeResult<K>>
 	callMounts<K extends MountsOp>(op: K, args: NativeOpArgs<K>, timeoutMs?: number): Promise<NativeMountsResult<K>>
+	callTransfers<K extends TransfersOp>(op: K, args: NativeOpArgs<K>, timeoutMs?: number): Promise<NativeTransfersResult<K>>
 	// false: the value is not what the call returns, so the host is broken. A reply nothing waits for (its call timed
 	// out) is dropped.
 	settle(reply: NativeReply): boolean
@@ -81,6 +86,8 @@ export function createRpc(send: (call: NativeCall) => void): NativeRpc {
 			request(op, args, timeoutMs) as Promise<NativeResult<K>>,
 		callMounts: <K extends MountsOp>(op: K, args: NativeOpArgs<K>, timeoutMs = CALL_TIMEOUT_MS) =>
 			request(op, args, timeoutMs) as Promise<NativeMountsResult<K>>,
+		callTransfers: <K extends TransfersOp>(op: K, args: NativeOpArgs<K>, timeoutMs = CALL_TIMEOUT_MS) =>
+			request(op, args, timeoutMs) as Promise<NativeTransfersResult<K>>,
 		settle: reply => {
 			const entry = waiting.get(reply.id)
 
