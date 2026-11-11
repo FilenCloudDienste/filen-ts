@@ -7,7 +7,6 @@ import path from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { macAddonOutput } from "../../scripts/buildMacAddon.ts"
 import { createQuarantine, type MacAddon } from "../native/quarantine.ts"
-import { quietestStall } from "./eventLoop.ts"
 
 // The built addon for this machine, loaded for real: run `node scripts/buildMacAddon.ts --dev` first.
 const output = process.platform === "darwin" && (process.arch === "arm64" || process.arch === "x64") ? macAddonOutput(process.arch) : null
@@ -74,9 +73,19 @@ describe.skipIf(!built)("filen-mac.node", () => {
 		}
 
 		const quarantine = createQuarantine({ platform: "darwin", macAddon: addon(), fs: { writeFile }, log: { warn: () => undefined } })
+		let settled = false
+		const marked = quarantine.mark(files, []).then(() => {
+			settled = true
+		})
 
-		// "A few ms", with room for a loaded test machine.
-		expect(await quietestStall(10, () => quarantine.mark(files, []))).toBeLessThan(10)
+		// Work done on the JS thread would settle every batch in microtasks, before the next loop turn.
+		await new Promise(resolve => setImmediate(resolve))
+
+		expect(settled).toBe(false)
+
+		await marked
+
+		expect(quarantineOf(files[0] ?? "")).toMatch(QUARANTINE)
 		expect(quarantineOf(files[9_999] ?? "")).toMatch(QUARANTINE)
 	}, 120_000)
 })

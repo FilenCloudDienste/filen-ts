@@ -1,9 +1,5 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises"
-import { tmpdir } from "node:os"
-import path from "node:path"
 import { describe, expect, it, vi } from "vitest"
 import { createQuarantine, MAC_QUARANTINE_BATCH, ZONE_IDENTIFIER, ZONE_WRITES_IN_FLIGHT, zoneIdentifierPath } from "../native/quarantine.ts"
-import { quietestStall } from "./eventLoop.ts"
 
 // The addon's rejection: the first failure's message and how many paths of the call failed.
 function quarantineFailed(message: string, failures: number): Error {
@@ -25,9 +21,6 @@ function setup(platform: NodeJS.Platform, options: { addon?: boolean; fail?: str
 
 	return { quarantine, macAddon, writeFile, warn }
 }
-
-// "A few ms", with room for a loaded test machine.
-const STALL_MS = 10
 
 describe("createQuarantine", () => {
 	it("win32 writes ZoneId=3 into each file's Zone.Identifier stream and skips directories", async () => {
@@ -117,18 +110,41 @@ describe("createQuarantine", () => {
 		expect(mostInFlight).toBe(ZONE_WRITES_IN_FLIGHT)
 	})
 
-	it("win32 marks a 10k-file batch without blocking the event loop", async () => {
-		const directory = await mkdtemp(path.join(tmpdir(), "filen-zone-"))
+	it("win32 starts a bounded slice of a 10k-file batch at a time and returns before any write lands", async () => {
+		const { quarantine, writeFile: write } = setup("win32")
+		const pending: (() => void)[] = []
 
-		try {
-			// APFS and ext4 take the stream suffix as part of a file name, so real writes stand in for NTFS here.
-			const quarantine = createQuarantine({ platform: "win32", macAddon: null, fs: { writeFile }, log: { warn: vi.fn() } })
-			const files = Array.from({ length: 10_000 }, (_, index) => path.join(directory, String(index)))
+		write.mockImplementation(() => new Promise<void>(resolve => pending.push(resolve)))
 
-			expect(await quietestStall(STALL_MS, () => quarantine.mark(files, []))).toBeLessThan(STALL_MS)
-		} finally {
-			await rm(directory, { recursive: true, force: true })
+		let settled = false
+		const marked = quarantine
+			.mark(
+				Array.from({ length: 10_000 }, (_, index) => `C:\\d\\${String(index)}`),
+				[]
+			)
+			.then(() => {
+				settled = true
+			})
+
+		expect(write).toHaveBeenCalledTimes(ZONE_WRITES_IN_FLIGHT)
+
+		pending.shift()?.()
+		await new Promise(resolve => setImmediate(resolve))
+
+		expect(write).toHaveBeenCalledTimes(ZONE_WRITES_IN_FLIGHT + 1)
+		expect(settled).toBe(false)
+
+		while (!settled) {
+			for (const release of pending.splice(0)) {
+				release()
+			}
+
+			await new Promise(resolve => setImmediate(resolve))
 		}
+
+		await marked
+
+		expect(write).toHaveBeenCalledTimes(10_000)
 	})
 
 	it("linux marks nothing", async () => {

@@ -31,7 +31,7 @@ import type {
 	DesktopTransferError,
 	DesktopVfsTuning
 } from "@filen/shared/desktop"
-import { SESSION_BLOB_MAX_LENGTH } from "./channels.ts"
+import { SESSION_BLOB_MAX_LENGTH, TRANSFER_ITEMS_MAX } from "./channels.ts"
 
 // The messages between main and the native host (the utility process that owns the sync engine), validated on both
 // ends. Plain JSON-safe values only: pair ids travel as decimal strings, bigints exist only inside the host.
@@ -562,7 +562,7 @@ export const transferIdSchema = type("string.uuid")
 
 export const listingIdSchema = type("string.uuid")
 
-const transferIdsArgs = type({ ids: transferIdSchema.array().moreThanLength(0).atMostLength(10_000), "+": "reject" })
+const transferIdsArgs = type({ ids: transferIdSchema.array().moreThanLength(0).atMostLength(TRANSFER_ITEMS_MAX), "+": "reject" })
 
 const transferFilesSchema = type({ total: countSchema, done: countSchema, failed: countSchema, failedBytes: countSchema, "+": "reject" })
 
@@ -696,7 +696,7 @@ export const LISTING_TTL_MS = 30 * 60_000
 // (listDirRecursiveWithPaths); the host keeps the files under `listingId` until released, restarted or 30 min unused.
 export const TRANSFER_OPS = {
 	transfersStart: {
-		args: type({ specs: transferSpecSchema.array().moreThanLength(0).atMostLength(10_000), "+": "reject" }).narrow(
+		args: type({ specs: transferSpecSchema.array().moreThanLength(0).atMostLength(TRANSFER_ITEMS_MAX), "+": "reject" }).narrow(
 			(args, ctx) => sdkValuesFit(args.specs, specSdkLength) || ctx.mustBe("SDK values of at most 16 MiB together")
 		),
 		result: done
@@ -706,13 +706,19 @@ export const TRANSFER_OPS = {
 	transfersListTree: {
 		args: type({
 			listingId: listingIdSchema,
-			items: type({ ref: sdkRefSchema, name: "0 < string <= 1024", "+": "reject" }).array().moreThanLength(0).atMostLength(10_000),
+			items: type({ ref: sdkRefSchema, name: "0 < string <= 1024", "+": "reject" })
+				.array()
+				.moreThanLength(0)
+				.atMostLength(TRANSFER_ITEMS_MAX),
 			maxEntries: "1 <= number.integer <= 10000",
 			"+": "reject"
 		}).narrow(
 			(args, ctx) => sdkValuesFit(args.items, item => item.ref.value.length) || ctx.mustBe("SDK values of at most 16 MiB together")
 		),
-		result: type({ entries: treeEntrySchema.array().atMostLength(10_000), "+": "reject" }).or({ tooMany: countSchema, "+": "reject" })
+		result: type({ entries: treeEntrySchema.array().atMostLength(TRANSFER_ITEMS_MAX), "+": "reject" }).or({
+			tooMany: countSchema,
+			"+": "reject"
+		})
 	},
 	transfersReleaseTree: { args: type({ listingId: listingIdSchema, "+": "reject" }), result: done }
 } as const

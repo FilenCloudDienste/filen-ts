@@ -1,5 +1,7 @@
-import { describe, expect, it } from "vitest"
-import { directoryRootOf, uploadPaths } from "../preload/uploadPaths.ts"
+import { describe, expect, it, vi } from "vitest"
+import type { DesktopTransferResult, DesktopUploadStart } from "@filen/shared/desktop"
+import { directoryRootOf, uploadInCalls, uploadPaths } from "../preload/uploadPaths.ts"
+import { TRANSFER_ITEMS_MAX } from "../shared/channels.ts"
 
 // A File as the preload sees it: `path` stands in for what webUtils.getPathForFile answers ("" when it has none).
 interface TestFile {
@@ -63,5 +65,40 @@ describe("directoryRootOf", () => {
 		expect(directoryRootOf([file("/x/a.txt", "a.txt")], pathOf)).toBeNull()
 		expect(directoryRootOf([file("/x/other/a.txt", "dir/a.txt")], pathOf)).toBeNull()
 		expect(directoryRootOf([file("/x/subdir/a.txt", "dir/a.txt")], pathOf)).toBeNull()
+	})
+})
+
+describe("uploadInCalls", () => {
+	const started = (ids: string[], skipped: number[] = []): DesktopTransferResult<DesktopUploadStart> => ({
+		ok: true,
+		value: { status: "started", ids, skipped }
+	})
+	const paths = Array.from({ length: TRANSFER_ITEMS_MAX * 2 + 1 }, (_, index) => `/d/${String(index)}`)
+
+	it("sends one call per TRANSFER_ITEMS_MAX paths and joins their ids and skipped indexes", async () => {
+		const call = vi.fn((chunk: string[]) => Promise.resolve(started([chunk[0] ?? ""], [0])))
+		const cancel = vi.fn()
+
+		expect(await uploadInCalls(paths, call, cancel)).toEqual(
+			started(
+				["/d/0", `/d/${String(TRANSFER_ITEMS_MAX)}`, `/d/${String(TRANSFER_ITEMS_MAX * 2)}`],
+				[0, TRANSFER_ITEMS_MAX, TRANSFER_ITEMS_MAX * 2]
+			)
+		)
+		expect(call.mock.calls.map(([chunk]) => chunk.length)).toEqual([TRANSFER_ITEMS_MAX, TRANSFER_ITEMS_MAX, 1])
+		expect(cancel).not.toHaveBeenCalled()
+	})
+
+	it("a failed call cancels what the earlier calls started and answers its failure", async () => {
+		const failure: DesktopTransferResult<DesktopUploadStart> = { ok: false, error: { code: "hostUnavailable" } }
+		const call = vi
+			.fn()
+			.mockResolvedValueOnce(started(["a", "b"]))
+			.mockResolvedValueOnce(failure)
+		const cancel = vi.fn()
+
+		expect(await uploadInCalls(paths, call, cancel)).toEqual(failure)
+		expect(call).toHaveBeenCalledTimes(2)
+		expect(cancel).toHaveBeenCalledWith(["a", "b"])
 	})
 })

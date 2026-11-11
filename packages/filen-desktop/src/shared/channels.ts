@@ -135,6 +135,9 @@ export const TRANSFERS_CALLS = [
 
 export type TransfersCall = (typeof TRANSFERS_CALLS)[number]
 
+// Items or ids one transfers call (and one host transfers op) may carry.
+export const TRANSFER_ITEMS_MAX = 10_000
+
 export function transfersChannel(call: TransfersCall): string {
 	return `transfers:call:${call}`
 }

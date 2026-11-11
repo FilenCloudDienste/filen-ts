@@ -19,7 +19,7 @@ import type {
 	DesktopUploadStart
 } from "@filen/shared/desktop"
 import { localCollisionKey, localName, type LocalPlatform } from "@filen/shared/localName"
-import { CHANNELS } from "../../shared/channels.ts"
+import { CHANNELS, TRANSFER_ITEMS_MAX } from "../../shared/channels.ts"
 import {
 	type FromNative,
 	LISTING_TTL_MS,
@@ -198,9 +198,10 @@ function fileUuidOf(ref: DesktopSdkRef): string | null {
 	}
 }
 
-// Specs in host calls of at most the protocol's SDK size each (usually one; an upload repeats its parent per spec).
+// Specs in host calls of at most the protocol's count and SDK size each (usually one; an upload repeats its parent per
+// spec).
 function batches(specs: readonly NativeTransferSpec[]): NativeTransferSpec[][] {
-	if (sdkValuesFit(specs, specSdkLength)) {
+	if (specs.length <= TRANSFER_ITEMS_MAX && sdkValuesFit(specs, specSdkLength)) {
 		return [[...specs]]
 	}
 
@@ -211,7 +212,7 @@ function batches(specs: readonly NativeTransferSpec[]): NativeTransferSpec[][] {
 	for (const spec of specs) {
 		const size = specSdkLength(spec)
 
-		if (batch.length > 0 && length + size > TRANSFER_SDK_MAX_LENGTH) {
+		if (batch.length === TRANSFER_ITEMS_MAX || (batch.length > 0 && length + size > TRANSFER_SDK_MAX_LENGTH)) {
 			result.push(batch)
 			batch = []
 			length = 0

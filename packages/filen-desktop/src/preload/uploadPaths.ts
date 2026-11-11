@@ -1,3 +1,6 @@
+import type { DesktopTransferResult, DesktopUploadStart } from "@filen/shared/desktop"
+import { TRANSFER_ITEMS_MAX } from "../shared/channels.ts"
+
 // The local paths of Files the page hands to `transfers.upload`. `pathOf` is webUtils.getPathForFile, which answers ""
 // for a File without one (built in the page) and throws for anything that is not a File.
 
@@ -64,4 +67,32 @@ export function directoryRootOf<F extends { readonly webkitRelativePath: string 
 	}
 
 	return root
+}
+
+// Main takes TRANSFER_ITEMS_MAX paths per call; more go in calls of that size, one after another, all or nothing as one
+// call is: a failed call cancels what the earlier calls started. `skipped` indexes into all of `paths`.
+export async function uploadInCalls(
+	paths: readonly string[],
+	call: (paths: string[]) => Promise<DesktopTransferResult<DesktopUploadStart>>,
+	cancel: (ids: string[]) => void
+): Promise<DesktopTransferResult<DesktopUploadStart>> {
+	const ids: string[] = []
+	const skipped: number[] = []
+
+	for (let start = 0; start < paths.length; start += TRANSFER_ITEMS_MAX) {
+		const result = await call(paths.slice(start, start + TRANSFER_ITEMS_MAX))
+
+		if (!result.ok || result.value.status !== "started") {
+			for (let first = 0; first < ids.length; first += TRANSFER_ITEMS_MAX) {
+				cancel(ids.slice(first, first + TRANSFER_ITEMS_MAX))
+			}
+
+			return result
+		}
+
+		ids.push(...result.value.ids)
+		skipped.push(...result.value.skipped.map(index => start + index))
+	}
+
+	return { ok: true, value: { status: "started", ids, skipped } }
 }

@@ -1,13 +1,11 @@
 import { type } from "arktype"
 import type { DesktopDownloadItem, DesktopTransferKind, DesktopUploadParent } from "@filen/shared/desktop"
-import { CHANNELS, type TransfersCall, transfersChannel } from "../../shared/channels.ts"
+import { CHANNELS, TRANSFER_ITEMS_MAX, type TransfersCall, transfersChannel } from "../../shared/channels.ts"
 import { absolutePathSchema, countSchema, pinned, sdkRefSchema, sdkValuesFit, transferIdSchema } from "../../shared/nativeProtocol.ts"
 import { type CheckedCall, checkedCalls, type IpcMain, pageOf, registerCalls } from "../pages.ts"
 import type { TransfersService } from "./service.ts"
 
-// What one call may carry, as the host's own limits: 10,000 items, SDK values of 16 MiB together.
-const ITEMS_MAX = 10_000
-
+// What one call may carry, as the host's own limits: TRANSFER_ITEMS_MAX items, SDK values of 16 MiB together.
 const kindSchema = pinned<DesktopTransferKind>()(type("'file' | 'directory'"))
 
 const itemSchema = pinned<DesktopDownloadItem>()(
@@ -17,12 +15,12 @@ const itemSchema = pinned<DesktopDownloadItem>()(
 const itemsSchema = itemSchema
 	.array()
 	.moreThanLength(0)
-	.atMostLength(ITEMS_MAX)
+	.atMostLength(TRANSFER_ITEMS_MAX)
 	.narrow((items, ctx) => sdkValuesFit(items, item => item.ref.value.length) || ctx.mustBe("SDK values of at most 16 MiB together"))
 
 const parentSchema = pinned<DesktopUploadParent>()(type({ uuid: "string.uuid", ref: sdkRefSchema, "+": "reject" }))
 
-const idsSchema = transferIdSchema.array().moreThanLength(0).atMostLength(ITEMS_MAX)
+const idsSchema = transferIdSchema.array().moreThanLength(0).atMostLength(TRANSFER_ITEMS_MAX)
 
 const call = checkedCalls<TransfersService>("transfers")
 
@@ -36,7 +34,7 @@ const CALLS: Record<TransfersCall, CheckedCall<TransfersService>> = {
 		})
 	),
 	upload: call(
-		type([absolutePathSchema.array().moreThanLength(0).atMostLength(ITEMS_MAX), parentSchema]),
+		type([absolutePathSchema.array().moreThanLength(0).atMostLength(TRANSFER_ITEMS_MAX), parentSchema]),
 		(service, _page, [paths, parent]) => service.startUpload({ paths, parent, origin: "page" })
 	),
 	pickUpload: call(type([kindSchema, parentSchema]), (service, _page, [kind, parent]) => service.pickUpload(kind, parent)),

@@ -5,7 +5,7 @@ import { stringifyEnvelope } from "@filen/shared/session"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { DEFAULT_PREFS } from "../main/prefs.ts"
 import { createTransfersService, type DownloadWatch, type NativeDownloadItem } from "../main/transfers/service.ts"
-import { CHANNELS } from "../shared/channels.ts"
+import { CHANNELS, TRANSFER_ITEMS_MAX } from "../shared/channels.ts"
 import {
 	type FromNative,
 	LISTING_TTL_MS,
@@ -1045,6 +1045,20 @@ describe("transfers service: reveal, open, uploads, directory pref", () => {
 
 		host(acked.map(id => ({ k: "settled", id, outcome: "cancelled" })))
 		expect(service.active()).toBe(0)
+	})
+
+	it("more picked paths than one host call takes go in calls of TRANSFER_ITEMS_MAX specs", async () => {
+		const { service, dialogs, disk, startCalls } = setup()
+		const paths = Array.from({ length: TRANSFER_ITEMS_MAX + 1 }, (_, n) => path.resolve("up", `${String(n)}.txt`))
+
+		for (const file of paths) {
+			disk.set(file, "file")
+		}
+
+		dialogs.open.mockResolvedValue(paths)
+		await service.pickUpload("file", PARENT)
+
+		expect(startCalls().map(call => call.specs.length)).toEqual([TRANSFER_ITEMS_MAX, 1])
 	})
 
 	it("pickUpload opens a native dialog and uploads its paths", async () => {

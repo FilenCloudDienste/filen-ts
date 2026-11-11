@@ -31,7 +31,7 @@ import {
 	transfersChannel,
 	VERSION_ARG_PREFIX
 } from "../shared/channels.ts"
-import { directoryRootOf, uploadPaths } from "./uploadPaths.ts"
+import { directoryRootOf, uploadInCalls, uploadPaths } from "./uploadPaths.ts"
 
 // The sandboxed preload's process object carries the platform and argv but no Node typings.
 declare const process: { readonly platform: DesktopPlatform; readonly argv: readonly string[] }
@@ -212,18 +212,25 @@ function pathOf(file: File): string {
 // Files reach main as their paths. Main answers `skipped` as indexes into the paths, mapped back to the Files here;
 // `asDirectory` sends one path, the picked directory, which stands for every File.
 const upload: DesktopTransfers["upload"] = async (files, parent, options) => {
-	const { paths, indexes, skipped } =
-		options?.asDirectory === true ? { paths: [directoryRootOf(files, pathOf)], indexes: [], skipped: [] } : uploadPaths(files, pathOf)
+	const root = options?.asDirectory === true ? directoryRootOf(files, pathOf) : undefined
 
-	if (paths[0] === null) {
+	if (root === null) {
 		return { ok: false, error: { code: "invalidItem" } }
 	}
+
+	const { paths, indexes, skipped } = root === undefined ? uploadPaths(files, pathOf) : { paths: [root], indexes: [], skipped: [] }
 
 	if (paths.length === 0) {
 		return { ok: true, value: { status: "started", ids: [], skipped } }
 	}
 
-	const result = (await ipcRenderer.invoke(transfersChannel("upload"), paths, parent)) as DesktopTransferResult<DesktopUploadStart>
+	const result = await uploadInCalls(
+		paths,
+		chunk => ipcRenderer.invoke(transfersChannel("upload"), chunk, parent) as Promise<DesktopTransferResult<DesktopUploadStart>>,
+		ids => {
+			transfersInvoke("cancel", ids).catch(() => undefined)
+		}
+	)
 
 	if (!result.ok || result.value.status !== "started") {
 		return result
