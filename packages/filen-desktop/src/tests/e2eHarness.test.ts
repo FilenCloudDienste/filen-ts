@@ -51,6 +51,7 @@ import { diffSnapshots, localSnapshot } from "../../scripts/ci/e2e/snapshot.ts"
 import { isChromiumChild } from "../../scripts/ci/targets.ts"
 import { chooserRetries, MAC_CHOOSER_TIMEOUT_MS, PANEL_WAIT_S } from "../../scripts/ci/e2e/mac.ts"
 import { CHOOSER_BUDGET_MS, type DesktopOs } from "../../scripts/ci/e2e/os.ts"
+import { underReminder } from "../../scripts/ci/e2e/app.ts"
 import { chooseThrough } from "../../scripts/ci/e2e/extraPair.ts"
 
 const dirs: string[] = []
@@ -750,5 +751,57 @@ describe("the folder chooser raced against the app's call", () => {
 		const { chain } = harness(refused, 20, 1)
 
 		await expect(chooseThrough(chain, "/tmp/pair", "/tmp/evidence")).rejects.toThrow(`chooseLocalDirectory: ${JSON.stringify(refused)}`)
+	})
+})
+
+describe("e2e master-key reminder handler", () => {
+	// A page whose reminder shows while `run` runs: the handler is invoked as Playwright invokes it, from an event, and
+	// the click on "Remind me later" either lands or times out.
+	function reminderPage(click: () => Promise<void>) {
+		const handlers: ((dialog: unknown) => Promise<void>)[] = []
+		const locator = { filter: () => locator }
+		const dialog = {
+			getByRole: () => ({ click }),
+			evaluate: () => Promise.resolve(true),
+			innerText: () => Promise.resolve("Back up your master keys\nExport now\nRemind me later")
+		}
+		const page = {
+			locator: () => locator,
+			addLocatorHandler: (_locator: unknown, handler: (dialog: unknown) => Promise<void>) => {
+				handlers.push(handler)
+
+				return Promise.resolve()
+			},
+			removeLocatorHandler: () => {
+				handlers.length = 0
+
+				return Promise.resolve()
+			}
+		}
+
+		return { page: page as unknown as Page, trigger: () => Promise.all(handlers.map(handler => handler(dialog))) }
+	}
+
+	it("counts each reminder put off", async () => {
+		const { page, trigger } = reminderPage(() => Promise.resolve())
+
+		await expect(underReminder(page, async () => (await trigger(), await trigger(), "done"))).resolves.toEqual({
+			value: "done",
+			putOff: 2
+		})
+	})
+
+	it("never rejects when the reminder cannot be put off, and says what the dialog held", async () => {
+		const log = vi.spyOn(console, "log").mockImplementation(() => undefined)
+		const { page, trigger } = reminderPage(() => Promise.reject(new Error("locator.click: Timeout 30000ms exceeded.")))
+
+		try {
+			await expect(underReminder(page, async () => (await trigger(), "done"))).resolves.toEqual({ value: "done", putOff: 0 })
+			expect(log).toHaveBeenCalledWith(
+				'reminder not put off: locator.click: Timeout 30000ms exceeded.; inside aria-hidden: true; dialog: "Back up your master keys Export now Remind me later"'
+			)
+		} finally {
+			log.mockRestore()
+		}
 	})
 })

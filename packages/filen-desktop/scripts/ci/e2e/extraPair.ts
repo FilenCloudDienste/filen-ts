@@ -11,7 +11,7 @@ import type {
 } from "@filen/shared/desktop"
 import type { Page } from "playwright-core"
 import { errorMessage, fail, waitFor } from "../support.ts"
-import { desktop, desktopCall, MASTER_KEYS_REMINDER, putOffKeysReminder } from "./app.ts"
+import { desktop, desktopCall, putOffKeysReminder, underReminder } from "./app.ts"
 import { json, ok, type Chain } from "./chains/common.ts"
 import { POLL_MS, type Sampler } from "./offlineBlock.ts"
 import { CHOOSER_BUDGET_MS } from "./os.ts"
@@ -222,13 +222,7 @@ export function nothingSeen(seen: Seen, forbidden: readonly ("offline" | "error"
 // Sync item, the pair in the sync sidebar, Issues. Resolves once `text` shows there. The master-key reminder, modal
 // over the shell, is put off whenever it covers a step.
 export async function issuesShow(page: Page, pairName: string, text: string, timeoutMs: number): Promise<string> {
-	const reminder = page.locator('[role="dialog"], [role="alertdialog"]').filter({ hasText: MASTER_KEYS_REMINDER })
-
-	await page.addLocatorHandler(reminder, async dialog => {
-		await dialog.getByRole("button", { name: "Remind me later", exact: true }).click({ timeout: 30_000 })
-	})
-
-	try {
+	const { value } = await underReminder(page, async () => {
 		const computer = page.locator('[aria-label^="Computer"]').first()
 
 		await computer.waitFor({ state: "visible", timeout: timeoutMs })
@@ -240,7 +234,7 @@ export async function issuesShow(page: Page, pairName: string, text: string, tim
 		await page.getByText(text).first().waitFor({ state: "visible", timeout: timeoutMs })
 
 		return `the Issues tab says "${text}"`
-	} finally {
-		await page.removeLocatorHandler(reminder)
-	}
+	})
+
+	return value
 }

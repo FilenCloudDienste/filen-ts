@@ -190,13 +190,24 @@ export function fileProviderUserEnabled(page: Page, timeoutMs: number): Promise<
 
 // `run` with the master-key reminder put off whenever it covers a step: modal over the shell, it may show at any point
 // of a launch. Resolves with run's value and how often the reminder was put off.
+//
+// The handler never throws: Playwright calls it from a protocol event listener with no catch, so a rejection there is
+// unhandled and ends the whole harness process, every later check and the findings with it. A reminder it could not
+// put off is logged with what the dialog held; the action that ran into it then fails on its own, inside its check.
 export async function underReminder<T>(page: Page, run: () => Promise<T>): Promise<{ value: T; putOff: number }> {
 	const reminder = page.locator('[role="dialog"], [role="alertdialog"]').filter({ hasText: MASTER_KEYS_REMINDER })
 	let putOff = 0
 
 	await page.addLocatorHandler(reminder, async dialog => {
-		await dialog.getByRole("button", { name: "Remind me later", exact: true }).click({ timeout: 30_000 })
-		putOff++
+		try {
+			await dialog.getByRole("button", { name: "Remind me later", exact: true }).click({ timeout: 30_000 })
+			putOff++
+		} catch (error) {
+			const hidden = await dialog.evaluate(element => element.closest('[aria-hidden="true"]') !== null).catch(errorMessage)
+			const text = (await dialog.innerText().catch(errorMessage)).replace(/\s+/g, " ").slice(0, 300)
+
+			console.log(`reminder not put off: ${errorMessage(error)}; inside aria-hidden: ${String(hidden)}; dialog: "${text}"`)
+		}
 	})
 
 	try {
