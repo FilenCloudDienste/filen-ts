@@ -34,6 +34,8 @@ import { inventory, json, openChain, pidsOf, SETUP_TIMEOUT_MS } from "./common.t
 //       uploaded (no upload transfer, the cloud directory as it was)
 //   D4  an in-app drag of a file onto a directory row still moves it (the pointer engine), and prepares no drag-out
 //   D5  the transfers screen lists the drag's rows
+// A drag's end is matched by the id the page prepared in that step, and every step starts with no OS drag running: one
+// whose end the last step never saw is waited for, then ended over the app's window, recorded as information.
 // Wayland stays a manual release-checklist row. Screens, the app's logs and each target's inventory are artifacts.
 
 export interface DragOutOptions {
@@ -90,12 +92,26 @@ const RECORDER = `(() => {
 			record.settled.push({ id: event.id, outcome: event.outcome, code: event.error?.code ?? null, at: Date.now() })
 		}
 	})
+	// The moves since the last press, and how many of them said no button was down (which ends a press).
+	let pressed = null
 	addEventListener("pointermove", event => {
 		record.pointer = { screenX: event.screenX, screenY: event.screenY, clientX: event.clientX, clientY: event.clientY, buttons: event.buttons, type: event.pointerType, at: Date.now() }
+		if (pressed !== null) {
+			pressed.moves++
+			if (event.buttons === 0) pressed.buttonless++
+		}
 	}, { capture: true, passive: true })
-	for (const type of ["pointerdown", "pointerup", "pointercancel"]) {
+	for (const type of ["pointerdown", "pointerup", "pointercancel", "contextmenu"]) {
 		addEventListener(type, event => {
-			record.presses.push({ type, x: event.clientX, y: event.clientY, buttons: event.buttons, dragging: document.body.classList.contains("pointer-drag"), at: Date.now() })
+			const entry = { type, x: event.clientX, y: event.clientY, buttons: event.buttons, keys: (event.altKey ? "a" : "") + (event.ctrlKey ? "c" : "") + (event.metaKey ? "m" : "") + (event.shiftKey ? "s" : ""), dragging: document.body.classList.contains("pointer-drag"), at: Date.now() }
+			if (type === "pointerdown") {
+				pressed = { moves: 0, buttonless: 0 }
+			} else if (pressed !== null) {
+				entry.moves = pressed.moves
+				entry.buttonless = pressed.buttonless
+				if (type !== "contextmenu") pressed = null
+			}
+			record.presses.push(entry)
 			record.presses.splice(0, record.presses.length - 20)
 		}, { capture: true, passive: true })
 	}
@@ -107,8 +123,19 @@ interface Recorded {
 	added: { id: string; direction: string; kind: string; origin: string; name: string; at: number }[]
 	settled: { id: string; outcome: string; code: string | null; at: number }[]
 	pointer: { screenX: number; screenY: number; clientX: number; clientY: number; buttons: number; type: string; at: number } | null
-	// The last presses and releases the page saw, and whether the pointer engine was dragging then.
-	presses: { type: string; x: number; y: number; buttons: number; dragging: boolean; at: number }[]
+	// The last presses, releases and context menus the page saw: the modifier keys held (a, c, m, s), whether the pointer
+	// engine was dragging then, and after a press the moves since it, `buttonless` of them without a button down.
+	presses: {
+		type: string
+		x: number
+		y: number
+		buttons: number
+		keys: string
+		dragging: boolean
+		moves?: number
+		buttonless?: number
+		at: number
+	}[]
 }
 
 // The pointer engine handed the drag to the OS: its chip hidden, the drag still on (pointerDrag.ts handOff).
@@ -217,13 +244,65 @@ export async function runDragOut(options: DragOutOptions): Promise<void> {
 
 	type Ending = "drop" | "escape" | "back"
 
+	// The drag-out the last step prepared, while its end is unseen.
+	let lastDrag: string | null = null
+
+	const endedOf = async (id: string) =>
+		(await recorded().catch(() => null))?.states.find(state => state.id === id && state.state === "ended") ?? null
+
+	// Every step starts with no OS drag running: a drag whose end the last step never saw takes this step's input (an
+	// AppKit drag still tracked drops where this step releases). Waited for a while, then ended over the app's own window
+	// (Escape and a release there cancel it); recorded as information, never as this step's result.
+	const settlePrevious = async (label: string): Promise<void> => {
+		const id = lastDrag
+
+		lastDrag = null
+
+		if (id === null || (await endedOf(id)) !== null) {
+			return
+		}
+
+		const check = `${label} the previous step's OS drag (${id}) before this step`
+		const late = await waitFor("the previous drag's end", 15_000, () => endedOf(id), 1000).catch(() => null)
+
+		if (late !== null) {
+			findings.info(check, `ended ${String(late.outcome)} late, before this step`)
+
+			return
+		}
+
+		// OS units, from the placed window (Windows' drag loop stalls the page, so nothing here asks it): the listing's empty
+		// lower part, clear of the selection bar at the bottom.
+		const app = (layout ?? fail("no layout")).app
+		const rest = { x: Math.round(app.x + app.width * 0.55), y: Math.round(app.y + app.height * 0.6) }
+		const posted = await desktop
+			.perform(gesture(rest).held().at(rest).hold(300).escape().hold(300).release().primitives())
+			.then(() => "", errorMessage)
+		const ended = await waitFor("the previous drag's end", 30_000, () => endedOf(id), 1000).catch(() => null)
+
+		findings.info(
+			check,
+			`still running 15 s into this step; Escape and a release over the app's window${posted === "" ? "" : ` (${posted})`}: ${ended === null ? "still no end" : `ended ${String(ended.outcome)}`}`
+		)
+	}
+
 	// One drag out of the window with the real pointer: press on `from`, leave the window over the file manager, wait
-	// for the OS drag (or hold through it on Windows), then end it. Returns the OS drag's end as main told the page, the
-	// hand-off, and on Windows what was under the pointer before the release.
+	// for the OS drag (or hold through it on Windows), then end it. Returns the drag-out the page prepared in this step
+	// and its end as main told the page (another id's end is never this drag's), the hand-off, and on Windows what was
+	// under the pointer before the release.
 	const dragOut = async (from: string, into: Rect, ending: Ending, label: string) => {
 		const pid = appPid()
 
+		await settlePrevious(label.toUpperCase())
 		await clearDialogs(page(), findings, seen)
+
+		// Windows: a window left over the session (windows-11-arm's console prompts come back) takes the press otherwise.
+		const uncovered = await desktop.uncover(pid, await rowPoint(from))
+
+		if (uncovered !== null && uncovered !== "nothing over the app") {
+			console.log(`${label}: ${uncovered}`)
+		}
+
 		await desktop.focusApp(pid)
 
 		const since = Date.now()
@@ -265,7 +344,8 @@ export async function runDragOut(options: DragOutOptions): Promise<void> {
 				).catch(() => false)
 			}
 
-			const end = gesture(drop).hold(1500)
+			// The button is still down from the first gesture: every move is a drag move.
+			const end = gesture(drop).held().hold(1500)
 
 			if (ending === "drop") {
 				end.release()
@@ -294,32 +374,50 @@ export async function runDragOut(options: DragOutOptions): Promise<void> {
 
 		await shot(`${label}-released`)
 
+		let id: string | null = null
+		let others: string[] = []
 		const ended = await waitFor(
 			"the OS drag's end",
 			ENDED_TIMEOUT_MS,
 			async () => {
 				const states = (await recorded().catch(() => null))?.states ?? []
 
-				return states.find(state => state.state === "ended" && state.at >= since) ?? null
+				id ??= states.find(state => state.at >= since && state.state !== "ended")?.id ?? null
+				others = states
+					.filter(state => state.at >= since && state.state === "ended" && state.id !== id)
+					.map(state => `${state.id} ended ${String(state.outcome)}`)
+
+				return id === null ? null : (states.find(state => state.id === id && state.state === "ended") ?? null)
 			},
 			1000
 		).catch(() => null)
 
-		return { since, outcome: ended?.outcome ?? null, handedOff, under }
+		lastDrag = ended === null ? id : null
+
+		return { since, id, outcome: ended?.outcome ?? null, handedOff, under, others }
 	}
 
-	const expectOutcome = async (outcome: string | null, wanted: string, handedOff: boolean | null): Promise<string> => {
-		if (outcome === null) {
+	const expectOutcome = async (
+		drag: { id: string | null; outcome: string | null; handedOff: boolean | null; others: string[] },
+		wanted: string
+	): Promise<string> => {
+		const others = drag.others.length === 0 ? "" : `; meanwhile ${drag.others.join(", ")}`
+
+		if (drag.id === null) {
+			fail(`no drag-out was prepared${others}; toasts: ${await toastText()}`)
+		}
+
+		if (drag.outcome === null) {
 			fail(
-				`no OS drag ended${handedOff === false ? " (the page never handed the drag to the OS)" : ""}; toasts: ${await toastText()}`
+				`no OS drag ended (${drag.id})${drag.handedOff === false ? " (the page never handed the drag to the OS)" : ""}${others}; toasts: ${await toastText()}`
 			)
 		}
 
-		if (outcome !== wanted) {
-			fail(`the OS drag ended ${outcome}, expected ${wanted}`)
+		if (drag.outcome !== wanted) {
+			fail(`the OS drag ended ${drag.outcome}, expected ${wanted}${others}`)
 		}
 
-		return `ended ${outcome}`
+		return `ended ${drag.outcome}${others}`
 	}
 
 	const nothingIn = async (dir: string): Promise<string> => {
@@ -579,7 +677,7 @@ export async function runDragOut(options: DragOutOptions): Promise<void> {
 
 		findings.attach(`${NAME}-d1-recorded.json`, JSON.stringify(await recorded().catch(() => null), null, "\t"))
 		await findings.check(`D1 the OS drag dropped onto ${desktop.fileManager}`, () =>
-			expectOutcome(drag.outcome, platform === "linux" ? "ended" : "dropped", drag.handedOff)
+			expectOutcome(drag, platform === "linux" ? "ended" : "dropped")
 		)
 
 		if (platform === "win") {
@@ -702,7 +800,7 @@ export async function runDragOut(options: DragOutOptions): Promise<void> {
 
 		if (ending === "escape") {
 			await findings.check(`D2 Escape during the OS drag over ${desktop.fileManager} cancels it and writes nothing`, async () => {
-				const outcome = await expectOutcome(drag.outcome, wanted, drag.handedOff)
+				const outcome = await expectOutcome(drag, wanted)
 
 				return `${outcome}; ${await nothingIn(dir)}`
 			})
@@ -710,7 +808,7 @@ export async function runDragOut(options: DragOutOptions): Promise<void> {
 			await findings.check(
 				"D3 the OS drag released back over our own window is ignored: nothing written, nothing uploaded",
 				async () => {
-					const outcome = await expectOutcome(drag.outcome, wanted, drag.handedOff)
+					const outcome = await expectOutcome(drag, wanted)
 					const nothing = await nothingIn(dir)
 					const uploads = (await recorded()).added.filter(item => item.direction === "upload" && item.at >= drag.since)
 					const after = (await cloud.list(cloudDir)) ?? []
@@ -738,13 +836,25 @@ export async function runDragOut(options: DragOutOptions): Promise<void> {
 	}
 
 	const moveInApp = async (): Promise<void> => {
+		await settlePrevious("D4")
 		await findings.check(`D4 an in-app drag moves ${MOVED} into ${DEST}, preparing no drag-out`, async () => {
 			await clearDialogs(page(), findings, seen)
+
+			const from = await rowPoint(MOVED)
+			const onto = await rowPoint(DEST)
+
+			// Windows: what covers the rows (windows-11-arm's console prompts come back) is ended first.
+			for (const point of [from, onto]) {
+				const uncovered = await desktop.uncover(appPid(), point)
+
+				if (uncovered !== null && uncovered !== "nothing over the app") {
+					console.log(`D4: ${uncovered}`)
+				}
+			}
+
 			await desktop.focusApp(appPid())
 
 			const since = Date.now()
-			const from = await rowPoint(MOVED)
-			const onto = await rowPoint(DEST)
 
 			try {
 				await desktop.perform(

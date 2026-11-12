@@ -6,7 +6,8 @@
 //   dragInput screen        the main display's bounds in global points (top-left origin)
 //   dragInput raise W H     the main display switched to its smallest mode of at least W x H points (else its widest)
 //                           when it is smaller, for this login session; what it was, the modes, what it is
-//   dragInput run "<steps>" m X Y (a move; a drag while the button is down), d, u, k esc, s MS; separated by ";"
+//   dragInput run "<steps>" m X Y (a move; a drag while the button is down), d, h (the button is still held from the
+//                           last run), u, k esc, s MS; separated by ";"
 import ApplicationServices
 import CoreGraphics
 import Foundation
@@ -23,8 +24,10 @@ struct Failure: Error, CustomStringConvertible {
 }
 
 let source = CGEventSource(stateID: .hidSystemState)
-// A drag goes on across runs: the button may still be down from the last one.
-var buttonDown = CGEventSource.buttonState(.hidSystemState, button: .left)
+// A drag goes on across runs: the button may still be down from the last one. The caller says so with "h": the HID
+// state read here is recorded, not trusted (a move posted as mouseMoved under a held drag confuses AppKit's drag loop).
+let buttonAtStart = CGEventSource.buttonState(.hidSystemState, button: .left)
+var buttonDown = buttonAtStart
 var cursor = CGEvent(source: nil)?.location ?? .zero
 
 func post(_ type: CGEventType, _ point: CGPoint) {
@@ -57,6 +60,8 @@ func step(_ raw: String) throws {
 		post(buttonDown ? .leftMouseDragged : .mouseMoved, CGPoint(x: x, y: y))
 	case "d":
 		post(.leftMouseDown, cursor)
+		buttonDown = true
+	case "h":
 		buttonDown = true
 	case "u":
 		post(.leftMouseUp, cursor)
@@ -114,7 +119,7 @@ do {
 		for raw in argv[1].split(separator: ";") {
 			try step(raw.trimmingCharacters(in: .whitespaces))
 		}
-		emit(["ran": true, "buttonDown": buttonDown])
+		emit(["ran": true, "buttonAtStart": buttonAtStart, "buttonDown": buttonDown])
 	default:
 		throw Failure(description: "usage: dragInput access | screen | run \"<steps>\"")
 	}

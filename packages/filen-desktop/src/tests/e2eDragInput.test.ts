@@ -29,6 +29,13 @@ describe("drag gestures", () => {
 		expect(encodeSteps(steps)).toBe("m 1 3;d;s 20;k esc;u")
 	})
 
+	it("says the button is still held from the last gesture, which X tracks itself", () => {
+		const steps = gesture({ x: 5, y: 6 }).held().hold(FRAME_MS).release().primitives()
+
+		expect(encodeSteps(steps)).toBe("h;m 6 6;s 16;m 5 6;u")
+		expect(xdotoolArgs(steps)).toEqual(["mousemove", "6", "6", "sleep", "0.016", "mousemove", "5", "6", "mouseup", "1"])
+	})
+
 	it("chains the whole gesture into one xdotool command line", () => {
 		const steps = gesture({ x: 5, y: 6 }).at({ x: 5, y: 6 }).press().wait(1500).escape().release().primitives()
 

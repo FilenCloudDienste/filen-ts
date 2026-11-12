@@ -15,7 +15,10 @@ export interface Rect {
 	height: number
 }
 
-export type Primitive = { op: "move"; at: Point } | { op: "down" } | { op: "up" } | { op: "escape" } | { op: "sleep"; ms: number }
+// "held": the button is still down from the previous gesture (a drag going on across helper runs); a later move is a
+// drag even where the helper cannot read the button's state.
+export type Primitive =
+	{ op: "move"; at: Point } | { op: "down" } | { op: "held" } | { op: "up" } | { op: "escape" } | { op: "sleep"; ms: number }
 
 // One frame at 60 Hz: what a mouse reports at, and how often the drag loops (OLE, AppKit, X DnD) see motion.
 export const FRAME_MS = 16
@@ -25,6 +28,8 @@ export interface Gesture {
 	readonly point: Point
 	at(point: Point): Gesture
 	press(): Gesture
+	// The button is still held from the previous gesture.
+	held(): Gesture
 	release(): Gesture
 	escape(): Gesture
 	wait(ms: number): Gesture
@@ -54,6 +59,11 @@ export function gesture(start: Point): Gesture {
 		},
 		press() {
 			list.push({ op: "down" })
+
+			return self
+		},
+		held() {
+			list.push({ op: "held" })
 
 			return self
 		},
@@ -107,7 +117,7 @@ export function gesture(start: Point): Gesture {
 	return self
 }
 
-// The step text the Windows and macOS helpers read: "m X Y", "d", "u", "k esc", "s MS", separated by ";".
+// The step text the Windows and macOS helpers read: "m X Y", "d", "h", "u", "k esc", "s MS", separated by ";".
 export function encodeSteps(primitives: readonly Primitive[]): string {
 	return primitives
 		.map(primitive => {
@@ -116,6 +126,8 @@ export function encodeSteps(primitives: readonly Primitive[]): string {
 					return `m ${String(primitive.at.x)} ${String(primitive.at.y)}`
 				case "down":
 					return "d"
+				case "held":
+					return "h"
 				case "up":
 					return "u"
 				case "escape":
@@ -135,6 +147,9 @@ export function xdotoolArgs(primitives: readonly Primitive[]): string[] {
 				return ["mousemove", String(primitive.at.x), String(primitive.at.y)]
 			case "down":
 				return ["mousedown", "1"]
+			// X keeps the button's state itself.
+			case "held":
+				return []
 			case "up":
 				return ["mouseup", "1"]
 			case "escape":

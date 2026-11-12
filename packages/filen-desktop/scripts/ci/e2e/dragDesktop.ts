@@ -162,6 +162,7 @@ public static class FilenE2eDrag {
 			switch (parts[0]) {
 				case "m": x = int.Parse(parts[1]); y = int.Parse(parts[2]); Mouse(0, x, y); break;
 				case "d": Mouse(LEFTDOWN, x, y); break;
+				case "h": break;
 				case "u": Mouse(LEFTUP, x, y); break;
 				case "k": Key(0x1B, false); Thread.Sleep(30); Key(0x1B, true); break;
 				case "s": Thread.Sleep(int.Parse(parts[1])); break;
@@ -524,7 +525,10 @@ function macDesktop(work: string): DragDesktop {
 			await sleep(700)
 		},
 		async perform(primitives) {
-			await helper("post the input", ["run", encodeSteps(primitives)], durationMs(primitives) + GESTURE_MARGIN_MS)
+			// The button's HID state at the start, in the chain's log.
+			console.log(
+				`dragInput: ${await helper("post the input", ["run", encodeSteps(primitives)], durationMs(primitives) + GESTURE_MARGIN_MS)}`
+			)
 		},
 		underPointer: async () => "not read on macOS",
 		uncover: async () => null,
