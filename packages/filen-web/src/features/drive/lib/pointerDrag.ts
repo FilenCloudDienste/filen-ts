@@ -90,8 +90,15 @@ interface Session {
 	mode: DragDropMode
 	cursor: string
 	frame: number
+	// A move said no button was down: the press ends unless its pointerup or a held move follows (onPointerMove).
+	release: ReturnType<typeof setTimeout> | null
 	detach: (() => void)[]
 }
+
+// How long a move with no button down waits for its pointerup before it ends the press. Chromium on macOS takes a mouse
+// event's buttons from the system's button state when it handles the event, so the last drag move, handled after the
+// button went up, says no button while its pointerup comes right behind it.
+export const UNSEEN_RELEASE_MS = 250
 
 const targets = new WeakMap<HTMLElement, DropTargetHandlers>()
 let hooks: PointerDragHooks | null = null
@@ -122,6 +129,12 @@ export function registerDropTarget(element: HTMLElement, handlers: DropTargetHan
 // The chip of the drag under way, for a hand-off that shows it as the OS drag image.
 export function pointerDragChip(): HTMLCanvasElement | null {
 	return session?.chip ?? null
+}
+
+// The drag under way still has its button down as far as the page knows: false once a move said none, while its
+// pointerup may still follow (no hand-off then).
+export function pointerDragHeld(): boolean {
+	return session !== null && session.release === null
 }
 
 // A late refusal of a hand-off: back to the in-app drag, if the drag is still held.
@@ -176,6 +189,7 @@ export function pressPointerDrag(event: PointerDragPress, source: PointerDragSou
 		mode: "move",
 		cursor: "",
 		frame: 0,
+		release: null,
 		detach: []
 	}
 
@@ -216,11 +230,21 @@ function onPointerMove(event: PointerEvent): void {
 		return
 	}
 
-	// No pointerup reaches the page after an OS drag, or after a release it never saw.
+	// No pointerup reaches the page after an OS drag, or after a release it never saw. The drop of a release whose last
+	// move already said no button is still its pointerup's (UNSEEN_RELEASE_MS).
 	if (event.buttons === 0) {
-		end(false, "none")
+		current.release ??= setTimeout(() => {
+			if (session === current) {
+				end(false, "none")
+			}
+		}, UNSEEN_RELEASE_MS)
 
 		return
+	}
+
+	if (current.release !== null) {
+		clearTimeout(current.release)
+		current.release = null
 	}
 
 	current.last = { x: event.clientX, y: event.clientY }
@@ -575,6 +599,10 @@ function end(dropped: boolean, button: EndButton): void {
 	}
 
 	session = null
+
+	if (current.release !== null) {
+		clearTimeout(current.release)
+	}
 
 	for (const detach of current.detach) {
 		detach()

@@ -217,9 +217,10 @@ describe("the pointer drag engine", () => {
 
 	it.each([
 		[
-			"a move with no buttons",
+			"a move with no buttons and no pointerup behind it",
 			() => {
 				move(40, 40, { buttons: 0 })
+				vi.advanceTimersByTime(250)
 			}
 		],
 		["pointercancel", () => window.dispatchEvent(new PointerEvent("pointercancel", { pointerId: 1 }))],
@@ -314,7 +315,41 @@ describe("the pointer drag engine", () => {
 		press()
 		move(30, 30)
 		move(31, 30, { buttons: 0 })
+		vi.advanceTimersByTime(250)
 		expect(onEnd).toHaveBeenLastCalledWith(false, false)
+	})
+
+	it("drops on the pointerup right behind a last move that said no button (Chromium on macOS)", () => {
+		const drag = source()
+		const { element, handlers } = target()
+
+		hit = element
+		press("mouse", drag)
+		move(30, 30)
+		move(32, 30, { buttons: 0 })
+		expect(drag.end).not.toHaveBeenCalled()
+
+		up(32, 30)
+		expect(handlers.drop).toHaveBeenCalledExactlyOnceWith("move")
+		expect(drag.end).toHaveBeenCalledOnce()
+
+		vi.advanceTimersByTime(250)
+		expect(drag.end).toHaveBeenCalledOnce()
+	})
+
+	it("a held move after one that said no button keeps the drag", () => {
+		const drag = source()
+		const { element, handlers } = target()
+
+		hit = element
+		press("mouse", drag)
+		move(11, 10, { buttons: 0 })
+		move(30, 30)
+		vi.advanceTimersByTime(250)
+		expect(document.body.classList.contains("pointer-drag")).toBe(true)
+
+		up(30, 30)
+		expect(handlers.drop).toHaveBeenCalledExactlyOnceWith("move")
 	})
 
 	it("hands the drag off when the hooks say so, and resumes it", () => {

@@ -10,6 +10,7 @@ import {
 	pressPointerDrag,
 	registerDropTarget,
 	setPointerDragHooks,
+	UNSEEN_RELEASE_MS,
 	type DropTargetHandlers
 } from "@/features/drive/lib/pointerDrag"
 
@@ -266,6 +267,12 @@ describe("drag-out hand-off", () => {
 		fake.prepares[0]?.resolve({ id: "d1" })
 		await settle()
 
+		// The move said no button: no hand-off while its pointerup may follow, the id back to main once none did.
+		expect(fake.drag.begin).not.toHaveBeenCalled()
+		await new Promise(resolve => {
+			setTimeout(resolve, UNSEEN_RELEASE_MS + 20)
+		})
+		await settle()
 		expect(fake.drag.begin).not.toHaveBeenCalled()
 		expect(fake.drag.release).toHaveBeenCalledExactlyOnceWith("d1")
 	})

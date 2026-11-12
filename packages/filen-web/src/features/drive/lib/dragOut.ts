@@ -14,6 +14,7 @@ import {
 	cancelPointerDrag,
 	handOffPointerDrag,
 	pointerDragChip,
+	pointerDragHeld,
 	resumePointerDrag,
 	setPointerDragHooks
 } from "@/features/drive/lib/pointerDrag"
@@ -149,6 +150,7 @@ function startBegin(current: Attempt): boolean {
 		current.engine !== "held" ||
 		!current.outside ||
 		current.buttons === 0 ||
+		!pointerDragHeld() ||
 		current.id === null ||
 		current.image === null ||
 		staging.has(current.id)
