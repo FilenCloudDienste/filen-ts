@@ -455,6 +455,7 @@ export async function runDragOut(options: DragOutOptions): Promise<void> {
 			const app = (layout ?? fail("no layout")).app
 			const centre = { x: app.x + Math.round(app.width / 2), y: app.y + Math.round(app.height / 2) }
 			const dpr = Number(await page().evaluate("devicePixelRatio"))
+			const uncovered = await desktop.uncover(appPid(), centre)
 
 			await desktop.focusApp(appPid())
 			await page().evaluate("globalThis.__filenE2eDrag.pointer = null")
@@ -467,7 +468,9 @@ export async function runDragOut(options: DragOutOptions): Promise<void> {
 					.primitives()
 			)
 
-			const pointer = (await recorded()).pointer ?? fail("no pointermove reached the page")
+			const pointer =
+				(await recorded()).pointer ??
+				fail(`no pointermove reached the page; under the pointer: ${await desktop.underPointer().catch(errorMessage)}`)
 			const scale = desktop.pixels ? dpr : 1
 			const landed = { x: Math.round(pointer.screenX * scale), y: Math.round(pointer.screenY * scale) }
 			const sent = { x: centre.x + 6, y: centre.y + 4 }
@@ -482,7 +485,7 @@ export async function runDragOut(options: DragOutOptions): Promise<void> {
 				scale
 			}
 
-			return `${pointer.type} at client ${String(pointer.clientX)},${String(pointer.clientY)}, screen ${String(pointer.screenX)},${String(pointer.screenY)}; offset ${json(calibration.offset)}, ${String(calibration.scale)} OS units per CSS px${blocked === null ? "" : `; the system reported ${blocked}`}`
+			return `${pointer.type} at client ${String(pointer.clientX)},${String(pointer.clientY)}, screen ${String(pointer.screenX)},${String(pointer.screenY)}; offset ${json(calibration.offset)}, ${String(calibration.scale)} OS units per CSS px${uncovered === null ? "" : `; ${uncovered}`}${blocked === null ? "" : `; the system reported ${blocked}`}`
 		}
 		const reaches = "D0 a real pointer move reaches the page"
 		const calibrated = await calibrate().then(
@@ -738,7 +741,10 @@ export async function runDragOut(options: DragOutOptions): Promise<void> {
 
 	const transfersScreen = async (): Promise<void> => {
 		await findings.check("D5 the transfers screen lists the drag's rows", async () => {
-			await page().goto(`${APP_ORIGIN}/transfers`, { timeout: 60_000 })
+			// In-app navigation: main drops a row once it settled, so only this page's store still holds the finished
+			// drag rows; a reload (goto) would show an empty list.
+			await clearDialogs(page(), findings, seen)
+			await page().locator('a[href="/transfers"]').first().click({ timeout: 30_000 })
 
 			const rows = page().locator("[data-transfer-id]")
 

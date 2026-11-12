@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url"
 import { setTimeout as sleep } from "node:timers/promises"
 import { type BoundedResult, errorMessage, fail, powershellBounded, psQuote, runBounded, waitFor } from "../support.ts"
 import type { Platform } from "../targets.ts"
-import { durationMs, encodeSteps, type Primitive, type Rect, xdotoolArgs } from "./dragInput.ts"
+import { durationMs, encodeSteps, type Point, type Primitive, type Rect, xdotoolArgs } from "./dragInput.ts"
 
 // Chain D's desktop on each OS (scripts/ci/e2e/chains/dragOut.ts): the file manager a drop lands in, both windows
 // placed side by side, the app brought to the front, and real pointer input (dragInput.ts plans it). Every tool runs
@@ -16,7 +16,8 @@ import { durationMs, encodeSteps, type Primitive, type Rect, xdotoolArgs } from 
 //            1024x768, too narrow for the app's 800 px beside Explorer)
 //   macOS    CoreGraphics HID events from dragInput.swift, compiled here with swiftc (they need Accessibility, which the
 //            runner may not grant: access() says, and the chain records it instead of failing); Finder on a directory
-//            and both windows placed through System Events, which hosted runners allow osascript
+//            and both windows placed through System Events, which hosted runners allow osascript; the screen raised
+//            like Windows' when the display offers a wider mode
 //   Linux    xdotool (XTEST) under Xvfb with no window manager, Thunar on a directory (an X11 file manager that takes
 //            XDND drops of text/uri-list); windows moved with xdotool, the app focused with windowfocus
 
@@ -46,6 +47,9 @@ export interface DragDesktop {
 	perform(primitives: readonly Primitive[]): Promise<void>
 	// What is under the pointer now, for the findings (Windows: the root window's class and process).
 	underPointer(): Promise<string>
+	// Whatever covers the app's window (process `pid`) at `at` ended, so input there reaches the app: what it did; null
+	// where nothing is checked. Fails when the cover stays (Windows: a first-logon screen over the whole desktop).
+	uncover(pid: number, at: Point): Promise<string | null>
 	stop(): Promise<void>
 }
 
@@ -193,6 +197,27 @@ public static class FilenE2eDrag {
 		try { name = System.Diagnostics.Process.GetProcessById((int)Pid(root)).ProcessName; } catch (Exception) { name = "?"; }
 		return "at " + at.X + "," + at.Y + ": " + Class(hwnd) + " in root " + Class(root) + " of " + name + " " + Pid(root) + " '" + Title(root) + "'";
 	}
+	// Ends the processes whose top-level window covers x,y over process pid's, up to three (the windows-11-arm image
+	// shows its first-logon privacy screen over the whole desktop); never the shell's or the session's own.
+	public static string Uncover(uint pid, int x, int y) {
+		var ended = new List<string>();
+		string[] keep = { "explorer", "dwm", "csrss", "winlogon", "svchost", "sihost", "system", "idle", "?" };
+		for (int round = 0; round < 4; round++) {
+			POINT at; at.X = x; at.Y = y;
+			IntPtr root = GetAncestor(WindowFromPoint(at), 2);
+			uint owner = Pid(root);
+			string after = ended.Count == 0 ? "" : " after ending " + string.Join(", ", ended);
+			if (owner == pid) return ended.Count == 0 ? "nothing over the app" : "ended " + string.Join(", ", ended);
+			string name;
+			try { name = System.Diagnostics.Process.GetProcessById((int)owner).ProcessName; } catch (Exception) { name = "?"; }
+			string what = name + " " + owner + " (" + Class(root) + " '" + Title(root) + "')";
+			if (round == 3 || Array.IndexOf(keep, name.ToLowerInvariant()) >= 0) return "covered by " + what + after;
+			try { System.Diagnostics.Process.GetProcessById((int)owner).Kill(); } catch (Exception error) { return "covered by " + what + after + ": " + error.Message; }
+			ended.Add(what);
+			Thread.Sleep(2000);
+		}
+		return "covered";
+	}
 }
 `
 
@@ -305,6 +330,18 @@ function windowsDesktop(work: string): DragDesktop {
 			)
 		},
 		underPointer: () => winScript("read what is under the pointer", "[FilenE2eDrag]::Under()"),
+		async uncover(pid, at) {
+			const result = await winScript(
+				"uncover the app's window",
+				`[FilenE2eDrag]::Uncover(${String(pid)}, ${String(at.x)}, ${String(at.y)})`
+			)
+
+			if (result.startsWith("covered")) {
+				fail(`the app's window at ${String(at.x)},${String(at.y)} is ${result}`)
+			}
+
+			return result
+		},
 		stop: closeTarget
 	}
 }
@@ -415,7 +452,12 @@ function macDesktop(work: string): DragDesktop {
 				fail(`swiftc dragInput.swift: ${described(built)}`)
 			}
 
-			return `dragInput built with swiftc; access ${await helper("read the input access", ["access"])}`
+			// Hosted runners start at 1024x768, too narrow for the app's 800 points beside Finder.
+			const raised = await helper("raise the screen", ["raise", "1920", "1080"])
+
+			await sleep(2000)
+
+			return `dragInput built with swiftc; access ${await helper("read the input access", ["access"])}; screen ${raised}`
 		},
 		async inputBlocked() {
 			const access = JSON.parse(await helper("read the input access", ["access"])) as { trusted?: unknown; postEvents?: unknown }
@@ -474,6 +516,7 @@ function macDesktop(work: string): DragDesktop {
 			await helper("post the input", ["run", encodeSteps(primitives)], durationMs(primitives) + GESTURE_MARGIN_MS)
 		},
 		underPointer: async () => "not read on macOS",
+		uncover: async () => null,
 		stop: closeTarget
 	}
 }
@@ -608,6 +651,7 @@ function linuxDesktop(work: string): DragDesktop {
 			await xdotool("send the input", xdotoolArgs(primitives), durationMs(primitives) + GESTURE_MARGIN_MS)
 		},
 		underPointer: async () => xdotool("read the pointer", ["getmouselocation"]),
+		uncover: async () => null,
 		stop: closeTarget
 	}
 }
