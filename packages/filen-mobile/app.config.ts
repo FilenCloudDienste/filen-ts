@@ -6,7 +6,7 @@ import { SUPPORTED_LANGUAGES } from "./src/locales/languages"
 import { EXTERNAL_LINK_PROTOCOLS } from "./src/lib/untrustedLinks"
 import { APPLE_TEAM_ID, IOS_APP_GROUP_IDENTIFIER, IOS_KEYCHAIN_ACCESS_GROUP } from "./src/lib/appIdentity"
 
-const VERSION: string = "4.0.18"
+const VERSION: string = "4.0.19"
 
 const ANDROID_MIN_SDK_VERSION: number = 31
 const ANDROID_TARGET_SDK_VERSION: number = 36
