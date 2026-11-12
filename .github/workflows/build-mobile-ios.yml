@@ -91,6 +91,20 @@ jobs:
           p12-file-base64: ${{ secrets.APPLE_DEVELOPMENT_CERT_BASE64 }}
           p12-password: ${{ secrets.APPLE_DEVELOPMENT_CERT_PASS }}
 
+      # Automatic signing archives with a development identity. Without a valid one in the keychain,
+      # -allowProvisioningUpdates mints a new development certificate through the API key on every
+      # run; its private key dies with the runner, so certificates pile up until the account limit.
+      - name: Verify development certificate
+        run: |
+          security find-identity -v -p codesigning
+          if ! security find-identity -v -p codesigning | grep -q '"Apple Development'; then
+            echo "::error::No valid Apple Development identity in the keychain. Renew APPLE_DEVELOPMENT_CERT_BASE64 / APPLE_DEVELOPMENT_CERT_PASS instead of letting Xcode create a certificate."
+            exit 1
+          fi
+          if ! security find-certificate -c "Apple Development" -p | openssl x509 -noout -checkend 2592000; then
+            echo "::warning::The Apple Development certificate expires within 30 days. Renew APPLE_DEVELOPMENT_CERT_BASE64."
+          fi
+
       - name: Set up App Store Connect API key
         env:
           APP_STORE_CONNECT_API_KEY_ID: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
