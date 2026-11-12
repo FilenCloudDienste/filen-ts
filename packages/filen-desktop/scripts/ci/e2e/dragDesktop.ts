@@ -84,6 +84,7 @@ public static class FilenE2eDrag {
 	[StructLayout(LayoutKind.Sequential)] struct INPUT { public uint type; public INPUTUNION u; }
 	[StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
 	[StructLayout(LayoutKind.Sequential)] public struct POINT { public int X; public int Y; }
+	[StructLayout(LayoutKind.Sequential)] struct GUITHREADINFO { public int cbSize; public int flags; public IntPtr hwndActive; public IntPtr hwndFocus; public IntPtr hwndCapture; public IntPtr hwndMenuOwner; public IntPtr hwndMoveSize; public IntPtr hwndCaret; public RECT rcCaret; }
 	[StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)] public struct DEVMODE {
 		[MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)] public string dmDeviceName;
 		public short dmSpecVersion; public short dmDriverVersion; public short dmSize; public short dmDriverExtra; public int dmFields;
@@ -110,6 +111,8 @@ public static class FilenE2eDrag {
 	[DllImport("user32.dll")] static extern bool GetCursorPos(out POINT point);
 	[DllImport("user32.dll")] static extern IntPtr WindowFromPoint(POINT point);
 	[DllImport("user32.dll")] static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
+	[DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+	[DllImport("user32.dll")] static extern bool GetGUIThreadInfo(uint thread, ref GUITHREADINFO info);
 	[DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern bool EnumDisplaySettings(string device, int mode, ref DEVMODE devmode);
 	[DllImport("user32.dll", CharSet = CharSet.Unicode)] static extern int ChangeDisplaySettings(ref DEVMODE devmode, int flags);
 	const uint MOVE = 0x0001, LEFTDOWN = 0x0002, LEFTUP = 0x0004, VIRTUALDESK = 0x4000, ABSOLUTE = 0x8000, KEYUP = 0x0002;
@@ -189,13 +192,21 @@ public static class FilenE2eDrag {
 	}
 	public static bool Front(IntPtr hwnd) { ShowWindow(hwnd, 9); return SetForegroundWindow(hwnd); }
 	public static bool Close(IntPtr hwnd) { return PostMessage(hwnd, 0x0010, IntPtr.Zero, IntPtr.Zero); }
-	public static string Under() {
-		POINT at; GetCursorPos(out at);
-		IntPtr hwnd = WindowFromPoint(at);
+	static string Owner(IntPtr hwnd) {
+		if (hwnd == IntPtr.Zero) return "none";
 		IntPtr root = GetAncestor(hwnd, 2);
 		string name;
 		try { name = System.Diagnostics.Process.GetProcessById((int)Pid(root)).ProcessName; } catch (Exception) { name = "?"; }
-		return "at " + at.X + "," + at.Y + ": " + Class(hwnd) + " in root " + Class(root) + " of " + name + " " + Pid(root) + " '" + Title(root) + "'";
+		return Class(hwnd) + " in root " + Class(root) + " of " + name + " " + Pid(root) + " '" + Title(root) + "'";
+	}
+	// What is under the pointer, the foreground window, and the window holding the mouse capture on its thread (which
+	// takes every mouse message, whatever is under the pointer).
+	public static string Under() {
+		POINT at; GetCursorPos(out at);
+		var info = new GUITHREADINFO();
+		info.cbSize = Marshal.SizeOf(typeof(GUITHREADINFO));
+		string capture = GetGUIThreadInfo(0, ref info) ? Owner(info.hwndCapture) : "not read";
+		return "at " + at.X + "," + at.Y + ": " + Owner(WindowFromPoint(at)) + "; foreground: " + Owner(GetForegroundWindow()) + "; capture: " + capture;
 	}
 	// Ends the processes whose top-level window covers x,y over process pid's, up to three (the windows-11-arm image
 	// shows its first-logon privacy screen over the whole desktop); never the shell's or the session's own.

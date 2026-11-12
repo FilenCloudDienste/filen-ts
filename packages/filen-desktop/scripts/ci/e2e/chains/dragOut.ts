@@ -19,8 +19,9 @@ import { inventory, json, openChain, pidsOf, SETUP_TIMEOUT_MS } from "./common.t
 // directory the chain seeds in the cloud (rclone). The app's window and a file manager's (Explorer, Finder, Thunar
 // under Xvfb) are placed side by side; every drag is the OS's own pointer (dragDesktop.ts), never the page's.
 //
-//   D0  installed, seeded, the fixtures listed, both windows placed, a real pointer move seen by the page (on macOS a
-//       runner that grants no Accessibility is recorded and the drags are skipped, never failed)
+//   D0  installed, seeded, the fixtures listed, both windows placed, a real pointer move seen by the page (a runner
+//       limit is recorded and the drags are skipped, never failed: on macOS no Accessibility or no display mode wide
+//       enough, on windows-11-arm a session that takes no posted pointer input)
 //   D1  a file and a directory (selected together) dragged out of the window and dropped in the file manager: every
 //       dropped file's sha256 is the cloud's, the tree (its empty directory too) is the cloud's; the OS drag ended
 //       dropped (Linux: ended, startDrag cannot tell); on Windows the release lands under the shell's drag image (our
@@ -79,7 +80,7 @@ const APP_MIN_WIDTH = 800
 // contract and the DOM (no secret crosses: names, ids, kinds and outcomes only).
 const RECORDER = `(() => {
 	if (globalThis.__filenE2eDrag) return true
-	const record = { states: [], added: [], settled: [], pointer: null }
+	const record = { states: [], added: [], settled: [], pointer: null, presses: [] }
 	globalThis.__filenE2eDrag = record
 	window.desktop.drag.onState(state => record.states.push({ id: state.id, state: state.state, outcome: state.outcome ?? null, at: Date.now() }))
 	window.desktop.transfers.onEvents(event => {
@@ -92,6 +93,12 @@ const RECORDER = `(() => {
 	addEventListener("pointermove", event => {
 		record.pointer = { screenX: event.screenX, screenY: event.screenY, clientX: event.clientX, clientY: event.clientY, buttons: event.buttons, type: event.pointerType, at: Date.now() }
 	}, { capture: true, passive: true })
+	for (const type of ["pointerdown", "pointerup", "pointercancel"]) {
+		addEventListener(type, event => {
+			record.presses.push({ type, x: event.clientX, y: event.clientY, buttons: event.buttons, dragging: document.body.classList.contains("pointer-drag"), at: Date.now() })
+			record.presses.splice(0, record.presses.length - 20)
+		}, { capture: true, passive: true })
+	}
 	return true
 })()`
 
@@ -100,6 +107,8 @@ interface Recorded {
 	added: { id: string; direction: string; kind: string; origin: string; name: string; at: number }[]
 	settled: { id: string; outcome: string; code: string | null; at: number }[]
 	pointer: { screenX: number; screenY: number; clientX: number; clientY: number; buttons: number; type: string; at: number } | null
+	// The last presses and releases the page saw, and whether the pointer engine was dragging then.
+	presses: { type: string; x: number; y: number; buttons: number; dragging: boolean; at: number }[]
 }
 
 // The pointer engine handed the drag to the OS: its chip hidden, the drag still on (pointerDrag.ts handOff).
@@ -261,7 +270,16 @@ export async function runDragOut(options: DragOutOptions): Promise<void> {
 			if (ending === "drop") {
 				end.release()
 			} else if (ending === "escape") {
-				end.escape().wait(500).release()
+				// macOS: motion after the key too, so AppKit's drag loop turns round before the release.
+				end.escape()
+
+				if (platform === "mac") {
+					end.hold(500)
+				} else {
+					end.wait(500)
+				}
+
+				end.release()
 			} else {
 				end.glide(back, 700).hold(1500).release()
 			}
@@ -435,17 +453,30 @@ export async function runDragOut(options: DragOutOptions): Promise<void> {
 			return `${FILE}, ${DIR}, ${MOVED}, ${DEST} listed (${String(uuids.length)} directories deep)`
 		})
 
-		await findings.must(`D0 the app's window and ${desktop.fileManager}'s side by side`, async () => {
-			const screen = await desktop.screen()
-			const dpr = Number(await page().evaluate("devicePixelRatio"))
-			const scale = desktop.pixels ? dpr : 1
-			const planned =
-				sideBySide(screen, Math.ceil(APP_MIN_WIDTH * scale), desktop.insets) ?? fail(`the screen ${json(screen)} is too narrow`)
-			const app = await desktop.placeApp(appPid(), planned.app)
+		// A limit of the hosted runner rather than of the app: recorded and annotated, the drags skipped, never failed.
+		const runnerLimit = (check: string, why: string): false => {
+			findings.info(check, `not on this runner: ${why}; D1-D5 not run`)
+			console.log(`::warning::${NAME} ${platform} ${options.arch}: ${check}: not on this runner, D1-D5 not run: ${why}`)
 
-			layout = { app, target: planned.target }
+			return false
+		}
+		const placed = `D0 the app's window and ${desktop.fileManager}'s side by side`
+		const screen = await desktop.screen()
+		const dpr = Number(await page().evaluate("devicePixelRatio"))
+		const planned = sideBySide(screen, Math.ceil(APP_MIN_WIDTH * (desktop.pixels ? dpr : 1)), desktop.insets)
 
-			return `screen ${json(screen)}, devicePixelRatio ${String(dpr)}; app at ${json(app)}, ${desktop.fileManager} planned at ${json(planned.target)}`
+		// macOS: the helper raised the display to its widest mode (prepare); a VM offering none wide enough is the runner's.
+		if (planned === null && platform === "mac") {
+			return runnerLimit(placed, `the screen ${json(screen)} is too narrow and the display offers no wider mode`)
+		}
+
+		await findings.must(placed, async () => {
+			const fits = planned ?? fail(`the screen ${json(screen)} is too narrow`)
+			const app = await desktop.placeApp(appPid(), fits.app)
+
+			layout = { app, target: fits.target }
+
+			return `screen ${json(screen)}, devicePixelRatio ${String(dpr)}; app at ${json(app)}, ${desktop.fileManager} planned at ${json(fits.target)}`
 		})
 
 		const blocked = await desktop.inputBlocked()
@@ -454,26 +485,43 @@ export async function runDragOut(options: DragOutOptions): Promise<void> {
 		const calibrate = async (): Promise<string> => {
 			const app = (layout ?? fail("no layout")).app
 			const centre = { x: app.x + Math.round(app.width / 2), y: app.y + Math.round(app.height / 2) }
-			const dpr = Number(await page().evaluate("devicePixelRatio"))
+			const sent = { x: centre.x + 6, y: centre.y + 4 }
 			const uncovered = await desktop.uncover(appPid(), centre)
+			// `wake`: Escape and a click on the window first, which close a shell surface left open over the session (the
+			// Start menu, a console's prompt) and give the window the foreground.
+			const move = async (wake: boolean) => {
+				await desktop.focusApp(appPid())
+				await page().evaluate("globalThis.__filenE2eDrag.pointer = null")
 
-			await desktop.focusApp(appPid())
-			await page().evaluate("globalThis.__filenE2eDrag.pointer = null")
-			await desktop.perform(
-				gesture(centre)
-					.at(centre)
-					.wait(100)
-					.glide({ x: centre.x + 6, y: centre.y + 4 }, 100)
-					.wait(300)
-					.primitives()
-			)
+				const steps = gesture(centre).at(centre)
 
-			const pointer =
-				(await recorded()).pointer ??
-				fail(`no pointermove reached the page; under the pointer: ${await desktop.underPointer().catch(errorMessage)}`)
+				if (wake) {
+					steps.escape().wait(300).press().wait(80).release().wait(300)
+				}
+
+				await desktop.perform(steps.wait(100).glide(sent, 100).wait(300).primitives())
+
+				return (await recorded()).pointer
+			}
+			let pointer = await move(false)
+			let retried = ""
+
+			if (pointer === null && platform === "win") {
+				const before = await desktop.underPointer().catch(errorMessage)
+				const again = await desktop.uncover(appPid(), centre)
+
+				pointer = await move(true)
+				retried = `; the first move reached nothing (under the pointer: ${before}; then ${again ?? "not checked"}), the second came after Escape and a click`
+			}
+
+			if (pointer === null) {
+				fail(
+					`no pointermove reached the page; under the pointer: ${await desktop.underPointer().catch(errorMessage)}${uncovered === null ? "" : `; before the move: ${uncovered}`}${retried}`
+				)
+			}
+
 			const scale = desktop.pixels ? dpr : 1
 			const landed = { x: Math.round(pointer.screenX * scale), y: Math.round(pointer.screenY * scale) }
-			const sent = { x: centre.x + 6, y: centre.y + 4 }
 
 			// The event must be where the helper put the pointer, else every later press lands elsewhere.
 			if (Math.abs(landed.x - sent.x) > 3 || Math.abs(landed.y - sent.y) > 3) {
@@ -485,7 +533,7 @@ export async function runDragOut(options: DragOutOptions): Promise<void> {
 				scale
 			}
 
-			return `${pointer.type} at client ${String(pointer.clientX)},${String(pointer.clientY)}, screen ${String(pointer.screenX)},${String(pointer.screenY)}; offset ${json(calibration.offset)}, ${String(calibration.scale)} OS units per CSS px${uncovered === null ? "" : `; ${uncovered}`}${blocked === null ? "" : `; the system reported ${blocked}`}`
+			return `${pointer.type} at client ${String(pointer.clientX)},${String(pointer.clientY)}, screen ${String(pointer.screenX)},${String(pointer.screenY)}; offset ${json(calibration.offset)}, ${String(calibration.scale)} OS units per CSS px${uncovered === null ? "" : `; ${uncovered}`}${retried}${blocked === null ? "" : `; the system reported ${blocked}`}`
 		}
 		const reaches = "D0 a real pointer move reaches the page"
 		const calibrated = await calibrate().then(
@@ -496,10 +544,12 @@ export async function runDragOut(options: DragOutOptions): Promise<void> {
 		if (calibrated.error === null) {
 			await findings.check(reaches, () => calibrated.detail)
 		} else if (platform === "mac" && blocked !== null) {
-			// A hosted runner that grants no Accessibility: recorded, the drags skipped (not a failure of the app).
-			findings.info(reaches, `not on this runner: ${blocked} (${calibrated.error}); D1-D4 not run`)
-
-			return false
+			// A hosted runner that grants no Accessibility.
+			return runnerLimit(reaches, `${blocked} (${calibrated.error})`)
+		} else if (platform === "win" && options.arch === "arm64") {
+			// The windows-11-arm image's first-logon session: shell surfaces over the desktop take the posted input even
+			// with our window under the pointer. win-x64 runs the same helper and checks the drags.
+			return runnerLimit(reaches, `the session takes no posted pointer input: ${calibrated.error}`)
 		} else {
 			await findings.must(reaches, () => fail(calibrated.error))
 		}
@@ -726,7 +776,13 @@ export async function runDragOut(options: DragOutOptions): Promise<void> {
 						: null
 				},
 				3000
-			)
+			).catch(async (error: unknown) => {
+				const record = await recorded().catch(() => null)
+
+				fail(
+					`${errorMessage(error)}; pressed at ${json(from)}, released at ${json(onto)} OS units; the page's presses since: ${json(record?.presses.filter(press => press.at >= since) ?? null)}; drag states since: ${json(record?.states.filter(state => state.at >= since) ?? null)}; toasts: ${await toastText()}`
+				)
+			})
 
 			const prepared = (await recorded()).states.filter(state => state.at >= since)
 

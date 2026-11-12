@@ -36,9 +36,16 @@ func post(_ type: CGEventType, _ point: CGPoint) {
 	cursor = point
 }
 
+// Held for about 100 ms with the pointer jittering, as a key pressed during a drag: AppKit's drag loop hears the key
+// between motion events (a 30 ms press under a resting pointer left a hosted runner's drag running).
 func escape() {
+	let base = cursor
 	CGEvent(keyboardEventSource: source, virtualKey: 53, keyDown: true)?.post(tap: .cghidEventTap)
-	Thread.sleep(forTimeInterval: 0.03)
+	for frame in 0 ..< 6 {
+		Thread.sleep(forTimeInterval: 0.016)
+		post(buttonDown ? .leftMouseDragged : .mouseMoved, CGPoint(x: base.x + (frame % 2 == 0 ? 1 : 0), y: base.y))
+	}
+	post(buttonDown ? .leftMouseDragged : .mouseMoved, base)
 	CGEvent(keyboardEventSource: source, virtualKey: 53, keyDown: false)?.post(tap: .cghidEventTap)
 }
 
