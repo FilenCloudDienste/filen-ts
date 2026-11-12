@@ -210,10 +210,20 @@ public static class FilenE2eDrag {
 		return "at " + at.X + "," + at.Y + ": " + Owner(WindowFromPoint(at)) + "; foreground: " + Owner(GetForegroundWindow()) + "; capture: " + capture;
 	}
 	// Ends the processes whose top-level window covers x,y over process pid's, up to three (the windows-11-arm image
-	// shows its first-logon privacy screen over the whole desktop); never the shell's or the session's own.
+	// shows its first-logon privacy screen over the whole desktop); never the shell's or the session's own. First, every
+	// "install WSL" console of that image, wherever it is: its wsl.exe client outlives an ended terminal, whose window
+	// comes back and takes the foreground (keys, Escape included, go there) or the mouse capture.
 	public static string Uncover(uint pid, int x, int y) {
 		var ended = new List<string>();
 		string[] keep = { "explorer", "dwm", "csrss", "winlogon", "svchost", "sihost", "system", "idle", "?" };
+		foreach (var client in System.Diagnostics.Process.GetProcessesByName("wsl")) {
+			try { client.Kill(); ended.Add("wsl " + client.Id); } catch (Exception) { }
+		}
+		for (IntPtr console = Titled("CASCADIA_HOSTING_WINDOW_CLASS", "wsl.exe"), last = IntPtr.Zero; console != IntPtr.Zero && console != last; last = console, console = Titled("CASCADIA_HOSTING_WINDOW_CLASS", "wsl.exe")) {
+			string what = "WindowsTerminal " + Pid(console) + " ('" + Title(console) + "')";
+			try { System.Diagnostics.Process.GetProcessById((int)Pid(console)).Kill(); ended.Add(what); } catch (Exception) { break; }
+			Thread.Sleep(1000);
+		}
 		for (int round = 0; round < 4; round++) {
 			POINT at; at.X = x; at.Y = y;
 			IntPtr root = GetAncestor(WindowFromPoint(at), 2);

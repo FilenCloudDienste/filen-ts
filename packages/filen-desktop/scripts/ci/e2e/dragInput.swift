@@ -8,6 +8,7 @@
 //                           when it is smaller, for this login session; what it was, the modes, what it is
 //   dragInput run "<steps>" m X Y (a move; a drag while the button is down), d, h (the button is still held from the
 //                           last run), u, k esc, s MS; separated by ";"
+import AppKit
 import ApplicationServices
 import CoreGraphics
 import Foundation
@@ -29,6 +30,8 @@ let source = CGEventSource(stateID: .hidSystemState)
 let buttonAtStart = CGEventSource.buttonState(.hidSystemState, button: .left)
 var buttonDown = buttonAtStart
 var cursor = CGEvent(source: nil)?.location ?? .zero
+// The frontmost app when Escape went down (key events go to it), in the run's output.
+var escapeTo: [String] = []
 
 func post(_ type: CGEventType, _ point: CGPoint) {
 	guard let event = CGEvent(mouseEventSource: source, mouseType: type, mouseCursorPosition: point, mouseButton: .left) else { return }
@@ -43,6 +46,8 @@ func post(_ type: CGEventType, _ point: CGPoint) {
 // between motion events (a 30 ms press under a resting pointer left a hosted runner's drag running).
 func escape() {
 	let base = cursor
+	let front = NSWorkspace.shared.frontmostApplication
+	escapeTo.append("\(front?.bundleIdentifier ?? front?.localizedName ?? "none") \(front?.processIdentifier ?? 0)")
 	CGEvent(keyboardEventSource: source, virtualKey: 53, keyDown: true)?.post(tap: .cghidEventTap)
 	for frame in 0 ..< 6 {
 		Thread.sleep(forTimeInterval: 0.016)
@@ -119,7 +124,11 @@ do {
 		for raw in argv[1].split(separator: ";") {
 			try step(raw.trimmingCharacters(in: .whitespaces))
 		}
-		emit(["ran": true, "buttonAtStart": buttonAtStart, "buttonDown": buttonDown])
+		var ran: [String: Any] = ["ran": true, "buttonAtStart": buttonAtStart, "buttonDown": buttonDown]
+		if !escapeTo.isEmpty {
+			ran["escapeTo"] = escapeTo
+		}
+		emit(ran)
 	default:
 		throw Failure(description: "usage: dragInput access | screen | run \"<steps>\"")
 	}

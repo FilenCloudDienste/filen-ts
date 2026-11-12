@@ -82,7 +82,7 @@ const APP_MIN_WIDTH = 800
 // contract and the DOM (no secret crosses: names, ids, kinds and outcomes only).
 const RECORDER = `(() => {
 	if (globalThis.__filenE2eDrag) return true
-	const record = { states: [], added: [], settled: [], pointer: null, presses: [] }
+	const record = { states: [], added: [], settled: [], pointer: null, presses: [], escapes: [] }
 	globalThis.__filenE2eDrag = record
 	window.desktop.drag.onState(state => record.states.push({ id: state.id, state: state.state, outcome: state.outcome ?? null, at: Date.now() }))
 	window.desktop.transfers.onEvents(event => {
@@ -92,6 +92,10 @@ const RECORDER = `(() => {
 			record.settled.push({ id: event.id, outcome: event.outcome, code: event.error?.code ?? null, at: Date.now() })
 		}
 	})
+	// Escape keys the page saw (macOS: one that reached the page went to Chromium, not to AppKit's drag).
+	addEventListener("keydown", event => {
+		if (event.key === "Escape") record.escapes.push({ focused: document.hasFocus(), at: Date.now() })
+	}, { capture: true, passive: true })
 	// The moves since the last press, and how many of them said no button was down (which ends a press).
 	let pressed = null
 	addEventListener("pointermove", event => {
@@ -136,6 +140,7 @@ interface Recorded {
 		buttonless?: number
 		at: number
 	}[]
+	escapes: { focused: boolean; at: number }[]
 }
 
 // The pointer engine handed the drag to the OS: its chip hidden, the drag still on (pointerDrag.ts handOff).
@@ -398,7 +403,7 @@ export async function runDragOut(options: DragOutOptions): Promise<void> {
 	}
 
 	const expectOutcome = async (
-		drag: { id: string | null; outcome: string | null; handedOff: boolean | null; others: string[] },
+		drag: { since: number; id: string | null; outcome: string | null; handedOff: boolean | null; under: string; others: string[] },
 		wanted: string
 	): Promise<string> => {
 		const others = drag.others.length === 0 ? "" : `; meanwhile ${drag.others.join(", ")}`
@@ -414,7 +419,13 @@ export async function runDragOut(options: DragOutOptions): Promise<void> {
 		}
 
 		if (drag.outcome !== wanted) {
-			fail(`the OS drag ended ${drag.outcome}, expected ${wanted}${others}`)
+			// Where the input went: the foreground window on Windows, the Escape keys the page itself saw.
+			const escapes = (await recorded().catch(() => null))?.escapes.filter(escape => escape.at >= drag.since) ?? null
+			const under = drag.under === "" ? "" : `; before the release: ${drag.under}`
+
+			fail(
+				`the OS drag ended ${drag.outcome}, expected ${wanted}${others}${under}; Escape keys the page saw: ${escapes === null ? "not read" : json(escapes)}`
+			)
 		}
 
 		return `ended ${drag.outcome}${others}`
