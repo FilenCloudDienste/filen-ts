@@ -650,6 +650,8 @@ export const sync = {
 	errorModeConflict: "The pair can't switch to this mode right now.",
 	/** Error — an ignore rule does not parse */
 	errorInvalidIgnore: "An ignore rule isn't valid.",
+	/** Error — the chosen resolution can't clear this conflict (a backup's file-versus-directory conflict) */
+	errorResolutionRefused: "In this sync mode, this choice can't resolve a conflict between a file and a directory. Choose another.",
 	/** Error — anything else */
 	errorUnknown: "Something went wrong with sync.",
 

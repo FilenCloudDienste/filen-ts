@@ -3,7 +3,7 @@ import type { OpenDialogOptions, OpenDialogReturnValue } from "electron"
 import {
 	type DesktopSyncActivity,
 	type DesktopSyncBacklog,
-	type DesktopSyncConflict,
+	type DesktopSyncHeldConflict,
 	type DesktopSyncConflictResolved,
 	type DesktopSyncEntries,
 	type DesktopSyncErrorCode,
@@ -120,7 +120,7 @@ export interface SyncService {
 	plan(page: Page, pairId: string): Promise<Result<DesktopSyncPlan | null>>
 	planPage(planId: string, list: DesktopSyncPlanList, offset: number, limit: number): Promise<Result<DesktopSyncPlanPage>>
 	releasePlan(planId: string): Promise<void>
-	conflicts(pairId: string, offset: number, limit: number): Promise<Result<DesktopSyncEntries<DesktopSyncConflict>>>
+	conflicts(pairId: string, offset: number, limit: number): Promise<Result<DesktopSyncEntries<DesktopSyncHeldConflict>>>
 	resolveConflict(pairId: string, relPath: string, resolution: DesktopSyncResolution): Promise<Result<DesktopSyncConflictResolved>>
 	resolveConflicts(pairId: string, resolution: DesktopSyncResolution, count: number): Promise<Result<DesktopSyncResolvedConflicts>>
 	heldDeletions(pairId: string): Promise<Result<DesktopSyncHeldDeletions>>

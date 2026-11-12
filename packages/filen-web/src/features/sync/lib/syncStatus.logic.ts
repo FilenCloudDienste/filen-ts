@@ -2,6 +2,7 @@ import {
 	type DesktopSyncConflict,
 	type DesktopSyncConflictResolved,
 	type DesktopSyncHalt,
+	type DesktopSyncHeldConflict,
 	type DesktopSyncHold,
 	type DesktopSyncHeldReason,
 	type DesktopSyncInfoNotice,
@@ -278,6 +279,14 @@ export const CONFLICTS_BULK: Record<
 	keepLocal: { label: "conflictsKeepAllLocal", body: "conflictsKeepAllLocalBody", kept: "conflictsKeptAllLocal", destructive: true },
 	keepRemote: { label: "conflictsKeepAllRemote", body: "conflictsKeepAllRemoteBody", kept: "conflictsKeptAllRemote", destructive: true },
 	keepBoth: { label: "conflictsKeepAllBoth", body: "conflictsKeepAllBothBody", kept: "conflictsKeptAllBoth", destructive: false }
+}
+
+const ALL_RESOLUTIONS: readonly DesktopSyncResolution[] = ["keepLocal", "keepRemote", "keepBoth"]
+
+// The resolutions offered for all the conflicts: those every listed one allows (keepBoth clears every conflict). A
+// path a later page holds that refuses the choice stays a conflict, counted as failed.
+export function bulkResolutions(conflicts: readonly DesktopSyncHeldConflict[]): DesktopSyncResolution[] {
+	return ALL_RESOLUTIONS.filter(resolution => conflicts.every(conflict => conflict.resolutions.includes(resolution)))
 }
 
 // How a bulk resolution's toast ends: success when every path resolved, a warning naming the failures when some did,

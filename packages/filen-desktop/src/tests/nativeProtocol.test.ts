@@ -259,6 +259,7 @@ describe("fromNativeSchema", () => {
 			{ t: "reply", id: 1, ok: true, value: null },
 			{ t: "reply", id: 1, ok: false, error: { code: "invalidIgnore", line: 3 } },
 			{ t: "reply", id: 1, ok: false, error: { code: "localRootNested", pairId: "2", message: "nested" } },
+			{ t: "reply", id: 1, ok: false, error: { code: "resolutionRefused" } },
 			{ t: "overview", pairs: [runtime] },
 			{ t: "overview", pairs: [{ ...runtime, stage: { kind: "waitingForCloud" }, halted: "offline", refused: "localCollision" }] },
 			{
@@ -344,6 +345,19 @@ describe("opResult", () => {
 		expect(
 			accepts(opResult("planPage"), { list: "conflicts", total: 1, entries: [{ relPath: "a", local: "file", remote: null }] })
 		).toBe(true)
+		expect(
+			accepts(opResult("conflicts"), {
+				total: 1,
+				entries: [{ relPath: "a", local: "file", remote: "directory", resolutions: ["keepRemote", "keepBoth"] }]
+			})
+		).toBe(true)
+		expect(accepts(opResult("conflicts"), { total: 1, entries: [{ relPath: "a", local: "file", remote: null }] })).toBe(false)
+		expect(
+			accepts(opResult("conflicts"), {
+				total: 1,
+				entries: [{ relPath: "a", local: "file", remote: null, resolutions: ["keepEither"] }]
+			})
+		).toBe(false)
 		expect(
 			accepts(opResult("planPage"), {
 				list: "held",

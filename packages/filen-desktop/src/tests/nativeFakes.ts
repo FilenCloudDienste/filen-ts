@@ -2,6 +2,7 @@ import { vi } from "vitest"
 import type {
 	AnyDirWithContext,
 	ConflictReason,
+	ConflictResolution,
 	AnyFile,
 	AnyNormalDir,
 	Dir,
@@ -322,6 +323,7 @@ export function fakeEngine(pairs: SyncPairInfo[] = [pairInfo()]) {
 			Promise.resolve({ conflicts: [], total: 0n })
 		),
 		resolveConflict: vi.fn((): Promise<SyncConflictResolved> => Promise.resolve({})),
+		conflictResolutions: vi.fn((_reason: ConflictReason): ConflictResolution[] => [0, 1, 2]),
 		lastReport: vi.fn((_pairId: bigint): Promise<SyncPassReport | undefined> => Promise.resolve(undefined)),
 		approveDeletions: vi.fn(() => Promise.resolve()),
 		restoreDeletions: vi.fn(() => Promise.resolve()),

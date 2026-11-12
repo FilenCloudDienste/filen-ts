@@ -1,4 +1,4 @@
-import type { ConflictResolution, DeleteGuardState, SyncPairInfo, SyncPassReport } from "@filen/sdk-rs"
+import type { ConflictReason, ConflictResolution, DeleteGuardState, SyncPairInfo, SyncPassReport } from "@filen/sdk-rs"
 import type { DesktopSyncResolution } from "@filen/shared/desktop"
 import type { NativeOpArgs, NativeOpResult, NativePair, SyncOp } from "../shared/nativeProtocol.ts"
 import { modeName, type NativeSdk, type SyncEngine, syncMode } from "./addon.ts"
@@ -79,6 +79,14 @@ function conflictResolution(sdk: NativeSdk, resolution: DesktopSyncResolution): 
 			: sdk.ConflictResolution.KeepBoth
 }
 
+function resolutionName(sdk: NativeSdk, resolution: ConflictResolution): DesktopSyncResolution {
+	return resolution === sdk.ConflictResolution.KeepLocal
+		? "keepLocal"
+		: resolution === sdk.ConflictResolution.KeepRemote
+			? "keepRemote"
+			: "keepBoth"
+}
+
 const NO_HELD = { passToken: null, reason: null, total: 0, entries: [], gaps: [], gapsTotal: 0 }
 
 // One handler per protocol op. Pair ids arrive as validated decimal strings and become the engine's bigints here; a
@@ -91,6 +99,19 @@ export function createHostEngine(ctx: OpsContext): HostEngine {
 	const conflictReads = new Map<string, number>()
 	let conflictRead = 0
 	let defaults: string[] | null = null
+	// Per conflict reason, the resolutions that can clear it: fixed for the addon, so asked for once per reason.
+	const allowed = new Map<ConflictReason, DesktopSyncResolution[]>()
+
+	function resolutionsFor(reason: ConflictReason): DesktopSyncResolution[] {
+		let names = allowed.get(reason)
+
+		if (names === undefined) {
+			names = engine.conflictResolutions(reason).map(resolution => resolutionName(sdk, resolution))
+			allowed.set(reason, names)
+		}
+
+		return names
+	}
 
 	// The conflicts the engine holds for the pair, counted from the baseline (an index seek, no network). Asked for
 	// once per pair, then only after what can change it: a pass that may have recorded one, or a resolution.
@@ -290,7 +311,10 @@ export function createHostEngine(ctx: OpsContext): HostEngine {
 		conflicts: async ({ pairId, offset, limit }) => {
 			const page = await engine.listConflicts(held(pairId).id, BigInt(offset), BigInt(limit))
 
-			return { total: Number(page.total), entries: page.conflicts.map(conflict => toConflict(sdk, conflict)) }
+			return {
+				total: Number(page.total),
+				entries: page.conflicts.map(conflict => ({ ...toConflict(sdk, conflict), resolutions: resolutionsFor(conflict.reason) }))
+			}
 		},
 		resolveConflict: async ({ pairId, relPath, resolution }) => {
 			const { id } = held(pairId)

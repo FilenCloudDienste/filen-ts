@@ -14,6 +14,7 @@ import type {
 	DesktopSyncConflictResolved,
 	DesktopSyncError,
 	DesktopSyncErrorCode,
+	DesktopSyncHeldConflict,
 	DesktopSyncHeldDeletions,
 	DesktopSyncHeldReason,
 	DesktopSyncIgnored,
@@ -93,6 +94,7 @@ const errorCodeSchema = pinned<DesktopSyncErrorCode>()(
 		"remoteRootContains",
 		"modeConflict",
 		"invalidIgnore",
+		"resolutionRefused",
 		"unknown"
 	)
 )
@@ -234,6 +236,19 @@ const conflictSchema = pinned<DesktopSyncConflict>()(
 	type({ relPath: relPathSchema, local: nodeKindSchema.or("null"), remote: nodeKindSchema.or("null"), "+": "reject" })
 )
 
+export const resolutionSchema = pinned<DesktopSyncResolution>()(type("'keepLocal' | 'keepRemote' | 'keepBoth'"))
+
+// A held conflict with the resolutions the engine allows for it.
+const heldConflictSchema = pinned<DesktopSyncHeldConflict>()(
+	type({
+		relPath: relPathSchema,
+		local: nodeKindSchema.or("null"),
+		remote: nodeKindSchema.or("null"),
+		resolutions: resolutionSchema.array().atMostLength(3),
+		"+": "reject"
+	})
+)
+
 const conflictResolvedSchema = pinned<DesktopSyncConflictResolved>()(
 	type({ quarantined: relPathSchema.or("null"), keptAs: relPathSchema.or("null"), "+": "reject" })
 )
@@ -294,8 +309,6 @@ const pageLimitSchema = type("1 <= number.integer <= 1000")
 // An ignore text: the engine allows 1 MiB per rule file.
 export const ignoreTextSchema = type("string <= 1048576")
 
-export const resolutionSchema = pinned<DesktopSyncResolution>()(type("'keepLocal' | 'keepRemote' | 'keepBoth'"))
-
 const noArgs = type({ "+": "reject" })
 const pairArgs = type({ pairId: pairIdSchema, "+": "reject" })
 const pageArgs = type({ pairId: pairIdSchema, offset: countSchema, limit: pageLimitSchema, "+": "reject" })
@@ -344,7 +357,7 @@ export const SYNC_OPS = {
 		result: planPageSchema
 	},
 	releasePlan: { args: type({ planId: planIdSchema, "+": "reject" }), result: done },
-	conflicts: { args: pageArgs, result: type({ total: countSchema, entries: conflictSchema.array(), "+": "reject" }) },
+	conflicts: { args: pageArgs, result: type({ total: countSchema, entries: heldConflictSchema.array(), "+": "reject" }) },
 	// The result is where the copy that lost went: keepRemote's bin path, or the path keepBoth kept it at.
 	resolveConflict: {
 		args: type({

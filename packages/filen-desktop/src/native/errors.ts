@@ -25,7 +25,8 @@ const REFUSALS: Partial<Record<string, DesktopSyncErrorCode>> = {
 	LocalRootContains: "localRootContains",
 	RemoteRootInUse: "remoteRootInUse",
 	RemoteRootNested: "remoteRootNested",
-	RemoteRootContains: "remoteRootContains"
+	RemoteRootContains: "remoteRootContains",
+	ResolutionRefused: "resolutionRefused"
 }
 
 // What a failed engine call means for main. "unauthenticated" — the server no longer takes the session — is only ever

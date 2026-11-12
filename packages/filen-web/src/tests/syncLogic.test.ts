@@ -14,6 +14,7 @@ import { ROOT_PROBLEM_KEY, ROOT_WARNING_KEY, SYNC_ERROR_KEY, UNSYNCABLE_REASON_K
 import {
 	ACTION_KIND_KEY,
 	aggregateSyncState,
+	bulkResolutions,
 	canRestoreHeld,
 	conflictDetailKey,
 	conflictResolvedToast,
@@ -130,6 +131,7 @@ describe("sync copy", () => {
 			"remoteRootContains",
 			"modeConflict",
 			"invalidIgnore",
+			"resolutionRefused",
 			"unknown"
 		])
 	})
@@ -369,6 +371,28 @@ describe("sync status helpers", () => {
 		expect(canRestoreHeld("remoteUnconverged")).toBe(false)
 		expect(canRestoreHeld("remoteEmptied")).toBe(false)
 		expect(canRestoreHeld(null)).toBe(false)
+	})
+
+	it("offers for all only the resolutions every listed conflict allows, in the engine's order", () => {
+		const held = (resolutions: ("keepLocal" | "keepRemote" | "keepBoth")[]) => ({
+			relPath: "a",
+			local: "file" as const,
+			remote: "directory" as const,
+			resolutions
+		})
+
+		expect(bulkResolutions([])).toEqual(["keepLocal", "keepRemote", "keepBoth"])
+		expect(bulkResolutions([held(["keepLocal", "keepRemote", "keepBoth"])])).toEqual(["keepLocal", "keepRemote", "keepBoth"])
+		expect(bulkResolutions([held(["keepLocal", "keepRemote", "keepBoth"]), held(["keepRemote", "keepBoth"])])).toEqual([
+			"keepRemote",
+			"keepBoth"
+		])
+		expect(bulkResolutions([held(["keepBoth"]), held(["keepRemote", "keepBoth"])])).toEqual(["keepBoth"])
+	})
+
+	it("says why a refused resolution was refused, in the product's words", () => {
+		expect(sync.errorResolutionRefused).toBeTypeOf("string")
+		expect(sync.errorResolutionRefused).not.toMatch(/folder/i)
 	})
 
 	it("labels, confirms and reports every bulk resolution, warning when some paths stayed conflicts", () => {

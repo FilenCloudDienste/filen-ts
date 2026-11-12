@@ -25,6 +25,7 @@ export const SYNC_ERROR_KEY: Record<DesktopSyncErrorCode, SyncKey> = {
 	remoteRootContains: "errorRemoteRootContains",
 	modeConflict: "errorModeConflict",
 	invalidIgnore: "errorInvalidIgnore",
+	resolutionRefused: "errorResolutionRefused",
 	unknown: "errorUnknown"
 }
 

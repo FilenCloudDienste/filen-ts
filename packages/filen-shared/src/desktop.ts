@@ -442,6 +442,12 @@ export interface DesktopSyncConflict {
 	remote: DesktopSyncNodeKind | null
 }
 
+// A conflict the pair holds, with the resolutions that can clear it (in the order keepLocal, keepRemote, keepBoth):
+// a backup mode's file-versus-directory conflict refuses the others as `resolutionRefused`.
+export interface DesktopSyncHeldConflict extends DesktopSyncConflict {
+	resolutions: DesktopSyncResolution[]
+}
+
 export type DesktopSyncUnsyncableReason =
 	| "invalidName"
 	| "repeatedFailure"
@@ -513,6 +519,7 @@ export type DesktopSyncErrorCode =
 	| "remoteRootContains"
 	| "modeConflict"
 	| "invalidIgnore"
+	| "resolutionRefused"
 	| "unknown"
 
 // `pairId`: the other pair an overlap refusal names. `line`: the first ignore line that does not parse (1-based).
@@ -609,7 +616,7 @@ export interface DesktopSync {
 	// `limit` at most 200.
 	planPage(planId: string, list: DesktopSyncPlanList, offset: number, limit: number): Promise<DesktopSyncResult<DesktopSyncPlanPage>>
 	releasePlan(planId: string): Promise<void>
-	conflicts(pairId: string, offset: number, limit: number): Promise<DesktopSyncResult<DesktopSyncEntries<DesktopSyncConflict>>>
+	conflicts(pairId: string, offset: number, limit: number): Promise<DesktopSyncResult<DesktopSyncEntries<DesktopSyncHeldConflict>>>
 	resolveConflict(
 		pairId: string,
 		relPath: string,

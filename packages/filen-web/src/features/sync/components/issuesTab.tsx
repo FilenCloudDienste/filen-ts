@@ -4,8 +4,8 @@ import { toast } from "sonner"
 import { useShallow } from "zustand/shallow"
 import { CircleCheckIcon } from "lucide-react"
 import type {
-	DesktopSyncConflict,
 	DesktopSyncHalt,
+	DesktopSyncHeldConflict,
 	DesktopSyncHeldDeletions,
 	DesktopSyncRefusal,
 	DesktopSyncResolution,
@@ -22,6 +22,7 @@ import { useSyncRead } from "@/features/sync/hooks/useSyncRead"
 import { syncApi, useSyncStore } from "@/features/sync/lib/syncStore"
 import { runSyncAction, syncErrorLabel } from "@/features/sync/lib/syncActions"
 import {
+	bulkResolutions,
 	canRestoreHeld,
 	CONFLICTS_BULK,
 	conflictDetailKey,
@@ -68,15 +69,18 @@ function useHidden(key: string): { hidden: ReadonlySet<string>; hide: (readKey: 
 
 // Every conflict resolved the same way, after a confirmation, in one shell call. The toast counts down from the
 // overview's count, which drops as the batches go. `busy` while a single row resolves, which the run would list too.
+// `allowed`: the resolutions every listed conflict allows.
 function ResolveAll({
 	pairId,
 	count,
 	busy,
+	allowed,
 	onRunning
 }: {
 	pairId: string
 	count: number
 	busy: boolean
+	allowed: readonly DesktopSyncResolution[]
 	onRunning: (running: boolean) => void
 }) {
 	const { t } = useTranslation(["sync", "common"])
@@ -136,7 +140,7 @@ function ResolveAll({
 	return (
 		<>
 			<SettingsBlock className="flex flex-wrap justify-end gap-2">
-				{RESOLUTIONS.map(resolution => (
+				{RESOLUTIONS.filter(resolution => allowed.includes(resolution.value)).map(resolution => (
 					<Button
 						key={resolution.value}
 						variant="outline"
@@ -169,15 +173,16 @@ function ResolveAll({
 	)
 }
 
-// Conflicts a page at a time, each with its three resolutions, and all of them at once. The list reads again when
-// the count changes; a resolved row hides at once, before the overview catches up.
+// Conflicts a page at a time, each with the resolutions that can clear it, and all of them at once. The list reads
+// again when the count changes; a resolved row hides at once, before the overview catches up.
 function ConflictsSection({ pairId, count }: { pairId: string; count: number }) {
 	const { t } = useTranslation("sync")
 	const key = `${pairId}:${String(count)}`
-	const paged = usePagedEntries<DesktopSyncConflict>(key, (offset, limit) => syncApi().conflicts(pairId, offset, limit))
+	const paged = usePagedEntries<DesktopSyncHeldConflict>(key, (offset, limit) => syncApi().conflicts(pairId, offset, limit))
 	const resolved = useHidden(key)
 	const [resolving, setResolving] = useState<string | null>(null)
 	const [resolvingAll, setResolvingAll] = useState(false)
+	const shown = paged.entries.filter(conflict => !resolved.hidden.has(conflict.relPath))
 
 	async function resolve(relPath: string, resolution: DesktopSyncResolution): Promise<void> {
 		const readKey = key
@@ -202,39 +207,38 @@ function ConflictsSection({ pairId, count }: { pairId: string; count: number }) 
 			title={t("issuesConflictsTitle")}
 			description={t("issuesConflictsDescription")}
 		>
-			{paged.entries
-				.filter(conflict => !resolved.hidden.has(conflict.relPath))
-				.map(conflict => (
-					<EntryRow
-						key={conflict.relPath}
-						path={conflict.relPath}
-						detail={
-							isRootRuleFile(conflict)
-								? `${t(conflictDetailKey(conflict))}. ${t("conflictRuleFileHint")}`
-								: t(conflictDetailKey(conflict))
-						}
-					>
-						{RESOLUTIONS.map(resolution => (
-							<Button
-								key={resolution.value}
-								variant="outline"
-								size="sm"
-								disabled={resolving !== null || resolvingAll}
-								onClick={() => {
-									void resolve(conflict.relPath, resolution.value)
-								}}
-							>
-								{t(resolution.key)}
-							</Button>
-						))}
-					</EntryRow>
-				))}
+			{shown.map(conflict => (
+				<EntryRow
+					key={conflict.relPath}
+					path={conflict.relPath}
+					detail={
+						isRootRuleFile(conflict)
+							? `${t(conflictDetailKey(conflict))}. ${t("conflictRuleFileHint")}`
+							: t(conflictDetailKey(conflict))
+					}
+				>
+					{RESOLUTIONS.filter(resolution => conflict.resolutions.includes(resolution.value)).map(resolution => (
+						<Button
+							key={resolution.value}
+							variant="outline"
+							size="sm"
+							disabled={resolving !== null || resolvingAll}
+							onClick={() => {
+								void resolve(conflict.relPath, resolution.value)
+							}}
+						>
+							{t(resolution.key)}
+						</Button>
+					))}
+				</EntryRow>
+			))}
 			<PagedFooter paged={paged} />
 			{count > 1 || resolvingAll ? (
 				<ResolveAll
 					pairId={pairId}
 					count={count}
 					busy={resolving !== null}
+					allowed={bulkResolutions(shown)}
 					onRunning={setResolvingAll}
 				/>
 			) : null}

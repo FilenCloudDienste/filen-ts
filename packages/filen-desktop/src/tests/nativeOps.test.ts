@@ -275,6 +275,52 @@ describe("native ops", () => {
 		})
 	})
 
+	it("lists each held conflict with the resolutions the engine allows for its reason, asking once per reason", async () => {
+		const { engine, host } = setup()
+		// ConflictReason.RemoteKeepsDir: a backup's kind mismatch the engine refuses keepLocal for.
+		const remoteKeepsDir = 1 as typeof DIVERGED
+
+		await host.refreshPairs()
+		engine.conflictResolutions.mockImplementation(reason =>
+			reason === remoteKeepsDir ? [fakeSdk.ConflictResolution.KeepRemote, fakeSdk.ConflictResolution.KeepBoth] : [0, 1, 2]
+		)
+		engine.listConflicts.mockResolvedValue({
+			conflicts: [
+				{ relPath: "a", local: fakeSdk.PlannedNodeKind.File, remote: fakeSdk.PlannedNodeKind.Dir, reason: remoteKeepsDir },
+				{ relPath: "b", local: fakeSdk.PlannedNodeKind.File, remote: fakeSdk.PlannedNodeKind.File, reason: DIVERGED },
+				{ relPath: "c", local: fakeSdk.PlannedNodeKind.File, remote: fakeSdk.PlannedNodeKind.Dir, reason: remoteKeepsDir }
+			],
+			total: 3n
+		})
+
+		await expect(host.ops.conflicts({ pairId: "1", offset: 0, limit: 10 })).resolves.toEqual({
+			total: 3,
+			entries: [
+				{ relPath: "a", local: "file", remote: "directory", resolutions: ["keepRemote", "keepBoth"] },
+				{ relPath: "b", local: "file", remote: "file", resolutions: ["keepLocal", "keepRemote", "keepBoth"] },
+				{ relPath: "c", local: "file", remote: "directory", resolutions: ["keepRemote", "keepBoth"] }
+			]
+		})
+		await host.ops.conflicts({ pairId: "1", offset: 0, limit: 10 })
+		expect(engine.conflictResolutions.mock.calls).toEqual([[remoteKeepsDir], [DIVERGED]])
+	})
+
+	it("reports a resolution the engine refuses as refused, not unknown", async () => {
+		const { engine, host } = setup()
+
+		await host.refreshPairs()
+		engine.resolveConflict.mockRejectedValueOnce(
+			sdkError(fakeSdk.ErrorKind.InvalidState, "refused", {
+				tag: "ResolutionRefused",
+				inner: { relPath: "a", resolution: fakeSdk.ConflictResolution.KeepLocal, reason: 1 as typeof DIVERGED }
+			})
+		)
+
+		await expect(failure(host.ops.resolveConflict({ pairId: "1", relPath: "a", resolution: "keepLocal" }))).resolves.toEqual({
+			code: "resolutionRefused"
+		})
+	})
+
 	it("resolves a batch of conflicts one after another, counting them once", async () => {
 		const { engine, host } = setup()
 
