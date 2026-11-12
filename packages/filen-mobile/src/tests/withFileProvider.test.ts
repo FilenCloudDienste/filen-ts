@@ -65,4 +65,14 @@ describe("getFileProviderInfoContent", () => {
 		expect(generated.NSExtension["NSExtensionFileProviderAllowsUserControlledEviction"]).toBe(false)
 		expect(generated.NSExtension["NSExtensionPointIdentifier"]).toBe("com.apple.fileprovider-nonui")
 	})
+
+	it("declares the document group only together with a hidden, disabled default domain", () => {
+		const generated = plist.parse(getFileProviderInfoContent("Filen", PROPS, fileProviderActionKeys(PROVIDER_PLIST))) as {
+			NSExtension: Record<string, unknown>
+		}
+
+		expect(generated.NSExtension["NSExtensionFileProviderDocumentGroup"]).toBe("group.io.filen.app")
+		expect(generated.NSExtension["NSFileProviderDefaultDomainVisible"]).toBe(false)
+		expect(generated.NSExtension["NSFileProviderDefaultDomainEnabled"]).toBe(false)
+	})
 })

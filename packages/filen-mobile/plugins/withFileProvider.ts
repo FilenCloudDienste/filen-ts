@@ -60,19 +60,17 @@ export const getFileProviderInfoContent = (appName: string, props: FileProviderP
 		CFBundleInfoDictionaryVersion: "6.0",
 		CFBundlePackageType: "$(PRODUCT_BUNDLE_PACKAGE_TYPE)",
 		NSExtension: {
-			// NSExtensionFileProviderDocumentGroup is deliberately ABSENT, and belongs with the
-			// replicated principal class below rather than being weighed on its own. Setting it
-			// makes iOS create a legacy default domain; a replicated provider cannot service one,
-			// so the system routes that domain's mutations into its own FPXFakeDefaultDomainExtension
-			// shim, whose modifyItem: hits an assert and aborts the extension — a C assert, so the
-			// FPExceptionToErrorProxy wrapping the call cannot turn it back into an error. The app
-			// registers its one real domain through NSFileProviderManager instead, and while the key
-			// was harmless under the pre-replicated extension (a second instance of our own class
-			// served the default domain), pairing it with this principal class is what crashes.
-			//
-			// The cost of leaving it out is an ITMS-90360 validation WARNING on upload, which is
-			// accepted: the build still processes and ships. Nothing derives from the key either —
-			// the content cache spells out its app-group path literally.
+			// App Store validation rejects the build without the document group (ITMS-90360). The key
+			// gives fileproviderd's legacy default domain, which it keeps for every provider, a root
+			// at <group>/File Provider Storage. A replicated principal class cannot serve that domain,
+			// so while it is visible (no real domain registered: provider off, logged out, biometric
+			// lock) its requests go to the system's FPXFakeDefaultDomainExtension, which asserts on
+			// every mutation and aborts the extension. The two DefaultDomain keys keep it hidden,
+			// so no request reaches the extension; Apple's replicated iCloud Drive extension ships
+			// the same three keys. Both are undocumented: recheck on major iOS releases.
+			NSExtensionFileProviderDocumentGroup: props.iosAppGroupIdentifier,
+			NSFileProviderDefaultDomainVisible: false,
+			NSFileProviderDefaultDomainEnabled: false,
 			NSExtensionFileProviderSupportsEnumeration: true,
 			// matches filen-ios-file-provider 99f4a72 — without this the extension is
 			// greyed out in other apps' folder pickers (e.g. Cryptomator vault location)
