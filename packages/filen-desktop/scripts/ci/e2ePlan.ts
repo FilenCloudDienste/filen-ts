@@ -208,22 +208,19 @@ export interface DeepReadiness {
 }
 
 export const DEEP_READY: DeepScenarios = {
-	"win-x64-nsis": ["previous", "legacy"],
+	"win-x64-nsis": ["previous", "legacy", "dragout"],
 	"win-arm64-nsis": ["previous", "legacy"],
 	"mac-arm64-dmg": ["previous", "legacy"],
-	"linux-x64-deb": ["previous", "legacy"],
-	"linux-arm64-deb": ["previous", "legacy"],
+	"linux-x64-deb": ["previous", "legacy", "dragout"],
+	"linux-arm64-deb": ["previous", "legacy", "dragout"],
 	"linux-x64-AppImage": ["previous", "legacy"],
 	"linux-arm64-AppImage": ["previous", "legacy"]
 }
 // Deep chains being brought up: deep only when a custom run names the entry in FORMATS with DEPTH deep, so nightly and
 // release runs stay on what is proven. Chain D moves to DEEP_READY once it has passed on an entry.
 export const DEEP_TRIAL: DeepScenarios = {
-	"win-x64-nsis": ["dragout"],
 	"win-arm64-nsis": ["dragout"],
-	"mac-arm64-dmg": ["dragout"],
-	"linux-x64-deb": ["dragout"],
-	"linux-arm64-deb": ["dragout"]
+	"mac-arm64-dmg": ["dragout"]
 }
 // Seconds between the UI sign-ins of parallel deep jobs.
 const STAGGER_SECONDS = 20
