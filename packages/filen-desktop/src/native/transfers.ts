@@ -500,11 +500,12 @@ export function createTransferRegistry(
 						onDownloadUpdate: (dirs, downloaded, bytes) => {
 							files.done += downloaded.length
 
+							// The SDK reports each entry by its full local path (below `created`).
 							if (dirs.length + downloaded.length > 0) {
 								mark(
 									entry,
-									downloaded.map(item => path.join(created, item.path)),
-									dirs.map(item => path.join(created, item.path))
+									downloaded.map(item => item.path),
+									dirs.map(item => item.path)
 								)
 							}
 

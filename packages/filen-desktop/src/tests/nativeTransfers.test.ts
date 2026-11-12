@@ -63,7 +63,7 @@ function innerOf(value: unknown): unknown {
 // What napi returns for these items.
 const ubrnFile = (uuid = FILE_UUID, size = 100_000n) => innerOf(ubrnOf("AnyFile.File", wasmFile(uuid, size))) as File
 const ubrnDir = (uuid = NEW_DIR_UUID) => innerOf(ubrnOf("AnyNormalDir.Dir", wasmDir(uuid, "Photos"))) as Dir
-// A directory download's FileWithPath and DirWithPath.
+// A directory download's FileWithPath and DirWithPath: the SDK reports full local paths.
 const fileAt = (filePath: string): FileWithPath => ({ path: filePath, file: ubrnFile() })
 const dirAt = (dirPath: string): DirWithPath => ({ path: dirPath, dir: { tag: "Normal", inner: [ubrnDir()] } })
 
@@ -323,7 +323,7 @@ describe("transfer registry", () => {
 		expect(download.args[0]).toBe(at("Projects"))
 		expect(download.args[2]).toEqual(ubrnOf("AnyDirWithContext.Normal.Dir", wasmDir(DIR_UUID, "Projects")))
 		callback.onScanComplete(0n, 3n, 30n)
-		callback.onDownloadUpdate([], [fileAt("a"), fileAt("b")], 20n)
+		callback.onDownloadUpdate([], [fileAt(at("Projects", "a")), fileAt(at("Projects", "b"))], 20n)
 		download.resolve()
 		await round()
 
@@ -743,7 +743,11 @@ describe("transfer registry", () => {
 
 		const download = client.last("downloadDirRecursively")
 
-		;(download.args[1] as JsDirDownloadCallback).onDownloadUpdate([dirAt("sub")], [fileAt("sub/x.txt")], 1n)
+		;(download.args[1] as JsDirDownloadCallback).onDownloadUpdate(
+			[dirAt(at("Projects", "sub"))],
+			[fileAt(at("Projects", "sub", "x.txt"))],
+			1n
+		)
 		download.resolve()
 		await round()
 
@@ -769,9 +773,9 @@ describe("transfer registry", () => {
 		const download = client.last("downloadDirRecursively")
 		const update = (download.args[1] as JsDirDownloadCallback).onDownloadUpdate
 
-		update([], [fileAt("a")], 1n)
-		update([dirAt("d")], [fileAt("b")], 1n)
-		update([], [fileAt("c")], 1n)
+		update([], [fileAt(at("Projects", "a"))], 1n)
+		update([dirAt(at("Projects", "d"))], [fileAt(at("Projects", "b"))], 1n)
+		update([], [fileAt(at("Projects", "c"))], 1n)
 		download.resolve()
 		await round()
 
