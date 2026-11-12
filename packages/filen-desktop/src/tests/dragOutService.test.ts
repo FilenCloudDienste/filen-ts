@@ -144,7 +144,7 @@ describe("drag-out service: macOS", () => {
 })
 
 describe("drag-out service: Windows", () => {
-	const tree = [treeFile(["a"], null), treeDir(["d"], 1), treeFile(["d", "b"], 0, 1)]
+	const tree = [treeFile(["a"], null), treeDir(["d"], 1), { ...treeFile(["d", "b"], 0, 1), mtimeMs: 1_700_000_000_000 }]
 
 	it("contents completes the ticket with the temp path", async () => {
 		const f = dragFakes("virtual", { tree })
@@ -155,10 +155,11 @@ describe("drag-out service: Windows", () => {
 
 		const begin = f.win.begins[0]
 
-		expect(begin?.entries).toEqual([
-			{ path: "a", directory: false, size: 10n, mtimeMs: null },
-			{ path: "d", directory: true, size: 0n, mtimeMs: null },
-			{ path: "d\\b", directory: false, size: 10n, mtimeMs: null }
+		// No mtime is no property, never null: the addon refuses null for its Option<f64> and the drag never begins.
+		expect(begin?.entries).toStrictEqual([
+			{ path: "a", directory: false, size: 10n },
+			{ path: "d", directory: true, size: 0n },
+			{ path: "d\\b", directory: false, size: 10n, mtimeMs: 1_700_000_000_000 }
 		])
 		expect(begin?.image).toMatchObject({ width: 200, height: 40 })
 		expect(begin?.image.bgra.byteLength).toBe(200 * 40 * 4)

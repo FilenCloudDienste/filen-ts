@@ -8,8 +8,9 @@ export interface DragOutEntryWin {
 	path: string
 	directory: boolean
 	size: bigint
-	// Explorer stamps it as the file's write time; null leaves the time to Explorer.
-	mtimeMs: number | null
+	// Explorer stamps it as the file's write time; absent leaves the time to Explorer. Never null: the addon's
+	// Option<f64> takes a missing property as None but refuses null (napi-rs converts it as an f64).
+	mtimeMs?: number
 }
 
 export interface DragOutBeginWin {

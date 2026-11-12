@@ -259,7 +259,7 @@ export function createDragOutService<Icon extends DragIcon>(deps: DragOutDeps<Ic
 						path: entry.relativePath,
 						directory: entry.directory,
 						size: BigInt(entry.size),
-						mtimeMs: entry.mtimeMs
+						...(entry.mtimeMs === null ? {} : { mtimeMs: entry.mtimeMs })
 					})),
 					image: bitmap,
 					onContents: (ticket, index) => {
