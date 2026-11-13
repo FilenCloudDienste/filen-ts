@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { BufferTarget, EncodedPacketSink } from "mediabunny"
-import { runExport, type EngineDeps } from "@/features/preview/videoEdit/worker/engine"
+import { runExport, type EngineDeps, type ExportSummary } from "@/features/preview/videoEdit/worker/engine"
 import { copyBounds, copyVideo, GopRule } from "@/features/preview/videoEdit/worker/copy"
 import { ExportRefusedError } from "@/features/preview/videoEdit/worker/errors"
 import { InterleaveGate } from "@/features/preview/videoEdit/worker/gate"
@@ -36,12 +36,12 @@ async function exportOf(
 	fixture: FixtureOptions,
 	recipe: (duration: number) => VideoEditRecipe,
 	options: { context?: PlanContext; info?: Partial<VideoSourceInfo>; deps?: Partial<EngineDeps> } = {}
-): Promise<{ bytes: Uint8Array; info: VideoSourceInfo; source: Uint8Array }> {
+): Promise<{ bytes: Uint8Array; info: VideoSourceInfo; source: Uint8Array; summary: ExportSummary }> {
 	const source = await sourceFixture(fixture)
 	const info = await sourceInfoOf(source, options.info)
 	const target = new BufferTarget()
 
-	await runExport({
+	const summary = await runExport({
 		input: openInput(source),
 		info,
 		recipe: recipe(info.duration),
@@ -57,7 +57,7 @@ async function exportOf(
 		throw new Error("no output")
 	}
 
-	return { bytes: new Uint8Array(target.buffer), info, source }
+	return { bytes: new Uint8Array(target.buffer), info, source, summary }
 }
 
 function inRanges(frame: number, ranges: readonly TimeRange[]): boolean {
@@ -69,6 +69,22 @@ function inRanges(frame: number, ranges: readonly TimeRange[]): boolean {
 const GOP_2S = 2 * FPS
 
 describe("copy path", () => {
+	it("reports the ranges it wrote and the output's length", async () => {
+		const { summary } = await exportOf({ seconds: 6, gop: GOP_2S, bframes: true, audio: false }, duration =>
+			recipeFor(duration, {
+				keep: [
+					{ start: 0, end: 2 },
+					{ start: 4, end: 6 }
+				]
+			})
+		)
+
+		expect(summary.bounds).toHaveLength(2)
+		expect(summary.bounds[0]?.start).toBe(0)
+		expect(summary.bounds[1]?.start).toBeCloseTo(4)
+		expect(summary.outputDuration).toBeCloseTo(summary.bounds.reduce((total, range) => total + range.end - range.start, 0))
+	})
+
 	it("copies a whole file packet for packet", async () => {
 		const { bytes } = await exportOf({ seconds: 6, gop: GOP_2S, bframes: true, audio: true }, duration => recipeFor(duration))
 		const { video, audio, input } = await outputPackets(bytes)

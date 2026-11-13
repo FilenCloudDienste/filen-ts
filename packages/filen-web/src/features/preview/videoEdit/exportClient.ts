@@ -69,7 +69,7 @@ export const exporter: Exporter = {
 
 			return await Promise.race([
 				resource.remote.startExport(Comlink.transfer(args, [args.source, args.output]), Comlink.proxy(onProgress)),
-				resource.lost.then((message): ExportWorkerResult => ({ status: "error", message, refusal: null }))
+				resource.lost.then((message): ExportWorkerResult => ({ status: "error", message, refusal: null, cause: "workerLost" }))
 			])
 		})
 

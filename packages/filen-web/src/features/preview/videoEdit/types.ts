@@ -158,22 +158,24 @@ export interface ExportProgress {
 	etaSeconds: number | null
 }
 
+// What went wrong in a save that failed, for the editor to word (the raw cause is only logged): the export made no
+// progress for too long; its worker died or stopped answering; the upload failed; anything else.
+export type VideoSaveErrorCode = "stalled" | "workerLost" | "uploadFailed" | "unknown"
+
 // "done": `item` is what the save made (the new version, or the copy).
-export type ExportOutcome = { status: "done"; item: DriveItem } | { status: "cancelled" } | { status: "error"; message: string }
+export type ExportOutcome = { status: "done"; item: DriveItem } | { status: "cancelled" } | { status: "error"; code: VideoSaveErrorCode }
 
 // Why a save never started (or stopped for its input rather than a fault; retrying will not help): offline; the
 // account's storage cannot hold the estimate; the recipe asks for what this browser cannot do; a copy fragment would
 // exceed iOS's memory cap; no video to export; a codec the export cannot copy or decode; a target the plan does not
-// offer for this file.
-export type VideoSaveRefusal = "offline" | "quota" | "unavailable" | "gop" | "noVideo" | "codec" | "target"
+// offer for this file; a new version of this file is being saved already (one at a time per file).
+export type VideoSaveRefusal = "offline" | "quota" | "unavailable" | "gop" | "noVideo" | "codec" | "target" | "busy"
 
 // How a save of an export ended, as the editor reports it: ExportOutcome, a refusal, or the file changed elsewhere
 // before the upload started (`currentUuid`: its version now, null when it is gone), for the remote-change dialog.
 // "error" is a fault worth a retry (the recipe is kept): a failed upload, a stalled or lost worker.
 export type VideoSaveOutcome =
-	| ExportOutcome
-	| { status: "refused"; reason: VideoSaveRefusal; message: string }
-	| { status: "remoteChanged"; currentUuid: string | null }
+	ExportOutcome | { status: "refused"; reason: VideoSaveRefusal } | { status: "remoteChanged"; currentUuid: string | null }
 
 // The worker-side surface the editor UI drives (implemented in videoEdit/client.ts).
 export interface VideoEditClient {

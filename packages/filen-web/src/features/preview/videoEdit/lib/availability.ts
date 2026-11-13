@@ -107,7 +107,8 @@ export const REFUSAL_LABELS: Readonly<Record<VideoSaveRefusal, NamespaceKey<"pre
 	gop: "previewVideoSaveRefusedGop",
 	noVideo: "previewVideoSaveRefusedNoVideo",
 	codec: "previewVideoSaveRefusedCodec",
-	target: "previewVideoSaveRefusedTarget"
+	target: "previewVideoSaveRefusedTarget",
+	busy: "previewVideoSaveRefusedBusy"
 }
 
 // A refusal worth trying again once its cause is gone (back online, storage freed); the others stay as they are.

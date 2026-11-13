@@ -14,28 +14,33 @@ import type { Exporter } from "@/features/preview/videoEdit/exportClient"
 import type { ExportWorkerProgress, ExportWorkerResult } from "@/features/preview/videoEdit/worker/exportApi"
 import type {
 	ExportProgress,
+	TimeRange,
 	VideoEditRecipe,
+	VideoSaveErrorCode,
 	VideoSaveOutcome,
 	VideoSaveRefusal,
 	VideoSaveTarget,
 	VideoSourceInfo
 } from "@/features/preview/videoEdit/types"
 
-// A video export saved into the drive, end to end, from the page: the offline gate, the plan's own refusals, the
-// copy's free name, a re-check that the file was not changed elsewhere (an in-place save would otherwise make a
-// version over someone else's), then the export worker writing into the SDK worker's upload over a save port, as a
-// transfer row (progress, ETA, cancel, pause; sign-out cancels it; a running row keeps the tab from closing unasked).
-// The storage pre-flight runs on the estimate (+10 %), never handed to the upload as a size. The upload only finishes
-// once the export committed: a cancel, a failure, a stalled or lost worker all end it without a version. After a
-// new version, the watch state's resume point follows the edit.
+// A video export saved into the drive, end to end, from the page: the offline gate, the plan's own refusals, one new
+// version of a file at a time, a re-check that the file was not changed elsewhere (an in-place save would otherwise
+// make a version over someone else's), the copy's free name (resolved right before the upload, and held until the
+// save ends so two copies never take the same one), then the export worker writing into the SDK worker's upload over
+// a save port, as a transfer row (progress, ETA, cancel, pause; sign-out cancels it; a running row keeps the tab from
+// closing unasked). The storage pre-flight runs on the estimate (+10 %), never handed to the upload as a size. The
+// upload only finishes once the export committed: a cancel, a failure, a stalled or lost worker all end it without a
+// version. After a new version, the watch state's resume point follows the edit as the worker wrote it.
 
 // The quota pre-flight's margin over the plan's estimate.
 const QUOTA_MARGIN = 1.1
 
-// Progress callbacks arrive every ~250 ms while the worker lives; none for this long means it is gone.
+// The worker beats every ~250 ms from the start of the export until the upload answered; none for this long means it
+// is gone.
 const HEARTBEAT_LOST_MS = 30_000
 
-// No output written for this long (and the row not paused) is a stall: an export that will not finish.
+// No progress for this long (and the row not paused) is a stall: an export that will not finish. Progress is output
+// written while exporting, then the upload's bytes once the export committed.
 export const EXPORT_STALL_MS = 120_000
 
 const WATCHDOG_INTERVAL_MS = 5_000
@@ -71,6 +76,8 @@ export interface VideoSaveDeps {
 	checkQuota: (neededBytes: bigint) => Promise<QuotaVerdict>
 	transfers: Pick<TransfersStore, "add" | "settle" | "remove" | "setItem" | "setSize">
 	isPaused: (transferId: string) => boolean
+	// The bytes the transfer row's upload has sent so far.
+	uploadedBytes: (transferId: string) => number
 	cancelTransfer: (transferId: string) => void
 	rebaseWatchState: (params: {
 		stableUuid: string
@@ -96,12 +103,62 @@ export interface VideoSaveHandle {
 	detach(): void
 }
 
-function refused(reason: VideoSaveRefusal, message: string): VideoSaveOutcome {
-	return { status: "refused", reason, message }
+// ── Running exports ─────────────────────────────────────────────────────────
+
+interface RunningExport {
+	// The file's stable uuid (its uuid when it has none): versions of one file share it.
+	file: string
+	target: VideoSaveTarget
+	// A copy's name once resolved, lowercased, and the directory it goes into: no other copy takes it meanwhile.
+	copy: { parent: string | null; name: string } | null
 }
 
-function exportRefusal(result: Extract<ExportWorkerResult, { status: "error" }>): VideoSaveRefusal | null {
-	return result.refusal
+// Every save from start to settle, by save id.
+const running = new Map<string, RunningExport>()
+const runningListeners = new Set<() => void>()
+
+function runningChanged(): void {
+	for (const listener of [...runningListeners]) {
+		listener()
+	}
+}
+
+function fileKey(file: SdkFile): string {
+	return file.stableUUID ?? file.uuid
+}
+
+// Whether a save of an edit of this file (a new version or a copy) is running, from any editor or none.
+export function isVideoExportRunning(stableUuid: string): boolean {
+	for (const entry of running.values()) {
+		if (entry.file === stableUuid) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// Calls `listener` whenever a save starts or ends; returns the unsubscribe (useSyncExternalStore's shape).
+export function subscribeVideoExports(listener: () => void): () => void {
+	runningListeners.add(listener)
+
+	return () => {
+		runningListeners.delete(listener)
+	}
+}
+
+function refused(reason: VideoSaveRefusal, detail?: string): VideoSaveOutcome {
+	if (detail !== undefined) {
+		log.info("video-edit", `save refused (${reason})`, detail)
+	}
+
+	return { status: "refused", reason }
+}
+
+function failed(code: VideoSaveErrorCode, cause: unknown): VideoSaveOutcome {
+	log.warn("video-edit", `save failed (${code})`, cause)
+
+	return { status: "error", code }
 }
 
 export function exportProgressOf(progress: ExportWorkerProgress, elapsedMs: number): ExportProgress {
@@ -120,23 +177,45 @@ export function startVideoSave(
 	onProgress?: (progress: ExportProgress) => void
 ): VideoSaveHandle {
 	const id = crypto.randomUUID()
+	const base = asDirectoryOrFile(request.item)
 	let report = onProgress
 	let cancelRequested = false
 	let cancelRun: (() => void) | null = null
 
-	const done = runSave(deps, request, id, {
-		progress: progress => {
-			report?.(progress)
-		},
-		cancelled: () => cancelRequested,
-		onRun: cancel => {
-			cancelRun = cancel
+	const start = (): Promise<VideoSaveOutcome> => {
+		if (base.type !== "file") {
+			return Promise.resolve(refused("target", "not a file"))
 		}
-	})
+
+		const file = fileKey(base.data)
+
+		// One new version of a file at a time: a second would stack on the first, made from the same original.
+		if (request.target === "inPlace" && [...running.values()].some(entry => entry.file === file && entry.target === "inPlace")) {
+			return Promise.resolve(refused("busy"))
+		}
+
+		const entry: RunningExport = { file, target: request.target, copy: null }
+
+		running.set(id, entry)
+		runningChanged()
+
+		return runSave(deps, request, id, entry, {
+			progress: progress => {
+				report?.(progress)
+			},
+			cancelled: () => cancelRequested,
+			onRun: cancel => {
+				cancelRun = cancel
+			}
+		}).finally(() => {
+			running.delete(id)
+			runningChanged()
+		})
+	}
 
 	return {
 		id,
-		done,
+		done: start(),
 		cancel: () => {
 			cancelRequested = true
 			cancelRun?.()
@@ -153,7 +232,42 @@ interface SaveHooks {
 	onRun: (cancel: () => void) => void
 }
 
-async function runSave(deps: VideoSaveDeps, request: VideoSaveRequest, id: string, hooks: SaveHooks): Promise<VideoSaveOutcome> {
+// The copy's free name in `parent`, held by `entry` from here on: the directory's names and every name a running save
+// holds there are taken.
+async function reserveCopyName(
+	deps: VideoSaveDeps,
+	request: VideoSaveRequest,
+	entry: RunningExport,
+	name: string,
+	parent: string | null
+): Promise<string> {
+	const taken = new Set(await deps.takenNames(parent))
+
+	for (const other of running.values()) {
+		if (other !== entry && other.copy !== null && other.copy.parent === parent) {
+			taken.add(other.copy.name)
+		}
+	}
+
+	const copyName = editedCopyName(
+		name,
+		videoSaveTargets({ name, container: request.info.container }).copyExtension,
+		request.copySuffix,
+		taken
+	)
+
+	entry.copy = { parent, name: copyName.toLowerCase() }
+
+	return copyName
+}
+
+async function runSave(
+	deps: VideoSaveDeps,
+	request: VideoSaveRequest,
+	id: string,
+	entry: RunningExport,
+	hooks: SaveHooks
+): Promise<VideoSaveOutcome> {
 	const { item, recipe, info, target } = request
 	const base = asDirectoryOrFile(item)
 
@@ -162,7 +276,7 @@ async function runSave(deps: VideoSaveDeps, request: VideoSaveRequest, id: strin
 	}
 
 	if (!deps.isOnline()) {
-		return refused("offline", "offline")
+		return refused("offline")
 	}
 
 	const name = driveItemName(base)
@@ -180,15 +294,6 @@ async function runSave(deps: VideoSaveDeps, request: VideoSaveRequest, id: strin
 	}
 
 	const parent = base.data.parent === deps.rootUuid() ? null : base.data.parent
-	const copyName =
-		target === "copy"
-			? editedCopyName(
-					name,
-					videoSaveTargets({ name, container: info.container }).copyExtension,
-					request.copySuffix,
-					await deps.takenNames(parent)
-				)
-			: null
 
 	// A new version must be of the version the edit was made on.
 	if (target === "inPlace" && base.data.stableUUID !== undefined) {
@@ -198,6 +303,13 @@ async function runSave(deps: VideoSaveDeps, request: VideoSaveRequest, id: strin
 			return { status: "remoteChanged", currentUuid: head?.uuid ?? null }
 		}
 	}
+
+	if (hooks.cancelled()) {
+		return { status: "cancelled" }
+	}
+
+	// Resolved now rather than when the editor asked: a copy saved meanwhile (here or elsewhere) has its name listed.
+	const copyName = target === "copy" ? await reserveCopyName(deps, request, entry, name, parent) : null
 
 	if (hooks.cancelled()) {
 		return { status: "cancelled" }
@@ -221,11 +333,8 @@ async function runSave(deps: VideoSaveDeps, request: VideoSaveRequest, id: strin
 	const source = new MessageChannel()
 	const token = crypto.randomUUID()
 	const started = deps.now()
-	let lastBeat = started
-	let lastAdvance = started
-	let lastWritten = -1
-	let lastSeconds = -1
-	let stalled: string | null = null
+	const liveness = { lastBeat: started, lastAdvance: started, written: -1, seconds: -1, uploaded: -1, committed: false }
+	let stalled: VideoSaveErrorCode | null = null
 
 	try {
 		await deps.openSourcePort(source.port1, item, token)
@@ -245,12 +354,17 @@ async function runSave(deps: VideoSaveDeps, request: VideoSaveRequest, id: strin
 			progress => {
 				const now = deps.now()
 
-				lastBeat = now
+				liveness.lastBeat = now
 
-				if (progress.bytesWritten !== lastWritten || progress.outputSeconds !== lastSeconds) {
-					lastWritten = progress.bytesWritten
-					lastSeconds = progress.outputSeconds
-					lastAdvance = now
+				if (progress.bytesWritten !== liveness.written || progress.outputSeconds !== liveness.seconds) {
+					liveness.written = progress.bytesWritten
+					liveness.seconds = progress.outputSeconds
+					liveness.lastAdvance = now
+				}
+
+				if (progress.phase === "committed" && !liveness.committed) {
+					liveness.committed = true
+					liveness.lastAdvance = now
 				}
 
 				hooks.progress(exportProgressOf(progress, now - started))
@@ -270,15 +384,42 @@ async function runSave(deps: VideoSaveDeps, request: VideoSaveRequest, id: strin
 		const watchdog = deps.setInterval(() => {
 			const now = deps.now()
 
-			if (now - lastBeat > HEARTBEAT_LOST_MS) {
-				stalled = "the export worker stopped answering"
-			} else if (!deps.isPaused(id) && now - lastAdvance > EXPORT_STALL_MS) {
-				stalled = "the export stalled"
-			} else {
+			if (now - liveness.lastBeat > HEARTBEAT_LOST_MS) {
+				stalled = "workerLost"
+				stop()
+
 				return
 			}
 
-			stop()
+			// A paused row makes no progress by design: its stall window starts over when it resumes.
+			if (deps.isPaused(id)) {
+				liveness.lastAdvance = now
+
+				return
+			}
+
+			if (liveness.committed) {
+				const uploaded = deps.uploadedBytes(id)
+
+				// Every byte is up: the upload is finishing the file (bounded by the save port's own settle wait).
+				if (uploaded >= liveness.written) {
+					liveness.lastAdvance = now
+
+					return
+				}
+
+				if (uploaded !== liveness.uploaded) {
+					liveness.uploaded = uploaded
+					liveness.lastAdvance = now
+
+					return
+				}
+			}
+
+			if (now - liveness.lastAdvance > EXPORT_STALL_MS) {
+				stalled = "stalled"
+				stop()
+			}
 		}, WATCHDOG_INTERVAL_MS)
 
 		let uploaded: ActionOutcome<DriveItem>
@@ -308,7 +449,7 @@ async function runSave(deps: VideoSaveDeps, request: VideoSaveRequest, id: strin
 			deps.clearInterval(watchdog)
 		}
 
-		return await settle(deps, request, { id, uploaded, exported, stalled, plan, copyName })
+		return await settle(deps, request, { id, uploaded, exported, stalled, plan, copyName, cancelled: hooks.cancelled() })
 	} catch (error) {
 		// Ports never handed over (the source could not be opened) are closed here; handed-over ones are their holders'.
 		save.port1.close()
@@ -316,7 +457,7 @@ async function runSave(deps: VideoSaveDeps, request: VideoSaveRequest, id: strin
 		source.port2.close()
 		deps.transfers.settle(id, "error")
 
-		return { status: "error", message: error instanceof Error ? error.message : String(error) }
+		return failed("unknown", error)
 	} finally {
 		deps.cancelSourceReads(token)
 		source.port1.close()
@@ -331,23 +472,38 @@ async function settle(
 		id: string
 		uploaded: ActionOutcome<DriveItem>
 		exported: ExportWorkerResult
-		stalled: string | null
+		stalled: VideoSaveErrorCode | null
 		plan: ReturnType<typeof planExport>
 		copyName: string | null
+		// The editor (or the row) asked for a cancel.
+		cancelled: boolean
 	}
 ): Promise<VideoSaveOutcome> {
 	const { id, uploaded, exported, stalled, plan, copyName } = result
 	const { transfers } = deps
 
-	if (uploaded.status === "success" && exported.status === "done") {
+	// The upload only finishes on the export's commit, so a made file is the export's whole output, whatever the
+	// worker could still report after it (it may have died meanwhile).
+	if (uploaded.status === "success") {
 		const saved = asDirectoryOrFile(uploaded.item)
 
 		transfers.settle(id, "done")
-		transfers.setSize(id, exported.bytes)
 		transfers.setItem(id, uploaded.item)
 
+		if (exported.status === "done") {
+			transfers.setSize(id, exported.bytes)
+		} else {
+			log.warn("video-edit", "the upload made the file but the export worker did not report done", exported)
+		}
+
 		if (copyName === null && saved.type === "file") {
-			await rebaseWatch(deps, request, saved.data, plan.mode, plan.outputDuration)
+			// What the worker wrote; the plan's ranges (which may differ by a frame or two) only when it did not say.
+			const written =
+				exported.status === "done"
+					? { bounds: exported.bounds, duration: exported.outputDuration }
+					: { bounds: plannedRanges(request.recipe, request.info, plan.mode), duration: plan.outputDuration }
+
+			await rebaseWatch(deps, request, saved.data, written.bounds, written.duration)
 		}
 
 		return { status: "done", item: uploaded.item }
@@ -356,18 +512,16 @@ async function settle(
 	if (stalled !== null) {
 		transfers.settle(id, "error")
 
-		return { status: "error", message: stalled }
+		return failed(stalled, exported)
 	}
 
 	if (exported.status === "error") {
-		transfers.settle(id, "error")
+		if (exported.refusal !== null) {
+			transfers.settle(id, "error")
 
-		const refusal = exportRefusal(exported)
+			return refused(exported.refusal, exported.message)
+		}
 
-		return refusal === null ? { status: "error", message: exported.message } : refused(refusal, exported.message)
-	}
-
-	if (uploaded.status === "error") {
 		if (uploaded.dto.kind === "MaxStorageReached") {
 			transfers.settle(id, "cancelled")
 			transfers.remove(id)
@@ -375,31 +529,38 @@ async function settle(
 			return refused("quota", uploaded.dto.message)
 		}
 
-		// A cancel (the editor's, the row's, a sign-out) drops the row; anything else stays as a failed row.
-		if (exported.status === "cancelled") {
-			transfers.settle(id, "cancelled")
-			transfers.remove(id)
+		transfers.settle(id, "error")
 
-			return { status: "cancelled" }
-		}
-
-		return settleTransferFailure(transfers, id, uploaded.dto)
-			? { status: "cancelled" }
-			: { status: "error", message: uploaded.dto.message }
+		return failed(
+			exported.cause === "workerLost" ? "workerLost" : exported.cause === "upload" ? "uploadFailed" : "unknown",
+			exported.message
+		)
 	}
 
-	// Uploaded, yet the export did not report done: not trusted as saved (never happens: the upload only finishes on
-	// the export's commit).
-	transfers.settle(id, "error")
+	if (uploaded.dto.kind === "MaxStorageReached") {
+		transfers.settle(id, "cancelled")
+		transfers.remove(id)
 
-	return exported.status === "cancelled" ? { status: "cancelled" } : { status: "error", message: "the export did not finish" }
+		return refused("quota", uploaded.dto.message)
+	}
+
+	// A cancel (the editor's, the row's, a sign-out) drops the row; anything else (the upload failed, which stopped the
+	// export) stays as a failed row.
+	if (result.cancelled) {
+		transfers.settle(id, "cancelled")
+		transfers.remove(id)
+
+		return { status: "cancelled" }
+	}
+
+	return settleTransferFailure(transfers, id, uploaded.dto) ? { status: "cancelled" } : failed("uploadFailed", uploaded.dto.message)
 }
 
 async function rebaseWatch(
 	deps: VideoSaveDeps,
 	request: VideoSaveRequest,
 	saved: SdkFile,
-	mode: "copy" | "transcode",
+	bounds: readonly TimeRange[],
 	duration: number
 ): Promise<void> {
 	const original = asDirectoryOrFile(request.item)
@@ -408,8 +569,6 @@ async function rebaseWatch(
 		return
 	}
 
-	const ranges = plannedRanges(request.recipe, request.info, mode)
-
 	await deps
 		.rebaseWatchState({
 			stableUuid: saved.stableUUID,
@@ -417,7 +576,7 @@ async function rebaseWatch(
 			uuid: saved.uuid,
 			size: Number(saved.size),
 			duration,
-			map: seconds => sourceToOutputTime(ranges, request.recipe.speed, seconds)
+			map: seconds => sourceToOutputTime(bounds, request.recipe.speed, seconds)
 		})
 		.catch((error: unknown) => {
 			log.warn("video-edit", "moving the watch state onto the edited version failed", error)

@@ -3,10 +3,16 @@ import type { File as SdkFile } from "@filen/sdk-rs"
 import { savePortReader, savePortWriter, SavePortAbortedError } from "@filen/shared/savePort"
 import type { QuotaVerdict } from "@filen/shared"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
-import { exportProgressOf, startVideoSave, type VideoSaveDeps } from "@/features/preview/videoEdit/save"
+import {
+	exportProgressOf,
+	isVideoExportRunning,
+	startVideoSave,
+	subscribeVideoExports,
+	type VideoSaveDeps
+} from "@/features/preview/videoEdit/save"
 import type { Exporter } from "@/features/preview/videoEdit/exportClient"
 import type { ExportWorkerProgress, ExportWorkerResult, StartExportArgs } from "@/features/preview/videoEdit/worker/exportApi"
-import type { VideoEditRecipe, VideoSourceInfo } from "@/features/preview/videoEdit/types"
+import type { TimeRange, VideoEditRecipe, VideoSourceInfo } from "@/features/preview/videoEdit/types"
 import { ALL_ENCODERS, NO_WEBCODECS, recipeFor, sourceInfo } from "@/tests/support/videoEditRecipe"
 import { testUuid } from "@/tests/support/uuid"
 
@@ -60,7 +66,19 @@ interface Upload {
 
 // An export worker stand-in: writes `chunks` MiB into the save port (progress after each), then commits; a cancel
 // aborts the channel as the real worker does.
-function fakeExporter(options: { chunks?: number; fail?: string; silent?: boolean; hang?: boolean } = {}): Exporter & {
+function fakeExporter(
+	options: {
+		chunks?: number
+		fail?: string
+		failCause?: "upload" | "workerLost"
+		silent?: boolean
+		hang?: boolean
+		// What the worker reports once the upload answered, in place of "done" (a worker that died meanwhile).
+		after?: ExportWorkerResult
+		// The ranges the worker reports writing (default: the recipe's).
+		bounds?: TimeRange[]
+	} = {}
+): Exporter & {
 	runs: StartExportArgs[]
 	cancels: number
 	progress: ((progress: ExportWorkerProgress) => unknown) | null
@@ -99,22 +117,53 @@ function fakeExporter(options: { chunks?: number; fail?: string; silent?: boolea
 						await writer.write(new Uint8Array(1024 * 1024).fill(chunk))
 
 						if (options.silent !== true) {
-							onProgress({ outputSeconds: chunk + 1, outputDuration: options.chunks ?? 3, bytesWritten: writer.sent })
+							onProgress({
+								outputSeconds: chunk + 1,
+								outputDuration: options.chunks ?? 3,
+								bytesWritten: writer.sent,
+								phase: "exporting"
+							})
 						}
 					}
 
 					if (options.fail !== undefined) {
 						writer.abort("failed")
 
-						return { status: "error", message: options.fail, refusal: null }
+						return {
+							status: "error",
+							message: options.fail,
+							refusal: null,
+							...(options.failCause === undefined ? {} : { cause: options.failCause })
+						}
 					}
 
 					await writer.close()
 					writer.commit()
 
-					return (await writer.uploaded)
-						? { status: "done", bytes: writer.sent }
-						: { status: "error", message: "not uploaded", refusal: null }
+					if (options.silent !== true) {
+						onProgress({
+							outputSeconds: options.chunks ?? 3,
+							outputDuration: options.chunks ?? 3,
+							bytesWritten: writer.sent,
+							phase: "committed"
+						})
+					}
+
+					const bounds = options.bounds ?? [...args.recipe.keep]
+					const made = await writer.uploaded
+
+					if (options.after !== undefined) {
+						return options.after
+					}
+
+					return made
+						? {
+								status: "done",
+								bytes: writer.sent,
+								outputDuration: bounds.reduce((total, range) => total + range.end - range.start, 0) / args.recipe.speed,
+								bounds
+							}
+						: { status: "error", message: "not uploaded", refusal: null, cause: "upload" }
 				} catch {
 					writer.abort("cancelled")
 
@@ -148,7 +197,12 @@ interface Harness {
 }
 
 function harness(
-	overrides: Partial<VideoSaveDeps> & { exporterOptions?: Parameters<typeof fakeExporter>[0]; quota?: QuotaVerdict } = {}
+	overrides: Partial<VideoSaveDeps> & {
+		exporterOptions?: Parameters<typeof fakeExporter>[0]
+		quota?: QuotaVerdict
+		// Holds the upload after it read every byte, before it makes the file (a slow uplink finishing).
+		uploadGate?: Promise<unknown>
+	} = {}
 ): Harness {
 	const uploads: Upload[] = []
 	const store = { add: vi.fn(), settle: vi.fn(), remove: vi.fn(), setItem: vi.fn(), setSize: vi.fn() }
@@ -188,6 +242,15 @@ function harness(
 					throw Object.assign(new Error("Cancelled"), { kind: "Cancelled" })
 				}
 
+				try {
+					await overrides.uploadGate
+				} catch {
+					// Cancelled while finishing: no file, as the SDK answers the writer.
+					reader.settled(false)
+
+					throw Object.assign(new Error("Cancelled"), { kind: "Cancelled" })
+				}
+
 				reader.settled(true)
 				upload.file = sdkFile({ uuid: SAVED, size: BigInt(upload.bytes) }, name)
 
@@ -199,6 +262,7 @@ function harness(
 		checkQuota,
 		transfers: store,
 		isPaused: () => false,
+		uploadedBytes: () => uploads.at(-1)?.bytes ?? 0,
 		cancelTransfer: vi.fn(),
 		rebaseWatchState: rebase,
 		keepAwake: () => {
@@ -238,7 +302,7 @@ describe("startVideoSave refusals", () => {
 	it("refuses offline before anything starts", async () => {
 		const h = harness({ isOnline: () => false })
 
-		expect(await save(h).done).toEqual({ status: "refused", reason: "offline", message: "offline" })
+		expect(await save(h).done).toEqual({ status: "refused", reason: "offline" })
 		expect(h.store.add).not.toHaveBeenCalled()
 		expect(h.exporter.runs).toEqual([])
 	})
@@ -372,7 +436,8 @@ describe("startVideoSave", () => {
 		const h = harness({ exporterOptions: { fail: "decoder error" } })
 		const outcome = await save(h).done
 
-		expect(outcome).toEqual({ status: "error", message: "decoder error" })
+		// The raw cause is logged, never shown.
+		expect(outcome).toEqual({ status: "error", code: "unknown" })
 		expect(h.uploads[0]?.file).toBeNull()
 		expect(h.store.settle).toHaveBeenCalledWith(expect.any(String), "error")
 	})
@@ -387,7 +452,7 @@ describe("startVideoSave", () => {
 		h.clock.now += 31_000
 		h.clock.tick?.()
 
-		expect(await handle.done).toEqual({ status: "error", message: "the export worker stopped answering" })
+		expect(await handle.done).toEqual({ status: "error", code: "workerLost" })
 		expect(h.uploads[0]?.file ?? null).toBeNull()
 	})
 
@@ -403,7 +468,7 @@ describe("startVideoSave", () => {
 		// The worker keeps posting (it is alive), but nothing advances: the upload is paused.
 		const beat = (): void => {
 			h.clock.now += 20_000
-			h.exporter.progress?.({ outputSeconds: 1, outputDuration: 3, bytesWritten: 5 })
+			h.exporter.progress?.({ outputSeconds: 1, outputDuration: 3, bytesWritten: 5, phase: "exporting" })
 			h.clock.tick?.()
 		}
 
@@ -411,22 +476,154 @@ describe("startVideoSave", () => {
 
 		expect(h.exporter.cancels).toBe(0)
 
+		// Resumed: a full stall window starts then, not from before the pause.
 		paused = false
+
+		for (let index = 0; index < 6; index++) beat()
+
+		expect(h.exporter.cancels).toBe(0)
+
 		beat()
 
-		expect(await handle.done).toEqual({ status: "error", message: "the export stalled" })
+		expect(await handle.done).toEqual({ status: "error", code: "stalled" })
 		expect(h.exporter.cancels).toBeGreaterThan(0)
+	})
+
+	it("keeps a committed export alive while the upload finishes over a slow link, by the upload's progress", async () => {
+		const gate = Promise.withResolvers<undefined>()
+		let uploaded = 0
+		const h = harness({ uploadGate: gate.promise, uploadedBytes: () => uploaded })
+		const handle = save(h)
+
+		await vi.waitFor(() => {
+			expect(h.uploads[0]?.bytes).toBe(3 * 1024 * 1024)
+		})
+
+		// The worker beats on (committed), the export writes nothing more; the upload creeps forward.
+		for (let index = 0; index < 20; index++) {
+			h.clock.now += 20_000
+			uploaded += 100_000
+			h.exporter.progress?.({ outputSeconds: 3, outputDuration: 3, bytesWritten: 3 * 1024 * 1024, phase: "committed" })
+			h.clock.tick?.()
+		}
+
+		expect(h.exporter.cancels).toBe(0)
+
+		gate.resolve(undefined)
+
+		expect(await handle.done).toMatchObject({ status: "done" })
+	})
+
+	it("calls a committed upload that stopped moving a stall", async () => {
+		const gate = Promise.withResolvers<undefined>()
+		const h = harness({
+			uploadGate: gate.promise,
+			uploadedBytes: () => 1000,
+			// As the row's cancel ends the SDK upload.
+			cancelTransfer: () => {
+				gate.reject(new Error("cancelled"))
+			}
+		})
+		const handle = save(h)
+
+		await vi.waitFor(() => {
+			expect(h.uploads[0]?.bytes).toBe(3 * 1024 * 1024)
+		})
+
+		for (let index = 0; index < 8; index++) {
+			h.clock.now += 20_000
+			h.exporter.progress?.({ outputSeconds: 3, outputDuration: 3, bytesWritten: 3 * 1024 * 1024, phase: "committed" })
+			h.clock.tick?.()
+		}
+
+		expect(await handle.done).toEqual({ status: "error", code: "stalled" })
+	})
+
+	it("reports a made file as saved even when the worker did not report done", async () => {
+		const h = harness({
+			exporterOptions: { after: { status: "error", message: "the export worker stopped", refusal: null, cause: "workerLost" } }
+		})
+		const outcome = await save(h).done
+
+		expect(outcome).toMatchObject({ status: "done", item: { data: { uuid: SAVED } } })
+		expect(h.store.settle).toHaveBeenCalledWith(expect.any(String), "done")
+		expect(h.rebase).toHaveBeenCalledTimes(1)
+	})
+
+	it("moves the watch state by the ranges the worker wrote, not the plan's", async () => {
+		const h = harness({ exporterOptions: { bounds: [{ start: 10.04, end: 39.96 }] } })
+
+		await save(h).done
+
+		const [rebase] = h.rebase.mock.calls[0] as [{ map: (seconds: number) => number | null; duration: number }]
+
+		expect(rebase.duration).toBeCloseTo(29.92)
+		expect(rebase.map(10.04)).toBeCloseTo(0)
+		expect(rebase.map(10)).toBeNull()
+	})
+
+	it("words a lost worker and a failed upload as codes", async () => {
+		const lost = harness({ exporterOptions: { fail: "the export worker stopped", failCause: "workerLost" } })
+
+		expect(await save(lost).done).toEqual({ status: "error", code: "workerLost" })
+
+		const failing = harness({
+			saveDeps: {
+				uploadFileBytes: () => Promise.reject(new Error("unused")),
+				uploadFileFromPort: () => Promise.reject(Object.assign(new Error("network gone"), { kind: "Network" })),
+				patchListing: vi.fn(),
+				rootUuid: ROOT
+			}
+		})
+
+		expect(await save(failing).done).toEqual({ status: "error", code: "uploadFailed" })
+	})
+})
+
+describe("running exports", () => {
+	it("refuses a second new version of a file while one is saved, and tells who listens", async () => {
+		const listener = vi.fn()
+		const unsubscribe = subscribeVideoExports(listener)
+		const h = harness({ exporterOptions: { chunks: 20 } })
+		const first = save(h)
+
+		expect(isVideoExportRunning(STABLE)).toBe(true)
+		expect(listener).toHaveBeenCalledTimes(1)
+		expect(await save(h).done).toEqual({ status: "refused", reason: "busy" })
+
+		// A copy of the same file is not a version: it may run alongside.
+		const copy = save(h, recipeFor(60), "copy")
+
+		expect((await first.done).status).toBe("done")
+		expect((await copy.done).status).toBe("done")
+		expect(isVideoExportRunning(STABLE)).toBe(false)
+		expect(listener).toHaveBeenCalledTimes(4)
+		unsubscribe()
+	})
+
+	it("never gives two copies running at once the same name", async () => {
+		const h = harness({ exporterOptions: { chunks: 10 } })
+		const first = save(h, recipeFor(60), "copy")
+		const second = save(h, recipeFor(60), "copy")
+
+		await Promise.all([first.done, second.done])
+
+		expect(h.uploads.map(upload => upload.name).sort()).toEqual(["clip (edited 2).mp4", "clip (edited 3).mp4"])
 	})
 })
 
 describe("exportProgressOf", () => {
 	it("reports a fraction and an ETA once enough is done", () => {
-		expect(exportProgressOf({ outputSeconds: 0.5, outputDuration: 100, bytesWritten: 10 }, 1000).etaSeconds).toBeNull()
-		expect(exportProgressOf({ outputSeconds: 25, outputDuration: 100, bytesWritten: 10 }, 10_000)).toEqual({
+		expect(
+			exportProgressOf({ outputSeconds: 0.5, outputDuration: 100, bytesWritten: 10, phase: "exporting" }, 1000).etaSeconds
+		).toBeNull()
+		expect(exportProgressOf({ outputSeconds: 25, outputDuration: 100, bytesWritten: 10, phase: "exporting" }, 10_000)).toEqual({
 			fraction: 0.25,
 			bytesWritten: 10,
 			etaSeconds: 30
 		})
-		expect(exportProgressOf({ outputSeconds: 100, outputDuration: 100, bytesWritten: 10 }, 10_000).etaSeconds).toBeNull()
+		expect(
+			exportProgressOf({ outputSeconds: 100, outputDuration: 100, bytesWritten: 10, phase: "exporting" }, 10_000).etaSeconds
+		).toBeNull()
 	})
 })

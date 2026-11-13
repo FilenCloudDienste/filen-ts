@@ -104,5 +104,7 @@ export const previewVideoSave = {
 	/** Export notice — the video or sound format cannot be saved in this browser */
 	previewVideoSaveRefusedCodec: "This video's format can't be saved in this browser.",
 	/** Export notice — this way of saving (in place or as a copy) is not offered for this file */
-	previewVideoSaveRefusedTarget: "This video can't be saved that way."
+	previewVideoSaveRefusedTarget: "This video can't be saved that way.",
+	/** Export notice — a new version of this video is being saved already; one at a time */
+	previewVideoSaveRefusedBusy: "A new version of this video is already being saved."
 } as const

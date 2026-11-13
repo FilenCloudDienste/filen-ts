@@ -86,7 +86,10 @@ export interface RunExportParams {
 
 export interface ExportSummary {
 	plan: ExportPlan
+	// What was written: the source ranges kept (on the copy path, as the key frames and B-frames bound them, which can
+	// differ from the plan's by a frame or two) and the output's length.
 	outputDuration: number
+	bounds: readonly TimeRange[]
 }
 
 type Pump = (signal: AbortSignal) => Promise<unknown>
@@ -384,7 +387,7 @@ export async function runExport(params: RunExportParams): Promise<ExportSummary>
 		pipeline?.dispose()
 	}
 
-	return { plan, outputDuration }
+	return { plan, outputDuration, bounds }
 }
 
 // The failure that stopped the export, not the cancellations it caused in the other pumps.

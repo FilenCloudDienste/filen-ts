@@ -502,7 +502,7 @@ export function VideoEditor(props: VideoEditorProps) {
 			}
 
 			case "error": {
-				setExportState({ status: "failed", message: outcome.message })
+				setExportState({ status: "failed", message: "" })
 
 				return
 			}
@@ -543,10 +543,11 @@ export function VideoEditor(props: VideoEditorProps) {
 		setExportState({ status: "running", fraction: 0, etaSeconds: null })
 
 		const handle = client.exportVideo(history.current, target, progressOf)
-		const done = handle.done.catch((error: unknown): VideoSaveOutcome => ({
-			status: "error",
-			message: error instanceof Error ? error.message : ""
-		}))
+		const done = handle.done.catch((error: unknown): VideoSaveOutcome => {
+			log.warn("video-edit", "the save rejected", error)
+
+			return { status: "error", code: "unknown" }
+		})
 
 		running.current = {
 			handle,
@@ -571,7 +572,7 @@ export function VideoEditor(props: VideoEditorProps) {
 			if (outcome.status === "done") {
 				toast.success(t(target === "copy" ? "previewVideoSaveDoneCopy" : "previewVideoSaveDone", { name }))
 			} else if (outcome.status === "error") {
-				toast.error(t("previewVideoSaveBackgroundFailed", { name }), { description: outcome.message })
+				toast.error(t("previewVideoSaveBackgroundFailed", { name }))
 			} else if (outcome.status === "refused") {
 				toast.error(t("previewVideoSaveBackgroundFailed", { name }), { description: t(REFUSAL_LABELS[outcome.reason]) })
 			} else if (outcome.status === "remoteChanged") {

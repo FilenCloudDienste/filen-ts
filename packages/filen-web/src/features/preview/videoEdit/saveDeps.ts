@@ -42,6 +42,7 @@ export function videoSaveDeps(): VideoSaveDeps {
 		checkQuota: checkUploadQuota,
 		transfers: useTransfersStore.getState(),
 		isPaused: id => transferById(useTransfersStore.getState().transfers, id)?.paused === true,
+		uploadedBytes: id => transferById(useTransfersStore.getState().transfers, id)?.bytesTransferred ?? 0,
 		cancelTransfer,
 		rebaseWatchState: params => watchState.rebaseEdited(params),
 		// The screen stays on, and the desktop app keeps rendering this window at full speed while it is hidden.

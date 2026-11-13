@@ -11,11 +11,12 @@ import { planExport, sourceFrame } from "@/features/preview/videoEdit/lib/plan"
 import type { TimeRange } from "@/features/preview/videoEdit/types"
 import { runExport, type EngineDeps } from "@/features/preview/videoEdit/worker/engine"
 import { ExportCancelledError, ExportRefusedError } from "@/features/preview/videoEdit/worker/errors"
-import type {
-	ExportWorkerApi,
-	ExportWorkerProgress,
-	ExportWorkerResult,
-	StartExportArgs
+import {
+	PROGRESS_INTERVAL_MS,
+	type ExportWorkerApi,
+	type ExportWorkerProgress,
+	type ExportWorkerResult,
+	type StartExportArgs
 } from "@/features/preview/videoEdit/worker/exportApi"
 import { appendOnlyTarget } from "@/features/preview/videoEdit/worker/sink"
 
@@ -99,6 +100,18 @@ const api: ExportWorkerApi = {
 	async startExport(args: StartExportArgs, onProgress: (progress: ExportWorkerProgress) => unknown): Promise<ExportWorkerResult> {
 		const controller = new AbortController()
 		const writer = savePortWriter(args.output)
+		// The latest the engine reported; the heartbeat sends it on, from before the input is read until the upload
+		// answered (a slow uplink, or a paused transfer, may take long after the muxer finished).
+		const latest: ExportWorkerProgress = { outputSeconds: 0, outputDuration: 0, bytesWritten: 0, phase: "exporting" }
+		const beat = (): void => {
+			latest.bytesWritten = writer.sent
+
+			void Promise.resolve(onProgress({ ...latest })).catch(() => undefined)
+		}
+		const heartbeat = setInterval(beat, PROGRESS_INTERVAL_MS)
+
+		beat()
+
 		const block = openBlockInput(args.source, args.size, "export")
 		const target = appendOnlyTarget(writer)
 
@@ -115,7 +128,7 @@ const api: ExportWorkerApi = {
 		}
 
 		try {
-			await runExport({
+			const summary = await runExport({
 				input: block.input,
 				info: args.info,
 				recipe: args.recipe,
@@ -139,16 +152,19 @@ const api: ExportWorkerApi = {
 					ios: args.context.ios === true
 				},
 				onProgress: (outputSeconds, outputDuration) => {
-					void Promise.resolve(onProgress({ outputSeconds, outputDuration, bytesWritten: writer.sent })).catch(() => undefined)
+					latest.outputSeconds = outputSeconds
+					latest.outputDuration = outputDuration
 				}
 			})
 
 			// Everything the muxer wrote is sent; only now may the upload finish the file.
 			writer.commit()
+			latest.phase = "committed"
+			beat()
 
 			return (await writer.uploaded)
-				? { status: "done", bytes: writer.sent }
-				: { status: "error", message: "the upload did not finish", refusal: null }
+				? { status: "done", bytes: writer.sent, outputDuration: summary.outputDuration, bounds: summary.bounds }
+				: { status: "error", message: "the upload did not finish", refusal: null, cause: "upload" }
 		} catch (error) {
 			const cancelled = controller.signal.aborted || error instanceof ExportCancelledError
 
@@ -156,6 +172,7 @@ const api: ExportWorkerApi = {
 
 			return cancelled ? { status: "cancelled" } : failure(error)
 		} finally {
+			clearInterval(heartbeat)
 			running.delete(args.exportId)
 			block.close()
 			;(onProgress as Partial<Comlink.ProxyMethods>)[Comlink.releaseProxy]?.()

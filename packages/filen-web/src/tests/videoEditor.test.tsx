@@ -329,7 +329,7 @@ describe("VideoEditor", () => {
 		fireEvent.click(await within(await openSave()).findByRole("button", { name: "Save" }))
 
 		await act(async () => {
-			exports[0]?.settle({ status: "refused", reason: "quota", message: "MaxStorageReached" })
+			exports[0]?.settle({ status: "refused", reason: "quota" })
 			await Promise.resolve()
 		})
 
@@ -339,7 +339,7 @@ describe("VideoEditor", () => {
 		expect(client.exportVideo).toHaveBeenCalledTimes(2)
 
 		await act(async () => {
-			exports[1]?.settle({ status: "refused", reason: "codec", message: "audio track 1 cannot be decoded" })
+			exports[1]?.settle({ status: "refused", reason: "codec" })
 			await Promise.resolve()
 		})
 
@@ -441,7 +441,7 @@ describe("VideoEditor", () => {
 		fireEvent.click(await within(await openSave()).findByRole("button", { name: "Save" }))
 
 		await act(async () => {
-			exports[1]?.settle({ status: "error", message: "network gone" })
+			exports[1]?.settle({ status: "error", code: "uploadFailed" })
 			await Promise.resolve()
 		})
 

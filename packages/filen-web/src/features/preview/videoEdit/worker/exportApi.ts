@@ -13,7 +13,7 @@
 
 import type { EncodeCapabilities } from "@/lib/media/playback/capabilities.logic"
 import type { ExportBlocker, PlanContext } from "@/features/preview/videoEdit/lib/plan"
-import type { ExportPlan, VideoEditRecipe, VideoSourceInfo } from "@/features/preview/videoEdit/types"
+import type { ExportPlan, TimeRange, VideoEditRecipe, VideoSourceInfo } from "@/features/preview/videoEdit/types"
 
 export interface StartExportArgs {
 	// Names the export for cancel().
@@ -31,12 +31,16 @@ export interface StartExportArgs {
 	fallbackCreationTime: number | null
 }
 
+// Sent every PROGRESS_INTERVAL_MS from the start of startExport (before the input is even read) until the upload's
+// answer arrived: a heartbeat as much as progress, so the page tells a dead worker from a slow step.
 export interface ExportWorkerProgress {
-	// Seconds of the output written so far (the slowest track's).
+	// Seconds of the output written so far (the slowest track's); 0 before the export knows its length.
 	outputSeconds: number
 	outputDuration: number
 	// Bytes handed to the upload.
 	bytesWritten: number
+	// "committed": the muxer finished and every byte was handed over; only the upload is left to finish.
+	phase: "exporting" | "committed"
 }
 
 // Why an export refused to run (or stopped) for reasons of its input, not a fault: the editor words them.
@@ -44,10 +48,19 @@ export interface ExportWorkerProgress {
 // cap; "noVideo": the file has no video track the export reads; "codec": a track's codec cannot be copied or decoded.
 export type ExportRefusal = "unavailable" | "gop" | "noVideo" | "codec"
 
+// "done": the source ranges written (the copy path's key-frame and B-frame bounds, not the plan's) and the output's
+// real length, which the watch state's resume point follows.
 export type ExportWorkerResult =
-	| { status: "done"; bytes: number }
+	| { status: "done"; bytes: number; outputDuration: number; bounds: readonly TimeRange[] }
 	| { status: "cancelled" }
-	| { status: "error"; message: string; refusal: ExportRefusal | null; blockers?: readonly ExportBlocker[] }
+	| {
+			status: "error"
+			message: string
+			refusal: ExportRefusal | null
+			blockers?: readonly ExportBlocker[]
+			// Where a fault (no refusal) lay when known: the upload did not make the file, or the worker died.
+			cause?: "upload" | "workerLost"
+	  }
 
 export interface ExportWorkerApi {
 	// planExport (lib/plan.ts) answered from the worker, for a client that already holds it.
