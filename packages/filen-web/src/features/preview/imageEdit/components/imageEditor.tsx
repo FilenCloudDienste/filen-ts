@@ -33,7 +33,7 @@ import {
 	type Crop,
 	type Size
 } from "@/features/preview/imageEdit/lib/recipe"
-import { createHistory } from "@/features/preview/imageEdit/lib/history"
+import { createHistory } from "@/lib/editHistory"
 import { ImageEditPanel, type EditTab } from "@/features/preview/imageEdit/components/imageEditPanel"
 import { CropOverlay } from "@/features/preview/imageEdit/components/cropOverlay"
 import { MarkupLayer } from "@/features/preview/imageEdit/components/markupLayer"

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { editedCopyName } from "@/features/drive/lib/copyName"
 import { FILTER_PRESETS, effectiveAdjustments } from "@/features/preview/imageEdit/lib/filters"
-import { COALESCE_MS, HISTORY_LIMIT, createHistory } from "@/features/preview/imageEdit/lib/history"
+import { COALESCE_MS, HISTORY_LIMIT, createHistory } from "@/lib/editHistory"
 import { identityRecipe } from "@/features/preview/imageEdit/lib/recipe"
 import { inPlaceFormatByName, isEditableSource, saveTargets } from "@/features/preview/imageEdit/lib/targets"
 import type { ImageEditRecipe, SourceInfo } from "@/features/preview/imageEdit/types"
