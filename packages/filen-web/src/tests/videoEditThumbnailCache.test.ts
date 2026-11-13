@@ -5,21 +5,21 @@ import { filmstripBudget } from "@/features/preview/videoEdit/lib/timeline.logic
 // The filmstrip's tile cache: bounded by the bytes its tiles hold (least recently used closed first), and closing
 // what arrives after the timeline went.
 
-function tile(width = 100, height = 50): ImageBitmap {
-	return { width, height, close: vi.fn() }
+function tile(width = 100, height = 50): { bitmap: ImageBitmap; close: ReturnType<typeof vi.fn> } {
+	const close = vi.fn()
+
+	return { bitmap: { width, height, close }, close }
 }
 
 describe("ThumbnailCache", () => {
 	it("closes the least recently used tiles past its byte budget", () => {
 		const cache = new ThumbnailCache(2 * 100 * 50 * 4)
-		const a = tile()
 		const b = tile()
-		const c = tile()
 
-		cache.set("a", a)
-		cache.set("b", b)
+		cache.set("a", tile().bitmap)
+		cache.set("b", b.bitmap)
 		cache.get("a")
-		cache.set("c", c)
+		cache.set("c", tile().bitmap)
 
 		expect(cache.has("b")).toBe(false)
 		expect(b.close).toHaveBeenCalledTimes(1)
@@ -30,13 +30,13 @@ describe("ThumbnailCache", () => {
 	it("counts a tile's real size, so a few big tiles fill what many small ones would", () => {
 		const cache = new ThumbnailCache(100 * 50 * 4)
 
-		cache.set("small1", tile(50, 25))
-		cache.set("small2", tile(50, 25))
-		cache.set("small3", tile(50, 25))
-		cache.set("small4", tile(50, 25))
+		cache.set("small1", tile(50, 25).bitmap)
+		cache.set("small2", tile(50, 25).bitmap)
+		cache.set("small3", tile(50, 25).bitmap)
+		cache.set("small4", tile(50, 25).bitmap)
 		expect(cache.size).toBe(100 * 50 * 4)
 
-		cache.set("big", tile(100, 50))
+		cache.set("big", tile(100, 50).bitmap)
 		expect(cache.size).toBe(100 * 50 * 4)
 		expect(cache.has("small4")).toBe(false)
 	})
@@ -45,7 +45,7 @@ describe("ThumbnailCache", () => {
 		const cache = new ThumbnailCache(10 * 100 * 50 * 4)
 
 		for (let index = 0; index < 5; index++) {
-			cache.set(String(index), tile())
+			cache.set(String(index), tile().bitmap)
 		}
 
 		cache.setBudget(2 * 100 * 50 * 4)
@@ -59,16 +59,16 @@ describe("ThumbnailCache", () => {
 		const kept = tile()
 		const late = tile()
 
-		cache.set("kept", kept)
+		cache.set("kept", kept.bitmap)
 		cache.clear()
 		expect(kept.close).toHaveBeenCalledTimes(1)
 
-		cache.set("late", late)
+		cache.set("late", late.bitmap)
 		expect(late.close).toHaveBeenCalledTimes(1)
 		expect(cache.has("late")).toBe(false)
 
 		cache.open()
-		cache.set("again", tile())
+		cache.set("again", tile().bitmap)
 		expect(cache.has("again")).toBe(true)
 	})
 })
