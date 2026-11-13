@@ -13,6 +13,9 @@ import { FAKE_INFO } from "@/tests/support/fakeVideoEditClient"
 // picture this browser shows is refused (and Edit is not offered again), an in-place save shows the new version, a copy
 // is noted beside the file, Cancel over unsaved edits asks first, and Escape never leaves while an export runs.
 
+const mocks = vi.hoisted(() => ({
+	useAction: vi.fn<(id: string, handler: () => void, options?: unknown) => void>()
+}))
 const harness = vi.hoisted(() => ({
 	props: null as VideoEditorProps | null,
 	previewable: true,
@@ -22,7 +25,8 @@ const harness = vi.hoisted(() => ({
 	toastError: vi.fn(),
 	splices: [] as unknown[],
 	// Files (stable uuid, else uuid) with a save of an edit running.
-	running: new Set<string>()
+	running: new Set<string>(),
+	runningListeners: new Set<() => void>()
 }))
 
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
@@ -32,7 +36,7 @@ vi.mock("@tanstack/react-router", () => ({
 	useNavigate: () => vi.fn(),
 	useRouterState: () => "/drive"
 }))
-vi.mock("@/lib/keymap/useAction", () => ({ useAction: vi.fn(), IN_EDITORS: {}, IN_EDITORS_AND_FIELDS: {} }))
+vi.mock("@/lib/keymap/useAction", () => ({ useAction: mocks.useAction, IN_EDITORS: {}, IN_EDITORS_AND_FIELDS: {} }))
 vi.mock("@/lib/useIsOnline", () => ({ useIsOnline: () => true }))
 vi.mock("@/features/drive/lib/actions", async () => ({
 	...(await vi.importActual<typeof import("@/features/drive/lib/actions")>("@/features/drive/lib/actions")),
@@ -54,7 +58,14 @@ vi.mock("@/features/preview/videoEdit/client", () => ({
 }))
 vi.mock("@/features/preview/videoEdit/save", async () => ({
 	...(await vi.importActual<typeof import("@/features/preview/videoEdit/save")>("@/features/preview/videoEdit/save")),
-	isVideoExportRunning: (file: string) => harness.running.has(file)
+	isVideoExportRunning: (file: string) => harness.running.has(file),
+	subscribeVideoExports: (listener: () => void) => {
+		harness.runningListeners.add(listener)
+
+		return () => {
+			harness.runningListeners.delete(listener)
+		}
+	}
 }))
 vi.mock("@/features/preview/videoEdit/components/videoEditor", () => ({
 	VideoEditor: (props: VideoEditorProps) => {
@@ -81,6 +92,7 @@ import { withCode } from "@/tests/support/keys"
 registerAllActions()
 
 const UUID: SdkFile["uuid"] = "11111111-1111-1111-1111-111111111111"
+const RUNNING = "This video is still being saved. Edit it again once that save finishes."
 
 function video(uuid: SdkFile["uuid"] = UUID, name = "clip.mp4"): DriveItem {
 	const file: SdkFile = {
@@ -145,6 +157,8 @@ beforeEach(() => {
 	harness.exporting = false
 	harness.splices = []
 	harness.running.clear()
+	harness.runningListeners.clear()
+	mocks.useAction.mockClear()
 	harness.openSave.mockClear()
 	harness.toastError.mockClear()
 	usePreviewUnsavedGuardStore.setState({ dirty: false, logoutRequest: null })
@@ -188,7 +202,7 @@ describe("PreviewOverlay — video editing", () => {
 		expect(harness.disposed).toBe(1)
 	})
 
-	it("refuses to open the editor while a save of the same video still runs, saying why", async () => {
+	it("disables Edit video while a save of the same video runs, saying why, and enables it once that save ends", async () => {
 		harness.running.add(UUID)
 
 		render(
@@ -202,9 +216,48 @@ describe("PreviewOverlay — video editing", () => {
 			})
 		)
 
-		fireEvent.click(await screen.findByRole("button", { name: "Edit video" }))
+		const edit = await screen.findByRole("button", { name: "Edit video" })
 
-		expect(harness.toastError).toHaveBeenCalledWith("This video is still being saved. Edit it again once that save finishes.")
+		expect(edit.hasAttribute("disabled")).toBe(true)
+		expect(edit.getAttribute("title")).toBe(RUNNING)
+
+		act(() => {
+			harness.running.delete(UUID)
+
+			for (const listener of harness.runningListeners) {
+				listener()
+			}
+		})
+
+		expect(edit.hasAttribute("disabled")).toBe(false)
+		expect(edit.getAttribute("title")).toBeNull()
+	})
+
+	it("refuses the Edit video key while a save of the same video runs, saying why", async () => {
+		harness.running.add(UUID)
+
+		render(
+			createElement(PreviewOverlay, {
+				variant: "drive" as const,
+				items: [video()],
+				index: 0,
+				onStep: vi.fn(),
+				onClose: vi.fn(),
+				onItemRemoved: vi.fn()
+			})
+		)
+
+		await screen.findByRole("button", { name: "Edit video" })
+
+		const handler = mocks.useAction.mock.calls.findLast(([id]) => id === "preview.editVideo")?.[1]
+
+		expect(handler).toBeTypeOf("function")
+
+		act(() => {
+			handler?.()
+		})
+
+		expect(harness.toastError).toHaveBeenCalledWith(RUNNING)
 		expect(screen.queryByTestId("video-editor")).toBeNull()
 		expect(harness.disposed).toBe(0)
 	})

@@ -64,7 +64,7 @@ import { ORIENTATION_REWRITE_UNAVAILABLE } from "@/features/preview/imageEdit/or
 import { inPlaceFormatByName } from "@/features/preview/imageEdit/lib/targets"
 import { inPlaceVideoContainerByName } from "@/features/preview/videoEdit/lib/targets"
 import { createVideoEditClient } from "@/features/preview/videoEdit/client"
-import { isVideoExportRunning } from "@/features/preview/videoEdit/save"
+import { isVideoExportRunning, subscribeVideoExports } from "@/features/preview/videoEdit/save"
 import { VideoEditor, type VideoEditorCommands } from "@/features/preview/videoEdit/components/videoEditor"
 import { VIDEO_CANCEL_ACTION } from "@/features/preview/videoEdit/lib/keys"
 import type { VideoSaveTarget } from "@/features/preview/videoEdit/types"
@@ -465,6 +465,12 @@ export function PreviewOverlay({
 		pin?.category === "video" &&
 		canEditVideo(driveItem, variant) &&
 		!knownUnpreviewable(driveItem.data.uuid)
+	// A save of this video still runs (in an editor gone to the background, or a transfer): a second one would race it for
+	// the same name or version, so Edit waits until it ends. Live, so the button says so before it is pressed.
+	const videoExportRunning = useSyncExternalStore(
+		subscribeVideoExports,
+		() => driveItem !== undefined && isVideoExportRunning(stableUuidOf(driveItem) ?? driveItem.data.uuid)
+	)
 	// Either editor is open: the viewer's header, keys and saves step aside.
 	const anyEditing = editing !== null || videoEditing !== null
 
@@ -599,9 +605,8 @@ export function PreviewOverlay({
 			return
 		}
 
-		// A save of this video still running (in an editor gone to the background, or a transfer): a second one would
-		// race it for the same name or version, so the editor waits until it ends.
-		if (isVideoExportRunning(stableUuidOf(item) ?? item.data.uuid)) {
+		// Reached by the key while the button is disabled.
+		if (videoExportRunning) {
 			toast.error(t("previewVideoEditExportRunning"))
 
 			return
@@ -2064,7 +2069,8 @@ export function PreviewOverlay({
 									{videoEditable ? (
 										<TooltipIconButton
 											label={t("previewVideoEditOpen")}
-											disabled={videoMode.entering || saving}
+											disabled={videoMode.entering || saving || videoExportRunning}
+											title={videoExportRunning ? t("previewVideoEditExportRunning") : undefined}
 											shortcut={<Kbd action="preview.editVideo" />}
 											onClick={startVideoEdit}
 										>
