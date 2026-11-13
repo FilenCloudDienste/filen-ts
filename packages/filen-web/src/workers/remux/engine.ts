@@ -48,6 +48,7 @@ import {
 	containerPackets,
 	estimatedStreamDuration,
 	ffmpegSampleReader,
+	probedCodecFor,
 	probedCodecs,
 	rawPackets,
 	rawStreamOf
@@ -313,12 +314,14 @@ export class RemuxEngine {
 		])
 
 		// A codec mediabunny does not know (or TrueHD) may be one FFmpeg decodes, which the container walk names.
-		const ffmpeg = isFfmpegReaderAudio(codec) ? ((await this.probedCodecs()).get(track.id) ?? null) : null
+		const ffmpeg = isFfmpegReaderAudio(codec) ? probedCodecFor(await this.probedCodecs(), track.number, codec) : null
 
-		this.audio.set(track.id, { kind: "track", track, codec, ffmpeg })
+		// Audio tracks go by their place among the file's audio tracks, which the probe's audio list (container order)
+		// gives too: InputTrack.id counts every track, and is not the container's own ID either.
+		this.audio.set(track.number, { kind: "track", track, codec, ffmpeg })
 
 		return {
-			id: track.id,
+			id: track.number,
 			codec: codec ?? ffmpeg?.codec ?? null,
 			copyCodec: isCopyableAudio(codec) && config !== null ? config.codec : null,
 			channels,

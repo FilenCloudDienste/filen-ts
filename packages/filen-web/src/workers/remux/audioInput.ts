@@ -507,26 +507,36 @@ function openRaw(source: BlockInput, raw: { info: RawStreamInfo; header: Speaker
 	}
 }
 
-// A track mediabunny cannot name but our own container walk can (TrueHD, ALAC), with ALAC's cookie.
-export async function probedCodecs(cache: BlockCache): Promise<Map<number, { codec: FfmpegCodec; extradata?: Uint8Array }>> {
-	const found = new Map<number, { codec: FfmpegCodec; extradata?: Uint8Array }>()
+export interface ProbedCodec {
+	codec: FfmpegCodec
+	extradata?: Uint8Array
+}
+
+// Audio tracks mediabunny cannot name but our own container walk can (TrueHD, ALAC), with ALAC's cookie, keyed by
+// the track's 1-based place among the file's audio tracks. The walk knows a track by the container's own ID,
+// mediabunny by its index in getTracks(); the order of the audio tracks is what both read the same.
+export async function probedCodecs(cache: BlockCache): Promise<Map<number, ProbedCodec>> {
+	const found = new Map<number, ProbedCodec>()
 
 	try {
 		const source = new BlockSource(cache.size, (start, end) => Promise.resolve(cache.read(start, end)), { maxBlockReads: 4 })
 		const parsed = await walkContainer(source, "card")
+		let number = 0
 
 		for (const track of parsed?.tracks ?? []) {
 			if (track.kind !== "audio") {
 				continue
 			}
 
+			number++
+
 			if (track.audio.codec === "truehd") {
-				found.set(track.audio.id, { codec: "truehd" })
+				found.set(number, { codec: "truehd" })
 			} else if (track.audio.codec === "alac") {
 				const extradata = track.config === undefined || track.config === null ? null : alacExtradata(track.config)
 
 				if (extradata !== null) {
-					found.set(track.audio.id, { codec: "alac", extradata })
+					found.set(number, { codec: "alac", extradata })
 				}
 			}
 		}
@@ -535,6 +545,14 @@ export async function probedCodecs(cache: BlockCache): Promise<Map<number, { cod
 	}
 
 	return found
+}
+
+// The walk's codec for one of mediabunny's audio tracks (`number` is InputAudioTrack.number). A codec mediabunny
+// names itself must agree, so a track only one side lists cannot shift a walked codec onto another stream.
+export function probedCodecFor(probed: Map<number, ProbedCodec>, number: number, codec: string | null): ProbedCodec | null {
+	const known = probed.get(number)
+
+	return known !== undefined && (codec === null || codec === known.codec) ? known : null
 }
 
 // An MP3 or ADTS stream's duration, which no header gives: its size over the byte rate of its first frames,
@@ -592,7 +610,7 @@ async function openContainer(source: BlockInput): Promise<AudioInput | null> {
 		...tracks.filter((_, i) => dispositions[i]?.default !== true)
 	]
 	let probed: Awaited<ReturnType<typeof probedCodecs>> | null = null
-	let chosen: { track: InputAudioTrack; codec: string; ffmpeg: { codec: FfmpegCodec; extradata?: Uint8Array } | null } | null = null
+	let chosen: { track: InputAudioTrack; codec: string; ffmpeg: ProbedCodec | null } | null = null
 
 	for (const track of ordered) {
 		const codec = await track.getCodec()
@@ -605,9 +623,9 @@ async function openContainer(source: BlockInput): Promise<AudioInput | null> {
 		// Not a codec mediabunny knows: perhaps one only FFmpeg decodes.
 		probed ??= await probedCodecs(cache)
 
-		const known = probed.get(track.id)
+		const known = probedCodecFor(probed, track.number, codec)
 
-		if (known !== undefined) {
+		if (known !== null) {
 			chosen = { track, codec: known.codec, ffmpeg: known }
 			break
 		}

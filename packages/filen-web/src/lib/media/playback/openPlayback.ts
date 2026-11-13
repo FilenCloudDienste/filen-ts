@@ -20,7 +20,7 @@ import {
 } from "@/lib/media/playback/capabilities"
 import { watchForDemotion, type DemotionWatch } from "@/lib/media/playback/demotionWatch"
 import { openDirectSession, type DirectSource } from "@/lib/media/playback/directSession"
-import { samePipeline, sessionPlan, type SessionPlan } from "@/lib/media/playback/openPlayback.logic"
+import { audioTrackId, samePipeline, sessionPlan, type SessionPlan } from "@/lib/media/playback/openPlayback.logic"
 import { captureFramePoster } from "@/lib/media/playback/poster"
 import { openRemuxPlaybackSession, type RemuxSource } from "@/lib/media/playback/remuxSession"
 import { directSource, remuxSource } from "@/lib/media/playback/sources"
@@ -424,7 +424,7 @@ class LadderPlayback implements Playback {
 	private directAudio(audioIndex: number): SessionAudio | null {
 		const track = this.probe.audio[audioIndex]
 
-		return track === undefined ? null : { index: audioIndex, trackId: track.id, mode: "copy" }
+		return track === undefined ? null : { index: audioIndex, trackId: audioTrackId(audioIndex), mode: "copy" }
 	}
 
 	private listen(type: string, listener: () => void): void {

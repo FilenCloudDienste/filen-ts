@@ -225,7 +225,7 @@ describe("openPlayback", () => {
 			failure: { trigger: "media-error" }
 		})
 		expect(video.poster).toBe("blob:poster")
-		expect(remuxes[0]?.options).toMatchObject({ startTime: 33, audio: { trackId: 2, mode: "copy" }, idrOnlyStart: false })
+		expect(remuxes[0]?.options).toMatchObject({ startTime: 33, audio: { trackId: 1, mode: "copy" }, idrOnlyStart: false })
 		expect(video.src).toBe("blob:mse")
 		// It was playing (autoplay): it plays on.
 		expect(video.paused).toBe(false)
@@ -314,7 +314,7 @@ describe("openPlayback", () => {
 		await playback.selectAudio(1)
 
 		expect(remuxes).toHaveLength(1)
-		expect(remuxes[0]?.selectAudio).toHaveBeenCalledWith(3, "copy")
+		expect(remuxes[0]?.selectAudio).toHaveBeenCalledWith(2, "copy")
 		expect(playback.getSnapshot().selection.audioIndex).toBe(1)
 
 		// Audio none: the session cannot drop its audio in place.
@@ -463,7 +463,7 @@ describe("openPlayback", () => {
 		// Direct failed for this file: the other track does not bring it back.
 		expect(directIds).toHaveLength(1)
 		expect(playback.getSnapshot()).toMatchObject({ decision: { path: "remux" }, selection: { audioIndex: 1 } })
-		expect(remuxes.at(-1)?.selectAudio).toHaveBeenCalledWith(3, "copy")
+		expect(remuxes.at(-1)?.selectAudio).toHaveBeenCalledWith(2, "copy")
 		playback.dispose()
 	})
 
@@ -491,7 +491,7 @@ describe("openPlayback", () => {
 		await settle()
 
 		expect(remuxes).toHaveLength(2)
-		expect(remuxes[1]?.options.audio).toMatchObject({ trackId: 3 })
+		expect(remuxes[1]?.options.audio).toMatchObject({ trackId: 2 })
 		expect(playback.getSnapshot()).toMatchObject({ selection: { audioIndex: 1 }, demotions: 1 })
 		playback.dispose()
 	})

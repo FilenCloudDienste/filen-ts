@@ -29,6 +29,12 @@ function directContentType(container: string): string | null {
 	}
 }
 
+// The remux engine's id for the probe's audio track at `index`: its 1-based place among the file's audio tracks,
+// which the probe and the demuxer both list in container order.
+export function audioTrackId(index: number): number {
+	return index + 1
+}
+
 export function sessionPlan(params: {
 	decision: LadderDecision
 	probe: VideoProbe
@@ -55,7 +61,7 @@ export function sessionPlan(params: {
 				audio:
 					track === undefined || (mode !== "copy" && mode !== "transcode")
 						? null
-						: { index: selection.audioIndex, trackId: track.id, mode },
+						: { index: selection.audioIndex, trackId: audioTrackId(selection.audioIndex), mode },
 				// Firefox's MediaSource starts HEVC only at an IDR picture.
 				idrOnlyStart: browser === "firefox" && probe.video?.codec === "hevc"
 			}

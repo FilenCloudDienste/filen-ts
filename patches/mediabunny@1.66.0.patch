@@ -1,5 +1,5 @@
 diff --git a/dist/modules/src/isobmff/isobmff-boxes.d.ts b/dist/modules/src/isobmff/isobmff-boxes.d.ts
-index 105cf54469a2cc5d63fb3f157faa91f3280205d4..38d3a1d8327cc9342f220f942d08d649ffb334d7 100644
+index 8966d2a6db735c2085b0ff75a56b084ed798a321..23395cf17d7b0929c4a14a873150e6ab18d996e3 100644
 --- a/dist/modules/src/isobmff/isobmff-boxes.d.ts
 +++ b/dist/modules/src/isobmff/isobmff-boxes.d.ts
 @@ -172,7 +172,9 @@ export declare const cslg: (trackData: IsobmffTrackData) => Box | null;
@@ -14,10 +14,10 @@ index 105cf54469a2cc5d63fb3f157faa91f3280205d4..38d3a1d8327cc9342f220f942d08d649
  export declare const trex: (trackData: IsobmffTrackData) => Box;
  /**
 diff --git a/dist/modules/src/isobmff/isobmff-boxes.js b/dist/modules/src/isobmff/isobmff-boxes.js
-index 39cb4984b72cf85d86cc448e2a9ecc0fe82ae9c9..979497a4d41f6bfa03573617e78978b1e59a586c 100644
+index 4e52b92e55ce69492643233b3032ee6877d7791e..0d403c41dd68f7e41718376076570950b4f3a8a5 100644
 --- a/dist/modules/src/isobmff/isobmff-boxes.js
 +++ b/dist/modules/src/isobmff/isobmff-boxes.js
-@@ -277,7 +277,7 @@ export const moov = (muxer) => {
+@@ -286,7 +286,7 @@ export const moov = (muxer) => {
      return box('moov', undefined, [
          mvhd(muxer.creationTime, muxer.trackDatas),
          ...muxer.trackDatas.map(x => trak(x, muxer.creationTime)),
@@ -26,7 +26,7 @@ index 39cb4984b72cf85d86cc448e2a9ecc0fe82ae9c9..979497a4d41f6bfa03573617e78978b1
          udta(muxer),
      ]);
  };
-@@ -1142,8 +1142,19 @@ const sgpdAndSbgp = (samples, inTrackFragment) => {
+@@ -1222,8 +1222,19 @@ const sgpdAndSbgp = (samples, inTrackFragment) => {
   * Movie Extends Box: This box signals to readers that the file is fragmented. Contains a single Track Extends Box
   * for each track in the movie.
   */
@@ -49,10 +49,10 @@ index 39cb4984b72cf85d86cc448e2a9ecc0fe82ae9c9..979497a4d41f6bfa03573617e78978b1
  /** Track Extends Box: Contains the default values used by the movie fragments. */
  export const trex = (trackData) => {
 diff --git a/dist/modules/src/matroska/matroska-demuxer.js b/dist/modules/src/matroska/matroska-demuxer.js
-index 0ce440c99f66e4694c7690f006fe6757536d836c..7bf6baaace5b1df7a9da7ba7fc9d37eb43b5b85f 100644
+index 149566a8f4aba2e7f6bfbdfcabce6c192468783f..1eca1c096f0c74612e20628d2329f74e37d8354b 100644
 --- a/dist/modules/src/matroska/matroska-demuxer.js
 +++ b/dist/modules/src/matroska/matroska-demuxer.js
-@@ -227,14 +227,19 @@ export class MatroskaDemuxer extends Demuxer {
+@@ -229,14 +229,19 @@ export class MatroskaDemuxer extends Demuxer {
                      this.readContiguousElements(slice);
                  }
              }
@@ -80,10 +80,10 @@ index 0ce440c99f66e4694c7690f006fe6757536d836c..7bf6baaace5b1df7a9da7ba7fc9d37eb
                  let slice = this.reader.requestSlice(dataStartPos, size);
                  if (isThenable(slice))
 diff --git a/dist/modules/src/output-format.d.ts b/dist/modules/src/output-format.d.ts
-index 5d8fb58a45720478a20eb03432d87cf3ea791606..71f91e06659440c754132280f3d97f83cbe5f11a 100644
+index 615ef3914822e6aec1fdc954d4132b8d38369390..28468524409baced844768831a5c39e7b73b5479 100644
 --- a/dist/modules/src/output-format.d.ts
 +++ b/dist/modules/src/output-format.d.ts
-@@ -119,6 +119,13 @@ export type IsobmffOutputFormatOptions = {
+@@ -120,6 +120,13 @@ export type IsobmffOutputFormatOptions = {
       * New fragments will only be created when the current fragment is longer than this value. Defaults to 1 second.
       */
      minimumFragmentDuration?: number;
@@ -98,10 +98,10 @@ index 5d8fb58a45720478a20eb03432d87cf3ea791606..71f91e06659440c754132280f3d97f83
       * The metadata format to use for writing metadata tags.
       *
 diff --git a/dist/modules/src/output-format.js b/dist/modules/src/output-format.js
-index ca749428857b5942240d94dfeae9746cc8175ef0..84ae2ecec94823d6173ae7123fa2314366d1c2c7 100644
+index a4caccedc192e8811f38d1f0d47cdb1b4a02af03..391244542ff45f130b392c74a08ce82baf2d4d76 100644
 --- a/dist/modules/src/output-format.js
 +++ b/dist/modules/src/output-format.js
-@@ -81,6 +81,10 @@ export class IsobmffOutputFormat extends OutputFormat {
+@@ -86,6 +86,10 @@ export class IsobmffOutputFormat extends OutputFormat {
              && (!isNumber(options.minimumFragmentDuration) || options.minimumFragmentDuration < 0)) {
              throw new TypeError('options.minimumFragmentDuration, when provided, must be a non-negative number.');
          }
@@ -113,10 +113,10 @@ index ca749428857b5942240d94dfeae9746cc8175ef0..84ae2ecec94823d6173ae7123fa23143
              throw new TypeError('options.onFtyp, when provided, must be a function.');
          }
 diff --git a/src/isobmff/isobmff-boxes.ts b/src/isobmff/isobmff-boxes.ts
-index 303b9217ac7cc154c85d0532fb15bc09f96625b0..7b34ed23c8ffbcabda013a3e3c6430ecfc1f78e6 100644
+index 670702c5c1eadad9ca0408dbb3b5473d1740ac9f..0a9815a52e576e48e33f8e16ea2672d1ac69b80a 100644
 --- a/src/isobmff/isobmff-boxes.ts
 +++ b/src/isobmff/isobmff-boxes.ts
-@@ -386,7 +386,7 @@ export const moov = (muxer: IsobmffMuxer) => {
+@@ -397,7 +397,7 @@ export const moov = (muxer: IsobmffMuxer) => {
  	return box('moov', undefined, [
  		mvhd(muxer.creationTime, muxer.trackDatas),
  		...muxer.trackDatas.map(x => trak(x, muxer.creationTime)),
@@ -125,7 +125,7 @@ index 303b9217ac7cc154c85d0532fb15bc09f96625b0..7b34ed23c8ffbcabda013a3e3c6430ec
  		udta(muxer),
  	]);
  };
-@@ -1452,8 +1452,21 @@ const sgpdAndSbgp = (samples: Sample[], inTrackFragment: boolean) => {
+@@ -1545,8 +1545,21 @@ const sgpdAndSbgp = (samples: Sample[], inTrackFragment: boolean) => {
   * Movie Extends Box: This box signals to readers that the file is fragmented. Contains a single Track Extends Box
   * for each track in the movie.
   */
@@ -150,10 +150,10 @@ index 303b9217ac7cc154c85d0532fb15bc09f96625b0..7b34ed23c8ffbcabda013a3e3c6430ec
  
  /** Track Extends Box: Contains the default values used by the movie fragments. */
 diff --git a/src/matroska/matroska-demuxer.ts b/src/matroska/matroska-demuxer.ts
-index c17ac37b40e64a0f81b6974c58d997f563e391fe..c500e854ce435b3fe23f26a69b555f41c4efe459 100644
+index 770a1302fc270ac0b16b898c453a01dfe29370b1..3f751bf175a6f8909d5fc592e732b033f571646e 100644
 --- a/src/matroska/matroska-demuxer.ts
 +++ b/src/matroska/matroska-demuxer.ts
-@@ -510,13 +510,18 @@ export class MatroskaDemuxer extends Demuxer {
+@@ -522,13 +522,18 @@ export class MatroskaDemuxer extends Demuxer {
  				if (slice) {
  					this.readContiguousElements(slice);
  				}
@@ -179,10 +179,10 @@ index c17ac37b40e64a0f81b6974c58d997f563e391fe..c500e854ce435b3fe23f26a69b555f41
  				assertDefinedSize(size);
  
 diff --git a/src/output-format.ts b/src/output-format.ts
-index 64bae2c63dc42f9b88b6f1cd6415910784a7353a..7a29c4e2a8e9cb2608b57e0a9c4fc783663d167d 100644
+index fded545ce95cb8061790876b40c91ecf58474cb0..c5f3b2ec717c951d2140abe7b2de451fe0ff75d3 100644
 --- a/src/output-format.ts
 +++ b/src/output-format.ts
-@@ -181,6 +181,14 @@ export type IsobmffOutputFormatOptions = {
+@@ -186,6 +186,14 @@ export type IsobmffOutputFormatOptions = {
  	 */
  	minimumFragmentDuration?: number;
  
@@ -197,7 +197,7 @@ index 64bae2c63dc42f9b88b6f1cd6415910784a7353a..7a29c4e2a8e9cb2608b57e0a9c4fc783
  	/**
  	 * The metadata format to use for writing metadata tags.
  	 *
-@@ -257,6 +265,12 @@ export abstract class IsobmffOutputFormat extends OutputFormat {
+@@ -262,6 +270,12 @@ export abstract class IsobmffOutputFormat extends OutputFormat {
  		) {
  			throw new TypeError('options.minimumFragmentDuration, when provided, must be a non-negative number.');
  		}

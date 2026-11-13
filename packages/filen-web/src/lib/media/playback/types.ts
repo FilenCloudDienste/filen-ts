@@ -43,7 +43,7 @@ export interface SessionCallbacks {
 	onReconnecting(reconnecting: boolean): void
 }
 
-// The audio a session plays: the probe's track (index into its audio list, and the container's track id)
+// The audio a session plays: the probe's track (index into its audio list, and the remux engine's id for it)
 // and how it reaches the element.
 export interface SessionAudio {
 	index: number

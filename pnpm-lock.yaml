@@ -190,7 +190,7 @@ patchedDependencies:
   expo-video@58.0.13: 6fb16ecb6426e070bb4b38279c307b8071dfffbb28255fafba66c69a9476b7fe
   file-type@22.2.0: a25744dce2cc85b7b7df582aa7b56fd1bedf8ce9e2e2317655e87be4a4e3b24e
   hucre@1.2.0: 5f5ada98495cb608ef0d4f0d1097036950756915c8210d92cc290756afe3feec
-  mediabunny@1.65.2: 2b7aaaf124ee08199b46e40509a85e3f79dff76d3b4b734bd180fb784d14a60d
+  mediabunny@1.66.0: d4d9dac984d5d92d167c2f0dd12d1e8fb09238dfc3c3f6de76d182c10707bc59
   pressto@0.7.0: ce80592e446002864888a4f51e2ceaf385c24a3f4c95a1266d5ff268deea4f4e
   react-native-ios-utilities@5.2.0: 5153d1d449fd7e01ce55ed1774332b5029f0065a7e968abc597635cade9b7954
   react-native-notify-kit@10.9.0: 5e3f20eed565eb625d67ebb2a8e56a2940472a6176625d7f8a28a2f5897db678
@@ -1077,8 +1077,8 @@ importers:
         specifier: 1.2.5
         version: 1.2.5
       '@mediabunny/aac-encoder':
-        specifier: 1.65.2
-        version: 1.65.2(mediabunny@1.65.2(patch_hash=2b7aaaf124ee08199b46e40509a85e3f79dff76d3b4b734bd180fb784d14a60d))
+        specifier: 1.66.0
+        version: 1.66.0(mediabunny@1.66.0(patch_hash=d4d9dac984d5d92d167c2f0dd12d1e8fb09238dfc3c3f6de76d182c10707bc59))
       '@replit/codemirror-lang-nix':
         specifier: 6.0.1
         version: 6.0.1(@codemirror/autocomplete@6.20.4)(@codemirror/language@6.13.1)(@codemirror/state@6.7.6)(@codemirror/view@6.43.15)(@lezer/common@1.5.2)(@lezer/highlight@1.2.5)(@lezer/lr@1.4.10)
@@ -1146,8 +1146,8 @@ importers:
         specifier: ^1.61.0
         version: 1.61.0(@types/react@19.3.0)(react@19.3.1)
       mediabunny:
-        specifier: 1.65.2
-        version: 1.65.2(patch_hash=2b7aaaf124ee08199b46e40509a85e3f79dff76d3b4b734bd180fb784d14a60d)
+        specifier: 1.66.0
+        version: 1.66.0(patch_hash=d4d9dac984d5d92d167c2f0dd12d1e8fb09238dfc3c3f6de76d182c10707bc59)
       music-metadata:
         specifier: 12.2.3
         version: 12.2.3(supports-color@8.1.1)
@@ -3194,8 +3194,8 @@ packages:
   '@marijn/find-cluster-break@1.0.4':
     resolution: {integrity: sha512-Wy0V7+SGUjnF9/TkiM1hKVDPj7jKXduPNboMVtHTA8dySMURWqfg/JZ9E2Sq8JgSJmkl7k7Qe9FLeMSrSraWmQ==}
 
-  '@mediabunny/aac-encoder@1.65.2':
-    resolution: {integrity: sha512-HsDmtqRf26PwSDl1IYCPz5hHtj3js5u6O1VGdOIPKrln5E0slaPyGue84CWpbbeJ54wrLDJdd/esp17Ot+xh3A==}
+  '@mediabunny/aac-encoder@1.66.0':
+    resolution: {integrity: sha512-46RM06RQGIqC+HQI30e2HR2JTgk6dzyD/ybD23E6zuc7R22/x1XIQHghJDkfKnHF72ztJBZxNbt/NncH7SrvYQ==}
     peerDependencies:
       mediabunny: ^1.0.0
 
@@ -7995,8 +7995,8 @@ packages:
     resolution: {integrity: sha512-kOy3OxT2HH39N70UnKgu4NWDZjLOz8W/mfyvniHjRH/DrL3f2pOfvWQ4p60offbbtDAnXWp0v9LfMIqMec269Q==}
     engines: {node: '>=18'}
 
-  mediabunny@1.65.2:
-    resolution: {integrity: sha512-goZpibvo/5hkc/56WVNm93Ini+o7K4y8aXA20c/BN1B+m3L5aHQa8MTvO+S1APg/YI8kMILtrX6QCqUtxLW7bA==}
+  mediabunny@1.66.0:
+    resolution: {integrity: sha512-0Zff/qLkY1ZRyjBEt2vQjLeMigmU/dFKwJLpiPyCiskIel2f2R2kqMxaLYbeHN+rmyz4PVwwLSnU9anjUHHeJQ==}
 
   memoize-one@5.2.1:
     resolution: {integrity: sha512-zYiwtZUcYyXKo/np96AGZAckk+FWWsUdJ3cHGGmld7+AhvcWmQyGCYUh1hc4Q/pkOhb65dQR/pqCyK0cOaHz4Q==}
@@ -13371,9 +13371,9 @@ snapshots:
 
   '@marijn/find-cluster-break@1.0.4': {}
 
-  '@mediabunny/aac-encoder@1.65.2(mediabunny@1.65.2(patch_hash=2b7aaaf124ee08199b46e40509a85e3f79dff76d3b4b734bd180fb784d14a60d))':
+  '@mediabunny/aac-encoder@1.66.0(mediabunny@1.66.0(patch_hash=d4d9dac984d5d92d167c2f0dd12d1e8fb09238dfc3c3f6de76d182c10707bc59))':
     dependencies:
-      mediabunny: 1.65.2(patch_hash=2b7aaaf124ee08199b46e40509a85e3f79dff76d3b4b734bd180fb784d14a60d)
+      mediabunny: 1.66.0(patch_hash=d4d9dac984d5d92d167c2f0dd12d1e8fb09238dfc3c3f6de76d182c10707bc59)
 
   '@modelcontextprotocol/sdk@1.32.1(supports-color@8.1.1)(zod@4.6.7)':
     dependencies:
@@ -18940,7 +18940,7 @@ snapshots:
 
   media-typer@2.0.0: {}
 
-  mediabunny@1.65.2(patch_hash=2b7aaaf124ee08199b46e40509a85e3f79dff76d3b4b734bd180fb784d14a60d):
+  mediabunny@1.66.0(patch_hash=d4d9dac984d5d92d167c2f0dd12d1e8fb09238dfc3c3f6de76d182c10707bc59):
     dependencies:
       '@types/dom-mediacapture-transform': 0.1.12
       '@types/dom-webcodecs': 0.1.13

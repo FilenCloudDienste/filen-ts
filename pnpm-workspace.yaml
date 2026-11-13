@@ -82,6 +82,8 @@ minimumReleaseAgeExclude:
   - expo-system-ui@58.0.7
   - expo-video@58.0.13
   - expo@58.0.21
+  - mediabunny@1.66.0
+  - '@mediabunny/aac-encoder@1.66.0'
 minimumReleaseAgeExcludePrune: true
 
 allowBuilds:
@@ -154,7 +156,7 @@ patchedDependencies:
   # Matroska demuxer reads attachments (often megabytes of fonts) lazily, so reading tracks never
   # downloads them; the fragmented MP4 muxer takes an expectedDuration it writes as mvex/mehd, so a streamed
   # (append-only) export carries its duration. Re-author on every bump; drop each hunk once upstream has it.
-  mediabunny@1.65.2: patches/mediabunny@1.65.2.patch
+  mediabunny@1.66.0: patches/mediabunny@1.66.0.patch
   # RNGH 3 dropped the v2 button callbacks pressto's feedback and haptics run on; moved onto LegacyBaseButton.
   # Drop once pressto supports RNGH 3 (enzomanuelmangano/pressto#37).
   pressto@0.7.0: patches/pressto@0.7.0.patch

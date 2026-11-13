@@ -131,42 +131,42 @@ describe("ladder decision -> session", () => {
 			CHROME,
 			file("mkv", "h264", "aac"),
 			FIRST,
-			{ kind: "remux", path: "remux", audio: { index: 0, trackId: 2, mode: "copy" }, idrOnlyStart: false }
+			{ kind: "remux", path: "remux", audio: { index: 0, trackId: 1, mode: "copy" }, idrOnlyStart: false }
 		],
 		[
 			"chrome",
 			CHROME,
 			file("mkv", "h264", "ac3"),
 			FIRST,
-			{ kind: "remux", path: "remux+transcode", audio: { index: 0, trackId: 2, mode: "transcode" }, idrOnlyStart: false }
+			{ kind: "remux", path: "remux+transcode", audio: { index: 0, trackId: 1, mode: "transcode" }, idrOnlyStart: false }
 		],
 		[
 			"safari",
 			SAFARI,
 			file("mkv", "h264", "ac3"),
 			FIRST,
-			{ kind: "remux", path: "remux", audio: { index: 0, trackId: 2, mode: "copy" }, idrOnlyStart: false }
+			{ kind: "remux", path: "remux", audio: { index: 0, trackId: 1, mode: "copy" }, idrOnlyStart: false }
 		],
 		[
 			"firefox",
 			FIREFOX,
 			file("mkv", "hevc", "aac"),
 			FIRST,
-			{ kind: "remux", path: "remux", audio: { index: 0, trackId: 2, mode: "copy" }, idrOnlyStart: true }
+			{ kind: "remux", path: "remux", audio: { index: 0, trackId: 1, mode: "copy" }, idrOnlyStart: true }
 		],
 		[
 			"chrome",
 			CHROME,
 			file("mkv", "hevc", "aac"),
 			FIRST,
-			{ kind: "remux", path: "remux", audio: { index: 0, trackId: 2, mode: "copy" }, idrOnlyStart: false }
+			{ kind: "remux", path: "remux", audio: { index: 0, trackId: 1, mode: "copy" }, idrOnlyStart: false }
 		],
 		[
 			"safari",
 			SAFARI,
 			file("webm", "h264", "opus"),
 			FIRST,
-			{ kind: "remux", path: "remux+transcode", audio: { index: 0, trackId: 2, mode: "transcode" }, idrOnlyStart: false }
+			{ kind: "remux", path: "remux+transcode", audio: { index: 0, trackId: 1, mode: "transcode" }, idrOnlyStart: false }
 		],
 		["chrome", CHROME, file("mkv", "h264", "truehd"), FIRST, { kind: "remux", path: "video-only", audio: null, idrOnlyStart: false }],
 		[
@@ -174,7 +174,7 @@ describe("ladder decision -> session", () => {
 			CHROME,
 			file("mp4", "h264", "aac", "aac"),
 			SECOND,
-			{ kind: "remux", path: "remux", audio: { index: 1, trackId: 3, mode: "copy" }, idrOnlyStart: false }
+			{ kind: "remux", path: "remux", audio: { index: 1, trackId: 2, mode: "copy" }, idrOnlyStart: false }
 		],
 		["safari", SAFARI, file("mp4", "h264", "aac", "aac"), SECOND, { kind: "direct", contentType: "video/mp4", audioIndex: 1 }],
 		["chrome", CHROME, file("mp4", "mpeg4", "aac"), FIRST, { kind: "none" }]

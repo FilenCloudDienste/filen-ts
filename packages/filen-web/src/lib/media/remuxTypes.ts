@@ -48,6 +48,7 @@ export interface RemuxVideoInfo {
 }
 
 export interface RemuxAudioInfo {
+	// The track's 1-based place among the file's audio tracks (the probe's audio index + 1).
 	id: number
 	codec: string | null
 	// The copied track's fragmented-MP4 codec string, in the demuxer's spelling; null when the codec cannot
