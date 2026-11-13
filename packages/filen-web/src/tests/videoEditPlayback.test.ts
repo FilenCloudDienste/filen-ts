@@ -1,15 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { EditorPlayback } from "@/features/preview/videoEdit/components/editorPlayback"
 import {
-	colourConvertsHdr,
+	announcedPercent,
 	dropNotices,
 	etaMinutes,
 	saveBlock,
+	savesSilently,
 	targetNote,
 	unavailableFeatures
 } from "@/features/preview/videoEdit/lib/availability"
-import type { ExportPlan, VideoSourceInfo } from "@/features/preview/videoEdit/types"
-import { FAKE_INFO, FAKE_PLAN } from "@/tests/support/fakeVideoEditClient"
+import type { ExportPlan } from "@/features/preview/videoEdit/types"
+import { FAKE_PLAN } from "@/tests/support/fakeVideoEditClient"
 
 // The editor's playback over a stand-in element: it jumps over removed sections and loops a selection on the frame it
 // reaches them, plays at the recipe's speed with the pitch kept, doubles on L, previews the gain as the element's
@@ -147,6 +148,61 @@ describe("EditorPlayback", () => {
 		expect(video.playbackRate).toBe(1.5)
 	})
 
+	it("keeps a paused playhead to itself, moving the element once the steps rest or on play", () => {
+		vi.useFakeTimers()
+
+		try {
+			const { playback, video, ticks } = setUp()
+			const settled: number[] = []
+
+			playback.onSettle(time => {
+				settled.push(time)
+			})
+
+			playback.seek(1)
+			playback.seek(1.04)
+			playback.seek(1.08)
+
+			expect(playback.time).toBe(1.08)
+			expect(ticks.at(-1)).toBe(1.08)
+			expect(settled).toEqual([1, 1.04, 1.08])
+			// The element has not decoded any of them.
+			expect(video.currentTime).toBe(0)
+
+			vi.advanceTimersByTime(1000)
+			expect(video.currentTime).toBe(1.08)
+
+			// A drag seeks without settling; settle() tells where it ended.
+			playback.seek(5, false)
+			expect(settled.at(-1)).toBe(1.08)
+			playback.settle()
+			expect(settled.at(-1)).toBe(5)
+			expect(video.currentTime).toBe(1.08)
+
+			playback.play()
+			expect(video.currentTime).toBe(5)
+
+			vi.advanceTimersByTime(1000)
+			expect(video.currentTime).toBe(5)
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	it("settles where a pause leaves the playhead", () => {
+		const { playback, video } = setUp()
+		const settled: number[] = []
+
+		playback.onSettle(time => {
+			settled.push(time)
+		})
+		playback.play()
+		video.currentTime = 7
+		playback.pause()
+
+		expect(settled).toEqual([7])
+	})
+
 	it("previews mute and gain on the element", () => {
 		const { playback, video } = setUp()
 
@@ -168,19 +224,30 @@ describe("plan readings", () => {
 	})
 
 	it("joins subtitles and chapters into one notice", () => {
-		expect(dropNotices(["chapters", "subtitles", "location"])).toEqual(["subtitlesAndChapters", "location"])
-		expect(dropNotices(["subtitles", "extraAudio"])).toEqual(["subtitles", "extraAudio"])
+		expect(dropNotices(["chapters", "subtitles", "location"], null)).toEqual(["subtitlesAndChapters", "location"])
+		expect(dropNotices(["subtitles", "extraAudio"], null)).toEqual(["subtitles", "extraAudio"])
+	})
+
+	it("leaves HDR details to the conversion's own notice", () => {
+		expect(dropNotices(["hdrMetadata"], "hevc10")).toEqual(["hdrMetadata"])
+		expect(dropNotices(["hdrMetadata", "location"], "toSdr")).toEqual(["location"])
+	})
+
+	it("starts a copy from the keys only when the popover would say nothing", () => {
+		expect(savesSilently(plan({}))).toBe(true)
+		expect(savesSilently(plan({ hdr: "toSdr" }))).toBe(false)
+		expect(savesSilently(plan({ dropped: ["chapters"] }))).toBe(false)
+		expect(savesSilently(plan({ blockers: ["crop"] }))).toBe(false)
+	})
+
+	it("announces progress in steps", () => {
+		expect([0, 19, 20, 54, 99, 100].map(announcedPercent)).toEqual([0, 0, 20, 40, 80, 100])
 	})
 
 	it("reads what happens to the original from the targets", () => {
 		expect(targetNote(plan({ targets: ["inPlace", "copy"] }))).toBe("versionKept")
 		expect(targetNote(plan({ targets: ["copy", "inPlace"] }))).toBe("versioningOff")
 		expect(targetNote(plan({ targets: ["copy"] }))).toBe("copyOnly")
-	})
-
-	it("notes that colour work converts HDR", () => {
-		expect(colourConvertsHdr(FAKE_INFO)).toBe(false)
-		expect(colourConvertsHdr({ ...FAKE_INFO, transfer: "pq" } satisfies VideoSourceInfo)).toBe(true)
 	})
 
 	it("tells a save blocked by its sound alone from one blocked by its picture", () => {

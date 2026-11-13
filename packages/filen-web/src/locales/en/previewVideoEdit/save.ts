@@ -65,8 +65,12 @@ export const previewVideoSave = {
 	previewVideoSaveRemoveLocation: "Remove location",
 	/** Save popover — the summary is still being worked out */
 	previewVideoSavePlanning: "Working out the save…",
+	/** Save popover — the summary could not be worked out; a Retry button follows */
+	previewVideoSavePlanFailed: "Couldn't work out the save.",
 	/** Export progress — percent done; {{percent}} is a whole number */
 	previewVideoSaveExporting: "Exporting… {{percent}}%",
+	/** Export progress — accessible name of the progress bar */
+	previewVideoSaveProgressLabel: "Export progress",
 	/** Export progress — keep exporting as a transfer and close the editor */
 	previewVideoSaveContinueInBackground: "Continue in background",
 	/** Export progress — stop the export (nothing is saved) */
@@ -75,6 +79,12 @@ export const previewVideoSave = {
 	previewVideoSaveCancelExportLabel: "Cancel export",
 	/** Export progress — the export failed; the edits are kept */
 	previewVideoSaveFailed: "The video couldn't be saved.",
+	/** Export notice — why the export failed: it stopped making progress */
+	previewVideoSaveFailedStalled: "The export stopped making progress.",
+	/** Export notice — why the export failed: the background process doing it stopped unexpectedly */
+	previewVideoSaveFailedWorkerLost: "The export stopped unexpectedly.",
+	/** Export notice — why the export failed: uploading the saved video failed */
+	previewVideoSaveFailedUploadFailed: "Uploading the saved video failed.",
 	/** Export progress — try the failed export again with the same edits */
 	previewVideoSaveRetry: "Retry",
 	/** Export progress — close the failure notice and go on editing */
@@ -105,6 +115,6 @@ export const previewVideoSave = {
 	previewVideoSaveRefusedCodec: "This video's format can't be saved in this browser.",
 	/** Export notice — this way of saving (in place or as a copy) is not offered for this file */
 	previewVideoSaveRefusedTarget: "This video can't be saved that way.",
-	/** Export notice — a new version of this video is being saved already; one at a time */
-	previewVideoSaveRefusedBusy: "A new version of this video is already being saved."
+	/** Export notice — the save did not start: an earlier save of this video is still running */
+	previewVideoSaveRefusedBusy: "This video is still being saved. Try again once that save finishes."
 } as const

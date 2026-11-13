@@ -1,4 +1,4 @@
-import type { ReactNode } from "react"
+import { useEffect, useRef, type ReactNode, type RefObject } from "react"
 import { useTranslation } from "react-i18next"
 import { AlertTriangleIcon, ChevronDownIcon, CopyIcon, HistoryIcon, InfoIcon, VolumeXIcon, ZapIcon } from "lucide-react"
 import { cn, formatBytes } from "@filen/shared"
@@ -8,7 +8,6 @@ import { Progress } from "@/components/ui/progress"
 import { Spinner } from "@/components/ui/spinner"
 import { Switch } from "@/components/ui/switch"
 import type {
-	ExportPlan,
 	OutputQuality,
 	OutputResolution,
 	VideoEditRecipe,
@@ -17,14 +16,18 @@ import type {
 	VideoSourceInfo
 } from "@/features/preview/videoEdit/types"
 import {
+	announcedPercent,
 	dropNotices,
 	etaMinutes,
 	REFUSAL_LABELS,
 	refusalRetries,
+	SAVE_ERROR_LABELS,
 	saveBlock,
 	targetNote,
 	type DropNotice,
-	type EditFeature
+	type EditFeature,
+	type PlanState,
+	type SaveErrorCode
 } from "@/features/preview/videoEdit/lib/availability"
 import { formatTimecode } from "@/features/preview/videoEdit/lib/timeline.logic"
 import type { NamespaceKey } from "@/lib/i18n"
@@ -65,7 +68,7 @@ function OptionChip(props: { selected: boolean; disabled: boolean; label: string
 			aria-pressed={props.selected}
 			disabled={props.disabled}
 			className={cn(
-				"h-7 min-w-0 flex-1 rounded-full px-2 text-xs font-medium transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/30 disabled:opacity-40 motion-reduce:transition-none",
+				"h-7 min-w-0 flex-1 rounded-full px-2 text-xs font-medium transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/30 disabled:opacity-40 motion-reduce:transition-none pointer-coarse:h-11",
 				props.selected ? "bg-background text-foreground shadow-sm ring-1 ring-border" : "text-muted-foreground hover:bg-muted"
 			)}
 			onClick={props.onClick}
@@ -90,7 +93,10 @@ function Notice(props: { icon: ReactNode; tone?: "warning" | undefined; children
 }
 
 export interface SavePopoverProps {
-	plan: ExportPlan | null
+	plan: PlanState
+	// The ways to save, from the newest plan that worked out: kept in place (disabled) while the next one is worked out,
+	// so they never vanish and come back under the pointer or the focus.
+	targets: readonly VideoSaveTarget[]
 	recipe: VideoEditRecipe
 	info: VideoSourceInfo
 	unavailable: ReadonlySet<EditFeature>
@@ -98,7 +104,11 @@ export interface SavePopoverProps {
 	online: boolean
 	busy: boolean
 	open: boolean
+	// The save button focused as the popover opens (Mod+Shift+S: the copy); null for the plan's first.
+	focusTarget: VideoSaveTarget | null
+	triggerRef: RefObject<HTMLButtonElement | null>
 	onOpenChange: (open: boolean) => void
+	onRetryPlan: () => void
 	onOutput: (output: VideoEditRecipe["output"]) => void
 	onRemoveLocation: (remove: boolean) => void
 	// Mutes the audio: the way out when only the sound blocks the save.
@@ -108,14 +118,34 @@ export interface SavePopoverProps {
 
 // The header's Save ▾: a summary of what the save will do (fast copy or re-encode, the size and time it will take, what it
 // drops, HDR, what happens to the original) with the output settings, and the ways to save the plan offers, in its
-// order (the first is the primary).
+// order (the first is the primary). The summary follows the edits: worked out again after each, never a stale one.
 export function SavePopover(props: SavePopoverProps) {
 	const { t } = useTranslation(["preview", "common"])
 	const eta = useEtaLabel()
-	const { plan, recipe, info } = props
+	const { recipe, info, triggerRef } = props
+	const plan = props.plan.status === "ready" ? props.plan.plan : null
 	const shortSide = Math.min(info.width, info.height)
 	const offline = !props.online
 	const block = saveBlock(plan)
+	const targets = plan?.targets ?? props.targets
+	const focused = props.focusTarget !== null && targets.includes(props.focusTarget) ? props.focusTarget : targets[0]
+	const focusedRef = useRef<HTMLButtonElement | null>(null)
+	// Whether this opening already put the focus on its save button (once the plan was ready to save from).
+	const focusDone = useRef(false)
+	const ready = plan !== null
+
+	useEffect(() => {
+		if (!props.open) {
+			focusDone.current = false
+
+			return
+		}
+
+		if (ready && !focusDone.current && focusedRef.current !== null) {
+			focusDone.current = true
+			focusedRef.current.focus()
+		}
+	}, [props.open, ready])
 
 	return (
 		<Popover
@@ -125,6 +155,7 @@ export function SavePopover(props: SavePopoverProps) {
 			<PopoverTrigger
 				render={
 					<Button
+						ref={triggerRef}
 						size="sm"
 						disabled={!props.dirty || props.busy}
 					>
@@ -138,12 +169,35 @@ export function SavePopover(props: SavePopoverProps) {
 				align="end"
 				className="dark w-80 scheme-dark"
 			>
-				{plan === null ? (
-					<div className="flex items-center gap-2 text-sm text-muted-foreground">
+				{props.plan.status === "planning" ? (
+					<div
+						role="status"
+						className="flex items-center gap-2 text-sm text-muted-foreground"
+					>
 						<Spinner className="size-4" />
 						{t("previewVideoSavePlanning")}
 					</div>
-				) : (
+				) : null}
+				{props.plan.status === "failed" ? (
+					<div
+						role="alert"
+						className="flex items-center justify-between gap-2 rounded-xl bg-destructive/10 px-3 py-2 text-xs"
+					>
+						<span className="flex items-start gap-2">
+							<AlertTriangleIcon className="mt-px size-3.5 shrink-0 text-destructive" />
+							{t("previewVideoSavePlanFailed")}
+						</span>
+						<Button
+							size="sm"
+							variant="outline"
+							autoFocus
+							onClick={props.onRetryPlan}
+						>
+							{t("previewVideoSaveRetry")}
+						</Button>
+					</div>
+				) : null}
+				{plan !== null ? (
 					<>
 						<div className="flex flex-col gap-1">
 							<div className="flex items-center gap-1.5 text-sm font-medium">
@@ -182,7 +236,7 @@ export function SavePopover(props: SavePopoverProps) {
 							</div>
 						) : null}
 						<ul className="flex flex-col gap-1.5">
-							{dropNotices(plan.dropped).map(notice => (
+							{dropNotices(plan.dropped, plan.hdr).map(notice => (
 								<Notice
 									key={notice}
 									icon={<InfoIcon />}
@@ -212,7 +266,7 @@ export function SavePopover(props: SavePopoverProps) {
 							)}
 						</ul>
 					</>
-				)}
+				) : null}
 				<div
 					role="group"
 					aria-label={t("previewVideoSaveResolution")}
@@ -268,12 +322,13 @@ export function SavePopover(props: SavePopoverProps) {
 				) : null}
 				{offline ? <p className="text-xs text-muted-foreground">{t("common:offlineActionDisabled")}</p> : null}
 				<div className="flex flex-wrap justify-end gap-2">
-					{(plan?.targets ?? []).map((target, index) => (
+					{targets.map((target, index) => (
 						<Button
 							key={target}
+							ref={target === focused ? focusedRef : undefined}
 							size="sm"
 							variant={index === 0 ? "default" : "outline"}
-							autoFocus={index === 0}
+							autoFocus={target === focused}
 							disabled={plan === null || block !== null || offline || props.busy || !props.dirty}
 							onClick={() => {
 								props.onSave(target)
@@ -290,25 +345,31 @@ export function SavePopover(props: SavePopoverProps) {
 
 export type ExportState =
 	| { status: "running"; fraction: number; etaSeconds: number | null }
-	| { status: "failed"; message: string }
+	| { status: "failed"; code: SaveErrorCode }
 	| { status: "refused"; reason: VideoSaveRefusal }
 
 // The export's progress under the header while it runs in the editor, or why it failed or was refused, with Retry where
-// trying again can help (the edits stay).
+// trying again can help (the edits stay; offline it waits). Focus follows it: to Continue in background as it starts,
+// to Retry (or Dismiss) when it stops (the editor puts it back on its Save once the bar goes).
 export function ExportBar(props: {
 	state: ExportState
+	online: boolean
 	onBackground: () => void
 	onCancel: () => void
 	onRetry: () => void
 	onDismiss: () => void
 }) {
-	const { t } = useTranslation("preview")
+	const { t } = useTranslation(["preview", "common"])
 	const eta = useEtaLabel()
 	const state = props.state
+	const focusRef = useRef<HTMLButtonElement | null>(null)
+	const retries = state.status === "failed" || (state.status === "refused" && refusalRetries(state.reason))
+
+	useEffect(() => {
+		focusRef.current?.focus()
+	}, [state.status])
 
 	if (state.status !== "running") {
-		const retries = state.status === "failed" || refusalRetries(state.reason)
-
 		return (
 			<div
 				role="alert"
@@ -319,13 +380,16 @@ export function ExportBar(props: {
 					{state.status === "failed" ? (
 						<>
 							{t("previewVideoSaveFailed")}
-							{state.message.length > 0 ? <span className="ml-1 text-muted-foreground">{state.message}</span> : null}
+							{state.code !== "unknown" ? (
+								<span className="ml-1 text-muted-foreground">{t(SAVE_ERROR_LABELS[state.code])}</span>
+							) : null}
 						</>
 					) : (
 						t(REFUSAL_LABELS[state.reason])
 					)}
 				</span>
 				<Button
+					ref={retries ? undefined : focusRef}
 					size="sm"
 					variant="ghost"
 					onClick={props.onDismiss}
@@ -334,7 +398,10 @@ export function ExportBar(props: {
 				</Button>
 				{retries ? (
 					<Button
+						ref={focusRef}
 						size="sm"
+						disabled={!props.online}
+						title={props.online ? undefined : t("common:offlineActionDisabled")}
 						onClick={props.onRetry}
 					>
 						{t("previewVideoSaveRetry")}
@@ -350,18 +417,26 @@ export function ExportBar(props: {
 		<div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-border px-4 py-2">
 			<div className="flex min-w-48 flex-1 flex-col gap-1.5">
 				<span
+					aria-hidden="true"
 					className="text-sm tabular-nums"
-					aria-live="polite"
 				>
 					{t("previewVideoSaveExporting", { percent })}
 					{state.etaSeconds !== null ? <span className="text-muted-foreground"> · {eta(state.etaSeconds)}</span> : null}
 				</span>
+				{/* Read out in steps, not every percent the bar moves. */}
+				<span
+					role="status"
+					className="sr-only"
+				>
+					{t("previewVideoSaveExporting", { percent: announcedPercent(percent) })}
+				</span>
 				<Progress
 					value={percent}
-					aria-label={t("previewVideoSaveExporting", { percent })}
+					aria-label={t("previewVideoSaveProgressLabel")}
 				/>
 			</div>
 			<Button
+				ref={focusRef}
 				size="sm"
 				variant="secondary"
 				onClick={props.onBackground}

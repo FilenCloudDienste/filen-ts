@@ -15,6 +15,7 @@ import {
 	ZoomInIcon,
 	ZoomOutIcon
 } from "lucide-react"
+import { isAbortError } from "@filen/shared"
 import { isImeKeydown } from "@filen/shared/keymap"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
@@ -65,7 +66,14 @@ import {
 	ZOOM_STEP,
 	type TimelineView
 } from "@/features/preview/videoEdit/lib/timeline.logic"
-import { colourConvertsHdr, REFUSAL_LABELS, unavailableFeatures } from "@/features/preview/videoEdit/lib/availability"
+import {
+	REFUSAL_LABELS,
+	SAVE_ERROR_LABELS,
+	savesSilently,
+	unavailableFeatures,
+	type PlanState
+} from "@/features/preview/videoEdit/lib/availability"
+import { isHdrSource } from "@/features/preview/videoEdit/lib/plan"
 import { repeatsWhileHeld, videoEditorKey, type EditorVideoAction } from "@/features/preview/videoEdit/lib/keys"
 import { EditorPlayback } from "@/features/preview/videoEdit/components/editorPlayback"
 import { drawBitmap, FrameRequests } from "@/features/preview/videoEdit/components/frameRequests"
@@ -119,6 +127,15 @@ interface Snapshot {
 	canRedo: boolean
 }
 
+// The newest plan answer: for which recipe and attempt (Retry asks again), what it was, and the last plan that worked
+// out (what the controls read while the next one is worked out).
+interface Planned {
+	recipe: VideoEditRecipe
+	attempt: number
+	result: ExportPlan | "failed"
+	lastGood: ExportPlan | null
+}
+
 interface RunningExport {
 	handle: ReturnType<VideoEditClient["exportVideo"]>
 	// Hands the export to a transfer and tells its end by a toast.
@@ -130,6 +147,8 @@ const PLAN_DELAY_MS = 150
 // Filter thumbnails, square, in CSS px.
 const FILTER_THUMBNAIL_SIZE = 96
 const STILL_QUALITY = 0.92
+// The transport row's buttons, 44 px under a coarse pointer.
+const TRANSPORT_BUTTON_CLASS = "pointer-coarse:size-11"
 
 // A key in a field is the field's own; a slider, tab or text box keeps its arrows, a button its Space and Enter.
 function ownsKey(event: KeyboardEvent | ReactKeyboardEvent): boolean {
@@ -200,8 +219,12 @@ export function VideoEditor(props: VideoEditorProps) {
 	const [loop, setLoop] = useState(false)
 	const [aspect, setAspect] = useState<AspectPreset>("free")
 	const [selectedText, setSelectedText] = useState<string | null>(null)
-	const [plan, setPlan] = useState<ExportPlan | null>(null)
+	const [planned, setPlanned] = useState<Planned | null>(null)
+	const [planAttempt, setPlanAttempt] = useState(0)
 	const [saveOpen, setSaveOpen] = useState(false)
+	// The save button the popover focuses as it opens; null for the plan's first.
+	const [saveFocus, setSaveFocus] = useState<VideoSaveTarget | null>(null)
+	const saveTriggerRef = useRef<HTMLButtonElement | null>(null)
 	const [exportState, setExportState] = useState<ExportState | null>(null)
 	// The file changed elsewhere (null: it is gone) before an in-place save started: asked about, the edits kept.
 	const [remoteChange, setRemoteChange] = useState<{ currentUuid: string | null } | null>(null)
@@ -214,16 +237,29 @@ export function VideoEditor(props: VideoEditorProps) {
 	const bindings = useBindings()
 	const online = useIsOnline()
 	const paused = useMediaPaused(video)
+	// An export holds the decoder (iOS): frames, filter thumbnails and filmstrip tiles are not asked for meanwhile.
+	const [decodingSuspended, setDecodingSuspended] = useState(() => client.isDecodingSuspended())
 	const recipe = snapshot.recipe
 	const exporting = exportState?.status === "running"
 	const dirty = !isIdentityVideoRecipe(recipe, duration)
-	const unavailable = unavailableFeatures(plan)
-	const hdrNote = colourConvertsHdr(info)
+	// The plan for the recipe on screen, or that it is still being worked out (or failed to be): a save never runs on
+	// an older recipe's plan.
+	const planCurrent = planned !== null && planned.recipe === recipe && planned.attempt === planAttempt
+	const planState: PlanState = !planCurrent
+		? { status: "planning" }
+		: planned.result === "failed"
+			? { status: "failed" }
+			: { status: "ready", plan: planned.result }
+	const plan = planState.status === "ready" ? planState.plan : null
+	// What the controls read meanwhile: the newest plan that worked out.
+	const shownPlan = plan ?? planned?.lastGood ?? null
+	const unavailable = unavailableFeatures(shownPlan)
+	const hdrNote = isHdrSource(info)
 	const adjustUnavailable = unavailable.has("adjust")
 	const mode: StageMode = tab === "crop" ? "crop" : tab === "text" ? "text" : "result"
 	const fps = info.frameRate
 	const outputLength = outputDuration(recipe.keep, recipe.speed)
-	const snaps = !recipe.precise && plan?.mode === "copy" ? snapMarks(plan.snapped, fps) : []
+	const snaps = !recipe.precise && shownPlan?.mode === "copy" ? snapMarks(shownPlan.snapped, fps) : []
 	// Splits only mean something inside what is kept.
 	const shownSplits = splits.filter(split => keepIndexAt(recipe.keep, split) !== -1)
 
@@ -283,28 +319,18 @@ export function VideoEditor(props: VideoEditorProps) {
 		playback.setSound(recipe.audio.mute, recipe.audio.gainDb)
 	}, [playback, recipe.keep, recipe.speed, recipe.audio.mute, recipe.audio.gainDb, loop, selection])
 
+	useEffect(() => {
+		return client.onDecodingSuspendedChange(suspended => {
+			setDecodingSuspended(suspended)
+		})
+	}, [client])
+
 	// Where the playhead settles (a pause, a seek), for the exact frame and the panels; never per frame.
 	useEffect(() => {
-		if (video === null) {
-			return
-		}
-
-		const settle = (): void => {
-			if (video.paused) {
-				setSettledTime(video.currentTime)
-			}
-		}
-
-		video.addEventListener("seeked", settle)
-		video.addEventListener("pause", settle)
-		video.addEventListener("loadeddata", settle)
-
-		return () => {
-			video.removeEventListener("seeked", settle)
-			video.removeEventListener("pause", settle)
-			video.removeEventListener("loadeddata", settle)
-		}
-	}, [video])
+		return playback.onSettle(time => {
+			setSettledTime(time)
+		})
+	}, [playback])
 
 	const latestView = useLatestRef(view)
 
@@ -342,10 +368,11 @@ export function VideoEditor(props: VideoEditorProps) {
 		seek(playback.time + seconds)
 	}
 
-	// A trim handle dragged: the exact frame there on the stage and in the loupe.
+	// A trim handle dragged: the exact frame there on the stage and in the loupe, drawn here; the playhead settles there
+	// once the drag ends (onScrubEnd), so the stage does not ask for the same frames again.
 	const scrub = (time: number): void => {
 		playback.pause()
-		playback.seek(time)
+		playback.seek(time, false)
 
 		const canvas = canvasRef.current
 		const width = (canvas?.clientWidth ?? 0) * window.devicePixelRatio
@@ -375,11 +402,15 @@ export function VideoEditor(props: VideoEditorProps) {
 			client.plan(recipe).then(
 				next => {
 					if (alive) {
-						setPlan(next)
+						setPlanned({ recipe, attempt: planAttempt, result: next, lastGood: next })
 					}
 				},
 				(error: unknown) => {
 					log.warn("[videoEditor] plan failed", error)
+
+					if (alive) {
+						setPlanned(previous => ({ recipe, attempt: planAttempt, result: "failed", lastGood: previous?.lastGood ?? null }))
+					}
 				}
 			)
 		}, PLAN_DELAY_MS)
@@ -388,7 +419,7 @@ export function VideoEditor(props: VideoEditorProps) {
 			alive = false
 			window.clearTimeout(timer)
 		}
-	}, [client, recipe])
+	}, [client, recipe, planAttempt])
 
 	const onDirtyChange = useLatestRef(props.onDirtyChange)
 
@@ -411,58 +442,54 @@ export function VideoEditor(props: VideoEditorProps) {
 	const latestRecipe = useLatestRef(recipe)
 	const shownThumbnailsKey = thumbnails?.key ?? null
 
+	// One decode for all of them per settle, never on the stage's own frame requests.
 	useEffect(() => {
-		if (tab !== "adjust" || !paused || adjustUnavailable || shownThumbnailsKey === thumbnailsKey) {
+		if (tab !== "adjust" || !paused || adjustUnavailable || shownThumbnailsKey === thumbnailsKey || decodingSuspended) {
 			return
 		}
 
-		const controller = new AbortController()
+		let alive = true
 		const base: VideoEditRecipe = { ...latestRecipe.current, text: [] }
 		const filters: readonly (string | null)[] = [null, ...FILTER_PRESETS.map(preset => preset.id)]
 
-		void (async () => {
-			const bitmaps: ImageBitmap[] = []
+		client.filterThumbnails(settledTime, base, filters, FILTER_THUMBNAIL_SIZE * window.devicePixelRatio).then(
+			results => {
+				const bitmaps = filters.map(filter => results.find(result => result.filter === filter)?.bitmap)
+				const complete = bitmaps.filter(bitmap => bitmap !== undefined)
 
-			for (const filter of filters) {
-				if (controller.signal.aborted) {
-					break
+				if (!alive || complete.length !== filters.length) {
+					for (const result of results) {
+						result.bitmap.close()
+					}
+
+					return
 				}
 
-				const bitmap = await client
-					.frameAt(settledTime, { ...base, filter }, FILTER_THUMBNAIL_SIZE * window.devicePixelRatio)
-					.catch((error: unknown) => {
-						log.warn("[videoEditor] filter thumbnail failed", error)
-
-						return null
-					})
-
-				if (bitmap === null) {
-					break
-				}
-
-				bitmaps.push(bitmap)
-			}
-
-			if (controller.signal.aborted || bitmaps.length !== filters.length) {
-				for (const bitmap of bitmaps) {
+				for (const bitmap of thumbnailsRef.current) {
 					bitmap.close()
 				}
 
-				return
-			}
+				for (const result of results) {
+					if (!complete.includes(result.bitmap)) {
+						result.bitmap.close()
+					}
+				}
 
-			for (const bitmap of thumbnailsRef.current) {
-				bitmap.close()
+				thumbnailsRef.current = complete
+				setThumbnails({ key: thumbnailsKey, bitmaps: complete })
+			},
+			(error: unknown) => {
+				// Superseded by a newer call, or an export took the decoder: nothing went wrong.
+				if (!isAbortError(error)) {
+					log.warn("[videoEditor] filter thumbnails failed", error)
+				}
 			}
-
-			thumbnailsRef.current = bitmaps
-			setThumbnails({ key: thumbnailsKey, bitmaps })
-		})()
+		)
 
 		return () => {
-			controller.abort()
+			alive = false
 		}
-	}, [client, tab, paused, adjustUnavailable, thumbnailsKey, shownThumbnailsKey, settledTime, latestRecipe])
+	}, [client, tab, paused, adjustUnavailable, thumbnailsKey, shownThumbnailsKey, settledTime, latestRecipe, decodingSuspended])
 
 	useEffect(() => {
 		return () => {
@@ -475,6 +502,22 @@ export function VideoEditor(props: VideoEditorProps) {
 	}, [])
 
 	// ---- Export. ----
+
+	const exportBarShown = exportState !== null
+	const exportBarWasShown = useRef(false)
+
+	// The export bar went (cancelled, dismissed) and took the focus with its buttons: back to the header's Save.
+	useEffect(() => {
+		if (exportBarWasShown.current && !exportBarShown) {
+			const active = document.activeElement
+
+			if (active === null || active === document.body) {
+				saveTriggerRef.current?.focus()
+			}
+		}
+
+		exportBarWasShown.current = exportBarShown
+	}, [exportBarShown])
 
 	const progressOf = (progress: ExportProgress): void => {
 		const percent = Math.floor(progress.fraction * 100)
@@ -502,7 +545,7 @@ export function VideoEditor(props: VideoEditorProps) {
 			}
 
 			case "error": {
-				setExportState({ status: "failed", message: "" })
+				setExportState({ status: "failed", code: outcome.code })
 
 				return
 			}
@@ -544,7 +587,7 @@ export function VideoEditor(props: VideoEditorProps) {
 
 		const handle = client.exportVideo(history.current, target, progressOf)
 		const done = handle.done.catch((error: unknown): VideoSaveOutcome => {
-			log.warn("video-edit", "the save rejected", error)
+			log.error("[videoEditor] the export failed", error)
 
 			return { status: "error", code: "unknown" }
 		})
@@ -572,7 +615,10 @@ export function VideoEditor(props: VideoEditorProps) {
 			if (outcome.status === "done") {
 				toast.success(t(target === "copy" ? "previewVideoSaveDoneCopy" : "previewVideoSaveDone", { name }))
 			} else if (outcome.status === "error") {
-				toast.error(t("previewVideoSaveBackgroundFailed", { name }))
+				toast.error(
+					t("previewVideoSaveBackgroundFailed", { name }),
+					outcome.code === "unknown" ? undefined : { description: t(SAVE_ERROR_LABELS[outcome.code]) }
+				)
 			} else if (outcome.status === "refused") {
 				toast.error(t("previewVideoSaveBackgroundFailed", { name }), { description: t(REFUSAL_LABELS[outcome.reason]) })
 			} else if (outcome.status === "remoteChanged") {
@@ -644,11 +690,26 @@ export function VideoEditor(props: VideoEditorProps) {
 			)
 	}
 
+	const openSave = (focus: VideoSaveTarget | null): void => {
+		if (dirty && !exporting) {
+			setSaveFocus(focus)
+			setSaveOpen(true)
+		}
+	}
+
+	// Mod+Shift+S: a copy at once when the popover would have nothing to say (no HDR conversion, nothing dropped, nothing
+	// blocking); otherwise the popover, its Save as copy focused, so nothing is lost unread.
+	const saveCopyFromKeys = (): void => {
+		if (plan !== null && plan.targets.includes("copy") && savesSilently(plan) && online) {
+			startExport("copy")
+		} else {
+			openSave("copy")
+		}
+	}
+
 	const commands = useLatestRef({
 		openSave: () => {
-			if (dirty && !exporting) {
-				setSaveOpen(true)
-			}
+			openSave(null)
 		},
 		saveCopy: () => {
 			startExport("copy")
@@ -762,7 +823,7 @@ export function VideoEditor(props: VideoEditorProps) {
 				redo()
 				break
 			case "preview.videoSaveCopy":
-				startExport("copy")
+				saveCopyFromKeys()
 				break
 			case "preview.videoPlayPause":
 				playback.toggle()
@@ -887,7 +948,8 @@ export function VideoEditor(props: VideoEditorProps) {
 						{t("previewVideoSaveRevert")}
 					</Button>
 					<SavePopover
-						plan={plan}
+						plan={planState}
+						targets={shownPlan?.targets ?? []}
 						recipe={recipe}
 						info={info}
 						unavailable={unavailable}
@@ -895,7 +957,18 @@ export function VideoEditor(props: VideoEditorProps) {
 						online={online}
 						busy={exporting}
 						open={saveOpen}
-						onOpenChange={setSaveOpen}
+						focusTarget={saveFocus}
+						triggerRef={saveTriggerRef}
+						onOpenChange={open => {
+							setSaveOpen(open)
+
+							if (!open) {
+								setSaveFocus(null)
+							}
+						}}
+						onRetryPlan={() => {
+							setPlanAttempt(planAttempt + 1)
+						}}
 						onOutput={output => {
 							change(current => ({ ...current, output }))
 						}}
@@ -912,13 +985,16 @@ export function VideoEditor(props: VideoEditorProps) {
 			{exportState !== null ? (
 				<ExportBar
 					state={exportState}
+					online={online}
 					onBackground={continueInBackground}
 					onCancel={() => {
 						running.current?.handle.cancel()
 					}}
 					onRetry={() => {
-						setExportState(null)
-						startExport(lastTarget.current)
+						if (online) {
+							setExportState(null)
+							startExport(lastTarget.current)
+						}
 					}}
 					onDismiss={() => {
 						setExportState(null)
@@ -940,6 +1016,7 @@ export function VideoEditor(props: VideoEditorProps) {
 							aspect={aspect}
 							paused={paused}
 							settledTime={settledTime}
+							decodingSuspended={decodingSuspended}
 							settledOutputTime={sourceToOutput(recipe.keep, recipe.speed, settledTime)}
 							selectedText={selectedText}
 							frames={frames}
@@ -963,6 +1040,7 @@ export function VideoEditor(props: VideoEditorProps) {
 					<div className="flex shrink-0 flex-col gap-2 px-4 pt-2 pb-3 sm:px-6 sm:pb-4">
 						<div className="flex items-center gap-0.5 overflow-x-auto">
 							<TooltipIconButton
+								className={TRANSPORT_BUTTON_CLASS}
 								label={t("previewVideoEditUndo")}
 								disabled={!snapshot.canUndo}
 								shortcut={<Kbd action="preview.videoUndo" />}
@@ -971,6 +1049,7 @@ export function VideoEditor(props: VideoEditorProps) {
 								<Undo2Icon />
 							</TooltipIconButton>
 							<TooltipIconButton
+								className={TRANSPORT_BUTTON_CLASS}
 								label={t("previewVideoEditRedo")}
 								disabled={!snapshot.canRedo}
 								shortcut={<Kbd action="preview.videoRedo" />}
@@ -983,6 +1062,7 @@ export function VideoEditor(props: VideoEditorProps) {
 								className="mx-1 my-1.5 self-stretch"
 							/>
 							<TooltipIconButton
+								className={TRANSPORT_BUTTON_CLASS}
 								label={t("previewVideoEditFrameBack")}
 								shortcut={<Kbd action="preview.videoFrameBack" />}
 								onClick={() => {
@@ -992,6 +1072,7 @@ export function VideoEditor(props: VideoEditorProps) {
 								<SkipBackIcon />
 							</TooltipIconButton>
 							<TooltipIconButton
+								className={TRANSPORT_BUTTON_CLASS}
 								label={t(paused ? "previewVideoEditPlay" : "previewVideoEditPause")}
 								shortcut={<Kbd action="preview.videoPlayPause" />}
 								onClick={() => {
@@ -1001,6 +1082,7 @@ export function VideoEditor(props: VideoEditorProps) {
 								{paused ? <PlayIcon /> : <PauseIcon />}
 							</TooltipIconButton>
 							<TooltipIconButton
+								className={TRANSPORT_BUTTON_CLASS}
 								label={t("previewVideoEditFrameForward")}
 								shortcut={<Kbd action="preview.videoFrameForward" />}
 								onClick={() => {
@@ -1017,6 +1099,7 @@ export function VideoEditor(props: VideoEditorProps) {
 							/>
 							<span className="flex-1" />
 							<TooltipIconButton
+								className={TRANSPORT_BUTTON_CLASS}
 								label={t("previewVideoEditSplit")}
 								shortcut={<Kbd action="preview.videoSplit" />}
 								onClick={split}
@@ -1024,6 +1107,7 @@ export function VideoEditor(props: VideoEditorProps) {
 								<SplitIcon />
 							</TooltipIconButton>
 							<TooltipIconButton
+								className={TRANSPORT_BUTTON_CLASS}
 								label={t("previewVideoEditRemoveSection")}
 								disabled={selection === null}
 								shortcut={<Kbd action="preview.videoRemoveSection" />}
@@ -1032,6 +1116,7 @@ export function VideoEditor(props: VideoEditorProps) {
 								<ScissorsIcon />
 							</TooltipIconButton>
 							<TooltipIconButton
+								className={TRANSPORT_BUTTON_CLASS}
 								label={t("previewVideoEditLoop")}
 								pressed={loop}
 								disabled={selection === null}
@@ -1043,6 +1128,7 @@ export function VideoEditor(props: VideoEditorProps) {
 								<RepeatIcon />
 							</TooltipIconButton>
 							<TooltipIconButton
+								className={TRANSPORT_BUTTON_CLASS}
 								label={t("previewVideoEditSaveFrame")}
 								disabled={!online}
 								title={!online ? t("common:offlineActionDisabled") : undefined}
@@ -1056,6 +1142,7 @@ export function VideoEditor(props: VideoEditorProps) {
 								className="mx-1 my-1.5 self-stretch"
 							/>
 							<TooltipIconButton
+								className={TRANSPORT_BUTTON_CLASS}
 								label={t("previewVideoEditZoomOut")}
 								shortcut={<Kbd action="preview.videoZoomOut" />}
 								onClick={() => {
@@ -1065,6 +1152,7 @@ export function VideoEditor(props: VideoEditorProps) {
 								<ZoomOutIcon />
 							</TooltipIconButton>
 							<TooltipIconButton
+								className={TRANSPORT_BUTTON_CLASS}
 								label={t("previewVideoEditZoomIn")}
 								shortcut={<Kbd action="preview.videoZoomIn" />}
 								onClick={() => {
@@ -1085,6 +1173,7 @@ export function VideoEditor(props: VideoEditorProps) {
 							splits={shownSplits}
 							snaps={snaps}
 							locked={exporting}
+							decodingSuspended={decodingSuspended}
 							onView={setView}
 							onSeek={seek}
 							onSelect={setSelection}
@@ -1095,6 +1184,9 @@ export function VideoEditor(props: VideoEditorProps) {
 								)
 							}}
 							onScrub={scrub}
+							onScrubEnd={() => {
+								playback.settle()
+							}}
 							onLoupeCanvas={canvas => {
 								loupeRef.current = canvas
 							}}
@@ -1152,12 +1244,12 @@ export function VideoEditor(props: VideoEditorProps) {
 			</div>
 			{remoteChange !== null ? (
 				<RemoteChangeDialog
+					key={remoteChange.currentUuid ?? "deleted"}
 					kind={remoteChange.currentUuid === null ? "deleted" : "revised"}
 					title={t(remoteChange.currentUuid === null ? "previewRemoteDeletedTitle" : "previewRemoteChangedTitle")}
 					body={t(remoteChange.currentUuid === null ? "previewRemoteDeletedBody" : "previewRemoteChangedBody", {
 						name: props.name
 					})}
-					readMine={() => undefined}
 					pending={false}
 					onKeepMine={() => {
 						setRemoteChange(null)

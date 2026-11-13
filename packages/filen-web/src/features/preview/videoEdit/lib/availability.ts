@@ -1,4 +1,4 @@
-import type { ExportDrop, ExportPlan, VideoSaveRefusal, VideoSourceInfo } from "@/features/preview/videoEdit/types"
+import type { ExportDrop, ExportPlan, HdrHandling, VideoSaveOutcome, VideoSaveRefusal } from "@/features/preview/videoEdit/types"
 import type { NamespaceKey } from "@/lib/i18n"
 
 // Which editing controls this browser can offer, read from the plan. `ExportPlan.unavailable` names features by these
@@ -42,15 +42,11 @@ export function saveBlock(plan: ExportPlan | null): SaveBlock | null {
 	return plan.mutingUnblocks ? "audio" : "video"
 }
 
-// Colour work on an HDR source is graded after a tone map to SDR (the Save popover says so too).
-export function colourConvertsHdr(info: VideoSourceInfo): boolean {
-	return info.transfer !== "sdr"
-}
-
 export type DropNotice = "subtitlesAndChapters" | "subtitles" | "chapters" | "extraAudio" | "hdrMetadata" | "location"
 
-// The Save popover's lines for what a save leaves out, subtitles and chapters as one line when both go.
-export function dropNotices(dropped: readonly ExportDrop[]): DropNotice[] {
+// The Save popover's lines for what a save leaves out, subtitles and chapters as one line when both go. HDR details
+// going with a conversion to SDR are that conversion's own notice, not a second line.
+export function dropNotices(dropped: readonly ExportDrop[], hdr: HdrHandling | null): DropNotice[] {
 	const set = new Set(dropped)
 	const notices: DropNotice[] = []
 
@@ -66,7 +62,7 @@ export function dropNotices(dropped: readonly ExportDrop[]): DropNotice[] {
 		notices.push("extraAudio")
 	}
 
-	if (set.has("hdrMetadata")) {
+	if (set.has("hdrMetadata") && hdr !== "toSdr") {
 		notices.push("hdrMetadata")
 	}
 
@@ -111,7 +107,34 @@ export const REFUSAL_LABELS: Readonly<Record<VideoSaveRefusal, NamespaceKey<"pre
 	busy: "previewVideoSaveRefusedBusy"
 }
 
-// A refusal worth trying again once its cause is gone (back online, storage freed); the others stay as they are.
+// A refusal worth trying again once its cause is gone (back online, storage freed, the other save of the file done);
+// the others stay as they are.
 export function refusalRetries(reason: VideoSaveRefusal): boolean {
-	return reason === "offline" || reason === "quota"
+	return reason === "offline" || reason === "quota" || reason === "busy"
+}
+
+export type SaveErrorCode = Extract<VideoSaveOutcome, { status: "error" }>["code"]
+
+// How the editor words why a save failed (never the error's own text, which is not for users).
+export const SAVE_ERROR_LABELS: Readonly<Record<SaveErrorCode, NamespaceKey<"preview">>> = {
+	stalled: "previewVideoSaveFailedStalled",
+	workerLost: "previewVideoSaveFailedWorkerLost",
+	uploadFailed: "previewVideoSaveFailedUploadFailed",
+	unknown: "previewVideoSaveFailed"
+}
+
+// A save the user could start from the keyboard without looking at the Save popover first: nothing in it to read
+// (no HDR conversion, nothing dropped, nothing blocking).
+export function savesSilently(plan: ExportPlan): boolean {
+	return plan.hdr !== "toSdr" && plan.dropped.length === 0 && plan.blockers.length === 0
+}
+
+// What a save would do for the recipe on screen: still being worked out, worked out, or failed to be.
+export type PlanState = { status: "planning" } | { status: "ready"; plan: ExportPlan } | { status: "failed" }
+
+// Progress announced to assistive technology in steps this many percent apart, not every percent shown.
+const ANNOUNCE_STEP = 20
+
+export function announcedPercent(percent: number): number {
+	return Math.floor(Math.min(100, Math.max(0, percent)) / ANNOUNCE_STEP) * ANNOUNCE_STEP
 }

@@ -9,7 +9,8 @@ import type { DriveItem } from "@/features/drive/lib/item"
 import type { ExportPlan, VideoEditRecipe, VideoSourceInfo } from "@/features/preview/videoEdit/types"
 import { PREVIEW_ACTIONS } from "@/features/preview/lib/keymap"
 import { registerAction } from "@/lib/keymap/registry"
-import { fakeVideoEditClient } from "@/tests/support/fakeVideoEditClient"
+import { FILTER_PRESETS } from "@/features/preview/imageEdit/lib/filters"
+import { FAKE_PLAN, fakeVideoEditClient } from "@/tests/support/fakeVideoEditClient"
 
 // The video editor over a fake client: the Save popover says what the plan says (fast or re-encode, size and time,
 // drops, HDR, the original's fate, the targets in the plan's order, options this browser cannot do disabled), a
@@ -481,6 +482,186 @@ describe("VideoEditor", () => {
 		})
 
 		expect(await screen.findByRole("dialog")).toBeTruthy()
+	})
+
+	it("saves a copy straight from Mod+Shift+S only when the popover has nothing to say", async () => {
+		const { root, plans, exports } = mount()
+
+		trimAFrame()
+		await waitFor(() => {
+			expect(lastPlanned(plans).keep[0]?.start).toBeCloseTo(0.04)
+		})
+		await new Promise(resolve => setTimeout(resolve, 0))
+
+		modKey(root, "s", true)
+
+		expect(exports[0]?.target).toBe("copy")
+		expect(screen.queryByRole("dialog")).toBeNull()
+	})
+
+	it("opens the Save popover on Mod+Shift+S, Save as copy focused, when the save converts HDR", async () => {
+		const { root, plans, exports } = mount({ planFor: () => ({ hdr: "toSdr", dropped: ["hdrMetadata"] }) })
+
+		trimAFrame()
+		await waitFor(() => {
+			expect(lastPlanned(plans).keep[0]?.start).toBeCloseTo(0.04)
+		})
+		await new Promise(resolve => setTimeout(resolve, 0))
+
+		modKey(root, "s", true)
+
+		const popover = await screen.findByRole("dialog")
+
+		expect(exports).toHaveLength(0)
+		await waitFor(() => {
+			expect(document.activeElement).toBe(within(popover).getByRole("button", { name: "Save as copy" }))
+		})
+		// One HDR line, not the dropped metadata as well.
+		expect(within(popover).getByText("HDR will be converted to SDR")).toBeTruthy()
+		expect(within(popover).queryByText("HDR details removed")).toBeNull()
+	})
+
+	it("says when the save could not be worked out and asks again on Retry", async () => {
+		const { client } = mount()
+		let fail = true
+
+		client.plan.mockImplementation(() => (fail ? Promise.reject(new Error("probe gone")) : Promise.resolve(FAKE_PLAN)))
+		trimAFrame()
+
+		const popover = await openSave()
+
+		await within(popover).findByText("Couldn't work out the save.")
+		expect(within(popover).queryByText("Fast – no re-encode")).toBeNull()
+
+		fail = false
+		fireEvent.click(within(popover).getByRole("button", { name: "Retry" }))
+
+		await within(popover).findByText("Fast – no re-encode")
+		expect(within(popover).queryByText("Couldn't work out the save.")).toBeNull()
+	})
+
+	it("shows the summary as worked out again after each edit, never the previous one", async () => {
+		const { plans } = mount({ planFor: recipe => (recipe.keep[0]?.start === 0 ? {} : { mode: "transcode" }) })
+
+		trimAFrame()
+
+		const popover = await openSave()
+
+		await within(popover).findByText("Re-encode")
+
+		fireEvent.keyDown(startHandle(), { key: "Home" })
+
+		expect(within(popover).getByText("Working out the save…")).toBeTruthy()
+		expect(within(popover).queryByText("Re-encode")).toBeNull()
+		await waitFor(() => {
+			expect(lastPlanned(plans).keep[0]?.start).toBe(0)
+		})
+	})
+
+	it("moves focus to Continue in background as an export starts, and to Retry when it fails", async () => {
+		const { exports } = mount()
+
+		trimAFrame()
+		fireEvent.click(await within(await openSave()).findByRole("button", { name: "Save" }))
+
+		await waitFor(() => {
+			expect(document.activeElement).toBe(screen.getByRole("button", { name: "Continue in background" }))
+		})
+		expect(screen.getByRole("progressbar", { name: "Export progress" })).toBeTruthy()
+
+		await act(async () => {
+			exports[0]?.settle({ status: "error", code: "stalled" })
+			await Promise.resolve()
+		})
+
+		expect(screen.getByText("The export stopped making progress.")).toBeTruthy()
+		await waitFor(() => {
+			expect(document.activeElement).toBe(screen.getByRole("button", { name: "Retry" }))
+		})
+
+		fireEvent.click(screen.getByRole("button", { name: "Dismiss" }))
+
+		await waitFor(() => {
+			expect(document.activeElement).toBe(screen.getAllByRole("button", { name: "Save" })[0])
+		})
+	})
+
+	it("keeps a failed export's Retry off while offline", async () => {
+		const { exports, client } = mount()
+
+		trimAFrame()
+		fireEvent.click(await within(await openSave()).findByRole("button", { name: "Save" }))
+
+		// The connection went while it ran; the failure's render reads it.
+		state.online = false
+
+		await act(async () => {
+			exports[0]?.settle({ status: "error", code: "workerLost" })
+			await Promise.resolve()
+		})
+
+		const retry = screen.getByRole("button", { name: "Retry" })
+
+		expect(screen.getByText("The export stopped unexpectedly.")).toBeTruthy()
+		expect(retry).toHaveProperty("disabled", true)
+		fireEvent.click(retry)
+		expect(client.exportVideo).toHaveBeenCalledTimes(1)
+		// The failure stays on screen to retry later.
+		expect(screen.getByText("The export stopped unexpectedly.")).toBeTruthy()
+	})
+
+	it("draws the filter thumbnails with one call per settled frame", async () => {
+		const { client } = mount()
+
+		fireEvent.click(screen.getByRole("tab", { name: "Adjust" }))
+
+		await waitFor(() => {
+			expect(client.filterThumbnails).toHaveBeenCalledTimes(1)
+		})
+		expect(client.filterThumbnails.mock.calls[0]?.[2]).toEqual([null, ...FILTER_PRESETS.map(preset => preset.id)])
+		expect(client.frameAt).not.toHaveBeenCalled()
+	})
+
+	it("asks for no thumbnails while an export holds the decoder, and asks once it ends", async () => {
+		const { client, setDecodingSuspended } = mount()
+
+		act(() => {
+			setDecodingSuspended(true)
+		})
+		fireEvent.click(screen.getByRole("tab", { name: "Adjust" }))
+		await new Promise(resolve => setTimeout(resolve, 0))
+		expect(client.filterThumbnails).not.toHaveBeenCalled()
+
+		act(() => {
+			setDecodingSuspended(false)
+		})
+
+		await waitFor(() => {
+			expect(client.filterThumbnails).toHaveBeenCalledTimes(1)
+		})
+	})
+
+	it("keeps a trim handle moved from the keyboard in the zoomed view", async () => {
+		mount()
+
+		for (let index = 0; index < 4; index++) {
+			fireEvent.click(screen.getByRole("button", { name: "Zoom in" }))
+		}
+
+		const end = screen.getByRole("slider", { name: "End of part 1" })
+
+		// Zoomed in at the start: the end is out of view, and out of the tab order.
+		expect(end.className).toContain("not-focus:hidden")
+
+		const start = startHandle()
+
+		start.focus()
+		fireEvent.keyDown(start, { key: "End" })
+
+		await waitFor(() => {
+			expect(startHandle().className).not.toContain("not-focus:hidden")
+		})
+		expect(startHandle().getAttribute("aria-valuetext")).toBe("01:39.90")
 	})
 
 	it("removes a selected section and restores it from the Trim tab", async () => {

@@ -71,17 +71,32 @@ export function fakeVideoEditClient(
 	const info: VideoSourceInfo = { ...FAKE_INFO, ...options.info }
 	const exports: FakeExport[] = []
 	const plans: VideoEditRecipe[] = []
+	const suspension = { suspended: false, listeners: new Set<(suspended: boolean) => void>() }
+	// An export holding the decoder (iOS) starts or ends.
+	const setDecodingSuspended = (suspended: boolean): void => {
+		suspension.suspended = suspended
+
+		for (const listener of suspension.listeners) {
+			listener(suspended)
+		}
+	}
 	const client = {
 		loadSource: vi.fn(() => Promise.resolve(info)),
 		frameAt: vi.fn((_time: number, _recipe: VideoEditRecipe, _maxWidth: number) => Promise.resolve(fakeBitmap())),
-		filterThumbnails: vi.fn((_time: number, _recipe: VideoEditRecipe, filters: readonly (string | null)[], _height: number) =>
-			Promise.resolve(filters.map(filter => ({ filter, bitmap: fakeBitmap() })))
+		filterThumbnails: vi.fn((_time: number, _recipe: VideoEditRecipe, filters: readonly (string | null)[], height: number) =>
+			Promise.resolve(filters.map(filter => ({ filter, bitmap: fakeBitmap(height, height) })))
 		),
 		filmstrip: vi.fn((times: readonly number[], _height: number) =>
 			Promise.resolve(times.map(time => ({ time, bitmap: fakeBitmap() })))
 		),
-		isDecodingSuspended: vi.fn(() => false),
-		onDecodingSuspendedChange: vi.fn((_listener: (suspended: boolean) => void) => vi.fn()),
+		isDecodingSuspended: vi.fn(() => suspension.suspended),
+		onDecodingSuspendedChange: vi.fn((listener: (suspended: boolean) => void) => {
+			suspension.listeners.add(listener)
+
+			return () => {
+				suspension.listeners.delete(listener)
+			}
+		}),
 		waveform: vi.fn((_range: { start: number; end: number }, columns: number, onUpdate: (peaks: Float32Array) => void) => {
 			onUpdate(new Float32Array(columns).fill(Number.NaN))
 
@@ -118,5 +133,5 @@ export function fakeVideoEditClient(
 		dispose: vi.fn()
 	} satisfies VideoEditClient
 
-	return { client, info, exports, plans }
+	return { client, info, exports, plans, setDecodingSuspended }
 }

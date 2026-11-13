@@ -22,7 +22,8 @@ interface RemoteChangeDialogProps {
 	// Renders the comparison of the newer version with `mine`, the unsaved edits as they were when it
 	// opened. Omitted where no line diff can show the difference (anything but text, code, markdown).
 	renderCompare?: ((mine: string) => ReactNode) | undefined
-	readMine: () => string | undefined
+	// The edits as text, read as the comparison opens; only with `renderCompare`.
+	readMine?: (() => string | undefined) | undefined
 	pending: boolean
 	onKeepMine: () => void
 	onLoadTheirs: () => void
@@ -94,7 +95,7 @@ export function RemoteChangeDialog({
 							className="sm:mr-auto"
 							disabled={pending}
 							onClick={() => {
-								setComparing(prev => (prev === null ? (readMine() ?? "") : null))
+								setComparing(prev => (prev === null ? (readMine?.() ?? "") : null))
 							}}
 						>
 							{comparing === null ? (
