@@ -1,9 +1,9 @@
 import * as Comlink from "comlink"
-import { parseUserAgent } from "@filen/shared"
 import RenderWorker from "@/features/preview/imageEdit/worker/render.worker.ts?worker"
 import type { RenderWorkerApi } from "@/features/preview/imageEdit/worker/render.worker"
 import type { EditCapabilities, EditSession, ImageEditSource } from "@/features/preview/imageEdit/types"
 import { idleResource } from "@/lib/idleResource"
+import { isAppleMobile } from "@/lib/appleMobile"
 import { recoverIfNewerBuild } from "@/lib/appUpdate"
 
 // The image editor's render worker, spun up on Edit. Each open session holds ONE use of it for its whole life,
@@ -56,11 +56,7 @@ const openSessions = new Set<() => void>()
 let capabilities: Promise<EditCapabilities> | null = null
 
 function maxPixels(): number {
-	const os = parseUserAgent(navigator.userAgent).os
-	// iPadOS browsers send a Mac's user agent by default; no Mac reports touch points.
-	const ios = os === "iOS" || os === "iPadOS" || (os === "macOS" && navigator.maxTouchPoints > 1)
-
-	return ios ? MAX_PIXELS_IOS : MAX_PIXELS_DESKTOP
+	return isAppleMobile() ? MAX_PIXELS_IOS : MAX_PIXELS_DESKTOP
 }
 
 function probe(remote: Comlink.Remote<RenderWorkerApi>): Promise<EditCapabilities> {
