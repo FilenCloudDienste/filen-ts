@@ -38,6 +38,7 @@ import { recordContentVerdict } from "@/features/drive/lib/contentVerdicts"
 import { startDownloads } from "@/features/drive/lib/download"
 import {
 	canEditImage,
+	canEditVideo,
 	canSaveCopyBeside,
 	editedSaveTimes,
 	isEditable,
@@ -62,6 +63,11 @@ import { enterImageEdit, type ImageEditState } from "@/features/preview/imageEdi
 import { ORIENTATION_REWRITE_UNAVAILABLE } from "@/features/preview/imageEdit/orientationRewrite"
 import { inPlaceFormatByName } from "@/features/preview/imageEdit/lib/targets"
 import { inPlaceVideoContainerByName } from "@/features/preview/videoEdit/lib/targets"
+import { createVideoEditClient } from "@/features/preview/videoEdit/client"
+import { VideoEditor, type VideoEditorCommands } from "@/features/preview/videoEdit/components/videoEditor"
+import { VIDEO_CANCEL_ACTION } from "@/features/preview/videoEdit/lib/keys"
+import type { VideoSaveTarget } from "@/features/preview/videoEdit/types"
+import { knownUnpreviewable, useVideoEditMode } from "@/features/preview/videoEdit/useVideoEditMode"
 import type { ImageEditorCommands, ImageExportSource, SaveTarget } from "@/features/preview/imageEdit/types"
 import type { ActionOutcome } from "@/lib/actions/outcome"
 import type { ErrorDTO } from "@/lib/sdk/errors"
@@ -290,11 +296,18 @@ export function PreviewOverlay({
 	const imageRef = useRef<HTMLImageElement | null>(null)
 	const imageSaveRef = useRef<ImageExportSource | null>(null)
 	const imageCommandsRef = useRef<ImageEditorCommands | null>(null)
+	// The open video editor's commands (Mod+S opens its Save popover; the remote-change dialog's copy is its export).
+	const videoCommandsRef = useRef<VideoEditorCommands | null>(null)
 	const cacheScope = usePreviewCacheScope()
 
 	// The open editor's unsaved edits: encoded, for a deck (never held here as bytes, it may be gigabytes) a save its
 	// session streams to an upload, or an edited image's export.
 	async function readEdits(): Promise<PreviewEdits | null> {
+		// A video's edits are an export, never bytes held here: its own Save as copy stands in (onSaveMineAsNew below).
+		if (videoEditing !== null) {
+			return null
+		}
+
 		if (editing !== null) {
 			return await readImageEdits(editing, imageSaveRef.current, editable)
 		}
@@ -426,6 +439,34 @@ export function PreviewOverlay({
 	const imagePrimaryTarget: SaveTarget | null =
 		editing === null ? null : editing.targets.primary.kind === "inPlace" && editable ? editing.targets.primary : copyTargetOf(editing)
 
+	// The video editor's session, for the slot and the version it opened on, as the image editor's: another file on
+	// screen leaves video edit mode (the effect below), which ends its client.
+	const videoMode = useVideoEditMode(item => createVideoEditClient({ item }))
+	const videoState = videoMode.state
+	const videoEditing =
+		videoState !== null && rawDriveItem?.data.uuid === videoState.frozenUuid && driveItem?.data.uuid === videoState.uuid
+			? videoState
+			: null
+	const videoStale = videoState !== null && videoEditing === null
+	const exitVideoMode = videoMode.exit
+
+	useEffect(() => {
+		if (videoStale) {
+			exitVideoMode()
+		}
+	}, [videoStale, exitVideoMode])
+
+	// The slot shows a video the editor may open: in the user's own drive, in a container the export reads, and not
+	// already found to have no picture this browser shows.
+	const videoEditable =
+		driveItem !== undefined &&
+		!asText &&
+		pin?.category === "video" &&
+		canEditVideo(driveItem, variant) &&
+		!knownUnpreviewable(driveItem.data.uuid)
+	// Either editor is open: the viewer's header, keys and saves step aside.
+	const anyEditing = editing !== null || videoEditing !== null
+
 	// Leaving edit mode, or the overlay, ends the session: the render worker's idle teardown starts then.
 	useEffect(() => {
 		if (editState === null) {
@@ -479,7 +520,7 @@ export function PreviewOverlay({
 			!imageEditable ||
 			item === undefined ||
 			raw === undefined ||
-			editing !== null ||
+			anyEditing ||
 			enteringEdit ||
 			saving ||
 			remote.prompt !== null ||
@@ -535,6 +576,119 @@ export function PreviewOverlay({
 	// The header's Cancel, Escape and Back in edit mode: asks first over unsaved edits.
 	function requestExitImageEdit(): void {
 		requestOrRun("exitEdit", exitImageEdit)
+	}
+
+	// Opens the video on screen in the editor (the source read once), or says why it cannot.
+	function startVideoEdit(): void {
+		const item = driveItem
+		const raw = rawDriveItem
+
+		if (
+			!videoEditable ||
+			item === undefined ||
+			raw === undefined ||
+			anyEditing ||
+			videoMode.entering ||
+			enteringEdit ||
+			saving ||
+			remote.prompt !== null ||
+			pendingIntent !== null ||
+			menuDialogKind !== null
+		) {
+			return
+		}
+
+		void videoMode.enter(item, raw.data.uuid).then(outcome => {
+			if (!mountedRef.current) {
+				return
+			}
+
+			if (outcome === "unavailable") {
+				toast.error(t("previewVideoEditUnavailable"))
+			} else if (outcome === "failed") {
+				toast.error(t("previewVideoEditLoadFailed"))
+			}
+		})
+	}
+
+	// Edits are dropped by the caller's choice (or there were none, or they were saved).
+	function exitVideoEdit(): void {
+		videoMode.exit()
+		dropPreviewBuffer(contentRef)
+	}
+
+	// The editor's Cancel, Escape and Back: asks first over unsaved edits; never while an export runs in the editor
+	// (its own Cancel export or Continue in background decide that).
+	function requestExitVideoEdit(): void {
+		if (videoCommandsRef.current?.exporting() !== true) {
+			requestOrRun("exitEdit", exitVideoEdit)
+		}
+	}
+
+	// A video export started from the slot on screen: what it saved is shown (a new version) or noted (a copy) when it
+	// ends, wherever the user is by then, and versions saved elsewhere meanwhile are judged against it.
+	function videoSaveStarted(target: VideoSaveTarget): (saved: DriveItem | null) => void {
+		const item = driveItem
+		const frozenUuid = rawDriveItem?.data.uuid
+
+		remote.saveStarted()
+
+		return saved => {
+			if (!mountedRef.current) {
+				return
+			}
+
+			const settled = videoSaveSettledRef.current
+
+			settled(saved, target, item, frozenUuid)
+		}
+	}
+
+	function videoSaveSettled(
+		saved: DriveItem | null,
+		target: VideoSaveTarget,
+		item: DriveItem | undefined,
+		frozenUuid: string | undefined
+	): void {
+		if (saved === null || item === undefined || frozenUuid === undefined) {
+			remote.saveSettled(null)
+
+			return
+		}
+
+		if (target === "copy") {
+			recordOwnSave(saved.data.uuid)
+			splicePhotoSave(item.data.uuid, saved, "beside")
+			remote.saveSettled(null)
+
+			return
+		}
+
+		commitSaved(frozenUuid, saved, true)
+		followClipboardItem(saved, item.data.uuid)
+		splicePhotoSave(item.data.uuid, saved, "replace")
+		remote.saveSettled(saved)
+	}
+
+	// A still of the video beside it, named as an edited copy ("clip (edited).jpg").
+	async function saveVideoFrame(blob: Blob, extension: "jpg"): Promise<string> {
+		const item = driveItem
+
+		if (item === undefined) {
+			throw new Error("no file on screen")
+		}
+
+		const written = await writeEditedCopy(item, blob, extension, number =>
+			number <= 1 ? t("previewImageSaveCopySuffix") : t("previewImageSaveCopySuffixNumbered", { number })
+		)
+
+		if (written === null || written.outcome.status === "error") {
+			throw new Error(written?.outcome.status === "error" ? written.outcome.dto.message : "not a file")
+		}
+
+		recordOwnSave(written.outcome.item.data.uuid)
+
+		return written.name
 	}
 
 	// Header item-menu action handlers — every one below only ever runs against `driveItem`/`rawDriveItem`
@@ -841,6 +995,12 @@ export function PreviewOverlay({
 			return
 		}
 
+		if (videoEditing !== null) {
+			requestExitVideoEdit()
+
+			return
+		}
+
 		requestOrRun("close", onClose)
 	})
 	const closeOnBack = useCallback<ShouldBlockFn>(
@@ -927,6 +1087,15 @@ export function PreviewOverlay({
 		// In edit mode a save is the image's own, never an autosave.
 		if (editing !== null) {
 			return !auto && imagePrimaryTarget !== null && saveImage(imagePrimaryTarget)
+		}
+
+		// The video editor's Save popover says what the export will do before anything runs.
+		if (videoEditing !== null) {
+			if (!auto) {
+				videoCommandsRef.current?.openSave()
+			}
+
+			return false
 		}
 
 		// Locals, not the outer `driveItem`/`rawDriveItem` directly — this closure runs asynchronously, well
@@ -1301,11 +1470,13 @@ export function PreviewOverlay({
 	const performSaveRef = useLatestRef(performSave)
 	// A saved copy's Open, as things stand when it is clicked: not over edits or a save.
 	const openSavedCopyRef = useLatestRef((frozenUuid: string, copy: DriveItem) => {
-		if (editing === null && !dirty && !saving) {
+		if (!anyEditing && !dirty && !saving) {
 			commitSaved(frozenUuid, copy)
 		}
 	})
 	const startImageEditRef = useLatestRef(startImageEdit)
+	// A video export's end, as things stand when it comes (the export may outlive the editor that started it).
+	const videoSaveSettledRef = useLatestRef(videoSaveSettled)
 	// A save asked for while one was in flight (a second Mod+S, an autosave meeting one), and whether only autosaves
 	// asked: run once that one settles and the file is still dirty, so no request is dropped with the deck left dirty.
 	const saveAgainRef = useRef<boolean | null>(null)
@@ -1354,7 +1525,8 @@ export function PreviewOverlay({
 			logoutRequest,
 			menuDialogKind,
 			editing,
-			imagePrimaryTarget
+			imagePrimaryTarget,
+			videoEditing
 		]
 	)
 
@@ -1384,7 +1556,7 @@ export function PreviewOverlay({
 
 			if (
 				editable ||
-				editing !== null ||
+				anyEditing ||
 				keyboardEvent.repeat ||
 				!isOnline ||
 				isAnyMenuOpen() ||
@@ -1398,7 +1570,7 @@ export function PreviewOverlay({
 			void startDownloads([driveItem])
 		},
 		IN_EDITORS_AND_FIELDS,
-		[editable, editing, isOnline, driveItem, downloadable, variant]
+		[editable, anyEditing, isOnline, driveItem, downloadable, variant]
 	)
 
 	// Routes a close/prev/next intent through the unsaved-changes prompt whenever the buffer is dirty;
@@ -1494,6 +1666,17 @@ export function PreviewOverlay({
 			return
 		}
 
+		// The video editor likewise, by its own leave key.
+		if (!next && videoEditing !== null) {
+			details.cancel()
+
+			if (!escape || pressed(VIDEO_CANCEL_ACTION)) {
+				requestExitVideoEdit()
+			}
+
+			return
+		}
+
 		if (escape && !pressed(CLOSE)) {
 			details.cancel()
 
@@ -1557,6 +1740,12 @@ export function PreviewOverlay({
 		const layer = target instanceof Element ? dialogLayerOf(target) : null
 
 		if (isAnyMenuOpen() || (layer !== null && layer !== popupRef.current)) {
+			return
+		}
+
+		// The video editor takes every key of its own (its layer, useEditorLayerKeys); Escape leaves it through the
+		// dialog's own dismissal (handleOpenChange).
+		if (videoEditing !== null) {
 			return
 		}
 
@@ -1719,7 +1908,11 @@ export function PreviewOverlay({
 		} else if (actions.intent === "replace") {
 			pendingReplaceRef.current?.()
 		} else if (actions.intent === "exitEdit") {
-			exitImageEdit()
+			if (videoEditing !== null) {
+				exitVideoEdit()
+			} else {
+				exitImageEdit()
+			}
 		}
 
 		pendingReplaceRef.current = null
@@ -1755,226 +1948,238 @@ export function PreviewOverlay({
 					onKeyDown={handleKeyDown}
 					className={cn(
 						"fixed inset-0 z-50 flex flex-col bg-background duration-100 outline-none data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0",
-						// Edit mode is a darkroom in either app theme, its header included (see ImageEditor).
-						editing !== null && "dark bg-canvas text-foreground scheme-dark"
+						// Edit mode is a darkroom in either app theme, its header included (see ImageEditor, VideoEditor).
+						anyEditing && "dark bg-canvas text-foreground scheme-dark"
 					)}
 				>
-					{/* Window chrome on desktop: below the Windows/Linux controls band, clear of the macOS lights. */}
-					<header className="flex h-[calc(3.5rem+var(--window-inset-top))] shrink-0 items-center gap-1 px-4 pt-(--window-inset-top) pl-[max(1rem,var(--window-inset-left))] app-region-chrome">
-						{editing !== null && imagePrimaryTarget !== null ? (
-							<>
-								{/* Equal-growing sides keep the name centred over the picture. */}
-								<div className="flex flex-1 basis-0 items-center">
-									<Button
-										variant="ghost"
-										size="sm"
-										disabled={saving}
-										onClick={requestExitImageEdit}
-									>
-										{t("previewImageSaveCancelAction")}
-									</Button>
-								</div>
-								{/* Named for assistive tech only at phone width, where the actions need the whole row. */}
-								<DialogPrimitive.Title className="flex min-w-0 shrink justify-center px-2 font-heading text-sm font-medium max-sm:sr-only">
-									<SplitTitle
-										text={name}
-										tailLength={16}
-									/>
-								</DialogPrimitive.Title>
-								<div className="flex flex-1 basis-0 items-center justify-end gap-1">
-									<Button
-										variant="ghost"
-										size="sm"
-										disabled={!dirty || saving}
-										onClick={() => {
-											imageCommandsRef.current?.revert()
-										}}
-									>
-										{t("previewImageSaveRevertAction")}
-									</Button>
-									{/* A copy is the other way to save where the primary writes in place; a copy-only format has just the one. */}
-									<div className="flex items-center">
+					{/* Window chrome on desktop: below the Windows/Linux controls band, clear of the macOS lights. The video
+					    editor brings its own header. */}
+					{videoEditing !== null ? null : (
+						<header className="flex h-[calc(3.5rem+var(--window-inset-top))] shrink-0 items-center gap-1 px-4 pt-(--window-inset-top) pl-[max(1rem,var(--window-inset-left))] app-region-chrome">
+							{editing !== null && imagePrimaryTarget !== null ? (
+								<>
+									{/* Equal-growing sides keep the name centred over the picture. */}
+									<div className="flex flex-1 basis-0 items-center">
 										<Button
+											variant="ghost"
+											size="sm"
+											disabled={saving}
+											onClick={requestExitImageEdit}
+										>
+											{t("previewImageSaveCancelAction")}
+										</Button>
+									</div>
+									{/* Named for assistive tech only at phone width, where the actions need the whole row. */}
+									<DialogPrimitive.Title className="flex min-w-0 shrink justify-center px-2 font-heading text-sm font-medium max-sm:sr-only">
+										<SplitTitle
+											text={name}
+											tailLength={16}
+										/>
+									</DialogPrimitive.Title>
+									<div className="flex flex-1 basis-0 items-center justify-end gap-1">
+										<Button
+											variant="ghost"
 											size="sm"
 											disabled={!dirty || saving}
-											className={cn(imagePrimaryTarget.kind === "inPlace" && "rounded-r-none")}
 											onClick={() => {
-												saveImage(imagePrimaryTarget)
+												imageCommandsRef.current?.revert()
 											}}
 										>
-											{saving ? <Spinner data-icon="inline-start" /> : null}
-											{t(imageSaveLabelKey(imagePrimaryTarget))}
+											{t("previewImageSaveRevertAction")}
 										</Button>
-										{imagePrimaryTarget.kind === "inPlace" ? (
-											<DropdownMenu>
-												<DropdownMenuTrigger
-													render={
-														<Button
-															size="icon-sm"
-															disabled={!dirty || saving}
-															aria-label={t("previewImageSaveMoreAction")}
-															className="rounded-l-none border-l-primary-foreground/20"
-														/>
-													}
-												>
-													<ChevronDownIcon />
-												</DropdownMenuTrigger>
-												{/* Portaled outside the darkroom subtree: dark on its own. */}
-												<DropdownMenuContent
-													align="end"
-													className="dark scheme-dark"
-												>
-													<DropdownMenuItem
-														onClick={() => {
-															saveImage(copyTargetOf(editing))
-														}}
+										{/* A copy is the other way to save where the primary writes in place; a copy-only format has just the one. */}
+										<div className="flex items-center">
+											<Button
+												size="sm"
+												disabled={!dirty || saving}
+												className={cn(imagePrimaryTarget.kind === "inPlace" && "rounded-r-none")}
+												onClick={() => {
+													saveImage(imagePrimaryTarget)
+												}}
+											>
+												{saving ? <Spinner data-icon="inline-start" /> : null}
+												{t(imageSaveLabelKey(imagePrimaryTarget))}
+											</Button>
+											{imagePrimaryTarget.kind === "inPlace" ? (
+												<DropdownMenu>
+													<DropdownMenuTrigger
+														render={
+															<Button
+																size="icon-sm"
+																disabled={!dirty || saving}
+																aria-label={t("previewImageSaveMoreAction")}
+																className="rounded-l-none border-l-primary-foreground/20"
+															/>
+														}
 													>
-														{t("previewImageSaveAsCopyAction")}
-													</DropdownMenuItem>
-												</DropdownMenuContent>
-											</DropdownMenu>
-										) : null}
+														<ChevronDownIcon />
+													</DropdownMenuTrigger>
+													{/* Portaled outside the darkroom subtree: dark on its own. */}
+													<DropdownMenuContent
+														align="end"
+														className="dark scheme-dark"
+													>
+														<DropdownMenuItem
+															onClick={() => {
+																saveImage(copyTargetOf(editing))
+															}}
+														>
+															{t("previewImageSaveAsCopyAction")}
+														</DropdownMenuItem>
+													</DropdownMenuContent>
+												</DropdownMenu>
+											) : null}
+										</div>
 									</div>
-								</div>
-							</>
-						) : (
-							<>
-								<PreviewName name={name} />
+								</>
+							) : (
+								<>
+									<PreviewName name={name} />
 
-								{imageEditable ? (
+									{imageEditable ? (
+										<TooltipIconButton
+											label={t("previewImageSaveEditAction")}
+											disabled={enteringEdit || saving}
+											shortcut={<Kbd action="preview.editImage" />}
+											onClick={startImageEdit}
+										>
+											{enteringEdit ? <Spinner className="size-4" /> : <PencilIcon />}
+										</TooltipIconButton>
+									) : null}
+									{videoEditable ? (
+										<TooltipIconButton
+											label={t("previewVideoEditOpen")}
+											disabled={videoMode.entering || saving}
+											onClick={startVideoEdit}
+										>
+											{videoMode.entering ? <Spinner className="size-4" /> : <PencilIcon />}
+										</TooltipIconButton>
+									) : null}
+									{editable && dirty ? (
+										<TooltipIconButton
+											label={t("previewSaveAction")}
+											disabled={saving}
+											shortcut={<Kbd action="preview.save" />}
+											onClick={() => {
+												performSave()
+											}}
+										>
+											{saving ? <Spinner className="size-4" /> : <SaveIcon />}
+										</TooltipIconButton>
+									) : null}
 									<TooltipIconButton
-										label={t("previewImageSaveEditAction")}
-										disabled={enteringEdit || saving}
-										shortcut={<Kbd action="preview.editImage" />}
-										onClick={startImageEdit}
-									>
-										{enteringEdit ? <Spinner className="size-4" /> : <PencilIcon />}
-									</TooltipIconButton>
-								) : null}
-								{editable && dirty ? (
-									<TooltipIconButton
-										label={t("previewSaveAction")}
-										disabled={saving}
-										shortcut={<Kbd action="preview.save" />}
+										label={t("previewPreviousAction")}
+										disabled={index <= 0 || saving}
+										shortcut={<Kbd action="preview.prev" />}
 										onClick={() => {
-											performSave()
+											requestOrRun("prev", () => {
+												onStep(-1)
+											})
 										}}
 									>
-										{saving ? <Spinner className="size-4" /> : <SaveIcon />}
+										<ChevronLeftIcon />
 									</TooltipIconButton>
-								) : null}
-								<TooltipIconButton
-									label={t("previewPreviousAction")}
-									disabled={index <= 0 || saving}
-									shortcut={<Kbd action="preview.prev" />}
-									onClick={() => {
-										requestOrRun("prev", () => {
-											onStep(-1)
-										})
-									}}
-								>
-									<ChevronLeftIcon />
-								</TooltipIconButton>
-								<TooltipIconButton
-									label={t("previewNextAction")}
-									disabled={index >= items.length - 1 || saving}
-									shortcut={<Kbd action="preview.next" />}
-									onClick={() => {
-										requestOrRun("next", () => {
-											onStep(1)
-										})
-									}}
-								>
-									<ChevronRightIcon />
-								</TooltipIconButton>
-								{download !== null ? (
 									<TooltipIconButton
-										label={t("previewDownloadAction")}
-										disabled={!isOnline}
-										title={!isOnline ? t("common:offlineActionDisabled") : undefined}
-										shortcut={<Kbd action="preview.download" />}
-										onClick={download}
+										label={t("previewNextAction")}
+										disabled={index >= items.length - 1 || saving}
+										shortcut={<Kbd action="preview.next" />}
+										onClick={() => {
+											requestOrRun("next", () => {
+												onStep(1)
+											})
+										}}
 									>
-										<DownloadIcon />
+										<ChevronRightIcon />
 									</TooltipIconButton>
-								) : null}
-								{/* Never for a chat/note embed's fabricated linked-file item (isLinkedEmbedItem). Same
+									{download !== null ? (
+										<TooltipIconButton
+											label={t("previewDownloadAction")}
+											disabled={!isOnline}
+											title={!isOnline ? t("common:offlineActionDisabled") : undefined}
+											shortcut={<Kbd action="preview.download" />}
+											onClick={download}
+										>
+											<DownloadIcon />
+										</TooltipIconButton>
+									) : null}
+									{/* Never for a chat/note embed's fabricated linked-file item (isLinkedEmbedItem). Same
 						descriptor list + dropdown renderer the tile/row faces' own ⋯ trigger uses (itemMenu.tsx),
 						just with "download" hidden (the button above already covers it) and the two extra
 						"direct"-outcome hooks wired into this overlay's own per-slot `saved` override / pager
 						housekeeping — see previewMenuHiddenActionIds and the handleMenu* functions above. */}
-								{!isLinkedEmbedItem(driveItem) ? (
-									<DropdownMenu>
-										<Tooltip>
-											<TooltipTrigger
-												render={
-													<DropdownMenuTrigger
-														render={
-															<Button
-																ref={menuTriggerRef}
-																variant="ghost"
-																size="icon-sm"
-																aria-label={t("drive:driveItemMenuTrigger")}
-															>
-																<MoreHorizontalIcon />
-															</Button>
-														}
-													/>
-												}
-											/>
-											<TooltipContent>
-												{t("drive:driveItemMenuTrigger")}
-												<Kbd action="preview.openMenu" />
-											</TooltipContent>
-										</Tooltip>
-										<DriveDropdownMenuContent
-											item={driveItem}
-											variant={variant}
-											onItemAction={kind => {
-												// The move and version-restore dialogs report no outcome, so their echo, whenever it
-												// comes, takes the mark; a mark left by a cancelled dialog only quiets a later
-												// notice of the same kind.
-												if (kind === "move" || kind === "versions") {
-													remote.expectOwnChange(driveItem.data.uuid, kind === "move" ? "move" : "restore")
-												}
+									{!isLinkedEmbedItem(driveItem) ? (
+										<DropdownMenu>
+											<Tooltip>
+												<TooltipTrigger
+													render={
+														<DropdownMenuTrigger
+															render={
+																<Button
+																	ref={menuTriggerRef}
+																	variant="ghost"
+																	size="icon-sm"
+																	aria-label={t("drive:driveItemMenuTrigger")}
+																>
+																	<MoreHorizontalIcon />
+																</Button>
+															}
+														/>
+													}
+												/>
+												<TooltipContent>
+													{t("drive:driveItemMenuTrigger")}
+													<Kbd action="preview.openMenu" />
+												</TooltipContent>
+											</Tooltip>
+											<DriveDropdownMenuContent
+												item={driveItem}
+												variant={variant}
+												onItemAction={kind => {
+													// The move and version-restore dialogs report no outcome, so their echo, whenever it
+													// comes, takes the mark; a mark left by a cancelled dialog only quiets a later
+													// notice of the same kind.
+													if (kind === "move" || kind === "versions") {
+														remote.expectOwnChange(driveItem.data.uuid, kind === "move" ? "move" : "restore")
+													}
 
-												setMenuDialogKind(kind)
-											}}
-											onFavoriteToggled={handleMenuFavoriteToggled}
-											onRestored={handleMenuRestored}
-											hiddenActionIds={previewMenuHiddenActionIds(
-												hiddenMenuActionIds,
-												previewDownloadable(downloadable, variant)
-											)}
-											compressParentNaming={compressParentNaming}
-											shortcuts={PREVIEW_ITEM_SHORTCUTS}
+													setMenuDialogKind(kind)
+												}}
+												onFavoriteToggled={handleMenuFavoriteToggled}
+												onRestored={handleMenuRestored}
+												hiddenActionIds={previewMenuHiddenActionIds(
+													hiddenMenuActionIds,
+													previewDownloadable(downloadable, variant)
+												)}
+												compressParentNaming={compressParentNaming}
+												shortcuts={PREVIEW_ITEM_SHORTCUTS}
+											/>
+										</DropdownMenu>
+									) : null}
+									<Tooltip>
+										<TooltipTrigger
+											render={
+												<DialogPrimitive.Close
+													render={
+														<Button
+															variant="ghost"
+															size="icon-sm"
+															aria-label={t("common:close")}
+														/>
+													}
+												>
+													<XIcon />
+												</DialogPrimitive.Close>
+											}
 										/>
-									</DropdownMenu>
-								) : null}
-								<Tooltip>
-									<TooltipTrigger
-										render={
-											<DialogPrimitive.Close
-												render={
-													<Button
-														variant="ghost"
-														size="icon-sm"
-														aria-label={t("common:close")}
-													/>
-												}
-											>
-												<XIcon />
-											</DialogPrimitive.Close>
-										}
-									/>
-									<TooltipContent>
-										{t("common:close")}
-										<Kbd action="preview.close" />
-									</TooltipContent>
-								</Tooltip>
-							</>
-						)}
-					</header>
+										<TooltipContent>
+											{t("common:close")}
+											<Kbd action="preview.close" />
+										</TooltipContent>
+									</Tooltip>
+								</>
+							)}
+						</header>
+					)}
 					<div className="min-h-0 flex-1">
 						<ArchiveListingScope>
 							{/* Mid-run (a held arrow key) the slots stepped through show only their header. */}
@@ -1989,6 +2194,29 @@ export function PreviewOverlay({
 										commandsRef={imageCommandsRef}
 										session={editing.session}
 										capabilities={editing.capabilities}
+									/>
+								</PreviewErrorBoundary>
+							) : videoEditing !== null ? (
+								<PreviewErrorBoundary key={`videoEdit:${videoEditing.uuid}`}>
+									<VideoEditor
+										client={videoEditing.client}
+										info={videoEditing.info}
+										item={driveItem}
+										name={name}
+										title={
+											<DialogPrimitive.Title className="min-w-0">
+												<SplitTitle
+													text={name}
+													tailLength={16}
+												/>
+											</DialogPrimitive.Title>
+										}
+										onDirtyChange={setPreviewDirty}
+										onCancel={requestExitVideoEdit}
+										onExit={exitVideoEdit}
+										onSaveStarted={videoSaveStarted}
+										onSaveFrame={saveVideoFrame}
+										commandsRef={videoCommandsRef}
 									/>
 								</PreviewErrorBoundary>
 							) : !slotSettled ? (
@@ -2093,11 +2321,17 @@ export function PreviewOverlay({
 							onLoadTheirs={remote.loadTheirs}
 							// Without a save source (a read-only viewer) there is nothing to write: not offered.
 							onSaveMineAsNew={
-								editable || editing !== null
+								videoEditing !== null
 									? () => {
-											void remote.saveMineAsNewFile()
+											// The editor's own copy export (an export runs in it, never bytes read here).
+											remote.keepMine()
+											videoCommandsRef.current?.saveCopy()
 										}
-									: undefined
+									: editable || editing !== null
+										? () => {
+												void remote.saveMineAsNewFile()
+											}
+										: undefined
 							}
 							onDiscardMine={remote.discardMine}
 						/>

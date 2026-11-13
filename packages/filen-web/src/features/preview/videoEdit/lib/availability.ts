@@ -1,4 +1,5 @@
-import type { ExportDrop, ExportPlan, VideoSourceInfo } from "@/features/preview/videoEdit/types"
+import type { ExportDrop, ExportPlan, VideoSaveRefusal, VideoSourceInfo } from "@/features/preview/videoEdit/types"
+import type { NamespaceKey } from "@/lib/i18n"
 
 // Which editing controls this browser can offer, read from the plan. `ExportPlan.unavailable` names features by these
 // ids (anything else in it is not a control and is ignored here): a feature listed there is disabled with the reason
@@ -96,4 +97,20 @@ export function etaMinutes(seconds: number | null): number {
 	}
 
 	return Math.max(1, Math.round(seconds / 60))
+}
+
+// How the editor words a refused save.
+export const REFUSAL_LABELS: Readonly<Record<VideoSaveRefusal, NamespaceKey<"preview">>> = {
+	offline: "previewVideoSaveRefusedOffline",
+	quota: "previewVideoSaveRefusedQuota",
+	unavailable: "previewVideoSaveRefusedUnavailable",
+	gop: "previewVideoSaveRefusedGop",
+	noVideo: "previewVideoSaveRefusedNoVideo",
+	codec: "previewVideoSaveRefusedCodec",
+	target: "previewVideoSaveRefusedTarget"
+}
+
+// A refusal worth trying again once its cause is gone (back online, storage freed); the others stay as they are.
+export function refusalRetries(reason: VideoSaveRefusal): boolean {
+	return reason === "offline" || reason === "quota"
 }

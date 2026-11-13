@@ -88,7 +88,9 @@ describe("frame stages", () => {
 		expect(kind({}, "toSdr")).toBe("gpu")
 		expect(kind({}, "hevc10")).toBe("pass")
 		expect(kind({ filter: "vivid" })).toBe("gpu")
-		expect(kind({ text: [{ id: "t", text: "Hi", startSec: 0, endSec: 1, x: 0.5, y: 0.5, size: 0.1, color: "#fff", background: false }] })).toBe("gpu")
+		expect(
+			kind({ text: [{ id: "t", text: "Hi", startSec: 0, endSec: 1, x: 0.5, y: 0.5, size: 0.1, color: "#fff", background: false }] })
+		).toBe("gpu")
 	})
 
 	it("hands the pipeline coded-space geometry with the source's rotation folded in", () => {

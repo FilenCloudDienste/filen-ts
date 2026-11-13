@@ -34,7 +34,8 @@ vi.mock("@/lib/storage/adapter", () => ({
 	kvSetJson: () => Promise.resolve(),
 	kvKeys: () => Promise.resolve([]),
 	kvEntriesJson: () => Promise.resolve([]),
-	kvDelete: () => Promise.resolve()
+	kvDelete: () => Promise.resolve(),
+	kvDeletePrefix: () => Promise.resolve()
 }))
 // The clipboard entries' shortcut badge, reduced to its action id (the registry's combos aren't the point).
 vi.mock("@/lib/keymap/kbd", async () => {

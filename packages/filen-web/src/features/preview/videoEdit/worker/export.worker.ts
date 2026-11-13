@@ -127,7 +127,10 @@ const api: ExportWorkerApi = {
 				deps: {
 					// Frames arrive coded (unrotated); an HDR source whose frames do not name their curve is tone-mapped by its own.
 					createPipeline: source =>
-						createFramePipeline(new OffscreenCanvas(1, 1), source.transfer === "sdr" ? {} : { sourceTransfer: source.transfer }),
+						createFramePipeline(
+							new OffscreenCanvas(1, 1),
+							source.transfer === "sdr" ? {} : { sourceTransfer: source.transfer }
+						),
 					createTimeStretch,
 					exoticAudio: exoticAudio(block),
 					ios: args.context.ios === true

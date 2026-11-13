@@ -19,6 +19,8 @@ import type {
 import {
 	dropNotices,
 	etaMinutes,
+	REFUSAL_LABELS,
+	refusalRetries,
 	saveBlock,
 	targetNote,
 	type DropNotice,
@@ -290,21 +292,6 @@ export type ExportState =
 	| { status: "running"; fraction: number; etaSeconds: number | null }
 	| { status: "failed"; message: string }
 	| { status: "refused"; reason: VideoSaveRefusal }
-
-export const REFUSAL_LABELS: Readonly<Record<VideoSaveRefusal, PreviewKey>> = {
-	offline: "previewVideoSaveRefusedOffline",
-	quota: "previewVideoSaveRefusedQuota",
-	unavailable: "previewVideoSaveRefusedUnavailable",
-	gop: "previewVideoSaveRefusedGop",
-	noVideo: "previewVideoSaveRefusedNoVideo",
-	codec: "previewVideoSaveRefusedCodec",
-	target: "previewVideoSaveRefusedTarget"
-}
-
-// A refusal worth trying again once its cause is gone (back online, storage freed); the others stay as they are.
-export function refusalRetries(reason: VideoSaveRefusal): boolean {
-	return reason === "offline" || reason === "quota"
-}
 
 // The export's progress under the header while it runs in the editor, or why it failed or was refused, with Retry where
 // trying again can help (the edits stay).

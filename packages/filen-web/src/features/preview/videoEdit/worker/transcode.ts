@@ -92,7 +92,12 @@ export function createFrameStage(params: {
 
 				return Promise.resolve(
 					new VideoFrame(frame, {
-						visibleRect: { x: (visible?.x ?? 0) + crop.x, y: (visible?.y ?? 0) + crop.y, width: crop.width, height: crop.height },
+						visibleRect: {
+							x: (visible?.x ?? 0) + crop.x,
+							y: (visible?.y ?? 0) + crop.y,
+							width: crop.width,
+							height: crop.height
+						},
 						displayWidth,
 						displayHeight
 					})

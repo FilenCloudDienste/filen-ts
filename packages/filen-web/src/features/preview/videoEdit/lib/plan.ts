@@ -165,7 +165,12 @@ export function squareToCodedCrop(crop: VideoCrop, frame: SourceFrame): VideoCro
 	const sy = frame.squareHeight > 0 ? frame.codedHeight / frame.squareHeight : 1
 
 	return evenCrop(
-		{ x: Math.round(crop.x * sx), y: Math.round(crop.y * sy), width: Math.round(crop.width * sx), height: Math.round(crop.height * sy) },
+		{
+			x: Math.round(crop.x * sx),
+			y: Math.round(crop.y * sy),
+			width: Math.round(crop.width * sx),
+			height: Math.round(crop.height * sy)
+		},
 		frame.codedWidth,
 		frame.codedHeight
 	)
@@ -197,7 +202,7 @@ export function outputGeometry(recipe: VideoEditRecipe, source: VideoSourceInfo)
 				)
 	const squareCrop = codedCrop === null ? null : codedToSquareCrop(codedCrop, frame)
 	// The kept picture in display space (square pixels, the source's rotation applied).
-	const kept = squareCrop === null ? { width: frame.squareWidth, height: frame.squareHeight } : squareCrop
+	const kept = squareCrop ?? { width: frame.squareWidth, height: frame.squareHeight }
 	const sourceSideways = quarterTurns(source.rotation)
 	const displayWidth = sourceSideways ? kept.height : kept.width
 	const displayHeight = sourceSideways ? kept.width : kept.height

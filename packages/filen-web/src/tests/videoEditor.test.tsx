@@ -41,8 +41,10 @@ function mount(options: { info?: Partial<VideoSourceInfo>; planFor?: (recipe: Vi
 	const fake = fakeVideoEditClient(options)
 	const onDirtyChange = vi.fn()
 	const onExit = vi.fn()
-	const onSaveStarted = vi.fn()
 	const onSaveSettled = vi.fn()
+	const onSaveStarted = vi.fn((target: string) => (saved: DriveItem | null) => {
+		onSaveSettled(saved, target)
+	})
 	const onCancel = vi.fn()
 	const onSaveFrame = vi.fn(() => Promise.resolve("clip.jpg"))
 	const commandsRef = createRef<VideoEditorCommands | null>()
@@ -57,7 +59,6 @@ function mount(options: { info?: Partial<VideoSourceInfo>; planFor?: (recipe: Vi
 			onCancel={onCancel}
 			onExit={onExit}
 			onSaveStarted={onSaveStarted}
-			onSaveSettled={onSaveSettled}
 			onSaveFrame={onSaveFrame}
 			commandsRef={commandsRef}
 		/>

@@ -1,6 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { EditorPlayback } from "@/features/preview/videoEdit/components/editorPlayback"
-import { colourConvertsHdr, dropNotices, etaMinutes, saveBlock, targetNote, unavailableFeatures } from "@/features/preview/videoEdit/lib/availability"
+import {
+	colourConvertsHdr,
+	dropNotices,
+	etaMinutes,
+	saveBlock,
+	targetNote,
+	unavailableFeatures
+} from "@/features/preview/videoEdit/lib/availability"
 import type { ExportPlan, VideoSourceInfo } from "@/features/preview/videoEdit/types"
 import { FAKE_INFO, FAKE_PLAN } from "@/tests/support/fakeVideoEditClient"
 

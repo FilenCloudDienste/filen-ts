@@ -169,7 +169,10 @@ describe("outputGeometry", () => {
 	})
 
 	it("crops nothing on a whole anamorphic frame, rotated or not", () => {
-		const geometry = outputGeometry(recipeFor(60), sourceInfo({ width: 480, height: 854, rotation: 90, codedWidth: 720, codedHeight: 480 }))
+		const geometry = outputGeometry(
+			recipeFor(60),
+			sourceInfo({ width: 480, height: 854, rotation: 90, codedWidth: 720, codedHeight: 480 })
+		)
 
 		expect(geometry.codedCrop).toBeNull()
 		expect([geometry.width, geometry.height]).toEqual([480, 854])
@@ -351,7 +354,11 @@ describe("planExport capabilities", () => {
 		expect(sped.blockers).toEqual(["speed"])
 		expect(sped.mutingUnblocks).toBe(true)
 
-		const mutedSpeed = planExport(recipeFor(60, { speed: 2, audio: { mute: true, gainDb: 0, keepTracks: "first" } }), fast, NO_WEBCODECS)
+		const mutedSpeed = planExport(
+			recipeFor(60, { speed: 2, audio: { mute: true, gainDb: 0, keepTracks: "first" } }),
+			fast,
+			NO_WEBCODECS
+		)
 
 		expect(mutedSpeed.mode).toBe("copy")
 		expect(mutedSpeed.blockers).toEqual([])
@@ -388,7 +395,8 @@ describe("planExport HDR", () => {
 	})
 
 	it("re-encodes to 10-bit HEVC where the browser can and no pixel changes", () => {
-		const hdrOf = (overrides: Parameters<typeof recipeFor>[1]): string | null => planExport(recipeFor(60, overrides), hlg, ALL_ENCODERS).hdr
+		const hdrOf = (overrides: Parameters<typeof recipeFor>[1]): string | null =>
+			planExport(recipeFor(60, overrides), hlg, ALL_ENCODERS).hdr
 
 		expect(hdrOf({ output: { resolution: 1080, quality: "medium" } })).toBe("hevc10")
 		expect(hdrOf({ crop: { x: 0, y: 0, width: 960, height: 540 }, rotate: 90 })).toBe("hevc10")
