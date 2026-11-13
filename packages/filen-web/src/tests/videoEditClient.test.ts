@@ -53,6 +53,7 @@ function previewRemote() {
 	return {
 		open: vi.fn(() => Promise.resolve(INFO)),
 		frameAt: vi.fn(() => Promise.resolve("bitmap")),
+		filterThumbnails: vi.fn(() => Promise.resolve([{ filter: "vivid", bitmap: "thumb" }])),
 		filmstrip: vi.fn(() => Promise.resolve([{ time: 1, bitmap: "still" }])),
 		cancelFilmstrip: vi.fn(() => Promise.resolve()),
 		watchWaveform: vi.fn(() => Promise.resolve()),
@@ -302,6 +303,108 @@ describe("createVideoEditClient", () => {
 		await flush()
 
 		expect(preview.resumeDecoding).toHaveBeenCalledTimes(1)
+		client.dispose()
+	})
+
+	it("forwards filter thumbnails to the preview worker", async () => {
+		const { createVideoEditClient } = await load()
+		const client = createVideoEditClient({ item: ITEM })
+
+		expect(await client.filterThumbnails(3, RECIPE, [null, "vivid"], 64)).toEqual([{ filter: "vivid", bitmap: "thumb" }])
+		expect(preview.filterThumbnails).toHaveBeenCalledWith(3, RECIPE, [null, "vivid"], 64)
+		client.dispose()
+	})
+
+	it("keeps the decoder handed over across editors on iOS, answering frame requests itself meanwhile", async () => {
+		h.ios.value = true
+
+		const { createVideoEditClient } = await load()
+		const first = createVideoEditClient({ item: ITEM })
+		const changes = vi.fn()
+
+		first.onDecodingSuspendedChange(changes)
+
+		const running = first.exportVideo(RECIPE, "inPlace", vi.fn())
+
+		await flush()
+
+		expect(first.isDecodingSuspended()).toBe(true)
+		expect(changes).toHaveBeenLastCalledWith(true)
+		await expect(first.frameAt(1, RECIPE, 640)).rejects.toMatchObject({ name: "AbortError" })
+		await expect(first.filterThumbnails(1, RECIPE, [null], 64)).rejects.toMatchObject({ name: "AbortError" })
+		expect(await first.filmstrip([1], 48)).toEqual([])
+		expect(preview.frameAt).not.toHaveBeenCalled()
+
+		// The editor closes; another opens on the file while the export runs: still suspended, and never resumed by
+		// the first editor going away.
+		first.dispose()
+
+		const second = createVideoEditClient({ item: ITEM })
+
+		expect(second.isDecodingSuspended()).toBe(true)
+		expect(preview.resumeDecoding).not.toHaveBeenCalled()
+
+		saves[0]?.finish({ status: "done", item: ITEM })
+		await running.done
+		await flush()
+
+		expect(preview.resumeDecoding).toHaveBeenCalledTimes(1)
+		expect(second.isDecodingSuspended()).toBe(false)
+		// The first editor's listener went with it.
+		expect(changes).toHaveBeenCalledTimes(1)
+		second.dispose()
+	})
+
+	it("starts a preview worker spun up during an export suspended", async () => {
+		h.ios.value = true
+
+		const { createVideoEditClient } = await load()
+		const exporting = createVideoEditClient({ item: ITEM })
+		const running = exporting.exportVideo(RECIPE, "inPlace", vi.fn())
+
+		await flush()
+		exporting.dispose()
+
+		// The worker goes (here at once); the next editor gets a new one.
+		const { releaseVideoEditWorkers } = await import("@/features/preview/videoEdit/client")
+
+		releaseVideoEditWorkers()
+		preview.suspendDecoding.mockClear()
+
+		const next = createVideoEditClient({ item: ITEM })
+
+		await next.loadSource()
+
+		expect(preview.suspendDecoding).toHaveBeenCalledTimes(1)
+		expect(preview.suspendDecoding.mock.invocationCallOrder[0]).toBeLessThan(preview.open.mock.invocationCallOrder.at(-1) ?? 0)
+
+		saves[0]?.finish({ status: "done", item: ITEM })
+		await running.done
+		next.dispose()
+	})
+
+	it("never starts a save cancelled while the decoder was being handed over", async () => {
+		h.ios.value = true
+
+		const { createVideoEditClient } = await load()
+		const client = createVideoEditClient({ item: ITEM })
+
+		await client.loadSource()
+
+		const handedOver = Promise.withResolvers<undefined>()
+
+		preview.suspendDecoding.mockImplementationOnce(() => handedOver.promise)
+
+		const running = client.exportVideo(RECIPE, "inPlace", vi.fn())
+
+		await flush()
+		running.cancel()
+		handedOver.resolve(undefined)
+
+		expect(await running.done).toEqual({ status: "cancelled" })
+		expect(h.startVideoSave).not.toHaveBeenCalled()
+		await flush()
+		expect(client.isDecodingSuspended()).toBe(false)
 		client.dispose()
 	})
 

@@ -177,14 +177,34 @@ export type VideoSaveRefusal = "offline" | "quota" | "unavailable" | "gop" | "no
 export type VideoSaveOutcome =
 	ExportOutcome | { status: "refused"; reason: VideoSaveRefusal } | { status: "remoteChanged"; currentUuid: string | null }
 
+// One of VideoEditClient.filterThumbnails' answers.
+export interface FilterThumbnail {
+	filter: string | null
+	bitmap: ImageBitmap
+}
+
 // The worker-side surface the editor UI drives (implemented in videoEdit/client.ts).
 export interface VideoEditClient {
 	loadSource(): Promise<VideoSourceInfo>
 	// Exact frame at `time` (nearest real sample at or before it), scaled to fit `maxWidth`, with the recipe's
 	// geometry + colour applied by the same GPU pass the export uses. The caller owns and closes the bitmap.
 	frameAt(time: number, recipe: VideoEditRecipe, maxWidth: number): Promise<ImageBitmap>
+	// The frame at `time` drawn once per filter (`recipe` with that filter and without its text boxes), at most `height`
+	// px high, in `filters` order: one decode, N GPU passes. Runs behind stage frames and never supersedes one; a newer
+	// call supersedes this one (AbortError). The caller owns and closes the bitmaps.
+	filterThumbnails(
+		time: number,
+		recipe: VideoEditRecipe,
+		filters: readonly (string | null)[],
+		height: number
+	): Promise<readonly FilterThumbnail[]>
 	// Filmstrip thumbnails at the given source times (budgeted; may return fewer).
 	filmstrip(times: readonly number[], height: number): Promise<readonly { time: number; bitmap: ImageBitmap }[]>
+	// Whether an export holds the one hardware decoder (iOS): frameAt and filterThumbnails reject with an AbortError and
+	// filmstrip answers nothing until it ends, so the editor should not ask (and say why).
+	isDecodingSuspended(): boolean
+	// Calls `listener` as that changes; returns the unsubscribe.
+	onDecodingSuspendedChange(listener: (suspended: boolean) => void): () => void
 	// Waveform peaks (0..1) for `columns` buckets over [range.start, range.end] from already-fetched data only;
 	// NaN marks a bucket with no data yet. `onUpdate` fires as more blocks arrive.
 	waveform(range: TimeRange, columns: number, onUpdate: (peaks: Float32Array) => void): () => void

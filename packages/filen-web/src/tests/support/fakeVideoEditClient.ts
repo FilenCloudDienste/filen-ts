@@ -74,9 +74,14 @@ export function fakeVideoEditClient(
 	const client = {
 		loadSource: vi.fn(() => Promise.resolve(info)),
 		frameAt: vi.fn((_time: number, _recipe: VideoEditRecipe, _maxWidth: number) => Promise.resolve(fakeBitmap())),
+		filterThumbnails: vi.fn((_time: number, _recipe: VideoEditRecipe, filters: readonly (string | null)[], _height: number) =>
+			Promise.resolve(filters.map(filter => ({ filter, bitmap: fakeBitmap() })))
+		),
 		filmstrip: vi.fn((times: readonly number[], _height: number) =>
 			Promise.resolve(times.map(time => ({ time, bitmap: fakeBitmap() })))
 		),
+		isDecodingSuspended: vi.fn(() => false),
+		onDecodingSuspendedChange: vi.fn((_listener: (suspended: boolean) => void) => vi.fn()),
 		waveform: vi.fn((_range: { start: number; end: number }, columns: number, onUpdate: (peaks: Float32Array) => void) => {
 			onUpdate(new Float32Array(columns).fill(Number.NaN))
 

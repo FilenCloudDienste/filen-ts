@@ -16,7 +16,13 @@ import {
 	sourceInfo,
 	type DemuxedFacts
 } from "@/features/preview/videoEdit/worker/preview.logic"
-import type { TimeRange, VideoEditRecipe, VideoSourceAudioTrack, VideoSourceInfo } from "@/features/preview/videoEdit/types"
+import type {
+	FilterThumbnail,
+	TimeRange,
+	VideoEditRecipe,
+	VideoSourceAudioTrack,
+	VideoSourceInfo
+} from "@/features/preview/videoEdit/types"
 
 // The video editor's preview worker: one open source at a time, read through a block cache over the range port the
 // page opened. It answers exact frames for the trim handles and the stage (decoded by ONE VideoDecoder kept positioned
@@ -52,13 +58,18 @@ interface Session {
 	lock: PriorityLock
 	// Bumped by every frame request; a request whose number is no longer current stops.
 	frameRequest: number
+	// The same for filter thumbnails, apart: a thumbnail never stops a stage frame, nor a stage frame a thumbnail.
+	thumbnailRequest: number
 	filmstrips: Set<number>
 	// Waveform subscriptions by id, each with what ends it.
 	waveforms: Map<number, () => void>
-	suspended: boolean
 }
 
 let session: Session | null = null
+
+// Another decoder holds the hardware (an export on iOS): nothing decodes until resumeDecoding(). The worker's, not a
+// session's, so a source opened meanwhile starts suspended.
+let decodingSuspended = false
 
 function current(): Session {
 	if (session === null) {
@@ -201,7 +212,7 @@ function ensurePipeline(s: Session): FramePipeline {
 }
 
 async function ensureDecoder(s: Session): Promise<GopDecoder<EncodedPacket>> {
-	if (s.suspended) {
+	if (decodingSuspended) {
 		throw new SupersededError()
 	}
 
@@ -221,6 +232,42 @@ async function ensureDecoder(s: Session): Promise<GopDecoder<EncodedPacket>> {
 	s.decoder = new GopDecoder({ ...config, optimizeForLatency: true, hardwareAcceleration: "no-preference" }, sink)
 
 	return s.decoder
+}
+
+// An HDR source's preview is tone-mapped to SDR (from the RGB upload: pipeline.ts renderBitmap).
+function previewHdr(s: Session): "toSdr" | null {
+	return s.info.transfer === "sdr" ? null : "toSdr"
+}
+
+// `frame` drawn once per filter through the stage's pass, `height` px high at most (never above the output's own).
+function renderThumbnails(
+	s: Session,
+	frame: VideoFrame,
+	recipe: VideoEditRecipe,
+	filters: readonly (string | null)[],
+	height: number
+): FilterThumbnail[] {
+	const pipeline = ensurePipeline(s)
+	const geometry = outputGeometry(recipe, s.info)
+	const size = filmstripSize(geometry, Math.min(height, geometry.height))
+	const out: FilterThumbnail[] = []
+
+	try {
+		for (const filter of filters) {
+			// No text boxes: they would be rasterised at the thumbnail's size, and a filter shows without them.
+			const variant: VideoEditRecipe = { ...recipe, filter, text: [] }
+
+			out.push({ filter, bitmap: pipeline.renderBitmap(frame, variant, size.width, size.height, 0, previewHdr(s)) })
+		}
+	} catch (error) {
+		for (const thumbnail of out) {
+			thumbnail.bitmap.close()
+		}
+
+		throw error
+	}
+
+	return out
 }
 
 // A filmstrip still in display orientation: the frame drawn turned by the source's rotation onto a small canvas.
@@ -272,7 +319,7 @@ const api = {
 		}
 
 		let tap: WaveformTap | null = null
-		const block = openBlockInput(params.port, params.size, "playback", {
+		const block = openBlockInput(params.port, params.size, "edit", {
 			onBlock: index => {
 				tap?.onBlock(index)
 			}
@@ -292,9 +339,9 @@ const api = {
 				tap: null,
 				lock: new PriorityLock(),
 				frameRequest: 0,
+				thumbnailRequest: 0,
 				filmstrips: new Set(),
-				waveforms: new Map(),
-				suspended: false
+				waveforms: new Map()
 			}
 
 			if (info.audio.length > 0 && info.duration > 0) {
@@ -317,7 +364,7 @@ const api = {
 	async frameAt(time: number, recipe: VideoEditRecipe, maxWidth: number): Promise<ImageBitmap> {
 		const s = current()
 		const request = ++s.frameRequest
-		const isCurrent = (): boolean => session === s && s.frameRequest === request && !s.suspended
+		const isCurrent = (): boolean => session === s && s.frameRequest === request && !decodingSuspended
 		const release = await s.lock.acquire("interactive")
 
 		try {
@@ -330,16 +377,19 @@ const api = {
 
 			try {
 				const out = fitWidth(outputGeometry(recipe, s.info), maxWidth)
-				const hdr = s.info.transfer === "sdr" ? null : "toSdr"
-				const bitmap = await ensurePipeline(s).renderBitmap(
+				const pipeline = ensurePipeline(s)
+				const bitmap = pipeline.renderBitmap(
 					frame,
 					recipe,
 					out.width,
 					out.height,
 					// A time that was cut shows no text.
 					sourceToOutputTime(recipe.keep, recipe.speed, time) ?? Number.NaN,
-					hdr
+					previewHdr(s)
 				)
+
+				// The stage's recipe is the one whose text boxes stay rasterised.
+				pipeline.pruneText(recipe.text)
 
 				return Comlink.transfer(bitmap, [bitmap])
 			} finally {
@@ -347,6 +397,57 @@ const api = {
 			}
 		} finally {
 			release()
+		}
+	},
+
+	// The frame at `time` drawn once per filter (the recipe with that filter, without its text boxes), `height` px high
+	// at most: one decode (the stage's own when it shows the same time), N passes. A newer call supersedes this one (it
+	// rejects with an AbortError); stage frames go first: a decode in progress steps aside for one and resumes after.
+	async filterThumbnails(
+		time: number,
+		recipe: VideoEditRecipe,
+		filters: readonly (string | null)[],
+		height: number
+	): Promise<FilterThumbnail[]> {
+		const s = current()
+		const request = ++s.thumbnailRequest
+		const isCurrent = (): boolean => session === s && s.thumbnailRequest === request && !decodingSuspended
+
+		for (;;) {
+			const release = await s.lock.acquire("background")
+
+			try {
+				if (!isCurrent()) {
+					throw new SupersededError()
+				}
+
+				const decoder = await ensureDecoder(s)
+				let frame: VideoFrame
+
+				try {
+					frame = await decoder.frameAt(time, () => isCurrent() && s.lock.waiting.interactive === 0)
+				} catch (error) {
+					// Stepped aside for a stage frame: the decoder keeps its position, and this asks again after it.
+					if (error instanceof SupersededError && isCurrent()) {
+						continue
+					}
+
+					throw error
+				}
+
+				try {
+					const thumbnails = renderThumbnails(s, frame, recipe, filters, height)
+
+					return Comlink.transfer(
+						thumbnails,
+						thumbnails.map(thumbnail => thumbnail.bitmap)
+					)
+				} finally {
+					frame.close()
+				}
+			} finally {
+				release()
+			}
 		}
 	},
 
@@ -383,7 +484,7 @@ const api = {
 
 		try {
 			for (const slot of slots) {
-				if (!s.filmstrips.has(id) || session !== s || s.suspended) {
+				if (!s.filmstrips.has(id) || session !== s || decodingSuspended) {
 					break
 				}
 
@@ -465,18 +566,14 @@ const api = {
 	},
 
 	// Another decoder needs the hardware (an export on iOS): the preview's is closed and frame requests fail until
-	// resumeDecoding().
+	// resumeDecoding(), a source opened meanwhile included.
 	suspendDecoding(): void {
-		if (session !== null) {
-			session.suspended = true
-			session.decoder?.release()
-		}
+		decodingSuspended = true
+		session?.decoder?.release()
 	},
 
 	resumeDecoding(): void {
-		if (session !== null) {
-			session.suspended = false
-		}
+		decodingSuspended = false
 	},
 
 	close(): void {

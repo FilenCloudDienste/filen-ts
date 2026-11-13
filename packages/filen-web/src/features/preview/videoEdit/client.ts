@@ -32,6 +32,66 @@ interface PreviewResource {
 
 const live = new Set<PreviewResource>()
 
+// iOS gives a tab one hardware decoder at a time: while any export runs (from any editor, or none left open), every
+// preview worker's decoder is let go, and a preview worker started meanwhile starts without one.
+let exportsHoldingDecoder = 0
+// The suspension posted to the live preview workers, which an export waits on before it decodes.
+let suspending: Promise<unknown> = Promise.resolve()
+const suspendListeners = new Set<(suspended: boolean) => void>()
+
+function decodingSuspended(): boolean {
+	return exportsHoldingDecoder > 0
+}
+
+function announceSuspended(suspended: boolean): void {
+	for (const listener of [...suspendListeners]) {
+		listener(suspended)
+	}
+}
+
+// Takes the decoder from the previews for an export (iOS only); returns the give-back, which is idempotent.
+async function handOverDecoder(ios: boolean): Promise<() => void> {
+	if (!ios) {
+		return () => undefined
+	}
+
+	exportsHoldingDecoder++
+
+	if (exportsHoldingDecoder === 1) {
+		suspending = Promise.all([...live].map(resource => resource.remote.suspendDecoding().catch(() => undefined)))
+		announceSuspended(true)
+	}
+
+	await suspending
+
+	let given = false
+
+	return () => {
+		if (given) {
+			return
+		}
+
+		given = true
+		exportsHoldingDecoder--
+
+		if (exportsHoldingDecoder === 0) {
+			for (const resource of live) {
+				void resource.remote.resumeDecoding().catch(() => undefined)
+			}
+
+			announceSuspended(false)
+		}
+	}
+}
+
+// What a frame request answers while an export holds the decoder: an AbortError, as a superseded request.
+export class DecodingSuspendedError extends Error {
+	public constructor() {
+		super("video decoding is suspended while an export runs")
+		this.name = "AbortError"
+	}
+}
+
 const previewWorker = idleResource<PreviewResource>(
 	() => {
 		const worker = new PreviewWorker({ name: "video-edit-preview" })
@@ -43,6 +103,11 @@ const previewWorker = idleResource<PreviewResource>(
 			previewWorker.invalidate(resource)
 		})
 		live.add(resource)
+
+		// Posted before anything else, so the source it opens starts suspended.
+		if (decodingSuspended()) {
+			void resource.remote.suspendDecoding().catch(() => undefined)
+		}
 
 		return resource
 	},
@@ -124,8 +189,8 @@ export function createVideoEditClient(params: VideoEditClientParams): VideoEditC
 	let saveDeps: VideoSaveDeps | null = null
 	let nextId = 1
 	const filmstrips = new Set<number>()
-	// Exports running with the preview's decoder handed over (iOS).
-	let exportsRunning = 0
+	// This client's suspension listeners, dropped on dispose.
+	const listeners = new Set<(suspended: boolean) => void>()
 
 	// The preview worker, held from the first use until dispose.
 	const remote = (): Promise<Comlink.Remote<PreviewWorkerApi>> => {
@@ -178,31 +243,6 @@ export function createVideoEditClient(params: VideoEditClientParams): VideoEditC
 		return source
 	}
 
-	// iOS gives a tab one hardware decoder at a time: the preview's goes while an export decodes, and comes back after.
-	const handOverDecoder = async (): Promise<() => void> => {
-		if (!ios) {
-			return () => undefined
-		}
-
-		exportsRunning++
-
-		if (exportsRunning === 1) {
-			await remote()
-				.then(worker => worker.suspendDecoding())
-				.catch(() => undefined)
-		}
-
-		return () => {
-			exportsRunning--
-
-			if (exportsRunning === 0 && !disposed) {
-				void remote()
-					.then(worker => worker.resumeDecoding())
-					.catch(() => undefined)
-			}
-		}
-	}
-
 	// Ends the preview; a running export is a save with its own transfer row and goes on.
 	const dispose = (): void => {
 		if (disposed) {
@@ -211,6 +251,12 @@ export function createVideoEditClient(params: VideoEditClientParams): VideoEditC
 
 		disposed = true
 		openClients.delete(dispose)
+
+		for (const listener of listeners) {
+			suspendListeners.delete(listener)
+		}
+
+		listeners.clear()
 
 		if (!held) {
 			hold.resolve(undefined)
@@ -240,16 +286,56 @@ export function createVideoEditClient(params: VideoEditClientParams): VideoEditC
 	return {
 		loadSource,
 
+		// While an export holds the decoder (iOS), frame requests are answered here, never posted.
 		frameAt: async (time, recipe, maxWidth) => {
 			await loadSource()
+
+			if (decodingSuspended()) {
+				throw new DecodingSuspendedError()
+			}
 
 			return await (await remote()).frameAt(time, recipe, maxWidth)
 		},
 
+		filterThumbnails: async (time, recipe, filters, height) => {
+			await loadSource()
+
+			if (decodingSuspended()) {
+				throw new DecodingSuspendedError()
+			}
+
+			return await (await remote()).filterThumbnails(time, recipe, filters, height)
+		},
+
+		isDecodingSuspended: decodingSuspended,
+
+		onDecodingSuspendedChange: listener => {
+			if (disposed) {
+				return () => undefined
+			}
+
+			// Its own entry, so one listener added twice is removed once per subscription.
+			const entry = (suspended: boolean): void => {
+				listener(suspended)
+			}
+
+			listeners.add(entry)
+			suspendListeners.add(entry)
+
+			return () => {
+				listeners.delete(entry)
+				suspendListeners.delete(entry)
+			}
+		},
+
 		// A newer filmstrip request supersedes the ones still running: they stop at their next still and resolve with
-		// what they made.
+		// what they made. None while an export holds the decoder (iOS).
 		filmstrip: async (times, height) => {
 			await loadSource()
+
+			if (decodingSuspended()) {
+				return []
+			}
 
 			const id = nextId++
 			const worker = await remote()
@@ -308,6 +394,7 @@ export function createVideoEditClient(params: VideoEditClientParams): VideoEditC
 				cancelled: false,
 				detached: false
 			}
+			const cancelledNow = (): boolean => run.cancelled
 			const done = (async (): Promise<VideoSaveOutcome> => {
 				const info = await loadSource()
 
@@ -315,9 +402,14 @@ export function createVideoEditClient(params: VideoEditClientParams): VideoEditC
 					return { status: "cancelled" }
 				}
 
-				const giveBack = await handOverDecoder()
+				const giveBack = await handOverDecoder(ios)
 
 				try {
+					// Cancelled while the decoder was handed over (read through a call: cancel() set it across the await).
+					if (cancelledNow()) {
+						return { status: "cancelled" }
+					}
+
 					const handle = startVideoSave(deps(), { item, recipe, info, target, copySuffix }, onProgress)
 
 					run.handle = handle
