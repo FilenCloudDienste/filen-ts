@@ -675,7 +675,7 @@ function analyse(
 	if (source.hasSubtitles) dropped.push("subtitles")
 	if (source.hasChapters) dropped.push("chapters")
 	if (!recipe.audio.mute && audioTracks.length < source.audio.length) dropped.push("extraAudio")
-	if (hdr === "toSdr") dropped.push("hdrMetadata")
+	// A tone map to SDR is told by `hdr` itself ("toSdr"), never as a drop too.
 	if (recipe.removeLocation && source.hasLocation) dropped.push("location")
 
 	const ranges = mode === "copy" ? snappedCopy.ranges : exactRanges(recipe.keep, source.duration)

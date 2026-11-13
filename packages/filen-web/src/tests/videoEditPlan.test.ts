@@ -404,7 +404,7 @@ describe("planExport HDR", () => {
 		expect(planExport(recipeFor(60, { output: { resolution: 1080, quality: "medium" } }), hlg, ALL_ENCODERS).dropped).toEqual([])
 	})
 
-	it("tone-maps to SDR with a notice for any pixel edit, or without a 10-bit encoder", () => {
+	it("tone-maps to SDR for any pixel edit, or without a 10-bit encoder", () => {
 		for (const overrides of [
 			{ flipH: true },
 			{ filter: "vivid" },
@@ -414,7 +414,8 @@ describe("planExport HDR", () => {
 			const plan = planExport(recipeFor(60, overrides), hlg, ALL_ENCODERS)
 
 			expect(plan.hdr).toBe("toSdr")
-			expect(plan.dropped).toContain("hdrMetadata")
+			// Told once, by `hdr`; not as a drop as well.
+			expect(plan.dropped).not.toContain("hdrMetadata")
 			expect(plan.blockers).toEqual([])
 		}
 
