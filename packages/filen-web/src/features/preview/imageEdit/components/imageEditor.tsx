@@ -564,12 +564,15 @@ export function ImageEditor(props: ImageEditorProps) {
 				<div className="min-h-0 flex-1 px-4 pt-2 pb-16 sm:px-6 sm:pt-4 sm:pb-18">
 					<div
 						ref={stageRef}
-						role="img"
-						aria-label={t("previewImageEditCanvas")}
+						role="group"
+						aria-label={t("previewImageEditStageArea")}
 						className="relative size-full"
 					>
+						{/* The picture alone is the image; the crop frame and markup over it stay reachable. */}
 						<div
 							ref={slotRef}
+							role="img"
+							aria-label={t("previewImageEditCanvas")}
 							className="absolute inset-0 touch-none"
 							onPointerDown={event => {
 								if (pressCompares && event.button === 0 && loaded !== null) {

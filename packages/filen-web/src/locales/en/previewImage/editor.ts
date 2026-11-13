@@ -3,6 +3,8 @@
 export const previewImageEditor = {
 	/** Image editor — accessible name of the edited picture (the canvas showing the result) */
 	previewImageEditCanvas: "Edited image",
+	/** Image editor — accessible name of the area around the edited picture (holds the crop frame and markup) */
+	previewImageEditStageArea: "Image editing area",
 	/** Image editor — the image could not be prepared for editing (decoding or the graphics setup failed) */
 	previewImageEditLoadFailed: "This image couldn't be opened for editing.",
 	/** Image editor — accessible name of the panel holding the editing tools (tabs Adjust, Crop, Filters, Markup) */
