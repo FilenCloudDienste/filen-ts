@@ -25,6 +25,8 @@ import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
 import type { Adjustments, AspectPreset, ImageEditRecipe, MarkupColor } from "@/features/preview/imageEdit/types"
 import { FILTER_PRESETS } from "@/features/preview/imageEdit/lib/filters"
 import { EditSlider } from "@/features/preview/imageEdit/components/editSlider"
+import { Chip, FilterThumbnail, FilterTile, Section, TurnButton } from "@/features/preview/components/editPanelParts"
+import { editTabClass, editTabIds } from "@/features/preview/components/editPanelTabs"
 import { MARKUP_COLORS, type MarkupTool, type MarkupWidth } from "@/features/preview/imageEdit/components/markupStyle"
 import type { NamespaceKey } from "@/lib/i18n"
 
@@ -115,24 +117,6 @@ const SEGMENT_CLASS = "flex-1 rounded-full"
 const SEGMENT_ON_CLASS = "bg-background text-foreground shadow-sm ring-1 ring-border hover:bg-background"
 const SEGMENT_OFF_CLASS = "text-muted-foreground hover:bg-muted"
 
-// The ids tab and panel share.
-function tabIds(base: string, tab: EditTab): { tab: string; panel: string } {
-	return { tab: `${base}-tab-${tab}`, panel: `${base}-panel-${tab}` }
-}
-
-function Section(props: { label: string; children: ReactNode }) {
-	return (
-		<div
-			role="group"
-			aria-label={props.label}
-			className="flex flex-col gap-2.5"
-		>
-			<span className="text-xs font-medium text-muted-foreground">{props.label}</span>
-			{props.children}
-		</div>
-	)
-}
-
 // A collapsible group of Adjust sliders. Its header marks a group with any slider off zero and offers to zero them;
 // the reset keeps its place while hidden so the header never reflows.
 function AdjustSection(props: {
@@ -181,28 +165,6 @@ function AdjustSection(props: {
 	)
 }
 
-// A filter's thumbnail, drawn from its bitmap (owned and closed by the editor).
-function FilterThumbnail(props: { bitmap: ImageBitmap | undefined }) {
-	return (
-		<canvas
-			aria-hidden="true"
-			className="block aspect-square w-full bg-muted object-cover"
-			ref={canvas => {
-				const bitmap = props.bitmap
-
-				// A closed bitmap (replaced while this render was in flight) reads 0 wide.
-				if (canvas === null || bitmap === undefined || bitmap.width === 0) {
-					return
-				}
-
-				canvas.width = bitmap.width
-				canvas.height = bitmap.height
-				canvas.getContext("2d")?.drawImage(bitmap, 0, 0)
-			}}
-		/>
-	)
-}
-
 export interface EditPanelProps {
 	idBase: string
 	tab: EditTab
@@ -248,11 +210,11 @@ export function ImageEditPanel(props: EditPanelProps) {
 
 		if (next !== undefined) {
 			props.onTab(next.id)
-			document.getElementById(tabIds(props.idBase, next.id).tab)?.focus()
+			document.getElementById(editTabIds(props.idBase, next.id).tab)?.focus()
 		}
 	}
 
-	const ids = tabIds(props.idBase, props.tab)
+	const ids = editTabIds(props.idBase, props.tab)
 
 	return (
 		<div className="flex min-h-0 flex-1 flex-col">
@@ -269,17 +231,12 @@ export function ImageEditPanel(props: EditPanelProps) {
 						<button
 							key={tab.id}
 							type="button"
-							id={tabIds(props.idBase, tab.id).tab}
+							id={editTabIds(props.idBase, tab.id).tab}
 							role="tab"
 							aria-selected={selected}
-							aria-controls={tabIds(props.idBase, tab.id).panel}
+							aria-controls={editTabIds(props.idBase, tab.id).panel}
 							tabIndex={selected ? 0 : -1}
-							className={cn(
-								"flex h-8 min-w-0 items-center justify-center gap-1.5 rounded-full px-2 text-xs font-medium transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/30 motion-reduce:transition-none sm:h-auto sm:flex-col sm:gap-0.5 sm:rounded-xl sm:py-1.5 sm:text-[11px] [&_svg]:size-4 [&_svg]:shrink-0",
-								selected
-									? "bg-background text-foreground shadow-sm ring-1 ring-border"
-									: "text-muted-foreground hover:text-foreground"
-							)}
+							className={editTabClass(selected, false)}
 							onClick={() => {
 								props.onTab(tab.id)
 							}}
@@ -360,22 +317,15 @@ export function ImageEditPanel(props: EditPanelProps) {
 									const selected = geometry.aspect === id
 
 									return (
-										<button
+										<Chip
 											key={id}
-											type="button"
-											aria-pressed={selected}
-											className={cn(
-												"h-7 rounded-full px-3 text-xs font-medium tabular-nums transition-colors outline-none focus-visible:ring-3 focus-visible:ring-ring/30 motion-reduce:transition-none",
-												selected
-													? "bg-primary text-primary-foreground"
-													: "bg-muted text-muted-foreground hover:bg-accent hover:text-foreground"
-											)}
+											selected={selected}
 											onClick={() => {
 												props.onAspect(id)
 											}}
 										>
 											{labelKey === null ? id : t(labelKey)}
-										</button>
+										</Chip>
 									)
 								})}
 							</div>
@@ -440,7 +390,7 @@ export function ImageEditPanel(props: EditPanelProps) {
 						{FILTER_PRESETS.map((preset, index) => (
 							<FilterTile
 								key={preset.id}
-								label={t(preset.labelKey as PreviewKey)}
+								label={t(preset.labelKey)}
 								selected={props.recipe.filter === preset.id}
 								onClick={() => {
 									props.onFilter(preset.id)
@@ -528,42 +478,5 @@ export function ImageEditPanel(props: EditPanelProps) {
 				) : null}
 			</div>
 		</div>
-	)
-}
-
-// Rotate and flip: an icon over its name.
-function TurnButton(props: { label: string; icon: ReactNode; onClick: () => void }) {
-	return (
-		<button
-			type="button"
-			className="flex min-w-0 flex-col items-center gap-1.5 rounded-xl bg-muted px-1 py-2.5 text-center text-[11px] leading-tight text-muted-foreground transition-colors outline-none hover:bg-accent hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/30 active:translate-y-px motion-reduce:transition-none [&_svg]:size-4.5 [&_svg]:shrink-0"
-			onClick={props.onClick}
-		>
-			{props.icon}
-			{props.label}
-		</button>
-	)
-}
-
-function FilterTile(props: { label: string; selected: boolean; onClick: () => void; children: ReactNode }) {
-	return (
-		<button
-			type="button"
-			aria-pressed={props.selected}
-			className="group/tile flex min-w-0 flex-col items-center gap-1.5 text-xs outline-none"
-			onClick={props.onClick}
-		>
-			<span
-				className={cn(
-					"block w-full overflow-hidden rounded-xl ring-offset-2 ring-offset-background transition-shadow group-focus-visible/tile:outline-2 group-focus-visible/tile:outline-offset-4 group-focus-visible/tile:outline-ring motion-reduce:transition-none",
-					props.selected ? "ring-2 ring-primary" : "ring-1 ring-border group-hover/tile:ring-foreground/40"
-				)}
-			>
-				{props.children}
-			</span>
-			<span className={cn("w-full truncate text-center", props.selected ? "font-medium text-foreground" : "text-muted-foreground")}>
-				{props.label}
-			</span>
-		</button>
 	)
 }

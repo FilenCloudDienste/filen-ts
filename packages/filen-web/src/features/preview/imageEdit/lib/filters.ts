@@ -1,9 +1,10 @@
 import type { Adjustments, ImageEditRecipe } from "@/features/preview/imageEdit/types"
+import type { NamespaceKey } from "@/lib/i18n"
 
 // A filter is a set of adjustment offsets added on top of the user's own sliders, so picking one never moves them.
 export interface FilterPreset {
 	id: string
-	labelKey: string
+	labelKey: NamespaceKey<"preview">
 	adjustments: Partial<Adjustments>
 }
 
