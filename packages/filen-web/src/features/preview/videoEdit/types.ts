@@ -84,7 +84,7 @@ export type ExportContainer = "mp4" | "mov"
 export type VideoSaveTarget = "inPlace" | "copy"
 
 // What the export will drop, for the Save popover.
-export type ExportDrop = "subtitles" | "chapters" | "extraAudio" | "hdrMetadata" | "location"
+export type ExportDrop = "subtitles" | "chapters" | "extraAudio" | "location"
 
 export interface SnappedEdge {
 	requested: number

@@ -414,8 +414,6 @@ describe("planExport HDR", () => {
 			const plan = planExport(recipeFor(60, overrides), hlg, ALL_ENCODERS)
 
 			expect(plan.hdr).toBe("toSdr")
-			// Told once, by `hdr`; not as a drop as well.
-			expect(plan.dropped).not.toContain("hdrMetadata")
 			expect(plan.blockers).toEqual([])
 		}
 
