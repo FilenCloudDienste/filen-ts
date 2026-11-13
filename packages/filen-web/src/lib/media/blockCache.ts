@@ -98,6 +98,43 @@ export class BlockCache {
 		return this.resident.has(Math.floor(position / BLOCK_BYTES))
 	}
 
+	// Bytes [start, end) when every block they span is resident, else null. Never downloads and is no access: no
+	// read-ahead, no change to the eviction order. For a tap that may use only what other readers fetched (a
+	// progressive waveform). A range inside one block is a view; across blocks, a copy.
+	public peek(start: number, end: number): Uint8Array | null {
+		const [first, last] = this.span(start, end)
+
+		for (let index = first; index <= last; index++) {
+			if (!this.resident.has(index)) {
+				return null
+			}
+		}
+
+		if (first === last) {
+			const offset = first * BLOCK_BYTES
+
+			return this.resident.get(first)?.subarray(start - offset, end - offset) ?? null
+		}
+
+		const out = new Uint8Array(end - start)
+
+		for (let index = first; index <= last; index++) {
+			const bytes = this.resident.get(index)
+			const offset = index * BLOCK_BYTES
+
+			if (bytes === undefined) {
+				return null
+			}
+
+			const from = Math.max(start, offset)
+			const to = Math.min(end, offset + bytes.length)
+
+			out.set(bytes.subarray(from - offset, to - offset), from - start)
+		}
+
+		return out
+	}
+
 	// Bytes [start, end). Synchronous when every block is resident, so a parser stepping through a block
 	// it already holds never waits a microtask; a range inside one block is a view, not a copy.
 	public read(start: number, end: number): Uint8Array | Promise<Uint8Array> {

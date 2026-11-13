@@ -105,6 +105,34 @@ describe("BlockCache", () => {
 		expect(requests).toHaveLength(1)
 	})
 
+	it("peeks at resident blocks only, without downloading, read-ahead or a change to the eviction order", async () => {
+		const { cache, requests } = harness({ blocks: 6, capacity: 2, readAhead: 2 })
+
+		expect(cache.peek(0, 10)).toBeNull()
+		expect(requests).toHaveLength(0)
+
+		await cache.read(0, 10)
+		await cache.read(BLOCK_BYTES, BLOCK_BYTES + 10)
+
+		expect(cache.peek(5, 50)).toEqual(expected(5, 50))
+		expect(same(cache.peek(BLOCK_BYTES - 7, BLOCK_BYTES + 7) ?? new Uint8Array(), expected(BLOCK_BYTES - 7, BLOCK_BYTES + 7))).toBe(
+			true
+		)
+		expect(cache.peek(BLOCK_BYTES - 7, 2 * BLOCK_BYTES + 7)).toBeNull()
+
+		// Peeking at block 0 did not make it the most recent: the next block evicts it.
+		cache.peek(0, 10)
+		await new Promise(resolve => setTimeout(resolve, 0))
+
+		const before = requests.length
+
+		await cache.read(3 * BLOCK_BYTES, 3 * BLOCK_BYTES + 10)
+
+		expect(cache.isResident(0)).toBe(false)
+		expect(cache.isResident(BLOCK_BYTES)).toBe(true)
+		expect(requests.length).toBe(before + 1)
+	})
+
 	it("downloads a block once however many readers want it at the same time", async () => {
 		const { cache, requests, flush } = harness({ blocks: 2, manual: true })
 		const reads = [cache.read(0, 10), cache.read(20, 30), cache.read(BLOCK_BYTES - 5, BLOCK_BYTES)]
