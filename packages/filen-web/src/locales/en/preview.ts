@@ -35,6 +35,7 @@ import { previewPptxShow } from "@/locales/en/previewPptx/show"
 import { previewPptxExport } from "@/locales/en/previewPptx/export"
 import { previewImageEditor } from "@/locales/en/previewImage/editor"
 import { previewImageSave } from "@/locales/en/previewImage/save"
+import { previewVideoEditKeys } from "@/locales/en/previewVideoEdit/keys"
 import { previewPptxPresenter } from "@/locales/en/previewPptx/presenter"
 import { previewPptxInk } from "@/locales/en/previewPptx/ink"
 import { previewPptxSmartArt } from "@/locales/en/previewPptx/smartart"
@@ -814,5 +815,6 @@ export const preview = {
 	...previewSheetShortcuts,
 	...previewImageEditor,
 	...previewImageSave,
+	...previewVideoEditKeys,
 	...previewKeysShortcuts
 } as const

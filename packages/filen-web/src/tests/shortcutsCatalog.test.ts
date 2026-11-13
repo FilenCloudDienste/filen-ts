@@ -114,6 +114,7 @@ describe("shortcut section metadata", () => {
 	const ALL_SECTIONS: readonly ShortcutSection[] = [
 		"viewer",
 		"imageEditor",
+		"videoEditor",
 		"code",
 		"presentation",
 		"presentationObjects",

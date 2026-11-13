@@ -217,6 +217,71 @@ export const IMAGE_EDITOR_ACTIONS: readonly Def<ImageEditorAction>[] = [
 	imageEditorAction("preview.imageToolEraser", "", "preview:previewKeyImageToolEraser")
 ]
 
+// The video editor's keys, matched on its own keydown and in its layer (videoEditor.tsx; its trim handles take their own
+// arrows, its fields their typing): Space plays, the arrows step a frame (Shift a second), Home and End go to the ends,
+// I and O mark the selection's in and out, J/K/L shuttle as in every editing suite (J goes back a second: a browser
+// cannot play backwards), S splits the timeline at the playhead, Delete takes the selection out, Shift+L loops it,
+// Mod+=/−/0 zoom the timeline, Escape leaves without saving and Mod+Shift+S saves a copy. Mod+S is preview.save, which
+// the overlay hands to the editor.
+export type VideoEditorAction =
+	| "preview.videoUndo"
+	| "preview.videoRedo"
+	| "preview.videoSaveCopy"
+	| "preview.videoCancel"
+	| "preview.videoPlayPause"
+	| "preview.videoShuttleBack"
+	| "preview.videoShuttlePause"
+	| "preview.videoShuttleForward"
+	| "preview.videoFrameBack"
+	| "preview.videoFrameForward"
+	| "preview.videoSecondBack"
+	| "preview.videoSecondForward"
+	| "preview.videoToStart"
+	| "preview.videoToEnd"
+	| "preview.videoSetIn"
+	| "preview.videoSetOut"
+	| "preview.videoSplit"
+	| "preview.videoRemoveSection"
+	| "preview.videoLoop"
+	| "preview.videoZoomIn"
+	| "preview.videoZoomOut"
+	| "preview.videoZoomFit"
+	| "preview.videoSaveFrame"
+
+function videoEditorAction(
+	id: VideoEditorAction,
+	defaultCombo: string,
+	descriptionKey: ActionDef["descriptionKey"]
+): Def<VideoEditorAction> {
+	return { id, defaultCombo, scope: "editor", section: "videoEditor", descriptionKey }
+}
+
+export const VIDEO_EDITOR_ACTIONS: readonly Def<VideoEditorAction>[] = [
+	videoEditorAction("preview.videoUndo", "mod+z", "preview:previewVideoEditKeyUndo"),
+	videoEditorAction("preview.videoRedo", "mod+y,mod+shift+z", "preview:previewVideoEditKeyRedo"),
+	videoEditorAction("preview.videoSaveCopy", "mod+shift+s", "preview:previewVideoEditKeySaveCopy"),
+	videoEditorAction("preview.videoCancel", "escape", "preview:previewVideoEditKeyCancel"),
+	videoEditorAction("preview.videoPlayPause", "space", "preview:previewVideoEditKeyPlayPause"),
+	videoEditorAction("preview.videoShuttleBack", "j", "preview:previewVideoEditKeyShuttleBack"),
+	videoEditorAction("preview.videoShuttlePause", "k", "preview:previewVideoEditKeyShuttlePause"),
+	videoEditorAction("preview.videoShuttleForward", "l", "preview:previewVideoEditKeyShuttleForward"),
+	videoEditorAction("preview.videoFrameBack", "arrowleft", "preview:previewVideoEditKeyFrameBack"),
+	videoEditorAction("preview.videoFrameForward", "arrowright", "preview:previewVideoEditKeyFrameForward"),
+	videoEditorAction("preview.videoSecondBack", "shift+arrowleft", "preview:previewVideoEditKeySecondBack"),
+	videoEditorAction("preview.videoSecondForward", "shift+arrowright", "preview:previewVideoEditKeySecondForward"),
+	videoEditorAction("preview.videoToStart", "home", "preview:previewVideoEditKeyToStart"),
+	videoEditorAction("preview.videoToEnd", "end", "preview:previewVideoEditKeyToEnd"),
+	videoEditorAction("preview.videoSetIn", "i", "preview:previewVideoEditKeySetIn"),
+	videoEditorAction("preview.videoSetOut", "o", "preview:previewVideoEditKeySetOut"),
+	videoEditorAction("preview.videoSplit", "s", "preview:previewVideoEditKeySplit"),
+	videoEditorAction("preview.videoRemoveSection", "delete,backspace", "preview:previewVideoEditKeyRemoveSection"),
+	videoEditorAction("preview.videoLoop", "shift+l", "preview:previewVideoEditKeyLoop"),
+	videoEditorAction("preview.videoZoomIn", "mod+equal,mod+shift+equal,mod+add", "preview:previewVideoEditKeyZoomIn"),
+	videoEditorAction("preview.videoZoomOut", "mod+minus,mod+subtract", "preview:previewVideoEditKeyZoomOut"),
+	videoEditorAction("preview.videoZoomFit", "mod+0", "preview:previewVideoEditKeyZoomFit"),
+	videoEditorAction("preview.videoSaveFrame", "", "preview:previewVideoEditKeySaveFrame")
+]
+
 function codeAction(id: string, defaultCombo: string, descriptionKey: ActionDef["descriptionKey"], extra?: Partial<ActionDef>): ActionDef {
 	return { id, defaultCombo, scope: "editor", section: "code", descriptionKey, ...extra }
 }
@@ -315,6 +380,7 @@ export const PREVIEW_ACTIONS: readonly ActionDef[] = [
 	},
 	...PDF_VIEWER_ACTIONS,
 	...IMAGE_EDITOR_ACTIONS,
+	...VIDEO_EDITOR_ACTIONS,
 	...PREVIEW_OVERLAY_ACTIONS,
 	...IMAGE_VIEWER_ACTIONS,
 	...CODE_EDITOR_ACTIONS

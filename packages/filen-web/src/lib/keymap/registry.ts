@@ -49,6 +49,7 @@ export type ActionScope =
 export type ShortcutSection =
 	| "viewer"
 	| "imageEditor"
+	| "videoEditor"
 	| "code"
 	| "presentation"
 	| "presentationObjects"

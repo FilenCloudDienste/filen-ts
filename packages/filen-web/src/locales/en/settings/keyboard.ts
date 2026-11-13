@@ -83,6 +83,8 @@ export const settingsKeyboard = {
 	keyboardSectionViewer: "PDF & image viewer",
 	/** Shortcuts list — sub-group of the Editor group: editing an image */
 	keyboardSectionImageEditor: "Image editor",
+	/** Shortcuts list — sub-group of the Editor group: editing a video */
+	keyboardSectionVideoEditor: "Video editor",
 	/** Shortcuts list — sub-group of the Editor group: code and Markdown files and notes */
 	keyboardSectionCode: "Code & Markdown",
 	/** Shortcuts list — sub-group of the Editor group: the presentation editor's slides */

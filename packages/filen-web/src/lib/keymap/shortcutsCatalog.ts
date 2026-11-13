@@ -69,6 +69,7 @@ export const SHORTCUT_SECTION_ORDER: readonly ShortcutSection[] = [
 	"code",
 	"viewer",
 	"imageEditor",
+	"videoEditor",
 	"word",
 	"sheet",
 	"presentation",
@@ -81,6 +82,7 @@ export const SHORTCUT_SECTION_ORDER: readonly ShortcutSection[] = [
 export const SHORTCUT_SECTION_LABEL_KEYS: Record<ShortcutSection, SettingsKey> = {
 	viewer: "keyboardSectionViewer",
 	imageEditor: "keyboardSectionImageEditor",
+	videoEditor: "keyboardSectionVideoEditor",
 	code: "keyboardSectionCode",
 	presentation: "keyboardSectionPresentation",
 	presentationObjects: "keyboardSectionPresentationObjects",
