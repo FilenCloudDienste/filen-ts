@@ -39,7 +39,7 @@ import { startDownloads } from "@/features/drive/lib/download"
 import {
 	canEditImage,
 	canSaveCopyBeside,
-	imageSaveTimes,
+	editedSaveTimes,
 	isEditable,
 	isTextCategory,
 	isUnresolvableParentError,
@@ -2182,7 +2182,7 @@ async function writeImageInPlace(
 		return null
 	}
 
-	const times = imageSaveTimes(item, Date.now())
+	const times = editedSaveTimes(item, Date.now())
 	const deps = imageSaveDeps()
 
 	if (exported.geometryOnly !== null) {
@@ -2238,7 +2238,7 @@ async function writeImageCopy(
 		content: { blob },
 		asNewFile: name,
 		mime: "",
-		times: imageSaveTimes(item, Date.now())
+		times: editedSaveTimes(item, Date.now())
 	})
 
 	return { outcome, name }

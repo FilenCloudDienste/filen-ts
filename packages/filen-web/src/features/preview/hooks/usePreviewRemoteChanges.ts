@@ -6,7 +6,7 @@ import { conflictCopyName, decideRevision, driveItemName } from "@filen/shared"
 import { asDirectoryOrFile, narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { type DriveVariant } from "@/features/drive/lib/preferences"
 import {
-	imageSaveTimes,
+	editedSaveTimes,
 	runPreviewSave,
 	type ImageSaveEdits,
 	type PresentationSaveEdits,
@@ -481,7 +481,7 @@ async function writeAsNewFile(
 		: content.kind === "port"
 			? await uploadDeckCopy(item, content, name, rootUuid)
 			: await uploadCopy(item, { blob: content.blob }, name, rootUuid, {
-					times: imageSaveTimes(item, Date.now()),
+					times: editedSaveTimes(item, Date.now()),
 					...(extension === null ? {} : { mime: "" })
 				})
 

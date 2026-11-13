@@ -120,7 +120,8 @@ export function isTextCategory(category: PreviewCategory): boolean {
 // global fan-out variant: a save never changes the item's parent, so exactly one listing can ever gain
 // or lose a row from it — the single-parent patch is the one that can never leak a phantom row into an
 // unrelated, already-cached listing (see upsertDriveItem's own unconditional-append behavior).
-// The new file's times, and that the image's own Exif dates must not replace them.
+// The new file's times, and that the file's own embedded dates (an image's Exif, a video's metadata) must not replace
+// them.
 export interface UploadTimes {
 	created?: bigint
 	modified?: bigint
@@ -188,7 +189,7 @@ export type PreviewSaveContent =
 	| { readonly blob: Blob }
 	| { readonly orientation: Orientation }
 
-// `times`: the new file's (an edited image keeps the original's creation time; its Exif never overrides them).
+// `times`: the new file's (an edited file keeps the original's creation time; its embedded dates never override them).
 // `mime`: instead of the file's own, "" letting the SDK take it from the name (a copy in another format).
 export async function runPreviewSave(
 	deps: PreviewSaveDeps,
@@ -315,9 +316,10 @@ export interface ImageSaveEdits {
 	readonly extension: string | null
 }
 
-// The times an edited image is saved with, as a new version or a copy: created stays the original's (its own, else
-// the capture time the Photos timeline sorts it by), modified is now.
-export function imageSaveTimes(item: DriveItem, now: number): { created: bigint; modified: bigint } {
+// The times an edited file (an image, a video) is saved with, as a new version or a copy: created stays the
+// original's (its own, else the capture time the Photos timeline sorts it by), modified is now. Passed as
+// runPreviewSave's `times`, which also keeps the edit's embedded dates (an encoder's "now") from replacing them.
+export function editedSaveTimes(item: DriveItem, now: number): { created: bigint; modified: bigint } {
 	const modified = BigInt(Math.floor(now))
 
 	if (item.type !== "file") {

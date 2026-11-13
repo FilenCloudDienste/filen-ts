@@ -3,7 +3,7 @@ import type { File as SdkFile } from "@filen/sdk-rs"
 import {
 	canEditImage,
 	canSaveCopyBeside,
-	imageSaveTimes,
+	editedSaveTimes,
 	isEditable,
 	isUnresolvableParentError,
 	runPreviewSave,
@@ -243,7 +243,7 @@ describe("canEditImage", () => {
 	})
 })
 
-describe("imageSaveTimes", () => {
+describe("editedSaveTimes", () => {
 	it("keeps the original's own creation time and stamps modified now", () => {
 		const item = fileItem({
 			meta: {
@@ -260,12 +260,31 @@ describe("imageSaveTimes", () => {
 			}
 		})
 
-		expect(imageSaveTimes(item, 1_800_000_000_000.7)).toEqual({ created: 1_600_000_000_000n, modified: 1_800_000_000_000n })
+		expect(editedSaveTimes(item, 1_800_000_000_000.7)).toEqual({ created: 1_600_000_000_000n, modified: 1_800_000_000_000n })
+	})
+
+	it("keeps an edited video's creation time the same way", () => {
+		const item = fileItem({
+			meta: {
+				type: "decoded",
+				data: {
+					name: "clip.mp4",
+					mime: "video/mp4",
+					created: 1_500_000_000_000n,
+					modified: 1_550_000_000_000n,
+					size: 1n,
+					key: "k",
+					version: 2
+				}
+			}
+		})
+
+		expect(editedSaveTimes(item, 1_800_000_000_000)).toEqual({ created: 1_500_000_000_000n, modified: 1_800_000_000_000n })
 	})
 
 	it("falls back to the capture time the Photos timeline sorts by when the file has none", () => {
 		const item = fileItem({ timestamp: 1_700_000_000_000n, meta: byMime("a.jpg", "image/jpeg") })
-		const { created } = imageSaveTimes(item, 1_800_000_000_000)
+		const { created } = editedSaveTimes(item, 1_800_000_000_000)
 
 		expect(created).toBeLessThanOrEqual(1_700_000_000_000n)
 		expect(created).toBeGreaterThan(0n)
