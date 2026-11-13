@@ -303,10 +303,17 @@ export function VideoEditor(props: VideoEditorProps) {
 
 	// The time read-out follows the playhead directly; while playing, a zoomed timeline pages along with it.
 	useEffect(() => {
-		return playback.subscribe(time => {
+		// Written here only, never by a render: a render would put back a stale text node.
+		const showTime = (time: number): void => {
 			if (timecodeRef.current !== null) {
 				timecodeRef.current.textContent = `${formatTimecode(time)} / ${formatTimecode(duration)}`
 			}
+		}
+
+		showTime(playback.time)
+
+		return playback.subscribe(time => {
+			showTime(time)
 
 			if (!playback.paused) {
 				const current = latestView.current
@@ -961,9 +968,7 @@ export function VideoEditor(props: VideoEditorProps) {
 								role="timer"
 								aria-label={t("previewVideoEditPosition")}
 								className="ml-2 shrink-0 font-mono text-xs text-muted-foreground tabular-nums"
-							>
-								{`${formatTimecode(settledTime)} / ${formatTimecode(duration)}`}
-							</span>
+							/>
 							<span className="flex-1" />
 							<TooltipIconButton
 								label={t("previewVideoEditSplit")}
