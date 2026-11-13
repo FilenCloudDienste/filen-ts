@@ -5,7 +5,7 @@ import { BlockSource, indexedKeyframeTimes, type VideoProbe } from "@filen/share
 import { openBlockInput, type BlockInput } from "@/lib/media/blockInput"
 import { createFramePipeline, type FramePipeline } from "@/features/preview/videoEdit/gl/pipeline"
 import { fitWidth } from "@/features/preview/videoEdit/gl/pipeline.logic"
-import { outputGeometry, sourceToOutputTime } from "@/features/preview/videoEdit/lib/plan"
+import { outputGeometry, sourceFrame, sourceToOutputTime } from "@/features/preview/videoEdit/lib/plan"
 import { FRAME_BATCH_MAX_FRAMES } from "@/features/videos/lib/frameBatch.logic"
 import { GopDecoder, SupersededError } from "@/features/preview/videoEdit/worker/gopDecoder"
 import { WaveformTap } from "@/features/preview/videoEdit/worker/waveform"
@@ -188,8 +188,11 @@ async function demuxedFacts(block: BlockInput, probe: VideoProbe | null): Promis
 function ensurePipeline(s: Session): FramePipeline {
 	if (s.pipeline === null) {
 		s.canvas = new OffscreenCanvas(1, 1)
+		const frame = sourceFrame(s.info)
+
 		s.pipeline = createFramePipeline(s.canvas, {
 			sourceRotation: s.info.rotation,
+			naturalSize: { width: frame.squareWidth, height: frame.squareHeight },
 			...(s.info.transfer === "sdr" ? {} : { sourceTransfer: s.info.transfer })
 		})
 	}

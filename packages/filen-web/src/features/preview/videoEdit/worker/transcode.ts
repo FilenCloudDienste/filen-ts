@@ -108,7 +108,21 @@ export function createFrameStage(params: {
 		}
 	}
 
-	return frame => Promise.resolve(frame)
+	// The square-pixel size the frame shows at: an anamorphic source keeps its pixel aspect ratio (WebKit's decoder
+	// reports the coded size as the display size).
+	const { squareWidth, squareHeight } = geometry
+
+	return frame => {
+		if (frame.displayWidth === squareWidth && frame.displayHeight === squareHeight) {
+			return Promise.resolve(frame)
+		}
+
+		try {
+			return Promise.resolve(new VideoFrame(frame, { displayWidth: squareWidth, displayHeight: squareHeight }))
+		} finally {
+			frame.close()
+		}
+	}
 }
 
 // Decoded frames of a range, in presentation order (mediabunny VideoSampleSink.samples).

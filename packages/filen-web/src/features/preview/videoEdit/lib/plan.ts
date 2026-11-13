@@ -91,6 +91,9 @@ export interface OutputGeometry {
 	// The same rectangle in the unrotated frame's square pixels (what a decoded VideoFrame's display size measures):
 	// the GPU pass's crop. Null exactly when codedCrop is.
 	squareCrop: VideoCrop | null
+	// The unrotated source picture in square pixels (what codedWidth × codedHeight shows as).
+	squareWidth: number
+	squareHeight: number
 	// Source rotation plus the recipe's, clockwise: what a path that leaves pixels unrotated writes as metadata.
 	rotation: VideoRotation
 }
@@ -221,6 +224,8 @@ export function outputGeometry(recipe: VideoEditRecipe, source: VideoSourceInfo)
 		codedHeight: frame.codedHeight,
 		codedCrop,
 		squareCrop,
+		squareWidth: frame.squareWidth,
+		squareHeight: frame.squareHeight,
 		rotation: ((source.rotation + recipe.rotate) % 360) as VideoRotation
 	}
 }

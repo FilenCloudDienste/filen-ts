@@ -127,6 +127,18 @@ describe("frame stages", () => {
 		expect([output.displayWidth, output.displayHeight]).toEqual([399, 480])
 	})
 
+	it("labels a whole anamorphic frame with its square-pixel size where the decoder reports the coded one", async () => {
+		const anamorphic = sourceInfo({ width: 854, height: 480, codedWidth: 720, codedHeight: 480 })
+		const recipe = recipeFor(60)
+		const stage = createFrameStage({ kind: "pass", recipe, geometry: outputGeometry(recipe, anamorphic), hdr: null, pipeline: null })
+		const input = new FakeVideoFrame({ width: 720, height: 480, timestamp: 0 }) as unknown as VideoFrame
+		const output = (await stage(input, 0)) as unknown as FakeVideoFrame
+
+		expect([output.displayWidth, output.displayHeight]).toEqual([854, 480])
+		expect(output.visibleRect).toEqual({ x: 0, y: 0, width: 720, height: 480 })
+		expect((input as unknown as FakeVideoFrame).closed).toBe(true)
+	})
+
 	it("never sends kept HDR through the GPU pass", () => {
 		const recipe = recipeFor(60, { flipH: true })
 		const pipeline: FramePipelineLike = { renderAsync: vi.fn(), needsGpu: () => true, dispose: vi.fn() }

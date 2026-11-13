@@ -7,7 +7,7 @@ import type { RemuxStats } from "@/lib/media/remuxTypes"
 import { containerPackets, ffmpegSampleReader, probedCodecFor, probedCodecs, type ProbedCodec } from "@/workers/remux/audioInput"
 import { createFramePipeline } from "@/features/preview/videoEdit/gl/pipeline"
 import { createTimeStretch } from "@/features/preview/videoEdit/audio/timeStretch"
-import { planExport } from "@/features/preview/videoEdit/lib/plan"
+import { planExport, sourceFrame } from "@/features/preview/videoEdit/lib/plan"
 import type { TimeRange } from "@/features/preview/videoEdit/types"
 import { runExport, type EngineDeps } from "@/features/preview/videoEdit/worker/engine"
 import { ExportCancelledError, ExportRefusedError } from "@/features/preview/videoEdit/worker/errors"
@@ -126,11 +126,14 @@ const api: ExportWorkerApi = {
 				fallbackCreationTime: args.fallbackCreationTime,
 				deps: {
 					// Frames arrive coded (unrotated); an HDR source whose frames do not name their curve is tone-mapped by its own.
-					createPipeline: source =>
-						createFramePipeline(
-							new OffscreenCanvas(1, 1),
-							source.transfer === "sdr" ? {} : { sourceTransfer: source.transfer }
-						),
+					createPipeline: source => {
+						const frame = sourceFrame(source)
+
+						return createFramePipeline(new OffscreenCanvas(1, 1), {
+							naturalSize: { width: frame.squareWidth, height: frame.squareHeight },
+							...(source.transfer === "sdr" ? {} : { sourceTransfer: source.transfer })
+						})
+					},
 					createTimeStretch,
 					exoticAudio: exoticAudio(block),
 					ios: args.context.ios === true

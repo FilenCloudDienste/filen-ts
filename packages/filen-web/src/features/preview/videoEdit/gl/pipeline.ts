@@ -66,6 +66,9 @@ export interface FramePipelineOptions {
 	sourceRotation?: VideoRotation
 	// For an HDR source whose frames do not say (VideoFrame.colorSpace.transfer), which curve the tone map undoes.
 	sourceTransfer?: TransferCharacteristic
+	// The decoded (unrotated) picture's size in square pixels, which the crop is measured in. A frame's own display
+	// size is not trusted for it: WebKit reports an anamorphic frame's coded size there.
+	naturalSize?: { width: number; height: number }
 }
 
 export class ContextLostError extends Error {
@@ -376,8 +379,8 @@ export function createFramePipeline(canvas: OffscreenCanvas, options: FramePipel
 	}
 
 	function derive(frame: VideoFrame, recipe: VideoEditRecipe, outWidth: number, outHeight: number): void {
-		const naturalWidth = frame.displayWidth
-		const naturalHeight = frame.displayHeight
+		const naturalWidth = options.naturalSize?.width ?? frame.displayWidth
+		const naturalHeight = options.naturalSize?.height ?? frame.displayHeight
 
 		if (
 			derived.recipe === recipe &&
