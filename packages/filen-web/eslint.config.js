@@ -11,11 +11,12 @@ const ALIAS_ONLY = {
 	message: 'Use the "@/..." alias instead of a relative import.'
 }
 
-// Mediabunny demuxes and muxes on whichever thread imports it, and it is large: only the remux worker runs it,
-// so the main thread and the other workers neither parse it nor block on its work.
+// Mediabunny demuxes and muxes on whichever thread imports it, and it is large: only the remux worker and the video
+// export worker run it, so the main thread and the other workers neither parse it nor block on its work.
 const MEDIABUNNY_REMUX_ONLY = {
 	group: ["mediabunny", "mediabunny/**", "@mediabunny/*", "@mediabunny/**"],
-	message: "Mediabunny runs only in the remux worker (src/workers/remux.worker.ts, src/workers/remux/**); talk to that worker instead."
+	message:
+		"Mediabunny runs only in workers (the remux worker, src/workers/remux/**, and the video export worker, src/features/preview/videoEdit/worker/**); talk to one instead."
 }
 
 // Everything ships in one bundle (codeSplitting: false). Shared by the app-wide block and the assistant's, which
@@ -181,9 +182,15 @@ export default defineConfig([
 		}
 	},
 	{
-		// The remux worker and its modules run Mediabunny, as does the worker-only input opener the media workers
-		// share; tests exercise them directly.
-		files: ["src/workers/remux.worker.ts", "src/workers/remux/**/*.{ts,tsx}", "src/lib/media/blockInput.ts", "src/tests/**/*.{ts,tsx}"],
+		// The remux worker and its modules run Mediabunny, as do the worker-only input opener the media workers share
+		// and the video editor's export worker; tests exercise them directly.
+		files: [
+			"src/workers/remux.worker.ts",
+			"src/workers/remux/**/*.{ts,tsx}",
+			"src/lib/media/blockInput.ts",
+			"src/features/preview/videoEdit/worker/**/*.{ts,tsx}",
+			"src/tests/**/*.{ts,tsx}"
+		],
 		rules: {
 			"no-restricted-imports": ["error", { patterns: [ALIAS_ONLY] }]
 		}
