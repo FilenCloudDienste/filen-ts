@@ -1620,19 +1620,23 @@ const api = {
 	// until then). A failed writer aborts the upload's managed future before the stream errors, so the SDK never takes
 	// the errored stream for the file's end; the writer's failure is what this rejects with. `options.size` when the
 	// writer knows it up front; the rest as uploadFileBytes's.
+	// `options.transferId` makes it a transfer row, as uploadFile: its byte progress goes through the page's progress
+	// sink, and cancelTransfer/pauseTransfer/resumeTransfer reach it (a paused upload stops pulling; the writer waits
+	// for requests, its heartbeat keeping the port open).
 	async uploadFileFromPort(
 		parentUuid: string | null,
 		name: string,
 		mime: string,
 		port: MessagePort,
-		options?: UploadOptions & { size?: number }
+		options?: UploadOptions & { size?: number; transferId?: string }
 	): Promise<File> {
 		const reader = savePortReader(port)
 		const control = uploadControl(options)
 		const size = options?.size
+		const transferId = options?.transferId
 		let streamFailure: { error: unknown } | undefined
-
-		try {
+		let cancelled = control.aborted
+		const upload = async (managedFuture: ManagedFuture): Promise<File> => {
 			const c = requireClient()
 			const parent = await resolveNormalDirParent(c, parentUuid)
 			const file = await c.uploadFileFromReader({
@@ -1647,7 +1651,8 @@ const api = {
 				knownSize: size !== undefined && size > 0 ? size : undefined,
 				...(mime ? { mime } : {}),
 				...uploadTimes(options),
-				managedFuture: { abortSignal: control.signal }
+				...(transferId === undefined ? {} : { progress: progressTo(transferId) }),
+				managedFuture
 			})
 
 			// An SDK that finished anyway on the errored stream made a truncated file: never reported as saved.
@@ -1655,11 +1660,34 @@ const api = {
 				throw streamFailure.error
 			}
 
+			return file
+		}
+
+		try {
+			const file =
+				transferId === undefined
+					? await upload({ abortSignal: control.signal })
+					: await withTransferControls(transferId, async managedFuture => {
+							const transferSignal = managedFuture.abortSignal
+
+							cancelled = () => control.aborted() || transferSignal?.aborted === true
+
+							try {
+								return await upload({
+									...managedFuture,
+									abortSignal:
+										transferSignal === undefined ? control.signal : AbortSignal.any([control.signal, transferSignal])
+								})
+							} finally {
+								await postProgress()
+							}
+						})
+
 			reader.settled(true)
 
 			return file
 		} catch (e) {
-			reader.abort(control.aborted() ? "cancelled" : "upload")
+			reader.abort(cancelled() ? "cancelled" : "upload")
 
 			throw streamFailure === undefined ? e : streamFailure.error
 		} finally {

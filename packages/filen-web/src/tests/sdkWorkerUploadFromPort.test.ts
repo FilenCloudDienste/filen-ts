@@ -6,11 +6,12 @@ import type { SdkWorkerApi } from "@/workers/sdk.worker"
 
 // The port upload against a stand-in client: a writer that fails or is cancelled mid-stream aborts the upload's
 // managed future BEFORE the stream errors, so an SDK that takes an errored stream for its end never finalizes a
-// truncated file.
+// truncated file. With a transfer id it is a transfer row: progress through the page's sink, and cancel/pause reach it.
 
 interface UploadParams {
 	reader: ReadableStream<Uint8Array>
-	managedFuture: { abortSignal?: AbortSignal }
+	managedFuture: { abortSignal?: AbortSignal; pauseSignal?: { paused: boolean } }
+	progress?: (bytes: bigint) => void
 }
 
 const { exposed, fakeClient } = vi.hoisted(() => ({
@@ -24,6 +25,16 @@ const { exposed, fakeClient } = vi.hoisted(() => ({
 
 vi.mock("@filen/sdk-rs", () => {
 	class PauseSignal {
+		public paused = false
+
+		pause(): void {
+			this.paused = true
+		}
+
+		resume(): void {
+			this.paused = false
+		}
+
 		free(): void {
 			// nothing to release in the stand-in
 		}
@@ -160,5 +171,100 @@ describe("uploadFileFromPort", () => {
 		await expect(upload).resolves.toEqual({ uuid: "made" })
 		expect(seen.bytes).toBe(3 * 1024 * 1024 + 5)
 		expect(await writer.uploaded).toBe(true)
+	})
+})
+
+describe("uploadFileFromPort as a transfer", () => {
+	const sink = vi.fn<(bytesById: Record<string, number>) => Promise<void>>()
+
+	beforeEach(async () => {
+		sink.mockReset()
+		sink.mockResolvedValue(undefined)
+		await api.setProgressSink(sink)
+	})
+
+	it("reports its bytes under the transfer id before it settles, and pause reaches the SDK", async () => {
+		const { port1, port2 } = channel()
+		const writer = savePortWriter(port1)
+		let paused: boolean | undefined
+
+		fakeClient.uploadFileFromReader.mockImplementation(async params => {
+			const reader = params.reader.getReader()
+			let bytes = 0
+
+			for (;;) {
+				const { done, value } = await reader.read()
+
+				if (done) break
+
+				bytes += value.length
+				params.progress?.(BigInt(bytes))
+
+				if (paused === undefined) {
+					await api.pauseTransfer("export-1")
+					paused = params.managedFuture.pauseSignal?.paused
+					await api.resumeTransfer("export-1")
+				}
+			}
+
+			return { uuid: "made" }
+		})
+
+		const upload = api.uploadFileFromPort(null, "clip.mp4", "video/mp4", port2, { transferId: "export-1" })
+
+		await writer.write(new Uint8Array(2 * 1024 * 1024))
+		await writer.close()
+		writer.commit()
+
+		await expect(upload).resolves.toEqual({ uuid: "made" })
+		expect(paused).toBe(true)
+		expect(sink).toHaveBeenLastCalledWith({ "export-1": 2 * 1024 * 1024 })
+	})
+
+	it("is cancelled by cancelTransfer: the managed future aborts and the upload rejects", async () => {
+		const { port1, port2 } = channel()
+		const writer = savePortWriter(port1)
+		let signal: AbortSignal | undefined
+
+		fakeClient.uploadFileFromReader.mockImplementation(params => {
+			signal = params.managedFuture.abortSignal
+
+			return new Promise((_, reject) => {
+				signal?.addEventListener("abort", () => {
+					void params.reader.cancel()
+					reject(new Error("cancelled"))
+				})
+			})
+		})
+
+		const upload = api.uploadFileFromPort(null, "clip.mp4", "video/mp4", port2, { transferId: "export-2" })
+
+		await vi.waitFor(() => {
+			expect(signal).toBeDefined()
+		})
+		await api.cancelTransfer("export-2")
+
+		await expect(upload).rejects.toMatchObject({ message: "cancelled" })
+		expect(signal?.aborted).toBe(true)
+		expect(await writer.aborted).toBe("upload")
+	})
+
+	it("aborts the transfer's managed future too when the writer fails mid-stream", async () => {
+		const { port1, port2 } = channel()
+		const writer = savePortWriter(port1)
+		const seen: { abortedWhenErrored?: boolean; bytes: number } = { bytes: 0 }
+
+		fakeClient.uploadFileFromReader.mockImplementation(params => sdkRead(params, seen))
+
+		const upload = api.uploadFileFromPort(null, "clip.mp4", "video/mp4", port2, { transferId: "export-3" })
+
+		await writer.write(new Uint8Array(2 * 1024 * 1024 + 10))
+		await vi.waitFor(() => {
+			expect(seen.bytes).toBeGreaterThan(0)
+		})
+		writer.abort("failed")
+
+		await expect(upload).rejects.toMatchObject({ message: "save stream aborted: failed" })
+		expect(seen.abortedWhenErrored).toBe(true)
 	})
 })
