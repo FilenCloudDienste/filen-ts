@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest"
-import { copyCodecString, isCopyableAudio, isTranscodableAudio, outputVideoCodecString } from "@/workers/remux/codecs.logic"
+import {
+	copyCodecString,
+	isCopyableAudio,
+	isFfmpegReaderAudio,
+	isTranscodableAudio,
+	outputVideoCodecString
+} from "@/workers/remux/codecs.logic"
 
 describe("outputVideoCodecString", () => {
 	it("names HEVC by the hvc1 sample entry the muxer writes, with or without a configuration record", () => {
@@ -57,5 +63,17 @@ describe("audio codec paths", () => {
 		}
 
 		expect(isTranscodableAudio(null)).toBe(false)
+	})
+
+	// mediabunny names TrueHD since 1.64 but decodes it only through a registered decoder, one packet per
+	// message; FFmpeg's own reader batches its tiny access units, so TrueHD keeps going there.
+	it("sends unknown codecs and TrueHD to FFmpeg's own reader", () => {
+		expect(isFfmpegReaderAudio(null)).toBe(true)
+		expect(isFfmpegReaderAudio("truehd")).toBe(true)
+		expect(isTranscodableAudio("truehd")).toBe(false)
+
+		for (const codec of ["aac", "ac3", "eac3", "dts", "flac", "opus"] as const) {
+			expect(isFfmpegReaderAudio(codec)).toBe(false)
+		}
 	})
 })

@@ -5,10 +5,11 @@ import { browserEngine, type BrowserEngine } from "@/lib/media/mseController.log
 // AC-3, E-AC-3, DTS and TrueHD, which no browser decodes, ALAC, which only Safari does, and FLAC where the
 // browser's own decoder fails, through FFmpeg's decoders built to WebAssembly
 // (scripts/codecs/build-ffmpeg-decoders.sh). AC-3, E-AC-3, DTS and FLAC reach them through mediabunny's
-// decoder registry; TrueHD and ALAC, which mediabunny does not know, through ffmpegSampleReader. The module
-// runs in a worker of its own, nested in the remux worker, so decoding overlaps the remux worker's own work;
-// the protocol is described in scripts/codecs/decoder-worker.js. The module is bundled into the remux worker
-// and compiled only when a track first needs it.
+// decoder registry; ALAC, which mediabunny does not know, and TrueHD, which it has no decoder for, through
+// ffmpegSampleReader (batched: TrueHD units are tiny). The module runs in a worker of its own, nested in the
+// remux worker, so decoding overlaps the remux worker's own work; the protocol is described in
+// scripts/codecs/decoder-worker.js. The module is bundled into the remux worker and compiled only when a
+// track first needs it.
 
 // The codecs mediabunny hands to FFmpeg in `engine`. WebKit's WebCodecs claims FLAC (isConfigSupported says
 // yes) and then fails on every frame, so only there FLAC goes to FFmpeg too; elsewhere the native decoder.

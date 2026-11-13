@@ -68,3 +68,10 @@ export function isCopyableAudio(codec: AudioCodec | null): codec is AudioCodec {
 export function isTranscodableAudio(codec: AudioCodec | null): codec is AudioCodec {
 	return codec !== null && TRANSCODABLE_AUDIO.has(codec)
 }
+
+// Tracks that go to FFmpeg's own reader once the container walk names them: a codec mediabunny does not know, and
+// TrueHD, which it names but has no decoder for. That reader batches TrueHD's access units (a few dozen samples
+// each), where mediabunny's decoder registry would post every one to the decoder worker on its own.
+export function isFfmpegReaderAudio(codec: AudioCodec | null): boolean {
+	return codec === null || codec === "truehd"
+}

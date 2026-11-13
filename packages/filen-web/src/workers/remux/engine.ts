@@ -61,7 +61,13 @@ import {
 import type { RawStreamInfo } from "@/workers/remux/rawAudio.logic"
 import type { FfmpegCodec } from "@/workers/remux/ffmpegDecoder"
 import { ac3Layout, dtsLayout, layoutFor, type Speaker } from "@/workers/remux/channelLayout.logic"
-import { copyCodecString, isCopyableAudio, isTranscodableAudio, outputVideoCodecString } from "@/workers/remux/codecs.logic"
+import {
+	copyCodecString,
+	isCopyableAudio,
+	isFfmpegReaderAudio,
+	isTranscodableAudio,
+	outputVideoCodecString
+} from "@/workers/remux/codecs.logic"
 import { hevcKeyIsIdr, hevcLengthSize, IDR_REACH_KEYS, idrReachSeconds } from "@/workers/remux/hevc.logic"
 import { KeyIndex, seekReach } from "@/workers/remux/keyIndex"
 import { FragmentedTrackOutput, FragmentTooLargeError } from "@/workers/remux/output"
@@ -341,8 +347,8 @@ export class RemuxEngine {
 			track.getDisposition()
 		])
 
-		// A codec mediabunny does not know may be one FFmpeg decodes, which the container walk names.
-		const ffmpeg = codec === null ? ((await this.probedCodecs()).get(track.id) ?? null) : null
+		// A codec mediabunny does not know (or TrueHD) may be one FFmpeg decodes, which the container walk names.
+		const ffmpeg = isFfmpegReaderAudio(codec) ? ((await this.probedCodecs()).get(track.id) ?? null) : null
 
 		this.audio.set(track.id, { kind: "track", track, codec, ffmpeg })
 

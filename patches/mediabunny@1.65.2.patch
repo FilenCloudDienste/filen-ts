@@ -1,0 +1,212 @@
+diff --git a/dist/modules/src/isobmff/isobmff-boxes.d.ts b/dist/modules/src/isobmff/isobmff-boxes.d.ts
+index 105cf54469a2cc5d63fb3f157faa91f3280205d4..38d3a1d8327cc9342f220f942d08d649ffb334d7 100644
+--- a/dist/modules/src/isobmff/isobmff-boxes.d.ts
++++ b/dist/modules/src/isobmff/isobmff-boxes.d.ts
+@@ -172,7 +172,9 @@ export declare const cslg: (trackData: IsobmffTrackData) => Box | null;
+  * Movie Extends Box: This box signals to readers that the file is fragmented. Contains a single Track Extends Box
+  * for each track in the movie.
+  */
+-export declare const mvex: (trackDatas: IsobmffTrackData[]) => Box;
++export declare const mvex: (trackDatas: IsobmffTrackData[], expectedDuration: number | undefined) => Box;
++/** Movie Extends Header Box: The duration of the whole movie, including all fragments. */
++export declare const mehd: (duration: number) => Box;
+ /** Track Extends Box: Contains the default values used by the movie fragments. */
+ export declare const trex: (trackData: IsobmffTrackData) => Box;
+ /**
+diff --git a/dist/modules/src/isobmff/isobmff-boxes.js b/dist/modules/src/isobmff/isobmff-boxes.js
+index 39cb4984b72cf85d86cc448e2a9ecc0fe82ae9c9..979497a4d41f6bfa03573617e78978b1e59a586c 100644
+--- a/dist/modules/src/isobmff/isobmff-boxes.js
++++ b/dist/modules/src/isobmff/isobmff-boxes.js
+@@ -277,7 +277,7 @@ export const moov = (muxer) => {
+     return box('moov', undefined, [
+         mvhd(muxer.creationTime, muxer.trackDatas),
+         ...muxer.trackDatas.map(x => trak(x, muxer.creationTime)),
+-        muxer.isFragmented ? mvex(muxer.trackDatas) : null,
++        muxer.isFragmented ? mvex(muxer.trackDatas, muxer.formatOptions.expectedDuration) : null,
+         udta(muxer),
+     ]);
+ };
+@@ -1142,8 +1142,19 @@ const sgpdAndSbgp = (samples, inTrackFragment) => {
+  * Movie Extends Box: This box signals to readers that the file is fragmented. Contains a single Track Extends Box
+  * for each track in the movie.
+  */
+-export const mvex = (trackDatas) => {
+-    return box('mvex', undefined, trackDatas.map(trex));
++export const mvex = (trackDatas, expectedDuration) => {
++    return box('mvex', undefined, [
++        expectedDuration !== undefined ? mehd(expectedDuration) : null,
++        ...trackDatas.map(trex),
++    ]);
++};
++/** Movie Extends Header Box: The duration of the whole movie, including all fragments. */
++export const mehd = (duration) => {
++    const fragmentDuration = intoTimescale(duration, GLOBAL_TIMESCALE);
++    const needsU64 = !isU32(fragmentDuration);
++    return fullBox('mehd', +needsU64, 0, [
++        needsU64 ? u64(fragmentDuration) : u32(fragmentDuration), // Fragment duration
++    ]);
+ };
+ /** Track Extends Box: Contains the default values used by the movie fragments. */
+ export const trex = (trackData) => {
+diff --git a/dist/modules/src/matroska/matroska-demuxer.js b/dist/modules/src/matroska/matroska-demuxer.js
+index 0ce440c99f66e4694c7690f006fe6757536d836c..7bf6baaace5b1df7a9da7ba7fc9d37eb43b5b85f 100644
+--- a/dist/modules/src/matroska/matroska-demuxer.js
++++ b/dist/modules/src/matroska/matroska-demuxer.js
+@@ -227,14 +227,19 @@ export class MatroskaDemuxer extends Demuxer {
+                     this.readContiguousElements(slice);
+                 }
+             }
+-            else if (id === EBMLId.Tags || id === EBMLId.Attachments) {
+-                // Metadata found at the beginning of the segment, great, let's parse it
+-                if (id === EBMLId.Tags) {
+-                    this.currentSegment.tagsSeen = true;
+-                }
+-                else {
+-                    this.currentSegment.attachmentsSeen = true;
++            else if (id === EBMLId.Attachments) {
++                // Attachments (often megabytes of fonts) only feed metadata tags: note where they are and
++                // leave them to loadSegmentMetadata, so reading tracks never downloads them.
++                if (!this.currentSegment.seekEntries.some(x => x.id === EBMLId.Attachments)) {
++                    this.currentSegment.seekEntries.push({
++                        id: EBMLId.Attachments,
++                        segmentPosition: elementStartPos - segmentDataStart,
++                    });
+                 }
++            }
++            else if (id === EBMLId.Tags) {
++                // Metadata found at the beginning of the segment, great, let's parse it
++                this.currentSegment.tagsSeen = true;
+                 assertDefinedSize(size);
+                 let slice = this.reader.requestSlice(dataStartPos, size);
+                 if (isThenable(slice))
+diff --git a/dist/modules/src/output-format.d.ts b/dist/modules/src/output-format.d.ts
+index 5d8fb58a45720478a20eb03432d87cf3ea791606..71f91e06659440c754132280f3d97f83cbe5f11a 100644
+--- a/dist/modules/src/output-format.d.ts
++++ b/dist/modules/src/output-format.d.ts
+@@ -119,6 +119,13 @@ export type IsobmffOutputFormatOptions = {
+      * New fragments will only be created when the current fragment is longer than this value. Defaults to 1 second.
+      */
+     minimumFragmentDuration?: number;
++    /**
++     * When using `fastStart: 'fragmented'`, the total duration of the file in seconds, if known up front. It is
++     * written as the fragment duration (`mvex/mehd`) of the Movie Box, which is emitted before any media and so cannot
++     * be derived from the samples without random access. Readers use it as the file's duration; without it, a
++     * fragmented file's duration is only known after scanning its fragments.
++     */
++    expectedDuration?: number;
+     /**
+      * The metadata format to use for writing metadata tags.
+      *
+diff --git a/dist/modules/src/output-format.js b/dist/modules/src/output-format.js
+index ca749428857b5942240d94dfeae9746cc8175ef0..84ae2ecec94823d6173ae7123fa2314366d1c2c7 100644
+--- a/dist/modules/src/output-format.js
++++ b/dist/modules/src/output-format.js
+@@ -81,6 +81,10 @@ export class IsobmffOutputFormat extends OutputFormat {
+             && (!isNumber(options.minimumFragmentDuration) || options.minimumFragmentDuration < 0)) {
+             throw new TypeError('options.minimumFragmentDuration, when provided, must be a non-negative number.');
+         }
++        if (options.expectedDuration !== undefined
++            && (!Number.isFinite(options.expectedDuration) || options.expectedDuration < 0)) {
++            throw new TypeError('options.expectedDuration, when provided, must be a non-negative finite number.');
++        }
+         if (options.onFtyp !== undefined && typeof options.onFtyp !== 'function') {
+             throw new TypeError('options.onFtyp, when provided, must be a function.');
+         }
+diff --git a/src/isobmff/isobmff-boxes.ts b/src/isobmff/isobmff-boxes.ts
+index 303b9217ac7cc154c85d0532fb15bc09f96625b0..7b34ed23c8ffbcabda013a3e3c6430ecfc1f78e6 100644
+--- a/src/isobmff/isobmff-boxes.ts
++++ b/src/isobmff/isobmff-boxes.ts
+@@ -386,7 +386,7 @@ export const moov = (muxer: IsobmffMuxer) => {
+ 	return box('moov', undefined, [
+ 		mvhd(muxer.creationTime, muxer.trackDatas),
+ 		...muxer.trackDatas.map(x => trak(x, muxer.creationTime)),
+-		muxer.isFragmented ? mvex(muxer.trackDatas) : null,
++		muxer.isFragmented ? mvex(muxer.trackDatas, muxer.formatOptions.expectedDuration) : null,
+ 		udta(muxer),
+ 	]);
+ };
+@@ -1452,8 +1452,21 @@ const sgpdAndSbgp = (samples: Sample[], inTrackFragment: boolean) => {
+  * Movie Extends Box: This box signals to readers that the file is fragmented. Contains a single Track Extends Box
+  * for each track in the movie.
+  */
+-export const mvex = (trackDatas: IsobmffTrackData[]) => {
+-	return box('mvex', undefined, trackDatas.map(trex));
++export const mvex = (trackDatas: IsobmffTrackData[], expectedDuration: number | undefined) => {
++	return box('mvex', undefined, [
++		expectedDuration !== undefined ? mehd(expectedDuration) : null,
++		...trackDatas.map(trex),
++	]);
++};
++
++/** Movie Extends Header Box: The duration of the whole movie, including all fragments. */
++export const mehd = (duration: number) => {
++	const fragmentDuration = intoTimescale(duration, GLOBAL_TIMESCALE);
++	const needsU64 = !isU32(fragmentDuration);
++
++	return fullBox('mehd', +needsU64, 0, [
++		needsU64 ? u64(fragmentDuration) : u32(fragmentDuration), // Fragment duration
++	]);
+ };
+ 
+ /** Track Extends Box: Contains the default values used by the movie fragments. */
+diff --git a/src/matroska/matroska-demuxer.ts b/src/matroska/matroska-demuxer.ts
+index c17ac37b40e64a0f81b6974c58d997f563e391fe..c500e854ce435b3fe23f26a69b555f41c4efe459 100644
+--- a/src/matroska/matroska-demuxer.ts
++++ b/src/matroska/matroska-demuxer.ts
+@@ -510,13 +510,18 @@ export class MatroskaDemuxer extends Demuxer {
+ 				if (slice) {
+ 					this.readContiguousElements(slice);
+ 				}
+-			} else if (id === EBMLId.Tags || id === EBMLId.Attachments) {
+-				// Metadata found at the beginning of the segment, great, let's parse it
+-				if (id === EBMLId.Tags) {
+-					this.currentSegment.tagsSeen = true;
+-				} else {
+-					this.currentSegment.attachmentsSeen = true;
++			} else if (id === EBMLId.Attachments) {
++				// Attachments (often megabytes of fonts) only feed metadata tags: note where they are and
++				// leave them to loadSegmentMetadata, so reading tracks never downloads them.
++				if (!this.currentSegment.seekEntries.some(x => x.id === EBMLId.Attachments)) {
++					this.currentSegment.seekEntries.push({
++						id: EBMLId.Attachments,
++						segmentPosition: elementStartPos - segmentDataStart,
++					});
+ 				}
++			} else if (id === EBMLId.Tags) {
++				// Metadata found at the beginning of the segment, great, let's parse it
++				this.currentSegment.tagsSeen = true;
+ 
+ 				assertDefinedSize(size);
+ 
+diff --git a/src/output-format.ts b/src/output-format.ts
+index 64bae2c63dc42f9b88b6f1cd6415910784a7353a..7a29c4e2a8e9cb2608b57e0a9c4fc783663d167d 100644
+--- a/src/output-format.ts
++++ b/src/output-format.ts
+@@ -181,6 +181,14 @@ export type IsobmffOutputFormatOptions = {
+ 	 */
+ 	minimumFragmentDuration?: number;
+ 
++	/**
++	 * When using `fastStart: 'fragmented'`, the total duration of the file in seconds, if known up front. It is
++	 * written as the fragment duration (`mvex/mehd`) of the Movie Box, which is emitted before any media and so cannot
++	 * be derived from the samples without random access. Readers use it as the file's duration; without it, a
++	 * fragmented file's duration is only known after scanning its fragments.
++	 */
++	expectedDuration?: number;
++
+ 	/**
+ 	 * The metadata format to use for writing metadata tags.
+ 	 *
+@@ -257,6 +265,12 @@ export abstract class IsobmffOutputFormat extends OutputFormat {
+ 		) {
+ 			throw new TypeError('options.minimumFragmentDuration, when provided, must be a non-negative number.');
+ 		}
++		if (
++			options.expectedDuration !== undefined
++			&& (!Number.isFinite(options.expectedDuration) || options.expectedDuration < 0)
++		) {
++			throw new TypeError('options.expectedDuration, when provided, must be a non-negative finite number.');
++		}
+ 		if (options.onFtyp !== undefined && typeof options.onFtyp !== 'function') {
+ 			throw new TypeError('options.onFtyp, when provided, must be a function.');
+ 		}

@@ -442,6 +442,92 @@ function ffmpegModuleNotices(): Collected[] {
 }
 
 /**
+ * @mediabunny/aac-encoder (MPL-2.0, described with the npm tree) inlines a WebAssembly build of FFmpeg's AAC
+ * encoder, LGPL-2.1-or-later (configured without --enable-gpl or --enable-nonfree). The FFmpeg commit and the
+ * Emscripten release are read from the package's own provenance section, so the notice follows each bump; the
+ * license texts are the ones the package ships under licenses/ffmpeg and FFmpeg's, kept beside this script.
+ */
+const AAC_ENCODER = "@mediabunny/aac-encoder"
+
+function aacEncoderNotices(installedNpm: InstalledNpmPackage[]): Collected[] {
+	const pkg = installedNpm.find(entry => entry.name === AAC_ENCODER)
+
+	if (pkg?.dir === undefined || pkg.dir === null) {
+		throw new Error(`the installed tree has no ${AAC_ENCODER} — run \`pnpm install\` at the repo root`)
+	}
+
+	const readme = readFileSync(join(pkg.dir, "README.md"), "utf8")
+	const ffmpeg = /- FFmpeg \[`([0-9a-f]{40})`\]\([^)]*\) \(`([^`]+)`\), unmodified/.exec(readme)
+	const emscripten = /- Emscripten (\S+) \(`([0-9a-f]{40})`\)/.exec(readme)
+	const configure = /emconfigure \.\/configure \\\n([\s\S]*?)\nemmake make\n/.exec(readme)
+
+	if (ffmpeg?.[1] === undefined || ffmpeg[2] === undefined || emscripten?.[1] === undefined || configure?.[1] === undefined) {
+		throw new Error(`${AAC_ENCODER} ${pkg.version}: README.md no longer states its FFmpeg/Emscripten provenance`)
+	}
+
+	const flags = configure[1]
+		.split("\n")
+		.map(line => line.replace(/\\$/, "").trim())
+		.filter(line => line.length > 0)
+
+	if (flags.some(flag => flag === "--enable-gpl" || flag === "--enable-nonfree")) {
+		throw new Error(`${AAC_ENCODER} ${pkg.version}: FFmpeg is built with GPL or non-free parts`)
+	}
+
+	const linkedInto = `Statically linked into the WebAssembly module of ${AAC_ENCODER} ${pkg.version}, built with Emscripten ${emscripten[1]}.`
+
+	return [
+		vendoredNotice(
+			{
+				name: "FFmpeg (AAC encoder)",
+				version: ffmpeg[2],
+				license: "LGPL-2.1-or-later",
+				copyright: ["Copyright (c) the FFmpeg developers"],
+				repository: FFMPEG_REPOSITORY,
+				terms: [
+					[
+						`FFmpeg's AAC encoder (libavcodec, libavutil), built to WebAssembly and inlined in ${AAC_ENCODER} ${pkg.version}, licensed under the GNU Lesser General Public License, version 2.1 or later.`,
+						`Corresponding source of the library: FFmpeg commit ${ffmpeg[1]} (${ffmpeg[2]}), unmodified, in ${FFMPEG_REPOSITORY}.`,
+						`Configured with: ${flags.join(" ")}.`,
+						`The module's bridge source and build recipe are published with the package (https://github.com/Vanilagy/mediabunny/tree/v${pkg.version}/packages/aac-encoder).`
+					].join(" "),
+					readFileSync("scripts/licenses/ffmpeg-COPYING.LGPLv2.1", "utf8")
+				]
+			},
+			"vendored"
+		),
+		vendoredNotice(
+			{
+				name: "Emscripten",
+				version: emscripten[1],
+				license: "MIT OR NCSA",
+				copyright: ["Copyright (c) 2010-2014 Emscripten authors"],
+				repository: "https://github.com/emscripten-core/emscripten",
+				terms: [
+					`The Emscripten runtime, emmalloc and its musl-derived libc. ${linkedInto}`,
+					readFileSync(`${FFMPEG_DIR}/licenses/emscripten-LICENSE`, "utf8")
+				]
+			},
+			"vendored"
+		),
+		vendoredNotice(
+			{
+				name: "musl",
+				version: `as bundled with Emscripten ${emscripten[1]}`,
+				license: "MIT",
+				copyright: ["Copyright © 2005-2020 Rich Felker, et al."],
+				repository: "https://git.musl-libc.org/cgit/musl",
+				terms: [
+					`The musl C library, as bundled with Emscripten. ${linkedInto}`,
+					readFileSync(`${FFMPEG_DIR}/licenses/musl-COPYRIGHT`, "utf8")
+				]
+			},
+			"vendored"
+		)
+	]
+}
+
+/**
  * The assistant's inference engine, wllama's WebAssembly build of llama.cpp, rebuilt by
  * scripts/wllama/build-wllama.sh with a patch to its glue code and to llama.cpp. wllama itself (MIT) is
  * described with its npm package, whose JavaScript runs the engine. What the module compiles in, read from
@@ -1124,6 +1210,7 @@ function spellcheckDictionaryNotices(): Collected[] {
 const npm = collectNpm(installed)
 const rust = collectRust(expectedSdk)
 const ffmpeg = ffmpegModuleNotices()
+const aacEncoder = aacEncoderNotices(installed)
 const engine = wllamaEngineNotices()
 const model = assistantModelNotice(QWEN35_4B)
 const fontRecords = officeFontRecords()
@@ -1139,7 +1226,7 @@ if (fontRecords.rest().length > 0) {
 }
 const spellcheckCrates = spellcheckCrateNotices(rust.entries)
 const dictionaries = spellcheckDictionaryNotices()
-const vendored = [...ffmpeg, ...engine, model, ...office, ...dictionaries]
+const vendored = [...ffmpeg, ...aacEncoder, ...engine, model, ...office, ...dictionaries]
 const collected = [...npm, ...rust.entries, ...spellcheckCrates, ...vendored]
 
 // Vendored entries promise their files verbatim (dictionaries ship them byte for byte). Texts sorted: the payload ships
@@ -1161,6 +1248,7 @@ const output = `// AUTO-GENERATED by scripts/generateThirdPartyNotices.ts — do
 // npm:  pnpm licenses list --json --prod --no-optional --filter @filen/web... (${String(npm.length)} name@version packages)
 // rust: filen-rs @ ${rust.ref} (${String(rust.crates)} crates)  [resolved via: ${rust.source}]
 // vendored: ${ffmpeg.map(entry => `${entry.name} ${entry.version}`).join(", ")} (${FFMPEG_MANIFEST})
+//   ${aacEncoder.map(entry => `${entry.name} ${entry.version}`).join(", ")} (${AAC_ENCODER} README provenance)
 //   ${engine.map(entry => `${entry.name} ${entry.version}`).join(", ")} (${WLLAMA_MANIFEST})
 //   assistant model: ${model.name} ${model.version} (${MODEL_MANIFEST_SOURCE})
 //   @filen/office: ${office.map(entry => `${entry.name} ${entry.version}`).join(", ")} (${OFFICE_REPO_DIR}/assets/fonts/manifest.json, ${OFFICE_REPO_DIR}/THIRD_PARTY_NOTICES.md)
