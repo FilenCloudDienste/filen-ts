@@ -382,6 +382,50 @@ describe("GopDecoder", () => {
 		}
 	})
 
+	it("skips an open GOP's leading pictures, which reference the GOP before (WebKit fails on them)", async () => {
+		const output = new Output({ format: new Mp4OutputFormat({ fastStart: "in-memory" }), target: new BufferTarget() })
+		const source = new EncodedVideoPacketSource("avc")
+		const step = 0.04
+		// Decode order: a GOP from 0 to 0.80, then a keyframe at 0.92 followed by its leading pictures 0.84 and 0.88
+		// (shown before it), then the rest of its GOP.
+		const order = [
+			...Array.from({ length: 21 }, (_, index) => index * step),
+			0.92,
+			0.84,
+			0.88,
+			...Array.from({ length: 10 }, (_, index) => 0.96 + index * step)
+		].map(time => Math.round(time * 100) / 100)
+		const keys = new Set([0, 0.92])
+
+		output.addVideoTrack(source)
+		await output.start()
+
+		for (const [index, time] of order.entries()) {
+			await source.add(
+				new EncodedPacket(new Uint8Array([0, 0, 0, 1, keys.has(time) ? 0x65 : 0x41]), keys.has(time) ? "key" : "delta", time, step),
+				index === 0
+					? { decoderConfig: { codec: "avc1.64001f", codedWidth: 1280, codedHeight: 720, description: AVC_PRIVATE } }
+					: undefined
+			)
+		}
+
+		await output.finalize()
+
+		const gop = decoder(await sinkOf(new Uint8Array(output.target.buffer ?? new ArrayBuffer(0))))
+
+		// The decoder fails on a leading picture fed after its keyframe, as WebKit's does.
+		FakeDecoder.failAt = us(0.84)
+
+		const frame = await gop.frameAt(1.0, always)
+		const fed = FakeDecoder.created[0]?.fed.map(chunk => chunk.timestamp) ?? []
+
+		expect(frame.timestamp).toBe(us(1.0))
+		expect(fed[0]).toBe(us(0.92))
+		expect(fed).not.toContain(us(0.84))
+		expect(fed).not.toContain(us(0.88))
+		frame.close()
+	})
+
 	it("reports a decoder that fails, and recovers with a new one", async () => {
 		const gop = decoder(await sinkOf(plain))
 

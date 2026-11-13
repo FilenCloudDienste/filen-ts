@@ -327,6 +327,15 @@ export class GopDecoder<P extends PacketLike> {
 				continue
 			}
 
+			// A leading picture (shown before the keyframe, decoded after it): never the target, which is at or past the
+			// keyframe. An open GOP's (HEVC RASL after a CRA) references the GOP before, which this decode never fed, and
+			// WebKit's decoder fails on it rather than dropping it.
+			if (next !== key && next.timestamp < key.timestamp) {
+				this.lastFed = next
+
+				continue
+			}
+
 			try {
 				decoder.decode(next.toEncodedVideoChunk())
 			} catch (error) {
