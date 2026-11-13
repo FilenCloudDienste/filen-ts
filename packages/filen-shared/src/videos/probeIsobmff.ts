@@ -16,6 +16,7 @@ import {
 } from "./codecString"
 import { BLOCK_BYTES, BlockReadError, ReadBudgetError, type BlockSource } from "./blockSource"
 import { LEADING_BOXES } from "./transportStreamHead"
+import { MAX_MFRA_BYTES, fragmentEnd, lastMoof, readMfra, readMoof, type FragmentDefaults, type FragmentIndex } from "./probeFragments"
 import {
 	MalformedError,
 	ascii,
@@ -72,6 +73,9 @@ interface Walk {
 	fragmented: boolean
 	fragmentDuration: number | null
 	timescale: number
+	// mdhd timescale per track ID, and mvex's trex defaults: what a fragmented file's moofs are read with.
+	timescales: Map<number, number>
+	fragmentDefaults: Map<number, FragmentDefaults>
 	// mvhd's next_track_ID: one past the highest track ID, so the card can stop once it has seen that many.
 	nextTrackId: number
 	// The whole moov was walked, so the absence of `mvex` is known.
@@ -686,6 +690,8 @@ async function walkTrak(walk: Walk, trak: Box): Promise<ParsedTrack | null> {
 	const { header, handler, entry, name } = state
 	const language = state.bcp47 ?? state.lang
 
+	walk.timescales.set(header.id, state.timescale)
+
 	if (entry === null) {
 		return null
 	}
@@ -915,6 +921,10 @@ async function walkMoov(walk: Walk, moov: Box): Promise<void> {
 					const bytes = await payload(walk, child, 12)
 
 					walk.fragmentDuration = (bytes[0] ?? 0) === 1 ? uint64(bytes, 4) : uint32(bytes, 4)
+				} else if (child.type === "trex" && child.end - child.dataStart >= 24) {
+					const bytes = await payload(walk, child, 24)
+
+					walk.fragmentDefaults.set(uint32(bytes, 4), { duration: uint32(bytes, 12), size: uint32(bytes, 16) })
 				}
 			})
 		} else if ((box.type === "udta" || box.type === "meta") && walk.tier !== "card") {
@@ -938,26 +948,56 @@ async function walkMoov(walk: Walk, moov: Box): Promise<void> {
 	})
 }
 
-// A fragmented file's `mfra` sits at the end, located by the 16-byte `mfro` that closes the file.
-async function hasMfra(walk: Walk): Promise<boolean> {
-	const { source } = walk
+// A fragmented file's tail: the `mfra` the closing `mfro` locates, which says whether keyframes can be found
+// without a scan, gives the duration when no `mehd` did (where its last fragment ends), and, for a walk asked
+// for keyframes, the index itself. Only a tier that may grow its budget raises it; a card (and a keyframe
+// walk, which runs under its caller's budget) spends what it has left. Out of budget, nothing is known;
+// broken boxes leave the index absent.
+async function walkFragmentTail(walk: Walk): Promise<void> {
+	const { source, result, tier } = walk
+	const needDuration = result.durationSec === null
 
-	if (source.size < 16) {
-		return false
+	if (!needDuration && tier !== "full" && !walk.keyframes) {
+		return
 	}
 
-	raiseBudget(source, 2)
-
-	const mfro = await readBytes(source, source.size - 16, 16)
-	const mfraSize = uint32(mfro, 12)
-
-	if (ascii(mfro, 4, 8) !== "mfro" || mfraSize < 16 || mfraSize > source.size) {
-		return false
+	if (tier !== "card") {
+		raiseBudget(source, Math.ceil(Math.min(MAX_MFRA_BYTES, source.size) / BLOCK_BYTES) + 2)
 	}
 
-	const mfra = await readBytes(source, source.size - mfraSize, 8)
+	let access: FragmentIndex["access"] | null
 
-	return ascii(mfra, 4, 8) === "mfra"
+	try {
+		access = await readMfra(source)
+	} catch (error) {
+		if (error instanceof ReadBudgetError || error instanceof BlockReadError) {
+			throw error
+		}
+
+		access = null
+	}
+
+	result.index = access === null || access.size === 0 ? "none" : "mfra"
+
+	if (access === null || access.size === 0) {
+		return
+	}
+
+	const index: FragmentIndex = { access, defaults: walk.fragmentDefaults, timescales: walk.timescales }
+
+	if (walk.keyframes) {
+		result.fragments = index
+	}
+
+	const last = needDuration ? lastMoof(access) : null
+
+	if (last !== null) {
+		const end = fragmentEnd(await readMoof(source, last), index)
+
+		if (end !== null && end > 0) {
+			result.durationSec = seconds(end)
+		}
+	}
 }
 
 // Top-level box headers to `moov`, wherever it is: a file written for streaming has it up front, one
@@ -972,6 +1012,8 @@ export async function walkIsobmff(source: BlockSource, tier: ProbeTier, result: 
 		fragmented: false,
 		fragmentDuration: null,
 		timescale: 0,
+		timescales: new Map(),
+		fragmentDefaults: new Map(),
 		nextTrackId: 0,
 		moovComplete: false,
 		chapterTracks: new Set(),
@@ -1042,7 +1084,14 @@ export async function walkIsobmff(source: BlockSource, tier: ProbeTier, result: 
 			}
 
 			if (walk.fragmented) {
-				result.index = tier === "full" ? ((await hasMfra(walk)) ? "mfra" : "none") : null
+				try {
+					await walkFragmentTail(walk)
+				} catch (error) {
+					// Whatever the tail held stays unknown; the moov's tracks stand.
+					if (!(error instanceof ReadBudgetError || error instanceof MalformedError)) {
+						throw error
+					}
+				}
 			} else if (walk.moovComplete) {
 				result.index = "moov"
 			}

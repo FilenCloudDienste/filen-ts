@@ -2,11 +2,13 @@ import type { BlockSource } from "./blockSource"
 import { MalformedError, readBytes, uint32, uint64 } from "./probeBytes"
 import { ebmlChildren, ebmlUint, parseElementHeader, type EbmlContext, type EbmlElement } from "./probeEbml"
 import { pictureTrack, walkContainer } from "./probe"
-import type { ByteRange, CuesLocation, ProbeVideo, SampleTables, VideoDecodeInfo } from "./probeTypes"
+import { accessAtOrBefore, locateSample, readMoof, type FragmentIndex } from "./probeFragments"
+import type { ByteRange, CuesLocation, ParsedContainer, ProbeVideo, SampleTables, VideoDecodeInfo } from "./probeTypes"
 
 // Keyframes located with the probe's own walkers, reading only the index bytes a lookup needs: an MP4's
-// sample tables (stts/stss/stsc entries, one chunk offset, the sizes up to the sample) or a Matroska's
-// Cues plus the header of the block they point at. One keyframe is then a single ranged read.
+// sample tables (stts/stss/stsc entries, one chunk offset, the sizes up to the sample), a fragmented MP4's
+// mfra plus the moof of the fragment it points at, or a Matroska's Cues plus the header of the block they
+// point at. One keyframe is then a single ranged read.
 
 // One keyframe's bytes in the file, and when it is shown.
 export interface KeyframeRef {
@@ -255,6 +257,45 @@ function mp4Index(source: BlockSource, tables: SampleTables): ((timeSec: number)
 	}
 }
 
+// ── Fragmented MP4 (mfra) ───────────────────────────────────────────────────
+
+function fragmentedIndex(
+	source: BlockSource,
+	index: FragmentIndex,
+	track: number
+): ((timeSec: number) => Promise<KeyframeRef | null>) | null {
+	const access = index.access.get(track)
+	const timescale = index.timescales.get(track) ?? 0
+
+	if (access === undefined || access.times.length === 0 || timescale <= 0) {
+		return null
+	}
+
+	const defaults = index.defaults.get(track)
+
+	return async timeSec => {
+		const entry = accessAtOrBefore(access, Math.max(0, timeSec) * timescale)
+		const moofStart = access.moofs[entry]
+
+		if (moofStart === undefined) {
+			return null
+		}
+
+		const frame = locateSample(
+			await readMoof(source, moofStart),
+			moofStart,
+			{ track, traf: access.trafs[entry] ?? 0, trun: access.truns[entry] ?? 0, sample: access.samples[entry] ?? 0 },
+			defaults
+		)
+
+		if (frame === null || frame.size > MAX_KEYFRAME_BYTES || frame.offset + frame.size > source.size) {
+			return null
+		}
+
+		return { ...frame, timeSec: (access.times[entry] ?? 0) / timescale }
+	}
+}
+
 // ── Matroska Cues ───────────────────────────────────────────────────────────
 
 // One track's cue points, in file order: time in Matroska ticks, the Cluster's position relative to the
@@ -271,7 +312,7 @@ export function parseCues(bytes: Uint8Array, track: number): CuePoints {
 
 	// Walked in place, not through ebmlChildren: its child cap would drop the points of a long or short-GOP
 	// file past MAX_EBML_CHILDREN, while MAX_CUES_BYTES already bounds this walk.
-	for (let at = 0; at < bytes.length; ) {
+	for (let at = 0; at < bytes.length;) {
 		const point = parseElementHeader(bytes, at)
 
 		if (typeof point === "string" || point.end === null || point.end > bytes.length) {
@@ -532,10 +573,28 @@ function decoderSetup(video: ProbeVideo, decode: VideoDecodeInfo): DecoderSetup 
 	return { codec: video.codecString, codedWidth: video.w, codedHeight: video.h, description: decode.description }
 }
 
+// The lookup the container's index allows: Matroska Cues, a fragmented MP4's mfra, or the MP4 sample tables
+// (empty in a fragmented file, so one without an mfra has nothing to look up).
+function keyframeLookup(
+	source: BlockSource,
+	parsed: ParsedContainer,
+	decode: VideoDecodeInfo
+): ((timeSec: number) => Promise<KeyframeRef | null>) | null {
+	if (parsed.container === "mkv" || parsed.container === "webm") {
+		return parsed.cues === undefined ? null : matroskaIndex(source, parsed.cues, decode.track)
+	}
+
+	if (parsed.fragments !== undefined) {
+		return fragmentedIndex(source, parsed.fragments, decode.track)
+	}
+
+	return parsed.index === "none" || decode.tables === null ? null : mp4Index(source, decode.tables)
+}
+
 // The picture track's keyframe index, or null when the file has none this can use: no container this
-// reads, a fragmented MP4, Matroska without Cues or with encoded frames. The walk reads headers the way a
-// card probe does; the index bytes are read on the first lookup. Failed downloads and an exhausted read
-// budget throw.
+// reads, a fragmented MP4 without an mfra, Matroska without Cues or with encoded frames. The walk reads
+// headers the way a card probe does (a fragmented MP4's tail too); the other index bytes are read on the
+// first lookup. Failed downloads and an exhausted read budget throw.
 export async function openKeyframeIndex(source: BlockSource): Promise<KeyframeIndex | null> {
 	const parsed = await walkContainer(source, "card", { keyframes: true })
 	const picture = parsed === null ? null : pictureTrack(parsed)
@@ -546,14 +605,7 @@ export async function openKeyframeIndex(source: BlockSource): Promise<KeyframeIn
 	}
 
 	const decoder = decoderSetup(picture.video, decode)
-	const keyframeAt =
-		parsed.container === "mkv" || parsed.container === "webm"
-			? parsed.cues === undefined
-				? null
-				: matroskaIndex(source, parsed.cues, decode.track)
-			: decode.tables === null
-				? null
-				: mp4Index(source, decode.tables)
+	const keyframeAt = keyframeLookup(source, parsed, decode)
 
 	if (decoder === null || keyframeAt === null) {
 		return null

@@ -1,3 +1,5 @@
+import type { FragmentIndex } from "./probeFragments"
+
 // What a video file's container says about it, read from its headers without decoding anything. Kept
 // JSON-serialisable and small (a few hundred bytes) so it can be cached per file uuid.
 
@@ -174,6 +176,8 @@ export interface ParsedContainer {
 	coverLand: ProbeCover | null
 	partial: boolean
 	cues?: CuesLocation
+	// A fragmented MP4's mfra index with what reading its moofs takes; only a walk asked for keyframes fills it.
+	fragments?: FragmentIndex
 	// Matroska: nanoseconds per tick of the Segment's timestamps.
 	timestampScale?: number
 }
