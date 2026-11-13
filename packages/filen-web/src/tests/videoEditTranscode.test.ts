@@ -1,7 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { AudioSample, type AudioSampleSource, type VideoSample, type VideoSampleSource } from "mediabunny"
 import { outputGeometry } from "@/features/preview/videoEdit/lib/plan"
-import { gainFactor, RangeAudio, transcodeAudio, type TimeStretchLike } from "@/features/preview/videoEdit/worker/audio"
+import {
+	gainFactor,
+	RangeAudio,
+	transcodeAudio,
+	type PlanarSampleLike,
+	type TimeStretchLike
+} from "@/features/preview/videoEdit/worker/audio"
 import { InterleaveGate } from "@/features/preview/videoEdit/worker/gate"
 import {
 	createFrameStage,
@@ -321,14 +327,44 @@ function lossyStretch(speed: number): TimeStretchLike {
 	}
 }
 
+// A decoded sample over `planes`, copying out as AudioSample.copyTo does; counts the frames it copied.
+function planarOf(planes: readonly Float32Array[], timestamp: number, copied = { frames: 0 }): PlanarSampleLike {
+	return {
+		timestamp,
+		numberOfFrames: planes[0]?.length ?? 0,
+		numberOfChannels: planes.length,
+		copyTo: (destination, options) => {
+			const plane = planes[options.planeIndex] ?? new Float32Array(0)
+
+			copied.frames += options.frameCount
+			destination.set(plane.subarray(options.frameOffset, options.frameOffset + options.frameCount))
+		}
+	}
+}
+
 describe("RangeAudio", () => {
+	it("copies only the kept frames, into one buffer reused across samples", () => {
+		const audio = new RangeAudio({ sampleRate: 1000, channels: 2, gainDb: 0, speed: 1, createStretch: null })
+		const copied = { frames: 0 }
+
+		audio.begin({ start: 0.25, end: 1.75 })
+
+		const first = audio.push(planarOf([new Float32Array(1000), new Float32Array(1000)], 0, copied))
+		const second = audio.push(planarOf([new Float32Array(1000), new Float32Array(1000)], 1, copied))
+
+		expect(copied.frames).toBe(2 * 750 + 2 * 750)
+		expect(first?.[0]?.length).toBe(750)
+		expect(second?.[0]?.buffer).toBe(second?.[1]?.buffer)
+		expect(second?.[0]?.buffer).toBe(first?.[0]?.buffer)
+	})
+
 	it("cuts sample-exactly at the range's edges", () => {
 		const audio = new RangeAudio({ sampleRate: 1000, channels: 1, gainDb: 0, speed: 1, createStretch: null })
 		const plane = Float32Array.from({ length: 1000 }, (_, index) => index)
 
 		audio.begin({ start: 0.25, end: 0.75 })
 
-		const kept = audio.push([plane], 0)
+		const kept = audio.push(planarOf([plane], 0))
 
 		expect(kept?.[0]?.length).toBe(500)
 		expect(kept?.[0]?.[0]).toBe(250)
@@ -348,7 +384,7 @@ describe("RangeAudio", () => {
 
 			// Decoded in 1024-frame blocks covering the range.
 			for (let at = Math.floor((range.start * sampleRate) / 1024) * 1024; at < range.end * sampleRate; at += 1024) {
-				audio.push([new Float32Array(1024), new Float32Array(1024)], at / sampleRate)
+				audio.push(planarOf([new Float32Array(1024), new Float32Array(1024)], at / sampleRate))
 			}
 
 			for (const planes of audio.end()) {
@@ -377,7 +413,7 @@ describe("RangeAudio", () => {
 
 		audio.begin({ start: 0, end: 1 })
 
-		const out = audio.push([Float32Array.from([0.1, -0.2, 0.9, -0.9, 0, 0, 0, 0, 0, 0])], 0)
+		const out = audio.push(planarOf([Float32Array.from([0.1, -0.2, 0.9, -0.9, 0, 0, 0, 0, 0, 0])], 0))
 
 		expect(out?.[0]?.[0]).toBeCloseTo(0.1 * gainFactor(6))
 		expect(out?.[0]?.[1]).toBeCloseTo(-0.2 * gainFactor(6))
@@ -392,7 +428,7 @@ describe("RangeAudio", () => {
 
 		audio.begin({ start: 0, end: 1 })
 
-		const out = audio.push([new Float32Array(10).fill(0.3)], 0)
+		const out = audio.push(planarOf([new Float32Array(10).fill(0.3)], 0))
 
 		expect(out?.[1]?.[0]).toBeCloseTo(0.3)
 	})

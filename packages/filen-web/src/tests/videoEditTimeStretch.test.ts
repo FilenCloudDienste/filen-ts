@@ -37,7 +37,8 @@ function stretch(input: readonly Float32Array[], speed: number, chunks: readonly
 		const size = Math.min(chunks[turn % chunks.length] ?? 1024, length - at)
 		const result = stretcher.push(input.map(channel => channel.subarray(at, at + size)))
 
-		result.forEach((channel, c) => outputs[c]?.push(channel))
+		// Views valid until the next call: kept as copies.
+		result.forEach((channel, c) => outputs[c]?.push(channel.slice()))
 		at += size
 		turn++
 	}
@@ -172,6 +173,17 @@ describe("createTimeStretch", () => {
 		expect(output).toEqual(input)
 		expect(output).not.toBe(input)
 		expect(stretcher.flush()[0]?.length).toBe(0)
+	})
+
+	it("returns views of one reused staging area rather than new arrays per call", () => {
+		const stretcher = createTimeStretch(RATE, 1, 2)
+		const block = sine(440, 0.05)
+		const [first] = stretcher.push([block])
+		const [second] = stretcher.push([block])
+
+		expect(first?.length).toBeGreaterThan(0)
+		expect(second?.length).toBeGreaterThan(0)
+		expect(second?.buffer).toBe(first?.buffer)
 	})
 
 	it("rejects speeds outside 0.25..4 and mismatched channels", () => {

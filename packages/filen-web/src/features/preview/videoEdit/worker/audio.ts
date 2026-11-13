@@ -7,10 +7,18 @@ import type { InterleaveGate } from "@/features/preview/videoEdit/worker/gate"
 // speed change, and an exact count of output frames per range (the stretch's own rounding is padded or trimmed), so
 // the audio's running length matches the video's to the sample after any number of joins.
 
-// The time stretch (audio/timeStretch.ts, WSOLA): planar in, planar out.
+// The time stretch (audio/timeStretch.ts, WSOLA): planar in, planar out (views valid until its next call).
 export interface TimeStretchLike {
 	push(planar: readonly Float32Array[]): Float32Array[]
 	flush(): Float32Array[]
+}
+
+// The part of a decoded AudioSample RangeAudio reads: its planes copied out as 32-bit float.
+export interface PlanarSampleLike {
+	readonly timestamp: number
+	readonly numberOfFrames: number
+	readonly numberOfChannels: number
+	copyTo(destination: Float32Array, options: { planeIndex: number; format: "f32-planar"; frameOffset: number; frameCount: number }): void
 }
 
 // Frames of silence emitted at once when a range's audio ends short of its video.
@@ -43,6 +51,8 @@ export class RangeAudio {
 	private stretch: TimeStretchLike | null = null
 	private writtenFrames = 0
 	private elapsed = 0
+	// The kept part of the latest sample, every channel back to back; reused (grown when a sample holds more).
+	private scratch = new Float32Array(0)
 
 	public constructor(params: {
 		sampleRate: number
@@ -70,24 +80,38 @@ export class RangeAudio {
 		this.stretch = this.createStretch?.() ?? null
 	}
 
-	// Decoded planes starting at `timestamp` (source seconds): what of them falls in the range, ready to encode, or null.
-	public push(source: readonly Float32Array[], timestamp: number): Float32Array[] | null {
-		const length = frames(source)
-		const from = Math.max(0, Math.round((this.range.start - timestamp) * this.sampleRate))
-		const to = Math.min(length, Math.round((this.range.end - timestamp) * this.sampleRate))
+	// What of a decoded sample (source seconds) falls in the range, ready to encode, or null. Only that part is copied
+	// out, once, into a buffer reused across samples, the gain applied in place: the planes returned are views of it
+	// (or of the stretch's output), valid until the next push.
+	public push(sample: PlanarSampleLike): Float32Array[] | null {
+		const from = Math.max(0, Math.round((this.range.start - sample.timestamp) * this.sampleRate))
+		const to = Math.min(sample.numberOfFrames, Math.round((this.range.end - sample.timestamp) * this.sampleRate))
 
-		if (to <= from) {
+		if (to <= from || sample.numberOfChannels < 1) {
 			return null
+		}
+
+		const count = to - from
+
+		if (this.scratch.length < count * this.channels) {
+			this.scratch = new Float32Array(count * this.channels)
 		}
 
 		const planes: Float32Array[] = []
 
 		for (let channel = 0; channel < this.channels; channel++) {
+			const plane = this.scratch.subarray(channel * count, (channel + 1) * count)
+
 			// A decoder that returns fewer planes than the track declares: the first stands in.
-			const plane = (source[channel] ?? source[0] ?? new Float32Array(length)).slice(from, to)
+			sample.copyTo(plane, {
+				planeIndex: channel < sample.numberOfChannels ? channel : 0,
+				format: "f32-planar",
+				frameOffset: from,
+				frameCount: count
+			})
 
 			if (this.gain !== 1) {
-				for (let index = 0; index < plane.length; index++) {
+				for (let index = 0; index < count; index++) {
 					plane[index] = Math.max(-FULL_SCALE, Math.min(FULL_SCALE, (plane[index] ?? 0) * this.gain))
 				}
 			}
@@ -144,19 +168,6 @@ export function planarSample(planes: readonly Float32Array[], sampleRate: number
 	return new AudioSample({ data, format: "f32-planar", numberOfChannels: planes.length, sampleRate, timestamp })
 }
 
-export function samplePlanes(sample: AudioSample): Float32Array[] {
-	const planes: Float32Array[] = []
-
-	for (let channel = 0; channel < sample.numberOfChannels; channel++) {
-		const plane = new Float32Array(sample.numberOfFrames)
-
-		sample.copyTo(plane, { planeIndex: channel, format: "f32-planar" })
-		planes.push(plane)
-	}
-
-	return planes
-}
-
 export interface TranscodeAudioParams {
 	// Decoded samples covering `range` (from the one holding its start), in order. Each is closed by the caller.
 	decode: (range: TimeRange) => AsyncIterable<AudioSample>
@@ -193,7 +204,7 @@ export async function transcodeAudio(params: TranscodeAudioParams): Promise<void
 			try {
 				throwIfCancelled(signal)
 
-				planes = audio.push(samplePlanes(sample), sample.timestamp)
+				planes = audio.push(sample)
 			} finally {
 				sample.close()
 			}

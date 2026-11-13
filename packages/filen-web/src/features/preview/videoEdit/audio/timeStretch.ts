@@ -6,14 +6,15 @@
 //
 // Streaming and allocation-free in steady state: the input sits in fixed ring buffers sized for the speed at
 // construction, the overlap-add accumulator is one window long, and the correlation runs over preallocated
-// scratch. Only each call's output arrays are new. All channels share one segment choice (made on their
+// scratch; each call returns views of a reused staging area. All channels share one segment choice (made on their
 // downmix), so the stereo image and the phase between channels are kept.
 
 export const MIN_STRETCH_SPEED = 0.25
 export const MAX_STRETCH_SPEED = 4
 
 export interface TimeStretch {
-	// Takes the next input samples (one array per channel, equal lengths) and returns what is final so far.
+	// Takes the next input samples (one array per channel, equal lengths) and returns what is final so far: views valid
+	// until the next call, which reuses their memory.
 	push(planar: readonly Float32Array[]): Float32Array[]
 	// Ends the stream: the rest, so that the whole output is round(input length / speed) samples long. Later
 	// calls to push throw.
@@ -370,7 +371,8 @@ class Wsola implements TimeStretch {
 	}
 
 	private drain(): Float32Array[] {
-		const out = this.staging.map(channel => channel.slice(0, this.staged))
+		// Views of the staging area, overwritten by the next call (TimeStretch).
+		const out = this.staging.map(channel => channel.subarray(0, this.staged))
 
 		this.staged = 0
 
