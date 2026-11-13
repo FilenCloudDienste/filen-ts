@@ -63,6 +63,7 @@ import { ImageEditor } from "@/features/preview/imageEdit/components/imageEditor
 import { enterImageEdit, takenNames, type ImageEditState } from "@/features/preview/imageEdit/editSession"
 import { ORIENTATION_REWRITE_UNAVAILABLE } from "@/features/preview/imageEdit/orientationRewrite"
 import { inPlaceFormatByName } from "@/features/preview/imageEdit/lib/targets"
+import { inPlaceVideoContainerByName } from "@/features/preview/videoEdit/lib/targets"
 import type { ImageEditorCommands, ImageExportSource, SaveTarget } from "@/features/preview/imageEdit/types"
 import type { ActionOutcome } from "@/lib/actions/outcome"
 import type { ErrorDTO } from "@/lib/sdk/errors"
@@ -2330,6 +2331,11 @@ function saveFormat(item: DriveItem): string {
 	// An image saves in place in the format its name says (a rename to another leaves the editor saving copies only).
 	if (category === "image") {
 		return `image:${inPlaceFormatByName(driveItemName(item)) ?? ""}`
+	}
+
+	// A video saves in place as the container its name says (a rename to another leaves the editor saving copies only).
+	if (category === "video") {
+		return `video:${inPlaceVideoContainerByName(driveItemName(item)) ?? ""}`
 	}
 
 	// A deck saves as the package it opened as (a template stays a template, a show a show).

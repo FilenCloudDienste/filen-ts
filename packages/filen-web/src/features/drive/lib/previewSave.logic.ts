@@ -9,6 +9,7 @@ import { type DriveVariant } from "@/features/drive/lib/preferences"
 import { isEditableSpreadsheetExtension } from "@/features/spreadsheet/lib/fileKind"
 import { isEditablePresentationExtension } from "@/features/presentation/lib/fileKind"
 import { inPlaceFormatByName } from "@/features/preview/imageEdit/lib/targets"
+import { inPlaceVideoContainerByName } from "@/features/preview/videoEdit/lib/targets"
 import type { Orientation } from "@/features/preview/imageEdit/types"
 import { captureTimestamp } from "@/features/photos/lib/captureSort"
 import { runOp, type ActionOutcome } from "@/lib/actions/outcome"
@@ -90,6 +91,12 @@ export function isEditable(item: DriveItem, variant: DriveVariant): boolean {
 		return inPlaceFormatByName(driveItemName(base)) !== null
 	}
 
+	// A video saves in place only as the ISO BMFF container its name says (MP4, QuickTime); others edit into an MP4
+	// copy (canEditVideo).
+	if (category === "video") {
+		return inPlaceVideoContainerByName(driveItemName(base)) !== null
+	}
+
 	return isTextCategory(category)
 }
 
@@ -107,6 +114,27 @@ export function canEditImage(item: DriveItem, variant: DriveVariant): boolean {
 	}
 
 	return extensionOf(driveItemName(base)) !== "svg" && base.data.decryptedMeta?.mime !== "image/svg+xml"
+}
+
+// Containers the video editor reads (its export demuxes them): MP4 and QuickTime, Matroska and WebM, MPEG-TS, 3GPP.
+// Never AVI, WMV or FLV: nothing reads them, so nothing could be exported.
+const VIDEO_EDIT_EXTENSIONS: ReadonlySet<string> = new Set(["mp4", "m4v", "mov", "qt", "mkv", "webm", "ts", "m2ts", "mts", "3gp", "3g2"])
+
+// Whether the preview offers the video editor: a video in the user's own drive in a container the export reads, saved
+// in place as MP4/MOV or as an MP4 copy beside it. Shared-in, public, trash and recents never edit (variant "drive"
+// only), nor does an undecryptable file. Whether this browser can show its frames is the editor's own check.
+export function canEditVideo(item: DriveItem, variant: DriveVariant): boolean {
+	if (variant !== "drive") {
+		return false
+	}
+
+	const base = asDirectoryOrFile(item)
+
+	if (base.type !== "file" || base.data.undecryptable || previewType(item) !== "video") {
+		return false
+	}
+
+	return VIDEO_EDIT_EXTENSIONS.has(extensionOf(driveItemName(base)))
 }
 
 // Whether the preview is text an editor holds as a string (a line diff can compare two versions of it).
@@ -136,7 +164,7 @@ export interface PreviewSaveDeps {
 		port: MessagePort,
 		name: string,
 		mime: string,
-		options: UploadTimes & { size?: number }
+		options: UploadTimes & { size?: number; transferId?: string }
 	) => Promise<SdkFile>
 	// A Blob the SDK worker streams itself (an edited image): the Blob crosses by reference, its bytes are never copied here.
 	uploadFileBlob?: (parentUuid: string | null, blob: Blob, name: string, mime: string, options: UploadTimes) => Promise<SdkFile>
@@ -181,11 +209,13 @@ function dropUuid(items: DriveItem[], uuid: string): DriveItem[] {
 // file itself moved on from, or of a file deleted meanwhile), leaving the file's own row alone. The name
 // must be free: the same upload onto a taken name would make a new version of that file.
 // What a save uploads: text, bytes, a port a worker writes the file to (never held whole on the page), a Blob, or the
-// file itself with a new Exif Orientation.
+// file itself with a new Exif Orientation. A port's `size` is exact (the SDK sizes its buffers by it); `quotaBytes`
+// only sizes the storage pre-flight for a port whose size is not known before it is written (an estimate, never
+// handed to the upload). `transferId`: the upload runs as that transfer row's (progress, cancel, pause).
 export type PreviewSaveContent =
 	| string
 	| Uint8Array
-	| { readonly port: MessagePort; readonly size?: number }
+	| { readonly port: MessagePort; readonly size?: number; readonly quotaBytes?: number; readonly transferId?: string }
 	| { readonly blob: Blob }
 	| { readonly orientation: Orientation }
 
@@ -268,7 +298,9 @@ function neededBytes(content: Exclude<PreviewSaveContent, string>, file: SdkFile
 		return file.size
 	}
 
-	return content.size === undefined ? null : BigInt(content.size)
+	const size = content.size ?? (content.quotaBytes === undefined ? undefined : Math.ceil(content.quotaBytes))
+
+	return size === undefined ? null : BigInt(size)
 }
 
 function upload(
@@ -304,7 +336,8 @@ function upload(
 
 	return deps.uploadFileFromPort(parent, Comlink.transfer(content.port, [content.port]), name, mime, {
 		...options,
-		...(content.size === undefined ? {} : { size: content.size })
+		...(content.size === undefined ? {} : { size: content.size }),
+		...(content.transferId === undefined ? {} : { transferId: content.transferId })
 	})
 }
 

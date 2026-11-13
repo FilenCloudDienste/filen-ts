@@ -152,6 +152,20 @@ export interface ExportProgress {
 
 export type ExportOutcome = { status: "done"; uuid: string } | { status: "cancelled" } | { status: "error"; message: string }
 
+// Why a save never started (or stopped for its input rather than a fault; retrying will not help): offline; the
+// account's storage cannot hold the estimate; the recipe asks for what this browser cannot do; a copy fragment would
+// exceed iOS's memory cap; no video to export; a codec the export cannot copy or decode; a target the plan does not
+// offer for this file.
+export type VideoSaveRefusal = "offline" | "quota" | "unavailable" | "gop" | "noVideo" | "codec" | "target"
+
+// How a save of an export ended, as the editor reports it: ExportOutcome, a refusal, or the file changed elsewhere
+// before the upload started (`currentUuid`: its version now, null when it is gone), for the remote-change dialog.
+// "error" is a fault worth a retry (the recipe is kept): a failed upload, a stalled or lost worker.
+export type VideoSaveOutcome =
+	| ExportOutcome
+	| { status: "refused"; reason: VideoSaveRefusal; message: string }
+	| { status: "remoteChanged"; currentUuid: string | null }
+
 // The worker-side surface the editor UI drives (implemented in videoEdit/client.ts).
 export interface VideoEditClient {
 	loadSource(): Promise<VideoSourceInfo>

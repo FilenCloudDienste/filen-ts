@@ -79,6 +79,7 @@ import {
 	nextBackoffMs,
 	playbackFlushReason,
 	pruneTargets,
+	rebasedEditRecord,
 	recentUploads,
 	sameBytes,
 	versionOf,
@@ -544,6 +545,34 @@ export class WatchStateEngine {
 					})
 			}
 		])
+	}
+
+	// An edited video was saved as a new version of the same file (rebasedEditRecord): its resume point follows the
+	// edit, its subtitle offset is cleared. `map` takes a time of the previous version to the new one's.
+	public rebaseEdited(params: {
+		stableUuid: string
+		previous: { uuid: string; size: number }
+		uuid: string
+		size: number
+		duration: number
+		map: (seconds: number) => number | null
+	}): Promise<void> {
+		if (!this.writable()) {
+			return Promise.resolve()
+		}
+
+		const key = itemKey(params.stableUuid)
+		const written = this.journal([
+			{
+				key,
+				edit: doc => rebasedEditRecord({ ...params, rec: doc.items[key], stamp: this.stamp() })
+			}
+		])
+
+		this.semanticEdits++
+		this.schedule("semantic")
+
+		return this.track(written)
 	}
 
 	// A series' audio and subtitle language (null subtitle = off); an omitted one is left as it is.

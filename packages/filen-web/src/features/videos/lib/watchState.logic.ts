@@ -1,7 +1,18 @@
 import { type } from "arktype"
 import type { File as SdkFile, FileVersion, UuidStr } from "@filen/sdk-rs"
 import { isUuid } from "@filen/shared"
-import { emptyWatchState, mergeRecordMaps, parseWatchState, type RegisterRecord, type WatchStateDoc } from "@filen/shared/videos"
+import {
+	emptyWatchState,
+	mergeRecordMaps,
+	parseWatchState,
+	progressMatchesFile,
+	withProgress,
+	withSubtitleOffset,
+	type ItemRec,
+	type RegisterRecord,
+	type Stamp,
+	type WatchStateDoc
+} from "@filen/shared/videos"
 
 // The watch-state engine's rules: when progress is journaled locally, when the synced file is uploaded, which old
 // versions of it are deleted, and the shapes it keeps in kv and localStorage. Plain and DOM-free.
@@ -482,4 +493,49 @@ export function encodePending({
 
 		kept.pop()
 	}
+}
+
+// ── Edited videos ──
+
+// An edited video saved as a new version of the same file (same stable uuid): the resume point moves to where that
+// moment lands in the edit (`map`; null when it was cut, so playback starts over) and is fingerprinted with the new
+// version; a subtitle offset, timed against the old cut, is cleared. A stack's later part keeps its record (its
+// position is another part's), as does a record about another version. Null when nothing changes.
+export function rebasedEditRecord({
+	rec,
+	stamp,
+	previous,
+	uuid,
+	size,
+	duration,
+	map
+}: {
+	rec: ItemRec | undefined
+	stamp: Stamp
+	previous: { uuid: string; size: number }
+	uuid: string
+	size: number
+	duration: number
+	map: (seconds: number) => number | null
+}): ItemRec | null {
+	if (rec === undefined) {
+		return null
+	}
+
+	const progress = rec.p
+	const rebase =
+		progress !== undefined &&
+		(progress.part ?? 0) === 0 &&
+		progressMatchesFile({ progress, file: { uuid: previous.uuid, size: previous.size } })
+	let next: ItemRec = rec
+
+	if (rebase) {
+		next = withProgress({ rec: next, stamp, pos: map(progress.pos) ?? 0, dur: duration, lp: progress.lp, uuid, size })
+	}
+
+	if (rec.o !== undefined && rec.o.subMs !== 0) {
+		next = withSubtitleOffset({ rec: next, stamp, subMs: 0 })
+	}
+
+	return next === rec ? null : next
 }
