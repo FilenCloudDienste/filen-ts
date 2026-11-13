@@ -22,6 +22,8 @@ export function EditSlider(props: {
 	format?: ((value: number) => string) | undefined
 	// A scale of ticks under the track every `step`, taller every `major`, for a slider read against its centre.
 	scale?: { step: number; major: number } | undefined
+	// Off, with the value still shown (the video editor's tools a browser cannot save).
+	disabled?: boolean | undefined
 	onChange: (value: number) => void
 	onReset: () => void
 }) {
@@ -45,7 +47,7 @@ export function EditSlider(props: {
 		<div
 			className="flex flex-col gap-1"
 			onDoubleClick={() => {
-				if (modified) {
+				if (modified && props.disabled !== true) {
 					props.onReset()
 				}
 			}}
@@ -85,6 +87,7 @@ export function EditSlider(props: {
 				</div>
 				<Slider
 					aria-labelledby={`${id}-label`}
+					disabled={props.disabled}
 					className="relative **:data-[slot=slider-range]:hidden **:data-[slot=slider-track]:bg-transparent"
 					min={props.min}
 					max={props.max}

@@ -543,3 +543,48 @@ export function clampTexts(recipe: VideoEditRecipe): VideoEditRecipe {
 
 	return { ...recipe, text: recipe.text.filter(text => text.startSec < output).map(text => clampTextTimes(text, output)) }
 }
+
+export interface LayoutBox {
+	left: number
+	top: number
+	width: number
+	height: number
+}
+
+// How the playing <video> is laid out to show `crop`, turned and mirrored, filling `box` (the output's box on the
+// stage): a window the crop's size (before the turn) centred in the box, turned and mirrored about its centre, holding
+// the whole display frame offset so the crop shows through it. Geometry only: colour and text need the exact frame.
+export function playbackLayout(
+	display: Size,
+	crop: VideoCrop | null,
+	rotate: VideoRotation,
+	flipH: boolean,
+	flipV: boolean,
+	box: Size
+): { window: LayoutBox; video: LayoutBox; transform: string } {
+	const shown = crop ?? { x: 0, y: 0, width: display.width, height: display.height }
+	const turned = turnedSize(rotate, { width: shown.width, height: shown.height })
+	const scale = turned.width > 0 ? box.width / turned.width : 0
+	const width = shown.width * scale
+	const height = shown.height * scale
+
+	return {
+		window: { left: (box.width - width) / 2, top: (box.height - height) / 2, width, height },
+		video: { left: -shown.x * scale, top: -shown.y * scale, width: display.width * scale, height: display.height * scale },
+		transform: `scale(${flipH ? "-1" : "1"}, ${flipV ? "-1" : "1"}) rotate(${String(rotate)}deg)`
+	}
+}
+
+// What the stage shows over the frame: nothing (the result), the crop frame over the whole turned picture, or the text
+// boxes to drag.
+export type StageMode = "result" | "crop" | "text"
+
+// The recipe the stage's exact frame is drawn with: the crop tab shows the whole frame under its crop frame, the text
+// tab draws its boxes itself (they move under the pointer).
+export function stageRecipe(recipe: VideoEditRecipe, mode: StageMode): VideoEditRecipe {
+	if (mode === "crop") {
+		return { ...recipe, crop: null, text: [] }
+	}
+
+	return mode === "text" ? { ...recipe, text: [] } : recipe
+}

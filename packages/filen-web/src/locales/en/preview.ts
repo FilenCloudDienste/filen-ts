@@ -36,6 +36,8 @@ import { previewPptxExport } from "@/locales/en/previewPptx/export"
 import { previewImageEditor } from "@/locales/en/previewImage/editor"
 import { previewImageSave } from "@/locales/en/previewImage/save"
 import { previewVideoEditKeys } from "@/locales/en/previewVideoEdit/keys"
+import { previewVideoEditor } from "@/locales/en/previewVideoEdit/editor"
+import { previewVideoSave } from "@/locales/en/previewVideoEdit/save"
 import { previewPptxPresenter } from "@/locales/en/previewPptx/presenter"
 import { previewPptxInk } from "@/locales/en/previewPptx/ink"
 import { previewPptxSmartArt } from "@/locales/en/previewPptx/smartart"
@@ -816,5 +818,7 @@ export const preview = {
 	...previewImageEditor,
 	...previewImageSave,
 	...previewVideoEditKeys,
+	...previewVideoEditor,
+	...previewVideoSave,
 	...previewKeysShortcuts
 } as const
