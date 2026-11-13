@@ -45,8 +45,9 @@ function clampAdjustment(key: keyof Adjustments, value: number): number {
 	return Math.min(100, Math.max(min, value))
 }
 
-// The adjustments to render: the user's plus the filter's, clamped. Without a filter, the user's own object.
-export function effectiveAdjustments(recipe: ImageEditRecipe): Adjustments {
+// The adjustments to render: the user's plus the filter's, clamped. Without a filter, the user's own object. The video
+// editor's recipe passes its own adjustments here too.
+export function effectiveAdjustments(recipe: Pick<ImageEditRecipe, "adjustments" | "filter">): Adjustments {
 	const preset = filterPreset(recipe.filter)
 
 	if (preset === null) {

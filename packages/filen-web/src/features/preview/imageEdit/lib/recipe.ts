@@ -196,7 +196,8 @@ export function aspectRect(aspect: AspectPreset, frame: Size, within: Crop = FUL
 	return { x: within.x + (within.width - width) / 2, y: within.y + (within.height - height) / 2, width, height }
 }
 
-function multiply(a: Matrix3, b: Matrix3): Matrix3 {
+// a ∘ b: b applied first.
+export function multiplyMatrix3(a: Matrix3, b: Matrix3): Matrix3 {
 	return [
 		a[0] * b[0] + a[3] * b[1],
 		a[1] * b[0] + a[4] * b[1],
@@ -210,7 +211,8 @@ function multiply(a: Matrix3, b: Matrix3): Matrix3 {
 	]
 }
 
-function affine(a: number, b: number, c: number, d: number, e: number, f: number): Matrix3 {
+// x' = a·x + c·y + e, y' = b·x + d·y + f.
+export function affineMatrix3(a: number, b: number, c: number, d: number, e: number, f: number): Matrix3 {
 	return [a, b, 0, c, d, 0, e, f, 1]
 }
 
@@ -226,23 +228,23 @@ export function geometryMatrix(recipe: ImageEditRecipe, source: Size): Matrix3 {
 	const cx = cropX + cropW / 2
 	const cy = cropY + cropH / 2
 	// Output px → straightened frame px (the crop is a whole number of output px, so scale by the exact ratio).
-	const toStraightened = affine(cropW / out.width, 0, 0, cropH / out.height, cropX, cropY)
+	const toStraightened = affineMatrix3(cropW / out.width, 0, 0, cropH / out.height, cropX, cropY)
 	// Straightened → turned-and-flipped frame: turn back by −angle about the crop centre.
 	const radians = (-g.angle * Math.PI) / 180
 	const c = Math.cos(radians)
 	const s = Math.sin(radians)
-	const unstraighten = affine(c, s, -s, c, cx - c * cx + s * cy, cy - s * cx - c * cy)
+	const unstraighten = affineMatrix3(c, s, -s, c, cx - c * cx + s * cy, cy - s * cx - c * cy)
 	// Undo the flips (each its own inverse).
-	const unflip = affine(g.flipH ? -1 : 1, 0, 0, g.flipV ? -1 : 1, g.flipH ? frame.width : 0, g.flipV ? frame.height : 0)
+	const unflip = affineMatrix3(g.flipH ? -1 : 1, 0, 0, g.flipV ? -1 : 1, g.flipH ? frame.width : 0, g.flipV ? frame.height : 0)
 	// Undo the clockwise turns: one turn maps upright (x, y) to (H − y, x) in an H-wide frame, so its inverse maps
 	// turned (X, Y) to (Y, H − X), H being the upright height.
-	let unturn: Matrix3 = affine(1, 0, 0, 1, 0, 0)
+	let unturn: Matrix3 = affineMatrix3(1, 0, 0, 1, 0, 0)
 	let width = frame.width
 	let height = frame.height
 
 	for (let turn = 0; turn < g.quarterTurns; turn++) {
 		// This step's frame is width×height; the one before it is height×width.
-		unturn = multiply(affine(0, -1, 1, 0, 0, width), unturn)
+		unturn = multiplyMatrix3(affineMatrix3(0, -1, 1, 0, 0, width), unturn)
 
 		const previousWidth = height
 
@@ -250,7 +252,7 @@ export function geometryMatrix(recipe: ImageEditRecipe, source: Size): Matrix3 {
 		width = previousWidth
 	}
 
-	return multiply(unturn, multiply(unflip, multiply(unstraighten, toStraightened)))
+	return multiplyMatrix3(unturn, multiplyMatrix3(unflip, multiplyMatrix3(unstraighten, toStraightened)))
 }
 
 export function invertMatrix3(m: Matrix3): Matrix3 {
@@ -265,7 +267,7 @@ export function invertMatrix3(m: Matrix3): Matrix3 {
 	const c = -m[3] / det
 	const d = m[0] / det
 
-	return affine(a, b, c, d, -(a * m[6] + c * m[7]), -(b * m[6] + d * m[7]))
+	return affineMatrix3(a, b, c, d, -(a * m[6] + c * m[7]), -(b * m[6] + d * m[7]))
 }
 
 export function transformPoint(m: Matrix3, x: number, y: number): [number, number] {
