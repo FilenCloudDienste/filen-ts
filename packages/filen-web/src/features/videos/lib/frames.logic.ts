@@ -64,8 +64,9 @@ export function usableKey(hint: FrameHint | null): FrameKey | null {
 	return hint !== null && hint.recipe === FRAME_RECIPE_VERSION ? hint.key : null
 }
 
-// Frames come only from files whose keyframes can be found without scanning: MP4/MOV with sample tables
-// (not fragmented), Matroska/WebM with Cues. A card probe of an MP4 may leave the index unknown (null).
+// Frames come only from files whose keyframes can be found without scanning: MP4/MOV with sample tables,
+// a fragmented MP4 with an mfra, Matroska/WebM with Cues. A card probe of an MP4 may leave the index unknown
+// (null); a fragmented MP4 without an mfra ("none") has nothing to find them with.
 export function frameEligible(probe: VideoProbe | null): boolean {
 	if (probe === null) {
 		return false
@@ -79,7 +80,7 @@ export function frameEligible(probe: VideoProbe | null): boolean {
 		return probe.index === "cues"
 	}
 
-	return probe.index === "moov" || probe.index === null
+	return probe.index === "moov" || probe.index === "mfra" || probe.index === null
 }
 
 // What generated frames may still spend this session.
