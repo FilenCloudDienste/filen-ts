@@ -15,7 +15,7 @@ function isEditorAction(id: VideoEditorAction): id is EditorVideoAction {
 const EDITOR_ACTIONS: readonly EditorVideoAction[] = VIDEO_EDITOR_ACTIONS.map(def => def.id).filter(isEditorAction)
 const DEFS: ReadonlyMap<string, ActionDef> = new Map(VIDEO_EDITOR_ACTIONS.map(def => [def.id, def]))
 
-// Keys that act once per press; the rest (stepping, undo, zoom) repeat while held.
+// Keys that repeat while held (stepping, undo, zoom); the rest act once per press.
 const REPEATS: ReadonlySet<EditorVideoAction> = new Set<EditorVideoAction>([
 	"preview.videoUndo",
 	"preview.videoRedo",

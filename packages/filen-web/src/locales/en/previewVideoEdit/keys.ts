@@ -1,6 +1,8 @@
 // "preview" namespace, video editor — the keyboard shortcuts list's names for its keys. Spread into preview.ts; same
 // catalog rules.
 export const previewVideoEditKeys = {
+	/** Keyboard shortcuts list (file preview) — open the video on screen in the video editor; unassigned by default */
+	previewVideoEditKeyOpen: "Edit video",
 	/** Keyboard shortcuts list (video editor) — undo the last edit */
 	previewVideoEditKeyUndo: "Undo the last video edit",
 	/** Keyboard shortcuts list (video editor) — redo the edit just undone */
@@ -12,11 +14,11 @@ export const previewVideoEditKeys = {
 	/** Keyboard shortcuts list (video editor) — start or stop playback */
 	previewVideoEditKeyPlayPause: "Play or pause",
 	/** Keyboard shortcuts list (video editor) — the J of J/K/L: go back one second */
-	previewVideoEditKeyShuttleBack: "Back one second",
+	previewVideoEditKeyShuttleBack: "Shuttle back one second",
 	/** Keyboard shortcuts list (video editor) — the K of J/K/L: stop playback */
-	previewVideoEditKeyShuttlePause: "Pause",
+	previewVideoEditKeyShuttlePause: "Shuttle stop",
 	/** Keyboard shortcuts list (video editor) — the L of J/K/L: play, faster with each press */
-	previewVideoEditKeyShuttleForward: "Play, faster with each press",
+	previewVideoEditKeyShuttleForward: "Shuttle forward, faster with each press",
 	/** Keyboard shortcuts list (video editor) — move the playhead one frame back */
 	previewVideoEditKeyFrameBack: "Previous frame",
 	/** Keyboard shortcuts list (video editor) — move the playhead one frame forward */

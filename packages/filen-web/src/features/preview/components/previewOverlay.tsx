@@ -64,6 +64,7 @@ import { ORIENTATION_REWRITE_UNAVAILABLE } from "@/features/preview/imageEdit/or
 import { inPlaceFormatByName } from "@/features/preview/imageEdit/lib/targets"
 import { inPlaceVideoContainerByName } from "@/features/preview/videoEdit/lib/targets"
 import { createVideoEditClient } from "@/features/preview/videoEdit/client"
+import { isVideoExportRunning } from "@/features/preview/videoEdit/save"
 import { VideoEditor, type VideoEditorCommands } from "@/features/preview/videoEdit/components/videoEditor"
 import { VIDEO_CANCEL_ACTION } from "@/features/preview/videoEdit/lib/keys"
 import type { VideoSaveTarget } from "@/features/preview/videoEdit/types"
@@ -595,6 +596,14 @@ export function PreviewOverlay({
 			pendingIntent !== null ||
 			menuDialogKind !== null
 		) {
+			return
+		}
+
+		// A save of this video still running (in an editor gone to the background, or a transfer): a second one would
+		// race it for the same name or version, so the editor waits until it ends.
+		if (isVideoExportRunning(stableUuidOf(item) ?? item.data.uuid)) {
+			toast.error(t("previewVideoEditExportRunning"))
+
 			return
 		}
 
@@ -1475,6 +1484,7 @@ export function PreviewOverlay({
 		}
 	})
 	const startImageEditRef = useLatestRef(startImageEdit)
+	const startVideoEditRef = useLatestRef(startVideoEdit)
 	// A video export's end, as things stand when it comes (the export may outlive the editor that started it).
 	const videoSaveSettledRef = useLatestRef(videoSaveSettled)
 	// A save asked for while one was in flight (a second Mod+S, an autosave meeting one), and whether only autosaves
@@ -1533,6 +1543,11 @@ export function PreviewOverlay({
 	// A no-op unless the slot shows an image the editor opens (startImageEdit's guards).
 	useAction("preview.editImage", () => {
 		startImageEditRef.current()
+	})
+
+	// Likewise for a video (startVideoEdit's guards); unbound until the user assigns it.
+	useAction("preview.editVideo", () => {
+		startVideoEditRef.current()
 	})
 
 	// The overlay's own keys (handleKeyDown) and its menu's ⋯ trigger, which Shift+F10 opens.
@@ -2050,6 +2065,7 @@ export function PreviewOverlay({
 										<TooltipIconButton
 											label={t("previewVideoEditOpen")}
 											disabled={videoMode.entering || saving}
+											shortcut={<Kbd action="preview.editVideo" />}
 											onClick={startVideoEdit}
 										>
 											{videoMode.entering ? <Spinner className="size-4" /> : <PencilIcon />}

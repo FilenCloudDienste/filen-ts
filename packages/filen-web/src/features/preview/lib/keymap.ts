@@ -378,6 +378,15 @@ export const PREVIEW_ACTIONS: readonly ActionDef[] = [
 		descriptionKey: "preview:previewImageSaveEditShortcut",
 		hintKey: "settings:keyboardHintImage"
 	},
+	// The video on screen into the editor. E is the image's; unassigned, so it can be bound.
+	{
+		id: "preview.editVideo",
+		defaultCombo: "",
+		scope: "editor",
+		section: "viewer",
+		descriptionKey: "preview:previewVideoEditKeyOpen",
+		hintKey: "settings:keyboardHintPreview"
+	},
 	...PDF_VIEWER_ACTIONS,
 	...IMAGE_EDITOR_ACTIONS,
 	...VIDEO_EDITOR_ACTIONS,

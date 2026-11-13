@@ -20,7 +20,9 @@ const harness = vi.hoisted(() => ({
 	exporting: false,
 	openSave: vi.fn(),
 	toastError: vi.fn(),
-	splices: [] as unknown[]
+	splices: [] as unknown[],
+	// Files (stable uuid, else uuid) with a save of an edit running.
+	running: new Set<string>()
 }))
 
 vi.mock("@/queries/client", () => ({ queryClient: new QueryClient() }))
@@ -49,6 +51,10 @@ vi.mock("@/features/preview/videoEdit/client", () => ({
 			harness.disposed++
 		}
 	})
+}))
+vi.mock("@/features/preview/videoEdit/save", async () => ({
+	...(await vi.importActual<typeof import("@/features/preview/videoEdit/save")>("@/features/preview/videoEdit/save")),
+	isVideoExportRunning: (file: string) => harness.running.has(file)
 }))
 vi.mock("@/features/preview/videoEdit/components/videoEditor", () => ({
 	VideoEditor: (props: VideoEditorProps) => {
@@ -138,6 +144,7 @@ beforeEach(() => {
 	harness.disposed = 0
 	harness.exporting = false
 	harness.splices = []
+	harness.running.clear()
 	harness.openSave.mockClear()
 	harness.toastError.mockClear()
 	usePreviewUnsavedGuardStore.setState({ dirty: false, logoutRequest: null })
@@ -179,6 +186,27 @@ describe("PreviewOverlay — video editing", () => {
 		})
 		expect(screen.queryByTestId("video-editor")).toBeNull()
 		expect(harness.disposed).toBe(1)
+	})
+
+	it("refuses to open the editor while a save of the same video still runs, saying why", async () => {
+		harness.running.add(UUID)
+
+		render(
+			createElement(PreviewOverlay, {
+				variant: "drive" as const,
+				items: [video()],
+				index: 0,
+				onStep: vi.fn(),
+				onClose: vi.fn(),
+				onItemRemoved: vi.fn()
+			})
+		)
+
+		fireEvent.click(await screen.findByRole("button", { name: "Edit video" }))
+
+		expect(harness.toastError).toHaveBeenCalledWith("This video is still being saved. Edit it again once that save finishes.")
+		expect(screen.queryByTestId("video-editor")).toBeNull()
+		expect(harness.disposed).toBe(0)
 	})
 
 	it("shows the new version once an in-place save lands, and leaves edit mode", async () => {
