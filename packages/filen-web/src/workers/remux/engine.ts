@@ -1,17 +1,11 @@
 import {
 	ADTS,
-	CustomSource,
 	EncodedPacketSink,
 	FLAC,
-	Input,
 	MATROSKA,
 	MP3,
-	MP4,
-	MPEG_TS,
-	OGG,
-	QTFF,
-	WAVE,
 	WEBM,
+	type Input,
 	type AudioCodec,
 	type EncodedPacket,
 	type InputAudioTrack,
@@ -20,10 +14,10 @@ import {
 	type Rotation,
 	type VideoCodec
 } from "mediabunny"
-import { BLOCK_BYTES, BlockSource, probeVideo, walkContainer } from "@filen/shared/videos"
-import { BlockAbortError, BlockCache } from "@/lib/media/blockCache"
+import { BlockSource, probeVideo, walkContainer } from "@filen/shared/videos"
+import { BlockAbortError, type BlockCache } from "@/lib/media/blockCache"
+import { openBlockInput, type BlockInput } from "@/lib/media/blockInput"
 import { isInitSegment } from "@/lib/media/fmp4Split"
-import { rangePortReader, type RangePortReader } from "@/lib/media/rangePort"
 import {
 	IdrUnreachableError,
 	SourceReadError,
@@ -74,16 +68,9 @@ import { FragmentedTrackOutput, FragmentTooLargeError } from "@/workers/remux/ou
 import { PumpGate, runPump, type PumpReader, type PumpResult, type PumpWriter } from "@/workers/remux/pump"
 import { TextTap, isTapTextCodec, type TextTapTrack } from "@/workers/remux/textTap"
 
-// Containers a remux may read. Not every format the demuxer knows: each one parsed is attack surface. The
-// audio-only ones come last, so a file any of the others recognises is read exactly as it would be without them.
-const FORMATS = [MATROSKA, WEBM, MP4, QTFF, MPEG_TS, WAVE, OGG, FLAC, MP3, ADTS]
-
 // Formats whose demuxer has no index: it finds a far position (the file's end too, for its duration) only by
 // reading every cluster or frame before it.
 const SCANNING_FORMATS = new Set<InputFormat>([MATROSKA, WEBM, FLAC, MP3, ADTS])
-
-// Reads longer than this reach the demuxer as a stream of blocks rather than one assembled buffer.
-const STREAM_READ_BYTES = 2 * BLOCK_BYTES
 
 // How far audio may read past the video pump's position. Both read the same interleaved clusters; an
 // audio pump that ran ahead or fell behind by more than the block cache holds would download them twice.
@@ -165,7 +152,7 @@ export class RemuxEngine {
 		transcodedMediaSeconds: 0
 	}
 
-	private readonly reader: RangePortReader
+	private readonly source: BlockInput
 	private readonly cache: BlockCache
 	private readonly input: Input
 	private readonly emit: Emit
@@ -195,25 +182,16 @@ export class RemuxEngine {
 	private lastIdr: { at: number; timestamp: number } | null = null
 
 	public constructor(params: RemuxOpenParams, emit: Emit) {
-		this.reader = rangePortReader(params.port)
-
-		const reader = this.reader
-
-		this.cache = new BlockCache(
-			params.size,
-			(start, end, signal) =>
-				reader.readRange(start, end, signal).catch((error: unknown) => {
-					throw signal.aborted ? error : new SourceReadError(error)
-				}),
-			{
-				onBlock: (index, bytes) => {
-					this.tap?.addBlock(index, bytes)
-				}
+		this.source = openBlockInput(params.port, params.size, "playback", {
+			onBlock: (index, bytes) => {
+				this.tap?.addBlock(index, bytes)
 			}
-		)
+		})
+		this.cache = this.source.cache
+		this.input = this.source.input
 		this.emit = emit
 		// The file's server went away: say so now, not at the next read a paused player may never make.
-		this.reader.onLost(() => {
+		this.source.reader.onLost(() => {
 			for (const [kind, run] of this.runs) {
 				this.emit({
 					type: "error",
@@ -229,19 +207,6 @@ export class RemuxEngine {
 		this.idrOnlyStart = params.idrOnlyStart === true
 		this.maxFragmentBytes = params.maxFragmentBytes
 		this.size = params.size
-
-		const cache = this.cache
-
-		this.input = new Input({
-			formats: FORMATS,
-			source: new CustomSource({
-				getSize: () => params.size,
-				read: (start, end) => (end - start > STREAM_READ_BYTES ? cache.stream(start, end) : cache.read(start, end)),
-				// The block cache is the only cache; the demuxer's own would hold a second copy.
-				prefetchProfile: "none",
-				maxCacheSize: 0
-			})
-		})
 	}
 
 	public async open(params: RemuxOpenParams): Promise<RemuxMediaInfo> {
@@ -462,9 +427,7 @@ export class RemuxEngine {
 		await Promise.race([Promise.all(closing), new Promise(resolve => setTimeout(resolve, CLOSE_TIMEOUT_MS))])
 		this.tap?.close()
 		this.tap = null
-		this.input.dispose()
-		this.cache.dispose()
-		this.reader.close()
+		this.source.close()
 	}
 
 	// The text tracks and the timestamp scale, from the head the demuxer has just read (served by the block cache).

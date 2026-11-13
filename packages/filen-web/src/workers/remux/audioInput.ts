@@ -1,25 +1,19 @@
 import {
 	ADTS,
-	CustomSource,
 	EncodedPacketSink,
 	FLAC,
-	Input,
 	MATROSKA,
 	MP3,
-	MP4,
-	MPEG_TS,
-	OGG,
-	QTFF,
-	WAVE,
 	WEBM,
 	type EncodedPacket,
+	type Input,
 	type InputAudioTrack,
 	type InputFormat
 } from "mediabunny"
-import { BLOCK_BYTES, BlockSource, walkContainer } from "@filen/shared/videos"
-import { BlockCache } from "@/lib/media/blockCache"
-import { rangePortReader, type RangePortReader } from "@/lib/media/rangePort"
-import { AUDIO_UNSUPPORTED_ERROR, SourceReadError, type RemuxStats } from "@/lib/media/remuxTypes"
+import { BlockSource, walkContainer } from "@filen/shared/videos"
+import type { BlockCache } from "@/lib/media/blockCache"
+import { openBlockInput, type BlockInput } from "@/lib/media/blockInput"
+import { AUDIO_UNSUPPORTED_ERROR, type RemuxStats } from "@/lib/media/remuxTypes"
 import { sampleReader, type SampleItem, type SampleReader } from "@/workers/remux/audioTranscode"
 import { estimateFrameStreamDuration, ID3V2_HEADER_BYTES, id3v2Bytes } from "@/workers/remux/audioDuration.logic"
 import { ac3Layout, dtsLayout, type Speaker } from "@/workers/remux/channelLayout.logic"
@@ -44,14 +38,6 @@ import {
 // decodable audio track), a codec only FFmpeg decodes inside one (TrueHD, ALAC), or a bare AC-3, E-AC-3 or
 // DTS stream. What the WAV stream (pcmStream.ts) decodes from.
 
-// Containers an audio file may come in; the same set the remux worker reads.
-const FORMATS = [MATROSKA, WEBM, MP4, QTFF, MPEG_TS, WAVE, OGG, FLAC, MP3, ADTS]
-
-// Audio is read in order and at a low bitrate: a few blocks are plenty.
-const CACHE_BLOCKS = 4
-const READ_AHEAD_BLOCKS = 2
-// Reads longer than this reach the demuxer as a stream of blocks rather than one assembled buffer.
-const STREAM_READ_BYTES = 2 * BLOCK_BYTES
 // The head searched for a bare stream's first frames.
 const RAW_HEAD_BYTES = 262_144
 const DURATION_ESTIMATE_BYTES = 262_144
@@ -438,32 +424,6 @@ function startsWithRawSync(head: Uint8Array): boolean {
 	return (head[0] === 0x0b && head[1] === 0x77) || (head[0] === 0x7f && head[1] === 0xfe && head[2] === 0x80 && head[3] === 0x01)
 }
 
-interface Source {
-	reader: RangePortReader
-	cache: BlockCache
-}
-
-function openSource(port: MessagePort, size: number): Source {
-	const reader = rangePortReader(port)
-	const cache = new BlockCache(
-		size,
-		(start, end, signal) =>
-			reader.readRange(start, end, signal).catch((error: unknown) => {
-				throw signal.aborted ? error : new SourceReadError(error)
-			}),
-		{ capacity: CACHE_BLOCKS, readAhead: READ_AHEAD_BLOCKS }
-	)
-
-	return { reader, cache }
-}
-
-function closeSource(source: Source, input: Input | null): void {
-	source.cache.abort()
-	input?.dispose()
-	source.cache.dispose()
-	source.reader.close()
-}
-
 // A bare AC-3, E-AC-3 or DTS stream with the speakers its first frame names. The same decision for both
 // readers of a file: a head that starts with a sync word is measured first; otherwise only a file no
 // container format recognises is (one with junk or tags before its first frame). Null for a container.
@@ -531,7 +491,7 @@ async function sampledTimeline(cache: BlockCache, info: RawStreamInfo): Promise<
 	})
 }
 
-function openRaw(source: Source, raw: { info: RawStreamInfo; header: Speaker[] | null }): AudioInput {
+function openRaw(source: BlockInput, raw: { info: RawStreamInfo; header: Speaker[] | null }): AudioInput {
 	const { cache } = source
 	const { info } = raw
 
@@ -540,7 +500,7 @@ function openRaw(source: Source, raw: { info: RawStreamInfo; header: Speaker[] |
 		cache,
 		reader: stats => ffmpegSampleReader({ codec: info.codec, packets: rawPackets(cache, info), stats }),
 		close: () => {
-			closeSource(source, null)
+			source.close()
 
 			return Promise.resolve()
 		}
@@ -616,20 +576,8 @@ async function estimate(cache: BlockCache, stream: "mp3" | "adts"): Promise<numb
 	return estimateFrameStreamDuration({ stream, bytes, size: cache.size - start })
 }
 
-function inputOf(cache: BlockCache): Input {
-	return new Input({
-		formats: FORMATS,
-		source: new CustomSource({
-			getSize: () => cache.size,
-			read: (start, end) => (end - start > STREAM_READ_BYTES ? cache.stream(start, end) : cache.read(start, end)),
-			prefetchProfile: "none",
-			maxCacheSize: 0
-		})
-	})
-}
-
-async function openContainer(source: Source, input: Input): Promise<AudioInput | null> {
-	const { cache } = source
+async function openContainer(source: BlockInput): Promise<AudioInput | null> {
+	const { cache, input } = source
 
 	const format = await input.getFormat().catch(() => null)
 
@@ -697,7 +645,7 @@ async function openContainer(source: Source, input: Input): Promise<AudioInput |
 						stats
 					}),
 		close: () => {
-			closeSource(source, input)
+			source.close()
 
 			return Promise.resolve()
 		}
@@ -710,15 +658,16 @@ async function estimatedOrComputed(cache: BlockCache, input: Input, format: Inpu
 
 // Opens the file a range port serves. Throws AudioUnsupportedError when nothing in it can be decoded.
 export async function openAudioInput(port: MessagePort, size: number): Promise<AudioInput> {
-	const source = openSource(port, size)
-	const input = inputOf(source.cache)
+	// Audio is read in order and at a low bitrate.
+	const source = openBlockInput(port, size, "audio")
 
 	try {
-		const raw = await rawStreamOf(source.cache, input)
-		const opened = raw === null ? await openContainer(source, input) : openRaw(source, raw)
+		const raw = await rawStreamOf(source.cache, source.input)
+		const opened = raw === null ? await openContainer(source) : openRaw(source, raw)
 
 		if (raw !== null) {
-			input.dispose()
+			// A bare stream is read through the cache alone.
+			source.input.dispose()
 		}
 
 		if (opened === null) {
@@ -727,7 +676,7 @@ export async function openAudioInput(port: MessagePort, size: number): Promise<A
 
 		return opened
 	} catch (error) {
-		closeSource(source, input)
+		source.close()
 
 		throw error
 	}

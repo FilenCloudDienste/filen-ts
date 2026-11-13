@@ -32,6 +32,8 @@ export class BlockAbortError extends Error {
 export interface BlockCacheOptions {
 	capacity?: number
 	readAhead?: number
+	// Blocks per range request (MAX_RUN_BLOCKS by default).
+	maxRunBlocks?: number
 	// Sees every block as it lands (a subtitle tap scanning what playback already read). Never reads.
 	onBlock?: (index: number, bytes: Uint8Array) => void
 }
@@ -57,6 +59,7 @@ export class BlockCache {
 	private readonly readRange: AbortableReadRange
 	private readonly capacity: number
 	private readonly readAhead: number
+	private readonly maxRunBlocks: number
 	private readonly onBlock: ((index: number, bytes: Uint8Array) => void) | undefined
 	// Map order is the LRU order, oldest first.
 	private readonly resident = new Map<number, Uint8Array>()
@@ -72,6 +75,7 @@ export class BlockCache {
 		this.readRange = readRange
 		this.capacity = Math.max(2, options.capacity ?? DEFAULT_CAPACITY)
 		this.readAhead = Math.max(0, options.readAhead ?? DEFAULT_READ_AHEAD)
+		this.maxRunBlocks = Math.max(1, options.maxRunBlocks ?? MAX_RUN_BLOCKS)
 		this.onBlock = options.onBlock
 	}
 
@@ -208,8 +212,8 @@ export class BlockCache {
 		let requestedTo = first - 1
 
 		for (let index = first; index <= last; index++) {
-			if (requestedTo < last && index + MAX_RUN_BLOCKS > requestedTo) {
-				const to = Math.min(last, requestedTo + MAX_RUN_BLOCKS)
+			if (requestedTo < last && index + this.maxRunBlocks > requestedTo) {
+				const to = Math.min(last, requestedTo + this.maxRunBlocks)
 
 				this.ensure(requestedTo + 1, to, held)
 				requestedTo = to
@@ -257,7 +261,7 @@ export class BlockCache {
 				runStart = index
 			}
 
-			if (runStart !== -1 && (!missing || index - runStart === MAX_RUN_BLOCKS)) {
+			if (runStart !== -1 && (!missing || index - runStart === this.maxRunBlocks)) {
 				const blocks = this.fetchRun(runStart, index - 1)
 
 				for (const [offset, block] of blocks.entries()) {

@@ -181,8 +181,9 @@ export default defineConfig([
 		}
 	},
 	{
-		// The remux worker and its modules run Mediabunny; tests exercise them directly.
-		files: ["src/workers/remux.worker.ts", "src/workers/remux/**/*.{ts,tsx}", "src/tests/**/*.{ts,tsx}"],
+		// The remux worker and its modules run Mediabunny, as does the worker-only input opener the media workers
+		// share; tests exercise them directly.
+		files: ["src/workers/remux.worker.ts", "src/workers/remux/**/*.{ts,tsx}", "src/lib/media/blockInput.ts", "src/tests/**/*.{ts,tsx}"],
 		rules: {
 			"no-restricted-imports": ["error", { patterns: [ALIAS_ONLY] }]
 		}
