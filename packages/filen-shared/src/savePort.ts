@@ -1,23 +1,21 @@
-import type { ByteSink } from "../../core/opc/io"
-import type { PortLike } from "./protocol"
-
-// A save streamed from the presentation worker to the SDK worker's upload over a MessagePort: a pull protocol, so no
+// A save streamed from a producing worker (a presentation save, a video export) to the SDK worker's upload over a
+// MessagePort: a pull protocol, so no
 // engine has to transfer a ReadableStream (one supported engine cannot). The reading side (the upload) asks for one
 // chunk at a time, with at most SAVE_PORT_IN_FLIGHT asked and not yet read; the writing side sends a chunk of at most
 // SAVE_PORT_CHUNK bytes per request, and its writes wait while nothing is asked, so neither side holds more than a
 // few chunks. Only "end" lets the upload finish: an "abort" from either side, or a port that goes quiet, ends it
 // without a new file. A writer still preparing its first bytes (a package checked whole before any leaves, over a
-// slow link) says it is alive every SAVE_PORT_ALIVE_MS, so only a writer that went away goes quiet. The bytes are always copied into chunks this module owns and transferred, so a chunk the zip
-// writer handed over (often a view of the deck's own bytes) is never detached.
+// slow link, or an encoder slower than the stall between two chunks) says it is alive every SAVE_PORT_ALIVE_MS on a
+// timer of its own, whatever it is sending, so only a writer that went away goes quiet. The bytes are always copied
+// into chunks this module owns and transferred, so a chunk the producer handed over (often a view of its own bytes)
+// is never detached.
 //
-// Self-contained (the SDK worker imports it alone): this file and the zip CRC are all it pulls in.
-
-export { crc32 } from "../../core/opc/crc32"
+// Self-contained (the SDK worker imports it alone): no imports, no DOM or Node typings.
 
 export const SAVE_PORT_CHUNK = 1024 * 1024
 export const SAVE_PORT_IN_FLIGHT = 4
 
-// Why a save stream ended without a file: the deck had nothing to save, the save failed a check before the upload
+// Why a save stream ended without a file: the producer had nothing to save, the save failed a check before the upload
 // could finish, the user or a newer save cancelled it, the upload side failed, or a side went away.
 export type SavePortAbortReason = "unchanged" | "refused" | "failed" | "cancelled" | "upload" | "closed"
 
@@ -43,8 +41,15 @@ type ToReader =
 	| { readonly [KEY]: "end"; readonly size: number }
 	| { readonly [KEY]: "abort"; readonly reason: SavePortAbortReason }
 
-// A port end that also receives (a MessagePort; the protocol's PortLike only sends).
-export interface SavePortEnd extends PortLike {
+// The sending side of a port (a MessagePort, or a worker-side stand-in).
+export interface SavePortLike {
+	postMessage(message: unknown, transfer?: readonly unknown[]): void
+	start?(): void
+	close(): void
+}
+
+// A port end that also receives (a MessagePort).
+export interface SavePortEnd extends SavePortLike {
 	addEventListener(type: "message", listener: (event: { readonly data: unknown }) => void): void
 	removeEventListener(type: "message", listener: (event: { readonly data: unknown }) => void): void
 }
@@ -112,10 +117,16 @@ function isAbortReason(value: unknown): value is SavePortAbortReason {
 	)
 }
 
-// The writing end, a ByteSink for the zip writer. close() sends what is still buffered but does not end the upload:
-// commit() does, once the save has passed its checks; abort() ends it without a file. Writes reject once the reader
+// Where a producer writes its bytes (the shape of a zip writer's sink).
+export interface SavePortSink {
+	write(chunk: Uint8Array): Promise<void>
+	close(): Promise<void>
+}
+
+// The writing end, a byte sink for the producer (a zip writer, a muxer). close() sends what is still buffered but
+// does not end the upload: commit() does, once the save has passed its checks; abort() ends it without a file. Writes reject once the reader
 // aborted (its reason in SavePortAbortedError).
-export interface SavePortWriter extends ByteSink {
+export interface SavePortWriter extends SavePortSink {
 	// Bytes sent so far.
 	readonly sent: number
 	// Tells the reading side now that bytes will follow (one "alive"): the page opens the upload only then.
@@ -329,8 +340,8 @@ export function savePortAnnounced(port: SavePortEnd): Promise<boolean> {
 
 // The reading end: chunks in order, undefined once the writer committed. A read rejects with SavePortAbortedError
 // when the writer aborted, when abort() was called here, or when no chunk arrived for `stallMs` while one was asked
-// (a writer whose worker died posts nothing; a live one says so while it prepares). After the last read, settled() tells the writer whether the upload made
-// the file (the writer holds the deck's reads of the old file until then).
+// (a writer whose worker died posts nothing; a live one says so while it works). After the last read, settled() tells
+// the writer whether the upload made the file (a presentation writer holds the deck's reads of the old file until then).
 export interface SavePortReader {
 	read(): Promise<Uint8Array | undefined>
 	abort(reason: SavePortAbortReason): void

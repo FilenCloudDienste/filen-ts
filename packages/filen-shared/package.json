@@ -21,6 +21,7 @@
 		"./videos": "./src/videos/index.ts",
 		"./videos/transportStreamHead": "./src/videos/transportStreamHead.ts",
 		"./heldPause": "./src/heldPause.ts",
+		"./savePort": "./src/savePort.ts",
 		"./keymap": "./src/keymap.ts",
 		"./svgProlog": "./src/svgProlog.ts",
 		"./svgThumb": "./src/svgThumb.ts",

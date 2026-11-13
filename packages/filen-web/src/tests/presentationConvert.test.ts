@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest"
 import type { ConversionLossKind, ConversionReport, PortLike, PresentationSessionApi } from "@filen/office/dom/presentation"
-import { savePortWriter, type SavePortEnd } from "@filen/office/dom/presentation/savePort"
+import { savePortWriter, type SavePortEnd } from "@filen/shared/savePort"
 import { i18n } from "@/lib/i18n"
 import { conversionLossLines, joinFreshPackage, readFreshPackage } from "@/features/presentation/lib/presentationConvert"
 

@@ -6,7 +6,7 @@ import type { ReactNode } from "react"
 import type { File } from "@filen/sdk-rs"
 import type { Format, GateReason } from "@filen/office/core/presentation"
 import type { ConversionReport, PortLike, PresentationSessionApi } from "@filen/office/dom/presentation"
-import { savePortWriter, type SavePortEnd } from "@filen/office/dom/presentation/savePort"
+import { savePortWriter, type SavePortEnd } from "@filen/shared/savePort"
 import "@/lib/i18n"
 
 // The presentation File menu's Download as: the formats the open deck converts to, converted from its session (unsaved

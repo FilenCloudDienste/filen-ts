@@ -57,7 +57,7 @@ vi.mock("@/features/presentation/lib/presentationJobs", async importOriginal => 
 })
 vi.mock("@/features/presentation/lib/presentationEngine", async () => {
 	const { PresentationCallError } = await import("@filen/office/dom/presentation")
-	const { savePortWriter } = await import("@filen/office/dom/presentation/savePort")
+	const { savePortWriter } = await import("@filen/shared/savePort")
 
 	return {
 		presentationPool: {

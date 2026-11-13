@@ -6,9 +6,9 @@ import {
 	savePortReader,
 	savePortWriter,
 	type SavePortEnd
-} from "../dom/presentation/savePort"
+} from "@filen/shared/savePort"
 
-// The save stream's pull protocol between the presentation worker (writer) and the SDK worker's upload (reader),
+// The save stream's pull protocol between a producing worker (writer) and the SDK worker's upload (reader),
 // over a real MessageChannel: chunk size and in-flight bounds, backpressure, commit and abort from either side.
 
 const MiB = 1024 * 1024
@@ -229,6 +229,30 @@ describe("save port pull protocol", () => {
 		writer.commit()
 
 		expect(same(await received, source)).toBe(true)
+	})
+
+	it("keeps the upload open while a slow producer goes longer than the stall between two chunks", async () => {
+		const { writerEnd, readerEnd } = channel()
+		const writer = savePortWriter(writerEnd, { aliveMs: 10 })
+		const reader = savePortReader(readerEnd, { stallMs: 40 })
+		const first = pattern(SAVE_PORT_CHUNK, 5)
+		const second = pattern(MiB / 2, 9)
+		const received = drain(reader)
+
+		// One chunk out, then an encoder that takes four stalls for the next: the heartbeat is the writer's own timer,
+		// not a side effect of sending.
+		await writer.write(first)
+		await new Promise(resolve => setTimeout(resolve, 160))
+		await writer.write(second)
+		await writer.close()
+		writer.commit()
+
+		const all = new Uint8Array(first.length + second.length)
+
+		all.set(first)
+		all.set(second, first.length)
+
+		expect(same(await received, all)).toBe(true)
 	})
 
 	it("keeps an aborting end open until the other side acknowledges the abort, then closes both", async () => {

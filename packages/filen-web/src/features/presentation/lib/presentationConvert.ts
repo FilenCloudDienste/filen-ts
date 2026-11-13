@@ -12,7 +12,7 @@ import type {
 	PresentationWorkerPool,
 	SourceSpec
 } from "@filen/office/dom/presentation"
-import { savePortReader } from "@filen/office/dom/presentation/savePort"
+import { savePortReader } from "@filen/shared/savePort"
 import { uploadConvertedCopy } from "@/features/drive/lib/convertedCopy"
 import type { DriveItem } from "@/features/drive/lib/item"
 import type { LegacySaveCopy } from "@/features/presentation/components/legacyView"

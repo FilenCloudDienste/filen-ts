@@ -13,7 +13,7 @@ import { passwordOfficeKey } from "../../encryption/webCrypto"
 import type { ConvertCapability, EngineSession } from "../engine"
 import type { ConversionReport, PortLike } from "../protocol"
 import { deckTurn } from "../save"
-import { SavePortAbortedError, savePortWriter, type SavePortEnd } from "../savePort"
+import { SavePortAbortedError, savePortWriter, type SavePortEnd } from "@filen/shared/savePort"
 import { presentationRealm } from "../services"
 import { MAX_SVG_BYTES } from "../svgPort"
 import { odpParts } from "./open/odp"
@@ -23,7 +23,7 @@ import { pptxSaveSource, sealPptx } from "./save"
 import { AVERAGE_MEASURER, relayoutDiagram } from "./smartart"
 
 // freshParts: the session's deck, unsaved edits included, written as a new package of the other format (or a
-// Transitional copy of a gated PresentationML deck) and streamed to the port (savePort.ts; the page reads it or an
+// Transitional copy of a gated PresentationML deck) and streamed to the port (@filen/shared/savePort; the page reads it or an
 // upload takes it), through the conversions of core/convert/presentation. It runs as one turn of the deck, after the
 // commands before it. A password-protected deck's PresentationML copy is sealed as Agile under the same key (an
 // encrypted pptx through its save sealer, a PowerPoint 97–2003 deck under its open password); its ODF copy is refused

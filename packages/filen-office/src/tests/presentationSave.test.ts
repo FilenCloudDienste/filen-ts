@@ -19,7 +19,7 @@ import {
 	type SaveDependencies,
 	type SaveHistory
 } from "../dom/presentation/save"
-import { savePortAnnounced, savePortReader, type SavePortEnd } from "../dom/presentation/savePort"
+import { savePortAnnounced, savePortReader, type SavePortEnd } from "@filen/shared/savePort"
 import { agileStreams, encryptedOfficeFile } from "./encryption/testing"
 import { writeBigDeck, type BigDeckSpec } from "./fixtures/presentation/bigDeck"
 

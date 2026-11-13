@@ -1,7 +1,7 @@
 import * as Comlink from "comlink"
 import type { File as SdkFile } from "@filen/sdk-rs"
 import type { DriveFileRef, PortLike, SaveResult } from "@filen/office/dom/presentation"
-import { savePortAnnounced } from "@filen/office/dom/presentation/savePort"
+import { savePortAnnounced } from "@filen/shared/savePort"
 import { driveItemName, type QuotaVerdict } from "@filen/shared"
 import { asDirectoryOrFile, narrowItem, upsertDriveItem, type DriveItem } from "@/features/drive/lib/item"
 import { extensionOf, previewType, type PreviewCategory } from "@/features/drive/lib/preview.logic"

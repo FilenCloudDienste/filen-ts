@@ -8,7 +8,7 @@ import { openOdpCapability } from "../dom/presentation/engine/open/odp"
 import { openPptxCapability } from "../dom/presentation/engine/open/pptx"
 import { SAVE_DEPENDENCIES } from "../dom/presentation/engine/save"
 import { commitSavedSession, rebasableSource, saveSession, type SaveDependencies } from "../dom/presentation/save"
-import { savePortAnnounced, savePortReader, type SavePortEnd } from "../dom/presentation/savePort"
+import { savePortAnnounced, savePortReader, type SavePortEnd } from "@filen/shared/savePort"
 
 // An engine session over a file store with versioning off (an upload replaces the file and the old version is gone),
 // so each save goes through saveSession, the upload, commitSavedSession and the rebase, as in the app.

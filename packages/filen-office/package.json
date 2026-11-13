@@ -50,7 +50,6 @@
 		"./core/anim": "./src/core/anim/index.ts",
 		"./core/smartart": "./src/core/smartart/index.ts",
 		"./dom/presentation": "./src/dom/presentation/index.ts",
-		"./dom/presentation/savePort": "./src/dom/presentation/savePort.ts",
 		"./react/presentation": "./src/react/presentation/index.ts",
 		"./react/docx": "./src/react/docx/index.ts",
 		"./css/docx.css": "./src/css/docx.css",

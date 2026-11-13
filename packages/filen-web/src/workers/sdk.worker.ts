@@ -155,7 +155,8 @@ import { probeSource, probeVideo, type ProbeTier, type VideoProbe } from "@filen
 import { asByteStream, imageSniffStream } from "@/lib/media/imageSniff"
 import { EarlyCancels } from "@/workers/earlyCancels"
 import { exposeRangePort } from "@/lib/media/rangePort"
-import { crc32, savePortReader } from "@filen/office/dom/presentation/savePort"
+import { crc32 } from "@filen/office/core/opc"
+import { savePortReader } from "@filen/shared/savePort"
 import { savePortStream } from "@/lib/media/savePortStream"
 import {
 	ORIENTATION_HEAD_MAX,
@@ -1611,12 +1612,14 @@ const api = {
 			control.release()
 		}
 	},
-	// A save streamed from the presentation worker over `port` (@filen/office's save port): the upload pulls 1 MiB
-	// chunks into a byte stream of its own (savePortStream), at most four asked ahead while the writer waits for
-	// requests, so no transferable stream crosses (an engine this app supports has none) and memory stays a few chunks
-	// on each side. Only the writer's end makes the file: its abort, a stalled port or a failed upload rejects with no
-	// new version, and the writer is told whether the file was made (it holds the deck's reads of the old file until
-	// then). `options.size` when the writer knows it up front; the rest as uploadFileBytes's.
+	// A save streamed from a producing worker over `port` (@filen/shared/savePort): the upload pulls 1 MiB chunks into
+	// a byte stream of its own (savePortStream), at most four asked ahead while the writer waits for requests, so no
+	// transferable stream crosses (an engine this app supports has none) and memory stays a few chunks on each side.
+	// Only the writer's end makes the file: its abort, a stalled port or a failed upload rejects with no new version,
+	// and the writer is told whether the file was made (a presentation writer holds the deck's reads of the old file
+	// until then). A failed writer aborts the upload's managed future before the stream errors, so the SDK never takes
+	// the errored stream for the file's end; the writer's failure is what this rejects with. `options.size` when the
+	// writer knows it up front; the rest as uploadFileBytes's.
 	async uploadFileFromPort(
 		parentUuid: string | null,
 		name: string,
@@ -1627,6 +1630,7 @@ const api = {
 		const reader = savePortReader(port)
 		const control = uploadControl(options)
 		const size = options?.size
+		let streamFailure: { error: unknown } | undefined
 
 		try {
 			const c = requireClient()
@@ -1634,12 +1638,22 @@ const api = {
 			const file = await c.uploadFileFromReader({
 				parent,
 				name,
-				reader: savePortStream(reader),
+				reader: savePortStream(reader, {
+					beforeError: error => {
+						streamFailure = { error }
+						control.abort()
+					}
+				}),
 				knownSize: size !== undefined && size > 0 ? size : undefined,
 				...(mime ? { mime } : {}),
 				...uploadTimes(options),
 				managedFuture: { abortSignal: control.signal }
 			})
+
+			// An SDK that finished anyway on the errored stream made a truncated file: never reported as saved.
+			if (streamFailure !== undefined) {
+				throw streamFailure.error
+			}
 
 			reader.settled(true)
 
@@ -1647,7 +1661,7 @@ const api = {
 		} catch (e) {
 			reader.abort(control.aborted() ? "cancelled" : "upload")
 
-			throw e
+			throw streamFailure === undefined ? e : streamFailure.error
 		} finally {
 			control.release()
 		}

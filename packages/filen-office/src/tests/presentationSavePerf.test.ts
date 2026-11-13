@@ -8,7 +8,7 @@ import { SERVICES, type CallContext, type EngineSession } from "../dom/presentat
 import { openPptxCapability, pptxParts } from "../dom/presentation/engine/open/pptx"
 import { pptxSaveSource } from "../dom/presentation/engine/save"
 import { bindSaveHistory, rebasableSource, saveSession, type SaveHistory } from "../dom/presentation/save"
-import { SAVE_PORT_CHUNK, SAVE_PORT_IN_FLIGHT, savePortReader, type SavePortEnd } from "../dom/presentation/savePort"
+import { SAVE_PORT_CHUNK, SAVE_PORT_IN_FLIGHT, savePortReader, type SavePortEnd } from "@filen/shared/savePort"
 import { CORPUS_DIR } from "./corpusDir"
 import { bigDeck } from "./fixtures/presentation/bigDeck"
 import { liveHeap, liveHeapNow } from "./liveHeap"

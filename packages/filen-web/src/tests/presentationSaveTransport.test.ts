@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 import type { File as SdkFile } from "@filen/sdk-rs"
-import { crc32, savePortReader, savePortWriter, SavePortAbortedError } from "@filen/office/dom/presentation/savePort"
+import { crc32 } from "@filen/office/core/opc"
+import { savePortReader, savePortWriter, SavePortAbortedError } from "@filen/shared/savePort"
 import type { PortLike, SaveResult } from "@filen/office/dom/presentation"
 import { narrowItem, type DriveItem } from "@/features/drive/lib/item"
 import { isEditable, presentationSaveEdits, runPreviewSave, type PreviewSaveDeps } from "@/features/drive/lib/previewSave.logic"

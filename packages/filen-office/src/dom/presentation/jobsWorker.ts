@@ -12,12 +12,12 @@ import {
 } from "./jobs/registry"
 import type { PortLike, PresentationSessionApi } from "./protocol"
 import { installJobsRealm, type JobsRealm } from "./raster"
-import { savePortReader, savePortWriter, type SavePortEnd, type SavePortReader } from "./savePort"
+import { savePortReader, savePortWriter, type SavePortEnd, type SavePortReader } from "@filen/shared/savePort"
 import { offerSvgPort, workerSvgRasterizer, type SvgRasterizer } from "./svgPort"
 
 // A presentation jobs worker (one per export or conversion, terminated afterwards) and the page's handle on one. The
 // page makes two channels: one to the open deck's presentation worker (jobsPort), through which the job reads the
-// session, unsaved edits included; one the job's bytes are pulled through (savePort.ts's protocol), which the page
+// session, unsaved edits included; one the job's bytes are pulled through (@filen/shared/savePort's protocol), which the page
 // reads into a download. The worker never sees the deck's bytes or its password. SVG pictures are drawn on the page
 // (svgPort.ts), for the PDF and the images alike.
 

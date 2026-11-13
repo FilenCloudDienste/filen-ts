@@ -6,7 +6,7 @@ import { resolveBody, type BodyContext } from "../core/presentation/text/resolve
 import { transferableLayout } from "../core/presentation/text/transfer"
 import { MeasureCache } from "../core/text/index"
 import { openInfo } from "../dom/presentation/engine"
-import { savePortAnnounced, savePortReader, savePortWriter, type SavePortEnd } from "../dom/presentation/savePort"
+import { savePortAnnounced, savePortReader, savePortWriter, type SavePortEnd } from "@filen/shared/savePort"
 import { LAYOUT, SLIDE, deckOf, renderServices } from "./fixtures/presentation/renderDeck"
 import { editDeck, editHarness } from "./presentationEditFixtures"
 import { FakeMeasurer, testFont } from "./textFixtures"

@@ -42,12 +42,12 @@ import {
 	type SavePortAbortReason,
 	type SavePortEnd,
 	type SavePortWriter
-} from "./savePort"
+} from "@filen/shared/savePort"
 
 // Saving a session: the snapshot of the changed parts at revision R, taken while commands wait; the package the
 // format's writer makes (with its second proof gate: a package up to the in-memory limit checked whole before a byte
 // leaves, a larger one streamed with every copy and new entry checked before its central directory) written to the
-// save port (savePort.ts); the upload allowed to end only once the writer finished; and the rebase that makes the saved
+// save port (@filen/shared/savePort); the upload allowed to end only once the writer finished; and the rebase that makes the saved
 // file the session's base source, so a drive with versioning off (which deletes the old version) never leaves the
 // session reading a file that is gone.
 //
