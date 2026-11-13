@@ -23,7 +23,7 @@ import {
 } from "@/features/drive/queries/drive"
 import { emitPreviewFileMetaChanged, subscribePreviewReconcile, type PreviewReconcileEvent } from "@/features/preview/lib/previewReconcile"
 import type { FileMeta } from "@filen/sdk-rs"
-import { isRevisionOf, settleHeldRevisions, type PreviewRevision } from "@/features/preview/lib/remoteChange.logic"
+import { isRevisionOf, settleHeldAcrossSaves, type PreviewRevision } from "@/features/preview/lib/remoteChange.logic"
 import { usePreviewCacheScope } from "@/features/preview/lib/accessMode"
 import { loadPreviewBytes } from "@/features/preview/lib/previewCache"
 import { isOwnSave, recordOwnSave } from "@/features/preview/lib/ownSaves"
@@ -99,7 +99,8 @@ interface RemoteChangeContext {
 	slots: RefObject<SlotIndex | null>
 	// Per slot, the revision the user chose to keep their edits over, so it is not asked about twice.
 	keptOver: RefObject<Map<string, string>>
-	saving: RefObject<boolean>
+	// The overlay's own saves in flight (an export can carry on in the background while another file saves).
+	saving: RefObject<number>
 	held: RefObject<PreviewRevision[]>
 	heldLeaving: RefObject<HeldLeaving[]>
 	// Slots (frozen uuid → the gone file's uuid) kept on screen for their unsaved edits: the pager, which
@@ -205,7 +206,7 @@ function handleRevision(
 	const decision = decideRevision({
 		current: sourceIndex === latest.index,
 		dirty: isDirty(),
-		saving: ctx.saving.current,
+		saving: ctx.saving.current > 0,
 		keptOver: ctx.keptOver.current.get(slot.frozenUuid),
 		revisionUuid: revision.item.data.uuid
 	})
@@ -249,7 +250,7 @@ function handleLeaving(ctx: RemoteChangeContext, uuid: string, moved: DriveItem 
 
 	// Judged once the save settles: a save that lands made a new file there, and one that failed still
 	// holds the edits this asks about. Asking now would let a Discard drop the slot under the upload.
-	if (edited && ctx.saving.current) {
+	if (edited && ctx.saving.current > 0) {
 		ctx.heldLeaving.current.push({ uuid, moved, hostKnows })
 
 		return
@@ -586,7 +587,9 @@ export function usePreviewRemoteChanges({
 	// The same, for a second click landing before the render that disables the button.
 	const pendingRef = useRef(false)
 	const keptOver = useRef(new Map<string, string>())
-	const saving = useRef(false)
+	const saving = useRef(0)
+	// What the saves that settled while others still ran made, judged together once the last one settles.
+	const landed = useRef<DriveItem[]>([])
 	const held = useRef<PreviewRevision[]>([])
 	const heldLeaving = useRef<HeldLeaving[]>([])
 	const keptGone = useRef(new Map<string, string>())
@@ -680,32 +683,39 @@ export function usePreviewRemoteChanges({
 		}
 	}, [ctx, currentFrozenUuid])
 
+	// Every saveStarted is matched by exactly one saveSettled.
 	function saveStarted(): void {
-		saving.current = true
+		saving.current++
 	}
 
 	// `savedItem` is what the save made, null when it failed. Call it after the overlay has shown
 	// `savedItem` (and cleared its dirty bit, where the save left nothing unsaved), so what arrived during
-	// the save is judged against both.
+	// the save is judged against both. What arrived is held until the last save in flight settles.
 	function saveSettled(savedItem: DriveItem | null): void {
-		saving.current = false
+		saving.current = Math.max(0, saving.current - 1)
 
 		if (savedItem !== null) {
 			recordOwnSave(savedItem.data.uuid)
+			landed.current.push(savedItem)
 		}
 
-		const settled = settleHeldRevisions(held.current, savedItem?.data.uuid ?? null)
+		if (saving.current > 0) {
+			return
+		}
+
+		const settled = settleHeldAcrossSaves(held.current, landed.current)
 		const leaving = heldLeaving.current
 
 		held.current = []
 		heldLeaving.current = []
+		landed.current = []
 
 		if (settled.replaced) {
 			toast(t("previewSaveReplacedNewer"))
 		}
 
-		for (const revision of settled.newer) {
-			handleRevision(ctx, revision, savedItem !== null)
+		for (const { revision, afterSave } of settled.newer) {
+			handleRevision(ctx, revision, afterSave)
 		}
 
 		// Against the saved version these no longer match a slot: the file they name is not what it shows.

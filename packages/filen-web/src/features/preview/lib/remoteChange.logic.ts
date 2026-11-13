@@ -30,3 +30,66 @@ export function settleHeldRevisions(
 ): { replaced: boolean; newer: PreviewRevision[] } {
 	return settleHeld(held, savedUuid, revision => revision.item.data.uuid)
 }
+
+function lineageOf(item: DriveItem): string {
+	return item.type === "file" ? (item.data.stableUUID ?? item.data.uuid) : item.data.uuid
+}
+
+// settleHeldRevisions once every save that overlapped has settled (an export carrying on in the background while
+// another file is saved, say): each file's held revisions are sorted by that file's own saves, its last echo
+// splitting them, the other saves' echoes dropped as the user's own. A file no save landed for keeps them all, as
+// newer. `afterSave` per revision: a save of its file landed.
+export function settleHeldAcrossSaves(
+	held: readonly PreviewRevision[],
+	saved: readonly DriveItem[]
+): { replaced: boolean; newer: { revision: PreviewRevision; afterSave: boolean }[] } {
+	const savedByLineage = new Map<string, Set<string>>()
+
+	for (const item of saved) {
+		const lineage = lineageOf(item)
+		const uuids = savedByLineage.get(lineage) ?? new Set<string>()
+
+		uuids.add(item.data.uuid)
+		savedByLineage.set(lineage, uuids)
+	}
+
+	let replaced = false
+	const newer: { revision: PreviewRevision; afterSave: boolean }[] = []
+	const lastEcho = new Map<string, number>()
+
+	held.forEach((revision, index) => {
+		const lineage = lineageOf(revision.item)
+
+		if (savedByLineage.get(lineage)?.has(revision.item.data.uuid) === true) {
+			lastEcho.set(lineage, index)
+		}
+	})
+
+	held.forEach((revision, index) => {
+		const lineage = lineageOf(revision.item)
+		const own = savedByLineage.get(lineage)
+
+		if (own === undefined) {
+			newer.push({ revision, afterSave: false })
+
+			return
+		}
+
+		if (own.has(revision.item.data.uuid)) {
+			return
+		}
+
+		const echo = lastEcho.get(lineage)
+
+		// Before its file's last own echo (or with none yet arrived): the save went over it.
+		if (echo === undefined || index < echo) {
+			replaced = true
+
+			return
+		}
+
+		newer.push({ revision, afterSave: true })
+	})
+
+	return { replaced, newer }
+}

@@ -352,6 +352,64 @@ describe("usePreviewRemoteChanges", () => {
 		expect(toast).toHaveBeenCalledWith("preview:previewUpdatedElsewhere")
 	})
 
+	it("holds what arrives until every overlapping save settled: an export in the background, then a text save", () => {
+		const items = [file("a"), file("b", { stableUUID: "other" as File["stableUUID"] })]
+		const { hook, commitSaved } = setup(items)
+		const b1 = file("b1", { stableUUID: "other" as File["stableUUID"] })
+
+		// The video's export carries on as a transfer; the user goes on to the text file and saves it.
+		hook.result.current.saveStarted()
+		hook.rerender({ items, index: 1 })
+		hook.result.current.saveStarted()
+
+		act(() => {
+			emitPreviewFileRevised({ item: b1 })
+			commitSaved(testUuid("b"), b1)
+			hook.result.current.saveSettled(b1)
+		})
+
+		// The export still runs: a version of the text saved elsewhere now waits for it.
+		act(() => {
+			emitPreviewFileRevised({ item: file("b2", { stableUUID: "other" as File["stableUUID"] }) })
+		})
+
+		expect(hook.result.current.prompt).toBeNull()
+
+		act(() => {
+			hook.result.current.saveSettled(file("a1"))
+		})
+
+		expect(hook.result.current.prompt).toMatchObject({ kind: "revised", afterSave: true, theirs: { data: { uuid: testUuid("b2") } } })
+		// The text save's own echo is the user's, never reported as a version it went over.
+		expect(toast).not.toHaveBeenCalledWith("previewSaveReplacedNewer")
+	})
+
+	it("settles held versions against each file's own save when two saves overlap", () => {
+		const { hook, commitSaved } = setup()
+
+		hook.result.current.saveStarted()
+		hook.result.current.saveStarted()
+
+		act(() => {
+			emitPreviewFileRevised({ item: file("theirs") })
+			emitPreviewFileRevised({ item: file("a1") })
+			emitPreviewFileRevised({ item: file("a2") })
+			commitSaved(testUuid("a"), file("a2"))
+			hook.result.current.saveSettled(file("a1"))
+		})
+
+		// One save still runs: nothing is judged yet.
+		expect(toast).not.toHaveBeenCalled()
+
+		act(() => {
+			hook.result.current.saveSettled(file("a2"))
+		})
+
+		// "theirs" came before the saves and went under them; both echoes are the user's own.
+		expect(toast).toHaveBeenCalledWith("previewSaveReplacedNewer")
+		expect(hook.result.current.prompt).toBeNull()
+	})
+
 	it("loading theirs does not also show them through the clean-after-save path", () => {
 		const { hook, commitSaved } = setup()
 
