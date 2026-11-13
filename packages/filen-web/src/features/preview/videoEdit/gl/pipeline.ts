@@ -47,7 +47,8 @@ export interface FramePipeline {
 		outputTimeSec: number,
 		hdr: HdrHandling | null
 	): Promise<VideoFrame>
-	// The same pass for a preview: the canvas's pixels handed off as a bitmap the caller owns.
+	// The same pass for a preview: the canvas's pixels handed off as a bitmap the caller owns. An HDR frame is
+	// tone-mapped from the browser's RGB upload (no plane copy per frame: a preview need not be exact to the code value).
 	renderBitmap(
 		frame: VideoFrame,
 		recipe: VideoEditRecipe,
@@ -55,7 +56,10 @@ export interface FramePipeline {
 		outHeight: number,
 		outputTimeSec: number,
 		hdr: HdrHandling | null
-	): Promise<ImageBitmap>
+	): ImageBitmap
+	// Deletes the text textures of overlays not in `overlays` (a preview's stage after an edit). Rendering never prunes
+	// on its own, so a pass with another recipe in between (a filter thumbnail) costs the stage no re-rasterising.
+	pruneText(overlays: readonly TextOverlay[]): void
 	// Whether the recipe needs this pass at all (pipeline.logic needsGpuPass).
 	needsGpu(recipe: VideoEditRecipe, options?: PipelineNeedOptions): boolean
 	dispose(): void
@@ -399,11 +403,6 @@ export function createFramePipeline(canvas: OffscreenCanvas, options: FramePipel
 		derived.graded = hasColourWork(recipe)
 		derived.grade = gradeUniforms(videoGrade(recipe))
 		derived.minification = minification({ width: naturalWidth, height: naturalHeight }, derived.matrix)
-
-		if (derived.recipe !== recipe && state !== null) {
-			pruneText(state, recipe.text)
-		}
-
 		derived.recipe = recipe
 		derived.outWidth = outWidth
 		derived.outHeight = outHeight
@@ -728,12 +727,15 @@ export function createFramePipeline(canvas: OffscreenCanvas, options: FramePipel
 
 			return wrap(frame, recipe, outputTimeSec)
 		},
-		renderBitmap: async (frame, recipe, outWidth, outHeight, outputTimeSec, hdr) => {
-			const planes = hdr === "toSdr" ? await stagePlanes(frame) : null
-
-			draw(frame, recipe, outWidth, outHeight, outputTimeSec, hdr, planes)
+		renderBitmap: (frame, recipe, outWidth, outHeight, outputTimeSec, hdr) => {
+			draw(frame, recipe, outWidth, outHeight, outputTimeSec, hdr, null)
 
 			return canvas.transferToImageBitmap()
+		},
+		pruneText: overlays => {
+			if (state !== null && !disposed && !lost) {
+				pruneText(state, overlays)
+			}
 		},
 		needsGpu: (recipe, needOptions) => needsGpuPass(recipe, needOptions),
 		dispose: () => {
@@ -750,26 +752,29 @@ export function createFramePipeline(canvas: OffscreenCanvas, options: FramePipel
 
 			state = null
 
-			if (s === null || gl.isContextLost()) {
+			if (gl.isContextLost()) {
 				return
 			}
 
-			for (const entry of s.text.values()) {
-				gl.deleteTexture(entry.texture)
+			if (s !== null) {
+				for (const entry of s.text.values()) {
+					gl.deleteTexture(entry.texture)
+				}
+
+				gl.deleteTexture(s.source)
+
+				for (const texture of s.planes) {
+					gl.deleteTexture(texture)
+				}
+
+				for (const built of Object.values(s.programs)) {
+					gl.deleteProgram(built.program)
+				}
+
+				gl.deleteVertexArray(s.vao)
 			}
 
-			gl.deleteTexture(s.source)
-
-			for (const texture of s.planes) {
-				gl.deleteTexture(texture)
-			}
-
-			for (const built of Object.values(s.programs)) {
-				gl.deleteProgram(built.program)
-			}
-
-			gl.deleteVertexArray(s.vao)
-			// Frees the drawing buffer now rather than at collection.
+			// Frees the context and its drawing buffer now rather than at collection, whether or not anything was drawn.
 			gl.getExtension("WEBGL_lose_context")?.loseContext()
 		}
 	}

@@ -208,7 +208,20 @@ describe("createFramePipeline", () => {
 
 		const deleted = canvas.gl.count("deleteTexture")
 
+		// Another recipe without the box (a filter thumbnail) keeps its texture: only pruneText frees it.
 		p.render(frame(), recipe(), 1920, 1080, 1, null)
+
+		expect(canvas.gl.count("deleteTexture")).toBe(deleted)
+
+		p.render(frame(), recipe({ text: [overlay()] }), 1920, 1080, 1, null)
+
+		expect(rasterize).toHaveBeenCalledTimes(1)
+
+		p.pruneText([overlay()])
+
+		expect(canvas.gl.count("deleteTexture")).toBe(deleted)
+
+		p.pruneText([])
 
 		expect(canvas.gl.count("deleteTexture")).toBe(deleted + 1)
 	})
@@ -289,11 +302,47 @@ describe("createFramePipeline", () => {
 		expect(canvas.gl.count("texImage2D")).toBe(1)
 	})
 
-	it("hands a preview off as a bitmap", async () => {
+	it("hands a preview off as a bitmap", () => {
 		const p = pipeline()
-		const bitmap = await p.renderBitmap(frame(), recipe(), 320, 180, 0, null)
+		const bitmap = p.renderBitmap(frame(), recipe(), 320, 180, 0, null)
 
 		expect(bitmap).toEqual({ width: 320, height: 180 })
+	})
+
+	it("tone-maps an HDR preview from the RGB upload, never copying its planes", () => {
+		const p = pipeline()
+		const copyTo = vi.fn()
+		const hdr = frame({
+			format: "I420P10",
+			colorSpace: { primaries: "bt2020", transfer: "pq", matrix: "bt2020-ncl", fullRange: false } as unknown as VideoColorSpace,
+			allocationSize: () => 3840 * 1080 * 2,
+			copyTo
+		} as unknown as Partial<VideoFrame>)
+
+		p.renderBitmap(hdr, recipe(), 640, 360, 0, "toSdr")
+
+		expect(copyTo).not.toHaveBeenCalled()
+		expect(canvas.gl.count("texImage2D")).toBe(1)
+		expect(canvas.gl.count("texSubImage2D")).toBe(0)
+
+		const input = canvas.gl.calls.filter(call => call[0] === "uniform1i" && (call[1] as { uniform: string }).uniform === "u_input")
+
+		// 1 = PQ.
+		expect(input.at(-1)?.[2]).toBe(1)
+	})
+
+	it("loses its context on dispose, even when it never drew", () => {
+		const loseContext = vi.fn()
+		const context = canvas.gl.context as Record<string, unknown>
+
+		canvas.gl.context = new Proxy(context, {
+			get: (target, property: string) =>
+				property === "getExtension" ? (name: string) => (name === "WEBGL_lose_context" ? { loseContext } : null) : target[property]
+		})
+
+		pipeline().dispose()
+
+		expect(loseContext).toHaveBeenCalledTimes(1)
 	})
 
 	it("answers needsGpu like needsGpuPass", () => {
