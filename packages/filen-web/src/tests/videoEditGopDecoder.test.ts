@@ -42,9 +42,16 @@ class FakeFrame {
 	public close(): void {
 		this.closed = true
 	}
+
+	public clone(): FakeFrame {
+		clones++
+
+		return new FakeFrame(this.timestamp)
+	}
 }
 
 let frames: FakeFrame[] = []
+let clones = 0
 
 class FakeDecoder extends EventTarget {
 	public static delay = 0
@@ -128,6 +135,7 @@ class FakeDecoder extends EventTarget {
 beforeEach(() => {
 	vi.stubGlobal("EncodedVideoChunk", FakeChunk)
 	frames = []
+	clones = 0
 	FakeDecoder.created = []
 	FakeDecoder.delay = 0
 	FakeDecoder.failAt = null
@@ -267,6 +275,69 @@ describe("GopDecoder", () => {
 
 		expect(frame.timestamp).toBe(us(63 / FPS))
 		frame.close()
+	})
+
+	it("answers a repeat at the same time from a clone of the last answer, decoding nothing", async () => {
+		FakeDecoder.delay = 2
+
+		const gop = decoder(await sinkOf(plain))
+
+		;(await gop.frameAt(30 / FPS, always)).close()
+
+		const fake = FakeDecoder.created[0]
+		const fed = fake?.fed.length ?? 0
+		const clonesBefore = clones
+
+		for (let repeat = 0; repeat < 3; repeat++) {
+			const again = await gop.frameAt(30 / FPS + 0.001, always)
+
+			expect(again.timestamp).toBe(us(30 / FPS))
+			again.close()
+		}
+
+		expect(fake?.fed.length).toBe(fed)
+		expect(fake?.resets).toBe(0)
+		expect(clones - clonesBefore).toBe(3)
+	})
+
+	it("closes the last answer's clone when it starts over elsewhere, and on release", async () => {
+		const gop = decoder(await sinkOf(plain))
+		const first = await gop.frameAt(30 / FPS, always)
+
+		first.close()
+
+		const held = frames.filter(frame => frame.timestamp === us(30 / FPS) && !frame.closed)
+
+		expect(held).toHaveLength(1)
+		;(await gop.frameAt(5 / FPS, always)).close()
+		expect(held.every(frame => frame.closed)).toBe(true)
+
+		gop.release()
+		expect(frames.every(frame => frame.closed)).toBe(true)
+	})
+
+	it("keeps the decoder configured across consecutive stills, and the last answer through them", async () => {
+		const gop = decoder(await sinkOf(plain))
+
+		;(await gop.frameAt(10 / FPS, always)).close()
+
+		const fake = FakeDecoder.created[0]
+
+		for (const time of [0.1, 2.1, 4.1]) {
+			;(await gop.keyFrameAt(time))?.close()
+		}
+
+		// One reset to leave the stepping position, then none between stills; one flush each.
+		expect(fake?.resets).toBe(1)
+		expect(fake?.configures).toBe(2)
+		expect(fake?.flushes).toBe(3)
+
+		const fed = fake?.fed.length ?? 0
+		const again = await gop.frameAt(10 / FPS, always)
+
+		expect(again.timestamp).toBe(us(10 / FPS))
+		expect(fake?.fed.length).toBe(fed)
+		again.close()
 	})
 
 	it("is correct for variable frame rates: the latest sample at or before the time", async () => {

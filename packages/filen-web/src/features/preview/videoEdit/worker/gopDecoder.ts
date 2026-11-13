@@ -5,7 +5,9 @@ import { pickFrame } from "@/features/preview/videoEdit/worker/preview.logic"
 // rates step correctly) forward in decode order until that frame comes out. The decoder is kept where it stopped, with
 // the few frames it had already decoded past the answer: stepping forward within the GOP continues from there instead
 // of starting over, and the next frame is often already out. A request that is no longer current stops between
-// packets, leaving that position intact.
+// packets, leaving that position intact. The last answer is kept as a clone: asking again for the frame at the same
+// time (a recipe change on a paused stage) decodes nothing. Filmstrip stills decode one keyframe each through the same
+// decoder, which stays configured from one still to the next (one flush per still).
 
 // The part of mediabunny's EncodedPacketSink this needs (timestamps in seconds, decode-order traversal).
 export interface PacketLike {
@@ -36,8 +38,8 @@ export class FrameDecodeError extends Error {
 	}
 }
 
-// Decoded frames held past the answer for the next step. A decoder's output frames come from a small pool; holding
-// more would starve it.
+// Decoded frames held past the answer for the next step, the last answer's clone included. A decoder's output frames
+// come from a small pool; holding more would starve it.
 const STASH = 3
 // Packets queued in the decoder before the feeder waits for it.
 const MAX_DECODE_QUEUE = 2
@@ -56,6 +58,8 @@ export class GopDecoder<P extends PacketLike> {
 	private lastOut = Number.NEGATIVE_INFINITY
 	private readonly queue: VideoFrame[] = []
 	private readonly candidate: { frame: VideoFrame | null } = { frame: null }
+	// A clone of the frame the last frameAt answered, by the target sample's timestamp (µs): a repeat is answered from it.
+	private last: { targetUs: number; frame: VideoFrame } | null = null
 	// The stream ended (flushed): a new keyframe is needed before anything else decodes.
 	private ended = false
 	// A frame was dropped for want of room: continuing would miss it.
@@ -83,12 +87,17 @@ export class GopDecoder<P extends PacketLike> {
 
 		const targetUs = target.microsecondTimestamp
 
+		// The same frame as the last answer: only the caller's own pass runs again.
+		if (this.last?.targetUs === targetUs) {
+			return this.last.frame.clone()
+		}
+
 		// Already decoded on an earlier step.
 		if (this.queue.some(frame => frame.timestamp === targetUs)) {
 			const hit = pickFrame(this.queue, targetUs, this.candidate)
 
 			if (hit !== null) {
-				return hit
+				return this.answer(targetUs, hit)
 			}
 		}
 
@@ -112,14 +121,16 @@ export class GopDecoder<P extends PacketLike> {
 			this.lastOut < targetUs
 
 		if (!continuing) {
+			this.forgetLast()
 			this.restart(key.sequenceNumber)
 		}
 
-		return this.decodeUntil(targetUs, key, current)
+		return this.answer(targetUs, await this.decodeUntil(targetUs, key, current))
 	}
 
-	// The keyframe at or before `time`, decoded on its own (a filmstrip still); null when the file has none. Leaves the
-	// decoder needing a new start.
+	// The keyframe at or before `time`, decoded on its own (a filmstrip still); null when the file has none. The next
+	// frameAt starts over, but the last answer's clone stays (a filmstrip runs while the stage is paused on a frame); a
+	// run of stills keeps the decoder configured, a flushed decoder taking a keyframe next as it is.
 	public async keyFrameAt(time: number): Promise<VideoFrame | null> {
 		const key = (await this.packets.getKeyPacket(Math.max(0, time))) ?? (await this.packets.getFirstPacket())
 
@@ -127,8 +138,12 @@ export class GopDecoder<P extends PacketLike> {
 			return null
 		}
 
-		const decoder = this.restart(null)
+		const decoder =
+			this.decoder !== null && this.decoder.state === "configured" && this.failure === null && this.ended && this.gop === null
+				? this.decoder
+				: this.restart(null)
 
+		this.dropped = false
 		decoder.decode(key.toEncodedVideoChunk())
 		this.lastFed = key
 
@@ -154,6 +169,7 @@ export class GopDecoder<P extends PacketLike> {
 	// Lets go of the decoder and every frame (another decoder needs the hardware); the next request starts over.
 	public release(): void {
 		this.dropQueue()
+		this.forgetLast()
 
 		if (this.decoder !== null && this.decoder.state !== "closed") {
 			this.decoder.close()
@@ -178,6 +194,19 @@ export class GopDecoder<P extends PacketLike> {
 		this.candidate.frame = null
 	}
 
+	private forgetLast(): void {
+		this.last?.frame.close()
+		this.last = null
+	}
+
+	// Keeps a clone of `frame` as the answer for `targetUs`, and hands the frame to the caller.
+	private answer(targetUs: number, frame: VideoFrame): VideoFrame {
+		this.forgetLast()
+		this.last = { targetUs, frame: frame.clone() }
+
+		return frame
+	}
+
 	// A configured decoder with nothing in it, starting at keyframe `gop`.
 	private restart(gop: number | null): VideoDecoder {
 		this.dropQueue()
@@ -193,7 +222,8 @@ export class GopDecoder<P extends PacketLike> {
 				output: frame => {
 					this.lastOut = Math.max(this.lastOut, frame.timestamp)
 
-					if (this.queue.length >= STASH + 1) {
+					// The last answer's clone holds one of the pool's frames too.
+					if (this.queue.length + (this.last === null ? 0 : 1) >= STASH + 1) {
 						frame.close()
 						this.dropped = true
 					} else {
