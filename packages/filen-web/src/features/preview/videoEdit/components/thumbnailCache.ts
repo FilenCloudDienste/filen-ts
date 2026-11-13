@@ -1,16 +1,32 @@
-// Filmstrip thumbnails by slot, oldest dropped (and closed) past `capacity`, so zooming and panning back and forth reuse
-// what was decoded instead of asking again, while memory stays bounded.
+// Filmstrip thumbnails by slot, least recently used dropped (and closed) past a byte budget, so zooming and panning back
+// and forth reuse what was decoded instead of asking again, while memory stays bounded by what a tile really holds
+// (RGBA, 4 bytes a pixel) rather than by a count of tiles of any size. The timeline sizes the budget to the visible
+// slots. Once closed, the cache closes whatever still arrives (a fetch that outlived the timeline).
 export class ThumbnailCache {
 	private readonly entries = new Map<string, ImageBitmap>()
+	private bytes = 0
+	private budget: number
+	private closed = false
 
-	private readonly capacity: number
-
-	constructor(capacity: number) {
-		this.capacity = capacity
+	constructor(budgetBytes: number) {
+		this.budget = budgetBytes
 	}
 
 	static key(step: number, time: number): string {
 		return `${String(step)}:${String(time)}`
+	}
+
+	static sizeOf(bitmap: ImageBitmap): number {
+		return bitmap.width * bitmap.height * 4
+	}
+
+	get size(): number {
+		return this.bytes
+	}
+
+	setBudget(budgetBytes: number): void {
+		this.budget = budgetBytes
+		this.evict()
 	}
 
 	get(key: string): ImageBitmap | undefined {
@@ -30,32 +46,62 @@ export class ThumbnailCache {
 	}
 
 	set(key: string, bitmap: ImageBitmap): void {
-		const previous = this.entries.get(key)
+		if (this.closed) {
+			bitmap.close()
 
-		if (previous !== undefined && previous !== bitmap) {
-			previous.close()
+			return
 		}
 
-		this.entries.delete(key)
-		this.entries.set(key, bitmap)
+		const previous = this.entries.get(key)
 
-		while (this.entries.size > this.capacity) {
+		if (previous !== undefined) {
+			this.entries.delete(key)
+			this.bytes -= ThumbnailCache.sizeOf(previous)
+
+			if (previous !== bitmap) {
+				previous.close()
+			}
+		}
+
+		this.entries.set(key, bitmap)
+		this.bytes += ThumbnailCache.sizeOf(bitmap)
+		this.evict()
+	}
+
+	// Takes tiles again after clear() (the timeline mounted again).
+	open(): void {
+		this.closed = false
+	}
+
+	// Closes every tile; later arrivals are closed on arrival, until open().
+	clear(): void {
+		this.closed = true
+
+		for (const bitmap of this.entries.values()) {
+			bitmap.close()
+		}
+
+		this.entries.clear()
+		this.bytes = 0
+	}
+
+	// The newest entry always stays, even alone over the budget: it is what is on screen.
+	private evict(): void {
+		while (this.bytes > this.budget && this.entries.size > 1) {
 			const oldest = this.entries.keys().next()
 
 			if (oldest.done === true) {
 				break
 			}
 
-			this.entries.get(oldest.value)?.close()
+			const bitmap = this.entries.get(oldest.value)
+
 			this.entries.delete(oldest.value)
-		}
-	}
 
-	clear(): void {
-		for (const bitmap of this.entries.values()) {
-			bitmap.close()
+			if (bitmap !== undefined) {
+				this.bytes -= ThumbnailCache.sizeOf(bitmap)
+				bitmap.close()
+			}
 		}
-
-		this.entries.clear()
 	}
 }

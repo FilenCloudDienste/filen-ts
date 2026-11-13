@@ -3,10 +3,15 @@ import { playMedia } from "@/lib/media/useMediaState"
 import type { TimeRange } from "@/features/preview/videoEdit/types"
 import { playableTime, previewVolume } from "@/features/preview/videoEdit/lib/recipe"
 
+// A paused playhead moved here reaches the element this long after it last moved (once a scrub or a run of steps
+// rests), or at once on play: the paused picture is the client's exact frame, and the element decoding every step too
+// would be a second decoder (iOS runs one at a time).
+const ELEMENT_SEEK_DELAY_MS = 400
+
 // The editor's playback over the preview's own <video>: plays only what is kept (jumping over removed sections and
 // looping a selection), at the recipe's speed with the pitch kept, and tells the playhead where it is once per
-// displayed frame through listeners, so nothing in React renders per frame. Seeks land exactly where asked (the
-// paused frame is then drawn exactly by the editor, from the client).
+// displayed frame through listeners, so nothing in React renders per frame. While paused the playhead lives here and
+// the element follows it lazily (see ELEMENT_SEEK_DELAY_MS); settle listeners hear where it came to rest.
 export class EditorPlayback {
 	private video: HTMLVideoElement | null = null
 	private keep: readonly TimeRange[] = []
@@ -17,7 +22,11 @@ export class EditorPlayback {
 	// The L key's multiplier on top of the recipe's speed.
 	private shuttle = 1
 	private frame = 0
+	// The paused playhead, while the element has not been moved there yet.
+	private pausedAt: number | null = null
+	private seekTimer: ReturnType<typeof setTimeout> | null = null
 	private readonly listeners = new Set<(time: number) => void>()
+	private readonly settleListeners = new Set<(time: number) => void>()
 	private readonly detachers: (() => void)[] = []
 
 	attach(video: HTMLVideoElement | null): void {
@@ -31,22 +40,38 @@ export class EditorPlayback {
 		const tick = (): void => {
 			this.emit()
 		}
+		// The element moved by itself (a restored position) or reached what was asked of it.
+		const seeked = (): void => {
+			this.emit()
+
+			if (video.paused && this.pausedAt === null) {
+				this.emitSettle()
+			}
+		}
+		const loaded = (): void => {
+			if (video.paused && this.pausedAt === null) {
+				this.emitSettle()
+			}
+		}
 		const play = (): void => {
 			this.startLoop()
 		}
 		const stop = (): void => {
 			this.stopLoop()
 			this.emit()
+			this.emitSettle()
 		}
 
-		video.addEventListener("seeked", tick)
+		video.addEventListener("seeked", seeked)
 		video.addEventListener("loadedmetadata", tick)
+		video.addEventListener("loadeddata", loaded)
 		video.addEventListener("play", play)
 		video.addEventListener("pause", stop)
 		video.addEventListener("ended", stop)
 		this.detachers.push(() => {
-			video.removeEventListener("seeked", tick)
+			video.removeEventListener("seeked", seeked)
 			video.removeEventListener("loadedmetadata", tick)
+			video.removeEventListener("loadeddata", loaded)
 			video.removeEventListener("play", play)
 			video.removeEventListener("pause", stop)
 			video.removeEventListener("ended", stop)
@@ -61,6 +86,7 @@ export class EditorPlayback {
 
 	detach(): void {
 		this.stopLoop()
+		this.flushSeek()
 
 		for (const detach of this.detachers.splice(0)) {
 			detach()
@@ -90,7 +116,7 @@ export class EditorPlayback {
 	}
 
 	get time(): number {
-		return this.video?.currentTime ?? 0
+		return this.pausedAt ?? this.video?.currentTime ?? 0
 	}
 
 	get paused(): boolean {
@@ -106,7 +132,23 @@ export class EditorPlayback {
 		}
 	}
 
-	seek(time: number): void {
+	// Listens to where the playhead comes to rest: a pause, a seek while paused (unless asked not to), the element's
+	// first frame. Returns the unsubscribe.
+	onSettle(listener: (time: number) => void): () => void {
+		this.settleListeners.add(listener)
+
+		return () => {
+			this.settleListeners.delete(listener)
+		}
+	}
+
+	// Tells the settle listeners where the playhead is now (a scrub that seeked without settling ended).
+	settle(): void {
+		this.emitSettle()
+	}
+
+	// `settle` false: a drag in progress, whose frames the caller draws itself; settle() once it ends.
+	seek(time: number, settle = true): void {
 		const video = this.video
 
 		if (video === null) {
@@ -114,9 +156,30 @@ export class EditorPlayback {
 		}
 
 		const duration = Number.isFinite(video.duration) ? video.duration : time
+		const target = Math.max(0, Math.min(duration, time))
 
-		video.currentTime = Math.max(0, Math.min(duration, time))
+		if (!video.paused) {
+			video.currentTime = target
+			this.emit()
+
+			return
+		}
+
+		this.pausedAt = target
 		this.emit()
+
+		if (settle) {
+			this.emitSettle()
+		}
+
+		if (this.seekTimer !== null) {
+			clearTimeout(this.seekTimer)
+		}
+
+		this.seekTimer = setTimeout(() => {
+			this.seekTimer = null
+			this.flushSeek()
+		}, ELEMENT_SEEK_DELAY_MS)
 	}
 
 	play(): void {
@@ -125,6 +188,8 @@ export class EditorPlayback {
 		if (video === null) {
 			return
 		}
+
+		this.flushSeek()
 
 		const at = playableTime(this.keep, video.currentTime, this.loop)
 
@@ -165,6 +230,22 @@ export class EditorPlayback {
 		this.applyRate()
 	}
 
+	// Moves the element to the paused playhead now.
+	private flushSeek(): void {
+		if (this.seekTimer !== null) {
+			clearTimeout(this.seekTimer)
+			this.seekTimer = null
+		}
+
+		const at = this.pausedAt
+
+		this.pausedAt = null
+
+		if (at !== null && this.video !== null && this.video.currentTime !== at) {
+			this.video.currentTime = at
+		}
+	}
+
 	private applyRate(): void {
 		const video = this.video
 
@@ -187,6 +268,14 @@ export class EditorPlayback {
 		const time = this.time
 
 		for (const listener of this.listeners) {
+			listener(time)
+		}
+	}
+
+	private emitSettle(): void {
+		const time = this.time
+
+		for (const listener of this.settleListeners) {
 			listener(time)
 		}
 	}

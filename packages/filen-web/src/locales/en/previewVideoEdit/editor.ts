@@ -8,6 +8,10 @@ export const previewVideoEditor = {
 	previewVideoEditUnavailable: "This video can't be edited in this browser.",
 	/** Video editor — accessible name of the edited video (the stage showing the result) */
 	previewVideoEditStage: "Edited video",
+	/** Video editor — accessible name of the area around the edited video (holds the crop frame and text boxes) */
+	previewVideoEditStageArea: "Video editing area",
+	/** Video preview — Edit is refused: a save of this video is still running (in the editor or as a transfer) */
+	previewVideoEditExportRunning: "This video is still being saved. Edit it again once that save finishes.",
 	/** Video editor — accessible name of the panel holding the editing tools */
 	previewVideoEditTools: "Editing tools",
 	/** Video editor — panel tab: trimming the ends and cutting sections out */
@@ -128,7 +132,7 @@ export const previewVideoEditor = {
 	previewVideoEditCropSize: "{{width}} × {{height}}",
 
 	// ── Adjust ───────────────────────────────────────────────────────────────
-	/** Video editor, Adjust tab — colour changes are off for this HDR video in this browser */
+	/** Video editor, Adjust tab — colour changes to this HDR video save it as standard range (SDR) */
 	previewVideoEditAdjustHdr: "Colour changes save this HDR video as SDR.",
 	/** Video editor, Adjust tab — the filters' heading */
 	previewVideoEditFilters: "Filters",

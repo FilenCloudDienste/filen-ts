@@ -4,10 +4,12 @@ import { cn } from "@filen/shared"
 import type { TimeRange, VideoEditClient } from "@/features/preview/videoEdit/types"
 import { edgeBounds, MIN_KEEP_SECONDS, removedRanges, type KeepEdge } from "@/features/preview/videoEdit/lib/recipe"
 import {
+	filmstripBudget,
 	filmstripSlots,
 	formatTimecode,
 	pinchFactor,
 	panView,
+	revealTime,
 	rulerStep,
 	rulerTicks,
 	sliderKeyTarget,
@@ -21,6 +23,7 @@ import {
 } from "@/features/preview/videoEdit/lib/timeline.logic"
 import type { EditorPlayback } from "@/features/preview/videoEdit/components/editorPlayback"
 import { ThumbnailCache } from "@/features/preview/videoEdit/components/thumbnailCache"
+import { isAppleMobile } from "@/lib/appleMobile"
 import { log } from "@/lib/log"
 import { useLatestRef } from "@/lib/useLatestRef"
 
@@ -36,7 +39,9 @@ const RULER_GAP = 72
 const DRAG_SLOP = 4
 // Fetches wait this long after the view settles: a zoom or pan gesture asks once, at its end.
 const FETCH_DELAY_MS = 120
-const THUMBNAIL_CAPACITY = 240
+// The filmstrip cache holds this many screens of tiles (fewer on iOS, whose tabs are killed for memory sooner).
+const CACHED_SCREENS = 3
+const CACHED_SCREENS_IOS = 1.5
 
 const HATCH_STYLE = {
 	backgroundImage: "repeating-linear-gradient(135deg, rgb(0 0 0 / 0.6) 0 6px, rgb(255 255 255 / 0.07) 6px 12px)"
@@ -54,6 +59,8 @@ export interface VideoTimelineProps {
 	// Edges the fast save moves to a key frame (empty when cuts are precise).
 	snaps: readonly SnapMark[]
 	locked: boolean
+	// An export holds the decoder (iOS): no filmstrip tiles are asked meanwhile, and they are asked once it ends.
+	decodingSuspended: boolean
 	onView: (view: TimelineView) => void
 	onSeek: (time: number) => void
 	onSelect: (range: TimeRange | null) => void
@@ -61,6 +68,8 @@ export interface VideoTimelineProps {
 	onEdge: (index: number, edge: KeepEdge, time: number, coalesceKey: string | undefined) => void
 	// A trim handle dragged to `time`: the stage shows that exact frame, and draws it into the loupe too.
 	onScrub: (time: number) => void
+	// The drag let go (committed or not), after any onEdge.
+	onScrubEnd: () => void
 	onLoupeCanvas: (canvas: HTMLCanvasElement | null) => void
 	onMakePrecise: () => void
 }
@@ -127,7 +136,7 @@ export function VideoTimeline(props: VideoTimelineProps) {
 	const loupeRef = useRef<HTMLDivElement | null>(null)
 	const loupeTimeRef = useRef<HTMLSpanElement | null>(null)
 	const [width, setWidth] = useState(0)
-	const [cache] = useState(() => new ThumbnailCache(THUMBNAIL_CAPACITY))
+	const [cache] = useState(() => new ThumbnailCache(0))
 	const handleDrag = useRef<HandleDrag | null>(null)
 	const press = useRef<TrackPress | null>(null)
 	const pointers = useRef(new Map<number, { x: number }>())
@@ -158,11 +167,26 @@ export function VideoTimeline(props: VideoTimelineProps) {
 		}
 	}, [])
 
+	// Tiles that arrive after the timeline went are closed as they come.
 	useEffect(() => {
+		cache.open()
+
 		return () => {
 			cache.clear()
 		}
 	}, [cache])
+
+	useEffect(() => {
+		cache.setBudget(
+			filmstripBudget(
+				width,
+				TILE_WIDTH,
+				FILMSTRIP_HEIGHT,
+				window.devicePixelRatio,
+				isAppleMobile() ? CACHED_SCREENS_IOS : CACHED_SCREENS
+			)
+		)
+	}, [cache, width])
 
 	// The playhead and its time follow the playback's ticks directly.
 	useEffect(() => {
@@ -230,7 +254,8 @@ export function VideoTimeline(props: VideoTimelineProps) {
 
 		const missing = slots.times.filter(time => !cache.has(ThumbnailCache.key(slots.step, time)))
 
-		if (missing.length === 0) {
+		// Nothing is asked while an export holds the decoder (iOS); the next view change asks again.
+		if (missing.length === 0 || props.decodingSuspended) {
 			return () => {
 				alive = false
 			}
@@ -257,7 +282,7 @@ export function VideoTimeline(props: VideoTimelineProps) {
 			alive = false
 			window.clearTimeout(timer)
 		}
-	}, [client, cache, view, width, duration])
+	}, [client, cache, view, width, duration, props.decodingSuspended])
 
 	// The waveform: peaks for the visible window from what is already fetched, redrawn as more arrives.
 	useEffect(() => {
@@ -438,6 +463,8 @@ export function VideoTimeline(props: VideoTimelineProps) {
 		} else {
 			drag.element.style.left = `${String(timeToX(view, drag.width, before))}px`
 		}
+
+		props.onScrubEnd()
 	}
 
 	const handleKey = (event: ReactKeyboardEvent<HTMLDivElement>, index: number, edge: KeepEdge): void => {
@@ -461,6 +488,13 @@ export function VideoTimeline(props: VideoTimelineProps) {
 		if (next !== value) {
 			props.onEdge(index, edge, next, `edge-${String(index)}-${edge}`)
 			props.onSeek(next)
+
+			// A zoomed view follows the handle, which never leaves it while it has the keyboard.
+			const revealed = revealTime(view, next, duration)
+
+			if (revealed !== view) {
+				props.onView(revealed)
+			}
 		}
 	}
 
@@ -601,28 +635,33 @@ export function VideoTimeline(props: VideoTimelineProps) {
 	return (
 		<div className="relative flex flex-col gap-1">
 			{chips.length > 0 ? (
-				<div className="relative h-7">
-					{chips.map(mark => (
-						<div
-							key={mark.requested}
-							className="absolute top-0 flex -translate-x-1/2 items-center gap-1 rounded-full bg-popover/90 py-0.5 pr-0.5 pl-2.5 text-[11px] whitespace-nowrap text-popover-foreground shadow-sm ring-1 ring-border"
-							style={{ left: Math.min(width - 90, Math.max(90, x(mark.actual))) }}
-						>
-							<span>
-								{t(mark.delta > 0 ? "previewVideoEditSnapsLater" : "previewVideoEditSnapsEarlier", {
-									seconds: Math.abs(mark.delta).toFixed(1)
-								})}
-							</span>
-							<button
-								type="button"
-								disabled={props.locked}
-								className="rounded-full px-2 py-0.5 font-medium text-primary outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/50"
-								onClick={props.onMakePrecise}
+				<div className="relative h-7 pointer-coarse:h-12">
+					{chips.map(mark => {
+						const at = Math.min(width, Math.max(0, x(mark.actual)))
+
+						return (
+							<div
+								key={mark.requested}
+								className="absolute top-0 flex items-center gap-1 rounded-full bg-popover/90 py-0.5 pr-0.5 pl-2.5 text-[11px] whitespace-nowrap text-popover-foreground shadow-sm ring-1 ring-border"
+								// Centred on the edge, held inside the track by its own width (any language's).
+								style={{ left: at, translate: `max(${String(-at)}px, min(-50%, calc(${String(width - at)}px - 100%)))` }}
 							>
-								{t("previewVideoEditMakePrecise")}
-							</button>
-						</div>
-					))}
+								<span>
+									{t(mark.delta > 0 ? "previewVideoEditSnapsLater" : "previewVideoEditSnapsEarlier", {
+										seconds: Math.abs(mark.delta).toFixed(1)
+									})}
+								</span>
+								<button
+									type="button"
+									disabled={props.locked}
+									className="rounded-full px-2 py-0.5 font-medium text-primary outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/50 pointer-coarse:min-h-11"
+									onClick={props.onMakePrecise}
+								>
+									{t("previewVideoEditMakePrecise")}
+								</button>
+							</div>
+						)
+					})}
 				</div>
 			) : null}
 			<div
@@ -808,7 +847,8 @@ function TrimHandle(props: {
 			data-trim-handle={props.edge}
 			className={cn(
 				"group/handle absolute top-0 bottom-0 z-10 w-11 -translate-x-1/2 cursor-ew-resize touch-none outline-none",
-				props.offscreen && "hidden"
+				// Out of the zoomed view it leaves the tab order, but never while it has focus.
+				props.offscreen && "not-focus:hidden"
 			)}
 			style={{ left: props.x }}
 			onPointerDown={event => {

@@ -184,6 +184,15 @@ export function filmstripSlots(view: TimelineView, width: number, tileWidth: num
 	return { step, times }
 }
 
+// The filmstrip cache's byte budget: `screens` times the RGBA tiles (`tileWidth` × `tileHeight` CSS px at `ratio`
+// device px each) that cover `width`, one more for the partly shown slot.
+export function filmstripBudget(width: number, tileWidth: number, tileHeight: number, ratio: number, screens: number): number {
+	const slots = Math.ceil(Math.max(0, width) / Math.max(1, tileWidth)) + 1
+	const tileBytes = Math.round(tileWidth * ratio) * Math.round(tileHeight * ratio) * 4
+
+	return Math.round(slots * tileBytes * screens)
+}
+
 const TICK_STEPS: readonly number[] = [0.04, 0.1, 0.2, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600]
 
 // The ruler's labelled step: the smallest of TICK_STEPS that leaves `minGap` px between labels.

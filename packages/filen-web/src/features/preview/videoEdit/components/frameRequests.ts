@@ -1,3 +1,4 @@
+import { isAbortError } from "@filen/shared"
 import type { VideoEditClient, VideoEditRecipe } from "@/features/preview/videoEdit/types"
 import { log } from "@/lib/log"
 
@@ -22,7 +23,8 @@ export class FrameRequests {
 	}
 
 	request(time: number, recipe: VideoEditRecipe, maxWidth: number, draw: (bitmap: ImageBitmap) => void): void {
-		if (this.disposed) {
+		// While an export holds the decoder (iOS), nothing is asked: the element's own picture stands in.
+		if (this.disposed || this.client.isDecodingSuspended()) {
 			return
 		}
 
@@ -61,7 +63,10 @@ export class FrameRequests {
 					bitmap.close()
 				},
 				(error: unknown) => {
-					log.warn("[videoEditor] frame failed", error)
+					// Superseded, or an export took the decoder meanwhile: nothing went wrong.
+					if (!isAbortError(error)) {
+						log.warn("[videoEditor] frame failed", error)
+					}
 				}
 			)
 			.then(() => {

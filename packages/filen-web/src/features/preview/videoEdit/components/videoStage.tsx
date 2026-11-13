@@ -26,10 +26,15 @@ import {
 	type Size
 } from "@/features/preview/videoEdit/lib/recipe"
 import { drawBitmap, type FrameRequests } from "@/features/preview/videoEdit/components/frameRequests"
+import { PreviewLoading } from "@/features/preview/components/previewErrorState"
+import { mediaValue, useMediaValue } from "@/lib/media/useMediaState"
 import { useLatestRef } from "@/lib/useLatestRef"
 
 // Text boxes nudge by this much of the frame per arrow key, ten times that with Shift.
 const TEXT_NUDGE = 0.01
+
+// The element holds a frame to show (HAVE_CURRENT_DATA).
+const HAS_PICTURE = mediaValue(["loadeddata", "emptied", "loadstart"], media => media.readyState >= 2)
 
 export interface VideoStageProps {
 	item: DriveItem
@@ -43,6 +48,8 @@ export interface VideoStageProps {
 	settledTime: number
 	// The same moment on the output timeline, for which text boxes show.
 	settledOutputTime: number
+	// An export holds the decoder (iOS): no exact frame is asked meanwhile, and it is asked again once it ends.
+	decodingSuspended: boolean
 	selectedText: string | null
 	frames: FrameRequests
 	// The exact frame's canvas, shared with the timeline's scrub (which draws into it too).
@@ -72,9 +79,13 @@ export function VideoStage(props: VideoStageProps) {
 	const [video, setVideo] = useState<HTMLVideoElement | null>(null)
 	const [stage, setStage] = useState<Size>({ width: 0, height: 0 })
 	const textDrag = useRef<TextDrag | null>(null)
+	// An exact frame from the client was drawn: the picture is there even before the element has one.
+	const [frameShown, setFrameShown] = useState(false)
 	const { recipe, info, mode, frames, canvasRef } = props
-
-	usePreviewVideo(props.item, video, props.positionKey)
+	const { snapshot } = usePreviewVideo(props.item, video, props.positionKey)
+	const hasPicture = useMediaValue(video, HAS_PICTURE, false)
+	const failed = !frameShown && (snapshot?.status === "failed" || snapshot?.status === "unsupported")
+	const loading = !frameShown && !hasPicture && !failed
 
 	const onVideo = props.onVideo
 
@@ -138,8 +149,9 @@ export function VideoStage(props: VideoStageProps) {
 		frames.request(props.settledTime, latestRecipe.current, box.width * window.devicePixelRatio, bitmap => {
 			drawBitmap(canvas, bitmap)
 			canvas.setAttribute("data-ready", "")
+			setFrameShown(true)
 		})
-	}, [frames, canvasRef, latestRecipe, props.paused, props.settledTime, frameKey, box.width])
+	}, [frames, canvasRef, latestRecipe, props.paused, props.settledTime, frameKey, box.width, props.decodingSuspended])
 
 	const cropView = rectToView(cropToNormalised(recipe.crop, display), recipe.rotate, recipe.flipH, recipe.flipV)
 
@@ -237,41 +249,54 @@ export function VideoStage(props: VideoStageProps) {
 	return (
 		<div
 			ref={stageRef}
-			role="img"
-			aria-label={t("previewVideoEditStage")}
+			role="group"
+			aria-label={t("previewVideoEditStageArea")}
 			className="relative size-full"
 		>
 			<div
 				className="absolute overflow-hidden"
 				style={{ left: box.left, top: box.top, width: box.width, height: box.height }}
 			>
+				{/* The picture alone is the image; the crop frame and text boxes over it stay reachable. */}
 				<div
-					className="absolute overflow-hidden"
-					style={{
-						left: layout.window.left,
-						top: layout.window.top,
-						width: layout.window.width,
-						height: layout.window.height,
-						transform: layout.transform
-					}}
+					role="img"
+					aria-label={t("previewVideoEditStage")}
+					className="absolute inset-0"
 				>
-					<video
-						ref={setVideo}
-						playsInline
-						preload="auto"
-						disablePictureInPicture
-						className="absolute max-w-none"
-						style={{ left: layout.video.left, top: layout.video.top, width: layout.video.width, height: layout.video.height }}
+					<div
+						className="absolute overflow-hidden"
+						style={{
+							left: layout.window.left,
+							top: layout.window.top,
+							width: layout.window.width,
+							height: layout.window.height,
+							transform: layout.transform
+						}}
+					>
+						{/* Metadata only: the paused picture is the client's exact frame; the element loads more once it plays. */}
+						<video
+							ref={setVideo}
+							playsInline
+							preload="metadata"
+							disablePictureInPicture
+							className="absolute max-w-none"
+							style={{
+								left: layout.video.left,
+								top: layout.video.top,
+								width: layout.video.width,
+								height: layout.video.height
+							}}
+						/>
+					</div>
+					<canvas
+						ref={canvasRef}
+						aria-hidden="true"
+						className={cn(
+							"absolute inset-0 block size-full opacity-0 transition-opacity duration-100 data-ready:opacity-100 motion-reduce:transition-none",
+							!props.paused && "hidden"
+						)}
 					/>
 				</div>
-				<canvas
-					ref={canvasRef}
-					aria-hidden="true"
-					className={cn(
-						"absolute inset-0 block size-full opacity-0 transition-opacity duration-100 data-ready:opacity-100 motion-reduce:transition-none",
-						!props.paused && "hidden"
-					)}
-				/>
 				{mode === "text" ? (
 					<div className="absolute inset-0">
 						{recipe.text.map(text => {
@@ -322,6 +347,16 @@ export function VideoStage(props: VideoStageProps) {
 					</div>
 				) : null}
 			</div>
+			{loading ? (
+				<div className="pointer-events-none absolute inset-0">
+					<PreviewLoading />
+				</div>
+			) : null}
+			{failed ? (
+				<p className="absolute inset-0 flex items-center justify-center px-4 text-center text-sm text-destructive">
+					{t("previewVideoEditLoadFailed")}
+				</p>
+			) : null}
 			{mode === "crop" ? (
 				<CropOverlay
 					frame={box}
