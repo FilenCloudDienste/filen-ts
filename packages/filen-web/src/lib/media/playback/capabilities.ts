@@ -12,6 +12,12 @@ import {
 	decodingVerdict,
 	demotionKvKey,
 	DEMOTION_KV_PREFIX,
+	ENCODE_CAPS_KV_PREFIX,
+	encodeCapabilitiesSchema,
+	encodeCapsKvKey,
+	NO_ENCODERS,
+	staleEncodeCapsKeys,
+	type EncodeCapabilities,
 	isConfirmedDemotion,
 	isLearnedTrigger,
 	ladderBrowser,
@@ -25,11 +31,13 @@ import {
 import type { PlaybackTrigger } from "@/lib/media/playback/types"
 import { kvDelete, kvGetJson, kvKeys, kvSetJson } from "@/lib/storage/adapter"
 import { log } from "@/lib/log"
+import { probeEncodersInWorker } from "@/lib/media/remuxClient"
 
 // What the browser can play, asked once per session for the environment and per file for its codecs.
 // canPlayType and isTypeSupported are synchronous and cheap, so they are asked every time; decodingInfo
 // and AudioEncoder.isConfigSupported go to the platform's decoders and encoders, so their answers are
-// kept for the session. Only demotions learned at runtime are persisted.
+// kept for the session. Only demotions learned at runtime are persisted, and the encoders an editor's export can use
+// (asked only when an editor asks, once per browser build).
 
 export type FullscreenKind = "element" | "video" | "none"
 
@@ -121,6 +129,13 @@ export interface CapabilityKv {
 	delete(key: string): Promise<void>
 }
 
+export interface EncodeCapabilityKv {
+	get(key: string): Promise<EncodeCapabilities | null>
+	set(key: string, value: EncodeCapabilities): Promise<void>
+	keys(prefix: string): Promise<string[]>
+	delete(key: string): Promise<void>
+}
+
 export interface CapabilityDeps {
 	environment(): PlaybackEnvironment
 	userAgent: string
@@ -129,6 +144,9 @@ export interface CapabilityDeps {
 	decodingInfo(configuration: MediaDecodingConfiguration): Promise<{ supported: boolean; smooth: boolean }>
 	isEncoderSupported(config: AudioEncoderConfig): Promise<boolean>
 	kv: CapabilityKv
+	// Runs the encoder checks (mediabunny's, in the remux worker).
+	probeEncoders(): Promise<EncodeCapabilities>
+	encodeKv: EncodeCapabilityKv
 	now(): number
 }
 
@@ -136,6 +154,7 @@ export class PlaybackCapabilityProbe {
 	private readonly deps: CapabilityDeps
 	private readonly decodings = new Map<string, Promise<DecodingVerdict | null>>()
 	private encoders: Promise<AudioTarget[]> | null = null
+	private exportEncoders: Promise<EncodeCapabilities> | null = null
 	private learnedLoad: Promise<Map<string, LearnedDemotion>> | null = null
 	// The stored demotions could not be read: they are left alone rather than overwritten.
 	private loadFailed = false
@@ -249,6 +268,49 @@ export class PlaybackCapabilityProbe {
 		}
 	}
 
+	// The encoders an editor's export can use: the stored answer for this browser build, else probed once and stored.
+	// A probe that failed (the worker died) answers no encoders for now and is asked again next time.
+	public encodeCapabilities(): Promise<EncodeCapabilities> {
+		this.exportEncoders ??= this.loadEncodeCapabilities()
+
+		return this.exportEncoders
+	}
+
+	private async loadEncodeCapabilities(): Promise<EncodeCapabilities> {
+		const { encodeKv, userAgent } = this.deps
+		const key = encodeCapsKvKey(userAgent)
+		const stored = await encodeKv.get(key).catch((error: unknown) => {
+			log.warn("playback", "failed to read the stored encoder capabilities", error)
+
+			return null
+		})
+
+		if (stored !== null) {
+			return stored
+		}
+
+		let probed: EncodeCapabilities
+
+		try {
+			probed = await this.deps.probeEncoders()
+		} catch (error) {
+			log.warn("playback", "encoder probe failed", error)
+			this.exportEncoders = null
+
+			return NO_ENCODERS
+		}
+
+		try {
+			const keys = await encodeKv.keys(ENCODE_CAPS_KV_PREFIX)
+
+			await Promise.all([encodeKv.set(key, probed), ...staleEncodeCapsKeys(keys, userAgent).map(stale => encodeKv.delete(stale))])
+		} catch (error) {
+			log.warn("playback", "failed to store the encoder capabilities", error)
+		}
+
+		return probed
+	}
+
 	private decoding(mime: string, type: "file" | "media-source", facts: StreamFacts): Promise<DecodingVerdict | null> {
 		const configuration = decodingConfiguration({ mime, type, facts })
 
@@ -320,6 +382,13 @@ export const playbackCapabilities = new PlaybackCapabilityProbe({
 	},
 	kv: {
 		get: key => kvGetJson(key, learnedDemotionsSchema),
+		set: (key, value) => kvSetJson(key, value),
+		keys: kvKeys,
+		delete: kvDelete
+	},
+	probeEncoders: probeEncodersInWorker,
+	encodeKv: {
+		get: key => kvGetJson(key, encodeCapabilitiesSchema),
 		set: (key, value) => kvSetJson(key, value),
 		keys: kvKeys,
 		delete: kvDelete

@@ -1,6 +1,7 @@
 import * as Comlink from "comlink"
 import RemuxWorker from "@/workers/remux.worker.ts?worker"
 import type { RemuxWorkerApi } from "@/workers/remux.worker"
+import type { EncodeCapabilities } from "@/lib/media/playback/capabilities.logic"
 import { idleResource } from "@/lib/idleResource"
 import { recoverIfNewerBuild } from "@/lib/appUpdate"
 
@@ -98,6 +99,12 @@ export function holdRemuxWorker(): Promise<RemuxWorkerHold> {
 			})
 			.catch(reject)
 	})
+}
+
+// The encoders an export can use, asked in the remux worker (which runs mediabunny's checks); the worker idles out
+// after as usual.
+export function probeEncodersInWorker(): Promise<EncodeCapabilities> {
+	return remuxWorker.use(({ remote, dead }) => Promise.race([remote.encodeCapabilities(), dead]))
 }
 
 // Logout: nothing of the previous session's media should outlive it in a worker's heap.

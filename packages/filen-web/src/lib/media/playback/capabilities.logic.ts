@@ -411,3 +411,59 @@ export function decideWithDemotions(params: {
 
 	return { decision, caps, demoted }
 }
+
+// ── Encoders ─────────────────────────────────────────────────────────────────────────────────────
+
+// What the browser can encode, for an editor's export. Asked once per browser build (one kv row per user agent, the
+// old row dropped) and only when an editor asks: on Firefox an answer means encoding a frame, since its
+// isConfigSupported is unreliable. Probed at 1080p, the export's default ceiling, with no hardware preference.
+export const ENCODE_CAPS_KV_PREFIX = "video.enc.v1:"
+
+export const ENCODE_PROBE_WIDTH = 1920
+export const ENCODE_PROBE_HEIGHT = 1080
+
+// HEVC Main 10 (profile 2, compatibility flag 2), level 4.1, main tier: the 10-bit target that keeps HDR.
+export const HEVC_MAIN10_CODEC_STRING = "hvc1.2.4.L123.B0"
+
+// Video codecs an export may pick, in order of preference for an MP4 output.
+export const EXPORT_VIDEO_CODECS = ["avc", "hevc", "vp9", "av1"] as const
+
+export const encodeCapabilitiesSchema = type({
+	// WebCodecs encoders exist at all (VideoEncoder, AudioEncoder); without them only the copy path is possible.
+	videoEncoder: "boolean",
+	audioEncoder: "boolean",
+	video: {
+		avc: "boolean",
+		hevc: "boolean",
+		hevcMain10: "boolean",
+		vp9: "boolean",
+		av1: "boolean"
+	},
+	// The first of EXPORT_VIDEO_CODECS the browser encodes.
+	firstVideoCodec: "'avc' | 'hevc' | 'vp9' | 'av1' | null",
+	audio: {
+		aac: "boolean",
+		opus: "boolean"
+	}
+})
+
+export type EncodeCapabilities = typeof encodeCapabilitiesSchema.infer
+
+export const NO_ENCODERS: EncodeCapabilities = {
+	videoEncoder: false,
+	audioEncoder: false,
+	video: { avc: false, hevc: false, hevcMain10: false, vp9: false, av1: false },
+	firstVideoCodec: null,
+	audio: { aac: false, opus: false }
+}
+
+export function encodeCapsKvKey(userAgent: string): string {
+	return `${ENCODE_CAPS_KV_PREFIX}${userAgent}`
+}
+
+// Rows written under another user agent: the browser changed since.
+export function staleEncodeCapsKeys(keys: readonly string[], userAgent: string): string[] {
+	const current = encodeCapsKvKey(userAgent)
+
+	return keys.filter(key => key !== current)
+}

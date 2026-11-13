@@ -17,6 +17,8 @@ import { RemuxEngine } from "@/workers/remux/engine"
 import { openAudioInput } from "@/workers/remux/audioInput"
 import { PcmStream } from "@/workers/remux/pcmStream"
 import { WAV_CONTENT_TYPE } from "@/workers/remux/wav.logic"
+import { probeEncodeCapabilities } from "@/workers/remux/encodeCaps"
+import type { EncodeCapabilities } from "@/lib/media/playback/capabilities.logic"
 import { exposeRangePort } from "@/lib/media/rangePort"
 
 // Remuxes files the browser cannot play as they are (Matroska, or audio it cannot decode) into
@@ -278,6 +280,10 @@ const api = {
 	},
 	close(id: number): Promise<void> {
 		return closeSession(id)
+	},
+	// The encoders an editor's export can use (capabilities.ts caches the answer per browser build).
+	encodeCapabilities(): Promise<EncodeCapabilities> {
+		return probeEncodeCapabilities()
 	},
 	// Held for the worker's whole life, so the page learns the moment it is gone (crashed, terminated):
 	// the page waits for the same lock, which it gets only then.

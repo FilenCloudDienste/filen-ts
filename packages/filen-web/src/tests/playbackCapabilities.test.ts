@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
+import { type } from "arktype"
 import type { LadderProbe, LadderSelection, VideoProbe } from "@filen/shared/videos"
 import {
 	decodingConfiguration,
@@ -6,6 +7,11 @@ import {
 	DEMOTION_KV_PREFIX,
 	DEMOTION_TTL_MS,
 	demotionKvKey,
+	ENCODE_CAPS_KV_PREFIX,
+	encodeCapabilitiesSchema,
+	encodeCapsKvKey,
+	NO_ENCODERS,
+	type EncodeCapabilities,
 	isConfirmedDemotion,
 	recordDemotion,
 	ladderBrowser,
@@ -250,6 +256,13 @@ function probeWith(overrides: Partial<CapabilityDeps> = {}) {
 				return Promise.resolve()
 			}
 		},
+		probeEncoders: () => Promise.resolve(NO_ENCODERS),
+		encodeKv: {
+			get: () => Promise.resolve(null),
+			set: () => Promise.resolve(),
+			keys: () => Promise.resolve([]),
+			delete: () => Promise.resolve()
+		},
 		now: () => now,
 		...overrides
 	}
@@ -374,5 +387,97 @@ describe("PlaybackCapabilityProbe", () => {
 
 		expect((await capabilities.learned()).size).toBe(0)
 		await expect(capabilities.learn("a", "media-error", "file-1")).resolves.toBeUndefined()
+	})
+})
+
+const ENCODERS: EncodeCapabilities = {
+	videoEncoder: true,
+	audioEncoder: true,
+	video: { avc: true, hevc: true, hevcMain10: true, vp9: true, av1: false },
+	firstVideoCodec: "avc",
+	audio: { aac: true, opus: true }
+}
+
+describe("PlaybackCapabilityProbe.encodeCapabilities", () => {
+	function encodeHarness() {
+		const encodeRows = new Map<string, EncodeCapabilities>()
+		const probeEncoders = vi.fn(() => Promise.resolve(ENCODERS))
+		const harness = probeWith({
+			probeEncoders,
+			encodeKv: {
+				get: key => Promise.resolve(encodeRows.get(key) ?? null),
+				set: (key, value) => {
+					encodeRows.set(key, value)
+
+					return Promise.resolve()
+				},
+				keys: prefix => Promise.resolve([...encodeRows.keys()].filter(key => key.startsWith(prefix))),
+				delete: key => {
+					encodeRows.delete(key)
+
+					return Promise.resolve()
+				}
+			}
+		})
+
+		return { ...harness, encodeRows, probeEncoders }
+	}
+
+	it("probes nothing until an editor asks", () => {
+		const { probe, probeEncoders } = encodeHarness()
+
+		probe()
+
+		expect(probeEncoders).not.toHaveBeenCalled()
+	})
+
+	it("probes once, stores the answer under this browser build and drops another build's", async () => {
+		const harness = encodeHarness()
+
+		harness.encodeRows.set(`${ENCODE_CAPS_KV_PREFIX}Firefox/150.0`, NO_ENCODERS)
+
+		const capabilities = harness.probe()
+		const [first, second] = await Promise.all([capabilities.encodeCapabilities(), capabilities.encodeCapabilities()])
+
+		expect(first).toEqual(ENCODERS)
+		expect(second).toBe(first)
+		expect(harness.probeEncoders).toHaveBeenCalledTimes(1)
+		expect([...harness.encodeRows]).toEqual([[encodeCapsKvKey(UA), ENCODERS]])
+	})
+
+	it("answers a later session from the stored row without probing", async () => {
+		const harness = encodeHarness()
+
+		harness.encodeRows.set(encodeCapsKvKey(UA), ENCODERS)
+
+		expect(await harness.probe().encodeCapabilities()).toEqual(ENCODERS)
+		expect(harness.probeEncoders).not.toHaveBeenCalled()
+	})
+
+	it("answers no encoders when the probe fails, stores nothing and asks again next time", async () => {
+		const harness = encodeHarness()
+
+		harness.probeEncoders.mockRejectedValueOnce(new Error("worker died"))
+
+		const capabilities = harness.probe()
+
+		expect(await capabilities.encodeCapabilities()).toEqual(NO_ENCODERS)
+		expect(harness.encodeRows.size).toBe(0)
+		expect(await capabilities.encodeCapabilities()).toEqual(ENCODERS)
+		expect(harness.probeEncoders).toHaveBeenCalledTimes(2)
+	})
+
+	it("still probes when storage fails", async () => {
+		const harness = encodeHarness()
+
+		harness.deps.encodeKv.get = () => Promise.reject(new Error("no storage"))
+		harness.deps.encodeKv.set = () => Promise.reject(new Error("no storage"))
+
+		expect(await harness.probe().encodeCapabilities()).toEqual(ENCODERS)
+	})
+
+	it("validates a stored row against the schema", () => {
+		expect(encodeCapabilitiesSchema(ENCODERS)).toEqual(ENCODERS)
+		expect(encodeCapabilitiesSchema({ ...ENCODERS, firstVideoCodec: "mpeg2" })).toBeInstanceOf(type.errors)
 	})
 })
