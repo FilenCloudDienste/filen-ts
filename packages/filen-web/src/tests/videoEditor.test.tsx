@@ -500,7 +500,7 @@ describe("VideoEditor", () => {
 	})
 
 	it("opens the Save popover on Mod+Shift+S, Save as copy focused, when the save converts HDR", async () => {
-		const { root, plans, exports } = mount({ planFor: () => ({ hdr: "toSdr", dropped: ["hdrMetadata"] }) })
+		const { root, plans, exports } = mount({ planFor: () => ({ hdr: "toSdr" }) })
 
 		trimAFrame()
 		await waitFor(() => {
@@ -516,9 +516,7 @@ describe("VideoEditor", () => {
 		await waitFor(() => {
 			expect(document.activeElement).toBe(within(popover).getByRole("button", { name: "Save as copy" }))
 		})
-		// One HDR line, not the dropped metadata as well.
 		expect(within(popover).getByText("HDR will be converted to SDR")).toBeTruthy()
-		expect(within(popover).queryByText("HDR details removed")).toBeNull()
 	})
 
 	it("says when the save could not be worked out and asks again on Retry", async () => {

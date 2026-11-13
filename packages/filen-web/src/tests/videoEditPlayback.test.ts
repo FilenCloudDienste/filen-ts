@@ -224,13 +224,8 @@ describe("plan readings", () => {
 	})
 
 	it("joins subtitles and chapters into one notice", () => {
-		expect(dropNotices(["chapters", "subtitles", "location"], null)).toEqual(["subtitlesAndChapters", "location"])
-		expect(dropNotices(["subtitles", "extraAudio"], null)).toEqual(["subtitles", "extraAudio"])
-	})
-
-	it("leaves HDR details to the conversion's own notice", () => {
-		expect(dropNotices(["hdrMetadata"], "hevc10")).toEqual(["hdrMetadata"])
-		expect(dropNotices(["hdrMetadata", "location"], "toSdr")).toEqual(["location"])
+		expect(dropNotices(["chapters", "subtitles", "location"])).toEqual(["subtitlesAndChapters", "location"])
+		expect(dropNotices(["subtitles", "extraAudio"])).toEqual(["subtitles", "extraAudio"])
 	})
 
 	it("starts a copy from the keys only when the popover would say nothing", () => {

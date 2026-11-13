@@ -11,6 +11,7 @@ import type {
 	OutputQuality,
 	OutputResolution,
 	VideoEditRecipe,
+	VideoSaveErrorCode,
 	VideoSaveRefusal,
 	VideoSaveTarget,
 	VideoSourceInfo
@@ -26,8 +27,7 @@ import {
 	targetNote,
 	type DropNotice,
 	type EditFeature,
-	type PlanState,
-	type SaveErrorCode
+	type PlanState
 } from "@/features/preview/videoEdit/lib/availability"
 import { formatTimecode } from "@/features/preview/videoEdit/lib/timeline.logic"
 import type { NamespaceKey } from "@/lib/i18n"
@@ -46,7 +46,6 @@ const DROP_LABELS: Readonly<Record<DropNotice, PreviewKey>> = {
 	subtitles: "previewVideoSaveDropSubtitles",
 	chapters: "previewVideoSaveDropChapters",
 	extraAudio: "previewVideoSaveDropExtraAudio",
-	hdrMetadata: "previewVideoSaveDropHdrMetadata",
 	location: "previewVideoSaveDropLocation"
 }
 
@@ -236,7 +235,7 @@ export function SavePopover(props: SavePopoverProps) {
 							</div>
 						) : null}
 						<ul className="flex flex-col gap-1.5">
-							{dropNotices(plan.dropped, plan.hdr).map(notice => (
+							{dropNotices(plan.dropped).map(notice => (
 								<Notice
 									key={notice}
 									icon={<InfoIcon />}
@@ -345,7 +344,7 @@ export function SavePopover(props: SavePopoverProps) {
 
 export type ExportState =
 	| { status: "running"; fraction: number; etaSeconds: number | null }
-	| { status: "failed"; code: SaveErrorCode }
+	| { status: "failed"; code: VideoSaveErrorCode }
 	| { status: "refused"; reason: VideoSaveRefusal }
 
 // The export's progress under the header while it runs in the editor, or why it failed or was refused, with Retry where

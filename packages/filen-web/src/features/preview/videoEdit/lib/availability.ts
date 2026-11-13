@@ -1,4 +1,4 @@
-import type { ExportDrop, ExportPlan, HdrHandling, VideoSaveOutcome, VideoSaveRefusal } from "@/features/preview/videoEdit/types"
+import type { ExportDrop, ExportPlan, VideoSaveErrorCode, VideoSaveRefusal } from "@/features/preview/videoEdit/types"
 import type { NamespaceKey } from "@/lib/i18n"
 
 // Which editing controls this browser can offer, read from the plan. `ExportPlan.unavailable` names features by these
@@ -42,11 +42,11 @@ export function saveBlock(plan: ExportPlan | null): SaveBlock | null {
 	return plan.mutingUnblocks ? "audio" : "video"
 }
 
-export type DropNotice = "subtitlesAndChapters" | "subtitles" | "chapters" | "extraAudio" | "hdrMetadata" | "location"
+export type DropNotice = "subtitlesAndChapters" | "subtitles" | "chapters" | "extraAudio" | "location"
 
-// The Save popover's lines for what a save leaves out, subtitles and chapters as one line when both go. HDR details
-// going with a conversion to SDR are that conversion's own notice, not a second line.
-export function dropNotices(dropped: readonly ExportDrop[], hdr: HdrHandling | null): DropNotice[] {
+// The Save popover's lines for what a save leaves out, subtitles and chapters as one line when both go. HDR converted to
+// SDR is the plan's `hdr` ("toSdr"), its own notice, never a line here.
+export function dropNotices(dropped: readonly ExportDrop[]): DropNotice[] {
 	const set = new Set(dropped)
 	const notices: DropNotice[] = []
 
@@ -60,10 +60,6 @@ export function dropNotices(dropped: readonly ExportDrop[], hdr: HdrHandling | n
 
 	if (set.has("extraAudio")) {
 		notices.push("extraAudio")
-	}
-
-	if (set.has("hdrMetadata") && hdr !== "toSdr") {
-		notices.push("hdrMetadata")
 	}
 
 	if (set.has("location")) {
@@ -113,10 +109,8 @@ export function refusalRetries(reason: VideoSaveRefusal): boolean {
 	return reason === "offline" || reason === "quota" || reason === "busy"
 }
 
-export type SaveErrorCode = Extract<VideoSaveOutcome, { status: "error" }>["code"]
-
 // How the editor words why a save failed (never the error's own text, which is not for users).
-export const SAVE_ERROR_LABELS: Readonly<Record<SaveErrorCode, NamespaceKey<"preview">>> = {
+export const SAVE_ERROR_LABELS: Readonly<Record<VideoSaveErrorCode, NamespaceKey<"preview">>> = {
 	stalled: "previewVideoSaveFailedStalled",
 	workerLost: "previewVideoSaveFailedWorkerLost",
 	uploadFailed: "previewVideoSaveFailedUploadFailed",

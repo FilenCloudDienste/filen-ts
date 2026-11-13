@@ -38,8 +38,6 @@ export const previewVideoSave = {
 	/** Save popover — what the save leaves out */
 	previewVideoSaveDropExtraAudio: "Extra audio tracks removed",
 	/** Save popover — what the save leaves out */
-	previewVideoSaveDropHdrMetadata: "HDR details removed",
-	/** Save popover — what the save leaves out */
 	previewVideoSaveDropLocation: "Location removed",
 	/** Save popover — the HDR video is saved as a standard-range video */
 	previewVideoSaveHdrToSdr: "HDR will be converted to SDR",
