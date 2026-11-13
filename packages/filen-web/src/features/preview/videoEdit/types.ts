@@ -178,10 +178,11 @@ export interface VideoEditClient {
 	// NaN marks a bucket with no data yet. `onUpdate` fires as more blocks arrive.
 	waveform(range: TimeRange, columns: number, onUpdate: (peaks: Float32Array) => void): () => void
 	plan(recipe: VideoEditRecipe): Promise<ExportPlan>
+	// A save (save.ts startVideoSave): a refusal and a file changed elsewhere are outcomes the editor words.
 	exportVideo(
 		recipe: VideoEditRecipe,
 		target: VideoSaveTarget,
 		onProgress: (progress: ExportProgress) => void
-	): { done: Promise<ExportOutcome>; cancel(): void; detachToTransfer(): void }
+	): { done: Promise<VideoSaveOutcome>; cancel(): void; detachToTransfer(): void }
 	dispose(): void
 }

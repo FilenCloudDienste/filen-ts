@@ -12,11 +12,12 @@ const ALIAS_ONLY = {
 }
 
 // Mediabunny demuxes and muxes on whichever thread imports it, and it is large: only the remux worker and the video
-// export worker run it, so the main thread and the other workers neither parse it nor block on its work.
+// editor's workers (export, preview) run it, so the main thread and the other workers neither parse it nor block on its
+// work.
 const MEDIABUNNY_REMUX_ONLY = {
 	group: ["mediabunny", "mediabunny/**", "@mediabunny/*", "@mediabunny/**"],
 	message:
-		"Mediabunny runs only in workers (the remux worker, src/workers/remux/**, and the video export worker, src/features/preview/videoEdit/worker/**); talk to one instead."
+		"Mediabunny runs only in workers (the remux worker, src/workers/remux/**, and the video editor's export and preview workers, src/features/preview/videoEdit/worker/**); talk to one instead."
 }
 
 // Everything ships in one bundle (codeSplitting: false). Shared by the app-wide block and the assistant's, which
@@ -183,7 +184,7 @@ export default defineConfig([
 	},
 	{
 		// The remux worker and its modules run Mediabunny, as do the worker-only input opener the media workers share
-		// and the video editor's export worker; tests exercise them directly.
+		// and the video editor's workers; tests exercise them directly.
 		files: [
 			"src/workers/remux.worker.ts",
 			"src/workers/remux/**/*.{ts,tsx}",

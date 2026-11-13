@@ -27,6 +27,7 @@ import { clearPreviewCache } from "@/features/preview/lib/previewCache"
 import { clearArchiveListings } from "@/features/archive/lib/listingCache"
 import { releaseHeicWorker } from "@/features/preview/lib/heicTransform"
 import { releaseImageEditWorker } from "@/features/preview/imageEdit/renderClient"
+import { releaseVideoEditWorkers } from "@/features/preview/videoEdit/client"
 import { useDriveClipboardStore } from "@/features/drive/store/useDriveClipboardStore"
 import { clearDirectoryTreeState } from "@/features/drive/store/useDirectoryTreeStore"
 import { discardListingPatches } from "@/features/drive/queries/drive"
@@ -151,12 +152,13 @@ export async function performLogout(options?: PerformLogoutOptions): Promise<boo
 	// audio from this account survives into the next session.
 	disposeAudioEngine()
 	// Decrypted preview buffers and archive listings (entry names, passwords) held for pager revisits,
-	// any idle HEIC worker whose heap still holds this account's decoded photos, and the image editor's
-	// render worker with the picture it was editing.
+	// any idle HEIC worker whose heap still holds this account's decoded photos, the image editor's
+	// render worker with the picture it was editing, and the video editor's preview worker.
 	clearPreviewCache()
 	clearArchiveListings()
 	releaseHeicWorker()
 	releaseImageEditWorker()
+	releaseVideoEditWorkers()
 	// Videos probes, artwork and frames held for this account, and the frame worker's heap; the drive's own
 	// keyframe thumbnail services and the file-kind verdicts read from content.
 	resetVideoSession()

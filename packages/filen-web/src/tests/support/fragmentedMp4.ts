@@ -27,16 +27,19 @@ export function videoPacket(frame: number, padding = 0): Uint8Array {
 	return bytes
 }
 
-// `padding` grows every video packet, for files that span several download blocks.
+// `padding` grows every video packet, for files that span several download blocks. `fastStart: "in-memory"` writes
+// an ordinary MP4 (moov first, sample tables) instead. `audioFill(n)` is the byte audio packet n is filled with.
 export async function fragmentedMp4(params: {
 	seconds: number
 	audio: boolean
 	expectedDuration?: number
 	padding?: number
+	fastStart?: "fragmented" | "in-memory"
+	audioFill?: (packet: number) => number
 }): Promise<Uint8Array> {
 	const output = new Output({
 		format: new Mp4OutputFormat({
-			fastStart: "fragmented",
+			fastStart: params.fastStart ?? "fragmented",
 			...(params.expectedDuration === undefined ? {} : { expectedDuration: params.expectedDuration })
 		}),
 		target: new BufferTarget()
@@ -55,6 +58,7 @@ export async function fragmentedMp4(params: {
 	const frames = params.seconds * FPS
 	const audioPacketSeconds = 1024 / 48_000
 	let audioTime = 0
+	let audioPacket = 0
 
 	for (let frame = 0; frame < frames; frame++) {
 		const time = frame / FPS
@@ -68,12 +72,13 @@ export async function fragmentedMp4(params: {
 
 		while (audio !== null && audioTime < time + 1 / FPS) {
 			await audio.add(
-				new EncodedPacket(new Uint8Array(64).fill(7), "key", audioTime, audioPacketSeconds),
+				new EncodedPacket(new Uint8Array(64).fill(params.audioFill?.(audioPacket) ?? 7), "key", audioTime, audioPacketSeconds),
 				audioTime === 0
 					? { decoderConfig: { codec: "mp4a.40.2", numberOfChannels: 2, sampleRate: 48_000, description: AAC_CONFIG } }
 					: undefined
 			)
 			audioTime += audioPacketSeconds
+			audioPacket++
 		}
 	}
 
