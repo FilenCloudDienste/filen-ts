@@ -20,14 +20,15 @@ import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
 import type { DriveItem } from "@/features/drive/lib/item"
+import { RemoteChangeDialog } from "@/features/preview/components/remoteChangeDialog"
 import type { AspectPreset } from "@/features/preview/imageEdit/types"
 import type {
-	ExportOutcome,
 	ExportPlan,
 	ExportProgress,
 	TimeRange,
 	VideoEditClient,
 	VideoEditRecipe,
+	VideoSaveOutcome,
 	VideoSaveTarget,
 	VideoSourceInfo
 } from "@/features/preview/videoEdit/types"
@@ -64,14 +65,14 @@ import {
 	ZOOM_STEP,
 	type TimelineView
 } from "@/features/preview/videoEdit/lib/timeline.logic"
-import { colourBlockedByHdr, unavailableFeatures } from "@/features/preview/videoEdit/lib/availability"
+import { colourConvertsHdr, unavailableFeatures } from "@/features/preview/videoEdit/lib/availability"
 import { repeatsWhileHeld, videoEditorKey, type EditorVideoAction } from "@/features/preview/videoEdit/lib/keys"
 import { EditorPlayback } from "@/features/preview/videoEdit/components/editorPlayback"
 import { drawBitmap, FrameRequests } from "@/features/preview/videoEdit/components/frameRequests"
 import { VideoStage } from "@/features/preview/videoEdit/components/videoStage"
 import { VideoTimeline } from "@/features/preview/videoEdit/components/videoTimeline"
 import { VideoEditPanel, type VideoEditTab } from "@/features/preview/videoEdit/components/videoEditPanel"
-import { ExportBar, SavePopover, type ExportState } from "@/features/preview/videoEdit/components/videoSaveControls"
+import { ExportBar, REFUSAL_LABELS, SavePopover, type ExportState } from "@/features/preview/videoEdit/components/videoSaveControls"
 import { FILTER_PRESETS } from "@/features/preview/imageEdit/lib/filters"
 import { createHistory } from "@/lib/editHistory"
 import { Kbd } from "@/lib/keymap/kbd"
@@ -83,9 +84,11 @@ import { useIsOnline } from "@/lib/useIsOnline"
 import { useLatestRef } from "@/lib/useLatestRef"
 import { log } from "@/lib/log"
 
-// The overlay's handle on the open editor: its Mod+S (preview.save) opens the Save popover.
+// The overlay's handle on the open editor: its Mod+S (preview.save) opens the Save popover; its remote-change dialog's
+// "save mine as a copy" starts the copy export.
 export interface VideoEditorCommands {
 	openSave: () => void
+	saveCopy: () => void
 }
 
 export interface VideoEditorProps {
@@ -99,10 +102,12 @@ export interface VideoEditorProps {
 	onDirtyChange: (dirty: boolean) => void
 	// The header's Cancel (the overlay asks first over unsaved edits).
 	onCancel: () => void
-	// Leaves the editor with nothing left to ask about: saved, or handed to a transfer.
+	// Leaves the editor with nothing left to ask about: saved, handed to a transfer, or the edits discarded.
 	onExit: () => void
-	// A save finished while the editor was open: the overlay shows the new version (in place) or offers the copy.
-	onSaved: (uuid: string, target: VideoSaveTarget) => void
+	// An export started; onSaveSettled follows exactly once, whether the editor is still open by then or not (a
+	// background export): `saved` is what it made (the new version, or the copy), null when nothing was saved.
+	onSaveStarted: () => void
+	onSaveSettled: (saved: DriveItem | null, target: VideoSaveTarget) => void
 	// Uploads a still beside the video; resolves with its file name.
 	onSaveFrame: (blob: Blob, extension: "jpg") => Promise<string>
 	commandsRef: RefObject<VideoEditorCommands | null>
@@ -116,7 +121,6 @@ interface Snapshot {
 
 interface RunningExport {
 	handle: ReturnType<VideoEditClient["exportVideo"]>
-	target: VideoSaveTarget
 	// Hands the export to a transfer and tells its end by a toast.
 	toBackground: () => void
 }
@@ -199,6 +203,8 @@ export function VideoEditor(props: VideoEditorProps) {
 	const [plan, setPlan] = useState<ExportPlan | null>(null)
 	const [saveOpen, setSaveOpen] = useState(false)
 	const [exportState, setExportState] = useState<ExportState | null>(null)
+	// The file changed elsewhere (null: it is gone) before an in-place save started: asked about, the edits kept.
+	const [remoteChange, setRemoteChange] = useState<{ currentUuid: string | null } | null>(null)
 	const [thumbnails, setThumbnails] = useState<{ key: string; bitmaps: readonly ImageBitmap[] } | null>(null)
 	const thumbnailsRef = useRef<readonly ImageBitmap[]>([])
 	const running = useRef<RunningExport | null>(null)
@@ -212,7 +218,8 @@ export function VideoEditor(props: VideoEditorProps) {
 	const exporting = exportState?.status === "running"
 	const dirty = !isIdentityVideoRecipe(recipe, duration)
 	const unavailable = unavailableFeatures(plan)
-	const hdrBlocked = colourBlockedByHdr(info, plan)
+	const hdrNote = colourConvertsHdr(info)
+	const adjustUnavailable = unavailable.has("adjust")
 	const mode: StageMode = tab === "crop" ? "crop" : tab === "text" ? "text" : "result"
 	const fps = info.frameRate
 	const outputLength = outputDuration(recipe.keep, recipe.speed)
@@ -405,7 +412,7 @@ export function VideoEditor(props: VideoEditorProps) {
 	const shownThumbnailsKey = thumbnails?.key ?? null
 
 	useEffect(() => {
-		if (tab !== "adjust" || !paused || hdrBlocked || shownThumbnailsKey === thumbnailsKey) {
+		if (tab !== "adjust" || !paused || adjustUnavailable || shownThumbnailsKey === thumbnailsKey) {
 			return
 		}
 
@@ -455,7 +462,7 @@ export function VideoEditor(props: VideoEditorProps) {
 		return () => {
 			controller.abort()
 		}
-	}, [client, tab, paused, hdrBlocked, thumbnailsKey, shownThumbnailsKey, settledTime, latestRecipe])
+	}, [client, tab, paused, adjustUnavailable, thumbnailsKey, shownThumbnailsKey, settledTime, latestRecipe])
 
 	useEffect(() => {
 		return () => {
@@ -479,7 +486,7 @@ export function VideoEditor(props: VideoEditorProps) {
 		}
 	}
 
-	const settle = (handle: RunningExport["handle"], target: VideoSaveTarget, outcome: ExportOutcome): void => {
+	const settle = (handle: RunningExport["handle"], target: VideoSaveTarget, outcome: VideoSaveOutcome): void => {
 		// Sent to the background (or replaced): the transfer reports it.
 		if (running.current?.handle !== handle) {
 			return
@@ -487,74 +494,90 @@ export function VideoEditor(props: VideoEditorProps) {
 
 		running.current = null
 
-		if (outcome.status === "cancelled") {
-			setExportState(null)
+		switch (outcome.status) {
+			case "cancelled": {
+				setExportState(null)
 
-			return
+				return
+			}
+
+			case "error": {
+				setExportState({ status: "failed", message: outcome.message })
+
+				return
+			}
+
+			case "refused": {
+				setExportState({ status: "refused", reason: outcome.reason })
+
+				return
+			}
+
+			case "remoteChanged": {
+				setExportState(null)
+				setRemoteChange({ currentUuid: outcome.currentUuid })
+
+				return
+			}
+
+			case "done": {
+				setExportState(null)
+				toast.success(t(target === "copy" ? "previewVideoSaveDoneCopy" : "previewVideoSaveDone", { name: props.name }))
+				dirtyRef.current = false
+				props.onDirtyChange(false)
+				props.onExit()
+			}
 		}
-
-		if (outcome.status === "error") {
-			setExportState({ status: "failed", message: outcome.message })
-
-			return
-		}
-
-		setExportState(null)
-		toast.success(t(target === "copy" ? "previewVideoSaveDoneCopy" : "previewVideoSaveDone", { name: props.name }))
-		dirtyRef.current = false
-		props.onDirtyChange(false)
-		props.onSaved(outcome.uuid, target)
-		props.onExit()
 	}
 
+	const onSaveSettled = useLatestRef(props.onSaveSettled)
+
 	const startExport = (target: VideoSaveTarget): void => {
-		if (running.current !== null || !online || !dirty || !plan?.targets.includes(target)) {
+		if (running.current !== null || !online || !dirty || !plan?.targets.includes(target) || plan.blockers.length > 0) {
 			return
 		}
 
 		setSaveOpen(false)
+		setRemoteChange(null)
 		playback.pause()
 		lastTarget.current = target
 		lastPercent.current = -1
 		setExportState({ status: "running", fraction: 0, etaSeconds: null })
 
 		const handle = client.exportVideo(history.current, target, progressOf)
+		const done = handle.done.catch(
+			(error: unknown): VideoSaveOutcome => ({ status: "error", message: error instanceof Error ? error.message : "" })
+		)
 
 		running.current = {
 			handle,
-			target,
 			toBackground: () => {
-				followInBackground(handle, target)
+				followInBackground(done, target)
 			}
 		}
-		handle.done.then(
-			outcome => {
-				settle(handle, target, outcome)
-			},
-			(error: unknown) => {
-				settle(handle, target, { status: "error", message: error instanceof Error ? error.message : "" })
-			}
-		)
+		props.onSaveStarted()
+		// Told whatever happens to the editor meanwhile: the overlay judges versions saved elsewhere against it.
+		void done.then(outcome => {
+			onSaveSettled.current(outcome.status === "done" ? outcome.item : null, target)
+			settle(handle, target, outcome)
+		})
 	}
 
 	// The export goes on as a transfer; its end is told by a toast, wherever the user is by then.
-	const followInBackground = (handle: RunningExport["handle"], target: VideoSaveTarget): void => {
+	const followInBackground = (done: Promise<VideoSaveOutcome>, target: VideoSaveTarget): void => {
 		const name = props.name
 
-		handle.detachToTransfer()
-		void handle.done.then(
-			outcome => {
-				if (outcome.status === "done") {
-					toast.success(t(target === "copy" ? "previewVideoSaveDoneCopy" : "previewVideoSaveDone", { name }))
-				} else if (outcome.status === "error") {
-					toast.error(t("previewVideoSaveBackgroundFailed", { name }), { description: outcome.message })
-				}
-			},
-			(error: unknown) => {
-				log.error("[videoEditor] background export failed", error)
-				toast.error(t("previewVideoSaveBackgroundFailed", { name }))
+		void done.then(outcome => {
+			if (outcome.status === "done") {
+				toast.success(t(target === "copy" ? "previewVideoSaveDoneCopy" : "previewVideoSaveDone", { name }))
+			} else if (outcome.status === "error") {
+				toast.error(t("previewVideoSaveBackgroundFailed", { name }), { description: outcome.message })
+			} else if (outcome.status === "refused") {
+				toast.error(t("previewVideoSaveBackgroundFailed", { name }), { description: t(REFUSAL_LABELS[outcome.reason]) })
+			} else if (outcome.status === "remoteChanged") {
+				toast.error(t("previewVideoSaveBackgroundFailed", { name }), { description: t("previewRemoteChangedTitle") })
 			}
-		)
+		})
 	}
 
 	const continueInBackground = (): void => {
@@ -565,6 +588,7 @@ export function VideoEditor(props: VideoEditorProps) {
 		}
 
 		running.current = null
+		current.handle.detachToTransfer()
 		current.toBackground()
 		setExportState(null)
 		dirtyRef.current = false
@@ -579,10 +603,20 @@ export function VideoEditor(props: VideoEditorProps) {
 
 			if (current !== null) {
 				running.current = null
+				current.handle.detachToTransfer()
 				current.toBackground()
 			}
 		}
 	}, [])
+
+	// The edits dropped for the version saved elsewhere (or for nothing, the file being gone): the overlay shows what
+	// the slot holds now.
+	const discard = (): void => {
+		setRemoteChange(null)
+		dirtyRef.current = false
+		props.onDirtyChange(false)
+		props.onExit()
+	}
 
 	const saveFrame = (): void => {
 		const time = playback.time
@@ -614,6 +648,9 @@ export function VideoEditor(props: VideoEditorProps) {
 			if (dirty && !exporting) {
 				setSaveOpen(true)
 			}
+		},
+		saveCopy: () => {
+			startExport("copy")
 		}
 	})
 	const { commandsRef } = props
@@ -622,6 +659,9 @@ export function VideoEditor(props: VideoEditorProps) {
 		commandsRef.current = {
 			openSave: () => {
 				commands.current.openSave()
+			},
+			saveCopy: () => {
+				commands.current.saveCopy()
 			}
 		}
 
@@ -859,6 +899,9 @@ export function VideoEditor(props: VideoEditorProps) {
 						onRemoveLocation={removeLocation => {
 							change(current => ({ ...current, removeLocation }))
 						}}
+						onMute={() => {
+							change(current => ({ ...current, audio: { ...current.audio, mute: true } }))
+						}}
 						onSave={startExport}
 					/>
 				</div>
@@ -1072,7 +1115,7 @@ export function VideoEditor(props: VideoEditorProps) {
 						recipe={recipe}
 						info={info}
 						unavailable={unavailable}
-						hdrBlocked={hdrBlocked}
+						hdrNote={hdrNote}
 						selection={selection}
 						aspect={aspect}
 						selectedText={selectedText}
@@ -1104,6 +1147,23 @@ export function VideoEditor(props: VideoEditorProps) {
 					/>
 				</aside>
 			</div>
+			{remoteChange !== null ? (
+				<RemoteChangeDialog
+					kind={remoteChange.currentUuid === null ? "deleted" : "revised"}
+					title={t(remoteChange.currentUuid === null ? "previewRemoteDeletedTitle" : "previewRemoteChangedTitle")}
+					body={t(remoteChange.currentUuid === null ? "previewRemoteDeletedBody" : "previewRemoteChangedBody", { name: props.name })}
+					readMine={() => undefined}
+					pending={false}
+					onKeepMine={() => {
+						setRemoteChange(null)
+					}}
+					onLoadTheirs={discard}
+					onSaveMineAsNew={() => {
+						startExport("copy")
+					}}
+					onDiscardMine={discard}
+				/>
+			) : null}
 		</div>
 	)
 }

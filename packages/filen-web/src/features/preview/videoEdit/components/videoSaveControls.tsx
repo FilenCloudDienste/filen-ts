@@ -1,6 +1,6 @@
 import type { ReactNode } from "react"
 import { useTranslation } from "react-i18next"
-import { AlertTriangleIcon, ChevronDownIcon, CopyIcon, HistoryIcon, InfoIcon, ZapIcon } from "lucide-react"
+import { AlertTriangleIcon, ChevronDownIcon, CopyIcon, HistoryIcon, InfoIcon, VolumeXIcon, ZapIcon } from "lucide-react"
 import { cn, formatBytes } from "@filen/shared"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -12,10 +12,18 @@ import type {
 	OutputQuality,
 	OutputResolution,
 	VideoEditRecipe,
+	VideoSaveRefusal,
 	VideoSaveTarget,
 	VideoSourceInfo
 } from "@/features/preview/videoEdit/types"
-import { dropNotices, etaMinutes, targetNote, type DropNotice, type EditFeature } from "@/features/preview/videoEdit/lib/availability"
+import {
+	dropNotices,
+	etaMinutes,
+	saveBlock,
+	targetNote,
+	type DropNotice,
+	type EditFeature
+} from "@/features/preview/videoEdit/lib/availability"
 import { formatTimecode } from "@/features/preview/videoEdit/lib/timeline.logic"
 import type { NamespaceKey } from "@/lib/i18n"
 
@@ -91,6 +99,8 @@ export interface SavePopoverProps {
 	onOpenChange: (open: boolean) => void
 	onOutput: (output: VideoEditRecipe["output"]) => void
 	onRemoveLocation: (remove: boolean) => void
+	// Mutes the audio: the way out when only the sound blocks the save.
+	onMute: () => void
 	onSave: (target: VideoSaveTarget) => void
 }
 
@@ -103,6 +113,7 @@ export function SavePopover(props: SavePopoverProps) {
 	const { plan, recipe, info } = props
 	const shortSide = Math.min(info.width, info.height)
 	const offline = !props.online
+	const block = saveBlock(plan)
 
 	return (
 		<Popover
@@ -146,6 +157,28 @@ export function SavePopover(props: SavePopoverProps) {
 								{t("previewVideoSaveLength", { length: formatTimecode(plan.outputDuration) })}
 							</p>
 						</div>
+						{block !== null ? (
+							<div
+								role="alert"
+								className="flex flex-col items-start gap-2 rounded-xl bg-destructive/10 px-3 py-2 text-xs"
+							>
+								<span className="flex items-start gap-2">
+									<AlertTriangleIcon className="mt-px size-3.5 shrink-0 text-destructive" />
+									{t(block === "audio" ? "previewVideoSaveBlockedAudio" : "previewVideoSaveBlockedVideo")}
+								</span>
+								{block === "audio" ? (
+									<Button
+										size="sm"
+										variant="outline"
+										disabled={props.busy}
+										onClick={props.onMute}
+									>
+										<VolumeXIcon data-icon="inline-start" />
+										{t("previewVideoSaveWithoutAudio")}
+									</Button>
+								) : null}
+							</div>
+						) : null}
 						<ul className="flex flex-col gap-1.5">
 							{dropNotices(plan.dropped).map(notice => (
 								<Notice
@@ -239,7 +272,7 @@ export function SavePopover(props: SavePopoverProps) {
 							size="sm"
 							variant={index === 0 ? "default" : "outline"}
 							autoFocus={index === 0}
-							disabled={plan === null || offline || props.busy || !props.dirty}
+							disabled={plan === null || block !== null || offline || props.busy || !props.dirty}
 							onClick={() => {
 								props.onSave(target)
 							}}
@@ -253,9 +286,28 @@ export function SavePopover(props: SavePopoverProps) {
 	)
 }
 
-export type ExportState = { status: "running"; fraction: number; etaSeconds: number | null } | { status: "failed"; message: string }
+export type ExportState =
+	| { status: "running"; fraction: number; etaSeconds: number | null }
+	| { status: "failed"; message: string }
+	| { status: "refused"; reason: VideoSaveRefusal }
 
-// The export's progress under the header while it runs in the editor, or its failure with Retry (the edits stay).
+export const REFUSAL_LABELS: Readonly<Record<VideoSaveRefusal, PreviewKey>> = {
+	offline: "previewVideoSaveRefusedOffline",
+	quota: "previewVideoSaveRefusedQuota",
+	unavailable: "previewVideoSaveRefusedUnavailable",
+	gop: "previewVideoSaveRefusedGop",
+	noVideo: "previewVideoSaveRefusedNoVideo",
+	codec: "previewVideoSaveRefusedCodec",
+	target: "previewVideoSaveRefusedTarget"
+}
+
+// A refusal worth trying again once its cause is gone (back online, storage freed); the others stay as they are.
+export function refusalRetries(reason: VideoSaveRefusal): boolean {
+	return reason === "offline" || reason === "quota"
+}
+
+// The export's progress under the header while it runs in the editor, or why it failed or was refused, with Retry where
+// trying again can help (the edits stay).
 export function ExportBar(props: {
 	state: ExportState
 	onBackground: () => void
@@ -267,7 +319,9 @@ export function ExportBar(props: {
 	const eta = useEtaLabel()
 	const state = props.state
 
-	if (state.status === "failed") {
+	if (state.status !== "running") {
+		const retries = state.status === "failed" || refusalRetries(state.reason)
+
 		return (
 			<div
 				role="alert"
@@ -275,8 +329,14 @@ export function ExportBar(props: {
 			>
 				<AlertTriangleIcon className="size-4 shrink-0 text-destructive" />
 				<span className="min-w-0 flex-1">
-					{t("previewVideoSaveFailed")}
-					{state.message.length > 0 ? <span className="ml-1 text-muted-foreground">{state.message}</span> : null}
+					{state.status === "failed" ? (
+						<>
+							{t("previewVideoSaveFailed")}
+							{state.message.length > 0 ? <span className="ml-1 text-muted-foreground">{state.message}</span> : null}
+						</>
+					) : (
+						t(REFUSAL_LABELS[state.reason])
+					)}
 				</span>
 				<Button
 					size="sm"
@@ -285,12 +345,14 @@ export function ExportBar(props: {
 				>
 					{t("previewVideoSaveDismiss")}
 				</Button>
-				<Button
-					size="sm"
-					onClick={props.onRetry}
-				>
-					{t("previewVideoSaveRetry")}
-				</Button>
+				{retries ? (
+					<Button
+						size="sm"
+						onClick={props.onRetry}
+					>
+						{t("previewVideoSaveRetry")}
+					</Button>
+				) : null}
 			</div>
 		)
 	}

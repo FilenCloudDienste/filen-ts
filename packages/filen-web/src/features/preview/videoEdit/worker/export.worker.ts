@@ -125,7 +125,9 @@ const api: ExportWorkerApi = {
 				signal: controller.signal,
 				fallbackCreationTime: args.fallbackCreationTime,
 				deps: {
-					createPipeline: () => createFramePipeline(new OffscreenCanvas(1, 1)),
+					// Frames arrive coded (unrotated); an HDR source whose frames do not name their curve is tone-mapped by its own.
+					createPipeline: source =>
+						createFramePipeline(new OffscreenCanvas(1, 1), source.transfer === "sdr" ? {} : { sourceTransfer: source.transfer }),
 					createTimeStretch,
 					exoticAudio: exoticAudio(block),
 					ios: args.context.ios === true

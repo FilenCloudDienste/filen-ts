@@ -183,6 +183,8 @@ export async function sourceInfoOf(bytes: Uint8Array, overrides: Partial<VideoSo
 		duration: await input.computeDuration(),
 		width: 1280,
 		height: 720,
+		codedWidth: 1280,
+		codedHeight: 720,
 		rotation: (await track?.getRotation()) ?? 0,
 		frameRate: FPS,
 		videoCodec: "avc1.64001f",

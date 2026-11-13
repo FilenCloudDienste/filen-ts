@@ -1,54 +1,51 @@
 import { VideoSample, type VideoSampleSource } from "mediabunny"
-import type { OutputGeometry } from "@/features/preview/videoEdit/lib/plan"
+import { needsPixelPass, type OutputGeometry } from "@/features/preview/videoEdit/lib/plan"
 import type { HdrHandling, TimeRange, VideoEditRecipe } from "@/features/preview/videoEdit/types"
 import { throwIfCancelled } from "@/features/preview/videoEdit/worker/errors"
 import type { InterleaveGate } from "@/features/preview/videoEdit/worker/gate"
 
 // The transcode path's video: every kept frame decoded, changed as little as the recipe needs, and encoded.
-// - A recipe with colour, text, a flip, a resize or a tone map goes through the one WebGL pass (gl/pipeline.ts).
-// - A crop alone is a view onto the decoded frame (VideoFrame visibleRect): no pixel is copied.
+// - A recipe with colour, text, a flip, a resize or a tone map goes through the one WebGL pass (gl/pipeline.ts). The
+//   plan never sends HDR it keeps ("keep", "hevc10") this way: the pass is 8-bit SDR.
+// - A crop alone is a view onto the decoded frame (VideoFrame visibleRect, coded pixels): no pixel is copied.
 // - Otherwise the decoded frame is encoded as it is.
 // Rotation never touches pixels outside the GPU pass: the output track carries it as metadata.
 
 // The frame pipeline (gl/pipeline.ts): see exportApi.ts for the orientation contract.
 export interface FramePipelineLike {
-	render(
+	// A 10-bit HDR frame being tone-mapped is read from its own planes, hence async; the frame stays open until it settles.
+	renderAsync(
 		frame: VideoFrame,
 		recipe: VideoEditRecipe,
 		outWidth: number,
 		outHeight: number,
 		outputTimeSec: number,
 		hdr: HdrHandling | null
-	): VideoFrame
+	): Promise<VideoFrame>
 	needsGpu(recipe: VideoEditRecipe): boolean
 	dispose(): void
 }
 
 // Turns one decoded frame into the frame to encode; takes ownership of `frame` (closes it, or returns it).
-export type FrameStage = (frame: VideoFrame, outputTime: number) => VideoFrame
+export type FrameStage = (frame: VideoFrame, outputTime: number) => Promise<VideoFrame>
 
 export type FrameStageKind = "gpu" | "crop" | "pass"
 
-// Which stage a recipe needs. `pipelineWants`: the pipeline's own answer for the recipe (colour, text).
-export function frameStageKind(params: {
-	recipe: VideoEditRecipe
-	geometry: OutputGeometry
-	hdr: HdrHandling | null
-	pipelineWants: boolean
-}): FrameStageKind {
-	const { recipe, geometry, hdr, pipelineWants } = params
+// Which stage a recipe needs.
+export function frameStageKind(params: { recipe: VideoEditRecipe; geometry: OutputGeometry; hdr: HdrHandling | null }): FrameStageKind {
+	const { recipe, geometry, hdr } = params
 
-	if (pipelineWants || recipe.flipH || recipe.flipV || geometry.scaled || hdr === "toSdr") {
+	if (needsPixelPass(recipe, geometry) || hdr === "toSdr") {
 		return "gpu"
 	}
 
 	return geometry.codedCrop === null ? "pass" : "crop"
 }
 
-// The recipe the pipeline renders: the crop in the source's coded space and the source's rotation folded into the
-// user's, since decoded frames arrive unrotated (exportApi.ts).
+// The recipe the pipeline renders: the crop in the unrotated frame's square pixels (a decoded frame's display units)
+// and the source's rotation folded into the user's, since decoded frames arrive unrotated (exportApi.ts).
 export function pipelineRecipe(recipe: VideoEditRecipe, geometry: OutputGeometry): VideoEditRecipe {
-	return { ...recipe, crop: geometry.codedCrop, rotate: geometry.rotation }
+	return { ...recipe, crop: geometry.squareCrop, rotate: geometry.rotation }
 }
 
 export function createFrameStage(params: {
@@ -65,11 +62,15 @@ export function createFrameStage(params: {
 			throw new Error("the GPU pass is needed but no pipeline was made")
 		}
 
+		if (hdr === "keep" || hdr === "hevc10") {
+			throw new Error(`the GPU pass cannot keep HDR ("${hdr}")`)
+		}
+
 		const recipe = pipelineRecipe(params.recipe, geometry)
 
-		return (frame, outputTime) => {
+		return async (frame, outputTime) => {
 			try {
-				return pipeline.render(frame, recipe, geometry.width, geometry.height, outputTime, hdr)
+				return await pipeline.renderAsync(frame, recipe, geometry.width, geometry.height, outputTime, hdr)
 			} finally {
 				frame.close()
 			}
@@ -77,22 +78,32 @@ export function createFrameStage(params: {
 	}
 
 	const crop = geometry.codedCrop
+	const square = geometry.squareCrop
 
-	if (kind === "crop" && crop !== null) {
+	if (kind === "crop" && crop !== null && square !== null) {
+		// Square-pixel display size: an anamorphic source keeps its pixel aspect ratio in the output.
+		const displayWidth = Math.max(1, Math.round(square.width))
+		const displayHeight = Math.max(1, Math.round(square.height))
+
 		return frame => {
 			try {
-				return new VideoFrame(frame, {
-					visibleRect: { x: crop.x, y: crop.y, width: crop.width, height: crop.height },
-					displayWidth: crop.width,
-					displayHeight: crop.height
-				})
+				// The coded crop is relative to the picture; a decoder may pad the coded frame around it.
+				const visible = frame.visibleRect
+
+				return Promise.resolve(
+					new VideoFrame(frame, {
+						visibleRect: { x: (visible?.x ?? 0) + crop.x, y: (visible?.y ?? 0) + crop.y, width: crop.width, height: crop.height },
+						displayWidth,
+						displayHeight
+					})
+				)
 			} finally {
 				frame.close()
 			}
 		}
 	}
 
-	return frame => frame
+	return frame => Promise.resolve(frame)
 }
 
 // Decoded frames of a range, in presentation order (mediabunny VideoSampleSink.samples).
@@ -146,7 +157,7 @@ export async function transcodeVideo(params: TranscodeVideoParams): Promise<{ fr
 				continue
 			}
 
-			const frame = stage(decoded.take(), time)
+			const frame = await stage(decoded.take(), time)
 			const duration = Math.max(EPSILON, Math.min(decoded.duration / speed, end - time))
 			const sample = new VideoSample(frame, { timestamp: time, duration })
 

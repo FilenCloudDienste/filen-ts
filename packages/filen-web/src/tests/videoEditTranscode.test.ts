@@ -72,10 +72,10 @@ describe("frame stages", () => {
 	const source = sourceInfo()
 
 	it("picks the cheapest stage the recipe allows", () => {
-		const kind = (overrides: Parameters<typeof recipeFor>[1], hdr: "toSdr" | "hevc10" | null = null, wants = false): string => {
+		const kind = (overrides: Parameters<typeof recipeFor>[1], hdr: "toSdr" | "hevc10" | null = null): string => {
 			const recipe = recipeFor(60, overrides)
 
-			return frameStageKind({ recipe, geometry: outputGeometry(recipe, source), hdr, pipelineWants: wants })
+			return frameStageKind({ recipe, geometry: outputGeometry(recipe, source), hdr })
 		}
 
 		expect(kind({})).toBe("pass")
@@ -87,7 +87,8 @@ describe("frame stages", () => {
 		expect(kind({ output: { resolution: 720, quality: "high" } })).toBe("gpu")
 		expect(kind({}, "toSdr")).toBe("gpu")
 		expect(kind({}, "hevc10")).toBe("pass")
-		expect(kind({}, null, true)).toBe("gpu")
+		expect(kind({ filter: "vivid" })).toBe("gpu")
+		expect(kind({ text: [{ id: "t", text: "Hi", startSec: 0, endSec: 1, x: 0.5, y: 0.5, size: 0.1, color: "#fff", background: false }] })).toBe("gpu")
 	})
 
 	it("hands the pipeline coded-space geometry with the source's rotation folded in", () => {
@@ -101,11 +102,11 @@ describe("frame stages", () => {
 		expect(handed.flipH).toBe(recipe.flipH)
 	})
 
-	it("crops by a view onto the decoded frame and closes the original", () => {
+	it("crops by a view onto the decoded frame and closes the original", async () => {
 		const recipe = recipeFor(60, { crop: { x: 100, y: 50, width: 640, height: 360 } })
 		const stage = createFrameStage({ kind: "crop", recipe, geometry: outputGeometry(recipe, source), hdr: null, pipeline: null })
 		const input = frame()
-		const output = stage(input, 0) as unknown as FakeVideoFrame
+		const output = (await stage(input, 0)) as unknown as FakeVideoFrame
 
 		expect(output.from).toBe(input)
 		expect(output.visibleRect).toEqual({ x: 100, y: 50, width: 640, height: 360 })
@@ -113,45 +114,61 @@ describe("frame stages", () => {
 		expect((input as unknown as FakeVideoFrame).closed).toBe(true)
 	})
 
-	it("passes an untouched frame through", () => {
+	it("crops an anamorphic source in coded pixels and keeps its square-pixel display size", async () => {
+		const anamorphic = sourceInfo({ width: 854, height: 480, codedWidth: 720, codedHeight: 480 })
+		const recipe = recipeFor(60, { crop: { x: 100, y: 0, width: 400, height: 480 } })
+		const stage = createFrameStage({ kind: "crop", recipe, geometry: outputGeometry(recipe, anamorphic), hdr: null, pipeline: null })
+		const input = new FakeVideoFrame({ width: 720, height: 480, timestamp: 0 }) as unknown as VideoFrame
+		const output = (await stage(input, 0)) as unknown as FakeVideoFrame
+
+		expect(output.visibleRect).toEqual({ x: 84, y: 0, width: 336, height: 480 })
+		expect([output.displayWidth, output.displayHeight]).toEqual([399, 480])
+	})
+
+	it("never sends kept HDR through the GPU pass", () => {
+		const recipe = recipeFor(60, { flipH: true })
+		const pipeline: FramePipelineLike = { renderAsync: vi.fn(), needsGpu: () => true, dispose: vi.fn() }
+
+		expect(() => createFrameStage({ kind: "gpu", recipe, geometry: outputGeometry(recipe, source), hdr: "hevc10", pipeline })).toThrow()
+	})
+
+	it("passes an untouched frame through", async () => {
 		const recipe = recipeFor(60)
 		const stage = createFrameStage({ kind: "pass", recipe, geometry: outputGeometry(recipe, source), hdr: null, pipeline: null })
 		const input = frame()
 
-		expect(stage(input, 0)).toBe(input)
+		expect(await stage(input, 0)).toBe(input)
 	})
 
-	it("renders through the GPU pass and closes the decoded frame", () => {
+	it("renders through the GPU pass and closes the decoded frame", async () => {
 		const recipe = recipeFor(60, { flipH: true, output: { resolution: 720, quality: "high" } })
 		const geometry = outputGeometry(recipe, source)
 		const rendered = frame()
-		const render = vi.fn(() => rendered)
+		const render = vi.fn(() => Promise.resolve(rendered))
 		const pipeline: FramePipelineLike = {
-			render,
+			renderAsync: render,
 			needsGpu: () => true,
 			dispose: vi.fn()
 		}
 		const stage = createFrameStage({ kind: "gpu", recipe, geometry, hdr: "toSdr", pipeline })
 		const input = frame()
 
-		expect(stage(input, 1.5)).toBe(rendered)
+		expect(await stage(input, 1.5)).toBe(rendered)
 		expect(render).toHaveBeenCalledWith(input, pipelineRecipe(recipe, geometry), 1280, 720, 1.5, "toSdr")
 		expect((input as unknown as FakeVideoFrame).closed).toBe(true)
 	})
 
-	it("closes the decoded frame even when the GPU pass throws", () => {
+	it("closes the decoded frame even when the GPU pass throws", async () => {
 		const recipe = recipeFor(60, { flipH: true })
 		const pipeline: FramePipelineLike = {
-			render: () => {
-				throw new Error("context lost")
-			},
+			renderAsync: () => Promise.reject(new Error("context lost")),
 			needsGpu: () => true,
 			dispose: () => undefined
 		}
 		const stage = createFrameStage({ kind: "gpu", recipe, geometry: outputGeometry(recipe, source), hdr: null, pipeline })
 		const input = frame()
 
-		expect(() => stage(input, 0)).toThrow("context lost")
+		await expect(stage(input, 0)).rejects.toThrow("context lost")
 		expect((input as unknown as FakeVideoFrame).closed).toBe(true)
 	})
 })
@@ -209,7 +226,7 @@ describe("transcodeVideo", () => {
 			],
 			speed: 1,
 			maxFrameRate: 10,
-			stage: decodedFrame => decodedFrame,
+			stage: decodedFrame => Promise.resolve(decodedFrame),
 			output,
 			gate,
 			lane: "video",
@@ -235,7 +252,7 @@ describe("transcodeVideo", () => {
 			ranges: [{ start: 0, end: 2 }],
 			speed: 2,
 			maxFrameRate: 30,
-			stage: decodedFrame => decodedFrame,
+			stage: decodedFrame => Promise.resolve(decodedFrame),
 			output,
 			gate,
 			lane: "video",
@@ -263,7 +280,7 @@ describe("transcodeVideo", () => {
 				ranges: [{ start: 0, end: 2 }],
 				speed: 1,
 				maxFrameRate: 30,
-				stage: decodedFrame => decodedFrame,
+				stage: decodedFrame => Promise.resolve(decodedFrame),
 				output,
 				gate,
 				lane: "video",

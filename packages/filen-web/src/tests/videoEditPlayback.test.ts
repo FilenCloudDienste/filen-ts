@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { EditorPlayback } from "@/features/preview/videoEdit/components/editorPlayback"
-import { colourBlockedByHdr, dropNotices, etaMinutes, targetNote, unavailableFeatures } from "@/features/preview/videoEdit/lib/availability"
+import { colourConvertsHdr, dropNotices, etaMinutes, saveBlock, targetNote, unavailableFeatures } from "@/features/preview/videoEdit/lib/availability"
 import type { ExportPlan, VideoSourceInfo } from "@/features/preview/videoEdit/types"
 import { FAKE_INFO, FAKE_PLAN } from "@/tests/support/fakeVideoEditClient"
 
@@ -171,12 +171,16 @@ describe("plan readings", () => {
 		expect(targetNote(plan({ targets: ["copy"] }))).toBe("copyOnly")
 	})
 
-	it("blocks colour on HDR unless the plan keeps 10-bit", () => {
-		const hdr: VideoSourceInfo = { ...FAKE_INFO, transfer: "pq" }
+	it("notes that colour work converts HDR", () => {
+		expect(colourConvertsHdr(FAKE_INFO)).toBe(false)
+		expect(colourConvertsHdr({ ...FAKE_INFO, transfer: "pq" } satisfies VideoSourceInfo)).toBe(true)
+	})
 
-		expect(colourBlockedByHdr(FAKE_INFO, null)).toBe(false)
-		expect(colourBlockedByHdr(hdr, plan({ hdr: "toSdr" }))).toBe(true)
-		expect(colourBlockedByHdr(hdr, plan({ hdr: "hevc10" }))).toBe(false)
+	it("tells a save blocked by its sound alone from one blocked by its picture", () => {
+		expect(saveBlock(null)).toBeNull()
+		expect(saveBlock(plan({}))).toBeNull()
+		expect(saveBlock(plan({ blockers: ["audioCodec"], mutingUnblocks: true }))).toBe("audio")
+		expect(saveBlock(plan({ blockers: ["crop", "gain"], mutingUnblocks: false }))).toBe("video")
 	})
 
 	it("rounds the time to whole minutes", () => {

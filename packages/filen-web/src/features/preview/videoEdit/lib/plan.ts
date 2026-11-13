@@ -33,7 +33,7 @@ export type UnavailableOption =
 	"crop" | "rotate" | "flip" | "resize" | "quality" | "adjust" | "text" | "speed" | "gain" | "audioTracks" | "precise"
 
 // What in a recipe this browser (or this source) cannot export; any of them refuses the export (exportBlockers).
-export type ExportBlocker = TranscodeReason | "gain" | "audioCodec" | "hdrAdjust"
+export type ExportBlocker = TranscodeReason | "gain" | "audioCodec"
 
 // Presentation-time slack: key frame times and range edges are compared within it.
 const TIME_EPSILON = 0.001
@@ -77,16 +77,20 @@ export function transcodeFrameRate(source: VideoSourceInfo, speed: number): numb
 }
 
 export interface OutputGeometry {
-	// The output's display size (after crop, rotation and scale), even.
+	// The output's display size (after crop, rotation and scale), even, square pixels.
 	width: number
 	height: number
 	// The source frame is resized (only the GPU pass does that).
 	scaled: boolean
-	// The source's coded frame size (before its rotation metadata).
+	// The source's coded frame size (before its pixel aspect ratio and rotation).
 	codedWidth: number
 	codedHeight: number
-	// The crop in the source's CODED space (before its rotation), even; null for the whole frame.
+	// The crop in CODED pixels (before the pixel aspect ratio and rotation), even: a VideoFrame visibleRect. Null for
+	// the whole frame.
 	codedCrop: VideoCrop | null
+	// The same rectangle in the unrotated frame's square pixels (what a decoded VideoFrame's display size measures):
+	// the GPU pass's crop. Null exactly when codedCrop is.
+	squareCrop: VideoCrop | null
 	// Source rotation plus the recipe's, clockwise: what a path that leaves pixels unrotated writes as metadata.
 	rotation: VideoRotation
 }
@@ -99,7 +103,7 @@ function quarterTurns(rotation: VideoRotation): boolean {
 	return rotation === 90 || rotation === 270
 }
 
-// A display-space rectangle in the coded frame, for a source shown rotated clockwise by `rotation`.
+// A display-space rectangle in the unrotated frame, for a source shown rotated clockwise by `rotation`.
 export function displayToCoded(crop: VideoCrop, rotation: VideoRotation, codedWidth: number, codedHeight: number): VideoCrop {
 	switch (rotation) {
 		case 90: {
@@ -132,32 +136,86 @@ function evenCrop(crop: VideoCrop, width: number, height: number): VideoCrop {
 	}
 }
 
-export function outputGeometry(recipe: VideoEditRecipe, source: VideoSourceInfo): OutputGeometry {
+// The unrotated source frame: its coded size and that size in square pixels (they differ for an anamorphic source).
+export interface SourceFrame {
+	codedWidth: number
+	codedHeight: number
+	squareWidth: number
+	squareHeight: number
+}
+
+export function sourceFrame(source: VideoSourceInfo): SourceFrame {
 	const sideways = quarterTurns(source.rotation)
-	const codedWidth = sideways ? source.height : source.width
-	const codedHeight = sideways ? source.width : source.height
+	const squareWidth = sideways ? source.height : source.width
+	const squareHeight = sideways ? source.width : source.height
+
+	return {
+		codedWidth: source.codedWidth > 0 ? source.codedWidth : squareWidth,
+		codedHeight: source.codedHeight > 0 ? source.codedHeight : squareHeight,
+		squareWidth,
+		squareHeight
+	}
+}
+
+// The one conversion between the two units of the unrotated frame: a square-pixel rectangle as coded pixels, even
+// (4:2:0 chroma), and that coded rectangle back in square pixels. The crop-only path (visibleRect, coded) and the GPU
+// pass (square) both take their crop from here, so they cut the same pixels.
+export function squareToCodedCrop(crop: VideoCrop, frame: SourceFrame): VideoCrop {
+	const sx = frame.squareWidth > 0 ? frame.codedWidth / frame.squareWidth : 1
+	const sy = frame.squareHeight > 0 ? frame.codedHeight / frame.squareHeight : 1
+
+	return evenCrop(
+		{ x: Math.round(crop.x * sx), y: Math.round(crop.y * sy), width: Math.round(crop.width * sx), height: Math.round(crop.height * sy) },
+		frame.codedWidth,
+		frame.codedHeight
+	)
+}
+
+export function codedToSquareCrop(crop: VideoCrop, frame: SourceFrame): VideoCrop {
+	const sx = frame.codedWidth > 0 ? frame.squareWidth / frame.codedWidth : 1
+	const sy = frame.codedHeight > 0 ? frame.squareHeight / frame.codedHeight : 1
+
+	return { x: crop.x * sx, y: crop.y * sy, width: crop.width * sx, height: crop.height * sy }
+}
+
+export function outputGeometry(recipe: VideoEditRecipe, source: VideoSourceInfo): OutputGeometry {
+	const frame = sourceFrame(source)
 	const displayCrop = recipe.crop === null ? null : evenCrop(recipe.crop, source.width, source.height)
 	const whole = displayCrop === null || (displayCrop.width >= source.width - 1 && displayCrop.height >= source.height - 1)
-	const cropped = whole ? { x: 0, y: 0, width: source.width, height: source.height } : displayCrop
+	// A source with an odd coded side is trimmed by a pixel (encoders take even sizes only), which is no crop to speak of.
+	const codedCrop =
+		whole && frame.codedWidth % 2 === 0 && frame.codedHeight % 2 === 0
+			? null
+			: squareToCodedCrop(
+					displayToCoded(
+						whole ? { x: 0, y: 0, width: source.width, height: source.height } : displayCrop,
+						source.rotation,
+						frame.squareWidth,
+						frame.squareHeight
+					),
+					frame
+				)
+	const squareCrop = codedCrop === null ? null : codedToSquareCrop(codedCrop, frame)
+	// The kept picture in display space (square pixels, the source's rotation applied).
+	const kept = squareCrop === null ? { width: frame.squareWidth, height: frame.squareHeight } : squareCrop
+	const sourceSideways = quarterTurns(source.rotation)
+	const displayWidth = sourceSideways ? kept.height : kept.width
+	const displayHeight = sourceSideways ? kept.width : kept.height
 	const turned = quarterTurns(recipe.rotate)
-	const width = turned ? cropped.height : cropped.width
-	const height = turned ? cropped.width : cropped.height
+	const width = turned ? displayHeight : displayWidth
+	const height = turned ? displayWidth : displayHeight
 	const short = Math.min(width, height)
 	const target = recipe.output.resolution === "original" ? short : recipe.output.resolution
 	const scale = target < short ? target / short : 1
-	// A source with an odd side is trimmed by a pixel (encoders take even sizes only), which is no crop to speak of.
-	const codedCrop =
-		whole && codedWidth % 2 === 0 && codedHeight % 2 === 0
-			? null
-			: evenCrop(displayToCoded(cropped, source.rotation, codedWidth, codedHeight), codedWidth, codedHeight)
 
 	return {
-		width: even(width * scale),
-		height: even(height * scale),
+		width: even(Math.round(width * scale)),
+		height: even(Math.round(height * scale)),
 		scaled: scale < 1,
-		codedWidth,
-		codedHeight,
+		codedWidth: frame.codedWidth,
+		codedHeight: frame.codedHeight,
 		codedCrop,
+		squareCrop,
 		rotation: ((source.rotation + recipe.rotate) % 360) as VideoRotation
 	}
 }
@@ -177,6 +235,12 @@ export function hasColourWork(recipe: VideoEditRecipe): boolean {
 		adjust.saturation !== 0 ||
 		adjust.vibrance !== 0
 	)
+}
+
+// Whether frames go through the GPU pass for the recipe's own sake (colour, text, a flip, a resize); a crop alone is a
+// view onto the decoded frame and a rotation is metadata.
+export function needsPixelPass(recipe: VideoEditRecipe, geometry: Pick<OutputGeometry, "scaled">): boolean {
+	return hasColourWork(recipe) || recipe.text.length > 0 || recipe.flipH || recipe.flipV || geometry.scaled
 }
 
 export function isHdrSource(source: VideoSourceInfo): boolean {
@@ -290,10 +354,8 @@ export function copySpeedFits(source: VideoSourceInfo, speed: number): boolean {
 		return true
 	}
 
-	const sideways = quarterTurns(source.rotation)
-	const limit =
-		levelMaxFrameRate(source.videoCodec, sideways ? source.height : source.width, sideways ? source.width : source.height) ??
-		UNKNOWN_LEVEL_MAX_FPS
+	const frame = sourceFrame(source)
+	const limit = levelMaxFrameRate(source.videoCodec, frame.codedWidth, frame.codedHeight) ?? UNKNOWN_LEVEL_MAX_FPS
 
 	return source.frameRate * speed <= limit + TIME_EPSILON
 }
@@ -497,12 +559,6 @@ export function unavailableOptions(source: VideoSourceInfo, caps: EncodeCapabili
 
 	if (!abilities.transcode) {
 		unavailable.push("crop", "flip", "resize", "quality", "adjust", "text", "precise")
-
-		// A speed-up retimes copied packets, but its audio is stretched (re-encoded).
-		if (!abilities.audioTranscode) unavailable.push("speed")
-	} else if (isHdrSource(source) && !caps.video.hevcMain10) {
-		// The colour grade is SDR maths; only the 10-bit path grades HDR.
-		unavailable.push("adjust")
 	}
 
 	if (!abilities.audioTranscode) unavailable.push("gain")
@@ -520,13 +576,23 @@ export function exportBlockers(
 	return analyse(recipe, source, caps, context).blockers
 }
 
+function muted(recipe: VideoEditRecipe): VideoEditRecipe {
+	return { ...recipe, audio: { ...recipe.audio, mute: true } }
+}
+
 export function planExport(
 	recipe: VideoEditRecipe,
 	source: VideoSourceInfo,
 	caps: EncodeCapabilities,
 	context: PlanContext = {}
 ): ExportPlan {
-	return analyse(recipe, source, caps, context).plan
+	const { plan, blockers } = analyse(recipe, source, caps, context)
+
+	return {
+		...plan,
+		blockers,
+		mutingUnblocks: blockers.length > 0 && !recipe.audio.mute && analyse(muted(recipe), source, caps, context).blockers.length === 0
+	}
 }
 
 function analyse(
@@ -534,7 +600,7 @@ function analyse(
 	source: VideoSourceInfo,
 	caps: EncodeCapabilities,
 	context: PlanContext
-): { plan: ExportPlan; blockers: ExportBlocker[] } {
+): { plan: Omit<ExportPlan, "blockers" | "mutingUnblocks">; blockers: ExportBlocker[] } {
 	const abilities = editAbilities(source, caps)
 	const geometry = outputGeometry(recipe, source)
 	const hdrSource = isHdrSource(source)
@@ -572,12 +638,16 @@ function analyse(
 		}
 	}
 
-	const hdr: HdrHandling | null = !hdrSource ? null : mode === "copy" ? "keep" : caps.video.hevcMain10 ? "hevc10" : "toSdr"
-
-	// The colour grade is SDR maths; only the 10-bit path grades HDR.
-	if (hdrSource && colour && hdr !== "hevc10") {
-		uniquePush(blockers, "hdrAdjust")
-	}
+	// HDR stays HDR where no pixel is changed: copied, or re-encoded as HEVC Main 10 when only cut, cropped (a view onto
+	// the decoded frame), turned (metadata), retimed or re-compressed. The GPU pass is 8-bit SDR, so colour, text, a flip
+	// or a resize tone-maps to SDR, which the Save popover says.
+	const hdr: HdrHandling | null = !hdrSource
+		? null
+		: mode === "copy"
+			? "keep"
+			: caps.video.hevcMain10 && !needsPixelPass(recipe, geometry)
+				? "hevc10"
+				: "toSdr"
 
 	const audioTracks = keptAudioTracks(recipe, source)
 	const audioInfo = source.audio.filter(track => audioTracks.includes(track.number))
@@ -651,7 +721,7 @@ function analyse(
 		)
 	}
 
-	const plan: ExportPlan = {
+	const plan: Omit<ExportPlan, "blockers" | "mutingUnblocks"> = {
 		mode,
 		transcodeReasons: mode === "copy" ? [] : reasons,
 		unavailable: unavailableOptions(source, caps),

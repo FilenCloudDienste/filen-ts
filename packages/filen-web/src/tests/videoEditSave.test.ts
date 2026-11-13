@@ -297,7 +297,7 @@ describe("startVideoSave", () => {
 		)
 		const outcome = await handle.done
 
-		expect(outcome).toEqual({ status: "done", uuid: SAVED })
+		expect(outcome).toMatchObject({ status: "done", item: { data: { uuid: SAVED } } })
 		expect(h.uploads).toHaveLength(1)
 
 		const upload = h.uploads[0]

@@ -2,6 +2,7 @@
 // plan decides from it, and where a save goes. Framework-free; the libs, the export worker, the editor and the
 // overlay all speak these.
 
+import type { DriveItem } from "@/features/drive/lib/item"
 import type { Adjustments } from "@/features/preview/imageEdit/types"
 
 // Seconds on the SOURCE timeline.
@@ -97,6 +98,10 @@ export interface ExportPlan {
 	transcodeReasons: readonly string[]
 	// Options the recipe asks for that this browser cannot do (disabled in the UI with the reason).
 	unavailable: readonly string[]
+	// What in this recipe this browser cannot export (plan.ts ExportBlocker ids): a save is refused while any remain.
+	blockers: readonly string[]
+	// Muting the audio would clear every blocker (an audio codec, gain or speed this browser cannot re-encode).
+	mutingUnblocks: boolean
 	dropped: readonly ExportDrop[]
 	hdr: HdrHandling | null
 	container: ExportContainer
@@ -121,9 +126,12 @@ export interface VideoSourceAudioTrack {
 // What the editor learns about the original before editing; read once per open from the probe and the input.
 export interface VideoSourceInfo {
 	duration: number
-	// Display size (after rotation metadata).
+	// Display size (after the pixel aspect ratio and the rotation metadata), square pixels.
 	width: number
 	height: number
+	// The coded frame's size (before both): differs from the unrotated display size for anamorphic sources.
+	codedWidth: number
+	codedHeight: number
 	// The source's own rotation metadata.
 	rotation: VideoRotation
 	// Average frames per second (VFR sources: a hint only; frame stepping uses real timestamps).
@@ -150,7 +158,8 @@ export interface ExportProgress {
 	etaSeconds: number | null
 }
 
-export type ExportOutcome = { status: "done"; uuid: string } | { status: "cancelled" } | { status: "error"; message: string }
+// "done": `item` is what the save made (the new version, or the copy).
+export type ExportOutcome = { status: "done"; item: DriveItem } | { status: "cancelled" } | { status: "error"; message: string }
 
 // Why a save never started (or stopped for its input rather than a fault; retrying will not help): offline; the
 // account's storage cannot hold the estimate; the recipe asks for what this browser cannot do; a copy fragment would

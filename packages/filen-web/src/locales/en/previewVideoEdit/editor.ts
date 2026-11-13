@@ -129,7 +129,7 @@ export const previewVideoEditor = {
 
 	// ── Adjust ───────────────────────────────────────────────────────────────
 	/** Video editor, Adjust tab — colour changes are off for this HDR video in this browser */
-	previewVideoEditAdjustHdr: "Colour changes aren't available for this HDR video in this browser.",
+	previewVideoEditAdjustHdr: "Colour changes save this HDR video as SDR.",
 	/** Video editor, Adjust tab — the filters' heading */
 	previewVideoEditFilters: "Filters",
 

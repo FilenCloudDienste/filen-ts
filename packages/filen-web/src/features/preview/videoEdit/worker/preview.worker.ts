@@ -131,6 +131,8 @@ async function demuxedFacts(block: BlockInput, probe: VideoProbe | null): Promis
 				duration: await input.computeDuration().catch(() => 0),
 				displayWidth: 0,
 				displayHeight: 0,
+				codedWidth: 0,
+				codedHeight: 0,
 				rotation: 0,
 				frameRate: 0,
 				videoCodec: null,
@@ -145,9 +147,11 @@ async function demuxedFacts(block: BlockInput, probe: VideoProbe | null): Promis
 		}
 	}
 
-	const [displayWidth, displayHeight, rotation, codec, colorSpace, previewable] = await Promise.all([
+	const [displayWidth, displayHeight, codedWidth, codedHeight, rotation, codec, colorSpace, previewable] = await Promise.all([
 		track.getDisplayWidth(),
 		track.getDisplayHeight(),
+		track.getCodedWidth(),
+		track.getCodedHeight(),
 		track.getRotation(),
 		track.getCodecParameterString(),
 		track.getColorSpace().catch(() => null),
@@ -165,6 +169,8 @@ async function demuxedFacts(block: BlockInput, probe: VideoProbe | null): Promis
 			duration,
 			displayWidth,
 			displayHeight,
+			codedWidth,
+			codedHeight,
 			rotation,
 			frameRate,
 			videoCodec: codec,

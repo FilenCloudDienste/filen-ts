@@ -350,7 +350,7 @@ async function settle(
 			await rebaseWatch(deps, request, saved.data, plan.mode, plan.outputDuration)
 		}
 
-		return { status: "done", uuid: uploaded.item.data.uuid }
+		return { status: "done", item: uploaded.item }
 	}
 
 	if (stalled !== null) {

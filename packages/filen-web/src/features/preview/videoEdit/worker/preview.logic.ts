@@ -329,6 +329,8 @@ export interface DemuxedFacts {
 	duration: number
 	displayWidth: number
 	displayHeight: number
+	codedWidth: number
+	codedHeight: number
 	rotation: number
 	frameRate: number
 	videoCodec: string | null
@@ -350,6 +352,8 @@ export function sourceInfo(probe: VideoProbe | null, facts: DemuxedFacts, bytes:
 		duration: probe?.durationSec ?? facts.duration,
 		width: facts.displayWidth,
 		height: facts.displayHeight,
+		codedWidth: facts.codedWidth,
+		codedHeight: facts.codedHeight,
 		rotation: rotationOf(facts.rotation),
 		frameRate: facts.frameRate,
 		videoCodec: facts.videoCodec,

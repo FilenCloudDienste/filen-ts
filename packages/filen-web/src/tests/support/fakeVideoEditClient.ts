@@ -1,6 +1,6 @@
 import { vi } from "vitest"
 import type {
-	ExportOutcome,
+	VideoSaveOutcome,
 	ExportPlan,
 	ExportProgress,
 	VideoEditClient,
@@ -17,6 +17,8 @@ export const FAKE_INFO: VideoSourceInfo = {
 	duration: 100,
 	width: 1920,
 	height: 1080,
+	codedWidth: 1920,
+	codedHeight: 1080,
 	rotation: 0,
 	frameRate: 25,
 	videoCodec: "avc1.640028",
@@ -36,6 +38,8 @@ export const FAKE_PLAN: ExportPlan = {
 	mode: "copy",
 	transcodeReasons: [],
 	unavailable: [],
+	blockers: [],
+	mutingUnblocks: false,
 	dropped: [],
 	hdr: null,
 	container: "mp4",
@@ -50,7 +54,7 @@ export interface FakeExport {
 	recipe: VideoEditRecipe
 	target: VideoSaveTarget
 	progress: (progress: ExportProgress) => void
-	settle: (outcome: ExportOutcome) => void
+	settle: (outcome: VideoSaveOutcome) => void
 	cancel: ReturnType<typeof vi.fn>
 	detachToTransfer: ReturnType<typeof vi.fn>
 }
@@ -84,8 +88,8 @@ export function fakeVideoEditClient(
 			return Promise.resolve({ ...FAKE_PLAN, ...options.planFor?.(recipe) })
 		}),
 		exportVideo: vi.fn((recipe: VideoEditRecipe, target: VideoSaveTarget, onProgress: (progress: ExportProgress) => void) => {
-			let settle: (outcome: ExportOutcome) => void = () => undefined
-			const done = new Promise<ExportOutcome>(resolve => {
+			let settle: (outcome: VideoSaveOutcome) => void = () => undefined
+			const done = new Promise<VideoSaveOutcome>(resolve => {
 				settle = resolve
 			})
 			const cancel = vi.fn(() => {

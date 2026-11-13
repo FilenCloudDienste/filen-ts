@@ -28,6 +28,8 @@ export function sourceInfo(overrides: Partial<VideoSourceInfo> = {}): VideoSourc
 		duration: 60,
 		width: 1920,
 		height: 1080,
+		codedWidth: 1920,
+		codedHeight: 1080,
 		rotation: 0,
 		frameRate: 30,
 		videoCodec: "avc1.640028",

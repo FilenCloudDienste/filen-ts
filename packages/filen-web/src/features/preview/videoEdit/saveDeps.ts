@@ -12,6 +12,7 @@ import { exporter } from "@/features/preview/videoEdit/exportClient"
 import type { VideoSaveDeps } from "@/features/preview/videoEdit/save"
 import { runOp } from "@/lib/actions/outcome"
 import { isAppleMobile } from "@/lib/appleMobile"
+import { holdForegroundRendering } from "@/lib/desktop"
 import { playbackCapabilities } from "@/lib/media/playback/capabilities"
 import { createScreenWakeLock } from "@/lib/media/wakeLock"
 import { sdkApi } from "@/lib/sdk/client"
@@ -43,13 +44,16 @@ export function videoSaveDeps(): VideoSaveDeps {
 		isPaused: id => transferById(useTransfersStore.getState().transfers, id)?.paused === true,
 		cancelTransfer,
 		rebaseWatchState: params => watchState.rebaseEdited(params),
+		// The screen stays on, and the desktop app keeps rendering this window at full speed while it is hidden.
 		keepAwake: () => {
 			const lock = createScreenWakeLock({ needed: true })
+			const releaseRendering = holdForegroundRendering()
 
 			lock.set(true)
 
 			return () => {
 				lock.dispose()
+				releaseRendering()
 			}
 		},
 		now: () => Date.now(),

@@ -29,9 +29,21 @@ export function unavailableFeatures(plan: ExportPlan | null): ReadonlySet<EditFe
 	return new Set(plan === null ? [] : plan.unavailable.filter(isFeature))
 }
 
-// Colour adjustments on an HDR source need the 10-bit path; otherwise they would be graded in the wrong space.
-export function colourBlockedByHdr(info: VideoSourceInfo, plan: ExportPlan | null): boolean {
-	return info.transfer !== "sdr" && plan?.hdr !== "hevc10"
+// Why a save cannot run for this recipe here (plan.blockers): only its sound (muting it would let the save run), or its
+// picture. Null when nothing blocks it.
+export type SaveBlock = "audio" | "video"
+
+export function saveBlock(plan: ExportPlan | null): SaveBlock | null {
+	if (plan === null || plan.blockers.length === 0) {
+		return null
+	}
+
+	return plan.mutingUnblocks ? "audio" : "video"
+}
+
+// Colour work on an HDR source is graded after a tone map to SDR (the Save popover says so too).
+export function colourConvertsHdr(info: VideoSourceInfo): boolean {
+	return info.transfer !== "sdr"
 }
 
 export type DropNotice = "subtitlesAndChapters" | "subtitles" | "chapters" | "extraAudio" | "hdrMetadata" | "location"

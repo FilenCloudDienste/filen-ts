@@ -26,7 +26,10 @@ vi.mock("@/features/preview/hooks/usePreviewVideo", () => ({ usePreviewVideo: ()
 
 const { VideoEditor } = await import("@/features/preview/videoEdit/components/videoEditor")
 
+type VideoEditorCommands = NonNullable<Parameters<typeof VideoEditor>[0]["commandsRef"]["current"]>
+
 const ITEM = { type: "file", data: { uuid: "video-1" } } as unknown as DriveItem
+const COPY = { type: "file", data: { uuid: "copy-1" } } as unknown as DriveItem
 
 class FakeResizeObserver {
 	observe = vi.fn()
@@ -38,10 +41,11 @@ function mount(options: { info?: Partial<VideoSourceInfo>; planFor?: (recipe: Vi
 	const fake = fakeVideoEditClient(options)
 	const onDirtyChange = vi.fn()
 	const onExit = vi.fn()
-	const onSaved = vi.fn()
+	const onSaveStarted = vi.fn()
+	const onSaveSettled = vi.fn()
 	const onCancel = vi.fn()
 	const onSaveFrame = vi.fn(() => Promise.resolve("clip.jpg"))
-	const commandsRef = createRef<{ openSave: () => void } | null>()
+	const commandsRef = createRef<VideoEditorCommands | null>()
 	const view = render(
 		<VideoEditor
 			client={fake.client}
@@ -52,7 +56,8 @@ function mount(options: { info?: Partial<VideoSourceInfo>; planFor?: (recipe: Vi
 			onDirtyChange={onDirtyChange}
 			onCancel={onCancel}
 			onExit={onExit}
-			onSaved={onSaved}
+			onSaveStarted={onSaveStarted}
+			onSaveSettled={onSaveSettled}
 			onSaveFrame={onSaveFrame}
 			commandsRef={commandsRef}
 		/>
@@ -63,7 +68,7 @@ function mount(options: { info?: Partial<VideoSourceInfo>; planFor?: (recipe: Vi
 		throw new Error("no editor root")
 	}
 
-	return { ...fake, onDirtyChange, onExit, onSaved, onCancel, onSaveFrame, commandsRef, view, root }
+	return { ...fake, onDirtyChange, onExit, onSaveStarted, onSaveSettled, onCancel, onSaveFrame, commandsRef, view, root }
 }
 
 function lastPlanned(plans: readonly VideoEditRecipe[]): VideoEditRecipe {
@@ -275,12 +280,91 @@ describe("VideoEditor", () => {
 		expect(screen.getByRole("button", { name: "2×" })).toHaveProperty("disabled", true)
 	})
 
-	it("says why colour is off for an HDR video", async () => {
+	it("says that colour work saves an HDR video as SDR", async () => {
 		mount({ info: { transfer: "hlg", bitDepth: 10 }, planFor: () => ({ hdr: "toSdr" }) })
 
 		fireEvent.click(screen.getByRole("tab", { name: "Adjust" }))
 
-		expect(await screen.findByText("Colour changes aren't available for this HDR video in this browser.")).toBeTruthy()
+		expect(await screen.findByText("Colour changes save this HDR video as SDR.")).toBeTruthy()
+	})
+
+	it("offers to export without audio when only the sound blocks the save", async () => {
+		const { plans } = mount({
+			planFor: recipe => (recipe.audio.mute ? {} : { blockers: ["audioCodec"], mutingUnblocks: true })
+		})
+
+		trimAFrame()
+
+		const popover = await openSave()
+
+		expect(await within(popover).findByText("This browser can't re-encode this video's sound.")).toBeTruthy()
+		expect(within(popover).getByRole("button", { name: "Save" })).toHaveProperty("disabled", true)
+
+		fireEvent.click(within(popover).getByRole("button", { name: "Export without audio" }))
+
+		await waitFor(() => {
+			expect(lastPlanned(plans).audio.mute).toBe(true)
+		})
+		await waitFor(() => {
+			expect(within(popover).getByRole("button", { name: "Save" })).toHaveProperty("disabled", false)
+		})
+	})
+
+	it("blocks a save the picture cannot be re-encoded for, without a way out through the sound", async () => {
+		mount({ planFor: () => ({ blockers: ["crop"], mutingUnblocks: false }) })
+
+		trimAFrame()
+
+		const popover = await openSave()
+
+		expect(await within(popover).findByText("This browser can't re-encode the picture, which these edits need.")).toBeTruthy()
+		expect(within(popover).queryByRole("button", { name: "Export without audio" })).toBeNull()
+	})
+
+	it("words a refused save and offers Retry only where it can help", async () => {
+		const { exports, client } = mount()
+
+		trimAFrame()
+		fireEvent.click(await within(await openSave()).findByRole("button", { name: "Save" }))
+
+		await act(async () => {
+			exports[0]?.settle({ status: "refused", reason: "quota", message: "MaxStorageReached" })
+			await Promise.resolve()
+		})
+
+		expect(screen.getByText("Not enough storage left for the saved video.")).toBeTruthy()
+
+		fireEvent.click(screen.getByRole("button", { name: "Retry" }))
+		expect(client.exportVideo).toHaveBeenCalledTimes(2)
+
+		await act(async () => {
+			exports[1]?.settle({ status: "refused", reason: "codec", message: "audio track 1 cannot be decoded" })
+			await Promise.resolve()
+		})
+
+		expect(screen.getByText("This video's format can't be saved in this browser.")).toBeTruthy()
+		expect(screen.queryByRole("button", { name: "Retry" })).toBeNull()
+	})
+
+	it("asks when the file changed elsewhere before the save, and saves a copy on request", async () => {
+		const { exports, onSaveSettled } = mount()
+
+		trimAFrame()
+		fireEvent.click(await within(await openSave()).findByRole("button", { name: "Save" }))
+
+		await act(async () => {
+			exports[0]?.settle({ status: "remoteChanged", currentUuid: "newer" })
+			await Promise.resolve()
+		})
+
+		expect(onSaveSettled).toHaveBeenCalledWith(null, "inPlace")
+
+		const dialog = await screen.findByRole("alertdialog")
+
+		fireEvent.click(within(dialog).getByRole("button", { name: /copy/i }))
+
+		expect(exports[1]?.target).toBe("copy")
+		expect(screen.queryByRole("alertdialog")).toBeNull()
 	})
 
 	it("shows the export's progress and continues it in the background", async () => {
@@ -312,7 +396,7 @@ describe("VideoEditor", () => {
 		expect(onDirtyChange).toHaveBeenLastCalledWith(false)
 
 		await act(async () => {
-			running?.settle({ status: "done", uuid: "new" })
+			running?.settle({ status: "done", item: ITEM })
 			await Promise.resolve()
 		})
 
@@ -320,7 +404,7 @@ describe("VideoEditor", () => {
 	})
 
 	it("hands a finished save to the overlay and leaves", async () => {
-		const { exports, onExit, onSaved } = mount()
+		const { exports, onExit, onSaveSettled } = mount()
 
 		trimAFrame()
 
@@ -329,11 +413,11 @@ describe("VideoEditor", () => {
 		fireEvent.click(await within(popover).findByRole("button", { name: "Save as copy" }))
 
 		await act(async () => {
-			exports[0]?.settle({ status: "done", uuid: "copy-uuid" })
+			exports[0]?.settle({ status: "done", item: COPY })
 			await Promise.resolve()
 		})
 
-		expect(onSaved).toHaveBeenCalledWith("copy-uuid", "copy")
+		expect(onSaveSettled).toHaveBeenCalledWith(COPY, "copy")
 		expect(onExit).toHaveBeenCalledTimes(1)
 		expect(toast.success).toHaveBeenCalledWith("Saved a copy of clip.mp4")
 	})

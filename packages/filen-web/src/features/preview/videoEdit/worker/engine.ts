@@ -22,7 +22,6 @@ import {
 	aacBitrate,
 	audioNeedsTranscode,
 	exportBlockers,
-	hasColourWork,
 	IOS_GOP_BYTE_CAP,
 	keptAudioTracks,
 	outputGeometry,
@@ -62,8 +61,8 @@ const KEY_FRAME_INTERVAL_SECONDS = 2
 const KEPT_SAMPLE_RATES: ReadonlySet<number> = new Set([44_100, 48_000])
 
 export interface EngineDeps {
-	// The GPU pass (gl/pipeline.ts), made only when the transcode needs it.
-	createPipeline: () => FramePipelineLike
+	// The GPU pass (gl/pipeline.ts), made only when the transcode needs it, for the source it reads.
+	createPipeline: (source: VideoSourceInfo) => FramePipelineLike
 	// The pitch-keeping time stretch (audio/timeStretch.ts).
 	createTimeStretch: (sampleRate: number, channels: number, speed: number) => TimeStretchLike
 	// Decoded audio for a track mediabunny cannot decode (a codec only FFmpeg reads, such as TrueHD or ALAC in
@@ -220,10 +219,9 @@ export async function runExport(params: RunExportParams): Promise<ExportSummary>
 				throw new ExportRefusedError("unavailable", "no video encoder")
 			}
 
-			const wantsGpu = hasColourWork(recipe) || recipe.text.length > 0
-			const kind = frameStageKind({ recipe, geometry, hdr: plan.hdr, pipelineWants: wantsGpu })
+			const kind = frameStageKind({ recipe, geometry, hdr: plan.hdr })
 
-			pipeline = kind === "gpu" ? deps.createPipeline() : null
+			pipeline = kind === "gpu" ? deps.createPipeline(info) : null
 
 			const stage = createFrameStage({ kind, recipe, geometry, hdr: plan.hdr, pipeline })
 			const frameRate = transcodeFrameRate(info, recipe.speed)

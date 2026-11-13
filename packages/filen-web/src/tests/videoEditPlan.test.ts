@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest"
 import {
 	copyRanges,
 	copySpeedFits,
+	codedToSquareCrop,
 	displayToCoded,
+	sourceFrame,
+	squareToCodedCrop,
 	editAbilities,
 	exactRanges,
 	exportBlockers,
@@ -139,7 +142,7 @@ describe("outputGeometry", () => {
 	})
 
 	it("trims an odd-sized source to even sides with a zero-copy crop", () => {
-		const geometry = outputGeometry(recipeFor(60), sourceInfo({ width: 1279, height: 719 }))
+		const geometry = outputGeometry(recipeFor(60), sourceInfo({ width: 1279, height: 719, codedWidth: 1279, codedHeight: 719 }))
 
 		expect(geometry.codedCrop).toEqual({ x: 0, y: 0, width: 1278, height: 718 })
 		expect([geometry.width, geometry.height]).toEqual([1278, 718])
@@ -149,6 +152,27 @@ describe("outputGeometry", () => {
 		const geometry = outputGeometry(recipeFor(60, { crop: { x: 3, y: 5, width: 101, height: 99 } }), sourceInfo())
 
 		expect(geometry.codedCrop).toEqual({ x: 2, y: 4, width: 100, height: 98 })
+		expect(geometry.squareCrop).toEqual(geometry.codedCrop)
+	})
+
+	it("cuts the same pixels on the crop-only path and the GPU pass for an anamorphic source", () => {
+		// 720x480 coded with a 32:27 pixel aspect ratio, shown 854x480.
+		const source = sourceInfo({ width: 854, height: 480, codedWidth: 720, codedHeight: 480 })
+		const geometry = outputGeometry(recipeFor(60, { crop: { x: 100, y: 0, width: 400, height: 480 } }), source)
+		const frame = sourceFrame(source)
+
+		expect(geometry.codedCrop).toEqual({ x: 84, y: 0, width: 336, height: 480 })
+		expect(geometry.squareCrop).toEqual(codedToSquareCrop({ x: 84, y: 0, width: 336, height: 480 }, frame))
+		expect(squareToCodedCrop(geometry.squareCrop ?? { x: 0, y: 0, width: 0, height: 0 }, frame)).toEqual(geometry.codedCrop)
+		// The output is square-pixel: the coded width widened by the pixel aspect ratio.
+		expect([geometry.width, geometry.height]).toEqual([398, 480])
+	})
+
+	it("crops nothing on a whole anamorphic frame, rotated or not", () => {
+		const geometry = outputGeometry(recipeFor(60), sourceInfo({ width: 480, height: 854, rotation: 90, codedWidth: 720, codedHeight: 480 }))
+
+		expect(geometry.codedCrop).toBeNull()
+		expect([geometry.width, geometry.height]).toEqual([480, 854])
 	})
 })
 
@@ -302,7 +326,7 @@ describe("planExport capabilities", () => {
 	it("disables everything but cuts, rotation and track choice up front without WebCodecs (Firefox Android)", () => {
 		const identity = planExport(recipeFor(60), sourceInfo(), NO_WEBCODECS)
 
-		expect(identity.unavailable).toEqual(["crop", "flip", "resize", "quality", "adjust", "text", "precise", "speed", "gain"])
+		expect(identity.unavailable).toEqual(["crop", "flip", "resize", "quality", "adjust", "text", "precise", "gain"])
 		expect(exportBlockers(recipeFor(60), sourceInfo(), NO_WEBCODECS)).toEqual([])
 		expect(unavailableOptions(sourceInfo(), ALL_ENCODERS)).toEqual([])
 		expect(unavailableOptions(sourceInfo(), FIREFOX_DESKTOP)).toEqual([])
@@ -320,10 +344,28 @@ describe("planExport capabilities", () => {
 		expect(blockers({ keep: [{ start: 3, end: 9 }], precise: true })).toEqual(["precise"])
 	})
 
+	it("retimes a muted copy without any encoder, and offers muting when only the audio blocks", () => {
+		const fast = sourceInfo({ videoCodec: "avc1.640033" })
+		const sped = planExport(recipeFor(60, { speed: 2 }), fast, NO_WEBCODECS)
+
+		expect(sped.blockers).toEqual(["speed"])
+		expect(sped.mutingUnblocks).toBe(true)
+
+		const mutedSpeed = planExport(recipeFor(60, { speed: 2, audio: { mute: true, gainDb: 0, keepTracks: "first" } }), fast, NO_WEBCODECS)
+
+		expect(mutedSpeed.mode).toBe("copy")
+		expect(mutedSpeed.blockers).toEqual([])
+		expect(mutedSpeed.mutingUnblocks).toBe(false)
+
+		// Video work stays blocked whatever happens to the sound.
+		expect(planExport(recipeFor(60, { flipH: true, speed: 2 }), fast, NO_WEBCODECS).mutingUnblocks).toBe(false)
+	})
+
 	it("needs an audio encoder for audio MP4 players do not take", () => {
 		const ac3 = sourceInfo({ audio: [{ number: 1, codec: "ac3", channels: 6, language: null }] })
 
 		expect(exportBlockers(recipeFor(60), ac3, NO_WEBCODECS)).toEqual(["audioCodec"])
+		expect(planExport(recipeFor(60), ac3, NO_WEBCODECS).mutingUnblocks).toBe(true)
 		expect(exportBlockers(recipeFor(60), ac3, FIREFOX_DESKTOP)).toEqual([])
 		expect(exportBlockers(recipeFor(60, { audio: { mute: true, gainDb: 0, keepTracks: "first" } }), ac3, NO_WEBCODECS)).toEqual([])
 	})
@@ -345,23 +387,32 @@ describe("planExport HDR", () => {
 		expect(plan.dropped).toEqual([])
 	})
 
-	it("re-encodes to 10-bit HEVC where the browser can", () => {
-		const plan = planExport(recipeFor(60, { output: { resolution: 1080, quality: "medium" } }), hlg, ALL_ENCODERS)
+	it("re-encodes to 10-bit HEVC where the browser can and no pixel changes", () => {
+		const hdrOf = (overrides: Parameters<typeof recipeFor>[1]): string | null => planExport(recipeFor(60, overrides), hlg, ALL_ENCODERS).hdr
 
-		expect(plan.hdr).toBe("hevc10")
-		expect(plan.dropped).toEqual([])
+		expect(hdrOf({ output: { resolution: 1080, quality: "medium" } })).toBe("hevc10")
+		expect(hdrOf({ crop: { x: 0, y: 0, width: 960, height: 540 }, rotate: 90 })).toBe("hevc10")
+		expect(hdrOf({ keep: [{ start: 3, end: 9 }], precise: true, speed: 4 })).toBe("hevc10")
+		expect(planExport(recipeFor(60, { output: { resolution: 1080, quality: "medium" } }), hlg, ALL_ENCODERS).dropped).toEqual([])
 	})
 
-	it("tone-maps to SDR with a notice where it cannot, and refuses colour grading then", () => {
-		const plan = planExport(recipeFor(60, { flipH: true }), hlg, FIREFOX_DESKTOP)
+	it("tone-maps to SDR with a notice for any pixel edit, or without a 10-bit encoder", () => {
+		for (const overrides of [
+			{ flipH: true },
+			{ filter: "vivid" },
+			{ output: { resolution: 720, quality: "high" } },
+			{ text: [{ id: "t", text: "Hi", startSec: 0, endSec: 1, x: 0.5, y: 0.5, size: 0.1, color: "#fff", background: false }] }
+		] satisfies Parameters<typeof recipeFor>[1][]) {
+			const plan = planExport(recipeFor(60, overrides), hlg, ALL_ENCODERS)
 
-		expect(plan.hdr).toBe("toSdr")
-		expect(plan.dropped).toContain("hdrMetadata")
+			expect(plan.hdr).toBe("toSdr")
+			expect(plan.dropped).toContain("hdrMetadata")
+			expect(plan.blockers).toEqual([])
+		}
 
-		expect(planExport(recipeFor(60), hlg, FIREFOX_DESKTOP).unavailable).toEqual(["adjust"])
-		expect(exportBlockers(recipeFor(60, { filter: "vivid" }), hlg, FIREFOX_DESKTOP)).toContain("hdrAdjust")
-		expect(planExport(recipeFor(60), hlg, ALL_ENCODERS).unavailable).toEqual([])
-		expect(exportBlockers(recipeFor(60, { filter: "vivid" }), hlg, ALL_ENCODERS)).toEqual([])
+		expect(planExport(recipeFor(60, { output: { resolution: 1080, quality: "low" } }), hlg, FIREFOX_DESKTOP).hdr).toBe("toSdr")
+		expect(planExport(recipeFor(60), hlg, FIREFOX_DESKTOP).unavailable).toEqual([])
+		expect(exportBlockers(recipeFor(60, { filter: "vivid" }), hlg, FIREFOX_DESKTOP)).toEqual([])
 	})
 
 	it("says nothing about HDR for an SDR source", () => {

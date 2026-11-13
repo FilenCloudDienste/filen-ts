@@ -218,7 +218,8 @@ export interface VideoEditPanelProps {
 	info: VideoSourceInfo
 	unavailable: ReadonlySet<EditFeature>
 	// Colour changes are off for an HDR source this browser cannot keep HDR for.
-	hdrBlocked: boolean
+	// Colour work converts this HDR source to SDR.
+	hdrNote: boolean
 	selection: TimeRange | null
 	aspect: AspectPreset
 	selectedText: string | null
@@ -249,7 +250,7 @@ export function VideoEditPanel(props: VideoEditPanelProps) {
 	const last = recipe.keep[recipe.keep.length - 1]
 	// Gaps between kept parts (the trims at either end have their own fields).
 	const cutOuts = removedRanges(recipe.keep, duration).filter(range => range.start > 0 && range.end < duration)
-	const colourOff = props.hdrBlocked || unavailable.has("adjust")
+	const colourOff = unavailable.has("adjust")
 	const selectedText = recipe.text.find(text => text.id === props.selectedText) ?? null
 	const unavailableText = t("previewVideoEditFeatureUnavailable")
 
@@ -522,7 +523,11 @@ export function VideoEditPanel(props: VideoEditPanelProps) {
 					<div className="flex flex-col gap-6">
 						<Unavailable
 							show={colourOff}
-							text={props.hdrBlocked ? t("previewVideoEditAdjustHdr") : unavailableText}
+							text={unavailableText}
+						/>
+						<Unavailable
+							show={!colourOff && props.hdrNote}
+							text={t("previewVideoEditAdjustHdr")}
 						/>
 						{ADJUST_SECTIONS.map(section => (
 							<Section

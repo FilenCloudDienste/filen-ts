@@ -84,5 +84,25 @@ export const previewVideoSave = {
 	/** Toast — the edited video was saved as a copy; {{name}} is the file name of the original */
 	previewVideoSaveDoneCopy: "Saved a copy of {{name}}",
 	/** Toast — an export running in the background failed; {{name}} is the file name */
-	previewVideoSaveBackgroundFailed: "{{name}} couldn't be saved."
+	previewVideoSaveBackgroundFailed: "{{name}} couldn't be saved.",
+	/** Save popover — the save is blocked: this browser cannot re-encode the video's sound (its format, a volume change or a speed change) */
+	previewVideoSaveBlockedAudio: "This browser can't re-encode this video's sound.",
+	/** Save popover — the save is blocked: these edits need the picture re-encoded, which this browser cannot do */
+	previewVideoSaveBlockedVideo: "This browser can't re-encode the picture, which these edits need.",
+	/** Save popover — mute the video so the save can run without re-encoding its sound */
+	previewVideoSaveWithoutAudio: "Export without audio",
+	/** Export notice — the save did not start: offline */
+	previewVideoSaveRefusedOffline: "You're offline. Nothing was saved.",
+	/** Export notice — the save did not start: the account's storage cannot hold the saved video */
+	previewVideoSaveRefusedQuota: "Not enough storage left for the saved video.",
+	/** Export notice — the save did not start: this browser cannot export these edits */
+	previewVideoSaveRefusedUnavailable: "This browser can't save these edits.",
+	/** Export notice — a fast save would hold too much of the video in memory on this device */
+	previewVideoSaveRefusedGop: "This video's key frames are too far apart to save without re-encoding on this device.",
+	/** Export notice — the file has no video track to save */
+	previewVideoSaveRefusedNoVideo: "There's no video to save in this file.",
+	/** Export notice — the video or sound format cannot be saved in this browser */
+	previewVideoSaveRefusedCodec: "This video's format can't be saved in this browser.",
+	/** Export notice — this way of saving (in place or as a copy) is not offered for this file */
+	previewVideoSaveRefusedTarget: "This video can't be saved that way."
 } as const

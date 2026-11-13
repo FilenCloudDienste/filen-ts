@@ -271,8 +271,8 @@ describe("createVideoEditClient", () => {
 		expect(saves[0]?.detach).toHaveBeenCalledTimes(1)
 		expect(saves[0]?.cancel).not.toHaveBeenCalled()
 
-		saves[0]?.finish({ status: "done", uuid: "new" })
-		expect(await running.done).toEqual({ status: "done", uuid: "new" })
+		saves[0]?.finish({ status: "done", item: ITEM })
+		expect(await running.done).toEqual({ status: "done", item: ITEM })
 
 		// Detached before the save started: detached as soon as it does.
 		const other = createVideoEditClient({ item: ITEM })
@@ -297,7 +297,7 @@ describe("createVideoEditClient", () => {
 		expect(preview.suspendDecoding).toHaveBeenCalledTimes(1)
 		expect(preview.resumeDecoding).not.toHaveBeenCalled()
 
-		saves[0]?.finish({ status: "done", uuid: "new" })
+		saves[0]?.finish({ status: "done", item: ITEM })
 		await running.done
 		await flush()
 
