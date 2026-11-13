@@ -36,9 +36,10 @@ const SIZE = 40 * BLOCK_BYTES
 const fakePort = {} as MessagePort
 
 describe("openBlockInput", () => {
-	it("keeps the playback and audio caches as they were", () => {
+	it("keeps the playback and audio caches as they were, and the editor's reads one block ahead", () => {
 		expect(BLOCK_INPUT_PROFILES.playback).toEqual({ capacity: 12, readAhead: 3, maxRunBlocks: MAX_RUN_BLOCKS })
 		expect(BLOCK_INPUT_PROFILES.audio).toEqual({ capacity: 4, readAhead: 2, maxRunBlocks: MAX_RUN_BLOCKS })
+		expect(BLOCK_INPUT_PROFILES.edit).toEqual({ capacity: 12, readAhead: 1, maxRunBlocks: MAX_RUN_BLOCKS })
 	})
 
 	it("reads long runs in the export profile, and keeps little resident", () => {

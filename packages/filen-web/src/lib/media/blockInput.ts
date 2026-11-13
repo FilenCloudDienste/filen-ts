@@ -14,9 +14,11 @@ const STREAM_READ_BYTES = 2 * BLOCK_BYTES
 // How the block cache under an input holds and fetches a file, by what reads it:
 // - playback: seeks back and forth; headroom for header blocks revisited between clusters.
 // - audio: one track read in order at a low bitrate; a few blocks are plenty.
+// - edit: the video editor's preview: seeks like playback (frames at the playhead, keyframe stills) with no
+//   stream to keep fed, so it reads one block ahead only; the same headroom for revisited header blocks.
 // - export: one pass start to end; long runs and a deep read-ahead keep the encoder fed, and nothing behind
 //   the reader is read again, so little more than the read-ahead stays resident.
-export type BlockInputProfile = "playback" | "audio" | "export"
+export type BlockInputProfile = "playback" | "audio" | "edit" | "export"
 
 export const BLOCK_INPUT_PROFILES: Record<
 	BlockInputProfile,
@@ -24,6 +26,7 @@ export const BLOCK_INPUT_PROFILES: Record<
 > = {
 	playback: { capacity: 12, readAhead: 3, maxRunBlocks: MAX_RUN_BLOCKS },
 	audio: { capacity: 4, readAhead: 2, maxRunBlocks: MAX_RUN_BLOCKS },
+	edit: { capacity: 12, readAhead: 1, maxRunBlocks: MAX_RUN_BLOCKS },
 	export: { capacity: 10, readAhead: 8, maxRunBlocks: 8 }
 }
 
