@@ -10,6 +10,7 @@ import {
 	type ProgramName
 } from "@/features/preview/imageEdit/worker/shaders"
 import { invertMatrix3, type Matrix3, type Rect } from "@/features/preview/imageEdit/lib/recipe"
+import { TRANSFER_SRGB, type GradeUniforms, type TransferFunction } from "@/lib/gl/colorGrade"
 import {
 	affine,
 	composeMatrix3,
@@ -46,14 +47,12 @@ export type SourcePixels =
 	| { kind: "rgba"; data: Uint8Array<ArrayBuffer>; width: number; height: number }
 
 // What one frame draws, already resolved from the recipe.
-export interface Frame {
+// The grade's uniforms: exposure, brightness, contrast, highlights; shadows, warmth, tint, saturation; vibrance,
+// vignette. −1..1 / 0..1.
+export interface Frame extends GradeUniforms {
 	output: { width: number; height: number }
 	// Output pixels → upright source pixels.
 	outputToSource: Matrix3
-	// exposure, brightness, contrast, highlights; shadows, warmth, tint, saturation; vibrance, vignette. −1..1 / 0..1.
-	adjustA: readonly [number, number, number, number]
-	adjustB: readonly [number, number, number, number]
-	adjustC: readonly [number, number]
 	// 0..1; 0 skips the sharpen pass.
 	sharpness: number
 	markup: readonly MarkupItem[]
@@ -265,6 +264,15 @@ export class Renderer {
 		}
 	}
 
+	// The curve the colour grade decodes and re-encodes with: images are sRGB-encoded whatever their primaries.
+	private transfer(program: Program, value: TransferFunction): void {
+		const location = program.uniforms.get("u_transfer")
+
+		if (location !== undefined) {
+			this.gl.uniform1i(location, value)
+		}
+	}
+
 	private rows(program: Program, name: string, m: Matrix3): void {
 		const rows = matrixRows(m)
 
@@ -303,6 +311,7 @@ export class Renderer {
 		this.uniform(program, "u_adjustA", ...frame.adjustA)
 		this.uniform(program, "u_adjustB", ...frame.adjustB)
 		this.uniform(program, "u_adjustC", ...frame.adjustC)
+		this.transfer(program, TRANSFER_SRGB)
 		this.flag(program, "u_opaque", opaque)
 		this.flag(program, "u_premultiply", premultiply)
 		this.flag(program, "u_markup", markup !== null)

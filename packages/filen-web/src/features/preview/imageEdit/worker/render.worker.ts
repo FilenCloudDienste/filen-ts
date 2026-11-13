@@ -9,6 +9,7 @@ import { canEncodeWebp, encodeImage, type ExportMeta } from "@/features/preview/
 import { loadMarkupFonts, markupFontsReady } from "@/features/preview/imageEdit/worker/markup"
 import { ContextLostError, Renderer, type Frame, type SourcePixels } from "@/features/preview/imageEdit/worker/renderer"
 import { log } from "@/lib/log"
+import { gradeUniforms, IDENTITY_GRADE } from "@/lib/gl/colorGrade"
 
 // The image editor's render worker: one editing session at a time on the canvas the editor transferred, with the
 // full-resolution original held here so neither the preview nor the export ever crosses back to the page.
@@ -66,7 +67,7 @@ function frameOf(recipe: ImageEditRecipe, source: { width: number; height: numbe
 	const outputToSource = geometryMatrix(recipe, source)
 
 	if (compare) {
-		return { output, outputToSource, adjustA: [0, 0, 0, 0], adjustB: [0, 0, 0, 0], adjustC: [0, 0], sharpness: 0, markup: NO_MARKUP }
+		return { output, outputToSource, ...IDENTITY_GRADE, sharpness: 0, markup: NO_MARKUP }
 	}
 
 	const a = effectiveAdjustments(recipe)
@@ -74,9 +75,7 @@ function frameOf(recipe: ImageEditRecipe, source: { width: number; height: numbe
 	return {
 		output,
 		outputToSource,
-		adjustA: [a.exposure / 100, a.brightness / 100, a.contrast / 100, a.highlights / 100],
-		adjustB: [a.shadows / 100, a.warmth / 100, a.tint / 100, a.saturation / 100],
-		adjustC: [a.vibrance / 100, a.vignette / 100],
+		...gradeUniforms(a),
 		sharpness: a.sharpness / 100,
 		markup: recipe.markup
 	}

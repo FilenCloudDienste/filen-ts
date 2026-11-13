@@ -1,3 +1,5 @@
+import { GL_COLOR_GRADE, GL_FRAGMENT_COMMON, GL_RECT_VERTEX } from "@/lib/gl/colorGrade"
+
 // GLSL ES 3.00 programs of the render worker (WebGL 2, Khronos WebGL 2.0 §4 / GLSL ES 3.00).
 //
 // Every program draws one rectangle (u_rect, in clip space) as a 4-vertex strip built from gl_VertexID, so no
@@ -6,30 +8,9 @@
 // top row first (no UNPACK_FLIP_Y), and render targets read back with readPixels are drawn so that framebuffer
 // row 0 is the top output row; only the canvas itself is flipped, through its own row map.
 //
-// Colour work happens in linear light: the stored values are taken through the sRGB transfer curve (IEC
-// 61966-2-1) whatever the source's primaries, operated on, and re-encoded, so a wide-gamut source keeps its
-// own primaries and its ICC profile stays valid.
-
-const VERTEX = `#version 300 es
-uniform vec4 u_rect;
-
-void main() {
-	vec2 corner = vec2(float(gl_VertexID & 1), float(gl_VertexID >> 1));
-	gl_Position = vec4(mix(u_rect.xy, u_rect.zw, corner), 0.0, 1.0);
-}
-`
-
-const COMMON = `#version 300 es
-precision highp float;
-precision highp sampler2D;
-
-out vec4 outColor;
-
-vec2 mapRows(vec3 rowX, vec3 rowY, vec2 p) {
-	vec3 h = vec3(p, 1.0);
-	return vec2(dot(rowX, h), dot(rowY, h));
-}
-`
+// Colour work happens in linear light (GL_COLOR_GRADE, shared with the video editor): the stored values are taken
+// through the sRGB transfer curve (IEC 61966-2-1) whatever the source's primaries, operated on, and re-encoded, so a
+// wide-gamut source keeps its own primaries and its ICC profile stays valid.
 
 // Markup layers, rasterised by a 2D canvas and uploaded premultiplied (UNPACK_PREMULTIPLY_ALPHA_WEBGL): the
 // highlighter layer multiplies what is under it, then the ink layer goes over everything with source-over.
@@ -77,7 +58,7 @@ vec4 compositeMarkup(vec4 base, vec2 outPx) {
 }
 `
 
-const COPY_FRAGMENT = `${COMMON}
+const COPY_FRAGMENT = `${GL_FRAGMENT_COMMON}
 uniform sampler2D u_texture;
 uniform vec3 u_fragToUvX;
 uniform vec3 u_fragToUvY;
@@ -87,7 +68,7 @@ void main() {
 }
 `
 
-const COLOR_FRAGMENT = `${COMMON}
+const COLOR_FRAGMENT = `${GL_FRAGMENT_COMMON}
 ${MARKUP}
 uniform sampler2D u_source;
 uniform vec3 u_fragToOutX;
@@ -98,71 +79,11 @@ uniform vec2 u_outSize;
 uniform vec2 u_srcSize;
 uniform vec2 u_texOrigin;
 uniform vec2 u_texSize;
-// exposure, brightness, contrast, highlights
-uniform vec4 u_adjustA;
-// shadows, warmth, tint, saturation
-uniform vec4 u_adjustB;
-// vibrance, vignette
-uniform vec2 u_adjustC;
 uniform bool u_opaque;
 uniform bool u_markup;
 uniform bool u_premultiply;
 
-const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
-
-vec3 decodeSrgb(vec3 v) {
-	return mix(v / 12.92, pow((v + 0.055) / 1.055, vec3(2.4)), step(vec3(0.04045), v));
-}
-
-vec3 encodeSrgb(vec3 v) {
-	return mix(v * 12.92, 1.055 * pow(v, vec3(1.0 / 2.4)) - 0.055, step(vec3(0.0031308), v));
-}
-
-vec3 grade(vec3 c, vec2 outPx) {
-	float exposure = u_adjustA.x;
-	float brightness = u_adjustA.y;
-	float contrast = u_adjustA.z;
-	float highlights = u_adjustA.w;
-	float shadows = u_adjustB.x;
-	float warmth = u_adjustB.y;
-	float tint = u_adjustB.z;
-	float saturation = u_adjustB.w;
-	float vibrance = u_adjustC.x;
-	float vignette = u_adjustC.y;
-
-	// White balance as channel gains, renormalised so the luminance stays put.
-	vec3 gains = vec3(1.0 + 0.3 * warmth, 1.0 - 0.3 * tint, 1.0 - 0.3 * warmth);
-	c *= gains / dot(gains, LUMA);
-
-	// ±2 stops.
-	c *= exp2(2.0 * exposure);
-
-	// Highlights and shadows: a gain in stops weighted by a smooth ramp over the perceptual luminance.
-	float lp = encodeSrgb(vec3(clamp(dot(c, LUMA), 0.0, 1.0))).x;
-	c *= exp2(shadows * (1.0 - smoothstep(0.0, 0.5, lp)) + highlights * smoothstep(0.5, 1.0, lp));
-
-	// Brightness bends the mid-tones (a gamma), keeping black and white.
-	c = pow(max(c, 0.0), vec3(exp2(-brightness)));
-
-	// Contrast pivots about mid-grey in the perceptual encoding.
-	vec3 p = encodeSrgb(clamp(c, 0.0, 1.0));
-	p = clamp((p - 0.5) * exp2(contrast) + 0.5, 0.0, 1.0);
-	c = decodeSrgb(p);
-
-	// Saturation scales chroma about the luminance; vibrance does so most where chroma is low.
-	float luma = dot(c, LUMA);
-	float top = max(c.r, max(c.g, c.b));
-	float chroma = top > 0.0 ? (top - min(c.r, min(c.g, c.b))) / top : 0.0;
-	c = mix(vec3(luma), c, (1.0 + saturation) * (1.0 + vibrance * (1.0 - chroma)));
-
-	// Vignette in output coordinates, so every export tile darkens the same frame.
-	vec2 fromCentre = (outPx - 0.5 * u_outSize) / (0.5 * u_outSize);
-	float reach = length(fromCentre) * 0.70710678;
-	c *= 1.0 - 0.85 * vignette * smoothstep(0.3, 1.0, reach);
-
-	return clamp(c, 0.0, 1.0);
-}
-
+${GL_COLOR_GRADE}
 void main() {
 	vec2 outPx = mapRows(u_fragToOutX, u_fragToOutY, gl_FragCoord.xy);
 
@@ -179,7 +100,7 @@ void main() {
 	}
 
 	vec4 texel = texture(u_source, (srcPx - u_texOrigin) / u_texSize);
-	vec4 color = vec4(encodeSrgb(grade(decodeSrgb(texel.rgb), outPx)), u_opaque ? 1.0 : texel.a);
+	vec4 color = vec4(encodeTransfer(grade(decodeTransfer(texel.rgb), outPx)), u_opaque ? 1.0 : texel.a);
 
 	if (u_markup) {
 		color = compositeMarkup(color, outPx);
@@ -192,7 +113,7 @@ void main() {
 // Unsharp mask over the colour pass's result: the centre plus `amount` times its difference from a 3×3
 // Gaussian at `radius` output pixels. Neighbours past the output's edge clamp to it, so every tile sees the same
 // border the whole picture has.
-const SHARPEN_FRAGMENT = `${COMMON}
+const SHARPEN_FRAGMENT = `${GL_FRAGMENT_COMMON}
 ${MARKUP}
 uniform sampler2D u_inter;
 uniform vec3 u_fragToOutX;
@@ -235,7 +156,8 @@ export interface Program {
 	uniforms: ReadonlyMap<string, WebGLUniformLocation>
 }
 
-const SOURCES: Readonly<Record<ProgramName, string>> = {
+// Each program's fragment source.
+export const FRAGMENT_SOURCES: Readonly<Record<ProgramName, string>> = {
 	copy: COPY_FRAGMENT,
 	color: COLOR_FRAGMENT,
 	sharpen: SHARPEN_FRAGMENT
@@ -269,7 +191,7 @@ function compile(gl: WebGL2RenderingContext, type: number, source: string): WebG
 
 function link(gl: WebGL2RenderingContext, fragment: string): Program {
 	const program = gl.createProgram()
-	const vs = compile(gl, gl.VERTEX_SHADER, VERTEX)
+	const vs = compile(gl, gl.VERTEX_SHADER, GL_RECT_VERTEX)
 	const fs = compile(gl, gl.FRAGMENT_SHADER, fragment)
 
 	gl.attachShader(program, vs)
@@ -316,7 +238,7 @@ function link(gl: WebGL2RenderingContext, fragment: string): Program {
 }
 
 export function createPrograms(gl: WebGL2RenderingContext): Record<ProgramName, Program> {
-	return { copy: link(gl, SOURCES.copy), color: link(gl, SOURCES.color), sharpen: link(gl, SOURCES.sharpen) }
+	return { copy: link(gl, FRAGMENT_SOURCES.copy), color: link(gl, FRAGMENT_SOURCES.color), sharpen: link(gl, FRAGMENT_SOURCES.sharpen) }
 }
 
 export function deletePrograms(gl: WebGL2RenderingContext, programs: Record<ProgramName, Program>): void {
