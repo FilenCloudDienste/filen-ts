@@ -48,19 +48,17 @@ import {
 	SaveRefusedError,
 	type ImageSaveEdits,
 	type PresentationSaveEdits,
-	type PresentationSaveSource,
-	type PreviewSaveDeps
+	type PresentationSaveSource
 } from "@/features/drive/lib/previewSave.logic"
 import { currentRootUuid, renameItem, trashItems, deleteItemsPermanently } from "@/features/drive/lib/actions"
 import { followClipboardItem } from "@/features/drive/lib/clipboardSync"
 import { unshareItems } from "@/features/drive/lib/share/actions"
-import { driveListingQueryUpdate, normalizeParentUuid } from "@/features/drive/queries/drive"
-import { editedCopyName } from "@/features/drive/lib/copyName"
-import { warmUploadThumbnail } from "@/features/drive/lib/thumbGenerators"
+import { driveListingQueryUpdate } from "@/features/drive/queries/drive"
 import { splicePhotoSave } from "@/features/photos/queries/photos"
 import { recordOwnSave } from "@/features/preview/lib/ownSaves"
+import { imageSaveDeps, writeEditedCopy } from "@/features/preview/lib/editedCopy"
 import { ImageEditor } from "@/features/preview/imageEdit/components/imageEditor"
-import { enterImageEdit, takenNames, type ImageEditState } from "@/features/preview/imageEdit/editSession"
+import { enterImageEdit, type ImageEditState } from "@/features/preview/imageEdit/editSession"
 import { ORIENTATION_REWRITE_UNAVAILABLE } from "@/features/preview/imageEdit/orientationRewrite"
 import { inPlaceFormatByName } from "@/features/preview/imageEdit/lib/targets"
 import { inPlaceVideoContainerByName } from "@/features/preview/videoEdit/lib/targets"
@@ -2133,24 +2131,6 @@ function imageSaveLabelKey(
 	return target.mime === "image/png" ? "previewImageSaveAsPngCopyAction" : "previewImageSaveAsJpegCopyAction"
 }
 
-// An edited image's upload: its Blob streamed by the SDK worker (the drive's thumbnail then made from that Blob, no
-// download), or the original streamed back with a new Exif Orientation.
-function imageSaveDeps(): PreviewSaveDeps {
-	return {
-		uploadFileBytes: (parentUuid, data, name, mime, options) => sdkApi.uploadFileBytes(parentUuid, data, name, mime, options),
-		uploadFileBlob: (parentUuid, blob, name, mime, options) =>
-			sdkApi.uploadFileFromBlob(parentUuid, blob, name, mime, options).then(file => {
-				warmUploadThumbnail(file, new File([blob], name, { type: blob.type }))
-
-				return file
-			}),
-		rewriteOrientation: (file, orientation, parentUuid, name, mime, options) =>
-			sdkApi.rewriteJpegOrientation(file, orientation, parentUuid, name, mime, options),
-		patchListing: driveListingQueryUpdate,
-		rootUuid: currentRootUuid()
-	}
-}
-
 type ImageExport = Awaited<ReturnType<ImageExportSource>>
 
 async function exportImage(source: ImageExportSource | null, target: SaveTarget): Promise<ImageExport | null> {
@@ -2226,23 +2206,8 @@ async function writeImageCopy(
 	suffix: (number: number) => string
 ): Promise<{ outcome: ActionOutcome<DriveItem>; name: string } | null> {
 	const blob = (await exportImage(source, target))?.blob ?? null
-	const base = asDirectoryOrFile(item)
 
-	if (blob === null || base.type !== "file") {
-		return null
-	}
-	const rootUuid = currentRootUuid()
-	const taken = await takenNames(normalizeParentUuid(base.data.parent, rootUuid))
-	const name = editedCopyName(driveItemName(base), target.extension, suffix, taken)
-	const outcome = await runPreviewSave(imageSaveDeps(), {
-		item,
-		content: { blob },
-		asNewFile: name,
-		mime: "",
-		times: editedSaveTimes(item, Date.now())
-	})
-
-	return { outcome, name }
+	return blob === null ? null : await writeEditedCopy(item, blob, target.extension, suffix)
 }
 
 // The edited image for the remote-change dialog's "save mine as new": as the header's Save would write it, or
