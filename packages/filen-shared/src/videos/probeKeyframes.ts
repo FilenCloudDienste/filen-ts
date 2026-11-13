@@ -519,6 +519,17 @@ async function clusterKeyframe(
 	return null
 }
 
+// One track's cue points, read from the Cues element at `at`.
+async function loadCuePoints(source: BlockSource, at: number, track: number): Promise<CuePoints> {
+	const element = await elementAt(source, at, source.size)
+
+	if (element?.id !== CUES_ID || element.end === null || element.end > source.size || element.end - element.dataStart > MAX_CUES_BYTES) {
+		throw new MalformedError("no readable Cues")
+	}
+
+	return parseCues(await readBytes(source, element.dataStart, element.end - element.dataStart), track)
+}
+
 function matroskaIndex(source: BlockSource, cues: CuesLocation, track: number): ((timeSec: number) => Promise<KeyframeRef | null>) | null {
 	const { at } = cues
 
@@ -529,20 +540,7 @@ function matroskaIndex(source: BlockSource, cues: CuesLocation, track: number): 
 	let loaded: Promise<CuePoints> | null = null
 
 	return async timeSec => {
-		loaded ??= (async () => {
-			const element = await elementAt(source, at, source.size)
-
-			if (
-				element?.id !== CUES_ID ||
-				element.end === null ||
-				element.end > source.size ||
-				element.end - element.dataStart > MAX_CUES_BYTES
-			) {
-				throw new MalformedError("no readable Cues")
-			}
-
-			return parseCues(await readBytes(source, element.dataStart, element.end - element.dataStart), track)
-		})()
+		loaded ??= loadCuePoints(source, at, track)
 
 		const points = await loaded
 		const ticksPerSecond = 1e9 / cues.timestampScale
@@ -617,4 +615,41 @@ export async function openKeyframeIndex(source: BlockSource): Promise<KeyframeIn
 // One keyframe's bytes.
 export function readKeyframe(source: BlockSource, ref: KeyframeRef): Promise<Uint8Array> {
 	return readBytes(source, ref.offset, ref.size)
+}
+
+// The picture track's keyframe times in seconds, ascending, from an index that lists them without reading a frame: a
+// Matroska file's Cues (cue points, which muxers put on keyframes) or a fragmented MP4's mfra (the sync samples tfra
+// lists). Null for anything else, an MP4 with sample tables included (its demuxer already holds stss). Failed
+// downloads and an exhausted read budget throw.
+export async function indexedKeyframeTimes(source: BlockSource): Promise<Float64Array | null> {
+	const parsed = await walkContainer(source, "card", { keyframes: true })
+	const picture = parsed === null ? null : pictureTrack(parsed)
+	const decode = picture?.decode
+
+	if (parsed === null || decode === undefined) {
+		return null
+	}
+
+	if (parsed.container === "mkv" || parsed.container === "webm") {
+		const at = parsed.cues?.at ?? null
+		const timestampScale = parsed.cues?.timestampScale ?? 0
+
+		if (at === null || timestampScale <= 0) {
+			return null
+		}
+
+		const points = await loadCuePoints(source, at, decode.track)
+		const ticksPerSecond = 1e9 / timestampScale
+
+		return Float64Array.from(points.times, ticks => ticks / ticksPerSecond).sort()
+	}
+
+	const access = parsed.fragments?.access.get(decode.track)
+	const timescale = parsed.fragments?.timescales.get(decode.track) ?? 0
+
+	if (access === undefined || timescale <= 0) {
+		return null
+	}
+
+	return access.times.map(ticks => ticks / timescale).sort()
 }

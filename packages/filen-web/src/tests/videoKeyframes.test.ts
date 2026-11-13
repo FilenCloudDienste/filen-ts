@@ -7,6 +7,7 @@ import {
 	blockFrameStart,
 	chunkOfSample,
 	cueAtOrBefore,
+	indexedKeyframeTimes,
 	openKeyframeIndex,
 	parseCues,
 	readKeyframe,
@@ -281,6 +282,16 @@ describe("openKeyframeIndex", () => {
 		}
 
 		expect(await readKeyframe(source, second)).toEqual(frames[2])
+	})
+
+	it("lists keyframe times from Matroska Cues, and leaves an MP4's sample tables to its demuxer", async () => {
+		const { bytes } = mkv()
+
+		expect(Array.from((await indexedKeyframeTimes(new BlockSource(bytes.length, bytesReadRange(bytes)))) ?? [])).toEqual([0, 5])
+
+		const { bytes: moov } = mp4()
+
+		expect(await indexedKeyframeTimes(new BlockSource(moov.length, bytesReadRange(moov)))).toBeNull()
 	})
 
 	it("has no index for Matroska without Cues or for a file that is no container", async () => {

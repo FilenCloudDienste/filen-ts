@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest"
 import {
 	BlockSource,
 	bytesReadRange,
+	indexedKeyframeTimes,
 	openKeyframeIndex,
 	probeSource,
 	probeVideo,
@@ -122,6 +123,13 @@ describe("fragmented MP4 probe", () => {
 
 			expect(await readKeyframe(source, ref)).toEqual(videoPacket(keyframe * FPS))
 		}
+	})
+
+	it("lists every keyframe time from the mfra", async () => {
+		const bytes = await fragmentedMp4({ seconds: 10, audio: true, expectedDuration: 10 })
+		const times = await indexedKeyframeTimes(new BlockSource(bytes.length, bytesReadRange(bytes), { maxBlockReads: 8 }))
+
+		expect(Array.from(times ?? [], time => Math.round(time * 1000) / 1000)).toEqual([0, 2, 4, 6, 8])
 	})
 
 	it("stays within a frame's read budget for a small file", async () => {
