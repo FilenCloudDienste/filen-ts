@@ -23,6 +23,7 @@ export const CHANNELS = {
 	prefsSet: "prefs:set",
 	setBadge: "app:set-badge",
 	setUnloadHolds: "app:set-unload-holds",
+	setForegroundRenderingHolds: "app:set-foreground-rendering-holds",
 	setAudioPlaying: "app:set-audio-playing",
 	setMediaTransport: "app:set-media-transport",
 	quit: "app:quit",

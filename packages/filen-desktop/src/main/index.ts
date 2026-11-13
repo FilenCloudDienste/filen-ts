@@ -97,6 +97,7 @@ import { createMountsService } from "./mounts/service.ts"
 import { loadMountsStore, type MountsStore } from "./mounts/store.ts"
 import { ensureCertificate } from "./mounts/tls.ts"
 import { anyDemand, createNativeSupervisor } from "./native/supervisor.ts"
+import { createForegroundRendering } from "./foregroundRendering.ts"
 import { classifyNavigation, isTrustedSender } from "./navigation.ts"
 import { isPermissionAllowed } from "./permissions.ts"
 import { DEFAULT_PREFS, loadPrefs, prefsPatchSchema, type PrefsStore } from "./prefs.ts"
@@ -710,6 +711,8 @@ const dragSessions = new DragSessions(
 	dragNative.mode
 )
 
+const foregroundRendering = createForegroundRendering()
+
 const dragOut = createDragOutService<NativeImage>({
 	sessions: dragSessions,
 	temp: dragTemp,
@@ -1268,12 +1271,14 @@ function createWindow(): void {
 		syncService.pageGone(contentsId)
 		mountsService.pageGone(contentsId)
 		transfersService.pageGone(contentsId)
+		foregroundRendering.pageGone(contentsId)
 	})
 	window.webContents.on("destroyed", () => {
 		syncService.pageGone(contentsId)
 		mountsService.pageGone(contentsId)
 		transfersService.pageGone(contentsId)
 		dragOut.pageGone(contentsId)
+		foregroundRendering.pageGone(contentsId)
 	})
 	// Before the old document goes: its unbegun drag sessions (and their downloads) end at once.
 	window.webContents.on("did-start-navigation", details => {
@@ -1317,6 +1322,7 @@ function createWindow(): void {
 	window.webContents.on("render-process-gone", (_event, details) => {
 		resetPageState()
 		dragOut.pageGone(contentsId)
+		foregroundRendering.pageGone(contentsId)
 
 		if (details.reason === "clean-exit") {
 			return
@@ -1943,6 +1949,14 @@ if (!instanceLock.held) {
 
 		unloadHolds = count
 		scheduleIdleDestroy()
+	})
+
+	ipcMain.on(CHANNELS.setForegroundRenderingHolds, (event, payload: unknown) => {
+		const count = countSchema(payload)
+
+		if (isTrusted(event.senderFrame) && !(count instanceof type.errors) && mainWindow?.webContents === event.sender) {
+			foregroundRendering.setHolds(event.sender, count)
+		}
 	})
 
 	ipcMain.on(CHANNELS.setAudioPlaying, (event, payload: unknown) => {

@@ -310,6 +310,9 @@ const bridge: DesktopBridge = {
 		setUnloadHolds: count => {
 			ipcRenderer.send(CHANNELS.setUnloadHolds, count)
 		},
+		setForegroundRenderingHolds: count => {
+			ipcRenderer.send(CHANNELS.setForegroundRenderingHolds, count)
+		},
 		setAudioPlaying: playing => {
 			ipcRenderer.send(CHANNELS.setAudioPlaying, playing)
 		},

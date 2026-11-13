@@ -27,6 +27,34 @@ export function desktopPlatform(): DesktopPlatform | undefined {
 	return bridge?.platform
 }
 
+let foregroundRenderingHolds = 0
+
+const noRelease = (): void => undefined
+
+// Keeps the desktop window rendering at full rate while hidden or occluded until the returned release is called (a
+// video export must not slow to background-throttled timers). Nothing in a browser. Releasing twice counts once.
+export function holdForegroundRendering(): () => void {
+	if (bridge === undefined) {
+		return noRelease
+	}
+
+	const app = bridge.app
+	let released = false
+
+	foregroundRenderingHolds += 1
+	app.setForegroundRenderingHolds(foregroundRenderingHolds)
+
+	return () => {
+		if (released) {
+			return
+		}
+
+		released = true
+		foregroundRenderingHolds -= 1
+		app.setForegroundRenderingHolds(foregroundRenderingHolds)
+	}
+}
+
 // The theme tokens are oklch() and some are translucent, which window chrome cannot take: resolve each token to
 // opaque rgb by painting one pixel over the canvas colour.
 function resolveColor(context: CanvasRenderingContext2D, styles: CSSStyleDeclaration, token: string): string {

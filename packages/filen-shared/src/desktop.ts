@@ -100,6 +100,9 @@ export interface DesktopApp {
 	// What must not be dropped (lib/unloadGuard.ts holds) and audio playback: either keeps a hidden window's page alive,
 	// and holds make quitting ask first.
 	setUnloadHolds(count: number): void
+	// Running work that must not slow down while the window is hidden or occluded (a video export): while above 0 the
+	// window's timers and rendering are not background-throttled.
+	setForegroundRenderingHolds(count: number): void
 	setAudioPlaying(playing: boolean): void
 	// The audio player's transport, for the macOS Controls menu and the tray.
 	setMediaTransport(state: DesktopMediaTransport): void

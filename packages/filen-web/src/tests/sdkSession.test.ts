@@ -292,6 +292,7 @@ describe("desktop vault", () => {
 				version: "4.0.0",
 				setBadge: () => undefined,
 				setUnloadHolds: () => undefined,
+				setForegroundRenderingHolds: () => undefined,
 				setAudioPlaying: () => undefined,
 				setMediaTransport: () => undefined,
 				setMenuShortcuts: () => undefined,
