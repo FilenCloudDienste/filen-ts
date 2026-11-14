@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import type { AnyFile } from "@filen/sdk-rs"
 import {
+	buildLapShuffleOrder,
 	buildShuffleOrder,
 	computeNext,
 	computePrevious,
@@ -96,6 +97,41 @@ describe("computeNext", () => {
 
 		expect(result).not.toBeNull()
 		expect([...(result?.shuffleOrder ?? [])].sort((a, b) => a - b)).toEqual([0, 1, 2])
+	})
+
+	it("never starts a fresh shuffle lap with the track that just finished", () => {
+		// A seeded generator, so every shape of the lap is visited.
+		for (const length of [2, 3, 7]) {
+			let seed = 7
+
+			const random = (): number => {
+				seed = (seed * 16807) % 2147483647
+
+				return (seed - 1) / 2147483646
+			}
+
+			for (let run = 0; run < 200; run++) {
+				const order = buildShuffleOrder(length, 0, random)
+				const finished = order[length - 1] ?? 0
+				const result = computeNext(
+					nav({ queueLength: length, shuffleEnabled: true, shuffleOrder: order, currentIndex: finished, loopMode: "all" }),
+					random
+				)
+
+				expect(result?.index).not.toBe(finished)
+				expect([...(result?.shuffleOrder ?? [])].sort((a, b) => a - b)).toEqual(Array.from({ length }, (_, i) => i))
+			}
+		}
+
+		// Both slots after the first are reachable.
+		expect(buildLapShuffleOrder(3, 1, () => 0)).toEqual([2, 1, 0])
+		expect(buildLapShuffleOrder(3, 1, () => 0.99)).toEqual([0, 2, 1])
+	})
+
+	it("leaves a one-track lap as it is", () => {
+		const result = computeNext(nav({ queueLength: 1, shuffleEnabled: true, shuffleOrder: [0], currentIndex: 0, loopMode: "all" }))
+
+		expect(result).toEqual({ index: 0, shuffleOrder: [0] })
 	})
 
 	it("rebuilds a stale (wrong-length) shuffle order anchored at the current index", () => {

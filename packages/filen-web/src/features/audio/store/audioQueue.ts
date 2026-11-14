@@ -85,6 +85,20 @@ export function buildShuffleOrder(length: number, currentIndex: number, random: 
 	return anchored ? [currentIndex, ...pool] : pool
 }
 
+// The order of a fresh shuffle lap under loop "all": the track that just finished never comes first (it would replay
+// at once), so the others are shuffled and it goes to a random later slot.
+export function buildLapShuffleOrder(length: number, finishedIndex: number, random: () => number = Math.random): number[] {
+	if (length <= 1 || finishedIndex < 0 || finishedIndex >= length) {
+		return buildShuffleOrder(length, -1, random)
+	}
+
+	const order = buildShuffleOrder(length, finishedIndex, random).slice(1)
+
+	order.splice(1 + Math.floor(random() * order.length), 0, finishedIndex)
+
+	return order
+}
+
 // Resolves the current shuffle order against the queue, rebuilding it anchored at the current index if
 // it is stale (wrong length, or the current index isn't in it — e.g. the queue changed underneath a
 // shuffle). Returns the order plus the current index's position within it.
@@ -103,7 +117,8 @@ function resolveShuffleOrder(nav: QueueNav, random: () => number): { order: numb
 // The next index to play after the current track — shuffle- and loop-aware. Loop "one" is intentionally
 // treated like "off" here (no wrap): restarting the same track is the caller's concern (handleTrackEnd),
 // so both user-next and auto-advance step forward identically and only loop "all" wraps. On a shuffle
-// pass wrapping under loop "all" the order is reshuffled so the next lap differs (mobile parity).
+// pass wrapping under loop "all" the order is reshuffled so the next lap differs (mobile parity), never starting with
+// the track that just finished.
 export function computeNext(nav: QueueNav, random: () => number = Math.random): AdvanceResult | null {
 	if (nav.queueLength <= 0) {
 		return null
@@ -118,7 +133,7 @@ export function computeNext(nav: QueueNav, random: () => number = Math.random): 
 		}
 
 		if (nav.loopMode === "all") {
-			const reshuffled = buildShuffleOrder(nav.queueLength, -1, random)
+			const reshuffled = buildLapShuffleOrder(nav.queueLength, nav.currentIndex, random)
 
 			return { index: reshuffled[0] ?? 0, shuffleOrder: reshuffled }
 		}
