@@ -22,7 +22,8 @@ const MENU_ACTIONS = Object.keys({
 	"audio.next": true,
 	"audio.previous": true,
 	"audio.shuffle": true,
-	"audio.loop": true
+	"audio.loop": true,
+	"audio.smoothTransitions": true
 } satisfies Record<DesktopMenuAction, true>) as DesktopMenuAction[]
 
 // A click can arrive before the component owning its handler mounts (the menu opened the window, the shell

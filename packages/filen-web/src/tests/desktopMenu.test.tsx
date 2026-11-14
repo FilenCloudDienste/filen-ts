@@ -49,7 +49,8 @@ describe("desktop menu actions", () => {
 			"audio.next": "mod+shift+arrowright",
 			"audio.previous": "mod+shift+arrowleft",
 			"audio.shuffle": "alt+shift+s",
-			"audio.loop": "alt+shift+r"
+			"audio.loop": "alt+shift+r",
+			"audio.smoothTransitions": ""
 		})
 	})
 

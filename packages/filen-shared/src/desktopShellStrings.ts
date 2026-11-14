@@ -100,7 +100,8 @@ export const DESKTOP_SHELL_STRINGS = {
 	shellChooseMountPoint: "Choose where to mount the network drive",
 	/** macOS File menu item that closes the open dialog (a file preview), or the window when none is open. */
 	shellMenuClose: "Close",
-	/** macOS menu bar menu holding the audio player's transport (play, pause, next, previous, shuffle, repeat). */
+	/** macOS menu bar menu holding the audio player's transport (play, pause, next, previous, shuffle, repeat, smooth
+	 * transitions). */
 	shellMenuControls: "Controls",
 	/** Controls menu and tray menu item that starts or resumes the audio player. */
 	shellPlay: "Play",
@@ -113,7 +114,10 @@ export const DESKTOP_SHELL_STRINGS = {
 	/** Controls menu and tray menu item that turns shuffle on or off. */
 	shellShuffle: "Shuffle",
 	/** Controls menu and tray menu item that switches the repeat mode (off, all, one). */
-	shellRepeat: "Repeat"
+	shellRepeat: "Repeat",
+	/** Controls menu and tray menu item that turns on or off blending the end of each track into the next one (a
+	 * crossfade; it never picks songs). */
+	shellSmoothTransitions: "Smooth Transitions"
 } as const
 
 export type DesktopShellStringKey = keyof typeof DESKTOP_SHELL_STRINGS

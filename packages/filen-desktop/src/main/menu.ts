@@ -18,7 +18,8 @@ const ACTION_LABELS: Record<DesktopMenuAction, DesktopShellStringKey> = {
 	"audio.next": "shellNextTrack",
 	"audio.previous": "shellPreviousTrack",
 	"audio.shuffle": "shellShuffle",
-	"audio.loop": "shellRepeat"
+	"audio.loop": "shellRepeat",
+	"audio.smoothTransitions": "shellSmoothTransitions"
 }
 
 export const MENU_ACTIONS = new Set(Object.keys(ACTION_LABELS)) as ReadonlySet<DesktopMenuAction>
@@ -110,10 +111,12 @@ export const TRANSPORT_ACTIONS: ReadonlySet<DesktopMenuAction> = new Set([
 	"audio.next",
 	"audio.previous",
 	"audio.shuffle",
-	"audio.loop"
+	"audio.loop",
+	"audio.smoothTransitions"
 ])
 
-// The audio player's transport while something is queued: play or pause, the track skips, then shuffle and repeat.
+// The audio player's transport while something is queued: play or pause, the track skips, then shuffle, repeat and
+// smooth transitions.
 // The Controls menu and the tray offer these.
 export function transportItems(transport: DesktopMediaTransport): { action: DesktopMenuAction; label: string }[] {
 	if (transport === "none") {
@@ -125,7 +128,8 @@ export function transportItems(transport: DesktopMediaTransport): { action: Desk
 		{ action: "audio.next", label: shellText("shellNextTrack") },
 		{ action: "audio.previous", label: shellText("shellPreviousTrack") },
 		{ action: "audio.shuffle", label: shellText("shellShuffle") },
-		{ action: "audio.loop", label: shellText("shellRepeat") }
+		{ action: "audio.loop", label: shellText("shellRepeat") },
+		{ action: "audio.smoothTransitions", label: shellText("shellSmoothTransitions") }
 	]
 }
 

@@ -135,7 +135,8 @@ describe("menuTemplate", () => {
 			["Next Track", false],
 			["Previous Track", false],
 			["Shuffle", false],
-			["Repeat", false]
+			["Repeat", false],
+			["Smooth Transitions", false]
 		])
 	})
 
@@ -156,7 +157,14 @@ describe("transportItems", () => {
 	})
 
 	it("plays a paused queue and pauses a playing one", () => {
-		expect(transportItems("paused").map(item => item.label)).toEqual(["Play", "Next Track", "Previous Track", "Shuffle", "Repeat"])
+		expect(transportItems("paused").map(item => item.label)).toEqual([
+			"Play",
+			"Next Track",
+			"Previous Track",
+			"Shuffle",
+			"Repeat",
+			"Smooth Transitions"
+		])
 		expect(transportItems("playing")[0]).toEqual({ action: "audio.playPause", label: "Pause" })
 	})
 })
