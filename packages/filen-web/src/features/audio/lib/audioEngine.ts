@@ -49,6 +49,8 @@ function inGesture(): boolean {
 	return desktopBridge() !== undefined || !("userActivation" in navigator) || navigator.userActivation.isActive
 }
 
+const webkit = isWebKitEngine()
+
 // The app-lifetime audio engine singleton, wired with the real DOM element adapter + streaming source
 // resolver + OS Media Session bridge + one-track-ahead prefetch + the track-metadata service's covers. One instance
 // owns playback for the whole session — same pattern as sdkApi. Import this from UI/handoff code; import
@@ -66,7 +68,7 @@ export const audioEngine = new AudioEngine({
 		output: createAudioOutput({
 			createContext,
 			audioSession,
-			webkit: isWebKitEngine(),
+			webkit,
 			warn: (message, error) => {
 				log.warn("audio", message, error)
 			}
@@ -76,7 +78,7 @@ export const audioEngine = new AudioEngine({
 			trackMetadata.request(track, { priority: true, refreshGain: true })
 		},
 		availability: smoothTransitionsAvailability,
-		webkit: isWebKitEngine(),
+		webkit,
 		inGesture
 	}
 })
