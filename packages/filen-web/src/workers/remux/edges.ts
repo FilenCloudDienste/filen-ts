@@ -15,6 +15,7 @@ import {
 	type EdgeWindows
 } from "@/workers/remux/edges.logic"
 import {
+	audioEndOf,
 	edgeWindowBytes,
 	flacMetadataBlock,
 	flacStreamInfo,
@@ -27,6 +28,7 @@ import {
 	syncFlacFrame,
 	syncFrameStream,
 	tailWindowOffset,
+	TRAILER_PROBE_BYTES,
 	type FlacStreamInfo,
 	type TailStream
 } from "@/workers/remux/tailWindow.logic"
@@ -194,10 +196,19 @@ async function streamLayout(input: AudioInput): Promise<StreamLayout | null> {
 	return streamInfo === null || info === null ? null : { stream: "flac", audioStart: at, streamInfo, info }
 }
 
-// An Input over the file from `from` to its end, behind `prefix`: the tail window as a file of its own.
-function windowInput(cache: BlockCache, prefix: Uint8Array, from: number, format: InputFormat): Input {
+// An Input over the file from `from` to `to` (where its audio ends), behind `prefix`: the tail window as a file of
+// its own. The block the window ends in, read first for the tags appended to the file, is kept resident while the
+// window decodes toward it, so it is never downloaded twice.
+function windowInput(cache: BlockCache, prefix: Uint8Array, from: number, to: number, format: InputFormat): Input {
 	const head = prefix.length
-	const size = head + cache.size - from
+	const size = head + to - from
+	const last = to - 1
+
+	const keepLast = (): void => {
+		if (cache.isResident(last)) {
+			void cache.read(last, to)
+		}
+	}
 
 	const read = async (start: number, end: number): Promise<Uint8Array> => {
 		if (end <= head) {
@@ -205,13 +216,18 @@ function windowInput(cache: BlockCache, prefix: Uint8Array, from: number, format
 		}
 
 		if (start >= head) {
-			return await cache.read(from + start - head, from + end - head)
+			const bytes = await cache.read(from + start - head, from + end - head)
+
+			keepLast()
+
+			return bytes
 		}
 
 		const out = new Uint8Array(end - start)
 
 		out.set(prefix.subarray(start))
 		out.set(await cache.read(from, from + end - head), head - start)
+		keepLast()
 
 		return out
 	}
@@ -224,8 +240,8 @@ function windowInput(cache: BlockCache, prefix: Uint8Array, from: number, format
 
 const TAIL_FORMATS: Record<TailStream, InputFormat> = { mp3: MP3, adts: ADTS, flac: FLAC }
 
-// The envelope of the last `seconds`, ending at the end of the file; null when no frame could be found to start
-// a byte-offset window at.
+// The envelope of the last `seconds`, ending where the audio does; null when no frame could be found to start a
+// byte-offset window at.
 async function tailEnvelope(
 	input: AudioInput,
 	layout: StreamLayout | null,
@@ -241,20 +257,22 @@ async function tailEnvelope(
 		return lastWindows(await envelopes.read(reader, Math.max(0, info.duration - seconds), Number.POSITIVE_INFINITY, windows), windows)
 	}
 
-	const offset = tailWindowOffset({ size: cache.size, audioStart: layout.audioStart, duration: info.duration, seconds })
-	const end = Math.min(cache.size, offset + RESYNC_BYTES)
+	const probeFrom = Math.max(layout.audioStart, cache.size - TRAILER_PROBE_BYTES)
+	const audioEnd = audioEndOf(await cache.read(probeFrom, cache.size), cache.size, layout.audioStart)
+	const offset = tailWindowOffset({ audioEnd, audioStart: layout.audioStart, duration: info.duration, seconds })
+	const end = Math.min(audioEnd, offset + RESYNC_BYTES)
 	const bytes = await cache.read(offset, end)
 	const at =
 		layout.stream === "flac"
 			? syncFlacFrame(bytes, 0, layout.info)
-			: (syncFrameStream(bytes, 0, layout.stream, layout.shape, end === cache.size)?.at ?? null)
+			: (syncFrameStream(bytes, 0, layout.stream, layout.shape, end === audioEnd)?.at ?? null)
 
 	if (at === null) {
 		return null
 	}
 
 	const prefix = layout.stream === "flac" ? flacVirtualHeader(layout.streamInfo) : new Uint8Array(0)
-	const window = windowInput(cache, prefix, offset + at, TAIL_FORMATS[layout.stream])
+	const window = windowInput(cache, prefix, offset + at, audioEnd, TAIL_FORMATS[layout.stream])
 
 	try {
 		const track = await window.getPrimaryAudioTrack()
@@ -286,8 +304,9 @@ export async function analyzeInput(
 		await permit.take()
 
 		const layout = await streamLayout(input)
+		// Tags appended to the file count toward the estimate: the tail window finds them, after this decision.
 		const bytes = edgeWindowBytes({
-			size: input.cache.size,
+			audioEnd: input.cache.size,
 			audioStart: layout?.audioStart ?? 0,
 			duration,
 			headSeconds: windows.headSeconds,

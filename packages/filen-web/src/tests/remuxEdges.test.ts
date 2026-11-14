@@ -15,8 +15,8 @@ import {
 	finishEnvelope,
 	powerDb
 } from "@/workers/remux/edges.logic"
-import { TAIL_PADDING } from "@/workers/remux/tailWindow.logic"
-import { adtsFile, flacFile, LevelDecoder, mp3File, SHAPE, wavFile, type LevelShape } from "@/tests/support/edgeAudio"
+import { TAIL_PADDING, TRAILER_PROBE_BYTES } from "@/workers/remux/tailWindow.logic"
+import { adtsFile, apeTag, flacFile, id3v1Tag, LevelDecoder, mp3File, SHAPE, wavFile, type LevelShape } from "@/tests/support/edgeAudio"
 
 // A Chromium engine: FLAC goes to the stand-in decoder, not to the FFmpeg worker WebKit's FLAC uses.
 vi.hoisted(() => {
@@ -309,6 +309,30 @@ describe("analyzeInput over real demuxers", () => {
 			expect(source.served()).toBeLessThan(bytes.length / 2)
 		})
 	}
+
+	it("ends the tail window where the audio does, before an APEv2 and an ID3v1 tag", async () => {
+		const audio = mp3File(LONG)
+		const bytes = new Uint8Array([...audio, ...apeTag(4000, true), ...id3v1Tag()])
+		const source = serve(bytes)
+		const input = await openAudioInput(source.port, source.size, "analysis")
+		const reads = spyReads(input)
+		const edges = await analyzeInput(input)
+
+		await input.close()
+
+		expect(edges.status).toBe("ok")
+		expect(Math.abs((edges.outEndFromEndMs ?? -1) - 4560)).toBeLessThanOrEqual(180)
+		expect(Math.abs((edges.fadeOutFromEndMs ?? -1) - 11_125)).toBeLessThanOrEqual(180)
+
+		// Past the audio, only the probe for the tags: the window neither decodes nor reads them.
+		const past = reads().filter(([, end]) => end > audio.length)
+
+		expect(past).toEqual([[bytes.length - TRAILER_PROBE_BYTES, bytes.length]])
+
+		const tail = EDGE_WINDOWS.tailSeconds * (audio.length / LONG.durationSec)
+
+		expect(bytesIn(reads(), audio.length - tail, audio.length)).toBeGreaterThanOrEqual(tail)
+	})
 
 	it("finds WAV edges through the container's own seek", async () => {
 		const bytes = wavFile()

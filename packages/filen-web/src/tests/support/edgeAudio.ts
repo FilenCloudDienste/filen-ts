@@ -71,6 +71,44 @@ export function id3Tag(size: number): Uint8Array {
 	return out
 }
 
+// Tags appended after the audio. An ID3v1 tag: "TAG" and 125 bytes.
+export function id3v1Tag(): Uint8Array {
+	const out = new Uint8Array(128).fill(0x20)
+
+	out.set([0x54, 0x41, 0x47])
+
+	return out
+}
+
+// An APEv2 tag with `items` bytes of items, its footer and (when `header`) its header.
+export function apeTag(items: number, header: boolean): Uint8Array {
+	const block = (isHeader: boolean): Uint8Array => {
+		const out = new Uint8Array(32)
+		const view = new DataView(out.buffer)
+
+		out.set([0x41, 0x50, 0x45, 0x54, 0x41, 0x47, 0x45, 0x58])
+		view.setUint32(8, 2000, true)
+		view.setUint32(12, items + 32, true)
+		view.setUint32(16, 1, true)
+		view.setUint32(20, (header ? 0x80000000 : 0) | (isHeader ? 0x20000000 : 0), true)
+
+		return out
+	}
+
+	return concat([...(header ? [block(true)] : []), new Uint8Array(items).fill(0x61), block(false)])
+}
+
+// An ID3v2.4 tag of `size` bytes of padding with a footer, as appended to a file.
+export function appendedId3Tag(size: number): Uint8Array {
+	const tag = id3Tag(size)
+	const footer = tag.slice(0, 10)
+
+	footer.set([0x33, 0x44, 0x49])
+	footer[5] = 0x10
+
+	return concat([tag, footer])
+}
+
 export function mp3File(shape: LevelShape = SHAPE): Uint8Array {
 	const seconds = 1152 / RATE
 	const count = Math.round(shape.durationSec / seconds)

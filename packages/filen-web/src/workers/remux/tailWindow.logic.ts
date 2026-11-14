@@ -17,30 +17,109 @@ export const RESYNC_BYTES = 131_072
 // Frames after a candidate MPEG or ADTS header that must follow it, each at the length the one before declares.
 const CHAINED_FRAMES = 2
 
-// The byte rate of the stream's audio over its whole length.
-function byteRate(params: { size: number; audioStart: number; duration: number }): number {
-	return Math.max(0, params.size - params.audioStart) / params.duration
+// The byte rate of the stream's audio over its whole length (`audioEnd`: where the audio ends, before any tags
+// appended to the file).
+function byteRate(params: { audioEnd: number; audioStart: number; duration: number }): number {
+	return Math.max(0, params.audioEnd - params.audioStart) / params.duration
 }
 
 // Where a window holding the last `seconds` of audio starts, padded: never before the audio itself.
-export function tailWindowOffset(params: { size: number; audioStart: number; duration: number; seconds: number }): number {
+export function tailWindowOffset(params: { audioEnd: number; audioStart: number; duration: number; seconds: number }): number {
 	const bytes = Math.ceil(params.seconds * byteRate(params) * TAIL_PADDING)
 
-	return Math.max(params.audioStart, params.size - bytes)
+	return Math.max(params.audioStart, params.audioEnd - bytes)
 }
 
 // The bytes a head window of `headSeconds` and a padded tail window of `tailSeconds` take, together, by the
 // average byte rate; never more than the audio itself.
 export function edgeWindowBytes(params: {
-	size: number
+	audioEnd: number
 	audioStart: number
 	duration: number
 	headSeconds: number
 	tailSeconds: number
 }): number {
-	const audio = Math.max(0, params.size - params.audioStart)
+	const audio = Math.max(0, params.audioEnd - params.audioStart)
 
 	return Math.min(audio, Math.ceil((params.headSeconds + params.tailSeconds * TAIL_PADDING) * byteRate(params)))
+}
+
+// ── Tags appended to the file ───────────────────────────────────────────────
+
+// The file's last bytes read to find the tags appended after its audio: an ID3v1 tag, an APEv2 footer before it
+// and an appended ID3v2 tag's footer before that.
+export const TRAILER_PROBE_BYTES = 256
+
+const ID3V1_BYTES = 128
+const APE_FOOTER_BYTES = 32
+const APE_HAS_HEADER = 0x80000000
+const ID3V2_FOOTER_BYTES = 10
+// Tags peeled off the end at most.
+const MAX_TRAILING_TAGS = 4
+
+function startsWith(bytes: Uint8Array, at: number, magic: string): boolean {
+	for (let i = 0; i < magic.length; i++) {
+		if (bytes[at + i] !== magic.charCodeAt(i)) {
+			return false
+		}
+	}
+
+	return true
+}
+
+// The size of the tag that ends at `at` in `bytes`, found by its footer; 0 when none ends there.
+function trailingTagBytes(bytes: Uint8Array, at: number): number {
+	if (at >= ID3V1_BYTES && startsWith(bytes, at - ID3V1_BYTES, "TAG")) {
+		return ID3V1_BYTES
+	}
+
+	if (at >= APE_FOOTER_BYTES && startsWith(bytes, at - APE_FOOTER_BYTES, "APETAGEX")) {
+		const footer = new DataView(bytes.buffer, bytes.byteOffset + at - APE_FOOTER_BYTES, APE_FOOTER_BYTES)
+		// The footer counts the items and itself, never the header.
+		const size = footer.getUint32(12, true)
+		const flags = footer.getUint32(20, true)
+
+		return size < APE_FOOTER_BYTES ? 0 : size + ((flags & APE_HAS_HEADER) !== 0 ? APE_FOOTER_BYTES : 0)
+	}
+
+	if (at >= ID3V2_FOOTER_BYTES && startsWith(bytes, at - ID3V2_FOOTER_BYTES, "3DI")) {
+		let size = 0
+
+		for (let i = at - 4; i < at; i++) {
+			const byte = bytes[i] ?? 0x80
+
+			if (byte >= 0x80) {
+				return 0
+			}
+
+			size = (size << 7) | byte
+		}
+
+		// Header and footer around the frames.
+		return size + 2 * ID3V2_FOOTER_BYTES
+	}
+
+	return 0
+}
+
+// Where the audio of a file of `size` bytes ends, before the tags appended to it (ID3v1, APEv2, an appended ID3v2,
+// in any order). `end` holds the file's last bytes; a tag whose footer lies before them ends the search, as does
+// one claiming more than `audioStart` leaves.
+export function audioEndOf(end: Uint8Array, size: number, audioStart: number): number {
+	const offset = size - end.length
+	let audioEnd = size
+
+	for (let i = 0; i < MAX_TRAILING_TAGS && audioEnd > offset; i++) {
+		const tag = trailingTagBytes(end, audioEnd - offset)
+
+		if (tag === 0 || audioEnd - tag <= audioStart) {
+			break
+		}
+
+		audioEnd -= tag
+	}
+
+	return audioEnd
 }
 
 // The first MPEG audio or ADTS frame at or after `from` that the next frames confirm: a sync word alone is

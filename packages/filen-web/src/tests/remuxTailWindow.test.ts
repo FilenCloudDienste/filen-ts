@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import {
+	audioEndOf,
 	crc8,
 	edgeWindowBytes,
 	flacFrameHeaderLength,
@@ -11,9 +12,21 @@ import {
 	syncFlacFrame,
 	syncFrameStream,
 	TAIL_PADDING,
-	tailWindowOffset
+	tailWindowOffset,
+	TRAILER_PROBE_BYTES
 } from "@/workers/remux/tailWindow.logic"
-import { adtsFrame, flacFrameHeader, MP3_FRAME_BYTES, MP3_HEADER, mp3Frame, RATE, streamInfo } from "@/tests/support/edgeAudio"
+import {
+	adtsFrame,
+	apeTag,
+	appendedId3Tag,
+	flacFrameHeader,
+	id3v1Tag,
+	MP3_FRAME_BYTES,
+	MP3_HEADER,
+	mp3Frame,
+	RATE,
+	streamInfo
+} from "@/tests/support/edgeAudio"
 
 function concat(...parts: (Uint8Array | number[])[]): Uint8Array {
 	const arrays = parts.map(part => (part instanceof Uint8Array ? part : Uint8Array.from(part)))
@@ -37,21 +50,21 @@ const STEREO_44K = { sampleRate: RATE, channels: 2 }
 describe("tailWindowOffset", () => {
 	it("cuts the window from the average byte rate, padded", () => {
 		// 10 000 bytes a second behind a 1000-byte head.
-		const params = { size: 1_001_000, audioStart: 1000, duration: 100 }
+		const params = { audioEnd: 1_001_000, audioStart: 1000, duration: 100 }
 
 		expect(tailWindowOffset({ ...params, seconds: 20 })).toBe(1_001_000 - Math.ceil(20 * 10_000 * TAIL_PADDING))
 		expect(tailWindowOffset({ ...params, seconds: 1 })).toBe(1_001_000 - 11_000)
 	})
 
 	it("never starts before the audio", () => {
-		expect(tailWindowOffset({ size: 50_000, audioStart: 2000, duration: 10, seconds: 20 })).toBe(2000)
+		expect(tailWindowOffset({ audioEnd: 50_000, audioStart: 2000, duration: 10, seconds: 20 })).toBe(2000)
 	})
 })
 
 describe("edgeWindowBytes", () => {
 	it("adds the head and the padded tail by the average byte rate, never past the audio", () => {
-		expect(edgeWindowBytes({ size: 1_000_000, audioStart: 0, duration: 100, headSeconds: 10, tailSeconds: 20 })).toBe(320_000)
-		expect(edgeWindowBytes({ size: 100_000, audioStart: 0, duration: 10, headSeconds: 10, tailSeconds: 20 })).toBe(100_000)
+		expect(edgeWindowBytes({ audioEnd: 1_000_000, audioStart: 0, duration: 100, headSeconds: 10, tailSeconds: 20 })).toBe(320_000)
+		expect(edgeWindowBytes({ audioEnd: 100_000, audioStart: 0, duration: 10, headSeconds: 10, tailSeconds: 20 })).toBe(100_000)
 	})
 })
 
@@ -183,5 +196,63 @@ describe("FLAC metadata", () => {
 		expect(isFlacMagic(header)).toBe(true)
 		expect(flacMetadataBlock(header.subarray(4, 8))).toEqual({ last: true, type: 0, size: 34 })
 		expect(header.subarray(8)).toEqual(info)
+	})
+})
+
+describe("audioEndOf", () => {
+	const AUDIO = 5000
+
+	// The audio, then `tags`; the last TRAILER_PROBE_BYTES of the file as the probe reads them.
+	function endOf(...tags: Uint8Array[]): number {
+		const file = concat(new Uint8Array(AUDIO).fill(9), ...tags)
+
+		return audioEndOf(file.subarray(Math.max(0, file.length - TRAILER_PROBE_BYTES)), file.length, 100)
+	}
+
+	it("is the end of the file when nothing is appended", () => {
+		expect(endOf()).toBe(AUDIO)
+	})
+
+	it("ends before an ID3v1 tag", () => {
+		expect(endOf(id3v1Tag())).toBe(AUDIO)
+	})
+
+	it("ends before an APEv2 tag, with or without its header", () => {
+		expect(endOf(apeTag(700, true))).toBe(AUDIO)
+		expect(endOf(apeTag(700, false))).toBe(AUDIO)
+	})
+
+	it("ends before an appended ID3v2 tag", () => {
+		expect(endOf(appendedId3Tag(400))).toBe(AUDIO)
+	})
+
+	it("ends before an APEv2 tag followed by an ID3v1 tag", () => {
+		expect(endOf(apeTag(2000, true), id3v1Tag())).toBe(AUDIO)
+	})
+
+	it("ends before an appended ID3v2 tag followed by an ID3v1 tag", () => {
+		expect(endOf(appendedId3Tag(400), id3v1Tag())).toBe(AUDIO)
+	})
+
+	it("stops at a footer before the probed bytes, and never peels into the audio's start", () => {
+		// The APE footer lies before the probe once the ID3v1 tag and the appended ID3v2 tag are peeled.
+		expect(endOf(apeTag(50, false), appendedId3Tag(400), id3v1Tag())).toBe(AUDIO + 82)
+
+		const file = concat(new Uint8Array(AUDIO), apeTag(10_000, false))
+
+		expect(audioEndOf(file.subarray(file.length - 32), file.length, file.length - 1000)).toBe(file.length)
+	})
+
+	it("rejects an APE footer claiming less than itself, and an ID3v2 footer with a size byte over 0x7f", () => {
+		const ape = apeTag(0, false)
+
+		new DataView(ape.buffer).setUint32(12, 8, true)
+
+		const id3 = appendedId3Tag(10)
+
+		id3[id3.length - 1] = 0x80
+
+		expect(endOf(ape)).toBe(AUDIO + 32)
+		expect(endOf(id3)).toBe(AUDIO + id3.length)
 	})
 })
