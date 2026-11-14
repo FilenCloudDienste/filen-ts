@@ -43,6 +43,7 @@ import { Route as AppSettingsIndexRouteImport } from './routes/_app/settings/ind
 import { Route as AppSettingsAccountRouteImport } from './routes/_app/settings/account'
 import { Route as AppSettingsAdvancedRouteImport } from './routes/_app/settings/advanced'
 import { Route as AppSettingsAppearanceRouteImport } from './routes/_app/settings/appearance'
+import { Route as AppSettingsAudioRouteImport } from './routes/_app/settings/audio'
 import { Route as AppSettingsBillingRouteImport } from './routes/_app/settings/billing'
 import { Route as AppSettingsDesktopRouteImport } from './routes/_app/settings/desktop'
 import { Route as AppSettingsEventsRouteImport } from './routes/_app/settings/events'
@@ -233,6 +234,11 @@ const AppSettingsAppearanceRoute = AppSettingsAppearanceRouteImport.update({
   path: '/appearance',
   getParentRoute: () => AppSettingsRouteRoute,
 } as any)
+const AppSettingsAudioRoute = AppSettingsAudioRouteImport.update({
+  id: '/audio',
+  path: '/audio',
+  getParentRoute: () => AppSettingsRouteRoute,
+} as any)
 const AppSettingsBillingRoute = AppSettingsBillingRouteImport.update({
   id: '/billing',
   path: '/billing',
@@ -364,6 +370,7 @@ export interface FileRoutesByFullPath {
   '/settings/account': typeof AppSettingsAccountRoute
   '/settings/advanced': typeof AppSettingsAdvancedRoute
   '/settings/appearance': typeof AppSettingsAppearanceRoute
+  '/settings/audio': typeof AppSettingsAudioRoute
   '/settings/billing': typeof AppSettingsBillingRoute
   '/settings/desktop': typeof AppSettingsDesktopRoute
   '/settings/events': typeof AppSettingsEventsRoute
@@ -413,6 +420,7 @@ export interface FileRoutesByTo {
   '/settings/account': typeof AppSettingsAccountRoute
   '/settings/advanced': typeof AppSettingsAdvancedRoute
   '/settings/appearance': typeof AppSettingsAppearanceRoute
+  '/settings/audio': typeof AppSettingsAudioRoute
   '/settings/billing': typeof AppSettingsBillingRoute
   '/settings/desktop': typeof AppSettingsDesktopRoute
   '/settings/events': typeof AppSettingsEventsRoute
@@ -470,6 +478,7 @@ export interface FileRoutesById {
   '/_app/settings/account': typeof AppSettingsAccountRoute
   '/_app/settings/advanced': typeof AppSettingsAdvancedRoute
   '/_app/settings/appearance': typeof AppSettingsAppearanceRoute
+  '/_app/settings/audio': typeof AppSettingsAudioRoute
   '/_app/settings/billing': typeof AppSettingsBillingRoute
   '/_app/settings/desktop': typeof AppSettingsDesktopRoute
   '/_app/settings/events': typeof AppSettingsEventsRoute
@@ -527,6 +536,7 @@ export interface FileRouteTypes {
     | '/settings/account'
     | '/settings/advanced'
     | '/settings/appearance'
+    | '/settings/audio'
     | '/settings/billing'
     | '/settings/desktop'
     | '/settings/events'
@@ -576,6 +586,7 @@ export interface FileRouteTypes {
     | '/settings/account'
     | '/settings/advanced'
     | '/settings/appearance'
+    | '/settings/audio'
     | '/settings/billing'
     | '/settings/desktop'
     | '/settings/events'
@@ -632,6 +643,7 @@ export interface FileRouteTypes {
     | '/_app/settings/account'
     | '/_app/settings/advanced'
     | '/_app/settings/appearance'
+    | '/_app/settings/audio'
     | '/_app/settings/billing'
     | '/_app/settings/desktop'
     | '/_app/settings/events'
@@ -910,6 +922,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppSettingsAppearanceRouteImport
       parentRoute: typeof AppSettingsRouteRoute
     }
+    '/_app/settings/audio': {
+      id: '/_app/settings/audio'
+      path: '/audio'
+      fullPath: '/settings/audio'
+      preLoaderRoute: typeof AppSettingsAudioRouteImport
+      parentRoute: typeof AppSettingsRouteRoute
+    }
     '/_app/settings/billing': {
       id: '/_app/settings/billing'
       path: '/billing'
@@ -1057,6 +1076,7 @@ interface AppSettingsRouteRouteChildren {
   AppSettingsAccountRoute: typeof AppSettingsAccountRoute
   AppSettingsAdvancedRoute: typeof AppSettingsAdvancedRoute
   AppSettingsAppearanceRoute: typeof AppSettingsAppearanceRoute
+  AppSettingsAudioRoute: typeof AppSettingsAudioRoute
   AppSettingsBillingRoute: typeof AppSettingsBillingRoute
   AppSettingsDesktopRoute: typeof AppSettingsDesktopRoute
   AppSettingsEventsRoute: typeof AppSettingsEventsRoute
@@ -1072,6 +1092,7 @@ const AppSettingsRouteRouteChildren: AppSettingsRouteRouteChildren = {
   AppSettingsAccountRoute: AppSettingsAccountRoute,
   AppSettingsAdvancedRoute: AppSettingsAdvancedRoute,
   AppSettingsAppearanceRoute: AppSettingsAppearanceRoute,
+  AppSettingsAudioRoute: AppSettingsAudioRoute,
   AppSettingsBillingRoute: AppSettingsBillingRoute,
   AppSettingsDesktopRoute: AppSettingsDesktopRoute,
   AppSettingsEventsRoute: AppSettingsEventsRoute,

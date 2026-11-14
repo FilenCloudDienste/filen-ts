@@ -11,7 +11,8 @@ import {
 	SlidersHorizontalIcon,
 	MonitorIcon,
 	GemIcon,
-	FilePenLineIcon
+	FilePenLineIcon,
+	HeadphonesIcon
 } from "lucide-react"
 import { SidebarPanel } from "@/features/shell/components/sidebarPanel"
 import { SIDEBAR_NAV_ITEM_CLASS } from "@/features/shell/lib/sidebarNavItem"
@@ -29,6 +30,7 @@ type SettingsRoute =
 	| "/settings/appearance"
 	| "/settings/keyboard"
 	| "/settings/office"
+	| "/settings/audio"
 	| "/settings/events"
 	| "/settings/plans"
 	| "/settings/billing"
@@ -43,6 +45,7 @@ interface SettingsSidebarItem {
 		| "settingsSectionAppearance"
 		| "settingsSectionKeyboard"
 		| "settingsSectionOffice"
+		| "settingsSectionAudio"
 		| "settingsSectionEvents"
 		| "settingsSectionPlans"
 		| "settingsSectionBilling"
@@ -53,7 +56,7 @@ interface SettingsSidebarItem {
 }
 
 // Account first (the index redirect's landing section — see routes/_app/settings/index.tsx),
-// Security second (the already-shipped page, unchanged), then Appearance/Keyboard/Office/Events/Plans (web only)/
+// Security second (the already-shipped page, unchanged), then Appearance/Keyboard/Office/Audio/Events/Plans (web only)/
 // Billing/Advanced, and Desktop in the desktop app only.
 const SETTINGS_ITEMS: SettingsSidebarItem[] = [
 	{ id: "account", labelKey: "settingsSectionAccount", icon: UserIcon, to: "/settings/account" },
@@ -61,6 +64,7 @@ const SETTINGS_ITEMS: SettingsSidebarItem[] = [
 	{ id: "appearance", labelKey: "settingsSectionAppearance", icon: SunMoonIcon, to: "/settings/appearance" },
 	{ id: "keyboard", labelKey: "settingsSectionKeyboard", icon: KeyboardIcon, to: "/settings/keyboard" },
 	{ id: "office", labelKey: "settingsSectionOffice", icon: FilePenLineIcon, to: "/settings/office" },
+	{ id: "audio", labelKey: "settingsSectionAudio", icon: HeadphonesIcon, to: "/settings/audio" },
 	{ id: "events", labelKey: "settingsSectionEvents", icon: HistoryIcon, to: "/settings/events" },
 	// Plans and checkout exist only in the web app.
 	...(desktopBridge() === undefined
