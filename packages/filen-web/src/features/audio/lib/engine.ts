@@ -1,6 +1,8 @@
 import { asErrorDTO, type ErrorDTO } from "@/lib/sdk/errors"
 import { useMediaVolumeStore, type MediaVolume } from "@/lib/media/mediaVolume"
 import { MEDIA_FORMAT_UNSUPPORTED, type MediaFailureKind } from "@/lib/media/mediaFailure"
+import { log } from "@/lib/log"
+import { replayGainFor } from "@filen/shared"
 import { useAudioStore } from "@/features/audio/store/useAudioStore"
 import {
 	buildShuffleOrder,
@@ -20,18 +22,47 @@ import type { MediaSessionPublisher } from "@/features/audio/lib/mediaSession"
 import { createThumbnailUrlCache } from "@/features/drive/lib/thumbnailUrlCache"
 import { backfillTrackDuration, getTrackTags } from "@/features/audio/store/useTrackTagsStore"
 import { COVER_THUMBNAIL_TYPE } from "@/features/audio/lib/trackTags.logic"
+import type { AudioOutput, ElementGain } from "@/features/audio/lib/audioOutput"
+import type { SmoothTransitionsAvailability } from "@/features/audio/lib/smoothTransitionsAvailability"
+import type { GetTrackEdges, SmoothTransitionsPrefs, SourceRoute, TrackEdges } from "@/features/audio/lib/smoothTransitions.types"
+import {
+	committedValid,
+	fadeCurves,
+	manualFadePlan,
+	planTransition,
+	sameRelease,
+	seekCancelsCrossfade,
+	shouldStartFade,
+	MANUAL_FADE_MS,
+	type CommittedAdvance,
+	type TransitionPlan
+} from "@/features/audio/lib/crossfade.logic"
+import { INITIAL_WATCHDOG_STATE, watchdogStep, type WatchdogState } from "@/features/audio/lib/outputWatchdog.logic"
+import { setSmoothTransitionsUnavailable, useSmoothTransitionsStore } from "@/features/audio/store/useSmoothTransitionsStore"
 
 // The module-level playback engine — a singleton lib (constructed in audioEngine.ts with the real DOM
 // adapter + streaming source resolver), NOT a React component, mirroring sdkApi and the mobile Audio
-// class. It owns exactly one media element for the app's life and drives the zustand store; the store
-// drives the UI. All element interaction goes through an injected adapter so the whole engine is
-// unit-testable in node, where an <audio> element cannot be constructed — the real adapter is exercised
-// live on-device instead.
+// class. It owns the main media element (replaced when a warm one is promoted, or when its Web Audio routing no
+// longer fits) and drives the zustand store; the store drives the UI. All element interaction goes through an
+// injected adapter so the whole engine is unit-testable in node, where an <audio> element cannot be constructed —
+// the real adapter is exercised live on-device instead.
 
 // Position writes to the store are throttled to a sane cadence — a media element fires `timeupdate`
 // several times a second, and a scrubber does not need more than ~4Hz. End-detection rides the `ended`
 // event, never this throttle, so a coarser cadence costs nothing.
 const POSITION_WRITE_THROTTLE_MS = 250
+
+// A gapless micro-overlap is too short for `timeupdate` to catch: its timer is armed once this little is left.
+const MICRO_OVERLAP_ARM_MS = 1_500
+
+// Curves start this far after the AudioContext's clock, so the first point is never already in the past.
+const CURVE_LEAD_SECONDS = 0.02
+
+// A cold target of a "short fade" skip that is not playing by then: the outgoing fades out on its own.
+const MANUAL_FADE_TARGET_TIMEOUT_MS = 3_000
+
+// Turning loudness matching on or off moves the trims this smoothly.
+const TRIM_RAMP_SECONDS = 0.2
 
 // The event callbacks the engine hands to the adapter factory; the adapter wires them to the concrete
 // element's listeners (or, in a test, exposes them so the harness can fire them). `onError` hands over
@@ -43,6 +74,9 @@ export interface AudioElementEvents {
 	onEnded: () => void
 	onError: (failure: () => Promise<ErrorDTO | null>) => void
 }
+
+// The element ran out of data (`waiting`) or the network stopped delivering (`stalled`).
+export type StallListener = (kind: "waiting" | "stalled") => void
 
 // The thin seam over a media element. Everything the engine needs and nothing more, so a fake is
 // trivial. Times are ms (via `sample`). `rebind` swaps which event-callback set a LIVE element reports
@@ -62,6 +96,11 @@ export interface AudioElementAdapter {
 	sample: () => ElementSample
 	rebind: (events: AudioElementEvents) => void
 	dispose: () => void
+	// Routes the element through the Web Audio output, for good: its sound then only reaches the speakers through
+	// the returned gains. Absent where an element cannot be routed.
+	route?: (output: AudioOutput) => ElementGain | null
+	// Reports data starvation to `listener` (null stops it). Logged during a transition, where two streams compete.
+	watchStalls?: (listener: StallListener | null) => void
 }
 
 export type AudioElementFactory = (events: AudioElementEvents) => AudioElementAdapter
@@ -75,12 +114,28 @@ export interface TrackSource {
 		| { kind: "url"; url: string }
 		// `onFailure` reports a failure the session itself detected, classified.
 		| { kind: "session"; attach: (element: HTMLMediaElement, onFailure: (kind: MediaFailureKind) => void) => Promise<void> }
+	// How the source reached the element; absent reads as the file as it is.
+	route?: SourceRoute
 	// Tells a format failure from a broken stream, given the element's MediaError code.
 	classify: (code: number) => Promise<MediaFailureKind>
 	release: () => void
 	// Present when a format failure of this source has another route to try: records the failure, so the
 	// file resolves to that route from now on.
 	demote?: () => void
+}
+
+// Smooth transitions (crossfades, smart edges, loudness matching). Opt-in by presence like prefetch: without it,
+// and while the feature is off, playback is exactly what it is without the feature.
+export interface SmoothTransitionsDeps {
+	output: AudioOutput
+	getEdges: GetTrackEdges
+	// Re-reads a parsed track's ReplayGain (records parsed before it was read carry none).
+	refreshGain?: (track: QueueTrack) => void
+	availability: () => SmoothTransitionsAvailability
+	// WebKit: MediaSource sessions cannot be routed (they play as silence).
+	webkit: boolean
+	// Whether the call runs inside a user gesture, so a context created now may start.
+	inGesture: () => boolean
 }
 
 export interface AudioEngineDeps {
@@ -108,6 +163,7 @@ export interface AudioEngineDeps {
 	// A track failed because the browser cannot play its format; `stopped` when playback stopped on it
 	// rather than skipping past it.
 	onFormatFailure?: (track: QueueTrack, stopped: boolean) => void
+	smoothTransitions?: SmoothTransitionsDeps
 }
 
 // Cover-art blob URLs are held only for the current + one-ahead prefetched track, so this is headroom
@@ -120,9 +176,43 @@ function defaultRevoke(url: string): void {
 	}
 }
 
-function applyOutput(element: AudioElementAdapter, output: MediaVolume): void {
-	element.setVolume(output.volume)
-	element.setMuted(output.muted)
+function masterLevel(output: MediaVolume): number {
+	return output.muted ? 0 : output.volume
+}
+
+// A routed element's gains, with the loudness trim it plays at and its peak after that trim (for the overlap's
+// headroom).
+interface Routed {
+	gain: ElementGain
+	trim: number
+	peak: number
+}
+
+// The outgoing element of a transition, fading out (or about to) while the current one plays.
+interface Fading {
+	element: AudioElementAdapter
+	source: TrackSource | null
+	timer: ReturnType<typeof setTimeout> | null
+	// Wall time the fade is over, for a background tab whose timers were held back.
+	endsAt: number
+}
+
+// A transition whose incoming element was asked to play and has not started yet.
+interface Starting {
+	incoming: AudioElementAdapter
+	source: TrackSource | null
+	index: number
+	plan: TransitionPlan
+	// Null when the queue already moved to the incoming track (a skip the user asked for).
+	advance: AdvanceResult | null
+	outgoingEnded: boolean
+}
+
+interface LoadOptions {
+	// The user picked the track: it starts at 0:00, and a "short fade" skip fades into it.
+	manual?: boolean
+	// The reload of a degraded output: a refused play holds paused instead of skipping.
+	degrade?: boolean
 }
 
 export class AudioEngine {
@@ -156,6 +246,9 @@ export class AudioEngine {
 	private prefetchElement: AudioElementAdapter | null = null
 	private prefetchIndex: number | null = null
 	private prefetchSource: TrackSource | null = null
+	// Where the warm element was sought to (past the incoming track's leading silence), so a skip the user asked
+	// for can take it back to 0:00.
+	private prefetchStartMs = 0
 	// Bumped on every schedulePrefetch call so a superseded in-flight resolve (a jump/shuffle-rebuild
 	// landed before the previous prefetch resolved) detects it and discards its result instead of
 	// warming a now-stale target.
@@ -164,25 +257,65 @@ export class AudioEngine {
 	// The index whose warm-up is still resolving, so a reschedule that lands on the same next track (a
 	// loop/shuffle toggle right after a track starts) lets it finish instead of restarting it.
 	private prefetchPendingIndex: number | null = null
+	// The next-track decision the warm-up was made for. A shuffle lap's reshuffle is random, so the track end, a
+	// fade, a skip and a failure all take this rather than deciding again (and landing on another track).
+	private committed: CommittedAdvance | null = null
 	// One mint per track shared by every surface that shows cover art (bar, panel, MediaSession).
 	private readonly coverCache = createThumbnailUrlCache(COVER_CACHE_MAX_ENTRIES, (_uuid, url) => {
 		this.revoke(url)
 	})
 
+	// Smooth transitions. Everything below stays empty while the feature is off.
+	private readonly routed = new Map<AudioElementAdapter, Routed>()
+	// An unrouted element's loudness trim, applied through its volume.
+	private readonly unroutedTrim = new WeakMap<AudioElementAdapter, number>()
+	private fading: Fading | null = null
+	private starting: Starting | null = null
+	private plan: TransitionPlan | null = null
+	// The plan needs re-deriving (edges arrived, a duration became known, the fade length changed).
+	private planStale = true
+	// The uuid whose crossfade the user ruled out by seeking into its window: it plays out gapless.
+	private gaplessOnlyUuid: string | null = null
+	private transitionTimer: ReturnType<typeof setTimeout> | null = null
+	// Edges known for the current and the warm track, by uuid.
+	private readonly knownEdges = new Map<string, TrackEdges | null>()
+	private readonly edgeReads = new Map<string, AbortController>()
+	// The output stopped rendering this session: every element plays unrouted from now on.
+	private degraded = false
+	// The degrade reload's play() was refused (background): the next resume tries again.
+	private degradeRetry = false
+	// Where a degrade reload resumes the track.
+	private pendingResume: { uuid: string; ms: number } | null = null
+	private watchdog: WatchdogState = INITIAL_WATCHDOG_STATE
+
 	public constructor(deps: AudioEngineDeps) {
 		this.deps = deps
 
-		// The shared media volume, whichever player changed it. The warm-up element follows too: a promoted
-		// one keeps playing at the level it was given.
+		// The shared media volume, whichever player changed it. The warm-up and the fading element follow too. A
+		// routed element stays at full level: the output's master gain carries the volume for it.
 		useMediaVolumeStore.subscribe(output => {
-			if (this.element) {
-				applyOutput(this.element, output)
+			for (const element of [this.element, this.prefetchElement, this.fading?.element]) {
+				if (element && !this.routed.has(element)) {
+					this.applyElementVolume(element, output)
+				}
 			}
 
-			if (this.prefetchElement) {
-				applyOutput(this.prefetchElement, output)
-			}
+			this.deps.smoothTransitions?.output.setMaster(masterLevel(output))
 		})
+
+		if (deps.smoothTransitions) {
+			const output = deps.smoothTransitions.output
+
+			output.setMaster(masterLevel(useMediaVolumeStore.getState()))
+			output.onStateChange(() => {
+				this.checkOutput()
+			})
+			useSmoothTransitionsStore.subscribe((state, previous) => {
+				if (state.prefs !== previous.prefs) {
+					this.onPrefsChanged(state.prefs, previous.prefs)
+				}
+			})
+		}
 	}
 
 	private now(): number {
@@ -199,10 +332,13 @@ export class AudioEngine {
 		return loadGeneration !== this.loadGeneration || pauseGeneration !== this.pauseGeneration
 	}
 
-	// Every supersede of the current load goes through here, so its source download stops with it.
+	// Every supersede of the current load goes through here, so its source download stops with it, and so does any
+	// transition: the fading element and a fade still starting never outlive a stop or a replace.
 	private bumpLoadGeneration(): number {
 		this.loadAbort?.abort()
 		this.loadAbort = null
+		this.dropStarting()
+		this.dropFading()
 
 		return ++this.loadGeneration
 	}
@@ -217,6 +353,42 @@ export class AudioEngine {
 			shuffleOrder: state.shuffleOrder,
 			loopMode: state.loopMode
 		}
+	}
+
+	// The decision the warm-up was made for while it still holds, else a fresh one.
+	private committedOrCompute(): AdvanceResult | null {
+		const state = useAudioStore.getState()
+		const committed = this.committed
+
+		if (
+			committedValid(committed, {
+				queue: state.queue,
+				currentIndex: state.currentIndex,
+				loopMode: state.loopMode,
+				shuffleEnabled: state.shuffleEnabled,
+				shuffleOrder: state.shuffleOrder
+			})
+		) {
+			return committed.advance
+		}
+
+		return computeNext(this.nav())
+	}
+
+	private commit(advance: AdvanceResult | null): void {
+		const state = useAudioStore.getState()
+
+		this.committed =
+			advance === null
+				? null
+				: {
+						advance,
+						queue: state.queue,
+						fromIndex: state.currentIndex,
+						loopMode: state.loopMode,
+						shuffleEnabled: state.shuffleEnabled,
+						shuffleOrder: state.shuffleOrder
+					}
 	}
 
 	// The real playback callbacks, for a freshly created element and for a promoted warm one.
@@ -241,13 +413,719 @@ export class AudioEngine {
 		}
 	}
 
+	// The outgoing element of a transition only reports its end (and data starvation, for the field log): it no
+	// longer drives the transport.
+	private fadingEvents(element: AudioElementAdapter): AudioElementEvents {
+		return {
+			onTimeUpdate: () => undefined,
+			onDurationChange: () => undefined,
+			onEnded: () => {
+				this.onOutgoingEnded(element)
+			},
+			onError: () => undefined
+		}
+	}
+
+	// Data starvation on either element while two streams play, for the field log.
+	private watchOverlapStalls(fading: Fading, incoming: AudioElementAdapter, incomingSource: TrackSource | null): void {
+		const routes = { outgoingRoute: fading.source?.route ?? "direct", incomingRoute: incomingSource?.route ?? "direct" }
+
+		fading.element.watchStalls?.(kind => {
+			log.info("audio", `${kind} during a transition (outgoing)`, routes)
+		})
+		incoming.watchStalls?.(kind => {
+			if (this.fading === fading) {
+				log.info("audio", `${kind} during a transition (incoming)`, routes)
+			}
+		})
+	}
+
+	// ── Smooth transitions: routing and levels ──
+
+	private prefs(): SmoothTransitionsPrefs {
+		return useSmoothTransitionsStore.getState().prefs
+	}
+
+	// The feature applies: present, on, allowed on this device, and the output has not failed this session.
+	private smoothOn(): boolean {
+		const smooth = this.deps.smoothTransitions
+
+		return smooth !== undefined && !this.degraded && this.prefs().enabled && smooth.availability() === "available"
+	}
+
+	private unlockOutput(): void {
+		const smooth = this.deps.smoothTransitions
+
+		if (smooth === undefined || !this.smoothOn()) {
+			return
+		}
+
+		smooth.output.setKeepOpen(true)
+
+		if (smooth.inGesture() || smooth.output.contextState !== "closed") {
+			smooth.output.unlock()
+		}
+	}
+
+	// Whether an element for `source` is routed now. A routed element on a context that cannot start would play
+	// silence, so a load outside a gesture (the assistant, an auto-advance) on a stopped context stays unrouted.
+	private eligible(source: TrackSource | null, element: AudioElementAdapter | null): boolean {
+		const smooth = this.deps.smoothTransitions
+
+		if (smooth === undefined || !this.smoothOn() || (element !== null && element.route === undefined)) {
+			return false
+		}
+
+		if (smooth.webkit && source?.route === "session") {
+			setSmoothTransitionsUnavailable("sourceIneligible")
+
+			return false
+		}
+
+		if (!this.degraded) {
+			setSmoothTransitionsUnavailable(null)
+		}
+
+		return smooth.output.usable
+	}
+
+	// The loudness trim the track at `index` plays at, and its peak after that trim. Album gain on a run of one
+	// album played in order, track gain otherwise.
+	private levelFor(index: number): { trim: number; peak: number } {
+		const state = useAudioStore.getState()
+		const track = state.queue[index]
+		const tags = track ? getTrackTags(track.uuid) : undefined
+
+		if (!this.smoothOn() || !this.prefs().matchLoudness) {
+			return { trim: 1, peak: tags?.gain?.trackPeak ?? 1 }
+		}
+
+		if (track && tags?.parsed === true && tags.gain === undefined) {
+			this.deps.smoothTransitions?.refreshGain?.(track)
+		}
+
+		const album =
+			!state.shuffleEnabled &&
+			tags !== undefined &&
+			[index - 1, index + 1].some(neighbour => {
+				const other = state.queue[neighbour]
+				const otherTags = other ? getTrackTags(other.uuid) : undefined
+
+				return otherTags !== undefined && sameRelease(tags, otherTags)
+			})
+		const { linear, peak } = replayGainFor(tags?.gain, { album })
+
+		return { trim: linear, peak: (peak ?? 1) * linear }
+	}
+
+	private applyElementVolume(element: AudioElementAdapter, output: MediaVolume): void {
+		element.setVolume(output.volume * Math.min(1, this.unroutedTrim.get(element) ?? 1))
+		element.setMuted(output.muted)
+	}
+
+	// Routes `element` (the track at `index`) when it is eligible, else gives it its loudness through its volume.
+	private prepareLevel(element: AudioElementAdapter, source: TrackSource | null, index: number): void {
+		const level = this.levelFor(index)
+
+		if (!this.routed.has(element) && this.eligible(source, element)) {
+			this.route(element, level, 0)
+		}
+
+		const routed = this.routed.get(element)
+
+		if (routed !== undefined) {
+			routed.trim = level.trim
+			routed.peak = level.peak
+			routed.gain.setTrim(level.trim, 0)
+
+			return
+		}
+
+		if (level.trim !== 1) {
+			this.unroutedTrim.set(element, level.trim)
+		} else {
+			this.unroutedTrim.delete(element)
+		}
+
+		this.applyElementVolume(element, useMediaVolumeStore.getState())
+	}
+
+	private route(element: AudioElementAdapter, level: { trim: number; peak: number }, rampSeconds: number): void {
+		const smooth = this.deps.smoothTransitions
+		const gain = smooth ? (element.route?.(smooth.output) ?? null) : null
+
+		if (gain === null) {
+			return
+		}
+
+		this.routed.set(element, { gain, trim: level.trim, peak: level.peak })
+		this.unroutedTrim.delete(element)
+		element.setVolume(1)
+		element.setMuted(false)
+		gain.holdFade(1)
+		gain.setTrim(level.trim, rampSeconds)
+	}
+
+	// Every play() the engine issues starts at full fade level, so a prepared element promoted without a fade is
+	// never silent.
+	private resetFadeGain(element: AudioElementAdapter): void {
+		this.routed.get(element)?.gain.holdFade(1)
+	}
+
+	private retire(element: AudioElementAdapter): void {
+		element.pause()
+		element.clear()
+		element.dispose()
+		this.routed.get(element)?.gain.release()
+		this.routed.delete(element)
+	}
+
+	private onPrefsChanged(next: SmoothTransitionsPrefs, previous: SmoothTransitionsPrefs): void {
+		const smooth = this.deps.smoothTransitions
+
+		if (smooth === undefined) {
+			return
+		}
+
+		this.planStale = true
+		smooth.output.setKeepOpen(this.smoothOn())
+
+		if (next.enabled && !previous.enabled) {
+			this.unlockOutput()
+		}
+
+		if (!next.enabled) {
+			this.plan = null
+			this.clearTransitionTimer()
+
+			// A source that could not be mixed no longer matters once the feature is off; a degrade holds for the session.
+			if (!this.degraded) {
+				setSmoothTransitionsUnavailable(null)
+			}
+		}
+
+		if (next.enabled === previous.enabled && next.matchLoudness === previous.matchLoudness) {
+			return
+		}
+
+		// Turned on mid-track: the live elements are routed now (inside the toggle's gesture), at most a buffer's
+		// glitch. Loudness moves to the new trims, gently.
+		const state = useAudioStore.getState()
+		const live: [AudioElementAdapter | null, TrackSource | null, number | null][] = [
+			[this.element, this.currentSource, state.currentIndex],
+			[this.prefetchElement, this.prefetchSource, this.prefetchIndex]
+		]
+
+		for (const [element, source, index] of live) {
+			if (element === null || index === null) {
+				continue
+			}
+
+			const level = this.levelFor(index)
+			const routed = this.routed.get(element)
+
+			if (routed !== undefined) {
+				routed.trim = level.trim
+				routed.peak = level.peak
+				routed.gain.setTrim(level.trim, TRIM_RAMP_SECONDS)
+			} else if (this.eligible(source, element)) {
+				this.route(element, level, element === this.element ? TRIM_RAMP_SECONDS : 0)
+			} else {
+				this.prepareLevel(element, source, index)
+			}
+		}
+	}
+
+	// ── Smooth transitions: edges and the plan ──
+
+	private requestEdges(track: QueueTrack, source: TrackSource, cachedOnly: boolean): void {
+		const smooth = this.deps.smoothTransitions
+
+		if (smooth === undefined || !this.smoothOn() || this.knownEdges.has(track.uuid) || this.edgeReads.has(track.uuid)) {
+			return
+		}
+
+		const abort = new AbortController()
+
+		this.edgeReads.set(track.uuid, abort)
+		void smooth.getEdges(track, source.route ?? "direct", abort.signal, { cachedOnly }).then(edges => {
+			if (this.edgeReads.get(track.uuid) !== abort) {
+				return
+			}
+
+			this.edgeReads.delete(track.uuid)
+			this.knownEdges.set(track.uuid, edges)
+			this.planStale = true
+		})
+	}
+
+	// Forgets edges (and stops reading them) for every track that is neither current nor next.
+	private pruneEdges(keep: readonly string[]): void {
+		for (const uuid of [...this.knownEdges.keys()]) {
+			if (!keep.includes(uuid)) {
+				this.knownEdges.delete(uuid)
+			}
+		}
+
+		for (const [uuid, abort] of [...this.edgeReads]) {
+			if (!keep.includes(uuid)) {
+				abort.abort()
+				this.edgeReads.delete(uuid)
+			}
+		}
+	}
+
+	private incomingDurationMs(uuid: string): number {
+		const sampled = this.prefetchElement?.sample().durationMs ?? 0
+
+		if (Number.isFinite(sampled) && sampled > 0) {
+			return sampled
+		}
+
+		const seconds = this.knownEdges.get(uuid)?.durationSec ?? getTrackTags(uuid)?.durationSec ?? null
+
+		return seconds !== null ? seconds * 1000 : 0
+	}
+
+	// Re-derives the plan for the transition out of the current track into the warm one. Cheap and pure, so it
+	// runs from `timeupdate` whenever something it depends on changed.
+	private refreshPlan(sample: ElementSample): void {
+		this.planStale = false
+
+		const state = useAudioStore.getState()
+		const advance = this.committedOrCompute()
+		const out = state.queue[state.currentIndex]
+		const incoming = advance ? state.queue[advance.index] : undefined
+
+		if (
+			!this.smoothOn() ||
+			state.loopMode === "one" ||
+			advance?.index !== this.prefetchIndex ||
+			!out ||
+			!incoming ||
+			incoming.uuid === out.uuid
+		) {
+			this.setPlan(null)
+
+			return
+		}
+
+		const inDurationMs = this.incomingDurationMs(incoming.uuid)
+
+		// Not known yet: asked again on the next update rather than settling on "too short to fade".
+		if (inDurationMs === 0) {
+			this.planStale = true
+		}
+
+		const outTags = getTrackTags(out.uuid)
+		const inTags = getTrackTags(incoming.uuid)
+
+		this.setPlan(
+			planTransition({
+				out: { name: out.name, durationMs: sample.durationMs, album: outTags?.album ?? null, artist: outTags?.artist ?? null },
+				in: { name: incoming.name, durationMs: inDurationMs, album: inTags?.album ?? null, artist: inTags?.artist ?? null },
+				outEdges: this.knownEdges.get(out.uuid) ?? null,
+				inEdges: this.knownEdges.get(incoming.uuid) ?? null,
+				consecutive: !state.shuffleEnabled && advance.index === state.currentIndex + 1,
+				fadeSeconds: this.prefs().fadeSeconds,
+				gaplessOnly: this.gaplessOnlyUuid === out.uuid
+			})
+		)
+
+		if (this.plan === null && sample.durationMs <= 0) {
+			this.planStale = true
+		}
+	}
+
+	private setPlan(plan: TransitionPlan | null): void {
+		this.plan = plan
+
+		const warm = this.prefetchElement
+
+		// The warm element waits where the incoming audio starts, sought before it buffers much. A gapless
+		// transition (an album run) starts at 0:00.
+		if (warm !== null && this.routed.has(warm)) {
+			const startMs = plan?.kind === "crossfade" ? plan.inStartMs : 0
+
+			if (startMs !== this.prefetchStartMs) {
+				warm.seek(startMs / 1000)
+				this.prefetchStartMs = startMs
+			}
+		}
+
+		this.armTransitionTimer()
+	}
+
+	private clearTransitionTimer(): void {
+		if (this.transitionTimer !== null) {
+			clearTimeout(this.transitionTimer)
+			this.transitionTimer = null
+		}
+	}
+
+	// The backup for `timeupdate`, which can run late or (a micro-overlap) too coarsely.
+	private armTransitionTimer(): void {
+		this.clearTransitionTimer()
+
+		const plan = this.plan
+		const element = this.element
+
+		if (plan === null || element === null || this.fading !== null || this.starting !== null) {
+			return
+		}
+
+		const sample = element.sample()
+
+		if (sample.paused) {
+			return
+		}
+
+		const delay = plan.startAtMs - sample.currentTimeMs
+
+		if (delay <= 0 || (plan.kind === "gapless" && delay > MICRO_OVERLAP_ARM_MS)) {
+			return
+		}
+
+		this.transitionTimer = setTimeout(() => {
+			this.transitionTimer = null
+
+			if (this.element === element) {
+				this.maybeStartTransition(element.sample())
+			}
+		}, delay)
+	}
+
+	private maybeStartTransition(sample: ElementSample): void {
+		const plan = this.plan
+
+		if (plan === null || this.starting !== null || this.fading !== null || useAudioStore.getState().status !== "playing") {
+			return
+		}
+
+		if (!shouldStartFade(sample, plan)) {
+			return
+		}
+
+		const advance = this.committedOrCompute()
+
+		if (advance?.index !== this.prefetchIndex) {
+			return
+		}
+
+		void this.beginTransition(plan, advance)
+	}
+
+	// ── Smooth transitions: the overlap ──
+
+	// Starts the warm element over the current one. Synchronously: the warm element leaves the prefetch slot (so
+	// nothing promotes it twice) and the outgoing stops driving the transport. The swap itself waits for the
+	// incoming's play() to resolve.
+	private async beginTransition(plan: TransitionPlan, advance: AdvanceResult | null): Promise<void> {
+		const outgoing = this.element
+		const incoming = this.prefetchElement
+		const index = this.prefetchIndex
+		const outRouted = outgoing ? this.routed.get(outgoing) : undefined
+		const inRouted = incoming ? this.routed.get(incoming) : undefined
+
+		if (
+			this.starting !== null ||
+			this.fading !== null ||
+			outgoing === null ||
+			incoming === null ||
+			index === null ||
+			outRouted === undefined ||
+			inRouted === undefined
+		) {
+			return
+		}
+
+		this.bumpLoadGeneration()
+
+		const source = this.prefetchSource
+
+		this.prefetchElement = null
+		this.prefetchIndex = null
+		this.prefetchSource = null
+		this.prefetchAbort = null
+		this.prefetchStartMs = 0
+		this.plan = null
+		this.clearTransitionTimer()
+		outgoing.rebind(this.fadingEvents(outgoing))
+		inRouted.gain.holdFade(0)
+
+		const starting: Starting = { incoming, source, index, plan, advance, outgoingEnded: false }
+
+		this.starting = starting
+
+		try {
+			await incoming.play()
+		} catch (error) {
+			if (this.starting === starting) {
+				this.failTransition(starting, error)
+			}
+
+			return
+		}
+
+		if (this.starting === starting) {
+			this.completeTransition(starting, outRouted, inRouted)
+		}
+	}
+
+	private failTransition(starting: Starting, error: unknown): void {
+		const outgoing = this.element
+
+		this.starting = null
+		log.warn("audio", "the incoming track of a transition did not start", error)
+		this.retire(starting.incoming)
+		starting.source?.release()
+
+		if (outgoing === null) {
+			return
+		}
+
+		outgoing.rebind(this.playbackEvents())
+
+		// The outgoing ended while the incoming's play() was pending: the track change happens now, cold.
+		if (starting.outgoingEnded) {
+			void this.handleTrackEnd()
+		}
+	}
+
+	private completeTransition(starting: Starting, outRouted: Routed, inRouted: Routed): void {
+		const smooth = this.deps.smoothTransitions
+		const outgoing = this.element
+		const state = useAudioStore.getState()
+		const track = starting.advance ? state.queue[starting.advance.index] : state.queue[state.currentIndex]
+
+		this.starting = null
+
+		if (smooth === undefined || outgoing === null || !track) {
+			this.retire(starting.incoming)
+			starting.source?.release()
+
+			return
+		}
+
+		const t0 = smooth.output.contextSeconds + CURVE_LEAD_SECONDS
+		const curves = fadeCurves(outRouted.peak, inRouted.peak)
+		const outRemainingMs = starting.plan.stopAtMs - outgoing.sample().currentTimeMs
+		const outgoingSource = this.currentSource
+
+		inRouted.gain.scheduleFade(curves.in, t0, starting.plan.inFadeMs / 1000)
+
+		if (starting.outgoingEnded || outRemainingMs <= CURVE_LEAD_SECONDS * 1000) {
+			this.retire(outgoing)
+			outgoingSource?.release()
+		} else {
+			outRouted.gain.scheduleFade(curves.out, t0, outRemainingMs / 1000)
+			this.watchOverlapStalls(this.startFading(outgoing, outgoingSource, outRemainingMs), starting.incoming, starting.source)
+		}
+
+		// The incoming is the current track from here: the store, the scrubber and the Media Session switch at fade
+		// start. The outgoing's source stays alive with the fading element.
+		this.element = starting.incoming
+		this.currentSource = starting.source
+		this.loadedTrackUuid = track.uuid
+		starting.incoming.rebind(this.playbackEvents())
+
+		if (starting.advance !== null) {
+			this.applyAdvance(starting.advance)
+		}
+
+		this.publishMetadata(track)
+		this.onDurationChange()
+		this.settlePlaying(starting.incoming, false)
+	}
+
+	private startFading(element: AudioElementAdapter, source: TrackSource | null, durationMs: number): Fading {
+		element.rebind(this.fadingEvents(element))
+
+		const fading: Fading = { element, source, timer: null, endsAt: this.now() + durationMs }
+
+		fading.timer = setTimeout(() => {
+			this.finishFade(fading)
+		}, durationMs + 50)
+		this.fading = fading
+
+		return fading
+	}
+
+	private onOutgoingEnded(element: AudioElementAdapter): void {
+		if (this.starting !== null && this.element === element) {
+			this.starting.outgoingEnded = true
+
+			return
+		}
+
+		if (this.fading?.element === element) {
+			this.finishFade(this.fading)
+		}
+	}
+
+	private finishFade(fading: Fading): void {
+		if (this.fading !== fading) {
+			return
+		}
+
+		this.dropFading()
+		void this.schedulePrefetch()
+	}
+
+	private dropFading(): void {
+		const fading = this.fading
+
+		if (fading === null) {
+			return
+		}
+
+		this.fading = null
+
+		if (fading.timer !== null) {
+			clearTimeout(fading.timer)
+		}
+
+		fading.element.watchStalls?.(null)
+		this.element?.watchStalls?.(null)
+		this.retire(fading.element)
+		fading.source?.release()
+	}
+
+	// A newer load superseded a transition still starting: its incoming element goes, the outgoing (still the main
+	// element) reports to the transport again.
+	private dropStarting(): void {
+		const starting = this.starting
+
+		if (starting === null) {
+			return
+		}
+
+		this.starting = null
+		this.retire(starting.incoming)
+		starting.source?.release()
+		this.element?.rebind(this.playbackEvents())
+	}
+
+	// A pause while the incoming's play() is pending: the incoming goes back to being the warm element, so resuming
+	// inside the window starts the transition again.
+	private parkStarting(): void {
+		const starting = this.starting
+
+		if (starting === null) {
+			return
+		}
+
+		this.starting = null
+		starting.incoming.pause()
+		this.resetFadeGain(starting.incoming)
+		this.element?.rebind(this.playbackEvents())
+
+		if (this.prefetchElement === null && starting.advance !== null) {
+			this.prefetchElement = starting.incoming
+			this.prefetchSource = starting.source
+			this.prefetchIndex = starting.index
+			this.prefetchStartMs = starting.plan.inStartMs
+			this.planStale = true
+
+			return
+		}
+
+		this.retire(starting.incoming)
+		starting.source?.release()
+	}
+
+	// ── Smooth transitions: the output watchdog ──
+
+	private checkOutput(): void {
+		const smooth = this.deps.smoothTransitions
+		const element = this.element
+
+		if (smooth === undefined || this.degraded || element === null || !this.routed.has(element)) {
+			return
+		}
+
+		const step = watchdogStep(this.watchdog, {
+			wallMs: this.now(),
+			contextSeconds: smooth.output.contextSeconds,
+			elementMs: element.sample().currentTimeMs,
+			contextState: smooth.output.contextState,
+			wantPlaying: useAudioStore.getState().status === "playing",
+			selfSuspended: smooth.output.selfSuspended
+		})
+
+		this.watchdog = step.state
+
+		if (step.action === "resume") {
+			log.warn("audio", `audio output ${smooth.output.contextState}, resuming`)
+			smooth.output.resume()
+		} else if (step.action === "degrade") {
+			this.degradeOutput()
+		}
+	}
+
+	// The output stopped rendering and a resume did not bring it back: the current track reloads into a plain
+	// element at its position and the rest of the session plays unrouted.
+	private degradeOutput(): void {
+		const smooth = this.deps.smoothTransitions
+		const element = this.element
+
+		if (smooth === undefined || this.degraded) {
+			return
+		}
+
+		log.warn("audio", "audio output stopped rendering; playing without smooth transitions for this session")
+		this.degraded = true
+		setSmoothTransitionsUnavailable("degraded")
+		smooth.output.setKeepOpen(false)
+		this.teardownPrefetch()
+		this.bumpLoadGeneration()
+
+		const state = useAudioStore.getState()
+		const current = state.queue[state.currentIndex]
+
+		if (element === null || !this.routed.has(element) || current?.uuid !== this.loadedTrackUuid) {
+			return
+		}
+
+		this.pendingResume = { uuid: current.uuid, ms: element.sample().currentTimeMs }
+
+		if (state.status !== "playing" && state.status !== "loading") {
+			this.loadedTrackUuid = null
+
+			return
+		}
+
+		void this.loadAndPlay(state.currentIndex, { degrade: true })
+	}
+
+	// ── Playback ──
+
 	// Shared play-start tail: a failure or success that lands after a supersede (new load or pause) is
 	// dropped silently.
-	private async playAndSettle(element: AudioElementAdapter, generation: number, pauseGeneration: number): Promise<void> {
+	private async playAndSettle(
+		element: AudioElementAdapter,
+		generation: number,
+		pauseGeneration: number,
+		options: LoadOptions = {}
+	): Promise<void> {
+		const fadeIn = this.fading !== null && options.manual === true
+
+		if (fadeIn) {
+			this.routed.get(element)?.gain.holdFade(0)
+		} else {
+			this.resetFadeGain(element)
+		}
+
 		try {
 			await element.play()
 		} catch (error) {
 			if (this.superseded(generation, pauseGeneration)) {
+				return
+			}
+
+			if (options.degrade === true) {
+				this.holdAfterRefusedPlay(error)
+
 				return
 			}
 
@@ -260,17 +1138,37 @@ export class AudioEngine {
 			return
 		}
 
+		if (fadeIn) {
+			this.fadeInto(element)
+		}
+
 		this.settlePlaying(element)
 	}
 
-	private ensureElement(): AudioElementAdapter {
+	// The degrade reload was refused (no gesture in a background tab): the track holds paused at its position and
+	// plays on the next resume (a lock-screen play, a return to the tab).
+	private holdAfterRefusedPlay(error: unknown): void {
+		log.warn("audio", "the reload of a degraded output was refused", error)
+		this.degradeRetry = true
+		useAudioStore.getState().setStatus("paused")
+		this.deps.mediaSession?.setPlaybackState("paused")
+	}
+
+	private ensureElement(source: TrackSource | null): AudioElementAdapter {
+		// Routing is permanent: an element routed for a feature that no longer applies (turned off, degraded), or a
+		// plain one where routing now applies, is replaced rather than reused.
+		if (this.element && this.routed.has(this.element) !== this.eligible(source, this.element)) {
+			this.retire(this.element)
+			this.element = null
+		}
+
 		if (this.element) {
 			return this.element
 		}
 
 		const element = this.deps.createElement(this.playbackEvents())
 
-		applyOutput(element, useMediaVolumeStore.getState())
+		this.applyElementVolume(element, useMediaVolumeStore.getState())
 		this.element = element
 
 		return element
@@ -315,16 +1213,14 @@ export class AudioEngine {
 					})
 					.catch(() => undefined)
 					.finally(() => {
-						failed.pause()
-						failed.clear()
-						failed.dispose()
+						this.retire(failed)
 						source?.release()
 					})
 			}
 		})
 
 		own.element = element
-		applyOutput(element, useMediaVolumeStore.getState())
+		this.applyElementVolume(element, useMediaVolumeStore.getState())
 		this.prefetchElement = element
 
 		return element
@@ -336,29 +1232,37 @@ export class AudioEngine {
 	// schedulePrefetch continuation still awaiting resolveSource when the teardown ran can never
 	// repopulate the slot afterwards: without the bump, a warm-up left in flight by a superseded queue
 	// would survive the teardown, resurrect a dead element, and a later promotion by raw-index
-	// coincidence would play the wrong track's bytes.
+	// coincidence would play the wrong track's bytes. The transition prepared for it goes with it.
 	private teardownPrefetch(): void {
 		this.prefetchGeneration++
 		this.prefetchAbort?.abort()
 		this.prefetchAbort = null
 		this.prefetchPendingIndex = null
-		this.prefetchElement?.pause()
-		this.prefetchElement?.clear()
-		this.prefetchElement?.dispose()
+
+		if (this.prefetchElement) {
+			this.retire(this.prefetchElement)
+		}
+
 		this.prefetchElement = null
 		this.prefetchIndex = null
+		this.prefetchStartMs = 0
 
 		this.prefetchSource?.release()
 		this.prefetchSource = null
+		this.committed = null
+		this.plan = null
+		this.planStale = true
+		this.clearTransitionTimer()
 	}
 
 	// Re-derives "what should be warmed next" from the live queue/nav state and, if it differs from what
 	// is already warmed, tears down the stale warm-up and resolves+loads the new one. A no-op when no
 	// prefetch dep was supplied (createPrefetchElement absent), when there is nowhere to advance to, or
 	// when the target is already warm. Never throws, never surfaces an error — prefetch is a pure nicety,
-	// a failure here just costs the next track a cold-start beat.
+	// a failure here just costs the next track a cold-start beat. Waits while a transition runs: two
+	// elements are already playing, and the fade's end schedules this again.
 	private async schedulePrefetch(): Promise<void> {
-		if (!this.deps.createPrefetchElement) {
+		if (!this.deps.createPrefetchElement || this.fading !== null || this.starting !== null) {
 			return
 		}
 
@@ -370,13 +1274,22 @@ export class AudioEngine {
 			return
 		}
 
+		// The decision is refreshed even when the warm element stays: the shuffle order behind it may have changed.
 		if (advance.index === this.prefetchIndex || advance.index === this.prefetchPendingIndex) {
+			this.commit(advance)
+			this.planStale = true
+
 			return
 		}
 
 		this.teardownPrefetch()
+		this.commit(advance)
 
-		const track = useAudioStore.getState().queue[advance.index]
+		const state = useAudioStore.getState()
+		const track = state.queue[advance.index]
+		const current = state.queue[state.currentIndex]
+
+		this.pruneEdges([current?.uuid ?? "", track?.uuid ?? ""])
 
 		// Next is the file already loaded (a one-track queue on loop "all"): handleTrackEnd replays it in
 		// place, so warming a second copy would only re-resolve it every lap.
@@ -418,14 +1331,23 @@ export class AudioEngine {
 		const element = this.ensurePrefetchElement()
 
 		this.prefetchSource = source
+		this.prepareLevel(element, source, advance.index)
 		element.load(source)
 		this.prefetchIndex = advance.index
+		this.planStale = true
+
+		// Only the incoming track is analysed: one read gives its head now and its tail for when it is the outgoing.
+		this.requestEdges(track, source, false)
+
+		if (current && this.currentSource) {
+			this.requestEdges(current, this.currentSource, true)
+		}
 	}
 
 	// Swaps the warmed element into the "now playing" slot: rebinds it to the real playback events,
 	// retires the outgoing main element, and plays. Preserves whatever the browser already
 	// buffered/decoded for the promoted element instead of resolving+loading from scratch.
-	private async promotePrefetch(index: number): Promise<void> {
+	private async promotePrefetch(index: number, options: LoadOptions): Promise<void> {
 		const generation = this.bumpLoadGeneration()
 		const pauseGeneration = this.pauseGeneration
 		const track = useAudioStore.getState().queue[index]
@@ -440,6 +1362,11 @@ export class AudioEngine {
 		this.publishMetadata(track)
 		useAudioStore.getState().setStatus("loading")
 
+		// A track the user picked starts at 0:00, not past its leading silence.
+		if (options.manual === true && this.prefetchStartMs > 0) {
+			promoted.seek(0)
+		}
+
 		// Detach bookkeeping from the prefetch slot before touching the element — teardownPrefetch would
 		// otherwise dispose the very element being promoted.
 		this.prefetchElement = null
@@ -447,6 +1374,7 @@ export class AudioEngine {
 		this.prefetchIndex = null
 		this.prefetchSource = null
 		this.prefetchAbort = null
+		this.prefetchStartMs = 0
 
 		promoted.rebind(this.playbackEvents())
 		this.swapSource(promotedSource)
@@ -455,9 +1383,10 @@ export class AudioEngine {
 
 		this.element = promoted
 		this.loadedTrackUuid = track.uuid
-		outgoing?.pause()
-		outgoing?.clear()
-		outgoing?.dispose()
+
+		if (outgoing) {
+			this.retire(outgoing)
+		}
 
 		// A warm element announced its duration while bound to the INERT warm-up events, and a loaded
 		// element never re-fires `durationchange` — so without this seed the store keeps the 0 setCurrent
@@ -471,14 +1400,22 @@ export class AudioEngine {
 	// Shared success tail for a track that just started playing, whether via a cold-started element
 	// (loadAndPlay) or a promoted warm one (promotePrefetch): clear the skip guard/error, settle the
 	// store + OS playback state, and re-arm the one-ahead prefetch for whatever is next from here.
-	private settlePlaying(element: AudioElementAdapter): void {
+	private settlePlaying(element: AudioElementAdapter, prefetch = true): void {
 		this.skipGuard = 0
 		this.lastPositionWriteAt = 0
+		this.degradeRetry = false
+		this.gaplessOnlyUuid = null
+		this.planStale = true
+		this.watchdog = INITIAL_WATCHDOG_STATE
 		useAudioStore.getState().setError(null)
 		useAudioStore.getState().setStatus("playing")
 		this.deps.mediaSession?.setPlaybackState("playing")
 		this.deps.mediaSession?.setPositionState(element.sample())
-		void this.schedulePrefetch()
+		this.deps.smoothTransitions?.output.active()
+
+		if (prefetch) {
+			void this.schedulePrefetch()
+		}
 	}
 
 	// Kicks off the cover (and, with it, tag) read for `track`. Skipped when the track's tags are known and
@@ -543,8 +1480,27 @@ export class AudioEngine {
 	}
 
 	private onTimeUpdate(): void {
-		if (!this.element) {
+		const element = this.element
+
+		if (!element) {
 			return
+		}
+
+		// The transition trigger and the output watchdog run on every update; only the store write is throttled.
+		if (this.deps.smoothTransitions && (this.smoothOn() || this.routed.has(element))) {
+			const live = element.sample()
+
+			if (this.planStale) {
+				this.refreshPlan(live)
+			}
+
+			this.maybeStartTransition(live)
+
+			if (this.plan?.kind === "gapless" && this.transitionTimer === null) {
+				this.armTransitionTimer()
+			}
+
+			this.checkOutput()
 		}
 
 		const now = this.now()
@@ -555,7 +1511,7 @@ export class AudioEngine {
 
 		this.lastPositionWriteAt = now
 
-		const sample = this.element.sample()
+		const sample = element.sample()
 
 		useAudioStore.getState().setPosition(Math.max(0, sample.currentTimeMs))
 		// WebKit's GStreamer backend can announce a duration of 0 and then learn the real one without a
@@ -571,6 +1527,7 @@ export class AudioEngine {
 			return
 		}
 
+		this.planStale = true
 		this.applyDuration(this.element.sample().durationMs)
 	}
 
@@ -590,17 +1547,116 @@ export class AudioEngine {
 		}
 	}
 
+	// A "short fade" skip wants a fade when the feature is on, the current track plays routed, and no transition
+	// is running.
+	private manualFadeWanted(options: LoadOptions): boolean {
+		return (
+			options.manual === true &&
+			this.smoothOn() &&
+			this.prefs().manualTransition === "fade" &&
+			useAudioStore.getState().status === "playing" &&
+			this.element !== null &&
+			this.routed.has(this.element) &&
+			this.fading === null &&
+			this.starting === null
+		)
+	}
+
+	// A "short fade" skip to a track that is not warm: the current element keeps playing as the fading one while
+	// the target loads cold into a fresh element; no third element is ever made. If the target is not playing in
+	// time, the outgoing fades out on its own.
+	private handOffForManualFade(): void {
+		const outgoing = this.element
+
+		if (outgoing === null) {
+			return
+		}
+
+		this.element = null
+		this.loadedTrackUuid = null
+
+		const fading: Fading = { element: outgoing, source: this.currentSource, timer: null, endsAt: Number.POSITIVE_INFINITY }
+
+		this.currentSource = null
+		outgoing.rebind(this.fadingEvents(outgoing))
+		fading.timer = setTimeout(() => {
+			this.fadeOutAlone(fading)
+		}, MANUAL_FADE_TARGET_TIMEOUT_MS)
+		this.fading = fading
+	}
+
+	private fadeOutAlone(fading: Fading): void {
+		const smooth = this.deps.smoothTransitions
+		const routed = this.routed.get(fading.element)
+
+		if (this.fading !== fading || smooth === undefined || routed === undefined) {
+			return
+		}
+
+		routed.gain.scheduleFade(fadeCurves(routed.peak, 0).out, smooth.output.contextSeconds + CURVE_LEAD_SECONDS, MANUAL_FADE_MS / 1000)
+		fading.endsAt = this.now() + MANUAL_FADE_MS
+		fading.timer = setTimeout(() => {
+			this.finishFade(fading)
+		}, MANUAL_FADE_MS + 50)
+	}
+
+	// The cold target of a "short fade" skip started: both gains move over the short fade.
+	private fadeInto(element: AudioElementAdapter): void {
+		const smooth = this.deps.smoothTransitions
+		const fading = this.fading
+		const outRouted = fading ? this.routed.get(fading.element) : undefined
+		const inRouted = this.routed.get(element)
+
+		if (smooth === undefined || fading === null || outRouted === undefined || inRouted === undefined) {
+			this.dropFading()
+			this.resetFadeGain(element)
+
+			return
+		}
+
+		const t0 = smooth.output.contextSeconds + CURVE_LEAD_SECONDS
+		const curves = fadeCurves(outRouted.peak, inRouted.peak)
+
+		if (fading.timer !== null) {
+			clearTimeout(fading.timer)
+		}
+
+		outRouted.gain.scheduleFade(curves.out, t0, MANUAL_FADE_MS / 1000)
+		inRouted.gain.scheduleFade(curves.in, t0, MANUAL_FADE_MS / 1000)
+		this.watchOverlapStalls(fading, element, this.currentSource)
+		fading.endsAt = this.now() + MANUAL_FADE_MS
+		fading.timer = setTimeout(() => {
+			this.finishFade(fading)
+		}, MANUAL_FADE_MS + 50)
+	}
+
 	// Move to `index` and start it. If it is already warmed by the prefetch element, promote it instead
 	// (no re-resolve, no reload). Otherwise the cold-start path: resolve a source (a service worker stream,
 	// or a MediaSource session without one), swap it onto the element, play. Every await re-checks the
 	// generation so a superseding load/skip/dispose bails cleanly; a source resolved for a superseded load is
 	// released. A pause is NOT a supersede: the resolved bytes still land on the element, only the
 	// playing is dropped. A resolve error or a rejected play() routes into the bounded auto-skip.
-	private async loadAndPlay(index: number): Promise<void> {
+	private async loadAndPlay(index: number, options: LoadOptions = {}): Promise<void> {
+		const manualFade = this.manualFadeWanted(options)
+
 		if (index === this.prefetchIndex && this.prefetchElement) {
-			await this.promotePrefetch(index)
+			if (manualFade && this.routed.has(this.prefetchElement)) {
+				if (this.prefetchStartMs > 0) {
+					this.prefetchElement.seek(0)
+				}
+
+				await this.beginTransition(manualFadePlan(this.element?.sample().currentTimeMs ?? 0), null)
+
+				return
+			}
+
+			await this.promotePrefetch(index, options)
 
 			return
+		}
+
+		if (manualFade) {
+			this.teardownPrefetch()
 		}
 
 		const generation = this.bumpLoadGeneration()
@@ -609,6 +1665,10 @@ export class AudioEngine {
 
 		if (!track) {
 			return
+		}
+
+		if (manualFade) {
+			this.handOffForManualFade()
 		}
 
 		// Publish OS metadata as soon as the track is known (before bytes resolve) so the lock-screen /
@@ -644,11 +1704,24 @@ export class AudioEngine {
 
 		this.scheduleMetadata(track)
 
-		const element = this.ensureElement()
+		const element = this.ensureElement(source)
 
 		this.swapSource(source)
+		this.prepareLevel(element, source, index)
 		element.load(source)
 		this.loadedTrackUuid = track.uuid
+
+		if (this.pendingResume?.uuid === track.uuid) {
+			element.seek(this.pendingResume.ms / 1000)
+			useAudioStore.getState().setPosition(this.pendingResume.ms)
+		}
+
+		this.pendingResume = null
+
+		// The fresh element could not be routed after all: a cut instead of a fade.
+		if (this.fading !== null && !this.routed.has(element)) {
+			this.dropFading()
+		}
 
 		// Paused while this was resolving: the bytes stay on the element — that is what gives the paused
 		// track a duration and a live scrubber, and what lets resume() replay it without a second download
@@ -657,7 +1730,7 @@ export class AudioEngine {
 			return
 		}
 
-		await this.playAndSettle(element, generation, pauseGeneration)
+		await this.playAndSettle(element, generation, pauseGeneration, options)
 	}
 
 	// Releases the outgoing source when another replaces it (or none, `null`).
@@ -693,7 +1766,7 @@ export class AudioEngine {
 
 		this.skipGuard += 1
 
-		const advance = withinSkipBudget(this.skipGuard, state.queue.length) ? computeNext(this.nav()) : null
+		const advance = withinSkipBudget(this.skipGuard, state.queue.length) ? this.committedOrCompute() : null
 
 		this.reportFormatFailure(error, track, advance === null)
 
@@ -768,6 +1841,7 @@ export class AudioEngine {
 		state.setStatus(state.queue.length === 0 ? "idle" : "paused")
 		state.setPosition(0)
 		this.deps.mediaSession?.setPlaybackState(state.queue.length === 0 ? "none" : "paused")
+		this.deps.smoothTransitions?.output.idle()
 	}
 
 	// The `ended` handler. Loop "one" restarts the current track; otherwise advance, and if there is
@@ -788,7 +1862,7 @@ export class AudioEngine {
 			return
 		}
 
-		const advance = computeNext(this.nav())
+		const advance = this.committedOrCompute()
 
 		if (advance === null) {
 			this.settleStopped()
@@ -841,6 +1915,8 @@ export class AudioEngine {
 	// `shuffle` sets the shuffle toggle as part of the swap (shuffle-play), rather than through
 	// setShuffleEnabled, which would first re-arm a prefetch against the queue being replaced.
 	public async enqueueAndPlay(tracks: QueueTrack[], startIndex: number, options: { shuffle?: boolean } = {}): Promise<void> {
+		this.unlockOutput()
+
 		const load = replaceQueueAtIndex(tracks, startIndex, options.shuffle ?? useAudioStore.getState().shuffleEnabled)
 
 		this.bumpLoadGeneration()
@@ -872,6 +1948,8 @@ export class AudioEngine {
 	// track — nothing yet, or the previous track because a load was paused/superseded mid-flight — this
 	// starts the current track instead of replaying stale bytes.
 	public resume(): void {
+		this.unlockOutput()
+
 		const state = useAudioStore.getState()
 		const current = state.queue[state.currentIndex]
 
@@ -883,31 +1961,58 @@ export class AudioEngine {
 
 		const generation = this.loadGeneration
 		const pauseGeneration = this.pauseGeneration
+		const element = this.element
 
 		state.setStatus("playing")
 		this.deps.mediaSession?.setPlaybackState("playing")
-		void this.element.play().catch((error: unknown) => {
-			// A pause landing before this settles rejects it with AbortError; that is the user's own doing,
-			// not a broken track, so it must not surface an error or trigger the auto-skip. Nor may a
-			// failure the element's error event already reported (and skipped past) count twice.
-			if (this.superseded(generation, pauseGeneration)) {
-				return
-			}
+		this.resetFadeGain(element)
+		this.deps.smoothTransitions?.output.active()
+		void element.play().then(
+			() => {
+				if (!this.superseded(generation, pauseGeneration)) {
+					this.degradeRetry = false
+					this.armTransitionTimer()
+				}
+			},
+			(error: unknown) => {
+				// A pause landing before this settles rejects it with AbortError; that is the user's own doing,
+				// not a broken track, so it must not surface an error or trigger the auto-skip. Nor may a
+				// failure the element's error event already reported (and skipped past) count twice.
+				if (this.superseded(generation, pauseGeneration)) {
+					return
+				}
 
-			this.onPlaybackFailure(asErrorDTO(error))
-		})
+				if (this.degradeRetry) {
+					this.holdAfterRefusedPlay(error)
+
+					return
+				}
+
+				this.onPlaybackFailure(asErrorDTO(error))
+			}
+		)
 	}
 
 	// Pausing supersedes the PLAYBACK an in-flight load is heading for, not the load itself: without the
 	// bump, a load that resolves after this settles to "playing" and starts audio the user just refused —
 	// and the element.pause() below would reject that load's own play() promise, surfacing a playback
 	// error and auto-skipping to another track. The load still finishes onto the element, so the paused
-	// track keeps a duration/scrubber and resume() replays it without re-downloading it.
+	// track keeps a duration/scrubber and resume() replays it without re-downloading it. A transition stops
+	// with the pause: the outgoing goes, the current plays on alone at full level on resume.
 	public pause(): void {
 		this.pauseGeneration++
+		this.parkStarting()
+		this.dropFading()
+		this.clearTransitionTimer()
 		this.element?.pause()
+
+		if (this.element) {
+			this.resetFadeGain(this.element)
+		}
+
 		useAudioStore.getState().setStatus("paused")
 		this.deps.mediaSession?.setPlaybackState("paused")
+		this.deps.smoothTransitions?.output.idle()
 	}
 
 	// "loading" is playback intent already in flight, so a toggle during it is a PAUSE — the transport
@@ -923,17 +2028,42 @@ export class AudioEngine {
 		}
 	}
 
+	// A seek during a transition drops the outgoing; a seek into the coming transition's window plays the track
+	// out instead (gapless into the next one).
 	public seek(seconds: number): void {
+		const targetMs = Math.max(0, seconds * 1000)
+
+		this.parkStarting()
+
+		if (this.fading !== null) {
+			this.dropFading()
+
+			if (this.element) {
+				this.resetFadeGain(this.element)
+			}
+
+			void this.schedulePrefetch()
+		}
+
+		if (this.plan !== null && seekCancelsCrossfade(targetMs, this.plan)) {
+			this.gaplessOnlyUuid = this.loadedTrackUuid
+		}
+
+		this.planStale = true
 		this.element?.seek(seconds)
-		useAudioStore.getState().setPosition(Math.max(0, seconds * 1000))
+		useAudioStore.getState().setPosition(targetMs)
 
 		if (this.element) {
 			this.deps.mediaSession?.setPositionState(this.element.sample())
 		}
+
+		this.armTransitionTimer()
 	}
 
 	public async skipNext(): Promise<void> {
-		const advance = computeNext(this.nav())
+		this.unlockOutput()
+
+		const advance = this.committedOrCompute()
 
 		if (advance === null) {
 			this.settleStopped()
@@ -942,10 +2072,12 @@ export class AudioEngine {
 		}
 
 		this.applyAdvance(advance)
-		await this.loadAndPlay(advance.index)
+		await this.loadAndPlay(advance.index, { manual: true })
 	}
 
 	public async skipPrevious(): Promise<void> {
+		this.unlockOutput()
+
 		const positionMs = this.element ? this.element.sample().currentTimeMs : useAudioStore.getState().positionMs
 		const result = smartPrevious(this.nav(), positionMs)
 
@@ -956,12 +2088,14 @@ export class AudioEngine {
 		}
 
 		useAudioStore.getState().setCurrent(result.index, result.shuffleOrder)
-		await this.loadAndPlay(result.index)
+		await this.loadAndPlay(result.index, { manual: true })
 	}
 
 	// Jump straight to a queued track (a now-playing-panel click-to-jump). Re-anchors the shuffle order at
 	// the target so shuffle-next continues from there, then loads and plays it.
 	public async playIndex(index: number): Promise<void> {
+		this.unlockOutput()
+
 		const state = useAudioStore.getState()
 
 		if (index < 0 || index >= state.queue.length) {
@@ -971,7 +2105,7 @@ export class AudioEngine {
 		const order = state.shuffleEnabled ? buildShuffleOrder(state.queue.length, index) : []
 
 		state.setCurrent(index, order)
-		await this.loadAndPlay(index)
+		await this.loadAndPlay(index, { manual: true })
 	}
 
 	// Remove one track from the queue (a per-row remove). A background track leaves playback untouched
@@ -1006,21 +2140,32 @@ export class AudioEngine {
 
 	// Empty the queue and stop — the mini-player disappears (the shell renders it only for a non-empty
 	// queue). Supersedes any in-flight load, releases the live source, and clears the OS metadata; the
-	// persisted shuffle/loop prefs survive (store.reset keeps them).
+	// persisted shuffle/loop prefs survive (store.reset keeps them). A routed element goes with the queue, so
+	// the output can close.
 	public clearQueue(): void {
 		this.bumpLoadGeneration()
 		this.element?.pause()
 		this.element?.clear()
+
+		if (this.element && this.routed.has(this.element)) {
+			this.retire(this.element)
+			this.element = null
+		}
+
 		this.loadedTrackUuid = null
 		this.teardownPrefetch()
+		this.pruneEdges([])
 
 		this.swapSource(null)
 
 		this.skipGuard = 0
 		this.lastPositionWriteAt = 0
+		this.gaplessOnlyUuid = null
+		this.pendingResume = null
 		useAudioStore.getState().reset()
 		this.deps.mediaSession?.setMetadata(null)
 		this.deps.mediaSession?.setPlaybackState("none")
+		this.deps.smoothTransitions?.output.closeIfUnused()
 	}
 
 	// Rebuilding the shuffle order can change what "next" means. schedulePrefetch re-derives it and tears
@@ -1038,6 +2183,7 @@ export class AudioEngine {
 	// differently there) — same reschedule as setShuffleEnabled.
 	public setLoopMode(mode: LoopMode): void {
 		useAudioStore.getState().setLoop(mode)
+		this.planStale = true
 		void this.schedulePrefetch()
 	}
 
@@ -1059,8 +2205,25 @@ export class AudioEngine {
 		document.addEventListener("visibilitychange", handler)
 	}
 
+	// A fade whose timer the hidden tab held back is over by now.
+	private finishFadeIfDue(): void {
+		const fading = this.fading
+
+		if (fading !== null && (fading.endsAt <= this.now() || fading.element.sample().ended)) {
+			this.finishFade(fading)
+		}
+	}
+
 	private reconcileOnVisible(): void {
+		this.finishFadeIfDue()
+
 		if (!this.element) {
+			return
+		}
+
+		if (this.degradeRetry && useAudioStore.getState().status === "paused") {
+			this.resume()
+
 			return
 		}
 
@@ -1091,21 +2254,27 @@ export class AudioEngine {
 
 		this.visibilityHandler = null
 
-		this.element?.pause()
-		this.element?.clear()
-		this.element?.dispose()
+		if (this.element) {
+			this.retire(this.element)
+		}
+
 		this.element = null
 		this.loadedTrackUuid = null
 		this.teardownPrefetch()
+		this.pruneEdges([])
 		this.coverCache.clear()
 
 		this.swapSource(null)
 
 		this.skipGuard = 0
 		this.lastPositionWriteAt = 0
+		this.gaplessOnlyUuid = null
+		this.pendingResume = null
+		this.degradeRetry = false
 		useAudioStore.getState().reset()
 		useAudioStore.getState().resetMetadata()
 		this.deps.mediaSession?.setMetadata(null)
 		this.deps.mediaSession?.setPlaybackState("none")
+		this.deps.smoothTransitions?.output.close()
 	}
 }

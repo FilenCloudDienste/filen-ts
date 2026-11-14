@@ -14,7 +14,7 @@ import { audioDemotions, audioRoute } from "@/lib/media/audioRoute.logic"
 import { audioMediaSource, openDecodedAudioStream } from "@/lib/media/playback/audioStream"
 import { isAudioUnsupported } from "@/lib/media/remuxTypes"
 import type { QueueTrack } from "@/features/audio/store/audioQueue"
-import type { AudioElementAdapter, AudioElementEvents, TrackSource } from "@/features/audio/lib/engine"
+import type { AudioElementAdapter, AudioElementEvents, StallListener, TrackSource } from "@/features/audio/lib/engine"
 import type { ElementSample } from "@/features/audio/store/audioQueue"
 
 // The browser-only half of the audio engine: the concrete media-element adapter and the track→source
@@ -56,6 +56,7 @@ export async function resolveTrackSource(track: QueueTrack, signal: AbortSignal)
 
 			return {
 				media: { kind: "url", url },
+				route: "direct",
 				classify: code => classifyMediaError(code, bytes),
 				release: () => {
 					releasePreviewStream(id)
@@ -79,6 +80,7 @@ export async function resolveTrackSource(track: QueueTrack, signal: AbortSignal)
 
 			return {
 				media: { kind: "url", url: stream.url },
+				route: "transcode",
 				// The stream is decodable by construction: a failure of it is the stream's, not the format's.
 				classify: () => Promise.resolve("other"),
 				release: () => {
@@ -103,6 +105,7 @@ export async function resolveTrackSource(track: QueueTrack, signal: AbortSignal)
 			kind: "session",
 			attach: (element, onFailure) => media.attach(element, { onFailure })
 		},
+		route: "session",
 		classify: () => Promise.resolve("other"),
 		release: () => {
 			media.dispose()
@@ -118,6 +121,7 @@ export async function resolveTrackSource(track: QueueTrack, signal: AbortSignal)
 function createDomAudioAdapterWithPreload(initialEvents: AudioElementEvents, preload: "metadata" | "auto"): AudioElementAdapter {
 	const element = document.createElement("audio")
 	let events = initialEvents
+	let stallListener: StallListener | null = null
 	let source: TrackSource | null = null
 	// A MediaSource session still attaching: playing waits for it, there is nothing to play before.
 	let attaching: Promise<void> | null = null
@@ -148,6 +152,12 @@ function createDomAudioAdapterWithPreload(initialEvents: AudioElementEvents, pre
 	})
 	element.addEventListener("ended", () => {
 		events.onEnded()
+	})
+	element.addEventListener("waiting", () => {
+		stallListener?.("waiting")
+	})
+	element.addEventListener("stalled", () => {
+		stallListener?.("stalled")
 	})
 	element.addEventListener("error", () => {
 		const error = element.error
@@ -222,6 +232,10 @@ function createDomAudioAdapterWithPreload(initialEvents: AudioElementEvents, pre
 		sample,
 		rebind: nextEvents => {
 			events = nextEvents
+		},
+		route: output => output.connect(element),
+		watchStalls: listener => {
+			stallListener = listener
 		},
 		dispose: () => {
 			cancelHeldPause(element)
