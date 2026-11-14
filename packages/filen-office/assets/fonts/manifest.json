@@ -1,5 +1,5 @@
 {
-	"comment": "Bundled substitutes for document fonts, each family with its licence file. Arimo, Tinos, Cousine, Gelasio and Selawik are the upstream WOFF2 files unchanged; Carlito and Caladea are published upstream only as TTF and were compressed to WOFF2 here (see each face's conversion). Apps serve or read the files by their path here and must ship each family's licence file with them. Regenerate src/core/fonts/tables.generated.ts with `pnpm run generate:fonts` after any change. Each family's \"pdf\" faces are TrueType files for PDF embedding, gzip-compressed and fetched only when a PDF is exported (upstream TTFs, or static instances of the variable fonts); \"fallbacks\" are Noto families fetched only when exported text is in a script, or uses symbols or math operators, the bundled families lack. Regenerate src/core/pdfwrite/fonts/faces.generated.ts with `pnpm run generate:pdf-fonts` after any change to those.",
+	"comment": "Bundled substitutes for document fonts, each family with its licence file. Arimo, Tinos, Cousine, Gelasio and Selawik are the upstream WOFF2 files unchanged; Carlito and Caladea are published upstream only as TTF and were compressed to WOFF2 here (see each face's conversion). Apps serve or read the files by their path here and must ship each family's licence file with them. Regenerate src/core/fonts/tables.generated.ts with `pnpm run generate:fonts` after any change. Each family's \"pdf\" faces are TrueType files for PDF embedding, gzip-compressed and fetched only when a PDF is exported (upstream TTFs, or static instances of the variable fonts); \"fallbacks\" are Noto families fetched only when exported text is in a script, or uses symbols or math operators, the bundled families lack. Regenerate src/core/pdfwrite/fonts/faces.generated.ts with `pnpm run generate:pdf-fonts` after any change to those. \"signatures\" are the handwriting families the PDF signature dialog draws a typed name in (upstream WOFF2 files unchanged), fetched only when its Type tab is used; each face's unicodeRange is the coverage of its cmap (src/tests/signatureFonts.test.ts checks it).",
 	"families": [
 		{
 			"id": "carlito",
@@ -2172,6 +2172,80 @@
 						"sha256": "3f495fe933c06786e4d5f6d86b8ee70b6753a68ee3b9d87528726de0f6e2c47d"
 					},
 					"conversion": "Upstream TTF unchanged, gzip-compressed (level 9, no name or time stamp) for transfer; the font data is not modified."
+				}
+			]
+		}
+	],
+	"signatures": [
+		{
+			"id": "dancing-script",
+			"name": "Dancing Script",
+			"version": "2.001",
+			"license": "OFL-1.1",
+			"licenseFile": "dancing-script/OFL.txt",
+			"reservedFontName": "Dancing Script",
+			"source": "https://github.com/googlefonts/DancingScript",
+			"commit": "291f87c05206179b6bfd53735a5638b5cc84e3b3",
+			"faces": [
+				{
+					"file": "dancing-script/DancingScript-Regular.woff2",
+					"weight": 400,
+					"italic": false,
+					"bytes": 47708,
+					"sha256": "0ac3d46d7f07701a449ed95af33adfac3f8f599c4c2cb21c7066e8f933e8d21b",
+					"unicodeRange": "U+0020-007E,U+00A0-017E,U+018F,U+0192,U+01A0-01A1,U+01AF-01B0,U+01C4-01CC,U+01E6-01E7,U+01EA-01EB,U+01FA-021B,U+022A-022D,U+0230-0233,U+0237,U+0259,U+02BC,U+02C6-02C7,U+02C9,U+02D8-02DD,U+0300-0304,U+0306-030C,U+030F,U+0311-0312,U+031B,U+0323-0324,U+0326-0328,U+032E,U+0331,U+0335,U+1E80-1E85,U+1E9E,U+1EA0-1EF9,U+2013-2014,U+2018-201A,U+201C-201E,U+2020-2022,U+2026,U+2030,U+2039-203A,U+2044,U+2074,U+20A1,U+20A3-20A4,U+20A6-20A7,U+20A9,U+20AB-20AD,U+20B1-20B2,U+20B5,U+20B9-20BA,U+20BC-20BD,U+2116,U+2122,U+2205,U+2212,U+2215,U+2219,U+2248,U+2260,U+2264-2265,U+FB01-FB02",
+					"upstream": {
+						"url": "https://raw.githubusercontent.com/googlefonts/DancingScript/291f87c05206179b6bfd53735a5638b5cc84e3b3/fonts/webfonts/DancingScript-Regular.woff2",
+						"sha256": "0ac3d46d7f07701a449ed95af33adfac3f8f599c4c2cb21c7066e8f933e8d21b"
+					}
+				}
+			]
+		},
+		{
+			"id": "ms-madi",
+			"name": "Ms Madi",
+			"version": "1.010",
+			"license": "OFL-1.1",
+			"licenseFile": "ms-madi/OFL.txt",
+			"reservedFontName": null,
+			"source": "https://github.com/googlefonts/ms-madi",
+			"commit": "867703c03535006513ced087c9d2a1a1fda8f565",
+			"faces": [
+				{
+					"file": "ms-madi/MsMadi-Regular.woff2",
+					"weight": 400,
+					"italic": false,
+					"bytes": 56956,
+					"sha256": "1fddd2a1f4f81ed2cd886b74b58062c7920bdcb8b6a7f1607d532a699a141114",
+					"unicodeRange": "U+0020-007E,U+00A0-0131,U+0134-0148,U+014A-017E,U+018F,U+0192,U+01A0-01A1,U+01AF-01B0,U+01C4-01D6,U+01D9-01DC,U+01E6-01E7,U+01EA-01EB,U+01FA-021B,U+022A-022D,U+0230-0233,U+0237,U+0259,U+02B9-02BA,U+02BC,U+02C6-02C7,U+02D8-02DD,U+0300-0304,U+0306-030C,U+030F,U+0311-0312,U+031B,U+0323-0324,U+0326-0328,U+032E,U+0331,U+0335,U+03C0,U+1E80-1E85,U+1E9E,U+1EA0-1EF9,U+2010,U+2013-2014,U+2018-201A,U+201C-201E,U+2020-2022,U+2026,U+2030,U+2032-2033,U+2039-203A,U+2044,U+2052,U+2074,U+20A1,U+20A3-20A4,U+20A6-20A7,U+20A9,U+20AB-20AD,U+20B1-20B2,U+20B5,U+20B9-20BA,U+20BC-20BD,U+2116,U+2122,U+2126,U+2202,U+2206,U+220F,U+2211-2212,U+2215,U+2219-221A,U+221E,U+222B,U+2248,U+2260,U+2264-2265,U+25CA,U+27E8-27E9,U+F8FF,U+FB01-FB02",
+					"upstream": {
+						"url": "https://raw.githubusercontent.com/googlefonts/ms-madi/867703c03535006513ced087c9d2a1a1fda8f565/fonts/webfonts/MsMadi-Regular.woff2",
+						"sha256": "1fddd2a1f4f81ed2cd886b74b58062c7920bdcb8b6a7f1607d532a699a141114"
+					}
+				}
+			]
+		},
+		{
+			"id": "pinyon-script",
+			"name": "Pinyon Script",
+			"version": "1.008",
+			"license": "OFL-1.1",
+			"licenseFile": "pinyon-script/OFL.txt",
+			"reservedFontName": null,
+			"source": "https://github.com/SorkinType/Pinyon",
+			"commit": "91d502f9b3a98c210c54916c356caa534cdc4d70",
+			"faces": [
+				{
+					"file": "pinyon-script/PinyonScript-Regular.woff2",
+					"weight": 400,
+					"italic": false,
+					"bytes": 57964,
+					"sha256": "27cdd334b0cc5cd1256653c0c77ce1054e75fb5c35dff652fc3696859922ec7d",
+					"unicodeRange": "U+0020-007E,U+00A0-00AC,U+00AE-0148,U+014A-017F,U+0181,U+0189-018A,U+018E-018F,U+0192,U+0198-0199,U+01A0-01A1,U+01AF-01B0,U+01B3-01B6,U+01C4-01E3,U+01E6-01EB,U+01F1-01F5,U+01F8-021B,U+021E-021F,U+0226-0233,U+0237,U+0245,U+0253,U+0256-0257,U+0259,U+028C,U+02C6-02C7,U+02D8-02DD,U+0300-0304,U+0306-030C,U+030F,U+0311-0312,U+031B,U+0323-0328,U+032D-032E,U+0330-0331,U+1E00-1E37,U+1E3A-1E95,U+1E97,U+1E9E,U+1EA0-1EF9,U+2000-200B,U+200D,U+2011,U+2013-2014,U+2018-201A,U+201C-201E,U+2020-2022,U+2026,U+202F,U+2032-2033,U+2039-203A,U+2044,U+205F,U+2074,U+20AC,U+2116,U+2122,U+212E,U+2153-2154,U+2212,U+2260,U+25CC,U+A78B-A78C,U+FB01-FB02",
+					"upstream": {
+						"url": "https://raw.githubusercontent.com/SorkinType/Pinyon/91d502f9b3a98c210c54916c356caa534cdc4d70/fonts/webfonts/PinyonScript-Regular.woff2",
+						"sha256": "27cdd334b0cc5cd1256653c0c77ce1054e75fb5c35dff652fc3696859922ec7d"
+					}
 				}
 			]
 		}

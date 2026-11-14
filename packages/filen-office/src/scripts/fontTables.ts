@@ -67,8 +67,21 @@ interface CalibratedLineMetrics {
 	evidence: string
 }
 
+// A handwriting family the PDF signature dialog draws a typed name in (not a document substitute).
+export interface SignatureFamily {
+	id: string
+	name: string
+	version: string
+	licenseFile: string
+	reservedFontName: string | null
+	source: string
+	commit: string
+	faces: (ManifestFace & { unicodeRange: string; upstream: { url: string; sha256: string } })[]
+}
+
 export interface Manifest {
 	families: ManifestFamily[]
+	signatures: SignatureFamily[]
 	metricSources: MetricSource[]
 	measuredLineMetrics: MeasuredLineMetrics[]
 	calibratedLineMetrics: CalibratedLineMetrics[]

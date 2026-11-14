@@ -380,7 +380,7 @@ SOFTWARE.
 
 - Source: the upstream repositories and commits below; every file, its upstream URL and both SHA-256 sums are recorded in `assets/fonts/manifest.json`.
 - Licence: SIL Open Font License, Version 1.1. Each family's licence text ships beside its files (`assets/fonts/<family>/OFL.txt`, Selawik `LICENSE.txt`) and must be served with them.
-- Use: Carlito, Caladea, Arimo, Tinos, Cousine, Gelasio and Selawik draw documents that name Calibri, Cambria, Arial, Times New Roman, Courier New, Georgia and Segoe UI (`src/core/fonts/substitutes.ts`); their `.ttf.gz` faces and the Noto families are fetched only for PDF export.
+- Use: Carlito, Caladea, Arimo, Tinos, Cousine, Gelasio and Selawik draw documents that name Calibri, Cambria, Arial, Times New Roman, Courier New, Georgia and Segoe UI (`src/core/fonts/substitutes.ts`); their `.ttf.gz` faces and the Noto families are fetched only for PDF export. Dancing Script, Ms Madi and Pinyon Script are the handwriting styles a typed PDF signature is drawn in, fetched only when the signature dialog's Type tab is used.
 
 ### Substitutes
 
@@ -689,6 +689,32 @@ SOFTWARE.
 - Licence: OFL-1.1 (`assets/fonts/noto/noto-sans-math/OFL.txt`); no Reserved Font Name
 - Files (SHA-256 of the shipped file; of the upstream file):
   - `assets/fonts/noto/noto-sans-math/NotoSansMath-Regular.ttf.gz` `7477333a44fc39c8432ab811a4c35fbccff446eccab415b9771d5144658b4fce`; upstream https://raw.githubusercontent.com/google/fonts/45e3d5269e4a17d823f6d84470bc084dc5ae46f6/ofl/notosansmath/NotoSansMath-Regular.ttf `3f495fe933c06786e4d5f6d86b8ee70b6753a68ee3b9d87528726de0f6e2c47d`; gzip-compressed, font data unchanged
+
+### Typed signatures
+
+#### Dancing Script 2.001
+
+- Source: https://github.com/googlefonts/DancingScript (`291f87c05206179b6bfd53735a5638b5cc84e3b3`)
+- Copyright: Copyright 2016 The Dancing Script Project Authors (https://github.com/googlefonts/DancingScript), with Reserved Font Name 'Dancing Script'.
+- Licence: OFL-1.1 (`assets/fonts/dancing-script/OFL.txt`); Reserved Font Name "Dancing Script"
+- Files (SHA-256 of the shipped file; of the upstream file):
+  - `assets/fonts/dancing-script/DancingScript-Regular.woff2` `0ac3d46d7f07701a449ed95af33adfac3f8f599c4c2cb21c7066e8f933e8d21b`; upstream https://raw.githubusercontent.com/googlefonts/DancingScript/291f87c05206179b6bfd53735a5638b5cc84e3b3/fonts/webfonts/DancingScript-Regular.woff2 `0ac3d46d7f07701a449ed95af33adfac3f8f599c4c2cb21c7066e8f933e8d21b`; the upstream WOFF2 file unchanged
+
+#### Ms Madi 1.010
+
+- Source: https://github.com/googlefonts/ms-madi (`867703c03535006513ced087c9d2a1a1fda8f565`)
+- Copyright: Copyright 2018 The Ms Madi Project Authors (https://github.com/googlefonts/ms-madi)
+- Licence: OFL-1.1 (`assets/fonts/ms-madi/OFL.txt`); no Reserved Font Name
+- Files (SHA-256 of the shipped file; of the upstream file):
+  - `assets/fonts/ms-madi/MsMadi-Regular.woff2` `1fddd2a1f4f81ed2cd886b74b58062c7920bdcb8b6a7f1607d532a699a141114`; upstream https://raw.githubusercontent.com/googlefonts/ms-madi/867703c03535006513ced087c9d2a1a1fda8f565/fonts/webfonts/MsMadi-Regular.woff2 `1fddd2a1f4f81ed2cd886b74b58062c7920bdcb8b6a7f1607d532a699a141114`; the upstream WOFF2 file unchanged
+
+#### Pinyon Script 1.008
+
+- Source: https://github.com/SorkinType/Pinyon (`91d502f9b3a98c210c54916c356caa534cdc4d70`)
+- Copyright: Copyright 2024 The Pinyon Project Authors (https://github.com/SorkinType/Pinyon)
+- Licence: OFL-1.1 (`assets/fonts/pinyon-script/OFL.txt`); no Reserved Font Name
+- Files (SHA-256 of the shipped file; of the upstream file):
+  - `assets/fonts/pinyon-script/PinyonScript-Regular.woff2` `27cdd334b0cc5cd1256653c0c77ce1054e75fb5c35dff652fc3696859922ec7d`; upstream https://raw.githubusercontent.com/SorkinType/Pinyon/91d502f9b3a98c210c54916c356caa534cdc4d70/fonts/webfonts/PinyonScript-Regular.woff2 `27cdd334b0cc5cd1256653c0c77ce1054e75fb5c35dff652fc3696859922ec7d`; the upstream WOFF2 file unchanged
 
 ## Apache License 2.0
 
