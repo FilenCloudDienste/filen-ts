@@ -3,6 +3,7 @@ import { trackConsoleErrors } from "./helpers/csp"
 import { bootTo, breadcrumb, clickSidebarLink, waitForListingSettled } from "./helpers/listing"
 import { FIXTURE_SCENARIOS, enterFixtureRoot } from "./helpers/fixtures"
 import { resolveModKey } from "./helpers/modkey"
+import { menuItemName } from "./helpers/menu"
 
 // Nothing here ever creates, renames, moves, or deletes anything: the new-directory flow is exercised
 // only up to dialog validation, never submitted — a live create has no net-zero counterpart yet
@@ -86,7 +87,10 @@ test.describe("drive", () => {
 		// Info is a pure read dialog — nothing is created or destroyed by opening it.
 		async function openInfoOn(list: ReturnType<typeof page.getByRole>): Promise<void> {
 			await list.getByRole("option").first().getByRole("button", { name: "More actions", exact: true }).click()
-			await page.getByRole("menu").getByRole("menuitem", { name: "Info", exact: true }).click()
+			await page
+				.getByRole("menu")
+				.getByRole("menuitem", { name: menuItemName("Info") })
+				.click()
 			await expect(page.getByRole("dialog")).toBeVisible()
 		}
 
@@ -240,7 +244,10 @@ test.describe("drive", () => {
 		const newMenu = page.getByRole("button", { name: "New", exact: true }).first()
 		await expect(newMenu).toBeEnabled()
 		await newMenu.click()
-		await page.getByRole("menu").getByRole("menuitem", { name: "New directory", exact: true }).click()
+		await page
+			.getByRole("menu")
+			.getByRole("menuitem", { name: menuItemName("New directory") })
+			.click()
 
 		// Filtered by its own heading: previewOverlay.tsx composes Base UI's dialog Popup directly, whose
 		// role defaults to "dialog" too, so a bare lookup can resolve to the wrong surface.

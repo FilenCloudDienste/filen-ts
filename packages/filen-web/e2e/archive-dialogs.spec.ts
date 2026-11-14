@@ -18,6 +18,7 @@ import { trackCspViolations } from "./helpers/csp"
 import { FIXTURE_FILES, openFixtureRows } from "./helpers/fixtures"
 import { bootTo, breadcrumb, descendInto, dismissOverlays, waitForListingSettled, type ListingHandle } from "./helpers/listing"
 import { setAppOffline } from "./helpers/offline"
+import { menuItemLabels, menuItemName } from "./helpers/menu"
 
 // The compress and extract dialogs and the menus that open them, over the shared read-only fixture
 // tree. Nothing here ever reaches the SDK's job API: every dialog ends with Cancel, every submit made
@@ -112,7 +113,7 @@ async function toFixtureRoot(page: Page): Promise<ListingHandle> {
 
 // The open submenu's entries, by name, in order.
 async function expectMenuEntries(page: Page, names: readonly string[]): Promise<void> {
-	await expect(page.getByRole("menu").last().getByRole("menuitem")).toHaveText(names)
+	await expect.poll(() => menuItemLabels(page.getByRole("menu").last().getByRole("menuitem"))).toEqual(names)
 }
 
 // The format list's options' first lines, read with the list open; closed again after. At the default
@@ -173,8 +174,8 @@ test.describe("archive dialogs", () => {
 
 		// A text file: Compress, no Extract.
 		await openRowMenu(page, listbox, DIALOG_A)
-		await expect(page.getByRole("menuitem", { name: "Compress", exact: true })).toBeVisible()
-		await expect(page.getByRole("menuitem", { name: "Extract", exact: true })).toHaveCount(0)
+		await expect(page.getByRole("menuitem", { name: menuItemName("Compress") })).toBeVisible()
+		await expect(page.getByRole("menuitem", { name: menuItemName("Extract") })).toHaveCount(0)
 		await dismissOverlays(page)
 
 		// An archive with a text file: no bulk Extract; two archives would have one (below).
@@ -186,8 +187,8 @@ test.describe("archive dialogs", () => {
 		const root = await toFixtureRoot(page)
 
 		await openRowMenu(page, root.listbox, "archive-dialogs")
-		await expect(page.getByRole("menuitem", { name: "Compress", exact: true })).toBeVisible()
-		await expect(page.getByRole("menuitem", { name: "Extract", exact: true })).toHaveCount(0)
+		await expect(page.getByRole("menuitem", { name: menuItemName("Compress") })).toBeVisible()
+		await expect(page.getByRole("menuitem", { name: menuItemName("Extract") })).toHaveCount(0)
 		await dismissOverlays(page)
 
 		await descendInto(page, root.listbox, "archive-browse")
@@ -199,8 +200,8 @@ test.describe("archive dialogs", () => {
 
 		const items = page.getByRole("menu").first().getByRole("menuitem")
 
-		await expect(items.nth(0)).toHaveAccessibleName("Open")
-		await expect(items.nth(1)).toHaveAccessibleName("Extract")
+		await expect(items.nth(0)).toHaveAccessibleName(menuItemName("Open"))
+		await expect(items.nth(1)).toHaveAccessibleName(menuItemName("Extract"))
 		await openSubmenu(page, "Extract")
 		await expectMenuEntries(page, [
 			"Extract here to “e2e-arc-tree/”",
@@ -262,7 +263,7 @@ test.describe("archive dialogs", () => {
 			await openRowMenu(page, listbox, TREE)
 
 			for (const name of ["Compress", "Extract"]) {
-				const trigger = page.getByRole("menuitem", { name, exact: true })
+				const trigger = page.getByRole("menuitem", { name: menuItemName(name) })
 
 				await expect(trigger).toHaveAttribute("aria-disabled", "true")
 				await expect(trigger).toHaveAttribute("title", OFFLINE_TITLE)

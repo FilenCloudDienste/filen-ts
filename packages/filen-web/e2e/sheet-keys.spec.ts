@@ -5,6 +5,7 @@ import { withScratchDirectory, LAZY_VIEWER_TIMEOUT_MS, LIVE_WRITE_TIMEOUT_MS, up
 import { resolveModKey } from "./helpers/modkey"
 import { activeCell, expectCell, expectSelection, goTo, nameBox, XLSX_MIME } from "./helpers/sheet"
 import { preview } from "@/locales/en/preview"
+import { menuItemName } from "./helpers/menu"
 
 // The office engine's grid keyboard end to end: Excel's shortcuts (Ctrl+arrow to
 // the data region's edge, Ctrl+A, Ctrl+Space, Ctrl+D, Ctrl+Page Down, Ctrl+;, F4 in a formula, Ctrl+Minus) and the
@@ -170,19 +171,19 @@ test("the active cell reads what the grid shows after rows and columns move, and
 
 		// A row and a column inserted, then deleted again: A2 holds "apple" again, as the grid draws it.
 		await gridMenu(dialog, 2)
-		await page.getByRole("menuitem", { name: preview.previewSpreadsheetInsertRowsAbove_one, exact: true }).click()
+		await page.getByRole("menuitem", { name: menuItemName(preview.previewSpreadsheetInsertRowsAbove_one) }).click()
 		await goTo(dialog, "A1")
 		await gridMenu(dialog, 1)
-		await page.getByRole("menuitem", { name: preview.previewSpreadsheetInsertColumnsLeft_one, exact: true }).click()
+		await page.getByRole("menuitem", { name: menuItemName(preview.previewSpreadsheetInsertColumnsLeft_one) }).click()
 		await goTo(dialog, "B3")
 		await expect(activeCell(dialog)).toHaveText("apple")
 		await expect(contents).toHaveValue("apple")
 		await goTo(dialog, "A2")
 		await gridMenu(dialog, 2)
-		await page.getByRole("menuitem", { name: preview.previewSpreadsheetDeleteRows_one, exact: true }).click()
+		await page.getByRole("menuitem", { name: menuItemName(preview.previewSpreadsheetDeleteRows_one) }).click()
 		await goTo(dialog, "A1")
 		await gridMenu(dialog, 1)
-		await page.getByRole("menuitem", { name: preview.previewSpreadsheetDeleteColumns_one, exact: true }).click()
+		await page.getByRole("menuitem", { name: menuItemName(preview.previewSpreadsheetDeleteColumns_one) }).click()
 		await goTo(dialog, "A2")
 		await expect(activeCell(dialog)).toHaveText("apple")
 		await expect(contents).toHaveValue("apple")

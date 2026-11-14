@@ -68,6 +68,7 @@ import {
 	waitForListingSettled,
 	LIVE_WRITE_TIMEOUT_MS
 } from "./helpers/listing"
+import { menuItemName } from "./helpers/menu"
 
 // Extracting from the drive's menus and dialogs, end to end through the SDK: every leg lands in the
 // test's own scratch directory and is checked by what arrived there (rows, sizes, the text a preview
@@ -589,7 +590,7 @@ test.describe("archive extract", () => {
 
 			await selectRows(scratch, [ownA, ownB])
 			await selectionBar(page).getByRole("button", { name: "Extract", exact: true }).click()
-			await page.getByRole("menuitem", { name: "Extract here (each into its own directory)", exact: true }).click()
+			await page.getByRole("menuitem", { name: menuItemName("Extract here (each into its own directory)") }).click()
 			await expectEntries(scratch, [destName, ownA, ownB, archiveStem(ownA), archiveStem(ownB)])
 			await expectTreeDirectory(page, scratch, archiveStem(ownA), treeReadmeText(runId))
 			await backTo(page, scratchName)

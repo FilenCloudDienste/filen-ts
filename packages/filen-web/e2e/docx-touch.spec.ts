@@ -6,6 +6,7 @@ import { DOCX_FIXTURE_TEXT, type DocxFixtureName } from "./helpers/docxFixtures"
 import { trackCspViolations } from "./helpers/csp"
 import { common } from "@/locales/en/common"
 import { preview } from "@/locales/en/preview"
+import { menuItemName } from "./helpers/menu"
 
 // The DOCX editor under touch: a long press selects the word with a handle at each end and the touch menu
 // above it, a handle dragged moves its end, the menu's Select all selects everything, and below 600 px the
@@ -210,8 +211,8 @@ test("a long press selects the word: handles at its ends, the touch menu, a hand
 
 	await touch(page, browserName, [await pointInWord(line, text, "headers")], LONG_PRESS_HOLD_MS)
 	await expect(menu).toBeVisible()
-	await expect(menu.getByRole("menuitem", { name: preview.previewDocxCopy, exact: true })).toBeVisible()
-	await expect(menu.getByRole("menuitem", { name: preview.previewDocxCut, exact: true })).toBeVisible()
+	await expect(menu.getByRole("menuitem", { name: menuItemName(preview.previewDocxCopy) })).toBeVisible()
+	await expect(menu.getByRole("menuitem", { name: menuItemName(preview.previewDocxCut) })).toBeVisible()
 
 	// The handles are a touch affordance only, kept from the accessibility tree.
 	const handles = page.locator("div.touch-none[aria-hidden='true']")
@@ -231,7 +232,7 @@ test("a long press selects the word: handles at its ends, the touch menu, a hand
 	// Select all from the menu: the start handle goes to the document's start.
 	const startBefore = await centerOf(handles.nth(0))
 
-	await touch(page, browserName, [await centerOf(menu.getByRole("menuitem", { name: preview.previewDocxSelectAll, exact: true }))], 0)
+	await touch(page, browserName, [await centerOf(menu.getByRole("menuitem", { name: menuItemName(preview.previewDocxSelectAll) }))], 0)
 	await expect.poll(async () => (await centerOf(handles.nth(0))).x).toBeLessThan(startBefore.x)
 	await expect(menu).toBeVisible()
 

@@ -3,6 +3,7 @@ import { test, expect, readFixtureManifest, runChatNamePrefix } from "./fixtures
 import { waitForE2eHooks } from "./helpers/e2eHooks"
 import { setAppOffline } from "./helpers/offline"
 import { bootTo, BOOT_SETTLE_TIMEOUT_MS, LIVE_WRITE_TIMEOUT_MS } from "./helpers/listing"
+import { menuItemName } from "./helpers/menu"
 
 // Chats shell smoke + conversation-action affordances + the send-outbox proof + Filen-link embeds. The rail
 // entry navigates to /chats, the contextual sidebar renders, the empty-conversation state shows on the
@@ -320,7 +321,7 @@ async function clickMessageMenuItem(page: Page, target: Locator, item: string): 
 		retrying = true
 		await target.click({ button: "right" })
 
-		const menuItem = page.getByRole("menuitem", { name: item, exact: true })
+		const menuItem = page.getByRole("menuitem", { name: menuItemName(item) })
 
 		await expect(menuItem).toBeVisible()
 		await menuItem.click()

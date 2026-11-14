@@ -7,9 +7,9 @@ import { preview } from "@/locales/en/preview"
 // The file editor's shortcuts on a real CodeMirror: find and replace (bound inside the editor, so the
 // drive listing's own mod+f search stays out of it) opening the command bar's find field in place of
 // CodeMirror's panel, Escape closing it without closing the file, the markdown formatting keys, the
-// rendered/source switch (locked while dirty) and mod+s. The
-// editor keys go through CodeMirror, whose idea of "mod" can differ from the app's under Playwright's
-// device emulation (helpers/modkey.ts), hence the two resolvers.
+// rendered/source switch (locked while dirty) and mod+s. Find, replace and the formatting keys are keymap
+// actions, so they follow the app's "mod"; select all is CodeMirror's own, whose "mod" can differ from the app's
+// under Playwright's device emulation (helpers/modkey.ts), hence the two resolvers.
 test.describe.configure({ mode: "default" })
 
 test("the file editor's shortcuts: find, replace, markdown formatting, preview toggle and save", async ({ page }) => {
@@ -43,7 +43,7 @@ test("the file editor's shortcuts: find, replace, markdown formatting, preview t
 
 		// Find opens the command bar's find field, not the listing's search nor CodeMirror's panel; Escape
 		// closes it and leaves the file open.
-		await page.keyboard.press(`${editorMod}+F`)
+		await page.keyboard.press(`${appMod}+F`)
 
 		const findField = dialog.getByRole("searchbox", { name: preview.previewDocxFindPlaceholder })
 
@@ -55,7 +55,7 @@ test("the file editor's shortcuts: find, replace, markdown formatting, preview t
 
 		// Replace opens the same field with its replace field beside it.
 		await focusEditorSurface(content)
-		await page.keyboard.press(`${editorMod}+Alt+F`)
+		await page.keyboard.press(`${appMod}+Alt+F`)
 		await expect(dialog.getByRole("textbox", { name: preview.previewDocxReplacePlaceholder })).toBeVisible()
 		await expect(findField).toBeFocused()
 		await page.keyboard.press("Escape")
@@ -87,14 +87,14 @@ test("the file editor's shortcuts: find, replace, markdown formatting, preview t
 		})
 
 		await line.dblclick({ position: words })
-		await page.keyboard.press(`${editorMod}+B`)
+		await page.keyboard.press(`${appMod}+B`)
 		await expect(content).toContainText("plain **words** here")
 		await page.keyboard.press(`${appMod}+Shift+V`)
 		await expect(content).toBeVisible()
 
 		// A link around the whole line, with its url placeholder selected and typed over.
 		await page.keyboard.press(`${editorMod}+A`)
-		await page.keyboard.press(`${editorMod}+K`)
+		await page.keyboard.press(`${appMod}+K`)
 		await page.keyboard.type("https://filen.io")
 		await expect(content).toContainText("[plain **words** here](https://filen.io)")
 

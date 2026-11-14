@@ -24,6 +24,7 @@ import {
 import { FIXTURE_FILES, gotoFixture } from "./helpers/fixtures"
 import { extractDone, jobCard, withArchiveScratch } from "./helpers/jobs"
 import { backTo, createDirectoryViaDialog, descendInto, gotoDirectory, selectAndTrashRow, LIVE_WRITE_TIMEOUT_MS } from "./helpers/listing"
+import { menuItemName } from "./helpers/menu"
 
 // Extracting from inside the archive browser: a selection, with its paths taken relative to the
 // directory shown, or the whole archive, each to wherever its menu says. Every leg lands in the test's
@@ -228,7 +229,7 @@ test.describe("archive browser extract", () => {
 
 			const menu = page.getByRole("menu").last()
 
-			await expect(menu.getByRole("menuitem", { name: "Choose destination…", exact: true })).toBeVisible()
+			await expect(menu.getByRole("menuitem", { name: menuItemName("Choose destination…") })).toBeVisible()
 			await expect(menu.getByRole("menuitem", { name: /next to the archive$/ })).toHaveCount(0)
 			await pickTreeTarget(page, "Extract to", [scratchName, destName], "Extract here")
 			await browser.close()

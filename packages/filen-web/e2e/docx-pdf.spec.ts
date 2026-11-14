@@ -9,6 +9,7 @@ import { ENCRYPTED_DOCX_PASSWORD, ENCRYPTED_DOCX_TEXT, encryptedDocxBytes } from
 import { trackCspViolations } from "./helpers/csp"
 import { storedPassword, trackPasswordCanary } from "./helpers/passwordCanary"
 import { preview } from "@/locales/en/preview"
+import { menuItemName } from "./helpers/menu"
 
 // Download as ▸ PDF from the Word document's File menu, in a real browser against the backend: the viewer's file
 // laid out again in the PDF worker, the editor's pages with an unsaved edit, and a password-protected document whose
@@ -27,8 +28,8 @@ function pageText(page: Page, text: string): Locator {
 
 async function downloadPdf(page: Page): Promise<void> {
 	await page.getByRole("button", { name: preview.previewDocxFileMenu, exact: true }).click()
-	await page.getByRole("menuitem", { name: preview.previewDocxDownloadAs, exact: true }).click()
-	await page.getByRole("menuitem", { name: preview.previewDocxDownloadPdf, exact: true }).click()
+	await page.getByRole("menuitem", { name: menuItemName(preview.previewDocxDownloadAs) }).click()
+	await page.getByRole("menuitem", { name: menuItemName(preview.previewDocxDownloadPdf) }).click()
 }
 
 async function readPdf(path: string, password?: string): Promise<{ pdf: pdfjs.PDFDocumentProxy; text: string }> {

@@ -4,6 +4,7 @@ import { LAZY_VIEWER_TIMEOUT_MS, uploadFiles, withScratchDirectory } from "./hel
 import { trackCspViolations } from "./helpers/csp"
 import { writePdf } from "../scripts/pdf-fixtures/view/pdfWriter"
 import { preview } from "@/locales/en/preview"
+import { resolveModKey } from "./helpers/modkey"
 
 // Annotations and comments on a PDF: a shape drawn with the pointer (the first change swaps to the editor and is
 // replayed into it), a text box placed from the keyboard, a highlight dragged over text, the selection's popover
@@ -113,7 +114,7 @@ test("annotates and comments on a PDF, and the saved file keeps it all", async (
 
 		await expect(editor).toBeFocused()
 		await editor.fill("Typed from the keyboard")
-		await editor.press("ControlOrMeta+Enter")
+		await editor.press(`${await resolveModKey(page)}+Enter`)
 		await expect(dialog.locator('[data-annotation-type="FreeText"]')).toHaveCount(1, { timeout: ENGINE_TIMEOUT_MS })
 
 		// A highlight dragged over the line of text (Highlight ▾ is the U tool).

@@ -11,6 +11,7 @@ import {
 	waitForListingSettled
 } from "./listing"
 import { gotoSettings, openSettingsSection } from "./settings"
+import { menuItemName } from "./menu"
 
 // Page objects for compress, extract and the archive browser: the drive menus that start them, their
 // dialogs, the browser in the preview overlay, the archive memory setting. Every lookup by item name
@@ -93,7 +94,10 @@ export async function openRowMenu(page: Page, listbox: Locator, name: string): P
 
 // Opens a submenu from its trigger; the tree levels are submenus of submenus, the newest last.
 export async function openSubmenu(page: Page, name: string): Promise<void> {
-	await page.getByRole("menuitem", { name, exact: true }).last().click()
+	await page
+		.getByRole("menuitem", { name: menuItemName(name) })
+		.last()
+		.click()
 }
 
 // Walks a directory tree submenu ("Copy" or "Extract to") down `path` from the drive root and runs
@@ -113,8 +117,8 @@ export async function pickTreeTarget(
 
 	await page
 		.getByRole("menu")
-		.filter({ has: page.getByRole("menuitem", { name: "No directories", exact: true }) })
-		.getByRole("menuitem", { name: action, exact: true })
+		.filter({ has: page.getByRole("menuitem", { name: menuItemName("No directories") }) })
+		.getByRole("menuitem", { name: menuItemName(action) })
 		.click()
 }
 
@@ -199,7 +203,7 @@ export type CompressPreset = "ZIP (.zip)" | "7-Zip (.7z)" | "Tarball (.tar.gz)"
 // Starts a preset compress of `names` (the format's last-used options, never a password or a disposal).
 export async function compressPreset(page: Page, listbox: Locator, names: readonly string[], preset: CompressPreset): Promise<void> {
 	await openArchiveEntries(page, listbox, names, "Compress")
-	await page.getByRole("menuitem", { name: preset, exact: true }).click()
+	await page.getByRole("menuitem", { name: menuItemName(preset) }).click()
 }
 
 export type CompressAfterwards = "Keep the originals" | "Move the originals to the trash" | "Delete the originals permanently"
@@ -340,7 +344,7 @@ export async function openCompressDialog(
 	title: "Compress" | "Save as archive" = "Compress"
 ): Promise<CompressDialogPO> {
 	await openArchiveEntries(page, listbox, names, "Compress")
-	await page.getByRole("menuitem", { name: "More options…", exact: true }).click()
+	await page.getByRole("menuitem", { name: menuItemName("More options…") }).click()
 
 	return waitForCompressDialog(page, title)
 }
@@ -377,7 +381,7 @@ export interface ExtractDialogPO {
 export async function openExtractDialog(page: Page, listbox: Locator, name: string): Promise<ExtractDialogPO> {
 	await openRowMenu(page, listbox, name)
 	await openSubmenu(page, "Extract")
-	await page.getByRole("menuitem", { name: "Extract with options…", exact: true }).click()
+	await page.getByRole("menuitem", { name: menuItemName("Extract with options…") }).click()
 
 	const dialog = page.getByRole("dialog", { name: "Extract", exact: true })
 	const folderNameInput = dialog.getByLabel("Directory name", { exact: true })
@@ -461,7 +465,7 @@ export async function extractToTree(page: Page, listbox: Locator, name: string, 
 // A row's Extract ▸ Choose destination… through the picker.
 export async function extractToPicker(page: Page, listbox: Locator, name: string, path: readonly string[]): Promise<void> {
 	await openExtractSubmenu(page, listbox, name)
-	await page.getByRole("menuitem", { name: "Choose destination…", exact: true }).click()
+	await page.getByRole("menuitem", { name: menuItemName("Choose destination…") }).click()
 	await pickDestination(page, "Extract to", path, "Extract here")
 }
 
@@ -556,11 +560,11 @@ async function pickBrowserTarget(page: Page, target: BrowserExtractTarget): Prom
 	if ("besideNewFolder" in target) {
 		await menu.getByRole("menuitem", { name: /^Extract to “.+\/” next to the archive$/ }).click()
 	} else if ("beside" in target) {
-		await menu.getByRole("menuitem", { name: "Extract next to the archive", exact: true }).click()
+		await menu.getByRole("menuitem", { name: menuItemName("Extract next to the archive") }).click()
 	} else if ("tree" in target) {
 		await pickTreeTarget(page, "Extract to", target.tree, "Extract here")
 	} else {
-		await menu.getByRole("menuitem", { name: "Choose destination…", exact: true }).click()
+		await menu.getByRole("menuitem", { name: menuItemName("Choose destination…") }).click()
 		await pickDestination(page, "Extract to", target.picker, "Extract here")
 	}
 }
@@ -659,10 +663,10 @@ export async function openArchive(
 		await openRowMenu(page, listbox, name)
 
 		if (via === "open") {
-			await page.getByRole("menuitem", { name: "Open", exact: true }).click()
+			await page.getByRole("menuitem", { name: menuItemName("Open") }).click()
 		} else {
 			await openSubmenu(page, "Extract")
-			await page.getByRole("menuitem", { name: "Browse contents", exact: true }).click()
+			await page.getByRole("menuitem", { name: menuItemName("Browse contents") }).click()
 		}
 	}
 

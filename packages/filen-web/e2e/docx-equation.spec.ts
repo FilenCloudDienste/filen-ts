@@ -5,6 +5,7 @@ import { FIXTURE_FILES, openFixtureRows } from "./helpers/fixtures"
 import { DOCX_FIXTURE_TEXT } from "./helpers/docxFixtures"
 import { ribbonButton, ribbonTab } from "./helpers/ribbon"
 import { preview } from "@/locales/en/preview"
+import { resolveModKey } from "./helpers/modkey"
 
 // Equations in the DOCX editor in a real browser: a new one typed as LaTeX from the Insert menu, its preview
 // painted as typed and an error shown inline, and one of the document opened by a press on it and changed.
@@ -90,7 +91,7 @@ test("edits an equation pressed on the page", async ({ page }) => {
 
 	await expect(field).toHaveValue("a^2+b^2")
 	await field.fill("a^2+b^2=c^2")
-	await field.press(process.platform === "darwin" ? "Meta+Enter" : "Control+Enter")
+	await field.press(`${await resolveModKey(page)}+Enter`)
 	await expect(popover).toHaveCount(0)
 	await expect(equations.first()).toContainText("c", { timeout: LAZY_VIEWER_TIMEOUT_MS })
 	await expect(equations).toHaveCount(2)

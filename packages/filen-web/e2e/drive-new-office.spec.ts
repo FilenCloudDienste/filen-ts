@@ -3,6 +3,7 @@ import { test, expect } from "./fixtures"
 import { withScratchDirectory, LAZY_VIEWER_TIMEOUT_MS, LIVE_WRITE_TIMEOUT_MS } from "./helpers/listing"
 import { drive } from "@/locales/en/drive"
 import { preview } from "@/locales/en/preview"
+import { menuItemName } from "./helpers/menu"
 
 // New ▸ Office end to end: a blank document and a blank workbook created from the Upload menu open in their
 // editors at once, take typing, save, and reopen with it; a taken name is refused in the dialog (the file it
@@ -13,8 +14,8 @@ test.describe.configure({ mode: "default" })
 async function startNew(page: Page, entry: string): Promise<Locator> {
 	// .first(): an empty scratch directory renders a second Upload trigger in its empty state.
 	await page.getByRole("button", { name: drive.driveNewMenuTrigger, exact: true }).first().click()
-	await page.getByRole("menuitem", { name: drive.driveNewOffice, exact: true }).click()
-	await page.getByRole("menuitem", { name: entry, exact: true }).click()
+	await page.getByRole("menuitem", { name: menuItemName(drive.driveNewOffice) }).click()
+	await page.getByRole("menuitem", { name: menuItemName(entry) }).click()
 
 	const field = page.getByLabel(drive.driveNewOfficeFileLabel, { exact: true })
 

@@ -17,6 +17,7 @@ import {
 	LIVE_WRITE_TIMEOUT_MS,
 	type ListingHandle
 } from "./helpers/listing"
+import { menuItemName } from "./helpers/menu"
 
 // Archives on the surfaces beside the drive (b6-design.md): a public file link, a public directory link
 // (with and without a password), a chat's link card, Shared with me. Every success path needs a public
@@ -31,7 +32,7 @@ const LINK_PASSWORD = "e2e-link-password"
 // The item's "Public link" dialog, opened from its row menu.
 async function openLinkDialog(page: Page, listbox: Locator, name: string): Promise<Locator> {
 	await openRowMenu(page, listbox, name)
-	await page.getByRole("menuitem", { name: "Public link", exact: true }).click()
+	await page.getByRole("menuitem", { name: menuItemName("Public link") }).click()
 
 	const dialog = page.getByRole("dialog", { name: "Public link", exact: true })
 

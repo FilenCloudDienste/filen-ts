@@ -14,6 +14,7 @@ import {
 	toasts
 } from "./helpers/listing"
 import { MOD_KEY } from "./helpers/modkey"
+import { menuItemName } from "./helpers/menu"
 
 // Serial, not parallel: the account is shared LIVE state, and the last test creates/selects/trashes/
 // restores real items by name — running it alongside this file's own other tests (which each select
@@ -114,11 +115,11 @@ test.describe("drive bulk actions", () => {
 
 		const menu = page.getByRole("menu").first()
 		await expect(menu).toBeVisible()
-		await expect(menu.getByRole("menuitem", { name: "Import", exact: true })).toHaveCount(0)
+		await expect(menu.getByRole("menuitem", { name: menuItemName("Import") })).toHaveCount(0)
 
-		await menu.getByRole("menuitem", { name: "Copy", exact: true }).click()
-		await expect(page.getByRole("menuitem", { name: "Choose destination…", exact: true }).last()).toBeVisible()
-		await expect(page.getByRole("menuitem", { name: "Copy here", exact: true }).first()).toBeVisible()
+		await menu.getByRole("menuitem", { name: menuItemName("Copy") }).click()
+		await expect(page.getByRole("menuitem", { name: menuItemName("Choose destination…") }).last()).toBeVisible()
+		await expect(page.getByRole("menuitem", { name: menuItemName("Copy here") }).first()).toBeVisible()
 
 		await page.keyboard.press("Escape")
 		await page.keyboard.press("Escape")

@@ -6,6 +6,7 @@ import { DOCX_FIXTURE_TEXT, largePictureBytes, svgPictureBytes, webpPictureBytes
 import { ribbonButton, ribbonTab } from "./helpers/ribbon"
 import { resolveModKey } from "./helpers/modkey"
 import { preview } from "@/locales/en/preview"
+import { menuItemName } from "./helpers/menu"
 
 // The DOCX editor's Insert and References tabs in a real browser: a picture from this device, the clipboard, a drop and the
 // drive (the 25 MB one refused before it is read), a table of contents inserted and updated from its chip, a
@@ -42,7 +43,7 @@ async function insertFrom(page: Page, tab: string, group: string, button: string
 	await (await ribbonButton(page, page, group, button)).click()
 
 	if (item !== undefined) {
-		await page.getByRole("menuitem", { name: item, exact: true }).click()
+		await page.getByRole("menuitem", { name: menuItemName(item) }).click()
 	}
 }
 

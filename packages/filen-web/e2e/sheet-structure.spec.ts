@@ -6,6 +6,7 @@ import { resolveModKey } from "./helpers/modkey"
 import { ribbonButton, ribbonTab } from "./helpers/ribbon"
 import { closeDialog, expectCell, expectSelection, goTo, nameBox, openRow, saveAndClose, XLSX_MIME } from "./helpers/sheet"
 import { preview } from "@/locales/en/preview"
+import { menuItemName } from "./helpers/menu"
 
 // Sheet structure on the office engine end to end: rows and columns inserted,
 // deleted, hidden and shown from the grid's menu, the top row frozen, cells merged and centred (with Excel's
@@ -41,7 +42,7 @@ async function gridMenu(dialog: Locator, row: number): Promise<void> {
 }
 
 function menuItem(page: Page, name: string): Locator {
-	return page.getByRole("menuitem", { name, exact: true })
+	return page.getByRole("menuitem", { name: menuItemName(name) })
 }
 
 // Escape on the menu itself: it closes the menu and leaves the viewer open.

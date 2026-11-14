@@ -3,10 +3,11 @@ import JSZip from "jszip"
 import type { Locator, Page } from "@playwright/test"
 import { test, expect, closeTrackedPage, seedSession, settleLeases } from "./fixtures"
 import { focusEditorSurface } from "./helpers/editor"
-import { resolveEditorModKey, resolveModKey } from "./helpers/modkey"
+import { resolveModKey } from "./helpers/modkey"
 import { waitForE2eHooks } from "./helpers/e2eHooks"
 import { dispatchAppConnectivity } from "./helpers/offline"
 import { BOOT_SETTLE_TIMEOUT_MS, bootTo, LIVE_WRITE_TIMEOUT_MS, reloadToShell } from "./helpers/listing"
+import { menuItemName } from "./helpers/menu"
 
 // Notes shell smoke: rail entry → /notes, the contextual sidebar renders, the two-view toggle switches,
 // and a UI-created note lands in the list and navigates. Net-zero on the shared FREE account — the one
@@ -93,7 +94,7 @@ async function runMenuAction(
 			await expect(menu).toBeVisible({ timeout: 10_000 })
 		}
 
-		await page.getByRole("menuitem", { name: itemName, exact: true }).click({ timeout: 10_000 })
+		await page.getByRole("menuitem", { name: menuItemName(itemName) }).click({ timeout: 10_000 })
 
 		if (until === "menuClosed") {
 			// A "direct" descriptor's click closes the popup asynchronously (Base UI's close
@@ -299,7 +300,7 @@ test.describe("notes", () => {
 			try {
 				await menuTrigger.click()
 				await expect(menu).toBeVisible()
-				await expect(page.getByRole("menuitem", { name: "Trash", exact: true })).toHaveAttribute("aria-disabled", "true")
+				await expect(page.getByRole("menuitem", { name: menuItemName("Trash") })).toHaveAttribute("aria-disabled", "true")
 				await page.keyboard.press("Escape")
 				await expect(menu).toHaveCount(0)
 
@@ -348,8 +349,8 @@ test.describe("notes", () => {
 					await expect(menu.first()).toBeVisible({ timeout: 10_000 })
 				}
 
-				await page.getByRole("menuitem", { name: "Tags", exact: true }).hover({ timeout: 10_000 })
-				const newTagItem = page.getByRole("menuitem", { name: "New tag", exact: true })
+				await page.getByRole("menuitem", { name: menuItemName("Tags") }).hover({ timeout: 10_000 })
+				const newTagItem = page.getByRole("menuitem", { name: menuItemName("New tag") })
 				await newTagItem.click({ timeout: 10_000 })
 				await expect(page.getByRole("dialog")).toBeVisible({ timeout: 10_000 })
 			}).toPass({ timeout: 90_000 })
@@ -387,7 +388,7 @@ test.describe("notes", () => {
 					await expect(menu).toBeVisible({ timeout: 10_000 })
 				}
 
-				await page.getByRole("menuitem", { name: "Delete", exact: true }).click({ timeout: 10_000 })
+				await page.getByRole("menuitem", { name: menuItemName("Delete") }).click({ timeout: 10_000 })
 				await expect(dialogTitled(page, "Delete tag?")).toBeVisible({ timeout: 10_000 })
 			}).toPass({ timeout: 90_000 })
 			const tagDeleteDialog = dialogTitled(page, "Delete tag?")
@@ -415,9 +416,9 @@ test.describe("notes", () => {
 					await expect(menu).toBeVisible({ timeout: 10_000 })
 				}
 
-				await expect(page.getByRole("menuitem", { name: "Restore", exact: true })).toBeVisible({ timeout: 15_000 })
-				await expect(page.getByRole("menuitem", { name: "Trash", exact: true })).toHaveCount(0, { timeout: 2_000 })
-				await page.getByRole("menuitem", { name: "Restore", exact: true }).click({ timeout: 10_000 })
+				await expect(page.getByRole("menuitem", { name: menuItemName("Restore") })).toBeVisible({ timeout: 15_000 })
+				await expect(page.getByRole("menuitem", { name: menuItemName("Trash") })).toHaveCount(0, { timeout: 2_000 })
+				await page.getByRole("menuitem", { name: menuItemName("Restore") }).click({ timeout: 10_000 })
 				await expect(menu).toHaveCount(0, { timeout: 10_000 })
 			}).toPass({ timeout: 90_000 })
 
@@ -503,7 +504,7 @@ test.describe("notes", () => {
 						await expect(exportAllMenu).toBeVisible({ timeout: 10_000 })
 					}
 
-					await page.getByRole("menuitem", { name: "Export all", exact: true }).click({ timeout: 10_000 })
+					await page.getByRole("menuitem", { name: menuItemName("Export all") }).click({ timeout: 10_000 })
 				}).toPass({ timeout: 60_000 })
 			])
 
@@ -739,7 +740,6 @@ test.describe("notes: editor shortcuts", () => {
 		const content = main.locator(".cm-content")
 		const bold = main.locator("strong", { hasText: "bold" })
 		const appMod = await resolveModKey(page)
-		const editorMod = await resolveEditorModKey(page)
 
 		try {
 			await focusEditorSurface(content)
@@ -749,7 +749,7 @@ test.describe("notes: editor shortcuts", () => {
 				await page.keyboard.press("Shift+ArrowLeft")
 			}
 
-			await page.keyboard.press(`${editorMod}+B`)
+			await page.keyboard.press(`${appMod}+B`)
 			await expect(content).toContainText("make this **bold**")
 			await expect(bold).toBeVisible()
 

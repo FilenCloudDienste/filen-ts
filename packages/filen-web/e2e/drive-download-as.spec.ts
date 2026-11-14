@@ -25,6 +25,7 @@ import { storedPassword, trackPasswordCanary } from "./helpers/passwordCanary"
 import { drive } from "@/locales/en/drive"
 import { preview } from "@/locales/en/preview"
 import { transfers } from "@/locales/en/transfers"
+import { menuItemName } from "./helpers/menu"
 
 // Download as ▸ PDF from the drive's item menu, end to end against the backend: the saved file read, laid out in the
 // workers without opening its viewer, and downloaded as "<name>.pdf"; byte for byte the File menu's export of the
@@ -110,11 +111,11 @@ async function readPdf(path: string, password?: string): Promise<{ pages: number
 
 // Download as ▸ PDF from an open menu; resolves with the download.
 async function pickPdf(page: Page): Promise<{ name: string; path: string }> {
-	await page.getByRole("menuitem", { name: drive.driveActionDownloadAs, exact: true }).click()
+	await page.getByRole("menuitem", { name: menuItemName(drive.driveActionDownloadAs) }).click()
 
 	const downloading = page.waitForEvent("download", { timeout: EXPORT_TIMEOUT_MS })
 
-	await page.getByRole("menuitem", { name: drive.driveDownloadAsPdf, exact: true }).click()
+	await page.getByRole("menuitem", { name: menuItemName(drive.driveDownloadAsPdf) }).click()
 
 	const download = await downloading
 
@@ -130,11 +131,11 @@ async function fileMenuPdf(page: Page, listbox: Locator, name: string): Promise<
 
 	await expect(fileMenu).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
 	await fileMenu.click()
-	await page.getByRole("menuitem", { name: preview.previewDocxDownloadAs, exact: true }).click()
+	await page.getByRole("menuitem", { name: menuItemName(preview.previewDocxDownloadAs) }).click()
 
 	const downloading = page.waitForEvent("download", { timeout: EXPORT_TIMEOUT_MS })
 
-	await page.getByRole("menuitem", { name: preview.previewDocxDownloadPdf, exact: true }).click()
+	await page.getByRole("menuitem", { name: menuItemName(preview.previewDocxDownloadPdf) }).click()
 
 	const path = await (await downloading).path()
 
@@ -209,8 +210,8 @@ test("a password-protected document asks its password, refuses a wrong one and p
 
 		await uploadFiles(page, [{ name, mimeType: DOCX_MIME, buffer: await encryptedDocxBytes() }], listbox)
 		await openRowMenu(page, listbox, name)
-		await page.getByRole("menuitem", { name: drive.driveActionDownloadAs, exact: true }).click()
-		await page.getByRole("menuitem", { name: drive.driveDownloadAsPdf, exact: true }).click()
+		await page.getByRole("menuitem", { name: menuItemName(drive.driveActionDownloadAs) }).click()
+		await page.getByRole("menuitem", { name: menuItemName(drive.driveDownloadAsPdf) }).click()
 
 		const prompt = page.getByRole("dialog", { name: preview.previewOfficePdfPasswordTitle })
 		const field = prompt.getByLabel(preview.previewOfficePdfPasswordLabel)
@@ -252,8 +253,8 @@ test("Cancel on the progress toast stops the export: no download, the toast goes
 
 		try {
 			await openRowMenu(page, listbox, name)
-			await page.getByRole("menuitem", { name: drive.driveActionDownloadAs, exact: true }).click()
-			await page.getByRole("menuitem", { name: drive.driveDownloadAsPdf, exact: true }).click()
+			await page.getByRole("menuitem", { name: menuItemName(drive.driveActionDownloadAs) }).click()
+			await page.getByRole("menuitem", { name: menuItemName(drive.driveDownloadAsPdf) }).click()
 			await expect.poll(() => hold?.held() ?? 0, { timeout: EXPORT_TIMEOUT_MS }).toBeGreaterThan(0)
 
 			const progress = toasts(page).filter({ has: page.getByRole("button", { name: preview.previewDocxPdfCancel, exact: true }) })
@@ -300,7 +301,7 @@ test("the whole selection downloads as one archive of PDFs from the selection ba
 		await listbox.getByRole("option", { name: document }).click()
 		await listbox.getByRole("option", { name: workbook }).click({ modifiers: [MOD_KEY] })
 		await page.getByRole("button", { name: drive.driveActionDownloadAs, exact: true }).click()
-		await page.getByRole("menuitem", { name: drive.driveDownloadAsPdf, exact: true }).click()
+		await page.getByRole("menuitem", { name: menuItemName(drive.driveDownloadAsPdf) }).click()
 		// Several files arrive as one zip (no browser limit on downloads started without a click drops any).
 		await expect.poll(() => downloads.length, { timeout: EXPORT_TIMEOUT_MS }).toBe(1)
 
@@ -337,7 +338,7 @@ test("Download as is never offered in the trash, and is disabled offline", async
 
 		await page.context().setOffline(true)
 		await openRowMenu(page, listbox, kept)
-		await expect(page.getByRole("menuitem", { name: drive.driveActionDownloadAs, exact: true })).toHaveAttribute(
+		await expect(page.getByRole("menuitem", { name: menuItemName(drive.driveActionDownloadAs) })).toHaveAttribute(
 			"aria-disabled",
 			"true"
 		)
@@ -354,6 +355,6 @@ test("Download as is never offered in the trash, and is disabled offline", async
 
 		await revealRow(trash, row, LIVE_WRITE_TIMEOUT_MS)
 		await openRowMenu(page, trash, trashed)
-		await expect(page.getByRole("menuitem", { name: drive.driveActionDownloadAs, exact: true })).toHaveCount(0)
+		await expect(page.getByRole("menuitem", { name: menuItemName(drive.driveActionDownloadAs) })).toHaveCount(0)
 	})
 })

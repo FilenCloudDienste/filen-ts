@@ -25,6 +25,7 @@ import {
 } from "./helpers/listing"
 import { common } from "@/locales/en/common"
 import { preview } from "@/locales/en/preview"
+import { menuItemName } from "./helpers/menu"
 
 // The DOCX viewer in a real browser against the real backend, at each place a document opens read-only: an
 // archive's entry (zip and 7z), a public link (signed out, and with downloads off) and a chat's link card. Per
@@ -349,7 +350,7 @@ test("archive viewer documents: comments, an embedded font, links and 300 pages 
 
 async function createLink(page: Page, listbox: Locator, name: string): Promise<{ dialog: Locator; url: string }> {
 	await openRowMenu(page, listbox, name)
-	await page.getByRole("menuitem", { name: "Public link", exact: true }).click()
+	await page.getByRole("menuitem", { name: menuItemName("Public link") }).click()
 
 	const dialog = page.getByRole("dialog", { name: "Public link", exact: true })
 
@@ -443,7 +444,7 @@ test.describe("public link and chat card", () => {
 					await page.getByRole("option", { name: scratchName }).dblclick()
 					await expect(listbox.getByRole("option", { name })).toBeVisible({ timeout: BOOT_SETTLE_TIMEOUT_MS })
 					await openRowMenu(page, listbox, name)
-					await page.getByRole("menuitem", { name: "Public link", exact: true }).click()
+					await page.getByRole("menuitem", { name: menuItemName("Public link") }).click()
 					await expect(dialog).toBeVisible()
 				}
 			}

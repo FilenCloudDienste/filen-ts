@@ -2,6 +2,7 @@ import type { Page } from "@playwright/test"
 import { test, expect } from "./fixtures"
 import { BOOT_SETTLE_TIMEOUT_MS, bootTo } from "./helpers/listing"
 import { MOD_KEY } from "./helpers/modkey"
+import { menuItemName } from "./helpers/menu"
 
 // Contact requests, blocks, and removals are OUTWARD-FACING: a request lands in another Filen
 // account's inbox, and a block/remove changes another account's own contact list too. Unlike drive's
@@ -207,9 +208,9 @@ test.describe("contacts", () => {
 		// Message is the row menu's first (non-destructive) entry, ahead of Remove/Block. Render-only:
 		// clicking it would create a real chat with this live contact (outward-facing, same as Remove/Block
 		// below), so this suite only confirms it's offered, never activates it.
-		await expect(menu.getByRole("menuitem", { name: "Message", exact: true })).toBeVisible()
+		await expect(menu.getByRole("menuitem", { name: menuItemName("Message") })).toBeVisible()
 
-		await menu.getByRole("menuitem", { name: "Remove", exact: true }).click()
+		await menu.getByRole("menuitem", { name: menuItemName("Remove") }).click()
 
 		// Scoped to THIS confirm's own title rather than "an alertdialog": the startup account reminders
 		// are alertdialogs too and mount asynchronously, so a bare role lookup is a strict-mode hazard,

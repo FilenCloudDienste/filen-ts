@@ -4,6 +4,7 @@ import { LAZY_VIEWER_TIMEOUT_MS, uploadFiles, withScratchDirectory } from "./hel
 import { trackCspViolations } from "./helpers/csp"
 import { writePdf } from "../scripts/pdf-fixtures/view/pdfWriter"
 import { preview } from "@/locales/en/preview"
+import { resolveModKey } from "./helpers/modkey"
 
 // Page organisation in the PDF editor: the pages rail beside the document and the Organise grid of the Pages tab, by
 // keyboard only (focus moves with the arrows, Shift extends the selection, Alt+arrows move it, Mod+Alt+[ rotates it,
@@ -91,7 +92,7 @@ test("organises pages with the keyboard alone and saves them", async ({ page }) 
 		await page.keyboard.press("Shift+ArrowRight")
 		await expect(options.nth(1)).toHaveAttribute("aria-selected", "true")
 		await expect(options.nth(2)).toHaveAttribute("aria-selected", "true")
-		await page.keyboard.press("ControlOrMeta+Alt+BracketLeft")
+		await page.keyboard.press(`${await resolveModKey(page)}+Alt+BracketLeft`)
 		await expect(live).toHaveText("2 pages rotated")
 
 		// Delete deletes the selection; every page cannot go.

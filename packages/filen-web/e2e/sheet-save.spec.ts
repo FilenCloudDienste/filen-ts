@@ -19,6 +19,7 @@ import { WORKBOOK_PASSWORD, encryptedWorkbook } from "@/tests/encryptedWorkbookF
 import { closeDialog, dialogOf, expectCell, goTo, openFromListing, typeInto, XLSX_MIME } from "./helpers/sheet"
 import { preview } from "@/locales/en/preview"
 import { settings } from "@/locales/en/settings"
+import { menuItemName } from "./helpers/menu"
 
 // Saving on the spreadsheet viewer end to end: the idle autosave,
 // Cmd/Ctrl+S, a save made elsewhere asked about over unsaved edits, Save as .xlsx of a CSV (its unsaved edits go
@@ -53,9 +54,9 @@ async function xlsxBytes(): Promise<Buffer> {
 async function fileMenu(page: Page, dialog: Locator, item: string, submenu?: string): Promise<void> {
 	await dialog.getByRole("button", { name: preview.previewSheetFileMenu, exact: true }).click()
 
-	if (submenu !== undefined) await page.getByRole("menuitem", { name: submenu, exact: true }).click()
+	if (submenu !== undefined) await page.getByRole("menuitem", { name: menuItemName(submenu) }).click()
 
-	await page.getByRole("menuitem", { name: item, exact: true }).click()
+	await page.getByRole("menuitem", { name: menuItemName(item) }).click()
 }
 
 test("a workbook saves itself after an idle pause, and on Cmd/Ctrl+S from the grid", async ({ page }) => {
@@ -244,9 +245,9 @@ test("a password-protected workbook's saves store only its sealed package, and i
 		// No CSV of a protected workbook; autosave is offered as for any workbook.
 		await dialog.getByRole("button", { name: preview.previewSheetFileMenu, exact: true }).click()
 		await expect(page.getByRole("menuitemcheckbox", { name: preview.previewSheetAutosave })).toBeVisible()
-		await page.getByRole("menuitem", { name: preview.previewSheetDownloadAs, exact: true }).click()
+		await page.getByRole("menuitem", { name: menuItemName(preview.previewSheetDownloadAs) }).click()
 		// The submenu is open (its PDF is offered) before the CSV's absence means anything.
-		await expect(page.getByRole("menuitem", { name: preview.previewSheetDownloadPdf, exact: true })).toBeVisible()
+		await expect(page.getByRole("menuitem", { name: menuItemName(preview.previewSheetDownloadPdf) })).toBeVisible()
 		await expect(page.getByRole("menuitem", { name: preview.previewSheetDownloadSheetCsvFormat })).toHaveCount(0)
 		await page.keyboard.press("Escape")
 

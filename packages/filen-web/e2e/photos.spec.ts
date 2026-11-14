@@ -13,6 +13,7 @@ import {
 import { PNG_BYTES } from "./helpers/fixtureBytes"
 import { resolveModKey } from "./helpers/modkey"
 import { photos } from "@/locales/en/photos"
+import { menuItemName } from "./helpers/menu"
 
 // The one live proof of the whole photos arc: root selection, the media-only grid over a mixed
 // upload, the viewer wired to the shared preview overlay, a favorite toggled FROM INSIDE that overlay
@@ -155,9 +156,9 @@ test("photos: root pick over a mixed upload, media-only grid, viewer pager + in-
 		await menuTrigger.click()
 		await expect(menu).toBeVisible()
 		// The viewer offers what the Photos grid does: Copy, no Move.
-		await expect(menu.getByRole("menuitem", { name: "Copy", exact: true })).toBeVisible()
-		await expect(menu.getByRole("menuitem", { name: "Move", exact: true })).toHaveCount(0)
-		await menu.getByRole("menuitem", { name: "Favorite", exact: true }).click()
+		await expect(menu.getByRole("menuitem", { name: menuItemName("Copy") })).toBeVisible()
+		await expect(menu.getByRole("menuitem", { name: menuItemName("Move") })).toHaveCount(0)
+		await menu.getByRole("menuitem", { name: menuItemName("Favorite") }).click()
 		await expect(menu).toHaveCount(0)
 
 		await page.keyboard.press("Escape")

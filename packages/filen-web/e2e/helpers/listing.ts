@@ -2,6 +2,7 @@ import type { Locator, Page } from "@playwright/test"
 import { expect, settleLeases } from "../fixtures"
 import { waitForE2eHooks } from "./e2eHooks"
 import { OPEN_OVERLAY_SELECTOR } from "@/lib/keymap/dialogGuard"
+import { menuItemName } from "./menu"
 
 // Startup account reminders (master-keys export, storage over limit) are BLOCKING modal alertdialogs
 // the authed shell raises once per page LOAD. They are LATCHED CLOSED in the e2e build before the first
@@ -302,7 +303,7 @@ export async function clearSelection(page: Page): Promise<void> {
 export async function openRailGroupChild(page: Page, group: string, child: string, urlPattern: RegExp): Promise<void> {
 	await expect(async () => {
 		await page.getByRole("navigation", { name: "Filen", exact: true }).getByRole("link", { name: group, exact: true }).hover()
-		await page.getByRole("menuitem", { name: child, exact: true }).click({ timeout: 5_000 })
+		await page.getByRole("menuitem", { name: menuItemName(child) }).click({ timeout: 5_000 })
 		await expect(page).toHaveURL(urlPattern, { timeout: 5_000 })
 	}).toPass({ timeout: 30_000 })
 }
@@ -325,7 +326,7 @@ export async function openPhotosUnset(page: Page): Promise<void> {
 export async function openTransfers(page: Page): Promise<void> {
 	await expect(async () => {
 		await page.getByRole("button", { name: "Account", exact: true }).click()
-		await page.getByRole("menuitem", { name: "Transfers", exact: true }).click({ timeout: 5_000 })
+		await page.getByRole("menuitem", { name: menuItemName("Transfers") }).click({ timeout: 5_000 })
 		await expect(page).toHaveURL(/\/transfers$/, { timeout: 5_000 })
 	}).toPass({ timeout: 30_000 })
 }
@@ -438,7 +439,10 @@ export async function createDirectoryViaDialog(
 	options?: { expectRow?: boolean; writeTimeoutMs?: number }
 ): Promise<void> {
 	await page.getByRole("button", { name: "New", exact: true }).first().click()
-	await page.getByRole("menu").getByRole("menuitem", { name: "New directory", exact: true }).click()
+	await page
+		.getByRole("menu")
+		.getByRole("menuitem", { name: menuItemName("New directory") })
+		.click()
 
 	// Filtered by its own heading: previewOverlay.tsx composes Base UI's dialog Popup directly, whose
 	// role defaults to "dialog" too, so a bare getByRole("dialog") can resolve to the preview surface

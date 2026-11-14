@@ -16,6 +16,7 @@ import { trackCspViolations } from "./helpers/csp"
 import { ODS_MIME, ODS_UNTOUCHED_ROW, OTS_MIME, odsFixture, zipEntry } from "./helpers/odsFixtures"
 import { closeDialog, dialogOf, expectCell, goTo, openFromListing, typeInto } from "./helpers/sheet"
 import { preview } from "@/locales/en/preview"
+import { menuItemName } from "./helpers/menu"
 
 // OpenDocument spreadsheets edited in the spreadsheet viewer against the backend: saved by the idle autosave and by
 // Cmd/Ctrl+S as the OpenDocument files they are (mimetype first and stored, rows no edit touched byte for byte), a
@@ -42,7 +43,7 @@ async function storedBytes(page: Page, listbox: Locator, name: string): Promise<
 
 	const downloading = page.waitForEvent("download", { timeout: LIVE_WRITE_TIMEOUT_MS })
 
-	await page.getByRole("menuitem", { name: /^Download$/u }).click()
+	await page.getByRole("menuitem", { name: menuItemName("Download") }).click()
 
 	return readFileSync(await (await downloading).path())
 }
@@ -90,7 +91,7 @@ test("an .ods saves itself after an idle pause and on Cmd/Ctrl+S, staying an Ope
 		dialog = await open(page, listbox, name)
 		await goTo(dialog, "A2")
 		await dialog.getByRole("grid").click({ button: "right", position: { x: 44, y: 20 + 20 + 10 } })
-		await page.getByRole("menuitem", { name: preview.previewSpreadsheetInsertRowsAbove_one, exact: true }).click()
+		await page.getByRole("menuitem", { name: menuItemName(preview.previewSpreadsheetInsertRowsAbove_one) }).click()
 		await typeInto(page, dialog, "A2", "Inserted")
 		await expect(saveButton).toBeVisible()
 		await page.keyboard.press(`${mod}+S`)

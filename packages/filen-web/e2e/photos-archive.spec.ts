@@ -20,6 +20,7 @@ import {
 } from "./helpers/listing"
 import { setAppOffline } from "./helpers/offline"
 import { photos } from "@/locales/en/photos"
+import { menuItemName } from "./helpers/menu"
 
 // Compress from Photos: the tile menu, the selection bar, the options dialog with a mixed selection and
 // with Afterwards, and the gates (no Extract anywhere in Photos, Compress off while offline). Photos only
@@ -135,9 +136,9 @@ test.describe("photos compress", () => {
 			// ---- P1: tile menu Compress ▸ ZIP, named after the photo, saved beside it ----
 			const menu = await openTileMenu(page, tileA)
 
-			await expect(menu.getByRole("menuitem", { name: "Extract", exact: true })).toHaveCount(0)
+			await expect(menu.getByRole("menuitem", { name: menuItemName("Extract") })).toHaveCount(0)
 			await openSubmenu(page, "Compress")
-			await page.getByRole("menuitem", { name: "ZIP (.zip)", exact: true }).click()
+			await page.getByRole("menuitem", { name: menuItemName("ZIP (.zip)") }).click()
 			await expectJobCard(page, `Compressed 1 item into e2e-ph-a-${runId}.zip`, LIVE_WRITE_TIMEOUT_MS)
 			await hideJobCards(page)
 
@@ -145,7 +146,7 @@ test.describe("photos compress", () => {
 			await selectTiles([tileA, tileB])
 			await expect(selectionBar(page).getByRole("button", { name: "Extract", exact: true })).toHaveCount(0)
 			await selectionBar(page).getByRole("button", { name: "Compress", exact: true }).click()
-			await page.getByRole("menuitem", { name: "7-Zip (.7z)", exact: true }).click()
+			await page.getByRole("menuitem", { name: menuItemName("7-Zip (.7z)") }).click()
 			await expectJobCard(page, `Compressed 2 items into ${scratchName}.7z`, LIVE_WRITE_TIMEOUT_MS)
 			await hideJobCards(page)
 			await clearSelection(page, grid)
@@ -153,7 +154,7 @@ test.describe("photos compress", () => {
 			// ---- P3: photos of two directories: named "Photos", saved in Cloud Drive unless moved ----
 			await selectTiles([tileA, tileC])
 			await selectionBar(page).getByRole("button", { name: "Compress", exact: true }).click()
-			await page.getByRole("menuitem", { name: "More options…", exact: true }).click()
+			await page.getByRole("menuitem", { name: menuItemName("More options…") }).click()
 
 			const mixed = await waitForCompressDialog(page)
 
@@ -173,7 +174,7 @@ test.describe("photos compress", () => {
 			// ---- P4: More options with "Move the originals to the trash": the photo leaves the grid ----
 			await openTileMenu(page, tileB)
 			await openSubmenu(page, "Compress")
-			await page.getByRole("menuitem", { name: "More options…", exact: true }).click()
+			await page.getByRole("menuitem", { name: menuItemName("More options…") }).click()
 
 			const single = await waitForCompressDialog(page)
 
@@ -233,13 +234,13 @@ test.describe("photos compress", () => {
 
 			const menu = page.getByRole("menu").first()
 
-			await expect(menu.getByRole("menuitem", { name: "Compress", exact: true })).toBeVisible()
-			await expect(menu.getByRole("menuitem", { name: "Extract", exact: true })).toHaveCount(0)
-			await expect(menu.getByRole("menuitem", { name: "Move", exact: true })).toHaveCount(0)
+			await expect(menu.getByRole("menuitem", { name: menuItemName("Compress") })).toBeVisible()
+			await expect(menu.getByRole("menuitem", { name: menuItemName("Extract") })).toHaveCount(0)
+			await expect(menu.getByRole("menuitem", { name: menuItemName("Move") })).toHaveCount(0)
 			// Opened to prove it is the Compress submenu, never clicked: a preset would write into the fixture tree.
 			await openSubmenu(page, "Compress")
-			await expect(page.getByRole("menuitem", { name: "ZIP (.zip)", exact: true })).toBeVisible()
-			await expect(page.getByRole("menuitem", { name: "More options…", exact: true })).toBeVisible()
+			await expect(page.getByRole("menuitem", { name: menuItemName("ZIP (.zip)") })).toBeVisible()
+			await expect(page.getByRole("menuitem", { name: menuItemName("More options…") })).toBeVisible()
 			await dismissOverlays(page)
 			await expect(overlay).toHaveCount(0)
 
@@ -255,11 +256,11 @@ test.describe("photos compress", () => {
 			await clearSelection(page, grid)
 
 			const tileMenu = await openTileMenu(page, tileB)
-			const tileCompress = tileMenu.getByRole("menuitem", { name: "Compress", exact: true })
+			const tileCompress = tileMenu.getByRole("menuitem", { name: menuItemName("Compress") })
 
 			await expect(tileCompress).toHaveAttribute("aria-disabled", "true")
 			await expect(tileCompress).toHaveAttribute("title", OFFLINE_TITLE)
-			await expect(tileMenu.getByRole("menuitem", { name: "Extract", exact: true })).toHaveCount(0)
+			await expect(tileMenu.getByRole("menuitem", { name: menuItemName("Extract") })).toHaveCount(0)
 			await dismissOverlays(page)
 			await setAppOffline(page, false)
 			await removePhotosDirectory(page, "preview-image")

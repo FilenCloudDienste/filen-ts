@@ -10,6 +10,7 @@ import {
 	LIVE_WRITE_TIMEOUT_MS
 } from "./helpers/listing"
 import { focusEditorSurface } from "./helpers/editor"
+import { menuItemName } from "./helpers/menu"
 
 // An open editor follows its file when a newer version is saved elsewhere. Two tabs of one session stand
 // in for two devices: each save goes through the socket to the other exactly as it would across
@@ -122,7 +123,7 @@ test("an open editor follows saves made elsewhere, asks over unsaved edits, and 
 		// new file takes the name the trashed file freed.
 		await typeInto(page, " survived-trash")
 		await theirs.getByRole("button", { name: "More actions", exact: true }).click()
-		await other.getByRole("menuitem", { name: "Trash", exact: true }).click()
+		await other.getByRole("menuitem", { name: menuItemName("Trash") }).click()
 		await other.getByRole("alertdialog", { name: "Move to trash?" }).getByRole("button", { name: "Trash", exact: true }).click()
 
 		const deleted = page.getByRole("alertdialog", { name: "This file was deleted elsewhere" })

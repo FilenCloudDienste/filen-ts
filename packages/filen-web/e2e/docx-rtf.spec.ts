@@ -3,6 +3,7 @@ import type { Locator, Page } from "@playwright/test"
 import { test, expect } from "./fixtures"
 import { LAZY_VIEWER_TIMEOUT_MS, LIVE_WRITE_TIMEOUT_MS, uploadFiles, withScratchDirectory } from "./helpers/listing"
 import { preview } from "@/locales/en/preview"
+import { menuItemName } from "./helpers/menu"
 
 // RTF documents in the docx viewer and editor, in a real browser against the backend: read in the RTF worker,
 // edited as the package they read as, saved as RTF by the lossless writer (the file stays RTF, untouched
@@ -55,7 +56,7 @@ async function storedBytes(page: Page, listbox: Locator, name: string): Promise<
 
 	const downloading = page.waitForEvent("download", { timeout: LIVE_WRITE_TIMEOUT_MS })
 
-	await page.getByRole("menuitem", { name: /^Download$/u }).click()
+	await page.getByRole("menuitem", { name: menuItemName("Download") }).click()
 
 	return readFileSync(await (await downloading).path())
 }

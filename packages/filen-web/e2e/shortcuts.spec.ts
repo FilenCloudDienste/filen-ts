@@ -19,8 +19,11 @@ test.describe("keyboard shortcuts", () => {
 		await openSettingsSection(page, "Keyboard")
 	}
 
-	function settingsRow(page: Page) {
-		return page.locator('li[data-action-id="app.openSettings"]')
+	// A global action with no default keys on any platform, listed near the top of the first group.
+	const UNBOUND_ACTION = "app.openTransfers"
+
+	function unboundRow(page: Page) {
+		return page.locator(`li[data-action-id="${UNBOUND_ACTION}"]`)
 	}
 
 	test("the overlay opens on its combo and lists groups from route chunks that were never loaded", async ({ page }) => {
@@ -45,10 +48,13 @@ test.describe("keyboard shortcuts", () => {
 
 		await search.fill("photos")
 		await expect(dialog.getByRole("heading", { name: /^photos$/i })).toBeVisible()
-		await search.fill("")
+		await search.fill("cloud drive")
 		await expect(dialog.getByRole("heading", { name: /^cloud drive$/i })).toBeVisible()
 		// A description key from a non-"common" namespace ("drive:driveCommandSelectAll") resolves.
 		await expect(dialog.locator('li[data-action-id="drive.selectAll"]')).toContainText("Select all")
+		// Cleared, the list starts over at its first group.
+		await search.fill("")
+		await expect(dialog.getByRole("heading", { name: /^everywhere$/i })).toBeVisible()
 
 		await page.keyboard.press("Escape")
 		await expect(dialog).toBeHidden()
@@ -65,11 +71,15 @@ test.describe("keyboard shortcuts", () => {
 	test("Settings -> Keyboard renders the same catalog", async ({ page }) => {
 		await gotoKeyboardSettings(page)
 
+		const search = page.getByRole("searchbox", { name: "Search shortcuts by name" })
+
+		await expect(page.getByRole("heading", { name: /^everywhere$/i })).toBeVisible()
+		await search.fill("cloud drive")
 		await expect(page.getByRole("heading", { name: /^cloud drive$/i })).toBeVisible()
-		await page.getByRole("searchbox", { name: "Search shortcuts by name" }).fill("photos")
+		await search.fill("photos")
 		await expect(page.getByRole("heading", { name: /^photos$/i })).toBeVisible()
-		await page.getByRole("searchbox", { name: "Search shortcuts by name" }).fill("")
-		await expect(settingsRow(page)).toContainText("Not set")
+		await search.fill("")
+		await expect(unboundRow(page)).toContainText("Not set")
 	})
 
 	test("recording suppresses every live hotkey and holds back a combo another action already holds", async ({ page }) => {
@@ -77,7 +87,7 @@ test.describe("keyboard shortcuts", () => {
 
 		await expect.poll(() => isDark(page)).toBe(false)
 
-		const row = settingsRow(page)
+		const row = unboundRow(page)
 
 		await row.getByRole("button", { name: "Add shortcut" }).click()
 		await expect(row).toContainText("Press the keys you want to use")
@@ -93,13 +103,13 @@ test.describe("keyboard shortcuts", () => {
 		// The hooks arrive on a fire-and-forget dynamic import, independently of the shell's own
 		// render — an interactive settings page is no proof they are installed.
 		await waitForE2eHooks(page)
-		expect(await page.evaluate(() => window.__filenE2E.comboFor("app.openSettings"))).toBe("")
+		expect(await page.evaluate(id => window.__filenE2E.comboFor(id), UNBOUND_ACTION)).toBe("")
 	})
 
 	test("Escape cancels a recording without dismissing or navigating anything", async ({ page }) => {
 		await gotoKeyboardSettings(page)
 
-		const row = settingsRow(page)
+		const row = unboundRow(page)
 
 		await row.getByRole("button", { name: "Add shortcut" }).click()
 		await expect(row).toContainText("Press the keys you want to use")
@@ -115,7 +125,7 @@ test.describe("keyboard shortcuts", () => {
 	test("a second shortcuts list never strands the recording session", async ({ page }) => {
 		await gotoKeyboardSettings(page)
 
-		const row = settingsRow(page)
+		const row = unboundRow(page)
 
 		await row.getByRole("button", { name: "Add shortcut" }).click()
 		await expect(row).toContainText("Press the keys you want to use")

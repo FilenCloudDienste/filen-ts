@@ -5,6 +5,7 @@ import { DOCX_FIXTURE_TEXT, DOCX_MIME, docxFixtureBytes, type DocxFixtureName } 
 import { trackCspViolations } from "./helpers/csp"
 import { ribbonButton, ribbonCommands, ribbonTab } from "./helpers/ribbon"
 import { preview } from "@/locales/en/preview"
+import { menuItemName } from "./helpers/menu"
 
 // Comments and tracked changes in the DOCX editor in a real browser: a comment composed, replied to and
 // resolved in its margin balloon (and composed in the popover where the margin has no room), track changes
@@ -89,7 +90,7 @@ async function review(page: Page, group: string, button: string, item?: string):
 	await (await ribbonButton(page, page, group, button)).click()
 
 	if (item !== undefined) {
-		await page.getByRole("menuitem", { name: item, exact: true }).click()
+		await page.getByRole("menuitem", { name: menuItemName(item) }).click()
 	}
 }
 

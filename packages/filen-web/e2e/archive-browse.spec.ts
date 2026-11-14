@@ -7,6 +7,8 @@ import { trackCspViolations } from "./helpers/csp"
 import { FIXTURE_FILES, openFixtureRows } from "./helpers/fixtures"
 import { holdChunks, observeEgest } from "./helpers/jobs"
 import { bootTo } from "./helpers/listing"
+import { menuItemName } from "./helpers/menu"
+import { resolveModKey } from "./helpers/modkey"
 
 // The archive browser in the preview overlay, over the shared read-only fixture tree's archives
 // (helpers/archiveFixtures.ts builds each, helpers/fixtures.ts names them). Browsing is a pure read —
@@ -66,7 +68,7 @@ test.describe("archive browser", () => {
 		await expectRows(list, ["deep.txt"])
 		await expect(crumbs.getByRole("button", { name: "docs", exact: true })).toHaveCount(0)
 		await crumbs.getByRole("button", { name: "Show the directories above", exact: true }).click()
-		await page.getByRole("menuitem", { name: "docs", exact: true }).click()
+		await page.getByRole("menuitem", { name: menuItemName("docs") }).click()
 		await expect(crumbs.getByRole("button", { name: "docs", exact: true })).toHaveAttribute("aria-current", "location")
 		await expectRows(list, ["a"])
 
@@ -129,7 +131,7 @@ test.describe("archive browser", () => {
 		await crumbs.getByRole("button", { name: TREE, exact: true }).click()
 		await expect(browser.footerSummary()).toHaveText("")
 		await list.focus()
-		await page.keyboard.press("ControlOrMeta+a")
+		await page.keyboard.press(`${await resolveModKey(page)}+a`)
 
 		const allBytes = Object.values(TREE_FILES).reduce((sum, text) => sum + Buffer.byteLength(text), 0)
 
@@ -468,7 +470,7 @@ test.describe("archive browser", () => {
 		await expect(browser.status("Reading the archive…")).toHaveCount(0, { timeout: LISTING_TIMEOUT_MS })
 		await expect(list).toBeFocused()
 
-		await page.keyboard.press("ControlOrMeta+a")
+		await page.keyboard.press(`${await resolveModKey(page)}+a`)
 		// However the count is grouped.
 		await expect(browser.footerSummary()).toHaveText(/^100[,.\s\u00a0\u202f]?000 files selected · 0 B$/)
 

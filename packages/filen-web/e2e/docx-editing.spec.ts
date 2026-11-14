@@ -5,6 +5,7 @@ import { DOCX_FIXTURE_TEXT, DOCX_MIME, docxFixtureBytes, svgPictureBytes, type D
 import { trackCspViolations } from "./helpers/csp"
 import { closeOfficeDocument, ribbonButton, ribbonCommands, ribbonTab } from "./helpers/ribbon"
 import { preview } from "@/locales/en/preview"
+import { menuItemName } from "./helpers/menu"
 
 // The DOCX editor's editing UI in a real browser: the Table group and a column border dragged on the page, a
 // header edited from its chip, content controls filled in where they are, and character formatting that a
@@ -315,7 +316,7 @@ test("ribbon: a pressed picture's tab fits a phone's width", async ({ page }) =>
 
 		await ribbonTab(page, preview.previewOfficeRibbonTabInsert)
 		await (await ribbonButton(page, page, preview.previewOfficeRibbonIllustrations, preview.previewDocxInsertPicture)).click()
-		await page.getByRole("menuitem", { name: preview.previewDocxPictureFromDevice, exact: true }).click()
+		await page.getByRole("menuitem", { name: menuItemName(preview.previewDocxPictureFromDevice) }).click()
 		await (await chooser).setFiles({ name: "w3-picture.svg", mimeType: "image/svg+xml", buffer: svgPictureBytes() })
 		await expect(picture).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
 

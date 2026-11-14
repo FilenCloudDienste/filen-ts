@@ -14,6 +14,7 @@ import {
 import { MOD_KEY } from "./helpers/modkey"
 import { ACTION_DEFS } from "@/features/drive/lib/actionDefs"
 import { drive as driveDict } from "@/locales/en/drive"
+import { menuItemLabels, menuItemName } from "./helpers/menu"
 
 // The unit layer (itemMenu.test.ts / bulkActionBar.test.ts) proves the descriptor LIST a given
 // item/variant/selection is gated to; it cannot prove the RENDERED menu actually carries those
@@ -91,8 +92,8 @@ async function assertRowContextMenu(page: Page, listbox: Locator, name: string, 
 
 	const menu = page.getByRole("menu")
 	await expect(menu).toBeVisible()
-	// Array form is a whole-string, in-order match per element — no "exact" option needed/available.
-	await expect(menu.getByRole("menuitem")).toHaveText(labels)
+	// Whole labels, in order, without the key hints the listing's entries end in.
+	await expect.poll(() => menuItemLabels(menu.getByRole("menuitem"))).toEqual(labels)
 
 	await page.keyboard.press("Escape")
 	await expect(menu).toHaveCount(0)
@@ -120,7 +121,7 @@ test.describe("context menus", () => {
 			await page.getByRole("button", { name: "New", exact: true }).first().click()
 			const uploadMenu = page.getByRole("menu")
 			await expect(uploadMenu).toBeVisible()
-			await uploadMenu.getByRole("menuitem", { name: "New text file", exact: true }).click()
+			await uploadMenu.getByRole("menuitem", { name: menuItemName("New text file") }).click()
 
 			const fileDialog = page.getByRole("heading", { name: "New text file", exact: true })
 			await expect(fileDialog).toBeVisible()
@@ -156,7 +157,7 @@ test.describe("context menus", () => {
 			await fileRow.click({ button: "right" })
 			const linkMenu = page.getByRole("menu")
 			await expect(linkMenu).toBeVisible()
-			await linkMenu.getByRole("menuitem", { name: labelFor("publicLink"), exact: true }).click()
+			await linkMenu.getByRole("menuitem", { name: menuItemName(labelFor("publicLink")) }).click()
 
 			// Scoped by its own title: the preview overlay is a role="dialog" too (previewOverlay.tsx), so a
 			// bare role lookup can resolve to the wrong surface — or to both at once.
@@ -203,7 +204,7 @@ test.describe("context menus", () => {
 			await fileRow.click({ button: "right" })
 			const bulkContextMenu = page.getByRole("menu")
 			await expect(bulkContextMenu).toBeVisible()
-			await expect(bulkContextMenu.getByRole("menuitem")).toHaveText(expectedBulkLabels)
+			await expect.poll(() => menuItemLabels(bulkContextMenu.getByRole("menuitem"))).toEqual(expectedBulkLabels)
 			await page.keyboard.press("Escape")
 			await expect(bulkContextMenu).toHaveCount(0)
 
@@ -215,7 +216,7 @@ test.describe("context menus", () => {
 			await fileRow.click({ button: "right" })
 			const retargetedMenu = page.getByRole("menu")
 			await expect(retargetedMenu).toBeVisible()
-			await expect(retargetedMenu.getByRole("menuitem")).toHaveText(FILE_MENU_LABELS)
+			await expect.poll(() => menuItemLabels(retargetedMenu.getByRole("menuitem"))).toEqual(FILE_MENU_LABELS)
 			await page.keyboard.press("Escape")
 			await expect(retargetedMenu).toHaveCount(0)
 
@@ -230,7 +231,7 @@ test.describe("context menus", () => {
 			await dirRow.click({ button: "right" })
 			const trashMenu = page.getByRole("menu")
 			await expect(trashMenu).toBeVisible()
-			await trashMenu.getByRole("menuitem", { name: labelFor("trash"), exact: true }).click()
+			await trashMenu.getByRole("menuitem", { name: menuItemName(labelFor("trash")) }).click()
 
 			// Scoped by title, never a bare role: a startup account reminder is an alertdialog too and can
 			// pop asynchronously, which would make this both a strict-mode hazard and an unreachable
@@ -278,7 +279,7 @@ test.describe("context menus", () => {
 			const restoreMenu = page.getByRole("menu")
 			await expect(restoreMenu).toBeVisible()
 			// "restore" runs "direct" (itemMenu.logic.ts) — no confirm dialog, unlike bulk restore.
-			await restoreMenu.getByRole("menuitem", { name: labelFor("restore"), exact: true }).click()
+			await restoreMenu.getByRole("menuitem", { name: menuItemName(labelFor("restore")) }).click()
 			// With no confirm to close, the row leaving the trash listing IS the live write — hence the
 			// write budget rather than the expect default, which only ever covers a React commit.
 			await expect(trashedDirRow).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })

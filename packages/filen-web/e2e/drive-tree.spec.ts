@@ -8,6 +8,7 @@ import {
 	expectBreadcrumbAt
 } from "./helpers/listing"
 import { pointerDragMove } from "./helpers/dnd"
+import { menuItemLabels, menuItemName } from "./helpers/menu"
 
 const TREE_ROW_SELECTOR = "[data-tree-path]"
 
@@ -36,7 +37,7 @@ test.describe("sidebar directory tree", () => {
 			await listbox.getByRole("option", { name: childName }).click({ button: "right" })
 			const rowMenu = page.getByRole("menu")
 			await expect(rowMenu).toBeVisible()
-			const rowEntries = await rowMenu.getByRole("menuitem").allTextContents()
+			const rowEntries = await menuItemLabels(rowMenu.getByRole("menuitem"))
 			await page.keyboard.press("Escape")
 			await expect(rowMenu).toHaveCount(0)
 
@@ -47,13 +48,13 @@ test.describe("sidebar directory tree", () => {
 
 			const menu = page.getByRole("menu")
 			await expect(menu).toBeVisible()
-			const entries = await menu.getByRole("menuitem").allTextContents()
-			// The one difference is Paste's shortcut badge: the tree's own mod+v pastes into the focused node,
-			// while the listing's pastes into the directory on screen rather than the row.
-			expect(entries.slice(0, 3).map(label => (label.startsWith("Paste") ? "Paste" : label))).toEqual(["Open", "New", "Paste"])
-			expect(entries.map(label => (label.startsWith("Paste") ? "Paste" : label))).toEqual(rowEntries)
+			// Compared without their key hints: the listing's keys act on its rows, the tree's own (its mod+v pastes into
+			// the focused node) on its nodes, so the two menus' hints differ by design.
+			const entries = await menuItemLabels(menu.getByRole("menuitem"))
+			expect(entries.slice(0, 3)).toEqual(["Open", "New", "Paste"])
+			expect(entries).toEqual(rowEntries)
 
-			await menu.getByRole("menuitem", { name: "Open", exact: true }).click()
+			await menu.getByRole("menuitem", { name: menuItemName("Open") }).click()
 			await expectBreadcrumbAt(page, childName)
 			await waitForListingSettled(page)
 		})

@@ -8,6 +8,7 @@ import { pdfSyntax } from "./helpers/pdfBytes"
 import { WORKBOOK_PASSWORD, encryptedWorkbook } from "@/tests/encryptedWorkbookFixtures"
 import { dialogOf, openFromListing, XLSX_MIME } from "./helpers/sheet"
 import { preview } from "@/locales/en/preview"
+import { menuItemName } from "./helpers/menu"
 
 // Download as ▸ PDF on the spreadsheet viewer end to end: made in the sheet worker beside the session (its fonts
 // fetched from the app's origin under the CSP), the sheet on show as it prints, a local download named after the
@@ -35,11 +36,11 @@ async function xlsxBytes(rows: number): Promise<Buffer> {
 // A protected workbook's PDF takes its password, asked for before the export.
 async function downloadPdf(page: Page, dialog: Locator, password?: string): Promise<{ name: string; text: string }> {
 	await dialog.getByRole("button", { name: preview.previewSheetFileMenu, exact: true }).click()
-	await page.getByRole("menuitem", { name: preview.previewSheetDownloadAs, exact: true }).click()
+	await page.getByRole("menuitem", { name: menuItemName(preview.previewSheetDownloadAs) }).click()
 
 	const downloading = page.waitForEvent("download", { timeout: PDF_TIMEOUT_MS })
 
-	await page.getByRole("menuitem", { name: preview.previewSheetDownloadPdf, exact: true }).click()
+	await page.getByRole("menuitem", { name: menuItemName(preview.previewSheetDownloadPdf) }).click()
 
 	if (password !== undefined) {
 		const prompt = page.getByRole("dialog", { name: preview.previewOfficePdfPasswordTitle })

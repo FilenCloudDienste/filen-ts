@@ -13,6 +13,7 @@ import {
 } from "./helpers/listing"
 import { resolveModKey } from "./helpers/modkey"
 import { trackCspViolations } from "./helpers/csp"
+import { menuItemName } from "./helpers/menu"
 
 // The one live proof the whole subtree search feature works end to end: a real
 // configureCache/createSearch/getRange round trip against the live cache-search engine, real
@@ -172,7 +173,7 @@ test("subtree search finds a nested file with its parent path, mod+f focuses it,
 		await revealHit.click({ button: "right" })
 		const revealMenu = page.getByRole("menu")
 		await expect(revealMenu).toBeVisible()
-		await revealMenu.getByRole("menuitem", { name: "Open containing directory", exact: true }).click()
+		await revealMenu.getByRole("menuitem", { name: menuItemName("Open containing directory") }).click()
 
 		// TWO splat segments — the regression guard for the truncated-splat defect: the target is built
 		// from the SDK's full ancestor chain, never from the item's own single `parent` uuid.

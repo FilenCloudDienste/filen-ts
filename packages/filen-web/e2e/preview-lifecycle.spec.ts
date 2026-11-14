@@ -11,6 +11,7 @@ import {
 import { focusEditorSurface } from "./helpers/editor"
 import { TEXT_BYTES } from "./helpers/fixtureBytes"
 import { resolveEditorModKey } from "./helpers/modkey"
+import { menuItemName } from "./helpers/menu"
 
 // Preview overlay lifecycle: editable-text save/persist/dirty-guard (including cross-sibling paging),
 // and a trashed file's read-only preview variant. The edited/trashed files never leave their own
@@ -366,11 +367,11 @@ test("the preview header's own item menu: matches the row menu's set (no Downloa
 			// header's separate Download button (still present, asserted below) covers that one. Copy link
 			// is the links view's alone.
 			for (const label of ["Rename", "Move", "Favorite", "Info", "Share", "Public link", "Trash"]) {
-				await expect(menu.getByRole("menuitem", { name: label, exact: true })).toBeVisible({ timeout: 10_000 })
+				await expect(menu.getByRole("menuitem", { name: menuItemName(label) })).toBeVisible({ timeout: 10_000 })
 			}
 
-			await expect(menu.getByRole("menuitem", { name: "Download", exact: true })).toHaveCount(0)
-			await expect(menu.getByRole("menuitem", { name: "Copy link", exact: true })).toHaveCount(0)
+			await expect(menu.getByRole("menuitem", { name: menuItemName("Download") })).toHaveCount(0)
+			await expect(menu.getByRole("menuitem", { name: menuItemName("Copy link") })).toHaveCount(0)
 		}).toPass({ timeout: 60_000 })
 
 		await expect(dialog.getByRole("button", { name: "Download", exact: true })).toBeVisible()
@@ -402,20 +403,20 @@ test("the preview header's own item menu: matches the row menu's set (no Downloa
 		// write landed — at the write budget, since it queues on the account-wide drive lease.
 		await menuTrigger.click()
 		await expect(menu).toBeVisible()
-		await menu.getByRole("menuitem", { name: "Favorite", exact: true }).click()
+		await menu.getByRole("menuitem", { name: menuItemName("Favorite") }).click()
 		await expect(menu).toHaveCount(0)
 		await menuTrigger.click()
-		await expect(menu.getByRole("menuitem", { name: "Unfavorite", exact: true })).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
+		await expect(menu.getByRole("menuitem", { name: menuItemName("Unfavorite") })).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
 
 		// Net-zero the favorite before trashing A, and settle it the same way: starting the trash while the
 		// unfavorite is still in flight queues two writes on that one lease behind a single wait.
-		await menu.getByRole("menuitem", { name: "Unfavorite", exact: true }).click()
+		await menu.getByRole("menuitem", { name: menuItemName("Unfavorite") }).click()
 		await expect(menu).toHaveCount(0)
 		await menuTrigger.click()
-		await expect(menu.getByRole("menuitem", { name: "Favorite", exact: true })).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
+		await expect(menu.getByRole("menuitem", { name: menuItemName("Favorite") })).toBeVisible({ timeout: LIVE_WRITE_TIMEOUT_MS })
 
 		// Trash A from inside the preview — the confirm nests over the overlay (Base UI dialog stacking).
-		await menu.getByRole("menuitem", { name: "Trash", exact: true }).click()
+		await menu.getByRole("menuitem", { name: menuItemName("Trash") }).click()
 		// Scoped by title, as everywhere else here — a startup reminder can pop as a second alertdialog.
 		const trashConfirm = page.getByRole("alertdialog", { name: "Move to trash?" })
 		await expect(trashConfirm).toBeVisible()

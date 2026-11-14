@@ -2,6 +2,7 @@ import { test, expect } from "./fixtures"
 import { bootTo, LAZY_VIEWER_TIMEOUT_MS } from "./helpers/listing"
 import { openFixtureRows } from "./helpers/fixtures"
 import { trackCspViolations } from "./helpers/csp"
+import { resolveModKey } from "./helpers/modkey"
 
 // Printing a PDF from the viewer: Mod+P opens the print dialog, Print renders the pages into the print root at each
 // page's own size, the browser's print dialog opens once every picture decoded, and the root is gone once it closed.
@@ -75,7 +76,7 @@ test("PDF prints every page at its size through the print root, cleaned up after
 
 	// Mod+P opens it again; Cancel closes it without printing.
 	await page.getByRole("region", { name: /Page 1 of 2/u }).click()
-	await page.keyboard.press("ControlOrMeta+p")
+	await page.keyboard.press(`${await resolveModKey(page)}+p`)
 	await expect(dialog).toBeVisible()
 	await dialog.getByRole("radio", { name: "Current page (1)" }).check()
 	await dialog.getByRole("button", { name: "Cancel" }).click()

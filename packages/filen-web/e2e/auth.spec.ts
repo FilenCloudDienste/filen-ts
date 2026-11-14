@@ -2,6 +2,7 @@ import type { BrowserContext, Page } from "@playwright/test"
 import { test, expect, readHarvestedSession, seedSession } from "./fixtures"
 import { waitForE2eHooks } from "./helpers/e2eHooks"
 import { BOOT_SETTLE_TIMEOUT_MS, bootTo, bootToSignIn, reloadToShell, SIGN_IN_HEADING, toasts } from "./helpers/listing"
+import { menuItemName } from "./helpers/menu"
 
 // Used with readHarvestedSession instead of the injectedSession fixture: that fixture serves the blob to
 // EVERY navigation of its page, including the reload logout itself triggers — left alone, it would
@@ -151,7 +152,7 @@ test.describe("auth", () => {
 			// as an actionability timeout on the NEXT step, naming a locator rather than the step that
 			// actually did not happen.
 			const accountMenu = page.getByRole("menu")
-			const signOutItem = accountMenu.getByRole("menuitem", { name: "Sign out", exact: true })
+			const signOutItem = accountMenu.getByRole("menuitem", { name: menuItemName("Sign out") })
 			// the confirm dialog's own action button
 			const signOutConfirm = page.getByRole("alertdialog").getByRole("button", { name: "Sign out", exact: true })
 

@@ -1,6 +1,7 @@
 import { test, expect } from "./fixtures"
 import { withScratchDirectory, LIVE_WRITE_TIMEOUT_MS } from "./helpers/listing"
 import { focusEditorSurface } from "./helpers/editor"
+import { menuItemName } from "./helpers/menu"
 
 // "New text file" (Upload menu's third entry, uploadMenu.tsx): create -> row appears instantly ->
 // editor opens automatically -> type + save round trip (the editable-preview save flow this reuses is
@@ -26,7 +27,7 @@ test("New text file: name without an extension defaults to .txt, the row appears
 		await page.getByRole("button", { name: "New", exact: true }).first().click()
 		const menu = page.getByRole("menu")
 		await expect(menu).toBeVisible()
-		await menu.getByRole("menuitem", { name: "New text file", exact: true }).click()
+		await menu.getByRole("menuitem", { name: menuItemName("New text file") }).click()
 
 		const nameDialogHeading = page.getByRole("heading", { name: "New text file", exact: true })
 		await expect(nameDialogHeading).toBeVisible()

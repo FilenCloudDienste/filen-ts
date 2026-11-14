@@ -6,6 +6,7 @@ import { resolveModKey } from "./helpers/modkey"
 import { ribbonButton, ribbonTab } from "./helpers/ribbon"
 import { closeDialog, expectCell, goTo, openRow, saveAndClose, XLSX_MIME } from "./helpers/sheet"
 import { preview } from "@/locales/en/preview"
+import { menuItemName } from "./helpers/menu"
 
 // Sorting and autofilters on the office engine end to end: the toolbar's sort and
 // filter menu sorts the data around the active cell and turns the filter on, a header's filter button opens its menu
@@ -35,7 +36,7 @@ async function xlsxBytes(): Promise<Buffer> {
 }
 
 function menuItem(page: Page, name: string): Locator {
-	return page.getByRole("menuitem", { name, exact: true })
+	return page.getByRole("menuitem", { name: menuItemName(name) })
 }
 
 // Home ▸ Editing ▸ Sort and filter, wherever the ribbon's width put it.
