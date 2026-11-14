@@ -771,6 +771,7 @@ async function runAudioMetadata(
 	c: Client,
 	uuid: string,
 	previewToken: string,
+	skipCover: boolean,
 	run: (deps: AudioMetadataDeps) => Promise<AudioMetadataResult>
 ): Promise<AudioMetadataResult> {
 	const controller = new AbortController()
@@ -778,6 +779,7 @@ async function runAudioMetadata(
 	try {
 		const result = await run({
 			signal: controller.signal,
+			skipCover,
 			makeThumbnail: async cover => {
 				const thumbnail = await c.makeThumbnailFromStream({
 					reader: new Blob([cover as Uint8Array<ArrayBuffer>]).stream(),
@@ -2856,11 +2858,18 @@ const api = {
 	// Tags plus a cover thumbnail for one audio file, parsed here so the parser's reads go straight to
 	// the SDK by range and the full-size cover never crosses to the page. The thumbnail is stored in the
 	// thumbnail cache under the file's uuid and also handed back, so the caller need not read it again.
-	// Cancelled through cancelPreviewDownload(previewToken), like the other preview reads.
-	async readAudioMetadata(file: AnyFile, uuid: string, mime: string, previewToken: string): Promise<AudioMetadataResult> {
+	// Cancelled through cancelPreviewDownload(previewToken), like the other preview reads. `skipCover`: a re-read
+	// for the ReplayGain tags alone, which neither reads nor stores the cover.
+	async readAudioMetadata(
+		file: AnyFile,
+		uuid: string,
+		mime: string,
+		previewToken: string,
+		options: { skipCover?: boolean } = {}
+	): Promise<AudioMetadataResult> {
 		const c = requireClient()
 
-		return runAudioMetadata(c, uuid, previewToken, deps =>
+		return runAudioMetadata(c, uuid, previewToken, options.skipCover === true, deps =>
 			parseAudioMetadata(Number(file.size), mime, (start, end) => readFileRange(c, file, start, end, deps.signal), deps)
 		)
 	},

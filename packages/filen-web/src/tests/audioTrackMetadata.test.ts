@@ -28,7 +28,9 @@ vi.mock("@/features/drive/lib/thumbCache", () => ({ readThumbnailBlob: vi.fn(), 
 
 const { TrackMetadataService } = await import("@/features/audio/lib/trackMetadata")
 const { JobQueue } = await import("@/features/audio/lib/trackMetadata.logic")
-const { planTrackTagEvictions, trackTagsKey, trackDisplayTitle } = await import("@/features/audio/lib/trackTags.logic")
+const { planTrackTagEvictions, trackTagsKey, trackDisplayTitle, TRACK_TAGS_MAX_RECORDS } =
+	await import("@/features/audio/lib/trackTags.logic")
+const { trackEdgesKey } = await import("@/features/audio/lib/trackEdges.logic")
 const { backfillTrackDuration, getTrackTags, hydrateTrackTags, putTrackTags, resetTrackTags, useTrackTagsStore } =
 	await import("@/features/audio/store/useTrackTagsStore")
 const { stringifyEnvelope } = await import("@filen/shared/session")
@@ -46,8 +48,10 @@ function record(overrides: Partial<TrackTagRecord> = {}): TrackTagRecord {
 	return { title: "T", artist: null, album: null, durationSec: null, cover: false, parsed: true, at: 1, ...overrides }
 }
 
+const GAIN = { trackDb: -7.5, trackPeak: 0.9, albumDb: null, albumPeak: null }
+
 function parsed(thumbnail: Uint8Array | null = null): AudioMetadataResult {
-	return { type: "parsed", tags: { title: "Song", artist: "Band", album: "Album", durationSec: 200 }, thumbnail }
+	return { type: "parsed", tags: { title: "Song", artist: "Band", album: "Album", durationSec: 200 }, gain: GAIN, thumbnail }
 }
 
 async function flush(): Promise<void> {
@@ -248,6 +252,36 @@ describe("useTrackTagsStore", () => {
 		expect(after.byUuid["b"]).toEqual(record({ title: "B", durationSec: 10 }))
 	})
 
+	it("hydrates a record from before ReplayGain was read (no gain) next to one that carries it", async () => {
+		fakeKv.set(trackTagsKey("old"), stringifyEnvelope(record({ title: "Old" })))
+		fakeKv.set(trackTagsKey("new"), stringifyEnvelope(record({ title: "New", gain: GAIN })))
+		fakeKv.set(trackTagsKey("bad"), stringifyEnvelope(record({ gain: { trackDb: "loud" } as never })))
+
+		await hydrateTrackTags()
+
+		expect(getTrackTags("old")).toEqual(record({ title: "Old" }))
+		expect(getTrackTags("old")?.gain).toBeUndefined()
+		expect(getTrackTags("new")?.gain).toEqual(GAIN)
+		expect(getTrackTags("bad")).toBeUndefined()
+	})
+
+	it("deletes an evicted track's edge analysis with its tags", async () => {
+		for (let i = 0; i <= TRACK_TAGS_MAX_RECORDS; i++) {
+			fakeKv.set(trackTagsKey(`t${String(i)}`), stringifyEnvelope(record({ at: i + 1 })))
+		}
+
+		fakeKv.set(trackEdgesKey("t0"), stringifyEnvelope({ v: "x" }))
+		fakeKv.set(trackEdgesKey("t1"), stringifyEnvelope({ v: "x" }))
+
+		await hydrateTrackTags()
+		await flush()
+
+		expect(fakeKv.has(trackTagsKey("t0"))).toBe(false)
+		expect(fakeKv.has(trackEdgesKey("t0"))).toBe(false)
+		expect(fakeKv.has(trackTagsKey("t1"))).toBe(true)
+		expect(fakeKv.has(trackEdgesKey("t1"))).toBe(true)
+	})
+
 	it("starts from an empty record map after a reset that followed writes", () => {
 		putTrackTags("a", record({ title: "A" }))
 
@@ -382,6 +416,98 @@ describe("TrackMetadataService", () => {
 		await service.request(track("a"), { refresh: true }).promise
 
 		expect(deps.readRemote).toHaveBeenCalledTimes(1)
+	})
+
+	it("writes the gain with every new parse, and reads the cover with it", async () => {
+		const { service, deps } = makeService()
+
+		expect(await service.request(track("a")).promise).toMatchObject({ type: "ready", record: { gain: GAIN } })
+		expect(getTrackTags("a")?.gain).toEqual(GAIN)
+		expect(deps.readRemote).toHaveBeenCalledWith(expect.objectContaining({ uuid: "a" }), expect.any(String), { skipCover: false })
+	})
+
+	describe("refreshGain", () => {
+		it("re-reads a record without gain, skipping the cover, and keeps its cover flag", async () => {
+			const { service, deps } = makeService()
+
+			putTrackTags("a", record({ title: "Kept", cover: true, at: 1 }))
+			deps.readRemote.mockResolvedValue(parsed(null))
+
+			const outcome = await service.request(track("a"), { priority: true, refreshGain: true }).promise
+
+			expect(deps.readRemote).toHaveBeenCalledWith(expect.objectContaining({ uuid: "a" }), expect.any(String), { skipCover: true })
+			expect(outcome).toEqual({ type: "ready", record: record({ title: "Kept", cover: true, gain: GAIN, at: 42 }), thumbnail: null })
+			expect(getTrackTags("a")).toEqual(record({ title: "Kept", cover: true, gain: GAIN, at: 42 }))
+			expect(service.peekCoverUrl("a")).toBeNull()
+			expect(deps.createObjectUrl).not.toHaveBeenCalled()
+		})
+
+		it("costs nothing for a record that already has its gain, or one the parser could not read", async () => {
+			const { service, deps } = makeService()
+
+			putTrackTags("a", record({ gain: GAIN }))
+			putTrackTags("b", record({ parsed: false }))
+
+			expect(await service.request(track("a"), { refreshGain: true }).promise).toMatchObject({ record: { gain: GAIN } })
+			expect(await service.request(track("b"), { refreshGain: true }).promise).toMatchObject({ record: { parsed: false } })
+			expect(deps.readRemote).not.toHaveBeenCalled()
+		})
+
+		it("re-reads at most once per session, on a guard of its own that leaves the cover refresh alone", async () => {
+			const { service, deps } = makeService()
+
+			putTrackTags("a", record({ cover: true }))
+			deps.readRemote.mockResolvedValue({ type: "readFailed" })
+
+			await service.request(track("a"), { refreshGain: true }).promise
+			await service.request(track("a"), { refreshGain: true }).promise
+
+			expect(deps.readRemote).toHaveBeenCalledTimes(1)
+
+			deps.readRemote.mockResolvedValue(parsed(new Uint8Array([1])))
+
+			expect(await service.request(track("a"), { refresh: true }).promise).toMatchObject({ type: "ready", record: { cover: true } })
+			expect(deps.readRemote).toHaveBeenCalledTimes(2)
+			expect(deps.readRemote).toHaveBeenLastCalledWith(expect.objectContaining({ uuid: "a" }), expect.any(String), {
+				skipCover: false
+			})
+			expect(service.peekCoverUrl("a")).toBe("blob:1")
+			// A cover refresh spent leaves the gain guard as it was, and the other way round.
+			await service.request(track("a"), { refresh: true }).promise
+			expect(deps.readRemote).toHaveBeenCalledTimes(2)
+		})
+
+		it("keeps the record unchanged when the gain re-read finds the file unparseable", async () => {
+			const { service, deps } = makeService()
+
+			putTrackTags("a", record({ title: "Kept", cover: true }))
+			deps.readRemote.mockResolvedValue({ type: "unparseable" })
+
+			expect(await service.request(track("a"), { refreshGain: true }).promise).toMatchObject({
+				record: { title: "Kept", parsed: true }
+			})
+			expect(getTrackTags("a")).toEqual(record({ title: "Kept", cover: true }))
+		})
+
+		it("lets a cover refresh wait for a gain re-read in flight instead of joining it", async () => {
+			const { service, deps } = makeService()
+			const gate = Promise.withResolvers<AudioMetadataResult>()
+
+			putTrackTags("a", record({ cover: true }))
+			deps.readRemote.mockReturnValueOnce(gate.promise).mockResolvedValueOnce(parsed(new Uint8Array([1])))
+
+			const gain = service.request(track("a"), { refreshGain: true })
+			const cover = service.request(track("a"), { refresh: true })
+
+			await flush()
+			gate.resolve(parsed(null))
+
+			expect(await gain.promise).toMatchObject({ record: { gain: GAIN }, thumbnail: null })
+			const covered = await cover.promise
+
+			expect(covered.type === "ready" ? covered.thumbnail : null).toBeInstanceOf(Blob)
+			expect(deps.readRemote.mock.calls.map(([, , options]) => options)).toEqual([{ skipCover: true }, { skipCover: false }])
+		})
 	})
 
 	it("loads a cover URL from the thumbnail cache without reading the track", async () => {

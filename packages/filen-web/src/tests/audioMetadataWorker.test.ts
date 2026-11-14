@@ -30,7 +30,7 @@ const COVER = new Uint8Array([0xff, 0xd8, 0xff, 0xe0, 1, 2, 3, 4, 0xff, 0xd9])
 
 // ID3v2.3 with title/artist/album and a cover, then a run of 128 kbps CBR MPEG frames, zero-padded out to
 // `size` bytes.
-function mp3(size: number, withCover = true): Uint8Array {
+function mp3(size: number, withCover = true, txxx: [string, string][] = []): Uint8Array {
 	function frame(id: string, data: Uint8Array): Uint8Array {
 		return concat(encoder.encode(id), be32(data.length), new Uint8Array([0, 0]), data)
 	}
@@ -43,6 +43,7 @@ function mp3(size: number, withCover = true): Uint8Array {
 		frame("TIT2", text("Night Drive")),
 		frame("TPE1", text("The Band")),
 		frame("TALB", text("Roads")),
+		...txxx.map(([description, value]) => frame("TXXX", text(`${description}\0${value}`))),
 		withCover
 			? frame("APIC", concat(new Uint8Array([0]), encoder.encode("image/jpeg\0"), new Uint8Array([3, 0]), COVER))
 			: new Uint8Array()
@@ -79,7 +80,9 @@ function flac(): Uint8Array {
 	}
 
 	const streamInfo = concat(new Uint8Array([0x10, 0x00, 0x10, 0x00, 0, 0, 0, 0, 0, 0]), packedBytes, new Uint8Array(16))
-	const comments = ["TITLE=Lake", "ARTIST=Quiet Ones", "ALBUM=Shore"].map(comment => encoder.encode(comment))
+	const comments = ["TITLE=Lake", "ARTIST=Quiet Ones", "ALBUM=Shore", "REPLAYGAIN_TRACK_GAIN=-6.00 dB"].map(comment =>
+		encoder.encode(comment)
+	)
 	const vorbis = concat(le32(0), le32(comments.length), ...comments.flatMap(comment => [le32(comment.length), comment]))
 	const mime = encoder.encode("image/jpeg")
 	const picture = concat(be32(3), be32(mime.length), mime, be32(0), be32(1), be32(1), be32(24), be32(0), be32(COVER.length), COVER)
@@ -123,7 +126,11 @@ describe("readAudioMetadata (ranged)", () => {
 
 		const result = await readAudioMetadata(bytes.length, "audio/flac", readerOver(bytes), deps)
 
-		expect(result).toMatchObject({ type: "parsed", tags: { title: "Lake", artist: "Quiet Ones", album: "Shore", durationSec: 10 } })
+		expect(result).toMatchObject({
+			type: "parsed",
+			tags: { title: "Lake", artist: "Quiet Ones", album: "Shore", durationSec: 10 },
+			gain: { trackDb: -6, trackPeak: null }
+		})
 		expect(deps.makeThumbnail).toHaveBeenCalledWith(COVER)
 	})
 
@@ -147,6 +154,41 @@ describe("readAudioMetadata (ranged)", () => {
 			thumbnail: null
 		})
 		expect(refusing.storeThumbnail).not.toHaveBeenCalled()
+	})
+
+	it('reads ReplayGain from the raw TXXX frames, "+3.2dB" without a space included', async () => {
+		const bytes = mp3(8192, false, [
+			["REPLAYGAIN_TRACK_GAIN", "+3.2dB"],
+			["replaygain_track_peak", "0.5"],
+			["REPLAYGAIN_ALBUM_GAIN", "-7.10 dB"]
+		])
+
+		expect(await readAudioMetadata(bytes.length, "audio/mpeg", readerOver(bytes), makeDeps())).toMatchObject({
+			type: "parsed",
+			gain: { trackDb: 3.2, trackPeak: 0.5, albumDb: -7.1, albumPeak: null }
+		})
+	})
+
+	it("reads an untagged file's gain as all nulls", async () => {
+		const bytes = mp3(8192, false)
+
+		expect(await readAudioMetadata(bytes.length, "audio/mpeg", readerOver(bytes), makeDeps())).toMatchObject({
+			gain: { trackDb: null, trackPeak: null, albumDb: null, albumPeak: null }
+		})
+	})
+
+	it("reads the gain alone with skipCover: no cover is thumbnailed or stored", async () => {
+		const bytes = mp3(8192, true, [["REPLAYGAIN_TRACK_GAIN", "-4 dB"]])
+		const deps = { ...makeDeps(), skipCover: true }
+
+		expect(await readAudioMetadata(bytes.length, "audio/mpeg", readerOver(bytes), deps)).toMatchObject({
+			type: "parsed",
+			tags: { title: "Night Drive" },
+			gain: { trackDb: -4 },
+			thumbnail: null
+		})
+		expect(deps.makeThumbnail).not.toHaveBeenCalled()
+		expect(deps.storeThumbnail).not.toHaveBeenCalled()
 	})
 
 	it("settles unparseable for bytes no parser recognizes", async () => {

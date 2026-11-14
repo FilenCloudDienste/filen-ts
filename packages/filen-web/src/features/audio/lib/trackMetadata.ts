@@ -47,10 +47,12 @@ export interface TrackMetadataRequestOptions {
 	priority?: boolean
 	// Parse again although a record exists: its cover thumbnail left the cache.
 	refresh?: boolean
+	// Parse again, without the cover, when the record predates ReplayGain (it has no `gain`); its cover flag is kept.
+	refreshGain?: boolean
 }
 
 export interface TrackMetadataDeps extends ObjectUrlFns {
-	readRemote: (track: QueueTrack, token: string) => Promise<AudioMetadataResult>
+	readRemote: (track: QueueTrack, token: string, options: { skipCover: boolean }) => Promise<AudioMetadataResult>
 	cancelRead: (token: string) => void
 	readThumbnail: (uuid: string) => Promise<Blob | null>
 	isOnline: () => boolean
@@ -63,6 +65,8 @@ interface Pending {
 	job: QueuedJob | null
 	holders: number
 	started: boolean
+	// A gain-only re-read: it yields no cover, so a cover refresh waits for it instead of joining it.
+	gainOnly: boolean
 }
 
 const UNAVAILABLE: TrackMetadataOutcome = { type: "unavailable" }
@@ -75,6 +79,9 @@ export class TrackMetadataService {
 	// Tracks already re-read this session for an evicted cover, so a thumbnail cache that keeps losing
 	// the write can never turn every remount into another download.
 	private readonly refreshed = new Set<string>()
+	// Tracks already re-read this session for a missing gain; separate from the cover guard, so neither
+	// refresh uses up the other.
+	private readonly gainRefreshed = new Set<string>()
 	private readonly readTokens = new Set<string>()
 	private readonly coverUrls: ThumbnailUrlCache
 	private readonly coverReads = new InFlight<string, string | null>()
@@ -96,6 +103,10 @@ export class TrackMetadataService {
 	public request(track: QueueTrack, options: TrackMetadataRequestOptions = {}): TrackMetadataRequest {
 		const existing = this.pending.get(track.uuid)
 
+		if (existing !== undefined && options.refresh === true && existing.gainOnly) {
+			return this.after(existing, track, options)
+		}
+
 		if (existing !== undefined) {
 			existing.holders++
 
@@ -109,13 +120,15 @@ export class TrackMetadataService {
 		if (
 			(this.failures.get(track.uuid) ?? 0) >= FAILURE_LIMIT ||
 			!this.deps.isOnline() ||
-			(options.refresh === true && this.refreshed.has(track.uuid))
+			(options.refresh === true && this.refreshed.has(track.uuid)) ||
+			(options.refreshGain === true && this.gainRefreshed.has(track.uuid))
 		) {
 			return { promise: Promise.resolve(UNAVAILABLE), cancel: () => undefined }
 		}
 
 		const { promise, resolve } = Promise.withResolvers<TrackMetadataOutcome>()
-		const entry: Pending = { promise, resolve, job: null, holders: 1, started: false }
+		const gainOnly = options.refreshGain === true && options.refresh !== true
+		const entry: Pending = { promise, resolve, job: null, holders: 1, started: false, gainOnly }
 		const epoch = this.epoch
 
 		this.pending.set(track.uuid, entry)
@@ -125,6 +138,10 @@ export class TrackMetadataService {
 			// Counted once it runs: a refresh dropped before starting (its row scrolled away) used nothing.
 			if (options.refresh === true) {
 				this.refreshed.add(track.uuid)
+			}
+
+			if (options.refreshGain === true) {
+				this.gainRefreshed.add(track.uuid)
 			}
 
 			resolve(await this.read(track, options, epoch).catch(() => UNAVAILABLE))
@@ -137,6 +154,28 @@ export class TrackMetadataService {
 		})
 
 		return this.handle(track.uuid, entry)
+	}
+
+	// A cover refresh behind a gain-only re-read of the same track: it starts once that one settles.
+	private after(existing: Pending, track: QueueTrack, options: TrackMetadataRequestOptions): TrackMetadataRequest {
+		let cancelled = false
+		let inner: TrackMetadataRequest | null = null
+
+		return {
+			promise: existing.promise.then(() => {
+				if (cancelled) {
+					return UNAVAILABLE
+				}
+
+				inner = this.request(track, options)
+
+				return inner.promise
+			}),
+			cancel: () => {
+				cancelled = true
+				inner?.cancel()
+			}
+		}
 	}
 
 	private handle(uuid: string, entry: Pending): TrackMetadataRequest {
@@ -170,10 +209,15 @@ export class TrackMetadataService {
 	private async read(track: QueueTrack, options: TrackMetadataRequestOptions, epoch: number): Promise<TrackMetadataOutcome> {
 		await hydrateTrackTags()
 
+		// A record without gain, re-read for it alone; any other record is the answer as it is.
+		let stale: TrackTagRecord | null = null
+
 		if (options.refresh !== true) {
 			const known = getTrackTags(track.uuid) ?? (await adoptPersistedTrackTags(track.uuid))
 
-			if (known !== null) {
+			if (known !== null && options.refreshGain === true && known.parsed && known.gain === undefined) {
+				stale = known
+			} else if (known !== null) {
 				return { type: "ready", record: known, thumbnail: null }
 			}
 		}
@@ -188,7 +232,7 @@ export class TrackMetadataService {
 		this.readTokens.add(token)
 
 		try {
-			result = await this.deps.readRemote(track, token)
+			result = await this.deps.readRemote(track, token, { skipCover: stale !== null })
 		} catch (error) {
 			if (epoch === this.epoch) {
 				log.warn("audio", "track metadata read failed", error)
@@ -210,6 +254,22 @@ export class TrackMetadataService {
 			return UNAVAILABLE
 		}
 
+		if (stale !== null) {
+			// Merged into the record as it is now (a duration may have been backfilled meanwhile); the cover flag
+			// stays, since a gain-only read never touches the thumbnail cache.
+			const current = getTrackTags(track.uuid) ?? stale
+
+			if (result.type !== "parsed") {
+				return { type: "ready", record: current, thumbnail: null }
+			}
+
+			const record: TrackTagRecord = { ...current, gain: result.gain, at: this.deps.now() }
+
+			putTrackTags(track.uuid, record)
+
+			return { type: "ready", record, thumbnail: null }
+		}
+
 		if (result.type === "unparseable") {
 			const record: TrackTagRecord = {
 				title: null,
@@ -228,7 +288,7 @@ export class TrackMetadataService {
 
 		const thumbnail =
 			result.thumbnail !== null ? new Blob([result.thumbnail as Uint8Array<ArrayBuffer>], { type: COVER_THUMBNAIL_TYPE }) : null
-		const record: TrackTagRecord = { ...result.tags, cover: thumbnail !== null, parsed: true, at: this.deps.now() }
+		const record: TrackTagRecord = { ...result.tags, cover: thumbnail !== null, parsed: true, gain: result.gain, at: this.deps.now() }
 
 		putTrackTags(track.uuid, record)
 
@@ -333,6 +393,7 @@ export class TrackMetadataService {
 		this.readTokens.clear()
 		this.failures.clear()
 		this.refreshed.clear()
+		this.gainRefreshed.clear()
 
 		this.coverUrls.clear()
 		resetTrackTags()
@@ -345,8 +406,10 @@ function firstInLine(): number {
 
 export const trackMetadata = new TrackMetadataService({
 	// Downloads share the media features' range-read cap.
-	readRemote: (track, token) =>
-		rangeReads.run<AudioMetadataResult>(firstInLine, () => sdkApi.readAudioMetadata(track.file, track.uuid, track.mime, token)),
+	readRemote: (track, token, options) =>
+		rangeReads.run<AudioMetadataResult>(firstInLine, () =>
+			sdkApi.readAudioMetadata(track.file, track.uuid, track.mime, token, options)
+		),
 	cancelRead: token => {
 		void sdkApi.cancelPreviewDownload(token)
 	},
