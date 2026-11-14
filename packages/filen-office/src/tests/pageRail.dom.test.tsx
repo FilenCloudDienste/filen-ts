@@ -122,6 +122,25 @@ describe("page rail", () => {
 		expect(document.activeElement?.getAttribute("data-fo-index")).toBe("3")
 	})
 
+	it("keeps the focus in the rail when the focused page is deleted", () => {
+		renderRail({ count: 3, current: 1 })
+		act(() => host.querySelector<HTMLElement>("[data-fo-index='1']")?.focus())
+		renderRail({ count: 1, current: 0 })
+		expect(document.activeElement?.getAttribute("data-fo-index")).toBe("0")
+	})
+
+	it("leaves the focus alone when pages go while it is elsewhere", () => {
+		const outside = document.createElement("button")
+
+		document.body.appendChild(outside)
+		renderRail({ count: 3, current: 1 })
+		act(() => host.querySelector<HTMLElement>("[data-fo-index='1']")?.focus())
+		act(() => outside.focus())
+		renderRail({ count: 1, current: 0 })
+		expect(document.activeElement).toBe(outside)
+		outside.remove()
+	})
+
 	it("toggles with Space, extends with Shift and the arrows, selects all, deletes", () => {
 		const handlers = renderRail({ current: 4 })
 

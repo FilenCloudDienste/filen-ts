@@ -270,6 +270,10 @@ export function PageRail({
 	// A drag just ended: the click its release fires selects nothing.
 	const dragged = useRef(false)
 	const edgeScroll = useRef<{ frame: number; speed: number }>({ frame: 0, speed: 0 })
+	// Roving focus: whether the focus is in the rail (it stays so when its focused item is removed, which moves the
+	// focus to the body without saying where), and the count it was last laid out with.
+	const focusWithin = useRef(false)
+	const laidOutCount = useRef(count)
 	const ids = useId()
 	const grid = layout === "grid" && vertical
 	const cell = grid ? thumbWidth + Math.max(0, cellChrome ?? 0) + gap : 0
@@ -331,12 +335,19 @@ export function PageRail({
 			else container.scrollLeft = target
 		}
 
+		const removed = count < laidOutCount.current
+
+		laidOutCount.current = count
+
 		if (!roving) return
 
 		const active = container.ownerDocument.activeElement
 		const option = container.ownerDocument.getElementById(`${ids}-item-${String(selectedIndex)}`)
+		// Items removed with the focus on one of them (Delete): the focus went to the body, and comes back to the current.
+		const lost = removed && focusWithin.current && (active === null || active === container.ownerDocument.body)
 
-		if (option !== null && active !== option && active !== null && container.contains(active)) option.focus({ preventScroll: true })
+		if (option !== null && active !== option && (lost || (active !== null && container.contains(active))))
+			option.focus({ preventScroll: true })
 	}, [currentRow, selectedIndex, total, vertical, count, roving])
 
 	// Thumbnails for what is mounted, at device pixels: the items in view first, then the overscan nearest first.
@@ -693,6 +704,13 @@ export function PageRail({
 			aria-activedescendant={roving || count === 0 ? undefined : optionId(selectedIndex)}
 			tabIndex={roving && count > 0 ? -1 : 0}
 			onKeyDown={onKeyDown}
+			onFocus={() => {
+				focusWithin.current = true
+			}}
+			onBlur={event => {
+				// Focus moving to another element outside; a removed item's blur (no next element) keeps it.
+				if (event.relatedTarget !== null && !event.currentTarget.contains(event.relatedTarget)) focusWithin.current = false
+			}}
 			onPointerDown={onPointerDown}
 			onPointerMove={onPointerMove}
 			onPointerUp={onPointerUp}
