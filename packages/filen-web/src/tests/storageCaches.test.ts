@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
 	wipeArtStore: vi.fn<() => Promise<void>>(),
 	wipeVideoIndexStore: vi.fn<() => Promise<void>>(),
 	resetTrackTags: vi.fn(),
+	resetTrackEdges: vi.fn(),
 	removeAssistantModel: vi.fn<() => Promise<void>>(),
 	deleteModels: vi.fn<() => Promise<void>>(),
 	modelState: "downloaded",
@@ -34,6 +35,7 @@ vi.mock("@/features/drive/lib/thumbCache", () => ({ wipeThumbnailStore: mocks.wi
 vi.mock("@/features/videos/lib/artStore", () => ({ wipeArtStore: mocks.wipeArtStore }))
 vi.mock("@/features/videos/lib/indexStore", () => ({ wipeVideoIndexStore: mocks.wipeVideoIndexStore }))
 vi.mock("@/features/audio/store/useTrackTagsStore", () => ({ resetTrackTags: mocks.resetTrackTags }))
+vi.mock("@/features/audio/lib/trackEdges", () => ({ resetTrackEdges: mocks.resetTrackEdges }))
 vi.mock("@/features/assistant/store/assistantSession", () => ({ removeAssistantModel: mocks.removeAssistantModel }))
 vi.mock("@/features/assistant/store/useAssistantStore", () => ({
 	useAssistantStore: { getState: () => ({ modelState: { kind: mocks.modelState } }) }
@@ -128,9 +130,9 @@ describe("measureRow", () => {
 		expect(mocks.kvPrefixBytes).toHaveBeenCalledWith(VIDEO_CACHE_KV_PREFIXES)
 	})
 
-	it("measures music and the query cache by their kv prefixes", async () => {
-		expect(await measureRow("music")).toBe(10)
-		expect(mocks.kvPrefixBytes).toHaveBeenLastCalledWith(["audio.v1.tags."])
+	it("measures music (tags and edge analyses) and the query cache by their kv prefixes", async () => {
+		expect(await measureRow("music")).toBe(20)
+		expect(mocks.kvPrefixBytes).toHaveBeenLastCalledWith(["audio.v1.tags.", "audio.v1.edges."])
 		expect(await measureRow("queryCache")).toBe(10)
 		expect(mocks.kvPrefixBytes).toHaveBeenLastCalledWith(["rq."])
 	})
@@ -169,11 +171,12 @@ describe("clearRow", () => {
 		expect(mocks.vacuumDatabase).toHaveBeenCalledOnce()
 	})
 
-	it("drops this tab's track tags with their rows", async () => {
+	it("drops this tab's track tags and edge analyses with their rows", async () => {
 		await clearRow("music")
 
-		expect(mocks.kvDeletePrefix).toHaveBeenCalledWith("audio.v1.tags.")
+		expect(mocks.kvDeletePrefix.mock.calls.map(([prefix]) => prefix)).toEqual(["audio.v1.tags.", "audio.v1.edges."])
 		expect(mocks.resetTrackTags).toHaveBeenCalledOnce()
+		expect(mocks.resetTrackEdges).toHaveBeenCalledOnce()
 	})
 
 	it("clears the persisted query rows", async () => {

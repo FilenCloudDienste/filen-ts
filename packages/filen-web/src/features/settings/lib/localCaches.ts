@@ -7,6 +7,8 @@ import { wipeVideoIndexStore } from "@/features/videos/lib/indexStore"
 import { VIDEO_CACHE_KV_PREFIXES } from "@/features/videos/lib/cacheKeys.logic"
 import { TRACK_TAGS_KV_PREFIX } from "@/features/audio/lib/trackTags.logic"
 import { resetTrackTags } from "@/features/audio/store/useTrackTagsStore"
+import { TRACK_EDGES_KV_PREFIX } from "@/features/audio/lib/smoothTransitions.types"
+import { resetTrackEdges } from "@/features/audio/lib/trackEdges"
 import { MODEL_LOCK, MODELS_DIRECTORY, deleteModels } from "@/features/assistant/runtime/modelStore"
 import { removeAssistantModel } from "@/features/assistant/store/assistantSession"
 import { useAssistantStore } from "@/features/assistant/store/useAssistantStore"
@@ -52,6 +54,9 @@ export function clearAllRows(desktop: boolean, networkDriveBytes: number | null)
 // Rows whose clear deletes kv rows, after which the database file is compacted.
 const KV_ROWS: ReadonlySet<CacheRow> = new Set<CacheRow>(["videos", "music", "queryCache"])
 
+// The music row: each track's tags and its edge analysis.
+const MUSIC_KV_PREFIXES = [TRACK_TAGS_KV_PREFIX, TRACK_EDGES_KV_PREFIX] as const
+
 function sum(values: readonly number[]): number {
 	return values.reduce((total, value) => total + value, 0)
 }
@@ -71,7 +76,7 @@ export async function measureRow(row: MeasuredRow, signal?: AbortSignal): Promis
 			return art + index + sum(kv ?? [])
 		}
 		case "music": {
-			const bytes = await kvPrefixBytes([TRACK_TAGS_KV_PREFIX])
+			const bytes = await kvPrefixBytes(MUSIC_KV_PREFIXES)
 
 			return bytes === null ? null : sum(bytes)
 		}
@@ -127,9 +132,10 @@ async function clearRowNow(row: ClearableRow): Promise<ClearOutcome> {
 			await settleAll([wipeArtStore(), wipeVideoIndexStore(), ...VIDEO_CACHE_KV_PREFIXES.map(prefix => kvDeletePrefix(prefix))])
 			break
 		case "music":
-			await kvDeletePrefix(TRACK_TAGS_KV_PREFIX)
-			// This tab's in-memory copy would keep showing the tags; other tabs keep theirs but never write it back.
+			await settleAll(MUSIC_KV_PREFIXES.map(prefix => kvDeletePrefix(prefix)))
+			// This tab's in-memory copies would keep showing the tags; other tabs keep theirs but never write them back.
 			resetTrackTags()
+			resetTrackEdges()
 			break
 		case "queryCache":
 			await kvDeletePrefix(PERSIST_FAMILY)

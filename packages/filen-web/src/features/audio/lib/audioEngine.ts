@@ -2,6 +2,7 @@ import { AudioEngine } from "@/features/audio/lib/engine"
 import { createDomAudioAdapter, createDomPrefetchAdapter, resolveTrackSource } from "@/features/audio/lib/bytes"
 import { bindMediaSessionActions, createMediaSessionPublisher } from "@/features/audio/lib/mediaSession"
 import { trackMetadata } from "@/features/audio/lib/trackMetadata"
+import { resetTrackEdges } from "@/features/audio/lib/trackEdges"
 import { notifyFormatFailure } from "@/features/audio/lib/formatFailureNotice"
 import { hydrateAudioPrefs, useAudioStore } from "@/features/audio/store/useAudioStore"
 import { warmMediaVolume } from "@/lib/media/mediaVolume"
@@ -71,4 +72,5 @@ bindMediaSessionActions(
 export function disposeAudioEngine(): void {
 	audioEngine.dispose()
 	trackMetadata.reset()
+	resetTrackEdges()
 }

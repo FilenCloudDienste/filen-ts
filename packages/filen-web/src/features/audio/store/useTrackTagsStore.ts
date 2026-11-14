@@ -10,6 +10,7 @@ import {
 	TRACK_TAGS_MAX_RECORDS,
 	type TrackTagRecord
 } from "@/features/audio/lib/trackTags.logic"
+import { trackEdgesKey } from "@/features/audio/lib/trackEdges.logic"
 
 // The reactive, session-wide view of every persisted track-tag record: the one source of truth for a
 // track's title/artist/album/duration, read by the playlist table, the player bar and the OS media
@@ -70,8 +71,11 @@ export function hydrateTrackTags(): Promise<void> {
 			// Anything written while the read was in flight is newer than what the read returned.
 			useTrackTagsStore.setState(state => ({ byUuid: { ...loaded, ...state.byUuid }, hydrated: true }))
 
+			// A track's edge analysis goes with its tags: an evicted uuid is almost always one its file's content
+			// rotated away from.
 			for (const uuid of evicted) {
 				void kvDelete(trackTagsKey(uuid)).catch(() => undefined)
+				void kvDelete(trackEdgesKey(uuid)).catch(() => undefined)
 			}
 		})
 		.catch((error: unknown) => {

@@ -135,10 +135,11 @@ describe("Local data and caches", () => {
 			expect(within(row("Thumbnails")).getByText(formatBytes(3_000_000))).toBeTruthy()
 		})
 		expect(within(row("Videos library")).getByText(formatBytes(1_500_000 + 5 * 1000))).toBeTruthy()
-		expect(within(row("Music metadata")).getByText(formatBytes(1000))).toBeTruthy()
+		// Two kv families: the tags and the edge analyses.
+		expect(within(row("Music metadata")).getByText(formatBytes(2000))).toBeTruthy()
 		expect(within(row("Cached lists and content")).getByText(formatBytes(1000))).toBeTruthy()
 		expect(await findTotal()).toContain(formatBytes(10_000_000))
-		expect(within(row("Other")).getByText(formatBytes(10_000_000 - 3_000_000 - 1_505_000 - 2000))).toBeTruthy()
+		expect(within(row("Other")).getByText(formatBytes(10_000_000 - 3_000_000 - 1_505_000 - 3000))).toBeTruthy()
 		expect(within(row("Other")).queryByRole("button")).toBeNull()
 		expect(screen.queryByText("AI model", { selector: "p" })).toBeNull()
 		expect(screen.queryByText("Browser cache", { selector: "p" })).toBeNull()
