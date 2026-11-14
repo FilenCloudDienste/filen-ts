@@ -11,6 +11,8 @@ import { playbackErrorLabel } from "@/features/audio/lib/formatFailureNotice"
 import { MEDIA_FORMAT_UNSUPPORTED } from "@/lib/media/mediaFailure"
 import { NowPlayingPanel } from "@/features/audio/components/nowPlayingPanel"
 import { ShuffleToggleButton, LoopToggleButton, TOGGLE_ON_CLASS } from "@/features/audio/components/queueToggles"
+import { SmoothTransitionsToggleButton } from "@/features/audio/components/smoothTransitionsToggle"
+import { toggleSmoothTransitionsByUser } from "@/features/audio/lib/smoothTransitionsUi"
 import { useAction } from "@/lib/keymap/useAction"
 import { isRecordingCombo, useBindings } from "@/lib/keymap/registry"
 import { isMacPlatform } from "@/lib/keymap/kbd.logic"
@@ -129,6 +131,7 @@ export function AudioPlayerBar() {
 		},
 		TRANSPORT_KEYS
 	)
+	useAction("audio.smoothTransitions", toggleSmoothTransitionsByUser, TRANSPORT_KEYS)
 	useAction(
 		"audio.toggleQueue",
 		() => {
@@ -257,6 +260,7 @@ export function AudioPlayerBar() {
 							<SkipForward />
 						</Button>
 						<LoopToggleButton className="hidden sm:inline-flex" />
+						<SmoothTransitionsToggleButton className="hidden sm:inline-flex" />
 					</div>
 					<PlayerBarTimeline />
 				</div>

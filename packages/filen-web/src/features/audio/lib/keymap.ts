@@ -24,6 +24,8 @@ export const AUDIO_ACTIONS: readonly ActionDef[] = [
 	transport("audio.mute", "alt+shift+m", "audio:commandMute"),
 	transport("audio.shuffle", "alt+shift+s", "audio:commandShuffle"),
 	transport("audio.loop", "alt+shift+r", "audio:commandLoop"),
+	// Unassigned: Alt+Shift+D is the document editor's date field.
+	transport("audio.smoothTransitions", "", "audio:commandSmoothTransitions"),
 	// No free chord: unassigned, so it can be bound.
 	transport("audio.toggleQueue", "", "audio:commandToggleQueue")
 ]

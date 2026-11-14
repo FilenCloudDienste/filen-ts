@@ -30,6 +30,22 @@ export const audio = {
 	volume: "Volume",
 	/** Seek slider label */
 	seek: "Seek",
+	/** Name of the feature that blends the end of each track into the start of the next one (a crossfade; it never
+	 *  picks songs). The player's toggle, its settings card and its switch */
+	smoothTransitions: "Smooth transitions",
+	/** Tooltip of the player's toggle for blending each track into the next (a crossfade, never song picking), with
+	 *  the blend length; {{count}} is a whole number of seconds */
+	smoothTransitionsTooltip_one: "Smooth transitions · {{count}} s",
+	smoothTransitionsTooltip_other: "Smooth transitions · {{count}} s",
+	/** Why blending each track into the next (a crossfade, never song picking) can't be used: this device isn't
+	 *  supported yet */
+	smoothTransitionsUnavailableDevice: "Not available on this device yet.",
+	/** Why blending each track into the next (a crossfade, never song picking) stopped: the device's audio mixer failed,
+	 *  so tracks switch at once until the page is reloaded */
+	smoothTransitionsUnavailableDegraded: "Off until you reload: this device stopped the audio mixer.",
+	/** Why blending each track into the next (a crossfade, never song picking) can't be used for what is playing: this
+	 *  browser can't mix tracks streamed this way */
+	smoothTransitionsUnavailableSource: "This browser can't mix these tracks here.",
 
 	// ── Now-playing surface ────────────────────────────────────────────────
 	/** Shown in place of a track name before anything is queued */
@@ -84,6 +100,8 @@ export const audio = {
 	commandShuffle: "Shuffle on or off",
 	/** Switch the repeat mode (off, all, one) via keyboard */
 	commandLoop: "Change repeat mode",
+	/** Turn on or off blending each track into the next (a crossfade, never song picking) via keyboard */
+	commandSmoothTransitions: "Smooth transitions on or off",
 	/** Show or hide the play queue via keyboard */
 	commandToggleQueue: "Show or hide the queue",
 

@@ -6,6 +6,7 @@ import { useTrackTagsStore } from "@/features/audio/store/useTrackTagsStore"
 import { trackDisplayTitle } from "@/features/audio/lib/trackTags.logic"
 import type { QueueTrack } from "@/features/audio/store/audioQueue"
 import { ShuffleToggleButton, LoopToggleButton } from "@/features/audio/components/queueToggles"
+import { SmoothTransitionsToggleButton } from "@/features/audio/components/smoothTransitionsToggle"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { cn } from "@filen/shared"
@@ -33,6 +34,7 @@ export function NowPlayingPanel() {
 				<div className="flex items-center gap-1">
 					<ShuffleToggleButton />
 					<LoopToggleButton />
+					<SmoothTransitionsToggleButton />
 					<Button
 						variant="ghost"
 						size="icon-sm"

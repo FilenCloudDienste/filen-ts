@@ -51,6 +51,11 @@ describe("AUDIO_ACTIONS — static contract", () => {
 		expect(AUDIO_ACTIONS.find(def => def.id === "audio.volumeDown")?.defaultCombo).toBe("")
 	})
 
+	// Alt+Shift+D is the document editor's date field.
+	it("leave smooth transitions unassigned", () => {
+		expect(AUDIO_ACTIONS.find(def => def.id === "audio.smoothTransitions")?.defaultCombo).toBe("")
+	})
+
 	it("have unique ids under the audio namespace", () => {
 		const ids = AUDIO_ACTIONS.map(def => def.id)
 
