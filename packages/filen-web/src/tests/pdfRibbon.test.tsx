@@ -374,6 +374,18 @@ describe("PdfRibbon", () => {
 		expect(screen.queryByRole("alertdialog")).toBeNull()
 	})
 
+	it("keeps Save named Save while a save runs (its spinner is decoration)", () => {
+		const props = setup({ history: history({ saving: true, canSave: false }) })
+
+		render(<PdfRibbon {...props} />)
+
+		const save = screen.getByRole("button", { name: "Save" })
+
+		expect(save).toHaveProperty("disabled", true)
+		expect(save.getAttribute("aria-busy")).toBe("true")
+		expect(within(save).queryByRole("status")).toBeNull()
+	})
+
 	it("disables saving while it may not run", () => {
 		const props = setup({ history: history({ canSave: false }) })
 

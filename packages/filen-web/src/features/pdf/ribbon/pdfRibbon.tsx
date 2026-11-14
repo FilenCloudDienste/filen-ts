@@ -246,15 +246,22 @@ function HistoryControls({ history, onDiscard }: { history: PdfRibbonHistory; on
 				<Redo2Icon />
 			</TooltipIconButton>
 			<div className="flex items-center">
+				{/* Saving keeps the button's name "Save" (the spinner is decoration; aria-busy says it is under way). */}
 				<Button
 					size="xs"
 					disabled={!history.canSave}
+					aria-busy={history.saving}
 					className="rounded-r-none"
 					onClick={() => {
 						history.save()
 					}}
 				>
-					{history.saving ? <Spinner data-icon="inline-start" /> : null}
+					{history.saving ? (
+						<Spinner
+							data-icon="inline-start"
+							aria-hidden="true"
+						/>
+					) : null}
 					{t("previewPdfSave")}
 				</Button>
 				<DropdownMenu>
