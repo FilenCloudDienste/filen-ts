@@ -1,5 +1,6 @@
 import type { AdvanceResult, ElementSample, LoopMode } from "@/features/audio/store/audioQueue"
 import type { TrackEdges } from "@/features/audio/lib/smoothTransitions.types"
+import { edgesMatchDuration } from "@/features/audio/lib/trackEdges.logic"
 
 // Pure planning for smooth transitions: when an overlap starts and stops, how the two gains move, and which
 // transitions play gapless instead. Times are ms unless a name says otherwise.
@@ -13,10 +14,6 @@ export const MICRO_OVERLAP_MS = 80
 
 // A skip the user asked for, with the "short fade" setting.
 export const MANUAL_FADE_MS = 1_500
-
-// Edges analysed for a file whose length differs this much from what the element reports are for another
-// encoding of it (or a misread VBR length) and are ignored.
-const EDGE_DURATION_TOLERANCE_MS = 1_500
 
 // Below this level a boundary second is silence: an ordinary album gap rather than one movement running into the next.
 const BOUNDARY_SILENCE_DB = -50
@@ -84,13 +81,10 @@ export function continuousBoundary(input: TransitionInput): boolean {
 	return !(tail !== undefined && head !== undefined && tail < BOUNDARY_SILENCE_DB && head < BOUNDARY_SILENCE_DB)
 }
 
-// Edges usable for a play of a file the element reports as `durationMs` long.
+// Edges usable for a play of a file the element reports as `durationMs` long: analysed, and for this length of the
+// file (not another encoding of it, nor a misread VBR length).
 export function usableEdges(edges: TrackEdges | null, durationMs: number): TrackEdges | null {
-	if (edges?.status !== "ok" || edges.durationSec === null) {
-		return null
-	}
-
-	return Math.abs(edges.durationSec * 1000 - durationMs) <= EDGE_DURATION_TOLERANCE_MS ? edges : null
+	return edges?.status === "ok" && edgesMatchDuration(edges, durationMs) ? edges : null
 }
 
 // The incoming is asked to play `startLatencyMs` ahead, so the overlap that is heard is the micro-overlap itself.
