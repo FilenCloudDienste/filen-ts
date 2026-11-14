@@ -5,16 +5,21 @@ import type { ContextState } from "@/features/audio/lib/outputWatchdog.logic"
 // while the feature is off. Structural types stand in for the DOM's, so a test can hand in a fake context.
 
 export interface AudioParamLike {
-	setValueAtTime: (value: number, time: number) => unknown
-	setTargetAtTime: (target: number, time: number, timeConstant: number) => unknown
-	linearRampToValueAtTime: (value: number, time: number) => unknown
-	setValueCurveAtTime: (values: Float32Array, time: number, duration: number) => unknown
-	cancelScheduledValues: (time: number) => unknown
+	setValueAtTime(value: number, time: number): unknown
+	setTargetAtTime(target: number, time: number, timeConstant: number): unknown
+	linearRampToValueAtTime(value: number, time: number): unknown
+	setValueCurveAtTime(values: Float32Array, time: number, duration: number): unknown
+	cancelScheduledValues(time: number): unknown
 }
 
 export interface AudioNodeLike {
-	connect: (destination: AudioNodeLike) => unknown
-	disconnect: () => void
+	connect(destination: AudioNodeLike): unknown
+	disconnect(destination?: AudioNodeLike): void
+}
+
+export interface AnalyserNodeLike extends AudioNodeLike {
+	fftSize: number
+	getFloatTimeDomainData(array: Float32Array<ArrayBuffer>): void
 }
 
 export interface GainNodeLike extends AudioNodeLike {
@@ -26,11 +31,12 @@ export interface AudioContextLike {
 	readonly currentTime: number
 	readonly destination: AudioNodeLike
 	onstatechange: unknown
-	resume: () => Promise<void>
-	suspend: () => Promise<void>
-	close: () => Promise<void>
-	createGain: () => GainNodeLike
-	createMediaElementSource: (element: HTMLMediaElement) => AudioNodeLike
+	resume(): Promise<void>
+	suspend(): Promise<void>
+	close(): Promise<void>
+	createGain(): GainNodeLike
+	createAnalyser(): AnalyserNodeLike
+	createMediaElementSource(element: HTMLMediaElement): AudioNodeLike
 }
 
 // navigator.audioSession (WebKit): "playback" keeps Web Audio rendering where the OS would treat the page as ambient.
@@ -46,6 +52,8 @@ export interface ElementGain {
 	holdFade: (value: number) => void
 	// Cancels any fade automation and plays `curve` from `startSeconds` over `durationSeconds`.
 	scheduleFade: (curve: Float32Array, startSeconds: number, durationSeconds: number) => void
+	// Resolves once the element's sound reaches the graph (or after `timeoutMs`, or on release).
+	whenAudible: (timeoutMs: number) => Promise<void>
 	release: () => void
 }
 
@@ -81,6 +89,8 @@ export interface AudioOutputDeps {
 }
 
 const IDLE_SUSPEND_MS = 10_000
+const AUDIBLE_POLL_MS = 10
+const PROBE_SIZE = 256
 const MASTER_TIME_CONSTANT = 0.015
 
 function contextState(state: string | undefined): ContextState {
@@ -228,6 +238,30 @@ class WebAudioOutput implements AudioOutput {
 				fade.gain.setValueAtTime(curve[0] ?? 1, context.currentTime)
 				fade.gain.setValueCurveAtTime(curve, start, Math.max(0.001, durationSeconds))
 			},
+			whenAudible: timeoutMs =>
+				new Promise<void>(resolve => {
+					const probe = context.createAnalyser()
+					const samples = new Float32Array(PROBE_SIZE)
+					const deadline = Date.now() + timeoutMs
+
+					probe.fftSize = PROBE_SIZE
+					source.connect(probe)
+
+					const check = (): void => {
+						probe.getFloatTimeDomainData(samples)
+
+						if (released || Date.now() >= deadline || samples.some(value => value !== 0)) {
+							source.disconnect(probe)
+							resolve()
+
+							return
+						}
+
+						setTimeout(check, AUDIBLE_POLL_MS)
+					}
+
+					check()
+				}),
 			release: () => {
 				if (released) {
 					return

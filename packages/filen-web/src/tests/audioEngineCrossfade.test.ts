@@ -88,6 +88,7 @@ function makeGain(): FakeGain {
 			scheduleFade: (curve, start, duration) => {
 				fake.events.push({ kind: "curve", curve, start, duration })
 			},
+			whenAudible: () => Promise.resolve(),
 			release: () => {
 				fake.released = true
 			}
@@ -687,7 +688,7 @@ describe("transitions that never crossfade", () => {
 		expect(out?.gain?.events.some(event => event.kind === "curve")).toBe(false)
 	})
 
-	it("overlaps an album run by 80 ms only, armed by the timer near the end", async () => {
+	it("overlaps an album run by 80 ms only, asked for early by the start latency", async () => {
 		enable()
 		putTrackTags("a", tags({ album: "Album", artist: "Artist" }))
 		putTrackTags("b", tags({ album: "Album", artist: "Artist" }))
@@ -701,16 +702,24 @@ describe("transitions that never crossfade", () => {
 
 		out.setSample({ currentTimeMs: 199_000 })
 		out.fire("onTimeUpdate")
-		// The element's clock moves on with the wall clock; no update arrives before the end.
-		out.setSample({ currentTimeMs: 199_930 })
-		vi.advanceTimersByTime(920)
+		// The element's clock moves on with the wall clock; no update arrives before the end. The timer fires 80 ms
+		// plus 1.5 × the assumed 50 ms start latency ahead of the end.
+		vi.advanceTimersByTime(844)
+
+		expect(useAudioStore.getState().currentIndex).toBe(0)
+
+		out.setSample({ currentTimeMs: 199_920 })
+		vi.advanceTimersByTime(1)
 		await flush()
 
 		expect(useAudioStore.getState().currentIndex).toBe(1)
 
 		const inFade = lastFade(warm.gain)
+		const outFade = lastFade(out.gain)
 
+		// Both cross over exactly what is left of the outgoing.
 		expect(inFade?.kind === "curve" && inFade.duration).toBeCloseTo(0.08, 3)
+		expect(outFade?.kind === "curve" && outFade.duration).toBeCloseTo(0.08, 3)
 	})
 
 	it("plays out gapless after a seek into the window, and keeps the fade after a seek before it", async () => {

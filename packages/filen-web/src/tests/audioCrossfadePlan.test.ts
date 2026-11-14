@@ -44,6 +44,7 @@ function input(overrides: Partial<TransitionInput> = {}): TransitionInput {
 		consecutive: false,
 		fadeSeconds: 6,
 		gaplessOnly: false,
+		startLatencyMs: 0,
 		...overrides
 	}
 }
@@ -167,6 +168,11 @@ describe("manual and micro-overlap plans", () => {
 			inStartMs: 0,
 			inFadeMs: MANUAL_FADE_MS
 		})
+	})
+
+	it("asks for a gapless switch early by the incoming's start latency", () => {
+		expect(microOverlapPlan(30_000, 60).startAtMs).toBe(30_000 - MICRO_OVERLAP_MS - 60)
+		expect(planTransition(input({ gaplessOnly: true, startLatencyMs: 40 }))?.startAtMs).toBe(200_000 - MICRO_OVERLAP_MS - 40)
 	})
 
 	it("overlaps a gapless switch by 80 ms at the very end", () => {

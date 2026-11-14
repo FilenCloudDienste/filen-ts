@@ -36,6 +36,8 @@ interface FakeContext extends AudioContextLike {
 	sources: number
 	resumes: number
 	suspends: number
+	// What an analyser on a routed element reads: its sound, once it arrives.
+	audible: boolean
 	closes: number
 	setState: (state: string) => void
 }
@@ -54,6 +56,7 @@ function fakeContext(initialState = "running"): FakeContext {
 		sources: 0,
 		resumes: 0,
 		suspends: 0,
+		audible: false,
 		closes: 0,
 		setState: next => {
 			state = next
@@ -87,6 +90,13 @@ function fakeContext(initialState = "running"): FakeContext {
 
 			return entry.node
 		},
+		createAnalyser: () => ({
+			...node(),
+			fftSize: 2048,
+			getFloatTimeDomainData: array => {
+				array.fill(context.audible ? 0.25 : 0)
+			}
+		}),
 		createMediaElementSource: () => {
 			context.sources++
 
@@ -280,6 +290,48 @@ describe("AudioOutput", () => {
 		contexts[0]?.setState("suspended")
 
 		expect(output.usable).toBe(false)
+	})
+
+	it("waits until a routed element is heard, or gives up after the timeout", async () => {
+		const { output, contexts } = setup()
+
+		output.unlock()
+
+		const gain = output.connect(element)
+		let heard = false
+
+		void gain?.whenAudible(600).then(() => {
+			heard = true
+		})
+		vi.advanceTimersByTime(100)
+		await Promise.resolve()
+
+		expect(heard).toBe(false)
+
+		const context = contexts[0]
+
+		if (context !== undefined) {
+			context.audible = true
+		}
+
+		vi.advanceTimersByTime(10)
+		await Promise.resolve()
+
+		expect(heard).toBe(true)
+
+		let timedOut = false
+
+		if (context !== undefined) {
+			context.audible = false
+		}
+
+		void gain?.whenAudible(200).then(() => {
+			timedOut = true
+		})
+		vi.advanceTimersByTime(250)
+		await Promise.resolve()
+
+		expect(timedOut).toBe(true)
 	})
 
 	it("reports state changes to its listener", () => {

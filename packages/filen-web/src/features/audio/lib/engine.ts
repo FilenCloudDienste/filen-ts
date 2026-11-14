@@ -61,6 +61,19 @@ const CURVE_LEAD_SECONDS = 0.02
 // A cold target of a "short fade" skip that is not playing by then: the outgoing fades out on its own.
 const MANUAL_FADE_TARGET_TIMEOUT_MS = 3_000
 
+// A routed element's sound can reach the graph well after its play() resolved (WebKit buffers it): the curves wait
+// for it to be heard, this long at most (a track that opens with digital silence).
+const AUDIBLE_TIMEOUT_MS = 600
+
+// How long a warm element takes from play() to being heard, before one was measured, and how much one measurement
+// moves it.
+const INITIAL_START_LATENCY_MS = 50
+// WebKit hands a routed element's sound to the graph about half a second after it starts.
+const WEBKIT_START_LATENCY_MS = 450
+const START_LATENCY_WEIGHT = 0.3
+const START_LATENCY_MARGIN = 1.5
+const MAX_START_LATENCY_MS = 300
+
 // Turning loudness matching on or off moves the trims this smoothly.
 const TRIM_RAMP_SECONDS = 0.2
 
@@ -287,6 +300,8 @@ export class AudioEngine {
 	// Where a degrade reload resumes the track.
 	private pendingResume: { uuid: string; ms: number } | null = null
 	private watchdog: WatchdogState = INITIAL_WATCHDOG_STATE
+	// How long a warm element takes from play() to being heard here, smoothed: a gapless switch is asked for that early.
+	private startLatencyMs = INITIAL_START_LATENCY_MS
 
 	public constructor(deps: AudioEngineDeps) {
 		this.deps = deps
@@ -305,6 +320,8 @@ export class AudioEngine {
 
 		if (deps.smoothTransitions) {
 			const output = deps.smoothTransitions.output
+
+			this.startLatencyMs = deps.smoothTransitions.webkit ? WEBKIT_START_LATENCY_MS : INITIAL_START_LATENCY_MS
 
 			output.setMaster(masterLevel(useMediaVolumeStore.getState()))
 			output.onStateChange(() => {
@@ -590,7 +607,8 @@ export class AudioEngine {
 		this.planStale = true
 		smooth.output.setKeepOpen(this.smoothOn())
 
-		if (next.enabled && !previous.enabled) {
+		// Nothing loaded: the output starts with the next play instead of idling until then.
+		if (next.enabled && !previous.enabled && this.element !== null) {
 			this.unlockOutput()
 		}
 
@@ -728,7 +746,9 @@ export class AudioEngine {
 				inEdges: this.knownEdges.get(incoming.uuid) ?? null,
 				consecutive: !state.shuffleEnabled && advance.index === state.currentIndex + 1,
 				fadeSeconds: this.prefs().fadeSeconds,
-				gaplessOnly: this.gaplessOnlyUuid === out.uuid
+				gaplessOnly: this.gaplessOnlyUuid === out.uuid,
+				// Half again as much as measured: starting early only lengthens the overlap, starting late leaves a gap.
+				startLatencyMs: this.startLatencyMs * START_LATENCY_MARGIN
 			})
 		)
 
@@ -789,8 +809,15 @@ export class AudioEngine {
 		this.transitionTimer = setTimeout(() => {
 			this.transitionTimer = null
 
-			if (this.element === element) {
-				this.maybeStartTransition(element.sample())
+			if (this.element !== element) {
+				return
+			}
+
+			this.maybeStartTransition(element.sample())
+
+			// The media clock can run a little behind the timer: not due yet, so it waits again for what is left.
+			if (this.starting === null && this.fading === null) {
+				this.armTransitionTimer()
 			}
 		}, delay)
 	}
@@ -857,6 +884,8 @@ export class AudioEngine {
 
 		this.starting = starting
 
+		const askedAt = this.now()
+
 		try {
 			await incoming.play()
 		} catch (error) {
@@ -868,7 +897,7 @@ export class AudioEngine {
 		}
 
 		if (this.starting === starting) {
-			this.completeTransition(starting, outRouted, inRouted)
+			this.completeTransition(starting, outRouted, inRouted, askedAt)
 		}
 	}
 
@@ -892,34 +921,39 @@ export class AudioEngine {
 		}
 	}
 
-	private completeTransition(starting: Starting, outRouted: Routed, inRouted: Routed): void {
-		const smooth = this.deps.smoothTransitions
+	private completeTransition(starting: Starting, outRouted: Routed, inRouted: Routed, askedAt: number): void {
 		const outgoing = this.element
 		const state = useAudioStore.getState()
 		const track = starting.advance ? state.queue[starting.advance.index] : state.queue[state.currentIndex]
 
 		this.starting = null
 
-		if (smooth === undefined || outgoing === null || !track) {
+		if (outgoing === null || !track) {
 			this.retire(starting.incoming)
 			starting.source?.release()
 
 			return
 		}
 
-		const t0 = smooth.output.contextSeconds + CURVE_LEAD_SECONDS
-		const curves = fadeCurves(outRouted.peak, inRouted.peak)
-		const outRemainingMs = starting.plan.stopAtMs - outgoing.sample().currentTimeMs
 		const outgoingSource = this.currentSource
 
-		inRouted.gain.scheduleFade(curves.in, t0, starting.plan.inFadeMs / 1000)
-
-		if (starting.outgoingEnded || outRemainingMs <= CURVE_LEAD_SECONDS * 1000) {
+		if (starting.outgoingEnded) {
+			inRouted.gain.holdFade(1)
 			this.retire(outgoing)
 			outgoingSource?.release()
 		} else {
-			outRouted.gain.scheduleFade(curves.out, t0, outRemainingMs / 1000)
-			this.watchOverlapStalls(this.startFading(outgoing, outgoingSource, outRemainingMs), starting.incoming, starting.source)
+			// The outgoing plays on at full level until the incoming is heard; the curves start then.
+			const fading = this.startFading(
+				outgoing,
+				outgoingSource,
+				starting.plan.stopAtMs - outgoing.sample().currentTimeMs + AUDIBLE_TIMEOUT_MS
+			)
+			const plan = starting.plan
+
+			this.watchOverlapStalls(fading, starting.incoming, starting.source)
+			void inRouted.gain.whenAudible(AUDIBLE_TIMEOUT_MS).then(() => {
+				this.crossOnceAudible(fading, starting.incoming, outRouted, inRouted, plan, askedAt, starting.advance === null)
+			})
 		}
 
 		// The incoming is the current track from here: the store, the scrubber and the Media Session switch at fade
@@ -936,6 +970,67 @@ export class AudioEngine {
 		this.publishMetadata(track)
 		this.onDurationChange()
 		this.settlePlaying(starting.incoming, false)
+	}
+
+	// The incoming is heard: both curves start, the outgoing's over what is left of it (however late the incoming
+	// arrived), the incoming's over the fade (a gapless switch: over the same short remainder).
+	private crossOnceAudible(
+		fading: Fading,
+		incoming: AudioElementAdapter,
+		outRouted: Routed,
+		inRouted: Routed,
+		plan: TransitionPlan,
+		askedAt: number,
+		manual: boolean
+	): void {
+		const smooth = this.deps.smoothTransitions
+
+		if (this.element !== incoming || smooth === undefined) {
+			return
+		}
+
+		// The outgoing went first (it ended, or a seek dropped it): the incoming plays on alone at full level.
+		if (this.fading !== fading) {
+			inRouted.gain.holdFade(1)
+
+			return
+		}
+
+		this.startLatencyMs = Math.min(
+			MAX_START_LATENCY_MS,
+			this.startLatencyMs + (this.now() - askedAt - this.startLatencyMs) * START_LATENCY_WEIGHT
+		)
+
+		// A skip the user asked for fades over its full length from here; a natural transition must be over where the
+		// outgoing's audio ends.
+		const outRemainingMs = manual ? plan.inFadeMs : plan.stopAtMs - fading.element.sample().currentTimeMs
+
+		// Nothing left of the outgoing to cross with: the incoming plays at full level at once.
+		if (outRemainingMs <= CURVE_LEAD_SECONDS * 1000) {
+			inRouted.gain.holdFade(1)
+			this.finishFade(fading)
+
+			return
+		}
+
+		const t0 = smooth.output.contextSeconds + CURVE_LEAD_SECONDS
+		const curves = fadeCurves(outRouted.peak, inRouted.peak)
+		const inFadeMs = plan.kind === "gapless" ? outRemainingMs : plan.inFadeMs
+
+		inRouted.gain.scheduleFade(curves.in, t0, inFadeMs / 1000)
+		outRouted.gain.scheduleFade(curves.out, t0, outRemainingMs / 1000)
+		this.rescheduleFadeEnd(fading, outRemainingMs)
+	}
+
+	private rescheduleFadeEnd(fading: Fading, durationMs: number): void {
+		if (fading.timer !== null) {
+			clearTimeout(fading.timer)
+		}
+
+		fading.endsAt = this.now() + durationMs
+		fading.timer = setTimeout(() => {
+			this.finishFade(fading)
+		}, durationMs + 50)
 	}
 
 	private startFading(element: AudioElementAdapter, source: TrackSource | null, durationMs: number): Fading {
@@ -1614,20 +1709,30 @@ export class AudioEngine {
 			return
 		}
 
-		const t0 = smooth.output.contextSeconds + CURVE_LEAD_SECONDS
-		const curves = fadeCurves(outRouted.peak, inRouted.peak)
-
 		if (fading.timer !== null) {
 			clearTimeout(fading.timer)
+			fading.timer = null
 		}
 
-		outRouted.gain.scheduleFade(curves.out, t0, MANUAL_FADE_MS / 1000)
-		inRouted.gain.scheduleFade(curves.in, t0, MANUAL_FADE_MS / 1000)
 		this.watchOverlapStalls(fading, element, this.currentSource)
-		fading.endsAt = this.now() + MANUAL_FADE_MS
-		fading.timer = setTimeout(() => {
-			this.finishFade(fading)
-		}, MANUAL_FADE_MS + 50)
+		void inRouted.gain.whenAudible(AUDIBLE_TIMEOUT_MS).then(() => {
+			if (this.element !== element) {
+				return
+			}
+
+			if (this.fading !== fading) {
+				inRouted.gain.holdFade(1)
+
+				return
+			}
+
+			const t0 = smooth.output.contextSeconds + CURVE_LEAD_SECONDS
+			const curves = fadeCurves(outRouted.peak, inRouted.peak)
+
+			outRouted.gain.scheduleFade(curves.out, t0, MANUAL_FADE_MS / 1000)
+			inRouted.gain.scheduleFade(curves.in, t0, MANUAL_FADE_MS / 1000)
+			this.rescheduleFadeEnd(fading, MANUAL_FADE_MS)
+		})
 	}
 
 	// Move to `index` and start it. If it is already warmed by the prefetch element, promote it instead

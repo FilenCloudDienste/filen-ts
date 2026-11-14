@@ -41,6 +41,8 @@ export interface TransitionInput {
 	fadeSeconds: number
 	// A crossfade was ruled out for this transition (the user sought into its window): gapless only.
 	gaplessOnly: boolean
+	// How long the incoming element takes to start once asked: a gapless switch is asked for that much earlier.
+	startLatencyMs: number
 }
 
 // `crossfade`: overlap from `startAtMs` (outgoing position) for `inFadeMs`, the outgoing reaching 0 at `stopAtMs`, the
@@ -91,10 +93,11 @@ export function usableEdges(edges: TrackEdges | null, durationMs: number): Track
 	return Math.abs(edges.durationSec * 1000 - durationMs) <= EDGE_DURATION_TOLERANCE_MS ? edges : null
 }
 
-export function microOverlapPlan(outDurationMs: number): TransitionPlan {
+// The incoming is asked to play `startLatencyMs` ahead, so the overlap that is heard is the micro-overlap itself.
+export function microOverlapPlan(outDurationMs: number, startLatencyMs = 0): TransitionPlan {
 	return {
 		kind: "gapless",
-		startAtMs: Math.max(0, outDurationMs - MICRO_OVERLAP_MS),
+		startAtMs: Math.max(0, outDurationMs - MICRO_OVERLAP_MS - startLatencyMs),
 		stopAtMs: outDurationMs,
 		inStartMs: 0,
 		inFadeMs: MICRO_OVERLAP_MS
@@ -110,7 +113,7 @@ export function planTransition(input: TransitionInput): TransitionPlan | null {
 	const fadeMs = input.fadeSeconds * 1000
 
 	if (input.gaplessOnly || !crossfadeEligible(input.out, input.in, fadeMs) || continuousBoundary(input)) {
-		return microOverlapPlan(input.out.durationMs)
+		return microOverlapPlan(input.out.durationMs, input.startLatencyMs)
 	}
 
 	const outEdges = usableEdges(input.outEdges, input.out.durationMs)
