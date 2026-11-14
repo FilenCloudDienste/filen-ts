@@ -205,6 +205,8 @@ class WebAudioOutput implements AudioOutput {
 		const trim = context.createGain()
 		const fade = context.createGain()
 		let released = false
+		// The pending whenAudible probes, each settled false when the element is released.
+		const probes = new Set<() => void>()
 		let trimLevel = 1
 
 		source.connect(trim)
@@ -238,38 +240,70 @@ class WebAudioOutput implements AudioOutput {
 				fade.gain.setValueAtTime(curve[0] ?? 1, context.currentTime)
 				fade.gain.setValueCurveAtTime(curve, start, Math.max(0.001, durationSeconds))
 			},
-			whenAudible: timeoutMs =>
-				new Promise<boolean>(resolve => {
+			whenAudible: timeoutMs => {
+				if (released) {
+					return Promise.resolve(false)
+				}
+
+				return new Promise<boolean>(resolve => {
 					const probe = context.createAnalyser()
 					const samples = new Float32Array(PROBE_SIZE)
 					const deadline = Date.now() + timeoutMs
+					let timer: ReturnType<typeof setTimeout> | null = null
+
+					// Settles once; a release settles it false (the release already took the probe off the source).
+					const settle = (heard: boolean, disconnect: boolean): void => {
+						if (!probes.delete(abandon)) {
+							return
+						}
+
+						if (timer !== null) {
+							clearTimeout(timer)
+						}
+
+						if (disconnect) {
+							source.disconnect(probe)
+						}
+
+						resolve(heard)
+					}
+					const abandon = (): void => {
+						settle(false, false)
+					}
 
 					probe.fftSize = PROBE_SIZE
 					source.connect(probe)
+					probes.add(abandon)
 
 					const check = (): void => {
+						timer = null
 						probe.getFloatTimeDomainData(samples)
 
 						const heard = samples.some(value => value !== 0)
 
-						if (released || heard || Date.now() >= deadline) {
-							source.disconnect(probe)
-							resolve(heard)
+						if (heard || Date.now() >= deadline) {
+							settle(heard, true)
 
 							return
 						}
 
-						setTimeout(check, AUDIBLE_POLL_MS)
+						timer = setTimeout(check, AUDIBLE_POLL_MS)
 					}
 
 					check()
-				}),
+				})
+			},
 			release: () => {
 				if (released) {
 					return
 				}
 
 				released = true
+
+				for (const abandon of [...probes]) {
+					abandon()
+				}
+
 				source.disconnect()
 				trim.disconnect()
 				fade.disconnect()

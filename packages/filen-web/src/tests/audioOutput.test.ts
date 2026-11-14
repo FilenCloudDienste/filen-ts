@@ -44,7 +44,27 @@ interface FakeContext extends AudioContextLike {
 
 function fakeContext(initialState = "running"): FakeContext {
 	let state = initialState
-	const node = (): AudioNodeLike => ({ connect: () => undefined, disconnect: () => undefined })
+	// As the real AudioNode: disconnecting from a node it is not connected to throws InvalidAccessError.
+	const node = (): AudioNodeLike => {
+		const outputs = new Set<AudioNodeLike>()
+
+		return {
+			connect: destination => {
+				outputs.add(destination)
+			},
+			disconnect: destination => {
+				if (destination === undefined) {
+					outputs.clear()
+
+					return
+				}
+
+				if (!outputs.delete(destination)) {
+					throw new DOMException("not connected", "InvalidAccessError")
+				}
+			}
+		}
+	}
 	const context: FakeContext = {
 		get state() {
 			return state
@@ -290,6 +310,26 @@ describe("AudioOutput", () => {
 		contexts[0]?.setState("suspended")
 
 		expect(output.usable).toBe(false)
+	})
+
+	it("settles a pending wait false when the element is released, without touching the released nodes", async () => {
+		const { output } = setup()
+
+		output.unlock()
+
+		const gain = output.connect(element)
+		const results: boolean[] = []
+
+		void gain?.whenAudible(600).then(heard => {
+			results.push(heard)
+		})
+		vi.advanceTimersByTime(30)
+		gain?.release()
+		await Promise.resolve()
+
+		expect(results).toEqual([false])
+		expect(() => vi.advanceTimersByTime(1_000)).not.toThrow()
+		expect(await gain?.whenAudible(600)).toBe(false)
 	})
 
 	it("waits until a routed element is heard, or gives up after the timeout", async () => {
