@@ -108,6 +108,8 @@ interface SettingsRowProps {
 	// Renders the label as a <label> for the control with this id — for controls with no visible name
 	// of their own (an input, a select trigger).
 	htmlFor?: string
+	// The label's id, for a control named by aria-labelledby (a group of segments, a slider).
+	labelId?: string
 	destructive?: boolean
 	// Control slot under the text at every width, full width — for wide content (a bar, a table, an
 	// input with its button) rather than a single trailing control.
@@ -117,7 +119,7 @@ interface SettingsRowProps {
 
 // Label and description on the left, the control on the right; below `sm` the control drops under
 // the text.
-function SettingsRow({ label, description, htmlFor, destructive, stacked, children }: SettingsRowProps) {
+function SettingsRow({ label, description, htmlFor, labelId, destructive, stacked, children }: SettingsRowProps) {
 	const labelClassName = cn("text-sm font-medium", destructive === true && "text-destructive")
 
 	return (
@@ -130,9 +132,15 @@ function SettingsRow({ label, description, htmlFor, destructive, stacked, childr
 		>
 			<div className="flex min-w-0 flex-col gap-0.5">
 				{htmlFor === undefined ? (
-					<p className={labelClassName}>{label}</p>
+					<p
+						id={labelId}
+						className={labelClassName}
+					>
+						{label}
+					</p>
 				) : (
 					<label
+						id={labelId}
 						htmlFor={htmlFor}
 						className={labelClassName}
 					>

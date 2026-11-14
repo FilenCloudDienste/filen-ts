@@ -19,6 +19,10 @@ export const settingsAudio = {
 	settingsAudioFadeLengthShort_other: "{{count}} s",
 	/** Settings > Audio — crossfade length choice on phones that opens a slider for any other length */
 	settingsAudioFadeLengthCustom: "Custom",
+	/** Settings > Audio — spoken name of the Custom crossfade length choice on phones while a length other than the
+	 *  listed ones is set; {{count}} is that length, a whole number of seconds */
+	settingsAudioFadeLengthCustomValue_one: "Custom, {{count}} second",
+	settingsAudioFadeLengthCustomValue_other: "Custom, {{count}} seconds",
 	/** Settings > Audio — button closing the custom crossfade length dialog */
 	settingsAudioFadeLengthDone: "Done",
 	/** Settings > Audio — row label: what happens when the user skips to another track while tracks blend into each

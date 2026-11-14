@@ -2,6 +2,8 @@ import { useId, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { InfoIcon } from "lucide-react"
 import { useShallow } from "zustand/shallow"
+import { Radio as RadioPrimitive } from "@base-ui/react/radio"
+import { RadioGroup as RadioGroupPrimitive } from "@base-ui/react/radio-group"
 import { setSmoothTransitionsPrefs, useSmoothTransitionsStore } from "@/features/audio/store/useSmoothTransitionsStore"
 import {
 	FADE_SECONDS_MAX,
@@ -9,7 +11,12 @@ import {
 	FADE_SECONDS_PRESETS,
 	type ManualTransition
 } from "@/features/audio/lib/smoothTransitions.types"
-import { SMOOTH_TRANSITIONS_UNAVAILABLE_KEYS, smoothTransitionsLocked } from "@/features/audio/lib/smoothTransitionsUi"
+import {
+	SMOOTH_TRANSITIONS_UNAVAILABLE_KEYS,
+	smoothTransitionsActive,
+	smoothTransitionsLocked,
+	toggleSmoothTransitionsByUser
+} from "@/features/audio/lib/smoothTransitionsUi"
 import { PreferenceToggleRow, SettingsSelectRow } from "@/features/settings/components/settingRows"
 import { SettingsBlock, SettingsRow } from "@/features/settings/components/settingsLayout"
 import { Button } from "@/components/ui/button"
@@ -22,8 +29,9 @@ const MANUAL_TRANSITION_OPTIONS = [
 	{ value: "fade", labelKey: "settingsAudioManualSkipFade" }
 ] as const satisfies readonly { value: ManualTransition; labelKey: string }[]
 
-// The one Smooth transitions card: the switch, then the rows it governs (disabled while it is off). A cause the
-// feature cannot run shows inline under the switch, only while there is one.
+// The one Smooth transitions card: the switch, then the rows it governs (disabled while it is off). The switch shows
+// whether tracks blend now and flips the stored pref; a cause the feature cannot run shows inline under it, only while
+// there is one.
 export function SmoothTransitionsRows() {
 	const { t } = useTranslation(["settings", "audio"])
 	const { enabled, fadeSeconds, manualTransition, matchLoudness, unavailable } = useSmoothTransitionsStore(
@@ -36,18 +44,18 @@ export function SmoothTransitionsRows() {
 		}))
 	)
 	const reason = unavailable === null ? undefined : t(`audio:${SMOOTH_TRANSITIONS_UNAVAILABLE_KEYS[unavailable]}`)
+	const active = smoothTransitionsActive({ enabled, unavailable })
+	const locked = smoothTransitionsLocked({ enabled, unavailable })
 
 	return (
 		<>
 			<PreferenceToggleRow
 				title={t("audio:smoothTransitions")}
 				description={t("settingsAudioSmoothTransitionsDescription")}
-				checked={enabled}
-				disabled={smoothTransitionsLocked({ enabled, unavailable })}
-				disabledReason={reason}
-				onCheckedChange={checked => {
-					setSmoothTransitionsPrefs({ enabled: checked })
-				}}
+				checked={active}
+				disabled={locked}
+				disabledReason={locked ? reason : undefined}
+				onCheckedChange={toggleSmoothTransitionsByUser}
 			/>
 			{reason === undefined ? null : (
 				<SettingsBlock className="flex items-start gap-2 text-sm text-muted-foreground">
@@ -60,7 +68,7 @@ export function SmoothTransitionsRows() {
 			)}
 			<FadeLengthRow
 				seconds={fadeSeconds}
-				disabled={!enabled}
+				disabled={!active}
 			/>
 			<SettingsSelectRow
 				label={t("settingsAudioManualSkip")}
@@ -68,7 +76,7 @@ export function SmoothTransitionsRows() {
 				id="smooth-transitions-manual-skip"
 				options={MANUAL_TRANSITION_OPTIONS.map(option => ({ value: option.value, label: t(option.labelKey) }))}
 				value={manualTransition}
-				disabled={!enabled}
+				disabled={!active}
 				onChange={value => {
 					setSmoothTransitionsPrefs({ manualTransition: value })
 				}}
@@ -77,7 +85,7 @@ export function SmoothTransitionsRows() {
 				title={t("settingsAudioMatchLoudness")}
 				description={t("settingsAudioMatchLoudnessDescription")}
 				checked={matchLoudness}
-				disabled={!enabled}
+				disabled={!active}
 				onCheckedChange={checked => {
 					setSmoothTransitionsPrefs({ matchLoudness: checked })
 				}}
@@ -92,14 +100,14 @@ function isPreset(seconds: number): boolean {
 
 function segmentClass(active: boolean): string {
 	return cn(
-		"h-8 min-w-0 flex-1 rounded-md px-2 text-sm font-medium whitespace-nowrap tabular-nums focus-ring transition-colors outline-none disabled:opacity-50 pointer-coarse:h-11",
+		"flex h-8 min-w-0 flex-1 items-center justify-center rounded-md px-2 text-sm font-medium whitespace-nowrap tabular-nums focus-ring transition-colors outline-none select-none disabled:opacity-50 pointer-coarse:h-11 data-disabled:opacity-50",
 		active ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
 	)
 }
 
-// A slider from wide widths up, segments of the common lengths plus Custom (a slider in a dialog) on a phone. CSS
-// picks one, so a resize never re-renders the page. A dragged length shows at once and is saved when let go (or with
-// each key step).
+// A slider from wide widths up, segments of the common lengths (one radio group) plus Custom (a slider in a dialog) on
+// a phone. CSS picks one, so a resize never re-renders the page. A dragged length shows at once and is saved when let
+// go (or with each key step).
 function FadeLengthRow({ seconds, disabled }: { seconds: number; disabled: boolean }) {
 	const { t } = useTranslation("settings")
 	const labelId = useId()
@@ -117,14 +125,9 @@ function FadeLengthRow({ seconds, disabled }: { seconds: number; disabled: boole
 	return (
 		<SettingsRow
 			label={label}
+			labelId={labelId}
 			description={t("settingsAudioFadeLengthValue", { count: shown })}
 		>
-			<span
-				id={labelId}
-				className="sr-only"
-			>
-				{label}
-			</span>
 			<FadeSlider
 				seconds={shown}
 				disabled={disabled}
@@ -133,29 +136,30 @@ function FadeLengthRow({ seconds, disabled }: { seconds: number; disabled: boole
 				onDrag={setDragged}
 				onCommit={commit}
 			/>
-			<div
-				role="group"
-				aria-labelledby={labelId}
-				className="flex w-full gap-0.5 rounded-lg bg-muted p-0.5 sm:hidden"
-			>
-				{FADE_SECONDS_PRESETS.map(preset => (
-					<button
-						key={preset}
-						type="button"
-						aria-pressed={preset === seconds}
-						aria-label={t("settingsAudioFadeLengthValue", { count: preset })}
-						disabled={disabled}
-						className={segmentClass(preset === seconds)}
-						onClick={() => {
-							setSmoothTransitionsPrefs({ fadeSeconds: preset })
-						}}
-					>
-						{t("settingsAudioFadeLengthShort", { count: preset })}
-					</button>
-				))}
+			<div className="flex w-full gap-0.5 rounded-lg bg-muted p-0.5 sm:hidden">
+				<RadioGroupPrimitive
+					aria-labelledby={labelId}
+					value={seconds}
+					disabled={disabled}
+					className="flex min-w-0 flex-[4] gap-0.5"
+					onValueChange={preset => {
+						setSmoothTransitionsPrefs({ fadeSeconds: preset })
+					}}
+				>
+					{FADE_SECONDS_PRESETS.map(preset => (
+						<RadioPrimitive.Root
+							key={preset}
+							value={preset}
+							aria-label={t("settingsAudioFadeLengthValue", { count: preset })}
+							className={segmentClass(preset === seconds)}
+						>
+							{t("settingsAudioFadeLengthShort", { count: preset })}
+						</RadioPrimitive.Root>
+					))}
+				</RadioGroupPrimitive>
 				<button
 					type="button"
-					aria-pressed={custom}
+					aria-label={custom ? t("settingsAudioFadeLengthCustomValue", { count: seconds }) : undefined}
 					aria-haspopup="dialog"
 					disabled={disabled}
 					className={segmentClass(custom)}
