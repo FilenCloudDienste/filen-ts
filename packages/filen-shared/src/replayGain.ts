@@ -137,17 +137,21 @@ export function parseReplayGain(native: NativeTags | null | undefined): TrackGai
 	return gain
 }
 
-// The linear trim a track plays at. `album` prefers the album gain (a run of consecutive tracks from one album keeps
-// its intended dynamics), falling back to the other gain, then to the untagged level. Never boosts past the known peak,
-// never boosts at all without one.
-export function linearGainFor(gain: TrackGain | null | undefined, options: { album: boolean }): number {
+// The linear trim a track plays at, and the peak it was clamped against (null when no peak is known). `album` prefers
+// the album gain (a run of consecutive tracks from one album keeps its intended dynamics), falling back to the other
+// gain, then to the untagged level. Never boosts past the known peak, never boosts at all without one.
+export function replayGainFor(gain: TrackGain | null | undefined, options: { album: boolean }): { linear: number; peak: number | null } {
 	const g = gain ?? NO_TRACK_GAIN
 	const primary = options.album ? { db: g.albumDb, peak: g.albumPeak } : { db: g.trackDb, peak: g.trackPeak }
 	const secondary = options.album ? { db: g.trackDb, peak: g.trackPeak } : { db: g.albumDb, peak: g.albumPeak }
-	const chosen = primary.db !== null ? primary : secondary.db !== null ? secondary : { db: UNTAGGED_GAIN_DB, peak: null }
-	const db = Math.min(APPLIED_MAX_DB, Math.max(APPLIED_MIN_DB, chosen.db ?? UNTAGGED_GAIN_DB))
-	const linear = 10 ** (db / 20)
-	const peak = chosen.peak ?? primary.peak ?? secondary.peak
+	const db = primary.db ?? secondary.db ?? UNTAGGED_GAIN_DB
+	const linear = 10 ** (Math.min(APPLIED_MAX_DB, Math.max(APPLIED_MIN_DB, db)) / 20)
+	const peak =
+		(primary.db !== null ? primary.peak : null) ?? (secondary.db !== null ? secondary.peak : null) ?? primary.peak ?? secondary.peak
 
-	return peak !== null ? Math.min(linear, 1 / peak) : Math.min(linear, 1)
+	return { linear: peak !== null ? Math.min(linear, 1 / peak) : Math.min(linear, 1), peak }
+}
+
+export function linearGainFor(gain: TrackGain | null | undefined, options: { album: boolean }): number {
+	return replayGainFor(gain, options).linear
 }
