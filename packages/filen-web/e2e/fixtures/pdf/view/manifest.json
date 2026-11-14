@@ -1,0 +1,37 @@
+{
+	"latin.pdf": {
+		"bytes": 4627,
+		"sha256": "4f3fe4016d5f2021be59ad71285a827be544421fd880c6c0c4231b8441d885bc",
+		"checks": "multi-page text, standard font"
+	},
+	"latin-linearized.pdf": {
+		"bytes": 4925,
+		"sha256": "27e2ef5cddda42eb4889b3f5b5e66fa64c158f01386ef1bf6bacbdcf1ea8629f",
+		"checks": "the linearized layout: page 1 from the file's start"
+	},
+	"cjk-non-embedded.pdf": {
+		"bytes": 1254,
+		"sha256": "93f5159d199f117b0aea4b3cc42971b09e7b930ed787b4a7ee2c7081b81cbfb8",
+		"checks": "Adobe-Japan1 font not embedded: character maps"
+	},
+	"cjk-embedded.pdf": {
+		"bytes": 42811,
+		"sha256": "c77dbe2073920be4a1ca269c545be1223565c0a12c5a4b924c20037a7f4d3636",
+		"checks": "embedded, subset CID font"
+	},
+	"jpx.pdf": {
+		"bytes": 10191,
+		"sha256": "37e1737d24714d63a4ec84f89424517995ef014544218c2dc43e118071d88111",
+		"checks": "JPEG 2000 decoder"
+	},
+	"jbig2.pdf": {
+		"bytes": 1106,
+		"sha256": "99bbf7c2eaeb2796f56a14cd66440652a08e69887ca323ab1104456ce5947055",
+		"checks": "JBIG2 decoder"
+	},
+	"cmyk.pdf": {
+		"bytes": 13187,
+		"sha256": "0318254c1498be258fa071b5b2f889c9361b2b6fab9dc062035bf0e8b6af5d38",
+		"checks": "DeviceCMYK through the CMYK ICC profile"
+	}
+}

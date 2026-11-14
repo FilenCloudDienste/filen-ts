@@ -835,6 +835,75 @@ describe("usePdfDocument", () => {
 	})
 })
 
+describe("usePdfDocument reopen", () => {
+	it("opens the same source again behind the shown document, answers its password, and drops the old task once swapped", async () => {
+		const { pdfjs: base, opened } = fakePdfJs([fakePage([])])
+		const updates: ReturnType<typeof vi.fn>[] = []
+		// A distinct document per task, as pdf.js gives.
+		const pdfjs: PdfJsDom = {
+			...base,
+			getDocument(params) {
+				const task = base.getDocument(params)
+
+				Reflect.set(
+					task,
+					"promise",
+					task.promise.then(document => ({ ...document }))
+				)
+
+				return task
+			}
+		}
+		const root = createRoot(host)
+
+		roots.push(root)
+		act(() => {
+			root.render(<Harness pdfjs={pdfjs} />)
+		})
+
+		const ask = (index: number, reason: number): void => {
+			const update = vi.fn()
+
+			updates.push(update)
+			act(() => {
+				;(opened[index]?.onPassword as (update: (password: string) => void, reason: number) => void)(update, reason)
+			})
+		}
+
+		ask(0, 1)
+		act(() => {
+			latest.document?.password("secret")
+		})
+		opened[0]?.resolve()
+		await settle()
+
+		const first = latest.document?.state
+
+		expect(first?.status).toBe("ready")
+
+		act(() => {
+			latest.document?.reopen()
+		})
+		await settle()
+		expect(opened).toHaveLength(2)
+		// Still the first document while the second opens.
+		expect(latest.document?.state).toBe(first)
+		expect(opened[0]?.destroy).not.toHaveBeenCalled()
+
+		ask(1, 1)
+		expect(updates[1]).toHaveBeenCalledWith("secret")
+		expect(latest.document?.state).toBe(first)
+
+		opened[1]?.resolve()
+		await settle()
+
+		expect(latest.document?.state.status).toBe("ready")
+		expect(latest.document?.state).not.toBe(first)
+		expect(opened[0]?.destroy).toHaveBeenCalledTimes(1)
+		expect(opened[1]?.destroy).not.toHaveBeenCalled()
+	})
+})
+
 describe("usePdfDocument sources", () => {
 	function Rebuilt({ pdfjs, bytes }: { pdfjs: PdfJsDom; bytes: Uint8Array }) {
 		latest.document = usePdfDocument(pdfjs, { kind: "bytes", bytes }, { worker: { kind: "script", src: "/worker.mjs" } })

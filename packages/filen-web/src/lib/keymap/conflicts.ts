@@ -98,7 +98,7 @@ export const RESOLVED_COLLISIONS: readonly (readonly [string, string])[] = [
 	["presentation.text.alignCenter", "editor.code"],
 	["presentation.text.alignLeft", "presentation.show.laser"],
 	// Print over an open deck; the running show takes Mod+P for its pen on its stage and stops it there.
-	["presentation.print", "presentation.show.pen"],
+	["office.print", "presentation.show.pen"],
 	["presentation.show.arrow", "presentation.selectAllSlides"],
 	["presentation.show.arrow", "presentation.objects.selectAll"],
 	["presentation.show.arrow", "drive.selectAll"],
@@ -391,7 +391,7 @@ export const RESOLVED_COLLISIONS: readonly (readonly [string, string])[] = [
 	["docx.copyFormatting", "presentation.copyFormat"],
 	["docx.pasteFormatting", "presentation.pasteFormat"],
 	["docx.wordCount", "presentation.objects.ungroup"],
-	["docx.downloadPdf", "presentation.print"],
+	["docx.downloadPdf", "office.print"],
 	["docx.downloadPdf", "presentation.show.pen"],
 	["docx.zoomIn", "presentation.zoomIn"],
 	["docx.zoomIn", "presentation.text.subscript"],
@@ -440,8 +440,6 @@ export const RESOLVED_COLLISIONS: readonly (readonly [string, string])[] = [
 	["sheet.goTo", "presentation.objects.group"],
 	["sheet.goTo", "presentation.show.start"],
 	["sheet.replace", "presentation.show.hidePointer"],
-	["sheet.print", "presentation.print"],
-	["sheet.print", "presentation.show.pen"],
 	// Mod+D duplicates the objects selected on the slide, whose canvas takes it first and stops it, and the slides in
 	// the slide list, whose own keydown takes it there (PowerPoint's both).
 	["presentation.objects.duplicate", "presentation.duplicateSlide"],
@@ -679,7 +677,6 @@ export const RESOLVED_COLLISIONS: readonly (readonly [string, string])[] = [
 	["docx.changeCase", "editor.findPrevious"],
 	["docx.changeCase", "sheet.find"],
 	["docx.clearFormatting", "sheet.selectColumns"],
-	["docx.downloadPdf", "sheet.print"],
 	["docx.formattingMarks", "sheet.selectRegion"],
 	["docx.goTo", "editor.findNext"],
 	["docx.goTo", "editor.goToLine"],

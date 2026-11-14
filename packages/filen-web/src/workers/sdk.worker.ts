@@ -155,6 +155,7 @@ import { probeSource, probeVideo, type ProbeTier, type VideoProbe } from "@filen
 import { asByteStream, imageSniffStream } from "@/lib/media/imageSniff"
 import { EarlyCancels } from "@/workers/earlyCancels"
 import { exposeRangePort } from "@/lib/media/rangePort"
+import { serveFileSyncRange } from "@/lib/media/syncRangeServe"
 import { crc32 } from "@filen/office/core/opc"
 import { savePortReader } from "@filen/shared/savePort"
 import { savePortStream } from "@/lib/media/savePortStream"
@@ -763,6 +764,40 @@ function serveRangePort(
 		// readChecked: the CRC of what is sent, so a presentation save can check the copies it uploads.
 		crc32
 	)
+}
+
+// Serves `file`'s decrypted blocks into the PDF engine's sync range `buffer` (lib/media/syncRangeServe.ts) through `c`,
+// until the engine closes it, the page releases `readerLock`, or cancelPreviewDownload(previewToken) aborts it.
+// `client` is checked on every read, so one after sign-out fails at once instead of reaching a freed handle.
+function serveSyncRangeFor(
+	buffer: SharedArrayBuffer,
+	port: MessagePort,
+	c: () => Pick<Client, "downloadFileToWriter">,
+	file: AnyFile,
+	previewToken: string,
+	readerLock: string,
+	release?: () => void
+): void {
+	const controller = new AbortController()
+
+	controller.signal.addEventListener(
+		"abort",
+		() => {
+			if (previewAborts.get(previewToken) === controller) {
+				previewAborts.delete(previewToken)
+			}
+		},
+		{ once: true }
+	)
+	registerPreviewAbort(previewToken, controller)
+	serveFileSyncRange(buffer, port, {
+		read: (start, end, signal) => readFileRange(c(), file, start, end, signal),
+		length: Number(file.size),
+		lifetime: controller,
+		readerLock,
+		...(release === undefined ? {} : { release }),
+		...("locks" in navigator ? { locks: navigator.locks } : {})
+	})
 }
 
 // The shared frame of both audio-metadata entry points: the abort registry, the cover thumbnail's decode
@@ -2476,6 +2511,23 @@ const api = {
 			unauth.free()
 		})
 	},
+	// The anon mirror of openSyncRange below, for a PDF behind a public link: the client handle lives as long as the
+	// bridge and is freed once it has shut down.
+	openLinkedSyncRangeAnon(buffer: SharedArrayBuffer, port: MessagePort, file: AnyFile, previewToken: string, readerLock: string): void {
+		const unauth = linkedUnauthClient()
+
+		serveSyncRangeFor(
+			buffer,
+			port,
+			() => unauth,
+			file,
+			previewToken,
+			readerLock,
+			() => {
+				unauth.free()
+			}
+		)
+	},
 	// The anon mirror of fetchRawPreview above, for a RAW behind a public link.
 	fetchLinkedRawPreviewAnon(file: AnyFile, previewToken: string): Promise<RawPreviewResult> {
 		return withLinkedUnauth(unauth => writeRawPreview(previewToken, params => unauth.writeEmbeddedPreview({ file, ...params })))
@@ -2952,6 +3004,13 @@ const api = {
 	// port or cancelPreviewDownload(previewToken) aborts every read on it.
 	openRangePort(port: MessagePort, file: AnyFile, previewToken: string): void {
 		serveRangePort(port, requireClient(), file, previewToken)
+	},
+	// Serves `file`'s decrypted blocks into a PDF engine's sync range `buffer` (lib/media/syncRange.ts): the engine
+	// reads them synchronously from the buffer, this worker writes them and reads ahead. The page holds `readerLock`
+	// while the engine lives.
+	openSyncRange(buffer: SharedArrayBuffer, port: MessagePort, file: AnyFile, previewToken: string, readerLock: string): void {
+		requireClient()
+		serveSyncRangeFor(buffer, port, requireClient, file, previewToken, readerLock)
 	},
 	// ── Search ───────────────────────────────────────────────────────────────
 	// Thin pass-throughs onto the single searchEngine instance (searchEngine.ts owns the actual

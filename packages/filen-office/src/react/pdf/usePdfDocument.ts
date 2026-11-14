@@ -19,13 +19,19 @@ export type PdfDocumentState =
 	| { readonly status: "ready"; readonly document: PdfDomDocument }
 	| { readonly status: "error"; readonly kind: PdfErrorKind }
 
-export type PdfDocumentOptions = Omit<PdfOpenOptions, "onPassword" | "onReadError">
+export type PdfDocumentOptions = Omit<PdfOpenOptions, "onPassword" | "onReadError" | "onFullyRead">
 
 export interface PdfDocumentHandle {
 	readonly state: PdfDocumentState
 	readonly password: (password: string) => void
 	// Opens the same source again after an error.
 	readonly retry: () => void
+	// pdf.js has read every byte of a ranged source and holds the whole file (a search of every page, printing, its
+	// read-everything fallback for a damaged file).
+	readonly fullyRead: boolean
+	// Opens the same source again in the background, answering a password with the one accepted before, and swaps
+	// the new document in once it is ready: the old one keeps showing meanwhile, and its memory goes with it.
+	readonly reopen: () => void
 }
 
 const LOADING = { status: "loading" } as const
@@ -68,41 +74,70 @@ function sameOptions(a: PdfDocumentOptions, b: PdfDocumentOptions): boolean {
 // host built them.
 export function usePdfDocument(pdfjs: PdfJs<ReadableStream>, source: PdfSource, options: PdfDocumentOptions): PdfDocumentHandle {
 	const [attempt, setAttempt] = useState(0)
+	// Bumped by reopen(): the same source, opened again.
+	const [generation, setGeneration] = useState(0)
 	const [opened, setOpened] = useState({ source, options })
-	// Tagged with what it belongs to, so a new source shows as loading from its first render on.
+	// Tagged with what it belongs to, so a new source shows as loading from its first render on. A reopen keeps the
+	// entry until the new document replaces it.
 	const [entry, setEntry] = useState<{
 		readonly source: PdfSource
 		readonly attempt: number
 		readonly state: PdfDocumentState
+		readonly fullyRead: boolean
 	} | null>(null)
 	const openingRef = useRef<PdfOpening<ReadableStream> | null>(null)
+	// The password last answered, and the one pdf.js accepted: a reopen answers with it (memory only, never kept
+	// beyond this hook).
+	const triedRef = useRef<string | null>(null)
+	const acceptedRef = useRef<string | null>(null)
+	// Set by reopen() for the open effect's cleanup, which then keeps the shown document until the new one shows.
+	const reopeningRef = useRef(false)
+	const retiringRef = useRef<{ readonly opening: PdfOpening<ReadableStream>; readonly document: PdfDomDocument } | null>(null)
 	const current = opened.source
 	const currentOptions = opened.options
 
 	if (!sameSource(current, source) || !sameOptions(currentOptions, options)) setOpened({ source, options })
 
-	const state = entry !== null && entry.source === current && entry.attempt === attempt ? entry.state : LOADING
+	const tagged = entry !== null && entry.source === current && entry.attempt === attempt ? entry : null
+	const state = tagged?.state ?? LOADING
+	const shown = state.status === "ready" ? state.document : null
 
 	useEffect(() => {
 		let live = true
-		const set = (next: PdfDocumentState): void => {
-			if (live) setEntry({ source: current, attempt, state: next })
+		let ready: PdfDomDocument | null = null
+		const reopening = retiringRef.current !== null
+		const set = (next: PdfDocumentState, fullyRead: boolean): void => {
+			if (live) setEntry({ source: current, attempt, state: next, fullyRead })
+		}
+
+		if (!reopening) {
+			acceptedRef.current = null
+			triedRef.current = null
 		}
 
 		const opening = openPdf(pdfjs, current, {
 			...currentOptions,
 			onPassword: reason => {
-				set({ status: "password", reason })
+				const accepted = acceptedRef.current
+
+				if (reopening && reason === "required" && accepted !== null && opening.password(accepted)) return
+
+				set({ status: "password", reason }, false)
 			},
 			onReadError: () => {
-				set({ status: "error", kind: "transportFailed" })
+				set({ status: "error", kind: "transportFailed" }, false)
+			},
+			onFullyRead: () => {
+				if (ready !== null) set({ status: "ready", document: ready }, true)
 			}
 		})
 
 		openingRef.current = opening
 		opening.promise.then(
 			document => {
-				set({ status: "ready", document })
+				ready = document
+				acceptedRef.current = triedRef.current ?? acceptedRef.current
+				set({ status: "ready", document }, false)
 			},
 			(error: unknown) => {
 				const failure = classifyPdfError(error)
@@ -111,7 +146,8 @@ export function usePdfDocument(pdfjs: PdfJs<ReadableStream>, source: PdfSource, 
 					set(
 						failure.type === "password"
 							? { status: "password", reason: failure.reason }
-							: { status: "error", kind: failure.kind }
+							: { status: "error", kind: failure.kind },
+						false
 					)
 				}
 			}
@@ -120,17 +156,52 @@ export function usePdfDocument(pdfjs: PdfJs<ReadableStream>, source: PdfSource, 
 		return () => {
 			live = false
 			openingRef.current = null
-			void opening.destroy()
+
+			if (reopeningRef.current && ready !== null) retiringRef.current = { opening, document: ready }
+			else void opening.destroy()
+
+			reopeningRef.current = false
 		}
-	}, [pdfjs, current, currentOptions, attempt])
+	}, [pdfjs, current, currentOptions, attempt, generation])
+
+	// The document a reopen replaced goes once another one shows (or none does).
+	useEffect(() => {
+		const retiring = retiringRef.current
+
+		if (retiring !== null && retiring.document !== shown) {
+			retiringRef.current = null
+			void retiring.opening.destroy()
+		}
+	}, [shown])
+
+	useEffect(
+		() => () => {
+			const retiring = retiringRef.current
+
+			retiringRef.current = null
+			void retiring?.opening.destroy()
+		},
+		[]
+	)
 
 	return {
 		state,
+		fullyRead: tagged?.fullyRead ?? false,
 		password: password => {
-			if (openingRef.current?.password(password) === true) setEntry({ source: current, attempt, state: LOADING })
+			triedRef.current = password
+
+			if (openingRef.current?.password(password) === true) {
+				setEntry({ source: current, attempt, state: LOADING, fullyRead: false })
+			}
 		},
 		retry: () => {
 			setAttempt(value => value + 1)
+		},
+		reopen: () => {
+			if (state.status !== "ready" || retiringRef.current !== null || reopeningRef.current) return
+
+			reopeningRef.current = true
+			setGeneration(value => value + 1)
 		}
 	}
 }

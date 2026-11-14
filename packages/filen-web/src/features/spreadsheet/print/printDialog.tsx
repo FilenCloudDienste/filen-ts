@@ -13,13 +13,11 @@ import {
 	type PrintSheetRequest
 } from "@filen/office/react/sheet/print"
 import { Button } from "@/components/ui/button"
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Field, FieldError, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Spinner } from "@/components/ui/spinner"
 import { Switch } from "@/components/ui/switch"
 import { isTextSheetKind } from "@/features/spreadsheet/lib/sheetHosts"
 import { sheetSettings } from "@/features/spreadsheet/print/printSettings"
@@ -40,6 +38,7 @@ import {
 } from "@/features/spreadsheet/print/print.logic"
 import { canvasMeasure, printPages, renderPages, svgElement } from "@/features/spreadsheet/print/printRoot"
 import type { PreviewKey } from "@/lib/i18n"
+import { PrintDialogFrame } from "@/lib/print/printDialogFrame"
 import { log } from "@/lib/log"
 
 const SCOPES: readonly { readonly value: PrintScope; readonly key: PreviewKey }[] = [
@@ -127,12 +126,6 @@ export function SheetPrintDialog({ active, grid, model, kind, name, canSave, run
 	const [progress, setProgress] = useState<{ done: number; pages: number } | null>(null)
 	const [measure] = useState(() => (typeof document === "undefined" ? () => 0 : canvasMeasure()))
 	const text = isTextSheetKind(kind)
-	const close = (): void => {
-		if (progress === null) {
-			onClose()
-		}
-	}
-
 	// Every sheet's settings, asked once when the workbook is first chosen.
 	function loadWorkbook(): void {
 		void Promise.all(
@@ -327,312 +320,288 @@ export function SheetPrintDialog({ active, grid, model, kind, name, canSave, run
 	const cut = pages > MAX_BROWSER_PAGES || printed?.more === true
 
 	return (
-		<Dialog
-			open
-			onOpenChange={next => {
-				if (!next) {
-					close()
-				}
+		<PrintDialogFrame
+			title={t("previewSheetPrint")}
+			description={t("previewSheetPrintDescription")}
+			className="sm:max-w-3xl"
+			busy={busy}
+			canPrint={pages > 0 && !percentInvalid}
+			printLabel={
+				progress !== null
+					? t("previewSheetPrintProgress", { done: progress.done, pages: progress.pages })
+					: t("previewSheetPrintButton")
+			}
+			onPrint={() => {
+				print()
 			}}
-		>
-			<DialogContent
-				closeButtonDisabled={busy}
-				data-preview-surface
-				className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-3xl"
-			>
-				<DialogHeader>
-					<DialogTitle>{t("previewSheetPrint")}</DialogTitle>
-					<DialogDescription>{t("previewSheetPrintDescription")}</DialogDescription>
-				</DialogHeader>
-				<div className="flex flex-col gap-6 sm:flex-row">
-					<div className="flex min-w-0 flex-1 flex-col gap-5">
-						<Field>
-							<FieldLabel htmlFor={`${id}-what`}>{t("previewSheetPrintWhat")}</FieldLabel>
-							<Select
-								items={SCOPES.filter(item => !text || item.value !== "workbook").map(item => ({
-									value: item.value,
-									label: t(item.key)
-								}))}
-								value={form.scope}
-								disabled={busy}
-								onValueChange={(next: string | null) => {
-									const found = SCOPES.find(item => item.value === next)
-
-									if (found !== undefined) {
-										change({ scope: found.value })
-									}
-								}}
-							>
-								<SelectTrigger id={`${id}-what`}>
-									<SelectValue />
-								</SelectTrigger>
-								<SelectContent data-preview-surface>
-									<SelectGroup>
-										{SCOPES.filter(item => !text || item.value !== "workbook").map(item => (
-											<SelectItem
-												key={item.value}
-												value={item.value}
-											>
-												{t(item.key)}
-											</SelectItem>
-										))}
-									</SelectGroup>
-								</SelectContent>
-							</Select>
-						</Field>
-						{text ? null : (
-							<Field orientation="horizontal">
-								<Switch
-									id={`${id}-ignore`}
-									checked={form.ignorePrintArea}
-									disabled={busy || form.scope === "selection"}
-									onCheckedChange={ignorePrintArea => {
-										change({ ignorePrintArea })
-									}}
-								/>
-								<FieldLabel htmlFor={`${id}-ignore`}>{t("previewSheetPrintIgnoreArea")}</FieldLabel>
-							</Field>
-						)}
-						<Field>
-							<FieldLabel htmlFor={`${id}-paper`}>{t("previewSheetPrintPaper")}</FieldLabel>
-							<Select
-								items={paperItems}
-								value={String(form.paperSize)}
-								disabled={busy}
-								onValueChange={(next: string | null) => {
-									if (next !== null) {
-										change({ paperSize: Number(next) })
-									}
-								}}
-							>
-								<SelectTrigger id={`${id}-paper`}>
-									<SelectValue />
-								</SelectTrigger>
-								<SelectContent data-preview-surface>
-									<SelectGroup>
-										{paperItems.map(item => (
-											<SelectItem
-												key={item.value}
-												value={item.value}
-											>
-												{item.label}
-											</SelectItem>
-										))}
-									</SelectGroup>
-								</SelectContent>
-							</Select>
-						</Field>
-						<Field>
-							<FieldLabel id={`${id}-orientation-label`}>{t("previewSheetPrintOrientation")}</FieldLabel>
-							<RadioGroup
-								aria-labelledby={`${id}-orientation-label`}
-								name={`${id}-orientation`}
-								value={form.orientation}
-								disabled={busy}
-								className="flex flex-wrap gap-x-5 gap-y-2"
-								onValueChange={(next: unknown) => {
-									if (next === "portrait" || next === "landscape") {
-										change({ orientation: next })
-									}
-								}}
-							>
-								{(["portrait", "landscape"] as const).map(value => (
-									<div
-										key={value}
-										className="flex items-center gap-2"
-									>
-										<RadioGroupItem
-											id={`${id}-${value}`}
-											value={value}
-										/>
-										<Label htmlFor={`${id}-${value}`}>
-											{t(value === "portrait" ? "previewSheetPrintPortrait" : "previewSheetPrintLandscape")}
-										</Label>
-									</div>
-								))}
-							</RadioGroup>
-						</Field>
-						<Field>
-							<FieldLabel htmlFor={`${id}-scaling`}>{t("previewSheetPrintScaling")}</FieldLabel>
-							<Select
-								items={scalingItems}
-								value={form.scaling}
-								disabled={busy}
-								onValueChange={(next: string | null) => {
-									const found = scalingItems.find(item => item.value === next)
-
-									if (found !== undefined) {
-										change({ scaling: found.value as PrintScaling })
-									}
-								}}
-							>
-								<SelectTrigger id={`${id}-scaling`}>
-									<SelectValue />
-								</SelectTrigger>
-								<SelectContent data-preview-surface>
-									<SelectGroup>
-										{scalingItems.map(item => (
-											<SelectItem
-												key={item.value}
-												value={item.value}
-											>
-												{item.label}
-											</SelectItem>
-										))}
-									</SelectGroup>
-								</SelectContent>
-							</Select>
-						</Field>
-						{form.scaling === "custom" ? (
-							<Field data-invalid={percentInvalid}>
-								<FieldLabel htmlFor={`${id}-percent`}>{t("previewSheetPrintScalePercent")}</FieldLabel>
-								<Input
-									id={`${id}-percent`}
-									inputMode="numeric"
-									autoComplete="off"
-									value={form.percent}
-									disabled={busy}
-									aria-invalid={percentInvalid}
-									onChange={event => {
-										change({ percent: event.target.value })
-									}}
-								/>
-								{percentInvalid ? <FieldError>{t("previewSheetPrintScaleInvalid")}</FieldError> : null}
-							</Field>
-						) : null}
-						<Field orientation="horizontal">
-							<Switch
-								id={`${id}-gridlines`}
-								checked={form.gridLines}
-								disabled={busy}
-								onCheckedChange={gridLines => {
-									change({ gridLines })
-								}}
-							/>
-							<FieldLabel htmlFor={`${id}-gridlines`}>{t("previewSheetPrintGridlines")}</FieldLabel>
-						</Field>
-						<Field orientation="horizontal">
-							<Switch
-								id={`${id}-headings`}
-								checked={form.headings}
-								disabled={busy}
-								onCheckedChange={headings => {
-									change({ headings })
-								}}
-							/>
-							<FieldLabel htmlFor={`${id}-headings`}>{t("previewSheetPrintHeadings")}</FieldLabel>
-						</Field>
-						{canSave && !text ? null : <p className="text-xs text-muted-foreground">{t("previewSheetPrintNotSaved")}</p>}
-					</div>
-					<div className="flex w-full flex-col items-center gap-2 sm:w-64">
-						{printed === null ? (
-							<p
-								role="status"
-								className="text-sm text-muted-foreground"
-							>
-								{t("previewSheetPrintPreparing")}
-							</p>
-						) : pages === 0 ? (
-							<p
-								role="status"
-								className="text-sm text-muted-foreground"
-							>
-								{t("previewSheetPrintNothing")}
-							</p>
-						) : (
-							<>
-								{tooLarge ? (
-									<p
-										role="status"
-										className="text-sm text-muted-foreground"
-									>
-										{t("previewSheetPrintPageTooLarge", { page: shown + 1 })}
-									</p>
-								) : (
-									<PagePreview
-										svg={svg}
-										label={t("previewSheetPrintPreview")}
-									/>
-								)}
-								<div className="flex items-center gap-1">
-									<Button
-										variant="ghost"
-										size="icon-xs"
-										aria-label={t("previewSheetPrintPreviousPage")}
-										disabled={shown === 0}
-										onClick={() => {
-											setIndex(shown - 1)
-										}}
-									>
-										<ChevronLeftIcon />
-									</Button>
-									<span
-										className="text-xs text-muted-foreground tabular-nums"
-										aria-live="polite"
-									>
-										{t("previewSheetPrintPageOf", { page: shown + 1, pages: cut ? `${String(pages)}+` : pages })}
-									</span>
-									<Button
-										variant="ghost"
-										size="icon-xs"
-										aria-label={t("previewSheetPrintNextPage")}
-										disabled={shown >= pages - 1}
-										onClick={() => {
-											setIndex(shown + 1)
-										}}
-									>
-										<ChevronRightIcon />
-									</Button>
-								</div>
-							</>
-						)}
-						{cut ? (
-							<p className="text-xs text-destructive">
-								{t("previewSheetPrintTooMany", { pages: Math.min(pages, MAX_BROWSER_PAGES) })}
-							</p>
-						) : null}
-						{workbook !== null && workbook.skipped.length > 0 && form.scope === "workbook" ? (
-							<p className="text-xs text-muted-foreground">
-								{t("previewSheetPrintSkipped", { names: workbook.skipped.join(", ") })}
-							</p>
-						) : null}
-					</div>
-				</div>
-				<DialogFooter>
+			onClose={onClose}
+			actions={
+				onSavePdf !== undefined ? (
 					<Button
 						type="button"
 						variant="outline"
-						disabled={busy}
-						onClick={close}
-					>
-						{t("common:cancel")}
-					</Button>
-					{onSavePdf !== undefined ? (
-						<Button
-							type="button"
-							variant="outline"
-							disabled={busy || pages === 0 || percentInvalid}
-							onClick={() => {
-								savePdf()
-							}}
-						>
-							{t("previewSheetPrintSaveAsPdf")}
-						</Button>
-					) : null}
-					<Button
-						type="button"
 						disabled={busy || pages === 0 || percentInvalid}
 						onClick={() => {
-							print()
+							savePdf()
 						}}
 					>
-						{busy ? <Spinner data-icon="inline-start" /> : null}
-						{progress !== null
-							? t("previewSheetPrintProgress", { done: progress.done, pages: progress.pages })
-							: t("previewSheetPrintButton")}
+						{t("previewSheetPrintSaveAsPdf")}
 					</Button>
-				</DialogFooter>
-			</DialogContent>
-		</Dialog>
+				) : null
+			}
+			aside={
+				<div className="flex w-full flex-col items-center gap-2 sm:w-64">
+					{printed === null ? (
+						<p
+							role="status"
+							className="text-sm text-muted-foreground"
+						>
+							{t("previewSheetPrintPreparing")}
+						</p>
+					) : pages === 0 ? (
+						<p
+							role="status"
+							className="text-sm text-muted-foreground"
+						>
+							{t("previewSheetPrintNothing")}
+						</p>
+					) : (
+						<>
+							{tooLarge ? (
+								<p
+									role="status"
+									className="text-sm text-muted-foreground"
+								>
+									{t("previewSheetPrintPageTooLarge", { page: shown + 1 })}
+								</p>
+							) : (
+								<PagePreview
+									svg={svg}
+									label={t("previewSheetPrintPreview")}
+								/>
+							)}
+							<div className="flex items-center gap-1">
+								<Button
+									variant="ghost"
+									size="icon-xs"
+									aria-label={t("previewSheetPrintPreviousPage")}
+									disabled={shown === 0}
+									onClick={() => {
+										setIndex(shown - 1)
+									}}
+								>
+									<ChevronLeftIcon />
+								</Button>
+								<span
+									className="text-xs text-muted-foreground tabular-nums"
+									aria-live="polite"
+								>
+									{t("previewSheetPrintPageOf", { page: shown + 1, pages: cut ? `${String(pages)}+` : pages })}
+								</span>
+								<Button
+									variant="ghost"
+									size="icon-xs"
+									aria-label={t("previewSheetPrintNextPage")}
+									disabled={shown >= pages - 1}
+									onClick={() => {
+										setIndex(shown + 1)
+									}}
+								>
+									<ChevronRightIcon />
+								</Button>
+							</div>
+						</>
+					)}
+					{cut ? (
+						<p className="text-xs text-destructive">
+							{t("previewSheetPrintTooMany", { pages: Math.min(pages, MAX_BROWSER_PAGES) })}
+						</p>
+					) : null}
+					{workbook !== null && workbook.skipped.length > 0 && form.scope === "workbook" ? (
+						<p className="text-xs text-muted-foreground">
+							{t("previewSheetPrintSkipped", { names: workbook.skipped.join(", ") })}
+						</p>
+					) : null}
+				</div>
+			}
+		>
+			<Field>
+				<FieldLabel htmlFor={`${id}-what`}>{t("previewSheetPrintWhat")}</FieldLabel>
+				<Select
+					items={SCOPES.filter(item => !text || item.value !== "workbook").map(item => ({
+						value: item.value,
+						label: t(item.key)
+					}))}
+					value={form.scope}
+					disabled={busy}
+					onValueChange={(next: string | null) => {
+						const found = SCOPES.find(item => item.value === next)
+
+						if (found !== undefined) {
+							change({ scope: found.value })
+						}
+					}}
+				>
+					<SelectTrigger id={`${id}-what`}>
+						<SelectValue />
+					</SelectTrigger>
+					<SelectContent data-preview-surface>
+						<SelectGroup>
+							{SCOPES.filter(item => !text || item.value !== "workbook").map(item => (
+								<SelectItem
+									key={item.value}
+									value={item.value}
+								>
+									{t(item.key)}
+								</SelectItem>
+							))}
+						</SelectGroup>
+					</SelectContent>
+				</Select>
+			</Field>
+			{text ? null : (
+				<Field orientation="horizontal">
+					<Switch
+						id={`${id}-ignore`}
+						checked={form.ignorePrintArea}
+						disabled={busy || form.scope === "selection"}
+						onCheckedChange={ignorePrintArea => {
+							change({ ignorePrintArea })
+						}}
+					/>
+					<FieldLabel htmlFor={`${id}-ignore`}>{t("previewSheetPrintIgnoreArea")}</FieldLabel>
+				</Field>
+			)}
+			<Field>
+				<FieldLabel htmlFor={`${id}-paper`}>{t("previewSheetPrintPaper")}</FieldLabel>
+				<Select
+					items={paperItems}
+					value={String(form.paperSize)}
+					disabled={busy}
+					onValueChange={(next: string | null) => {
+						if (next !== null) {
+							change({ paperSize: Number(next) })
+						}
+					}}
+				>
+					<SelectTrigger id={`${id}-paper`}>
+						<SelectValue />
+					</SelectTrigger>
+					<SelectContent data-preview-surface>
+						<SelectGroup>
+							{paperItems.map(item => (
+								<SelectItem
+									key={item.value}
+									value={item.value}
+								>
+									{item.label}
+								</SelectItem>
+							))}
+						</SelectGroup>
+					</SelectContent>
+				</Select>
+			</Field>
+			<Field>
+				<FieldLabel id={`${id}-orientation-label`}>{t("previewSheetPrintOrientation")}</FieldLabel>
+				<RadioGroup
+					aria-labelledby={`${id}-orientation-label`}
+					name={`${id}-orientation`}
+					value={form.orientation}
+					disabled={busy}
+					className="flex flex-wrap gap-x-5 gap-y-2"
+					onValueChange={(next: unknown) => {
+						if (next === "portrait" || next === "landscape") {
+							change({ orientation: next })
+						}
+					}}
+				>
+					{(["portrait", "landscape"] as const).map(value => (
+						<div
+							key={value}
+							className="flex items-center gap-2"
+						>
+							<RadioGroupItem
+								id={`${id}-${value}`}
+								value={value}
+							/>
+							<Label htmlFor={`${id}-${value}`}>
+								{t(value === "portrait" ? "previewSheetPrintPortrait" : "previewSheetPrintLandscape")}
+							</Label>
+						</div>
+					))}
+				</RadioGroup>
+			</Field>
+			<Field>
+				<FieldLabel htmlFor={`${id}-scaling`}>{t("previewSheetPrintScaling")}</FieldLabel>
+				<Select
+					items={scalingItems}
+					value={form.scaling}
+					disabled={busy}
+					onValueChange={(next: string | null) => {
+						const found = scalingItems.find(item => item.value === next)
+
+						if (found !== undefined) {
+							change({ scaling: found.value as PrintScaling })
+						}
+					}}
+				>
+					<SelectTrigger id={`${id}-scaling`}>
+						<SelectValue />
+					</SelectTrigger>
+					<SelectContent data-preview-surface>
+						<SelectGroup>
+							{scalingItems.map(item => (
+								<SelectItem
+									key={item.value}
+									value={item.value}
+								>
+									{item.label}
+								</SelectItem>
+							))}
+						</SelectGroup>
+					</SelectContent>
+				</Select>
+			</Field>
+			{form.scaling === "custom" ? (
+				<Field data-invalid={percentInvalid}>
+					<FieldLabel htmlFor={`${id}-percent`}>{t("previewSheetPrintScalePercent")}</FieldLabel>
+					<Input
+						id={`${id}-percent`}
+						inputMode="numeric"
+						autoComplete="off"
+						value={form.percent}
+						disabled={busy}
+						aria-invalid={percentInvalid}
+						onChange={event => {
+							change({ percent: event.target.value })
+						}}
+					/>
+					{percentInvalid ? <FieldError>{t("previewSheetPrintScaleInvalid")}</FieldError> : null}
+				</Field>
+			) : null}
+			<Field orientation="horizontal">
+				<Switch
+					id={`${id}-gridlines`}
+					checked={form.gridLines}
+					disabled={busy}
+					onCheckedChange={gridLines => {
+						change({ gridLines })
+					}}
+				/>
+				<FieldLabel htmlFor={`${id}-gridlines`}>{t("previewSheetPrintGridlines")}</FieldLabel>
+			</Field>
+			<Field orientation="horizontal">
+				<Switch
+					id={`${id}-headings`}
+					checked={form.headings}
+					disabled={busy}
+					onCheckedChange={headings => {
+						change({ headings })
+					}}
+				/>
+				<FieldLabel htmlFor={`${id}-headings`}>{t("previewSheetPrintHeadings")}</FieldLabel>
+			</Field>
+			{canSave && !text ? null : <p className="text-xs text-muted-foreground">{t("previewSheetPrintNotSaved")}</p>}
+		</PrintDialogFrame>
 	)
 }

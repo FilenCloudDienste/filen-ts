@@ -153,7 +153,7 @@ describe("the print dialog's choices", () => {
 		decoded()
 		await done
 		expect(print).toHaveBeenCalledTimes(1)
-		expect(document.querySelector(".fo-sheet-print-root")).toBeNull()
+		expect(document.querySelector(".fo-print-root")).toBeNull()
 	})
 
 	it("reads only well-formed SVG pages into the document", () => {
@@ -174,7 +174,7 @@ describe("the print dialog", () => {
 		const onClose = vi.fn()
 		let printed: string[] = []
 		const print = stubPrint(() => {
-			printed = [...document.querySelectorAll(".fo-sheet-print-root .fo-sheet-print-page svg")].map(svg => svg.textContent)
+			printed = [...document.querySelectorAll(".fo-print-root .fo-print-page svg")].map(svg => svg.textContent)
 		})
 
 		if (active === null) throw new Error("no settings")
@@ -218,7 +218,7 @@ describe("the print dialog", () => {
 		expect(run).toHaveBeenCalledWith({ type: "print.setup", sheet: 0, patch: { orientation: "landscape", gridLines: true } })
 		expect(printed).toHaveLength(4)
 		expect(printed[3]).toContain("row 120")
-		expect(document.querySelector(".fo-sheet-print-root")).toBeNull()
+		expect(document.querySelector(".fo-print-root")).toBeNull()
 		expect(onClose).toHaveBeenCalled()
 
 		await waitFor(async () => {

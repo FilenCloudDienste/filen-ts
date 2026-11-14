@@ -145,8 +145,6 @@ export const previewSheetShortcuts = {
 	previewSheetShortcutGoTo: "Go to",
 	/** Keyboard shortcut (spreadsheet) — saves the file as an Excel workbook beside it (text files and older formats) */
 	previewSheetShortcutSaveAs: "Save as Excel workbook",
-	/** Keyboard shortcut (spreadsheet) — opens the print dialog */
-	previewSheetShortcutPrint: "Print",
 	/** Keyboard shortcut (spreadsheet) — downloads the sheet as a CSV file */
 	previewSheetShortcutExportCsv: "Download as CSV",
 	/** Keyboard shortcut (spreadsheet) — downloads the workbook as a PDF file */

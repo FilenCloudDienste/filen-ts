@@ -78,7 +78,7 @@ export function usePresentationPrintKey(session: PresentationSessionApi | undefi
 	const print = usePresentationPrint(session, info)
 
 	useAction(
-		"presentation.print",
+		"office.print",
 		event => {
 			event.preventDefault()
 

@@ -6,8 +6,9 @@ import type { ActionDef, PlatformDefault } from "@/lib/keymap/registry"
 // keys, which ships the defaults): "sheet.<shortcut>". The grid matches them on its own keydown against the combos in
 // effect (sheetBindings), as the presentation editor does, so they act only where the sheet has focus. Save is the
 // preview overlay's preview.save, which the grid takes too (sheetBindings), so the browser's Save Page As never opens
-// over a sheet. The ribbon's commands ship without keys: a user may bind them.
-export type SheetActionShortcut = Exclude<SheetShortcut, "save">
+// over a sheet; print is the office editors' office.print, which the grid takes the same way. The ribbon's commands ship
+// without keys: a user may bind them.
+export type SheetActionShortcut = Exclude<SheetShortcut, "save" | "print">
 
 const PREFIX = "sheet."
 
@@ -85,7 +86,6 @@ const DESCRIPTIONS: Readonly<Record<SheetActionShortcut, ActionDef["descriptionK
 	replace: "preview:previewSheetShortcutReplace",
 	goTo: "preview:previewSheetShortcutGoTo",
 	saveAs: "preview:previewSheetShortcutSaveAs",
-	print: "preview:previewSheetShortcutPrint",
 	exportCsv: "preview:previewSheetShortcutExportCsv",
 	exportPdf: "preview:previewSheetShortcutExportPdf",
 	zoomIn: "preview:previewSheetShortcutZoomIn",
@@ -124,7 +124,7 @@ const DESCRIPTIONS: Readonly<Record<SheetActionShortcut, ActionDef["descriptionK
 const MAC_DESKTOP: Readonly<Partial<Record<SheetActionShortcut, string>>> = { selectColumns: "" }
 
 function isAction(shortcut: SheetShortcut): shortcut is SheetActionShortcut {
-	return shortcut !== "save"
+	return shortcut !== "save" && shortcut !== "print"
 }
 
 function sheetAction(shortcut: SheetActionShortcut, windows: string, mac: string): ActionDef {
@@ -165,7 +165,7 @@ const sheetBindingsCache = new WeakMap<Readonly<Record<string, string>>, SheetKe
 
 // The grid's bindings from every action's combo in effect (registry.ts bindingsOf, one object per record): the same
 // object back while the record stays, so the grid's lookup is built once per change. Save is preview.save's keys and
-// Mod+S.
+// Mod+S, print office.print's.
 export function sheetBindings(bindings: Readonly<Record<string, string>>): SheetKeyBindings {
 	let sheet = sheetBindingsCache.get(bindings)
 
@@ -178,6 +178,12 @@ export function sheetBindings(bindings: Readonly<Record<string, string>>): Sheet
 			if (bound !== undefined) {
 				out[action] = bound
 			}
+		}
+
+		const print: string | undefined = bindings["office.print"]
+
+		if (print !== undefined) {
+			out.print = print
 		}
 
 		const save: string | undefined = bindings["preview.save"]

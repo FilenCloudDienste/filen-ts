@@ -1207,6 +1207,193 @@ function spellcheckDictionaryNotices(): Collected[] {
 	})
 }
 
+/**
+ * MuPDF's wasm (mupdf-wasm.wasm in the mupdf package, AGPL-3.0-or-later, described with the npm tree) has the
+ * libraries below compiled in. The set is MuPDF's thirdparty/ submodules at the release tag that the package's
+ * build (platform/wasm/tools/build.sh: brotli=no mujs=no extract=no xps=no svg=no, -DTOFU -DTOFU_CJK_EXT) links:
+ * not curl, freeglut, leptonica, tesseract, zint or zxing-cpp (off by default), brotli, mujs or extract (off by the
+ * build), nor the Noto, Droid, Source Han and Charis fonts (left out by TOFU). Each library is read at the
+ * submodule commit the tag pins, from Artifex's mirrors, and its license file is kept beside this script.
+ */
+const MUPDF_VERSION = "1.28.6"
+// The release the build script installs (emsdk install 4.0.8).
+const MUPDF_EMSCRIPTEN = "4.0.8"
+const MUPDF_LICENSES = "scripts/licenses/mupdf"
+const MUPDF_SOURCE = `https://github.com/ArtifexSoftware/mupdf/tree/${MUPDF_VERSION}`
+
+interface MupdfComponent {
+	readonly name: string
+	readonly license: string
+	readonly copyright: readonly string[]
+	// The mirror the submodule points at, and the commit the release tag pins.
+	readonly mirror: string
+	readonly commit: string
+	readonly what: string
+	readonly files: readonly string[]
+}
+
+const MUPDF_COMPONENTS: readonly MupdfComponent[] = [
+	{
+		name: "MuPDF",
+		license: "AGPL-3.0-or-later",
+		copyright: ["Copyright (C) 2004-2026 Artifex Software, Inc."],
+		mirror: "mupdf",
+		commit: MUPDF_VERSION,
+		what: "The MuPDF library and its WebAssembly bindings (the mupdf package), unmodified, licensed under the GNU Affero General Public License, version 3 or later. Corresponding source: the MuPDF release tagged 1.28.6, its submodules and platform/wasm (the package's build).",
+		files: ["agpl-3.0.txt"]
+	},
+	{
+		name: "FreeType",
+		license: "FTL",
+		copyright: ["Copyright 1996-2002, 2006 by David Turner, Robert Wilhelm, and Werner Lemberg"],
+		mirror: "thirdparty-freetype2",
+		commit: "0a0221a1347e2f1e07c395263540026e9a0aa7c7",
+		what: "The FreeType font engine, used under the FreeType License. Portions of this software are copyright © The FreeType Project (www.freetype.org). All rights reserved.",
+		files: ["freetype-FTL.TXT", "freetype-LICENSE.TXT"]
+	},
+	{
+		name: "HarfBuzz",
+		license: "MIT-Modern-Variant",
+		copyright: [
+			"Copyright © 2010-2022 Google, Inc.",
+			"Copyright © 2015-2020 Ebrahim Byagowi",
+			"Copyright © 2012,2015 Mozilla Foundation"
+		],
+		mirror: "thirdparty-harfbuzz",
+		commit: "c28ba35a1e6dc4b6b32e2b1d11fd2a408f6c86bb",
+		what: "The HarfBuzz text shaping engine.",
+		files: ["harfbuzz-COPYING"]
+	},
+	{
+		name: "jbig2dec",
+		license: "AGPL-3.0-or-later",
+		copyright: ["Copyright (C) Artifex Software, Inc."],
+		mirror: "jbig2dec",
+		commit: "dc15c39bbbddc90f79c14563d2eb5a794106be8f",
+		what: "The jbig2dec JBIG2 decoder.",
+		files: ["jbig2dec-LICENSE", "agpl-3.0.txt"]
+	},
+	{
+		name: "libjpeg",
+		license: "IJG",
+		copyright: ["Copyright (C) 1991-2026, Thomas G. Lane, Guido Vollbeding"],
+		mirror: "thirdparty-libjpeg",
+		commit: "627faae398468d5d11e3d694dc325432f734b5c4",
+		what: "This software is based in part on the work of the Independent JPEG Group. The LEGAL ISSUES section of its README follows.",
+		files: ["libjpeg-LEGAL"]
+	},
+	{
+		name: "Little CMS (lcms2mt, MuPDF's fork)",
+		license: "MIT",
+		copyright: ["Copyright (c) 2023 Marti Maria Saguer"],
+		mirror: "thirdparty-lcms2",
+		commit: "d69c64417c4a33a4629957fc0e08f4f4c5abcc3d",
+		what: "The Little CMS colour management engine, in Artifex's thread-safe fork.",
+		files: ["lcms2-LICENSE"]
+	},
+	{
+		name: "OpenJPEG",
+		license: "BSD-2-Clause",
+		copyright: [
+			"Copyright (c) 2002-2014, Universite catholique de Louvain (UCL), Belgium",
+			"Copyright (c) 2002-2014, Professor Benoit Macq"
+		],
+		mirror: "thirdparty-openjpeg",
+		commit: "957029eb875eee1118743f200cb86da9d8289de2",
+		what: "The OpenJPEG JPEG 2000 codec.",
+		files: ["openjpeg-LICENSE"]
+	},
+	{
+		name: "zlib",
+		license: "Zlib",
+		copyright: ["(C) 1995-2026 Jean-loup Gailly and Mark Adler"],
+		mirror: "thirdparty-zlib",
+		commit: "da607da739fa6047df13e66a2af6b8bec7c2a498",
+		what: "The zlib compression library.",
+		files: ["zlib-LICENSE"]
+	},
+	{
+		name: "Gumbo",
+		license: "Apache-2.0",
+		copyright: ["Copyright 2010 Google Inc."],
+		mirror: "thirdparty-gumbo-parser",
+		commit: "61bd4e736c3b342e592f65be0d65ec6a0acd8dcb",
+		what: "The Gumbo HTML5 parser.",
+		files: ["gumbo-COPYING"]
+	},
+	{
+		name: "cmark-gfm",
+		license: "BSD-2-Clause",
+		copyright: ["Copyright (c) 2014, John MacFarlane"],
+		mirror: "thirdparty-cmark-gfm",
+		commit: "74e0f5b6b62bbdd1e262c92f4bb2c6c871c6307e",
+		what: "GitHub's fork of the cmark CommonMark parser.",
+		files: ["cmark-gfm-COPYING"]
+	},
+	{
+		name: "URW base 35 fonts (as subset by MuPDF)",
+		license: "OFL-1.1",
+		copyright: ["Copyright 2016 by (URW)++ Design & Development"],
+		mirror: "mupdf",
+		commit: MUPDF_VERSION,
+		what: "The Nimbus Sans, Nimbus Roman, Nimbus Mono PS, Standard Symbols PS and Dingbats fonts (MuPDF's resources/fonts/urw), which stand in for the PDF standard 14 fonts.",
+		files: ["urw-OFL.txt"]
+	}
+]
+
+function mupdfNotices(): Collected[] {
+	const runtime = [
+		vendoredNotice(
+			{
+				name: "Emscripten",
+				version: MUPDF_EMSCRIPTEN,
+				license: "MIT OR NCSA",
+				copyright: ["Copyright (c) 2010-2014 Emscripten authors"],
+				repository: "https://github.com/emscripten-core/emscripten",
+				terms: [
+					`The Emscripten runtime, linked into MuPDF ${MUPDF_VERSION}'s WebAssembly module (built with Emscripten ${MUPDF_EMSCRIPTEN}, platform/wasm/tools/build.sh).`,
+					readFileSync(`${FFMPEG_DIR}/licenses/emscripten-LICENSE`, "utf8")
+				]
+			},
+			"vendored"
+		),
+		vendoredNotice(
+			{
+				name: "musl",
+				version: `Emscripten ${MUPDF_EMSCRIPTEN}`,
+				license: "MIT",
+				copyright: ["Copyright © 2005-2020 Rich Felker, et al."],
+				repository: "https://git.musl-libc.org/cgit/musl",
+				terms: [
+					`The musl C library, as bundled with Emscripten ${MUPDF_EMSCRIPTEN}, linked into MuPDF ${MUPDF_VERSION}'s WebAssembly module.`,
+					readFileSync(`${FFMPEG_DIR}/licenses/musl-COPYRIGHT`, "utf8")
+				]
+			},
+			"vendored"
+		)
+	]
+
+	return [
+		...runtime,
+		...MUPDF_COMPONENTS.map(component =>
+			vendoredNotice(
+				{
+					name: component.name,
+					version: component.commit === MUPDF_VERSION ? MUPDF_VERSION : `git ${component.commit.slice(0, 12)}`,
+					license: component.license,
+					copyright: [...component.copyright],
+					repository: `https://github.com/ArtifexSoftware/${component.mirror}`,
+					terms: [
+						`${component.what} Compiled into MuPDF ${MUPDF_VERSION}'s WebAssembly module (the mupdf package, AGPL-3.0-or-later), which the PDF editor runs in its own worker. Source: ${component.mirror === "mupdf" ? MUPDF_SOURCE : `https://github.com/ArtifexSoftware/${component.mirror}/tree/${component.commit}`}, the submodule commit MuPDF's release tag ${MUPDF_VERSION} pins (${MUPDF_SOURCE}).`,
+						...component.files.map(file => readFileSync(`${MUPDF_LICENSES}/${file}`, "utf8"))
+					]
+				},
+				"vendored"
+			)
+		)
+	]
+}
+
 const npm = collectNpm(installed)
 const rust = collectRust(expectedSdk)
 const ffmpeg = ffmpegModuleNotices()
@@ -1226,7 +1413,8 @@ if (fontRecords.rest().length > 0) {
 }
 const spellcheckCrates = spellcheckCrateNotices(rust.entries)
 const dictionaries = spellcheckDictionaryNotices()
-const vendored = [...ffmpeg, ...aacEncoder, ...engine, model, ...office, ...dictionaries]
+const mupdf = mupdfNotices()
+const vendored = [...ffmpeg, ...aacEncoder, ...engine, model, ...office, ...dictionaries, ...mupdf]
 const collected = [...npm, ...rust.entries, ...spellcheckCrates, ...vendored]
 
 // Vendored entries promise their files verbatim (dictionaries ship them byte for byte). Texts sorted: the payload ships
@@ -1252,6 +1440,7 @@ const output = `// AUTO-GENERATED by scripts/generateThirdPartyNotices.ts — do
 //   ${engine.map(entry => `${entry.name} ${entry.version}`).join(", ")} (${WLLAMA_MANIFEST})
 //   assistant model: ${model.name} ${model.version} (${MODEL_MANIFEST_SOURCE})
 //   @filen/office: ${office.map(entry => `${entry.name} ${entry.version}`).join(", ")} (${OFFICE_REPO_DIR}/assets/fonts/manifest.json, ${OFFICE_REPO_DIR}/THIRD_PARTY_NOTICES.md)
+//   mupdf wasm: ${mupdf.map(entry => `${entry.name} ${entry.version}`).join(", ")} (MuPDF ${MUPDF_VERSION} thirdparty/, ${MUPDF_LICENSES})
 //   @filen/spellcheck: ${[...spellcheckCrates, ...dictionaries].map(entry => `${entry.name} ${entry.version}`).join(", ")} (${SPELLCHECK_REPO_DIR}/crate/Cargo.lock, ${SPELLCHECK_REPO_DIR}/dictionaries/manifest.json)
 //
 // Cannot run in CI: needs a filen-rs checkout and the local cargo caches. Re-run after any SDK bump.

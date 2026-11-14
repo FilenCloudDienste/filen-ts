@@ -68,6 +68,10 @@ import { previewSheetCharts } from "@/locales/en/previewSheet/charts"
 import { previewSheetRibbon } from "@/locales/en/previewSheet/ribbon"
 import { previewKeysShortcuts } from "@/locales/en/previewKeys/shortcuts"
 import { previewSheetShortcuts } from "@/locales/en/previewSheet/shortcuts"
+// PDF viewer and editor: one area file per feature, each spread below.
+import { previewPdfView } from "@/locales/en/previewPdf/view"
+import { previewPdfPrint } from "@/locales/en/previewPdf/print"
+import { previewPdfSignatures } from "@/locales/en/previewPdf/signatures"
 
 export const preview = {
 	// ── Header ───────────────────────────────────────────────────────────────
@@ -820,5 +824,8 @@ export const preview = {
 	...previewVideoEditKeys,
 	...previewVideoEditor,
 	...previewVideoSave,
-	...previewKeysShortcuts
+	...previewKeysShortcuts,
+	...previewPdfView,
+	...previewPdfPrint,
+	...previewPdfSignatures
 } as const

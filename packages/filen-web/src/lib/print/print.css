@@ -1,0 +1,47 @@
+/* A print the app makes itself (printRoot.ts): the pages exist only for the printer. While a print root is in the
+   document, the printer gets it alone, one page per sheet of paper. */
+.fo-print-root {
+	display: none;
+}
+
+@media print {
+	html:has(> body > .fo-print-root),
+	body:has(> .fo-print-root) {
+		height: auto !important;
+		min-height: 0 !important;
+		overflow: visible !important;
+		background: #ffffff !important;
+	}
+
+	body:has(> .fo-print-root) > :not(.fo-print-root) {
+		display: none !important;
+	}
+
+	.fo-print-root {
+		display: block !important;
+		color: #000000;
+		background: #ffffff;
+	}
+
+	.fo-print-page {
+		position: relative;
+		overflow: hidden;
+		break-after: page;
+		break-inside: avoid;
+		print-color-adjust: exact;
+		-webkit-print-color-adjust: exact;
+	}
+
+	.fo-print-page:last-child {
+		break-after: auto;
+	}
+
+	/* A page drawn as one picture (a spreadsheet's SVG, a PDF page's image or canvas) fills its sheet. */
+	.fo-print-page > svg,
+	.fo-print-page > img,
+	.fo-print-page > canvas {
+		display: block;
+		width: 100%;
+		height: 100%;
+	}
+}

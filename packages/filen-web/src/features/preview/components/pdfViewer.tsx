@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useEffectEvent, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 import { getDocument, GlobalWorkerOptions, PDFDataRangeTransport, TextLayer } from "pdfjs-dist"
-import { loadPdfOutline, type PdfOutlineItem, type PdfSource } from "@filen/office/dom/pdf"
+import { loadPdfOutline, type PdfErrorKind, type PdfOutlineItem, type PdfSource, type PdfViewerCommand } from "@filen/office/dom/pdf"
 import {
 	PdfPages,
 	usePdfDocument,
@@ -12,10 +12,13 @@ import {
 } from "@filen/office/react/pdf"
 import { type DriveItem } from "@/features/drive/lib/item"
 import { usePreviewBytes } from "@/features/preview/hooks/usePreviewBytes"
+import { usePreviewRangeSource } from "@/features/preview/hooks/usePreviewRangeSource"
+import { usePdfFullReadGuard } from "@/features/preview/hooks/usePdfFullReadGuard"
+import { PDF_FULL_READ_WARN_BYTES, pdfViewerLimits, type PdfViewerLimits } from "@/features/preview/lib/pdfLimits"
 import { PdfCommandBar, PdfPropertiesDialog } from "@/features/preview/components/pdfCommandBar"
 import { toggleViewerFullScreen, useLeaveViewerFullScreen } from "@/features/preview/components/commandBar.logic"
 import { onCommandBarF6, onRibbonEscape } from "@/features/office/components/ribbon/ribbonFocus"
-import { usePreviewDownload } from "@/features/preview/lib/accessMode"
+import { usePreviewByteSource, usePreviewDownload } from "@/features/preview/lib/accessMode"
 import { useTrustedLinkGate } from "@/lib/trustedLinks/useTrustedLinkGate"
 import { isSafeAbsoluteHref } from "@/lib/safeUrl"
 import { keyForEditor } from "@/lib/keymap/dialogGuard"
@@ -34,6 +37,10 @@ import "@filen/office/css/pdf.css"
 import "@/features/preview/components/pdfTheme.css"
 import { recoverIfNewerBuild } from "@/lib/appUpdate"
 import { usePasswordDraft } from "@/features/preview/lib/passwordDraft"
+import { usePdfPrint } from "@/features/pdf/print/usePdfPrint"
+import { PDFJS_ASSETS } from "virtual:pdfjs-assets"
+import { BLOCK_BYTES } from "@filen/shared/videos"
+import { PdfSignatureStatus } from "@/features/pdf/signatures/pdfSignatureStatus"
 
 export interface PdfViewerProps {
 	item: DriveItem
@@ -46,8 +53,22 @@ const PDFJS: PdfJsDom = { getDocument, GlobalWorkerOptions, PDFDataRangeTranspor
 // Vite rewrites `new URL(specifier, import.meta.url)` to a same-origin, content-hashed asset URL, which
 // worker-src 'self' covers. A worker script (not one shared Worker) gives every document its own worker,
 // destroyed with it: pdf.js tears down the worker of the task it destroys. pdf.js has no eval path, so the CSP
-// needs nothing more.
-const OPTIONS: PdfDocumentOptions = { worker: { kind: "script", src: new URL("pdfjs-dist/build/pdf.worker.mjs", import.meta.url).href } }
+// needs nothing more. Its data files (character maps, standard fonts, image decoders, ICC profile) come from this
+// origin too (vite/pdfjs-assets-plugin.ts), and decoded images and pdf.js's own canvases are capped for the device.
+const WORKER_SRC = new URL("pdfjs-dist/build/pdf.worker.mjs", import.meta.url).href
+
+let built: { readonly options: PdfDocumentOptions; readonly limits: PdfViewerLimits } | null = null
+
+// Built once: the device's limits do not change while the page lives.
+function viewerSetup(): { readonly options: PdfDocumentOptions; readonly limits: PdfViewerLimits } {
+	if (built === null) {
+		const limits = pdfViewerLimits()
+
+		built = { limits, options: { worker: { kind: "script", src: WORKER_SRC }, assets: { kind: "urls", ...PDFJS_ASSETS }, ...limits } }
+	}
+
+	return built
+}
 
 // The column grows to its widest page (w-max) and at least fills the view (min-w-full), so narrower pages stay
 // centred while a page zoomed wider than the view overflows to the right only, keeping its left side scrollable.
@@ -114,16 +135,79 @@ export function PdfPasswordPrompt({ attempt, onSubmit }: { attempt: PasswordAtte
 	)
 }
 
-function PdfReader({ document, alt, size }: { document: PdfDomDocument; alt: string; size: number }) {
+interface PdfReaderProps {
+	document: PdfDomDocument
+	alt: string
+	size: number
+	// pdf.js holds every byte of the file (it read them all); a reopen of the document drops them.
+	fullyRead: boolean
+	onReopen: () => void
+}
+
+function PdfReader({ document, alt, size, fullyRead, onReopen }: PdfReaderProps) {
 	const { t } = useTranslation("preview")
 	const viewer = usePdfViewer(document)
-	const { state, dispatch } = viewer
+	const { state } = viewer
 	const rootRef = useRef<HTMLDivElement | null>(null)
 	const [findFocus, setFindFocus] = useState(0)
+	const fullRead = usePdfFullReadGuard(size)
+	// The confirmed full reads already followed by a reopen, and the reopens nobody asked for: pdf.js reading
+	// everything on its own (a damaged file) would read it all again after a reopen, so that is done once.
+	const reopenedAt = useRef(0)
+	const unaskedReopens = useRef(0)
+	const reopen = useEffectEvent(onReopen)
+
+	// Searching every page of a large file reads all of it: asked first. Everything else goes straight through.
+	const dispatch = (command: PdfViewerCommand): void => {
+		if (command.type !== "find.query" || command.query.length === 0 || !fullRead.needs("find")) {
+			viewer.dispatch(command)
+
+			return
+		}
+
+		void fullRead.confirm("find").then(confirmed => {
+			viewer.dispatch(confirmed ? command : { type: "find.close" })
+
+			if (confirmed) {
+				setFindFocus(focus => focus + 1)
+			}
+		})
+	}
+
+	// A large file pdf.js read completely (a search, printing, its read-everything fallback) is reopened once nothing
+	// uses the read bytes any more, keeping page, zoom and scroll: the new document reads pages on demand again.
+	useEffect(() => {
+		if (!fullyRead || size <= PDF_FULL_READ_WARN_BYTES || state.find.open || fullRead.holds > 0) {
+			return
+		}
+
+		const asked = fullRead.confirmations > reopenedAt.current
+
+		if (!asked && unaskedReopens.current > 0) {
+			return
+		}
+
+		if (asked) {
+			reopenedAt.current = fullRead.confirmations
+		} else {
+			unaskedReopens.current++
+		}
+
+		reopen()
+	}, [fullyRead, size, state.find.open, fullRead.holds, fullRead.confirmations])
 	const [outline, setOutline] = useState<readonly PdfOutlineItem[]>([])
 	const [properties, setProperties] = useState(false)
 	const linkGate = useTrustedLinkGate()
 	const download = usePreviewDownload()
+	const print = usePdfPrint({
+		document,
+		current: state.page,
+		size,
+		fullRead: {
+			confirm: () => fullRead.confirm("print"),
+			hold: fullRead.hold
+		}
+	})
 
 	// One worker round trip per document, cached with it: the Outline menu shows only for a document with bookmarks.
 	useEffect(() => {
@@ -298,11 +382,13 @@ function PdfReader({ document, alt, size }: { document: PdfDomDocument; alt: str
 					viewer.pages.scrollerRef.current?.focus()
 				}}
 				onDownload={download}
+				onPrint={print.open}
 				onProperties={() => {
 					setProperties(true)
 				}}
 				pageInputRef={pageInputRef}
 			/>
+			<PdfSignatureStatus document={document} />
 			{/* A preview surface: arrow keys in the pages scroll the document (sideways on a zoomed page) instead of
 			paging to another file. External links open in a new tab once their domain is trusted. */}
 			<div
@@ -322,12 +408,15 @@ function PdfReader({ document, alt, size }: { document: PdfDomDocument; alt: str
 						/>
 					}
 					allowLink={isSafeAbsoluteHref}
+					maxCanvasBytes={viewerSetup().limits.canvasMaxAreaInBytes}
 					tabIndex={-1}
 					onClick={linkGate.onClick}
 					onAuxClick={linkGate.onAuxClick}
 				/>
 			</div>
 			{linkGate.dialog}
+			{print.dialog}
+			{fullRead.dialog}
 			<PdfPropertiesDialog
 				open={properties}
 				onOpenChange={setProperties}
@@ -338,10 +427,22 @@ function PdfReader({ document, alt, size }: { document: PdfDomDocument; alt: str
 	)
 }
 
-function PdfDocument({ bytes, alt }: { bytes: Uint8Array; alt: string }) {
+interface PdfDocumentProps {
+	source: PdfSource
+	alt: string
+	// The file's size (a ranged source reads less up front).
+	size: number
+	// Opens the source again: a ranged source's own retry gets a new port.
+	onRetry?: () => void
+}
+
+function loadFailedKey(kind: PdfErrorKind): "previewPdfReadFailed" | "previewPdfLoadFailed" {
+	return kind === "transportFailed" ? "previewPdfReadFailed" : "previewPdfLoadFailed"
+}
+
+function PdfDocument({ source, alt, size, onRetry }: PdfDocumentProps) {
 	const { t } = useTranslation("preview")
-	const source: PdfSource = { kind: "bytes", bytes }
-	const { state, password, retry } = usePdfDocument(PDFJS, source, OPTIONS)
+	const { state, password, retry, fullyRead, reopen } = usePdfDocument(PDFJS, source, viewerSetup().options)
 	const failed = state.status === "error"
 
 	useEffect(() => {
@@ -367,8 +468,8 @@ function PdfDocument({ bytes, alt }: { bytes: Uint8Array; alt: string }) {
 	if (state.status === "error") {
 		return (
 			<PreviewErrorState
-				message={t("previewPdfLoadFailed")}
-				onRetry={retry}
+				message={t(loadFailedKey(state.kind))}
+				onRetry={onRetry ?? retry}
 			/>
 		)
 	}
@@ -377,23 +478,59 @@ function PdfDocument({ bytes, alt }: { bytes: Uint8Array; alt: string }) {
 		<PdfReader
 			document={state.document}
 			alt={alt}
-			size={bytes.byteLength}
+			size={size}
+			fullyRead={fullyRead}
+			onReopen={reopen}
 		/>
 	)
 }
 
-// Gated on the whole-buffer download every buffered preview shares; PdfDocument owns the rest.
-export function PdfViewer({ item, alt }: PdfViewerProps) {
-	useLeaveViewerFullScreen()
-
+function BufferedPdf({ item, alt }: PdfViewerProps) {
 	return (
 		<PreviewGate result={usePreviewBytes(item)}>
 			{ready => (
 				<PdfDocument
-					bytes={ready.bytes}
+					source={{ kind: "bytes", bytes: ready.bytes }}
 					alt={alt}
+					size={ready.bytes.byteLength}
 				/>
 			)}
 		</PreviewGate>
+	)
+}
+
+function RangedPdf({ item, alt }: PdfViewerProps) {
+	return (
+		<PreviewGate result={usePreviewRangeSource(item)}>
+			{ready => (
+				<PdfDocument
+					source={ready.source}
+					alt={alt}
+					size={Number(item.data.size)}
+					onRetry={ready.refetch}
+				/>
+			)}
+		</PreviewGate>
+	)
+}
+
+// pdf.js reads the file on demand through a range port to the SDK worker, aligned to its blocks, so a large file opens
+// after reading its first pages. A file of one block or less is read whole and kept in the session's preview cache,
+// as is an archive's entry (bytes from the archive, not the drive).
+export function PdfViewer({ item, alt }: PdfViewerProps) {
+	useLeaveViewerFullScreen()
+
+	const ranged = usePreviewByteSource() === null && Number(item.data.size) > BLOCK_BYTES
+
+	return ranged ? (
+		<RangedPdf
+			item={item}
+			alt={alt}
+		/>
+	) : (
+		<BufferedPdf
+			item={item}
+			alt={alt}
+		/>
 	)
 }

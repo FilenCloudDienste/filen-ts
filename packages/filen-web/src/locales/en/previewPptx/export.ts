@@ -46,7 +46,5 @@ export const previewPptxExport = {
 	/** Error toast: printing failed */
 	previewPptxPrintFailed: "The slides couldn't be printed.",
 	/** Notice when the print shortcut is pressed on a shared link whose owner turned off downloads */
-	previewPptxPrintNotAllowed: "The link's owner doesn't allow downloads, so the slides can't be printed.",
-	/** Shortcuts list — prints the slides of the open presentation */
-	previewPptxKeyPrint: "Print (presentations)"
+	previewPptxPrintNotAllowed: "The link's owner doesn't allow downloads, so the slides can't be printed."
 }

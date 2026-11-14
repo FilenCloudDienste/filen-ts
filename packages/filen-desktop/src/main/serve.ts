@@ -62,8 +62,26 @@ async function fetchFile(distDir: string, relPath: string): Promise<Response | n
 	}
 }
 
-function withHeaders(response: Response, extra: Record<string, string>): Response {
+// Types Chromium's file mapping does not know or does not pin: wasm is compiled only from application/wasm
+// (WebAssembly.compileStreaming), and the PDF viewer's data files (character maps, Type 1 fonts, ICC profile) are
+// opaque bytes.
+const CONTENT_TYPES: Readonly<Record<string, string>> = {
+	".wasm": "application/wasm",
+	".bcmap": "application/octet-stream",
+	".pfb": "application/octet-stream",
+	".icc": "application/octet-stream"
+}
+
+export function contentTypeFor(relPath: string): string | null {
+	return CONTENT_TYPES[path.posix.extname(relPath).toLowerCase()] ?? null
+}
+
+function withHeaders(response: Response, extra: Record<string, string>, contentType: string | null): Response {
 	const headers = new Headers(response.headers)
+
+	if (contentType !== null) {
+		headers.set("content-type", contentType)
+	}
 
 	for (const [name, value] of Object.entries(extra)) {
 		headers.set(name, value)
@@ -119,6 +137,6 @@ export function registerAppProtocol(scheme: string, distDir: string, rules: read
 			(await fetchFile(distDir, resolution.relPath)) ??
 			(resolution.onMissing === "index" ? await fetchFile(distDir, "index.html") : null)
 
-		return file === null ? notFound : withHeaders(file, headersFor(rules, pathname))
+		return file === null ? notFound : withHeaders(file, headersFor(rules, pathname), contentTypeFor(resolution.relPath))
 	})
 }

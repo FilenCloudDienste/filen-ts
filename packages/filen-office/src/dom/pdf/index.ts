@@ -19,6 +19,7 @@ export {
 	type PdfFindSignal,
 	type PdfPageText
 } from "./find"
+export { loadPdfSignatureFields, pdfSignatureFields, type PdfSignatureFieldHint } from "./signatureFields"
 export { pdfLinks, resolveDestination, type PdfDestination, type PdfLink, type PdfRect } from "./links"
 export {
 	loadPdfInfo,

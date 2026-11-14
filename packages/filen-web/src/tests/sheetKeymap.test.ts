@@ -30,16 +30,17 @@ afterEach(async () => {
 })
 
 describe("the spreadsheet's keymap actions", () => {
-	it("registers every grid shortcut but save, in the Spreadsheet group, with the table's keys", () => {
+	it("registers every grid shortcut but save and print, in the Spreadsheet group, with the table's keys", () => {
 		const ids = SHEET_ACTIONS.map(def => def.id)
 
 		expect(ids).not.toContain("sheet.save")
-		expect(ids).toHaveLength(SHEET_SHORTCUTS.length - 1)
+		expect(ids).not.toContain("sheet.print")
+		expect(ids).toHaveLength(SHEET_SHORTCUTS.length - 2)
 
 		for (const entry of SHEET_SHORTCUTS) {
 			const action = entry.action
 
-			if (action === "save") continue
+			if (action === "save" || action === "print") continue
 
 			const def = SHEET_ACTIONS.find(candidate => candidate.id === sheetActionId(action))
 
@@ -96,5 +97,19 @@ describe("the spreadsheet's keymap actions", () => {
 		await unbindAction("preview.save")
 
 		expect(live().save).toBe("mod+s")
+	})
+
+	it("takes the office editors' office.print as the grid's print", async () => {
+		expect(shortcutOf(press({ code: "KeyP", ctrlKey: true }), false, live())).toBe("print")
+
+		await setUserCombo("office.print", "mod+shift+p")
+
+		expect(shortcutOf(press({ code: "KeyP", ctrlKey: true }), false, live())).toBeNull()
+		expect(shortcutOf(press({ code: "KeyP", ctrlKey: true, shiftKey: true }), false, live())).toBe("print")
+
+		await unbindAction("office.print")
+
+		expect(shortcutOf(press({ code: "KeyP", ctrlKey: true, shiftKey: true }), false, live())).toBeNull()
+		await clearUserCombo("office.print")
 	})
 })

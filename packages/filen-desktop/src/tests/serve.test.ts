@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { devServerUrl, resolveRequest } from "../main/serve.ts"
+import { contentTypeFor, devServerUrl, resolveRequest } from "../main/serve.ts"
 
 const navigation = { method: "GET", secFetchMode: "navigate", accept: "text/html" }
 const subresource = { method: "GET", secFetchMode: "no-cors", accept: "*/*" }
@@ -48,5 +48,19 @@ describe("devServerUrl", () => {
 
 	it("fails a download the service worker never saw", () => {
 		expect(devServerUrl("filen://app/sw/download/abc", "http://localhost:5173")).toBeNull()
+	})
+})
+
+describe("contentTypeFor", () => {
+	it("pins wasm and the PDF viewer's data files", () => {
+		expect(contentTypeFor("assets/pdfjs-6.4.299/wasm/openjpeg.wasm")).toBe("application/wasm")
+		expect(contentTypeFor("assets/pdfjs-6.4.299/cmaps/UniJIS-UTF16-H.bcmap")).toBe("application/octet-stream")
+		expect(contentTypeFor("assets/pdfjs-6.4.299/standard_fonts/FoxitSerif.pfb")).toBe("application/octet-stream")
+		expect(contentTypeFor("assets/pdfjs-6.4.299/iccs/CGATS001Compat-v2-micro.icc")).toBe("application/octet-stream")
+	})
+
+	it("leaves every other type to Chromium's own mapping", () => {
+		expect(contentTypeFor("assets/index-abc.js")).toBeNull()
+		expect(contentTypeFor("index.html")).toBeNull()
 	})
 })

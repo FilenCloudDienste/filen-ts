@@ -5,6 +5,7 @@ import { log } from "@/lib/log"
 import type { NamespaceKey } from "@/lib/i18n"
 import { isMacPlatform } from "@/lib/keymap/kbd.logic"
 import type { ReservedOwner } from "@/lib/keymap/reserved"
+import { RENAMED_ACTIONS } from "@/lib/keymap/renamedActions"
 import type { SHORTCUT_NAMESPACES } from "@/lib/keymap/shortcutsCatalog"
 import {
 	DEFAULT_RECORD,
@@ -195,18 +196,31 @@ function applyRecord(record: KeymapRecord): void {
 	useKeymapStore.setState({ record, recordingProblem: retired ? null : problem })
 }
 
+const RENAMED_IDS = new Set(RENAMED_ACTIONS.map(([from]) => from))
+
 // Stored combos in the canonical token spelling (@filen/shared/keymap): older records may spell a key by its
 // character ("mod+=", "mod+shift+,"). Rewritten on load rather than in storage: the next write persists the canonical
 // form. A combo that holds no chord at all matches nothing, so it is dropped and the action falls back to its default;
-// the unbound marker is kept.
+// the unbound marker is kept. A combo stored under a renamed action's old id moves to its new one (RENAMED_ACTIONS).
 export function migrateOverrides(overrides: Readonly<Record<string, string>>): Record<string, string> {
 	const migrated: Record<string, string> = {}
+	const canonicalOf = (combo: string): string => (combo === UNBOUND_COMBO ? combo : normalizeCombo(combo))
 
 	for (const [id, combo] of Object.entries(overrides)) {
-		const canonical = combo === UNBOUND_COMBO ? combo : normalizeCombo(combo)
+		const canonical = canonicalOf(combo)
+
+		if (canonical.length > 0 && !RENAMED_IDS.has(id)) {
+			migrated[id] = canonical
+		}
+	}
+
+	// A combo stored under a renamed action's old id moves to its new one.
+	for (const [from, to] of RENAMED_ACTIONS) {
+		const stored = overrides[from]
+		const canonical = stored === undefined ? "" : canonicalOf(stored)
 
 		if (canonical.length > 0) {
-			migrated[id] = canonical
+			migrated[to] ??= canonical
 		}
 	}
 

@@ -1,4 +1,5 @@
 import type { OutgoingHttpHeaders } from "node:http"
+import { fileURLToPath } from "node:url"
 import { defineConfig, loadEnv, type Connect, type Plugin } from "vite"
 import react from "@vitejs/plugin-react"
 import tailwindcss from "@tailwindcss/vite"
@@ -8,9 +9,14 @@ import { sdkArtifacts, COI_HEADERS, SDK_ARTIFACTS } from "./vite/sdk-artifacts-p
 import { officeFonts, OFFICE_FONTS_BASE } from "./vite/office-fonts-plugin"
 import { officeHyphenation } from "./vite/office-hyphenation-plugin"
 import { spellcheckAssets, SPELLCHECK_BASE } from "./vite/spellcheck-assets-plugin"
+import { pdfjsAssets } from "./vite/pdfjs-assets-plugin"
 import { SINGLETONS } from "./vite/singletons"
 import { assistantModelDev } from "./vite/assistant-model"
 import { isAllowedModelOrigin } from "./src/features/assistant/runtime/manifest"
+
+// MuPDF's wasm beside its module, outside the package's exports: the page compiles it (features/pdf/session/
+// engineModule.ts) and hands the module to the engine worker, so the import is `mupdf-wasm?url`.
+const MUPDF_WASM = fileURLToPath(new URL("mupdf-wasm.wasm", import.meta.resolve("mupdf")))
 
 // Vite's header options only reach the responses it serves with a body: the 304 Not Modified that
 // answers a revalidation goes out bare, from the preview's static handler and the dev server's module
@@ -209,6 +215,7 @@ export default defineConfig(({ mode }) => ({
 		officeFonts(),
 		officeHyphenation(),
 		spellcheckAssets(),
+		pdfjsAssets(),
 		assistantModelDev()
 	],
 	// Workspace packages are compiled from source, so their bare imports resolve from their own directory,
@@ -216,7 +223,10 @@ export default defineConfig(({ mode }) => ({
 	// singleton, resolved from this package; a package name covers its subpaths (react/jsx-runtime, and
 	// react/compiler-runtime that the React Compiler injects into those sources too).
 	resolve: {
-		alias: [{ find: "@", replacement: "/src" }],
+		alias: [
+			{ find: "@", replacement: "/src" },
+			{ find: /^mupdf-wasm(\?url)$/, replacement: `${MUPDF_WASM}$1` }
+		],
 		dedupe: SINGLETONS
 	},
 	// @sqlite.org/sqlite-wasm's own Vite guidance (README "Usage with vite"): it self-locates
@@ -237,10 +247,11 @@ export default defineConfig(({ mode }) => ({
 	// The workers and the service worker are scan entries of their own: the scan treats a `?worker` import as
 	// external, so a worker's dependencies would only be found when it first runs, and re-optimizing then
 	// reloads the page under it (the assistant's model download among it). Explicit entries replace the default
-	// html glob, so index.html is listed too.
+	// html glob, so index.html is listed too. mupdf (the PDF engine worker's) is excluded like sqlite-wasm: its glue
+	// self-locates its wasm beside it.
 	optimizeDeps: {
 		entries: ["index.html", "src/**/*.worker.ts", "src/sw/sw.ts"],
-		exclude: ["@sqlite.org/sqlite-wasm", "@filen/sdk-rs/service-worker/sdk-rs.js"],
+		exclude: ["@sqlite.org/sqlite-wasm", "@filen/sdk-rs/service-worker/sdk-rs.js", "mupdf"],
 		include: ["react/compiler-runtime"]
 	},
 	// Vite 8 already defaults both of these on (verified against the installed package's

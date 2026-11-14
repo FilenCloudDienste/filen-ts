@@ -272,5 +272,7 @@ export const settingsKeyboard = {
 	/** Shortcuts list — where the shortcut works: in a document's find field */
 	keyboardHintFindField: "In the find field",
 	/** Shortcut name — in the Word, spreadsheet and presentation editors, hides the ribbon's commands below its tabs or shows them again */
-	keyboardActionToggleRibbon: "Show tabs only or the whole ribbon"
+	keyboardActionToggleRibbon: "Show tabs only or the whole ribbon",
+	/** Shortcut name — in the spreadsheet and presentation editors and the PDF viewer, opens printing for the open file */
+	keyboardActionPrint: "Print"
 } as const

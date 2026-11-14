@@ -32,13 +32,13 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem } from "@/component
 import { fullscreenSupported } from "@/lib/media/fullscreen"
 import { formatDateTime } from "@/lib/formatDate"
 import { Kbd } from "@/lib/keymap/kbd"
+import { MenuShortcut } from "@/components/ui/menuShortcut"
 
-// The PDF viewer's command bar (OfficeCommandBar): File (Download, Document properties), then Pages (first,
+// The PDF viewer's command bar (OfficeCommandBar): File (Download, Print, Document properties), then Pages (first,
 // previous, the page number field, next, last), Zoom (out, the zoom menu with its steps and fits, in), Rotate,
 // Outline (the document's bookmarks, when it has any), Full screen and Find; the page and the zoom at the end. The
 // find field takes the groups' place while finding. Everything it shows is the viewer's state, everything it does a
-// viewer command. Print is not offered: the CSP allows no frame (the browser's own PDF viewer cannot be asked to
-// print), and printing from here would mean rendering every page at print resolution.
+// viewer command.
 
 // The find field's view of the viewer: a query shows as searched (with its count) once its search finished.
 function findControls(state: PdfViewerState, dispatch: (command: PdfViewerCommand) => void): DocxFindControls {
@@ -121,6 +121,8 @@ export interface PdfCommandBarProps {
 	onFindClosed: () => void
 	// The host's download, null where the file may not be saved.
 	onDownload: (() => void) | null
+	// Opens the print dialog; undefined where printing is not offered.
+	onPrint: (() => void) | undefined
 	onProperties: () => void
 	// The page field, for the Go to Page key.
 	pageInputRef: RefObject<HTMLInputElement | null>
@@ -137,6 +139,7 @@ export function PdfCommandBar({
 	findFocus,
 	onFindClosed,
 	onDownload,
+	onPrint,
 	onProperties,
 	pageInputRef
 }: PdfCommandBarProps) {
@@ -276,6 +279,14 @@ export function PdfCommandBar({
 			file={
 				<CommandFileMenu>
 					{onDownload === null ? null : <DropdownMenuItem onClick={onDownload}>{t("previewDownloadAction")}</DropdownMenuItem>}
+					{onPrint === undefined ? null : (
+						<DropdownMenuItem onClick={onPrint}>
+							{t("previewPdfPrintMenu")}
+							<MenuShortcut>
+								<Kbd action="office.print" />
+							</MenuShortcut>
+						</DropdownMenuItem>
+					)}
 					<DropdownMenuItem onClick={onProperties}>{t("previewCommandBarProperties")}</DropdownMenuItem>
 				</CommandFileMenu>
 			}

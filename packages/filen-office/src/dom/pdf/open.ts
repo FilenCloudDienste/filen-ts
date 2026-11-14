@@ -20,6 +20,8 @@ export type PdfSource =
 			readonly read: (offset: number, length: number) => Promise<Uint8Array>
 			// The most one read asks for; pdf.js merges adjacent chunks into one request of any size.
 			readonly maxRead?: number
+			// How many reads of one request run at once (default 4).
+			readonly readsInFlight?: number
 			readonly chunkSize?: number
 	  }
 
@@ -58,6 +60,9 @@ export interface PdfOpenOptions {
 	readonly onPassword: (reason: PdfPasswordReason) => void
 	// A ranged read failed after the document opened (pdf.js never asks for a failed range again).
 	readonly onReadError?: () => void
+	// Every byte of a ranged source has been handed to pdf.js (it asks for each range once), which then holds the
+	// whole file for the document's life. Called once.
+	readonly onFullyRead?: () => void
 }
 
 export interface PdfOpening<S = unknown> {
@@ -79,6 +84,48 @@ export class PdfReadError extends Error {
 
 const VERBOSITY_ERRORS = 0
 const DEFAULT_CHUNK = 256 * 1024
+const DEFAULT_READS_IN_FLIGHT = 4
+
+// One answer per request: pdf.js matches an answer to its request by the start offset, so the reads of a request
+// larger than maxRead are merged. They run in parallel, at most inFlight at once; a request one read covers is handed
+// on as read, without a copy.
+export async function readRange(
+	read: (offset: number, length: number) => Promise<Uint8Array>,
+	begin: number,
+	end: number,
+	maxRead: number,
+	inFlight: number
+): Promise<Uint8Array | null> {
+	const total = end - begin
+
+	if (total <= 0) return null
+
+	const checked = async (offset: number, length: number): Promise<Uint8Array> => {
+		const chunk = await read(offset, length)
+
+		if (chunk.length !== length) throw new PdfReadError()
+
+		return chunk
+	}
+
+	if (total <= maxRead) return checked(begin, total)
+
+	const merged = new Uint8Array(total)
+	let next = begin
+	const lane = async (): Promise<void> => {
+		while (next < end) {
+			const offset = next
+			const length = Math.min(maxRead, end - offset)
+
+			next += length
+			merged.set(await checked(offset, length), offset - begin)
+		}
+	}
+
+	await Promise.all(Array.from({ length: Math.min(inFlight, Math.ceil(total / maxRead)) }, lane))
+
+	return merged
+}
 
 function hasInThreadWorker(): boolean {
 	const worker: unknown = Reflect.get(globalThis, "pdfjsWorker")
@@ -155,32 +202,29 @@ export function openPdf<S>(pdfjs: PdfJs<S>, source: PdfSource, options: PdfOpenO
 		const transport = new pdfjs.PDFDataRangeTransport(source.length, null)
 		const maxRead = Math.max(1, source.maxRead ?? Number.MAX_SAFE_INTEGER)
 
+		const inFlight = Math.max(1, source.readsInFlight ?? DEFAULT_READS_IN_FLIGHT)
+		const onFullyRead = options.onFullyRead
+		let loaded = 0
+
 		transport.requestDataRange = (begin: number, end: number): void => {
-			const fetchRange = async (): Promise<void> => {
-				const total = end - begin
+			readRange(source.read, begin, end, maxRead, inFlight)
+				.then(bytes => {
+					if (destroyed || bytes === null) return
 
-				if (total <= 0) return
+					// Read before handing over: pdf.js may transfer the buffer to its worker.
+					const before = loaded
 
-				const merged = new Uint8Array(total)
+					loaded += bytes.length
+					transport.onDataRange(begin, bytes)
 
-				for (let offset = begin; offset < end;) {
-					const chunk = await source.read(offset, Math.min(maxRead, end - offset))
+					if (onFullyRead !== undefined && before < source.length && loaded >= source.length) onFullyRead()
+				})
+				.catch(() => {
+					if (destroyed) return
 
-					if (chunk.length === 0 || chunk.length > end - offset) throw new PdfReadError()
-
-					merged.set(chunk, offset - begin)
-					offset += chunk.length
-				}
-
-				if (!destroyed) transport.onDataRange(begin, merged)
-			}
-
-			fetchRange().catch(() => {
-				if (destroyed) return
-
-				if (opened) options.onReadError?.()
-				else failRead?.(new PdfReadError())
-			})
+					if (opened) options.onReadError?.()
+					else failRead?.(new PdfReadError())
+				})
 		}
 
 		range = transport

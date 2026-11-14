@@ -239,6 +239,107 @@ describe("openPdf", () => {
 		expect(transport.ranges[0]).toEqual([10, file.slice(10, 50)])
 	})
 
+	it("runs a request's reads in parallel, at most readsInFlight at once, in file order", async () => {
+		const { pdfjs, transports } = fakePdfJs()
+		const file = Uint8Array.from({ length: 100 }, (_, index) => index)
+		const waiting: (() => void)[] = []
+		let running = 0
+		let peak = 0
+		const read = vi.fn(async (offset: number, length: number) => {
+			running++
+			peak = Math.max(peak, running)
+			await new Promise<void>(resolve => waiting.push(resolve))
+			running--
+
+			return file.slice(offset, offset + length)
+		})
+
+		openPdf(
+			pdfjs,
+			{ kind: "ranges", length: 100, read, maxRead: 10, readsInFlight: 3 },
+			{ worker: SCRIPT, onPassword: () => undefined }
+		)
+
+		const transport = only(transports)
+
+		transport.requestDataRange(0, 100)
+
+		while (transport.ranges.length === 0) {
+			await Promise.resolve()
+
+			// Answer the newest read first, so completion order differs from file order.
+			waiting.pop()?.()
+			await new Promise(resolve => setTimeout(resolve, 0))
+		}
+
+		expect(peak).toBe(3)
+		expect(read.mock.calls.map(call => call[0])).toEqual([0, 10, 20, 30, 40, 50, 60, 70, 80, 90])
+		expect(transport.ranges[0]).toEqual([0, file])
+	})
+
+	it("hands a request one read covers to pdf.js as read, without a copy", async () => {
+		const { pdfjs, transports } = fakePdfJs()
+		const answer = new Uint8Array(40)
+
+		openPdf(
+			pdfjs,
+			{ kind: "ranges", length: 100, read: () => Promise.resolve(answer), maxRead: 64 },
+			{ worker: SCRIPT, onPassword: () => undefined }
+		)
+
+		const transport = only(transports)
+
+		transport.requestDataRange(10, 50)
+		await vi.waitFor(() => {
+			expect(transport.ranges).toHaveLength(1)
+		})
+
+		expect(transport.ranges[0]?.[1]).toBe(answer)
+	})
+
+	it("says once when every byte of the file has been read", async () => {
+		const { pdfjs, transports } = fakePdfJs()
+		const onFullyRead = vi.fn()
+
+		openPdf(
+			pdfjs,
+			{ kind: "ranges", length: 30, read: (_offset, length) => Promise.resolve(new Uint8Array(length)) },
+			{ worker: SCRIPT, onPassword: () => undefined, onFullyRead }
+		)
+
+		const transport = only(transports)
+
+		transport.requestDataRange(20, 30)
+		await vi.waitFor(() => {
+			expect(transport.ranges).toHaveLength(1)
+		})
+		expect(onFullyRead).not.toHaveBeenCalled()
+
+		transport.requestDataRange(0, 20)
+		await vi.waitFor(() => {
+			expect(onFullyRead).toHaveBeenCalledTimes(1)
+		})
+	})
+
+	it("fails the open when one of a request's parallel reads fails", async () => {
+		const { pdfjs, transports } = fakePdfJs()
+		const opening = openPdf(
+			pdfjs,
+			{
+				kind: "ranges",
+				length: 40,
+				read: (offset, length) => (offset === 20 ? Promise.reject(new Error("bridge")) : Promise.resolve(new Uint8Array(length))),
+				maxRead: 10
+			},
+			{ worker: SCRIPT, onPassword: () => undefined }
+		)
+
+		only(transports).requestDataRange(0, 40)
+
+		await expect(opening.promise).rejects.toBeInstanceOf(PdfReadError)
+		expect(only(transports).ranges).toEqual([])
+	})
+
 	it("fails the open when a ranged read fails before the document opened", async () => {
 		const { pdfjs, transports } = fakePdfJs()
 		const opening = openPdf(

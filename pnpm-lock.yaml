@@ -729,9 +729,6 @@ importers:
       hyperformula:
         specifier: 3.4.0
         version: 3.4.0
-      pdfjs-dist:
-        specifier: ^6.3.289
-        version: 6.4.299
     devDependencies:
       '@codemirror/autocomplete':
         specifier: 6.20.4
@@ -838,18 +835,39 @@ importers:
       '@types/node':
         specifier: ^24.0.0
         version: 24.19.2
+      '@types/node-forge':
+        specifier: 1.3.14
+        version: 1.3.14
       '@types/react':
         specifier: ~19.3.0
         version: 19.3.0
       '@types/react-dom':
         specifier: ~19.2.3
         version: 19.2.7(@types/react@19.3.0)
+      asn1js:
+        specifier: 3.1.0
+        version: 3.1.0
       eslint:
         specifier: ^9.39.3
         version: 9.39.5(jiti@2.7.0)(supports-color@8.1.1)
       happy-dom:
         specifier: ^20.14.0
         version: 20.14.5
+      hash-wasm:
+        specifier: 4.12.0
+        version: 4.12.0
+      mupdf:
+        specifier: 1.28.6
+        version: 1.28.6
+      node-forge:
+        specifier: 1.4.3
+        version: 1.4.3
+      pdfjs-dist:
+        specifier: 6.4.299
+        version: 6.4.299
+      pkijs:
+        specifier: 3.4.3
+        version: 3.4.3
       prettier:
         specifier: ^3.9.6
         version: 3.9.10
@@ -880,6 +898,9 @@ importers:
       remark-gfm:
         specifier: 4.0.1
         version: 4.0.1(supports-color@8.1.1)
+      tesseract.js-core:
+        specifier: 7.0.0
+        version: 7.0.0
       tsx:
         specifier: 4.23.13
         version: 4.23.13
@@ -1112,6 +1133,9 @@ importers:
       arktype:
         specifier: 2.2.9
         version: 2.2.9
+      asn1js:
+        specifier: 3.1.0
+        version: 3.1.0
       buffer:
         specifier: ^6.0.3
         version: 6.0.3
@@ -1148,12 +1172,21 @@ importers:
       mediabunny:
         specifier: 1.66.0
         version: 1.66.0(patch_hash=d4d9dac984d5d92d167c2f0dd12d1e8fb09238dfc3c3f6de76d182c10707bc59)
+      mupdf:
+        specifier: 1.28.6
+        version: 1.28.6
       music-metadata:
         specifier: 12.2.3
         version: 12.2.3(supports-color@8.1.1)
+      node-forge:
+        specifier: 1.4.3
+        version: 1.4.3
       pdfjs-dist:
         specifier: 6.4.299
         version: 6.4.299
+      pkijs:
+        specifier: 3.4.3
+        version: 3.4.3
       prosemirror-history:
         specifier: 1.5.1
         version: 1.5.1
@@ -1205,6 +1238,9 @@ importers:
       tailwindcss:
         specifier: ^4
         version: 4.3.3
+      tesseract.js-core:
+        specifier: 7.0.0
+        version: 7.0.0
       tw-animate-css:
         specifier: ^1.4.0
         version: 1.4.0
@@ -1242,6 +1278,9 @@ importers:
       '@types/node':
         specifier: ^24
         version: 24.19.2
+      '@types/node-forge':
+        specifier: 1.3.14
+        version: 1.3.14
       '@types/react':
         specifier: ^19.3.0
         version: 19.3.0
@@ -4639,6 +4678,9 @@ packages:
 
   '@types/ms@2.1.0':
     resolution: {integrity: sha512-GsCCIZDE/p3i96vtEqx+7dBUGXrc7zeSK3wwPHIaRThS+9OhWIXRqzs4d6k1SVU8g91DrNRWxWUGhp5KXQb2VA==}
+
+  '@types/node-forge@1.3.14':
+    resolution: {integrity: sha512-mhVF2BnD4BO+jtOp7z1CdzaK4mbuK0LLQYAvdOLqHTavxFNq4zA1EmYkpnFjP8HOUzedfQkRnp0E2ulSAYSzAw==}
 
   '@types/node@24.19.2':
     resolution: {integrity: sha512-93d49wCWJkCyN87MxLpNN6KXPCwFw7bVUg79mGUV1OS40JGWwVCr8n61DXCSqz7CV6/VfPkb7xec7uP2M+QHWQ==}
@@ -8359,6 +8401,9 @@ packages:
   multitars@1.0.2:
     resolution: {integrity: sha512-6GwVw5eLi9sThdtlS4PKwC7yRLaf45pYhIEzKBHdKxi+YOXGKFX8acIniH+Uh/+k9mS2lQOupTccjoe5r0/1IQ==}
 
+  mupdf@1.28.6:
+    resolution: {integrity: sha512-LsNqk3a9TNJGjJKWVOUK1YMlWJNxFh8bIf+SSxGI+A+WXDlkwc4R2PW/n1qINb4YpqZfOazjPdRqw95WpmCrfw==}
+
   music-metadata@12.2.3:
     resolution: {integrity: sha512-YN0oQcaIhXyIW8lmmjErhegZhqpyO325oQu9ZjtOFXb/QfwgGjxpzIQUmEGHBpLlrCix42OmrlvUZFkfv+Eecw==}
     engines: {node: '>=22'}
@@ -8425,6 +8470,10 @@ packages:
 
   node-forge@1.4.0:
     resolution: {integrity: sha512-LarFH0+6VfriEhqMMcLX2F7SwSXeWwnEAJEsYm5QKWchiVYVvJyV9v7UDvUv+w5HO23ZpQTXDv/GxdDdMyOuoQ==}
+    engines: {node: '>= 6.13.0'}
+
+  node-forge@1.4.3:
+    resolution: {integrity: sha512-P6wzfh6t70avmV8FrVEAd/36sOPJQ+hkaJVX1Laap9J/77m7M0eyozDvc8SwnDf4P7MP94gwbAAo0rg3YVXT+g==}
     engines: {node: '>= 6.13.0'}
 
   node-gyp@12.4.0:
@@ -9980,6 +10029,9 @@ packages:
     resolution: {integrity: sha512-bWnjSNscmuI+GJze6ZupnHP8G/cTcsJF+bXCeQknk2SHQsgbNJnLrqiH9jZ2W4STPVXH2mDKKRX3iwPhc9Cn/Q==}
     engines: {node: '>=10'}
     hasBin: true
+
+  tesseract.js-core@7.0.0:
+    resolution: {integrity: sha512-WnNH518NzmbSq9zgTPeoF8c+xmilS8rFIl1YKbk/ptuuc7p6cLNELNuPAzcmsYw450ca6bLa8j3t0VAtq435Vw==}
 
   throat@5.0.0:
     resolution: {integrity: sha512-fcwX4mndzpLQKBS1DVYhGAcYaYt7vsHNIvQV+WXMvnow5cgjPphq5CaayLaGsjRdSCKZFNGt7/GYAuXaNOiYCA==}
@@ -14811,6 +14863,10 @@ snapshots:
   '@types/mime-types@3.0.1': {}
 
   '@types/ms@2.1.0': {}
+
+  '@types/node-forge@1.3.14':
+    dependencies:
+      '@types/node': 24.19.2
 
   '@types/node@24.19.2':
     dependencies:
@@ -19653,6 +19709,8 @@ snapshots:
 
   multitars@1.0.2: {}
 
+  mupdf@1.28.6: {}
+
   music-metadata@12.2.3(supports-color@8.1.1):
     dependencies:
       '@borewit/text-codec': 0.2.2
@@ -19710,6 +19768,8 @@ snapshots:
       whatwg-url: 5.0.0
 
   node-forge@1.4.0: {}
+
+  node-forge@1.4.3: {}
 
   node-gyp@12.4.0:
     dependencies:
@@ -21659,6 +21719,8 @@ snapshots:
       acorn: 8.18.0
       commander: 2.20.3
       source-map-support: 0.5.21
+
+  tesseract.js-core@7.0.0: {}
 
   throat@5.0.0: {}
 

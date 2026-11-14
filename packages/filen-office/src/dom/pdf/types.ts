@@ -1,4 +1,4 @@
-// The part of pdf.js (pdfjs-dist 6.3) the PDF viewer uses, typed structurally. The host passes its own pdf.js
+// The part of pdf.js (pdfjs-dist 6.4) the PDF viewer uses, typed structurally. The host passes its own pdf.js
 // module in: the browser build with a real worker on web, the legacy build with an in-thread worker in a
 // mobile WebView. This package never imports pdf.js, so neither build is bundled where the other is used,
 // and a host's module is checked against these shapes where it is passed.
@@ -36,8 +36,14 @@ export interface PdfRenderTask {
 export interface PdfRenderParams {
 	// An HTMLCanvasElement (typed loosely: this layer has no DOM types).
 	readonly canvas?: unknown
+	// A CanvasRenderingContext2D to draw with instead of the canvas's own (a print surface's).
+	readonly canvasContext?: unknown
 	readonly viewport: PdfViewport
 	readonly transform?: readonly number[] | undefined
+	// "print" renders the annotations flagged for printing instead of those for display ("display", the default).
+	readonly intent?: string | undefined
+	// pdf.js AnnotationMode: 0 none, 1 their appearances, 2 forms as HTML, 3 appearances with entered values.
+	readonly annotationMode?: number | undefined
 }
 
 export interface PdfTextContent {
@@ -68,6 +74,10 @@ export interface PdfDocument<S = unknown> {
 	getOutline(): Promise<readonly unknown[] | null>
 	// The Info dictionary as `info` (pdfDocumentInfo reads it).
 	getMetadata(): Promise<{ readonly info: unknown }>
+	// The author's permission flags (pdf.js PermissionFlag), null without restrictions.
+	getPermissions?(): Promise<ReadonlySet<number> | null>
+	// The signatures' metadata (field name, /ByteRange, ...) from the AcroForm alone, no page loaded; null when unsigned.
+	getSignatures?(): Promise<unknown[] | null>
 }
 
 export interface PdfLoadingTask<S = unknown> {
