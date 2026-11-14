@@ -183,6 +183,27 @@ export class PdfEditSwap {
 		if (this.phase.kind === "view") void this.start()
 	}
 
+	// The session once the editor has the document (now, or when it is starting, once started); null when it does not
+	// (it failed, was poisoned or closed). Never starts it.
+	started(): Promise<PdfEditSessionModel | null> {
+		const settled = (phase: PdfEditPhase): PdfEditSessionModel | null | undefined =>
+			phase.kind === "editing" ? phase.session : phase.kind === "starting" ? undefined : null
+		const now = settled(this.phase)
+
+		if (now !== undefined) return Promise.resolve(now)
+
+		return new Promise(resolve => {
+			const unsubscribe = this.subscribe(() => {
+				const next = settled(this.phase)
+
+				if (next === undefined) return
+
+				unsubscribe()
+				resolve(next)
+			})
+		})
+	}
+
 	// Runs `apply` on the session when the editor already has the document; never starts it.
 	withSession(apply: (session: PdfEditSessionModel) => void): void {
 		if (this.phase.kind === "editing") apply(this.phase.session)

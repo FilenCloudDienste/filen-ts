@@ -247,12 +247,16 @@ export function usePdfEdit(
 		toast.error(t("previewPdfRedactVerifyFailed", { reason: t(reason.key, reason.params) }))
 	}
 
-	const saveDeps = (): PdfSaveActionDeps | null =>
-		phase.kind !== "editing"
+	// Read when a save runs, from the editor as it is then (a save asked for while it started runs once it has the
+	// document).
+	const saveDeps = (): PdfSaveActionDeps | null => {
+		const current = swap.getSnapshot()
+
+		return current.kind !== "editing"
 			? null
 			: {
-					engine: phase.engine,
-					session: phase.session,
+					engine: current.engine,
+					session: current.session,
 					memory: pdfEngineMemory(),
 					fileBytes: draft?.draft.size ?? Number(item.data.size),
 					password: swap.password(),
@@ -303,7 +307,7 @@ export function usePdfEdit(
 							})
 						}),
 					beforeSave: requested =>
-						pdfFormSaveGate(phase.session, requested, {
+						pdfFormSaveGate(current.session, requested, {
 							askXfa: () =>
 								new Promise(resolve => {
 									setXfa({
@@ -359,6 +363,7 @@ export function usePdfEdit(
 						return request
 					}
 				}
+	}
 
 	const actions = pdfEditActions(saveDeps, item)
 
@@ -653,14 +658,28 @@ export function usePdfEdit(
 		// when asked); with "Flatten annotations" chosen, they are drawn into the pages first (one undo step).
 		// One save at a time: another asked for while one holds the document is refused quietly.
 		saveSource:
-			phase.kind === "editing" && draft === undefined
-				? options =>
-						options.auto
-							? Promise.resolve(null)
-							: saving
-								? Promise.reject(new SaveRefusedError("previewPdfSaveFailed", { silent: true }))
-								: flattenedFirst(session, flatten, () => actions.saveVersion())
-				: null,
+			draft !== undefined
+				? null
+				: phase.kind === "editing"
+					? options =>
+							options.auto
+								? Promise.resolve(null)
+								: saving
+									? Promise.reject(new SaveRefusedError("previewPdfSaveFailed", { silent: true }))
+									: flattenedFirst(session, flatten, () => actions.saveVersion())
+					: // A Save while the editor starts (text typed into a field starts it) runs once it has the document.
+						phase.kind === "starting"
+						? options =>
+								options.auto
+									? Promise.resolve(null)
+									: swap
+											.started()
+											.then(started =>
+												started === null
+													? Promise.reject(new SaveRefusedError("previewPdfSaveFailed"))
+													: flattenedFirst(started, flatten, () => actions.saveVersion())
+											)
+						: null,
 		activeTool,
 		toolVariants,
 		setActiveTool,

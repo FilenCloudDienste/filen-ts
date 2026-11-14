@@ -77,6 +77,36 @@ describe("the swap to the editor", () => {
 		expect(calls).toEqual(["state"])
 	})
 
+	it("hands a save asked for while starting the session once it is ready, or nothing when it never is", async () => {
+		const calls: string[] = []
+		let fail = false
+		const swap = new PdfEditSwap({
+			open: () => (fail ? Promise.reject(new Error("offline")) : Promise.resolve(fakeEngine(calls))),
+			mobile: false,
+			onChangeFailed: () => undefined
+		})
+
+		swap.setFile(FILE)
+		swap.warm()
+		expect(swap.getSnapshot().kind).toBe("starting")
+
+		const ready = await swap.started()
+		const phase = swap.getSnapshot()
+
+		expect(phase.kind).toBe("editing")
+		expect(ready).toBe(phase.kind === "editing" ? phase.session : undefined)
+		// Already editing: at once.
+		await expect(swap.started()).resolves.toBe(ready)
+
+		swap.close()
+		await expect(swap.started()).resolves.toBeNull()
+
+		fail = true
+		swap.warm()
+		await expect(swap.started()).resolves.toBeNull()
+		expect(swap.getSnapshot().kind).toBe("failed")
+	})
+
 	it("marks an engine opened on a file a save wrote, whose signatures pdf.js never read", async () => {
 		const calls: string[] = []
 		const swap = new PdfEditSwap({ open: () => Promise.resolve(fakeEngine(calls)), mobile: false, onChangeFailed: () => undefined })
