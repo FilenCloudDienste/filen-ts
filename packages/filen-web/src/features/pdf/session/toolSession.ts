@@ -3,7 +3,7 @@ import { isImeKeydown } from "@filen/shared/keymap"
 import { pdfToolLetterAllowed } from "@/features/pdf/lib/toolKeys"
 import { toolInEffect, type PdfPolicyState, type PdfTool, type PdfToolContext } from "@/features/pdf/tools/registry"
 import { pdfSurfaceKey } from "@/features/pdf/tools/toolKeys.logic"
-import { isAnyOverlayOpen } from "@/lib/keymap/dialogGuard"
+import { OPEN_OVERLAY_SELECTOR } from "@/lib/keymap/dialogGuard"
 import { isMacPlatform } from "@/lib/keymap/kbd.logic"
 import { isRecordingCombo } from "@/lib/keymap/registry"
 import { log } from "@/lib/log"
@@ -39,11 +39,22 @@ export interface PdfSurfaceKeyDeps {
 	readonly activate: (tool: string | null) => void
 }
 
+// Whether a dialog or menu is open over the layer `surface` is shown in: one that does not hold it and comes after it
+// (layers are portaled in the order they open). The layer holding the surface (the preview overlay, a draft's own
+// layer) and those under it do not count.
+export function overlayOverSurface(surface: Element): boolean {
+	for (const overlay of surface.ownerDocument.querySelectorAll(OPEN_OVERLAY_SELECTOR)) {
+		if (!overlay.contains(surface) && (surface.compareDocumentPosition(overlay) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0) return true
+	}
+
+	return false
+}
+
 // A keydown or keyup on the viewer: a tool letter picks its tool (an action tool runs), and Enter, Escape, Delete, the
 // arrows and Space go to the tool in effect, for the focused page (else `page`, the page in view). Only keys pressed on the page surface outside its fields, never while a
-// dialog or menu is open, an input method composes or a shortcut is being recorded. True when a tool took the key.
+// dialog or menu is open over it, an input method composes or a shortcut is being recorded. True when a tool took the key.
 export function pdfToolSurfaceKey(event: KeyboardEvent, surface: Element, page: number, deps: PdfSurfaceKeyDeps): boolean {
-	if (event.defaultPrevented || isImeKeydown(event) || isRecordingCombo() || isAnyOverlayOpen()) return false
+	if (event.defaultPrevented || isImeKeydown(event) || isRecordingCombo() || overlayOverSurface(surface)) return false
 	if (!pdfToolLetterAllowed(event.target, surface)) return false
 
 	const key = pdfSurfaceKey(event, deps.tools, deps.combos, MAC)
