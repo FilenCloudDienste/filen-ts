@@ -7,11 +7,13 @@ import { type } from "arktype"
 // { "v": 1,
 //   "items": [ { "id": "<uuid>", "role": "signature" | "initials", "at": <stamp>,
 //                "kind": "strokes", "width": <int>, "height": <int>, "strokes": [[x, y, x, y, …], …] }
-//            | { …, "kind": "image", "width": <px>, "height": <px>, "png": "<base64>" } ],
+//            | { …, "kind": "image", "width": <px>, "height": <px>, "png": "<base64>", "style"?: "<id>" } ],
 //   "deleted": { "<id>": <stamp>, … } }
 //
 // Strokes are integer units in a width × height box (y down, the longer side 1000), as the signature dialog
-// normalises them; an image is a small PNG. Stamps are milliseconds since the epoch.
+// normalises them; an image is a small PNG. A typed name is stored as its image, with "style" naming the handwriting
+// style it was drawn in (the signature fonts' ids; an id this app does not know is kept and ignored). Stamps are
+// milliseconds since the epoch.
 
 export const PDF_SIGNATURES_FILE_NAME = "pdf-signatures.v1.json"
 export const PDF_SIGNATURES_VERSION = 1
@@ -41,6 +43,8 @@ export interface SavedPdfSignatureImage {
 	readonly height: number
 	// Base64 of the PNG.
 	readonly png: string
+	// The handwriting style of a typed name; absent for pictures and for names typed before styles existed.
+	readonly style?: string
 }
 
 export type SavedPdfSignatureData = SavedPdfSignatureStrokes | SavedPdfSignatureImage
@@ -93,7 +97,8 @@ const strokesEntry = type({
 const imageEntry = type({
 	...common,
 	kind: "'image'",
-	png: type("string").narrow(value => value.length > 0 && value.length <= Math.ceil(PDF_SIGNATURE_MAX_PNG_BYTES / 3) * 4 && BASE64.test(value))
+	png: type("string").narrow(value => value.length > 0 && value.length <= Math.ceil(PDF_SIGNATURE_MAX_PNG_BYTES / 3) * 4 && BASE64.test(value)),
+	"style?": type("string").narrow(value => ID.test(value))
 })
 
 const entry = strokesEntry.or(imageEntry)
@@ -110,7 +115,9 @@ function toSaved(raw: typeof entry.infer): SavedPdfSignature {
 	const data: SavedPdfSignatureData =
 		raw.kind === "strokes"
 			? { kind: "strokes", width: raw.width, height: raw.height, strokes: raw.strokes }
-			: { kind: "image", width: raw.width, height: raw.height, png: raw.png }
+			: raw.style === undefined
+				? { kind: "image", width: raw.width, height: raw.height, png: raw.png }
+				: { kind: "image", width: raw.width, height: raw.height, png: raw.png, style: raw.style }
 
 	return { id: raw.id, role: raw.role, at: raw.at, data }
 }

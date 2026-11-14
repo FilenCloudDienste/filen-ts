@@ -86,6 +86,21 @@ describe("saved PDF signatures", () => {
 		expect(doc.deleted.has("s1")).toBe(true)
 	})
 
+	it("keeps a typed name's style, and reads names saved before styles existed without one", () => {
+		const typed: SavedPdfSignature = { ...image("t", 3), data: { kind: "image", width: 120, height: 40, png: "iVBORw0KGgo=", style: "ms-madi" } }
+		const doc = addPdfSignature(addPdfSignature(emptyPdfSignatures(), typed), image("old", 1))
+		const text = serializePdfSignatures(doc)
+		const again = parsePdfSignatures(text)
+
+		expect(text).toContain("\"style\":\"ms-madi\"")
+		expect(again.items.find(item => item.id === "t")?.data).toEqual(typed.data)
+		expect(again.items.find(item => item.id === "old")?.data).toEqual(image("old", 1).data)
+		expect(again.items.find(item => item.id === "old")?.data).not.toHaveProperty("style")
+		// A style this app does not know is kept; one that is not an id drops the entry, as any malformed field does.
+		expect(parsePdfSignatures(text.replace("\"ms-madi\"", "\"future-style\"")).items[0]?.data).toHaveProperty("style", "future-style")
+		expect(parsePdfSignatures(text.replace("\"ms-madi\"", "\"not an id\"")).items.map(item => item.id)).toEqual(["old"])
+	})
+
 	it("refuses what a read would drop", () => {
 		expect(isStorablePdfSignature({ kind: "strokes", width: 10, height: 10, strokes: [] })).toBe(false)
 		expect(isStorablePdfSignature({ kind: "image", width: 10, height: 10, png: "A".repeat(400_000) })).toBe(false)
