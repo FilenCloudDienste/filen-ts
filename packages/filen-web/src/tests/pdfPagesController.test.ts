@@ -85,6 +85,7 @@ function host(fake: FakeSession, overrides: Partial<PdfPagesHost> = {}): PdfPage
 		password: () => undefined,
 		memory: () => PDF_DESKTOP_MEMORY,
 		openVerifier: () => Promise.reject(new Error("no verifier")),
+		openEditor: () => Promise.reject(new Error("no editor")),
 		write: () => Promise.resolve(null),
 		fileSize: 1000,
 		onCopied: names => {
@@ -370,6 +371,163 @@ describe("new files of pages", () => {
 		expect(saved).toBe(false)
 		expect(write).not.toHaveBeenCalled()
 		expect(bound.failed).toEqual(["previewPdfSplitFailed"])
+		expect(fake.calls.filter(call => call.op === "saveEnd").map(call => (call.args as { outcome: string }).outcome)).toEqual(["failed"])
+		expect(fake.dispatched).toEqual([])
+	})
+})
+
+describe("extracted pages as a new unsaved document", () => {
+	const ops = (fake: FakeSession): string[] => fake.calls.map(call => call.op)
+
+	// An engine holding the extracted pages (encrypted like the document when `encryption` says).
+	function draftEngine(encryption = "None") {
+		return (op: string): Promise<unknown> => {
+			switch (op) {
+				case "extractBegin":
+					return Promise.resolve({ status: "written", size: 4321, pageCount: 2, encryption, flattenedSignatures: 0 })
+				case "saveEnd":
+					return Promise.resolve({ state: state(3), heapBytes: 0, history: "kept" })
+				default:
+					return Promise.resolve(null)
+			}
+		}
+	}
+
+	function engine(check: { ok: boolean }, closed: string[], name: string): PdfEngine {
+		return {
+			client: { call: () => Promise.resolve(check) },
+			opened: { status: "open" },
+			close: () => {
+				closed.push(name)
+
+				return Promise.resolve({ heapBytes: 0 })
+			}
+		} as unknown as PdfEngine
+	}
+
+	async function opened(encryption = "None") {
+		const fake = fakeSession(3, () => ({ pages: [1, 2], count: 1 }), draftEngine(encryption))
+		const closed: string[] = []
+		const editors: { length: number; password: string | undefined }[] = []
+		const write = vi.fn()
+		const controller = new PdfPagesController()
+		const bound = host(fake, {
+			password: () => "secret",
+			write,
+			openVerifier: () => Promise.resolve(engine({ ok: true }, closed, "verifier")),
+			openEditor: (channel, password) => {
+				editors.push({ length: channel.length, password })
+
+				return Promise.resolve(engine({ ok: true }, closed, "editor"))
+			}
+		})
+
+		controller.bind(bound)
+		controller.sync(3)
+
+		const shown = await controller.openDraft(
+			{ ranges: [{ first: 2, last: 3 }], suffix: () => "pages 2-3" },
+			{ protect: true, deletes: [1, 2] }
+		)
+
+		return { fake, closed, editors, write, controller, bound, shown }
+	}
+
+	it("opens the pages as a draft held in the engine, writing no file and deleting nothing", async () => {
+		const { fake, editors, write, controller, shown } = await opened()
+		const draft = controller.getSnapshot().draft
+
+		expect(shown).toBe(true)
+		expect(draft).toMatchObject({ size: 4321, pageCount: 2, password: undefined })
+		expect(draft?.suffix(1)).toBe("pages 2-3")
+		expect(controller.getSnapshot().progress).toBeUndefined()
+		expect(fake.calls.find(call => call.op === "extractBegin")?.args).toMatchObject({ pages: [1, 2], protect: true })
+
+		// The draft's editor reads the bytes from the engine that holds them.
+		await draft?.open(() => undefined)
+
+		expect(editors).toEqual([{ length: 4321, password: undefined }])
+		expect(ops(fake)).toEqual(["extractBegin", "serveOutput", "serveOutput"])
+		expect(write).not.toHaveBeenCalled()
+		expect(fake.dispatched).toEqual([])
+	})
+
+	it("deletes the extracted pages only once the draft was saved, after its editor let go of the bytes", async () => {
+		const { fake, closed, controller } = await opened()
+
+		await controller.getSnapshot().draft?.open(() => undefined)
+		controller.closeDraft(true)
+		await settle()
+
+		expect(closed).toEqual(["verifier", "editor"])
+		expect(fake.calls.filter(call => call.op === "saveEnd").map(call => call.args)).toEqual([{ outcome: "copied", next: "continue" }])
+		expect(fake.dispatched).toEqual([{ command: "pages.delete", args: { pages: [1, 2] } }])
+		expect(controller.getSnapshot().draft).toBeNull()
+	})
+
+	it("keeps every page when the draft is dropped, and the engine lets go of its bytes", async () => {
+		const { fake, controller } = await opened()
+
+		controller.closeDraft(false)
+		await settle()
+
+		expect(fake.calls.filter(call => call.op === "saveEnd").map(call => call.args)).toEqual([{ outcome: "failed", next: "continue" }])
+		expect(fake.dispatched).toEqual([])
+		expect(controller.getSnapshot().draft).toBeNull()
+	})
+
+	it("opens an encrypted draft with the document's password", async () => {
+		const { editors, controller } = await opened("Standard V5 R6 256-bit AES")
+
+		expect(controller.getSnapshot().draft?.password).toBe("secret")
+
+		await controller.getSnapshot().draft?.open(() => undefined)
+
+		expect(editors).toEqual([{ length: 4321, password: "secret" }])
+		controller.closeDraft(false)
+	})
+
+	it("says it failed, and opens nothing, when the editor never starts", async () => {
+		const fake = fakeSession(3, () => ({ pages: [], count: 3 }), draftEngine())
+		const controller = new PdfPagesController()
+		const bound = host(fake, {
+			edit: (_change, dropped) => {
+				dropped?.()
+			}
+		})
+
+		controller.bind(bound)
+		controller.sync(3)
+
+		const shown = await controller.openDraft(
+			{ ranges: [{ first: 1, last: 1 }], suffix: () => "page 1" },
+			{ protect: false, deletes: [] }
+		)
+
+		expect(shown).toBe(false)
+		expect(controller.getSnapshot().progress).toBeUndefined()
+		expect(bound.failed).toEqual(["previewPdfExtractFailed"])
+		expect(fake.calls).toEqual([])
+	})
+
+	it("opens nothing when the pages fail their check", async () => {
+		const fake = fakeSession(3, () => ({ pages: [], count: 3 }), draftEngine())
+		const controller = new PdfPagesController()
+		const bound = host(fake, { openVerifier: () => Promise.resolve(engine({ ok: false }, [], "verifier")) })
+
+		controller.bind(bound)
+		controller.sync(3)
+
+		const shown = await controller.openDraft(
+			{ ranges: [{ first: 1, last: 1 }], suffix: () => "page 1" },
+			{ protect: false, deletes: [0] }
+		)
+
+		await settle()
+
+		expect(shown).toBe(false)
+		expect(controller.getSnapshot().draft).toBeNull()
+		expect(bound.failed).toEqual(["previewPdfExtractFailed"])
 		expect(fake.calls.filter(call => call.op === "saveEnd").map(call => (call.args as { outcome: string }).outcome)).toEqual(["failed"])
 		expect(fake.dispatched).toEqual([])
 	})

@@ -201,7 +201,8 @@ describe("PdfTextEditor", () => {
 describe("PdfTextEditNotice", () => {
 	it.each([
 		["cantEdit", "previewPdfTextEditNotPossible"],
-		["unsafe", "previewPdfTextEditUnsafe"]
+		["unsafe", "previewPdfTextEditUnsafe"],
+		["noText", "previewPdfTextEditNoText"]
 	] as const)("says %s in one line", (kind, key) => {
 		const onDismiss = vi.fn()
 

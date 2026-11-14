@@ -45,8 +45,6 @@ export const previewPdfComments = {
 	previewPdfCommentReplies_one: "{{count}} reply",
 	/** PDF Comments panel — a thread's number of replies */
 	previewPdfCommentReplies_other: "{{count}} replies",
-	/** PDF Comments panel — the page a thread's annotation is on */
-	previewPdfCommentPage: "Page {{page}}",
 	/** PDF Comments panel — accessible name of one thread in the list: its first comment's author, date and opening words */
 	previewPdfCommentThread: "{{author}}, {{date}}: {{excerpt}}",
 	/** PDF Comments panel — accessible name of one thread whose first comment has no date: author and opening words */

@@ -1,4 +1,4 @@
-import type { CSSProperties } from "react"
+import { useLayoutEffect, useRef, type CSSProperties } from "react"
 import type { PdfPoint, PdfQuad, PdfRect, PdfRgb, PdfTextAlign } from "../../../core/pdfedit/annotations"
 import { inkDraftPoints, type InkStroke } from "./ink"
 import { SELECT_HANDLES } from "./select"
@@ -40,6 +40,56 @@ function quadPoints(quad: PdfQuad): string {
 	return `${String(quad[0])},${String(quad[1])} ${String(quad[2])},${String(quad[3])} ${String(quad[6])},${String(quad[7])} ${String(quad[4])},${String(quad[5])}`
 }
 
+// The stroke being drawn, kept up by appending each new point to the polyline's point list: a move costs one point,
+// never a rebuild of the whole points attribute (which made a long stroke quadratic). Where the list can't be
+// appended to, the attribute is written whole.
+function InkDraft({ stroke, style }: { stroke: InkStroke; style: CSSProperties }) {
+	const lineRef = useRef<SVGPolylineElement | null>(null)
+	// The stroke's values (x, y pairs) already in the list, and where that stroke started (a new stroke starts anew).
+	const drawn = useRef(0)
+	const start = useRef<{ readonly page: number; readonly x: number; readonly y: number } | null>(null)
+
+	useLayoutEffect(() => {
+		const line = lineRef.current
+		const svg = line?.ownerSVGElement ?? null
+		const list: SVGPointList | undefined = line?.points
+
+		if (line === null || svg === null || list === undefined) {
+			line?.setAttribute("points", inkDraftPoints(stroke))
+
+			return
+		}
+
+		const x = stroke.points[0] ?? 0
+		const y = stroke.points[1] ?? 0
+		const begun = start.current
+
+		if (stroke.length < drawn.current || begun === null || begun.page !== stroke.page || begun.x !== x || begun.y !== y) {
+			list.clear()
+			drawn.current = 0
+			start.current = { page: stroke.page, x, y }
+		}
+
+		for (let index = drawn.current; index + 1 < stroke.length; index += 2) {
+			const point = svg.createSVGPoint()
+
+			point.x = stroke.points[index] ?? 0
+			point.y = stroke.points[index + 1] ?? 0
+			list.appendItem(point)
+		}
+
+		drawn.current = stroke.length
+	}, [stroke])
+
+	return (
+		<polyline
+			ref={lineRef}
+			className="fo-pdf-tool-ink"
+			style={style}
+		/>
+	)
+}
+
 // The shape a tool is drawing (not yet a document change).
 export function PdfToolDraftOverlay({ draft, box }: { draft: PdfToolDraft; box: PdfRect }) {
 	return (
@@ -74,9 +124,8 @@ export function PdfToolDraftOverlay({ draft, box }: { draft: PdfToolDraft; box: 
 					y2={draft.to[1]}
 				/>
 			) : draft.kind === "ink" ? (
-				<polyline
-					className="fo-pdf-tool-ink"
-					points={inkDraftPoints(draft.stroke)}
+				<InkDraft
+					stroke={draft.stroke}
 					style={{
 						...(draft.color === undefined ? {} : { stroke: rgbCss(draft.color) }),
 						...(draft.width === undefined ? {} : { strokeWidth: draft.width })
@@ -117,24 +166,15 @@ export function PdfSelectionFrame({ rect, box, handles }: { rect: PdfRect; box: 
 	)
 }
 
-// A keyboard placement's rect, and its position said in a polite live region (`announcement`, from the host's
-// strings).
-export function PdfPlacementIndicator({ rect, box, announcement }: { rect: PdfRect; box: PdfRect; announcement: string }) {
+// A keyboard placement's rect. The host says its position in its own live region, one that stays mounted (a region
+// mounted with its text is often not read).
+export function PdfPlacementIndicator({ rect, box }: { rect: PdfRect; box: PdfRect }) {
 	return (
-		<>
-			<div
-				className="fo-pdf-tool-placement"
-				style={rectStyle(rect, box)}
-				aria-hidden="true"
-			/>
-			<span
-				className="fo-pdf-sr-only"
-				role="status"
-				aria-live="polite"
-			>
-				{announcement}
-			</span>
-		</>
+		<div
+			className="fo-pdf-tool-placement"
+			style={rectStyle(rect, box)}
+			aria-hidden="true"
+		/>
 	)
 }
 

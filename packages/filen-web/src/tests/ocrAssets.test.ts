@@ -89,11 +89,15 @@ describe("OCR assets", () => {
 		expect(assets).toEqual({ engines, languages })
 	})
 
-	it("bundles each build's glue as a factory, in the worker's own instance too", async () => {
-		const source = await loaded("virtual:ocr-engines", false)
+	it("wraps each build's glue alone as a factory module, in the worker's own instance too", async () => {
+		for (const variant of OCR_ENGINE_VARIANTS) {
+			const source = await loaded(`virtual:ocr-engine/${variant}`, false)
 
-		for (const variant of OCR_ENGINE_VARIANTS) expect(source).toContain(`"${variant}": (() => {\nvar TesseractCore=`)
+			expect(source).toMatch(/^export const OCR_ENGINE_FACTORY = \(\(\) => \{\nvar TesseractCore=/)
+			expect(source.match(/var TesseractCore=/g)).toHaveLength(1)
+			expect(source).toContain(readFileSync(join(CORE_DIR, `tesseract-core-${variant}.js`), "utf8").slice(0, 2000))
+		}
 
-		expect(source.match(/\nreturn TesseractCore\n\}\)\(\)/g)).toHaveLength(3)
+		expect(await loaded("virtual:ocr-engine/unknown", false)).toBe("null")
 	})
 })

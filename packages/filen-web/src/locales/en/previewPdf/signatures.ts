@@ -6,14 +6,13 @@ export const previewPdfSignatures = {
 	previewPdfSignatureChecking: "Checking signatures…",
 	/** PDF signature status line: the latest signature's signed bytes verify and nothing was added after them. {{name}} is the name in the signer's certificate (never verified against a trust list) */
 	previewPdfSignatureBannerUnchanged: "Signed by {{name}} · unchanged since signing · signer not verified",
-	/** PDF signature status line: the signature verifies, and the document was changed afterwards only in ways the signer allowed (filling in forms, adding annotations or more signatures) */
-	previewPdfSignatureBannerChangedAllowed: "Signed by {{name}} · changed after signing, in ways the signer allowed",
-	/** PDF signature status line: the signature verifies, but the document was changed afterwards in ways the signer did not allow */
-	previewPdfSignatureBannerChangedNotAllowed: "Signed by {{name}} · changed after signing, in ways the signer didn't allow",
-	/** PDF signature status line: a signature failed a check. {{reason}} is one of the previewPdfSignatureInvalid… sentences */
+	/** PDF signature status line: the signature verifies, and the document was changed afterwards only in ways the signer allowed (filling in forms, adding annotations or more signatures). The signer is never verified */
+	previewPdfSignatureBannerChangedAllowed: "Signed by {{name}} · changed after signing, in ways the signer allowed · signer not verified",
+	/** PDF signature status line: the signature verifies, but the document was changed afterwards in ways the signer did not allow. The signer is never verified */
+	previewPdfSignatureBannerChangedNotAllowed:
+		"Signed by {{name}} · changed after signing, in ways the signer didn't allow · signer not verified",
+	/** PDF signature status line: a signature failed a check or couldn't be checked in this browser. {{reason}} is one of the previewPdfSignatureInvalid… or previewPdfSignatureUnverifiable… sentences */
 	previewPdfSignatureBannerInvalid: "Invalid signature by {{name}}: {{reason}}",
-	/** PDF signature status line: a signature could not be checked in this browser. {{reason}} is one of the previewPdfSignatureUnverifiable… sentences */
-	previewPdfSignatureBannerUnverifiable: "Can't verify the signature by {{name}}: {{reason}}",
 	/** PDF signature status line when the signatures could not be read at all (a read failed) */
 	previewPdfSignatureCheckFailed: "The signatures couldn't be checked.",
 	/** Button on the failed signature status line, checking again */

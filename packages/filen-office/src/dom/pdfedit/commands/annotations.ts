@@ -330,6 +330,7 @@ export const ANNOTATION_COMMANDS: PdfCommandTable<PdfAnnotationCommands> = {
 	},
 	"annotations.inkStroke": {
 		tool: "annotate",
+		target: "id",
 		parse: args => {
 			const ref = target(args)
 			const line = isRecord(args) ? points(args["stroke"]) : null
@@ -441,6 +442,7 @@ export const ANNOTATION_COMMANDS: PdfCommandTable<PdfAnnotationCommands> = {
 	},
 	"annotations.image": {
 		tool: "annotate",
+		bytes: args => args.image.byteLength,
 		parse: args => {
 			const base = authored(args)
 
@@ -491,6 +493,7 @@ export const ANNOTATION_COMMANDS: PdfCommandTable<PdfAnnotationCommands> = {
 	},
 	"annotations.move": {
 		tool: "annotate",
+		target: "id",
 		parse: args => {
 			const ref = target(args)
 
@@ -502,6 +505,7 @@ export const ANNOTATION_COMMANDS: PdfCommandTable<PdfAnnotationCommands> = {
 	},
 	"annotations.resize": {
 		tool: "annotate",
+		target: "id",
 		parse: args => {
 			const ref = target(args)
 			const box = isRecord(args) ? rect(args["rect"]) : null
@@ -512,6 +516,7 @@ export const ANNOTATION_COMMANDS: PdfCommandTable<PdfAnnotationCommands> = {
 	},
 	"annotations.style": {
 		tool: "annotate",
+		target: "id",
 		parse: args => {
 			const ref = target(args)
 			const style = isRecord(args) ? parseStyle(args["style"]) : null
@@ -522,6 +527,7 @@ export const ANNOTATION_COMMANDS: PdfCommandTable<PdfAnnotationCommands> = {
 	},
 	"annotations.text": {
 		tool: "annotate",
+		target: "id",
 		parse: args => {
 			const ref = target(args)
 
@@ -531,11 +537,13 @@ export const ANNOTATION_COMMANDS: PdfCommandTable<PdfAnnotationCommands> = {
 	},
 	"annotations.delete": {
 		tool: "annotate",
+		target: "id",
 		parse: target,
 		run: (context, args) => guarded(context, () => deleteAnnotation(context.document, args))
 	},
 	"annotations.reply": {
 		tool: "annotate",
+		target: "id",
 		parse: args => {
 			const ref = target(args)
 
@@ -548,6 +556,7 @@ export const ANNOTATION_COMMANDS: PdfCommandTable<PdfAnnotationCommands> = {
 	},
 	"annotations.state": {
 		tool: "annotate",
+		target: "id",
 		parse: args => {
 			const ref = target(args)
 			const state = isRecord(args) ? oneOf(args["state"], PDF_REVIEW_STATES) : null

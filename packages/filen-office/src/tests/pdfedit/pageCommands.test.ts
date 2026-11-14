@@ -12,6 +12,7 @@ import type { PdfSaveExpectation } from "../../dom/pdfedit/protocol"
 import { markArea, markText, pageRedactionMarks } from "../../dom/pdfedit/redact"
 import { createSyncRangeBuffer, serveSyncRange, type SyncRangePort } from "../../dom/pdfedit/syncRange"
 import { PDF_UNSIGNED } from "../../core/pdfedit/signaturePolicy"
+import type { RedactionManifest, RedactionVerdict } from "../../core/pdfedit/redactVerify"
 import { openPdf, pageText } from "../docxPdfFixtures"
 import { budget } from "../timing"
 import { spawnEngine, startEngine, stopEngines, syncPort } from "./harness"
@@ -77,6 +78,26 @@ async function upload(client: PdfEngineClient): Promise<Uint8Array> {
 	return bytes
 }
 
+// The held output's redaction check, in a verifying engine as the page runs it.
+async function verifyRedaction(client: PdfEngineClient, size: number, manifest: RedactionManifest): Promise<RedactionVerdict> {
+	const buffer = createSyncRangeBuffer(8, 64 * 1024)
+	const channel = new MessageChannel()
+
+	await client.call("serveOutput", { buffer, port: channel.port1 as unknown as SyncRangePort }, [channel.port1])
+
+	const verifier = spawnEngine({})
+
+	await verifier.call("open", { channel: { buffer, port: channel.port2 as unknown as SyncRangePort, length: size }, role: "verify" }, [
+		channel.port2
+	])
+
+	const verdict = await verifier.call("verifyRedaction", { manifest })
+
+	verifier.terminate()
+
+	return verdict
+}
+
 async function verify(client: PdfEngineClient, size: number, expected: PdfSaveExpectation, password?: string) {
 	const buffer = createSyncRangeBuffer(8, 64 * 1024)
 	const channel = new MessageChannel()
@@ -103,13 +124,25 @@ async function verify(client: PdfEngineClient, size: number, expected: PdfSaveEx
 	return check
 }
 
-// `removesContent`: whether the save says content was removed since the last one (the earlier-versions warning).
-async function save(client: PdfEngineClient, inputBytes: number, removesContent = false): Promise<Uint8Array> {
+// `removesContent`: whether the save says content was removed since the last one (the earlier-versions warning);
+// `redacted`: the pages whose regions the save's redaction check proves gone (it passes).
+async function save(
+	client: PdfEngineClient,
+	inputBytes: number,
+	removesContent = false,
+	redacted: readonly number[] = []
+): Promise<Uint8Array> {
 	const begun = await client.call("saveBegin", { inputBytes, memory: PDF_DESKTOP_MEMORY, invalidateConfirmed: true })
 
 	if (begun.status !== "written") throw new Error("refused")
 
 	expect(begun.removesContent).toBe(removesContent)
+	expect([...new Set(begun.redaction?.regions.map(region => region.page) ?? [])]).toEqual(redacted)
+
+	if (begun.redaction !== null) {
+		expect(begun.redaction.regions.every(region => region.kind === "area")).toBe(true)
+		expect(await verifyRedaction(client, begun.size, begun.redaction)).toEqual({ ok: true })
+	}
 
 	const bytes = await upload(client)
 
@@ -352,6 +385,30 @@ describe("page commands", () => {
 	)
 
 	it(
+		"checks a redaction where its page shows after a later rotation and crop",
+		async () => {
+			const bytes = plainPdf()
+			const engine = startEngine(bytes)
+
+			await engine.open()
+			// An area clear of the blue rectangle, which the turned and cropped page shows where the area was before.
+			await engine.client.call("dispatch", { command: "redact.markArea", args: { page: 0, rect: [300, 40, 600, 100] } })
+			await engine.client.call("dispatch", {
+				command: "redact.apply",
+				args: { page: 0, removeAnnotations: true, terms: [], sanitize: false }
+			})
+			await engine.client.call("dispatch", { command: "pages.rotate", args: { pages: [0], degrees: 90 } })
+			await engine.client.call("dispatch", {
+				command: "crop.set",
+				args: { pages: [0], margins: { left: 20, top: 30, right: 40, bottom: 50 } }
+			})
+
+			await save(engine.client, bytes.length, true, [0])
+		},
+		TIMEOUT
+	)
+
+	it(
 		"crops, fits to content, and removes what lies outside a crop",
 		async () => {
 			const bytes = plainPdf()
@@ -379,7 +436,7 @@ describe("page commands", () => {
 				engine.client.call("dispatch", { command: "crop.set", args: { pages: [0], margins: { ...margins, left: -1 } } })
 			).rejects.toMatchObject({ failure: "badRequest" })
 
-			const saved = await save(engine.client, bytes.length, true)
+			const saved = await save(engine.client, bytes.length, true, [1])
 			const doc = mupdf.Document.openDocument(saved, "application/pdf").asPDF()
 
 			if (doc === null) throw new Error("not a PDF")
@@ -457,7 +514,7 @@ describe("page commands", () => {
 	})
 
 	it(
-		"makes new files of pages, encrypted only like the document, without changing it",
+		"makes new files of pages, encrypted like the document unless its owner says, without changing it",
 		async () => {
 			const locked = makeOrganisedPdf({ userPassword: "pässword" })
 			const engine = startEngine(locked)
@@ -487,7 +544,25 @@ describe("page commands", () => {
 			expect(ended.state).toMatchObject({ dirty: false, canUndo: false, pageCount: 6 })
 			expect(await pdfjsTexts(encrypted, "pässword")).toEqual(["Page 1", "Page 3"])
 
-			const open = await engine.client.call("extractBegin", {
+			// Opened with the user password, leaving the protection off is not this session's to choose.
+			const kept = await engine.client.call("extractBegin", {
+				pages: [1],
+				protect: false,
+				inputBytes: locked.length,
+				memory: PDF_DESKTOP_MEMORY
+			})
+
+			if (kept.status !== "written") throw new Error("refused")
+
+			expect(kept.encryption).toBe(PDF_EXTRACT_ENCRYPTION)
+			await engine.client.call("saveEnd", { outcome: "failed", next: "continue" })
+
+			// Opened with the owner password, it is.
+			const owned = startEngine(locked)
+
+			await owned.open("owner-pässword")
+
+			const open = await owned.client.call("extractBegin", {
 				pages: [1],
 				protect: false,
 				inputBytes: locked.length,
@@ -497,11 +572,11 @@ describe("page commands", () => {
 			if (open.status !== "written") throw new Error("refused")
 
 			expect(open.encryption).toBe("None")
-			expect(await verify(engine.client, open.size, { pageCount: 1, versions: 1, encryption: "None" })).toEqual({ ok: true })
+			expect(await verify(owned.client, open.size, { pageCount: 1, versions: 1, encryption: "None" })).toEqual({ ok: true })
 
-			const plain = await upload(engine.client)
+			const plain = await upload(owned.client)
 
-			await engine.client.call("saveEnd", { outcome: "copied", next: "continue" })
+			await owned.client.call("saveEnd", { outcome: "copied", next: "continue" })
 			expect(mupdf.Document.openDocument(plain, "application/pdf").needsPassword()).toBe(false)
 			expect(await pdfjsTexts(plain)).toEqual(["Page 2"])
 

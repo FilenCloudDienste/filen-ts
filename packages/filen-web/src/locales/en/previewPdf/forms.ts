@@ -17,8 +17,6 @@ export const previewPdfForms = {
 	previewPdfFormXfaSaveBody: "This form also contains XFA data. Saving removes it; the regular form fields keep your entries.",
 	/** PDF editor — XFA save confirm: save as a new version in place */
 	previewPdfFormXfaSave: "Save",
-	/** PDF editor — XFA save confirm: save as a copy, the original keeps its XFA data */
-	previewPdfFormXfaSaveCopy: "Save as copy",
 	/** PDF editor — XFA save confirm: cancel */
 	previewPdfFormXfaSaveCancel: "Cancel"
 } as const

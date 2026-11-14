@@ -58,18 +58,32 @@ export type ExtractSaveOptions =
 
 const BASE_OPTIONS = "garbage=compact,compress,objstms"
 
+// An owner password nobody knows (128 random bits, hex): a new file made without owner access keeps the restrictions
+// its source had, which no one can lift from it.
+function unknownOwnerPassword(): string {
+	return Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, "0")).join("")
+}
+
 // The write options for a document made from `source`: a full rewrite, encrypted like the source when it is (AES-256
-// whatever the source used, its permissions kept) unless `protect` is false. Passwords reach MuPDF only through
-// composeWriteOptions, never inside the comma-separated option string.
-export function extractSaveOptions(source: PDFDocument, passwords: CarriedPasswords | null, protect = true): ExtractSaveOptions {
+// whatever the source used, its permissions kept). Only with owner access (`ownerAccess`) may `protect` false drop the
+// encryption, and only then is the password the document was opened with the new files' owner password; without it the
+// new files open with the same password (none for a file with restrictions only) under an owner password nobody knows.
+// Passwords reach MuPDF only through composeWriteOptions, never inside the comma-separated option string.
+export function extractSaveOptions(
+	source: PDFDocument,
+	passwords: CarriedPasswords | null,
+	protect: boolean,
+	ownerAccess: boolean
+): ExtractSaveOptions {
 	const encrypt = at(source.getTrailer(), "Encrypt")
 
-	if (!protect || !encrypt.isDictionary() || passwords === null)
+	if (!encrypt.isDictionary() || (ownerAccess && (!protect || passwords === null)))
 		return { ok: true, options: composeWriteOptions(BASE_OPTIONS, { encrypt: "none" }), encrypted: false }
 
-	const owner = passwords.owner ?? passwords.user
+	const user = passwords?.user ?? ""
+	const owner = ownerAccess ? (passwords?.owner ?? user) : unknownOwnerPassword()
 
-	if (!isWriteOptionText(passwords.user) || !isWriteOptionText(owner)) return { ok: false, reason: "unsupportedPassword" }
+	if (!isWriteOptionText(user) || !isWriteOptionText(owner)) return { ok: false, reason: "unsupportedPassword" }
 
 	const permissions = at(encrypt, "P")
 
@@ -77,7 +91,7 @@ export function extractSaveOptions(source: PDFDocument, passwords: CarriedPasswo
 		ok: true,
 		options: composeWriteOptions(BASE_OPTIONS, {
 			encrypt: "aes-256",
-			"user-password": passwords.user,
+			"user-password": user,
 			"owner-password": owner,
 			permissions: permissions.isInteger() ? permissions.asNumber() | 0 : PDF_PERMISSIONS_ALL
 		}),

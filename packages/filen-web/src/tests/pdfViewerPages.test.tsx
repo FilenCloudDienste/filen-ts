@@ -410,7 +410,7 @@ describe("PdfViewer", () => {
 		expect(await screen.findByRole("menuitemradio", { name: "Fit page" })).toBeTruthy()
 	})
 
-	// Edge's and Acrobat's PDF keys; each is kept from the browser, whose page zoom would scale the whole app.
+	// The common PDF viewers' keys; each is kept from the browser, whose page zoom would scale the whole app.
 	it("zooms, resets, fits and rotates from the keyboard instead of zooming the page", async () => {
 		await mount()
 

@@ -19,9 +19,9 @@ const P12_PASSWORD = "fixture-password"
 
 async function open(page: Page, listbox: Locator, name: string): Promise<Locator> {
 	await listbox.getByRole("option", { name }).dblclick()
-	await expect(page.locator("canvas").first()).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+	await expect(page.getByRole("region", { name: /Page 1 of/u })).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
 
-	return page.getByLabel(/Page 1 of/u)
+	return page.getByRole("region", { name: /Page 1 of/u })
 }
 
 // Signs with `p12`, dragging the signature over the page's box from `from` to `to` (fractions of the page).

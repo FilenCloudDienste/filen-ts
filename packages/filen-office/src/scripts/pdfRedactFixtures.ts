@@ -249,6 +249,39 @@ const fixtures: Record<string, () => Buffer> = {
 
 		return pdf.bytes(catalog)
 	},
+	// The text alternatives sit on ancestors of the redacted content: a section's ActualText and the document's Alt
+	// spell out its words; the kept paragraph has its own Alt.
+	"tagged-parent.pdf": () => {
+		const pdf = new Pdf()
+		const font = pdf.font()
+		const { first, second, sectionActual, documentAlt } = SPEC.taggedParent
+		const content = pdf.stream("", `/P << /MCID 0 >> BDC ${text(first)}EMC\n/P << /MCID 1 >> BDC ${text(second)}EMC\n`)
+		const root = pdf.reserve()
+		const documentElement = pdf.reserve()
+		const section = pdf.reserve()
+		const pageNumber = pdf.reserve()
+		const one = pdf.add(`<< /Type /StructElem /S /P /P ${ref(section)} /Pg ${ref(pageNumber)} /K 0 >>`)
+		// No /Type: it is optional on a structure element.
+		const two = pdf.add(`<< /S /P /P ${ref(documentElement)} /Pg ${ref(pageNumber)} /K 1 /Alt ${str("Kept alt")} >>`)
+
+		pdf.put(section, `<< /Type /StructElem /S /Sect /P ${ref(documentElement)} /K [${ref(one)}] /ActualText ${utf16(sectionActual)} >>`)
+		pdf.put(
+			documentElement,
+			`<< /Type /StructElem /S /Document /P ${ref(root)} /K [${ref(section)} ${ref(two)}] /Alt ${str(documentAlt)} >>`
+		)
+		pdf.put(
+			root,
+			`<< /Type /StructTreeRoot /K ${ref(documentElement)} /ParentTree << /Nums [0 [${ref(one)} ${ref(two)}]] >> /ParentTreeNextKey 1 >>`
+		)
+
+		const catalog = finish(
+			pdf,
+			[{ content, resources: `<< /Font << /F1 ${ref(font)} >> >>`, extra: " /StructParents 0", number: pageNumber }],
+			` /MarkInfo << /Marked true >> /StructTreeRoot ${ref(root)}`
+		)
+
+		return pdf.bytes(catalog)
+	},
 	"annotations.pdf": () => {
 		const pdf = new Pdf()
 		const font = pdf.font()

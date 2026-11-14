@@ -1,6 +1,6 @@
 import { LockKeyholeIcon } from "lucide-react"
 import { ProtectPanel } from "@/features/pdf/security/protectPanel"
-import { whileActive, type PdfTool } from "@/features/pdf/tools/registry"
+import { editorWritable, whileActive, type PdfTool } from "@/features/pdf/tools/registry"
 
 // Protect › Protect document: a password to open, restrictions with an owner password, or none, written by the next
 // save (AES-256 for anything new; an RC4 file is offered the upgrade). Offered wherever the file may be edited: the
@@ -16,12 +16,7 @@ export const PROTECT_DOCUMENT_TOOL: PdfTool = {
 	toolClass: "security",
 	actionIds: [],
 	actions: [],
-	enabledWhen: policy =>
-		!policy.editable
-			? { enabled: false, reasonKey: "previewPdfToolNotEditable" }
-			: !policy.online
-				? { enabled: false, reasonKey: "previewPdfToolOffline" }
-				: { enabled: true },
+	enabledWhen: policy => editorWritable(policy) ?? { enabled: true },
 	commands: [],
 	Panel: whileActive(ProtectPanel)
 }

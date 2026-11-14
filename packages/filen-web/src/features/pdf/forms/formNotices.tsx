@@ -164,7 +164,7 @@ export function PdfXfaSaveDialog({ open, onAnswer }: PdfXfaSaveDialogProps) {
 							onAnswer("copy")
 						}}
 					>
-						{t("previewPdfFormXfaSaveCopy")}
+						{t("previewPdfSaveAsCopy")}
 					</Button>
 					<Button
 						autoFocus

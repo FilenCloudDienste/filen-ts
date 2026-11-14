@@ -48,6 +48,8 @@ function pageInRange(page: number, count: number): void {
 export const TEXT_EDIT_COMMANDS: PdfCommandTable<PdfTextEditCommands> = {
 	"textEdit.replace": {
 		tool: "content",
+		// The replaced glyphs stay in the file's earlier versions.
+		removesContent: true,
 		parse: args => {
 			if (!isRecord(args) || !isIndex(args["page"]) || !Array.isArray(args["chars"])) return null
 

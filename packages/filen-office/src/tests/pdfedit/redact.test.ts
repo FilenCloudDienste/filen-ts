@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest"
 import * as mupdf from "mupdf"
 import * as pdfjs from "pdfjs-dist/legacy/build/pdf.mjs"
 import {
+	hiddenTerms,
 	REDACTION_SAVE_OPTIONS,
 	type RedactionManifest,
 	type RedactionRegion,
@@ -76,6 +77,7 @@ function redact(name: string, options: Redaction): { readonly bytes: Uint8Array;
 		manifest: {
 			regions: applied.regions,
 			terms,
+			hidden: hiddenTerms(applied.hidden),
 			sanitized: options.sanitize ?? true,
 			annotationsRemoved: options.removeAnnotations ?? true
 		}
@@ -154,7 +156,9 @@ describe("redaction marks", () => {
 
 		markArea(page, rect)
 
-		const before = save(document)
+		// Without object streams: each save would write its own anew (at new numbers), whatever changed.
+		const plain = "garbage=yes,compress"
+		const before = save(document, plain)
 		const pixmap = new mupdf.Pixmap(mupdf.ColorSpace.DeviceRGB, [0, 0, 612, 792], false)
 
 		pixmap.clear(255)
@@ -170,7 +174,7 @@ describe("redaction marks", () => {
 		const at = y * pixmap.getStride() + x * 3
 
 		expect([...pixmap.getPixels().slice(at, at + 3)]).toEqual([0, 0, 0])
-		expect(save(document)).toEqual(before)
+		expect(save(document, plain)).toEqual(before)
 	})
 })
 
@@ -230,6 +234,24 @@ describe("applying redactions", () => {
 		expect(parents.get(0).get("Alt").isNull()).toBe(true)
 		expect(parents.get(1).get("Alt").asString()).toBe("Kept alt")
 		expect(document.loadPage(0).getObject().get("Contents").readStream().asString()).not.toContain("ActualText")
+	})
+
+	it("strips the text alternatives of every ancestor of redacted tagged content, and the verifier checks the tags", () => {
+		const { bytes, manifest } = redact("tagged-parent", { areas: [SPEC.taggedParent.area] })
+		const document = open(bytes)
+		const [one, two] = [0, 1].map(index => document.getTrailer().get("Root", "StructTreeRoot", "ParentTree", "Nums").get(1).get(index))
+		const section = one?.get("P")
+		const documentElement = section?.get("P")
+
+		expect(manifest.hidden).toEqual([
+			{ text: "Hidden", matchCase: true, wholeWord: true },
+			{ text: "words", matchCase: true, wholeWord: true }
+		])
+		expect(section?.get("ActualText").isNull()).toBe(true)
+		expect(documentElement?.get("Alt").isNull()).toBe(true)
+		expect(two?.get("Alt").asString()).toBe("Kept alt")
+		expect(document.loadPage(0).toStructuredText("").asText()).toContain("Kept words")
+		expect(verify(bytes, manifest)).toEqual({ ok: true })
 	})
 
 	it("removes links and form fields over a mark with their values, and keeps comments when asked", () => {
@@ -486,6 +508,21 @@ describe("the verifier catches incomplete redactions", () => {
 			ok: false,
 			failure: { code: "image", page: 1 }
 		})
+	})
+
+	it("catches a covered word an ancestor's text alternative still spells out", () => {
+		// The tagged file as it was: its section and document elements describe the words under the area.
+		const bytes = save(open(fixture("tagged-parent")))
+
+		expect(
+			verify(bytes, {
+				regions: [],
+				terms: [],
+				hidden: hiddenTerms(["Hidden"]),
+				sanitized: false,
+				annotationsRemoved: true
+			})
+		).toEqual({ ok: false, failure: { code: "term", term: "Hidden", place: "tags" } })
 	})
 
 	it("catches a term only in an earlier revision's leftovers and in page content strings", () => {

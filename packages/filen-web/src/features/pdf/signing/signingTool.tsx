@@ -12,6 +12,7 @@ import { displayToSurface, surfaceToDisplay } from "@/features/pdf/textEdit/text
 import { withPdfSession, type PdfToolContext, type PdfToolOverlayProps, type PdfToolPanelProps } from "@/features/pdf/tools/registry"
 import { pdfToolState, usePdfToolState } from "@/features/pdf/tools/toolState"
 import { formatShortDate } from "@/lib/formatDate"
+import { useAnnouncement } from "@/features/pdf/tools/liveRegion"
 import { log } from "@/lib/log"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
@@ -253,6 +254,11 @@ export function SignOverlay({ context, page, viewport, widgets, editing }: PdfTo
 		}
 	})
 
+	useAnnouncement(
+		context.swap,
+		placing === null || keyboard.rect === null ? null : t("previewPdfPlacementPosition", placementPosition(keyboard.rect, size))
+	)
+
 	if (placing === null) return null
 
 	const point = (event: PointerEvent<HTMLDivElement>): [number, number] => {
@@ -273,7 +279,6 @@ export function SignOverlay({ context, page, viewport, widgets, editing }: PdfTo
 						keyboard.rect.x + keyboard.rect.width,
 						size.height - keyboard.rect.y
 					])
-	const position = keyboard.rect === null ? null : placementPosition(keyboard.rect, size)
 
 	return (
 		<div
@@ -349,14 +354,6 @@ export function SignOverlay({ context, page, viewport, widgets, editing }: PdfTo
 					className="pointer-events-none absolute rounded-xs border-2 border-dashed border-primary bg-primary/10"
 					style={indicator}
 				/>
-			)}
-			{position === null ? null : (
-				<p
-					aria-live="polite"
-					className="sr-only"
-				>
-					{t("previewPdfPlacementPosition", position)}
-				</p>
 			)}
 		</div>
 	)

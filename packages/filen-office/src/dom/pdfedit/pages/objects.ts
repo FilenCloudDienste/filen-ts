@@ -1,4 +1,6 @@
 import type { PDFDocument, PDFObject } from "mupdf"
+import type { PdfMatrix } from "../../../core/pdfedit/matrix"
+import { at, deref, name as nameOf, ref } from "../fields"
 
 // Object access shared by the page operations. MuPDF's null object has no document, so every read of a value that may
 // be missing goes through these instead of PDFObject.get.
@@ -8,24 +10,8 @@ import type { PDFDocument, PDFObject } from "mupdf"
 export const MAX_DEPTH = 64
 export const MAX_NODES = 1_000_000
 
-export function deref(object: PDFObject): PDFObject {
-	return object.isNull() ? object : object.resolve()
-}
-
-// The value at a key or index path, unresolved (to read its object number).
-export function ref(object: PDFObject, ...path: (string | number)[]): PDFObject {
-	return object.isNull() ? object : object.get(...path)
-}
-
-export function at(object: PDFObject, ...path: (string | number)[]): PDFObject {
-	return deref(ref(object, ...path))
-}
-
-export function nameOf(object: PDFObject): string | null {
-	const resolved = deref(object)
-
-	return resolved.isName() ? resolved.asName() : null
-}
+// The null-safe readers are the form reader's (fields.ts), shared with every editor module.
+export { at, deref, nameOf, ref }
 
 export function numOf(object: PDFObject): number | null {
 	return object.isIndirect() ? object.asIndirect() : null
@@ -52,18 +38,6 @@ export function ensureArray(doc: PDFDocument, dict: PDFObject, key: string): PDF
 	dict.put(key, array)
 
 	return array
-}
-
-export function ensureDict(doc: PDFDocument, dict: PDFObject, key: string): PDFObject {
-	const existing = at(dict, key)
-
-	if (existing.isDictionary()) return existing
-
-	const made = doc.newDictionary()
-
-	dict.put(key, made)
-
-	return made
 }
 
 // The entries of an array, unresolved.
@@ -255,8 +229,6 @@ export function freeXObjectName(page: PDFObject, prefix: string, taken: Set<stri
 		}
 	}
 }
-
-export type PdfMatrix = readonly [number, number, number, number, number, number]
 
 // The matrix that draws an annotation's appearance stream (BBox through its /Matrix) into the annotation's Rect, as
 // a viewer places it (PDF 32000-1 12.5.5).

@@ -4,6 +4,7 @@ import { toast } from "sonner"
 import { Trash2Icon } from "lucide-react"
 import type { SavedPdfSignature } from "@filen/shared/pdfSignatures"
 import { SettingsRow } from "@/features/settings/components/settingsLayout"
+import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { useIsOnline } from "@/lib/useIsOnline"
@@ -45,7 +46,7 @@ export function OfficePdfRows() {
 						type="button"
 						variant="outline"
 						disabled={!saved.loaded || count === 0}
-						aria-label={t("settingsOfficeSavedSignatures")}
+						aria-label={t("settingsOfficeSavedSignaturesManageLabel")}
 						onClick={() => {
 							setManaging(true)
 						}}
@@ -82,7 +83,9 @@ function SavedSignaturesDialog({
 	canDelete: boolean
 	offlineReason: string | undefined
 }) {
-	const { t } = useTranslation("settings")
+	const { t } = useTranslation(["settings", "common"])
+	// The entry whose delete is being confirmed (deleting removes it from every device).
+	const [deleting, setDeleting] = useState<{ readonly id: string; readonly initials: boolean } | null>(null)
 
 	function remove(id: string): void {
 		savedSignatures.delete(id).catch((error: unknown) => {
@@ -96,12 +99,14 @@ function SavedSignaturesDialog({
 			key: "signatures",
 			title: t("settingsOfficeSavedSignaturesSignatures"),
 			items: signatures,
+			initials: false,
 			deleteKey: "settingsOfficeSavedSignaturesDelete" as const
 		},
 		{
 			key: "initials",
 			title: t("settingsOfficeSavedSignaturesInitials"),
 			items: initials,
+			initials: true,
 			deleteKey: "settingsOfficeSavedInitialsDelete" as const
 		}
 	]
@@ -143,7 +148,7 @@ function SavedSignaturesDialog({
 											title={offlineReason}
 											aria-label={t(section.deleteKey, { index: index + 1 })}
 											onClick={() => {
-												remove(item.id)
+												setDeleting({ id: item.id, initials: section.initials })
 											}}
 										>
 											<Trash2Icon />
@@ -155,6 +160,25 @@ function SavedSignaturesDialog({
 					</section>
 				))}
 			</DialogContent>
+			<ConfirmDialog
+				open={deleting !== null}
+				pending={false}
+				title={t(
+					deleting?.initials === true ? "settingsOfficeSavedInitialsDeleteTitle" : "settingsOfficeSavedSignaturesDeleteTitle"
+				)}
+				body={t("settingsOfficeSavedSignaturesDialogDescription")}
+				confirmLabel={t("settingsOfficeSavedSignaturesDeleteConfirm")}
+				cancelLabel={t("common:cancel")}
+				destructive
+				onOpenChange={open => {
+					if (!open) setDeleting(null)
+				}}
+				onConfirm={() => {
+					if (deleting !== null) remove(deleting.id)
+
+					setDeleting(null)
+				}}
+			/>
 		</Dialog>
 	)
 }

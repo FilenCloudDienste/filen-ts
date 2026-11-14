@@ -45,6 +45,12 @@ export const previewPdfShell = {
 	previewPdfToolNotEditable: "This PDF can't be edited here.",
 	/** PDF editor — tooltip on a tool that is not offered while the device has no connection */
 	previewPdfToolOffline: "You're offline.",
+	/** Toast when undoing the last PDF change failed (the editor's error) */
+	previewPdfUndoFailed: "That change couldn't be undone.",
+	/** Toast when redoing a PDF change failed (the editor's error) */
+	previewPdfRedoFailed: "That change couldn't be redone.",
+	/** Why a PDF tool is not offered after the editor stopped (out of memory or an internal error); the file must be opened again */
+	previewPdfToolPoisoned: "The editor stopped. Reopen the file to edit.",
 	/** PDF editor — tooltip on a tool that is not offered because the change would break the PDF's digital signature */
 	previewPdfToolSigned: "Not available on a signed PDF.",
 	/** PDF editor — added to the file name of a copy saved beside the original, e.g. "Contract edited.pdf" */
@@ -61,8 +67,6 @@ export const previewPdfShell = {
 	previewPdfSaveFailed: "The PDF couldn't be saved.",
 	/** PDF editor — error when a change (a form field's value, a tool's edit) could not be applied to the document */
 	previewPdfChangeFailed: "This change couldn't be made.",
-	/** PDF editor — button in the dialog shown when the file changed elsewhere since it was opened: save the changes to a new file instead */
-	previewPdfRemoteSaveCopy: "Save as copy",
 	/** PDF editor — button in the same dialog: save over the other change as a new version (the other change stays in the file's versions) */
 	previewPdfRemoteSaveAnyway: "Save as new version anyway",
 	/** PDF editor — button in the same dialog: do not save */

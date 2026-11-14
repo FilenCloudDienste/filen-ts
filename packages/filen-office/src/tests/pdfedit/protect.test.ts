@@ -161,6 +161,8 @@ describe("redaction in the engine", () => {
 			expect(begun).toMatchObject({ versions: 1, encryption: "None", removesContent: true, protection: { kind: "keep" } })
 			expect(begun.redaction).toMatchObject({ terms: [SECRET_TERM], sanitized: true, annotationsRemoved: true })
 			expect(begun.redaction?.regions.map(region => region.page)).toEqual([0, 1])
+			// The words the marks covered, for the structure tree check.
+			expect(begun.redaction?.hidden).toContainEqual({ text: SECRET, matchCase: true, wholeWord: true })
 
 			const check = await verifier(client, begun.size)
 
@@ -362,7 +364,12 @@ describe("protection in the engine", () => {
 				await client.call("saveBegin", { inputBytes: 10_000, memory: PDF_DESKTOP_MEMORY, invalidateConfirmed: false })
 			)
 
-			expect(begun).toMatchObject({ encryption: PDF_AES256_METHOD, removesContent: false, redaction: null, protection: { kind: "new" } })
+			expect(begun).toMatchObject({
+				encryption: PDF_AES256_METHOD,
+				removesContent: false,
+				redaction: null,
+				protection: { kind: "new" }
+			})
 
 			if (begun.protection.kind !== "new") throw new Error("no new protection")
 

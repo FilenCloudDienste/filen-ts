@@ -221,6 +221,17 @@ describe("page rail", () => {
 
 		expect(live?.textContent).toBe("Page 3 moved to position 2")
 		expect(live?.getAttribute("role")).toBe("status")
+		// Beside the listbox, never one of its children.
+		expect(listbox().contains(live ?? null)).toBe(false)
+	})
+
+	it("keeps its live region mounted, empty, before anything is announced", () => {
+		renderRail({})
+
+		const live = host.querySelector("[aria-live=polite]")
+
+		expect(live?.textContent).toBe("")
+		expect(listbox().contains(live)).toBe(false)
 	})
 
 	it("asks thumbnails for the mounted pages only, those in view first", async () => {
@@ -239,5 +250,13 @@ describe("page rail", () => {
 		// Scrolled to page 21, which is asked for with the pages around it.
 		expect(asked).toContain(20)
 		expect(mounted).toBeLessThanOrEqual(asked.length + 1)
+
+		// The leading items in view are counted apart from the overscan after them.
+		const inView = handlers.onWindow.mock.calls.at(-1)?.[2] as number
+
+		expect(inView).toBeGreaterThan(0)
+		expect(inView).toBeLessThanOrEqual(6)
+		expect(inView).toBeLessThan(asked.length)
+		expect(asked.slice(0, inView)).toContain(20)
 	})
 })

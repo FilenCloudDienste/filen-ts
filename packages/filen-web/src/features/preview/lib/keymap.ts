@@ -1,10 +1,10 @@
 import type { ActionDef, PlatformDefault } from "@/lib/keymap/registry"
 
-// The PDF viewer's zoom, fit and rotate keys, as in Edge's and Acrobat's PDF viewers: Mod with the US "=" / "+" key
+// The PDF viewer's zoom, fit and rotate keys, as in the common PDF viewers: Mod with the US "=" / "+" key
 // (Shift or not) or the numpad's + to zoom in, Mod with "-" or the numpad's - to zoom out, Mod+0 for 100 %, Mod+\
 // between fit to width and fit to page, Mod+] and Mod+[ to rotate (keys are physical, @filen/shared/keymap). Its page
-// keys are Acrobat's (Mod+Page Down/Up, Mod+Home/End, N and P), Go to Page VS Code's go to line. The viewer matches
-// them on its own keydown (pdfKeys.logic.ts), so they keep the browser's page zoom out while it has focus.
+// keys are the usual ones (Mod+Page Down/Up, Mod+Home/End, N and P), Go to Page a code editor's go to line. The viewer
+// matches them on its own keydown (pdfKeys.logic.ts), so they keep the browser's page zoom out while it has focus.
 export type PdfViewerAction =
 	| "preview.pdfZoomIn"
 	| "preview.pdfZoomOut"

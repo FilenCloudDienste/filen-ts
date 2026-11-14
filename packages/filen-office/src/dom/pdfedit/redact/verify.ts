@@ -1,12 +1,11 @@
 import type * as Mupdf from "mupdf"
+import { concatMatrix, invertMatrix, type PdfMatrix, transformPoint } from "../../../core/pdfedit/matrix"
 import { contentStrings } from "../../../core/pdfedit/contentStream"
 import {
-	concatMatrix,
 	forEachCoveredPixel,
 	foldCase,
 	glyphCore,
 	intersectRects,
-	invertMatrix,
 	matchTerm,
 	pdfTextString,
 	quadBounds,
@@ -14,7 +13,6 @@ import {
 	rectsOverlap,
 	segmentCrossesRect,
 	streamReadings,
-	transformPoint,
 	transformRect,
 	transformRectQuad,
 	type RedactionFailure,
@@ -23,7 +21,6 @@ import {
 	type RedactionRegion,
 	type RedactionTerm,
 	type RedactionVerdict,
-	type RedactMatrix,
 	type RedactQuad,
 	type RedactRect
 } from "../../../core/pdfedit/redactVerify"
@@ -38,6 +35,7 @@ import { pageText } from "./find"
 //   or alternate images;
 // - no searched term in any page's text (all layers on) nor in any decoded string, name or non-image stream of any
 //   object (annotations, fields, bookmarks, destinations, URIs, tags, page labels, XMP, attachment names, …);
+// - no word the marks covered in the structure tree (its text alternatives would still spell it out);
 // - no glyph (filled, stroked, clipping or invisible; in forms, patterns and annotation appearances) inside a mark;
 // - every pixel of every image drawn over a mark is the redaction fill (white, opaque; unpainted for stencils);
 // - under area and page marks, no drawing or shading that touches the mark.
@@ -78,6 +76,8 @@ const SCRIPT_ACTIONS = new Set(["JavaScript", "Launch", "SubmitForm", "ImportDat
 
 interface Scan {
 	readonly terms: readonly RedactionTerm[]
+	// The terms searched in the structure tree: the terms, and the words the marks covered.
+	readonly tagTerms: readonly RedactionTerm[]
 	readonly sanitized: boolean
 	// Object number of each page's content streams, to name the page a term was found on.
 	readonly contentPages: ReadonlyMap<number, number>
@@ -95,6 +95,8 @@ function placeOf(dict: Mupdf.PDFObject, infoNumber: number, number: number): Red
 	if (type === "Metadata") return "metadata"
 	if (type === "Filespec" || type === "EmbeddedFile" || !dict.get("EF").isNull()) return "attachment"
 	if (type === "StructElem" || type === "StructTreeRoot" || type === "MCR" || type === "OBJR") return "tags"
+	// A structure element need not say its /Type: its structure type and parent tell it.
+	if (type === "" && dict.get("S").isName() && !dict.get("P").isNull() && dict.get("Subtype").isNull()) return "tags"
 	if (subtype === "Widget" || !dict.get("FT").isNull() || (!dict.get("T").isNull() && !dict.get("Kids").isNull())) return "field"
 	if (ANNOTATION_TYPES.has(subtype) && !dict.get("Rect").isNull()) return "annotation"
 	if (type === "Outlines" || (!dict.get("Title").isNull() && (!dict.get("Parent").isNull() || !dict.get("First").isNull())))
@@ -241,6 +243,8 @@ function scanObjects(document: Mupdf.PDFDocument, scan: Scan): void {
 		return
 	}
 
+	// The structure tree is searched for the covered words too.
+	const tagScan: Scan = { ...scan, terms: scan.tagTerms }
 	// The encryption dictionary and the file identifier are binary.
 	const encryption = trailer.get("Encrypt").asIndirect()
 	// `reference` answers stream questions (a resolved object no longer knows it is a stream); `object` is walked.
@@ -251,7 +255,10 @@ function scanObjects(document: Mupdf.PDFDocument, scan: Scan): void {
 		const place = object.isDictionary() ? placeOf(object, scan.infoNumber, number) : "file"
 
 		scanDicts(object, scan, 0)
-		if (scan.terms.length > 0) scanValue(object, scan, place, 0)
+
+		const target = place === "tags" ? tagScan : scan
+
+		if (target.terms.length > 0) scanValue(object, target, place, 0)
 		if (reference.isStream()) scanStream(reference, number, scan, place)
 	}
 
@@ -295,7 +302,7 @@ function enableAllContent(document: Mupdf.PDFDocument): void {
 }
 
 interface Tile {
-	readonly ctm: RedactMatrix
+	readonly ctm: PdfMatrix
 	readonly xstep: number
 	readonly ystep: number
 	readonly area: RedactRect
@@ -395,7 +402,7 @@ function pixelsAre(pixmap: Mupdf.Pixmap, mupdf: MupdfModule, rule: PixelRule): (
 }
 
 // Whether every pixel of an image (and of its soft mask) that a region covers is the fill.
-function checkImage(mupdf: MupdfModule, image: Mupdf.Image, ctm: RedactMatrix, regions: readonly RedactRect[], rule: PixelRule): boolean {
+function checkImage(mupdf: MupdfModule, image: Mupdf.Image, ctm: PdfMatrix, regions: readonly RedactRect[], rule: PixelRule): boolean {
 	const placed = transformRectQuad(ctm, [0, 0, 1, 1])
 	const hit = regions.filter(region => quadOverlapsRect(placed, region))
 
@@ -425,7 +432,7 @@ function checkImage(mupdf: MupdfModule, image: Mupdf.Image, ctm: RedactMatrix, r
 	return check(image, rule) && (mask === null || check(mask, "opaque"))
 }
 
-function isRectanglePath(path: Mupdf.Path, ctm: RedactMatrix): RedactRect | null {
+function isRectanglePath(path: Mupdf.Path, ctm: PdfMatrix): RedactRect | null {
 	const points: (readonly [number, number])[] = []
 	let curved = false
 
@@ -460,7 +467,7 @@ const inside = (inner: RedactRect, outer: RedactRect): boolean =>
 
 // Whether a path (page space through `ctm`) touches a rectangle: a segment crosses it (strokes widened by half the
 // line width), or, for fills, the rectangle's centre lies inside the path.
-function pathTouches(path: Mupdf.Path, ctm: RedactMatrix, rect: RedactRect, halfWidth: number, fill: boolean, evenOdd: boolean): boolean {
+function pathTouches(path: Mupdf.Path, ctm: PdfMatrix, rect: RedactRect, halfWidth: number, fill: boolean, evenOdd: boolean): boolean {
 	const grown: RedactRect = [rect[0] - halfWidth, rect[1] - halfWidth, rect[2] + halfWidth, rect[3] + halfWidth]
 	const cx = (rect[0] + rect[2]) / 2
 	const cy = (rect[1] + rect[3]) / 2
@@ -713,6 +720,7 @@ export function verifyRedactedPdf(mupdf: MupdfModule, document: Mupdf.PDFDocumen
 
 	scanObjects(document, {
 		terms: manifest.terms,
+		tagTerms: [...manifest.terms, ...(manifest.hidden ?? [])],
 		sanitized: manifest.sanitized,
 		contentPages,
 		infoNumber: document.getTrailer().get("Info").asIndirect(),

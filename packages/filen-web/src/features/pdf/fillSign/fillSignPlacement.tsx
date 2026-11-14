@@ -4,6 +4,7 @@ import { pdfBox, type PdfViewport } from "@filen/office/dom/pdf"
 import { placementPosition, placementStart, useKeyboardPlacement, type PlacementRect } from "@filen/office/react/pdfedit"
 import { useOfficeSettings } from "@/features/office/lib/officeSettings"
 import { SignatureDialog } from "@/features/pdf/fillSign/signatureDialog"
+import { useAnnouncement } from "@/features/pdf/tools/liveRegion"
 import { fillSignChoice, setFillSignChoice, useFillSignChoice } from "@/features/pdf/fillSign/fillSignChoice"
 import {
 	FILL_TEXT_BOX,
@@ -75,6 +76,11 @@ export function FillSignOverlay({ mode, context, page, viewport, editing }: Fill
 
 	const placement = useKeyboardPlacement({ page: pageSize, size, onCommit: place })
 
+	useAnnouncement(
+		context.swap,
+		placement.rect === null ? null : t("previewPdfPlacementPosition", placementPosition(placement.rect, pageSize))
+	)
+
 	const commitText = (): void => {
 		if (editor === null) return
 
@@ -140,20 +146,11 @@ export function FillSignOverlay({ mode, context, page, viewport, editing }: Fill
 				{t("previewPdfFillPlaceHint")}
 			</span>
 			{placement.rect === null ? null : (
-				<>
-					<div
-						className="fo-pdf-tool-placement pointer-events-none"
-						style={viewportRect(viewport, placement.rect)}
-						aria-hidden="true"
-					/>
-					<span
-						className="sr-only"
-						role="status"
-						aria-live="polite"
-					>
-						{t("previewPdfPlacementPosition", placementPosition(placement.rect, pageSize))}
-					</span>
-				</>
+				<div
+					className="fo-pdf-tool-placement pointer-events-none"
+					style={viewportRect(viewport, placement.rect)}
+					aria-hidden="true"
+				/>
 			)}
 			{editor === null ? null : (
 				<textarea

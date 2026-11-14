@@ -2,7 +2,19 @@ import type * as Mupdf from "mupdf"
 import { fieldEditable, type PdfSignatureState } from "../../core/pdfedit/signaturePolicy"
 import type { PdfFormState, PdfRect, PdfWidgetSummary, PdfWidgetType } from "../../core/pdfedit/state"
 import type { PdfFieldLock } from "../../core/pdfsign/policy"
-import { at, certificationOf, collectFields, deref, locksOf, name, num, ref, signatureFieldsOf } from "./fields"
+import {
+	at,
+	collectFields,
+	deref,
+	locksOf,
+	name,
+	num,
+	ref,
+	signatureFieldsOf,
+	signedCertification,
+	signedOrder,
+	type SignatureField
+} from "./fields"
 import { describeWidget, type PdfFieldKind } from "./fillSign/fields"
 import { hasFormScripts, pdfXfaKind } from "./fillSign/forms"
 
@@ -151,16 +163,36 @@ export function xfaState(document: Mupdf.PDFDocument): PdfFormState["xfa"] {
 	return kind === "xfaOnly" ? "only" : kind
 }
 
-export function signatureState(document: Mupdf.PDFDocument): PdfSignatureState {
+// The file a document reads, as earlier revisions: its length, and its byte prefix [0, length) opened as its own
+// read-only document (the caller destroys it).
+export interface PdfRevisions {
+	readonly length: number
+	readonly open: (length: number) => Mupdf.PDFDocument
+}
+
+// The signatures' fields and locks, and the certification as the certifying signature signed it: read from the
+// revision it signed, as the verifier reads it, never from a later catalog anyone can write. A revision that cannot be
+// read allows nothing.
+export function signatureState(document: Mupdf.PDFDocument, revisions: PdfRevisions): PdfSignatureState {
 	const { fields } = collectFields(document)
 	const signed = signatureFieldsOf(document, fields)
-	const certifying = num(ref(document.getTrailer(), "Root", "Perms", "DocMDP"))
-	const certifier = certifying === null ? undefined : signed.find(field => field.valueNum === certifying)
 	const locks: PdfFieldLock[] = []
 
 	for (const field of signed) locks.push(...locksOf(field))
 
-	return { fields: signed.map(field => field.name), certification: certificationOf(document, certifier), locks }
+	return { fields: signed.map(field => field.name), certification: certificationOrLocked(document, signed, revisions), locks }
+}
+
+function certificationOrLocked(
+	document: Mupdf.PDFDocument,
+	signed: readonly SignatureField[],
+	revisions: PdfRevisions
+): PdfSignatureState["certification"] {
+	try {
+		return signedCertification(document, signedOrder(signed, revisions.length)[0], revisions.length, revisions.open)
+	} catch {
+		return 1
+	}
 }
 
 export function isTagged(document: Mupdf.PDFDocument): boolean {

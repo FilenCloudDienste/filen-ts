@@ -49,7 +49,7 @@ test("PDF prints every page at its size through the print root, cleaned up after
 	} = await openFixtureRows(page, "preview-pdf-pages")
 
 	await row.dblclick()
-	await expect(page.locator('canvas[aria-label*="Page 1 of 2"]')).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+	await expect(page.getByRole("region", { name: /Page 1 of 2/u })).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
 
 	await page.getByRole("button", { name: "File" }).click()
 	await page.getByRole("menuitem", { name: /Print/ }).click()
@@ -74,7 +74,7 @@ test("PDF prints every page at its size through the print root, cleaned up after
 	await expect(page.locator(".fo-print-root")).toHaveCount(0)
 
 	// Mod+P opens it again; Cancel closes it without printing.
-	await page.locator('canvas[aria-label*="Page 1 of 2"]').click()
+	await page.getByRole("region", { name: /Page 1 of 2/u }).click()
 	await page.keyboard.press("ControlOrMeta+p")
 	await expect(dialog).toBeVisible()
 	await dialog.getByRole("radio", { name: "Current page (1)" }).check()

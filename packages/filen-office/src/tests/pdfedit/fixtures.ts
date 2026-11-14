@@ -82,9 +82,13 @@ function appearance(document: mupdf.PDFDocument, on: string): mupdf.PDFObject {
 
 // Two pages with a form: a text field ("name", at most 20 characters), a checkbox ("agree"), a read-only text field
 // ("fixed"), a combo box ("colour") and a radio group ("choice") with a button on each page; a web link and a link to
-// page 2 on page 1.
-export function makeFormPdf(): Uint8Array {
+// page 2 on page 1. `orphan`: an unused object written before the form's own (a free number a compacting rewrite
+// would close by renumbering every object after it).
+export function makeFormPdf(options: { readonly orphan?: boolean } = {}): Uint8Array {
 	const document = new mupdf.PDFDocument()
+
+	if (options.orphan === true) document.addObject({ Unused: true })
+
 	const font = document.addSimpleFont(new mupdf.Font("Helvetica"))
 	const resources = document.addObject({ Font: { Helv: font } })
 

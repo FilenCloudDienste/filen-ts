@@ -153,7 +153,7 @@ export function PdfProtectDialog({ open, pending, current, onOpenChange, onApply
 			<FieldGroup>
 				{locked ? (
 					<div className="flex flex-wrap items-center justify-between gap-2 rounded-md border px-3 py-2 text-sm">
-						<span>{t("previewPdfSecurityOwnerRestricted")}</span>
+						<span>{t("previewPdfOwnerRestricted")}</span>
 						<Button
 							type="button"
 							variant="outline"

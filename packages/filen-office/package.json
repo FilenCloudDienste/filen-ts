@@ -86,6 +86,7 @@
 		"./dom/pdfedit/digest": "./src/dom/pdfedit/digest.ts",
 		"./dom/pdfedit/sign": "./src/dom/pdfedit/sign.ts",
 		"./dom/pdfedit/ocr": "./src/dom/pdfedit/ocr/index.ts",
+		"./core/pdfedit/matrix": "./src/core/pdfedit/matrix.ts",
 		"./core/pdfedit/ocrGeometry": "./src/core/pdfedit/ocrGeometry.ts",
 		"./core/pdfwrite/fonts": "./src/core/pdfwrite/fonts/index.ts",
 		"./core/pdfedit/pageRanges": "./src/core/pdfedit/pageRanges.ts",

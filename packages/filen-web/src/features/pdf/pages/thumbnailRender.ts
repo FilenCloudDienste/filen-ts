@@ -78,6 +78,11 @@ function engineThumbnail(document: PdfDomDocument, engine: PdfEditEngine): Rende
 	}
 }
 
+// pdf.js draws the thumbnails: the editor does not have the document (yet).
+export function pdfjsDrawsThumbnails(document: PdfDomDocument, engine: PdfEditEngine | null): boolean {
+	return engine === null || !isMupdfDocument(document)
+}
+
 // The renderer for the document shown: the engine's when the editor has it.
 export function thumbnailRenderer(document: PdfDomDocument, engine: PdfEditEngine | null): RenderThumbnail {
 	return engine !== null && isMupdfDocument(document) ? engineThumbnail(document, engine) : pdfjsThumbnail(document)

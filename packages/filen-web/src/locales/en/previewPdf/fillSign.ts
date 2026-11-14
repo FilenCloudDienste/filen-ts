@@ -2,8 +2,8 @@
 // (draw, type or pick an image; saved signatures and initials). A visual signature is a picture of a signature, not a
 // certificate signature: nothing here says it is verified. Spread into preview.ts; same catalog rules.
 export const previewPdfFillSign = {
-	/** Fill & Sign — tool placing typed text on the page */
-	previewPdfFillText: "Add text",
+	/** Fill & Sign — tool typing text into a form on the page (filling it in); distinct from Tools › Add text, which adds page content */
+	previewPdfFillText: "Fill in text",
 	/** Fill & Sign — tool placing a check mark */
 	previewPdfFillCheck: "Check mark",
 	/** Fill & Sign — tool placing a cross */
@@ -14,6 +14,8 @@ export const previewPdfFillSign = {
 	previewPdfFillSignature: "Signature",
 	/** Fill & Sign — tool adding initials */
 	previewPdfFillInitials: "Initials",
+	/** Shortcuts list — the PDF editor's key choosing the Signature tool (a picture of a signature placed on the page) */
+	previewPdfKeyToolSign: "Signature tool (PDF)",
 	/** Fill & Sign — accessible name of a page while a Fill & Sign tool waits to be placed on it; {{page}} is the page number */
 	previewPdfFillPlaceOnPage: "Place on page {{page}}",
 	/** Fill & Sign — hint while a Fill & Sign tool waits to be placed */
@@ -35,8 +37,6 @@ export const previewPdfFillSign = {
 	previewPdfSignatureSavedItem: "Saved signature {{index}}",
 	/** Signature dialog — accessible name of one saved set of initials in that row. {{index}} counts from 1 */
 	previewPdfInitialsSavedItem: "Saved initials {{index}}",
-	/** Signature dialog — accessible name of the button deleting one saved signature or initials */
-	previewPdfSignatureSavedDelete: "Delete",
 	/** Signature dialog — button starting a new signature instead of a saved one */
 	previewPdfSignatureNew: "New",
 	/** Signature dialog — tab: draw with a mouse, pen or finger */
@@ -70,7 +70,5 @@ export const previewPdfFillSign = {
 	/** Signature dialog — places the signature on the page */
 	previewPdfSignaturePlace: "Place",
 	/** Toast when the signature was placed but saving it for reuse failed */
-	previewPdfSignatureSaveFailed: "The signature was placed, but it couldn't be saved for reuse.",
-	/** Toast when deleting a saved signature failed */
-	previewPdfSignatureDeleteFailed: "The saved signature couldn't be deleted."
+	previewPdfSignatureSaveFailed: "The signature was placed, but it couldn't be saved for reuse."
 } as const

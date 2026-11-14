@@ -13,6 +13,10 @@ import * as mupdf from "mupdf"
 
 export interface OrganisedOptions {
 	readonly userPassword?: string
+	// Without a user password: restrictions only (the file opens without one).
+	readonly ownerPassword?: string
+	// /P (default: everything allowed).
+	readonly permissions?: number
 }
 
 function pageContent(index: number): string {
@@ -176,10 +180,12 @@ export function makeOrganisedPdf(options: OrganisedOptions = {}): Uint8Array {
 
 	root.put("OpenAction", dest(doc, page(2)))
 
+	const user = options.userPassword ?? ""
+	const permissions = options.permissions === undefined ? "" : `,permissions=${String(options.permissions)}`
 	const encrypt =
-		options.userPassword === undefined
+		options.userPassword === undefined && options.ownerPassword === undefined
 			? ""
-			: `,encrypt=aes-256,user-password=${options.userPassword},owner-password=owner-${options.userPassword}`
+			: `,encrypt=aes-256,user-password=${user},owner-password=${options.ownerPassword ?? `owner-${user}`}${permissions}`
 	const bytes = doc.saveToBuffer(`compress${encrypt}`).asUint8Array().slice()
 
 	doc.destroy()

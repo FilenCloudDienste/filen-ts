@@ -2,7 +2,7 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest"
 import { createElement } from "react"
-import { act, fireEvent, render, screen } from "@testing-library/react"
+import { act, fireEvent, render, screen, within } from "@testing-library/react"
 import type { SavedSignaturesView } from "@/features/pdf/fillSign/savedSignatures"
 
 // Settings › Office › PDF: the no-autosave note, and the saved signatures with delete.
@@ -48,7 +48,9 @@ describe("Office › PDF settings", () => {
 
 		expect(screen.getByText("PDFs are never saved automatically. Use Save.")).toBeTruthy()
 		expect(screen.getByText(EN.settingsOfficeSavedSignaturesNone)).toBeTruthy()
-		expect(screen.getByRole("button", { name: EN.settingsOfficeSavedSignatures })).toHaveProperty("disabled", true)
+		// The visible word starts the accessible name.
+		expect(screen.getByRole("button", { name: EN.settingsOfficeSavedSignaturesManageLabel })).toHaveProperty("disabled", true)
+		expect(EN.settingsOfficeSavedSignaturesManageLabel.startsWith(EN.settingsOfficeSavedSignaturesManage)).toBe(true)
 	})
 
 	it("lists the saved signatures and initials and deletes one; a failed delete is told", async () => {
@@ -63,13 +65,31 @@ describe("Office › PDF settings", () => {
 
 		expect(screen.getByText("2 saved")).toBeTruthy()
 
-		fireEvent.click(screen.getByRole("button", { name: EN.settingsOfficeSavedSignatures }))
+		fireEvent.click(screen.getByRole("button", { name: EN.settingsOfficeSavedSignaturesManageLabel }))
 		fireEvent.click(await screen.findByRole("button", { name: "Delete initials 1" }))
+
+		// Asked first: nothing is deleted until confirmed, and cancelling keeps it.
+		const question = await screen.findByRole("alertdialog", { name: EN.settingsOfficeSavedInitialsDeleteTitle })
+
+		expect(hooks.remove).not.toHaveBeenCalled()
+		fireEvent.click(within(question).getByRole("button", { name: "Cancel" }))
+		await settle()
+		expect(hooks.remove).not.toHaveBeenCalled()
+
+		fireEvent.click(screen.getByRole("button", { name: "Delete initials 1" }))
+		fireEvent.click(
+			within(await screen.findByRole("alertdialog")).getByRole("button", { name: EN.settingsOfficeSavedSignaturesDeleteConfirm })
+		)
 
 		expect(hooks.remove).toHaveBeenCalledWith("ini")
 
 		hooks.remove.mockRejectedValueOnce(new Error("offline"))
 		fireEvent.click(screen.getByRole("button", { name: "Delete signature 1" }))
+		fireEvent.click(
+			within(await screen.findByRole("alertdialog", { name: EN.settingsOfficeSavedSignaturesDeleteTitle })).getByRole("button", {
+				name: EN.settingsOfficeSavedSignaturesDeleteConfirm
+			})
+		)
 		await settle()
 
 		expect(hooks.toastError).toHaveBeenCalledWith(EN.settingsOfficeSavedSignaturesDeleteFailed)
@@ -84,7 +104,7 @@ describe("Office › PDF settings", () => {
 			]
 		}
 		render(createElement(OfficePdfRows))
-		fireEvent.click(screen.getByRole("button", { name: EN.settingsOfficeSavedSignatures }))
+		fireEvent.click(screen.getByRole("button", { name: EN.settingsOfficeSavedSignaturesManageLabel }))
 
 		expect(await screen.findByRole("button", { name: "Delete signature 1" })).toHaveProperty("disabled", true)
 	})

@@ -1,18 +1,17 @@
 import { describe, expect, it } from "vitest"
 import * as mupdf from "mupdf"
+import { transformPoint } from "../../core/pdfedit/matrix"
 import {
-	concatMatrix,
 	fitOcrWords,
 	imageUprightTurns,
-	invertMatrix,
 	isOcrCandidate,
 	OCR_DEFAULT_DPI,
 	OCR_MAX_DPI,
 	OCR_MIN_DPI,
 	ocrOverlayMatrix,
 	ocrRenderDpi,
+	pixelToPageMatrix,
 	quarterTurnMatrix,
-	transformPoint,
 	type OcrPageSummary,
 	type QuarterTurns
 } from "../../core/pdfedit/ocrGeometry"
@@ -90,12 +89,8 @@ function expectMarker(options: MarkerPageOptions, unit = options.userUnit ?? 1):
 }
 
 describe("OCR geometry", () => {
-	it("composes and inverts matrices in PDF order", () => {
-		const m = concatMatrix([2, 0, 0, 3, 5, 7], [0, 1, -1, 0, 10, 0])
-
-		expect(transformPoint(m, 1, 1)).toEqual([0, 7])
-		expect(transformPoint(concatMatrix(m, invertMatrix(m)), 4, -9).map(v => Math.round(v * 1e9) / 1e9)).toEqual([4, -9])
-		expect(() => invertMatrix([0, 0, 0, 0, 1, 1])).toThrow(RangeError)
+	it("refuses a page transform that flattens the page", () => {
+		expect(() => pixelToPageMatrix([0, 0, 0, 0, 1, 1], [1, 0, 0, 1, 0, 0], [0, 0])).toThrow(RangeError)
 	})
 
 	it("turns pixels the way the quarter-turn matrices say", () => {

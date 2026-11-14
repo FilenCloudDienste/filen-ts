@@ -21,6 +21,8 @@ export const settingsOfficePdf = {
 	settingsOfficeSavedSignaturesCount_other: "{{count}} saved",
 	/** Settings > Office — button opening the saved signatures dialog */
 	settingsOfficeSavedSignaturesManage: "Manage",
+	/** Settings > Office — accessible name of that button; starts with its visible word (settingsOfficeSavedSignaturesManage) */
+	settingsOfficeSavedSignaturesManageLabel: "Manage saved signatures",
 	/** Settings > Office — saved signatures dialog title */
 	settingsOfficeSavedSignaturesDialogTitle: "Saved signatures",
 	/** Settings > Office — saved signatures dialog description */
@@ -35,6 +37,12 @@ export const settingsOfficePdf = {
 	settingsOfficeSavedSignaturesDelete: "Delete signature {{index}}",
 	/** Settings > Office — saved signatures dialog: accessible name of the delete button of one set of initials. {{index}} counts from 1 */
 	settingsOfficeSavedInitialsDelete: "Delete initials {{index}}",
+	/** Settings > Office — title of the question before a saved signature is deleted */
+	settingsOfficeSavedSignaturesDeleteTitle: "Delete this signature?",
+	/** Settings > Office — title of the question before saved initials are deleted */
+	settingsOfficeSavedInitialsDeleteTitle: "Delete these initials?",
+	/** Settings > Office — button confirming the delete of a saved signature or initials */
+	settingsOfficeSavedSignaturesDeleteConfirm: "Delete",
 	/** Settings > Office — toast when deleting a saved signature failed */
 	settingsOfficeSavedSignaturesDeleteFailed: "The saved signature couldn't be deleted."
 } as const

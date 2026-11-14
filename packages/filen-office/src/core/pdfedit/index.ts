@@ -1,11 +1,14 @@
 export {
 	estimateSavePeak,
 	fitsBudget,
+	fitsEdit,
 	PDF_DESKTOP_MEMORY,
+	PDF_FRESH_HEAP,
 	PDF_HEAP_BASELINE,
 	PDF_MOBILE_MEMORY,
 	PDF_SAVE_PEAK_FACTOR,
 	shouldRespawn,
+	type PdfHeapUse,
 	type PdfMemoryProfile
 } from "./budget"
 export {

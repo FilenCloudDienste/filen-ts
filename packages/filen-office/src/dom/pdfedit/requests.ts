@@ -10,6 +10,7 @@ import type {
 	PdfPageInfo,
 	PdfPermission
 } from "./protocol"
+import { PDF_DESKTOP_MEMORY } from "../../core/pdfedit/budget"
 import { saslPrepPassword } from "../../core/pdfwrite/crypto"
 import { ANNOTATION_REQUESTS } from "./annotationRequests"
 import { EDIT_REQUESTS, startEdit } from "./editRequests"
@@ -21,6 +22,7 @@ import { SIGN_REQUESTS } from "./signRequests"
 import { TOOL_REQUESTS } from "./toolRequests"
 import { TileRenderer } from "./render"
 import { SyncRangeReader, syncRangeStreamHandle } from "./stream"
+import { fileRevisions } from "./verifyRequest"
 
 // The engine's request table: one entry per request. A handler gets the engine context and the request's arguments
 // and returns its value (and what of it to transfer); it may throw a PdfEngineRefusal. Renders are queued by priority
@@ -127,7 +129,7 @@ function heap(context: PdfEngineContext): PdfHandled<{ readonly heapBytes: numbe
 }
 
 export const PDF_ENGINE_REQUESTS: PdfRequestTable = {
-	open: (context, { channel, role, password }) => {
+	open: (context, { channel, role, password, memory = PDF_DESKTOP_MEMORY }) => {
 		if (context.current !== null) throw new PdfEngineRefusal("badRequest", "a document is already open")
 
 		const { mupdf, host } = context
@@ -167,9 +169,13 @@ export const PDF_ENGINE_REQUESTS: PdfRequestTable = {
 			role,
 			renderer: new TileRenderer(mupdf, document, host.maxDisplayLists),
 			// The editor's journal starts once the document is unlocked (its objects are read to know the form).
-			edit: role === "edit" && result.status === "open" ? startEdit(document, result, password) : null,
+			edit:
+				role === "edit" && result.status === "open"
+					? startEdit(document, result, password, fileRevisions(mupdf, reader, password), memory, channel.length)
+					: null,
 			heap: null,
-			base: null
+			base: null,
+			memory
 		})
 
 		return { value: result }
@@ -179,7 +185,17 @@ export const PDF_ENGINE_REQUESTS: PdfRequestTable = {
 		const result = opened(current.document, password)
 
 		if (current.role === "edit" && current.edit === null && result.status === "open")
-			context.setCurrent({ ...current, edit: startEdit(current.document, result, password) })
+			context.setCurrent({
+				...current,
+				edit: startEdit(
+					current.document,
+					result,
+					password,
+					fileRevisions(context.mupdf, current.reader, password),
+					current.memory ?? PDF_DESKTOP_MEMORY,
+					current.reader.length
+				)
+			})
 
 		return { value: result }
 	},
@@ -198,7 +214,7 @@ export const PDF_ENGINE_REQUESTS: PdfRequestTable = {
 
 		return { value: pages }
 	},
-	render: async (context, { page, scale, rotation, tile, print }) => {
+	render: async (context, { page, scale, rotation, tile, print, priority }) => {
 		const { document, renderer } = context.open()
 
 		if (!Number.isInteger(page) || page < 0 || page >= document.countPages() || !(scale > 0)) throw new PdfEngineRefusal("badRequest")
@@ -208,7 +224,8 @@ export const PDF_ENGINE_REQUESTS: PdfRequestTable = {
 			scale,
 			rotation,
 			tile,
-			print === undefined ? undefined : { annotations: print.annotations === true }
+			print === undefined ? undefined : { annotations: print.annotations === true },
+			priority === "thumbnail"
 		)
 		const bitmap = await context.host.toBitmap(drawn.rgba, drawn.width, drawn.height)
 
@@ -240,6 +257,9 @@ export const PDF_ENGINE_REQUESTS: PdfRequestTable = {
 	// The verifier (pkijs, WebCrypto) is a worker's own entry, so a host without it never bundles it.
 	verifySignatures: () => {
 		throw new PdfEngineRefusal("badRequest", "signature verification is not served")
+	},
+	signatureHints: () => {
+		throw new PdfEngineRefusal("badRequest", "signature hints are not served")
 	},
 	// The redaction verifier runs in a verifying engine's worker, which registers it.
 	verifyRedaction: () => {

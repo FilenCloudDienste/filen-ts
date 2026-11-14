@@ -3,6 +3,7 @@ import { matchesCombo, type ChordEvent } from "@filen/shared/keymap"
 import { PDF_VIEWER_ACTIONS, type PdfViewerAction } from "@/features/preview/lib/keymap"
 import { browserZoomKey, zoomKeyAction, type BrowserZoomKey } from "@/lib/keymap/browserZoom"
 import { isMacPlatform } from "@/lib/keymap/kbd.logic"
+import { typesInPdfField } from "@/features/pdf/lib/toolKeys"
 
 const ZOOM_ACTIONS: Readonly<Record<BrowserZoomKey, PdfViewerAction>> = {
 	in: "preview.pdfZoomIn",
@@ -13,12 +14,19 @@ const ZOOM_ACTIONS: Readonly<Record<BrowserZoomKey, PdfViewerAction>> = {
 // The PDF viewer action a keydown is, under `combos` (the combos in effect by action id, useBindings), by physical key as every
 // shortcut is matched (@filen/shared/keymap). The browser's own zoom keys, read by character, zoom the document ahead
 // of the default bindings, so no layout zooms the page in its place or hits another default there (a German keyboard's
-// "+" is the US "]", rotate); a key the user bound to an action stays that action.
+// "+" is the US "]", rotate); a key the user bound to an action stays that action. A key typed into a field (a form
+// field, a tool's editor) is never the viewer's: N, P and F are letters there.
 export function pdfViewerKey(
-	event: ChordEvent,
+	event: ChordEvent & { readonly target?: EventTarget | null },
 	combos: Readonly<Record<string, string>>,
 	mac: boolean = isMacPlatform()
 ): PdfViewerAction | undefined {
+	const { ctrlKey, metaKey, altKey } = event
+
+	if (typesInPdfField({ target: event.target ?? null, ctrlKey, metaKey, altKey })) {
+		return undefined
+	}
+
 	const zoom = browserZoomKey(event, mac)
 
 	if (zoom !== undefined) {

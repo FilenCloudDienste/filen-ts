@@ -70,6 +70,7 @@ function refusal(error: PdfFieldError): PdfEngineRefusal {
 export const FORM_COMMANDS: PdfCommandTable<PdfFormCommands> = {
 	"forms.setField": {
 		tool: "formFill",
+		target: "widget",
 		parse: parseField,
 		run: (context, args) => {
 			if (args.page >= context.document.countPages()) throw new PdfEngineRefusal("badRequest", "no such page")
@@ -97,9 +98,11 @@ export const FORM_COMMANDS: PdfCommandTable<PdfFormCommands> = {
 		parse: parseNone,
 		run: context => resetForm(context.document)
 	},
-	// Nothing is drawn differently: the AcroForm fields already show the values.
+	// Nothing is drawn differently: the AcroForm fields already show the values. Offered with form filling, but it changes
+	// the form itself, which no signer allowed: a signed document is rewritten, its signatures invalidated (asked first).
 	"forms.removeXfa": {
 		tool: "formFill",
+		saves: "content",
 		parse: parseNone,
 		run: context => {
 			removeXfa(context.document)

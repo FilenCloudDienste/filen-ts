@@ -1,4 +1,5 @@
 import type * as Mupdf from "mupdf"
+import { concatMatrix, IDENTITY_MATRIX, invertMatrix, type PdfMatrix } from "../../core/pdfedit/matrix"
 import type { MupdfModule } from "./protocol"
 
 // Grafts page 0 of a separately produced one-page PDF (an overlay) onto a page of the open document as a Form XObject
@@ -20,8 +21,6 @@ import type { MupdfModule } from "./protocol"
 // the page's resources: names never clash and resources shared with other pages are never changed. Nothing else of
 // the overlay page (annotations, actions, metadata) is carried over.
 
-export type PdfMatrix = readonly [number, number, number, number, number, number]
-
 export interface GraftOverlayOptions {
 	// Overlay display space → target display space; default identity.
 	readonly toDisplay?: PdfMatrix
@@ -38,30 +37,13 @@ export interface GraftedOverlay {
 
 export class PdfOverlayError extends Error {}
 
-const IDENTITY: PdfMatrix = [1, 0, 0, 1, 0, 0]
+// The inverse of a page's transform (its display space back to its content space).
+function pageInverse(page: Mupdf.PDFPage): PdfMatrix {
+	const inverse = invertMatrix(page.getTransform())
 
-export function concatMatrix(one: PdfMatrix, two: PdfMatrix): PdfMatrix {
-	return [
-		one[0] * two[0] + one[1] * two[2],
-		one[0] * two[1] + one[1] * two[3],
-		one[2] * two[0] + one[3] * two[2],
-		one[2] * two[1] + one[3] * two[3],
-		one[4] * two[0] + one[5] * two[2] + two[4],
-		one[4] * two[1] + one[5] * two[3] + two[5]
-	]
-}
+	if (inverse === null) throw new PdfOverlayError("The matrix cannot be inverted")
 
-export function invertMatrix(m: PdfMatrix): PdfMatrix {
-	const det = m[0] * m[3] - m[1] * m[2]
-
-	if (Math.abs(det) < 1e-12) throw new PdfOverlayError("The matrix cannot be inverted")
-
-	const a = m[3] / det
-	const b = -m[1] / det
-	const c = -m[2] / det
-	const d = m[0] / det
-
-	return [a, b, c, d, -m[4] * a - m[5] * c, -m[4] * b - m[5] * d]
+	return inverse
 }
 
 // The scale that stretches an overlay page of overlayWidth × overlayHeight display points over a target display box
@@ -97,7 +79,7 @@ export function graftOverlay(
 		// Overlay content space → overlay display → target display → target content space.
 		const matrix =
 			options.toPage ??
-			concatMatrix(concatMatrix(overlayPage.getTransform(), options.toDisplay ?? IDENTITY), invertMatrix(page.getTransform()))
+			concatMatrix(concatMatrix(overlayPage.getTransform(), options.toDisplay ?? IDENTITY_MATRIX), pageInverse(page))
 		const map = document.newGraftMap()
 		const contents = overlayObject.get("Contents")
 		// One content stream is copied as stored (still compressed); a content array is decoded and joined.

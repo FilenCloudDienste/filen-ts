@@ -166,7 +166,7 @@ function FieldControl({ field, page, viewport, swap, form, starting, editable, w
 	const { t } = useTranslation("preview")
 	const element = useRef<ControlElement | null>(null)
 	// What was typed or chosen and not yet drawn by the engine; null: the field's value.
-	const [draft, setDraft] = useState<string | null>(() => form.drafts.get(field.id) ?? null)
+	const [draft, setDraft] = useState<string | null>(() => form.draft(field.id)?.text ?? null)
 	const [chosen, setChosen] = useState<readonly string[] | null>(null)
 	const props = pdfFormControlProps(controlField(field), form.scope, t("previewPdfFieldLabel"))
 	// One element id for the control's life (a datalist is tied to it).
@@ -204,11 +204,10 @@ function FieldControl({ field, page, viewport, swap, form, starting, editable, w
 
 	if (chosen !== null && sameValues(chosen, field.selected)) setChosen(null)
 
-	// The draft outlives the control (its page is drawn anew on every change).
+	// The draft outlives the control (its page is drawn anew on every change), and a save commits it.
 	useEffect(() => {
-		if (draft === null) form.drafts.delete(field.id)
-		else form.drafts.set(field.id, draft)
-	}, [form, field.id, draft])
+		form.setDraft(field.id, draft === null ? null : { page, text: draft })
+	}, [form, field.id, page, draft])
 
 	// The focus comes back to the control that had it when the page was drawn anew (every change redraws), and is
 	// noted when this control goes with the focus on it.

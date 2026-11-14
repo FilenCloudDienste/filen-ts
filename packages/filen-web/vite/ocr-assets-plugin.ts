@@ -11,18 +11,23 @@ import { ensureTessdata, gzippedTessdata, readTessdataManifest, sha256, type Tes
 // gzip-compressed and named .bin, not .gz (opaque bytes no host re-encodes); the OCR worker fetches only the
 // languages picked, inflates and verifies them against the manifest's size and SHA-256.
 //   virtual:ocr-assets   every URL, with each model's size, SHA-256 and download size (page and OCR worker);
-//   virtual:ocr-engines  each build's Emscripten glue (a script defining `TesseractCore`), wrapped as a module whose
-//                        factories the OCR worker bundles (the worker's own instance: ocrAssets({ emit: false })).
+//   virtual:ocr-engine/<build>  that build's Emscripten glue (a script defining `TesseractCore`), wrapped as a module
+//                        exporting its factory; each build's OCR worker bundles its own (the worker's instance:
+//                        ocrAssets({ emit: false })), so a browser loads only the glue of the build it runs.
 // The licence texts ship in the third-party notices (scripts/generateThirdPartyNotices.ts), not as files.
 
 const ASSETS_ID = "virtual:ocr-assets"
-const ENGINES_ID = "virtual:ocr-engines"
+const ENGINE_PREFIX = "virtual:ocr-engine/"
 const CORE_DIR = dirname(createRequire(import.meta.url).resolve("tesseract.js-core/package.json"))
 
 // Best first: the worker picks the first its browser validates.
 export const OCR_ENGINE_VARIANTS = ["relaxedsimd-lstm", "simd-lstm", "lstm"] as const
 
 type Variant = (typeof OCR_ENGINE_VARIANTS)[number]
+
+function isVariant(value: string): value is Variant {
+	return (OCR_ENGINE_VARIANTS as readonly string[]).includes(value)
+}
 
 function glueSource(variant: Variant): string {
 	const glue = readFileSync(join(CORE_DIR, `tesseract-core-${variant}.js`), "utf8")
@@ -69,19 +74,19 @@ export function ocrAssets(options: { readonly emit?: boolean } = {}): Plugin {
 	const plugin: Plugin = {
 		name: options.emit === false ? "filen:ocr-assets-modules" : "filen:ocr-assets",
 		resolveId(id) {
-			return id === ASSETS_ID || id === ENGINES_ID ? `\0${id}` : null
+			if (id === ASSETS_ID) return `\0${id}`
+
+			return id.startsWith(ENGINE_PREFIX) && isVariant(id.slice(ENGINE_PREFIX.length)) ? `\0${id}` : null
 		},
 		load(id) {
 			if (id === `\0${ASSETS_ID}`) return `export const OCR_ASSETS = Object.freeze(${JSON.stringify(assets)})\n`
 
-			if (id !== `\0${ENGINES_ID}`) return null
+			const variant = id.startsWith(`\0${ENGINE_PREFIX}`) ? id.slice(ENGINE_PREFIX.length + 1) : ""
 
-			// Each glue in a function scope of its own: its top-level `var`s stay local and it returns its factory.
-			const factories = OCR_ENGINE_VARIANTS.map(
-				variant => `${JSON.stringify(variant)}: (() => {\n${glueSource(variant)}\nreturn TesseractCore\n})()`
-			)
+			if (!isVariant(variant)) return null
 
-			return `export const OCR_ENGINE_FACTORIES = Object.freeze({\n${factories.join(",\n")}\n})\n`
+			// The glue in a function scope of its own: its top-level `var`s stay local and it returns its factory.
+			return `export const OCR_ENGINE_FACTORY = (() => {\n${glueSource(variant)}\nreturn TesseractCore\n})()\n`
 		}
 	}
 

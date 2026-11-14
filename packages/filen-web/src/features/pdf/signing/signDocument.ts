@@ -25,11 +25,10 @@ export interface PdfSigningRequest {
 export interface PdfSignedSaveJob {
 	readonly signer: PdfSigner
 	readonly digest: PdfDigestName
-	// The document's signatures as the viewer's parser saw them (pdf.js), with the ones signed here since: the verifier
-	// cross-checks its own reading against them. Null when pdf.js could not tell.
+	// The signatures of the file the signature is appended to, as the viewer's parser saw them (pdf.js), or the
+	// engine's own reading of a file a save here wrote: the verifier cross-checks its reading against them. Null when
+	// pdf.js could not tell.
 	readonly hints: () => Promise<readonly PdfSignatureFieldHint[] | null>
-	// The signed file was saved: its new signature's field and byte range.
-	readonly onSigned: (field: string, byteRange: readonly [number, number, number, number]) => void
 }
 
 export interface PdfSigningDeps {
@@ -59,7 +58,13 @@ export async function signWithCertificate(deps: PdfSigningDeps, request: PdfSign
 	try {
 		const state = await deps.session(session => Promise.resolve(session.getSnapshot().state))
 
-		if (!signsInOneVersion(state.dirty, state.signatures.fields.length > 0, deps.fileSize(), deps.memory)) {
+		// New protection and redactions are saved by a plain Save first (the signing save refuses them).
+		const saveFirst =
+			state.security.pending !== null ||
+			state.redacting ||
+			!signsInOneVersion(state.dirty, state.signatures.fields.length > 0, deps.fileSize(), deps.memory)
+
+		if (saveFirst) {
 			deps.onSaveChangesFirst()
 
 			if (!(await deps.save(null))) return false

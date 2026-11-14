@@ -1442,6 +1442,7 @@ export function PreviewOverlay({
 		}
 
 		if (outcome.status === "error") {
+			void edits.abandon?.()
 			setSaving(false)
 			remote.saveSettled(null)
 			toast.error(errorLabel(outcome.dto))

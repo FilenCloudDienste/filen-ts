@@ -32,7 +32,7 @@ describe("planSave", () => {
 			const plan = planSave(input({ changes }))
 
 			expect(plan.mode).toBe("full")
-			expect(plan.options).toContain("garbage=compact")
+			expect(plan.options).toContain("garbage=yes")
 			expect(plan.options).not.toContain("incremental")
 			expect(plan.refuse).toBeNull()
 			expect(plan.invalidates).toEqual([])

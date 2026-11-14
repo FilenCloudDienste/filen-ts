@@ -1,12 +1,16 @@
-import { OCR_BATCH_PAGES, ocrOverlayMatrix, type OcrMatrix } from "../../../core/pdfedit/ocrGeometry"
+import type { PdfMatrix } from "../../../core/pdfedit/matrix"
+import { OCR_BATCH_PAGES, ocrOverlayMatrix } from "../../../core/pdfedit/ocrGeometry"
 import type { OcrPageEdit } from "./page"
 import type { OcrPageResult, OcrRecogniseArgs } from "./protocol"
 
 // Text recognition over many pages, independent of where each step runs: the engine renders pages (in batches of
 // OCR_BATCH_PAGES, its store emptied after each), the recognisers read them (one per worker, each busy with one page
 // at a time), and the engine lays each page's text over it as soon as it is read (one journal operation per page).
-// Each rendered page's pixels go to exactly one recogniser and are transferred, never copied. With `exclusive` a
-// batch is recognised only after it was rendered (one heavy worker busy at a time, for small-memory devices).
+// Each rendered page's pixels go to exactly one recogniser and are transferred, never copied. Rendering runs ahead of
+// recognition, across batches too, by at most one page per recogniser waiting for it: the engine renders the next page
+// while the recognisers read, and rendered pixels never pile up. With `exclusive` a batch is recognised only after it was
+// rendered and the next batch rendered only after it was read (one heavy worker busy at a time, for small-memory
+// devices).
 
 export interface OcrRenderedPage {
 	readonly pixels: Uint8Array<ArrayBuffer>
@@ -14,7 +18,7 @@ export interface OcrRenderedPage {
 	readonly height: number
 	readonly stride: number
 	readonly dpi: number
-	readonly pixelToPage: OcrMatrix
+	readonly pixelToPage: PdfMatrix
 }
 
 export type OcrPageOutcome =
@@ -70,8 +74,29 @@ export async function runOcrPages(pipeline: OcrPipeline): Promise<OcrRunReport> 
 		else next(recognise)
 	}
 
+	// Rendered pages no recogniser has taken yet, and the render waiting for one of them to be taken.
+	const ahead = pipeline.recognisers.length
+	let queued = 0
+	let room: (() => void) | null = null
+	const taken = (): void => {
+		queued--
+		room?.()
+		room = null
+	}
+	const roomToRender = (): Promise<void> =>
+		queued < ahead
+			? Promise.resolve()
+			: new Promise(resolve => {
+					room = resolve
+				})
+
 	const read = async (page: number, rendered: OcrRenderedPage): Promise<void> => {
+		queued++
+
 		const recognise = await acquire()
+
+		taken()
+
 		let result: OcrPageResult
 
 		try {
@@ -106,12 +131,16 @@ export async function runOcrPages(pipeline: OcrPipeline): Promise<OcrRunReport> 
 		}
 	}
 
+	const exclusive = pipeline.exclusive === true
+	const reading: Promise<void>[] = []
+
 	for (let at = 0; at < pipeline.pages.length && !aborted(); at += OCR_BATCH_PAGES) {
 		const batch = pipeline.pages.slice(at, at + OCR_BATCH_PAGES)
 		const rendered: { readonly page: number; readonly value: OcrRenderedPage }[] = []
-		const reading: Promise<void>[] = []
 
 		for (const page of batch) {
+			if (!exclusive) await roomToRender()
+
 			if (aborted()) break
 
 			pipeline.onPage?.(page, null)
@@ -119,7 +148,7 @@ export async function runOcrPages(pipeline: OcrPipeline): Promise<OcrRunReport> 
 			try {
 				const value = await pipeline.render(page)
 
-				if (pipeline.exclusive === true) rendered.push({ page, value })
+				if (exclusive) rendered.push({ page, value })
 				else reading.push(read(page, value))
 			} catch (error) {
 				settle({ page, status: "failed", reason: reasonOf(error) })
@@ -128,10 +157,10 @@ export async function runOcrPages(pipeline: OcrPipeline): Promise<OcrRunReport> 
 
 		await pipeline.flush().catch(() => undefined)
 
-		for (const { page, value } of rendered) reading.push(read(page, value))
-
-		await Promise.all(reading)
+		if (exclusive) await Promise.all(rendered.map(({ page, value }) => read(page, value)))
 	}
+
+	await Promise.all(reading)
 
 	return { outcomes, cancelled: aborted() || outcomes.length < pipeline.pages.length }
 }

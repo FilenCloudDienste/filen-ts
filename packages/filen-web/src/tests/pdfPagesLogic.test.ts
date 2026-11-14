@@ -14,7 +14,7 @@ import {
 	toggleSelection
 } from "@/features/pdf/pages/organise.logic"
 import { batchCopyNames, extractSuffix, partSuffix } from "@/features/pdf/pages/names"
-import { PageThumbnails, type ThumbnailBitmap } from "@/features/pdf/pages/thumbnails"
+import { PageThumbnails, thumbnailWindow, type ThumbnailBitmap } from "@/features/pdf/pages/thumbnails"
 import { previewPdfPages } from "@/locales/en/previewPdf/pages"
 
 // The pages rail's selection, its announcements, the Extract and Split plans, new files' names and the thumbnail
@@ -177,5 +177,20 @@ describe("thumbnail window", () => {
 		})
 		thumbnails.dispose()
 		expect(signals[1]?.aborted).toBe(true)
+	})
+})
+
+describe("thumbnailWindow", () => {
+	// Mounted pages 3–9, pages 4–7 in view first, then the overscan nearest first.
+	const MOUNTED = [4, 5, 6, 7, 8, 3, 9]
+
+	it("asks for every mounted page of a document held whole", () => {
+		expect(thumbnailWindow(MOUNTED, 4, null)).toEqual(MOUNTED)
+	})
+
+	it("sparing, asks for the pages in view next to the page shown, and every page in view once explored", () => {
+		expect(thumbnailWindow(MOUNTED, 4, { current: 5, explored: false })).toEqual([4, 5, 6])
+		expect(thumbnailWindow(MOUNTED, 4, { current: 20, explored: false })).toEqual([])
+		expect(thumbnailWindow(MOUNTED, 4, { current: 20, explored: true })).toEqual([4, 5, 6, 7])
 	})
 })

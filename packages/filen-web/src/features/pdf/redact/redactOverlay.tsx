@@ -1,4 +1,4 @@
-import { useEffect, useEffectEvent, useState, type KeyboardEvent, type PointerEvent } from "react"
+import { useEffect, useEffectEvent, useId, useState, type KeyboardEvent, type PointerEvent } from "react"
 import { useTranslation } from "react-i18next"
 import type { PdfQuad } from "@filen/office/core/pdfedit/annotations"
 import type { PdfTextGeometryLine } from "@filen/office/dom/pdfedit"
@@ -17,6 +17,7 @@ import {
 } from "@filen/office/react/pdfedit/tools"
 import { placementPosition } from "@filen/office/react/pdfedit"
 import { useToolSession } from "@/features/pdf/session/useToolSession"
+import { useAnnouncement } from "@/features/pdf/tools/liveRegion"
 import type { PdfToolOverlayProps } from "@/features/pdf/tools/registry"
 import { pageSpaceBox, toBoxStyle, toPageSpace, type PageRect } from "@/features/pdf/redact/redactOverlay.logic"
 
@@ -60,6 +61,7 @@ function Draft({ props, rect }: { props: PdfToolOverlayProps; rect: PageRect }) 
 export function RedactAreaOverlay(props: PdfToolOverlayProps) {
 	const { t } = useTranslation("preview")
 	const [state, setState] = useState<RectToolState>(RECT_TOOL_IDLE)
+	const hintId = useId()
 	const draft = rectToolDraft(state)
 	const box = pageSpaceBox(props.viewport)
 
@@ -98,11 +100,14 @@ export function RedactAreaOverlay(props: PdfToolOverlayProps) {
 					{ width: box[2], height: box[3] }
 				)
 
+	useAnnouncement(props.context.swap, position === null ? null : t("previewPdfPlacementPosition", position))
+
 	return (
 		<div
 			role="group"
 			tabIndex={0}
 			aria-label={t("previewPdfRedactAreaSurface", { page: props.page + 1 })}
+			aria-describedby={hintId}
 			className="absolute inset-0 cursor-crosshair touch-none outline-none focus-visible:ring-3 focus-visible:ring-ring/30"
 			onPointerDown={event => {
 				if (event.button !== 0) return
@@ -127,15 +132,12 @@ export function RedactAreaOverlay(props: PdfToolOverlayProps) {
 					rect={draft.rect}
 				/>
 			)}
-			{position === null ? null : (
-				<span
-					className="sr-only"
-					role="status"
-					aria-live="polite"
-				>
-					{t("previewPdfPlacementPosition", position)}
-				</span>
-			)}
+			<span
+				id={hintId}
+				hidden
+			>
+				{t("previewPdfAnnotPlacementHint")}
+			</span>
 		</div>
 	)
 }

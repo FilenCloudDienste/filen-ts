@@ -2,9 +2,10 @@
 // was redacted (the manifest), why a check failed, term matching, the find presets, and the geometry both sides agree
 // on. Coordinates are MuPDF page space (points, origin top left, y down), the space annotations and stext use.
 
+import { invertMatrix, transformPoint, type PdfMatrix } from "./matrix"
+
 export type RedactRect = readonly [number, number, number, number]
 export type RedactQuad = readonly [number, number, number, number, number, number, number, number]
-export type RedactMatrix = readonly [number, number, number, number, number, number]
 
 // "text": marked characters (quads); drawings are removed only where fully covered. "area": a drawn rectangle;
 // drawings it touches are removed whole. "page": the whole page, as an area.
@@ -38,6 +39,10 @@ export interface RedactionManifest {
 	readonly regions: readonly RedactionRegion[]
 	// Each must have no match anywhere in the file.
 	readonly terms: readonly RedactionTerm[]
+	// The words the marks covered (coveredWords): none may remain in a text alternative of the structure tree, where
+	// tags would spell out what the pages no longer draw. Not searched elsewhere: a word may still be on a page
+	// outside the marks.
+	readonly hidden?: readonly RedactionTerm[]
 	// Sanitize ran: no metadata, attachments, scripts or page-piece data may remain.
 	readonly sanitized: boolean
 	// Annotations over marks were removed, so the ones left must not draw into a mark.
@@ -67,8 +72,9 @@ export type RedactionFailure =
 export type RedactionVerdict = { readonly ok: true } | { readonly ok: false; readonly failure: RedactionFailure }
 
 // Write options for a redacted file: a full rewrite without unused objects, so no earlier revision or orphaned
-// original survives. The host adds its encryption option.
-export const REDACTION_SAVE_OPTIONS = "garbage=compact,compress,objstms"
+// original survives; never renumbered (savePlan.ts PDF_FULL_SAVE_OPTIONS: the document goes on after a copy or a
+// failed check). The host adds its encryption option.
+export const REDACTION_SAVE_OPTIONS = "garbage=yes,compress,objstms"
 
 // ——— Geometry ———
 
@@ -111,40 +117,8 @@ export function intersectRects(left: RedactRect, right: RedactRect): RedactRect 
 	return out[0] < out[2] && out[1] < out[3] ? out : null
 }
 
-// Apply `first`, then `second` (row vectors, as PDF and MuPDF).
-export function concatMatrix(first: RedactMatrix, second: RedactMatrix): RedactMatrix {
-	return [
-		first[0] * second[0] + first[1] * second[2],
-		first[0] * second[1] + first[1] * second[3],
-		first[2] * second[0] + first[3] * second[2],
-		first[2] * second[1] + first[3] * second[3],
-		first[4] * second[0] + first[5] * second[2] + second[4],
-		first[4] * second[1] + first[5] * second[3] + second[5]
-	]
-}
-
-export function invertMatrix(matrix: RedactMatrix): RedactMatrix | null {
-	const [a, b, c, d, e, f] = matrix
-	const determinant = a * d - b * c
-
-	if (Math.abs(determinant) < 1e-12) return null
-
-	return [
-		d / determinant,
-		-b / determinant,
-		-c / determinant,
-		a / determinant,
-		(c * f - d * e) / determinant,
-		(b * e - a * f) / determinant
-	]
-}
-
-export function transformPoint(matrix: RedactMatrix, x: number, y: number): readonly [number, number] {
-	return [matrix[0] * x + matrix[2] * y + matrix[4], matrix[1] * x + matrix[3] * y + matrix[5]]
-}
-
 // The quad of a rectangle under a matrix (corners in rectangle order: x0y0, x1y0, x0y1, x1y1).
-export function transformRectQuad(matrix: RedactMatrix, rect: RedactRect): RedactQuad {
+export function transformRectQuad(matrix: PdfMatrix, rect: RedactRect): RedactQuad {
 	const [ax, ay] = transformPoint(matrix, rect[0], rect[1])
 	const [bx, by] = transformPoint(matrix, rect[2], rect[1])
 	const [cx, cy] = transformPoint(matrix, rect[0], rect[3])
@@ -153,7 +127,7 @@ export function transformRectQuad(matrix: RedactMatrix, rect: RedactRect): Redac
 	return [ax, ay, bx, by, cx, cy, dx, dy]
 }
 
-export function transformRect(matrix: RedactMatrix, rect: RedactRect): RedactRect {
+export function transformRect(matrix: PdfMatrix, rect: RedactRect): RedactRect {
 	return quadBounds(transformRectQuad(matrix, rect))
 }
 
@@ -219,7 +193,7 @@ export function quadOverlapsRect(quad: RedactQuad, rect: RedactRect): boolean {
 // up to half the em. MuPDF removes a glyph when its box less 10 % at each side touches a mark; the smaller core keeps
 // the check from failing on a neighbour that a mark only grazes, and every glyph that is substantially inside is
 // still caught. `trm` maps glyph space (1 unit = 1 em) to page space.
-export function glyphCore(trm: RedactMatrix, advance: number, vertical: boolean): RedactQuad {
+export function glyphCore(trm: PdfMatrix, advance: number, vertical: boolean): RedactQuad {
 	if (vertical) {
 		const extent = Math.max(advance, 0.1)
 
@@ -238,7 +212,7 @@ export function glyphCore(trm: RedactMatrix, advance: number, vertical: boolean)
 // returning false stops. `ctm` is the image matrix as a MuPDF device receives it: the unit square with pixel row 0
 // at y = 0. Pixels only touching along an edge do not count.
 export function forEachCoveredPixel(
-	ctm: RedactMatrix,
+	ctm: PdfMatrix,
 	width: number,
 	height: number,
 	rect: RedactRect,
@@ -344,6 +318,49 @@ export function matchTerm(text: string, term: RedactionTerm, folded?: string): T
 	}
 
 	return matches
+}
+
+// Shortest word a redaction's covered text adds to the manifest's hidden terms: shorter ones are too common to prove
+// anything by their absence.
+export const MIN_HIDDEN_WORD = 4
+// Most hidden terms a manifest carries (the longest kept), the most terms the verifier is handed.
+export const MAX_HIDDEN_TERMS = 1000
+
+const EDGE_PUNCTUATION = /^[\p{P}\p{S}]+|[\p{P}\p{S}]+$/gu
+
+// The words of a page's text that its marks covered, read before they were applied: each word (split on white space,
+// edge punctuation trimmed) of every run of covered characters, at least MIN_HIDDEN_WORD long. `covered[i]` tells
+// whether UTF-16 unit `i` of `text` lies under a mark.
+export function coveredWords(text: string, covered: readonly boolean[]): string[] {
+	const words = new Set<string>()
+	let run = ""
+	const flush = (): void => {
+		for (const part of run.split(/\s+/u)) {
+			const word = part.replace(EDGE_PUNCTUATION, "")
+
+			if ([...word].length >= MIN_HIDDEN_WORD) words.add(word)
+		}
+
+		run = ""
+	}
+
+	for (let index = 0; index < text.length; index++) {
+		if (covered[index] === true) run += text[index]
+		else flush()
+	}
+
+	flush()
+
+	return [...words]
+}
+
+// The manifest's hidden terms for covered words: each matched as a whole word, case and all, the longest kept up to
+// MAX_HIDDEN_TERMS.
+export function hiddenTerms(words: Iterable<string>): RedactionTerm[] {
+	return [...new Set(words)]
+		.sort((left, right) => right.length - left.length || (left < right ? -1 : 1))
+		.slice(0, MAX_HIDDEN_TERMS)
+		.map(text => ({ text, matchCase: true, wholeWord: true }))
 }
 
 // A term with at least one character that is not whitespace.

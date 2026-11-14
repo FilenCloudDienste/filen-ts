@@ -369,7 +369,8 @@ describe("presentation refused actions", () => {
 		expect(screen.getByRole("button", { name: "Play media" })).toBeTruthy()
 		expect(screen.queryByRole("button", { name: "3" })).toBeNull()
 		fireEvent.click(await screen.findByRole("button", { name: "Run, an action that can't run here" }))
-		expect(screen.getByRole("status").textContent).toContain("This action can't run here.")
+		// Its own status (the slide rail keeps an empty live region of its own beside it).
+		expect(screen.getAllByRole("status").map(status => status.textContent)).toContain("This action can't run here.")
 	})
 })
 

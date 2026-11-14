@@ -4,7 +4,8 @@ import type { ActionDef, PlatformDefault, ShortcutDescriptionKey } from "@/lib/k
 // The PDF editor's keys (section pdfEditor): its own (undo, redo, delete, Escape, page rotate) and every tool's. The
 // viewer's keys stay as they are once the editor has the document (zoom, fit, view rotate Mod+] / Mod+[, the pages
 // incl. N and P, full screen F); Save is preview.save (Mod+S), Print office.print (Mod+P). Page rotate turns the pages
-// in the file, Acrobat's Mod+Alt+] / Mod+Alt+[ beside the view's keys; redo is Mod+Shift+Z, plus Ctrl+Y off a Mac.
+// in the file with Mod+Alt+] / Mod+Alt+[, the usual PDF editor keys, beside the view's; redo is Mod+Shift+Z, plus Ctrl+Y
+// off a Mac.
 export type PdfEditorAction = "pdf.undo" | "pdf.redo" | "pdf.delete" | "pdf.escape" | "pdf.rotatePagesCw" | "pdf.rotatePagesCcw"
 
 type Def<Id extends string> = ActionDef & { readonly id: Id }

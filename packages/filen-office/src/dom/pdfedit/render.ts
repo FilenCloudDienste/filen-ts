@@ -1,6 +1,7 @@
 import type * as Mupdf from "mupdf"
 import type { MupdfModule, PdfPrintRender, PdfTile } from "./protocol"
 import { drawPendingRedactions } from "./redact/print"
+import { PDF_HEAP_BASELINE } from "../../core/pdfedit/budget"
 
 // Tile rendering from a cached display list per page: zooming and panning re-run the list without interpreting the
 // page's content again. A tile is an opaque white pixmap of just its rectangle, drawn by a DrawDevice and copied once
@@ -13,6 +14,25 @@ export const PDF_TILE_MOBILE = 512
 
 // Display lists kept: the pages in view and their neighbours; others are rebuilt when they come back.
 const DEFAULT_LISTS = 8
+
+// The resource store (decoded images, fonts) levels off at about 92 MiB above a fresh heap (budget.ts). Below that the
+// store lives in memory the heap already holds, and clearing it only costs decoding again; above it the heap has grown
+// for other work (a save, an edit), and space the store gives back is reused instead of growing the heap further.
+// Checked at most once a second while pages leave the view, never per eviction, and inside the request that evicts (no
+// timer runs between a request's steps).
+const STORE_LEVEL = 92 * 1024 * 1024
+export const PDF_STORE_SHRINK_HEAP_BYTES = PDF_HEAP_BASELINE + STORE_LEVEL
+export const PDF_STORE_SHRINK_INTERVAL_MS = 1000
+
+// The wasm memory's size in bytes (its high-water mark: wasm memory never shrinks).
+export function wasmHeapBytes(mupdf: MupdfModule): number {
+	const probe = new mupdf.Buffer()
+	const bytes = probe.asUint8Array().buffer.byteLength
+
+	probe.destroy()
+
+	return bytes
+}
 
 export interface RenderedTile {
 	readonly rgba: Uint8ClampedArray<ArrayBuffer>
@@ -36,11 +56,14 @@ export class TileRenderer {
 		readonly list: Mupdf.DisplayList
 		readonly bounds: Mupdf.Rect
 	} | null = null
+	private readonly now: () => number
+	private lastShrinkCheck = Number.NEGATIVE_INFINITY
 
-	constructor(mupdf: MupdfModule, document: Mupdf.PDFDocument, maxLists = DEFAULT_LISTS) {
+	constructor(mupdf: MupdfModule, document: Mupdf.PDFDocument, maxLists = DEFAULT_LISTS, now: () => number = Date.now) {
 		this.mupdf = mupdf
 		this.document = document
 		this.maxLists = Math.max(1, maxLists)
+		this.now = now
 	}
 
 	private list(page: number): { readonly list: Mupdf.DisplayList; readonly bounds: Mupdf.Rect } {
@@ -123,10 +146,36 @@ export class TileRenderer {
 		return { ctm, size: [Math.ceil(box[2] - box[0]), Math.ceil(box[3] - box[1])] }
 	}
 
-	// A tile of the page; `print`: as printed (printList).
-	render(page: number, scale: number, rotation: PdfRotation, tile: PdfTile, print?: PdfPrintRender): RenderedTile {
-		const { mupdf } = this
+	// A tile of the page; `print`: as printed (printList); `once`: a page drawn once (a thumbnail), straight from the page
+	// unless its list is held, so the lists of the pages in view are neither evicted nor reordered.
+	render(page: number, scale: number, rotation: PdfRotation, tile: PdfTile, print?: PdfPrintRender, once = false): RenderedTile {
+		if (print === undefined && once) {
+			const held = this.lists.get(page)
+
+			if (held !== undefined) return this.draw(held.list, held.bounds, scale, rotation, tile)
+
+			const loaded = this.document.loadPage(page)
+
+			try {
+				return this.draw(loaded, loaded.getBounds(), scale, rotation, tile)
+			} finally {
+				loaded.destroy()
+			}
+		}
+
 		const { list, bounds } = print === undefined ? this.list(page) : this.printList(page, print)
+
+		return this.draw(list, bounds, scale, rotation, tile)
+	}
+
+	private draw(
+		source: { run(device: Mupdf.Device, matrix: Mupdf.Matrix): void },
+		bounds: Mupdf.Rect,
+		scale: number,
+		rotation: PdfRotation,
+		tile: PdfTile
+	): RenderedTile {
+		const { mupdf } = this
 		const { ctm, size } = this.transform(bounds, scale, rotation)
 		const x0 = Math.max(0, Math.floor(tile[0]))
 		const y0 = Math.max(0, Math.floor(tile[1]))
@@ -146,7 +195,7 @@ export class TileRenderer {
 
 		const device = new mupdf.DrawDevice(mupdf.Matrix.identity, pixmap)
 
-		list.run(device, ctm)
+		source.run(device, ctm)
 		device.close()
 		device.destroy()
 
@@ -181,8 +230,19 @@ export class TileRenderer {
 			}
 		}
 
-		// Half of the resource store (decoded images, fonts) the dropped pages may have kept.
-		if (dropped) this.mupdf.shrinkStore(50)
+		if (dropped) this.shrinkStore()
+	}
+
+	// Half of the resource store the dropped pages may have kept, only when the heap has grown past what the store fits
+	// in, and checked at most once an interval.
+	private shrinkStore(): void {
+		const now = this.now()
+
+		if (now - this.lastShrinkCheck < PDF_STORE_SHRINK_INTERVAL_MS) return
+
+		this.lastShrinkCheck = now
+
+		if (wasmHeapBytes(this.mupdf) >= PDF_STORE_SHRINK_HEAP_BYTES) this.mupdf.shrinkStore(50)
 	}
 
 	destroy(): void {

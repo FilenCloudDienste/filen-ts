@@ -1,5 +1,7 @@
 import type { PDFDocument, PDFObject } from "mupdf"
+import { signedEnd } from "../../core/pdfsign/byteRange"
 import { certificationLevel, type PdfCertificationLevel, type PdfFieldLock } from "../../core/pdfsign/policy"
+import type { PdfSignatureFieldHint } from "../pdf/signatureFields"
 
 // Reading a document's form through MuPDF's object access: the AcroForm field tree, signature dictionaries and what
 // they lock. Shared by the signature verifier and the editor (no CMS or crypto here).
@@ -227,6 +229,47 @@ export function certificationOf(document: PDFDocument, first: SignatureField | u
 	return null
 }
 
+// Where a signature's signed bytes end, or null when its ByteRange cannot be read.
+export function signatureEnd(signature: SignatureField): number | null {
+	const range = numberArray(ref(signature.value, "ByteRange"))
+
+	return range?.length === 4 ? signedEnd([range[0] ?? 0, range[1] ?? 0, range[2] ?? 0, range[3] ?? 0]) : null
+}
+
+// Signatures by where their signed bytes end (an unreadable ByteRange sorts last, past a file of `length` bytes).
+export function signedOrder(fields: readonly SignatureField[], length: number): SignatureField[] {
+	const ends = new Map(fields.map(field => [field, signatureEnd(field) ?? length + 1]))
+
+	return [...fields].sort((a, b) => (ends.get(a) ?? 0) - (ends.get(b) ?? 0))
+}
+
+// The certification (DocMDP) as the first signature signed it: read from the catalog and signature dictionary of the
+// revision it signed, never from a later revision's, which anyone can write. `openRevision` opens the byte prefix
+// [0, length) of the file as its own document (destroyed here). Throws when that revision cannot be opened or read.
+export function signedCertification(
+	document: PDFDocument,
+	first: SignatureField | undefined,
+	length: number,
+	openRevision: (length: number) => PDFDocument
+): PdfCertificationLevel | null {
+	if (first === undefined) return null
+
+	const end = signatureEnd(first)
+
+	// No earlier revision to read: the signature covers the whole file (or no file at all).
+	if (end === null || end >= length) return certificationOf(document, first)
+
+	const revision = openRevision(end)
+
+	try {
+		const value = first.valueNum === null ? first.value : deref(revision.newIndirect(first.valueNum))
+
+		return certificationOf(revision, { ...first, value })
+	} finally {
+		revision.destroy()
+	}
+}
+
 export function fieldType(dict: PDFObject): string | null {
 	let current = dict
 
@@ -242,6 +285,27 @@ export function fieldType(dict: PDFObject): string | null {
 }
 
 // The signed signature fields (a /Sig field with a value dictionary), in field order.
+// The signatures as hints (pdf.js's shape): each signed field's own name and byte range, for a file of `length`
+// bytes. Fields whose range or contents could not have been signed are left out, as pdf.js leaves them out.
+export function signatureFieldHints(fields: readonly SignatureField[], length: number): PdfSignatureFieldHint[] {
+	const hints: PdfSignatureFieldHint[] = []
+
+	for (const field of fields) {
+		const range = numberArray(ref(field.value, "ByteRange"))
+		const contents = deref(ref(field.value, "Contents"))
+
+		if (range?.length !== 4 || range.some(value => !Number.isSafeInteger(value) || value < 0)) continue
+
+		const [a = 0, b = 0, c = 0, d = 0] = range
+
+		if (a !== 0 || b <= 0 || a + b > c || c + d > length || !contents.isString() || contents.asByteString().length === 0) continue
+
+		hints.push({ name: field.partialName, byteRange: [a, b, c, d] })
+	}
+
+	return hints
+}
+
 export function signatureFieldsOf(document: PDFDocument, fields: readonly FieldRecord[]): SignatureField[] {
 	const pages = lazyPages(document)
 	const signatures: SignatureField[] = []

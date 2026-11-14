@@ -9,7 +9,7 @@ import { DriveFilePickerDialog } from "@/features/drive/components/driveFilePick
 import { useCommentAuthor } from "@/features/office/components/commentAuthor"
 import { applied, placeDrivePicture, placePicture, postComment } from "@/features/pdf/annotations/annotationActions"
 import { annotationStoreOf, editingSession } from "@/features/pdf/annotations/annotationStore"
-import { downloadAttachment } from "@/features/pdf/annotations/attachments"
+import { downloadAttachmentTold } from "@/features/pdf/annotations/attachments"
 import { PdfCommentsPanel } from "@/features/pdf/comments/pdfCommentsPanel"
 import type { PdfToolPanelProps } from "@/features/pdf/tools/registry"
 import { isStampPicture } from "@/features/pdf/annotations/stampImage"
@@ -74,6 +74,7 @@ export function PdfAnnotationsHost({ context, phone }: PdfToolPanelProps) {
 
 	const selected = state.selected
 	const composing = state.composing
+	const attachmentWords = { failed: t("previewPdfAnnotAttachmentFailed"), missing: t("previewPdfAnnotAttachmentMissing") }
 	const attachments = state.attachmentsOpen ? store.attachments() : null
 
 	return (
@@ -193,7 +194,7 @@ export function PdfAnnotationsHost({ context, phone }: PdfToolPanelProps) {
 										onClick={() => {
 											const live = editingSession(context.swap)
 
-											if (live !== null) void downloadAttachment(live, entry.source).catch(() => undefined)
+											if (live !== null) void downloadAttachmentTold(live, entry.source, attachmentWords)
 										}}
 									>
 										<DownloadIcon />

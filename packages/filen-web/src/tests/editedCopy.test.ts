@@ -114,13 +114,25 @@ describe("writeEditedCopy", () => {
 		expect(warmUploadThumbnail).toHaveBeenCalledTimes(1)
 	})
 
-	it("closes a port whose names cannot be read, so its writer never blocks", async () => {
+	it("tells the writer of a port whose names cannot be read that nothing comes, so it never blocks", async () => {
 		takenNames.mockRejectedValue(new Error("offline"))
-		const { port1 } = new MessageChannel()
+		const { port1, port2 } = new MessageChannel()
 		const close = vi.spyOn(port1, "close")
+		// Closing a port tells its other end nothing: the save port's abort does.
+		const told = new Promise<unknown>(resolve => {
+			port2.addEventListener("message", (event: MessageEvent<Record<string, unknown>>) => {
+				if (event.data["filen.savePort"] === "abort") resolve(event.data)
+			})
+			port2.start()
+		})
 
 		await expect(writeEditedCopy(item(), { port: port1, size: 10 }, "pdf", suffix)).rejects.toThrow("offline")
-		expect(close).toHaveBeenCalledTimes(1)
+		expect(await told).toMatchObject({ "filen.savePort": "abort", reason: "cancelled" })
+		// Acknowledged, the aborting end closes.
+		port2.postMessage({ "filen.savePort": "closed" })
+		await vi.waitFor(() => {
+			expect(close).toHaveBeenCalledTimes(1)
+		})
 		expect(sdk.uploadFileFromPort).not.toHaveBeenCalled()
 	})
 })

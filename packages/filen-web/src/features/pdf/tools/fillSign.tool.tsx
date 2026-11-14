@@ -10,6 +10,8 @@ import {
 import type { FillSignMode } from "@/features/pdf/fillSign/fillSign.logic"
 import { toolEnabled, whileActive, type PdfTool, type PdfToolOverlayProps } from "@/features/pdf/tools/registry"
 import type { PreviewKey } from "@/lib/i18n"
+import type { ActionDef } from "@/lib/keymap/registry"
+import { pdfToolAction } from "@/features/pdf/lib/toolKeys"
 
 // The Fill & Sign tab's placing tools: Add text, the check / cross / dot marks, and Sign (signature, initials). Each is
 // a mode tool: its overlay makes every page shown a surface to place on (pointer or keyboard), its panel starts the
@@ -25,7 +27,9 @@ function fillSignTool(
 	toolClass: PdfToolClass,
 	command: PdfCommandName,
 	mode: FillSignMode,
-	Panel: NonNullable<PdfTool["Panel"]>
+	Panel: NonNullable<PdfTool["Panel"]>,
+	// Its letter on the page surface, if it has one.
+	key?: ActionDef
 ): PdfTool {
 	return {
 		id,
@@ -33,8 +37,8 @@ function fillSignTool(
 		labelKey,
 		icon,
 		toolClass,
-		actionIds: [],
-		actions: [],
+		actionIds: key === undefined ? [] : [key.id],
+		actions: key === undefined ? [] : [key],
 		enabledWhen: policy => toolEnabled(toolClass, policy),
 		commands: [command],
 		Overlay: (props: PdfToolOverlayProps) => (
@@ -102,7 +106,8 @@ export const FILL_SIGN_TOOLS: readonly PdfTool[] = [
 		"sign",
 		"fillSign.signature",
 		{ kind: "signature", role: "signature" },
-		FillSignSignaturePanel
+		FillSignSignaturePanel,
+		pdfToolAction("pdf.tool.sign", "s", "preview:previewPdfKeyToolSign")
 	),
 	fillSignTool(
 		"fillSign.initials",

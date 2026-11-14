@@ -1,4 +1,4 @@
-import { useEffect, useEffectEvent, useRef, useState, useSyncExternalStore, type PointerEvent as ReactPointerEvent } from "react"
+import { useEffect, useEffectEvent, useId, useRef, useState, useSyncExternalStore, type PointerEvent as ReactPointerEvent } from "react"
 import { useTranslation } from "react-i18next"
 import type { PdfAnnotationInfo, PdfPoint, PdfPresetStamp, PdfRect } from "@filen/office/core/pdfedit/annotations"
 import type { PdfCommandResult } from "@filen/office/core/pdfedit"
@@ -39,6 +39,7 @@ import {
 	type RectSize,
 	type RectToolState,
 	type SelectState,
+	type ShapeCommit,
 	type ShapeState,
 	type TextBoxCommit,
 	type TextBoxState,
@@ -47,12 +48,14 @@ import {
 } from "@filen/office/react/pdfedit/tools"
 import { PdfAnnotationPopover, type PdfAnnotationStyleChange } from "@/features/pdf/annotations/annotationPopover"
 import { annotationStoreOf, type PdfAnnotationStore } from "@/features/pdf/annotations/annotationStore"
-import { downloadAttachment } from "@/features/pdf/annotations/attachments"
+import { downloadAttachmentTold } from "@/features/pdf/annotations/attachments"
 import {
+	annotationLabel,
 	ANNOTATION_TEXT_STYLE,
 	markupKindOf,
 	placementToolKey,
 	PRESET_STAMP_SIZE,
+	readingOrder,
 	shapeKindOf,
 	stampVariantOf,
 	type AnnotationMode
@@ -65,6 +68,7 @@ import {
 	viewerAnnotationInfos,
 	type PageSpace
 } from "@/features/pdf/annotations/pageSpace.logic"
+import { useAnnouncement } from "@/features/pdf/tools/liveRegion"
 import type { PdfToolContext, PdfToolOverlayProps } from "@/features/pdf/tools/registry"
 import "@filen/office/css/pdfedit.css"
 
@@ -224,6 +228,7 @@ function AnnotationLayer({ context, page, document, variant, mode, space }: Laye
 	const viewerAnnotations = useViewerAnnotations(document, page)
 	const items = usePageText(document, page, mode === "markup")
 	const rootRef = useRef<HTMLDivElement | null>(null)
+	const hintId = useId()
 	const dropped = useRef(false)
 	const hand = useRef<{ readonly x: number; readonly y: number; readonly left: number; readonly top: number } | null>(null)
 	const [select, setSelect] = useState<SelectState>(SELECT_IDLE)
@@ -294,6 +299,25 @@ function AnnotationLayer({ context, page, document, variant, mode, space }: Laye
 			store,
 			(session, author) =>
 				session.dispatch("annotations.textBox", { ...ANNOTATION_TEXT_STYLE, page, author, rect: commit.rect, text: commit.text }),
+			finishTool
+		)
+	}
+
+	// A shape drawn with the pointer or placed from the keyboard: a line (an arrow with its head) or a rect shape.
+	const commitShape = (commit: ShapeCommit): void => {
+		made(
+			context,
+			store,
+			(session, author) =>
+				commit.kind === "Line"
+					? session.dispatch("annotations.line", {
+							page: commit.page,
+							author,
+							from: commit.from,
+							to: commit.to,
+							...(variant === "Arrow" ? { end: "OpenArrow" as const } : {})
+						})
+					: session.dispatch("annotations.shape", { page: commit.page, author, kind: commit.kind, rect: commit.rect }),
 			finishTool
 		)
 	}
@@ -453,27 +477,9 @@ function AnnotationLayer({ context, page, document, variant, mode, space }: Laye
 			}
 			case "shape": {
 				const step = shapePointer(shape, input)
-				const commit = step.commit
-
 				setShape(step.state)
 
-				if (commit === undefined) return
-
-				made(
-					context,
-					store,
-					(session, author) =>
-						commit.kind === "Line"
-							? session.dispatch("annotations.line", {
-									page: commit.page,
-									author,
-									from: commit.from,
-									to: commit.to,
-									...(variant === "Arrow" ? { end: "OpenArrow" as const } : {})
-								})
-							: session.dispatch("annotations.shape", { page: commit.page, author, kind: commit.kind, rect: commit.rect }),
-					finishTool
-				)
+				if (step.commit !== undefined) commitShape(step.commit)
 
 				return
 			}
@@ -493,7 +499,7 @@ function AnnotationLayer({ context, page, document, variant, mode, space }: Laye
 		}
 	}
 
-	// --- Keyboard placement (Enter on the page in view, arrows, Alt+arrows, Enter, Escape) ---
+	// --- Keyboard placement (Enter on the focused page or the page in view, arrows, Alt+arrows, Enter, Escape) ---
 
 	const onKey = useEffectEvent((key: ToolKey): boolean => {
 		const target = { page, box: space.box }
@@ -516,17 +522,7 @@ function AnnotationLayer({ context, page, document, variant, mode, space }: Laye
 
 				setShape(step.state)
 
-				const commit = step.commit
-
-				if (commit !== undefined && commit.kind !== "Line") {
-					made(
-						context,
-						store,
-						(session, author) =>
-							session.dispatch("annotations.shape", { page: commit.page, author, kind: commit.kind, rect: commit.rect }),
-						finishTool
-					)
-				}
+				if (step.commit !== undefined) commitShape(step.commit)
 
 				return true
 			}
@@ -596,6 +592,13 @@ function AnnotationLayer({ context, page, document, variant, mode, space }: Laye
 		setTextBox(textBoxEdit(info.page, info.id, info.rect, info.text))
 	}
 
+	// An existing annotation's accessible name: its kind, author and the start of its text.
+	const labelOf = (info: PdfAnnotationInfo): string => {
+		const label = annotationLabel(info)
+
+		return t(label.key, { kind: t(label.kind), author: label.author, text: label.text })
+	}
+
 	// --- Drawing ---
 
 	const draft: PdfToolDraft | null =
@@ -626,12 +629,37 @@ function AnnotationLayer({ context, page, document, variant, mode, space }: Laye
 	const capturing = mode !== "select"
 	const popoverBox = selected === null || select.drag !== null || mode !== "select" ? null : viewBox(space, selected.rect)
 	const toolName = t(placementToolKey(mode, variant))
+	const placing = mode === "textBox" || mode === "shape" || mode === "stamp" || mode === "note"
+
+	// The placement's position, said in the editor's live region on every step.
+	useAnnouncement(
+		context.swap,
+		placement?.page === page
+			? t("previewPdfAnnotPlacement", {
+					tool: toolName,
+					x: Math.round(placement.rect[0]),
+					y: Math.round(placement.rect[1]),
+					width: Math.round(placement.rect[2] - placement.rect[0]),
+					height: Math.round(placement.rect[3] - placement.rect[1])
+				})
+			: null
+	)
 
 	return (
 		<div
 			ref={rootRef}
-			className="absolute inset-0"
+			className={placing ? "absolute inset-0 outline-none focus-visible:ring-2 focus-visible:ring-primary" : "absolute inset-0"}
 			data-pdf-annotation-layer={mode}
+			// A placing tool's page is a focusable target: Enter on it places on this page (the surface's keys go to the
+			// focused page's layer).
+			{...(placing
+				? {
+						role: "application",
+						tabIndex: 0,
+						"aria-label": t("previewPdfAnnotPlaceOnPage", { tool: toolName, page: page + 1 }),
+						"aria-describedby": hintId
+					}
+				: {})}
 			style={{
 				pointerEvents: capturing ? "auto" : "none",
 				touchAction: capturing ? "none" : undefined,
@@ -655,12 +683,25 @@ function AnnotationLayer({ context, page, document, variant, mode, space }: Laye
 				style={pageLayerStyle(space)}
 			>
 				{mode === "select"
-					? annotations.map(info => (
+					? readingOrder(annotations).map(info => (
+							// Each annotation is reachable from the keyboard in reading order: Enter or Space selects it
+							// (then the selection's keys and its popover apply).
 							<div
 								key={info.id}
-								className="absolute"
+								role="button"
+								tabIndex={0}
+								aria-label={labelOf(info)}
+								aria-pressed={info.id === selected?.id}
+								className="absolute rounded-xs outline-none focus-visible:ring-2 focus-visible:ring-primary"
 								data-annotation={info.id}
 								data-annotation-type={info.type}
+								onKeyDown={event => {
+									if ((event.key !== "Enter" && event.key !== " ") || event.repeat) return
+
+									event.preventDefault()
+									event.stopPropagation()
+									store.select(info)
+								}}
 								style={{
 									...rectStyle(
 										info.id === selected?.id
@@ -698,13 +739,6 @@ function AnnotationLayer({ context, page, document, variant, mode, space }: Laye
 					<PdfPlacementIndicator
 						rect={placement.rect}
 						box={space.box}
-						announcement={t("previewPdfAnnotPlacement", {
-							tool: toolName,
-							x: Math.round(placement.rect[0]),
-							y: Math.round(placement.rect[1]),
-							width: Math.round(placement.rect[2] - placement.rect[0]),
-							height: Math.round(placement.rect[3] - placement.rect[1])
-						})}
 					/>
 				) : null}
 				{frameRect === null || selected === null ? null : (
@@ -782,10 +816,14 @@ function AnnotationLayer({ context, page, document, variant, mode, space }: Laye
 									downloadLabel: t("previewPdfAnnotAttachmentDownloadAny"),
 									onDownload: () => {
 										context.edit(session =>
-											downloadAttachment(session, {
-												kind: "annotation",
-												ref: { page: selected.page, id: selected.id }
-											})
+											downloadAttachmentTold(
+												session,
+												{ kind: "annotation", ref: { page: selected.page, id: selected.id } },
+												{
+													failed: t("previewPdfAnnotAttachmentFailed"),
+													missing: t("previewPdfAnnotAttachmentMissing")
+												}
+											)
 										)
 									}
 								}
@@ -793,6 +831,14 @@ function AnnotationLayer({ context, page, document, variant, mode, space }: Laye
 					/>
 				</div>
 			)}
+			{placing ? (
+				<span
+					id={hintId}
+					hidden
+				>
+					{t("previewPdfAnnotPlacementHint")}
+				</span>
+			) : null}
 		</div>
 	)
 }

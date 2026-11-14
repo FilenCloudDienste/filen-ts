@@ -8,12 +8,14 @@ import * as pkijs from "pkijs"
 
 // Generates the signed-PDF fixtures in src/tests/fixtures/pdfsign/. The PDF structure is written by hand here and
 // every signature is made by the system OpenSSL (`openssl cms -sign`, `openssl ts`), so the verifier is tested
-// against a signer that shares no code with it. Keys and certificates are generated per run and discarded.
+// against a signer that shares no code with it. Keys and certificates are generated per run and discarded. Names after
+// the OpenSSL path write only those fixtures (the others keep the keys they were signed with).
 //
-//   pnpm exec tsx src/scripts/pdfSignFixtures.ts [path/to/openssl]
+//   pnpm exec tsx src/scripts/pdfSignFixtures.ts [path/to/openssl] [fixture.pdf ...]
 
 const OUT = fileURLToPath(new URL("../tests/fixtures/pdfsign/", import.meta.url))
 const OPENSSL = process.argv[2] ?? "openssl"
+const ONLY = new Set(process.argv.slice(3))
 const CONTENTS_BYTES = 6000
 const latin1 = (text: string): Buffer => Buffer.from(text, "latin1")
 
@@ -583,6 +585,148 @@ make("shadow-hide-replace.pdf", pdf => {
 	)
 	pdf.revision([3], TRAILER)
 })
+// Shadow attack through an object missing at signing: the signed page already draws object 40, which does not exist
+// yet (null, nothing drawn); a later revision only adds it. No signed object changes.
+make("shadow-missing-object.pdf", pdf => {
+	pdf.object(3, page(PAGE_ANNOTS).replace("/Contents 4 0 R", "/Contents [4 0 R 40 0 R]"))
+	pdf.revision([3], TRAILER)
+	sign(pdf, { signer: RSA })
+	pdf.stream(40, "", "BT /F1 24 Tf 72 700 Td (Pay 1,000,000 to Mallory) Tj ET")
+	pdf.revision([40], TRAILER)
+})
+// The same through a resource: the signed page names a font object that does not exist at signing.
+make("shadow-missing-resource.pdf", pdf => {
+	pdf.object(3, page(PAGE_ANNOTS).replace("/F1 5 0 R", "/F1 41 0 R"))
+	pdf.revision([3], TRAILER)
+	sign(pdf, { signer: RSA })
+	pdf.object(41, "<< /Type /Font /Subtype /Type1 /BaseFont /Courier >>")
+	pdf.revision([41], TRAILER)
+})
+
+// ---- annotation-disguise attacks (all must be "changed, not allowed") ----
+
+const NOTE_AP = "q 1 1 0 rg 0 0 20 20 re f Q"
+
+// A note added after signing whose appearance is the page's content stream, rewritten: by the final document's roles
+// the content stream is an annotation appearance.
+make("ap-repointed-content.pdf", pdf => {
+	sign(pdf, { signer: RSA })
+
+	const note = pdf.objectCount + 1
+
+	pdf.object(note, "<< /Type /Annot /Subtype /Text /Rect [400 700 420 720] /P 3 0 R /AP << /N 4 0 R >> >>")
+	pdf.object(3, page(`[7 0 R 8 0 R ${note} 0 R]`))
+	pdf.stream(4, "", "BT /F1 24 Tf 72 760 Td (Replaced after signing) Tj ET")
+	pdf.revision([note, 3, 4], TRAILER)
+})
+// The signed page's content stream is also a signed note's appearance; a later revision rewrites it.
+make("ap-shared-with-content.pdf", pdf => {
+	const note = 20
+
+	pdf.object(note, "<< /Type /Annot /Subtype /Text /Rect [400 700 420 720] /P 3 0 R /AP << /N 4 0 R >> >>")
+	pdf.object(3, page(`[7 0 R 8 0 R ${note} 0 R]`))
+	pdf.revision([note, 3], TRAILER)
+	sign(pdf, { signer: RSA })
+	pdf.stream(4, "", "BT /F1 24 Tf 72 760 Td (Replaced after signing) Tj ET")
+	pdf.revision([4], TRAILER)
+})
+// The page's font rewritten into the shape of an annotation (/Type /Annot), with another typeface.
+make("font-type-annot.pdf", pdf => {
+	sign(pdf, { signer: RSA })
+	pdf.object(5, "<< /Type /Annot /Subtype /Type1 /BaseFont /Courier >>")
+	pdf.revision([5], TRAILER)
+})
+// The page's font given a /Rect (a /Subtype and a /Rect: an annotation by shape), with another typeface.
+make("font-rect.pdf", pdf => {
+	sign(pdf, { signer: RSA })
+	pdf.object(5, "<< /Type /Font /Subtype /Type1 /BaseFont /Courier /Rect [0 0 1 1] >>")
+	pdf.revision([5], TRAILER)
+})
+// The signed page lists its own font among its annotations; a later revision changes the font.
+make("font-listed-as-annotation.pdf", pdf => {
+	pdf.object(3, page("[7 0 R 8 0 R 5 0 R]"))
+	pdf.revision([3], TRAILER)
+	sign(pdf, { signer: RSA })
+	pdf.object(5, "<< /Type /Font /Subtype /Type1 /BaseFont /Courier >>")
+	pdf.revision([5], TRAILER)
+})
+// The page's /Contents is an indirect array; a later revision appends a stream to it (an indirect array that changed
+// is not a page's /Annots).
+make("contents-array-appended.pdf", pdf => {
+	pdf.object(20, "[4 0 R]")
+	pdf.object(3, page(PAGE_ANNOTS).replace("/Contents 4 0 R", "/Contents 20 0 R"))
+	pdf.revision([20, 3], TRAILER)
+	sign(pdf, { signer: RSA })
+
+	const added = pdf.objectCount + 1
+
+	pdf.stream(added, "", "BT /F1 24 Tf 72 700 Td (Pay 1,000,000 to Mallory) Tj ET")
+	pdf.object(20, `[4 0 R ${added} 0 R]`)
+	pdf.revision([added, 20], TRAILER)
+})
+// The page tree's root listed as a page's annotation at signing; a later revision adds a page through it.
+make("pages-listed-as-annotation.pdf", pdf => {
+	pdf.object(3, page("[7 0 R 8 0 R 2 0 R]"))
+	pdf.revision([3], TRAILER)
+	sign(pdf, { signer: RSA })
+
+	const added = pdf.objectCount + 1
+
+	pdf.object(added, "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>")
+	pdf.object(2, `<< /Type /Pages /Kids [3 0 R ${added} 0 R] /Count 2 >>`)
+	pdf.revision([added, 2], TRAILER)
+})
+
+// ---- annotation edits that stay allowed ----
+
+// A signed note (with its own appearance stream) edited after signing: its text and its appearance.
+make("approval-annotation-edited.pdf", pdf => {
+	pdf.stream(21, "/Type /XObject /Subtype /Form /BBox [0 0 20 20]", NOTE_AP)
+	pdf.object(20, "<< /Type /Annot /Subtype /Text /Rect [400 700 420 720] /Contents (A note) /P 3 0 R /AP << /N 21 0 R >> >>")
+	pdf.object(3, page("[7 0 R 8 0 R 20 0 R]"))
+	pdf.revision([21, 20, 3], TRAILER)
+	sign(pdf, { signer: RSA })
+	pdf.object(20, "<< /Type /Annot /Subtype /Text /Rect [400 700 420 720] /Contents (An edited note) /P 3 0 R /AP << /N 21 0 R >> >>")
+	pdf.stream(21, "/Type /XObject /Subtype /Form /BBox [0 0 20 20]", "q 0 0 1 rg 0 0 20 20 re f Q")
+	pdf.revision([20, 21], TRAILER)
+})
+// Certified at level 3, then annotated, then filled: two later revisions, each allowed.
+make("certified-p3-annotated-filled.pdf", pdf => {
+	sign(pdf, { signer: RSA, certify: 3, reference: docMdp(3, 1) })
+	annotate(pdf)
+	fillName(pdf, "Ada")
+})
+
+// A later revision points the trailer at a new catalog and page tree in fresh objects (a new page content) and edits
+// one annotation: object by object only the annotation changed, as the new objects are referenced from the trailer
+// alone. `certify`: the signature certified the document, and the new catalog drops its /Perms.
+function newRoot(pdf: PdfWriter, certify?: number): void {
+	sign(pdf, certify === undefined ? { signer: RSA } : { signer: RSA, certify, reference: docMdp(certify, 1) })
+
+	const root = pdf.objectCount + 1
+	const pages = root + 1
+	const shown = root + 2
+	const content = root + 3
+	const note = root + 4
+
+	pdf.stream(content, "", "BT /F1 24 Tf 72 760 Td (Pay 1,000,000 to Mallory) Tj ET")
+	pdf.object(
+		shown,
+		`<< /Type /Page /Parent ${pages} 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 5 0 R >> >> /Contents ${content} 0 R /Annots ${PAGE_ANNOTS} >>`
+	)
+	pdf.object(pages, `<< /Type /Pages /Kids [${shown} 0 R] /Count 1 >>`)
+	pdf.object(root, `<< /Type /Catalog /Pages ${pages} 0 R /AcroForm 6 0 R >>`)
+	pdf.object(note, "<< /Type /Annot /Subtype /Text /Rect [400 700 420 720] /Contents (A note) /T (Reviewer) /P 3 0 R >>")
+	pdf.object(3, page(`[7 0 R 8 0 R ${note} 0 R]`))
+	pdf.revision([content, shown, pages, root, note, 3], `/Root ${root} 0 R /Info 9 0 R /ID ${ID}`)
+}
+
+make("new-root-annotated.pdf", pdf => {
+	newRoot(pdf)
+})
+make("certified-p1-new-root.pdf", pdf => {
+	newRoot(pdf, 1)
+})
 // Bytes appended after the signed revision without an xref section (viewers repair and show them).
 make("appended-without-xref.pdf", pdf => {
 	sign(pdf, { signer: RSA })
@@ -591,7 +735,7 @@ make("appended-without-xref.pdf", pdf => {
 
 mkdirSync(OUT, { recursive: true })
 
-for (const [name, bytes] of fixtures) writeFileSync(join(OUT, name), bytes)
+for (const [name, bytes] of fixtures) if (ONLY.size === 0 || ONLY.has(name)) writeFileSync(join(OUT, name), bytes)
 
 rmSync(work, { recursive: true, force: true })
-console.log(`wrote ${fixtures.size} fixtures to ${OUT}`)
+console.log(`wrote ${ONLY.size === 0 ? fixtures.size : ONLY.size} fixtures to ${OUT}`)

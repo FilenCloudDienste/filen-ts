@@ -11,6 +11,7 @@ export {
 	type PlacementStep
 } from "./keyboardPlacement"
 export {
+	engineDocumentPermissions,
 	isMupdfDocument,
 	MupdfPdfDocument,
 	readPdfDocumentFacts,

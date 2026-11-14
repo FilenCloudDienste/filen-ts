@@ -59,6 +59,8 @@ export type PdfEngineFailure =
 	| "notAllowed"
 	// MuPDF refused it (a damaged object, an unsupported feature).
 	| "failed"
+	// The document would grow past what the editor edits in this browser's memory (core/pdfedit/budget.ts fitsEdit).
+	| "overBudget"
 
 export type PdfPermission = "print" | "printHq" | "copy" | "edit" | "annotate" | "form" | "assemble" | "accessibility"
 
@@ -124,7 +126,13 @@ export interface PdfHeapReport {
 // request table (requests.ts).
 export interface PdfEngineOps {
 	open: {
-		readonly args: { readonly channel: PdfByteChannel; readonly role: PdfEngineRole; readonly password?: string }
+		readonly args: {
+			readonly channel: PdfByteChannel
+			readonly role: PdfEngineRole
+			readonly password?: string
+			// The edit role's memory profile (what it lets the document grow to); the desktop one when absent.
+			readonly memory?: PdfMemoryProfile
+		}
 		readonly value: PdfOpenResult
 	}
 	authenticate: { readonly args: { readonly password: string }; readonly value: PdfOpenResult }
@@ -140,6 +148,9 @@ export interface PdfEngineOps {
 		readonly args: { readonly fields: readonly PdfSignatureFieldHint[] | null }
 		readonly value: PdfSignatureReport
 	}
+	// The signatures of the file as it now is, as this engine reads them: the hints for a file pdf.js never read (one
+	// the editor wrote). Served with verifySignatures (signatureHintsRequest).
+	signatureHints: { readonly args: Record<string, never>; readonly value: readonly PdfSignatureFieldHint[] }
 	// --- The edit role ---
 	// The document as the editor reports it.
 	state: { readonly args: Record<string, never>; readonly value: PdfEditState }
@@ -152,7 +163,8 @@ export interface PdfEngineOps {
 	}
 	// The form's required fields still empty (the warning on save): how many, and the first in page order.
 	requiredFields: { readonly args: Record<string, never>; readonly value: PdfRequiredFields }
-	undo: { readonly args: Record<string, never>; readonly value: PdfCommandResult }
+	// `steps` back at once (1 when absent): through the journal where it can, else one rebuild.
+	undo: { readonly args: { readonly steps?: number }; readonly value: PdfCommandResult }
 	redo: { readonly args: Record<string, never>; readonly value: PdfCommandResult }
 	// A save: planned (core/pdfedit/savePlan.ts), then written into the heap and held there until saveEnd.
 	saveBegin: {

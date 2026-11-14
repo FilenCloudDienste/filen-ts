@@ -3,7 +3,7 @@ import { NoteOverlay } from "@/features/pdf/annotations/annotationOverlays"
 import { placingKey } from "@/features/pdf/annotations/annotationKeys"
 import { annotationStoreOf } from "@/features/pdf/annotations/annotationStore"
 import { pdfToolAction } from "@/features/pdf/lib/toolKeys"
-import { toolEnabled, type PdfPolicyState, type PdfTool, type PdfToolVerdict } from "@/features/pdf/tools/registry"
+import { editorUnavailable, toolEnabled, type PdfPolicyState, type PdfTool, type PdfToolVerdict } from "@/features/pdf/tools/registry"
 
 // Home › Comment (C): a click (or Enter on the page in view) places a sticky note, written in the Comments panel. The
 // Comments button shows every thread (replies, resolve, edit, delete); Attachments lists the files the document carries,
@@ -11,7 +11,7 @@ import { toolEnabled, type PdfPolicyState, type PdfTool, type PdfToolVerdict } f
 
 // Reading needs the editor's engine, which reads the file from Filen.
 function readable(policy: PdfPolicyState): PdfToolVerdict {
-	return policy.online ? { enabled: true } : { enabled: false, reasonKey: "previewPdfToolOffline" }
+	return editorUnavailable(policy) ?? { enabled: true }
 }
 
 export const NOTE_TOOL: PdfTool = {

@@ -4,21 +4,15 @@
 export const previewPdfRedaction = {
 	/** Label of the Redact mode controls (Protect tab of the PDF editor) */
 	previewPdfRedactMode: "Redact",
+	/** Accessible name of the Redact tools' side panel (Find & redact, the marks waiting to be applied, Apply redactions…) */
+	previewPdfRedactPanel: "Redaction",
 	/** Redact mode button: drag a rectangle on the page to mark everything inside it */
 	previewPdfRedactArea: "Area",
-	/** Tooltip of the Area button */
-	previewPdfRedactAreaHint: "Mark an area of the page for redaction",
 	/** Redact mode button: select text on the page to mark it */
 	previewPdfRedactText: "Text",
-	/** Tooltip of the Text button */
-	previewPdfRedactTextHint: "Select text to mark it for redaction",
 	/** Redact mode button opening the Find & redact panel */
 	previewPdfRedactFind: "Find & redact",
-	/** Tooltip of the Find & redact button */
-	previewPdfRedactFindHint: "Find words or phrases and mark every match",
 
-	/** Title of the Find & redact panel */
-	previewPdfFindRedactTitle: "Find & redact",
 	/** Label of the input adding a word or phrase to search for (matched literally, never as a pattern) */
 	previewPdfFindRedactTermLabel: "Words or phrases",
 	/** Placeholder of that input */
@@ -47,8 +41,8 @@ export const previewPdfRedaction = {
 	previewPdfFindRedactResults_other: "{{count}} matches",
 	/** Shown when the search found nothing */
 	previewPdfFindRedactNoResults: "No matches.",
-	/** Location of a match in the results list. {{page}} is the 1-based page number */
-	previewPdfFindRedactResultPage: "Page {{page}}",
+	/** Shown when the search itself failed (an error, not an empty result); the document may still contain the terms */
+	previewPdfFindRedactFailed: "The search couldn't be completed, so matches may be missing. Try again.",
 	/** Checkbox selecting or clearing every match in the results */
 	previewPdfFindRedactSelectAll: "Select all",
 	/** Button marking the selected matches for redaction */
@@ -70,10 +64,8 @@ export const previewPdfRedaction = {
 	previewPdfRedactMarkArea: "Area",
 	/** A whole-page mark in the list */
 	previewPdfRedactMarkPage: "Whole page",
-	/** Page of a mark in the list. {{page}} is the 1-based page number */
-	previewPdfRedactMarkPageNumber: "Page {{page}}",
-	/** Accessible label of the ✕ button removing one mark (nothing is redacted yet) */
-	previewPdfRedactRemoveMark: "Remove this mark",
+	/** Accessible label of the ✕ button removing one mark (nothing is redacted yet). {{index}}: its place in the list from 1; {{mark}}: the mark as listed (previewPdfRedactMarkText, …Area, …Page); {{page}}: its page */
+	previewPdfRedactRemoveMark: "Remove mark {{index}}: {{mark}}, page {{page}}",
 	/** Button opening the Apply redactions dialog */
 	previewPdfRedactApply: "Apply redactions…",
 
@@ -156,4 +148,4 @@ export const previewPdfRedaction = {
 	previewPdfRedactTextSurface: "Page {{page}}: drag over text to mark it for redaction",
 	/** Keyboard shortcut description: the redaction tool of the PDF editor */
 	previewPdfKeyRedact: "Redact (PDF)"
-}
+} as const

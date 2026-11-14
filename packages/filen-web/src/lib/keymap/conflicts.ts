@@ -770,6 +770,9 @@ export const RESOLVED_COLLISIONS: readonly (readonly [string, string])[] = [
 	// the PDF body never shows.
 	["pdf.tool.crop", "media.playPause"],
 	["pdf.tool.crop", "preview.videoShuttlePause"],
+	// The signature tool's S likewise: S skips and splits only in a player or the video editor.
+	["pdf.tool.sign", "media.skip"],
+	["pdf.tool.sign", "preview.videoSplit"],
 	// A PDF tool letter acts only with focus on the pages in the preview overlay; a chat message's letters only with focus
 	// on the message, and the chat stands down while the preview is the open dialog.
 	["pdf.tool.redact", "chats.message.reply"],

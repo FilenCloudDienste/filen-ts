@@ -420,6 +420,88 @@ describe("saving an edited document", () => {
 	)
 
 	it(
+		"names a signed, unnamed annotation it edits and saves the edit as an allowed annotation change, widgets unnamed",
+		async () => {
+			// The signed revision alone of a file whose signed page has a note without /NM (ByteRange's end).
+			const edited = signedFixture("approval-annotation-edited.pdf")
+			const range = /\/ByteRange\s*\[\s*(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s*\]/u.exec(new TextDecoder("latin1").decode(edited))
+
+			if (range === null) throw new Error("no ByteRange")
+
+			const source = edited.slice(0, Number(range[3]) + Number(range[4]))
+			const engine = startEngine(source)
+
+			await engine.open()
+
+			const read = await engine.client.call("annotations", { pages: [0] })
+			const note = read[0]?.annotations.find(annotation => annotation.type === "Text")
+
+			if (note === undefined) throw new Error("no note")
+
+			await engine.client.call("dispatch", { command: "annotations.text", args: { page: 0, id: note.id, text: "Edited" } })
+
+			const begun = await engine.client.call("saveBegin", {
+				inputBytes: source.length,
+				memory: PDF_DESKTOP_MEMORY,
+				invalidateConfirmed: false
+			})
+
+			if (begun.status !== "written") throw new Error("refused")
+
+			expect(begun.plan.mode).toBe("incremental")
+
+			const { bytes } = await upload(engine.client)
+
+			expect(bytes.subarray(0, source.length)).toEqual(source)
+
+			// The note is named in the new revision; the widgets are not.
+			const written = mupdf.Document.openDocument(bytes, "application/pdf").asPDF()
+			const annots = written?.findPage(0).get("Annots")
+			const named: Record<string, boolean> = {}
+
+			for (let at = 0; annots?.isArray() === true && at < annots.length; at++) {
+				const annot = annots.get(at)
+
+				named[annot.get("Subtype").asName()] = annot.get("NM").isString()
+			}
+
+			written?.destroy()
+			expect(named).toEqual({ Widget: false, Text: true })
+
+			const check = startEngine(bytes)
+
+			await check.open()
+
+			const task = pdfjs.getDocument({ data: bytes.slice(), verbosity: 0 })
+			const fields = pdfSignatureFields(await (await task.promise).getSignatures())
+
+			await task.destroy()
+
+			const report = await check.client.call("verifySignatures", { fields })
+
+			expect(report.signatures.map(signature => [signature.state, signature.changes?.allowed])).toEqual([["changed", true]])
+		},
+		TIMEOUT
+	)
+
+	it(
+		"reads the certification its tools obey from the revision the certifying signature signed, not a later catalog",
+		async () => {
+			// Certified at level 1; a later revision's new catalog drops /Perms.
+			const engine = startEngine(signedFixture("certified-p1-new-root.pdf"))
+
+			await engine.open()
+
+			const state = await engine.client.call("state", {})
+
+			expect(state.signatures.certification).toBe(1)
+			expect(state.tools.formFill).not.toBeNull()
+			expect(state.tools.annotate).not.toBeNull()
+		},
+		TIMEOUT
+	)
+
+	it(
 		"appends each incremental save of a signed document to the one before, keeping the signature and the history",
 		async () => {
 			const source = signedFixture("approval-rsa.pdf")

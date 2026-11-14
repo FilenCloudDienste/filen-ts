@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Switch } from "@/components/ui/switch"
 import { batchCopyNames, extractSuffix } from "@/features/pdf/pages/names"
-import { defaultExtractForm, extractPlan, selectionText, type ExtractForm } from "@/features/pdf/pages/organise.logic"
+import { copiesProtected, defaultExtractForm, extractPlan, selectionText, type ExtractForm } from "@/features/pdf/pages/organise.logic"
 
 // Shared by the Extract and Split dialogs: what the PDF is and how the new files are named.
 export interface PdfCopyContext {
@@ -19,8 +19,11 @@ export interface PdfCopyContext {
 	readonly selected: readonly number[]
 	// Names in the PDF's directory (lowercased), so the shown names are the ones the files get.
 	readonly taken: ReadonlySet<string>
-	// Password-protected: the "protect the new files" switch shows.
+	// Password-protected (or restricted).
 	readonly encrypted: boolean
+	// Opened with owner access (or not encrypted): only then may the new files go without the protection, and the
+	// "protect the new files" switch shows.
+	readonly ownerAccess: boolean
 	// The password cannot be carried (extractSaveOptions refused it).
 	readonly passwordUnsupported: boolean
 	// Has signatures: the note that they are not copied shows.
@@ -33,6 +36,8 @@ export interface PdfCopyContext {
 export interface PdfExtractRequest {
 	// One entry per new file: its pages (1-based ranges) and its name.
 	readonly files: readonly { readonly ranges: readonly PageRange[]; readonly name: string }[]
+	// One file per page, each saved at once; otherwise the one file opens as a new unsaved document.
+	readonly separate: boolean
 	// 0-based pages to delete from this PDF afterwards.
 	readonly deletes: readonly number[]
 	readonly protect: boolean
@@ -63,7 +68,10 @@ export function CopyOptions({
 	return (
 		<>
 			{children}
-			{context.encrypted ? (
+			{context.encrypted && !context.ownerAccess ? (
+				<p className="text-xs text-muted-foreground">{t("previewPdfExtractKeepsProtection")}</p>
+			) : null}
+			{context.encrypted && context.ownerAccess ? (
 				<Field orientation="horizontal">
 					<Switch
 						id={`${id}-protect`}
@@ -77,8 +85,10 @@ export function CopyOptions({
 					</div>
 				</Field>
 			) : null}
-			{context.encrypted && protect && context.passwordUnsupported ? (
-				<FieldError>{t("previewPdfExtractPasswordUnsupported")}</FieldError>
+			{copiesProtected(context.encrypted, context.ownerAccess, protect) && context.passwordUnsupported ? (
+				<FieldError>
+					{t(context.ownerAccess ? "previewPdfExtractPasswordUnsupported" : "previewPdfExtractPasswordUnsupportedLocked")}
+				</FieldError>
 			) : null}
 			{context.signed ? <p className="text-xs text-muted-foreground">{t("previewPdfExtractSignatures")}</p> : null}
 		</>
@@ -102,9 +112,25 @@ export function OutputNames({ names }: { names: readonly string[] }) {
 	)
 }
 
-// Extract: pages (the selection or typed ranges) copied into a new PDF beside this one, or one PDF per page; the
-// pages may be deleted from this PDF afterwards (never all of them); a password-protected PDF's new files keep its
-// password unless switched off. Mounted anew for each opening.
+// The name the new unsaved PDF gets once saved, as the Extract dialog shows it.
+function DraftName({ name }: { name: string | undefined }) {
+	const { t } = useTranslation("preview")
+
+	if (name === undefined) return null
+
+	return (
+		<p
+			className="text-xs break-all text-muted-foreground"
+			role="status"
+		>
+			{t("previewPdfExtractOpens", { name })}
+		</p>
+	)
+}
+
+// Extract: pages (the selection or typed ranges) opened as a new unsaved PDF, saved beside this one from there, or
+// saved at once as one PDF per page; the pages may be deleted from this PDF once that is saved (never all of them); a
+// password-protected PDF's new files keep its password unless switched off. Mounted anew for each opening.
 export function PdfExtractDialog({ onExtract, onClose, ...context }: PdfExtractDialogProps) {
 	const { t } = useTranslation(["preview", "common"])
 	const id = useId()
@@ -120,7 +146,8 @@ export function PdfExtractDialog({ onExtract, onClose, ...context }: PdfExtractD
 				)
 	const busy = context.progress !== undefined
 	const rangeInvalid = form.source === "range" && form.range.trim().length > 0 && plan === null
-	const blocked = context.encrypted && form.protect && context.passwordUnsupported
+	const protect = copiesProtected(context.encrypted, context.ownerAccess, form.protect)
+	const blocked = protect && context.passwordUnsupported
 	const change = (patch: Partial<ExtractForm>): void => {
 		setForm({ ...form, ...patch })
 	}
@@ -134,7 +161,9 @@ export function PdfExtractDialog({ onExtract, onClose, ...context }: PdfExtractD
 			submitLabel={
 				context.progress === undefined
 					? t("previewPdfExtractSubmit")
-					: t("previewPdfExtractProgress", { done: context.progress.done, count: context.progress.count })
+					: form.separate
+						? t("previewPdfExtractProgress", { done: context.progress.done, count: context.progress.count })
+						: t("previewPdfExtractPreparing")
 			}
 			cancelLabel={t("common:cancel")}
 			canSubmit={plan !== null && !blocked && context.online}
@@ -148,8 +177,9 @@ export function PdfExtractDialog({ onExtract, onClose, ...context }: PdfExtractD
 
 				onExtract({
 					files: plan.files.map((ranges, index) => ({ ranges, name: names[index] ?? context.name })),
+					separate: form.separate,
 					deletes: plan.deletes,
-					protect: context.encrypted && form.protect
+					protect
 				})
 			}}
 		>
@@ -185,7 +215,7 @@ export function PdfExtractDialog({ onExtract, onClose, ...context }: PdfExtractD
 						<Input
 							aria-label={t("previewPdfExtractRangeLabel")}
 							aria-invalid={rangeInvalid}
-							placeholder={t("previewPdfExtractRangePlaceholder")}
+							placeholder={t("previewPdfPageRangePlaceholder")}
 							autoComplete="off"
 							spellCheck={false}
 							className="h-8 min-w-0 flex-1 leading-5"
@@ -197,7 +227,7 @@ export function PdfExtractDialog({ onExtract, onClose, ...context }: PdfExtractD
 						/>
 					</div>
 				</RadioGroup>
-				{rangeInvalid ? <FieldError>{t("previewPdfExtractRangeInvalid", { last: context.pageCount })}</FieldError> : null}
+				{rangeInvalid ? <FieldError>{t("previewPdfPageRangeInvalid", { last: context.pageCount })}</FieldError> : null}
 			</Field>
 			<CopyOptions
 				id={id}
@@ -216,7 +246,10 @@ export function PdfExtractDialog({ onExtract, onClose, ...context }: PdfExtractD
 							change({ separate })
 						}}
 					/>
-					<FieldLabel htmlFor={`${id}-separate`}>{t("previewPdfExtractSeparate")}</FieldLabel>
+					<div className="flex flex-col gap-0.5">
+						<FieldLabel htmlFor={`${id}-separate`}>{t("previewPdfExtractSeparate")}</FieldLabel>
+						<FieldDescription>{t("previewPdfExtractSeparateNote")}</FieldDescription>
+					</div>
 				</Field>
 				<Field orientation="horizontal">
 					<Switch
@@ -229,11 +262,15 @@ export function PdfExtractDialog({ onExtract, onClose, ...context }: PdfExtractD
 					/>
 					<div className="flex flex-col gap-0.5">
 						<FieldLabel htmlFor={`${id}-delete`}>{t("previewPdfExtractDelete")}</FieldLabel>
-						{plan?.coversAll === true ? <FieldDescription>{t("previewPdfExtractDeleteAll")}</FieldDescription> : null}
+						{plan?.coversAll === true ? (
+							<FieldDescription>{t("previewPdfExtractDeleteAll")}</FieldDescription>
+						) : form.separate ? null : (
+							<FieldDescription>{t("previewPdfExtractDeleteNote")}</FieldDescription>
+						)}
 					</div>
 				</Field>
 			</CopyOptions>
-			<OutputNames names={names} />
+			{form.separate ? <OutputNames names={names} /> : <DraftName name={names[0]} />}
 		</FormDialog>
 	)
 }

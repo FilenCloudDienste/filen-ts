@@ -1,4 +1,5 @@
 import type * as Mupdf from "mupdf"
+import type { PdfMemoryProfile } from "../../core/pdfedit/budget"
 import type { MupdfModule, PdfBitmapLike, PdfEngineFailure, PdfEngineRole } from "./protocol"
 import type { PdfEditSession } from "./editSession"
 import type { TileRenderer } from "./render"
@@ -44,6 +45,8 @@ export interface OpenDocument {
 	// The bytes `document` reads from, when they are a buffer in the heap (a written save opened in place, or the base
 	// a step back rebuilt it from); absent or null: the file behind the reader.
 	readonly source?: Mupdf.Buffer | null
+	// The edit role's memory profile, as the open asked (the editor's bookkeeping takes it once the document unlocks).
+	readonly memory?: PdfMemoryProfile
 }
 
 export interface PdfEngineContext {

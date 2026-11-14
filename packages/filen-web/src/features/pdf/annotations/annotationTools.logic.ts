@@ -1,4 +1,5 @@
 import {
+	attachmentDisplayName,
 	PDF_PRESET_STAMPS,
 	type PdfMarkupKind,
 	type PdfPresetStamp,
@@ -91,19 +92,65 @@ export function placementToolKey(mode: AnnotationMode, variant: string | null): 
 	}
 }
 
-// A file name for an attachment saved from a PDF: the name the file gives, without any directory part or control
-// characters, never empty.
-export function attachmentFileName(name: string): string {
-	const base = name.split(/[\\/]/).pop() ?? ""
-	// Control characters (below U+0020, and U+007F) go.
-	const clean = Array.from(base)
-		.filter(char => {
-			const code = char.codePointAt(0) ?? 0
+// What an annotation is called in its accessible name, by PDF subtype; any other is an "Annotation".
+const ANNOTATION_KINDS: ReadonlyMap<string, PreviewKey> = new Map([
+	["FreeText", "previewPdfAnnotToolTextBox"],
+	["Ink", "previewPdfAnnotKindInk"],
+	["Highlight", "previewPdfAnnotToolHighlight"],
+	["Underline", "previewPdfAnnotToolUnderline"],
+	["StrikeOut", "previewPdfAnnotToolStrikeOut"],
+	["Squiggly", "previewPdfAnnotToolSquiggly"],
+	["Square", "previewPdfAnnotToolRectangle"],
+	["Circle", "previewPdfAnnotToolEllipse"],
+	["Line", "previewPdfAnnotToolLine"],
+	["Stamp", "previewPdfAnnotToolStamp"],
+	["Text", "previewPdfAnnotToolNote"],
+	["FileAttachment", "previewPdfAnnotKindAttachment"],
+	["Redact", "previewPdfAnnotKindRedact"]
+])
 
-			return code >= 0x20 && code !== 0x7f
-		})
-		.join("")
-		.trim()
+// The longest part of an annotation's text its accessible name repeats.
+const LABEL_TEXT_MAX = 80
+
+export interface AnnotationLabel {
+	readonly key: "previewPdfAnnotLabel" | "previewPdfAnnotLabelAuthor" | "previewPdfAnnotLabelText" | "previewPdfAnnotLabelAuthorText"
+	readonly kind: PreviewKey
+	readonly author: string
+	readonly text: string
+}
+
+// An annotation's accessible name: its kind, then who wrote it and the start of its text when it has them.
+export function annotationLabel(info: { readonly type: string; readonly author: string; readonly text: string }): AnnotationLabel {
+	const author = info.author.trim()
+	const flat = info.text.replace(/\s+/gu, " ").trim()
+	const text = flat.length > LABEL_TEXT_MAX ? `${flat.slice(0, LABEL_TEXT_MAX - 1).trimEnd()}…` : flat
+	const kind = ANNOTATION_KINDS.get(info.type) ?? "previewPdfAnnotPopover"
+
+	return {
+		key:
+			author === ""
+				? text === ""
+					? "previewPdfAnnotLabel"
+					: "previewPdfAnnotLabelText"
+				: text === ""
+					? "previewPdfAnnotLabelAuthor"
+					: "previewPdfAnnotLabelAuthorText",
+		kind,
+		author,
+		text
+	}
+}
+
+// A page's annotations in reading order (top to bottom, then left to right), the order Tab visits them in. Rects are in
+// page space (y down).
+export function readingOrder<T extends { readonly rect: readonly [number, number, number, number] }>(annotations: readonly T[]): T[] {
+	return [...annotations].sort((a, b) => a.rect[1] - b.rect[1] || a.rect[0] - b.rect[0])
+}
+
+// A file name for an attachment saved from a PDF: the name the file gives, without any directory part or hidden and
+// reordering characters (attachmentDisplayName), never empty.
+export function attachmentFileName(name: string): string {
+	const clean = attachmentDisplayName(name.split(/[\\/]/).pop() ?? "")
 
 	return clean === "" || clean === "." || clean === ".." ? "attachment" : clean
 }

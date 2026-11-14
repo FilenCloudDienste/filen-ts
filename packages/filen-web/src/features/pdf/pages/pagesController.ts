@@ -5,13 +5,13 @@ import type { PageRange } from "@filen/office/core/pdfedit/pageRanges"
 import { preparedPassword } from "@filen/office/core/pdfedit/security"
 import type { PdfCommandResult, PdfMemoryProfile } from "@filen/office/core/pdfedit"
 import type { CropMargins, CropRect } from "@filen/office/core/pdfedit/crop"
-import { createSyncRangeBuffer, serveSyncRange, type PdfByteChannel, type PdfEngineArgs } from "@filen/office/dom/pdfedit"
+import { createSyncRangeBuffer, PdfEngineError, serveSyncRange, type PdfByteChannel, type PdfEngineArgs } from "@filen/office/dom/pdfedit"
 import type { PdfEditSessionModel } from "@filen/office/react/pdfedit"
 import { BLOCK_BYTES } from "@filen/shared/videos"
 import type { DriveItem } from "@/features/drive/lib/item"
 import type { PreviewAccessMode } from "@/features/preview/lib/accessMode"
 import type { PdfEngine } from "@/features/pdf/session/engineWorker"
-import { checkHeldOutput, streamHeldOutput } from "@/features/pdf/save/pdfSave"
+import { checkHeldOutput, serveHeldOutput, streamHeldOutput } from "@/features/pdf/save/pdfSave"
 import { pageChangeAnnouncement, remapSelection, type PageChange } from "@/features/pdf/pages/organise.logic"
 import type { CopySuffix } from "@/features/pdf/pages/names"
 import { openSyncRange, syncRangeSlots } from "@/lib/media/syncRange"
@@ -20,9 +20,11 @@ import { log } from "@/lib/log"
 
 // The pages rail's and Organise grid's state (stable page ids, the current page, the selection, the live region's
 // sentence, thumbnails to draw again), and the page operations the tools run: each change one engine command through
-// the editor session (started on first use), new files of pages (extract, split) made one at a time in the engine,
-// checked by a verifying engine and uploaded beside the PDF, and second PDFs read for inserting through their own
-// sync range channel (from the drive, or a file on this device read in slices). A view subscribes (useSyncExternalStore).
+// the editor session (started on first use), new files of pages (split, one file per page) made one at a time in the
+// engine, checked by a verifying engine and uploaded beside the PDF, extracted pages opened as a new unsaved document
+// (a draft: a second editing engine reads it from the first one's heap; saved as a copy beside the PDF, or dropped),
+// and second PDFs read for inserting through their own sync range channel (from the drive, or a file on this device
+// read in slices). A view subscribes (useSyncExternalStore).
 
 export interface PdfPagesView {
 	// Per page, an id kept across moves (a moved page keeps its thumbnail).
@@ -41,6 +43,22 @@ export interface PdfPagesView {
 	readonly progress: { readonly done: number; readonly count: number } | undefined
 	// The crop drawn on a page (points, as the view shows the page), null before one is drawn.
 	readonly crop: PdfCropDraft | null
+	// The extracted pages open as a new document, null when none is.
+	readonly draft: PdfDraft | null
+}
+
+// Extracted pages as a new document, saved nowhere yet: the engine that made it holds its bytes (the one copy) and
+// serves them to the draft's own editing engine until the draft is saved (as a copy beside the PDF) or dropped.
+export interface PdfDraft {
+	readonly id: number
+	readonly size: number
+	readonly pageCount: number
+	// The new file's name: the PDF's with this suffix ("report (pages 3-5).pdf").
+	readonly suffix: CopySuffix
+	// What the new document opens with (undefined: it is not encrypted).
+	readonly password: string | undefined
+	// Opens the draft's editing engine (again after a failed start).
+	readonly open: (onPoisoned: (message: string) => void) => Promise<PdfEngine>
 }
 
 // A crop being drawn: its page, the page's box and the crop in points, as the view shows the page.
@@ -67,13 +85,20 @@ export type PdfCopyWrite = (
 // What the controller works with, bound by the viewer on every render.
 export interface PdfPagesHost {
 	readonly t: TFunction<"preview">
-	// Runs a change on the editor session (starting the editor first; a failure is reported by the host).
-	readonly edit: (change: (session: PdfEditSessionModel) => Promise<unknown>) => void
+	// Runs a change on the editor session (starting the editor first; a failure is reported by the host); `dropped` runs
+	// instead when it never will (the editor did not start).
+	readonly edit: (change: (session: PdfEditSessionModel) => Promise<unknown>, dropped?: () => void) => void
 	readonly access: PreviewAccessMode
 	// The password the PDF was opened with (memory only), undefined without one.
 	readonly password: () => string | undefined
 	readonly memory: () => PdfMemoryProfile
 	readonly openVerifier: (channel: PdfByteChannel, password: string | undefined) => Promise<PdfEngine>
+	// Opens an editing engine on a new document another engine serves (a draft).
+	readonly openEditor: (
+		channel: PdfByteChannel,
+		password: string | undefined,
+		onPoisoned: (message: string) => void
+	) => Promise<PdfEngine>
 	// Uploads a new file beside the PDF (writeEditedCopy).
 	readonly write: PdfCopyWrite
 	readonly fileSize: number
@@ -89,10 +114,16 @@ export interface PdfPagesHost {
 	) => void
 }
 
+// The engine refused a change that would grow the document past what this browser edits.
+function overBudget(error: unknown): boolean {
+	return error instanceof PdfEngineError && error.failure === "overBudget"
+}
+
 // The largest picture inserted as a page (bytes).
 export const PDF_INSERT_IMAGE_MAX_BYTES = 64 * 1024 * 1024
 
 let nextId = 0
+let nextDraft = 0
 
 function newIds(count: number): string[] {
 	return Array.from({ length: count }, () => `p${String(++nextId)}`)
@@ -176,8 +207,11 @@ export class PdfPagesController {
 		taggedNotice: false,
 		password: null,
 		progress: undefined,
-		crop: null
+		crop: null,
+		draft: null
 	}
+	// Ends the open draft: whether it was saved.
+	private draftEnd: ((saved: boolean) => void) | null = null
 	private readonly listeners = new Set<() => void>()
 	private taggedShown = false
 	private passwordAnswer: ((password: string | null) => void) | null = null
@@ -317,8 +351,8 @@ export class PdfPagesController {
 		})
 	}
 
-	private run(change: (session: PdfEditSessionModel) => Promise<unknown>): void {
-		this.host?.edit(change)
+	private run(change: (session: PdfEditSessionModel) => Promise<unknown>, dropped?: () => void): void {
+		this.host?.edit(change, dropped)
 	}
 
 	rotate(pages: readonly number[], degrees: 90 | -90): void {
@@ -437,7 +471,7 @@ export class PdfPagesController {
 			const count = session.getSnapshot().state.pageCount
 			const result = await session.dispatch("pages.insertImage", { at, bytes }).catch((error: unknown) => {
 				log.warn("pdf", "inserting a picture failed", { error })
-				this.host?.onFailed("previewPdfPagesInsertImageFailed")
+				this.host?.onFailed(overBudget(error) ? "previewPdfOverBudget" : "previewPdfPagesInsertImageFailed")
 
 				return null
 			})
@@ -489,7 +523,7 @@ export class PdfPagesController {
 				const attached = await session.engine.call("attachSource", args, [held.channel.port]).catch((error: unknown) => {
 					held.close()
 					log.warn("pdf", "opening a PDF to insert failed", { error })
-					this.host?.onFailed("previewPdfPagesInsertFileFailed")
+					this.host?.onFailed(overBudget(error) ? "previewPdfOverBudget" : "previewPdfPagesInsertFileFailed")
 
 					return null
 				})
@@ -505,7 +539,7 @@ export class PdfPagesController {
 						.dispatch("pages.insertFrom", { at, source: attached.source, pages })
 						.catch((error: unknown) => {
 							log.warn("pdf", "inserting pages failed", { error })
-							this.host?.onFailed("previewPdfPagesInsertFileFailed")
+							this.host?.onFailed(overBudget(error) ? "previewPdfOverBudget" : "previewPdfPagesInsertFileFailed")
 
 							return null
 						})
@@ -587,6 +621,115 @@ export class PdfPagesController {
 		return done.promise
 	}
 
+	// Extracted pages as a new unsaved document (the draft view shows it): written in the engine and checked by a
+	// verifying engine, then held there while the draft is open. The pages in `deletes` go from this PDF only once the
+	// draft was saved. Resolves whether the draft opened.
+	openDraft(file: PdfCopyFile, options: { readonly protect: boolean; readonly deletes: readonly number[] }): Promise<boolean> {
+		const opened = Promise.withResolvers<boolean>()
+
+		this.set({ progress: { done: 0, count: 1 } })
+		this.run(
+			async session => {
+				const saved = await this.heldDraft(session, file, options.protect, () => {
+					opened.resolve(true)
+				}).catch((error: unknown) => {
+					log.warn("pdf", "extracting pages failed", { error })
+
+					return null
+				})
+
+				this.set({ progress: undefined, draft: null })
+
+				if (saved === null) {
+					this.host?.onFailed("previewPdfExtractFailed")
+					opened.resolve(false)
+
+					return
+				}
+
+				if (saved && options.deletes.length > 0) {
+					const count = session.getSnapshot().state.pageCount
+					const result = await session.dispatch("pages.delete", { pages: options.deletes })
+
+					this.changed(result, deleteOrder(count, options.deletes), { kind: "deleted", pages: options.deletes })
+				}
+			},
+			() => {
+				// The editor did not start: nothing was made.
+				this.set({ progress: undefined })
+				this.host?.onFailed("previewPdfExtractFailed")
+				opened.resolve(false)
+			}
+		)
+
+		return opened.promise
+	}
+
+	// The open draft ends: saved (as a copy beside the PDF), or dropped.
+	closeDraft(saved: boolean): void {
+		const end = this.draftEnd
+
+		this.draftEnd = null
+		end?.(saved)
+	}
+
+	// Makes the draft and holds it until it ends; resolves whether it was saved.
+	private async heldDraft(session: PdfEditSessionModel, file: PdfCopyFile, protect: boolean, onOpen: () => void): Promise<boolean> {
+		const host = this.host
+
+		if (host === null) throw new Error("no host")
+
+		const { engine } = session
+		const pages = rangesToPages(file.ranges)
+		const begun = await engine.call("extractBegin", { pages, protect, inputBytes: host.fileSize, memory: host.memory() })
+
+		if (begun.status === "refused") throw new Error(begun.reason)
+
+		// Encrypted whenever the engine says (without owner access it always is): opened with the document's password.
+		const password = begun.encryption === "None" ? undefined : host.password()
+		// The draft's editing engines, closed before the bytes they read go.
+		const editors: PdfEngine[] = []
+		let saved = false
+
+		try {
+			const check = await checkHeldOutput(engine, host.openVerifier, password, begun.size, {
+				pageCount: begun.pageCount,
+				versions: 1,
+				encryption: begun.encryption
+			})
+
+			if (!check.ok) throw new Error(`the new file failed its check: ${"reason" in check ? check.reason : "redaction"}`)
+
+			const ended = Promise.withResolvers<boolean>()
+
+			this.draftEnd = ended.resolve
+			this.set({
+				progress: undefined,
+				draft: {
+					id: ++nextDraft,
+					size: begun.size,
+					pageCount: begun.pageCount,
+					suffix: file.suffix,
+					password,
+					open: async onPoisoned => {
+						const editor = await host.openEditor(await serveHeldOutput(engine, begun.size), password, onPoisoned)
+
+						editors.push(editor)
+
+						return editor
+					}
+				}
+			})
+			onOpen()
+			saved = await ended.promise
+		} finally {
+			await Promise.all(editors.map(editor => editor.close()))
+			await engine.call("saveEnd", { outcome: saved ? "copied" : "failed", next: "continue" }).catch(() => undefined)
+		}
+
+		return saved
+	}
+
 	private async copies(
 		session: PdfEditSessionModel,
 		files: readonly PdfCopyFile[],
@@ -608,12 +751,17 @@ export class PdfPagesController {
 			let made = false
 
 			try {
+				// Encrypted whenever the engine says (without owner access it always is): opened with the document's password.
 				const check = await checkHeldOutput(
 					engine,
 					host.openVerifier,
-					protect ? host.password() : undefined,
+					begun.encryption === "None" ? undefined : host.password(),
 					begun.size,
-					{ pageCount: begun.pageCount, versions: 1, encryption: begun.encryption }
+					{
+						pageCount: begun.pageCount,
+						versions: 1,
+						encryption: begun.encryption
+					}
 				)
 
 				if (!check.ok) throw new Error(`the new file failed its check: ${"reason" in check ? check.reason : "redaction"}`)

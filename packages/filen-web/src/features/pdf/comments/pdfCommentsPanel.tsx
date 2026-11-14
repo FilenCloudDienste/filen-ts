@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next"
 import type { PdfAnnotationRef, PdfCommentThread, PdfReviewState } from "@filen/office/core/pdfedit/annotations"
 import { CommentThreads, type CommentThreadActions, type CommentThreadLabels } from "@/features/office/components/commentThreads"
 import { pdfThreads, threadOfRef, type PdfThreadComment } from "@/features/pdf/comments/pdfCommentsPanel.logic"
+import { PdfSidePanel } from "@/features/pdf/tools/pdfSidePanel"
 
 // The PDF Comments panel: the document's annotation threads (notes on any annotation, sticky notes, their replies and
 // review states) on the generic thread list. Values in, callbacks out: the host applies each change to the document
@@ -70,7 +71,7 @@ export function PdfCommentsPanel({
 
 	const shown = pdfThreads(
 		threads,
-		index => t("previewPdfCommentPage", { page: index + 1 }),
+		index => t("previewPdfPageNumber", { page: index + 1 }),
 		state =>
 			state === "Accepted"
 				? t("previewPdfCommentAccepted")
@@ -110,7 +111,7 @@ export function PdfCommentsPanel({
 		...(onPost === undefined ? {} : { post: onPost })
 	}
 
-	return (
+	const pane = (
 		<CommentThreads
 			open={open}
 			scope={SCOPE}
@@ -135,4 +136,7 @@ export function PdfCommentsPanel({
 			actions={actions}
 		/>
 	)
+
+	// On a phone the pane is the tools' bottom sheet, like every PDF side panel.
+	return phone && open ? <PdfSidePanel aria-label={t("previewPdfCommentsTitle")}>{pane}</PdfSidePanel> : pane
 }

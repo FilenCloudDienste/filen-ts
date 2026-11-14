@@ -4,6 +4,8 @@
 export const previewPdfPages = {
 	/** PDF pages rail and Organise grid — accessible name of the list of page thumbnails */
 	previewPdfPagesRailLabel: "Pages",
+	/** PDF ribbon, Pages tab — toggle button that shows or hides the column of page thumbnails beside the document; also names that column */
+	previewPdfPagesRailToggle: "Page thumbnails",
 	/** PDF pages rail — accessible name of one page thumbnail; {{page}} is its number, {{count}} the number of pages */
 	previewPdfPagesItemLabel: "Page {{page}} of {{count}}",
 	/** PDF Organise grid — title of the full-screen view of every page, where pages are moved, rotated, deleted and inserted */
@@ -85,8 +87,8 @@ export const previewPdfPages = {
 
 	/** PDF Extract dialog — title */
 	previewPdfExtractTitle: "Extract pages",
-	/** PDF Extract dialog — description under the title */
-	previewPdfExtractDescription: "The pages are copied into a new PDF beside this one.",
+	/** PDF Extract dialog — description under the title: the pages open as a new, unsaved PDF */
+	previewPdfExtractDescription: "The pages open as a new PDF. Review it, then save it beside this one.",
 	/** PDF Extract and Split dialogs — label of the choice of pages */
 	previewPdfExtractPages: "Pages",
 	/** PDF Extract dialog — extracts the pages selected in the pages rail; {{pages}} lists them, like "2-4, 7" */
@@ -95,20 +97,30 @@ export const previewPdfPages = {
 	previewPdfExtractRange: "Pages",
 	/** PDF Extract dialog — accessible name of the field for the pages to extract */
 	previewPdfExtractRangeLabel: "Pages to extract",
-	/** PDF Extract and Split dialogs — placeholder of a pages field: single pages and ranges, separated by commas */
-	previewPdfExtractRangePlaceholder: "e.g. 1-3, 7, 10-",
-	/** PDF Extract and Split dialogs — error under a pages field when it cannot be read; {{last}} is the last page's number */
-	previewPdfExtractRangeInvalid: "Enter pages from 1 to {{last}}, such as 1-3, 7, 10-",
+	/** PDF pages fields (print, extract, split, crop, text recognition) — placeholder: single pages and ranges, separated by commas */
+	previewPdfPageRangePlaceholder: "e.g. 1-3, 7, 10-",
+	/** PDF pages fields — error under the field when it cannot be read; {{last}} is the last page's number */
+	previewPdfPageRangeInvalid: "Enter pages from 1 to {{last}}, such as 1-3, 7, 10-",
+	/** PDF editor — a page named in a list (a comment's page, a search match, a redaction mark, a page being recognised); {{page}} is its 1-based number */
+	previewPdfPageNumber: "Page {{page}}",
 	/** PDF Extract dialog — switch: make a separate PDF of each page */
 	previewPdfExtractSeparate: "One file per page",
+	/** PDF Extract dialog — note under the one-file-per-page switch: those files are saved at once, not opened */
+	previewPdfExtractSeparateNote: "Each page is saved straight away as a PDF of its own.",
 	/** PDF Extract dialog — switch: remove the extracted pages from this PDF afterwards */
 	previewPdfExtractDelete: "Delete pages after extracting",
+	/** PDF Extract dialog — note under the delete switch: the pages are removed from this PDF only once the new PDF is saved */
+	previewPdfExtractDeleteNote: "They're removed from this PDF once the new one is saved.",
 	/** PDF Extract dialog — note under the delete switch when every page is chosen */
 	previewPdfExtractDeleteAll: "Every page is chosen, so they can't all be deleted.",
 	/** PDF Extract and Split dialogs — switch, shown for a password-protected PDF: the new files open with the same password */
 	previewPdfExtractKeepPassword: "Password-protect the new files",
 	/** PDF Extract and Split dialogs — note under the password switch */
 	previewPdfExtractKeepPasswordNote: "They open with this PDF's password.",
+	/** PDF Extract and Split dialogs — note for a protected PDF opened without its owner password: the new files cannot go without its protection */
+	previewPdfExtractKeepsProtection: "The new files keep this PDF's password and restrictions.",
+	/** PDF Extract and Split dialogs — error: the password cannot be given to new files, and without the owner password they cannot go without it */
+	previewPdfExtractPasswordUnsupportedLocked: "This PDF's password can't be given to new files, so they can't be made.",
 	/** PDF Extract and Split dialogs — error: the password cannot be given to new files */
 	previewPdfExtractPasswordUnsupported: "This PDF's password can't be given to new files. Turn off password protection to continue.",
 	/** PDF Extract and Split dialogs — note for a signed PDF */
@@ -117,6 +129,10 @@ export const previewPdfPages = {
 	previewPdfExtractOutput_one: "Saves {{name}}",
 	/** PDF Extract and Split dialogs — the files that will be made; {{name}} is the first file's name */
 	previewPdfExtractOutput_other: "Saves {{count}} files, starting with {{name}}",
+	/** PDF Extract dialog — what extracting opens; {{name}} is the name the new PDF gets when it is saved */
+	previewPdfExtractOpens: "Opens {{name}}, not saved yet",
+	/** PDF Extract dialog — the submit button while the new PDF is made */
+	previewPdfExtractPreparing: "Extracting…",
 	/** PDF Extract dialog — the button that extracts */
 	previewPdfExtractSubmit: "Extract",
 	/** PDF Extract and Split dialogs — the submit button while files are saved: files done of all */
@@ -127,6 +143,13 @@ export const previewPdfPages = {
 	previewPdfExtractSaved_other: "Saved {{count}} files",
 	/** Error toast: extracting pages failed */
 	previewPdfExtractFailed: "The pages couldn't be extracted.",
+
+	/** New PDF of extracted pages — note beside its name in the header: it is not a file yet */
+	previewPdfDraftUnsaved: "Not saved",
+	/** New PDF of extracted pages — title of the confirm shown on closing or discarding it unsaved */
+	previewPdfDraftDiscardTitle: "Discard the new PDF?",
+	/** New PDF of extracted pages — body of that confirm */
+	previewPdfDraftDiscardBody: "It hasn't been saved, so its pages and changes are lost. The PDF they came from doesn't change.",
 
 	/** PDF Split dialog — title */
 	previewPdfSplitTitle: "Split PDF",

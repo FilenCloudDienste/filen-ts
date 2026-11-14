@@ -1,4 +1,4 @@
-import { savePortAnnounced } from "@filen/shared/savePort"
+import { savePortAnnounced, savePortReader } from "@filen/shared/savePort"
 import type { PdfMemoryProfile } from "@filen/office/core/pdfedit"
 import type { RedactionFailure, RedactionManifest } from "@filen/office/core/pdfedit/redactVerify"
 import {
@@ -27,7 +27,9 @@ import { log } from "@/lib/log"
 // do its bytes stream to the upload, over a save port with their exact size. The engine holds the written file until
 // the save ends: as a new version (the session goes on, its history kept; or on the written file opened in place where
 // the old version will not stay readable; or in a fresh engine when the heap grew past its threshold), as a copy, or
-// not at all (nothing changes). An interrupted upload never counts as saved.
+// not at all (nothing changes). Every save ends, whatever fails on its way (the engine refuses changes until then), and
+// holds the editor's changes meanwhile (deps.hold), which run once it ended. An interrupted upload never counts as
+// saved.
 
 // A written file opened in place on the engine's heap only up to this size; a larger one is read again from the drive.
 export const PDF_ADOPT_MAX_BYTES = 64 * 1024 * 1024
@@ -36,6 +38,9 @@ export interface PdfSaveDeps {
 	readonly engine: PdfEngine
 	readonly session: PdfEditSessionModel
 	readonly memory: PdfMemoryProfile
+	// The size of the document's file (a draft of extracted pages: its own, not the PDF it came from), which the save's
+	// memory budget plans from.
+	readonly fileBytes: number
 	// The password the document was opened with (the verifying engine opens the written file with it).
 	readonly password: string | undefined
 	// Opens a verifying engine on a channel (engineWorker openPdfEngineOnChannel).
@@ -43,11 +48,15 @@ export interface PdfSaveDeps {
 		channel: { buffer: SharedArrayBuffer; port: MessagePort; length: number },
 		password: string | undefined
 	) => Promise<PdfEngine>
-	// The account keeps earlier versions (an old version stays readable after a save); undefined when not known.
-	readonly versioning: () => boolean | undefined
-	// After a new version: the heap is past its threshold, so the session moves to a fresh engine on `saved`.
+	// The account keeps earlier versions (an old version stays readable after a save); false when not known (the
+	// session then never relies on the old version staying readable).
+	readonly versioning: () => boolean
+	// After a new version: the heap is past its threshold, so the session moves to a fresh engine on `saved`; false when
+	// that engine did not open (the editor says so and offers to try again).
 	readonly needsRespawn: (heapBytes: number) => boolean
-	readonly respawn: (saved: DriveItem) => Promise<void>
+	readonly respawn: (saved: DriveItem) => Promise<boolean>
+	// Holds the editor's changes from the start of a save until the returned release (PdfEditSwap.hold).
+	readonly hold: () => () => void
 	// The history started again (the user is told).
 	readonly onHistoryReset: () => void
 	// Asked before a save that invalidates `count` signatures; false cancels it. Without it such a save is refused.
@@ -144,7 +153,7 @@ async function checkWritten(
 			"the written file failed its check",
 			"redaction" in check ? { redaction: check.redaction } : { reason: check.reason }
 		)
-		await end(deps, "failed", "continue")
+		await endQuietly(deps, "failed")
 
 		throw "redaction" in check ? new PdfRedactionRefusedError(check.redaction) : new SaveRefusedError("previewPdfSaveVerifyFailed")
 	}
@@ -164,12 +173,8 @@ export async function checkHeldOutput(
 	expected: PdfSaveExpectation,
 	more?: (verifier: PdfEngine) => Promise<HeldOutputCheck>
 ): Promise<HeldOutputCheck> {
-	const buffer = createSyncRangeBuffer(8, BLOCK_BYTES)
-	const channel = new MessageChannel()
-
-	return client
-		.call("serveOutput", { buffer, port: channel.port1 }, [channel.port1])
-		.then(() => openVerifier({ buffer, port: channel.port2, length: size }, password))
+	return serveHeldOutput(client, size)
+		.then(channel => openVerifier(channel, password))
 		.then(async (verifier): Promise<HeldOutputCheck> => {
 			try {
 				const saved = await verifier.client.call("checkSaved", expected)
@@ -182,12 +187,44 @@ export async function checkHeldOutput(
 		.catch((error: unknown) => ({ ok: false as const, reason: error instanceof Error ? error.message : String(error) }))
 }
 
+// The file an engine holds served to another engine over a new sync range channel (the reading engine takes it).
+export async function serveHeldOutput(
+	client: Pick<PdfEngine["client"], "call">,
+	size: number
+): Promise<{ buffer: SharedArrayBuffer; port: MessagePort; length: number }> {
+	const buffer = createSyncRangeBuffer(8, BLOCK_BYTES)
+	const channel = new MessageChannel()
+
+	await client.call("serveOutput", { buffer, port: channel.port1 }, [channel.port1])
+
+	return { buffer, port: channel.port2, length: size }
+}
+
 async function end(deps: PdfSaveDeps, outcome: "saved" | "copied" | "failed", next: PdfAfterSave): Promise<PdfSaveEnded> {
 	const ended = await deps.engine.client.call("saveEnd", { outcome, next })
 
 	deps.session.saved(ended)
 
 	return ended
+}
+
+// Ends a save that did not make the file (or made a copy), whatever else failed: the engine lets go of the written
+// file and takes changes again. A failure to say so (the engine went) is logged; nothing else depends on it.
+async function endQuietly(deps: PdfSaveDeps, outcome: "copied" | "failed"): Promise<void> {
+	await end(deps, outcome, "continue").catch((error: unknown) => {
+		log.warn("pdf", "ending a save failed", { error })
+	})
+}
+
+// The written file and the edits held until `run` settles, however it does (release once, at the end).
+async function holding<T>(deps: PdfSaveDeps, run: (release: () => void) => Promise<T>): Promise<T> {
+	const release = deps.hold()
+
+	return run(release).catch((error: unknown) => {
+		release()
+
+		throw error
+	})
 }
 
 // Streams the held file to an upload over a new channel; resolves whether the upload made the file. `port` is the
@@ -215,68 +252,91 @@ export function streamHeldOutput(client: Pick<PdfEngine["client"], "call">): Hel
 }
 
 // Save: a new version of `item`, for the preview overlay's port save (PresentationSaveEdits, with the exact size and the
-// edited file's times).
-export async function savePdfVersion(deps: PdfSaveDeps, item: DriveItem): Promise<PresentationSaveEdits> {
-	const begun = await writeAndCheck(deps, Number(item.data.size))
-	const upload = stream(deps)
-	const result: Promise<SaveResult> = upload.uploaded.then(async uploaded => {
-		if (uploaded) return { kind: "written", bytes: begun.size, revision: 0, notices: [] }
+// edited file's times). `adopt`: the session goes on on the written file where it fits (a signing follows, which
+// appends to the saved file).
+export function savePdfVersion(deps: PdfSaveDeps, item: DriveItem, adopt = false): Promise<PresentationSaveEdits> {
+	return holding(deps, async release => {
+		const begun = await writeAndCheck(deps, deps.fileBytes)
+		const upload = stream(deps)
+		const result: Promise<SaveResult> = upload.uploaded.then(async uploaded => {
+			if (uploaded) return { kind: "written", bytes: begun.size, revision: 0, notices: [] }
 
-		await end(deps, "failed", "continue").catch(() => undefined)
+			await endQuietly(deps, "failed")
+			release()
 
-		return { kind: "refused", reason: "failed" }
-	})
+			return { kind: "refused", reason: "failed" }
+		})
 
-	return {
-		kind: "port",
-		port: upload.port,
-		announced: upload.announced,
-		result,
-		size: begun.size,
-		times: editedSaveTimes(item, Date.now()),
-		commit: async saved => {
-			// Without earlier versions the file just replaced may go: the session moves onto the written one.
-			const keepsOld = deps.versioning() !== false
-			const next: PdfAfterSave = keepsOld || begun.size > PDF_ADOPT_MAX_BYTES ? "continue" : "adopt"
-			const ended = await end(deps, "saved", next)
-
-			// The file opens with its new passwords from now on (a respawn reads it with them).
-			if (begun.protection.kind !== "keep") deps.onProtected?.(openingPassword(begun.protection, undefined))
-
-			if ((!keepsOld && next === "continue") || deps.needsRespawn(ended.heapBytes)) {
-				await deps.respawn(saved)
-				deps.onHistoryReset()
-			} else if (ended.history === "reset") deps.onHistoryReset()
-
-			// Earlier versions still hold what this one removed.
-			if (begun.removesContent && keepsOld) deps.onEarlierVersions?.(saved)
-
-			return { dirty: deps.session.getSnapshot().state.dirty }
+		return {
+			kind: "port",
+			port: upload.port,
+			announced: upload.announced,
+			result,
+			size: begun.size,
+			times: editedSaveTimes(item, Date.now()),
+			commit: saved => commitVersion(deps, saved, begun, adopt).finally(release),
+			abandon: () => endQuietly(deps, "failed").finally(release)
 		}
-	}
+	})
 }
 
-// Save as copy: the edited document as a new file beside `item` (the document itself stays unsaved). `write` uploads
-// the stream as the copy (editedCopy.ts writeEditedCopy).
-export async function savePdfCopy(
+// A new version made: the session goes on as the account's versions allow (see savePdfVersion).
+async function commitVersion(
 	deps: PdfSaveDeps,
-	item: DriveItem,
+	saved: DriveItem,
+	begun: Extract<PdfSaveBegun, { status: "written" }>,
+	adopt: boolean
+): Promise<{ readonly dirty: boolean }> {
+	// Without earlier versions the file just replaced may go: the session moves onto the written one.
+	const keepsOld = deps.versioning()
+	const next: PdfAfterSave = (keepsOld && !adopt) || begun.size > PDF_ADOPT_MAX_BYTES ? "continue" : "adopt"
+	const ended = await end(deps, "saved", next)
+
+	// The file opens with its new passwords from now on (a respawn reads it with them).
+	if (begun.protection.kind !== "keep") deps.onProtected?.(openingPassword(begun.protection, undefined))
+
+	if ((!keepsOld && next === "continue") || deps.needsRespawn(ended.heapBytes)) {
+		if (await deps.respawn(saved)) deps.onHistoryReset()
+	} else if (ended.history === "reset") deps.onHistoryReset()
+
+	// Earlier versions still hold what this one removed.
+	if (begun.removesContent && keepsOld) deps.onEarlierVersions?.(saved)
+
+	return { dirty: deps.session.getSnapshot().state.dirty }
+}
+
+// Save as copy: the edited document as a new file (the document itself stays unsaved). `write` uploads the stream as
+// the copy beside the PDF (editedCopy.ts writeEditedCopy).
+export function savePdfCopy(
+	deps: PdfSaveDeps,
 	write: (content: {
 		readonly port: MessagePort
 		readonly size: number
 	}) => Promise<{ outcome: ActionOutcome<DriveItem>; name: string } | null>
 ): Promise<{ outcome: ActionOutcome<DriveItem>; name: string } | null> {
-	const begun = await writeAndCheck(deps, Number(item.data.size))
-	const upload = stream(deps)
-	const [written, uploaded] = await Promise.all([
-		upload.announced.then(() => write({ port: upload.port, size: begun.size })),
-		upload.uploaded
-	])
-	const made = uploaded && written?.outcome.status === "success"
+	return holding(deps, async release => {
+		const begun = await writeAndCheck(deps, deps.fileBytes)
+		const upload = stream(deps)
+		const written = await upload.announced
+			.then(() => write({ port: upload.port, size: begun.size }))
+			.then(
+				value => ({ ok: true as const, value }),
+				(error: unknown) => ({ ok: false as const, error })
+			)
+		// The upload's own answer only once it made the file. Otherwise the engine's write, which holds its requests until
+		// the upload settles, is told on this end of the port (a write that failed may never have read it; one that handed
+		// it on leaves nothing to tell here).
+		const made = written.ok && written.value?.outcome.status === "success" && (await upload.uploaded)
 
-	await end(deps, made ? "copied" : "failed", "continue")
+		if (!made) savePortReader(upload.port, { inFlight: 1 }).abort("upload")
 
-	return written
+		await endQuietly(deps, made ? "copied" : "failed")
+		release()
+
+		if (!written.ok) throw written.error
+
+		return written.value
+	})
 }
 
 // The engine's digests answered by the signer worker, over a channel the signing save holds.
@@ -306,35 +366,56 @@ function partialName(field: string): string {
 // soon as it did; the written file is checked like any save, and the new signature must read "unchanged since signing"
 // to our verifier (cross-checked against the signatures already known) before it is uploaded. Kept, the session goes
 // on on the signed file, its history starting there (a step back past a signing would bring back its placeholder).
-export async function signPdfVersion(deps: PdfSaveDeps, item: DriveItem, job: PdfSignedSaveJob): Promise<PresentationSaveEdits> {
+export function signPdfVersion(deps: PdfSaveDeps, item: DriveItem, job: PdfSignedSaveJob): Promise<PresentationSaveEdits> {
+	return holding(deps, release => signedVersion(deps, item, job, release))
+}
+
+async function signedVersion(
+	deps: PdfSaveDeps,
+	item: DriveItem,
+	job: PdfSignedSaveJob,
+	release: () => void
+): Promise<PresentationSaveEdits> {
 	const port = signerChannel(job)
 	const begun = await deps.engine.client
-		.call("signBegin", { inputBytes: Number(item.data.size), memory: deps.memory, digest: job.digest, signer: port }, [port])
+		.call("signBegin", { inputBytes: deps.fileBytes, memory: deps.memory, digest: job.digest, signer: port }, [port])
 		.finally(() => {
 			job.signer.terminate()
 		})
 
 	if (begun.status === "refused") throw new SaveRefusedError("previewPdfOverBudget")
 
-	const known = await job.hints()
+	// Held from here: a failure before the check ends the save too.
+	const known = await job.hints().catch(async (error: unknown) => {
+		await endQuietly(deps, "failed")
+
+		throw error
+	})
 	const hints = [...(known ?? []), { name: partialName(begun.field), byteRange: begun.byteRange }]
 
 	const state = deps.session.getSnapshot().state
 
-	await checkWritten(deps, begun.size, { pageCount: state.pageCount, versions: begun.versions, encryption: state.encryption.method }, deps.password, async verifier => {
-		const report = await verifier.client.call("verifySignatures", { fields: hints })
-		const signature = report.signatures.find(entry => entry.field === begun.field)
+	await checkWritten(
+		deps,
+		begun.size,
+		{ pageCount: state.pageCount, versions: begun.versions, encryption: state.encryption.method },
+		deps.password,
+		async verifier => {
+			const report = await verifier.client.call("verifySignatures", { fields: hints })
+			const signature = report.signatures.find(entry => entry.field === begun.field)
 
-		return signature?.state === "unchanged"
-			? { ok: true }
-			: { ok: false, reason: `the new signature is ${signature?.state ?? "missing"}` }
-	})
+			return signature?.state === "unchanged"
+				? { ok: true }
+				: { ok: false, reason: `the new signature is ${signature?.state ?? "missing"}` }
+		}
+	)
 
 	const upload = stream(deps)
 	const result: Promise<SaveResult> = upload.uploaded.then(async uploaded => {
 		if (uploaded) return { kind: "written", bytes: begun.size, revision: 0, notices: [] }
 
-		await end(deps, "failed", "continue").catch(() => undefined)
+		await endQuietly(deps, "failed")
+		release()
 
 		return { kind: "refused", reason: "failed" }
 	})
@@ -346,16 +427,16 @@ export async function signPdfVersion(deps: PdfSaveDeps, item: DriveItem, job: Pd
 		result,
 		size: begun.size,
 		times: editedSaveTimes(item, Date.now()),
-		commit: async saved => {
-			const ended = await end(deps, "saved", "adopt")
-
-			job.onSigned(begun.field, begun.byteRange)
-
-			if (deps.needsRespawn(ended.heapBytes)) await deps.respawn(saved)
-
-			deps.onHistoryReset()
-
-			return { dirty: deps.session.getSnapshot().state.dirty }
-		}
+		commit: saved => commitSigned(deps, saved).finally(release),
+		abandon: () => endQuietly(deps, "failed").finally(release)
 	}
+}
+
+async function commitSigned(deps: PdfSaveDeps, saved: DriveItem): Promise<{ readonly dirty: boolean }> {
+	const ended = await end(deps, "saved", "adopt")
+	const reopened = !deps.needsRespawn(ended.heapBytes) || (await deps.respawn(saved))
+
+	if (reopened) deps.onHistoryReset()
+
+	return { dirty: deps.session.getSnapshot().state.dirty }
 }

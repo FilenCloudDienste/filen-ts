@@ -1,4 +1,5 @@
 import { PDF_ENGINE_WASM, type PdfEngineScope } from "@filen/office/dom/pdfedit"
+import { transferList } from "@/lib/transferList"
 
 // Runs before MuPDF's module evaluates (imported first by pdfEngine.worker.ts): MuPDF awaits its wasm at import, through
 // the Emscripten hook installed here, which instantiates the module the page compiled and posted (no second fetch or
@@ -40,7 +41,7 @@ globalThis.$libmupdf_wasm_Module = {
 // The worker's scope for servePdfEngine; its first listener also gets the messages held so far.
 export const engineScope: PdfEngineScope = {
 	postMessage: (message, transfer) => {
-		self.postMessage(message, { transfer: transfer as Transferable[] })
+		self.postMessage(message, { transfer: transferList(transfer) })
 	},
 	addEventListener: (type, listener) => {
 		self.removeEventListener("message", hold)

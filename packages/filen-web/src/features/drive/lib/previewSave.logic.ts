@@ -401,6 +401,9 @@ export interface PresentationSaveEdits {
 	readonly announced: Promise<boolean>
 	readonly result: Promise<SaveResult>
 	commit(file: DriveItem): Promise<{ readonly dirty: boolean }>
+	// The written file did not become the new version though it was written (a copy was made of it instead, or the
+	// upload failed past the session's part): a session that holds it until commit lets it go.
+	abandon?(): Promise<void>
 	// The file's exact size, when the writer knows it before the upload starts (a PDF, written whole first).
 	readonly size?: number
 	// The new version's times (an edited PDF keeps the original's creation time, editedSaveTimes).

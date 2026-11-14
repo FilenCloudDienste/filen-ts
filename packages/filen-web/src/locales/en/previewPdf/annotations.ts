@@ -51,8 +51,25 @@ export const previewPdfAnnotations = {
 	previewPdfAnnotTextBoxEditor: "Text box text",
 	/** Live region while placing an annotation from the keyboard. {{tool}}: the tool's name; positions and sizes in points from the page's top-left corner */
 	previewPdfAnnotPlacement: "{{tool}} at {{x}}, {{y}}, {{width}} by {{height}} points",
-	/** How keyboard placement works, read once when it starts */
-	previewPdfAnnotPlacementHint: "Arrow keys move it, Alt and arrow keys resize it, Enter places it, Escape cancels.",
+	/** How keyboard placement works: the description of a page while a placing tool is chosen (read when the page is focused) */
+	previewPdfAnnotPlacementHint:
+		"Press Enter to start. Arrow keys move it, Alt and arrow keys resize it, Enter places it, Escape cancels.",
+	/** Accessible name of a page while a placing tool (text box, shape, stamp, note) is chosen. {{tool}}: the tool's name; {{page}}: the page number */
+	previewPdfAnnotPlaceOnPage: "Place {{tool}} on page {{page}}",
+	/** Kind of an existing annotation, in its accessible name: a freehand drawing */
+	previewPdfAnnotKindInk: "Drawing",
+	/** Kind of an existing annotation, in its accessible name: a file attached at a spot on the page */
+	previewPdfAnnotKindAttachment: "Attached file",
+	/** Kind of an existing annotation, in its accessible name: an area marked for redaction, not yet applied */
+	previewPdfAnnotKindRedact: "Redaction mark",
+	/** Accessible name of an existing annotation on the page (focusable; Enter selects it). {{kind}}: what it is, e.g. "Highlight" */
+	previewPdfAnnotLabel: "{{kind}}",
+	/** Accessible name of an existing annotation. {{kind}}: what it is; {{author}}: who added it */
+	previewPdfAnnotLabelAuthor: "{{kind}} by {{author}}",
+	/** Accessible name of an existing annotation. {{kind}}: what it is; {{text}}: the start of its note */
+	previewPdfAnnotLabelText: "{{kind}}: {{text}}",
+	/** Accessible name of an existing annotation. {{kind}}: what it is; {{author}}: who added it; {{text}}: the start of its note */
+	previewPdfAnnotLabelAuthorText: "{{kind}} by {{author}}: {{text}}",
 	/** Save option: draw every annotation into its page, so it can no longer be changed or removed */
 	previewPdfAnnotFlatten: "Flatten annotations",
 	/** Explains the flatten save option */
@@ -123,6 +140,10 @@ export const previewPdfAnnotations = {
 	previewPdfAnnotAttachmentsLoading: "Reading attachments…",
 	/** Attachments dialog: the PDF has no attached files */
 	previewPdfAnnotAttachmentsEmpty: "This PDF has no attachments.",
+	/** Toast when a file attached to a PDF couldn't be downloaded (an error) */
+	previewPdfAnnotAttachmentFailed: "The attachment couldn't be downloaded.",
+	/** Toast when a file attached to a PDF is empty or no longer in the document */
+	previewPdfAnnotAttachmentMissing: "This attachment is empty or no longer in the file.",
 	/** Annotation toolbar: downloads the file a file attachment annotation carries */
 	previewPdfAnnotAttachmentDownloadAny: "Download attachment"
 } as const

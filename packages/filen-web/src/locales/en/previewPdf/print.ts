@@ -17,10 +17,6 @@ export const previewPdfPrint = {
 	previewPdfPrintRange: "Pages",
 	/** PDF print dialog — accessible name of the field for the pages to print */
 	previewPdfPrintRangeLabel: "Pages to print",
-	/** PDF print dialog — placeholder of the pages field: single pages and ranges, separated by commas */
-	previewPdfPrintRangePlaceholder: "e.g. 1-3, 7, 10-",
-	/** PDF print dialog — error under the pages field when it cannot be read; {{last}} is the last page's number */
-	previewPdfPrintRangeInvalid: "Enter pages from 1 to {{last}}, such as 1-3, 7, 10-",
 	/** PDF print dialog — label of the print quality choice */
 	previewPdfPrintQuality: "Quality",
 	/** PDF print dialog — quality: pages drawn at 150 dots per inch */

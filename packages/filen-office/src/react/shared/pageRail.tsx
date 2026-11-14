@@ -57,9 +57,10 @@ export interface PageRailProps {
 	readonly itemLabel: (index: number, count: number) => string
 	// What an option shows; `size` is the thumbnail's (CSS px).
 	readonly renderItem: (index: number, size: { readonly width: number; readonly height: number }) => ReactNode
-	// The mounted items, the ones in view first, then the overscan nearest first, and the thumbnail width in device
-	// pixels. Called when they change and on every render that changes `thumbsVersion`.
-	readonly onWindow?: (indices: readonly number[], widthPx: number) => void
+	// The mounted items, the ones in view first, then the overscan nearest first, the thumbnail width in device
+	// pixels, and how many of the items lead the list because they are in view. Called when they change and on every
+	// render that changes `thumbsVersion`.
+	readonly onWindow?: (indices: readonly number[], widthPx: number, inView: number) => void
 	readonly thumbsVersion?: unknown
 	readonly orientation?: "vertical" | "horizontal"
 	// A grid (vertical only) fits as many columns as the width holds.
@@ -343,14 +344,17 @@ export function PageRail({
 		if (onWindow === undefined || range.last < range.first) return
 
 		const indices: number[] = []
+		let inView = 0
 
 		for (const row of thumbnailOrder(range, visible)) {
 			const first = rows.items[row] ?? -1
 
 			for (let column = 0; first >= 0 && column < (rows.counts[row] ?? 0); column++) indices.push(first + column)
+
+			if (row >= visible.first && row <= visible.last) inView = indices.length
 		}
 
-		onWindow(indices, thumbWidth * railDevicePixelRatio())
+		onWindow(indices, thumbWidth * railDevicePixelRatio(), inView)
 	}, [range.first, range.last, visible.first, visible.last, count, columns, rowsProp, thumbsVersion, thumbWidth, onWindow])
 
 	useEffect(
@@ -675,7 +679,7 @@ export function PageRail({
 					acrossSize: Math.abs(marquee.toAcross - marquee.across)
 				}
 
-	return (
+	const listbox = (
 		<div
 			ref={containerRef}
 			className={className === undefined ? prefix : `${prefix} ${className}`}
@@ -726,15 +730,21 @@ export function PageRail({
 					/>
 				)}
 			</div>
-			{announcement === undefined ? null : (
-				<div
-					role="status"
-					aria-live="polite"
-					style={LIVE_REGION}
-				>
-					{announcement}
-				</div>
-			)}
 		</div>
+	)
+
+	// The live region sits beside the listbox, never in it (a listbox holds options only), and is always mounted, so an
+	// announcement set later is read.
+	return (
+		<>
+			{listbox}
+			<div
+				role="status"
+				aria-live="polite"
+				style={LIVE_REGION}
+			>
+				{announcement ?? ""}
+			</div>
+		</>
 	)
 }

@@ -4,7 +4,9 @@ import { PdfEngineRefusal, type OpenDocument } from "./context"
 import { createPdfDigest } from "./digest"
 import type { MupdfModule } from "./protocol"
 import type { PdfRequestHandler } from "./requests"
-import { syncRangeStreamHandle, type MupdfStreamHandle } from "./stream"
+import { SyncRangeReader, syncRangeStreamHandle, type MupdfStreamHandle } from "./stream"
+import type { PdfRevisions } from "./formState"
+import { collectFields, signatureFieldHints, signatureFieldsOf } from "./fields"
 import { verifyPdfSignatures } from "./verify"
 
 // The engine's verifySignatures request: the signatures of a file checked on its raw bytes. A verifying engine checks
@@ -42,8 +44,7 @@ function heapBytes(buffer: Mupdf.Buffer): FileBytes {
 	}
 }
 
-function readerBytes(open: OpenDocument): FileBytes {
-	const { reader } = open
+function readerBytes(reader: SyncRangeReader): FileBytes {
 	const whole = syncRangeStreamHandle(reader)
 
 	return {
@@ -88,27 +89,61 @@ function openOn(mupdf: MupdfModule, handle: MupdfStreamHandle): Mupdf.PDFDocumen
 	}
 }
 
+// A read-only document over `handle`, unlocked with `password` when it needs one (else a "needsPassword" refusal).
+function openUnlocked(mupdf: MupdfModule, handle: MupdfStreamHandle, password: string | undefined): Mupdf.PDFDocument {
+	const document = openOn(mupdf, handle)
+
+	if (document.needsPassword() && (password === undefined || document.authenticatePassword(password) === 0)) {
+		document.destroy()
+
+		throw new PdfEngineRefusal("needsPassword")
+	}
+
+	return document
+}
+
+// The earlier revisions of a file (byte prefixes of it), each opened as its own document unlocked with the document's
+// password: the file behind the reader, or a written file in the heap.
+export function fileRevisions(mupdf: MupdfModule, file: SyncRangeReader | Mupdf.Buffer, password: string | undefined): PdfRevisions {
+	const bytes = file instanceof SyncRangeReader ? readerBytes(file) : heapBytes(file)
+
+	return { length: bytes.length, open: length => openUnlocked(mupdf, bytes.handle(length), password) }
+}
+
+// The file as it now is on the drive, as a document over its bytes: a verifying engine's own document, or the editing
+// engine's read-only copy of its file (the caller destroys it when it is not `open.document`).
+function savedFile(context: Parameters<PdfRequestHandler<"verifySignatures">>[0]): {
+	readonly open: OpenDocument
+	readonly bytes: FileBytes
+	readonly document: Mupdf.PDFDocument
+} {
+	const open = context.open()
+	const editing = open.role === "edit"
+	const bytes = editing && open.heap !== null ? heapBytes(open.heap) : readerBytes(open.reader)
+
+	// Never needsPassword() on the document being edited or verified: on an authenticated document MuPDF drops the
+	// access it granted. The editor's own read-only copy is unlocked with the document's password.
+	if (!editing) return { open, bytes, document: open.document }
+
+	return { open, bytes, document: openUnlocked(context.mupdf, bytes.handle(bytes.length), open.edit?.password) }
+}
+
+// The signatures of the file as it now is, as this engine reads them (pdf.js's shape): what a verifier cross-checks
+// against for a file the editor wrote, which pdf.js never read.
+export const signatureHintsRequest: PdfRequestHandler<"signatureHints"> = context => {
+	const { open, bytes, document } = savedFile(context)
+
+	try {
+		return { value: signatureFieldHints(signatureFieldsOf(document, collectFields(document).fields), bytes.length) }
+	} finally {
+		if (document !== open.document) document.destroy()
+	}
+}
+
 export function verifySignaturesRequest(subtle: PdfSubtle): PdfRequestHandler<"verifySignatures"> {
 	return async (context, { fields }) => {
-		const open = context.open()
 		const { mupdf } = context
-		const editing = open.role === "edit"
-		const bytes = editing && open.heap !== null ? heapBytes(open.heap) : readerBytes(open)
-		// Never needsPassword() on the document being edited or verified: on an authenticated document MuPDF drops the
-		// access it granted. The editor's own read-only copy is unlocked with the document's password.
-		let document = open.document
-
-		if (editing) {
-			document = openOn(mupdf, bytes.handle(bytes.length))
-
-			const password = open.edit?.password
-
-			if (document.needsPassword() && (password === undefined || document.authenticatePassword(password) === 0)) {
-				document.destroy()
-
-				throw new PdfEngineRefusal("needsPassword")
-			}
-		}
+		const { open, bytes, document } = savedFile(context)
 
 		try {
 			const report = await verifyPdfSignatures(

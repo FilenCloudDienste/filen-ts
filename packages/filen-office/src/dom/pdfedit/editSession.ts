@@ -1,4 +1,5 @@
 import type * as Mupdf from "mupdf"
+import type { PdfMemoryProfile } from "../../core/pdfedit/budget"
 import type { PdfSavePlan } from "../../core/pdfedit/savePlan"
 import {
 	PDF_UNRESTRICTED,
@@ -9,10 +10,12 @@ import {
 } from "../../core/pdfedit/signaturePolicy"
 import { heldAfterSave, type PdfHeldAccess, type PdfSecurityChoice, type PdfSecurityWriteOptions } from "../../core/pdfedit/security"
 import type { PdfEditState, PdfFormState } from "../../core/pdfedit/state"
+import { redactsContent } from "./commands/redact"
 import { num } from "./fields"
-import { formState, isTagged, signatureState, xfaState } from "./formState"
+import { formState, isTagged, signatureState, xfaState, type PdfRevisions } from "./formState"
 import type { PdfAccess } from "./protocol"
 import { securitySummary } from "./security/index"
+import type { PdfStepKey } from "./stepKeys"
 import type { SyncRangeLifetime } from "./syncRange"
 
 // New protection chosen for the next save: the choice, and the write options planned from it (an encryption change).
@@ -34,6 +37,20 @@ export interface LoggedStep {
 	readonly label: string
 	// The arguments of each dispatch the step was made of (a gesture's several).
 	readonly args: readonly unknown[]
+	// Per dispatch, the annotations it worked on and made, by name (stepKeys.ts): its arguments' object numbers do not
+	// hold when it runs again.
+	readonly keys: readonly PdfStepKey[]
+	// What its dispatches added to the document (PdfCommand.bytes).
+	readonly bytes: number
+}
+
+// One dispatch as the history takes it.
+export interface PdfDispatched {
+	readonly tool: PdfToolClass
+	readonly label: string
+	readonly args: unknown
+	readonly key: PdfStepKey
+	readonly bytes: number
 }
 
 // A lifetime the engine ends itself (an AbortSignal's shape, without the DOM).
@@ -64,7 +81,8 @@ export interface HeldOutput {
 	// The new protection it was written with, and MuPDF's name for the encryption it has.
 	readonly security: PendingSecurity | null
 	readonly encryption: string
-	// It redacted or changed the protection: once it becomes the file, the session starts again on it.
+	// It redacted, changed the protection or invalidated signatures: once it becomes the file, the session starts again
+	// on it.
 	readonly resets: boolean
 }
 
@@ -83,6 +101,12 @@ export class PdfEditSession {
 	// The steps after `applied` were undone through the journal since its last write, which can redo them.
 	journalRedo = false
 	output: HeldOutput | null = null
+	// The last save rewrote the file and the document went on on the one it read before (its history kept): the drive
+	// holds the rewrite, so nothing may be appended to the document's own file (an incremental save would bring back
+	// what the rewrite left out).
+	fileBehind = false
+	// The document reads a file a save here wrote (PdfEditState.ownFile).
+	ownFile = false
 	signatures: PdfSignatureState
 	restrictions: PdfRestrictions
 	form: PdfFormState
@@ -96,6 +120,9 @@ export class PdfEditSession {
 	held: PdfHeldAccess
 	// The protection the next save writes (the Protect dialog's choice, planned), null: the file keeps its own.
 	security: PendingSecurity | null = null
+	// The engine's memory profile, and the size of the file as last written (opened, or saved here).
+	readonly memory: PdfMemoryProfile
+	fileBytes: number
 	private pages: Map<number, number> | null = null
 	// The operation still open (a gesture continues it): its gesture id, its step, and the journal position before it.
 	private open: { readonly id: string | null; readonly step: LoggedStep; readonly before: number } | null = null
@@ -108,9 +135,13 @@ export class PdfEditSession {
 			readonly restrictions: PdfRestrictions
 			readonly held: PdfHeldAccess
 			readonly password?: string
+			// The file the document reads, for the revisions its signatures signed.
+			readonly revisions: PdfRevisions
+			readonly memory: PdfMemoryProfile
+			readonly fileBytes: number
 		}
 	) {
-		this.signatures = signatureState(document)
+		this.signatures = signatureState(document, options.revisions)
 		this.form = formState(document)
 		this.tagged = isTagged(document)
 		this.access = options.access
@@ -118,14 +149,23 @@ export class PdfEditSession {
 		this.restrictions = options.restrictions
 		this.held = options.held
 		this.password = options.password
+		this.memory = options.memory
+		this.fileBytes = options.fileBytes
 	}
 
 	// Starts a command's operation, or continues the gesture's (same id) still open; any other open one ends first.
-	begin(document: Mupdf.PDFDocument, label: string, tool: PdfToolClass, args: unknown, gesture: string | null): void {
+	begin(document: Mupdf.PDFDocument, dispatched: PdfDispatched, gesture: string | null): void {
 		if (this.open !== null && (gesture === null || this.open.id !== gesture)) this.endOpen(document)
 
+		const { tool, label, args, key, bytes } = dispatched
+
 		if (this.open !== null) {
-			this.open = { ...this.open, step: { ...this.open.step, args: [...this.open.step.args, args] } }
+			const { step } = this.open
+
+			this.open = {
+				...this.open,
+				step: { ...step, args: [...step.args, args], keys: [...step.keys, key], bytes: step.bytes + bytes }
+			}
 
 			return
 		}
@@ -134,7 +174,7 @@ export class PdfEditSession {
 		const before = document.getJournal().position
 
 		document.beginOperation(label)
-		this.open = { id: gesture, step: { tool, label, args: [args] }, before }
+		this.open = { id: gesture, step: { tool, label, args: [args], keys: [key], bytes }, before }
 	}
 
 	// The command ran: its operation ends, unless a gesture continues it (`final` false).
@@ -182,17 +222,24 @@ export class PdfEditSession {
 		this.revision++
 	}
 
-	// One step back. `rebuild(count)` replaces the document with the opened file plus the first `count` steps.
-	undo(document: Mupdf.PDFDocument, rebuild: (count: number) => void): void {
-		if (this.applied === 0) return
+	// `steps` back (at least one). `rebuild(count)` replaces the document with the opened file plus the first `count`
+	// steps: once, for whatever the journal cannot take back.
+	undo(document: Mupdf.PDFDocument, rebuild: (count: number) => void, steps = 1): void {
+		const target = Math.max(0, this.applied - Math.max(1, steps))
 
-		if (this.applied > this.journalBase && document.canUndo()) {
-			document.undo()
-			this.applied--
-			this.journalRedo = true
-		} else {
-			rebuild(this.applied - 1)
-			this.applied--
+		if (target === this.applied) return
+
+		if (target >= this.journalBase) {
+			while (this.applied > target && document.canUndo()) {
+				document.undo()
+				this.applied--
+				this.journalRedo = true
+			}
+		}
+
+		if (this.applied > target) {
+			rebuild(target)
+			this.applied = target
 			this.journalBase = 0
 			this.journalRedo = false
 		}
@@ -235,6 +282,17 @@ export class PdfEditSession {
 	// The steps in the document, as the save writes it (an open gesture's ends before a save).
 	appliedSteps(): readonly LoggedStep[] {
 		return this.log.slice(0, this.applied)
+	}
+
+	// The bytes the steps in the document added since its file was last written (all of them when that state is gone),
+	// the open gesture's included.
+	addedBytes(): number {
+		let total = this.open?.step.bytes ?? 0
+
+		for (let index = this.savedApplied < 0 ? 0 : Math.min(this.savedApplied, this.applied); index < this.applied; index++)
+			total += this.log[index]?.bytes ?? 0
+
+		return total
 	}
 
 	// The owner password unlocked the document: its restrictions are lifted, and a rebuild opens it with that password.
@@ -300,7 +358,7 @@ export class PdfEditSession {
 	}
 
 	// The document was replaced by a written file: everything is read again and the history starts over.
-	reset(document: Mupdf.PDFDocument): void {
+	reset(document: Mupdf.PDFDocument, revisions: PdfRevisions): void {
 		this.log = []
 		this.applied = 0
 		this.savedApplied = 0
@@ -308,7 +366,7 @@ export class PdfEditSession {
 		this.journalRedo = false
 		this.open = null
 		this.pages = null
-		this.signatures = signatureState(document)
+		this.signatures = signatureState(document, revisions)
 		this.form = formState(document)
 		this.tagged = isTagged(document)
 		this.revision++
@@ -335,6 +393,8 @@ export class PdfEditSession {
 			tools: toolAvailability(this.signatures, this.restrictions),
 			encryption: { method: this.encryption, access: this.access },
 			security: { ...securitySummary(document, this.held), pending: this.security?.choice.kind ?? null },
+			redacting: redactsContent(this.appliedSteps()),
+			ownFile: this.ownFile,
 			tagged: this.tagged,
 			// XFA read live: removing it before a save is a step that undo takes back.
 			form: { ...this.form, xfa: xfaState(document) }

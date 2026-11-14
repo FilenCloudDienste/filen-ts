@@ -186,6 +186,7 @@ export const FILL_SIGN_COMMANDS: PdfCommandTable<PdfFillSignCommands> = {
 
 			return role === null || signature === null ? null : { ...placement, role, signature }
 		},
+		bytes: ({ signature }) => (signature.kind === "image" ? signature.png.byteLength : 0),
 		run: (context, args) => {
 			const { page, box } = placeOn(context, args)
 

@@ -1,7 +1,7 @@
 import { OCR_ENGINE_VARIANTS, type OcrEngineVariant, type OcrModel } from "@filen/office/dom/pdfedit/ocr"
 
-// The text recognition worker's own helpers (ocr.worker.ts): which engine build this browser runs, and reading a
-// language model.
+// The text recognition worker's helpers: which engine build this browser runs (the page starts that build's worker),
+// and reading a language model (in the worker, ocrWorker.ts).
 
 // Smallest modules using one instruction of each feature: SIMD's i8x16.popcnt and relaxed SIMD's
 // i8x16.relaxed_swizzle (the probes wasm-feature-detect uses).

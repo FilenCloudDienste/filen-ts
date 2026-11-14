@@ -25,7 +25,52 @@ afterEach(() => {
 	host.remove()
 })
 
+// A polyline's points as its point list holds them.
+function pointsOf(line: SVGPolylineElement | null): number[][] {
+	const list = line?.points
+
+	if (list === undefined) return []
+
+	return Array.from({ length: list.numberOfItems }, (_, index) => {
+		const point = list.getItem(index)
+
+		return [point.x, point.y]
+	})
+}
+
 describe("tool overlays", () => {
+	it("appends each new ink point instead of rebuilding the stroke (linear in its length)", () => {
+		const points = new Float64Array(1024)
+		const appended = vi.spyOn(SVGPointList.prototype, "appendItem")
+		const draw = (length: number): void => {
+			act(() => {
+				root.render(
+					<PdfToolDraftOverlay
+						draft={{ kind: "ink", stroke: { page: 0, points, length } }}
+						box={[0, 0, 100, 200]}
+					/>
+				)
+			})
+		}
+
+		for (let index = 0; index < 400; index += 2) {
+			points[index] = index
+			points[index + 1] = index / 2
+			draw(index + 2)
+		}
+
+		// 200 points drawn one by one: one append each, never the whole stroke again.
+		expect(appended).toHaveBeenCalledTimes(200)
+		expect(pointsOf(host.querySelector("polyline")).at(-1)).toEqual([398, 199])
+
+		// A new stroke (another start) starts the list anew.
+		points[0] = 50
+		draw(2)
+		expect(pointsOf(host.querySelector("polyline"))).toEqual([[50, 0]])
+
+		appended.mockRestore()
+	})
+
 	it("draws drafts in page space", () => {
 		act(() => {
 			root.render(
@@ -55,7 +100,10 @@ describe("tool overlays", () => {
 
 		expect(svgs[0]?.getAttribute("viewBox")).toBe("0 0 100 200")
 		expect(host.querySelector("ellipse")?.getAttribute("rx")).toBe("20")
-		expect(host.querySelector("polyline")?.getAttribute("points")).toBe("1,2 3,4")
+		expect(pointsOf(host.querySelector("polyline"))).toEqual([
+			[1, 2],
+			[3, 4]
+		])
 		expect(host.querySelector("polyline")?.getAttribute("style")).toContain("stroke-width: 3")
 		expect(host.querySelector("polygon")?.getAttribute("points")).toBe("0,0 10,0 10,5 0,5")
 	})
@@ -92,18 +140,18 @@ describe("tool overlays", () => {
 		expect(host.querySelectorAll(".fo-pdf-tool-handle")).toHaveLength(0)
 	})
 
-	it("announces a keyboard placement", () => {
+	it("draws a keyboard placement, leaving its announcement to the host's one live region", () => {
 		act(() => {
 			root.render(
 				<PdfPlacementIndicator
 					rect={[0, 0, 50, 50]}
 					box={[0, 0, 100, 100]}
-					announcement="Text box at 0, 0"
 				/>
 			)
 		})
 
-		expect(host.querySelector('[role="status"]')?.textContent).toBe("Text box at 0, 0")
+		expect(host.querySelector(".fo-pdf-tool-placement")?.getAttribute("style")).toContain("width: 50%")
+		expect(host.querySelector('[role="status"], [aria-live]')).toBeNull()
 	})
 
 	it("edits a text box and finishes on Mod+Enter or blur", () => {

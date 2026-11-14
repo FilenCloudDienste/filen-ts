@@ -17,6 +17,7 @@ const { PdfAnnotationStore, annotationStoreOf } = await import("@/features/pdf/a
 const { selectionKey, placingKey } = await import("@/features/pdf/annotations/annotationKeys")
 const { pdfSurfaceKey } = await import("@/features/pdf/tools/toolKeys.logic")
 const { PDF_TOOLS } = await import("@/features/pdf/tools")
+const { preview } = await import("@/locales/en/preview")
 const { toolInEffect, toolVariant } = await import("@/features/pdf/tools/registry")
 const { flattenedFirst } = await import("@/features/pdf/session/toolSession")
 
@@ -155,6 +156,49 @@ describe("the annotation tools' choices", () => {
 		expect(attachmentFileName("dir/")).toBe("attachment")
 		expect(attachmentFileName("..")).toBe("attachment")
 		expect(attachmentFileName("")).toBe("attachment")
+	})
+
+	it("names an attachment's download without bidi or other format characters", () => {
+		// A right-to-left override would show "invoiceexe.pdf".
+		expect(attachmentFileName("invoice‮fdp.exe")).toBe("invoicefdp.exe")
+		expect(attachmentFileName("a​b⁦c⁩﻿­.txt")).toBe("abc.txt")
+		expect(attachmentFileName("line break .txt")).toBe("linebreak.txt")
+		expect(attachmentFileName("‎‏")).toBe("attachment")
+	})
+})
+
+describe("tool names", () => {
+	it("name every tool and variant differently (Fill & Sign's text is not Tools' Add text)", () => {
+		const names = PDF_TOOLS.flatMap(tool => [
+			preview[tool.labelKey],
+			...(tool.variants ?? []).filter(variant => variant.labelKey !== tool.labelKey).map(variant => preview[variant.labelKey])
+		])
+		const repeated = names.filter((name, index) => names.indexOf(name) !== index)
+
+		expect(repeated).toEqual([])
+	})
+})
+
+describe("a stopped editor", () => {
+	it("offers no tool that needs it, each saying to reopen the file; viewing stays", () => {
+		const policy = { editable: true, online: true, tools: null, poisoned: true }
+		const offered = PDF_TOOLS.filter(tool => tool.enabledWhen(policy).enabled).map(tool => tool.id)
+
+		expect(offered.sort()).toEqual(["annotations.hand", "annotations.select"])
+
+		for (const tool of PDF_TOOLS) {
+			const verdict = tool.enabledWhen(policy)
+
+			if (!verdict.enabled) expect([tool.id, verdict.reasonKey]).toEqual([tool.id, "previewPdfToolPoisoned"])
+		}
+
+		// Read-only files say so first while the editor runs.
+		expect(
+			PDF_TOOLS.find(tool => tool.id === "annotations.draw")?.enabledWhen({ ...policy, editable: false, poisoned: false })
+		).toEqual({
+			enabled: false,
+			reasonKey: "previewPdfToolNotEditable"
+		})
 	})
 })
 
@@ -321,7 +365,9 @@ describe("the annotation store", () => {
 		const changes: unknown[] = []
 		const swap = {} as never
 		const store = annotationStoreOf(swap)
+		const finish = vi.fn()
 		const context = fakeToolContext({
+			finish,
 			edit: (change: (session: PdfEditSessionModel) => Promise<unknown>) => {
 				void change({
 					dispatch: (command: string, args: unknown) => {
@@ -366,6 +412,6 @@ describe("the annotation store", () => {
 		expect(store.getState().hand).toBe(false)
 		// Escape with nothing placing goes back to selection.
 		expect(placingKey({ kind: "down", key: "Escape", shift: false, alt: false, page: 0 }, context)).toBe(true)
-		expect(context.finish).toHaveBeenCalled()
+		expect(finish).toHaveBeenCalled()
 	})
 })

@@ -7,7 +7,7 @@ import { servePdfEngine, type PdfEngineScope } from "../../dom/pdfedit/server"
 import type { PdfBitmapLike } from "../../dom/pdfedit/protocol"
 import type { PdfRequestTable } from "../../dom/pdfedit/requests"
 import { textPrepareRequest } from "../../dom/pdfedit/toolRequests"
-import { verifySignaturesRequest } from "../../dom/pdfedit/verifyRequest"
+import { signatureHintsRequest, verifySignaturesRequest } from "../../dom/pdfedit/verifyRequest"
 import { verifyRedactionRequest } from "../../dom/pdfedit/protectRequests"
 import { nodeFontAssets } from "../sheetPdfFixtures"
 import { nodeSubtle } from "../pdfSignFixtures"
@@ -42,6 +42,7 @@ const scope: PdfEngineScope = {
 }
 const requests: Partial<PdfRequestTable> = {
 	verifySignatures: verifySignaturesRequest(nodeSubtle),
+	signatureHints: signatureHintsRequest,
 	verifyRedaction: verifyRedactionRequest,
 	textPrepare: textPrepareRequest(nodeFontAssets),
 	...(options.trapOnHeap === true

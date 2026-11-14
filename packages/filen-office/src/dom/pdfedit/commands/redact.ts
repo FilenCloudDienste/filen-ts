@@ -1,9 +1,12 @@
+import { invertMatrix, type PdfMatrix } from "../../../core/pdfedit/matrix"
 import {
+	hiddenTerms,
 	REDACTION_PRESETS,
 	type RedactionManifest,
 	type RedactionPreset,
 	type RedactionRegion,
 	type RedactionTerm,
+	transformRect,
 	type RedactQuad,
 	type RedactRect
 } from "../../../core/pdfedit/redactVerify"
@@ -94,18 +97,65 @@ function checkPage(context: PdfCommandContext, page: number): void {
 	if (page >= context.document.countPages()) throw new PdfEngineRefusal("badRequest", "no such page")
 }
 
-function pageNumber(context: PdfCommandContext, page: number): number {
-	const object = context.document.findPage(page)
+function pageNumber(document: PdfCommandContext["document"], page: number): number {
+	const object = document.findPage(page)
 
 	if (!object.isIndirect()) throw new PdfEngineRefusal("failed", "the page is not an object")
 
 	return object.asIndirect()
 }
 
-// What an applied page redacted, by the logged arguments of its command: the page's object (found again by number
-// at save time, wherever the page moved) and the regions. A rebuild runs the command again on the same arguments and
-// records the same.
-const applied = new WeakMap<object, { readonly pageObject: number; readonly regions: readonly RedactionRegion[] }>()
+// What a step redacted, by the logged arguments of its command: each page's object (found again by number at save
+// time, wherever the page moved) and its regions in the page's user space (where a later crop or rotation does not
+// move them). A rebuild runs the command again on the same arguments and records the same.
+interface RedactedPage {
+	readonly pageObject: number
+	readonly regions: readonly RedactionRegion[]
+	// The words the marks covered (AppliedRedactions.hidden).
+	readonly hidden: readonly string[]
+}
+
+// What a command redacted on one page (0-based, as now), in its page space as it is now.
+export interface RedactedRegions {
+	readonly page: number
+	readonly regions: readonly RedactionRegion[]
+	readonly hidden: readonly string[]
+}
+
+// The transform from a page's user space to its page space (MuPDF's: crop box and rotation applied).
+function pageTransform(document: PdfCommandContext["document"], page: number): PdfMatrix {
+	const loaded = document.loadPage(page)
+
+	try {
+		return loaded.getTransform()
+	} finally {
+		loaded.destroy()
+	}
+}
+
+const redactedBy = new WeakMap<object, readonly RedactedPage[]>()
+
+// The commands whose steps redact regions, each recording them with recordRedaction: an applied page, and a crop that
+// deletes what lies outside it.
+const REGION_STEPS: ReadonlySet<string> = new Set(["redact.apply", "crop.removeOutside"])
+
+// Records what a command run with `args` redacted on each page of `document`.
+export function recordRedaction(document: PdfCommandContext["document"], args: object, pages: readonly RedactedRegions[]): void {
+	redactedBy.set(
+		args,
+		pages.map(({ page, regions, hidden }) => {
+			const toUser = invertMatrix(pageTransform(document, page))
+
+			if (toUser === null) throw new PdfEngineRefusal("failed", "the page has no area")
+
+			return {
+				pageObject: pageNumber(document, page),
+				regions: regions.map(region => ({ ...region, rect: transformRect(toUser, region.rect) })),
+				hidden
+			}
+		})
+	)
+}
 
 const APPLY: PdfCommand<PdfRedactCommands["redact.apply"]> = {
 	tool: "content",
@@ -121,10 +171,9 @@ const APPLY: PdfCommand<PdfRedactCommands["redact.apply"]> = {
 	run: (context, args) => {
 		checkPage(context, args.page)
 
-		const pageObject = pageNumber(context, args.page)
 		const result = applyPageRedactions(context.mupdf, context.document, args.page, { removeAnnotations: args.removeAnnotations })
 
-		applied.set(args, { pageObject, regions: result.regions })
+		recordRedaction(context.document, args, [{ page: args.page, regions: result.regions, hidden: result.hidden }])
 
 		return result.pages
 	}
@@ -201,6 +250,7 @@ export const REDACT_COMMANDS: PdfCommandTable<PdfRedactCommands> = {
 	},
 	"redact.removeMark": {
 		tool: "content",
+		target: "id",
 		parse: args => (isRecord(args) && isIndex(args["page"]) && isIndex(args["id"]) ? { page: args["page"], id: args["id"] } : null),
 		run: (context, args) => {
 			checkPage(context, args.page)
@@ -229,35 +279,56 @@ function termKey(term: RedactionTerm): string {
 	return `${term.matchCase ? "1" : "0"}${term.wholeWord ? "1" : "0"}${term.text}`
 }
 
+// Whether any of the steps removes content under the redaction rules (an apply, a scrub, a sanitize, removing what lies
+// outside a crop): only a plain save, whose verifier checks them, may write them.
+export function redactsContent(steps: readonly LoggedStep[]): boolean {
+	return steps.some(step => REGION_STEPS.has(step.label) || step.label === "redact.scrub" || step.label === "redact.sanitize")
+}
+
 // What the steps in the document redacted, for the verifier of the file a save writes; null when none redacted
 // anything (no apply, scrub or sanitize). Terms and sanitize count from the applied pages' promises and from scrub and
 // sanitize steps alike: a check that would fail is never skipped because its step was undone. `pageOf` finds a page's index by its object number now; regions of a page
 // since deleted are gone with it. Throws when an applied page's regions are not known (never: every apply records).
 export function redactionManifest(
+	document: PdfCommandContext["document"],
 	steps: readonly LoggedStep[],
 	pageOf: (pageObject: number) => number | undefined
 ): RedactionManifest | null {
 	const regions: RedactionRegion[] = []
 	const terms = new Map<string, RedactionTerm>()
+	const hidden = new Set<string>()
 	let redacted = false
 	let sanitized = false
 	let annotationsRemoved = true
 
 	for (const step of steps) {
-		if (step.label === "redact.apply") {
+		if (REGION_STEPS.has(step.label)) {
 			redacted = true
 
 			for (const args of step.args) {
-				const record = typeof args === "object" && args !== null ? applied.get(args) : undefined
+				const record = typeof args === "object" && args !== null ? redactedBy.get(args) : undefined
 
 				if (record === undefined || !isRecord(args)) throw new PdfEngineRefusal("failed", "an applied redaction is not known")
-				if (args["removeAnnotations"] === false) annotationsRemoved = false
-				if (args["sanitize"] === true) sanitized = true
-				if (isRedactionTerms(args["terms"])) for (const term of args["terms"]) terms.set(termKey(term), term)
 
-				const page = pageOf(record.pageObject)
+				if (step.label === "redact.apply") {
+					if (args["removeAnnotations"] === false) annotationsRemoved = false
+					if (args["sanitize"] === true) sanitized = true
+					if (isRedactionTerms(args["terms"])) for (const term of args["terms"]) terms.set(termKey(term), term)
+				}
 
-				if (page !== undefined) for (const region of record.regions) regions.push({ ...region, page })
+				for (const done of record) {
+					// Kept even when the page is gone since: its tags may not be.
+					for (const word of done.hidden) hidden.add(word)
+
+					const page = pageOf(done.pageObject)
+
+					if (page === undefined) continue
+
+					// Into the page space the verifier reads the saved page in (its crop and rotation now).
+					const toPage = pageTransform(document, page)
+
+					for (const region of done.regions) regions.push({ ...region, page, rect: transformRect(toPage, region.rect) })
+				}
 			}
 		} else if (step.label === "redact.scrub") {
 			redacted = true
@@ -271,5 +342,5 @@ export function redactionManifest(
 		}
 	}
 
-	return redacted ? { regions, terms: [...terms.values()], sanitized, annotationsRemoved } : null
+	return redacted ? { regions, terms: [...terms.values()], hidden: hiddenTerms(hidden), sanitized, annotationsRemoved } : null
 }

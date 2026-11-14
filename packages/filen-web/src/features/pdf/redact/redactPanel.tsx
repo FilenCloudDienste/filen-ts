@@ -5,10 +5,11 @@ import type { RedactionFailure, RedactionFinding, RedactionMark } from "@filen/o
 import { usePdfEditSession } from "@filen/office/react/pdfedit"
 import { ApplyRedactionsDialog, type ApplyRedactionsOptions } from "@/features/pdf/redact/applyRedactionsDialog"
 import { FindRedactPanel } from "@/features/pdf/redact/findRedactPanel"
-import { applyRedactions, rememberSearch } from "@/features/pdf/redact/redactFlow"
+import { applyRedactions, findForRedaction } from "@/features/pdf/redact/redactFlow"
 import { RedactionMarksList } from "@/features/pdf/redact/redactionMarksList"
 import type { RedactMode } from "@/features/pdf/redact/redaction.logic"
 import { useToolSession } from "@/features/pdf/session/useToolSession"
+import { PdfSidePanel } from "@/features/pdf/tools/pdfSidePanel"
 import type { PdfToolPanelProps } from "@/features/pdf/tools/registry"
 
 // The Redact tools' side panel: Find & redact (its mode), the marks waiting to be applied, and Apply redactions…,
@@ -55,6 +56,8 @@ function RedactPanel({ context, mode }: RedactPanelProps) {
 	const [marks, setMarks] = useState<readonly RedactionMark[]>([])
 	const [findings, setFindings] = useState<readonly RedactionFinding[] | null>(null)
 	const [searching, setSearching] = useState(false)
+	// The last search failed (the engine's error, or the editor never ran it): said as such, never as "no matches".
+	const [searchFailed, setSearchFailed] = useState(false)
 	const [open, setOpen] = useState(false)
 	const [busy, setBusy] = useState(false)
 	const [failure, setFailure] = useState<RedactionFailure | null>(null)
@@ -118,23 +121,27 @@ function RedactPanel({ context, mode }: RedactPanelProps) {
 	}
 
 	return (
-		<aside className="flex h-full w-80 shrink-0 flex-col border-l bg-background">
+		<PdfSidePanel aria-label={t("previewPdfRedactPanel")}>
 			{mode === "find" ? (
 				<div className="min-h-0 flex-1 border-b">
 					<FindRedactPanel
 						findings={findings}
 						searching={searching}
+						failed={searchFailed}
 						onSearch={query => {
 							setSearching(true)
+							setSearchFailed(false)
 							context.edit(
 								async current => {
-									const found = await current.engine.call("redactFind", { query }).catch(() => [])
+									const found = await findForRedaction(current, query)
 
-									rememberSearch(current, query)
 									setFindings(found)
+									setSearchFailed(found === null)
 									setSearching(false)
 								},
 								() => {
+									setFindings(null)
+									setSearchFailed(true)
 									setSearching(false)
 								}
 							)
@@ -173,10 +180,11 @@ function RedactPanel({ context, mode }: RedactPanelProps) {
 				fileName={context.host.fileName}
 				takenNames={taken}
 				canSaveInPlace={context.host.canSaveInPlace}
+				tagged={snapshot?.state.tagged ?? false}
 				busy={busy}
 				failure={failure}
 				onApply={apply}
 			/>
-		</aside>
+		</PdfSidePanel>
 	)
 }

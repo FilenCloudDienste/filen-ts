@@ -1,4 +1,5 @@
 import type * as Mupdf from "mupdf"
+import type { PdfMatrix } from "../../../core/pdfedit/matrix"
 import {
 	fitOcrWords,
 	imageUprightTurns,
@@ -7,7 +8,6 @@ import {
 	ocrUprightTurns,
 	pixelToPageMatrix,
 	type OcrImageUse,
-	type OcrMatrix,
 	type OcrPageSummary,
 	type QuarterTurns
 } from "../../../core/pdfedit/ocrGeometry"
@@ -16,7 +16,7 @@ import type { MupdfModule } from "../protocol"
 // The engine's side of text recognition: what a page draws (to pick scanned pages), its render for the recogniser,
 // and the command that lays the recognised text over it.
 
-function clippedArea(ctm: OcrMatrix, width: number, height: number): number {
+function clippedArea(ctm: PdfMatrix, width: number, height: number): number {
 	const xs = [ctm[4], ctm[0] + ctm[4], ctm[2] + ctm[4], ctm[0] + ctm[2] + ctm[4]]
 	const ys = [ctm[5], ctm[1] + ctm[5], ctm[3] + ctm[5], ctm[1] + ctm[3] + ctm[5]]
 	const x0 = Math.max(0, Math.min(...xs))
@@ -80,7 +80,7 @@ export interface OcrRender {
 	readonly stride: number
 	readonly dpi: number
 	// Pixel space → page space (core/pdfedit/ocrGeometry.ts).
-	readonly pixelToPage: OcrMatrix
+	readonly pixelToPage: PdfMatrix
 	readonly summary: OcrPageSummary
 }
 
@@ -131,7 +131,7 @@ export interface OcrPageEdit {
 	// The recogniser's text-only page.
 	readonly pdf: Uint8Array
 	// Overlay → page (ocrOverlayMatrix).
-	readonly matrix: OcrMatrix
+	readonly matrix: PdfMatrix
 }
 
 // The recogniser's page with its words' glyphs stretched to their boxes (fitOcrWords); a new PDF.

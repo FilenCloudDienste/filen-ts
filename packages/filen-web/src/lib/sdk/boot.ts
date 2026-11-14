@@ -34,6 +34,7 @@ import { loadRibbonCollapsed } from "@/features/office/lib/ribbonSettings"
 import { loadDocxFormattingMarks } from "@/features/preview/lib/docxFormattingMarks"
 import { loadSidebarHidden } from "@/features/shell/lib/sidebarHidden"
 import { loadOcrLanguages } from "@/features/pdf/ocr/ocrLanguagePreference"
+import { loadPdfPagesRailOpen } from "@/features/pdf/pages/railOpen"
 
 // Settled when bootSdk() finishes — on success OR failure, and never rejected. Auth-sensitive route
 // guards await this before reading hasClient(): the boot kick runs before the router mounts, but
@@ -173,7 +174,8 @@ function preloadDevicePreferences(): Promise<void> {
 		loadRibbonCollapsed(),
 		loadDocxFormattingMarks(),
 		loadSidebarHidden(),
-		loadOcrLanguages()
+		loadOcrLanguages(),
+		loadPdfPagesRailOpen()
 	]).then(() => undefined)
 }
 

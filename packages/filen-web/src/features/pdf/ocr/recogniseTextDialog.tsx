@@ -50,7 +50,7 @@ function PageRow({ state }: { state: OcrPageState }) {
 
 	return (
 		<li className="flex items-center justify-between gap-3 py-1 text-sm">
-			<span>{t("previewPdfOcrPage", { page: state.page + 1 })}</span>
+			<span>{t("previewPdfPageNumber", { page: state.page + 1 })}</span>
 			<span className={state.status === "failed" ? "text-destructive" : "text-muted-foreground"}>{status}</span>
 		</li>
 	)
@@ -178,7 +178,7 @@ export function RecogniseTextDialog({
 									<Input
 										aria-label={t("previewPdfOcrRangeLabel")}
 										aria-invalid={rangeInvalid}
-										placeholder={t("previewPdfPrintRangePlaceholder")}
+										placeholder={t("previewPdfPageRangePlaceholder")}
 										autoComplete="off"
 										spellCheck={false}
 										className="h-8 min-w-0 flex-1 leading-5"
@@ -189,7 +189,7 @@ export function RecogniseTextDialog({
 									/>
 								</div>
 							</RadioGroup>
-							{rangeInvalid ? <FieldError>{t("previewPdfPrintRangeInvalid", { last: pageCount })}</FieldError> : null}
+							{rangeInvalid ? <FieldError>{t("previewPdfPageRangeInvalid", { last: pageCount })}</FieldError> : null}
 							{chosen === null ? null : (
 								<FieldDescription>
 									{chosen.length === 0

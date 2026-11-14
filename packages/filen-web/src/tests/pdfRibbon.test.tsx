@@ -25,7 +25,6 @@ const { registerAllActions } = await import("@/lib/keymap/actions")
 
 registerAllActions()
 
-
 type Props = Parameters<typeof PdfRibbon>[0]
 type History = NonNullable<Props["history"]>
 
@@ -92,7 +91,6 @@ function setup(overrides: Partial<Props>): Props {
 		...overrides
 	}
 }
-
 
 function history(overrides: Partial<History>): History {
 	return {
@@ -201,6 +199,8 @@ describe("PdfRibbon", () => {
 		fireEvent.click(screen.getByRole("button", { name: "Underline" }))
 		expect(props.onActivateTool).toHaveBeenLastCalledWith("markup", "Underline")
 
+		// A 24 px target beside the tool, 44 px under a finger.
+		expect(screen.getByRole("button", { name: "Highlight options" }).className).toMatch(/(^| )w-6( |$).*pointer-coarse:w-11/)
 		fireEvent.click(screen.getByRole("button", { name: "Highlight options" }))
 
 		const item = await screen.findByRole("menuitem", { name: "Highlight" })
@@ -240,6 +240,36 @@ describe("PdfRibbon", () => {
 
 		expect(off).toHaveProperty("disabled", true)
 		expect(off.getAttribute("title")).toBe("You're offline.")
+	})
+
+	it("starts with the pages rail closed and opens and closes it from the Pages tab's toggle", async () => {
+		const { usePdfPagesRailOpen } = await import("@/features/pdf/pages/railOpen")
+		const seen: boolean[] = []
+
+		function RailProbe() {
+			seen.push(usePdfPagesRailOpen())
+
+			return null
+		}
+
+		render(
+			<>
+				<PdfRibbon {...setup({})} />
+				<RailProbe />
+			</>
+		)
+		expect(seen.at(-1)).toBe(false)
+
+		fireEvent.click(screen.getByRole("tab", { name: "Pages" }))
+
+		const toggle = screen.getByRole("button", { name: "Page thumbnails" })
+
+		expect(toggle.getAttribute("aria-pressed")).toBe("false")
+		fireEvent.click(toggle)
+		expect(seen.at(-1)).toBe(true)
+		expect(screen.getByRole("button", { name: "Page thumbnails" }).getAttribute("aria-pressed")).toBe("true")
+		fireEvent.click(screen.getByRole("button", { name: "Page thumbnails" }))
+		expect(seen.at(-1)).toBe(false)
 	})
 
 	it("prefetches the editor when Tools is chosen", () => {
@@ -284,6 +314,64 @@ describe("PdfRibbon", () => {
 		await waitFor(() => {
 			expect(discard).toHaveBeenCalledTimes(1)
 		})
+	})
+
+	it("for a new document of extracted pages, saves without a separate copy and asks before dropping it", async () => {
+		const discard = vi.fn()
+		const props = setup({ history: history({ draft: true, discard }) })
+
+		render(<PdfRibbon {...props} />)
+		fireEvent.click(screen.getByRole("button", { name: "More save options" }))
+		await screen.findByRole("menuitem", { name: /^Save/ })
+		expect(screen.queryByRole("menuitem", { name: "Save as copy" })).toBeNull()
+		fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" })
+		fireEvent.click(screen.getByRole("button", { name: "Discard changes" }))
+
+		const dialog = await screen.findByRole("alertdialog", { name: "Discard the new PDF?" })
+
+		fireEvent.click(within(dialog).getByRole("button", { name: "Discard" }))
+
+		await waitFor(() => {
+			expect(discard).toHaveBeenCalledTimes(1)
+		})
+	})
+
+	it("disables Discard while nothing is unsaved (after a save the history stays)", () => {
+		const props = setup({ history: history({ dirty: false, canUndo: true }) })
+
+		render(<PdfRibbon {...props} />)
+
+		const discard = screen.getByRole("button", { name: "Discard changes" })
+
+		expect(discard).toHaveProperty("disabled", true)
+		fireEvent.click(discard)
+		expect(screen.queryByRole("alertdialog")).toBeNull()
+	})
+
+	it("drops an open Discard question once a save leaves nothing unsaved, and never shows it later", async () => {
+		const props = setup({ history: history({}) })
+		const { rerender } = render(<PdfRibbon {...props} />)
+
+		fireEvent.click(screen.getByRole("button", { name: "Discard changes" }))
+		await screen.findByRole("alertdialog")
+
+		rerender(
+			<PdfRibbon
+				{...props}
+				history={history({ dirty: false, canUndo: true })}
+			/>
+		)
+		await waitFor(() => {
+			expect(screen.queryByRole("alertdialog")).toBeNull()
+		})
+
+		rerender(
+			<PdfRibbon
+				{...props}
+				history={history({})}
+			/>
+		)
+		expect(screen.queryByRole("alertdialog")).toBeNull()
 	})
 
 	it("disables saving while it may not run", () => {

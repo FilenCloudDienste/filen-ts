@@ -6,6 +6,7 @@ import * as pdfjs from "pdfjs-dist/legacy/build/pdf.mjs"
 import { savePortReader, type SavePortEnd } from "@filen/shared/savePort"
 import { PDF_DESKTOP_MEMORY, type PdfWidgetSummary } from "../../core/pdfedit"
 import { normalizeStrokes } from "../../core/pdfedit/visualSignature"
+import { pdfSignatureFields, type PdfSignatureFieldHint } from "../../dom/pdf"
 import type { PdfEngineClient } from "../../dom/pdfedit/client"
 import { startEngine, stopEngines } from "./harness"
 import { budget } from "../timing"
@@ -41,6 +42,15 @@ async function saved(client: PdfEngineClient, inputBytes: number): Promise<Uint8
 
 	if (begun.status !== "written") throw new Error("refused")
 
+	const bytes = await upload(client)
+
+	await client.call("saveEnd", { outcome: "copied", next: "continue" })
+
+	return bytes
+}
+
+// The held output, streamed as an upload reads it.
+async function upload(client: PdfEngineClient): Promise<Uint8Array> {
 	const channel = new MessageChannel()
 	const reader = savePortReader(channel.port2 as unknown as SavePortEnd)
 	const written = client.call("writeOutput", { port: channel.port1 }, [channel.port1])
@@ -50,7 +60,6 @@ async function saved(client: PdfEngineClient, inputBytes: number): Promise<Uint8
 
 	reader.settled(true)
 	await written
-	await client.call("saveEnd", { outcome: "copied", next: "continue" })
 
 	const bytes = new Uint8Array(chunks.reduce((sum, chunk) => sum + chunk.length, 0))
 	let at = 0
@@ -61,6 +70,16 @@ async function saved(client: PdfEngineClient, inputBytes: number): Promise<Uint8
 	}
 
 	return bytes
+}
+
+// The signatures pdf.js reads, the hints the engine's check cross-checks.
+async function pdfjsHints(bytes: Uint8Array): Promise<PdfSignatureFieldHint[] | null> {
+	const task = pdfjs.getDocument({ data: bytes.slice(), verbosity: 0 })
+	const hints = pdfSignatureFields(await (await task.promise).getSignatures())
+
+	await task.destroy()
+
+	return hints
 }
 
 async function pdfjsAnnotations(bytes: Uint8Array): Promise<Record<string, unknown>[][]> {
@@ -186,7 +205,8 @@ describe("form commands", () => {
 			expect((await engine.client.call("state", {})).form.xfa).toBe("hybrid")
 
 			await engine.client.call("dispatch", { command: "forms.removeXfa", args: {} })
-			expect((await engine.client.call("state", {})).form.xfa).toBe("none")
+			// Counted as a content change: a signed document's save would invalidate its signatures.
+			expect(await engine.client.call("state", {})).toMatchObject({ form: { xfa: "none" }, changes: ["content"] })
 
 			await engine.client.call("undo", {})
 			expect((await engine.client.call("state", {})).form.xfa).toBe("hybrid")
@@ -197,6 +217,71 @@ describe("form commands", () => {
 
 			expect(reopened.getTrailer().get("Root", "AcroForm", "XFA").isNull()).toBe(true)
 			reopened.destroy()
+		},
+		TIMEOUT
+	)
+
+	it(
+		"counts removing a signed form's XFA as invalidating its signatures, and goes on with the file that rewrote them",
+		async () => {
+			// A signed form given an XFA packet afterwards (a hybrid form the signer signed).
+			const signed = new mupdf.PDFDocument(readFileSync(new URL("../fixtures/pdfsign/approval-rsa.pdf", import.meta.url)))
+
+			signed.getTrailer().get("Root", "AcroForm").put("XFA", signed.newString("<xdp:xdp/>"))
+
+			const source = signed.saveToBuffer("incremental").asUint8Array().slice()
+
+			signed.destroy()
+
+			const engine = startEngine(source)
+
+			await engine.open()
+			expect(await engine.client.call("state", {})).toMatchObject({ tools: { formFill: null }, form: { xfa: "hybrid" } })
+
+			await engine.client.call("dispatch", { command: "forms.removeXfa", args: {} })
+
+			const begun = await engine.client.call("saveBegin", {
+				inputBytes: source.length,
+				memory: PDF_DESKTOP_MEMORY,
+				invalidateConfirmed: false
+			})
+
+			expect(begun).toMatchObject({ status: "refused", reason: "invalidatesSignatures", plan: { mode: "full" } })
+
+			// Confirmed: the rewrite becomes the file, and the engine goes on with it, so its signature check reads the
+			// written file, never the signed one it opened.
+			const before = await engine.client.call("verifySignatures", { fields: await pdfjsHints(source) })
+
+			expect(before.signatures[0]?.state).not.toBe("invalid")
+
+			const confirmed = await engine.client.call("saveBegin", {
+				inputBytes: source.length,
+				memory: PDF_DESKTOP_MEMORY,
+				invalidateConfirmed: true
+			})
+
+			expect(confirmed).toMatchObject({ status: "written", plan: { mode: "full", invalidates: ["Signature1"] } })
+			const written = await upload(engine.client)
+
+			const ended = await engine.client.call("saveEnd", { outcome: "saved", next: "continue" })
+
+			expect(ended).toMatchObject({ history: "reset", state: { dirty: false, form: { xfa: "none" } } })
+
+			const after = await engine.client.call("verifySignatures", { fields: await pdfjsHints(written) })
+
+			expect(after.signatures[0]?.state).toBe("invalid")
+
+			// The file it now reads is its own: the hints for it are the engine's reading, as pdf.js would read the same
+			// bytes, and the check against them is the verdict; the opened file's hints no longer describe it.
+			expect(ended.state.ownFile).toBe(true)
+
+			const own = await engine.client.call("signatureHints", {})
+
+			expect(own).toEqual(await pdfjsHints(written))
+			expect((await engine.client.call("verifySignatures", { fields: own })).signatures[0]?.state).toBe("invalid")
+			expect((await engine.client.call("verifySignatures", { fields: await pdfjsHints(source) })).signatures[0]).toMatchObject({
+				unverifiableReason: "parserMismatch"
+			})
 		},
 		TIMEOUT
 	)

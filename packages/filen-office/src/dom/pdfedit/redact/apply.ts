@@ -1,7 +1,8 @@
 import type * as Mupdf from "mupdf"
-import { quadBounds, rectsOverlap, type RedactionRegion, type RedactRect } from "../../../core/pdfedit/redactVerify"
+import { coveredWords, quadBounds, rectsOverlap, type RedactionRegion, type RedactRect } from "../../../core/pdfedit/redactVerify"
 import type { MupdfModule } from "../protocol"
 import { changedSections, markedSections, removeAlternates, removeShadings, stripSectionText } from "./content"
+import { pageText } from "./find"
 import { isRedaction, markOf } from "./marks"
 import { stripObjectStructText, stripPageStructText } from "./structure"
 
@@ -20,6 +21,8 @@ export interface AppliedRedactions {
 	readonly regions: readonly RedactionRegion[]
 	// Pages that changed: the page, and pages showing another widget of a form field whose value was removed.
 	readonly pages: readonly number[]
+	// The words of the page's text the marks covered (coveredWords), for the verifier's manifest.
+	readonly hidden: readonly string[]
 }
 
 function overlapsAny(rect: RedactRect, regions: readonly RedactionRegion[]): boolean {
@@ -187,7 +190,7 @@ export function applyPageRedactions(
 	if (marks.length === 0) {
 		page.destroy()
 
-		return { regions: [], pages: [] }
+		return { regions: [], pages: [], hidden: [] }
 	}
 
 	const regions: RedactionRegion[] = []
@@ -207,6 +210,11 @@ export function applyPageRedactions(
 		}
 	}
 
+	const text = pageText(page)
+	const hidden = coveredWords(
+		text.text,
+		text.quads.map(quad => quad !== null && overlapsAny(quadBounds(quad), regions))
+	)
 	const pageObject = page.getObject()
 	const before = markedSections(pageObject).sections
 	const others = removeOverlying(document, page, regions, options)
@@ -249,13 +257,14 @@ export function applyPageRedactions(
 	removeAlternates(pageObject)
 	page.destroy()
 
-	return { regions, pages: [...new Set([pageIndex, ...others])].sort((left, right) => left - right) }
+	return { regions, pages: [...new Set([pageIndex, ...others])].sort((left, right) => left - right), hidden }
 }
 
 // Applies the marks of every page that has some; one operation per page in a session, this loop for a batch.
 export function applyAllRedactions(mupdf: MupdfModule, document: Mupdf.PDFDocument, options: ApplyRedactionOptions): AppliedRedactions {
 	const regions: RedactionRegion[] = []
 	const pages = new Set<number>()
+	const hidden = new Set<string>()
 
 	for (let index = 0; index < document.countPages(); index++) {
 		const applied = applyPageRedactions(mupdf, document, index, options)
@@ -263,7 +272,8 @@ export function applyAllRedactions(mupdf: MupdfModule, document: Mupdf.PDFDocume
 		regions.push(...applied.regions)
 
 		for (const page of applied.pages) pages.add(page)
+		for (const word of applied.hidden) hidden.add(word)
 	}
 
-	return { regions, pages: [...pages].sort((left, right) => left - right) }
+	return { regions, pages: [...pages].sort((left, right) => left - right), hidden: [...hidden] }
 }

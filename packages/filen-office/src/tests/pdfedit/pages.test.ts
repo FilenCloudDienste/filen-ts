@@ -393,7 +393,7 @@ describe("extract", () => {
 		expect(raw).not.toContain("Page 5")
 		expect(raw).not.toContain("example.com")
 
-		const saved = extractSaveOptions(source, null)
+		const saved = extractSaveOptions(source, null, true, true)
 
 		expect(saved).toEqual({ ok: true, options: UNENCRYPTED, encrypted: false })
 
@@ -418,7 +418,7 @@ describe("extract", () => {
 	it("carries the source's encryption as AES-256 with its permissions, and can leave it off", async () => {
 		const source = open(makeOrganisedPdf({ userPassword: "pässword" }), "pässword")
 		const extracted = extractDocument(mupdf, source, [1])
-		const saved = extractSaveOptions(source, { user: "pässword" })
+		const saved = extractSaveOptions(source, { user: "pässword" }, true, true)
 
 		if (!saved.ok) throw new Error("refused")
 
@@ -430,10 +430,10 @@ describe("extract", () => {
 		expect(reopened.needsPassword()).toBe(true)
 		expect(reopened.authenticatePassword("pässword")).toBeGreaterThan(0)
 		expect(await pdfjsTexts(bytes, "pässword")).toEqual(["Page 2"])
-		expect(extractSaveOptions(source, { user: "pässword" }, false)).toEqual({ ok: true, options: UNENCRYPTED, encrypted: false })
+		expect(extractSaveOptions(source, { user: "pässword" }, false, true)).toEqual({ ok: true, options: UNENCRYPTED, encrypted: false })
 
 		// A separator in a password is a password character, never another option.
-		const comma = extractSaveOptions(source, { user: "a,encrypt=none" })
+		const comma = extractSaveOptions(source, { user: "a,encrypt=none" }, true, true)
 
 		if (!comma.ok) throw new Error("refused")
 
@@ -442,9 +442,57 @@ describe("extract", () => {
 		expect(commaDoc.needsPassword()).toBe(true)
 		expect(commaDoc.authenticatePassword("a,encrypt=none")).toBeGreaterThan(0)
 		// A control character cannot pass the option parser unchanged: such a password cannot be carried.
-		expect(extractSaveOptions(source, { user: "a\u0007b" })).toEqual({ ok: false, reason: "unsupportedPassword" })
-		expect(extractSaveOptions(source, { user: "a\tb" })).toEqual({ ok: false, reason: "unsupportedPassword" })
+		expect(extractSaveOptions(source, { user: "a\u0007b" }, true, true)).toEqual({ ok: false, reason: "unsupportedPassword" })
+		expect(extractSaveOptions(source, { user: "a\tb" }, true, true)).toEqual({ ok: false, reason: "unsupportedPassword" })
 		extracted.document.destroy()
+	})
+
+	it("keeps a new file's encryption and restrictions without owner access, under an owner password nobody knows", () => {
+		const permissionsOf = (document: mupdf.PDFDocument): number => document.getTrailer().get("Encrypt").get("P").asNumber()
+		const reopen = (source: mupdf.PDFDocument, options: Readonly<Record<string, string | number>>): mupdf.PDFDocument => {
+			const extracted = extractDocument(mupdf, source, [0])
+			const reopened = mupdf.Document.openDocument(save(extracted.document, options), "application/pdf").asPDF()
+
+			extracted.document.destroy()
+
+			if (reopened === null) throw new Error("not a PDF")
+
+			return reopened
+		}
+
+		// Opened with the user password: the new files open with it, which never becomes their owner password, and the
+		// switch that would leave the protection off does nothing.
+		const locked = open(makeOrganisedPdf({ userPassword: "pässword", permissions: -3904 }), "pässword")
+
+		for (const protect of [true, false]) {
+			const saved = extractSaveOptions(locked, { user: "pässword" }, protect, false)
+
+			if (!saved.ok) throw new Error("refused")
+
+			expect(saved.encrypted).toBe(true)
+
+			const reopened = reopen(locked, saved.options)
+
+			expect(reopened.needsPassword()).toBe(true)
+			expect(reopened.authenticatePassword("pässword")).toBe(2)
+			expect(permissionsOf(reopened)).toBe(permissionsOf(locked))
+			reopened.destroy()
+		}
+
+		// Restrictions only: still none to open, the restrictions kept.
+		const restricted = open(makeOrganisedPdf({ ownerPassword: "owner", permissions: -3904 }))
+		const saved = extractSaveOptions(restricted, null, false, false)
+
+		if (!saved.ok) throw new Error("refused")
+
+		expect(saved.encrypted).toBe(true)
+
+		const reopened = reopen(restricted, saved.options)
+
+		expect(reopened.needsPassword()).toBe(false)
+		expect(reopened.authenticatePassword("owner") & 4).toBe(0)
+		expect(permissionsOf(reopened)).toBe(permissionsOf(restricted))
+		reopened.destroy()
 	})
 
 	it.each(["a,encrypt=none", 'x","encrypt":"none', 'o\\"wn,er=1}{', "🔑,=密码"])(
@@ -452,7 +500,7 @@ describe("extract", () => {
 		async password => {
 			const source = open(makeOrganisedPdf({ userPassword: "pässword" }), "pässword")
 			const extracted = extractDocument(mupdf, source, [0])
-			const saved = extractSaveOptions(source, { user: password, owner: `${password}!` })
+			const saved = extractSaveOptions(source, { user: password, owner: `${password}!` }, true, true)
 
 			if (!saved.ok) throw new Error("refused")
 

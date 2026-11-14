@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import type { PdfSignatureInfo, PdfSignatureReport } from "@filen/office/core/pdfsign"
 import type { PdfDocument } from "@filen/office/dom/pdf"
+import { previewPdfSignatures } from "@/locales/en/previewPdf/signatures"
 
 const { verifier } = vi.hoisted(() => ({ verifier: { current: null as null | ((...args: unknown[]) => Promise<PdfSignatureReport>) } }))
 
@@ -81,10 +82,36 @@ describe("signatureBanner", () => {
 		expect(
 			signatureBanner(report(info({ state: "unverifiable", unverifiableReason: "algorithm", signer: null, name: "Bob" })))
 		).toMatchObject({
-			key: "previewPdfSignatureBannerUnverifiable",
+			key: "previewPdfSignatureBannerInvalid",
+			tone: "invalid",
 			name: "Bob",
 			reason: "previewPdfSignatureUnverifiableAlgorithm"
 		})
+	})
+
+	it("has exactly three states, each verified one saying the signer isn't verified", () => {
+		const states: Parameters<typeof info>[0][] = [
+			{},
+			{ state: "changed", changes: { allowed: true, kinds: ["form"] }, signedLength: 9 },
+			{ state: "changed", changes: { allowed: false, kinds: ["content"] }, signedLength: 9 },
+			{ state: "invalid", invalidReason: "digestMismatch" },
+			{ state: "unverifiable", unverifiableReason: "parserMismatch" }
+		]
+		const banners = states.map(state => signatureBanner(report(info(state))))
+
+		expect(banners.map(banner => banner?.tone)).toEqual(["unchanged", "changed", "changed", "invalid", "invalid"])
+
+		for (const banner of banners) {
+			if (banner === null) throw new Error("no banner")
+
+			const text = previewPdfSignatures[banner.key]
+
+			if (banner.tone === "invalid") expect(text).toMatch(/^Invalid/)
+			else expect(text).toMatch(/ · signer not verified$/)
+		}
+
+		expect(previewPdfSignatures.previewPdfSignatureBannerUnchanged).toContain("unchanged since signing")
+		expect(previewPdfSignatures.previewPdfSignatureBannerChangedAllowed).toContain("changed after signing")
 	})
 })
 
@@ -126,6 +153,35 @@ describe("PdfSignatureStatus", () => {
 		expect(await screen.findByText("previewPdfSignatureSignerNotVerified")).toBeTruthy()
 		expect(screen.getByText(/previewPdfSignatureClaimedTime/)).toBeTruthy()
 		expect(screen.getByText("previewPdfSignatureNoTimestamp")).toBeTruthy()
+	})
+
+	it("draws each state with its own icon and wraps the sentence instead of cutting it off", async () => {
+		const icons = new Set<string>()
+
+		for (const state of [
+			{},
+			{ state: "changed" as const, changes: { allowed: true, kinds: ["form" as const] }, signedLength: 9 },
+			{ state: "invalid" as const, invalidReason: "digestMismatch" as const }
+		]) {
+			verifier.current = () => Promise.resolve(report(info(state)))
+
+			const { container, unmount } = render(
+				<PdfSignatureStatus
+					verify={verifier.current}
+					document={pdf(SIGNED)}
+				/>
+			)
+
+			await screen.findByText("previewPdfSignatureDetails")
+
+			const line = container.querySelector("[data-tone]")
+
+			icons.add(line?.querySelector("svg")?.getAttribute("class") ?? "")
+			expect(line?.querySelector(".truncate, [title]")).toBeNull()
+			unmount()
+		}
+
+		expect(icons.size).toBe(3)
 	})
 
 	it("offers the signed version of a document changed after signing", async () => {

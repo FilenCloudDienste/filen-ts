@@ -24,6 +24,7 @@ const { PdfFieldOverlay } = await import("@/features/pdf/session/fieldOverlay")
 const { combSpacing, controlField, engineFields, fieldEmpty, pdfjsFields } = await import("@/features/pdf/session/fieldOverlay.logic")
 const { pdfFormSaveGate } = await import("@/features/pdf/forms/formSave")
 const { FillSignOverlay } = await import("@/features/pdf/fillSign/fillSignPlacement")
+const { PdfLiveRegion } = await import("@/features/pdf/tools/pdfLiveRegion")
 const { markSize, pageBox, signatureSize, textBox } = await import("@/features/pdf/fillSign/fillSign.logic")
 
 afterEach(cleanup)
@@ -289,7 +290,9 @@ describe("Fill & Sign placement", () => {
 
 	function renderOverlay(mode: Parameters<typeof FillSignOverlay>[0]["mode"]) {
 		const { dispatch, session } = fakeSession()
+		const finish = vi.fn()
 		const context = fakeToolContext({
+			finish,
 			edit: vi.fn((change: (session: PdfEditSessionModel) => Promise<unknown>) => {
 				void change(session)
 			})
@@ -297,6 +300,7 @@ describe("Fill & Sign placement", () => {
 
 		render(
 			<div style={{ position: "relative", width: 612, height: 792 }}>
+				<PdfLiveRegion owner={context.swap} />
 				<FillSignOverlay
 					mode={mode}
 					context={context}
@@ -310,7 +314,7 @@ describe("Fill & Sign placement", () => {
 			</div>
 		)
 
-		return { dispatch, context, surface: screen.getByRole("application", { name: "Place on page 2" }) }
+		return { dispatch, finish, surface: screen.getByRole("application", { name: "Place on page 2" }) }
 	}
 
 	it("places a mark where clicked, centred", () => {
@@ -327,7 +331,7 @@ describe("Fill & Sign placement", () => {
 	})
 
 	it("places from the keyboard: Enter at the centre, arrows move, Enter places; Escape ends the tool", async () => {
-		const { dispatch, context, surface } = renderOverlay({ kind: "mark", mark: "cross" })
+		const { dispatch, finish, surface } = renderOverlay({ kind: "mark", mark: "cross" })
 
 		act(() => {
 			surface.focus()
@@ -342,7 +346,7 @@ describe("Fill & Sign placement", () => {
 		expect(dispatch).toHaveBeenCalledWith("fillSign.mark", expect.objectContaining({ box: [310, 390, 322, 402], mark: "cross" }))
 
 		fireEvent.keyDown(surface, { key: "Escape" })
-		expect(context.finish).toHaveBeenCalled()
+		expect(finish).toHaveBeenCalled()
 	})
 
 	it("opens a text box where clicked and adds the text on Enter", async () => {

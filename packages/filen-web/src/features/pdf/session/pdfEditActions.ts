@@ -17,10 +17,13 @@ import { log } from "@/lib/log"
 // (a save in place, or a signing save) and be told how it ended.
 
 export interface PdfSaveActionDeps extends PdfSaveDeps {
+	// Commits what was typed into form fields and not yet committed (each as its step), before anything else of a save.
+	readonly commitDrafts: () => Promise<void>
 	readonly askRemote: () => Promise<"copy" | "version" | "cancel">
 	// Words a copy's name: "report (edited).pdf", then "report (edited 2).pdf"...
 	readonly copySuffix: (number: number) => string
-	readonly onCopied: (name: string) => void
+	// `copy`: the file written, when known (to open it).
+	readonly onCopied: (name: string, copy: DriveItem | undefined) => void
 	readonly onCopyFailed: (error: unknown) => void
 	// Asked before either save (a form's XFA confirm and required-fields warning): it may become the other save, or
 	// none.
@@ -36,6 +39,8 @@ export interface PdfSaveActionDeps extends PdfSaveDeps {
 export interface PdfSaveRequest {
 	// What a signing save signs; null for a plain save in place.
 	readonly job: PdfSignedSaveJob | null
+	// A plain save a signing follows: the session goes on on the written file where it fits.
+	readonly adopt?: boolean
 	// Once: how the save ended.
 	readonly settle: (outcome: PdfToolSaveOutcome) => void
 }
@@ -89,13 +94,11 @@ export function pdfEditActions(deps: () => PdfSaveActionDeps | null, item: Drive
 
 		if (current === null) return { status: "cancelled" }
 
-		const written = await savePdfCopy(current, item, content => writeEditedCopy(item, content, "pdf", suffix)).catch(
-			(error: unknown) => {
-				log.warn("pdf", "saving a copy failed", { error })
+		const written = await savePdfCopy(current, content => writeEditedCopy(item, content, "pdf", suffix)).catch((error: unknown) => {
+			log.warn("pdf", "saving a copy failed", { error })
 
-				return { error }
-			}
-		)
+			return { error }
+		})
 
 		if (written !== null && "error" in written) return { status: "failed", error: written.error }
 		if (written?.outcome.status !== "success")
@@ -104,7 +107,7 @@ export function pdfEditActions(deps: () => PdfSaveActionDeps | null, item: Drive
 		// The copy is this tab's own: a listing that later shows it never announces it as made elsewhere.
 		recordOwnSave(written.outcome.item.data.uuid)
 
-		return { status: "saved", name: written.name }
+		return { status: "saved", name: written.name, item: written.outcome.item }
 	}
 
 	// `asked`: beforeSave already ran for this save.
@@ -112,6 +115,8 @@ export function pdfEditActions(deps: () => PdfSaveActionDeps | null, item: Drive
 		const current = deps()
 
 		if (current === null) return
+
+		await current.commitDrafts()
 
 		if (!asked && current.beforeSave !== undefined) {
 			const choice = await current.beforeSave("copy")
@@ -122,13 +127,19 @@ export function pdfEditActions(deps: () => PdfSaveActionDeps | null, item: Drive
 
 		const outcome = await saveCopyAs(current.copySuffix)
 
-		if (outcome.status === "saved") current.onCopied(outcome.name ?? "")
+		if (outcome.status === "saved") current.onCopied(outcome.name ?? "", outcome.item)
 		else if (outcome.status === "failed") current.onCopyFailed(outcome.error)
 	}
 
 	// Save, as the overlay runs it: the form's checks (never for a signing save, whose signature must be the last
 	// step), the remote-change question, then the save itself.
-	const saving = async (current: PdfSaveActionDeps, job: PdfSignedSaveJob | null): Promise<PresentationSaveEdits> => {
+	const saving = async (current: PdfSaveActionDeps, request: PdfSaveRequest | null): Promise<PresentationSaveEdits> => {
+		const job = request?.job ?? null
+
+		// A save the user asked for only: one a tool asked for saves the steps it made as they are (a signature stays the
+		// last step, a redaction the steps it undoes when the save does not happen); the drafts stay for a later save.
+		if (request === null) await current.commitDrafts()
+
 		if (job === null && current.beforeSave !== undefined) {
 			const choice = await current.beforeSave("version")
 
@@ -146,7 +157,7 @@ export function pdfEditActions(deps: () => PdfSaveActionDeps | null, item: Drive
 			if (answer !== "version") throw quietly()
 		}
 
-		return job === null ? savePdfVersion(current, item) : signPdfVersion(current, item, job)
+		return job === null ? savePdfVersion(current, item, request?.adopt === true) : signPdfVersion(current, item, job)
 	}
 
 	return {
@@ -162,7 +173,7 @@ export function pdfEditActions(deps: () => PdfSaveActionDeps | null, item: Drive
 				throw new SaveRefusedError("previewPdfSaveFailed")
 			}
 
-			return saving(current, request?.job ?? null).then(
+			return saving(current, request).then(
 				edits => settling(edits, request),
 				(error: unknown) => {
 					if (request === null) current.onVersionFailed?.(error)

@@ -326,4 +326,26 @@ describe("PDF comments panel", () => {
 		})
 		expect(document.querySelector("[data-comments-pane]")).toBeNull()
 	})
+
+	it("on a phone sits in the tools' bottom sheet, named, and beside the pages otherwise", () => {
+		const { props, view } = panel([thread(0, 3, "Look")], { phone: true })
+		const sheet = screen.getByRole("complementary", { name: "Comments" })
+
+		expect(sheet.contains(document.querySelector("[data-comments-pane]"))).toBe(true)
+		// The image editor's sheet: a fixed height and a rounded top under the sm breakpoint, a side panel from it.
+		expect(sheet.className).toContain("h-[44dvh]")
+		expect(sheet.className).toContain("rounded-t-3xl")
+		expect(sheet.className).toContain("sm:w-80")
+
+		act(() => {
+			view.rerender(
+				<PdfCommentsPanel
+					{...props}
+					phone={false}
+				/>
+			)
+		})
+		expect(screen.queryByRole("complementary", { name: "Comments" })).toBeNull()
+		expect(document.querySelector("[data-comments-pane]")).not.toBeNull()
+	})
 })

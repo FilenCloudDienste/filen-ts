@@ -1,4 +1,4 @@
-import forge from "node-forge"
+import * as Comlink from "comlink"
 import {
 	buildPdfCms,
 	certificateInfo,
@@ -7,6 +7,7 @@ import {
 	PdfPkcs12Error,
 	type PdfCertificateInfo,
 	type PdfDigestName,
+	type PdfLegacyCiphers,
 	type PdfPkcs12Failure,
 	type PdfSigningIdentity,
 	type PdfSigningSubtle
@@ -17,6 +18,8 @@ import { rangePortReader } from "@/lib/media/rangePort"
 // drive file's range port, or a picked device file), unlocks it with the password, and signs digests with the key.
 // The key never leaves this realm: it is a non-extractable CryptoKey, never posted, never stored, and the worker is
 // terminated after signing or cancelling, which is what wipes it. The container's bytes are zeroed once unlocked.
+// Containers older exports write (3DES or RC2) need node-forge's ciphers: only the legacy signer worker
+// (pdfSignerLegacy.worker.ts) carries them, and the page starts it only for such a container.
 
 // Certificate files are a few kilobytes; anything far larger is not one.
 export const PDF_SIGNER_MAX_BYTES = 1024 * 1024
@@ -94,7 +97,8 @@ async function readSource(source: PdfSignerSource): Promise<Uint8Array | PdfSign
 	}
 }
 
-export function createPdfSignerApi(subtle: PdfSigningSubtle): PdfSignerApi {
+// `legacy`: node-forge's ciphers, for containers that need them; null answers such a container "algorithm".
+export function createPdfSignerApi(subtle: PdfSigningSubtle, legacy: PdfLegacyCiphers | null): PdfSignerApi {
 	let container: Uint8Array | null = null
 	let identity: PdfSigningIdentity | null = null
 
@@ -114,7 +118,7 @@ export function createPdfSignerApi(subtle: PdfSigningSubtle): PdfSignerApi {
 			if (container === null) return { ok: false, reason: "notLoaded" }
 
 			try {
-				identity = await importPkcs12(container, password, { subtle, legacy: forge })
+				identity = await importPkcs12(container, password, { subtle, legacy })
 			} catch (error) {
 				if (error instanceof PdfPkcs12Error) return { ok: false, reason: error.reason }
 
@@ -145,4 +149,20 @@ export function createPdfSignerApi(subtle: PdfSigningSubtle): PdfSignerApi {
 
 function missing(): never {
 	throw new Error("no signer certificate")
+}
+
+// A signer worker's entry: the core over Comlink, the CMS handed back transferred.
+export function servePdfSigner(subtle: PdfSigningSubtle, legacy: PdfLegacyCiphers | null): void {
+	const core = createPdfSignerApi(subtle, legacy)
+	const api: PdfSignerApi = {
+		load: source => core.load(source),
+		unlock: password => core.unlock(password),
+		sign: async digest => {
+			const cms = await core.sign(digest)
+
+			return Comlink.transfer(cms, [cms.buffer])
+		}
+	}
+
+	Comlink.expose(api)
 }

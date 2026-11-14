@@ -40,9 +40,9 @@ const OUTLINES = "0 g 72 400 m 80 430 l 88 400 l h f 90 400 m 98 430 l 106 400 l
 async function open(page: Page, listbox: Locator, name: string): Promise<Locator> {
 	await listbox.getByRole("option", { name }).dblclick()
 
-	const surface = page.getByLabel(/Page 1 of 1/u)
+	const surface = page.getByRole("region", { name: /Page 1 of 1/u })
 
-	await expect(page.locator("canvas").first()).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+	await expect(page.getByRole("region", { name: /Page 1 of/u })).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
 
 	return surface
 }

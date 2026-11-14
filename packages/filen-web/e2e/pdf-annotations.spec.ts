@@ -38,7 +38,7 @@ async function openPdf(page: Page, listbox: Locator, name: string): Promise<Loca
 
 	const dialog = page.getByRole("dialog").first()
 
-	await expect(dialog.locator("canvas.block").first()).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+	await expect(dialog.getByRole("region", { name: /Page 1 of/u })).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
 
 	return dialog
 }
@@ -55,7 +55,7 @@ async function answerAuthor(page: Page): Promise<void> {
 
 // A point of the first page, as fractions of its box.
 async function pagePoint(dialog: Locator, x: number, y: number): Promise<{ x: number; y: number }> {
-	const box = await dialog.locator("canvas.block").first().boundingBox()
+	const box = await dialog.getByRole("region", { name: /Page 1 of/u }).boundingBox()
 
 	if (box === null) throw new Error("the page is not shown")
 

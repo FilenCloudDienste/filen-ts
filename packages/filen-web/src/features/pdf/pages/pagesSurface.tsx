@@ -18,7 +18,8 @@ import { PdfPagesRail, type PdfPagesRailProps } from "@/features/pdf/pages/pages
 import { isPdfItem, usePagesView, usePdfPagesSurface, type PdfPagesSurfaceValue } from "@/features/pdf/pages/pagesSurfaceContext"
 import { bookmarkStarts } from "@/features/pdf/pages/pagesSurface.logic"
 import { PdfSplitDialog } from "@/features/pdf/pages/splitDialog"
-import { thumbnailRenderer } from "@/features/pdf/pages/thumbnailRender"
+import { usePdfPagesRailOpen } from "@/features/pdf/pages/railOpen"
+import { pdfjsDrawsThumbnails, thumbnailRenderer } from "@/features/pdf/pages/thumbnailRender"
 import { toolEnabled, type PdfToolPanelProps } from "@/features/pdf/tools/registry"
 
 // The editor's page surfaces: the pages rail beside the pages, the Organise grid (the Pages tab's Organise tool), the
@@ -89,17 +90,29 @@ function useRailProps(surface: PdfPagesSurfaceValue): Omit<PdfPagesRailProps, "l
 			controller.remove(pages)
 		},
 		changed: view.changed,
-		announcement: view.announcement
+		announcement: view.announcement,
+		// Every pdf.js thumbnail reads and decodes its page; the engine's (after the swap) keep the rail's window.
+		sparing: surface.ranged && pdfjsDrawsThumbnails(document, surface.engine)
 	}
 }
 
-// The pages rail, left of the pages (wide views only).
+// The pages rail, left of the pages (wide views only), while the user has it open (the Pages tab's toggle).
 export function PdfPagesSide() {
+	const open = usePdfPagesRailOpen()
+
+	return open ? <PdfPagesSideRail /> : null
+}
+
+function PdfPagesSideRail() {
+	const { t } = useTranslation("preview")
 	const surface = usePdfPagesSurface()
 	const rail = useRailProps(surface)
 
 	return (
-		<aside className="hidden w-32 shrink-0 border-r border-border bg-muted/30 md:block">
+		<aside
+			aria-label={t("previewPdfPagesRailToggle")}
+			className="hidden w-32 shrink-0 border-r border-border bg-muted/30 md:block"
+		>
 			<PdfPagesRail
 				{...rail}
 				layout="rail"
@@ -219,6 +232,8 @@ function useCopyContext(surface: PdfPagesSurfaceValue): PdfCopyContext {
 		selected: [...view.selected].sort((a, b) => a - b),
 		taken,
 		encrypted: (surface.snapshot?.state.encryption.method ?? "None") !== "None",
+		ownerAccess:
+			(surface.snapshot?.state.encryption.method ?? "None") === "None" || surface.snapshot?.state.encryption.access === "owner",
 		passwordUnsupported: surface.controller.passwordUnsupported(),
 		signed: (surface.snapshot?.state.signatures.fields.length ?? 0) > 0,
 		progress: view.progress,
@@ -238,14 +253,21 @@ export function PdfExtractPanel({ onClose }: { onClose: () => void }) {
 				if (context.progress === undefined) onClose()
 			}}
 			onExtract={request => {
-				void surface.controller
-					.makeCopies(
-						request.files.map(file => ({ ranges: file.ranges, suffix: extractSuffix(t, file.ranges) })),
-						{ protect: request.protect, deletes: request.deletes, failedKey: "previewPdfExtractFailed" }
-					)
-					.then(saved => {
-						if (saved) onClose()
-					})
+				const files = request.files.map(file => ({ ranges: file.ranges, suffix: extractSuffix(t, file.ranges) }))
+				const first = files[0]
+				// One file opens as a new unsaved PDF (saved from there); one per page is saved at once.
+				const done =
+					request.separate || first === undefined
+						? surface.controller.makeCopies(files, {
+								protect: request.protect,
+								deletes: request.deletes,
+								failedKey: "previewPdfExtractFailed"
+							})
+						: surface.controller.openDraft(first, { protect: request.protect, deletes: request.deletes })
+
+				void done.then(ended => {
+					if (ended) onClose()
+				})
 			}}
 		/>
 	)

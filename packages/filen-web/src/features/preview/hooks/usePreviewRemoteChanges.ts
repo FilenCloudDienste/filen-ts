@@ -559,6 +559,11 @@ async function uploadDeckCopy(item: DriveItem, edits: PresentationSaveEdits, nam
 		})
 	])
 
+	// Made a copy, never the new version: a session holding the written file until commit lets it go.
+	if (result.kind === "written") {
+		await edits.abandon?.()
+	}
+
 	if (outcome.status === "error") {
 		return outcome
 	}

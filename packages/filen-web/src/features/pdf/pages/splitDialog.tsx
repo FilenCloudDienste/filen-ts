@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { CopyOptions, OutputNames, type PdfCopyContext } from "@/features/pdf/pages/extractDialog"
 import { batchCopyNames, partSuffix } from "@/features/pdf/pages/names"
-import { defaultSplitForm, splitPlan, type SplitForm, type SplitMode } from "@/features/pdf/pages/organise.logic"
+import { copiesProtected, defaultSplitForm, splitPlan, type SplitForm, type SplitMode } from "@/features/pdf/pages/organise.logic"
 
 export interface PdfSplitRequest {
 	// One entry per part: its pages (1-based, inclusive) and its name.
@@ -42,7 +42,8 @@ export function PdfSplitDialog({ bookmarks, onSplit, onClose, ...context }: PdfS
 			)
 		: []
 	const busy = context.progress !== undefined
-	const blocked = context.encrypted && form.protect && context.passwordUnsupported
+	const protect = copiesProtected(context.encrypted, context.ownerAccess, form.protect)
+	const blocked = protect && context.passwordUnsupported
 	const invalid =
 		(form.mode === "ranges" && form.ranges.trim().length > 0 && plan === null) ||
 		(form.mode === "count" && form.size.trim().length > 0 && plan === null)
@@ -85,7 +86,7 @@ export function PdfSplitDialog({ bookmarks, onSplit, onClose, ...context }: PdfS
 
 				onSplit({
 					parts: plan.map((range, index) => ({ range, name: names[index] ?? context.name })),
-					protect: context.encrypted && form.protect
+					protect
 				})
 			}}
 		>
@@ -153,7 +154,7 @@ export function PdfSplitDialog({ bookmarks, onSplit, onClose, ...context }: PdfS
 					))}
 				</RadioGroup>
 				{bookmarks.length === 0 ? <FieldDescription>{t("previewPdfSplitNoBookmarks")}</FieldDescription> : null}
-				{invalid ? <FieldError>{t("previewPdfExtractRangeInvalid", { last: context.pageCount })}</FieldError> : null}
+				{invalid ? <FieldError>{t("previewPdfPageRangeInvalid", { last: context.pageCount })}</FieldError> : null}
 				{plan !== null && plan.length === 1 ? <FieldDescription>{t("previewPdfSplitNothing")}</FieldDescription> : null}
 			</Field>
 			<CopyOptions

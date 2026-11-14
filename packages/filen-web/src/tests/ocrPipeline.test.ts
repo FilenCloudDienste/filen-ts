@@ -17,7 +17,7 @@ import {
 	type TesseractFactory
 } from "@filen/office/dom/pdfedit/ocr"
 import { scannedPdf, stubGraft, textPage } from "@filen/office/testing/ocr"
-import { transformPoint } from "@filen/office/core/pdfedit/ocrGeometry"
+import { transformPoint } from "@filen/office/core/pdfedit/matrix"
 
 // The whole text recognition path in Node with the real engine: MuPDF renders a scanned page, tesseract.js-core
 // (the SIMD LSTM build, English model from the pinned tessdata_fast commit) recognises it into a text-only PDF page,

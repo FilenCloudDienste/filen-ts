@@ -5,6 +5,7 @@ import { PdfCropOverlay } from "@/features/pdf/pages/cropOverlay"
 import type { PdfPagesController } from "@/features/pdf/pages/pagesController"
 import { usePagesView, usePdfPagesSurface } from "@/features/pdf/pages/pagesSurfaceContext"
 import { cropMargins, hasMargins, unrotateMargins } from "@/features/pdf/pages/pagesSurface.logic"
+import { pdfAnnouncer } from "@/features/pdf/tools/liveRegion"
 import type { PdfToolOverlayProps, PdfToolPanelProps } from "@/features/pdf/tools/registry"
 
 // The crop tool's surfaces: handles on the current page (drag them, or Tab to them and use the arrows; Enter crops
@@ -59,6 +60,9 @@ export function PdfCropToolOverlay({ context, page, viewport }: PdfToolOverlayPr
 			onCancel={() => {
 				surface.controller.setCrop(null)
 				context.finish()
+			}}
+			onAnnounce={text => {
+				pdfAnnouncer(context.swap).set(text)
 			}}
 		/>
 	)

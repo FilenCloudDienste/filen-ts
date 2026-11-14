@@ -84,6 +84,7 @@ function deps(begun: PdfSaveBegun[], verdict: unknown, calls: Calls, extra: Reco
 		} as unknown as PdfEngine,
 		session: { getSnapshot: () => ({ state: STATE }), saved: vi.fn() } as unknown as PdfEditSessionModel,
 		memory: PDF_DESKTOP_MEMORY,
+		fileBytes: 1000,
 		password: "old",
 		openVerifier: (_channel: unknown, password: string | undefined) => {
 			calls.verifierPasswords.push(password)
@@ -91,8 +92,9 @@ function deps(begun: PdfSaveBegun[], verdict: unknown, calls: Calls, extra: Reco
 			return Promise.resolve(verifier as unknown as PdfEngine)
 		},
 		versioning: () => true,
+		hold: () => () => undefined,
 		needsRespawn: () => false,
-		respawn: () => Promise.resolve(),
+		respawn: () => Promise.resolve(true),
 		onHistoryReset: vi.fn(),
 		...extra
 	}
@@ -106,7 +108,7 @@ describe("saving a redacted or protected PDF", () => {
 	it("refuses a file that fails the redaction check, uploading nothing, and says what remained", async () => {
 		const seen = calls()
 		const failure = { code: "term", term: "Secret", place: "page", page: 2 } as const
-		const save = savePdfCopy(deps([written({ redaction: MANIFEST, removesContent: true })], { ok: false, failure }, seen), ITEM, () =>
+		const save = savePdfCopy(deps([written({ redaction: MANIFEST, removesContent: true })], { ok: false, failure }, seen), () =>
 			Promise.resolve(null)
 		)
 
@@ -180,15 +182,31 @@ describe("saving a redacted or protected PDF", () => {
 		const onEarlierVersions = vi.fn()
 		const seen = calls()
 
-		await (await savePdfVersion(deps([written({ removesContent: true })], { ok: true }, seen, { onEarlierVersions }), ITEM)).commit(ITEM)
+		await (
+			await savePdfVersion(deps([written({ removesContent: true })], { ok: true }, seen, { onEarlierVersions }), ITEM)
+		).commit(ITEM)
 		await (
 			await savePdfVersion(
-				deps([written({ removesContent: true })], { ok: true }, seen, { onEarlierVersions, versioning: () => false }),
+				deps([written({ removesContent: true })], { ok: true }, seen, {
+					onEarlierVersions,
+					versioning: () => false
+				}),
 				ITEM
 			)
 		).commit(ITEM)
 		await (await savePdfVersion(deps([written()], { ok: true }, seen, { onEarlierVersions }), ITEM)).commit(ITEM)
 		expect(onEarlierVersions).toHaveBeenCalledTimes(1)
+	})
+
+	it("goes on on the written file for a save a signing follows, even when earlier versions are kept", async () => {
+		const plain = calls()
+		const first = calls()
+
+		await (await savePdfVersion(deps([written()], { ok: true }, plain), ITEM)).commit(ITEM)
+		await (await savePdfVersion(deps([written()], { ok: true }, first), ITEM, true)).commit(ITEM)
+
+		expect(plain.edit.at(-1)).toEqual({ op: "saveEnd", args: { outcome: "saved", next: "continue" } })
+		expect(first.edit.at(-1)).toEqual({ op: "saveEnd", args: { outcome: "saved", next: "adopt" } })
 	})
 })
 

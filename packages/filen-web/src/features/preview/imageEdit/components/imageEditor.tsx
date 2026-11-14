@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboard
 import { useTranslation } from "react-i18next"
 import { Redo2Icon, SquareSplitHorizontalIcon, Undo2Icon } from "lucide-react"
 import { cn } from "@filen/shared"
+import { ToolSheet } from "@/components/toolSheet"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
@@ -686,14 +687,10 @@ export function ImageEditor(props: ImageEditorProps) {
 			</div>
 			{/* A floating inspector beside the picture; under the sm breakpoint a bottom sheet of fixed height, so
 			    switching tabs never resizes the picture. */}
-			<aside
+			<ToolSheet
 				aria-label={t("previewImageEditTools")}
-				className="flex h-[44dvh] shrink-0 animate-in flex-col rounded-t-3xl bg-background shadow-[0_-8px_24px_-12px_rgb(0_0_0/0.6)] ring-1 ring-border duration-300 ease-out fade-in-0 slide-in-from-bottom-4 motion-reduce:animate-none sm:my-3 sm:mr-3 sm:h-auto sm:w-80 sm:rounded-3xl sm:shadow-lg sm:slide-in-from-bottom-0 sm:slide-in-from-right-4"
+				className="sm:my-3 sm:mr-3 sm:h-auto sm:w-80 sm:rounded-3xl sm:shadow-lg sm:slide-in-from-bottom-0 sm:slide-in-from-right-4"
 			>
-				<span
-					aria-hidden="true"
-					className="mx-auto mt-2 h-1 w-9 shrink-0 rounded-full bg-foreground/20 sm:hidden"
-				/>
 				<ImageEditPanel
 					idBase={idBase}
 					tab={tab}
@@ -723,7 +720,7 @@ export function ImageEditor(props: ImageEditorProps) {
 					onColor={setColor}
 					onWidth={setWidth}
 				/>
-			</aside>
+			</ToolSheet>
 		</div>
 	)
 }

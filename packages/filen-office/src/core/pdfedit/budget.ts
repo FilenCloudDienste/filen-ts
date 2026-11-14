@@ -11,7 +11,9 @@
 //   JavaScript), the same for a 39 MiB and a 117 MiB file;
 // - saveToBuffer peaks at 1.85x (39 MiB), 2.12x (78 MiB) and 2.74x (117 MiB) the input above the start, incremental
 //   and full rewrite alike: the output buffer doubles as it grows (old and new copies at once), and the memory grows
-//   in steps of up to 96 MiB beyond what is asked.
+//   in steps of up to 96 MiB beyond what is asked;
+// - memory freed inside the heap is used again: after rendering every page of a 56 MiB file (heap 270 MiB), a save
+//   with the display lists dropped and the store emptied first grew nothing; with them kept it grew 119 MiB.
 
 const MIB = 1024 * 1024
 
@@ -38,12 +40,29 @@ export const PDF_DESKTOP_MEMORY: PdfMemoryProfile = profile(512 * MIB, 256 * MIB
 // Phones and tablets (WebKit on iOS is killed first); provisional until measured on devices.
 export const PDF_MOBILE_MEMORY: PdfMemoryProfile = profile(256 * MIB, 128 * MIB)
 
+// What the heap holds as a save starts (its display lists dropped and its store emptied first): the wasm memory's size
+// (never smaller than the peak so far), and the bytes the edits added since the file was last written (inserted pages'
+// files, pictures), held in the document and its history and written by the save.
+export interface PdfHeapUse {
+	readonly heapBytes: number
+	readonly addedBytes: number
+}
+
+export const PDF_FRESH_HEAP: PdfHeapUse = { heapBytes: 0, addedBytes: 0 }
+
 // The heap a save of `inputBytes` is expected to reach; `thenSign` adds an incremental signing save of the output in
 // the same heap (the output, about the input's size, is saved again while the first save's memory is still held).
-export function estimateSavePeak(inputBytes: number, thenSign: boolean): number {
-	const save = inputBytes * PDF_SAVE_PEAK_FACTOR
+// What was added is written too and stays live meanwhile; a heap already larger than that holds the save in its freed
+// memory.
+export function estimateSavePeak(inputBytes: number, thenSign: boolean, use: PdfHeapUse = PDF_FRESH_HEAP): number {
+	const save = (inputBytes + use.addedBytes) * PDF_SAVE_PEAK_FACTOR
 
-	return PDF_HEAP_BASELINE + (thenSign ? 2 * save : save)
+	return Math.max(use.heapBytes, PDF_HEAP_BASELINE + use.addedBytes + (thenSign ? 2 * save : save))
+}
+
+// Whether a document of `bytes` (its file and what the edits added to it) is one the tools edit: its save fits.
+export function fitsEdit(bytes: number, memory: PdfMemoryProfile): boolean {
+	return bytes <= memory.editMaxBytes
 }
 
 export function fitsBudget(estimate: number, memory: PdfMemoryProfile): boolean {

@@ -27,12 +27,12 @@ function status(page: Page): Locator {
 
 async function open(page: Page, listbox: Locator, name: string): Promise<void> {
 	await listbox.getByRole("option", { name }).dblclick()
-	await expect(page.locator("canvas").first()).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+	await expect(page.getByRole("region", { name: /Page 1 of/u })).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
 }
 
 async function close(page: Page): Promise<void> {
 	await page.keyboard.press("Escape")
-	await expect(page.locator("canvas")).toHaveCount(0)
+	await expect(page.getByRole("region", { name: /Page 1 of/u })).toHaveCount(0)
 }
 
 test("signed PDFs: the signature status says what was checked, never more", async ({ page }) => {

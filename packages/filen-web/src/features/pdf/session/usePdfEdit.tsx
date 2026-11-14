@@ -18,13 +18,19 @@ import { PROTECT_DOCUMENT_TOOL_ID } from "@/features/pdf/tools/protect.tool"
 import { pdfMemoryConstrained } from "@/features/preview/lib/pdfLimits"
 import type { PreviewAccessMode } from "@/features/preview/lib/accessMode"
 import { PdfEditSwap, type PdfEditPhase } from "@/features/pdf/session/swap"
-import { engineNeedsRespawn, openPdfEngine, openPdfEngineOnChannel, pdfEngineMemory } from "@/features/pdf/session/engineWorker"
+import {
+	engineNeedsRespawn,
+	openPdfEditEngineOnChannel,
+	openPdfEngine,
+	openPdfEngineOnChannel,
+	pdfEngineMemory
+} from "@/features/pdf/session/engineWorker"
 import { pdfEditActions, type PdfSaveActionDeps, type PdfSaveRequest } from "@/features/pdf/session/pdfEditActions"
 import { withPdfSession, type PdfPolicyState, type PdfToolContext, type PdfToolSaveOutcome } from "@/features/pdf/tools/registry"
 import { PDF_TOOLS } from "@/features/pdf/tools"
-import { flattenedFirst, pdfToolSurfaceKey } from "@/features/pdf/session/toolSession"
+import { flattenedFirst, historyStep, pdfToolSurfaceKey } from "@/features/pdf/session/toolSession"
 import { useBindings } from "@/lib/keymap/registry"
-import { pdfSignatureFields, type PdfSignatureSource } from "@filen/office/dom/pdf"
+import { pdfSignatureFields, type PdfSignatureFieldHint, type PdfSignatureSource } from "@filen/office/dom/pdf"
 import { signWithCertificate, type PdfSignedSaveJob } from "@/features/pdf/signing/signDocument"
 import { PdfNoticeLine } from "@/features/pdf/tools/noticeLine"
 import type { PdfRibbonHistory } from "@/features/pdf/ribbon/pdfRibbon"
@@ -32,13 +38,17 @@ import { PdfRemoteChangeDialog } from "@/features/pdf/save/pdfRemoteChangeDialog
 import { pdfFormSaveGate, type PdfFormSaveChoice } from "@/features/pdf/forms/formSave"
 import { PdfXfaSaveDialog } from "@/features/pdf/forms/formNotices"
 import { formOverlaySession } from "@/features/pdf/session/fieldOverlay.logic"
-import { accountQueryGet } from "@/queries/account"
+import { accountKeepsVersions } from "@/features/pdf/save/accountVersions"
+import { PdfEngineError } from "@filen/office/dom/pdfedit"
 import { useIsOnline } from "@/lib/useIsOnline"
 import { errorLabel } from "@/lib/i18n/errorLabel"
 import { Button } from "@/components/ui/button"
-import { PdfPagesController } from "@/features/pdf/pages/pagesController"
+import { Spinner } from "@/components/ui/spinner"
+import { useAnnouncement } from "@/features/pdf/tools/liveRegion"
+import { PdfPagesController, type PdfDraft } from "@/features/pdf/pages/pagesController"
 import { writeEditedCopy } from "@/features/preview/lib/editedCopy"
 import { recordOwnSave } from "@/features/preview/lib/ownSaves"
+import { log } from "@/lib/log"
 
 // The PDF viewer's editing: the swap to the editor, the session's state for the view (history, policy, banners), and
 // the saves the preview overlay drives (its port save, through `saveRef`) or the ribbon asks for (Save as copy).
@@ -72,30 +82,71 @@ export interface PdfEditView {
 	// Banners under the ribbon (editor unavailable, poisoned, protection, a tool's notice).
 	readonly banner: ReactNode
 	readonly dialogs: ReactNode
-	// What the signature status reads the signatures from once a signing here changed them (pdf.js's view with the
-	// signatures made since); null: the viewer's document.
+	// What the signature status reads the signatures from once the editor reads a file a save here wrote (the engine's
+	// own reading of it); null: the viewer's document.
 	readonly signatureSource: PdfSignatureSource | null
+	// Extracted pages open as a new document over this one (shown in its own view), null when none is.
+	readonly draft: PdfDraft | null
 }
 
-// A signature signed here, as pdf.js reports one.
-interface SignedHere {
-	readonly fieldName: string
-	readonly byteRange: readonly [number, number, number, number]
+// The editor of a new document of extracted pages (pagesController PdfDraft), not saved anywhere yet: it opens at once,
+// counts as unsaved until saved, and saves only as a copy beside the PDF it came from (named with the draft's suffix).
+export interface PdfEditDraft {
+	readonly draft: PdfDraft
+	// The draft ends: saved, or dropped.
+	readonly onEnd: (saved: boolean) => void
+}
+
+// The signatures of the file `file` as a pdf.js document reports them, from `read`.
+function editorSignatureSource(
+	file: string,
+	read: () => Promise<readonly PdfSignatureFieldHint[] | null>
+): { readonly file: string; readonly source: PdfSignatureSource } {
+	return {
+		file,
+		source: {
+			getSignatures: () =>
+				read().then(hints =>
+					hints === null ? null : hints.map(hint => ({ fieldName: hint.name, byteRange: [...hint.byteRange] }))
+				)
+		}
+	}
 }
 
 const LINE = "flex shrink-0 items-center gap-2 border-b bg-muted px-3 py-1.5 text-xs text-muted-foreground"
 
-export function usePdfEdit(item: DriveItem, access: PreviewAccessMode, host: PdfEditHost | undefined): PdfEditView {
+// A change the engine refused, as the user is told it.
+function changeFailedKey(error: unknown): "previewPdfOverBudget" | "previewPdfChangeFailed" {
+	return error instanceof PdfEngineError && error.failure === "overBudget" ? "previewPdfOverBudget" : "previewPdfChangeFailed"
+}
+
+export interface PdfEditOptions {
+	// The editor of a new document of extracted pages instead of the file `item` (which names and places its copy).
+	readonly draft?: PdfEditDraft
+	// Opens a file this editor wrote (a saved copy), where the viewer can.
+	readonly onOpenFile?: (item: DriveItem) => void
+}
+
+export function usePdfEdit(
+	item: DriveItem,
+	access: PreviewAccessMode,
+	host: PdfEditHost | undefined,
+	options?: PdfEditOptions
+): PdfEditView {
+	const draft = options?.draft
+	const onOpenFile = options?.onOpenFile
 	const { t } = useTranslation("preview")
 	const online = useIsOnline()
 	const [swap] = useState(
 		() =>
 			new PdfEditSwap({
 				open: (file, password, onPoisoned) =>
-					openPdfEngine({ file, access, role: "edit", ...(password === undefined ? {} : { password }), onPoisoned }),
+					draft === undefined
+						? openPdfEngine({ file, access, role: "edit", ...(password === undefined ? {} : { password }), onPoisoned })
+						: draft.draft.open(onPoisoned),
 				mobile: pdfMemoryConstrained(),
-				onChangeFailed: () => {
-					toast.error(t("previewPdfChangeFailed"))
+				onChangeFailed: error => {
+					toast.error(t(changeFailedKey(error)))
 				}
 			})
 	)
@@ -104,9 +155,25 @@ export function usePdfEdit(item: DriveItem, access: PreviewAccessMode, host: Pdf
 	useEffect(() => {
 		swap.setFile(narrowToAnyFile(item))
 	}, [swap, item])
+
+	// A draft has no viewer before the editor: the editor opens it at once, with the password it was written with.
+	const draftPassword = draft?.draft.password
+	const isDraft = draft !== undefined
+
+	useEffect(() => {
+		if (!isDraft) return
+
+		swap.setPassword(draftPassword)
+		swap.warm()
+	}, [swap, isDraft, draftPassword])
 	const phase = useSyncExternalStore(swap.subscribe, swap.getSnapshot)
 	const snapshot = usePdfEditSession(phase.kind === "editing" ? phase.session : null)
-	const dirty = snapshot?.state.dirty ?? false
+	const form = formOverlaySession(swap)
+	// Text typed into a field and not committed yet is unsaved too (a save commits it first).
+	const drafted = useSyncExternalStore(form.subscribe, form.drafted)
+	const dirty = (snapshot?.state.dirty ?? false) || drafted
+	// A save holds the document (its changes wait for it).
+	const saving = phase.kind === "editing" && phase.saving
 	const [activeTool, setActiveToolState] = useState<string | null>(null)
 	const [toolVariants, setToolVariants] = useState<Readonly<Record<string, string>>>({})
 	// The Save menu's "Flatten annotations" (off until chosen; for this editing session).
@@ -119,25 +186,27 @@ export function usePdfEdit(item: DriveItem, access: PreviewAccessMode, host: Pdf
 	// The version an in-place save that removed content just wrote (its earlier versions still hold that content).
 	const [earlier, setEarlier] = useState<DriveItem | null>(null)
 	const [pages] = useState(() => new PdfPagesController())
+	// Extracted pages open as a new document over this one: unsaved until the draft is saved.
+	const openDraft = useSyncExternalStore(pages.subscribe, () => pages.getSnapshot().draft)
+	// The draft's Save as copy under way.
+	const [draftSaving, setDraftSaving] = useState(false)
 	const [notice, setNotice] = useState<ReactNode>(null)
 	// The save a tool asked for, taken by the next Save the overlay runs.
 	const saveRequest = useRef<PdfSaveRequest | null>(null)
-	// Signatures signed while the editor has the document (gone with it: the viewer's next document sees them itself).
-	const [signedHere, setSignedHere] = useState<readonly SignedHere[]>([])
-
-	if (signedHere.length > 0 && phase.kind !== "editing" && phase.kind !== "starting") setSignedHere([])
 	const onDirtyChange = host?.onDirtyChange
 
 	useEffect(() => {
-		onDirtyChange?.(dirty)
-	}, [dirty, onDirtyChange])
+		onDirtyChange?.(dirty || openDraft !== null)
+	}, [dirty, openDraft, onDirtyChange])
 
-	// The viewer going away closes the editor with it (its unsaved changes were asked about by the overlay).
+	// The viewer going away closes the editor with it, and drops a draft of its pages left open (its unsaved changes were
+	// asked about by the overlay).
 	useEffect(
 		() => () => {
+			pages.closeDraft(false)
 			swap.close()
 		},
-		[swap]
+		[swap, pages]
 	)
 
 	const session = phase.kind === "editing" ? phase.session : null
@@ -150,15 +219,16 @@ export function usePdfEdit(item: DriveItem, access: PreviewAccessMode, host: Pdf
 	useEffect(() => {
 		pages.bind({
 			t,
-			edit: change => {
-				swap.edit(change)
+			edit: (change, dropped) => {
+				swap.edit(change, dropped)
 			},
 			access,
 			password: () => swap.password(),
 			memory: pdfEngineMemory,
 			openVerifier: (channel, password) => openPdfEngineOnChannel(channel, password),
+			openEditor: openPdfEditEngineOnChannel,
 			write: (content, suffix) => writeEditedCopy(item, content, "pdf", suffix),
-			fileSize: Number(item.data.size),
+			fileSize: draft?.draft.size ?? Number(item.data.size),
 			onCopied: (names, items) => {
 				for (const made of items) recordOwnSave(made.data.uuid)
 
@@ -184,9 +254,15 @@ export function usePdfEdit(item: DriveItem, access: PreviewAccessMode, host: Pdf
 					engine: phase.engine,
 					session: phase.session,
 					memory: pdfEngineMemory(),
+					fileBytes: draft?.draft.size ?? Number(item.data.size),
 					password: swap.password(),
 					openVerifier: (channel, password) => openPdfEngineOnChannel(channel, password),
-					versioning: () => accountQueryGet()?.versioningEnabled,
+					versioning: accountKeepsVersions,
+					hold: () => swap.hold(),
+					commitDrafts: () =>
+						form.commitDrafts((change, dropped) => {
+							swap.edit(change, dropped)
+						}),
 					needsRespawn: engineNeedsRespawn,
 					respawn: saved =>
 						swap.respawn((password, onPoisoned) =>
@@ -239,15 +315,27 @@ export function usePdfEdit(item: DriveItem, access: PreviewAccessMode, host: Pdf
 								}),
 							warnRequired: count => {
 								toast.warning(t("previewPdfFormRequiredEmpty", { count }), { id: "pdf-form-required" })
-								formOverlaySession(swap).warnRequired()
+								form.warnRequired()
 							}
 						}),
 					requestVersionSave: () => {
 						host?.onSave()
 					},
 					copySuffix: number => (number <= 1 ? t("previewPdfSaveCopySuffix") : t("previewPdfSaveCopySuffixNumbered", { number })),
-					onCopied: name => {
-						toast.success(t("previewPdfSavedAsCopy", { name }))
+					onCopied: (name, copy) => {
+						toast.success(
+							t("previewPdfSavedAsCopy", { name }),
+							copy === undefined || onOpenFile === undefined
+								? undefined
+								: {
+										action: {
+											label: t("previewPdfOpenCopy"),
+											onClick: () => {
+												onOpenFile(copy)
+											}
+										}
+									}
+						)
 					},
 					onCopyFailed: error => {
 						if (error instanceof PdfRedactionRefusedError) reportRedactionRefusal(error)
@@ -277,8 +365,9 @@ export function usePdfEdit(item: DriveItem, access: PreviewAccessMode, host: Pdf
 	// A Save the overlay runs now, for a tool (a save in place, or a signing save with `job`): how it ended. The overlay's
 	// Save is retried while it has not seen the change yet (its dirty bit follows the editor's after a render), and is
 	// cancelled when it cannot start (one under way, a dialog open).
-	const requestSave = async (job: PdfSignedSaveJob | null): Promise<PdfToolSaveOutcome> => {
-		if (host?.writable !== true) return { status: "cancelled" }
+	const requestSave = async (job: PdfSignedSaveJob | null, adopt = false): Promise<PdfToolSaveOutcome> => {
+		// A draft is no file to save in place.
+		if (host?.writable !== true || draft !== undefined) return { status: "cancelled" }
 
 		let settle: (outcome: PdfToolSaveOutcome) => void = () => undefined
 		const ended = new Promise<PdfToolSaveOutcome>(resolve => {
@@ -286,6 +375,7 @@ export function usePdfEdit(item: DriveItem, access: PreviewAccessMode, host: Pdf
 		})
 		const request: PdfSaveRequest = {
 			job,
+			adopt,
 			settle: outcome => {
 				if (saveRequest.current === request) saveRequest.current = null
 
@@ -306,43 +396,91 @@ export function usePdfEdit(item: DriveItem, access: PreviewAccessMode, host: Pdf
 		return ended
 	}
 
-	// pdf.js's view of the document's signatures (read before the swap; the editor keeps it), with those signed here.
-	const knownSignatures = (): unknown[] => {
+	// The signatures a verifier cross-checks its reading of the editor's file against: pdf.js's (read before the swap)
+	// while the engine reads the file pdf.js read; once it reads one a save here wrote, the engine's own reading of it.
+	const expectedSignatures = (): Promise<readonly PdfSignatureFieldHint[] | null> => {
 		const current = swap.getSnapshot()
-		const viewer = current.kind === "editing" ? current.session.getSnapshot().document.facts.signatures : null
 
-		return [...(viewer ?? []), ...signedHere]
+		if (current.kind !== "editing") return Promise.resolve(null)
+
+		const { document, state } = current.session.getSnapshot()
+
+		return current.respawned || state.ownFile
+			? current.engine.client.call("signatureHints", {})
+			: Promise.resolve(pdfSignatureFields(document.facts.signatures))
 	}
-	const signatureSource: PdfSignatureSource | null =
-		signedHere.length === 0 ? null : { getSignatures: () => Promise.resolve(knownSignatures()) }
+	// The status line's source of those signatures once the editor reads a file it wrote (one per file); before, the
+	// viewer's document answers for itself.
+	const ownFile = phase.kind === "editing" && (phase.respawned || snapshot?.state.ownFile === true)
+	// One source per file written (the status line reads each once).
+	const [editorSignatures, setEditorSignatures] = useState<ReturnType<typeof editorSignatureSource> | null>(null)
+
+	if (ownFile && editorSignatures?.file !== item.data.uuid) setEditorSignatures(editorSignatureSource(item.data.uuid, expectedSignatures))
+	else if (!ownFile && editorSignatures !== null) setEditorSignatures(null)
+
+	const signatureSource = ownFile && editorSignatures?.file === item.data.uuid ? editorSignatures.source : null
+
+	// A draft's Save: a copy beside the PDF under the draft's name; once made, the draft ends saved.
+	const saveDraft = (current: PdfEditDraft, live: NonNullable<typeof session>): void => {
+		if (draftSaving || saving) return
+
+		setDraftSaving(true)
+		// What was typed into its fields is saved with it.
+		void (saveDeps()?.commitDrafts() ?? Promise.resolve())
+			.then(() => flattenedFirst(live, flatten, () => actions.saveCopyAs(current.draft.suffix)))
+			.catch((error: unknown) => ({ status: "failed" as const, error }))
+			.then(outcome => {
+				setDraftSaving(false)
+
+				if (outcome.status === "saved") {
+					toast.success(t("previewPdfExtractSaved", { count: 1, name: outcome.name ?? "" }))
+					current.onEnd(true)
+				} else if (outcome.status === "failed") saveDeps()?.onCopyFailed(outcome.error)
+			})
+	}
 
 	const history: PdfRibbonHistory | null =
 		snapshot === null || session === null
 			? null
 			: {
-					dirty,
-					canUndo: snapshot.state.canUndo && snapshot.pending === 0,
-					canRedo: snapshot.state.canRedo && snapshot.pending === 0,
-					saving: false,
-					canSave: dirty && online && host?.writable === true,
+					// A draft is unsaved until it is saved.
+					dirty: dirty || draft !== undefined,
+					canUndo: snapshot.state.canUndo && snapshot.pending === 0 && !saving,
+					canRedo: snapshot.state.canRedo && snapshot.pending === 0 && !saving,
+					saving: saving || draftSaving,
+					canSave:
+						draft === undefined ? dirty && online && host?.writable === true && !saving : online && !saving && !draftSaving,
 					undo: () => {
-						void session.undo().catch(() => undefined)
+						historyStep(() => session.undo(), "undo", t("previewPdfUndoFailed"))
 					},
 					redo: () => {
-						void session.redo().catch(() => undefined)
+						historyStep(() => session.redo(), "redo", t("previewPdfRedoFailed"))
 					},
 					save: () => {
-						host?.onSave()
+						if (draft !== undefined) saveDraft(draft, session)
+						else if (!saving) host?.onSave()
 					},
 					saveAsCopy: () => {
-						void flattenedFirst(session, flatten, () => actions.saveCopy()).catch(() => undefined)
+						if (draft !== undefined) {
+							saveDraft(draft, session)
+
+							return
+						}
+
+						if (saving) return
+
+						void flattenedFirst(session, flatten, () => actions.saveCopy()).catch((error: unknown) => {
+							log.warn("pdf", "saving a copy failed", { error })
+						})
 					},
 					security: () => {
 						setActiveToolState(PROTECT_DOCUMENT_TOOL_ID)
 					},
 					discard: () => {
-						swap.close()
+						if (draft === undefined) swap.close()
+						else draft.onEnd(false)
 					},
+					...(draft === undefined ? {} : { draft: true }),
 					flatten: {
 						on: flatten,
 						enabled: snapshot.state.tools.content === null,
@@ -358,8 +496,9 @@ export function usePdfEdit(item: DriveItem, access: PreviewAccessMode, host: Pdf
 		if (tool !== null && variant !== undefined) setToolVariants({ ...toolVariants, [tool]: variant })
 	}
 
-	const editable = host?.writable === true && online
-	const policy: PdfPolicyState = { editable: host?.writable === true, online, tools: snapshot?.state.tools ?? null }
+	const poisoned = phase.kind === "poisoned"
+	const editable = host?.writable === true && online && !poisoned
+	const policy: PdfPolicyState = { editable: host?.writable === true, online, tools: snapshot?.state.tools ?? null, poisoned }
 	const toolContext: PdfToolContext = {
 		edit: (change, dropped) => {
 			swap.edit(change, dropped)
@@ -382,14 +521,17 @@ export function usePdfEdit(item: DriveItem, access: PreviewAccessMode, host: Pdf
 					? takenNames(normalizeParentUuid(base.data.parent, currentRootUuid()))
 					: Promise.resolve(new Set<string>())
 			},
-			canSaveInPlace: host?.writable === true,
+			canSaveInPlace: host?.writable === true && draft === undefined,
 			save: target => (target.kind === "version" ? requestSave(null) : actions.saveCopyAs(target.suffix)),
 			unlocked: password => {
 				swap.setPassword(password)
 			},
 			close: () => {
 				setActiveToolState(null)
-				swap.close()
+
+				// A draft has no saved state to go back to: it closes (its pages stay in the PDF they came from).
+				if (draft === undefined) swap.close()
+				else draft.onEnd(false)
 			}
 		},
 		notify: setNotice,
@@ -399,14 +541,12 @@ export function usePdfEdit(item: DriveItem, access: PreviewAccessMode, host: Pdf
 					session: read => withPdfSession(toolContext, read),
 					fileSize: () => Number(item.data.size),
 					memory: pdfEngineMemory(),
-					save: job => requestSave(job).then(outcome => outcome.status === "saved"),
+					// The changes saved first are signed on next: the session goes on on that file.
+					save: job => requestSave(job, job === null).then(outcome => outcome.status === "saved"),
 					job: (signer, digest) => ({
 						signer,
 						digest,
-						hints: () => Promise.resolve(pdfSignatureFields(knownSignatures())),
-						onSigned: (field, byteRange) => {
-							setSignedHere(current => [...current, { fieldName: field.slice(field.lastIndexOf(".") + 1), byteRange }])
-						}
+						hints: expectedSignatures
 					}),
 					onSaveChangesFirst: () => {
 						setNotice(
@@ -447,8 +587,19 @@ export function usePdfEdit(item: DriveItem, access: PreviewAccessMode, host: Pdf
 		}
 	})
 
+	// Said once the first change asks for the editor (its banner shows meanwhile).
+	useAnnouncement(swap, phase.kind === "starting" ? t("previewPdfEditorStarting") : null)
+
 	const failedBanner =
-		phase.kind === "failed" ? (
+		phase.kind === "starting" ? (
+			<div className={LINE}>
+				<Spinner
+					aria-hidden="true"
+					className="size-3.5 shrink-0"
+				/>
+				<p className="min-w-0 flex-1">{t("previewPdfEditorStarting")}</p>
+			</div>
+		) : phase.kind === "failed" ? (
 			<div
 				role="status"
 				className={LINE}
@@ -471,6 +622,22 @@ export function usePdfEdit(item: DriveItem, access: PreviewAccessMode, host: Pdf
 			>
 				<p className="min-w-0 flex-1">{t("previewPdfPoisoned")}</p>
 			</div>
+		) : phase.kind === "reopenFailed" ? (
+			<div
+				role="status"
+				className={LINE}
+			>
+				<p className="min-w-0 flex-1">{t("previewPdfReopenFailed")}</p>
+				<Button
+					variant="outline"
+					size="xs"
+					onClick={() => {
+						swap.retry()
+					}}
+				>
+					{t("previewPdfEditorRetry")}
+				</Button>
+			</div>
 		) : (
 			notice
 		)
@@ -484,9 +651,15 @@ export function usePdfEdit(item: DriveItem, access: PreviewAccessMode, host: Pdf
 		history,
 		// The overlay's Save streams through this while the editor has the document (never an autosave: PDFs save only
 		// when asked); with "Flatten annotations" chosen, they are drawn into the pages first (one undo step).
+		// One save at a time: another asked for while one holds the document is refused quietly.
 		saveSource:
-			phase.kind === "editing"
-				? options => (options.auto ? Promise.resolve(null) : flattenedFirst(session, flatten, () => actions.saveVersion()))
+			phase.kind === "editing" && draft === undefined
+				? options =>
+						options.auto
+							? Promise.resolve(null)
+							: saving
+								? Promise.reject(new SaveRefusedError("previewPdfSaveFailed", { silent: true }))
+								: flattenedFirst(session, flatten, () => actions.saveVersion())
 				: null,
 		activeTool,
 		toolVariants,
@@ -536,6 +709,7 @@ export function usePdfEdit(item: DriveItem, access: PreviewAccessMode, host: Pdf
 				{protect.dialog}
 			</>
 		),
-		signatureSource
+		signatureSource,
+		draft: openDraft
 	}
 }

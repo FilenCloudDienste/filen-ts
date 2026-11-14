@@ -6,10 +6,6 @@ export const previewPdfTextEdit = {
 	previewPdfTextEditTool: "Edit text",
 	/** Ribbon button (Tools tab) that places new text on the PDF page */
 	previewPdfTextAddTool: "Add text",
-	/** Undo/redo history entry for a change to existing text */
-	previewPdfTextEditHistory: "Edit text",
-	/** Undo/redo history entry for text added to a page */
-	previewPdfTextAddHistory: "Add text",
 	/** Accessible name of the text box that edits a text block in place on the PDF page */
 	previewPdfTextEditField: "Text",
 	/** Font chip on the in-place text editor: "Aa" followed by the name of the font the new text is set in. {{font}} is a font family name such as "Arimo" */
@@ -29,6 +25,17 @@ export const previewPdfTextEdit = {
 		"This text can't be edited here. It may be drawn as shapes, use a Type 3 font, be vertical or follow a curve.",
 	/** One-line notice when an edit was refused because it would have removed text next to it (exact wording) */
 	previewPdfTextEditUnsafe: "This change would also remove nearby text, so it wasn't applied.",
+	/** One-line notice when Edit text was used where the page has no text */
+	previewPdfTextEditNoText: "There's no text there to edit.",
+	/** Toast when the editor couldn't read which text is at the chosen place (an error, not an empty spot) */
+	previewPdfTextEditHitFailed: "The text there couldn't be read. Try again.",
+	/** Accessible name of a page while Edit text is chosen (focusable; Enter puts a marker on it). {{page}}: the page number */
+	previewPdfTextEditOnPage: "Edit text on page {{page}}",
+	/** Accessible name of a page while Add text is chosen (focusable; Enter places a text box on it). {{page}}: the page number */
+	previewPdfTextAddOnPage: "Add text on page {{page}}",
+	/** How Edit text works from the keyboard: the description of a page while it is chosen */
+	previewPdfTextEditPlaceHint:
+		"Press Enter to put a marker on the page, move it onto the text with the arrow keys, then press Enter to edit that text.",
 	/** Button closing a text-editing notice */
 	previewPdfTextEditDismiss: "Dismiss"
-}
+} as const

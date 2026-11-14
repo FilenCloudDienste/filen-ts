@@ -33,7 +33,8 @@ export interface PdfDocumentHandle {
 	// the new document in once it is ready: the old one keeps showing meanwhile, and its memory goes with it.
 	readonly reopen: () => void
 	// The password pdf.js accepted for the document shown, null when none was asked (memory only: an editor taking over
-	// opens the file with it).
+	// opens the file with it). The same function for the hook's life: an effect handing it on does not run again on
+	// every render.
 	readonly acceptedPassword: () => string | null
 	// Closes the document now (another engine took over its view); `state` stays as it was, never used again.
 	readonly release: () => void
@@ -95,6 +96,7 @@ export function usePdfDocument(pdfjs: PdfJs<ReadableStream>, source: PdfSource, 
 	// beyond this hook).
 	const triedRef = useRef<string | null>(null)
 	const acceptedRef = useRef<string | null>(null)
+	const [acceptedPassword] = useState(() => () => acceptedRef.current)
 	// Set by reopen() for the open effect's cleanup, which then keeps the shown document until the new one shows.
 	const reopeningRef = useRef(false)
 	const retiringRef = useRef<{ readonly opening: PdfOpening<ReadableStream>; readonly document: PdfDomDocument } | null>(null)
@@ -208,7 +210,7 @@ export function usePdfDocument(pdfjs: PdfJs<ReadableStream>, source: PdfSource, 
 			reopeningRef.current = true
 			setGeneration(value => value + 1)
 		},
-		acceptedPassword: () => acceptedRef.current,
+		acceptedPassword,
 		release: () => {
 			const opening = openingRef.current
 

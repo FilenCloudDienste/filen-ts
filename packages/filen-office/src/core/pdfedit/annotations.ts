@@ -11,7 +11,6 @@ export type PdfQuad = readonly [number, number, number, number, number, number, 
 export type PdfRgb = readonly [number, number, number]
 
 export type PdfMarkupKind = "Highlight" | "Underline" | "StrikeOut" | "Squiggly"
-export type PdfShapeKind = "Square" | "Circle" | "Line"
 export type PdfLineEnding =
 	"None" | "Square" | "Circle" | "Diamond" | "OpenArrow" | "ClosedArrow" | "Butt" | "ROpenArrow" | "RClosedArrow" | "Slash"
 export type PdfTextAlign = "left" | "center" | "right"
@@ -21,7 +20,7 @@ export type PdfReviewState = "None" | "Accepted" | "Rejected" | "Cancelled" | "C
 export type PdfTextFont = "Helv" | "TiRo" | "Cour"
 
 // An annotation within the open document: its page and its object number (stable for the session; undo and redo
-// restore the same numbers; a save with garbage collection renumbers, so the session reads them again afterwards).
+// restore the same numbers, and a save never renumbers: savePlan.ts PDF_FULL_SAVE_OPTIONS).
 export interface PdfAnnotationRef {
 	readonly page: number
 	readonly id: number
@@ -88,6 +87,16 @@ export interface PdfAttachmentInfo {
 	readonly source: { readonly kind: "document"; readonly key: string } | { readonly kind: "annotation"; readonly ref: PdfAnnotationRef }
 }
 
+// Control (Cc), format (Cf: bidi overrides and isolates, zero-width joiners, soft hyphens, tag characters, …) and line or
+// paragraph separator (Zl, Zp) characters: invisible, or able to reorder what a name shows ("invoice‮fdp.exe"
+// reads as "invoiceexe.pdf").
+const HIDDEN_NAME_CHARACTERS = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu
+
+// An attachment's name as shown and offered for download: without the characters above, trimmed.
+export function attachmentDisplayName(name: string): string {
+	return name.replace(HIDDEN_NAME_CHARACTERS, "").trim()
+}
+
 // The standard stamp names (ISO 32000-2 §12.5.6.12) every viewer draws without an appearance of its own.
 export const PDF_PRESET_STAMPS = [
 	"Approved",
@@ -118,10 +127,6 @@ export function normalizeRect(rect: readonly [number, number, number, number]): 
 	const [ax, ay, bx, by] = rect
 
 	return [Math.min(ax, bx), Math.min(ay, by), Math.max(ax, bx), Math.max(ay, by)]
-}
-
-export function rectOfPoints(a: PdfPoint, b: PdfPoint): PdfRect {
-	return normalizeRect([a[0], a[1], b[0], b[1]])
 }
 
 export function translateRect(rect: PdfRect, dx: number, dy: number): PdfRect {

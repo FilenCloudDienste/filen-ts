@@ -1,5 +1,6 @@
 import { MessageChannel, Worker, type MessagePort } from "node:worker_threads"
 import { savePortReader, type SavePortEnd } from "@filen/shared/savePort"
+import type { PdfMemoryProfile } from "../../core/pdfedit/budget"
 import { PdfEngineClient, type PdfEngineWorkerLike } from "../../dom/pdfedit/client"
 import type { PdfOpenResult } from "../../dom/pdfedit/protocol"
 import { createSyncRangeBuffer, serveSyncRange, type SyncRangePort, type SyncRangeServerStats } from "../../dom/pdfedit/syncRange"
@@ -23,7 +24,7 @@ export interface Engine {
 	readonly stats: SyncRangeServerStats
 	readonly buffer: SharedArrayBuffer
 	readonly reads: { start: number; end: number }[]
-	open(password?: string): Promise<PdfOpenResult>
+	open(password?: string, memory?: PdfMemoryProfile): Promise<PdfOpenResult>
 }
 
 const running: PdfEngineClient[] = []
@@ -78,14 +79,15 @@ export function startEngine(bytes: Uint8Array, setup: EngineSetup = {}): Engine 
 		stats,
 		buffer,
 		reads,
-		open: password =>
+		open: (password, memory) =>
 			client.call(
 				"open",
 				{
 					// Transferred to the engine thread, where it is Node's port again.
 					channel: { buffer, port: channel.port1 as unknown as SyncRangePort, length: bytes.length },
 					role: "edit",
-					...(password === undefined ? {} : { password })
+					...(password === undefined ? {} : { password }),
+					...(memory === undefined ? {} : { memory })
 				},
 				[channel.port1]
 			)

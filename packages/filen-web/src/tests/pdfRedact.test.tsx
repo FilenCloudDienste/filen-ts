@@ -11,10 +11,14 @@ vi.mock("react-i18next", () => ({
 	})
 }))
 
-const { RedactModeBar } = await import("@/features/pdf/redact/redactModeBar")
+const logError = vi.fn()
+
+vi.mock("@/lib/log", () => ({ log: { error: logError, warn: vi.fn(), info: vi.fn(), debug: vi.fn() } }))
+
 const { FindRedactPanel } = await import("@/features/pdf/redact/findRedactPanel")
 const { RedactionMarksList } = await import("@/features/pdf/redact/redactionMarksList")
 const { ApplyRedactionsDialog } = await import("@/features/pdf/redact/applyRedactionsDialog")
+const { findForRedaction } = await import("@/features/pdf/redact/redactFlow")
 const { addTerm, failureReason, findQuery, markLabel, redactedCopyName } = await import("@/features/pdf/redact/redaction.logic")
 
 const suffix = (number: number): string => (number <= 1 ? "redacted" : `redacted ${String(number)}`)
@@ -56,7 +60,10 @@ describe("redaction rules", () => {
 
 		for (const failure of failures) expect(previewPdfRedaction[failureReason(failure).key]).toBeTypeOf("string")
 
-		expect(failureReason({ code: "text", page: 3 })).toEqual({ key: "previewPdfRedactReasonText", params: { page: 3 } })
+		expect(failureReason({ code: "text", page: 3 })).toEqual({
+			key: "previewPdfRedactReasonText",
+			params: { page: 3, term: "", text: "" }
+		})
 		expect(failureReason({ code: "term", term: "Ada", place: "page" }).key).toBe("previewPdfRedactReasonTermFile")
 	})
 
@@ -82,42 +89,16 @@ describe("redaction rules", () => {
 	it("labels marks by kind", () => {
 		expect(markLabel(mark(1, "area"), undefined).key).toBe("previewPdfRedactMarkArea")
 		expect(markLabel(mark(1, "page"), undefined).key).toBe("previewPdfRedactMarkPage")
-		expect(markLabel(mark(1, "text"), "x".repeat(80)).params["text"]).toHaveLength(60)
+		expect(markLabel(mark(1, "text"), "x".repeat(80)).params.text).toHaveLength(60)
 		expect(markLabel(mark(1, "text"), undefined).key).toBe("previewPdfRedactMarkTextUnknown")
 	})
 })
 
 describe("redaction controls", () => {
-	it("switches between the marking modes and leaves the active one", () => {
-		const onModeChange = vi.fn()
-		const { rerender } = render(
-			<RedactModeBar
-				mode={null}
-				onModeChange={onModeChange}
-			/>
-		)
-
-		fireEvent.click(screen.getByRole("button", { name: /previewPdfRedactArea/ }))
-		expect(onModeChange).toHaveBeenLastCalledWith("area")
-
-		rerender(
-			<RedactModeBar
-				mode="find"
-				onModeChange={onModeChange}
-			/>
-		)
-
-		const find = screen.getByRole("button", { name: /previewPdfRedactFind$/ })
-
-		expect(find.getAttribute("aria-pressed")).toBe("true")
-		fireEvent.click(find)
-		expect(onModeChange).toHaveBeenLastCalledWith(null)
-	})
-
 	it("searches the typed terms with the options and marks the selected results", () => {
 		const onSearch = vi.fn()
 		const onMark = vi.fn()
-		const props = { searching: false, onSearch, onMark, onClose: vi.fn() }
+		const props = { searching: false, failed: false, onSearch, onMark, onClose: vi.fn() }
 		const { rerender } = render(
 			<FindRedactPanel
 				findings={null}
@@ -159,6 +140,46 @@ describe("redaction controls", () => {
 		expect(screen.getByRole("button", { name: 'previewPdfFindRedactMark {"count":2}' })).toBeTruthy()
 	})
 
+	it("says a failed search failed, never that nothing matched", () => {
+		const props = { searching: false, onSearch: vi.fn(), onMark: vi.fn(), onClose: vi.fn() }
+		const { rerender } = render(
+			<FindRedactPanel
+				findings={null}
+				failed={false}
+				{...props}
+			/>
+		)
+
+		// The status is there (empty) before any search, so its outcome is announced.
+		expect(screen.getByRole("status").textContent).toBe("")
+
+		rerender(
+			<FindRedactPanel
+				findings={null}
+				failed
+				{...props}
+			/>
+		)
+
+		expect(screen.getByRole("status").textContent).toBe("previewPdfFindRedactFailed")
+		expect(screen.queryByText("previewPdfFindRedactNoResults")).toBeNull()
+	})
+
+	it("reports an engine failure of a search as no findings, logged and not remembered", async () => {
+		const failure = new Error("engine trap")
+		const call = vi.fn((op: string): Promise<RedactionFinding[]> =>
+			op === "redactFind" ? Promise.reject(failure) : Promise.resolve([])
+		)
+		const session = { engine: { call } } as unknown as Parameters<typeof findForRedaction>[0]
+		const query = { terms: [{ text: "Ada", matchCase: false, wholeWord: false }], presets: [] }
+
+		await expect(findForRedaction(session, query)).resolves.toBeNull()
+		expect(logError).toHaveBeenCalledWith("pdf", expect.any(String), { error: failure })
+
+		call.mockImplementation(() => Promise.resolve([finding("0:0", 0, "Ada")]))
+		await expect(findForRedaction(session, query)).resolves.toHaveLength(1)
+	})
+
 	it("lists the marks, removes one and opens the apply dialog", () => {
 		const onRemove = vi.fn()
 		const onApply = vi.fn()
@@ -174,16 +195,63 @@ describe("redaction controls", () => {
 		)
 
 		expect(screen.getByText('previewPdfRedactMarked {"count":2}')).toBeTruthy()
-		expect(screen.getByText('previewPdfRedactMarkText {"text":"Ada"}')).toBeTruthy()
-		expect(screen.getByText('previewPdfRedactMarkPageNumber {"page":3}')).toBeTruthy()
-		const second = screen.getAllByRole("button", { name: "previewPdfRedactRemoveMark" })[1]
-
-		if (second === undefined) throw new Error("missing remove button")
-
-		fireEvent.click(second)
+		expect(screen.getByText('previewPdfRedactMarkText {"page":0,"term":"","text":"Ada"}')).toBeTruthy()
+		expect(screen.getByText('previewPdfPageNumber {"page":3}')).toBeTruthy()
+		// Each ✕ is named after its own mark.
+		fireEvent.click(
+			screen.getByRole("button", {
+				name: `previewPdfRedactRemoveMark ${JSON.stringify({ index: 2, mark: 'previewPdfRedactMarkArea {"page":0,"term":"","text":""}', page: 3 })}`
+			})
+		)
 		expect(onRemove).toHaveBeenCalledWith(marks[1])
 		fireEvent.click(screen.getByRole("button", { name: "previewPdfRedactApply" }))
 		expect(onApply).toHaveBeenCalled()
+	})
+
+	it("moves focus to the mark in a removed one's place, then the one before, then the heading", () => {
+		const marks = [mark(1, "area", 0), mark(2, "area", 0), mark(3, "page", 1)]
+		const props = { onRemove: vi.fn(), onApply: vi.fn() }
+		const { rerender } = render(
+			<RedactionMarksList
+				marks={marks}
+				{...props}
+			/>
+		)
+		const remove = (index: number): HTMLElement => {
+			const button = screen.getAllByRole("button", { name: /^previewPdfRedactRemoveMark/ })[index]
+
+			if (button === undefined) throw new Error("missing remove button")
+
+			return button
+		}
+
+		remove(1).focus()
+		fireEvent.click(remove(1))
+		rerender(
+			<RedactionMarksList
+				marks={[marks[0], marks[2]].filter(entry => entry !== undefined)}
+				{...props}
+			/>
+		)
+		expect(document.activeElement).toBe(remove(1))
+
+		fireEvent.click(remove(1))
+		rerender(
+			<RedactionMarksList
+				marks={marks.slice(0, 1)}
+				{...props}
+			/>
+		)
+		expect(document.activeElement).toBe(remove(0))
+
+		fireEvent.click(remove(0))
+		rerender(
+			<RedactionMarksList
+				marks={[]}
+				{...props}
+			/>
+		)
+		expect(document.activeElement).toBe(screen.getByRole("heading", { name: 'previewPdfRedactMarked {"count":0}' }))
 	})
 
 	it("disables Apply while nothing is marked", () => {
@@ -207,6 +275,7 @@ describe("redaction controls", () => {
 			// The mocked t returns keys, so the first suffix reads as its key.
 			takenNames: new Set(["contract (previewpdfredactcopysuffix).pdf"]),
 			canSaveInPlace: true,
+			tagged: false,
 			busy: false,
 			onApply
 		}
@@ -218,6 +287,7 @@ describe("redaction controls", () => {
 		)
 
 		expect(screen.getByText("previewPdfRedactApplyWarning")).toBeTruthy()
+		expect(screen.queryByText("previewPdfTagged")).toBeNull()
 		expect(screen.getByLabelText<HTMLInputElement>("previewPdfRedactSanitize").checked).toBe(true)
 		fireEvent.click(screen.getByRole("button", { name: "previewPdfRedactApplyConfirm" }))
 		expect(onApply).toHaveBeenLastCalledWith({
@@ -240,5 +310,16 @@ describe("redaction controls", () => {
 
 		expect(screen.getByRole("alert").textContent).toContain("previewPdfRedactVerifyFailed")
 		expect(screen.getByRole("alert").textContent).toContain("previewPdfRedactReasonText")
+
+		// A document with accessibility tags is told a redaction may leave them incomplete.
+		rerender(
+			<ApplyRedactionsDialog
+				{...props}
+				tagged
+				failure={null}
+			/>
+		)
+
+		expect(screen.getByText("previewPdfTagged")).toBeTruthy()
 	})
 })

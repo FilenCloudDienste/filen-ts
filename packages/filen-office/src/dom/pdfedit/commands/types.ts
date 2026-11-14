@@ -33,9 +33,16 @@ export function outcomePages(outcome: readonly number[] | PdfCommandOutcome): re
 export interface PdfCommand<A> {
 	// The kind of change, for the signature policy and the save planner.
 	readonly tool: PdfToolClass
+	// The kind of change the save planner counts it as, when other than `tool` (which decides whether it may run).
+	readonly saves?: PdfToolClass
 	// It removes content from the file (deleted pages, redacted, cropped-away or replaced content, ...): a save in place
 	// leaves the removed content in the file's earlier versions, which the user is told.
 	readonly removesContent?: true
+	// The argument holding the object number of the annotation (or widget) on the arguments' `page` it works on: the
+	// history logs it by name instead (stepKeys.ts), and a run again finds it by that name.
+	readonly target?: "id" | "widget"
+	// The bytes it adds to the document (a picture, a page's file): counted against the size the editor edits.
+	bytes?(args: A, mupdf: MupdfModule): number
 	// The arguments when well-formed, else null (answered "badRequest").
 	parse(args: unknown): A | null
 	run(context: PdfCommandContext, args: A): readonly number[] | PdfCommandOutcome

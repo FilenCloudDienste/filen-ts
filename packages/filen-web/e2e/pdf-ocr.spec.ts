@@ -20,7 +20,7 @@ const LINES = ["The quick brown fox jumps over the lazy dog.", "Filen recognises
 
 async function open(page: Page, listbox: Locator, name: string): Promise<void> {
 	await listbox.getByRole("option", { name }).dblclick()
-	await expect(page.locator("canvas").first()).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+	await expect(page.getByRole("region", { name: /Page 1 of/u })).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
 }
 
 async function downloaded(page: Page): Promise<Buffer> {

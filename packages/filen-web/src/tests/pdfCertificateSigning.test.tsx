@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import { StrictMode } from "react"
 import { describe, expect, it, vi } from "vitest"
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import type { PdfSignerUnlock } from "@/features/pdf/workers/pdfSignerCore"
@@ -99,6 +100,27 @@ describe("CertificateSigningDialog", () => {
 			summary: { algorithm: "RSA 2048" },
 			options: { reason: "previewPdfSigningReasonApprove", location: "Berlin", appearance: "nameDate", certify: null }
 		})
+	})
+
+	it("reads the certificate after a remount (StrictMode runs the mount effects twice)", async () => {
+		opened.calls.length = 0
+		opened.terminate.mockClear()
+
+		render(
+			<StrictMode>
+				<CertificateSigningDialog
+					canCertify
+					hasVisual={false}
+					onPlace={() => undefined}
+					onClose={() => undefined}
+				/>
+			</StrictMode>
+		)
+
+		pickDeviceFile()
+
+		expect(await screen.findByLabelText("previewPdfSigningPassword")).toBeTruthy()
+		expect(opened.terminate).not.toHaveBeenCalled()
 	})
 
 	it("terminates a signer it still owns when it closes", async () => {

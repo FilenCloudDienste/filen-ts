@@ -8,6 +8,7 @@ import { sdkApi } from "@/lib/sdk/client"
 import { pdfMemoryConstrained } from "@/features/preview/lib/pdfLimits"
 import type { PreviewAccessMode } from "@/features/preview/lib/accessMode"
 import { log } from "@/lib/log"
+import { transferList } from "@/lib/transferList"
 
 // One PDF engine: a worker with MuPDF and one document, reading the file through its own sync range bridge from the
 // SDK worker. Closing it closes the document, stops the bridge and terminates the worker; a poisoned engine (a wasm
@@ -42,7 +43,7 @@ function spawn(module: WebAssembly.Module): PdfEngineClient {
 
 	return new PdfEngineClient({
 		postMessage: (message, transfer) => {
-			worker.postMessage(message, { transfer: transfer as Transferable[] })
+			worker.postMessage(message, { transfer: transferList(transfer) })
 		},
 		addEventListener: (type: "message" | "error", listener: (event: { readonly data: unknown }) => void) => {
 			worker.addEventListener(type, event => {
@@ -102,7 +103,13 @@ async function startEngine(options: EngineStart): Promise<PdfEngine> {
 
 			const opened = await client.call(
 				"open",
-				{ channel, role: options.role, ...(options.password === undefined ? {} : { password: options.password }) },
+				{
+					channel,
+					role: options.role,
+					...(options.password === undefined ? {} : { password: options.password }),
+					// What the editor lets the document grow to in this browser.
+					...(options.role === "edit" ? { memory: pdfEngineMemory() } : {})
+				},
 				[channel.port]
 			)
 			let closing: Promise<{ readonly heapBytes: number }> | null = null
@@ -148,6 +155,16 @@ export function openPdfEngine(options: OpenPdfEngineOptions): Promise<PdfEngine>
 // A short-lived verifying engine on a channel another engine serves (its port is transferred to the new engine).
 export function openPdfEngineOnChannel(channel: PdfByteChannel, password: string | undefined): Promise<PdfEngine> {
 	return startEngine({ source: { kind: "channel", channel }, role: "verify", ...(password === undefined ? {} : { password }) })
+}
+
+// An editing engine on a channel another engine serves: a new document that engine made (extracted pages), not yet a
+// file anywhere.
+export function openPdfEditEngineOnChannel(
+	channel: PdfByteChannel,
+	password: string | undefined,
+	onPoisoned: (message: string) => void
+): Promise<PdfEngine> {
+	return startEngine({ source: { kind: "channel", channel }, role: "edit", ...(password === undefined ? {} : { password }), onPoisoned })
 }
 
 // Whether an engine that reached `heapBytes` should be replaced by a fresh one before more work (wasm memory never

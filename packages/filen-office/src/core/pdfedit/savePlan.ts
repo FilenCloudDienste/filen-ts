@@ -1,4 +1,4 @@
-import { estimateSavePeak, fitsBudget, type PdfMemoryProfile } from "./budget"
+import { estimateSavePeak, fitsBudget, PDF_FRESH_HEAP, type PdfHeapUse, type PdfMemoryProfile } from "./budget"
 import { signatureAllows, type PdfSignatureState, type PdfToolClass } from "./signaturePolicy"
 
 // How a document is written, decided before anything is written. A signed document is saved incrementally (its
@@ -28,6 +28,8 @@ export interface PdfSaveInput {
 	readonly invalidateConfirmed: boolean
 	readonly poisoned: boolean
 	readonly memory: PdfMemoryProfile
+	// What the engine's heap holds as the save starts; absent: a fresh engine.
+	readonly heap?: PdfHeapUse
 }
 
 export interface PdfSavePlan {
@@ -44,7 +46,10 @@ export interface PdfSavePlan {
 	readonly refuse: PdfSaveRefusal | null
 }
 
-export const PDF_FULL_SAVE_OPTIONS = "garbage=compact,objstms,compress"
+// Unused objects dropped, never renumbered: MuPDF writes the document in memory, so a compacting rewrite would change
+// the object numbers of the live document under the page (its widget and annotation ids) and under the history (the
+// logged steps a rebuild runs again). The numbers left free cost a few bytes in the cross-reference stream.
+export const PDF_FULL_SAVE_OPTIONS = "garbage=yes,objstms,compress"
 // No object streams: a reader that never learned them still reads the signed revisions, and the appended one stays
 // plain to check.
 export const PDF_INCREMENTAL_SAVE_OPTIONS = "incremental"
@@ -53,7 +58,7 @@ export function planSave(input: PdfSaveInput): PdfSavePlan {
 	const signed = input.signatures.fields.length > 0
 	const incremental = signed && input.changes.every(change => signatureAllows(input.signatures, change))
 	const invalidates = signed && !incremental ? input.signatures.fields : []
-	const peakBytes = estimateSavePeak(input.inputBytes, false)
+	const peakBytes = estimateSavePeak(input.inputBytes, false, input.heap ?? PDF_FRESH_HEAP)
 	const refuse: PdfSaveRefusal | null = input.poisoned
 		? "poisoned"
 		: !fitsBudget(peakBytes, input.memory)

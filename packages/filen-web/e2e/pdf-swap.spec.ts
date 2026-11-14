@@ -41,7 +41,7 @@ async function openPdf(page: Page, listbox: Locator, name: string): Promise<Loca
 
 	const dialog = page.getByRole("dialog").first()
 
-	await expect(dialog.locator("canvas.block").first()).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+	await expect(dialog.getByRole("region", { name: /Page 1 of/u })).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
 
 	return dialog
 }
@@ -75,7 +75,7 @@ test("typing into a form field swaps to the editor and saves the value", async (
 
 		await expect(undo).toBeVisible({ timeout: ENGINE_TIMEOUT_MS })
 		expect(await scroller.evaluate(element => ({ top: element.scrollTop, width: element.scrollWidth }))).toEqual(before)
-		await expect(dialog.locator("canvas.block").first()).toBeVisible()
+		await expect(dialog.getByRole("region", { name: /Page 1 of/u })).toBeVisible()
 
 		await undo.click()
 		await expect(field).toHaveValue("")
@@ -107,6 +107,6 @@ test("the editor not loading leaves the viewer working and says so", async ({ pa
 		await field.press("Enter")
 		await expect(dialog.getByText(preview.previewPdfEditorUnavailable)).toBeVisible({ timeout: ENGINE_TIMEOUT_MS })
 		await expect(dialog.getByRole("button", { name: preview.previewPdfEditorRetry })).toBeVisible()
-		await expect(dialog.locator("canvas.block").first()).toBeVisible()
+		await expect(dialog.getByRole("region", { name: /Page 1 of/u })).toBeVisible()
 	})
 })

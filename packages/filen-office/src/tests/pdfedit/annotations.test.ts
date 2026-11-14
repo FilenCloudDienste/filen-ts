@@ -730,4 +730,24 @@ describe("flattening, links and attachments", () => {
 		expect(readAttachment(reopened, only(pageFiles).source)).toEqual(new Uint8Array([1, 2, 3]))
 		expect(readAttachment(reopened, { kind: "document", key: "missing" })).toBeNull()
 	})
+
+	it("lists attachment names without bidi, format or control characters", () => {
+		const document = open()
+		// Shown as is, the right-to-left override would read "invoiceexe.pdf".
+		const disguised = "invoice‮fdp.exe"
+		const spec = document.addEmbeddedFile(disguised, "application/x-msdownload", new Uint8Array([1]), NOW, NOW)
+
+		document.insertEmbeddedFile(disguised, spec)
+
+		const hidden = document.addEmbeddedFile("hidden.txt", "text/plain", new Uint8Array([2]), NOW, NOW)
+
+		// A name of nothing but invisible characters: the name tree's key is shown instead.
+		for (const key of ["UF", "F"]) hidden.resolve().put(key, document.newString("​⁦\u0007"))
+
+		document.insertEmbeddedFile("hidden", hidden)
+
+		const names = listDocumentAttachments(open(save(document))).map(file => file.name)
+
+		expect(names.sort()).toEqual(["hidden", "invoicefdp.exe"])
+	})
 })

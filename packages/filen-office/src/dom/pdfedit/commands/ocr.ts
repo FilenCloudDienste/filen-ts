@@ -1,4 +1,4 @@
-import type { OcrMatrix } from "../../../core/pdfedit/ocrGeometry"
+import type { PdfMatrix } from "../../../core/pdfedit/matrix"
 import { PdfEngineRefusal } from "../context"
 import { applyOcrPage, type OcrGraft } from "../ocr/page"
 import { graftOverlay } from "../overlay"
@@ -13,7 +13,7 @@ import { isIndex, isRecord, type PdfCommandTable } from "./types"
 const MAX_OVERLAY_BYTES = 16 * 1024 * 1024
 
 export interface PdfOcrCommands {
-	"ocr.applyPage": { readonly page: number; readonly pdf: Uint8Array; readonly matrix: OcrMatrix }
+	"ocr.applyPage": { readonly page: number; readonly pdf: Uint8Array; readonly matrix: PdfMatrix }
 }
 
 // The graft OCR takes: overlay.ts with the overlay → page content matrix as it is.
@@ -23,7 +23,7 @@ export function ocrGraft(mupdf: MupdfModule): OcrGraft {
 	}
 }
 
-function parseMatrix(value: unknown): OcrMatrix | null {
+function parseMatrix(value: unknown): PdfMatrix | null {
 	if (!Array.isArray(value) || value.length !== 6) return null
 
 	const numbers = value.filter((item): item is number => typeof item === "number" && Number.isFinite(item))

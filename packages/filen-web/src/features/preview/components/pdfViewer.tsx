@@ -1,6 +1,8 @@
 import { useEffect, useEffectEvent, useRef, useState, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { getDocument, GlobalWorkerOptions, PDFDataRangeTransport, TextLayer } from "pdfjs-dist"
+import { Dialog as DialogPrimitive } from "@base-ui/react/dialog"
+import { XIcon } from "lucide-react"
 import {
 	loadPdfOutline,
 	type PdfErrorKind,
@@ -25,12 +27,17 @@ import { PDF_FULL_READ_WARN_BYTES, pdfViewerLimits, type PdfViewerLimits } from 
 import { PdfCommandBar, PdfPropertiesDialog } from "@/features/preview/components/pdfCommandBar"
 import { toggleViewerFullScreen, useLeaveViewerFullScreen } from "@/features/preview/components/commandBar.logic"
 import { onCommandBarF6, onRibbonEscape } from "@/features/office/components/ribbon/ribbonFocus"
-import { usePreviewByteSource, usePreviewDownload } from "@/features/preview/lib/accessMode"
+import {
+	PreviewDownloadableProvider,
+	usePreviewByteSource,
+	usePreviewDownload,
+	type PreviewAccessMode
+} from "@/features/preview/lib/accessMode"
 import { useTrustedLinkGate } from "@/lib/trustedLinks/useTrustedLinkGate"
 import { isSafeAbsoluteHref } from "@/lib/safeUrl"
 import { keyForEditor } from "@/lib/keymap/dialogGuard"
 import { useEditorLayerKeys } from "@/lib/keymap/editorLayerKeys"
-import { IN_EDITORS, useAction } from "@/lib/keymap/useAction"
+import { IN_EDITORS, IN_EDITORS_AND_FIELDS, useAction } from "@/lib/keymap/useAction"
 import { isRecordingCombo, useBindings } from "@/lib/keymap/registry"
 import { isPdfHostAction, pdfViewerKey, pdfViewerKeyCommand, type PdfHostAction } from "@/features/preview/lib/pdfKeys.logic"
 import { isImeKeydown } from "@filen/shared/keymap"
@@ -39,6 +46,7 @@ import { log } from "@/lib/log"
 import { LoadingState } from "@/components/loadingState"
 import { Button } from "@/components/ui/button"
 import { InputDialog } from "@/components/dialogs/inputDialog"
+import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 import { PreviewErrorState, PreviewGate, PreviewLoading } from "@/features/preview/components/previewErrorState"
 import "@filen/office/css/pdf.css"
 import "@/features/preview/components/pdfTheme.css"
@@ -50,11 +58,14 @@ import { BLOCK_BYTES } from "@filen/shared/videos"
 import { PdfSignatureStatus, PdfSignedVersionStatus } from "@/features/pdf/signatures/pdfSignatureStatus"
 import { useSignatureVerifier, type PdfSignatureVerify } from "@/features/pdf/signatures/useSignatureVerifier"
 import { usePdfEdit, type PdfEditHost, type PdfEditView } from "@/features/pdf/session/usePdfEdit"
+import type { PdfDraft, PdfPagesController } from "@/features/pdf/pages/pagesController"
+import { batchCopyNames } from "@/features/pdf/pages/names"
 import { PdfFieldOverlay } from "@/features/pdf/session/fieldOverlay"
 import { PdfFormNotices } from "@/features/pdf/forms/formNotices"
 import { PdfRibbon } from "@/features/pdf/ribbon/pdfRibbon"
 import { PDF_TOOLS } from "@/features/pdf/tools"
 import { PdfToolOverlay, PdfToolPanels } from "@/features/pdf/tools/toolHost"
+import { PdfLiveRegion } from "@/features/pdf/tools/pdfLiveRegion"
 import { PdfPagesNotices, PdfPagesSide } from "@/features/pdf/pages/pagesSurface"
 import { PdfPagesSurfaceContext, type PdfPagesSurfaceValue } from "@/features/pdf/pages/pagesSurfaceContext"
 import { usePdfPageKeys } from "@/features/pdf/pages/pagesKeys"
@@ -63,7 +74,7 @@ import { usePreviewAccessMode } from "@/features/preview/lib/accessMode"
 import type { DriveVariant } from "@/features/drive/lib/preferences"
 import { pdfTooLargeToEdit, type PresentationSaveSource } from "@/features/drive/lib/previewSave.logic"
 import { pdfEngineMemory } from "@/features/pdf/session/engineWorker"
-import { formatBytes } from "@filen/shared"
+import { driveItemName, formatBytes } from "@filen/shared"
 
 export interface PdfViewerProps {
 	item: DriveItem
@@ -176,6 +187,8 @@ interface PdfReaderProps {
 	size: number
 	// pdf.js holds every byte of the file (it read them all); a reopen of the document drops them.
 	fullyRead: boolean
+	// pdf.js reads the file in ranges (it does not hold all of it).
+	ranged: boolean
 	onReopen: () => void
 	signatures: PdfSignatures
 }
@@ -186,7 +199,7 @@ type PdfSignatures =
 	| { readonly kind: "current"; readonly verify: PdfSignatureVerify | null; readonly onViewSignedVersion: (byteLength: number) => void }
 	| { readonly kind: "signedVersion"; readonly onBack: () => void }
 
-function PdfReader({ item, notice, document, viewerDocument, edit, alt, size, fullyRead, onReopen, signatures }: PdfReaderProps) {
+function PdfReader({ item, notice, document, viewerDocument, edit, alt, size, fullyRead, ranged, onReopen, signatures }: PdfReaderProps) {
 	const { t } = useTranslation("preview")
 	const viewer = usePdfViewer(document)
 	const { state } = viewer
@@ -395,7 +408,8 @@ function PdfReader({ item, notice, document, viewerDocument, edit, alt, size, fu
 					policy: edit.policy,
 					toolContext: edit.toolContext,
 					viewRotation: state.rotation,
-					online: edit.policy.online
+					online: edit.policy.online,
+					ranged
 				}
 
 	useEffect(() => {
@@ -586,13 +600,16 @@ function PdfReader({ item, notice, document, viewerDocument, edit, alt, size, fu
 				className="relative flex min-h-0 flex-1 flex-col"
 			>
 				{edit === null ? null : (
-					<PdfToolPanels
-						edit={edit}
-						document={document}
-						slot="top"
-					/>
+					<>
+						<PdfLiveRegion owner={edit.swap} />
+						<PdfToolPanels
+							edit={edit}
+							document={document}
+							slot="top"
+						/>
+					</>
 				)}
-				<div className="flex min-h-0 flex-1 max-sm:flex-col-reverse">
+				<div className="flex min-h-0 flex-1 max-sm:flex-col">
 					{surface === null ? null : <PdfPagesSide />}
 					<PdfPages
 						pdfjs={PDFJS}
@@ -620,7 +637,7 @@ function PdfReader({ item, notice, document, viewerDocument, edit, alt, size, fu
 												swap={edit.swap}
 												snapshot={edit.snapshot}
 												starting={edit.phase.kind === "starting"}
-												editable={edit.policy.editable && edit.policy.online}
+												editable={edit.toolContext.editable}
 											/>
 											<PdfToolOverlay
 												edit={edit}
@@ -753,6 +770,7 @@ function PdfDocument({ item, notice, edit, source, alt, size, onRetry, signature
 			alt={alt}
 			size={size}
 			fullyRead={fullyRead}
+			ranged={source.kind === "ranges" && !fullyRead}
 			onReopen={reopen}
 			signatures={signatures}
 		/>
@@ -809,7 +827,7 @@ function RangedPdf({ item, alt, limit, signatures, edit, notice }: PdfSourceProp
 // pdf.js reads the file on demand through a range port to the SDK worker, aligned to its blocks, so a large file opens
 // after reading its first pages. A file of one block or less is read whole and kept in the session's preview cache,
 // as is an archive's entry (bytes from the archive, not the drive).
-export function PdfViewer({ item, alt, variant, editing }: PdfViewerProps) {
+export function PdfViewer({ item, alt, variant, editing, onOpenFile }: PdfViewerProps) {
 	useLeaveViewerFullScreen()
 
 	const { t } = useTranslation("preview")
@@ -817,7 +835,7 @@ export function PdfViewer({ item, alt, variant, editing }: PdfViewerProps) {
 	const entry = usePreviewByteSource()
 	const access = usePreviewAccessMode()
 	// An archive's entry is not a drive file the editor could read or save.
-	const edit = usePdfEdit(item, access, entry === null ? editing : undefined)
+	const edit = usePdfEdit(item, access, entry === null ? editing : undefined, onOpenFile === undefined ? undefined : { onOpenFile })
 	const editView = entry === null && editing !== undefined ? edit : null
 	const holding = edit.phase.kind === "starting" || edit.phase.kind === "editing"
 	// The file pdf.js opened: kept while the editor holds the document (its saves make new versions under it).
@@ -865,6 +883,8 @@ export function PdfViewer({ item, alt, variant, editing }: PdfViewerProps) {
 		) : null
 	// The signed version is a read-only view of bytes, never the editor's.
 	const sourceEdit = signedVersion === null ? editView : null
+	// Extracted pages open as a new document over this one.
+	const draft = editView?.draft ?? null
 
 	// The signed version of the file as it now is (the editor's saves may have signed it since pdf.js opened it).
 	const sourceItem = signedVersion === null ? shownItem : item
@@ -900,7 +920,165 @@ export function PdfViewer({ item, alt, variant, editing }: PdfViewerProps) {
 				/>
 			) : null}
 			{source}
+			{draft === null ? null : (
+				<PdfDraftDocument
+					key={draft.id}
+					draft={draft}
+					item={item}
+					access={access}
+					controller={edit.pages}
+				/>
+			)}
 		</>
+	)
+}
+
+// A draft saves only through its own Save: never the overlay's.
+const DRAFT_HOST: PdfEditHost = {
+	writable: true,
+	onDirtyChange: () => undefined,
+	saveRef: { current: null },
+	onSave: () => false
+}
+
+const NO_SIGNED_VERSION = (): void => undefined
+
+// Extracted pages as a new, unsaved PDF over the one they came from (its own full-screen layer, the editor's ribbon and
+// tools on a second engine): Save makes it a file beside `item`, named as Extract said; closing it unsaved asks first.
+// The PDF behind stays as it was (its view, its changes) and keeps the draft's bytes until the draft ends.
+function PdfDraftDocument({
+	draft,
+	item,
+	access,
+	controller
+}: {
+	draft: PdfDraft
+	item: DriveItem
+	access: PreviewAccessMode
+	controller: PdfPagesController
+}) {
+	const { t } = useTranslation(["preview", "common"])
+	const popupRef = useRef<HTMLDivElement | null>(null)
+	const [asking, setAsking] = useState(false)
+	const edit = usePdfEdit(item, access, DRAFT_HOST, {
+		draft: {
+			draft,
+			onEnd: saved => {
+				controller.closeDraft(saved)
+			}
+		}
+	})
+	const name = batchCopyNames(driveItemName(item), [draft.suffix], new Set())[0] ?? driveItemName(item)
+	const history = edit.history
+
+	// Mod+S in the draft's layer saves the draft (the overlay's Save stands down for a layer over it).
+	useAction(
+		"preview.save",
+		keyboardEvent => {
+			const popup = popupRef.current
+
+			if (popup === null || !(keyboardEvent.target instanceof Node) || !popup.contains(keyboardEvent.target)) return
+
+			keyboardEvent.preventDefault()
+
+			if (history?.canSave === true) history.save()
+		},
+		IN_EDITORS_AND_FIELDS,
+		[history]
+	)
+
+	const snapshot = edit.snapshot
+	const body =
+		edit.phase.kind === "failed" ? (
+			<PreviewErrorState
+				message={t("previewPdfEditorUnavailable")}
+				onRetry={() => {
+					edit.swap.retry()
+				}}
+			/>
+		) : edit.phase.kind === "poisoned" ? (
+			<PreviewErrorState message={t("previewPdfPoisoned")} />
+		) : snapshot === null ? (
+			<PreviewLoading />
+		) : (
+			// Download would save the PDF behind, not this one: Save is the way to keep it.
+			<PreviewDownloadableProvider
+				downloadable
+				onDownload={null}
+			>
+				<PdfReader
+					item={item}
+					notice={null}
+					document={snapshot.document}
+					viewerDocument={snapshot.document}
+					edit={edit}
+					alt={name}
+					size={draft.size}
+					fullyRead={false}
+					ranged
+					onReopen={NO_SIGNED_VERSION}
+					signatures={{ kind: "current", verify: null, onViewSignedVersion: NO_SIGNED_VERSION }}
+				/>
+			</PreviewDownloadableProvider>
+		)
+
+	return (
+		<DialogPrimitive.Root
+			open
+			onOpenChange={(next, details) => {
+				if (next) return
+
+				details.cancel()
+
+				// An Escape something inside took already (the find field, a tool) is not a close.
+				if (details.reason === "escape-key" && details.event.defaultPrevented) return
+
+				setAsking(true)
+			}}
+		>
+			<DialogPrimitive.Portal>
+				<DialogPrimitive.Backdrop className="fixed inset-0 z-50 bg-background" />
+				<DialogPrimitive.Popup
+					ref={popupRef}
+					initialFocus={popupRef}
+					className="fixed inset-0 z-50 flex flex-col bg-background outline-none"
+				>
+					<header className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
+						<DialogPrimitive.Title className="min-w-0 truncate font-heading text-sm font-medium">{name}</DialogPrimitive.Title>
+						<span className="shrink-0 rounded-sm bg-muted px-1.5 py-0.5 text-xs text-muted-foreground">
+							{t("previewPdfDraftUnsaved")}
+						</span>
+						<div className="flex-1" />
+						<Button
+							variant="ghost"
+							size="icon-sm"
+							aria-label={t("common:close")}
+							disabled={history?.saving === true}
+							onClick={() => {
+								setAsking(true)
+							}}
+						>
+							<XIcon />
+						</Button>
+					</header>
+					<div className="min-h-0 flex-1">{body}</div>
+					<ConfirmDialog
+						open={asking}
+						pending={false}
+						title={t("previewPdfDraftDiscardTitle")}
+						body={t("previewPdfDraftDiscardBody")}
+						confirmLabel={t("previewPdfDiscardConfirm")}
+						cancelLabel={t("common:cancel")}
+						destructive
+						onOpenChange={setAsking}
+						onConfirm={() => {
+							setAsking(false)
+							controller.closeDraft(false)
+						}}
+					/>
+				</DialogPrimitive.Popup>
+			</DialogPrimitive.Portal>
+		</DialogPrimitive.Root>
 	)
 }
 
@@ -925,7 +1103,7 @@ function PdfSaveBinding({ saveRef, saveSource }: { saveRef: PdfEditHost["saveRef
 
 // Fetches the editor while the reader is idle when the document has a form or signatures (pdf.js's information says,
 // with no page read). Returns the cancel.
-function prefetchWhenIdle(document: PdfDomDocument, swap: { prefetch(): void }): () => void {
+function prefetchWhenIdle(document: PdfDomDocument, swap: { prefetchIdle(): void }): () => void {
 	let live = true
 	let idle = 0
 
@@ -939,7 +1117,7 @@ function prefetchWhenIdle(document: PdfDomDocument, swap: { prefetch(): void }):
 			}
 
 			const prefetch = (): void => {
-				swap.prefetch()
+				swap.prefetchIdle()
 			}
 
 			idle = typeof requestIdleCallback === "function" ? requestIdleCallback(prefetch) : window.setTimeout(prefetch, 2000)

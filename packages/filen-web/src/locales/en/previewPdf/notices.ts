@@ -8,6 +8,8 @@ export const previewPdfNotices = {
 	previewPdfEditorRetry: "Try again",
 	/** PDF editor — notice when the editor crashed; the viewer shows the file as last saved */
 	previewPdfPoisoned: "The editor stopped (out of memory or an internal error). Unsaved changes are lost. The file is unchanged.",
+	/** PDF editor — notice when the file was saved but the editor could not open the saved file again; a Try again button follows */
+	previewPdfReopenFailed: "Your changes were saved, but the editor couldn't open the saved file again.",
 	/** PDF editor — notice when the file is too large to edit in this browser; {{size}} is the largest size it can edit, e.g. "175 MB" */
 	previewPdfTooLarge: "This PDF is too large to edit in this browser (limit {{size}}). You can still view, print and check signatures.",
 	/** PDF editor — error when one change (e.g. inserting many pages) would need more memory than the browser gives the editor */
@@ -29,9 +31,5 @@ export const previewPdfNotices = {
 	/** PDF editor — body of the confirmation before deleting every earlier version of the file */
 	previewPdfDeleteEarlierVersionsBody: "Every earlier version of this file is deleted for good. This can't be undone.",
 	/** PDF editor — title of the dialog on save when someone else saved the file since it was opened here */
-	previewPdfRemoteChanged: "This file changed since you opened it.",
-	/** PDF editor — warning before saving changes that break the PDF's digital signature; {{count}} is the number of signatures */
-	previewPdfInvalidates_one: "Saving these changes invalidates {{count}} signature.",
-	/** PDF editor — warning before saving changes that break the PDF's digital signatures; {{count}} is the number of signatures */
-	previewPdfInvalidates_other: "Saving these changes invalidates {{count}} signatures."
+	previewPdfRemoteChanged: "This file changed since you opened it."
 } as const

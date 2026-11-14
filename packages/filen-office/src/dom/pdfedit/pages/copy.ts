@@ -1,4 +1,5 @@
 import type { PDFDocument, PDFGraftMap, PDFObject } from "mupdf"
+import type { PdfMatrix } from "../../../core/pdfedit/matrix"
 import {
 	appearanceMatrix,
 	appendPageContent,
@@ -17,8 +18,7 @@ import {
 	numOf,
 	pageAnnots,
 	ref,
-	type NamedDests,
-	type PdfMatrix
+	type NamedDests
 } from "./objects"
 
 // Copies pages from one document into another through ONE graft map (shared fonts, images and appearance streams are

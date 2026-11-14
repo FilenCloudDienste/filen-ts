@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest"
 import { contentStrings, parseContent, sectionEnd, spliceContent, writeOperation } from "../core/pdfedit/contentStream"
 import {
+	coveredWords,
 	decodeXmlText,
+	hiddenTerms,
 	forEachCoveredPixel,
 	glyphCore,
 	matchPreset,
@@ -179,5 +181,24 @@ describe("geometry", () => {
 		})
 
 		expect(visited).toEqual(["1,1"])
+	})
+})
+
+describe("covered words", () => {
+	it("takes the words of covered runs, trimmed of edge punctuation, long enough to mean something", () => {
+		const text = "Pay Mallory, (1,000,000) now."
+		const covered = Array.from(text, (_, index) => index >= 4 && index < 28)
+
+		expect(coveredWords(text, covered)).toEqual(["Mallory", "1,000,000"])
+		expect(coveredWords("été rose", [true, true, true, true, true, true, true, true])).toEqual(["rose"])
+	})
+
+	it("keeps the longest words as whole-word, case-sensitive terms up to the limit", () => {
+		const words = Array.from({ length: 1200 }, (_, index) => "w".repeat(4 + (index % 50)) + String(index))
+		const terms = hiddenTerms([...words, words[0] ?? ""])
+
+		expect(terms).toHaveLength(1000)
+		expect(terms.every(term => term.matchCase && term.wholeWord)).toBe(true)
+		expect(terms[0]?.text.length).toBeGreaterThanOrEqual(terms.at(-1)?.text.length ?? 0)
 	})
 })

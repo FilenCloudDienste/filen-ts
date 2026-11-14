@@ -6,6 +6,8 @@ import { pdfSurfaceKey } from "@/features/pdf/tools/toolKeys.logic"
 import { isAnyOverlayOpen } from "@/lib/keymap/dialogGuard"
 import { isMacPlatform } from "@/lib/keymap/kbd.logic"
 import { isRecordingCombo } from "@/lib/keymap/registry"
+import { log } from "@/lib/log"
+import { toast } from "sonner"
 
 // The editor session's tool glue the viewer runs: keys on the page surface, and the Save option that draws the
 // annotations into the pages first.
@@ -20,6 +22,14 @@ export async function flattenedFirst<T>(session: PdfEditSessionModel | null, fla
 	return save()
 }
 
+// An undo or redo from the ribbon or its keys: a failure is logged and told (`failed`), never dropped.
+export function historyStep(step: () => Promise<unknown>, which: "undo" | "redo", failed: string): void {
+	void step().catch((error: unknown) => {
+		log.error("pdf", `${which} failed`, { error })
+		toast.error(failed)
+	})
+}
+
 export interface PdfSurfaceKeyDeps {
 	readonly tools: readonly PdfTool[]
 	readonly combos: Readonly<Record<string, string>>
@@ -30,7 +40,7 @@ export interface PdfSurfaceKeyDeps {
 }
 
 // A keydown or keyup on the viewer: a tool letter picks its tool (an action tool runs), and Enter, Escape, Delete, the
-// arrows and Space go to the tool in effect. Only keys pressed on the page surface outside its fields, never while a
+// arrows and Space go to the tool in effect, for the focused page (else `page`, the page in view). Only keys pressed on the page surface outside its fields, never while a
 // dialog or menu is open, an input method composes or a shortcut is being recorded. True when a tool took the key.
 export function pdfToolSurfaceKey(event: KeyboardEvent, surface: Element, page: number, deps: PdfSurfaceKeyDeps): boolean {
 	if (event.defaultPrevented || isImeKeydown(event) || isRecordingCombo() || isAnyOverlayOpen()) return false
@@ -61,5 +71,17 @@ export function pdfToolSurfaceKey(event: KeyboardEvent, surface: Element, page: 
 
 	const tool = toolInEffect(deps.tools, deps.activeTool)
 
-	return tool?.onKey?.({ kind: up ? "up" : "down", key: key.key, shift: event.shiftKey, alt: event.altKey, page }, deps.context) ?? false
+	return (
+		tool?.onKey?.(
+			{ kind: up ? "up" : "down", key: key.key, shift: event.shiftKey, alt: event.altKey, page: focusedPage(event.target) ?? page },
+			deps.context
+		) ?? false
+	)
+}
+
+// The 0-based page holding `target` (a page's tool layer focused from the keyboard), or null outside the pages.
+function focusedPage(target: EventTarget | null): number | null {
+	const number = target instanceof Element ? Number(target.closest("[data-page]")?.getAttribute("data-page")) : Number.NaN
+
+	return Number.isInteger(number) && number >= 1 ? number - 1 : null
 }

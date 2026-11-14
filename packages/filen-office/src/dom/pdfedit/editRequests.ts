@@ -1,5 +1,6 @@
 import type * as Mupdf from "mupdf"
 import { savePortWriter, type SavePortEnd } from "@filen/shared/savePort"
+import { fitsEdit, type PdfMemoryProfile } from "../../core/pdfedit/budget"
 import { REDACTION_SAVE_OPTIONS } from "../../core/pdfedit/redactVerify"
 import { planSave } from "../../core/pdfedit/savePlan"
 import {
@@ -13,16 +14,18 @@ import {
 import type { PdfCommandResult, PdfPageWidgets } from "../../core/pdfedit/state"
 import { saslPrepPassword } from "../../core/pdfwrite/crypto"
 import { pdfCommand, redactionManifest } from "./commands/index"
-import { outcomePages, type PdfCommandContext, type PdfCommandOutcome } from "./commands/types"
+import { isIndex, isRecord, outcomePages, type PdfCommand, type PdfCommandContext, type PdfCommandOutcome } from "./commands/types"
 import { pendingSignature } from "./commands/sign"
 import { PdfEngineRefusal, type OpenDocument, type PdfEngineContext } from "./context"
 import { EngineLifetime, PdfEditSession, restrictionsOf, type LoggedStep, type PendingSecurity } from "./editSession"
-import { pageWidgets } from "./formState"
+import { pageWidgets, type PdfRevisions } from "./formState"
 import type { PdfOpenResult, PdfSaveProtection } from "./protocol"
 import type { PdfRequestHandler } from "./requests"
 import { TileRenderer } from "./render"
 import { syncRangeStreamHandle } from "./stream"
+import { nameCreated, resolveTarget, targetKey, type PdfStepKey } from "./stepKeys"
 import { serveSyncRange } from "./syncRange"
+import { fileRevisions } from "./verifyRequest"
 import { pageTextLines, pageTextLinks, pointOf } from "./text"
 
 // The edit role's requests: commands as journal operations, undo and redo, the snapshot the page holds, and the save
@@ -57,7 +60,10 @@ export type Editing = OpenDocument & { readonly edit: PdfEditSession }
 export function startEdit(
 	document: Mupdf.PDFDocument,
 	opened: Extract<PdfOpenResult, { status: "open" }>,
-	password: string | undefined
+	password: string | undefined,
+	revisions: PdfRevisions,
+	memory: PdfMemoryProfile,
+	fileBytes: number
 ): PdfEditSession {
 	document.enableJournal()
 
@@ -68,7 +74,10 @@ export function startEdit(
 		encryption,
 		restrictions: restrictionsOf(permissions, opened.access, encryption),
 		held: heldAtStart(document, opened, password),
-		...(password === undefined ? {} : { password })
+		revisions,
+		...(password === undefined ? {} : { password }),
+		memory,
+		fileBytes
 	})
 }
 
@@ -146,6 +155,44 @@ function commandContext(
 	}
 }
 
+// The page and object number of the annotation a command's arguments name (PdfCommand.target), or null.
+function targetOf(
+	command: PdfCommand<unknown>,
+	args: unknown
+): {
+	readonly page: number
+	readonly id: number
+	readonly field: "id" | "widget"
+	readonly args: Readonly<Record<string, unknown>>
+} | null {
+	if (command.target === undefined || !isRecord(args)) return null
+
+	const page = args["page"]
+	const id = args[command.target]
+
+	return isIndex(page) && isIndex(id) ? { page, id, field: command.target, args } : null
+}
+
+// One dispatch of a logged step run again: its target found by name (and named as the first run did), the annotation
+// it makes named as then.
+function runAgain(command: PdfCommand<unknown>, context: PdfCommandContext, args: unknown, key: PdfStepKey | undefined): void {
+	const target = targetOf(command, args)
+	let run = args
+
+	if (target !== null && key !== undefined && (key.target !== null || key.at !== null)) {
+		const id = resolveTarget(context.document, target.page, key)
+
+		if (id === null) throw new PdfEngineRefusal("failed", "the annotation a step changed is gone")
+
+		run = { ...target.args, [target.field]: id }
+	}
+
+	const outcome = command.run(context, run)
+	const created = key === undefined ? null : key.created
+
+	if (created !== null && "created" in outcome) nameCreated(context.document, outcome.created, created)
+}
+
 // Runs a logged step again (a redo the journal cannot make, a rebuild), as one journal operation.
 function runStep(context: PdfEngineContext, edit: PdfEditSession, document: Mupdf.PDFDocument, step: LoggedStep): void {
 	const command = pdfCommand(step.label)
@@ -157,7 +204,9 @@ function runStep(context: PdfEngineContext, edit: PdfEditSession, document: Mupd
 	document.beginOperation(step.label)
 
 	try {
-		for (const args of step.args) command.run(commandContextValue, args)
+		step.args.forEach((args, index) => {
+			runAgain(command, commandContextValue, args, step.keys[index])
+		})
 	} catch (error) {
 		document.abandonOperation()
 
@@ -330,6 +379,13 @@ function checkProtection(document: Mupdf.PDFDocument, protection: PdfSaveProtect
 	return null
 }
 
+// Before a save writes: every page's display list goes and the resource store is emptied, so the write runs in memory
+// the heap already has (core/pdfedit/budget.ts) rather than growing it past what it holds for the view.
+export function freeForSave(context: PdfEngineContext): void {
+	context.open().renderer.destroy()
+	context.mupdf.emptyStore()
+}
+
 export function idle(edit: PdfEditSession): void {
 	if (edit.output !== null) throw new PdfEngineRefusal("badRequest", "a save is under way")
 }
@@ -356,13 +412,28 @@ export const EDIT_REQUESTS: Handlers = {
 		if (edit.snapshot(document).tools[command.tool] !== null)
 			throw new PdfEngineRefusal("notAllowed", `${command.tool} is not allowed on this document`)
 
-		edit.begin(document, name, command.tool, parsed, op?.id ?? null)
+		// What it adds (a picture, another file's pages) must leave a document the editor can still save.
+		const bytes = command.bytes?.(parsed, context.mupdf) ?? 0
+
+		if (bytes > 0 && !fitsEdit(edit.fileBytes + edit.addedBytes() + bytes, edit.memory))
+			throw new PdfEngineRefusal("overBudget", `${name} would grow the document past what this browser edits`)
+
+		// The annotation it works on, as the history logs it (by name; named inside the step when it has none).
+		const target = targetOf(command, parsed)
+		const located = target === null ? null : targetKey(document, target.page, target.id, target.field === "widget")
+		const key: PdfStepKey = located?.key ?? { target: null, at: null, created: null }
+
+		edit.begin(document, { tool: command.saves ?? command.tool, label: name, args: parsed, key, bytes }, op?.id ?? null)
 
 		const { command: commandContextValue, release } = commandContext(context, document, edit)
 		let outcome: readonly number[] | PdfCommandOutcome
 
 		try {
+			located?.name()
 			outcome = command.run(commandContextValue, parsed)
+
+			// What it made is named in the step, so later steps find it by that name when they run again.
+			if ("created" in outcome) key.created = nameCreated(document, outcome.created, null)
 		} catch (error) {
 			release()
 			edit.fail(document)
@@ -379,14 +450,20 @@ export const EDIT_REQUESTS: Handlers = {
 
 		return { value: "created" in outcome ? { ...result, created: outcome.created } : result }
 	},
-	undo: context => {
+	undo: (context, { steps }) => {
 		const open = editing(context)
+
+		if (steps !== undefined && !(Number.isInteger(steps) && steps >= 1)) throw new PdfEngineRefusal("badRequest", "steps")
 
 		idle(open.edit)
 		open.edit.endOpen(open.document)
-		open.edit.undo(open.document, count => {
-			rebuild(context, open, count)
-		})
+		open.edit.undo(
+			open.document,
+			count => {
+				rebuild(context, open, count)
+			},
+			steps
+		)
 		open.edit.pagesChanged()
 
 		return { value: changed(editing(context), allPages(context.open().document)) }
@@ -418,14 +495,17 @@ export const EDIT_REQUESTS: Handlers = {
 			changes: edit.changes(),
 			invalidateConfirmed,
 			poisoned: false,
-			memory
+			memory,
+			heap: { heapBytes: context.heapBytes(), addedBytes: edit.addedBytes() }
 		})
 
 		if (plan.refuse !== null) return { value: { status: "refused", plan, reason: plan.refuse } }
 
+		freeForSave(context)
+
 		// What the steps redacted (the verifier's manifest), and the protection the save writes.
 		const steps = edit.appliedSteps()
-		const redaction = redactionManifest(steps, pageObject => edit.pageOf(document, pageObject))
+		const redaction = redactionManifest(document, steps, pageObject => edit.pageOf(document, pageObject))
 		const security = edit.security
 
 		// Both remove or replace what the earlier revision holds: never appended to it.
@@ -450,12 +530,13 @@ export const EDIT_REQUESTS: Handlers = {
 			previousSaved: edit.savedApplied,
 			security,
 			encryption,
-			resets: redaction !== null || security !== null
+			// Signatures it invalidated: what the engine checks from now on is the written file, never the signed one.
+			resets: redaction !== null || security !== null || plan.invalidates.length > 0
 		}
 		edit.savedApplied = edit.applied
 		edit.written()
-		// The write decoded what it copied: half of the resource store goes again.
-		context.mupdf.shrinkStore(50)
+		// The write decoded what it copied: it goes again.
+		context.mupdf.emptyStore()
 
 		return {
 			value: {
@@ -504,6 +585,8 @@ export const EDIT_REQUESTS: Handlers = {
 		const writer = savePortWriter(port as SavePortEnd)
 		const length = output.buffer.getLength()
 
+		// Requests run one at a time: until the upload settles or either end aborts, nothing else runs here (a page that
+		// gives up on the upload aborts its end of the port).
 		writer.announce()
 
 		try {
@@ -535,9 +618,11 @@ export const EDIT_REQUESTS: Handlers = {
 
 		// Written elsewhere (a copy) or not at all: the file is as it was, and so is what is unsaved in it.
 		if (outcome !== "saved") edit.savedApplied = output.previousSaved
+		else edit.fileBytes = output.buffer.getLength()
 
-		// A redaction or new protection that became the file always starts again on it: the document in memory still
-		// holds what was redacted (in its history) or the old protection.
+		// A redaction, new protection or invalidated signatures that became the file always start again on it: the
+		// document in memory still holds what was redacted (in its history), the old protection, or reads as the signed
+		// file it was opened from.
 		const restart = next === "adopt" || output.resets
 
 		// A rewrite leaves the document as it was (the next save writes it whole again). After an incremental save MuPDF
@@ -545,12 +630,17 @@ export const EDIT_REQUESTS: Handlers = {
 		// it, in place. The history goes on unless asked to start again; a step back past the save rebuilds from the file
 		// the history starts at (the base).
 		if (outcome !== "saved" || (!restart && output.plan.mode === "full")) {
+			// Kept: the drive now holds the rewrite, not the file the document reads.
+			if (outcome === "saved") edit.fileBehind = true
+
 			edit.close()
 
 			return { value: { state: edit.snapshot(open.document), heapBytes: context.heapBytes(), history: "kept" } }
 		}
 
 		edit.output = null
+		edit.fileBehind = false
+		edit.ownFile = true
 
 		// The written file opens with its new passwords.
 		if (output.security !== null) edit.protectedAs(output.security.options, output.encryption)
@@ -567,7 +657,7 @@ export const EDIT_REQUESTS: Handlers = {
 			if (open.base !== null) open.base.destroy()
 
 			open.reader.close()
-			edit.reset(adopted)
+			edit.reset(adopted, fileRevisions(context.mupdf, output.buffer, edit.password))
 		}
 
 		context.setCurrent({

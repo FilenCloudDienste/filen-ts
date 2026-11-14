@@ -46,8 +46,6 @@ export const previewPdfSecurity = {
 	previewPdfSecurityUpgradeUnavailable: "To upgrade, unlock with the owner password or set new passwords.",
 	/** Protect document dialog (No password): what saving does to a PDF that has a password or restrictions */
 	previewPdfSecurityRemoveNote: "Saving removes the password and restrictions.",
-	/** Shown where the PDF's owner restrictions stop a change (exact wording) */
-	previewPdfSecurityOwnerRestricted: "The document's author restricted this. Unlock with the owner password.",
 	/** Button next to the owner restriction text opening the owner password prompt */
 	previewPdfSecurityUnlockAction: "Unlock",
 	/** Protect document dialog: error under the repeated password */

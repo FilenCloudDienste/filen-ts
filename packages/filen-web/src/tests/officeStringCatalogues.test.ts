@@ -7,7 +7,7 @@ import { preview } from "@/locales/en/preview"
 // own, each spread into the preview namespace, and every key in them is one the app names.
 
 const ROOT = process.cwd()
-const CATALOGUES = ["previewDocx", "previewSheet", "previewOffice"] as const
+const CATALOGUES = ["previewDocx", "previewSheet", "previewOffice", "previewPdf"] as const
 
 function sources(directory: string, into: string[] = []): string[] {
 	for (const entry of readdirSync(directory, { withFileTypes: true })) {
@@ -55,7 +55,8 @@ describe("the office editors' string catalogues", () => {
 
 	it.each([
 		["previewDocx", "previewDocx"],
-		["previewSheet", "previewSheet"]
+		["previewSheet", "previewSheet"],
+		["previewPdf", "previewPdf"]
 	] as const)("ship no %s string the app never names", (name, prefix) => {
 		const code = sources(join(ROOT, "src")).join("\n")
 		const directory = join(ROOT, "src/locales/en", name)
@@ -70,6 +71,30 @@ describe("the office editors' string catalogues", () => {
 			.filter(key => !code.includes(key))
 
 		expect(unused).toEqual([])
+	})
+
+	it("declare every PDF editor catalogue as const (the typed catalog checks each key's values)", () => {
+		for (const file of catalogueFiles("previewPdf"))
+			expect(readFileSync(join(ROOT, "src/locales/en/previewPdf", file), "utf8"), file).toMatch(/\n\} as const\n?$/)
+	})
+
+	it("give the PDF editor no sentence twice (one key per wording, shared where the meaning is one)", () => {
+		const keys = new Map<string, string[]>()
+
+		for (const file of catalogueFiles("previewPdf")) {
+			const source = readFileSync(join(ROOT, "src/locales/en/previewPdf", file), "utf8")
+
+			for (const match of source.matchAll(/^\t(previewPdf\w+):\s*("(?:[^"\\]|\\.)*")/gm)) {
+				const text = match[2] ?? ""
+
+				// Short button words ("Cancel", "Save", "Pages") stay per place, for their translators' context.
+				if (text.split(/\s+/).length < 3) continue
+
+				keys.set(text, [...(keys.get(text) ?? []), match[1] ?? ""])
+			}
+		}
+
+		expect([...keys.values()].filter(names => names.length > 1)).toEqual([])
 	})
 
 	it("are imported into the app shell's logic (and the workers using it) for types only", () => {

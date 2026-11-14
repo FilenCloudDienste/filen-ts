@@ -12,6 +12,8 @@ export interface PdfCropOverlayProps {
 	readonly onChange: (rect: CropRect) => void
 	readonly onCommit: () => void
 	readonly onCancel: () => void
+	// Says the crop's place after a keyboard step (the editor's live region).
+	readonly onAnnounce: (text: string) => void
 }
 
 interface CropDrag {
@@ -64,11 +66,10 @@ function cursor(handle: CropHandle): string {
 
 // The crop handles over one page: the outside dimmed, the crop area (drag to move, arrows to move with the keyboard)
 // and eight handles (drag, or focus one with Tab and use the arrows). Enter applies, Escape cancels; the crop's
-// place in points is announced after each keyboard step. Positioned by the host over the page at its zoom.
-export function PdfCropOverlay({ bounds, scale, rect, onChange, onCommit, onCancel }: PdfCropOverlayProps) {
+// place in points is announced (onAnnounce) after each keyboard step. Positioned by the host over the page at its zoom.
+export function PdfCropOverlay({ bounds, scale, rect, onChange, onCommit, onCancel, onAnnounce }: PdfCropOverlayProps) {
 	const { t } = useTranslation("preview")
 	const id = useId()
-	const [announcement, setAnnouncement] = useState("")
 	const [drag, setDrag] = useState<CropDrag | null>(null)
 	const px = (value: number): number => value * scale
 	const width = rect[2] - rect[0]
@@ -108,7 +109,7 @@ export function PdfCropOverlay({ bounds, scale, rect, onChange, onCommit, onCanc
 		event.preventDefault()
 		event.stopPropagation()
 		onChange(next)
-		setAnnouncement(
+		onAnnounce(
 			t("previewPdfCropPosition", {
 				width: Math.round(next[2] - next[0]),
 				height: Math.round(next[3] - next[1]),
@@ -185,7 +186,8 @@ export function PdfCropOverlay({ bounds, scale, rect, onChange, onCommit, onCanc
 							aria-label={labels[handle]}
 							aria-describedby={`${id}-keys`}
 							data-crop-handle={handle}
-							className="absolute size-3 -translate-x-1/2 -translate-y-1/2 rounded-sm border border-primary bg-background focus-visible:ring-2 focus-visible:ring-primary"
+							// A 24 px target (44 px under a finger) around the small square drawn.
+							className="group/handle absolute flex size-6 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-sm outline-none pointer-coarse:size-11"
 							style={{
 								left: `${String(place.x * 100)}%`,
 								top: `${String(place.y * 100)}%`,
@@ -194,7 +196,12 @@ export function PdfCropOverlay({ bounds, scale, rect, onChange, onCommit, onCanc
 							}}
 							onKeyDown={onKeyDown(handle)}
 							{...pointer(handle)}
-						/>
+						>
+							<span
+								aria-hidden="true"
+								className="size-3 rounded-sm border border-primary bg-background group-focus-visible/handle:ring-2 group-focus-visible/handle:ring-primary"
+							/>
+						</button>
 					)
 				})}
 			</div>
@@ -203,12 +210,6 @@ export function PdfCropOverlay({ bounds, scale, rect, onChange, onCommit, onCanc
 				className="sr-only"
 			>
 				{t("previewPdfCropKeys")}
-			</span>
-			<span
-				className="sr-only"
-				aria-live="polite"
-			>
-				{announcement}
 			</span>
 		</div>
 	)

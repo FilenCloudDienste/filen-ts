@@ -19,6 +19,8 @@ vi.mock("@/lib/storage/adapter", () => ({
 }))
 
 const WEB = { mac: false, desktop: false }
+// Each test imports the whole action catalog anew (every editor's and tool's actions): slow on a loaded machine.
+const CATALOG_TIMEOUT_MS = 60_000
 const DESKTOP_MAC = { mac: true, desktop: true }
 
 async function fresh() {
@@ -38,7 +40,7 @@ beforeEach(() => {
 	kvStore.clear()
 })
 
-describe("chords of one action", () => {
+describe("chords of one action", { timeout: CATALOG_TIMEOUT_MS }, () => {
 	it("withChord adds, replaces in place and never doubles; withoutChord removes one", async () => {
 		const { withChord, withoutChord } = await fresh()
 
@@ -85,7 +87,7 @@ describe("chords of one action", () => {
 	})
 })
 
-describe("conflicts", () => {
+describe("conflicts", { timeout: CATALOG_TIMEOUT_MS }, () => {
 	it("holds the recording back, naming every action that has the keys", async () => {
 		const { beginRecording, commitRecordedChord, currentRecordingProblem, comboFor, isRecordingCombo } = await fresh()
 
@@ -140,7 +142,7 @@ describe("conflicts", () => {
 	})
 })
 
-describe("reserved keys", () => {
+describe("reserved keys", { timeout: CATALOG_TIMEOUT_MS }, () => {
 	it("saves a key a browser keeps on the web, with a note", async () => {
 		const { beginRecording, commitRecordedChord, currentRecordingProblem, comboFor } = await fresh()
 
@@ -168,7 +170,7 @@ describe("reserved keys", () => {
 	})
 })
 
-describe("an action turned off", () => {
+describe("an action turned off", { timeout: CATALOG_TIMEOUT_MS }, () => {
 	it("is no key to the slideshow, the text editor, the slide editor, the PDF viewer and CodeMirror", async () => {
 		const { unbindAction, bindingsOf, currentKeymapRecord } = await fresh()
 		const { presentationShowBindings } = await import("@/features/presentation/lib/keymap/show")

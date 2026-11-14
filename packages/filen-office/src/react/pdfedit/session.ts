@@ -95,8 +95,9 @@ export class PdfEditSessionModel {
 		return this.run(() => this.engine.call("dispatch", { command, args, ...(op === undefined ? {} : { op }) }))
 	}
 
-	undo(): Promise<PdfCommandResult> {
-		return this.run(() => this.engine.call("undo", {}))
+	// `steps` back at once (one rebuild at most where the journal cannot take them back).
+	undo(steps?: number): Promise<PdfCommandResult> {
+		return this.run(() => this.engine.call("undo", steps === undefined ? {} : { steps }))
 	}
 
 	redo(): Promise<PdfCommandResult> {

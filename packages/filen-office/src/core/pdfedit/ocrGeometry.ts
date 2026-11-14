@@ -10,45 +10,23 @@
 //            CropBox offset are applied).
 // The overlay → page matrix is what grafting the overlay onto the page takes.
 
-export type OcrMatrix = readonly [number, number, number, number, number, number]
+import { concatMatrix, IDENTITY_MATRIX, invertMatrix, type PdfMatrix } from "./matrix"
 
 export type QuarterTurns = 0 | 1 | 2 | 3
 
-export const OCR_IDENTITY: OcrMatrix = [1, 0, 0, 1, 0, 0]
+function invertible(m: PdfMatrix): PdfMatrix {
+	const inverse = invertMatrix(m)
 
-export function concatMatrix(m: OcrMatrix, n: OcrMatrix): OcrMatrix {
-	return [
-		m[0] * n[0] + m[1] * n[2],
-		m[0] * n[1] + m[1] * n[3],
-		m[2] * n[0] + m[3] * n[2],
-		m[2] * n[1] + m[3] * n[3],
-		m[4] * n[0] + m[5] * n[2] + n[4],
-		m[4] * n[1] + m[5] * n[3] + n[5]
-	]
-}
+	if (inverse === null) throw new RangeError("the matrix is not invertible")
 
-export function invertMatrix(m: OcrMatrix): OcrMatrix {
-	const det = m[0] * m[3] - m[1] * m[2]
-
-	if (det === 0 || !Number.isFinite(det)) throw new RangeError("the matrix is not invertible")
-
-	const a = m[3] / det
-	const b = -m[1] / det
-	const c = -m[2] / det
-	const d = m[0] / det
-
-	return [a, b, c, d, -m[4] * a - m[5] * c, -m[4] * b - m[5] * d]
-}
-
-export function transformPoint(m: OcrMatrix, x: number, y: number): readonly [number, number] {
-	return [m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]]
+	return inverse
 }
 
 // Clockwise quarter turns of an image `width` × `height` pixels: its pixel space → the turned image's.
-export function quarterTurnMatrix(turns: QuarterTurns, width: number, height: number): OcrMatrix {
+export function quarterTurnMatrix(turns: QuarterTurns, width: number, height: number): PdfMatrix {
 	switch (turns) {
 		case 0:
-			return OCR_IDENTITY
+			return IDENTITY_MATRIX
 		case 1:
 			return [0, 1, -1, 0, height, 0]
 		case 2:
@@ -62,12 +40,8 @@ export function turnedSize(turns: QuarterTurns, width: number, height: number): 
 	return turns % 2 === 0 ? [width, height] : [height, width]
 }
 
-export function addTurns(a: QuarterTurns, b: QuarterTurns): QuarterTurns {
-	return ((a + b) % 4) as QuarterTurns
-}
-
 // The recogniser's overlay page for an image of `width` × `height` pixels read at `dpi`: points, y up.
-export function overlayToImage(height: number, dpi: number): OcrMatrix {
+export function overlayToImage(height: number, dpi: number): PdfMatrix {
 	const scale = dpi / 72
 
 	return [scale, 0, 0, -scale, 0, height]
@@ -75,9 +49,9 @@ export function overlayToImage(height: number, dpi: number): OcrMatrix {
 
 // The graft's matrix: overlay → page, for an overlay recognised on the rendered page (`width` × `height` pixels at
 // `dpi`, `pixelToPage` from the render) turned clockwise by `turns` first.
-export function ocrOverlayMatrix(pixelToPage: OcrMatrix, width: number, height: number, dpi: number, turns: QuarterTurns): OcrMatrix {
+export function ocrOverlayMatrix(pixelToPage: PdfMatrix, width: number, height: number, dpi: number, turns: QuarterTurns): PdfMatrix {
 	const [, turnedHeight] = turnedSize(turns, width, height)
-	const imageToPixel = invertMatrix(quarterTurnMatrix(turns, width, height))
+	const imageToPixel = invertible(quarterTurnMatrix(turns, width, height))
 
 	return concatMatrix(concatMatrix(overlayToImage(turnedHeight, dpi), imageToPixel), pixelToPage)
 }
@@ -85,17 +59,17 @@ export function ocrOverlayMatrix(pixelToPage: OcrMatrix, width: number, height: 
 // A render's pixel space → page space: `pageTransform` is the page's user space → its view space (MuPDF's page
 // transform: CropBox origin at the top left, /Rotate and /UserUnit applied), `renderMatrix` the view space → device
 // pixels the render used, `origin` the pixmap's top left in device pixels.
-export function pixelToPageMatrix(pageTransform: OcrMatrix, renderMatrix: OcrMatrix, origin: readonly [number, number]): OcrMatrix {
+export function pixelToPageMatrix(pageTransform: PdfMatrix, renderMatrix: PdfMatrix, origin: readonly [number, number]): PdfMatrix {
 	const pageToPixel = concatMatrix(concatMatrix(pageTransform, renderMatrix), [1, 0, 0, 1, -origin[0], -origin[1]])
 
-	return invertMatrix(pageToPixel)
+	return invertible(pageToPixel)
 }
 
 // The view space → device pixels matrix of a render at `dpi`, turned clockwise by `turns` (rotation about the
 // origin; the pixmap's origin absorbs the offset).
-export function ocrRenderMatrix(dpi: number, turns: QuarterTurns): OcrMatrix {
+export function ocrRenderMatrix(dpi: number, turns: QuarterTurns): PdfMatrix {
 	const scale = dpi / 72
-	const quarter: Readonly<Record<QuarterTurns, OcrMatrix>> = {
+	const quarter: Readonly<Record<QuarterTurns, PdfMatrix>> = {
 		0: [scale, 0, 0, scale, 0, 0],
 		1: [0, scale, -scale, 0, 0, 0],
 		2: [-scale, 0, 0, -scale, 0, 0],
@@ -171,7 +145,7 @@ export function ocrUprightTurns(summary: OcrPageSummary): QuarterTurns {
 
 // How an image's drawing matrix (unit square → view space) turns it: the quarter turns that make it upright, or 0
 // for a sheared or mirrored drawing.
-export function imageUprightTurns(ctm: OcrMatrix): QuarterTurns {
+export function imageUprightTurns(ctm: PdfMatrix): QuarterTurns {
 	const det = ctm[0] * ctm[3] - ctm[1] * ctm[2]
 
 	if (det <= 0) return 0

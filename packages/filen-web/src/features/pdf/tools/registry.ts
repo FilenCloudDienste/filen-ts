@@ -6,6 +6,7 @@ import type { PdfViewport } from "@filen/office/dom/pdf"
 import type { PdfDomDocument } from "@filen/office/react/pdf"
 import type { PdfEditSessionModel, PdfEditSnapshot } from "@filen/office/react/pdfedit"
 import type { ToolKeyName } from "@filen/office/react/pdfedit/tools"
+import type { DriveItem } from "@/features/drive/lib/item"
 import type { PdfEditSwap } from "@/features/pdf/session/swap"
 import type { PdfPagesController } from "@/features/pdf/pages/pagesController"
 import type { ActionDef } from "@/lib/keymap/registry"
@@ -32,6 +33,9 @@ export interface PdfPolicyState {
 	readonly editable: boolean
 	readonly online: boolean
 	readonly tools: PdfToolAvailability | null
+	// The editor stopped (out of memory or an internal error): nothing that needs it is offered until the file is
+	// opened again.
+	readonly poisoned?: boolean
 }
 
 // Offered, or not with the reason shown on the control.
@@ -83,8 +87,8 @@ export function withPdfSession<T>(context: PdfToolContext, read: (session: PdfEd
 export type PdfToolSaveTarget = { readonly kind: "version" } | { readonly kind: "copy"; readonly suffix: (number: number) => string }
 
 export type PdfToolSaveOutcome =
-	// `name`: the copy's.
-	| { readonly status: "saved"; readonly name: string | null }
+	// `name` and `item`: the copy's.
+	| { readonly status: "saved"; readonly name: string | null; readonly item?: DriveItem }
 	// Refused or failed (a SaveRefusedError says why; nothing was written).
 	| { readonly status: "failed"; readonly error: unknown }
 	// Not started (another save running, a dialog open) or abandoned by the user.
@@ -182,10 +186,28 @@ export function whileActive(Panel: ComponentType<PdfToolPanelProps>): ComponentT
 	}
 }
 
+// What every tool needing the editor checks first: the editor has not stopped, and the app is online (the editor reads
+// the file from Filen). Null when both hold.
+export function editorUnavailable(policy: PdfPolicyState): PdfToolVerdict | null {
+	if (policy.poisoned === true) return { enabled: false, reasonKey: "previewPdfToolPoisoned" }
+	if (!policy.online) return { enabled: false, reasonKey: "previewPdfToolOffline" }
+
+	return null
+}
+
+// For a tool that changes the document: the editor has not stopped, the file may be edited here, and the app is
+// online. Null when all hold.
+export function editorWritable(policy: PdfPolicyState): PdfToolVerdict | null {
+	return policy.poisoned === true || policy.editable
+		? editorUnavailable(policy)
+		: { enabled: false, reasonKey: "previewPdfToolNotEditable" }
+}
+
 // The usual rule: offered where the file may be edited and the document allows the tool's kind of change.
 export function toolEnabled(toolClass: PdfToolClass, policy: PdfPolicyState): PdfToolVerdict {
-	if (!policy.editable) return { enabled: false, reasonKey: "previewPdfToolNotEditable" }
-	if (!policy.online) return { enabled: false, reasonKey: "previewPdfToolOffline" }
+	const unavailable = editorWritable(policy)
+
+	if (unavailable !== null) return unavailable
 
 	const block = policy.tools?.[toolClass] ?? null
 

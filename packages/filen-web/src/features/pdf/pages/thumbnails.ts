@@ -13,6 +13,26 @@ export interface ThumbnailBitmap {
 // Renders page `page` (0-based) `widthPx` device pixels wide; rejects (or resolves late) after `signal` aborts.
 export type RenderThumbnail = (page: number, widthPx: number, signal: AbortSignal) => Promise<ThumbnailBitmap>
 
+// How sparing a rail is with a document pdf.js reads in ranges, where every thumbnail reads and decodes its page:
+// `current` is the page shown, `explored` true once the user scrolled or moved through the rail.
+export interface ThumbnailSparing {
+	readonly current: number
+	readonly explored: boolean
+}
+
+// Pages within this distance of the page shown get thumbnails before the rail is explored: the view reads them anyway.
+const SPARING_NEIGHBOURS = 1
+
+// The pages a rail asks thumbnails for, from its mounted `indices` (the `inView` ones first): all of them, or with
+// `sparing` the ones in view only, and until the rail is explored only those next to the page shown.
+export function thumbnailWindow(indices: readonly number[], inView: number, sparing: ThumbnailSparing | null): readonly number[] {
+	if (sparing === null) return indices
+
+	const shown = indices.slice(0, Math.max(0, inView))
+
+	return sparing.explored ? shown : shown.filter(index => Math.abs(index - sparing.current) <= SPARING_NEIGHBOURS)
+}
+
 interface Entry {
 	bitmap: ThumbnailBitmap | undefined
 	width: number

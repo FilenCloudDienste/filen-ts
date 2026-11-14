@@ -95,6 +95,12 @@ export interface PdfEditState {
 	readonly tools: PdfToolAvailability
 	readonly encryption: PdfEncryptionState
 	readonly security: PdfEditSecurity
+	// Unsaved steps remove content under the redaction rules: a plain Save writes them (its verifier checks them), never
+	// a signing save.
+	readonly redacting: boolean
+	// The document reads a file this editor wrote (a save it went on on), which the viewer's parser never read: its
+	// signatures are the engine's own reading (signatureHints).
+	readonly ownFile: boolean
 	// The document carries accessibility tags (/MarkInfo /Marked and a structure tree).
 	readonly tagged: boolean
 	readonly form: PdfFormState

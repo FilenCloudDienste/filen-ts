@@ -118,7 +118,7 @@ test("upgrades an RC4 file to AES-256 on save, keeping its password", async ({ p
 
 		const dialog = page.getByRole("dialog").first()
 
-		await expect(dialog.locator("canvas.block").first()).toBeVisible({ timeout: ENGINE_TIMEOUT_MS })
+		await expect(dialog.getByRole("region", { name: /Page 1 of/u })).toBeVisible({ timeout: ENGINE_TIMEOUT_MS })
 		await protectTab(dialog)
 		await dialog.getByRole("button", { name: preview.previewPdfSecurityTitle }).click()
 

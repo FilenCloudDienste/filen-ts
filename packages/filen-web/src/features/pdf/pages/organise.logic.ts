@@ -100,6 +100,12 @@ export interface ExtractForm {
 	readonly protect: boolean
 }
 
+// Whether new files made of pages are password-protected: always for an encrypted PDF opened without owner access
+// (only its owner may make files without its protection), else as the switch says.
+export function copiesProtected(encrypted: boolean, ownerAccess: boolean, protect: boolean): boolean {
+	return encrypted && (protect || !ownerAccess)
+}
+
 export function defaultExtractForm(hasSelection: boolean): ExtractForm {
 	return { source: hasSelection ? "selected" : "range", range: "", separate: false, deleteAfter: false, protect: true }
 }

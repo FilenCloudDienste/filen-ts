@@ -276,8 +276,10 @@ function pageElement(page: number): HTMLElement {
 	return element
 }
 
-function observer(kind: "render" | "evict"): Observer {
-	const margin = `${String(kind === "render" ? PDF_PAGE_RENDER_MARGIN_PX : PDF_PAGE_EVICT_MARGIN_PX)}px 0px`
+type ObserverKind = "render" | "evict" | "show"
+
+function observer(kind: ObserverKind): Observer {
+	const margin = kind === "show" ? undefined : `${String(kind === "render" ? PDF_PAGE_RENDER_MARGIN_PX : PDF_PAGE_EVICT_MARGIN_PX)}px 0px`
 	const found = observers.find(entry => entry.options?.rootMargin === margin)
 
 	if (found === undefined) throw new Error(`no ${kind} observer`)
@@ -285,7 +287,7 @@ function observer(kind: "render" | "evict"): Observer {
 	return found
 }
 
-function fire(kind: "render" | "evict", page: number, isIntersecting: boolean, intersectionRatio = isIntersecting ? 1 : 0): void {
+function fire(kind: ObserverKind, page: number, isIntersecting: boolean, intersectionRatio = isIntersecting ? 1 : 0): void {
 	const entry = observer(kind)
 
 	act(() => {
@@ -296,21 +298,24 @@ function fire(kind: "render" | "evict", page: number, isIntersecting: boolean, i
 	})
 }
 
+// The page in view: inside every observer's root.
 async function show(page: number): Promise<void> {
 	fire("evict", page, true)
+	fire("show", page, true)
 	fire("render", page, true)
 	await settle()
 }
 
 describe("PdfPages", () => {
-	it("watches every page with one pair of observers", async () => {
+	it("watches every page with one set of observers", async () => {
 		const { pdfjs, opened } = fakePdfJs([fakePage([]), fakePage([]), fakePage([])])
 
 		await mount(pdfjs, opened)
 
-		expect(observers).toHaveLength(2)
+		expect(observers).toHaveLength(3)
 		expect(observer("render").elements.size).toBe(3)
 		expect(observer("evict").elements.size).toBe(3)
+		expect(observer("show").elements.size).toBe(3)
 	})
 
 	it("renders a page once it nears the view, without re-rendering its siblings", async () => {
@@ -318,6 +323,7 @@ describe("PdfPages", () => {
 		const { pdfjs, opened } = fakePdfJs(pages)
 
 		await mount(pdfjs, opened)
+		await show(1)
 
 		const siblingViewports = pages[2]?.getViewport.mock.calls.length
 
@@ -637,6 +643,142 @@ describe("PdfPages loading and zooming", () => {
 		expect(new Set(getPage.mock.calls.map(([page]) => page))).toEqual(new Set([1, 30]))
 	})
 
+	it("reads the pages beside the view only once a page in it has painted", async () => {
+		const pages = Array.from({ length: 6 }, () => fakePage([], [], 200))
+		let paint: () => void = () => undefined
+
+		pages[0]?.render.mockImplementation(() => ({
+			promise: new Promise<void>(resolve => {
+				paint = resolve
+			}),
+			cancel: vi.fn()
+		}))
+
+		const { pdfjs, opened, document: pdf } = fakePdfJs(pages)
+		const getPage = vi.spyOn(pdf, "getPage")
+
+		await mount(pdfjs, opened)
+		await show(1)
+		// Pages 2 and 3 in the render margin, inside the evict margin.
+		fire("evict", 2, true)
+		fire("render", 2, true, 0)
+		fire("evict", 3, true)
+		fire("render", 3, true, 0)
+		await settle()
+
+		expect(pages[0]?.render).toHaveBeenCalledTimes(1)
+		expect(new Set(getPage.mock.calls.map(([page]) => page))).toEqual(new Set([1]))
+
+		act(() => {
+			paint()
+		})
+		await settle()
+
+		expect(pages[1]?.render).toHaveBeenCalledTimes(1)
+		expect(pages[2]?.render).toHaveBeenCalledTimes(1)
+		expect(new Set(getPage.mock.calls.map(([page]) => page))).toEqual(new Set([1, 2, 3]))
+	})
+
+	it("renders a page scrolled into the view at once, while the first paint is still under way", async () => {
+		const pages = [fakePage([]), fakePage([]), fakePage([])]
+
+		for (const page of pages.slice(0, 2))
+			page.render.mockImplementation(() => ({ promise: new Promise<void>(() => undefined), cancel: vi.fn() }))
+
+		const { pdfjs, opened } = fakePdfJs(pages)
+
+		await mount(pdfjs, opened)
+		await show(1)
+		fire("evict", 2, true)
+		fire("render", 2, true, 0)
+		fire("evict", 3, true)
+		fire("render", 3, true, 0)
+		await settle()
+
+		expect(pages[1]?.render).not.toHaveBeenCalled()
+
+		await show(2)
+
+		expect(pages[1]?.render).toHaveBeenCalledTimes(1)
+		expect(pages[2]?.render).not.toHaveBeenCalled()
+	})
+
+	it("lets the pages beside the view render when the page in view fails to", async () => {
+		const pages = [fakePage([]), fakePage([])]
+
+		pages[0]?.render.mockImplementation(() => ({ promise: Promise.reject(new Error("broken page")), cancel: vi.fn() }))
+
+		const { pdfjs, opened } = fakePdfJs(pages)
+
+		await mount(pdfjs, opened)
+		fire("evict", 2, true)
+		fire("render", 2, true, 0)
+		await show(1)
+
+		expect(pages[1]?.render).toHaveBeenCalledTimes(1)
+	})
+
+	it("keeps the pages beside the view waiting when the page in view is scrolled away before it painted", async () => {
+		const pages = [fakePage([]), fakePage([]), fakePage([])]
+
+		pages[0]?.render.mockImplementation(() => {
+			let reject: (reason: Error) => void = () => undefined
+			const promise = new Promise<void>((_, no) => {
+				reject = no
+			})
+
+			return {
+				promise,
+				cancel: vi.fn(() => {
+					reject(new Error("cancelled"))
+				})
+			}
+		})
+
+		const { pdfjs, opened } = fakePdfJs(pages)
+
+		await mount(pdfjs, opened)
+		await show(1)
+		fire("evict", 3, true)
+		fire("render", 3, true, 0)
+		fire("evict", 1, false)
+		await settle()
+
+		expect(pages[2]?.render).not.toHaveBeenCalled()
+
+		// The page that took its place paints: the waiting page follows.
+		await show(2)
+
+		expect(pages[2]?.render).toHaveBeenCalledTimes(1)
+	})
+
+	it("watches no page until page 1 gives the pages their size", async () => {
+		const pages = Array.from({ length: 12 }, () => fakePage([], [], 200))
+		const { pdfjs, opened, document: pdf } = fakePdfJs(pages)
+		let release: () => void = () => undefined
+		const held = new Promise<void>(resolve => {
+			release = resolve
+		})
+		const getPage = pdf.getPage.bind(pdf)
+
+		vi.spyOn(pdf, "getPage").mockImplementation(async page => {
+			if (page === 1) await held
+
+			return getPage(page)
+		})
+
+		await mount(pdfjs, opened)
+
+		// Laid out at the default size, more pages would sit near the view and read (and render) for good.
+		expect(observers.every(entry => entry.elements.size === 0)).toBe(true)
+
+		release()
+		await settle()
+
+		expect(observer("render").elements.size).toBe(12)
+		expect(pageElement(5).style.height).toBe("300px")
+	})
+
 	it("names the page taking the most of the view, not a page inside the observers' margin", async () => {
 		const scroll = { top: 0 }
 		const rect = (top: number, height: number): DOMRect =>
@@ -832,6 +974,32 @@ describe("usePdfDocument", () => {
 			root.unmount()
 		})
 		expect(task?.destroy).toHaveBeenCalledTimes(1)
+	})
+
+	it("hands on the accepted password through one function for its life, so an effect handing it on never runs again", async () => {
+		const { pdfjs, opened } = fakePdfJs([fakePage([])])
+		const root = createRoot(host)
+
+		roots.push(root)
+		act(() => {
+			root.render(<Harness pdfjs={pdfjs} />)
+		})
+
+		const first = latest.document?.acceptedPassword
+		const onPassword = opened[0]?.onPassword as (update: (password: string) => void, reason: number) => void
+
+		act(() => {
+			onPassword(vi.fn(), 1)
+		})
+		act(() => {
+			latest.document?.password("right")
+		})
+		opened[0]?.resolve()
+		await settle()
+
+		expect(latest.document?.state.status).toBe("ready")
+		expect(latest.document?.acceptedPassword).toBe(first)
+		expect(first?.()).toBe("right")
 	})
 })
 

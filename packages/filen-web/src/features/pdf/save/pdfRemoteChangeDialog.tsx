@@ -53,7 +53,7 @@ export function PdfRemoteChangeDialog({ open, onAnswer }: PdfRemoteChangeDialogP
 							onAnswer("copy")
 						}}
 					>
-						{t("previewPdfRemoteSaveCopy")}
+						{t("previewPdfSaveAsCopy")}
 					</Button>
 				</AlertDialogFooter>
 			</AlertDialogContent>

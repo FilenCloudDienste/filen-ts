@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { useTranslation } from "react-i18next"
-import { ChevronDownIcon, Redo2Icon, Undo2Icon } from "lucide-react"
+import { ChevronDownIcon, PanelLeftIcon, Redo2Icon, Undo2Icon } from "lucide-react"
 import { cn } from "@filen/shared"
 import { ConfirmDialog } from "@/components/dialogs/confirmDialog"
 import { Button } from "@/components/ui/button"
@@ -16,6 +16,7 @@ import { MenuShortcut } from "@/components/ui/menuShortcut"
 import { Spinner } from "@/components/ui/spinner"
 import { TooltipIconButton } from "@/components/ui/tooltipIconButton"
 import { OfficeRibbon, type RibbonGroup, type RibbonTab } from "@/features/office/components/ribbon/officeRibbon"
+import { useCoarsePointer } from "@/features/office/components/ribbon/phoneMedia"
 import { keepFocus } from "@/features/office/lib/officeControls"
 import { BAR_BUTTON } from "@/features/preview/components/commandBar.logic"
 import { usePdfCommandParts, type PdfCommandBarProps } from "@/features/preview/components/pdfCommandParts"
@@ -35,6 +36,7 @@ import {
 	pdfToolGroups,
 	PDF_TAB_LABELS
 } from "@/features/pdf/ribbon/pdfRibbon.logic"
+import { togglePdfPagesRail, usePdfPagesRailOpen } from "@/features/pdf/pages/railOpen"
 import type { PreviewKey } from "@/lib/i18n"
 import { Kbd } from "@/lib/keymap/kbd"
 
@@ -58,6 +60,9 @@ export interface PdfRibbonHistory {
 	discard(): void
 	// The Save menu's "Flatten annotations" option (written into the pages on the next save), absent where none applies.
 	readonly flatten?: { readonly on: boolean; readonly enabled: boolean; toggle(): void }
+	// A new document of extracted pages, saved nowhere yet: Save makes it a file (there is no copy to save besides), and
+	// Discard drops it.
+	readonly draft?: boolean
 }
 
 export interface PdfRibbonProps extends PdfCommandBarProps {
@@ -75,8 +80,9 @@ export interface PdfRibbonProps extends PdfCommandBarProps {
 }
 
 const TOOL_GROUP_PRIORITY = 4
-// A tool's variant menu button.
-const VARIANT_MENU = 14
+// A tool's variant menu button: a 24 px target, 44 px under a finger.
+const VARIANT_MENU = 24
+const VARIANT_MENU_COARSE = 44
 
 function PdfToolButton({ tool, props }: { tool: PdfTool; props: PdfRibbonProps }) {
 	const { t } = useTranslation("preview")
@@ -119,7 +125,7 @@ function PdfToolButton({ tool, props }: { tool: PdfTool; props: PdfRibbonProps }
 							variant="ghost"
 							size="icon-xs"
 							aria-label={t("previewPdfToolVariants", { tool: t(tool.labelKey) })}
-							className="w-3.5 rounded-l-none"
+							className="w-6 rounded-l-none pointer-coarse:w-11"
 							onMouseDown={keepFocus}
 						/>
 					}
@@ -144,8 +150,9 @@ function PdfToolButton({ tool, props }: { tool: PdfTool; props: PdfRibbonProps }
 	)
 }
 
-function toolGroups(props: PdfRibbonProps, tab: PdfRibbonTab, label: (key: PreviewKey) => string): RibbonGroup[] {
+function toolGroups(props: PdfRibbonProps, tab: PdfRibbonTab, label: (key: PreviewKey) => string, coarse: boolean): RibbonGroup[] {
 	const groups: RibbonGroup[] = []
+	const variantMenu = coarse ? VARIANT_MENU_COARSE : VARIANT_MENU
 
 	for (const group of pdfToolGroups(props.tools, tab)) {
 		const first = group.tools[0]
@@ -157,7 +164,7 @@ function toolGroups(props: PdfRibbonProps, tab: PdfRibbonTab, label: (key: Previ
 			id: `tool-${group.id}`,
 			label: label(labelKey),
 			icon: first.icon,
-			width: group.tools.reduce((sum, tool) => sum + BAR_BUTTON + (tool.variants === undefined ? 0 : VARIANT_MENU), 0),
+			width: group.tools.reduce((sum, tool) => sum + BAR_BUTTON + (tool.variants === undefined ? 0 : variantMenu), 0),
 			priority: TOOL_GROUP_PRIORITY,
 			single: group.tools.length === 1,
 			content: (
@@ -179,6 +186,36 @@ function toolGroups(props: PdfRibbonProps, tab: PdfRibbonTab, label: (key: Previ
 	}
 
 	return groups
+}
+
+// The Pages tab's first control: the pages rail beside the pages, shown or hidden (kept on this device).
+function PagesRailToggle() {
+	const { t } = useTranslation("preview")
+	const open = usePdfPagesRailOpen()
+
+	return (
+		<TooltipIconButton
+			label={t("previewPdfPagesRailToggle")}
+			pressed={open}
+			className={cn("shrink-0", open && "bg-accent text-foreground")}
+			onMouseDown={keepFocus}
+			onClick={togglePdfPagesRail}
+		>
+			<PanelLeftIcon />
+		</TooltipIconButton>
+	)
+}
+
+function pagesRailGroup(label: string): RibbonGroup {
+	return {
+		id: "pages-rail",
+		label,
+		icon: PanelLeftIcon,
+		width: BAR_BUTTON,
+		priority: TOOL_GROUP_PRIORITY,
+		single: true,
+		content: <PagesRailToggle />
+	}
 }
 
 function HistoryControls({ history, onDiscard }: { history: PdfRibbonHistory; onDiscard: () => void }) {
@@ -247,13 +284,15 @@ function HistoryControls({ history, onDiscard }: { history: PdfRibbonHistory; on
 								<Kbd action="preview.save" />
 							</MenuShortcut>
 						</DropdownMenuItem>
-						<DropdownMenuItem
-							onClick={() => {
-								history.saveAsCopy()
-							}}
-						>
-							{t("previewPdfSaveAsCopy")}
-						</DropdownMenuItem>
+						{history.draft === true ? null : (
+							<DropdownMenuItem
+								onClick={() => {
+									history.saveAsCopy()
+								}}
+							>
+								{t("previewPdfSaveAsCopy")}
+							</DropdownMenuItem>
+						)}
 						{history.flatten === undefined ? null : (
 							<>
 								<DropdownMenuSeparator />
@@ -284,7 +323,8 @@ function HistoryControls({ history, onDiscard }: { history: PdfRibbonHistory; on
 			<Button
 				variant="ghost"
 				size="xs"
-				disabled={history.saving}
+				// Nothing unsaved (a save keeps the history): nothing to discard.
+				disabled={history.saving || !history.dirty}
 				onClick={onDiscard}
 			>
 				{t("previewPdfDiscard")}
@@ -299,9 +339,14 @@ export function PdfRibbon(props: PdfRibbonProps) {
 	const [tab, setTab] = useState<PdfRibbonTab>("home")
 	const [discarding, setDiscarding] = useState(false)
 	const tabs: RibbonTab[] = PDF_RIBBON_TABS.map(id => ({ id, label: t(PDF_TAB_LABELS[id]) }))
-	const tools = toolGroups(props, tab, key => t(key))
-	const groups = tab === "home" ? [...parts.groups, ...tools] : tools
+	const coarse = useCoarsePointer()
+	const tools = toolGroups(props, tab, key => t(key), coarse)
+	const groups =
+		tab === "home" ? [...parts.groups, ...tools] : tab === "pages" ? [pagesRailGroup(t("previewPdfPagesRailToggle")), ...tools] : tools
 	const history = props.history
+
+	// Nothing left to discard (a save ran meanwhile): the question goes, and never comes back on a later change.
+	if (discarding && history?.dirty !== true) setDiscarding(false)
 
 	return (
 		<>
@@ -339,8 +384,8 @@ export function PdfRibbon(props: PdfRibbonProps) {
 			<ConfirmDialog
 				open={discarding && history?.dirty === true}
 				pending={false}
-				title={t("previewPdfDiscardTitle")}
-				body={t("previewPdfDiscardBody")}
+				title={t(history?.draft === true ? "previewPdfDraftDiscardTitle" : "previewPdfDiscardTitle")}
+				body={t(history?.draft === true ? "previewPdfDraftDiscardBody" : "previewPdfDiscardBody")}
 				confirmLabel={t("previewPdfDiscardConfirm")}
 				cancelLabel={t("common:cancel")}
 				destructive

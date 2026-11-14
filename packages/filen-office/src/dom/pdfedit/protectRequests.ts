@@ -215,6 +215,7 @@ function isManifest(value: unknown): value is RedactionManifest {
 		Array.isArray(value["regions"]) &&
 		value["regions"].every(isRegion) &&
 		isRedactionTerms(value["terms"]) &&
+		(value["hidden"] === undefined || isRedactionTerms(value["hidden"])) &&
 		typeof value["sanitized"] === "boolean" &&
 		typeof value["annotationsRemoved"] === "boolean"
 	)

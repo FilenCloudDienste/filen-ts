@@ -215,7 +215,7 @@ export function PdfPrintDialog({ document, current, size, permissions, constrain
 						<Input
 							aria-label={t("previewPdfPrintRangeLabel")}
 							aria-invalid={rangeInvalid}
-							placeholder={t("previewPdfPrintRangePlaceholder")}
+							placeholder={t("previewPdfPageRangePlaceholder")}
 							autoComplete="off"
 							spellCheck={false}
 							className="h-8 min-w-0 flex-1 leading-5"
@@ -227,7 +227,7 @@ export function PdfPrintDialog({ document, current, size, permissions, constrain
 						/>
 					</div>
 				</RadioGroup>
-				{rangeInvalid ? <FieldError>{t("previewPdfPrintRangeInvalid", { last: pageCount })}</FieldError> : null}
+				{rangeInvalid ? <FieldError>{t("previewPdfPageRangeInvalid", { last: pageCount })}</FieldError> : null}
 			</Field>
 			<Field>
 				<FieldLabel id={`${id}-quality-label`}>{t("previewPdfPrintQuality")}</FieldLabel>

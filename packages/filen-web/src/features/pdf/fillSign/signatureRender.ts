@@ -1,5 +1,5 @@
 import { OFFICE_FONT_URLS } from "virtual:office-fonts"
-import type { PdfSignatureImage, PdfSignatureStrokes } from "@filen/office/core/pdfedit/visualSignature"
+import type { PdfSignatureImage } from "@filen/office/core/pdfedit/visualSignature"
 import { PDF_SIGNATURE_MAX_PNG_BYTES } from "@filen/shared/pdfSignatures"
 import { extensionOf, HEIC_EXTENSIONS } from "@/features/drive/lib/preview.logic"
 import { transformHeicBytesOwned } from "@/features/preview/lib/heicTransform"
@@ -189,9 +189,4 @@ export async function imageFileSignature(file: File): Promise<PdfSignatureImage>
 	} finally {
 		bitmap.close()
 	}
-}
-
-// Drawn strokes' aspect for the dialog's preview of a saved entry.
-export function strokesViewBox(signature: PdfSignatureStrokes): string {
-	return `0 0 ${String(signature.width)} ${String(signature.height)}`
 }

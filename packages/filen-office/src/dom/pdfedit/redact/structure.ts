@@ -1,10 +1,12 @@
 import type * as Mupdf from "mupdf"
 
 // The tagged-PDF side of a redaction: struct elements whose content was redacted lose their text alternatives
-// (ActualText, Alt, E), which would otherwise still spell out what the page no longer draws.
+// (ActualText, Alt, E), which would otherwise still spell out what the page no longer draws, and so do all their
+// ancestors: an ancestor's alternative stands for its whole subtree, the redacted part included.
 
 const ALTERNATIVES = ["ActualText", "Alt", "E"]
 const MAX_TREE_DEPTH = 32
+const MAX_PARENT_DEPTH = 256
 
 // The value under `key` in a number tree, or null.
 export function numberTreeGet(node: Mupdf.PDFObject, key: number, depth = 0): Mupdf.PDFObject | null {
@@ -42,16 +44,36 @@ function parentTree(document: Mupdf.PDFDocument): Mupdf.PDFObject | null {
 	return tree.isDictionary() ? tree : null
 }
 
-function strip(element: Mupdf.PDFObject): boolean {
+function stripOne(element: Mupdf.PDFObject): boolean {
 	let changed = false
-
-	if (!element.isDictionary()) return false
 
 	for (const key of ALTERNATIVES) {
 		if (!element.get(key).isNull()) {
 			element.delete(key)
 			changed = true
 		}
+	}
+
+	return changed
+}
+
+// Strips an element's text alternatives and those of each ancestor up its /P chain to the structure tree's root.
+function strip(element: Mupdf.PDFObject): boolean {
+	const seen = new Set<number>()
+	let changed = false
+	let current = element
+
+	for (let depth = 0; depth <= MAX_PARENT_DEPTH && current.isDictionary(); depth++) {
+		if (current.isIndirect()) {
+			if (seen.has(current.asIndirect())) break
+
+			seen.add(current.asIndirect())
+		}
+
+		if (current.get("Type").asName() === "StructTreeRoot") break
+
+		changed = stripOne(current) || changed
+		current = current.get("P")
 	}
 
 	return changed

@@ -26,9 +26,10 @@ import type { PdfDomDocument, PdfJsDom, PdfTextLayer } from "./types"
 // (react/pdfedit). Every page gets a sized wrapper at once (so the scroll height is right), and only pages near the
 // view hold a canvas, a text layer and links. A page renders once it nears the view and releases its canvas, text
 // layer and engine resources once it is far away again, so a long document never holds more than a screenful or so of
-// bitmaps. Two IntersectionObservers serve all pages. A page reads its page only once it nears the view (a long
+// bitmaps. Three IntersectionObservers serve all pages. A page reads its page only once it nears the view (a long
 // document opens without a worker round trip per page); until then it is sized from page 1, as pdf.js's own viewer
-// does. A new document (the editor taking over from the viewer) keeps every page's size and painted bitmap until its
+// does. Pages near the view but outside it wait until a page in it has painted, so the first paint has the file's
+// reads and pdf.js's worker to itself. A new document (the editor taking over from the viewer) keeps every page's size and painted bitmap until its
 // own page has been read and drawn, so the view neither jumps nor blanks.
 
 // The largest canvas a page allocates: WebKit refuses canvases over 16,777,216 pixels, and a large page zoomed
@@ -99,14 +100,20 @@ function classes(own: string, host: string | undefined): string {
 
 type EntryHandler = (entry: IntersectionObserverEntry) => void
 
-// Both observers for every page: one at the render margin (the render gate), one at the evict margin. The page
-// in view is measured by the viewer from the page boxes, not from these. Pages register before the scroller
-// attaches (children's effects run first); they are observed once it does.
+// The observers for every page: one at the render margin (the render gate), one at the evict margin and one at the
+// view itself (a page in view renders at once). The page in view is measured by the viewer from the page boxes, not
+// from these. Pages register before the scroller attaches (children's effects run first); they are observed once it
+// does.
 class PageWatcher {
 	private readonly renders = new Map<Element, EntryHandler>()
 	private readonly evicts = new Map<Element, EntryHandler>()
+	private readonly shows = new Map<Element, EntryHandler>()
 	private render: IntersectionObserver | null = null
 	private evict: IntersectionObserver | null = null
+	private shown: IntersectionObserver | null = null
+	// Open once a page has painted (or its render settled otherwise); until then pages in the render margin wait.
+	private painted = false
+	private readonly waiting = new Set<() => void>()
 
 	attach(root: Element): void {
 		const dispatch =
@@ -117,32 +124,66 @@ class PageWatcher {
 
 		this.render = new IntersectionObserver(dispatch(this.renders), { root, rootMargin: `${String(PDF_PAGE_RENDER_MARGIN_PX)}px 0px` })
 		this.evict = new IntersectionObserver(dispatch(this.evicts), { root, rootMargin: `${String(PDF_PAGE_EVICT_MARGIN_PX)}px 0px` })
+		this.shown = new IntersectionObserver(dispatch(this.shows), { root })
 
 		for (const element of this.renders.keys()) {
 			this.render.observe(element)
 			this.evict.observe(element)
+			this.shown.observe(element)
 		}
 	}
 
 	detach(): void {
 		this.render?.disconnect()
 		this.evict?.disconnect()
+		this.shown?.disconnect()
 		this.render = null
 		this.evict = null
+		this.shown = null
 	}
 
-	watch(element: Element, onRender: EntryHandler, onEvict: EntryHandler): () => void {
+	watch(element: Element, onRender: EntryHandler, onEvict: EntryHandler, onShow: EntryHandler): () => void {
 		this.renders.set(element, onRender)
 		this.evicts.set(element, onEvict)
+		this.shows.set(element, onShow)
 		this.render?.observe(element)
 		this.evict?.observe(element)
+		this.shown?.observe(element)
 
 		return () => {
 			this.renders.delete(element)
 			this.evicts.delete(element)
+			this.shows.delete(element)
 			this.render?.unobserve(element)
 			this.evict?.unobserve(element)
+			this.shown?.unobserve(element)
 		}
+	}
+
+	// Runs `run` once a page has painted (at once if one has); the returned function drops it.
+	afterFirstPaint(run: () => void): () => void {
+		if (this.painted) {
+			run()
+
+			return () => undefined
+		}
+
+		this.waiting.add(run)
+
+		return () => {
+			this.waiting.delete(run)
+		}
+	}
+
+	// A page's render settled: drawn or failed (a page that cannot paint never holds the others back).
+	settled(): void {
+		if (this.painted) return
+
+		this.painted = true
+
+		for (const run of [...this.waiting]) run()
+
+		this.waiting.clear()
 	}
 }
 
@@ -343,9 +384,15 @@ export function PdfPageColumn({
 	const pages = Array.from({ length: total }, (_, index) => index + 1)
 	// Page 1, which sizes every page not read yet (pdf.js caches the page, so its own view reads it again free). A new
 	// document's page 1 replaces the previous one's once read, so unread pages keep their size meanwhile.
-	const [first, setFirst] = useState<{ readonly document: PdfDomDocument; readonly page: PdfPageProxy<ReadableStream> } | null>(null)
+	// null for a page 1 that could not be read (the unread pages keep the default size).
+	const [first, setFirst] = useState<{ readonly document: PdfDomDocument; readonly page: PdfPageProxy<ReadableStream> | null } | null>(
+		null
+	)
 	const firstPage = first?.page ?? null
 	const fallback = firstPage?.getViewport({ scale, rotation: pdfPageRotation(firstPage.rotate, rotation) })
+	// The pages are watched once they have their size: laid out at the default size, more of them would sit near the
+	// view for a moment, and each one that does reads its page (and starts rendering it) for good.
+	const sized = first !== null
 
 	useEffect(() => {
 		let live = true
@@ -355,7 +402,7 @@ export function PdfPageColumn({
 				if (live) setFirst({ document, page })
 			},
 			() => {
-				// The unread pages keep the default size.
+				if (live) setFirst(previous => previous ?? { document, page: null })
 			}
 		)
 
@@ -367,14 +414,14 @@ export function PdfPageColumn({
 	useEffect(() => {
 		const root = scrollerRef.current
 
-		if (root === null) return
+		if (root === null || !sized) return
 
 		watcher.attach(root)
 
 		return () => {
 			watcher.detach()
 		}
-	}, [watcher, scrollerRef])
+	}, [watcher, scrollerRef, sized])
 
 	return (
 		<div
@@ -558,10 +605,15 @@ function PdfPageView({
 
 		registerPage(pageNumber, element)
 
+		const near = (): void => {
+			setNearView(true)
+		}
+		let waiting: (() => void) | null = null
 		const unwatch = watcher.watch(
 			element,
 			entry => {
-				if (entry.isIntersecting) setNearView(true)
+				waiting?.()
+				waiting = entry.isIntersecting ? watcher.afterFirstPaint(near) : null
 			},
 			entry => {
 				setInView(entry.isIntersecting)
@@ -580,10 +632,14 @@ function PdfPageView({
 					proxyRef.current?.cleanup()
 					setPaintedAt(null)
 				}
+			},
+			entry => {
+				if (entry.isIntersecting) near()
 			}
 		)
 
 		return () => {
+			waiting?.()
 			unwatch()
 			registerPage(pageNumber, null)
 		}
@@ -625,10 +681,13 @@ function PdfPageView({
 					}
 
 					setPaintedAt({ page: proxy, scale, rotation })
+					watcher.settled()
 				},
 				() => {
 					// A cancelled render (scrolled away, zoomed) rejects too. A page that fails to render stays a
-					// placeholder; the document opened, so the rest still shows.
+					// placeholder; the document opened, so the rest still shows. Only a render this effect cancelled keeps
+					// the others waiting: a page in view takes its place.
+					if (!cancelled) watcher.settled()
 				}
 			)
 		}
@@ -650,7 +709,7 @@ function PdfPageView({
 				offscreen.height = 0
 			}
 		}
-	}, [proxy, fresh, nearView, inView, rendered, painted, scale, rotation, maxCanvasBytes])
+	}, [proxy, fresh, nearView, inView, rendered, painted, scale, rotation, maxCanvasBytes, watcher])
 
 	// Before the text layer's effect, which reads it.
 	useEffect(() => {
@@ -770,8 +829,11 @@ function PdfPageView({
 	const viewport = proxy?.getViewport({ scale, rotation: pdfPageRotation(proxy.rotate, rotation) })
 
 	return (
+		// Each page a labelled region ("Page 3 of 12"), its text layer what screen readers, selection and copy read.
 		<div
 			ref={wrapperRef}
+			role="region"
+			aria-label={pageLabel(pageNumber, total)}
 			className={classes("fo-pdf-page", classNames?.page)}
 			data-page={pageNumber}
 			data-rendered={rendered}
@@ -785,7 +847,7 @@ function PdfPageView({
 			{/* The CSS box follows every zoom step at once, so a stale bitmap stretches to the new size. */}
 			<canvas
 				ref={canvasRef}
-				aria-label={pageLabel(pageNumber, total)}
+				aria-hidden="true"
 				className={classNames?.canvas?.(painted)}
 				style={viewport === undefined ? undefined : { width: Math.floor(viewport.width), height: Math.floor(viewport.height) }}
 			/>

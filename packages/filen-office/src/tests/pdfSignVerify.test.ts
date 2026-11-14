@@ -117,13 +117,79 @@ describe("verifyPdfSignatures", () => {
 		["certified-p3-annotated.pdf", true, ["annotation"]],
 		["fieldmdp-locked-filled.pdf", false, ["form"]],
 		["shadow-hide-replace.pdf", false, ["content"]],
-		["appended-without-xref.pdf", false, ["content"]]
+		["appended-without-xref.pdf", false, ["content"]],
+		["approval-annotation-edited.pdf", true, ["annotation"]],
+		["certified-p3-annotated-filled.pdf", true, ["form", "annotation"]]
 	])("%s changed after signing (allowed: %s)", async (name, allowed, kinds) => {
 		const signature = await only(name)
 
 		expect(signature.state).toBe("changed")
 		expect(signature.changes).toEqual({ allowed, kinds })
 		expect(signature.signedLength).toBeLessThan(fixture(name).length)
+	})
+
+	it.each(["new-root-annotated.pdf", "certified-p1-new-root.pdf"])(
+		"%s: a new catalog and page tree behind one annotation edit is a change nobody allowed",
+		async name => {
+			const signature = await only(name)
+
+			expect(signature.state).toBe("changed")
+			expect(signature.changes?.allowed).toBe(false)
+			expect(signature.changes?.kinds).toContain("content")
+		}
+	)
+
+	// Roles come from the signed revision: an object counts as an annotation (or an annotation's appearance) only when
+	// the signed revision made it one and no page draws it as content.
+	it.each([
+		"ap-repointed-content.pdf",
+		"ap-shared-with-content.pdf",
+		"font-type-annot.pdf",
+		"font-rect.pdf",
+		"font-listed-as-annotation.pdf",
+		"contents-array-appended.pdf",
+		"pages-listed-as-annotation.pdf",
+		"shadow-missing-object.pdf",
+		"shadow-missing-resource.pdf"
+	])("%s: content disguised as an annotation change is a change nobody allowed", async name => {
+		const signature = await only(name)
+
+		expect(signature.state).toBe("changed")
+		expect(signature.changes?.allowed).toBe(false)
+		expect(signature.changes?.kinds).toContain("content")
+	})
+
+	// MuPDF's own check of the locks has the last word on a revision it rejects for something other than annotations.
+	it("lets MuPDF's change check veto a revision without annotation changes", async () => {
+		const bytes = fixture("certified-p3-annotated-filled.pdf")
+		// MuPDF names the first version it rejects, newest first: 2 is the annotating revision, 1 the filling one.
+		const withHistory = async (history: number): Promise<PdfSignatureInfo | undefined> => {
+			const document = new mupdf.PDFDocument(bytes)
+			const disagreeing = new Proxy(document, {
+				get: (target, key) => (key === "validateChangeHistory" ? () => history : Reflect.get(target, key, target))
+			})
+			const report = await verifyPdfSignatures(
+				disagreeing,
+				{ length: bytes.length, read: (offset, length) => Promise.resolve(bytes.slice(offset, offset + length)) },
+				{
+					subtle: nodeSubtle,
+					createDigest: createPdfDigest,
+					openRevision: length => new mupdf.PDFDocument(bytes.slice(0, length)),
+					now: Date.UTC(2026, 6, 1)
+				}
+			)
+
+			document.destroy()
+
+			return report.signatures[0]
+		}
+
+		expect((await withHistory(2))?.changes).toEqual({ allowed: true, kinds: ["form", "annotation"] })
+		expect((await withHistory(1))?.changes).toEqual({ allowed: false, kinds: ["form", "annotation"] })
+	})
+
+	it("reads the certification from the revision the certifying signature signed, not a later catalog", async () => {
+		expect(await only("certified-p1-new-root.pdf")).toMatchObject({ certification: 1 })
 	})
 
 	it("judges each of two signatures against what came after it", async () => {

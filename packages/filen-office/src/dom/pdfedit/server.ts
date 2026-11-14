@@ -10,6 +10,7 @@ import {
 	type PdfRenderPriority
 } from "./protocol"
 import { PDF_ENGINE_REQUESTS, type PdfRequestTable } from "./requests"
+import { wasmHeapBytes } from "./render"
 
 // The engine worker's side: requests are taken from the scope's messages and run one at a time. Renders wait in a
 // queue ordered by priority (visible tiles before overlays, thumbnails and prefetch) and can be cancelled until they
@@ -51,15 +52,6 @@ function rankOf(op: PdfEngineOp, args: unknown): number {
 	const priority: unknown = typeof args === "object" && args !== null ? Reflect.get(args, "priority") : undefined
 
 	return typeof priority === "string" && priority in PRIORITY ? (PRIORITY[priority as PdfRenderArgs["priority"]] ?? 3) : 3
-}
-
-function wasmHeapBytes(mupdf: MupdfModule): number {
-	const probe = new mupdf.Buffer()
-	const bytes = probe.asUint8Array().buffer.byteLength
-
-	probe.destroy()
-
-	return bytes
 }
 
 export function servePdfEngine(mupdf: MupdfModule, scope: PdfEngineScope, options: PdfEngineServeOptions): () => void {

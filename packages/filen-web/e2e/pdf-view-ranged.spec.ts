@@ -27,9 +27,38 @@ async function openPdf(page: Page, listbox: Locator, name: string): Promise<Loca
 
 	const dialog = page.getByRole("dialog").first()
 
-	await expect(dialog.locator("canvas.block").first()).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+	await expect(dialog.getByRole("region", { name: /Page 1 of/u })).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
 
 	return dialog
+}
+
+// The SDK chunks pdf.js needs before page 1 paints, for the non-linearized latin document: the cross-reference table
+// and trailer at the end, page 1's objects from the start of the file, and every page's own dictionary (pdf.js walks the
+// page tree to the last page at open). The pages beside page 1 are read only after it painted.
+function firstPaintChunks(bytes: Buffer, pages: number): number {
+	const text = bytes.toString("latin1")
+	const chunks = new Set<number>()
+	const add = (from: number, to: number): void => {
+		for (let chunk = Math.floor(from / CHUNK); chunk <= Math.floor((to - 1) / CHUNK); chunk++) chunks.add(chunk)
+	}
+	const object = (number: number): readonly [number, number] => {
+		const start = text.indexOf(`\n${String(number)} 0 obj`)
+		const end = text.indexOf("endobj", start)
+
+		if (start < 0 || end < 0) throw new Error(`no object ${String(number)}`)
+
+		return [start + 1, end + "endobj".length]
+	}
+
+	// Catalog, page tree, font, then page 1, its content and its image (objects 4 to 6).
+	add(0, object(6)[1])
+
+	// Each page is three objects from 4: the page, its content, its image.
+	for (let page = 2; page <= pages; page++) add(...object(4 + (page - 1) * 3))
+
+	add(text.lastIndexOf("xref"), bytes.length)
+
+	return chunks.size
 }
 
 // Dark and coloured pixels of the first painted page canvas.
@@ -73,10 +102,29 @@ test("a large PDF shows its first page after reading part of the file", async ({
 		await uploadFiles(page, [{ name, mimeType: PDF_MIME, buffer: bytes }], listbox)
 
 		const egest = observeEgest(page)
+		let atPaint = -1
+
+		// Counted the moment page 1's canvas has its bitmap (the pages beside it start reading only then).
+		await page.exposeFunction("pdfPagePainted", () => {
+			if (atPaint < 0) atPaint = egest.count()
+		})
+		await page.evaluate(() => {
+			const report = Reflect.get(window, "pdfPagePainted") as () => void
+			const observer = new MutationObserver(() => {
+				if (document.querySelector('[data-page="1"][data-rendered="true"]') !== null) {
+					observer.disconnect()
+					report()
+				}
+			})
+
+			observer.observe(document.body, { subtree: true, attributes: true, attributeFilter: ["data-rendered"] })
+		})
+
 		const dialog = await openPdf(page, listbox, name)
 
-		// Page 1 and the pages rendered beside it, with the cross-reference table at the end: well under half.
-		expect(egest.count()).toBeLessThan(chunks / 2)
+		await expect.poll(() => atPaint, { timeout: LAZY_VIEWER_TIMEOUT_MS }).toBeGreaterThanOrEqual(0)
+		expect(atPaint).toBe(firstPaintChunks(bytes, 12))
+		expect(atPaint).toBeLessThan(chunks / 2)
 		await expect(dialog.getByText("Page 1 of 12", { exact: false }).first()).toBeAttached()
 	})
 

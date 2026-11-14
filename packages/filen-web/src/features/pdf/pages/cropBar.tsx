@@ -107,7 +107,7 @@ export function PdfCropBar({ pageCount, current, selected, canApply, busy, onRem
 				<Input
 					aria-label={t("previewPdfCropRangeLabel")}
 					aria-invalid={rangeInvalid}
-					placeholder={t("previewPdfExtractRangePlaceholder")}
+					placeholder={t("previewPdfPageRangePlaceholder")}
 					autoComplete="off"
 					spellCheck={false}
 					className="h-8 w-36 leading-5"

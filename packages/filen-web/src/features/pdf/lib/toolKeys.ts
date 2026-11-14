@@ -41,12 +41,24 @@ export function pdfToolKeysValid(def: ActionDef): boolean {
 
 const PDF_FIELD_SELECTOR = 'input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"], [role="combobox"]'
 
-// Whether a keydown with focus on `target` may run a tool letter: pressed on the page surface, not in a field there
-// (input, textarea, select, contenteditable, an ARIA textbox).
-export function pdfToolLetterAllowed(target: EventTarget | null, surface: Element): boolean {
-	if (!(target instanceof Element) || !surface.contains(target)) {
-		return false
-	}
+// Whether `target` is a field or inside one (input, textarea, select, contenteditable, an ARIA textbox or combobox):
+// a form field on the page, a tool's editor, the page number.
+export function inPdfField(target: EventTarget | null): boolean {
+	return target !== null && target instanceof Element && target.closest(PDF_FIELD_SELECTOR) !== null
+}
 
-	return target.closest(PDF_FIELD_SELECTOR) === null
+// A keydown that types into a field: in one, without Ctrl, Cmd or Alt (Shift types too). Neither the viewer's keys
+// (N, P, F) nor a tool's act on it.
+export function typesInPdfField(event: {
+	readonly target: EventTarget | null
+	readonly ctrlKey: boolean
+	readonly metaKey: boolean
+	readonly altKey: boolean
+}): boolean {
+	return !event.ctrlKey && !event.metaKey && !event.altKey && inPdfField(event.target)
+}
+
+// Whether a keydown with focus on `target` may run a tool letter: pressed on the page surface, not in a field there.
+export function pdfToolLetterAllowed(target: EventTarget | null, surface: Element): boolean {
+	return target instanceof Element && surface.contains(target) && !inPdfField(target)
 }

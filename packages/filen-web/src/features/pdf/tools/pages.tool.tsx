@@ -20,7 +20,14 @@ import {
 	PdfSplitToolPanel
 } from "@/features/pdf/pages/pagesSurface"
 import { pickFile } from "@/features/pdf/pages/pagesSurface.logic"
-import { toolEnabled, whileActive, type PdfPolicyState, type PdfTool, type PdfToolContext, type PdfToolVerdict } from "@/features/pdf/tools/registry"
+import {
+	toolEnabled,
+	whileActive,
+	type PdfPolicyState,
+	type PdfTool,
+	type PdfToolContext,
+	type PdfToolVerdict
+} from "@/features/pdf/tools/registry"
 import type { PdfPagesController } from "@/features/pdf/pages/pagesController"
 import type { PreviewKey } from "@/lib/i18n"
 

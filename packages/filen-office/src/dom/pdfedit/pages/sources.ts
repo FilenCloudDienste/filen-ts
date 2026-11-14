@@ -1,4 +1,5 @@
 import type * as Mupdf from "mupdf"
+import { fitsEdit } from "../../../core/pdfedit/budget"
 import { passwordCandidates } from "../../../core/pdfedit/security"
 import { PdfEngineRefusal, type PdfEngineContext } from "../context"
 import type { MupdfModule, PdfByteChannel } from "../protocol"
@@ -33,6 +34,11 @@ function registry(mupdf: MupdfModule): { next: number; readonly sources: Map<num
 // The open source document `id`, or null.
 export function pageSource(mupdf: MupdfModule, id: number): Mupdf.PDFDocument | null {
 	return held.get(mupdf)?.sources.get(id)?.document ?? null
+}
+
+// The size of source `id`'s file (0 when it is not held).
+export function sourceBytes(mupdf: MupdfModule, id: number): number {
+	return held.get(mupdf)?.sources.get(id)?.reader.length ?? 0
 }
 
 export type PdfSourceAttach =
@@ -120,9 +126,12 @@ export const PAGE_SOURCE_REQUESTS: {
 	readonly detachSource: PdfRequestHandler<"detachSource">
 } = {
 	attachSource: (context, { channel, password }) => {
-		const { role } = context.open()
+		const { role, edit } = context.open()
 
 		if (role !== "edit") throw new PdfEngineRefusal("badRequest", "only the editor inserts pages")
+		// Its pages inserted, the document must stay one the editor can save (counted again when they are).
+		if (edit !== null && !fitsEdit(edit.fileBytes + edit.addedBytes() + channel.length, edit.memory))
+			throw new PdfEngineRefusal("overBudget", "the document would grow past what this browser edits")
 
 		return { value: attach(context, channel, password) }
 	},

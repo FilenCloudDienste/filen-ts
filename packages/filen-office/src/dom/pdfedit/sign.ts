@@ -8,6 +8,7 @@ import {
 	type SignaturePlaceholder
 } from "../../core/pdfsign/placeholder"
 import { digestRanges, type PdfDigestFactory } from "../../core/pdfsign/source"
+import { deref, name as nameOf } from "./fields"
 import type { PdfDigestName } from "../../core/pdfsign/types"
 
 // Signing an open MuPDF document with a certificate, in two steps around the CMS signature that is made elsewhere (the
@@ -108,16 +109,6 @@ type PDFObject = Mupdf.PDFObject
 
 function refuse(reason: PdfSignRefusalReason): never {
 	throw new PdfSignRefusal(reason)
-}
-
-function deref(object: PDFObject): PDFObject {
-	return object.isNull() ? object : object.resolve()
-}
-
-function nameOf(object: PDFObject): string | null {
-	const resolved = deref(object)
-
-	return resolved.isName() ? resolved.asName() : null
 }
 
 function pdfDate(date: Date): string {
@@ -655,12 +646,6 @@ function writeRevision(document: PDFDocument, draft: PdfSignatureDraft, options:
 			buffer.destroy()
 		}
 	}
-}
-
-// Saves the document incrementally with the placeholder and patches /ByteRange (the document is spent, see above).
-// The bytes before `baseLength` are the original file, unchanged.
-export function writePdfSignature(document: PDFDocument, draft: PdfSignatureDraft, options: WritePdfSignatureOptions): PdfSignedRevision {
-	return writeRevision(document, draft, options)
 }
 
 export interface SignPdfDocumentOptions extends WritePdfSignatureOptions {

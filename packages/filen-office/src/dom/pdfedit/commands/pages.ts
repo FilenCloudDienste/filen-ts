@@ -10,7 +10,7 @@ import {
 	rotatePages,
 	type PageOpResult
 } from "../pages/index"
-import { pageSource } from "../pages/sources"
+import { pageSource, sourceBytes } from "../pages/sources"
 import { isIndex, isRecord, type PdfCommandContext, type PdfCommandTable } from "./types"
 
 // Page organisation: move, rotate, delete, duplicate and insert (a blank page, a picture, pages of a second document
@@ -139,6 +139,7 @@ export const PAGE_COMMANDS: PdfCommandTable<PdfPageCommands> = {
 
 			return isIndex(at) && bytes instanceof Uint8Array && bytes.length > 0 && bytes.length <= MAX_IMAGE_BYTES ? { at, bytes } : null
 		},
+		bytes: ({ bytes }) => bytes.length,
 		run: (context, { at, bytes }) => run(() => insertImagePage(context.mupdf, context.document, bytes, at))
 	},
 	"pages.insertFrom": {
@@ -151,6 +152,8 @@ export const PAGE_COMMANDS: PdfCommandTable<PdfPageCommands> = {
 
 			return isIndex(at) && isIndex(source) && pages !== null ? { at, source, pages } : null
 		},
+		// The pages' file at most (a second insertion from it copies its objects again).
+		bytes: ({ source }, mupdf) => sourceBytes(mupdf, source),
 		run: (context, { at, source, pages }) => {
 			const document = pageSource(context.mupdf, source)
 

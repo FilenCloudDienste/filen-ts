@@ -75,14 +75,16 @@ export function CertificateSigningDialog({ canCertify, hasVisual, onPlace, onClo
 	const mounted = useRef(true)
 	const busy = loading || unlocking
 
-	useEffect(
-		() => () => {
+	// Set on every mount: a remount (StrictMode, a reused subtree) must not leave the dialog believing it is gone.
+	useEffect(() => {
+		mounted.current = true
+
+		return () => {
 			mounted.current = false
 			owned.current?.terminate()
 			owned.current = null
-		},
-		[]
-	)
+		}
+	}, [])
 
 	const load = async (name: string, source: PdfSignerFileSource): Promise<void> => {
 		owned.current?.terminate()

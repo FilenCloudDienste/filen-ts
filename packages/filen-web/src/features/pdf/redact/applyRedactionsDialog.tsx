@@ -28,6 +28,8 @@ export interface ApplyRedactionsDialogProps {
 	takenNames: ReadonlySet<string>
 	// In-place saving offered (a writable drive file).
 	canSaveInPlace: boolean
+	// The document has accessibility tags, which a redaction may leave incomplete.
+	tagged: boolean
 	busy: boolean
 	// The last attempt's check failure, shown until the next attempt.
 	failure: RedactionFailure | null
@@ -40,6 +42,7 @@ export function ApplyRedactionsDialog({
 	fileName,
 	takenNames,
 	canSaveInPlace,
+	tagged,
 	busy,
 	failure,
 	onApply
@@ -73,6 +76,7 @@ export function ApplyRedactionsDialog({
 					<DialogDescription>{t("previewPdfRedactApplyWarning")}</DialogDescription>
 				</DialogHeader>
 				<div className="flex flex-col gap-3">
+					{tagged ? <p className="text-xs text-muted-foreground">{t("previewPdfTagged")}</p> : null}
 					<div className="flex items-start gap-2">
 						<input
 							id={`${id}-sanitize`}

@@ -72,7 +72,7 @@ describe("signing with a certificate", () => {
 		expect(signsInOneVersion(true, false, 120 * MIB, PDF_DESKTOP_MEMORY)).toBe(false)
 	})
 
-	function harness(options: { dirty: boolean; size: number; saves: boolean[] }) {
+	function harness(options: { dirty: boolean; size: number; saves: boolean[]; protecting?: boolean; redacting?: boolean }) {
 		const calls: string[] = []
 		const signer = {
 			unlock: vi.fn(),
@@ -82,7 +82,14 @@ describe("signing with a certificate", () => {
 			})
 		}
 		const session = {
-			getSnapshot: () => ({ state: { dirty: options.dirty, signatures: { fields: [] } } }),
+			getSnapshot: () => ({
+				state: {
+					dirty: options.dirty,
+					signatures: { fields: [] },
+					security: { pending: options.protecting === true ? "protect" : null },
+					redacting: options.redacting === true
+				}
+			}),
 			dispatch: vi.fn((command: string, _args: unknown) => {
 				calls.push(command)
 
@@ -106,8 +113,7 @@ describe("signing with a certificate", () => {
 			job: (jobSigner, digest) => ({
 				signer: jobSigner,
 				digest,
-				hints: () => Promise.resolve([]),
-				onSigned: vi.fn()
+				hints: () => Promise.resolve([])
 			}),
 			onSaveChangesFirst: () => calls.push("notice"),
 			onFailed: () => calls.push("failed")
@@ -142,6 +148,15 @@ describe("signing with a certificate", () => {
 
 		expect(await signWithCertificate(deps, request)).toBe(true)
 		expect(calls).toEqual(["notice", "save", "sign.addField", "signedSave", "terminate"])
+	})
+
+	it("saves new protection or redactions with a plain Save first, whatever their size", async () => {
+		for (const pending of [{ protecting: true }, { redacting: true }]) {
+			const { calls, deps, request } = harness({ dirty: true, size: 1000, saves: [true, true], ...pending })
+
+			expect(await signWithCertificate(deps, request)).toBe(true)
+			expect(calls).toEqual(["notice", "save", "sign.addField", "signedSave", "terminate"])
+		}
 	})
 
 	it("takes the placed signature back when the signed save did not happen", async () => {

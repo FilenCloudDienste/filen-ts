@@ -1,6 +1,6 @@
 import type { PdfPage, PdfRenderParams, PdfRenderTask, PdfTextContent, PdfViewport } from "../../dom/pdf/index"
 import type { PdfEngineClient } from "../../dom/pdfedit/client"
-import type { PdfPageInfo, PdfRenderValue, PdfTile } from "../../dom/pdfedit/protocol"
+import type { PdfOpenResult, PdfPageInfo, PdfPermission, PdfRenderValue, PdfTile } from "../../dom/pdfedit/protocol"
 import type { PdfPageText } from "../../dom/pdfedit/text"
 import type { PdfDomDocument } from "../pdf/types"
 import { PageViewport } from "./viewport"
@@ -327,14 +327,38 @@ export function isMupdfDocument(document: unknown): document is MupdfPdfDocument
 	return document instanceof MupdfPdfDocument
 }
 
-// What the editor needs of the viewer's document before it is closed (PdfDocumentFacts).
-export async function readPdfDocumentFacts(document: PdfDomDocument): Promise<PdfDocumentFacts> {
-	const [metadata, permissions, signatures, outline] = await Promise.all([
+// What the editor needs of the viewer's document before it is closed (PdfDocumentFacts), but its restrictions: the
+// engine reads those itself (engineDocumentPermissions), from the file it opened, with the password it holds.
+export async function readPdfDocumentFacts(document: PdfDomDocument): Promise<Omit<PdfDocumentFacts, "permissions">> {
+	const [metadata, signatures, outline] = await Promise.all([
 		document.getMetadata().catch(() => ({ info: null })),
-		document.getPermissions?.().catch(() => null) ?? Promise.resolve(null),
 		document.getSignatures?.().catch(() => null) ?? Promise.resolve(null),
 		document.getOutline().catch(() => null)
 	])
 
-	return { info: metadata.info, permissions, signatures, outline }
+	return { info: metadata.info, signatures, outline }
+}
+
+// pdf.js PermissionFlag, by the engine's permission names.
+const PDFJS_PERMISSION_FLAGS: readonly (readonly [PdfPermission, number])[] = [
+	["print", 0x04],
+	["edit", 0x08],
+	["copy", 0x10],
+	["annotate", 0x20],
+	["form", 0x100],
+	["accessibility", 0x200],
+	["assemble", 0x400],
+	["printHq", 0x800]
+]
+
+// The document's restrictions as pdf.js reports them (getPermissions), from what the engine read opening it: null
+// when there are none (not encrypted, or unlocked with the owner password), else the flags of what is allowed.
+export function engineDocumentPermissions(opened: Extract<PdfOpenResult, { readonly status: "open" }>): ReadonlySet<number> | null {
+	if (opened.access === "owner" || opened.document.encryption === "None") return null
+
+	const flags = new Set<number>()
+
+	for (const [name, flag] of PDFJS_PERMISSION_FLAGS) if (opened.document.permissions[name]) flags.add(flag)
+
+	return flags
 }

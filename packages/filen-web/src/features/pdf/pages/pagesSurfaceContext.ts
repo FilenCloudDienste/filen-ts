@@ -21,6 +21,8 @@ export interface PdfPagesSurfaceValue {
 	// The view's rotation, added to every page's own (0, 90, 180, 270).
 	readonly viewRotation: number
 	readonly online: boolean
+	// pdf.js reads the document in ranges (it does not hold the whole file).
+	readonly ranged: boolean
 }
 
 export const PdfPagesSurfaceContext = createContext<PdfPagesSurfaceValue | null>(null)

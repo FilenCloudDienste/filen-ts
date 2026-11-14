@@ -2,10 +2,11 @@ import type * as Mupdf from "mupdf"
 import { estimateSavePeak, fitsBudget } from "../../core/pdfedit/budget"
 import { PDF_FULL_SAVE_OPTIONS, PDF_INCREMENTAL_SAVE_OPTIONS, type PdfSavePlan } from "../../core/pdfedit/savePlan"
 import { composeWriteOptions } from "../../core/pdfedit/security"
+import { redactsContent } from "./commands/redact"
 import { pendingSignature } from "./commands/sign"
 import { PdfEngineRefusal, type PdfEngineContext } from "./context"
 import { createPdfDigest } from "./digest"
-import { changed, editing, idle, rebuild, type Editing } from "./editRequests"
+import { changed, editing, freeForSave, idle, rebuild, type Editing } from "./editRequests"
 import type { PdfSignAnswer, PdfSignPort } from "./protocol"
 import type { PdfRequestHandler } from "./requests"
 import { PdfSignRefusal, signPdfDocument, type PdfSignedRevision } from "./sign"
@@ -128,11 +129,25 @@ export const SIGN_REQUESTS: Handlers = {
 		if (last?.label !== "sign.addField" || pendingSignature(document) === null)
 			throw new PdfEngineRefusal("badRequest", "no signature is placed")
 
-		// Unsaved changes besides the signature, in an unsigned document: rewritten first, into the same file.
-		const rewrite = edit.signatures.fields.length === 0 && edit.savedApplied !== edit.applied - 1
-		const peakBytes = estimateSavePeak(inputBytes, rewrite)
+		// New protection and redactions are written by a plain Save (its round-trip and redaction checks, the
+		// earlier-versions warning), then signed on: never through the signing save, which would drop the one and skip
+		// the checks of the other.
+		if (edit.security !== null || redactsContent(edit.appliedSteps())) throw new PdfEngineRefusal("notAllowed", "saveFirst")
+
+		const alreadySigned = edit.signatures.fields.length > 0
+
+		// A signed document's saves are incremental, so its file is the saved one; anything else cannot be signed on.
+		if (alreadySigned && edit.fileBehind) throw new PdfEngineRefusal("notAllowed", "the saved file is not the document's")
+
+		// Unsaved changes besides the signature, or a last save that rewrote the file while the document stayed on the
+		// one before (the drive holds the rewrite), in an unsigned document: rewritten first, into the same file, so the
+		// signed file's first revision is what was saved, never the file before it.
+		const rewrite = !alreadySigned && (edit.savedApplied !== edit.applied - 1 || edit.fileBehind)
+		const peakBytes = estimateSavePeak(inputBytes, rewrite, { heapBytes: context.heapBytes(), addedBytes: edit.addedBytes() })
 
 		if (!fitsBudget(peakBytes, memory)) return { value: { status: "refused", reason: "overBudget" } }
+
+		freeForSave(context)
 
 		const sign = signerOf(signer)
 		let signed: { readonly revision: PdfSignedRevision; readonly field: string }

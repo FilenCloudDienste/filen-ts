@@ -15,15 +15,27 @@ export type SignatureBannerKey =
 	| "previewPdfSignatureBannerChangedAllowed"
 	| "previewPdfSignatureBannerChangedNotAllowed"
 	| "previewPdfSignatureBannerInvalid"
-	| "previewPdfSignatureBannerUnverifiable"
 
-const BANNER_KEYS: Readonly<Record<PdfSignatureSummaryState, SignatureBannerKey>> = {
+// The status line's three states: unchanged since signing, changed after signing, and invalid (a check failed, or
+// could not be made: such a signature is never shown as valid). Every state of a verified signature also says the
+// signer is not verified.
+export type SignatureBannerTone = "unchanged" | "changed" | "invalid"
+
+const BANNER_KEYS = {
 	unchanged: "previewPdfSignatureBannerUnchanged",
 	changedAllowed: "previewPdfSignatureBannerChangedAllowed",
 	changedNotAllowed: "previewPdfSignatureBannerChangedNotAllowed",
 	invalid: "previewPdfSignatureBannerInvalid",
-	unverifiable: "previewPdfSignatureBannerUnverifiable"
-}
+	unverifiable: "previewPdfSignatureBannerInvalid"
+} as const satisfies Record<PdfSignatureSummaryState, SignatureBannerKey>
+
+const BANNER_TONES = {
+	unchanged: "unchanged",
+	changedAllowed: "changed",
+	changedNotAllowed: "changed",
+	invalid: "invalid",
+	unverifiable: "invalid"
+} as const satisfies Record<PdfSignatureSummaryState, SignatureBannerTone>
 
 export const INVALID_REASON_KEYS = {
 	byteRange: "previewPdfSignatureInvalidByteRange",
@@ -109,6 +121,7 @@ export function certificationKey(level: PdfSignatureInfo["certification"]): Cert
 
 export interface SignatureBanner {
 	readonly state: PdfSignatureSummaryState
+	readonly tone: SignatureBannerTone
 	readonly key: SignatureBannerKey
 	readonly signature: PdfSignatureInfo
 	readonly name: string | null
@@ -127,6 +140,7 @@ export function signatureBanner(report: PdfSignatureReport): SignatureBanner | n
 
 	return {
 		state: summary.state,
+		tone: BANNER_TONES[summary.state],
 		key: BANNER_KEYS[summary.state],
 		signature,
 		name: signerName(signature),

@@ -18,8 +18,6 @@ export const FLAG_LOCKED = 1 << 7
 export const RECT_TYPES = new Set(["FreeText", "Square", "Circle", "Stamp", "Text", "Redact", "Caret"])
 // Types whose geometry is points (moved by translating them, resized by scaling them).
 export const POINT_TYPES = new Set(["Ink", "Line", "Polygon", "PolyLine"])
-// Text markups: their quads follow the text, so they are never moved or resized.
-export const MARKUP_TYPES = new Set(["Highlight", "Underline", "StrikeOut", "Squiggly"])
 // Types that are never a comment thread's root.
 export const NOT_COMMENTABLE = new Set([
 	"Popup",

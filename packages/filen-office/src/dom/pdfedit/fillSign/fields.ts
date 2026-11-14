@@ -1,5 +1,6 @@
 import type { PDFDocument, PDFObject, PDFPage, PDFWidget } from "mupdf"
 import type { PdfPageRect } from "../../../core/pdfedit/visualSignature"
+import { deref } from "../fields"
 
 // AcroForm fields of an open MuPDF document: what a field overlay shows (kind, value, flags, options, the /TU
 // label) and the value setters a form edit applies. Each setter changes one field and regenerates the appearance
@@ -92,10 +93,6 @@ function kindOf(widget: PDFWidget): PdfFieldKind {
 		default:
 			return "button"
 	}
-}
-
-function deref(object: PDFObject): PDFObject {
-	return object.isIndirect() ? object.resolve() : object
 }
 
 function stringOf(object: PDFObject): string | null {

@@ -3,6 +3,7 @@ import type { CropMargins } from "../../../core/pdfedit/crop"
 import type { RedactionMark } from "../../../core/pdfedit/redactVerify"
 import { cropPages, cropPagesToContent, outsideCropRects } from "../pages/index"
 import { applyPageRedactions, markArea, markText, pageRedactionMarks, removeRedactionMark } from "../redact/index"
+import { recordRedaction, type RedactedRegions } from "./redact"
 import type { MupdfModule } from "../protocol"
 import { isIndex, isRecord, type PdfCommandTable } from "./types"
 
@@ -46,9 +47,16 @@ function parseMargins(args: unknown): { readonly pages: readonly number[]; reado
 }
 
 // Deletes what lies outside `margins`' crop on each page; returns the pages that changed (a form field's other widgets
-// on other pages lose a removed value too).
-function removeOutside(mupdf: MupdfModule, document: Mupdf.PDFDocument, pages: readonly number[], margins: CropMargins): number[] {
+// on other pages lose a removed value too) and the regions redacted on each, which the save's redaction check proves
+// gone like any area redaction.
+function removeOutside(
+	mupdf: MupdfModule,
+	document: Mupdf.PDFDocument,
+	pages: readonly number[],
+	margins: CropMargins
+): { readonly changed: number[]; readonly redacted: RedactedRegions[] } {
 	const changed = new Set<number>()
+	const redacted: RedactedRegions[] = []
 
 	for (const [index, rects] of outsideCropRects(document, pages, margins)) {
 		if (rects.length === 0) continue
@@ -61,7 +69,11 @@ function removeOutside(mupdf: MupdfModule, document: Mupdf.PDFDocument, pages: r
 
 		page.destroy()
 
-		for (const other of applyPageRedactions(mupdf, document, index, { removeAnnotations: true }).pages) changed.add(other)
+		const applied = applyPageRedactions(mupdf, document, index, { removeAnnotations: true })
+
+		for (const other of applied.pages) changed.add(other)
+
+		redacted.push({ page: index, regions: applied.regions, hidden: applied.hidden })
 
 		page = document.loadPage(index)
 
@@ -74,7 +86,7 @@ function removeOutside(mupdf: MupdfModule, document: Mupdf.PDFDocument, pages: r
 		changed.add(index)
 	}
 
-	return [...changed]
+	return { changed: [...changed], redacted }
 }
 
 function sorted(pages: Iterable<number>): number[] {
@@ -102,10 +114,13 @@ export const CROP_COMMANDS: PdfCommandTable<PdfCropCommands> = {
 		// What was outside stays in the file's earlier versions.
 		removesContent: true,
 		parse: parseMargins,
-		run: (context, { pages, margins }) => {
+		run: (context, args) => {
+			const { pages, margins } = args
 			const removed = removeOutside(context.mupdf, context.document, pages, margins)
 
-			return sorted([...removed, ...cropPages(context.document, pages, margins).touched])
+			recordRedaction(context.document, args, removed.redacted)
+
+			return sorted([...removed.changed, ...cropPages(context.document, pages, margins).touched])
 		}
 	}
 }

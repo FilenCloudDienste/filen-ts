@@ -1,6 +1,6 @@
 import type { PDFDocument, PDFObject } from "mupdf"
 import { classifyLink } from "@filen/shared/linkPolicy"
-import type { PdfAnnotationRef, PdfAttachmentInfo, PdfLinkInfo } from "../../../core/pdfedit/annotations"
+import { attachmentDisplayName, type PdfAnnotationRef, type PdfAttachmentInfo, type PdfLinkInfo } from "../../../core/pdfedit/annotations"
 import { annotationId, loadPage, rectOf, requireAnnotation } from "./shared"
 
 // Links and attachments, read only; nothing navigates here. Attachments are only ever handed out as bytes for a
@@ -41,11 +41,13 @@ function sizeOf(spec: PDFObject): number | null {
 	return size.isInteger() && size.asNumber() >= 0 ? size.asNumber() : null
 }
 
+// The file's name (without hidden or reordering characters), or `fallback` when none is left.
 function nameOf(spec: PDFObject, fallback: string): string {
 	for (const key of ["UF", "F"]) {
 		const value = spec.get(key)
+		const name = value.isString() ? attachmentDisplayName(value.asString()) : ""
 
-		if (value.isString() && value.asString() !== "") return value.asString()
+		if (name !== "") return name
 	}
 
 	return fallback

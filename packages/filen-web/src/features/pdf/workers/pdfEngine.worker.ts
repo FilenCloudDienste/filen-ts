@@ -4,7 +4,7 @@ import * as mupdf from "mupdf"
 import { macrotaskYield } from "@filen/office/dom/docx"
 import { servePdfEngine } from "@filen/office/dom/pdfedit"
 import { textPrepareRequest } from "@filen/office/dom/pdfedit/toolRequests"
-import { verifySignaturesRequest } from "@filen/office/dom/pdfedit/verifyRequest"
+import { signatureHintsRequest, verifySignaturesRequest } from "@filen/office/dom/pdfedit/verifyRequest"
 import { officePdfFontAssets } from "@/features/office/lib/pdfFontAssets"
 import { verifyRedactionRequest } from "@filen/office/dom/pdfedit/protectRequests"
 import { RANGE_READ_TIMEOUT_MS } from "@/lib/media/rangePort"
@@ -20,6 +20,7 @@ servePdfEngine(mupdf, engineScope, {
 	yieldTask: macrotaskYield(),
 	requests: {
 		verifySignatures: verifySignaturesRequest(crypto.subtle),
+		signatureHints: signatureHintsRequest,
 		verifyRedaction: verifyRedactionRequest,
 		textPrepare: textPrepareRequest(officePdfFontAssets)
 	}

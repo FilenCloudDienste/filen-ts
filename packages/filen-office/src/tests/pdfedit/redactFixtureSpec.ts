@@ -63,6 +63,14 @@ export const SPEC = {
 		second: { text: "Kept words", x: 72, y: 500, size: 18 },
 		area: [60, 590, 300, 625] as PdfBox
 	},
+	// tagged-parent.pdf: the redacted paragraph's section (ActualText) and the document element (Alt) describe it.
+	taggedParent: {
+		first: { text: "Hidden words", x: 72, y: 600, size: 18 },
+		second: { text: "Kept words", x: 72, y: 500, size: 18 },
+		sectionActual: "Section about Hidden words",
+		documentAlt: "Document mentioning Hidden words",
+		area: [60, 590, 300, 625] as PdfBox
+	},
 	// annotations.pdf: a note, a free text, a link and a text field over `area`; a note elsewhere.
 	annotations: {
 		area: [60, 560, 400, 720] as PdfBox,

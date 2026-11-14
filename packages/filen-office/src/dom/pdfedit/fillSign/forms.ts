@@ -1,4 +1,5 @@
 import type { PDFDocument, PDFObject } from "mupdf"
+import { deref } from "../fields"
 
 // Document-level form facts: XFA (hybrid forms are filled through their AcroForm and lose the XFA packet on the
 // first save; XFA-only forms are view-only) and the scripts a form relies on (they never run here, so calculated
@@ -20,10 +21,6 @@ export interface PdfFormScripts {
 
 const MAX_DEPTH = 32
 const MAX_NODES = 20_000
-
-function deref(object: PDFObject): PDFObject {
-	return object.isIndirect() ? object.resolve() : object
-}
 
 function acroForm(document: PDFDocument): PDFObject {
 	return deref(document.getTrailer().get("Root", "AcroForm"))

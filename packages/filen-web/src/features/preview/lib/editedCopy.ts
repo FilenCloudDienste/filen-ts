@@ -1,4 +1,5 @@
 import { driveItemName } from "@filen/shared"
+import { savePortReader } from "@filen/shared/savePort"
 import { currentRootUuid } from "@/features/drive/lib/actions"
 import { editedCopyName } from "@/features/drive/lib/copyName"
 import { asDirectoryOrFile, type DriveItem } from "@/features/drive/lib/item"
@@ -51,10 +52,11 @@ export async function writeEditedCopy(
 	extension: string,
 	suffix: (number: number) => string
 ): Promise<{ outcome: ActionOutcome<DriveItem>; name: string } | null> {
-	// The writer on a port's other end would otherwise block on a reader that never comes.
+	// The writer on a port's other end would otherwise block on a reader that never comes: told by the save port's own
+	// abort (closing a port tells the other end nothing).
 	const closePort = (): void => {
 		if ("port" in content) {
-			content.port.close()
+			savePortReader(content.port, { inFlight: 1 }).abort("cancelled")
 		}
 	}
 	const base = asDirectoryOrFile(item)

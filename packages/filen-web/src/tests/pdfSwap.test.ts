@@ -5,7 +5,7 @@ import type { PdfEngine } from "@/features/pdf/session/engineWorker"
 import { PdfEditSwap } from "@/features/pdf/session/swap"
 import { engineFields, fieldChecked, pdfjsFields } from "@/features/pdf/session/fieldOverlay.logic"
 
-vi.mock("@/features/pdf/session/engineModule", () => ({ prefetchPdfEngine: () => undefined }))
+vi.mock("@/features/pdf/session/engineModule", () => ({ prefetchPdfEngine: () => undefined, prefetchPdfEngineIdle: () => undefined }))
 
 const STATE = { revision: 0, pageCount: 2, dirty: false, restrictions: { owner: false } } as unknown as PdfEditState
 
@@ -20,7 +20,7 @@ function fakeEngine(calls: string[]): PdfEngine {
 
 	return {
 		client: { call, queued: (op: string) => ({ promise: call(op), cancel: () => undefined }) } as unknown as PdfEngine["client"],
-		opened: { status: "open", access: "none", document: {} as never },
+		opened: { status: "open", access: "none", document: { encryption: "None" } as never },
 		close: () => Promise.resolve({ heapBytes: 0 })
 	}
 }
@@ -75,6 +75,20 @@ describe("the swap to the editor", () => {
 		})
 		// The change asked for before the failure is dropped, never replayed later.
 		expect(calls).toEqual(["state"])
+	})
+
+	it("marks an engine opened on a file a save wrote, whose signatures pdf.js never read", async () => {
+		const calls: string[] = []
+		const swap = new PdfEditSwap({ open: () => Promise.resolve(fakeEngine(calls)), mobile: false, onChangeFailed: () => undefined })
+
+		swap.setFile(FILE)
+		swap.edit(() => Promise.resolve())
+		await vi.waitFor(() => {
+			expect(swap.getSnapshot()).toMatchObject({ kind: "editing", respawned: false })
+		})
+
+		await swap.respawn(() => Promise.resolve(fakeEngine(calls)))
+		expect(swap.getSnapshot()).toMatchObject({ kind: "editing", respawned: true })
 	})
 
 	it("goes back to the viewer when the engine is poisoned", async () => {

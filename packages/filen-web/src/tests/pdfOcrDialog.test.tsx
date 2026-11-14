@@ -164,7 +164,7 @@ describe("RecogniseTextDialog", () => {
 
 		expect(screen.getByText('previewPdfOcrPageWords {"count":3}')).toBeTruthy()
 		expect(screen.getByText("previewPdfOcrPageWorking")).toBeTruthy()
-		expect(screen.getByText('previewPdfOcrPage {"page":4}')).toBeTruthy()
+		expect(screen.getByText('previewPdfPageNumber {"page":4}')).toBeTruthy()
 	})
 
 	it("sums up a finished run with its failures", () => {

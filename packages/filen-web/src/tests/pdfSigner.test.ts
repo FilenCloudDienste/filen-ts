@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs"
 import { webcrypto } from "node:crypto"
 import { describe, expect, it } from "vitest"
+import forge from "node-forge"
 import { checkContents } from "@filen/office/core/pdfsign"
 import { createPdfDigest } from "@filen/office/dom/pdfedit/digest"
 import { createPdfSignerApi, PDF_SIGNER_MAX_BYTES } from "@/features/pdf/workers/pdfSignerCore"
@@ -25,7 +26,7 @@ const stamp = {
 
 describe("pdf signer core", () => {
 	it("unlocks a container read from a file and signs digests the verifier accepts", async () => {
-		const api = createPdfSignerApi(webcrypto.subtle)
+		const api = createPdfSignerApi(webcrypto.subtle, null)
 
 		expect(await api.unlock("fixture-password")).toEqual({ ok: false, reason: "notLoaded" })
 		expect(await api.load({ kind: "file", file: p12("p256") })).toEqual({ ok: true })
@@ -56,11 +57,24 @@ describe("pdf signer core", () => {
 		).toMatchObject({ state: "valid", algorithm: "ECDSA P-256", signer: { commonName: "p256 signer" } })
 	})
 
-	it("reads legacy containers and refuses what it cannot sign with", async () => {
-		const api = createPdfSignerApi(webcrypto.subtle)
+	it("reads legacy containers only with the legacy ciphers", async () => {
+		const plain = createPdfSignerApi(webcrypto.subtle, null)
 
-		await api.load({ kind: "file", file: p12("legacy-rc2") })
-		expect((await api.unlock("fixture-password")).ok).toBe(true)
+		for (const name of ["legacy-rc2", "legacy-3des"]) {
+			await plain.load({ kind: "file", file: p12(name) })
+			expect(await plain.unlock("fixture-password")).toEqual({ ok: false, reason: "algorithm" })
+		}
+
+		const legacy = createPdfSignerApi(webcrypto.subtle, forge)
+
+		for (const name of ["legacy-rc2", "legacy-3des"]) {
+			await legacy.load({ kind: "file", file: p12(name) })
+			expect((await legacy.unlock("fixture-password")).ok).toBe(true)
+		}
+	})
+
+	it("refuses what it cannot sign with", async () => {
+		const api = createPdfSignerApi(webcrypto.subtle, forge)
 
 		await api.load({ kind: "file", file: p12("brainpool") })
 		expect(await api.unlock("fixture-password")).toEqual({ ok: false, reason: "algorithm" })
@@ -72,7 +86,7 @@ describe("pdf signer core", () => {
 			ok: false,
 			reason: "tooLarge"
 		})
-		await expect(createPdfSignerApi(webcrypto.subtle).sign(new Uint8Array(32))).rejects.toThrow("locked")
+		await expect(createPdfSignerApi(webcrypto.subtle, null).sign(new Uint8Array(32))).rejects.toThrow("locked")
 	})
 })
 

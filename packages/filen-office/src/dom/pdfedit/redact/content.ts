@@ -1,4 +1,5 @@
 import type * as Mupdf from "mupdf"
+import { concatMatrix, type PdfMatrix } from "../../../core/pdfedit/matrix"
 import {
 	parseContent,
 	sectionEnd,
@@ -8,14 +9,7 @@ import {
 	type PdfOperand,
 	type PdfOperation
 } from "../../../core/pdfedit/contentStream"
-import {
-	concatMatrix,
-	intersectRects,
-	rectsOverlap,
-	transformRect,
-	type RedactMatrix,
-	type RedactRect
-} from "../../../core/pdfedit/redactVerify"
+import { intersectRects, rectsOverlap, transformRect, type RedactRect } from "../../../core/pdfedit/redactVerify"
 
 // Content-stream passes MuPDF's redaction does not do: shadings painted under an area mark, the text alternatives of
 // marked content whose drawing a redaction changed, and (sanitize) content in hidden layers. Streams are rewritten by
@@ -25,7 +19,7 @@ const MAX_FORM_DEPTH = 12
 const PATH_PAINT = new Set(["n", "f", "F", "f*", "B", "B*", "b", "b*", "S", "s"])
 const PATH_BUILD = new Set(["m", "l", "c", "v", "y", "h", "re"])
 const TEXT_SHOW = new Set(["Tj", "'", '"', "TJ"])
-const IDENTITY: RedactMatrix = [1, 0, 0, 1, 0, 0]
+const IDENTITY: PdfMatrix = [1, 0, 0, 1, 0, 0]
 
 export function streamBytes(stream: Mupdf.PDFObject): Uint8Array {
 	return stream.readStream().asUint8Array().slice()
@@ -63,7 +57,7 @@ function numbers(operands: readonly PdfOperand[]): number[] {
 	return operands.map(operand => (operand.kind === "number" ? operand.value : Number.NaN))
 }
 
-function matrixOf(object: Mupdf.PDFObject): RedactMatrix {
+function matrixOf(object: Mupdf.PDFObject): PdfMatrix {
 	if (!object.isArray() || object.length !== 6) return IDENTITY
 
 	const values = [0, 1, 2, 3, 4, 5].map(index => object.get(index).asNumber())
@@ -134,7 +128,7 @@ function removeShadingsIn(
 	document: Mupdf.PDFDocument,
 	bytes: Uint8Array,
 	resources: Mupdf.PDFObject,
-	start: RedactMatrix,
+	start: PdfMatrix,
 	startClip: RedactRect | null,
 	areas: readonly RedactRect[],
 	depth: number
@@ -142,7 +136,7 @@ function removeShadingsIn(
 	const operations = parseContent(bytes)
 	const edits: ContentEdit[] = []
 	const replaced = new Map<string, Mupdf.PDFObject>()
-	const stack: { ctm: RedactMatrix; clip: RedactRect | null }[] = []
+	const stack: { ctm: PdfMatrix; clip: RedactRect | null }[] = []
 	let ctm = start
 	let clip = startClip
 	let path: RedactRect | null = null

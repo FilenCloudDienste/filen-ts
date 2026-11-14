@@ -85,11 +85,12 @@ async function upload(client: PdfEngineClient): Promise<Uint8Array> {
 	return bytes
 }
 
-// A plain save to the end, kept as a new version.
-async function saveVersion(client: PdfEngineClient, size: number): Promise<Uint8Array> {
+// A plain save to the end, kept as a new version. `removesContent`: what the save says of content removed since the
+// last one (the earlier-versions warning).
+async function saveVersion(client: PdfEngineClient, size: number, removesContent = false): Promise<Uint8Array> {
 	const begun = await client.call("saveBegin", { inputBytes: size, memory: PDF_DESKTOP_MEMORY, invalidateConfirmed: false })
 
-	expect(begun.status).toBe("written")
+	expect(begun).toMatchObject({ status: "written", removesContent })
 
 	const bytes = await upload(client)
 
@@ -147,7 +148,7 @@ describe("editing text in the engine", () => {
 			text = (await engine.client.call("text", { page: 0 })).lines.map(line => line.str).join("\n")
 			expect(text).toContain("Hello bold new world")
 
-			const saved = await saveVersion(engine.client, bytes.length)
+			const saved = await saveVersion(engine.client, bytes.length, true)
 			const read = await pageText(saved)
 
 			expect(read).toContain("Hello bold new world")
@@ -445,7 +446,10 @@ describe("signing with a certificate in the engine", () => {
 
 			if (name === undefined) throw new Error("no field")
 
-			await engine.client.call("dispatch", { command: "forms.setField", args: { page: 0, widget: name.id, value: { kind: "text", text: "Ada" } } })
+			await engine.client.call("dispatch", {
+				command: "forms.setField",
+				args: { page: 0, widget: name.id, value: { kind: "text", text: "Ada" } }
+			})
 			await engine.client.call("dispatch", { command: "sign.addField", args: fieldArgs(identity, 0, [320, 100, 520, 160]) })
 
 			// Not kept: the upload failed. The signature goes, the field's value stays.
@@ -467,6 +471,77 @@ describe("signing with a certificate in the engine", () => {
 			const values = await pdfjsValues(signed)
 
 			expect(values["name"]).toBe("Ada")
+		},
+		TIMEOUT
+	)
+
+	it(
+		"refuses to sign over new protection or a redaction not saved yet, which a plain Save writes and checks",
+		async () => {
+			const identity = await loadIdentity("p256")
+
+			for (const pending of ["protection", "redaction"] as const) {
+				const bytes = makePdf({ pages: 2 })
+				const engine = startEngine(bytes)
+
+				await engine.open()
+
+				if (pending === "protection") {
+					await engine.client.call("securitySet", { choice: { kind: "open", password: "secret" } })
+				} else {
+					await engine.client.call("dispatch", { command: "redact.markArea", args: { page: 1, rect: [60, 60, 500, 140] } })
+					const applied = await engine.client.call("dispatch", {
+						command: "redact.apply",
+						args: { page: 1, removeAnnotations: false, terms: [], sanitize: false }
+					})
+
+					expect(applied.state.redacting).toBe(true)
+				}
+
+				await engine.client.call("dispatch", { command: "sign.addField", args: fieldArgs(identity, 0, [320, 100, 520, 160]) })
+
+				const signer = signerPort(identity)
+				const refusal = await failureOf(
+					engine.client.call(
+						"signBegin",
+						{ inputBytes: bytes.length, memory: PDF_DESKTOP_MEMORY, digest: identity.scheme.digest, signer },
+						[signer]
+					)
+				)
+
+				expect(refusal).toMatchObject({ failure: "notAllowed", message: "saveFirst" })
+			}
+		},
+		TIMEOUT
+	)
+
+	it(
+		"signs on what the last save wrote, not on the file the document went on reading after it",
+		async () => {
+			const identity = await loadIdentity("p256")
+			const bytes = makePdf({ pages: 2 })
+			const engine = startEngine(bytes)
+
+			await engine.open()
+			await engine.client.call("dispatch", { command: "pages.delete", args: { pages: [1] } })
+
+			// A rewrite kept as a version, the document going on on the file it opened (its history kept).
+			const saved = await saveVersion(engine.client, bytes.length, true)
+
+			await engine.client.call("dispatch", { command: "sign.addField", args: fieldArgs(identity, 0, [320, 100, 520, 160]) })
+
+			const { bytes: signed } = await signSave(engine.client, identity, saved.length)
+
+			expect((await verifySigned(signed)).signatures.map(signature => signature.state)).toEqual(["unchanged"])
+
+			// The revision the signature was appended to is the saved rewrite (one page), never the opened file.
+			const text = new TextDecoder("latin1").decode(signed)
+			const firstEnd = text.indexOf("%%EOF") + "%%EOF".length
+			const first = new mupdf.PDFDocument(signed.slice(0, firstEnd))
+
+			expect(first.countPages()).toBe(1)
+			expect(new mupdf.PDFDocument(signed.slice()).countPages()).toBe(1)
+			first.destroy()
 		},
 		TIMEOUT
 	)

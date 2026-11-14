@@ -28,12 +28,26 @@ export function redactedCopyName(original: string, suffix: (n: number) => string
 	return editedCopyName(original, "pdf", suffix, taken)
 }
 
+// The keys a phrase is worded with: the failure reasons and the marks' labels.
+type PhraseKey = Extract<
+	RedactionKey,
+	`previewPdfRedactReason${string}` | `previewPdfRedactMark${"Text" | "TextUnknown" | "Area" | "Page"}`
+>
+
+// Every value a phrase's key may read (each reads only its own), so any of them is worded from one object.
+// (Mapped, not an interface: the catalog's typed options need its implicit index signature.)
+export type PhraseParams = Readonly<Record<"page", number> & Record<"term" | "text", string>>
+
 export interface Phrase {
-	readonly key: RedactionKey
-	readonly params: Readonly<Record<string, string | number>>
+	readonly key: PhraseKey
+	readonly params: PhraseParams
 }
 
-const TERM_PLACES: Readonly<Record<RedactionPlace, RedactionKey>> = {
+function phrase(key: PhraseKey, params: Partial<PhraseParams> = {}): Phrase {
+	return { key, params: { page: 0, term: "", text: "", ...params } }
+}
+
+const TERM_PLACES: Readonly<Record<RedactionPlace, PhraseKey>> = {
 	page: "previewPdfRedactReasonTermPage",
 	annotation: "previewPdfRedactReasonTermAnnotation",
 	field: "previewPdfRedactReasonTermField",
@@ -44,7 +58,7 @@ const TERM_PLACES: Readonly<Record<RedactionPlace, RedactionKey>> = {
 	file: "previewPdfRedactReasonTermFile"
 }
 
-const METADATA: Readonly<Record<Extract<RedactionFailure, { code: "metadata" }>["what"], RedactionKey>> = {
+const METADATA: Readonly<Record<Extract<RedactionFailure, { code: "metadata" }>["what"], PhraseKey>> = {
 	info: "previewPdfRedactReasonInfo",
 	xmp: "previewPdfRedactReasonXmp",
 	attachments: "previewPdfRedactReasonAttachments",
@@ -56,35 +70,35 @@ const METADATA: Readonly<Record<Extract<RedactionFailure, { code: "metadata" }>[
 export function failureReason(failure: RedactionFailure): Phrase {
 	switch (failure.code) {
 		case "revisions":
-			return { key: "previewPdfRedactReasonRevisions", params: {} }
+			return phrase("previewPdfRedactReasonRevisions")
 		case "text":
-			return { key: "previewPdfRedactReasonText", params: { page: failure.page } }
+			return phrase("previewPdfRedactReasonText", { page: failure.page })
 		case "image":
-			return { key: "previewPdfRedactReasonImage", params: { page: failure.page } }
+			return phrase("previewPdfRedactReasonImage", { page: failure.page })
 		case "drawing":
-			return { key: "previewPdfRedactReasonDrawing", params: { page: failure.page } }
+			return phrase("previewPdfRedactReasonDrawing", { page: failure.page })
 		case "term":
-			return {
-				key: failure.place === "page" && failure.page === undefined ? "previewPdfRedactReasonTermFile" : TERM_PLACES[failure.place],
-				params: { term: failure.term, page: failure.page ?? 0 }
-			}
+			return phrase(
+				failure.place === "page" && failure.page === undefined ? "previewPdfRedactReasonTermFile" : TERM_PLACES[failure.place],
+				{ term: failure.term, page: failure.page ?? 0 }
+			)
 		case "metadata":
-			return { key: METADATA[failure.what], params: {} }
+			return phrase(METADATA[failure.what])
 		case "hiddenData":
-			return { key: "previewPdfRedactReasonHiddenData", params: {} }
+			return phrase("previewPdfRedactReasonHiddenData")
 		case "unreadable":
-			return { key: "previewPdfRedactReasonUnreadable", params: { page: failure.page } }
+			return phrase("previewPdfRedactReasonUnreadable", { page: failure.page })
 	}
 }
 
 // How a mark reads in the review list; `text` is the marked text when the caller knows it.
 export function markLabel(mark: RedactionMark, text: string | undefined): Phrase {
-	if (mark.kind === "page") return { key: "previewPdfRedactMarkPage", params: {} }
-	if (mark.kind === "area") return { key: "previewPdfRedactMarkArea", params: {} }
+	if (mark.kind === "page") return phrase("previewPdfRedactMarkPage")
+	if (mark.kind === "area") return phrase("previewPdfRedactMarkArea")
 
 	return text === undefined || text.trim().length === 0
-		? { key: "previewPdfRedactMarkTextUnknown", params: {} }
-		: { key: "previewPdfRedactMarkText", params: { text: text.length > 60 ? `${text.slice(0, 59)}…` : text } }
+		? phrase("previewPdfRedactMarkTextUnknown")
+		: phrase("previewPdfRedactMarkText", { text: text.length > 60 ? `${text.slice(0, 59)}…` : text })
 }
 
 // The terms with a typed one added: trimmed, ignored when empty or already there (compared as typed).

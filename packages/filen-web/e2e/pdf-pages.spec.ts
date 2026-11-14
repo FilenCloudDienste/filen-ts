@@ -7,8 +7,9 @@ import { preview } from "@/locales/en/preview"
 
 // Page organisation in the PDF editor: the pages rail beside the document and the Organise grid of the Pages tab, by
 // keyboard only (focus moves with the arrows, Shift extends the selection, Alt+arrows move it, Mod+Alt+[ rotates it,
-// Delete deletes it, a polite live region says what happened), then Save makes a new version; Extract writes new files
-// beside the PDF; the crop tool crops the current page. Under the CSP, in every browser.
+// Delete deletes it, a polite live region says what happened), then Save makes a new version; Extract opens the pages as
+// a new unsaved PDF saved beside this one (or writes one file per page at once); the crop tool crops the current page.
+// Under the CSP, in every browser.
 test.describe.configure({ mode: "default" })
 
 const PDF_MIME = "application/pdf"
@@ -41,7 +42,7 @@ async function openPdf(page: Page, listbox: Locator, name: string): Promise<Loca
 
 	const dialog = page.getByRole("dialog").first()
 
-	await expect(dialog.locator("canvas.block").first()).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
+	await expect(dialog.getByRole("region", { name: /Page 1 of/u })).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
 
 	return dialog
 }
@@ -68,9 +69,12 @@ test("organises pages with the keyboard alone and saves them", async ({ page }) 
 		await uploadFiles(page, [{ name, mimeType: PDF_MIME, buffer: Buffer.from(threePages()) }], listbox)
 
 		const dialog = await openPdf(page, listbox, name)
-		// The pages rail beside the document shows every page.
+		// The pages rail beside the document opens from the Pages tab (closed until asked) and shows every page.
 		const rail = dialog.getByRole("listbox", { name: preview.previewPdfPagesRailLabel }).first()
 
+		await expect(rail).toHaveCount(0)
+		await dialog.getByRole("tab", { name: preview.previewPdfTabPages }).click()
+		await dialog.getByRole("button", { name: preview.previewPdfPagesRailToggle }).click()
 		await expect(rail.getByRole("option")).toHaveCount(3)
 
 		const grid = await openOrganise(dialog)
@@ -113,7 +117,67 @@ test("organises pages with the keyboard alone and saves them", async ({ page }) 
 	expect(cspViolations).toEqual([])
 })
 
-test("extracts pages into new files beside the PDF", async ({ page }) => {
+test("extracts pages as a new unsaved PDF, saved beside this one, and deletes them only once it is", async ({ page }) => {
+	test.slow()
+
+	await withScratchDirectory(page, "pdf-pages-draft", async ({ listbox, runId }) => {
+		const name = `e2e-pdf-draft-${runId}.pdf`
+		const base = name.slice(0, -".pdf".length)
+		const draftName = `${base} (pages 2-3).pdf`
+
+		await uploadFiles(page, [{ name, mimeType: PDF_MIME, buffer: Buffer.from(threePages()) }], listbox)
+
+		const dialog = await openPdf(page, listbox, name)
+		const extractPages = async (range: string, deleteAfter: boolean): Promise<Locator> => {
+			await dialog.getByRole("tab", { name: preview.previewPdfTabPages }).click()
+			await dialog.getByRole("button", { name: preview.previewPdfPagesExtract }).click()
+
+			const extract = page.getByRole("dialog", { name: preview.previewPdfExtractTitle })
+
+			await extract.getByRole("textbox", { name: preview.previewPdfExtractRangeLabel }).fill(range)
+
+			if (deleteAfter) await extract.getByRole("switch", { name: preview.previewPdfExtractDelete }).click()
+
+			await extract.getByRole("button", { name: preview.previewPdfExtractSubmit }).click()
+			await expect(extract).toBeHidden({ timeout: ENGINE_TIMEOUT_MS })
+
+			return page.getByRole("dialog", { name: range === "1" ? `${base} (page 1).pdf` : draftName })
+		}
+
+		// Dropped: closing the new PDF asks first; discarding it leaves every page and makes no file.
+		const dropped = await extractPages("1", true)
+
+		await expect(dropped.getByText(preview.previewPdfDraftUnsaved)).toBeVisible()
+		await expect(dropped.getByRole("region", { name: /Page 1 of 1$/u })).toBeVisible({ timeout: ENGINE_TIMEOUT_MS })
+		await dropped.getByRole("button", { name: "Close" }).first().click()
+
+		const confirm = page.getByRole("alertdialog", { name: preview.previewPdfDraftDiscardTitle })
+
+		await confirm.getByRole("button", { name: preview.previewPdfDiscardConfirm }).click()
+		await expect(dropped).toBeHidden()
+		await expect(dialog.getByRole("region", { name: /Page 1 of 3$/u })).toBeVisible()
+
+		// Saved: the new PDF opens with the extracted pages, is saved beside this one, and only then do they go from it.
+		const draft = await extractPages("2-3", true)
+
+		await expect(draft.getByRole("region", { name: /Page 1 of 2$/u })).toBeVisible({ timeout: ENGINE_TIMEOUT_MS })
+		await draft.getByRole("button", { name: preview.previewPdfSave, exact: true }).click()
+		await expect(draft).toBeHidden({ timeout: ENGINE_TIMEOUT_MS })
+		await expect(page.getByText(`Saved ${draftName}`)).toBeVisible()
+		await expect(dialog.getByRole("region", { name: /Page 1 of 1$/u })).toBeVisible({ timeout: ENGINE_TIMEOUT_MS })
+
+		// The PDF itself now has a change of its own to save or discard.
+		await page.keyboard.press("Escape")
+		await page
+			.getByRole("alertdialog", { name: preview.previewUnsavedChangesTitle })
+			.getByRole("button", { name: /Discard/u })
+			.click()
+		await expect(listbox.getByRole("option", { name: draftName })).toBeVisible({ timeout: ENGINE_TIMEOUT_MS })
+		await expect(listbox.getByRole("option", { name: `${base} (page 1).pdf` })).toHaveCount(0)
+	})
+})
+
+test("extracts one file per page straight away, beside the PDF", async ({ page }) => {
 	test.slow()
 
 	await withScratchDirectory(page, "pdf-pages-extract", async ({ listbox, runId }) => {

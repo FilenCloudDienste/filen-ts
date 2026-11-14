@@ -1,11 +1,9 @@
 // vite/ocr-assets-plugin.ts: the text recognition engine builds and language models, as this build serves them
-// (content-hashed, same origin), and the engine builds' glue (bundled by the OCR worker).
+// (content-hashed, same origin), and each engine build's glue (bundled by that build's OCR worker).
 declare module "virtual:ocr-assets" {
 	export const OCR_ASSETS: import("@filen/office/dom/pdfedit/ocr").OcrAssets
 }
 
-declare module "virtual:ocr-engines" {
-	export const OCR_ENGINE_FACTORIES: Readonly<
-		Record<import("@filen/office/dom/pdfedit/ocr").OcrEngineVariant, import("@filen/office/dom/pdfedit/ocr").TesseractFactory>
-	>
+declare module "virtual:ocr-engine/*" {
+	export const OCR_ENGINE_FACTORY: import("@filen/office/dom/pdfedit/ocr").TesseractFactory
 }

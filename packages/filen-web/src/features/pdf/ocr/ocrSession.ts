@@ -2,6 +2,7 @@ import { OCR_ASSETS } from "virtual:ocr-assets"
 import {
 	OcrClient,
 	runOcrPages,
+	type OcrEngineVariant,
 	type OcrModel,
 	type OcrPageEdit,
 	type OcrPageOutcome,
@@ -9,8 +10,12 @@ import {
 	type OcrRenderedPage,
 	type OcrRunReport
 } from "@filen/office/dom/pdfedit/ocr"
-import OcrWorker from "@/features/pdf/workers/ocr.worker.ts?worker"
+import OcrRelaxedSimdWorker from "@/features/pdf/workers/ocrRelaxedSimd.worker.ts?worker"
+import OcrSimdWorker from "@/features/pdf/workers/ocrSimd.worker.ts?worker"
+import OcrPlainWorker from "@/features/pdf/workers/ocrPlain.worker.ts?worker"
 import type { OcrLanguage } from "@/features/pdf/ocr/languages"
+import { ocrEngineVariant } from "@/features/pdf/ocr/ocrWorkerHost"
+import { transferList } from "@/lib/transferList"
 
 // Recognising text in a document: the OCR workers (one; two on a large Chromium machine), the picked languages'
 // models loaded into each, then @filen/office's pipeline over the pages with the engine's render, store flush and
@@ -55,12 +60,19 @@ export function ocrDownloadBytes(languages: readonly OcrLanguage[]): number {
 	return languages.reduce((sum, code) => sum + (OCR_ASSETS.languages[code]?.transferBytes ?? 0), 0)
 }
 
-function spawn(): OcrClient {
-	const worker = new OcrWorker({ name: "pdf-ocr" })
+// Each engine build's worker, which bundles only that build's glue.
+const OCR_WORKERS: Readonly<Record<OcrEngineVariant, new (options?: WorkerOptions) => Worker>> = {
+	"relaxedsimd-lstm": OcrRelaxedSimdWorker,
+	"simd-lstm": OcrSimdWorker,
+	lstm: OcrPlainWorker
+}
+
+function spawn(variant: OcrEngineVariant): OcrClient {
+	const worker = new OCR_WORKERS[variant]({ name: "pdf-ocr" })
 
 	return new OcrClient({
 		postMessage: (message, transfer) => {
-			worker.postMessage(message, { transfer: transfer as Transferable[] })
+			worker.postMessage(message, { transfer: transferList(transfer) })
 		},
 		addEventListener: (type: "message" | "error", listener: (event: { readonly data: unknown }) => void) => {
 			worker.addEventListener(type, event => {
@@ -98,7 +110,8 @@ export class OcrModelsError extends Error {
 }
 
 export async function recogniseDocument(options: RecogniseOptions): Promise<OcrRunReport> {
-	const clients = Array.from({ length: options.workers ?? ocrWorkerCount(currentOcrMachine()) }, spawn)
+	const variant = ocrEngineVariant()
+	const clients = Array.from({ length: options.workers ?? ocrWorkerCount(currentOcrMachine()) }, () => spawn(variant))
 	const stop = (): void => {
 		for (const client of clients) client.terminate()
 	}

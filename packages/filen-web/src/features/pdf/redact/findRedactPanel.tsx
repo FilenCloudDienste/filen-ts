@@ -23,6 +23,8 @@ export interface FindRedactPanelProps {
 	// The last search's results; null before any search.
 	findings: readonly RedactionFinding[] | null
 	searching: boolean
+	// The last search failed: said so (its findings are null), never shown as no matches.
+	failed: boolean
 	onSearch: (query: RedactionQuery, form: FindRedactForm) => void
 	onMark: (findings: readonly RedactionFinding[]) => void
 	onClose: () => void
@@ -36,7 +38,7 @@ const PRESETS: readonly {
 	{ preset: "phoneNumbers", label: "previewPdfFindRedactPhones" }
 ]
 
-export function FindRedactPanel({ findings, searching, onSearch, onMark, onClose }: FindRedactPanelProps) {
+export function FindRedactPanel({ findings, searching, failed, onSearch, onMark, onClose }: FindRedactPanelProps) {
 	const { t } = useTranslation("preview")
 	const id = useId()
 	const [form, setForm] = useState<FindRedactForm>(DEFAULT_FIND_FORM)
@@ -88,7 +90,7 @@ export function FindRedactPanel({ findings, searching, onSearch, onMark, onClose
 					id={`${id}-title`}
 					className="text-sm font-semibold"
 				>
-					{t("previewPdfFindRedactTitle")}
+					{t("previewPdfRedactFind")}
 				</h2>
 				<Button
 					variant="ghost"
@@ -190,28 +192,29 @@ export function FindRedactPanel({ findings, searching, onSearch, onMark, onClose
 			>
 				{searching ? t("previewPdfFindRedactSearching") : t("previewPdfFindRedactSearch")}
 			</Button>
-			{findings === null ? null : (
+			{/* Mounted empty, so the outcome of each search is announced when it is set. */}
+			<p
+				role="status"
+				className={failed ? "text-sm text-destructive" : "text-sm empty:hidden"}
+			>
+				{failed
+					? t("previewPdfFindRedactFailed")
+					: findings === null
+						? ""
+						: results.length === 0
+							? t("previewPdfFindRedactNoResults")
+							: t("previewPdfFindRedactResults", { count: results.length })}
+			</p>
+			{findings === null || results.length === 0 ? null : (
 				<div className="flex min-h-0 flex-1 flex-col gap-2">
-					<div
-						className="flex items-center justify-between gap-2 text-sm"
-						aria-live="polite"
-					>
-						<span>
-							{results.length === 0
-								? t("previewPdfFindRedactNoResults")
-								: t("previewPdfFindRedactResults", { count: results.length })}
-						</span>
-						{results.length > 0 ? (
-							<Option
-								id={`${id}-all`}
-								checked={chosen.length === results.length}
-								label={t("previewPdfFindRedactSelectAll")}
-								onChange={on => {
-									setUnselected(on ? new Set() : new Set(results.map(finding => finding.id)))
-								}}
-							/>
-						) : null}
-					</div>
+					<Option
+						id={`${id}-all`}
+						checked={chosen.length === results.length}
+						label={t("previewPdfFindRedactSelectAll")}
+						onChange={on => {
+							setUnselected(on ? new Set() : new Set(results.map(finding => finding.id)))
+						}}
+					/>
 					<ul className="min-h-0 flex-1 overflow-y-auto">
 						{results.map(finding => (
 							<li
@@ -233,22 +236,20 @@ export function FindRedactPanel({ findings, searching, onSearch, onMark, onClose
 								>
 									<span className="max-w-full truncate">{finding.text}</span>
 									<span className="text-xs text-muted-foreground">
-										{t("previewPdfFindRedactResultPage", { page: finding.page + 1 })}
+										{t("previewPdfPageNumber", { page: finding.page + 1 })}
 									</span>
 								</Label>
 							</li>
 						))}
 					</ul>
-					{results.length > 0 ? (
-						<Button
-							disabled={chosen.length === 0}
-							onClick={() => {
-								onMark(chosen)
-							}}
-						>
-							{t("previewPdfFindRedactMark", { count: chosen.length })}
-						</Button>
-					) : null}
+					<Button
+						disabled={chosen.length === 0}
+						onClick={() => {
+							onMark(chosen)
+						}}
+					>
+						{t("previewPdfFindRedactMark", { count: chosen.length })}
+					</Button>
 				</div>
 			)}
 		</section>

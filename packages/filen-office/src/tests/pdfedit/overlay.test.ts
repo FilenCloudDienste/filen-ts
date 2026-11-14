@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest"
 import * as mupdf from "mupdf"
 import { matchPdfFont } from "../../core/pdfedit/fontMatch"
 import { layoutTextOverlay } from "../../core/pdfedit/textLayout"
-import { PdfOverlayError, concatMatrix, fitOverlay, graftOverlay, invertMatrix } from "../../dom/pdfedit/overlay"
+import { PdfOverlayError, fitOverlay, graftOverlay } from "../../dom/pdfedit/overlay"
 import { nodeFontAssets } from "../sheetPdfFixtures"
 import { budget } from "../timing"
 import { LATIN_CONTENT, makeDocument, pageChars, pdfjsRuns, reopen, save, type PageSpec } from "./textEditFixtures"
@@ -128,15 +128,5 @@ describe("overlay graft", () => {
 		expect(() => graftOverlay(mupdf, document, 0, bytes)).toThrow(PdfOverlayError)
 		empty.destroy()
 		document.destroy()
-	})
-
-	it("composes and inverts matrices", () => {
-		const m = [2, 0.5, -1, 3, 10, -4] as const
-		const product = concatMatrix(m, invertMatrix(m))
-
-		product.forEach((value, index) => {
-			expect(value).toBeCloseTo([1, 0, 0, 1, 0, 0][index] ?? NaN, 9)
-		})
-		expect(() => invertMatrix([0, 0, 0, 0, 1, 1])).toThrow(PdfOverlayError)
 	})
 })

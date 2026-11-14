@@ -38,8 +38,6 @@ export const previewPdfOcr = {
 	previewPdfOcrDownloading: "Downloading languages… {{percent}}%",
 	/** Text recognition dialog — progress over the pages: pages finished of all */
 	previewPdfOcrProgress: "Page {{done}} of {{pages}}",
-	/** Text recognition dialog — one page's row in the progress list; {{page}} is its number */
-	previewPdfOcrPage: "Page {{page}}",
 	/** Text recognition dialog — a page waiting its turn */
 	previewPdfOcrPageWaiting: "Waiting",
 	/** Text recognition dialog — the page being recognised */
