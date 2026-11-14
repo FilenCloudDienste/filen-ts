@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest"
-import { linearGainFor, NO_TRACK_GAIN, parseGainDb, parsePeak, parseReplayGain, UNTAGGED_GAIN_DB, type TrackGain } from "@filen/shared"
+import {
+	linearGainFor,
+	NO_TRACK_GAIN,
+	parseGainDb,
+	parsePeak,
+	parseReplayGain,
+	replayGainFor,
+	UNTAGGED_GAIN_DB,
+	type TrackGain
+} from "@filen/shared"
 
 function db(linear: number): number {
 	return 20 * Math.log10(linear)
@@ -146,5 +155,16 @@ describe("linearGainFor", () => {
 	it("uses the other gain's peak when the chosen gain has none", () => {
 		expect(linearGainFor(gain({ trackDb: 6, albumPeak: 0.5 }), { album: false })).toBeCloseTo(1.995, 2)
 		expect(linearGainFor(gain({ trackDb: 12, albumPeak: 0.5 }), { album: false })).toBeCloseTo(2)
+	})
+})
+
+describe("replayGainFor", () => {
+	it("reports the peak of the gain it chose, for the overlap's headroom", () => {
+		expect(replayGainFor(gain({ trackDb: -3, trackPeak: 0.9, albumDb: -5, albumPeak: 0.99 }), { album: false }).peak).toBe(0.9)
+		expect(replayGainFor(gain({ trackDb: -3, trackPeak: 0.9, albumDb: -5, albumPeak: 0.99 }), { album: true }).peak).toBe(0.99)
+	})
+
+	it("reports no peak for an untagged track", () => {
+		expect(replayGainFor(NO_TRACK_GAIN, { album: false })).toEqual({ linear: 10 ** (UNTAGGED_GAIN_DB / 20), peak: null })
 	})
 })
