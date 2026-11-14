@@ -5,7 +5,6 @@ import { toggleSmoothTransitions, useSmoothTransitionsStore } from "@/features/a
 
 // Why smooth transitions are unavailable, in the words the player's toggle and the settings card share.
 export const SMOOTH_TRANSITIONS_UNAVAILABLE_KEYS = {
-	appleMobileGated: "smoothTransitionsUnavailableDevice",
 	degraded: "smoothTransitionsUnavailableDegraded",
 	sourceIneligible: "smoothTransitionsUnavailableSource"
 } as const satisfies Record<SmoothTransitionsUnavailable, string>

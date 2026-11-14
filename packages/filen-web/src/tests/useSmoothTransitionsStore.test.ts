@@ -33,7 +33,6 @@ import {
 	useSmoothTransitionsStore
 } from "@/features/audio/store/useSmoothTransitionsStore"
 import { DEFAULT_SMOOTH_TRANSITIONS_PREFS, SMOOTH_TRANSITIONS_PREFS_KEY } from "@/features/audio/lib/smoothTransitions.types"
-import { smoothTransitionsAvailabilityFor } from "@/features/audio/lib/smoothTransitionsAvailability"
 
 async function flush(): Promise<void> {
 	for (let i = 0; i < 20; i++) {
@@ -85,20 +84,13 @@ describe("smooth transition prefs", () => {
 		expect(JSON.parse(fakeStore.get("audio.v1.prefs") ?? "null")).toEqual({ shuffleEnabled: true, loopMode: "all" })
 	})
 
-	it("keeps the device gate over any runtime cause", () => {
+	it("records and clears a runtime cause", () => {
 		setSmoothTransitionsUnavailable("degraded")
 
 		expect(useSmoothTransitionsStore.getState().unavailable).toBe("degraded")
 
-		useSmoothTransitionsStore.setState({ unavailable: "appleMobileGated" })
 		setSmoothTransitionsUnavailable(null)
 
-		expect(useSmoothTransitionsStore.getState().unavailable).toBe("appleMobileGated")
-	})
-
-	it("gates Apple mobile until the hardware gate passes", () => {
-		expect(smoothTransitionsAvailabilityFor(true, false)).toBe("appleMobileGated")
-		expect(smoothTransitionsAvailabilityFor(true, true)).toBe("available")
-		expect(smoothTransitionsAvailabilityFor(false, false)).toBe("available")
+		expect(useSmoothTransitionsStore.getState().unavailable).toBeNull()
 	})
 })

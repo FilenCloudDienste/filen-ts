@@ -23,7 +23,6 @@ import { createThumbnailUrlCache } from "@/features/drive/lib/thumbnailUrlCache"
 import { backfillTrackDuration, getTrackTags } from "@/features/audio/store/useTrackTagsStore"
 import { COVER_THUMBNAIL_TYPE } from "@/features/audio/lib/trackTags.logic"
 import type { AudioOutput, ElementGain } from "@/features/audio/lib/audioOutput"
-import type { SmoothTransitionsAvailability } from "@/features/audio/lib/smoothTransitionsAvailability"
 import type { GetTrackEdges, SmoothTransitionsPrefs, SourceRoute, TrackEdges } from "@/features/audio/lib/smoothTransitions.types"
 import {
 	committedValid,
@@ -149,7 +148,6 @@ export interface SmoothTransitionsDeps {
 	getEdges: GetTrackEdges
 	// Re-reads a parsed track's ReplayGain (records parsed before it was read carry none).
 	refreshGain?: (track: QueueTrack) => void
-	availability: () => SmoothTransitionsAvailability
 	// WebKit: MediaSource sessions cannot be routed (they play as silence).
 	webkit: boolean
 	// Whether the call runs inside a user gesture, so a context created now may start.
@@ -477,11 +475,11 @@ export class AudioEngine {
 		return useSmoothTransitionsStore.getState().prefs
 	}
 
-	// The feature applies: present, on, allowed on this device, and the output has not failed this session.
+	// The feature applies: present, on, and the output has not failed this session.
 	private smoothOn(): boolean {
 		const smooth = this.deps.smoothTransitions
 
-		return smooth !== undefined && !this.degraded && this.prefs().enabled && smooth.availability() === "available"
+		return smooth !== undefined && !this.degraded && this.prefs().enabled
 	}
 
 	private unlockOutput(): void {

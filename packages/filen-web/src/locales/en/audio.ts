@@ -37,9 +37,6 @@ export const audio = {
 	 *  the blend length; {{count}} is a whole number of seconds */
 	smoothTransitionsTooltip_one: "Smooth transitions · {{count}} s",
 	smoothTransitionsTooltip_other: "Smooth transitions · {{count}} s",
-	/** Why blending each track into the next (a crossfade, never song picking) can't be used: this device isn't
-	 *  supported yet */
-	smoothTransitionsUnavailableDevice: "Not available on this device yet.",
 	/** Why blending each track into the next (a crossfade, never song picking) stopped: the device's audio mixer failed,
 	 *  so tracks switch at once until the page is reloaded */
 	smoothTransitionsUnavailableDegraded: "Off until you reload: this device stopped the audio mixer.",

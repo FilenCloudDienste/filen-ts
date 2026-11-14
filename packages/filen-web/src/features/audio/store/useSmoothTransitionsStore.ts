@@ -12,7 +12,6 @@ import {
 	type SmoothTransitionsPrefs,
 	type SmoothTransitionsUnavailable
 } from "@/features/audio/lib/smoothTransitions.types"
-import { smoothTransitionsAvailability } from "@/features/audio/lib/smoothTransitionsAvailability"
 
 // Smooth-transition prefs (persisted, in a kv row of their own so the shuffle/loop blob stays untouched) and why the
 // feature is unavailable right now (in memory: the engine sets it, the UI reads it).
@@ -64,7 +63,7 @@ interface SmoothTransitionsState {
 
 export const useSmoothTransitionsStore = create<SmoothTransitionsState>(() => ({
 	prefs: DEFAULT_SMOOTH_TRANSITIONS_PREFS,
-	unavailable: smoothTransitionsAvailability() === "appleMobileGated" ? "appleMobileGated" : null
+	unavailable: null
 }))
 
 let hydrate: Promise<void> | null = null
@@ -103,11 +102,9 @@ export function toggleSmoothTransitions(): void {
 	setSmoothTransitionsPrefs({ enabled: !useSmoothTransitionsStore.getState().prefs.enabled })
 }
 
-// Written by the engine. The device gate holds for the page's life; a runtime cause never replaces it.
+// Written by the engine.
 export function setSmoothTransitionsUnavailable(cause: SmoothTransitionsUnavailable | null): void {
-	const current = useSmoothTransitionsStore.getState().unavailable
-
-	if (current === "appleMobileGated" || current === cause) {
+	if (useSmoothTransitionsStore.getState().unavailable === cause) {
 		return
 	}
 

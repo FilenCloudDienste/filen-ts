@@ -9,7 +9,6 @@ import { mediaSessionOwners } from "@/lib/media/mediaSessionOwner"
 import { audioSeekTarget } from "@/features/audio/lib/barKeys"
 import { createAudioOutput, type AudioContextLike, type AudioSessionLike } from "@/features/audio/lib/audioOutput"
 import { getTrackEdges, resetTrackEdges } from "@/features/audio/lib/trackEdges"
-import { smoothTransitionsAvailability } from "@/features/audio/lib/smoothTransitionsAvailability"
 import { hydrateSmoothTransitionsPrefs } from "@/features/audio/store/useSmoothTransitionsStore"
 import { isWebKitEngine } from "@/lib/appleMobile"
 import { desktopBridge } from "@/lib/desktop"
@@ -77,7 +76,6 @@ export const audioEngine = new AudioEngine({
 		refreshGain: track => {
 			trackMetadata.request(track, { priority: true, refreshGain: true })
 		},
-		availability: smoothTransitionsAvailability,
 		webkit,
 		inGesture
 	}

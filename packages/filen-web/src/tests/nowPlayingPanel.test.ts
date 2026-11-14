@@ -166,16 +166,6 @@ describe("NowPlayingPanel — controls", () => {
 		}
 	})
 
-	it("shows no smooth transitions toggle on a device that can never blend", () => {
-		useAudioStore.setState({ queue: [track("t1", "one.mp3")], currentIndex: 0 })
-		useSmoothTransitionsStore.setState({ unavailable: "appleMobileGated" })
-
-		render(createElement(NowPlayingPanel))
-
-		expect(smoothToggle()).toBeNull()
-		expect(screen.getByRole("button", { name: "Shuffle" })).toBeTruthy()
-	})
-
 	it("shows whether tracks blend now, and turns the kept pref off while they can't", () => {
 		useAudioStore.setState({ queue: [track("t1", "one.mp3")], currentIndex: 0 })
 		useSmoothTransitionsStore.setState({ prefs: { ...DEFAULT_SMOOTH_TRANSITIONS_PREFS, enabled: true } })

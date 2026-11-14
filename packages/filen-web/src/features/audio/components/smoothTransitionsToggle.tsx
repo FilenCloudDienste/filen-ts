@@ -15,8 +15,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { cn } from "@filen/shared"
 
 // Beside Shuffle and Repeat, in their style, pressed while tracks blend. The tooltip names the blend length; while the
-// feature is unavailable it says why instead, and the button stays hoverable (aria-disabled) so it can. A device that
-// can never blend gets no toggle: a touch screen has no tooltip, so Settings › Audio says why.
+// feature is unavailable it says why instead, and the button stays hoverable (aria-disabled) so it can.
 export function SmoothTransitionsToggleButton({ className }: { className?: string }) {
 	const { t } = useTranslation("audio")
 	const { enabled, fadeSeconds, unavailable } = useSmoothTransitionsStore(
@@ -27,10 +26,6 @@ export function SmoothTransitionsToggleButton({ className }: { className?: strin
 		}))
 	)
 	const reasonId = useId()
-
-	if (unavailable === "appleMobileGated") {
-		return null
-	}
 
 	const reason = unavailable === null ? null : t(SMOOTH_TRANSITIONS_UNAVAILABLE_KEYS[unavailable])
 

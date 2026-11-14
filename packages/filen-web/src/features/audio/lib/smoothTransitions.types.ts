@@ -3,9 +3,6 @@ import type { QueueTrack } from "@/features/audio/store/audioQueue"
 // The shared contract of smooth transitions (a crossfade between tracks, smart edges and loudness matching): the
 // prefs, the analysis records and the seams between the engine, the Web Audio output and the edge analysis.
 
-// iOS and iPadOS stay off until the locked-iPhone hardware gate passes: background Web Audio there is the risk.
-export const SMOOTH_TRANSITIONS_APPLE_MOBILE = false
-
 export const SMOOTH_TRANSITIONS_PREFS_KEY = "audio.v1.smoothTransitions"
 
 export const FADE_SECONDS_MIN = 1
@@ -33,9 +30,9 @@ export const DEFAULT_SMOOTH_TRANSITIONS_PREFS: SmoothTransitionsPrefs = {
 	matchLoudness: true
 }
 
-// Why the feature cannot run right now: the device is gated, the device stopped the mixer this session, or the
-// browser cannot route the playing source through Web Audio.
-export type SmoothTransitionsUnavailable = "appleMobileGated" | "degraded" | "sourceIneligible"
+// Why the feature cannot run right now: the device stopped the mixer this session, or the browser cannot route the
+// playing source through Web Audio.
+export type SmoothTransitionsUnavailable = "degraded" | "sourceIneligible"
 
 // How a track's source reached the element: the file as it is through the service worker, its audio decoded into a
 // WAV stream the service worker serves, or a MediaSource session (no service worker).

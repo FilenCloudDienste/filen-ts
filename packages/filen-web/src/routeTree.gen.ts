@@ -34,7 +34,6 @@ import { Route as FUuidRouteImport } from './routes/f.$uuid'
 import { Route as ResetTokenRouteImport } from './routes/reset.$token'
 import { Route as AppChatsIndexRouteImport } from './routes/_app/chats.index'
 import { Route as AppChatsUuidRouteImport } from './routes/_app/chats.$uuid'
-import { Route as AppDevSmoothTransitionsSpikeRouteImport } from './routes/_app/dev/smooth-transitions-spike'
 import { Route as AppDriveSplatRouteImport } from './routes/_app/drive.$'
 import { Route as AppMountsIndexRouteImport } from './routes/_app/mounts.index'
 import { Route as AppMountsRoleRouteImport } from './routes/_app/mounts.$role'
@@ -190,12 +189,6 @@ const AppChatsUuidRoute = AppChatsUuidRouteImport.update({
   path: '/$uuid',
   getParentRoute: () => AppChatsRoute,
 } as any)
-const AppDevSmoothTransitionsSpikeRoute =
-  AppDevSmoothTransitionsSpikeRouteImport.update({
-    id: '/dev/smooth-transitions-spike',
-    path: '/dev/smooth-transitions-spike',
-    getParentRoute: () => AppRouteRoute,
-  } as any)
 const AppDriveSplatRoute = AppDriveSplatRouteImport.update({
   id: '/drive/$',
   path: '/drive/$',
@@ -371,7 +364,6 @@ export interface FileRoutesByFullPath {
   '/f/$uuid': typeof FUuidRoute
   '/reset/$token': typeof ResetTokenRoute
   '/chats/$uuid': typeof AppChatsUuidRoute
-  '/dev/smooth-transitions-spike': typeof AppDevSmoothTransitionsSpikeRoute
   '/drive/$': typeof AppDriveSplatRoute
   '/mounts/$role': typeof AppMountsRoleRoute
   '/notes/$uuid': typeof AppNotesUuidRoute
@@ -422,7 +414,6 @@ export interface FileRoutesByTo {
   '/f/$uuid': typeof FUuidRoute
   '/reset/$token': typeof ResetTokenRoute
   '/chats/$uuid': typeof AppChatsUuidRoute
-  '/dev/smooth-transitions-spike': typeof AppDevSmoothTransitionsSpikeRoute
   '/drive/$': typeof AppDriveSplatRoute
   '/mounts/$role': typeof AppMountsRoleRoute
   '/notes/$uuid': typeof AppNotesUuidRoute
@@ -481,7 +472,6 @@ export interface FileRoutesById {
   '/f/$uuid': typeof FUuidRoute
   '/reset/$token': typeof ResetTokenRoute
   '/_app/chats/$uuid': typeof AppChatsUuidRoute
-  '/_app/dev/smooth-transitions-spike': typeof AppDevSmoothTransitionsSpikeRoute
   '/_app/drive/$': typeof AppDriveSplatRoute
   '/_app/mounts/$role': typeof AppMountsRoleRoute
   '/_app/notes/$uuid': typeof AppNotesUuidRoute
@@ -540,7 +530,6 @@ export interface FileRouteTypes {
     | '/f/$uuid'
     | '/reset/$token'
     | '/chats/$uuid'
-    | '/dev/smooth-transitions-spike'
     | '/drive/$'
     | '/mounts/$role'
     | '/notes/$uuid'
@@ -591,7 +580,6 @@ export interface FileRouteTypes {
     | '/f/$uuid'
     | '/reset/$token'
     | '/chats/$uuid'
-    | '/dev/smooth-transitions-spike'
     | '/drive/$'
     | '/mounts/$role'
     | '/notes/$uuid'
@@ -649,7 +637,6 @@ export interface FileRouteTypes {
     | '/f/$uuid'
     | '/reset/$token'
     | '/_app/chats/$uuid'
-    | '/_app/dev/smooth-transitions-spike'
     | '/_app/drive/$'
     | '/_app/mounts/$role'
     | '/_app/notes/$uuid'
@@ -871,13 +858,6 @@ declare module '@tanstack/react-router' {
       fullPath: '/chats/$uuid'
       preLoaderRoute: typeof AppChatsUuidRouteImport
       parentRoute: typeof AppChatsRoute
-    }
-    '/_app/dev/smooth-transitions-spike': {
-      id: '/_app/dev/smooth-transitions-spike'
-      path: '/dev/smooth-transitions-spike'
-      fullPath: '/dev/smooth-transitions-spike'
-      preLoaderRoute: typeof AppDevSmoothTransitionsSpikeRouteImport
-      parentRoute: typeof AppRouteRoute
     }
     '/_app/drive/$': {
       id: '/_app/drive/$'
@@ -1223,7 +1203,6 @@ interface AppRouteRouteChildren {
   AppTransfersRoute: typeof AppTransfersRoute
   AppTrashRoute: typeof AppTrashRoute
   AppVideosRoute: typeof AppVideosRouteWithChildren
-  AppDevSmoothTransitionsSpikeRoute: typeof AppDevSmoothTransitionsSpikeRoute
   AppDriveSplatRoute: typeof AppDriveSplatRoute
   AppSharedInSplatRoute: typeof AppSharedInSplatRoute
   AppSharedOutSplatRoute: typeof AppSharedOutSplatRoute
@@ -1244,7 +1223,6 @@ const AppRouteRouteChildren: AppRouteRouteChildren = {
   AppTransfersRoute: AppTransfersRoute,
   AppTrashRoute: AppTrashRoute,
   AppVideosRoute: AppVideosRouteWithChildren,
-  AppDevSmoothTransitionsSpikeRoute: AppDevSmoothTransitionsSpikeRoute,
   AppDriveSplatRoute: AppDriveSplatRoute,
   AppSharedInSplatRoute: AppSharedInSplatRoute,
   AppSharedOutSplatRoute: AppSharedOutSplatRoute,

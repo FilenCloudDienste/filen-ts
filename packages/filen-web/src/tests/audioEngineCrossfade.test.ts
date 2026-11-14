@@ -287,7 +287,6 @@ interface HarnessOptions {
 	smooth?: boolean
 	routable?: boolean
 	webkit?: boolean
-	availability?: "available" | "appleMobileGated"
 	route?: SourceRoute
 }
 
@@ -305,7 +304,6 @@ function makeHarness(options: HarnessOptions = {}): Harness {
 	const smooth: SmoothTransitionsDeps = {
 		output,
 		getEdges: t => Promise.resolve(edges.get(t.uuid) ?? null),
-		availability: () => options.availability ?? "available",
 		webkit: options.webkit ?? false,
 		inGesture: () => true
 	}
@@ -449,16 +447,6 @@ describe("smooth transitions off", () => {
 
 		expect(useAudioStore.getState().currentIndex).toBe(1)
 		expect(warm.plays).toBe(1)
-	})
-
-	it("starts no output on a device that is gated", async () => {
-		enable()
-
-		const h = makeHarness({ availability: "appleMobileGated" })
-		const { out } = await start(h)
-
-		expect(h.output.unlocks).toBe(0)
-		expect(out.gain).toBeNull()
 	})
 })
 
