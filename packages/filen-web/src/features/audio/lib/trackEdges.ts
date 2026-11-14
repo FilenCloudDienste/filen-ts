@@ -1,6 +1,6 @@
 import * as Comlink from "comlink"
 import { InFlight } from "@filen/shared"
-import { kvDelete, kvGetJson } from "@/lib/storage/adapter"
+import { kvGetJson } from "@/lib/storage/adapter"
 import { kvSetJsonQuiet } from "@/lib/storage/kvBestEffort"
 import { log } from "@/lib/log"
 import { rangeReads, type RangeReadBudget } from "@/lib/media/rangeReads"
@@ -29,7 +29,6 @@ const MEMORY_TRACKS = 8
 export interface TrackEdgesDeps {
 	readRecord: (uuid: string) => Promise<TrackEdgesRecord | null>
 	writeRecord: (uuid: string, record: TrackEdgesRecord) => void
-	deleteRecord: (uuid: string) => Promise<void>
 	// The worker's answer; rejects when the bytes did not arrive or the signal aborted. Called once the first
 	// window's permit is held; each window takes one from `permits`.
 	analyze: (track: QueueTrack, signal: AbortSignal, permits: WindowPermits) => Promise<EdgeAnalysis>
@@ -163,14 +162,6 @@ export class TrackEdgesService {
 		}
 
 		this.analyses.clear()
-	}
-
-	public async delete(uuids: readonly string[]): Promise<void> {
-		for (const uuid of uuids) {
-			this.memory.delete(uuid)
-		}
-
-		await Promise.all(uuids.map(uuid => this.deps.deleteRecord(uuid).catch(() => undefined)))
 	}
 
 	private remember(uuid: string, edges: TrackEdges): void {
@@ -316,7 +307,6 @@ export const trackEdges = new TrackEdgesService({
 	writeRecord: (uuid, record) => {
 		void kvSetJsonQuiet(trackEdgesKey(uuid), record, "audio", "track edges")
 	},
-	deleteRecord: uuid => kvDelete(trackEdgesKey(uuid)),
 	analyze: analyzeInWorker,
 	reads: rangeReads,
 	now: () => Date.now()
@@ -326,8 +316,4 @@ export const getTrackEdges: GetTrackEdges = (track, route, signal, options) => t
 
 export function resetTrackEdges(): void {
 	trackEdges.reset()
-}
-
-export function deleteTrackEdges(uuids: readonly string[]): Promise<void> {
-	return trackEdges.delete(uuids)
 }

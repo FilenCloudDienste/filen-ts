@@ -60,11 +60,6 @@ function makeService(overrides: Partial<TrackEdgesDeps> = {}) {
 		writeRecord: vi.fn<TrackEdgesDeps["writeRecord"]>((uuid, record) => {
 			kv.set(uuid, record)
 		}),
-		deleteRecord: vi.fn<TrackEdgesDeps["deleteRecord"]>(uuid => {
-			kv.delete(uuid)
-
-			return Promise.resolve()
-		}),
 		analyze: vi.fn<TrackEdgesDeps["analyze"]>(() => Promise.resolve(OK)),
 		reads: new RangeReadBudget(6, 2, 0),
 		now: () => 7
@@ -344,17 +339,6 @@ describe("TrackEdgesService", () => {
 		await service.get(track("a"), "direct", live())
 
 		expect(deps.readRecord).toHaveBeenCalledOnce()
-	})
-
-	it("deletes rows and their memory", async () => {
-		const { service, kv, deps } = makeService()
-
-		await service.get(track("a"), "direct", live())
-		await service.delete(["a"])
-
-		expect(kv.has("a")).toBe(false)
-		expect(await service.get(track("a"), "direct", live(), { cachedOnly: true })).toBeNull()
-		expect(deps.deleteRecord).toHaveBeenCalledWith("a")
 	})
 
 	it("takes a permit per window, letting a cover read go between the windows", async () => {
