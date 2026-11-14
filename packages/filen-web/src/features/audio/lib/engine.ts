@@ -1131,7 +1131,8 @@ export class AudioEngine {
 
 	// ── Smooth transitions: the output watchdog ──
 
-	private checkOutput(): void {
+	// `sample` is the current element's, when the caller just read it.
+	private checkOutput(sample?: ElementSample): void {
 		const smooth = this.deps.smoothTransitions
 		const element = this.element
 
@@ -1142,7 +1143,7 @@ export class AudioEngine {
 		const step = watchdogStep(this.watchdog, {
 			wallMs: this.now(),
 			contextSeconds: smooth.output.contextSeconds,
-			elementMs: element.sample().currentTimeMs,
+			elementMs: (sample ?? element.sample()).currentTimeMs,
 			contextState: smooth.output.contextState,
 			wantPlaying: useAudioStore.getState().status === "playing",
 			selfSuspended: smooth.output.selfSuspended
@@ -1595,7 +1596,7 @@ export class AudioEngine {
 				this.armTransitionTimer()
 			}
 
-			this.checkOutput()
+			this.checkOutput(live)
 		}
 
 		const now = this.now()
