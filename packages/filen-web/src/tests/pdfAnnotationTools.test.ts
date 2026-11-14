@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
-import type { PdfAnnotationInfo } from "@filen/office/core/pdfedit/annotations"
+import type { PdfAnnotationInfo, PdfCommentThread } from "@filen/office/core/pdfedit/annotations"
 import type { PdfCommandResult, PdfEditState } from "@filen/office/core/pdfedit"
 import { PageViewport, type PdfEditSessionModel, type PdfEditSnapshot } from "@filen/office/react/pdfedit"
 import { fakeToolContext } from "@/tests/support/pdfToolContext"
@@ -350,6 +350,45 @@ describe("the annotation store", () => {
 		store.selectRef({ page: 0, id: 7 })
 		await flush()
 		expect(store.getState().selected?.id).toBe(7)
+	})
+
+	it("reads the threads again when a comment was posted while they were first read", async () => {
+		const pages = new Map<number, PdfAnnotationInfo[]>([[0, []]])
+		const session = fakeSession(pages, [])
+		const thread = { page: 0, root: { page: 0, id: 7 } } as unknown as PdfCommentThread
+		let posted = false
+		const pending: (() => void)[] = []
+		const reads: number[] = []
+
+		// The engine answers in order, each "comments" call with the threads as they were when it was asked.
+		const call = (op: string): Promise<unknown> => {
+			if (op !== "comments") return Promise.resolve([])
+
+			const answer = posted ? [thread] : []
+
+			reads.push(answer.length)
+
+			return new Promise(resolve => {
+				pending.push(() => {
+					resolve(answer)
+				})
+			})
+		}
+
+		const live = { ...session, engine: { call } }
+		const store = new PdfAnnotationStore()
+
+		store.bind(live as unknown as PdfEditSessionModel)
+		// Composing reads every page's threads; the comment is posted before that read answers.
+		store.compose({ page: 0, rect: [0, 0, 10, 10] } as unknown as Parameters<typeof store.compose>[0])
+		posted = true
+		session.change([0])
+		pending.shift()?.()
+		await flush()
+		expect(reads).toEqual([0, 1])
+		pending.shift()?.()
+		await flush()
+		expect(store.commentThreads()).toEqual([thread])
 	})
 
 	it("joins an ink stroke to the drawing only while nothing else changed", () => {

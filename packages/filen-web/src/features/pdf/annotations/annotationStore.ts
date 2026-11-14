@@ -254,6 +254,9 @@ export class PdfAnnotationStore {
 
 		if (pages === null) this.threadsAsked = true
 
+		// The revision read: a change made while every page's threads are read is not in them, and is not read on its
+		// own either (follow reads touched pages only once there are threads), so the read starts again.
+		const asOf = this.shown
 		const read = await session.engine.call("comments", pages === null ? {} : { pages }).catch(() => null)
 
 		if (session !== this.session || read === null) {
@@ -270,6 +273,8 @@ export class PdfAnnotationStore {
 
 		this.threads = threads
 		this.changed()
+
+		if (pages === null && this.shown !== asOf) void this.readThreads(null)
 	}
 
 	// --- Attachments ---
