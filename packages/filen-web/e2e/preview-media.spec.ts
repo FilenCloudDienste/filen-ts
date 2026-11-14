@@ -159,10 +159,12 @@ test("image/video/audio previews stream over the SW's inline route: range-seekab
 	// Paused first, and the seek asserted POSITIVELY: while the clip is playing currentTime climbs on its
 	// own, so an advance would prove nothing, and "the heading is still there" is instantly true whether
 	// the player consumed the key or nothing did at all. Paused, only a real seek moves the playhead.
+	// At its start, too: the step is 10 s, and from past the middle of the 20 s clip it would land on the end.
 	await video.evaluate(el => {
 		const videoEl = el as HTMLVideoElement
 
 		videoEl.pause()
+		videoEl.currentTime = 0
 		videoEl.focus()
 	})
 	await expect
