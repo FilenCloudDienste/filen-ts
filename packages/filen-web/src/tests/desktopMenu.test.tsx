@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { describe, expect, it, vi } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { renderHook } from "@testing-library/react"
 import type { DesktopMenuAction } from "@filen/shared/desktop"
 
@@ -8,6 +8,7 @@ const desktop = vi.hoisted(() => {
 	const state = { listener: null as ((action: string) => void) | null }
 	const app = {
 		setMenuShortcuts: vi.fn(),
+		setSmoothTransitions: vi.fn(),
 		onMenuAction: vi.fn((listener: (action: string) => void) => {
 			state.listener = listener
 
@@ -20,9 +21,20 @@ const desktop = vi.hoisted(() => {
 
 vi.mock("@/lib/desktop", () => ({ desktopBridge: () => desktop.bridge }))
 vi.mock("@/lib/storage/kvBestEffort", () => ({ kvLoadOnce: () => () => Promise.resolve(), kvSetJsonQuiet: vi.fn() }))
+vi.mock("@/lib/storage/preference", () => ({
+	kvPreference: () => ({ get: () => new Promise(() => undefined), set: () => Promise.resolve() })
+}))
+
+const toast = vi.hoisted(() => ({ info: vi.fn() }))
+
+vi.mock("sonner", () => ({ toast }))
 
 const { registerAllActions } = await import("@/lib/keymap/actions")
 const { useMenuAction } = await import("@/lib/keymap/desktopMenu")
+const { useSmoothTransitionsStore } = await import("@/features/audio/store/useSmoothTransitionsStore")
+const { toggleSmoothTransitionsByUser } = await import("@/features/audio/lib/smoothTransitionsUi")
+const { reportSmoothTransitions } = await import("@/features/desktop/lib/mediaTransport")
+const { DEFAULT_SMOOTH_TRANSITIONS_PREFS } = await import("@/features/audio/lib/smoothTransitions.types")
 
 registerAllActions()
 
@@ -115,5 +127,57 @@ describe("desktop menu actions", () => {
 
 		expect(settings).toHaveBeenCalledOnce()
 		expect(shortcuts).toHaveBeenCalledOnce()
+	})
+})
+
+describe("desktop menu Smooth Transitions", () => {
+	type Unavailable = ReturnType<typeof useSmoothTransitionsStore.getState>["unavailable"]
+
+	function setSmooth(enabled: boolean, unavailable: Unavailable): void {
+		useSmoothTransitionsStore.setState({ prefs: { ...DEFAULT_SMOOTH_TRANSITIONS_PREFS, enabled }, unavailable })
+	}
+
+	afterEach(() => {
+		setSmooth(DEFAULT_SMOOTH_TRANSITIONS_PREFS.enabled, null)
+		vi.clearAllMocks()
+	})
+
+	it("reports whether tracks blend now, only on a change, and off when stopped", () => {
+		setSmooth(false, null)
+
+		const stop = reportSmoothTransitions()
+
+		setSmooth(true, null)
+		setSmooth(true, null)
+		setSmooth(true, "degraded")
+		setSmooth(false, "degraded")
+		setSmooth(true, null)
+		stop()
+
+		expect(desktop.bridge.app.setSmoothTransitions.mock.calls).toEqual([[true], [false], [true], [false]])
+	})
+
+	it("says why a click cannot turn it on, and keeps it off", () => {
+		setSmooth(false, "degraded")
+		renderHook(() => {
+			useMenuAction("audio.smoothTransitions", toggleSmoothTransitionsByUser)
+		})
+		click("audio.smoothTransitions")
+
+		expect(useSmoothTransitionsStore.getState().prefs.enabled).toBe(false)
+		expect(toast.info).toHaveBeenCalledWith("Off until you reload: this device stopped the audio mixer.", {
+			id: "smooth-transitions-unavailable"
+		})
+	})
+
+	it("turns the stored pref off while unavailable, without a notice", () => {
+		setSmooth(true, "sourceIneligible")
+		renderHook(() => {
+			useMenuAction("audio.smoothTransitions", toggleSmoothTransitionsByUser)
+		})
+		click("audio.smoothTransitions")
+
+		expect(useSmoothTransitionsStore.getState().prefs.enabled).toBe(false)
+		expect(toast.info).not.toHaveBeenCalled()
 	})
 })

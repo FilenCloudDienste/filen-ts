@@ -12,7 +12,7 @@ import type { TypedChatSocketEvent } from "@/features/chats/lib/socketHandlers"
 import { chatMessageNotification, type NotificationContent } from "@/features/desktop/lib/notifications"
 import { loadDesktopPrefs, useDesktopPrefs } from "@/features/desktop/lib/prefs"
 import { isDesktopLocked } from "@/features/desktop/lib/lock"
-import { reportMediaTransport } from "@/features/desktop/lib/mediaTransport"
+import { reportMediaTransport, reportSmoothTransitions } from "@/features/desktop/lib/mediaTransport"
 import { performLogout } from "@/features/shell/lib/performLogout"
 import { loadSync } from "@/features/sync/lib/syncStore"
 import { loadMounts } from "@/features/mounts/lib/mountsStore"
@@ -68,8 +68,10 @@ export function DesktopHost(): null {
 		}
 	}, [])
 
-	// The macOS Controls menu and the tray offer the audio player's transport while it has a queue.
+	// The macOS Controls menu and the tray offer the audio player's transport while it has a queue, Smooth Transitions
+	// checked while tracks blend.
 	useEffect(reportMediaTransport, [])
+	useEffect(reportSmoothTransitions, [])
 
 	// Uploads and downloads the desktop app's native host runs, in the transfers store for this page's whole life.
 	useEffect(startNativeTransfersFeed, [])
