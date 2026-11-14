@@ -24,7 +24,7 @@ async function findAndMark(page: import("@playwright/test").Page, dialog: import
 	await dialog.getByRole("button", { name: preview.previewPdfRedactFind }).click()
 	await dialog.getByLabel(preview.previewPdfFindRedactTermLabel).fill(SECRET)
 	await dialog.getByRole("button", { name: preview.previewPdfFindRedactSearch }).click()
-	await expect(dialog.getByText("2 matches")).toBeVisible({ timeout: ENGINE_TIMEOUT_MS })
+	await expect(dialog.getByText("2 matches", { exact: true })).toBeVisible({ timeout: ENGINE_TIMEOUT_MS })
 	await dialog.getByRole("button", { name: "Mark 2 matches for redaction" }).click()
 	await expect(dialog.getByRole("heading", { name: "Marked for redaction (2)" })).toBeVisible({ timeout: ENGINE_TIMEOUT_MS })
 	await dialog.getByRole("button", { name: preview.previewPdfRedactApply }).click()

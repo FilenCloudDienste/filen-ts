@@ -88,7 +88,7 @@ async function inkOf(dialog: Locator): Promise<{ dark: number; colour: number }>
 		})
 }
 
-test("a large PDF shows its first page after reading part of the file", async ({ page }) => {
+test("a large PDF shows its first page after reading part of the file", async ({ page }, testInfo) => {
 	test.slow()
 
 	const cspViolations = trackCspViolations(page)
@@ -103,6 +103,16 @@ test("a large PDF shows its first page after reading part of the file", async ({
 
 		const egest = observeEgest(page)
 		let atPaint = -1
+		// Diagnostic (Linux CI counts about twice the expected chunks): each chunk request's path in order, with the
+		// milliseconds since the row was opened (negative: before), to tell a second reader from a read-ahead.
+		const requested: string[] = []
+		let openedAt = Date.now()
+
+		page.context().on("request", request => {
+			const url = new URL(request.url())
+
+			if (url.hostname.startsWith("egest.filen")) requested.push(`${String(Date.now() - openedAt)}ms ${url.pathname}`)
+		})
 
 		// Counted the moment page 1's canvas has its bitmap (the pages beside it start reading only then).
 		await page.exposeFunction("pdfPagePainted", () => {
@@ -120,9 +130,19 @@ test("a large PDF shows its first page after reading part of the file", async ({
 			observer.observe(document.body, { subtree: true, attributes: true, attributeFilter: ["data-rendered"] })
 		})
 
+		openedAt = Date.now()
+
 		const dialog = await openPdf(page, listbox, name)
 
 		await expect.poll(() => atPaint, { timeout: LAZY_VIEWER_TIMEOUT_MS }).toBeGreaterThanOrEqual(0)
+
+		if (atPaint !== firstPaintChunks(bytes, 12)) {
+			await testInfo.attach("egest-requests", {
+				body: [`at first paint: ${String(atPaint)} of ${String(chunks)} chunks`, ...requested].join("\n"),
+				contentType: "text/plain"
+			})
+		}
+
 		expect(atPaint).toBe(firstPaintChunks(bytes, 12))
 		expect(atPaint).toBeLessThan(chunks / 2)
 		await expect(dialog.getByText("Page 1 of 12", { exact: false }).first()).toBeAttached()

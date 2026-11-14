@@ -2,6 +2,7 @@ import type { Locator, Page } from "@playwright/test"
 import { test, expect } from "./fixtures"
 import { LAZY_VIEWER_TIMEOUT_MS, uploadFiles, withScratchDirectory } from "./helpers/listing"
 import { trackCspViolations } from "./helpers/csp"
+import { expectPdfSaved, pdfPageScroller } from "./helpers/pdfSurface"
 import { writePdf } from "../scripts/pdf-fixtures/view/pdfWriter"
 import { preview } from "@/locales/en/preview"
 
@@ -57,12 +58,12 @@ test("typing into a form field swaps to the editor and saves the value", async (
 		await uploadFiles(page, [{ name, mimeType: PDF_MIME, buffer: Buffer.from(formPdf()) }], listbox)
 
 		const dialog = await openPdf(page, listbox, name)
-		const scroller = dialog.locator("[data-preview-surface] > div").first()
+		const scroller = pdfPageScroller(dialog)
 		const field = dialog.getByRole("textbox", { name: "Your name" })
 
 		await expect(field).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
-		// Never the document's own field name, never a password manager's field.
-		await expect(field).not.toHaveAttribute("name")
+		// Never the document's own field name (a generated one, so radio groups still group), never a password manager's field.
+		await expect(field).toHaveAttribute("name", /^pdfField-\d+$/u)
 		await expect(field).toHaveAttribute("autocomplete", "off")
 
 		const before = await scroller.evaluate(element => ({ top: element.scrollTop, width: element.scrollWidth }))
@@ -84,28 +85,50 @@ test("typing into a form field swaps to the editor and saves the value", async (
 
 		await dialog.getByRole("button", { name: preview.previewPdfSave, exact: true }).click()
 		// Saved: nothing left to save.
-		await expect(dialog.getByRole("button", { name: preview.previewPdfSave, exact: true })).toBeDisabled({ timeout: ENGINE_TIMEOUT_MS })
+		await expectPdfSaved(dialog.getByRole("button", { name: preview.previewPdfSave, exact: true }), ENGINE_TIMEOUT_MS)
 	})
 
 	expect(cspViolations).toEqual([])
 })
 
-test("the editor not loading leaves the viewer working and says so", async ({ page }) => {
+test("the editor not loading leaves the viewer working and says so", async ({ page }, testInfo) => {
 	test.slow()
 
 	await withScratchDirectory(page, "pdf-swap-fail", async ({ listbox, runId }) => {
 		const name = `e2e-pdf-swap-fail-${runId}.pdf`
+		// Diagnostic (WebKit shows the editor anyway): every engine wasm request the context saw, and which the route
+		// aborted, plus the editor's own log lines.
+		const seen: string[] = []
+
+		page.context().on("request", request => {
+			if (request.url().includes("mupdf-wasm"))
+				seen.push(
+					`request ${request.url()} (${request.resourceType()}, service worker: ${String(request.serviceWorker() !== null)})`
+				)
+		})
+		page.on("console", message => {
+			if (message.text().startsWith("[pdf]")) seen.push(`console ${message.text()}`)
+		})
 
 		await uploadFiles(page, [{ name, mimeType: PDF_MIME, buffer: Buffer.from(formPdf()) }], listbox)
 		// The engine's wasm cannot be fetched: as offline on first use, or WebAssembly turned off.
-		await page.route(/mupdf-wasm.*\.wasm$/, route => route.abort())
+		await page.route(/mupdf-wasm.*\.wasm$/, route => {
+			seen.push(`aborted ${route.request().url()}`)
+
+			return route.abort()
+		})
 
 		const dialog = await openPdf(page, listbox, name)
 		const field = dialog.getByRole("textbox", { name: "Your name" })
 
 		await field.fill("Ada")
 		await field.press("Enter")
-		await expect(dialog.getByText(preview.previewPdfEditorUnavailable)).toBeVisible({ timeout: ENGINE_TIMEOUT_MS })
+		await expect(dialog.getByText(preview.previewPdfEditorUnavailable))
+			.toBeVisible({ timeout: ENGINE_TIMEOUT_MS })
+			.catch(async (error: unknown) => {
+				await testInfo.attach("engine-wasm-requests", { body: seen.join("\n") || "(none)", contentType: "text/plain" })
+				throw error
+			})
 		await expect(dialog.getByRole("button", { name: preview.previewPdfEditorRetry })).toBeVisible()
 		await expect(dialog.getByRole("region", { name: /Page 1 of/u })).toBeVisible()
 	})

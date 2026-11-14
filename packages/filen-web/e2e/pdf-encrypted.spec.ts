@@ -51,7 +51,8 @@ test("sets a password to open that the saved file asks for", async ({ page }) =>
 		const save = dialog.getByRole("button", { name: preview.previewPdfSave, exact: true })
 
 		await save.click()
-		await expect(save).toBeDisabled({ timeout: LIVE_WRITE_TIMEOUT_MS })
+		// The protection is no undo step: once it is saved nothing is left to save or undo, and the history controls go.
+		await expect(save).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
 
 		const bytes = new Uint8Array(await downloaded(page, dialog))
 
@@ -113,7 +114,7 @@ test("upgrades an RC4 file to AES-256 on save, keeping its password", async ({ p
 
 		await uploadFiles(page, [{ name, mimeType: PDF_MIME, buffer: rc4 }], listbox)
 		await listbox.getByRole("option", { name }).dblclick()
-		await page.getByLabel(preview.previewPdfPasswordLabel).fill("both")
+		await page.getByRole("textbox", { name: preview.previewPdfPasswordLabel, exact: true }).fill("both")
 		await page.getByRole("button", { name: preview.previewPdfPasswordSubmit }).click()
 
 		const dialog = page.getByRole("dialog").first()
@@ -130,7 +131,8 @@ test("upgrades an RC4 file to AES-256 on save, keeping its password", async ({ p
 		const save = dialog.getByRole("button", { name: preview.previewPdfSave, exact: true })
 
 		await save.click()
-		await expect(save).toBeDisabled({ timeout: LIVE_WRITE_TIMEOUT_MS })
+		// The protection is no undo step: once it is saved nothing is left to save or undo, and the history controls go.
+		await expect(save).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
 
 		const bytes = new Uint8Array(await downloaded(page, dialog))
 		const reopened = mupdf.Document.openDocument(bytes, "application/pdf")

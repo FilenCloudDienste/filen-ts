@@ -4,6 +4,7 @@ import * as pdfjs from "pdfjs-dist/legacy/build/pdf.mjs"
 import { test, expect } from "./fixtures"
 import { LAZY_VIEWER_TIMEOUT_MS, uploadFiles, withScratchDirectory } from "./helpers/listing"
 import { trackCspViolations } from "./helpers/csp"
+import { expectPdfSaved } from "./helpers/pdfSurface"
 import { writePdf } from "../scripts/pdf-fixtures/view/pdfWriter"
 import { preview } from "@/locales/en/preview"
 
@@ -118,7 +119,13 @@ test("a word is replaced in place, text is added, and the saved file reads them"
 		await expect(editor).toHaveCount(0, { timeout: ENGINE_TIMEOUT_MS })
 
 		await page.getByRole("button", { name: preview.previewPdfSave, exact: true }).click()
-		await expect(page.getByRole("button", { name: preview.previewPdfSave, exact: true })).toBeDisabled({ timeout: ENGINE_TIMEOUT_MS })
+
+		// The replaced word is removed content the earlier versions still hold: the warning offers deleting them.
+		const warning = page.getByRole("alertdialog").filter({ hasText: preview.previewPdfEarlierVersions })
+
+		await expect(warning).toBeVisible({ timeout: ENGINE_TIMEOUT_MS })
+		await warning.getByRole("button", { name: "Close" }).click()
+		await expectPdfSaved(page.getByRole("button", { name: preview.previewPdfSave, exact: true }), ENGINE_TIMEOUT_MS)
 
 		const text = await pdfText(await downloaded(page))
 
@@ -151,6 +158,7 @@ test("text drawn as shapes can't be edited, and the notice says so", async ({ pa
 			await expect(page.getByText(preview.previewPdfTextEditNotPossible)).toBeVisible({ timeout: 2_000 })
 		}).toPass({ timeout: ENGINE_TIMEOUT_MS })
 		await expect(page.getByRole("textbox", { name: preview.previewPdfTextEditField })).toHaveCount(0)
-		await expect(page.getByRole("button", { name: preview.previewPdfUndo })).toBeDisabled()
+		// Nothing changed: the history controls stay away (they show once there is something to undo or save).
+		await expect(page.getByRole("button", { name: preview.previewPdfUndo })).toHaveCount(0)
 	})
 })

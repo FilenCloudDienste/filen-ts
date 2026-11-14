@@ -3,6 +3,7 @@ import { bootTo, LAZY_VIEWER_TIMEOUT_MS } from "./helpers/listing"
 import { openFixtureRows } from "./helpers/fixtures"
 import { trackCspViolations } from "./helpers/csp"
 import { resolveModKey } from "./helpers/modkey"
+import { menuItemName } from "./helpers/menu"
 
 // Printing a PDF from the viewer: Mod+P opens the print dialog, Print renders the pages into the print root at each
 // page's own size, the browser's print dialog opens once every picture decoded, and the root is gone once it closed.
@@ -52,8 +53,8 @@ test("PDF prints every page at its size through the print root, cleaned up after
 	await row.dblclick()
 	await expect(page.getByRole("region", { name: /Page 1 of 2/u })).toBeVisible({ timeout: LAZY_VIEWER_TIMEOUT_MS })
 
-	await page.getByRole("button", { name: "File" }).click()
-	await page.getByRole("menuitem", { name: /Print/ }).click()
+	await page.getByRole("button", { name: "File", exact: true }).click()
+	await page.getByRole("menuitem", { name: menuItemName("Print…") }).click()
 
 	const dialog = page.getByRole("dialog", { name: "Print" })
 

@@ -25,8 +25,22 @@ async function open(page: Page, listbox: Locator, name: string): Promise<void> {
 }
 
 async function close(page: Page): Promise<void> {
+	// Diagnostic (WebKit has kept the viewer open here): where focus was when Escape was pressed.
+	const focused = await page.evaluate(() => {
+		const element = document.activeElement
+
+		return element === null
+			? "(none)"
+			: `<${element.tagName.toLowerCase()} role=${element.getAttribute("role") ?? ""} label=${element.getAttribute("aria-label") ?? ""}> in dialog: ${String(element.closest('[role="dialog"]') !== null)}`
+	})
+
 	await page.keyboard.press("Escape")
-	await expect(page.getByRole("region", { name: /Page 1 of/u })).toHaveCount(0)
+	await expect(page.getByRole("region", { name: /Page 1 of/u }))
+		.toHaveCount(0)
+		.catch(async (error: unknown) => {
+			await test.info().attach("focus-before-escape", { body: focused, contentType: "text/plain" })
+			throw error
+		})
 }
 
 async function downloaded(page: Page): Promise<Buffer> {
@@ -37,16 +51,30 @@ async function downloaded(page: Page): Promise<Buffer> {
 	return readFileSync(await (await downloading).path())
 }
 
-// Annotation subtypes per page, as pdf.js reads them.
-async function annotationTypes(bytes: Buffer): Promise<string[][]> {
+interface AnnotationInfo {
+	readonly subtype: string
+	readonly rect: readonly number[]
+	readonly subject: string | null
+}
+
+// The annotations per page (no form widgets), as pdf.js reads them.
+async function annotationInfos(bytes: Buffer): Promise<AnnotationInfo[][]> {
 	const task = pdfjs.getDocument({ data: new Uint8Array(bytes), verbosity: 0 })
 	const pdf = await task.promise
-	const pages: string[][] = []
+	const pages: AnnotationInfo[][] = []
 
 	for (let index = 1; index <= pdf.numPages; index++) {
-		const annotations = (await (await pdf.getPage(index)).getAnnotations()) as { subtype: string }[]
+		const annotations = (await (await pdf.getPage(index)).getAnnotations()) as {
+			subtype: string
+			rect: number[]
+			subject?: { str?: string } | null
+		}[]
 
-		pages.push(annotations.map(annotation => annotation.subtype).filter(subtype => subtype !== "Widget"))
+		pages.push(
+			annotations
+				.filter(annotation => annotation.subtype !== "Widget")
+				.map(annotation => ({ subtype: annotation.subtype, rect: annotation.rect, subject: annotation.subject?.str ?? null }))
+		)
 	}
 
 	await task.destroy()
@@ -76,7 +104,9 @@ function fillSignTab(page: Page): Locator {
 	return page.getByRole("tab", { name: "Fill & Sign" })
 }
 
-test("Fill & Sign: text, marks and a drawn signature are saved; the signature is offered again and deletable", async ({ page }) => {
+test("Fill & Sign: text, marks and a drawn signature are saved; the signature is offered again and deletable", async ({
+	page
+}, testInfo) => {
 	test.slow()
 
 	const cspViolations = trackCspViolations(page)
@@ -147,10 +177,13 @@ test("Fill & Sign: text, marks and a drawn signature are saved; the signature is
 			timeout: LIVE_WRITE_TIMEOUT_MS
 		})
 
-		const types = await annotationTypes(await downloaded(page))
+		const infos = await annotationInfos(await downloaded(page))
+		const types = infos.map(annotations => annotations.map(annotation => annotation.subtype))
 
+		// Diagnostic: which placement is missing when an Ink annotation is (each one's box and subject).
+		await testInfo.attach("saved-annotations", { body: JSON.stringify(infos, null, "\t"), contentType: "application/json" })
 		expect(types[1]).toEqual(expect.arrayContaining(["FreeText", "Ink", "Stamp"]))
-		// The text, the check mark, the cross and the drawn signature.
+		// The check mark, the cross and the drawn signature.
 		expect(types[1]?.filter(type => type === "Ink").length).toBe(3)
 		await close(page)
 
@@ -163,6 +196,7 @@ test("Fill & Sign: text, marks and a drawn signature are saved; the signature is
 
 		await expect(again.getByRole("button", { name: "Saved signature 1" })).toHaveAttribute("aria-pressed", "true")
 		await page.keyboard.press("Escape")
+		await expect(again).toHaveCount(0)
 		await close(page)
 	})
 
@@ -214,7 +248,9 @@ test("the signature pad draws with touch on a phone viewport", async ({ page, br
 
 		await pad.dispatchEvent("pointerup", { pointerId: 7, pointerType: "touch" })
 		await expect(pad).toHaveAttribute("data-strokes", "1")
+		// The signature dialog closes first (a drawn signature is not placed); the next Escape is the viewer's.
 		await page.keyboard.press("Escape")
+		await expect(page.getByRole("dialog", { name: preview.previewPdfSignatureDialogTitle })).toHaveCount(0)
 		await close(page)
 	})
 })

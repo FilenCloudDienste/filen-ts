@@ -6,6 +6,7 @@ import { scannedPdf } from "@filen/office/testing/ocr"
 import { test, expect } from "./fixtures"
 import { LAZY_VIEWER_TIMEOUT_MS, uploadFiles, withScratchDirectory } from "./helpers/listing"
 import { trackCspViolations } from "./helpers/csp"
+import { expectPdfSaved } from "./helpers/pdfSurface"
 import { preview } from "@/locales/en/preview"
 
 // Tools › Recognise text on a scanned page (an image of text, no text): the dialog finds the scanned page, the English
@@ -77,7 +78,7 @@ test("a scanned page becomes searchable", async ({ page }) => {
 		await expect(page.getByRole("button", { name: preview.previewPdfUndo })).toBeEnabled()
 
 		await page.getByRole("button", { name: preview.previewPdfSave, exact: true }).click()
-		await expect(page.getByRole("button", { name: preview.previewPdfSave, exact: true })).toBeDisabled({ timeout: OCR_TIMEOUT_MS })
+		await expectPdfSaved(page.getByRole("button", { name: preview.previewPdfSave, exact: true }), OCR_TIMEOUT_MS)
 
 		const saved = await downloaded(page)
 		const text = await pdfText(saved)

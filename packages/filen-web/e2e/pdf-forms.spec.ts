@@ -90,7 +90,7 @@ test("a PDF form: every field type filled, saved and read back; the overlay is n
 		await password.press("s")
 		await expect(page.getByText(preview.previewPdfFormPassword)).toBeVisible()
 
-		await page.getByRole("textbox", { name: "Code" }).fill("AB12CD99")
+		await page.getByRole("textbox", { name: "Code", exact: true }).fill("AB12CD99")
 		await page.getByRole("textbox", { name: "Postal code" }).fill("12345678")
 		await page.getByRole("textbox", { name: "Notes" }).fill("line one\nline two")
 		await page.getByRole("checkbox", { name: "I agree" }).check()
@@ -150,8 +150,14 @@ test("forms with scripts or XFA say what doesn't work here", async ({ page }) =>
 		)
 
 		await open(page, listbox, names.calculated)
-		await page.getByRole("textbox", { name: "First number" }).fill("2")
+		const first = page.getByRole("textbox", { name: "First number" })
+
+		await first.fill("2")
 		await expect(page.getByText(preview.previewPdfScripts)).toBeVisible({ timeout: SWAP_TIMEOUT_MS })
+		// Escape in the field first takes the uncommitted text back (focus stays there); the next one is the viewer's.
+		await page.keyboard.press("Escape")
+		await expect(first).toHaveValue("")
+		await expect(first).toBeFocused()
 		await close(page)
 
 		await open(page, listbox, names.xfa)

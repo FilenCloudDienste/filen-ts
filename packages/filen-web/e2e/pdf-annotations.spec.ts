@@ -5,6 +5,7 @@ import { trackCspViolations } from "./helpers/csp"
 import { writePdf } from "../scripts/pdf-fixtures/view/pdfWriter"
 import { preview } from "@/locales/en/preview"
 import { resolveModKey } from "./helpers/modkey"
+import { expectPdfSaved, pdfLiveRegion, pdfPageScroller } from "./helpers/pdfSurface"
 
 // Annotations and comments on a PDF: a shape drawn with the pointer (the first change swaps to the editor and is
 // replayed into it), a text box placed from the keyboard, a highlight dragged over text, the selection's popover
@@ -82,7 +83,6 @@ test("annotates and comments on a PDF, and the saved file keeps it all", async (
 		await uploadFiles(page, [{ name, mimeType: PDF_MIME, buffer: Buffer.from(textPdf()) }], listbox)
 
 		const dialog = await openPdf(page, listbox, name)
-		const layer = dialog.locator("[data-pdf-annotation-layer]").first()
 
 		// A rectangle (Shapes ▾ › Rectangle), dragged out: the drag that started the editor lands in it.
 		await dialog.getByRole("button", { name: preview.previewPdfAnnotToolRectangle }).click()
@@ -104,10 +104,10 @@ test("annotates and comments on a PDF, and the saved file keeps it all", async (
 		await expect(square).toHaveCount(1)
 
 		// A text box from the keyboard: T on the page, Enter places it, Enter commits the place, then type.
-		await dialog.locator("[data-preview-surface] > div").first().focus()
+		await pdfPageScroller(dialog).focus()
 		await page.keyboard.press("t")
 		await page.keyboard.press("Enter")
-		await expect(layer.getByRole("status")).toContainText(preview.previewPdfAnnotToolTextBox)
+		await expect(pdfLiveRegion(dialog)).toContainText(preview.previewPdfAnnotToolTextBox)
 		await page.keyboard.press("Enter")
 
 		const editor = dialog.getByRole("textbox", { name: preview.previewPdfAnnotTextBoxEditor })
@@ -118,14 +118,14 @@ test("annotates and comments on a PDF, and the saved file keeps it all", async (
 		await expect(dialog.locator('[data-annotation-type="FreeText"]')).toHaveCount(1, { timeout: ENGINE_TIMEOUT_MS })
 
 		// A highlight dragged over the line of text (Highlight ▾ is the U tool).
-		await dialog.locator("[data-preview-surface] > div").first().focus()
+		await pdfPageScroller(dialog).focus()
 		await page.keyboard.press("u")
 		await drag(page, await pagePoint(dialog, 0.11, 0.135), await pagePoint(dialog, 0.6, 0.135))
 		await page.keyboard.press("v")
 		await expect(dialog.locator('[data-annotation-type="Highlight"]')).toHaveCount(1, { timeout: ENGINE_TIMEOUT_MS })
 
 		// A sticky note (C), written in the Comments panel, replied to and resolved.
-		await dialog.locator("[data-preview-surface] > div").first().focus()
+		await pdfPageScroller(dialog).focus()
 		await page.keyboard.press("c")
 		const note = await pagePoint(dialog, 0.8, 0.2)
 
@@ -155,7 +155,7 @@ test("annotates and comments on a PDF, and the saved file keeps it all", async (
 		await expect(panel.getByRole("button", { name: preview.previewPdfCommentReopen })).toBeVisible({ timeout: ENGINE_TIMEOUT_MS })
 
 		await dialog.getByRole("button", { name: preview.previewPdfSave, exact: true }).click()
-		await expect(dialog.getByRole("button", { name: preview.previewPdfSave, exact: true })).toBeDisabled({ timeout: ENGINE_TIMEOUT_MS })
+		await expectPdfSaved(dialog.getByRole("button", { name: preview.previewPdfSave, exact: true }), ENGINE_TIMEOUT_MS)
 
 		// Opened again (pdf.js, before any change): every annotation is there.
 		await page.keyboard.press("Escape")
@@ -190,7 +190,7 @@ test("Flatten annotations draws them into the page on save", async ({ page }) =>
 		await page.getByRole("menuitemcheckbox", { name: preview.previewPdfAnnotFlatten }).click()
 		await page.keyboard.press("Escape")
 		await dialog.getByRole("button", { name: preview.previewPdfSave, exact: true }).click()
-		await expect(dialog.getByRole("button", { name: preview.previewPdfSave, exact: true })).toBeDisabled({ timeout: ENGINE_TIMEOUT_MS })
+		await expectPdfSaved(dialog.getByRole("button", { name: preview.previewPdfSave, exact: true }), ENGINE_TIMEOUT_MS)
 		// Drawn into the page: no annotation left to select.
 		await expect(dialog.locator('[data-annotation-type="Square"]')).toHaveCount(0)
 	})

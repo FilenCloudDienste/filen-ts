@@ -5,6 +5,7 @@ import { trackCspViolations } from "./helpers/csp"
 import { writePdf } from "../scripts/pdf-fixtures/view/pdfWriter"
 import { preview } from "@/locales/en/preview"
 import { resolveModKey } from "./helpers/modkey"
+import { expectPdfSaved } from "./helpers/pdfSurface"
 
 // Page organisation in the PDF editor: the pages rail beside the document and the Organise grid of the Pages tab, by
 // keyboard only (focus moves with the arrows, Shift extends the selection, Alt+arrows move it, Mod+Alt+[ rotates it,
@@ -109,7 +110,7 @@ test("organises pages with the keyboard alone and saves them", async ({ page }) 
 		await grid.getByRole("button", { name: preview.previewPdfPagesOrganiseDone }).click()
 
 		await dialog.getByRole("button", { name: preview.previewPdfSave, exact: true }).click()
-		await expect(dialog.getByRole("button", { name: preview.previewPdfSave, exact: true })).toBeDisabled({ timeout: ENGINE_TIMEOUT_MS })
+		await expectPdfSaved(dialog.getByRole("button", { name: preview.previewPdfSave, exact: true }), ENGINE_TIMEOUT_MS)
 		// A save after a delete: the earlier versions still hold the deleted pages (the warning shows only for removals
 		// left in the document; the undo restored them here, so none is due).
 		await expect(dialog.getByText(preview.previewPdfEarlierVersions)).toHaveCount(0)
