@@ -6660,7 +6660,6 @@
 		"smoothTransitionsTooltip_one": "सहज ट्रांज़िशन · {{count}} सेकंड",
 		"smoothTransitionsTooltip_other": "सहज ट्रांज़िशन · {{count}} सेकंड",
 		"smoothTransitionsUnavailableDegraded": "रीलोड करने तक बंद: इस डिवाइस ने ऑडियो मिक्सर रोक दिया।",
-		"smoothTransitionsUnavailableDevice": "इस डिवाइस पर अभी उपलब्ध नहीं है।",
 		"smoothTransitionsUnavailableSource": "जब तक आप यह पेज रीलोड नहीं करते, Safari ट्रैक को आपस में मिला नहीं सकता।",
 		"trackColumnActions": "कार्रवाइयाँ",
 		"trackColumnAlbum": "एल्बम",

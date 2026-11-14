@@ -6660,7 +6660,6 @@
 		"smoothTransitionsTooltip_one": "Transizioni fluide · {{count}} s",
 		"smoothTransitionsTooltip_other": "Transizioni fluide · {{count}} s",
 		"smoothTransitionsUnavailableDegraded": "Disattivate fino al ricaricamento: questo dispositivo ha interrotto il mixer audio.",
-		"smoothTransitionsUnavailableDevice": "Non ancora disponibile su questo dispositivo.",
 		"smoothTransitionsUnavailableSource": "Safari non può fondere i brani finché non ricarichi questa pagina.",
 		"trackColumnActions": "Azioni",
 		"trackColumnAlbum": "Album",

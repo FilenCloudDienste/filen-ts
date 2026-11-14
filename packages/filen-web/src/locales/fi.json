@@ -6660,7 +6660,6 @@
 		"smoothTransitionsTooltip_one": "Pehmeät siirtymät · {{count}} s",
 		"smoothTransitionsTooltip_other": "Pehmeät siirtymät · {{count}} s",
 		"smoothTransitionsUnavailableDegraded": "Pois päältä, kunnes lataat sivun uudelleen: tämä laite pysäytti äänimikserin.",
-		"smoothTransitionsUnavailableDevice": "Ei vielä käytettävissä tällä laitteella.",
 		"smoothTransitionsUnavailableSource": "Safari ei voi sulauttaa kappaleita yhteen, ennen kuin lataat tämän sivun uudelleen.",
 		"trackColumnActions": "Toiminnot",
 		"trackColumnAlbum": "Albumi",

@@ -6660,7 +6660,6 @@
 		"smoothTransitionsTooltip_one": "Transiciones suaves · {{count}} s",
 		"smoothTransitionsTooltip_other": "Transiciones suaves · {{count}} s",
 		"smoothTransitionsUnavailableDegraded": "Desactivado hasta que recargues: este dispositivo detuvo el mezclador de audio.",
-		"smoothTransitionsUnavailableDevice": "Aún no disponible en este dispositivo.",
 		"smoothTransitionsUnavailableSource": "Safari no puede fundir las pistas hasta que recargues esta página.",
 		"trackColumnActions": "Acciones",
 		"trackColumnAlbum": "Álbum",

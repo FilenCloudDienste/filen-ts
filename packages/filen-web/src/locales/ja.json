@@ -6660,7 +6660,6 @@
 		"smoothTransitionsTooltip_one": "スムーズな曲間移行 · {{count}} 秒",
 		"smoothTransitionsTooltip_other": "スムーズな曲間移行 · {{count}} 秒",
 		"smoothTransitionsUnavailableDegraded": "再読み込みするまでオフ：このデバイスでオーディオミキサーが停止しました。",
-		"smoothTransitionsUnavailableDevice": "このデバイスではまだ利用できません。",
 		"smoothTransitionsUnavailableSource": "このページを再読み込みするまで、Safari では曲をつなげて再生できません。",
 		"trackColumnActions": "操作",
 		"trackColumnAlbum": "アルバム",

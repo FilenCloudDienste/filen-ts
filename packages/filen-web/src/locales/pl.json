@@ -7366,7 +7366,6 @@
 		"smoothTransitionsTooltip_one": "Płynne przejścia · {{count}} s",
 		"smoothTransitionsTooltip_other": "Płynne przejścia · {{count}} s",
 		"smoothTransitionsUnavailableDegraded": "Wyłączone do czasu ponownego załadowania: to urządzenie zatrzymało mikser dźwięku.",
-		"smoothTransitionsUnavailableDevice": "Jeszcze niedostępne na tym urządzeniu.",
 		"smoothTransitionsUnavailableSource": "Safari nie może płynnie łączyć utworów, dopóki nie załadujesz ponownie tej strony.",
 		"trackColumnActions": "Akcje",
 		"trackColumnAlbum": "Album",

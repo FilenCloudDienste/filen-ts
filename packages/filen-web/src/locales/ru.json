@@ -7366,7 +7366,6 @@
 		"smoothTransitionsTooltip_one": "Плавные переходы · {{count}} с",
 		"smoothTransitionsTooltip_other": "Плавные переходы · {{count}} с",
 		"smoothTransitionsUnavailableDegraded": "Отключено до перезагрузки: устройство остановило аудиомикшер.",
-		"smoothTransitionsUnavailableDevice": "Пока недоступно на этом устройстве.",
 		"smoothTransitionsUnavailableSource": "Safari не может сводить треки, пока вы не перезагрузите эту страницу.",
 		"trackColumnActions": "Действия",
 		"trackColumnAlbum": "Альбом",

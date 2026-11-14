@@ -6660,7 +6660,6 @@
 		"smoothTransitionsTooltip_one": "Mjuka övergångar · {{count}} s",
 		"smoothTransitionsTooltip_other": "Mjuka övergångar · {{count}} s",
 		"smoothTransitionsUnavailableDegraded": "Av tills du laddar om: den här enheten stoppade ljudmixern.",
-		"smoothTransitionsUnavailableDevice": "Inte tillgängligt på den här enheten än.",
 		"smoothTransitionsUnavailableSource": "Safari kan inte blanda spår förrän du laddar om sidan.",
 		"trackColumnActions": "Åtgärder",
 		"trackColumnAlbum": "Album",

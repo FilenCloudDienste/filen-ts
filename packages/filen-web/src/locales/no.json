@@ -6660,7 +6660,6 @@
 		"smoothTransitionsTooltip_one": "Myke overganger · {{count}} s",
 		"smoothTransitionsTooltip_other": "Myke overganger · {{count}} s",
 		"smoothTransitionsUnavailableDegraded": "Av til du laster inn på nytt: denne enheten stoppet lydmikseren.",
-		"smoothTransitionsUnavailableDevice": "Ikke tilgjengelig på denne enheten ennå.",
 		"smoothTransitionsUnavailableSource": "Safari kan ikke flette sammen spor før du laster inn denne siden på nytt.",
 		"trackColumnActions": "Handlinger",
 		"trackColumnAlbum": "Album",

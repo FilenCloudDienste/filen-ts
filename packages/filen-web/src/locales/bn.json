@@ -6660,7 +6660,6 @@
 		"smoothTransitionsTooltip_one": "মসৃণ ট্রানজিশন · {{count}} সে.",
 		"smoothTransitionsTooltip_other": "মসৃণ ট্রানজিশন · {{count}} সে.",
 		"smoothTransitionsUnavailableDegraded": "রিলোড না করা পর্যন্ত বন্ধ: এই ডিভাইস অডিও মিক্সার বন্ধ করে দিয়েছে।",
-		"smoothTransitionsUnavailableDevice": "এই ডিভাইসে এখনও উপলব্ধ নয়।",
 		"smoothTransitionsUnavailableSource": "এই পৃষ্ঠাটি রিলোড না করা পর্যন্ত Safari ট্র্যাকগুলো মেশাতে পারবে না।",
 		"trackColumnActions": "অ্যাকশন",
 		"trackColumnAlbum": "অ্যালবাম",

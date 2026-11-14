@@ -6660,7 +6660,6 @@
 		"smoothTransitionsTooltip_one": "Lágy átmenetek · {{count}} mp",
 		"smoothTransitionsTooltip_other": "Lágy átmenetek · {{count}} mp",
 		"smoothTransitionsUnavailableDegraded": "Újratöltésig kikapcsolva: az eszköz leállította a hangkeverőt.",
-		"smoothTransitionsUnavailableDevice": "Ezen az eszközön még nem érhető el.",
 		"smoothTransitionsUnavailableSource": "A Safari nem tudja összemosni a számokat, amíg újra nem tölti ezt az oldalt.",
 		"trackColumnActions": "Műveletek",
 		"trackColumnAlbum": "Album",

@@ -6660,7 +6660,6 @@
 		"smoothTransitionsTooltip_one": "Smooth transitions · {{count}} s",
 		"smoothTransitionsTooltip_other": "Smooth transitions · {{count}} s",
 		"smoothTransitionsUnavailableDegraded": "Off until you reload: this device stopped the audio mixer.",
-		"smoothTransitionsUnavailableDevice": "Not available on this device yet.",
 		"smoothTransitionsUnavailableSource": "Safari can't blend tracks until you reload this page.",
 		"trackColumnActions": "Actions",
 		"trackColumnAlbum": "Album",
