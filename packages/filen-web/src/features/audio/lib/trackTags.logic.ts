@@ -3,7 +3,15 @@ import { type } from "arktype"
 // One audio file's parsed tags, persisted per file uuid so a track already read costs nothing on any later
 // visit. A uuid rotates whenever the file's content changes, so uuid keying is the whole invalidation
 // story. `parsed: false` records a file the parser could not read (final for that content); `cover` is
-// true only when a cover thumbnail was actually stored in the thumbnail cache.
+// true only when a cover thumbnail was actually stored in the thumbnail cache. `gain` is absent on a record parsed
+// before ReplayGain was read ("not read yet"); a new parse always carries it, all nulls when the file has none.
+export const trackGainSchema = type({
+	trackDb: "number | null",
+	trackPeak: "number | null",
+	albumDb: "number | null",
+	albumPeak: "number | null"
+})
+
 export const trackTagRecordSchema = type({
 	title: "string | null",
 	artist: "string | null",
@@ -11,6 +19,7 @@ export const trackTagRecordSchema = type({
 	durationSec: "number | null",
 	cover: "boolean",
 	parsed: "boolean",
+	"gain?": trackGainSchema,
 	at: "number"
 })
 
