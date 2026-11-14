@@ -168,6 +168,11 @@ function FieldControl({ field, page, viewport, swap, form, starting, editable, w
 	// What was typed or chosen and not yet drawn by the engine; null: the field's value.
 	const [draft, setDraft] = useState<string | null>(() => form.draft(field.id)?.text ?? null)
 	const [chosen, setChosen] = useState<readonly string[] | null>(null)
+	// A check box or radio button clicked and not yet drawn by the engine: shown as clicked meanwhile (else it would
+	// spring back until the editor answers, and a second click would ask for the same state again).
+	// Kept until the engine draws the field again (`from`: its value at the click), whatever it then shows: a radio button
+	// turned on and then off by another one's click before either was drawn shows the engine's answer.
+	const [toggled, setToggled] = useState<{ readonly checked: boolean; readonly from: string } | null>(null)
 	const props = pdfFormControlProps(controlField(field), form.scope, t("previewPdfFieldLabel"))
 	// One element id for the control's life (a datalist is tied to it).
 	const [id] = useState(() => props.id)
@@ -204,6 +209,8 @@ function FieldControl({ field, page, viewport, swap, form, starting, editable, w
 
 	if (chosen !== null && sameValues(chosen, field.selected)) setChosen(null)
 
+	if (toggled !== null && (toggled.from !== field.value || toggled.checked === fieldChecked(field))) setToggled(null)
+
 	// The draft outlives the control (its page is drawn anew on every change), and a save commits it.
 	useEffect(() => {
 		form.setDraft(field.id, draft === null ? null : { page, text: draft })
@@ -229,8 +236,16 @@ function FieldControl({ field, page, viewport, swap, form, starting, editable, w
 		}
 	}, [form, field.id])
 
-	const dispatch = (value: PdfFieldValue): void => {
-		swap.edit(session => session.dispatch("forms.setField", { page, widget: field.id, value }))
+	const dispatch = (value: PdfFieldValue, dropped?: () => void): void => {
+		swap.edit(
+			session =>
+				session.dispatch("forms.setField", { page, widget: field.id, value }).catch((error: unknown) => {
+					dropped?.()
+
+					throw error
+				}),
+			dropped
+		)
 	}
 
 	const commit = (): void => {
@@ -282,7 +297,7 @@ function FieldControl({ field, page, viewport, swap, form, starting, editable, w
 	}
 
 	if (field.kind === "checkbox" || field.kind === "radio") {
-		const checked = fieldChecked(field)
+		const checked = toggled?.checked ?? fieldChecked(field)
 
 		return (
 			<input
@@ -295,7 +310,13 @@ function FieldControl({ field, page, viewport, swap, form, starting, editable, w
 				className={cn(className, "cursor-pointer appearance-none")}
 				style={style}
 				onChange={() => {
-					dispatch(field.kind === "radio" ? { kind: "radio" } : { kind: "checkbox", checked: !checked })
+					// A radio button only turns on (its group's others turn off as the engine draws them).
+					const next = field.kind === "radio" ? true : !checked
+
+					setToggled({ checked: next, from: field.value })
+					dispatch(field.kind === "radio" ? { kind: "radio" } : { kind: "checkbox", checked: next }, () => {
+						setToggled(null)
+					})
 				}}
 			/>
 		)

@@ -166,12 +166,49 @@ describe("form field controls", () => {
 
 		fireEvent.click(second)
 		expect(dispatch).toHaveBeenLastCalledWith("forms.setField", { page: 1, widget: 20, value: { kind: "radio" } })
+		// Shown as clicked until the editor draws it (this fake never does).
+		expect(second).toHaveProperty("checked", true)
 
 		// Typing into the password field is refused: nothing is dispatched.
 		const before = dispatch.mock.calls.length
 
 		fireEvent.keyDown(password, { key: "s" })
 		expect(dispatch.mock.calls.length).toBe(before)
+	})
+})
+
+describe("a clicked radio button the editor refuses", () => {
+	it("springs back to the document's state", async () => {
+		const refused = vi.fn(() => Promise.reject(new Error("refused")))
+		const session = { dispatch: refused } as unknown as PdfEditSessionModel
+		const swap = {
+			prefetch: vi.fn(),
+			warm: vi.fn(),
+			withSession: vi.fn(),
+			edit: vi.fn((change: (session: PdfEditSessionModel) => Promise<unknown>) => {
+				void change(session).catch(() => undefined)
+			})
+		}
+
+		render(
+			<PdfFieldOverlay
+				document={pdfjsDocument()}
+				page={1}
+				viewport={VIEWPORT}
+				swap={swap as never}
+				snapshot={null}
+				starting={false}
+				editable
+			/>
+		)
+
+		const radio = await screen.findByRole("radio", { name: "Choice" })
+
+		fireEvent.click(radio)
+		expect(refused).toHaveBeenCalledTimes(1)
+		await waitFor(() => {
+			expect(radio).toHaveProperty("checked", false)
+		})
 	})
 })
 
