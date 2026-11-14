@@ -141,7 +141,7 @@ import { drawsOwnBorder, initialColors, titleBarColorsSchema, windowOptions } fr
 
 // Payloads from the renderer are untrusted input.
 const countSchema = type("0 <= number.integer < 1000000")
-const audioPlayingSchema = type("boolean")
+const booleanSchema = type("boolean")
 const mediaTransportSchema = type("'none' | 'paused' | 'playing'")
 const zoomStepSchema = type("'in' | 'out' | 'reset'")
 const menuShortcutsSchema = type({ "[string]": "string <= 64" })
@@ -1013,6 +1013,7 @@ let showRequested = false
 let unloadHolds = 0
 let audioPlaying = false
 let mediaTransport: DesktopMediaTransport = "none"
+let smoothTransitions = false
 // The page listens for menu actions; until then clicked ones wait here.
 let menuReady = false
 let pendingMenuActions: DesktopMenuAction[] = []
@@ -1021,8 +1022,20 @@ function resetPageState(): void {
 	unloadHolds = 0
 	audioPlaying = false
 	menuReady = false
+	setSmoothTransitions(false)
 	setMediaTransport("none")
 	scheduleIdleDestroy()
+}
+
+// Smooth Transitions' check in the Controls menu and the tray: whether the page's player blends tracks now.
+function setSmoothTransitions(active: boolean): void {
+	if (active === smoothTransitions) {
+		return
+	}
+
+	smoothTransitions = active
+	applyMenu()
+	applyTrayMenu()
 }
 
 // The Controls menu and the tray offer the transport only while the page has something queued.
@@ -1423,6 +1436,13 @@ function runTransportAction(action: DesktopMenuAction): void {
 	if (mainWindow !== null && menuReady && !isLocked()) {
 		mainWindow.webContents.send(CHANNELS.menuAction, action)
 	}
+
+	// A checkbox item flips its own check when clicked; the menus show the page's state again until it reports a change
+	// (none when the page refused, e.g. while the feature is unavailable).
+	if (action === "audio.smoothTransitions") {
+		applyMenu()
+		applyTrayMenu()
+	}
 }
 
 // File > Close: another of the app's windows closes itself; the page closes its open dialog first (a file preview),
@@ -1458,6 +1478,7 @@ function applyMenu(): void {
 						shortcuts: menuShortcuts,
 						devTools: !app.isPackaged,
 						transport: mediaTransport,
+						smoothTransitions,
 						onAction: action => {
 							if (TRANSPORT_ACTIONS.has(action)) {
 								runTransportAction(action)
@@ -1599,8 +1620,8 @@ function applyTrayMenu(): void {
 						}
 					]),
 			...(trayLines.length === 0 ? [] : [{ type: "separator" as const }]),
-			...transportItems(mediaTransport).map(({ action, label }) => ({
-				label,
+			...transportItems(mediaTransport, smoothTransitions).map(({ action, ...item }) => ({
+				...item,
 				click: () => {
 					runTransportAction(action)
 				}
@@ -1960,7 +1981,7 @@ if (!instanceLock.held) {
 	})
 
 	ipcMain.on(CHANNELS.setAudioPlaying, (event, payload: unknown) => {
-		const playing = audioPlayingSchema(payload)
+		const playing = booleanSchema(payload)
 
 		if (!isTrusted(event.senderFrame) || playing instanceof type.errors) {
 			return
@@ -1975,6 +1996,14 @@ if (!instanceLock.held) {
 
 		if (isTrusted(event.senderFrame) && !(state instanceof type.errors) && mainWindow?.webContents === event.sender) {
 			setMediaTransport(state)
+		}
+	})
+
+	ipcMain.on(CHANNELS.setSmoothTransitions, (event, payload: unknown) => {
+		const active = booleanSchema(payload)
+
+		if (isTrusted(event.senderFrame) && !(active instanceof type.errors) && mainWindow?.webContents === event.sender) {
+			setSmoothTransitions(active)
 		}
 	})
 

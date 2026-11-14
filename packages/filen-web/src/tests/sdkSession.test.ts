@@ -295,6 +295,7 @@ describe("desktop vault", () => {
 				setForegroundRenderingHolds: () => undefined,
 				setAudioPlaying: () => undefined,
 				setMediaTransport: () => undefined,
+				setSmoothTransitions: () => undefined,
 				setMenuShortcuts: () => undefined,
 				setShellStrings: () => undefined,
 				onMenuAction: () => () => undefined,

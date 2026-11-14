@@ -48,6 +48,7 @@ function template(options: Partial<MenuOptions> = {}): MenuItemConstructorOption
 		shortcuts: {},
 		devTools: false,
 		transport: "none",
+		smoothTransitions: false,
 		onAction: vi.fn(),
 		onLock: null,
 		onClose: vi.fn(),
@@ -149,15 +150,32 @@ describe("menuTemplate", () => {
 		;(find(playing, "Pause")?.click as () => void)()
 		expect(onTransport).toHaveBeenCalledWith("audio.playPause")
 	})
+
+	it("checks Smooth Transitions while tracks blend", () => {
+		expect(find(template({ transport: "playing" }), "Smooth Transitions")).toMatchObject({ type: "checkbox", checked: false })
+		expect(find(template({ transport: "playing", smoothTransitions: true }), "Smooth Transitions")).toMatchObject({
+			type: "checkbox",
+			checked: true,
+			enabled: true
+		})
+		expect(find(template({ smoothTransitions: true }), "Smooth Transitions")).toMatchObject({ checked: true, enabled: false })
+	})
 })
 
 describe("transportItems", () => {
 	it("offers nothing without a queue", () => {
-		expect(transportItems("none")).toEqual([])
+		expect(transportItems("none", true)).toEqual([])
+	})
+
+	it("checks Smooth Transitions only, as the shell's state says", () => {
+		expect(transportItems("paused", true).filter(item => item.type === "checkbox")).toEqual([
+			{ action: "audio.smoothTransitions", label: "Smooth Transitions", type: "checkbox", checked: true }
+		])
+		expect(transportItems("paused", false).at(-1)?.checked).toBe(false)
 	})
 
 	it("plays a paused queue and pauses a playing one", () => {
-		expect(transportItems("paused").map(item => item.label)).toEqual([
+		expect(transportItems("paused", false).map(item => item.label)).toEqual([
 			"Play",
 			"Next Track",
 			"Previous Track",
@@ -165,7 +183,7 @@ describe("transportItems", () => {
 			"Repeat",
 			"Smooth Transitions"
 		])
-		expect(transportItems("playing")[0]).toEqual({ action: "audio.playPause", label: "Pause" })
+		expect(transportItems("playing", false)[0]).toEqual({ action: "audio.playPause", label: "Pause" })
 	})
 })
 

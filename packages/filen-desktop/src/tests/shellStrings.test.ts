@@ -53,6 +53,7 @@ describe("shell strings", () => {
 			shortcuts: {},
 			devTools: false,
 			transport: "none",
+			smoothTransitions: false,
 			onAction: vi.fn(),
 			onLock: null,
 			onClose: vi.fn(),

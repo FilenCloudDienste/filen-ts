@@ -115,10 +115,12 @@ export const TRANSPORT_ACTIONS: ReadonlySet<DesktopMenuAction> = new Set([
 	"audio.smoothTransitions"
 ])
 
+export type TransportItem = { action: DesktopMenuAction; label: string } & Pick<MenuItemConstructorOptions, "type" | "checked">
+
 // The audio player's transport while something is queued: play or pause, the track skips, then shuffle, repeat and
-// smooth transitions.
+// smooth transitions, checked while tracks blend.
 // The Controls menu and the tray offer these.
-export function transportItems(transport: DesktopMediaTransport): { action: DesktopMenuAction; label: string }[] {
+export function transportItems(transport: DesktopMediaTransport, smoothTransitions: boolean): TransportItem[] {
 	if (transport === "none") {
 		return []
 	}
@@ -129,7 +131,12 @@ export function transportItems(transport: DesktopMediaTransport): { action: Desk
 		{ action: "audio.previous", label: shellText("shellPreviousTrack") },
 		{ action: "audio.shuffle", label: shellText("shellShuffle") },
 		{ action: "audio.loop", label: shellText("shellRepeat") },
-		{ action: "audio.smoothTransitions", label: shellText("shellSmoothTransitions") }
+		{
+			action: "audio.smoothTransitions",
+			label: shellText("shellSmoothTransitions"),
+			type: "checkbox",
+			checked: smoothTransitions
+		}
 	]
 }
 
@@ -137,6 +144,8 @@ export interface MenuOptions {
 	shortcuts: MenuShortcuts
 	devTools: boolean
 	transport: DesktopMediaTransport
+	// Whether tracks blend now: Smooth Transitions' check.
+	smoothTransitions: boolean
 	onAction: (action: DesktopMenuAction) => void
 	// Offered only while a PIN is set and the app is unlocked.
 	onLock: (() => void) | null
@@ -160,6 +169,7 @@ export function menuTemplate({
 	shortcuts,
 	devTools,
 	transport,
+	smoothTransitions,
 	onAction,
 	onLock,
 	onClose,
@@ -172,7 +182,7 @@ export function menuTemplate({
 			onAction(id)
 		}
 	})
-	const controls = transportItems(transport)
+	const controls = transportItems(transport, smoothTransitions)
 
 	return [
 		{
@@ -219,10 +229,13 @@ export function menuTemplate({
 		// Disabled while nothing is queued; the first item says Pause while audio plays.
 		{
 			label: shellText("shellMenuControls"),
-			submenu: (controls.length === 0 ? transportItems("paused") : controls).map(item => ({
-				...action(item.action, item.label),
-				enabled: controls.length > 0
-			}))
+			submenu: (controls.length === 0 ? transportItems("paused", smoothTransitions) : controls).map(
+				({ action: id, label, ...item }) => ({
+					...action(id, label),
+					...item,
+					enabled: controls.length > 0
+				})
+			)
 		},
 		{ role: "windowMenu" },
 		{

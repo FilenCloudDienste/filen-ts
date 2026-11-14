@@ -319,6 +319,9 @@ const bridge: DesktopBridge = {
 		setMediaTransport: state => {
 			ipcRenderer.send(CHANNELS.setMediaTransport, state)
 		},
+		setSmoothTransitions: active => {
+			ipcRenderer.send(CHANNELS.setSmoothTransitions, active)
+		},
 		setMenuShortcuts: combos => {
 			ipcRenderer.send(CHANNELS.setMenuShortcuts, combos)
 		},

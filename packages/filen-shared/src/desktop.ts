@@ -107,6 +107,8 @@ export interface DesktopApp {
 	setAudioPlaying(playing: boolean): void
 	// The audio player's transport, for the macOS Controls menu and the tray.
 	setMediaTransport(state: DesktopMediaTransport): void
+	// Whether the audio player blends tracks now: the check on the Controls menu's and the tray's Smooth Transitions.
+	setSmoothTransitions(active: boolean): void
 	// The combo in effect per action ("" when unassigned), in the web keymap's notation.
 	setMenuShortcuts(combos: Partial<Record<DesktopMenuAction, string>>): void
 	// The shell's own text (menu, tray, main's notifications and dialogs) in the UI language; main keeps the last one
