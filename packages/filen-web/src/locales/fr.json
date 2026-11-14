@@ -6660,7 +6660,6 @@
 		"smoothTransitionsTooltip_one": "Transitions fluides · {{count}} s",
 		"smoothTransitionsTooltip_other": "Transitions fluides · {{count}} s",
 		"smoothTransitionsUnavailableDegraded": "Désactivé jusqu'au rechargement : cet appareil a arrêté le mixeur audio.",
-		"smoothTransitionsUnavailableDevice": "Pas encore disponible sur cet appareil.",
 		"smoothTransitionsUnavailableSource": "Safari ne peut pas enchaîner les pistes en fondu tant que vous n'avez pas rechargé cette page.",
 		"trackColumnActions": "Actions",
 		"trackColumnAlbum": "Album",

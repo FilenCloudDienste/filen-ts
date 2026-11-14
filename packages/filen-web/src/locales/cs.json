@@ -7013,7 +7013,6 @@
 		"smoothTransitionsTooltip_one": "Plynulé přechody · {{count}} s",
 		"smoothTransitionsTooltip_other": "Plynulé přechody · {{count}} s",
 		"smoothTransitionsUnavailableDegraded": "Vypnuto do opětovného načtení: toto zařízení zastavilo zvukový mixér.",
-		"smoothTransitionsUnavailableDevice": "Na tomto zařízení zatím není k dispozici.",
 		"smoothTransitionsUnavailableSource": "Safari nemůže prolínat skladby, dokud tuto stránku znovu nenačtete.",
 		"trackColumnActions": "Akce",
 		"trackColumnAlbum": "Album",

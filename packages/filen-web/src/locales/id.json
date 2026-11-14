@@ -6660,7 +6660,6 @@
 		"smoothTransitionsTooltip_one": "Transisi mulus · {{count}} dtk",
 		"smoothTransitionsTooltip_other": "Transisi mulus · {{count}} dtk",
 		"smoothTransitionsUnavailableDegraded": "Nonaktif hingga Anda memuat ulang: perangkat ini menghentikan mixer audio.",
-		"smoothTransitionsUnavailableDevice": "Belum tersedia di perangkat ini.",
 		"smoothTransitionsUnavailableSource": "Safari tidak dapat memadukan trek hingga Anda memuat ulang halaman ini.",
 		"trackColumnActions": "Tindakan",
 		"trackColumnAlbum": "Album",

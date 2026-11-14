@@ -6660,7 +6660,6 @@
 		"smoothTransitionsTooltip_one": "การเปลี่ยนเพลงอย่างนุ่มนวล · {{count}} วินาที",
 		"smoothTransitionsTooltip_other": "การเปลี่ยนเพลงอย่างนุ่มนวล · {{count}} วินาที",
 		"smoothTransitionsUnavailableDegraded": "ปิดอยู่จนกว่าคุณจะโหลดซ้ำ: อุปกรณ์นี้หยุดตัวผสมเสียง",
-		"smoothTransitionsUnavailableDevice": "ยังไม่พร้อมใช้งานบนอุปกรณ์นี้",
 		"smoothTransitionsUnavailableSource": "Safari ไม่สามารถผสานเพลงได้จนกว่าคุณจะโหลดหน้านี้ซ้ำ",
 		"trackColumnActions": "การดำเนินการ",
 		"trackColumnAlbum": "อัลบั้ม",

@@ -6660,7 +6660,6 @@
 		"smoothTransitionsTooltip_one": "Chuyển bài mượt mà · {{count}} giây",
 		"smoothTransitionsTooltip_other": "Chuyển bài mượt mà · {{count}} giây",
 		"smoothTransitionsUnavailableDegraded": "Đã tắt cho đến khi bạn tải lại: thiết bị này đã dừng bộ trộn âm thanh.",
-		"smoothTransitionsUnavailableDevice": "Chưa khả dụng trên thiết bị này.",
 		"smoothTransitionsUnavailableSource": "Safari không thể hòa trộn các bài cho đến khi bạn tải lại trang này.",
 		"trackColumnActions": "Thao tác",
 		"trackColumnAlbum": "Album",

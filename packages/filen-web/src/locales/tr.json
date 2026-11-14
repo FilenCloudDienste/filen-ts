@@ -6660,7 +6660,6 @@
 		"smoothTransitionsTooltip_one": "Yumuşak geçişler · {{count}} sn",
 		"smoothTransitionsTooltip_other": "Yumuşak geçişler · {{count}} sn",
 		"smoothTransitionsUnavailableDegraded": "Yeniden yükleyene kadar kapalı: bu cihaz ses mikserini durdurdu.",
-		"smoothTransitionsUnavailableDevice": "Bu cihazda henüz kullanılamıyor.",
 		"smoothTransitionsUnavailableSource": "Bu sayfayı yeniden yükleyene kadar Safari parçaları birbirine karıştıramaz.",
 		"trackColumnActions": "İşlemler",
 		"trackColumnAlbum": "Albüm",

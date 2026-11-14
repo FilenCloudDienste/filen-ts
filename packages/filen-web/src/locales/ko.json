@@ -6660,7 +6660,6 @@
 		"smoothTransitionsTooltip_one": "부드러운 전환 · {{count}}초",
 		"smoothTransitionsTooltip_other": "부드러운 전환 · {{count}}초",
 		"smoothTransitionsUnavailableDegraded": "새로고침할 때까지 꺼짐: 이 기기에서 오디오 믹서가 중지되었습니다.",
-		"smoothTransitionsUnavailableDevice": "이 기기에서는 아직 사용할 수 없습니다.",
 		"smoothTransitionsUnavailableSource": "이 페이지를 새로고침할 때까지 Safari에서 트랙을 자연스럽게 이어 재생할 수 없습니다.",
 		"trackColumnActions": "작업",
 		"trackColumnAlbum": "앨범",

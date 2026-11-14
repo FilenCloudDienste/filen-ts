@@ -6660,7 +6660,6 @@
 		"smoothTransitionsTooltip_one": "Transições suaves · {{count}} s",
 		"smoothTransitionsTooltip_other": "Transições suaves · {{count}} s",
 		"smoothTransitionsUnavailableDegraded": "Desativado até você recarregar: este dispositivo interrompeu o mixer de áudio.",
-		"smoothTransitionsUnavailableDevice": "Ainda não disponível neste dispositivo.",
 		"smoothTransitionsUnavailableSource": "O Safari não consegue mesclar as faixas até você recarregar esta página.",
 		"trackColumnActions": "Ações",
 		"trackColumnAlbum": "Álbum",

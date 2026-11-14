@@ -7013,7 +7013,6 @@
 		"smoothTransitionsTooltip_one": "Tranziții line · {{count}} s",
 		"smoothTransitionsTooltip_other": "Tranziții line · {{count}} s",
 		"smoothTransitionsUnavailableDegraded": "Dezactivat până la reîncărcare: acest dispozitiv a oprit mixerul audio.",
-		"smoothTransitionsUnavailableDevice": "Încă nu este disponibil pe acest dispozitiv.",
 		"smoothTransitionsUnavailableSource": "Safari nu poate îmbina piesele până nu reîncărcați această pagină.",
 		"trackColumnActions": "Acțiuni",
 		"trackColumnAlbum": "Album",

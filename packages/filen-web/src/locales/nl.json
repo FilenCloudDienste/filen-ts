@@ -6660,7 +6660,6 @@
 		"smoothTransitionsTooltip_one": "Vloeiende overgangen · {{count}} s",
 		"smoothTransitionsTooltip_other": "Vloeiende overgangen · {{count}} s",
 		"smoothTransitionsUnavailableDegraded": "Uit tot je herlaadt: dit apparaat heeft de audiomixer gestopt.",
-		"smoothTransitionsUnavailableDevice": "Nog niet beschikbaar op dit apparaat.",
 		"smoothTransitionsUnavailableSource": "Safari kan nummers pas laten overvloeien als je deze pagina herlaadt.",
 		"trackColumnActions": "Acties",
 		"trackColumnAlbum": "Album",

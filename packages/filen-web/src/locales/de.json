@@ -6660,7 +6660,6 @@
 		"smoothTransitionsTooltip_one": "Sanfte Übergänge · {{count}} s",
 		"smoothTransitionsTooltip_other": "Sanfte Übergänge · {{count}} s",
 		"smoothTransitionsUnavailableDegraded": "Aus bis zum Neuladen: Dieses Gerät hat den Audiomixer gestoppt.",
-		"smoothTransitionsUnavailableDevice": "Auf diesem Gerät noch nicht verfügbar.",
 		"smoothTransitionsUnavailableSource": "Safari kann Titel erst überblenden, wenn du diese Seite neu lädst.",
 		"trackColumnActions": "Aktionen",
 		"trackColumnAlbum": "Album",

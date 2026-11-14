@@ -6660,7 +6660,6 @@
 		"smoothTransitionsTooltip_one": "Glidende overgange · {{count}} s",
 		"smoothTransitionsTooltip_other": "Glidende overgange · {{count}} s",
 		"smoothTransitionsUnavailableDegraded": "Slået fra, indtil du genindlæser: denne enhed stoppede lydmixeren.",
-		"smoothTransitionsUnavailableDevice": "Endnu ikke tilgængelig på denne enhed.",
 		"smoothTransitionsUnavailableSource": "Safari kan ikke blande numre, før du genindlæser denne side.",
 		"trackColumnActions": "Handlinger",
 		"trackColumnAlbum": "Album",

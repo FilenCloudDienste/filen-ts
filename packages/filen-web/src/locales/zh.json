@@ -6660,7 +6660,6 @@
 		"smoothTransitionsTooltip_one": "平滑过渡 · {{count}} 秒",
 		"smoothTransitionsTooltip_other": "平滑过渡 · {{count}} 秒",
 		"smoothTransitionsUnavailableDegraded": "已关闭，重新加载后恢复：此设备停止了音频混音器。",
-		"smoothTransitionsUnavailableDevice": "此设备暂不支持。",
 		"smoothTransitionsUnavailableSource": "重新加载此页面之前，Safari 无法混合曲目。",
 		"trackColumnActions": "操作",
 		"trackColumnAlbum": "专辑",
