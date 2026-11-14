@@ -5,6 +5,7 @@ import { test, expect } from "./fixtures"
 import { LAZY_VIEWER_TIMEOUT_MS, LIVE_WRITE_TIMEOUT_MS, uploadFiles, withScratchDirectory } from "./helpers/listing"
 import { trackCspViolations } from "./helpers/csp"
 import { resolveModKey } from "./helpers/modkey"
+import { expectPdfSaved } from "./helpers/pdfSurface"
 import { preview } from "@/locales/en/preview"
 
 // PDF forms in a real browser: every AcroForm widget type filled through the overlay, saved as a new version and read
@@ -110,9 +111,8 @@ test("a PDF form: every field type filled, saved and read back; the overlay is n
 		// The required field was left empty: said, and saved anyway.
 		await expect(page.getByText(preview.previewPdfFormRequiredEmpty_one.replace("{{count}}", "1"))).toBeVisible()
 		await expect(page.getByRole("textbox", { name: "Required" })).toHaveAttribute("aria-invalid", "true")
-		await expect(page.getByRole("button", { name: preview.previewSaveAction, exact: true })).toBeDisabled({
-			timeout: LIVE_WRITE_TIMEOUT_MS
-		})
+		// The editor's Save: disabled while the save runs, so only "disabled and not busy" says it ended.
+		await expectPdfSaved(page.getByRole("button", { name: preview.previewPdfSave, exact: true }), LIVE_WRITE_TIMEOUT_MS)
 
 		const values = await fieldValues(await downloaded(page))
 
@@ -174,6 +174,7 @@ test("forms with scripts or XFA say what doesn't work here", async ({ page }) =>
 		await expect(confirm.getByText(preview.previewPdfFormXfaSaveBody)).toBeVisible()
 		await confirm.getByRole("button", { name: preview.previewPdfFormXfaSave, exact: true }).click()
 		await expect(confirm).toHaveCount(0, { timeout: LIVE_WRITE_TIMEOUT_MS })
+		await expectPdfSaved(page.getByRole("button", { name: preview.previewPdfSave, exact: true }), LIVE_WRITE_TIMEOUT_MS)
 
 		const values = await fieldValues(await downloaded(page))
 

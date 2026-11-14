@@ -135,7 +135,7 @@ test("annotates and comments on a PDF, and the saved file keeps it all", async (
 		const compose = panel.getByRole("textbox", { name: preview.previewPdfCommentPlaceholder })
 
 		await compose.fill("Please check this page")
-		await panel.getByRole("button", { name: preview.previewPdfCommentPost }).click()
+		await panel.getByRole("button", { name: preview.previewPdfCommentPost, exact: true }).click()
 		await answerAuthor(page)
 		await expect(dialog.locator('[data-annotation-type="Text"]')).toHaveCount(1, { timeout: ENGINE_TIMEOUT_MS })
 		await expect(panel.getByText("Please check this page")).toBeVisible()
@@ -145,14 +145,20 @@ test("annotates and comments on a PDF, and the saved file keeps it all", async (
 		await reply.fill("Checked")
 		await panel.getByRole("button", { name: preview.previewPdfCommentReply, exact: true }).click()
 		await expect(panel.getByText("Checked")).toBeVisible({ timeout: ENGINE_TIMEOUT_MS })
-		await panel.getByRole("button", { name: preview.previewPdfCommentResolve }).click()
-		await expect(panel.getByRole("button", { name: preview.previewPdfCommentReopen })).toBeVisible({ timeout: ENGINE_TIMEOUT_MS })
+		await panel.getByRole("button", { name: preview.previewPdfCommentResolve, exact: true }).click()
+		await expect(panel.getByRole("button", { name: preview.previewPdfCommentReopen, exact: true })).toBeVisible({
+			timeout: ENGINE_TIMEOUT_MS
+		})
 
 		// Undo and Redo step the last change (the resolve).
 		await dialog.getByRole("button", { name: preview.previewPdfUndo }).click()
-		await expect(panel.getByRole("button", { name: preview.previewPdfCommentResolve })).toBeVisible({ timeout: ENGINE_TIMEOUT_MS })
+		await expect(panel.getByRole("button", { name: preview.previewPdfCommentResolve, exact: true })).toBeVisible({
+			timeout: ENGINE_TIMEOUT_MS
+		})
 		await dialog.getByRole("button", { name: preview.previewPdfRedo }).click()
-		await expect(panel.getByRole("button", { name: preview.previewPdfCommentReopen })).toBeVisible({ timeout: ENGINE_TIMEOUT_MS })
+		await expect(panel.getByRole("button", { name: preview.previewPdfCommentReopen, exact: true })).toBeVisible({
+			timeout: ENGINE_TIMEOUT_MS
+		})
 
 		await dialog.getByRole("button", { name: preview.previewPdfSave, exact: true }).click()
 		await expectPdfSaved(dialog.getByRole("button", { name: preview.previewPdfSave, exact: true }), ENGINE_TIMEOUT_MS)

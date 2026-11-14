@@ -91,7 +91,11 @@ test("typing into a form field swaps to the editor and saves the value", async (
 	expect(cspViolations).toEqual([])
 })
 
-test("the editor not loading leaves the viewer working and says so", async ({ page }, testInfo) => {
+test("the editor not loading leaves the viewer working and says so", async ({ page, browserName }, testInfo) => {
+	// The engine worker fetches its wasm, and Playwright's WebKit sees a worker's requests but never routes them: CI run
+	// 43642534054 logged the fetch with neither the page's nor the context's route called, and the editor started (see
+	// holdChunks in helpers/jobs.ts). Chromium and Firefox route it.
+	test.skip(browserName === "webkit", "Playwright's WebKit cannot route a worker's requests")
 	test.slow()
 
 	await withScratchDirectory(page, "pdf-swap-fail", async ({ listbox, runId }) => {

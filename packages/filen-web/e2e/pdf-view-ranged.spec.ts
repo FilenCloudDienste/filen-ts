@@ -14,6 +14,8 @@ test.describe.configure({ mode: "default" })
 const PDF_MIME = "application/pdf"
 const FIXTURES = new URL("./fixtures/pdf/view/", import.meta.url)
 const CHUNK = 1024 * 1024
+// The thumbnail of a 48 MiB PDF: drawn from the uploaded file, or downloaded whole and drawn.
+const THUMBNAIL_TIMEOUT_MS = 120_000
 
 function fixture(name: string): Buffer {
 	return readFileSync(new URL(name, FIXTURES))
@@ -100,11 +102,14 @@ test("a large PDF shows its first page after reading part of the file", async ({
 		const name = `e2e-pdf-ranged-${runId}.pdf`
 
 		await uploadFiles(page, [{ name, mimeType: PDF_MIME, buffer: bytes }], listbox)
+		// The listing's thumbnail of the new row first: where it is made from the drive it downloads the whole file (CI run
+		// 43642534054: Firefox and WebKit read every chunk while the viewer opened), which is not the viewer's reading.
+		await expect(listbox.getByRole("option", { name }).locator('img[src^="blob:"]')).toHaveCount(1, { timeout: THUMBNAIL_TIMEOUT_MS })
 
 		const egest = observeEgest(page)
 		let atPaint = -1
-		// Diagnostic (Linux CI counts about twice the expected chunks): each chunk request's path in order, with the
-		// milliseconds since the row was opened (negative: before), to tell a second reader from a read-ahead.
+		// Diagnostic: each chunk request's path in order, with the milliseconds since the row was opened (negative:
+		// before), to tell a second reader from a read-ahead.
 		const requested: string[] = []
 		let openedAt = Date.now()
 

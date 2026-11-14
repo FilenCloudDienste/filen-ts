@@ -1,11 +1,11 @@
 import { readFileSync } from "node:fs"
-import type { Locator, Page } from "@playwright/test"
+import type { Locator, Page, Request } from "@playwright/test"
 import * as pdfjs from "pdfjs-dist/legacy/build/pdf.mjs"
-import { test, expect } from "./fixtures"
+import { test, expect, settleLeases } from "./fixtures"
 import { bootTo, LAZY_VIEWER_TIMEOUT_MS, LIVE_WRITE_TIMEOUT_MS, uploadFiles, withScratchDirectory } from "./helpers/listing"
 import { trackCspViolations } from "./helpers/csp"
 import { resolveModKey } from "./helpers/modkey"
-import { pdfPageScroller } from "./helpers/pdfSurface"
+import { expectPdfSaved, pdfPageScroller } from "./helpers/pdfSurface"
 import { preview } from "@/locales/en/preview"
 import { settings } from "@/locales/en/settings"
 
@@ -106,6 +106,19 @@ async function scribble(page: Page, pad: Locator): Promise<void> {
 	await page.mouse.up()
 }
 
+// A request taking a drive-write lease (the SDK's lock endpoint).
+function writeLeaseAcquire(request: Request): boolean {
+	try {
+		if (!new URL(request.url()).pathname.endsWith("/v3/user/lock")) return false
+
+		const body = request.postDataJSON() as { type?: unknown; resource?: unknown } | null
+
+		return body?.type === "acquire" && body.resource === "drive-write"
+	} catch {
+		return false
+	}
+}
+
 // Settings › Office: every saved signature and initials deleted (they live with the account, so a run that stopped
 // early leaves its own behind), until the row says there are none.
 async function clearSavedSignatures(page: Page): Promise<void> {
@@ -138,6 +151,10 @@ async function clearSavedSignatures(page: Page): Promise<void> {
 
 	while ((await remove.count()) > 0) {
 		const left = await remove.count()
+		// The list drops the entry at once; the synced file is written after it, under a drive-write lease. A navigation
+		// before that lease is let go loses the delete (the next boot reads the file as it was).
+		// Watched on the context: the SDK worker sends it.
+		const written = page.context().waitForEvent("request", { predicate: writeLeaseAcquire, timeout: LIVE_WRITE_TIMEOUT_MS })
 
 		await remove.first().click()
 		await page
@@ -145,6 +162,8 @@ async function clearSavedSignatures(page: Page): Promise<void> {
 			.getByRole("button", { name: settings.settingsOfficeSavedSignaturesDeleteConfirm, exact: true })
 			.click()
 		await expect(remove).toHaveCount(left - 1, { timeout: LIVE_WRITE_TIMEOUT_MS })
+		await written
+		await settleLeases(page)
 	}
 
 	await page.keyboard.press("Escape")
@@ -227,9 +246,8 @@ test("Fill & Sign: text, marks and a drawn signature are saved; the signature is
 		await pageSurface.click({ position: { x: 120, y: 470 } })
 
 		await page.keyboard.press(`${mod}+s`)
-		await expect(page.getByRole("button", { name: preview.previewSaveAction, exact: true })).toBeDisabled({
-			timeout: LIVE_WRITE_TIMEOUT_MS
-		})
+		// The editor's Save: disabled while the save runs, so only "disabled and not busy" says it ended.
+		await expectPdfSaved(page.getByRole("button", { name: preview.previewPdfSave, exact: true }), LIVE_WRITE_TIMEOUT_MS)
 
 		const infos = await annotationInfos(await downloaded(page))
 		const types = infos.map(annotations => annotations.map(annotation => annotation.subtype))
