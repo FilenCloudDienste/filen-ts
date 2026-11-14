@@ -71,3 +71,97 @@ export function wasmTrap(): Error {
 
 	return error
 }
+
+function appearance(document: mupdf.PDFDocument, on: string): mupdf.PDFObject {
+	const box = { BBox: [0, 0, 14, 14] }
+
+	return document.addObject({
+		N: { [on]: document.addStream("0 0 1 rg 2 2 10 10 re f", box), Off: document.addStream("", box) }
+	})
+}
+
+// Two pages with a form: a text field ("name", at most 20 characters), a checkbox ("agree"), a read-only text field
+// ("fixed"), a combo box ("colour") and a radio group ("choice") with a button on each page; a web link and a link to
+// page 2 on page 1.
+export function makeFormPdf(): Uint8Array {
+	const document = new mupdf.PDFDocument()
+	const font = document.addSimpleFont(new mupdf.Font("Helvetica"))
+	const resources = document.addObject({ Font: { Helv: font } })
+
+	for (let index = 0; index < 2; index++) {
+		const content = `BT /Helv 18 Tf 72 760 Td (Form page ${String(index + 1)}) Tj ET\n`
+
+		document.insertPage(-1, document.addPage([0, 0, 595, 842], 0, resources, content))
+	}
+
+	const first = document.findPage(0)
+	const second = document.findPage(1)
+	// A JavaScript string becomes a name object in MuPDF's object builder; text values must be strings.
+	const string = (value: string) => document.newString(value)
+	const widget = (fields: Record<string, unknown>) => document.addObject({ Type: "Annot", Subtype: "Widget", F: 4, ...fields })
+	const name = widget({ FT: "Tx", T: string("name"), Rect: [72, 680, 300, 700], P: first, DA: string("/Helv 12 Tf 0 g"), MaxLen: 20 })
+	const fixed = widget({
+		FT: "Tx",
+		T: string("fixed"),
+		Rect: [72, 600, 300, 620],
+		P: first,
+		DA: string("/Helv 12 Tf 0 g"),
+		Ff: 1,
+		V: string("Locked")
+	})
+	const agree = widget({
+		FT: "Btn",
+		T: string("agree"),
+		Rect: [72, 640, 86, 654],
+		P: first,
+		V: document.newName("Off"),
+		AS: document.newName("Off"),
+		AP: appearance(document, "Yes")
+	})
+	const colour = widget({
+		FT: "Ch",
+		Ff: 1 << 17,
+		T: string("colour"),
+		Rect: [72, 560, 200, 580],
+		P: first,
+		DA: string("/Helv 12 Tf 0 g"),
+		Opt: [string("Red"), string("Green"), string("Blue")],
+		V: string("Red")
+	})
+	const choice = document.addObject({ FT: "Btn", Ff: 1 << 15, T: string("choice"), V: document.newName("Off") })
+	const radio = (page: mupdf.PDFObject, on: string) =>
+		widget({ Parent: choice, Rect: [72, 520, 86, 534], P: page, AS: document.newName("Off"), AP: appearance(document, on) })
+	const radioA = radio(first, "A")
+	const radioB = radio(second, "B")
+
+	choice.put("Kids", [radioA, radioB])
+
+	const web = document.addObject({
+		Type: "Annot",
+		Subtype: "Link",
+		Rect: [72, 450, 200, 470],
+		A: { S: "URI", URI: string("https://filen.io/") }
+	})
+	const toSecond = document.addObject({
+		Type: "Annot",
+		Subtype: "Link",
+		Rect: [72, 420, 200, 440],
+		Dest: [second, document.newName("XYZ"), 0, 800, 0]
+	})
+
+	first.put("Annots", [name, agree, fixed, colour, radioA, web, toSecond])
+	second.put("Annots", [radioB])
+	document
+		.getTrailer()
+		.get("Root")
+		.put(
+			"AcroForm",
+			document.addObject({ Fields: [name, agree, fixed, colour, choice], DA: string("/Helv 0 Tf 0 g"), DR: { Font: { Helv: font } } })
+		)
+
+	const saved = document.saveToBuffer("compress").asUint8Array().slice()
+
+	document.destroy()
+
+	return saved
+}

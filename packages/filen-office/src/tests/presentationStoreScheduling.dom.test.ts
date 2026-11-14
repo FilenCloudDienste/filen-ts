@@ -10,7 +10,7 @@ vi.mock("../react/presentation/paint/slide", () => ({
 }))
 import { slideRef, type SlideRef } from "../core/presentation/model"
 import type { OpenInfo, PresentationEvent, PresentationSessionApi, SlideRender } from "../dom/presentation/protocol"
-import { thumbnailOrder } from "../react/presentation/rail/window"
+import { thumbnailOrder } from "../react/shared/railWindow"
 import { createPresentationStore, type PresentationConnection, type PresentationHost } from "../react/presentation/store"
 import { fixtureDeck } from "./fixtures/presentation/deck"
 import { fixtureSlideRender } from "./fixtures/presentation/slideRender"

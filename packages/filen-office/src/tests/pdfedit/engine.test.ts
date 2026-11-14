@@ -1,125 +1,17 @@
-import { MessageChannel, Worker, type MessagePort } from "node:worker_threads"
 import { afterEach, describe, expect, it } from "vitest"
 import * as mupdf from "mupdf"
-import { PdfEngineClient, PdfEngineError, type PdfEngineWorkerLike } from "../../dom/pdfedit/client"
+import { PdfEngineError } from "../../dom/pdfedit/client"
 import { isFatalEngineError } from "../../dom/pdfedit/server"
-import {
-	abortSyncRange,
-	createSyncRangeBuffer,
-	serveSyncRange,
-	type SyncRangePort,
-	type SyncRangeServerStats
-} from "../../dom/pdfedit/syncRange"
-import type { PdfOpenResult } from "../../dom/pdfedit/protocol"
+import { abortSyncRange } from "../../dom/pdfedit/syncRange"
 import { estimateSavePeak, fitsBudget, PDF_DESKTOP_MEMORY, PDF_MOBILE_MEMORY } from "../../core/pdfedit/budget"
 import { makePdf, wasmTrap } from "./fixtures"
+import { startEngine, stopEngines } from "./harness"
+import * as pdfjs from "pdfjs-dist/legacy/build/pdf.mjs"
+import { pdfSignatureFields } from "../../dom/pdf/signatureFields"
+import { signedFixture } from "../pdfSignFixtures"
 import { budget } from "../timing"
 
-interface EngineSetup {
-	readonly blockBytes?: number
-	readonly slots?: number
-	// Blocks whose first read rejects, or never settles; later reads of them succeed.
-	readonly failBlocks?: Set<number>
-	readonly hangBlocks?: Set<number>
-	readonly readAhead?: number
-	readonly trapOnHeap?: boolean
-	readonly deadlineMs?: number
-}
-
-interface Engine {
-	readonly client: PdfEngineClient
-	readonly stats: SyncRangeServerStats
-	readonly buffer: SharedArrayBuffer
-	readonly reads: { start: number; end: number }[]
-	open(password?: string): Promise<PdfOpenResult>
-}
-
-const running: PdfEngineClient[] = []
-
-// Node's MessagePort as the bridge's port (its message events carry `data` like the DOM's).
-function syncPort(port: MessagePort): SyncRangePort {
-	return {
-		postMessage: message => {
-			port.postMessage(message)
-		},
-		addEventListener: (_type, listener) => {
-			port.on("message", data => {
-				listener({ data })
-			})
-		},
-		close: () => {
-			port.close()
-		}
-	}
-}
-
-afterEach(() => {
-	for (const client of running.splice(0)) client.terminate()
-})
-
-function startEngine(bytes: Uint8Array, setup: EngineSetup = {}): Engine {
-	const blockBytes = setup.blockBytes ?? 64 * 1024
-	const buffer = createSyncRangeBuffer(setup.slots ?? 16, blockBytes)
-	const channel = new MessageChannel()
-	const lifetime = new AbortController()
-	const reads: { start: number; end: number }[] = []
-	const stats = serveSyncRange(
-		buffer,
-		syncPort(channel.port2),
-		{
-			length: bytes.length,
-			read: (start, end) => {
-				reads.push({ start, end })
-
-				for (let block = Math.floor(start / blockBytes); block * blockBytes < end; block++) {
-					if (setup.hangBlocks?.delete(block) === true) return new Promise<Uint8Array>(() => undefined)
-					if (setup.failBlocks?.delete(block) === true) return Promise.reject(new Error("read failed"))
-				}
-
-				return Promise.resolve(bytes.slice(start, end))
-			}
-		},
-		{ lifetime: lifetime.signal, readAhead: setup.readAhead ?? 3, onReaderClose: () => lifetime.abort() }
-	)
-	const worker = new Worker(new URL("./engineWorker.ts", import.meta.url), {
-		execArgv: ["--import", "tsx"],
-		workerData: { trapOnHeap: setup.trapOnHeap ?? false, deadlineMs: setup.deadlineMs ?? 60_000 }
-	})
-	const like: PdfEngineWorkerLike = {
-		postMessage: (message, transfer) => {
-			worker.postMessage(message, transfer as never[])
-		},
-		addEventListener: (type: "message" | "error", listener: (event: { readonly data: unknown }) => void) => {
-			if (type === "message") worker.on("message", data => listener({ data }))
-			else worker.on("error", error => listener({ data: error }))
-		},
-		terminate: () => {
-			lifetime.abort()
-			void worker.terminate()
-		}
-	}
-	const client = new PdfEngineClient(like)
-
-	running.push(client)
-
-	return {
-		client,
-		stats,
-		buffer,
-		reads,
-		open: password =>
-			client.call(
-				"open",
-				{
-					// Transferred to the engine thread, where it is Node's port again.
-					channel: { buffer, port: channel.port1 as unknown as SyncRangePort, length: bytes.length },
-					role: "edit",
-					...(password === undefined ? {} : { password })
-				},
-				[channel.port1]
-			)
-	}
-}
+afterEach(stopEngines)
 
 function rgbaOf(value: unknown): Uint8ClampedArray {
 	const bitmap: unknown = Reflect.get(value as object, "bitmap")
@@ -337,6 +229,48 @@ describe("the PDF engine over the sync range bridge", () => {
 
 			expect(heapBytes).toBeGreaterThan(1024 * 1024)
 			await expect(engine.client.call("pages", { from: 0, count: 1 })).rejects.toMatchObject({ failure: "closed" })
+		},
+		TIMEOUT
+	)
+})
+
+// What pdf.js reads of the signatures, the cross-check the page passes in.
+async function pdfjsHints(bytes: Uint8Array) {
+	const task = pdfjs.getDocument({ data: bytes.slice(), verbosity: 0 })
+	const hints = pdfSignatureFields(await (await task.promise).getSignatures())
+
+	await task.destroy()
+
+	return hints
+}
+
+describe("signature verification in the engine", () => {
+	it(
+		"verifies a signed file read through the bridge",
+		async () => {
+			const bytes = signedFixture("approval-rsa.pdf")
+			const engine = startEngine(bytes)
+
+			await engine.open()
+
+			const report = await engine.client.call("verifySignatures", { fields: await pdfjsHints(bytes) })
+
+			expect(report.signatures.map(signature => signature.state)).toEqual(["unchanged"])
+		},
+		TIMEOUT
+	)
+
+	it(
+		"opens the signed revision of a file changed after signing over the same reader",
+		async () => {
+			const bytes = signedFixture("approval-content-changed.pdf")
+			const engine = startEngine(bytes)
+
+			await engine.open()
+
+			const report = await engine.client.call("verifySignatures", { fields: await pdfjsHints(bytes) })
+
+			expect(report.signatures.map(signature => [signature.state, signature.changes?.allowed])).toEqual([["changed", false]])
 		},
 		TIMEOUT
 	)

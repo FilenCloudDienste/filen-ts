@@ -85,7 +85,14 @@ export function servePdfEngine(mupdf: MupdfModule, scope: PdfEngineScope, option
 			return current
 		},
 		readBytes(offset, length) {
-			const { reader } = context.open()
+			const { reader, heap } = context.open()
+
+			if (heap !== null) {
+				if (offset + length > heap.getLength()) throw new PdfEngineRefusal("readFailed", "end of file")
+
+				return heap.asUint8Array().slice(offset, offset + length)
+			}
+
 			const bytes = new Uint8Array(length)
 			let at = 0
 

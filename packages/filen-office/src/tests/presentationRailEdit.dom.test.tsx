@@ -4,7 +4,7 @@ import { createRoot, type Root } from "react-dom/client"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { slideRef, type Section, type SlideRef } from "../core/presentation/model"
 import { SlideRail, type SlideRailProps } from "../react/presentation/rail/SlideRail"
-import { dropBefore, dropLineOffset, railRows, revealRowOffset, rowRange } from "../react/presentation/rail/window"
+import { dropBefore, dropLineOffset, railRows, revealRowOffset, rowRange } from "../react/shared/railWindow"
 import type { PresentationThumb } from "../react/presentation/store"
 
 // The rail's section headers, its multiple selection, the host's keys and dragging slides to another place.

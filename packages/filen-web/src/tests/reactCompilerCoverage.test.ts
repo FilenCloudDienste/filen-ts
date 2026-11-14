@@ -378,6 +378,33 @@ describe("React Compiler coverage", () => {
 		expect(events.some(event => event.kind === "CompileSuccess" && event.fnName === fnName && (event.memoSlots ?? 0) > 0)).toBe(true)
 	})
 
+	// useVirtualizer opts its host out, so an opened thread's window lives in ThreadComments; the pane, its rows, its
+	// comments and each editor's adapter compile, so a scroll step or a field keystroke skips unchanged rows.
+	it("compiles the comment thread list and its adapters, leaving only ThreadComments to the virtualizer", () => {
+		const events = compile("src/features/office/components/commentThreads.tsx")
+
+		expect(events.filter(event => event.kind !== "CompileSuccess")).toHaveLength(1)
+
+		for (const fnName of ["ThreadRow", "CommentItem", "ThreadView", "CommentThreads"]) {
+			expect(events.some(event => event.kind === "CompileSuccess" && event.fnName === fnName && (event.memoSlots ?? 0) > 0)).toBe(
+				true
+			)
+		}
+
+		for (const [file, fnName] of [
+			["src/features/office/components/commentAuthor.tsx", "useCommentAuthor"],
+			["src/features/presentation/components/commentsPane.tsx", "PresentationCommentsPane"],
+			["src/features/pdf/comments/pdfCommentsPanel.tsx", "PdfCommentsPanel"]
+		] as const) {
+			const adapter = compile(file)
+
+			expect(adapter.filter(event => event.kind !== "CompileSuccess")).toEqual([])
+			expect(adapter.some(event => event.kind === "CompileSuccess" && event.fnName === fnName && (event.memoSlots ?? 0) > 0)).toBe(
+				true
+			)
+		}
+	})
+
 	// useVirtualizer opts its host out, so it lives in eventsTimeline.tsx; a scroll render must not reach the
 	// list, and a keystroke or minute tick must not rebuild the describer or the rows.
 	it("compiles EventsList, leaving only EventsTimeline to the virtualizer", () => {
@@ -689,14 +716,19 @@ describe("Videos browsing compiles", () => {
 // the shell must compile, so such a render reaches only the toolbar and the pages whose matches changed.
 describe("React Compiler coverage of the PDF viewer", () => {
 	it.each([
-		["../filen-office/src/react/pdf/PdfPages.tsx", "PdfPages"],
-		["../filen-office/src/react/pdf/PdfPages.tsx", "PdfPageView"],
+		["../filen-office/src/react/pdf/pageColumn.tsx", "PdfPageColumn"],
+		["../filen-office/src/react/pdf/pageColumn.tsx", "PdfPageView"],
 		["../filen-office/src/react/pdf/usePdfViewer.ts", "usePdfViewer"],
 		["../filen-office/src/react/pdf/usePdfDocument.ts", "usePdfDocument"],
 		["src/features/preview/components/pdfViewer.tsx", "PdfReader"],
 		["src/features/preview/components/pdfViewer.tsx", "PdfDocument"],
+		["src/features/preview/components/pdfViewer.tsx", "PdfViewer"],
+		["src/features/pdf/session/fieldOverlay.tsx", "PdfFieldOverlay"],
+		["src/features/pdf/session/fieldOverlay.tsx", "FieldControl"],
+		["src/features/pdf/session/usePdfEdit.tsx", "usePdfEdit"],
+		["src/features/pdf/ribbon/pdfRibbon.tsx", "PdfRibbon"],
 		["src/features/preview/components/pdfCommandBar.tsx", "PdfCommandBar"],
-		["src/features/preview/components/pdfCommandBar.tsx", "OutlineMenu"],
+		["src/features/preview/components/pdfCommandParts.tsx", "usePdfCommandParts"],
 		["src/features/preview/components/pdfCommandBar.tsx", "PdfPropertiesDialog"],
 		["src/features/preview/components/commandBarControls.tsx", "PageControls"],
 		["src/features/preview/components/commandBarControls.tsx", "ZoomControls"],
@@ -704,6 +736,23 @@ describe("React Compiler coverage of the PDF viewer", () => {
 		["src/features/preview/components/commandBarControls.tsx", "FullScreenButton"],
 		["src/features/office/components/ribbon/officeRibbon.tsx", "OfficeCommandBar"],
 		["src/features/shell/components/sessionUnreadableScreen.tsx", "SessionUnreadableScreen"]
+	])("compiles %s's %s", (file, fnName) => {
+		const events = compile(file)
+
+		expect(events.filter(event => event.kind !== "CompileSuccess")).toEqual([])
+		expect(events.some(event => event.kind === "CompileSuccess" && event.fnName === fnName && (event.memoSlots ?? 0) > 0)).toBe(true)
+	})
+})
+
+// The annotation tools' overlays render on every pointer move of a gesture, and the annotation popover beside them:
+// each must compile, so a move reaches only the draft being drawn.
+describe("React Compiler coverage of the PDF annotation overlays", () => {
+	it.each([
+		["../filen-office/src/react/pdfedit/tools/overlays.tsx", "PdfToolDraftOverlay"],
+		["../filen-office/src/react/pdfedit/tools/overlays.tsx", "PdfSelectionFrame"],
+		["../filen-office/src/react/pdfedit/tools/overlays.tsx", "PdfPlacementIndicator"],
+		["../filen-office/src/react/pdfedit/tools/overlays.tsx", "PdfTextBoxEditor"],
+		["src/features/pdf/annotations/annotationPopover.tsx", "PdfAnnotationPopover"]
 	])("compiles %s's %s", (file, fnName) => {
 		const events = compile(file)
 

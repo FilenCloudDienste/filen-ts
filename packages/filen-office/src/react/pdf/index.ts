@@ -1,8 +1,10 @@
 export { paintMatches, type PaintedMatches } from "./highlight"
 export {
+	PdfPageColumn,
 	PdfPages,
 	pdfTextLayerVars,
 	PDF_MAX_PAGE_CANVAS_BYTES,
+	type PdfPageOverlay,
 	type PdfPagesBinding,
 	type PdfPagesClassNames,
 	type PdfPagesFind,

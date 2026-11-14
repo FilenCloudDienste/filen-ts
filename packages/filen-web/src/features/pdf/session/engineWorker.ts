@@ -1,6 +1,6 @@
 import type { AnyFile } from "@filen/sdk-rs"
 import { PDF_DESKTOP_MEMORY, PDF_MOBILE_MEMORY, shouldRespawn, type PdfMemoryProfile } from "@filen/office/core/pdfedit"
-import { PDF_ENGINE_WASM, PdfEngineClient, type PdfEngineRole, type PdfOpenResult } from "@filen/office/dom/pdfedit"
+import { PDF_ENGINE_WASM, PdfEngineClient, type PdfByteChannel, type PdfEngineRole, type PdfOpenResult } from "@filen/office/dom/pdfedit"
 import PdfEngineWorker from "@/features/pdf/workers/pdfEngine.worker.ts?worker"
 import { withPdfEngineModule } from "@/features/pdf/session/engineModule"
 import { openSyncRange, type SyncRangeHandle } from "@/lib/media/syncRange"
@@ -55,7 +55,20 @@ function spawn(module: WebAssembly.Module): PdfEngineClient {
 	})
 }
 
-export async function openPdfEngine(options: OpenPdfEngineOptions): Promise<PdfEngine> {
+// Where an engine reads its file: a drive file through the SDK worker, or a channel another engine serves (a written
+// save, from the editing engine's heap).
+type EngineSource =
+	| { readonly kind: "file"; readonly file: AnyFile; readonly access: PreviewAccessMode }
+	| { readonly kind: "channel"; readonly channel: PdfByteChannel }
+
+interface EngineStart {
+	readonly source: EngineSource
+	readonly role: PdfEngineRole
+	readonly password?: string
+	readonly onPoisoned?: (message: string) => void
+}
+
+async function startEngine(options: EngineStart): Promise<PdfEngine> {
 	const token = crypto.randomUUID()
 	const engineDone = Promise.withResolvers<undefined>()
 	const ready = Promise.withResolvers<PdfEngine>()
@@ -67,7 +80,9 @@ export async function openPdfEngine(options: OpenPdfEngineOptions): Promise<PdfE
 		const end = (): void => {
 			client.terminate()
 			range?.close()
-			void sdkApi.cancelPreviewDownload(token).catch(() => undefined)
+
+			if (options.source.kind === "file") void sdkApi.cancelPreviewDownload(token).catch(() => undefined)
+
 			engineDone.resolve(undefined)
 		}
 
@@ -78,12 +93,17 @@ export async function openPdfEngine(options: OpenPdfEngineOptions): Promise<PdfE
 		})
 
 		try {
-			range = await openSyncRange(options.file, options.access, token)
+			let channel: PdfByteChannel
+
+			if (options.source.kind === "file") {
+				range = await openSyncRange(options.source.file, options.source.access, token)
+				channel = range.channel
+			} else channel = options.source.channel
 
 			const opened = await client.call(
 				"open",
-				{ channel: range.channel, role: options.role, ...(options.password === undefined ? {} : { password: options.password }) },
-				[range.channel.port]
+				{ channel, role: options.role, ...(options.password === undefined ? {} : { password: options.password }) },
+				[channel.port]
 			)
 			let closing: Promise<{ readonly heapBytes: number }> | null = null
 
@@ -114,6 +134,20 @@ export async function openPdfEngine(options: OpenPdfEngineOptions): Promise<PdfE
 	})
 
 	return ready.promise
+}
+
+export function openPdfEngine(options: OpenPdfEngineOptions): Promise<PdfEngine> {
+	return startEngine({
+		source: { kind: "file", file: options.file, access: options.access },
+		role: options.role,
+		...(options.password === undefined ? {} : { password: options.password }),
+		...(options.onPoisoned === undefined ? {} : { onPoisoned: options.onPoisoned })
+	})
+}
+
+// A short-lived verifying engine on a channel another engine serves (its port is transferred to the new engine).
+export function openPdfEngineOnChannel(channel: PdfByteChannel, password: string | undefined): Promise<PdfEngine> {
+	return startEngine({ source: { kind: "channel", channel }, role: "verify", ...(password === undefined ? {} : { password }) })
 }
 
 // Whether an engine that reached `heapBytes` should be replaced by a fresh one before more work (wasm memory never

@@ -4,12 +4,8 @@ import { toast } from "sonner"
 import { NotesPanel, PresentationTextEditor } from "@filen/office/react/presentation"
 import type { SlideRef, SlideReview } from "@filen/office/core/presentation"
 import { useElementSize } from "@/lib/useElementSize"
-import {
-	askSlideNotesAgain,
-	focusSettled,
-	useAskSlideNotes,
-	useSlideNotesAnswer
-} from "@/features/presentation/components/commentsPane.logic"
+import { askSlideNotesAgain, useAskSlideNotes, useSlideNotesAnswer } from "@/features/presentation/components/commentsPane.logic"
+import { focusSettled } from "@/features/office/components/commentThreads.logic"
 import type { PresentationRibbonEditor } from "@/features/presentation/components/ribbon/tabs"
 import { refusalKey } from "@/features/presentation/hooks/usePresentationSession"
 import { usePresentationTextBindings } from "@/features/presentation/lib/keymap/text"

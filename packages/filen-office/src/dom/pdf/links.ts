@@ -30,6 +30,16 @@ function asRect(value: unknown): PdfRect | null {
 	return [x1, y1, x2, y2]
 }
 
+// A link target taken from a document, as a viewer may follow it: the URL the shared link policy allows (and `allow`
+// too, which only ever narrows it), else null. Every engine's links pass here, so there is one gate.
+export function pdfExternalLink(raw: unknown, allow?: (url: string) => boolean): string | null {
+	if (typeof raw !== "string") return null
+
+	const verdict = classifyLink(raw)
+
+	return verdict.kind === "external" && (allow === undefined || allow(verdict.url)) ? verdict.url : null
+}
+
 // `allow` narrows the policy further (a host that must also parse the URL); it never widens it.
 export function pdfLinks(annotations: readonly unknown[], allow?: (url: string) => boolean): PdfLink[] {
 	const links: PdfLink[] = []
@@ -46,10 +56,9 @@ export function pdfLinks(annotations: readonly unknown[], allow?: (url: string) 
 		const url = typeof entry["url"] === "string" ? entry["url"] : entry["unsafeUrl"]
 
 		if (typeof url === "string") {
-			const verdict = classifyLink(url)
+			const allowed = pdfExternalLink(url, allow)
 
-			if (verdict.kind === "external" && (allow === undefined || allow(verdict.url)))
-				links.push({ kind: "external", rect, url: verdict.url })
+			if (allowed !== null) links.push({ kind: "external", rect, url: allowed })
 
 			continue
 		}

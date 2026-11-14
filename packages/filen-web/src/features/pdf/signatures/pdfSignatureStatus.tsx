@@ -5,7 +5,7 @@ import type { PdfDocument } from "@filen/office/dom/pdf"
 import type { PdfSignatureSummaryState } from "@filen/office/core/pdfsign/summary"
 import { signatureBanner } from "@/features/pdf/signatures/signatureStatus.logic"
 import { usePdfSignatureReport } from "@/features/pdf/signatures/usePdfSignatureReport"
-import { useSignatureVerifier } from "@/features/pdf/signatures/useSignatureVerifier"
+import type { PdfSignatureVerify } from "@/features/pdf/signatures/useSignatureVerifier"
 import { PdfSignaturesDialog } from "@/features/pdf/signatures/pdfSignaturesDialog"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
@@ -16,6 +16,8 @@ import { Spinner } from "@/components/ui/spinner"
 
 export interface PdfSignatureStatusProps {
 	document: PdfDocument
+	// Null: nothing can verify this document's bytes, so no status shows.
+	verify: PdfSignatureVerify | null
 	// Opens the byte prefix the signature covers, read-only; absent where the viewer cannot show it.
 	onViewSignedVersion?: (byteLength: number) => void
 }
@@ -30,9 +32,8 @@ const ICONS: Readonly<Record<PdfSignatureSummaryState, LucideIcon>> = {
 
 const LINE = "flex shrink-0 items-center gap-2 border-b bg-muted px-3 py-1.5 text-xs text-muted-foreground"
 
-export function PdfSignatureStatus({ document, onViewSignedVersion }: PdfSignatureStatusProps) {
+export function PdfSignatureStatus({ document, verify, onViewSignedVersion }: PdfSignatureStatusProps) {
 	const { t } = useTranslation("preview")
-	const verify = useSignatureVerifier()
 	const { check, retry } = usePdfSignatureReport(document, verify)
 	const [details, setDetails] = useState(false)
 

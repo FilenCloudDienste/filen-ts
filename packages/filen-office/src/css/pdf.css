@@ -16,6 +16,11 @@
 	position: relative;
 }
 
+/* A password field's text in a form overlay: masked like a password input, without being one (dom/pdf/formWidgets.ts). */
+.fo-pdf-masked {
+	-webkit-text-security: disc;
+}
+
 /* Over the text layer, which covers the page: the links stay clickable. */
 .fo-pdf-link {
 	position: absolute;

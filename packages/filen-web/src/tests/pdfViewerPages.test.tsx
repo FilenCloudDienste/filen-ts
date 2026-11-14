@@ -30,7 +30,20 @@ const { pages, outline, info, scrolled } = vi.hoisted(() => {
 })
 
 // The link gate reads the trusted link domains.
-vi.mock("@/lib/storage/adapter", () => ({ kvGetJson: () => Promise.resolve(null), kvSetJson: () => Promise.resolve() }))
+// The viewer reaches the account's cached settings (whether earlier versions are kept): an empty store.
+vi.mock("@/lib/storage/adapter", () => ({
+	kvGetJson: () => Promise.resolve(null),
+	kvSetJson: () => Promise.resolve(),
+	kvKeys: () => Promise.resolve([]),
+	kvDelete: () => Promise.resolve(),
+	kvGet: () => Promise.resolve(null),
+	kvHas: () => Promise.resolve(false),
+	kvEntriesJson: () => Promise.resolve([]),
+	kvEntriesJsonInSlices: () => Promise.resolve([]),
+	kvDeletePrefix: () => Promise.resolve(),
+	kvDeleteIfAt: () => Promise.resolve([]),
+	isMissingStorageMethod: () => false
+}))
 
 function fakePage(text: string[] = []): FakePage {
 	const items = text.map(str => ({ str, hasEOL: false }))

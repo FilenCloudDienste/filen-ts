@@ -3,9 +3,12 @@
 import { describe, expect, it, vi } from "vitest"
 import { render } from "@testing-library/react"
 
-// The document settings (author name, autosave) follow remote changes.
+// The document settings (author name, autosave) and the saved PDF signatures follow remote changes.
 
-const { registerOfficeSettings } = vi.hoisted(() => ({ registerOfficeSettings: vi.fn(() => () => undefined) }))
+const { registerOfficeSettings, registerSavedSignatures } = vi.hoisted(() => ({
+	registerOfficeSettings: vi.fn(() => () => undefined),
+	registerSavedSignatures: vi.fn(() => () => undefined)
+}))
 
 vi.mock("@/features/office/lib/officeSettings", () => ({ registerOfficeSettingsSocketHandlers: registerOfficeSettings }))
 vi.mock("@/lib/sdk/socket", () => ({ socketBridge: { start: vi.fn(() => Promise.resolve()) } }))
@@ -19,6 +22,7 @@ vi.mock("@/lib/dotFilen", () => ({ registerDotFilenSocketHandlers: () => () => u
 vi.mock("@/features/videos/lib/library", () => ({ registerLibraryConfigSocketHandlers: () => () => undefined }))
 vi.mock("@/features/videos/lib/watchState", () => ({ registerWatchStateSocketHandlers: () => () => undefined }))
 vi.mock("@/features/spellcheck/lib/userDictionary", () => ({ registerUserDictionarySocketHandlers: () => () => undefined }))
+vi.mock("@/features/pdf/fillSign/savedSignatures", () => ({ registerSavedSignaturesSocketHandlers: registerSavedSignatures }))
 vi.mock("@/features/photos/lib/library", () => ({ registerPhotosLibrarySocketHandlers: () => () => undefined }))
 vi.mock("@/lib/directoryRoots", () => ({ registerDirectoryRootSocketHandlers: () => () => undefined }))
 
@@ -29,5 +33,6 @@ describe("the socket host", () => {
 		render(<SocketHost />)
 
 		expect(registerOfficeSettings).toHaveBeenCalledTimes(1)
+		expect(registerSavedSignatures).toHaveBeenCalledTimes(1)
 	})
 })

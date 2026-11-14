@@ -116,6 +116,29 @@ export function canEditImage(item: DriveItem, variant: DriveVariant): boolean {
 	return extensionOf(driveItemName(base)) !== "svg" && base.data.decryptedMeta?.mime !== "image/svg+xml"
 }
 
+// Whether the PDF tools may change this file: a decryptable PDF in the user's own drive no larger than `maxBytes`
+// (the engine's edit limit for this device, passed in so this module stays free of the engine).
+export function canEditPdf(item: DriveItem, variant: DriveVariant, maxBytes: number): boolean {
+	return pdfEditable(item, variant) && !pdfOverEditLimit(item, maxBytes)
+}
+
+// A PDF the tools would edit but for its size: the "too large to edit" notice instead of an unexplained gate.
+export function pdfTooLargeToEdit(item: DriveItem, variant: DriveVariant, maxBytes: number): boolean {
+	return pdfEditable(item, variant) && pdfOverEditLimit(item, maxBytes)
+}
+
+function pdfEditable(item: DriveItem, variant: DriveVariant): boolean {
+	const base = asDirectoryOrFile(item)
+
+	return variant === "drive" && base.type === "file" && !base.data.undecryptable && previewType(item) === "pdf"
+}
+
+function pdfOverEditLimit(item: DriveItem, maxBytes: number): boolean {
+	const base = asDirectoryOrFile(item)
+
+	return base.type === "file" && Number(base.data.size) > maxBytes
+}
+
 // Containers the video editor reads (its export demuxes them): MP4 and QuickTime, Matroska and WebM, MPEG-TS, 3GPP.
 // Never AVI, WMV or FLV: nothing reads them, so nothing could be exported.
 const VIDEO_EDIT_EXTENSIONS: ReadonlySet<string> = new Set(["mp4", "m4v", "mov", "qt", "mkv", "webm", "ts", "m2ts", "mts", "3gp", "3g2"])
@@ -378,6 +401,10 @@ export interface PresentationSaveEdits {
 	readonly announced: Promise<boolean>
 	readonly result: Promise<SaveResult>
 	commit(file: DriveItem): Promise<{ readonly dirty: boolean }>
+	// The file's exact size, when the writer knows it before the upload starts (a PDF, written whole first).
+	readonly size?: number
+	// The new version's times (an edited PDF keeps the original's creation time, editedSaveTimes).
+	readonly times?: { readonly created: bigint; readonly modified: bigint }
 }
 
 // What the user is told when the session refuses a save: the presentation's own reasons, else the editors' common one.

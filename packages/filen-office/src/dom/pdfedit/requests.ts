@@ -10,6 +10,8 @@ import type {
 	PdfPageInfo,
 	PdfPermission
 } from "./protocol"
+import { saslPrepPassword } from "../../core/pdfwrite/crypto"
+import { EDIT_REQUESTS, startEdit } from "./editRequests"
 import { TileRenderer } from "./render"
 import { SyncRangeReader, syncRangeStreamHandle } from "./stream"
 
@@ -73,9 +75,29 @@ function opened(document: Mupdf.PDFDocument, password: string | undefined): PdfO
 	if (!document.needsPassword()) return { status: "open", document: summary(document), access: "none" }
 	if (password === undefined) return { status: "password" }
 
-	const result = document.authenticatePassword(password)
+	// As typed, then SASLprep'd (an AES-256 password, PDF 32000-2 §7.6.4.3.3): each attempt authenticates anew, so the
+	// last one decides the document's access.
+	let result = 0
+
+	for (const candidate of passwordCandidates(password)) {
+		result = document.authenticatePassword(candidate)
+
+		if (result !== 0) break
+	}
 
 	return result === 0 ? { status: "password" } : { status: "open", document: summary(document), access: access(result) }
+}
+
+function passwordCandidates(password: string): string[] {
+	let prepared: string | null = null
+
+	try {
+		prepared = saslPrepPassword(password)
+	} catch {
+		// Prohibited characters: only the password as typed can match.
+	}
+
+	return prepared === null || prepared === password ? [password] : [password, prepared]
 }
 
 function heap(context: PdfEngineContext): PdfHandled<{ readonly heapBytes: number }> {
@@ -115,14 +137,29 @@ export const PDF_ENGINE_REQUESTS: PdfRequestTable = {
 		// page loaded, which reads blocks all over a file whose pages lie between their images (a scan).
 		document.setPageTreeCache(false)
 
-		context.setCurrent({ document, reader, role, renderer: new TileRenderer(mupdf, document, host.maxDisplayLists) })
+		const result = opened(document, password)
 
-		return { value: opened(document, password) }
+		context.setCurrent({
+			document,
+			reader,
+			role,
+			renderer: new TileRenderer(mupdf, document, host.maxDisplayLists),
+			// The editor's journal starts once the document is unlocked (its objects are read to know the form).
+			edit: role === "edit" && result.status === "open" ? startEdit(document, result, password) : null,
+			heap: null,
+			base: null
+		})
+
+		return { value: result }
 	},
 	authenticate: (context, { password }) => {
-		const { document } = context.open()
+		const current = context.open()
+		const result = opened(current.document, password)
 
-		return { value: opened(document, password) }
+		if (current.role === "edit" && current.edit === null && result.status === "open")
+			context.setCurrent({ ...current, edit: startEdit(current.document, result, password) })
+
+		return { value: result }
 	},
 	pages: (context, { from, count }) => {
 		const { document } = context.open()
@@ -160,12 +197,21 @@ export const PDF_ENGINE_REQUESTS: PdfRequestTable = {
 
 		if (current !== null) {
 			context.setCurrent(null)
+			current.edit?.close()
 			current.renderer.destroy()
 			current.document.destroy()
 			current.reader.close()
+			if (current.base !== null && current.base !== current.heap) current.base.destroy()
+
+			current.heap?.destroy()
 			context.mupdf.emptyStore()
 		}
 
 		return heap(context)
-	}
+	},
+	// The verifier (pkijs, WebCrypto) is a worker's own entry, so a host without it never bundles it.
+	verifySignatures: () => {
+		throw new PdfEngineRefusal("badRequest", "signature verification is not served")
+	},
+	...EDIT_REQUESTS
 }

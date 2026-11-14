@@ -17,7 +17,7 @@ import {
 	type PdfViewerState
 } from "../../dom/pdf/index"
 import type { Slicing } from "../../core/slicing"
-import type { PdfPagesBinding } from "./PdfPages"
+import type { PdfPagesBinding } from "./pageColumn"
 import type { PdfDomDocument } from "./types"
 
 // The viewer over an open document: page tracking, navigation, zoom, rotation and find, driven by

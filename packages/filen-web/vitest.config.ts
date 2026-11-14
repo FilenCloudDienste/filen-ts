@@ -4,12 +4,14 @@ import { officeFonts } from "./vite/office-fonts-plugin"
 import { officeHyphenation } from "./vite/office-hyphenation-plugin"
 import { spellcheckAssets } from "./vite/spellcheck-assets-plugin"
 import { pdfjsAssets } from "./vite/pdfjs-assets-plugin"
+import { ocrAssets } from "./vite/ocr-assets-plugin"
+import { MUPDF_WASM_ALIAS } from "./vite/mupdf-wasm"
 export default defineConfig({
-	// virtual:office-fonts (the viewer's font URLs), virtual:office-hyphenation, virtual:spellcheck-assets and
-	// virtual:pdfjs-assets resolve in tests as in the app.
-	plugins: [officeFonts(), officeHyphenation(), spellcheckAssets(), pdfjsAssets()],
+	// virtual:office-fonts (the viewer's font URLs), virtual:office-hyphenation, virtual:spellcheck-assets,
+	// virtual:pdfjs-assets and virtual:ocr-assets resolve in tests as in the app.
+	plugins: [officeFonts(), officeHyphenation(), spellcheckAssets(), pdfjsAssets(), ocrAssets()],
 	// The same single copies the app build resolves (vite.config.ts): tests render @filen/office's components.
-	resolve: { alias: { "@": new URL("./src", import.meta.url).pathname }, dedupe: SINGLETONS },
+	resolve: { alias: [{ find: "@", replacement: new URL("./src", import.meta.url).pathname }, MUPDF_WASM_ALIAS], dedupe: SINGLETONS },
 	test: {
 		// @testing-library/react registers its auto-cleanup only when a GLOBAL `afterEach` exists
 		// (its index.js guards on `typeof afterEach === "function"`). Without this every render/renderHook

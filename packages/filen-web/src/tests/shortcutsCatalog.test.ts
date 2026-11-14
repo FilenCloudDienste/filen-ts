@@ -122,7 +122,8 @@ describe("shortcut section metadata", () => {
 		"slideshow",
 		"word",
 		"sheet",
-		"archive"
+		"archive",
+		"pdfEditor"
 	]
 
 	it("orders and labels every section", () => {

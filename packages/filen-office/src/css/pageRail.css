@@ -1,0 +1,130 @@
+/* The shared page rail (react/shared/pageRail.tsx) under its default prefix: a PDF's pages rail and Organise grid.
+   Structure only; colours come from the host's --fo-* custom properties. */
+
+.fo-page-rail {
+	position: relative;
+	overflow: auto;
+	overscroll-behavior: contain;
+	background: var(--fo-rail-bg, #f4f4f5);
+	contain: strict;
+	outline: none;
+}
+
+.fo-page-rail[data-fo-orientation="vertical"] {
+	overflow-x: hidden;
+}
+
+.fo-page-rail[data-fo-orientation="horizontal"] {
+	overflow-y: hidden;
+}
+
+.fo-page-rail-content {
+	position: relative;
+}
+
+.fo-page-rail-item {
+	position: absolute;
+	box-sizing: border-box;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	gap: 4px;
+	padding: 6px;
+	cursor: pointer;
+	user-select: none;
+	contain: layout paint;
+	outline: none;
+}
+
+.fo-page-rail[data-fo-orientation="vertical"]:not([data-fo-layout]) .fo-page-rail-item {
+	left: 0;
+	right: 0;
+}
+
+.fo-page-rail[data-fo-orientation="horizontal"] .fo-page-rail-item {
+	top: 0;
+	bottom: 0;
+}
+
+.fo-page-rail-thumb {
+	position: relative;
+	flex: none;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	overflow: hidden;
+	border-radius: var(--fo-rail-radius, 2px);
+}
+
+/* A page's bitmap keeps its own aspect inside the item's box. */
+.fo-page-rail-canvas {
+	display: block;
+	max-width: 100%;
+	max-height: 100%;
+	background: var(--fo-page-bg, #fff);
+	box-shadow: 0 0 0 1px var(--fo-rail-edge, rgb(0 0 0 / 0.15));
+}
+
+.fo-page-rail-thumb[data-fo-pending] {
+	background: var(--fo-page-pending, #fafafa);
+	box-shadow: 0 0 0 1px var(--fo-rail-edge, rgb(0 0 0 / 0.15));
+}
+
+/* A host's hover-only controls on an item (mouse shortcuts; keys do the same). */
+.fo-page-rail-item [data-fo-hover] {
+	position: absolute;
+	display: none;
+}
+
+.fo-page-rail-item:hover [data-fo-hover] {
+	display: flex;
+}
+
+.fo-page-rail-item:hover .fo-page-rail-thumb {
+	outline: 2px solid var(--fo-rail-hover, rgb(0 0 0 / 0.3));
+}
+
+.fo-page-rail-item[aria-selected="true"] .fo-page-rail-thumb {
+	outline: 2px solid var(--fo-rail-selected, #2563eb);
+}
+
+.fo-page-rail-item:focus-visible .fo-page-rail-thumb {
+	outline: 2px solid var(--fo-rail-selected, #2563eb);
+	box-shadow: 0 0 0 4px var(--fo-focus-ring, #2563eb);
+}
+
+/* Where dragged pages land: a line between rows, or between cells in a grid. */
+.fo-page-rail-drop {
+	position: absolute;
+	z-index: 2;
+	pointer-events: none;
+	background: var(--fo-rail-selected, #2563eb);
+}
+
+.fo-page-rail[data-fo-orientation="vertical"] .fo-page-rail-drop:not([data-fo-axis]) {
+	left: 4px;
+	right: 4px;
+	height: 2px;
+}
+
+.fo-page-rail[data-fo-orientation="horizontal"] .fo-page-rail-drop {
+	top: 4px;
+	bottom: 4px;
+	width: 2px;
+}
+
+.fo-page-rail-drop[data-fo-axis="across"] {
+	width: 2px;
+}
+
+.fo-page-rail[data-fo-dragging] .fo-page-rail-item {
+	cursor: grabbing;
+}
+
+.fo-page-rail-marquee {
+	position: absolute;
+	z-index: 3;
+	pointer-events: none;
+	border: 1px solid var(--fo-rail-selected, #2563eb);
+	background: color-mix(in srgb, var(--fo-rail-selected, #2563eb) 12%, transparent);
+}

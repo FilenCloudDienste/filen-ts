@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 
 import { beforeEach, describe, expect, test } from "vitest"
-import { createFormWidgetScope, hardenFormWidgets } from "@/components/pdfPreview/formWidgets"
+import { createFormWidgetScope, hardenFormWidgets } from "@filen/shared/dom/formHardening"
 
 function render(html: string): HTMLElement {
 	const root = document.createElement("div")
@@ -25,7 +25,7 @@ beforeEach(() => {
  */
 describe("hardenFormWidgets", () => {
 	test("downgrades a password input and suppresses autofill", () => {
-		const root = render('<input type="password" name="password" id="password">')
+		const root = render("<input type=\"password\" name=\"password\" id=\"password\">")
 
 		hardenFormWidgets(root, createFormWidgetScope())
 
@@ -39,7 +39,7 @@ describe("hardenFormWidgets", () => {
 	test("rewrites the document's chosen name and id", () => {
 		// Both platforms' autofill heuristics key off attribute names, so a document-chosen
 		// name="password" is a hint that must not survive.
-		const root = render('<input type="password" name="password" id="filen-password">')
+		const root = render("<input type=\"password\" name=\"password\" id=\"filen-password\">")
 
 		hardenFormWidgets(root, createFormWidgetScope())
 
@@ -51,7 +51,7 @@ describe("hardenFormWidgets", () => {
 	})
 
 	test("covers textarea and select, not just input", () => {
-		const root = render('<textarea name="password"></textarea><select name="password"></select>')
+		const root = render("<textarea name=\"password\"></textarea><select name=\"password\"></select>")
 
 		hardenFormWidgets(root, createFormWidgetScope())
 
@@ -64,7 +64,7 @@ describe("hardenFormWidgets", () => {
 	test("is idempotent across repeated renders", () => {
 		// Virtualization re-creates these elements, so the sweep runs again after every annotation-layer
 		// render and on focus. Running twice must not drift.
-		const root = render('<input type="password" name="password">')
+		const root = render("<input type=\"password\" name=\"password\">")
 
 		hardenFormWidgets(root, createFormWidgetScope())
 
@@ -77,11 +77,11 @@ describe("hardenFormWidgets", () => {
 	})
 
 	test("re-hardens an element the document re-added after the first sweep", () => {
-		const root = render('<input type="password" name="password">')
+		const root = render("<input type=\"password\" name=\"password\">")
 
 		hardenFormWidgets(root, createFormWidgetScope())
 
-		root.insertAdjacentHTML("beforeend", '<input type="password" name="password" id="late">')
+		root.insertAdjacentHTML("beforeend", "<input type=\"password\" name=\"password\" id=\"late\">")
 
 		hardenFormWidgets(root, createFormWidgetScope())
 
@@ -95,7 +95,7 @@ describe("hardenFormWidgets", () => {
 		// Radios are grouped BY name. A per-element index would split one group into several
 		// single-option radios that can all be selected at once — a silently broken form.
 		const root = render(
-			'<input type="radio" name="choice" value="a"><input type="radio" name="choice" value="b"><input type="radio" name="other" value="c">'
+			"<input type=\"radio\" name=\"choice\" value=\"a\"><input type=\"radio\" name=\"choice\" value=\"b\"><input type=\"radio\" name=\"other\" value=\"c\">"
 		)
 
 		hardenFormWidgets(root, createFormWidgetScope())
@@ -110,7 +110,7 @@ describe("hardenFormWidgets", () => {
 	test("never wraps widgets in a form", () => {
 		// The contract verifies pdf.js creates no form element; adding one here would manufacture the
 		// very thing the check looks for.
-		const root = render('<input type="password">')
+		const root = render("<input type=\"password\">")
 
 		hardenFormWidgets(root, createFormWidgetScope())
 
@@ -118,7 +118,7 @@ describe("hardenFormWidgets", () => {
 	})
 
 	test("leaves ordinary text fields usable", () => {
-		const root = render('<input type="text" name="firstName" value="hello">')
+		const root = render("<input type=\"text\" name=\"firstName\" value=\"hello\">")
 
 		hardenFormWidgets(root, createFormWidgetScope())
 
@@ -136,7 +136,7 @@ describe("hardenFormWidgets", () => {
 		// of this test built a fresh one per sweep, the one configuration production never uses, and so
 		// passed against the broken implementation.
 		const scope = createFormWidgetScope()
-		const root = render('<input type="radio" name="choice" id="a"><input type="radio" name="choice" id="b">')
+		const root = render("<input type=\"radio\" name=\"choice\" id=\"a\"><input type=\"radio\" name=\"choice\" id=\"b\">")
 
 		hardenFormWidgets(root, scope)
 
@@ -158,13 +158,13 @@ describe("hardenFormWidgets", () => {
 		// in the DOM and in the annotation storage a save serialises from.
 		const scope = createFormWidgetScope()
 
-		const pageOne = render('<input type="checkbox" name="agree" id="a">')
+		const pageOne = render("<input type=\"checkbox\" name=\"agree\" id=\"a\">")
 
 		hardenFormWidgets(pageOne, scope)
 
 		const first = pageOne.querySelector("input")?.name
 
-		const pageTwo = render('<input type="checkbox" name="subscribe" id="b">')
+		const pageTwo = render("<input type=\"checkbox\" name=\"subscribe\" id=\"b\">")
 
 		hardenFormWidgets(pageTwo, scope)
 
@@ -180,11 +180,11 @@ describe("hardenFormWidgets", () => {
 		// same field. Splitting it would let two options of one group be selected at once.
 		const scope = createFormWidgetScope()
 
-		const pageOne = render('<input type="radio" name="choice" id="a">')
+		const pageOne = render("<input type=\"radio\" name=\"choice\" id=\"a\">")
 
 		hardenFormWidgets(pageOne, scope)
 
-		const pageTwo = render('<input type="radio" name="choice" id="b">')
+		const pageTwo = render("<input type=\"radio\" name=\"choice\" id=\"b\">")
 
 		hardenFormWidgets(pageTwo, scope)
 
@@ -195,11 +195,11 @@ describe("hardenFormWidgets", () => {
 		// Duplicate ids in one document break label association and getElementById.
 		const scope = createFormWidgetScope()
 
-		const pageOne = render('<input type="text" name="one" id="x">')
+		const pageOne = render("<input type=\"text\" name=\"one\" id=\"x\">")
 
 		hardenFormWidgets(pageOne, scope)
 
-		const pageTwo = render('<input type="text" name="two" id="y">')
+		const pageTwo = render("<input type=\"text\" name=\"two\" id=\"y\">")
 
 		hardenFormWidgets(pageTwo, scope)
 

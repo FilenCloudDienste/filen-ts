@@ -1,5 +1,11 @@
 import type * as Mupdf from "mupdf"
+import type { PdfMemoryProfile } from "../../core/pdfedit/budget"
+import type { PdfSavePlan, PdfSaveRefusal } from "../../core/pdfedit/savePlan"
+import type { PdfCommandResult, PdfEditState, PdfPageWidgets } from "../../core/pdfedit/state"
+import type { PdfSignatureReport } from "../../core/pdfsign/types"
+import type { PdfSignatureFieldHint } from "../pdf/signatureFields"
 import type { SyncRangePort } from "./syncRange"
+import type { PdfPageText } from "./text"
 
 // What a page and a PDF engine worker (MuPDF) say to each other. Requests carry an id and get exactly one answer;
 // the worker also posts events (a render started, the engine was poisoned). Everything is plain data; bitmaps and
@@ -41,6 +47,8 @@ export type PdfEngineFailure =
 	| "closed"
 	// The request was malformed or not allowed in this role.
 	| "badRequest"
+	// The document does not allow the change (a read-only or signature-locked field, the author's restrictions).
+	| "notAllowed"
 	// MuPDF refused it (a damaged object, an unsupported feature).
 	| "failed"
 
@@ -112,6 +120,96 @@ export interface PdfEngineOps {
 	evict: { readonly args: { readonly pages: readonly number[] }; readonly value: null }
 	heap: { readonly args: Record<string, never>; readonly value: PdfHeapReport }
 	close: { readonly args: Record<string, never>; readonly value: PdfHeapReport }
+	// The open document's signatures checked on its raw bytes. `fields` are what a second parser (pdf.js) found, null
+	// when it could not tell. Served by a worker that registers verifySignaturesRequest (verifyRequest.ts).
+	verifySignatures: {
+		readonly args: { readonly fields: readonly PdfSignatureFieldHint[] | null }
+		readonly value: PdfSignatureReport
+	}
+	// --- The edit role ---
+	// The document as the editor reports it.
+	state: { readonly args: Record<string, never>; readonly value: PdfEditState }
+	// The widgets of these 0-based pages.
+	widgets: { readonly args: { readonly pages: readonly number[] }; readonly value: readonly PdfPageWidgets[] }
+	// One command (commands/index.ts) as one journal operation.
+	dispatch: {
+		readonly args: { readonly command: string; readonly args: unknown; readonly op?: PdfCommandOp }
+		readonly value: PdfCommandResult
+	}
+	undo: { readonly args: Record<string, never>; readonly value: PdfCommandResult }
+	redo: { readonly args: Record<string, never>; readonly value: PdfCommandResult }
+	// A save: planned (core/pdfedit/savePlan.ts), then written into the heap and held there until saveEnd.
+	saveBegin: {
+		readonly args: {
+			readonly inputBytes: number
+			readonly memory: PdfMemoryProfile
+			readonly invalidateConfirmed: boolean
+		}
+		readonly value: PdfSaveBegun
+	}
+	// Serves the held output's bytes on a sync range channel (to a verifying engine), until saveEnd.
+	serveOutput: { readonly args: { readonly buffer: SharedArrayBuffer; readonly port: SyncRangePort }; readonly value: null }
+	// Streams the held output to an upload over a save port (@filen/shared/savePort) and answers whether the upload
+	// made the file.
+	writeOutput: { readonly args: { readonly port: unknown }; readonly value: { readonly uploaded: boolean } }
+	// Ends a save: the upload made the file a new version of the document's file ("saved"), a new file beside it
+	// ("copied"), or nothing ("failed"). The held output is dropped, or adopted as the document after "saved".
+	saveEnd: { readonly args: { readonly outcome: PdfSaveOutcome; readonly next: PdfAfterSave }; readonly value: PdfSaveEnded }
+	// --- Any role ---
+	// A page's text lines and links (the text layer, find, links after the swap).
+	text: { readonly args: { readonly page: number }; readonly value: PdfPageText }
+	// Where a named destination or a page object leads: a 0-based page and a point in its bottom-left user space; null
+	// when nowhere.
+	destination: {
+		readonly args: { readonly name: string } | { readonly pageObject: number }
+		readonly value: PdfDestinationPoint | null
+	}
+	// --- The verify role, on a written file (opened, and unlocked with the document's password) ---
+	checkSaved: { readonly args: PdfSaveExpectation; readonly value: PdfSaveCheck }
+}
+
+// A step of a drag or another gesture: the steps sharing an id are one journal operation, ended by the step with
+// `final` (or by any other change, undo, redo or save).
+export interface PdfCommandOp {
+	readonly id: string
+	readonly final: boolean
+}
+
+// A save, written into the engine's heap before anything leaves it.
+export type PdfSaveBegun =
+	// `versions`: the revisions the written file has (what checkSaved expects).
+	| { readonly status: "written"; readonly plan: PdfSavePlan; readonly size: number; readonly versions: number }
+	| { readonly status: "refused"; readonly plan: PdfSavePlan; readonly reason: PdfSaveRefusal }
+
+// What a written file must be: verification after a save opens it in another engine and checks it.
+export interface PdfSaveExpectation {
+	readonly pageCount: number
+	readonly versions: number
+	// The encryption method, as PdfDocumentSummary gives it ("None" when not encrypted).
+	readonly encryption: string
+}
+
+export type PdfSaveCheck = { readonly ok: true } | { readonly ok: false; readonly reason: string }
+
+// How the session goes on after a save: with its undo history ("continue": a step back past the save opens the file the
+// history starts at again, which must stay readable), or starting again on the written file held in the heap ("adopt":
+// where the old file may go). An incremental save always goes on on the written file, opened in place.
+export type PdfAfterSave = "continue" | "adopt"
+
+export type PdfSaveOutcome = "saved" | "copied" | "failed"
+
+export interface PdfDestinationPoint {
+	readonly page: number
+	readonly left: number | null
+	readonly top: number | null
+}
+
+export interface PdfSaveEnded {
+	readonly state: PdfEditState
+	// The heap's high-water mark: a caller replaces an engine past its respawn threshold.
+	readonly heapBytes: number
+	// Whether the undo history survived.
+	readonly history: "kept" | "reset"
 }
 
 export type PdfEngineOp = keyof PdfEngineOps

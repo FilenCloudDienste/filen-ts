@@ -33,6 +33,7 @@ import { loadOfficeViewSettings } from "@/features/office/lib/officeViewSettings
 import { loadRibbonCollapsed } from "@/features/office/lib/ribbonSettings"
 import { loadDocxFormattingMarks } from "@/features/preview/lib/docxFormattingMarks"
 import { loadSidebarHidden } from "@/features/shell/lib/sidebarHidden"
+import { loadOcrLanguages } from "@/features/pdf/ocr/ocrLanguagePreference"
 
 // Settled when bootSdk() finishes — on success OR failure, and never rejected. Auth-sensitive route
 // guards await this before reading hasClient(): the boot kick runs before the router mounts, but
@@ -167,9 +168,13 @@ export async function retrySessionResume(discard: boolean): Promise<boolean> {
 // probe: the first real SDK call (session resume, login) exercises the async runtime, and a runtime
 // failure in the steps below lands in the catch as an "async-runtime" boot error.
 function preloadDevicePreferences(): Promise<void> {
-	return Promise.all([loadOfficeViewSettings(), loadRibbonCollapsed(), loadDocxFormattingMarks(), loadSidebarHidden()]).then(
-		() => undefined
-	)
+	return Promise.all([
+		loadOfficeViewSettings(),
+		loadRibbonCollapsed(),
+		loadDocxFormattingMarks(),
+		loadSidebarHidden(),
+		loadOcrLanguages()
+	]).then(() => undefined)
 }
 
 export async function bootSdk(): Promise<void> {

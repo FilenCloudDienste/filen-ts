@@ -20,7 +20,7 @@ import {
 } from "@/components/pdfPreview/protocol"
 import { PDF_MAX_PAGE_CANVAS_BYTES, PDF_MAX_ZOOM } from "@/components/pdfPreview/constants"
 import { MAX_RANGE_LENGTH, base64ToBytes, writeAllBytes } from "@/lib/rangeTransfer"
-import { createFormWidgetScope, hardenFormWidgets } from "@/components/pdfPreview/formWidgets"
+import { createFormWidgetScope, hardenFormWidgets } from "@filen/shared/dom/formHardening"
 import { attachTextLayerSelection } from "@/components/pdfPreview/textSelection"
 import { classifyUntrustedLinkHref } from "@/lib/untrustedLinks"
 import { EXTERNAL_URL_ATTRIBUTE, postExternalLink, postToNativeWebView } from "@/lib/domExternalLink"

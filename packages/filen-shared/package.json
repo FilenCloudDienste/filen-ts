@@ -13,6 +13,9 @@
 	"exports": {
 		".": "./src/index.ts",
 		"./dom": "./src/dom/index.ts",
+		"./dom/formHardening": "./src/dom/formHardening.ts",
+		"./dom/formFieldNames": "./src/dom/formFieldNames.ts",
+		"./pdfSignatures": "./src/pdfSignatures.ts",
 		"./emojis": "./src/emojis/index.ts",
 		"./tooling": "./src/tooling/licenseNotices.ts",
 		"./tooling/i18n": "./src/tooling/i18nPipeline.ts",

@@ -736,7 +736,56 @@ export const RESOLVED_COLLISIONS: readonly (readonly [string, string])[] = [
 	["preview.imageZoomIn", "sheet.insertCells"],
 	["preview.imageZoomOut", "sheet.deleteCells"],
 	["preview.pdfNextPage", "sheet.nextSheet"],
-	["preview.pdfPreviousPage", "sheet.previousSheet"]
+	["preview.pdfPreviousPage", "sheet.previousSheet"],
+	// The PDF editor is one more body of the preview overlay, which shows one file at a time: its undo, redo, delete,
+	// Escape and page rotate never mount with the other bodies' (the image and video editors, the code, Word, spreadsheet
+	// and presentation editors, the running show, the archive browser).
+	["pdf.undo", "docx.undo"],
+	["pdf.undo", "editor.undo"],
+	["pdf.undo", "presentation.undo"],
+	["pdf.undo", "preview.imageUndo"],
+	["pdf.undo", "preview.videoUndo"],
+	["pdf.undo", "sheet.undo"],
+	["pdf.redo", "docx.redo"],
+	["pdf.redo", "editor.redo"],
+	["pdf.redo", "presentation.redo"],
+	["pdf.redo", "preview.imageRedo"],
+	["pdf.redo", "preview.videoRedo"],
+	["pdf.redo", "sheet.redo"],
+	["pdf.redo", "sheet.redoOrRepeat"],
+	["pdf.delete", "archive.parent"],
+	["pdf.delete", "presentation.deleteSlide"],
+	["pdf.delete", "presentation.show.previous"],
+	["pdf.delete", "preview.videoRemoveSection"],
+	["pdf.escape", "archive.back"],
+	["pdf.escape", "archive.clearSelection"],
+	["pdf.escape", "presentation.show.end"],
+	["pdf.escape", "preview.imageCancel"],
+	["pdf.escape", "preview.videoCancel"],
+	["pdf.rotatePagesCcw", "editor.fold"],
+	["pdf.rotatePagesCcw", "editor.foldAll"],
+	["pdf.rotatePagesCw", "editor.unfold"],
+	["pdf.rotatePagesCw", "editor.unfoldAll"],
+	// The listings and the chat under the preview stand down while it is the open dialog; the notes route never mounts
+	// it.
+	["pdf.delete", "chats.deleteSelected"],
+	["pdf.delete", "chats.message.delete"],
+	["pdf.delete", "drive.trash"],
+	["pdf.delete", "notes.trash"],
+	["pdf.delete", "photos.trash"],
+	["pdf.escape", "chats.clearSelection"],
+	["pdf.escape", "drive.clearSelection"],
+	["pdf.escape", "notes.clearSelection"],
+	["pdf.escape", "photos.clearSelection"],
+	// The overlay's own keys take only a key no body took: the PDF editor takes Delete and Escape only while something is
+	// selected or a tool is active, and stops them there.
+	["pdf.delete", "preview.trash"],
+	["pdf.escape", "preview.close"],
+	// The chat composer's field, the players (keys only with focus inside one) and a shared link's page (which never
+	// mounts the editor) never share a layer with the PDF editor.
+	["pdf.escape", "chats.composer.cancel"],
+	["pdf.escape", "links.back"],
+	["pdf.escape", "media.close"]
 ]
 
 export function scopesCanCollide(a: ActionScope, b: ActionScope): boolean {

@@ -1,7 +1,14 @@
-import { useEffect, useEffectEvent, useRef, useState } from "react"
+import { useEffect, useEffectEvent, useRef, useState, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { getDocument, GlobalWorkerOptions, PDFDataRangeTransport, TextLayer } from "pdfjs-dist"
-import { loadPdfOutline, type PdfErrorKind, type PdfOutlineItem, type PdfSource, type PdfViewerCommand } from "@filen/office/dom/pdf"
+import {
+	loadPdfOutline,
+	type PdfErrorKind,
+	type PdfOutlineItem,
+	type PdfSource,
+	type PdfViewerCommand,
+	type PdfViewport
+} from "@filen/office/dom/pdf"
 import {
 	PdfPages,
 	usePdfDocument,
@@ -40,11 +47,26 @@ import { usePasswordDraft } from "@/features/preview/lib/passwordDraft"
 import { usePdfPrint } from "@/features/pdf/print/usePdfPrint"
 import { PDFJS_ASSETS } from "virtual:pdfjs-assets"
 import { BLOCK_BYTES } from "@filen/shared/videos"
-import { PdfSignatureStatus } from "@/features/pdf/signatures/pdfSignatureStatus"
+import { PdfSignatureStatus, PdfSignedVersionStatus } from "@/features/pdf/signatures/pdfSignatureStatus"
+import { useSignatureVerifier, type PdfSignatureVerify } from "@/features/pdf/signatures/useSignatureVerifier"
+import { usePdfEdit, type PdfEditHost, type PdfEditView } from "@/features/pdf/session/usePdfEdit"
+import { PdfFieldOverlay } from "@/features/pdf/session/fieldOverlay"
+import { PdfRibbon } from "@/features/pdf/ribbon/pdfRibbon"
+import { PDF_TOOLS } from "@/features/pdf/tools"
+import { usePreviewAccessMode } from "@/features/preview/lib/accessMode"
+import type { DriveVariant } from "@/features/drive/lib/preferences"
+import { pdfTooLargeToEdit, type PresentationSaveSource } from "@/features/drive/lib/previewSave.logic"
+import { pdfEngineMemory } from "@/features/pdf/session/engineWorker"
+import { formatBytes } from "@filen/shared"
 
 export interface PdfViewerProps {
 	item: DriveItem
 	alt: string
+	variant?: DriveVariant
+	canSaveCopy?: boolean
+	onOpenFile?: (item: DriveItem) => void
+	// Present where the slot's file may be edited and saved (the preview overlay's save path).
+	editing?: PdfEditHost
 }
 
 // Only what the viewer uses, so the rest of pdf.js's exports stay out of the bundle.
@@ -136,15 +158,28 @@ export function PdfPasswordPrompt({ attempt, onSubmit }: { attempt: PasswordAtte
 }
 
 interface PdfReaderProps {
+	// A one-line notice under the ribbon (the file is too large to edit here).
+	notice: ReactNode
+	// The document shown: pdf.js's, or the editor's once it took over.
 	document: PdfDomDocument
+	// pdf.js's document as opened (its signatures are checked once, whatever engine shows the pages later).
+	viewerDocument: PdfDomDocument
+	edit: PdfEditView | null
 	alt: string
 	size: number
 	// pdf.js holds every byte of the file (it read them all); a reopen of the document drops them.
 	fullyRead: boolean
 	onReopen: () => void
+	signatures: PdfSignatures
 }
 
-function PdfReader({ document, alt, size, fullyRead, onReopen }: PdfReaderProps) {
+// The signature status of the document shown: its verifier (null: none), and either the way to open the byte prefix a
+// signature signed, or, while that signed version is shown, the way back.
+type PdfSignatures =
+	| { readonly kind: "current"; readonly verify: PdfSignatureVerify | null; readonly onViewSignedVersion: (byteLength: number) => void }
+	| { readonly kind: "signedVersion"; readonly onBack: () => void }
+
+function PdfReader({ notice, document, viewerDocument, edit, alt, size, fullyRead, onReopen, signatures }: PdfReaderProps) {
 	const { t } = useTranslation("preview")
 	const viewer = usePdfViewer(document)
 	const { state } = viewer
@@ -205,7 +240,7 @@ function PdfReader({ document, alt, size, fullyRead, onReopen }: PdfReaderProps)
 		size,
 		fullRead: {
 			confirm: () => fullRead.confirm("print"),
-			hold: fullRead.hold
+			hold: () => fullRead.hold()
 		}
 	})
 
@@ -287,6 +322,43 @@ function PdfReader({ document, alt, size, fullyRead, onReopen }: PdfReaderProps)
 		},
 		IN_EDITORS,
 		[state.find, dispatch]
+	)
+
+	// Undo and redo of the editor's changes, from anywhere in the layer but a field (which keeps its own text undo).
+	const editHistory = edit?.history ?? null
+	const onHistoryKey = (keyboardEvent: KeyboardEvent, redo: boolean): void => {
+		const root = rootRef.current
+
+		if (root === null || editHistory === null || !keyForEditor(root, keyboardEvent.target)) {
+			return
+		}
+
+		keyboardEvent.preventDefault()
+
+		if (redo ? editHistory.canRedo : editHistory.canUndo) {
+			if (redo) {
+				editHistory.redo()
+			} else {
+				editHistory.undo()
+			}
+		}
+	}
+
+	useAction(
+		"pdf.undo",
+		keyboardEvent => {
+			onHistoryKey(keyboardEvent, false)
+		},
+		IN_EDITORS,
+		[editHistory]
+	)
+	useAction(
+		"pdf.redo",
+		keyboardEvent => {
+			onHistoryKey(keyboardEvent, true)
+		},
+		IN_EDITORS,
+		[editHistory]
 	)
 
 	const focusPages = (): void => {
@@ -372,23 +444,69 @@ function PdfReader({ document, alt, size, fullyRead, onReopen }: PdfReaderProps)
 					onCommandBarF6(event, event.currentTarget, focusPages)
 			}}
 		>
-			<PdfCommandBar
-				state={state}
-				dispatch={dispatch}
-				document={document}
-				outline={outline}
-				findFocus={findFocus}
-				onFindClosed={() => {
-					viewer.pages.scrollerRef.current?.focus()
-				}}
-				onDownload={download}
-				onPrint={print.open}
-				onProperties={() => {
-					setProperties(true)
-				}}
-				pageInputRef={pageInputRef}
-			/>
-			<PdfSignatureStatus document={document} />
+			{edit === null ? (
+				<PdfCommandBar
+					state={state}
+					dispatch={dispatch}
+					document={document}
+					outline={outline}
+					findFocus={findFocus}
+					onFindClosed={() => {
+						viewer.pages.scrollerRef.current?.focus()
+					}}
+					onDownload={download}
+					onPrint={print.open}
+					onProperties={() => {
+						setProperties(true)
+					}}
+					pageInputRef={pageInputRef}
+				/>
+			) : (
+				<PdfRibbon
+					state={state}
+					dispatch={dispatch}
+					document={document}
+					outline={outline}
+					findFocus={findFocus}
+					onFindClosed={() => {
+						viewer.pages.scrollerRef.current?.focus()
+					}}
+					onDownload={download}
+					onPrint={
+						print.open === undefined
+							? undefined
+							: () => {
+									// Printing after a change renders through the editor: it is fetched meanwhile.
+									edit.swap.prefetch()
+									print.open?.()
+								}
+					}
+					onProperties={() => {
+						setProperties(true)
+					}}
+					pageInputRef={pageInputRef}
+					tools={PDF_TOOLS}
+					policy={edit.policy}
+					toolContext={edit.toolContext}
+					activeTool={edit.activeTool}
+					onActivateTool={edit.setActiveTool}
+					onPrefetch={() => {
+						edit.swap.prefetch()
+					}}
+					history={edit.history}
+				/>
+			)}
+			{edit?.banner}
+			{notice}
+			{signatures.kind === "current" ? (
+				<PdfSignatureStatus
+					document={viewerDocument}
+					verify={signatures.verify}
+					onViewSignedVersion={signatures.onViewSignedVersion}
+				/>
+			) : (
+				<PdfSignedVersionStatus onBack={signatures.onBack} />
+			)}
 			{/* A preview surface: arrow keys in the pages scroll the document (sideways on a zoomed page) instead of
 			paging to another file. External links open in a new tab once their domain is trusted. */}
 			<div
@@ -409,12 +527,28 @@ function PdfReader({ document, alt, size, fullyRead, onReopen }: PdfReaderProps)
 					}
 					allowLink={isSafeAbsoluteHref}
 					maxCanvasBytes={viewerSetup().limits.canvasMaxAreaInBytes}
+					{...(edit === null
+						? {}
+						: {
+								overlay: (page: number, viewport: PdfViewport) => (
+									<PdfFieldOverlay
+										document={document}
+										page={page}
+										viewport={viewport}
+										swap={edit.swap}
+										snapshot={edit.snapshot}
+										starting={edit.phase.kind === "starting"}
+										editable={edit.policy.editable && edit.policy.online}
+									/>
+								)
+							})}
 					tabIndex={-1}
 					onClick={linkGate.onClick}
 					onAuxClick={linkGate.onAuxClick}
 				/>
 			</div>
 			{linkGate.dialog}
+			{edit?.dialogs}
 			{print.dialog}
 			{fullRead.dialog}
 			<PdfPropertiesDialog
@@ -428,22 +562,57 @@ function PdfReader({ document, alt, size, fullyRead, onReopen }: PdfReaderProps)
 }
 
 interface PdfDocumentProps {
+	notice: ReactNode
+	edit: PdfEditView | null
 	source: PdfSource
 	alt: string
 	// The file's size (a ranged source reads less up front).
 	size: number
 	// Opens the source again: a ranged source's own retry gets a new port.
 	onRetry?: () => void
+	signatures: PdfSignatures
 }
 
 function loadFailedKey(kind: PdfErrorKind): "previewPdfReadFailed" | "previewPdfLoadFailed" {
 	return kind === "transportFailed" ? "previewPdfReadFailed" : "previewPdfLoadFailed"
 }
 
-function PdfDocument({ source, alt, size, onRetry }: PdfDocumentProps) {
+function PdfDocument({ notice, edit, source, alt, size, onRetry, signatures }: PdfDocumentProps) {
 	const { t } = useTranslation("preview")
-	const { state, password, retry, fullyRead, reopen } = usePdfDocument(PDFJS, source, viewerSetup().options)
+	const { state, password, retry, fullyRead, reopen, acceptedPassword, release } = usePdfDocument(PDFJS, source, viewerSetup().options)
 	const failed = state.status === "error"
+	const ready = state.status === "ready" ? state.document : null
+	const swap = edit?.swap ?? null
+	const editing = edit?.phase.kind === "editing"
+
+	// The editor takes the view from this document (and the password pdf.js accepted for it, memory only).
+	useEffect(() => {
+		if (swap === null || ready === null) {
+			return
+		}
+
+		swap.setViewer(ready, acceptedPassword())
+
+		return () => {
+			swap.setViewer(null, null)
+		}
+	}, [swap, ready, acceptedPassword])
+
+	// Once the editor has the document, pdf.js closes: its file buffer goes, its painted pages stay on screen.
+	useEffect(() => {
+		if (editing) {
+			release()
+		}
+	}, [editing, release])
+
+	// A form or signatures: the editor is likely wanted, so it is fetched while the reader is idle.
+	useEffect(() => {
+		if (swap === null || ready === null) {
+			return
+		}
+
+		return prefetchWhenIdle(ready, swap)
+	}, [swap, ready])
 
 	useEffect(() => {
 		if (failed) {
@@ -476,38 +645,58 @@ function PdfDocument({ source, alt, size, onRetry }: PdfDocumentProps) {
 
 	return (
 		<PdfReader
-			document={state.document}
+			notice={notice}
+			document={edit?.snapshot?.document ?? state.document}
+			viewerDocument={state.document}
+			edit={edit}
 			alt={alt}
 			size={size}
 			fullyRead={fullyRead}
 			onReopen={reopen}
+			signatures={signatures}
 		/>
 	)
 }
 
-function BufferedPdf({ item, alt }: PdfViewerProps) {
+interface PdfSourceProps {
+	item: DriveItem
+	alt: string
+	// Bytes [0, limit) only: the version a signature signed.
+	limit: number | undefined
+	signatures: PdfSignatures
+	edit: PdfEditView | null
+	notice: ReactNode
+}
+
+function BufferedPdf({ item, alt, limit, signatures, edit, notice }: PdfSourceProps) {
 	return (
 		<PreviewGate result={usePreviewBytes(item)}>
 			{ready => (
 				<PdfDocument
-					source={{ kind: "bytes", bytes: ready.bytes }}
+					notice={notice}
+					edit={edit}
+					source={{ kind: "bytes", bytes: limit === undefined ? ready.bytes : ready.bytes.subarray(0, limit) }}
 					alt={alt}
-					size={ready.bytes.byteLength}
+					size={limit ?? ready.bytes.byteLength}
+					signatures={signatures}
 				/>
 			)}
 		</PreviewGate>
 	)
 }
 
-function RangedPdf({ item, alt }: PdfViewerProps) {
+function RangedPdf({ item, alt, limit, signatures, edit, notice }: PdfSourceProps) {
 	return (
-		<PreviewGate result={usePreviewRangeSource(item)}>
+		<PreviewGate result={usePreviewRangeSource(item, limit === undefined ? undefined : { limit })}>
 			{ready => (
 				<PdfDocument
+					notice={notice}
+					edit={edit}
 					source={ready.source}
 					alt={alt}
-					size={Number(item.data.size)}
+					size={limit ?? Number(item.data.size)}
 					onRetry={ready.refetch}
+					signatures={signatures}
 				/>
 			)}
 		</PreviewGate>
@@ -517,20 +706,149 @@ function RangedPdf({ item, alt }: PdfViewerProps) {
 // pdf.js reads the file on demand through a range port to the SDK worker, aligned to its blocks, so a large file opens
 // after reading its first pages. A file of one block or less is read whole and kept in the session's preview cache,
 // as is an archive's entry (bytes from the archive, not the drive).
-export function PdfViewer({ item, alt }: PdfViewerProps) {
+export function PdfViewer({ item, alt, variant, editing }: PdfViewerProps) {
 	useLeaveViewerFullScreen()
 
-	const ranged = usePreviewByteSource() === null && Number(item.data.size) > BLOCK_BYTES
+	const { t } = useTranslation("preview")
 
-	return ranged ? (
+	const entry = usePreviewByteSource()
+	const access = usePreviewAccessMode()
+	// An archive's entry is not a drive file the editor could read or save.
+	const edit = usePdfEdit(item, access, entry === null ? editing : undefined)
+	const editView = entry === null && editing !== undefined ? edit : null
+	const holding = edit.phase.kind === "starting" || edit.phase.kind === "editing"
+	// The file pdf.js opened: kept while the editor holds the document (its saves make new versions under it).
+	const [shownItem, setShownItem] = useState(item)
+
+	if (!holding && shownItem.data.uuid !== item.data.uuid) {
+		setShownItem(item)
+	}
+
+	// pdf.js closed its document when the editor took over: one the editor let go of (Discard, a poisoned engine) opens
+	// pdf.js anew on the file.
+	const [view, setView] = useState({ held: false, generation: 0 })
+
+	if (edit.phase.kind === "editing" && !view.held) {
+		setView({ held: true, generation: view.generation })
+	} else if (!holding && view.held) {
+		setView({ held: false, generation: view.generation + 1 })
+	}
+
+	const ranged = entry === null && Number(shownItem.data.size) > BLOCK_BYTES
+	const verify = useSignatureVerifier(item)
+	// The byte length of the signed version shown instead of the file, or null for the file itself.
+	const [signedVersion, setSignedVersion] = useState<number | null>(null)
+	const signatures: PdfSignatures =
+		signedVersion === null
+			? { kind: "current", verify, onViewSignedVersion: setSignedVersion }
+			: {
+					kind: "signedVersion",
+					onBack: () => {
+						setSignedVersion(null)
+					}
+				}
+	const limit = signedVersion ?? undefined
+	// A new key per version shown: the document, its viewer state and its reads start over.
+	const key = signedVersion === null ? `file-${String(view.generation)}` : `signed-${String(signedVersion)}`
+	const editMaxBytes = pdfEngineMemory().editMaxBytes
+	// A file the tools would edit but for its size: said once, under the ribbon.
+	const notice =
+		variant !== undefined && entry === null && signedVersion === null && pdfTooLargeToEdit(item, variant, editMaxBytes) ? (
+			<div
+				role="status"
+				className="flex shrink-0 items-center gap-2 border-b bg-muted px-3 py-1.5 text-xs text-muted-foreground"
+			>
+				<p className="min-w-0 flex-1">{t("previewPdfTooLarge", { size: formatBytes(editMaxBytes) })}</p>
+			</div>
+		) : null
+	// The signed version is a read-only view of bytes, never the editor's.
+	const sourceEdit = signedVersion === null ? editView : null
+
+	const source = ranged ? (
 		<RangedPdf
-			item={item}
+			key={key}
+			item={shownItem}
 			alt={alt}
+			limit={limit}
+			signatures={signatures}
+			edit={sourceEdit}
+			notice={notice}
 		/>
 	) : (
 		<BufferedPdf
-			item={item}
+			key={key}
+			item={shownItem}
 			alt={alt}
+			limit={limit}
+			signatures={signatures}
+			edit={sourceEdit}
+			notice={notice}
 		/>
 	)
+
+	return (
+		<>
+			{editing !== undefined && editView !== null ? (
+				<PdfSaveBinding
+					saveRef={editing.saveRef}
+					saveSource={editView.saveSource}
+				/>
+			) : null}
+			{source}
+		</>
+	)
+}
+
+// The overlay's Save streams through the editor while it has the document.
+function PdfSaveBinding({ saveRef, saveSource }: { saveRef: PdfEditHost["saveRef"]; saveSource: PresentationSaveSource | null }) {
+	useEffect(() => {
+		if (saveSource === null) {
+			return
+		}
+
+		saveRef.current = saveSource
+
+		return () => {
+			if (saveRef.current === saveSource) {
+				saveRef.current = null
+			}
+		}
+	}, [saveRef, saveSource])
+
+	return null
+}
+
+// Fetches the editor while the reader is idle when the document has a form or signatures (pdf.js's information says,
+// with no page read). Returns the cancel.
+function prefetchWhenIdle(document: PdfDomDocument, swap: { prefetch(): void }): () => void {
+	let live = true
+	let idle = 0
+
+	void document.getMetadata().then(
+		({ info }) => {
+			const record = typeof info === "object" && info !== null ? info : {}
+			const wanted = Reflect.get(record, "IsAcroFormPresent") === true || Reflect.get(record, "IsSignaturesPresent") === true
+
+			if (!live || !wanted) {
+				return
+			}
+
+			const prefetch = (): void => {
+				swap.prefetch()
+			}
+
+			idle = typeof requestIdleCallback === "function" ? requestIdleCallback(prefetch) : window.setTimeout(prefetch, 2000)
+		},
+		() => undefined
+	)
+
+	return () => {
+		live = false
+
+		if (typeof cancelIdleCallback === "function") {
+			cancelIdleCallback(idle)
+		} else {
+			window.clearTimeout(idle)
+		}
+	}
 }

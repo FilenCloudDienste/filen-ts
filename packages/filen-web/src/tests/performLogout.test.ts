@@ -30,6 +30,7 @@ const {
 	wipeVideoIndexStore,
 	resetVideoSession,
 	officeSettingsReset,
+	savedSignaturesReset,
 	confirmMountsSignOut,
 	wipeLegacyWebOnSignOut
 } = vi.hoisted(() => {
@@ -69,6 +70,7 @@ const {
 		wipeVideoIndexStore: vi.fn(() => Promise.resolve()),
 		resetVideoSession: vi.fn(record("resetVideoSession", () => undefined)),
 		officeSettingsReset: vi.fn(),
+		savedSignaturesReset: vi.fn(),
 		confirmMountsSignOut: vi.fn(() => Promise.resolve(true)),
 		wipeLegacyWebOnSignOut: vi.fn(() => Promise.resolve())
 	}
@@ -127,6 +129,7 @@ vi.mock("@/features/preview/imageEdit/renderClient", () => ({ releaseImageEditWo
 vi.mock("@/queries/client", () => ({ queryClient: { cancelQueries: vi.fn(), clear: vi.fn() } }))
 vi.mock("sonner", () => ({ toast: { warning: toastWarning } }))
 vi.mock("@/features/office/lib/officeSettings", () => ({ resetOfficeSettings: officeSettingsReset }))
+vi.mock("@/features/pdf/fillSign/savedSignatures", () => ({ resetSavedSignatures: savedSignaturesReset }))
 vi.mock("@/features/mounts/lib/mountsStore", () => ({ confirmMountsSignOut }))
 
 import { kvClear } from "@/lib/storage/adapter"
@@ -285,10 +288,11 @@ describe("performLogout", () => {
 		expect(cache.get("archive-uuid")).toBeUndefined()
 	})
 
-	it("forgets the document settings, which are this account's", async () => {
+	it("forgets the document settings and saved PDF signatures, which are this account's", async () => {
 		await performLogout()
 
 		expect(officeSettingsReset).toHaveBeenCalledTimes(1)
+		expect(savedSignaturesReset).toHaveBeenCalledTimes(1)
 	})
 
 	it("empties the drive clipboard, whose items belong to this account", async () => {

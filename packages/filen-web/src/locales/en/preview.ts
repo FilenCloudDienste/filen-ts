@@ -72,6 +72,18 @@ import { previewSheetShortcuts } from "@/locales/en/previewSheet/shortcuts"
 import { previewPdfView } from "@/locales/en/previewPdf/view"
 import { previewPdfPrint } from "@/locales/en/previewPdf/print"
 import { previewPdfSignatures } from "@/locales/en/previewPdf/signatures"
+import { previewPdfAnnotations } from "@/locales/en/previewPdf/annotations"
+import { previewPdfSecurity } from "@/locales/en/previewPdf/security"
+import { previewPdfComments } from "@/locales/en/previewPdf/comments"
+import { previewPdfForms } from "@/locales/en/previewPdf/forms"
+import { previewPdfFillSign } from "@/locales/en/previewPdf/fillSign"
+import { previewPdfTextEdit } from "@/locales/en/previewPdf/textEdit"
+import { previewPdfSigning } from "@/locales/en/previewPdf/signing"
+import { previewPdfOcr } from "@/locales/en/previewPdf/ocr"
+import { previewPdfRedaction } from "@/locales/en/previewPdf/redaction"
+import { previewPdfShell } from "@/locales/en/previewPdf/shell"
+import { previewPdfNotices } from "@/locales/en/previewPdf/notices"
+import { previewPdfPages } from "@/locales/en/previewPdf/pages"
 
 export const preview = {
 	// ── Header ───────────────────────────────────────────────────────────────
@@ -827,5 +839,17 @@ export const preview = {
 	...previewKeysShortcuts,
 	...previewPdfView,
 	...previewPdfPrint,
-	...previewPdfSignatures
+	...previewPdfSignatures,
+	...previewPdfAnnotations,
+	...previewPdfSecurity,
+	...previewPdfComments,
+	...previewPdfForms,
+	...previewPdfFillSign,
+	...previewPdfTextEdit,
+	...previewPdfSigning,
+	...previewPdfOcr,
+	...previewPdfRedaction,
+	...previewPdfShell,
+	...previewPdfNotices,
+	...previewPdfPages
 } as const

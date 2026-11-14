@@ -59,6 +59,7 @@ export type ShortcutSection =
 	| "word"
 	| "sheet"
 	| "archive"
+	| "pdfEditor"
 
 type ShortcutNamespace = (typeof SHORTCUT_NAMESPACES)[number]
 

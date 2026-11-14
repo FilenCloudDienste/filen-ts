@@ -12,7 +12,6 @@ vi.mock("react-i18next", () => ({
 		t: (key: string, params?: Record<string, unknown>) => (params === undefined ? key : `${key} ${JSON.stringify(params)}`)
 	})
 }))
-vi.mock("@/features/pdf/signatures/useSignatureVerifier", () => ({ useSignatureVerifier: () => verifier.current }))
 
 const { PdfSignatureStatus } = await import("@/features/pdf/signatures/pdfSignatureStatus")
 const { signatureBanner } = await import("@/features/pdf/signatures/signatureStatus.logic")
@@ -95,7 +94,12 @@ describe("PdfSignatureStatus", () => {
 
 		verifier.current = verify
 
-		const { container } = render(<PdfSignatureStatus document={pdf(null)} />)
+		const { container } = render(
+			<PdfSignatureStatus
+				verify={verifier.current}
+				document={pdf(null)}
+			/>
+		)
 
 		await waitFor(() => {
 			expect(container.textContent).toBe("")
@@ -107,7 +111,12 @@ describe("PdfSignatureStatus", () => {
 		const verify = vi.fn(() => Promise.resolve(report(info({}))))
 
 		verifier.current = verify
-		render(<PdfSignatureStatus document={pdf(SIGNED)} />)
+		render(
+			<PdfSignatureStatus
+				verify={verifier.current}
+				document={pdf(SIGNED)}
+			/>
+		)
 
 		expect(await screen.findByText(/previewPdfSignatureBannerUnchanged/)).toBeTruthy()
 		expect(verify).toHaveBeenCalledWith([{ name: "Signature1", byteRange: [0, 10, 20, 80] }], expect.any(AbortSignal))
@@ -126,6 +135,7 @@ describe("PdfSignatureStatus", () => {
 			Promise.resolve(report(info({ state: "changed", changes: { allowed: true, kinds: ["form"] }, signedLength: 64 })))
 		render(
 			<PdfSignatureStatus
+				verify={verifier.current}
 				document={pdf(SIGNED)}
 				onViewSignedVersion={onViewSignedVersion}
 			/>
@@ -140,7 +150,12 @@ describe("PdfSignatureStatus", () => {
 		const verify = vi.fn(() => Promise.reject(new Error("offline")))
 
 		verifier.current = verify
-		render(<PdfSignatureStatus document={pdf(SIGNED)} />)
+		render(
+			<PdfSignatureStatus
+				verify={verifier.current}
+				document={pdf(SIGNED)}
+			/>
+		)
 
 		fireEvent.click(await screen.findByText("previewPdfSignatureRetry"))
 

@@ -20,7 +20,7 @@ export {
 	type PdfPageText
 } from "./find"
 export { loadPdfSignatureFields, pdfSignatureFields, type PdfSignatureFieldHint } from "./signatureFields"
-export { pdfLinks, resolveDestination, type PdfDestination, type PdfLink, type PdfRect } from "./links"
+export { pdfExternalLink, pdfLinks, resolveDestination, type PdfDestination, type PdfLink, type PdfRect } from "./links"
 export {
 	loadPdfInfo,
 	loadPdfOutline,
@@ -88,3 +88,12 @@ export {
 	type PdfViewerState,
 	type PdfZoomMode
 } from "./viewer"
+export {
+	createFormWidgetScope,
+	PDF_MASKED_CLASS,
+	pdfFormControlProps,
+	type FormWidgetScope,
+	type PdfFormControlField,
+	type PdfFormControlKind,
+	type PdfFormControlProps
+} from "./formWidgets"

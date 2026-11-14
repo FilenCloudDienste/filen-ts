@@ -6,6 +6,7 @@ import { loadOfficeSettings } from "@/features/office/lib/officeSettings"
 import { OfficeGeneralRows } from "@/features/settings/components/office/generalRows"
 import { OfficeProofingRows } from "@/features/settings/components/office/proofingRows"
 import { OfficeRegionalRows } from "@/features/settings/components/office/regionalRows"
+import { OfficePdfRows } from "@/features/settings/components/office/pdfRows"
 import { OfficeLayoutRows, OfficeWordRows } from "@/features/settings/components/office/deviceRows"
 import { SettingsGroup, SettingsPage } from "@/features/settings/components/settingsLayout"
 import { routeHead } from "@/lib/head/routeHead"
@@ -47,6 +48,12 @@ function OfficePage() {
 				description={t("settingsOfficeRegionalDescription")}
 			>
 				<OfficeRegionalRows />
+			</SettingsGroup>
+			<SettingsGroup
+				title={t("settingsOfficePdfTitle")}
+				description={t("settingsOfficePdfDescription")}
+			>
+				<OfficePdfRows />
 			</SettingsGroup>
 			<SettingsGroup
 				title={t("settingsOfficeWordTitle")}

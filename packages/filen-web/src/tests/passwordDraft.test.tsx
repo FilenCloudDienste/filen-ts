@@ -12,7 +12,20 @@ import { PasswordDraft, PasswordDraftContext } from "@/features/preview/lib/pass
 // prompt starts blank.
 
 vi.mock("pdfjs-dist", () => ({ getDocument: vi.fn(), GlobalWorkerOptions: {}, PDFDataRangeTransport: vi.fn(), TextLayer: vi.fn() }))
-vi.mock("@/lib/storage/adapter", () => ({ kvGetJson: () => Promise.resolve(null), kvSetJson: () => Promise.resolve() }))
+// The viewer reaches the account's cached settings (whether earlier versions are kept): an empty store.
+vi.mock("@/lib/storage/adapter", () => ({
+	kvGetJson: () => Promise.resolve(null),
+	kvSetJson: () => Promise.resolve(),
+	kvKeys: () => Promise.resolve([]),
+	kvDelete: () => Promise.resolve(),
+	kvGet: () => Promise.resolve(null),
+	kvHas: () => Promise.resolve(false),
+	kvEntriesJson: () => Promise.resolve([]),
+	kvEntriesJsonInSlices: () => Promise.resolve([]),
+	kvDeletePrefix: () => Promise.resolve(),
+	kvDeleteIfAt: () => Promise.resolve([]),
+	isMissingStorageMethod: () => false
+}))
 
 const { PdfPasswordPrompt } = await import("@/features/preview/components/pdfViewer")
 

@@ -19,6 +19,7 @@ import { resetFileKindVerdicts } from "@/features/drive/lib/fileKindVerdicts"
 import { watchState } from "@/features/videos/lib/watchState"
 import { userDictionary } from "@/features/spellcheck/lib/userDictionary"
 import { resetOfficeSettings } from "@/features/office/lib/officeSettings"
+import { resetSavedSignatures } from "@/features/pdf/fillSign/savedSignatures"
 import { resetPhotosLibrary } from "@/features/photos/lib/library"
 import { disposeAudioEngine } from "@/features/audio/lib/audioEngine"
 import { cancelActiveTransfers } from "@/features/transfers/lib/control"
@@ -133,8 +134,9 @@ export async function performLogout(options?: PerformLogoutOptions): Promise<boo
 	watchState.cancel()
 	// The spelling dictionary's words leave with the account (the spellchecker hears the empty list).
 	userDictionary.reset()
-	// The document settings likewise.
+	// The document settings likewise, and the saved PDF signatures.
 	resetOfficeSettings()
+	resetSavedSignatures()
 	// The Photos directories likewise.
 	resetPhotosLibrary()
 	// Uploads, downloads and copies abort before the worker drops its client; the confirm that leads

@@ -32,6 +32,11 @@ export interface PdfDocumentHandle {
 	// Opens the same source again in the background, answering a password with the one accepted before, and swaps
 	// the new document in once it is ready: the old one keeps showing meanwhile, and its memory goes with it.
 	readonly reopen: () => void
+	// The password pdf.js accepted for the document shown, null when none was asked (memory only: an editor taking over
+	// opens the file with it).
+	readonly acceptedPassword: () => string | null
+	// Closes the document now (another engine took over its view); `state` stays as it was, never used again.
+	readonly release: () => void
 }
 
 const LOADING = { status: "loading" } as const
@@ -202,6 +207,13 @@ export function usePdfDocument(pdfjs: PdfJs<ReadableStream>, source: PdfSource, 
 
 			reopeningRef.current = true
 			setGeneration(value => value + 1)
+		},
+		acceptedPassword: () => acceptedRef.current,
+		release: () => {
+			const opening = openingRef.current
+
+			openingRef.current = null
+			void opening?.destroy()
 		}
 	}
 }

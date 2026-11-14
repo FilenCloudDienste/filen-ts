@@ -2,10 +2,12 @@ import { describe, expect, it, vi } from "vitest"
 import type { File as SdkFile } from "@filen/sdk-rs"
 import {
 	canEditImage,
+	canEditPdf,
 	canSaveCopyBeside,
 	editedSaveTimes,
 	isEditable,
 	isUnresolvableParentError,
+	pdfTooLargeToEdit,
 	runPreviewSave,
 	type PreviewSaveDeps
 } from "@/features/drive/lib/previewSave.logic"
@@ -240,6 +242,37 @@ describe("canEditImage", () => {
 		expect(canEditImage(fileItem({ meta: decodedMeta("notes.txt") }), "drive")).toBe(false)
 		expect(canEditImage(fileItem({ meta: decodedMeta("photo.jpg") }), "sharedIn")).toBe(false)
 		expect(canEditImage(fileItem({ meta: { type: "encrypted", data: "cipher" } }), "drive")).toBe(false)
+	})
+})
+
+describe("canEditPdf / pdfTooLargeToEdit", () => {
+	const LIMIT = 4_096
+
+	function pdf(size: bigint, overrides: Partial<SdkFile> = {}): DriveItem {
+		return fileItem({ size, meta: byMime("report.pdf", "application/pdf"), ...overrides })
+	}
+
+	it("edits a decryptable PDF in the drive up to the limit, inclusive", () => {
+		expect(canEditPdf(pdf(1_024n), "drive", LIMIT)).toBe(true)
+		expect(canEditPdf(pdf(4_096n), "drive", LIMIT)).toBe(true)
+		expect(pdfTooLargeToEdit(pdf(4_096n), "drive", LIMIT)).toBe(false)
+	})
+
+	it("is too large only when everything but the size passes", () => {
+		expect(canEditPdf(pdf(4_097n), "drive", LIMIT)).toBe(false)
+		expect(pdfTooLargeToEdit(pdf(4_097n), "drive", LIMIT)).toBe(true)
+		expect(pdfTooLargeToEdit(pdf(4_097n), "sharedIn", LIMIT)).toBe(false)
+		expect(pdfTooLargeToEdit(fileItem({ size: 4_097n, meta: decodedMeta("notes.txt") }), "drive", LIMIT)).toBe(false)
+	})
+
+	it("never outside the drive, for a non-PDF, a directory or an undecryptable row", () => {
+		for (const variant of ["sharedIn", "sharedOut", "trash", "recents", "favorites"] as const) {
+			expect(canEditPdf(pdf(1_024n), variant, LIMIT), variant).toBe(false)
+		}
+		expect(canEditPdf(fileItem({ meta: decodedMeta("notes.txt") }), "drive", LIMIT)).toBe(false)
+		expect(canEditPdf(dirItem(), "drive", LIMIT)).toBe(false)
+		expect(canEditPdf(pdf(1_024n, { meta: { type: "encrypted", data: "cipher" } }), "drive", LIMIT)).toBe(false)
+		expect(pdfTooLargeToEdit(pdf(4_097n, { meta: { type: "encrypted", data: "cipher" } }), "drive", LIMIT)).toBe(false)
 	})
 })
 

@@ -5,28 +5,42 @@ import { build } from "vite"
 
 // The PDF editor's heavy engines (MuPDF's wasm glue, Tesseract, the PKCS#12 and CMS libraries) live in their workers,
 // never in the page's single bundle: only a worker module imports them by value, and @filen/office only by type (the
-// host passes the module in). The engine worker builds into one file that holds MuPDF, with the wasm emitted as a
+// host passes the module in), except its signature verifier (core/pdfsign, which parses CMS with pkijs), whose entries
+// only a worker imports by value. The engine worker builds into one file that holds MuPDF, with the wasm emitted as a
 // hashed asset beside it.
 
 const HEAVY = ["mupdf", "tesseract.js-core", "pkijs", "node-forge", "asn1js"]
+// @filen/office's verifier: pkijs and asn1js by value, so for workers only. Its summary entry is dependency-free.
+const VERIFIER = [
+	"@filen/office/core/pdfsign",
+	"@filen/office/dom/pdfedit/verify",
+	"@filen/office/dom/pdfedit/verifyRequest",
+	"@filen/office/dom/pdfedit/digest"
+]
+const VERIFIER_LIBRARIES = new Set(["pkijs", "asn1js"])
 const WEB_SRC = join(import.meta.dirname, "..")
 const OFFICE_SRC = join(import.meta.dirname, "../../../filen-office/src")
 
 function sources(root: string): string[] {
 	return readdirSync(root, { recursive: true, encoding: "utf8" })
-		.filter(path => /\.tsx?$/.test(path) && !/(^|\/)tests\//.test(path))
+		.filter(path => /\.tsx?$/.test(path) && !/(^|\/)(tests|scripts|bench)\//.test(path))
 		.map(path => join(root, path))
 }
 
-// Imports of `specifier` (or its subpaths) that bring values, not only types.
+// Imports of `specifier` (or its subpaths) that bring values, not only types; a statement never runs past its own `from`.
 function valueImports(code: string, specifier: string): number {
 	const escaped = specifier.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 	const pattern = new RegExp(
-		`^\\s*(import|export)\\s+(?!type\\b)[^;]*?from\\s+["']${escaped}(/[^"']*)?["']|import\\(\\s*["']${escaped}(/[^"']*)?["']`,
+		`^\\s*(import|export)\\s+(?!type\\b)(?:(?!\\bfrom\\s+["'])[\\s\\S])*?\\bfrom\\s+["']${escaped}(/[^"']*)?["']|import\\(\\s*["']${escaped}(/[^"']*)?["']`,
 		"gm"
 	)
 
 	return [...code.matchAll(pattern)].length
+}
+
+// Value imports of the verifier's dependency-free summary entry, which `valueImports` counts as its subpath.
+function exactSummaryImports(code: string, specifier: string): number {
+	return specifier === "@filen/office/core/pdfsign" ? valueImports(code, "@filen/office/core/pdfsign/summary") : 0
 }
 
 describe("the PDF engines stay out of the page bundle", () => {
@@ -34,9 +48,9 @@ describe("the PDF engines stay out of the page bundle", () => {
 		const offenders = sources(WEB_SRC).flatMap(path => {
 			const code = readFileSync(path, "utf8")
 
-			return HEAVY.filter(specifier => valueImports(code, specifier) > 0 && !path.includes("/workers/")).map(
-				specifier => `${relative(WEB_SRC, path)} imports ${specifier}`
-			)
+			return [...HEAVY, ...VERIFIER]
+				.filter(specifier => valueImports(code, specifier) > exactSummaryImports(code, specifier) && !path.includes("/workers/"))
+				.map(specifier => `${relative(WEB_SRC, path)} imports ${specifier}`)
 		})
 
 		expect(offenders).toEqual([])
@@ -46,7 +60,9 @@ describe("the PDF engines stay out of the page bundle", () => {
 		const offenders = sources(OFFICE_SRC).flatMap(path => {
 			const code = readFileSync(path, "utf8")
 
-			return HEAVY.filter(specifier => valueImports(code, specifier) > 0).map(
+			const verifier = relative(OFFICE_SRC, path).startsWith("core/pdfsign/")
+
+			return HEAVY.filter(specifier => valueImports(code, specifier) > 0 && !(verifier && VERIFIER_LIBRARIES.has(specifier))).map(
 				specifier => `${relative(OFFICE_SRC, path)} imports ${specifier}`
 			)
 		})

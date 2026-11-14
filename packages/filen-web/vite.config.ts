@@ -1,5 +1,4 @@
 import type { OutgoingHttpHeaders } from "node:http"
-import { fileURLToPath } from "node:url"
 import { defineConfig, loadEnv, type Connect, type Plugin } from "vite"
 import react from "@vitejs/plugin-react"
 import tailwindcss from "@tailwindcss/vite"
@@ -10,13 +9,11 @@ import { officeFonts, OFFICE_FONTS_BASE } from "./vite/office-fonts-plugin"
 import { officeHyphenation } from "./vite/office-hyphenation-plugin"
 import { spellcheckAssets, SPELLCHECK_BASE } from "./vite/spellcheck-assets-plugin"
 import { pdfjsAssets } from "./vite/pdfjs-assets-plugin"
+import { ocrAssets } from "./vite/ocr-assets-plugin"
 import { SINGLETONS } from "./vite/singletons"
 import { assistantModelDev } from "./vite/assistant-model"
+import { MUPDF_WASM_ALIAS } from "./vite/mupdf-wasm"
 import { isAllowedModelOrigin } from "./src/features/assistant/runtime/manifest"
-
-// MuPDF's wasm beside its module, outside the package's exports: the page compiles it (features/pdf/session/
-// engineModule.ts) and hands the module to the engine worker, so the import is `mupdf-wasm?url`.
-const MUPDF_WASM = fileURLToPath(new URL("mupdf-wasm.wasm", import.meta.resolve("mupdf")))
 
 // Vite's header options only reach the responses it serves with a body: the 304 Not Modified that
 // answers a revalidation goes out bare, from the preview's static handler and the dev server's module
@@ -216,6 +213,7 @@ export default defineConfig(({ mode }) => ({
 		officeHyphenation(),
 		spellcheckAssets(),
 		pdfjsAssets(),
+		ocrAssets(),
 		assistantModelDev()
 	],
 	// Workspace packages are compiled from source, so their bare imports resolve from their own directory,
@@ -223,10 +221,7 @@ export default defineConfig(({ mode }) => ({
 	// singleton, resolved from this package; a package name covers its subpaths (react/jsx-runtime, and
 	// react/compiler-runtime that the React Compiler injects into those sources too).
 	resolve: {
-		alias: [
-			{ find: "@", replacement: "/src" },
-			{ find: /^mupdf-wasm(\?url)$/, replacement: `${MUPDF_WASM}$1` }
-		],
+		alias: [{ find: "@", replacement: "/src" }, MUPDF_WASM_ALIAS],
 		dedupe: SINGLETONS
 	},
 	// @sqlite.org/sqlite-wasm's own Vite guidance (README "Usage with vite"): it self-locates
@@ -292,7 +287,7 @@ export default defineConfig(({ mode }) => ({
 	// for the page build: ~70 KB of comments across the workers.
 	worker: {
 		format: "es",
-		plugins: () => [officeFonts(), officeHyphenation()],
+		plugins: () => [officeFonts(), officeHyphenation(), ocrAssets({ emit: false })],
 		rolldownOptions: { output: { codeSplitting: false, comments: { annotation: false } } }
 	}
 }))

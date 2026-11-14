@@ -101,6 +101,8 @@ export const settingsKeyboard = {
 	keyboardSectionSheet: "Spreadsheet",
 	/** Shortcuts list — sub-group of the Editor group: browsing the files inside an archive (ZIP, 7-Zip, tarball) */
 	keyboardSectionArchive: "Archive browser",
+	/** Shortcuts list — sub-group of the Editor group: editing a PDF (forms, annotations, pages) */
+	keyboardSectionPdfEditor: "PDF editor",
 	/** Shortcuts list — button resetting every shortcut of one group; {{group}} is the group's name */
 	keyboardResetGroup: "Reset {{group}}",
 
@@ -201,6 +203,10 @@ export const settingsKeyboard = {
 	keyboardHintSlideText: "While editing text on a slide",
 	/** Shortcuts list — where the shortcut works: in the PDF viewer */
 	keyboardHintPdf: "In the PDF viewer",
+	/** Shortcuts list — where the shortcut works: on a page of a PDF being edited, but not while typing in one of its fields */
+	keyboardHintPdfPage: "On a PDF page, outside its fields",
+	/** Shortcuts list — where the shortcut works: in the PDF editor's page thumbnails, or with pages selected there */
+	keyboardHintPdfPages: "In the PDF page list",
 	/** Shortcuts list — where the shortcut works: in the image viewer */
 	keyboardHintImage: "In the image viewer",
 	/** Shortcuts list — where the shortcut works: in Markdown files and notes */

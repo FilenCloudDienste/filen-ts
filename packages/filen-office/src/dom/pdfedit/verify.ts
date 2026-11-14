@@ -1,6 +1,5 @@
 import type { PDFDocument, PDFObject } from "mupdf"
 import {
-	certificationLevel,
 	changeAllowed,
 	checkContents,
 	checkIntegrity,
@@ -21,6 +20,21 @@ import {
 	type XrefSection
 } from "../../core/pdfsign"
 import { parsePdfDate } from "../pdf/outline"
+import {
+	at,
+	certificationOf,
+	collectFields,
+	deref,
+	fieldType,
+	locksOf,
+	name,
+	num,
+	numberArray,
+	ref,
+	signatureFieldsOf,
+	text,
+	type SignatureField
+} from "./fields"
 import type { PdfSignatureFieldHint } from "../pdf/signatureFields"
 
 export type { PdfSignatureFieldHint }
@@ -41,168 +55,10 @@ export interface VerifyPdfSignaturesOptions extends PdfCryptoDeps {
 	readonly now?: number
 }
 
-interface FieldRecord {
-	readonly name: string
-	readonly partialName: string
-	readonly type: string | null
-	readonly dict: PDFObject
-	readonly num: number | null
-	readonly widget: PDFObject | null
-}
-
-interface SignatureField extends FieldRecord {
-	readonly value: PDFObject
-	readonly valueNum: number | null
-	readonly page: number | null
-	readonly rect: readonly [number, number, number, number] | null
-}
-
-const MAX_FIELD_DEPTH = 32
-const MAX_FIELDS = 100_000
 const MAX_CHANGED_OBJECTS = 100_000
 const TRAILING_CHECK_BYTES = 64 * 1024
 const FORM_KEYS = new Set(["V", "AS", "AP", "M"])
 const ACROFORM_FORM_KEYS = new Set(["NeedAppearances", "DR", "DA"])
-
-// MuPDF's null object has no document: every read of a missing value goes through these, which pass it on.
-function deref(object: PDFObject): PDFObject {
-	return object.isNull() ? object : object.resolve()
-}
-
-// The value at a key or index path, unresolved (to read its object number) or resolved.
-function ref(object: PDFObject, ...path: (string | number)[]): PDFObject {
-	return object.isNull() ? object : object.get(...path)
-}
-
-function at(object: PDFObject, ...path: (string | number)[]): PDFObject {
-	return deref(ref(object, ...path))
-}
-
-function name(object: PDFObject): string | null {
-	const resolved = deref(object)
-
-	return resolved.isName() ? resolved.asName() : null
-}
-
-function text(object: PDFObject): string | null {
-	const resolved = deref(object)
-
-	return resolved.isString() ? resolved.asString() : null
-}
-
-function num(object: PDFObject): number | null {
-	return object.isIndirect() ? object.asIndirect() : null
-}
-
-function numberArray(object: PDFObject): number[] | null {
-	const resolved = deref(object)
-
-	if (!resolved.isArray()) return null
-
-	const out: number[] = []
-
-	for (let i = 0; i < resolved.length; i++) {
-		const item = at(resolved, i)
-
-		if (!item.isNumber()) return null
-
-		out.push(item.asNumber())
-	}
-
-	return out
-}
-
-function rectOf(object: PDFObject): [number, number, number, number] | null {
-	const values = numberArray(ref(object, "Rect"))
-
-	if (values?.length !== 4) return null
-
-	const [x0 = 0, y0 = 0, x1 = 0, y1 = 0] = values
-
-	return [Math.min(x0, x1), Math.min(y0, y1), Math.max(x0, x1), Math.max(y0, y1)]
-}
-
-// Every field of the AcroForm tree by fully qualified name, with its type (inherited) and its first widget.
-function collectFields(document: PDFDocument): { readonly fields: FieldRecord[]; readonly names: Map<number, string> } {
-	const fields: FieldRecord[] = []
-	const names = new Map<number, string>()
-	const seen = new Set<number>()
-	const roots = at(document.getTrailer(), "Root", "AcroForm", "Fields")
-
-	const visit = (field: PDFObject, parent: string | null, inheritedType: string | null, depth: number): void => {
-		const fieldNum = num(field)
-		const dict = deref(field)
-
-		if (depth > MAX_FIELD_DEPTH || fields.length >= MAX_FIELDS || !dict.isDictionary()) return
-		if (fieldNum !== null) {
-			if (seen.has(fieldNum)) return
-
-			seen.add(fieldNum)
-		}
-
-		const partial = text(ref(dict, "T"))
-		const fullName = partial === null ? parent : parent === null ? partial : `${parent}.${partial}`
-		const type = name(ref(dict, "FT")) ?? inheritedType
-		const kids = at(dict, "Kids")
-		const childFields: PDFObject[] = []
-		let widget: PDFObject | null = name(ref(dict, "Subtype")) === "Widget" ? dict : null
-
-		if (kids.isArray()) {
-			for (let i = 0; i < kids.length; i++) {
-				const kid = ref(kids, i)
-				const kidDict = deref(kid)
-
-				// A kid without a name is one of this field's widgets.
-				if (kidDict.isDictionary() && ref(kidDict, "T").isNull()) {
-					widget ??= kidDict
-
-					const kidNum = num(kid)
-
-					if (kidNum !== null && fullName !== null) names.set(kidNum, fullName)
-				} else childFields.push(kid)
-			}
-		}
-
-		if (fullName !== null) {
-			if (fieldNum !== null) names.set(fieldNum, fullName)
-			if (childFields.length === 0) fields.push({ name: fullName, partialName: partial ?? "", type, dict, num: fieldNum, widget })
-		}
-
-		for (const child of childFields) visit(child, fullName, type, depth + 1)
-	}
-
-	if (roots.isArray()) for (let i = 0; i < roots.length; i++) visit(ref(roots, i), null, null, 0)
-
-	return { fields, names }
-}
-
-function pageIndexOf(widget: PDFObject | null, pages: () => Map<number, number>): number | null {
-	if (widget === null) return null
-
-	const pageNum = num(ref(widget, "P"))
-
-	return pageNum === null ? null : (pages().get(pageNum) ?? null)
-}
-
-function lazyPages(document: PDFDocument): () => Map<number, number> {
-	let pages: Map<number, number> | null = null
-
-	return () => {
-		if (pages === null) {
-			pages = new Map()
-
-			const count = document.countPages()
-
-			for (let i = 0; i < count; i++) {
-				const pageNum = num(document.findPage(i))
-
-				if (pageNum !== null) pages.set(pageNum, i)
-			}
-		}
-
-		return pages
-	}
-}
 
 // pdf.js lists the signatures whose /ByteRange it finds well-formed and whose /Contents is a non-empty string; the
 // same signatures, by field name and byte range, must be MuPDF's.
@@ -226,70 +82,6 @@ function sameSignatures(found: readonly SignatureField[], expected: readonly Pdf
 	const theirs = expected.map(hint => key(hint.name, hint.byteRange))
 
 	return mine.length === theirs.length && mine.sort().join() === theirs.sort().join()
-}
-
-// Field locks a signature declares: FieldMDP in /Reference, and its field's /Lock.
-function locksOf(signature: SignatureField): PdfFieldLock[] {
-	const locks: PdfFieldLock[] = []
-	const add = (params: PDFObject): void => {
-		const action = name(ref(params, "Action"))
-
-		if (action !== "All" && action !== "Include" && action !== "Exclude") return
-
-		const fields: string[] = []
-		const list = at(params, "Fields")
-
-		if (list.isArray()) {
-			for (let i = 0; i < list.length; i++) {
-				const value = text(ref(list, i))
-
-				if (value !== null) fields.push(value)
-			}
-		}
-
-		locks.push({ action, fields })
-	}
-	const references = at(signature.value, "Reference")
-
-	if (references.isArray()) {
-		for (let i = 0; i < references.length; i++) {
-			const reference = at(references, i)
-
-			if (name(ref(reference, "TransformMethod")) === "FieldMDP") add(at(reference, "TransformParams"))
-		}
-	}
-
-	const lock = at(signature.dict, "Lock")
-
-	if (lock.isDictionary()) add(lock)
-
-	return locks
-}
-
-// The DocMDP level of the document's certifying signature: only the catalog's /Perms /DocMDP names it, and only the
-// first signature may certify.
-function certificationOf(document: PDFDocument, first: SignatureField | undefined): PdfCertificationLevel | null {
-	if (first === undefined) return null
-
-	const certifying = num(ref(document.getTrailer(), "Root", "Perms", "DocMDP"))
-
-	if (certifying === null || certifying !== first.valueNum) return null
-
-	const references = at(first.value, "Reference")
-
-	if (!references.isArray()) return null
-
-	for (let i = 0; i < references.length; i++) {
-		const reference = at(references, i)
-
-		if (name(ref(reference, "TransformMethod")) === "DocMDP") {
-			const p = at(reference, "TransformParams", "P")
-
-			return certificationLevel(p.isNumber() ? p.asNumber() : null)
-		}
-	}
-
-	return null
 }
 
 interface ChangeContext {
@@ -317,20 +109,6 @@ function isField(dict: PDFObject): boolean {
 	return (
 		dict.isDictionary() && (isWidget(dict) || !ref(dict, "FT").isNull() || (!ref(dict, "T").isNull() && !ref(dict, "Parent").isNull()))
 	)
-}
-
-function fieldType(dict: PDFObject): string | null {
-	let current = dict
-
-	for (let depth = 0; depth < MAX_FIELD_DEPTH && current.isDictionary(); depth++) {
-		const type = name(ref(current, "FT"))
-
-		if (type !== null) return type
-
-		current = at(current, "Parent")
-	}
-
-	return null
 }
 
 function changedKeys(before: PDFObject, after: PDFObject): Set<string> {
@@ -610,25 +388,7 @@ export async function verifyPdfSignatures(
 	options: VerifyPdfSignaturesOptions
 ): Promise<PdfSignatureReport> {
 	const { fields, names } = collectFields(document)
-	const pages = lazyPages(document)
-	const signatureFields: SignatureField[] = []
-
-	for (const field of fields) {
-		if (field.type !== "Sig") continue
-
-		const valueRef = ref(field.dict, "V")
-		const value = deref(valueRef)
-
-		if (!value.isDictionary()) continue
-
-		signatureFields.push({
-			...field,
-			value,
-			valueNum: num(valueRef),
-			page: pageIndexOf(field.widget, pages),
-			rect: field.widget === null ? null : rectOf(field.widget)
-		})
-	}
+	const signatureFields = signatureFieldsOf(document, fields)
 
 	const root = ref(document.getTrailer(), "Root")
 	const dss = !ref(root, "DSS").isNull()

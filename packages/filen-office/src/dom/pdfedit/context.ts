@@ -1,5 +1,6 @@
 import type * as Mupdf from "mupdf"
 import type { MupdfModule, PdfBitmapLike, PdfEngineFailure, PdfEngineRole } from "./protocol"
+import type { PdfEditSession } from "./editSession"
 import type { TileRenderer } from "./render"
 import type { SyncRangeReader } from "./stream"
 
@@ -34,6 +35,12 @@ export interface OpenDocument {
 	readonly reader: SyncRangeReader
 	readonly renderer: TileRenderer
 	readonly role: PdfEngineRole
+	// The editor's bookkeeping (role "edit", once the document is unlocked).
+	readonly edit: PdfEditSession | null
+	// A written save the document was opened on in place (its bytes live in the heap, not behind the reader).
+	readonly heap: Mupdf.Buffer | null
+	// The file the editor's history starts at, when it is a written save in the heap; null: the file behind the reader.
+	readonly base: Mupdf.Buffer | null
 }
 
 export interface PdfEngineContext {

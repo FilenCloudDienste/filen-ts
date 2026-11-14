@@ -1,4 +1,18 @@
 export { PdfEngineClient, PdfEngineError, PDF_RENDER_WATCHDOG_MS, type PdfEngineClientOptions, type PdfEngineWorkerLike } from "./client"
+export {
+	FORM_COMMANDS,
+	isIndex,
+	isRecord,
+	isText,
+	PDF_COMMANDS,
+	pdfCommand,
+	type PdfCommand,
+	type PdfCommandArgs,
+	type PdfCommandContext,
+	type PdfCommandName,
+	type PdfCommandTable,
+	type PdfFormCommands
+} from "./commands/index"
 export { PdfEngineRefusal, type OpenDocument, type PdfEngineContext, type PdfEngineHost } from "./context"
 export {
 	isFromPdfEngine,
@@ -7,6 +21,9 @@ export {
 	type FromPdfEngine,
 	type MupdfModule,
 	type PdfAccess,
+	type PdfAfterSave,
+	type PdfCommandOp,
+	type PdfDestinationPoint,
 	type PdfBitmapLike,
 	type PdfByteChannel,
 	type PdfDocumentSummary,
@@ -23,6 +40,11 @@ export {
 	type PdfRenderArgs,
 	type PdfRenderPriority,
 	type PdfRenderValue,
+	type PdfSaveBegun,
+	type PdfSaveCheck,
+	type PdfSaveEnded,
+	type PdfSaveExpectation,
+	type PdfSaveOutcome,
 	type PdfTile,
 	type ToPdfEngine
 } from "./protocol"
@@ -43,3 +65,4 @@ export {
 	type SyncRangeServerStats,
 	type SyncRangeSource
 } from "./syncRange"
+export type { PdfPageText, PdfTextLine, PdfTextLink } from "./text"

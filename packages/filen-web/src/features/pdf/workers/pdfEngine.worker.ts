@@ -3,6 +3,7 @@ import { engineScope } from "@/features/pdf/workers/mupdfBoot"
 import * as mupdf from "mupdf"
 import { macrotaskYield } from "@filen/office/dom/docx"
 import { servePdfEngine } from "@filen/office/dom/pdfedit"
+import { verifySignaturesRequest } from "@filen/office/dom/pdfedit/verifyRequest"
 import { RANGE_READ_TIMEOUT_MS } from "@/lib/media/rangePort"
 
 // The PDF engine worker (one per open document): MuPDF with the document, reading the file synchronously from the
@@ -12,5 +13,6 @@ servePdfEngine(mupdf, engineScope, {
 	toBitmap: (rgba, width, height) => createImageBitmap(new ImageData(rgba, width, height)),
 	readDeadlineMs: RANGE_READ_TIMEOUT_MS,
 	now: () => performance.now(),
-	yieldTask: macrotaskYield()
+	yieldTask: macrotaskYield(),
+	requests: { verifySignatures: verifySignaturesRequest(crypto.subtle) }
 })

@@ -6,6 +6,7 @@ import { settingsBilling } from "@/locales/en/settings/billing"
 import { settingsDesktopPrefs } from "@/locales/en/settings/desktopPrefs"
 import { settingsMigration } from "@/locales/en/settings/migration"
 import { settingsOffice } from "@/locales/en/settings/office"
+import { settingsOfficePdf } from "@/locales/en/settings/officePdf"
 import { settingsKeyboard } from "@/locales/en/settings/keyboard"
 import { settingsAudio } from "@/locales/en/settings/audio"
 // English source catalog — "settings" namespace: the settings sidebar (Account / Security /
@@ -332,6 +333,7 @@ export const settings = {
 	...settingsDesktopPrefs,
 	...settingsMigration,
 	...settingsOffice,
+	...settingsOfficePdf,
 	...settingsKeyboard,
 	...settingsAudio
 } as const

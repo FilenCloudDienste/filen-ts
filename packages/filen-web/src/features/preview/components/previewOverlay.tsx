@@ -41,6 +41,7 @@ import {
 	canEditVideo,
 	canSaveCopyBeside,
 	editedSaveTimes,
+	canEditPdf,
 	isEditable,
 	isTextCategory,
 	isUnresolvableParentError,
@@ -92,6 +93,7 @@ import { DocxViewer } from "@/features/preview/components/docxViewer"
 import type { DocxSaveSource } from "@/features/preview/components/docxEditor"
 import { MarkdownViewer } from "@/features/preview/components/markdownViewer"
 import { PdfViewer } from "@/features/preview/components/pdfViewer"
+import { pdfEngineMemory } from "@/features/pdf/session/engineWorker"
 import { TextViewer } from "@/features/preview/components/textViewer"
 import type { SpreadsheetSaveSource } from "@/features/spreadsheet/save/sheetSave.logic"
 import { SheetViewer } from "@/features/spreadsheet/sheetViewer"
@@ -416,7 +418,7 @@ export function PreviewOverlay({
 		driveItem !== undefined &&
 		pin !== null &&
 		!asText &&
-		isEditable(driveItem, variant) &&
+		slotEditable(driveItem, variant) &&
 		saveFormat(driveItem) === pin.format &&
 		lockedReadOnly?.forUuid !== rawDriveItem.data.uuid
 	// Read-only only because a rename changed the format the open edits would be saved in.
@@ -692,7 +694,7 @@ export function PreviewOverlay({
 			throw new Error("no file on screen")
 		}
 
-		const written = await writeEditedCopy(item, blob, extension, number =>
+		const written = await writeEditedCopy(item, { blob }, extension, number =>
 			number <= 1 ? t("previewImageSaveCopySuffix") : t("previewImageSaveCopySuffixNumbered", { number })
 		)
 
@@ -1404,7 +1406,12 @@ export function PreviewOverlay({
 				patchListing: driveListingQueryUpdate,
 				rootUuid: currentRootUuid()
 			},
-			{ item: targetItem, content: { port: edits.port } }
+			{
+				item: targetItem,
+				// A PDF knows its file's exact size before the upload, and keeps the original's creation time.
+				content: { port: edits.port, ...(edits.size === undefined ? {} : { size: edits.size }) },
+				...(edits.times === undefined ? {} : { times: edits.times })
+			}
 		)
 		const result = await edits.result.catch((e: unknown) => {
 			log.error("preview", "the presentation save failed", e)
@@ -2077,7 +2084,8 @@ export function PreviewOverlay({
 											{videoMode.entering ? <Spinner className="size-4" /> : <PencilIcon />}
 										</TooltipIconButton>
 									) : null}
-									{editable && dirty ? (
+									{/* A PDF's Save sits in its ribbon (with Save as copy, Undo, Redo and Discard). */}
+									{editable && dirty && pin.category !== "pdf" ? (
 										<TooltipIconButton
 											label={t("previewSaveAction")}
 											disabled={saving}
@@ -2463,7 +2471,7 @@ async function writeImageCopy(
 ): Promise<{ outcome: ActionOutcome<DriveItem>; name: string } | null> {
 	const blob = (await exportImage(source, target))?.blob ?? null
 
-	return blob === null ? null : await writeEditedCopy(item, blob, target.extension, suffix)
+	return blob === null ? null : await writeEditedCopy(item, { blob }, target.extension, suffix)
 }
 
 // The edited image for the remote-change dialog's "save mine as new": as the header's Save would write it, or
@@ -2566,6 +2574,10 @@ function saveFormat(item: DriveItem): string {
 		return `presentation:${presentationSaveFormat(extension) ?? extension}`
 	}
 
+	if (category === "pdf") {
+		return "pdf"
+	}
+
 	if (category !== "spreadsheet") {
 		return ""
 	}
@@ -2575,13 +2587,19 @@ function saveFormat(item: DriveItem): string {
 	return `spreadsheet:${spreadsheetSaveFormat(extension) ?? extension}`
 }
 
+// Whether the slot's file saves from its editor: isEditable's formats, and a PDF the editor can take (canEditPdf: its
+// size within what this browser's engine edits).
+function slotEditable(item: DriveItem, variant: DriveVariant): boolean {
+	return isEditable(item, variant) || canEditPdf(item, variant, pdfEngineMemory().editMaxBytes)
+}
+
 // Opened as text, the slot stays the text viewer and never editable, whatever a rename later says.
 function slotPin(item: DriveItem, variant: DriveVariant, asText: boolean): SlotPin {
 	if (asText) {
 		return { category: "text", format: "", editable: false }
 	}
 
-	return { category: previewType(item), format: saveFormat(item), editable: isEditable(item, variant) }
+	return { category: previewType(item), format: saveFormat(item), editable: slotEditable(item, variant) }
 }
 
 // What remounts the body. A spreadsheet, and a Word document opened for editing, follow their document (see
@@ -2592,9 +2610,13 @@ function bodyKey(item: DriveItem, documentKey: string, pin: SlotPin | null): str
 		return `spreadsheet:${documentKey}`
 	}
 
-	// An editable deck follows its document too: its session moves onto each file it saves.
+	// An editable deck follows its document too: its session moves onto each file it saves. So does a PDF's editor.
 	if (pin?.category === "presentation" && pin.editable) {
 		return `presentation:${documentKey}`
+	}
+
+	if (pin?.category === "pdf" && pin.editable) {
+		return `pdf:${documentKey}`
 	}
 
 	return pin?.category === "docx" && pin.editable ? `docx:${documentKey}` : item.data.uuid
@@ -2703,11 +2725,26 @@ function PreviewBody({
 					alt={alt}
 				/>
 			)
+		// An editable PDF is keyed by its document (bodyKey): its editor's saves stream through presentationRef's port save
+		// and keep it mounted.
 		case "pdf":
 			return (
 				<PdfViewer
 					item={item}
 					alt={alt}
+					variant={variant}
+					canSaveCopy={canSaveCopy}
+					onOpenFile={onOpenFile}
+					{...(neverEditable
+						? {}
+						: {
+								editing: {
+									writable: editable,
+									onDirtyChange,
+									saveRef: presentationRef,
+									onSave
+								}
+							})}
 				/>
 			)
 		case "spreadsheet":

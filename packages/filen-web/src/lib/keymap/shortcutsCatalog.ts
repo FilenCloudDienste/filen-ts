@@ -68,6 +68,7 @@ export const SHORTCUT_SCOPE_LABEL_KEYS: Record<ActionScope, CommonKey> = {
 export const SHORTCUT_SECTION_ORDER: readonly ShortcutSection[] = [
 	"code",
 	"viewer",
+	"pdfEditor",
 	"imageEditor",
 	"videoEditor",
 	"word",
@@ -90,7 +91,8 @@ export const SHORTCUT_SECTION_LABEL_KEYS: Record<ShortcutSection, SettingsKey> =
 	slideshow: "keyboardSectionSlideshow",
 	word: "keyboardSectionWord",
 	sheet: "keyboardSectionSheet",
-	archive: "keyboardSectionArchive"
+	archive: "keyboardSectionArchive",
+	pdfEditor: "keyboardSectionPdfEditor"
 }
 
 export interface ShortcutGroup {

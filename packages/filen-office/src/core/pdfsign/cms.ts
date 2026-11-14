@@ -1,5 +1,6 @@
 import * as asn1js from "asn1js"
 import { Certificate, ContentInfo, IssuerAndSerialNumber, RSAPublicKey, RSASSAPSSParams, SignedData, TSTInfo, type SignerInfo } from "pkijs"
+import { RSA_ENCRYPTION_OID as RSA_KEY, RSA_PSS_OID as RSA_PSS, webCryptoSpki } from "./keyInfo"
 import { digestBytes, equalBytes, type PdfDigestFactory } from "./source"
 import type { PdfDigestName, PdfSignatureInvalidReason } from "./types"
 
@@ -75,8 +76,6 @@ const CURVES = new Map<string, { readonly name: string; readonly size: number }>
 	["1.3.132.0.35", { name: "P-521", size: 66 }]
 ])
 
-const RSA_PSS = "1.2.840.113549.1.1.10"
-const RSA_KEY = "1.2.840.113549.1.1.1"
 const EC_KEY = "1.2.840.10045.2.1"
 const ED25519 = "1.3.101.112"
 const MGF1 = "1.2.840.113549.1.1.8"
@@ -274,13 +273,7 @@ export async function verifyCms(cms: ParsedCms, expected: Uint8Array, deps: PdfC
 	let key: unknown
 
 	try {
-		key = await deps.subtle.importKey(
-			"spki",
-			bytesOf(derOf(certificate.subjectPublicKeyInfo.toSchema())),
-			resolved.importParams,
-			false,
-			["verify"]
-		)
+		key = await deps.subtle.importKey("spki", bytesOf(webCryptoSpki(certificate)), resolved.importParams, false, ["verify"])
 	} catch {
 		return { ok: false, state: "unverifiable" }
 	}
@@ -301,7 +294,8 @@ function resolveAlgorithm(signer: SignerInfo, certificate: Certificate, digest: 
 	const keyInfo = certificate.subjectPublicKeyInfo
 	const keyId = keyInfo.algorithm.algorithmId
 
-	if (keyId === RSA_KEY) {
+	// A key restricted to RSA-PSS signs only with RSA-PSS.
+	if (keyId === RSA_KEY || (keyId === RSA_PSS && signatureId === RSA_PSS)) {
 		const bits = rsaBits(keyInfo.subjectPublicKey.valueBlock.valueHexView)
 
 		if (bits === null) return invalid("malformedSignature")

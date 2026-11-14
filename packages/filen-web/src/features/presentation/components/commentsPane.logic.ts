@@ -3,12 +3,13 @@ import type { SlideRef, SlideReview } from "@filen/office/core/presentation"
 import type { PresentationSessionApi } from "@filen/office/dom/presentation"
 import { usePresentationEditor } from "@/features/presentation/hooks/usePresentationSession"
 import type { PresentationRibbonEditor } from "@/features/presentation/components/ribbon/tabs"
+import { createThreadPane } from "@/features/office/components/commentThreads.logic"
 
 // The review of the slide in view, as the worker last answered (review()), for the two panes: the Comments pane's
 // (the slide's threads, asked again for each new render of the slide, since a comment op renders the slide again) and
 // the notes pane's (the notes body, its box and its text without the comments, asked again for each new history
 // revision, since a notes edit or its undo never renders the slide again). Never polled. And the Comments pane's own
-// state (open, the thread opened whole, the field starting a thread).
+// state (open, the thread opened whole, the field starting a thread; commentThreads.logic.ts).
 
 interface Asked {
 	readonly slide?: SlideRef
@@ -93,16 +94,7 @@ export interface ReviewState {
 	readonly composing: boolean
 }
 
-interface PaneState {
-	readonly open: boolean
-	readonly thread?: string
-	readonly composing: boolean
-}
-
-type Mutable = { -readonly [K in keyof PaneState]: PaneState[K] }
-
 function createReviewStore() {
-	let pane: PaneState = { open: false, composing: false }
 	let snapshot: ReviewState | undefined
 	const listeners = new Set<() => void>()
 	const emit = (): void => {
@@ -110,10 +102,7 @@ function createReviewStore() {
 
 		for (const listener of listeners) listener()
 	}
-	const replace = (next: PaneState): void => {
-		pane = next
-		emit()
-	}
+	const pane = createThreadPane(emit)
 	const threads = createAsker(true)
 
 	threads.subscribe(emit)
@@ -127,33 +116,15 @@ function createReviewStore() {
 			}
 		},
 		getSnapshot: (): ReviewState => {
-			snapshot ??= { ...threads.getSnapshot(), ...pane }
+			snapshot ??= { ...threads.getSnapshot(), ...pane.get() }
 
 			return snapshot
 		},
-		setOpen: (open: boolean): void => {
-			if (pane.open !== open) replace({ ...pane, open, ...(open ? {} : { composing: false }) })
-		},
-		openThread: (thread: string | undefined): void => {
-			const next: Mutable = { ...pane, composing: false }
-
-			if (thread === undefined) delete next.thread
-			else next.thread = thread
-
-			replace(next)
-		},
+		setOpen: pane.setOpen,
+		openThread: pane.openThread,
 		// The slide in view changed: its thread and field close.
-		leaveSlide: (): void => {
-			if (pane.thread === undefined && !pane.composing) return
-
-			const next: Mutable = { ...pane, composing: false }
-
-			delete next.thread
-			replace(next)
-		},
-		compose: (composing: boolean): void => {
-			replace(composing ? { ...pane, open: true, composing: true } : { ...pane, composing: false })
-		},
+		leaveSlide: pane.leave,
+		compose: pane.compose,
 		request: (session: Pick<PresentationSessionApi, "review">, slide: SlideRef, revision: number): void => {
 			threads.request(session, slide, revision)
 		}
@@ -213,20 +184,6 @@ export function useAskSlideNotes(editor: PresentationRibbonEditor | undefined, a
 	useEffect(() => {
 		if (active && session !== undefined && slide !== undefined) slideNotes.request(session, slide, revision)
 	}, [active, session, slide, revision])
-}
-
-// Focuses `element`, and again in the next frame if focus fell back to a container of it: a frame after a focused
-// element (a field just closed, a row just opened) is removed, the overlay's focus manager puts focus back on the
-// dialog, which would undo a focus set in between.
-export function focusSettled(element: HTMLElement | null): void {
-	if (element === null) return
-
-	element.focus({ preventScroll: true })
-	requestAnimationFrame(() => {
-		const now = element.ownerDocument.activeElement
-
-		if (element.isConnected && now !== element && (now === null || now.contains(element))) element.focus({ preventScroll: true })
-	})
 }
 
 // A GUID as PresentationML writes ids ({XXXXXXXX-...}).

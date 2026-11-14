@@ -8,3 +8,35 @@ export {
 	shouldRespawn,
 	type PdfMemoryProfile
 } from "./budget"
+export {
+	planSave,
+	PDF_FULL_SAVE_OPTIONS,
+	PDF_INCREMENTAL_SAVE_OPTIONS,
+	type PdfSaveInput,
+	type PdfSaveMode,
+	type PdfSavePlan,
+	type PdfSaveRefusal
+} from "./savePlan"
+export {
+	fieldEditable,
+	PDF_TOOL_CLASSES,
+	PDF_UNRESTRICTED,
+	PDF_UNSIGNED,
+	signatureAllows,
+	toolAvailability,
+	type PdfRestrictions,
+	type PdfSignatureState,
+	type PdfToolAvailability,
+	type PdfToolBlock,
+	type PdfToolClass
+} from "./signaturePolicy"
+export type {
+	PdfCommandResult,
+	PdfEditState,
+	PdfEncryptionState,
+	PdfFormState,
+	PdfPageWidgets,
+	PdfRect,
+	PdfWidgetSummary,
+	PdfWidgetType
+} from "./state"

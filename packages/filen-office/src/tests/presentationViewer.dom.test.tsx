@@ -7,7 +7,7 @@ import type { BitmapLike, PresentationEvent, PresentationSessionApi, SlideRender
 import { presentationActions } from "../react/presentation/links"
 import { NotesPanel } from "../react/presentation/notes/NotesPanel"
 import { SlideRail } from "../react/presentation/rail/SlideRail"
-import { railKeyTarget, railRange, revealOffset } from "../react/presentation/rail/window"
+import { railKeyTarget, railRange, revealOffset } from "../react/shared/railWindow"
 import { SlideView, type SlidePainter } from "../react/presentation/SlideView"
 import {
 	createPresentationStore,

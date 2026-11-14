@@ -95,6 +95,20 @@ export async function hash2B(password: Uint8Array, salt: Uint8Array, userKey: Ui
 // §7.6.4.3.3: SASLprep (RFC 4013) then UTF-8, at most 127 bytes. Bidi classes come from the current Unicode
 // data, not Unicode 3.2 as RFC 3454 says; they differ only for characters assigned since.
 export function preparePassword(password: string): Uint8Array {
+	const bytes = utf8(saslPrepPassword(password))
+
+	if (bytes.length <= 127) return bytes
+
+	// Truncate at 127 bytes, never inside a character.
+	let end = 127
+
+	while (end > 0 && ((bytes[end] ?? 0) & 0xc0) === 0x80) end--
+
+	return bytes.slice(0, end)
+}
+
+// SASLprep (RFC 4013) of a password, as a string (before UTF-8 and the 127-byte cut).
+export function saslPrepPassword(password: string): string {
 	let mapped = ""
 
 	for (const char of password) {
@@ -139,16 +153,7 @@ export function preparePassword(password: string): Uint8Array {
 			throw new PdfWriteError("password", "The password mixes text directions as SASLprep prohibits")
 	}
 
-	const bytes = utf8(normalized)
-
-	if (bytes.length <= 127) return bytes
-
-	// Truncate at 127 bytes, never inside a character.
-	let end = 127
-
-	while (end > 0 && ((bytes[end] ?? 0) & 0xc0) === 0x80) end--
-
-	return bytes.slice(0, end)
+	return normalized
 }
 
 // RFC 3454 table B.1.

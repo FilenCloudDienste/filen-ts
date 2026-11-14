@@ -32,6 +32,14 @@ function page(digits: string): number | null {
 // Parses `text` for a document of `pageCount` pages into ranges sorted by first page, overlapping and adjacent ones
 // merged.
 export function parsePageRanges(text: string, pageCount: number): PageRangeResult {
+	const parsed = parsePageRangeParts(text, pageCount)
+
+	return parsed.ok ? { ok: true, ranges: normalizePageRanges(parsed.ranges) } : parsed
+}
+
+// Parses `text` like parsePageRanges, keeping every part as typed, in order (overlaps included): splitting by ranges
+// makes one file per part.
+export function parsePageRangeParts(text: string, pageCount: number): PageRangeResult {
 	const parts = text
 		.replace(/–/g, "-")
 		.split(/[,;]/)
@@ -58,7 +66,7 @@ export function parsePageRanges(text: string, pageCount: number): PageRangeResul
 		ranges.push({ first, last })
 	}
 
-	return { ok: true, ranges: normalizePageRanges(ranges) }
+	return { ok: true, ranges }
 }
 
 // Sorted by first page, overlapping and adjacent ranges merged.

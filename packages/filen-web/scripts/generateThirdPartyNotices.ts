@@ -1394,6 +1394,196 @@ function mupdfNotices(): Collected[] {
 	]
 }
 
+/**
+ * tesseract.js-core's wasm (Apache-2.0, described with the npm tree) has the libraries below compiled in: what its
+ * build.sh at the release tag builds and links (zlib, libtiff, openlibm, giflib, libpng, libjpeg, libwebp, leptonica
+ * with HAVE_LIBJP2K=0, and tesseract), each from the third_party/ submodule commit the tag pins, its license file kept
+ * beside this script. The tessdata_fast models the text recognition loads are served from the app's own origin.
+ */
+const TESSERACT_CORE_VERSION = "7.0.0"
+const TESSERACT_CORE_COMMIT = "acffef2b66eb44a31df297e11d905f4b39001068"
+// The release build-with-docker.sh builds with (EM_VERSION).
+const TESSERACT_EMSCRIPTEN = "4.0.15"
+const TESSERACT_LICENSES = "scripts/licenses/tesseract"
+const TESSERACT_CORE_SOURCE = `https://github.com/naptha/tesseract.js-core/tree/${TESSERACT_CORE_COMMIT}`
+const TESSDATA_FAST_REPOSITORY = "https://github.com/tesseract-ocr/tessdata_fast"
+const TESSDATA_FAST_COMMIT = "87416418657359cb625c412a48b6e1d6d41c29bd"
+
+interface TesseractComponent {
+	readonly name: string
+	readonly license: string
+	readonly copyright: readonly string[]
+	// The repository the submodule points at, and the commit the release tag pins.
+	readonly repository: string
+	readonly commit: string
+	readonly what: string
+	readonly files: readonly string[]
+}
+
+const TESSERACT_COMPONENTS: readonly TesseractComponent[] = [
+	{
+		name: "Tesseract (tesseract.js fork)",
+		license: "Apache-2.0",
+		copyright: ["(C) Copyright 2006-2020, Google Inc.", "(C) Copyright 1987-1996, Hewlett-Packard Ltd."],
+		repository: "https://github.com/Balearica/tesseract",
+		commit: "2a9c1c49c360462733c386d2a44fcd22c4e21411",
+		what: "The Tesseract OCR engine (5.3.0), in the fork tesseract.js builds.",
+		files: ["tesseract-LICENSE"]
+	},
+	{
+		name: "Leptonica",
+		license: "BSD-2-Clause",
+		copyright: ["Copyright (C) 2001-2020 Leptonica.  All rights reserved."],
+		repository: "https://github.com/DanBloomberg/leptonica",
+		commit: "4af068b56a9674da915debea4ed7e1b9885b17e8",
+		what: "The Leptonica image processing library.",
+		files: ["leptonica-license.txt"]
+	},
+	{
+		name: "libjpeg",
+		license: "IJG",
+		copyright: ["Copyright (C) 1991-2014, Thomas G. Lane, Guido Vollbeding"],
+		repository: "https://github.com/LuaDist/libjpeg",
+		commit: "6c0fcb8ddee365e7abc4d332662b06900612e923",
+		what: "This software is based in part on the work of the Independent JPEG Group. The LEGAL ISSUES section of its README follows.",
+		files: ["libjpeg-LEGAL"]
+	},
+	{
+		name: "GIFLIB",
+		license: "MIT",
+		copyright: ["The GIFLIB distribution is Copyright (c) 1997  Eric S. Raymond"],
+		repository: "https://github.com/mirrorer/giflib",
+		commit: "fa37672085ce4b3d62c51627ab3c8cf2dda8009a",
+		what: "The GIFLIB GIF codec.",
+		files: ["giflib-COPYING"]
+	},
+	{
+		name: "libpng",
+		license: "libpng-2.0",
+		copyright: [
+			"Copyright (c) 1995-2020 The PNG Reference Library Authors.",
+			"Copyright (c) 2018-2020 Cosmin Truta.",
+			"Copyright (c) 2000-2002, 2004, 2006-2018 Glenn Randers-Pehrson.",
+			"Copyright (c) 1996-1997 Andreas Dilger.",
+			"Copyright (c) 1995-1996 Guy Eric Schalnat, Group 42, Inc."
+		],
+		repository: "https://github.com/glennrp/libpng",
+		commit: "a37d4836519517bdce6cb9d956092321eca3e73b",
+		what: "The PNG reference library.",
+		files: ["libpng-LICENSE"]
+	},
+	{
+		name: "LibTIFF",
+		license: "libtiff",
+		copyright: ["Copyright (c) 1988-1997 Sam Leffler", "Copyright (c) 1991-1997 Silicon Graphics, Inc."],
+		repository: "https://gitlab.com/libtiff/libtiff",
+		commit: "b51bb157123264e26d34c09cc673d213aea61fc7",
+		what: "The LibTIFF TIFF library.",
+		files: ["libtiff-COPYRIGHT"]
+	},
+	{
+		name: "libwebp",
+		license: "BSD-3-Clause",
+		copyright: ["Copyright (c) 2010, Google Inc. All rights reserved."],
+		repository: "https://github.com/webmproject/libwebp",
+		commit: "20ef03ee351d4ff03fc5ff3ec4804a879d1b9d5c",
+		what: "The WebP codec library, with the WebM Project's additional patent grant.",
+		files: ["libwebp-COPYING", "libwebp-PATENTS"]
+	},
+	{
+		name: "zlib",
+		license: "Zlib",
+		copyright: ["(C) 1995-2022 Jean-loup Gailly and Mark Adler"],
+		repository: "https://github.com/madler/zlib",
+		commit: "21767c654d31d2dccdde4330529775c6c5fd5389",
+		what: "The zlib compression library (1.2.12). Its README's copyright notice follows.",
+		files: ["zlib-NOTICE"]
+	},
+	{
+		name: "OpenLibm",
+		license: "MIT AND ISC AND BSD-2-Clause AND SunPro",
+		copyright: [
+			"Copyright (c) 2011-14 The Julia Project.",
+			"Copyright (c) 2008 Stephen L. Moshier <steve@moshier.net>",
+			"Copyright 1992-2011 The FreeBSD Project. All rights reserved.",
+			"Copyright (C) 1993 by Sun Microsystems, Inc. All rights reserved."
+		],
+		repository: "https://github.com/JuliaMath/openlibm",
+		commit: "ae2d91698508701c83cab83714d42a1146dccf85",
+		what: "The OpenLibm C math library (its LGPL-licensed test files are not compiled in).",
+		files: ["openlibm-LICENSE.md"]
+	}
+]
+
+function tesseractNotices(): Collected[] {
+	const runtime = [
+		vendoredNotice(
+			{
+				name: "Emscripten",
+				version: TESSERACT_EMSCRIPTEN,
+				license: "MIT OR NCSA",
+				copyright: ["Copyright (c) 2010-2014 Emscripten authors"],
+				repository: "https://github.com/emscripten-core/emscripten",
+				terms: [
+					`The Emscripten runtime, linked into tesseract.js-core ${TESSERACT_CORE_VERSION}'s WebAssembly modules (built with Emscripten ${TESSERACT_EMSCRIPTEN}, build-with-docker.sh).`,
+					readFileSync(`${FFMPEG_DIR}/licenses/emscripten-LICENSE`, "utf8")
+				]
+			},
+			"vendored"
+		),
+		vendoredNotice(
+			{
+				name: "musl",
+				version: `Emscripten ${TESSERACT_EMSCRIPTEN}`,
+				license: "MIT",
+				copyright: ["Copyright © 2005-2020 Rich Felker, et al."],
+				repository: "https://git.musl-libc.org/cgit/musl",
+				terms: [
+					`The musl C library, as bundled with Emscripten ${TESSERACT_EMSCRIPTEN}, linked into tesseract.js-core ${TESSERACT_CORE_VERSION}'s WebAssembly modules.`,
+					readFileSync(`${FFMPEG_DIR}/licenses/musl-COPYRIGHT`, "utf8")
+				]
+			},
+			"vendored"
+		)
+	]
+	const models = vendoredNotice(
+		{
+			name: "tessdata_fast",
+			version: `git ${TESSDATA_FAST_COMMIT.slice(0, 12)}`,
+			license: "Apache-2.0",
+			// The repository names no holder beyond its contributors.
+			copyright: ["Copyright the tessdata_fast contributors"],
+			repository: TESSDATA_FAST_REPOSITORY,
+			terms: [
+				`Trained models for Tesseract (the fast integer LSTM models), served unmodified from the app's own origin and downloaded only for the languages a user picks. Source: ${TESSDATA_FAST_REPOSITORY}/tree/${TESSDATA_FAST_COMMIT}.`,
+				readFileSync(`${TESSERACT_LICENSES}/tessdata_fast-LICENSE`, "utf8")
+			]
+		},
+		"vendored"
+	)
+
+	return [
+		...runtime,
+		...TESSERACT_COMPONENTS.map(component =>
+			vendoredNotice(
+				{
+					name: component.name,
+					version: `git ${component.commit.slice(0, 12)}`,
+					license: component.license,
+					copyright: [...component.copyright],
+					repository: component.repository,
+					terms: [
+						`${component.what} Compiled into tesseract.js-core ${TESSERACT_CORE_VERSION}'s WebAssembly modules (the tesseract.js-core package, Apache-2.0), which the PDF editor's text recognition runs in its own worker. Source: ${component.repository}/tree/${component.commit}, the submodule commit tesseract.js-core's release tag v${TESSERACT_CORE_VERSION} pins (${TESSERACT_CORE_SOURCE}).`,
+						...component.files.map(file => readFileSync(`${TESSERACT_LICENSES}/${file}`, "utf8"))
+					]
+				},
+				"vendored"
+			)
+		),
+		models
+	]
+}
+
 const npm = collectNpm(installed)
 const rust = collectRust(expectedSdk)
 const ffmpeg = ffmpegModuleNotices()
@@ -1414,7 +1604,8 @@ if (fontRecords.rest().length > 0) {
 const spellcheckCrates = spellcheckCrateNotices(rust.entries)
 const dictionaries = spellcheckDictionaryNotices()
 const mupdf = mupdfNotices()
-const vendored = [...ffmpeg, ...aacEncoder, ...engine, model, ...office, ...dictionaries, ...mupdf]
+const tesseract = tesseractNotices()
+const vendored = [...ffmpeg, ...aacEncoder, ...engine, model, ...office, ...dictionaries, ...mupdf, ...tesseract]
 const collected = [...npm, ...rust.entries, ...spellcheckCrates, ...vendored]
 
 // Vendored entries promise their files verbatim (dictionaries ship them byte for byte). Texts sorted: the payload ships
@@ -1441,6 +1632,7 @@ const output = `// AUTO-GENERATED by scripts/generateThirdPartyNotices.ts — do
 //   assistant model: ${model.name} ${model.version} (${MODEL_MANIFEST_SOURCE})
 //   @filen/office: ${office.map(entry => `${entry.name} ${entry.version}`).join(", ")} (${OFFICE_REPO_DIR}/assets/fonts/manifest.json, ${OFFICE_REPO_DIR}/THIRD_PARTY_NOTICES.md)
 //   mupdf wasm: ${mupdf.map(entry => `${entry.name} ${entry.version}`).join(", ")} (MuPDF ${MUPDF_VERSION} thirdparty/, ${MUPDF_LICENSES})
+//   tesseract.js-core wasm and OCR models: ${tesseract.map(entry => `${entry.name} ${entry.version}`).join(", ")} (tesseract.js-core v${TESSERACT_CORE_VERSION} third_party/, ${TESSERACT_LICENSES})
 //   @filen/spellcheck: ${[...spellcheckCrates, ...dictionaries].map(entry => `${entry.name} ${entry.version}`).join(", ")} (${SPELLCHECK_REPO_DIR}/crate/Cargo.lock, ${SPELLCHECK_REPO_DIR}/dictionaries/manifest.json)
 //
 // Cannot run in CI: needs a filen-rs checkout and the local cargo caches. Re-run after any SDK bump.

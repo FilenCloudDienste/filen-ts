@@ -1,0 +1,136 @@
+/* Structure of @filen/office's PDF editing overlays (react/pdfedit/tools/overlays.tsx): drafts of the annotation
+   tools, the selection frame with its handles, the keyboard placement indicator and the text box editor. Each fills
+   or is placed within its page element (position: relative). The only visual values are --fo-pdf-* variables:
+   --fo-pdf-tool-accent (drafts, frames, handles), --fo-pdf-tool-quad (a markup drag's text), --fo-pdf-tool-ink (the
+   stroke being drawn when no colour is given), --fo-pdf-tool-handle-size, --fo-pdf-tool-handle-fill. */
+
+.fo-pdf-tool-overlay {
+	position: absolute;
+	inset: 0;
+	width: 100%;
+	height: 100%;
+	overflow: visible;
+	pointer-events: none;
+}
+
+.fo-pdf-tool-draft {
+	fill: none;
+	stroke: var(--fo-pdf-tool-accent, #2563eb);
+	stroke-width: 1.5px;
+	stroke-dasharray: 4 3;
+	vector-effect: non-scaling-stroke;
+}
+
+.fo-pdf-tool-ink {
+	fill: none;
+	stroke: var(--fo-pdf-tool-ink, #000);
+	stroke-width: 2;
+	stroke-linecap: round;
+	stroke-linejoin: round;
+}
+
+.fo-pdf-tool-quad {
+	fill: var(--fo-pdf-tool-quad, rgb(255 217 0 / 0.4));
+	stroke: none;
+}
+
+.fo-pdf-tool-selection,
+.fo-pdf-tool-placement {
+	position: absolute;
+	box-sizing: border-box;
+	pointer-events: none;
+	outline: 1.5px solid var(--fo-pdf-tool-accent, #2563eb);
+	outline-offset: 1px;
+}
+
+.fo-pdf-tool-placement {
+	outline-style: dashed;
+}
+
+.fo-pdf-tool-handle {
+	--fo-pdf-handle: var(--fo-pdf-tool-handle-size, 8px);
+
+	position: absolute;
+	width: var(--fo-pdf-handle);
+	height: var(--fo-pdf-handle);
+	margin: calc(var(--fo-pdf-handle) / -2) 0 0 calc(var(--fo-pdf-handle) / -2);
+	box-sizing: border-box;
+	border: 1.5px solid var(--fo-pdf-tool-accent, #2563eb);
+	background: var(--fo-pdf-tool-handle-fill, #fff);
+}
+
+.fo-pdf-tool-handle[data-handle="nw"] {
+	left: 0;
+	top: 0;
+	cursor: nwse-resize;
+}
+
+.fo-pdf-tool-handle[data-handle="n"] {
+	left: 50%;
+	top: 0;
+	cursor: ns-resize;
+}
+
+.fo-pdf-tool-handle[data-handle="ne"] {
+	left: 100%;
+	top: 0;
+	cursor: nesw-resize;
+}
+
+.fo-pdf-tool-handle[data-handle="e"] {
+	left: 100%;
+	top: 50%;
+	cursor: ew-resize;
+}
+
+.fo-pdf-tool-handle[data-handle="se"] {
+	left: 100%;
+	top: 100%;
+	cursor: nwse-resize;
+}
+
+.fo-pdf-tool-handle[data-handle="s"] {
+	left: 50%;
+	top: 100%;
+	cursor: ns-resize;
+}
+
+.fo-pdf-tool-handle[data-handle="sw"] {
+	left: 0;
+	top: 100%;
+	cursor: nesw-resize;
+}
+
+.fo-pdf-tool-handle[data-handle="w"] {
+	left: 0;
+	top: 50%;
+	cursor: ew-resize;
+}
+
+/* Plain text over the page, in the box being edited: no chrome of its own beyond the frame. */
+.fo-pdf-tool-text-editor {
+	position: absolute;
+	box-sizing: border-box;
+	margin: 0;
+	padding: 2px;
+	border: 0;
+	outline: 1.5px dashed var(--fo-pdf-tool-accent, #2563eb);
+	background: transparent;
+	font-family: Helvetica, Arial, sans-serif;
+	line-height: 1.2;
+	resize: none;
+	overflow: hidden;
+	color-scheme: only light;
+}
+
+.fo-pdf-sr-only {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	margin: -1px;
+	padding: 0;
+	overflow: hidden;
+	clip-path: inset(50%);
+	white-space: nowrap;
+	border: 0;
+}

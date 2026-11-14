@@ -6,6 +6,8 @@ import * as mupdf from "mupdf"
 import { servePdfEngine, type PdfEngineScope } from "../../dom/pdfedit/server"
 import type { PdfBitmapLike } from "../../dom/pdfedit/protocol"
 import type { PdfRequestTable } from "../../dom/pdfedit/requests"
+import { verifySignaturesRequest } from "../../dom/pdfedit/verifyRequest"
+import { nodeSubtle } from "../pdfSignFixtures"
 import { wasmTrap } from "./fixtures"
 
 const port = parentPort
@@ -35,14 +37,16 @@ const scope: PdfEngineScope = {
 		if (wrapped !== undefined) port.off("message", wrapped)
 	}
 }
-const requests: Partial<PdfRequestTable> =
-	options.trapOnHeap === true
+const requests: Partial<PdfRequestTable> = {
+	verifySignatures: verifySignaturesRequest(nodeSubtle),
+	...(options.trapOnHeap === true
 		? {
 				heap: () => {
 					throw wasmTrap()
 				}
 			}
-		: {}
+		: {})
+}
 
 servePdfEngine(mupdf, scope, {
 	readDeadlineMs: options.deadlineMs ?? 60_000,

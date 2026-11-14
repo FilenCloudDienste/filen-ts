@@ -27,26 +27,53 @@ export function imageSaveDeps(): PreviewSaveDeps {
 	}
 }
 
-// A picture made from `item` (an edited image, a video's frame) as a new file beside it, named "photo (edited).jpg" (or
-// the first such name free) from one read of the directory's names, typed by the SDK from that name, with the
-// original's dates. Null when `item` is not a file.
+// A port-streamed save's upload: the writer on the port's other end (a worker) streams the file to the SDK worker,
+// which uploads as it reads; the page never holds it.
+function portSaveDeps(): PreviewSaveDeps {
+	return {
+		uploadFileBytes: (parentUuid, data, name, mime, options) => sdkApi.uploadFileBytes(parentUuid, data, name, mime, options),
+		uploadFileFromPort: (parentUuid, port, name, mime, options) => sdkApi.uploadFileFromPort(parentUuid, name, mime, port, options),
+		patchListing: driveListingQueryUpdate,
+		rootUuid: currentRootUuid()
+	}
+}
+
+// What an edited copy is written from: a Blob (an edited image, a video's frame), or a port a worker writes the file
+// to, `size` its exact length.
+export type EditedCopyContent = { readonly blob: Blob } | { readonly port: MessagePort; readonly size: number }
+
+// A file made from `item` (an edited image, a video's frame, an edited PDF) as a new file beside it, named
+// "photo (edited).jpg" (or the first such name free) from one read of the directory's names, typed by the SDK from
+// that name, with the original's dates. Null when `item` is not a file (a port is then closed unread).
 export async function writeEditedCopy(
 	item: DriveItem,
-	blob: Blob,
+	content: EditedCopyContent,
 	extension: string,
 	suffix: (number: number) => string
 ): Promise<{ outcome: ActionOutcome<DriveItem>; name: string } | null> {
+	// The writer on a port's other end would otherwise block on a reader that never comes.
+	const closePort = (): void => {
+		if ("port" in content) {
+			content.port.close()
+		}
+	}
 	const base = asDirectoryOrFile(item)
 
 	if (base.type !== "file") {
+		closePort()
+
 		return null
 	}
 
-	const taken = await takenNames(normalizeParentUuid(base.data.parent, currentRootUuid()))
+	const taken = await takenNames(normalizeParentUuid(base.data.parent, currentRootUuid())).catch((e: unknown) => {
+		closePort()
+
+		throw e
+	})
 	const name = editedCopyName(driveItemName(base), extension, suffix, taken)
-	const outcome = await runPreviewSave(imageSaveDeps(), {
+	const outcome = await runPreviewSave("blob" in content ? imageSaveDeps() : portSaveDeps(), {
 		item,
-		content: { blob },
+		content,
 		asNewFile: name,
 		mime: "",
 		times: editedSaveTimes(item, Date.now())
