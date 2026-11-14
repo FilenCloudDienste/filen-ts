@@ -14,4 +14,8 @@ describe("assistant routes", () => {
 	it("opens and reports the Office page as settings_office", () => {
 		expect(screenOfPath("/settings/office")).toBe("settings_office")
 	})
+
+	it("opens and reports the Audio page as settings_audio", () => {
+		expect(screenOfPath("/settings/audio")).toBe("settings_audio")
+	})
 })
