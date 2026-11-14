@@ -7,6 +7,7 @@ import { ribbonControl } from "./helpers/ribbon"
 import { framedCenterOf } from "./helpers/geometry"
 import { activeCell, expectSelection, nameBox, selectByNameBox, XLSX_MIME } from "./helpers/sheet"
 import { preview } from "@/locales/en/preview"
+import { attachDomTrace, startDomTrace } from "./helpers/domTrace"
 
 // The office engine's grid under a finger, on a sheet's whole range and for a screen reader. A tap selects and a pan
 // selects nothing, a double tap opens the entry with focus in it (the soft keyboard's target), a long press shows the
@@ -159,7 +160,7 @@ async function openWorkbook(page: Page, listbox: Locator, runId: string, dialog:
 test.describe("touch", () => {
 	test.use({ hasTouch: true, viewport: { width: 820, height: 1000 } })
 
-	test("tap, double tap, long press and its menu, the start handle, Edit and Select all", async ({ page, browserName }) => {
+	test("tap, double tap, long press and its menu, the start handle, Edit and Select all", async ({ page, browserName }, testInfo) => {
 		test.slow()
 
 		const dialog = page.getByRole("dialog").first()
@@ -202,9 +203,20 @@ test.describe("touch", () => {
 			const c6 = await cellCentre(dialog, "C6")
 
 			await selectByNameBox(dialog, "A1")
+			// Diagnostic: the menu has stopped showing on CI; says whether it mounts at all and what the press delivered.
+			await startDomTrace(
+				page,
+				['[role="toolbar"]', '[role="menu"]', "textarea.fo-sheet-editor"],
+				["pointerdown", "pointerup", "pointercancel", "touchstart", "touchend", "contextmenu"]
+			)
 			await touch(page, browserName, [c6], LONG_PRESS_HOLD_MS)
 			await expect(nameBox(dialog)).toHaveValue("C6")
-			await expect(menu).toBeVisible()
+			await expect(menu)
+				.toBeVisible()
+				.catch(async (error: unknown) => {
+					await attachDomTrace(page, testInfo, "long-press-trace")
+					throw error
+				})
 			await expect(menu.getByRole("button")).toHaveText([
 				preview.previewSheetTouchCut,
 				preview.previewSheetTouchCopy,

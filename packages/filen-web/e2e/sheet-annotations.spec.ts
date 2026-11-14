@@ -5,6 +5,8 @@ import { withScratchDirectory, uploadFiles, reloadAfterWrite } from "./helpers/l
 import { resolveModKey } from "./helpers/modkey"
 import { closeDialog, goTo, nameBox, openRow, saveAndClose, XLSX_MIME } from "./helpers/sheet"
 import { preview } from "@/locales/en/preview"
+import { menuItemName } from "./helpers/menu"
+import { attachDomTrace, startDomTrace } from "./helpers/domTrace"
 
 // Notes, threaded comments and hyperlinks on the office engine end to end: a note
 // added from the grid's menu and shown on hover, a comment thread started and replied to, a web link inserted with
@@ -90,7 +92,7 @@ async function closeStrayMenu(page: Page): Promise<void> {
 	}
 }
 
-test("a note, a comment thread and links: added, shown, followed, saved and read back", async ({ page }) => {
+test("a note, a comment thread and links: added, shown, followed, saved and read back", async ({ page }, testInfo) => {
 	test.slow()
 
 	const dialog = page.getByRole("dialog").first()
@@ -107,12 +109,17 @@ test("a note, a comment thread and links: added, shown, followed, saved and read
 
 		// A note on B2 from the grid's menu: its text starts with the author's line.
 		await goTo(dialog, "B2")
+		// Diagnostic: the note's field has stopped showing on CI; says whether it (or the name question) mounts at all.
+		await startDomTrace(page, ['[role="dialog"]', '[role="menu"]', "textarea", '[role="textbox"]'], ["click", "pointerup"])
 		await gridMenu(dialog, 1, 1)
-		await page.getByRole("menuitem", { name: preview.previewSheetNoteInsert, exact: true }).click()
+		await page.getByRole("menuitem", { name: menuItemName(preview.previewSheetNoteInsert) }).click()
 
 		const noteField = dialog.getByRole("textbox", { name: preview.previewSheetNoteText })
 
-		await giveNameIfAsked(page, noteField)
+		await giveNameIfAsked(page, noteField).catch(async (error: unknown) => {
+			await attachDomTrace(page, testInfo, "insert-note-trace")
+			throw error
+		})
 
 		await expect(noteField).toBeFocused()
 		await page.keyboard.type("Check the rent")
@@ -122,7 +129,7 @@ test("a note, a comment thread and links: added, shown, followed, saved and read
 		// A comment on A3, then a reply.
 		await goTo(dialog, "A3")
 		await gridMenu(dialog, 2, 0)
-		await page.getByRole("menuitem", { name: preview.previewSheetCommentNew, exact: true }).click()
+		await page.getByRole("menuitem", { name: menuItemName(preview.previewSheetCommentNew) }).click()
 
 		const commentField = dialog.getByRole("textbox", { name: preview.previewSheetCommentPlaceholder })
 
